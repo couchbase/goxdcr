@@ -145,6 +145,22 @@ func (c *Client) store(opcode gomemcached.CommandCode, vb uint16,
 	return c.Send(req)
 }
 
+func (c *Client) storeCas(opcode gomemcached.CommandCode, vb uint16,
+	key string, flags int, exp int, cas uint64, body []byte) (*gomemcached.MCResponse, error) {
+
+	req := &gomemcached.MCRequest{
+		Opcode:  opcode,
+		VBucket: vb,
+		Key:     []byte(key),
+		Cas:     cas,
+		Opaque:  0,
+		Extras:  []byte{0, 0, 0, 0, 0, 0, 0, 0},
+		Body:    body}
+
+	binary.BigEndian.PutUint64(req.Extras, uint64(flags)<<32|uint64(exp))
+	return c.Send(req)
+}
+
 // Incr increments the value at the given key.
 func (c *Client) Incr(vb uint16, key string,
 	amt, def uint64, exp int) (uint64, error) {
@@ -177,6 +193,12 @@ func (c *Client) Add(vb uint16, key string, flags int, exp int,
 func (c *Client) Set(vb uint16, key string, flags int, exp int,
 	body []byte) (*gomemcached.MCResponse, error) {
 	return c.store(gomemcached.SET, vb, key, flags, exp, body)
+}
+
+// Set the value for a key with cas
+func (c *Client) SetCas(vb uint16, key string, flags int, exp int, cas uint64,
+	body []byte) (*gomemcached.MCResponse, error) {
+	return c.storeCas(gomemcached.SET, vb, key, flags, exp, cas, body)
 }
 
 // Append data to the value of a key.
