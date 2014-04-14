@@ -8,7 +8,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/dustin/gomemcached"
+	"github.com/couchbase/gomemcached"
 )
 
 func TestTransmitRes(t *testing.T) {

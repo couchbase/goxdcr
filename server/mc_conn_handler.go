@@ -4,7 +4,7 @@ package memcached
 import (
 	"io"
 
-	"github.com/dustin/gomemcached"
+	"github.com/couchbase/gomemcached"
 )
 
 type funcHandler func(io.Writer, *gomemcached.MCRequest) *gomemcached.MCResponse

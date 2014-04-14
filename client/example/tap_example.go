@@ -4,7 +4,7 @@ import (
 	"flag"
 	"log"
 
-	"github.com/dustin/gomemcached/client"
+	"github.com/couchbase/gomemcached/client"
 )
 
 var prot = flag.String("prot", "tcp", "Layer 3 protocol (tcp, tcp4, tcp6)")
