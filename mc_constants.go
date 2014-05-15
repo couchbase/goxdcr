@@ -67,6 +67,21 @@ const (
 	TAP_CHECKPOINT_START = CommandCode(0x46) // Notifies start of new checkpoint
 	TAP_CHECKPOINT_END   = CommandCode(0x47) // Notifies end of checkpoint
 
+	UPR_OPEN        = CommandCode(0x50) // Open a UPR connection with a name
+	UPR_ADDSTREAM   = CommandCode(0x51) // Sent by ebucketMigrator to UPR Consumer
+	UPR_CLOSESTREAM = CommandCode(0x52) // Sent by eBucketMigrator to UPR Consumer
+	UPR_FAILOVERLOG = CommandCode(0x54) // Request failover logs
+	UPR_STREAMREQ   = CommandCode(0x53) // Stream request from consumer to producer
+	UPR_STREAMEND   = CommandCode(0x55) // Sent by producer when it has no more messages to stream
+	UPR_SNAPSHOT    = CommandCode(0x56) // Start of a new snapshot
+	UPR_MUTATION    = CommandCode(0x57) // Key mutation
+	UPR_DELETION    = CommandCode(0x58) // Key deletion
+	UPR_EXPIRATION  = CommandCode(0x59) // Key expiration
+	UPR_FLUSH       = CommandCode(0x5a) // Delete all the data for a vbucket
+	UPR_NOOP        = CommandCode(0x5c) // UPR NOOP
+	UPR_BUFFERACK   = CommandCode(0x5d) // UPR Buffer Acknowledgement
+	UPR_CONTROL     = CommandCode(0x5e) // Set flow control params
+
 	OBSERVE = CommandCode(0x92)
 )
 
@@ -81,6 +96,8 @@ const (
 	NOT_STORED      = Status(0x05)
 	DELTA_BADVAL    = Status(0x06)
 	NOT_MY_VBUCKET  = Status(0x07)
+	ERANGE          = Status(0x22)
+	ROLLBACK        = Status(0x23)
 	UNKNOWN_COMMAND = Status(0x81)
 	ENOMEM          = Status(0x82)
 	TMPFAIL         = Status(0x86)
@@ -157,6 +174,20 @@ func init() {
 	CommandNames[TAP_CHECKPOINT_START] = "TAP_CHECKPOINT_START"
 	CommandNames[TAP_CHECKPOINT_END] = "TAP_CHECKPOINT_END"
 
+	CommandNames[UPR_OPEN] = "UPR_OPEN"
+	CommandNames[UPR_ADDSTREAM] = "UPR_ADDSTREAM"
+	CommandNames[UPR_FAILOVERLOG] = "UPR_FAILOVERLOG"
+	CommandNames[UPR_STREAMREQ] = "UPR_STREAMREQ"
+	CommandNames[UPR_STREAMEND] = "UPR_STREAMEND"
+	CommandNames[UPR_SNAPSHOT] = "UPR_SNAPSHOT"
+	CommandNames[UPR_MUTATION] = "UPR_MUTATION"
+	CommandNames[UPR_DELETION] = "UPR_DELETION"
+	CommandNames[UPR_EXPIRATION] = "UPR_EXPIRATION"
+	CommandNames[UPR_FLUSH] = "UPR_FLUSH"
+	CommandNames[UPR_NOOP] = "UPR_NOOP"
+	CommandNames[UPR_BUFFERACK] = "UPR_BUFFERACK"
+	CommandNames[UPR_CONTROL] = "UPR_CONTROL"
+
 	StatusNames = make(map[Status]string)
 	StatusNames[SUCCESS] = "SUCCESS"
 	StatusNames[KEY_ENOENT] = "KEY_ENOENT"
@@ -167,6 +198,8 @@ func init() {
 	StatusNames[DELTA_BADVAL] = "DELTA_BADVAL"
 	StatusNames[NOT_MY_VBUCKET] = "NOT_MY_VBUCKET"
 	StatusNames[UNKNOWN_COMMAND] = "UNKNOWN_COMMAND"
+	StatusNames[ERANGE] = "ERANGE"
+	StatusNames[ROLLBACK] = "ROLLBACK"
 	StatusNames[ENOMEM] = "ENOMEM"
 	StatusNames[TMPFAIL] = "TMPFAIL"
 
