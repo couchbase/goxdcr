@@ -3,7 +3,6 @@ package memcached
 import (
 	"encoding/binary"
 	"fmt"
-	//	"io"
 	"strconv"
 
 	"github.com/couchbase/gomemcached"
@@ -82,8 +81,9 @@ type UprEvent struct {
 	Flags        uint32             // Item flags
 	Expiry       uint32             // Item expiration time
 	Key, Value   []byte             // Item key/value
+	OldValue     []byte             // TODO: TBD: old document value
 	Cas          uint64             // CAS value of the item
-	SeqNo        uint64             // sequence number of the mutation
+	Seqno        uint64             // sequence number of the mutation
 	SnapstartSeq uint64             // start sequence number of this snapshot
 	SnapendSeq   uint64             // End sequence number of the snapshot
 	SnapshotType uint32             // 0: disk 1: memory
@@ -101,7 +101,7 @@ func makeUprEvent(rq gomemcached.MCRequest) *UprEvent {
 	}
 
 	if len(rq.Extras) >= tapMutationExtraLen {
-		event.SeqNo = binary.BigEndian.Uint64(rq.Extras[:8])
+		event.Seqno = binary.BigEndian.Uint64(rq.Extras[:8])
 	}
 
 	switch rq.Opcode {
@@ -147,7 +147,7 @@ type FailoverCallback func(uint16, FailoverLog, error)
 // Represents a UPR feed. A feed contains a connection to a single host
 // and multiple vBuckets
 type UprFeed struct {
-	C         <-chan UprEvent       // Exported channel for receiving UPR events
+	C         <-chan *UprEvent      // Exported channel for receiving UPR events
 	vbstreams map[uint16]*UprStream // vb->stream mapping
 	closer    chan bool             // closer
 	conn      *Client               // connection to UPR producer
@@ -328,7 +328,7 @@ func (feed *UprFeed) UprRequestStream(vb uint16, flags uint32,
 // Start the upr feed
 func (feed *UprFeed) StartFeed() error {
 
-	ch := make(chan UprEvent)
+	ch := make(chan *UprEvent)
 	feed.C = ch
 	go feed.runFeed(ch)
 	return nil
@@ -372,7 +372,7 @@ func handleStreamRequest(res *gomemcached.MCResponse) (gomemcached.Status, uint6
 	return res.Status, rollback, flog, err
 }
 
-func (feed *UprFeed) runFeed(ch chan UprEvent) {
+func (feed *UprFeed) runFeed(ch chan *UprEvent) {
 	defer close(ch)
 	var headerBuf [gomemcached.HDR_LEN]byte
 	var pkt gomemcached.MCRequest
@@ -476,7 +476,7 @@ loop:
 
 		if event != nil {
 			select {
-			case ch <- *event:
+			case ch <- event:
 			case <-feed.closer:
 				break loop
 			}
