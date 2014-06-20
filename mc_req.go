@@ -10,7 +10,7 @@ import (
 // Anything larger than this will result in an error.
 var MaxBodyLen = int(1e6)
 
-// A Memcached Request
+// MCRequest is memcached Request
 type MCRequest struct {
 	// The command being issued
 	Opcode CommandCode
@@ -24,7 +24,7 @@ type MCRequest struct {
 	Extras, Key, Body []byte
 }
 
-// The number of bytes this request requires.
+// Size gives the number of bytes this request requires.
 func (req *MCRequest) Size() int {
 	return HDR_LEN + len(req.Extras) + len(req.Key) + len(req.Body)
 }
@@ -81,7 +81,8 @@ func (req *MCRequest) fillHeaderBytes(data []byte) int {
 	return pos
 }
 
-// The wire representation of the header (with the extras and key)
+// HeaderBytes will return the wire representation of the request header
+// (with the extras and key).
 func (req *MCRequest) HeaderBytes() []byte {
 	data := make([]byte, HDR_LEN+len(req.Extras)+len(req.Key))
 
@@ -90,7 +91,7 @@ func (req *MCRequest) HeaderBytes() []byte {
 	return data
 }
 
-// The wire representation of this request.
+// Bytes will return the wire representation of this request.
 func (req *MCRequest) Bytes() []byte {
 	data := make([]byte, req.Size())
 
@@ -103,7 +104,7 @@ func (req *MCRequest) Bytes() []byte {
 	return data
 }
 
-// Send this request message across a writer.
+// Transmit will send this request message across a writer.
 func (req *MCRequest) Transmit(w io.Writer) (n int, err error) {
 	if len(req.Body) < 128 {
 		n, err = w.Write(req.Bytes())
@@ -118,7 +119,7 @@ func (req *MCRequest) Transmit(w io.Writer) (n int, err error) {
 	return
 }
 
-// Fill this MCRequest with the data from this reader.
+// Receive will fill this MCRequest with the data from a reader.
 func (req *MCRequest) Receive(r io.Reader, hdrBytes []byte) (int, error) {
 	if len(hdrBytes) < HDR_LEN {
 		hdrBytes = []byte{
@@ -132,7 +133,7 @@ func (req *MCRequest) Receive(r io.Reader, hdrBytes []byte) (int, error) {
 	}
 
 	if hdrBytes[0] != RES_MAGIC && hdrBytes[0] != REQ_MAGIC {
-		return n, fmt.Errorf("Bad magic: 0x%02x", hdrBytes[0])
+		return n, fmt.Errorf("bad magic: 0x%02x", hdrBytes[0])
 	}
 
 	klen := int(binary.BigEndian.Uint16(hdrBytes[2:]))

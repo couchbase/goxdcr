@@ -1,4 +1,5 @@
-// Useful functions for building your own memcached server.
+// Package memcached provides useful functions for building your own memcached
+// server.
 package memcached
 
 import (
@@ -13,7 +14,7 @@ func (fh funcHandler) HandleMessage(w io.Writer, msg *gomemcached.MCRequest) *go
 	return fh(w, msg)
 }
 
-// Request handler for doing server stuff.
+// RequestHandler for doing server stuff.
 type RequestHandler interface {
 	// Handle a message from the client.
 	// If the message should cause the connection to terminate,
@@ -25,7 +26,7 @@ type RequestHandler interface {
 	HandleMessage(io.Writer, *gomemcached.MCRequest) *gomemcached.MCResponse
 }
 
-// Convert a request handler function as a RequestHandler.
+// FuncHandler to convert a request handler function as a RequestHandler.
 func FuncHandler(f func(io.Writer, *gomemcached.MCRequest) *gomemcached.MCResponse) RequestHandler {
 	return funcHandler(f)
 }
@@ -36,7 +37,7 @@ func must(err error) {
 	}
 }
 
-// Handle until the handler returns a fatal message or a read or write
+// HandleIO until the handler returns a fatal message or a read or write
 // on the socket fails.
 func HandleIO(s io.ReadWriteCloser, handler RequestHandler) error {
 	defer func() { must(s.Close()) }()
@@ -47,7 +48,7 @@ func HandleIO(s io.ReadWriteCloser, handler RequestHandler) error {
 	return err
 }
 
-// Handle an individual message.
+// HandleMessage to handle an individual message.
 func HandleMessage(r io.Reader, w io.Writer, handler RequestHandler) error {
 	req, err := ReadPacket(r)
 	if err != nil {
@@ -73,6 +74,7 @@ func HandleMessage(r io.Reader, w io.Writer, handler RequestHandler) error {
 	return io.EOF
 }
 
+// ReadPacket returns a new memcached Request from a reader.
 func ReadPacket(r io.Reader) (rv gomemcached.MCRequest, err error) {
 	_, err = rv.Receive(r, nil)
 	return

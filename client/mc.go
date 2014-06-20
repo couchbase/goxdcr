@@ -195,7 +195,7 @@ func (c *Client) Set(vb uint16, key string, flags int, exp int,
 	return c.store(gomemcached.SET, vb, key, flags, exp, body)
 }
 
-// Set the value for a key with cas
+// SetCas set the value for a key with cas
 func (c *Client) SetCas(vb uint16, key string, flags int, exp int, cas uint64,
 	body []byte) (*gomemcached.MCResponse, error) {
 	return c.storeCas(gomemcached.SET, vb, key, flags, exp, cas, body)

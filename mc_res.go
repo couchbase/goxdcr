@@ -6,7 +6,7 @@ import (
 	"io"
 )
 
-// A memcached response
+// MCResponse is memcached response
 type MCResponse struct {
 	// The command opcode of the command that sent the request
 	Opcode CommandCode
@@ -42,12 +42,12 @@ func errStatus(e error) Status {
 	return status
 }
 
-// True if this error represents a "not found" response.
+// IsNotFound is true if this error represents a "not found" response.
 func IsNotFound(e error) bool {
 	return errStatus(e) == KEY_ENOENT
 }
 
-// False if this error isn't believed to be fatal to a connection.
+// IsFatal is false if this error isn't believed to be fatal to a connection.
 func IsFatal(e error) bool {
 	if e == nil {
 		return false
@@ -59,7 +59,7 @@ func IsFatal(e error) bool {
 	return true
 }
 
-// Number of bytes this response consumes on the wire.
+// Size is number of bytes this response consumes on the wire.
 func (res *MCResponse) Size() int {
 	return HDR_LEN + len(res.Extras) + len(res.Key) + len(res.Body)
 }
@@ -108,7 +108,7 @@ func (res *MCResponse) fillHeaderBytes(data []byte) int {
 	return pos
 }
 
-// Get just the header bytes for this response.
+// HeaderBytes will get just the header bytes for this response.
 func (res *MCResponse) HeaderBytes() []byte {
 	data := make([]byte, HDR_LEN+len(res.Extras)+len(res.Key))
 
@@ -117,7 +117,7 @@ func (res *MCResponse) HeaderBytes() []byte {
 	return data
 }
 
-// The actual bytes transmitted for this response.
+// Bytes will return the actual bytes transmitted for this response.
 func (res *MCResponse) Bytes() []byte {
 	data := make([]byte, res.Size())
 
@@ -128,7 +128,7 @@ func (res *MCResponse) Bytes() []byte {
 	return data
 }
 
-// Send this response message across a writer.
+// Transmit will send this response message across a writer.
 func (res *MCResponse) Transmit(w io.Writer) (n int, err error) {
 	if len(res.Body) < 128 {
 		n, err = w.Write(res.Bytes())
@@ -143,8 +143,8 @@ func (res *MCResponse) Transmit(w io.Writer) (n int, err error) {
 	return
 }
 
-// Fill this MCResponse with the data from this reader.
-func (req *MCResponse) Receive(r io.Reader, hdrBytes []byte) (int, error) {
+// Receive will fill this MCResponse with the data from this reader.
+func (res *MCResponse) Receive(r io.Reader, hdrBytes []byte) (int, error) {
 	if len(hdrBytes) < HDR_LEN {
 		hdrBytes = []byte{
 			0, 0, 0, 0, 0, 0, 0, 0,
@@ -157,25 +157,25 @@ func (req *MCResponse) Receive(r io.Reader, hdrBytes []byte) (int, error) {
 	}
 
 	if hdrBytes[0] != RES_MAGIC && hdrBytes[0] != REQ_MAGIC {
-		return n, fmt.Errorf("Bad magic: 0x%02x", hdrBytes[0])
+		return n, fmt.Errorf("bad magic: 0x%02x", hdrBytes[0])
 	}
 
 	klen := int(binary.BigEndian.Uint16(hdrBytes[2:4]))
 	elen := int(hdrBytes[4])
 
-	req.Opcode = CommandCode(hdrBytes[1])
-	req.Status = Status(binary.BigEndian.Uint16(hdrBytes[6:8]))
-	req.Opaque = binary.BigEndian.Uint32(hdrBytes[12:16])
-	req.Cas = binary.BigEndian.Uint64(hdrBytes[16:24])
+	res.Opcode = CommandCode(hdrBytes[1])
+	res.Status = Status(binary.BigEndian.Uint16(hdrBytes[6:8]))
+	res.Opaque = binary.BigEndian.Uint32(hdrBytes[12:16])
+	res.Cas = binary.BigEndian.Uint64(hdrBytes[16:24])
 
 	bodyLen := int(binary.BigEndian.Uint32(hdrBytes[8:12])) - (klen + elen)
 
 	buf := make([]byte, klen+elen+bodyLen)
 	m, err := io.ReadFull(r, buf)
 	if err == nil {
-		req.Extras = buf[0:elen]
-		req.Key = buf[elen : klen+elen]
-		req.Body = buf[klen+elen:]
+		res.Extras = buf[0:elen]
+		res.Key = buf[elen : klen+elen]
+		res.Body = buf[klen+elen:]
 	}
 
 	return n + m, err

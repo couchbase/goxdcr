@@ -11,7 +11,7 @@ import (
 	"github.com/couchbase/gomemcached/server"
 )
 
-var port *int = flag.Int("port", 11212, "Port on which to listen")
+var port = flag.Int("port", 11212, "Port on which to listen")
 
 type chanReq struct {
 	req *gomemcached.MCRequest

@@ -72,8 +72,10 @@ func (event UprEvent) String() string {
 	return name
 }
 
-type FailoverLog [][2]uint64 // Failover log containing vvuid and sequnce number
+// FailoverLog containing vvuid and sequnce number
+type FailoverLog [][2]uint64
 
+// UprEvent memcached events for UPR streams.
 type UprEvent struct {
 	Opcode       UprOpcode          // Type of event
 	Status       gomemcached.Status // Response status
@@ -134,6 +136,7 @@ func makeUprEvent(rq gomemcached.MCRequest) *UprEvent {
 	return event
 }
 
+// UprStream is per stream data structure over an UPR Connection.
 type UprStream struct {
 	Vbucket   uint16 // Vbucket id
 	VbUuid    uint64 // vbucket uuid
@@ -142,10 +145,8 @@ type UprStream struct {
 	connected bool
 }
 
-type FailoverCallback func(uint16, FailoverLog, error)
-
-// Represents a UPR feed. A feed contains a connection to a single host
-// and multiple vBuckets
+// UprFeed represents an UPR feed. A feed contains a connection to a single
+// host and multiple vBuckets
 type UprFeed struct {
 	C         <-chan *UprEvent      // Exported channel for receiving UPR events
 	vbstreams map[uint16]*UprStream // vb->stream mapping
@@ -180,7 +181,8 @@ loop:
 	}
 }
 
-// Create a new UPR Feed
+// NewUprFeed creates a new UPR Feed.
+// TODO: Describe side-effects on bucket instance and its connection pool.
 func (mc *Client) NewUprFeed() (*UprFeed, error) {
 
 	ul.LogDebug("", "", "New UPR Feed")
@@ -221,14 +223,14 @@ func doUprOpen(mc *Client, name string, sequence uint32) error {
 	} else if rq.Opaque != res.Opaque {
 		return fmt.Errorf("opaque mismatch, %v over %v", res.Opaque, res.Opaque)
 	} else if res.Status != gomemcached.SUCCESS {
-		return fmt.Errorf("Error %v", res.Status)
+		return fmt.Errorf("error %v", res.Status)
 	}
 
 	ul.LogDebug("", "", "UPR open success")
 	return nil
 }
 
-// Connect to a UPR producer
+// UprOpen to connect with a UPR producer.
 // Name: name of te UPR connection
 // sequence: sequence number for the connection
 // bufsize: max size of the application
@@ -252,9 +254,7 @@ func (feed *UprFeed) UprOpen(name string, sequence uint32, bufSize uint32) error
 	return nil
 }
 
-type FailoverLogMap map[uint16]*FailoverLog
-
-// Get failover logs for a given vbucket
+// UprGetFailoverLog for given list of vbuckets.
 func (mc *Client) UprGetFailoverLog(vb []uint16) (map[uint16]*FailoverLog, error) {
 
 	ul.LogDebug("", "", "Get Failover Log")
@@ -277,14 +277,14 @@ func (mc *Client) UprGetFailoverLog(vb []uint16) (map[uint16]*FailoverLog, error
 		res, err := mc.Receive()
 
 		if err != nil {
-			return nil, fmt.Errorf("Failed to receive %s", err.Error())
+			return nil, fmt.Errorf("failed to receive %s", err.Error())
 		} else if res.Opcode != gomemcached.UPR_FAILOVERLOG || res.Status != gomemcached.SUCCESS {
-			return nil, fmt.Errorf("Unexpected #opcode %v", res.Opcode)
+			return nil, fmt.Errorf("unexpected #opcode %v", res.Opcode)
 		}
 
 		flog, err := parseFailoverLog(res.Body)
 		if err != nil {
-			return nil, fmt.Errorf("Unable to parse failover logs for vb %d", vb)
+			return nil, fmt.Errorf("unable to parse failover logs for vb %d", vb)
 		}
 		failoverLogs[vBucket] = flog
 	}
@@ -292,6 +292,8 @@ func (mc *Client) UprGetFailoverLog(vb []uint16) (map[uint16]*FailoverLog, error
 	return failoverLogs, nil
 }
 
+// UprRequestStream for a single vbucket.
+// TODO: describe arguments.
 func (feed *UprFeed) UprRequestStream(vb uint16, flags uint32,
 	vuuid, startSequence, endSequence, snapStart, snapEnd uint64) error {
 
@@ -325,7 +327,7 @@ func (feed *UprFeed) UprRequestStream(vb uint16, flags uint32,
 	return nil
 }
 
-// Start the upr feed
+// StartFeed to start the upper feed.
 func (feed *UprFeed) StartFeed() error {
 
 	ch := make(chan *UprEvent)
@@ -364,7 +366,7 @@ func handleStreamRequest(res *gomemcached.MCResponse) (gomemcached.Status, uint6
 		ul.LogInfo("", "", "Rollback %v for vb %v\n", rollback, res.Opaque /*vb*/)
 		return res.Status, rollback, nil, nil
 	case res.Status != gomemcached.SUCCESS:
-		err = fmt.Errorf("Unexpected status %v, for %v", res.Status, res.Opaque)
+		err = fmt.Errorf("unexpected status %v, for %v", res.Status, res.Opaque)
 		return res.Status, 0, nil, err
 	}
 
@@ -502,6 +504,7 @@ loop:
 	feed.transmitCl <- true
 }
 
+// Close this UprFeed.
 func (feed *UprFeed) Close() {
 	close(feed.closer)
 }

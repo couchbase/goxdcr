@@ -1,4 +1,4 @@
-// Memcached binary protocol packet formats and constants.
+// Package gomemcached is binary protocol packet formats and constants.
 package gomemcached
 
 import (
@@ -10,6 +10,7 @@ const (
 	RES_MAGIC = 0x81
 )
 
+// CommandCode for memcached packets.
 type CommandCode uint8
 
 const (
@@ -85,6 +86,7 @@ const (
 	OBSERVE = CommandCode(0x92)
 )
 
+// Status field for memcached response.
 type Status uint16
 
 const (
@@ -103,7 +105,7 @@ const (
 	TMPFAIL         = Status(0x86)
 )
 
-// An internal representation of an item.
+// MCItem is an internal representation of an item.
 type MCItem struct {
 	Cas               uint64
 	Flags, Expiration uint32
@@ -116,6 +118,7 @@ const HDR_LEN = 24
 // Mapping of CommandCode -> name of command (not exhaustive)
 var CommandNames map[CommandCode]string
 
+// StatusNames human readable names for memcached response.
 var StatusNames map[Status]string
 
 func init() {
@@ -223,7 +226,7 @@ func (s Status) String() (rv string) {
 	return rv
 }
 
-// Return true if a command is a "quiet" command.
+// IsQuiet will return true if a command is a "quiet" command.
 func (o CommandCode) IsQuiet() bool {
 	switch o {
 	case GETQ,

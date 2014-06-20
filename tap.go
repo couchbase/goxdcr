@@ -40,6 +40,7 @@ const (
 	TAP_FLAG_NETWORK_BYTE_ORDER = 4
 )
 
+// TapConnectFlagNames for TapConnectFlag
 var TapConnectFlagNames = map[TapConnectFlag]string{
 	BACKFILL:           "BACKFILL",
 	DUMP:               "DUMP",
@@ -52,25 +53,29 @@ var TapConnectFlagNames = map[TapConnectFlag]string{
 	FIX_FLAG_BYTEORDER: "FIX_FLAG_BYTEORDER",
 }
 
-// A function to parse a single tap extra
+// TapItemParser is a function to parse a single tap extra.
 type TapItemParser func(io.Reader) (interface{}, error)
 
+// TapParseUint64 is a function to parse a single tap uint64.
 func TapParseUint64(r io.Reader) (interface{}, error) {
 	var rv uint64
 	err := binary.Read(r, binary.BigEndian, &rv)
 	return rv, err
 }
 
+// TapParseUint16 is a function to parse a single tap uint16.
 func TapParseUint16(r io.Reader) (interface{}, error) {
 	var rv uint16
 	err := binary.Read(r, binary.BigEndian, &rv)
 	return rv, err
 }
 
+// TapParseBool is a function to parse a single tap boolean.
 func TapParseBool(r io.Reader) (interface{}, error) {
 	return true, nil
 }
 
+// TapParseVBList parses a list of vBucket numbers as []uint16.
 func TapParseVBList(r io.Reader) (interface{}, error) {
 	num, err := TapParseUint16(r)
 	if err != nil {
@@ -90,12 +95,13 @@ func TapParseVBList(r io.Reader) (interface{}, error) {
 	return rv, err
 }
 
+// TapFlagParsers parser functions for TAP fields.
 var TapFlagParsers = map[TapConnectFlag]TapItemParser{
 	BACKFILL:      TapParseUint64,
 	LIST_VBUCKETS: TapParseVBList,
 }
 
-// Split the ORed flags into the individual bit flags.
+// SplitFlags will split the ORed flags into the individual bit flags.
 func (f TapConnectFlag) SplitFlags() []TapConnectFlag {
 	rv := []TapConnectFlag{}
 	for i := uint32(1); f != 0; i = i << 1 {
@@ -125,7 +131,8 @@ type TapConnect struct {
 	Name          string
 }
 
-// Parse the tap request into the interesting bits we may need to do something with.
+// ParseTapCommands parse the tap request into the interesting bits we may
+// need to do something with.
 func (req *MCRequest) ParseTapCommands() (TapConnect, error) {
 	rv := TapConnect{
 		Flags: map[TapConnectFlag]interface{}{},

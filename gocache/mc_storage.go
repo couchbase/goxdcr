@@ -20,6 +20,7 @@ var handlers = map[gomemcached.CommandCode]handler{
 	gomemcached.FLUSH:  handleFlush,
 }
 
+// RunServer runs the cache server.
 func RunServer(input chan chanReq) {
 	var s storage
 	s.data = make(map[string]gomemcached.MCItem)
@@ -53,7 +54,7 @@ func handleSet(req *gomemcached.MCRequest, s *storage) (ret *gomemcached.MCRespo
 	item.Expiration = binary.BigEndian.Uint32(req.Extras[4:])
 	item.Data = req.Body
 	ret.Status = gomemcached.SUCCESS
-	s.cas += 1
+	s.cas++
 	item.Cas = s.cas
 	ret.Cas = s.cas
 
