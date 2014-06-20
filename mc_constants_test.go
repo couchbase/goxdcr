@@ -30,10 +30,9 @@ func TestStatusNameString(t *testing.T) {
 
 func TestIsQuiet(t *testing.T) {
 	for v, k := range CommandNames {
-		isq := strings.HasSuffix(k, "Q")
+		isq := strings.HasSuffix(k, "Q") && (k != CommandNames[UPR_STREAMREQ])
 		if v.IsQuiet() != isq {
-			t.Errorf("Expected quiet=%v for %v, got %v",
-				isq, v, v.IsQuiet())
+			t.Errorf("Expected quiet=%v for %v, got %v", isq, v, v.IsQuiet())
 		}
 	}
 }
