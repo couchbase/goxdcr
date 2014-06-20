@@ -2,6 +2,7 @@ package memcached
 
 import (
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"strconv"
 
@@ -17,6 +18,9 @@ import (
 // 1. Optimize bufferAck messages
 // 2. Use a pool allocator to avoid garbage
 
+// error codes
+var ErrorInvalidLog = errors.New("couchbase.errorInvalidLog")
+
 // UprOpcode is the upr operation type (found in UprEvent)
 type UprOpcode uint8
 
@@ -27,6 +31,7 @@ const (
 	UprCloseStream
 	UprFailoverLog
 	UprStreamRequest
+	UprStreamEnd // TODO: TBD: it is now used by secondary index projector
 	UprSnapshot
 	UprMutation
 	UprDeletion
@@ -52,6 +57,7 @@ func init() {
 		UprCloseStream:   "CloseStream",
 		UprFailoverLog:   "FailoverLog",
 		UprStreamRequest: "StreamRequest",
+		UprStreamEnd:     "StreamEnd",
 		UprSnapshot:      "SnapshotMarker",
 		UprMutation:      "Mutation",
 		UprDeletion:      "Deletion",
@@ -64,22 +70,24 @@ func init() {
 	ul, _ = logger.NewLogger("upr_client", logger.LevelInfo)
 }
 
-func (event UprEvent) String() string {
-	name := uprOpcodeNames[event.Opcode]
-	if name == "" {
-		name = fmt.Sprintf("#%d", event.Opcode)
-	}
-	return name
-}
-
 // FailoverLog containing vvuid and sequnce number
 type FailoverLog [][2]uint64
+
+func (flogp *FailoverLog) Latest() (vbuuid, seqno uint64, err error) {
+	if flogp != nil {
+		flog := *flogp
+		latest := flog[len(flog)-1]
+		return latest[0], latest[1], nil
+	}
+	return vbuuid, seqno, ErrorInvalidLog
+}
 
 // UprEvent memcached events for UPR streams.
 type UprEvent struct {
 	Opcode       UprOpcode          // Type of event
 	Status       gomemcached.Status // Response status
 	VBucket      uint16             // VBucket this event applies to
+	VBuuid       uint64             // This field is set by downstream
 	Flags        uint32             // Item flags
 	Expiry       uint32             // Item expiration time
 	Key, Value   []byte             // Item key/value
@@ -93,10 +101,10 @@ type UprEvent struct {
 	Error        error              // Error value in case of a failure
 }
 
-func makeUprEvent(rq gomemcached.MCRequest) *UprEvent {
-
+func makeUprEvent(rq gomemcached.MCRequest, stream *UprStream) *UprEvent {
 	event := &UprEvent{
-		VBucket: uint16(rq.VBucket),
+		VBucket: stream.Vbucket,
+		VBuuid:  stream.Vbuuid,
 		Key:     rq.Key,
 		Value:   rq.Body,
 		Cas:     rq.Cas,
@@ -107,6 +115,8 @@ func makeUprEvent(rq gomemcached.MCRequest) *UprEvent {
 	}
 
 	switch rq.Opcode {
+	case gomemcached.UPR_STREAMREQ:
+		event.Opcode = UprStreamRequest
 	case gomemcached.UPR_MUTATION:
 		event.Opcode = UprMutation
 	case gomemcached.UPR_DELETION:
@@ -136,10 +146,18 @@ func makeUprEvent(rq gomemcached.MCRequest) *UprEvent {
 	return event
 }
 
+func (event *UprEvent) String() string {
+	name := uprOpcodeNames[event.Opcode]
+	if name == "" {
+		name = fmt.Sprintf("#%d", event.Opcode)
+	}
+	return name
+}
+
 // UprStream is per stream data structure over an UPR Connection.
 type UprStream struct {
 	Vbucket   uint16 // Vbucket id
-	VbUuid    uint64 // vbucket uuid
+	Vbuuid    uint64 // vbucket uuid
 	StartSeq  uint64 // start sequence number
 	EndSeq    uint64 // end sequence number
 	connected bool
@@ -318,7 +336,8 @@ func (feed *UprFeed) UprRequestStream(vb uint16, flags uint32,
 	}
 
 	stream := &UprStream{
-		VbUuid:   vuuid,
+		Vbucket:  vb,
+		Vbuuid:   vuuid,
 		StartSeq: startSequence,
 		EndSeq:   endSequence,
 	}
@@ -407,10 +426,10 @@ loop:
 
 			vb := uint16(res.Opaque)
 			feed.bytesRead += uint64(bytes)
+			stream := feed.vbstreams[vb]
 
 			switch pkt.Opcode {
 			case gomemcached.UPR_STREAMREQ:
-				stream := feed.vbstreams[vb]
 				if stream == nil {
 					ul.LogError("", "", "Fatal Error, Stream not found for vb %d", vb)
 					break loop
@@ -419,17 +438,18 @@ loop:
 				status, rb, flog, err := handleStreamRequest(res)
 				if status == gomemcached.ROLLBACK {
 					// rollback stream
-					if err := feed.UprRequestStream(vb, 0, stream.VbUuid, rb,
+					if err := feed.UprRequestStream(vb, 0, stream.Vbuuid, rb,
 						stream.EndSeq, 0, 0); err != nil {
 						ul.LogError("", "",
 							"UPR_STREAMREQ with rollback %d for vb % Failed. Error %s",
 							rb, vb, err.Error())
-						event = makeUprEvent(pkt)
+						event = makeUprEvent(pkt, stream)
 						// delete the stream from the vbmap for the feed
 						delete(feed.vbstreams, vb)
 					}
 				} else if status == gomemcached.SUCCESS {
-					event = makeUprEvent(pkt)
+					event = makeUprEvent(pkt, stream)
+					event.Seqno = stream.StartSeq
 					event.FailoverLog = flog
 					stream.connected = true
 				} else if err != nil {
@@ -439,18 +459,18 @@ loop:
 			case gomemcached.UPR_MUTATION,
 				gomemcached.UPR_DELETION,
 				gomemcached.UPR_EXPIRATION:
-				event = makeUprEvent(pkt)
+				event = makeUprEvent(pkt, stream)
 				mutationCtr++
 				sendAck = true
 			case gomemcached.UPR_STREAMEND:
 				//stream has ended
-				event = makeUprEvent(pkt)
+				event = makeUprEvent(pkt, stream)
 				ul.LogInfo("", "", "Stream Ended for vb %d", vb)
 				sendAck = true
 				delete(feed.vbstreams, vb)
 			case gomemcached.UPR_SNAPSHOT:
 				// snapshot marker
-				event = makeUprEvent(pkt)
+				event = makeUprEvent(pkt, stream)
 				event.SnapstartSeq = binary.BigEndian.Uint64(pkt.Extras[0:8])
 				event.SnapendSeq = binary.BigEndian.Uint64(pkt.Extras[8:16])
 				event.SnapshotType = binary.BigEndian.Uint32(pkt.Extras[16:20])
@@ -458,7 +478,7 @@ loop:
 				sendAck = true
 			case gomemcached.UPR_FLUSH:
 				// special processing for flush ?
-				event = makeUprEvent(pkt)
+				event = makeUprEvent(pkt, stream)
 			case gomemcached.UPR_ADDSTREAM, gomemcached.UPR_CLOSESTREAM:
 				ul.LogWarn("", "", "Opcode %v not implemented", pkt.Opcode)
 			case gomemcached.UPR_CONTROL, gomemcached.UPR_BUFFERACK:
