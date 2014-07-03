@@ -514,8 +514,8 @@ loop:
 			bufferAck := &gomemcached.MCRequest{
 				Opcode: gomemcached.UPR_BUFFERACK,
 			}
-			bufferAck.Body = make([]byte, 4)
-			binary.BigEndian.PutUint32(bufferAck.Body[:4], uint32(bytes))
+			bufferAck.Extras = make([]byte, 4)
+			binary.BigEndian.PutUint32(bufferAck.Extras[:4], uint32(bytes))
 			feed.transmitCh <- bufferAck
 		}
 
