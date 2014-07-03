@@ -1,28 +1,18 @@
+// go implementation of upr client.
+// See https://github.com/couchbaselabs/cbupr/blob/master/transport-spec.md
+// TODO
+// 1. Use a pool allocator to avoid garbage
 package memcached
 
 import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"strconv"
-
 	"github.com/couchbase/gomemcached"
 	"github.com/couchbaselabs/retriever/logger"
 	"github.com/couchbaselabs/retriever/stats"
+	"strconv"
 )
-
-// go implementation of upr client.
-// See https://github.com/couchbaselabs/cbupr/blob/master/transport-spec.md
-
-// TODO
-// 1. Optimize bufferAck messages
-// 2. Use a pool allocator to avoid garbage
-
-// error codes
-var ErrorInvalidLog = errors.New("couchbase.errorInvalidLog")
-
-// UprOpcode is the upr operation type (found in UprEvent)
-type UprOpcode uint8
 
 // Upr opcode values.
 const (
@@ -43,8 +33,71 @@ const (
 )
 
 const uprMutationExtraLen = 16
+const bufferAckThreshold = 0.2
+const opaqueOpen = 0xBEAF0001
+const opaqueFailover = 0xDEADBEEF
+
+// UprOpcode is the upr operation type (found in UprEvent)
+type UprOpcode uint8
+
+// UprEvent memcached events for UPR streams.
+type UprEvent struct {
+	Opcode       UprOpcode          // Type of event
+	Status       gomemcached.Status // Response status
+	VBucket      uint16             // VBucket this event applies to
+	VBuuid       uint64             // This field is set by downstream
+	Flags        uint32             // Item flags
+	Expiry       uint32             // Item expiration time
+	Key, Value   []byte             // Item key/value
+	OldValue     []byte             // TODO: TBD: old document value
+	Cas          uint64             // CAS value of the item
+	Seqno        uint64             // sequence number of the mutation
+	SnapstartSeq uint64             // start sequence number of this snapshot
+	SnapendSeq   uint64             // End sequence number of the snapshot
+	SnapshotType uint32             // 0: disk 1: memory
+	FailoverLog  *FailoverLog       // Failover log containing vvuid and sequnce number
+	Error        error              // Error value in case of a failure
+}
+
+// UprStream is per stream data structure over an UPR Connection.
+type UprStream struct {
+	Vbucket   uint16 // Vbucket id
+	Vbuuid    uint64 // vbucket uuid
+	StartSeq  uint64 // start sequence number
+	EndSeq    uint64 // end sequence number
+	connected bool
+}
+
+// UprFeed represents an UPR feed. A feed contains a connection to a single
+// host and multiple vBuckets
+type UprFeed struct {
+	C           <-chan *UprEvent            // Exported channel for receiving UPR events
+	vbstreams   map[uint16]*UprStream       // vb->stream mapping
+	closer      chan bool                   // closer
+	conn        *Client                     // connection to UPR producer
+	Error       error                       // error
+	bytesRead   uint64                      // total bytes read on this connection
+	toAckBytes  uint32                      // bytes client has read
+	maxAckBytes uint32                      // Max buffer control ack bytes
+	stats       UprStats                    // Stats for upr client
+	transmitCh  chan *gomemcached.MCRequest // transmit command channel
+	transmitCl  chan bool                   //  closer channel for transmit go-routine
+}
+
+type UprStats struct {
+	TotalBytes         uint64
+	TotalMutation      uint64
+	TotalBufferAckSent uint64
+	TotalSnapShot      uint64
+}
+
+// FailoverLog containing vvuid and sequnce number
+type FailoverLog [][2]uint64
 
 var uprOpcodeNames map[UprOpcode]string
+
+// error codes
+var ErrorInvalidLog = errors.New("couchbase.errorInvalidLog")
 
 //logging and stats
 var ul *logger.LogWriter
@@ -70,9 +123,6 @@ func init() {
 	ul, _ = logger.NewLogger("upr_client", logger.LevelInfo)
 }
 
-// FailoverLog containing vvuid and sequnce number
-type FailoverLog [][2]uint64
-
 func (flogp *FailoverLog) Latest() (vbuuid, seqno uint64, err error) {
 	if flogp != nil {
 		flog := *flogp
@@ -80,25 +130,6 @@ func (flogp *FailoverLog) Latest() (vbuuid, seqno uint64, err error) {
 		return latest[0], latest[1], nil
 	}
 	return vbuuid, seqno, ErrorInvalidLog
-}
-
-// UprEvent memcached events for UPR streams.
-type UprEvent struct {
-	Opcode       UprOpcode          // Type of event
-	Status       gomemcached.Status // Response status
-	VBucket      uint16             // VBucket this event applies to
-	VBuuid       uint64             // This field is set by downstream
-	Flags        uint32             // Item flags
-	Expiry       uint32             // Item expiration time
-	Key, Value   []byte             // Item key/value
-	OldValue     []byte             // TODO: TBD: old document value
-	Cas          uint64             // CAS value of the item
-	Seqno        uint64             // sequence number of the mutation
-	SnapstartSeq uint64             // start sequence number of this snapshot
-	SnapendSeq   uint64             // End sequence number of the snapshot
-	SnapshotType uint32             // 0: disk 1: memory
-	FailoverLog  *FailoverLog       // Failover log containing vvuid and sequnce number
-	Error        error              // Error value in case of a failure
 }
 
 func makeUprEvent(rq gomemcached.MCRequest, stream *UprStream) *UprEvent {
@@ -153,32 +184,6 @@ func (event *UprEvent) String() string {
 	}
 	return name
 }
-
-// UprStream is per stream data structure over an UPR Connection.
-type UprStream struct {
-	Vbucket   uint16 // Vbucket id
-	Vbuuid    uint64 // vbucket uuid
-	StartSeq  uint64 // start sequence number
-	EndSeq    uint64 // end sequence number
-	connected bool
-}
-
-// UprFeed represents an UPR feed. A feed contains a connection to a single
-// host and multiple vBuckets
-type UprFeed struct {
-	C         <-chan *UprEvent      // Exported channel for receiving UPR events
-	vbstreams map[uint16]*UprStream // vb->stream mapping
-	closer    chan bool             // closer
-	conn      *Client               // connection to UPR producer
-	Error     error                 // error
-	bytesRead uint64                // total bytes read on this connection
-
-	transmitCh chan *gomemcached.MCRequest // transmit command channel
-	transmitCl chan bool                   //  closer channel for transmit go-routine
-}
-
-const opaqueOpen = 0xBEAF0001
-const opaqueFailover = 0xDEADBEEF
 
 func sendCommands(mc *Client, ch chan *gomemcached.MCRequest, closer chan bool) {
 
@@ -267,6 +272,7 @@ func (feed *UprFeed) UprOpen(name string, sequence uint32, bufSize uint32) error
 			Body:   []byte(strconv.Itoa(int(bufSize))),
 		}
 		feed.transmitCh <- rq
+		feed.maxAckBytes = uint32(bufferAckThreshold * float32(bufSize))
 	}
 
 	return nil
@@ -400,9 +406,7 @@ func (feed *UprFeed) runFeed(ch chan *UprEvent) {
 	var event *UprEvent
 
 	mc := feed.conn.Hijack()
-
-	var mutationCtr uint64
-	var snapshotCtr uint64
+	uprStats := &feed.stats
 
 loop:
 	for {
@@ -425,7 +429,7 @@ loop:
 			}
 
 			vb := uint16(res.Opaque)
-			feed.bytesRead += uint64(bytes)
+			uprStats.TotalBytes = uint64(bytes)
 			stream := feed.vbstreams[vb]
 
 			switch pkt.Opcode {
@@ -460,7 +464,7 @@ loop:
 				gomemcached.UPR_DELETION,
 				gomemcached.UPR_EXPIRATION:
 				event = makeUprEvent(pkt, stream)
-				mutationCtr++
+				uprStats.TotalMutation++
 				sendAck = true
 			case gomemcached.UPR_STREAMEND:
 				//stream has ended
@@ -474,7 +478,7 @@ loop:
 				event.SnapstartSeq = binary.BigEndian.Uint64(pkt.Extras[0:8])
 				event.SnapendSeq = binary.BigEndian.Uint64(pkt.Extras[8:16])
 				event.SnapshotType = binary.BigEndian.Uint32(pkt.Extras[16:20])
-				snapshotCtr++
+				uprStats.TotalSnapShot++
 				sendAck = true
 			case gomemcached.UPR_FLUSH:
 				// special processing for flush ?
@@ -510,18 +514,36 @@ loop:
 
 		}
 
-		if sendAck == true {
+		if needToSend, sendSize := feed.SendBufferAck(sendAck, uint32(bytes)); needToSend {
 			bufferAck := &gomemcached.MCRequest{
 				Opcode: gomemcached.UPR_BUFFERACK,
 			}
 			bufferAck.Extras = make([]byte, 4)
-			binary.BigEndian.PutUint32(bufferAck.Extras[:4], uint32(bytes))
+			binary.BigEndian.PutUint32(bufferAck.Extras[:4], uint32(sendSize))
 			feed.transmitCh <- bufferAck
+			uprStats.TotalBufferAckSent++
 		}
 
 	}
 
 	feed.transmitCl <- true
+}
+
+// Send buffer ack
+func (feed *UprFeed) SendBufferAck(sendAck bool, bytes uint32) (bool, uint32) {
+	if sendAck {
+		totalBytes := feed.toAckBytes + bytes
+		if totalBytes > feed.maxAckBytes {
+			feed.toAckBytes = 0
+			return true, totalBytes
+		}
+		feed.toAckBytes += bytes
+	}
+	return false, 0
+}
+
+func (feed *UprFeed) GetUprStats() *UprStats {
+	return &feed.stats
 }
 
 // Close this UprFeed.
