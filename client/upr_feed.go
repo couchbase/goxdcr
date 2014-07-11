@@ -148,6 +148,8 @@ func makeUprEvent(rq gomemcached.MCRequest, stream *UprStream) *UprEvent {
 	switch rq.Opcode {
 	case gomemcached.UPR_STREAMREQ:
 		event.Opcode = UprStreamRequest
+	case gomemcached.UPR_STREAMEND:
+		event.Opcode = UprStreamEnd
 	case gomemcached.UPR_MUTATION:
 		event.Opcode = UprMutation
 	case gomemcached.UPR_DELETION:
@@ -456,6 +458,7 @@ loop:
 					event.Seqno = stream.StartSeq
 					event.FailoverLog = flog
 					stream.connected = true
+					ul.LogInfo("", "", "UPR_STREAMREQ for vbucket %d successful", vb)
 				} else if err != nil {
 					ul.LogError("", "", "UPR_STREAMREQ for vbucket %d erro %s", vb, err.Error())
 					event = &UprEvent{Opcode: UprStreamRequest, Status: status, VBucket: vb, Error: err}
