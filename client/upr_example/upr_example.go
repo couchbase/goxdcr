@@ -75,6 +75,8 @@ func main() {
 			if len(op.Value) > 0 && len(op.Value) < 500 {
 				log.Printf("\tValue: %s", op.Value)
 			}
+		} else if op.String() == "StreamEnd" {
+			log.Printf("Received stream end event for vbucket %d", op.VBucket)
 		}
 
 		if op.Status != 0 {

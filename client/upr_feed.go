@@ -401,6 +401,21 @@ func handleStreamRequest(res *gomemcached.MCResponse) (gomemcached.Status, uint6
 	return res.Status, rollback, flog, err
 }
 
+// generate stream end responses for all active vb streams
+func (feed *UprFeed) doStreamClose(ch chan *UprEvent) {
+
+	for vb := range feed.vbstreams {
+
+		uprEvent := &UprEvent{
+			VBucket: vb,
+			VBuuid:  feed.vbstreams[vb].Vbuuid,
+			Opcode:  UprStreamEnd,
+		}
+
+		ch <- uprEvent
+	}
+}
+
 func (feed *UprFeed) runFeed(ch chan *UprEvent) {
 	defer close(ch)
 	var headerBuf [gomemcached.HDR_LEN]byte
@@ -417,6 +432,8 @@ loop:
 		if err != nil {
 			ul.LogError("", "", "Error in receive %s", err.Error())
 			feed.Error = err
+			// send all the stream close messages to the client
+			feed.doStreamClose(ch)
 			break loop
 		} else {
 			event = nil
