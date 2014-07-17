@@ -12,6 +12,7 @@ import (
 	"github.com/couchbaselabs/retriever/logger"
 	"github.com/couchbaselabs/retriever/stats"
 	"strconv"
+	"sync"
 )
 
 // Upr opcode values.
@@ -71,6 +72,7 @@ type UprStream struct {
 // UprFeed represents an UPR feed. A feed contains a connection to a single
 // host and multiple vBuckets
 type UprFeed struct {
+	mu          sync.RWMutex
 	C           <-chan *UprEvent            // Exported channel for receiving UPR events
 	vbstreams   map[uint16]*UprStream       // vb->stream mapping
 	closer      chan bool                   // closer
@@ -338,6 +340,9 @@ func (feed *UprFeed) UprRequestStream(vb uint16, flags uint32,
 	binary.BigEndian.PutUint64(rq.Extras[32:40], snapStart)
 	binary.BigEndian.PutUint64(rq.Extras[40:48], snapEnd)
 
+	feed.mu.Lock()
+	defer feed.mu.Unlock()
+
 	if err := feed.conn.Transmit(rq); err != nil {
 		ul.LogError("", "", "Error in StreamRequest %s", err.Error())
 		return err
@@ -403,17 +408,16 @@ func handleStreamRequest(res *gomemcached.MCResponse) (gomemcached.Status, uint6
 
 // generate stream end responses for all active vb streams
 func (feed *UprFeed) doStreamClose(ch chan *UprEvent) {
-
-	for vb := range feed.vbstreams {
-
+	feed.mu.RLock()
+	for vb, stream := range feed.vbstreams {
 		uprEvent := &UprEvent{
 			VBucket: vb,
-			VBuuid:  feed.vbstreams[vb].Vbuuid,
+			VBuuid:  stream.Vbuuid,
 			Opcode:  UprStreamEnd,
 		}
-
 		ch <- uprEvent
 	}
+	feed.mu.RUnlock()
 }
 
 func (feed *UprFeed) runFeed(ch chan *UprEvent) {
@@ -449,7 +453,10 @@ loop:
 
 			vb := uint16(res.Opaque)
 			uprStats.TotalBytes = uint64(bytes)
+
+			feed.mu.RLock()
 			stream := feed.vbstreams[vb]
+			feed.mu.RUnlock()
 
 			switch pkt.Opcode {
 			case gomemcached.UPR_STREAMREQ:
@@ -468,7 +475,9 @@ loop:
 							rb, vb, err.Error())
 						event = makeUprEvent(pkt, stream)
 						// delete the stream from the vbmap for the feed
+						feed.mu.Lock()
 						delete(feed.vbstreams, vb)
+						feed.mu.Unlock()
 					}
 				} else if status == gomemcached.SUCCESS {
 					event = makeUprEvent(pkt, stream)
@@ -491,7 +500,11 @@ loop:
 				event = makeUprEvent(pkt, stream)
 				ul.LogInfo("", "", "Stream Ended for vb %d", vb)
 				sendAck = true
+
+				feed.mu.Lock()
 				delete(feed.vbstreams, vb)
+				feed.mu.Unlock()
+
 			case gomemcached.UPR_SNAPSHOT:
 				// snapshot marker
 				event = makeUprEvent(pkt, stream)
@@ -527,7 +540,11 @@ loop:
 				break loop
 			}
 
-			if event.Opcode == UprCloseStream && len(feed.vbstreams) == 0 {
+			feed.mu.RLock()
+			l := len(feed.vbstreams)
+			feed.mu.RUnlock()
+
+			if event.Opcode == UprCloseStream && l == 0 {
 				ul.LogInfo("", "", "No more streams")
 				break loop
 			}
