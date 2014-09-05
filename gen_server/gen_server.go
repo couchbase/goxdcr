@@ -1,20 +1,27 @@
-package base
+package gen_server
 
 import (
 	"errors"
 	log "github.com/Xiaomei-Zhang/couchbase_goxdcr/util"
+	utils "github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/utils"
+	"reflect"
 	"sync"
+)
+
+const (
+cmdStop = 0
+cmdHeartBeat = 1
 )
 
 var logger *log.CommonLogger
 
 func init() {
-	logger = log.NewLogger("GenServer", log.LogLevelInfo)
+	logger = log.NewLogger("GenServer", log.LogLevelDebug)
 }
 
-type Gen_Server_Msg_Callback_Func func(msg []interface{}) bool
-type Gen_Server_Extend_Callback_Func func()
-type Gen_Server_Exit_Callback_Func func()
+type Msg_Callback_Func func(msg []interface{}) bool
+type Behavior_Callback_Func func()
+type Exit_Callback_Func func()
 
 type GenServer struct {
 	//msg channel
@@ -23,21 +30,28 @@ type GenServer struct {
 	//heartbeat channel
 	heartBeatChan chan []interface{}
 
-	msg_callback    Gen_Server_Msg_Callback_Func
-	extend_callback Gen_Server_Extend_Callback_Func
-	exit_callback   Gen_Server_Exit_Callback_Func
+	msg_callback      *Msg_Callback_Func
+	behavior_callback *Behavior_Callback_Func
+	exit_callback     *Exit_Callback_Func
 
 	isStarted bool
 	startLock sync.RWMutex
 }
 
-func (s *GenServer) Start_server() error{
+func NewGenServer(msg_callback *Msg_Callback_Func,
+	behavior_callback *Behavior_Callback_Func,
+	exit_callback *Exit_Callback_Func) GenServer {
+	return GenServer{make(chan []interface{}), make(chan []interface{}), msg_callback, behavior_callback, exit_callback, false, sync.RWMutex{}}
+}
+
+func (s *GenServer) Start_server() (err error) {
 	s.startLock.Lock()
 	defer s.startLock.Unlock()
+	defer utils.RecoverPanic(&err)
 
 	go s.run()
 	s.isStarted = true
-	return nil
+	return err
 }
 
 func (s *GenServer) run() {
@@ -55,14 +69,27 @@ loop:
 				respch <- []interface{}{true}
 				break loop
 			} else {
-				s.msg_callback(msg)
+				if (*s.msg_callback) != nil {
+					(*s.msg_callback)(msg)
+				} else {
+					logger.Debugf("No msg_callback for %s\n", reflect.TypeOf(s).Name())
+				}
 			}
 		default:
-			s.extend_callback()
+			if (*s.behavior_callback) != nil {
+				(*s.behavior_callback)()
+			} else {
+				logger.Debugf("No behavior_callback for %s\n", reflect.TypeOf(s).Name())
+			}
 
 		}
 	}
-	s.exit_callback()
+
+	if (*s.exit_callback) != nil {
+		(*s.exit_callback)()
+	} else {
+		logger.Debugf("No exit_callback for %s\n", reflect.TypeOf(s).Name())
+	}
 }
 
 func (s *GenServer) decodeCmd(command int, msg []interface{}) (error, chan []interface{}) {
@@ -87,7 +114,7 @@ func (s *GenServer) IsStarted() bool {
 	return s.isStarted
 }
 
-func (s *GenServer) Stop_server() error{
+func (s *GenServer) Stop_server() error {
 	s.startLock.Lock()
 	defer s.startLock.Unlock()
 
@@ -109,10 +136,10 @@ func (s *GenServer) Stop_server() error{
 
 }
 
-func (s *GenServer) HeartBeat() bool{
-	respchan := make (chan []interface{})
+func (s *GenServer) HeartBeat() bool {
+	respchan := make(chan []interface{})
 	s.heartBeatChan <- []interface{}{cmdHeartBeat, respchan}
-	
+
 	response := <-respchan
 	if response != nil {
 		return response[0].(bool)

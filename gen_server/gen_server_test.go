@@ -1,10 +1,11 @@
-package base
+package gen_server
 
 import (
 	"errors"
 	"fmt"
 	common "github.com/Xiaomei-Zhang/couchbase_goxdcr/common"
 	part "github.com/Xiaomei-Zhang/couchbase_goxdcr/part"
+	base "github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/base"
 	"sync"
 	"testing"
 	"time"
@@ -19,10 +20,12 @@ type example_part struct {
 }
 
 func newExamplePart(id string, increase_amount int) *example_part {
-	part_server := GenServer{make(chan []interface{}), make(chan []interface{}), nil, nil, nil, false, sync.RWMutex{}}
+	var exit_callback gen_server.Exit_Callback_Func
+	var extend_callback gen_server.Behavior_Callback_Func
+	part_server := gen_server.NewGenServer(nil, &extend_callback, &exit_callback)
 	part := &example_part{make(chan interface{}), part_server, part.NewAbstractPart(id), increase_amount, sync.WaitGroup{}}
-	part.GenServer.exit_callback = part.onExit
-	part.GenServer.extend_callback = part.runData
+	exit_callback = part.onExit
+	extend_callback = part.runData
 	return part
 }
 func (p *example_part) runData() {
@@ -45,7 +48,7 @@ func (p *example_part) Stop() error {
 
 func (p *example_part) processData(data interface{}) {
 	newData := data.(int) + p.increase_amount
-
+	fmt.Println(fmt.Sprint(newData))
 	//raise DataProcessed event
 	p.RaiseEvent(common.DataProcessed, data, p, nil, nil)
 
@@ -56,6 +59,7 @@ func (p *example_part) processData(data interface{}) {
 }
 
 func (p *example_part) onExit() {
+	fmt.Println("Before Exit")
 	p.waitGrp.Wait()
 }
 
@@ -112,12 +116,13 @@ func TestHeartBeat(t *testing.T) {
 				//				fmt.Printf("finchan %s = %d\n", fmt.Sprint(finchan), len(finchan))
 			}
 		}
-		
+
 		waitGrp.Wait()
 	}
 }
 
 func heartBeatChecker(p *example_part, timechan <-chan time.Time, finchan chan bool, waitGrp *sync.WaitGroup) {
+	defer waitGrp.Done()
 loop:
 	for {
 		for now := range timechan {
@@ -135,11 +140,11 @@ loop:
 			}
 		}
 	}
-	waitGrp.Done()
-	
+
 }
 
 func lifeKiller(p *example_part, finchan chan bool, lifespan time.Duration, t *testing.T, waitGrp *sync.WaitGroup) {
+	defer waitGrp.Done()
 	time.Sleep(lifespan)
 
 	fmt.Println("Wakeup to kill")
@@ -149,6 +154,5 @@ func lifeKiller(p *example_part, finchan chan bool, lifespan time.Duration, t *t
 		t.Errorf("Failed to stop %s", p.Id())
 	}
 	finchan <- true
-	waitGrp.Done()
 	fmt.Println("Killer is done")
 }

@@ -5,5 +5,4 @@ import (
 )
 
 //constants
-var cmdStop = 0
-var cmdHeartBeat = 1
+var DefaultConnectionSize = 20
