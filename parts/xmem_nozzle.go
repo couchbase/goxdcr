@@ -60,8 +60,7 @@ var xmem_setting_defs base.SettingDefinitions = base.SettingDefinitions{XMEM_SET
 	XMEM_SETTING_CONNECTSTR: base.NewSettingDef(reflect.TypeOf((*string)(nil)), true),
 	XMEM_SETTING_BUCKETNAME: base.NewSettingDef(reflect.TypeOf((*string)(nil)), true),
 	XMEM_SETTING_USERNAME:   base.NewSettingDef(reflect.TypeOf((*string)(nil)), true),
-	XMEM_SETTING_PASSWORD:   base.NewSettingDef(reflect.TypeOf((*string)(nil)), true),
-	XMEM_SETTING_VBID:       base.NewSettingDef(reflect.TypeOf((*string)(nil)), true)}
+	XMEM_SETTING_PASSWORD:   base.NewSettingDef(reflect.TypeOf((*string)(nil)), true)}
 
 var logger_xmem *log.CommonLogger = log.NewLogger("XmemNozzle", log.LogLevelInfo)
 
@@ -95,22 +94,27 @@ type requestBuffer struct {
 }
 
 func newReqBuffer(size int, notifychan chan bool) *requestBuffer {
-	buf := &requestBuffer{make([]chan *bufferedMCRequest, 0, size), make(chan int), size, make(chan int), notifychan}
+	logger_xmem.Infof("Create a new request buffer of size %d\n", size)
+	buf := &requestBuffer{make([]chan *bufferedMCRequest, 0, size), make(chan int, size), size, make(chan int,1), notifychan}
 	buf.initializeOpaqueNumbers()
-	buf.empty_slots_num <- size
+	logger_xmem.Infof("new request buffer of size %d is created\n", size)
 	return buf
 }
 
 func (buf *requestBuffer) initializeOpaqueNumbers() error {
 	for i := 0; i < buf.size; i++ {
+		logger_xmem.Infof("add slot index=%d\n", i)
 		buf.empty_slots_pos <- i
 	}
+	buf.empty_slots_num <- buf.size
+	logger_xmem.Infof("empty_slots_num's size is %d\n", len(buf.empty_slots_num))
 
 	return nil
 }
 
 func (buf *requestBuffer) slot(pos int) (*mc.MCRequest, error) {
-	if pos < 0 || pos > len(buf.slots) {
+	if pos < 0 || pos >= len(buf.slots) {
+		logger_xmem.Error ("Invalid slot index")
 		return nil, errors.New("Invalid slot index")
 	}
 	reqch := buf.slots[pos]
@@ -128,9 +132,11 @@ func (buf *requestBuffer) slot(pos int) (*mc.MCRequest, error) {
 }
 
 func (buf *requestBuffer) modSlot(pos int, modFuc func(req *bufferedMCRequest, p int) bool) (bool, error) {
-	if pos < 0 || pos > len(buf.slots) {
+	if pos < 0 || pos >= len(buf.slots) {
+		logger_xmem.Error ("Invalid slot index")
 		return false, errors.New("Invalid slot index")
 	}
+	
 	reqch := buf.slots[pos]
 
 	req := <-reqch
@@ -143,7 +149,8 @@ func (buf *requestBuffer) modSlot(pos int, modFuc func(req *bufferedMCRequest, p
 }
 
 func (buf *requestBuffer) evictSlot(pos int) error {
-	if pos < 0 || pos > len(buf.slots) {
+	if pos < 0 || pos >= len(buf.slots) {
+		logger_xmem.Error ("Invalid slot index")
 		return errors.New("Invalid slot index")
 	}
 
@@ -170,7 +177,8 @@ func (buf *requestBuffer) availableSlotIndex() int {
 }
 
 func (buf *requestBuffer) returnSlotIndex(index int) error {
-	if index < 0 || index > len(buf.slots) {
+	if index < 0 || index >= len(buf.slots) {
+		logger_xmem.Error ("Invalid slot index")
 		return errors.New("Invalid slot index")
 	}
 
@@ -179,7 +187,8 @@ func (buf *requestBuffer) returnSlotIndex(index int) error {
 }
 
 func (buf *requestBuffer) enSlot(pos int, req *mc.MCRequest) error {
-	if pos < 0 || pos > len(buf.slots) {
+	if pos < 0 || pos >= len(buf.slots) {
+		logger_xmem.Error ("Invalid slot index")
 		return errors.New("Invalid slot index")
 	}
 
@@ -220,7 +229,6 @@ type xmemConfig struct {
 	bucketName   string
 	username     string
 	password     string
-	vbid         uint16
 }
 
 func newConfig() xmemConfig {
@@ -233,7 +241,7 @@ func newConfig() xmemConfig {
 		bucketName:   "",
 		username:     "",
 		password:     "",
-		vbid:         0}
+		}
 
 }
 
@@ -265,9 +273,6 @@ func (config *xmemConfig) initializeConfig(settings map[string]interface{}) erro
 	}
 	if val, ok := settings[XMEM_SETTING_PASSWORD]; ok {
 		config.password = val.(string)
-	}
-	if val, ok := settings[XMEM_SETTING_VBID]; ok {
-		config.vbid = val.(uint16)
 	}
 	return err
 }
@@ -374,7 +379,9 @@ func (xmem *XmemNozzle) Close() {
 }
 
 func (xmem *XmemNozzle) Start(settings map[string]interface{}) error {
+	logger_xmem.Info ("Xmem starting ....")
 	err := xmem.initialize(settings)
+	logger_xmem.Info ("....Finish initializing....")
 	if err == nil {
 		xmem.childrenWaitGrp.Add(1)
 		go xmem.receiveResponse(xmem.memClient, xmem.receiver_finch, &xmem.childrenWaitGrp)
@@ -385,7 +392,7 @@ func (xmem *XmemNozzle) Start(settings map[string]interface{}) error {
 	if err == nil {
 		err = xmem.Start_server()
 	}
-
+	
 	return err
 }
 
@@ -404,6 +411,7 @@ func (xmem *XmemNozzle) Stop() error {
 }
 
 func (xmem *XmemNozzle) Receive(data interface{}) error {
+	logger_xmem.Infof ("data key=%v is received", data.(*mc.MCRequest).Key)
 	xmem.dataChan <- data.(*mc.MCRequest)
 
 	//accumulate the batchCount and batchSize
@@ -451,10 +459,12 @@ func (xmem *XmemNozzle) send() error {
 			logger_xmem.Errorf("Invalid state - expected %d items in the batch; but there are not that much in the data channel", 1)
 		}
 	} else {
-		var data []byte = make([]byte, 0, xmem.batch.curCount)
-		binary.BigEndian.PutUint32(data, uint32(xmem.batch.curSize))
-		binary.BigEndian.PutUint32(data, uint32(xmem.batch.curCount))
-
+		var data []byte = make([]byte, 0, xmem.batch.curSize + 64)
+		var header []byte = make([]byte, 64)
+		binary.BigEndian.PutUint32(header, uint32(xmem.batch.curSize))
+		binary.BigEndian.PutUint32(header, uint32(xmem.batch.curCount))
+		data = append(data, header...)
+		
 		for i := 0; i < count; i++ {
 			select {
 			case item := <-xmem.dataChan:
@@ -516,6 +526,8 @@ func (xmem *XmemNozzle) sendSingle(item *mc.MCRequest, index int) error {
 //TODO: who will release the pool? maybe it should be replication manager
 //
 func (xmem *XmemNozzle) initializeConnection() (err error) {
+	logger_xmem.Infof("xmem.config= %v", xmem.config.connectStr)
+	logger_xmem.Infof("poolName=%v", xmem.getPoolName(xmem.config.connectStr))
 	pool, err := base.ConnPoolMgr().GetOrCreatePool(xmem.getPoolName(xmem.config.connectStr), xmem.config.connectStr, xmem.config.username, xmem.config.password, 5)
 	if err == nil {
 		xmem.memClient, err = pool.Get()
@@ -535,23 +547,24 @@ func (xmem *XmemNozzle) initialize(settings map[string]interface{}) error {
 	//initialize batch
 	if xmem.config.mode == Batch_XMEM {
 		xmem.batch = newXmemBatch(xmem.config.maxCount, xmem.config.maxSize)
-	} else {
-		xmem.batch = newXmemBatch(1, -1)
-	}
-
-	if xmem.config.mode == Batch_XMEM {
 		xmem.buf = newReqBuffer(xmem.config.maxCount*2, xmem.batch_done)
 	} else {
+		xmem.batch = newXmemBatch(1, -1)
 		xmem.buf = newReqBuffer(xmem.config.maxCount*2, nil)
 	}
 
+	logger_xmem.Info("Here")
+	
 	xmem.receiver_finch = make(chan bool)
 	xmem.checker_finch = make(chan bool)
 
+	logger_xmem.Info("About to start initializing connection")
 	if err == nil {
 		err = xmem.initializeConnection()
 	}
 
+	logger_xmem.Info("Initialization is done")
+	
 	return err
 }
 
@@ -576,6 +589,7 @@ func (xmem *XmemNozzle) receiveResponse(client *mcc.Client, finch chan bool, wai
 						xmem.RaiseEvent(common.DataSent, req, xmem, nil, nil)
 						//empty the slot in the buffer
 						xmem.buf.evictSlot(pos)
+						logger_xmem.Infof("data on slot=%d is received", pos)
 					}
 				}
 			}

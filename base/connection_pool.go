@@ -4,12 +4,13 @@ import (
 	"errors"
 	"net/url"
 	//	"log"
+	log "github.com/Xiaomei-Zhang/couchbase_goxdcr/util"
 	mcc "github.com/couchbase/gomemcached/client"
 	cb "github.com/couchbaselabs/go-couchbase"
-	"log"
 	"sync"
-	//	"time"
 )
+
+var logger_pool *log.CommonLogger = log.NewLogger("Connection", log.LogLevelInfo)
 
 type ConnPool struct {
 	clients  chan *mcc.Client
@@ -173,6 +174,8 @@ func (connPoolMgr *connPoolMgr) CreatePoolForVB(bucket *cb.Bucket, vbid uint16, 
 }
 
 func (connPoolMgr *connPoolMgr) CreatePool(poolName string, hostName string, username string, password string, connectionSize int) (p *ConnPool, err error) {
+	logger_pool.Infof("Create Pool - poolName=%v,", poolName)
+	logger_pool.Infof("connectionSize=%d", connectionSize)
 	p = &ConnPool{clients: make(chan *mcc.Client, connectionSize),
 		hostName: hostName,
 		userName: username,
@@ -190,7 +193,10 @@ func (connPoolMgr *connPoolMgr) CreatePool(poolName string, hostName string, use
 	for i := 0; i < connectionSize; i++ {
 		mcClient, err := newConn(hostName, username, password)
 		if err == nil {
+			logger_pool.Infof("A client connection is established")
 			p.clients <- mcClient
+		} else {
+			logger_pool.Infof("error establishing connection with hostname=%s, username=%s, password=%s - %s", hostName, username, password, err)
 		}
 
 	}
@@ -199,7 +205,7 @@ func (connPoolMgr *connPoolMgr) CreatePool(poolName string, hostName string, use
 	connPoolMgr.conn_pools_map[poolName] = p
 	connPoolMgr.token.Unlock()
 
-	log.Println("Connection pool ", poolName, "is created")
+	logger_pool.Infof("Connection pool %s is created with %d clients\n", poolName, len(p.clients))
 	return p, nil
 }
 
@@ -240,6 +246,7 @@ func newConn(hostName string, username string, password string) (conn *mcc.Clien
 
 	// authentic using user/pass
 	if len(username) != 0 && username != "default" {
+		logger_pool.Info("Authenticate...")
 		_, err = conn.Auth(username, password)
 		if err != nil {
 			conn.Close()
@@ -264,7 +271,7 @@ func (connPoolMgr *connPoolMgr) Close() {
 	defer connPoolMgr.token.Unlock()
 
 	for key, pool := range connPoolMgr.conn_pools_map {
-		log.Println("close pool ", key)
+		logger_pool.Infof("close pool %s", key)
 		pool.ReleaseConnections()
 	}
 }
