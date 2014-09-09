@@ -43,6 +43,12 @@ cd tests
 cd xmem
 go clean
 go install
+cd ../router
+go clean 
+go install
+cd ../kvfeed
+go clean
+go install
 cd ..
 echo "Done"
 }
