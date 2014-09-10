@@ -12,6 +12,7 @@ import (
 	"os"
 	"sync"
 	"strconv"
+	"math"
 	pc "github.com/Xiaomei-Zhang/couchbase_goxdcr/common"
 	mc "github.com/couchbase/gomemcached"
 )
@@ -152,40 +153,66 @@ func mf(err error, msg string) {
 
 func startRouter() {
 	
-	partMaps := make(map[string]pc.Part)
+	partMap := make(map[string]pc.Part)
 	for i := 0; i < NUM_PARTS; i++ {
 		partId := PART_ID_PREFIX + strconv.FormatInt(int64(i), 10)
-		partMaps[partId] = NewFakePart(partId)
+		partMap[partId] = NewTestPart(partId)
 	}
 	
-	router, _ = parts.NewRouter(partMaps, uint16(options.maxVbno))
+	router, _ = parts.NewRouter(partMap, buildVbMap(partMap))
 }
 
-type FakePart struct {
+func buildVbMap(downStreamParts map[string]pc.Part) (map[uint16]string) {
+	vbMap := make(map[uint16]string)
+
+	numOfNodes := len(downStreamParts)
+	
+	numOfVbPerNode := uint16(math.Ceil(float64(options.maxVbno)/float64(numOfNodes)))
+	
+	var indexOfNode uint16
+	for partId := range downStreamParts {
+	    var j uint16
+		for j = 0; j < numOfVbPerNode; j++ {
+			vbno := indexOfNode * numOfVbPerNode + j
+			if vbno < uint16(options.maxVbno) {
+				vbMap[vbno] = partId
+			} else {
+				// no more vbs to process 
+				break
+			}
+		}
+		indexOfNode ++
+	}
+	return vbMap
+	
+}
+
+
+type TestPart struct {
 	part.AbstractPart
 }
 
-func NewFakePart(id string) *FakePart {
-	fp := new(FakePart)
-	var isStarted_callback_func part.IsStarted_Callback_Func = fp.IsStarted
-	fp.AbstractPart = part.NewAbstractPart(id, &isStarted_callback_func)
-	return fp
+func NewTestPart(id string) *TestPart {
+	tp := new(TestPart)
+	var isStarted_callback_func part.IsStarted_Callback_Func = tp.IsStarted
+	tp.AbstractPart = part.NewAbstractPart(id, &isStarted_callback_func)
+	return tp
 }
 
-func (fp *FakePart) Start (settings map[string]interface{} ) error {
+func (tp *TestPart) Start (settings map[string]interface{} ) error {
 	return nil
 }
 
-func (fp *FakePart) Stop () error {
+func (tp *TestPart) Stop () error {
 	return nil
 }
 
-func (fp *FakePart) Receive (data interface {}) error {
-	fmt.Println("Part %v received data with vbno %v", fp.Id(), data.(*mc.MCRequest).VBucket)
+func (tp *TestPart) Receive (data interface {}) error {
+	fmt.Println("Part %v received data with vbno %v", tp.Id(), data.(*mc.MCRequest).VBucket)
 
 	return nil
 }
 
-func (fp *FakePart) IsStarted () bool {
+func (tp *TestPart) IsStarted () bool {
 	return false
 }
