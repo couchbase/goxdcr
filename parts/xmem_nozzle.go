@@ -348,10 +348,12 @@ func NewXmemNozzle(id string) *XmemNozzle {
 	var msg_callback_func gen_server.Msg_Callback_Func
 	var behavior_callback_func gen_server.Behavior_Callback_Func
 	var exit_callback_func gen_server.Exit_Callback_Func
+	var isStarted_callback_func part.IsStarted_Callback_Func
 
 	server := gen_server.NewGenServer(&msg_callback_func,
 		&behavior_callback_func, &exit_callback_func)
-	part := part.NewAbstractPart(id)
+	isStarted_callback_func = server.IsStarted
+	part := part.NewAbstractPart(id, &isStarted_callback_func)
 	xmem := &XmemNozzle{server, /*gen_server.GenServer*/
 		part, /*part.AbstractPart*/
 		nil,  /*dataChan*/

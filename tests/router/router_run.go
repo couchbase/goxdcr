@@ -167,7 +167,8 @@ type FakePart struct {
 
 func NewFakePart(id string) *FakePart {
 	fp := new(FakePart)
-	fp.AbstractPart = part.NewAbstractPart(id)
+	var isStarted_callback_func part.IsStarted_Callback_Func = fp.IsStarted
+	fp.AbstractPart = part.NewAbstractPart(id, &isStarted_callback_func)
 	return fp
 }
 
