@@ -7,7 +7,6 @@ import (
 	"github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/parts"
 	factory "github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/factory"
 	sp "github.com/ysui6888/indexing/secondary/projector"
-	"github.com/couchbaselabs/go-couchbase"
 	"os"
 	"errors"
 )
@@ -22,11 +21,6 @@ var options struct {
 	password      string //password
 	maxVbno       int    // maximum number of vbuckets
 }
-
-var done = make(chan bool, 16)
-var rch = make(chan []interface{}, 10000)
-var uprFeed *couchbase.UprFeed = nil
-var router *parts.Router = nil
 
 const (
 	TEST_TOPIC = "test"
