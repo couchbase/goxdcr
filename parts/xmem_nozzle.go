@@ -374,10 +374,12 @@ func NewXmemNozzle(id string) *XmemNozzle {
 
 }
 
-func (xmem *XmemNozzle) Open() {
+func (xmem *XmemNozzle) Open() error {
+	return nil
 }
 
-func (xmem *XmemNozzle) Close() {
+func (xmem *XmemNozzle) Close() error {
+	return nil
 }
 
 func (xmem *XmemNozzle) Start(settings map[string]interface{}) error {
@@ -410,6 +412,10 @@ func (xmem *XmemNozzle) Stop() error {
 	xmem.memClient = nil
 
 	return err
+}
+
+func (xmem *XmemNozzle) IsOpen() bool {
+	return false
 }
 
 func (xmem *XmemNozzle) Receive(data interface{}) error {

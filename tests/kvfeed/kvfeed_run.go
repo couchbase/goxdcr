@@ -5,12 +5,12 @@ import (
 	"flag"
 	"fmt"
 	connector "github.com/Xiaomei-Zhang/couchbase_goxdcr/connector"
-	"github.com/couchbase/indexing/secondary/common"
+	"github.com/ysui6888/indexing/secondary/common"
 	"log"
 	"os"
 	"time"
 	mcc "github.com/couchbase/gomemcached/client"
-	sp "github.com/couchbase/indexing/secondary/projector"
+	sp "github.com/ysui6888/indexing/secondary/projector"
 	protobuf "github.com/couchbase/indexing/secondary/protobuf"
 )
 
@@ -68,7 +68,7 @@ func startKVFeed(cluster, kvaddr, bucketn string) {
 	b, err := common.ConnectBucket(cluster, "default", bucketn)
 	mf(err, "bucket")
 	
-	kvfeed, err := sp.NewKVFeed(kvaddr, "test", b)
+	kvfeed, err := sp.NewKVFeed(kvaddr, "test", "", b)
 	kvfeed.SetConnector(NewTestConnector())
 	kvfeed.Start(sp.ConstructStartSettingsForKVFeed(constructTimestamp(bucketn)))
 	fmt.Println("KVFeed is started")
