@@ -28,19 +28,13 @@ type Router struct {
 func NewRouter(downStreamParts map[string]common.Part, numOfVbuckets uint16) (*Router, error){
 	router := &Router{
 				numOfVbuckets: numOfVbuckets,
-				vbMap: make(map[uint16]string),
 			   }
 			   
 	var routingFunc connector.Routing_Callback_Func = router.route
 	router.Router = connector.NewRouter(downStreamParts, &routingFunc)
 	
-	err := router.buildVbMap()
-	if err == nil {
-		logger_router.Infof("Router created with %d downstream parts \n", len(downStreamParts))
-		return router, nil
-	} else {
-		return nil, err
-	}
+	logger_router.Infof("Router created with %d downstream parts \n", len(downStreamParts))
+	return router, nil
 }
 
 // build vbMap for load balancing
@@ -121,6 +115,14 @@ func ComposeMCRequest(event *mcc.UprEvent) *mc.MCRequest {
 // Implementation of the routing algorithm
 // Currently doing static dispatching based on vbucket number. 
 func (router *Router) route(data interface{}) (map[string]interface{}, error) {
+	if router.vbMap == nil {
+		// build vbMap for routing if it has not been done before
+		err := router.buildVbMap()
+		if err != nil {
+			return nil, err
+		}
+	}
+	
 	// only *mc.UprEvent type data is accepted
 	uprEvent, ok := data.(*mcc.UprEvent)
     if !ok {
@@ -135,19 +137,4 @@ func (router *Router) route(data interface{}) (map[string]interface{}, error) {
 	result[partId] = ComposeMCRequest(uprEvent)
 	
 	return result, nil
-}
-
-func (router *Router) AddDownStream(partId string, part common.Part) error {
-	if router.DownStreams()[partId] == nil {
-		err := router.Router.AddDownStream(partId, part)
-		if err == nil {
-			// re-build vbmap
-			return router.buildVbMap()
-		} else {
-			return err
-		}
-	} else {
-		return router.Router.AddDownStream(partId, part)
-	}
-	
 }
