@@ -6,29 +6,37 @@ import (
 	"flag"
 	"fmt"
 	parts "github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/parts"
+	utils "github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/utils"
 	mc "github.com/couchbase/gomemcached"
 	mcc "github.com/couchbase/gomemcached/client"
 	"github.com/couchbase/indexing/secondary/common"
 	"github.com/couchbaselabs/go-couchbase"
 	"log"
+	//	"math"
+	//	"math/rand"
+	"net/http"
 	"os"
 	"sync"
 	"time"
 )
 
+import _ "net/http/pprof"
+
 var options struct {
-	source_bucket string // source bucket
-	target_bucket string //target bucket
-	connectStr    string //connect string
-	username      string //username
-	password      string //password
-	maxVbno       int    // maximum number of vbuckets
+	source_bucket      string // source bucket
+	target_bucket      string //target bucket
+	source_clusterAddr string //source connect string
+	target_clusterAddr string //target connect string
+	username           string //username
+	password           string //password
+	maxVbno            int    // maximum number of vbuckets
 }
 
 var done = make(chan bool, 16)
 var rch = make(chan []interface{}, 10000)
 var uprFeed *couchbase.UprFeed = nil
 var xmem *parts.XmemNozzle = nil
+var target_bk *couchbase.Bucket
 
 func argParse() {
 
@@ -49,25 +57,85 @@ func argParse() {
 		usage()
 		os.Exit(1)
 	}
-	options.connectStr = args[0]
+	options.source_clusterAddr = args[0]
+	options.target_clusterAddr = args[1]
 }
 
 func usage() {
-	fmt.Fprintf(os.Stderr, "Usage : %s [OPTIONS] <cluster-addr> \n", os.Args[0])
+	fmt.Fprintf(os.Stderr, "Usage : %s [OPTIONS] <source-cluster-addr> <target-cluster-addr>\n", os.Args[0])
 	flag.PrintDefaults()
 }
 
-func main() {
-	fmt.Println("Start Testing Xmem...")
+func setup() (err error) {
+	//start http server for pprof
+	go func() {
+		log.Println(http.ListenAndServe("localhost:6565", nil))
+	}()
+
+	log.Println("Start Testing Xmem...")
 	argParse()
-	fmt.Printf("connectStr=%s, username=%s, password=%s\n", options.connectStr, options.username, options.password)
-	fmt.Println("Done with parsing the arguments")
+	log.Printf("target_clusterAddr=%s, username=%s, password=%s\n", options.target_clusterAddr, options.username, options.password)
+	log.Println("Done with parsing the arguments")
+
+	//flush the target bucket
+	baseURL, err := couchbase.ParseURL("http://" + options.target_bucket + ":" +options.password + "@"+ options.target_clusterAddr)
+
+	if err == nil {
+		err = utils.QueryRestAPI(baseURL,
+			"/pools/default/buckets/target/controller/doFlush",
+			options.username,
+			options.password,
+			"POST",
+			nil)
+	}
+
+	if err != nil {
+		log.Printf("Setup error=%v\n", err)
+	}else {
+		log.Println("Setup is done")
+	}
+	
+	return
+}
+
+func verify() {
+	//	if target_bk != nil {
+	//		cmd := exec.Command("curl", "-i", "-X GET", "http://Administrator:welcome@127.0.0.1:9000/pools/default/buckets/target")
+	//		output, err := cmd.Output()
+	//
+	//	}
+	output := &utils.CouchBucket{}
+	baseURL, err := couchbase.ParseURL("http://" + options.target_clusterAddr)
+
+	if err == nil {
+		err = utils.QueryRestAPI(baseURL,
+			"/pools/default/buckets/target",
+			options.target_bucket,
+			options.password,
+			"GET",
+			output)
+	}
+	if err != nil {
+		panic (err)
+	}
+	log.Printf("name=%s itemCount=%d\n", output.Name, output.Stat.ItemCount)
+
+}
+func main() {
+	err := setup()
+
+	if err != nil {
+		panic (err)
+	}
 	startXmem()
 	fmt.Println("XMEM is started")
 	waitGrp := &sync.WaitGroup{}
 	waitGrp.Add(1)
-	go startUpr(options.connectStr, options.source_bucket, waitGrp)
+	go startUpr(options.source_clusterAddr, options.source_bucket, waitGrp)
 	waitGrp.Wait()
+
+	time.Sleep (5*time.Second)
+	verify()
 }
 
 func startUpr(cluster, bucketn string, waitGrp *sync.WaitGroup) {
@@ -97,11 +165,15 @@ func startUpr(cluster, bucketn string, waitGrp *sync.WaitGroup) {
 		}
 
 		//transfer UprEvent to MCRequest
-		mcReq := composeMCRequest(e)
-		count++
-		fmt.Printf("Number of upr event received so far is %d", count)
-		xmem.Receive(mcReq)
+		fmt.Println("OpCode =%v\n", e.Opcode)
+		switch e.Opcode {
+		case mcc.UprMutation, mcc.UprDeletion, mcc.UprExpiration:
+			mcReq := composeMCRequest(e)
+			count++
+			fmt.Printf("Number of upr event received so far is %d\n", count)
 
+			xmem.Receive(mcReq)
+		}
 		if count > 100 {
 			goto Done
 		}
@@ -109,18 +181,27 @@ func startUpr(cluster, bucketn string, waitGrp *sync.WaitGroup) {
 	}
 Done:
 	//close the upr stream
+	fmt.Println("Done.........")
 	uprFeed.Close()
 	xmem.Stop()
 	waitGrp.Done()
 }
 
+func getVBucket(source_vbId uint16) uint16 {
+	return uint16(1023)
+}
+
 func composeMCRequest(event *mcc.UprEvent) *mc.MCRequest {
 	req := &mc.MCRequest{Cas: event.Cas,
 		Opaque:  0,
-		VBucket: event.VBucket,
+		VBucket: getVBucket(event.VBucket),
 		Key:     event.Key,
 		Body:    event.Value,
-		Extras:	 make ([]byte, 224)}
+		Extras:  make([]byte, 224)}
+
+	keystr := string(req.Key)
+	keystr = keystr + "_target"
+	req.Key = []byte(keystr)
 	//opCode
 	switch event.Opcode {
 	case mcc.UprStreamRequest:
@@ -186,16 +267,46 @@ func mf(err error, msg string) {
 	}
 }
 
+func getConnectStr(clusterAddr string, poolName string, bucketName string, username string, password string) (string, error) {
+	var c string
+	if username != "" && password != "" {
+		c = "http://" + username + ":" + password + "@" + clusterAddr
+	} else {
+		c = "http://" + clusterAddr
+	}
+	var err error
+	target_bk, err = couchbase.GetBucket(c, poolName, bucketName)
+	if err == nil && target_bk != nil {
+		addrs := target_bk.NodeAddresses()
+
+		if addrs != nil && len(addrs) > 0 {
+			for _, add := range addrs {
+				fmt.Printf("node_address=%v\n", add)
+			}
+			return addrs[0], nil
+
+		}
+	} else {
+		panic("failed to instantiate target bucket")
+	}
+	return "", err
+}
+
 func startXmem() {
+	target_connectStr, err := getConnectStr(options.target_clusterAddr, "default", options.target_bucket, options.username, options.password)
+	if err != nil || target_connectStr == "" {
+		panic(err)
+	}
+	fmt.Printf("target_connectStr=%s\n", target_connectStr)
 
 	xmem = parts.NewXmemNozzle("xmem")
-	var configs map[string]interface{} = map[string]interface{}{parts.XMEM_SETTING_BATCHCOUNT: 10,
+	var configs map[string]interface{} = map[string]interface{}{parts.XMEM_SETTING_BATCHCOUNT: 1,
 		parts.XMEM_SETTING_TIMEOUT:    time.Millisecond * 10,
 		parts.XMEM_SETTING_NUMOFRETRY: 3,
 		parts.XMEM_SETTING_MODE:       parts.Batch_XMEM,
-		parts.XMEM_SETTING_CONNECTSTR: options.connectStr,
+		parts.XMEM_SETTING_CONNECTSTR: target_connectStr,
 		parts.XMEM_SETTING_BUCKETNAME: options.target_bucket,
-		parts.XMEM_SETTING_USERNAME:   options.username,
+		parts.XMEM_SETTING_USERNAME:   options.target_bucket,
 		parts.XMEM_SETTING_PASSWORD:   options.password}
 
 	xmem.Start(configs)

@@ -95,7 +95,13 @@ type requestBuffer struct {
 
 func newReqBuffer(size int, notifychan chan bool) *requestBuffer {
 	logger_xmem.Infof("Create a new request buffer of size %d\n", size)
-	buf := &requestBuffer{make([]chan *bufferedMCRequest, 0, size), make(chan int, size), size, make(chan int,1), notifychan}
+	buf := &requestBuffer{make([]chan *bufferedMCRequest, size, size), make(chan int, size), size, make(chan int, 1), notifychan}
+	for i := 0; i < size; i++ {
+		slotch := make(chan *bufferedMCRequest, 1)
+		slotch <- nil
+		buf.slots[i] = slotch
+	}
+	logger_xmem.Info("Slots is initialized")
 	buf.initializeOpaqueNumbers()
 	logger_xmem.Infof("new request buffer of size %d is created\n", size)
 	return buf
@@ -113,8 +119,9 @@ func (buf *requestBuffer) initializeOpaqueNumbers() error {
 }
 
 func (buf *requestBuffer) slot(pos int) (*mc.MCRequest, error) {
+	logger_xmem.Infof("Getting the content in slot %d\n", pos)
 	if pos < 0 || pos >= len(buf.slots) {
-		logger_xmem.Error ("Invalid slot index")
+		logger_xmem.Error("Invalid slot index")
 		return nil, errors.New("Invalid slot index")
 	}
 	reqch := buf.slots[pos]
@@ -124,36 +131,47 @@ func (buf *requestBuffer) slot(pos int) (*mc.MCRequest, error) {
 	select {
 	case req := <-reqch:
 		reqch <- req
-		return req.req, nil
+		logger_xmem.Info("Got the content")
+		if req == nil {
+			return nil, nil
+		} else {
+			return req.req, nil
+		}
 	default:
+		logger_xmem.Info("Somebody is holding it")
 		return nil, errors.New("Somebody is holding it")
 	}
 
 }
 
 func (buf *requestBuffer) modSlot(pos int, modFuc func(req *bufferedMCRequest, p int) bool) (bool, error) {
+	var err error = nil
 	if pos < 0 || pos >= len(buf.slots) {
-		logger_xmem.Error ("Invalid slot index")
+		logger_xmem.Error("Invalid slot index")
 		return false, errors.New("Invalid slot index")
 	}
-	
+
 	reqch := buf.slots[pos]
 
+	var modified bool
 	req := <-reqch
-	modified := modFuc(req, pos)
-	if modified {
-		reqch <- req
+	if req != nil {
+		modified = modFuc(req, pos)
+	} else {
+		modified = false
 	}
+	reqch <- req
 
-	return modified, nil
+	return modified, err
 }
 
 func (buf *requestBuffer) evictSlot(pos int) error {
+	logger_xmem.Infof("evictSlot-------pos=%d\n", pos)
 	if pos < 0 || pos >= len(buf.slots) {
-		logger_xmem.Error ("Invalid slot index")
+		logger_xmem.Infof("Invalid slot index, len=%d\n", len(buf.slots))
 		return errors.New("Invalid slot index")
 	}
-
+	logger_xmem.Info("Here")
 	reqch := buf.slots[pos]
 
 	<-reqch
@@ -163,8 +181,12 @@ func (buf *requestBuffer) evictSlot(pos int) error {
 	if empty_slots_num == buf.size {
 		if buf.notifych != nil {
 			buf.notifych <- true
+			logger_xmem.Info("buffer is empty, notify")
+		} else {
+			logger_xmem.Info("buffer is empty, no notify channel is specified though")
 		}
 	}
+	logger_xmem.Infof("empty_slots_num=%d\n", empty_slots_num)
 	buf.empty_slots_num <- empty_slots_num
 	reqch <- nil
 
@@ -178,7 +200,7 @@ func (buf *requestBuffer) availableSlotIndex() int {
 
 func (buf *requestBuffer) returnSlotIndex(index int) error {
 	if index < 0 || index >= len(buf.slots) {
-		logger_xmem.Error ("Invalid slot index")
+		logger_xmem.Error("Invalid slot index")
 		return errors.New("Invalid slot index")
 	}
 
@@ -187,17 +209,19 @@ func (buf *requestBuffer) returnSlotIndex(index int) error {
 }
 
 func (buf *requestBuffer) enSlot(pos int, req *mc.MCRequest) error {
+	logger_xmem.Info("enSlot------------")
 	if pos < 0 || pos >= len(buf.slots) {
-		logger_xmem.Error ("Invalid slot index")
+		logger_xmem.Error("Invalid slot index")
 		return errors.New("Invalid slot index")
 	}
 
 	reqch := buf.slots[pos]
+	logger_xmem.Info("Here")
 	r := <-reqch
 	if r != nil {
 		//the slot is not empty, error condition
 		reqch <- r
-
+		logger_xmem.Errorf("Trying to enslot an empty slot %d\n", pos)
 		return errors.New("Slot is already occupied")
 	}
 
@@ -208,6 +232,7 @@ func (buf *requestBuffer) enSlot(pos int, req *mc.MCRequest) error {
 	bufferedReq := newBufferedMCRequest(req)
 	reqch <- bufferedReq
 
+	logger_xmem.Infof("slot %d is occupied\n", pos)
 	return nil
 }
 
@@ -241,7 +266,7 @@ func newConfig() xmemConfig {
 		bucketName:   "",
 		username:     "",
 		password:     "",
-		}
+	}
 
 }
 
@@ -295,13 +320,16 @@ func newXmemBatch(cap_count int, cap_size int) *xmemBatch {
 func (b *xmemBatch) accumuBatch(size int) bool {
 	b.lock.Lock()
 	defer b.lock.Unlock()
+	var ret bool = false
 	if b.curCount < b.capacity_count && b.curSize < b.capacity_size {
 		b.curCount++
 		b.curSize += size
-		return true
 	}
-
-	return false
+	if b.curCount < b.capacity_count && b.curSize < b.capacity_size {
+		ret = true
+	}
+	logger_xmem.Infof("The current batch count=%d, size=%d, the batch ready=%v, capacity_count=%d\n", b.curCount, b.curSize, ret, b.capacity_count)
+	return ret
 }
 
 func (b *xmemBatch) count() int {
@@ -330,7 +358,8 @@ type XmemNozzle struct {
 	//configurable parameter
 	config xmemConfig
 
-	batch *xmemBatch
+	batches_ready chan *xmemBatch
+	batch         *xmemBatch
 
 	sendNowCh chan bool
 
@@ -344,7 +373,6 @@ type XmemNozzle struct {
 }
 
 func NewXmemNozzle(id string) *XmemNozzle {
-
 	var msg_callback_func gen_server.Msg_Callback_Func
 	var behavior_callback_func gen_server.Behavior_Callback_Func
 	var exit_callback_func gen_server.Exit_Callback_Func
@@ -357,14 +385,15 @@ func NewXmemNozzle(id string) *XmemNozzle {
 		nil,  /*dataChan*/
 		nil,  /*memClient*/
 		//		nil,              /*connPool*/
-		newConfig(),      /*config	xmemConfig*/
-		nil,              /*batch *xmemBatch*/
-		make(chan bool),  /*sendNowChan chan bool*/
-		sync.WaitGroup{}, /*childrenWaitGrp sync.WaitGroup*/
-		nil,              /*buf	requestBuffer*/
-		make(chan bool),  /*receiver_finch chan bool*/
-		make(chan bool),  /*checker_finch chan bool*/
-		make(chan bool) /*batch_done chan bool*/}
+		newConfig(),              /*config	xmemConfig*/
+		make(chan *xmemBatch, 5), /*batch *xmemBatch*/
+		nil,                /*batch		  *xmemBatch*/
+		make(chan bool, 1), /*sendNowChan chan bool*/
+		sync.WaitGroup{},   /*childrenWaitGrp sync.WaitGroup*/
+		nil,                /*buf	requestBuffer*/
+		make(chan bool),    /*receiver_finch chan bool*/
+		make(chan bool),    /*checker_finch chan bool*/
+		make(chan bool, 1) /*batch_done chan bool*/}
 	msg_callback_func = nil
 	behavior_callback_func = xmem.processData
 	exit_callback_func = xmem.onExit
@@ -379,9 +408,9 @@ func (xmem *XmemNozzle) Close() {
 }
 
 func (xmem *XmemNozzle) Start(settings map[string]interface{}) error {
-	logger_xmem.Info ("Xmem starting ....")
+	logger_xmem.Info("Xmem starting ....")
 	err := xmem.initialize(settings)
-	logger_xmem.Info ("....Finish initializing....")
+	logger_xmem.Info("....Finish initializing....")
 	if err == nil {
 		xmem.childrenWaitGrp.Add(1)
 		go xmem.receiveResponse(xmem.memClient, xmem.receiver_finch, &xmem.childrenWaitGrp)
@@ -392,7 +421,8 @@ func (xmem *XmemNozzle) Start(settings map[string]interface{}) error {
 	if err == nil {
 		err = xmem.Start_server()
 	}
-	
+
+	logger_xmem.Info("Xmem nozzle is started")
 	return err
 }
 
@@ -411,25 +441,37 @@ func (xmem *XmemNozzle) Stop() error {
 }
 
 func (xmem *XmemNozzle) Receive(data interface{}) error {
-	logger_xmem.Infof ("data key=%v is received", data.(*mc.MCRequest).Key)
+	logger_xmem.Infof("data key=%v is received", data.(*mc.MCRequest).Key)
 	xmem.dataChan <- data.(*mc.MCRequest)
 
 	//accumulate the batchCount and batchSize
 	if !xmem.batch.accumuBatch(data.(*mc.MCRequest).Size()) {
+		//move the batch to ready batches channel
+		logger_xmem.Info("move the batch ready queue")
+		xmem.batches_ready <- xmem.batch
+		xmem.initNewBatch()
+		logger_xmem.Info("ready to accumulate a new batch")
+
 		//non-blocking
 		select {
 		case xmem.sendNowCh <- true:
+			logger_xmem.Infof("Signal to send batch...%v, size=%d\n", xmem, len(xmem.sendNowCh))
 		}
 	}
 	//raise DataReceived event
 	xmem.RaiseEvent(common.DataReceived, data.(*mc.MCRequest), xmem, nil, nil)
+	logger_xmem.Info("data received")
 	return nil
 }
 
 func (xmem *XmemNozzle) processData() {
+	logger_xmem.Debugf("Processing data...%v, sendNowCh size=%d\n", xmem, len(xmem.sendNowCh))
 	select {
 	case <-xmem.sendNowCh:
+		logger_xmem.Info("got the signal to send")
 		xmem.send()
+	default:
+		logger_xmem.Debug("Still waiting...")
 	}
 }
 
@@ -441,7 +483,13 @@ func (xmem *XmemNozzle) onExit() {
 
 func (xmem *XmemNozzle) send() error {
 	var err error
-	count := xmem.batch.count()
+
+	logger_xmem.Info("send...")
+	//get the batch to process
+	batch := <-xmem.batches_ready
+	count := batch.count()
+
+	logger_xmem.Infof("Send batch count=%d\n", count)
 	if count == 1 {
 		select {
 		case item := <-xmem.dataChan:
@@ -454,17 +502,22 @@ func (xmem *XmemNozzle) send() error {
 			}
 
 			//buffer it for now until the receipt is confirmed
-			xmem.buf.enSlot(index, item)
+			logger_xmem.Infof("And sent item to slot=%d\n", index)
+			err = xmem.buf.enSlot(index, item)
 		default:
 			logger_xmem.Errorf("Invalid state - expected %d items in the batch; but there are not that much in the data channel", 1)
 		}
 	} else {
-		var data []byte = make([]byte, 0, xmem.batch.curSize + 64)
-		var header []byte = make([]byte, 64)
-		binary.BigEndian.PutUint32(header, uint32(xmem.batch.curSize))
-		binary.BigEndian.PutUint32(header, uint32(xmem.batch.curCount))
+		var itemIndexMap map[int]*mc.MCRequest = make(map[int]*mc.MCRequest)
+		var data []byte = make([]byte, 0, batch.curSize+64)
+		var header []byte = make([]byte, 8)
+		binary.BigEndian.PutUint32(header, uint32(batch.curSize))
+		binary.BigEndian.PutUint32(header[4:], uint32(batch.curCount))
+
+		logger_xmem.Infof("header=%v, curSize=%d, curCount=%d\n", header, batch.curSize, batch.curCount)
+
 		data = append(data, header...)
-		
+
 		for i := 0; i < count; i++ {
 			select {
 			case item := <-xmem.dataChan:
@@ -482,7 +535,7 @@ func (xmem *XmemNozzle) send() error {
 				xmem.adjustRequest(item, index)
 				item_byte := item.Bytes()
 				data = append(data, item_byte...)
-
+				itemIndexMap[index] = item
 			default:
 				logger_xmem.Errorf("Invalid state - expected %d items in the batch; but there are not that much in the data channel", count-i)
 				break
@@ -491,11 +544,24 @@ func (xmem *XmemNozzle) send() error {
 
 		//send it
 		conn := xmem.memClient.Hijack()
-		conn.Write(data)
-		xmem.memClient, err = mcc.Wrap(conn)
+
+		var bytes int
+		bytes, err = conn.Write(data)
+
+		//log the data
+		logger_xmem.Infof("data=%v\n", data)
+		logger_xmem.Infof("%d bytes are sent\n", bytes)
+
+		for ind, it := range itemIndexMap {
+			err = xmem.buf.enSlot(ind, it)
+		}
+
 	}
 	if xmem.config.mode == Batch_XMEM {
+		logger_xmem.Info("Waiting for the confirmation of the batch")
 		<-xmem.batch_done
+		logger_xmem.Info("Batch is confirmed")
+
 	}
 
 	return err
@@ -515,6 +581,12 @@ func (xmem *XmemNozzle) sendSingleWithRetry(item *mc.MCRequest, numOfRetry int, 
 func (xmem *XmemNozzle) sendSingle(item *mc.MCRequest, index int) error {
 
 	xmem.adjustRequest(item, index)
+	logger_xmem.Infof("key=%v\n", item.Key)
+	logger_xmem.Infof("item=%v\n", item.Bytes())
+	logger_xmem.Infof("magic=%x\n", item.Bytes()[0])
+	logger_xmem.Infof("opaque=%d\n", item.Opaque)
+	logger_xmem.Infof("opcode=%v\n", item.Opcode)
+
 	err := xmem.memClient.Transmit(item)
 	if err != nil {
 		logger_xmem.Errorf("XMmemLoc.SendBatch: transmit error: %s\n", fmt.Sprint(err))
@@ -539,22 +611,31 @@ func (xmem *XmemNozzle) getPoolName(connectionStr string) string {
 	return "Couch_Xmem_" + connectionStr
 }
 
+func (xmem *XmemNozzle) initNewBatch() {
+	if xmem.config.mode == Batch_XMEM {
+		xmem.batch = newXmemBatch(xmem.config.maxCount, xmem.config.maxSize)
+	} else {
+		xmem.batch = newXmemBatch(1, -1)
+	}
+}
+
 func (xmem *XmemNozzle) initialize(settings map[string]interface{}) error {
 	err := xmem.config.initializeConfig(settings)
 	xmem.dataChan = make(chan *mc.MCRequest, xmem.config.maxCount)
-	xmem.sendNowCh = make(chan bool)
+	xmem.sendNowCh = make(chan bool, 1)
 
-	//initialize batch
+	//init a new batch
+	xmem.initNewBatch()
+
+	//initialize buffer
 	if xmem.config.mode == Batch_XMEM {
-		xmem.batch = newXmemBatch(xmem.config.maxCount, xmem.config.maxSize)
 		xmem.buf = newReqBuffer(xmem.config.maxCount*2, xmem.batch_done)
 	} else {
-		xmem.batch = newXmemBatch(1, -1)
 		xmem.buf = newReqBuffer(xmem.config.maxCount*2, nil)
 	}
 
 	logger_xmem.Info("Here")
-	
+
 	xmem.receiver_finch = make(chan bool)
 	xmem.checker_finch = make(chan bool)
 
@@ -564,7 +645,7 @@ func (xmem *XmemNozzle) initialize(settings map[string]interface{}) error {
 	}
 
 	logger_xmem.Info("Initialization is done")
-	
+
 	return err
 }
 
@@ -582,13 +663,16 @@ func (xmem *XmemNozzle) receiveResponse(client *mcc.Client, finch chan bool, wai
 				if err != io.EOF {
 					pos := int(response.Opaque)
 					if err != nil && isRealError(response.Status) {
-						xmem.buf.modSlot(pos, xmem.resend)
+						logger_xmem.Infof("pos=%d, Received error = %v in response, err = %v, response=%v\n", pos, response.Status.String(), err, response.Bytes())
+						_, err = xmem.buf.modSlot(pos, xmem.resend)
 					} else {
 						//raiseEvent
 						req, _ := xmem.buf.slot(pos)
 						xmem.RaiseEvent(common.DataSent, req, xmem, nil, nil)
 						//empty the slot in the buffer
-						xmem.buf.evictSlot(pos)
+						if xmem.buf.evictSlot(pos) != nil {
+							logger_xmem.Errorf("Failed to evict slot %d\n", pos)
+						}
 						logger_xmem.Infof("data on slot=%d is received", pos)
 					}
 				}
@@ -654,9 +738,15 @@ func (xmem *XmemNozzle) resend(req *bufferedMCRequest, pos int) bool {
 
 func (xmem *XmemNozzle) adjustRequest(mc_req *mc.MCRequest, index int) {
 	mc_req.Opcode = xmem.encodeOpCode(mc_req.Opcode)
+	logger_xmem.Infof("-------mc_req.OpCode=%v\n", xmem.encodeOpCode(mc_req.Opcode))
 	mc_req.Cas = 0
 	mc_req.Opaque = uint32(index)
-	mc_req.Extras = []byte{0, 0, 0, 0, 0, 0, 0, 0}
+	mc_req.Extras = []byte{0, 0, 0, 0,
+		0, 0, 0, 0,
+		0, 0, 0, 0,
+		0, 0, 0, 0,
+		0, 0, 0, 0,
+		0, 0, 0, 0}
 	binary.BigEndian.PutUint64(mc_req.Extras, uint64(0)<<32|uint64(0))
 
 }
