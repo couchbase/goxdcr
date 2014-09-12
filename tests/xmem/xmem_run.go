@@ -67,13 +67,8 @@ func usage() {
 }
 
 func setup() (err error) {
-	//start http server for pprof
-	go func() {
-		log.Println(http.ListenAndServe("localhost:6565", nil))
-	}()
 
 	log.Println("Start Testing Xmem...")
-	argParse()
 	log.Printf("target_clusterAddr=%s, username=%s, password=%s\n", options.target_clusterAddr, options.username, options.password)
 	log.Println("Done with parsing the arguments")
 
@@ -98,7 +93,7 @@ func setup() (err error) {
 	return
 }
 
-func verify() {
+func verify(data_count int) bool{
 	//	if target_bk != nil {
 	//		cmd := exec.Command("curl", "-i", "-X GET", "http://Administrator:welcome@127.0.0.1:9000/pools/default/buckets/target")
 	//		output, err := cmd.Output()
@@ -119,26 +114,51 @@ func verify() {
 		panic (err)
 	}
 	log.Printf("name=%s itemCount=%d\n", output.Name, output.Stat.ItemCount)
-
+	
+	return output.Stat.ItemCount == data_count
 }
 func main() {
+	//start http server for pprof
+	go func() {
+		log.Println("Try to start pprof...")
+		err := http.ListenAndServe("localhost:7000", nil) 
+		if err != nil {
+			panic (err)
+		}else {
+			log.Println("Http server for pprof is started")
+		}
+	}()
+	argParse()
+	
+	test (10, 100, parts.Batch_XMEM)
+	test (5, 50, parts.Batch_XMEM)
+	
+}
+
+func test (batch_count int, data_count int, xmem_mode parts.XMEM_MODE) {
+	log.Printf ("------------START testing Xmem-------------------\n")
+	log.Printf ("batch_count=%d, data_count=%d, xmem_mode=%d\n", batch_count, data_count, xmem_mode)
 	err := setup()
 
 	if err != nil {
 		panic (err)
 	}
-	startXmem()
+	startXmem(batch_count, xmem_mode)
 	fmt.Println("XMEM is started")
 	waitGrp := &sync.WaitGroup{}
 	waitGrp.Add(1)
-	go startUpr(options.source_clusterAddr, options.source_bucket, waitGrp)
+	go startUpr(options.source_clusterAddr, options.source_bucket, waitGrp, data_count)
 	waitGrp.Wait()
 
-	time.Sleep (5*time.Second)
-	verify()
+	time.Sleep (10*time.Second)
+	bSuccess := verify(data_count)
+	if bSuccess {
+		log.Println("----------TEST SUCCEED------------")
+	}else {
+		log.Println("----------TEST FAILED-------------")
+	}
 }
-
-func startUpr(cluster, bucketn string, waitGrp *sync.WaitGroup) {
+func startUpr(cluster, bucketn string, waitGrp *sync.WaitGroup, data_count int) {
 	b, err := common.ConnectBucket(cluster, "default", bucketn)
 	mf(err, "bucket")
 
@@ -165,7 +185,6 @@ func startUpr(cluster, bucketn string, waitGrp *sync.WaitGroup) {
 		}
 
 		//transfer UprEvent to MCRequest
-		fmt.Println("OpCode =%v\n", e.Opcode)
 		switch e.Opcode {
 		case mcc.UprMutation, mcc.UprDeletion, mcc.UprExpiration:
 			mcReq := composeMCRequest(e)
@@ -174,7 +193,7 @@ func startUpr(cluster, bucketn string, waitGrp *sync.WaitGroup) {
 
 			xmem.Receive(mcReq)
 		}
-		if count > 100 {
+		if count >= data_count {
 			goto Done
 		}
 
@@ -194,7 +213,7 @@ func getVBucket(source_vbId uint16) uint16 {
 func composeMCRequest(event *mcc.UprEvent) *mc.MCRequest {
 	req := &mc.MCRequest{Cas: event.Cas,
 		Opaque:  0,
-		VBucket: getVBucket(event.VBucket),
+		VBucket: event.VBucket,
 		Key:     event.Key,
 		Body:    event.Value,
 		Extras:  make([]byte, 224)}
@@ -292,7 +311,7 @@ func getConnectStr(clusterAddr string, poolName string, bucketName string, usern
 	return "", err
 }
 
-func startXmem() {
+func startXmem(batch_count int, xmem_mode parts.XMEM_MODE) {
 	target_connectStr, err := getConnectStr(options.target_clusterAddr, "default", options.target_bucket, options.username, options.password)
 	if err != nil || target_connectStr == "" {
 		panic(err)
@@ -300,13 +319,13 @@ func startXmem() {
 	fmt.Printf("target_connectStr=%s\n", target_connectStr)
 
 	xmem = parts.NewXmemNozzle("xmem")
-	var configs map[string]interface{} = map[string]interface{}{parts.XMEM_SETTING_BATCHCOUNT: 1,
+	var configs map[string]interface{} = map[string]interface{}{parts.XMEM_SETTING_BATCHCOUNT: batch_count,
 		parts.XMEM_SETTING_TIMEOUT:    time.Millisecond * 10,
 		parts.XMEM_SETTING_NUMOFRETRY: 3,
-		parts.XMEM_SETTING_MODE:       parts.Batch_XMEM,
+		parts.XMEM_SETTING_MODE:       xmem_mode,
 		parts.XMEM_SETTING_CONNECTSTR: target_connectStr,
 		parts.XMEM_SETTING_BUCKETNAME: options.target_bucket,
-		parts.XMEM_SETTING_USERNAME:   options.target_bucket,
+
 		parts.XMEM_SETTING_PASSWORD:   options.password}
 
 	xmem.Start(configs)
