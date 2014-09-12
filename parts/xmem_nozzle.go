@@ -29,9 +29,6 @@ const (
 //configuration settings for XmemNozzle
 const (
 	//configuration param names
-	XMEM_SETTING_CONNECTSTR = "connectStr"
-	XMEM_SETTING_BUCKETNAME = "bucketName"
-	XMEM_SETTING_PASSWORD   = "password"
 	XMEM_SETTING_VBID       = "vbid"
 	XMEM_SETTING_BATCHCOUNT = "batchCount"
 	XMEM_SETTING_BATCHSIZE  = "batchSize"
@@ -57,10 +54,7 @@ var xmem_setting_defs base.SettingDefinitions = base.SettingDefinitions{XMEM_SET
 	XMEM_SETTING_BATCHSIZE:  base.NewSettingDef(reflect.TypeOf((*int)(nil)), false),
 	XMEM_SETTING_MODE:       base.NewSettingDef(reflect.TypeOf((*XMEM_MODE)(nil)), false),
 	XMEM_SETTING_NUMOFRETRY: base.NewSettingDef(reflect.TypeOf((*int)(nil)), false),
-	XMEM_SETTING_TIMEOUT:    base.NewSettingDef(reflect.TypeOf((*time.Duration)(nil)), false),
-	XMEM_SETTING_CONNECTSTR: base.NewSettingDef(reflect.TypeOf((*string)(nil)), true),
-	XMEM_SETTING_BUCKETNAME: base.NewSettingDef(reflect.TypeOf((*string)(nil)), true),
-	XMEM_SETTING_PASSWORD:   base.NewSettingDef(reflect.TypeOf((*string)(nil)), true)}
+	XMEM_SETTING_TIMEOUT:    base.NewSettingDef(reflect.TypeOf((*time.Duration)(nil)), false)}
 
 var logger_xmem *log.CommonLogger = log.NewLogger("XmemNozzle", log.LogLevelDebug)
 
@@ -359,15 +353,6 @@ func (config *xmemConfig) initializeConfig(settings map[string]interface{}) erro
 	if val, ok := settings[XMEM_SETTING_MODE]; ok {
 		config.mode = val.(XMEM_MODE)
 	}
-	if val, ok := settings[XMEM_SETTING_CONNECTSTR]; ok {
-		config.connectStr = val.(string)
-	}
-	if val, ok := settings[XMEM_SETTING_BUCKETNAME]; ok {
-		config.bucketName = val.(string)
-	}
-	if val, ok := settings[XMEM_SETTING_PASSWORD]; ok {
-		config.password = val.(string)
-	}
 	return err
 }
 
@@ -414,13 +399,6 @@ func (b *xmemBatch) size() int {
 
 }
 
-//func (b *xmemBatch) reinit() {
-//	b.lock.Lock()
-//	defer b.lock.Unlock()
-//	b.curSize = 0
-//	b.curCount = 0
-//}
-
 /************************************
 /* struct XmemNozzle
 *************************************/
@@ -461,7 +439,7 @@ type XmemNozzle struct {
 	batch_done     chan bool
 }
 
-func NewXmemNozzle(id string) *XmemNozzle {
+func NewXmemNozzle(id string, connectString string, bucketName string, password string) *XmemNozzle {
 	var msg_callback_func gen_server.Msg_Callback_Func
 	var behavior_callback_func gen_server.Behavior_Callback_Func
 	var exit_callback_func gen_server.Exit_Callback_Func
@@ -487,6 +465,11 @@ func NewXmemNozzle(id string) *XmemNozzle {
 		make(chan bool),    /*receiver_finch chan bool*/
 		make(chan bool),    /*checker_finch chan bool*/
 		make(chan bool, 1) /*batch_done chan bool*/}
+		
+	xmem.config.connectStr = connectString
+	xmem.config.bucketName = bucketName
+	xmem.config.password = password
+	
 	msg_callback_func = nil
 	behavior_callback_func = xmem.processData
 	exit_callback_func = xmem.onExit
@@ -539,7 +522,7 @@ func (xmem *XmemNozzle) getReadyToShutdown() {
 			logger_xmem.Debug("Ready to stop")
 			return
 		} else if len(xmem.dataChan) == 0 && xmem.batch.count() > 0 {
-			xmem.batchReady(false)
+			xmem.batchReady()
 			close(xmem.batches_ready)
 		} else {
 			logger_xmem.Debugf("%d in data channel, %d batches ready\n", len(xmem.dataChan), len(xmem.batches_ready))
@@ -573,7 +556,7 @@ func (xmem *XmemNozzle) IsOpen() bool {
 	return ret
 }
 
-func (xmem *XmemNozzle) batchReady(bLastBatch bool) {
+func (xmem *XmemNozzle) batchReady() {
 	//move the batch to ready batches channel
 	if xmem.batch.count() > 0 {
 		logger_xmem.Infof("move the batch (count=%d) ready queue\n", xmem.batch.count())
@@ -592,13 +575,13 @@ func (xmem *XmemNozzle) Receive(data interface{}) error {
 
 	//accumulate the batchCount and batchSize
 	if xmem.batch.accumuBatch(data.(*mc.MCRequest).Size()) {
-		xmem.batchReady(true)
+		xmem.batchReady()
 	} else {
 		//not enough for a batch, but the xmem.sendNowCh is signaled
 		select {
 		case <-xmem.sendNowCh:
 			logger_xmem.Debug("Need to send now")
-			xmem.batchReady(true)
+			xmem.batchReady()
 		default:
 		}
 	}
