@@ -68,7 +68,7 @@ func startKVFeed(cluster, kvaddr, bucketn string) {
 	b, err := common.ConnectBucket(cluster, "default", bucketn)
 	mf(err, "bucket")
 	
-	kvfeed, err := sp.NewKVFeed(kvaddr, "test", "", b)
+	kvfeed, err := sp.NewKVFeed(kvaddr, "test", "", b, nil)
 	kvfeed.SetConnector(NewTestConnector())
 	kvfeed.Start(sp.ConstructStartSettingsForKVFeed(constructTimestamp(bucketn)))
 	fmt.Println("KVFeed is started")

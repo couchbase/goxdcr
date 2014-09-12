@@ -7,6 +7,9 @@ import (
 	"github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/parts"
 	factory "github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/factory"
 	sp "github.com/ysui6888/indexing/secondary/projector"
+	"github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/base"
+	"github.com/ysui6888/indexing/secondary/common"
+	"github.com/couchbaselabs/go-couchbase"
 	"os"
 	"errors"
 )
@@ -24,8 +27,8 @@ var options struct {
 
 const (
 	TEST_TOPIC = "test"
-	NUM_CONN_KV = 2
-	NUM_OUT_CONN = 3
+	NUM_SOURCE_CONN = 2
+	NUM_TARGET_CONN = 3
 )
 
 
@@ -37,9 +40,9 @@ func argParse() {
 		"maximum number of vbuckets")
 	flag.StringVar(&options.targetBucket, "target_bucket", "target",
 		"bucket to replicate to")
-	flag.IntVar(&options.numConnPerKV, "numConnPerKV", NUM_CONN_KV,
+	flag.IntVar(&options.numConnPerKV, "numConnPerKV", NUM_SOURCE_CONN,
 		"number of connections per kv node")
-	flag.IntVar(&options.numOutgoingConn, "numOutgoingConn", NUM_OUT_CONN,
+	flag.IntVar(&options.numOutgoingConn, "numOutgoingConn", NUM_TARGET_CONN,
 		"number of outgoing connections to target")
 
 	flag.Parse()
@@ -70,6 +73,10 @@ func main() {
 }
 
 func invokeFactory() error {
+	var get_xdcr_config_callback factory.Get_XDCR_Config_Callback_Func = getXDCRConfig
+	var get_source_kv_topology_callback factory.Get_Source_KV_Topology_Callback_Func = getSourceTopology
+	var get_target_topology_callback factory.Get_Target_Topology_Callback_Func = getTargetTopology
+	factory.SetCallBackFuncs(&get_xdcr_config_callback, &get_source_kv_topology_callback, &get_target_topology_callback);
 	pl, err := factory.NewPipeline(TEST_TOPIC)
 	if err != nil {
 		return err
@@ -78,11 +85,11 @@ func invokeFactory() error {
 	sources := pl.Sources()
 	targets := pl.Targets()
 	
-	if len(sources) != NUM_CONN_KV {
-		return errors.New(fmt.Sprintf("incorrect source nozzles. expected %v; actual %v", NUM_CONN_KV, len(sources)));
+	if len(sources) != NUM_SOURCE_CONN {
+		return errors.New(fmt.Sprintf("incorrect source nozzles. expected %v; actual %v", NUM_SOURCE_CONN, len(sources)));
 	}
-	if len(targets) != NUM_OUT_CONN {
-		return errors.New(fmt.Sprintf("incorrect target nozzles. expected %v; actual %v", NUM_OUT_CONN, len(targets)));
+	if len(targets) != NUM_TARGET_CONN {
+		return errors.New(fmt.Sprintf("incorrect target nozzles. expected %v; actual %v", NUM_TARGET_CONN, len(targets)));
 	}
 	for sourceId, source := range sources {
 		_, ok := source.(*sp.KVFeed)
@@ -100,8 +107,8 @@ func invokeFactory() error {
 			return errors.New(fmt.Sprintf("incorrect connector type in source nozzle %v.", sourceId));
 		}
 		downStreamParts := source.Connector().DownStreams()
-		if len(downStreamParts) != NUM_OUT_CONN {
-			return errors.New(fmt.Sprintf("incorrect number of downstream parts for source nozzle %v. expected %v; actual %v", sourceId, NUM_OUT_CONN, len(downStreamParts)));
+		if len(downStreamParts) != NUM_TARGET_CONN {
+			return errors.New(fmt.Sprintf("incorrect number of downstream parts for source nozzle %v. expected %v; actual %v", sourceId, NUM_TARGET_CONN, len(downStreamParts)));
 		}
 		for partId := range downStreamParts {
 			if _, ok := targets[partId]; !ok {
@@ -121,5 +128,48 @@ func invokeFactory() error {
 	}
 	
 	return nil
+}
+
+// implementation of call back funcs required by xdcrFactory
+func getXDCRConfig(topic string) (*base.XDCRConfig, error) {
+	return &base.XDCRConfig {
+	SourceCluster: options.connectStr,
+	SourceBucketn: "default",
+	NumSourceConn: NUM_SOURCE_CONN,
+	TargetCluster: options.connectStr, 
+	TargetBucketn: "default",
+	NumTargetConn: NUM_TARGET_CONN,
+	}, nil
+}
+
+func getSourceTopology(sourceCluster, sourceBucketn string) (string, *couchbase.Bucket, []uint16, error) {
+	fmt.Printf("Getting source topo. sourceCluster=%v; sourceBucket=%v\n", sourceCluster, sourceBucketn)
+	bucket, err := common.ConnectBucket(sourceCluster, "default", sourceBucketn)
+	if err != nil {
+		return "", nil, nil, err
+	}
+	
+	// in test env, there should be only one kv in bucket server list
+	kvaddr := bucket.VBServerMap().ServerList[0]
+	
+	m, err := bucket.GetVBmap([]string{kvaddr})
+	if err != nil {
+		return "", nil, nil, err
+	}
+	
+	vbList := m[kvaddr]
+	
+	fmt.Printf("Returning target topo. kvaddr=%v; vbList=%v\n", kvaddr, vbList)
+	
+	return kvaddr, bucket, vbList, nil
+}
+
+func getTargetTopology(targetCluster, targetBucketn string) (map[string][]uint16, error) {
+	bucket, err := common.ConnectBucket(targetCluster, "default", targetBucketn)
+	if err != nil {
+		return nil, err
+	}
+	
+	return bucket.GetVBmap(bucket.VBServerMap().ServerList)
 }
 
