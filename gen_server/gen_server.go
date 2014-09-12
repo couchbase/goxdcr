@@ -41,7 +41,7 @@ type GenServer struct {
 func NewGenServer(msg_callback *Msg_Callback_Func,
 	behavior_callback *Behavior_Callback_Func,
 	exit_callback *Exit_Callback_Func) GenServer {
-	return GenServer{make(chan []interface{}), make(chan []interface{}), msg_callback, behavior_callback, exit_callback, false, sync.RWMutex{}}
+	return GenServer{make(chan []interface{}, 1), make(chan []interface{}), msg_callback, behavior_callback, exit_callback, false, sync.RWMutex{}}
 }
 
 func (s *GenServer) Start_server() (err error) {

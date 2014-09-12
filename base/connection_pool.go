@@ -249,6 +249,7 @@ func newConn(hostName string, username string, password string) (conn *mcc.Clien
 		logger_pool.Info("Authenticate...")
 		_, err = conn.Auth(username, password)
 		if err != nil {
+			logger_pool.Infof("err=%v\n", err)
 			conn.Close()
 			return nil, err
 		}
