@@ -3,9 +3,13 @@
 package replicationmanager
 
 import (
+	"strings"
+	"strconv"
+	ap "github.com/couchbase/indexing/secondary/adminport"
 	"github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/protobuf"
 	"github.com/ysui6888/indexing/secondary/common"
 	base "github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/base"
+	utils "github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/utils"
 	couchbase "github.com/couchbaselabs/go-couchbase"
 )
 
@@ -45,7 +49,25 @@ func (rm *ReplicationManager) forwardReplicationRequest(request *protobuf.Replic
 }
 
 func (rm *ReplicationManager) forwardReplicationRequestToKV(request *protobuf.ReplicationRequest, kvaddr string) error {
-	return nil
+	kvName := getKVNameFromKVAddr(kvaddr)
+	baseURL, err := couchbase.ParseURL("http://" + kvName + ":" + strconv.Itoa(base.AdminportNumber))
+	if err != nil {
+		return err
+	}
+	path := request.String()
+	
+	var output ap.MessageMarshaller
+	err = utils.QueryRestAPI(baseURL, path, "", "", "POST", output)
+	return err
+}
+
+// extract kv node name from kvaddr, which is in the form of kvName:port
+func getKVNameFromKVAddr(kvaddr string) string {
+	kvName := kvaddr
+	if index := strings.Index(kvaddr, ":"); index >= 0 {
+		kvName = kvaddr[0:index]
+	}
+	return kvName
 }
 
 // implementation of call back funcs required by xdcrFactory
