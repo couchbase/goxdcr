@@ -10,6 +10,24 @@ cd ..
 echo "Done"
 }
 
+build_protobuf(){
+echo "Building protobuf..."
+cd protobuf
+go clean
+go install
+cd ..
+echo "Done"
+}
+
+build_replicationmanager(){
+echo "Building replicationmanager..."
+cd replicationmanager
+go clean
+go install
+cd ..
+echo "Done"
+}
+
 build_factory(){
 echo "Building factory..."
 cd factory
@@ -73,6 +91,22 @@ cd ..
 echo "Done"
 }
 
+clean_protobuf(){
+echo "Clean protobuf..."
+cd protobuf
+go clean
+cd ..
+echo "Done"
+}
+
+clean_replicationmanager(){
+echo "Clean replicationmanager..."
+cd replicationmanager
+go clean
+cd ..
+echo "Done"
+}
+
 clean_factory(){
 echo "Clean factory..."
 cd factory
@@ -117,6 +151,8 @@ echo "Done"
 if [ -z "$1" ]
 then
 build_base
+build_protobuf
+build_replicationmanager
 build_factory
 build_gen_server
 build_parts
@@ -128,6 +164,12 @@ build_base
 elif [ $1 == "factory" ]
 then
 build_factory
+elif [ $1 == "protobuf" ]
+then
+build_protobuf
+elif [ $1 == "replicationmanager" ]
+then
+build_replicationmanager
 elif [ $1 == "gen_server" ]
 then
 build_gen_server
@@ -144,6 +186,8 @@ elif [ $1 == "clean" ]
 then
 echo "Cleaning..."
 clean_base
+clean_protobuf
+clean_replicationmanager
 clean_factory:
 clean_gen_server
 clean_parts

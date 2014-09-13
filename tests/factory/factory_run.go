@@ -143,7 +143,6 @@ func getXDCRConfig(topic string) (*base.XDCRConfig, error) {
 }
 
 func getSourceTopology(sourceCluster, sourceBucketn string) (string, *couchbase.Bucket, []uint16, error) {
-	fmt.Printf("Getting source topo. sourceCluster=%v; sourceBucket=%v\n", sourceCluster, sourceBucketn)
 	bucket, err := common.ConnectBucket(sourceCluster, "default", sourceBucketn)
 	if err != nil {
 		return "", nil, nil, err
@@ -158,8 +157,6 @@ func getSourceTopology(sourceCluster, sourceBucketn string) (string, *couchbase.
 	}
 	
 	vbList := m[kvaddr]
-	
-	fmt.Printf("Returning target topo. kvaddr=%v; vbList=%v\n", kvaddr, vbList)
 	
 	return kvaddr, bucket, vbList, nil
 }

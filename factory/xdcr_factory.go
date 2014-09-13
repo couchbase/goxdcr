@@ -16,7 +16,6 @@ import (
 )
 
 const (
-	POOL_NAME = "default"
 	PART_NAME_DELIMITER = "_"
 	KVFEED_NAME_PREFIX = "kvfeed"
 	XMEM_NOZZLE_NAME_PREFIX = "xmem"

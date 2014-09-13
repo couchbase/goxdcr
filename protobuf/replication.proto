@@ -1,0 +1,30 @@
+// replication request supported by replication manager's adminport.
+
+package protobuf;
+
+// Request to start/stop/restart a XDCR replication
+message ReplicationRequest {
+ 	required string    sourceCluster     = 1; // source cluster address
+ 	required string    sourceBucket      = 2; // source bucket name
+ 	optional uint32    numSourceConn     = 3; // number of connections per source kv node
+ 	required string    targetCluster     = 4; // target cluster address
+ 	required string    targetBucket      = 5; // target bucket name
+ 	optional uint32    numTargetConn     = 6; // number of connections per target kv node
+    required uint32    opCode            = 7; // Operation code: start/stop/restart 
+    required bool      forward           = 8; // flag indicating whether the request should be forwarded to other nodes
+}
+
+// response to replication request
+message ReplicationResponse {
+ 	required string    sourceCluster     = 1; // source cluster address
+ 	required string    sourceBucket      = 2; // source bucket name
+ 	required string    targetCluster     = 3; // target cluster address
+ 	required string    targetBucket      = 4; // target bucket name
+ 	required uint32    opCode            = 5; // Operation code: start/stop/restart 
+    optional Error     err   			 = 6; // return error code
+}
+
+message Error {
+    required string error = 1; // Empty string means success
+}
+
