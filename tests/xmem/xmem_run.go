@@ -94,11 +94,6 @@ func setup() (err error) {
 }
 
 func verify(data_count int) bool{
-	//	if target_bk != nil {
-	//		cmd := exec.Command("curl", "-i", "-X GET", "http://Administrator:welcome@127.0.0.1:9000/pools/default/buckets/target")
-	//		output, err := cmd.Output()
-	//
-	//	}
 	output := &utils.CouchBucket{}
 	baseURL, err := couchbase.ParseURL("http://" + options.target_clusterAddr)
 
@@ -144,7 +139,7 @@ func test (batch_count int, data_count int, xmem_mode parts.XMEM_MODE) {
 		panic (err)
 	}
 	startXmem(batch_count, xmem_mode)
-	fmt.Println("XMEM is started")
+	log.Println("XMEM is started")
 	waitGrp := &sync.WaitGroup{}
 	waitGrp.Add(1)
 	go startUpr(options.source_clusterAddr, options.source_bucket, waitGrp, data_count)
@@ -166,7 +161,7 @@ func startUpr(cluster, bucketn string, waitGrp *sync.WaitGroup, data_count int) 
 	mf(err, "- upr")
 
 	flogs := failoverLogs(b)
-	fmt.Print("Got failover log successfully")
+	log.Println("Got failover log successfully")
 
 	// list of vbuckets
 	vbnos := make([]uint16, 0, options.maxVbno)
@@ -175,13 +170,13 @@ func startUpr(cluster, bucketn string, waitGrp *sync.WaitGroup, data_count int) 
 	}
 
 	startStream(uprFeed, flogs)
-	fmt.Print("Upr stream is started")
+	log.Println("Upr stream is started")
 
 	count := 0
 	for {
 		e, ok := <-uprFeed.C
 		if ok == false {
-			fmt.Println("Closing for bucket", b.Name)
+			log.Printf("Closing for bucket %v\n", b.Name)
 		}
 
 		//transfer UprEvent to MCRequest
@@ -189,7 +184,7 @@ func startUpr(cluster, bucketn string, waitGrp *sync.WaitGroup, data_count int) 
 		case mcc.UprMutation, mcc.UprDeletion, mcc.UprExpiration:
 			mcReq := composeMCRequest(e)
 			count++
-			fmt.Printf("Number of upr event received so far is %d\n", count)
+			log.Printf("Number of upr event received so far is %d\n", count)
 
 			xmem.Receive(mcReq)
 		}
@@ -200,7 +195,7 @@ func startUpr(cluster, bucketn string, waitGrp *sync.WaitGroup, data_count int) 
 	}
 Done:
 	//close the upr stream
-	fmt.Println("Done.........")
+	log.Println("Done.........")
 	uprFeed.Close()
 	xmem.Stop()
 	waitGrp.Done()
@@ -218,9 +213,6 @@ func composeMCRequest(event *mcc.UprEvent) *mc.MCRequest {
 		Body:    event.Value,
 		Extras:  make([]byte, 224)}
 
-	keystr := string(req.Key)
-	keystr = keystr + "_target"
-	req.Key = []byte(keystr)
 	//opCode
 	switch event.Opcode {
 	case mcc.UprStreamRequest:
@@ -246,7 +238,7 @@ func composeMCRequest(event *mcc.UprEvent) *mc.MCRequest {
 		binary.BigEndian.PutUint32(req.Extras, event.Flags)
 		binary.BigEndian.PutUint32(req.Extras, event.Expiry)
 	} else if event.Opcode == mcc.UprSnapshot {
-		fmt.Printf("event.Seqno=%v\n", event.Seqno)
+		log.Printf("event.Seqno=%v\n", event.Seqno)
 		binary.BigEndian.PutUint64(req.Extras, event.Seqno)
 		binary.BigEndian.PutUint64(req.Extras, event.SnapstartSeq)
 		binary.BigEndian.PutUint64(req.Extras, event.SnapendSeq)
@@ -300,7 +292,7 @@ func getConnectStr(clusterAddr string, poolName string, bucketName string, usern
 
 		if addrs != nil && len(addrs) > 0 {
 			for _, add := range addrs {
-				fmt.Printf("node_address=%v\n", add)
+				log.Printf("node_address=%v\n", add)
 			}
 			return addrs[0], nil
 
@@ -316,17 +308,13 @@ func startXmem(batch_count int, xmem_mode parts.XMEM_MODE) {
 	if err != nil || target_connectStr == "" {
 		panic(err)
 	}
-	fmt.Printf("target_connectStr=%s\n", target_connectStr)
+	log.Printf("target_connectStr=%s\n", target_connectStr)
 
-	xmem = parts.NewXmemNozzle("xmem")
+	xmem = parts.NewXmemNozzle("xmem", target_connectStr, options.target_bucket, options.password)
 	var configs map[string]interface{} = map[string]interface{}{parts.XMEM_SETTING_BATCHCOUNT: batch_count,
 		parts.XMEM_SETTING_TIMEOUT:    time.Millisecond * 10,
 		parts.XMEM_SETTING_NUMOFRETRY: 3,
-		parts.XMEM_SETTING_MODE:       xmem_mode,
-		parts.XMEM_SETTING_CONNECTSTR: target_connectStr,
-		parts.XMEM_SETTING_BUCKETNAME: options.target_bucket,
-
-		parts.XMEM_SETTING_PASSWORD:   options.password}
+		parts.XMEM_SETTING_MODE:       xmem_mode}
 
 	xmem.Start(configs)
 }

@@ -28,8 +28,8 @@ type Get_XDCR_Config_Callback_Func func(topic string) (*base.XDCRConfig, error)
 // 2. Bucket, which will be used by kvfeed
 // 3. a list of vbuckets owned by the source kv, which will be used for load balancing 
 type Get_Source_KV_Topology_Callback_Func func(sourceCluster, sourceBucketn string) (string, *couchbase.Bucket, []uint16, error)
-// call back function for getting target topology, i.e., a map of kvaddr -> vbucket list
-type Get_Target_Topology_Callback_Func func(targetCluster, targetBucketn string) (map[string][]uint16, error)
+// call back function for getting target topology and bucket password if it is set, i.e., a map of kvaddr -> vbucket list
+type Get_Target_Topology_Callback_Func func(targetCluster, targetBucketn string) (map[string][]uint16, string, error)
 
 // Factory for XDCR pipelines
 type xdcrFactory struct {
@@ -154,7 +154,7 @@ func (xdcrf *xdcrFactory) constructOutgoingNozzles(config *base.XDCRConfig) (map
 	outNozzles := make(map[string]common.Nozzle)
 	vbNozzleMap := make(map[uint16]string)
 	
-	kvVBMap, err := (*xdcr_factory.get_target_topology_callback)(config.TargetCluster, config.TargetBucketn)
+	kvVBMap, bucketPwd, err := (*xdcr_factory.get_target_topology_callback)(config.TargetCluster, config.TargetBucketn)
 	logger_factory.Debugf("Target topology retrived. kvVBMap = %v\n", kvVBMap)
 	if err != nil {
 		return nil, nil, err
@@ -172,7 +172,7 @@ func (xdcrf *xdcrFactory) constructOutgoingNozzles(config *base.XDCRConfig) (map
 		
 			// construct xmem nozzle
 	    	// partIds of the xmem nozzles look like "xmem_$kvaddr_1"
-			outNozzle := parts.NewXmemNozzle(XMEM_NOZZLE_NAME_PREFIX + PART_NAME_DELIMITER + kvaddr + PART_NAME_DELIMITER + strconv.Itoa(i))
+			outNozzle := parts.NewXmemNozzle(XMEM_NOZZLE_NAME_PREFIX + PART_NAME_DELIMITER + kvaddr + PART_NAME_DELIMITER + strconv.Itoa(i), kvaddr, config.TargetBucketn, bucketPwd)
 			outNozzles[outNozzle.Id()] = outNozzle
 			
 			// TODO pass kvaddr and other info to xmem once setters are exposed

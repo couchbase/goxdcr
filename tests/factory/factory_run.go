@@ -161,12 +161,13 @@ func getSourceTopology(sourceCluster, sourceBucketn string) (string, *couchbase.
 	return kvaddr, bucket, vbList, nil
 }
 
-func getTargetTopology(targetCluster, targetBucketn string) (map[string][]uint16, error) {
+func getTargetTopology(targetCluster, targetBucketn string) (map[string][]uint16, string, error) {
 	bucket, err := common.ConnectBucket(targetCluster, "default", targetBucketn)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	
-	return bucket.GetVBmap(bucket.VBServerMap().ServerList)
+	vbmap, err := bucket.GetVBmap(bucket.VBServerMap().ServerList) 
+	return vbmap, bucket.Password, err
 }
 
