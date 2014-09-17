@@ -12,7 +12,6 @@ import (
 // list of requests handled by this adminport
 var reqReplication = &protobuf.ReplicationRequest{}
 
-// TODO replace ReplicationManager with ReplicationManager
 // admin-port entry point
 func mainAdminPort(laddr string, rm *ReplicationManager) {
 	var err error
@@ -62,13 +61,50 @@ func (rm *ReplicationManager) handleRequest(
 func (rm *ReplicationManager) doReplicationRequest(request *protobuf.ReplicationRequest) ap.MessageMarshaller {
 	c.Debugf("%v doReplicationRequest\n", rm.logPrefix)
 	
-	err := rm.requestReplication(request)
+	// TODO
+	err := rm.StartReplication(request)
 	
 	response := protobuf.NewReplicationResponse(request, err)
 	
 	// forward replication request to other KV nodes involved
-	// TODO how to process err returned from forward op?
 	rm.forwardReplicationRequest(request)
 
 	return response
+}
+
+func (rm *ReplicationManager) forwardReplicationRequest(request *protobuf.ReplicationRequest) error {
+	if !request.GetForward() {
+	    // do nothing if "forward" flag in request is false
+	    // this would happen if the request itself is a forwarded request
+		return nil;
+	}
+	
+	// turn off "forward" flag to prevent the forwarded request from being forwarded again
+	off := false
+	request.Forward = &off
+	
+	deployConfig, err := rm.GetXDCRDeployConfig()
+	if err != nil {
+		return err
+	}
+	
+	// TODO get current xdcr node addr
+	curXDCRAddr := "test"
+	
+	for xdcrAddr := range deployConfig.XDCRNodeMap {
+		if xdcrAddr != curXDCRAddr {
+			err := rm.forwardReplicationRequestToXDCRNode(request, xdcrAddr)
+			if err != nil {
+			// TODO what if forward fails. How do we cancel previously forwarded requests? 
+			}
+		}
+	}
+	
+	return nil
+}
+
+func (rm *ReplicationManager) forwardReplicationRequestToXDCRNode(request *protobuf.ReplicationRequest, xdcrAddr string) error {
+	var response ap.MessageMarshaller
+	client := ap.NewHTTPClient(xdcrAddr, "")
+	return client.Request(request, response)
 }
