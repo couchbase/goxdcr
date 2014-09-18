@@ -13,6 +13,8 @@ import (
 	"net/url"
 	"reflect"
 	"strings"
+	"bytes"
+	"bufio"
 )
 
 type BucketBasicStats struct {
@@ -115,4 +117,20 @@ func maybeAddAuth(req *http.Request, username string, password string) {
 		req.Header.Set("Authorization", "Basic "+
 			base64.StdEncoding.EncodeToString([]byte(username+":"+password)))
 	}
+}
+
+
+func EncodeRequestIntoByteArray(r *http.Request) ([]byte, error) {
+	buffer := new(bytes.Buffer)
+	err := r.Write(buffer)
+	if err == nil {	
+		return buffer.Bytes(), nil
+	} else {
+		return nil, err
+	}
+}
+
+func DecodeRequestFromByteArray(data []byte) (*http.Request, error) {
+	buffer := bytes.NewBuffer(data)
+	return http.ReadRequest(bufio.NewReader(buffer))
 }

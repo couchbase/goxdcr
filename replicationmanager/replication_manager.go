@@ -18,15 +18,7 @@ type ReplicationManager struct {
 	logPrefix string
 }
 
-func (rm *ReplicationManager) StartReplication(request *protobuf.ReplicationRequest) error {
-	return nil
-}
-
-func (rm *ReplicationManager) StopReplication(request *protobuf.ReplicationRequest) error {
-	return nil
-}
-
-func (rm *ReplicationManager) RestartReplication(request *protobuf.ReplicationRequest) error {
+func (rm *ReplicationManager) StartReplication(request *protobuf.CreateReplicationRequest) error {
 	return nil
 }
 

@@ -5,7 +5,6 @@ import (
 	"sync"
 	"math"
 	common "github.com/Xiaomei-Zhang/couchbase_goxdcr/common"
-	//connector "github.com/Xiaomei-Zhang/couchbase_goxdcr/connector"
 	pp "github.com/Xiaomei-Zhang/couchbase_goxdcr/pipeline"
 	pctx "github.com/Xiaomei-Zhang/couchbase_goxdcr/pipeline_ctx"
 	"github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/base"

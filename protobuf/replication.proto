@@ -1,30 +1,92 @@
-// replication request supported by replication manager's adminport.
+//requests and responses for XDCR rest APIs 
 
 package protobuf;
 
-// Request to start/stop/restart a XDCR replication
-message ReplicationRequest {
- 	required string    sourceCluster     = 1; // source cluster address
- 	required string    sourceBucket      = 2; // source bucket name
- 	optional uint32    numSourceConn     = 3; // number of connections per source kv node
- 	required string    targetCluster     = 4; // target cluster address
- 	required string    targetBucket      = 5; // target bucket name
- 	optional uint32    numTargetConn     = 6; // number of connections per target kv node
-    required uint32    opCode            = 7; // Operation code: start/stop/restart 
-    required bool      forward           = 8; // flag indicating whether the request should be forwarded to other nodes
+// TODO DeleteRemoteClusterResponse, DeleteReplicationResponse are empty messages.  Do we need them?
+
+message GetRemoteClustersRequest {
 }
 
-// response to replication request
-message ReplicationResponse {
- 	required string    sourceCluster     = 1; // source cluster address
- 	required string    sourceBucket      = 2; // source bucket name
- 	required string    targetCluster     = 3; // target cluster address
- 	required string    targetBucket      = 4; // target bucket name
- 	required uint32    opCode            = 5; // Operation code: start/stop/restart 
-    optional Error     err   			 = 6; // return error code
+message GetRemoteClustersResponse {
+	repeated RemoteClusterResponse remoteCluster = 1; // array of remote clusters
 }
 
-message Error {
-    required string error = 1; // Empty string means success
+message CreateRemoteClusterRequest {
+ 	required string    uuid     		 = 1; // uuid of the remote cluster
+ 	required string    refName     		 = 2; // name of the remote cluster reference
+ 	required string    hostname          = 3; // host name and port number of the remote cluster, e.g., 10.4.2.4:8091
+ 	required string    username          = 4; // user name for logging into the remote cluster
+ 	required string    password          = 5; // password for logging into the remote cluster
 }
+
+message RemoteClusterResponse {
+	required string    refName     		 = 1; // name of the remote cluster reference
+ 	required string    uri       		 = 2; // uri of the remote cluster reference
+ 	required string    validateURI       = 3; // uri to validate details of the remote cluster reference
+ 	required string    hostname          = 4; // host name and port number of the remote cluster, e.g., 10.4.2.4:8091
+ 	required string    username          = 5; // user name for logging into the remote cluster
+    required string    uuid     		 = 6; // uuid of the remote cluster 
+    required bool      deleted           = 7; // flag indicating whether the remote reference has been deleted 
+}
+
+message DeleteRemoteClusterRequest {
+ 	required string    refName     		 = 1; // name of the remote cluster reference
+}
+
+message CreateReplicationRequest {
+ 	required string    fromBucket        = 1; // name of source bucket
+ 	required string    toCluster         = 2; // name of the remote cluster reference
+ 	required string    toBucket          = 3; // name of target bucket
+ 	required string    replicationType   = 4; // replication type
+ 	optional bool      forward           = 5 [default = true]; // flag indicating whether the request should be forwarded to other XDCR nodes
+}
+
+message CreateReplicationResponse {
+ 	required string    id       		 = 1; // id of the created replication
+ 	required string    database          = 2; // name of the database
+}
+
+message DeleteReplicationRequest {
+ 	required string    id     		     = 1; // id of the replication to delete
+ 	optional bool      forward           = 2 [default = true]; // flag indicating whether the request should be forwarded to other XDCR nodes
+}
+
+message ViewSettingsRequest {
+}
+
+message ViewSettingsResponse {
+ 	required string    protocol       	 = 1; // version of XDCR protocol 
+ 	required uint32    xdcrMaxConcurrentReps  = 2; // maximum replications per bucket
+ 	required uint32    xdcrCheckpointInterval = 3; // checkpoint interval (in seconds)
+ 	required uint32    xdcrWorkerBatchSize    = 4; // number of documents in a batch
+ 	required uint32    xdcrDocBatchSizeKb     = 5; // size of a batch (in KB)
+ 	required uint32    xdcrFailureRestartInterval     = 6; // internal for restarting failed XDCR (in seconds)
+ 	required uint32    xdcrOptimisticReplicationThreshold = 7; // threshold size of compressed document (in bytes)
+ 	required uint32    workerProcesses   = 8; // number of worker processes for each vbucket replicator
+ 	required uint32    httpConnections   = 9; // number of maximum simultaneous HTTP connections  
+}
+
+message ChangeSettingsRequest {
+ 	optional string    id          	     = 1; // presence of replication id indicates that the request is for a specific replication; omission of replication id indicates that the request is for all replications in the source cluster  
+ 	optional uint32    xdcrMaxConcurrentReps  = 2; // maximum replications per bucket
+ 	optional uint32    xdcrCheckpointInterval = 3; // checkpoint interval (in seconds)
+ 	optional uint32    xdcrWorkerBatchSize    = 4; // number of documents in a batch
+ 	optional uint32    xdcrDocBatchSizeKb     = 5; // size of a batch (in KB)
+ 	optional uint32    xdcrFailureRestartInterval     = 6; // internal for restarting failed XDCR (in seconds)
+ 	optional uint32    xdcrOptimisticReplicationThreshold = 7; // threshold size of compressed document (in bytes)
+ 	optional uint32    workerProcesses   = 8; // number of worker processes for each vbucket replicator
+ 	optional uint32    httpConnections   = 9; // number of maximum simultaneous HTTP connections  
+}
+
+message GetStatisticsRequest {
+	required string    uuid              = 1; // uuid of the remote cluster 
+	required string    fromBucket        = 2; // name of source bucket
+	required string    toBucket          = 3; // name of target bucket
+	required string    statsName         = 4; // name of statistics, e.g., docs_written
+}
+
+/* TODO one response message for each statistics type?
+message GetStatisticsResponse {
+}*/
+
 
