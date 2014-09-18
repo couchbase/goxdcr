@@ -76,8 +76,8 @@ func invokeFactory() error {
 	var get_xdcr_config_callback factory.Get_XDCR_Config_Callback_Func = getXDCRConfig
 	var get_source_kv_topology_callback factory.Get_Source_KV_Topology_Callback_Func = getSourceTopology
 	var get_target_topology_callback factory.Get_Target_Topology_Callback_Func = getTargetTopology
-	factory.SetCallBackFuncs(&get_xdcr_config_callback, &get_source_kv_topology_callback, &get_target_topology_callback);
-	pl, err := factory.NewPipeline(TEST_TOPIC)
+	fac := factory.XDCRFactory(&get_xdcr_config_callback, &get_source_kv_topology_callback, &get_target_topology_callback);
+	pl, err := fac.NewPipeline(TEST_TOPIC)
 	if err != nil {
 		return err
 	}

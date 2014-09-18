@@ -7,6 +7,7 @@ import (
 	"fmt"
 	log "github.com/Xiaomei-Zhang/couchbase_goxdcr/util"
 	base "github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/base"
+	"github.com/couchbaselabs/go-couchbase"
 	"io"
 	"io/ioutil"
 	"net/http"
@@ -99,13 +100,13 @@ func QueryRestAPI(
 	}
 
 	if out != nil {
-		logger_utils.Infof ("rest response=%v\n", res.Body)
+		logger_utils.Infof("rest response=%v\n", res.Body)
 		d := json.NewDecoder(res.Body)
 		if err = d.Decode(&out); err != nil {
 			return err
 		}
 	} else {
-		logger_utils.Info ("out is nil")
+		logger_utils.Info("out is nil")
 	}
 	return nil
 }
@@ -115,4 +116,20 @@ func maybeAddAuth(req *http.Request, username string, password string) {
 		req.Header.Set("Authorization", "Basic "+
 			base64.StdEncoding.EncodeToString([]byte(username+":"+password)))
 	}
+}
+
+func Bucket(connectStr string, bucketName string) (*couchbase.Bucket, error) {
+	couch, err := couchbase.Connect("http://" + connectStr)
+	if err != nil {
+		return nil, err
+	}
+	pool, err := couch.GetPool("default")
+	if err != nil {
+		return nil, err
+	}
+	bucket, err := pool.GetBucket(bucketName)
+	if err != nil {
+		return nil, err
+	}
+	return bucket, err
 }

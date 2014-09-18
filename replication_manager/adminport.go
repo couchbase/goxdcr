@@ -1,6 +1,6 @@
 // replication manager's adminport.
 
-package replicationmanager
+package replication_manager
 
 import (
 	ap "github.com/couchbase/indexing/secondary/adminport"

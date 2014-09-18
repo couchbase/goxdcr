@@ -29,7 +29,6 @@ const (
 //configuration settings for XmemNozzle
 const (
 	//configuration param names
-	XMEM_SETTING_VBID       = "vbid"
 	XMEM_SETTING_BATCHCOUNT = "batchCount"
 	XMEM_SETTING_BATCHSIZE  = "batchSize"
 	XMEM_SETTING_MODE       = "mode"
@@ -56,7 +55,7 @@ var xmem_setting_defs base.SettingDefinitions = base.SettingDefinitions{XMEM_SET
 	XMEM_SETTING_NUMOFRETRY: base.NewSettingDef(reflect.TypeOf((*int)(nil)), false),
 	XMEM_SETTING_TIMEOUT:    base.NewSettingDef(reflect.TypeOf((*time.Duration)(nil)), false)}
 
-var logger_xmem *log.CommonLogger = log.NewLogger("XmemNozzle", log.LogLevelDebug)
+var logger_xmem *log.CommonLogger = log.NewLogger("XmemNozzle", log.LogLevelInfo)
 
 /************************************
 /* struct bufferedMCRequest
