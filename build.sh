@@ -19,9 +19,9 @@ cd ..
 echo "Done"
 }
 
-build_replicationmanager(){
-echo "Building replicationmanager..."
-cd replicationmanager
+build_replication_manager(){
+echo "Building replication_manager..."
+cd replication_manager
 go clean
 go install
 cd ..
@@ -31,6 +31,24 @@ echo "Done"
 build_factory(){
 echo "Building factory..."
 cd factory
+go clean
+go install
+cd ..
+echo "Done"
+}
+
+build_metadata(){
+echo "Building metadata..."
+cd metadata
+go clean
+go install
+cd ..
+echo "Done"
+}
+
+build_metadata_svc(){
+echo "Building metadata_svc..."
+cd metadata_svc
 go clean
 go install
 cd ..
@@ -99,9 +117,25 @@ cd ..
 echo "Done"
 }
 
-clean_replicationmanager(){
-echo "Clean replicationmanager..."
-cd replicationmanager
+clean_replication_manager(){
+echo "Clean replication_manager..."
+cd replication_manager
+go clean
+cd ..
+echo "Done"
+}
+
+clean_metadata(){
+echo "Clean metadata..."
+cd metadata
+go clean
+cd ..
+echo "Done"
+}
+
+clean_metadata_svc(){
+echo "Clean metadata_svc..."
+cd metadata_svc
 go clean
 cd ..
 echo "Done"
@@ -152,7 +186,9 @@ if [ -z "$1" ]
 then
 build_base
 build_protobuf
-build_replicationmanager
+build_replication_manager
+build_metadata_svc
+build_metadata
 build_factory
 build_gen_server
 build_parts
@@ -187,8 +223,10 @@ then
 echo "Cleaning..."
 clean_base
 clean_protobuf
-clean_replicationmanager
-clean_factory:
+clean_metadata
+clean_metadata_svc
+clean_replication_manager
+clean_factory
 clean_gen_server
 clean_parts
 clean_utils

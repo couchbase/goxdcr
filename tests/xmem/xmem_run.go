@@ -12,8 +12,6 @@ import (
 	"github.com/couchbase/indexing/secondary/common"
 	"github.com/couchbaselabs/go-couchbase"
 	"log"
-	//	"math"
-	//	"math/rand"
 	"net/http"
 	"os"
 	"sync"
