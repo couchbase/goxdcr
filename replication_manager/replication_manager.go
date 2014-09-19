@@ -92,7 +92,7 @@ func PauseReplication(topic string) error {
 
 	settings := spec.Settings()
 	settings.SetActive(false)
-	err = replication_mgr.metadata_svc.SetReplicationSpec(spec)
+	err = replication_mgr.metadata_svc.SetReplicationSpec(*spec)
 	logger_rm.Debugf("Replication specification %s is set to active=false\n", topic)
 	return err
 }
@@ -115,7 +115,7 @@ func ResumeReplication(topic string) error {
 	logger_rm.Debugf("Pipeline %s is started", topic)
 
 	settings.SetActive(true)
-	err = replication_mgr.metadata_svc.SetReplicationSpec(spec)
+	err = replication_mgr.metadata_svc.SetReplicationSpec(*spec)
 	if err == nil {
 		logger_rm.Debugf("Replication specification %s is updated with active=true\n", topic)
 	} else {

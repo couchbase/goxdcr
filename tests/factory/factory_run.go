@@ -77,6 +77,7 @@ func invokeFactory() error {
 	msvc := &mockMetadataSvc{}
 	mcisvc := &mockClusterInfoSvc{}
 	mxtsvc := &mockXDCRTopologySvc{}
+	
 	fac := factory.NewXDCRFactory(msvc,mcisvc,mxtsvc)
 	
 	pl, err := fac.NewPipeline(TEST_TOPIC)
@@ -135,8 +136,12 @@ func invokeFactory() error {
 type mockMetadataSvc struct {
 }
 
-func (mock_meta_svc *mockMetadataSvc) ReplicationSpec (replicationId string) (metadata.ReplicationSpecification, error) {
-	return *metadata.NewReplicationSpecification (options.connectStr,options.sourceBucket, options.connectStr, options.targetBucket, ""), nil
+func (mock_meta_svc *mockMetadataSvc) ReplicationSpec (replicationId string) (*metadata.ReplicationSpecification, error) {
+	spec := metadata.NewReplicationSpecification (options.connectStr,options.sourceBucket, options.connectStr, options.targetBucket, "")
+	settings := spec.Settings()
+	settings.SetTargetNozzlesPerNode(options.numOutgoingConn)
+	settings.SetSourceNozzlesPerNode(options.numConnPerKV)
+	return spec, nil
 }
 
 func (mock_meta_svc *mockMetadataSvc) AddReplicationSpec (spec metadata.ReplicationSpecification) error {
@@ -156,6 +161,7 @@ type mockClusterInfoSvc struct {
 func (mock_ci_svc *mockClusterInfoSvc) GetClusterConnectionStr (ClusterUUID string) (string, error) {
 	return options.connectStr, nil
 }
+
 func (mock_ci_svc *mockClusterInfoSvc) GetMyActiveVBuckets (ClusterUUID string, bucketName string, NodeId string) ([]uint16, error) {
 	sourceCluster, err := mock_ci_svc.GetClusterConnectionStr(ClusterUUID)
 	if err != nil {
@@ -197,6 +203,7 @@ func (mock_ci_svc *mockClusterInfoSvc) GetServerList (ClusterUUID string, bucket
 
 func (mock_ci_svc *mockClusterInfoSvc) GetServerVBucketsMap (ClusterUUID string, bucketName string) (map[string][]uint16, error) {
 	cluster, err := mock_ci_svc.GetClusterConnectionStr(ClusterUUID)
+	fmt.Printf("cluster=%s\n", cluster)
 	if err != nil {
 		return nil, err
 	}
@@ -204,8 +211,9 @@ func (mock_ci_svc *mockClusterInfoSvc) GetServerVBucketsMap (ClusterUUID string,
 	if err != nil {
 		return nil, err
 	}
-	
+	fmt.Printf("ServerList=%v\n", bucket.VBServerMap().ServerList)
 	serverVBMap, err := bucket.GetVBmap (bucket.VBServerMap().ServerList)
+	fmt.Printf("ServerVBMap=%v\n", serverVBMap)
 	return serverVBMap, err
 }
 
@@ -226,8 +234,9 @@ func (mock_top_svc *mockXDCRTopologySvc) MyAdminPort () (uint16, error) {
 }
 	
 func (mock_top_svc *mockXDCRTopologySvc) MyKVNodes () ([]string, error) {
-	nodes := make([]string, 20)
-	return nodes, nil
+	mock_ci_svc := &mockClusterInfoSvc{}
+	nodes, err := mock_ci_svc.GetServerList(options.connectStr, "default")
+	return nodes, err
 }
 	
 func (mock_top_svc *mockXDCRTopologySvc) XDCRTopology () (map[string]uint16, error) {

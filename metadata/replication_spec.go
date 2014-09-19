@@ -28,7 +28,8 @@ func NewReplicationSpecification (sourceClusterUUID string, sourceBucketName str
 	return &ReplicationSpecification {id : replicationId (sourceClusterUUID, sourceBucketName, targetClusterUUID, targetBucketName, filterName),
 	source : constructEndIdentifier (sourceClusterUUID, sourceBucketName),
 	target : constructEndIdentifier (targetClusterUUID, targetBucketName),
-	filter_name : filterName}
+	filter_name : filterName,
+	settings: DefaultSettings()}
 }
 
 func (rep_spec *ReplicationSpecification) Id() string {

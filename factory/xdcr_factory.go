@@ -14,8 +14,8 @@ import (
 	"github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/metadata_svc"
 	"github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/parts"
 	"github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/pipeline_svc"
+	xdcr_pipeline_svc "github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/pipeline_svc"
 	"github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/utils"
-	xdcr_pipeline_svc "github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/pipeline_svc"	
 	"github.com/couchbaselabs/go-couchbase"
 	sp "github.com/ysui6888/indexing/secondary/projector"
 	"reflect"
@@ -34,7 +34,7 @@ type XDCRFactory struct {
 	xdcr_topology_svc metadata_svc.XDCRCompTopologySvc
 }
 
-var logger_factory *log.CommonLogger = log.NewLogger("XDCRFactory", log.LogLevelInfo)
+var logger_factory *log.CommonLogger = log.NewLogger("XDCRFactory", log.LogLevelDebug)
 
 // set call back functions is done only once
 func NewXDCRFactory(metadata_svc metadata_svc.MetadataSvc, cluster_info_svc metadata_svc.ClusterInfoSvc, xdcr_topology_svc metadata_svc.XDCRCompTopologySvc) *XDCRFactory {
@@ -95,17 +95,20 @@ func (xdcrf *XDCRFactory) NewPipeline(topic string) (common.Pipeline, error) {
 
 // construct source nozzles for the requested/current kv node
 // question: should kvaddr be passed to factory, or can factory figure it out by itself through some GetCurrentNode API?
-func (xdcrf *XDCRFactory) constructSourceNozzles(spec metadata.ReplicationSpecification, topic string) (map[string]common.Nozzle, error) {
+func (xdcrf *XDCRFactory) constructSourceNozzles(spec *metadata.ReplicationSpecification, topic string) (map[string]common.Nozzle, error) {
 	sourceNozzles := make(map[string]common.Nozzle)
 
 	//	kvaddr, bucket, vbnos, err := (*xdcr_factory.get_source_kv_topology_callback)(config.SourceCluster, config.SourceBucketn)
 	kvaddrs, err := xdcrf.xdcr_topology_svc.MyKVNodes()
 	if err != nil {
+		logger_factory.Errorf("err=%v\n", err)
 		return nil, err
 	}
+	logger_factory.Debugf("kvaddrs=%v\n", kvaddrs)
 
 	bucketName, err := spec.SourceBucketName()
 	if err != nil {
+		logger_factory.Errorf("err=%v\n", err)
 		return nil, err
 	}
 
@@ -114,12 +117,14 @@ func (xdcrf *XDCRFactory) constructSourceNozzles(spec metadata.ReplicationSpecif
 	bucket, err := xdcrf.getBucket(sourceClusterUUID, bucketName)
 
 	if err != nil {
+		logger_factory.Errorf("err=%v\n", err)
 		return nil, err
 	}
 	maxNozzlesPerNode := spec.Settings().SourceNozzlesPerNode()
 
 	serverVBMap, err := xdcrf.cluster_info_svc.GetServerVBucketsMap(sourceClusterUUID, bucketName)
 	if err != nil {
+		logger_factory.Errorf("err=%v\n", err)
 		return nil, err
 	}
 	for _, kvaddr := range kvaddrs {
@@ -127,6 +132,7 @@ func (xdcrf *XDCRFactory) constructSourceNozzles(spec metadata.ReplicationSpecif
 
 		logger_factory.Debugf("Start building source nozzle for kvaddr = %v; vbnos = %v\n", kvaddr, vbnos)
 		if err != nil {
+			logger_factory.Errorf("err=%v\n", err)
 			return nil, err
 		}
 
@@ -156,6 +162,7 @@ func (xdcrf *XDCRFactory) constructSourceNozzles(spec metadata.ReplicationSpecif
 			// partIds of the kvfeed nodes look like "kvfeed_1"
 			kvfeed, err := sp.NewKVFeed(kvaddr, topic, KVFEED_NAME_PREFIX+PART_NAME_DELIMITER+strconv.Itoa(i), bucket, vbList)
 			if err != nil {
+				logger_factory.Errorf("err=%v\n", err)
 				return nil, err
 			}
 			sourceNozzles[kvfeed.Id()] = kvfeed
@@ -168,27 +175,31 @@ func (xdcrf *XDCRFactory) constructSourceNozzles(spec metadata.ReplicationSpecif
 }
 
 // TODO figure out whether to construct CAPI or XMEM type
-func (xdcrf *XDCRFactory) constructOutgoingNozzles(spec metadata.ReplicationSpecification) (map[string]common.Nozzle, map[uint16]string, error) {
+func (xdcrf *XDCRFactory) constructOutgoingNozzles(spec *metadata.ReplicationSpecification) (map[string]common.Nozzle, map[uint16]string, error) {
 	outNozzles := make(map[string]common.Nozzle)
 	vbNozzleMap := make(map[uint16]string)
 
 	//	kvVBMap, bucketPwd, err := (*xdcr_factory.get_target_topology_callback)(config.TargetCluster, config.TargetBucketn)
 	targetClusterUUID, err := spec.TargetClusterUUID()
 	if err != nil {
+		logger_factory.Errorf("err=%v\n", err)
 		return nil, nil, err
 	}
 	targetBucketName, err := spec.TargetBucketName()
 	if err != nil {
+		logger_factory.Errorf("err=%v\n", err)
 		return nil, nil, err
 	}
 
 	kvVBMap, err := xdcrf.cluster_info_svc.GetServerVBucketsMap(targetClusterUUID, targetBucketName)
 	if err != nil {
+		logger_factory.Errorf("err=%v\n", err)
 		return nil, nil, err
 	}
 
 	targetBucket, err := xdcrf.getBucket(targetClusterUUID, targetBucketName)
 	if err != nil {
+		logger_factory.Errorf("err=%v\n", err)
 		return nil, nil, err
 	}
 
@@ -202,7 +213,8 @@ func (xdcrf *XDCRFactory) constructOutgoingNozzles(spec metadata.ReplicationSpec
 		numOfNozzles := int(math.Min(float64(numOfVbs), float64(maxTargetNozzlePerNode)))
 
 		numOfVbPerNozzle := int(math.Ceil(float64(numOfVbs) / float64(numOfNozzles)))
-
+		logger_factory.Debugf("maxTargetNozzlePerNode=%d\n", maxTargetNozzlePerNode)
+		logger_factory.Debugf("Constructing %d nozzles, each is responsible for %d vbuckets\n", numOfNozzles, numOfVbPerNozzle)
 		var index int = 0
 		for i := 0; i < numOfNozzles; i++ {
 
@@ -211,6 +223,7 @@ func (xdcrf *XDCRFactory) constructOutgoingNozzles(spec metadata.ReplicationSpec
 			outNozzle, err := xdcrf.constructNozzleForTargetNode(kvaddr, targetBucketName, bucketPwd, i)
 
 			if err != nil {
+				logger_factory.Errorf("err=%v\n", err)
 				return nil, nil, err
 			}
 
@@ -239,7 +252,7 @@ func (xdcrf *XDCRFactory) constructOutgoingNozzles(spec metadata.ReplicationSpec
 	return outNozzles, vbNozzleMap, nil
 }
 
-func (xdcrf *XDCRFactory) constructRouter(spec metadata.ReplicationSpecification, downStreamParts map[string]common.Part, vbNozzleMap map[uint16]string) (*parts.Router, error) {
+func (xdcrf *XDCRFactory) constructRouter(spec *metadata.ReplicationSpecification, downStreamParts map[string]common.Part, vbNozzleMap map[uint16]string) (*parts.Router, error) {
 	router, err := parts.NewRouter(downStreamParts, vbNozzleMap)
 	logger_factory.Infof("Constructed router")
 	return router, err
@@ -248,6 +261,7 @@ func (xdcrf *XDCRFactory) constructRouter(spec metadata.ReplicationSpecification
 func (xdcrf *XDCRFactory) getBucket(clusterUUID string, bucketName string) (*couchbase.Bucket, error) {
 	connectStr, err := xdcrf.cluster_info_svc.GetClusterConnectionStr(clusterUUID)
 	if err != nil {
+		logger_factory.Errorf ("err=%v\n", err)
 		return nil, err
 	}
 	return utils.Bucket(connectStr, bucketName)
@@ -258,6 +272,7 @@ func (xdcrf *XDCRFactory) constructNozzleForTargetNode(kvaddr string, bucketName
 	nozzleType, err := xdcrf.getNozzleType(kvaddr)
 
 	if err != nil {
+		logger_factory.Errorf ("err=%v\n", err)
 		return nil, err
 	}
 
@@ -275,6 +290,7 @@ func (xdcrf *XDCRFactory) constructNozzleForTargetNode(kvaddr string, bucketName
 func (xdcrf *XDCRFactory) getNozzleType(kvaddr string) (base.XDCROutgoingNozzleType, error) {
 	beforeXMEM, err := xdcrf.cluster_info_svc.IsNodeCompatible(kvaddr, "2.5")
 	if err != nil {
+		logger_factory.Errorf ("err=%v\n", err)
 		return -1, err
 	}
 
@@ -354,12 +370,12 @@ func (xdcrf *XDCRFactory) constructSettingsForKVFeed(pipeline common.Pipeline, s
 }
 
 func (xdcrf *XDCRFactory) registerServices(pipeline common.Pipeline) {
-		ctx := pipeline.RuntimeContext()
+	ctx := pipeline.RuntimeContext()
 
 	//TODO:
 	//register pipeline supervisor
-	ctx.RegisterService ("PipelineSupervisor", &xdcr_pipeline_svc.PipelineSupervisor{})
+	ctx.RegisterService("PipelineSupervisor", &xdcr_pipeline_svc.PipelineSupervisor{})
 	//register pipeline checkpoint manager
-	ctx.RegisterService ("CheckpointManager", &xdcr_pipeline_svc.CheckpointManager{})
+	ctx.RegisterService("CheckpointManager", &xdcr_pipeline_svc.CheckpointManager{})
 	//register pipeline statistics manager
 }
