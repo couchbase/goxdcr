@@ -2,43 +2,18 @@
 
 package protobuf;
 
-// TODO DeleteRemoteClusterResponse, DeleteReplicationResponse are empty messages.  Do we need them?
-
-message GetRemoteClustersRequest {
-}
-
-message GetRemoteClustersResponse {
-	repeated RemoteClusterResponse remoteCluster = 1; // array of remote clusters
-}
-
-message CreateRemoteClusterRequest {
- 	required string    uuid     		 = 1; // uuid of the remote cluster
- 	required string    refName     		 = 2; // name of the remote cluster reference
- 	required string    hostname          = 3; // host name and port number of the remote cluster, e.g., 10.4.2.4:8091
- 	required string    username          = 4; // user name for logging into the remote cluster
- 	required string    password          = 5; // password for logging into the remote cluster
-}
-
-message RemoteClusterResponse {
-	required string    refName     		 = 1; // name of the remote cluster reference
- 	required string    uri       		 = 2; // uri of the remote cluster reference
- 	required string    validateURI       = 3; // uri to validate details of the remote cluster reference
- 	required string    hostname          = 4; // host name and port number of the remote cluster, e.g., 10.4.2.4:8091
- 	required string    username          = 5; // user name for logging into the remote cluster
-    required string    uuid     		 = 6; // uuid of the remote cluster 
-    required bool      deleted           = 7; // flag indicating whether the remote reference has been deleted 
-}
-
-message DeleteRemoteClusterRequest {
- 	required string    refName     		 = 1; // name of the remote cluster reference
-}
-
 message CreateReplicationRequest {
  	required string    fromBucket        = 1; // name of source bucket
  	required string    toCluster         = 2; // name of the remote cluster reference
  	required string    toBucket          = 3; // name of target bucket
- 	required string    replicationType   = 4; // replication type
- 	optional bool      forward           = 5 [default = true]; // flag indicating whether the request should be forwarded to other XDCR nodes
+ 	required string    filterName        = 4; // name of filter used for the replication
+ 	enum Mode {
+ 	    capi = 0;  // use CAPI nozzles
+ 		xmem = 1;  // use XMEM nozzles
+ 	}
+ 	required Mode      mode              = 5 [default = capi]; // relication mode. xmem vs. capi
+ 	optional Settings  settings          = 6; // replication settings
+ 	optional bool      forward           = 7 [default = true]; // flag indicating whether the request should be forwarded to other XDCR nodes
 }
 
 message CreateReplicationResponse {
@@ -54,38 +29,68 @@ message DeleteReplicationRequest {
 message ViewSettingsRequest {
 }
 
-message ViewSettingsResponse {
- 	required string    protocol       	 = 1; // version of XDCR protocol 
- 	required uint32    xdcrMaxConcurrentReps  = 2; // maximum replications per bucket
- 	required uint32    xdcrCheckpointInterval = 3; // checkpoint interval (in seconds)
- 	required uint32    xdcrWorkerBatchSize    = 4; // number of documents in a batch
- 	required uint32    xdcrDocBatchSizeKb     = 5; // size of a batch (in KB)
- 	required uint32    xdcrFailureRestartInterval     = 6; // internal for restarting failed XDCR (in seconds)
- 	required uint32    xdcrOptimisticReplicationThreshold = 7; // threshold size of compressed document (in bytes)
- 	required uint32    workerProcesses   = 8; // number of worker processes for each vbucket replicator
- 	required uint32    httpConnections   = 9; // number of maximum simultaneous HTTP connections  
+message Settings {
+ 	optional string    protocol        	  = 1; // version of XDCR protocol 
+ 	optional string    filterExpression   = 2; // filter expression
+ 	optional uint32    checkpointInterval = 3; // checkpoint interval (in seconds)
+ 	optional uint32    workerBatchSize    = 4; // number of documents in a batch
+ 	optional uint32    docBatchSizeKb     = 5; // size of a batch (in KB)
+ 	optional uint32    failureRestartInterval     = 6; // internal for restarting failed XDCR (in seconds)
+ 	optional uint32    optimisticReplicationThreshold = 7; // threshold size of compressed document (in bytes)
+ 	optional uint32    httpConnections     = 8; // number of maximum simultaneous HTTP connections 
+ 	optional uint32    sourceNozzlePerNode = 9; // number of source nozzles per source node
+ 	optional uint32    targetNozzlePerNode = 10; // number of outgoing nozzles per target node
+ 	optional uint32    maxExpectedReplicationLag = 11; // max replication lag (in ms) that can be tolerated
+ 	optional uint32    timeoutPercentageCap = 12; // maximum timeout percentage allowed. pipeline is considered not healthy when it is exceeded 
 }
 
-message ChangeSettingsRequest {
- 	optional string    id          	     = 1; // presence of replication id indicates that the request is for a specific replication; omission of replication id indicates that the request is for all replications in the source cluster  
- 	optional uint32    xdcrMaxConcurrentReps  = 2; // maximum replications per bucket
- 	optional uint32    xdcrCheckpointInterval = 3; // checkpoint interval (in seconds)
- 	optional uint32    xdcrWorkerBatchSize    = 4; // number of documents in a batch
- 	optional uint32    xdcrDocBatchSizeKb     = 5; // size of a batch (in KB)
- 	optional uint32    xdcrFailureRestartInterval     = 6; // internal for restarting failed XDCR (in seconds)
- 	optional uint32    xdcrOptimisticReplicationThreshold = 7; // threshold size of compressed document (in bytes)
- 	optional uint32    workerProcesses   = 8; // number of worker processes for each vbucket replicator
- 	optional uint32    httpConnections   = 9; // number of maximum simultaneous HTTP connections  
+// request to change global settings of all replications in the cluster
+message ChangeGlobalSettingsRequest { 
+	required Settings  settings          = 1; // settings to be set/updated
+}
+
+// request to change settings of an individual replication
+message ChangeReplicationSettingsRequest { 
+	required string    id         	     = 1; // replication id 
+	required Settings  settings          = 2; // settings to be set/updated
+}
+
+// request to change internal settings of all replications in the cluster. 
+// effectively the same as ChangeGlobalSettingsRequest but with a different url
+message ChangeInternalSettingsRequest { 
+	required Settings  settings          = 1; // settings to be set/updated
 }
 
 message GetStatisticsRequest {
 	required string    uuid              = 1; // uuid of the remote cluster 
 	required string    fromBucket        = 2; // name of source bucket
 	required string    toBucket          = 3; // name of target bucket
-	required string    statsName         = 4; // name of statistics, e.g., docs_written
+	enum Stats {
+		docs_written = 0; // number of documents written to destination cluster via XDCR
+		data_replicated = 1; // size of data replicated in bytes
+		changes_left = 2; // number of updates still pending replication
+		docs_checked = 3; // number of documents checkpointed for changes
+		num_checkpoints = 4; // number of checkpoints issued in replication queue
+		num_failedckpts = 5; // number of checkpoints failed during replication
+		size_rep_queue = 6; // size of replication queue in bytes
+		time_committing = 7; // seconds elapsed during replication
+		bandwidth_usage = 8; // bandwidth used during replication
+		docs_lanecy_aggr = 9; // aggregate time waiting to send changes to destination cluster in milliseconds
+		docs_latency_wt = 10; // weighted average latency for sending replicated changes to destination cluster
+		docs_req_queue = 11; // Number of documents in replication queue
+		meta_latency_aggr = 12; // aggregate time to request and receive metadata about documents
+		meta_latency_wt = 13; // weighted average time for requesting document metadata
+		rate_replication = 14; // bytes replicated per second
+		docs_opt_repd = 15; // number of docs sent optimistically
+		active_vbreps = 16;
+		waiting_vbreps = 17;
+		time_working = 18;
+		timeout_percentage_map = 19;  // The map of vbucket id and  the percentage of timed-out data for this VBucket during this statistics interval		
+	}
+	required Stats    stats         = 4; // name of statistics, e.g., docs_written
 }
 
-/* TODO one response message for each statistics type?
+/* TODO do we need to have one response message for each statistics type?
 message GetStatisticsResponse {
 }*/
 

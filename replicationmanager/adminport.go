@@ -9,36 +9,25 @@ import (
 	"strings"
 	"errors"*/
 	ap "github.com/couchbase/indexing/secondary/adminport"
-	c "github.com/couchbase/indexing/secondary/common"
+	sicommon "github.com/couchbase/indexing/secondary/common"
+	//siprotobuf "github.com/couchbase/indexing/secondary/protobuf"
 	"github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/protobuf"
-	base "github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/base"
 	log "github.com/Xiaomei-Zhang/couchbase_goxdcr/util"
 	//utils "github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/utils"
 )
 
-const(
-	REMOTE_CLUSTERS_PATH = "pools/default/remoteClusters"
-	CREATE_REPLICATION_PATH = "controller/createReplication"
-	INTERNAL_SETTINGS_PATH = "internalSettings"
-	SETTINGS_REPLICATION_PATH = "settings/replications"
-	DELETE_REPLICATION_PATH_PREFIX = "controller/cancelXDCR"
-	STATISTICS_PATH_PREFIX = "pools/default/buckets"
-	DYNAMIC_PATH_ID = "/dynamic"
-)
-
-var StaticPaths = [4]string{REMOTE_CLUSTERS_PATH, CREATE_REPLICATION_PATH, INTERNAL_SETTINGS_PATH, SETTINGS_REPLICATION_PATH}
-var DynamicPathPrefixes = [4]string{REMOTE_CLUSTERS_PATH, DELETE_REPLICATION_PATH_PREFIX, SETTINGS_REPLICATION_PATH, STATISTICS_PATH_PREFIX}
+var StaticPaths = [3]string{protobuf.CREATE_REPLICATION_PATH, protobuf.INTERNAL_SETTINGS_PATH, protobuf.SETTINGS_REPLICATIONS_PATH}
+var DynamicPathPrefixes = [3]string{protobuf.DELETE_REPLICATION_PREFIX, protobuf.SETTINGS_REPLICATIONS_PATH, protobuf.STATISTICS_PREFIX}
 
 var logger_ap *log.CommonLogger = log.NewLogger("AdminPort", log.LogLevelInfo)
 
 // list of requests handled by this adminport
-var reqGetRemoteClusters = &protobuf.GetRemoteClustersRequest{}
-var reqCreateRemoteCluster = &protobuf.CreateRemoteClusterRequest{}
-var reqDeleteRemoteCluster = &protobuf.DeleteRemoteClusterRequest{}
 var reqCreateReplication = &protobuf.CreateReplicationRequest{}
 var reqDeleteReplication = &protobuf.DeleteReplicationRequest{}
 var reqViewSettings = &protobuf.ViewSettingsRequest{}
-var reqChangeSettings = &protobuf.ChangeSettingsRequest{}
+var reqChangeGlobalSettings = &protobuf.ChangeGlobalSettingsRequest{}
+var reqChangeReplicationSettings = &protobuf.ChangeReplicationSettingsRequest{}
+var reqChangeInternalSettings = &protobuf.ChangeInternalSettingsRequest{}
 var reqGetStatistics = &protobuf.GetStatisticsRequest{}
 
 // admin-port entry point
@@ -46,14 +35,13 @@ func mainAdminPort(laddr string, rm *ReplicationManager) {
 	var err error
 
 	reqch := make(chan ap.Request)
-	server := ap.NewHTTPServer("xdcr", laddr, base.AdminportURLPrefix, reqch/*TODO, new(XDCRHandler)*/)
-	server.Register(reqGetRemoteClusters)
-	server.Register(reqCreateRemoteCluster)
-	server.Register(reqDeleteRemoteCluster)
+	server := ap.NewHTTPServer("xdcr", laddr, ""/*urlPrefix*/, reqch/*TODO, new(XDCRHandler)*/)
 	server.Register(reqCreateReplication)
 	server.Register(reqDeleteReplication)
 	server.Register(reqViewSettings)
-	server.Register(reqChangeSettings)
+	server.Register(reqChangeGlobalSettings)
+	server.Register(reqChangeReplicationSettings)
+	server.Register(reqChangeInternalSettings)
 	server.Register(reqGetStatistics)
 	
 	server.Start()
@@ -85,49 +73,31 @@ func (rm *ReplicationManager) handleRequest(
 	server ap.Server) (response ap.MessageMarshaller, err error) {
 
 	switch request := msg.(type) {
-	case *protobuf.GetRemoteClustersRequest:
-		response = rm.doGetRemoteClustersRequest(request)
-	case *protobuf.CreateRemoteClusterRequest:
-		response = rm.doCreateRemoteClusterRequest(request)
-	case *protobuf.DeleteRemoteClusterRequest:
-		response = rm.doDeleteRemoteClusterRequest(request)
 	case *protobuf.CreateReplicationRequest:
 		response = rm.doCreateReplicationRequest(request)
 	case *protobuf.DeleteReplicationRequest:
 		response = rm.doDeleteReplicationRequest(request)
 	case *protobuf.ViewSettingsRequest:
 		response = rm.doViewSettingsRequest(request)
-	case *protobuf.ChangeSettingsRequest:
-		response = rm.doChangeSettingsRequest(request)
+	case *protobuf.ChangeGlobalSettingsRequest:
+		response = rm.doChangeGlobalSettingsRequest(request)
+	case *protobuf.ChangeReplicationSettingsRequest:
+		response = rm.doChangeReplicationSettingsRequest(request)
+	case *protobuf.ChangeInternalSettingsRequest:
+		response = rm.doChangeInternalSettingsRequest(request)
 	case *protobuf.GetStatisticsRequest:
 		response = rm.doGetStatisticsRequest(request)
 	default:
-		err = c.ErrorInvalidRequest
+		err = sicommon.ErrorInvalidRequest
 	}
 	return response, err
-}
-
-func (rm *ReplicationManager) doGetRemoteClustersRequest(request *protobuf.GetRemoteClustersRequest) ap.MessageMarshaller {
-	logger_ap.Debugf("doGetRemoteClustersRequest\n")
-
-	return nil
-}
-
-func (rm *ReplicationManager) doCreateRemoteClusterRequest(request *protobuf.CreateRemoteClusterRequest) ap.MessageMarshaller {
-	logger_ap.Debugf("doCreateRemoteClusterRequest\n")
-
-	return nil
-}
-
-func (rm *ReplicationManager) doDeleteRemoteClusterRequest(request *protobuf.DeleteRemoteClusterRequest) ap.MessageMarshaller {
-	logger_ap.Debugf("doDeleteRemoteClusterRequest\n")
-
-	return nil
 }
 
 func (rm *ReplicationManager) doDeleteReplicationRequest(request *protobuf.DeleteReplicationRequest) ap.MessageMarshaller {
 	logger_ap.Debugf("doDeleteReplicationRequest\n")
 
+	// err := rm.DeleteReplication(request)
+	// return siprotobuf.NewError(err)
 	return nil
 }
 
@@ -137,8 +107,20 @@ func (rm *ReplicationManager) doViewSettingsRequest(request *protobuf.ViewSettin
 	return nil
 }
 
-func (rm *ReplicationManager) doChangeSettingsRequest(request *protobuf.ChangeSettingsRequest) ap.MessageMarshaller {
-	logger_ap.Debugf("doChangeSettingsRequest\n")
+func (rm *ReplicationManager) doChangeGlobalSettingsRequest(request *protobuf.ChangeGlobalSettingsRequest) ap.MessageMarshaller {
+	logger_ap.Debugf("doChangeGlobalSettingsRequest\n")
+
+	return nil
+}
+
+func (rm *ReplicationManager) doChangeReplicationSettingsRequest(request *protobuf.ChangeReplicationSettingsRequest) ap.MessageMarshaller {
+	logger_ap.Debugf("doChangeReplicationSettingsRequest\n")
+
+	return nil
+}
+
+func (rm *ReplicationManager) doChangeInternalSettingsRequest(request *protobuf.ChangeInternalSettingsRequest) ap.MessageMarshaller {
+	logger_ap.Debugf("doChangeInternalSettingsRequest\n")
 
 	return nil
 }
@@ -302,6 +284,12 @@ func (h *XDCRHandler) GetMessageNameFromRequest(r *http.Request) (string, error)
 	if len(name) == 0 {
 		return "", errors.New(fmt.Sprintf("Invalid path, %v, in http Request.", path))
 	} else {
+	    // add get/post suffix to name to distinguish between lookup/modify requests
+		if r.Method == "" || r.Method == "GET" {
+			name += GET_SUFFIX
+		} else {
+			name += POST_SUFFIX
+		}
 		return name, nil
 	}
 }*/

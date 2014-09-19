@@ -9,17 +9,14 @@ It is generated from these files:
 	replication.proto
 
 It has these top-level messages:
-	GetRemoteClustersRequest
-	GetRemoteClustersResponse
-	CreateRemoteClusterRequest
-	RemoteClusterResponse
-	DeleteRemoteClusterRequest
 	CreateReplicationRequest
 	CreateReplicationResponse
 	DeleteReplicationRequest
 	ViewSettingsRequest
-	ViewSettingsResponse
-	ChangeSettingsRequest
+	Settings
+	ChangeGlobalSettingsRequest
+	ChangeReplicationSettingsRequest
+	ChangeInternalSettingsRequest
 	GetStatisticsRequest
 */
 package protobuf
@@ -31,171 +28,142 @@ import math "math"
 var _ = proto.Marshal
 var _ = math.Inf
 
-type GetRemoteClustersRequest struct {
-	XXX_unrecognized []byte `json:"-"`
+type CreateReplicationRequest_Mode int32
+
+const (
+	CreateReplicationRequest_capi CreateReplicationRequest_Mode = 0
+	CreateReplicationRequest_xmem CreateReplicationRequest_Mode = 1
+)
+
+var CreateReplicationRequest_Mode_name = map[int32]string{
+	0: "capi",
+	1: "xmem",
+}
+var CreateReplicationRequest_Mode_value = map[string]int32{
+	"capi": 0,
+	"xmem": 1,
 }
 
-func (m *GetRemoteClustersRequest) Reset()         { *m = GetRemoteClustersRequest{} }
-func (m *GetRemoteClustersRequest) String() string { return proto.CompactTextString(m) }
-func (*GetRemoteClustersRequest) ProtoMessage()    {}
-
-type GetRemoteClustersResponse struct {
-	RemoteCluster    []*RemoteClusterResponse `protobuf:"bytes,1,rep,name=remoteCluster" json:"remoteCluster,omitempty"`
-	XXX_unrecognized []byte                   `json:"-"`
+func (x CreateReplicationRequest_Mode) Enum() *CreateReplicationRequest_Mode {
+	p := new(CreateReplicationRequest_Mode)
+	*p = x
+	return p
 }
-
-func (m *GetRemoteClustersResponse) Reset()         { *m = GetRemoteClustersResponse{} }
-func (m *GetRemoteClustersResponse) String() string { return proto.CompactTextString(m) }
-func (*GetRemoteClustersResponse) ProtoMessage()    {}
-
-func (m *GetRemoteClustersResponse) GetRemoteCluster() []*RemoteClusterResponse {
-	if m != nil {
-		return m.RemoteCluster
+func (x CreateReplicationRequest_Mode) String() string {
+	return proto.EnumName(CreateReplicationRequest_Mode_name, int32(x))
+}
+func (x *CreateReplicationRequest_Mode) UnmarshalJSON(data []byte) error {
+	value, err := proto.UnmarshalJSONEnum(CreateReplicationRequest_Mode_value, data, "CreateReplicationRequest_Mode")
+	if err != nil {
+		return err
 	}
+	*x = CreateReplicationRequest_Mode(value)
 	return nil
 }
 
-type CreateRemoteClusterRequest struct {
-	Uuid             *string `protobuf:"bytes,1,req,name=uuid" json:"uuid,omitempty"`
-	RefName          *string `protobuf:"bytes,2,req,name=refName" json:"refName,omitempty"`
-	Hostname         *string `protobuf:"bytes,3,req,name=hostname" json:"hostname,omitempty"`
-	Username         *string `protobuf:"bytes,4,req,name=username" json:"username,omitempty"`
-	Password         *string `protobuf:"bytes,5,req,name=password" json:"password,omitempty"`
-	XXX_unrecognized []byte  `json:"-"`
+type GetStatisticsRequest_Stats int32
+
+const (
+	GetStatisticsRequest_docs_written           GetStatisticsRequest_Stats = 0
+	GetStatisticsRequest_data_replicated        GetStatisticsRequest_Stats = 1
+	GetStatisticsRequest_changes_left           GetStatisticsRequest_Stats = 2
+	GetStatisticsRequest_docs_checked           GetStatisticsRequest_Stats = 3
+	GetStatisticsRequest_num_checkpoints        GetStatisticsRequest_Stats = 4
+	GetStatisticsRequest_num_failedckpts        GetStatisticsRequest_Stats = 5
+	GetStatisticsRequest_size_rep_queue         GetStatisticsRequest_Stats = 6
+	GetStatisticsRequest_time_committing        GetStatisticsRequest_Stats = 7
+	GetStatisticsRequest_bandwidth_usage        GetStatisticsRequest_Stats = 8
+	GetStatisticsRequest_docs_lanecy_aggr       GetStatisticsRequest_Stats = 9
+	GetStatisticsRequest_docs_latency_wt        GetStatisticsRequest_Stats = 10
+	GetStatisticsRequest_docs_req_queue         GetStatisticsRequest_Stats = 11
+	GetStatisticsRequest_meta_latency_aggr      GetStatisticsRequest_Stats = 12
+	GetStatisticsRequest_meta_latency_wt        GetStatisticsRequest_Stats = 13
+	GetStatisticsRequest_rate_replication       GetStatisticsRequest_Stats = 14
+	GetStatisticsRequest_docs_opt_repd          GetStatisticsRequest_Stats = 15
+	GetStatisticsRequest_active_vbreps          GetStatisticsRequest_Stats = 16
+	GetStatisticsRequest_waiting_vbreps         GetStatisticsRequest_Stats = 17
+	GetStatisticsRequest_time_working           GetStatisticsRequest_Stats = 18
+	GetStatisticsRequest_timeout_percentage_map GetStatisticsRequest_Stats = 19
+)
+
+var GetStatisticsRequest_Stats_name = map[int32]string{
+	0:  "docs_written",
+	1:  "data_replicated",
+	2:  "changes_left",
+	3:  "docs_checked",
+	4:  "num_checkpoints",
+	5:  "num_failedckpts",
+	6:  "size_rep_queue",
+	7:  "time_committing",
+	8:  "bandwidth_usage",
+	9:  "docs_lanecy_aggr",
+	10: "docs_latency_wt",
+	11: "docs_req_queue",
+	12: "meta_latency_aggr",
+	13: "meta_latency_wt",
+	14: "rate_replication",
+	15: "docs_opt_repd",
+	16: "active_vbreps",
+	17: "waiting_vbreps",
+	18: "time_working",
+	19: "timeout_percentage_map",
+}
+var GetStatisticsRequest_Stats_value = map[string]int32{
+	"docs_written":           0,
+	"data_replicated":        1,
+	"changes_left":           2,
+	"docs_checked":           3,
+	"num_checkpoints":        4,
+	"num_failedckpts":        5,
+	"size_rep_queue":         6,
+	"time_committing":        7,
+	"bandwidth_usage":        8,
+	"docs_lanecy_aggr":       9,
+	"docs_latency_wt":        10,
+	"docs_req_queue":         11,
+	"meta_latency_aggr":      12,
+	"meta_latency_wt":        13,
+	"rate_replication":       14,
+	"docs_opt_repd":          15,
+	"active_vbreps":          16,
+	"waiting_vbreps":         17,
+	"time_working":           18,
+	"timeout_percentage_map": 19,
 }
 
-func (m *CreateRemoteClusterRequest) Reset()         { *m = CreateRemoteClusterRequest{} }
-func (m *CreateRemoteClusterRequest) String() string { return proto.CompactTextString(m) }
-func (*CreateRemoteClusterRequest) ProtoMessage()    {}
-
-func (m *CreateRemoteClusterRequest) GetUuid() string {
-	if m != nil && m.Uuid != nil {
-		return *m.Uuid
+func (x GetStatisticsRequest_Stats) Enum() *GetStatisticsRequest_Stats {
+	p := new(GetStatisticsRequest_Stats)
+	*p = x
+	return p
+}
+func (x GetStatisticsRequest_Stats) String() string {
+	return proto.EnumName(GetStatisticsRequest_Stats_name, int32(x))
+}
+func (x *GetStatisticsRequest_Stats) UnmarshalJSON(data []byte) error {
+	value, err := proto.UnmarshalJSONEnum(GetStatisticsRequest_Stats_value, data, "GetStatisticsRequest_Stats")
+	if err != nil {
+		return err
 	}
-	return ""
-}
-
-func (m *CreateRemoteClusterRequest) GetRefName() string {
-	if m != nil && m.RefName != nil {
-		return *m.RefName
-	}
-	return ""
-}
-
-func (m *CreateRemoteClusterRequest) GetHostname() string {
-	if m != nil && m.Hostname != nil {
-		return *m.Hostname
-	}
-	return ""
-}
-
-func (m *CreateRemoteClusterRequest) GetUsername() string {
-	if m != nil && m.Username != nil {
-		return *m.Username
-	}
-	return ""
-}
-
-func (m *CreateRemoteClusterRequest) GetPassword() string {
-	if m != nil && m.Password != nil {
-		return *m.Password
-	}
-	return ""
-}
-
-type RemoteClusterResponse struct {
-	RefName          *string `protobuf:"bytes,1,req,name=refName" json:"refName,omitempty"`
-	Uri              *string `protobuf:"bytes,2,req,name=uri" json:"uri,omitempty"`
-	ValidateURI      *string `protobuf:"bytes,3,req,name=validateURI" json:"validateURI,omitempty"`
-	Hostname         *string `protobuf:"bytes,4,req,name=hostname" json:"hostname,omitempty"`
-	Username         *string `protobuf:"bytes,5,req,name=username" json:"username,omitempty"`
-	Uuid             *string `protobuf:"bytes,6,req,name=uuid" json:"uuid,omitempty"`
-	Deleted          *bool   `protobuf:"varint,7,req,name=deleted" json:"deleted,omitempty"`
-	XXX_unrecognized []byte  `json:"-"`
-}
-
-func (m *RemoteClusterResponse) Reset()         { *m = RemoteClusterResponse{} }
-func (m *RemoteClusterResponse) String() string { return proto.CompactTextString(m) }
-func (*RemoteClusterResponse) ProtoMessage()    {}
-
-func (m *RemoteClusterResponse) GetRefName() string {
-	if m != nil && m.RefName != nil {
-		return *m.RefName
-	}
-	return ""
-}
-
-func (m *RemoteClusterResponse) GetUri() string {
-	if m != nil && m.Uri != nil {
-		return *m.Uri
-	}
-	return ""
-}
-
-func (m *RemoteClusterResponse) GetValidateURI() string {
-	if m != nil && m.ValidateURI != nil {
-		return *m.ValidateURI
-	}
-	return ""
-}
-
-func (m *RemoteClusterResponse) GetHostname() string {
-	if m != nil && m.Hostname != nil {
-		return *m.Hostname
-	}
-	return ""
-}
-
-func (m *RemoteClusterResponse) GetUsername() string {
-	if m != nil && m.Username != nil {
-		return *m.Username
-	}
-	return ""
-}
-
-func (m *RemoteClusterResponse) GetUuid() string {
-	if m != nil && m.Uuid != nil {
-		return *m.Uuid
-	}
-	return ""
-}
-
-func (m *RemoteClusterResponse) GetDeleted() bool {
-	if m != nil && m.Deleted != nil {
-		return *m.Deleted
-	}
-	return false
-}
-
-type DeleteRemoteClusterRequest struct {
-	RefName          *string `protobuf:"bytes,1,req,name=refName" json:"refName,omitempty"`
-	XXX_unrecognized []byte  `json:"-"`
-}
-
-func (m *DeleteRemoteClusterRequest) Reset()         { *m = DeleteRemoteClusterRequest{} }
-func (m *DeleteRemoteClusterRequest) String() string { return proto.CompactTextString(m) }
-func (*DeleteRemoteClusterRequest) ProtoMessage()    {}
-
-func (m *DeleteRemoteClusterRequest) GetRefName() string {
-	if m != nil && m.RefName != nil {
-		return *m.RefName
-	}
-	return ""
+	*x = GetStatisticsRequest_Stats(value)
+	return nil
 }
 
 type CreateReplicationRequest struct {
-	FromBucket       *string `protobuf:"bytes,1,req,name=fromBucket" json:"fromBucket,omitempty"`
-	ToCluster        *string `protobuf:"bytes,2,req,name=toCluster" json:"toCluster,omitempty"`
-	ToBucket         *string `protobuf:"bytes,3,req,name=toBucket" json:"toBucket,omitempty"`
-	ReplicationType  *string `protobuf:"bytes,4,req,name=replicationType" json:"replicationType,omitempty"`
-	Forward          *bool   `protobuf:"varint,5,opt,name=forward,def=1" json:"forward,omitempty"`
-	XXX_unrecognized []byte  `json:"-"`
+	FromBucket       *string                        `protobuf:"bytes,1,req,name=fromBucket" json:"fromBucket,omitempty"`
+	ToCluster        *string                        `protobuf:"bytes,2,req,name=toCluster" json:"toCluster,omitempty"`
+	ToBucket         *string                        `protobuf:"bytes,3,req,name=toBucket" json:"toBucket,omitempty"`
+	FilterName       *string                        `protobuf:"bytes,4,req,name=filterName" json:"filterName,omitempty"`
+	Mode             *CreateReplicationRequest_Mode `protobuf:"varint,5,req,name=mode,enum=protobuf.CreateReplicationRequest_Mode,def=0" json:"mode,omitempty"`
+	Settings         *Settings                      `protobuf:"bytes,6,opt,name=settings" json:"settings,omitempty"`
+	Forward          *bool                          `protobuf:"varint,7,opt,name=forward,def=1" json:"forward,omitempty"`
+	XXX_unrecognized []byte                         `json:"-"`
 }
 
 func (m *CreateReplicationRequest) Reset()         { *m = CreateReplicationRequest{} }
 func (m *CreateReplicationRequest) String() string { return proto.CompactTextString(m) }
 func (*CreateReplicationRequest) ProtoMessage()    {}
 
+const Default_CreateReplicationRequest_Mode CreateReplicationRequest_Mode = CreateReplicationRequest_capi
 const Default_CreateReplicationRequest_Forward bool = true
 
 func (m *CreateReplicationRequest) GetFromBucket() string {
@@ -219,11 +187,25 @@ func (m *CreateReplicationRequest) GetToBucket() string {
 	return ""
 }
 
-func (m *CreateReplicationRequest) GetReplicationType() string {
-	if m != nil && m.ReplicationType != nil {
-		return *m.ReplicationType
+func (m *CreateReplicationRequest) GetFilterName() string {
+	if m != nil && m.FilterName != nil {
+		return *m.FilterName
 	}
 	return ""
+}
+
+func (m *CreateReplicationRequest) GetMode() CreateReplicationRequest_Mode {
+	if m != nil && m.Mode != nil {
+		return *m.Mode
+	}
+	return Default_CreateReplicationRequest_Mode
+}
+
+func (m *CreateReplicationRequest) GetSettings() *Settings {
+	if m != nil {
+		return m.Settings
+	}
+	return nil
 }
 
 func (m *CreateReplicationRequest) GetForward() bool {
@@ -291,172 +273,176 @@ func (m *ViewSettingsRequest) Reset()         { *m = ViewSettingsRequest{} }
 func (m *ViewSettingsRequest) String() string { return proto.CompactTextString(m) }
 func (*ViewSettingsRequest) ProtoMessage()    {}
 
-type ViewSettingsResponse struct {
-	Protocol                           *string `protobuf:"bytes,1,req,name=protocol" json:"protocol,omitempty"`
-	XdcrMaxConcurrentReps              *uint32 `protobuf:"varint,2,req,name=xdcrMaxConcurrentReps" json:"xdcrMaxConcurrentReps,omitempty"`
-	XdcrCheckpointInterval             *uint32 `protobuf:"varint,3,req,name=xdcrCheckpointInterval" json:"xdcrCheckpointInterval,omitempty"`
-	XdcrWorkerBatchSize                *uint32 `protobuf:"varint,4,req,name=xdcrWorkerBatchSize" json:"xdcrWorkerBatchSize,omitempty"`
-	XdcrDocBatchSizeKb                 *uint32 `protobuf:"varint,5,req,name=xdcrDocBatchSizeKb" json:"xdcrDocBatchSizeKb,omitempty"`
-	XdcrFailureRestartInterval         *uint32 `protobuf:"varint,6,req,name=xdcrFailureRestartInterval" json:"xdcrFailureRestartInterval,omitempty"`
-	XdcrOptimisticReplicationThreshold *uint32 `protobuf:"varint,7,req,name=xdcrOptimisticReplicationThreshold" json:"xdcrOptimisticReplicationThreshold,omitempty"`
-	WorkerProcesses                    *uint32 `protobuf:"varint,8,req,name=workerProcesses" json:"workerProcesses,omitempty"`
-	HttpConnections                    *uint32 `protobuf:"varint,9,req,name=httpConnections" json:"httpConnections,omitempty"`
-	XXX_unrecognized                   []byte  `json:"-"`
+type Settings struct {
+	Protocol                       *string `protobuf:"bytes,1,opt,name=protocol" json:"protocol,omitempty"`
+	FilterExpression               *string `protobuf:"bytes,2,opt,name=filterExpression" json:"filterExpression,omitempty"`
+	CheckpointInterval             *uint32 `protobuf:"varint,3,opt,name=checkpointInterval" json:"checkpointInterval,omitempty"`
+	WorkerBatchSize                *uint32 `protobuf:"varint,4,opt,name=workerBatchSize" json:"workerBatchSize,omitempty"`
+	DocBatchSizeKb                 *uint32 `protobuf:"varint,5,opt,name=docBatchSizeKb" json:"docBatchSizeKb,omitempty"`
+	FailureRestartInterval         *uint32 `protobuf:"varint,6,opt,name=failureRestartInterval" json:"failureRestartInterval,omitempty"`
+	OptimisticReplicationThreshold *uint32 `protobuf:"varint,7,opt,name=optimisticReplicationThreshold" json:"optimisticReplicationThreshold,omitempty"`
+	HttpConnections                *uint32 `protobuf:"varint,8,opt,name=httpConnections" json:"httpConnections,omitempty"`
+	SourceNozzlePerNode            *uint32 `protobuf:"varint,9,opt,name=sourceNozzlePerNode" json:"sourceNozzlePerNode,omitempty"`
+	TargetNozzlePerNode            *uint32 `protobuf:"varint,10,opt,name=targetNozzlePerNode" json:"targetNozzlePerNode,omitempty"`
+	MaxExpectedReplicationLag      *uint32 `protobuf:"varint,11,opt,name=maxExpectedReplicationLag" json:"maxExpectedReplicationLag,omitempty"`
+	TimeoutPercentageCap           *uint32 `protobuf:"varint,12,opt,name=timeoutPercentageCap" json:"timeoutPercentageCap,omitempty"`
+	XXX_unrecognized               []byte  `json:"-"`
 }
 
-func (m *ViewSettingsResponse) Reset()         { *m = ViewSettingsResponse{} }
-func (m *ViewSettingsResponse) String() string { return proto.CompactTextString(m) }
-func (*ViewSettingsResponse) ProtoMessage()    {}
+func (m *Settings) Reset()         { *m = Settings{} }
+func (m *Settings) String() string { return proto.CompactTextString(m) }
+func (*Settings) ProtoMessage()    {}
 
-func (m *ViewSettingsResponse) GetProtocol() string {
+func (m *Settings) GetProtocol() string {
 	if m != nil && m.Protocol != nil {
 		return *m.Protocol
 	}
 	return ""
 }
 
-func (m *ViewSettingsResponse) GetXdcrMaxConcurrentReps() uint32 {
-	if m != nil && m.XdcrMaxConcurrentReps != nil {
-		return *m.XdcrMaxConcurrentReps
+func (m *Settings) GetFilterExpression() string {
+	if m != nil && m.FilterExpression != nil {
+		return *m.FilterExpression
+	}
+	return ""
+}
+
+func (m *Settings) GetCheckpointInterval() uint32 {
+	if m != nil && m.CheckpointInterval != nil {
+		return *m.CheckpointInterval
 	}
 	return 0
 }
 
-func (m *ViewSettingsResponse) GetXdcrCheckpointInterval() uint32 {
-	if m != nil && m.XdcrCheckpointInterval != nil {
-		return *m.XdcrCheckpointInterval
+func (m *Settings) GetWorkerBatchSize() uint32 {
+	if m != nil && m.WorkerBatchSize != nil {
+		return *m.WorkerBatchSize
 	}
 	return 0
 }
 
-func (m *ViewSettingsResponse) GetXdcrWorkerBatchSize() uint32 {
-	if m != nil && m.XdcrWorkerBatchSize != nil {
-		return *m.XdcrWorkerBatchSize
+func (m *Settings) GetDocBatchSizeKb() uint32 {
+	if m != nil && m.DocBatchSizeKb != nil {
+		return *m.DocBatchSizeKb
 	}
 	return 0
 }
 
-func (m *ViewSettingsResponse) GetXdcrDocBatchSizeKb() uint32 {
-	if m != nil && m.XdcrDocBatchSizeKb != nil {
-		return *m.XdcrDocBatchSizeKb
+func (m *Settings) GetFailureRestartInterval() uint32 {
+	if m != nil && m.FailureRestartInterval != nil {
+		return *m.FailureRestartInterval
 	}
 	return 0
 }
 
-func (m *ViewSettingsResponse) GetXdcrFailureRestartInterval() uint32 {
-	if m != nil && m.XdcrFailureRestartInterval != nil {
-		return *m.XdcrFailureRestartInterval
+func (m *Settings) GetOptimisticReplicationThreshold() uint32 {
+	if m != nil && m.OptimisticReplicationThreshold != nil {
+		return *m.OptimisticReplicationThreshold
 	}
 	return 0
 }
 
-func (m *ViewSettingsResponse) GetXdcrOptimisticReplicationThreshold() uint32 {
-	if m != nil && m.XdcrOptimisticReplicationThreshold != nil {
-		return *m.XdcrOptimisticReplicationThreshold
-	}
-	return 0
-}
-
-func (m *ViewSettingsResponse) GetWorkerProcesses() uint32 {
-	if m != nil && m.WorkerProcesses != nil {
-		return *m.WorkerProcesses
-	}
-	return 0
-}
-
-func (m *ViewSettingsResponse) GetHttpConnections() uint32 {
+func (m *Settings) GetHttpConnections() uint32 {
 	if m != nil && m.HttpConnections != nil {
 		return *m.HttpConnections
 	}
 	return 0
 }
 
-type ChangeSettingsRequest struct {
-	Id                                 *string `protobuf:"bytes,1,opt,name=id" json:"id,omitempty"`
-	XdcrMaxConcurrentReps              *uint32 `protobuf:"varint,2,opt,name=xdcrMaxConcurrentReps" json:"xdcrMaxConcurrentReps,omitempty"`
-	XdcrCheckpointInterval             *uint32 `protobuf:"varint,3,opt,name=xdcrCheckpointInterval" json:"xdcrCheckpointInterval,omitempty"`
-	XdcrWorkerBatchSize                *uint32 `protobuf:"varint,4,opt,name=xdcrWorkerBatchSize" json:"xdcrWorkerBatchSize,omitempty"`
-	XdcrDocBatchSizeKb                 *uint32 `protobuf:"varint,5,opt,name=xdcrDocBatchSizeKb" json:"xdcrDocBatchSizeKb,omitempty"`
-	XdcrFailureRestartInterval         *uint32 `protobuf:"varint,6,opt,name=xdcrFailureRestartInterval" json:"xdcrFailureRestartInterval,omitempty"`
-	XdcrOptimisticReplicationThreshold *uint32 `protobuf:"varint,7,opt,name=xdcrOptimisticReplicationThreshold" json:"xdcrOptimisticReplicationThreshold,omitempty"`
-	WorkerProcesses                    *uint32 `protobuf:"varint,8,opt,name=workerProcesses" json:"workerProcesses,omitempty"`
-	HttpConnections                    *uint32 `protobuf:"varint,9,opt,name=httpConnections" json:"httpConnections,omitempty"`
-	XXX_unrecognized                   []byte  `json:"-"`
+func (m *Settings) GetSourceNozzlePerNode() uint32 {
+	if m != nil && m.SourceNozzlePerNode != nil {
+		return *m.SourceNozzlePerNode
+	}
+	return 0
 }
 
-func (m *ChangeSettingsRequest) Reset()         { *m = ChangeSettingsRequest{} }
-func (m *ChangeSettingsRequest) String() string { return proto.CompactTextString(m) }
-func (*ChangeSettingsRequest) ProtoMessage()    {}
+func (m *Settings) GetTargetNozzlePerNode() uint32 {
+	if m != nil && m.TargetNozzlePerNode != nil {
+		return *m.TargetNozzlePerNode
+	}
+	return 0
+}
 
-func (m *ChangeSettingsRequest) GetId() string {
+func (m *Settings) GetMaxExpectedReplicationLag() uint32 {
+	if m != nil && m.MaxExpectedReplicationLag != nil {
+		return *m.MaxExpectedReplicationLag
+	}
+	return 0
+}
+
+func (m *Settings) GetTimeoutPercentageCap() uint32 {
+	if m != nil && m.TimeoutPercentageCap != nil {
+		return *m.TimeoutPercentageCap
+	}
+	return 0
+}
+
+// request to change global settings of all replications in the cluster
+type ChangeGlobalSettingsRequest struct {
+	Settings         *Settings `protobuf:"bytes,1,req,name=settings" json:"settings,omitempty"`
+	XXX_unrecognized []byte    `json:"-"`
+}
+
+func (m *ChangeGlobalSettingsRequest) Reset()         { *m = ChangeGlobalSettingsRequest{} }
+func (m *ChangeGlobalSettingsRequest) String() string { return proto.CompactTextString(m) }
+func (*ChangeGlobalSettingsRequest) ProtoMessage()    {}
+
+func (m *ChangeGlobalSettingsRequest) GetSettings() *Settings {
+	if m != nil {
+		return m.Settings
+	}
+	return nil
+}
+
+// request to change settings of an individual replication
+type ChangeReplicationSettingsRequest struct {
+	Id               *string   `protobuf:"bytes,1,req,name=id" json:"id,omitempty"`
+	Settings         *Settings `protobuf:"bytes,2,req,name=settings" json:"settings,omitempty"`
+	XXX_unrecognized []byte    `json:"-"`
+}
+
+func (m *ChangeReplicationSettingsRequest) Reset()         { *m = ChangeReplicationSettingsRequest{} }
+func (m *ChangeReplicationSettingsRequest) String() string { return proto.CompactTextString(m) }
+func (*ChangeReplicationSettingsRequest) ProtoMessage()    {}
+
+func (m *ChangeReplicationSettingsRequest) GetId() string {
 	if m != nil && m.Id != nil {
 		return *m.Id
 	}
 	return ""
 }
 
-func (m *ChangeSettingsRequest) GetXdcrMaxConcurrentReps() uint32 {
-	if m != nil && m.XdcrMaxConcurrentReps != nil {
-		return *m.XdcrMaxConcurrentReps
+func (m *ChangeReplicationSettingsRequest) GetSettings() *Settings {
+	if m != nil {
+		return m.Settings
 	}
-	return 0
+	return nil
 }
 
-func (m *ChangeSettingsRequest) GetXdcrCheckpointInterval() uint32 {
-	if m != nil && m.XdcrCheckpointInterval != nil {
-		return *m.XdcrCheckpointInterval
-	}
-	return 0
+// request to change internal settings of all replications in the cluster.
+// effectively the same as ChangeGlobalSettingsRequest but with a different url
+type ChangeInternalSettingsRequest struct {
+	Settings         *Settings `protobuf:"bytes,1,req,name=settings" json:"settings,omitempty"`
+	XXX_unrecognized []byte    `json:"-"`
 }
 
-func (m *ChangeSettingsRequest) GetXdcrWorkerBatchSize() uint32 {
-	if m != nil && m.XdcrWorkerBatchSize != nil {
-		return *m.XdcrWorkerBatchSize
-	}
-	return 0
-}
+func (m *ChangeInternalSettingsRequest) Reset()         { *m = ChangeInternalSettingsRequest{} }
+func (m *ChangeInternalSettingsRequest) String() string { return proto.CompactTextString(m) }
+func (*ChangeInternalSettingsRequest) ProtoMessage()    {}
 
-func (m *ChangeSettingsRequest) GetXdcrDocBatchSizeKb() uint32 {
-	if m != nil && m.XdcrDocBatchSizeKb != nil {
-		return *m.XdcrDocBatchSizeKb
+func (m *ChangeInternalSettingsRequest) GetSettings() *Settings {
+	if m != nil {
+		return m.Settings
 	}
-	return 0
-}
-
-func (m *ChangeSettingsRequest) GetXdcrFailureRestartInterval() uint32 {
-	if m != nil && m.XdcrFailureRestartInterval != nil {
-		return *m.XdcrFailureRestartInterval
-	}
-	return 0
-}
-
-func (m *ChangeSettingsRequest) GetXdcrOptimisticReplicationThreshold() uint32 {
-	if m != nil && m.XdcrOptimisticReplicationThreshold != nil {
-		return *m.XdcrOptimisticReplicationThreshold
-	}
-	return 0
-}
-
-func (m *ChangeSettingsRequest) GetWorkerProcesses() uint32 {
-	if m != nil && m.WorkerProcesses != nil {
-		return *m.WorkerProcesses
-	}
-	return 0
-}
-
-func (m *ChangeSettingsRequest) GetHttpConnections() uint32 {
-	if m != nil && m.HttpConnections != nil {
-		return *m.HttpConnections
-	}
-	return 0
+	return nil
 }
 
 type GetStatisticsRequest struct {
-	Uuid             *string `protobuf:"bytes,1,req,name=uuid" json:"uuid,omitempty"`
-	FromBucket       *string `protobuf:"bytes,2,req,name=fromBucket" json:"fromBucket,omitempty"`
-	ToBucket         *string `protobuf:"bytes,3,req,name=toBucket" json:"toBucket,omitempty"`
-	StatsName        *string `protobuf:"bytes,4,req,name=statsName" json:"statsName,omitempty"`
-	XXX_unrecognized []byte  `json:"-"`
+	Uuid             *string                     `protobuf:"bytes,1,req,name=uuid" json:"uuid,omitempty"`
+	FromBucket       *string                     `protobuf:"bytes,2,req,name=fromBucket" json:"fromBucket,omitempty"`
+	ToBucket         *string                     `protobuf:"bytes,3,req,name=toBucket" json:"toBucket,omitempty"`
+	Stats            *GetStatisticsRequest_Stats `protobuf:"varint,4,req,name=stats,enum=protobuf.GetStatisticsRequest_Stats" json:"stats,omitempty"`
+	XXX_unrecognized []byte                      `json:"-"`
 }
 
 func (m *GetStatisticsRequest) Reset()         { *m = GetStatisticsRequest{} }
@@ -484,12 +470,14 @@ func (m *GetStatisticsRequest) GetToBucket() string {
 	return ""
 }
 
-func (m *GetStatisticsRequest) GetStatsName() string {
-	if m != nil && m.StatsName != nil {
-		return *m.StatsName
+func (m *GetStatisticsRequest) GetStats() GetStatisticsRequest_Stats {
+	if m != nil && m.Stats != nil {
+		return *m.Stats
 	}
-	return ""
+	return GetStatisticsRequest_docs_written
 }
 
 func init() {
+	proto.RegisterEnum("protobuf.CreateReplicationRequest_Mode", CreateReplicationRequest_Mode_name, CreateReplicationRequest_Mode_value)
+	proto.RegisterEnum("protobuf.GetStatisticsRequest_Stats", GetStatisticsRequest_Stats_name, GetStatisticsRequest_Stats_value)
 }
