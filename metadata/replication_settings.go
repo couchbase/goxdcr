@@ -20,6 +20,8 @@ const (
 /* struct ReplicationSettings
 *************************************/
 type ReplicationSettings struct {
+	//type - XMEM or CAPI
+	rep_type string `json:"type"`
 
 	//the filter expression
 	filter_expression string `json:"filter_exp"`
@@ -89,6 +91,14 @@ func DefaultSettings() *ReplicationSettings {
 		source_nozzle_per_node:           default_source_nozzle_per_node,
 		target_nozzle_per_node:           default_target_nozzle_per_node,
 		max_expected_replication_lag:     default_max_expected_replication_lag}
+}
+
+func (s *ReplicationSettings) Type() string {
+	return s.rep_type
+}
+
+func (s *ReplicationSettings) SetType(repType string) {
+	s.rep_type = repType
 }
 
 func (s *ReplicationSettings) CheckpointInterval() int {

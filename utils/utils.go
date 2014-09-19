@@ -14,6 +14,8 @@ import (
 	"net/url"
 	"reflect"
 	"strings"
+	"bytes"
+	"bufio"
 )
 
 type BucketBasicStats struct {
@@ -132,4 +134,19 @@ func Bucket(connectStr string, bucketName string) (*couchbase.Bucket, error) {
 		return nil, err
 	}
 	return bucket, err
+}
+
+func EncodeRequestIntoByteArray(r *http.Request) ([]byte, error) {
+	buffer := new(bytes.Buffer)
+	err := r.Write(buffer)
+	if err == nil {	
+		return buffer.Bytes(), nil
+	} else {
+		return nil, err
+	}
+}
+
+func DecodeRequestFromByteArray(data []byte) (*http.Request, error) {
+	buffer := bytes.NewBuffer(data)
+	return http.ReadRequest(bufio.NewReader(buffer))
 }

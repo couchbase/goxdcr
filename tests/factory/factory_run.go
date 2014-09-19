@@ -7,9 +7,10 @@ import (
 	"github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/parts"
 	factory "github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/factory"
 	sp "github.com/ysui6888/indexing/secondary/projector"
-	"github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/base"
-	"github.com/ysui6888/indexing/secondary/common"
-	"github.com/couchbaselabs/go-couchbase"
+//	"github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/base"
+"github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/utils"
+"github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/metadata"
+//	"github.com/couchbaselabs/go-couchbase"
 	"os"
 	"errors"
 )
@@ -73,10 +74,11 @@ func main() {
 }
 
 func invokeFactory() error {
-	var get_xdcr_config_callback factory.Get_XDCR_Config_Callback_Func = getXDCRConfig
-	var get_source_kv_topology_callback factory.Get_Source_KV_Topology_Callback_Func = getSourceTopology
-	var get_target_topology_callback factory.Get_Target_Topology_Callback_Func = getTargetTopology
-	fac := factory.XDCRFactory(&get_xdcr_config_callback, &get_source_kv_topology_callback, &get_target_topology_callback);
+	msvc := &mockMetadataSvc{}
+	mcisvc := &mockClusterInfoSvc{}
+	mxtsvc := &mockXDCRTopologySvc{}
+	fac := factory.NewXDCRFactory(msvc,mcisvc,mxtsvc)
+	
 	pl, err := fac.NewPipeline(TEST_TOPIC)
 	if err != nil {
 		return err
@@ -130,44 +132,111 @@ func invokeFactory() error {
 	return nil
 }
 
-// implementation of call back funcs required by xdcrFactory
-func getXDCRConfig(topic string) (*base.XDCRConfig, error) {
-	return &base.XDCRConfig {
-	SourceCluster: options.connectStr,
-	SourceBucketn: "default",
-	NumSourceConn: NUM_SOURCE_CONN,
-	TargetCluster: options.connectStr, 
-	TargetBucketn: "default",
-	NumTargetConn: NUM_TARGET_CONN,
-	}, nil
+type mockMetadataSvc struct {
 }
 
-func getSourceTopology(sourceCluster, sourceBucketn string) (string, *couchbase.Bucket, []uint16, error) {
-	bucket, err := common.ConnectBucket(sourceCluster, "default", sourceBucketn)
+func (mock_meta_svc *mockMetadataSvc) ReplicationSpec (replicationId string) (metadata.ReplicationSpecification, error) {
+	return *metadata.NewReplicationSpecification (options.connectStr,options.sourceBucket, options.connectStr, options.targetBucket, ""), nil
+}
+
+func (mock_meta_svc *mockMetadataSvc) AddReplicationSpec (spec metadata.ReplicationSpecification) error {
+	return nil
+}
+
+func (mock_meta_svc *mockMetadataSvc) SetReplicationSpec (spec metadata.ReplicationSpecification) error {
+	return nil
+}
+
+func (mock_meta_svc *mockMetadataSvc) DelReplicationSpec (replicationId string) error {
+	return nil
+}
+
+type mockClusterInfoSvc struct {
+}
+func (mock_ci_svc *mockClusterInfoSvc) GetClusterConnectionStr (ClusterUUID string) (string, error) {
+	return options.connectStr, nil
+}
+func (mock_ci_svc *mockClusterInfoSvc) GetMyActiveVBuckets (ClusterUUID string, bucketName string, NodeId string) ([]uint16, error) {
+	sourceCluster, err := mock_ci_svc.GetClusterConnectionStr(ClusterUUID)
 	if err != nil {
-		return "", nil, nil, err
+		return nil, err
+	}
+	b, err := utils.Bucket(sourceCluster, bucketName)
+	if err != nil {
+		return nil, err
 	}
 	
 	// in test env, there should be only one kv in bucket server list
-	kvaddr := bucket.VBServerMap().ServerList[0]
+	kvaddr := b.VBServerMap().ServerList[0]
 	
-	m, err := bucket.GetVBmap([]string{kvaddr})
+	m, err := b.GetVBmap([]string{kvaddr})
 	if err != nil {
-		return "", nil, nil, err
+		return nil, err
 	}
 	
 	vbList := m[kvaddr]
 	
-	return kvaddr, bucket, vbList, nil
+	return vbList, nil
 }
 
-func getTargetTopology(targetCluster, targetBucketn string) (map[string][]uint16, string, error) {
-	bucket, err := common.ConnectBucket(targetCluster, "default", targetBucketn)
+func (mock_ci_svc *mockClusterInfoSvc) GetServerList (ClusterUUID string, bucketName string) ([]string, error) {
+	cluster, err := mock_ci_svc.GetClusterConnectionStr(ClusterUUID)
 	if err != nil {
-		return nil, "", err
+		return nil, err
+	}
+	bucket, err := utils.Bucket(cluster, bucketName)
+	if err != nil {
+		return nil, err
 	}
 	
-	vbmap, err := bucket.GetVBmap(bucket.VBServerMap().ServerList) 
-	return vbmap, bucket.Password, err
+	// in test env, there should be only one kv in bucket server list
+	serverlist := bucket.VBServerMap().ServerList
+	
+	return serverlist, nil
+}
+
+func (mock_ci_svc *mockClusterInfoSvc) GetServerVBucketsMap (ClusterUUID string, bucketName string) (map[string][]uint16, error) {
+	cluster, err := mock_ci_svc.GetClusterConnectionStr(ClusterUUID)
+	if err != nil {
+		return nil, err
+	}
+	bucket, err := utils.Bucket(cluster, bucketName)
+	if err != nil {
+		return nil, err
+	}
+	
+	serverVBMap, err := bucket.GetVBmap (bucket.VBServerMap().ServerList)
+	return serverVBMap, err
+}
+
+func (mock_ci_svc *mockClusterInfoSvc) IsNodeCompatible (node string, version string) (bool, error) {
+	return true, nil
+}
+
+type mockXDCRTopologySvc struct {
+}
+
+
+func (mock_top_svc *mockXDCRTopologySvc) MyHost () (string, error) {
+	return options.connectStr, nil
+}
+	
+func (mock_top_svc *mockXDCRTopologySvc) MyAdminPort () (uint16, error) {
+	return 0, nil
+}
+	
+func (mock_top_svc *mockXDCRTopologySvc) MyKVNodes () ([]string, error) {
+	nodes := make([]string, 20)
+	return nodes, nil
+}
+	
+func (mock_top_svc *mockXDCRTopologySvc) XDCRTopology () (map[string]uint16, error) {
+	retmap := make(map[string]uint16)
+	return retmap, nil
+}
+	
+func (mock_top_svc *mockXDCRTopologySvc) XDCRCompToKVNodeMap () (map[string][]string, error) {
+	retmap := make(map[string][]string)
+	return retmap, nil
 }
 

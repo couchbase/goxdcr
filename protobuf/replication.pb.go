@@ -9,9 +9,18 @@ It is generated from these files:
 	replication.proto
 
 It has these top-level messages:
-	ReplicationRequest
-	ReplicationResponse
-	Error
+	GetRemoteClustersRequest
+	GetRemoteClustersResponse
+	CreateRemoteClusterRequest
+	RemoteClusterResponse
+	DeleteRemoteClusterRequest
+	CreateReplicationRequest
+	CreateReplicationResponse
+	DeleteReplicationRequest
+	ViewSettingsRequest
+	ViewSettingsResponse
+	ChangeSettingsRequest
+	GetStatisticsRequest
 */
 package protobuf
 
@@ -22,148 +31,462 @@ import math "math"
 var _ = proto.Marshal
 var _ = math.Inf
 
-// Request to start/stop/restart a XDCR replication
-type ReplicationRequest struct {
-	SourceCluster    *string `protobuf:"bytes,1,req,name=sourceCluster" json:"sourceCluster,omitempty"`
-	SourceBucket     *string `protobuf:"bytes,2,req,name=sourceBucket" json:"sourceBucket,omitempty"`
-	NumSourceConn    *uint32 `protobuf:"varint,3,opt,name=numSourceConn" json:"numSourceConn,omitempty"`
-	TargetCluster    *string `protobuf:"bytes,4,req,name=targetCluster" json:"targetCluster,omitempty"`
-	TargetBucket     *string `protobuf:"bytes,5,req,name=targetBucket" json:"targetBucket,omitempty"`
-	NumTargetConn    *uint32 `protobuf:"varint,6,opt,name=numTargetConn" json:"numTargetConn,omitempty"`
-	OpCode           *uint32 `protobuf:"varint,7,req,name=opCode" json:"opCode,omitempty"`
-	Forward          *bool   `protobuf:"varint,8,req,name=forward" json:"forward,omitempty"`
-	XXX_unrecognized []byte  `json:"-"`
+type GetRemoteClustersRequest struct {
+	XXX_unrecognized []byte `json:"-"`
 }
 
-func (m *ReplicationRequest) Reset()         { *m = ReplicationRequest{} }
-func (m *ReplicationRequest) String() string { return proto.CompactTextString(m) }
-func (*ReplicationRequest) ProtoMessage()    {}
+func (m *GetRemoteClustersRequest) Reset()         { *m = GetRemoteClustersRequest{} }
+func (m *GetRemoteClustersRequest) String() string { return proto.CompactTextString(m) }
+func (*GetRemoteClustersRequest) ProtoMessage()    {}
 
-func (m *ReplicationRequest) GetSourceCluster() string {
-	if m != nil && m.SourceCluster != nil {
-		return *m.SourceCluster
-	}
-	return ""
+type GetRemoteClustersResponse struct {
+	RemoteCluster    []*RemoteClusterResponse `protobuf:"bytes,1,rep,name=remoteCluster" json:"remoteCluster,omitempty"`
+	XXX_unrecognized []byte                   `json:"-"`
 }
 
-func (m *ReplicationRequest) GetSourceBucket() string {
-	if m != nil && m.SourceBucket != nil {
-		return *m.SourceBucket
-	}
-	return ""
-}
+func (m *GetRemoteClustersResponse) Reset()         { *m = GetRemoteClustersResponse{} }
+func (m *GetRemoteClustersResponse) String() string { return proto.CompactTextString(m) }
+func (*GetRemoteClustersResponse) ProtoMessage()    {}
 
-func (m *ReplicationRequest) GetNumSourceConn() uint32 {
-	if m != nil && m.NumSourceConn != nil {
-		return *m.NumSourceConn
-	}
-	return 0
-}
-
-func (m *ReplicationRequest) GetTargetCluster() string {
-	if m != nil && m.TargetCluster != nil {
-		return *m.TargetCluster
-	}
-	return ""
-}
-
-func (m *ReplicationRequest) GetTargetBucket() string {
-	if m != nil && m.TargetBucket != nil {
-		return *m.TargetBucket
-	}
-	return ""
-}
-
-func (m *ReplicationRequest) GetNumTargetConn() uint32 {
-	if m != nil && m.NumTargetConn != nil {
-		return *m.NumTargetConn
-	}
-	return 0
-}
-
-func (m *ReplicationRequest) GetOpCode() uint32 {
-	if m != nil && m.OpCode != nil {
-		return *m.OpCode
-	}
-	return 0
-}
-
-func (m *ReplicationRequest) GetForward() bool {
-	if m != nil && m.Forward != nil {
-		return *m.Forward
-	}
-	return false
-}
-
-// response to replication request
-type ReplicationResponse struct {
-	SourceCluster    *string `protobuf:"bytes,1,req,name=sourceCluster" json:"sourceCluster,omitempty"`
-	SourceBucket     *string `protobuf:"bytes,2,req,name=sourceBucket" json:"sourceBucket,omitempty"`
-	TargetCluster    *string `protobuf:"bytes,3,req,name=targetCluster" json:"targetCluster,omitempty"`
-	TargetBucket     *string `protobuf:"bytes,4,req,name=targetBucket" json:"targetBucket,omitempty"`
-	OpCode           *uint32 `protobuf:"varint,5,req,name=opCode" json:"opCode,omitempty"`
-	Err              *Error  `protobuf:"bytes,6,opt,name=err" json:"err,omitempty"`
-	XXX_unrecognized []byte  `json:"-"`
-}
-
-func (m *ReplicationResponse) Reset()         { *m = ReplicationResponse{} }
-func (m *ReplicationResponse) String() string { return proto.CompactTextString(m) }
-func (*ReplicationResponse) ProtoMessage()    {}
-
-func (m *ReplicationResponse) GetSourceCluster() string {
-	if m != nil && m.SourceCluster != nil {
-		return *m.SourceCluster
-	}
-	return ""
-}
-
-func (m *ReplicationResponse) GetSourceBucket() string {
-	if m != nil && m.SourceBucket != nil {
-		return *m.SourceBucket
-	}
-	return ""
-}
-
-func (m *ReplicationResponse) GetTargetCluster() string {
-	if m != nil && m.TargetCluster != nil {
-		return *m.TargetCluster
-	}
-	return ""
-}
-
-func (m *ReplicationResponse) GetTargetBucket() string {
-	if m != nil && m.TargetBucket != nil {
-		return *m.TargetBucket
-	}
-	return ""
-}
-
-func (m *ReplicationResponse) GetOpCode() uint32 {
-	if m != nil && m.OpCode != nil {
-		return *m.OpCode
-	}
-	return 0
-}
-
-func (m *ReplicationResponse) GetErr() *Error {
+func (m *GetRemoteClustersResponse) GetRemoteCluster() []*RemoteClusterResponse {
 	if m != nil {
-		return m.Err
+		return m.RemoteCluster
 	}
 	return nil
 }
 
-type Error struct {
-	Error            *string `protobuf:"bytes,1,req,name=error" json:"error,omitempty"`
+type CreateRemoteClusterRequest struct {
+	Uuid             *string `protobuf:"bytes,1,req,name=uuid" json:"uuid,omitempty"`
+	RefName          *string `protobuf:"bytes,2,req,name=refName" json:"refName,omitempty"`
+	Hostname         *string `protobuf:"bytes,3,req,name=hostname" json:"hostname,omitempty"`
+	Username         *string `protobuf:"bytes,4,req,name=username" json:"username,omitempty"`
+	Password         *string `protobuf:"bytes,5,req,name=password" json:"password,omitempty"`
 	XXX_unrecognized []byte  `json:"-"`
 }
 
-func (m *Error) Reset()         { *m = Error{} }
-func (m *Error) String() string { return proto.CompactTextString(m) }
-func (*Error) ProtoMessage()    {}
+func (m *CreateRemoteClusterRequest) Reset()         { *m = CreateRemoteClusterRequest{} }
+func (m *CreateRemoteClusterRequest) String() string { return proto.CompactTextString(m) }
+func (*CreateRemoteClusterRequest) ProtoMessage()    {}
 
-func (m *Error) GetError() string {
-	if m != nil && m.Error != nil {
-		return *m.Error
+func (m *CreateRemoteClusterRequest) GetUuid() string {
+	if m != nil && m.Uuid != nil {
+		return *m.Uuid
+	}
+	return ""
+}
+
+func (m *CreateRemoteClusterRequest) GetRefName() string {
+	if m != nil && m.RefName != nil {
+		return *m.RefName
+	}
+	return ""
+}
+
+func (m *CreateRemoteClusterRequest) GetHostname() string {
+	if m != nil && m.Hostname != nil {
+		return *m.Hostname
+	}
+	return ""
+}
+
+func (m *CreateRemoteClusterRequest) GetUsername() string {
+	if m != nil && m.Username != nil {
+		return *m.Username
+	}
+	return ""
+}
+
+func (m *CreateRemoteClusterRequest) GetPassword() string {
+	if m != nil && m.Password != nil {
+		return *m.Password
+	}
+	return ""
+}
+
+type RemoteClusterResponse struct {
+	RefName          *string `protobuf:"bytes,1,req,name=refName" json:"refName,omitempty"`
+	Uri              *string `protobuf:"bytes,2,req,name=uri" json:"uri,omitempty"`
+	ValidateURI      *string `protobuf:"bytes,3,req,name=validateURI" json:"validateURI,omitempty"`
+	Hostname         *string `protobuf:"bytes,4,req,name=hostname" json:"hostname,omitempty"`
+	Username         *string `protobuf:"bytes,5,req,name=username" json:"username,omitempty"`
+	Uuid             *string `protobuf:"bytes,6,req,name=uuid" json:"uuid,omitempty"`
+	Deleted          *bool   `protobuf:"varint,7,req,name=deleted" json:"deleted,omitempty"`
+	XXX_unrecognized []byte  `json:"-"`
+}
+
+func (m *RemoteClusterResponse) Reset()         { *m = RemoteClusterResponse{} }
+func (m *RemoteClusterResponse) String() string { return proto.CompactTextString(m) }
+func (*RemoteClusterResponse) ProtoMessage()    {}
+
+func (m *RemoteClusterResponse) GetRefName() string {
+	if m != nil && m.RefName != nil {
+		return *m.RefName
+	}
+	return ""
+}
+
+func (m *RemoteClusterResponse) GetUri() string {
+	if m != nil && m.Uri != nil {
+		return *m.Uri
+	}
+	return ""
+}
+
+func (m *RemoteClusterResponse) GetValidateURI() string {
+	if m != nil && m.ValidateURI != nil {
+		return *m.ValidateURI
+	}
+	return ""
+}
+
+func (m *RemoteClusterResponse) GetHostname() string {
+	if m != nil && m.Hostname != nil {
+		return *m.Hostname
+	}
+	return ""
+}
+
+func (m *RemoteClusterResponse) GetUsername() string {
+	if m != nil && m.Username != nil {
+		return *m.Username
+	}
+	return ""
+}
+
+func (m *RemoteClusterResponse) GetUuid() string {
+	if m != nil && m.Uuid != nil {
+		return *m.Uuid
+	}
+	return ""
+}
+
+func (m *RemoteClusterResponse) GetDeleted() bool {
+	if m != nil && m.Deleted != nil {
+		return *m.Deleted
+	}
+	return false
+}
+
+type DeleteRemoteClusterRequest struct {
+	RefName          *string `protobuf:"bytes,1,req,name=refName" json:"refName,omitempty"`
+	XXX_unrecognized []byte  `json:"-"`
+}
+
+func (m *DeleteRemoteClusterRequest) Reset()         { *m = DeleteRemoteClusterRequest{} }
+func (m *DeleteRemoteClusterRequest) String() string { return proto.CompactTextString(m) }
+func (*DeleteRemoteClusterRequest) ProtoMessage()    {}
+
+func (m *DeleteRemoteClusterRequest) GetRefName() string {
+	if m != nil && m.RefName != nil {
+		return *m.RefName
+	}
+	return ""
+}
+
+type CreateReplicationRequest struct {
+	FromBucket       *string `protobuf:"bytes,1,req,name=fromBucket" json:"fromBucket,omitempty"`
+	ToCluster        *string `protobuf:"bytes,2,req,name=toCluster" json:"toCluster,omitempty"`
+	ToBucket         *string `protobuf:"bytes,3,req,name=toBucket" json:"toBucket,omitempty"`
+	ReplicationType  *string `protobuf:"bytes,4,req,name=replicationType" json:"replicationType,omitempty"`
+	Forward          *bool   `protobuf:"varint,5,opt,name=forward,def=1" json:"forward,omitempty"`
+	XXX_unrecognized []byte  `json:"-"`
+}
+
+func (m *CreateReplicationRequest) Reset()         { *m = CreateReplicationRequest{} }
+func (m *CreateReplicationRequest) String() string { return proto.CompactTextString(m) }
+func (*CreateReplicationRequest) ProtoMessage()    {}
+
+const Default_CreateReplicationRequest_Forward bool = true
+
+func (m *CreateReplicationRequest) GetFromBucket() string {
+	if m != nil && m.FromBucket != nil {
+		return *m.FromBucket
+	}
+	return ""
+}
+
+func (m *CreateReplicationRequest) GetToCluster() string {
+	if m != nil && m.ToCluster != nil {
+		return *m.ToCluster
+	}
+	return ""
+}
+
+func (m *CreateReplicationRequest) GetToBucket() string {
+	if m != nil && m.ToBucket != nil {
+		return *m.ToBucket
+	}
+	return ""
+}
+
+func (m *CreateReplicationRequest) GetReplicationType() string {
+	if m != nil && m.ReplicationType != nil {
+		return *m.ReplicationType
+	}
+	return ""
+}
+
+func (m *CreateReplicationRequest) GetForward() bool {
+	if m != nil && m.Forward != nil {
+		return *m.Forward
+	}
+	return Default_CreateReplicationRequest_Forward
+}
+
+type CreateReplicationResponse struct {
+	Id               *string `protobuf:"bytes,1,req,name=id" json:"id,omitempty"`
+	Database         *string `protobuf:"bytes,2,req,name=database" json:"database,omitempty"`
+	XXX_unrecognized []byte  `json:"-"`
+}
+
+func (m *CreateReplicationResponse) Reset()         { *m = CreateReplicationResponse{} }
+func (m *CreateReplicationResponse) String() string { return proto.CompactTextString(m) }
+func (*CreateReplicationResponse) ProtoMessage()    {}
+
+func (m *CreateReplicationResponse) GetId() string {
+	if m != nil && m.Id != nil {
+		return *m.Id
+	}
+	return ""
+}
+
+func (m *CreateReplicationResponse) GetDatabase() string {
+	if m != nil && m.Database != nil {
+		return *m.Database
+	}
+	return ""
+}
+
+type DeleteReplicationRequest struct {
+	Id               *string `protobuf:"bytes,1,req,name=id" json:"id,omitempty"`
+	Forward          *bool   `protobuf:"varint,2,opt,name=forward,def=1" json:"forward,omitempty"`
+	XXX_unrecognized []byte  `json:"-"`
+}
+
+func (m *DeleteReplicationRequest) Reset()         { *m = DeleteReplicationRequest{} }
+func (m *DeleteReplicationRequest) String() string { return proto.CompactTextString(m) }
+func (*DeleteReplicationRequest) ProtoMessage()    {}
+
+const Default_DeleteReplicationRequest_Forward bool = true
+
+func (m *DeleteReplicationRequest) GetId() string {
+	if m != nil && m.Id != nil {
+		return *m.Id
+	}
+	return ""
+}
+
+func (m *DeleteReplicationRequest) GetForward() bool {
+	if m != nil && m.Forward != nil {
+		return *m.Forward
+	}
+	return Default_DeleteReplicationRequest_Forward
+}
+
+type ViewSettingsRequest struct {
+	XXX_unrecognized []byte `json:"-"`
+}
+
+func (m *ViewSettingsRequest) Reset()         { *m = ViewSettingsRequest{} }
+func (m *ViewSettingsRequest) String() string { return proto.CompactTextString(m) }
+func (*ViewSettingsRequest) ProtoMessage()    {}
+
+type ViewSettingsResponse struct {
+	Protocol                           *string `protobuf:"bytes,1,req,name=protocol" json:"protocol,omitempty"`
+	XdcrMaxConcurrentReps              *uint32 `protobuf:"varint,2,req,name=xdcrMaxConcurrentReps" json:"xdcrMaxConcurrentReps,omitempty"`
+	XdcrCheckpointInterval             *uint32 `protobuf:"varint,3,req,name=xdcrCheckpointInterval" json:"xdcrCheckpointInterval,omitempty"`
+	XdcrWorkerBatchSize                *uint32 `protobuf:"varint,4,req,name=xdcrWorkerBatchSize" json:"xdcrWorkerBatchSize,omitempty"`
+	XdcrDocBatchSizeKb                 *uint32 `protobuf:"varint,5,req,name=xdcrDocBatchSizeKb" json:"xdcrDocBatchSizeKb,omitempty"`
+	XdcrFailureRestartInterval         *uint32 `protobuf:"varint,6,req,name=xdcrFailureRestartInterval" json:"xdcrFailureRestartInterval,omitempty"`
+	XdcrOptimisticReplicationThreshold *uint32 `protobuf:"varint,7,req,name=xdcrOptimisticReplicationThreshold" json:"xdcrOptimisticReplicationThreshold,omitempty"`
+	WorkerProcesses                    *uint32 `protobuf:"varint,8,req,name=workerProcesses" json:"workerProcesses,omitempty"`
+	HttpConnections                    *uint32 `protobuf:"varint,9,req,name=httpConnections" json:"httpConnections,omitempty"`
+	XXX_unrecognized                   []byte  `json:"-"`
+}
+
+func (m *ViewSettingsResponse) Reset()         { *m = ViewSettingsResponse{} }
+func (m *ViewSettingsResponse) String() string { return proto.CompactTextString(m) }
+func (*ViewSettingsResponse) ProtoMessage()    {}
+
+func (m *ViewSettingsResponse) GetProtocol() string {
+	if m != nil && m.Protocol != nil {
+		return *m.Protocol
+	}
+	return ""
+}
+
+func (m *ViewSettingsResponse) GetXdcrMaxConcurrentReps() uint32 {
+	if m != nil && m.XdcrMaxConcurrentReps != nil {
+		return *m.XdcrMaxConcurrentReps
+	}
+	return 0
+}
+
+func (m *ViewSettingsResponse) GetXdcrCheckpointInterval() uint32 {
+	if m != nil && m.XdcrCheckpointInterval != nil {
+		return *m.XdcrCheckpointInterval
+	}
+	return 0
+}
+
+func (m *ViewSettingsResponse) GetXdcrWorkerBatchSize() uint32 {
+	if m != nil && m.XdcrWorkerBatchSize != nil {
+		return *m.XdcrWorkerBatchSize
+	}
+	return 0
+}
+
+func (m *ViewSettingsResponse) GetXdcrDocBatchSizeKb() uint32 {
+	if m != nil && m.XdcrDocBatchSizeKb != nil {
+		return *m.XdcrDocBatchSizeKb
+	}
+	return 0
+}
+
+func (m *ViewSettingsResponse) GetXdcrFailureRestartInterval() uint32 {
+	if m != nil && m.XdcrFailureRestartInterval != nil {
+		return *m.XdcrFailureRestartInterval
+	}
+	return 0
+}
+
+func (m *ViewSettingsResponse) GetXdcrOptimisticReplicationThreshold() uint32 {
+	if m != nil && m.XdcrOptimisticReplicationThreshold != nil {
+		return *m.XdcrOptimisticReplicationThreshold
+	}
+	return 0
+}
+
+func (m *ViewSettingsResponse) GetWorkerProcesses() uint32 {
+	if m != nil && m.WorkerProcesses != nil {
+		return *m.WorkerProcesses
+	}
+	return 0
+}
+
+func (m *ViewSettingsResponse) GetHttpConnections() uint32 {
+	if m != nil && m.HttpConnections != nil {
+		return *m.HttpConnections
+	}
+	return 0
+}
+
+type ChangeSettingsRequest struct {
+	Id                                 *string `protobuf:"bytes,1,opt,name=id" json:"id,omitempty"`
+	XdcrMaxConcurrentReps              *uint32 `protobuf:"varint,2,opt,name=xdcrMaxConcurrentReps" json:"xdcrMaxConcurrentReps,omitempty"`
+	XdcrCheckpointInterval             *uint32 `protobuf:"varint,3,opt,name=xdcrCheckpointInterval" json:"xdcrCheckpointInterval,omitempty"`
+	XdcrWorkerBatchSize                *uint32 `protobuf:"varint,4,opt,name=xdcrWorkerBatchSize" json:"xdcrWorkerBatchSize,omitempty"`
+	XdcrDocBatchSizeKb                 *uint32 `protobuf:"varint,5,opt,name=xdcrDocBatchSizeKb" json:"xdcrDocBatchSizeKb,omitempty"`
+	XdcrFailureRestartInterval         *uint32 `protobuf:"varint,6,opt,name=xdcrFailureRestartInterval" json:"xdcrFailureRestartInterval,omitempty"`
+	XdcrOptimisticReplicationThreshold *uint32 `protobuf:"varint,7,opt,name=xdcrOptimisticReplicationThreshold" json:"xdcrOptimisticReplicationThreshold,omitempty"`
+	WorkerProcesses                    *uint32 `protobuf:"varint,8,opt,name=workerProcesses" json:"workerProcesses,omitempty"`
+	HttpConnections                    *uint32 `protobuf:"varint,9,opt,name=httpConnections" json:"httpConnections,omitempty"`
+	XXX_unrecognized                   []byte  `json:"-"`
+}
+
+func (m *ChangeSettingsRequest) Reset()         { *m = ChangeSettingsRequest{} }
+func (m *ChangeSettingsRequest) String() string { return proto.CompactTextString(m) }
+func (*ChangeSettingsRequest) ProtoMessage()    {}
+
+func (m *ChangeSettingsRequest) GetId() string {
+	if m != nil && m.Id != nil {
+		return *m.Id
+	}
+	return ""
+}
+
+func (m *ChangeSettingsRequest) GetXdcrMaxConcurrentReps() uint32 {
+	if m != nil && m.XdcrMaxConcurrentReps != nil {
+		return *m.XdcrMaxConcurrentReps
+	}
+	return 0
+}
+
+func (m *ChangeSettingsRequest) GetXdcrCheckpointInterval() uint32 {
+	if m != nil && m.XdcrCheckpointInterval != nil {
+		return *m.XdcrCheckpointInterval
+	}
+	return 0
+}
+
+func (m *ChangeSettingsRequest) GetXdcrWorkerBatchSize() uint32 {
+	if m != nil && m.XdcrWorkerBatchSize != nil {
+		return *m.XdcrWorkerBatchSize
+	}
+	return 0
+}
+
+func (m *ChangeSettingsRequest) GetXdcrDocBatchSizeKb() uint32 {
+	if m != nil && m.XdcrDocBatchSizeKb != nil {
+		return *m.XdcrDocBatchSizeKb
+	}
+	return 0
+}
+
+func (m *ChangeSettingsRequest) GetXdcrFailureRestartInterval() uint32 {
+	if m != nil && m.XdcrFailureRestartInterval != nil {
+		return *m.XdcrFailureRestartInterval
+	}
+	return 0
+}
+
+func (m *ChangeSettingsRequest) GetXdcrOptimisticReplicationThreshold() uint32 {
+	if m != nil && m.XdcrOptimisticReplicationThreshold != nil {
+		return *m.XdcrOptimisticReplicationThreshold
+	}
+	return 0
+}
+
+func (m *ChangeSettingsRequest) GetWorkerProcesses() uint32 {
+	if m != nil && m.WorkerProcesses != nil {
+		return *m.WorkerProcesses
+	}
+	return 0
+}
+
+func (m *ChangeSettingsRequest) GetHttpConnections() uint32 {
+	if m != nil && m.HttpConnections != nil {
+		return *m.HttpConnections
+	}
+	return 0
+}
+
+type GetStatisticsRequest struct {
+	Uuid             *string `protobuf:"bytes,1,req,name=uuid" json:"uuid,omitempty"`
+	FromBucket       *string `protobuf:"bytes,2,req,name=fromBucket" json:"fromBucket,omitempty"`
+	ToBucket         *string `protobuf:"bytes,3,req,name=toBucket" json:"toBucket,omitempty"`
+	StatsName        *string `protobuf:"bytes,4,req,name=statsName" json:"statsName,omitempty"`
+	XXX_unrecognized []byte  `json:"-"`
+}
+
+func (m *GetStatisticsRequest) Reset()         { *m = GetStatisticsRequest{} }
+func (m *GetStatisticsRequest) String() string { return proto.CompactTextString(m) }
+func (*GetStatisticsRequest) ProtoMessage()    {}
+
+func (m *GetStatisticsRequest) GetUuid() string {
+	if m != nil && m.Uuid != nil {
+		return *m.Uuid
+	}
+	return ""
+}
+
+func (m *GetStatisticsRequest) GetFromBucket() string {
+	if m != nil && m.FromBucket != nil {
+		return *m.FromBucket
+	}
+	return ""
+}
+
+func (m *GetStatisticsRequest) GetToBucket() string {
+	if m != nil && m.ToBucket != nil {
+		return *m.ToBucket
+	}
+	return ""
+}
+
+func (m *GetStatisticsRequest) GetStatsName() string {
+	if m != nil && m.StatsName != nil {
+		return *m.StatsName
 	}
 	return ""
 }
