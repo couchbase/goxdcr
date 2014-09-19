@@ -1,6 +1,6 @@
 // replication manager's adminport.
 
-package replicationmanager
+package replication_manager
 
 import (
 	/*"net/http"
@@ -8,22 +8,22 @@ import (
 	"fmt"
 	"strings"
 	"errors"*/
+	log "github.com/Xiaomei-Zhang/couchbase_goxdcr/util"
+	base "github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/base"
+	"github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/protobuf"
 	ap "github.com/couchbase/indexing/secondary/adminport"
 	c "github.com/couchbase/indexing/secondary/common"
-	"github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/protobuf"
-	base "github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/base"
-	log "github.com/Xiaomei-Zhang/couchbase_goxdcr/util"
 	//utils "github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/utils"
 )
 
-const(
-	REMOTE_CLUSTERS_PATH = "pools/default/remoteClusters"
-	CREATE_REPLICATION_PATH = "controller/createReplication"
-	INTERNAL_SETTINGS_PATH = "internalSettings"
-	SETTINGS_REPLICATION_PATH = "settings/replications"
+const (
+	REMOTE_CLUSTERS_PATH           = "pools/default/remoteClusters"
+	CREATE_REPLICATION_PATH        = "controller/createReplication"
+	INTERNAL_SETTINGS_PATH         = "internalSettings"
+	SETTINGS_REPLICATION_PATH      = "settings/replications"
 	DELETE_REPLICATION_PATH_PREFIX = "controller/cancelXDCR"
-	STATISTICS_PATH_PREFIX = "pools/default/buckets"
-	DYNAMIC_PATH_ID = "/dynamic"
+	STATISTICS_PATH_PREFIX         = "pools/default/buckets"
+	DYNAMIC_PATH_ID                = "/dynamic"
 )
 
 var StaticPaths = [4]string{REMOTE_CLUSTERS_PATH, CREATE_REPLICATION_PATH, INTERNAL_SETTINGS_PATH, SETTINGS_REPLICATION_PATH}
@@ -41,12 +41,15 @@ var reqViewSettings = &protobuf.ViewSettingsRequest{}
 var reqChangeSettings = &protobuf.ChangeSettingsRequest{}
 var reqGetStatistics = &protobuf.GetStatisticsRequest{}
 
+type xdcrRestHandler struct {
+}
+
 // admin-port entry point
-func mainAdminPort(laddr string, rm *ReplicationManager) {
+func mainAdminPort(laddr string, h *xdcrRestHandler) {
 	var err error
 
 	reqch := make(chan ap.Request)
-	server := ap.NewHTTPServer("xdcr", laddr, base.AdminportURLPrefix, reqch/*TODO, new(XDCRHandler)*/)
+	server := ap.NewHTTPServer("xdcr", laddr, base.AdminportURLPrefix, reqch /*TODO, new(XDCRHandler)*/)
 	server.Register(reqGetRemoteClusters)
 	server.Register(reqCreateRemoteCluster)
 	server.Register(reqDeleteRemoteCluster)
@@ -55,7 +58,7 @@ func mainAdminPort(laddr string, rm *ReplicationManager) {
 	server.Register(reqViewSettings)
 	server.Register(reqChangeSettings)
 	server.Register(reqGetStatistics)
-	
+
 	server.Start()
 
 loop:
@@ -66,7 +69,7 @@ loop:
 				break loop
 			}
 			msg := req.GetMessage()
-			if response, err := rm.handleRequest(msg, server); err == nil {
+			if response, err := h.handleRequest(msg, server); err == nil {
 				req.Send(response)
 			} else {
 				req.SendError(err)
@@ -80,126 +83,151 @@ loop:
 	server.Stop()
 }
 
-func (rm *ReplicationManager) handleRequest(
+func (h *xdcrRestHandler) handleRequest(
 	msg ap.MessageMarshaller,
 	server ap.Server) (response ap.MessageMarshaller, err error) {
 
 	switch request := msg.(type) {
 	case *protobuf.GetRemoteClustersRequest:
-		response = rm.doGetRemoteClustersRequest(request)
+		response = h.doGetRemoteClustersRequest(request)
 	case *protobuf.CreateRemoteClusterRequest:
-		response = rm.doCreateRemoteClusterRequest(request)
+		response = h.doCreateRemoteClusterRequest(request)
 	case *protobuf.DeleteRemoteClusterRequest:
-		response = rm.doDeleteRemoteClusterRequest(request)
+		response = h.doDeleteRemoteClusterRequest(request)
 	case *protobuf.CreateReplicationRequest:
-		response = rm.doCreateReplicationRequest(request)
+		response = h.doCreateReplicationRequest(request)
 	case *protobuf.DeleteReplicationRequest:
-		response = rm.doDeleteReplicationRequest(request)
+		response = h.doDeleteReplicationRequest(request)
 	case *protobuf.ViewSettingsRequest:
-		response = rm.doViewSettingsRequest(request)
+		response = h.doViewSettingsRequest(request)
 	case *protobuf.ChangeSettingsRequest:
-		response = rm.doChangeSettingsRequest(request)
+		response = h.doChangeSettingsRequest(request)
 	case *protobuf.GetStatisticsRequest:
-		response = rm.doGetStatisticsRequest(request)
+		response = h.doGetStatisticsRequest(request)
 	default:
 		err = c.ErrorInvalidRequest
 	}
 	return response, err
 }
 
-func (rm *ReplicationManager) doGetRemoteClustersRequest(request *protobuf.GetRemoteClustersRequest) ap.MessageMarshaller {
+func (h *xdcrRestHandler) doGetRemoteClustersRequest(request *protobuf.GetRemoteClustersRequest) ap.MessageMarshaller {
 	logger_ap.Debugf("doGetRemoteClustersRequest\n")
 
 	return nil
 }
 
-func (rm *ReplicationManager) doCreateRemoteClusterRequest(request *protobuf.CreateRemoteClusterRequest) ap.MessageMarshaller {
+func (h *xdcrRestHandler) doCreateRemoteClusterRequest(request *protobuf.CreateRemoteClusterRequest) ap.MessageMarshaller {
 	logger_ap.Debugf("doCreateRemoteClusterRequest\n")
 
 	return nil
 }
 
-func (rm *ReplicationManager) doDeleteRemoteClusterRequest(request *protobuf.DeleteRemoteClusterRequest) ap.MessageMarshaller {
+func (h *xdcrRestHandler) doDeleteRemoteClusterRequest(request *protobuf.DeleteRemoteClusterRequest) ap.MessageMarshaller {
 	logger_ap.Debugf("doDeleteRemoteClusterRequest\n")
 
 	return nil
 }
 
-func (rm *ReplicationManager) doDeleteReplicationRequest(request *protobuf.DeleteReplicationRequest) ap.MessageMarshaller {
+func (h *xdcrRestHandler) doDeleteReplicationRequest(request *protobuf.DeleteReplicationRequest) ap.MessageMarshaller {
 	logger_ap.Debugf("doDeleteReplicationRequest\n")
 
 	return nil
 }
 
-func (rm *ReplicationManager) doViewSettingsRequest(request *protobuf.ViewSettingsRequest) ap.MessageMarshaller {
+func (h *xdcrRestHandler) doViewSettingsRequest(request *protobuf.ViewSettingsRequest) ap.MessageMarshaller {
 	logger_ap.Debugf("doViewSettingsRequest\n")
 
 	return nil
 }
 
-func (rm *ReplicationManager) doChangeSettingsRequest(request *protobuf.ChangeSettingsRequest) ap.MessageMarshaller {
+func (h *xdcrRestHandler) doChangeSettingsRequest(request *protobuf.ChangeSettingsRequest) ap.MessageMarshaller {
 	logger_ap.Debugf("doChangeSettingsRequest\n")
 
 	return nil
 }
 
-func (rm *ReplicationManager) doGetStatisticsRequest(request *protobuf.GetStatisticsRequest) ap.MessageMarshaller {
+func (h *xdcrRestHandler) doGetStatisticsRequest(request *protobuf.GetStatisticsRequest) ap.MessageMarshaller {
 	logger_ap.Debugf("doGetStatisticsRequest\n")
 
 	return nil
 }
 
-func (rm *ReplicationManager) doCreateReplicationRequest(request *protobuf.CreateReplicationRequest) ap.MessageMarshaller {
+func (h *xdcrRestHandler) doCreateReplicationRequest(request *protobuf.CreateReplicationRequest) ap.MessageMarshaller {
 	logger_ap.Debugf("doCreateReplicationRequest\n")
-	
-	 rm.StartReplication(request)
-	
+
+	h.startReplication(request)
+
 	// forward replication request to other KV nodes involved
-	rm.forwardReplicationRequest(request)
+	h.forwardReplicationRequest(request)
 
 	// TODO
 	return nil
 }
 
-func (rm *ReplicationManager) forwardReplicationRequest(request *protobuf.CreateReplicationRequest) error {
-	if !request.GetForward() {
-	    // do nothing if "forward" flag in request is false
-	    // this would happen if the request itself is a forwarded request
-		return nil;
-	}
+func (h *xdcrRestHandler) startReplication(request *protobuf.CreateReplicationRequest) error {
+	//TODO: implement it
+	tocluster := request.GetToCluster ()
+	tobucket := request.GetToBucket()
+	frombucket := request.GetFromBucket()
+	fromcluster := XDCRCompTopologyService().MyCluster()
 	
+	err := CreateReplication(fromcluster, frombucket, tocluster, tobucket, ""/*filter_name*/)
+	return err
+}
+
+func (h *xdcrRestHandler) forwardReplicationRequest(request *protobuf.CreateReplicationRequest) error {
+	if !request.GetForward() {
+		// do nothing if "forward" flag in request is false
+		// this would happen if the request itself is a forwarded request
+		return nil
+	}
+
 	// turn off "forward" flag to prevent the forwarded request from being forwarded again
 	off := false
 	request.Forward = &off
-	
-	deployConfig, err := rm.GetXDCRDeployConfig()
+
+//	deployConfig, err := h.GetXDCRDeployConfig()
+//	if err != nil {
+//		return err
+//	}
+//
+//	// TODO get current xdcr node addr
+//	curXDCRAddr := "test"
+//
+//	for xdcrAddr := range deployConfig.XDCRNodeMap {
+//		if xdcrAddr != curXDCRAddr {
+//			err := rm.forwardReplicationRequestToXDCRNode(request, xdcrAddr)
+//		}
+//	}
+
+	myAddr, err := XDCRCompTopologyService().MyHost () 
 	if err != nil {
 		return err
 	}
 	
-	// TODO get current xdcr node addr
-	curXDCRAddr := "test"
-	
-	for xdcrAddr := range deployConfig.XDCRNodeMap {
-		if xdcrAddr != curXDCRAddr {
-			err := rm.forwardReplicationRequestToXDCRNode(request, xdcrAddr)
-			if err != nil {
-			// TODO what if forward fails. How do we cancel previously forwarded requests? 
-			}
+	xdcrNodesMap, err := XDCRCompTopologyService().XDCRTopology()
+	if err != nil {
+		return err
+	}
+	for xdcrNode, port := range xdcrNodesMap {
+		if xdcrNode != myAddr {
+			err := h.forwardReplicationRequestToXDCRNode(request, xdcrNode, port)
+//			if err != nil {
+//				// TODO what if forward fails. How do we cancel previously forwarded requests?
+//			}
 		}
 	}
-	
-	return nil
+	return err
 }
 
-func (rm *ReplicationManager) forwardReplicationRequestToXDCRNode(request *protobuf.CreateReplicationRequest, xdcrAddr string) error {
+func (h *xdcrRestHandler) forwardReplicationRequestToXDCRNode(request *protobuf.CreateReplicationRequest, xdcrAddr string, port int) error {
 	var response ap.MessageMarshaller
 	client := ap.NewHTTPClient(xdcrAddr, "")
 	return client.Request(request, response)
 }
 
 /* TODO enable after secondary index changes are checked in
-//XDCR implementation of RequestHandler 
+//XDCR implementation of RequestHandler
 type XDCRHandler struct{
 	ap.Handler
 }
@@ -207,7 +235,7 @@ type XDCRHandler struct{
 // handles incoming requests
 func (h *XDCRHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	var err error
-	
+
 	s := h.GetServer()
 
 	logger_ap.Infof("Request with path %v\n", r.URL.Path)
@@ -218,29 +246,29 @@ func (h *XDCRHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			logger_ap.Errorf("adminport.request.recovered `%v`\n",  r)
 		} else if err != nil {
 			logger_ap.Errorf("%v\n",err)
-		} 
+		}
 	}()
 
 	var msg ap.MessageMarshaller
 	// encode the entire http request into a byte array for use by MessageMarshaller
 	data, err := utils.EncodeRequestIntoByteArray(r)
 	if err != nil {
-	
+
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	
+
 	// look up name of message based on http request
 	name, err := h.GetMessageNameFromRequest(r)
 	if err != nil {
-	
+
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	
+
 	// get the message corresponsing to message name
 	msg = s.GetMessages()[name]
-	
+
 	// Get an instance of request type and decode request into that.
 	typeOfMsg := reflect.ValueOf(msg).Elem().Type()
 	msg = reflect.New(typeOfMsg).Interface().(ap.MessageMarshaller)
@@ -286,9 +314,9 @@ func (h *XDCRHandler) GetMessageNameFromRequest(r *http.Request) (string, error)
 			// if path in url is a static path, use it as name
 			name = path
 			break
-		} 
+		}
 	}
-	
+
 	if len(name) == 0 {
 		// if path does not match any static paths, check if it has a prefix that matches dynamic path prefixes
 		for _, dynPathPrefix := range DynamicPathPrefixes {
@@ -298,11 +326,10 @@ func (h *XDCRHandler) GetMessageNameFromRequest(r *http.Request) (string, error)
 			}
 		}
 	}
-	
+
 	if len(name) == 0 {
 		return "", errors.New(fmt.Sprintf("Invalid path, %v, in http Request.", path))
 	} else {
 		return name, nil
 	}
 }*/
-

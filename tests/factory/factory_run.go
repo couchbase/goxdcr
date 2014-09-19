@@ -249,3 +249,6 @@ func (mock_top_svc *mockXDCRTopologySvc) XDCRCompToKVNodeMap () (map[string][]st
 	return retmap, nil
 }
 
+func (mock_top_svc *mockXDCRTopologySvc)  MyCluster() (string, error) {
+	return options.connectStr, nil
+}

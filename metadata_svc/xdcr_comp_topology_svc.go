@@ -24,6 +24,9 @@ type XDCRCompTopologySvc interface {
 	//the list of kv nodes (hostname:port) that this xdcr comp is responsible for
 	MyKVNodes () ([]string, error)
 	
+	//the cluster XDCR is serving
+	MyCluster() (string, error)
+	
 	//return a map with the key to be the host name that a xdcr comp is 
 	//running on and the value to be the admin port number on that host 
 	XDCRTopology () (map[string]uint16, error)
