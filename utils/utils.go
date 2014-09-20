@@ -16,6 +16,7 @@ import (
 	"strings"
 	"bytes"
 	"bufio"
+    "code.google.com/p/goprotobuf/proto"
 )
 
 type BucketBasicStats struct {
@@ -136,7 +137,8 @@ func Bucket(connectStr string, bucketName string) (*couchbase.Bucket, error) {
 	return bucket, err
 }
 
-func EncodeRequestIntoByteArray(r *http.Request) ([]byte, error) {
+// encode http request into a byte array
+func EncodeHttpRequestIntoByteArray(r *http.Request) ([]byte, error) {
 	buffer := new(bytes.Buffer)
 	err := r.Write(buffer)
 	if err == nil {	
@@ -146,7 +148,61 @@ func EncodeRequestIntoByteArray(r *http.Request) ([]byte, error) {
 	}
 }
 
-func DecodeRequestFromByteArray(data []byte) (*http.Request, error) {
+// decode http request from byte array
+func DecodeHttpRequestFromByteArray(data []byte) (*http.Request, error) {
 	buffer := bytes.NewBuffer(data)
 	return http.ReadRequest(bufio.NewReader(buffer))
+}
+
+// given a http request encoded as a byte array, extract request body and 
+// decode a message from it
+// this method should be used for messages with static paths, where message 
+// content depends on only request body and nothing else
+func DecodeMessageFromByteArray(data []byte, msg proto.Message) error {
+	request, err := DecodeHttpRequestFromByteArray(data)
+	if err != nil {
+		return err
+	}
+	
+	return DecodeMessageFromHttpRequest(request, msg)
+}
+
+
+// given a http request, extract requesy body and 
+// decode a message from it
+func DecodeMessageFromHttpRequest(request *http.Request, msg proto.Message) error {
+	requestBody := make([]byte, request.ContentLength)
+	err := RequestRead(request.Body, requestBody)
+	if err != nil {
+		return err
+	} 
+	
+	return proto.Unmarshal(requestBody, msg)
+}
+
+// decode replication id from http request
+func DecodeReplicationIdFromHttpRequest(request *http.Request, pathPrefix string) (string, error) {
+	if len(request.URL.Path) <= len(pathPrefix) {
+		return "", errors.New(fmt.Sprintf("Invalid path, %v, in http request.", request.URL.Path))
+	}
+	return request.URL.Path[len(pathPrefix):], nil
+}
+
+// TODO may expose and reuse the same func in si
+func RequestRead(r io.Reader, data []byte) (err error) {
+	var c int
+
+	n, start := len(data), 0
+	for n > 0 && err == nil {
+		// Per http://golang.org/pkg/io/#Reader, it is valid for Read to
+		// return EOF with non-zero number of bytes at the end of the
+		// input stream
+		c, err = r.Read(data[start:])
+		n -= c
+		start += c
+	}
+	if n == 0 {
+		return nil
+	}
+	return err
 }

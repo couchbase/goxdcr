@@ -196,7 +196,7 @@ func (h *xdcrRestHandler) forwardReplicationRequest(request *protobuf.CreateRepl
 	}
 	for xdcrNode, port := range xdcrNodesMap {
 		if xdcrNode != myAddr {
-			err := h.forwardReplicationRequestToXDCRNode(request, xdcrNode, int(port))
+			err = h.forwardReplicationRequestToXDCRNode(request, xdcrNode, int(port))
 //			if err != nil {
 //				// TODO what if forward fails. How do we cancel previously forwarded requests?
 //			}

@@ -6,7 +6,7 @@ message CreateReplicationRequest {
  	required string    fromBucket        = 1; // name of source bucket
  	required string    toCluster         = 2; // name of the remote cluster reference
  	required string    toBucket          = 3; // name of target bucket
- 	required string    filterName        = 4; // name of filter used for the replication
+ 	optional string    filterName        = 4; // name of filter used for the replication
  	enum Mode {
  	    capi = 0;  // use CAPI nozzles
  		xmem = 1;  // use XMEM nozzles
@@ -65,6 +65,7 @@ message GetStatisticsRequest {
 	required string    uuid              = 1; // uuid of the remote cluster 
 	required string    fromBucket        = 2; // name of source bucket
 	required string    toBucket          = 3; // name of target bucket
+	optional string    filterName        = 4; // name of filter used for the replication
 	enum Stats {
 		docs_written = 0; // number of documents written to destination cluster via XDCR
 		data_replicated = 1; // size of data replicated in bytes
@@ -87,7 +88,7 @@ message GetStatisticsRequest {
 		time_working = 18;
 		timeout_percentage_map = 19;  // The map of vbucket id and  the percentage of timed-out data for this VBucket during this statistics interval		
 	}
-	required Stats    stats         = 4; // name of statistics, e.g., docs_written
+	required Stats    stats         = 5; // name of statistics, e.g., docs_written
 }
 
 /* TODO do we need to have one response message for each statistics type?

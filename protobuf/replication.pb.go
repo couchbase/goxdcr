@@ -152,7 +152,7 @@ type CreateReplicationRequest struct {
 	FromBucket       *string                        `protobuf:"bytes,1,req,name=fromBucket" json:"fromBucket,omitempty"`
 	ToCluster        *string                        `protobuf:"bytes,2,req,name=toCluster" json:"toCluster,omitempty"`
 	ToBucket         *string                        `protobuf:"bytes,3,req,name=toBucket" json:"toBucket,omitempty"`
-	FilterName       *string                        `protobuf:"bytes,4,req,name=filterName" json:"filterName,omitempty"`
+	FilterName       *string                        `protobuf:"bytes,4,opt,name=filterName" json:"filterName,omitempty"`
 	Mode             *CreateReplicationRequest_Mode `protobuf:"varint,5,req,name=mode,enum=protobuf.CreateReplicationRequest_Mode,def=0" json:"mode,omitempty"`
 	Settings         *Settings                      `protobuf:"bytes,6,opt,name=settings" json:"settings,omitempty"`
 	Forward          *bool                          `protobuf:"varint,7,opt,name=forward,def=1" json:"forward,omitempty"`
@@ -441,7 +441,8 @@ type GetStatisticsRequest struct {
 	Uuid             *string                     `protobuf:"bytes,1,req,name=uuid" json:"uuid,omitempty"`
 	FromBucket       *string                     `protobuf:"bytes,2,req,name=fromBucket" json:"fromBucket,omitempty"`
 	ToBucket         *string                     `protobuf:"bytes,3,req,name=toBucket" json:"toBucket,omitempty"`
-	Stats            *GetStatisticsRequest_Stats `protobuf:"varint,4,req,name=stats,enum=protobuf.GetStatisticsRequest_Stats" json:"stats,omitempty"`
+	FilterName       *string                     `protobuf:"bytes,4,opt,name=filterName" json:"filterName,omitempty"`
+	Stats            *GetStatisticsRequest_Stats `protobuf:"varint,5,req,name=stats,enum=protobuf.GetStatisticsRequest_Stats" json:"stats,omitempty"`
 	XXX_unrecognized []byte                      `json:"-"`
 }
 
@@ -466,6 +467,13 @@ func (m *GetStatisticsRequest) GetFromBucket() string {
 func (m *GetStatisticsRequest) GetToBucket() string {
 	if m != nil && m.ToBucket != nil {
 		return *m.ToBucket
+	}
+	return ""
+}
+
+func (m *GetStatisticsRequest) GetFilterName() string {
+	if m != nil && m.FilterName != nil {
+		return *m.FilterName
 	}
 	return ""
 }
