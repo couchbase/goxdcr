@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
+	"github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/metadata"
 )
 
 const(
@@ -35,6 +36,132 @@ const(
 var statsPathRegexp, _ = regexp.Compile(STATS_PATH_PATTERN)
 
 var logger_repmsg *log.CommonLogger = log.NewLogger("ReplicationMessages", log.LogLevelInfo)
+
+// create new Settings message from ReplicationSettings object
+func NewInternalSettings(replSettings *metadata.ReplicationSettings) *InternalSettings {
+	checkpointInterval := uint32(replSettings.CheckpointInterval())
+	batchCount :=  uint32(replSettings.BatchCount())
+	batchSize :=           uint32(replSettings.BatchSize()) 
+	failureRestartInterval :=   uint32(replSettings.FailureRestartInterval())
+	optimisticReplicationThreshold := uint32(replSettings.OptimisticReplicationThreshold())
+	httpConnections :=           uint32(replSettings.HttpConnection())
+	sourceNozzlePerNode :=   uint32(replSettings.SourceNozzlesPerNode())
+	targetNozzlePerNode :=   uint32(replSettings.TargetNozzlesPerNode())
+	maxExpectedReplicationLag := uint32(replSettings.MaxExpectedReplicationLag())
+	timeoutPercentageCap := uint32(replSettings.TimeoutPercentageCap())
+	return &InternalSettings{                  
+		XdcrCheckpointInterval:  &checkpointInterval,       
+		XdcrWorkerBatchSize:       &batchCount,         
+		XdcrDocBatchSizeKb:           &batchSize,        
+		XdcrFailureRestartInterval:   &failureRestartInterval,        
+		XdcrOptimisticReplicationThreshold: &optimisticReplicationThreshold,  
+		HttpConnections:           &httpConnections,       
+		XdcrSourceNozzlePerNode:   &sourceNozzlePerNode,           
+		XdcrTargetNozzlePerNode:   &targetNozzlePerNode,           
+		XdcrMaxExpectedReplicationLag: &maxExpectedReplicationLag,       
+		XdcrTimeoutPercentageCap:  &timeoutPercentageCap,
+	}
+}
+
+// convert InternalSettings to map with keys in sync with those in metadata.ReplicationSettings
+func InternalSettingsToMap(settings *InternalSettings) map[string]interface{} {
+	settings_map := make (map[string]interface{})
+	checkpointInternal := settings.GetXdcrCheckpointInterval()
+	if checkpointInternal != 0 {
+		settings_map[metadata.CheckpointInterval] = checkpointInternal
+	}
+	batchCount := settings.GetXdcrWorkerBatchSize()
+	if batchCount != 0 {
+		settings_map[metadata.BatchCount] = batchCount
+	}
+	batchSize := settings.GetXdcrDocBatchSizeKb()
+	if batchSize != 0 {
+		settings_map[metadata.BatchSize] = batchSize
+	}
+	failureRestartInterval := settings.GetXdcrFailureRestartInterval()
+	if failureRestartInterval != 0 {
+		settings_map[metadata.FailureRestartInterval] = failureRestartInterval
+	}
+	optimisticReplicationThreshold := settings.GetXdcrOptimisticReplicationThreshold()
+	if optimisticReplicationThreshold != 0 {
+		settings_map[metadata.OptimisticReplicationThreshold] = optimisticReplicationThreshold
+	}
+	httpConnection := settings.GetHttpConnections()
+	if httpConnection != 0 {
+		settings_map[metadata.HttpConnection] = httpConnection
+	}
+	sourceNozzlePerNode := settings.GetXdcrSourceNozzlePerNode()
+	if sourceNozzlePerNode != 0 {
+		settings_map[metadata.SourceNozzlePerNode] = sourceNozzlePerNode
+	}	
+	targetNozzlePerNode := settings.GetXdcrTargetNozzlePerNode()
+	if targetNozzlePerNode != 0 {
+		settings_map[metadata.TargetNozzlePerNode] = targetNozzlePerNode
+	}	
+	maxExpectedReplicationLag := settings.GetXdcrMaxExpectedReplicationLag()
+	if maxExpectedReplicationLag != 0 {
+		settings_map[metadata.MaxExpectedReplicationLag] = maxExpectedReplicationLag
+	}	
+	timeoutPercentageCap := settings.GetXdcrTimeoutPercentageCap()
+	if timeoutPercentageCap != 0 {
+		settings_map[metadata.TimeoutPercentageCap] = timeoutPercentageCap
+	}	
+	
+	return settings_map
+}
+
+// convert ReplicationSettings to map with keys in sync with those in metadata.ReplicationSettings
+func ReplicationSettingsToMap(settings *ReplicationSettings) map[string]interface{} {
+	settings_map := make (map[string]interface{})
+	replicationType := settings.GetXdcrReplicationType()
+	settings_map[metadata.ReplicationType] = replicationType
+	filterExpression := settings.GetXdcrFilterExpression()
+	if len(filterExpression) > 0 {
+		settings_map[metadata.FilterExpression] = filterExpression
+	}
+	active := settings.GetActive()
+	settings_map[metadata.Active] = active
+	
+	internalSettings_map := InternalSettingsToMap(settings.GetInternalSettings())
+	for key, value := range internalSettings_map {
+		settings_map[key] = value
+	}
+	
+	return settings_map
+}
+
+// create a new DeleteReplication request for specified replicationId
+func NewDeleteReplicationRequest(replicationId string) *DeleteReplicationRequest {
+	forward := false
+	return &DeleteReplicationRequest{
+		Id: &replicationId,
+		Forward: &forward,
+	}
+}
+
+// create a new CreateReplication response
+func NewCreateReplicationResponse(replicationId string) *CreateReplicationResponse {
+	return &CreateReplicationResponse{
+		Id: &replicationId,
+	}
+}
+
+// EmptyMessage implement MessageMarshaller interface
+func (res *EmptyMessage) Name() string {
+	return "EmptyMessage"
+}
+
+func (res *EmptyMessage) ContentType() string {
+	return "application/protobuf"
+}
+
+func (res *EmptyMessage) Encode() (data []byte, err error) {
+	return proto.Marshal(res)
+}
+
+func (res *EmptyMessage) Decode(data []byte) (err error) {
+	return utils.DecodeMessageFromByteArray(data, res)
+}
 
 // CreateReplicationRequest implement MessageMarshaller interface
 func (req *CreateReplicationRequest) Name() string {
@@ -102,37 +229,54 @@ func (req *DeleteReplicationRequest) Decode(data []byte) (err error) {
 	return err
 }
 
-// ViewSettingsRequest implement MessageMarshaller interface
-func (req *ViewSettingsRequest) Name() string {
+// ViewInternalSettingsRequest implement MessageMarshaller interface
+func (req *ViewInternalSettingsRequest) Name() string {
 	return INTERNAL_SETTINGS_PATH + GET_SUFFIX
 }
 
-func (req *ViewSettingsRequest) ContentType() string {
+func (req *ViewInternalSettingsRequest) ContentType() string {
 	return "application/protobuf"
 }
 
-func (req *ViewSettingsRequest) Encode() (data []byte, err error) {
+func (req *ViewInternalSettingsRequest) Encode() (data []byte, err error) {
 	return proto.Marshal(req)
 }
 
-func (req *ViewSettingsRequest) Decode(data []byte) (err error) {
+func (req *ViewInternalSettingsRequest) Decode(data []byte) (err error) {
 	return utils.DecodeMessageFromByteArray(data, req)
 }
 
-// Settings implement MessageMarshaller interface
-func (res *Settings) Name() string {
-	return "Settings"
+// ViewInternalSettingsResponse implement MessageMarshaller interface
+func (res *ViewInternalSettingsResponse) Name() string {
+	return "ViewInternalSettingsResponse"
 }
 
-func (res *Settings) ContentType() string {
+func (res *ViewInternalSettingsResponse) ContentType() string {
 	return "application/protobuf"
 }
 
-func (res *Settings) Encode() (data []byte, err error) {
+func (res *ViewInternalSettingsResponse) Encode() (data []byte, err error) {
 	return proto.Marshal(res)
 }
 
-func (res *Settings) Decode(data []byte) (err error) {
+func (res *ViewInternalSettingsResponse) Decode(data []byte) (err error) {
+	return utils.DecodeMessageFromByteArray(data, res)
+}
+
+// InternalSettings implement MessageMarshaller interface
+func (res *InternalSettings) Name() string {
+	return "InternalSettings"
+}
+
+func (res *InternalSettings) ContentType() string {
+	return "application/protobuf"
+}
+
+func (res *InternalSettings) Encode() (data []byte, err error) {
+	return proto.Marshal(res)
+}
+
+func (res *InternalSettings) Decode(data []byte) (err error) {
 	return proto.Unmarshal(data, res)
 }
 

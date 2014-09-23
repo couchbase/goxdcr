@@ -2,17 +2,16 @@
 
 package protobuf;
 
+// certain responses, e.g., response to ChangeGlobalSettingsRequest, are empty messages
+message EmptyMessage{
+}
+
 message CreateReplicationRequest {
  	required string    fromBucket        = 1; // name of source bucket
  	required string    toCluster         = 2; // name of the remote cluster reference
  	required string    toBucket          = 3; // name of target bucket
  	optional string    filterName        = 4; // name of filter used for the replication
- 	enum Mode {
- 	    capi = 0;  // use CAPI nozzles
- 		xmem = 1;  // use XMEM nozzles
- 	}
- 	required Mode      mode              = 5 [default = capi]; // relication mode. xmem vs. capi
- 	optional Settings  settings          = 6; // replication settings
+ 	optional ReplicationSettings  settings          = 6; // replication settings
  	optional bool      forward           = 7 [default = true]; // flag indicating whether the request should be forwarded to other XDCR nodes
 }
 
@@ -26,39 +25,53 @@ message DeleteReplicationRequest {
  	optional bool      forward           = 2 [default = true]; // flag indicating whether the request should be forwarded to other XDCR nodes
 }
 
-message ViewSettingsRequest {
+message ViewInternalSettingsRequest {
 }
 
-message Settings {
+message ViewInternalSettingsResponse {
+	required InternalSettings  settings          = 1; // internal settings 
+}
+
+message InternalSettings {
  	optional string    protocol        	  = 1; // version of XDCR protocol 
- 	optional string    filterExpression   = 2; // filter expression
- 	optional uint32    checkpointInterval = 3; // checkpoint interval (in seconds)
- 	optional uint32    workerBatchSize    = 4; // number of documents in a batch
- 	optional uint32    docBatchSizeKb     = 5; // size of a batch (in KB)
- 	optional uint32    failureRestartInterval     = 6; // internal for restarting failed XDCR (in seconds)
- 	optional uint32    optimisticReplicationThreshold = 7; // threshold size of compressed document (in bytes)
- 	optional uint32    httpConnections     = 8; // number of maximum simultaneous HTTP connections 
- 	optional uint32    sourceNozzlePerNode = 9; // number of source nozzles per source node
- 	optional uint32    targetNozzlePerNode = 10; // number of outgoing nozzles per target node
- 	optional uint32    maxExpectedReplicationLag = 11; // max replication lag (in ms) that can be tolerated
- 	optional uint32    timeoutPercentageCap = 12; // maximum timeout percentage allowed. pipeline is considered not healthy when it is exceeded 
+ 	optional uint32    xdcrCheckpointInterval = 2; // checkpoint interval (in seconds)
+ 	optional uint32    xdcrWorkerBatchSize    = 3; // number of documents in a batch
+ 	optional uint32    xdcrDocBatchSizeKb     = 4; // size of a batch (in KB)
+ 	optional uint32    xdcrFailureRestartInterval     = 5; // internal for restarting failed XDCR (in seconds)
+ 	optional uint32    xdcrOptimisticReplicationThreshold = 6; // threshold size of compressed document (in bytes)
+ 	optional uint32    httpConnections     = 7; // number of maximum simultaneous HTTP connections 
+ 	optional uint32    xdcrSourceNozzlePerNode = 8; // number of source nozzles per source node
+ 	optional uint32    xdcrTargetNozzlePerNode = 9; // number of outgoing nozzles per target node
+ 	optional uint32    xdcrMaxExpectedReplicationLag = 10; // max replication lag (in ms) that can be tolerated
+ 	optional uint32    xdcrTimeoutPercentageCap = 11; // maximum timeout percentage allowed. pipeline is considered not healthy when it is exceeded 
+}
+
+message ReplicationSettings {
+	optional InternalSettings  internalSettings = 1; // internal settings
+ 	optional string    xdcrFilterExpression   = 2; // filter expression
+ 	enum ReplicationType {
+ 	    capi = 0;  // use CAPI nozzles
+ 		xmem = 1;  // use XMEM nozzles
+ 	}
+ 	optional ReplicationType      xdcrReplicationType  = 3 [default = capi]; // relication type. xmem vs. capi
+	optional bool      active                 = 4; // flag indicating whether the replication is active
 }
 
 // request to change global settings of all replications in the cluster
 message ChangeGlobalSettingsRequest { 
-	required Settings  settings          = 1; // settings to be set/updated
+	required InternalSettings  settings          = 1; // settings to be set/updated
 }
 
 // request to change settings of an individual replication
 message ChangeReplicationSettingsRequest { 
 	required string    id         	     = 1; // replication id 
-	required Settings  settings          = 2; // settings to be set/updated
+	required ReplicationSettings  settings          = 2; // settings to be set/updated
 }
 
 // request to change internal settings of all replications in the cluster. 
 // effectively the same as ChangeGlobalSettingsRequest but with a different url
 message ChangeInternalSettingsRequest { 
-	required Settings  settings          = 1; // settings to be set/updated
+	required InternalSettings  settings          = 1; // settings to be set/updated
 }
 
 message GetStatisticsRequest {

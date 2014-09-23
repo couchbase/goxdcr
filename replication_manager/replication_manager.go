@@ -20,6 +20,7 @@ type replicationManager struct {
 	metadata_svc      metadata_svc.MetadataSvc
 	cluster_info_svc  metadata_svc.ClusterInfoSvc
 	xdcr_topology_svc metadata_svc.XDCRCompTopologySvc
+	internal_settings_svc metadata_svc.InternalReplicationSettingsSvc
 	once              sync.Once
 }
 
@@ -28,16 +29,18 @@ var replication_mgr replicationManager
 func Initialize() {
 	replication_mgr.once.Do(func() {
 		//TODO: change it
-		replication_mgr.init(nil, nil, nil)
+		replication_mgr.init(nil, nil, nil, nil)
 	})
 }
 
 func (rm *replicationManager) init(metadataSvc metadata_svc.MetadataSvc,
 	clusterSvc metadata_svc.ClusterInfoSvc,
-	topologySvc metadata_svc.XDCRCompTopologySvc) {
+	topologySvc metadata_svc.XDCRCompTopologySvc,
+	internalSettingsSvc metadata_svc.InternalReplicationSettingsSvc) {
 	rm.metadata_svc = metadataSvc
 	rm.cluster_info_svc = clusterSvc
 	rm.xdcr_topology_svc = topologySvc
+	rm.internal_settings_svc = internalSettingsSvc
 	fac := factory.NewXDCRFactory(metadataSvc, clusterSvc, topologySvc)
 	pipeline_manager.PipelineManager(fac)
 
@@ -57,22 +60,28 @@ func XDCRCompTopologyService() metadata_svc.XDCRCompTopologySvc {
 	return replication_mgr.xdcr_topology_svc
 }
 
-func CreateReplication(sourceClusterUUID string, sourceBucket string, targetClusterUUID, targetBucket string, filterName string, settings map[string]interface{}) error {
+func InternalSettingsService() metadata_svc.InternalReplicationSettingsSvc {
+	return replication_mgr.internal_settings_svc
+}
+
+func CreateReplication(sourceClusterUUID string, sourceBucket string, targetClusterUUID, targetBucket string, filterName string, settings map[string]interface{}) (string, error) {
 	logger_rm.Infof("Creating replication - sourceCluterUUID=%s, sourceBucket=%s, targetClusterUUID=%s, targetBucket=%s, filterName=%s, settings=%v\n", sourceClusterUUID,
 		sourceBucket, targetClusterUUID, targetBucket, filterName, settings)
 	spec, err := replication_mgr.createAndPersistReplicationSpec(sourceClusterUUID, sourceBucket, targetClusterUUID, targetBucket, filterName, settings)
 	logger_rm.Debugf("replication specification %s is created and persisted\n", spec.Id())
 	if err != nil {
 		logger_rm.Errorf("%v\n", err)
-		return err
+		return "", err
 	}
 	_, err = pipeline_manager.StartPipeline(spec.Id(), settings)
 	if err == nil {
 		logger_rm.Debugf("Pipeline %s is started\n", spec.Id())
+		return spec.Id(), err
 	} else {
 		logger_rm.Errorf("%v\n", err)
+		return "", err
 	}
-	return err
+	
 }
 
 func PauseReplication(topic string) error {

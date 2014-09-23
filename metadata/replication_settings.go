@@ -12,11 +12,29 @@ const (
 	default_source_nozzle_per_node               = 2
 	default_target_nozzle_per_node               = 2
 	default_max_expected_replication_lag         = 100
+	default_timeout_percentage_cap               = 80  // TODO is this ok?
 	default_filter_expression string			 = ""
+	default_replication_type string			     = "capi"
 	default_active bool							 = true
 )
 
-/************************************
+const (
+	ReplicationType = "replication_type"
+	FilterExpression = "filter_expression"
+	Active = "active"
+	CheckpointInterval = "checkpoint_interval"
+	BatchCount = "batch_count"
+	BatchSize = "batch_size"
+	FailureRestartInterval = "failure_restart_interval"
+	OptimisticReplicationThreshold = "optimistic_replication_threshold"
+	HttpConnection = "http_connection"
+	SourceNozzlePerNode = "source_nozzle_per_node"
+	TargetNozzlePerNode = "target_nozzle_per_node"
+	MaxExpectedReplicationLag = "max_expected_replication_lag"
+	TimeoutPercentageCap = "timeout_percentage_cap"
+)
+
+/***********************************
 /* struct ReplicationSettings
 *************************************/
 type ReplicationSettings struct {
@@ -77,6 +95,10 @@ type ReplicationSettings struct {
 	//Note: if the actual replication lag is larger than this value, it is consider as timeout
 	//default: 100ms
 	max_expected_replication_lag int `json:"max_expected_replication_lag"`
+	
+	// The max allowed timeout percentage. Exceed that limit, piepline would be 
+	// condisered as not healthy
+	timeout_percentage_cap  int `json:"timeout_percentage_cap"`
 }
 
 func DefaultSettings() *ReplicationSettings {
@@ -90,7 +112,8 @@ func DefaultSettings() *ReplicationSettings {
 		http_connection:                  default_http_connection,
 		source_nozzle_per_node:           default_source_nozzle_per_node,
 		target_nozzle_per_node:           default_target_nozzle_per_node,
-		max_expected_replication_lag:     default_max_expected_replication_lag}
+		max_expected_replication_lag:     default_max_expected_replication_lag,
+		timeout_percentage_cap:           default_timeout_percentage_cap,}
 }
 
 func (s *ReplicationSettings) Type() string {
@@ -181,6 +204,14 @@ func (s *ReplicationSettings) SetFilterExpression (filterExp string) {
 	s.filter_expression = filterExp
 }
 
+func (s *ReplicationSettings) TimeoutPercentageCap () int {
+	return s.timeout_percentage_cap
+}
+
+func (s *ReplicationSettings) SetTimeoutPercentageCap (cap int) {
+	s.timeout_percentage_cap = cap
+}
+
 func (s *ReplicationSettings) IsActive() bool {
 	return s.active
 }
@@ -192,66 +223,82 @@ func (s *ReplicationSettings) SetActive (active bool) {
 func SettingsFromMap(settingsMap map[string]interface{}) *ReplicationSettings {
 	settings := DefaultSettings()
 	
-	if val, ok := settingsMap["filter_expression"]; ok {
-		settings.SetFilterExpression(val.(string))
-	}
-	
-	if val, ok := settingsMap["active"]; ok {
-		settings.SetActive (val.(bool))
-	}
-	
-	if val, ok := settingsMap["checkpoint_interval"]; ok {
-		settings.SetCheckpointInterval(val.(int))
-	}
-	
-	if val, ok := settingsMap["batch_count"]; ok {
-		settings.SetBatchCount(val.(int))
-	}
-	
-	if val, ok := settingsMap["batch_size"]; ok {
-		settings.SetBatchSize(val.(int))
-	}
-	
-	if val, ok := settingsMap["failure_restart_interval"]; ok {
-		settings.SetFailureRestartInterval(val.(int))
-	}
-	
-	if val, ok := settingsMap["optimistic_replication_threshold"]; ok {
-		settings.SetOptimisticReplicationThreshold(val.(int))
-	}
-	
-	if val, ok := settingsMap["http_connection"]; ok {
-		settings.SetHttpConnection(val.(int))
-	}
-	
-	if val, ok := settingsMap["source_nozzle_per_node"]; ok {
-		settings.SetSourceNozzlesPerNode(val.(int))
-	}
-
-	if val, ok := settingsMap["target_nozzle_per_node"]; ok {
-		settings.SetTargetNozzlesPerNode(val.(int))
-	}
-
-	if val, ok := settingsMap["max_expected_replication_lag"]; ok {
-		settings.SetMaxExpectedReplicationLag(val.(int))
-	}
+	settings.UpdateSettingsFromMap(settingsMap)
 	
 	return settings
 }
 
+func (s *ReplicationSettings) UpdateSettingsFromMap(settingsMap map[string]interface{}) {
+	if val, ok := settingsMap[ReplicationType]; ok {
+		s.SetType(val.(string))
+	}
+	
+	if val, ok := settingsMap[FilterExpression]; ok {
+		s.SetFilterExpression(val.(string))
+	}
+	
+	if val, ok := settingsMap[Active]; ok {
+		s.SetActive (val.(bool))
+	}
+	
+	if val, ok := settingsMap[CheckpointInterval]; ok {
+		s.SetCheckpointInterval(val.(int))
+	}
+	
+	if val, ok := settingsMap[BatchCount]; ok {
+		s.SetBatchCount(val.(int))
+	}
+	
+	if val, ok := settingsMap[BatchSize]; ok {
+		s.SetBatchSize(val.(int))
+	}
+	
+	if val, ok := settingsMap[FailureRestartInterval]; ok {
+		s.SetFailureRestartInterval(val.(int))
+	}
+	
+	if val, ok := settingsMap[OptimisticReplicationThreshold]; ok {
+		s.SetOptimisticReplicationThreshold(val.(int))
+	}
+	
+	if val, ok := settingsMap[HttpConnection]; ok {
+		s.SetHttpConnection(val.(int))
+	}
+	
+	if val, ok := settingsMap[SourceNozzlePerNode]; ok {
+		s.SetSourceNozzlesPerNode(val.(int))
+	}
+
+	if val, ok := settingsMap[TargetNozzlePerNode]; ok {
+		s.SetTargetNozzlesPerNode(val.(int))
+	}
+
+	if val, ok := settingsMap[MaxExpectedReplicationLag]; ok {
+		s.SetMaxExpectedReplicationLag(val.(int))
+	}
+	
+	if val, ok := settingsMap[TimeoutPercentageCap]; ok {
+		s.SetTimeoutPercentageCap(val.(int))
+	}
+	
+	return
+}
+
 func (s *ReplicationSettings) ToMap () map[string]interface{}{
 	settings_map := make (map[string]interface{})
-	settings_map["filter_expression"] = s.FilterExpression()
-	settings_map["active"] = s.IsActive()
-	settings_map["checkpoint_interval"] = s.CheckpointInterval()
-	settings_map["batch_count"] = s.BatchCount()
-	settings_map["batch_size"] = s.BatchSize()
-	settings_map["failure_restart_interval"] = s.FailureRestartInterval()
-	settings_map["optimistic_replication_threshold"] = s.OptimisticReplicationThreshold()
-	settings_map["http_connection"] = s.HttpConnection()
-	settings_map["source_nozzle_per_node"] = s.SourceNozzlesPerNode()
-	settings_map["target_nozzle_per_node"] = s.TargetNozzlesPerNode()
-	settings_map["max_expected_replication_lag"] = s.MaxExpectedReplicationLag ()
+	settings_map[ReplicationType] = s.Type()
+	settings_map[FilterExpression] = s.FilterExpression()
+	settings_map[Active] = s.IsActive()
+	settings_map[CheckpointInterval] = s.CheckpointInterval()
+	settings_map[BatchCount] = s.BatchCount()
+	settings_map[BatchSize] = s.BatchSize()
+	settings_map[FailureRestartInterval] = s.FailureRestartInterval()
+	settings_map[OptimisticReplicationThreshold] = s.OptimisticReplicationThreshold()
+	settings_map[HttpConnection] = s.HttpConnection()
+	settings_map[SourceNozzlePerNode] = s.SourceNozzlesPerNode()
+	settings_map[TargetNozzlePerNode] = s.TargetNozzlesPerNode()
+	settings_map[MaxExpectedReplicationLag] = s.MaxExpectedReplicationLag ()
+	settings_map[TimeoutPercentageCap] = s.TimeoutPercentageCap ()
 	
 	return settings_map
 }
