@@ -1,6 +1,10 @@
 package metadata
 
-import ()
+import (
+	"errors"
+	"fmt"
+	"reflect"
+)
 
 const (
 	default_checkpoint_interval              int = 1800
@@ -220,68 +224,105 @@ func (s *ReplicationSettings) SetActive (active bool) {
 	s.active = active
 }
 
-func SettingsFromMap(settingsMap map[string]interface{}) *ReplicationSettings {
+func SettingsFromMap(settingsMap map[string]interface{}) (*ReplicationSettings, error) {
 	settings := DefaultSettings()
 	
-	settings.UpdateSettingsFromMap(settingsMap)
-	
-	return settings
+	err := settings.UpdateSettingsFromMap(settingsMap)
+	if err == nil {
+		return settings, nil
+	} else {
+		return nil, err
+	}
 }
 
-func (s *ReplicationSettings) UpdateSettingsFromMap(settingsMap map[string]interface{}) {
-	if val, ok := settingsMap[ReplicationType]; ok {
-		s.SetType(val.(string))
+func (s *ReplicationSettings) UpdateSettingsFromMap(settingsMap map[string]interface{}) error {
+	for key, val := range settingsMap {
+		switch (key) {
+			case ReplicationType:
+				replType, ok := val.(string)
+				if !ok {
+					return incorrectValueTypeError(key, val, "string")
+				}
+				s.SetType(replType)
+			case FilterExpression:
+				filterExpression, ok := val.(string)
+				if !ok {
+					return incorrectValueTypeError(key, val, "string")
+				}
+				s.SetFilterExpression(filterExpression)
+			case Active:
+				active, ok := val.(bool)
+				if !ok {
+					return incorrectValueTypeError(key, val, "bool")
+				}
+				s.SetActive(active)	
+			case CheckpointInterval:
+				checkpointInterval, ok := val.(int)
+				if !ok {
+					return incorrectValueTypeError(key, val, "int")
+				}
+				s.SetCheckpointInterval(checkpointInterval)	
+			case BatchCount:
+				batchCount, ok := val.(int)
+				if !ok {
+					return incorrectValueTypeError(key, val, "int")
+				}
+				s.SetBatchCount(batchCount)	
+			case BatchSize:
+				batchSize, ok := val.(int)
+				if !ok {
+					return incorrectValueTypeError(key, val, "int")
+				}
+				s.SetBatchSize(batchSize)	
+			case FailureRestartInterval:
+				failureRestartInterval, ok := val.(int)
+				if !ok {
+					return incorrectValueTypeError(key, val, "int")
+				}
+				s.SetFailureRestartInterval(failureRestartInterval)	
+			case OptimisticReplicationThreshold:
+				optimisticReplicationThreshold, ok := val.(int)
+				if !ok {
+					return incorrectValueTypeError(key, val, "int")
+				}
+				s.SetOptimisticReplicationThreshold(optimisticReplicationThreshold)	
+			case HttpConnection:
+				httpConnection, ok := val.(int)
+				if !ok {
+					return incorrectValueTypeError(key, val, "int")
+				}
+				s.SetHttpConnection(httpConnection)	
+			case SourceNozzlePerNode:
+				sourceNozzlePerNode, ok := val.(int)
+				if !ok {
+					return incorrectValueTypeError(key, val, "int")
+				}
+				s.SetSourceNozzlesPerNode(sourceNozzlePerNode)	
+			case TargetNozzlePerNode:
+				targetNozzlePerNode, ok := val.(int)
+				if !ok {
+					return incorrectValueTypeError(key, val, "int")
+				}
+				s.SetTargetNozzlesPerNode(targetNozzlePerNode)	
+			case MaxExpectedReplicationLag:
+				maxExpectedReplicationLag, ok := val.(int)
+				if !ok {
+					return incorrectValueTypeError(key, val, "int")
+				}
+				s.SetMaxExpectedReplicationLag(maxExpectedReplicationLag)	
+			case TimeoutPercentageCap:
+				timeoutPercentageCap, ok := val.(int)
+				if !ok {
+					return incorrectValueTypeError(key, val, "int")
+				}
+				s.SetTimeoutPercentageCap(timeoutPercentageCap)	
+			default:
+				return errors.New(fmt.Sprintf("Invalid key in map, %v", key))
+							
+		}
 	}
 	
-	if val, ok := settingsMap[FilterExpression]; ok {
-		s.SetFilterExpression(val.(string))
-	}
-	
-	if val, ok := settingsMap[Active]; ok {
-		s.SetActive (val.(bool))
-	}
-	
-	if val, ok := settingsMap[CheckpointInterval]; ok {
-		s.SetCheckpointInterval(val.(int))
-	}
-	
-	if val, ok := settingsMap[BatchCount]; ok {
-		s.SetBatchCount(val.(int))
-	}
-	
-	if val, ok := settingsMap[BatchSize]; ok {
-		s.SetBatchSize(val.(int))
-	}
-	
-	if val, ok := settingsMap[FailureRestartInterval]; ok {
-		s.SetFailureRestartInterval(val.(int))
-	}
-	
-	if val, ok := settingsMap[OptimisticReplicationThreshold]; ok {
-		s.SetOptimisticReplicationThreshold(val.(int))
-	}
-	
-	if val, ok := settingsMap[HttpConnection]; ok {
-		s.SetHttpConnection(val.(int))
-	}
-	
-	if val, ok := settingsMap[SourceNozzlePerNode]; ok {
-		s.SetSourceNozzlesPerNode(val.(int))
-	}
-
-	if val, ok := settingsMap[TargetNozzlePerNode]; ok {
-		s.SetTargetNozzlesPerNode(val.(int))
-	}
-
-	if val, ok := settingsMap[MaxExpectedReplicationLag]; ok {
-		s.SetMaxExpectedReplicationLag(val.(int))
-	}
-	
-	if val, ok := settingsMap[TimeoutPercentageCap]; ok {
-		s.SetTimeoutPercentageCap(val.(int))
-	}
-	
-	return
+	return nil
 }
 
 func (s *ReplicationSettings) ToMap () map[string]interface{}{
@@ -301,4 +342,8 @@ func (s *ReplicationSettings) ToMap () map[string]interface{}{
 	settings_map[TimeoutPercentageCap] = s.TimeoutPercentageCap ()
 	
 	return settings_map
+}
+
+func incorrectValueTypeError (key string, val interface{}, expectedType string) error {
+	return errors.New(fmt.Sprintf("Value, %v, for settings with key, %v, has incorrect data type. Expected type: %v. Actual type: %v", val, key, expectedType, reflect.TypeOf(val)))
 }

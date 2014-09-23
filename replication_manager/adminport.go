@@ -16,8 +16,8 @@ import (
 	//utils "github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/utils"
 )
 
-var StaticPaths = [3]string{protobuf.CREATE_REPLICATION_PATH, protobuf.INTERNAL_SETTINGS_PATH, protobuf.SETTINGS_REPLICATIONS_PATH}
-var DynamicPathPrefixes = [3]string{protobuf.DELETE_REPLICATION_PREFIX, protobuf.SETTINGS_REPLICATIONS_PATH, protobuf.STATISTICS_PREFIX}
+var StaticPaths = [3]string{protobuf.CreateReplicationPath, protobuf.InternalSettingsPath, protobuf.SettingsReplicationsPath}
+var DynamicPathPrefixes = [3]string{protobuf.DeleteReplicationPrefix, protobuf.SettingsReplicationsPath, protobuf.StatisticsPrefix}
 
 var logger_ap *log.CommonLogger = log.NewLogger("AdminPort", log.LogLevelInfo)
 
@@ -34,11 +34,14 @@ type xdcrRestHandler struct {
 }
 
 // admin-port entry point
-func mainAdminPort(laddr string, h *xdcrRestHandler) {
+func MainAdminPort(laddr string) {
+logger_ap.Infof("adminport newed !\n")
 	var err error
 
+	h := new(xdcrRestHandler)
 	reqch := make(chan ap.Request)
-	server := ap.NewHTTPServer("xdcr", laddr, ""/*urlPrefix*/, reqch/*TODO, new(XDCRHandler)*/)
+	server := ap.NewHTTPServer("xdcr", laddr, "/"/*urlPrefix*/, reqch/*TODO, new(XDCRHandler)*/)
+	logger_ap.Infof("server newed !\n")
 	server.Register(reqCreateReplication)
 	server.Register(reqDeleteReplication)
 	server.Register(reqViewInternalSettings)
@@ -48,11 +51,13 @@ func mainAdminPort(laddr string, h *xdcrRestHandler) {
 	server.Register(reqGetStatistics)
 
 	server.Start()
+	logger_ap.Infof("server started %v !\n", laddr)
 
 loop:
 	for {
 		select {
 		case req, ok := <-reqch: // admin requests are serialized here
+		logger_ap.Infof("request received %v !\n", req)
 			if ok == false {
 				break loop
 			}

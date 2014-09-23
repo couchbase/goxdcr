@@ -13,27 +13,27 @@ import (
 )
 
 const(
-	URL_DELIMITER = "/"
+	UrlDelimiter = "/"
 	
-	CREATE_REPLICATION_PATH = "controller/createReplication"
-	INTERNAL_SETTINGS_PATH = "internalSettings"
-	SETTINGS_REPLICATIONS_PATH = "settings/replications/"
-	DELETE_REPLICATION_PREFIX = "controller/cancelXDCR/"
-	STATISTICS_PREFIX = "pools/default/buckets"
+	CreateReplicationPath = "/controller/createReplication"
+	InternalSettingsPath = "/internalSettings"
+	SettingsReplicationsPath = "/settings/replications/"
+	DeleteReplicationPrefix = "/controller/cancelXDCR/"
+	StatisticsPrefix = "/pools/default/buckets"
 	// Some url paths are not static and have variable contents, e.g., settings/replications/$replication_id
 	// The message keys for such paths are constructed by appending the dynamic suffix below to the static portion of the path. 
 	// e.g., settings/replications/dynamic
-	DYNAMIC_SUFFIX = URL_DELIMITER + "dynamic"
+	DynamicSuffix = UrlDelimiter + "dynamic"
 	// The same path, e.g.,SETTINGS_REPLICATION_PATH, may be used for two different APIs: look up and modify. 
 	// The following suffixes are used to distinguish between these two cases
-	GET_SUFFIX = URL_DELIMITER + "get"
-	POST_SUFFIX = URL_DELIMITER + "post"
+	GetSuffix = UrlDelimiter + "get"
+	PostSuffix = UrlDelimiter + "post"
 	
-	STATS_PATH_PATTERN = ".*pools/default/buckets/[^/]*/stats/replications"
+	StatsPathPattern = ".*pools/default/buckets/[^/]*/stats/replications"
 	
 )
 
-var statsPathRegexp, _ = regexp.Compile(STATS_PATH_PATTERN)
+var statsPathRegexp, _ = regexp.Compile(StatsPathPattern)
 
 var logger_repmsg *log.CommonLogger = log.NewLogger("ReplicationMessages", log.LogLevelInfo)
 
@@ -165,7 +165,7 @@ func (res *EmptyMessage) Decode(data []byte) (err error) {
 
 // CreateReplicationRequest implement MessageMarshaller interface
 func (req *CreateReplicationRequest) Name() string {
-	return CREATE_REPLICATION_PATH + POST_SUFFIX
+	return CreateReplicationPath + PostSuffix
 }
 
 func (req *CreateReplicationRequest) ContentType() string {
@@ -199,7 +199,7 @@ func (res *CreateReplicationResponse) Decode(data []byte) (err error) {
 
 // DeleteReplicationRequest implement MessageMarshaller interface
 func (req *DeleteReplicationRequest) Name() string {
-	return DELETE_REPLICATION_PREFIX + DYNAMIC_SUFFIX + POST_SUFFIX
+	return DeleteReplicationPrefix + DynamicSuffix + PostSuffix
 }
 
 func (req *DeleteReplicationRequest) ContentType() string {
@@ -222,7 +222,7 @@ func (req *DeleteReplicationRequest) Decode(data []byte) (err error) {
 	}
 	
 	// extract replication id from request and add it to message
-	replicationId, err := utils.DecodeReplicationIdFromHttpRequest(request, DELETE_REPLICATION_PREFIX)
+	replicationId, err := utils.DecodeReplicationIdFromHttpRequest(request, DeleteReplicationPrefix)
 	if err == nil {
 		req.Id = &replicationId
 	}
@@ -231,7 +231,7 @@ func (req *DeleteReplicationRequest) Decode(data []byte) (err error) {
 
 // ViewInternalSettingsRequest implement MessageMarshaller interface
 func (req *ViewInternalSettingsRequest) Name() string {
-	return INTERNAL_SETTINGS_PATH + GET_SUFFIX
+	return InternalSettingsPath + GetSuffix
 }
 
 func (req *ViewInternalSettingsRequest) ContentType() string {
@@ -282,7 +282,7 @@ func (res *InternalSettings) Decode(data []byte) (err error) {
 
 // ChangeGlobalSettingsRequest implement MessageMarshaller interface
 func (req *ChangeGlobalSettingsRequest) Name() string {
-	return SETTINGS_REPLICATIONS_PATH + POST_SUFFIX
+	return SettingsReplicationsPath + PostSuffix
 }
 
 func (req *ChangeGlobalSettingsRequest) ContentType() string {
@@ -299,7 +299,7 @@ func (req *ChangeGlobalSettingsRequest) Decode(data []byte) (err error) {
 
 // ChangeReplicationSettingsRequest implement MessageMarshaller interface
 func (req *ChangeReplicationSettingsRequest) Name() string {
-	return SETTINGS_REPLICATIONS_PATH + DYNAMIC_SUFFIX + POST_SUFFIX
+	return SettingsReplicationsPath + DynamicSuffix + PostSuffix
 }
 
 func (req *ChangeReplicationSettingsRequest) ContentType() string {
@@ -322,7 +322,7 @@ func (req *ChangeReplicationSettingsRequest) Decode(data []byte) (err error) {
 	}
 	
 	// extract replication id from request and add it to message
-	replicationId, err := utils.DecodeReplicationIdFromHttpRequest(request, SETTINGS_REPLICATIONS_PATH)
+	replicationId, err := utils.DecodeReplicationIdFromHttpRequest(request, SettingsReplicationsPath)
 	if err == nil {
 		req.Id = &replicationId
 	}
@@ -331,7 +331,7 @@ func (req *ChangeReplicationSettingsRequest) Decode(data []byte) (err error) {
 
 // ChangeInternalSettingsRequest implement MessageMarshaller interface
 func (req *ChangeInternalSettingsRequest) Name() string {
-	return INTERNAL_SETTINGS_PATH + POST_SUFFIX
+	return InternalSettingsPath + PostSuffix
 }
 
 func (req *ChangeInternalSettingsRequest) ContentType() string {
@@ -349,7 +349,7 @@ func (req *ChangeInternalSettingsRequest) Decode(data []byte) (err error) {
 
 // GetStatisticsRequest implement MessageMarshaller interface
 func (req *GetStatisticsRequest) Name() string {
-	return STATISTICS_PREFIX + GET_SUFFIX
+	return StatisticsPrefix + GetSuffix
 }
 
 func (req *GetStatisticsRequest) ContentType() string {
@@ -386,7 +386,7 @@ func (req *GetStatisticsRequest) Decode(data []byte) (err error) {
 		return err
 	}
 	
-	paramsArr := strings.Split(paramsStr.String(), URL_DELIMITER)
+	paramsArr := strings.Split(paramsStr.String(), UrlDelimiter)
 	numOfParams := len(paramsArr)
 	if numOfParams != 4 && numOfParams != 5 {
 		return errors.New(fmt.Sprintf("Invalid path, %v, in http request.", request.URL.Path))
