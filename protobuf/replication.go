@@ -15,19 +15,20 @@ import (
 const(
 	UrlDelimiter = "/"
 	
-	CreateReplicationPath = "/controller/createReplication"
-	InternalSettingsPath = "/internalSettings"
-	SettingsReplicationsPath = "/settings/replications/"
-	DeleteReplicationPrefix = "/controller/cancelXDCR/"
-	StatisticsPrefix = "/pools/default/buckets"
+	CreateReplicationPath = "controller/createReplication"
+	InternalSettingsPath = "internalSettings"
+	SettingsReplicationsPath = "settings/replications"
+	DeleteReplicationPrefix = "controller/cancelXDCR"
+	StatisticsPrefix = "pools/default/buckets"
 	// Some url paths are not static and have variable contents, e.g., settings/replications/$replication_id
 	// The message keys for such paths are constructed by appending the dynamic suffix below to the static portion of the path. 
 	// e.g., settings/replications/dynamic
 	DynamicSuffix = UrlDelimiter + "dynamic"
 	// The same path, e.g.,SETTINGS_REPLICATION_PATH, may be used for two different APIs: look up and modify. 
 	// The following suffixes are used to distinguish between these two cases
-	GetSuffix = UrlDelimiter + "get"
-	PostSuffix = UrlDelimiter + "post"
+	GetSuffix = UrlDelimiter + "GET"
+	PostSuffix = UrlDelimiter + "POST"
+	DeleteSuffix = UrlDelimiter + "DELETE"
 	
 	StatsPathPattern = ".*pools/default/buckets/[^/]*/stats/replications"
 	
@@ -199,7 +200,7 @@ func (res *CreateReplicationResponse) Decode(data []byte) (err error) {
 
 // DeleteReplicationRequest implement MessageMarshaller interface
 func (req *DeleteReplicationRequest) Name() string {
-	return DeleteReplicationPrefix + DynamicSuffix + PostSuffix
+	return DeleteReplicationPrefix + DynamicSuffix + DeleteSuffix
 }
 
 func (req *DeleteReplicationRequest) ContentType() string {
@@ -215,12 +216,10 @@ func (req *DeleteReplicationRequest) Decode(data []byte) (err error) {
 	if err != nil {
 		return err
 	}
-	
 	err = utils.DecodeMessageFromHttpRequest(request, req)
 	if err != nil {
 		return err
 	}
-	
 	// extract replication id from request and add it to message
 	replicationId, err := utils.DecodeReplicationIdFromHttpRequest(request, DeleteReplicationPrefix)
 	if err == nil {

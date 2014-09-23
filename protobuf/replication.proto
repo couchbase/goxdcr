@@ -21,7 +21,7 @@ message CreateReplicationResponse {
 }
 
 message DeleteReplicationRequest {
- 	required string    id     		     = 1; // id of the replication to delete
+ 	optional string    id     		     = 1; // id of the replication to delete
  	optional bool      forward           = 2 [default = true]; // flag indicating whether the request should be forwarded to other XDCR nodes
 }
 

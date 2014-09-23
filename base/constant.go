@@ -6,6 +6,7 @@ import (
 
 //constants
 var DefaultConnectionSize = 20
+var AdminportUrlPrefix = "/"
 var AdminportNumber = 12100
 var DefaultPoolName = "default"
 

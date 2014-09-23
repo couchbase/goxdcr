@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"strings"
 	"errors"
+	"github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/base"
 	"github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/protobuf"
 	ap "github.com/couchbase/indexing/secondary/adminport"
 	sicommon "github.com/couchbase/indexing/secondary/common"
@@ -40,7 +41,7 @@ logger_ap.Infof("adminport newed !\n")
 
 	h := new(xdcrRestHandler)
 	reqch := make(chan ap.Request)
-	server := ap.NewHTTPServer("xdcr", laddr, "/"/*urlPrefix*/, reqch, new(XDCRHandler))
+	server := ap.NewHTTPServer("xdcr", laddr, base.AdminportUrlPrefix, reqch, new(XDCRHandler))
 	logger_ap.Infof("server newed !\n")
 	server.Register(reqCreateReplication)
 	server.Register(reqDeleteReplication)
@@ -281,7 +282,7 @@ func (h *XDCRHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	s := h.GetServer()
 
-	logger_ap.Infof("Request with path %v\n", r.URL.Path)
+	logger_ap.Infof("Request with path, %v, and method, %v\n", r.URL.Path, r.Method)
 
 	// Fault-tolerance. No need to crash the server in case of panic.
 	defer func() {
@@ -301,16 +302,22 @@ func (h *XDCRHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// look up name of message based on http request
-	name, err := h.GetMessageNameFromRequest(r)
+	// look up key of message based on http request
+	key, err := h.GetMessageKeyFromRequest(r)
+	logger_ap.Infof("message key %v\n", key)
 	if err != nil {
 
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	// get the message corresponsing to message name
-	msg = s.GetMessages()[name]
+	// get the message corresponsing to message key
+	msg, ok := s.GetMessages()[key]
+	if !ok {
+		logger_ap.Infof("messages: %v !\n", s.GetMessages())
+		http.Error(w, fmt.Sprintf("Invalid message key, %v", key), http.StatusInternalServerError)
+		return
+	}
 
 	// Get an instance of request type and decode request into that.
 	typeOfMsg := reflect.ValueOf(msg).Elem().Type()
@@ -348,37 +355,36 @@ func (h *XDCRHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// Get the message name from http request
-func (h *XDCRHandler) GetMessageNameFromRequest(r *http.Request) (string, error) {
-	var name string
-	path := r.URL.Path
+// Get the message key from http request
+func (h *XDCRHandler) GetMessageKeyFromRequest(r *http.Request) (string, error) {
+	var key string
+	// remove adminport url prefix from path
+	path := r.URL.Path[len(base.AdminportUrlPrefix):]
 	for _, staticPath := range StaticPaths {
 		if path == staticPath {
 			// if path in url is a static path, use it as name
-			name = path
+			key = path
 			break
 		}
 	}
 
-	if len(name) == 0 {
+	if len(key) == 0 {
 		// if path does not match any static paths, check if it has a prefix that matches dynamic path prefixes
 		for _, dynPathPrefix := range DynamicPathPrefixes {
 			if strings.HasPrefix(path, dynPathPrefix) {
-				name = path + protobuf.DynamicSuffix
+				key = dynPathPrefix + protobuf.DynamicSuffix
 				break
 			}
 		}
 	}
 
-	if len(name) == 0 {
-		return "", errors.New(fmt.Sprintf("Invalid path, %v, in http Request.", path))
+	if len(key) == 0 {
+		return "", errors.New(fmt.Sprintf("Invalid path, %v, in http Request.", r.URL.Path))
 	} else {
-	    // add get/post suffix to name to distinguish between lookup/modify requests
-		if r.Method == "" || r.Method == "GET" {
-			name += protobuf.GetSuffix
-		} else {
-			name += protobuf.PostSuffix
-		}
-		return name, nil
+	    key = base.AdminportUrlPrefix + key
+	    // add http method suffix to name to ensure uniqueness
+		key += protobuf.UrlDelimiter + strings.ToUpper(r.Method)
+		
+		return key, nil
 	}
 }

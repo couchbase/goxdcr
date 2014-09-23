@@ -243,7 +243,7 @@ func (m *CreateReplicationResponse) GetDatabase() string {
 }
 
 type DeleteReplicationRequest struct {
-	Id               *string `protobuf:"bytes,1,req,name=id" json:"id,omitempty"`
+	Id               *string `protobuf:"bytes,1,opt,name=id" json:"id,omitempty"`
 	Forward          *bool   `protobuf:"varint,2,opt,name=forward,def=1" json:"forward,omitempty"`
 	XXX_unrecognized []byte  `json:"-"`
 }
