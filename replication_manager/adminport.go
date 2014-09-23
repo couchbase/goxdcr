@@ -3,17 +3,17 @@
 package replication_manager
 
 import (
-	/*"net/http"
+	"net/http"
 	"reflect"
 	"fmt"
 	"strings"
-	"errors"*/
+	"errors"
 	"github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/protobuf"
 	ap "github.com/couchbase/indexing/secondary/adminport"
 	sicommon "github.com/couchbase/indexing/secondary/common"
 	//siprotobuf "github.com/couchbase/indexing/secondary/protobuf"
 	log "github.com/Xiaomei-Zhang/couchbase_goxdcr/util"
-	//utils "github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/utils"
+	utils "github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/utils"
 )
 
 var StaticPaths = [3]string{protobuf.CreateReplicationPath, protobuf.InternalSettingsPath, protobuf.SettingsReplicationsPath}
@@ -40,7 +40,7 @@ logger_ap.Infof("adminport newed !\n")
 
 	h := new(xdcrRestHandler)
 	reqch := make(chan ap.Request)
-	server := ap.NewHTTPServer("xdcr", laddr, "/"/*urlPrefix*/, reqch/*TODO, new(XDCRHandler)*/)
+	server := ap.NewHTTPServer("xdcr", laddr, "/"/*urlPrefix*/, reqch, new(XDCRHandler))
 	logger_ap.Infof("server newed !\n")
 	server.Register(reqCreateReplication)
 	server.Register(reqDeleteReplication)
@@ -270,7 +270,6 @@ func (h *xdcrRestHandler) forwardReplicationRequestToXDCRNode(request ap.Message
 	return response, err
 }
 
-/* TODO enable after secondary index changes are checked in
 //XDCR implementation of RequestHandler
 type XDCRHandler struct{
 	ap.Handler
@@ -295,7 +294,7 @@ func (h *XDCRHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	var msg ap.MessageMarshaller
 	// encode the entire http request into a byte array for use by MessageMarshaller
-	data, err := utils.EncodeRequestIntoByteArray(r)
+	data, err := utils.EncodeHttpRequestIntoByteArray(r)
 	if err != nil {
 
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -365,7 +364,7 @@ func (h *XDCRHandler) GetMessageNameFromRequest(r *http.Request) (string, error)
 		// if path does not match any static paths, check if it has a prefix that matches dynamic path prefixes
 		for _, dynPathPrefix := range DynamicPathPrefixes {
 			if strings.HasPrefix(path, dynPathPrefix) {
-				name = path + DYNAMIC_PATH_ID
+				name = path + protobuf.DynamicSuffix
 				break
 			}
 		}
@@ -376,10 +375,10 @@ func (h *XDCRHandler) GetMessageNameFromRequest(r *http.Request) (string, error)
 	} else {
 	    // add get/post suffix to name to distinguish between lookup/modify requests
 		if r.Method == "" || r.Method == "GET" {
-			name += GET_SUFFIX
+			name += protobuf.GetSuffix
 		} else {
-			name += POST_SUFFIX
+			name += protobuf.PostSuffix
 		}
 		return name, nil
 	}
-}*/
+}

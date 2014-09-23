@@ -324,7 +324,8 @@ func (xdcrf *XDCRFactory) ConstructSettingsForPart(pipeline common.Pipeline, par
 
 func (xdcrf *XDCRFactory) constructSettingsForXmemNozzle(topic string, settings map[string]interface{}) map[string]interface{} {
 	xmemSettings := make(map[string]interface{})
-	repSettings := metadata.SettingsFromMap(settings)
+	// TODO this may break
+	repSettings, _ := metadata.SettingsFromMap(settings)
 	xmemSettings[parts.XMEM_SETTING_BATCHCOUNT] = repSettings.BatchCount()
 	xmemSettings[parts.XMEM_SETTING_BATCHSIZE] = repSettings.BatchSize()
 	xmemSettings[parts.XMEM_SETTING_TIMEOUT] = xdcrf.getTargetTimeoutEstimate(topic)

@@ -153,8 +153,11 @@ func DeleteReplication(topic string) error {
 
 func (rm *replicationManager) createAndPersistReplicationSpec(sourceClusterUUID, sourceBucket, targetClusterUUID, targetBucket, filterName string, settings map[string]interface{}) (*metadata.ReplicationSpecification, error) {
 	spec := metadata.NewReplicationSpecification(sourceClusterUUID, sourceBucket, targetClusterUUID, targetBucket, filterName)
-	s := metadata.SettingsFromMap(settings)
-	spec.SetSettings(s)
-
-	return spec, nil
+	s, err := metadata.SettingsFromMap(settings)
+	if err == nil {
+		spec.SetSettings(s)
+		return spec, nil
+	} else {
+		return nil, err
+	}
 }
