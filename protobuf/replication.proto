@@ -11,13 +11,12 @@ message CreateReplicationRequest {
  	required string    toCluster         = 2; // name of the remote cluster reference
  	required string    toBucket          = 3; // name of target bucket
  	optional string    filterName        = 4; // name of filter used for the replication
- 	optional ReplicationSettings  settings          = 6; // replication settings
- 	optional bool      forward           = 7 [default = true]; // flag indicating whether the request should be forwarded to other XDCR nodes
+ 	optional ReplicationSettings  settings          = 5; // replication settings
+ 	optional bool      forward           = 6 [default = true]; // flag indicating whether the request should be forwarded to other XDCR nodes
 }
 
 message CreateReplicationResponse {
  	required string    id       		 = 1; // id of the created replication
- 	required string    database          = 2; // name of the database
 }
 
 message DeleteReplicationRequest {
@@ -54,7 +53,7 @@ message ReplicationSettings {
  		xmem = 1;  // use XMEM nozzles
  	}
  	optional ReplicationType      xdcrReplicationType  = 3 [default = capi]; // relication type. xmem vs. capi
-	optional bool      active                 = 4; // flag indicating whether the replication is active
+	optional bool      xdcrActive                 = 4; // flag indicating whether the replication is active
 }
 
 // request to change global settings of all replications in the cluster

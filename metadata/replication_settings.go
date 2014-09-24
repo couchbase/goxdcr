@@ -241,79 +241,79 @@ func (s *ReplicationSettings) UpdateSettingsFromMap(settingsMap map[string]inter
 			case ReplicationType:
 				replType, ok := val.(string)
 				if !ok {
-					return incorrectValueTypeError(key, val, "string")
+					return IncorrectValueTypeInMapError(key, val, "string")
 				}
 				s.SetType(replType)
 			case FilterExpression:
 				filterExpression, ok := val.(string)
 				if !ok {
-					return incorrectValueTypeError(key, val, "string")
+					return IncorrectValueTypeInMapError(key, val, "string")
 				}
 				s.SetFilterExpression(filterExpression)
 			case Active:
 				active, ok := val.(bool)
 				if !ok {
-					return incorrectValueTypeError(key, val, "bool")
+					return IncorrectValueTypeInMapError(key, val, "bool")
 				}
 				s.SetActive(active)	
 			case CheckpointInterval:
 				checkpointInterval, ok := val.(int)
 				if !ok {
-					return incorrectValueTypeError(key, val, "int")
+					return IncorrectValueTypeInMapError(key, val, "int")
 				}
 				s.SetCheckpointInterval(checkpointInterval)	
 			case BatchCount:
 				batchCount, ok := val.(int)
 				if !ok {
-					return incorrectValueTypeError(key, val, "int")
+					return IncorrectValueTypeInMapError(key, val, "int")
 				}
 				s.SetBatchCount(batchCount)	
 			case BatchSize:
 				batchSize, ok := val.(int)
 				if !ok {
-					return incorrectValueTypeError(key, val, "int")
+					return IncorrectValueTypeInMapError(key, val, "int")
 				}
 				s.SetBatchSize(batchSize)	
 			case FailureRestartInterval:
 				failureRestartInterval, ok := val.(int)
 				if !ok {
-					return incorrectValueTypeError(key, val, "int")
+					return IncorrectValueTypeInMapError(key, val, "int")
 				}
 				s.SetFailureRestartInterval(failureRestartInterval)	
 			case OptimisticReplicationThreshold:
 				optimisticReplicationThreshold, ok := val.(int)
 				if !ok {
-					return incorrectValueTypeError(key, val, "int")
+					return IncorrectValueTypeInMapError(key, val, "int")
 				}
 				s.SetOptimisticReplicationThreshold(optimisticReplicationThreshold)	
 			case HttpConnection:
 				httpConnection, ok := val.(int)
 				if !ok {
-					return incorrectValueTypeError(key, val, "int")
+					return IncorrectValueTypeInMapError(key, val, "int")
 				}
 				s.SetHttpConnection(httpConnection)	
 			case SourceNozzlePerNode:
 				sourceNozzlePerNode, ok := val.(int)
 				if !ok {
-					return incorrectValueTypeError(key, val, "int")
+					return IncorrectValueTypeInMapError(key, val, "int")
 				}
 				s.SetSourceNozzlesPerNode(sourceNozzlePerNode)	
 			case TargetNozzlePerNode:
 				targetNozzlePerNode, ok := val.(int)
 				if !ok {
-					return incorrectValueTypeError(key, val, "int")
+					return IncorrectValueTypeInMapError(key, val, "int")
 				}
 				s.SetTargetNozzlesPerNode(targetNozzlePerNode)	
 			case MaxExpectedReplicationLag:
 				maxExpectedReplicationLag, ok := val.(int)
 				if !ok {
-					return incorrectValueTypeError(key, val, "int")
+					return IncorrectValueTypeInMapError(key, val, "int")
 				}
 				s.SetMaxExpectedReplicationLag(maxExpectedReplicationLag)	
 			case TimeoutPercentageCap:
 				timeoutPercentageCap, ok := val.(int)
 				if !ok {
-					return incorrectValueTypeError(key, val, "int")
+					return IncorrectValueTypeInMapError(key, val, "int")
 				}
 				s.SetTimeoutPercentageCap(timeoutPercentageCap)	
 			default:
@@ -344,6 +344,6 @@ func (s *ReplicationSettings) ToMap () map[string]interface{}{
 	return settings_map
 }
 
-func incorrectValueTypeError (key string, val interface{}, expectedType string) error {
+func IncorrectValueTypeInMapError (key string, val interface{}, expectedType string) error {
 	return errors.New(fmt.Sprintf("Value, %v, for settings with key, %v, has incorrect data type. Expected type: %v. Actual type: %v", val, key, expectedType, reflect.TypeOf(val)))
 }

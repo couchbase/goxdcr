@@ -36,13 +36,11 @@ type xdcrRestHandler struct {
 
 // admin-port entry point
 func MainAdminPort(laddr string) {
-logger_ap.Infof("adminport newed !\n")
 	var err error
 
 	h := new(xdcrRestHandler)
 	reqch := make(chan ap.Request)
 	server := ap.NewHTTPServer("xdcr", laddr, base.AdminportUrlPrefix, reqch, new(XDCRHandler))
-	logger_ap.Infof("server newed !\n")
 	server.Register(reqCreateReplication)
 	server.Register(reqDeleteReplication)
 	server.Register(reqViewInternalSettings)
@@ -170,7 +168,7 @@ func (h *xdcrRestHandler) doCreateReplicationRequest(request *protobuf.CreateRep
 	if err != nil {
 		return nil, err 
 	}
-	
+
 	// forward replication request to other KV nodes involved if necessary
 	if request.GetForward() {
 		// turn off "forward" flag to prevent the forwarded request from being forwarded again
@@ -185,6 +183,7 @@ func (h *xdcrRestHandler) doCreateReplicationRequest(request *protobuf.CreateRep
 				port := infoArr[1].(uint16)
 				// second element in infoArr is a CreateReplicationResponse
 				createReplResponse := infoArr[0].(*protobuf.CreateReplicationResponse)	
+				// ask each node that called startReplication before to delete the replication
 				h.forwardReplicationRequestToXDCRNode(protobuf.NewDeleteReplicationRequest(createReplResponse.GetId()), nodeAddr, int(port))
 			}
 			// call deleteReplication on current node
@@ -198,9 +197,9 @@ func (h *xdcrRestHandler) doCreateReplicationRequest(request *protobuf.CreateRep
 }
 
 func (h *xdcrRestHandler) doDeleteReplicationRequest(request *protobuf.DeleteReplicationRequest) (ap.MessageMarshaller, error) {
-	logger_ap.Debugf("doDeleteReplicationRequest\n")
-
 	replId := request.GetId()
+	logger_ap.Infof("doDeleteReplicationRequest on repliation id, %v\n", replId)
+		
 	err := DeleteReplication(replId)
 	if err != nil {
 		return nil, err 
@@ -219,6 +218,7 @@ func (h *xdcrRestHandler) doDeleteReplicationRequest(request *protobuf.DeleteRep
 		}
 	}
 	
+	// no return message in success case
 	return &protobuf.EmptyMessage{}, nil
 }
 

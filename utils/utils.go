@@ -1,6 +1,7 @@
 package utils
 
 import (
+	"code.google.com/p/goprotobuf/proto"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -16,7 +17,6 @@ import (
 	"strings"
 	"bytes"
 	"bufio"
-    "code.google.com/p/goprotobuf/proto"
 )
 
 type BucketBasicStats struct {
@@ -160,6 +160,7 @@ func DecodeHttpRequestFromByteArray(data []byte) (*http.Request, error) {
 // content depends on only request body and nothing else
 func DecodeMessageFromByteArray(data []byte, msg proto.Message) error {
 	request, err := DecodeHttpRequestFromByteArray(data)
+	logger_utils.Infof("decoded http %v", request)
 	if err != nil {
 		return err
 	}
@@ -176,16 +177,8 @@ func DecodeMessageFromHttpRequest(request *http.Request, msg proto.Message) erro
 	if err != nil {
 		return err
 	} 
-	
-	return proto.Unmarshal(requestBody, msg)
-}
-
-// decode replication id from http request
-func DecodeReplicationIdFromHttpRequest(request *http.Request, pathPrefix string) (string, error) {
-	if len(request.URL.Path) <= len(pathPrefix) {
-		return "", errors.New(fmt.Sprintf("Invalid path, %v, in http request.", request.URL.Path))
-	}
-	return request.URL.Path[len(pathPrefix):], nil
+	err = proto.Unmarshal(requestBody, msg)
+	return err
 }
 
 // TODO may expose and reuse the same func in si
@@ -205,4 +198,16 @@ func RequestRead(r io.Reader, data []byte) (err error) {
 		return nil
 	}
 	return err
+}
+
+func InvalidParameterInHttpRequestError (param string) error{
+	return errors.New(fmt.Sprintf("Invalid parameter, %v, in http request.", param))
+}
+
+func InvalidValueInHttpRequestError (param, val string) error{
+	return errors.New(fmt.Sprintf("Invalid value, %v, for parameter, %v, in http request.", val, param))
+}
+
+func InvalidPathInHttpRequestError (path string) error{
+	return errors.New(fmt.Sprintf("Invalid path, %v, in http request.", path))
 }

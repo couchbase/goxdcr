@@ -165,8 +165,8 @@ type CreateReplicationRequest struct {
 	ToCluster        *string              `protobuf:"bytes,2,req,name=toCluster" json:"toCluster,omitempty"`
 	ToBucket         *string              `protobuf:"bytes,3,req,name=toBucket" json:"toBucket,omitempty"`
 	FilterName       *string              `protobuf:"bytes,4,opt,name=filterName" json:"filterName,omitempty"`
-	Settings         *ReplicationSettings `protobuf:"bytes,6,opt,name=settings" json:"settings,omitempty"`
-	Forward          *bool                `protobuf:"varint,7,opt,name=forward,def=1" json:"forward,omitempty"`
+	Settings         *ReplicationSettings `protobuf:"bytes,5,opt,name=settings" json:"settings,omitempty"`
+	Forward          *bool                `protobuf:"varint,6,opt,name=forward,def=1" json:"forward,omitempty"`
 	XXX_unrecognized []byte               `json:"-"`
 }
 
@@ -220,7 +220,6 @@ func (m *CreateReplicationRequest) GetForward() bool {
 
 type CreateReplicationResponse struct {
 	Id               *string `protobuf:"bytes,1,req,name=id" json:"id,omitempty"`
-	Database         *string `protobuf:"bytes,2,req,name=database" json:"database,omitempty"`
 	XXX_unrecognized []byte  `json:"-"`
 }
 
@@ -231,13 +230,6 @@ func (*CreateReplicationResponse) ProtoMessage()    {}
 func (m *CreateReplicationResponse) GetId() string {
 	if m != nil && m.Id != nil {
 		return *m.Id
-	}
-	return ""
-}
-
-func (m *CreateReplicationResponse) GetDatabase() string {
-	if m != nil && m.Database != nil {
-		return *m.Database
 	}
 	return ""
 }
@@ -392,7 +384,7 @@ type ReplicationSettings struct {
 	InternalSettings     *InternalSettings                    `protobuf:"bytes,1,opt,name=internalSettings" json:"internalSettings,omitempty"`
 	XdcrFilterExpression *string                              `protobuf:"bytes,2,opt,name=xdcrFilterExpression" json:"xdcrFilterExpression,omitempty"`
 	XdcrReplicationType  *ReplicationSettings_ReplicationType `protobuf:"varint,3,opt,name=xdcrReplicationType,enum=protobuf.ReplicationSettings_ReplicationType,def=0" json:"xdcrReplicationType,omitempty"`
-	Active               *bool                                `protobuf:"varint,4,opt,name=active" json:"active,omitempty"`
+	XdcrActive           *bool                                `protobuf:"varint,4,opt,name=xdcrActive" json:"xdcrActive,omitempty"`
 	XXX_unrecognized     []byte                               `json:"-"`
 }
 
@@ -423,9 +415,9 @@ func (m *ReplicationSettings) GetXdcrReplicationType() ReplicationSettings_Repli
 	return Default_ReplicationSettings_XdcrReplicationType
 }
 
-func (m *ReplicationSettings) GetActive() bool {
-	if m != nil && m.Active != nil {
-		return *m.Active
+func (m *ReplicationSettings) GetXdcrActive() bool {
+	if m != nil && m.XdcrActive != nil {
+		return *m.XdcrActive
 	}
 	return false
 }
