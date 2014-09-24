@@ -65,6 +65,7 @@ loop:
 
 		case msg := <-s.msgChan:
 			if err2, respch := s.decodeCmd(cmdStop, msg); err2 == nil {
+				logger.Debugf("server is stopped\n")
 				close(s.msgChan)
 				respch <- []interface{}{true}
 				break loop

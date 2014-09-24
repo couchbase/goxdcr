@@ -3,6 +3,7 @@
 package replication_manager
 
 import (
+	common "github.com/Xiaomei-Zhang/couchbase_goxdcr/common"
 	"github.com/Xiaomei-Zhang/couchbase_goxdcr/pipeline_manager"
 	log "github.com/Xiaomei-Zhang/couchbase_goxdcr/util"
 	factory "github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/factory"
@@ -25,10 +26,9 @@ type replicationManager struct {
 
 var replication_mgr replicationManager
 
-func Initialize() {
+func Initialize(metadata_svc metadata_svc.MetadataSvc, cluster_info_svc metadata_svc.ClusterInfoSvc, xdcr_topology_svc metadata_svc.XDCRCompTopologySvc) {
 	replication_mgr.once.Do(func() {
-		//TODO: change it
-		replication_mgr.init(nil, nil, nil)
+		replication_mgr.init(metadata_svc, cluster_info_svc, xdcr_topology_svc)
 	})
 }
 
@@ -57,22 +57,22 @@ func XDCRCompTopologyService() metadata_svc.XDCRCompTopologySvc {
 	return replication_mgr.xdcr_topology_svc
 }
 
-func CreateReplication(sourceClusterUUID string, sourceBucket string, targetClusterUUID, targetBucket string, filterName string, settings map[string]interface{}) error {
+func CreateReplication(sourceClusterUUID string, sourceBucket string, targetClusterUUID, targetBucket string, filterName string, settings map[string]interface{}) (common.Pipeline, error)  {
 	logger_rm.Infof("Creating replication - sourceCluterUUID=%s, sourceBucket=%s, targetClusterUUID=%s, targetBucket=%s, filterName=%s, settings=%v\n", sourceClusterUUID,
 		sourceBucket, targetClusterUUID, targetBucket, filterName, settings)
 	spec, err := replication_mgr.createAndPersistReplicationSpec(sourceClusterUUID, sourceBucket, targetClusterUUID, targetBucket, filterName, settings)
 	logger_rm.Debugf("replication specification %s is created and persisted\n", spec.Id())
 	if err != nil {
 		logger_rm.Errorf("%v\n", err)
-		return err
+		return nil, err
 	}
-	_, err = pipeline_manager.StartPipeline(spec.Id(), settings)
+	p, err := pipeline_manager.StartPipeline(spec.Id(), settings)
 	if err == nil {
 		logger_rm.Debugf("Pipeline %s is started\n", spec.Id())
 	} else {
 		logger_rm.Errorf("%v\n", err)
 	}
-	return err
+	return p, err
 }
 
 func PauseReplication(topic string) error {

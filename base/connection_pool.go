@@ -10,7 +10,7 @@ import (
 	"sync"
 )
 
-var logger_pool *log.CommonLogger = log.NewLogger("Connection", log.LogLevelInfo)
+var logger_pool *log.CommonLogger = log.NewLogger("Connection", log.LogLevelDebug)
 
 type ConnPool struct {
 	clients  chan *mcc.Client
@@ -65,6 +65,7 @@ func (p *ConnPool) IsClosed() bool {
 }
 
 func (p *ConnPool) Get() (*mcc.Client, error) {
+	logger_pool.Debugf("There are %d connections in the pool\n", len(p.clients))
 	client, ok := <-p.clients
 	if ok {
 		return client, nil
@@ -121,24 +122,6 @@ func (p *ConnPool) ReleaseConnections() {
 	p.clients = nil
 }
 
-func (connPoolMgr *connPoolMgr) GetConnection(bucket *cb.Bucket, vbid uint16, poolName *string, username string, password string) (*mcc.Client, error) {
-	pool, err := connPoolMgr.GetPoolForVB(bucket, vbid, poolName, username, password, 0)
-	if err != nil {
-		return nil, err
-	}
-	return pool.Get()
-}
-
-func (connPoolMgr *connPoolMgr) GetPoolForVB(bucket *cb.Bucket, vbid uint16, poolName *string, username string, password string, connsize int) (*ConnPool, error) {
-	var poolNameToCreate string
-	if poolName == nil {
-		poolNameToCreate = GetHostStr(bucket, vbid)
-	} else {
-		poolNameToCreate = *poolName
-	}
-	return connPoolMgr.GetOrCreatePool(poolNameToCreate, GetHostStr(bucket, vbid), username, password, connsize)
-}
-
 func (connPoolMgr *connPoolMgr) GetOrCreatePool(poolNameToCreate string, hostname string, username string, password string, connsize int) (*ConnPool, error) {
 	pool := connPoolMgr.GetPool(poolNameToCreate)
 	var err error
@@ -158,19 +141,6 @@ func (connPoolMgr *connPoolMgr) GetPool(poolName string) *ConnPool {
 	pool := connPoolMgr.conn_pools_map[poolName]
 
 	return pool
-}
-
-//
-// This function creates a connection pool.
-func (connPoolMgr *connPoolMgr) CreatePoolForVB(bucket *cb.Bucket, vbid uint16, poolName *string, username string, password string, connectionSize int) (p *ConnPool, err error) {
-	var poolNameToCreate string
-	if poolName != nil {
-		poolNameToCreate = *poolName
-	} else {
-		poolNameToCreate = GetHostStr(bucket, vbid)
-	}
-
-	return connPoolMgr.CreatePool(poolNameToCreate, GetHostStr(bucket, vbid), username, password, connectionSize)
 }
 
 func (connPoolMgr *connPoolMgr) CreatePool(poolName string, hostName string, username string, password string, connectionSize int) (p *ConnPool, err error) {

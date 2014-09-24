@@ -120,8 +120,19 @@ func maybeAddAuth(req *http.Request, username string, password string) {
 	}
 }
 
-func Bucket(connectStr string, bucketName string) (*couchbase.Bucket, error) {
-	couch, err := couchbase.Connect("http://" + connectStr)
+func Bucket(connectStr string, bucketName string, clusterUserName, clusterPassword string) (*couchbase.Bucket, error) {
+	bucketInfos, err := couchbase.GetBucketList (fmt.Sprintf("http://%s:%s@%s", clusterUserName, clusterPassword, connectStr))
+	if err != nil {
+		return nil, err
+	}
+	
+	var password string
+	for _, bucketInfo := range bucketInfos {
+		if bucketInfo.Name == bucketName {
+			password = bucketInfo.Password
+		}
+	}
+	couch, err := couchbase.Connect("http://" + bucketName + ":" + password +"@" + connectStr)
 	if err != nil {
 		return nil, err
 	}
@@ -129,6 +140,7 @@ func Bucket(connectStr string, bucketName string) (*couchbase.Bucket, error) {
 	if err != nil {
 		return nil, err
 	}
+	
 	bucket, err := pool.GetBucket(bucketName)
 	if err != nil {
 		return nil, err
