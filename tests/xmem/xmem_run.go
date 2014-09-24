@@ -71,7 +71,7 @@ func setup() (err error) {
 	log.Println("Done with parsing the arguments")
 
 	//flush the target bucket
-	baseURL, err := couchbase.ParseURL("http://" + options.target_bucket + ":" +options.password + "@"+ options.target_clusterAddr)
+	baseURL, err := couchbase.ParseURL("http://" + options.target_bucket + ":" + options.password + "@" + options.target_clusterAddr)
 
 	if err == nil {
 		err = utils.QueryRestAPI(baseURL,
@@ -84,14 +84,14 @@ func setup() (err error) {
 
 	if err != nil {
 		log.Printf("Setup error=%v\n", err)
-	}else {
+	} else {
 		log.Println("Setup is done")
 	}
-	
+
 	return
 }
 
-func verify(data_count int) bool{
+func verify(data_count int) bool {
 	output := &utils.CouchBucket{}
 	baseURL, err := couchbase.ParseURL("http://" + options.target_clusterAddr)
 
@@ -104,37 +104,37 @@ func verify(data_count int) bool{
 			output)
 	}
 	if err != nil {
-		panic (err)
+		panic(err)
 	}
 	log.Printf("name=%s itemCount=%d\n", output.Name, output.Stat.ItemCount)
-	
+
 	return output.Stat.ItemCount == data_count
 }
 func main() {
 	//start http server for pprof
 	go func() {
 		log.Println("Try to start pprof...")
-		err := http.ListenAndServe("localhost:7000", nil) 
+		err := http.ListenAndServe("localhost:7000", nil)
 		if err != nil {
-			panic (err)
-		}else {
+			panic(err)
+		} else {
 			log.Println("Http server for pprof is started")
 		}
 	}()
 	argParse()
-	
-	test (10, 100, parts.Batch_XMEM)
-	test (5, 50, parts.Batch_XMEM)
-	
+
+	test(10, 100, parts.Batch_XMEM)
+	test(5, 50, parts.Batch_XMEM)
+
 }
 
-func test (batch_count int, data_count int, xmem_mode parts.XMEM_MODE) {
-	log.Printf ("------------START testing Xmem-------------------\n")
-	log.Printf ("batch_count=%d, data_count=%d, xmem_mode=%d\n", batch_count, data_count, xmem_mode)
+func test(batch_count int, data_count int, xmem_mode parts.XMEM_MODE) {
+	log.Printf("------------START testing Xmem-------------------\n")
+	log.Printf("batch_count=%d, data_count=%d, xmem_mode=%d\n", batch_count, data_count, xmem_mode)
 	err := setup()
 
 	if err != nil {
-		panic (err)
+		panic(err)
 	}
 	startXmem(batch_count, xmem_mode)
 	log.Println("XMEM is started")
@@ -143,11 +143,11 @@ func test (batch_count int, data_count int, xmem_mode parts.XMEM_MODE) {
 	go startUpr(options.source_clusterAddr, options.source_bucket, waitGrp, data_count)
 	waitGrp.Wait()
 
-	time.Sleep (10*time.Second)
+	time.Sleep(10 * time.Second)
 	bSuccess := verify(data_count)
 	if bSuccess {
 		log.Println("----------TEST SUCCEED------------")
-	}else {
+	} else {
 		log.Println("----------TEST FAILED-------------")
 	}
 }

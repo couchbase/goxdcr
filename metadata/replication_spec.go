@@ -19,17 +19,17 @@ type ReplicationSpecification struct {
 
 	//the filter name, it is going to be part of the key
 	//It will not change once the replication specification is created
-	filter_name	string  `json:"filter_name"`
-	
+	filter_name string `json:"filter_name"`
+
 	settings *ReplicationSettings `json:"replicationSettings"`
 }
 
-func NewReplicationSpecification (sourceClusterUUID string, sourceBucketName string, targetClusterUUID string, targetBucketName string, filterName string) *ReplicationSpecification{
-	return &ReplicationSpecification {id : replicationId (sourceClusterUUID, sourceBucketName, targetClusterUUID, targetBucketName, filterName),
-	source : constructEndIdentifier (sourceClusterUUID, sourceBucketName),
-	target : constructEndIdentifier (targetClusterUUID, targetBucketName),
-	filter_name : filterName,
-	settings: DefaultSettings()}
+func NewReplicationSpecification(sourceClusterUUID string, sourceBucketName string, targetClusterUUID string, targetBucketName string, filterName string) *ReplicationSpecification {
+	return &ReplicationSpecification{id: replicationId(sourceClusterUUID, sourceBucketName, targetClusterUUID, targetBucketName, filterName),
+		source:      constructEndIdentifier(sourceClusterUUID, sourceBucketName),
+		target:      constructEndIdentifier(targetClusterUUID, targetBucketName),
+		filter_name: filterName,
+		settings:    DefaultSettings()}
 }
 
 func (rep_spec *ReplicationSpecification) Id() string {
@@ -73,15 +73,15 @@ func parse(bucketStr string, errorStr string, segmentIndex int) (string, error) 
 
 }
 
-func replicationId (sourceClusterUUID string, sourceBucketName string, targetClusterUUID string, targetBucketName string, filterName string) string {
+func replicationId(sourceClusterUUID string, sourceBucketName string, targetClusterUUID string, targetBucketName string, filterName string) string {
 	parts := []string{sourceClusterUUID, sourceBucketName, targetClusterUUID, targetBucketName}
 	if filterName != "" {
-		parts = append (parts, filterName)
+		parts = append(parts, filterName)
 	}
-	return strings.Join (parts, "_")
+	return strings.Join(parts, "_")
 }
 
-func constructEndIdentifier (clusterUUID string, bucketName string ) string {
+func constructEndIdentifier(clusterUUID string, bucketName string) string {
 	parts := []string{clusterUUID, bucketName}
-	return strings.Join (parts, "/")
+	return strings.Join(parts, "/")
 }

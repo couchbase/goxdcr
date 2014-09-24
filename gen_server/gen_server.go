@@ -9,8 +9,8 @@ import (
 )
 
 const (
-cmdStop = 0
-cmdHeartBeat = 1
+	cmdStop      = 0
+	cmdHeartBeat = 1
 )
 
 var logger *log.CommonLogger

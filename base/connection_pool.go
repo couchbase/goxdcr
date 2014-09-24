@@ -10,7 +10,7 @@ import (
 	"sync"
 )
 
-var logger_pool *log.CommonLogger = log.NewLogger("Connection", log.LogLevelDebug)
+var logger_pool *log.CommonLogger = log.NewLogger("Connection", log.LogLevelInfo)
 
 type ConnPool struct {
 	clients  chan *mcc.Client

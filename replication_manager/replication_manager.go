@@ -3,7 +3,6 @@
 package replication_manager
 
 import (
-	common "github.com/Xiaomei-Zhang/couchbase_goxdcr/common"
 	"github.com/Xiaomei-Zhang/couchbase_goxdcr/pipeline_manager"
 	log "github.com/Xiaomei-Zhang/couchbase_goxdcr/util"
 	factory "github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/factory"
@@ -18,26 +17,32 @@ var logger_rm *log.CommonLogger = log.NewLogger("ReplicationManager", log.LogLev
 /* struct ReplicationManager
 *************************************/
 type replicationManager struct {
-	metadata_svc      metadata_svc.MetadataSvc
-	cluster_info_svc  metadata_svc.ClusterInfoSvc
-	xdcr_topology_svc metadata_svc.XDCRCompTopologySvc
-	once              sync.Once
+	metadata_svc          metadata_svc.MetadataSvc
+	cluster_info_svc      metadata_svc.ClusterInfoSvc
+	xdcr_topology_svc     metadata_svc.XDCRCompTopologySvc
+	internal_settings_svc metadata_svc.InternalReplicationSettingsSvc
+	once                  sync.Once
 }
 
 var replication_mgr replicationManager
 
-func Initialize(metadata_svc metadata_svc.MetadataSvc, cluster_info_svc metadata_svc.ClusterInfoSvc, xdcr_topology_svc metadata_svc.XDCRCompTopologySvc) {
+func Initialize(metadata_svc metadata_svc.MetadataSvc, 
+cluster_info_svc metadata_svc.ClusterInfoSvc, 
+xdcr_topology_svc metadata_svc.XDCRCompTopologySvc, 
+internalSettingsSvc metadata_svc.InternalReplicationSettingsSvc) {
 	replication_mgr.once.Do(func() {
-		replication_mgr.init(metadata_svc, cluster_info_svc, xdcr_topology_svc)
+		replication_mgr.init(metadata_svc, cluster_info_svc, xdcr_topology_svc, internalSettingsSvc)
 	})
 }
 
 func (rm *replicationManager) init(metadataSvc metadata_svc.MetadataSvc,
 	clusterSvc metadata_svc.ClusterInfoSvc,
-	topologySvc metadata_svc.XDCRCompTopologySvc) {
+	topologySvc metadata_svc.XDCRCompTopologySvc,
+	internalSettingsSvc metadata_svc.InternalReplicationSettingsSvc) {
 	rm.metadata_svc = metadataSvc
 	rm.cluster_info_svc = clusterSvc
 	rm.xdcr_topology_svc = topologySvc
+	rm.internal_settings_svc = internalSettingsSvc
 	fac := factory.NewXDCRFactory(metadataSvc, clusterSvc, topologySvc)
 	pipeline_manager.PipelineManager(fac)
 
@@ -57,22 +62,27 @@ func XDCRCompTopologyService() metadata_svc.XDCRCompTopologySvc {
 	return replication_mgr.xdcr_topology_svc
 }
 
-func CreateReplication(sourceClusterUUID string, sourceBucket string, targetClusterUUID, targetBucket string, filterName string, settings map[string]interface{}) (common.Pipeline, error)  {
+func InternalSettingsService() metadata_svc.InternalReplicationSettingsSvc {
+	return replication_mgr.internal_settings_svc
+}
+
+func CreateReplication(sourceClusterUUID string, sourceBucket string, targetClusterUUID, targetBucket string, filterName string, settings map[string]interface{}) (string, error) {
 	logger_rm.Infof("Creating replication - sourceCluterUUID=%s, sourceBucket=%s, targetClusterUUID=%s, targetBucket=%s, filterName=%s, settings=%v\n", sourceClusterUUID,
 		sourceBucket, targetClusterUUID, targetBucket, filterName, settings)
 	spec, err := replication_mgr.createAndPersistReplicationSpec(sourceClusterUUID, sourceBucket, targetClusterUUID, targetBucket, filterName, settings)
 	logger_rm.Debugf("replication specification %s is created and persisted\n", spec.Id())
 	if err != nil {
 		logger_rm.Errorf("%v\n", err)
-		return nil, err
+		return "", err
 	}
-	p, err := pipeline_manager.StartPipeline(spec.Id(), settings)
+	_, err = pipeline_manager.StartPipeline(spec.Id(), settings)
 	if err == nil {
 		logger_rm.Debugf("Pipeline %s is started\n", spec.Id())
+		return spec.Id(), err
 	} else {
 		logger_rm.Errorf("%v\n", err)
+		return "", err
 	}
-	return p, err
 }
 
 func PauseReplication(topic string) error {
@@ -144,8 +154,11 @@ func DeleteReplication(topic string) error {
 
 func (rm *replicationManager) createAndPersistReplicationSpec(sourceClusterUUID, sourceBucket, targetClusterUUID, targetBucket, filterName string, settings map[string]interface{}) (*metadata.ReplicationSpecification, error) {
 	spec := metadata.NewReplicationSpecification(sourceClusterUUID, sourceBucket, targetClusterUUID, targetBucket, filterName)
-	s := metadata.SettingsFromMap(settings)
-	spec.SetSettings(s)
-
-	return spec, nil
+	s, err := metadata.SettingsFromMap(settings)
+	if err == nil {
+		spec.SetSettings(s)
+		return spec, nil
+	} else {
+		return nil, err
+	}
 }

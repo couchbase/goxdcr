@@ -93,12 +93,12 @@ func main() {
 func setup() {
 	flushTargetBkt()
 	fmt.Println("Finish setup")
-	replication_manager.Initialize(&mockMetadataSvc{}, &mockClusterInfoSvc{}, &mockXDCRTopologySvc{})
+	replication_manager.Initialize(&mockMetadataSvc{}, &mockClusterInfoSvc{}, &mockXDCRTopologySvc{}, nil)
 	return
 }
 
 func test() {
-	pipeline, err := replication_manager.CreateReplication(options.source_cluster_addr, options.source_bucket, options.target_cluster_addr, options.target_bucket, options.target_bucket_password, nil)
+	topic, err := replication_manager.CreateReplication(options.source_cluster_addr, options.source_bucket, options.target_cluster_addr, options.target_bucket, options.target_bucket_password, nil)
 	if err != nil {
 		fail(fmt.Sprintf("%v", err))
 	}
@@ -109,9 +109,9 @@ func test() {
 //	replication_manager.ResumeReplication(pipeline.Topic())
 //	fmt.Printf("Replication %s is resumed\n", pipeline.Topic())
 //	time.Sleep(2 * time.Second)
-	replication_manager.DeleteReplication(pipeline.Topic())
-	fmt.Printf("Replication %s is deleted\n", pipeline.Topic())
-	time.Sleep(5 * time.Second)
+	replication_manager.DeleteReplication(topic)
+	fmt.Printf("Replication %s is deleted\n", topic)
+	time.Sleep(6 * time.Second)
 }
 
 func fail(msg string) {

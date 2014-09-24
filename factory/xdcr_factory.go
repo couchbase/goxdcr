@@ -160,7 +160,7 @@ func (xdcrf *XDCRFactory) constructSourceNozzles(spec *metadata.ReplicationSpeci
 
 			// construct kvfeeds
 			// partIds of the kvfeed nodes look like "kvfeed_1"
-			kvfeed, err := sp.NewKVFeed(kvaddr, topic, KVFEED_NAME_PREFIX+PART_NAME_DELIMITER+strconv.Itoa(i), bucket, vbList, i)
+			kvfeed, err := sp.NewKVFeed(kvaddr, topic, KVFEED_NAME_PREFIX+PART_NAME_DELIMITER+strconv.Itoa(i), bucket, vbList)
 			if err != nil {
 				logger_factory.Errorf("Error on NewKVFeed. i=%d, err=%v\n", i, err)
 				return nil, err
@@ -316,7 +316,8 @@ func (xdcrf *XDCRFactory) ConstructSettingsForPart(pipeline common.Pipeline, par
 
 func (xdcrf *XDCRFactory) constructSettingsForXmemNozzle(topic string, settings map[string]interface{}) (map[string]interface{}, error) {
 	xmemSettings := make(map[string]interface{})
-	repSettings := metadata.SettingsFromMap(settings)
+	// TODO this may break
+	repSettings, _ := metadata.SettingsFromMap(settings)
 	xmemSettings[parts.XMEM_SETTING_BATCHCOUNT] = repSettings.BatchCount()
 	xmemSettings[parts.XMEM_SETTING_BATCHSIZE] = repSettings.BatchSize()
 	xmemSettings[parts.XMEM_SETTING_TIMEOUT] = xdcrf.getTargetTimeoutEstimate(topic)

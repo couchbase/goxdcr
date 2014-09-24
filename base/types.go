@@ -11,8 +11,8 @@ type SettingDef struct {
 	Required  bool
 }
 
-func NewSettingDef (data_type reflect.Type, bReq bool) *SettingDef {
-	return &SettingDef {Data_type : data_type, Required : bReq}
+func NewSettingDef(data_type reflect.Type, bReq bool) *SettingDef {
+	return &SettingDef{Data_type: data_type, Required: bReq}
 }
 
 type SettingDefinitions map[string]*SettingDef

@@ -25,7 +25,6 @@ type Router struct {
 	vbMap map[uint16]string // pvbno -> partId. This defines the loading balancing strategy of which vbnos would be routed to which part
 	//Debug only, need to be rolled into statistics and monitoring
 	counter map[string]int
-	
 }
 
 func NewRouter(downStreamParts map[string]common.Part, vbMap map[uint16]string) (*Router, error) {

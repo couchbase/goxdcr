@@ -45,6 +45,8 @@ func argParse() {
 		"number of connections per kv node")
 	flag.IntVar(&options.numOutgoingConn, "numOutgoingConn", NUM_TARGET_CONN,
 		"number of outgoing connections to target")
+	flag.StringVar(&options.username, "username", "Administrator", "username to cluster admin console")
+	flag.StringVar(&options.password, "password", "welcome", "password to Cluster admin console")
 
 	flag.Parse()
 	args := flag.Args()
