@@ -2,58 +2,57 @@ package protobuf
 
 import (
 	"code.google.com/p/goprotobuf/proto"
-	utils "github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/utils"
-	base "github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/base"
 	log "github.com/Xiaomei-Zhang/couchbase_goxdcr/util"
-	"regexp"
-	"net/url"
-	"strings"
-	"strconv"
+	base "github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/base"
 	"github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/metadata"
+	utils "github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/utils"
+	"net/url"
+	"regexp"
+	"strconv"
+	"strings"
 )
 
 // constants used for parsing url path
-const(
+const (
 	UrlDelimiter = "/"
-	
-	CreateReplicationPath = "controller/createReplication"
-	InternalSettingsPath = "internalSettings"
+
+	CreateReplicationPath    = "controller/createReplication"
+	InternalSettingsPath     = "internalSettings"
 	SettingsReplicationsPath = "settings/replications"
-	DeleteReplicationPrefix = "controller/cancelXDCR"
-	StatisticsPrefix = "pools/default/buckets"
+	DeleteReplicationPrefix  = "controller/cancelXDCR"
+	StatisticsPrefix         = "pools/default/buckets"
 	// Some url paths are not static and have variable contents, e.g., settings/replications/$replication_id
-	// The message keys for such paths are constructed by appending the dynamic suffix below to the static portion of the path. 
+	// The message keys for such paths are constructed by appending the dynamic suffix below to the static portion of the path.
 	// e.g., settings/replications/dynamic
 	DynamicSuffix = UrlDelimiter + "dynamic"
-	// The same path, e.g.,SETTINGS_REPLICATION_PATH, may be used for two different APIs: look up and modify. 
+	// The same path, e.g.,SETTINGS_REPLICATION_PATH, may be used for two different APIs: look up and modify.
 	// The following suffixes are used to distinguish between these two cases
-	GetSuffix = UrlDelimiter + "GET"
-	PostSuffix = UrlDelimiter + "POST"
+	GetSuffix    = UrlDelimiter + "GET"
+	PostSuffix   = UrlDelimiter + "POST"
 	DeleteSuffix = UrlDelimiter + "DELETE"
-	
+
 	StatsPathPattern = ".*pools/default/buckets/[^/]*/stats/replications"
-	
 )
 
 // constants used for parsing internal settings
 const (
-	ReplicationType = "xdcrReplicationType"
-	FilterExpression = "xdcrFilterExpression"
-	Active = "xdcrActive"
-	CheckpointInterval = "xdcrCheckpointInterval"
-	BatchCount = "xdcrWorkerBatchSize"
-	BatchSize = "xdcrDocBatchSizeKb"
-	FailureRestartInterval = "xdcrFailureRestartInterval"
+	ReplicationType                = "xdcrReplicationType"
+	FilterExpression               = "xdcrFilterExpression"
+	Active                         = "xdcrActive"
+	CheckpointInterval             = "xdcrCheckpointInterval"
+	BatchCount                     = "xdcrWorkerBatchSize"
+	BatchSize                      = "xdcrDocBatchSizeKb"
+	FailureRestartInterval         = "xdcrFailureRestartInterval"
 	OptimisticReplicationThreshold = "xdcrOptimisticReplicationThreshold"
-	HttpConnection = "httpConnections"
-	SourceNozzlePerNode = "xdcrSourceNozzlePerNode"
-	TargetNozzlePerNode = "xdcrTargetNozzlePerNode"
-	MaxExpectedReplicationLag = "xdcrMaxExpectedReplicationLag"
-	TimeoutPercentageCap = "xdcrTimeoutPercentageCap"
+	HttpConnection                 = "httpConnections"
+	SourceNozzlePerNode            = "xdcrSourceNozzlePerNode"
+	TargetNozzlePerNode            = "xdcrTargetNozzlePerNode"
+	MaxExpectedReplicationLag      = "xdcrMaxExpectedReplicationLag"
+	TimeoutPercentageCap           = "xdcrTimeoutPercentageCap"
 )
 
 const (
-	ParseIntBase = 10
+	ParseIntBase    = 10
 	ParseIntBitSize = 64
 )
 
@@ -64,26 +63,26 @@ var logger_repmsg *log.CommonLogger = log.NewLogger("ReplicationMessages", log.L
 // create new Settings message from ReplicationSettings object
 func NewInternalSettings(replSettings *metadata.ReplicationSettings) *InternalSettings {
 	checkpointInterval := uint32(replSettings.CheckpointInterval())
-	batchCount :=  uint32(replSettings.BatchCount())
-	batchSize :=           uint32(replSettings.BatchSize()) 
-	failureRestartInterval :=   uint32(replSettings.FailureRestartInterval())
+	batchCount := uint32(replSettings.BatchCount())
+	batchSize := uint32(replSettings.BatchSize())
+	failureRestartInterval := uint32(replSettings.FailureRestartInterval())
 	optimisticReplicationThreshold := uint32(replSettings.OptimisticReplicationThreshold())
-	httpConnections :=           uint32(replSettings.HttpConnection())
-	sourceNozzlePerNode :=   uint32(replSettings.SourceNozzlesPerNode())
-	targetNozzlePerNode :=   uint32(replSettings.TargetNozzlesPerNode())
+	httpConnections := uint32(replSettings.HttpConnection())
+	sourceNozzlePerNode := uint32(replSettings.SourceNozzlesPerNode())
+	targetNozzlePerNode := uint32(replSettings.TargetNozzlesPerNode())
 	maxExpectedReplicationLag := uint32(replSettings.MaxExpectedReplicationLag())
 	timeoutPercentageCap := uint32(replSettings.TimeoutPercentageCap())
-	return &InternalSettings{                  
-		XdcrCheckpointInterval:  &checkpointInterval,       
-		XdcrWorkerBatchSize:       &batchCount,         
-		XdcrDocBatchSizeKb:           &batchSize,        
-		XdcrFailureRestartInterval:   &failureRestartInterval,        
-		XdcrOptimisticReplicationThreshold: &optimisticReplicationThreshold,  
-		HttpConnections:           &httpConnections,       
-		XdcrSourceNozzlePerNode:   &sourceNozzlePerNode,           
-		XdcrTargetNozzlePerNode:   &targetNozzlePerNode,           
-		XdcrMaxExpectedReplicationLag: &maxExpectedReplicationLag,       
-		XdcrTimeoutPercentageCap:  &timeoutPercentageCap,
+	return &InternalSettings{
+		XdcrCheckpointInterval:             &checkpointInterval,
+		XdcrWorkerBatchSize:                &batchCount,
+		XdcrDocBatchSizeKb:                 &batchSize,
+		XdcrFailureRestartInterval:         &failureRestartInterval,
+		XdcrOptimisticReplicationThreshold: &optimisticReplicationThreshold,
+		HttpConnections:                    &httpConnections,
+		XdcrSourceNozzlePerNode:            &sourceNozzlePerNode,
+		XdcrTargetNozzlePerNode:            &targetNozzlePerNode,
+		XdcrMaxExpectedReplicationLag:      &maxExpectedReplicationLag,
+		XdcrTimeoutPercentageCap:           &timeoutPercentageCap,
 	}
 }
 
@@ -91,79 +90,79 @@ func NewInternalSettings(replSettings *metadata.ReplicationSettings) *InternalSe
 func NewInternalSettingsFromMap(settingsMap map[string]interface{}) (*InternalSettings, error) {
 	internalSettings := new(InternalSettings)
 	for key, val := range settingsMap {
-		switch (key) {
-			case CheckpointInterval:
-				checkpointInterval, err := getIntValueFromStringArray(key, val)
-				if err != nil {
-					return nil, err
-				}
-				internalSettings.XdcrCheckpointInterval = checkpointInterval
-			case BatchCount:
-				batchCount, err := getIntValueFromStringArray(key, val)
-				if err != nil {
-					return nil, err
-				}
-				internalSettings.XdcrWorkerBatchSize = batchCount	
-			case BatchSize:
-				batchSize, err := getIntValueFromStringArray(key, val)
-				if err != nil {
-					return nil, err
-				}
-				internalSettings.XdcrDocBatchSizeKb = batchSize
-			case FailureRestartInterval:
-				failureRestartInterval, err := getIntValueFromStringArray(key, val)
-				if err != nil {
-					return nil, err
-				}
-				internalSettings.XdcrFailureRestartInterval = failureRestartInterval	
-			case OptimisticReplicationThreshold:
-				optimisticReplicationThreshold, err := getIntValueFromStringArray(key, val)
-				if err != nil {
-					return nil, err
-				}
-				internalSettings.XdcrOptimisticReplicationThreshold = optimisticReplicationThreshold	
-			case HttpConnection:
-				httpConnections, err := getIntValueFromStringArray(key, val)
-				if err != nil {
-					return nil, err
-				}
-				internalSettings.HttpConnections = httpConnections	
-			case SourceNozzlePerNode:
-				sourceNozzlePerNode, err := getIntValueFromStringArray(key, val)
-				if err != nil {
-					return nil, err
-				}
-				internalSettings.XdcrSourceNozzlePerNode = sourceNozzlePerNode	
-			case TargetNozzlePerNode:
-				targetNozzlePerNode, err := getIntValueFromStringArray(key, val)
-				if err != nil {
-					return nil, err
-				}
-				internalSettings.XdcrTargetNozzlePerNode = targetNozzlePerNode
-			case MaxExpectedReplicationLag:
-				maxExpectedReplicationLag, err := getIntValueFromStringArray(key, val)
-				if err != nil {
-					return nil, err
-				}
-				internalSettings.XdcrMaxExpectedReplicationLag = maxExpectedReplicationLag
-			case TimeoutPercentageCap:
-				timeoutPercentageCap, err := getIntValueFromStringArray(key, val)
-				if err != nil {
-					return nil, err
-				}
-				internalSettings.XdcrTimeoutPercentageCap = timeoutPercentageCap	
-			default:
-				return nil, utils.InvalidParameterInHttpRequestError(key)
-							
+		switch key {
+		case CheckpointInterval:
+			checkpointInterval, err := getIntValueFromStringArray(key, val)
+			if err != nil {
+				return nil, err
+			}
+			internalSettings.XdcrCheckpointInterval = checkpointInterval
+		case BatchCount:
+			batchCount, err := getIntValueFromStringArray(key, val)
+			if err != nil {
+				return nil, err
+			}
+			internalSettings.XdcrWorkerBatchSize = batchCount
+		case BatchSize:
+			batchSize, err := getIntValueFromStringArray(key, val)
+			if err != nil {
+				return nil, err
+			}
+			internalSettings.XdcrDocBatchSizeKb = batchSize
+		case FailureRestartInterval:
+			failureRestartInterval, err := getIntValueFromStringArray(key, val)
+			if err != nil {
+				return nil, err
+			}
+			internalSettings.XdcrFailureRestartInterval = failureRestartInterval
+		case OptimisticReplicationThreshold:
+			optimisticReplicationThreshold, err := getIntValueFromStringArray(key, val)
+			if err != nil {
+				return nil, err
+			}
+			internalSettings.XdcrOptimisticReplicationThreshold = optimisticReplicationThreshold
+		case HttpConnection:
+			httpConnections, err := getIntValueFromStringArray(key, val)
+			if err != nil {
+				return nil, err
+			}
+			internalSettings.HttpConnections = httpConnections
+		case SourceNozzlePerNode:
+			sourceNozzlePerNode, err := getIntValueFromStringArray(key, val)
+			if err != nil {
+				return nil, err
+			}
+			internalSettings.XdcrSourceNozzlePerNode = sourceNozzlePerNode
+		case TargetNozzlePerNode:
+			targetNozzlePerNode, err := getIntValueFromStringArray(key, val)
+			if err != nil {
+				return nil, err
+			}
+			internalSettings.XdcrTargetNozzlePerNode = targetNozzlePerNode
+		case MaxExpectedReplicationLag:
+			maxExpectedReplicationLag, err := getIntValueFromStringArray(key, val)
+			if err != nil {
+				return nil, err
+			}
+			internalSettings.XdcrMaxExpectedReplicationLag = maxExpectedReplicationLag
+		case TimeoutPercentageCap:
+			timeoutPercentageCap, err := getIntValueFromStringArray(key, val)
+			if err != nil {
+				return nil, err
+			}
+			internalSettings.XdcrTimeoutPercentageCap = timeoutPercentageCap
+		default:
+			return nil, utils.InvalidParameterInHttpRequestError(key)
+
 		}
 	}
-	
+
 	return internalSettings, nil
 }
 
 // convert InternalSettings to map with keys in sync with those in metadata.ReplicationSettings
 func InternalSettingsToMap(settings *InternalSettings) map[string]interface{} {
-	settings_map := make (map[string]interface{})
+	settings_map := make(map[string]interface{})
 	checkpointInternal := settings.GetXdcrCheckpointInterval()
 	if checkpointInternal != 0 {
 		settings_map[metadata.CheckpointInterval] = checkpointInternal
@@ -191,26 +190,26 @@ func InternalSettingsToMap(settings *InternalSettings) map[string]interface{} {
 	sourceNozzlePerNode := settings.GetXdcrSourceNozzlePerNode()
 	if sourceNozzlePerNode != 0 {
 		settings_map[metadata.SourceNozzlePerNode] = sourceNozzlePerNode
-	}	
+	}
 	targetNozzlePerNode := settings.GetXdcrTargetNozzlePerNode()
 	if targetNozzlePerNode != 0 {
 		settings_map[metadata.TargetNozzlePerNode] = targetNozzlePerNode
-	}	
+	}
 	maxExpectedReplicationLag := settings.GetXdcrMaxExpectedReplicationLag()
 	if maxExpectedReplicationLag != 0 {
 		settings_map[metadata.MaxExpectedReplicationLag] = maxExpectedReplicationLag
-	}	
+	}
 	timeoutPercentageCap := settings.GetXdcrTimeoutPercentageCap()
 	if timeoutPercentageCap != 0 {
 		settings_map[metadata.TimeoutPercentageCap] = timeoutPercentageCap
-	}	
-	
+	}
+
 	return settings_map
 }
 
 // convert ReplicationSettings to map with keys in sync with those in metadata.ReplicationSettings
 func ReplicationSettingsToMap(settings *ReplicationSettings) map[string]interface{} {
-	settings_map := make (map[string]interface{})
+	settings_map := make(map[string]interface{})
 	replicationType := settings.GetXdcrReplicationType()
 	settings_map[metadata.ReplicationType] = replicationType
 	filterExpression := settings.GetXdcrFilterExpression()
@@ -219,12 +218,12 @@ func ReplicationSettingsToMap(settings *ReplicationSettings) map[string]interfac
 	}
 	active := settings.GetXdcrActive()
 	settings_map[metadata.Active] = active
-	
+
 	internalSettings_map := InternalSettingsToMap(settings.GetInternalSettings())
 	for key, value := range internalSettings_map {
 		settings_map[key] = value
 	}
-	
+
 	return settings_map
 }
 
@@ -234,42 +233,42 @@ func NewReplicationSettingsFromMap(settingsMap map[string]interface{}) (*Replica
 
 	internalSettingsMap := make(map[string]interface{})
 	for key, val := range settingsMap {
-		switch (key) {
-			case ReplicationType:
-				replicationTypeStr, err := getStringValueFromStringArray(key, val)
-				if err != nil {
-					return nil, err
-				}
-				replicationTypeValue, ok := ReplicationSettings_ReplicationType_value[*replicationTypeStr]
-				if !ok {
-					return nil, utils.InvalidValueInHttpRequestError(key, *replicationTypeStr)
-				}
-				replicationType := ReplicationSettings_ReplicationType(replicationTypeValue)
-				replicationSettings.XdcrReplicationType = &replicationType
-			case FilterExpression:
-				filterExpression, err := getStringValueFromStringArray(key, val)
-				if err != nil {
-					return nil, err
-				}
-				replicationSettings.XdcrFilterExpression = filterExpression	
-			case Active:
-				active, err := getBoolValueFromStringArray(key, val)
-				if err != nil {
-					return nil, err
-				}
-				replicationSettings.XdcrActive = active	
-			default:
-				// other keys must be for internal settings
-				internalSettingsMap[key] = val		
+		switch key {
+		case ReplicationType:
+			replicationTypeStr, err := getStringValueFromStringArray(key, val)
+			if err != nil {
+				return nil, err
+			}
+			replicationTypeValue, ok := ReplicationSettings_ReplicationType_value[*replicationTypeStr]
+			if !ok {
+				return nil, utils.InvalidValueInHttpRequestError(key, *replicationTypeStr)
+			}
+			replicationType := ReplicationSettings_ReplicationType(replicationTypeValue)
+			replicationSettings.XdcrReplicationType = &replicationType
+		case FilterExpression:
+			filterExpression, err := getStringValueFromStringArray(key, val)
+			if err != nil {
+				return nil, err
+			}
+			replicationSettings.XdcrFilterExpression = filterExpression
+		case Active:
+			active, err := getBoolValueFromStringArray(key, val)
+			if err != nil {
+				return nil, err
+			}
+			replicationSettings.XdcrActive = active
+		default:
+			// other keys must be for internal settings
+			internalSettingsMap[key] = val
 		}
 	}
-	
+
 	internalSettings, err := NewInternalSettingsFromMap(internalSettingsMap)
 	if err != nil {
 		return nil, err
-    }
+	}
 	replicationSettings.InternalSettings = internalSettings
-	
+
 	return replicationSettings, nil
 }
 
@@ -277,7 +276,7 @@ func NewReplicationSettingsFromMap(settingsMap map[string]interface{}) (*Replica
 func NewDeleteReplicationRequest(replicationId string) *DeleteReplicationRequest {
 	forward := false
 	return &DeleteReplicationRequest{
-		Id: &replicationId,
+		Id:      &replicationId,
 		Forward: &forward,
 	}
 }
@@ -328,36 +327,36 @@ func (req *CreateReplicationRequest) Decode(data []byte) (err error) {
 	if err = request.ParseForm(); err != nil {
 		return err
 	}
-	
+
 	// read input paramters from http request and use them to populate corresponding fields in req
 	settingsMap := make(map[string]interface{})
 	for key, val := range request.Form {
-		switch (key) {
-			case "fromBucket": 
-				req.FromBucket = &val[0]
-			case "toCluster": 
-				req.ToCluster = &val[0]
-			case "toBucket": 
-				req.ToBucket = &val[0]
-			case "filterName": 
-				req.FilterName = &val[0]
-			case "forward": 
-				forward, err := strconv.ParseBool(val[0])
-				if err != nil {
-					return utils.InvalidValueInHttpRequestError(key, val[0])
-				}
-				req.Forward = &forward
-			default:
-				// other keys musy be for replication settings. 
-				settingsMap[key] = val
+		switch key {
+		case "fromBucket":
+			req.FromBucket = &val[0]
+		case "toCluster":
+			req.ToCluster = &val[0]
+		case "toBucket":
+			req.ToBucket = &val[0]
+		case "filterName":
+			req.FilterName = &val[0]
+		case "forward":
+			forward, err := strconv.ParseBool(val[0])
+			if err != nil {
+				return utils.InvalidValueInHttpRequestError(key, val[0])
+			}
+			req.Forward = &forward
+		default:
+			// other keys musy be for replication settings.
+			settingsMap[key] = val
 		}
 	}
-	
+
 	settings, err := NewReplicationSettingsFromMap(settingsMap)
 	if err != nil {
 		return err
 	}
-	
+
 	req.Settings = settings
 	return nil
 }
@@ -392,7 +391,7 @@ func (req *DeleteReplicationRequest) Encode() (data []byte, err error) {
 	return proto.Marshal(req)
 }
 
-func (req *DeleteReplicationRequest) Decode(data []byte) (err error) {	
+func (req *DeleteReplicationRequest) Decode(data []byte) (err error) {
 	// extract replication id from request and add it to message
 	replicationId, err := decodeReplicationIdFromByteArray(data, DeleteReplicationPrefix)
 	if err == nil {
@@ -471,7 +470,7 @@ func (req *ChangeGlobalSettingsRequest) Decode(data []byte) (err error) {
 	if err != nil {
 		return err
 	}
-	
+
 	req.Settings = internalSettings
 	return nil
 }
@@ -489,19 +488,19 @@ func (req *ChangeReplicationSettingsRequest) Encode() (data []byte, err error) {
 	return proto.Marshal(req)
 }
 
-func (req *ChangeReplicationSettingsRequest) Decode(data []byte) (err error) {	
+func (req *ChangeReplicationSettingsRequest) Decode(data []byte) (err error) {
 	// extract replication id from request and add it to message
 	replicationId, err := decodeReplicationIdFromByteArray(data, SettingsReplicationsPath)
 	if err == nil {
 		req.Id = &replicationId
 	}
-	
+
 	// extract replication settings
 	replicationSettings, err := decodeReplicationSettingsFromByteArray(data)
 	if err != nil {
 		return err
 	}
-	
+
 	req.Settings = replicationSettings
 	return nil
 }
@@ -524,11 +523,10 @@ func (req *ChangeInternalSettingsRequest) Decode(data []byte) (err error) {
 	if err != nil {
 		return err
 	}
-	
+
 	req.Settings = internalSettings
 	return nil
 }
-
 
 // GetStatisticsRequest implement MessageMarshaller interface
 func (req *GetStatisticsRequest) Name() string {
@@ -548,7 +546,7 @@ func (req *GetStatisticsRequest) Decode(data []byte) (err error) {
 	if err != nil {
 		return err
 	}
-	
+
 	// extract extra parameters from request and add it to message
 	loc := statsPathRegexp.FindStringIndex(request.URL.Path)
 	if loc == nil {
@@ -556,43 +554,43 @@ func (req *GetStatisticsRequest) Decode(data []byte) (err error) {
 	}
 	// get encoded parameters from request url
 	encodedParams := request.URL.Path[loc[1]:]
-	// decode params into a url, which is essentially a list of "/" separated values, 
+	// decode params into a url, which is essentially a list of "/" separated values,
 	// i.e., /[UUID]/[source_bucket]/[destination_bucket]/[stat_name]
 	// or /[UUID]/[source_bucket]/[destination_bucket]/[filter_name]/[stat_name]
 	paramsStr, err := url.Parse(encodedParams)
 	if err != nil {
 		return err
 	}
-	
+
 	paramsArr := strings.Split(paramsStr.String(), UrlDelimiter)
 	numOfParams := len(paramsArr)
 	if numOfParams != 4 && numOfParams != 5 {
 		return utils.InvalidPathInHttpRequestError(request.URL.Path)
 	}
-	
+
 	// first three elements in array are UUID, source_bucket, destination_bucket, respectively
 	req.Uuid = &(paramsArr[0])
 	req.FromBucket = &(paramsArr[1])
 	req.ToBucket = &(paramsArr[2])
-	
+
 	// if filter name is specified, set it
 	if numOfParams == 5 {
 		req.FilterName = &(paramsArr[3])
 	}
-	
-	// last element in array is stat name. 
-	statName := paramsArr[numOfParams - 1]
+
+	// last element in array is stat name.
+	statName := paramsArr[numOfParams-1]
 	if stats, ok := GetStatisticsRequest_Stats_value[statName]; !ok {
 		return utils.InvalidPathInHttpRequestError(request.URL.Path)
 	} else {
 		statsObj := GetStatisticsRequest_Stats(stats)
 		req.Stats = &statsObj
 	}
-	
+
 	return err
 }
 
-func getIntValueFromStringArray (key string, val interface{}) (*uint32, error) {
+func getIntValueFromStringArray(key string, val interface{}) (*uint32, error) {
 	strArr, ok := val.([]string)
 	if !ok {
 		return nil, metadata.IncorrectValueTypeInMapError(key, val, "[]string")
@@ -606,7 +604,7 @@ func getIntValueFromStringArray (key string, val interface{}) (*uint32, error) {
 	}
 }
 
-func getStringValueFromStringArray (key string, val interface{}) (*string, error) {
+func getStringValueFromStringArray(key string, val interface{}) (*string, error) {
 	strArr, ok := val.([]string)
 	if !ok {
 		return nil, metadata.IncorrectValueTypeInMapError(key, val, "[]string")
@@ -614,7 +612,7 @@ func getStringValueFromStringArray (key string, val interface{}) (*string, error
 	return &strArr[0], nil
 }
 
-func getBoolValueFromStringArray (key string, val interface{}) (*bool, error) {
+func getBoolValueFromStringArray(key string, val interface{}) (*bool, error) {
 	strArr, ok := val.([]string)
 	if !ok {
 		return nil, metadata.IncorrectValueTypeInMapError(key, val, "[]string")
@@ -636,11 +634,11 @@ func decodeReplicationIdFromByteArray(data []byte, pathPrefix string) (string, e
 	if len(request.URL.Path) <= len(pathPrefix) {
 		return "", utils.InvalidPathInHttpRequestError(request.URL.Path)
 	}
-	return request.URL.Path[len(pathPrefix) + len(base.AdminportUrlPrefix) + len(UrlDelimiter):], nil
+	return request.URL.Path[len(pathPrefix)+len(base.AdminportUrlPrefix)+len(UrlDelimiter):], nil
 }
 
 // decode internal settings from http request encoded as byte array
-func decodeInternalSettingsFromByteArray (data []byte) (*InternalSettings, error) {	
+func decodeInternalSettingsFromByteArray(data []byte) (*InternalSettings, error) {
 	settingsMap, err := decodeSettingsMapFromByteArray(data)
 	if err != nil {
 		return nil, err
@@ -649,7 +647,7 @@ func decodeInternalSettingsFromByteArray (data []byte) (*InternalSettings, error
 }
 
 // decode replication settings from http request encoded as byte array
-func decodeReplicationSettingsFromByteArray (data []byte) (*ReplicationSettings, error) {
+func decodeReplicationSettingsFromByteArray(data []byte) (*ReplicationSettings, error) {
 	settingsMap, err := decodeSettingsMapFromByteArray(data)
 	if err != nil {
 		return nil, err
@@ -657,7 +655,7 @@ func decodeReplicationSettingsFromByteArray (data []byte) (*ReplicationSettings,
 	return NewReplicationSettingsFromMap(settingsMap)
 }
 
-func decodeSettingsMapFromByteArray (data []byte) (map[string]interface{}, error) {
+func decodeSettingsMapFromByteArray(data []byte) (map[string]interface{}, error) {
 	request, err := utils.DecodeHttpRequestFromByteArray(data)
 	if err != nil {
 		return nil, err
@@ -665,13 +663,12 @@ func decodeSettingsMapFromByteArray (data []byte) (map[string]interface{}, error
 	if err = request.ParseForm(); err != nil {
 		return nil, err
 	}
-	
+
 	// read input paramters from http request and use them to populate corresponding fields in req
 	settingsMap := make(map[string]interface{})
 	for key, val := range request.Form {
 		settingsMap[key] = val
 	}
-	
+
 	return settingsMap, nil
 }
-

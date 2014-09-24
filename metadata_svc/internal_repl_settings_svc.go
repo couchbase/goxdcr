@@ -5,7 +5,6 @@ import (
 )
 
 type InternalReplicationSettingsSvc interface {
-	GetInternalReplicationSettings () (*metadata.ReplicationSettings, error)
-	SetInternalReplicationSettings (*metadata.ReplicationSettings) error
+	GetInternalReplicationSettings() (*metadata.ReplicationSettings, error)
+	SetInternalReplicationSettings(*metadata.ReplicationSettings) error
 }
-

@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"os"
 
-	c "github.com/couchbase/indexing/secondary/common"
 	"github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/replication_manager"
+	c "github.com/couchbase/indexing/secondary/common"
 )
 
 var done = make(chan bool)

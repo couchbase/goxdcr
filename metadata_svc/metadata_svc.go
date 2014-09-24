@@ -5,9 +5,8 @@ import (
 )
 
 type MetadataSvc interface {
-	ReplicationSpec (replicationId string) (*metadata.ReplicationSpecification, error)
-	AddReplicationSpec (spec metadata.ReplicationSpecification) error
-	SetReplicationSpec (spec metadata.ReplicationSpecification) error
-	DelReplicationSpec (replicationId string) error
+	ReplicationSpec(replicationId string) (*metadata.ReplicationSpecification, error)
+	AddReplicationSpec(spec metadata.ReplicationSpecification) error
+	SetReplicationSpec(spec metadata.ReplicationSpecification) error
+	DelReplicationSpec(replicationId string) error
 }
-

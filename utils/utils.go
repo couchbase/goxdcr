@@ -1,6 +1,8 @@
 package utils
 
 import (
+	"bufio"
+	"bytes"
 	"code.google.com/p/goprotobuf/proto"
 	"encoding/base64"
 	"encoding/json"
@@ -15,8 +17,6 @@ import (
 	"net/url"
 	"reflect"
 	"strings"
-	"bytes"
-	"bufio"
 )
 
 type BucketBasicStats struct {
@@ -141,7 +141,7 @@ func Bucket(connectStr string, bucketName string) (*couchbase.Bucket, error) {
 func EncodeHttpRequestIntoByteArray(r *http.Request) ([]byte, error) {
 	buffer := new(bytes.Buffer)
 	err := r.Write(buffer)
-	if err == nil {	
+	if err == nil {
 		return buffer.Bytes(), nil
 	} else {
 		return nil, err
@@ -154,9 +154,9 @@ func DecodeHttpRequestFromByteArray(data []byte) (*http.Request, error) {
 	return http.ReadRequest(bufio.NewReader(buffer))
 }
 
-// given a http request encoded as a byte array, extract request body and 
+// given a http request encoded as a byte array, extract request body and
 // decode a message from it
-// this method should be used for messages with static paths, where message 
+// this method should be used for messages with static paths, where message
 // content depends on only request body and nothing else
 func DecodeMessageFromByteArray(data []byte, msg proto.Message) error {
 	request, err := DecodeHttpRequestFromByteArray(data)
@@ -164,19 +164,18 @@ func DecodeMessageFromByteArray(data []byte, msg proto.Message) error {
 	if err != nil {
 		return err
 	}
-	
+
 	return DecodeMessageFromHttpRequest(request, msg)
 }
 
-
-// given a http request, extract requesy body and 
+// given a http request, extract requesy body and
 // decode a message from it
 func DecodeMessageFromHttpRequest(request *http.Request, msg proto.Message) error {
 	requestBody := make([]byte, request.ContentLength)
 	err := RequestRead(request.Body, requestBody)
 	if err != nil {
 		return err
-	} 
+	}
 	err = proto.Unmarshal(requestBody, msg)
 	return err
 }
@@ -200,14 +199,14 @@ func RequestRead(r io.Reader, data []byte) (err error) {
 	return err
 }
 
-func InvalidParameterInHttpRequestError (param string) error{
+func InvalidParameterInHttpRequestError(param string) error {
 	return errors.New(fmt.Sprintf("Invalid parameter, %v, in http request.", param))
 }
 
-func InvalidValueInHttpRequestError (param, val string) error{
+func InvalidValueInHttpRequestError(param, val string) error {
 	return errors.New(fmt.Sprintf("Invalid value, %v, for parameter, %v, in http request.", val, param))
 }
 
-func InvalidPathInHttpRequestError (path string) error{
+func InvalidPathInHttpRequestError(path string) error {
 	return errors.New(fmt.Sprintf("Invalid path, %v, in http request.", path))
 }

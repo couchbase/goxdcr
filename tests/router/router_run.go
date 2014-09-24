@@ -4,17 +4,17 @@ package main
 import (
 	"flag"
 	"fmt"
-	parts "github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/parts"
+	pc "github.com/Xiaomei-Zhang/couchbase_goxdcr/common"
 	part "github.com/Xiaomei-Zhang/couchbase_goxdcr/part"
+	parts "github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/parts"
+	mc "github.com/couchbase/gomemcached"
 	"github.com/couchbase/indexing/secondary/common"
 	"github.com/couchbaselabs/go-couchbase"
 	"log"
-	"os"
-	"sync"
-	"strconv"
 	"math"
-	pc "github.com/Xiaomei-Zhang/couchbase_goxdcr/common"
-	mc "github.com/couchbase/gomemcached"
+	"os"
+	"strconv"
+	"sync"
 )
 
 var options struct {
@@ -32,14 +32,13 @@ var uprFeed *couchbase.UprFeed = nil
 var router *parts.Router = nil
 
 const (
-    // total number of parts to route data to
+	// total number of parts to route data to
 	NUM_PARTS = 3
 	// total number of data points to be routed
-	NUM_DATA = 100 
+	NUM_DATA = 100
 	// prefix for part id
 	PART_ID_PREFIX = "part"
 )
-
 
 func argParse() {
 
@@ -108,7 +107,6 @@ func startUpr(cluster, bucketn string, waitGrp *sync.WaitGroup) {
 		fmt.Println("Number of upr event received so far is %d", count)
 		err := router.Forward(e)
 		mf(err, " - route")
-		
 
 		if count >= NUM_DATA {
 			break
@@ -152,41 +150,40 @@ func mf(err error, msg string) {
 }
 
 func startRouter() {
-	
+
 	partMap := make(map[string]pc.Part)
 	for i := 0; i < NUM_PARTS; i++ {
 		partId := PART_ID_PREFIX + strconv.FormatInt(int64(i), 10)
 		partMap[partId] = NewTestPart(partId)
 	}
-	
+
 	router, _ = parts.NewRouter(partMap, buildVbMap(partMap))
 }
 
-func buildVbMap(downStreamParts map[string]pc.Part) (map[uint16]string) {
+func buildVbMap(downStreamParts map[string]pc.Part) map[uint16]string {
 	vbMap := make(map[uint16]string)
 
 	numOfNodes := len(downStreamParts)
-	
-	numOfVbPerNode := uint16(math.Ceil(float64(options.maxVbno)/float64(numOfNodes)))
-	
+
+	numOfVbPerNode := uint16(math.Ceil(float64(options.maxVbno) / float64(numOfNodes)))
+
 	var indexOfNode uint16
 	for partId := range downStreamParts {
-	    var j uint16
+		var j uint16
 		for j = 0; j < numOfVbPerNode; j++ {
-			vbno := indexOfNode * numOfVbPerNode + j
+			vbno := indexOfNode*numOfVbPerNode + j
 			if vbno < uint16(options.maxVbno) {
 				vbMap[vbno] = partId
 			} else {
-				// no more vbs to process 
+				// no more vbs to process
 				break
 			}
 		}
-		indexOfNode ++
+		indexOfNode++
 	}
 	return vbMap
-	
-}
 
+}
 
 type TestPart struct {
 	part.AbstractPart
@@ -199,20 +196,20 @@ func NewTestPart(id string) *TestPart {
 	return tp
 }
 
-func (tp *TestPart) Start (settings map[string]interface{} ) error {
+func (tp *TestPart) Start(settings map[string]interface{}) error {
 	return nil
 }
 
-func (tp *TestPart) Stop () error {
+func (tp *TestPart) Stop() error {
 	return nil
 }
 
-func (tp *TestPart) Receive (data interface {}) error {
+func (tp *TestPart) Receive(data interface{}) error {
 	fmt.Println("Part %v received data with vbno %v", tp.Id(), data.(*mc.MCRequest).VBucket)
 
 	return nil
 }
 
-func (tp *TestPart) IsStarted () bool {
+func (tp *TestPart) IsStarted() bool {
 	return false
 }

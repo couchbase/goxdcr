@@ -1,8 +1,6 @@
 package metadata_svc
 
-import (
-
-)
+import ()
 
 //XDCRCompTopologySvc abstracts the service interface that has the knowledge
 //of xdcr component topology - xdcr components in a cluster running on which nodes;
@@ -16,23 +14,23 @@ import (
 //deployment mode, xdcr solution can choose to use the proper implementation class
 type XDCRCompTopologySvc interface {
 	//the host name that this xdcr comp is running on
-	MyHost () (string, error)
-	
+	MyHost() (string, error)
+
 	//the admin port number of this xdcr comp
-	MyAdminPort () (uint16, error)
-	
+	MyAdminPort() (uint16, error)
+
 	//the list of kv nodes (hostname:port) that this xdcr comp is responsible for
-	MyKVNodes () ([]string, error)
-	
+	MyKVNodes() ([]string, error)
+
 	//the cluster XDCR is serving
 	MyCluster() (string, error)
-	
-	//return a map with the key to be the host name that a xdcr comp is 
-	//running on and the value to be the admin port number on that host 
-	XDCRTopology () (map[string]uint16, error)
-	
+
+	//return a map with the key to be the host name that a xdcr comp is
+	//running on and the value to be the admin port number on that host
+	XDCRTopology() (map[string]uint16, error)
+
 	//return a map with the key to be the host name that a xdcr comp is running on
 	// and the value to be an array of kv node address which the xdcr component would
 	//be responsible for
-	XDCRCompToKVNodeMap () (map[string][]string, error)
+	XDCRCompToKVNodeMap() (map[string][]string, error)
 }

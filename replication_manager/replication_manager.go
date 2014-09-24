@@ -17,11 +17,11 @@ var logger_rm *log.CommonLogger = log.NewLogger("ReplicationManager", log.LogLev
 /* struct ReplicationManager
 *************************************/
 type replicationManager struct {
-	metadata_svc      metadata_svc.MetadataSvc
-	cluster_info_svc  metadata_svc.ClusterInfoSvc
-	xdcr_topology_svc metadata_svc.XDCRCompTopologySvc
+	metadata_svc          metadata_svc.MetadataSvc
+	cluster_info_svc      metadata_svc.ClusterInfoSvc
+	xdcr_topology_svc     metadata_svc.XDCRCompTopologySvc
 	internal_settings_svc metadata_svc.InternalReplicationSettingsSvc
-	once              sync.Once
+	once                  sync.Once
 }
 
 var replication_mgr replicationManager
@@ -81,7 +81,7 @@ func CreateReplication(sourceClusterUUID string, sourceBucket string, targetClus
 		logger_rm.Errorf("%v\n", err)
 		return "", err
 	}
-	
+
 }
 
 func PauseReplication(topic string) error {

@@ -5,19 +5,19 @@ import (
 	"flag"
 	"fmt"
 	connector "github.com/Xiaomei-Zhang/couchbase_goxdcr/connector"
+	mcc "github.com/couchbase/gomemcached/client"
+	protobuf "github.com/couchbase/indexing/secondary/protobuf"
 	"github.com/ysui6888/indexing/secondary/common"
+	sp "github.com/ysui6888/indexing/secondary/projector"
 	"log"
 	"os"
 	"time"
-	mcc "github.com/couchbase/gomemcached/client"
-	sp "github.com/ysui6888/indexing/secondary/projector"
-	protobuf "github.com/couchbase/indexing/secondary/protobuf"
 )
 
 var options struct {
 	source_bucket string // source bucket
 	connectStr    string //connect string
-	kvaddr    string //kvaddr
+	kvaddr        string //kvaddr
 	maxVbno       int    // maximum number of vbuckets
 }
 
@@ -67,28 +67,28 @@ func mf(err error, msg string) {
 func startKVFeed(cluster, kvaddr, bucketn string) {
 	b, err := common.ConnectBucket(cluster, "default", bucketn)
 	mf(err, "bucket")
-	
+
 	kvfeed, err := sp.NewKVFeed(kvaddr, "test", "", b, nil)
 	kvfeed.SetConnector(NewTestConnector())
 	kvfeed.Start(sp.ConstructStartSettingsForKVFeed(constructTimestamp(bucketn)))
 	fmt.Println("KVFeed is started")
-	
+
 	timeChan := time.NewTimer(time.Second * 20).C
-	loop:
+loop:
 	for {
 		select {
-			case <- timeChan:
-				fmt.Println("Timer expired")
+		case <-timeChan:
+			fmt.Println("Timer expired")
+			break loop
+		default:
+			if count >= NUM_DATA {
 				break loop
-			default:
-				if count >= NUM_DATA {
-					break loop
-				}
+			}
 		}
 	}
 	kvfeed.Stop()
 	fmt.Println("KVFeed is stopped")
-	
+
 	if count < NUM_DATA {
 		fmt.Println("Test failed. Only %v data was received before timer expired.", count)
 	} else {
@@ -99,7 +99,7 @@ func startKVFeed(cluster, kvaddr, bucketn string) {
 func constructTimestamp(bucketn string) *protobuf.TsVbuuid {
 	ts := protobuf.NewTsVbuuid(bucketn, options.maxVbno)
 	for i := 0; i < options.maxVbno; i++ {
-		 ts.Append(uint16(i), 0, 0, 0, 0)
+		ts.Append(uint16(i), 0, 0, 0, 0)
 	}
 	return ts
 }

@@ -261,7 +261,7 @@ func (xdcrf *XDCRFactory) constructRouter(spec *metadata.ReplicationSpecificatio
 func (xdcrf *XDCRFactory) getBucket(clusterUUID string, bucketName string) (*couchbase.Bucket, error) {
 	connectStr, err := xdcrf.cluster_info_svc.GetClusterConnectionStr(clusterUUID)
 	if err != nil {
-		logger_factory.Errorf ("err=%v\n", err)
+		logger_factory.Errorf("err=%v\n", err)
 		return nil, err
 	}
 	return utils.Bucket(connectStr, bucketName)
@@ -272,7 +272,7 @@ func (xdcrf *XDCRFactory) constructNozzleForTargetNode(kvaddr string, bucketName
 	nozzleType, err := xdcrf.getNozzleType(kvaddr)
 
 	if err != nil {
-		logger_factory.Errorf ("err=%v\n", err)
+		logger_factory.Errorf("err=%v\n", err)
 		return nil, err
 	}
 
@@ -290,7 +290,7 @@ func (xdcrf *XDCRFactory) constructNozzleForTargetNode(kvaddr string, bucketName
 func (xdcrf *XDCRFactory) getNozzleType(kvaddr string) (base.XDCROutgoingNozzleType, error) {
 	beforeXMEM, err := xdcrf.cluster_info_svc.IsNodeCompatible(kvaddr, "2.5")
 	if err != nil {
-		logger_factory.Errorf ("err=%v\n", err)
+		logger_factory.Errorf("err=%v\n", err)
 		return -1, err
 	}
 
