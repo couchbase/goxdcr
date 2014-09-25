@@ -203,10 +203,23 @@ func InvalidParameterInHttpRequestError(param string) error {
 	return errors.New(fmt.Sprintf("Invalid parameter, %v, in http request.", param))
 }
 
-func InvalidValueInHttpRequestError(param, val string) error {
+func InvalidValueInHttpRequestError(param string, val interface{}) error {
 	return errors.New(fmt.Sprintf("Invalid value, %v, for parameter, %v, in http request.", val, param))
 }
 
 func InvalidPathInHttpRequestError(path string) error {
 	return errors.New(fmt.Sprintf("Invalid path, %v, in http request.", path))
 }
+
+func MissingParametersInHttpRequestError(params []string) error {
+	return errors.New(fmt.Sprintf("Parameters, %v, are missing in http request.", params))
+}
+
+func MissingReplicationIdInHttpRequestError(path string) error {
+	return errors.New(fmt.Sprintf("Replication id is missing from request url, %v.", path))
+}
+
+func MissingParameterInHttpResponseError(param string) error {
+	return errors.New(fmt.Sprintf("Parameter, %v, is missing in http response.", param))
+}
+

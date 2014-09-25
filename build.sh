@@ -10,9 +10,9 @@ cd ..
 echo "Done"
 }
 
-build_protobuf(){
-echo "Building protobuf..."
-cd protobuf
+build_adminport(){
+echo "Building adminport..."
+cd adminport
 go clean
 go install
 cd ..
@@ -109,9 +109,9 @@ cd ..
 echo "Done"
 }
 
-clean_protobuf(){
-echo "Clean protobuf..."
-cd protobuf
+clean_adminport(){
+echo "Clean adminport..."
+cd adminport
 go clean
 cd ..
 echo "Done"
@@ -185,7 +185,7 @@ echo "Done"
 if [ -z "$1" ]
 then
 build_base
-build_protobuf
+build_adminport
 build_replication_manager
 build_metadata_svc
 build_metadata
@@ -200,9 +200,9 @@ build_base
 elif [ $1 == "factory" ]
 then
 build_factory
-elif [ $1 == "protobuf" ]
+elif [ $1 == "adminport" ]
 then
-build_protobuf
+build_adminport
 elif [ $1 == "replicationmanager" ]
 then
 build_replicationmanager
@@ -222,7 +222,7 @@ elif [ $1 == "clean" ]
 then
 echo "Cleaning..."
 clean_base
-clean_protobuf
+clean_adminport
 clean_metadata
 clean_metadata_svc
 clean_replication_manager
