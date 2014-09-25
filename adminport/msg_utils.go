@@ -100,6 +100,9 @@ const (
 
 var statsPathRegexp, _ = regexp.Compile(StatsPathPattern)
 
+// json content type for http request and response
+var JsonType = "application/json"
+
 // replication settings key in rest api -> internal replication settings key
 var ReplSettingRestToInternalMap = map[string]string {
 	ReplicationType: metadata.ReplicationType,
