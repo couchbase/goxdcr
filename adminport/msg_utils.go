@@ -336,6 +336,8 @@ func DecodeSettingsFromRequest(request *http.Request, throwError bool) (map[stri
 		return nil, errors.New("Invalid http request. No replication setting parameters have been supplied.")
 	}
 	
+	logger_msgutil.Debugf("settings decoded from request: %v\n", settings)
+	
 	return settings, nil
 	
 }
@@ -364,7 +366,9 @@ func DecodeReplicationIdFromHttpRequest(request *http.Request, pathPrefix string
 		return "", utils.MissingReplicationIdInHttpRequestError(request.URL.Path)
 	}
 
-	return request.URL.Path[prefixLength:], nil
+	replicationId := request.URL.Path[prefixLength:]
+	logger_msgutil.Debugf("replication id decoded from request: %v\n", replicationId)
+	return replicationId, nil
 }
 
 func DecodeGetStatisticsRequest (request *http.Request) (uuid, fromBucket, toBucket, filterName, statName string, err error) {

@@ -72,103 +72,22 @@ func (h *xdcrRestHandler) handleRequest(
 		response, err = h.doDeleteReplicationRequest(request)
 	case InternalSettingsPath + UrlDelimiter + MethodGet:
 		response, err = h.doViewInternalSettingsRequest(request)
-	case SettingsReplicationsPath + UrlDelimiter + MethodPost:
-		response, err = h.doChangeGlobalSettingsRequest(request)
-	case SettingsReplicationsPath + DynamicSuffix + UrlDelimiter + MethodPost:
-		response, err = h.doChangeReplicationSettingsRequest(request)
 	case InternalSettingsPath + UrlDelimiter + MethodPost:
 		response, err = h.doChangeInternalSettingsRequest(request)
+	case SettingsReplicationsPath + UrlDelimiter + MethodGet:
+		response, err = h.doViewGlobalSettingsRequest(request)
+	case SettingsReplicationsPath + UrlDelimiter + MethodPost:
+		response, err = h.doChangeGlobalSettingsRequest(request)
+	case SettingsReplicationsPath + DynamicSuffix + UrlDelimiter + MethodGet:
+		response, err = h.doViewReplicationSettingsRequest(request)
+	case SettingsReplicationsPath + DynamicSuffix + UrlDelimiter + MethodPost:
+		response, err = h.doChangeReplicationSettingsRequest(request)
 	case StatisticsPrefix + DynamicSuffix + UrlDelimiter + MethodGet:
 		response, err = h.doGetStatisticsRequest(request)
 	default:
 		err = ErrorInvalidRequest
 	}
 	return response, err
-}
-
-func (h *xdcrRestHandler) doViewInternalSettingsRequest(request *http.Request) ([]byte, error) {
-	logger_ap.Infof("doViewInternalSettingsRequest\n")
-
-	internalSettings, err := rm.InternalSettingsService().GetInternalReplicationSettings()
-	if err != nil {
-		return nil, err
-	}
-	
-	return NewViewInternalSettingsResponse(internalSettings)
-}
-
-func (h *xdcrRestHandler) doChangeGlobalSettingsRequest(request *http.Request) ([]byte, error) {
-	logger_ap.Infof("doChangeGlobalSettingsRequest\n")
-
-	return h.changeInternalSettings(request)
-}
-
-func (h *xdcrRestHandler) doChangeReplicationSettingsRequest(request *http.Request) ([]byte, error) {
-	logger_ap.Infof("doChangeReplicationSettingsRequest\n")
-
-	// get input parameters from request
-	replicationId, err:= DecodeReplicationIdFromHttpRequest(request, SettingsReplicationsPath)
-	if err != nil {
-		return nil, err
-	}
-	inputSettingsMap, err := DecodeSettingsFromRequest(request, true)
-	if err != nil {
-		return nil, err
-	}
-	
-	// read replication spec with the specified replication id
-	replSpec, err := rm.MetadataService().ReplicationSpec(replicationId)
-	if err != nil {
-		return nil, err
-	}
-	
-	// update replication spec with input settings
-	replSpec.Settings().UpdateSettingsFromMap(inputSettingsMap)
-	err = rm.MetadataService().SetReplicationSpec(*replSpec)
-	if err != nil {
-		return nil, err
-	}
-	
-	return nil, nil
-}
-
-func (h *xdcrRestHandler) doChangeInternalSettingsRequest(request *http.Request) ([]byte, error) {
-	logger_ap.Infof("doChangeInternalSettingsRequest\n")
-
-	return h.changeInternalSettings(request)
-}
-
-func (h *xdcrRestHandler) changeInternalSettings(request *http.Request) ([]byte, error) {
-	inputSettingsMap, err := DecodeSettingsFromRequest(request, true)
-	if err != nil {
-		return nil, err
-	}
-	
-	internalSettings, err := rm.InternalSettingsService().GetInternalReplicationSettings()
-
-	internalSettings.UpdateSettingsFromMap(inputSettingsMap)
-	err = rm.InternalSettingsService().SetInternalReplicationSettings(internalSettings)
-	if err != nil {
-		return nil, err
-	}
-	return nil, nil
-}
-
-func (h *xdcrRestHandler) doGetStatisticsRequest(request *http.Request) ([]byte, error) {
-	logger_ap.Infof("doGetStatisticsRequest\n")
-
-	uuid, fromBucket, toBucket, filterName, statName, err := DecodeGetStatisticsRequest(request)
-	if err != nil {
-		return nil, err
-	}
-	 	
-	// TODO change to debug
-	logger_ap.Infof("Request params decoded: uuid=%v; fromBucket=%v; toBucket=%v; filterName=%v; statName=%v \n",
-					 uuid, fromBucket, toBucket, filterName, statName)
-	
-	// TODO enable after stats is implemented at rm
-	// stats := rm.GetStatistics(uuid, fromBucket, toBucket, filterName, statName)
-	return nil, nil
 }
 
 func (h *xdcrRestHandler) doCreateReplicationRequest(request *http.Request) ([]byte, error) {
@@ -180,7 +99,7 @@ func (h *xdcrRestHandler) doCreateReplicationRequest(request *http.Request) ([]b
 	}
 	
 	//TODO change to debug
-	logger_ap.Infof("Request params: fromBucket=%v; toCluster=%v; toBucket=%v; filterName=%v; forward=%v; settings=%v \n", 
+	logger_ap.Infof("Request params decoded: fromBucket=%v; toCluster=%v; toBucket=%v; filterName=%v; forward=%v; settings=%v \n", 
 					fromBucket, toCluster, toBucket, filterName, forward, settings)
 	
 	fromCluster, err := rm.XDCRCompTopologyService().MyCluster()
@@ -253,6 +172,122 @@ func (h *xdcrRestHandler) doDeleteReplicationRequest(request *http.Request) ([]b
 	}
 
 	// no response body in success case
+	return nil, nil
+}
+
+func (h *xdcrRestHandler) doViewInternalSettingsRequest(request *http.Request) ([]byte, error) {
+	logger_ap.Infof("doViewInternalSettingsRequest\n")
+
+	internalSettings, err := rm.InternalSettingsService().GetInternalReplicationSettings()
+	if err != nil {
+		return nil, err
+	}
+	
+	return NewViewInternalSettingsResponse(internalSettings)
+}
+
+func (h *xdcrRestHandler) doChangeInternalSettingsRequest(request *http.Request) ([]byte, error) {
+	logger_ap.Infof("doChangeInternalSettingsRequest\n")
+
+	return h.changeInternalSettings(request)
+}
+
+// TODO different from internal settings?
+func (h *xdcrRestHandler) doViewGlobalSettingsRequest(request *http.Request) ([]byte, error) {
+	logger_ap.Infof("doViewGlobalSettingsRequest\n")
+
+	internalSettings, err := rm.InternalSettingsService().GetInternalReplicationSettings()
+	if err != nil {
+		return nil, err
+	}
+	
+	return NewViewInternalSettingsResponse(internalSettings)
+}
+
+func (h *xdcrRestHandler) doChangeGlobalSettingsRequest(request *http.Request) ([]byte, error) {
+	logger_ap.Infof("doChangeGlobalSettingsRequest\n")
+
+	return h.changeInternalSettings(request)
+}
+
+func (h *xdcrRestHandler) doViewReplicationSettingsRequest(request *http.Request) ([]byte, error) {
+	logger_ap.Infof("doViewReplicationSettingsRequest\n")
+
+	// get input parameters from request
+	replicationId, err:= DecodeReplicationIdFromHttpRequest(request, SettingsReplicationsPath)
+	if err != nil {
+		return nil, err
+	}
+	
+	// read replication spec with the specified replication id
+	replSpec, err := rm.MetadataService().ReplicationSpec(replicationId)
+	if err != nil {
+		return nil, err
+	}
+	
+	// marshal replication settings in replication spec and return it
+	return NewViewInternalSettingsResponse(replSpec.Settings())
+}
+
+func (h *xdcrRestHandler) doChangeReplicationSettingsRequest(request *http.Request) ([]byte, error) {
+	logger_ap.Infof("doChangeReplicationSettingsRequest\n")
+
+	// get input parameters from request
+	replicationId, err:= DecodeReplicationIdFromHttpRequest(request, SettingsReplicationsPath)
+	if err != nil {
+		return nil, err
+	}
+	inputSettingsMap, err := DecodeSettingsFromRequest(request, true)
+	if err != nil {
+		return nil, err
+	}
+	
+	// read replication spec with the specified replication id
+	replSpec, err := rm.MetadataService().ReplicationSpec(replicationId)
+	if err != nil {
+		return nil, err
+	}
+	
+	// update replication spec with input settings
+	replSpec.Settings().UpdateSettingsFromMap(inputSettingsMap)
+	err = rm.MetadataService().SetReplicationSpec(*replSpec)
+	if err != nil {
+		return nil, err
+	}
+	
+	return nil, nil
+}
+
+func (h *xdcrRestHandler) changeInternalSettings(request *http.Request) ([]byte, error) {
+	inputSettingsMap, err := DecodeSettingsFromRequest(request, true)
+	if err != nil {
+		return nil, err
+	}
+	
+	internalSettings, err := rm.InternalSettingsService().GetInternalReplicationSettings()
+
+	internalSettings.UpdateSettingsFromMap(inputSettingsMap)
+	err = rm.InternalSettingsService().SetInternalReplicationSettings(internalSettings)
+	if err != nil {
+		return nil, err
+	}
+	return nil, nil
+}
+
+func (h *xdcrRestHandler) doGetStatisticsRequest(request *http.Request) ([]byte, error) {
+	logger_ap.Infof("doGetStatisticsRequest\n")
+
+	uuid, fromBucket, toBucket, filterName, statName, err := DecodeGetStatisticsRequest(request)
+	if err != nil {
+		return nil, err
+	}
+	 	
+	// TODO change to debug
+	logger_ap.Infof("Request params decoded: uuid=%v; fromBucket=%v; toBucket=%v; filterName=%v; statName=%v \n",
+					 uuid, fromBucket, toBucket, filterName, statName)
+	
+	// TODO enable after stats is implemented at rm
+	// stats := rm.GetStatistics(uuid, fromBucket, toBucket, filterName, statName)
 	return nil, nil
 }
 
