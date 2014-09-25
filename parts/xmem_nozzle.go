@@ -29,11 +29,12 @@ const (
 //configuration settings for XmemNozzle
 const (
 	//configuration param names
-	XMEM_SETTING_BATCHCOUNT = "batchCount"
-	XMEM_SETTING_BATCHSIZE  = "batchSize"
+	XMEM_SETTING_BATCHCOUNT = "batch_count"
+	XMEM_SETTING_BATCHSIZE  = "batch_size"
 	XMEM_SETTING_MODE       = "mode"
 	XMEM_SETTING_NUMOFRETRY = "max_retry"
 	XMEM_SETTING_TIMEOUT    = "timeout"
+	XMEM_SETTING_BATCH_EXPIRATION_TIME = "batch_expiration_time"
 
 	//default configuration
 	default_batchcount      int           = 500
@@ -42,6 +43,7 @@ const (
 	default_numofretry      int           = 3
 	default_timeout         time.Duration = 100 * time.Millisecond
 	default_dataChannelSize               = 200
+	default_batchExpirationTime		      = 100 * time.Millisecond
 )
 
 const (
@@ -53,9 +55,10 @@ var xmem_setting_defs base.SettingDefinitions = base.SettingDefinitions{XMEM_SET
 	XMEM_SETTING_BATCHSIZE:  base.NewSettingDef(reflect.TypeOf((*int)(nil)), false),
 	XMEM_SETTING_MODE:       base.NewSettingDef(reflect.TypeOf((*XMEM_MODE)(nil)), false),
 	XMEM_SETTING_NUMOFRETRY: base.NewSettingDef(reflect.TypeOf((*int)(nil)), false),
-	XMEM_SETTING_TIMEOUT:    base.NewSettingDef(reflect.TypeOf((*time.Duration)(nil)), false)}
+	XMEM_SETTING_TIMEOUT:    base.NewSettingDef(reflect.TypeOf((*time.Duration)(nil)), false),
+	XMEM_SETTING_BATCH_EXPIRATION_TIME: base.NewSettingDef(reflect.TypeOf((*time.Duration)(nil)), false)}
 
-var logger_xmem *log.CommonLogger = log.NewLogger("XmemNozzle", log.LogLevelDebug)
+var logger_xmem *log.CommonLogger = log.NewLogger("XmemNozzle", log.LogLevelInfo)
 
 /************************************
 /* struct bufferedMCRequest
@@ -315,6 +318,7 @@ type xmemConfig struct {
 	maxSize  int
 	//the duration to wait for the batch-sending to finish
 	batchtimeout time.Duration
+	batchExpirationTime time.Duration
 	maxRetry     int
 	mode         XMEM_MODE
 	connectStr   string
@@ -326,6 +330,7 @@ func newConfig() xmemConfig {
 	return xmemConfig{maxCount: default_batchcount,
 		maxSize:      default_batchsize,
 		batchtimeout: default_timeout,
+		batchExpirationTime: default_batchExpirationTime,
 		maxRetry:     default_numofretry,
 		mode:         default_mode,
 		connectStr:   "",
@@ -352,6 +357,9 @@ func (config *xmemConfig) initializeConfig(settings map[string]interface{}) erro
 	if val, ok := settings[XMEM_SETTING_MODE]; ok {
 		config.mode = val.(XMEM_MODE)
 	}
+	if val, ok := settings[XMEM_SETTING_BATCH_EXPIRATION_TIME]; ok {
+		config.batchExpirationTime = val.(time.Duration)
+	}
 	return err
 }
 
@@ -364,10 +372,15 @@ type xmemBatch struct {
 	curSize        int
 	capacity_count int
 	capacity_size  int
+	start_time	   time.Time
 }
 
 func newXmemBatch(cap_count int, cap_size int) *xmemBatch {
-	return &xmemBatch{sync.RWMutex{}, 0, 0, cap_count, cap_size}
+	return &xmemBatch{lock:sync.RWMutex{}, 
+	curCount:0, 
+	curSize:0, 
+	capacity_count:cap_count, 
+	capacity_size:cap_size}
 }
 
 //turn this batch to be a read only batch
@@ -387,6 +400,10 @@ func (b *xmemBatch) accumuBatch(size int) bool {
 	}()
 
 	b.curCount++
+	if b.curCount == 1 {
+		b.start_time = time.Now()
+	}
+	
 	b.curSize += size
 	if b.curCount < b.capacity_count && b.curSize < b.capacity_size {
 		ret = false
@@ -704,7 +721,7 @@ func (xmem *XmemNozzle) send() error {
 	var count int
 
 	//get the batch to process
-	logger_xmem.Debugf("Send: xmem %v, count=%v, %d batches ready, %v items in data channel\n", xmem.Id(), xmem.counter_sent,len(xmem.batches_ready), len(xmem.dataChan))
+//	logger_xmem.Debugf("Send: xmem %v, count=%v, %d batches ready, %v items in data channel\n", xmem.Id(), xmem.counter_sent,len(xmem.batches_ready), len(xmem.dataChan))
 	select {
 	case batch := <-xmem.batches_ready:
 		count = batch.count()
@@ -766,6 +783,10 @@ func (xmem *XmemNozzle) send() error {
 			<-xmem.batch_done
 			logger_xmem.Debugf("Batch of count %v is confirmed", count)
 
+		}
+	default:
+		if xmem.isCurrentBatchExpiring () {
+			xmem.batchReady()
 		}
 	}
 	return err
@@ -959,4 +980,17 @@ func (xmem *XmemNozzle) encodeOpCode(code mc.CommandCode) mc.CommandCode {
 		return DELETE_WITH_META
 	}
 	return code
+}
+
+func (xmem *XmemNozzle) isCurrentBatchExpiring () bool {
+	if xmem.batch.count() >=1 && time.Since(xmem.batch.start_time) > xmem.config.batchExpirationTime {
+		logger_xmem.Debugf("The current batch count=%v is expiring\n", xmem.batch.count())
+		return true
+	}
+	return false
+	
+}
+
+func (xmem *XmemNozzle) StatusSummary () string {
+	return fmt.Sprintf("Xmem %v received %v items, sent %v items", xmem.Id(), xmem.counter_received, xmem.counter_sent)
 }

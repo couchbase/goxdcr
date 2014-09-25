@@ -33,7 +33,7 @@ type XDCRFactory struct {
 	xdcr_topology_svc metadata_svc.XDCRCompTopologySvc
 }
 
-var logger_factory *log.CommonLogger = log.NewLogger("XDCRFactory", log.LogLevelDebug)
+var logger_factory *log.CommonLogger = log.NewLogger("XDCRFactory", log.LogLevelInfo)
 
 // set call back functions is done only once
 func NewXDCRFactory(metadata_svc metadata_svc.MetadataSvc, cluster_info_svc metadata_svc.ClusterInfoSvc, xdcr_topology_svc metadata_svc.XDCRCompTopologySvc) *XDCRFactory {

@@ -3,10 +3,12 @@ package main
 import (
 	"flag"
 	"fmt"
+	"github.com/Xiaomei-Zhang/couchbase_goxdcr/pipeline_manager"
 	"github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/metadata"
+	"github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/parts"
 	"github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/replication_manager"
 	"github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/utils"
-	c "github.com/couchbase/indexing/secondary/common"
+//	c "github.com/couchbase/indexing/secondary/common"
 	"github.com/couchbaselabs/go-couchbase"
 	"log"
 	"net/http"
@@ -82,7 +84,7 @@ func main() {
 		}
 	}()
 
-	c.SetLogLevel(c.LogLevelTrace)
+//	c.SetLogLevel(c.LogLevelTrace)
 	fmt.Println("Start Testing ...")
 	argParse()
 	setup()
@@ -103,17 +105,26 @@ func test() {
 		fail(fmt.Sprintf("%v", err))
 	}
 	time.Sleep(1 * time.Second)
-//	replication_manager.PauseReplication(pipeline.Topic())
-//	fmt.Printf("Replication %s is paused\n", pipeline.Topic())
-//	time.Sleep(100 * time.Millisecond)
-//	replication_manager.ResumeReplication(pipeline.Topic())
-//	fmt.Printf("Replication %s is resumed\n", pipeline.Topic())
-//	time.Sleep(2 * time.Second)
-	replication_manager.DeleteReplication(topic)
-	fmt.Printf("Replication %s is deleted\n", topic)
-	time.Sleep(6 * time.Second)
+	//	replication_manager.PauseReplication(pipeline.Topic())
+	//	fmt.Printf("Replication %s is paused\n", pipeline.Topic())
+	//	time.Sleep(100 * time.Millisecond)
+	//	replication_manager.ResumeReplication(pipeline.Topic())
+	//	fmt.Printf("Replication %s is resumed\n", pipeline.Topic())
+	//	time.Sleep(2 * time.Second)
+	//	replication_manager.DeleteReplication(topic)
+	//	fmt.Printf("Replication %s is deleted\n", topic)
+	time.Sleep(4 * time.Second)
+
+	summary(topic)
 }
 
+func summary(topic string) {
+	pipeline := pipeline_manager.Pipeline(topic)
+	targetNozzles := pipeline.Targets()
+	for _, targetNozzle := range targetNozzles {
+		fmt.Println(targetNozzle.(*parts.XmemNozzle).StatusSummary())
+	}
+}
 func fail(msg string) {
 	panic(fmt.Sprintf("TEST FAILED - %s", msg))
 }
@@ -260,14 +271,14 @@ func (mock_ci_svc *mockClusterInfoSvc) IsNodeCompatible(node string, version str
 	return true, nil
 }
 
-func (mock_ci_svc *mockClusterInfoSvc) GetBucket (clusterUUID, bucketName string)(*couchbase.Bucket, error) {
-	clusterConnStr, err := mock_ci_svc.GetClusterConnectionStr (clusterUUID)
+func (mock_ci_svc *mockClusterInfoSvc) GetBucket(clusterUUID, bucketName string) (*couchbase.Bucket, error) {
+	clusterConnStr, err := mock_ci_svc.GetClusterConnectionStr(clusterUUID)
 	if err != nil {
 		return nil, err
 	}
-	return utils.Bucket (clusterConnStr, bucketName, options.source_cluster_username, options.source_cluster_password)
+	return utils.Bucket(clusterConnStr, bucketName, options.source_cluster_username, options.source_cluster_password)
 }
- 
+
 type mockXDCRTopologySvc struct {
 }
 
