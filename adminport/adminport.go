@@ -69,6 +69,9 @@ func (h *xdcrRestHandler) handleRequest(
 	case CreateReplicationPath + UrlDelimiter + MethodPost:
 		response, err = h.doCreateReplicationRequest(request)
 	case DeleteReplicationPrefix + DynamicSuffix + UrlDelimiter + MethodDelete:
+		fallthrough
+	// historically, deleteReplication could use Post method	
+	case DeleteReplicationPrefix + DynamicSuffix + UrlDelimiter + MethodPost:
 		response, err = h.doDeleteReplicationRequest(request)
 	case InternalSettingsPath + UrlDelimiter + MethodGet:
 		response, err = h.doViewInternalSettingsRequest(request)
