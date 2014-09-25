@@ -26,10 +26,12 @@ type replicationManager struct {
 
 var replication_mgr replicationManager
 
-func Initialize() {
+func Initialize(metadata_svc metadata_svc.MetadataSvc, 
+cluster_info_svc metadata_svc.ClusterInfoSvc, 
+xdcr_topology_svc metadata_svc.XDCRCompTopologySvc, 
+internalSettingsSvc metadata_svc.InternalReplicationSettingsSvc) {
 	replication_mgr.once.Do(func() {
-		//TODO: change it
-		replication_mgr.init(nil, nil, nil, nil)
+		replication_mgr.init(metadata_svc, cluster_info_svc, xdcr_topology_svc, internalSettingsSvc)
 	})
 }
 
@@ -81,7 +83,6 @@ func CreateReplication(sourceClusterUUID string, sourceBucket string, targetClus
 		logger_rm.Errorf("%v\n", err)
 		return "", err
 	}
-
 }
 
 func PauseReplication(topic string) error {

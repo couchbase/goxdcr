@@ -56,6 +56,7 @@ func main() {
 	fmt.Printf("connectStr=%s\n", options.connectStr)
 	fmt.Println("Done with parsing the arguments")
 	startKVFeed(options.connectStr, options.kvaddr, options.source_bucket)
+
 }
 
 func mf(err error, msg string) {
@@ -90,7 +91,7 @@ loop:
 	fmt.Println("KVFeed is stopped")
 
 	if count < NUM_DATA {
-		fmt.Println("Test failed. Only %v data was received before timer expired.", count)
+		fmt.Printf("Test failed. Only %v data was received before timer expired.\n", count)
 	} else {
 		fmt.Println("Test passed. All test data was received as expected before timer expired.")
 	}
@@ -117,6 +118,6 @@ func NewTestConnector() *TestConnector {
 func (tc *TestConnector) Forward(data interface{}) error {
 	uprEvent := data.(*mcc.UprEvent)
 	count++
-	fmt.Println("received %vth upr event with opcode %v and vbno %v", count, uprEvent.Opcode, uprEvent.VBucket)
+	fmt.Printf("received %vth upr event with opcode %v and vbno %v\n", count, uprEvent.Opcode, uprEvent.VBucket)
 	return nil
 }

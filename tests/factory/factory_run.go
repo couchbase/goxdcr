@@ -12,6 +12,7 @@ import (
 	"github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/utils"
 	//	"github.com/couchbaselabs/go-couchbase"
 	"errors"
+	"github.com/couchbaselabs/go-couchbase"
 	"os"
 )
 
@@ -44,6 +45,8 @@ func argParse() {
 		"number of connections per kv node")
 	flag.IntVar(&options.numOutgoingConn, "numOutgoingConn", NUM_TARGET_CONN,
 		"number of outgoing connections to target")
+	flag.StringVar(&options.username, "username", "Administrator", "username to cluster admin console")
+	flag.StringVar(&options.password, "password", "welcome", "password to Cluster admin console")
 
 	flag.Parse()
 	args := flag.Args()
@@ -167,7 +170,7 @@ func (mock_ci_svc *mockClusterInfoSvc) GetMyActiveVBuckets(ClusterUUID string, b
 	if err != nil {
 		return nil, err
 	}
-	b, err := utils.Bucket(sourceCluster, bucketName)
+	b, err := utils.Bucket(sourceCluster, bucketName, options.username, options.password)
 	if err != nil {
 		return nil, err
 	}
@@ -190,7 +193,7 @@ func (mock_ci_svc *mockClusterInfoSvc) GetServerList(ClusterUUID string, bucketN
 	if err != nil {
 		return nil, err
 	}
-	bucket, err := utils.Bucket(cluster, bucketName)
+	bucket, err := utils.Bucket(cluster, bucketName, options.username, options.password)
 	if err != nil {
 		return nil, err
 	}
@@ -207,7 +210,7 @@ func (mock_ci_svc *mockClusterInfoSvc) GetServerVBucketsMap(ClusterUUID string, 
 	if err != nil {
 		return nil, err
 	}
-	bucket, err := utils.Bucket(cluster, bucketName)
+	bucket, err := utils.Bucket(cluster, bucketName, options.username, options.password)
 	if err != nil {
 		return nil, err
 	}
@@ -220,6 +223,15 @@ func (mock_ci_svc *mockClusterInfoSvc) GetServerVBucketsMap(ClusterUUID string, 
 func (mock_ci_svc *mockClusterInfoSvc) IsNodeCompatible(node string, version string) (bool, error) {
 	return true, nil
 }
+
+func (mock_ci_svc *mockClusterInfoSvc) GetBucket(clusterUUID, bucketName string) (*couchbase.Bucket, error) {
+	clusterConnStr, err := mock_ci_svc.GetClusterConnectionStr(clusterUUID)
+	if err != nil {
+		return nil, err
+	}
+	return utils.Bucket(clusterConnStr, bucketName, options.username, options.password)
+}
+
 
 type mockXDCRTopologySvc struct {
 }

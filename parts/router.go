@@ -23,15 +23,22 @@ var logger_router *log.CommonLogger = log.NewLogger("Router", log.LogLevelInfo)
 type Router struct {
 	*connector.Router
 	vbMap map[uint16]string // pvbno -> partId. This defines the loading balancing strategy of which vbnos would be routed to which part
+	//Debug only, need to be rolled into statistics and monitoring
+	counter map[string]int
 }
 
 func NewRouter(downStreamParts map[string]common.Part, vbMap map[uint16]string) (*Router, error) {
 	router := &Router{
 		vbMap: vbMap,
-	}
+		counter: make(map[string]int)}
 
 	var routingFunc connector.Routing_Callback_Func = router.route
 	router.Router = connector.NewRouter(downStreamParts, &routingFunc)
+	
+	//initialize counter
+	for partId, _ := range downStreamParts {
+		router.counter[partId] = 0
+	}
 
 	logger_router.Infof("Router created with %d downstream parts \n", len(downStreamParts))
 	return router, nil
@@ -97,11 +104,17 @@ func (router *Router) route(data interface{}) (map[string]interface{}, error) {
 		return nil, ErrorInvalidVbMapForRouter
 	}
 
-	logger_router.Debugf("Data with vbno %d is routed to downstream part %s", uprEvent.VBucket, partId)
+	logger_router.Debugf("Data with vbno=%d, opCode=%v is routed to downstream part %s", uprEvent.VBucket, uprEvent.Opcode, partId)
 
 	result := make(map[string]interface{})
-	result[partId] = ComposeMCRequest(uprEvent)
-
+	switch uprEvent.Opcode {
+	case mcc.UprMutation, mcc.UprDeletion, mcc.UprExpiration:
+		result[partId] = ComposeMCRequest(uprEvent)
+		router.counter[partId] = router.counter[partId] +1
+		logger_router.Debugf("Rounting counter = %v\n", router.counter)
+	default:
+		logger_router.Debugf("Uprevent OpCode=%v, is skipped\n", uprEvent.Opcode)
+	}
 	return result, nil
 }
 
