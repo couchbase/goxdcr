@@ -6,13 +6,10 @@ import (
 	base "github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/base"
 	metadata "github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/metadata"
 	utils "github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/utils"
-	"regexp"
 	"strconv"
 	"net/http"
 	"io/ioutil"
 	"errors"
-	"net/url"
-	"strings"
 )
 
 // http request method types
@@ -32,15 +29,11 @@ const (
 	InternalSettingsPath     = "internalSettings"
 	SettingsReplicationsPath = "settings/replications"
 	DeleteReplicationPrefix  = "controller/cancelXDCR"
-	StatisticsPrefix         = "pools/default/buckets"
+	StatisticsPath         = "stats"
 	// Some url paths are not static and have variable contents, e.g., settings/replications/$replication_id
 	// The message keys for such paths are constructed by appending the dynamic suffix below to the static portion of the path.
 	// e.g., settings/replications/dynamic
 	DynamicSuffix = UrlDelimiter + "dynamic"
-	// The same path, e.g.,SETTINGS_REPLICATION_PATH, may be used for two different APIs: look up and modify.
-	// The following suffixes are used to distinguish between these two cases
-
-	StatsPathPattern = ".*pools/default/buckets/[^/]*/stats/replications"
 )
 
 // constants used for parsing internal settings
@@ -97,8 +90,6 @@ const (
 	TimeWorking = "time_working"
 	TimeoutPercentageMap = "timeout_percentage_map" 
 )
-
-var statsPathRegexp, _ = regexp.Compile(StatsPathPattern)
 
 // json content type for http request and response
 var JsonType = "application/json"
@@ -372,55 +363,5 @@ func DecodeReplicationIdFromHttpRequest(request *http.Request, pathPrefix string
 	replicationId := request.URL.Path[prefixLength:]
 	logger_msgutil.Debugf("replication id decoded from request: %v\n", replicationId)
 	return replicationId, nil
-}
-
-func DecodeGetStatisticsRequest (request *http.Request) (uuid, fromBucket, toBucket, filterName, statName string, err error) {
-	loc := statsPathRegexp.FindStringIndex(request.URL.Path)
-	if loc == nil {
-		err = utils.InvalidPathInHttpRequestError(request.URL.Path)
-		return 
-	}
-	
-	// get encoded parameters from request url
-	encodedParams := request.URL.Path[loc[1]:]
-	// decode params into a url, which is essentially a list of "/" separated values,
-	// i.e., /[UUID]/[source_bucket]/[destination_bucket]/[stat_name]
-	// or /[UUID]/[source_bucket]/[destination_bucket]/[filter_name]/[stat_name]
-	params, err := url.Parse(encodedParams)
-	if err != nil {
-		return 
-	}
-	paramsStr := params.String()
-	
-	// verify that paramsStr starts with "/", and then remove the leading "/"
-	if !strings.HasPrefix(paramsStr, UrlDelimiter) {
-		err = utils.InvalidPathInHttpRequestError(request.URL.Path)
-		return 
-	}
-	paramsStr = paramsStr[len(UrlDelimiter):]
-	
-	paramsArr := strings.Split(paramsStr, UrlDelimiter)
-	numOfParams := len(paramsArr)
-	if numOfParams != 4 && numOfParams != 5 {
-		err = utils.InvalidPathInHttpRequestError(request.URL.Path)
-		return
-	}
-
-	// first three elements in array are UUID, source_bucket, destination_bucket, respectively
-	uuid = paramsArr[0]
-	fromBucket = paramsArr[1]
-	toBucket = paramsArr[2]
-	
-	// if filter name is specified, set it
-	if numOfParams == 5 {
-		filterName = paramsArr[3]
-	}
-
-	// last element in array is stat name.
-	statName = paramsArr[numOfParams-1]
-	
-	// TODO validate statName
-
-	return 
 }
 

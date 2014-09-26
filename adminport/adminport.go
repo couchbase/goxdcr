@@ -3,6 +3,7 @@
 package adminport
 
 import (
+	"encoding/json"
 	"github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/base"
 	"net/http"
 	"strings"
@@ -11,8 +12,8 @@ import (
 	utils "github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/utils"
 )
 
-var StaticPaths = [3]string{CreateReplicationPath, InternalSettingsPath, SettingsReplicationsPath}
-var DynamicPathPrefixes = [3]string{DeleteReplicationPrefix, SettingsReplicationsPath, StatisticsPrefix}
+var StaticPaths = [3]string{CreateReplicationPath, SettingsReplicationsPath, StatisticsPath}
+var DynamicPathPrefixes = [3]string{DeleteReplicationPrefix, SettingsReplicationsPath}
 
 var logger_ap *log.CommonLogger = log.NewLogger("AdminPort", log.LogLevelInfo)
 
@@ -73,19 +74,11 @@ func (h *xdcrRestHandler) handleRequest(
 	// historically, deleteReplication could use Post method	
 	case DeleteReplicationPrefix + DynamicSuffix + UrlDelimiter + MethodPost:
 		response, err = h.doDeleteReplicationRequest(request)
-	case InternalSettingsPath + UrlDelimiter + MethodGet:
-		response, err = h.doViewInternalSettingsRequest(request)
-	case InternalSettingsPath + UrlDelimiter + MethodPost:
-		response, err = h.doChangeInternalSettingsRequest(request)
-	case SettingsReplicationsPath + UrlDelimiter + MethodGet:
-		response, err = h.doViewGlobalSettingsRequest(request)
-	case SettingsReplicationsPath + UrlDelimiter + MethodPost:
-		response, err = h.doChangeGlobalSettingsRequest(request)
 	case SettingsReplicationsPath + DynamicSuffix + UrlDelimiter + MethodGet:
 		response, err = h.doViewReplicationSettingsRequest(request)
 	case SettingsReplicationsPath + DynamicSuffix + UrlDelimiter + MethodPost:
 		response, err = h.doChangeReplicationSettingsRequest(request)
-	case StatisticsPrefix + DynamicSuffix + UrlDelimiter + MethodGet:
+	case StatisticsPath + UrlDelimiter + MethodGet:
 		response, err = h.doGetStatisticsRequest(request)
 	default:
 		err = ErrorInvalidRequest
@@ -107,6 +100,11 @@ func (h *xdcrRestHandler) doCreateReplicationRequest(request *http.Request) ([]b
 	
 	fromCluster, err := rm.XDCRCompTopologyService().MyCluster()
 	if err != nil {
+		return nil, err
+	}
+	
+	// apply default replication settings
+	if err := ApplyDefaultSettings(&settings); err != nil {
 		return nil, err
 	}
 	
@@ -178,41 +176,6 @@ func (h *xdcrRestHandler) doDeleteReplicationRequest(request *http.Request) ([]b
 	return nil, nil
 }
 
-func (h *xdcrRestHandler) doViewInternalSettingsRequest(request *http.Request) ([]byte, error) {
-	logger_ap.Infof("doViewInternalSettingsRequest\n")
-
-	internalSettings, err := rm.InternalSettingsService().GetInternalReplicationSettings()
-	if err != nil {
-		return nil, err
-	}
-	
-	return NewViewInternalSettingsResponse(internalSettings)
-}
-
-func (h *xdcrRestHandler) doChangeInternalSettingsRequest(request *http.Request) ([]byte, error) {
-	logger_ap.Infof("doChangeInternalSettingsRequest\n")
-
-	return h.changeInternalSettings(request)
-}
-
-// TODO different from internal settings?
-func (h *xdcrRestHandler) doViewGlobalSettingsRequest(request *http.Request) ([]byte, error) {
-	logger_ap.Infof("doViewGlobalSettingsRequest\n")
-
-	internalSettings, err := rm.InternalSettingsService().GetInternalReplicationSettings()
-	if err != nil {
-		return nil, err
-	}
-	
-	return NewViewInternalSettingsResponse(internalSettings)
-}
-
-func (h *xdcrRestHandler) doChangeGlobalSettingsRequest(request *http.Request) ([]byte, error) {
-	logger_ap.Infof("doChangeGlobalSettingsRequest\n")
-
-	return h.changeInternalSettings(request)
-}
-
 func (h *xdcrRestHandler) doViewReplicationSettingsRequest(request *http.Request) ([]byte, error) {
 	logger_ap.Infof("doViewReplicationSettingsRequest\n")
 
@@ -245,53 +208,21 @@ func (h *xdcrRestHandler) doChangeReplicationSettingsRequest(request *http.Reque
 		return nil, err
 	}
 	
-	// read replication spec with the specified replication id
-	replSpec, err := rm.MetadataService().ReplicationSpec(replicationId)
-	if err != nil {
-		return nil, err
-	}
+	err = rm.HandleChangesToReplicationSettings(replicationId, inputSettingsMap)
 	
-	// update replication spec with input settings
-	replSpec.Settings().UpdateSettingsFromMap(inputSettingsMap)
-	err = rm.MetadataService().SetReplicationSpec(*replSpec)
-	if err != nil {
-		return nil, err
-	}
-	
-	return nil, nil
+	return nil, err
 }
 
-func (h *xdcrRestHandler) changeInternalSettings(request *http.Request) ([]byte, error) {
-	inputSettingsMap, err := DecodeSettingsFromRequest(request, true)
-	if err != nil {
-		return nil, err
-	}
-	
-	internalSettings, err := rm.InternalSettingsService().GetInternalReplicationSettings()
-
-	internalSettings.UpdateSettingsFromMap(inputSettingsMap)
-	err = rm.InternalSettingsService().SetInternalReplicationSettings(internalSettings)
-	if err != nil {
-		return nil, err
-	}
-	return nil, nil
-}
-
+// get statistics for all running replications
 func (h *xdcrRestHandler) doGetStatisticsRequest(request *http.Request) ([]byte, error) {
 	logger_ap.Infof("doGetStatisticsRequest\n")
 
-	uuid, fromBucket, toBucket, filterName, statName, err := DecodeGetStatisticsRequest(request)
-	if err != nil {
+	statsMap, err := rm.GetStatistics()
+	if err == nil {
+		return json.Marshal(statsMap)
+	} else {
 		return nil, err
 	}
-	 	
-	// TODO change to debug
-	logger_ap.Infof("Request params decoded: uuid=%v; fromBucket=%v; toBucket=%v; filterName=%v; statName=%v \n",
-					 uuid, fromBucket, toBucket, filterName, statName)
-	
-	// TODO enable after stats is implemented at rm
-	// stats := rm.GetStatistics(uuid, fromBucket, toBucket, filterName, statName)
-	return nil, nil
 }
 
 // forward requests to other nodes.
@@ -375,4 +306,19 @@ func (h *xdcrRestHandler) GetMessageKeyFromRequest(r *http.Request) (string, err
 
 		return key, nil
 	}
+}
+
+// apply default replication settings for the ones that are not explicitly specified
+func ApplyDefaultSettings(settings *map[string]interface{}) error {
+	defaultSettings, err := rm.ReplicationSettingsService().GetReplicationSettings()
+	if err != nil {
+		return err
+	}
+	
+	for key, val := range defaultSettings.ToMap() {
+		if _, ok := (*settings)[key]; !ok {
+			(*settings)[key] = val
+		}
+	}
+	return nil
 }

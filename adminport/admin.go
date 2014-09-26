@@ -18,8 +18,6 @@ var ErrorInternal = errors.New("Internal error in adminport")
 
 var ErrorInvalidRequest = errors.New("Invalid http request")
 
-var ErrorInvalidResponse = errors.New("Invalid http response")
-
 var ErrorInvalidServerType = errors.New("Invalid http server type for handler")
 
 // Server API for adminport
