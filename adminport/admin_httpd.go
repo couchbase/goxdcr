@@ -136,9 +136,6 @@ func (s *httpServer) systemHandler(w http.ResponseWriter, r *http.Request) {
 			err = fmt.Errorf("%v, %v", ErrorInternal, v)
 			logger_ap.Errorf("%v", err)
 		case []byte:
-			header := w.Header()
-			// responses are always in json type
-			header["Content-Type"] = []string{JsonType}
 			w.Write(v)
 	}
 }

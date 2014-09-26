@@ -144,7 +144,7 @@ func (h *xdcrRestHandler) doCreateReplicationRequest(request *http.Request) ([]b
 		}
 	}
 
-	return NewCreateReplicationResponse(replicationId)
+	return NewCreateReplicationResponse(replicationId), nil
 }
 
 func (h *xdcrRestHandler) doDeleteReplicationRequest(request *http.Request) ([]byte, error) {
@@ -185,6 +185,8 @@ func (h *xdcrRestHandler) doViewReplicationSettingsRequest(request *http.Request
 		return nil, err
 	}
 	
+	logger_ap.Debugf("Request decoded: replicationId=%v", replicationId)
+	
 	// read replication spec with the specified replication id
 	replSpec, err := rm.MetadataService().ReplicationSpec(replicationId)
 	if err != nil {
@@ -192,12 +194,12 @@ func (h *xdcrRestHandler) doViewReplicationSettingsRequest(request *http.Request
 	}
 	
 	// marshal replication settings in replication spec and return it
-	return NewViewInternalSettingsResponse(replSpec.Settings())
+	return NewViewReplicationSettingsResponse(replSpec.Settings()), nil
 }
 
 func (h *xdcrRestHandler) doChangeReplicationSettingsRequest(request *http.Request) ([]byte, error) {
 	logger_ap.Infof("doChangeReplicationSettingsRequest\n")
-
+	
 	// get input parameters from request
 	replicationId, err:= DecodeReplicationIdFromHttpRequest(request, SettingsReplicationsPath)
 	if err != nil {
@@ -207,6 +209,8 @@ func (h *xdcrRestHandler) doChangeReplicationSettingsRequest(request *http.Reque
 	if err != nil {
 		return nil, err
 	}
+	
+	logger_ap.Debugf("Request decoded: replicationId=%v; inputSettings=%v", replicationId, inputSettingsMap)
 	
 	err = rm.HandleChangesToReplicationSettings(replicationId, inputSettingsMap)
 	

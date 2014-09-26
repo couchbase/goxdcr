@@ -85,7 +85,13 @@ echo "Done"
 build_tests(){
 echo "Building tests..."
 cd tests
-cd xmem
+cd common
+go clean
+go install
+cd ../adminport
+go clean
+go install
+cd ../xmem
 go clean
 go install
 cd ../factory
@@ -176,7 +182,17 @@ echo "Done"
 clean_tests(){
 echo "Clean tests..."
 cd tests
-cd xmem
+cd common
+go clean
+cd ../adminport
+go clean
+cd ../xmem
+go clean
+cd ../factory
+go clean
+cd ../router
+go clean 
+cd ../kvfeed
 go clean
 cd ..
 echo "Done"

@@ -219,6 +219,10 @@ func InvalidValueInHttpRequestError(param string, val interface{}) error {
 	return errors.New(fmt.Sprintf("Invalid value, %v, for parameter, %v, in http request.", val, param))
 }
 
+func IncorrectValueTypeInHttpRequestError(key string, val interface{}, expectedType string) error {
+	return errors.New(fmt.Sprintf("Value, %v, for key, %v, in http request has incorrect data type. Expected type: %v. Actual type: %v", val, key, expectedType, reflect.TypeOf(val)))
+}
+
 func InvalidPathInHttpRequestError(path string) error {
 	return errors.New(fmt.Sprintf("Invalid path, %v, in http request.", path))
 }
@@ -233,5 +237,9 @@ func MissingReplicationIdInHttpRequestError(path string) error {
 
 func MissingParameterInHttpResponseError(param string) error {
 	return errors.New(fmt.Sprintf("Parameter, %v, is missing in http response.", param))
+}
+
+func IncorrectValueTypeInHttpResponseError(key string, val interface{}, expectedType string) error {
+	return errors.New(fmt.Sprintf("Value, %v, for key, %v, in http response has incorrect data type. Expected type: %v. Actual type: %v", val, key, expectedType, reflect.TypeOf(val)))
 }
 

@@ -9,15 +9,10 @@ import (
 )
 
 var done = make(chan bool)
-var cluster = "localhost:9000"
+var nodeAddr = "localhost"
 
-var options struct {
-	nodeAddr string
-}
 
 func argParse() {
-	flag.StringVar(&options.nodeAddr, "nodeAddr", "localhost",
-		"xdcr node address")
 	flag.Parse()
 }
 
@@ -34,7 +29,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	cluster = args[0]
-	go ap.MainAdminPort(options.nodeAddr)
+	nodeAddr = args[0]
+	go ap.MainAdminPort(nodeAddr)
 	<-done
 }

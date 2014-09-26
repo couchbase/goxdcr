@@ -1,7 +1,6 @@
 package adminport
 
 import (
-	"encoding/json"
 	log "github.com/Xiaomei-Zhang/couchbase_goxdcr/util"
 	base "github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/base"
 	metadata "github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/metadata"
@@ -10,6 +9,7 @@ import (
 	"net/http"
 	"io/ioutil"
 	"errors"
+	"strings"
 )
 
 // http request method types
@@ -19,12 +19,20 @@ const (
 	MethodDelete = "DELETE"
 )
 
-// constants used for parsing url path
+// http request related constants
 const (
 	UrlDelimiter = "/"
 	UrlPortNumberDelimiter = ":"
 	
+	// delimiters in request body
+	KeyValueDelimiter = "="
+	ValuesDelimiter = "&"
+	
+	ContentType = "Content-Type"
+)
 
+// constants used for parsing url path
+const (
 	CreateReplicationPath    = "controller/createReplication"
 	InternalSettingsPath     = "internalSettings"
 	SettingsReplicationsPath = "settings/replications"
@@ -91,8 +99,7 @@ const (
 	TimeoutPercentageMap = "timeout_percentage_map" 
 )
 
-// json content type for http request and response
-var JsonType = "application/json"
+var MissingSettingsInRequest = errors.New("Invalid http request. No replication setting parameters have been supplied.")
 
 // replication settings key in rest api -> internal replication settings key
 var ReplSettingRestToInternalMap = map[string]string {
@@ -129,7 +136,7 @@ var ReplSettingInternalToRestMap = map[string]string {
 var logger_msgutil *log.CommonLogger = log.NewLogger("MessageUtils", log.LogLevelInfo)
 
 // decode parameters from create replication request
-func DecodeCreateReplicationRequest(request *http.Request) (fromBucket, toCluster, toBucket, filterName string, forward bool, settings map[string]interface{}, err error) {
+func DecodeCreateReplicationRequest(request *http.Request) (fromBucket, toCluster, toBucket, filterName string, forward bool, settings map[string]interface{}, err error) {	
 	if err = request.ParseForm(); err != nil {
 		return 
 	}
@@ -201,25 +208,26 @@ func GetHostAddr(nodeAddr string, port int) string {
 }
 
 // decode replicationId from create replication response
-func DecodeCreateReplicationResponse(response *http.Response) (replicationId string, err error) {
+func DecodeCreateReplicationResponse(response *http.Response) (string, error) {
 	defer response.Body.Close()
 
 	// create replication response is a map
-	var resultMap = make(map[string]string)
 	bodyBytes, err := ioutil.ReadAll(response.Body)
 	if err != nil {
-		return
+		return "", err
+	}
+	bodyStr := string(bodyBytes)
+	
+	parts := strings.Split(bodyStr, KeyValueDelimiter)
+	if len(parts) != 2 {
+		return "", errors.New("Invalid response. More parameters than expected are returned.")
 	}
 	
-	err = json.Unmarshal(bodyBytes, resultMap)
-	if err != nil {
-		return
+	if parts[0] != ReplicationId {
+		return "", utils.MissingParameterInHttpResponseError(ReplicationId)
 	}
-	replicationId, ok := resultMap[ReplicationId]
-	if !ok {
-		err = utils.MissingParameterInHttpResponseError(ReplicationId)
-	}
-	return
+	
+	return parts[1], nil
 	
 }
 
@@ -327,7 +335,7 @@ func DecodeSettingsFromRequest(request *http.Request, throwError bool) (map[stri
 	}
 	
 	if len(settings) == 0 && throwError {
-		return nil, errors.New("Invalid http request. No replication setting parameters have been supplied.")
+		return nil, MissingSettingsInRequest
 	}
 	
 	logger_msgutil.Debugf("settings decoded from request: %v\n", settings)
@@ -336,20 +344,31 @@ func DecodeSettingsFromRequest(request *http.Request, throwError bool) (map[stri
 	
 }
 
-func NewCreateReplicationResponse(replicationId string) ([]byte, error) {
-	resultMap := make(map[string]string)
-	resultMap[ReplicationId] = replicationId
-	return json.Marshal(resultMap)
+func NewCreateReplicationResponse(replicationId string) []byte {
+	result := ReplicationId + KeyValueDelimiter + replicationId
+	return []byte (result)
 }
 
-func NewViewInternalSettingsResponse(settings *metadata.ReplicationSettings) ([]byte, error) {
-	resultMap := make(map[string]interface{})
+func NewViewReplicationSettingsResponse(settings *metadata.ReplicationSettings) []byte {
+	var result string
 	for key, val := range settings.ToMap() {
-		restKey := ReplSettingInternalToRestMap[key]
-		resultMap[restKey] = val
+		var strVal string
+		switch val.(type) {
+			case string:
+				strVal = val.(string)
+			case int:
+				strVal = strconv.FormatInt(int64(val.(int)), base.ParseIntBase)
+			case bool:
+				strVal = strconv.FormatBool(val.(bool))
+		}
+		
+		result = result + key + KeyValueDelimiter + strVal + ValuesDelimiter
 	}
-	return json.Marshal(resultMap)
+	
+	//strip the extra delimiter at the end
+	return []byte (result[:len(result)-len(ValuesDelimiter)])
 }
+
 
 // decode replication id from http request
 func DecodeReplicationIdFromHttpRequest(request *http.Request, pathPrefix string) (string, error) {
@@ -364,4 +383,5 @@ func DecodeReplicationIdFromHttpRequest(request *http.Request, pathPrefix string
 	logger_msgutil.Debugf("replication id decoded from request: %v\n", replicationId)
 	return replicationId, nil
 }
+
 
