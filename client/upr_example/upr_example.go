@@ -54,12 +54,14 @@ func main() {
 	//time.Sleep(10 * time.Second)
 
 	for i := 0; i < 64; i++ {
-		if err := uf.UprRequestStream(uint16(i), 0, 0, 0, 0xFFFFFFFFFFFFFFFF, 0, 0); err != nil {
+		err := uf.UprRequestStream(uint16(i), 0, 0, 0, 0, 0xFFFFFFFFFFFFFFFF, 0, 0)
+		if err != nil {
 			log.Fatalf("Request stream for vb %d Failed %v", i, err)
 		}
 	}
 
-	if err := uf.UprRequestStream(uint16(100), 0, 0, 0, 0, 0, 0); err != nil {
+	err = uf.UprRequestStream(uint16(100), 0, 0, 0, 0, 0, 0, 0)
+	if err != nil {
 		log.Fatalf("Request stream for vb 100 Failed %v", err)
 	}
 

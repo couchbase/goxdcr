@@ -46,6 +46,7 @@ type UprEvent struct {
 	Opcode       UprOpcode          // Type of event
 	Status       gomemcached.Status // Response status
 	VBucket      uint16             // VBucket this event applies to
+	Opaque       uint32             // 16 MSB of opaque
 	VBuuid       uint64             // This field is set by downstream
 	Flags        uint32             // Item flags
 	Expiry       uint32             // Item expiration time
@@ -142,6 +143,9 @@ func makeUprEvent(rq gomemcached.MCRequest, stream *UprStream) *UprEvent {
 		Value:   rq.Body,
 		Cas:     rq.Cas,
 	}
+	// 16 LSBits are used by client library to encode vbucket number.
+	// 16 MSBits are left for application to multiplex on opaque value.
+	event.Opaque = rq.Opaque & 0xFFFF0000
 
 	if len(rq.Extras) >= tapMutationExtraLen {
 		event.Seqno = binary.BigEndian.Uint64(rq.Extras[:8])
@@ -322,13 +326,13 @@ func (mc *Client) UprGetFailoverLog(vb []uint16) (map[uint16]*FailoverLog, error
 
 // UprRequestStream for a single vbucket.
 // TODO: describe arguments.
-func (feed *UprFeed) UprRequestStream(vb uint16, flags uint32,
+func (feed *UprFeed) UprRequestStream(vb uint16, opaque, flags uint32,
 	vuuid, startSequence, endSequence, snapStart, snapEnd uint64) error {
 
 	rq := &gomemcached.MCRequest{
 		Opcode:  gomemcached.UPR_STREAMREQ,
 		VBucket: vb,
-		Opaque:  uint32(vb),
+		Opaque:  (opaque & 0xFFFF0000) | uint32(vb),
 	}
 
 	rq.Extras = make([]byte, 48) // #Extras
@@ -395,7 +399,7 @@ func handleStreamRequest(res *gomemcached.MCResponse) (gomemcached.Status, uint6
 		return res.Status, 0, nil, err
 	case res.Status == gomemcached.ROLLBACK:
 		rollback = binary.BigEndian.Uint64(res.Extras)
-		ul.LogInfo("", "", "Rollback %v for vb %v\n", rollback, res.Opaque /*vb*/)
+		ul.LogInfo("", "", "Rollback %v for vb %v\n", rollback, res.Opaque)
 		return res.Status, rollback, nil, nil
 	case res.Status != gomemcached.SUCCESS:
 		err = fmt.Errorf("unexpected status %v, for %v", res.Status, res.Opaque)
@@ -451,7 +455,8 @@ loop:
 				Body:   pkt.Body,
 			}
 
-			vb := uint16(res.Opaque)
+			vb := uint16(pkt.Opaque & 0xFFFF)
+			opaque := pkt.Opaque & 0xFFFF0000
 			uprStats.TotalBytes = uint64(bytes)
 
 			feed.mu.RLock()
@@ -468,7 +473,7 @@ loop:
 				status, rb, flog, err := handleStreamRequest(res)
 				if status == gomemcached.ROLLBACK {
 					// rollback stream
-					if err := feed.UprRequestStream(vb, 0, stream.Vbuuid, rb,
+					if err := feed.UprRequestStream(vb, opaque, 0, stream.Vbuuid, rb,
 						stream.EndSeq, 0, 0); err != nil {
 						ul.LogError("", "",
 							"UPR_STREAMREQ with rollback %d for vb % Failed. Error %s",
