@@ -243,3 +243,7 @@ func IncorrectValueTypeInHttpResponseError(key string, val interface{}, expected
 	return errors.New(fmt.Sprintf("Value, %v, for key, %v, in http response has incorrect data type. Expected type: %v. Actual type: %v", val, key, expectedType, reflect.TypeOf(val)))
 }
 
+func IncorrectValueTypeInMapError(key string, val interface{}, expectedType string) error {
+	return errors.New(fmt.Sprintf("Value, %v, with key, %v, in map has incorrect data type. Expected type: %v. Actual type: %v", val, key, expectedType, reflect.TypeOf(val)))
+}
+

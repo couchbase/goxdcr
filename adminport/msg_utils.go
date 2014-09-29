@@ -349,24 +349,12 @@ func NewCreateReplicationResponse(replicationId string) []byte {
 	return []byte (result)
 }
 
-func NewViewReplicationSettingsResponse(settings *metadata.ReplicationSettings) []byte {
-	var result string
-	for key, val := range settings.ToMap() {
-		var strVal string
-		switch val.(type) {
-			case string:
-				strVal = val.(string)
-			case int:
-				strVal = strconv.FormatInt(int64(val.(int)), base.ParseIntBase)
-			case bool:
-				strVal = strconv.FormatBool(val.(bool))
-		}
-		
-		result = result + key + KeyValueDelimiter + strVal + ValuesDelimiter
+func NewViewReplicationSettingsResponse(settings *metadata.ReplicationSettings) ([]byte, error) {
+	if settings == nil {
+		return nil, nil
+	} else {
+		return EncodeMapIntoByteArray(settings.ToMap())
 	}
-	
-	//strip the extra delimiter at the end
-	return []byte (result[:len(result)-len(ValuesDelimiter)])
 }
 
 
@@ -382,6 +370,36 @@ func DecodeReplicationIdFromHttpRequest(request *http.Request, pathPrefix string
 	replicationId := request.URL.Path[prefixLength:]
 	logger_msgutil.Debugf("replication id decoded from request: %v\n", replicationId)
 	return replicationId, nil
+}
+
+// encode data in a map into a byte array, which can then be used as 
+// the body part of a http response
+// the assumption is that values in map are of three types: string, int, bool
+// which should be sufficient for almost all cases
+func EncodeMapIntoByteArray(data map[string]interface{}) ([]byte, error) {
+	if len(data) == 0 {
+		return nil, nil
+	}
+	
+	var result string
+	for key, val := range data {
+		var strVal string
+		switch val.(type) {
+			case string:
+				strVal = val.(string)
+			case int:
+				strVal = strconv.FormatInt(int64(val.(int)), base.ParseIntBase)
+			case bool:
+				strVal = strconv.FormatBool(val.(bool))
+			default:
+				return nil, utils.IncorrectValueTypeInMapError(key, val, "string/int/bool")
+		}
+		
+		result = result + key + KeyValueDelimiter + strVal + ValuesDelimiter
+	}
+	
+	//strip the extra delimiter at the end
+	return []byte (result[:len(result)-len(ValuesDelimiter)]), nil
 }
 
 
