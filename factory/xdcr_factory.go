@@ -5,7 +5,6 @@ import (
 	"github.com/couchbase/indexing/secondary/protobuf"
 	"math"
 	"strconv"
-	//connector "github.com/Xiaomei-Zhang/couchbase_goxdcr/connector"
 	"errors"
 	pp "github.com/Xiaomei-Zhang/couchbase_goxdcr/pipeline"
 	pctx "github.com/Xiaomei-Zhang/couchbase_goxdcr/pipeline_ctx"
@@ -21,9 +20,9 @@ import (
 )
 
 const (
-	PART_NAME_DELIMITER     = "_"
-	KVFEED_NAME_PREFIX      = "kvfeed"
-	XMEM_NOZZLE_NAME_PREFIX = "xmem"
+	PartNameDelimiter     = "_"
+	KvfeedNamePrefix      = "kvfeed"
+	XmemNozzleNamePrefix = "xmem"
 )
 
 // Factory for XDCR pipelines
@@ -160,7 +159,7 @@ func (xdcrf *XDCRFactory) constructSourceNozzles(spec *metadata.ReplicationSpeci
 
 			// construct kvfeeds
 			// partIds of the kvfeed nodes look like "kvfeed_1"
-			kvfeed, err := sp.NewKVFeed(kvaddr, topic, KVFEED_NAME_PREFIX+PART_NAME_DELIMITER+strconv.Itoa(i), bucket, vbList)
+			kvfeed, err := sp.NewKVFeed(kvaddr, topic, KvfeedNamePrefix+PartNameDelimiter+strconv.Itoa(i), bucket, vbList)
 			if err != nil {
 				logger_factory.Errorf("Error on NewKVFeed. i=%d, err=%v\n", i, err)
 				return nil, err
@@ -208,7 +207,7 @@ func (xdcrf *XDCRFactory) constructOutgoingNozzles(spec *metadata.ReplicationSpe
 
 	for kvaddr, kvVBList := range kvVBMap {
 		numOfVbs := len(kvVBList)
-		// the nuhmber of xmem nozzles to construct is the smaller of vbucket list size and target connection size
+		// the number of xmem nozzles to construct is the smaller of vbucket list size and target connection size
 		numOfNozzles := int(math.Min(float64(numOfVbs), float64(maxTargetNozzlePerNode)))
 
 		numOfVbPerNozzle := int(math.Ceil(float64(numOfVbs) / float64(numOfNozzles)))
@@ -266,9 +265,9 @@ func (xdcrf *XDCRFactory) constructNozzleForTargetNode(kvaddr string, bucketName
 	}
 
 	switch nozzleType {
-	case base.XMEM:
+	case base.Xmem:
 		nozzle = xdcrf.constructXMEMNozzle(kvaddr, bucketName, bucketPwd, nozzle_index)
-	case base.CAPI:
+	case base.Capi:
 		nozzle = xdcrf.constructCAPINozzle(kvaddr, bucketName, bucketPwd, nozzle_index)
 	}
 
@@ -284,14 +283,14 @@ func (xdcrf *XDCRFactory) getNozzleType(kvaddr string) (base.XDCROutgoingNozzleT
 	}
 
 	if beforeXMEM {
-		return base.XMEM, nil
+		return base.Xmem, nil
 	} else {
-		return base.CAPI, nil
+		return base.Capi, nil
 	}
 }
 
 func (xdcrf *XDCRFactory) constructXMEMNozzle(kvaddr string, bucketName string, bucketPwd string, nozzle_index int) common.Nozzle {
-	xmemNozzle_Id := XMEM_NOZZLE_NAME_PREFIX + PART_NAME_DELIMITER + kvaddr + PART_NAME_DELIMITER + strconv.Itoa(nozzle_index)
+	xmemNozzle_Id := XmemNozzleNamePrefix + PartNameDelimiter + kvaddr + PartNameDelimiter + strconv.Itoa(nozzle_index)
 	nozzle := parts.NewXmemNozzle(xmemNozzle_Id, kvaddr, bucketName, bucketPwd)
 	return nozzle
 }

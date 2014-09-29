@@ -20,8 +20,8 @@ var AdminportWriteTimeout = 0
 type XDCROutgoingNozzleType int
 
 const (
-	XMEM XDCROutgoingNozzleType = iota
-	CAPI XDCROutgoingNozzleType = iota
+	Xmem XDCROutgoingNozzleType = iota
+	Capi XDCROutgoingNozzleType = iota
 )
 
 // constants for integer parsing
