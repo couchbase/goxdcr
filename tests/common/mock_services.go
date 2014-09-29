@@ -13,18 +13,20 @@ import (
 var options struct {
 	sourceBucket    string // source bucket
 	targetBucket    string //target bucket
-	connectStr      string //connect string
+	sourceClusterAddr      string //source cluster addr
+	targetClusterAddr      string //target cluster addr
 	numConnPerKV    int    // number of connections per source KV node
 	numOutgoingConn int    // number of connections to target cluster
-	username        string //username
-	password        string //password
+	username        string //username on source cluster
+	password        string //password on source cluster
 	maxVbno         int    // maximum number of vbuckets
 }
 
-func SetTestOptions(sourceBucket, targetBucket, connectStr, username, password string, numConnPerKV, numOutgoingConn int) {
-	options.connectStr = connectStr
+func SetTestOptions(sourceBucket, targetBucket, sourceClusterAddr, targetClusterAddr, username, password string, numConnPerKV, numOutgoingConn int) {
 	options.sourceBucket = sourceBucket
 	options.targetBucket = targetBucket
+	options.sourceClusterAddr = sourceClusterAddr
+	options.targetClusterAddr = targetClusterAddr
 	options.username = username
 	options.password = password
 	options.numConnPerKV = numConnPerKV
@@ -35,7 +37,7 @@ type MockMetadataSvc struct {
 }
 
 func (mock_meta_svc *MockMetadataSvc) ReplicationSpec(replicationId string) (*metadata.ReplicationSpecification, error) {
-	spec := metadata.NewReplicationSpecification(options.connectStr, options.sourceBucket, options.connectStr, options.targetBucket, "")
+	spec := metadata.NewReplicationSpecification(options.sourceClusterAddr, options.sourceBucket, options.targetClusterAddr, options.targetBucket, "")
 	settings := spec.Settings()
 	settings.SetTargetNozzlesPerNode(options.numOutgoingConn)
 	settings.SetSourceNozzlesPerNode(options.numConnPerKV)
@@ -58,7 +60,7 @@ type MockClusterInfoSvc struct {
 }
 
 func (mock_ci_svc *MockClusterInfoSvc) GetClusterConnectionStr(ClusterUUID string) (string, error) {
-	return options.connectStr, nil
+	return options.sourceClusterAddr, nil
 }
 
 func (mock_ci_svc *MockClusterInfoSvc) GetMyActiveVBuckets(ClusterUUID string, bucketName string, NodeId string) ([]uint16, error) {
@@ -133,7 +135,7 @@ type MockXDCRTopologySvc struct {
 }
 
 func (mock_top_svc *MockXDCRTopologySvc) MyHost() (string, error) {
-	return options.connectStr, nil
+	return options.sourceClusterAddr, nil
 }
 
 func (mock_top_svc *MockXDCRTopologySvc) MyAdminPort() (uint16, error) {
@@ -142,7 +144,7 @@ func (mock_top_svc *MockXDCRTopologySvc) MyAdminPort() (uint16, error) {
 
 func (mock_top_svc *MockXDCRTopologySvc) MyKVNodes() ([]string, error) {
 	mock_ci_svc := &MockClusterInfoSvc{}
-	nodes, err := mock_ci_svc.GetServerList(options.connectStr, "default")
+	nodes, err := mock_ci_svc.GetServerList(options.sourceClusterAddr, "default")
 	return nodes, err
 }
 
@@ -157,7 +159,7 @@ func (mock_top_svc *MockXDCRTopologySvc) XDCRCompToKVNodeMap() (map[string][]str
 }
 
 func (mock_top_svc *MockXDCRTopologySvc) MyCluster() (string, error) {
-	return options.connectStr, nil
+	return options.sourceClusterAddr, nil
 }
 
 type MockReplicationSettingsSvc struct {

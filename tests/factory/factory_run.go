@@ -74,7 +74,7 @@ func main() {
 }
 
 func invokeFactory() error {
-	c.SetTestOptions(options.sourceBucket, options.targetBucket, options.connectStr, options.username, options.password, options.numConnPerKV, options.numOutgoingConn)
+	c.SetTestOptions(options.sourceBucket, options.targetBucket, options.connectStr, options.connectStr, options.username, options.password, options.numConnPerKV, options.numOutgoingConn)
 	fac := factory.NewXDCRFactory(new(c.MockMetadataSvc), new(c.MockClusterInfoSvc), new(c.MockXDCRTopologySvc))
 
 	pl, err := fac.NewPipeline(TEST_TOPIC)
