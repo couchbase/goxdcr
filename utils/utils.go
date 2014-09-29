@@ -122,9 +122,10 @@ func maybeAddAuth(req *http.Request, username string, password string) {
 }
 
 func Bucket(connectStr string, bucketName string, clusterUserName, clusterPassword string) (*couchbase.Bucket, error) {
-	bucketInfos, err := couchbase.GetBucketList (fmt.Sprintf("http://%s:%s@%s", clusterUserName, clusterPassword, connectStr))
+	url := fmt.Sprintf("http://%s:%s@%s", clusterUserName, clusterPassword, connectStr)
+	bucketInfos, err := couchbase.GetBucketList (url)
 	if err != nil {
-		return nil, err
+		return nil, NewEnhancedError("Error getting bucketlist with url:" + url, err)
 	}
 	
 	var password string
@@ -135,16 +136,16 @@ func Bucket(connectStr string, bucketName string, clusterUserName, clusterPasswo
 	}
 	couch, err := couchbase.Connect("http://" + bucketName + ":" + password +"@" + connectStr)
 	if err != nil {
-		return nil, err
+		return nil, NewEnhancedError(fmt.Sprintf("Error connecting to couchbase. bucketName=%v; password=%v; connectStr=%v", bucketName, password, connectStr), err)
 	}
 	pool, err := couch.GetPool("default")
 	if err != nil {
-		return nil, err
+		return nil, NewEnhancedError("Error getting pool with name 'default'.", err)
 	}
 	
 	bucket, err := pool.GetBucket(bucketName)
 	if err != nil {
-		return nil, err
+		return nil, NewEnhancedError(fmt.Sprintf("Error getting bucket, %v, from pool.", bucketName), err)
 	}
 	return bucket, err
 }
@@ -245,5 +246,10 @@ func IncorrectValueTypeInHttpResponseError(key string, val interface{}, expected
 
 func IncorrectValueTypeInMapError(key string, val interface{}, expectedType string) error {
 	return errors.New(fmt.Sprintf("Value, %v, with key, %v, in map has incorrect data type. Expected type: %v. Actual type: %v", val, key, expectedType, reflect.TypeOf(val)))
+}
+
+// returns an enhanced error with erroe message being "msg + old error message"
+func NewEnhancedError (msg string, err error) error {
+	return errors.New(msg + "\n" + err.Error())
 }
 
