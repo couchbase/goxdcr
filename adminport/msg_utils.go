@@ -64,7 +64,7 @@ const (
 // constants for parsing create replication request
 const (
 	FromBucket = "fromBucket"
-	ToCluster = "toCluster"
+	ToClusterUuid = "toClusterUuid"
 	ToBucket = "toBucket"
 	FilterName = "filterName"
 	Forward = "forward"
@@ -136,7 +136,7 @@ var ReplSettingInternalToRestMap = map[string]string {
 var logger_msgutil *log.CommonLogger = log.NewLogger("MessageUtils", log.LogLevelInfo)
 
 // decode parameters from create replication request
-func DecodeCreateReplicationRequest(request *http.Request) (fromBucket, toCluster, toBucket, filterName string, forward bool, settings map[string]interface{}, err error) {	
+func DecodeCreateReplicationRequest(request *http.Request) (fromBucket, toClusterUuid, toBucket, filterName string, forward bool, settings map[string]interface{}, err error) {	
 	if err = request.ParseForm(); err != nil {
 		return 
 	}
@@ -154,8 +154,8 @@ func DecodeCreateReplicationRequest(request *http.Request) (fromBucket, toCluste
 		switch key {
 		case FromBucket:
 			fromBucket = val
-		case ToCluster:
-			toCluster = val
+		case ToClusterUuid:
+			toClusterUuid = val
 		case ToBucket:
 			toBucket = val
 		case FilterName:
@@ -180,8 +180,8 @@ func DecodeCreateReplicationRequest(request *http.Request) (fromBucket, toCluste
 	if len(fromBucket) == 0 {
 		missingParams = append(missingParams, FromBucket)
 	}
-	if len(toCluster) == 0 {
-		missingParams = append(missingParams, ToCluster)
+	if len(toClusterUuid) == 0 {
+		missingParams = append(missingParams, ToClusterUuid)
 	}
 	if len(toBucket) == 0 {
 		missingParams = append(missingParams, ToBucket)

@@ -32,6 +32,7 @@ var options struct {
 	sourceBucket    string // source bucket
 	targetBucket    string //target bucket
 	connectStr      string //connect string
+	toClusterUuid   string //to cluster
 	numConnPerKV    int    // number of connections per source KV node
 	numOutgoingConn int    // number of connections to target cluster
 	username        string //username
@@ -41,12 +42,16 @@ var options struct {
 }
 
 func argParse() {
-	flag.StringVar(&options.sourceBucket, "source_bucket", "default",
+	flag.StringVar(&options.sourceBucket, "sourceBucket", "default",
 		"bucket to replicate from")
 	flag.IntVar(&options.maxVbno, "maxvb", 8,
 		"maximum number of vbuckets")
-	flag.StringVar(&options.targetBucket, "target_bucket", "default",
+	flag.StringVar(&options.targetBucket, "targetBucket", "default",
 		"bucket to replicate to")
+	// garbage for now. Need to make it a required parameter for real 
+	// end to end testing
+	flag.StringVar(&options.toClusterUuid, "toClusterUuid", "asdf",
+		"cluster to replicate to")
 	flag.IntVar(&options.numConnPerKV, "numConnPerKV", NumSourceConn,
 		"number of connections per kv node")
 	flag.IntVar(&options.numOutgoingConn, "numOutgoingConn", NumTargetConn,
@@ -125,7 +130,7 @@ func testCreateReplication() error {
 	
 	params := make(map[string]string)
 	params[ap.FromBucket] = options.sourceBucket
-	params[ap.ToCluster] = options.connectStr
+	params[ap.ToClusterUuid] = options.toClusterUuid
 	params[ap.ToBucket] = options.targetBucket
 	params[ap.FilterExpression] = FilterExpression
 	params[ap.BatchCount] = strconv.FormatInt(int64(BatchCount), base.ParseIntBase)

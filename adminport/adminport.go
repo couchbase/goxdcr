@@ -89,26 +89,27 @@ func (h *xdcrRestHandler) handleRequest(
 func (h *xdcrRestHandler) doCreateReplicationRequest(request *http.Request) ([]byte, error) {
 	logger_ap.Infof("doCreateReplicationRequest called\n")
 
-	fromBucket, toCluster, toBucket, filterName, forward, settings, err := DecodeCreateReplicationRequest(request)
+	fromBucket, toClusterUuid, toBucket, filterName, forward, settings, err := DecodeCreateReplicationRequest(request)
 	if err != nil {
 		return nil, err
 	}
 	
-	//TODO change to debug
-	logger_ap.Infof("Request params decoded: fromBucket=%v; toCluster=%v; toBucket=%v; filterName=%v; forward=%v; settings=%v \n", 
-					fromBucket, toCluster, toBucket, filterName, forward, settings)
+	logger_ap.Debugf("Request params decoded: fromBucket=%v; toClusterUuid=%v; toBucket=%v; filterName=%v; forward=%v; settings=%v \n", 
+					fromBucket, toClusterUuid, toBucket, filterName, forward, settings)
 	
-	fromCluster, err := rm.XDCRCompTopologyService().MyCluster()
+	fromClusterUuid, err := rm.XDCRCompTopologyService().MyCluster()
 	if err != nil {
 		return nil, err
 	}
+	
+	logger_ap.Debugf("fromClusterUuid=%v \n", fromClusterUuid)
 	
 	// apply default replication settings
 	if err := ApplyDefaultSettings(&settings); err != nil {
 		return nil, err
 	}
 	
-	replicationId, err := rm.CreateReplication(fromCluster, fromBucket, toCluster, toBucket, filterName, settings)
+	replicationId, err := rm.CreateReplication(fromClusterUuid, fromBucket, toClusterUuid, toBucket, filterName, settings)
 	if err != nil {
 		return nil, err
 	}
