@@ -7,6 +7,7 @@ import (
 	utils "github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/utils"
 	"strconv"
 	"net/http"
+	"net/url"
 	"io/ioutil"
 	"errors"
 	"strings"
@@ -64,7 +65,7 @@ const (
 // constants for parsing create replication request
 const (
 	FromBucket = "fromBucket"
-	ToClusterUuid = "toClusterUuid"
+	ToClusterUuid = "uuid"
 	ToBucket = "toBucket"
 	FilterName = "filterName"
 	Forward = "forward"
@@ -368,8 +369,10 @@ func DecodeReplicationIdFromHttpRequest(request *http.Request, pathPrefix string
 	}
 
 	replicationId := request.URL.Path[prefixLength:]
+	unescapedReplId, err := url.QueryUnescape(replicationId)
 	logger_msgutil.Debugf("replication id decoded from request: %v\n", replicationId)
-	return replicationId, nil
+	logger_msgutil.Debugf("unescaped replication id: %v\n", unescapedReplId)
+	return unescapedReplId, err
 }
 
 // encode data in a map into a byte array, which can then be used as 
@@ -381,7 +384,7 @@ func EncodeMapIntoByteArray(data map[string]interface{}) ([]byte, error) {
 		return nil, nil
 	}
 	
-	var result string
+	params := make(url.Values) 
 	for key, val := range data {
 		var strVal string
 		switch val.(type) {
@@ -394,12 +397,10 @@ func EncodeMapIntoByteArray(data map[string]interface{}) ([]byte, error) {
 			default:
 				return nil, utils.IncorrectValueTypeInMapError(key, val, "string/int/bool")
 		}
-		
-		result = result + key + KeyValueDelimiter + strVal + ValuesDelimiter
+		params.Add(key, strVal)
 	}
 	
-	//strip the extra delimiter at the end
-	return []byte (result[:len(result)-len(ValuesDelimiter)]), nil
+	return []byte (params.Encode()), nil
 }
 
 

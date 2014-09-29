@@ -10,10 +10,12 @@ import (
 	"bytes"
 	"strconv"
 	"errors"
+	"net/url"
 	ap "github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/adminport"
 	base "github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/base"
 	rm "github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/replication_manager"
 	c "github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/tests/common"
+	pm "github.com/Xiaomei-Zhang/couchbase_goxdcr/pipeline_manager"
 )
 
 const (
@@ -32,7 +34,7 @@ var options struct {
 	sourceBucket    string // source bucket
 	targetBucket    string //target bucket
 	connectStr      string //connect string
-	toClusterUuid   string //to cluster
+	filterName      string //filter name
 	numConnPerKV    int    // number of connections per source KV node
 	numOutgoingConn int    // number of connections to target cluster
 	username        string //username
@@ -48,10 +50,8 @@ func argParse() {
 		"maximum number of vbuckets")
 	flag.StringVar(&options.targetBucket, "targetBucket", "default",
 		"bucket to replicate to")
-	// garbage for now. Need to make it a required parameter for real 
-	// end to end testing
-	flag.StringVar(&options.toClusterUuid, "toClusterUuid", "asdf",
-		"cluster to replicate to")
+	flag.StringVar(&options.filterName, "filterName", "myActive",
+		"name of filter to use for replication")
 	flag.IntVar(&options.numConnPerKV, "numConnPerKV", NumSourceConn,
 		"number of connections per kv node")
 	flag.IntVar(&options.numOutgoingConn, "numOutgoingConn", NumTargetConn,
@@ -83,26 +83,28 @@ func main() {
 }
 
 func startAdminport() {
-	c.SetTestOptions(options.sourceBucket, options.targetBucket, options.connectStr, options.username, options.password, options.numConnPerKV, options.numOutgoingConn)
+	c.SetTestOptions(options.sourceBucket, options.targetBucket, options.connectStr, options.connectStr, options.username, options.password, options.numConnPerKV, options.numOutgoingConn)
 	rm.Initialize(new(c.MockMetadataSvc), new(c.MockClusterInfoSvc), new(c.MockXDCRTopologySvc), new(c.MockReplicationSettingsSvc))
 
 	go ap.MainAdminPort(options.kvaddr)
 	//wait for server to finish starting
 	time.Sleep(time.Second * 3)
 
-	if err := testCreateReplication(); err != nil {
-		fmt.Println(err.Error())
-		// ignore failure for now till replication can run end to end	
-		// return
-	}
-
-	// TODO get replicationId from testCreateReplication()
-	if err := testViewReplicationSettings("test"); err != nil {
+	replicationId, err := testCreateReplication()
+	if err != nil {
 		fmt.Println(err.Error())
 		return
 	}
 	
-	if err := testChangeReplicationSettings("test"); err != nil {
+	escapedReplId := url.QueryEscape(replicationId)
+	fmt.Println("replicationId: ", replicationId, " escaped replication id: " + escapedReplId)
+
+	if err := testViewReplicationSettings(escapedReplId); err != nil {
+		fmt.Println(err.Error())
+		return
+	}
+	
+	if err := testChangeReplicationSettings(escapedReplId); err != nil {
 		fmt.Println(err.Error())
 		return
 	}
@@ -112,7 +114,7 @@ func startAdminport() {
 		return
 	}
 	
-	if err := testDeleteReplication("test"); err != nil {
+	if err := testDeleteReplication(replicationId, escapedReplId); err != nil {
 		fmt.Println(err.Error())
 		return
 	}
@@ -125,13 +127,14 @@ func getUrlPrefix() string {
 	return "http://" + ap.GetHostAddr(options.kvaddr, base.AdminportNumber) + base.AdminportUrlPrefix
 }
 
-func testCreateReplication() error {
+func testCreateReplication() (string, error) {
 	url := getUrlPrefix() + ap.CreateReplicationPath
 	
 	params := make(map[string]string)
 	params[ap.FromBucket] = options.sourceBucket
-	params[ap.ToClusterUuid] = options.toClusterUuid
+	params[ap.ToClusterUuid] = options.connectStr
 	params[ap.ToBucket] = options.targetBucket
+	params[ap.FilterName] = options.filterName
 	params[ap.FilterExpression] = FilterExpression
 	params[ap.BatchCount] = strconv.FormatInt(int64(BatchCount), base.ParseIntBase)
 		
@@ -140,7 +143,7 @@ func testCreateReplication() error {
 	
 	request, err := http.NewRequest(ap.MethodPost, url, paramsBuf)
 	if err != nil {
-		return err
+		return "", err
 	}
 	request.Header.Set(ap.ContentType, DefaultContentType)
 	
@@ -148,11 +151,25 @@ func testCreateReplication() error {
 	
 	response, err := http.DefaultClient.Do(request)
 	
-	return validateResponse("CreateReplication", response, err)
+	err = validateResponse("CreateReplication", response, err)
+	if err != nil {
+		return "", err
+	}
+	
+	replicationId, err := ap.DecodeCreateReplicationResponse(response)
+	
+	// verify that the replication is created and started and is being
+	// managed by pipeline manager
+	if pm.Pipeline(replicationId) == nil {
+		return "", errors.New("Replication not found in pipeline manager.")
+	}
+	
+	// retrieve replicationId
+	return replicationId, err
 }
 
-func testDeleteReplication(replicationId string) error {
-	url := getUrlPrefix() + ap.DeleteReplicationPrefix + ap.UrlDelimiter + replicationId
+func testDeleteReplication(replicationId, escapedReplId string) error {
+	url := getUrlPrefix() + ap.DeleteReplicationPrefix + ap.UrlDelimiter + escapedReplId
 	
 	request, err := http.NewRequest(ap.MethodPost, url, nil)
 	if err != nil {
@@ -164,7 +181,18 @@ func testDeleteReplication(replicationId string) error {
 	
 	response, err := http.DefaultClient.Do(request)
 	
-	return validateResponse("DeleteReplication", response, err)
+	err = validateResponse("DeleteReplication", response, err)
+	if err != nil {
+		return err
+	}
+	
+	// verify that the replication is no longer managed by pipeline manager
+	if pm.Pipeline(replicationId) != nil {
+		return errors.New("Replication still visible from pipeline manager.")
+	}
+	
+	// retrieve replicationId
+	return nil
 }
 
 func testViewReplicationSettings(replicationId string) error {
@@ -202,7 +230,6 @@ func testChangeReplicationSettings(replicationId string) error {
 	fmt.Println("request", request)
 	
 	response, err := http.DefaultClient.Do(request)
-	
 	return validateResponse("ChangeReplicationSettings", response, err)
 }
 
@@ -241,6 +268,7 @@ func validateResponse(testName string, response *http.Response, err error) error
 		return nil
 	}
 }
+
 
 
 
