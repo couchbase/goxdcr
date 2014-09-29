@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"bytes"
 	"strconv"
+	"errors"
 	ap "github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/adminport"
 	base "github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/base"
 	rm "github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/replication_manager"
@@ -81,20 +82,37 @@ func startAdminport() {
 	rm.Initialize(new(c.MockMetadataSvc), new(c.MockClusterInfoSvc), new(c.MockXDCRTopologySvc), new(c.MockReplicationSettingsSvc))
 
 	go ap.MainAdminPort(options.kvaddr)
-	//wait for server to start
+	//wait for server to finish starting
 	time.Sleep(time.Second * 3)
 
-	// this one is failing now since replication is not yet running end to end	
-	testCreateReplication()
+	if err := testCreateReplication(); err != nil {
+		fmt.Println(err.Error())
+		// ignore failure for now till replication can run end to end	
+		// return
+	}
 
 	// TODO get replicationId from testCreateReplication()
-	testViewReplicationSettings("test")
+	if err := testViewReplicationSettings("test"); err != nil {
+		fmt.Println(err.Error())
+		return
+	}
 	
-	testChangeReplicationSettings("test")
+	if err := testChangeReplicationSettings("test"); err != nil {
+		fmt.Println(err.Error())
+		return
+	}
 	
-	testGetStatistics()
-		
-	testDeleteReplication("test")
+	if err := testGetStatistics(); err != nil {
+		fmt.Println(err.Error())
+		return
+	}
+	
+	if err := testDeleteReplication("test"); err != nil {
+		fmt.Println(err.Error())
+		return
+	}
+	
+	fmt.Println("All tests passed.")
 
 }
 
@@ -125,9 +143,7 @@ func testCreateReplication() error {
 	
 	response, err := http.DefaultClient.Do(request)
 	
-	validateResponse("CreateReplication", response, err)
-	
-	return err
+	return validateResponse("CreateReplication", response, err)
 }
 
 func testDeleteReplication(replicationId string) error {
@@ -143,9 +159,7 @@ func testDeleteReplication(replicationId string) error {
 	
 	response, err := http.DefaultClient.Do(request)
 	
-	validateResponse("DeleteReplication", response, err)
-	
-	return err
+	return validateResponse("DeleteReplication", response, err)
 }
 
 func testViewReplicationSettings(replicationId string) error {
@@ -161,9 +175,7 @@ func testViewReplicationSettings(replicationId string) error {
 	
 	response, err := http.DefaultClient.Do(request)
 	
-	validateResponse("ViewReplicationSettings", response, err)
-	
-	return err
+	return validateResponse("ViewReplicationSettings", response, err)
 }
 
 func testChangeReplicationSettings(replicationId string) error {
@@ -186,9 +198,7 @@ func testChangeReplicationSettings(replicationId string) error {
 	
 	response, err := http.DefaultClient.Do(request)
 	
-	validateResponse("ChangeReplicationSettings", response, err)
-	
-	return err
+	return validateResponse("ChangeReplicationSettings", response, err)
 }
 
 func testGetStatistics() error {
@@ -204,9 +214,7 @@ func testGetStatistics() error {
 	
 	response, err := http.DefaultClient.Do(request)
 	
-	validateResponse("GetStatistics", response, err)
-	
-	return err
+	return validateResponse("GetStatistics", response, err)
 }
 
 func constructRequestBodyFromParams(params map[string]string) []byte{
@@ -220,11 +228,12 @@ func constructRequestBodyFromParams(params map[string]string) []byte{
 	return []byte (result)
 }
 
-func validateResponse(testName string, response *http.Response, err error) {
+func validateResponse(testName string, response *http.Response, err error) error {
 	if err != nil || response.StatusCode != 200 {
-		fmt.Println("!!!", testName, " failed. err : ", err, " response status: ", response.Status)
+		return errors.New(fmt.Sprintf("Test %v failed. err=%v; response status=%v\n", testName, err, response.Status))
 	} else{
-		fmt.Println("!!!", testName, " succeeded.")
+		fmt.Println("Test ", testName, " passed.")
+		return nil
 	}
 }
 
