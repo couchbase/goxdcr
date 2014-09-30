@@ -8,7 +8,6 @@ import (
 	"time"
 	"net/http"
 	"bytes"
-	"strconv"
 	"errors"
 	"net/url"
 	ap "github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/adminport"
@@ -130,15 +129,15 @@ func getUrlPrefix() string {
 func testCreateReplication() (string, error) {
 	url := getUrlPrefix() + ap.CreateReplicationPath
 	
-	params := make(map[string]string)
+	params := make(map[string]interface{})
 	params[ap.FromBucket] = options.sourceBucket
 	params[ap.ToClusterUuid] = options.connectStr
 	params[ap.ToBucket] = options.targetBucket
 	params[ap.FilterName] = options.filterName
 	params[ap.FilterExpression] = FilterExpression
-	params[ap.BatchCount] = strconv.FormatInt(int64(BatchCount), base.ParseIntBase)
+	params[ap.BatchCount] = BatchCount
 		
-	paramsBytes := constructRequestBodyFromParams(params)
+	paramsBytes, _ := ap.EncodeMapIntoByteArray(params)
 	paramsBuf := bytes.NewBuffer(paramsBytes)
 	
 	request, err := http.NewRequest(ap.MethodPost, url, paramsBuf)
@@ -214,11 +213,11 @@ func testViewReplicationSettings(replicationId string) error {
 func testChangeReplicationSettings(replicationId string) error {
 	url := getUrlPrefix() + ap.SettingsReplicationsPath + ap.UrlDelimiter + replicationId
 	
-	params := make(map[string]string)
-	params[ap.Active] = strconv.FormatBool(Active)
-	params[ap.BatchSize] = strconv.FormatInt(int64(BatchSize), base.ParseIntBase)
+	params := make(map[string]interface{})
+	params[ap.Active] = Active
+	params[ap.BatchSize] = BatchSize
 		
-	paramsBytes := constructRequestBodyFromParams(params)
+	paramsBytes, _ := ap.EncodeMapIntoByteArray(params)
 	paramsBuf := bytes.NewBuffer(paramsBytes)
 	
 	request, err := http.NewRequest(ap.MethodPost, url, paramsBuf)
@@ -249,16 +248,6 @@ func testGetStatistics() error {
 	return validateResponse("GetStatistics", response, err)
 }
 
-func constructRequestBodyFromParams(params map[string]string) []byte{
-	var result string
-	for key, val := range params {
-		result = result + key + ap.KeyValueDelimiter + val + ap.ValuesDelimiter		
-	}
-	if len(result) > 0 {
-		result = result[:len(result)-len(ap.ValuesDelimiter)]
-	}
-	return []byte (result)
-}
 
 func validateResponse(testName string, response *http.Response, err error) error {
 	if err != nil || response.StatusCode != 200 {

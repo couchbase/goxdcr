@@ -10,7 +10,6 @@ import (
 	"net/url"
 	"io/ioutil"
 	"errors"
-	"strings"
 )
 
 // http request method types
@@ -24,11 +23,6 @@ const (
 const (
 	UrlDelimiter = "/"
 	UrlPortNumberDelimiter = ":"
-	
-	// delimiters in request body
-	KeyValueDelimiter = "="
-	ValuesDelimiter = "&"
-	
 	ContentType = "Content-Type"
 )
 
@@ -100,6 +94,7 @@ const (
 	TimeoutPercentageMap = "timeout_percentage_map" 
 )
 
+// errors
 var MissingSettingsInRequest = errors.New("Invalid http request. No replication setting parameters have been supplied.")
 
 // replication settings key in rest api -> internal replication settings key
@@ -212,23 +207,26 @@ func GetHostAddr(nodeAddr string, port int) string {
 func DecodeCreateReplicationResponse(response *http.Response) (string, error) {
 	defer response.Body.Close()
 
-	// create replication response is a map
 	bodyBytes, err := ioutil.ReadAll(response.Body)
 	if err != nil {
 		return "", err
 	}
-	bodyStr := string(bodyBytes)
 	
-	parts := strings.Split(bodyStr, KeyValueDelimiter)
-	if len(parts) != 2 {
-		return "", errors.New("Invalid response. More parameters than expected are returned.")
+	params, err := url.ParseQuery(string(bodyBytes))
+	if err != nil {
+		return "", nil
+	}
+	if len(params) != 1 {
+		return "", errors.New("Invalid response. One and only one parameter should have been returned.")
 	}
 	
-	if parts[0] != ReplicationId {
+	replicationId := params.Get(ReplicationId)
+	
+	if len(replicationId) == 0 {
 		return "", utils.MissingParameterInHttpResponseError(ReplicationId)
 	}
 	
-	return parts[1], nil
+	return replicationId, nil
 	
 }
 
@@ -346,8 +344,11 @@ func DecodeSettingsFromRequest(request *http.Request, throwError bool) (map[stri
 }
 
 func NewCreateReplicationResponse(replicationId string) []byte {
-	result := ReplicationId + KeyValueDelimiter + replicationId
-	return []byte (result)
+	params := make(map[string]interface{})
+	params[ReplicationId] = replicationId
+	// this should not fail
+	bytes, _ := EncodeMapIntoByteArray(params)
+	return bytes
 }
 
 func NewViewReplicationSettingsResponse(settings *metadata.ReplicationSettings) ([]byte, error) {
