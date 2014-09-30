@@ -7,13 +7,12 @@ import (
 	"github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/parts"
 	"github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/replication_manager"
 	"github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/utils"
-//	c "github.com/couchbase/indexing/secondary/common"
 	"github.com/couchbaselabs/go-couchbase"
 	"log"
 	"net/http"
 	"os"
 	"time"
-	c "github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/tests/common"
+	c "github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/mock_services"
 )
 
 import _ "net/http/pprof"

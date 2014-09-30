@@ -13,7 +13,7 @@ import (
 	ap "github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/adminport"
 	base "github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/base"
 	rm "github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/replication_manager"
-	c "github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/tests/common"
+	c "github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/mock_services"
 	pm "github.com/Xiaomei-Zhang/couchbase_goxdcr/pipeline_manager"
 )
 
@@ -55,8 +55,8 @@ func argParse() {
 		"number of connections per kv node")
 	flag.IntVar(&options.numOutgoingConn, "numOutgoingConn", NumTargetConn,
 		"number of outgoing connections to target")
-	flag.StringVar(&options.username, "username", "Admin", "username to cluster admin console")
-	flag.StringVar(&options.password, "password", "justam00", "password to Cluster admin console")
+	flag.StringVar(&options.username, "username", "Administrator", "username to cluster admin console")
+	flag.StringVar(&options.password, "password", "welcome", "password to Cluster admin console")
 	flag.StringVar(&options.kvaddr, "kvaddr", "localhost", "kv address")
 
 	flag.Parse()

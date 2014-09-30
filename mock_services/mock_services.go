@@ -1,12 +1,12 @@
-// mock services for unit tests
-package common
+// mock services 
+package mock_services
 
 import (
 	"fmt"
-	//	"github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/base"
+	"strings"
+	"github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/base"
 	"github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/metadata"
 	"github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/utils"
-	//	"github.com/couchbaselabs/go-couchbase"
 	"github.com/couchbaselabs/go-couchbase"
 )
 
@@ -135,11 +135,12 @@ type MockXDCRTopologySvc struct {
 }
 
 func (mock_top_svc *MockXDCRTopologySvc) MyHost() (string, error) {
-	return options.sourceClusterAddr, nil
+	parts := strings.Split(options.sourceClusterAddr, ":")
+	return parts[0], nil
 }
 
 func (mock_top_svc *MockXDCRTopologySvc) MyAdminPort() (uint16, error) {
-	return 0, nil
+	return uint16(base.AdminportNumber), nil
 }
 
 func (mock_top_svc *MockXDCRTopologySvc) MyKVNodes() ([]string, error) {

@@ -11,7 +11,7 @@ import (
 	//	"github.com/couchbaselabs/go-couchbase"
 	"errors"
 	"os"
-	c "github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/tests/common"
+	c "github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/mock_services"
 )
 
 var options struct {

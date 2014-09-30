@@ -3,10 +3,10 @@
 build_xdcr(){
 
     echo "Building xdcr..."
-    cd adminport/main
+    cd main
     go build -o xdcr
-    mv xdcr ../../bin/
-    cd ../..
+    mv xdcr ../bin/
+    cd ..
     echo "Done"
     echo "xdcr binary under bin/"
 }
@@ -14,10 +14,7 @@ build_xdcr(){
 build_tests(){
 echo "Building tests..."
 cd tests
-cd common
-go clean
-go install
-cd ../adminport
+cd adminport
 go clean
 go install
 cd ../xmem
@@ -30,6 +27,9 @@ cd ../router
 go clean 
 go install
 cd ../kvfeed
+go clean
+go install
+cd ../pipeline
 go clean
 go install
 cd ..
@@ -38,18 +38,16 @@ echo "Done"
 
 clean_xdcr(){
 echo "Clean xdcr..."
-cd adminport/main
+cd main
 go clean
-cd ../..
+cd ..
 rm -f bin/xdcr
 }
 
 clean_tests(){
 echo "Clean tests..."
 cd tests
-cd common
-go clean
-cd ../adminport
+cd adminport
 go clean
 cd ../xmem
 go clean
@@ -58,6 +56,8 @@ go clean
 cd ../router
 go clean 
 cd ../kvfeed
+go clean
+cd ../pipeline
 go clean
 cd ..
 echo "Done"
