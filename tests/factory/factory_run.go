@@ -2,17 +2,16 @@
 package main
 
 import (
+	"errors"
 	"flag"
 	"fmt"
+	"github.com/Xiaomei-Zhang/couchbase_goxdcr/log"
 	factory "github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/factory"
-	"github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/parts"
-	sp "github.com/ysui6888/indexing/secondary/projector"
-	//	"github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/base"
 	"github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/metadata"
+	"github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/parts"
 	"github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/utils"
-	//	"github.com/couchbaselabs/go-couchbase"
-	"errors"
 	"github.com/couchbaselabs/go-couchbase"
+	sp "github.com/ysui6888/indexing/secondary/projector"
 	"os"
 )
 
@@ -80,7 +79,7 @@ func invokeFactory() error {
 	mcisvc := &mockClusterInfoSvc{}
 	mxtsvc := &mockXDCRTopologySvc{}
 
-	fac := factory.NewXDCRFactory(msvc, mcisvc, mxtsvc)
+	fac := factory.NewXDCRFactory(msvc, mcisvc, mxtsvc, log.DefaultLoggerContext, log.DefaultLoggerContext, nil)
 
 	pl, err := fac.NewPipeline(TEST_TOPIC)
 	if err != nil {
@@ -231,7 +230,6 @@ func (mock_ci_svc *mockClusterInfoSvc) GetBucket(clusterUUID, bucketName string)
 	}
 	return utils.Bucket(clusterConnStr, bucketName, options.username, options.password)
 }
-
 
 type mockXDCRTopologySvc struct {
 }

@@ -8,7 +8,7 @@ import (
 	"github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/parts"
 	"github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/replication_manager"
 	"github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/utils"
-//	c "github.com/couchbase/indexing/secondary/common"
+	//	c "github.com/couchbase/indexing/secondary/common"
 	"github.com/couchbaselabs/go-couchbase"
 	"log"
 	"net/http"
@@ -84,7 +84,7 @@ func main() {
 		}
 	}()
 
-//	c.SetLogLevel(c.LogLevelTrace)
+	//	c.SetLogLevel(c.LogLevelTrace)
 	fmt.Println("Start Testing ...")
 	argParse()
 	setup()
@@ -95,7 +95,7 @@ func main() {
 func setup() {
 	flushTargetBkt()
 	fmt.Println("Finish setup")
-	replication_manager.Initialize(&mockMetadataSvc{}, &mockClusterInfoSvc{}, &mockXDCRTopologySvc{}, nil)
+	replication_manager.Initialize(NewMockMetadataSvc(), &mockClusterInfoSvc{}, &mockXDCRTopologySvc{}, nil)
 	return
 }
 
@@ -105,17 +105,29 @@ func test() {
 		fail(fmt.Sprintf("%v", err))
 	}
 	time.Sleep(1 * time.Second)
-	//	replication_manager.PauseReplication(pipeline.Topic())
-	//	fmt.Printf("Replication %s is paused\n", pipeline.Topic())
-	//	time.Sleep(100 * time.Millisecond)
-	//	replication_manager.ResumeReplication(pipeline.Topic())
-	//	fmt.Printf("Replication %s is resumed\n", pipeline.Topic())
-	//	time.Sleep(2 * time.Second)
-	//	replication_manager.DeleteReplication(topic)
-	//	fmt.Printf("Replication %s is deleted\n", topic)
+	replication_manager.PauseReplication(topic)
+
+	err = replication_manager.SetPipelineLogLevel(topic, "Error")
+	if err != nil {
+		fail(fmt.Sprintf("%v", err))
+	}
+	fmt.Printf("Replication %s is paused\n", topic)
+	time.Sleep(100 * time.Millisecond)
+	err = replication_manager.ResumeReplication(topic)
+	if err != nil {
+		fail(fmt.Sprintf("%v", err))
+	}
+	fmt.Printf("Replication %s is resumed\n", topic)
+	time.Sleep(2 * time.Second)
+	summary(topic)
+
+	err = replication_manager.DeleteReplication(topic)
+	if err != nil {
+		fail(fmt.Sprintf("%v", err))
+	}
+	fmt.Printf("Replication %s is deleted\n", topic)
 	time.Sleep(4 * time.Second)
 
-	summary(topic)
 }
 
 func summary(topic string) {
@@ -151,7 +163,7 @@ func getDocCounts(clusterAddress string, bucketName string, password string) int
 			bucketName,
 			password,
 			"GET",
-			output)
+			output, nil)
 	}
 	if err != nil {
 		panic(err)
@@ -171,7 +183,7 @@ func flushTargetBkt() {
 			options.target_cluster_username,
 			options.target_cluster_password,
 			"POST",
-			nil)
+			nil, nil)
 	}
 
 	if err != nil {
@@ -183,25 +195,38 @@ func flushTargetBkt() {
 }
 
 type mockMetadataSvc struct {
+	specs map[string]metadata.ReplicationSpecification
 }
 
+func NewMockMetadataSvc() *mockMetadataSvc {
+	return &mockMetadataSvc{specs: make(map[string]metadata.ReplicationSpecification)}
+}
 func (mock_meta_svc *mockMetadataSvc) ReplicationSpec(replicationId string) (*metadata.ReplicationSpecification, error) {
-	spec := metadata.NewReplicationSpecification(options.source_cluster_addr, options.source_bucket, options.target_cluster_addr, options.target_bucket, "")
-	settings := spec.Settings()
-	settings.SetTargetNozzlesPerNode(options.nozzles_per_node_target)
-	settings.SetSourceNozzlesPerNode(options.nozzles_per_node_source)
-	return spec, nil
+	spec, ok := mock_meta_svc.specs[replicationId]
+	if !ok {
+		spec_ptr := metadata.NewReplicationSpecification(options.source_cluster_addr, options.source_bucket, options.target_cluster_addr, options.target_bucket, "")
+		settings := spec_ptr.Settings()
+		settings.SetTargetNozzlesPerNode(options.nozzles_per_node_target)
+		settings.SetSourceNozzlesPerNode(options.nozzles_per_node_source)
+		mock_meta_svc.specs[replicationId] = *spec_ptr
+		return spec_ptr, nil
+	}else {
+		return &spec, nil
+	}
 }
 
 func (mock_meta_svc *mockMetadataSvc) AddReplicationSpec(spec metadata.ReplicationSpecification) error {
+	mock_meta_svc.specs[spec.Id()] = spec
 	return nil
 }
 
 func (mock_meta_svc *mockMetadataSvc) SetReplicationSpec(spec metadata.ReplicationSpecification) error {
+	mock_meta_svc.specs[spec.Id()] = spec
 	return nil
 }
 
 func (mock_meta_svc *mockMetadataSvc) DelReplicationSpec(replicationId string) error {
+	delete(mock_meta_svc.specs, replicationId)
 	return nil
 }
 

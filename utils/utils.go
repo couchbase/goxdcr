@@ -8,7 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	log "github.com/Xiaomei-Zhang/couchbase_goxdcr/util"
+	"github.com/Xiaomei-Zhang/couchbase_goxdcr/log"
 	base "github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/base"
 	"github.com/couchbaselabs/go-couchbase"
 	"io"
@@ -27,13 +27,27 @@ type CouchBucket struct {
 	Stat BucketBasicStats `json:"basicStats"`
 }
 
-var logger_utils *log.CommonLogger = log.NewLogger("Utils", log.LogLevelInfo)
+var logger_utils *log.CommonLogger = log.NewLogger("Utils", log.DefaultLoggerContext)
 var MaxIdleConnsPerHost = 256
 var HTTPTransport = &http.Transport{MaxIdleConnsPerHost: MaxIdleConnsPerHost}
 var HTTPClient = &http.Client{Transport: HTTPTransport}
 
-func ValidateSettings(defs base.SettingDefinitions, settings map[string]interface{}) error {
-	logger_utils.Infof("Start validate setting=%v, defs=%v", settings, defs)
+func loggerForFunc(logger *log.CommonLogger) *log.CommonLogger {
+	var l *log.CommonLogger
+	if logger != nil {
+		l = logger
+	} else {
+		l = logger_utils
+	}
+	return l
+}
+
+func ValidateSettings(defs base.SettingDefinitions,
+	settings map[string]interface{},
+	logger *log.CommonLogger) error {
+	var l *log.CommonLogger = loggerForFunc(logger)
+
+	l.Infof("Start validate setting=%v, defs=%v", settings, defs)
 	var err *base.SettingsError = nil
 	for key, def := range defs {
 		val, ok := settings[key]
@@ -53,7 +67,7 @@ func ValidateSettings(defs base.SettingDefinitions, settings map[string]interfac
 		}
 	}
 	if err != nil {
-		logger_utils.Infof("setting validation result = %v", *err)
+		l.Infof("setting validation result = %v", *err)
 		return *err
 	}
 	return nil
@@ -71,7 +85,11 @@ func QueryRestAPI(
 	username string,
 	password string,
 	httpCommand string,
-	out interface{}) error {
+	out interface{},
+	logger *log.CommonLogger) error {
+
+	var l *log.CommonLogger = loggerForFunc(logger)
+
 	u := *baseURL
 	if username != "" {
 		u.User = url.UserPassword(username, password)
@@ -89,7 +107,7 @@ func QueryRestAPI(
 	}
 	//	maybeAddAuth(req, username, password)
 
-	logger_utils.Infof("req=%v\n", req)
+	l.Infof("req=%v\n", req)
 
 	res, err := HTTPClient.Do(req)
 	if err != nil {
@@ -103,13 +121,13 @@ func QueryRestAPI(
 	}
 
 	if out != nil {
-		logger_utils.Infof("rest response=%v\n", res.Body)
+		l.Infof("rest response=%v\n", res.Body)
 		d := json.NewDecoder(res.Body)
 		if err = d.Decode(&out); err != nil {
 			return err
 		}
 	} else {
-		logger_utils.Info("out is nil")
+		l.Info("out is nil")
 	}
 	return nil
 }
@@ -122,18 +140,18 @@ func maybeAddAuth(req *http.Request, username string, password string) {
 }
 
 func Bucket(connectStr string, bucketName string, clusterUserName, clusterPassword string) (*couchbase.Bucket, error) {
-	bucketInfos, err := couchbase.GetBucketList (fmt.Sprintf("http://%s:%s@%s", clusterUserName, clusterPassword, connectStr))
+	bucketInfos, err := couchbase.GetBucketList(fmt.Sprintf("http://%s:%s@%s", clusterUserName, clusterPassword, connectStr))
 	if err != nil {
 		return nil, err
 	}
-	
+
 	var password string
 	for _, bucketInfo := range bucketInfos {
 		if bucketInfo.Name == bucketName {
 			password = bucketInfo.Password
 		}
 	}
-	couch, err := couchbase.Connect("http://" + bucketName + ":" + password +"@" + connectStr)
+	couch, err := couchbase.Connect("http://" + bucketName + ":" + password + "@" + connectStr)
 	if err != nil {
 		return nil, err
 	}
@@ -141,7 +159,7 @@ func Bucket(connectStr string, bucketName string, clusterUserName, clusterPasswo
 	if err != nil {
 		return nil, err
 	}
-	
+
 	bucket, err := pool.GetBucket(bucketName)
 	if err != nil {
 		return nil, err
@@ -170,19 +188,21 @@ func DecodeHttpRequestFromByteArray(data []byte) (*http.Request, error) {
 // decode a message from it
 // this method should be used for messages with static paths, where message
 // content depends on only request body and nothing else
-func DecodeMessageFromByteArray(data []byte, msg proto.Message) error {
+func DecodeMessageFromByteArray(data []byte, msg proto.Message, logger *log.CommonLogger) error {
+	var l *log.CommonLogger = loggerForFunc(logger)
+
 	request, err := DecodeHttpRequestFromByteArray(data)
-	logger_utils.Infof("decoded http %v", request)
+	l.Infof("decoded http %v", request)
 	if err != nil {
 		return err
 	}
 
-	return DecodeMessageFromHttpRequest(request, msg)
+	return DecodeMessageFromHttpRequest(request, msg, logger)
 }
 
 // given a http request, extract requesy body and
 // decode a message from it
-func DecodeMessageFromHttpRequest(request *http.Request, msg proto.Message) error {
+func DecodeMessageFromHttpRequest(request *http.Request, msg proto.Message, logger *log.CommonLogger) error {
 	requestBody := make([]byte, request.ContentLength)
 	err := RequestRead(request.Body, requestBody)
 	if err != nil {
@@ -221,4 +241,17 @@ func InvalidValueInHttpRequestError(param, val string) error {
 
 func InvalidPathInHttpRequestError(path string) error {
 	return errors.New(fmt.Sprintf("Invalid path, %v, in http request.", path))
+}
+
+func WrapError (err error) map[string]interface{} {
+	infos := make (map[string]interface{})
+	infos ["error"] = err
+	return infos
+}
+
+func UnwrapError (infos map[string]interface{}) (err error) {
+	if infos != nil && len(infos) > 0 {
+		err = infos ["error"].(error)
+	}
+	return err
 }

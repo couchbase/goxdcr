@@ -5,11 +5,11 @@ import (
 	"errors"
 	"fmt"
 	common "github.com/Xiaomei-Zhang/couchbase_goxdcr/common"
+	"github.com/Xiaomei-Zhang/couchbase_goxdcr/log"
 	part "github.com/Xiaomei-Zhang/couchbase_goxdcr/part"
-	log "github.com/Xiaomei-Zhang/couchbase_goxdcr/util"
 	base "github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/base"
 	gen_server "github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/gen_server"
-	utils "github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/utils"
+	"github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/utils"
 	mc "github.com/couchbase/gomemcached"
 	mcc "github.com/couchbase/gomemcached/client"
 	"io"
@@ -29,21 +29,21 @@ const (
 //configuration settings for XmemNozzle
 const (
 	//configuration param names
-	XMEM_SETTING_BATCHCOUNT = "batch_count"
-	XMEM_SETTING_BATCHSIZE  = "batch_size"
-	XMEM_SETTING_MODE       = "mode"
-	XMEM_SETTING_NUMOFRETRY = "max_retry"
-	XMEM_SETTING_TIMEOUT    = "timeout"
+	XMEM_SETTING_BATCHCOUNT            = "batch_count"
+	XMEM_SETTING_BATCHSIZE             = "batch_size"
+	XMEM_SETTING_MODE                  = "mode"
+	XMEM_SETTING_NUMOFRETRY            = "max_retry"
+	XMEM_SETTING_TIMEOUT               = "timeout"
 	XMEM_SETTING_BATCH_EXPIRATION_TIME = "batch_expiration_time"
 
 	//default configuration
-	default_batchcount      int           = 500
-	default_batchsize       int           = 2048
-	default_mode            XMEM_MODE     = Batch_XMEM
-	default_numofretry      int           = 3
-	default_timeout         time.Duration = 100 * time.Millisecond
-	default_dataChannelSize               = 200
-	default_batchExpirationTime		      = 100 * time.Millisecond
+	default_batchcount          int           = 500
+	default_batchsize           int           = 2048
+	default_mode                XMEM_MODE     = Batch_XMEM
+	default_numofretry          int           = 3
+	default_timeout             time.Duration = 100 * time.Millisecond
+	default_dataChannelSize                   = 200
+	default_batchExpirationTime               = 100 * time.Millisecond
 )
 
 const (
@@ -52,13 +52,13 @@ const (
 )
 
 var xmem_setting_defs base.SettingDefinitions = base.SettingDefinitions{XMEM_SETTING_BATCHCOUNT: base.NewSettingDef(reflect.TypeOf((*int)(nil)), false),
-	XMEM_SETTING_BATCHSIZE:  base.NewSettingDef(reflect.TypeOf((*int)(nil)), false),
-	XMEM_SETTING_MODE:       base.NewSettingDef(reflect.TypeOf((*XMEM_MODE)(nil)), false),
-	XMEM_SETTING_NUMOFRETRY: base.NewSettingDef(reflect.TypeOf((*int)(nil)), false),
-	XMEM_SETTING_TIMEOUT:    base.NewSettingDef(reflect.TypeOf((*time.Duration)(nil)), false),
+	XMEM_SETTING_BATCHSIZE:             base.NewSettingDef(reflect.TypeOf((*int)(nil)), false),
+	XMEM_SETTING_MODE:                  base.NewSettingDef(reflect.TypeOf((*XMEM_MODE)(nil)), false),
+	XMEM_SETTING_NUMOFRETRY:            base.NewSettingDef(reflect.TypeOf((*int)(nil)), false),
+	XMEM_SETTING_TIMEOUT:               base.NewSettingDef(reflect.TypeOf((*time.Duration)(nil)), false),
 	XMEM_SETTING_BATCH_EXPIRATION_TIME: base.NewSettingDef(reflect.TypeOf((*time.Duration)(nil)), false)}
 
-var logger_xmem *log.CommonLogger = log.NewLogger("XmemNozzle", log.LogLevelInfo)
+//var logger_xmem *log.CommonLogger = log.NewLogger("XmemNozzle", log.LogLevelInfo)
 
 /************************************
 /* struct bufferedMCRequest
@@ -89,15 +89,17 @@ type requestBuffer struct {
 	empty_slots_pos chan int                  /*empty slot pos in the buffer*/
 	size            int                       /*the size of the buffer*/
 	notifych        chan bool                 /*notify channel is set when the buffer is empty*/
+	logger          *log.CommonLogger
 }
 
-func newReqBuffer(size int, notifychan chan bool) *requestBuffer {
-	logger_xmem.Debugf("Create a new request buffer of size %d\n", size)
+func newReqBuffer(size int, notifychan chan bool, logger *log.CommonLogger) *requestBuffer {
+	logger.Debugf("Create a new request buffer of size %d\n", size)
 	buf := &requestBuffer{
 		make([]chan *bufferedMCRequest, size, size),
 		make(chan int, size),
 		size,
-		notifychan}
+		notifychan,
+		logger}
 
 	//initialize the slots
 	for i := 0; i < size; i++ {
@@ -106,12 +108,12 @@ func newReqBuffer(size int, notifychan chan bool) *requestBuffer {
 		buf.slots[i] = slotch
 	}
 
-	logger_xmem.Debug("Slots is initialized")
+	logger.Debug("Slots is initialized")
 
 	//initialize the empty_slots_pos
 	buf.initializeEmptySlotPos()
 
-	logger_xmem.Debugf("new request buffer of size %d is created\n", size)
+	logger.Debugf("new request buffer of size %d is created\n", size)
 	return buf
 }
 
@@ -126,7 +128,7 @@ func (buf *requestBuffer) initializeEmptySlotPos() error {
 func (buf *requestBuffer) validatePos(pos int) (err error) {
 	err = nil
 	if pos < 0 || pos >= len(buf.slots) {
-		logger_xmem.Error("Invalid slot index")
+		buf.logger.Error("Invalid slot index")
 		err = errors.New("Invalid slot index")
 	}
 	return
@@ -135,7 +137,7 @@ func (buf *requestBuffer) validatePos(pos int) (err error) {
 //slot allow caller to get hold of the content in the slot without locking the slot
 //@pos - the position of the slot
 func (buf *requestBuffer) slot(pos int) (*mc.MCRequest, error) {
-	logger_xmem.Debugf("Getting the content in slot %d\n", pos)
+	buf.logger.Debugf("Getting the content in slot %d\n", pos)
 
 	err := buf.validatePos(pos)
 	if err != nil {
@@ -153,7 +155,7 @@ func (buf *requestBuffer) slot(pos int) (*mc.MCRequest, error) {
 			return req.req, nil
 		}
 	default:
-		logger_xmem.Debug("Somebody is holding it")
+		buf.logger.Debug("Somebody is holding it")
 		return nil, errors.New("Somebody is holding it")
 	}
 
@@ -185,7 +187,7 @@ func (buf *requestBuffer) modSlot(pos int, modFunc func(req *bufferedMCRequest, 
 			modified = false
 		}
 	default:
-		logger_xmem.Debugf("Can't modified this slot, somebody is holding it.")
+		buf.logger.Debugf("Can't modified this slot, somebody is holding it.")
 	}
 	return modified, err
 }
@@ -217,9 +219,9 @@ func (buf *requestBuffer) evictSlot(pos int) error {
 		if len(buf.empty_slots_pos) == buf.size {
 			if buf.notifych != nil {
 				buf.notifych <- true
-				logger_xmem.Debug("buffer is empty, notify")
+				buf.logger.Debug("buffer is empty, notify")
 			} else {
-				logger_xmem.Debug("buffer is empty, no notify channel is specified though")
+				buf.logger.Debug("buffer is empty, no notify channel is specified though")
 			}
 		}
 	}
@@ -229,7 +231,7 @@ func (buf *requestBuffer) evictSlot(pos int) error {
 
 //availableSlotIndex returns a position number of an empty slot
 func (buf *requestBuffer) reserveSlot() (error, int, int) {
-	logger_xmem.Debugf("slots chan length=%d\n", len(buf.empty_slots_pos))
+	buf.logger.Debugf("slots chan length=%d\n", len(buf.empty_slots_pos))
 	index := <-buf.empty_slots_pos
 
 	reqch := buf.slots[index]
@@ -282,7 +284,7 @@ func (buf *requestBuffer) cancelReservation(index int, reservation_num int) erro
 }
 
 func (buf *requestBuffer) enSlot(pos int, req *mc.MCRequest, reservationNum int) error {
-	logger_xmem.Debugf("enSlot: pos=%d\n", pos)
+	buf.logger.Debugf("enSlot: pos=%d\n", pos)
 
 	err := buf.validatePos(pos)
 	if err != nil {
@@ -296,13 +298,13 @@ func (buf *requestBuffer) enSlot(pos int, req *mc.MCRequest, reservationNum int)
 	}()
 
 	if r == nil || r.reservation != reservationNum {
-		logger_xmem.Errorf("Can't enSlot %d, doesn't have the reservation", pos)
+		buf.logger.Errorf("Can't enSlot %d, doesn't have the reservation", pos)
 		return errors.New(fmt.Sprintf("Can't enSlot %d, doesn't have the reservation", pos))
 	}
 
 	r.req = req
 
-	logger_xmem.Debugf("slot %d is occupied\n", pos)
+	buf.logger.Debugf("slot %d is occupied\n", pos)
 	return nil
 }
 
@@ -317,31 +319,32 @@ type xmemConfig struct {
 	maxCount int
 	maxSize  int
 	//the duration to wait for the batch-sending to finish
-	batchtimeout time.Duration
+	batchtimeout        time.Duration
 	batchExpirationTime time.Duration
-	maxRetry     int
-	mode         XMEM_MODE
-	connectStr   string
-	bucketName   string
-	password     string
+	maxRetry            int
+	mode                XMEM_MODE
+	connectStr          string
+	bucketName          string
+	password            string
+	logger              *log.CommonLogger
 }
 
-func newConfig() xmemConfig {
+func newConfig(logger *log.CommonLogger) xmemConfig {
 	return xmemConfig{maxCount: default_batchcount,
-		maxSize:      default_batchsize,
-		batchtimeout: default_timeout,
+		maxSize:             default_batchsize,
+		batchtimeout:        default_timeout,
 		batchExpirationTime: default_batchExpirationTime,
-		maxRetry:     default_numofretry,
-		mode:         default_mode,
-		connectStr:   "",
-		bucketName:   "",
-		password:     "",
+		maxRetry:            default_numofretry,
+		mode:                default_mode,
+		connectStr:          "",
+		bucketName:          "",
+		password:            "",
 	}
 
 }
 
 func (config *xmemConfig) initializeConfig(settings map[string]interface{}) error {
-	err := utils.ValidateSettings(xmem_setting_defs, settings)
+	err := utils.ValidateSettings(xmem_setting_defs, settings, config.logger)
 	if val, ok := settings[XMEM_SETTING_BATCHSIZE]; ok {
 		config.maxSize = val.(int)
 	}
@@ -372,21 +375,23 @@ type xmemBatch struct {
 	curSize        int
 	capacity_count int
 	capacity_size  int
-	start_time	   time.Time
+	start_time     time.Time
+	logger         *log.CommonLogger
 }
 
-func newXmemBatch(cap_count int, cap_size int) *xmemBatch {
-	return &xmemBatch{lock:sync.RWMutex{}, 
-	curCount:0, 
-	curSize:0, 
-	capacity_count:cap_count, 
-	capacity_size:cap_size}
+func newXmemBatch(cap_count int, cap_size int, logger *log.CommonLogger) *xmemBatch {
+	return &xmemBatch{lock: sync.RWMutex{},
+		curCount:       0,
+		curSize:        0,
+		capacity_count: cap_count,
+		capacity_size:  cap_size,
+		logger:         logger}
 }
 
 //turn this batch to be a read only batch
 func (b *xmemBatch) frozeBatch() {
 	b.lock.RLock()
-	logger_xmem.Debug("The batch is frozen")
+	b.logger.Debug("The batch is frozen")
 }
 
 func (b *xmemBatch) accumuBatch(size int) bool {
@@ -403,16 +408,19 @@ func (b *xmemBatch) accumuBatch(size int) bool {
 	if b.curCount == 1 {
 		b.start_time = time.Now()
 	}
-	
+
 	b.curSize += size
 	if b.curCount < b.capacity_count && b.curSize < b.capacity_size {
 		ret = false
 	}
-	logger_xmem.Debugf("The current batch count=%d, size=%d, the batch ready=%v, capacity_count=%d\n", b.curCount, b.curSize, ret, b.capacity_count)
+	b.logger.Debugf("The current batch count=%d, size=%d, the batch ready=%v, capacity_count=%d\n", b.curCount, b.curSize, ret, b.capacity_count)
 	return ret
 }
 
 func (b *xmemBatch) count() int {
+	if b == nil {
+		panic("lock becomes null")
+	}
 	b.lock.RLock()
 	defer b.lock.RUnlock()
 	return b.curCount
@@ -464,20 +472,28 @@ type XmemNozzle struct {
 	checker_finch  chan bool
 	batch_done     chan bool
 
-	counter_sent         int
+	counter_sent     int
 	counter_received int
 }
 
-func NewXmemNozzle(id string, connectString string, bucketName string, password string) *XmemNozzle {
+func NewXmemNozzle(id string,
+	connectString string,
+	bucketName string,
+	password string,
+	logger_context *log.LoggerContext) *XmemNozzle {
+
+	//callback functions from GenServer
 	var msg_callback_func gen_server.Msg_Callback_Func
 	var behavior_callback_func gen_server.Behavior_Callback_Func
 	var exit_callback_func gen_server.Exit_Callback_Func
+	var error_handler_func gen_server.Error_Handler_Func
+
 	var isStarted_callback_func part.IsStarted_Callback_Func
 
 	server := gen_server.NewGenServer(&msg_callback_func,
-		&behavior_callback_func, &exit_callback_func)
+		&behavior_callback_func, &exit_callback_func, &error_handler_func, logger_context, "XmemNozzle")
 	isStarted_callback_func = server.IsStarted
-	part := part.NewAbstractPart(id, &isStarted_callback_func)
+	part := part.NewAbstractPartWithLogger(id, &isStarted_callback_func, server.Logger())
 	xmem := &XmemNozzle{server, /*gen_server.GenServer*/
 		part,           /*part.AbstractPart*/
 		true,           /*bOpen	bool*/
@@ -485,7 +501,7 @@ func NewXmemNozzle(id string, connectString string, bucketName string, password 
 		nil,            /*dataChan*/
 		nil,            /*memClient*/
 		//		nil,              /*connPool*/
-		newConfig(),                /*config	xmemConfig*/
+		newConfig(server.Logger()), /*config	xmemConfig*/
 		make(chan *xmemBatch, 100), /*batches_ready chan *xmemBatch*/
 		nil,                /*batch		  *xmemBatch*/
 		make(chan bool, 1), /*sendNowChan chan bool*/
@@ -504,6 +520,7 @@ func NewXmemNozzle(id string, connectString string, bucketName string, password 
 	msg_callback_func = nil
 	behavior_callback_func = xmem.processData
 	exit_callback_func = xmem.onExit
+	error_handler_func = xmem.handleGeneralError
 	return xmem
 
 }
@@ -527,9 +544,9 @@ func (xmem *XmemNozzle) Close() error {
 }
 
 func (xmem *XmemNozzle) Start(settings map[string]interface{}) error {
-	logger_xmem.Info("Xmem starting ....")
+	xmem.Logger().Info("Xmem starting ....")
 	err := xmem.initialize(settings)
-	logger_xmem.Info("....Finish initializing....")
+	xmem.Logger().Info("....Finish initializing....")
 	if err == nil {
 		xmem.childrenWaitGrp.Add(1)
 		go xmem.receiveResponse(xmem.memClient, xmem.receiver_finch, &xmem.childrenWaitGrp)
@@ -541,22 +558,22 @@ func (xmem *XmemNozzle) Start(settings map[string]interface{}) error {
 		err = xmem.Start_server()
 	}
 
-	logger_xmem.Info("Xmem nozzle is started")
+	xmem.Logger().Info("Xmem nozzle is started")
 	return err
 }
 
 func (xmem *XmemNozzle) getReadyToShutdown() {
-	logger_xmem.Debug("Waiting for data is drained")
+	xmem.Logger().Debug("Waiting for data is drained")
 
 	for {
 		if len(xmem.dataChan) == 0 && len(xmem.batches_ready) == 0 {
-			logger_xmem.Debug("Ready to stop")
+			xmem.Logger().Debug("Ready to stop")
 			break
 		} else if len(xmem.batches_ready) == 0 && xmem.batch.count() > 0 {
 			xmem.batchReady()
 
 		} else {
-			logger_xmem.Debugf("%d in data channel, %d batches ready, % data in current batch \n", len(xmem.dataChan), len(xmem.batches_ready), xmem.batch.count())
+			xmem.Logger().Debugf("%d in data channel, %d batches ready, % data in current batch \n", len(xmem.dataChan), len(xmem.batches_ready), xmem.batch.count())
 		}
 	}
 
@@ -564,21 +581,13 @@ func (xmem *XmemNozzle) getReadyToShutdown() {
 }
 
 func (xmem *XmemNozzle) Stop() error {
-	logger_xmem.Infof("Stop XmemNozzle %v\n", xmem.Id())
+	xmem.Logger().Infof("Stop XmemNozzle %v\n", xmem.Id())
 	xmem.getReadyToShutdown()
 
-	logger_xmem.Debugf("XmemNozzle %v processed %v items\n", xmem.Id(), xmem.counter_sent)
+	xmem.Logger().Debugf("XmemNozzle %v processed %v items\n", xmem.Id(), xmem.counter_sent)
 	err := xmem.Stop_server()
 
-	//cleanup
-	pool := base.ConnPoolMgr().GetPool(xmem.getPoolName(xmem.config.connectStr))
-	if pool != nil {
-		pool.Release(xmem.memClient)
-	}
-
-	xmem.memClient = nil
-
-	logger_xmem.Debugf("XmemNozzle %v is stopped\n", xmem.Id())
+	xmem.Logger().Debugf("XmemNozzle %v is stopped\n", xmem.Id())
 	return err
 }
 
@@ -593,20 +602,20 @@ func (xmem *XmemNozzle) IsOpen() bool {
 func (xmem *XmemNozzle) batchReady() {
 	//move the batch to ready batches channel
 	if xmem.batch.count() > 0 {
-		logger_xmem.Infof("move the batch (count=%d) ready queue\n", xmem.batch.count())
+		xmem.Logger().Infof("move the batch (count=%d) ready queue\n", xmem.batch.count())
 		xmem.batch.frozeBatch()
 		xmem.batches_ready <- xmem.batch
 
-		logger_xmem.Debugf("There are %d batches in ready queue\n", len(xmem.batches_ready))
+		xmem.Logger().Debugf("There are %d batches in ready queue\n", len(xmem.batches_ready))
 		xmem.initNewBatch()
 	} else {
 		panic("Nothing in the batch")
-		logger_xmem.Debug("Nothing in the batch")
+		xmem.Logger().Debug("Nothing in the batch")
 	}
 }
 func (xmem *XmemNozzle) Receive(data interface{}) error {
-	logger_xmem.Debugf("data key=%v is received", data.(*mc.MCRequest).Key)
-	logger_xmem.Debugf("data channel len is %d\n", len(xmem.dataChan))
+	xmem.Logger().Debugf("data key=%v is received", data.(*mc.MCRequest).Key)
+	xmem.Logger().Debugf("data channel len is %d\n", len(xmem.dataChan))
 
 	request := data.(*mc.MCRequest)
 
@@ -622,7 +631,7 @@ func (xmem *XmemNozzle) Receive(data interface{}) error {
 		select {
 		//not enough for a batch, but the xmem.sendNowCh is signaled
 		case <-xmem.sendNowCh:
-			logger_xmem.Debug("Need to send now")
+			xmem.Logger().Debug("Need to send now")
 			xmem.batchReady()
 		default:
 			if xmem.batch.count() <= prev {
@@ -633,23 +642,32 @@ func (xmem *XmemNozzle) Receive(data interface{}) error {
 	}
 	//raise DataReceived event
 	xmem.RaiseEvent(common.DataReceived, data.(*mc.MCRequest), xmem, nil, nil)
-	logger_xmem.Debugf("Xmem %v received %v items\n", xmem.Id(), xmem.counter_received)
+	xmem.Logger().Debugf("Xmem %v received %v items\n", xmem.Id(), xmem.counter_received)
 
 	return nil
 }
 
-func (xmem *XmemNozzle) processData() {
+func (xmem *XmemNozzle) processData() error {
 	if xmem.IsOpen() {
 		err := xmem.send()
 		if err != nil {
-			logger_xmem.Error(err.Error())
+			xmem.Logger().Error(err.Error())
+			return err
 		}
 	} else {
-		logger_xmem.Debug("The nozzle is closed")
+		xmem.Logger().Debug("The nozzle is closed")
 	}
+	return nil
 }
 
 func (xmem *XmemNozzle) onExit() {
+	//cleanup
+	pool := base.ConnPoolMgr().GetPool(xmem.getPoolName(xmem.config.connectStr))
+	if pool != nil {
+		pool.Release(xmem.memClient)
+	}
+
+	xmem.memClient = nil
 	xmem.receiver_finch <- true
 	xmem.checker_finch <- true
 	xmem.childrenWaitGrp.Wait()
@@ -698,13 +716,13 @@ func (xmem *XmemNozzle) batchSendWithRetry(batch *xmemBatch, conn io.ReadWriteCl
 		}
 	}
 	if err == nil {
-		logger_xmem.Debugf("data=%v\n", data)
-		logger_xmem.Debugf("%d bytes are sent\n", bytes)
+		xmem.Logger().Debugf("data=%v\n", data)
+		xmem.Logger().Debugf("%d bytes are sent\n", bytes)
 
 		for ind, it := range itemIndexMap {
 			err = xmem.buf.enSlot(ind, it, indexReservMap[ind])
 		}
-		logger_xmem.Debugf("move %d items to buffer\n", len(itemIndexMap))
+		xmem.Logger().Debugf("move %d items to buffer\n", len(itemIndexMap))
 
 	} else {
 		for ind, reserv_num := range indexReservMap {
@@ -721,71 +739,73 @@ func (xmem *XmemNozzle) send() error {
 	var count int
 
 	//get the batch to process
-//	logger_xmem.Debugf("Send: xmem %v, count=%v, %d batches ready, %v items in data channel\n", xmem.Id(), xmem.counter_sent,len(xmem.batches_ready), len(xmem.dataChan))
+	//	logger_xmem.Debugf("Send: xmem %v, count=%v, %d batches ready, %v items in data channel\n", xmem.Id(), xmem.counter_sent,len(xmem.batches_ready), len(xmem.dataChan))
 	select {
 	case batch := <-xmem.batches_ready:
-		count = batch.count()
+		if batch != nil {
+			count = batch.count()
 
-		logger_xmem.Infof("Send batch count=%d\n", count)
+			xmem.Logger().Infof("Send batch count=%d\n", count)
 
-		xmem.counter_sent = xmem.counter_sent + count
-		logger_xmem.Debugf("So far, xmem %v processed %d items", xmem.Id(), xmem.counter_sent)
+			xmem.counter_sent = xmem.counter_sent + count
+			xmem.Logger().Debugf("So far, xmem %v processed %d items", xmem.Id(), xmem.counter_sent)
 
-		if count == 1 {
-			select {
-			case item := <-xmem.dataChan:
-				//blocking
-				err, index, reserv_num := xmem.buf.reserveSlot()
-				if err != nil {
-					logger_xmem.Errorf("Failed to reserve a slot")
-					return err
-				}
-				err = xmem.sendSingleWithRetry(item, xmem.config.maxRetry, index)
-				if err != nil {
-					logger_xmem.Errorf("Failed to reserve a slot")
-					xmem.buf.cancelReservation(index, reserv_num)
-					return err
-				}
-
-				//buffer it for now until the receipt is confirmed
-				logger_xmem.Debugf("And sent item to slot=%d\n", index)
-				err = xmem.buf.enSlot(index, item, reserv_num)
-			default:
-				logger_xmem.Errorf("Invalid state - expected %d items in the batch; but there are not that much in the data channel", 1)
-			}
-		} else {
-
-			//get the raw connection
-			conn := xmem.memClient.Hijack()
-			defer func() {
-				xmem.memClient, err = mcc.Wrap(conn)
-
-				if err != nil || xmem.memClient == nil {
-					//failed to recycle the connection
-					//reinitialize the connection
-					err = xmem.initializeConnection()
+			if count == 1 {
+				select {
+				case item := <-xmem.dataChan:
+					//blocking
+					err, index, reserv_num := xmem.buf.reserveSlot()
 					if err != nil {
-						logger_xmem.Errorf("failed to recycle the connection")
+						xmem.Logger().Errorf("Failed to reserve a slot")
+						return err
 					}
+					err = xmem.sendSingleWithRetry(item, xmem.config.maxRetry, index)
+					if err != nil {
+						xmem.Logger().Errorf("Failed to reserve a slot")
+						xmem.buf.cancelReservation(index, reserv_num)
+						return err
+					}
+
+					//buffer it for now until the receipt is confirmed
+					xmem.Logger().Debugf("And sent item to slot=%d\n", index)
+					err = xmem.buf.enSlot(index, item, reserv_num)
+				default:
+					xmem.Logger().Errorf("Invalid state - expected %d items in the batch; but there are not that much in the data channel", 1)
+				}
+			} else {
+
+				//get the raw connection
+				conn := xmem.memClient.Hijack()
+				defer func() {
+					xmem.memClient, err = mcc.Wrap(conn)
+
+					if err != nil || xmem.memClient == nil {
+						//failed to recycle the connection
+						//reinitialize the connection
+						err = xmem.initializeConnection()
+						if err != nil {
+							xmem.Logger().Errorf("failed to recycle the connection")
+						}
+					}
+
+				}()
+
+				//batch send
+				err = xmem.batchSendWithRetry(batch, conn, xmem.config.maxRetry)
+				if err != nil {
+					return err
 				}
 
-			}()
-
-			//batch send
-			err = xmem.batchSendWithRetry(batch, conn, xmem.config.maxRetry)
-			if err != nil {
-				return err
 			}
+			if xmem.config.mode == Batch_XMEM {
+				xmem.Logger().Debug("Waiting for the confirmation of the batch")
+				<-xmem.batch_done
+				xmem.Logger().Debugf("Batch of count %v is confirmed", count)
 
-		}
-		if xmem.config.mode == Batch_XMEM {
-			logger_xmem.Debug("Waiting for the confirmation of the batch")
-			<-xmem.batch_done
-			logger_xmem.Debugf("Batch of count %v is confirmed", count)
-
+			}
 		}
 	default:
-		if xmem.isCurrentBatchExpiring () {
+		if xmem.isCurrentBatchExpiring() {
 			xmem.batchReady()
 		}
 	}
@@ -806,12 +826,12 @@ func (xmem *XmemNozzle) sendSingleWithRetry(item *mc.MCRequest, numOfRetry int, 
 func (xmem *XmemNozzle) sendSingle(item *mc.MCRequest, index int) error {
 
 	xmem.adjustRequest(item, index)
-	logger_xmem.Debugf("key=%v\n", item.Key)
-	logger_xmem.Debugf("opcode=%v\n", item.Opcode)
+	xmem.Logger().Debugf("key=%v\n", item.Key)
+	xmem.Logger().Debugf("opcode=%v\n", item.Opcode)
 
 	err := xmem.memClient.Transmit(item)
 	if err != nil {
-		logger_xmem.Errorf("SendBatch: transmit error: %s\n", fmt.Sprint(err))
+		xmem.Logger().Errorf("SendBatch: transmit error: %s\n", fmt.Sprint(err))
 		return err
 	}
 	return nil
@@ -820,8 +840,8 @@ func (xmem *XmemNozzle) sendSingle(item *mc.MCRequest, index int) error {
 //TODO: who will release the pool? maybe it should be replication manager
 //
 func (xmem *XmemNozzle) initializeConnection() (err error) {
-	logger_xmem.Debugf("xmem.config= %v", xmem.config.connectStr)
-	logger_xmem.Debugf("poolName=%v", xmem.getPoolName(xmem.config.connectStr))
+	xmem.Logger().Debugf("xmem.config= %v", xmem.config.connectStr)
+	xmem.Logger().Debugf("poolName=%v", xmem.getPoolName(xmem.config.connectStr))
 	pool, err := base.ConnPoolMgr().GetOrCreatePool(xmem.getPoolName(xmem.config.connectStr), xmem.config.connectStr, xmem.config.bucketName, xmem.config.password, base.DefaultConnectionSize)
 	if err == nil {
 		xmem.memClient, err = pool.Get()
@@ -835,9 +855,9 @@ func (xmem *XmemNozzle) getPoolName(connectionStr string) string {
 
 func (xmem *XmemNozzle) initNewBatch() {
 	if xmem.config.mode == Batch_XMEM {
-		xmem.batch = newXmemBatch(xmem.config.maxCount, xmem.config.maxSize)
+		xmem.batch = newXmemBatch(xmem.config.maxCount, xmem.config.maxSize, xmem.Logger())
 	} else {
-		xmem.batch = newXmemBatch(1, -1)
+		xmem.batch = newXmemBatch(1, -1, xmem.Logger())
 	}
 }
 
@@ -851,20 +871,20 @@ func (xmem *XmemNozzle) initialize(settings map[string]interface{}) error {
 
 	//initialize buffer
 	if xmem.config.mode == Batch_XMEM {
-		xmem.buf = newReqBuffer(xmem.config.maxCount*2, xmem.batch_done)
+		xmem.buf = newReqBuffer(xmem.config.maxCount*2, xmem.batch_done, xmem.Logger())
 	} else {
-		xmem.buf = newReqBuffer(xmem.config.maxCount*2, nil)
+		xmem.buf = newReqBuffer(xmem.config.maxCount*2, nil, xmem.Logger())
 	}
 
 	xmem.receiver_finch = make(chan bool, 1)
 	xmem.checker_finch = make(chan bool, 1)
 
-	logger_xmem.Debug("About to start initializing connection")
+	xmem.Logger().Debug("About to start initializing connection")
 	if err == nil {
 		err = xmem.initializeConnection()
 	}
 
-	logger_xmem.Debug("Initialization is done")
+	xmem.Logger().Debug("Initialization is done")
 
 	return err
 }
@@ -883,18 +903,18 @@ func (xmem *XmemNozzle) receiveResponse(client *mcc.Client, finch chan bool, wai
 				if err != io.EOF {
 					pos := int(response.Opaque)
 					if err != nil && isRealError(response.Status) {
-						logger_xmem.Debugf("pos=%d, Received error = %v in response, err = %v, response=%v\n", pos, response.Status.String(), err, response.Bytes())
+						xmem.Logger().Debugf("pos=%d, Received error = %v in response, err = %v, response=%v\n", pos, response.Status.String(), err, response.Bytes())
 						_, err = xmem.buf.modSlot(pos, xmem.resend)
 					} else {
 						//raiseEvent
-						logger_xmem.Debugf("Received response....")
+						xmem.Logger().Debugf("Received response....")
 						req, _ := xmem.buf.slot(pos)
 						xmem.RaiseEvent(common.DataSent, req, xmem, nil, nil)
 						//empty the slot in the buffer
 						if xmem.buf.evictSlot(pos) != nil {
-							logger_xmem.Errorf("Failed to evict slot %d\n", pos)
+							xmem.Logger().Errorf("Failed to evict slot %d\n", pos)
 						}
-						logger_xmem.Debugf("data on slot=%d is received", pos)
+						xmem.Logger().Debugf("data on slot=%d is received", pos)
 					}
 				}
 			}
@@ -933,7 +953,7 @@ done:
 
 func (xmem *XmemNozzle) checkTimeout(req *bufferedMCRequest, pos int) bool {
 	if time.Since(req.sent_time) > xmem.config.batchtimeout {
-		logger_xmem.Debug("Timeout, resend...")
+		xmem.Logger().Debug("Timeout, resend...")
 		modified := xmem.resend(req, pos)
 		return modified
 	}
@@ -942,7 +962,7 @@ func (xmem *XmemNozzle) checkTimeout(req *bufferedMCRequest, pos int) bool {
 
 func (xmem *XmemNozzle) resend(req *bufferedMCRequest, pos int) bool {
 	if req.num_of_retry < xmem.config.maxRetry-1 {
-		logger_xmem.Debug("Retry sending ....")
+		xmem.Logger().Debug("Retry sending ....")
 		err := xmem.sendSingle(req.req, pos)
 		req.sent_time = time.Now()
 		if err != nil {
@@ -953,7 +973,9 @@ func (xmem *XmemNozzle) resend(req *bufferedMCRequest, pos int) bool {
 		return true
 	} else {
 		//raise error
-		xmem.RaiseEvent(common.ErrorEncountered, req.req, xmem, nil, nil)
+		err := errors.New("Max number of retry has reached")
+		otherInfo := utils.WrapError(err)
+		xmem.RaiseEvent(common.ErrorEncountered, req.req, xmem, nil, otherInfo)
 		xmem.buf.evictSlot(pos)
 	}
 	return false
@@ -982,15 +1004,20 @@ func (xmem *XmemNozzle) encodeOpCode(code mc.CommandCode) mc.CommandCode {
 	return code
 }
 
-func (xmem *XmemNozzle) isCurrentBatchExpiring () bool {
-	if xmem.batch.count() >=1 && time.Since(xmem.batch.start_time) > xmem.config.batchExpirationTime {
-		logger_xmem.Debugf("The current batch count=%v is expiring\n", xmem.batch.count())
+func (xmem *XmemNozzle) isCurrentBatchExpiring() bool {
+	if xmem.batch.count() >= 1 && time.Since(xmem.batch.start_time) > xmem.config.batchExpirationTime {
+		xmem.Logger().Debugf("The current batch count=%v is expiring\n", xmem.batch.count())
 		return true
 	}
 	return false
-	
+
 }
 
-func (xmem *XmemNozzle) StatusSummary () string {
+func (xmem *XmemNozzle) StatusSummary() string {
 	return fmt.Sprintf("Xmem %v received %v items, sent %v items", xmem.Id(), xmem.counter_received, xmem.counter_sent)
+}
+
+func (xmem *XmemNozzle) handleGeneralError(err error) {
+	otherInfo := utils.WrapError(err)
+	xmem.RaiseEvent(common.ErrorEncountered, nil, xmem, nil, otherInfo)
 }

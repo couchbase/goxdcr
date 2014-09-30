@@ -3,15 +3,19 @@
 package replication_manager
 
 import (
+	"errors"
+	"fmt"
+	"github.com/Xiaomei-Zhang/couchbase_goxdcr/log"
 	"github.com/Xiaomei-Zhang/couchbase_goxdcr/pipeline_manager"
-	log "github.com/Xiaomei-Zhang/couchbase_goxdcr/util"
-	factory "github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/factory"
+	"github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/base"
+	"github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/factory"
 	"github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/metadata"
 	"github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/metadata_svc"
+	"github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/pipeline_svc"
 	"sync"
 )
 
-var logger_rm *log.CommonLogger = log.NewLogger("ReplicationManager", log.LogLevelInfo)
+var logger_rm *log.CommonLogger = log.NewLogger("ReplicationManager", log.DefaultLoggerContext)
 
 /************************************
 /* struct ReplicationManager
@@ -26,10 +30,10 @@ type replicationManager struct {
 
 var replication_mgr replicationManager
 
-func Initialize(metadata_svc metadata_svc.MetadataSvc, 
-cluster_info_svc metadata_svc.ClusterInfoSvc, 
-xdcr_topology_svc metadata_svc.XDCRCompTopologySvc, 
-internalSettingsSvc metadata_svc.InternalReplicationSettingsSvc) {
+func Initialize(metadata_svc metadata_svc.MetadataSvc,
+	cluster_info_svc metadata_svc.ClusterInfoSvc,
+	xdcr_topology_svc metadata_svc.XDCRCompTopologySvc,
+	internalSettingsSvc metadata_svc.InternalReplicationSettingsSvc) {
 	replication_mgr.once.Do(func() {
 		replication_mgr.init(metadata_svc, cluster_info_svc, xdcr_topology_svc, internalSettingsSvc)
 	})
@@ -43,8 +47,8 @@ func (rm *replicationManager) init(metadataSvc metadata_svc.MetadataSvc,
 	rm.cluster_info_svc = clusterSvc
 	rm.xdcr_topology_svc = topologySvc
 	rm.internal_settings_svc = internalSettingsSvc
-	fac := factory.NewXDCRFactory(metadataSvc, clusterSvc, topologySvc)
-	pipeline_manager.PipelineManager(fac)
+	fac := factory.NewXDCRFactory(metadataSvc, clusterSvc, topologySvc, log.DefaultLoggerContext, log.DefaultLoggerContext, rm)
+	pipeline_manager.PipelineManager(fac, log.DefaultLoggerContext)
 
 	logger_rm.Info("Replication manager is initialized")
 
@@ -161,4 +165,61 @@ func (rm *replicationManager) createAndPersistReplicationSpec(sourceClusterUUID,
 	} else {
 		return nil, err
 	}
+}
+
+func (rm *replicationManager) OnError(topic string, partsError map[string]error) {
+	logger_rm.Infof("Pipeline %v reported failure. The following parts are broken: %v\n", topic, partsError)
+
+	//fix the pipeline
+	err := fixPipeline(topic)
+
+	if err != nil {
+		logger_rm.Infof("The effort of fixing pipeline %v is failed, err=%v; The retry will happen latter\n",
+			topic, err)
+		//TODO: propagate the error to ns_server
+
+		//TODO: schedule the retry
+	}
+
+}
+
+func fixPipeline(topic string) error {
+	//pause the replication
+	err := PauseReplication(topic)
+	if err == nil {
+		err = ResumeReplication(topic)
+	}
+	return err
+}
+
+func SetPipelineLogLevel(topic string, levelStr string) error {
+	pipeline := pipeline_manager.Pipeline(topic)
+
+	//update the setting
+	spec, err := MetadataService().ReplicationSpec(topic)
+	if err != nil && spec == nil {
+		return errors.New(fmt.Sprintf("Failed to lookup replication specification %v, err=%v", topic, err))
+	}
+
+	settings := spec.Settings()
+	err = settings.SetLogLevel(levelStr)
+	if err != nil {
+		return err
+	}
+
+	if pipeline != nil {
+		if pipeline.RuntimeContext() == nil {
+			return errors.New("Pipeline doesn't have the runtime context")
+		}
+		if pipeline.RuntimeContext().Service(base.PIPELINE_SUPERVISOR_SVC) == nil {
+			return errors.New("Pipeline doesn't have the PipelineSupervisor registered")
+		}
+		supervisor := pipeline.RuntimeContext().Service(base.PIPELINE_SUPERVISOR_SVC).(*pipeline_svc.PipelineSupervisor)
+
+		if supervisor != nil {
+			err := supervisor.SetPipelineLogLevel(levelStr)
+			return err
+		}
+	}
+	return nil
 }

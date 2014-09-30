@@ -15,3 +15,8 @@ const (
 	XMEM XDCROutgoingNozzleType = iota
 	CAPI XDCROutgoingNozzleType = iota
 )
+
+const (
+	PIPELINE_SUPERVISOR_SVC string = "PipelineSupervisor"
+	CHECKPOINT_MGR_SVC string = "CheckpointManager"
+)

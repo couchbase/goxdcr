@@ -11,6 +11,7 @@ import (
 	"github.com/couchbase/indexing/secondary/common"
 	"github.com/couchbaselabs/go-couchbase"
 	"log"
+	couchlog "github.com/Xiaomei-Zhang/couchbase_goxdcr/log"
 	"math"
 	"os"
 	"strconv"
@@ -157,7 +158,7 @@ func startRouter() {
 		partMap[partId] = NewTestPart(partId)
 	}
 
-	router, _ = parts.NewRouter(partMap, buildVbMap(partMap))
+	router, _ = parts.NewRouter(partMap, buildVbMap(partMap), couchlog.DefaultLoggerContext)
 }
 
 func buildVbMap(downStreamParts map[string]pc.Part) map[uint16]string {

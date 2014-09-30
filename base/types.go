@@ -37,3 +37,7 @@ func NewSettingsError() *SettingsError {
 func (se SettingsError) Add(key string, err error) {
 	se.err_map[key] = err
 }
+
+type PipelineFailureHandler interface {
+	OnError(topic string, partsError map[string]error)
+}

@@ -2,7 +2,7 @@ package protobuf
 
 import (
 	"code.google.com/p/goprotobuf/proto"
-	log "github.com/Xiaomei-Zhang/couchbase_goxdcr/util"
+	"github.com/Xiaomei-Zhang/couchbase_goxdcr/log"
 	base "github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/base"
 	"github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/metadata"
 	utils "github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/utils"
@@ -58,7 +58,7 @@ const (
 
 var statsPathRegexp, _ = regexp.Compile(StatsPathPattern)
 
-var logger_repmsg *log.CommonLogger = log.NewLogger("ReplicationMessages", log.LogLevelInfo)
+var logger_repmsg *log.CommonLogger = log.NewLogger("ReplicationMessages", log.DefaultLoggerContext)
 
 // create new Settings message from ReplicationSettings object
 func NewInternalSettings(replSettings *metadata.ReplicationSettings) *InternalSettings {
@@ -432,7 +432,7 @@ func (res *ViewInternalSettingsResponse) Encode() (data []byte, err error) {
 }
 
 func (res *ViewInternalSettingsResponse) Decode(data []byte) (err error) {
-	return utils.DecodeMessageFromByteArray(data, res)
+	return utils.DecodeMessageFromByteArray(data, res, logger_repmsg)
 }
 
 // InternalSettings implement MessageMarshaller interface

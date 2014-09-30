@@ -3,23 +3,25 @@ package metadata
 import (
 	"errors"
 	"fmt"
+	"github.com/Xiaomei-Zhang/couchbase_goxdcr/log"
 	"reflect"
 )
 
 const (
-	default_checkpoint_interval              int    = 1800
-	default_batch_count                      int    = 500
-	default_batch_size                       int    = 2048
-	default_failure_restart_interval         int    = 30
-	default_optimistic_replication_threshold        = 256
-	default_http_connection                         = 20
-	default_source_nozzle_per_node                  = 2
-	default_target_nozzle_per_node                  = 2
-	default_max_expected_replication_lag            = 100
-	default_timeout_percentage_cap                  = 80 // TODO is this ok?
-	default_filter_expression                string = ""
-	default_replication_type                 string = "capi"
-	default_active                           bool   = true
+	default_checkpoint_interval              int          = 1800
+	default_batch_count                      int          = 500
+	default_batch_size                       int          = 2048
+	default_failure_restart_interval         int          = 30
+	default_optimistic_replication_threshold              = 256
+	default_http_connection                               = 20
+	default_source_nozzle_per_node                        = 2
+	default_target_nozzle_per_node                        = 2
+	default_max_expected_replication_lag                  = 100
+	default_timeout_percentage_cap                        = 80 // TODO is this ok?
+	default_filter_expression                string       = ""
+	default_replication_type                 string       = "capi"
+	default_active                           bool         = true
+	default_pipeline_log_level               log.LogLevel = log.LogLevelInfo
 )
 
 const (
@@ -36,6 +38,7 @@ const (
 	TargetNozzlePerNode            = "target_nozzle_per_node"
 	MaxExpectedReplicationLag      = "max_expected_replication_lag"
 	TimeoutPercentageCap           = "timeout_percentage_cap"
+	PipelineLogLevel               = "log_level"
 )
 
 /***********************************
@@ -103,6 +106,9 @@ type ReplicationSettings struct {
 	// The max allowed timeout percentage. Exceed that limit, piepline would be
 	// condisered as not healthy
 	timeout_percentage_cap int `json:"timeout_percentage_cap"`
+
+	//log level
+	log_level log.LogLevel
 }
 
 func DefaultSettings() *ReplicationSettings {
@@ -117,7 +123,8 @@ func DefaultSettings() *ReplicationSettings {
 		source_nozzle_per_node:           default_source_nozzle_per_node,
 		target_nozzle_per_node:           default_target_nozzle_per_node,
 		max_expected_replication_lag:     default_max_expected_replication_lag,
-		timeout_percentage_cap:           default_timeout_percentage_cap}
+		timeout_percentage_cap:           default_timeout_percentage_cap,
+		log_level:                        default_pipeline_log_level}
 }
 
 func (s *ReplicationSettings) Type() string {
@@ -316,6 +323,12 @@ func (s *ReplicationSettings) UpdateSettingsFromMap(settingsMap map[string]inter
 				return IncorrectValueTypeInMapError(key, val, "int")
 			}
 			s.SetTimeoutPercentageCap(timeoutPercentageCap)
+		case PipelineLogLevel:
+			l, ok := val.(log.LogLevel)
+			if !ok {
+				return IncorrectValueTypeInMapError(key, val, "log.LogLevel")
+			}
+			s.setLogLevel(l)
 		default:
 			return errors.New(fmt.Sprintf("Invalid key in map, %v", key))
 
@@ -323,6 +336,22 @@ func (s *ReplicationSettings) UpdateSettingsFromMap(settingsMap map[string]inter
 	}
 
 	return nil
+}
+
+func (s *ReplicationSettings) LogLevel() log.LogLevel {
+	return s.log_level
+}
+
+func (s *ReplicationSettings) SetLogLevel(log_level string) error {
+	l, err := log.LogLevelFromStr(log_level)
+	if err == nil {
+		s.setLogLevel(l)
+	}
+	return err
+}
+
+func (s *ReplicationSettings) setLogLevel (l log.LogLevel)  {
+		s.log_level = l
 }
 
 func (s *ReplicationSettings) ToMap() map[string]interface{} {
@@ -340,7 +369,7 @@ func (s *ReplicationSettings) ToMap() map[string]interface{} {
 	settings_map[TargetNozzlePerNode] = s.TargetNozzlesPerNode()
 	settings_map[MaxExpectedReplicationLag] = s.MaxExpectedReplicationLag()
 	settings_map[TimeoutPercentageCap] = s.TimeoutPercentageCap()
-
+	settings_map[PipelineLogLevel] = s.LogLevel()
 	return settings_map
 }
 

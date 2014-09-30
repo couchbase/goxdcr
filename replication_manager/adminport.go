@@ -13,14 +13,14 @@ import (
 	"reflect"
 	"strings"
 	//siprotobuf "github.com/couchbase/indexing/secondary/protobuf"
-	log "github.com/Xiaomei-Zhang/couchbase_goxdcr/util"
+	"github.com/Xiaomei-Zhang/couchbase_goxdcr/log"
 	utils "github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/utils"
 )
 
 var StaticPaths = [3]string{protobuf.CreateReplicationPath, protobuf.InternalSettingsPath, protobuf.SettingsReplicationsPath}
 var DynamicPathPrefixes = [3]string{protobuf.DeleteReplicationPrefix, protobuf.SettingsReplicationsPath, protobuf.StatisticsPrefix}
 
-var logger_ap *log.CommonLogger = log.NewLogger("AdminPort", log.LogLevelInfo)
+var logger_ap *log.CommonLogger = log.NewLogger("AdminPort", log.DefaultLoggerContext)
 
 // list of requests handled by this adminport
 var reqCreateReplication = &protobuf.CreateReplicationRequest{}

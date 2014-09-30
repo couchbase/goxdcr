@@ -11,7 +11,7 @@ import (
 	mcc "github.com/couchbase/gomemcached/client"
 	"github.com/couchbase/indexing/secondary/common"
 	"github.com/couchbaselabs/go-couchbase"
-	"log"
+	"github.com/Xiaomei-Zhang/couchbase_goxdcr/log"
 	"net/http"
 	"os"
 	"sync"
@@ -19,6 +19,8 @@ import (
 )
 
 import _ "net/http/pprof"
+
+var logger *log.CommonLogger = log.NewLogger("Xmem_run", log.DefaultLoggerContext)
 
 var options struct {
 	source_bucket      string // source bucket
@@ -66,9 +68,9 @@ func usage() {
 
 func setup() (err error) {
 
-	log.Println("Start Testing Xmem...")
-	log.Printf("target_clusterAddr=%s, username=%s, password=%s\n", options.target_clusterAddr, options.username, options.password)
-	log.Println("Done with parsing the arguments")
+	logger.Info("Start Testing Xmem...")
+	logger.Infof("target_clusterAddr=%s, username=%s, password=%s\n", options.target_clusterAddr, options.username, options.password)
+	logger.Info("Done with parsing the arguments")
 
 	//flush the target bucket
 	baseURL, err := couchbase.ParseURL("http://" + options.target_bucket + ":" + options.password + "@" + options.target_clusterAddr)
@@ -79,13 +81,13 @@ func setup() (err error) {
 			options.username,
 			options.password,
 			"POST",
-			nil)
+			nil, logger)
 	}
 
 	if err != nil {
-		log.Printf("Setup error=%v\n", err)
+		logger.Infof("Setup error=%v\n", err)
 	} else {
-		log.Println("Setup is done")
+		logger.Info("Setup is done")
 	}
 
 	return
@@ -101,24 +103,24 @@ func verify(data_count int) bool {
 			options.target_bucket,
 			options.password,
 			"GET",
-			output)
+			output, logger)
 	}
 	if err != nil {
 		panic(err)
 	}
-	log.Printf("name=%s itemCount=%d\n", output.Name, output.Stat.ItemCount)
+	logger.Infof("name=%s itemCount=%d\n", output.Name, output.Stat.ItemCount)
 
 	return output.Stat.ItemCount == data_count
 }
 func main() {
 	//start http server for pprof
 	go func() {
-		log.Println("Try to start pprof...")
+		logger.Info("Try to start pprof...")
 		err := http.ListenAndServe("localhost:7000", nil)
 		if err != nil {
 			panic(err)
 		} else {
-			log.Println("Http server for pprof is started")
+			logger.Info("Http server for pprof is started")
 		}
 	}()
 	argParse()
@@ -129,15 +131,15 @@ func main() {
 }
 
 func test(batch_count int, data_count int, xmem_mode parts.XMEM_MODE) {
-	log.Printf("------------START testing Xmem-------------------\n")
-	log.Printf("batch_count=%d, data_count=%d, xmem_mode=%d\n", batch_count, data_count, xmem_mode)
+	logger.Info("------------START testing Xmem-------------------")
+	logger.Infof("batch_count=%d, data_count=%d, xmem_mode=%d\n", batch_count, data_count, xmem_mode)
 	err := setup()
 
 	if err != nil {
 		panic(err)
 	}
 	startXmem(batch_count, xmem_mode)
-	log.Println("XMEM is started")
+	logger.Info("XMEM is started")
 	waitGrp := &sync.WaitGroup{}
 	waitGrp.Add(1)
 	go startUpr(options.source_clusterAddr, options.source_bucket, waitGrp, data_count)
@@ -146,9 +148,9 @@ func test(batch_count int, data_count int, xmem_mode parts.XMEM_MODE) {
 	time.Sleep(10 * time.Second)
 	bSuccess := verify(data_count)
 	if bSuccess {
-		log.Println("----------TEST SUCCEED------------")
+		logger.Info("----------TEST SUCCEED------------")
 	} else {
-		log.Println("----------TEST FAILED-------------")
+		logger.Info("----------TEST FAILED-------------")
 	}
 }
 func startUpr(cluster, bucketn string, waitGrp *sync.WaitGroup, data_count int) {
@@ -159,7 +161,7 @@ func startUpr(cluster, bucketn string, waitGrp *sync.WaitGroup, data_count int) 
 	mf(err, "- upr")
 
 	flogs := failoverLogs(b)
-	log.Println("Got failover log successfully")
+	logger.Info("Got failover log successfully")
 
 	// list of vbuckets
 	vbnos := make([]uint16, 0, options.maxVbno)
@@ -168,13 +170,13 @@ func startUpr(cluster, bucketn string, waitGrp *sync.WaitGroup, data_count int) 
 	}
 
 	startStream(uprFeed, flogs)
-	log.Println("Upr stream is started")
+	logger.Info("Upr stream is started")
 
 	count := 0
 	for {
 		e, ok := <-uprFeed.C
 		if ok == false {
-			log.Printf("Closing for bucket %v\n", b.Name)
+			logger.Infof("Closing for bucket %v\n", b.Name)
 		}
 
 		//transfer UprEvent to MCRequest
@@ -182,7 +184,7 @@ func startUpr(cluster, bucketn string, waitGrp *sync.WaitGroup, data_count int) 
 		case mcc.UprMutation, mcc.UprDeletion, mcc.UprExpiration:
 			mcReq := composeMCRequest(e)
 			count++
-			log.Printf("Number of upr event received so far is %d\n", count)
+			logger.Infof("Number of upr event received so far is %d\n", count)
 
 			xmem.Receive(mcReq)
 		}
@@ -193,7 +195,7 @@ func startUpr(cluster, bucketn string, waitGrp *sync.WaitGroup, data_count int) 
 	}
 Done:
 	//close the upr stream
-	log.Println("Done.........")
+	logger.Info("Done.........")
 	uprFeed.Close()
 	xmem.Stop()
 	waitGrp.Done()
@@ -236,7 +238,7 @@ func composeMCRequest(event *mcc.UprEvent) *mc.MCRequest {
 		binary.BigEndian.PutUint32(req.Extras, event.Flags)
 		binary.BigEndian.PutUint32(req.Extras, event.Expiry)
 	} else if event.Opcode == mcc.UprSnapshot {
-		log.Printf("event.Seqno=%v\n", event.Seqno)
+		logger.Infof("event.Seqno=%v\n", event.Seqno)
 		binary.BigEndian.PutUint64(req.Extras, event.Seqno)
 		binary.BigEndian.PutUint64(req.Extras, event.SnapstartSeq)
 		binary.BigEndian.PutUint64(req.Extras, event.SnapendSeq)
@@ -272,7 +274,7 @@ func failoverLogs(b *couchbase.Bucket) couchbase.FailoverLog {
 
 func mf(err error, msg string) {
 	if err != nil {
-		log.Fatalf("%v: %v", msg, err)
+		logger.Errorf("%v: %v", msg, err)
 	}
 }
 
@@ -290,7 +292,7 @@ func getConnectStr(clusterAddr string, poolName string, bucketName string, usern
 
 		if addrs != nil && len(addrs) > 0 {
 			for _, add := range addrs {
-				log.Printf("node_address=%v\n", add)
+				logger.Infof("node_address=%v\n", add)
 			}
 			return addrs[0], nil
 
@@ -306,9 +308,9 @@ func startXmem(batch_count int, xmem_mode parts.XMEM_MODE) {
 	if err != nil || target_connectStr == "" {
 		panic(err)
 	}
-	log.Printf("target_connectStr=%s\n", target_connectStr)
+	logger.Infof("target_connectStr=%s\n", target_connectStr)
 
-	xmem = parts.NewXmemNozzle("xmem", target_connectStr, options.target_bucket, options.password)
+	xmem = parts.NewXmemNozzle("xmem", target_connectStr, options.target_bucket, options.password, logger.LoggerContext())
 	var configs map[string]interface{} = map[string]interface{}{parts.XMEM_SETTING_BATCHCOUNT: batch_count,
 		parts.XMEM_SETTING_TIMEOUT:    time.Millisecond * 10,
 		parts.XMEM_SETTING_NUMOFRETRY: 3,

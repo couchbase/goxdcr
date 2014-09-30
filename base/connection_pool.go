@@ -4,13 +4,11 @@ import (
 	"errors"
 	"net/url"
 	//	"log"
-	log "github.com/Xiaomei-Zhang/couchbase_goxdcr/util"
+	"github.com/Xiaomei-Zhang/couchbase_goxdcr/log"
 	mcc "github.com/couchbase/gomemcached/client"
 	cb "github.com/couchbaselabs/go-couchbase"
 	"sync"
 )
-
-var logger_pool *log.CommonLogger = log.NewLogger("Connection", log.LogLevelInfo)
 
 type ConnPool struct {
 	clients  chan *mcc.Client
@@ -18,12 +16,14 @@ type ConnPool struct {
 	userName string
 	password string
 	maxConn  int
+	logger   *log.CommonLogger
 }
 
 type connPoolMgr struct {
 	conn_pools_map map[string]*ConnPool
 	token          sync.Mutex
 	once           sync.Once
+	logger         *log.CommonLogger
 }
 
 var _connPoolMgr connPoolMgr
@@ -65,7 +65,7 @@ func (p *ConnPool) IsClosed() bool {
 }
 
 func (p *ConnPool) Get() (*mcc.Client, error) {
-	logger_pool.Debugf("There are %d connections in the pool\n", len(p.clients))
+	p.logger.Debugf("There are %d connections in the pool\n", len(p.clients))
 	client, ok := <-p.clients
 	if ok {
 		return client, nil
@@ -144,12 +144,13 @@ func (connPoolMgr *connPoolMgr) GetPool(poolName string) *ConnPool {
 }
 
 func (connPoolMgr *connPoolMgr) CreatePool(poolName string, hostName string, username string, password string, connectionSize int) (p *ConnPool, err error) {
-	logger_pool.Infof("Create Pool - poolName=%v,", poolName)
-	logger_pool.Infof("connectionSize=%d", connectionSize)
+	connPoolMgr.logger.Infof("Create Pool - poolName=%v,", poolName)
+	connPoolMgr.logger.Infof("connectionSize=%d", connectionSize)
 	p = &ConnPool{clients: make(chan *mcc.Client, connectionSize),
 		hostName: hostName,
 		userName: username,
-		password: password}
+		password: password,
+		logger: log.NewLogger("ConnPool", connPoolMgr.logger.LoggerContext())}
 
 	// make sure we release resource upon unexpected error
 	defer func() {
@@ -163,10 +164,10 @@ func (connPoolMgr *connPoolMgr) CreatePool(poolName string, hostName string, use
 	for i := 0; i < connectionSize; i++ {
 		mcClient, err := newConn(hostName, username, password)
 		if err == nil {
-			logger_pool.Infof("A client connection is established")
+			connPoolMgr.logger.Infof("A client connection is established")
 			p.clients <- mcClient
 		} else {
-			logger_pool.Infof("error establishing connection with hostname=%s, username=%s, password=%s - %s", hostName, username, password, err)
+			connPoolMgr.logger.Infof("error establishing connection with hostname=%s, username=%s, password=%s - %s", hostName, username, password, err)
 		}
 
 	}
@@ -175,7 +176,7 @@ func (connPoolMgr *connPoolMgr) CreatePool(poolName string, hostName string, use
 	connPoolMgr.conn_pools_map[poolName] = p
 	connPoolMgr.token.Unlock()
 
-	logger_pool.Infof("Connection pool %s is created with %d clients\n", poolName, len(p.clients))
+	connPoolMgr.logger.Infof("Connection pool %s is created with %d clients\n", poolName, len(p.clients))
 	return p, nil
 }
 
@@ -216,10 +217,10 @@ func newConn(hostName string, username string, password string) (conn *mcc.Clien
 
 	// authentic using user/pass
 	if len(username) != 0 && username != "default" {
-		logger_pool.Info("Authenticate...")
+		_connPoolMgr.logger.Info("Authenticate...")
 		_, err = conn.Auth(username, password)
 		if err != nil {
-			logger_pool.Infof("err=%v\n", err)
+			_connPoolMgr.logger.Infof("err=%v\n", err)
 			conn.Close()
 			return nil, err
 		}
@@ -232,9 +233,16 @@ func newConn(hostName string, username string, password string) (conn *mcc.Clien
 func ConnPoolMgr() *connPoolMgr {
 	_connPoolMgr.once.Do(func() {
 		_connPoolMgr.conn_pools_map = make(map[string]*ConnPool)
+		_connPoolMgr.logger = log.NewLogger("ConnPoolMgr", log.DefaultLoggerContext)
 
 	})
 	return &_connPoolMgr
+}
+
+func SetLoggerContexForConnPoolMgr(logger_context *log.LoggerContext) *connPoolMgr {
+	connPoolMgr := ConnPoolMgr()
+	connPoolMgr.logger = log.NewLogger("ConnPoolMgr", logger_context)
+	return connPoolMgr
 }
 
 func (connPoolMgr *connPoolMgr) Close() {
@@ -242,7 +250,7 @@ func (connPoolMgr *connPoolMgr) Close() {
 	defer connPoolMgr.token.Unlock()
 
 	for key, pool := range connPoolMgr.conn_pools_map {
-		logger_pool.Infof("close pool %s", key)
+		connPoolMgr.logger.Infof("close pool %s", key)
 		pool.ReleaseConnections()
 	}
 }

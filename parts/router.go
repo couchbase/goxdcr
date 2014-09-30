@@ -5,7 +5,7 @@ import (
 	"errors"
 	common "github.com/Xiaomei-Zhang/couchbase_goxdcr/common"
 	connector "github.com/Xiaomei-Zhang/couchbase_goxdcr/connector"
-	log "github.com/Xiaomei-Zhang/couchbase_goxdcr/util"
+	"github.com/Xiaomei-Zhang/couchbase_goxdcr/log"
 	mc "github.com/couchbase/gomemcached"
 	mcc "github.com/couchbase/gomemcached/client"
 )
@@ -15,7 +15,7 @@ var ErrorNoDownStreamNodesForRouter = errors.New("No downstream nodes have been 
 var ErrorNoVbMapForRouter = errors.New("No vbMap has been defined for Router.")
 var ErrorInvalidVbMapForRouter = errors.New("vbMap in Router is invalid.")
 
-var logger_router *log.CommonLogger = log.NewLogger("Router", log.LogLevelInfo)
+//var logger_router *log.CommonLogger = log.NewLogger("Router", log.LogLevelInfo)
 
 // XDCR Router does two things:
 // 1. converts UprEvent to MCRequest
@@ -27,20 +27,22 @@ type Router struct {
 	counter map[string]int
 }
 
-func NewRouter(downStreamParts map[string]common.Part, vbMap map[uint16]string) (*Router, error) {
+func NewRouter(downStreamParts map[string]common.Part,
+	vbMap map[uint16]string,
+	logger_context *log.LoggerContext) (*Router, error) {
 	router := &Router{
-		vbMap: vbMap,
+		vbMap:   vbMap,
 		counter: make(map[string]int)}
 
 	var routingFunc connector.Routing_Callback_Func = router.route
-	router.Router = connector.NewRouter(downStreamParts, &routingFunc)
-	
+	router.Router = connector.NewRouter(downStreamParts, &routingFunc, logger_context, "XDCRRouter")
+
 	//initialize counter
 	for partId, _ := range downStreamParts {
 		router.counter[partId] = 0
 	}
 
-	logger_router.Infof("Router created with %d downstream parts \n", len(downStreamParts))
+	router.Logger().Infof("Router created with %d downstream parts \n", len(downStreamParts))
 	return router, nil
 }
 
@@ -104,22 +106,22 @@ func (router *Router) route(data interface{}) (map[string]interface{}, error) {
 		return nil, ErrorInvalidVbMapForRouter
 	}
 
-	logger_router.Debugf("Data with vbno=%d, opCode=%v is routed to downstream part %s", uprEvent.VBucket, uprEvent.Opcode, partId)
+	router.Logger().Debugf("Data with vbno=%d, opCode=%v is routed to downstream part %s", uprEvent.VBucket, uprEvent.Opcode, partId)
 
 	result := make(map[string]interface{})
 	switch uprEvent.Opcode {
 	case mcc.UprMutation, mcc.UprDeletion, mcc.UprExpiration:
 		result[partId] = ComposeMCRequest(uprEvent)
-		router.counter[partId] = router.counter[partId] +1
-		logger_router.Debugf("Rounting counter = %v\n", router.counter)
+		router.counter[partId] = router.counter[partId] + 1
+		router.Logger().Debugf("Rounting counter = %v\n", router.counter)
 	default:
-		logger_router.Debugf("Uprevent OpCode=%v, is skipped\n", uprEvent.Opcode)
+		router.Logger().Debugf("Uprevent OpCode=%v, is skipped\n", uprEvent.Opcode)
 	}
 	return result, nil
 }
 
 func (router *Router) SetVbMap(vbMap map[uint16]string) {
 	router.vbMap = vbMap
-	logger_router.Infof("Set vbMap in Router")
-	logger_router.Debugf("vbMap: %v", vbMap)
+	router.Logger().Infof("Set vbMap in Router")
+	router.Logger().Debugf("vbMap: %v", vbMap)
 }
