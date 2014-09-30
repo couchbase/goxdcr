@@ -48,7 +48,7 @@ func argParse() {
 		"bucket to replicate from")
 	flag.IntVar(&options.maxVbno, "maxvb", 8,
 		"maximum number of vbuckets")
-	flag.StringVar(&options.targetBucket, "targetBucket", "default",
+	flag.StringVar(&options.targetBucket, "targetBucket", "target",
 		"bucket to replicate to")
 	flag.StringVar(&options.filterName, "filterName", "myActive",
 		"name of filter to use for replication")

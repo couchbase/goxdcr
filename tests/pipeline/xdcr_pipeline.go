@@ -106,17 +106,18 @@ func test() {
 		fail(fmt.Sprintf("%v", err))
 	}
 	time.Sleep(1 * time.Second)
-	//	replication_manager.PauseReplication(pipeline.Topic())
-	//	fmt.Printf("Replication %s is paused\n", pipeline.Topic())
-	//	time.Sleep(100 * time.Millisecond)
-	//	replication_manager.ResumeReplication(pipeline.Topic())
-	//	fmt.Printf("Replication %s is resumed\n", pipeline.Topic())
-	//	time.Sleep(2 * time.Second)
-	//	replication_manager.DeleteReplication(topic)
-	//	fmt.Printf("Replication %s is deleted\n", topic)
-	time.Sleep(4 * time.Second)
-
+	replication_manager.PauseReplication(topic)
+	fmt.Printf("Replication %s is paused\n", topic)
+	time.Sleep(100 * time.Millisecond)
+	replication_manager.ResumeReplication(topic)
+	fmt.Printf("Replication %s is resumed\n", topic)
+	time.Sleep(2 * time.Second)
+	
 	summary(topic)
+	
+	replication_manager.DeleteReplication(topic)
+	fmt.Printf("Replication %s is deleted\n", topic)
+	time.Sleep(4 * time.Second)
 }
 
 func summary(topic string) {
