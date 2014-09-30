@@ -29,9 +29,11 @@ const (
 // constants used for parsing url path
 const (
 	CreateReplicationPath    = "controller/createReplication"
+	DeleteReplicationPrefix  = "controller/cancelXDCR"
+	PauseReplicationPrefix  = "controller/pauseXDCR"
+	ResumeReplicationPrefix  = "controller/resumeAXDCR"
 	InternalSettingsPath     = "internalSettings"
 	SettingsReplicationsPath = "settings/replications"
-	DeleteReplicationPrefix  = "controller/cancelXDCR"
 	StatisticsPath         = "stats"
 	// Some url paths are not static and have variable contents, e.g., settings/replications/$replication_id
 	// The message keys for such paths are constructed by appending the dynamic suffix below to the static portion of the path.
@@ -230,9 +232,8 @@ func DecodeCreateReplicationResponse(response *http.Response) (string, error) {
 	
 }
 
-// decode parameters from delete replication request
-func DecodeDeleteReplicationRequest(request *http.Request) (replicationId string, forward bool, err error) {
-	replicationId, err = DecodeReplicationIdFromHttpRequest(request, DeleteReplicationPrefix)
+func DecodeReplicationIdAndForwardFlagFromHttpRequest(request *http.Request, pathPrefix string) (replicationId string, forward bool, err error) {
+	replicationId, err = DecodeReplicationIdFromHttpRequest(request, pathPrefix)
 	if err != nil {
 		return 
 	}

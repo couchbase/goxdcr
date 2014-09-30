@@ -13,7 +13,7 @@ import (
 )
 
 var StaticPaths = [3]string{CreateReplicationPath, SettingsReplicationsPath, StatisticsPath}
-var DynamicPathPrefixes = [3]string{DeleteReplicationPrefix, SettingsReplicationsPath}
+var DynamicPathPrefixes = [4]string{DeleteReplicationPrefix, PauseReplicationPrefix, ResumeReplicationPrefix, SettingsReplicationsPath}
 
 var logger_ap *log.CommonLogger = log.NewLogger("AdminPort", log.LogLevelInfo)
 
@@ -74,6 +74,10 @@ func (h *xdcrRestHandler) handleRequest(
 	// historically, deleteReplication could use Post method	
 	case DeleteReplicationPrefix + DynamicSuffix + UrlDelimiter + MethodPost:
 		response, err = h.doDeleteReplicationRequest(request)
+	case PauseReplicationPrefix + DynamicSuffix + UrlDelimiter + MethodPost:
+		response, err = h.doPauseReplicationRequest(request)
+	case ResumeReplicationPrefix + DynamicSuffix + UrlDelimiter + MethodPost:
+		response, err = h.doResumeReplicationRequest(request)
 	case SettingsReplicationsPath + DynamicSuffix + UrlDelimiter + MethodGet:
 		response, err = h.doViewReplicationSettingsRequest(request)
 	case SettingsReplicationsPath + DynamicSuffix + UrlDelimiter + MethodPost:
@@ -151,7 +155,7 @@ func (h *xdcrRestHandler) doCreateReplicationRequest(request *http.Request) ([]b
 func (h *xdcrRestHandler) doDeleteReplicationRequest(request *http.Request) ([]byte, error) {
 	logger_ap.Infof("doDeleteReplicationRequest\n")
 
-	replicationId, forward, err := DecodeDeleteReplicationRequest(request)
+	replicationId, forward, err := DecodeReplicationIdAndForwardFlagFromHttpRequest(request, DeleteReplicationPrefix)
 	if err != nil {
 		return nil, err
 	}
@@ -169,6 +173,62 @@ func (h *xdcrRestHandler) doDeleteReplicationRequest(request *http.Request) ([]b
 			// not much we can do when forwarding fails. it is not like we can 
 			// resurract deleted replications 
 			logger_ap.Errorf("Error forwarding DeleteReplicationRequest\n")
+			return nil, err
+		}
+	}
+
+	// no response body in success case
+	return nil, nil
+}
+
+func (h *xdcrRestHandler) doPauseReplicationRequest(request *http.Request) ([]byte, error) {
+	logger_ap.Infof("doPauseReplicationRequest\n")
+
+	replicationId, forward, err := DecodeReplicationIdAndForwardFlagFromHttpRequest(request, PauseReplicationPrefix)
+	if err != nil {
+		return nil, err
+	}
+	
+	logger_ap.Debugf("Request params: replicationId=%v\n", replicationId)
+	
+	if err = rm.PauseReplication(replicationId); err != nil {
+		return nil, err
+	}
+
+	// forward replication request to other KV nodes involved 
+	if forward {
+		_, err = h.forwardReplicationRequest(request)
+		if err != nil {
+			// TODO
+			logger_ap.Errorf("Error forwarding PauseReplicationRequest\n")
+			return nil, err
+		}
+	}
+
+	// no response body in success case
+	return nil, nil
+}
+
+func (h *xdcrRestHandler) doResumeReplicationRequest(request *http.Request) ([]byte, error) {
+	logger_ap.Infof("doResumeReplicationRequest\n")
+
+	replicationId, forward, err := DecodeReplicationIdAndForwardFlagFromHttpRequest(request, ResumeReplicationPrefix)
+	if err != nil {
+		return nil, err
+	}
+	
+	logger_ap.Debugf("Request params: replicationId=%v\n", replicationId)
+	
+	if err = rm.ResumeReplication(replicationId); err != nil {
+		return nil, err
+	}
+
+	// forward replication request to other KV nodes involved 
+	if forward {
+		_, err = h.forwardReplicationRequest(request)
+		if err != nil {
+			// TODO
+			logger_ap.Errorf("Error forwarding ResumeReplicationRequest\n")
 			return nil, err
 		}
 	}

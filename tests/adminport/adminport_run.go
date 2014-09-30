@@ -108,6 +108,16 @@ func startAdminport() {
 		return
 	}
 	
+	if err := testPauseReplication(replicationId, escapedReplId); err != nil {
+		fmt.Println(err.Error())
+		return
+	}
+	
+	if err := testResumeReplication(replicationId, escapedReplId); err != nil {
+		fmt.Println(err.Error())
+		return
+	}
+	
 	if err := testGetStatistics(); err != nil {
 		fmt.Println(err.Error())
 		return
@@ -159,12 +169,49 @@ func testCreateReplication() (string, error) {
 	
 	// verify that the replication is created and started and is being
 	// managed by pipeline manager
-	if pm.Pipeline(replicationId) == nil {
-		return "", errors.New("Replication not found in pipeline manager.")
+	return replicationId, validatePipeline("CreateReplication", replicationId, true)
+}
+
+func testPauseReplication(replicationId, escapedReplId string) error {
+	url := getUrlPrefix() + ap.PauseReplicationPrefix + ap.UrlDelimiter + escapedReplId
+	
+	request, err := http.NewRequest(ap.MethodPost, url, nil)
+	if err != nil {
+		return err
+	}
+	request.Header.Set(ap.ContentType, DefaultContentType)
+	
+	fmt.Println("request", request)
+	
+	response, err := http.DefaultClient.Do(request)
+	
+	err = validateResponse("PauseReplication", response, err)
+	if err != nil {
+		return err
 	}
 	
-	// retrieve replicationId
-	return replicationId, err
+	return validatePipeline("PauseReplication", replicationId, false)
+}
+
+func testResumeReplication(replicationId, escapedReplId string) error {
+	url := getUrlPrefix() + ap.ResumeReplicationPrefix + ap.UrlDelimiter + escapedReplId
+	
+	request, err := http.NewRequest(ap.MethodPost, url, nil)
+	if err != nil {
+		return err
+	}
+	request.Header.Set(ap.ContentType, DefaultContentType)
+	
+	fmt.Println("request", request)
+	
+	response, err := http.DefaultClient.Do(request)
+	
+	err = validateResponse("ResumeReplication", response, err)
+	if err != nil {
+		return err
+	}
+	
+	return validatePipeline("ResumeReplication", replicationId, true)
 }
 
 func testDeleteReplication(replicationId, escapedReplId string) error {
@@ -185,13 +232,7 @@ func testDeleteReplication(replicationId, escapedReplId string) error {
 		return err
 	}
 	
-	// verify that the replication is no longer managed by pipeline manager
-	if pm.Pipeline(replicationId) != nil {
-		return errors.New("Replication still visible from pipeline manager.")
-	}
-	
-	// retrieve replicationId
-	return nil
+	return validatePipeline("DeleteReplication", replicationId, false)
 }
 
 func testViewReplicationSettings(replicationId string) error {
@@ -252,6 +293,19 @@ func testGetStatistics() error {
 func validateResponse(testName string, response *http.Response, err error) error {
 	if err != nil || response.StatusCode != 200 {
 		return errors.New(fmt.Sprintf("Test %v failed. err=%v; response status=%v\n", testName, err, response.Status))
+	} 
+	return nil
+}
+
+func validatePipeline(testName string, replicationId string, pipelineRunning bool) error {
+	if (pm.Pipeline(replicationId) == nil) == pipelineRunning {
+		var errMsg string
+		if pipelineRunning {
+			errMsg = ", should be running but was not"
+		} else {
+			errMsg = ", should not be running but was"
+		}
+		return errors.New(fmt.Sprintf("Test %v failed. Pipeline, %v%v\n", testName, replicationId, errMsg))
 	} else{
 		fmt.Println("Test ", testName, " passed.")
 		return nil
