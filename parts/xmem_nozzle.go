@@ -723,8 +723,8 @@ func (xmem *XmemNozzle) send() error {
 	//get the batch to process
 //	logger_xmem.Debugf("Send: xmem %v, count=%v, %d batches ready, %v items in data channel\n", xmem.Id(), xmem.counter_sent,len(xmem.batches_ready), len(xmem.dataChan))
 	select {
-	case batch := <-xmem.batches_ready:
-		if batch == nil {
+	case batch, ok := <-xmem.batches_ready:
+		if !ok {
 			return nil
 		}
 		count = batch.count()
