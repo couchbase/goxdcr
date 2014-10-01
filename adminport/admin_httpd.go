@@ -33,11 +33,11 @@ import (
 	"net/http"
 	"sync"
 	"time"
-	log "github.com/Xiaomei-Zhang/couchbase_goxdcr/util"
+	"github.com/Xiaomei-Zhang/couchbase_goxdcr/log"
 	base "github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/base"
 )
 
-var logger_server *log.CommonLogger = log.NewLogger("HttpServer", log.LogLevelInfo)
+var logger_server *log.CommonLogger = log.NewLogger("HttpServer", log.DefaultLoggerContext)
 
 type httpServer struct {
 	mu        sync.RWMutex   // handle concurrent updates to this object

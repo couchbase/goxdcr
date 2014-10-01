@@ -1,7 +1,7 @@
 package adminport
 
 import (
-	log "github.com/Xiaomei-Zhang/couchbase_goxdcr/util"
+	"github.com/Xiaomei-Zhang/couchbase_goxdcr/log"
 	base "github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/base"
 	metadata "github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/metadata"
 	utils "github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/utils"
@@ -131,7 +131,7 @@ var ReplSettingInternalToRestMap = map[string]string {
 	metadata.TimeoutPercentageCap: TimeoutPercentageCap,
 } 
 
-var logger_msgutil *log.CommonLogger = log.NewLogger("MessageUtils", log.LogLevelInfo)
+var logger_msgutil *log.CommonLogger = log.NewLogger("MessageUtils", log.DefaultLoggerContext)
 
 // decode parameters from create replication request
 func DecodeCreateReplicationRequest(request *http.Request) (fromBucket, toClusterUuid, toBucket, filterName string, forward bool, settings map[string]interface{}, err error) {	

@@ -7,7 +7,7 @@ import (
 	"github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/base"
 	"net/http"
 	"strings"
-	log "github.com/Xiaomei-Zhang/couchbase_goxdcr/util"
+	"github.com/Xiaomei-Zhang/couchbase_goxdcr/log"
 	rm "github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/replication_manager"
 	utils "github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/utils"
 )
@@ -15,7 +15,7 @@ import (
 var StaticPaths = [3]string{CreateReplicationPath, SettingsReplicationsPath, StatisticsPath}
 var DynamicPathPrefixes = [4]string{DeleteReplicationPrefix, PauseReplicationPrefix, ResumeReplicationPrefix, SettingsReplicationsPath}
 
-var logger_ap *log.CommonLogger = log.NewLogger("AdminPort", log.LogLevelInfo)
+var logger_ap *log.CommonLogger = log.NewLogger("AdminPort", log.DefaultLoggerContext)
 
 
 type xdcrRestHandler struct {
