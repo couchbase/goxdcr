@@ -21,11 +21,11 @@ var logger_rm *log.CommonLogger = log.NewLogger("ReplicationManager", log.Defaul
 /* struct ReplicationManager
 *************************************/
 type replicationManager struct {
-	metadata_svc          metadata_svc.MetadataSvc
-	cluster_info_svc      metadata_svc.ClusterInfoSvc
-	xdcr_topology_svc     metadata_svc.XDCRCompTopologySvc
-	internal_settings_svc metadata_svc.InternalReplicationSettingsSvc
-	once                  sync.Once
+	metadata_svc             metadata_svc.MetadataSvc
+	cluster_info_svc         metadata_svc.ClusterInfoSvc
+	xdcr_topology_svc        metadata_svc.XDCRCompTopologySvc
+	replication_settings_svc metadata_svc.ReplicationSettingsSvc
+	once                     sync.Once
 }
 
 var replication_mgr replicationManager
@@ -33,20 +33,20 @@ var replication_mgr replicationManager
 func Initialize(metadata_svc metadata_svc.MetadataSvc,
 	cluster_info_svc metadata_svc.ClusterInfoSvc,
 	xdcr_topology_svc metadata_svc.XDCRCompTopologySvc,
-	internalSettingsSvc metadata_svc.InternalReplicationSettingsSvc) {
+	replication_settings_svc metadata_svc.ReplicationSettingsSvc) {
 	replication_mgr.once.Do(func() {
-		replication_mgr.init(metadata_svc, cluster_info_svc, xdcr_topology_svc, internalSettingsSvc)
+		replication_mgr.init(metadata_svc, cluster_info_svc, xdcr_topology_svc, replication_settings_svc)
 	})
 }
 
 func (rm *replicationManager) init(metadataSvc metadata_svc.MetadataSvc,
 	clusterSvc metadata_svc.ClusterInfoSvc,
 	topologySvc metadata_svc.XDCRCompTopologySvc,
-	internalSettingsSvc metadata_svc.InternalReplicationSettingsSvc) {
+	replicationSettingsSvc metadata_svc.ReplicationSettingsSvc) {
 	rm.metadata_svc = metadataSvc
 	rm.cluster_info_svc = clusterSvc
 	rm.xdcr_topology_svc = topologySvc
-	rm.internal_settings_svc = internalSettingsSvc
+	rm.replication_settings_svc = replicationSettingsSvc
 	fac := factory.NewXDCRFactory(metadataSvc, clusterSvc, topologySvc, log.DefaultLoggerContext, log.DefaultLoggerContext, rm)
 	pipeline_manager.PipelineManager(fac, log.DefaultLoggerContext)
 
@@ -66,8 +66,8 @@ func XDCRCompTopologyService() metadata_svc.XDCRCompTopologySvc {
 	return replication_mgr.xdcr_topology_svc
 }
 
-func InternalSettingsService() metadata_svc.InternalReplicationSettingsSvc {
-	return replication_mgr.internal_settings_svc
+func ReplicationSettingsService() metadata_svc.ReplicationSettingsSvc {
+	return replication_mgr.replication_settings_svc
 }
 
 func CreateReplication(sourceClusterUUID string, sourceBucket string, targetClusterUUID, targetBucket string, filterName string, settings map[string]interface{}) (string, error) {
@@ -154,6 +154,30 @@ func DeleteReplication(topic string) error {
 		logger_rm.Errorf("%v\n", err)
 	}
 	return err
+}
+
+func HandleChangesToReplicationSettings(topic string, settings map[string]interface{}) error {
+	// read replication spec with the specified replication id
+	replSpec, err := MetadataService().ReplicationSpec(topic)
+	if err != nil {
+		return err
+	}
+
+	// update replication spec with input settings
+	replSpec.Settings().UpdateSettingsFromMap(settings)
+	err = MetadataService().SetReplicationSpec(*replSpec)
+
+	// TODO implement additional logic, e.g.,
+	// 1. reconstruct pipeline when source/targetNozzlePerNode is changed
+	// 2. pause pipeline when active is changed from true to false
+	// 3. restart pipeline when criteral settings are changed
+	return err
+}
+
+// get statistics for all running replications
+func GetStatistics() (map[string]interface{}, error) {
+	// TODO implement
+	return nil, nil
 }
 
 func (rm *replicationManager) createAndPersistReplicationSpec(sourceClusterUUID, sourceBucket, targetClusterUUID, targetBucket, filterName string, settings map[string]interface{}) (*metadata.ReplicationSpecification, error) {

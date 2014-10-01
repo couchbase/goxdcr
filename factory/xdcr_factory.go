@@ -5,7 +5,6 @@ import (
 	"github.com/couchbase/indexing/secondary/protobuf"
 	"math"
 	"strconv"
-	//connector "github.com/Xiaomei-Zhang/couchbase_goxdcr/connector"
 	"errors"
 	"github.com/Xiaomei-Zhang/couchbase_goxdcr/log"
 	pp "github.com/Xiaomei-Zhang/couchbase_goxdcr/pipeline"
@@ -224,7 +223,7 @@ func (xdcrf *XDCRFactory) constructOutgoingNozzles(spec *metadata.ReplicationSpe
 
 	for kvaddr, kvVBList := range kvVBMap {
 		numOfVbs := len(kvVBList)
-		// the nuhmber of xmem nozzles to construct is the smaller of vbucket list size and target connection size
+		// the number of xmem nozzles to construct is the smaller of vbucket list size and target connection size
 		numOfNozzles := int(math.Min(float64(numOfVbs), float64(maxTargetNozzlePerNode)))
 
 		numOfVbPerNozzle := int(math.Ceil(float64(numOfVbs) / float64(numOfNozzles)))
@@ -288,9 +287,9 @@ func (xdcrf *XDCRFactory) constructNozzleForTargetNode(kvaddr string,
 	}
 
 	switch nozzleType {
-	case base.XMEM:
+	case base.Xmem:
 		nozzle = xdcrf.constructXMEMNozzle(kvaddr, bucketName, bucketPwd, nozzle_index, logger_ctx)
-	case base.CAPI:
+	case base.Capi:
 		nozzle = xdcrf.constructCAPINozzle(kvaddr, bucketName, bucketPwd, nozzle_index, logger_ctx)
 	}
 
@@ -306,9 +305,9 @@ func (xdcrf *XDCRFactory) getNozzleType(kvaddr string) (base.XDCROutgoingNozzleT
 	}
 
 	if beforeXMEM {
-		return base.XMEM, nil
+		return base.Xmem, nil
 	} else {
-		return base.CAPI, nil
+		return base.Capi, nil
 	}
 }
 

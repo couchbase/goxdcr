@@ -1,9 +1,6 @@
 package utils
 
 import (
-	"bufio"
-	"bytes"
-	"code.google.com/p/goprotobuf/proto"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -17,6 +14,9 @@ import (
 	"net/url"
 	"reflect"
 	"strings"
+	"bytes"
+	"bufio"
+	"code.google.com/p/goprotobuf/proto"
 )
 
 type BucketBasicStats struct {
@@ -140,9 +140,10 @@ func maybeAddAuth(req *http.Request, username string, password string) {
 }
 
 func Bucket(connectStr string, bucketName string, clusterUserName, clusterPassword string) (*couchbase.Bucket, error) {
-	bucketInfos, err := couchbase.GetBucketList(fmt.Sprintf("http://%s:%s@%s", clusterUserName, clusterPassword, connectStr))
+	url := fmt.Sprintf("http://%s:%s@%s", clusterUserName, clusterPassword, connectStr)
+	bucketInfos, err := couchbase.GetBucketList (url)
 	if err != nil {
-		return nil, err
+		return nil, NewEnhancedError("Error getting bucketlist with url:" + url, err)
 	}
 
 	var password string
@@ -153,16 +154,16 @@ func Bucket(connectStr string, bucketName string, clusterUserName, clusterPasswo
 	}
 	couch, err := couchbase.Connect("http://" + bucketName + ":" + password + "@" + connectStr)
 	if err != nil {
-		return nil, err
+		return nil, NewEnhancedError(fmt.Sprintf("Error connecting to couchbase. bucketName=%v; password=%v; connectStr=%v", bucketName, password, connectStr), err)
 	}
 	pool, err := couch.GetPool("default")
 	if err != nil {
-		return nil, err
+		return nil, NewEnhancedError("Error getting pool with name 'default'.", err)
 	}
 
 	bucket, err := pool.GetBucket(bucketName)
 	if err != nil {
-		return nil, err
+		return nil, NewEnhancedError(fmt.Sprintf("Error getting bucket, %v, from pool.", bucketName), err)
 	}
 	return bucket, err
 }
@@ -235,8 +236,12 @@ func InvalidParameterInHttpRequestError(param string) error {
 	return errors.New(fmt.Sprintf("Invalid parameter, %v, in http request.", param))
 }
 
-func InvalidValueInHttpRequestError(param, val string) error {
+func InvalidValueInHttpRequestError(param string, val interface{}) error {
 	return errors.New(fmt.Sprintf("Invalid value, %v, for parameter, %v, in http request.", val, param))
+}
+
+func IncorrectValueTypeInHttpRequestError(key string, val interface{}, expectedType string) error {
+	return errors.New(fmt.Sprintf("Value, %v, for key, %v, in http request has incorrect data type. Expected type: %v. Actual type: %v", val, key, expectedType, reflect.TypeOf(val)))
 }
 
 func InvalidPathInHttpRequestError(path string) error {
@@ -255,3 +260,29 @@ func UnwrapError (infos map[string]interface{}) (err error) {
 	}
 	return err
 }
+
+func MissingParametersInHttpRequestError(params []string) error {
+	return errors.New(fmt.Sprintf("Parameters, %v, are missing in http request.", params))
+}
+
+func MissingReplicationIdInHttpRequestError(path string) error {
+	return errors.New(fmt.Sprintf("Replication id is missing from request url, %v.", path))
+}
+
+func MissingParameterInHttpResponseError(param string) error {
+	return errors.New(fmt.Sprintf("Parameter, %v, is missing in http response.", param))
+}
+
+func IncorrectValueTypeInHttpResponseError(key string, val interface{}, expectedType string) error {
+	return errors.New(fmt.Sprintf("Value, %v, for key, %v, in http response has incorrect data type. Expected type: %v. Actual type: %v", val, key, expectedType, reflect.TypeOf(val)))
+}
+
+func IncorrectValueTypeInMapError(key string, val interface{}, expectedType string) error {
+	return errors.New(fmt.Sprintf("Value, %v, with key, %v, in map has incorrect data type. Expected type: %v. Actual type: %v", val, key, expectedType, reflect.TypeOf(val)))
+}
+
+// returns an enhanced error with erroe message being "msg + old error message"
+func NewEnhancedError (msg string, err error) error {
+	return errors.New(msg + "\n" + err.Error())
+}
+

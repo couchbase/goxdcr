@@ -4,16 +4,15 @@ import (
 	"flag"
 	"fmt"
 	"github.com/Xiaomei-Zhang/couchbase_goxdcr/pipeline_manager"
-	"github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/metadata"
 	"github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/parts"
 	"github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/replication_manager"
 	"github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/utils"
-	//	c "github.com/couchbase/indexing/secondary/common"
 	"github.com/couchbaselabs/go-couchbase"
 	"log"
 	"net/http"
 	"os"
 	"time"
+	c "github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/mock_services"
 )
 
 import _ "net/http/pprof"
@@ -95,7 +94,8 @@ func main() {
 func setup() {
 	flushTargetBkt()
 	fmt.Println("Finish setup")
-	replication_manager.Initialize(NewMockMetadataSvc(), &mockClusterInfoSvc{}, &mockXDCRTopologySvc{}, nil)
+	c.SetTestOptions(options.source_bucket, options.target_bucket, options.source_cluster_addr, options.target_cluster_addr, options.source_cluster_username, options.source_cluster_password, options.nozzles_per_node_source, options.nozzles_per_node_target)
+	replication_manager.Initialize(c.NewMockMetadataSvc(), new(c.MockClusterInfoSvc), new(c.MockXDCRTopologySvc), new (c.MockReplicationSettingsSvc))
 	return
 }
 
@@ -194,143 +194,3 @@ func flushTargetBkt() {
 
 }
 
-type mockMetadataSvc struct {
-	specs map[string]metadata.ReplicationSpecification
-}
-
-func NewMockMetadataSvc() *mockMetadataSvc {
-	return &mockMetadataSvc{specs: make(map[string]metadata.ReplicationSpecification)}
-}
-func (mock_meta_svc *mockMetadataSvc) ReplicationSpec(replicationId string) (*metadata.ReplicationSpecification, error) {
-	spec, ok := mock_meta_svc.specs[replicationId]
-	if !ok {
-		spec_ptr := metadata.NewReplicationSpecification(options.source_cluster_addr, options.source_bucket, options.target_cluster_addr, options.target_bucket, "")
-		settings := spec_ptr.Settings()
-		settings.SetTargetNozzlesPerNode(options.nozzles_per_node_target)
-		settings.SetSourceNozzlesPerNode(options.nozzles_per_node_source)
-		mock_meta_svc.specs[replicationId] = *spec_ptr
-		return spec_ptr, nil
-	}else {
-		return &spec, nil
-	}
-}
-
-func (mock_meta_svc *mockMetadataSvc) AddReplicationSpec(spec metadata.ReplicationSpecification) error {
-	mock_meta_svc.specs[spec.Id()] = spec
-	return nil
-}
-
-func (mock_meta_svc *mockMetadataSvc) SetReplicationSpec(spec metadata.ReplicationSpecification) error {
-	mock_meta_svc.specs[spec.Id()] = spec
-	return nil
-}
-
-func (mock_meta_svc *mockMetadataSvc) DelReplicationSpec(replicationId string) error {
-	delete(mock_meta_svc.specs, replicationId)
-	return nil
-}
-
-type mockClusterInfoSvc struct {
-}
-
-func (mock_ci_svc *mockClusterInfoSvc) GetClusterConnectionStr(ClusterUUID string) (string, error) {
-	return options.source_cluster_addr, nil
-}
-
-func (mock_ci_svc *mockClusterInfoSvc) GetMyActiveVBuckets(ClusterUUID string, bucketName string, NodeId string) ([]uint16, error) {
-	sourceCluster, err := mock_ci_svc.GetClusterConnectionStr(ClusterUUID)
-	if err != nil {
-		return nil, err
-	}
-	b, err := utils.Bucket(sourceCluster, bucketName, options.source_cluster_username, options.source_cluster_password)
-	if err != nil {
-		return nil, err
-	}
-
-	// in test env, there should be only one kv in bucket server list
-	kvaddr := b.VBServerMap().ServerList[0]
-
-	m, err := b.GetVBmap([]string{kvaddr})
-	if err != nil {
-		return nil, err
-	}
-
-	vbList := m[kvaddr]
-
-	return vbList, nil
-}
-
-func (mock_ci_svc *mockClusterInfoSvc) GetServerList(ClusterUUID string, bucketName string) ([]string, error) {
-	cluster, err := mock_ci_svc.GetClusterConnectionStr(ClusterUUID)
-	if err != nil {
-		return nil, err
-	}
-	bucket, err := utils.Bucket(cluster, bucketName, options.source_cluster_username, options.source_cluster_password)
-	if err != nil {
-		return nil, err
-	}
-
-	// in test env, there should be only one kv in bucket server list
-	serverlist := bucket.VBServerMap().ServerList
-
-	return serverlist, nil
-}
-
-func (mock_ci_svc *mockClusterInfoSvc) GetServerVBucketsMap(ClusterUUID string, bucketName string) (map[string][]uint16, error) {
-	cluster, err := mock_ci_svc.GetClusterConnectionStr(ClusterUUID)
-	fmt.Printf("cluster=%s\n", cluster)
-	if err != nil {
-		return nil, err
-	}
-	bucket, err := utils.Bucket(cluster, bucketName, options.source_cluster_username, options.source_cluster_password)
-	if err != nil {
-		return nil, err
-	}
-	fmt.Printf("ServerList=%v\n", bucket.VBServerMap().ServerList)
-	serverVBMap, err := bucket.GetVBmap(bucket.VBServerMap().ServerList)
-	fmt.Printf("ServerVBMap=%v\n", serverVBMap)
-	return serverVBMap, err
-}
-
-func (mock_ci_svc *mockClusterInfoSvc) IsNodeCompatible(node string, version string) (bool, error) {
-	return true, nil
-}
-
-func (mock_ci_svc *mockClusterInfoSvc) GetBucket(clusterUUID, bucketName string) (*couchbase.Bucket, error) {
-	clusterConnStr, err := mock_ci_svc.GetClusterConnectionStr(clusterUUID)
-	if err != nil {
-		return nil, err
-	}
-	return utils.Bucket(clusterConnStr, bucketName, options.source_cluster_username, options.source_cluster_password)
-}
-
-type mockXDCRTopologySvc struct {
-}
-
-func (mock_top_svc *mockXDCRTopologySvc) MyHost() (string, error) {
-	return options.source_cluster_addr, nil
-}
-
-func (mock_top_svc *mockXDCRTopologySvc) MyAdminPort() (uint16, error) {
-	return 0, nil
-}
-
-func (mock_top_svc *mockXDCRTopologySvc) MyKVNodes() ([]string, error) {
-	mock_ci_svc := &mockClusterInfoSvc{}
-	nodes, err := mock_ci_svc.GetServerList(options.source_cluster_addr, "default")
-	return nodes, err
-}
-
-func (mock_top_svc *mockXDCRTopologySvc) XDCRTopology() (map[string]uint16, error) {
-	retmap := make(map[string]uint16)
-	return retmap, nil
-}
-
-func (mock_top_svc *mockXDCRTopologySvc) XDCRCompToKVNodeMap() (map[string][]string, error) {
-	retmap := make(map[string][]string)
-	return retmap, nil
-}
-
-func (mock_top_svc *mockXDCRTopologySvc) MyCluster() (string, error) {
-	return options.source_cluster_addr, nil
-}

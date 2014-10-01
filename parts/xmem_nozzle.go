@@ -741,68 +741,69 @@ func (xmem *XmemNozzle) send() error {
 	//get the batch to process
 	//	logger_xmem.Debugf("Send: xmem %v, count=%v, %d batches ready, %v items in data channel\n", xmem.Id(), xmem.counter_sent,len(xmem.batches_ready), len(xmem.dataChan))
 	select {
-	case batch := <-xmem.batches_ready:
-		if batch != nil {
-			count = batch.count()
+	case batch, ok := <-xmem.batches_ready:
+		if !ok {
+			return nil
+		}
+		count = batch.count()
 
-			xmem.Logger().Infof("Send batch count=%d\n", count)
+		xmem.Logger().Infof("Send batch count=%d\n", count)
 
-			xmem.counter_sent = xmem.counter_sent + count
-			xmem.Logger().Debugf("So far, xmem %v processed %d items", xmem.Id(), xmem.counter_sent)
+		xmem.counter_sent = xmem.counter_sent + count
+		xmem.Logger().Debugf("So far, xmem %v processed %d items", xmem.Id(), xmem.counter_sent)
 
-			if count == 1 {
-				select {
-				case item := <-xmem.dataChan:
-					//blocking
-					err, index, reserv_num := xmem.buf.reserveSlot()
-					if err != nil {
-						xmem.Logger().Errorf("Failed to reserve a slot")
-						return err
-					}
-					err = xmem.sendSingleWithRetry(item, xmem.config.maxRetry, index)
-					if err != nil {
-						xmem.Logger().Errorf("Failed to reserve a slot")
-						xmem.buf.cancelReservation(index, reserv_num)
-						return err
-					}
-
-					//buffer it for now until the receipt is confirmed
-					xmem.Logger().Debugf("And sent item to slot=%d\n", index)
-					err = xmem.buf.enSlot(index, item, reserv_num)
-				default:
-					xmem.Logger().Errorf("Invalid state - expected %d items in the batch; but there are not that much in the data channel", 1)
-				}
-			} else {
-
-				//get the raw connection
-				conn := xmem.memClient.Hijack()
-				defer func() {
-					xmem.memClient, err = mcc.Wrap(conn)
-
-					if err != nil || xmem.memClient == nil {
-						//failed to recycle the connection
-						//reinitialize the connection
-						err = xmem.initializeConnection()
-						if err != nil {
-							xmem.Logger().Errorf("failed to recycle the connection")
-						}
-					}
-
-				}()
-
-				//batch send
-				err = xmem.batchSendWithRetry(batch, conn, xmem.config.maxRetry)
+		if count == 1 {
+			select {
+			case item := <-xmem.dataChan:
+				//blocking
+				err, index, reserv_num := xmem.buf.reserveSlot()
 				if err != nil {
+					xmem.Logger().Errorf("Failed to reserve a slot")
+					return err
+				}
+				err = xmem.sendSingleWithRetry(item, xmem.config.maxRetry, index)
+				if err != nil {
+					xmem.Logger().Errorf("Failed to reserve a slot")
+					xmem.buf.cancelReservation(index, reserv_num)
 					return err
 				}
 
+				//buffer it for now until the receipt is confirmed
+				xmem.Logger().Debugf("And sent item to slot=%d\n", index)
+				err = xmem.buf.enSlot(index, item, reserv_num)
+			default:
+				xmem.Logger().Errorf("Invalid state - expected %d items in the batch; but there are not that much in the data channel", 1)
 			}
-			if xmem.config.mode == Batch_XMEM {
-				xmem.Logger().Debug("Waiting for the confirmation of the batch")
-				<-xmem.batch_done
-				xmem.Logger().Debugf("Batch of count %v is confirmed", count)
+		} else {
 
+			//get the raw connection
+			conn := xmem.memClient.Hijack()
+			defer func() {
+				xmem.memClient, err = mcc.Wrap(conn)
+
+				if err != nil || xmem.memClient == nil {
+					//failed to recycle the connection
+					//reinitialize the connection
+					err = xmem.initializeConnection()
+					if err != nil {
+						xmem.Logger().Errorf("failed to recycle the connection")
+					}
+				}
+
+			}()
+
+			//batch send
+			err = xmem.batchSendWithRetry(batch, conn, xmem.config.maxRetry)
+			if err != nil {
+				return err
 			}
+
+		}
+		if xmem.config.mode == Batch_XMEM {
+			xmem.Logger().Debug("Waiting for the confirmation of the batch")
+			<-xmem.batch_done
+			xmem.Logger().Debugf("Batch of count %v is confirmed", count)
+
 		}
 	default:
 		if xmem.isCurrentBatchExpiring() {
