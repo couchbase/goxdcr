@@ -17,6 +17,7 @@ var options struct {
 	username        string //username on source cluster
 	password        string //password on source cluster	
 	// temp params for mock services. should be removed later
+	targetClusterAddr      string //target cluster addr
 	sourceBucket          string // source bucket
 	targetBucket          string // target bucket
 	numConnPerKV  int    // number of nozzles per source node
@@ -24,7 +25,7 @@ var options struct {
 }
 
 func argParse() {
-	flag.StringVar(&options.sourceClusterAddr, "sourceClusterAddr", "127.0.0.1:9000",
+	flag.StringVar(&options.targetClusterAddr, "targetClusterAddr", "127.0.0.1:9000",
 		"source cluster address")
 	flag.StringVar(&options.username, "username", "Administrator", "username to cluster admin console")
 	flag.StringVar(&options.password, "password", "welcome", "password to Cluster admin console")
@@ -55,7 +56,7 @@ func main() {
 
 	options.sourceClusterAddr = args[0]
 	
-	c.SetTestOptions(options.sourceBucket, options.targetBucket, options.sourceClusterAddr, options.sourceClusterAddr, options.username, options.password, options.numConnPerKV, options.numOutgoingConn)
+	c.SetTestOptions(options.sourceBucket, options.targetBucket, options.sourceClusterAddr, options.targetClusterAddr, options.username, options.password, options.numConnPerKV, options.numOutgoingConn)
 	xdcrTopologyService := new(c.MockXDCRTopologySvc)
 	hostAddr, err := xdcrTopologyService.MyHost()
 	if err != nil {
