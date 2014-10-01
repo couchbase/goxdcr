@@ -296,7 +296,12 @@ func testGetStatistics() error {
 
 func validateResponse(testName string, response *http.Response, err error) error {
 	if err != nil || response.StatusCode != 200 {
-		return errors.New(fmt.Sprintf("Test %v failed. err=%v; response status=%v\n", testName, err, response.Status))
+		errMsg := fmt.Sprintf("Test %v failed. err=%v", err)
+		if response != nil {
+			errMsg += fmt.Sprintf("; response status=%v", response.Status)
+		}
+		errMsg += "\n"
+		return errors.New(errMsg)
 	} 
 	return nil
 }
