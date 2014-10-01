@@ -62,7 +62,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Error getting host address \n")
 		os.Exit(1)
 	}
-	rm.Initialize(new(c.MockMetadataSvc), new(c.MockClusterInfoSvc), xdcrTopologyService, new(c.MockReplicationSettingsSvc))
+	rm.Initialize(c.NewMockMetadataSvc(), new(c.MockClusterInfoSvc), xdcrTopologyService, new(c.MockReplicationSettingsSvc))
 	go ap.MainAdminPort(hostAddr)
 	<-done
 }
