@@ -10,6 +10,7 @@ import (
 	"bytes"
 	"errors"
 	"net/url"
+	"strings"
 	ap "github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/adminport"
 	base "github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/base"
 	rm "github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/replication_manager"
@@ -39,7 +40,7 @@ var options struct {
 	username        string //username
 	password        string //password
 	maxVbno         int    // maximum number of vbuckets
-	kvaddr    string // kv addr. may not need
+	kvaddr          string // kv addr
 }
 
 func argParse() {
@@ -57,7 +58,6 @@ func argParse() {
 		"number of outgoing connections to target")
 	flag.StringVar(&options.username, "username", "Administrator", "username to cluster admin console")
 	flag.StringVar(&options.password, "password", "welcome", "password to Cluster admin console")
-	flag.StringVar(&options.kvaddr, "kvaddr", "localhost", "kv address")
 
 	flag.Parse()
 	args := flag.Args()
@@ -66,6 +66,10 @@ func argParse() {
 		os.Exit(1)
 	}
 	options.connectStr = args[0]
+	
+	// decode kvaddr from cluster addr
+	parts := strings.Split(options.connectStr, ":")
+	options.kvaddr = parts[0]
 }
 
 func usage() {
