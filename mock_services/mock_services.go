@@ -73,7 +73,7 @@ type MockClusterInfoSvc struct {
 }
 
 func (mock_ci_svc *MockClusterInfoSvc) GetClusterConnectionStr(ClusterUUID string) (string, error) {
-	return options.sourceClusterAddr, nil
+	return ClusterUUID, nil
 }
 
 func (mock_ci_svc *MockClusterInfoSvc) GetMyActiveVBuckets(ClusterUUID string, bucketName string, NodeId string) ([]uint16, error) {

@@ -10,6 +10,7 @@ import (
 	"bytes"
 	"errors"
 	"net/url"
+	"strings"
 	ap "github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/adminport"
 	base "github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/base"
 	rm "github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/replication_manager"
@@ -38,15 +39,12 @@ var options struct {
 	numOutgoingConn int    // number of connections to target cluster
 	username        string //username
 	password        string //password
-	maxVbno         int    // maximum number of vbuckets
-	kvaddr    string // kv addr. may not need
+	kvaddr          string // kv addr
 }
 
 func argParse() {
 	flag.StringVar(&options.sourceBucket, "sourceBucket", "default",
 		"bucket to replicate from")
-	flag.IntVar(&options.maxVbno, "maxvb", 8,
-		"maximum number of vbuckets")
 	flag.StringVar(&options.targetBucket, "targetBucket", "target",
 		"bucket to replicate to")
 	flag.StringVar(&options.filterName, "filterName", "myActive",
@@ -57,7 +55,6 @@ func argParse() {
 		"number of outgoing connections to target")
 	flag.StringVar(&options.username, "username", "Administrator", "username to cluster admin console")
 	flag.StringVar(&options.password, "password", "welcome", "password to Cluster admin console")
-	flag.StringVar(&options.kvaddr, "kvaddr", "localhost", "kv address")
 
 	flag.Parse()
 	args := flag.Args()
@@ -66,6 +63,10 @@ func argParse() {
 		os.Exit(1)
 	}
 	options.connectStr = args[0]
+	
+	// decode kvaddr from cluster addr
+	parts := strings.Split(options.connectStr, ":")
+	options.kvaddr = parts[0]
 }
 
 func usage() {
@@ -83,7 +84,7 @@ func main() {
 
 func startAdminport() {
 	c.SetTestOptions(options.sourceBucket, options.targetBucket, options.connectStr, options.connectStr, options.username, options.password, options.numConnPerKV, options.numOutgoingConn)
-	rm.Initialize(new(c.MockMetadataSvc), new(c.MockClusterInfoSvc), new(c.MockXDCRTopologySvc), new(c.MockReplicationSettingsSvc))
+	rm.Initialize(c.NewMockMetadataSvc(), new(c.MockClusterInfoSvc), new(c.MockXDCRTopologySvc), new(c.MockReplicationSettingsSvc))
 
 	go ap.MainAdminPort(options.kvaddr)
 	//wait for server to finish starting
@@ -292,7 +293,12 @@ func testGetStatistics() error {
 
 func validateResponse(testName string, response *http.Response, err error) error {
 	if err != nil || response.StatusCode != 200 {
-		return errors.New(fmt.Sprintf("Test %v failed. err=%v; response status=%v\n", testName, err, response.Status))
+		errMsg := fmt.Sprintf("Test %v failed. err=%v", testName, err)
+		if response != nil {
+			errMsg += fmt.Sprintf("; response status=%v", response.Status)
+		}
+		errMsg += "\n"
+		return errors.New(errMsg)
 	} 
 	return nil
 }
