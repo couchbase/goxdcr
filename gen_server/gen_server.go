@@ -5,7 +5,7 @@ import (
 	"github.com/Xiaomei-Zhang/couchbase_goxdcr/log"
 	utils "github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/utils"
 	"reflect"
-	"sync"
+	"time"
 )
 
 const (
@@ -37,7 +37,6 @@ type GenServer struct {
 	error_handler     *Error_Handler_Func
 
 	isStarted bool
-	startLock sync.RWMutex
 	logger    *log.CommonLogger
 }
 
@@ -48,19 +47,16 @@ func NewGenServer(msg_callback *Msg_Callback_Func,
 	logger_context *log.LoggerContext,
 	module string) GenServer {
 	return GenServer{msgChan: make(chan []interface{}, 1),
-		heartBeatChan:     make(chan []interface{}),
+		heartBeatChan:     make(chan []interface{}, 1),
 		msg_callback:      msg_callback,
 		behavior_callback: behavior_callback,
 		exit_callback:     exit_callback,
 		error_handler:     error_handler,
 		isStarted:         false,
-		startLock:         sync.RWMutex{},
 		logger:            log.NewLogger(module, logger_context)}
 }
 
 func (s *GenServer) Start_server() (err error) {
-	s.startLock.Lock()
-	defer s.startLock.Unlock()
 	defer utils.RecoverPanic(&err)
 
 	go s.run()
@@ -73,13 +69,20 @@ loop:
 	for {
 		select {
 		case heartBeatReq := <-s.heartBeatChan:
-			if err1, respch_heartbeat := s.decodeCmd(cmdHeartBeat, heartBeatReq); err1 == nil {
-				respch_heartbeat <- []interface{}{true}
+			s.logger.Debug("Recieved heart beat message...")
+			if err1, respch_heartbeat, timestamp := s.decodeCmd(cmdHeartBeat, heartBeatReq); err1 == nil {
+				s.logger.Infof("responded heart beat sent at %v\n", timestamp)
+				select {
+				case respch_heartbeat <- []interface{}{true}:
+				default:
+				}
+			} else {
+				s.logger.Errorf("Error decoding heartbeat cmd, err=%v\n", err1)
 			}
 
 		case msg := <-s.msgChan:
-			if err2, respch := s.decodeCmd(cmdStop, msg); err2 == nil {
-				s.logger.Debugf("server is stopped\n")
+			if err2, respch, timestamp := s.decodeCmd(cmdStop, msg); err2 == nil {
+				s.logger.Infof("server is stopped per request sent at %v\n", timestamp)
 				close(s.msgChan)
 				respch <- []interface{}{true}
 				break loop
@@ -90,25 +93,23 @@ loop:
 						//report error
 						s.reportError(err)
 					}
-				} else {
-					s.logger.Debugf("No msg_callback for %s\n", reflect.TypeOf(s).Name())
 				}
 			}
 		default:
 			if (*s.behavior_callback) != nil {
-				err := (*s.behavior_callback)()
-				if err != nil {
-					//report error
-					s.reportError(err)
-				}
-			} else {
-				s.logger.Debugf("No behavior_callback for %s\n", reflect.TypeOf(s).Name())
+				go func() {
+					err := (*s.behavior_callback)()
+					if err != nil {
+						//report error
+						s.reportError(err)
+					}
+				}()
 			}
 
 		}
 	}
 
-	if (*s.exit_callback) != nil {
+	if s.exit_callback != nil && (*s.exit_callback) != nil {
 		(*s.exit_callback)()
 		//probably no need to report error during exitting.
 	} else {
@@ -116,36 +117,31 @@ loop:
 	}
 }
 
-func (s *GenServer) decodeCmd(command int, msg []interface{}) (error, chan []interface{}) {
-	if len(msg) != 2 {
-		return errors.New("Failed to decode command"), nil
+func (s *GenServer) decodeCmd(command int, msg []interface{}) (error, chan []interface{}, time.Time) {
+	if len(msg) != 3 {
+		return errors.New("Failed to decode command"), nil, time.Now()
 	} else {
 		cmd := msg[0].(int)
 		respch := msg[1].(chan []interface{})
+		timestamp := msg[2].(time.Time)
 		if cmd == command {
-			return nil, respch
+			return nil, respch, timestamp
 		} else {
-			return errors.New("Failed to decode command"), nil
+			return errors.New("Failed to decode command"), nil, time.Now()
 		}
 
 	}
 }
 
 func (s *GenServer) IsStarted() bool {
-	s.startLock.RLock()
-	defer s.startLock.RUnlock()
-
 	return s.isStarted
 }
 
 func (s *GenServer) Stop_server() error {
-	s.startLock.Lock()
-	defer s.startLock.Unlock()
-
 	if s.isStarted {
 
 		respChan := make(chan []interface{})
-		s.msgChan <- []interface{}{cmdStop, respChan}
+		s.msgChan <- []interface{}{cmdStop, respChan, time.Now()}
 
 		response := <-respChan
 		succeed := response[0].(bool)
@@ -174,12 +170,13 @@ func (s *GenServer) HeartBeat_sync() bool {
 	return false
 }
 
-func (s *GenServer) HeartBeat_async(respchan chan []interface{}) error {
+func (s *GenServer) HeartBeat_async(respchan chan []interface{}, timestamp time.Time) error {
 	select {
-	case s.heartBeatChan <- []interface{}{cmdHeartBeat, respchan}:
+	case s.heartBeatChan <- []interface{}{cmdHeartBeat, respchan, timestamp}:
+		s.logger.Info("heart beat test")
 		return nil
 	default:
-		s.logger.Info("Last heart beat msg has not been processed")
+		s.logger.Debugf("Last heart beat msg has not been processed, len(heartBeatChan)=%v", len(s.heartBeatChan))
 		return errors.New("Last heart beat msg has not been processed")
 	}
 }
@@ -197,6 +194,6 @@ func (s *GenServer) reportError(err error) {
 	}
 }
 
-func (s *GenServer) SendMsg_async (msg []interface{}) {
+func (s *GenServer) SendMsg_async(msg []interface{}) {
 	s.msgChan <- msg
 }

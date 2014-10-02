@@ -5,6 +5,7 @@ package replication_manager
 import (
 	"errors"
 	"fmt"
+	"github.com/Xiaomei-Zhang/couchbase_goxdcr/common"
 	"github.com/Xiaomei-Zhang/couchbase_goxdcr/log"
 	"github.com/Xiaomei-Zhang/couchbase_goxdcr/pipeline_manager"
 	"github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/base"
@@ -74,11 +75,12 @@ func CreateReplication(sourceClusterUUID string, sourceBucket string, targetClus
 	logger_rm.Infof("Creating replication - sourceCluterUUID=%s, sourceBucket=%s, targetClusterUUID=%s, targetBucket=%s, filterName=%s, settings=%v\n", sourceClusterUUID,
 		sourceBucket, targetClusterUUID, targetBucket, filterName, settings)
 	spec, err := replication_mgr.createAndPersistReplicationSpec(sourceClusterUUID, sourceBucket, targetClusterUUID, targetBucket, filterName, settings)
-	logger_rm.Debugf("replication specification %s is created and persisted\n", spec.Id())
 	if err != nil {
 		logger_rm.Errorf("%v\n", err)
 		return "", err
 	}
+	logger_rm.Debugf("replication specification %s is created and persisted\n", spec.Id())
+
 	_, err = pipeline_manager.StartPipeline(spec.Id(), settings)
 	if err == nil {
 		logger_rm.Debugf("Pipeline %s is started\n", spec.Id())
@@ -185,21 +187,25 @@ func (rm *replicationManager) createAndPersistReplicationSpec(sourceClusterUUID,
 	s, err := metadata.SettingsFromMap(settings)
 	if err == nil {
 		spec.SetSettings(s)
+
+		//persist it
+		rm.metadata_svc.AddReplicationSpec(*spec)
 		return spec, nil
 	} else {
 		return nil, err
 	}
 }
 
-func (rm *replicationManager) OnError(topic string, partsError map[string]error) {
-	logger_rm.Infof("Pipeline %v reported failure. The following parts are broken: %v\n", topic, partsError)
+func (rm *replicationManager) OnError(pipeline common.Pipeline, partsError map[string]error) {
+	logger_rm.Infof("Pipeline %v reported failure. The following parts are broken: %v\n", pipeline.Topic(), partsError)
 
 	//fix the pipeline
-	err := fixPipeline(topic)
+	err := fixPipeline(pipeline)
 
 	if err != nil {
 		logger_rm.Infof("The effort of fixing pipeline %v is failed, err=%v; The retry will happen latter\n",
-			topic, err)
+			pipeline.Topic(), err)
+		panic("Failed to fix pipeline")
 		//TODO: propagate the error to ns_server
 
 		//TODO: schedule the retry
@@ -207,13 +213,25 @@ func (rm *replicationManager) OnError(topic string, partsError map[string]error)
 
 }
 
-func fixPipeline(topic string) error {
-	//pause the replication
-	err := PauseReplication(topic)
-	if err == nil {
-		err = ResumeReplication(topic)
+func fixPipeline(pipeline common.Pipeline) error {
+	pOnFile := pipeline_manager.Pipeline(pipeline.Topic())
+
+	if pOnFile == pipeline {
+		//pause the replication
+		err := PauseReplication(pipeline.Topic())
+		if err == nil {
+			err = ResumeReplication(pipeline.Topic())
+		}
+		if err == nil {
+			logger_rm.Infof("Pipeline %v is fixed, back to business\n", pipeline.Topic())
+		}else {
+			logger_rm.Infof("Failed to fix pipeline %v, err=%v\n", pipeline.Topic(), err)
+		}
+		return err
+	} else {
+		logger_rm.Debug("Ignore the error report, as the error is reported on a pipeline that is not on file")
+		return nil
 	}
-	return err
 }
 
 func SetPipelineLogLevel(topic string, levelStr string) error {

@@ -4,15 +4,16 @@ import (
 	"flag"
 	"fmt"
 	"github.com/Xiaomei-Zhang/couchbase_goxdcr/pipeline_manager"
+	"github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/metadata"
+	c "github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/mock_services"
 	"github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/parts"
 	"github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/replication_manager"
 	"github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/utils"
 	"github.com/couchbaselabs/go-couchbase"
 	"log"
-	"net/http"
+//	"net/http"
 	"os"
 	"time"
-	c "github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/mock_services"
 )
 
 import _ "net/http/pprof"
@@ -75,12 +76,12 @@ func usage() {
 func main() {
 	go func() {
 		log.Println("Try to start pprof...")
-		err := http.ListenAndServe("localhost:7000", nil)
-		if err != nil {
-			panic(err)
-		} else {
-			log.Println("Http server for pprof is started")
-		}
+//		err := http.ListenAndServe("localhost:7000", nil)
+//		if err != nil {
+//			panic(err)
+//		} else {
+//			log.Println("Http server for pprof is started")
+//		}
 	}()
 
 	//	c.SetLogLevel(c.LogLevelTrace)
@@ -95,38 +96,41 @@ func setup() {
 	flushTargetBkt()
 	fmt.Println("Finish setup")
 	c.SetTestOptions(options.source_bucket, options.target_bucket, options.source_cluster_addr, options.target_cluster_addr, options.source_cluster_username, options.source_cluster_password, options.nozzles_per_node_source, options.nozzles_per_node_target)
-	replication_manager.Initialize(c.NewMockMetadataSvc(), new(c.MockClusterInfoSvc), new(c.MockXDCRTopologySvc), new (c.MockReplicationSettingsSvc))
+	replication_manager.Initialize(c.NewMockMetadataSvc(), new(c.MockClusterInfoSvc), new(c.MockXDCRTopologySvc), new(c.MockReplicationSettingsSvc))
 	return
 }
 
 func test() {
-	topic, err := replication_manager.CreateReplication(options.source_cluster_addr, options.source_bucket, options.target_cluster_addr, options.target_bucket, options.target_bucket_password, nil)
+	settings := make(map[string]interface{})
+	settings[metadata.PipelineLogLevel] = "Error"
+	_, err := replication_manager.CreateReplication(options.source_cluster_addr, options.source_bucket, options.target_cluster_addr, options.target_bucket, options.target_bucket_password, settings)
 	if err != nil {
 		fail(fmt.Sprintf("%v", err))
 	}
 	time.Sleep(1 * time.Second)
-	replication_manager.PauseReplication(topic)
-
-	err = replication_manager.SetPipelineLogLevel(topic, "Error")
-	if err != nil {
-		fail(fmt.Sprintf("%v", err))
-	}
-	fmt.Printf("Replication %s is paused\n", topic)
-	time.Sleep(100 * time.Millisecond)
-	err = replication_manager.ResumeReplication(topic)
-	if err != nil {
-		fail(fmt.Sprintf("%v", err))
-	}
-	fmt.Printf("Replication %s is resumed\n", topic)
-	time.Sleep(2 * time.Second)
-	summary(topic)
-
-	err = replication_manager.DeleteReplication(topic)
-	if err != nil {
-		fail(fmt.Sprintf("%v", err))
-	}
-	fmt.Printf("Replication %s is deleted\n", topic)
-	time.Sleep(4 * time.Second)
+	
+//	replication_manager.PauseReplication(topic)
+//
+//	err = replication_manager.SetPipelineLogLevel(topic, "Error")
+//	if err != nil {
+//		fail(fmt.Sprintf("%v", err))
+//	}
+//	fmt.Printf("Replication %s is paused\n", topic)
+//	time.Sleep(100 * time.Millisecond)
+//	err = replication_manager.ResumeReplication(topic)
+//	if err != nil {
+//		fail(fmt.Sprintf("%v", err))
+//	}
+//	fmt.Printf("Replication %s is resumed\n", topic)
+//	time.Sleep(2 * time.Second)
+//	summary(topic)
+//
+//	err = replication_manager.DeleteReplication(topic)
+//	if err != nil {
+//		fail(fmt.Sprintf("%v", err))
+//	}
+//	fmt.Printf("Replication %s is deleted\n", topic)
+	time.Sleep(15 * time.Minute)
 
 }
 
@@ -193,4 +197,3 @@ func flushTargetBkt() {
 	}
 
 }
-

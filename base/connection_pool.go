@@ -164,10 +164,10 @@ func (connPoolMgr *connPoolMgr) CreatePool(poolName string, hostName string, use
 	for i := 0; i < connectionSize; i++ {
 		mcClient, err := newConn(hostName, username, password)
 		if err == nil {
-			connPoolMgr.logger.Infof("A client connection is established")
+			connPoolMgr.logger.Debug("A client connection is established")
 			p.clients <- mcClient
 		} else {
-			connPoolMgr.logger.Infof("error establishing connection with hostname=%s, username=%s, password=%s - %s", hostName, username, password, err)
+			connPoolMgr.logger.Debugf("error establishing connection with hostname=%s, username=%s, password=%s - %s", hostName, username, password, err)
 		}
 
 	}
@@ -217,10 +217,10 @@ func newConn(hostName string, username string, password string) (conn *mcc.Clien
 
 	// authentic using user/pass
 	if len(username) != 0 && username != "default" {
-		_connPoolMgr.logger.Info("Authenticate...")
+		_connPoolMgr.logger.Debug("Authenticate...")
 		_, err = conn.Auth(username, password)
 		if err != nil {
-			_connPoolMgr.logger.Infof("err=%v\n", err)
+			_connPoolMgr.logger.Errorf("err=%v\n", err)
 			conn.Close()
 			return nil, err
 		}

@@ -1,11 +1,8 @@
 package factory
 
 import (
-	"github.com/Xiaomei-Zhang/couchbase_goxdcr/common"
-	"github.com/couchbase/indexing/secondary/protobuf"
-	"math"
-	"strconv"
 	"errors"
+	"github.com/Xiaomei-Zhang/couchbase_goxdcr/common"
 	"github.com/Xiaomei-Zhang/couchbase_goxdcr/log"
 	pp "github.com/Xiaomei-Zhang/couchbase_goxdcr/pipeline"
 	pctx "github.com/Xiaomei-Zhang/couchbase_goxdcr/pipeline_ctx"
@@ -15,7 +12,10 @@ import (
 	"github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/parts"
 	"github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/pipeline_svc"
 	xdcr_pipeline_svc "github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/pipeline_svc"
+	"github.com/couchbase/indexing/secondary/protobuf"
 	sp "github.com/ysui6888/indexing/secondary/projector"
+	"math"
+	"strconv"
 	"time"
 )
 
@@ -27,12 +27,12 @@ const (
 
 // Factory for XDCR pipelines
 type XDCRFactory struct {
-	metadata_svc       metadata_svc.MetadataSvc
-	cluster_info_svc   metadata_svc.ClusterInfoSvc
-	xdcr_topology_svc  metadata_svc.XDCRCompTopologySvc
-	default_logger_ctx *log.LoggerContext
-	pipeline_failure_handler	base.PipelineFailureHandler
-	logger             *log.CommonLogger
+	metadata_svc             metadata_svc.MetadataSvc
+	cluster_info_svc         metadata_svc.ClusterInfoSvc
+	xdcr_topology_svc        metadata_svc.XDCRCompTopologySvc
+	default_logger_ctx       *log.LoggerContext
+	pipeline_failure_handler base.PipelineFailureHandler
+	logger                   *log.CommonLogger
 }
 
 //var xdcrf.logger *log.CommonLogger = log.NewLogger("XDCRFactory", log.LogLevelInfo)
@@ -41,15 +41,15 @@ type XDCRFactory struct {
 func NewXDCRFactory(metadata_svc metadata_svc.MetadataSvc,
 	cluster_info_svc metadata_svc.ClusterInfoSvc,
 	xdcr_topology_svc metadata_svc.XDCRCompTopologySvc,
-	pipeline_default_logger_ctx *log.LoggerContext, 
+	pipeline_default_logger_ctx *log.LoggerContext,
 	factory_logger_ctx *log.LoggerContext,
 	pipeline_failure_handler base.PipelineFailureHandler) *XDCRFactory {
 	return &XDCRFactory{metadata_svc: metadata_svc,
-		cluster_info_svc:   cluster_info_svc,
-		xdcr_topology_svc:  xdcr_topology_svc,
-		default_logger_ctx: pipeline_default_logger_ctx,
-		pipeline_failure_handler:	pipeline_failure_handler,
-		logger:             log.NewLogger("XDCRFactory", factory_logger_ctx)}
+		cluster_info_svc:         cluster_info_svc,
+		xdcr_topology_svc:        xdcr_topology_svc,
+		default_logger_ctx:       pipeline_default_logger_ctx,
+		pipeline_failure_handler: pipeline_failure_handler,
+		logger: log.NewLogger("XDCRFactory", factory_logger_ctx)}
 }
 
 func (xdcrf *XDCRFactory) NewPipeline(topic string) (common.Pipeline, error) {
@@ -90,7 +90,7 @@ func (xdcrf *XDCRFactory) NewPipeline(topic string) (common.Pipeline, error) {
 
 	// construct pipeline
 	pipeline := pp.NewPipelineWithSettingConstructor(topic, sourceNozzles, outNozzles, xdcrf.ConstructSettingsForPart, logger_ctx)
-	if pipelineContext, err := pctx.NewWithCtx(pipeline, logger_ctx); err != nil {
+	if pipelineContext, err := pctx.NewWithSettingConstructor(pipeline, xdcrf.ConstructSettingsForService, logger_ctx); err != nil {
 		return nil, err
 	} else {
 
@@ -346,7 +346,10 @@ func (xdcrf *XDCRFactory) ConstructSettingsForPart(pipeline common.Pipeline, par
 func (xdcrf *XDCRFactory) constructSettingsForXmemNozzle(topic string, settings map[string]interface{}) (map[string]interface{}, error) {
 	xmemSettings := make(map[string]interface{})
 	// TODO this may break
-	repSettings, _ := metadata.SettingsFromMap(settings)
+	repSettings, err := metadata.SettingsFromMap(settings)
+	if err != nil {
+		return nil, err
+	}
 	xmemSettings[parts.XMEM_SETTING_BATCHCOUNT] = repSettings.BatchCount()
 	xmemSettings[parts.XMEM_SETTING_BATCHSIZE] = repSettings.BatchSize()
 	xmemSettings[parts.XMEM_SETTING_TIMEOUT] = xdcrf.getTargetTimeoutEstimate(topic)
@@ -400,4 +403,22 @@ func (xdcrf *XDCRFactory) registerServices(pipeline common.Pipeline, logger_ctx 
 	//register pipeline checkpoint manager
 	ctx.RegisterService(base.CHECKPOINT_MGR_SVC, &xdcr_pipeline_svc.CheckpointManager{})
 	//register pipeline statistics manager
+}
+
+func (xdcrf *XDCRFactory) ConstructSettingsForService(pipeline common.Pipeline, service common.PipelineService, settings map[string]interface{}) (map[string]interface{}, error) {
+	if _, ok := service.(*pipeline_svc.PipelineSupervisor); ok {
+		xdcrf.logger.Debug("Construct settings for PipelineSupervisor")
+		return xdcrf.constructSettingsForSupervisor(pipeline.Topic(), settings)
+	}
+	return settings, nil
+}
+
+func (xdcrf *XDCRFactory) constructSettingsForSupervisor(topic string, settings map[string]interface{}) (map[string]interface{}, error) {
+	s := make(map[string]interface{})
+	repSettings, err := metadata.SettingsFromMap(settings)
+	if err != nil {
+		return nil, err
+	}
+	s[pipeline_svc.PIPELINE_LOG_LEVEL] = repSettings.LogLevel()
+	return s, nil
 }

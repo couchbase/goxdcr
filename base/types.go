@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"reflect"
+	"github.com/Xiaomei-Zhang/couchbase_goxdcr/common"
 )
 
 type SettingDef struct {
@@ -39,5 +40,5 @@ func (se SettingsError) Add(key string, err error) {
 }
 
 type PipelineFailureHandler interface {
-	OnError(topic string, partsError map[string]error)
+	OnError(pipeline common.Pipeline, partsError map[string]error)
 }

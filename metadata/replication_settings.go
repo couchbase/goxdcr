@@ -324,11 +324,11 @@ func (s *ReplicationSettings) UpdateSettingsFromMap(settingsMap map[string]inter
 			}
 			s.SetTimeoutPercentageCap(timeoutPercentageCap)
 		case PipelineLogLevel:
-			l, ok := val.(log.LogLevel)
+			l, ok := val.(string)
 			if !ok {
-				return utils.IncorrectValueTypeInMapError(key, val, "log.LogLevel")
+				return utils.IncorrectValueTypeInMapError(key, val, "string")
 			}
-			s.setLogLevel(l)
+			s.SetLogLevel(l)
 		default:
 			return errors.New(fmt.Sprintf("Invalid key in map, %v", key))
 
@@ -350,8 +350,8 @@ func (s *ReplicationSettings) SetLogLevel(log_level string) error {
 	return err
 }
 
-func (s *ReplicationSettings) setLogLevel (l log.LogLevel)  {
-		s.log_level = l
+func (s *ReplicationSettings) setLogLevel(l log.LogLevel) {
+	s.log_level = l
 }
 
 func (s *ReplicationSettings) ToMap() map[string]interface{} {
@@ -369,6 +369,6 @@ func (s *ReplicationSettings) ToMap() map[string]interface{} {
 	settings_map[TargetNozzlePerNode] = s.TargetNozzlesPerNode()
 	settings_map[MaxExpectedReplicationLag] = s.MaxExpectedReplicationLag()
 	settings_map[TimeoutPercentageCap] = s.TimeoutPercentageCap()
-	settings_map[PipelineLogLevel] = s.LogLevel()
+	settings_map[PipelineLogLevel] = s.LogLevel().String()
 	return settings_map
 }
