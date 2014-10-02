@@ -39,15 +39,12 @@ var options struct {
 	numOutgoingConn int    // number of connections to target cluster
 	username        string //username
 	password        string //password
-	maxVbno         int    // maximum number of vbuckets
 	kvaddr          string // kv addr
 }
 
 func argParse() {
 	flag.StringVar(&options.sourceBucket, "sourceBucket", "default",
 		"bucket to replicate from")
-	flag.IntVar(&options.maxVbno, "maxvb", 8,
-		"maximum number of vbuckets")
 	flag.StringVar(&options.targetBucket, "targetBucket", "target",
 		"bucket to replicate to")
 	flag.StringVar(&options.filterName, "filterName", "myActive",

@@ -379,7 +379,7 @@ func DecodeReplicationIdFromHttpRequest(request *http.Request, pathPrefix string
 
 // encode data in a map into a byte array, which can then be used as 
 // the body part of a http response
-// the assumption is that values in map are of three types: string, int, bool
+// so far only four types are supported: string, int, bool, LogLevel
 // which should be sufficient for almost all cases
 func EncodeMapIntoByteArray(data map[string]interface{}) ([]byte, error) {
 	if len(data) == 0 {
@@ -396,8 +396,10 @@ func EncodeMapIntoByteArray(data map[string]interface{}) ([]byte, error) {
 				strVal = strconv.FormatInt(int64(val.(int)), base.ParseIntBase)
 			case bool:
 				strVal = strconv.FormatBool(val.(bool))
+			case log.LogLevel:
+				strVal = strconv.FormatInt(int64(val.(log.LogLevel)), base.ParseIntBase)
 			default:
-				return nil, utils.IncorrectValueTypeInMapError(key, val, "string/int/bool")
+				return nil, utils.IncorrectValueTypeInMapError(key, val, "string/int/bool/LogLevel")
 		}
 		params.Add(key, strVal)
 	}
