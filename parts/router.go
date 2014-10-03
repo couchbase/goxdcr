@@ -23,27 +23,27 @@ var ErrorInvalidVbMapForRouter = errors.New("vbMap in Router is invalid.")
 // 2. routes MCRequest to downstream parts
 type Router struct {
 	*connector.Router
-	filterExpression  *regexp.Regexp // filter expression
+	filterRegexp  *regexp.Regexp // filter expression
 	vbMap map[uint16]string // pvbno -> partId. This defines the loading balancing strategy of which vbnos would be routed to which part
 	//Debug only, need to be rolled into statistics and monitoring
 	counter map[string]int
 }
 
-func NewRouter(filterExpressionStr  string,
+func NewRouter(filterExpression  string,
 	downStreamParts map[string]common.Part,
 	vbMap map[uint16]string,
 	logger_context *log.LoggerContext) (*Router, error) {
 	// compile filter expression 
-	var filterExpression *regexp.Regexp
+	var filterRegexp *regexp.Regexp
 	var err error
-	if len(filterExpressionStr) > 0 {
-		filterExpression, err = regexp.Compile(filterExpressionStr)
+	if len(filterExpression) > 0 {
+		filterRegexp, err = regexp.Compile(filterExpression)
 		if err != nil {
 			return nil, err
 		}
 	}
 	router := &Router{
-		filterExpression:  filterExpression,
+		filterRegexp:  filterRegexp,
 		vbMap:   vbMap,
 		counter: make(map[string]int)}
 
@@ -111,9 +111,9 @@ func (router *Router) route(data interface{}) (map[string]interface{}, error) {
 		return nil, ErrorInvalidDataForRouter
 	}
 	
-	// filter data if filter expessions has been defined
-	if router.filterExpression != nil { 
-		if !router.filterExpression.Match(uprEvent.Key) {
+	// filter data if filter expession has been defined
+	if router.filterRegexp != nil { 
+		if !router.filterRegexp.Match(uprEvent.Key) {
 			// if data does not match filter expression, drop it. return empty result
 			router.Logger().Debugf("Data with key=%v has been filtered out", string(uprEvent.Key))
 			return result, nil

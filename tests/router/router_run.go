@@ -54,6 +54,7 @@ func argParse() {
 		"maximum number of vbuckets")
 	flag.StringVar(&options.target_bucket, "target_bucket", "target",
 		"bucket to replicate to")
+	// example filter_expression to use: "default-1-1.*"
 	flag.StringVar(&options.filter_expression, "filter_expression", "",
 		"filter expression")
 
@@ -64,7 +65,6 @@ func argParse() {
 		os.Exit(1)
 	}
 	options.connectStr = args[0]
-	filterRegExp, _ = regexp.Compile(options.filter_expression)
 }
 
 func usage() {
@@ -77,6 +77,17 @@ func main() {
 	argParse()
 	fmt.Printf("connectStr=%s\n", options.connectStr)
 	fmt.Println("Done with parsing the arguments")
+	
+	// compile filter expression if needed
+	var err error
+	if len(options.filter_expression) > 0 {
+		filterRegExp, err = regexp.Compile(options.filter_expression)
+		if err != nil {
+			fmt.Println("Error compiling filter expression. ", err.Error())
+			os.Exit(1)
+		}
+	}
+	
 	startRouter()
 	fmt.Println("Router is started")
 	waitGrp := &sync.WaitGroup{}
@@ -113,7 +124,6 @@ func startUpr(cluster, bucketn string, waitGrp *sync.WaitGroup) {
 
 		// let router process the stream
 		count++
-		fmt.Printf("upr data with vbno=%v, key=%v, count=%v\n", e.VBucket, string(e.Key), count)
 		err := router.Forward(e)
 		mf(err, " - route")
 
@@ -216,11 +226,11 @@ func (tp *TestPart) Stop() error {
 }
 
 func (tp *TestPart) Receive(data interface{}) error {
-	routedCount ++
 	request := data.(*mc.MCRequest)
+	routedCount ++
 	fmt.Printf("Part %v received data with vbno=%v, key=%v\n", tp.Id(), request.VBucket, string(request.Key))
-	if !filterRegExp.Match(request.Key) {
-		return errors.New("Data with key=" + string(request.Key) + " has not been filtered out as expected.")
+	if filterRegExp != nil  && !filterRegExp.Match(request.Key) {
+		return errors.New("Data with key=" + string(request.Key) + " has not been filtered out as expected by filter expression=" + options.filter_expression)
 	}
 
 	return nil
