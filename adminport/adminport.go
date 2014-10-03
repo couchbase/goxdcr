@@ -255,7 +255,7 @@ func (h *xdcrRestHandler) doViewReplicationSettingsRequest(request *http.Request
 	}
 	
 	// marshal replication settings in replication spec and return it
-	return NewViewReplicationSettingsResponse(replSpec.Settings())
+	return NewViewReplicationSettingsResponse(replSpec.Settings)
 }
 
 func (h *xdcrRestHandler) doChangeReplicationSettingsRequest(request *http.Request) ([]byte, error) {

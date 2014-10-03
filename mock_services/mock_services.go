@@ -44,9 +44,9 @@ func (mock_meta_svc *MockMetadataSvc) ReplicationSpec(replicationId string) (*me
 	spec, ok := mock_meta_svc.specs[replicationId]
 	if !ok {
 		spec_ptr := metadata.NewReplicationSpecification(options.sourceClusterAddr, options.sourceBucket, options.targetClusterAddr, options.targetBucket, "")
-		settings := spec_ptr.Settings()
-		settings.SetTargetNozzlesPerNode(options.numOutgoingConn)
-		settings.SetSourceNozzlesPerNode(options.numConnPerKV)
+		settings := spec_ptr.Settings
+		settings.TargetNozzlePerNode = options.numOutgoingConn
+		settings.SourceNozzlePerNode = options.numConnPerKV
 		mock_meta_svc.specs[replicationId] = *spec_ptr
 		return spec_ptr, nil
 	}else {
@@ -55,12 +55,12 @@ func (mock_meta_svc *MockMetadataSvc) ReplicationSpec(replicationId string) (*me
 }
 
 func (mock_meta_svc *MockMetadataSvc) AddReplicationSpec(spec metadata.ReplicationSpecification) error {
-	mock_meta_svc.specs[spec.Id()] = spec
+	mock_meta_svc.specs[spec.Id] = spec
 	return nil
 }
 
 func (mock_meta_svc *MockMetadataSvc) SetReplicationSpec(spec metadata.ReplicationSpecification) error {
-	mock_meta_svc.specs[spec.Id()] = spec
+	mock_meta_svc.specs[spec.Id] = spec
 	return nil
 }
 

@@ -79,12 +79,12 @@ func CreateReplication(sourceClusterUUID string, sourceBucket string, targetClus
 		logger_rm.Errorf("%v\n", err)
 		return "", err
 	}
-	logger_rm.Debugf("replication specification %s is created and persisted\n", spec.Id())
+	logger_rm.Debugf("replication specification %s is created and persisted\n", spec.Id)
 
-	_, err = pipeline_manager.StartPipeline(spec.Id(), settings)
+	_, err = pipeline_manager.StartPipeline(spec.Id, settings)
 	if err == nil {
-		logger_rm.Debugf("Pipeline %s is started\n", spec.Id())
-		return spec.Id(), err
+		logger_rm.Debugf("Pipeline %s is started\n", spec.Id)
+		return spec.Id, err
 	} else {
 		logger_rm.Errorf("%v\n", err)
 		return "", err
@@ -112,8 +112,8 @@ func PauseReplication(topic string) error {
 		return err
 	}
 
-	settings := spec.Settings()
-	settings.SetActive(false)
+	settings := spec.Settings
+	settings.Active = false
 	err = replication_mgr.metadata_svc.SetReplicationSpec(*spec)
 	logger_rm.Debugf("Replication specification %s is set to active=false\n", topic)
 	return err
@@ -127,7 +127,7 @@ func ResumeReplication(topic string) error {
 		return err
 	}
 
-	settings := spec.Settings()
+	settings := spec.Settings
 	settingsMap := settings.ToMap()
 	_, err = pipeline_manager.StartPipeline(topic, settingsMap)
 	if err != nil {
@@ -136,7 +136,7 @@ func ResumeReplication(topic string) error {
 	}
 	logger_rm.Debugf("Pipeline %s is started", topic)
 
-	settings.SetActive(true)
+	settings.Active = true
 	err = replication_mgr.metadata_svc.SetReplicationSpec(*spec)
 	if err == nil {
 		logger_rm.Debugf("Replication specification %s is updated with active=true\n", topic)
@@ -172,7 +172,7 @@ func HandleChangesToReplicationSettings(topic string, settings map[string]interf
 	}
 
 	// update replication spec with input settings
-	replSpec.Settings().UpdateSettingsFromMap(settings)
+	replSpec.Settings.UpdateSettingsFromMap(settings)
 	err = MetadataService().SetReplicationSpec(*replSpec)
 
 	// TODO implement additional logic, e.g.,
@@ -192,7 +192,7 @@ func (rm *replicationManager) createAndPersistReplicationSpec(sourceClusterUUID,
 	spec := metadata.NewReplicationSpecification(sourceClusterUUID, sourceBucket, targetClusterUUID, targetBucket, filterName)
 	s, err := metadata.SettingsFromMap(settings)
 	if err == nil {
-		spec.SetSettings(s)
+		spec.Settings = s
 
 		//persist it
 		rm.metadata_svc.AddReplicationSpec(*spec)
@@ -249,7 +249,7 @@ func SetPipelineLogLevel(topic string, levelStr string) error {
 		return errors.New(fmt.Sprintf("Failed to lookup replication specification %v, err=%v", topic, err))
 	}
 
-	settings := spec.Settings()
+	settings := spec.Settings
 	err = settings.SetLogLevel(levelStr)
 	if err != nil {
 		return err
