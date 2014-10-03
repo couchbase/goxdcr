@@ -92,6 +92,12 @@ func CreateReplication(sourceClusterUUID string, sourceBucket string, targetClus
 }
 
 func PauseReplication(topic string) error {
+	defer func () {
+		if r := recover(); r != nil {
+			logger_rm.Errorf("PauseReplication on pipeline %v panic: %v\n", topic, r)
+		}
+	}()
+	
 	logger_rm.Infof("Pausing replication %s\n", topic)
 	err := pipeline_manager.StopPipeline(topic)
 	if err != nil {
