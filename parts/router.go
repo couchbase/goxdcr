@@ -3,6 +3,7 @@ package parts
 import (
 	"encoding/binary"
 	"errors"
+	"regexp"
 	common "github.com/Xiaomei-Zhang/couchbase_goxdcr/common"
 	connector "github.com/Xiaomei-Zhang/couchbase_goxdcr/connector"
 	"github.com/Xiaomei-Zhang/couchbase_goxdcr/log"
@@ -22,15 +23,27 @@ var ErrorInvalidVbMapForRouter = errors.New("vbMap in Router is invalid.")
 // 2. routes MCRequest to downstream parts
 type Router struct {
 	*connector.Router
+	filterExpression  *regexp.Regexp // filter expression
 	vbMap map[uint16]string // pvbno -> partId. This defines the loading balancing strategy of which vbnos would be routed to which part
 	//Debug only, need to be rolled into statistics and monitoring
 	counter map[string]int
 }
 
-func NewRouter(downStreamParts map[string]common.Part,
+func NewRouter(filterExpressionStr  string,
+	downStreamParts map[string]common.Part,
 	vbMap map[uint16]string,
 	logger_context *log.LoggerContext) (*Router, error) {
+	// compile filter expression 
+	var filterExpression *regexp.Regexp
+	var err error
+	if len(filterExpressionStr) > 0 {
+		filterExpression, err = regexp.Compile(filterExpressionStr)
+		if err != nil {
+			return nil, err
+		}
+	}
 	router := &Router{
+		filterExpression:  filterExpression,
 		vbMap:   vbMap,
 		counter: make(map[string]int)}
 
@@ -90,10 +103,21 @@ func ComposeMCRequest(event *mcc.UprEvent) *mc.MCRequest {
 // Implementation of the routing algorithm
 // Currently doing static dispatching based on vbucket number.
 func (router *Router) route(data interface{}) (map[string]interface{}, error) {
+	result := make(map[string]interface{})
+	
 	// only *mc.UprEvent type data is accepted
 	uprEvent, ok := data.(*mcc.UprEvent)
 	if !ok {
 		return nil, ErrorInvalidDataForRouter
+	}
+	
+	// filter data if filter expessions has been defined
+	if router.filterExpression != nil { 
+		if !router.filterExpression.Match(uprEvent.Key) {
+			// if data does not match filter expression, drop it. return empty result
+			router.Logger().Debugf("Data with key=%v has been filtered out", string(uprEvent.Key))
+			return result, nil
+		}
 	}
 
 	if router.vbMap == nil {
@@ -108,7 +132,6 @@ func (router *Router) route(data interface{}) (map[string]interface{}, error) {
 
 	router.Logger().Debugf("Data with vbno=%d, opCode=%v is routed to downstream part %s", uprEvent.VBucket, uprEvent.Opcode, partId)
 
-	result := make(map[string]interface{})
 	switch uprEvent.Opcode {
 	case mcc.UprMutation, mcc.UprDeletion, mcc.UprExpiration:
 		result[partId] = ComposeMCRequest(uprEvent)

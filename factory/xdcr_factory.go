@@ -252,7 +252,7 @@ func (xdcrf *XDCRFactory) constructRouter(spec *metadata.ReplicationSpecificatio
 	downStreamParts map[string]common.Part,
 	vbNozzleMap map[uint16]string,
 	logger_ctx *log.LoggerContext) (*parts.Router, error) {
-	router, err := parts.NewRouter(downStreamParts, vbNozzleMap, logger_ctx)
+	router, err := parts.NewRouter(spec.Settings.FilterExpression, downStreamParts, vbNozzleMap, logger_ctx)
 	xdcrf.logger.Infof("Constructed router")
 	return router, err
 }
