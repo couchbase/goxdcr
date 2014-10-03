@@ -118,19 +118,11 @@ func (xdcrf *XDCRFactory) constructSourceNozzles(spec *metadata.ReplicationSpeci
 	}
 	xdcrf.logger.Debugf("kvaddrs=%v\n", kvaddrs)
 
-	bucketName, err := spec.SourceBucketName()
-	if err != nil {
-		xdcrf.logger.Errorf("err=%v\n", err)
-		return nil, err
-	}
+	bucketName:= spec.SourceBucketName
 
-	sourceClusterUUID, err := spec.SourceClusterUUID()
+	sourceClusterUUID := spec.SourceClusterUUID
 
-	if err != nil {
-		xdcrf.logger.Errorf("err=%v\n", err)
-		return nil, err
-	}
-	maxNozzlesPerNode := spec.Settings().SourceNozzlesPerNode()
+	maxNozzlesPerNode := spec.Settings.SourceNozzlePerNode
 
 	serverVBMap, err := xdcrf.cluster_info_svc.GetServerVBucketsMap(sourceClusterUUID, bucketName)
 	if err != nil {
@@ -194,16 +186,8 @@ func (xdcrf *XDCRFactory) constructOutgoingNozzles(spec *metadata.ReplicationSpe
 	vbNozzleMap := make(map[uint16]string)
 
 	//	kvVBMap, bucketPwd, err := (*xdcr_factory.get_target_topology_callback)(config.TargetCluster, config.TargetBucketn)
-	targetClusterUUID, err := spec.TargetClusterUUID()
-	if err != nil {
-		xdcrf.logger.Errorf("Error getting target cluster uuid, err=%v\n", err)
-		return nil, nil, err
-	}
-	targetBucketName, err := spec.TargetBucketName()
-	if err != nil {
-		xdcrf.logger.Errorf("Error getting bucket name, err=%v\n", err)
-		return nil, nil, err
-	}
+	targetClusterUUID:= spec.TargetClusterUUID
+	targetBucketName := spec.TargetBucketName
 
 	kvVBMap, err := xdcrf.cluster_info_svc.GetServerVBucketsMap(targetClusterUUID, targetBucketName)
 	if err != nil {
@@ -218,7 +202,7 @@ func (xdcrf *XDCRFactory) constructOutgoingNozzles(spec *metadata.ReplicationSpe
 	}
 
 	bucketPwd := targetBucket.Password
-	maxTargetNozzlePerNode := spec.Settings().TargetNozzlesPerNode()
+	maxTargetNozzlePerNode := spec.Settings.TargetNozzlePerNode
 	xdcrf.logger.Debugf("Target topology retrived. kvVBMap = %v\n", kvVBMap)
 
 	for kvaddr, kvVBList := range kvVBMap {
@@ -350,8 +334,8 @@ func (xdcrf *XDCRFactory) constructSettingsForXmemNozzle(topic string, settings 
 	if err != nil {
 		return nil, err
 	}
-	xmemSettings[parts.XMEM_SETTING_BATCHCOUNT] = repSettings.BatchCount()
-	xmemSettings[parts.XMEM_SETTING_BATCHSIZE] = repSettings.BatchSize()
+	xmemSettings[parts.XMEM_SETTING_BATCHCOUNT] = repSettings.BatchCount
+	xmemSettings[parts.XMEM_SETTING_BATCHSIZE] = repSettings.BatchSize
 	xmemSettings[parts.XMEM_SETTING_TIMEOUT] = xdcrf.getTargetTimeoutEstimate(topic)
 
 	return xmemSettings, nil
@@ -378,10 +362,7 @@ func (xdcrf *XDCRFactory) constructSettingsForKVFeed(pipeline common.Pipeline, p
 	xdcrf.logger.Debugf("start sequence number is %v\n", startSeqNums)
 	spec, err := xdcrf.metadata_svc.ReplicationSpec(topic)
 	if err == nil {
-		sourceBucketName, err := spec.SourceBucketName()
-		if err != nil {
-			return kvFeedSettings, nil
-		}
+		sourceBucketName := spec.SourceBucketName
 
 		vbList := part.GetVBList()
 		tsVb := protobuf.NewTsVbuuid(sourceBucketName, len(vbList))
@@ -419,6 +400,6 @@ func (xdcrf *XDCRFactory) constructSettingsForSupervisor(topic string, settings 
 	if err != nil {
 		return nil, err
 	}
-	s[pipeline_svc.PIPELINE_LOG_LEVEL] = repSettings.LogLevel()
+	s[pipeline_svc.PIPELINE_LOG_LEVEL] = repSettings.LogLevel
 	return s, nil
 }

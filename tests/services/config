@@ -1,0 +1,8 @@
+{
+"Host" : {
+        "ElectionAddr" : "localhost:5001",
+        "MessageAddr"  : "localhost:5002",
+        "RequestAddr"  : "localhost:5003"
+        },
+"Peer" : []
+}

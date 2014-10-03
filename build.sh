@@ -33,6 +33,10 @@ cd ../pipeline
 go clean
 go install
 cd ..
+cd ../services
+go clean
+go install
+cd ..
 echo "Done"
 }
 
@@ -58,6 +62,9 @@ go clean
 cd ../kvfeed
 go clean
 cd ../pipeline
+go clean
+cd ..
+cd ../services
 go clean
 cd ..
 echo "Done"
