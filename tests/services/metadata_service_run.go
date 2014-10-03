@@ -44,34 +44,52 @@ func main() {
 	fmt.Printf("host addr=%s\n", options.hostAddr)
 	fmt.Println("Done with parsing the arguments")
 	
-	go startGometaService()
+	cmd, err := startGometaService()
+	if err != nil {
+		fmt.Println("Test failed. err: ", err)
+		return
+	}
+	err = cmd.Start()
+	if err != nil {
+		fmt.Println("Test failed. err: ", err)
+		return
+	}
+	fmt.Println("started gometa service.")
+	
 	//wait for gometa service to finish starting
 	time.Sleep(time.Second * 3)
 	
-	err := startMetadataService()
+	// start and test metadata service
+	err = startMetadataService()
 	if err != nil {
 		fmt.Println("Test failed. err: ", err)
 	} else {
 		fmt.Println("Test passed.") 
 	}
+	
+	// kill the gometa service
+	if err = cmd.Process.Kill(); err != nil {
+		fmt.Println("failed to kill gometa service. Please kill it manually")
+	} else {
+		fmt.Println("killed gometa service successfully")
+	}
 }
 
 // start the gometa service, which the metadata service depends on
-func startGometaService() {
-	gopath := os.Getenv("GOPATH")
-	/* auto-building gometa executable is not yet working
-	//opath := gopath + "/bin/" + gometaExecutableName
-	opath := "/Users/yu/goprojects/bin/gometa"
-	//spath := gopath + "/src/github.com/couchbase/gometa/main/*.go"
-	spath := "/Users/yu/goprojects/src/github.com/couchbase/gometa/main/*.go"
-	// build gometa executable
-	err := exec.Command("/usr/local/go/bin/go", "build",  "-o", opath, spath).Run()
+func startGometaService() (*exec.Cmd, error) {
+	goPath := os.Getenv("GOPATH")
+	
+	
+	objPath := goPath + "bin/gometa"
+	srcPath := "/Users/yu/goprojects/src/github.com/couchbase/gometa/main/*.go"
+	output, err := exec.Command("/bin/bash", "-c", "go build -o " + objPath + " " + srcPath).CombinedOutput()
 	if err != nil {
-		fmt.Println("build failed. err: ", err)
-		return
-	}*/
-	// run gometa executable to start server
-	exec.Command(gopath + "/bin/gometa", "-config", gopath + "/src/github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/tests/services/config").Run()
+		fmt.Println("Failed to build gometa. output:", string(output))
+		return nil, err
+	}
+
+	// build command to run gometa executable to start server
+	return exec.Command(objPath, "-config", goPath + "/src/github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/tests/services/config"), nil
 }
 
 func startMetadataService() error {
