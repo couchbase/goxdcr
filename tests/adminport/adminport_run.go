@@ -15,6 +15,7 @@ import (
 	base "github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/base"
 	rm "github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/replication_manager"
 	c "github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/mock_services"
+	s "github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/services"
 	pm "github.com/Xiaomei-Zhang/couchbase_goxdcr/pipeline_manager"
 )
 
@@ -84,7 +85,22 @@ func main() {
 
 func startAdminport() {
 	c.SetTestOptions(options.sourceBucket, options.targetBucket, options.connectStr, options.connectStr, options.username, options.password, options.numConnPerKV, options.numOutgoingConn)
-	rm.Initialize(c.NewMockMetadataSvc(), new(c.MockClusterInfoSvc), new(c.MockXDCRTopologySvc), new(c.MockReplicationSettingsSvc))
+	
+	cmd, err := s.StartGometaService()
+	if err != nil {
+		fmt.Println("Test failed. err: ", err)
+		return
+	}
+	
+	defer s.KillGometaService(cmd)
+	
+	metadata_svc, err := s.DefaultMetadataSvc()
+	if err != nil {
+		fmt.Println("Test failed. err: ", err)
+		return
+	}
+	
+	rm.Initialize(metadata_svc, new(c.MockClusterInfoSvc), new(c.MockXDCRTopologySvc), new(c.MockReplicationSettingsSvc))
 
 	go ap.MainAdminPort(options.kvaddr)
 	//wait for server to finish starting

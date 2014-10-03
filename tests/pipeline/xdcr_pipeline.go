@@ -6,6 +6,7 @@ import (
 	"github.com/Xiaomei-Zhang/couchbase_goxdcr/pipeline_manager"
 	"github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/metadata"
 	c "github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/mock_services"
+	s "github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/services"
 	"github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/parts"
 	"github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/replication_manager"
 	"github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/utils"
@@ -58,7 +59,7 @@ func argParse() {
 		"user name to use for logging into target cluster")
 	flag.StringVar(&options.target_cluster_password, "target_cluster_password", "welcome",
 		"password to use for logging into target cluster")
-	flag.StringVar(&options.target_bucket_password, "target_bucket_password", "welcome",
+	flag.StringVar(&options.target_bucket_password, "target_bucket_password", "",
 		"password to use for accessing target bucket")
 	flag.IntVar(&options.nozzles_per_node_source, "nozzles_per_node_source", NUM_SOURCE_CONN,
 		"number of nozzles per source node")
@@ -87,17 +88,36 @@ func main() {
 	//	c.SetLogLevel(c.LogLevelTrace)
 	fmt.Println("Start Testing ...")
 	argParse()
-	setup()
+	
+	// set up gometa service
+	cmd, err := s.StartGometaService()
+	if err != nil {
+		fmt.Println("Test failed. err: ", err)
+		return
+	}
+	
+	defer s.KillGometaService(cmd)
+	
+	err = setup()
+	if err != nil {
+		fmt.Println("Test failed. err: ", err)
+		return
+	}
+	
 	test()
 	verify()
 }
 
-func setup() {
+func setup() error {
 	flushTargetBkt()
 	fmt.Println("Finish setup")
 	c.SetTestOptions(options.source_bucket, options.target_bucket, options.source_cluster_addr, options.target_cluster_addr, options.source_cluster_username, options.source_cluster_password, options.nozzles_per_node_source, options.nozzles_per_node_target)
-	replication_manager.Initialize(c.NewMockMetadataSvc(), new(c.MockClusterInfoSvc), new(c.MockXDCRTopologySvc), new(c.MockReplicationSettingsSvc))
-	return
+	metadata_svc, err := s.DefaultMetadataSvc()
+	if err != nil {
+		return err
+	}
+	replication_manager.Initialize(metadata_svc, new(c.MockClusterInfoSvc), new(c.MockXDCRTopologySvc), new(c.MockReplicationSettingsSvc))
+	return nil
 }
 
 func test() {
@@ -130,7 +150,7 @@ func test() {
 //		fail(fmt.Sprintf("%v", err))
 //	}
 //	fmt.Printf("Replication %s is deleted\n", topic)
-	time.Sleep(15 * time.Minute)
+	//time.Sleep(15 * time.Minute)
 
 }
 

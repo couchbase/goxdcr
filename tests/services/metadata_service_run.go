@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"os"
 	"errors"
-	"os/exec"
-	"time"
 	metadata "github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/metadata"
 	s "github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/services"
 )
@@ -24,15 +22,6 @@ const(
 	 newBatchCount = 345
 )
 
-var options struct {
-	hostAddr          string // host addr
-}
-
-func argParse() {
-    // host address has to be consistent with that in the config file. There is no need or use to make it configurable.
-	options.hostAddr = "localhost:5003"
-}
-
 func usage() {
 	fmt.Fprintf(os.Stderr, "Usage : %s \n", os.Args[0])
 	flag.PrintDefaults()
@@ -40,24 +29,13 @@ func usage() {
 
 func main() {
 	fmt.Println("Start Testing metadata service ...")
-	argParse()
-	fmt.Printf("host addr=%s\n", options.hostAddr)
-	fmt.Println("Done with parsing the arguments")
 	
-	cmd, err := startGometaService()
+	cmd, err := s.StartGometaService()
 	if err != nil {
 		fmt.Println("Test failed. err: ", err)
 		return
 	}
-	err = cmd.Start()
-	if err != nil {
-		fmt.Println("Test failed. err: ", err)
-		return
-	}
-	fmt.Println("started gometa service.")
-	
-	//wait for gometa service to finish starting
-	time.Sleep(time.Second * 3)
+	defer s.KillGometaService(cmd)
 	
 	// start and test metadata service
 	err = startMetadataService()
@@ -66,36 +44,12 @@ func main() {
 	} else {
 		fmt.Println("Test passed.") 
 	}
-	
-	// kill the gometa service
-	if err = cmd.Process.Kill(); err != nil {
-		fmt.Println("failed to kill gometa service. Please kill it manually")
-	} else {
-		fmt.Println("killed gometa service successfully")
-	}
-}
-
-// start the gometa service, which the metadata service depends on
-func startGometaService() (*exec.Cmd, error) {
-	goPath := os.Getenv("GOPATH")
-	
-	
-	objPath := goPath + "bin/gometa"
-	srcPath := "/Users/yu/goprojects/src/github.com/couchbase/gometa/main/*.go"
-	output, err := exec.Command("/bin/bash", "-c", "go build -o " + objPath + " " + srcPath).CombinedOutput()
-	if err != nil {
-		fmt.Println("Failed to build gometa. output:", string(output))
-		return nil, err
-	}
-
-	// build command to run gometa executable to start server
-	return exec.Command(objPath, "-config", goPath + "/src/github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/tests/services/config"), nil
 }
 
 func startMetadataService() error {
-	service, err := s.NewMetadataSvc(options.hostAddr, nil)
+	service, err := s.DefaultMetadataSvc()
 	if err != nil {
-		return errors.New("Error starting metadata service.")
+		return errors.New(fmt.Sprintf("Error starting metadata service. err=%v\n", err.Error()))
 	}
 	
 	// create a test replication spec
