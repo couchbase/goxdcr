@@ -4,6 +4,10 @@ package services
 import (
 	"encoding/json"
 	"net/rpc"
+	"os"
+	"os/exec"
+	"fmt"
+	"time"
 	"github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/metadata"
 	"github.com/couchbase/gometa/server"
 	"github.com/couchbase/gometa/common"
@@ -18,7 +22,23 @@ type MetadataSvc struct {
 	logger      *log.CommonLogger
 }
 
-func NewMetadataSvc(hostAddr string, logger_ctx *log.LoggerContext,) (*MetadataSvc, error) {
+func DefaultMetadataSvc() (*MetadataSvc, error) {
+	meta_svc := &MetadataSvc{
+					hostAddr:  "localhost:5003",  
+					logger:    log.NewLogger("MetadataService", nil),
+					}
+		
+	client, err := rpc.DialHTTP("tcp", meta_svc.hostAddr)
+	if err == nil {
+		meta_svc.client = client
+		meta_svc.logger.Infof("Metdata service started with host=%v\n", meta_svc.hostAddr)
+		return meta_svc, nil
+	} else {
+		return nil, err
+	}
+}
+
+func NewMetadataSvc(hostAddr string, logger_ctx *log.LoggerContext) (*MetadataSvc, error) {
 	meta_svc := &MetadataSvc{
 					hostAddr:  hostAddr,  
 					logger:    log.NewLogger("MetadataService", logger_ctx),
@@ -81,5 +101,42 @@ func (meta_svc *MetadataSvc) sendRequest(opCode, key string, value []byte) ([]by
 		return nil, err
 	} else {
 		return reply.Result, err
+	}
+}
+
+// utility methods for starting and killing the gometa service which the metadata service depends on. 
+// mostly for testing
+
+// start the gometa service
+func StartGometaService() (*exec.Cmd, error) {
+	goPath := os.Getenv("GOPATH")
+	
+	objPath := goPath + "/bin/gometa"
+	srcPath := goPath + "/src/github.com/couchbase/gometa/main/*.go"
+	err := exec.Command("/bin/bash", "-c", "go build -o " + objPath + " " + srcPath).Run()
+	if err != nil {
+		return nil, err
+	}
+
+	// run gometa executable to start server
+	cmd := exec.Command(objPath, "-config", goPath + "/src/github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/services/metadata_svc_config")
+	err = cmd.Start()
+	if err != nil {
+		return nil, err
+	}
+	
+	//wait for gometa service to finish starting
+	time.Sleep(time.Second * 3)
+	
+	fmt.Println("started gometa service.")
+	return cmd, nil
+}
+
+// kill the gometa service
+func KillGometaService(cmd *exec.Cmd) {
+	if err := cmd.Process.Kill(); err != nil {
+		fmt.Println("failed to kill gometa service. Please kill it manually")
+	} else {
+		fmt.Println("killed gometa service successfully")
 	}
 }

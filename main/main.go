@@ -8,6 +8,7 @@ import (
 	ap "github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/adminport"
 	rm "github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/replication_manager"
 	c "github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/mock_services"
+	s "github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/services"
 )
 
 var done = make(chan bool)
@@ -56,14 +57,29 @@ func main() {
 
 	options.sourceClusterAddr = args[0]
 	
+	cmd, err := s.StartGometaService()
+	if err != nil {
+		fmt.Println("Failed to start gometa service. err: ", err)
+		os.Exit(1)
+	}
+	defer s.KillGometaService(cmd)
+	
 	c.SetTestOptions(options.sourceBucket, options.targetBucket, options.sourceClusterAddr, options.targetClusterAddr, options.username, options.password, options.numConnPerKV, options.numOutgoingConn)
+		
 	xdcrTopologyService := new(c.MockXDCRTopologySvc)
 	hostAddr, err := xdcrTopologyService.MyHost()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error getting host address \n")
 		os.Exit(1)
 	}
-	rm.Initialize(c.NewMockMetadataSvc(), new(c.MockClusterInfoSvc), xdcrTopologyService, new(c.MockReplicationSettingsSvc))
+	
+	metadata_svc, err := s.DefaultMetadataSvc()
+	if err != nil {
+		fmt.Println("Error starting metadata service. ", err.Error())
+		os.Exit(1)
+	}
+	
+	rm.Initialize(metadata_svc, new(c.MockClusterInfoSvc), xdcrTopologyService, new(c.MockReplicationSettingsSvc))
 	go ap.MainAdminPort(hostAddr)
 	<-done
 }

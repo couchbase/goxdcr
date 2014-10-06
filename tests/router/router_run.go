@@ -1,4 +1,4 @@
-// Tool receives raw events from go-couchbase UPR client.
+// test for xdcr router
 package main
 
 import (
@@ -16,6 +16,8 @@ import (
 	"os"
 	"strconv"
 	"sync"
+	"regexp"
+	"errors"
 )
 
 var options struct {
@@ -25,20 +27,23 @@ var options struct {
 	username      string //username
 	password      string //password
 	maxVbno       int    // maximum number of vbuckets
+	filter_expression    string  //filter expression
 }
 
 var done = make(chan bool, 16)
 var rch = make(chan []interface{}, 10000)
 var uprFeed *couchbase.UprFeed = nil
 var router *parts.Router = nil
+var filterRegExp *regexp.Regexp
+var routedCount int
 
 const (
 	// total number of parts to route data to
-	NUM_PARTS = 3
+	NumParts = 3
 	// total number of data points to be routed
-	NUM_DATA = 100
+	NumData = 100
 	// prefix for part id
-	PART_ID_PREFIX = "part"
+	PartIdPrefix = "part"
 )
 
 func argParse() {
@@ -49,6 +54,9 @@ func argParse() {
 		"maximum number of vbuckets")
 	flag.StringVar(&options.target_bucket, "target_bucket", "target",
 		"bucket to replicate to")
+	// example filter_expression to use: "default-1-1.*"
+	flag.StringVar(&options.filter_expression, "filter_expression", "",
+		"filter expression")
 
 	flag.Parse()
 	args := flag.Args()
@@ -69,6 +77,17 @@ func main() {
 	argParse()
 	fmt.Printf("connectStr=%s\n", options.connectStr)
 	fmt.Println("Done with parsing the arguments")
+	
+	// compile filter expression if needed
+	var err error
+	if len(options.filter_expression) > 0 {
+		filterRegExp, err = regexp.Compile(options.filter_expression)
+		if err != nil {
+			fmt.Println("Error compiling filter expression. ", err.Error())
+			os.Exit(1)
+		}
+	}
+	
 	startRouter()
 	fmt.Println("Router is started")
 	waitGrp := &sync.WaitGroup{}
@@ -105,15 +124,16 @@ func startUpr(cluster, bucketn string, waitGrp *sync.WaitGroup) {
 
 		// let router process the stream
 		count++
-		fmt.Println("Number of upr event received so far is %d", count)
 		err := router.Forward(e)
 		mf(err, " - route")
 
-		if count >= NUM_DATA {
+		if count >= NumData {
 			break
 		}
 
 	}
+	
+	fmt.Printf("Number of upr event routed is %d\n", routedCount)
 
 	//close the upr stream
 	uprFeed.Close()
@@ -153,12 +173,12 @@ func mf(err error, msg string) {
 func startRouter() {
 
 	partMap := make(map[string]pc.Part)
-	for i := 0; i < NUM_PARTS; i++ {
-		partId := PART_ID_PREFIX + strconv.FormatInt(int64(i), 10)
+	for i := 0; i < NumParts; i++ {
+		partId := PartIdPrefix + strconv.FormatInt(int64(i), 10)
 		partMap[partId] = NewTestPart(partId)
 	}
 
-	router, _ = parts.NewRouter(partMap, buildVbMap(partMap), couchlog.DefaultLoggerContext)
+	router, _ = parts.NewRouter(options.filter_expression, partMap, buildVbMap(partMap), couchlog.DefaultLoggerContext)
 }
 
 func buildVbMap(downStreamParts map[string]pc.Part) map[uint16]string {
@@ -206,7 +226,12 @@ func (tp *TestPart) Stop() error {
 }
 
 func (tp *TestPart) Receive(data interface{}) error {
-	fmt.Println("Part %v received data with vbno %v", tp.Id(), data.(*mc.MCRequest).VBucket)
+	request := data.(*mc.MCRequest)
+	routedCount ++
+	fmt.Printf("Part %v received data with vbno=%v, key=%v\n", tp.Id(), request.VBucket, string(request.Key))
+	if filterRegExp != nil  && !filterRegExp.Match(request.Key) {
+		return errors.New("Data with key=" + string(request.Key) + " has not been filtered out as expected by filter expression=" + options.filter_expression)
+	}
 
 	return nil
 }
