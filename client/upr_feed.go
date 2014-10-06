@@ -15,50 +15,29 @@ import (
 	"sync"
 )
 
-// Upr opcode values.
-const (
-	UprOpen = UprOpcode(iota)
-	UprAddStream
-	UprCloseStream
-	UprFailoverLog
-	UprStreamRequest
-	UprStreamEnd // TODO: TBD: it is now used by secondary index projector
-	UprSnapshot
-	UprMutation
-	UprDeletion
-	UprExpiration
-	UprFlush
-	UprControl
-	UprBufferAck
-	UprNoop
-)
-
 const uprMutationExtraLen = 16
 const bufferAckThreshold = 0.2
 const opaqueOpen = 0xBEAF0001
 const opaqueFailover = 0xDEADBEEF
 
-// UprOpcode is the upr operation type (found in UprEvent)
-type UprOpcode uint8
-
 // UprEvent memcached events for UPR streams.
 type UprEvent struct {
-	Opcode       UprOpcode          // Type of event
-	Status       gomemcached.Status // Response status
-	VBucket      uint16             // VBucket this event applies to
-	Opaque       uint32             // 16 MSB of opaque
-	VBuuid       uint64             // This field is set by downstream
-	Flags        uint32             // Item flags
-	Expiry       uint32             // Item expiration time
-	Key, Value   []byte             // Item key/value
-	OldValue     []byte             // TODO: TBD: old document value
-	Cas          uint64             // CAS value of the item
-	Seqno        uint64             // sequence number of the mutation
-	SnapstartSeq uint64             // start sequence number of this snapshot
-	SnapendSeq   uint64             // End sequence number of the snapshot
-	SnapshotType uint32             // 0: disk 1: memory
-	FailoverLog  *FailoverLog       // Failover log containing vvuid and sequnce number
-	Error        error              // Error value in case of a failure
+	Opcode       gomemcached.CommandCode // Type of event
+	Status       gomemcached.Status      // Response status
+	VBucket      uint16                  // VBucket this event applies to
+	Opaque       uint32                  // 16 MSB of opaque
+	VBuuid       uint64                  // This field is set by downstream
+	Flags        uint32                  // Item flags
+	Expiry       uint32                  // Item expiration time
+	Key, Value   []byte                  // Item key/value
+	OldValue     []byte                  // TODO: TBD: old document value
+	Cas          uint64                  // CAS value of the item
+	Seqno        uint64                  // sequence number of the mutation
+	SnapstartSeq uint64                  // start sequence number of this snapshot
+	SnapendSeq   uint64                  // End sequence number of the snapshot
+	SnapshotType uint32                  // 0: disk 1: memory
+	FailoverLog  *FailoverLog            // Failover log containing vvuid and sequnce number
+	Error        error                   // Error value in case of a failure
 }
 
 // UprStream is per stream data structure over an UPR Connection.
@@ -97,8 +76,6 @@ type UprStats struct {
 // FailoverLog containing vvuid and sequnce number
 type FailoverLog [][2]uint64
 
-var uprOpcodeNames map[UprOpcode]string
-
 // error codes
 var ErrorInvalidLog = errors.New("couchbase.errorInvalidLog")
 
@@ -107,22 +84,6 @@ var ul *logger.LogWriter
 var us *stats.StatsCollector
 
 func init() {
-	uprOpcodeNames = map[UprOpcode]string{
-		UprOpen:          "UprOpen",
-		UprAddStream:     "AddStream",
-		UprCloseStream:   "CloseStream",
-		UprFailoverLog:   "FailoverLog",
-		UprStreamRequest: "StreamRequest",
-		UprStreamEnd:     "StreamEnd",
-		UprSnapshot:      "SnapshotMarker",
-		UprMutation:      "Mutation",
-		UprDeletion:      "Deletion",
-		UprExpiration:    "Expiration",
-		UprFlush:         "Flush",
-		UprControl:       "Flow Control",
-		UprBufferAck:     "Buffer Acknowledgement",
-		UprNoop:          "Noop",
-	}
 	ul, _ = logger.NewLogger("upr_client", logger.LevelInfo)
 }
 
@@ -137,6 +98,7 @@ func (flogp *FailoverLog) Latest() (vbuuid, seqno uint64, err error) {
 
 func makeUprEvent(rq gomemcached.MCRequest, stream *UprStream) *UprEvent {
 	event := &UprEvent{
+		Opcode:  rq.Opcode,
 		VBucket: stream.Vbucket,
 		VBuuid:  stream.Vbuuid,
 		Key:     rq.Key,
@@ -151,32 +113,17 @@ func makeUprEvent(rq gomemcached.MCRequest, stream *UprStream) *UprEvent {
 		event.Seqno = binary.BigEndian.Uint64(rq.Extras[:8])
 	}
 
-	switch rq.Opcode {
-	case gomemcached.UPR_STREAMREQ:
-		event.Opcode = UprStreamRequest
-	case gomemcached.UPR_STREAMEND:
-		event.Opcode = UprStreamEnd
-	case gomemcached.UPR_MUTATION:
-		event.Opcode = UprMutation
-	case gomemcached.UPR_DELETION:
-		event.Opcode = UprDeletion
-	case gomemcached.UPR_EXPIRATION:
-		event.Opcode = UprExpiration
-	case gomemcached.UPR_CLOSESTREAM:
-		event.Opcode = UprCloseStream
-	case gomemcached.UPR_SNAPSHOT:
-		event.Opcode = UprSnapshot
-	case gomemcached.UPR_FLUSH:
-		event.Opcode = UprFlush
-	}
-
 	if len(rq.Extras) >= tapMutationExtraLen &&
-		event.Opcode == UprMutation || event.Opcode == UprDeletion ||
-		event.Opcode == UprExpiration {
+		event.Opcode == gomemcached.UPR_MUTATION ||
+		event.Opcode == gomemcached.UPR_DELETION ||
+		event.Opcode == gomemcached.UPR_EXPIRATION {
+
 		event.Flags = binary.BigEndian.Uint32(rq.Extras[8:])
 		event.Expiry = binary.BigEndian.Uint32(rq.Extras[12:])
 
-	} else if len(rq.Extras) >= tapMutationExtraLen && event.Opcode == UprSnapshot {
+	} else if len(rq.Extras) >= tapMutationExtraLen &&
+		event.Opcode == gomemcached.UPR_SNAPSHOT {
+
 		event.SnapstartSeq = binary.BigEndian.Uint64(rq.Extras[:8])
 		event.SnapendSeq = binary.BigEndian.Uint64(rq.Extras[8:16])
 		event.SnapshotType = binary.BigEndian.Uint32(rq.Extras[16:20])
@@ -186,7 +133,7 @@ func makeUprEvent(rq gomemcached.MCRequest, stream *UprStream) *UprEvent {
 }
 
 func (event *UprEvent) String() string {
-	name := uprOpcodeNames[event.Opcode]
+	name := gomemcached.CommandNames[event.Opcode]
 	if name == "" {
 		name = fmt.Sprintf("#%d", event.Opcode)
 	}
@@ -417,7 +364,7 @@ func (feed *UprFeed) doStreamClose(ch chan *UprEvent) {
 		uprEvent := &UprEvent{
 			VBucket: vb,
 			VBuuid:  stream.Vbuuid,
-			Opcode:  UprStreamEnd,
+			Opcode:  gomemcached.UPR_STREAMEND,
 		}
 		ch <- uprEvent
 	}
@@ -492,7 +439,8 @@ loop:
 					ul.LogInfo("", "", "UPR_STREAMREQ for vbucket %d successful", vb)
 				} else if err != nil {
 					ul.LogError("", "", "UPR_STREAMREQ for vbucket %d erro %s", vb, err.Error())
-					event = &UprEvent{Opcode: UprStreamRequest, Status: status, VBucket: vb, Error: err}
+					event = &UprEvent{
+						Opcode: gomemcached.UPR_STREAMREQ, Status: status, VBucket: vb, Error: err}
 				}
 			case gomemcached.UPR_MUTATION,
 				gomemcached.UPR_DELETION,
@@ -549,7 +497,7 @@ loop:
 			l := len(feed.vbstreams)
 			feed.mu.RUnlock()
 
-			if event.Opcode == UprCloseStream && l == 0 {
+			if event.Opcode == gomemcached.UPR_CLOSESTREAM && l == 0 {
 				ul.LogInfo("", "", "No more streams")
 				break loop
 			}
