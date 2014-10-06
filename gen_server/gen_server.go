@@ -97,13 +97,11 @@ loop:
 			}
 		default:
 			if (*s.behavior_callback) != nil {
-				go func() {
-					err := (*s.behavior_callback)()
-					if err != nil {
-						//report error
-						s.reportError(err)
-					}
-				}()
+				err := (*s.behavior_callback)()
+				if err != nil {
+					//report error
+					s.reportError(err)
+				}
 			}
 
 		}

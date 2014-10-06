@@ -11,7 +11,7 @@ import (
 	"github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/utils"
 	"github.com/couchbaselabs/go-couchbase"
 	"log"
-//	"net/http"
+	"net/http"
 	"os"
 	"time"
 )
@@ -76,12 +76,12 @@ func usage() {
 func main() {
 	go func() {
 		log.Println("Try to start pprof...")
-//		err := http.ListenAndServe("localhost:7000", nil)
-//		if err != nil {
-//			panic(err)
-//		} else {
-//			log.Println("Http server for pprof is started")
-//		}
+		err := http.ListenAndServe("localhost:7000", nil)
+		if err != nil {
+			panic(err)
+		} else {
+			log.Println("Http server for pprof is started")
+		}
 	}()
 
 	//	c.SetLogLevel(c.LogLevelTrace)
@@ -102,35 +102,39 @@ func setup() {
 
 func test() {
 	settings := make(map[string]interface{})
-	settings[metadata.PipelineLogLevel] = "Error"
-	_, err := replication_manager.CreateReplication(options.source_cluster_addr, options.source_bucket, options.target_cluster_addr, options.target_bucket, options.target_bucket_password, settings)
+	settings[metadata.PipelineLogLevel] = "Info"
+	settings[metadata.SourceNozzlePerNode] = 1
+	settings[metadata.TargetNozzlePerNode] = 4
+	settings[metadata.BatchCount] = 500
+	
+	topic, err := replication_manager.CreateReplication(options.source_cluster_addr, options.source_bucket, options.target_cluster_addr, options.target_bucket, options.target_bucket_password, settings)
 	if err != nil {
 		fail(fmt.Sprintf("%v", err))
 	}
 	time.Sleep(1 * time.Second)
 	
-//	replication_manager.PauseReplication(topic)
-//
-//	err = replication_manager.SetPipelineLogLevel(topic, "Error")
-//	if err != nil {
-//		fail(fmt.Sprintf("%v", err))
-//	}
-//	fmt.Printf("Replication %s is paused\n", topic)
-//	time.Sleep(100 * time.Millisecond)
-//	err = replication_manager.ResumeReplication(topic)
-//	if err != nil {
-//		fail(fmt.Sprintf("%v", err))
-//	}
-//	fmt.Printf("Replication %s is resumed\n", topic)
-//	time.Sleep(2 * time.Second)
-//	summary(topic)
-//
-//	err = replication_manager.DeleteReplication(topic)
-//	if err != nil {
-//		fail(fmt.Sprintf("%v", err))
-//	}
-//	fmt.Printf("Replication %s is deleted\n", topic)
-	time.Sleep(15 * time.Minute)
+	replication_manager.PauseReplication(topic)
+
+	err = replication_manager.SetPipelineLogLevel(topic, "Error")
+	if err != nil {
+		fail(fmt.Sprintf("%v", err))
+	}
+	fmt.Printf("Replication %s is paused\n", topic)
+	time.Sleep(100 * time.Millisecond)
+	err = replication_manager.ResumeReplication(topic)
+	if err != nil {
+		fail(fmt.Sprintf("%v", err))
+	}
+	fmt.Printf("Replication %s is resumed\n", topic)
+	time.Sleep(2 * time.Second)
+	summary(topic)
+
+	err = replication_manager.DeleteReplication(topic)
+	if err != nil {
+		fail(fmt.Sprintf("%v", err))
+	}
+	fmt.Printf("Replication %s is deleted\n", topic)
+	time.Sleep(3 * time.Minute)
 
 }
 
