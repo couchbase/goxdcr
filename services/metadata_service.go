@@ -112,9 +112,10 @@ func StartGometaService() (*exec.Cmd, error) {
 	goPath := os.Getenv("GOPATH")
 	
 	objPath := goPath + "/bin/gometa"
-	srcPath := goPath + "/src/github.com/couchbase/gometa/main/*.go"
+	srcPath := goPath + "/src/github.com/couchbase/gometa/cmd/gometa/*.go"
 	err := exec.Command("/bin/bash", "-c", "go build -o " + objPath + " " + srcPath).Run()
 	if err != nil {
+		fmt.Printf("Error executing command line - %v\n", exec.Command("/bin/bash", "-c", "go build -o " + objPath + " " + srcPath).Args)
 		return nil, err
 	}
 

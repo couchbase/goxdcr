@@ -92,7 +92,7 @@ func main() {
 	// set up gometa service
 	cmd, err := s.StartGometaService()
 	if err != nil {
-		fmt.Println("Test failed. err: ", err)
+		fmt.Println("Test failed. Failed to start goMeta service. err: ", err)
 		return
 	}
 	
