@@ -147,7 +147,7 @@ func startStream(uprFeed *couchbase.UprFeed, flogs couchbase.FailoverLog) {
 		x := flog[len(flog)-1] // map[uint16][][2]uint64
 		flags, vbuuid := uint32(0), x[0]
 		err := uprFeed.UprRequestStream(
-			vbno, flags, vbuuid, start, end, snapStart, snapEnd)
+			vbno, uint32(vbno), flags, vbuuid, start, end, snapStart, snapEnd)
 		mf(err, fmt.Sprintf("stream-req for %v failed", vbno))
 	}
 }
