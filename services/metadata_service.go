@@ -109,6 +109,7 @@ func (meta_svc *MetadataSvc) sendRequest(opCode, key string, value []byte) ([]by
 
 // start the gometa service
 func StartGometaService() (*exec.Cmd, error) {
+	fmt.Println("starting gometa service. this will take a couple seconds")
 	goPath := os.Getenv("GOPATH")
 	
 	objPath := goPath + "/bin/gometa"
