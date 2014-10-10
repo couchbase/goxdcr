@@ -469,7 +469,21 @@ loop:
 			case gomemcached.UPR_FLUSH:
 				// special processing for flush ?
 				event = makeUprEvent(pkt, stream)
-			case gomemcached.UPR_ADDSTREAM, gomemcached.UPR_CLOSESTREAM:
+			case gomemcached.UPR_CLOSESTREAM:
+
+				event = &UprEvent{
+					VBucket: vb,
+					Opcode:  gomemcached.UPR_STREAMEND,
+				}
+
+				ul.LogInfo("", "", "Stream Ended for vb %d", vb)
+				sendAck = true
+
+				feed.mu.Lock()
+				delete(feed.vbstreams, vb)
+				feed.mu.Unlock()
+
+			case gomemcached.UPR_ADDSTREAM:
 				ul.LogWarn("", "", "Opcode %v not implemented", pkt.Opcode)
 			case gomemcached.UPR_CONTROL, gomemcached.UPR_BUFFERACK:
 				if res.Status != gomemcached.SUCCESS {
@@ -517,6 +531,21 @@ loop:
 	}
 
 	feed.transmitCl <- true
+}
+
+// send a close stream for this vbucket
+func (feed *UprFeed) CloseStream(vbid uint16) error {
+	if feed.vbstreams[vbid] == nil {
+		return fmt.Errorf("Stream for vb %d has not been requested", vbid)
+	}
+
+	closeStream := &gomemcached.MCRequest{
+		Opcode:  gomemcached.UPR_CLOSESTREAM,
+		VBucket: vbid,
+		Opaque:  uint32(vbid),
+	}
+	feed.transmitCh <- closeStream
+	return nil
 }
 
 // Send buffer ack

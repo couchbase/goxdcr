@@ -41,6 +41,19 @@ func main() {
 		log.Printf("Failover log for vb %d is %v", vb, flog)
 	}
 
+	client, err = memcached.Connect(*prot, *dest)
+	if err != nil {
+		log.Fatalf("Error connecting: %v", err)
+	}
+
+	if *u != "" {
+		resp, err := client.Auth(*u, *p)
+		if err != nil {
+			log.Fatalf("auth error: %v", err)
+		}
+		log.Printf("Auth response = %v", resp)
+	}
+
 	uf, err := client.NewUprFeed()
 	if err != nil {
 		log.Fatalf("Error connecting: %v", err)
@@ -70,14 +83,14 @@ func main() {
 		log.Fatalf("Error starting upr feed: %v", err)
 	}
 	for op := range uf.C {
-		if op.String() == "SnapshotMarker" {
+		if op.String() == "UPR_SNAPSHOT" {
 			log.Printf("Received Snapshot marker for Vbucket %d. Start Sequence %d End Sequence %d", op.VBucket, op.SnapstartSeq, op.SnapendSeq)
-		} else if op.String() == "Mutation" {
+		} else if op.String() == "UPR_MUTATION" {
 			log.Printf("Received %s Key %s, Sequence %d, Cas %d\n", op.String(), op.Key, op.Seqno, op.Cas)
 			if len(op.Value) > 0 && len(op.Value) < 500 {
 				log.Printf("\tValue: %s", op.Value)
 			}
-		} else if op.String() == "StreamEnd" {
+		} else if op.String() == "UPR_STREAMEND" {
 			log.Printf("Received stream end event for vbucket %d", op.VBucket)
 		}
 
