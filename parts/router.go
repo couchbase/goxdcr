@@ -67,30 +67,15 @@ func ComposeMCRequest(event *mcc.UprEvent) *mc.MCRequest {
 		Body:    event.Value,
 		Extras:  make([]byte, 224)}
 	//opCode
-	switch event.Opcode {
-	case mcc.UprStreamRequest:
-		req.Opcode = mc.UPR_STREAMREQ
-	case mcc.UprMutation:
-		req.Opcode = mc.UPR_MUTATION
-	case mcc.UprDeletion:
-		req.Opcode = mc.UPR_DELETION
-	case mcc.UprExpiration:
-		req.Opcode = mc.UPR_EXPIRATION
-	case mcc.UprCloseStream:
-		req.Opcode = mc.UPR_CLOSESTREAM
-	case mcc.UprSnapshot:
-		req.Opcode = mc.UPR_SNAPSHOT
-	case mcc.UprFlush:
-		req.Opcode = mc.UPR_FLUSH
-	}
+	req.Opcode = event.Opcode
 
 	//extra
-	if event.Opcode == mcc.UprMutation || event.Opcode == mcc.UprDeletion ||
-		event.Opcode == mcc.UprExpiration {
+	if event.Opcode == mc.UPR_MUTATION || event.Opcode == mc.UPR_DELETION ||
+		event.Opcode == mc.UPR_EXPIRATION {
 		binary.BigEndian.PutUint64(req.Extras, event.Seqno)
 		binary.BigEndian.PutUint32(req.Extras, event.Flags)
 		binary.BigEndian.PutUint32(req.Extras, event.Expiry)
-	} else if event.Opcode == mcc.UprSnapshot {
+	} else if event.Opcode == mc.UPR_SNAPSHOT {
 		binary.BigEndian.PutUint64(req.Extras, event.Seqno)
 		binary.BigEndian.PutUint64(req.Extras, event.SnapstartSeq)
 		binary.BigEndian.PutUint64(req.Extras, event.SnapendSeq)
@@ -133,7 +118,7 @@ func (router *Router) route(data interface{}) (map[string]interface{}, error) {
 	router.Logger().Debugf("Data with vbno=%d, opCode=%v is routed to downstream part %s", uprEvent.VBucket, uprEvent.Opcode, partId)
 
 	switch uprEvent.Opcode {
-	case mcc.UprMutation, mcc.UprDeletion, mcc.UprExpiration:
+	case mc.UPR_MUTATION, mc.UPR_DELETION, mc.UPR_EXPIRATION:
 		result[partId] = ComposeMCRequest(uprEvent)
 		router.counter[partId] = router.counter[partId] + 1
 		router.Logger().Debugf("Rounting counter = %v\n", router.counter)

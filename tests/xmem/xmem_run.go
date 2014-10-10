@@ -125,19 +125,19 @@ func main() {
 	}()
 	argParse()
 
-	test(10, 100, parts.Batch_XMEM)
-	test(5, 50, parts.Batch_XMEM)
+	test(500, 100000, parts.Batch_XMEM)
+//	test(5, 50, parts.Batch_XMEM)
 
 }
 
 func test(batch_count int, data_count int, xmem_mode parts.XMEM_MODE) {
 	logger.Info("------------START testing Xmem-------------------")
 	logger.Infof("batch_count=%d, data_count=%d, xmem_mode=%d\n", batch_count, data_count, xmem_mode)
-	err := setup()
+//	err := setup()
 
-	if err != nil {
-		panic(err)
-	}
+//	if err != nil {
+//		panic(err)
+//	}
 	startXmem(batch_count, xmem_mode)
 	logger.Info("XMEM is started")
 	waitGrp := &sync.WaitGroup{}
@@ -145,7 +145,7 @@ func test(batch_count int, data_count int, xmem_mode parts.XMEM_MODE) {
 	go startUpr(options.source_clusterAddr, options.source_bucket, waitGrp, data_count)
 	waitGrp.Wait()
 
-	time.Sleep(10 * time.Second)
+	time.Sleep(100 * time.Second)
 	bSuccess := verify(data_count)
 	if bSuccess {
 		logger.Info("----------TEST SUCCEED------------")
@@ -154,6 +154,7 @@ func test(batch_count int, data_count int, xmem_mode parts.XMEM_MODE) {
 	}
 }
 func startUpr(cluster, bucketn string, waitGrp *sync.WaitGroup, data_count int) {
+	logger.Info("Start Upr...")
 	b, err := common.ConnectBucket(cluster, "default", bucketn)
 	mf(err, "bucket")
 
@@ -181,7 +182,7 @@ func startUpr(cluster, bucketn string, waitGrp *sync.WaitGroup, data_count int) 
 
 		//transfer UprEvent to MCRequest
 		switch e.Opcode {
-		case mcc.UprMutation, mcc.UprDeletion, mcc.UprExpiration:
+		case mc.UPR_MUTATION, mc.UPR_DELETION, mc.UPR_EXPIRATION:
 			mcReq := composeMCRequest(e)
 			count++
 			logger.Infof("Number of upr event received so far is %d\n", count)
@@ -214,30 +215,31 @@ func composeMCRequest(event *mcc.UprEvent) *mc.MCRequest {
 		Extras:  make([]byte, 224)}
 
 	//opCode
-	switch event.Opcode {
-	case mcc.UprStreamRequest:
-		req.Opcode = mc.UPR_STREAMREQ
-	case mcc.UprMutation:
-		req.Opcode = mc.UPR_MUTATION
-	case mcc.UprDeletion:
-		req.Opcode = mc.UPR_DELETION
-	case mcc.UprExpiration:
-		req.Opcode = mc.UPR_EXPIRATION
-	case mcc.UprCloseStream:
-		req.Opcode = mc.UPR_CLOSESTREAM
-	case mcc.UprSnapshot:
-		req.Opcode = mc.UPR_SNAPSHOT
-	case mcc.UprFlush:
-		req.Opcode = mc.UPR_FLUSH
-	}
+	req.Opcode = event.Opcode
+//	switch event.Opcode {
+//	case mcc.UprStreamRequest:
+//		req.Opcode = mc.UPR_STREAMREQ
+//	case mcc.UprMutation:
+//		req.Opcode = mc.UPR_MUTATION
+//	case mcc.UprDeletion:
+//		req.Opcode = mc.UPR_DELETION
+//	case mcc.UprExpiration:
+//		req.Opcode = mc.UPR_EXPIRATION
+//	case mcc.UprCloseStream:
+//		req.Opcode = mc.UPR_CLOSESTREAM
+//	case mcc.UprSnapshot:
+//		req.Opcode = mc.UPR_SNAPSHOT
+//	case mcc.UprFlush:
+//		req.Opcode = mc.UPR_FLUSH
+//	}
 
 	//extra
-	if event.Opcode == mcc.UprMutation || event.Opcode == mcc.UprDeletion ||
-		event.Opcode == mcc.UprExpiration {
+	if event.Opcode == mc.UPR_MUTATION || event.Opcode == mc.UPR_DELETION ||
+		event.Opcode == mc.UPR_EXPIRATION {
 		binary.BigEndian.PutUint64(req.Extras, event.Seqno)
 		binary.BigEndian.PutUint32(req.Extras, event.Flags)
 		binary.BigEndian.PutUint32(req.Extras, event.Expiry)
-	} else if event.Opcode == mcc.UprSnapshot {
+	} else if event.Opcode == mc.UPR_SNAPSHOT {
 		logger.Infof("event.Seqno=%v\n", event.Seqno)
 		binary.BigEndian.PutUint64(req.Extras, event.Seqno)
 		binary.BigEndian.PutUint64(req.Extras, event.SnapstartSeq)
@@ -255,7 +257,7 @@ func startStream(uprFeed *couchbase.UprFeed, flogs couchbase.FailoverLog) {
 		x := flog[len(flog)-1] // map[uint16][][2]uint64
 		flags, vbuuid := uint32(0), x[0]
 		err := uprFeed.UprRequestStream(
-			vbno, flags, vbuuid, start, end, snapStart, snapEnd)
+			vbno, uint32(vbno), flags, vbuuid, start, end, snapStart, snapEnd)
 		mf(err, fmt.Sprintf("stream-req for %v failed", vbno))
 	}
 }
@@ -298,7 +300,7 @@ func getConnectStr(clusterAddr string, poolName string, bucketName string, usern
 
 		}
 	} else {
-		panic("failed to instantiate target bucket")
+		panic(fmt.Sprintf("failed to instantiate target bucket - %v", c))
 	}
 	return "", err
 }
