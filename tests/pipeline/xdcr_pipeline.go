@@ -12,7 +12,7 @@ import (
 	"github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/utils"
 	"github.com/couchbaselabs/go-couchbase"
 	"log"
-///	"net/http"
+//	"net/http"
 	"os"
 	//"time"
 )
