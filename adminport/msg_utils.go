@@ -56,6 +56,7 @@ const (
 	TargetNozzlePerNode            = "xdcrTargetNozzlePerNode"
 	MaxExpectedReplicationLag      = "xdcrMaxExpectedReplicationLag"
 	TimeoutPercentageCap           = "xdcrTimeoutPercentageCap"
+	LogLevel                       = "xdcrLogLevel"
 )
 
 // constants for parsing create replication request
@@ -113,6 +114,7 @@ var ReplSettingRestToInternalMap = map[string]string {
 	TargetNozzlePerNode: metadata.TargetNozzlePerNode,
 	MaxExpectedReplicationLag: metadata.MaxExpectedReplicationLag,
 	TimeoutPercentageCap: metadata.TimeoutPercentageCap,
+	LogLevel: metadata.PipelineLogLevel,
 } 
 
 // internal replication settings key -> replication settings key in rest api
@@ -129,6 +131,7 @@ var ReplSettingInternalToRestMap = map[string]string {
 	metadata.TargetNozzlePerNode: TargetNozzlePerNode,
 	metadata.MaxExpectedReplicationLag: MaxExpectedReplicationLag,
 	metadata.TimeoutPercentageCap: TimeoutPercentageCap,
+	metadata.PipelineLogLevel: LogLevel,
 } 
 
 var logger_msgutil *log.CommonLogger = log.NewLogger("MessageUtils", log.DefaultLoggerContext)
@@ -331,6 +334,13 @@ func DecodeSettingsFromRequest(request *http.Request, throwError bool) (map[stri
 					return nil, err
 				}
 				settings[internalKey] = int(intVal)
+			case LogLevel:
+				logLevel, err := log.LogLevelFromStr(val)
+				if err != nil {
+					err = utils.InvalidValueInHttpRequestError(key, val)
+					return nil, err
+				}
+				settings[internalKey] = logLevel
 		}
 	}
 	
