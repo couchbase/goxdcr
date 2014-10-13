@@ -48,7 +48,7 @@ func NewRouter(filterExpression  string,
 		counter: make(map[string]int)}
 
 	var routingFunc connector.Routing_Callback_Func = router.route
-	router.Router = connector.NewRouter(downStreamParts, &routingFunc, logger_context, "XDCRRouter")
+	router.Router = connector.NewRouter("XDCRRouter", downStreamParts, &routingFunc, logger_context, "XDCRRouter")
 
 	//initialize counter
 	for partId, _ := range downStreamParts {

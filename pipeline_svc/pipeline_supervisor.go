@@ -83,7 +83,7 @@ func (supervisor *PipelineSupervisor) Attach(p common.Pipeline) error {
 	partsMap := generic_p.GetAllParts(p)
 
 	for _, part := range partsMap {
-		part.RegisterPartEventListener(common.ErrorEncountered, supervisor)
+		part.RegisterComponentEventListener(common.ErrorEncountered, supervisor)
 	}
 	return nil
 }
@@ -115,17 +115,17 @@ func (supervisor *PipelineSupervisor) Stop() error {
 	return err
 }
 
-func (supervisor *PipelineSupervisor) OnEvent(eventType common.PartEventType,
+func (supervisor *PipelineSupervisor) OnEvent(eventType common.ComponentEventType,
 	item interface{},
-	part common.Part,
+	component common.Component,
 	derivedItems []interface{},
 	otherInfos map[string]interface{}) {
 	if eventType == common.ErrorEncountered {
 		partsError := make(map[string]error)
-		partsError[part.Id()] = otherInfos["error"].(error)
+		partsError[component.Id()] = otherInfos["error"].(error)
 		supervisor.reportFailure(partsError)
 	} else {
-		supervisor.Logger().Errorf("Pipeline supervisor didn't register to recieve event %v for part %v", eventType, part.Id())
+		supervisor.Logger().Errorf("Pipeline supervisor didn't register to recieve event %v for component %v", eventType, component.Id())
 	}
 }
 
