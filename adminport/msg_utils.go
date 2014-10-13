@@ -335,12 +335,7 @@ func DecodeSettingsFromRequest(request *http.Request, throwError bool) (map[stri
 				}
 				settings[internalKey] = int(intVal)
 			case LogLevel:
-				logLevel, err := log.LogLevelFromStr(val)
-				if err != nil {
-					err = utils.InvalidValueInHttpRequestError(key, val)
-					return nil, err
-				}
-				settings[internalKey] = logLevel
+				settings[internalKey] = val
 		}
 	}
 	
@@ -407,7 +402,7 @@ func EncodeMapIntoByteArray(data map[string]interface{}) ([]byte, error) {
 			case bool:
 				strVal = strconv.FormatBool(val.(bool))
 			case log.LogLevel:
-				strVal = strconv.FormatInt(int64(val.(log.LogLevel)), base.ParseIntBase)
+				strVal = val.(log.LogLevel).String()
 			default:
 				return nil, utils.IncorrectValueTypeInMapError(key, val, "string/int/bool/LogLevel")
 		}
