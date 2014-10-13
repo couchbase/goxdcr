@@ -12,12 +12,12 @@ import (
 	"github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/utils"
 	"github.com/couchbaselabs/go-couchbase"
 	"log"
-	"net/http"
+//	"net/http"
 	"os"
 	"time"
 )
 
-import _ "net/http/pprof"
+//import _ "net/http/pprof"
 
 var options struct {
 	source_bucket           string // source bucket
@@ -59,7 +59,7 @@ func argParse() {
 		"user name to use for logging into target cluster")
 	flag.StringVar(&options.target_cluster_password, "target_cluster_password", "welcome",
 		"password to use for logging into target cluster")
-	flag.StringVar(&options.target_bucket_password, "target_bucket_password", "",
+	flag.StringVar(&options.target_bucket_password, "target_bucket_password", "welcome",
 		"password to use for accessing target bucket")
 	flag.IntVar(&options.nozzles_per_node_source, "nozzles_per_node_source", NUM_SOURCE_CONN,
 		"number of nozzles per source node")
@@ -75,15 +75,15 @@ func usage() {
 }
 
 func main() {
-	go func() {
-		log.Println("Try to start pprof...")
-		err := http.ListenAndServe("localhost:7000", nil)
-		if err != nil {
-			panic(err)
-		} else {
-			log.Println("Http server for pprof is started")
-		}
-	}()
+//	go func() {
+//		log.Println("Try to start pprof...")
+//		err := http.ListenAndServe("localhost:7000", nil)
+//		if err != nil {
+//			panic(err)
+//		} else {
+//			log.Println("Http server for pprof is started")
+//		}
+//	}()
 
 	//	c.SetLogLevel(c.LogLevelTrace)
 	fmt.Println("Start Testing ...")
@@ -109,7 +109,7 @@ func main() {
 }
 
 func setup() error {
-	flushTargetBkt()
+//	flushTargetBkt()
 	fmt.Println("Finish setup")
 	c.SetTestOptions(options.source_bucket, options.target_bucket, options.source_cluster_addr, options.target_cluster_addr, options.source_cluster_username, options.source_cluster_password, options.nozzles_per_node_source, options.nozzles_per_node_target)
 	metadata_svc, err := s.DefaultMetadataSvc()
@@ -122,39 +122,39 @@ func setup() error {
 
 func test() {
 	settings := make(map[string]interface{})
-	settings[metadata.PipelineLogLevel] = "Info"
+	settings[metadata.PipelineLogLevel] = "Error"
 	settings[metadata.SourceNozzlePerNode] = 1
-	settings[metadata.TargetNozzlePerNode] = 4
+	settings[metadata.TargetNozzlePerNode] = 1
 	settings[metadata.BatchCount] = 500
 	
-	topic, err := replication_manager.CreateReplication(options.source_cluster_addr, options.source_bucket, options.target_cluster_addr, options.target_bucket, options.target_bucket_password, settings)
+	_, err := replication_manager.CreateReplication(options.source_cluster_addr, options.source_bucket, options.target_cluster_addr, options.target_bucket, options.target_bucket_password, settings)
 	if err != nil {
 		fail(fmt.Sprintf("%v", err))
 	}
-	time.Sleep(1 * time.Second)
-	
-	replication_manager.PauseReplication(topic)
-
-	err = replication_manager.SetPipelineLogLevel(topic, "Error")
-	if err != nil {
-		fail(fmt.Sprintf("%v", err))
-	}
-	fmt.Printf("Replication %s is paused\n", topic)
-	time.Sleep(100 * time.Millisecond)
-	err = replication_manager.ResumeReplication(topic)
-	if err != nil {
-		fail(fmt.Sprintf("%v", err))
-	}
-	fmt.Printf("Replication %s is resumed\n", topic)
-	time.Sleep(2 * time.Second)
-	summary(topic)
-
-	err = replication_manager.DeleteReplication(topic)
-	if err != nil {
-		fail(fmt.Sprintf("%v", err))
-	}
-	fmt.Printf("Replication %s is deleted\n", topic)
-	time.Sleep(1 * time.Minute)
+//	time.Sleep(1 * time.Second)
+//	
+//	replication_manager.PauseReplication(topic)
+//
+//	err = replication_manager.SetPipelineLogLevel(topic, "Error")
+//	if err != nil {
+//		fail(fmt.Sprintf("%v", err))
+//	}
+//	fmt.Printf("Replication %s is paused\n", topic)
+//	time.Sleep(100 * time.Millisecond)
+//	err = replication_manager.ResumeReplication(topic)
+//	if err != nil {
+//		fail(fmt.Sprintf("%v", err))
+//	}
+//	fmt.Printf("Replication %s is resumed\n", topic)
+//	time.Sleep(2 * time.Second)
+//	summary(topic)
+//
+//	err = replication_manager.DeleteReplication(topic)
+//	if err != nil {
+//		fail(fmt.Sprintf("%v", err))
+//	}
+//	fmt.Printf("Replication %s is deleted\n", topic)
+	time.Sleep(2 * time.Minute)
 
 }
 

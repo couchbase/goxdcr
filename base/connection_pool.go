@@ -66,10 +66,17 @@ func (p *ConnPool) IsClosed() bool {
 
 func (p *ConnPool) Get() (*mcc.Client, error) {
 	p.logger.Debugf("There are %d connections in the pool\n", len(p.clients))
-	client, ok := <-p.clients
-	if ok {
-		return client, nil
-	}
+	select {
+	case client, ok := <-p.clients:
+		if ok {
+			return client, nil
+		}
+	default:
+		//no more connection, create more
+		mcClient, err := newConn(p.hostName, p.userName, p.password)
+		return mcClient, err
+	}	
+		
 	return nil, errors.New("connection pool is closed")
 }
 
