@@ -10,6 +10,8 @@ import (
 	"net/url"
 	"io/ioutil"
 	"errors"
+	"regexp"
+	"fmt"
 )
 
 // http request method types
@@ -301,6 +303,11 @@ func DecodeSettingsFromRequest(request *http.Request, throwError bool) (map[stri
 			case ReplicationType:	
 				fallthrough
 			case FilterExpression:
+				err := verifyFilterExpression(val) 
+				if err != nil {
+					errMsg := fmt.Sprintf("Invalid value, %v, for parameter, %v, in http request. It needs to be a valid regular expression.", val, key)
+					return nil, utils.NewEnhancedError(errMsg, err)
+				}
 				settings[internalKey] = val
 			case Active:
 				active, err := strconv.ParseBool(val)
@@ -410,6 +417,11 @@ func EncodeMapIntoByteArray(data map[string]interface{}) ([]byte, error) {
 	}
 	
 	return []byte (params.Encode()), nil
+}
+
+func verifyFilterExpression(filterExpression string) error {
+	_, err := regexp.Compile(filterExpression)
+	return err
 }
 
 
