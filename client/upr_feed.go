@@ -25,7 +25,7 @@ type UprEvent struct {
 	Opcode       gomemcached.CommandCode // Type of event
 	Status       gomemcached.Status      // Response status
 	VBucket      uint16                  // VBucket this event applies to
-	Opaque       uint32                  // 16 MSB of opaque
+	Opaque       uint16                  // 16 MSB of opaque
 	VBuuid       uint64                  // This field is set by downstream
 	Flags        uint32                  // Item flags
 	Expiry       uint32                  // Item expiration time
@@ -107,7 +107,7 @@ func makeUprEvent(rq gomemcached.MCRequest, stream *UprStream) *UprEvent {
 	}
 	// 16 LSBits are used by client library to encode vbucket number.
 	// 16 MSBits are left for application to multiplex on opaque value.
-	event.Opaque = rq.Opaque & 0xFFFF0000
+	event.Opaque = appOpaque(rq.Opaque)
 
 	if len(rq.Extras) >= tapMutationExtraLen {
 		event.Seqno = binary.BigEndian.Uint64(rq.Extras[:8])
@@ -141,13 +141,13 @@ func (event *UprEvent) String() string {
 }
 
 func sendCommands(mc *Client, ch chan *gomemcached.MCRequest, closer chan bool) {
-
 loop:
 	for {
 		select {
 		case command := <-ch:
 			if err := mc.Transmit(command); err != nil {
-				ul.LogError("Failed to transmit command %s. Error %s", command.Opcode.String(), err.Error())
+				msg := "Failed to transmit command %s. Error %s"
+				ul.LogError(msg, command.Opcode.String(), err.Error())
 				break loop
 			}
 
@@ -155,7 +155,6 @@ loop:
 			ul.LogInfo("", "", "Exiting send command go routine ...")
 			break loop
 		}
-
 	}
 }
 
@@ -213,12 +212,12 @@ func doUprOpen(mc *Client, name string, sequence uint32) error {
 // sequence: sequence number for the connection
 // bufsize: max size of the application
 func (feed *UprFeed) UprOpen(name string, sequence uint32, bufSize uint32) error {
-
 	mc := feed.conn
 
 	if err := doUprOpen(mc, name, sequence); err != nil {
 		return err
 	}
+
 	// send a UPR control message to set the window size for the this connection
 	if bufSize > 0 {
 		rq := &gomemcached.MCRequest{
@@ -234,7 +233,8 @@ func (feed *UprFeed) UprOpen(name string, sequence uint32, bufSize uint32) error
 }
 
 // UprGetFailoverLog for given list of vbuckets.
-func (mc *Client) UprGetFailoverLog(vb []uint16) (map[uint16]*FailoverLog, error) {
+func (mc *Client) UprGetFailoverLog(
+	vb []uint16) (map[uint16]*FailoverLog, error) {
 
 	ul.LogDebug("", "", "Get Failover Log")
 
@@ -272,14 +272,13 @@ func (mc *Client) UprGetFailoverLog(vb []uint16) (map[uint16]*FailoverLog, error
 }
 
 // UprRequestStream for a single vbucket.
-// TODO: describe arguments.
-func (feed *UprFeed) UprRequestStream(vb uint16, opaque, flags uint32,
+func (feed *UprFeed) UprRequestStream(vbno, opaqueMSB uint16, flags uint32,
 	vuuid, startSequence, endSequence, snapStart, snapEnd uint64) error {
 
 	rq := &gomemcached.MCRequest{
 		Opcode:  gomemcached.UPR_STREAMREQ,
-		VBucket: vb,
-		Opaque:  (opaque & 0xFFFF0000) | uint32(vb),
+		VBucket: vbno,
+		Opaque:  composeOpaque(vbno, opaqueMSB),
 	}
 
 	rq.Extras = make([]byte, 48) // #Extras
@@ -300,19 +299,34 @@ func (feed *UprFeed) UprRequestStream(vb uint16, opaque, flags uint32,
 	}
 
 	stream := &UprStream{
-		Vbucket:  vb,
+		Vbucket:  vbno,
 		Vbuuid:   vuuid,
 		StartSeq: startSequence,
 		EndSeq:   endSequence,
 	}
+	feed.vbstreams[vbno] = stream
+	return nil
+}
 
-	feed.vbstreams[vb] = stream
+// CloseStream for specified vbucket.
+func (feed *UprFeed) CloseStream(vbno, opaqueMSB uint16) error {
+	feed.mu.Lock()
+	defer feed.mu.Unlock()
+
+	if feed.vbstreams[vbno] == nil {
+		return fmt.Errorf("Stream for vb %d has not been requested", vbno)
+	}
+	closeStream := &gomemcached.MCRequest{
+		Opcode:  gomemcached.UPR_CLOSESTREAM,
+		VBucket: vbno,
+		Opaque:  composeOpaque(vbno, opaqueMSB),
+	}
+	feed.transmitCh <- closeStream
 	return nil
 }
 
 // StartFeed to start the upper feed.
 func (feed *UprFeed) StartFeed() error {
-
 	ch := make(chan *UprEvent)
 	feed.C = ch
 	go feed.runFeed(ch)
@@ -335,7 +349,9 @@ func parseFailoverLog(body []byte) (*FailoverLog, error) {
 	return &log, nil
 }
 
-func handleStreamRequest(res *gomemcached.MCResponse) (gomemcached.Status, uint64, *FailoverLog, error) {
+func handleStreamRequest(
+	res *gomemcached.MCResponse,
+) (gomemcached.Status, uint64, *FailoverLog, error) {
 
 	var rollback uint64
 	var err error
@@ -344,10 +360,12 @@ func handleStreamRequest(res *gomemcached.MCResponse) (gomemcached.Status, uint6
 	case res.Status == gomemcached.ROLLBACK && len(res.Extras) != 8:
 		err = fmt.Errorf("invalid rollback %v\n", res.Extras)
 		return res.Status, 0, nil, err
+
 	case res.Status == gomemcached.ROLLBACK:
 		rollback = binary.BigEndian.Uint64(res.Extras)
 		ul.LogInfo("", "", "Rollback %v for vb %v\n", rollback, res.Opaque)
 		return res.Status, rollback, nil, nil
+
 	case res.Status != gomemcached.SUCCESS:
 		err = fmt.Errorf("unexpected status %v, for %v", res.Status, res.Opaque)
 		return res.Status, 0, nil, err
@@ -402,8 +420,7 @@ loop:
 				Body:   pkt.Body,
 			}
 
-			vb := uint16(pkt.Opaque & 0xFFFF)
-			opaque := pkt.Opaque & 0xFFFF0000
+			vb := vbOpaque(pkt.Opaque)
 			uprStats.TotalBytes = uint64(bytes)
 
 			feed.mu.RLock()
@@ -413,42 +430,54 @@ loop:
 			switch pkt.Opcode {
 			case gomemcached.UPR_STREAMREQ:
 				if stream == nil {
-					ul.LogError("", "", "Fatal Error, Stream not found for vb %d", vb)
+					ul.LogError("", "", "Stream not found for vb %d: %#v", vb, pkt)
 					break loop
 				}
-
 				status, rb, flog, err := handleStreamRequest(res)
 				if status == gomemcached.ROLLBACK {
+					event = makeUprEvent(pkt, stream)
 					// rollback stream
-					if err := feed.UprRequestStream(vb, opaque, 0, stream.Vbuuid, rb,
-						stream.EndSeq, 0, 0); err != nil {
-						ul.LogError("", "",
-							"UPR_STREAMREQ with rollback %d for vb % Failed. Error %s",
-							rb, vb, err.Error())
-						event = makeUprEvent(pkt, stream)
-						// delete the stream from the vbmap for the feed
-						feed.mu.Lock()
-						delete(feed.vbstreams, vb)
-						feed.mu.Unlock()
-					}
+					msg := "UPR_STREAMREQ with rollback %d for vb %d Failed: %v"
+					ul.LogError("", "", msg, rb, vb, err)
+					// delete the stream from the vbmap for the feed
+					feed.mu.Lock()
+					delete(feed.vbstreams, vb)
+					feed.mu.Unlock()
+
 				} else if status == gomemcached.SUCCESS {
 					event = makeUprEvent(pkt, stream)
 					event.Seqno = stream.StartSeq
 					event.FailoverLog = flog
 					stream.connected = true
-					ul.LogInfo("", "", "UPR_STREAMREQ for vbucket %d successful", vb)
+					ul.LogInfo("", "", "UPR_STREAMREQ for vb %d successful", vb)
+
 				} else if err != nil {
-					ul.LogError("", "", "UPR_STREAMREQ for vbucket %d erro %s", vb, err.Error())
+					msg := "UPR_STREAMREQ for vbucket %d erro %s"
+					ul.LogError("", "", msg, vb, err.Error())
 					event = &UprEvent{
-						Opcode: gomemcached.UPR_STREAMREQ, Status: status, VBucket: vb, Error: err}
+						Opcode:  gomemcached.UPR_STREAMREQ,
+						Status:  status,
+						VBucket: vb,
+						Error:   err,
+					}
 				}
+
 			case gomemcached.UPR_MUTATION,
 				gomemcached.UPR_DELETION,
 				gomemcached.UPR_EXPIRATION:
+				if stream == nil {
+					ul.LogError("", "", "Stream not found for vb %d: %#v", vb, pkt)
+					break loop
+				}
 				event = makeUprEvent(pkt, stream)
 				uprStats.TotalMutation++
 				sendAck = true
+
 			case gomemcached.UPR_STREAMEND:
+				if stream == nil {
+					ul.LogError("", "", "Stream not found for vb %d: %#v", vb, pkt)
+					break loop
+				}
 				//stream has ended
 				event = makeUprEvent(pkt, stream)
 				ul.LogInfo("", "", "Stream Ended for vb %d", vb)
@@ -459,6 +488,10 @@ loop:
 				feed.mu.Unlock()
 
 			case gomemcached.UPR_SNAPSHOT:
+				if stream == nil {
+					ul.LogError("", "", "Stream not found for vb %d: %#v", vb, pkt)
+					break loop
+				}
 				// snapshot marker
 				event = makeUprEvent(pkt, stream)
 				event.SnapstartSeq = binary.BigEndian.Uint64(pkt.Extras[0:8])
@@ -466,17 +499,24 @@ loop:
 				event.SnapshotType = binary.BigEndian.Uint32(pkt.Extras[16:20])
 				uprStats.TotalSnapShot++
 				sendAck = true
+
 			case gomemcached.UPR_FLUSH:
+				if stream == nil {
+					ul.LogError("", "", "Stream not found for vb %d: %#v", vb, pkt)
+					break loop
+				}
 				// special processing for flush ?
 				event = makeUprEvent(pkt, stream)
+
 			case gomemcached.UPR_CLOSESTREAM:
-
-				event = &UprEvent{
-					VBucket: vb,
-					Opcode:  gomemcached.UPR_STREAMEND,
+				if stream == nil {
+					ul.LogError("", "", "Stream not found for vb %d: %#v", vb, pkt)
+					break loop
 				}
-
-				ul.LogInfo("", "", "Stream Ended for vb %d", vb)
+				event = makeUprEvent(pkt, stream)
+				event.Opcode = gomemcached.UPR_STREAMEND // opcode re-write !!
+				msg := "Stream Closed for vb %d StreamEnd simulated"
+				ul.LogInfo("", "", msg, vb)
 				sendAck = true
 
 				feed.mu.Lock()
@@ -485,18 +525,23 @@ loop:
 
 			case gomemcached.UPR_ADDSTREAM:
 				ul.LogWarn("", "", "Opcode %v not implemented", pkt.Opcode)
+
 			case gomemcached.UPR_CONTROL, gomemcached.UPR_BUFFERACK:
 				if res.Status != gomemcached.SUCCESS {
-					ul.LogWarn("", "", "Opcode %v received status %d", pkt.Opcode.String(), res.Status)
+					msg := "Opcode %v received status %d"
+					ul.LogWarn("", "", msg, pkt.Opcode.String(), res.Status)
 				}
+
 			case gomemcached.UPR_NOOP:
 				// send a NOOP back
 				noop := &gomemcached.MCRequest{
 					Opcode: gomemcached.UPR_NOOP,
 				}
 				feed.transmitCh <- noop
+
 			default:
-				ul.LogError("", "", "Recived an unknown response for vbucket %d", vb)
+				msg := "Recived an unknown response for vbucket %d"
+				ul.LogError("", "", msg, vb)
 			}
 		}
 
@@ -518,7 +563,8 @@ loop:
 
 		}
 
-		if needToSend, sendSize := feed.SendBufferAck(sendAck, uint32(bytes)); needToSend {
+		needToSend, sendSize := feed.SendBufferAck(sendAck, uint32(bytes))
+		if needToSend {
 			bufferAck := &gomemcached.MCRequest{
 				Opcode: gomemcached.UPR_BUFFERACK,
 			}
@@ -527,25 +573,9 @@ loop:
 			feed.transmitCh <- bufferAck
 			uprStats.TotalBufferAckSent++
 		}
-
 	}
 
 	feed.transmitCl <- true
-}
-
-// send a close stream for this vbucket
-func (feed *UprFeed) CloseStream(vbid uint16) error {
-	if feed.vbstreams[vbid] == nil {
-		return fmt.Errorf("Stream for vb %d has not been requested", vbid)
-	}
-
-	closeStream := &gomemcached.MCRequest{
-		Opcode:  gomemcached.UPR_CLOSESTREAM,
-		VBucket: vbid,
-		Opaque:  uint32(vbid),
-	}
-	feed.transmitCh <- closeStream
-	return nil
 }
 
 // Send buffer ack
@@ -563,6 +593,18 @@ func (feed *UprFeed) SendBufferAck(sendAck bool, bytes uint32) (bool, uint32) {
 
 func (feed *UprFeed) GetUprStats() *UprStats {
 	return &feed.stats
+}
+
+func composeOpaque(vbno, opaqueMSB uint16) uint32 {
+	return (uint32(opaqueMSB) << 16) | uint32(vbno)
+}
+
+func appOpaque(opq32 uint32) uint16 {
+	return uint16((opq32 & 0xFFFF0000) >> 16)
+}
+
+func vbOpaque(opq32 uint32) uint16 {
+	return uint16(opq32 & 0xFFFF)
 }
 
 // Close this UprFeed.
