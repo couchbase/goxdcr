@@ -762,17 +762,7 @@ func (xmem *XmemNozzle) sendSingle(item *mc.MCRequest, index int) error {
 	xmem.Logger().Debugf("key=%v\n", item.Key)
 	xmem.Logger().Debugf("opcode=%v\n", item.Opcode)
 
-	pool, err := base.ConnPoolMgr().GetOrCreatePool(xmem.getPoolName(xmem.config.connectStr), xmem.config.connectStr, xmem.config.bucketName, xmem.config.password, base.DefaultConnectionSize)
-	if err == nil {
-		memClient, err := pool.Get()
-
-		if err == nil {
-			defer func() {
-				pool.Release(memClient)
-			}()
-			err = memClient.Transmit(item)
-		}
-	}
+	err := xmem.memClient.Transmit(item)
 
 	if err != nil {
 		xmem.Logger().Errorf("SendBatch: transmit error: %s\n", fmt.Sprint(err))

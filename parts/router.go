@@ -48,7 +48,7 @@ func NewRouter(filterExpression  string,
 		counter: make(map[string]int)}
 
 	var routingFunc connector.Routing_Callback_Func = router.route
-	router.Router = connector.NewRouter(downStreamParts, &routingFunc, logger_context, "XDCRRouter")
+	router.Router = connector.NewRouter("XDCRRouter", downStreamParts, &routingFunc, logger_context, "XDCRRouter")
 
 	//initialize counter
 	for partId, _ := range downStreamParts {
@@ -100,6 +100,7 @@ func (router *Router) route(data interface{}) (map[string]interface{}, error) {
 	if router.filterRegexp != nil { 
 		if !router.filterRegexp.Match(uprEvent.Key) {
 			// if data does not match filter expression, drop it. return empty result
+			router.RaiseEvent(common.DataFiltered, uprEvent, router, nil, nil)
 			router.Logger().Debugf("Data with key=%v has been filtered out", string(uprEvent.Key))
 			return result, nil
 		}

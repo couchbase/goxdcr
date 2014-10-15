@@ -14,7 +14,7 @@ import (
 	"log"
 //	"net/http"
 	"os"
-	"time"
+	//"time"
 )
 
 //import _ "net/http/pprof"
@@ -154,7 +154,7 @@ func test() {
 //		fail(fmt.Sprintf("%v", err))
 //	}
 //	fmt.Printf("Replication %s is deleted\n", topic)
-	time.Sleep(2 * time.Minute)
+	//time.Sleep(2 * time.Minute)
 
 }
 

@@ -10,6 +10,8 @@ import (
 	"net/url"
 	"io/ioutil"
 	"errors"
+	"regexp"
+	"fmt"
 )
 
 // http request method types
@@ -56,6 +58,7 @@ const (
 	TargetNozzlePerNode            = "xdcrTargetNozzlePerNode"
 	MaxExpectedReplicationLag      = "xdcrMaxExpectedReplicationLag"
 	TimeoutPercentageCap           = "xdcrTimeoutPercentageCap"
+	LogLevel                       = "xdcrLogLevel"
 )
 
 // constants for parsing create replication request
@@ -113,6 +116,7 @@ var ReplSettingRestToInternalMap = map[string]string {
 	TargetNozzlePerNode: metadata.TargetNozzlePerNode,
 	MaxExpectedReplicationLag: metadata.MaxExpectedReplicationLag,
 	TimeoutPercentageCap: metadata.TimeoutPercentageCap,
+	LogLevel: metadata.PipelineLogLevel,
 } 
 
 // internal replication settings key -> replication settings key in rest api
@@ -129,6 +133,7 @@ var ReplSettingInternalToRestMap = map[string]string {
 	metadata.TargetNozzlePerNode: TargetNozzlePerNode,
 	metadata.MaxExpectedReplicationLag: MaxExpectedReplicationLag,
 	metadata.TimeoutPercentageCap: TimeoutPercentageCap,
+	metadata.PipelineLogLevel: LogLevel,
 } 
 
 var logger_msgutil *log.CommonLogger = log.NewLogger("MessageUtils", log.DefaultLoggerContext)
@@ -298,6 +303,11 @@ func DecodeSettingsFromRequest(request *http.Request, throwError bool) (map[stri
 			case ReplicationType:	
 				fallthrough
 			case FilterExpression:
+				err := verifyFilterExpression(val) 
+				if err != nil {
+					errMsg := fmt.Sprintf("Invalid value, %v, for parameter, %v, in http request. It needs to be a valid regular expression.", val, key)
+					return nil, utils.NewEnhancedError(errMsg, err)
+				}
 				settings[internalKey] = val
 			case Active:
 				active, err := strconv.ParseBool(val)
@@ -331,6 +341,8 @@ func DecodeSettingsFromRequest(request *http.Request, throwError bool) (map[stri
 					return nil, err
 				}
 				settings[internalKey] = int(intVal)
+			case LogLevel:
+				settings[internalKey] = val
 		}
 	}
 	
@@ -397,7 +409,7 @@ func EncodeMapIntoByteArray(data map[string]interface{}) ([]byte, error) {
 			case bool:
 				strVal = strconv.FormatBool(val.(bool))
 			case log.LogLevel:
-				strVal = strconv.FormatInt(int64(val.(log.LogLevel)), base.ParseIntBase)
+				strVal = val.(log.LogLevel).String()
 			default:
 				return nil, utils.IncorrectValueTypeInMapError(key, val, "string/int/bool/LogLevel")
 		}
@@ -405,6 +417,11 @@ func EncodeMapIntoByteArray(data map[string]interface{}) ([]byte, error) {
 	}
 	
 	return []byte (params.Encode()), nil
+}
+
+func verifyFilterExpression(filterExpression string) error {
+	_, err := regexp.Compile(filterExpression)
+	return err
 }
 
 
