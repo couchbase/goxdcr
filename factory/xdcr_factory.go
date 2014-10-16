@@ -58,6 +58,7 @@ func (xdcrf *XDCRFactory) NewPipeline(topic string) (common.Pipeline, error) {
 	spec, err := xdcrf.metadata_svc.ReplicationSpec(topic)
 	xdcrf.logger.Debugf("replication specification = %v\n", spec)
 	if err != nil {
+		xdcrf.logger.Errorf("err=%v\n", err)
 		return nil, err
 	}
 
@@ -118,7 +119,7 @@ func (xdcrf *XDCRFactory) constructSourceNozzles(spec *metadata.ReplicationSpeci
 	}
 	xdcrf.logger.Debugf("kvaddrs=%v\n", kvaddrs)
 
-	bucketName:= spec.SourceBucketName
+	bucketName := spec.SourceBucketName
 
 	sourceClusterUUID := spec.SourceClusterUUID
 
@@ -186,7 +187,7 @@ func (xdcrf *XDCRFactory) constructOutgoingNozzles(spec *metadata.ReplicationSpe
 	vbNozzleMap := make(map[uint16]string)
 
 	//	kvVBMap, bucketPwd, err := (*xdcr_factory.get_target_topology_callback)(config.TargetCluster, config.TargetBucketn)
-	targetClusterUUID:= spec.TargetClusterUUID
+	targetClusterUUID := spec.TargetClusterUUID
 	targetBucketName := spec.TargetBucketName
 
 	kvVBMap, err := xdcrf.cluster_info_svc.GetServerVBucketsMap(targetClusterUUID, targetBucketName)
@@ -337,6 +338,7 @@ func (xdcrf *XDCRFactory) constructSettingsForXmemNozzle(topic string, settings 
 	xmemSettings[parts.XMEM_SETTING_BATCHCOUNT] = repSettings.BatchCount
 	xmemSettings[parts.XMEM_SETTING_BATCHSIZE] = repSettings.BatchSize
 	xmemSettings[parts.XMEM_SETTING_TIMEOUT] = xdcrf.getTargetTimeoutEstimate(topic)
+	xmemSettings[parts.XMEM_SETTING_BATCH_EXPIRATION_TIME] = time.Duration(float64(repSettings.MaxExpectedReplicationLag)*0.7) * time.Millisecond
 
 	return xmemSettings, nil
 

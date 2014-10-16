@@ -730,13 +730,11 @@ func (xmem *XmemNozzle) send_internal(batch *xmemBatch) error {
 
 			if err != nil || xmem.memClient == nil {
 				conn.Close()
-				//failed to recycle the connection
-				//reinitialize the connection
-				err = xmem.initializeConnection()
+				err = xmem.recoverFromConnLost()
 				if err != nil {
-					xmem.Logger().Errorf("failed to recycle the connection")
+					otherInfo := utils.WrapError(err)
+					xmem.RaiseEvent(common.ErrorEncountered, nil, xmem, nil, otherInfo)
 				}
-				go xmem.receiveResponse(xmem.memClient, xmem.receiver_finch, &xmem.childrenWaitGrp)
 			}
 		}()
 
@@ -762,6 +760,13 @@ func (xmem *XmemNozzle) sendSingle(item *mc.MCRequest, index int) error {
 	xmem.Logger().Debugf("key=%v\n", item.Key)
 	xmem.Logger().Debugf("opcode=%v\n", item.Opcode)
 
+	if xmem.memClient == nil {
+		err := xmem.recoverFromConnLost()
+		if err != nil {
+			otherInfo := utils.WrapError(err)
+			xmem.RaiseEvent(common.ErrorEncountered, nil, xmem, nil, otherInfo)
+		}
+	}
 	err := xmem.memClient.Transmit(item)
 
 	if err != nil {
@@ -964,4 +969,15 @@ func (xmem *XmemNozzle) StatusSummary() string {
 func (xmem *XmemNozzle) handleGeneralError(err error) {
 	otherInfo := utils.WrapError(err)
 	xmem.RaiseEvent(common.ErrorEncountered, nil, xmem, nil, otherInfo)
+}
+
+func (xmem *XmemNozzle) recoverFromConnLost() (err error) {
+	//failed to recycle the connection
+	//reinitialize the connection
+	err = xmem.initializeConnection()
+	if err != nil {
+		xmem.Logger().Errorf("failed to recycle the connection")
+	}
+	go xmem.receiveResponse(xmem.memClient, xmem.receiver_finch, &xmem.childrenWaitGrp)
+	return
 }
