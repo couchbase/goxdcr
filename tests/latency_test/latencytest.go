@@ -206,14 +206,21 @@ func (r *appReader) read(key string) {
 
 	docinfo := key_map[key]
 	logger_latency.Infof("Try to read doc key=%v\n", key)
-	_, err := r.b.Observe(key)
-	if err == nil {
-		logger_latency.Infof("Observed changes for %v\n", key)
-		newInfo := &docInfo{key: key,
-			duration: time.Since(docinfo.update_time)}
-		key_recv_ch <- newInfo
-		return
-	} else {
+	loop:
+	for {
+		result, err := r.b.Observe(key)
+		if err != nil {
+			// add error handling?
+			break loop
+		}
+		if result.Status == mc.ObservedPersisted || result.Status == mc.ObservedNotPersisted{
+			logger_latency.Infof("Observed changes %v for %v\n", result, key)
+			newInfo := &docInfo{key: key,
+				duration: time.Since(docinfo.update_time)}
+			key_recv_ch <- newInfo
+			break loop
+		} else {
+		}
 	}
 
 	return
@@ -281,7 +288,7 @@ func main() {
 	//start app reader
 
 	//let it run for 3 minutes
-	time.Sleep(time.Minute * 2)
+	time.Sleep(time.Minute * 3)
 
 	quit = true
 
@@ -305,7 +312,7 @@ func startGoXDCRReplicationByRest() error {
 
 	go func() {
 		cmd := exec.Command("curl", "-X", "POST", "http://localhost:12100/controller/createReplication", "-d", "fromBucket="+options.source_bucket, "-d", "uuid="+options.target_cluster_addr,
-			"-d", "toBucket="+options.target_bucket, "-d", "xdcrSourceNozzlePerNode=2", "-d", "xdcrTargetNozzlePerNode=2", "-d", "xdcrLogLevel=Error")
+			"-d", "toBucket="+options.target_bucket, "-d", "xdcrSourceNozzlePerNode=4", "-d", "xdcrTargetNozzlePerNode=4", "-d", "xdcrLogLevel=Error")
 		logger_latency.Infof("cmd =%v, path=%v\n", cmd.Args, cmd.Path)
 		bytes, err := cmd.Output()
 		if err != nil {
