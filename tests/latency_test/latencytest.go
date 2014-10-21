@@ -304,7 +304,7 @@ func setup() error {
 func startGoXDCRReplicationByRest() error {
 
 	go func() {
-		cmd := exec.Command("curl", "-X", "POST", "http://localhost:12100/controller/createReplication", "-d", "fromBucket="+options.source_bucket, "-d", "uuid="+options.source_cluster_addr,
+		cmd := exec.Command("curl", "-X", "POST", "http://localhost:12100/controller/createReplication", "-d", "fromBucket="+options.source_bucket, "-d", "uuid="+options.target_cluster_addr,
 			"-d", "toBucket="+options.target_bucket, "-d", "xdcrSourceNozzlePerNode=2", "-d", "xdcrTargetNozzlePerNode=2", "-d", "xdcrLogLevel=Error")
 		logger_latency.Infof("cmd =%v, path=%v\n", cmd.Args, cmd.Path)
 		bytes, err := cmd.Output()
@@ -324,7 +324,8 @@ func startGoXDCRReplicationByRest() error {
 
 func stopGoXDCRReplicationByRest() (err error) {
 
-	cmd := exec.Command("curl", "-X", "POST", "http://localhost:12100/controller/pauseXDCR/127.0.0.1:9000_default_127.0.0.1:9000_target")
+	replicationId := options.source_cluster_addr + "_" + options.source_bucket + "_" + options.target_cluster_addr + "_" + options.target_bucket;
+	cmd := exec.Command("curl", "-X", "POST", "http://localhost:12100/controller/pauseXDCR/" + replicationId)
 	logger_latency.Infof("cmd =%v, path=%v\n", cmd.Args, cmd.Path)
 	bytes, err := cmd.Output()
 	if err != nil {
