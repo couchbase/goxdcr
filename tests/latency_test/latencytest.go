@@ -10,6 +10,7 @@ import (
 	//	c "github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/mock_services"
 	//	"github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/replication_manager"
 	//	s "github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/services"
+	"github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/base"
 	"github.com/couchbase/gomemcached"
 	mc "github.com/couchbase/gomemcached/client"
 	"github.com/couchbaselabs/go-couchbase"
@@ -19,6 +20,8 @@ import (
 	"os"
 	"os/exec"
 	"time"
+	"strings"
+	"strconv"
 	//	 "io/ioutil"
 )
 
@@ -39,6 +42,7 @@ var options struct {
 	target_bucket_password  string //target bucket password
 	doc_size                int    //doc_size
 	doc_count               int    //doc_count
+	source_rest_server_addr     string //source rest server address
 }
 
 type docInfo struct {
@@ -305,6 +309,11 @@ func usage() {
 
 func setup() error {
 	parseArgs()
+	
+	// set source rest server address
+	hostName := strings.Split(options.source_cluster_addr, ":")[0]
+	options.source_rest_server_addr = hostName + ":" + strconv.FormatInt(int64(base.AdminportNumber), 10)
+	
 	key_recv_ch = make(chan *docInfo, options.doc_count)
 
 	logger_latency.Infof("Setup is done")
@@ -312,9 +321,8 @@ func setup() error {
 }
 
 func startGoXDCRReplicationByRest() error {
-
 	go func() {
-		cmd := exec.Command("curl", "-X", "POST", "http://localhost:12100/controller/createReplication", "-d", "fromBucket="+options.source_bucket, "-d", "uuid="+options.target_cluster_addr,
+		cmd := exec.Command("curl", "-X", "POST", "http://" + options.source_rest_server_addr + "/controller/createReplication", "-d", "fromBucket="+options.source_bucket, "-d", "uuid="+options.target_cluster_addr,
 			"-d", "toBucket="+options.target_bucket, "-d", "xdcrSourceNozzlePerNode=4", "-d", "xdcrTargetNozzlePerNode=4", "-d", "xdcrLogLevel=Error")
 		logger_latency.Infof("cmd =%v, path=%v\n", cmd.Args, cmd.Path)
 		bytes, err := cmd.Output()
@@ -335,7 +343,7 @@ func startGoXDCRReplicationByRest() error {
 func stopGoXDCRReplicationByRest() (err error) {
 
 	replicationId := options.source_cluster_addr + "_" + options.source_bucket + "_" + options.target_cluster_addr + "_" + options.target_bucket;
-	cmd := exec.Command("curl", "-X", "POST", "http://localhost:12100/controller/pauseXDCR/" + replicationId)
+	cmd := exec.Command("curl", "-X", "POST", "http://" + options.source_rest_server_addr + "/controller/pauseXDCR/" + replicationId)
 	logger_latency.Infof("cmd =%v, path=%v\n", cmd.Args, cmd.Path)
 	bytes, err := cmd.Output()
 	if err != nil {
