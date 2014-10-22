@@ -274,6 +274,9 @@ func main() {
 		stopGoXDCRReplicationByRest()
 	}()
 
+	// wait for replication to finish initializing
+	time.Sleep(time.Second * 20)
+
 	ch := make(chan string, options.doc_count)
 
 	appR := &appReader{cluster: options.target_cluster_addr,
