@@ -22,6 +22,7 @@ import (
 	"time"
 	"strings"
 	"strconv"
+	"math"
 	//	 "io/ioutil"
 )
 
@@ -43,6 +44,7 @@ var options struct {
 	doc_size                int    //doc_size
 	doc_count               int    //doc_count
 	source_rest_server_addr     string //source rest server address
+	num_write              int  // number of concurrent write routines
 }
 
 type docInfo struct {
@@ -99,38 +101,49 @@ func (w *appWriter) run() (err error) {
 		return
 	}
 
-	for i := 0; i < w.doc_count; i++ {
-		logger_latency.Infof("Write doc #%v\n", i)
-		err = w.write(b, i)
-		if err != nil {
-			logger_latency.Errorf("Failed to write item %v\n", i)
-			return
+	num_write := options.num_write
+	if num_write > w.doc_count {
+		num_write = w.doc_count
+	}
+	docs_per_write := int(math.Ceil(float64(w.doc_count)/float64(num_write)))
+	var start_index int
+	for i := 0; i < num_write; i++ {
+		logger_latency.Infof("Starting write routine #%v\n", i)
+		docs_to_write := docs_per_write
+		if docs_to_write > w.doc_count - start_index {
+			docs_to_write = w.doc_count - start_index
 		}
+		go w.write(b, start_index, docs_to_write)
+		start_index += docs_to_write
 	}
 
 	logger_latency.Infof("--------DONE WITH CREATING %v Items------------\n", w.doc_count)
 	return
 }
 
-func (w *appWriter) write(b *couchbase.Bucket, index int) error {
-	doc_key := w.key_prefix + "_" + fmt.Sprintf("%v", index)
-	doc := w.genDoc(doc_key, index)
-	err := b.SetRaw(doc_key, 0, doc)
-	if err != nil {
-		return err
-	}
+func (w *appWriter) write(b *couchbase.Bucket, start_index int, docs_to_write int) error {
+	doc := w.genDoc(start_index)
+	
+	var err error
+	for i:=start_index; i< start_index + docs_to_write; i++ {
+		doc_key := w.key_prefix + "_" + fmt.Sprintf("%v", i)
+		err = b.SetRaw(doc_key, 0, doc)
+		if err != nil {
+			return err
+		}
 
-	if err == nil {
-		logger_latency.Infof("Record doc %v", index)
-		write_time := time.Now()
-		id := doc_key
-		recordWriteTime(id, doc_key, write_time)
-		go w.reader.read(doc_key)
+		if err == nil {
+			logger_latency.Infof("Record doc %v\n", doc_key)
+			write_time := time.Now()
+			id := doc_key
+			recordWriteTime(id, doc_key, write_time)
+			go w.reader.read(doc_key)
+		}
 	}
 	return err
 }
 
-func (w *appWriter) genDoc(doc_key string, index int) []byte {
+func (w *appWriter) genDoc(index int) []byte {
 	if w.doc == nil {
 		w.doc = []byte{}
 		for i := 0; i < w.doc_size; i++ {
@@ -251,6 +264,7 @@ func parseArgs() {
 		"password to use for accessing target bucket")
 	flag.IntVar(&options.doc_size, "doc_size", 1000, "size (in byte) of the documents app writer generates")
 	flag.IntVar(&options.doc_count, "doc_count", 100000, "the number of documents app writer generates")
+	flag.IntVar(&options.num_write, "num_write", 100, "number of concurrent write routines")
 	flag.Parse()
 
 }
@@ -295,7 +309,7 @@ func main() {
 	//start app reader
 
 	//let it run for 3 minutes
-	time.Sleep(time.Minute * 3)
+	time.Sleep(time.Second * 30)
 
 	quit = true
 
