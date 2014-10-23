@@ -32,7 +32,7 @@ type GenServer struct {
 	heartBeatChan chan []interface{}
 
 	msg_callback      *Msg_Callback_Func
-	behavior_callback *Behavior_Callback_Func
+//	behavior_callback *Behavior_Callback_Func
 	exit_callback     *Exit_Callback_Func
 	error_handler     *Error_Handler_Func
 
@@ -49,7 +49,7 @@ func NewGenServer(msg_callback *Msg_Callback_Func,
 	return GenServer{msgChan: make(chan []interface{}, 1),
 		heartBeatChan:     make(chan []interface{}, 1),
 		msg_callback:      msg_callback,
-		behavior_callback: behavior_callback,
+//		behavior_callback: behavior_callback,
 		exit_callback:     exit_callback,
 		error_handler:     error_handler,
 		isStarted:         false,
@@ -93,14 +93,6 @@ loop:
 						//report error
 						s.reportError(err)
 					}
-				}
-			}
-		default:
-			if (*s.behavior_callback) != nil {
-				err := (*s.behavior_callback)()
-				if err != nil {
-					//report error
-					s.reportError(err)
 				}
 			}
 
