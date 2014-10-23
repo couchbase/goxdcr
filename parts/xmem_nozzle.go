@@ -951,7 +951,7 @@ func (xmem *XmemNozzle) check(finch chan bool, waitGrp *sync.WaitGroup) {
 		case <-ticker:
 			count++
 			if math.Mod(float64(count), float64(15)) < 2 {
-				fmt.Println(xmem.Id(), " checking timeout. ", len(xmem.dataChan), " unsent")
+				xmem.Logger().Debugf("%v checking timeout. %v unsent\n", xmem.Id(), len(xmem.dataChan))
 			}
 			size := xmem.buf.bufferSize()
 			timeoutCheckFunc := xmem.checkTimeout
