@@ -10,6 +10,7 @@ import (
 	//	c "github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/mock_services"
 	//	"github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/replication_manager"
 	//	s "github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/services"
+	"github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/base"
 	"github.com/couchbase/gomemcached"
 	mc "github.com/couchbase/gomemcached/client"
 	"github.com/couchbaselabs/go-couchbase"
@@ -19,6 +20,9 @@ import (
 	"os"
 	"os/exec"
 	"time"
+	"strings"
+	"strconv"
+	"math"
 	//	 "io/ioutil"
 )
 
@@ -39,6 +43,8 @@ var options struct {
 	target_bucket_password  string //target bucket password
 	doc_size                int    //doc_size
 	doc_count               int    //doc_count
+	source_rest_server_addr     string //source rest server address
+	num_write              int  // number of concurrent write routines
 }
 
 type docInfo struct {
@@ -95,38 +101,49 @@ func (w *appWriter) run() (err error) {
 		return
 	}
 
-	for i := 0; i < w.doc_count; i++ {
-		logger_latency.Infof("Write doc #%v\n", i)
-		err = w.write(b, i)
-		if err != nil {
-			logger_latency.Errorf("Failed to write item %v\n", i)
-			return
+	num_write := options.num_write
+	if num_write > w.doc_count {
+		num_write = w.doc_count
+	}
+	docs_per_write := int(math.Ceil(float64(w.doc_count)/float64(num_write)))
+	var start_index int
+	for i := 0; i < num_write; i++ {
+		logger_latency.Infof("Starting write routine #%v\n", i)
+		docs_to_write := docs_per_write
+		if docs_to_write > w.doc_count - start_index {
+			docs_to_write = w.doc_count - start_index
 		}
+		go w.write(b, start_index, docs_to_write)
+		start_index += docs_to_write
 	}
 
 	logger_latency.Infof("--------DONE WITH CREATING %v Items------------\n", w.doc_count)
 	return
 }
 
-func (w *appWriter) write(b *couchbase.Bucket, index int) error {
-	doc_key := w.key_prefix + "_" + fmt.Sprintf("%v", index)
-	doc := w.genDoc(doc_key, index)
-	err := b.SetRaw(doc_key, 0, doc)
-	if err != nil {
-		return err
-	}
+func (w *appWriter) write(b *couchbase.Bucket, start_index int, docs_to_write int) error {
+	doc := w.genDoc(start_index)
+	
+	var err error
+	for i:=start_index; i< start_index + docs_to_write; i++ {
+		doc_key := w.key_prefix + "_" + fmt.Sprintf("%v", i)
+		err = b.SetRaw(doc_key, 0, doc)
+		if err != nil {
+			return err
+		}
 
-	if err == nil {
-		logger_latency.Infof("Record doc %v", index)
-		write_time := time.Now()
-		id := doc_key
-		recordWriteTime(id, doc_key, write_time)
-		go w.reader.read(doc_key)
+		if err == nil {
+			logger_latency.Infof("Record doc %v\n", doc_key)
+			write_time := time.Now()
+			id := doc_key
+			recordWriteTime(id, doc_key, write_time)
+			go w.reader.read(doc_key)
+		}
 	}
 	return err
 }
 
-func (w *appWriter) genDoc(doc_key string, index int) []byte {
+func (w *appWriter) genDoc(index int) []byte {
 	if w.doc == nil {
 		w.doc = []byte{}
 		for i := 0; i < w.doc_size; i++ {
@@ -206,14 +223,21 @@ func (r *appReader) read(key string) {
 
 	docinfo := key_map[key]
 	logger_latency.Infof("Try to read doc key=%v\n", key)
-	_, err := r.b.Observe(key)
-	if err == nil {
-		logger_latency.Infof("Observed changes for %v\n", key)
-		newInfo := &docInfo{key: key,
-			duration: time.Since(docinfo.update_time)}
-		key_recv_ch <- newInfo
-		return
-	} else {
+	loop:
+	for {
+		result, err := r.b.Observe(key)
+		if err != nil {
+			// add error handling?
+			break loop
+		}
+		if result.Status == mc.ObservedPersisted || result.Status == mc.ObservedNotPersisted{
+			logger_latency.Infof("Observed changes %v for %v\n", result, key)
+			newInfo := &docInfo{key: key,
+				duration: time.Since(docinfo.update_time)}
+			key_recv_ch <- newInfo
+			break loop
+		} else {
+		}
 	}
 
 	return
@@ -240,6 +264,7 @@ func parseArgs() {
 		"password to use for accessing target bucket")
 	flag.IntVar(&options.doc_size, "doc_size", 1000, "size (in byte) of the documents app writer generates")
 	flag.IntVar(&options.doc_count, "doc_count", 100000, "the number of documents app writer generates")
+	flag.IntVar(&options.num_write, "num_write", 100, "number of concurrent write routines")
 	flag.Parse()
 
 }
@@ -267,6 +292,9 @@ func main() {
 		stopGoXDCRReplicationByRest()
 	}()
 
+	// wait for replication to finish initializing
+	time.Sleep(time.Second * 20)
+
 	ch := make(chan string, options.doc_count)
 
 	appR := &appReader{cluster: options.target_cluster_addr,
@@ -281,7 +309,7 @@ func main() {
 	//start app reader
 
 	//let it run for 3 minutes
-	time.Sleep(time.Minute * 2)
+	time.Sleep(time.Second * 30)
 
 	quit = true
 
@@ -295,6 +323,11 @@ func usage() {
 
 func setup() error {
 	parseArgs()
+	
+	// set source rest server address
+	hostName := strings.Split(options.source_cluster_addr, ":")[0]
+	options.source_rest_server_addr = hostName + ":" + strconv.FormatInt(int64(base.AdminportNumber), 10)
+	
 	key_recv_ch = make(chan *docInfo, options.doc_count)
 
 	logger_latency.Infof("Setup is done")
@@ -302,10 +335,9 @@ func setup() error {
 }
 
 func startGoXDCRReplicationByRest() error {
-
 	go func() {
-		cmd := exec.Command("curl", "-X", "POST", "http://localhost:12100/controller/createReplication", "-d", "fromBucket="+options.source_bucket, "-d", "uuid="+options.source_cluster_addr,
-			"-d", "toBucket="+options.target_bucket, "-d", "xdcrSourceNozzlePerNode=2", "-d", "xdcrTargetNozzlePerNode=2", "-d", "xdcrLogLevel=Error")
+		cmd := exec.Command("curl", "-X", "POST", "http://" + options.source_rest_server_addr + "/controller/createReplication", "-d", "fromBucket="+options.source_bucket, "-d", "uuid="+options.target_cluster_addr,
+			"-d", "toBucket="+options.target_bucket, "-d", "xdcrSourceNozzlePerNode=4", "-d", "xdcrTargetNozzlePerNode=4", "-d", "xdcrLogLevel=Error")
 		logger_latency.Infof("cmd =%v, path=%v\n", cmd.Args, cmd.Path)
 		bytes, err := cmd.Output()
 		if err != nil {
@@ -324,7 +356,8 @@ func startGoXDCRReplicationByRest() error {
 
 func stopGoXDCRReplicationByRest() (err error) {
 
-	cmd := exec.Command("curl", "-X", "POST", "http://localhost:12100/controller/pauseXDCR/127.0.0.1:9000_default_127.0.0.1:9000_target")
+	replicationId := options.source_cluster_addr + "_" + options.source_bucket + "_" + options.target_cluster_addr + "_" + options.target_bucket;
+	cmd := exec.Command("curl", "-X", "POST", "http://" + options.source_rest_server_addr + "/controller/pauseXDCR/" + replicationId)
 	logger_latency.Infof("cmd =%v, path=%v\n", cmd.Args, cmd.Path)
 	bytes, err := cmd.Output()
 	if err != nil {
