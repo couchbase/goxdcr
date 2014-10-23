@@ -193,8 +193,8 @@ func (buf *requestBuffer) evictSlot(pos uint16) error {
 			buf.sequences[pos] = buf.sequences[pos] + 1
 		}
 
-		buf.logger.Errorf("buf.seqence[%v]=%v\n", pos, buf.sequences[pos])
-		buf.logger.Infof("wait_for_resp=%vs\n", time.Since(req.sent_time).Seconds())
+		buf.logger.Debugf("buf.seqence[%v]=%v\n", pos, buf.sequences[pos])
+		buf.logger.Debugf("wait_for_resp=%vs\n", time.Since(req.sent_time).Seconds())
 
 		if len(buf.empty_slots_pos) == int(buf.size) {
 			if buf.notifych != nil {
@@ -908,7 +908,7 @@ func (xmem *XmemNozzle) receiveResponse(client *mcc.Client, finch chan bool, wai
 				//raiseEvent
 				req, _ := xmem.buf.slot(pos)
 				if req != nil && req.Opaque == response.Opaque {
-					fmt.Println(xmem.Id(), "received opaque=", req.Opaque)
+					xmem.Logger().Debugf("%v received opaque=%v\n", xmem.Id(), req.Opaque)
 					xmem.RaiseEvent(common.DataSent, req, xmem, nil, nil)
 					//empty the slot in the buffer
 					if xmem.buf.evictSlot(pos) != nil {
@@ -971,8 +971,9 @@ done:
 }
 
 func (xmem *XmemNozzle) checkTimeout(req *bufferedMCRequest, pos uint16) bool {
-	if time.Since(req.sent_time) > xmem.timeoutDuration(req.num_of_retry) {
-		xmem.Logger().Error("Timeout, resend...")
+	duration := xmem.timeoutDuration(req.num_of_retry)
+	if time.Since(req.sent_time) > duration {
+		xmem.Logger().Debugf("key=%v, numOfRetry=%v, timeout duration=%v\n", string(req.req.Key), req.num_of_retry, duration)
 		modified := xmem.resend(req, pos)
 		return modified
 	}
@@ -984,7 +985,6 @@ func (xmem *XmemNozzle) timeoutDuration(numofRetry int) time.Duration {
 	for i := 0; i <= numofRetry; i++ {
 		duration = duration + time.Duration(i+1)*xmem.config.batchtimeout
 	}
-	xmem.Logger().Errorf("numOfRetry=%v, timeout duration=%v\n", numofRetry, duration)
 	return duration
 }
 
