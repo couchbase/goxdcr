@@ -11,7 +11,7 @@ import (
 	//	"github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/replication_manager"
 	//	s "github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/services"
 	"github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/base"
-	"github.com/couchbase/gomemcached"
+//	"github.com/couchbase/gomemcached"
 	mc "github.com/couchbase/gomemcached/client"
 	"github.com/couchbaselabs/go-couchbase"
 	"log"
@@ -47,14 +47,11 @@ var options struct {
 	num_write              int  // number of concurrent write routines
 }
 
-type docInfo struct {
-	key         string
-	update_time time.Time
-	duration    time.Duration
-}
-
-var key_map map[string]*docInfo
-var key_recv_ch chan *docInfo
+//type docInfo struct {
+//	key         string
+//	update_time time.Time
+//	duration    time.Duration
+//}
 
 type appWriter struct {
 	cluster    string
@@ -76,6 +73,7 @@ func newAppWriter(cluster, bucket, key_prefix string, doc_size, doc_count int, r
 }
 
 func (w *appWriter) run() (err error) {
+	couchbase.PoolSize=options.num_write
 
 	u, err := url.Parse("http://" + w.cluster)
 	if err != nil {
@@ -106,7 +104,8 @@ func (w *appWriter) run() (err error) {
 		num_write = w.doc_count
 	}
 	docs_per_write := int(math.Ceil(float64(w.doc_count)/float64(num_write)))
-	var start_index int
+	logger_latency.Infof("docs_per_write=%v\n", docs_per_write)
+	var start_index int = 0
 	for i := 0; i < num_write; i++ {
 		logger_latency.Infof("Starting write routine #%v\n", i)
 		docs_to_write := docs_per_write
@@ -133,11 +132,11 @@ func (w *appWriter) write(b *couchbase.Bucket, start_index int, docs_to_write in
 		}
 
 		if err == nil {
-			logger_latency.Infof("Record doc %v\n", doc_key)
+			logger_latency.Infof("%v - Record doc %v\n", i, doc_key)
 			write_time := time.Now()
-			id := doc_key
-			recordWriteTime(id, doc_key, write_time)
-			go w.reader.read(doc_key)
+//			id := doc_key
+//			recordWriteTime(id, doc_key, write_time)
+			w.reader.read(i, doc_key, write_time)
 		}
 	}
 	return err
@@ -153,31 +152,31 @@ func (w *appWriter) genDoc(index int) []byte {
 	return w.doc
 }
 
-func getDoc(b *couchbase.Bucket, key string, res *gomemcached.MCResponse) error {
+func getDoc(b *couchbase.Bucket, key string) error {
 	return b.Do(key, func(mc *mc.Client, vb uint16) error {
 		var err error
-		res, err = mc.Get(vb, key)
+		_, err = mc.Get(vb, key)
 		return err
 	})
 }
-func recordWriteTime(id string, key string, write_time time.Time) {
-	logger_latency.Infof("Record (%v, %v)--\n", id, write_time)
-	if key_map == nil {
-		key_map = make(map[string]*docInfo)
-	}
-
-	info := &docInfo{key: key,
-		update_time: write_time}
-	key_map[id] = info
-	logger_latency.Infof("key_map has %v elements\n", len(key_map))
-}
+//func recordWriteTime(id string, key string, write_time time.Time) {
+//	logger_latency.Infof("Record (%v, %v)--\n", id, write_time)
+//	if key_map == nil {
+//		key_map = make(map[string]*docInfo)
+//	}
+//
+//	info := &docInfo{key: key,
+//		update_time: write_time}
+//	key_map[id] = info
+//	logger_latency.Infof("key_map has %v elements\n", len(key_map))
+//}
 
 type appReader struct {
 	cluster  string
 	bucket   string
 	password string
-	id_ch    chan string
 	b        *couchbase.Bucket
+	worker_pool []*appReadWorker
 }
 
 func (r *appReader) init() (err error) {
@@ -210,38 +209,57 @@ func (r *appReader) init() (err error) {
 		return
 	}
 
+	r.worker_pool = make ([]*appReadWorker, options.doc_count)
+	
+	for i:=0; i<options.doc_count; i++ {
+		r.worker_pool[i] = &appReadWorker{}
+	}
 	return
 }
 
-func (r *appReader) read(key string) {
+type appReadWorker struct {
+	key string
+	duration time.Duration
+}
+
+func (w *appReadWorker) run (write_time time.Time, r *appReader) {
 	defer func() {
 		if r := recover(); r != nil {
-			logger_latency.Infof("Recovered in f", r)
-			logger_latency.Infof("Received %v\n", key)
+			logger_latency.Infof("Recovered in function read ", r)
+			logger_latency.Infof("Received %v\n", w.key)
 		}
 	}()
 
-	docinfo := key_map[key]
-	logger_latency.Infof("Try to read doc key=%v\n", key)
-	loop:
+	logger_latency.Infof("Try to read doc key=%v\n", w.key)
+//	loop:
 	for {
-		result, err := r.b.Observe(key)
-		if err != nil {
+		err := 	getDoc (r.b, w.key)
+		if err == nil {
 			// add error handling?
-			break loop
+			w.duration = time.Since(write_time)
+			return
 		}
-		if result.Status == mc.ObservedPersisted || result.Status == mc.ObservedNotPersisted{
-			logger_latency.Infof("Observed changes %v for %v\n", result, key)
-			newInfo := &docInfo{key: key,
-				duration: time.Since(docinfo.update_time)}
-			key_recv_ch <- newInfo
-			break loop
-		} else {
-		}
+//		if result.Status == mc.ObservedPersisted || result.Status == mc.ObservedNotPersisted{
+//			logger_latency.Infof("Observed changes %v for %v\n", result, w.key)
+//			w.duration = time.Since(write_time)
+//			break loop
+//		} else {
+//		}
 	}
-
+//
 	return
 
+}
+func (r *appReader) read(index int, key string, write_time time.Time) {
+	worker := r.worker_pool[index]
+	worker.key = key
+	
+	if math.Mod(float64(index), float64(50)) == 0 {
+		go worker.run(write_time, r)
+	}else {
+		fmt.Printf("Skip observing key=%v\n", key)
+	}
+	
 }
 func parseArgs() {
 	flag.StringVar(&options.source_cluster_addr, "source_cluster_addr", "127.0.0.1:9000",
@@ -295,11 +313,9 @@ func main() {
 	// wait for replication to finish initializing
 	time.Sleep(time.Second * 20)
 
-	ch := make(chan string, options.doc_count)
 
 	appR := &appReader{cluster: options.target_cluster_addr,
-		bucket: options.target_bucket, password: options.target_bucket_password,
-		id_ch: ch}
+		bucket: options.target_bucket, password: options.target_bucket_password}
 	appR.init()
 
 	//start app writer
@@ -309,11 +325,11 @@ func main() {
 	//start app reader
 
 	//let it run for 3 minutes
-	time.Sleep(time.Second * 30)
+	time.Sleep(time.Minute * 1)
 
 	quit = true
 
-	verify()
+	verify("TEST-", appR.worker_pool)
 }
 
 func usage() {
@@ -328,8 +344,6 @@ func setup() error {
 	hostName := strings.Split(options.source_cluster_addr, ":")[0]
 	options.source_rest_server_addr = hostName + ":" + strconv.FormatInt(int64(base.AdminportNumber), 10)
 	
-	key_recv_ch = make(chan *docInfo, options.doc_count)
-
 	logger_latency.Infof("Setup is done")
 	return nil
 }
@@ -371,7 +385,7 @@ func stopGoXDCRReplicationByRest() (err error) {
 	return
 }
 
-func verify() {
+func verify(key_prefix string, readWorkers []*appReadWorker) {
 	logger_latency.Infof("----------VERIFY------------")
 	outliner := []string{}
 	outliner_count := 0
@@ -380,15 +394,15 @@ func verify() {
 	normals_min := 0 * time.Millisecond
 	normals_max := 0 * time.Millisecond
 
-	recvmap := make(map[string]*docInfo)
-	close(key_recv_ch)
-	for ent := range key_recv_ch {
+	recvmap := make(map[string]*appReadWorker)
+	for _, ent := range readWorkers {
 		recvmap[ent.key] = ent
 		logger_latency.Infof("key=%v, duration=%v\n", ent.key, ent.duration)
 	}
 
-	for _, docinfo := range key_map {
-		entry, ok := recvmap[docinfo.key]
+	for i:=0; i<options.doc_count; i++ {
+		key := key_prefix + "_" + fmt.Sprintf("%v", i)
+		entry, ok := recvmap[key]
 		if ok {
 			normals_count++
 			normals_total = normals_total + entry.duration
@@ -400,7 +414,7 @@ func verify() {
 				normals_max = entry.duration
 			}
 		} else {
-			outliner = append(outliner, docinfo.key)
+			outliner = append(outliner, key)
 			outliner_count++
 		}
 	}
@@ -409,9 +423,9 @@ func verify() {
 	logger_latency.Infof("outliner_count=%v\n", outliner_count)
 	logger_latency.Infof("outliner=%v\n", outliner)
 	logger_latency.Infof("normal latency item count=%v\n", normals_count)
-	logger_latency.Infof("normal latency max=%v\n", normals_max.Seconds())
-	logger_latency.Infof("normal latency min=%v\n", normals_min.Seconds())
-	logger_latency.Infof("normal latency average=%v\n", (normals_total.Seconds() / float64(normals_count)))
+	logger_latency.Infof("normal latency max=%v sec\n", normals_max.Seconds())
+	logger_latency.Infof("normal latency min=%v sec\n", normals_min.Seconds())
+	logger_latency.Infof("normal latency average=%v sec\n", (normals_total.Seconds() / float64(normals_count)))
 
 	//write key_map and key_map_recv to files
 	//	   w := bufio.NewWriter(f)
