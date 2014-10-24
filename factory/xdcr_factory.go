@@ -166,8 +166,8 @@ func (xdcrf *XDCRFactory) constructSourceNozzles(spec *metadata.ReplicationSpeci
 			}
 
 			// construct kvfeeds
-			// partIds of the kvfeed nodes look like "kvfeed_1"
-			kvfeed, err := sp.NewKVFeed(kvaddr, topic, KVFEED_NAME_PREFIX+PART_NAME_DELIMITER+strconv.Itoa(i), bucket, vbList)
+			// partIds of the kvfeed nodes look like "kvfeed_$kvaddr_1"
+			kvfeed, err := sp.NewKVFeed(kvaddr, topic, KVFEED_NAME_PREFIX + PART_NAME_DELIMITER + kvaddr + PART_NAME_DELIMITER + strconv.Itoa(i), bucket, vbList)
 			if err != nil {
 				xdcrf.logger.Errorf("Error on NewKVFeed. i=%d, err=%v\n", i, err)
 				return nil, err
