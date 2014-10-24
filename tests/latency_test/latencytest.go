@@ -136,7 +136,7 @@ func (w *appWriter) write(b *couchbase.Bucket, start_index, num_write, docs_per_
 
 		if err == nil {
 			if math.Mod(float64(index), float64(options.sample_frequency)) == 0 {
-				logger_latency.Infof("Record doc %v in write routine %v in the %v th iteration\n", doc_key, start_index, i)
+				logger_latency.Infof("Record doc %v in write routine #%v in the %vth iteration\n", doc_key, start_index, i)
 				write_time := time.Now()
 				w.reader.read(index/options.sample_frequency, doc_key, write_time)
 			}
@@ -234,22 +234,16 @@ func (w *appReadWorker) run (write_time time.Time, r *appReader) {
 	}()
 
 	logger_latency.Infof("Try to read doc key=%v\n", w.key)
-//	loop:
 	for {
 		err := 	getDoc (r.b, w.key)
 		if err == nil {
-			// add error handling?
 			w.duration = time.Since(write_time)
 			return
-		}
-//		if result.Status == mc.ObservedPersisted || result.Status == mc.ObservedNotPersisted{
-//			logger_latency.Infof("Observed changes %v for %v\n", result, w.key)
-//			w.duration = time.Since(write_time)
-//			break loop
-//		} else {
-//		}
+		} else {
+			// sleep to avoid taking up too much CPU
+        	time.Sleep(time.Millisecond * 50)
+        }
 	}
-//
 	return
 
 }
@@ -325,7 +319,7 @@ func main() {
 	//start app reader
 
 	//let it run for 3 minutes
-	time.Sleep(time.Minute * 1)
+	time.Sleep(time.Second * 30)
 
 	quit = true
 
