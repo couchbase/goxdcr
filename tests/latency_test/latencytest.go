@@ -107,37 +107,38 @@ func (w *appWriter) run() (err error) {
 	
 	docs_per_write := int(math.Ceil(float64(w.doc_count)/float64(num_write)))
 	logger_latency.Infof("docs_per_write=%v\n", docs_per_write)
-	var start_index int = 0
-	for i := 0; i < num_write; i++ {
-		logger_latency.Infof("Starting write routine #%v\n", i)
-		docs_to_write := docs_per_write
-		if docs_to_write > w.doc_count - start_index {
-			docs_to_write = w.doc_count - start_index
-		}
-		go w.write(b, start_index, docs_to_write)
-		start_index += docs_to_write
+	for start_index := 0; start_index < num_write; start_index++ {
+		logger_latency.Infof("Starting write routine #%v\n", start_index)
+		go w.write(b, start_index, num_write, docs_per_write)
 	}
 
 	logger_latency.Infof("--------DONE WITH CREATING %v Items------------\n", w.doc_count)
 	return
 }
 
-func (w *appWriter) write(b *couchbase.Bucket, start_index int, docs_to_write int) error {
+// Each write routine writes docs at start_index, start_index+num_write, start_index+2*num_write, etc. 
+// This way the larger the doc index, the later it will be written. 
+// This, coupled with the current sampling algorithm based on doc index, can achieve approximate uniform sampling in the time dimension.   
+func (w *appWriter) write(b *couchbase.Bucket, start_index, num_write, docs_per_write int) error {
 	doc := w.genDoc(start_index)
 	
 	var err error
-	for i:=start_index; i< start_index + docs_to_write; i++ {
-		doc_key := w.key_prefix + "_" + fmt.Sprintf("%v", i)
+	for i:=0; i< docs_per_write; i++ {
+		index := start_index + i * num_write
+		if index >= options.doc_count {
+			break
+		}
+		doc_key := w.key_prefix + "_" + fmt.Sprintf("%v", index)
 		err = b.SetRaw(doc_key, 0, doc)
 		if err != nil {
 			return err
 		}
 
 		if err == nil {
-			if math.Mod(float64(i), float64(options.sample_frequency)) == 0 {
-				logger_latency.Infof("%v - Record doc %v\n", i, doc_key)
+			if math.Mod(float64(index), float64(options.sample_frequency)) == 0 {
+				logger_latency.Infof("Record doc %v in write routine %v in the %v th iteration\n", doc_key, start_index, i)
 				write_time := time.Now()
-				w.reader.read(i/options.sample_frequency, doc_key, write_time)
+				w.reader.read(index/options.sample_frequency, doc_key, write_time)
 			}
 		}
 	}
