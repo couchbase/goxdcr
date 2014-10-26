@@ -333,6 +333,9 @@ func TestReceiveResponseNoContent(t *testing.T) {
 		Opcode: SET,
 		Status: 74,
 		Opaque: 7242,
+		Extras: []byte{},
+		Key:    []byte{},
+		Body:   []byte{},
 	}
 
 	data := res.Bytes()
