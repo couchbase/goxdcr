@@ -11,12 +11,12 @@ import (
 	"github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/metadata_svc"
 	"github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/parts"
 	"github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/pipeline_svc"
-	"github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/utils"
 	xdcr_pipeline_svc "github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/pipeline_svc"
 	"github.com/couchbase/indexing/secondary/protobuf"
 	sp "github.com/ysui6888/indexing/secondary/projector"
 	"math"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -117,7 +117,7 @@ func (xdcrf *XDCRFactory) constructSourceNozzles(spec *metadata.ReplicationSpeci
 		xdcrf.logger.Errorf("err=%v\n", err)
 		return nil, err
 	}
-	xdcrf.logger.Debugf("kvHosts=%v\n", kvHosts)
+	xdcrf.logger.Infof("kvHosts=%v\n", kvHosts)
 
 	bucketName := spec.SourceBucketName
 
@@ -132,8 +132,17 @@ func (xdcrf *XDCRFactory) constructSourceNozzles(spec *metadata.ReplicationSpeci
 	}
 
 	for _, kvHost := range kvHosts {
-		kvaddr := utils.GetHostAddr(kvHost, base.KVPortNumber)
-		vbnos := serverVBMap[kvaddr]
+		var kvaddr string
+		var vbnos []uint16
+		// iterate through serverVBMap and look for server addr that starts with "kvHost:"
+		for kvaddr_iter, vbnos_iter := range serverVBMap{
+			if strings.HasPrefix(kvaddr_iter, kvHost + base.UrlPortNumberDelimiter) {
+			xdcrf.logger.Infof("found kv")
+				kvaddr = kvaddr_iter
+				vbnos = vbnos_iter
+				break
+			}
+		}
 
 		numOfVbs := len(vbnos)
 
