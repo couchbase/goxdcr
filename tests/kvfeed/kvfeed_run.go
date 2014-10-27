@@ -12,7 +12,10 @@ import (
 	"log"
 	"os"
 	"time"
+	"net/http"
 )
+
+import _ "net/http/pprof"
 
 var options struct {
 	source_bucket string // source bucket
@@ -51,12 +54,26 @@ func usage() {
 }
 
 func main() {
-	fmt.Println("Start Testing Router...")
+	go func() {
+		log.Println("Try to start pprof...")
+		err := http.ListenAndServe("localhost:7000", nil)
+		if err != nil {
+			panic(err)
+		} else {
+			log.Println("Http server for pprof is started")
+		}
+	}()
+
+	fmt.Println("Start Testing KVFeed...")
 	argParse()
 	fmt.Printf("connectStr=%s\n", options.connectStr)
 	fmt.Println("Done with parsing the arguments")
-	startKVFeed(options.connectStr, options.kvaddr, options.source_bucket)
+	
+	for i:=0; i<16; i++ {
+	go startKVFeed(options.connectStr, options.kvaddr, options.source_bucket)
+	}
 
+	time.Sleep (3 * time.Minute)
 }
 
 func mf(err error, msg string) {
@@ -74,7 +91,7 @@ func startKVFeed(cluster, kvaddr, bucketn string) {
 	kvfeed.Start(sp.ConstructStartSettingsForKVFeed(constructTimestamp(bucketn)))
 	fmt.Println("KVFeed is started")
 
-	timeChan := time.NewTimer(time.Second * 20).C
+	timeChan := time.NewTimer(time.Second * 1000).C
 loop:
 	for {
 		select {
@@ -82,9 +99,9 @@ loop:
 			fmt.Println("Timer expired")
 			break loop
 		default:
-			if count >= NUM_DATA {
-				break loop
-			}
+//			if count >= NUM_DATA {
+//				break loop
+//			}
 		}
 	}
 	kvfeed.Stop()

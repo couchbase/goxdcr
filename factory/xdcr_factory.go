@@ -337,7 +337,7 @@ func (xdcrf *XDCRFactory) constructSettingsForXmemNozzle(topic string, settings 
 	}
 	xmemSettings[parts.XMEM_SETTING_BATCHCOUNT] = repSettings.BatchCount
 	xmemSettings[parts.XMEM_SETTING_BATCHSIZE] = repSettings.BatchSize
-	xmemSettings[parts.XMEM_SETTING_TIMEOUT] = xdcrf.getTargetTimeoutEstimate(topic)
+	xmemSettings[parts.XMEM_SETTING_RESP_TIMEOUT] = xdcrf.getTargetTimeoutEstimate(topic)
 	xmemSettings[parts.XMEM_SETTING_BATCH_EXPIRATION_TIME] = time.Duration(float64(repSettings.MaxExpectedReplicationLag)*0.7) * time.Millisecond
 
 	return xmemSettings, nil
