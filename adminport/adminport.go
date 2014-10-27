@@ -298,21 +298,7 @@ func (h *xdcrRestHandler) forwardReplicationRequest(request *http.Request) (map[
 		return nil, err
 	}
 
-	// enable after XDCRTopologyService is implemented
-	// xdcrNodesMap, err := rm.XDCRCompTopologyService().XDCRTopology()
-	sourceCluster, err := rm.XDCRCompTopologyService().MyCluster()
-		if err != nil {
-		return nil, err
-	}
-	serverList, err := rm.ClusterInfoService().GetServerList(sourceCluster, "default")
-	if err != nil {
-		return nil, err
-	}
-	xdcrNodesMap := make(map[string]uint16)
-	for _, server := range serverList {
-		serverName := (strings.Split(server, ":"))[0]
-		xdcrNodesMap[serverName] = uint16(base.AdminportNumber)
-	}
+	xdcrNodesMap, err := rm.XDCRCompTopologyService().XDCRTopology()
 
 	forwardedNodesMap := make(map[string][]interface{})
 	for xdcrNode, port := range xdcrNodesMap {

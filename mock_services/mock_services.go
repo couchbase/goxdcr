@@ -3,10 +3,12 @@ package mock_services
 
 import (
 	"fmt"
+	"strings"
 	"github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/base"
 	"github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/metadata"
 	"github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/utils"
 	"github.com/couchbaselabs/go-couchbase"
+	rm "github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/replication_manager"
 )
 
 var options struct {
@@ -165,6 +167,18 @@ func (mock_top_svc *MockXDCRTopologySvc) MyKVNodes() ([]string, error) {
 
 func (mock_top_svc *MockXDCRTopologySvc) XDCRTopology() (map[string]uint16, error) {
 	retmap := make(map[string]uint16)
+	sourceCluster, err := mock_top_svc.MyCluster()
+		if err != nil {
+		return nil, err
+	}
+	serverList, err := rm.ClusterInfoService().GetServerList(sourceCluster, "default")
+	if err != nil {
+		return nil, err
+	}
+	for _, server := range serverList {
+		serverName := (strings.Split(server, ":"))[0]
+		retmap[serverName] = uint16(base.AdminportNumber)
+	}
 	return retmap, nil
 }
 
