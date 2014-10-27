@@ -16,7 +16,7 @@ const (
 	default_http_connection                               = 20
 	default_source_nozzle_per_node                        = 2
 	default_target_nozzle_per_node                        = 2
-	default_max_expected_replication_lag                  = 300
+	default_max_expected_replication_lag                  = 1000
 	default_timeout_percentage_cap                        = 80 // TODO is this ok?
 	default_filter_expression                string       = ""
 	default_replication_type                 string       = "capi"

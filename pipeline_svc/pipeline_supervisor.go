@@ -251,7 +251,9 @@ func (supervisor *PipelineSupervisor) processReport(heartbeat_report map[string]
 
 func (supervisor *PipelineSupervisor) reportFailure(partsError map[string]error) {
 	//report the failure to decision maker
-	supervisor.heartbeat_ticker.Stop()
+	if supervisor.heartbeat_ticker != nil {
+		supervisor.heartbeat_ticker.Stop()
+	}
 	supervisor.notifyWaitersToFinish()
 	supervisor.failure_handler.OnError(supervisor.pipeline, partsError)
 }

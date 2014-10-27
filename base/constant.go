@@ -3,7 +3,7 @@ package base
 import ()
 
 //constants
-var DefaultConnectionSize = 20
+var DefaultConnectionSize = 70
 var DefaultPoolName = "default"
 
 //constants for adminport

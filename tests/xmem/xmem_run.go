@@ -125,20 +125,20 @@ func main() {
 	}()
 	argParse()
 
-	test(500, 100000, parts.Batch_XMEM)
+	test(500, 100000)
 //	test(5, 50, parts.Batch_XMEM)
 
 }
 
-func test(batch_count int, data_count int, xmem_mode parts.XMEM_MODE) {
+func test(batch_count int, data_count int) {
 	logger.Info("------------START testing Xmem-------------------")
-	logger.Infof("batch_count=%d, data_count=%d, xmem_mode=%d\n", batch_count, data_count, xmem_mode)
+	logger.Infof("batch_count=%d, data_count=%d\n", batch_count, data_count)
 //	err := setup()
 
 //	if err != nil {
 //		panic(err)
 //	}
-	startXmem(batch_count, xmem_mode)
+	startXmem(batch_count)
 	logger.Info("XMEM is started")
 	waitGrp := &sync.WaitGroup{}
 	waitGrp.Add(1)
@@ -305,7 +305,7 @@ func getConnectStr(clusterAddr string, poolName string, bucketName string, usern
 	return "", err
 }
 
-func startXmem(batch_count int, xmem_mode parts.XMEM_MODE) {
+func startXmem(batch_count int) {
 	target_connectStr, err := getConnectStr(options.target_clusterAddr, "default", options.target_bucket, options.username, options.password)
 	if err != nil || target_connectStr == "" {
 		panic(err)
@@ -314,9 +314,8 @@ func startXmem(batch_count int, xmem_mode parts.XMEM_MODE) {
 
 	xmem = parts.NewXmemNozzle("xmem", target_connectStr, options.target_bucket, options.password, logger.LoggerContext())
 	var configs map[string]interface{} = map[string]interface{}{parts.XMEM_SETTING_BATCHCOUNT: batch_count,
-		parts.XMEM_SETTING_TIMEOUT:    time.Millisecond * 10,
-		parts.XMEM_SETTING_NUMOFRETRY: 3,
-		parts.XMEM_SETTING_MODE:       xmem_mode}
+		parts.XMEM_SETTING_RESP_TIMEOUT:    time.Millisecond * 10,
+		parts.XMEM_SETTING_NUMOFRETRY: 3}
 
 	xmem.Start(configs)
 }
