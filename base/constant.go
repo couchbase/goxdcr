@@ -6,9 +6,14 @@ import ()
 var DefaultConnectionSize = 20
 var DefaultPoolName = "default"
 
+// URL related constants
+var UrlDelimiter = "/"
+var UrlPortNumberDelimiter = ":"
+
 //constants for adminport
-var AdminportUrlPrefix = "/"
+var AdminportUrlPrefix = UrlDelimiter
 var AdminportNumber = 12100
+var KVPortNumber = 12000
 // AdminportReadTimeout timeout, in milliseconds, is read timeout for
 // golib's http server.
 var AdminportReadTimeout = 0

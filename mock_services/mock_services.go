@@ -3,7 +3,6 @@ package mock_services
 
 import (
 	"fmt"
-	"strings"
 	"github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/base"
 	"github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/metadata"
 	"github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/utils"
@@ -15,6 +14,7 @@ var options struct {
 	targetBucket    string //target bucket
 	sourceClusterAddr      string //source cluster addr
 	targetClusterAddr      string //target cluster addr
+	sourceKVHost      string //source kv host name
 	numConnPerKV    int    // number of connections per source KV node
 	numOutgoingConn int    // number of connections to target cluster
 	username        string //username on source cluster
@@ -22,11 +22,12 @@ var options struct {
 	maxVbno         int    // maximum number of vbuckets
 }
 
-func SetTestOptions(sourceBucket, targetBucket, sourceClusterAddr, targetClusterAddr, username, password string, numConnPerKV, numOutgoingConn int) {
+func SetTestOptions(sourceBucket, targetBucket, sourceClusterAddr, targetClusterAddr, sourceKVHost, username, password string, numConnPerKV, numOutgoingConn int) {
 	options.sourceBucket = sourceBucket
 	options.targetBucket = targetBucket
 	options.sourceClusterAddr = sourceClusterAddr
 	options.targetClusterAddr = targetClusterAddr
+	options.sourceKVHost = sourceKVHost
 	options.username = username
 	options.password = password
 	options.numConnPerKV = numConnPerKV
@@ -148,8 +149,7 @@ type MockXDCRTopologySvc struct {
 }
 
 func (mock_top_svc *MockXDCRTopologySvc) MyHost() (string, error) {
-	parts := strings.Split(options.sourceClusterAddr, ":")
-	return parts[0], nil
+	return options.sourceKVHost, nil
 }
 
 func (mock_top_svc *MockXDCRTopologySvc) MyAdminPort() (uint16, error) {
@@ -157,9 +157,10 @@ func (mock_top_svc *MockXDCRTopologySvc) MyAdminPort() (uint16, error) {
 }
 
 func (mock_top_svc *MockXDCRTopologySvc) MyKVNodes() ([]string, error) {
-	mock_ci_svc := &MockClusterInfoSvc{}
-	nodes, err := mock_ci_svc.GetServerList(options.sourceClusterAddr, "default")
-	return nodes, err
+	// as of now each xdcr instance is responsible for only one kv node
+	nodes := make([]string, 1)
+	nodes[0] = options.sourceKVHost
+	return nodes, nil
 }
 
 func (mock_top_svc *MockXDCRTopologySvc) XDCRTopology() (map[string]uint16, error) {

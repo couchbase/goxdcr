@@ -25,8 +25,8 @@ var logger *log.CommonLogger = log.NewLogger("Xmem_run", log.DefaultLoggerContex
 var options struct {
 	source_bucket      string // source bucket
 	target_bucket      string //target bucket
-	source_clusterAddr string //source connect string
-	target_clusterAddr string //target connect string
+	source_cluster_addr string //source connect string
+	target_cluster_addr string //target connect string
 	username           string //username
 	password           string //password
 	maxVbno            int    // maximum number of vbuckets
@@ -39,7 +39,10 @@ var xmem *parts.XmemNozzle = nil
 var target_bk *couchbase.Bucket
 
 func argParse() {
-
+	flag.StringVar(&options.source_cluster_addr, "source_cluster_addr", "127.0.0.1:9000",
+		"source cluster address")
+	flag.StringVar(&options.target_cluster_addr, "target_cluster_addr", "127.0.0.1:9000",
+		"target cluster address")
 	flag.StringVar(&options.source_bucket, "source_bucket", "default",
 		"bucket to replicate from")
 	flag.IntVar(&options.maxVbno, "maxvb", 1024,
@@ -52,28 +55,21 @@ func argParse() {
 		"password")
 
 	flag.Parse()
-	args := flag.Args()
-	if len(args) < 1 {
-		usage()
-		os.Exit(1)
-	}
-	options.source_clusterAddr = args[0]
-	options.target_clusterAddr = args[1]
 }
 
 func usage() {
-	fmt.Fprintf(os.Stderr, "Usage : %s [OPTIONS] <source-cluster-addr> <target-cluster-addr>\n", os.Args[0])
+	fmt.Fprintf(os.Stderr, "Usage : %s [OPTIONS] \n", os.Args[0])
 	flag.PrintDefaults()
 }
 
 func setup() (err error) {
 
 	logger.Info("Start Testing Xmem...")
-	logger.Infof("target_clusterAddr=%s, username=%s, password=%s\n", options.target_clusterAddr, options.username, options.password)
+	logger.Infof("target_clusterAddr=%s, username=%s, password=%s\n", options.target_cluster_addr, options.username, options.password)
 	logger.Info("Done with parsing the arguments")
 
 	//flush the target bucket
-	baseURL, err := couchbase.ParseURL("http://" + options.target_bucket + ":" + options.password + "@" + options.target_clusterAddr)
+	baseURL, err := couchbase.ParseURL("http://" + options.target_bucket + ":" + options.password + "@" + options.target_cluster_addr)
 
 	if err == nil {
 		err = utils.QueryRestAPI(baseURL,
@@ -95,7 +91,7 @@ func setup() (err error) {
 
 func verify(data_count int) bool {
 	output := &utils.CouchBucket{}
-	baseURL, err := couchbase.ParseURL("http://" + options.target_clusterAddr)
+	baseURL, err := couchbase.ParseURL("http://" + options.target_cluster_addr)
 
 	if err == nil {
 		err = utils.QueryRestAPI(baseURL,
@@ -142,7 +138,7 @@ func test(batch_count int, data_count int, xmem_mode parts.XMEM_MODE) {
 	logger.Info("XMEM is started")
 	waitGrp := &sync.WaitGroup{}
 	waitGrp.Add(1)
-	go startUpr(options.source_clusterAddr, options.source_bucket, waitGrp, data_count)
+	go startUpr(options.source_cluster_addr, options.source_bucket, waitGrp, data_count)
 	waitGrp.Wait()
 
 	time.Sleep(100 * time.Second)
@@ -306,7 +302,7 @@ func getConnectStr(clusterAddr string, poolName string, bucketName string, usern
 }
 
 func startXmem(batch_count int, xmem_mode parts.XMEM_MODE) {
-	target_connectStr, err := getConnectStr(options.target_clusterAddr, "default", options.target_bucket, options.username, options.password)
+	target_connectStr, err := getConnectStr(options.target_cluster_addr, "default", options.target_bucket, options.username, options.password)
 	if err != nil || target_connectStr == "" {
 		panic(err)
 	}

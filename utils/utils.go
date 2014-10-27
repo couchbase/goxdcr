@@ -16,6 +16,7 @@ import (
 	"strings"
 	"bytes"
 	"bufio"
+	"strconv"
 	"code.google.com/p/goprotobuf/proto"
 )
 
@@ -284,5 +285,10 @@ func IncorrectValueTypeInMapError(key string, val interface{}, expectedType stri
 // returns an enhanced error with erroe message being "msg + old error message"
 func NewEnhancedError (msg string, err error) error {
 	return errors.New(msg + "\n" + err.Error())
+}
+
+// return host address in the form of hostName:port
+func GetHostAddr(hostName string, port int) string {
+	return hostName + base.UrlPortNumberDelimiter + strconv.FormatInt(int64(port), base.ParseIntBase)
 }
 

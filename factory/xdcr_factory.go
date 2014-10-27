@@ -11,6 +11,7 @@ import (
 	"github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/metadata_svc"
 	"github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/parts"
 	"github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/pipeline_svc"
+	"github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/utils"
 	xdcr_pipeline_svc "github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/pipeline_svc"
 	"github.com/couchbase/indexing/secondary/protobuf"
 	sp "github.com/ysui6888/indexing/secondary/projector"
@@ -111,13 +112,12 @@ func (xdcrf *XDCRFactory) constructSourceNozzles(spec *metadata.ReplicationSpeci
 	logger_ctx *log.LoggerContext) (map[string]common.Nozzle, error) {
 	sourceNozzles := make(map[string]common.Nozzle)
 
-	//	kvaddr, bucket, vbnos, err := (*xdcr_factory.get_source_kv_topology_callback)(config.SourceCluster, config.SourceBucketn)
-	kvaddrs, err := xdcrf.xdcr_topology_svc.MyKVNodes()
+	kvHosts, err := xdcrf.xdcr_topology_svc.MyKVNodes()
 	if err != nil {
 		xdcrf.logger.Errorf("err=%v\n", err)
 		return nil, err
 	}
-	xdcrf.logger.Debugf("kvaddrs=%v\n", kvaddrs)
+	xdcrf.logger.Debugf("kvHosts=%v\n", kvHosts)
 
 	bucketName := spec.SourceBucketName
 
@@ -130,7 +130,9 @@ func (xdcrf *XDCRFactory) constructSourceNozzles(spec *metadata.ReplicationSpeci
 		xdcrf.logger.Errorf("err=%v\n", err)
 		return nil, err
 	}
-	for _, kvaddr := range kvaddrs {
+
+	for _, kvHost := range kvHosts {
+		kvaddr := utils.GetHostAddr(kvHost, base.KVPortNumber)
 		vbnos := serverVBMap[kvaddr]
 
 		numOfVbs := len(vbnos)

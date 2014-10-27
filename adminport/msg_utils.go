@@ -23,8 +23,6 @@ const (
 
 // http request related constants
 const (
-	UrlDelimiter = "/"
-	UrlPortNumberDelimiter = ":"
 	ContentType = "Content-Type"
 )
 
@@ -40,7 +38,7 @@ const (
 	// Some url paths are not static and have variable contents, e.g., settings/replications/$replication_id
 	// The message keys for such paths are constructed by appending the dynamic suffix below to the static portion of the path.
 	// e.g., settings/replications/dynamic
-	DynamicSuffix = UrlDelimiter + "dynamic"
+	DynamicSuffix = "/dynamic"
 )
 
 // constants used for parsing internal settings
@@ -201,13 +199,8 @@ func DecodeCreateReplicationRequest(request *http.Request) (fromBucket, toCluste
 // create a new DeleteReplication request for specified replicationId and the specified node
 func NewDeleteReplicationRequest(replicationId, nodeAddr string, port int) (*http.Request, error) {
 	// replicatioId is cancatenated into the url 
-	url := GetHostAddr(nodeAddr, port) + base.AdminportUrlPrefix + DeleteReplicationPrefix + UrlDelimiter + replicationId
+	url := utils.GetHostAddr(nodeAddr, port) + base.AdminportUrlPrefix + DeleteReplicationPrefix + base.UrlDelimiter + replicationId
 	return http.NewRequest(MethodDelete, url, nil)
-}
-
-// return host address in the form of nodeAddr:port
-func GetHostAddr(nodeAddr string, port int) string {
-	return nodeAddr + UrlPortNumberDelimiter + strconv.FormatInt(int64(port), base.ParseIntBase)
 }
 
 // decode replicationId from create replication response
@@ -376,7 +369,7 @@ func NewViewReplicationSettingsResponse(settings *metadata.ReplicationSettings) 
 // decode replication id from http request
 func DecodeReplicationIdFromHttpRequest(request *http.Request, pathPrefix string) (string, error) {
 	// length of prefix preceding replicationId in request url path 
-	prefixLength := len(base.AdminportUrlPrefix) + len(pathPrefix) + len(UrlDelimiter)
+	prefixLength := len(base.AdminportUrlPrefix) + len(pathPrefix) + len(base.UrlDelimiter)
 	
 	if len(request.URL.Path) <= prefixLength {		
 		return "", utils.MissingReplicationIdInHttpRequestError(request.URL.Path)

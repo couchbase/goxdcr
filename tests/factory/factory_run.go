@@ -14,6 +14,7 @@ import (
 )
 
 var options struct {
+	sourceKVHost      string //source kv host name
 	sourceBucket    string // source bucket
 	targetBucket    string //target bucket
 	connectStr      string //connect string
@@ -31,7 +32,10 @@ const (
 )
 
 func argParse() {
-
+	flag.StringVar(&options.connectStr, "connectStr", "127.0.0.1:9000",
+		"connection string to source cluster")
+	flag.StringVar(&options.sourceKVHost, "source_kv_host", "127.0.0.1",
+		"source KV host name")
 	flag.StringVar(&options.sourceBucket, "source_bucket", "default",
 		"bucket to replicate from")
 	flag.IntVar(&options.maxVbno, "maxvb", 8,
@@ -46,16 +50,10 @@ func argParse() {
 	flag.StringVar(&options.password, "password", "welcome", "password to Cluster admin console")
 
 	flag.Parse()
-	args := flag.Args()
-	if len(args) < 1 {
-		usage()
-		os.Exit(1)
-	}
-	options.connectStr = args[0]
 }
 
 func usage() {
-	fmt.Fprintf(os.Stderr, "Usage : %s [OPTIONS] <cluster-addr> \n", os.Args[0])
+	fmt.Fprintf(os.Stderr, "Usage : %s [OPTIONS] \n", os.Args[0])
 	flag.PrintDefaults()
 }
 
@@ -77,7 +75,7 @@ func invokeFactory() error {
 	mcisvc := &c.MockClusterInfoSvc{}
 	mxtsvc := &c.MockXDCRTopologySvc{}
 
-	c.SetTestOptions(options.sourceBucket, options.targetBucket, options.connectStr, options.connectStr, options.username, options.password, options.numConnPerKV, options.numOutgoingConn)
+	c.SetTestOptions(options.sourceBucket, options.targetBucket, options.connectStr, options.connectStr, options.sourceKVHost, options.username, options.password, options.numConnPerKV, options.numOutgoingConn)
 	fac := factory.NewXDCRFactory(msvc, mcisvc, mxtsvc, log.DefaultLoggerContext, log.DefaultLoggerContext, nil)
 
 	pl, err := fac.NewPipeline(TEST_TOPIC)

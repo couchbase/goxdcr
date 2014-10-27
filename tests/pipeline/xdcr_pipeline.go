@@ -24,6 +24,7 @@ var options struct {
 	target_bucket           string //target bucket
 	source_cluster_addr     string //source connect string
 	target_cluster_addr     string //target connect string
+	source_kv_addr      string //source kv addr
 	source_cluster_username string //source cluster username
 	source_cluster_password string //source cluster password
 	target_cluster_username string //target cluster username
@@ -51,6 +52,8 @@ func argParse() {
 		"target cluster address")
 	flag.StringVar(&options.target_bucket, "target_bucket", "target",
 		"bucket to replicate to")
+	flag.StringVar(&options.source_kv_addr, "source_kv_addr", "127.0.0.1:12100",
+		"source KV address")
 	flag.StringVar(&options.source_cluster_username, "source_cluster_username", "Administrator",
 		"user name to use for logging into source cluster")
 	flag.StringVar(&options.source_cluster_password, "source_cluster_password", "welcome",
@@ -111,7 +114,7 @@ func main() {
 func setup() error {
 //	flushTargetBkt()
 	fmt.Println("Finish setup")
-	c.SetTestOptions(options.source_bucket, options.target_bucket, options.source_cluster_addr, options.target_cluster_addr, options.source_cluster_username, options.source_cluster_password, options.nozzles_per_node_source, options.nozzles_per_node_target)
+	c.SetTestOptions(options.source_bucket, options.target_bucket, options.source_cluster_addr, options.target_cluster_addr, options.source_kv_addr, options.source_cluster_username, options.source_cluster_password, options.nozzles_per_node_source, options.nozzles_per_node_target)
 	metadata_svc, err := s.DefaultMetadataSvc()
 	if err != nil {
 		return err

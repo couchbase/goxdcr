@@ -23,6 +23,9 @@ go install
 cd ../factory
 go clean
 go install
+cd ../latency_test
+go clean
+go install
 cd ../router
 go clean 
 go install
@@ -56,6 +59,8 @@ go clean
 cd ../xmem
 go clean
 cd ../factory
+go clean
+cd ../latency_test
 go clean
 cd ../router
 go clean 
