@@ -14,7 +14,7 @@ import (
 	"log"
 //	"net/http"
 	"os"
-	//"time"
+	"time"
 )
 
 //import _ "net/http/pprof"
@@ -59,7 +59,7 @@ func argParse() {
 		"user name to use for logging into target cluster")
 	flag.StringVar(&options.target_cluster_password, "target_cluster_password", "welcome",
 		"password to use for logging into target cluster")
-	flag.StringVar(&options.target_bucket_password, "target_bucket_password", "welcome",
+	flag.StringVar(&options.target_bucket_password, "target_bucket_password", "",
 		"password to use for accessing target bucket")
 	flag.IntVar(&options.nozzles_per_node_source, "nozzles_per_node_source", NUM_SOURCE_CONN,
 		"number of nozzles per source node")
@@ -123,8 +123,8 @@ func setup() error {
 func test() {
 	settings := make(map[string]interface{})
 	settings[metadata.PipelineLogLevel] = "Error"
-	settings[metadata.SourceNozzlePerNode] = 1
-	settings[metadata.TargetNozzlePerNode] = 1
+	settings[metadata.SourceNozzlePerNode] = options.nozzles_per_node_source
+	settings[metadata.TargetNozzlePerNode] = options.nozzles_per_node_target
 	settings[metadata.BatchCount] = 500
 	
 	_, err := replication_manager.CreateReplication(options.source_cluster_addr, options.source_bucket, options.target_cluster_addr, options.target_bucket, options.target_bucket_password, settings)
@@ -154,7 +154,7 @@ func test() {
 //		fail(fmt.Sprintf("%v", err))
 //	}
 //	fmt.Printf("Replication %s is deleted\n", topic)
-	//time.Sleep(2 * time.Minute)
+	time.Sleep(10 * time.Minute)
 
 }
 
