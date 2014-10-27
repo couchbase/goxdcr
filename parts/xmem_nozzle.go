@@ -208,8 +208,6 @@ func (buf *requestBuffer) evictSlot(pos uint16) error {
 			buf.sequences[pos] = buf.sequences[pos] + 1
 		}
 
-		buf.logger.Infof("wait_for_resp=%vs\n", time.Since(req.sent_time).Seconds())
-
 		if buf.size-uint16(len(buf.empty_slots_pos)) <= buf.notify_threshold {
 			if buf.notifych != nil && buf.notify_allowed {
 				buf.notifych <- true
@@ -849,9 +847,6 @@ func (xmem *XmemNozzle) check(finch chan bool, waitGrp *sync.WaitGroup) {
 			goto done
 		case <-ticker:
 			count++
-			//			if math.Mod(float64(count), float64(15)) < 2 {
-			//				xmem.Logger().Errorf("%v checking timeout. %v  unsent, waiting for %v, ready_batch=%v, current_batch_start_time=%v\n", xmem.Id(), len(xmem.dataChan), int(xmem.buf.bufferSize())-len(xmem.buf.empty_slots_pos), len(xmem.batches_ready), xmem.batch.start_time)
-			//			}
 			size := xmem.buf.bufferSize()
 			timeoutCheckFunc := xmem.checkTimeout
 			for i := 0; i < int(size); i++ {

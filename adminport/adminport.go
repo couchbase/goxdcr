@@ -27,7 +27,7 @@ func MainAdminPort(laddr string) {
 
 	h := new(xdcrRestHandler)
 	reqch := make(chan Request)
-	server := NewHTTPServer("xdcr", GetHostAddr(laddr, base.AdminportNumber), base.AdminportUrlPrefix, reqch, new(Handler))
+	server := NewHTTPServer("xdcr", utils.GetHostAddr(laddr, base.AdminportNumber), base.AdminportUrlPrefix, reqch, new(Handler))
 
 	server.Start()
 	logger_ap.Infof("server started %v !\n", laddr)
@@ -67,22 +67,22 @@ func (h *xdcrRestHandler) handleRequest(
 	}
 	
 	switch (key) {
-	case CreateReplicationPath + UrlDelimiter + MethodPost:
+	case CreateReplicationPath + base.UrlDelimiter + MethodPost:
 		response, err = h.doCreateReplicationRequest(request)
-	case DeleteReplicationPrefix + DynamicSuffix + UrlDelimiter + MethodDelete:
+	case DeleteReplicationPrefix + DynamicSuffix + base.UrlDelimiter + MethodDelete:
 		fallthrough
 	// historically, deleteReplication could use Post method	
-	case DeleteReplicationPrefix + DynamicSuffix + UrlDelimiter + MethodPost:
+	case DeleteReplicationPrefix + DynamicSuffix + base.UrlDelimiter + MethodPost:
 		response, err = h.doDeleteReplicationRequest(request)
-	case PauseReplicationPrefix + DynamicSuffix + UrlDelimiter + MethodPost:
+	case PauseReplicationPrefix + DynamicSuffix + base.UrlDelimiter + MethodPost:
 		response, err = h.doPauseReplicationRequest(request)
-	case ResumeReplicationPrefix + DynamicSuffix + UrlDelimiter + MethodPost:
+	case ResumeReplicationPrefix + DynamicSuffix + base.UrlDelimiter + MethodPost:
 		response, err = h.doResumeReplicationRequest(request)
-	case SettingsReplicationsPath + DynamicSuffix + UrlDelimiter + MethodGet:
+	case SettingsReplicationsPath + DynamicSuffix + base.UrlDelimiter + MethodGet:
 		response, err = h.doViewReplicationSettingsRequest(request)
-	case SettingsReplicationsPath + DynamicSuffix + UrlDelimiter + MethodPost:
+	case SettingsReplicationsPath + DynamicSuffix + base.UrlDelimiter + MethodPost:
 		response, err = h.doChangeReplicationSettingsRequest(request)
-	case StatisticsPath + UrlDelimiter + MethodGet:
+	case StatisticsPath + base.UrlDelimiter + MethodGet:
 		response, err = h.doGetStatisticsRequest(request)
 	default:
 		err = ErrorInvalidRequest
@@ -299,9 +299,6 @@ func (h *xdcrRestHandler) forwardReplicationRequest(request *http.Request) (map[
 	}
 
 	xdcrNodesMap, err := rm.XDCRCompTopologyService().XDCRTopology()
-	if err != nil {
-		return nil, err
-	}
 
 	forwardedNodesMap := make(map[string][]interface{})
 	for xdcrNode, port := range xdcrNodesMap {
@@ -322,7 +319,7 @@ func (h *xdcrRestHandler) forwardReplicationRequest(request *http.Request) (map[
 // this functions works on a copy of http request so as to leave the original request intact
 func forwardReplicationRequestToXDCRNode(request http.Request, xdcrAddr string, port int) (*http.Response, error) {
 	// change the host in request url to point to the new node
-	request.URL.Host = GetHostAddr(xdcrAddr, port)
+	request.URL.Host = utils.GetHostAddr(xdcrAddr, port)
 	// disable further forwarding of a request by adding forward = false to request body
 	if err := request.ParseForm(); err != nil {
 		return nil, err
@@ -338,7 +335,7 @@ func (h *xdcrRestHandler) GetMessageKeyFromRequest(r *http.Request) (string, err
 	// remove adminport url prefix from path
 	path := r.URL.Path[len(base.AdminportUrlPrefix):]
 	// remove trailing "/" in path if it exists
-	if strings.HasSuffix(path, UrlDelimiter) {
+	if strings.HasSuffix(path, base.UrlDelimiter) {
 		path = path[:len(path)-1]
 	}
 	
@@ -364,7 +361,7 @@ func (h *xdcrRestHandler) GetMessageKeyFromRequest(r *http.Request) (string, err
 		return "", utils.InvalidPathInHttpRequestError(r.URL.Path)
 	} else {
 		// add http method suffix to name to ensure uniqueness
-		key += UrlDelimiter + strings.ToUpper(r.Method)
+		key += base.UrlDelimiter + strings.ToUpper(r.Method)
 
 		//todo change to debug
 		logger_ap.Infof("Request key decoded: %v\n", key)

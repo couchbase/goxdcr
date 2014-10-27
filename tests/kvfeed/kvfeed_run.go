@@ -31,7 +31,8 @@ const (
 var count int
 
 func argParse() {
-
+	flag.StringVar(&options.connectStr, "connectStr", "127.0.0.1:9000",
+		"connection string to source cluster")
 	flag.StringVar(&options.source_bucket, "source_bucket", "default",
 		"bucket to replicate from")
 	flag.IntVar(&options.maxVbno, "maxvb", 8,
@@ -40,16 +41,10 @@ func argParse() {
 		"kv server address")
 
 	flag.Parse()
-	args := flag.Args()
-	if len(args) < 1 {
-		usage()
-		os.Exit(1)
-	}
-	options.connectStr = args[0]
 }
 
 func usage() {
-	fmt.Fprintf(os.Stderr, "Usage : %s [OPTIONS] <cluster-addr> \n", os.Args[0])
+	fmt.Fprintf(os.Stderr, "Usage : %s [OPTIONS] \n", os.Args[0])
 	flag.PrintDefaults()
 }
 

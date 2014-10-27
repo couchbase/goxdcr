@@ -15,6 +15,7 @@ var done = make(chan bool)
 
 var options struct {
 	sourceClusterAddr      string //source cluster addr
+	sourceKVHost      string //source kv host name
 	username        string //username on source cluster
 	password        string //password on source cluster	
 	// temp params for mock services. should be removed later
@@ -26,8 +27,12 @@ var options struct {
 }
 
 func argParse() {
+	flag.StringVar(&options.sourceClusterAddr, "sourceClusterAddr", "127.0.0.1:9000",
+		"connection string to source cluster")
+	flag.StringVar(&options.sourceKVHost, "sourceKVHost", "127.0.0.1",
+		"source KV host name")
 	flag.StringVar(&options.targetClusterAddr, "targetClusterAddr", "127.0.0.1:9000",
-		"source cluster address")
+		"target cluster address")
 	flag.StringVar(&options.username, "username", "Administrator", "username to cluster admin console")
 	flag.StringVar(&options.password, "password", "welcome", "password to Cluster admin console")
 		
@@ -43,19 +48,12 @@ func argParse() {
 }
 
 func usage() {
-	fmt.Fprintf(os.Stderr, "Usage : %s [OPTIONS] <sourceClusterAddr> \n", os.Args[0])
+	fmt.Fprintf(os.Stderr, "Usage : %s [OPTIONS] \n", os.Args[0])
 	flag.PrintDefaults()
 }
 
 func main() {
 	argParse()
-	args := flag.Args()
-	if len(args) == 0 {
-		usage()
-		os.Exit(1)
-	}
-
-	options.sourceClusterAddr = args[0]
 	
 	cmd, err := s.StartGometaService()
 	if err != nil {
@@ -64,7 +62,7 @@ func main() {
 	}
 	defer s.KillGometaService(cmd)
 	
-	c.SetTestOptions(options.sourceBucket, options.targetBucket, options.sourceClusterAddr, options.targetClusterAddr, options.username, options.password, options.numConnPerKV, options.numOutgoingConn)
+	c.SetTestOptions(options.sourceBucket, options.targetBucket, options.sourceClusterAddr, options.targetClusterAddr, options.sourceKVHost, options.username, options.password, options.numConnPerKV, options.numOutgoingConn)
 		
 	xdcrTopologyService := new(c.MockXDCRTopologySvc)
 	hostAddr, err := xdcrTopologyService.MyHost()

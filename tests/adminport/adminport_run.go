@@ -10,12 +10,12 @@ import (
 	"bytes"
 	"errors"
 	"net/url"
-	"strings"
 	ap "github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/adminport"
 	base "github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/base"
 	rm "github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/replication_manager"
 	c "github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/mock_services"
 	s "github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/services"
+	utils "github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/utils"
 	pm "github.com/Xiaomei-Zhang/couchbase_goxdcr/pipeline_manager"
 )
 
@@ -35,15 +35,19 @@ var options struct {
 	sourceBucket    string // source bucket
 	targetBucket    string //target bucket
 	connectStr      string //connect string
+	sourceKVHost      string //source kv host name
 	filterName      string //filter name
 	numConnPerKV    int    // number of connections per source KV node
 	numOutgoingConn int    // number of connections to target cluster
 	username        string //username
 	password        string //password
-	kvaddr          string // kv addr
 }
 
 func argParse() {
+	flag.StringVar(&options.connectStr, "connectStr", "127.0.0.1:9000",
+		"connection string to source cluster")
+	flag.StringVar(&options.sourceKVHost, "source_kv_host", "127.0.0.1",
+		"source KV host name")
 	flag.StringVar(&options.sourceBucket, "sourceBucket", "default",
 		"bucket to replicate from")
 	flag.StringVar(&options.targetBucket, "targetBucket", "target",
@@ -58,33 +62,23 @@ func argParse() {
 	flag.StringVar(&options.password, "password", "welcome", "password to Cluster admin console")
 
 	flag.Parse()
-	args := flag.Args()
-	if len(args) < 1 {
-		usage()
-		os.Exit(1)
-	}
-	options.connectStr = args[0]
-	
-	// decode kvaddr from cluster addr
-	parts := strings.Split(options.connectStr, ":")
-	options.kvaddr = parts[0]
 }
 
 func usage() {
-	fmt.Fprintf(os.Stderr, "Usage : %s [OPTIONS] <cluster-addr> \n", os.Args[0])
+	fmt.Fprintf(os.Stderr, "Usage : %s [OPTIONS] \n", os.Args[0])
 	flag.PrintDefaults()
 }
 
 func main() {
 	fmt.Println("Start Testing adminport...")
 	argParse()
-	fmt.Printf("kvaddr=%s\n", options.kvaddr)
+	fmt.Printf("sourceKVHost=%s\n", options.sourceKVHost)
 	fmt.Println("Done with parsing the arguments")
 	startAdminport()
 }
 
 func startAdminport() {
-	c.SetTestOptions(options.sourceBucket, options.targetBucket, options.connectStr, options.connectStr, options.username, options.password, options.numConnPerKV, options.numOutgoingConn)
+	c.SetTestOptions(options.sourceBucket, options.targetBucket, options.connectStr, options.connectStr, options.sourceKVHost, options.username, options.password, options.numConnPerKV, options.numOutgoingConn)
 	
 	cmd, err := s.StartGometaService()
 	if err != nil {
@@ -102,7 +96,7 @@ func startAdminport() {
 	
 	rm.Initialize(metadata_svc, new(c.MockClusterInfoSvc), new(c.MockXDCRTopologySvc), new(c.MockReplicationSettingsSvc))
 
-	go ap.MainAdminPort(options.kvaddr)
+	go ap.MainAdminPort(options.sourceKVHost)
 	//wait for server to finish starting
 	time.Sleep(time.Second * 3)
 
@@ -150,7 +144,7 @@ func startAdminport() {
 }
 
 func getUrlPrefix() string {
-	return "http://" + ap.GetHostAddr(options.kvaddr, base.AdminportNumber) + base.AdminportUrlPrefix
+	return "http://" + utils.GetHostAddr(options.sourceKVHost, base.AdminportNumber) + base.AdminportUrlPrefix
 }
 
 func testCreateReplication() (string, error) {
@@ -190,7 +184,7 @@ func testCreateReplication() (string, error) {
 }
 
 func testPauseReplication(replicationId, escapedReplId string) error {
-	url := getUrlPrefix() + ap.PauseReplicationPrefix + ap.UrlDelimiter + escapedReplId
+	url := getUrlPrefix() + ap.PauseReplicationPrefix + base.UrlDelimiter + escapedReplId
 	
 	request, err := http.NewRequest(ap.MethodPost, url, nil)
 	if err != nil {
@@ -211,7 +205,7 @@ func testPauseReplication(replicationId, escapedReplId string) error {
 }
 
 func testResumeReplication(replicationId, escapedReplId string) error {
-	url := getUrlPrefix() + ap.ResumeReplicationPrefix + ap.UrlDelimiter + escapedReplId
+	url := getUrlPrefix() + ap.ResumeReplicationPrefix + base.UrlDelimiter + escapedReplId
 	
 	request, err := http.NewRequest(ap.MethodPost, url, nil)
 	if err != nil {
@@ -232,7 +226,7 @@ func testResumeReplication(replicationId, escapedReplId string) error {
 }
 
 func testDeleteReplication(replicationId, escapedReplId string) error {
-	url := getUrlPrefix() + ap.DeleteReplicationPrefix + ap.UrlDelimiter + escapedReplId
+	url := getUrlPrefix() + ap.DeleteReplicationPrefix + base.UrlDelimiter + escapedReplId
 	
 	request, err := http.NewRequest(ap.MethodPost, url, nil)
 	if err != nil {
@@ -253,7 +247,7 @@ func testDeleteReplication(replicationId, escapedReplId string) error {
 }
 
 func testViewReplicationSettings(replicationId string) error {
-	url := getUrlPrefix() + ap.SettingsReplicationsPath + ap.UrlDelimiter + replicationId
+	url := getUrlPrefix() + ap.SettingsReplicationsPath + base.UrlDelimiter + replicationId
 	
 	request, err := http.NewRequest(ap.MethodGet, url, nil)
 	if err != nil {
@@ -269,7 +263,7 @@ func testViewReplicationSettings(replicationId string) error {
 }
 
 func testChangeReplicationSettings(replicationId string) error {
-	url := getUrlPrefix() + ap.SettingsReplicationsPath + ap.UrlDelimiter + replicationId
+	url := getUrlPrefix() + ap.SettingsReplicationsPath + base.UrlDelimiter + replicationId
 	
 	params := make(map[string]interface{})
 	params[ap.Active] = Active

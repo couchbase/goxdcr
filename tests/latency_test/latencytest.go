@@ -30,6 +30,8 @@ import _ "net/http/pprof"
 
 var quit bool = false
 var logger_latency *xdcrlog.CommonLogger = xdcrlog.NewLogger("LatencyTest", xdcrlog.DefaultLoggerContext)
+var source_rest_server_addr string //source rest server address
+var num_worker int // number of read worker used by the test
 
 var options struct {
 	source_bucket           string // source bucket
@@ -43,8 +45,8 @@ var options struct {
 	target_bucket_password  string //target bucket password
 	doc_size                int    //doc_size
 	doc_count               int    //doc_count
-	source_rest_server_addr     string //source rest server address
 	num_write              int  // number of concurrent write routines
+	sample_frequency        int  // frequency of sampling - sample one in every sample_frequency data points
 }
 
 //type docInfo struct {
@@ -73,8 +75,6 @@ func newAppWriter(cluster, bucket, key_prefix string, doc_size, doc_count int, r
 }
 
 func (w *appWriter) run() (err error) {
-	couchbase.PoolSize=options.num_write
-
 	u, err := url.Parse("http://" + w.cluster)
 	if err != nil {
 		logger_latency.Errorf("Failed to parse cluster %v\n", w.cluster)
@@ -93,50 +93,53 @@ func (w *appWriter) run() (err error) {
 		return
 	}
 
+	num_write := options.num_write
+	if num_write > w.doc_count {
+		num_write = w.doc_count
+	}
+	
+	couchbase.PoolSize = num_write
 	b, err := p.GetBucket(w.bucket)
 	if err != nil {
 		logger_latency.Errorf("Failed to get bucket %v", w.bucket)
 		return
 	}
-
-	num_write := options.num_write
-	if num_write > w.doc_count {
-		num_write = w.doc_count
-	}
+	
 	docs_per_write := int(math.Ceil(float64(w.doc_count)/float64(num_write)))
 	logger_latency.Infof("docs_per_write=%v\n", docs_per_write)
-	var start_index int = 0
-	for i := 0; i < num_write; i++ {
-		logger_latency.Infof("Starting write routine #%v\n", i)
-		docs_to_write := docs_per_write
-		if docs_to_write > w.doc_count - start_index {
-			docs_to_write = w.doc_count - start_index
-		}
-		go w.write(b, start_index, docs_to_write)
-		start_index += docs_to_write
+	for start_index := 0; start_index < num_write; start_index++ {
+		logger_latency.Infof("Starting write routine #%v\n", start_index)
+		go w.write(b, start_index, num_write, docs_per_write)
 	}
 
 	logger_latency.Infof("--------DONE WITH CREATING %v Items------------\n", w.doc_count)
 	return
 }
 
-func (w *appWriter) write(b *couchbase.Bucket, start_index int, docs_to_write int) error {
+// Each write routine writes docs at start_index, start_index+num_write, start_index+2*num_write, etc. 
+// This way the larger the doc index, the later it will be written. 
+// This, coupled with the current sampling algorithm based on doc index, can achieve approximate uniform sampling in the time dimension.   
+func (w *appWriter) write(b *couchbase.Bucket, start_index, num_write, docs_per_write int) error {
 	doc := w.genDoc(start_index)
 	
 	var err error
-	for i:=start_index; i< start_index + docs_to_write; i++ {
-		doc_key := w.key_prefix + "_" + fmt.Sprintf("%v", i)
+	for i:=0; i< docs_per_write; i++ {
+		index := start_index + i * num_write
+		if index >= options.doc_count {
+			break
+		}
+		doc_key := w.key_prefix + "_" + fmt.Sprintf("%v", index)
 		err = b.SetRaw(doc_key, 0, doc)
 		if err != nil {
 			return err
 		}
 
 		if err == nil {
-			logger_latency.Infof("%v - Record doc %v\n", i, doc_key)
-			write_time := time.Now()
-//			id := doc_key
-//			recordWriteTime(id, doc_key, write_time)
-			w.reader.read(i, doc_key, write_time)
+			if math.Mod(float64(index), float64(options.sample_frequency)) == 0 {
+				logger_latency.Infof("Record doc %v in write routine #%v in the %vth iteration\n", doc_key, start_index, i)
+				write_time := time.Now()
+				w.reader.read(index/options.sample_frequency, doc_key, write_time)
+			}
 		}
 	}
 	return err
@@ -209,9 +212,9 @@ func (r *appReader) init() (err error) {
 		return
 	}
 
-	r.worker_pool = make ([]*appReadWorker, options.doc_count)
+	r.worker_pool = make ([]*appReadWorker, num_worker)
 	
-	for i:=0; i<options.doc_count; i++ {
+	for i:=0; i<num_worker; i++ {
 		r.worker_pool[i] = &appReadWorker{}
 	}
 	return
@@ -231,22 +234,16 @@ func (w *appReadWorker) run (write_time time.Time, r *appReader) {
 	}()
 
 	logger_latency.Infof("Try to read doc key=%v\n", w.key)
-//	loop:
 	for {
 		err := 	getDoc (r.b, w.key)
 		if err == nil {
-			// add error handling?
 			w.duration = time.Since(write_time)
 			return
-		}
-//		if result.Status == mc.ObservedPersisted || result.Status == mc.ObservedNotPersisted{
-//			logger_latency.Infof("Observed changes %v for %v\n", result, w.key)
-//			w.duration = time.Since(write_time)
-//			break loop
-//		} else {
-//		}
+		} else {
+			// sleep to avoid taking up too much CPU
+        	time.Sleep(time.Millisecond * 50)
+        }
 	}
-//
 	return
 
 }
@@ -254,13 +251,9 @@ func (r *appReader) read(index int, key string, write_time time.Time) {
 	worker := r.worker_pool[index]
 	worker.key = key
 	
-	if math.Mod(float64(index), float64(50)) == 0 {
-		go worker.run(write_time, r)
-	}else {
-		fmt.Printf("Skip observing key=%v\n", key)
-	}
-	
+	go worker.run(write_time, r)	
 }
+
 func parseArgs() {
 	flag.StringVar(&options.source_cluster_addr, "source_cluster_addr", "127.0.0.1:9000",
 		"source cluster address")
@@ -283,6 +276,7 @@ func parseArgs() {
 	flag.IntVar(&options.doc_size, "doc_size", 1000, "size (in byte) of the documents app writer generates")
 	flag.IntVar(&options.doc_count, "doc_count", 100000, "the number of documents app writer generates")
 	flag.IntVar(&options.num_write, "num_write", 100, "number of concurrent write routines")
+	flag.IntVar(&options.sample_frequency, "sample_frequency", 50, "frequency of sampling - sample one in every sample_frequency data points")
 	flag.Parse()
 
 }
@@ -325,11 +319,11 @@ func main() {
 	//start app reader
 
 	//let it run for 3 minutes
-	time.Sleep(time.Minute * 1)
+	time.Sleep(time.Second * 30)
 
 	quit = true
 
-	verify("TEST-", appR.worker_pool)
+	verify(appR.worker_pool)
 }
 
 func usage() {
@@ -342,7 +336,10 @@ func setup() error {
 	
 	// set source rest server address
 	hostName := strings.Split(options.source_cluster_addr, ":")[0]
-	options.source_rest_server_addr = hostName + ":" + strconv.FormatInt(int64(base.AdminportNumber), 10)
+	source_rest_server_addr = hostName + ":" + strconv.FormatInt(int64(base.AdminportNumber), 10)
+	
+	// set number of read workers
+	num_worker = int(math.Ceil(float64(options.doc_count) / float64(options.sample_frequency)))
 	
 	logger_latency.Infof("Setup is done")
 	return nil
@@ -350,7 +347,7 @@ func setup() error {
 
 func startGoXDCRReplicationByRest() error {
 	go func() {
-		cmd := exec.Command("curl", "-X", "POST", "http://" + options.source_rest_server_addr + "/controller/createReplication", "-d", "fromBucket="+options.source_bucket, "-d", "uuid="+options.target_cluster_addr,
+		cmd := exec.Command("curl", "-X", "POST", "http://" + source_rest_server_addr + "/controller/createReplication", "-d", "fromBucket="+options.source_bucket, "-d", "uuid="+options.target_cluster_addr,
 			"-d", "toBucket="+options.target_bucket, "-d", "xdcrSourceNozzlePerNode=4", "-d", "xdcrTargetNozzlePerNode=4", "-d", "xdcrLogLevel=Error")
 		logger_latency.Infof("cmd =%v, path=%v\n", cmd.Args, cmd.Path)
 		bytes, err := cmd.Output()
@@ -371,7 +368,7 @@ func startGoXDCRReplicationByRest() error {
 func stopGoXDCRReplicationByRest() (err error) {
 
 	replicationId := options.source_cluster_addr + "_" + options.source_bucket + "_" + options.target_cluster_addr + "_" + options.target_bucket;
-	cmd := exec.Command("curl", "-X", "POST", "http://" + options.source_rest_server_addr + "/controller/pauseXDCR/" + replicationId)
+	cmd := exec.Command("curl", "-X", "POST", "http://" + source_rest_server_addr + "/controller/pauseXDCR/" + replicationId)
 	logger_latency.Infof("cmd =%v, path=%v\n", cmd.Args, cmd.Path)
 	bytes, err := cmd.Output()
 	if err != nil {
@@ -385,43 +382,35 @@ func stopGoXDCRReplicationByRest() (err error) {
 	return
 }
 
-func verify(key_prefix string, readWorkers []*appReadWorker) {
+func verify(readWorkers []*appReadWorker) {
 	logger_latency.Infof("----------VERIFY------------")
-	outliner := []string{}
-	outliner_count := 0
+	outlier := []string{}
+	outlier_count := 0
 	normals_count := 0
 	normals_total := 0 * time.Millisecond
 	normals_min := 0 * time.Millisecond
 	normals_max := 0 * time.Millisecond
 
-	recvmap := make(map[string]*appReadWorker)
-	for _, ent := range readWorkers {
-		recvmap[ent.key] = ent
-		logger_latency.Infof("key=%v, duration=%v\n", ent.key, ent.duration)
-	}
-
-	for i:=0; i<options.doc_count; i++ {
-		key := key_prefix + "_" + fmt.Sprintf("%v", i)
-		entry, ok := recvmap[key]
-		if ok {
+	for _, readWorker := range readWorkers {
+		if readWorker.duration != 0 {
 			normals_count++
-			normals_total = normals_total + entry.duration
-			if normals_min == 0*time.Millisecond || entry.duration < normals_min {
-				normals_min = entry.duration
+			normals_total = normals_total + readWorker.duration
+			if normals_min == 0*time.Millisecond || readWorker.duration < normals_min {
+				normals_min = readWorker.duration
 			}
 
-			if normals_min == 0*time.Millisecond || entry.duration > normals_max {
-				normals_max = entry.duration
+			if normals_min == 0*time.Millisecond || readWorker.duration > normals_max {
+				normals_max = readWorker.duration
 			}
 		} else {
-			outliner = append(outliner, key)
-			outliner_count++
+			outlier = append(outlier, readWorker.key)
+			outlier_count++
 		}
 	}
 
 	logger_latency.Info("------TEST RESULT-----")
-	logger_latency.Infof("outliner_count=%v\n", outliner_count)
-	logger_latency.Infof("outliner=%v\n", outliner)
+	logger_latency.Infof("outlier_count=%v\n", outlier_count)
+	logger_latency.Infof("outlier=%v\n", outlier)
 	logger_latency.Infof("normal latency item count=%v\n", normals_count)
 	logger_latency.Infof("normal latency max=%v sec\n", normals_max.Seconds())
 	logger_latency.Infof("normal latency min=%v sec\n", normals_min.Seconds())
