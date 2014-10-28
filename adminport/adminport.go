@@ -7,6 +7,7 @@ import (
 	"github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/base"
 	"net/http"
 	"strings"
+	"bytes"
 	"github.com/Xiaomei-Zhang/couchbase_goxdcr/log"
 	rm "github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/replication_manager"
 	utils "github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/utils"
@@ -293,40 +294,62 @@ func (h *xdcrRestHandler) doGetStatisticsRequest(request *http.Request) ([]byte,
 // forward requests to other nodes.
 // in case of error, return a list of nodes that the request has been forwarded to, so that caller can take undo action on these nodes
 func (h *xdcrRestHandler) forwardReplicationRequest(request *http.Request) (map[string][]interface{}, error) {
+	logger_ap.Infof("forwardReplicationRequest\n")
+	
 	myAddr, err := rm.XDCRCompTopologyService().MyHost()
 	if err != nil {
 		return nil, err
 	}
 
 	xdcrNodesMap, err := rm.XDCRCompTopologyService().XDCRTopology()
-
+	
 	forwardedNodesMap := make(map[string][]interface{})
-	for xdcrNode, port := range xdcrNodesMap {
-		// do not forward to current node 
-		if xdcrNode != myAddr {
-			response, err := forwardReplicationRequestToXDCRNode(*request, xdcrNode, int(port))
-			if err != nil {
-				return forwardedNodesMap, err
-			} else {
-				array := []interface{}{port, response}
-				forwardedNodesMap[xdcrNode] = array
+	if len(xdcrNodesMap) > 1 {
+		if err = request.ParseForm(); err != nil {
+			return nil, err
+		}
+		
+		// set "Forward" flag to false in the forwarded request
+		var paramMap = make(map[string]interface{}, 0)
+		for key, valArr := range request.Form {
+			if len(valArr) > 0 {
+				paramMap[key] = valArr[0]
+	    	}
+		}
+		paramMap[Forward] = "false" 
+		// this Encode op should never fail since paramMap is fully under control
+		newBody, _ := EncodeMapIntoByteArray(paramMap)
+	
+		for xdcrNode, port := range xdcrNodesMap {
+			// do not forward to current node 
+			if xdcrNode != myAddr {
+				response, err := forwardReplicationRequestToXDCRNode(request.URL.String(), newBody, xdcrNode, int(port))
+				if err != nil {
+					return forwardedNodesMap, err
+				} else {
+					array := []interface{}{port, response}
+					forwardedNodesMap[xdcrNode] = array
+				}
 			}
 		}
 	}
 	return forwardedNodesMap, nil
 }
 
-// this functions works on a copy of http request so as to leave the original request intact
-func forwardReplicationRequestToXDCRNode(request http.Request, xdcrAddr string, port int) (*http.Response, error) {
-	// change the host in request url to point to the new node
-	request.URL.Host = utils.GetHostAddr(xdcrAddr, port)
-	// disable further forwarding of a request by adding forward = false to request body
-	if err := request.ParseForm(); err != nil {
+func forwardReplicationRequestToXDCRNode(oldRequestUrl string, newRequestBody []byte, xdcrAddr string, port int) (*http.Response, error) {
+	logger_ap.Infof("forwardReplicationRequestToXDCRNode. oldRequestUrl=%v, newRequestBody=%v, xdcrAddr=%v, port=%v\n", 
+	                oldRequestUrl, string(newRequestBody), xdcrAddr, port)
+
+	newUrl := "http://" + utils.GetHostAddr(xdcrAddr, port) + oldRequestUrl
+	newRequest, err := http.NewRequest(MethodPost, newUrl, bytes.NewBuffer(newRequestBody))
+	if err != nil {
 		return nil, err
 	}
-	request.Form.Set(Forward, "false")
-	
-	return http.DefaultClient.Do(&request)
+	newRequest.Header.Set(ContentType, DefaultContentType)
+
+    logger_ap.Infof("forwarded request=%v\n", newRequest)
+        
+    return http.DefaultClient.Do(newRequest)
 }
 
 // Get the message key from http request
