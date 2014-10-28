@@ -91,7 +91,7 @@ type requestBuffer struct {
 	empty_slots_pos  chan uint16 /*empty slot pos in the buffer*/
 	size             uint16      /*the size of the buffer*/
 	notifych         chan bool   /*notify channel is set when the buffer is below threshold*/
-	notify_allowed  bool   /*notify is allowed*/
+//	notify_allowed  bool   /*notify is allowed*/
 	notify_threshold uint16
 	logger           *log.CommonLogger
 }
@@ -104,7 +104,6 @@ func newReqBuffer(size uint16, notifychan chan bool, threshold uint16, logger *l
 		make(chan uint16, size),
 		size,
 		notifychan,
-		true,
 		threshold,
 		logger}
 
@@ -120,10 +119,6 @@ func newReqBuffer(size uint16, notifychan chan bool, threshold uint16, logger *l
 //not concurrent safe. Caller need to be aware
 func (buf *requestBuffer) setNotifyThreshold(threshold uint16) {
 	buf.notify_threshold = threshold
-}
-
-func (buf *requestBuffer) nextNotify () {
-	buf.notify_allowed = true
 }
 
 func (buf *requestBuffer) initializeEmptySlotPos() error {
@@ -209,9 +204,8 @@ func (buf *requestBuffer) evictSlot(pos uint16) error {
 		}
 
 		if buf.size-uint16(len(buf.empty_slots_pos)) <= buf.notify_threshold {
-			if buf.notifych != nil && buf.notify_allowed {
+			if buf.notifych != nil {
 				buf.notifych <- true
-				buf.notify_allowed = false
 				buf.logger.Debugf("buffer's occupied slots is below threshold %v, notify", buf.notify_threshold)
 			} else {
 				buf.logger.Debugf("buffer's occupied slots is below threshold %v, no notify channel is specified though", buf.notify_threshold)
@@ -621,9 +615,8 @@ func (xmem *XmemNozzle) processData_batch(finch chan bool, waitGrp *sync.WaitGro
 				}
 				err = xmem.send_internal(batch)
 				<-xmem.send_allow_ch
-				xmem.buf.nextNotify()
 			case <-xmem.batch.expire_ch:
-				xmem.Logger().Debugf("%v batch expired, move %v to ready queue\n", xmem.Id(), xmem.batch.count())
+				xmem.Logger().Errorf("%v batch expired, move %v to ready queue, %v batches ready\n", xmem.Id(), xmem.batch.count(), len(xmem.batches_ready))
 				xmem.batchReady()
 			}
 		}
@@ -783,7 +776,7 @@ func (xmem *XmemNozzle) initialize(settings map[string]interface{}) error {
 	xmem.batch_move_ch = make(chan bool, 1)
 	xmem.batch_move_ch <- true
 
-	xmem.buf = newReqBuffer(uint16(xmem.config.maxCount*100), xmem.send_allow_ch, uint16(float64(xmem.config.maxCount)*0.1), xmem.Logger())
+	xmem.buf = newReqBuffer(uint16(xmem.config.maxCount*100), xmem.send_allow_ch, uint16(float64(xmem.config.maxCount)*0.2), xmem.Logger())
 
 	xmem.receiver_finch = make(chan bool, 1)
 	xmem.checker_finch = make(chan bool, 1)
