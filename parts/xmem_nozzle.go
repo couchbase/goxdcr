@@ -434,10 +434,6 @@ type XmemNozzle struct {
 	//channel to signal if batch can be transitioned to batches_ready
 	batch_move_ch chan bool
 
-	//control the pace of send
-	//used by flow control
-	//	send_allow_ch chan bool
-
 	childrenWaitGrp sync.WaitGroup
 
 	//buffer for the sent, but not yet confirmed data
@@ -629,7 +625,7 @@ func (xmem *XmemNozzle) processData_batch(finch chan bool, waitGrp *sync.WaitGro
 				goto done
 			case batch := <-xmem.batches_ready:
 				xmem.buf.flowControl()
-				xmem.Logger().Errorf("%v Batch Send..., %v batches ready, %v items in queue, count_recieved=%v, count_sent=%v\n", xmem.Id(), len(xmem.batches_ready), len(xmem.dataChan), xmem.counter_received, xmem.counter_sent)
+				xmem.Logger().Infof("%v Batch Send..., %v batches ready, %v items in queue, count_recieved=%v, count_sent=%v\n", xmem.Id(), len(xmem.batches_ready), len(xmem.dataChan), xmem.counter_received, xmem.counter_sent)
 				err = xmem.send_internal(batch)
 				if err != nil {
 					xmem.handleGeneralError(err)
@@ -638,7 +634,7 @@ func (xmem *XmemNozzle) processData_batch(finch chan bool, waitGrp *sync.WaitGro
 		}
 	}
 done:
-	xmem.Logger().Errorf("%v processData_batch exits\n", xmem.Id())
+	xmem.Logger().Infof("%v processData_batch exits\n", xmem.Id())
 	return
 }
 
@@ -683,7 +679,7 @@ func (xmem *XmemNozzle) batchSendWithRetry(batch *xmemBatch, numOfRetry int) err
 				xmem.Logger().Errorf("%v batchSend: transmit error: %s\n", xmem.Id(), fmt.Sprint(err))
 
 				if !isSeriousError(err) {
-					xmem.Logger().Errorf("%v batchSend: net nonserious error, isNetError=%v |%v|\n", xmem.Id(), isNetError(err), err.Error())			
+					xmem.Logger().Errorf("%v batchSend Failed, retry later\n", xmem.Id())
 					time.Sleep(time.Duration(2^(j+1)) * xmem.config.writeTimeout * time.Second)
 				} else {
 					xmem.repairConn(xmem.memClient)
@@ -696,7 +692,7 @@ func (xmem *XmemNozzle) batchSendWithRetry(batch *xmemBatch, numOfRetry int) err
 		}
 
 		if err != nil {
-			fmt.Println("Failed to send. err=%v\n", err)
+			xmem.Logger().Errorf("%v Failed to send. err=%v\n", xmem.Id(), err)
 			xmem.buf.cancelReservation(index, reserv_num)
 		}
 
@@ -708,18 +704,20 @@ func (xmem *XmemNozzle) batchSendWithRetry(batch *xmemBatch, numOfRetry int) err
 
 func (xmem *XmemNozzle) send_internal(batch *xmemBatch) error {
 	var err error
-	count := batch.count()
+	if batch != nil {
+		count := batch.count()
 
-	xmem.Logger().Infof("Send batch count=%d\n", count)
+		xmem.Logger().Infof("Send batch count=%d\n", count)
 
-	xmem.counter_sent = xmem.counter_sent + count
-	xmem.Logger().Debugf("So far, xmem %v processed %d items", xmem.Id(), xmem.counter_sent)
+		xmem.counter_sent = xmem.counter_sent + count
+		xmem.Logger().Debugf("So far, xmem %v processed %d items", xmem.Id(), xmem.counter_sent)
 
-	//batch send
-	err = xmem.batchSendWithRetry(batch, xmem.config.maxRetry)
-	if err != nil {
-		xmem.repairConn(xmem.memClient)
+		//batch send
 		err = xmem.batchSendWithRetry(batch, xmem.config.maxRetry)
+		if err != nil {
+			xmem.repairConn(xmem.memClient)
+			err = xmem.batchSendWithRetry(batch, xmem.config.maxRetry)
+		}
 	}
 	return err
 }
@@ -818,21 +816,21 @@ func (xmem *XmemNozzle) repairConn(client *mcc.Client) {
 	defer xmem.lock_connection.Unlock()
 
 	if client == xmem.memClient {
-		xmem.Logger().Errorf("%v connection is broken, try to repair...\n", xmem.Id())
+		xmem.Logger().Infof("%v connection is broken, try to repair...\n", xmem.Id())
 		pool, err := base.ConnPoolMgr().GetOrCreatePool(xmem.getPoolName(xmem.config.connectStr), xmem.config.connectStr, xmem.config.bucketName, xmem.config.password, base.DefaultConnectionSize)
 		xmem.memClient.Close()
 		if err == nil {
 			xmem.memClient, err = pool.Get()
 		}
 		if err == nil {
-			xmem.Logger().Errorf("%v - The connection is repaired\n", xmem.Id())
+			xmem.Logger().Infof("%v - The connection is repaired\n", xmem.Id())
 			size := xmem.buf.bufferSize()
 			for i := 0; i < int(size); i++ {
 				xmem.buf.modSlot(uint16(i), xmem.resend)
 			}
 			xmem.Logger().Infof("%v - The unresponded items are resent\n", xmem.Id())
 		} else {
-			xmem.Logger().Errorf("%v - Connection repair failed\n", xmem.Id())
+			xmem.Logger().Infof("%v - Connection repair failed\n", xmem.Id())
 			xmem.handleGeneralError(err)
 		}
 	}
@@ -860,20 +858,23 @@ func (xmem *XmemNozzle) receiveResponse(finch chan bool, waitGrp *sync.WaitGroup
 				if read_retry > 10 && (int(xmem.buf.bufferSize())-len(xmem.buf.empty_slots_pos)) > 0 {
 					xmem.repairConn(xmem.memClient)
 				}
-				xmem.Logger().Errorf("%v read response timed out\n", xmem.Id())
+				xmem.Logger().Infof("%v read response timed out\n", xmem.Id())
 				time.Sleep(100 * time.Millisecond)
 				read_retry++
 			}
-		} else if err != nil && isRealError(response.Status) {
+		} else if err != nil && isRecoverableMCError(response.Status) {
 			pos := xmem.getPosFromOpaque(response.Opaque)
-			xmem.Logger().Errorf("%v pos=%d, Received error = %v in response, err = %v, response=%v\n", xmem.Id(), pos, response.Status.String(), err, response.Bytes())
+			xmem.Logger().Infof("%v pos=%d, Received error = %v in response, err = %v, response=%v\n", xmem.Id(), pos, response.Status.String(), err, response.Bytes())
 			_, err = xmem.buf.modSlot(pos, xmem.resend)
+		} else if err != nil && mc.IsFatal(err) {
+			xmem.handleGeneralError(err)
+			return
 		} else {
 			//raiseEvent
 			pos := xmem.getPosFromOpaque(response.Opaque)
 			req, _ := xmem.buf.slot(pos)
 			if req != nil && req.Opaque == response.Opaque {
-				xmem.Logger().Errorf("%v Got the response, response.Opaque=%v, req.Opaque=%v\n", xmem.Id(), response.Opaque, req.Opaque)
+				xmem.Logger().Debugf("%v Got the response, response.Opaque=%v, req.Opaque=%v\n", xmem.Id(), response.Opaque, req.Opaque)
 				xmem.RaiseEvent(common.DataSent, req, xmem, nil, nil)
 				//empty the slot in the buffer
 				if xmem.buf.evictSlot(pos) != nil {
@@ -881,9 +882,9 @@ func (xmem *XmemNozzle) receiveResponse(finch chan bool, waitGrp *sync.WaitGroup
 				}
 			} else {
 				if req != nil {
-					xmem.Logger().Errorf("%v Got the response, response.Opaque=%v, req.Opaque=%v\n", xmem.Id(), response.Opaque, req.Opaque)
+					xmem.Logger().Debugf("%v Got the response, response.Opaque=%v, req.Opaque=%v\n", xmem.Id(), response.Opaque, req.Opaque)
 				} else {
-					xmem.Logger().Errorf("%v Got the response, pos=%v, req in that pos is nil\n", xmem.Id(), pos)
+					xmem.Logger().Debugf("%v Got the response, pos=%v, req in that pos is nil\n", xmem.Id(), pos)
 				}
 			}
 		}
@@ -912,14 +913,16 @@ func isSeriousError(err error) bool {
 	return err.Error() == "use of closed network connection" || (ok && (!netError.Temporary() && !netError.Timeout()))
 }
 
-func isRealError(resp_status mc.Status) bool {
+
+func isRecoverableMCError(resp_status mc.Status) bool {
 	switch resp_status {
-	case mc.KEY_ENOENT, mc.KEY_EEXISTS, mc.NOT_STORED, mc.Status(0x87):
-		return false
-	default:
+	case mc.TMPFAIL:
 		return true
+	default:
+		return false
 	}
 }
+
 func (xmem *XmemNozzle) check(finch chan bool, waitGrp *sync.WaitGroup) {
 	var count uint64
 	ticker := time.Tick(xmem.config.respTimeout)
@@ -931,13 +934,12 @@ func (xmem *XmemNozzle) check(finch chan bool, waitGrp *sync.WaitGroup) {
 
 			select {
 			case <-xmem.batch.expire_ch:
-				xmem.Logger().Errorf("%v batch expired, moving it to ready queue\n", xmem.Id())
+				xmem.Logger().Infof("%v batch expired, moving it to ready queue\n", xmem.Id())
 				xmem.batchReady()
-				xmem.Logger().Errorf("%v batch expired, move %v to ready queue, %v batches ready\n", xmem.Id(), xmem.batch.count(), len(xmem.batches_ready))
 			default:
 			}
 			count++
-			xmem.Logger().Errorf("%v open=%v checking..., %v item unsent, received %v items, sent %v items, %v items waiting for response, %v batches ready, current batch timeout at %v, current batch expire_ch size is %v\n", xmem.Id(), xmem.IsOpen(), len(xmem.dataChan), xmem.counter_received, xmem.counter_sent, int(xmem.buf.bufferSize())-len(xmem.buf.empty_slots_pos), len(xmem.batches_ready), xmem.batch.start_time.Add(xmem.batch.expiring_duration), len(xmem.batch.expire_ch))
+			xmem.Logger().Debugf("%v open=%v checking..., %v item unsent, received %v items, sent %v items, %v items waiting for response, %v batches ready, current batch timeout at %v, current batch expire_ch size is %v\n", xmem.Id(), xmem.IsOpen(), len(xmem.dataChan), xmem.counter_received, xmem.counter_sent, int(xmem.buf.bufferSize())-len(xmem.buf.empty_slots_pos), len(xmem.batches_ready), xmem.batch.start_time.Add(xmem.batch.expiring_duration), len(xmem.batch.expire_ch))
 			size := xmem.buf.bufferSize()
 			timeoutCheckFunc := xmem.checkTimeout
 			for i := 0; i < int(size); i++ {
@@ -973,7 +975,7 @@ func (xmem *XmemNozzle) timeoutDuration(numofRetry int) time.Duration {
 }
 
 func (xmem *XmemNozzle) resend(req *bufferedMCRequest, pos uint16) (bool, error) {
-	xmem.Logger().Errorf("%v Retry sending ....", xmem.Id())
+	xmem.Logger().Debugf("%v Retry sending ....", xmem.Id())
 	err := xmem.sendSingle(false, req.req, pos)
 
 	if err != nil {
