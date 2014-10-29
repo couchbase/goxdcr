@@ -24,6 +24,7 @@ const (
 // http request related constants
 const (
 	ContentType = "Content-Type"
+	DefaultContentType = "application/x-www-form-urlencoded"
 )
 
 // constants used for parsing url path

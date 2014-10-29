@@ -26,6 +26,10 @@ const (
 	XMEM_NOZZLE_NAME_PREFIX = "xmem"
 )
 
+// errors
+var ErrorNoSourceNozzle = errors.New("Invalid configuration. No source nozzle can be constructed.")
+var ErrorNoTargetNozzle = errors.New("Invalid configuration. No target nozzle can be constructed.")
+
 // Factory for XDCR pipelines
 type XDCRFactory struct {
 	metadata_svc             metadata_svc.MetadataSvc
@@ -118,6 +122,9 @@ func (xdcrf *XDCRFactory) constructSourceNozzles(spec *metadata.ReplicationSpeci
 		return nil, err
 	}
 	xdcrf.logger.Infof("kvHosts=%v\n", kvHosts)
+	if len(kvHosts) == 0 {
+		return nil, ErrorNoSourceNozzle
+	}
 
 	bucketName := spec.SourceBucketName
 
@@ -205,6 +212,9 @@ func (xdcrf *XDCRFactory) constructOutgoingNozzles(spec *metadata.ReplicationSpe
 	if err != nil {
 		xdcrf.logger.Errorf("Error getting server vbuckets map, err=%v\n", err)
 		return nil, nil, err
+	}
+	if len(kvVBMap) == 0 {
+		return nil, nil, ErrorNoTargetNozzle
 	}
 
 	targetBucket, err := xdcrf.cluster_info_svc.GetBucket(targetClusterUUID, targetBucketName)

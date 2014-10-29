@@ -20,8 +20,6 @@ import (
 )
 
 const (
-	DefaultContentType = "application/x-www-form-urlencoded"
-
 	TestTopic      = "test"
 	NumSourceConn = 2
 	NumTargetConn = 3
@@ -165,7 +163,7 @@ func testCreateReplication() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	request.Header.Set(ap.ContentType, DefaultContentType)
+	request.Header.Set(ap.ContentType, ap.DefaultContentType)
 	
 	fmt.Println("request", request)
 	
@@ -190,7 +188,7 @@ func testPauseReplication(replicationId, escapedReplId string) error {
 	if err != nil {
 		return err
 	}
-	request.Header.Set(ap.ContentType, DefaultContentType)
+	request.Header.Set(ap.ContentType, ap.DefaultContentType)
 	
 	fmt.Println("request", request)
 	
@@ -211,7 +209,7 @@ func testResumeReplication(replicationId, escapedReplId string) error {
 	if err != nil {
 		return err
 	}
-	request.Header.Set(ap.ContentType, DefaultContentType)
+	request.Header.Set(ap.ContentType, ap.DefaultContentType)
 	
 	fmt.Println("request", request)
 	
@@ -232,7 +230,7 @@ func testDeleteReplication(replicationId, escapedReplId string) error {
 	if err != nil {
 		return err
 	}
-	request.Header.Set(ap.ContentType, DefaultContentType)
+	request.Header.Set(ap.ContentType, ap.DefaultContentType)
 	
 	fmt.Println("request", request)
 	
@@ -253,7 +251,7 @@ func testViewReplicationSettings(replicationId string) error {
 	if err != nil {
 		return err
 	}
-	request.Header.Set(ap.ContentType, DefaultContentType)
+	request.Header.Set(ap.ContentType, ap.DefaultContentType)
 	
 	fmt.Println("request", request)
 	
@@ -276,7 +274,7 @@ func testChangeReplicationSettings(replicationId string) error {
 	if err != nil {
 		return err
 	}
-	request.Header.Set(ap.ContentType, DefaultContentType)
+	request.Header.Set(ap.ContentType, ap.DefaultContentType)
 	
 	fmt.Println("request", request)
 	
@@ -291,7 +289,7 @@ func testGetStatistics() error {
 	if err != nil {
 		return err
 	}
-	request.Header.Set(ap.ContentType, DefaultContentType)
+	request.Header.Set(ap.ContentType, ap.DefaultContentType)
 	
 	fmt.Println("request", request)
 	
