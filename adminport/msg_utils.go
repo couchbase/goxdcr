@@ -32,7 +32,7 @@ const (
 	CreateReplicationPath    = "controller/createReplication"
 	DeleteReplicationPrefix  = "controller/cancelXDCR"
 	PauseReplicationPrefix  = "controller/pauseXDCR"
-	ResumeReplicationPrefix  = "controller/resumeAXDCR"
+	ResumeReplicationPrefix  = "controller/resumeXDCR"
 	InternalSettingsPath     = "internalSettings"
 	SettingsReplicationsPath = "settings/replications"
 	StatisticsPath         = "stats"

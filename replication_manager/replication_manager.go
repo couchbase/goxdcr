@@ -74,6 +74,14 @@ func ReplicationSettingsService() metadata_svc.ReplicationSettingsSvc {
 func CreateReplication(sourceClusterUUID string, sourceBucket string, targetClusterUUID, targetBucket string, filterName string, settings map[string]interface{}) (string, error) {
 	logger_rm.Infof("Creating replication - sourceCluterUUID=%s, sourceBucket=%s, targetClusterUUID=%s, targetBucket=%s, filterName=%s, settings=%v\n", sourceClusterUUID,
 		sourceBucket, targetClusterUUID, targetBucket, filterName, settings)
+	
+	// check if the same replication already exists
+	replicationId := metadata.ReplicationId(sourceClusterUUID, sourceBucket, targetClusterUUID, targetBucket, filterName)
+	_, err := replication_mgr.metadata_svc.ReplicationSpec(replicationId)
+	if err == nil {
+		return "", errors.New(fmt.Sprintf("Error starting replication with id, %v, since it already exists.", replicationId))
+	}
+	
 	spec, err := replication_mgr.createAndPersistReplicationSpec(sourceClusterUUID, sourceBucket, targetClusterUUID, targetBucket, filterName, settings)
 	if err != nil {
 		logger_rm.Errorf("%v\n", err)
@@ -99,6 +107,11 @@ func PauseReplication(topic string) error {
 	}()
 	
 	logger_rm.Infof("Pausing replication %s\n", topic)
+	
+	if err := validatePipelineExists(topic, "pausing"); err != nil {
+		return err
+	}
+	
 	err := pipeline_manager.StopPipeline(topic)
 	if err != nil {
 		logger_rm.Errorf("%v\n", err)
@@ -121,6 +134,11 @@ func PauseReplication(topic string) error {
 
 func ResumeReplication(topic string) error {
 	logger_rm.Infof("Resuming replication %s\n", topic)
+	
+	if err := validatePipelineExists(topic, "resuming"); err != nil {
+		return err
+	}
+	
 	spec, err := replication_mgr.metadata_svc.ReplicationSpec(topic)
 	if err != nil {
 		logger_rm.Errorf("%v\n", err)
@@ -148,8 +166,9 @@ func ResumeReplication(topic string) error {
 
 func DeleteReplication(topic string) error {
 	logger_rm.Infof("Deleting replication %s\n", topic)
-	if pipeline_manager.Pipeline(topic) == nil {
-		return errors.New(fmt.Sprintf("Error deleting pipeline with topic, %v, since it does not exist.", topic))
+	
+	if err := validatePipelineExists(topic, "deleting"); err != nil {
+		return err
 	}
 	
 	err := pipeline_manager.StopPipeline(topic)
@@ -272,6 +291,14 @@ func SetPipelineLogLevel(topic string, levelStr string) error {
 			err := supervisor.SetPipelineLogLevel(levelStr)
 			return err
 		}
+	}
+	return nil
+}
+
+func validatePipelineExists(topic, action string) error {
+	_, err := replication_mgr.metadata_svc.ReplicationSpec(topic)
+	if err != nil {
+		return errors.New(fmt.Sprintf("Error %v replication with id, %v, since it does not exist.", action, topic))
 	}
 	return nil
 }

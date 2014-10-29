@@ -858,7 +858,7 @@ func (xmem *XmemNozzle) receiveResponse(finch chan bool, waitGrp *sync.WaitGroup
 				if read_retry > 10 && (int(xmem.buf.bufferSize())-len(xmem.buf.empty_slots_pos)) > 0 {
 					xmem.repairConn(xmem.memClient)
 				}
-				xmem.Logger().Infof("%v read response timed out\n", xmem.Id())
+				xmem.Logger().Debugf("%v read response timed out\n", xmem.Id())
 				time.Sleep(100 * time.Millisecond)
 				read_retry++
 			}
