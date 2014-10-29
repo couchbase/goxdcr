@@ -148,6 +148,10 @@ func ResumeReplication(topic string) error {
 
 func DeleteReplication(topic string) error {
 	logger_rm.Infof("Deleting replication %s\n", topic)
+	if pipeline_manager.Pipeline(topic) == nil {
+		return errors.New(fmt.Sprintf("Error deleting pipeline with topic, %v, since it does not exist.", topic))
+	}
+	
 	err := pipeline_manager.StopPipeline(topic)
 	if err != nil {
 		logger_rm.Errorf("%v\n", err)
