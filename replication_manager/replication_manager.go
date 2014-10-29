@@ -77,9 +77,8 @@ func CreateReplication(sourceClusterUUID string, sourceBucket string, targetClus
 	
 	// check if the same replication already exists
 	replicationId := metadata.ReplicationId(sourceClusterUUID, sourceBucket, targetClusterUUID, targetBucket, filterName)
-	_, err := replication_mgr.metadata_svc.ReplicationSpec(replicationId)
-	if err == nil {
-		return "", errors.New(fmt.Sprintf("Error starting replication with id, %v, since it already exists.", replicationId))
+	if err := validatePipelineExists(replicationId, "starting", false); err != nil {
+		return "", err
 	}
 	
 	spec, err := replication_mgr.createAndPersistReplicationSpec(sourceClusterUUID, sourceBucket, targetClusterUUID, targetBucket, filterName, settings)
@@ -108,7 +107,11 @@ func PauseReplication(topic string) error {
 	
 	logger_rm.Infof("Pausing replication %s\n", topic)
 	
-	if err := validatePipelineExists(topic, "pausing"); err != nil {
+	if err := validatePipelineExists(topic, "pausing", true); err != nil {
+		return err
+	}
+	
+	if err := validatePipelineState(topic, "pause", true); err != nil {
 		return err
 	}
 	
@@ -135,7 +138,11 @@ func PauseReplication(topic string) error {
 func ResumeReplication(topic string) error {
 	logger_rm.Infof("Resuming replication %s\n", topic)
 	
-	if err := validatePipelineExists(topic, "resuming"); err != nil {
+	if err := validatePipelineExists(topic, "resuming", true); err != nil {
+		return err
+	}
+	
+	if err := validatePipelineState(topic, "resume", false); err != nil {
 		return err
 	}
 	
@@ -167,7 +174,7 @@ func ResumeReplication(topic string) error {
 func DeleteReplication(topic string) error {
 	logger_rm.Infof("Deleting replication %s\n", topic)
 	
-	if err := validatePipelineExists(topic, "deleting"); err != nil {
+	if err := validatePipelineExists(topic, "deleting", true); err != nil {
 		return err
 	}
 	
@@ -295,10 +302,27 @@ func SetPipelineLogLevel(topic string, levelStr string) error {
 	return nil
 }
 
-func validatePipelineExists(topic, action string) error {
+func validatePipelineExists(topic, action string, exist bool) error {
 	_, err := replication_mgr.metadata_svc.ReplicationSpec(topic)
-	if err != nil {
-		return errors.New(fmt.Sprintf("Error %v replication with id, %v, since it does not exist.", action, topic))
+	pipelineExist := (err == nil)
+	if pipelineExist != exist {
+		state := "already exists"
+		if exist {
+			state = "does not exist"
+		} 
+		return errors.New(fmt.Sprintf("Error %v replication with id, %v, since it %v.\n", action, topic, state))
+	}
+	return nil
+}
+
+func validatePipelineState(topic, action string, active bool) error {
+	pipelineActive := (pipeline_manager.Pipeline(topic) != nil)
+	if pipelineActive != active {
+		state := "already"
+		if active {
+			state = "not"
+		}
+		return errors.New(fmt.Sprintf("Warning: Cannot %v replication with id, %v, since it is %v actively running.\n", action, topic, state))
 	}
 	return nil
 }

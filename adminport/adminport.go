@@ -193,7 +193,13 @@ func (h *xdcrRestHandler) doPauseReplicationRequest(request *http.Request) ([]by
 	logger_ap.Debugf("Request params: replicationId=%v\n", replicationId)
 	
 	if err = rm.PauseReplication(replicationId); err != nil {
-		return nil, err
+		if strings.HasPrefix(err.Error(), "Warning") {
+			// return warning messages in response body
+			return []byte(err.Error()), nil
+		} else {
+			// return error
+			return nil, err
+		}
 	}
 
 	// forward replication request to other KV nodes involved 
@@ -221,7 +227,13 @@ func (h *xdcrRestHandler) doResumeReplicationRequest(request *http.Request) ([]b
 	logger_ap.Debugf("Request params: replicationId=%v\n", replicationId)
 	
 	if err = rm.ResumeReplication(replicationId); err != nil {
-		return nil, err
+		if strings.HasPrefix(err.Error(), "Warning") {
+			// return warning messages in response body
+			return []byte(err.Error()), nil
+		} else {
+			// return error
+			return nil, err
+		}
 	}
 
 	// forward replication request to other KV nodes involved 
