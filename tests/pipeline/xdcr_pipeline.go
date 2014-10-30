@@ -12,16 +12,16 @@ package main
 import (
 	"flag"
 	"fmt"
-	"github.com/Xiaomei-Zhang/goxdcr/pipeline_manager"
 	"github.com/Xiaomei-Zhang/goxdcr/metadata"
 	c "github.com/Xiaomei-Zhang/goxdcr/mock_services"
-	s "github.com/Xiaomei-Zhang/goxdcr/services"
 	"github.com/Xiaomei-Zhang/goxdcr/parts"
+	"github.com/Xiaomei-Zhang/goxdcr/pipeline_manager"
 	"github.com/Xiaomei-Zhang/goxdcr/replication_manager"
+	s "github.com/Xiaomei-Zhang/goxdcr/services"
 	"github.com/Xiaomei-Zhang/goxdcr/utils"
 	"github.com/couchbaselabs/go-couchbase"
 	"log"
-//	"net/http"
+	//	"net/http"
 	"os"
 	"time"
 )
@@ -33,7 +33,7 @@ var options struct {
 	target_bucket           string //target bucket
 	source_cluster_addr     string //source connect string
 	target_cluster_addr     string //target connect string
-	source_kv_host      string //source kv addr
+	source_kv_host          string //source kv addr
 	source_cluster_username string //source cluster username
 	source_cluster_password string //source cluster password
 	target_cluster_username string //target cluster username
@@ -87,86 +87,89 @@ func usage() {
 }
 
 func main() {
-//	go func() {
-//		log.Println("Try to start pprof...")
-//		err := http.ListenAndServe("localhost:7000", nil)
-//		if err != nil {
-//			panic(err)
-//		} else {
-//			log.Println("Http server for pprof is started")
-//		}
-//	}()
+	//	go func() {
+	//		log.Println("Try to start pprof...")
+	//		err := http.ListenAndServe("localhost:7000", nil)
+	//		if err != nil {
+	//			panic(err)
+	//		} else {
+	//			log.Println("Http server for pprof is started")
+	//		}
+	//	}()
 
 	//	c.SetLogLevel(c.LogLevelTrace)
 	fmt.Println("Start Testing ...")
 	argParse()
-	
+
 	// set up gometa service
 	cmd, err := s.StartGometaService()
 	if err != nil {
 		fmt.Println("Test failed. Failed to start goMeta service. err: ", err)
 		return
 	}
-	
+
 	defer s.KillGometaService(cmd)
-	
+
 	err = setup()
 	if err != nil {
 		fmt.Println("Test failed. err: ", err)
 		return
 	}
-	
+
 	test()
 	verify()
 }
 
 func setup() error {
-//	flushTargetBkt()
-	fmt.Println("Finish setup")
+	//	flushTargetBkt()
 	c.SetTestOptions(options.source_bucket, options.target_bucket, options.source_cluster_addr, options.target_cluster_addr, options.source_kv_host, options.source_cluster_username, options.source_cluster_password, options.nozzles_per_node_source, options.nozzles_per_node_target)
 	metadata_svc, err := s.DefaultMetadataSvc()
 	if err != nil {
 		return err
 	}
 	replication_manager.Initialize(metadata_svc, new(c.MockClusterInfoSvc), new(c.MockXDCRTopologySvc), new(c.MockReplicationSettingsSvc))
+	fmt.Println("Finish setup")
 	return nil
 }
 
 func test() {
+	fmt.Println("Start testing")
 	settings := make(map[string]interface{})
 	settings[metadata.PipelineLogLevel] = "Error"
 	settings[metadata.SourceNozzlePerNode] = options.nozzles_per_node_source
 	settings[metadata.TargetNozzlePerNode] = options.nozzles_per_node_target
 	settings[metadata.BatchCount] = 500
-	
-	_, err := replication_manager.CreateReplication(options.source_cluster_addr, options.source_bucket, options.target_cluster_addr, options.target_bucket, options.target_bucket_password, settings)
+
+	topic, err := replication_manager.CreateReplication(options.source_cluster_addr, options.source_bucket, options.target_cluster_addr, options.target_bucket, options.target_bucket_password, settings)
 	if err != nil {
 		fail(fmt.Sprintf("%v", err))
 	}
-//	time.Sleep(1 * time.Second)
-//	
-//	replication_manager.PauseReplication(topic)
-//
-//	err = replication_manager.SetPipelineLogLevel(topic, "Error")
-//	if err != nil {
-//		fail(fmt.Sprintf("%v", err))
-//	}
-//	fmt.Printf("Replication %s is paused\n", topic)
-//	time.Sleep(100 * time.Millisecond)
-//	err = replication_manager.ResumeReplication(topic)
-//	if err != nil {
-//		fail(fmt.Sprintf("%v", err))
-//	}
-//	fmt.Printf("Replication %s is resumed\n", topic)
-//	time.Sleep(2 * time.Second)
-//	summary(topic)
-//
-//	err = replication_manager.DeleteReplication(topic)
-//	if err != nil {
-//		fail(fmt.Sprintf("%v", err))
-//	}
-//	fmt.Printf("Replication %s is deleted\n", topic)
+	//	time.Sleep(1 * time.Second)
+	//
+	//	replication_manager.PauseReplication(topic)
+	//
+	//	err = replication_manager.SetPipelineLogLevel(topic, "Error")
+	//	if err != nil {
+	//		fail(fmt.Sprintf("%v", err))
+	//	}
+	//	fmt.Printf("Replication %s is paused\n", topic)
+	//	time.Sleep(100 * time.Millisecond)
+	//	err = replication_manager.ResumeReplication(topic)
+	//	if err != nil {
+	//		fail(fmt.Sprintf("%v", err))
+	//	}
+	//	fmt.Printf("Replication %s is resumed\n", topic)
+	//	time.Sleep(2 * time.Second)
+	//	summary(topic)
+	//
 	time.Sleep(10 * time.Minute)
+
+	//delete the replication before we go
+	err = replication_manager.DeleteReplication(topic)
+	if err != nil {
+		fail(fmt.Sprintf("%v", err))
+	}
+	fmt.Printf("Replication %s is deleted\n", topic)
 
 }
 

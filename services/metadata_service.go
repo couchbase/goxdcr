@@ -43,6 +43,7 @@ func DefaultMetadataSvc() (*MetadataSvc, error) {
 		meta_svc.logger.Infof("Metdata service started with host=%v\n", meta_svc.hostAddr)
 		return meta_svc, nil
 	} else {
+		meta_svc.logger.Errorf("Failed to connect to go metadat at %v, err=%v\n", meta_svc.hostAddr, err)
 		return nil, err
 	}
 }
@@ -130,7 +131,7 @@ func StartGometaService() (*exec.Cmd, error) {
 	}
 
 	// run gometa executable to start server
-	cmd := exec.Command(objPath, "-config", goPath + "/src/github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/services/metadata_svc_config")
+	cmd := exec.Command(objPath, "-config", goPath + "/src/github.com/Xiaomei-Zhang/goxdcr/services/metadata_svc_config")
 	err = cmd.Start()
 	if err != nil {
 		return nil, err
