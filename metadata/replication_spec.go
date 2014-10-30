@@ -31,7 +31,7 @@ type ReplicationSpecification struct {
 }
 
 func NewReplicationSpecification(sourceClusterUUID string, sourceBucketName string, targetClusterUUID string, targetBucketName string, filterName string) *ReplicationSpecification {
-	return &ReplicationSpecification{Id: replicationId(sourceClusterUUID, sourceBucketName, targetClusterUUID, targetBucketName, filterName),
+	return &ReplicationSpecification{Id: ReplicationId(sourceClusterUUID, sourceBucketName, targetClusterUUID, targetBucketName, filterName),
 		SourceClusterUUID: sourceClusterUUID,
 		SourceBucketName: sourceBucketName,
 		TargetClusterUUID: targetClusterUUID,
@@ -40,7 +40,7 @@ func NewReplicationSpecification(sourceClusterUUID string, sourceBucketName stri
 		Settings:    DefaultSettings()}
 }
 
-func replicationId(sourceClusterUUID string, sourceBucketName string, targetClusterUUID string, targetBucketName string, filterName string) string {
+func ReplicationId(sourceClusterUUID string, sourceBucketName string, targetClusterUUID string, targetBucketName string, filterName string) string {
 	parts := []string{sourceClusterUUID, sourceBucketName, targetClusterUUID, targetBucketName}
 	if filterName != "" {
 		parts = append(parts, filterName)
