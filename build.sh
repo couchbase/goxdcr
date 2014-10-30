@@ -29,7 +29,7 @@ go install
 cd ../router
 go clean 
 go install
-cd ../kvfeed
+cd ../dcpnozzle
 go clean
 go install
 cd ../pipeline
@@ -64,7 +64,7 @@ cd ../latency_test
 go clean
 cd ../router
 go clean 
-cd ../kvfeed
+cd ../dcpnozzle
 go clean
 cd ../pipeline
 go clean

@@ -11,6 +11,7 @@ package pipeline_svc
 
 import (
 	common "github.com/Xiaomei-Zhang/goxdcr/common"
+	base "github.com/Xiaomei-Zhang/goxdcr/base"
 )
 
 type CheckpointManager struct {
@@ -38,4 +39,15 @@ func (ckmgr *CheckpointManager) StartSequenceNum(topic string) []uint64 {
 		ret[i] = 0
 	}
 	return ret
+}
+
+func (ckmgr *CheckpointManager) VBTimestamps(topic string) map[uint16]*base.VBTimestamp {
+	//TODO: implement
+    ret := make(map[uint16]*base.VBTimestamp)
+    for i := 0; i < 1024; i++ {
+    	vbts := &base.VBTimestamp{}
+        vbts.Vbno = uint16(i)
+        ret[uint16(i)] = vbts
+    }
+    return ret
 }

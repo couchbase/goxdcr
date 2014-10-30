@@ -1,12 +1,3 @@
-// Copyright (c) 2013 Couchbase, Inc.
-// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file
-// except in compliance with the License. You may obtain a copy of the License at
-//   http://www.apache.org/licenses/LICENSE-2.0
-// Unless required by applicable law or agreed to in writing, software distributed under the
-// License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND,
-// either express or implied. See the License for the specific language governing permissions
-// and limitations under the License.
-
 // unit test for xdcr pipeline factory.
 package main
 
@@ -14,11 +5,10 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"os"
 	"github.com/Xiaomei-Zhang/goxdcr/log"
 	"github.com/Xiaomei-Zhang/goxdcr/factory"
 	"github.com/Xiaomei-Zhang/goxdcr/parts"
-	sp "github.com/ysui6888/indexing/secondary/projector"
-	"os"
 	c "github.com/Xiaomei-Zhang/goxdcr/mock_services"
 )
 
@@ -102,7 +92,7 @@ func invokeFactory() error {
 		return errors.New(fmt.Sprintf("incorrect target nozzles. expected %v; actual %v", NUM_TARGET_CONN, len(targets)))
 	}
 	for sourceId, source := range sources {
-		_, ok := source.(*sp.KVFeed)
+		_, ok := source.(*parts.DcpNozzle)
 		if !ok {
 			return errors.New(fmt.Sprintf("incorrect nozzle type for source nozzle %v.", sourceId))
 		}

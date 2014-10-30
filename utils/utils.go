@@ -48,7 +48,7 @@ func ValidateSettings(defs base.SettingDefinitions,
 	logger *log.CommonLogger) error {
 	var l *log.CommonLogger = loggerForFunc(logger)
 
-	l.Infof("Start validate setting=%v, defs=%v", settings, defs)
+	l.Debugf("Start validate setting=%v, defs=%v", settings, defs)
 	var err *base.SettingsError = nil
 	for key, def := range defs {
 		val, ok := settings[key]

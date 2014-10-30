@@ -1,23 +1,16 @@
-// Copyright (c) 2013 Couchbase, Inc.
-// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file
-// except in compliance with the License. You may obtain a copy of the License at
-//   http://www.apache.org/licenses/LICENSE-2.0
-// Unless required by applicable law or agreed to in writing, software distributed under the
-// License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND,
-// either express or implied. See the License for the specific language governing permissions
-// and limitations under the License.
-
-// Test for KVFeed, source nozzle in XDCR
+// Test for DcpNozzle, source nozzle in XDCR
 package main
 
 import (
 	"flag"
 	"fmt"
+	"math"
 	connector "github.com/Xiaomei-Zhang/goxdcr/connector"
 	mcc "github.com/couchbase/gomemcached/client"
-	protobuf "github.com/couchbase/indexing/secondary/protobuf"
-	"github.com/ysui6888/indexing/secondary/common"
-	sp "github.com/ysui6888/indexing/secondary/projector"
+	"github.com/couchbase/indexing/secondary/common"
+	"github.com/Xiaomei-Zhang/goxdcr/base"
+	"github.com/Xiaomei-Zhang/goxdcr/parts"
+	"github.com/couchbaselabs/go-couchbase"
 	"log"
 	"os"
 	"time"
@@ -30,11 +23,10 @@ var options struct {
 	source_bucket string // source bucket
 	connectStr    string //connect string
 	kvaddr        string //kvaddr
-	maxVbno       int    // maximum number of vbuckets
 }
 
 const (
-	NUM_DATA = 30 // number of data points to collect before test ends
+	NUM_DATA = 3000 // number of data points to collect before test ends
 )
 
 var count int
@@ -44,8 +36,6 @@ func argParse() {
 		"connection string to source cluster")
 	flag.StringVar(&options.source_bucket, "source_bucket", "default",
 		"bucket to replicate from")
-	flag.IntVar(&options.maxVbno, "maxvb", 8,
-		"maximum number of vbuckets")
 	flag.StringVar(&options.kvaddr, "kvaddr", "127.0.0.1:12000",
 		"kv server address")
 
@@ -68,16 +58,23 @@ func main() {
 		}
 	}()
 
-	fmt.Println("Start Testing KVFeed...")
+	fmt.Println("Start Testing DcpNozzle...")
 	argParse()
 	fmt.Printf("connectStr=%s\n", options.connectStr)
 	fmt.Println("Done with parsing the arguments")
 	
+	bucket, err := common.ConnectBucket(options.connectStr, "default", options.source_bucket)
+	mf(err, "bucket")
+	
+	vblist, err := getVBListFromBucket(bucket, options.kvaddr)
+	mf(err, "vblist")
+	fmt.Printf("vblist in b=%v\n", vblist)
+	
 	for i:=0; i<16; i++ {
-	go startKVFeed(options.connectStr, options.kvaddr, options.source_bucket)
+		go startDcpNozzle(options.kvaddr, bucket, vblist, 16, i)
 	}
 
-	time.Sleep (3 * time.Minute)
+	time.Sleep (1 * time.Minute)
 }
 
 func mf(err error, msg string) {
@@ -86,14 +83,21 @@ func mf(err error, msg string) {
 	}
 }
 
-func startKVFeed(cluster, kvaddr, bucketn string) {
-	b, err := common.ConnectBucket(cluster, "default", bucketn)
-	mf(err, "bucket")
-
-	kvfeed, err := sp.NewKVFeed(kvaddr, "test", "", b, nil)
-	kvfeed.SetConnector(NewTestConnector())
-	kvfeed.Start(sp.ConstructStartSettingsForKVFeed(constructTimestamp(bucketn)))
-	fmt.Println("KVFeed is started")
+func startDcpNozzle(kvaddr string, bucket *couchbase.Bucket, vbList []uint16, numNozzle, i int) {
+	
+	numVbs := len(vbList)
+ 	numVbPerNozzle := int(math.Ceil(float64(numVbs)/float64(numNozzle)))
+	dcpVbList := make([]uint16, 0)
+	for j:= numVbPerNozzle*i; j<numVbPerNozzle*(i+1); j++ {
+		if j >= numVbs {
+			break
+		}
+		dcpVbList = append(dcpVbList, uint16(j))
+	} 
+	dcpNozzle := parts.NewDcpNozzle("test_dcp", kvaddr, bucket, dcpVbList, nil)
+	dcpNozzle.SetConnector(NewTestConnector())
+	dcpNozzle.Start(constructStartSettings(dcpNozzle))
+	fmt.Println("DcpNozzle is started")
 
 	timeChan := time.NewTimer(time.Second * 1000).C
 loop:
@@ -103,13 +107,13 @@ loop:
 			fmt.Println("Timer expired")
 			break loop
 		default:
-//			if count >= NUM_DATA {
-//				break loop
-//			}
+			if count >= NUM_DATA {
+				break loop
+			}
 		}
 	}
-	kvfeed.Stop()
-	fmt.Println("KVFeed is stopped")
+	dcpNozzle.Stop()
+	fmt.Println("DcpNozzle is stopped")
 
 	if count < NUM_DATA {
 		fmt.Printf("Test failed. Only %v data was received before timer expired.\n", count)
@@ -118,12 +122,17 @@ loop:
 	}
 }
 
-func constructTimestamp(bucketn string) *protobuf.TsVbuuid {
-	ts := protobuf.NewTsVbuuid(bucketn, options.maxVbno)
-	for i := 0; i < options.maxVbno; i++ {
-		ts.Append(uint16(i), 0, 0, 0, 0)
-	}
-	return ts
+func constructStartSettings(dcpNozzle *parts.DcpNozzle) map[string]interface{} {
+		settings := make(map[string]interface{})
+		vblist := dcpNozzle.GetVBList()
+		fmt.Printf("vblist in dcp =%v\n", vblist)
+		ts := make(map[uint16]*base.VBTimestamp)
+		for _, vb := range vblist {
+			ts[vb] = &base.VBTimestamp{}
+			ts[vb].Vbno = vb
+		}
+		settings[parts.DCP_SETTINGS_KEY] = ts
+	return settings
 }
 
 type TestConnector struct {
@@ -141,4 +150,14 @@ func (tc *TestConnector) Forward(data interface{}) error {
 	count++
 	fmt.Printf("received %vth upr event with opcode %v and vbno %v\n", count, uprEvent.Opcode, uprEvent.VBucket)
 	return nil
+}
+
+// get all vbs owned by specied node from bucket
+func getVBListFromBucket(bucket *couchbase.Bucket, kvaddr string) ([]uint16, error) {
+
+	m, err := bucket.GetVBmap([]string{kvaddr})
+	if err != nil {
+		return nil, err
+	}
+	return m[kvaddr], nil
 }

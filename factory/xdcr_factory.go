@@ -1,28 +1,16 @@
-// Copyright (c) 2013 Couchbase, Inc.
-// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file
-// except in compliance with the License. You may obtain a copy of the License at
-//   http://www.apache.org/licenses/LICENSE-2.0
-// Unless required by applicable law or agreed to in writing, software distributed under the
-// License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND,
-// either express or implied. See the License for the specific language governing permissions
-// and limitations under the License.
-
 package factory
 
 import (
 	"errors"
 	"github.com/Xiaomei-Zhang/goxdcr/common"
-	"github.com/Xiaomei-Zhang/goxdcr/log"
-	pp "github.com/Xiaomei-Zhang/goxdcr/pipeline"
-	pctx "github.com/Xiaomei-Zhang/goxdcr/pipeline_ctx"
-	"github.com/Xiaomei-Zhang/goxdcr/base"
-	"github.com/Xiaomei-Zhang/goxdcr/metadata"
-	"github.com/Xiaomei-Zhang/goxdcr/metadata_svc"
-	"github.com/Xiaomei-Zhang/goxdcr/parts"
-	"github.com/Xiaomei-Zhang/goxdcr/pipeline_svc"
-	xdcr_pipeline_svc "github.com/Xiaomei-Zhang/goxdcr/pipeline_svc"
-	"github.com/couchbase/indexing/secondary/protobuf"
-	sp "github.com/ysui6888/indexing/secondary/projector"
+    "github.com/Xiaomei-Zhang/goxdcr/log"
+    pp "github.com/Xiaomei-Zhang/goxdcr/pipeline"
+    pctx "github.com/Xiaomei-Zhang/goxdcr/pipeline_ctx"
+    "github.com/Xiaomei-Zhang/goxdcr/base"
+    "github.com/Xiaomei-Zhang/goxdcr/metadata"
+    "github.com/Xiaomei-Zhang/goxdcr/metadata_svc"
+    "github.com/Xiaomei-Zhang/goxdcr/parts"
+    "github.com/Xiaomei-Zhang/goxdcr/pipeline_svc"
 	"math"
 	"strconv"
 	"strings"
@@ -31,7 +19,7 @@ import (
 
 const (
 	PART_NAME_DELIMITER     = "_"
-	KVFEED_NAME_PREFIX      = "kvfeed"
+	DCP_NOZZLE_NAME_PREFIX      = "dcp"
 	XMEM_NOZZLE_NAME_PREFIX = "xmem"
 )
 
@@ -162,19 +150,19 @@ func (xdcrf *XDCRFactory) constructSourceNozzles(spec *metadata.ReplicationSpeci
 
 		numOfVbs := len(vbnos)
 
-		// the number of kvfeed nodes to construct is the smaller of vbucket list size and source connection size
-		numOfKVFeeds := int(math.Min(float64(numOfVbs), float64(maxNozzlesPerNode)))
+		// the number of dcpNozzle nodes to construct is the smaller of vbucket list size and source connection size
+		numOfDcpNozzles := int(math.Min(float64(numOfVbs), float64(maxNozzlesPerNode)))
 
-		numOfVbPerKVFeed := int(math.Ceil(float64(numOfVbs) / float64(numOfKVFeeds)))
+		numOfVbPerDcpNozzle := int(math.Ceil(float64(numOfVbs) / float64(numOfDcpNozzles)))
 
 		var index int
-		for i := 0; i < numOfKVFeeds; i++ {
-			// construct vbList for the kvfeed
-			// before statistics info is available, the default load balancing stragegy is to evenly distribute vbuckets among kvfeeds
+		for i := 0; i < numOfDcpNozzles; i++ {
+			// construct vbList for the dcpNozzle
+			// before statistics info is available, the default load balancing stragegy is to evenly distribute vbuckets among dcpNozzles
 
-			//bucket has to be created for each KVFeed as it uses its underline
+			//bucket has to be created for each DcpNozzle as it uses its underline
 			//connection. Each Upr connection needs a separate socket
-			//TODO: look into if different KVFeeds for the same kv node can share a
+			//TODO: look into if different DcpNozzles for the same kv node can share a
 			//upr connection
 			bucket, err := xdcrf.cluster_info_svc.GetBucket(sourceClusterUUID, bucketName)
 			if err != nil {
@@ -182,7 +170,7 @@ func (xdcrf *XDCRFactory) constructSourceNozzles(spec *metadata.ReplicationSpeci
 				return nil, err
 			}
 			vbList := make([]uint16, 0, 15)
-			for i := 0; i < numOfVbPerKVFeed; i++ {
+			for i := 0; i < numOfVbPerDcpNozzle; i++ {
 				if index < numOfVbs {
 					vbList = append(vbList, vbnos[index])
 					index++
@@ -192,15 +180,12 @@ func (xdcrf *XDCRFactory) constructSourceNozzles(spec *metadata.ReplicationSpeci
 				}
 			}
 
-			// construct kvfeeds
-			// partIds of the kvfeed nodes look like "kvfeed_$kvaddr_1"
-			kvfeed, err := sp.NewKVFeed(kvaddr, topic, KVFEED_NAME_PREFIX + PART_NAME_DELIMITER + kvaddr + PART_NAME_DELIMITER + strconv.Itoa(i), bucket, vbList)
-			if err != nil {
-				xdcrf.logger.Errorf("Error on NewKVFeed. i=%d, err=%v\n", i, err)
-				return nil, err
-			}
-			sourceNozzles[kvfeed.Id()] = kvfeed
-			xdcrf.logger.Debugf("Constructed source nozzle %v with vbList = %v \n", kvfeed.Id(), vbList)
+			// construct dcpNozzles
+			// partIds of the dcpNozzle nodes look like "dcpNozzle_$kvaddr_1"
+			dcpNozzle := parts.NewDcpNozzle(DCP_NOZZLE_NAME_PREFIX + PART_NAME_DELIMITER + kvaddr + PART_NAME_DELIMITER + strconv.Itoa(i), 
+			                                  kvaddr, bucket, vbList, logger_ctx)
+			sourceNozzles[dcpNozzle.Id()] = dcpNozzle
+			xdcrf.logger.Debugf("Constructed source nozzle %v with vbList = %v \n", dcpNozzle.Id(), vbList)
 		}
 	}
 	xdcrf.logger.Infof("Constructed %v source nozzles\n", len(sourceNozzles))
@@ -350,9 +335,9 @@ func (xdcrf *XDCRFactory) ConstructSettingsForPart(pipeline common.Pipeline, par
 	if _, ok := part.(*parts.XmemNozzle); ok {
 		xdcrf.logger.Debugf("Construct settings for XmemNozzle %s", part.Id())
 		return xdcrf.constructSettingsForXmemNozzle(pipeline.Topic(), settings)
-	} else if _, ok := part.(*sp.KVFeed); ok {
-		xdcrf.logger.Debugf("Construct settings for KVFeed %s", part.Id())
-		return xdcrf.constructSettingsForKVFeed(pipeline, part.(*sp.KVFeed), settings)
+	} else if _, ok := part.(*parts.DcpNozzle); ok {
+		xdcrf.logger.Debugf("Construct settings for DcpNozzle %s", part.Id())
+		return xdcrf.constructSettingsForDcpNozzle(pipeline, part.(*parts.DcpNozzle), settings)
 	} else {
 		return settings, nil
 	}
@@ -380,9 +365,9 @@ func (xdcrf *XDCRFactory) getTargetTimeoutEstimate(topic string) time.Duration {
 	return 100 * time.Millisecond
 }
 
-func (xdcrf *XDCRFactory) constructSettingsForKVFeed(pipeline common.Pipeline, part *sp.KVFeed, settings map[string]interface{}) (map[string]interface{}, error) {
-	xdcrf.logger.Debugf("Construct settings for KVFeed ....")
-	kvFeedSettings := make(map[string]interface{})
+func (xdcrf *XDCRFactory) constructSettingsForDcpNozzle(pipeline common.Pipeline, part *parts.DcpNozzle, settings map[string]interface{}) (map[string]interface{}, error) {
+	xdcrf.logger.Debugf("Construct settings for DcpNozzle ....")
+	dcpNozzleSettings := make(map[string]interface{})
 
 	if pipeline.RuntimeContext().Service("CheckpointManager") == nil {
 		return nil, errors.New("No checkpoint manager is registered with the pipeline")
@@ -390,20 +375,15 @@ func (xdcrf *XDCRFactory) constructSettingsForKVFeed(pipeline common.Pipeline, p
 
 	svc := pipeline.RuntimeContext().Service("CheckpointManager").(*pipeline_svc.CheckpointManager)
 	topic := pipeline.Topic()
-	startSeqNums := svc.StartSequenceNum(topic)
-	xdcrf.logger.Debugf("start sequence number is %v\n", startSeqNums)
-	spec, err := xdcrf.metadata_svc.ReplicationSpec(topic)
-	if err == nil {
-		sourceBucketName := spec.SourceBucketName
-
-		vbList := part.GetVBList()
-		tsVb := protobuf.NewTsVbuuid(sourceBucketName, len(vbList))
-		for _, vb := range vbList {
-			tsVb.Append(vb, 0, 0, startSeqNums[int(vb)], 0)
-		}
-		kvFeedSettings["key"] = tsVb
+	ts := svc.VBTimestamps(topic)
+	vbList := part.GetVBList()
+	partTs := make(map[uint16]*base.VBTimestamp)
+	for _, vb := range vbList {
+			partTs[vb] = ts[vb]
 	}
-	return kvFeedSettings, err
+	xdcrf.logger.Debugf("start timestamps is %v\n", ts)
+	dcpNozzleSettings[parts.DCP_SETTINGS_KEY] = partTs
+	return dcpNozzleSettings, nil
 }
 
 func (xdcrf *XDCRFactory) registerServices(pipeline common.Pipeline, logger_ctx *log.LoggerContext) {
@@ -411,10 +391,10 @@ func (xdcrf *XDCRFactory) registerServices(pipeline common.Pipeline, logger_ctx 
 
 	//TODO:
 	//register pipeline supervisor
-	supervisor := xdcr_pipeline_svc.NewPipelineSupervisor(logger_ctx, xdcrf.pipeline_failure_handler)
+	supervisor := pipeline_svc.NewPipelineSupervisor(logger_ctx, xdcrf.pipeline_failure_handler)
 	ctx.RegisterService(base.PIPELINE_SUPERVISOR_SVC, supervisor)
 	//register pipeline checkpoint manager
-	ctx.RegisterService(base.CHECKPOINT_MGR_SVC, &xdcr_pipeline_svc.CheckpointManager{})
+	ctx.RegisterService(base.CHECKPOINT_MGR_SVC, &pipeline_svc.CheckpointManager{})
 	//register pipeline statistics manager
 }
 

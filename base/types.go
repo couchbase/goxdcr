@@ -51,3 +51,12 @@ func (se SettingsError) Add(key string, err error) {
 type PipelineFailureHandler interface {
 	OnError(pipeline common.Pipeline, partsError map[string]error)
 }
+
+// timestamp for a specific vb
+type VBTimestamp struct{
+    Vbno  uint16
+    Vbuuid uint64
+    Seqno  uint64
+    SnapshotStart  uint64
+    SnapshotEnd  uint64
+}
