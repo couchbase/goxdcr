@@ -3,8 +3,8 @@ package gen_server
 import (
 	"errors"
 	"fmt"
-	common "github.com/Xiaomei-Zhang/couchbase_goxdcr/common"
-	part "github.com/Xiaomei-Zhang/couchbase_goxdcr/part"
+	common "github.com/Xiaomei-Zhang/goxdcr/common"
+	part "github.com/Xiaomei-Zhang/goxdcr/part"
 	base "github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/base"
 	"sync"
 	"testing"

@@ -1,7 +1,7 @@
 package metadata_svc
 
 import (
-	"github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/metadata"
+	"github.com/Xiaomei-Zhang/goxdcr/metadata"
 )
 
 type MetadataSvc interface {

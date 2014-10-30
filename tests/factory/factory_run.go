@@ -5,12 +5,12 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"github.com/Xiaomei-Zhang/couchbase_goxdcr/log"
-	"github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/factory"
-	"github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/parts"
+	"github.com/Xiaomei-Zhang/goxdcr/log"
+	"github.com/Xiaomei-Zhang/goxdcr/factory"
+	"github.com/Xiaomei-Zhang/goxdcr/parts"
 	sp "github.com/ysui6888/indexing/secondary/projector"
 	"os"
-	c "github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/mock_services"
+	c "github.com/Xiaomei-Zhang/goxdcr/mock_services"
 )
 
 var options struct {

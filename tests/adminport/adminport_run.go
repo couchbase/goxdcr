@@ -10,13 +10,13 @@ import (
 	"bytes"
 	"errors"
 	"net/url"
-	ap "github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/adminport"
-	base "github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/base"
-	rm "github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/replication_manager"
-	c "github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/mock_services"
-	s "github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/services"
-	utils "github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/utils"
-	pm "github.com/Xiaomei-Zhang/couchbase_goxdcr/pipeline_manager"
+	ap "github.com/Xiaomei-Zhang/goxdcr/adminport"
+	base "github.com/Xiaomei-Zhang/goxdcr/base"
+	rm "github.com/Xiaomei-Zhang/goxdcr/replication_manager"
+	c "github.com/Xiaomei-Zhang/goxdcr/mock_services"
+	s "github.com/Xiaomei-Zhang/goxdcr/services"
+	utils "github.com/Xiaomei-Zhang/goxdcr/utils"
+	pm "github.com/Xiaomei-Zhang/goxdcr/pipeline_manager"
 )
 
 const (

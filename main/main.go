@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"os"
 
-	ap "github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/adminport"
-	rm "github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/replication_manager"
-	c "github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/mock_services"
-	s "github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/services"
+	ap "github.com/Xiaomei-Zhang/goxdcr/adminport"
+	rm "github.com/Xiaomei-Zhang/goxdcr/replication_manager"
+	c "github.com/Xiaomei-Zhang/goxdcr/mock_services"
+	s "github.com/Xiaomei-Zhang/goxdcr/services"
 )
 
 var done = make(chan bool)

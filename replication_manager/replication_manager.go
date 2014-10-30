@@ -5,14 +5,14 @@ package replication_manager
 import (
 	"errors"
 	"fmt"
-	"github.com/Xiaomei-Zhang/couchbase_goxdcr/common"
-	"github.com/Xiaomei-Zhang/couchbase_goxdcr/log"
-	"github.com/Xiaomei-Zhang/couchbase_goxdcr/pipeline_manager"
-	"github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/base"
-	"github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/factory"
-	"github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/metadata"
-	"github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/metadata_svc"
-	"github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/pipeline_svc"
+	"github.com/Xiaomei-Zhang/goxdcr/common"
+	"github.com/Xiaomei-Zhang/goxdcr/log"
+	"github.com/Xiaomei-Zhang/goxdcr/pipeline_manager"
+	"github.com/Xiaomei-Zhang/goxdcr/base"
+	"github.com/Xiaomei-Zhang/goxdcr/factory"
+	"github.com/Xiaomei-Zhang/goxdcr/metadata"
+	"github.com/Xiaomei-Zhang/goxdcr/metadata_svc"
+	"github.com/Xiaomei-Zhang/goxdcr/pipeline_svc"
 	"sync"
 )
 

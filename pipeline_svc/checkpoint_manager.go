@@ -1,7 +1,7 @@
 package pipeline_svc
 
 import (
-	common "github.com/Xiaomei-Zhang/couchbase_goxdcr/common"
+	common "github.com/Xiaomei-Zhang/goxdcr/common"
 )
 
 type CheckpointManager struct {

@@ -3,8 +3,8 @@ package metadata
 import (
 	"errors"
 	"fmt"
-	"github.com/Xiaomei-Zhang/couchbase_goxdcr/log"
-	"github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/utils"
+	"github.com/Xiaomei-Zhang/goxdcr/log"
+	"github.com/Xiaomei-Zhang/goxdcr_impl/utils"
 )
 
 const (

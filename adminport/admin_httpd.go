@@ -33,8 +33,8 @@ import (
 	"net/http"
 	"sync"
 	"time"
-	"github.com/Xiaomei-Zhang/couchbase_goxdcr/log"
-	base "github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/base"
+	"github.com/Xiaomei-Zhang/goxdcr/log"
+	base "github.com/Xiaomei-Zhang/goxdcr/base"
 )
 
 var logger_server *log.CommonLogger = log.NewLogger("HttpServer", log.DefaultLoggerContext)

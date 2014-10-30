@@ -4,13 +4,13 @@ package adminport
 
 import (
 	"encoding/json"
-	"github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/base"
+	"github.com/Xiaomei-Zhang/goxdcr/base"
 	"net/http"
 	"strings"
 	"bytes"
-	"github.com/Xiaomei-Zhang/couchbase_goxdcr/log"
-	rm "github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/replication_manager"
-	utils "github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/utils"
+	"github.com/Xiaomei-Zhang/goxdcr/log"
+	rm "github.com/Xiaomei-Zhang/goxdcr/replication_manager"
+	utils "github.com/Xiaomei-Zhang/goxdcr/utils"
 )
 
 var StaticPaths = [3]string{CreateReplicationPath, SettingsReplicationsPath, StatisticsPath}

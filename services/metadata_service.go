@@ -8,10 +8,10 @@ import (
 	"os/exec"
 	"fmt"
 	"time"
-	"github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/metadata"
+	"github.com/Xiaomei-Zhang/goxdcr/metadata"
 	"github.com/couchbase/gometa/server"
 	"github.com/couchbase/gometa/common"
-	"github.com/Xiaomei-Zhang/couchbase_goxdcr/log"
+	"github.com/Xiaomei-Zhang/goxdcr/log"
 )
 
 var goMetadataServiceMethod = "RequestReceiver.NewRequest"

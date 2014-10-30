@@ -1,7 +1,7 @@
 package parts
 
 import (
-	"github.com/Xiaomei-Zhang/couchbase_goxdcr/common"
+	"github.com/Xiaomei-Zhang/goxdcr/common"
 )
 
 type XDCRPart interface {
