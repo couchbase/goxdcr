@@ -302,10 +302,9 @@ func getConnectStr(clusterAddr string, poolName string, bucketName string, usern
 				logger.Infof("node_address=%v\n", add)
 			}
 			return addrs[0], nil
-
 		}
 	} else {
-		panic(fmt.Sprintf("failed to instantiate target bucket - %v", c))
+		panic(fmt.Sprintf("failed to instantiate target bucket - %v, err=%v", c, err))
 	}
 	return "", err
 }
