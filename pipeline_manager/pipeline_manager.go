@@ -1,8 +1,8 @@
 package pipeline_manager
 
 import (
-	common "github.com/Xiaomei-Zhang/couchbase_goxdcr/common"
-	"github.com/Xiaomei-Zhang/couchbase_goxdcr/log"
+	common "github.com/Xiaomei-Zhang/goxdcr/common"
+	"github.com/Xiaomei-Zhang/goxdcr/log"
 	"sync"
 )
 

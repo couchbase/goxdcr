@@ -4,7 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/Xiaomei-Zhang/goxdcr/log"
-	"github.com/Xiaomei-Zhang/goxdcr_impl/utils"
+	"github.com/Xiaomei-Zhang/goxdcr/utils"
 )
 
 const (

@@ -5,7 +5,6 @@ import (
 	"flag"
 	"fmt"
 	pc "github.com/Xiaomei-Zhang/goxdcr/common"
-	part "github.com/Xiaomei-Zhang/goxdcr/part"
 	parts "github.com/Xiaomei-Zhang/goxdcr/parts"
 	mc "github.com/couchbase/gomemcached"
 	"github.com/couchbase/indexing/secondary/common"
@@ -202,13 +201,13 @@ func buildVbMap(downStreamParts map[string]pc.Part) map[uint16]string {
 }
 
 type TestPart struct {
-	part.AbstractPart
+	parts.AbstractPart
 }
 
 func NewTestPart(id string) *TestPart {
 	tp := new(TestPart)
-	var isStarted_callback_func part.IsStarted_Callback_Func = tp.IsStarted
-	tp.AbstractPart = part.NewAbstractPart(id, &isStarted_callback_func)
+	var isStarted_callback_func parts.IsStarted_Callback_Func = tp.IsStarted
+	tp.AbstractPart = parts.NewAbstractPart(id, &isStarted_callback_func)
 	return tp
 }
 

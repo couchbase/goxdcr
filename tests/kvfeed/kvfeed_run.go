@@ -4,7 +4,7 @@ package main
 import (
 	"flag"
 	"fmt"
-	connector "github.com/Xiaomei-Zhang/couchbase_goxdcr/connector"
+	connector "github.com/Xiaomei-Zhang/goxdcr/connector"
 	mcc "github.com/couchbase/gomemcached/client"
 	protobuf "github.com/couchbase/indexing/secondary/protobuf"
 	"github.com/ysui6888/indexing/secondary/common"

@@ -6,7 +6,6 @@ import (
 	"fmt"
 	common "github.com/Xiaomei-Zhang/goxdcr/common"
 	"github.com/Xiaomei-Zhang/goxdcr/log"
-	part "github.com/Xiaomei-Zhang/goxdcr/part"
 	base "github.com/Xiaomei-Zhang/goxdcr/base"
 	gen_server "github.com/Xiaomei-Zhang/goxdcr/gen_server"
 	"github.com/Xiaomei-Zhang/goxdcr/utils"
@@ -410,7 +409,7 @@ type XmemNozzle struct {
 
 	//parent inheritance
 	gen_server.GenServer
-	part.AbstractPart
+	AbstractPart
 
 	bOpen      bool
 	lock_bOpen sync.RWMutex
@@ -460,12 +459,12 @@ func NewXmemNozzle(id string,
 	var exit_callback_func gen_server.Exit_Callback_Func
 	var error_handler_func gen_server.Error_Handler_Func
 
-	var isStarted_callback_func part.IsStarted_Callback_Func
+	var isStarted_callback_func IsStarted_Callback_Func
 
 	server := gen_server.NewGenServer(&msg_callback_func,
 		nil, &exit_callback_func, &error_handler_func, logger_context, "XmemNozzle")
 	isStarted_callback_func = server.IsStarted
-	part := part.NewAbstractPartWithLogger(id, &isStarted_callback_func, server.Logger())
+	part := NewAbstractPartWithLogger(id, &isStarted_callback_func, server.Logger())
 
 	xmem := &XmemNozzle{GenServer: server, /*gen_server.GenServer*/
 		AbstractPart:    part,           /*part.AbstractPart*/
