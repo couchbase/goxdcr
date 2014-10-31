@@ -170,7 +170,7 @@ func (xdcrf *XDCRFactory) constructSourceNozzles(spec *metadata.ReplicationSpeci
 				return nil, err
 			}
 			vbList := make([]uint16, 0, 15)
-			for i := 0; i < numOfVbPerDcpNozzle; i++ {
+			for j := 0; j < numOfVbPerDcpNozzle; j++ {
 				if index < numOfVbs {
 					vbList = append(vbList, vbnos[index])
 					index++

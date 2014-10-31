@@ -157,7 +157,6 @@ func (dcp *DcpNozzle) Start(settings map[string]interface{}) error {
 
 func (dcp *DcpNozzle) Stop() error {
 	dcp.Logger().Infof("Stop DcpNozzle %v\n", dcp.Id())
-
 	dcp.Logger().Debugf("DcpNozzle %v processed %v items\n", dcp.Id(), dcp.counter)
 
 	// close upr feed
@@ -193,7 +192,7 @@ func (dcp *DcpNozzle) processData() (err error) {
 				goto done
 			case m, ok := <-mutch: // mutation from upstream
 				if ok == false {
-					dcp.Stop()
+					//dcp.Stop()
 					goto done
 				}
 				dcp.counter++
