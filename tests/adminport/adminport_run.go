@@ -11,41 +11,41 @@
 package main
 
 import (
-	"flag"
-	"fmt"
-	"os"
-	"time"
-	"net/http"
 	"bytes"
 	"errors"
-	"net/url"
+	"flag"
+	"fmt"
 	ap "github.com/Xiaomei-Zhang/goxdcr/adminport"
 	base "github.com/Xiaomei-Zhang/goxdcr/base"
-	rm "github.com/Xiaomei-Zhang/goxdcr/replication_manager"
 	c "github.com/Xiaomei-Zhang/goxdcr/mock_services"
+	pm "github.com/Xiaomei-Zhang/goxdcr/pipeline_manager"
+	rm "github.com/Xiaomei-Zhang/goxdcr/replication_manager"
 	s "github.com/Xiaomei-Zhang/goxdcr/services"
 	utils "github.com/Xiaomei-Zhang/goxdcr/utils"
-	pm "github.com/Xiaomei-Zhang/goxdcr/pipeline_manager"
+	"net/http"
+	"net/url"
+	"os"
+	"time"
 )
 
 const (
-	TestTopic      = "test"
-	NumSourceConn = 2
-	NumTargetConn = 3
+	TestTopic        = "test"
+	NumSourceConn    = 2
+	NumTargetConn    = 3
 	FilterExpression = "testExpr"
-	BatchCount = 20
-	BatchSize = 30
-	Active = false
+	BatchCount       = 20
+	BatchSize        = 30
+	Active           = false
 )
 
 var options struct {
-	sourceBucket    string // source bucket
-	targetBucket    string //target bucket
-	connectStr      string //connect string
-	sourceKVHost      string //source kv host name
-	filterName      string //filter name
-	username        string //username
-	password        string //password
+	sourceBucket string // source bucket
+	targetBucket string //target bucket
+	connectStr   string //connect string
+	sourceKVHost string //source kv host name
+	filterName   string //filter name
+	username     string //username
+	password     string //password
 }
 
 func argParse() {
@@ -79,22 +79,22 @@ func main() {
 }
 
 func startAdminport() {
-	c.SetTestOptions(options.sourceBucket, options.targetBucket, options.connectStr, options.connectStr, options.sourceKVHost, options.username, options.password)
-	
+	c.SetTestOptions(options.connectStr, options.sourceKVHost, options.username, options.password)
+
 	cmd, err := s.StartGometaService()
 	if err != nil {
 		fmt.Println("Test failed. err: ", err)
 		return
 	}
-	
+
 	defer s.KillGometaService(cmd)
-	
+
 	metadata_svc, err := s.DefaultMetadataSvc()
 	if err != nil {
 		fmt.Println("Test failed. err: ", err)
 		return
 	}
-	
+
 	rm.Initialize(metadata_svc, new(c.MockClusterInfoSvc), new(c.MockXDCRTopologySvc), new(c.MockReplicationSettingsSvc))
 
 	go ap.MainAdminPort(options.sourceKVHost)
@@ -106,40 +106,40 @@ func startAdminport() {
 		fmt.Println(err.Error())
 		return
 	}
-	
+
 	escapedReplId := url.QueryEscape(replicationId)
-	fmt.Println("replicationId: ", replicationId, " escaped replication id: " + escapedReplId)
+	fmt.Println("replicationId: ", replicationId, " escaped replication id: "+escapedReplId)
 
 	if err := testViewReplicationSettings(escapedReplId); err != nil {
 		fmt.Println(err.Error())
 		return
 	}
-	
+
 	if err := testChangeReplicationSettings(escapedReplId); err != nil {
 		fmt.Println(err.Error())
 		return
 	}
-	
+
 	if err := testPauseReplication(replicationId, escapedReplId); err != nil {
 		fmt.Println(err.Error())
 		return
 	}
-	
+
 	if err := testResumeReplication(replicationId, escapedReplId); err != nil {
 		fmt.Println(err.Error())
 		return
 	}
-	
+
 	if err := testGetStatistics(); err != nil {
 		fmt.Println(err.Error())
 		return
 	}
-	
+
 	if err := testDeleteReplication(replicationId, escapedReplId); err != nil {
 		fmt.Println(err.Error())
 		return
 	}
-	
+
 	fmt.Println("All tests passed.")
 
 }
@@ -150,7 +150,7 @@ func getUrlPrefix() string {
 
 func testCreateReplication() (string, error) {
 	url := getUrlPrefix() + ap.CreateReplicationPath
-	
+
 	params := make(map[string]interface{})
 	params[ap.FromBucket] = options.sourceBucket
 	params[ap.ToClusterUuid] = options.connectStr
@@ -158,27 +158,27 @@ func testCreateReplication() (string, error) {
 	params[ap.FilterName] = options.filterName
 	params[ap.FilterExpression] = FilterExpression
 	params[ap.BatchCount] = BatchCount
-		
+
 	paramsBytes, _ := ap.EncodeMapIntoByteArray(params)
 	paramsBuf := bytes.NewBuffer(paramsBytes)
-	
+
 	request, err := http.NewRequest(ap.MethodPost, url, paramsBuf)
 	if err != nil {
 		return "", err
 	}
 	request.Header.Set(ap.ContentType, ap.DefaultContentType)
-	
+
 	fmt.Println("request", request)
-	
+
 	response, err := http.DefaultClient.Do(request)
-	
+
 	err = validateResponse("CreateReplication", response, err)
 	if err != nil {
 		return "", err
 	}
-	
+
 	replicationId, err := ap.DecodeCreateReplicationResponse(response)
-	
+
 	// verify that the replication is created and started and is being
 	// managed by pipeline manager
 	return replicationId, validatePipeline("CreateReplication", replicationId, true)
@@ -186,121 +186,120 @@ func testCreateReplication() (string, error) {
 
 func testPauseReplication(replicationId, escapedReplId string) error {
 	url := getUrlPrefix() + ap.PauseReplicationPrefix + base.UrlDelimiter + escapedReplId
-	
+
 	request, err := http.NewRequest(ap.MethodPost, url, nil)
 	if err != nil {
 		return err
 	}
 	request.Header.Set(ap.ContentType, ap.DefaultContentType)
-	
+
 	fmt.Println("request", request)
-	
+
 	response, err := http.DefaultClient.Do(request)
-	
+
 	err = validateResponse("PauseReplication", response, err)
 	if err != nil {
 		return err
 	}
-	
+
 	return validatePipeline("PauseReplication", replicationId, false)
 }
 
 func testResumeReplication(replicationId, escapedReplId string) error {
 	url := getUrlPrefix() + ap.ResumeReplicationPrefix + base.UrlDelimiter + escapedReplId
-	
+
 	request, err := http.NewRequest(ap.MethodPost, url, nil)
 	if err != nil {
 		return err
 	}
 	request.Header.Set(ap.ContentType, ap.DefaultContentType)
-	
+
 	fmt.Println("request", request)
-	
+
 	response, err := http.DefaultClient.Do(request)
-	
+
 	err = validateResponse("ResumeReplication", response, err)
 	if err != nil {
 		return err
 	}
-	
+
 	return validatePipeline("ResumeReplication", replicationId, true)
 }
 
 func testDeleteReplication(replicationId, escapedReplId string) error {
 	url := getUrlPrefix() + ap.DeleteReplicationPrefix + base.UrlDelimiter + escapedReplId
-	
+
 	request, err := http.NewRequest(ap.MethodPost, url, nil)
 	if err != nil {
 		return err
 	}
 	request.Header.Set(ap.ContentType, ap.DefaultContentType)
-	
+
 	fmt.Println("request", request)
-	
+
 	response, err := http.DefaultClient.Do(request)
-	
+
 	err = validateResponse("DeleteReplication", response, err)
 	if err != nil {
 		return err
 	}
-	
+
 	return validatePipeline("DeleteReplication", replicationId, false)
 }
 
 func testViewReplicationSettings(replicationId string) error {
 	url := getUrlPrefix() + ap.SettingsReplicationsPath + base.UrlDelimiter + replicationId
-	
+
 	request, err := http.NewRequest(ap.MethodGet, url, nil)
 	if err != nil {
 		return err
 	}
 	request.Header.Set(ap.ContentType, ap.DefaultContentType)
-	
+
 	fmt.Println("request", request)
-	
+
 	response, err := http.DefaultClient.Do(request)
-	
+
 	return validateResponse("ViewReplicationSettings", response, err)
 }
 
 func testChangeReplicationSettings(replicationId string) error {
 	url := getUrlPrefix() + ap.SettingsReplicationsPath + base.UrlDelimiter + replicationId
-	
+
 	params := make(map[string]interface{})
 	params[ap.Active] = Active
 	params[ap.BatchSize] = BatchSize
-		
+
 	paramsBytes, _ := ap.EncodeMapIntoByteArray(params)
 	paramsBuf := bytes.NewBuffer(paramsBytes)
-	
+
 	request, err := http.NewRequest(ap.MethodPost, url, paramsBuf)
 	if err != nil {
 		return err
 	}
 	request.Header.Set(ap.ContentType, ap.DefaultContentType)
-	
+
 	fmt.Println("request", request)
-	
+
 	response, err := http.DefaultClient.Do(request)
 	return validateResponse("ChangeReplicationSettings", response, err)
 }
 
 func testGetStatistics() error {
 	url := getUrlPrefix() + ap.StatisticsPath
-	
+
 	request, err := http.NewRequest(ap.MethodGet, url, nil)
 	if err != nil {
 		return err
 	}
 	request.Header.Set(ap.ContentType, ap.DefaultContentType)
-	
+
 	fmt.Println("request", request)
-	
+
 	response, err := http.DefaultClient.Do(request)
-	
+
 	return validateResponse("GetStatistics", response, err)
 }
-
 
 func validateResponse(testName string, response *http.Response, err error) error {
 	if err != nil || response.StatusCode != 200 {
@@ -310,7 +309,7 @@ func validateResponse(testName string, response *http.Response, err error) error
 		}
 		errMsg += "\n"
 		return errors.New(errMsg)
-	} 
+	}
 	return nil
 }
 
@@ -323,13 +322,8 @@ func validatePipeline(testName string, replicationId string, pipelineRunning boo
 			errMsg = ", should not be running but was"
 		}
 		return errors.New(fmt.Sprintf("Test %v failed. Pipeline, %v%v\n", testName, replicationId, errMsg))
-	} else{
+	} else {
 		fmt.Println("Test ", testName, " passed.")
 		return nil
 	}
 }
-
-
-
-
-

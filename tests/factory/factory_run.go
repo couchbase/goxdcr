@@ -21,7 +21,6 @@ var options struct {
 	connectStr      string //connect string
 	username        string //username
 	password        string //password
-	maxVbno         int    // maximum number of vbuckets
 }
 
 const (
@@ -36,8 +35,6 @@ func argParse() {
 		"source KV host name")
 	flag.StringVar(&options.sourceBucket, "source_bucket", "default",
 		"bucket to replicate from")
-	flag.IntVar(&options.maxVbno, "maxvb", 8,
-		"maximum number of vbuckets")
 	flag.StringVar(&options.targetBucket, "target_bucket", "target",
 		"bucket to replicate to")
 	flag.StringVar(&options.username, "username", "Administrator", "username to cluster admin console")
@@ -65,6 +62,14 @@ func main() {
 }
 
 func invokeFactory() error {
+	cmd, err := s.StartGometaService()
+	if err != nil {
+		fmt.Println("Test failed. err: ", err)
+		return err
+	}
+
+	defer s.KillGometaService(cmd)
+	
 	msvc, err := s.DefaultMetadataSvc()
 	if err != nil {
 		fmt.Println("Test failed. err: ", err)
@@ -74,7 +79,7 @@ func invokeFactory() error {
 	mcisvc := &c.MockClusterInfoSvc{}
 	mxtsvc := &c.MockXDCRTopologySvc{}
 
-	c.SetTestOptions(options.sourceBucket, options.targetBucket, options.connectStr, options.connectStr, options.sourceKVHost, options.username, options.password)
+	c.SetTestOptions(options.connectStr, options.sourceKVHost, options.username, options.password)
 	fac := factory.NewXDCRFactory(msvc, mcisvc, mxtsvc, log.DefaultLoggerContext, log.DefaultLoggerContext, nil)
 
 	replSpec := metadata.NewReplicationSpecification(options.connectStr, options.sourceBucket, options.connectStr, options.targetBucket, "")

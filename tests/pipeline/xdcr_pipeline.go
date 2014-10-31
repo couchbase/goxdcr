@@ -113,7 +113,7 @@ func main() {
 
 func setup() error {
 	//	flushTargetBkt()
-	c.SetTestOptions(options.source_bucket, options.target_bucket, options.source_cluster_addr, options.target_cluster_addr, options.source_kv_host, options.source_cluster_username, options.source_cluster_password)
+	c.SetTestOptions(options.source_cluster_addr, options.source_kv_host, options.source_cluster_username, options.source_cluster_password)
 	metadata_svc, err := s.DefaultMetadataSvc()
 	if err != nil {
 		return err

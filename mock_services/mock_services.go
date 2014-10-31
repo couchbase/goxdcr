@@ -21,21 +21,14 @@ import (
 )
 
 var options struct {
-	sourceBucket    string // source bucket
-	targetBucket    string //target bucket
 	sourceClusterAddr      string //source cluster addr
-	targetClusterAddr      string //target cluster addr
 	sourceKVHost      string //source kv host name
 	username        string //username on source cluster
 	password        string //password on source cluster
-	maxVbno         int    // maximum number of vbuckets
 }
 
-func SetTestOptions(sourceBucket, targetBucket, sourceClusterAddr, targetClusterAddr, sourceKVHost, username, password string) {
-	options.sourceBucket = sourceBucket
-	options.targetBucket = targetBucket
+func SetTestOptions(sourceClusterAddr, sourceKVHost, username, password string) {
 	options.sourceClusterAddr = sourceClusterAddr
-	options.targetClusterAddr = targetClusterAddr
 	options.sourceKVHost = sourceKVHost
 	options.username = username
 	options.password = password
