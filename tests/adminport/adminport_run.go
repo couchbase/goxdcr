@@ -44,8 +44,6 @@ var options struct {
 	connectStr      string //connect string
 	sourceKVHost      string //source kv host name
 	filterName      string //filter name
-	numConnPerKV    int    // number of connections per source KV node
-	numOutgoingConn int    // number of connections to target cluster
 	username        string //username
 	password        string //password
 }
@@ -61,10 +59,6 @@ func argParse() {
 		"bucket to replicate to")
 	flag.StringVar(&options.filterName, "filterName", "myActive",
 		"name of filter to use for replication")
-	flag.IntVar(&options.numConnPerKV, "numConnPerKV", NumSourceConn,
-		"number of connections per kv node")
-	flag.IntVar(&options.numOutgoingConn, "numOutgoingConn", NumTargetConn,
-		"number of outgoing connections to target")
 	flag.StringVar(&options.username, "username", "Administrator", "username to cluster admin console")
 	flag.StringVar(&options.password, "password", "welcome", "password to Cluster admin console")
 
@@ -85,7 +79,7 @@ func main() {
 }
 
 func startAdminport() {
-	c.SetTestOptions(options.sourceBucket, options.targetBucket, options.connectStr, options.connectStr, options.sourceKVHost, options.username, options.password, options.numConnPerKV, options.numOutgoingConn)
+	c.SetTestOptions(options.sourceBucket, options.targetBucket, options.connectStr, options.connectStr, options.sourceKVHost, options.username, options.password)
 	
 	cmd, err := s.StartGometaService()
 	if err != nil {

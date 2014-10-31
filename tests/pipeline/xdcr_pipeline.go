@@ -28,6 +28,11 @@ import (
 
 //import _ "net/http/pprof"
 
+const (
+	NUM_SOURCE_CONN = 2
+	NUM_TARGET_CONN = 3
+)
+
 var options struct {
 	source_bucket           string // source bucket
 	target_bucket           string //target bucket
@@ -39,17 +44,7 @@ var options struct {
 	target_cluster_username string //target cluster username
 	target_cluster_password string //target cluster password
 	target_bucket_password  string //target bucket password
-	nozzles_per_node_source int    // number of nozzles per source node
-	nozzles_per_node_target int    // number of nozzles per target node
-	//	username        string //username
-	//	password        string //password
-	//	maxVbno         int    // maximum number of vbuckets
 }
-
-const (
-	NUM_SOURCE_CONN = 2
-	NUM_TARGET_CONN = 3
-)
 
 func argParse() {
 
@@ -73,10 +68,6 @@ func argParse() {
 		"password to use for logging into target cluster")
 	flag.StringVar(&options.target_bucket_password, "target_bucket_password", "",
 		"password to use for accessing target bucket")
-	flag.IntVar(&options.nozzles_per_node_source, "nozzles_per_node_source", NUM_SOURCE_CONN,
-		"number of nozzles per source node")
-	flag.IntVar(&options.nozzles_per_node_target, "nozzles_per_node_target", NUM_TARGET_CONN,
-		"number of nozzles per target node")
 
 	flag.Parse()
 }
@@ -122,7 +113,7 @@ func main() {
 
 func setup() error {
 	//	flushTargetBkt()
-	c.SetTestOptions(options.source_bucket, options.target_bucket, options.source_cluster_addr, options.target_cluster_addr, options.source_kv_host, options.source_cluster_username, options.source_cluster_password, options.nozzles_per_node_source, options.nozzles_per_node_target)
+	c.SetTestOptions(options.source_bucket, options.target_bucket, options.source_cluster_addr, options.target_cluster_addr, options.source_kv_host, options.source_cluster_username, options.source_cluster_password)
 	metadata_svc, err := s.DefaultMetadataSvc()
 	if err != nil {
 		return err
@@ -136,8 +127,8 @@ func test() {
 	fmt.Println("Start testing")
 	settings := make(map[string]interface{})
 	settings[metadata.PipelineLogLevel] = "Error"
-	settings[metadata.SourceNozzlePerNode] = options.nozzles_per_node_source
-	settings[metadata.TargetNozzlePerNode] = options.nozzles_per_node_target
+	settings[metadata.SourceNozzlePerNode] = NUM_SOURCE_CONN
+	settings[metadata.TargetNozzlePerNode] = NUM_TARGET_CONN
 	settings[metadata.BatchCount] = 500
 
 	topic, err := replication_manager.CreateReplication(options.source_cluster_addr, options.source_bucket, options.target_cluster_addr, options.target_bucket, options.target_bucket_password, settings)

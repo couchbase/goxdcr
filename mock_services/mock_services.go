@@ -26,14 +26,12 @@ var options struct {
 	sourceClusterAddr      string //source cluster addr
 	targetClusterAddr      string //target cluster addr
 	sourceKVHost      string //source kv host name
-	numConnPerKV    int    // number of connections per source KV node
-	numOutgoingConn int    // number of connections to target cluster
 	username        string //username on source cluster
 	password        string //password on source cluster
 	maxVbno         int    // maximum number of vbuckets
 }
 
-func SetTestOptions(sourceBucket, targetBucket, sourceClusterAddr, targetClusterAddr, sourceKVHost, username, password string, numConnPerKV, numOutgoingConn int) {
+func SetTestOptions(sourceBucket, targetBucket, sourceClusterAddr, targetClusterAddr, sourceKVHost, username, password string) {
 	options.sourceBucket = sourceBucket
 	options.targetBucket = targetBucket
 	options.sourceClusterAddr = sourceClusterAddr
@@ -41,44 +39,6 @@ func SetTestOptions(sourceBucket, targetBucket, sourceClusterAddr, targetCluster
 	options.sourceKVHost = sourceKVHost
 	options.username = username
 	options.password = password
-	options.numConnPerKV = numConnPerKV
-	options.numOutgoingConn = numOutgoingConn 
-}
-
-type MockMetadataSvc struct {
-	specs map[string]metadata.ReplicationSpecification
-}
-
-func NewMockMetadataSvc() *MockMetadataSvc {
-	return &MockMetadataSvc{specs: make(map[string]metadata.ReplicationSpecification)}
-}
-func (mock_meta_svc *MockMetadataSvc) ReplicationSpec(replicationId string) (*metadata.ReplicationSpecification, error) {
-	spec, ok := mock_meta_svc.specs[replicationId]
-	if !ok {
-		spec_ptr := metadata.NewReplicationSpecification(options.sourceClusterAddr, options.sourceBucket, options.targetClusterAddr, options.targetBucket, "")
-		settings := spec_ptr.Settings
-		settings.TargetNozzlePerNode = options.numOutgoingConn
-		settings.SourceNozzlePerNode = options.numConnPerKV
-		mock_meta_svc.specs[replicationId] = *spec_ptr
-		return spec_ptr, nil
-	}else {
-		return &spec, nil
-	}
-}
-
-func (mock_meta_svc *MockMetadataSvc) AddReplicationSpec(spec metadata.ReplicationSpecification) error {
-	mock_meta_svc.specs[spec.Id] = spec
-	return nil
-}
-
-func (mock_meta_svc *MockMetadataSvc) SetReplicationSpec(spec metadata.ReplicationSpecification) error {
-	mock_meta_svc.specs[spec.Id] = spec
-	return nil
-}
-
-func (mock_meta_svc *MockMetadataSvc) DelReplicationSpec(replicationId string) error {
-	delete(mock_meta_svc.specs, replicationId)
-	return nil
 }
 
 type MockClusterInfoSvc struct {

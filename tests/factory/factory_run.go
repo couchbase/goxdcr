@@ -10,6 +10,8 @@ import (
 	"github.com/Xiaomei-Zhang/goxdcr/factory"
 	"github.com/Xiaomei-Zhang/goxdcr/parts"
 	c "github.com/Xiaomei-Zhang/goxdcr/mock_services"
+	s "github.com/Xiaomei-Zhang/goxdcr/services"
+    "github.com/Xiaomei-Zhang/goxdcr/metadata"
 )
 
 var options struct {
@@ -17,15 +19,12 @@ var options struct {
 	sourceBucket    string // source bucket
 	targetBucket    string //target bucket
 	connectStr      string //connect string
-	numConnPerKV    int    // number of connections per source KV node
-	numOutgoingConn int    // number of connections to target cluster
 	username        string //username
 	password        string //password
 	maxVbno         int    // maximum number of vbuckets
 }
 
 const (
-	TEST_TOPIC      = "test"
 	NUM_SOURCE_CONN = 2
 	NUM_TARGET_CONN = 3
 )
@@ -41,10 +40,6 @@ func argParse() {
 		"maximum number of vbuckets")
 	flag.StringVar(&options.targetBucket, "target_bucket", "target",
 		"bucket to replicate to")
-	flag.IntVar(&options.numConnPerKV, "numConnPerKV", NUM_SOURCE_CONN,
-		"number of connections per kv node")
-	flag.IntVar(&options.numOutgoingConn, "numOutgoingConn", NUM_TARGET_CONN,
-		"number of outgoing connections to target")
 	flag.StringVar(&options.username, "username", "Administrator", "username to cluster admin console")
 	flag.StringVar(&options.password, "password", "welcome", "password to Cluster admin console")
 
@@ -70,14 +65,28 @@ func main() {
 }
 
 func invokeFactory() error {
-	msvc := c.NewMockMetadataSvc()
+	msvc, err := s.DefaultMetadataSvc()
+	if err != nil {
+		fmt.Println("Test failed. err: ", err)
+		return err
+	}
+	
 	mcisvc := &c.MockClusterInfoSvc{}
 	mxtsvc := &c.MockXDCRTopologySvc{}
 
-	c.SetTestOptions(options.sourceBucket, options.targetBucket, options.connectStr, options.connectStr, options.sourceKVHost, options.username, options.password, options.numConnPerKV, options.numOutgoingConn)
+	c.SetTestOptions(options.sourceBucket, options.targetBucket, options.connectStr, options.connectStr, options.sourceKVHost, options.username, options.password)
 	fac := factory.NewXDCRFactory(msvc, mcisvc, mxtsvc, log.DefaultLoggerContext, log.DefaultLoggerContext, nil)
 
-	pl, err := fac.NewPipeline(TEST_TOPIC)
+	replSpec := metadata.NewReplicationSpecification(options.connectStr, options.sourceBucket, options.connectStr, options.targetBucket, "")
+	replSpec.Settings.SourceNozzlePerNode = NUM_SOURCE_CONN
+	replSpec.Settings.TargetNozzlePerNode = NUM_TARGET_CONN
+	err = msvc.AddReplicationSpec(*replSpec)
+	if err != nil {
+		return err
+	}
+	defer msvc.DelReplicationSpec(replSpec.Id)
+	
+	pl, err := fac.NewPipeline(replSpec.Id)
 	if err != nil {
 		return err
 	}

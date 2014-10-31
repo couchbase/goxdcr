@@ -31,8 +31,6 @@ var options struct {
 	targetClusterAddr      string //target cluster addr
 	sourceBucket          string // source bucket
 	targetBucket          string // target bucket
-	numConnPerKV  int    // number of nozzles per source node
-	numOutgoingConn  int    // number of nozzles per target node
 }
 
 func argParse() {
@@ -49,10 +47,6 @@ func argParse() {
 		"bucket to replicate from")
 	flag.StringVar(&options.targetBucket, "targetBucket", "target",
 		"bucket to replicate to")
-	flag.IntVar(&options.numConnPerKV, "numConnPerKV", 2,
-		"number of nozzles per source node")
-	flag.IntVar(&options.numOutgoingConn, "numOutgoingConn", 3,
-		"number of nozzles per target node")
 	flag.Parse()
 }
 
@@ -71,7 +65,7 @@ func main() {
 	}
 	defer s.KillGometaService(cmd)
 	
-	c.SetTestOptions(options.sourceBucket, options.targetBucket, options.sourceClusterAddr, options.targetClusterAddr, options.sourceKVHost, options.username, options.password, options.numConnPerKV, options.numOutgoingConn)
+	c.SetTestOptions(options.sourceBucket, options.targetBucket, options.sourceClusterAddr, options.targetClusterAddr, options.sourceKVHost, options.username, options.password)
 		
 	xdcrTopologyService := new(c.MockXDCRTopologySvc)
 	hostAddr, err := xdcrTopologyService.MyHost()
