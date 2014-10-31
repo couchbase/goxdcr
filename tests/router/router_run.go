@@ -15,8 +15,8 @@ import (
 	"fmt"
 	pc "github.com/Xiaomei-Zhang/goxdcr/common"
 	parts "github.com/Xiaomei-Zhang/goxdcr/parts"
+	utils "github.com/Xiaomei-Zhang/goxdcr/utils"
 	mc "github.com/couchbase/gomemcached"
-	"github.com/couchbase/indexing/secondary/common"
 	"github.com/couchbaselabs/go-couchbase"
 	"log"
 	couchlog "github.com/Xiaomei-Zhang/goxdcr/log"
@@ -100,7 +100,7 @@ func main() {
 }
 
 func startUpr(cluster, bucketn string, waitGrp *sync.WaitGroup) {
-	b, err := common.ConnectBucket(cluster, "default", bucketn)
+	b, err := utils.Bucket(cluster, bucketn, "", "")
 	mf(err, "bucket")
 
 	uprFeed, err = b.StartUprFeed("rawupr", uint32(0))

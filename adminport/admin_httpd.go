@@ -175,7 +175,7 @@ func (r *httpAdminRequest) SendError(err error) error {
 	return nil
 }
 
-//secondary index implementaton of RequestHandler 
+//xdcr implementaton of RequestHandler 
 type Handler struct{
         server  *httpServer
 }

@@ -7,9 +7,9 @@ import (
 	"math"
 	connector "github.com/Xiaomei-Zhang/goxdcr/connector"
 	mcc "github.com/couchbase/gomemcached/client"
-	"github.com/couchbase/indexing/secondary/common"
 	"github.com/Xiaomei-Zhang/goxdcr/base"
 	"github.com/Xiaomei-Zhang/goxdcr/parts"
+	"github.com/Xiaomei-Zhang/goxdcr/utils"
 	"github.com/couchbaselabs/go-couchbase"
 	"log"
 	"os"
@@ -63,7 +63,7 @@ func main() {
 	fmt.Printf("connectStr=%s\n", options.connectStr)
 	fmt.Println("Done with parsing the arguments")
 	
-	bucket, err := common.ConnectBucket(options.connectStr, "default", options.source_bucket)
+	bucket, err := utils.Bucket(options.connectStr, options.source_bucket, "", "")
 	mf(err, "bucket")
 	
 	vblist, err := getVBListFromBucket(bucket, options.kvaddr)

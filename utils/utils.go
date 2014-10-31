@@ -141,7 +141,13 @@ func maybeAddAuth(req *http.Request, username string, password string) {
 }
 
 func Bucket(connectStr string, bucketName string, clusterUserName, clusterPassword string) (*couchbase.Bucket, error) {
-	url := fmt.Sprintf("http://%s:%s@%s", clusterUserName, clusterPassword, connectStr)
+	var url string
+	if clusterUserName != "" && clusterPassword != "" {
+		url = fmt.Sprintf("http://%s:%s@%s", clusterUserName, clusterPassword, connectStr)
+	} else {
+		url = fmt.Sprintf("http://%s", connectStr)
+	}
+		
 	bucketInfos, err := couchbase.GetBucketList (url)
 	if err != nil {
 		return nil, NewEnhancedError("Error getting bucketlist with url:" + url, err)

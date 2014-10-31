@@ -18,7 +18,6 @@ import (
 	utils "github.com/Xiaomei-Zhang/goxdcr/utils"
 	mc "github.com/couchbase/gomemcached"
 	mcc "github.com/couchbase/gomemcached/client"
-	"github.com/couchbase/indexing/secondary/common"
 	"github.com/couchbaselabs/go-couchbase"
 	"github.com/Xiaomei-Zhang/goxdcr/log"
 	"net/http"
@@ -160,7 +159,7 @@ func test(batch_count int, data_count int) {
 }
 func startUpr(cluster, bucketn string, waitGrp *sync.WaitGroup, data_count int) {
 	logger.Info("Start Upr...")
-	b, err := common.ConnectBucket(cluster, "default", bucketn)
+	b, err := utils.Bucket(cluster, bucketn, "", "")
 	mf(err, "bucket")
 
 	uprFeed, err = b.StartUprFeed("rawupr", uint32(0))

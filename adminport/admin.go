@@ -6,10 +6,6 @@
 // License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND,
 // either express or implied. See the License for the specific language governing permissions
 // and limitations under the License.
-
-// Other than mutation path and query path, most of the components in secondary
-// index talk to each other via admin port. Admin port can also be used for
-// collecting statistics, administering and managing cluster.
 //
 // An admin port is started as a server daemon and listens for request messages,
 // where every request is serviced by sending back a response to the client.
