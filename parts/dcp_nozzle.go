@@ -1,3 +1,12 @@
+// Copyright (c) 2013 Couchbase, Inc.
+// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file
+// except in compliance with the License. You may obtain a copy of the License at
+//   http://www.apache.org/licenses/LICENSE-2.0
+// Unless required by applicable law or agreed to in writing, software distributed under the
+// License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND,
+// either express or implied. See the License for the specific language governing permissions
+// and limitations under the License.
+
 package parts
 
 import (
@@ -36,7 +45,6 @@ type DcpNozzle struct {
 	// this allows multiple kvfeeds to be created for a kv node
 	vbnos []uint16
 	// immutable fields
-	kvaddr  string
 	bucket  *couchbase.Bucket
 	uprFeed *couchbase.UprFeed
 
@@ -50,7 +58,7 @@ type DcpNozzle struct {
 	start_time time.Time
 }
 
-func NewDcpNozzle(id, kvaddr string,
+func NewDcpNozzle(id string,
 	bucket *couchbase.Bucket,
 	vbnos []uint16,
 	logger_context *log.LoggerContext) *DcpNozzle {
@@ -68,7 +76,7 @@ func NewDcpNozzle(id, kvaddr string,
 	isStarted_callback_func = server.IsStarted
 	part := NewAbstractPartWithLogger(id, &isStarted_callback_func, server.Logger())
 
-	dcp := &DcpNozzle{kvaddr: kvaddr,
+	dcp := &DcpNozzle{
 		bucket:          bucket,
 		vbnos:           vbnos,
 		GenServer:       server,           /*gen_server.GenServer*/
@@ -81,7 +89,7 @@ func NewDcpNozzle(id, kvaddr string,
 	exit_callback_func = dcp.onExit
 	error_handler_func = dcp.handleGeneralError
 	
-	dcp.Logger().Infof("Constructed Dcp nozzle %v with kvaddr %v, vblist %v\n", dcp.Id(), kvaddr, vbnos)
+	dcp.Logger().Infof("Constructed Dcp nozzle %v with vblist %v\n", dcp.Id(), vbnos)
 
 	return dcp
 
