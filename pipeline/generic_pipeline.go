@@ -156,7 +156,7 @@ func (genericPipeline *GenericPipeline) Start(settings map[string]interface{}) e
 
 func (genericPipeline *GenericPipeline) stopPart(part common.Part) error {
 	var err error = nil
-	genericPipeline.logger.Debugf("Trying to stop part %v\n", part.Id())
+	genericPipeline.logger.Infof("Trying to stop part %v\n", part.Id())
 	if genericPipeline.canStop(part) {
 		if !part.IsStarted() {
 			genericPipeline.logger.Debugf("part %v is already stopped\n", part.Id())
@@ -164,6 +164,7 @@ func (genericPipeline *GenericPipeline) stopPart(part common.Part) error {
 		}
 		err = part.Stop()
 		if err == nil {
+			genericPipeline.logger.Infof("part %v is stopped\n", part.Id())
 			if part.Connector() != nil {
 				downstreamParts := part.Connector().DownStreams()
 				for _, p := range downstreamParts {
