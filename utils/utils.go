@@ -17,7 +17,6 @@ import (
 	"bytes"
 	"bufio"
 	"strconv"
-	"code.google.com/p/goprotobuf/proto"
 )
 
 type BucketBasicStats struct {
@@ -190,34 +189,6 @@ func EncodeHttpRequestIntoByteArray(r *http.Request) ([]byte, error) {
 func DecodeHttpRequestFromByteArray(data []byte) (*http.Request, error) {
 	buffer := bytes.NewBuffer(data)
 	return http.ReadRequest(bufio.NewReader(buffer))
-}
-
-// given a http request encoded as a byte array, extract request body and
-// decode a message from it
-// this method should be used for messages with static paths, where message
-// content depends on only request body and nothing else
-func DecodeMessageFromByteArray(data []byte, msg proto.Message, logger *log.CommonLogger) error {
-	var l *log.CommonLogger = loggerForFunc(logger)
-
-	request, err := DecodeHttpRequestFromByteArray(data)
-	l.Infof("decoded http %v", request)
-	if err != nil {
-		return err
-	}
-
-	return DecodeMessageFromHttpRequest(request, msg, logger)
-}
-
-// given a http request, extract requesy body and
-// decode a message from it
-func DecodeMessageFromHttpRequest(request *http.Request, msg proto.Message, logger *log.CommonLogger) error {
-	requestBody := make([]byte, request.ContentLength)
-	err := RequestRead(request.Body, requestBody)
-	if err != nil {
-		return err
-	}
-	err = proto.Unmarshal(requestBody, msg)
-	return err
 }
 
 // TODO may expose and reuse the same func in si
