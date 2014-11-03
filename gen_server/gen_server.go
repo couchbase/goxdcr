@@ -74,6 +74,8 @@ func (s *GenServer) Start_server() (err error) {
 }
 
 func (s *GenServer) run() {
+	// resp ch used when exiting the routine
+	var exitRespCh chan []interface{}
 loop:
 	for {
 		select {
@@ -93,7 +95,7 @@ loop:
 			if err2, respch, timestamp := s.decodeCmd(cmdStop, msg); err2 == nil {
 				s.logger.Infof("server is stopped per request sent at %v\n", timestamp)
 				close(s.msgChan)
-				respch <- []interface{}{true}
+				exitRespCh = respch
 				break loop
 			} else {
 				if (*s.msg_callback) != nil {
@@ -113,6 +115,10 @@ loop:
 		//probably no need to report error during exitting.
 	} else {
 		s.logger.Debugf("No exit_callback for %s\n", reflect.TypeOf(s).Name())
+	}
+	
+	if exitRespCh != nil {
+		exitRespCh <- []interface{}{true}
 	}
 }
 

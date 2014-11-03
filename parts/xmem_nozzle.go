@@ -626,14 +626,14 @@ func (xmem *XmemNozzle) processData_batch(finch chan bool, waitGrp *sync.WaitGro
 	xmem.Logger().Infof("%v processData starts..........\n", xmem.Id())
 	defer waitGrp.Done()
 	for {
-		xmem.Logger().Infof("%v processData ....\n", xmem.Id())
+		xmem.Logger().Debugf("%v processData ....\n", xmem.Id())
 		if xmem.IsOpen() {
 			select {
 			case <-finch:
 				goto done
 			case batch := <-xmem.batches_ready:
 				xmem.buf.flowControl()
-				xmem.Logger().Infof("%v Batch Send..., %v batches ready, %v items in queue, count_recieved=%v, count_sent=%v\n", xmem.Id(), len(xmem.batches_ready), len(xmem.dataChan), xmem.counter_received, xmem.counter_sent)
+				xmem.Logger().Debugf("%v Batch Send..., %v batches ready, %v items in queue, count_recieved=%v, count_sent=%v\n", xmem.Id(), len(xmem.batches_ready), len(xmem.dataChan), xmem.counter_received, xmem.counter_sent)
 				err = xmem.send_internal(batch)
 				if err != nil {
 					xmem.handleGeneralError(err)
@@ -850,6 +850,10 @@ func (xmem *XmemNozzle) receiveResponse(finch chan bool, waitGrp *sync.WaitGroup
 	var count = 0
 	var read_retry = 0
 	for {
+		select {
+			case <-finch:
+				goto done
+			default:
 		conn := xmem.memClient.Hijack()
 		conn.(*net.TCPConn).SetReadDeadline(time.Now().Add(300 * time.Millisecond))
 		response, err := xmem.memClient.Receive()
@@ -896,9 +900,11 @@ func (xmem *XmemNozzle) receiveResponse(finch chan bool, waitGrp *sync.WaitGroup
 				}
 			}
 		}
+		}
 	}
 
 done:
+	xmem.Logger().Infof("%v receiveResponse exits\n", xmem.Id())
 }
 
 func isNetError(err error) bool {
@@ -932,6 +938,8 @@ func isRecoverableMCError(resp_status mc.Status) bool {
 }
 
 func (xmem *XmemNozzle) check(finch chan bool, waitGrp *sync.WaitGroup) {
+	defer waitGrp.Done()
+
 	var count uint64
 	ticker := time.Tick(xmem.config.respTimeout)
 	for {
@@ -961,8 +969,7 @@ func (xmem *XmemNozzle) check(finch chan bool, waitGrp *sync.WaitGroup) {
 		}
 	}
 done:
-	xmem.Logger().Debug("Xmem checking routine exits")
-	waitGrp.Done()
+	xmem.Logger().Info("Xmem checking routine exits")
 }
 
 func (xmem *XmemNozzle) checkTimeout(req *bufferedMCRequest, pos uint16) (bool, error) {

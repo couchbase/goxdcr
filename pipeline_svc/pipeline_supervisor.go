@@ -112,15 +112,14 @@ func (supervisor *PipelineSupervisor) Start(settings map[string]interface{}) err
 }
 
 func (supervisor *PipelineSupervisor) Stop() error {
-
+	supervisor.Logger().Info("stopping pipeline supervisor")
 	err := supervisor.Stop_server()
-
 	close(supervisor.finch)
 
 	supervisor.Logger().Debug("Wait for children goroutines to exit")
 	//	supervisor.children_waitGrp.Wait()
 	supervisor.heartbeat_ticker.Stop()
-	supervisor.Logger().Debug("Supervisor exits....")
+	supervisor.Logger().Info("Supervisor exits....")
 	return err
 }
 

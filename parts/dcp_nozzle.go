@@ -47,6 +47,8 @@ type DcpNozzle struct {
 	// immutable fields
 	bucket  *couchbase.Bucket
 	uprFeed *couchbase.UprFeed
+	// lock on uprFeed to avoid race condition
+	lock_uprFeed sync.Mutex
 
 	finch chan bool
 
@@ -83,6 +85,7 @@ func NewDcpNozzle(id string,
 		AbstractPart:    part,             /*AbstractPart*/
 		bOpen:           true,             /*bOpen	bool*/
 		childrenWaitGrp: sync.WaitGroup{}, /*childrenWaitGrp sync.WaitGroup*/
+		lock_uprFeed:    sync.Mutex{},
 	}
 
 	msg_callback_func = nil
@@ -159,13 +162,29 @@ func (dcp *DcpNozzle) Stop() error {
 	dcp.Logger().Infof("Stop DcpNozzle %v\n", dcp.Id())
 	dcp.Logger().Debugf("DcpNozzle %v processed %v items\n", dcp.Id(), dcp.counter)
 
-	// close upr feed
-	dcp.uprFeed.Close()
+	// Stop() could be called from more than one go routines in dcp nozzle
+	// Here we are using uprFeed to prevent the actual stop operations
+	// from being executed more than once. In other words, the first call to Stop()
+	// would get uprFeed to be set to nil, and subsequent call(s) to Stop()
+	// would be no ops. We need to lock uprFeed to avoid race condition.
+	dcp.lock_uprFeed.Lock()
+	dcp.Logger().Infof("locked uprfeed %v\n", dcp.Id())
+	if dcp.uprFeed != nil {
+		dcp.uprFeed.Close()
+		dcp.uprFeed = nil
+		dcp.lock_uprFeed.Unlock()
+		dcp.Logger().Infof("unlocked uprfeed %v\n", dcp.Id())
 
-	err := dcp.Stop_server()
+		err := dcp.Stop_server()
+		dcp.Logger().Infof("DcpNozzle %v is stopped\n", dcp.Id())
+		return err
+	} else {
+		dcp.lock_uprFeed.Unlock()
+		dcp.Logger().Debugf("Stop() on DcpNozzle %v is skipped since the nozzle has already been stopped\n", dcp.Id())
+	}
+		
+	return nil
 
-	dcp.Logger().Debugf("DcpNozzle %v is stopped\n", dcp.Id())
-	return err
 }
 
 func (dcp *DcpNozzle) IsOpen() bool {
@@ -192,7 +211,7 @@ func (dcp *DcpNozzle) processData() (err error) {
 				goto done
 			case m, ok := <-mutch: // mutation from upstream
 				if ok == false {
-					//dcp.Stop()
+					dcp.Stop()
 					goto done
 				}
 				dcp.counter++

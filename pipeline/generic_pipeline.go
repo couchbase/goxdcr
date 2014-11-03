@@ -156,14 +156,13 @@ func (genericPipeline *GenericPipeline) Start(settings map[string]interface{}) e
 
 func (genericPipeline *GenericPipeline) stopPart(part common.Part) error {
 	var err error = nil
-	genericPipeline.logger.Debugf("Try to stop part %v\n", part.Id())
+	genericPipeline.logger.Debugf("Trying to stop part %v\n", part.Id())
 	if genericPipeline.canStop(part) {
 		if !part.IsStarted() {
-			genericPipeline.logger.Infof("part %v is already stopped\n", part.Id())
+			genericPipeline.logger.Debugf("part %v is already stopped\n", part.Id())
 			return nil
 		}
 		err = part.Stop()
-		genericPipeline.logger.Infof("part %v is already stopped\n", part.Id())
 		if err == nil {
 			if part.Connector() != nil {
 				downstreamParts := part.Connector().DownStreams()
@@ -245,6 +244,7 @@ func (genericPipeline *GenericPipeline) isUpstreamTo(target_part common.Part, pa
 
 //Stop stops the pipeline
 func (genericPipeline *GenericPipeline) Stop() error {
+	genericPipeline.logger.Infof("stoppping pipeline %v\n", genericPipeline.Topic())
 	var err error
 
 //	genericPipeline.stateLock.Lock()
@@ -278,7 +278,7 @@ func (genericPipeline *GenericPipeline) Stop() error {
 
 	genericPipeline.isActive = false
 
-	genericPipeline.logger.Debugf("Pipeline %v is stopped\n", genericPipeline.Topic())
+	genericPipeline.logger.Infof("Pipeline %v is stopped\n", genericPipeline.Topic())
 	return err
 
 }

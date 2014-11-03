@@ -14,8 +14,6 @@ import (
 	"net/url"
 	"reflect"
 	"strings"
-	"bytes"
-	"bufio"
 	"strconv"
 )
 
@@ -172,42 +170,6 @@ func Bucket(connectStr string, bucketName string, clusterUserName, clusterPasswo
 		return nil, NewEnhancedError(fmt.Sprintf("Error getting bucket, %v, from pool.", bucketName), err)
 	}
 	return bucket, err
-}
-
-// encode http request into a byte array
-func EncodeHttpRequestIntoByteArray(r *http.Request) ([]byte, error) {
-	buffer := new(bytes.Buffer)
-	err := r.Write(buffer)
-	if err == nil {
-		return buffer.Bytes(), nil
-	} else {
-		return nil, err
-	}
-}
-
-// decode http request from byte array
-func DecodeHttpRequestFromByteArray(data []byte) (*http.Request, error) {
-	buffer := bytes.NewBuffer(data)
-	return http.ReadRequest(bufio.NewReader(buffer))
-}
-
-// TODO may expose and reuse the same func in si
-func RequestRead(r io.Reader, data []byte) (err error) {
-	var c int
-
-	n, start := len(data), 0
-	for n > 0 && err == nil {
-		// Per http://golang.org/pkg/io/#Reader, it is valid for Read to
-		// return EOF with non-zero number of bytes at the end of the
-		// input stream
-		c, err = r.Read(data[start:])
-		n -= c
-		start += c
-	}
-	if n == 0 {
-		return nil
-	}
-	return err
 }
 
 func InvalidParameterInHttpRequestError(param string) error {
