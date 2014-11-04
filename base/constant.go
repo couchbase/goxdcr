@@ -9,7 +9,9 @@
 
 package base
 
-import ()
+import (
+	"errors"
+)
 
 //constants
 var DefaultConnectionSize = 70
@@ -45,4 +47,6 @@ const (
 // constants for integer parsing
 var ParseIntBase    = 10
 var ParseIntBitSize = 64
+
+var ErrorNotMyVbucket = errors.New("NOT_MY_VBUCKET")
 

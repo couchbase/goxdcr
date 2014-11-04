@@ -16,6 +16,7 @@ import (
 	"github.com/Xiaomei-Zhang/goxdcr/log"
 	base "github.com/Xiaomei-Zhang/goxdcr/base"
 	gen_server "github.com/Xiaomei-Zhang/goxdcr/gen_server"
+	"github.com/couchbase/gomemcached"
 	"github.com/Xiaomei-Zhang/goxdcr/utils"
 	"github.com/couchbaselabs/go-couchbase"
 	"reflect"
@@ -216,6 +217,12 @@ func (dcp *DcpNozzle) processData() (err error) {
 				if ok == false {
 					dcp.Stop()
 					goto done
+				}
+				if m.Status == gomemcached.NOT_MY_VBUCKET {
+					dcp.Logger().Errorf("Raise error condition %v\n", base.ErrorNotMyVbucket)
+					otherInfo := utils.WrapError(base.ErrorNotMyVbucket)
+					dcp.RaiseEvent(common.ErrorEncountered, nil, dcp, nil, otherInfo)
+					return base.ErrorNotMyVbucket
 				}
 				dcp.counter++
 				dcp.Logger().Tracef("%v, Mutation %v:%v:%v <%v>, counter=%v, ops_per_sec=%v\n",

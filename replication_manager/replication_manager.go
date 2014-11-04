@@ -243,12 +243,25 @@ func (rm *replicationManager) createAndPersistReplicationSpec(sourceClusterUUID,
 
 func (rm *replicationManager) OnError(pipeline common.Pipeline, partsError map[string]error) {
 	logger_rm.Infof("Pipeline %v reported failure. The following parts are broken: %v\n", pipeline.Topic(), partsError)
-
-	//fix the pipeline
+	
+	// if some part reported fetal errors such as NOT_MY_VBUCKET, reconstruct and restart the pipeline
+	if hasFetalError(partsError) {
+		err := reconstructAndRestartPipeline(pipeline)
+		if err != nil {
+			logger_rm.Infof("The effort of reconstructing pipeline %v has failed, err=%v; The retry will happen latter\n",
+				pipeline.Topic(), err)
+			panic("Failed to reconstruct the pipeline")
+			//TODO: propagate the error to ns_server
+	
+			//TODO: schedule the retry
+		}
+	}
+	
+	// otherwise, try to fix the existing pipeline
 	err := fixPipeline(pipeline)
 
 	if err != nil {
-		logger_rm.Infof("The effort of fixing pipeline %v is failed, err=%v; The retry will happen latter\n",
+		logger_rm.Infof("The effort of fixing pipeline %v has failed, err=%v; The retry will happen latter\n",
 			pipeline.Topic(), err)
 		panic("Failed to fix pipeline")
 		//TODO: propagate the error to ns_server
@@ -258,10 +271,47 @@ func (rm *replicationManager) OnError(pipeline common.Pipeline, partsError map[s
 
 }
 
-func fixPipeline(pipeline common.Pipeline) error {
-	pOnFile := pipeline_manager.Pipeline(pipeline.Topic())
+func hasFetalError(partsError map[string]error) bool {
+	var fetalErrorExists = false
+	for _, err := range partsError {
+		if err.Error() == base.ErrorNotMyVbucket.Error() {
+			fetalErrorExists = true
+			break
+		}
+	}
+	return fetalErrorExists
+}
 
-	if pOnFile == pipeline {
+func reconstructAndRestartPipeline(pipeline common.Pipeline) error {
+	if checkPipelineOnFile(pipeline) {
+		topic := pipeline.Topic()
+		spec, err := replication_mgr.metadata_svc.ReplicationSpec(topic)
+		if err != nil {
+			logger_rm.Errorf("%v\n", err)
+			return err
+		}
+		// stop the existing replication
+		err = pipeline_manager.StopPipeline(topic)
+		if err != nil {
+			logger_rm.Errorf("%v\n", err)
+			return err
+		}
+		logger_rm.Debugf("Pipeline %s is stopped", topic)
+		// reconstruct and restart pipeline
+		_, err = pipeline_manager.StartPipeline(topic, spec.Settings.ToMap())
+		if err == nil {
+			logger_rm.Debugf("Pipeline %s is reconstructed and restarted. Back to business\n", topic)
+			return nil
+		} else {
+			logger_rm.Infof("Failed to reconstruct and restart pipeline %v, err=%v\n", topic, err)
+			return err
+		}
+	} 
+	return nil
+}
+
+func fixPipeline(pipeline common.Pipeline) error {
+	if checkPipelineOnFile(pipeline) {
 		//pause the replication
 		err := PauseReplication(pipeline.Topic())
 		if err == nil {
@@ -273,10 +323,17 @@ func fixPipeline(pipeline common.Pipeline) error {
 			logger_rm.Infof("Failed to fix pipeline %v, err=%v\n", pipeline.Topic(), err)
 		}
 		return err
-	} else {
+	} 
+	return nil
+}
+
+// check if a specified pipeline is on file
+func checkPipelineOnFile(pipeline common.Pipeline) bool {
+	var isOnFile = (pipeline_manager.Pipeline(pipeline.Topic()) == pipeline)
+	if !isOnFile {
 		logger_rm.Debug("Ignore the error report, as the error is reported on a pipeline that is not on file")
-		return nil
 	}
+	return isOnFile
 }
 
 func SetPipelineLogLevel(topic string, levelStr string) error {
