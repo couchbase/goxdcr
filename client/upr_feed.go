@@ -456,6 +456,10 @@ loop:
 						VBucket: vb,
 						Error:   err,
 					}
+					// delete the stream
+					feed.mu.Lock()
+					delete(feed.vbstreams, vb)
+					feed.mu.Unlock()
 				}
 
 			case gomemcached.UPR_MUTATION,
@@ -549,7 +553,6 @@ loop:
 			if event.Opcode == gomemcached.UPR_CLOSESTREAM && l == 0 {
 				log.Printf("No more streams")
 			}
-
 		}
 
 		needToSend, sendSize := feed.SendBufferAck(sendAck, uint32(bytes))
