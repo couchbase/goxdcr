@@ -292,7 +292,7 @@ func (dcp *DcpNozzle) GetVBList() []uint16 {
 }
 
 // generate a new 16 bit opaque value set as MSB.
-func newOpaque() uint32 {
+func newOpaque() uint16 {
 	// bit 26 ... 42 from UnixNano().
-	return uint32((uint64(time.Now().UnixNano()) >> 26) & 0xFFFF)
+	return uint16((uint64(time.Now().UnixNano()) >> 26) & 0xFFFF)
 }
