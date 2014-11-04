@@ -18,7 +18,6 @@ import (
 	"strings"
 	"bytes"
 	"github.com/Xiaomei-Zhang/goxdcr/log"
-	"github.com/Xiaomei-Zhang/goxdcr/metadata"
 	rm "github.com/Xiaomei-Zhang/goxdcr/replication_manager"
 	utils "github.com/Xiaomei-Zhang/goxdcr/utils"
 )
@@ -109,6 +108,11 @@ func (h *xdcrRestHandler) doCreateReplicationRequest(request *http.Request) ([]b
 		return nil, err
 	}
 	
+	if forward {	
+		// forward replication request to other KV nodes involved if necessary
+		h.forwardReplicationRequest(request)	
+	}
+	
 	fromClusterUuid, err := rm.XDCRCompTopologyService().MyCluster()
 	if err != nil {
 		return nil, err
@@ -120,23 +124,13 @@ func (h *xdcrRestHandler) doCreateReplicationRequest(request *http.Request) ([]b
 	if err := ApplyDefaultSettings(&settings); err != nil {
 		return nil, err
 	}
-	
-	// if forward is true, current node is the first node that receives the createReplication request 
-	if forward {
-		// create replicaion spec
-		_, err := rm.CreateAndPersistReplicationSpec(fromClusterUuid, fromBucket, toClusterUuid, toBucket, filterName, settings)
-		if err != nil {
-			return nil, err
-		}
-	
-		// forward replication request to other KV nodes involved if necessary
-		h.forwardReplicationRequest(request)	
+
+	replicationId, err := rm.CreateReplication(fromClusterUuid, fromBucket, toClusterUuid, toBucket, filterName, settings, forward)
+	if err != nil {
+		return nil, err
+	} else {
+		return NewCreateReplicationResponse(replicationId), nil
 	}
-
-	replicationId := metadata.ReplicationId(fromClusterUuid, fromBucket, toClusterUuid, toBucket, filterName)
-	go rm.CreateReplication(replicationId, settings)
-
-	return NewCreateReplicationResponse(replicationId), nil
 }
 
 func (h *xdcrRestHandler) doDeleteReplicationRequest(request *http.Request) ([]byte, error) {
@@ -150,24 +144,15 @@ func (h *xdcrRestHandler) doDeleteReplicationRequest(request *http.Request) ([]b
 	logger_ap.Debugf("Request params: replicationId=%v\n", replicationId)
 	
 	// if forward is true, current node is the first node that receives the deleteReplication request 
-	if forward {
-		// delete replication spec
-		err := rm.MetadataService().DelReplicationSpec(replicationId)
-		if err == nil {
-			logger_ap.Debugf("Replication specification %s is deleted\n", replicationId)
-		} else {
-			logger_ap.Errorf("%v\n", err)
-			return nil, err
-		}
-		
+	if forward {		
 		// forward replication request to other KV nodes involved 
 		h.forwardReplicationRequest(request)
 	}
 	
-	go rm.DeleteReplication(replicationId)
-
+	err = rm.DeleteReplication(replicationId, forward)
+	
 	// no response body in success case
-	return nil, nil
+	return nil, err
 }
 
 func (h *xdcrRestHandler) doPauseReplicationRequest(request *http.Request) ([]byte, error) {
@@ -180,25 +165,15 @@ func (h *xdcrRestHandler) doPauseReplicationRequest(request *http.Request) ([]by
 	
 	logger_ap.Debugf("Request params: replicationId=%v\n", replicationId)
 	
-	// if forward is true, current node is the first node that receives the pauseReplication request 
 	if forward {
-		// update replication spec to inactive
-		err := rm.UpdateReplicationSpec(replicationId, false, "pause")
-		if err == nil {
-			logger_ap.Debugf("Replication specification %s is updated\n", replicationId)
-		} else {
-			logger_ap.Errorf("%v\n", err)
-			return nil, err
-		}
-		
 		// forward replication request to other KV nodes involved 
 		h.forwardReplicationRequest(request)
 	}
 	
-	go rm.PauseReplication(replicationId)
+	err = rm.PauseReplication(replicationId, forward, false/*sync*/)
 	
 	// no response body in success case
-	return nil, nil
+	return nil, err
 }
 
 func (h *xdcrRestHandler) doResumeReplicationRequest(request *http.Request) ([]byte, error) {
@@ -211,25 +186,15 @@ func (h *xdcrRestHandler) doResumeReplicationRequest(request *http.Request) ([]b
 	
 	logger_ap.Debugf("Request params: replicationId=%v\n", replicationId)
 	
-	// if forward is true, current node is the first node that receives the resumeReplication request 
 	if forward {
-		// update replication spec to active
-		err := rm.UpdateReplicationSpec(replicationId, true, "resume")
-		if err == nil {
-			logger_ap.Debugf("Replication specification %s is updated\n", replicationId)
-		} else {
-			logger_ap.Errorf("%v\n", err)
-			return nil, err
-		}
-		
 		// forward replication request to other KV nodes involved 
 		h.forwardReplicationRequest(request)
 	}
 	
-	go rm.ResumeReplication(replicationId)
+	err = rm.ResumeReplication(replicationId, forward, false/*sync*/)
 
 	// no response body in success case
-	return nil, nil
+	return nil, err
 }
 
 func (h *xdcrRestHandler) doViewReplicationSettingsRequest(request *http.Request) ([]byte, error) {

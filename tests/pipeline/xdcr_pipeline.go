@@ -131,13 +131,7 @@ func test() {
 	settings[metadata.TargetNozzlePerNode] = NUM_TARGET_CONN
 	settings[metadata.BatchCount] = 500
 
-	spec, err := replication_manager.CreateAndPersistReplicationSpec(options.source_cluster_addr, options.source_bucket, options.target_cluster_addr, options.target_bucket, options.target_bucket_password, settings)
-	if err != nil {
-		fail(fmt.Sprintf("%v", err))		
-	}
-	
-	topic := spec.Id
-	err = replication_manager.CreateReplication(topic, settings)
+	topic, err := replication_manager.CreateReplication(options.source_cluster_addr, options.source_bucket, options.target_cluster_addr, options.target_bucket, "", settings, true)
 	if err != nil {
 		fail(fmt.Sprintf("%v", err))
 	}
@@ -160,12 +154,9 @@ func test() {
 	//	summary(topic)
 	//
 	time.Sleep(1 * time.Minute)
-	
-	// delete replication spec
-	err = replication_manager.MetadataService().DelReplicationSpec(topic)
 
 	//delete the replication before we go
-	err = replication_manager.DeleteReplication(topic)
+	err = replication_manager.DeleteReplication(topic, true)
 	if err != nil {
 		fail(fmt.Sprintf("%v", err))
 	}

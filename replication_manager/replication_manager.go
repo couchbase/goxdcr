@@ -80,19 +80,29 @@ func ReplicationSettingsService() metadata_svc.ReplicationSettingsSvc {
 	return replication_mgr.replication_settings_svc
 }
 
-func CreateReplication(topic string, settings map[string]interface{}) error {
-	logger_rm.Infof("Creating replication -topic=%s, settings=%v\n", topic, settings)
+func CreateReplication(sourceClusterUUID, sourceBucket, targetClusterUUID, targetBucket, filterName string, settings map[string]interface{}, createReplSpec bool) (string, error) {
+	logger_rm.Infof("Creating replication - sourceCluterUUID=%s, sourceBucket=%s, targetClusterUUID=%s, targetBucket=%s, filterName=%s, settings=%v, createReplSpec=%v\n", sourceClusterUUID,
+	                sourceBucket, targetClusterUUID, targetBucket, filterName, settings, createReplSpec)
 
-	_, err := pipeline_manager.StartPipeline(topic, settings)
-	if err == nil {
-		logger_rm.Infof("Pipeline %s is started\n", topic)
+	var topic string
+	if createReplSpec {
+		spec, err := replication_mgr.createAndPersistReplicationSpec(sourceClusterUUID, sourceBucket, targetClusterUUID, targetBucket, filterName, settings)
+		if err != nil {
+			logger_rm.Errorf("%v\n", err)
+			return "", err
+		}
+		topic = spec.Id
 	} else {
-		logger_rm.Errorf("%v\n", err)
+		topic = metadata.ReplicationId(sourceClusterUUID, sourceBucket, targetClusterUUID, targetBucket, filterName)
 	}
-	return err
+	
+	go pipeline_manager.StartPipeline(topic, settings)
+	logger_rm.Infof("Pipeline %s is created and started\n", topic)
+
+	return topic, nil
 }
 
-func PauseReplication(topic string) error {
+func PauseReplication(topic string, updateReplSpec bool, sync bool) error {
 	defer func () {
 		if r := recover(); r != nil {
 			logger_rm.Errorf("PauseReplication on pipeline %v panic: %v\n", topic, r)
@@ -101,68 +111,91 @@ func PauseReplication(topic string) error {
 	
 	logger_rm.Infof("Pausing replication %s\n", topic)
 	
-	if err := validatePipelineExists(topic, "pausing", true); err != nil {
-		return err
+	if updateReplSpec {
+		// update replication spec
+		if err := validatePipelineExists(topic, "pausing", true); err != nil {
+			return err
+		}
+		
+		err := UpdateReplicationSpec(topic, false, "pause")
+		if err == nil {
+			logger_rm.Debugf("Replication specification %s is updated\n", topic)
+		} else {
+			logger_rm.Errorf("%v\n", err)
+			return err
+		}
 	}
-	
-	if err := validatePipelineState(topic, "pause", true); err != nil {
+
+	if sync {
+		err := pipeline_manager.StopPipeline(topic)
+		logger_rm.Infof("Pipeline %s has been paused\n", topic)
 		return err
+	} else {
+		go pipeline_manager.StopPipeline(topic)
+		logger_rm.Infof("Pipeline %s is being paused\n", topic)
+		return nil
 	}
-	
-	err := pipeline_manager.StopPipeline(topic)
-	if err != nil {
-		logger_rm.Errorf("%v\n", err)
-		return err
-	}
-	logger_rm.Debugf("Pipeline %s is stopped", topic)
-	
-	return err
 }
 
-func ResumeReplication(topic string) error {
+func ResumeReplication(topic string, updateReplSpec bool, sync bool) error {
 	logger_rm.Infof("Resuming replication %s\n", topic)
 	
-	if err := validatePipelineExists(topic, "resuming", true); err != nil {
-		return err
-	}
-	
-	if err := validatePipelineState(topic, "resume", false); err != nil {
-		return err
-	}
-	
-	spec, err := replication_mgr.metadata_svc.ReplicationSpec(topic)
-	if err != nil {
-		logger_rm.Errorf("%v\n", err)
-		return err
+	if updateReplSpec {
+		// update replication spec
+		if err := validatePipelineExists(topic, "resuming", true); err != nil {
+			return err
+		}
+		
+		err := UpdateReplicationSpec(topic, true, "resume")
+		if err == nil {
+			logger_rm.Debugf("Replication specification %s is updated\n", topic)
+		} else {
+			logger_rm.Errorf("%v\n", err)
+			return err
+		}
 	}
 
+	spec, err := MetadataService().ReplicationSpec(topic)
+	if err != nil {
+		return err
+	}
+	
 	settings := spec.Settings
 	settingsMap := settings.ToMap()
-	_, err = pipeline_manager.StartPipeline(topic, settingsMap)
-	if err != nil {
-		logger_rm.Errorf("%v\n", err)
+	if sync {
+		_, err := pipeline_manager.StartPipeline(topic, settingsMap)
+		logger_rm.Infof("Pipeline %s has been resumed\n", topic)
 		return err
+	} else {
+		go pipeline_manager.StartPipeline(topic, settingsMap)
+		logger_rm.Infof("Pipeline %s is being resumed\n", topic)
+		return nil
 	}
-	logger_rm.Debugf("Pipeline %s is started", topic)
-
-	return err
 }
 
-func DeleteReplication(topic string) error {
+func DeleteReplication(topic string, deleteReplSpec bool) error {
 	logger_rm.Infof("Deleting replication %s\n", topic)
 	
-	if err := validatePipelineExists(topic, "deleting", false); err != nil {
-		return err
+	if deleteReplSpec {
+		// delete replication spec
+		if err := validatePipelineExists(topic, "deleting", true); err != nil {
+			return err
+		}
+
+		err := MetadataService().DelReplicationSpec(topic)
+		if err == nil {
+			logger_rm.Debugf("Replication specification %s is deleted\n", topic)
+		} else {
+			logger_rm.Errorf("%v\n", err)
+			return err
+		}
 	}
 	
-	err := pipeline_manager.StopPipeline(topic)
-	if err != nil {
-		logger_rm.Errorf("%v\n", err)
-		return err
-	}
-	logger_rm.Debugf("Pipeline %s is stopped", topic)
+	go pipeline_manager.StopPipeline(topic)
 
-	return err
+	logger_rm.Infof("Pipeline %s is deleted\n", topic)
+
+	return nil
 }
 
 func HandleChangesToReplicationSettings(topic string, settings map[string]interface{}) error {
@@ -189,7 +222,7 @@ func GetStatistics() (map[string]interface{}, error) {
 	return nil, nil
 }
 
-func CreateAndPersistReplicationSpec(sourceClusterUUID, sourceBucket, targetClusterUUID, targetBucket, filterName string, settings map[string]interface{}) (*metadata.ReplicationSpecification, error) {
+func (rm *replicationManager) createAndPersistReplicationSpec(sourceClusterUUID, sourceBucket, targetClusterUUID, targetBucket, filterName string, settings map[string]interface{}) (*metadata.ReplicationSpecification, error) {
 	logger_rm.Infof("Creating replication spec - sourceCluterUUID=%s, sourceBucket=%s, targetClusterUUID=%s, targetBucket=%s, filterName=%s, settings=%v\n", sourceClusterUUID,
 		sourceBucket, targetClusterUUID, targetBucket, filterName, settings)
 		
@@ -254,10 +287,10 @@ func (rm *replicationManager) OnError(pipeline common.Pipeline, partsError map[s
 
 func fixPipeline(pipeline common.Pipeline) error {
 	if checkPipelineOnFile(pipeline) {
-		//pause the replication
-		err := PauseReplication(pipeline.Topic())
+		//pause and then resume the replication without updating the replication spec
+		err := PauseReplication(pipeline.Topic(), false/*updateReplSpec*/, true/*sync*/)
 		if err == nil {
-			err = ResumeReplication(pipeline.Topic())
+			err = ResumeReplication(pipeline.Topic(), false/*updateReplSpec*/, true/*sync*/)
 		}
 		if err == nil {
 			logger_rm.Infof("Pipeline %v is fixed, back to business\n", pipeline.Topic())
