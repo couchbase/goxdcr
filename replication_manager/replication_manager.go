@@ -80,31 +80,16 @@ func ReplicationSettingsService() metadata_svc.ReplicationSettingsSvc {
 	return replication_mgr.replication_settings_svc
 }
 
-func CreateReplication(sourceClusterUUID string, sourceBucket string, targetClusterUUID, targetBucket string, filterName string, settings map[string]interface{}) (string, error) {
-	logger_rm.Infof("Creating replication - sourceCluterUUID=%s, sourceBucket=%s, targetClusterUUID=%s, targetBucket=%s, filterName=%s, settings=%v\n", sourceClusterUUID,
-		sourceBucket, targetClusterUUID, targetBucket, filterName, settings)
-	
-	// check if the same replication already exists
-	replicationId := metadata.ReplicationId(sourceClusterUUID, sourceBucket, targetClusterUUID, targetBucket, filterName)
-	if err := validatePipelineExists(replicationId, "starting", false); err != nil {
-		return "", err
-	}
-	
-	spec, err := replication_mgr.createAndPersistReplicationSpec(sourceClusterUUID, sourceBucket, targetClusterUUID, targetBucket, filterName, settings)
-	if err != nil {
-		logger_rm.Errorf("%v\n", err)
-		return "", err
-	}
-	logger_rm.Debugf("replication specification %s is created and persisted\n", spec.Id)
+func CreateReplication(topic string, settings map[string]interface{}) error {
+	logger_rm.Infof("Creating replication -topic=%s, settings=%v\n", topic, settings)
 
-	_, err = pipeline_manager.StartPipeline(spec.Id, settings)
+	_, err := pipeline_manager.StartPipeline(topic, settings)
 	if err == nil {
-		logger_rm.Debugf("Pipeline %s is started\n", spec.Id)
-		return spec.Id, err
+		logger_rm.Infof("Pipeline %s is started\n", topic)
 	} else {
 		logger_rm.Errorf("%v\n", err)
-		return "", err
 	}
+	return err
 }
 
 func PauseReplication(topic string) error {
@@ -130,17 +115,7 @@ func PauseReplication(topic string) error {
 		return err
 	}
 	logger_rm.Debugf("Pipeline %s is stopped", topic)
-	//update the replication specification's "active" setting to be false
-	spec, err := replication_mgr.metadata_svc.ReplicationSpec(topic)
-	if err != nil {
-		logger_rm.Errorf("%v\n", err)
-		return err
-	}
-
-	settings := spec.Settings
-	settings.Active = false
-	err = replication_mgr.metadata_svc.SetReplicationSpec(*spec)
-	logger_rm.Debugf("Replication specification %s is set to active=false\n", topic)
+	
 	return err
 }
 
@@ -170,20 +145,13 @@ func ResumeReplication(topic string) error {
 	}
 	logger_rm.Debugf("Pipeline %s is started", topic)
 
-	settings.Active = true
-	err = replication_mgr.metadata_svc.SetReplicationSpec(*spec)
-	if err == nil {
-		logger_rm.Debugf("Replication specification %s is updated with active=true\n", topic)
-	} else {
-		logger_rm.Errorf("%v\n", err)
-	}
 	return err
 }
 
 func DeleteReplication(topic string) error {
 	logger_rm.Infof("Deleting replication %s\n", topic)
 	
-	if err := validatePipelineExists(topic, "deleting", true); err != nil {
+	if err := validatePipelineExists(topic, "deleting", false); err != nil {
 		return err
 	}
 	
@@ -194,12 +162,6 @@ func DeleteReplication(topic string) error {
 	}
 	logger_rm.Debugf("Pipeline %s is stopped", topic)
 
-	err = replication_mgr.metadata_svc.DelReplicationSpec(topic)
-	if err == nil {
-		logger_rm.Debugf("Replication specification %s is deleted\n", topic)
-	} else {
-		logger_rm.Errorf("%v\n", err)
-	}
 	return err
 }
 
@@ -213,7 +175,7 @@ func HandleChangesToReplicationSettings(topic string, settings map[string]interf
 	// update replication spec with input settings
 	replSpec.Settings.UpdateSettingsFromMap(settings)
 	err = MetadataService().SetReplicationSpec(*replSpec)
-
+	
 	// TODO implement additional logic, e.g.,
 	// 1. reconstruct pipeline when source/targetNozzlePerNode is changed
 	// 2. pause pipeline when active is changed from true to false
@@ -227,18 +189,50 @@ func GetStatistics() (map[string]interface{}, error) {
 	return nil, nil
 }
 
-func (rm *replicationManager) createAndPersistReplicationSpec(sourceClusterUUID, sourceBucket, targetClusterUUID, targetBucket, filterName string, settings map[string]interface{}) (*metadata.ReplicationSpecification, error) {
+func CreateAndPersistReplicationSpec(sourceClusterUUID, sourceBucket, targetClusterUUID, targetBucket, filterName string, settings map[string]interface{}) (*metadata.ReplicationSpecification, error) {
+	logger_rm.Infof("Creating replication spec - sourceCluterUUID=%s, sourceBucket=%s, targetClusterUUID=%s, targetBucket=%s, filterName=%s, settings=%v\n", sourceClusterUUID,
+		sourceBucket, targetClusterUUID, targetBucket, filterName, settings)
+		
+	// check if the same replication already exists
+	replicationId := metadata.ReplicationId(sourceClusterUUID, sourceBucket, targetClusterUUID, targetBucket, filterName)
+	if err := validatePipelineExists(replicationId, "starting", false); err != nil {
+		return nil, err
+	}
+	
 	spec := metadata.NewReplicationSpecification(sourceClusterUUID, sourceBucket, targetClusterUUID, targetBucket, filterName)
 	s, err := metadata.SettingsFromMap(settings)
 	if err == nil {
 		spec.Settings = s
 
 		//persist it
-		rm.metadata_svc.AddReplicationSpec(*spec)
+		replication_mgr.metadata_svc.AddReplicationSpec(*spec)
+		logger_rm.Debugf("replication specification %s is created and persisted\n", spec.Id)
 		return spec, nil
 	} else {
 		return nil, err
 	}
+}
+
+//update the replication specification's "active" setting
+func UpdateReplicationSpec(topic string, active bool, action string) error {	
+	spec, err := replication_mgr.metadata_svc.ReplicationSpec(topic)
+	if err != nil {
+		logger_rm.Errorf("%v\n", err)
+		return err
+	}
+
+	settings := spec.Settings
+	if settings.Active == active {
+		state := "not"
+		if active {
+			state = "already"
+		}
+		return errors.New(fmt.Sprintf("Invalid operation. Cannot %v replication with id, %v, since it is %v actively running.\n", action, topic, state))
+	}
+	settings.Active = active
+	err = replication_mgr.metadata_svc.SetReplicationSpec(*spec)
+	logger_rm.Debugf("Replication specification %s is set to active=%v\n", topic, active)
+	return err
 }
 
 func (rm *replicationManager) OnError(pipeline common.Pipeline, partsError map[string]error) {

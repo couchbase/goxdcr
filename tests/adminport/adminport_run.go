@@ -35,7 +35,6 @@ const (
 	FilterExpression = "testExpr"
 	BatchCount       = 20
 	BatchSize        = 30
-	Active           = false
 )
 
 var options struct {
@@ -115,7 +114,7 @@ func startAdminport() {
 		return
 	}
 
-	if err := testChangeReplicationSettings(escapedReplId); err != nil {
+	if err := testChangeReplicationSettings(replicationId, escapedReplId); err != nil {
 		fmt.Println(err.Error())
 		return
 	}
@@ -178,6 +177,8 @@ func testCreateReplication() (string, error) {
 	}
 
 	replicationId, err := ap.DecodeCreateReplicationResponse(response)
+	
+	time.Sleep(10 * time.Second)
 
 	// verify that the replication is created and started and is being
 	// managed by pipeline manager
@@ -201,6 +202,8 @@ func testPauseReplication(replicationId, escapedReplId string) error {
 	if err != nil {
 		return err
 	}
+	
+	time.Sleep(10 * time.Second)
 
 	return validatePipeline("PauseReplication", replicationId, false)
 }
@@ -222,6 +225,8 @@ func testResumeReplication(replicationId, escapedReplId string) error {
 	if err != nil {
 		return err
 	}
+	
+	time.Sleep(10 * time.Second)
 
 	return validatePipeline("ResumeReplication", replicationId, true)
 }
@@ -243,6 +248,8 @@ func testDeleteReplication(replicationId, escapedReplId string) error {
 	if err != nil {
 		return err
 	}
+	
+	time.Sleep(10 * time.Second)
 
 	return validatePipeline("DeleteReplication", replicationId, false)
 }
@@ -263,11 +270,10 @@ func testViewReplicationSettings(replicationId string) error {
 	return validateResponse("ViewReplicationSettings", response, err)
 }
 
-func testChangeReplicationSettings(replicationId string) error {
-	url := getUrlPrefix() + ap.SettingsReplicationsPath + base.UrlDelimiter + replicationId
+func testChangeReplicationSettings(replicationId, escapedReplicationId string) error {
+	url := getUrlPrefix() + ap.SettingsReplicationsPath + base.UrlDelimiter + escapedReplicationId
 
 	params := make(map[string]interface{})
-	params[ap.Active] = Active
 	params[ap.BatchSize] = BatchSize
 
 	paramsBytes, _ := ap.EncodeMapIntoByteArray(params)
@@ -282,7 +288,21 @@ func testChangeReplicationSettings(replicationId string) error {
 	fmt.Println("request", request)
 
 	response, err := http.DefaultClient.Do(request)
-	return validateResponse("ChangeReplicationSettings", response, err)
+	err = validateResponse("ChangeReplicationSettings", response, err)
+	if err != nil {
+		return err
+	}
+	
+	spec, err := rm.MetadataService().ReplicationSpec(replicationId)
+	if err != nil {
+		return err
+	}
+	resultingBatchSize := spec.Settings.BatchSize
+	if resultingBatchSize != BatchSize {
+		return errors.New(fmt.Sprintf("TestChangeReplicationSettings failed. Resulting batch size, %v, does not match the specified value, %v\n", resultingBatchSize, BatchSize))
+	}
+	
+	return nil
 }
 
 func testGetStatistics() error {

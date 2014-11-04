@@ -18,6 +18,7 @@ import (
 	"strings"
 	"bytes"
 	"github.com/Xiaomei-Zhang/goxdcr/log"
+	"github.com/Xiaomei-Zhang/goxdcr/metadata"
 	rm "github.com/Xiaomei-Zhang/goxdcr/replication_manager"
 	utils "github.com/Xiaomei-Zhang/goxdcr/utils"
 )
@@ -102,14 +103,11 @@ func (h *xdcrRestHandler) handleRequest(
 
 func (h *xdcrRestHandler) doCreateReplicationRequest(request *http.Request) ([]byte, error) {
 	logger_ap.Infof("doCreateReplicationRequest called\n")
-
+	
 	fromBucket, toClusterUuid, toBucket, filterName, forward, settings, err := DecodeCreateReplicationRequest(request)
 	if err != nil {
 		return nil, err
 	}
-	
-	logger_ap.Debugf("Request params decoded: fromBucket=%v; toClusterUuid=%v; toBucket=%v; filterName=%v; forward=%v; settings=%v \n", 
-					fromBucket, toClusterUuid, toBucket, filterName, forward, settings)
 	
 	fromClusterUuid, err := rm.XDCRCompTopologyService().MyCluster()
 	if err != nil {
@@ -123,41 +121,20 @@ func (h *xdcrRestHandler) doCreateReplicationRequest(request *http.Request) ([]b
 		return nil, err
 	}
 	
-	replicationId, err := rm.CreateReplication(fromClusterUuid, fromBucket, toClusterUuid, toBucket, filterName, settings)
-	if err != nil {
-		return nil, err
-	}
-
-	// forward replication request to other KV nodes involved if necessary
+	// if forward is true, current node is the first node that receives the createReplication request 
 	if forward {
-		forwardedNodesMap, err := h.forwardReplicationRequest(request)
+		// create replicaion spec
+		_, err := rm.CreateAndPersistReplicationSpec(fromClusterUuid, fromBucket, toClusterUuid, toBucket, filterName, settings)
 		if err != nil {
-			// if some forward request failed, call deleteRelication on all 
-			// nodes where the replication has been started
-			for nodeAddr, infoArr := range forwardedNodesMap {
-				// first element in infoArr is port number
-				port := infoArr[1].(uint16)
-				// second element in infoArr is a http response
-				createReplResponse := infoArr[0].(*http.Response)
-				// decode replication id from http response
-				replId, err := DecodeCreateReplicationResponse(createReplResponse)
-				if err == nil {
-					// create a deleteReplication request for each node involved
-					deleteRequest, err := NewDeleteReplicationRequest(replId, nodeAddr, int(port))
-					if err == nil {
-						http.DefaultClient.Do(deleteRequest)
-					}
-				} else {
-					// not much we can do when we cannot get replId. 
-					logger_ap.Errorf("Error decoding CreateReplicationResponse from node %v\n", nodeAddr)
-				}
-			}
-			// call deleteReplication on current node
-			rm.DeleteReplication(replicationId)
-
 			return nil, err
 		}
+	
+		// forward replication request to other KV nodes involved if necessary
+		h.forwardReplicationRequest(request)	
 	}
+
+	replicationId := metadata.ReplicationId(fromClusterUuid, fromBucket, toClusterUuid, toBucket, filterName)
+	go rm.CreateReplication(replicationId, settings)
 
 	return NewCreateReplicationResponse(replicationId), nil
 }
@@ -172,20 +149,22 @@ func (h *xdcrRestHandler) doDeleteReplicationRequest(request *http.Request) ([]b
 	
 	logger_ap.Debugf("Request params: replicationId=%v\n", replicationId)
 	
-	if err = rm.DeleteReplication(replicationId); err != nil {
-		return nil, err
-	}
-
-	// forward replication request to other KV nodes involved 
+	// if forward is true, current node is the first node that receives the deleteReplication request 
 	if forward {
-		_, err = h.forwardReplicationRequest(request)
-		if err != nil {
-			// not much we can do when forwarding fails. it is not like we can 
-			// resurract deleted replications 
-			logger_ap.Errorf("Error forwarding DeleteReplicationRequest\n")
+		// delete replication spec
+		err := rm.MetadataService().DelReplicationSpec(replicationId)
+		if err == nil {
+			logger_ap.Debugf("Replication specification %s is deleted\n", replicationId)
+		} else {
+			logger_ap.Errorf("%v\n", err)
 			return nil, err
 		}
+		
+		// forward replication request to other KV nodes involved 
+		h.forwardReplicationRequest(request)
 	}
+	
+	go rm.DeleteReplication(replicationId)
 
 	// no response body in success case
 	return nil, nil
@@ -201,26 +180,23 @@ func (h *xdcrRestHandler) doPauseReplicationRequest(request *http.Request) ([]by
 	
 	logger_ap.Debugf("Request params: replicationId=%v\n", replicationId)
 	
-	if err = rm.PauseReplication(replicationId); err != nil {
-		if strings.HasPrefix(err.Error(), "Warning") {
-			// return warning messages in response body
-			return []byte(err.Error()), nil
-		} else {
-			// return error
-			return nil, err
-		}
-	}
-
-	// forward replication request to other KV nodes involved 
+	// if forward is true, current node is the first node that receives the pauseReplication request 
 	if forward {
-		_, err = h.forwardReplicationRequest(request)
-		if err != nil {
-			// TODO
-			logger_ap.Errorf("Error forwarding PauseReplicationRequest\n")
+		// update replication spec to inactive
+		err := rm.UpdateReplicationSpec(replicationId, false, "pause")
+		if err == nil {
+			logger_ap.Debugf("Replication specification %s is updated\n", replicationId)
+		} else {
+			logger_ap.Errorf("%v\n", err)
 			return nil, err
 		}
+		
+		// forward replication request to other KV nodes involved 
+		h.forwardReplicationRequest(request)
 	}
-
+	
+	go rm.PauseReplication(replicationId)
+	
 	// no response body in success case
 	return nil, nil
 }
@@ -235,25 +211,22 @@ func (h *xdcrRestHandler) doResumeReplicationRequest(request *http.Request) ([]b
 	
 	logger_ap.Debugf("Request params: replicationId=%v\n", replicationId)
 	
-	if err = rm.ResumeReplication(replicationId); err != nil {
-		if strings.HasPrefix(err.Error(), "Warning") {
-			// return warning messages in response body
-			return []byte(err.Error()), nil
-		} else {
-			// return error
-			return nil, err
-		}
-	}
-
-	// forward replication request to other KV nodes involved 
+	// if forward is true, current node is the first node that receives the resumeReplication request 
 	if forward {
-		_, err = h.forwardReplicationRequest(request)
-		if err != nil {
-			// TODO
-			logger_ap.Errorf("Error forwarding ResumeReplicationRequest\n")
+		// update replication spec to active
+		err := rm.UpdateReplicationSpec(replicationId, true, "resume")
+		if err == nil {
+			logger_ap.Debugf("Replication specification %s is updated\n", replicationId)
+		} else {
+			logger_ap.Errorf("%v\n", err)
 			return nil, err
 		}
+		
+		// forward replication request to other KV nodes involved 
+		h.forwardReplicationRequest(request)
 	}
+	
+	go rm.ResumeReplication(replicationId)
 
 	// no response body in success case
 	return nil, nil
@@ -313,21 +286,22 @@ func (h *xdcrRestHandler) doGetStatisticsRequest(request *http.Request) ([]byte,
 }
 
 // forward requests to other nodes.
-// in case of error, return a list of nodes that the request has been forwarded to, so that caller can take undo action on these nodes
-func (h *xdcrRestHandler) forwardReplicationRequest(request *http.Request) (map[string][]interface{}, error) {
+func (h *xdcrRestHandler) forwardReplicationRequest(request *http.Request) error {
 	logger_ap.Infof("forwardReplicationRequest\n")
 	
 	myAddr, err := rm.XDCRCompTopologyService().MyHost()
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	xdcrNodesMap, err := rm.XDCRCompTopologyService().XDCRTopology()
+	if err != nil {
+		return err
+	}
 	
-	forwardedNodesMap := make(map[string][]interface{})
 	if len(xdcrNodesMap) > 1 {
 		if err = request.ParseForm(); err != nil {
-			return nil, err
+			return err
 		}
 		
 		// set "Forward" flag to false in the forwarded request
@@ -344,17 +318,11 @@ func (h *xdcrRestHandler) forwardReplicationRequest(request *http.Request) (map[
 		for xdcrNode, port := range xdcrNodesMap {
 			// do not forward to current node 
 			if xdcrNode != myAddr {
-				response, err := forwardReplicationRequestToXDCRNode(request.URL.String(), newBody, xdcrNode, int(port))
-				if err != nil {
-					return forwardedNodesMap, err
-				} else {
-					array := []interface{}{port, response}
-					forwardedNodesMap[xdcrNode] = array
-				}
+				forwardReplicationRequestToXDCRNode(request.URL.String(), newBody, xdcrNode, int(port))
 			}
 		}
 	}
-	return forwardedNodesMap, nil
+	return nil
 }
 
 func forwardReplicationRequestToXDCRNode(oldRequestUrl string, newRequestBody []byte, xdcrAddr string, port int) (*http.Response, error) {
