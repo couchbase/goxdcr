@@ -108,11 +108,6 @@ func (h *xdcrRestHandler) doCreateReplicationRequest(request *http.Request) ([]b
 		return nil, err
 	}
 	
-	if forward {	
-		// forward replication request to other KV nodes involved if necessary
-		h.forwardReplicationRequest(request)	
-	}
-	
 	fromClusterUuid, err := rm.XDCRCompTopologyService().MyCluster()
 	if err != nil {
 		return nil, err
@@ -126,9 +121,15 @@ func (h *xdcrRestHandler) doCreateReplicationRequest(request *http.Request) ([]b
 	}
 
 	replicationId, err := rm.CreateReplication(fromClusterUuid, fromBucket, toClusterUuid, toBucket, filterName, settings, forward)
+	
 	if err != nil {
 		return nil, err
 	} else {
+		if forward {	
+		// forward replication request to other KV nodes involved if necessary
+		h.forwardReplicationRequest(request)	
+		}
+		
 		return NewCreateReplicationResponse(replicationId), nil
 	}
 }
@@ -143,16 +144,18 @@ func (h *xdcrRestHandler) doDeleteReplicationRequest(request *http.Request) ([]b
 	
 	logger_ap.Debugf("Request params: replicationId=%v\n", replicationId)
 	
-	// if forward is true, current node is the first node that receives the deleteReplication request 
-	if forward {		
-		// forward replication request to other KV nodes involved 
-		h.forwardReplicationRequest(request)
-	}
-	
 	err = rm.DeleteReplication(replicationId, forward)
 	
-	// no response body in success case
-	return nil, err
+	if err != nil {
+		return nil, err
+	} else {
+		if forward {		
+			// forward replication request to other KV nodes involved 
+			h.forwardReplicationRequest(request)
+		}
+		// no response body in success case
+		return nil, nil
+	}
 }
 
 func (h *xdcrRestHandler) doPauseReplicationRequest(request *http.Request) ([]byte, error) {
@@ -165,15 +168,18 @@ func (h *xdcrRestHandler) doPauseReplicationRequest(request *http.Request) ([]by
 	
 	logger_ap.Debugf("Request params: replicationId=%v\n", replicationId)
 	
-	if forward {
-		// forward replication request to other KV nodes involved 
-		h.forwardReplicationRequest(request)
-	}
-	
 	err = rm.PauseReplication(replicationId, forward, false/*sync*/)
 	
-	// no response body in success case
-	return nil, err
+	if err != nil {
+		return nil, err
+	} else {
+		if forward {		
+			// forward replication request to other KV nodes involved 
+			h.forwardReplicationRequest(request)
+		}
+		// no response body in success case
+		return nil, nil
+	}
 }
 
 func (h *xdcrRestHandler) doResumeReplicationRequest(request *http.Request) ([]byte, error) {
@@ -186,15 +192,18 @@ func (h *xdcrRestHandler) doResumeReplicationRequest(request *http.Request) ([]b
 	
 	logger_ap.Debugf("Request params: replicationId=%v\n", replicationId)
 	
-	if forward {
-		// forward replication request to other KV nodes involved 
-		h.forwardReplicationRequest(request)
-	}
-	
 	err = rm.ResumeReplication(replicationId, forward, false/*sync*/)
-
-	// no response body in success case
-	return nil, err
+	
+	if err != nil {
+		return nil, err
+	} else {
+		if forward {		
+			// forward replication request to other KV nodes involved 
+			h.forwardReplicationRequest(request)
+		}
+		// no response body in success case
+		return nil, nil
+	}
 }
 
 func (h *xdcrRestHandler) doViewReplicationSettingsRequest(request *http.Request) ([]byte, error) {
