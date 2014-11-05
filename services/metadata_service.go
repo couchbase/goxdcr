@@ -31,21 +31,9 @@ type MetadataSvc struct {
 	logger      *log.CommonLogger
 }
 
+// for testing only
 func DefaultMetadataSvc() (*MetadataSvc, error) {
-	meta_svc := &MetadataSvc{
-					hostAddr:  "localhost:5003",  
-					logger:    log.NewLogger("MetadataService", nil),
-					}
-		
-	client, err := rpc.DialHTTP("tcp", meta_svc.hostAddr)
-	if err == nil {
-		meta_svc.client = client
-		meta_svc.logger.Infof("Metdata service started with host=%v\n", meta_svc.hostAddr)
-		return meta_svc, nil
-	} else {
-		meta_svc.logger.Errorf("Failed to connect to go metadat at %v, err=%v\n", meta_svc.hostAddr, err)
-		return nil, err
-	}
+	return NewMetadataSvc("127.0.0.1:5003", nil)
 }
 
 func NewMetadataSvc(hostAddr string, logger_ctx *log.LoggerContext) (*MetadataSvc, error) {

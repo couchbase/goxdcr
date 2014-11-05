@@ -18,6 +18,7 @@ import (
 	rm "github.com/Xiaomei-Zhang/goxdcr/replication_manager"
 	c "github.com/Xiaomei-Zhang/goxdcr/mock_services"
 	s "github.com/Xiaomei-Zhang/goxdcr/services"
+	"github.com/Xiaomei-Zhang/goxdcr/utils"
 )
 
 var done = make(chan bool)
@@ -25,6 +26,7 @@ var done = make(chan bool)
 var options struct {
 	sourceClusterAddr      string //source cluster addr
 	sourceKVHost      string //source kv host name
+	gometaPortNumber  int
 	username        string //username on source cluster
 	password        string //password on source cluster	
 }
@@ -34,6 +36,8 @@ func argParse() {
 		"connection string to source cluster")
 	flag.StringVar(&options.sourceKVHost, "sourceKVHost", "127.0.0.1",
 		"source KV host name")
+	flag.IntVar(&options.gometaPortNumber, "gometaPortNumber", 5003,
+		"port number for gometa requests")
 	flag.StringVar(&options.username, "username", "Administrator", "username to cluster admin console")
 	flag.StringVar(&options.password, "password", "welcome", "password to Cluster admin console")
 	flag.Parse()
@@ -63,7 +67,7 @@ func main() {
 		os.Exit(1)
 	}
 	
-	metadata_svc, err := s.DefaultMetadataSvc()
+	metadata_svc, err := s.NewMetadataSvc(utils.GetHostAddr(options.sourceKVHost, options.gometaPortNumber), nil)
 	if err != nil {
 		fmt.Println("Error starting metadata service. ", err.Error())
 		os.Exit(1)
