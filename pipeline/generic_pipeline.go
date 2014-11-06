@@ -49,9 +49,13 @@ type GenericPipeline struct {
 
 	partSetting_constructor PartsSettingsConstructor
 
-	//the map that contains the reference of all parts used in the pipeline
+	//the map that contains the references to all parts used in the pipeline
 	//it only populated when GetAllParts called the first time
 	partsMap map[string]common.Part
+	
+	//the map that contains the references to all connectors used in the pipeline
+	//it only populated when GetAllConnectors called the first time
+	connectorsMap map[string]common.Connector
 
 	logger *log.CommonLogger
 }
@@ -343,23 +347,51 @@ func GetAllParts(p common.Pipeline) map[string]common.Part {
 	if p.(*GenericPipeline).partsMap == nil {
 		p.(*GenericPipeline).partsMap = make(map[string]common.Part)
 		sources := p.Sources()
-		for key, source := range sources {
-			p.(*GenericPipeline).partsMap[key] = source
-
-			addDownStreams(source, p.(*GenericPipeline).partsMap)
+		for _, source := range sources {
+			addPartToMap(source, p.(*GenericPipeline).partsMap)
 		}
 	}
 	return p.(*GenericPipeline).partsMap
 }
 
-func addDownStreams(p common.Part, partsMap map[string]common.Part) {
-	connector := p.Connector()
-	if connector != nil {
-		downstreams := connector.DownStreams()
-		for key, part := range downstreams {
-			partsMap[key] = part
+func addPartToMap(part common.Part, partsMap map[string]common.Part) {
+	if _, ok := partsMap[part.Id()]; !ok {
+		// process the part if it has not been processed yet to avoid infinite loop
+		partsMap[part.Id()] = part
+		
+		connector := part.Connector()
+		if connector != nil {
+			for _, downStreamPart := range connector.DownStreams() {
+				addPartToMap(downStreamPart, partsMap)
+			}
+		}
+	}
+}
 
-			addDownStreams(part, partsMap)
+func GetAllConnectors(p common.Pipeline) map[string]common.Connector {
+	if p.(*GenericPipeline).connectorsMap == nil {
+		p.(*GenericPipeline).connectorsMap = make(map[string]common.Connector)
+		sources := p.Sources()
+		for _, source := range sources {
+			connector := source.Connector()
+			if connector != nil {
+				addConnectorToMap(connector, p.(*GenericPipeline).connectorsMap)
+			}
+		}
+	}
+	return p.(*GenericPipeline).connectorsMap
+}
+
+func addConnectorToMap(connector common.Connector, connectorsMap map[string]common.Connector) {
+	if _, ok := connectorsMap[connector.Id()]; !ok {
+		// process the connector if it has not been processed yet to avoid infinite loop
+		connectorsMap[connector.Id()] = connector
+	
+		for _, downStreamPart := range connector.DownStreams() {
+			downStreamConnector := downStreamPart.Connector()
+			if downStreamConnector != nil {
+				addConnectorToMap(downStreamConnector, connectorsMap)
+			}
 		}
 	}
 }

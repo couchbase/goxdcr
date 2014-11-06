@@ -86,6 +86,8 @@ func NewPipelineSupervisor(logger_ctx *log.LoggerContext, failure_handler base.P
 }
 
 func (supervisor *PipelineSupervisor) Attach(p common.Pipeline) error {
+	supervisor.Logger().Infof("Attaching pipeline supervior service")
+
 	supervisor.pipeline = p
 
 	//register itself with all parts' ErrorEncountered event
@@ -93,7 +95,17 @@ func (supervisor *PipelineSupervisor) Attach(p common.Pipeline) error {
 
 	for _, part := range partsMap {
 		part.RegisterComponentEventListener(common.ErrorEncountered, supervisor)
+		supervisor.Logger().Infof("Registering ErrorEncountered event on part %v\n", part.Id()) 
 	}
+	
+	//register itself with all connectors' ErrorEncountered event
+	connectorsMap := generic_p.GetAllConnectors(p)
+
+	for _, connector := range connectorsMap {
+		connector.RegisterComponentEventListener(common.ErrorEncountered, supervisor)
+		supervisor.Logger().Infof("Registering ErrorEncountered event on connector %v\n", connector.Id()) 
+	}
+	
 	return nil
 }
 
