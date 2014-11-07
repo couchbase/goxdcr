@@ -17,6 +17,8 @@ import (
 	"net/http"
 	"strings"
 	"bytes"
+	"time"
+	"errors"
 	"github.com/Xiaomei-Zhang/goxdcr/log"
 	rm "github.com/Xiaomei-Zhang/goxdcr/replication_manager"
 	utils "github.com/Xiaomei-Zhang/goxdcr/utils"
@@ -24,6 +26,9 @@ import (
 
 var StaticPaths = [3]string{CreateReplicationPath, SettingsReplicationsPath, StatisticsPath}
 var DynamicPathPrefixes = [4]string{DeleteReplicationPrefix, PauseReplicationPrefix, ResumeReplicationPrefix, SettingsReplicationsPath}
+
+var MaxForwardingRetry = 5
+var ForwardingRetryInterval = time.Second * 10
 
 var logger_ap *log.CommonLogger = log.NewLogger("AdminPort", log.DefaultLoggerContext)
 
@@ -292,7 +297,7 @@ func (h *xdcrRestHandler) forwardReplicationRequest(request *http.Request) error
 		for xdcrNode, port := range xdcrNodesMap {
 			// do not forward to current node 
 			if xdcrNode != myAddr {
-				forwardReplicationRequestToXDCRNode(request.URL.String(), newBody, xdcrNode, int(port))
+				go forwardReplicationRequestToXDCRNode(request.URL.String(), newBody, xdcrNode, int(port))
 			}
 		}
 	}
@@ -309,10 +314,26 @@ func forwardReplicationRequestToXDCRNode(oldRequestUrl string, newRequestBody []
 		return nil, err
 	}
 	newRequest.Header.Set(ContentType, DefaultContentType)
+   
+   	retryInterval := ForwardingRetryInterval
+    for i := 0; i <= MaxForwardingRetry; i++ {
+    	response, err := http.DefaultClient.Do(newRequest)
+    	logger_ap.Infof("forwarding request=%v for the %vth time\n", newRequest, i + 1)
+    	if err == nil && response.StatusCode == 200 {
+    		logger_ap.Infof("forwarding request succeeded")
+			return response, err
+    	}
+    	// if did not succeed, wait and try again
+    	if i < MaxForwardingRetry {
+    		time.Sleep(retryInterval)
+    		retryInterval *= 2
+    	}
+    }
 
-    logger_ap.Infof("forwarded request=%v\n", newRequest)
-        
-    return http.DefaultClient.Do(newRequest)
+	// give up after max retry. the target node is likely dead. hopefully it will
+	// get restarted and the required action, e.g., create/resumeReplication, will get performed then
+   	logger_ap.Errorf("Error forwarding request after max retry")
+   	return nil, errors.New("Error forwarding request after max retry")
 }
 
 // Get the message key from http request

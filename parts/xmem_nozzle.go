@@ -981,11 +981,14 @@ func (xmem *XmemNozzle) checkTimeout(req *bufferedMCRequest, pos uint16) (bool, 
 }
 
 func (xmem *XmemNozzle) timeoutDuration(numofRetry int) time.Duration {
-	duration := 0 * time.Millisecond
-	duration = time.Duration(2^(numofRetry+1)) * xmem.config.respTimeout
-	if duration > xmem.config.maxRetryInterval {
-		duration = xmem.config.maxRetryInterval
-	}
+	duration := xmem.config.respTimeout
+	for i := 1; i <= numofRetry; i++ {
+		duration *= 2
+		if duration > xmem.config.maxRetryInterval {
+			duration = xmem.config.maxRetryInterval
+			break
+		}
+	} 
 	return duration
 }
 
