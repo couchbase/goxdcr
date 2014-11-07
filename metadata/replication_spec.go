@@ -13,6 +13,10 @@ import (
 	"strings"
 )
 
+const (
+	XdcrPrefix = "xdcr"
+)
+
 /************************************
 /* struct ReplicationSpecification
 *************************************/
@@ -50,7 +54,7 @@ func NewReplicationSpecification(sourceClusterUUID string, sourceBucketName stri
 }
 
 func ReplicationId(sourceClusterUUID string, sourceBucketName string, targetClusterUUID string, targetBucketName string, filterName string) string {
-	parts := []string{sourceClusterUUID, sourceBucketName, targetClusterUUID, targetBucketName}
+	parts := []string{XdcrPrefix, sourceClusterUUID, sourceBucketName, targetClusterUUID, targetBucketName}
 	if filterName != "" {
 		parts = append(parts, filterName)
 	}

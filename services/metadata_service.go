@@ -21,7 +21,11 @@ import (
 	"github.com/couchbase/gometa/server"
 	"github.com/couchbase/gometa/common"
 	"github.com/Xiaomei-Zhang/goxdcr/log"
+	"github.com/couchbase/gometa/repository"
 )
+
+var XdcrKeyStart = metadata.XdcrPrefix + "_0"
+var XdcrKeyEnd = metadata.XdcrPrefix + "_{"
 
 var goMetadataServiceMethod = "RequestReceiver.NewRequest"
 
@@ -89,6 +93,29 @@ func (meta_svc *MetadataSvc) DelReplicationSpec(replicationId string) error {
 	opCode := common.GetOpCodeStr(common.OPCODE_DELETE)
 	_, err := meta_svc.sendRequest(opCode, replicationId, nil)
 	return err
+}
+
+func (meta_svc *MetadataSvc) ActiveReplicationSpecs() (map[string]*metadata.ReplicationSpecification, error) {
+	specs := make(map[string]*metadata.ReplicationSpecification, 0)
+	repo, _ := repository.OpenRepository()
+	iter, _ := repo.NewIterator(XdcrKeyStart, XdcrKeyEnd)
+	for {
+		key, value, err := iter.Next()
+		if err != nil {
+			break
+		}
+		
+		spec := &metadata.ReplicationSpecification{}
+		err = json.Unmarshal(value, spec) 
+		if err != nil {
+			return nil, err
+		}
+		if spec.Settings.Active {
+			specs[key] = spec
+		}
+	}
+	
+	return specs, nil
 }
 
 func (meta_svc *MetadataSvc) sendRequest(opCode, key string, value []byte) ([]byte, error) {

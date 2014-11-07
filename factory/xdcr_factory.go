@@ -24,7 +24,8 @@ const (
 )
 
 // errors
-var ErrorNoSourceNozzle = errors.New("Invalid configuration. No source nozzle can be constructed.")
+var ErrorNoSourceKV = errors.New("Invalid configuration. No source kv node is found.")
+var ErrorNoSourceNozzle = errors.New("Invalid configuration. No source nozzle can be constructed since the source kv nodes are not the master for any vbuckets.")
 var ErrorNoTargetNozzle = errors.New("Invalid configuration. No target nozzle can be constructed.")
 
 // Factory for XDCR pipelines
@@ -68,6 +69,10 @@ func (xdcrf *XDCRFactory) NewPipeline(topic string) (common.Pipeline, error) {
 	sourceNozzles, err := xdcrf.constructSourceNozzles(spec, topic, logger_ctx)
 	if err != nil {
 		return nil, err
+	}
+	if (len(sourceNozzles) == 0) {
+		// no pipeline is constructed if there is no source nozzle
+		return nil, ErrorNoSourceNozzle
 	}
 
 	outNozzles, vbNozzleMap, err := xdcrf.constructOutgoingNozzles(spec, logger_ctx)
@@ -120,7 +125,7 @@ func (xdcrf *XDCRFactory) constructSourceNozzles(spec *metadata.ReplicationSpeci
 	}
 	xdcrf.logger.Infof("kvHosts=%v\n", kvHosts)
 	if len(kvHosts) == 0 {
-		return nil, ErrorNoSourceNozzle
+		return nil, ErrorNoSourceKV
 	}
 
 	bucketName := spec.SourceBucketName
@@ -149,6 +154,10 @@ func (xdcrf *XDCRFactory) constructSourceNozzles(spec *metadata.ReplicationSpeci
 		}
 
 		numOfVbs := len(vbnos)
+		
+		if numOfVbs == 0 {
+			continue
+		}
 
 		// the number of dcpNozzle nodes to construct is the smaller of vbucket list size and source connection size
 		numOfDcpNozzles := int(math.Min(float64(numOfVbs), float64(maxNozzlesPerNode)))

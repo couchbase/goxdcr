@@ -18,4 +18,5 @@ type MetadataSvc interface {
 	AddReplicationSpec(spec metadata.ReplicationSpecification) error
 	SetReplicationSpec(spec metadata.ReplicationSpecification) error
 	DelReplicationSpec(replicationId string) error
+	ActiveReplicationSpecs() (map[string]*metadata.ReplicationSpecification, error)
 }

@@ -59,6 +59,9 @@ func (rm *replicationManager) init(metadataSvc metadata_svc.MetadataSvc,
 	rm.replication_settings_svc = replicationSettingsSvc
 	fac := factory.NewXDCRFactory(metadataSvc, clusterSvc, topologySvc, log.DefaultLoggerContext, log.DefaultLoggerContext, rm)
 	pipeline_manager.PipelineManager(fac, log.DefaultLoggerContext)
+	
+	// start replications
+	rm.startReplications()
 
 	logger_rm.Info("Replication manager is initialized")
 
@@ -283,6 +286,21 @@ func (rm *replicationManager) OnError(pipeline common.Pipeline, partsError map[s
 		//TODO: schedule the retry
 	}
 
+}
+
+// start all replications with active replication spec 
+func (rm *replicationManager) startReplications() {
+	logger_rm.Infof("Replication manager init - starting existing replications")
+	
+	specs, err := replication_mgr.metadata_svc.ActiveReplicationSpecs()
+	if err != nil {
+		logger_rm.Errorf("Error retrieving active replication specs")
+		return
+	}
+	
+	for _, spec := range specs {
+		go pipeline_manager.StartPipeline(spec.Id, spec.Settings.ToMap())
+	}
 }
 
 func fixPipeline(pipeline common.Pipeline) error {
