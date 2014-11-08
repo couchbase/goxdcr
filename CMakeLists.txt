@@ -13,9 +13,27 @@ PROJECT (goxdcr)
 #
 # GODEPSPATH - should point to a Go workspace directory containing all
 #      transitive Go dependencies
+#
+# FORESTDB_INCLUDE_DIR - should point to where libforestdb/forestdb.h exists
+#
+# FORESTDB_LIBRARY_DIR - should point to where libforestdb.so resides
+#
+# Optionally:
+#
+# FORESTDB_TARGET - if set, assumed to the the CMake target name which
+# builds libforestdb.so; will set dependencies to ensure it is build
+# before attempting to compile indexer
 
 INCLUDE (FindCouchbaseGo)
 
+SET (_forestdb_dep)
+IF (DEFINED FORESTDB_TARGET)
+  SET (_forestdb_dep "DEPENDS ${FORESTDB_TARGET}")
+ENDIF (DEFINED FORESTDB_TARGET)
+
 GoInstall (TARGET goxdcr PACKAGE github.com/couchbase/goxdcr/main
   GOPATH "${PROJECT_SOURCE_DIR}/../../../.." "${GODEPSDIR}"
+  ${_forestdb_dep}
+  CGO_INCLUDE_DIRS "${FORESTDB_INCLUDE_DIR}"
+  CGO_LIBRARY_DIRS "${FORESTDB_LIBRARY_DIR}"
   INSTALL_PATH bin OUTPUT goxdcr)
