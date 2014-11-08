@@ -11,8 +11,8 @@ package pipeline
 
 import (
 	"fmt"
-	common "github.com/Xiaomei-Zhang/goxdcr/common"
-	log "github.com/Xiaomei-Zhang/goxdcr/log"
+	common "github.com/couchbase/goxdcr/common"
+	log "github.com/couchbase/goxdcr/log"
 	"sync"
 )
 

@@ -13,7 +13,7 @@ import (
 	"errors"
 	"net/url"
 	//	"log"
-	"github.com/Xiaomei-Zhang/goxdcr/log"
+	"github.com/couchbase/goxdcr/log"
 	mcc "github.com/couchbase/gomemcached/client"
 	cb "github.com/couchbaselabs/go-couchbase"
 	"sync"

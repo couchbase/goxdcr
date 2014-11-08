@@ -10,7 +10,7 @@
 package parts
 
 import (
-	"github.com/Xiaomei-Zhang/goxdcr/common"
+	"github.com/couchbase/goxdcr/common"
 )
 
 type XDCRPart interface {

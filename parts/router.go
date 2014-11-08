@@ -13,9 +13,9 @@ import (
 	"encoding/binary"
 	"errors"
 	"regexp"
-	common "github.com/Xiaomei-Zhang/goxdcr/common"
-	connector "github.com/Xiaomei-Zhang/goxdcr/connector"
-	"github.com/Xiaomei-Zhang/goxdcr/log"
+	common "github.com/couchbase/goxdcr/common"
+	connector "github.com/couchbase/goxdcr/connector"
+	"github.com/couchbase/goxdcr/log"
 	mc "github.com/couchbase/gomemcached"
 	mcc "github.com/couchbase/gomemcached/client"
 )

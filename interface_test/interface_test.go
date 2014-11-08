@@ -10,9 +10,9 @@
 package interface_test
 
 import (
-	common "github.com/Xiaomei-Zhang/goxdcr/common"
-	pipeline_manager "github.com/Xiaomei-Zhang/goxdcr/pipeline_manager"
-	xdcrlog "github.com/Xiaomei-Zhang/goxdcr/log"
+	common "github.com/couchbase/goxdcr/common"
+	pipeline_manager "github.com/couchbase/goxdcr/pipeline_manager"
+	xdcrlog "github.com/couchbase/goxdcr/log"
 	"testing"
 	"time"	
 	"log"

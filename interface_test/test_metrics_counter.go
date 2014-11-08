@@ -10,8 +10,8 @@
 package interface_test
 
 import (
-	common "github.com/Xiaomei-Zhang/goxdcr/common"
-	"github.com/Xiaomei-Zhang/goxdcr/log"
+	common "github.com/couchbase/goxdcr/common"
+	"github.com/couchbase/goxdcr/log"
 	"sync"
 )
 

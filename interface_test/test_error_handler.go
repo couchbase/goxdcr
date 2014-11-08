@@ -10,9 +10,9 @@
 package interface_test
 
 import (
-	common "github.com/Xiaomei-Zhang/couchbase_goxdcr/common"
-	pipeline "github.com/Xiaomei-Zhang/couchbase_goxdcr/pipeline"
-	log "github.com/Xiaomei-Zhang/couchbase_goxdcr/log"
+	common "github.com/couchbase/couchbase_goxdcr/common"
+	pipeline "github.com/couchbase/couchbase_goxdcr/pipeline"
+	log "github.com/couchbase/couchbase_goxdcr/log"
 )
 
 var logger = log.NewLogger ("testErrorHandler", log.DefaultLoggerContext)

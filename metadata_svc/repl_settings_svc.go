@@ -10,7 +10,7 @@
 package metadata_svc
 
 import (
-	metadata "github.com/Xiaomei-Zhang/goxdcr/metadata"
+	metadata "github.com/couchbase/goxdcr/metadata"
 )
 
 // this service is likely provided by exposing an erlang rest api in ns_server

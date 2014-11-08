@@ -11,8 +11,8 @@ package gen_server
 
 import (
 	"errors"
-	"github.com/Xiaomei-Zhang/goxdcr/log"
-	utils "github.com/Xiaomei-Zhang/goxdcr/utils"
+	"github.com/couchbase/goxdcr/log"
+	utils "github.com/couchbase/goxdcr/utils"
 	"reflect"
 	"time"
 )

@@ -10,7 +10,7 @@
 package metadata_svc
 
 import (
-	"github.com/Xiaomei-Zhang/goxdcr/metadata"
+	"github.com/couchbase/goxdcr/metadata"
 )
 
 type MetadataSvc interface {

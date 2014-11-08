@@ -15,8 +15,8 @@ import (
 	"fmt"
 	"os"
 	"errors"
-	metadata "github.com/Xiaomei-Zhang/goxdcr/metadata"
-	s "github.com/Xiaomei-Zhang/goxdcr/services"
+	metadata "github.com/couchbase/goxdcr/metadata"
+	s "github.com/couchbase/goxdcr/services"
 )
 
 // test parameters

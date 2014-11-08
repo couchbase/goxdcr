@@ -13,11 +13,11 @@ package mock_services
 import (
 	"fmt"
 	"strings"
-	"github.com/Xiaomei-Zhang/goxdcr/base"
-	"github.com/Xiaomei-Zhang/goxdcr/metadata"
-	"github.com/Xiaomei-Zhang/goxdcr/utils"
+	"github.com/couchbase/goxdcr/base"
+	"github.com/couchbase/goxdcr/metadata"
+	"github.com/couchbase/goxdcr/utils"
 	"github.com/couchbaselabs/go-couchbase"
-	rm "github.com/Xiaomei-Zhang/goxdcr/replication_manager"
+	rm "github.com/couchbase/goxdcr/replication_manager"
 )
 
 var options struct {

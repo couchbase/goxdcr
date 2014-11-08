@@ -17,10 +17,10 @@ import (
 	"os/exec"
 	"fmt"
 	"time"
-	"github.com/Xiaomei-Zhang/goxdcr/metadata"
+	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/gometa/server"
 	"github.com/couchbase/gometa/common"
-	"github.com/Xiaomei-Zhang/goxdcr/log"
+	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/gometa/repository"
 )
 
@@ -146,7 +146,7 @@ func StartGometaService() (*exec.Cmd, error) {
 	}
 
 	// run gometa executable to start server
-	cmd := exec.Command(objPath, "-config", goPath + "/src/github.com/Xiaomei-Zhang/goxdcr/services/metadata_svc_config")
+	cmd := exec.Command(objPath, "-config", goPath + "/src/github.com/couchbase/goxdcr/services/metadata_svc_config")
 	err = cmd.Start()
 	if err != nil {
 		return nil, err

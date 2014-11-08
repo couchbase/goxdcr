@@ -11,9 +11,9 @@ package interface_test
 
 import (
 	"errors"
-	common "github.com/Xiaomei-Zhang/goxdcr/common"
-	part "github.com/Xiaomei-Zhang/goxdcr/part"
-	"github.com/Xiaomei-Zhang/goxdcr/log"
+	common "github.com/couchbase/goxdcr/common"
+	part "github.com/couchbase/goxdcr/part"
+	"github.com/couchbase/goxdcr/log"
 	"reflect"
 	"sync"
 )

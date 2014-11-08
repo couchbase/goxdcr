@@ -13,7 +13,7 @@ import (
 	"bytes"
 	"fmt"
 	"reflect"
-	"github.com/Xiaomei-Zhang/goxdcr/common"
+	"github.com/couchbase/goxdcr/common"
 )
 
 type SettingDef struct {

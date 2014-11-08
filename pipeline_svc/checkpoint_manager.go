@@ -10,8 +10,8 @@
 package pipeline_svc
 
 import (
-	common "github.com/Xiaomei-Zhang/goxdcr/common"
-	base "github.com/Xiaomei-Zhang/goxdcr/base"
+	common "github.com/couchbase/goxdcr/common"
+	base "github.com/couchbase/goxdcr/base"
 )
 
 type CheckpointManager struct {

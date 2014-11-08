@@ -10,10 +10,10 @@
 package interface_test
 
 import (
-	common "github.com/Xiaomei-Zhang/goxdcr/common"
-	connector "github.com/Xiaomei-Zhang/goxdcr/connector"
-	pipeline "github.com/Xiaomei-Zhang/goxdcr/pipeline"
-	pipeline_ctx "github.com/Xiaomei-Zhang/goxdcr/pipeline_ctx"
+	common "github.com/couchbase/goxdcr/common"
+	connector "github.com/couchbase/goxdcr/connector"
+	pipeline "github.com/couchbase/goxdcr/pipeline"
+	pipeline_ctx "github.com/couchbase/goxdcr/pipeline_ctx"
 )
 
 type testPipelineFactory struct {

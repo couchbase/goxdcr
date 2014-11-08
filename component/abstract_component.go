@@ -12,8 +12,8 @@ package Component
 import (
 	"errors"
 	"fmt"
-	common "github.com/Xiaomei-Zhang/goxdcr/common"
-	"github.com/Xiaomei-Zhang/goxdcr/log"
+	common "github.com/couchbase/goxdcr/common"
+	"github.com/couchbase/goxdcr/log"
 )
 
 type AbstractComponent struct {

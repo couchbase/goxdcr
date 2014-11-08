@@ -14,11 +14,11 @@ import (
 	"fmt"
 	"os"
 
-	ap "github.com/Xiaomei-Zhang/goxdcr/adminport"
-	rm "github.com/Xiaomei-Zhang/goxdcr/replication_manager"
-	c "github.com/Xiaomei-Zhang/goxdcr/mock_services"
-	s "github.com/Xiaomei-Zhang/goxdcr/services"
-	"github.com/Xiaomei-Zhang/goxdcr/utils"
+	ap "github.com/couchbase/goxdcr/adminport"
+	rm "github.com/couchbase/goxdcr/replication_manager"
+	c "github.com/couchbase/goxdcr/mock_services"
+	s "github.com/couchbase/goxdcr/services"
+	"github.com/couchbase/goxdcr/utils"
 )
 
 var done = make(chan bool)

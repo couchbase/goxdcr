@@ -13,15 +13,15 @@ package adminport
 
 import (
 	"encoding/json"
-	"github.com/Xiaomei-Zhang/goxdcr/base"
+	"github.com/couchbase/goxdcr/base"
 	"net/http"
 	"strings"
 	"bytes"
 	"time"
 	"errors"
-	"github.com/Xiaomei-Zhang/goxdcr/log"
-	rm "github.com/Xiaomei-Zhang/goxdcr/replication_manager"
-	utils "github.com/Xiaomei-Zhang/goxdcr/utils"
+	"github.com/couchbase/goxdcr/log"
+	rm "github.com/couchbase/goxdcr/replication_manager"
+	utils "github.com/couchbase/goxdcr/utils"
 )
 
 var StaticPaths = [3]string{CreateReplicationPath, SettingsReplicationsPath, StatisticsPath}

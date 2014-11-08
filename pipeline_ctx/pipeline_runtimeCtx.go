@@ -11,8 +11,8 @@ package pipeline_ctx
 
 import (
 	"errors"
-	common "github.com/Xiaomei-Zhang/goxdcr/common"
-	"github.com/Xiaomei-Zhang/goxdcr/log"
+	common "github.com/couchbase/goxdcr/common"
+	"github.com/couchbase/goxdcr/log"
 )
 
 type ServiceSettingsConstructor func(pipeline common.Pipeline, service common.PipelineService, pipeline_settings map[string]interface{}) (map[string]interface{}, error)

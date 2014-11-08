@@ -12,8 +12,8 @@ package metadata
 import (
 	"errors"
 	"fmt"
-	"github.com/Xiaomei-Zhang/goxdcr/log"
-	"github.com/Xiaomei-Zhang/goxdcr/utils"
+	"github.com/couchbase/goxdcr/log"
+	"github.com/couchbase/goxdcr/utils"
 )
 
 const (

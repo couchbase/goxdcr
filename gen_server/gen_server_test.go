@@ -12,9 +12,9 @@ package gen_server
 import (
 	"errors"
 	"fmt"
-	common "github.com/Xiaomei-Zhang/goxdcr/common"
-	part "github.com/Xiaomei-Zhang/goxdcr/part"
-	base "github.com/Xiaomei-Zhang/couchbase_goxdcr_impl/base"
+	common "github.com/couchbase/goxdcr/common"
+	part "github.com/couchbase/goxdcr/part"
+	base "github.com/couchbase/couchbase_goxdcr_impl/base"
 	"sync"
 	"testing"
 	"time"

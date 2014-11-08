@@ -10,10 +10,10 @@
 package adminport
 
 import (
-	"github.com/Xiaomei-Zhang/goxdcr/log"
-	base "github.com/Xiaomei-Zhang/goxdcr/base"
-	metadata "github.com/Xiaomei-Zhang/goxdcr/metadata"
-	utils "github.com/Xiaomei-Zhang/goxdcr/utils"
+	"github.com/couchbase/goxdcr/log"
+	base "github.com/couchbase/goxdcr/base"
+	metadata "github.com/couchbase/goxdcr/metadata"
+	utils "github.com/couchbase/goxdcr/utils"
 	"strconv"
 	"net/http"
 	"net/url"

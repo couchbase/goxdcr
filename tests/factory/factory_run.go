@@ -6,12 +6,12 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"github.com/Xiaomei-Zhang/goxdcr/log"
-	"github.com/Xiaomei-Zhang/goxdcr/factory"
-	"github.com/Xiaomei-Zhang/goxdcr/parts"
-	c "github.com/Xiaomei-Zhang/goxdcr/mock_services"
-	s "github.com/Xiaomei-Zhang/goxdcr/services"
-    "github.com/Xiaomei-Zhang/goxdcr/metadata"
+	"github.com/couchbase/goxdcr/log"
+	"github.com/couchbase/goxdcr/factory"
+	"github.com/couchbase/goxdcr/parts"
+	c "github.com/couchbase/goxdcr/mock_services"
+	s "github.com/couchbase/goxdcr/services"
+    "github.com/couchbase/goxdcr/metadata"
 )
 
 var options struct {

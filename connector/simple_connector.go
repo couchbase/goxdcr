@@ -12,9 +12,9 @@ package connector
 import (
 	//	"errors"
 	"sync"
-	common "github.com/Xiaomei-Zhang/goxdcr/common"
-	component "github.com/Xiaomei-Zhang/goxdcr/component"
-	"github.com/Xiaomei-Zhang/goxdcr/log"
+	common "github.com/couchbase/goxdcr/common"
+	component "github.com/couchbase/goxdcr/component"
+	"github.com/couchbase/goxdcr/log"
 )
 
 
