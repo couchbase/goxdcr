@@ -17,6 +17,8 @@ import (
 	"os/exec"
 	"fmt"
 	"time"
+	"strings"
+	"errors"
 	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/gometa/server"
 	"github.com/couchbase/gometa/common"
@@ -135,28 +137,61 @@ func (meta_svc *MetadataSvc) sendRequest(opCode, key string, value []byte) ([]by
 // start the gometa service
 func StartGometaService() (*exec.Cmd, error) {
 	fmt.Println("starting gometa service. this will take a couple seconds")
-	goPath := os.Getenv("GOPATH")
+	goPaths := os.Getenv("GOPATH")
+
+	goPathArr := strings.Split(goPaths, ":")
 	
-	objPath := goPath + "/bin/gometa"
-	srcPath := goPath + "/src/github.com/couchbase/gometa/cmd/gometa/*.go"
-	err := exec.Command("/bin/bash", "-c", "go build -o " + objPath + " " + srcPath).Run()
+	// iterate through all defined gopath till we find the source path for gometa and goxdcr 
+	var gometaDir string
+	var goxdcrDir string
+	for _, goPath := range goPathArr {
+ 		gometaDirCur := goPath + "/src/github.com/couchbase/gometa"
+ 		goxdcrDirCur := goPath + "/src/github.com/couchbase/goxdcr"
+ 		
+ 		command := exec.Command("/bin/bash", "-c", "test -d " + gometaDirCur)
+ 		err := command.Run()
+		if err == nil {
+			gometaDir = gometaDirCur
+		} 
+		
+		command = exec.Command("/bin/bash", "-c", "test -d " + goxdcrDirCur)
+ 		err = command.Run()
+		if err == nil {
+			goxdcrDir = goxdcrDirCur
+		}
+		
+		if gometaDir != "" && goxdcrDir != "" {
+			break
+		}
+	}
+	
+	if gometaDir == "" || goxdcrDir == "" {
+ 		return nil, errors.New(fmt.Sprintf("Cannot find gometa or goxdcr in source path, %v\n", goPaths))	
+	}
+		
+	// build gometa executable
+	objPath := goxdcrDir + "../../../../bin/gometa"
+	gometaSrcPath := gometaDir + "/cmd/gometa/*.go"
+	command := exec.Command("/bin/bash", "-c", "go build -o " + objPath + " " + gometaSrcPath)
+	err := command.Run()
 	if err != nil {
-		fmt.Printf("Error executing command line - %v\n", exec.Command("/bin/bash", "-c", "go build -o " + objPath + " " + srcPath).Args)
+		fmt.Printf("Error executing command line - %v\n", command.Args)
 		return nil, err
 	}
-
+		
 	// run gometa executable to start server
-	cmd := exec.Command(objPath, "-config", goPath + "/src/github.com/couchbase/goxdcr/services/metadata_svc_config")
-	err = cmd.Start()
+	command = exec.Command(objPath, "-config", goxdcrDir + "/services/metadata_svc_config")
+	err = command.Start()
 	if err != nil {
+		fmt.Printf("Error executing command line - %v\n", command.Args)
 		return nil, err
 	}
 	
 	//wait for gometa service to finish starting
 	time.Sleep(time.Second * 3)
-	
+		
 	fmt.Println("started gometa service.")
-	return cmd, nil
+	return command, nil
 }
 
 // kill the gometa service
