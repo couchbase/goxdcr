@@ -170,7 +170,7 @@ func StartGometaService() (*exec.Cmd, error) {
 	}
 		
 	// build gometa executable
-	objPath := goxdcrDir + "../../../../bin/gometa"
+	objPath := goxdcrDir + "../../../../../bin/gometa"
 	gometaSrcPath := gometaDir + "/cmd/gometa/*.go"
 	command := exec.Command("/bin/bash", "-c", "go build -o " + objPath + " " + gometaSrcPath)
 	err := command.Run()
