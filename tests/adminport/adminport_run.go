@@ -15,7 +15,6 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	ap "github.com/couchbase/goxdcr/adminport"
 	base "github.com/couchbase/goxdcr/base"
 	c "github.com/couchbase/goxdcr/mock_services"
 	pm "github.com/couchbase/goxdcr/pipeline_manager"
@@ -152,24 +151,24 @@ func getUrlPrefix() string {
 }
 
 func testCreateReplication() (string, error) {
-	url := getUrlPrefix() + ap.CreateReplicationPath
+	url := getUrlPrefix() + rm.CreateReplicationPath
 
 	params := make(map[string]interface{})
-	params[ap.FromBucket] = options.sourceBucket
-	params[ap.ToClusterUuid] = utils.GetHostAddr(options.sourceKVHost, options.sourceKVPort)
-	params[ap.ToBucket] = options.targetBucket
-	params[ap.FilterName] = options.filterName
-	params[ap.FilterExpression] = FilterExpression
-	params[ap.BatchCount] = BatchCount
+	params[rm.FromBucket] = options.sourceBucket
+	params[rm.ToClusterUuid] = utils.GetHostAddr(options.sourceKVHost, options.sourceKVPort)
+	params[rm.ToBucket] = options.targetBucket
+	params[rm.FilterName] = options.filterName
+	params[rm.FilterExpression] = FilterExpression
+	params[rm.BatchCount] = BatchCount
 
-	paramsBytes, _ := ap.EncodeMapIntoByteArray(params)
+	paramsBytes, _ := rm.EncodeMapIntoByteArray(params)
 	paramsBuf := bytes.NewBuffer(paramsBytes)
 
-	request, err := http.NewRequest(ap.MethodPost, url, paramsBuf)
+	request, err := http.NewRequest(rm.MethodPost, url, paramsBuf)
 	if err != nil {
 		return "", err
 	}
-	request.Header.Set(ap.ContentType, ap.DefaultContentType)
+	request.Header.Set(rm.ContentType, rm.DefaultContentType)
 
 	fmt.Println("request", request)
 
@@ -180,7 +179,7 @@ func testCreateReplication() (string, error) {
 		return "", err
 	}
 
-	replicationId, err := ap.DecodeCreateReplicationResponse(response)
+	replicationId, err := rm.DecodeCreateReplicationResponse(response)
 	
 	time.Sleep(30 * time.Second)
 
@@ -190,13 +189,13 @@ func testCreateReplication() (string, error) {
 }
 
 func testPauseReplication(replicationId, escapedReplId string) error {
-	url := getUrlPrefix() + ap.PauseReplicationPrefix + base.UrlDelimiter + escapedReplId
+	url := getUrlPrefix() + rm.PauseReplicationPrefix + base.UrlDelimiter + escapedReplId
 
-	request, err := http.NewRequest(ap.MethodPost, url, nil)
+	request, err := http.NewRequest(rm.MethodPost, url, nil)
 	if err != nil {
 		return err
 	}
-	request.Header.Set(ap.ContentType, ap.DefaultContentType)
+	request.Header.Set(rm.ContentType, rm.DefaultContentType)
 
 	fmt.Println("request", request)
 
@@ -213,13 +212,13 @@ func testPauseReplication(replicationId, escapedReplId string) error {
 }
 
 func testResumeReplication(replicationId, escapedReplId string) error {
-	url := getUrlPrefix() + ap.ResumeReplicationPrefix + base.UrlDelimiter + escapedReplId
+	url := getUrlPrefix() + rm.ResumeReplicationPrefix + base.UrlDelimiter + escapedReplId
 
-	request, err := http.NewRequest(ap.MethodPost, url, nil)
+	request, err := http.NewRequest(rm.MethodPost, url, nil)
 	if err != nil {
 		return err
 	}
-	request.Header.Set(ap.ContentType, ap.DefaultContentType)
+	request.Header.Set(rm.ContentType, rm.DefaultContentType)
 
 	fmt.Println("request", request)
 
@@ -236,13 +235,13 @@ func testResumeReplication(replicationId, escapedReplId string) error {
 }
 
 func testDeleteReplication(replicationId, escapedReplId string) error {
-	url := getUrlPrefix() + ap.DeleteReplicationPrefix + base.UrlDelimiter + escapedReplId
+	url := getUrlPrefix() + rm.DeleteReplicationPrefix + base.UrlDelimiter + escapedReplId
 
-	request, err := http.NewRequest(ap.MethodPost, url, nil)
+	request, err := http.NewRequest(rm.MethodPost, url, nil)
 	if err != nil {
 		return err
 	}
-	request.Header.Set(ap.ContentType, ap.DefaultContentType)
+	request.Header.Set(rm.ContentType, rm.DefaultContentType)
 
 	fmt.Println("request", request)
 
@@ -259,13 +258,13 @@ func testDeleteReplication(replicationId, escapedReplId string) error {
 }
 
 func testViewReplicationSettings(replicationId string) error {
-	url := getUrlPrefix() + ap.SettingsReplicationsPath + base.UrlDelimiter + replicationId
+	url := getUrlPrefix() + rm.SettingsReplicationsPath + base.UrlDelimiter + replicationId
 
-	request, err := http.NewRequest(ap.MethodGet, url, nil)
+	request, err := http.NewRequest(rm.MethodGet, url, nil)
 	if err != nil {
 		return err
 	}
-	request.Header.Set(ap.ContentType, ap.DefaultContentType)
+	request.Header.Set(rm.ContentType, rm.DefaultContentType)
 
 	fmt.Println("request", request)
 
@@ -275,19 +274,19 @@ func testViewReplicationSettings(replicationId string) error {
 }
 
 func testChangeReplicationSettings(replicationId, escapedReplicationId string) error {
-	url := getUrlPrefix() + ap.SettingsReplicationsPath + base.UrlDelimiter + escapedReplicationId
+	url := getUrlPrefix() + rm.SettingsReplicationsPath + base.UrlDelimiter + escapedReplicationId
 
 	params := make(map[string]interface{})
-	params[ap.BatchSize] = BatchSize
+	params[rm.BatchSize] = BatchSize
 
-	paramsBytes, _ := ap.EncodeMapIntoByteArray(params)
+	paramsBytes, _ := rm.EncodeMapIntoByteArray(params)
 	paramsBuf := bytes.NewBuffer(paramsBytes)
 
-	request, err := http.NewRequest(ap.MethodPost, url, paramsBuf)
+	request, err := http.NewRequest(rm.MethodPost, url, paramsBuf)
 	if err != nil {
 		return err
 	}
-	request.Header.Set(ap.ContentType, ap.DefaultContentType)
+	request.Header.Set(rm.ContentType, rm.DefaultContentType)
 
 	fmt.Println("request", request)
 
@@ -310,13 +309,13 @@ func testChangeReplicationSettings(replicationId, escapedReplicationId string) e
 }
 
 func testGetStatistics() error {
-	url := getUrlPrefix() + ap.StatisticsPath
+	url := getUrlPrefix() + rm.StatisticsPath
 
-	request, err := http.NewRequest(ap.MethodGet, url, nil)
+	request, err := http.NewRequest(rm.MethodGet, url, nil)
 	if err != nil {
 		return err
 	}
-	request.Header.Set(ap.ContentType, ap.DefaultContentType)
+	request.Header.Set(rm.ContentType, rm.DefaultContentType)
 
 	fmt.Println("request", request)
 
