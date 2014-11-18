@@ -38,7 +38,9 @@ var options struct {
 	target_bucket           string //target bucket
 	source_cluster_addr     string //source connect string
 	target_cluster_addr     string //target connect string
-	source_kv_host          string //source kv addr
+	source_kv_host string //source kv host name
+	source_kv_port      int //source kv admin port
+	gometa_port        int // gometa request port
 	source_cluster_username string //source cluster username
 	source_cluster_password string //source cluster password
 	target_cluster_username string //target cluster username
@@ -47,17 +49,18 @@ var options struct {
 }
 
 func argParse() {
-
-	flag.StringVar(&options.source_cluster_addr, "source_cluster_addr", "127.0.0.1:9000",
-		"source cluster address")
+	flag.StringVar(&options.source_kv_host, "source_kv_host", "127.0.0.1",
+		"source KV host name")
+	flag.IntVar(&options.source_kv_port, "source_kv_port", 9000,
+		"admin port number for source kv")
+	flag.IntVar(&options.gometa_port, "gometa_port", 5003,
+		"port number for gometa requests")
 	flag.StringVar(&options.source_bucket, "source_bucket", "default",
 		"bucket to replicate from")
 	flag.StringVar(&options.target_cluster_addr, "target_cluster_addr", "127.0.0.1:9000",
 		"target cluster address")
 	flag.StringVar(&options.target_bucket, "target_bucket", "target",
 		"bucket to replicate to")
-	flag.StringVar(&options.source_kv_host, "source_kv_host", "127.0.0.1",
-		"source KV address")
 	flag.StringVar(&options.source_cluster_username, "source_cluster_username", "Administrator",
 		"user name to use for logging into source cluster")
 	flag.StringVar(&options.source_cluster_password, "source_cluster_password", "welcome",
@@ -91,6 +94,8 @@ func main() {
 	//	c.SetLogLevel(c.LogLevelTrace)
 	fmt.Println("Start Testing ...")
 	argParse()
+	
+	options.source_cluster_addr = utils.GetHostAddr(options.source_kv_host, options.source_kv_port)
 
 	// set up gometa service
 	cmd, err := s.StartGometaService()
@@ -118,7 +123,8 @@ func setup() error {
 	if err != nil {
 		return err
 	}
-	replication_manager.Initialize(metadata_svc, new(c.MockClusterInfoSvc), new(c.MockXDCRTopologySvc), new(c.MockReplicationSettingsSvc))
+	replication_manager.StartReplicationManager(options.source_kv_host, options.source_kv_port,
+								  metadata_svc, new(c.MockClusterInfoSvc), new(c.MockXDCRTopologySvc), new(c.MockReplicationSettingsSvc))
 	fmt.Println("Finish setup")
 	return nil
 }

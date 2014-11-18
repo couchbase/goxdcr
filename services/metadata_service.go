@@ -23,7 +23,6 @@ import (
 	"github.com/couchbase/gometa/server"
 	"github.com/couchbase/gometa/common"
 	"github.com/couchbase/goxdcr/log"
-	"github.com/couchbase/gometa/repository"
 )
 
 var XdcrKeyStart = metadata.XdcrPrefix + "_0"
@@ -99,7 +98,8 @@ func (meta_svc *MetadataSvc) DelReplicationSpec(replicationId string) error {
 
 func (meta_svc *MetadataSvc) ActiveReplicationSpecs() (map[string]*metadata.ReplicationSpecification, error) {
 	specs := make(map[string]*metadata.ReplicationSpecification, 0)
-	repo, _ := repository.OpenRepository()
+	// TODO store keys ourselves?
+	/*repo, _ := repository.OpenRepository()
 	iter, _ := repo.NewIterator(XdcrKeyStart, XdcrKeyEnd)
 	for {
 		key, value, err := iter.Next()
@@ -115,7 +115,7 @@ func (meta_svc *MetadataSvc) ActiveReplicationSpecs() (map[string]*metadata.Repl
 		if spec.Settings.Active {
 			specs[key] = spec
 		}
-	}
+	}*/
 	
 	return specs, nil
 }

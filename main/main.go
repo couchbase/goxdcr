@@ -14,29 +14,28 @@ import (
 	"fmt"
 	"os"
 
-	ap "github.com/couchbase/goxdcr/adminport"
 	rm "github.com/couchbase/goxdcr/replication_manager"
-	c "github.com/couchbase/goxdcr/mock_services"
+	ms "github.com/couchbase/goxdcr/mock_services"
 	s "github.com/couchbase/goxdcr/services"
-	"github.com/couchbase/goxdcr/utils"
+	utils "github.com/couchbase/goxdcr/utils"	
 )
 
 var done = make(chan bool)
 
 var options struct {
-	sourceClusterAddr      string //source cluster addr
 	sourceKVHost      string //source kv host name
-	gometaPortNumber  int
+	sourceKVPort      int //source kv admin port
+	gometaPort        int // gometa request port
 	username        string //username on source cluster
 	password        string //password on source cluster	
 }
 
 func argParse() {
-	flag.StringVar(&options.sourceClusterAddr, "sourceClusterAddr", "127.0.0.1:9000",
-		"connection string to source cluster")
 	flag.StringVar(&options.sourceKVHost, "sourceKVHost", "127.0.0.1",
 		"source KV host name")
-	flag.IntVar(&options.gometaPortNumber, "gometaPortNumber", 5003,
+	flag.IntVar(&options.sourceKVPort, "sourceKVPort", 9000,
+		"admin port number for source kv")
+	flag.IntVar(&options.gometaPort, "gometaPort", 5003,
 		"port number for gometa requests")
 	flag.StringVar(&options.username, "username", "Administrator", "username to cluster admin console")
 	flag.StringVar(&options.password, "password", "welcome", "password to Cluster admin console")
@@ -51,6 +50,9 @@ func usage() {
 func main() {
 	argParse()
 	
+	// TODO remove after real services are implemented
+	ms.SetTestOptions(utils.GetHostAddr(options.sourceKVHost, options.sourceKVPort), options.sourceKVHost, options.username, options.password)
+	
 	cmd, err := s.StartGometaService()
 	if err != nil {
 		fmt.Println("Failed to start gometa service. err: ", err)
@@ -58,22 +60,14 @@ func main() {
 	}
 	defer s.KillGometaService(cmd)
 	
-	c.SetTestOptions(options.sourceClusterAddr, options.sourceKVHost, options.username, options.password)
-		
-	xdcrTopologyService := new(c.MockXDCRTopologySvc)
-	hostAddr, err := xdcrTopologyService.MyHost()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error getting host address \n")
-		os.Exit(1)
-	}
-	
-	metadata_svc, err := s.NewMetadataSvc(utils.GetHostAddr(options.sourceKVHost, options.gometaPortNumber), nil)
+	metadata_svc, err := s.NewMetadataSvc(utils.GetHostAddr(options.sourceKVHost, options.gometaPort), nil)
 	if err != nil {
 		fmt.Println("Error starting metadata service. ", err.Error())
 		os.Exit(1)
 	}
 	
-	rm.Initialize(metadata_svc, new(c.MockClusterInfoSvc), xdcrTopologyService, new(c.MockReplicationSettingsSvc))
-	go ap.MainAdminPort(hostAddr)
+	rm.StartReplicationManager(options.sourceKVHost, options.sourceKVPort,
+								  metadata_svc, new(ms.MockClusterInfoSvc), new(ms.MockXDCRTopologySvc), new(ms.MockReplicationSettingsSvc))
+								  
 	<-done
 }

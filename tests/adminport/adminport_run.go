@@ -21,6 +21,7 @@ import (
 	pm "github.com/couchbase/goxdcr/pipeline_manager"
 	rm "github.com/couchbase/goxdcr/replication_manager"
 	s "github.com/couchbase/goxdcr/services"
+	ms "github.com/couchbase/goxdcr/mock_services"
 	utils "github.com/couchbase/goxdcr/utils"
 	"net/http"
 	"net/url"
@@ -40,18 +41,21 @@ const (
 var options struct {
 	sourceBucket string // source bucket
 	targetBucket string //target bucket
-	connectStr   string //connect string
 	sourceKVHost string //source kv host name
+	sourceKVPort      int //source kv admin port
+	gometaPort        int // gometa request port
 	filterName   string //filter name
 	username     string //username
 	password     string //password
 }
 
 func argParse() {
-	flag.StringVar(&options.connectStr, "connectStr", "127.0.0.1:9000",
-		"connection string to source cluster")
-	flag.StringVar(&options.sourceKVHost, "source_kv_host", "127.0.0.1",
+	flag.StringVar(&options.sourceKVHost, "sourceKVHost", "127.0.0.1",
 		"source KV host name")
+	flag.IntVar(&options.sourceKVPort, "sourceKVPort", 9000,
+		"admin port number for source kv")
+	flag.IntVar(&options.gometaPort, "gometaPort", 5003,
+		"port number for gometa requests")
 	flag.StringVar(&options.sourceBucket, "sourceBucket", "default",
 		"bucket to replicate from")
 	flag.StringVar(&options.targetBucket, "targetBucket", "target",
@@ -78,7 +82,7 @@ func main() {
 }
 
 func startAdminport() {
-	c.SetTestOptions(options.connectStr, options.sourceKVHost, options.username, options.password)
+	c.SetTestOptions(utils.GetHostAddr(options.sourceKVHost, options.sourceKVPort), options.sourceKVHost, options.username, options.password)
 
 	cmd, err := s.StartGometaService()
 	if err != nil {
@@ -93,10 +97,10 @@ func startAdminport() {
 		fmt.Println("Test failed. err: ", err)
 		return
 	}
-
-	rm.Initialize(metadata_svc, new(c.MockClusterInfoSvc), new(c.MockXDCRTopologySvc), new(c.MockReplicationSettingsSvc))
-
-	go ap.MainAdminPort(options.sourceKVHost)
+	
+	rm.StartReplicationManager(options.sourceKVHost, options.sourceKVPort,
+								  metadata_svc, new(ms.MockClusterInfoSvc), new(ms.MockXDCRTopologySvc), new(ms.MockReplicationSettingsSvc))
+	
 	//wait for server to finish starting
 	time.Sleep(time.Second * 3)
 
@@ -152,7 +156,7 @@ func testCreateReplication() (string, error) {
 
 	params := make(map[string]interface{})
 	params[ap.FromBucket] = options.sourceBucket
-	params[ap.ToClusterUuid] = options.connectStr
+	params[ap.ToClusterUuid] = utils.GetHostAddr(options.sourceKVHost, options.sourceKVPort)
 	params[ap.ToBucket] = options.targetBucket
 	params[ap.FilterName] = options.filterName
 	params[ap.FilterExpression] = FilterExpression
@@ -178,7 +182,7 @@ func testCreateReplication() (string, error) {
 
 	replicationId, err := ap.DecodeCreateReplicationResponse(response)
 	
-	time.Sleep(10 * time.Second)
+	time.Sleep(30 * time.Second)
 
 	// verify that the replication is created and started and is being
 	// managed by pipeline manager

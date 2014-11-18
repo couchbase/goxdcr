@@ -29,11 +29,10 @@ const (
 //}
 
 type Msg_Callback_Func func(msg []interface{}) error
-type Behavior_Callback_Func func() error
 type Exit_Callback_Func func()
 type Error_Handler_Func func(err error)
 
-type GenServer struct {
+type GenServer struct {	
 	//msg channel
 	msgChan chan []interface{}
 
@@ -41,7 +40,6 @@ type GenServer struct {
 	heartBeatChan chan []interface{}
 
 	msg_callback      *Msg_Callback_Func
-//	behavior_callback *Behavior_Callback_Func
 	exit_callback     *Exit_Callback_Func
 	error_handler     *Error_Handler_Func
 
@@ -50,15 +48,14 @@ type GenServer struct {
 }
 
 func NewGenServer(msg_callback *Msg_Callback_Func,
-	behavior_callback *Behavior_Callback_Func,
 	exit_callback *Exit_Callback_Func,
 	error_handler *Error_Handler_Func,
 	logger_context *log.LoggerContext,
 	module string) GenServer {
-	return GenServer{msgChan: make(chan []interface{}, 1),
+	return GenServer{
+		msgChan: make(chan []interface{}, 1),
 		heartBeatChan:     make(chan []interface{}, 1),
 		msg_callback:      msg_callback,
-//		behavior_callback: behavior_callback,
 		exit_callback:     exit_callback,
 		error_handler:     error_handler,
 		isStarted:         false,
@@ -80,11 +77,10 @@ loop:
 	for {
 		select {
 		case heartBeatReq := <-s.heartBeatChan:
-			s.logger.Debug("Recieved heart beat message...")
 			if err1, respch_heartbeat, timestamp := s.decodeCmd(cmdHeartBeat, heartBeatReq); err1 == nil {
-				s.logger.Infof("responded heart beat sent at %v\n", timestamp)
 				select {
 				case respch_heartbeat <- []interface{}{true}:
+					s.logger.Debugf("responded to heart beat sent at %v\n", timestamp)
 				default:
 				}
 			} else {
@@ -178,7 +174,7 @@ func (s *GenServer) HeartBeat_sync() bool {
 func (s *GenServer) HeartBeat_async(respchan chan []interface{}, timestamp time.Time) error {
 	select {
 	case s.heartBeatChan <- []interface{}{cmdHeartBeat, respchan, timestamp}:
-		s.logger.Info("heart beat test")
+		s.logger.Debug("heart beat async called")
 		return nil
 	default:
 		s.logger.Debugf("Last heart beat msg has not been processed, len(heartBeatChan)=%v", len(s.heartBeatChan))

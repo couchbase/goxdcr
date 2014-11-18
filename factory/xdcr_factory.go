@@ -34,7 +34,7 @@ type XDCRFactory struct {
 	cluster_info_svc         metadata_svc.ClusterInfoSvc
 	xdcr_topology_svc        metadata_svc.XDCRCompTopologySvc
 	default_logger_ctx       *log.LoggerContext
-	pipeline_failure_handler base.PipelineFailureHandler
+	pipeline_failure_handler common.SupervisorFailureHandler
 	logger                   *log.CommonLogger
 }
 
@@ -46,7 +46,7 @@ func NewXDCRFactory(metadata_svc metadata_svc.MetadataSvc,
 	xdcr_topology_svc metadata_svc.XDCRCompTopologySvc,
 	pipeline_default_logger_ctx *log.LoggerContext,
 	factory_logger_ctx *log.LoggerContext,
-	pipeline_failure_handler base.PipelineFailureHandler) *XDCRFactory {
+	pipeline_failure_handler common.SupervisorFailureHandler) *XDCRFactory {
 	return &XDCRFactory{metadata_svc: metadata_svc,
 		cluster_info_svc:         cluster_info_svc,
 		xdcr_topology_svc:        xdcr_topology_svc,
@@ -400,7 +400,7 @@ func (xdcrf *XDCRFactory) registerServices(pipeline common.Pipeline, logger_ctx 
 
 	//TODO:
 	//register pipeline supervisor
-	supervisor := pipeline_svc.NewPipelineSupervisor(logger_ctx, xdcrf.pipeline_failure_handler)
+	supervisor := pipeline_svc.NewPipelineSupervisor(base.PipelineSupervisorIdPrefix + pipeline.Topic(), logger_ctx, xdcrf.pipeline_failure_handler)
 	ctx.RegisterService(base.PIPELINE_SUPERVISOR_SVC, supervisor)
 	//register pipeline checkpoint manager
 	ctx.RegisterService(base.CHECKPOINT_MGR_SVC, &pipeline_svc.CheckpointManager{})

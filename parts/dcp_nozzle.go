@@ -68,14 +68,13 @@ func NewDcpNozzle(id string,
 
 	//callback functions from GenServer
 	var msg_callback_func gen_server.Msg_Callback_Func
-	//	var behavior_callback_func gen_server.Behavior_Callback_Func
 	var exit_callback_func gen_server.Exit_Callback_Func
 	var error_handler_func gen_server.Error_Handler_Func
 
 	var isStarted_callback_func IsStarted_Callback_Func
 
 	server := gen_server.NewGenServer(&msg_callback_func,
-		nil, &exit_callback_func, &error_handler_func, logger_context, "DcpNozzle")
+		&exit_callback_func, &error_handler_func, logger_context, "DcpNozzle")
 	isStarted_callback_func = server.IsStarted
 	part := NewAbstractPartWithLogger(id, &isStarted_callback_func, server.Logger())
 

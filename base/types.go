@@ -13,7 +13,6 @@ import (
 	"bytes"
 	"fmt"
 	"reflect"
-	"github.com/couchbase/goxdcr/common"
 )
 
 type SettingDef struct {
@@ -48,10 +47,6 @@ func (se SettingsError) Add(key string, err error) {
 	se.err_map[key] = err
 }
 
-type PipelineFailureHandler interface {
-	OnError(pipeline common.Pipeline, partsError map[string]error)
-}
-
 // timestamp for a specific vb
 type VBTimestamp struct{
     Vbno  uint16
@@ -60,3 +55,4 @@ type VBTimestamp struct{
     SnapshotStart  uint64
     SnapshotEnd  uint64
 }
+

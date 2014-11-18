@@ -70,7 +70,7 @@ func main() {
 	mf(err, "vblist")
 	fmt.Printf("vblist in b=%v\n", vblist)
 	
-	for i:=0; i<16; i++ {
+	for i:=0; i<1; i++ {
 		go startDcpNozzle(options.kvaddr, bucket, vblist, 16, i)
 	}
 

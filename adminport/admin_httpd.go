@@ -123,14 +123,14 @@ func (s *httpServer) systemHandler(w http.ResponseWriter, r *http.Request) {
 	var err error
 
 	// TODO change to Debugf 
-	logger_ap.Infof("Request with path, %v, method, %v, and content type %v\n", r.URL.Path, r.Method, r.Header.Get("Content-Type"))
+	logger_server.Infof("Request with path, %v, method, %v, and content type %v\n", r.URL.Path, r.Method, r.Header.Get("Content-Type"))
 
 	// Fault-tolerance. No need to crash the server in case of panic.
 	defer func() {
 		if r := recover(); r != nil {
-			logger_ap.Errorf("adminport.request.recovered `%v`\n", r)
+			logger_server.Errorf("adminport.request.recovered `%v`\n", r)
 		} else if err != nil {
-			logger_ap.Errorf("%v\n", err)
+			logger_server.Errorf("%v\n", err)
 		}
 	}()
 
@@ -143,7 +143,7 @@ func (s *httpServer) systemHandler(w http.ResponseWriter, r *http.Request) {
 		case error:
 			http.Error(w, v.Error(), http.StatusInternalServerError)
 			err = fmt.Errorf("%v, %v", ErrorInternal, v)
-			logger_ap.Errorf("%v", err)
+			logger_server.Errorf("%v", err)
 		case []byte:
 			w.Write(v)
 	}

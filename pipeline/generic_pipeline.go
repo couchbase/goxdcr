@@ -255,6 +255,12 @@ func (genericPipeline *GenericPipeline) Stop() error {
 //	genericPipeline.stateLock.Lock()
 //	defer genericPipeline.stateLock.Unlock()
 
+	// stop services before stopping parts to avoid spurious errors from services
+	err = genericPipeline.context.Stop()
+	if err != nil {
+			return err
+	}
+	
 	//close the sources
 	for _, source := range genericPipeline.sources {
 		err = source.Close()
@@ -278,8 +284,6 @@ func (genericPipeline *GenericPipeline) Stop() error {
 	finchan := make(chan bool, 1)
 	go genericPipeline.waitToStop(finchan)
 	<-finchan
-
-	err = genericPipeline.context.Stop()
 
 	genericPipeline.isActive = false
 

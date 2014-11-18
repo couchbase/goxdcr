@@ -44,6 +44,14 @@ const (
 	CHECKPOINT_MGR_SVC string = "CheckpointManager"
 )
 
+// supervisor related constants
+const(
+	ReplicationManagerSupervisorId = "ReplicationManagerSupervisor"
+	PipelineMasterSupervisorId = "PipelineMasterSupervisor"
+	AdminportSupervisorId = "AdminportSupervisor"
+	PipelineSupervisorIdPrefix = "PipelineSupervisor_"
+)
+
 // constants for integer parsing
 var ParseIntBase    = 10
 var ParseIntBitSize = 64

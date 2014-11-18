@@ -22,7 +22,13 @@ import (
 	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/goxdcr/metadata_svc"
 	"github.com/couchbase/goxdcr/pipeline_svc"
+	"github.com/couchbase/goxdcr/supervisor"
 	"sync"
+	"reflect"
+	"strings"
+	"os"
+	"io"
+	"bufio"
 )
 
 var logger_rm *log.CommonLogger = log.NewLogger("ReplicationManager", log.DefaultLoggerContext)
@@ -31,37 +37,76 @@ var logger_rm *log.CommonLogger = log.NewLogger("ReplicationManager", log.Defaul
 /* struct ReplicationManager
 *************************************/
 type replicationManager struct {
+	supervisor.GenericSupervisor  // supervises the livesness of adminport and pipelineMasterSupervisor
+	pipelineMasterSupervisor  *supervisor.GenericSupervisor  // supervises the liveness of all pipeline supervisors
+	
+	sourceKVHost      string //source kv host name
+	sourceKVPort      int //source kv admin port
+	
 	metadata_svc             metadata_svc.MetadataSvc
 	cluster_info_svc         metadata_svc.ClusterInfoSvc
 	xdcr_topology_svc        metadata_svc.XDCRCompTopologySvc
 	replication_settings_svc metadata_svc.ReplicationSettingsSvc
 	once                     sync.Once
+	
+	adminport_finch  chan bool //finish channel for adminport
 }
 
 var replication_mgr replicationManager
 
-func Initialize(metadata_svc metadata_svc.MetadataSvc,
+func StartReplicationManager(sourceKVHost string, 
+	sourceKVPort int, 
+	metadata_svc metadata_svc.MetadataSvc,
 	cluster_info_svc metadata_svc.ClusterInfoSvc,
 	xdcr_topology_svc metadata_svc.XDCRCompTopologySvc,
 	replication_settings_svc metadata_svc.ReplicationSettingsSvc) {
+	
 	replication_mgr.once.Do(func() {
-		replication_mgr.init(metadata_svc, cluster_info_svc, xdcr_topology_svc, replication_settings_svc)
+		// initializes replication manager
+		replication_mgr.init(sourceKVHost, sourceKVPort, metadata_svc, cluster_info_svc, xdcr_topology_svc, replication_settings_svc)
+				
+		// start pipeline master supervisor
+		// TODO should we make heart beat settings configurable?
+		replication_mgr.pipelineMasterSupervisor.Start(nil)
+		
+		// start adminport
+		adminport := NewAdminport(sourceKVHost, replication_mgr.adminport_finch)	
+		go adminport.Start()
+		
+		// add pipeline master supervisor and adminport as children of replication manager supervisor
+		replication_mgr.GenericSupervisor.AddChild(replication_mgr.pipelineMasterSupervisor)
+		replication_mgr.GenericSupervisor.AddChild(adminport)
+		
+		// start replication manager supervisor
+		// TODO should we make heart beat settings configurable?
+		replication_mgr.GenericSupervisor.Start(nil)
+		
+		// start replications in existing replication specs
+		go replication_mgr.startReplications()
+		
+		// ns_server shutdown protocol: poll stdin and exit upon reciept of EOF
+		go pollStdin()
 	})
+	
 }
 
-func (rm *replicationManager) init(metadataSvc metadata_svc.MetadataSvc,
+func (rm *replicationManager) init(sourceKVHost string, 
+	sourceKVPort int,
+	metadataSvc metadata_svc.MetadataSvc,
 	clusterSvc metadata_svc.ClusterInfoSvc,
 	topologySvc metadata_svc.XDCRCompTopologySvc,
 	replicationSettingsSvc metadata_svc.ReplicationSettingsSvc) {
+	rm.GenericSupervisor = *supervisor.NewGenericSupervisor(base.ReplicationManagerSupervisorId, log.DefaultLoggerContext, rm)
+	rm.pipelineMasterSupervisor = supervisor.NewGenericSupervisor(base.PipelineMasterSupervisorId, log.DefaultLoggerContext, rm)
+	rm.sourceKVHost = sourceKVHost
+	rm.sourceKVPort = sourceKVPort
 	rm.metadata_svc = metadataSvc
 	rm.cluster_info_svc = clusterSvc
 	rm.xdcr_topology_svc = topologySvc
 	rm.replication_settings_svc = replicationSettingsSvc
+	rm.adminport_finch = make(chan bool)
 	fac := factory.NewXDCRFactory(metadataSvc, clusterSvc, topologySvc, log.DefaultLoggerContext, log.DefaultLoggerContext, rm)
 	pipeline_manager.PipelineManager(fac, log.DefaultLoggerContext)
-	
-	// start replications
-	rm.startReplications()
 
 	logger_rm.Info("Replication manager is initialized")
 
@@ -99,7 +144,7 @@ func CreateReplication(sourceClusterUUID, sourceBucket, targetClusterUUID, targe
 		topic = metadata.ReplicationId(sourceClusterUUID, sourceBucket, targetClusterUUID, targetBucket, filterName)
 	}
 	
-	go pipeline_manager.StartPipeline(topic, settings)
+	go StartPipeline(topic, settings)
 	logger_rm.Infof("Pipeline %s is created and started\n", topic)
 
 	return topic, nil
@@ -130,11 +175,11 @@ func PauseReplication(topic string, updateReplSpec bool, sync bool) error {
 	}
 
 	if sync {
-		err := pipeline_manager.StopPipeline(topic)
+		err := StopPipeline(topic)
 		logger_rm.Infof("Pipeline %s has been paused\n", topic)
 		return err
 	} else {
-		go pipeline_manager.StopPipeline(topic)
+		go StopPipeline(topic)
 		logger_rm.Infof("Pipeline %s is being paused\n", topic)
 		return nil
 	}
@@ -166,11 +211,11 @@ func ResumeReplication(topic string, updateReplSpec bool, sync bool) error {
 	settings := spec.Settings
 	settingsMap := settings.ToMap()
 	if sync {
-		_, err := pipeline_manager.StartPipeline(topic, settingsMap)
+		err := StartPipeline(topic, settingsMap)
 		logger_rm.Infof("Pipeline %s has been resumed\n", topic)
 		return err
 	} else {
-		go pipeline_manager.StartPipeline(topic, settingsMap)
+		go StartPipeline(topic, settingsMap)
 		logger_rm.Infof("Pipeline %s is being resumed\n", topic)
 		return nil
 	}
@@ -194,11 +239,30 @@ func DeleteReplication(topic string, deleteReplSpec bool) error {
 		}
 	}
 	
-	go pipeline_manager.StopPipeline(topic)
+	go StopPipeline(topic)
 
 	logger_rm.Infof("Pipeline %s is deleted\n", topic)
 
 	return nil
+}
+
+func StartPipeline(topic string, settings map[string]interface{}) error {
+	pipeline, err := pipeline_manager.StartPipeline(topic, settings)
+	if err == nil {
+		//add pipeline supervisor to the children of replication manager supervisor
+		replication_mgr.GenericSupervisor.AddChild(pipeline.RuntimeContext().Service(base.PIPELINE_SUPERVISOR_SVC).(*pipeline_svc.PipelineSupervisor))
+	}
+	return nil
+}
+
+func StopPipeline(topic string) error {
+	//remove pipeline supervisor from the children of replication manager supervisor
+	pipeline := pipeline_manager.Pipeline(topic)
+	if pipeline != nil {
+		replication_mgr.GenericSupervisor.RemoveChild(pipeline.RuntimeContext().Service(base.PIPELINE_SUPERVISOR_SVC).(*pipeline_svc.PipelineSupervisor).Id())
+	}
+		
+	return pipeline_manager.StopPipeline(topic)
 }
 
 func HandleChangesToReplicationSettings(topic string, settings map[string]interface{}) error {
@@ -271,21 +335,51 @@ func UpdateReplicationSpec(topic string, active bool, action string) error {
 	return err
 }
 
-func (rm *replicationManager) OnError(pipeline common.Pipeline, partsError map[string]error) {
-	logger_rm.Infof("Pipeline %v reported failure. The following parts are broken: %v\n", pipeline.Topic(), partsError)
+func (rm *replicationManager) OnError(s common.Supervisor, errors map[string]error) {
+	logger_rm.Infof("Supervisor %v of type %v reported errors %v\n", s.Id(), reflect.TypeOf(s), errors)
 	
-	// try to fix the pipeline
-	err := fixPipeline(pipeline)
-
-	if err != nil {
-		logger_rm.Infof("The effort of fixing pipeline %v has failed, err=%v; The retry will happen latter\n",
-			pipeline.Topic(), err)
-		panic("Failed to fix pipeline")
-		//TODO: propagate the error to ns_server
-
-		//TODO: schedule the retry
+	if s.Id() == base.ReplicationManagerSupervisorId {
+		// the errors came from the replication manager supervisor because adminport or pipeline master supervisor is not longer alive.	
+		// there is nothing we can do except to abort xdcr. ns_server will restart xdcr while later
+		stop()
+	} else if s.Id() == base.PipelineMasterSupervisorId {
+		// the errors came from the pipeline master supervisor because some pipeline supervisors are not longer alive.	
+		for childId, _ := range errors {
+			child, _ := s.Child(childId)
+			// child could be null if the pipeline has been stopped so far. //TODO should we restart it here?
+			if child != nil {
+				pipeline, err := getPipelineFromPipelineSupevisor(child.(common.Supervisor))
+				if err == nil {
+					// try to fix the pipeline
+					go fixPipeline(pipeline)
+				}
+			}
+		}
+	} else {
+		// the errors came from a pipeline supervisor because some parts are not longer alive.
+			pipeline, err := getPipelineFromPipelineSupevisor(s)
+			if err == nil {
+				// try to fix the pipeline
+				go fixPipeline(pipeline)
+			}
 	}
+}
 
+func getPipelineFromPipelineSupevisor(s common.Supervisor) (common.Pipeline, error) {
+	supervisorId := s.Id()
+	if strings.HasPrefix(supervisorId, base.PipelineSupervisorIdPrefix) {
+		pipelineId := supervisorId[len(base.PipelineSupervisorIdPrefix):]
+		pipeline := pipeline_manager.Pipeline(pipelineId)
+		if pipeline != nil {
+			return pipeline, nil
+		} else {
+			// should never get here
+			return nil, errors.New(fmt.Sprintf("Internal error. Pipeline, %v, is not found", pipelineId))
+		}
+	} else {
+		// should never get here
+		return nil, errors.New(fmt.Sprintf("Internal error. Supervisor, %v, is not a pipeline supervisor.", supervisorId))
+	}
 }
 
 // start all replications with active replication spec 
@@ -299,7 +393,7 @@ func (rm *replicationManager) startReplications() {
 	}
 	
 	for _, spec := range specs {
-		go pipeline_manager.StartPipeline(spec.Id, spec.Settings.ToMap())
+		go StartPipeline(spec.Id, spec.Settings.ToMap())
 	}
 }
 
@@ -313,7 +407,11 @@ func fixPipeline(pipeline common.Pipeline) error {
 		if err == nil {
 			logger_rm.Infof("Pipeline %v is fixed, back to business\n", pipeline.Topic())
 		}else {
-			logger_rm.Infof("Failed to fix pipeline %v, err=%v\n", pipeline.Topic(), err)
+			logger_rm.Errorf("Failed to fix pipeline %v, err=%v\n", pipeline.Topic(), err)
+			//panic("Failed to fix pipeline")
+				//TODO: propagate the error to ns_server
+
+				//TODO: schedule the retry
 		}
 		return err
 	} 
@@ -384,4 +482,41 @@ func validatePipelineState(topic, action string, active bool) error {
 		return errors.New(fmt.Sprintf("Warning: Cannot %v replication with id, %v, since it is %v actively running.\n", action, topic, state))
 	}
 	return nil
+}
+
+// ns_server shutdown protocol: poll stdin and exit upon reciept of EOF
+func pollStdin() {
+	reader := bufio.NewReader(os.Stdin)
+	logger_rm.Infof("pollEOF: About to start stdin polling")
+	for {
+		ch, err := reader.ReadByte()
+		logger_rm.Infof("received byte %v\n", ch)
+		if err == io.EOF {
+			logger_rm.Infof("Received EOF; Exiting...")
+			stop()
+		}
+		if err != nil {
+			logger_rm.Errorf("Unexpected error polling stdin: %v\n", err)
+			os.Exit(1)
+		}
+		if ch == '\n' || ch == '\r' {
+			logger_rm.Infof("Received EOL; Exiting...")
+			stop()
+		}
+	}
+}
+
+func stop() {
+	// kill adminport to stop receiving new requests
+	close(replication_mgr.adminport_finch)
+
+	// TODO checkpointing
+		
+	// stop running pipelines
+	for _, topic := range pipeline_manager.Topics() {
+		pipeline_manager.StopPipeline(topic)
+	}
+
+	// exit main routine
+	os.Exit(0)
 }

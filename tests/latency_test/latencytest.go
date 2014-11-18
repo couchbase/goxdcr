@@ -23,6 +23,7 @@ import (
 //	"github.com/couchbase/gomemcached"
 	mc "github.com/couchbase/gomemcached/client"
 	"github.com/couchbaselabs/go-couchbase"
+	"github.com/couchbase/goxdcr/metadata"
 	"log"
 	"net/http"
 	"net/url"
@@ -376,7 +377,7 @@ func startGoXDCRReplicationByRest() error {
 
 func stopGoXDCRReplicationByRest() (err error) {
 
-	replicationId := options.source_cluster_addr + "_" + options.source_bucket + "_" + options.target_cluster_addr + "_" + options.target_bucket;
+	replicationId := metadata.XdcrPrefix + "_" + options.source_cluster_addr + "_" + options.source_bucket + "_" + options.target_cluster_addr + "_" + options.target_bucket;
 	cmd := exec.Command("curl", "-X", "POST", "http://" + source_rest_server_addr + "/controller/cancelXDCR/" + replicationId)
 	logger_latency.Infof("cmd =%v, path=%v\n", cmd.Args, cmd.Path)
 	bytes, err := cmd.Output()
