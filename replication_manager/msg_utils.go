@@ -21,6 +21,7 @@ import (
 	"errors"
 	"regexp"
 	"fmt"
+	"encoding/json"
 )
 
 // http request method types
@@ -38,6 +39,7 @@ const (
 
 // constants used for parsing url path
 const (
+	RemoteClustersPath  = "pools/default/remoteClusters"
 	CreateReplicationPath    = "controller/createReplication"
 	DeleteReplicationPrefix  = "controller/cancelXDCR"
 	PauseReplicationPrefix  = "controller/pauseXDCR"
@@ -50,6 +52,19 @@ const (
 	// e.g., settings/replications/dynamic
 	DynamicSuffix = "/dynamic"
 )
+
+// constants used for remote cluster references
+const (
+	RemoteClusterUuid   = "uuid"
+	RemoteClusterName  = "name"
+	RemoteClusterHostName = "hostname"
+	RemoteClusterUserName = "username"
+	RemoteClusterPassword = "password"
+	RemoteClusterDemandEncryption = "demandEncryption"
+	RemoteClusterCertificate = "certificate"
+)
+
+var RequiredRemoteClusterParams = [4]string{RemoteClusterName, RemoteClusterHostName, RemoteClusterUserName, RemoteClusterPassword}
 
 // constants used for parsing internal settings
 const (
@@ -145,6 +160,104 @@ var ReplSettingInternalToRestMap = map[string]string {
 } 
 
 var logger_msgutil *log.CommonLogger = log.NewLogger("MessageUtils", log.DefaultLoggerContext)
+
+func NewGetRemoteClustersResponse(remoteClusters map[string]*metadata.RemoteClusterReference) ([]byte, error) {
+	remoteClusterArr := make([]metadata.RemoteClusterReference, 0)
+	for _, remoteCluster := range remoteClusters {
+		remoteClusterArr = append(remoteClusterArr, *remoteCluster)
+	}
+	b, err := json.Marshal(remoteClusterArr)
+	return b, err
+}
+
+// decode parameters from create remote cluster request
+func DecodeCreateRemoteClusterRequest(request *http.Request) (uuid, name, hostName, userName, password string, demandEncryption bool, certificate []byte, err error) {	
+	if err = request.ParseForm(); err != nil {
+		return 
+	}
+
+	decodedParams := make(map[string]bool, 0)
+	
+	for key, valArr := range request.Form {
+		if len(valArr) != 1 {
+			err = utils.InvalidValueInHttpRequestError(key, valArr)
+			return
+		}
+		val := valArr[0]
+		
+		switch key {
+		case RemoteClusterUuid:
+			uuid = val
+			decodedParams[RemoteClusterUuid] = true
+		case RemoteClusterName:
+			name = val
+			decodedParams[RemoteClusterName] = true
+		case RemoteClusterHostName:
+			hostName = val
+			decodedParams[RemoteClusterHostName] = true
+		case RemoteClusterUserName:
+			userName = val
+			decodedParams[RemoteClusterUserName] = true
+		case RemoteClusterPassword:
+			password = val
+			decodedParams[RemoteClusterPassword] = true
+		case RemoteClusterDemandEncryption:
+			demandEncryption, err = strconv.ParseBool(val)
+			if err != nil {
+				err = utils.InvalidValueInHttpRequestError(key, val)
+				return
+			}
+		case RemoteClusterCertificate:
+			certificate = []byte(val)
+		default:
+			err = utils.InvalidParameterInHttpRequestError(key)
+			return
+		}
+	}
+	
+	// check required parameters
+	missingParams := make([]string, 0)
+	for _, requiredParam := range RequiredRemoteClusterParams{
+		if _, ok := decodedParams[requiredParam]; !ok {
+			missingParams = append(missingParams, requiredParam)
+		}
+	}
+	
+	// certificate is required if demandEncryption is set to true
+	if demandEncryption && len(certificate) == 0 {
+		missingParams = append(missingParams, RemoteClusterCertificate)
+	}
+	
+	if len(missingParams) > 0 {
+		err = utils.MissingParametersInHttpRequestError(missingParams)
+		return
+	} 
+	
+	return
+}
+
+func NewCreateRemoteClusterResponse(remoteClusterRef *metadata.RemoteClusterReference) ([]byte, error) {
+	return json.Marshal(remoteClusterRef)
+}
+
+// decode remote cluster name from request
+func DecodeRemoteClusterNameFromHttpRequest(request *http.Request) (string, error) {
+	// length of prefix preceding remote cluster name in request url path 
+	prefixLength := len(base.AdminportUrlPrefix) + len(RemoteClustersPath) + len(base.UrlDelimiter)
+	
+	if len(request.URL.Path) <= prefixLength {		
+		return "", utils.MissingParameterInHttpRequestUrlError("remote cluster name", request.URL.Path)
+	}
+
+	remoteClusterName := request.URL.Path[prefixLength:]
+	return remoteClusterName, nil
+	
+}
+
+func NewDeleteRemoteClusterResponse() ([]byte, error) {
+	// return "ok" in success case
+	return []byte("ok"), nil
+}
 
 // decode parameters from create replication request
 func DecodeCreateReplicationRequest(request *http.Request) (fromBucket, toClusterUuid, toBucket, filterName string, forward bool, settings map[string]interface{}, err error) {	
@@ -382,7 +495,7 @@ func DecodeReplicationIdFromHttpRequest(request *http.Request, pathPrefix string
 	prefixLength := len(base.AdminportUrlPrefix) + len(pathPrefix) + len(base.UrlDelimiter)
 	
 	if len(request.URL.Path) <= prefixLength {		
-		return "", utils.MissingReplicationIdInHttpRequestError(request.URL.Path)
+		return "", utils.MissingParameterInHttpRequestUrlError("replication id", request.URL.Path)
 	}
 
 	replicationId := request.URL.Path[prefixLength:]

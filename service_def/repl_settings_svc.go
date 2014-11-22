@@ -7,16 +7,14 @@
 // either express or implied. See the License for the specific language governing permissions
 // and limitations under the License.
 
-package metadata_svc
+package service_def
 
 import (
-	"github.com/couchbase/goxdcr/metadata"
+	metadata "github.com/couchbase/goxdcr/metadata"
 )
 
-type MetadataSvc interface {
-	ReplicationSpec(replicationId string) (*metadata.ReplicationSpecification, error)
-	AddReplicationSpec(spec metadata.ReplicationSpecification) error
-	SetReplicationSpec(spec metadata.ReplicationSpecification) error
-	DelReplicationSpec(replicationId string) error
-	ActiveReplicationSpecs() (map[string]*metadata.ReplicationSpecification, error)
+// this service is likely provided by exposing an erlang rest api in ns_server
+type ReplicationSettingsSvc interface {
+	GetReplicationSettings() (*metadata.ReplicationSettings, error)
+	SetReplicationSettings(*metadata.ReplicationSettings) error
 }

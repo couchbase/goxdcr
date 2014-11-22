@@ -10,7 +10,7 @@ import (
 	"github.com/couchbase/goxdcr/factory"
 	"github.com/couchbase/goxdcr/parts"
 	c "github.com/couchbase/goxdcr/mock_services"
-	s "github.com/couchbase/goxdcr/services"
+	s "github.com/couchbase/goxdcr/service_impl"
     "github.com/couchbase/goxdcr/metadata"
 )
 
@@ -76,20 +76,22 @@ func invokeFactory() error {
 		return err
 	}
 	
+	replSpecSvc := s.NewReplicationSpecService(msvc, nil)
+	
 	mcisvc := &c.MockClusterInfoSvc{}
 	mxtsvc := &c.MockXDCRTopologySvc{}
 
 	c.SetTestOptions(options.connectStr, options.sourceKVHost, options.username, options.password)
-	fac := factory.NewXDCRFactory(msvc, mcisvc, mxtsvc, log.DefaultLoggerContext, log.DefaultLoggerContext, nil)
+	fac := factory.NewXDCRFactory(replSpecSvc, mcisvc, mxtsvc, log.DefaultLoggerContext, log.DefaultLoggerContext, nil)
 
 	replSpec := metadata.NewReplicationSpecification(options.connectStr, options.sourceBucket, options.connectStr, options.targetBucket, "")
 	replSpec.Settings.SourceNozzlePerNode = NUM_SOURCE_CONN
 	replSpec.Settings.TargetNozzlePerNode = NUM_TARGET_CONN
-	err = msvc.AddReplicationSpec(*replSpec)
+	err = replSpecSvc.AddReplicationSpec(replSpec)
 	if err != nil {
 		return err
 	}
-	defer msvc.DelReplicationSpec(replSpec.Id)
+	defer replSpecSvc.DelReplicationSpec(replSpec.Id)
 	
 	pl, err := fac.NewPipeline(replSpec.Id)
 	if err != nil {

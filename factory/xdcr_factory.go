@@ -8,7 +8,7 @@ import (
     pctx "github.com/couchbase/goxdcr/pipeline_ctx"
     "github.com/couchbase/goxdcr/base"
     "github.com/couchbase/goxdcr/metadata"
-    "github.com/couchbase/goxdcr/metadata_svc"
+    "github.com/couchbase/goxdcr/service_def"
     "github.com/couchbase/goxdcr/parts"
     "github.com/couchbase/goxdcr/pipeline_svc"
 	"math"
@@ -30,9 +30,9 @@ var ErrorNoTargetNozzle = errors.New("Invalid configuration. No target nozzle ca
 
 // Factory for XDCR pipelines
 type XDCRFactory struct {
-	metadata_svc             metadata_svc.MetadataSvc
-	cluster_info_svc         metadata_svc.ClusterInfoSvc
-	xdcr_topology_svc        metadata_svc.XDCRCompTopologySvc
+	repl_spec_svc             service_def.ReplicationSpecSvc
+	cluster_info_svc         service_def.ClusterInfoSvc
+	xdcr_topology_svc        service_def.XDCRCompTopologySvc
 	default_logger_ctx       *log.LoggerContext
 	pipeline_failure_handler common.SupervisorFailureHandler
 	logger                   *log.CommonLogger
@@ -41,13 +41,13 @@ type XDCRFactory struct {
 //var xdcrf.logger *log.CommonLogger = log.NewLogger("XDCRFactory", log.LogLevelInfo)
 
 // set call back functions is done only once
-func NewXDCRFactory(metadata_svc metadata_svc.MetadataSvc,
-	cluster_info_svc metadata_svc.ClusterInfoSvc,
-	xdcr_topology_svc metadata_svc.XDCRCompTopologySvc,
+func NewXDCRFactory(repl_spec_svc service_def.ReplicationSpecSvc,
+	cluster_info_svc service_def.ClusterInfoSvc,
+	xdcr_topology_svc service_def.XDCRCompTopologySvc,
 	pipeline_default_logger_ctx *log.LoggerContext,
 	factory_logger_ctx *log.LoggerContext,
 	pipeline_failure_handler common.SupervisorFailureHandler) *XDCRFactory {
-	return &XDCRFactory{metadata_svc: metadata_svc,
+	return &XDCRFactory{repl_spec_svc: repl_spec_svc,
 		cluster_info_svc:         cluster_info_svc,
 		xdcr_topology_svc:        xdcr_topology_svc,
 		default_logger_ctx:       pipeline_default_logger_ctx,
@@ -58,7 +58,7 @@ func NewXDCRFactory(metadata_svc metadata_svc.MetadataSvc,
 func (xdcrf *XDCRFactory) NewPipeline(topic string) (common.Pipeline, error) {
 	logger_ctx := log.CopyCtx(xdcrf.default_logger_ctx)
 
-	spec, err := xdcrf.metadata_svc.ReplicationSpec(topic)
+	spec, err := xdcrf.repl_spec_svc.ReplicationSpec(topic)
 	xdcrf.logger.Debugf("replication specification = %v\n", spec)
 	if err != nil {
 		xdcrf.logger.Errorf("err=%v\n", err)

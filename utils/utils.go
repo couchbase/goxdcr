@@ -205,8 +205,8 @@ func MissingParametersInHttpRequestError(params []string) error {
 	return errors.New(fmt.Sprintf("Parameters, %v, are missing in http request.", params))
 }
 
-func MissingReplicationIdInHttpRequestError(path string) error {
-	return errors.New(fmt.Sprintf("Replication id is missing from request url, %v.", path))
+func MissingParameterInHttpRequestUrlError(paramName, path string) error {
+	return errors.New(fmt.Sprintf("%v is missing from request url, %v.", paramName, path))
 }
 
 func MissingParameterInHttpResponseError(param string) error {

@@ -14,7 +14,10 @@ build_xdcr(){
 build_tests(){
 echo "Building tests..."
 cd tests
-cd adminport
+cd common
+go clean
+go install
+cd ../adminport
 go clean
 go install
 cd ../xmem
@@ -35,7 +38,9 @@ go install
 cd ../pipeline
 go clean
 go install
-cd ..
+cd ../remote_cluster
+go clean
+go install
 cd ../services
 go clean
 go install
@@ -54,7 +59,9 @@ rm -f bin/xdcr
 clean_tests(){
 echo "Clean tests..."
 cd tests
-cd adminport
+cd common
+go clean
+cd ../adminport
 go clean
 cd ../xmem
 go clean
@@ -69,6 +76,8 @@ go clean
 cd ../pipeline
 go clean
 cd ..
+cd ../remote_cluster
+go clean
 cd ../services
 go clean
 cd ..

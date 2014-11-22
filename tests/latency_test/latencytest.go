@@ -377,7 +377,7 @@ func startGoXDCRReplicationByRest() error {
 
 func stopGoXDCRReplicationByRest() (err error) {
 
-	replicationId := metadata.XdcrPrefix + "_" + options.source_cluster_addr + "_" + options.source_bucket + "_" + options.target_cluster_addr + "_" + options.target_bucket;
+	replicationId := metadata.ReplicationSpecKeyPrefix  + "_" + options.source_cluster_addr + "_" + options.source_bucket + "_" + options.target_cluster_addr + "_" + options.target_bucket;
 	cmd := exec.Command("curl", "-X", "POST", "http://" + source_rest_server_addr + "/controller/cancelXDCR/" + replicationId)
 	logger_latency.Infof("cmd =%v, path=%v\n", cmd.Args, cmd.Path)
 	bytes, err := cmd.Output()

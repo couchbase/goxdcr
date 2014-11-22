@@ -20,7 +20,7 @@ import (
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/factory"
 	"github.com/couchbase/goxdcr/metadata"
-	"github.com/couchbase/goxdcr/metadata_svc"
+	"github.com/couchbase/goxdcr/service_def"
 	"github.com/couchbase/goxdcr/pipeline_svc"
 	"github.com/couchbase/goxdcr/supervisor"
 	"sync"
@@ -43,10 +43,11 @@ type replicationManager struct {
 	sourceKVHost      string //source kv host name
 	sourceKVPort      int //source kv admin port
 	
-	metadata_svc             metadata_svc.MetadataSvc
-	cluster_info_svc         metadata_svc.ClusterInfoSvc
-	xdcr_topology_svc        metadata_svc.XDCRCompTopologySvc
-	replication_settings_svc metadata_svc.ReplicationSettingsSvc
+	repl_spec_svc            service_def.ReplicationSpecSvc
+	remote_cluster_svc       service_def.RemoteClusterSvc
+	cluster_info_svc         service_def.ClusterInfoSvc
+	xdcr_topology_svc        service_def.XDCRCompTopologySvc
+	replication_settings_svc service_def.ReplicationSettingsSvc
 	once                     sync.Once
 	
 	adminport_finch  chan bool //finish channel for adminport
@@ -56,14 +57,15 @@ var replication_mgr replicationManager
 
 func StartReplicationManager(sourceKVHost string, 
 	sourceKVPort int, 
-	metadata_svc metadata_svc.MetadataSvc,
-	cluster_info_svc metadata_svc.ClusterInfoSvc,
-	xdcr_topology_svc metadata_svc.XDCRCompTopologySvc,
-	replication_settings_svc metadata_svc.ReplicationSettingsSvc) {
+	repl_spec_svc service_def.ReplicationSpecSvc,
+	remote_cluster_svc service_def.RemoteClusterSvc,
+	cluster_info_svc service_def.ClusterInfoSvc,
+	xdcr_topology_svc service_def.XDCRCompTopologySvc,
+	replication_settings_svc service_def.ReplicationSettingsSvc) {
 	
 	replication_mgr.once.Do(func() {
 		// initializes replication manager
-		replication_mgr.init(sourceKVHost, sourceKVPort, metadata_svc, cluster_info_svc, xdcr_topology_svc, replication_settings_svc)
+		replication_mgr.init(sourceKVHost, sourceKVPort, repl_spec_svc, remote_cluster_svc, cluster_info_svc, xdcr_topology_svc, replication_settings_svc)
 				
 		// start pipeline master supervisor
 		// TODO should we make heart beat settings configurable?
@@ -92,39 +94,45 @@ func StartReplicationManager(sourceKVHost string,
 
 func (rm *replicationManager) init(sourceKVHost string, 
 	sourceKVPort int,
-	metadataSvc metadata_svc.MetadataSvc,
-	clusterSvc metadata_svc.ClusterInfoSvc,
-	topologySvc metadata_svc.XDCRCompTopologySvc,
-	replicationSettingsSvc metadata_svc.ReplicationSettingsSvc) {
+	repl_spec_svc service_def.ReplicationSpecSvc,
+	remote_cluster_svc service_def.RemoteClusterSvc,
+	cluster_info_svc service_def.ClusterInfoSvc,
+	xdcr_topology_svc service_def.XDCRCompTopologySvc,
+	replication_settings_svc service_def.ReplicationSettingsSvc) {
 	rm.GenericSupervisor = *supervisor.NewGenericSupervisor(base.ReplicationManagerSupervisorId, log.DefaultLoggerContext, rm)
 	rm.pipelineMasterSupervisor = supervisor.NewGenericSupervisor(base.PipelineMasterSupervisorId, log.DefaultLoggerContext, rm)
 	rm.sourceKVHost = sourceKVHost
 	rm.sourceKVPort = sourceKVPort
-	rm.metadata_svc = metadataSvc
-	rm.cluster_info_svc = clusterSvc
-	rm.xdcr_topology_svc = topologySvc
-	rm.replication_settings_svc = replicationSettingsSvc
+	rm.repl_spec_svc = repl_spec_svc
+	rm.remote_cluster_svc = remote_cluster_svc
+	rm.cluster_info_svc = cluster_info_svc
+	rm.xdcr_topology_svc = xdcr_topology_svc
+	rm.replication_settings_svc = replication_settings_svc
 	rm.adminport_finch = make(chan bool)
-	fac := factory.NewXDCRFactory(metadataSvc, clusterSvc, topologySvc, log.DefaultLoggerContext, log.DefaultLoggerContext, rm)
+	fac := factory.NewXDCRFactory(repl_spec_svc, cluster_info_svc, xdcr_topology_svc, log.DefaultLoggerContext, log.DefaultLoggerContext, rm)
 	pipeline_manager.PipelineManager(fac, log.DefaultLoggerContext)
 
 	logger_rm.Info("Replication manager is initialized")
 
 }
 
-func MetadataService() metadata_svc.MetadataSvc {
-	return replication_mgr.metadata_svc
+func ReplicationSpecService() service_def.ReplicationSpecSvc {
+	return replication_mgr.repl_spec_svc
 }
 
-func ClusterInfoService() metadata_svc.ClusterInfoSvc {
+func RemoteClusterService() service_def.RemoteClusterSvc {
+	return replication_mgr.remote_cluster_svc
+}
+
+func ClusterInfoService() service_def.ClusterInfoSvc {
 	return replication_mgr.cluster_info_svc
 }
 
-func XDCRCompTopologyService() metadata_svc.XDCRCompTopologySvc {
+func XDCRCompTopologyService() service_def.XDCRCompTopologySvc {
 	return replication_mgr.xdcr_topology_svc
 }
 
-func ReplicationSettingsService() metadata_svc.ReplicationSettingsSvc {
+func ReplicationSettingsService() service_def.ReplicationSettingsSvc {
 	return replication_mgr.replication_settings_svc
 }
 
@@ -203,7 +211,7 @@ func ResumeReplication(topic string, updateReplSpec bool, sync bool) error {
 		}
 	}
 
-	spec, err := MetadataService().ReplicationSpec(topic)
+	spec, err := ReplicationSpecService().ReplicationSpec(topic)
 	if err != nil {
 		return err
 	}
@@ -230,7 +238,7 @@ func DeleteReplication(topic string, deleteReplSpec bool) error {
 			return err
 		}
 
-		err := MetadataService().DelReplicationSpec(topic)
+		err := ReplicationSpecService().DelReplicationSpec(topic)
 		if err == nil {
 			logger_rm.Debugf("Replication specification %s is deleted\n", topic)
 		} else {
@@ -267,14 +275,14 @@ func StopPipeline(topic string) error {
 
 func HandleChangesToReplicationSettings(topic string, settings map[string]interface{}) error {
 	// read replication spec with the specified replication id
-	replSpec, err := MetadataService().ReplicationSpec(topic)
+	replSpec, err := ReplicationSpecService().ReplicationSpec(topic)
 	if err != nil {
 		return err
 	}
 
 	// update replication spec with input settings
 	replSpec.Settings.UpdateSettingsFromMap(settings)
-	err = MetadataService().SetReplicationSpec(*replSpec)
+	err = ReplicationSpecService().SetReplicationSpec(replSpec)
 	
 	// TODO implement additional logic, e.g.,
 	// 1. reconstruct pipeline when source/targetNozzlePerNode is changed
@@ -305,7 +313,7 @@ func (rm *replicationManager) createAndPersistReplicationSpec(sourceClusterUUID,
 		spec.Settings = s
 
 		//persist it
-		replication_mgr.metadata_svc.AddReplicationSpec(*spec)
+		replication_mgr.repl_spec_svc.AddReplicationSpec(spec)
 		logger_rm.Debugf("replication specification %s is created and persisted\n", spec.Id)
 		return spec, nil
 	} else {
@@ -315,7 +323,7 @@ func (rm *replicationManager) createAndPersistReplicationSpec(sourceClusterUUID,
 
 //update the replication specification's "active" setting
 func UpdateReplicationSpec(topic string, active bool, action string) error {	
-	spec, err := replication_mgr.metadata_svc.ReplicationSpec(topic)
+	spec, err := replication_mgr.repl_spec_svc.ReplicationSpec(topic)
 	if err != nil {
 		logger_rm.Errorf("%v\n", err)
 		return err
@@ -330,7 +338,7 @@ func UpdateReplicationSpec(topic string, active bool, action string) error {
 		return errors.New(fmt.Sprintf("Invalid operation. Cannot %v replication with id, %v, since it is %v actively running.\n", action, topic, state))
 	}
 	settings.Active = active
-	err = replication_mgr.metadata_svc.SetReplicationSpec(*spec)
+	err = replication_mgr.repl_spec_svc.SetReplicationSpec(spec)
 	logger_rm.Debugf("Replication specification %s is set to active=%v\n", topic, active)
 	return err
 }
@@ -386,7 +394,7 @@ func getPipelineFromPipelineSupevisor(s common.Supervisor) (common.Pipeline, err
 func (rm *replicationManager) startReplications() {
 	logger_rm.Infof("Replication manager init - starting existing replications")
 	
-	specs, err := replication_mgr.metadata_svc.ActiveReplicationSpecs()
+	specs, err := replication_mgr.repl_spec_svc.ActiveReplicationSpecs()
 	if err != nil {
 		logger_rm.Errorf("Error retrieving active replication specs")
 		return
@@ -431,7 +439,7 @@ func SetPipelineLogLevel(topic string, levelStr string) error {
 	pipeline := pipeline_manager.Pipeline(topic)
 
 	//update the setting
-	spec, err := MetadataService().ReplicationSpec(topic)
+	spec, err := ReplicationSpecService().ReplicationSpec(topic)
 	if err != nil && spec == nil {
 		return errors.New(fmt.Sprintf("Failed to lookup replication specification %v, err=%v", topic, err))
 	}
@@ -460,7 +468,7 @@ func SetPipelineLogLevel(topic string, levelStr string) error {
 }
 
 func validatePipelineExists(topic, action string, exist bool) error {
-	_, err := replication_mgr.metadata_svc.ReplicationSpec(topic)
+	_, err := replication_mgr.repl_spec_svc.ReplicationSpec(topic)
 	pipelineExist := (err == nil)
 	if pipelineExist != exist {
 		state := "already exists"

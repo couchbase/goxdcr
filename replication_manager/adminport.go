@@ -19,14 +19,19 @@ import (
 	"bytes"
 	"time"
 	"errors"
+	"fmt"
+	"io/ioutil"
+	"crypto/x509"
+	"crypto/tls"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/gen_server"
+	"github.com/couchbase/goxdcr/metadata"
 	ap "github.com/couchbase/goxdcr/adminport"
-	utils "github.com/couchbase/goxdcr/utils"
+	"github.com/couchbase/goxdcr/utils"
 )
 
-var StaticPaths = [3]string{CreateReplicationPath, SettingsReplicationsPath, StatisticsPath}
-var DynamicPathPrefixes = [4]string{DeleteReplicationPrefix, PauseReplicationPrefix, ResumeReplicationPrefix, SettingsReplicationsPath}
+var StaticPaths = [4]string{RemoteClustersPath, CreateReplicationPath, SettingsReplicationsPath, StatisticsPath}
+var DynamicPathPrefixes = [5]string{RemoteClustersPath, DeleteReplicationPrefix, PauseReplicationPrefix, ResumeReplicationPrefix, SettingsReplicationsPath}
 
 var MaxForwardingRetry = 5
 var ForwardingRetryInterval = time.Second * 10
@@ -139,6 +144,12 @@ func (adminport *Adminport) handleRequest(
 	}
 	
 	switch (key) {
+	case RemoteClustersPath + base.UrlDelimiter + MethodGet:
+		response, err = adminport.doGetRemoteClustersRequest(request)
+	case RemoteClustersPath + base.UrlDelimiter + MethodPost:
+		response, err = adminport.doCreateRemoteClusterRequest(request)
+	case RemoteClustersPath + DynamicSuffix + base.UrlDelimiter + MethodDelete:
+		response, err = adminport.doDeleteRemoteClusterRequest(request)
 	case CreateReplicationPath + base.UrlDelimiter + MethodPost:
 		response, err = adminport.doCreateReplicationRequest(request)
 	case DeleteReplicationPrefix + DynamicSuffix + base.UrlDelimiter + MethodDelete:
@@ -160,6 +171,134 @@ func (adminport *Adminport) handleRequest(
 		err = ap.ErrorInvalidRequest
 	}
 	return response, err
+}
+
+func (adminport *Adminport) doGetRemoteClustersRequest(request *http.Request) ([]byte, error) {
+	logger_ap.Infof("doGetRemoteClustersRequest\n")
+	
+	remoteClusters, err := RemoteClusterService().RemoteClusters()
+	if err != nil {
+		return nil, err
+	}
+	
+	return NewGetRemoteClustersResponse(remoteClusters)
+}
+
+func (adminport *Adminport) doCreateRemoteClusterRequest(request *http.Request) ([]byte, error) {
+	logger_ap.Infof("doCreateRemoteClusterRequest\n")
+	
+	uuid, name, hostName, userName, password, demandEncryption, certificate, err := DecodeCreateRemoteClusterRequest(request)
+	if err != nil {
+		return nil, err
+	}
+
+	logger_ap.Infof("Decoded parameters: uuid=%v, name=%v, hostName=%v, userName=%v, password=%v, demandEncryption=%v, certificate is nil? %v\n",
+					uuid, name, hostName, userName, password, demandEncryption, certificate == nil)
+	
+	actualUuid, err := validateRemoteClusterInfo(hostName, userName, password, demandEncryption, certificate)
+	if err != nil {
+		return nil, err
+	}
+	
+	remoteClusterRef := metadata.NewRemoteClusterReference(actualUuid, name, hostName, userName, password, demandEncryption, certificate)
+	err = RemoteClusterService().AddRemoteCluster(remoteClusterRef)
+	if err != nil {
+		return nil, err
+	}
+	
+	return NewCreateRemoteClusterResponse(remoteClusterRef)
+}
+
+// validate remote cluster info and retrieve uuid 
+func validateRemoteClusterInfo(hostName, userName, password string, 
+	demandEncryption  bool, certificate  []byte) (string, error) {
+		
+	var response *http.Response
+	var err error
+	if demandEncryption {
+		response, err = connectToRemoteClusterThroughHttps(hostName, userName, password, certificate)
+	} else {
+		response, err = connectToRemoteClusterThroughHttp(hostName, userName, password)
+	}
+	if err != nil {
+		return "", err
+	}
+	
+	// verify contents in response
+	defer response.Body.Close()
+	bodyBytes, err := ioutil.ReadAll(response.Body)
+	if err != nil {
+		return "", err
+	}
+
+	// xxx/pools returns a map object
+	var poolsInfo map[string]interface{}
+	err = json.Unmarshal(bodyBytes, &poolsInfo)
+	if err != nil {
+		return "", err
+	}
+	
+	// get remote cluster uuid from the map 
+	actualUuid, ok := poolsInfo[RemoteClusterUuid]
+	if !ok {
+		// should never get here
+		return "", errors.New("Could not get uuid of remote cluster.")
+	}
+	
+	return actualUuid.(string), nil
+}
+
+func connectToRemoteClusterThroughHttp(hostName, userName, password string) (*http.Response, error) {
+	url := fmt.Sprintf("http://%s:%s@%s/pools", userName, password, hostName)
+	request, err := http.NewRequest(MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return http.DefaultClient.Do(request)
+}
+
+func connectToRemoteClusterThroughHttps(hostName, userName, password string, certificate  []byte) (*http.Response, error) {
+	url := fmt.Sprintf("https://%s:%s@%s/pools", userName, password, hostName)
+	// TODO Load client cert -- is it needed?
+	/*cert, err := tls.LoadX509KeyPair("/Users/yu/server.crt", 
+			"/Users/yu/server.key")
+	if err != nil {
+		fmt.Printf("Could not load client certificate! err=%v\n", err)
+		return 
+	} */
+
+	CA_Pool := x509.NewCertPool()
+	CA_Pool.AppendCertsFromPEM(certificate)
+	
+	tlsConfig := &tls.Config{
+		//Certificates: []tls.Certificate{cert},
+		RootCAs: CA_Pool,
+		InsecureSkipVerify: true,
+	}
+	tlsConfig.BuildNameToCertificate() 
+	
+	tr := &http.Transport{
+		TLSClientConfig:    tlsConfig,
+	}
+	client := &http.Client{Transport: tr}
+	return client.Get(url)
+}
+
+func (adminport *Adminport) doDeleteRemoteClusterRequest(request *http.Request) ([]byte, error) {
+	logger_ap.Infof("doDeleteRemoteClusterRequest\n")
+	
+	remoteClusterName, err := DecodeRemoteClusterNameFromHttpRequest(request)
+	if err != nil {
+		return nil, err
+	}
+	
+	err = RemoteClusterService().DelRemoteCluster(metadata.RemoteClusterRefId(remoteClusterName))
+	if err != nil {
+		return nil, err
+	}
+	
+	return NewDeleteRemoteClusterResponse()
 }
 
 func (adminport *Adminport) doCreateReplicationRequest(request *http.Request) ([]byte, error) {
@@ -280,7 +419,7 @@ func (adminport *Adminport) doViewReplicationSettingsRequest(request *http.Reque
 	logger_ap.Debugf("Request decoded: replicationId=%v", replicationId)
 	
 	// read replication spec with the specified replication id
-	replSpec, err := MetadataService().ReplicationSpec(replicationId)
+	replSpec, err := ReplicationSpecService().ReplicationSpec(replicationId)
 	if err != nil {
 		return nil, err
 	}

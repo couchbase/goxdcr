@@ -16,12 +16,12 @@ import (
 	"flag"
 	"fmt"
 	base "github.com/couchbase/goxdcr/base"
-	c "github.com/couchbase/goxdcr/mock_services"
 	pm "github.com/couchbase/goxdcr/pipeline_manager"
 	rm "github.com/couchbase/goxdcr/replication_manager"
-	s "github.com/couchbase/goxdcr/services"
+	s "github.com/couchbase/goxdcr/service_impl"
 	ms "github.com/couchbase/goxdcr/mock_services"
 	utils "github.com/couchbase/goxdcr/utils"
+	"github.com/couchbase/goxdcr/tests/common"
 	"net/http"
 	"net/url"
 	"os"
@@ -81,7 +81,7 @@ func main() {
 }
 
 func startAdminport() {
-	c.SetTestOptions(utils.GetHostAddr(options.sourceKVHost, options.sourceKVPort), options.sourceKVHost, options.username, options.password)
+	ms.SetTestOptions(utils.GetHostAddr(options.sourceKVHost, options.sourceKVPort), options.sourceKVHost, options.username, options.password)
 
 	cmd, err := s.StartGometaService()
 	if err != nil {
@@ -98,7 +98,11 @@ func startAdminport() {
 	}
 	
 	rm.StartReplicationManager(options.sourceKVHost, options.sourceKVPort,
-								  metadata_svc, new(ms.MockClusterInfoSvc), new(ms.MockXDCRTopologySvc), new(ms.MockReplicationSettingsSvc))
+							   s.NewReplicationSpecService(metadata_svc, nil),
+							   s.NewRemoteClusterService(metadata_svc, nil),	
+							   new(ms.MockClusterInfoSvc), 
+							   new(ms.MockXDCRTopologySvc), 
+							   new(ms.MockReplicationSettingsSvc))
 	
 	//wait for server to finish starting
 	time.Sleep(time.Second * 3)
@@ -145,13 +149,9 @@ func startAdminport() {
 	fmt.Println("All tests passed.")
 
 }
-
-func getUrlPrefix() string {
-	return "http://" + utils.GetHostAddr(options.sourceKVHost, base.AdminportNumber) + base.AdminportUrlPrefix
-}
-
+	
 func testCreateReplication() (string, error) {
-	url := getUrlPrefix() + rm.CreateReplicationPath
+	url := common.GetAdminportUrlPrefix(options.sourceKVHost) + rm.CreateReplicationPath
 
 	params := make(map[string]interface{})
 	params[rm.FromBucket] = options.sourceBucket
@@ -174,7 +174,7 @@ func testCreateReplication() (string, error) {
 
 	response, err := http.DefaultClient.Do(request)
 
-	err = validateResponse("CreateReplication", response, err)
+	err = common.ValidateResponse("CreateReplication", response, err)
 	if err != nil {
 		return "", err
 	}
@@ -189,7 +189,7 @@ func testCreateReplication() (string, error) {
 }
 
 func testPauseReplication(replicationId, escapedReplId string) error {
-	url := getUrlPrefix() + rm.PauseReplicationPrefix + base.UrlDelimiter + escapedReplId
+	url := common.GetAdminportUrlPrefix(options.sourceKVHost) + rm.PauseReplicationPrefix + base.UrlDelimiter + escapedReplId
 
 	request, err := http.NewRequest(rm.MethodPost, url, nil)
 	if err != nil {
@@ -201,7 +201,7 @@ func testPauseReplication(replicationId, escapedReplId string) error {
 
 	response, err := http.DefaultClient.Do(request)
 
-	err = validateResponse("PauseReplication", response, err)
+	err = common.ValidateResponse("PauseReplication", response, err)
 	if err != nil {
 		return err
 	}
@@ -212,7 +212,7 @@ func testPauseReplication(replicationId, escapedReplId string) error {
 }
 
 func testResumeReplication(replicationId, escapedReplId string) error {
-	url := getUrlPrefix() + rm.ResumeReplicationPrefix + base.UrlDelimiter + escapedReplId
+	url := common.GetAdminportUrlPrefix(options.sourceKVHost) + rm.ResumeReplicationPrefix + base.UrlDelimiter + escapedReplId
 
 	request, err := http.NewRequest(rm.MethodPost, url, nil)
 	if err != nil {
@@ -224,7 +224,7 @@ func testResumeReplication(replicationId, escapedReplId string) error {
 
 	response, err := http.DefaultClient.Do(request)
 
-	err = validateResponse("ResumeReplication", response, err)
+	err = common.ValidateResponse("ResumeReplication", response, err)
 	if err != nil {
 		return err
 	}
@@ -235,7 +235,7 @@ func testResumeReplication(replicationId, escapedReplId string) error {
 }
 
 func testDeleteReplication(replicationId, escapedReplId string) error {
-	url := getUrlPrefix() + rm.DeleteReplicationPrefix + base.UrlDelimiter + escapedReplId
+	url := common.GetAdminportUrlPrefix(options.sourceKVHost) + rm.DeleteReplicationPrefix + base.UrlDelimiter + escapedReplId
 
 	request, err := http.NewRequest(rm.MethodPost, url, nil)
 	if err != nil {
@@ -247,7 +247,7 @@ func testDeleteReplication(replicationId, escapedReplId string) error {
 
 	response, err := http.DefaultClient.Do(request)
 
-	err = validateResponse("DeleteReplication", response, err)
+	err = common.ValidateResponse("DeleteReplication", response, err)
 	if err != nil {
 		return err
 	}
@@ -258,7 +258,7 @@ func testDeleteReplication(replicationId, escapedReplId string) error {
 }
 
 func testViewReplicationSettings(replicationId string) error {
-	url := getUrlPrefix() + rm.SettingsReplicationsPath + base.UrlDelimiter + replicationId
+	url := common.GetAdminportUrlPrefix(options.sourceKVHost) + rm.SettingsReplicationsPath + base.UrlDelimiter + replicationId
 
 	request, err := http.NewRequest(rm.MethodGet, url, nil)
 	if err != nil {
@@ -270,11 +270,11 @@ func testViewReplicationSettings(replicationId string) error {
 
 	response, err := http.DefaultClient.Do(request)
 
-	return validateResponse("ViewReplicationSettings", response, err)
+	return common.ValidateResponse("ViewReplicationSettings", response, err)
 }
 
 func testChangeReplicationSettings(replicationId, escapedReplicationId string) error {
-	url := getUrlPrefix() + rm.SettingsReplicationsPath + base.UrlDelimiter + escapedReplicationId
+	url := common.GetAdminportUrlPrefix(options.sourceKVHost) + rm.SettingsReplicationsPath + base.UrlDelimiter + escapedReplicationId
 
 	params := make(map[string]interface{})
 	params[rm.BatchSize] = BatchSize
@@ -291,12 +291,12 @@ func testChangeReplicationSettings(replicationId, escapedReplicationId string) e
 	fmt.Println("request", request)
 
 	response, err := http.DefaultClient.Do(request)
-	err = validateResponse("ChangeReplicationSettings", response, err)
+	err = common.ValidateResponse("ChangeReplicationSettings", response, err)
 	if err != nil {
 		return err
 	}
 	
-	spec, err := rm.MetadataService().ReplicationSpec(replicationId)
+	spec, err := rm.ReplicationSpecService().ReplicationSpec(replicationId)
 	if err != nil {
 		return err
 	}
@@ -309,7 +309,7 @@ func testChangeReplicationSettings(replicationId, escapedReplicationId string) e
 }
 
 func testGetStatistics() error {
-	url := getUrlPrefix() + rm.StatisticsPath
+	url := common.GetAdminportUrlPrefix(options.sourceKVHost) + rm.StatisticsPath
 
 	request, err := http.NewRequest(rm.MethodGet, url, nil)
 	if err != nil {
@@ -321,19 +321,7 @@ func testGetStatistics() error {
 
 	response, err := http.DefaultClient.Do(request)
 
-	return validateResponse("GetStatistics", response, err)
-}
-
-func validateResponse(testName string, response *http.Response, err error) error {
-	if err != nil || response.StatusCode != 200 {
-		errMsg := fmt.Sprintf("Test %v failed. err=%v", testName, err)
-		if response != nil {
-			errMsg += fmt.Sprintf("; response status=%v", response.Status)
-		}
-		errMsg += "\n"
-		return errors.New(errMsg)
-	}
-	return nil
+	return common.ValidateResponse("GetStatistics", response, err)
 }
 
 func validatePipeline(testName string, replicationId string, pipelineRunning bool) error {

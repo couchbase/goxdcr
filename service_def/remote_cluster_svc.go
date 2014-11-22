@@ -7,14 +7,15 @@
 // either express or implied. See the License for the specific language governing permissions
 // and limitations under the License.
 
-package metadata_svc
+package service_def
 
 import (
-	metadata "github.com/couchbase/goxdcr/metadata"
+	"github.com/couchbase/goxdcr/metadata"
 )
 
-// this service is likely provided by exposing an erlang rest api in ns_server
-type ReplicationSettingsSvc interface {
-	GetReplicationSettings() (*metadata.ReplicationSettings, error)
-	SetReplicationSettings(*metadata.ReplicationSettings) error
+type RemoteClusterSvc interface {
+	RemoteCluster(refId string) (*metadata.RemoteClusterReference, error)
+	AddRemoteCluster(ref *metadata.RemoteClusterReference) error
+	DelRemoteCluster(refId string) error
+	RemoteClusters() (map[string]*metadata.RemoteClusterReference, error)
 }

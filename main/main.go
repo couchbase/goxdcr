@@ -16,7 +16,7 @@ import (
 
 	rm "github.com/couchbase/goxdcr/replication_manager"
 	ms "github.com/couchbase/goxdcr/mock_services"
-	s "github.com/couchbase/goxdcr/services"
+	s "github.com/couchbase/goxdcr/service_impl"
 	utils "github.com/couchbase/goxdcr/utils"	
 )
 
@@ -65,9 +65,13 @@ func main() {
 		fmt.Println("Error starting metadata service. ", err.Error())
 		os.Exit(1)
 	}
-	
+
 	rm.StartReplicationManager(options.sourceKVHost, options.sourceKVPort,
-								  metadata_svc, new(ms.MockClusterInfoSvc), new(ms.MockXDCRTopologySvc), new(ms.MockReplicationSettingsSvc))
+							   s.NewReplicationSpecService(metadata_svc, nil),
+							   s.NewRemoteClusterService(metadata_svc, nil),	
+							   new(ms.MockClusterInfoSvc), 
+							   new(ms.MockXDCRTopologySvc), 
+							   new(ms.MockReplicationSettingsSvc))
 								  
 	<-done
 }

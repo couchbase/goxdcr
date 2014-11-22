@@ -16,7 +16,7 @@ import (
 	"os"
 	"errors"
 	metadata "github.com/couchbase/goxdcr/metadata"
-	s "github.com/couchbase/goxdcr/services"
+	s "github.com/couchbase/goxdcr/service_impl"
 )
 
 // test parameters
@@ -46,8 +46,8 @@ func main() {
 	}
 	defer s.KillGometaService(cmd)
 	
-	// start and test metadata service
-	err = startMetadataService()
+	// start and test ReplicationSpec service
+	err = startReplicationSpecService()
 	if err != nil {
 		fmt.Println("Test failed. err: ", err)
 	} else {
@@ -55,12 +55,14 @@ func main() {
 	}
 }
 
-func startMetadataService() error {
-	service, err := s.DefaultMetadataSvc()
+func startReplicationSpecService() error {
+	metadataSvc, err := s.DefaultMetadataSvc()
 	if err != nil {
 		return errors.New(fmt.Sprintf("Error starting metadata service. err=%v\n", err.Error()))
 	}
 	
+	service := s.NewReplicationSpecService(metadataSvc, nil)
+		
 	// create a test replication spec
 	spec := metadata.NewReplicationSpecification(sourceClusterUUID, sourceBucketName, 
 			targetClusterUUID, targetBucketName, filterName)
@@ -85,7 +87,7 @@ func startMetadataService() error {
 		return err
 	}
 	
-	err = service.AddReplicationSpec(*spec)
+	err = service.AddReplicationSpec(spec)
 	if err != nil {
 		return err
 	}
@@ -102,7 +104,7 @@ func startMetadataService() error {
 	// update spec
 	spec.Settings.BatchCount = newBatchCount
 	
-	err = service.SetReplicationSpec(*spec)
+	err = service.SetReplicationSpec(spec)
 	if err != nil {
 		return err
 	}

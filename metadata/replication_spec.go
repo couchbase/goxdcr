@@ -11,10 +11,14 @@ package metadata
 
 import (
 	"strings"
+	"github.com/couchbase/goxdcr/base"
 )
 
 const (
-	XdcrPrefix = "xdcr"
+	// ids of xdcr replication specs are used as keys in gometa service. 
+	// the following prefix distinguishes the replication specs from other entries
+	// and reduces the chance of naming conflicts
+	ReplicationSpecKeyPrefix = "replicationSpec"
 )
 
 /************************************
@@ -54,9 +58,9 @@ func NewReplicationSpecification(sourceClusterUUID string, sourceBucketName stri
 }
 
 func ReplicationId(sourceClusterUUID string, sourceBucketName string, targetClusterUUID string, targetBucketName string, filterName string) string {
-	parts := []string{XdcrPrefix, sourceClusterUUID, sourceBucketName, targetClusterUUID, targetBucketName}
+	parts := []string{ReplicationSpecKeyPrefix, sourceClusterUUID, sourceBucketName, targetClusterUUID, targetBucketName}
 	if filterName != "" {
 		parts = append(parts, filterName)
 	}
-	return strings.Join(parts, "_")
+	return strings.Join(parts, base.KeyPartsDelimiter)
 }

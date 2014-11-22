@@ -21,6 +21,9 @@ var DefaultPoolName = "default"
 var UrlDelimiter = "/"
 var UrlPortNumberDelimiter = ":"
 
+// delimiter for multiple parts in a key
+var KeyPartsDelimiter = "_"
+
 //constants for adminport
 var AdminportUrlPrefix = UrlDelimiter
 var AdminportNumber = 12100

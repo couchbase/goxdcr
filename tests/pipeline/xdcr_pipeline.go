@@ -17,7 +17,7 @@ import (
 	"github.com/couchbase/goxdcr/parts"
 	"github.com/couchbase/goxdcr/pipeline_manager"
 	"github.com/couchbase/goxdcr/replication_manager"
-	s "github.com/couchbase/goxdcr/services"
+	s "github.com/couchbase/goxdcr/service_impl"
 	"github.com/couchbase/goxdcr/utils"
 	"github.com/couchbaselabs/go-couchbase"
 	"log"
@@ -124,7 +124,9 @@ func setup() error {
 		return err
 	}
 	replication_manager.StartReplicationManager(options.source_kv_host, options.source_kv_port,
-								  metadata_svc, new(c.MockClusterInfoSvc), new(c.MockXDCRTopologySvc), new(c.MockReplicationSettingsSvc))
+								 s.NewReplicationSpecService(metadata_svc, nil),
+							     s.NewRemoteClusterService(metadata_svc, nil),
+							     new(c.MockClusterInfoSvc), new(c.MockXDCRTopologySvc), new(c.MockReplicationSettingsSvc))
 	fmt.Println("Finish setup")
 	return nil
 }

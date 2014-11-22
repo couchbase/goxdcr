@@ -8,10 +8,9 @@
 // and limitations under the License.
 
 // metadata service implementation leveraging gometa
-package services
+package service_impl
 
 import (
-	"encoding/json"
 	"net/rpc"
 	"os"
 	"os/exec"
@@ -19,14 +18,10 @@ import (
 	"time"
 	"strings"
 	"errors"
-	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/gometa/server"
 	"github.com/couchbase/gometa/common"
 	"github.com/couchbase/goxdcr/log"
 )
-
-var XdcrKeyStart = metadata.XdcrPrefix + "_0"
-var XdcrKeyEnd = metadata.XdcrPrefix + "_{"
 
 var goMetadataServiceMethod = "RequestReceiver.NewRequest"
 
@@ -57,67 +52,27 @@ func NewMetadataSvc(hostAddr string, logger_ctx *log.LoggerContext) (*MetadataSv
 	}
 }
 
-func (meta_svc *MetadataSvc) ReplicationSpec(replicationId string) (*metadata.ReplicationSpecification, error) {
+func (meta_svc *MetadataSvc) Get(key string) ([] byte, error) {
 	opCode := common.GetOpCodeStr(common.OPCODE_GET)
-	result, err := meta_svc.sendRequest(opCode, replicationId, nil)
-	if err != nil {
-		return nil, err
-	}
-	var spec = &metadata.ReplicationSpecification{}
-	err = json.Unmarshal(result, spec) 
-	return spec, err
+	return meta_svc.sendRequest(opCode, key, nil)
 }
 
-func (meta_svc *MetadataSvc) AddReplicationSpec(spec metadata.ReplicationSpecification) error {
+func (meta_svc *MetadataSvc) Add(key string, value []byte) error {
 	opCode := common.GetOpCodeStr(common.OPCODE_ADD)
-	key := spec.Id
-	value, err := json.Marshal(spec)
-	if err != nil {
-		return err
-	}
-	_, err = meta_svc.sendRequest(opCode, key, value)
+	_, err := meta_svc.sendRequest(opCode, key, value)
 	return err
 }
 
-func (meta_svc *MetadataSvc) SetReplicationSpec(spec metadata.ReplicationSpecification) error {
+func (meta_svc *MetadataSvc) Set(key string, value []byte) error {
 	opCode := common.GetOpCodeStr(common.OPCODE_SET)
-	key := spec.Id
-	value, err := json.Marshal(spec)
-	if err != nil {
-		return err
-	}
-	_, err = meta_svc.sendRequest(opCode, key, value)
+	_, err := meta_svc.sendRequest(opCode, key, value)
 	return err
 }
 
-func (meta_svc *MetadataSvc) DelReplicationSpec(replicationId string) error {
+func (meta_svc *MetadataSvc) Del(key string) error {
 	opCode := common.GetOpCodeStr(common.OPCODE_DELETE)
-	_, err := meta_svc.sendRequest(opCode, replicationId, nil)
+	_, err := meta_svc.sendRequest(opCode, key, nil)
 	return err
-}
-
-func (meta_svc *MetadataSvc) ActiveReplicationSpecs() (map[string]*metadata.ReplicationSpecification, error) {
-	specs := make(map[string]*metadata.ReplicationSpecification, 0)
-	// TODO store keys ourselves?
-	/*repo, _ := repository.OpenRepository()
-	iter, _ := repo.NewIterator(XdcrKeyStart, XdcrKeyEnd)
-	for {
-		key, value, err := iter.Next()
-		if err != nil {
-			break
-		}
-		
-		spec := &metadata.ReplicationSpecification{}
-		err = json.Unmarshal(value, spec) 
-		if err != nil {
-			return nil, err
-		}
-		if spec.Settings.Active {
-			specs[key] = spec
-		}
-	}*/
-	
-	return specs, nil
 }
 
 func (meta_svc *MetadataSvc) sendRequest(opCode, key string, value []byte) ([]byte, error) {
@@ -180,7 +135,7 @@ func StartGometaService() (*exec.Cmd, error) {
 	}
 		
 	// run gometa executable to start server
-	command = exec.Command(objPath, "-config", goxdcrDir + "/services/metadata_svc_config")
+	command = exec.Command(objPath, "-config", goxdcrDir + "/service_impl/metadata_svc_config")
 	err = command.Start()
 	if err != nil {
 		fmt.Printf("Error executing command line - %v\n", command.Args)
