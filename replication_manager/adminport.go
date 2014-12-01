@@ -25,9 +25,9 @@ import (
 	"crypto/tls"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/gen_server"
-	"github.com/couchbase/goxdcr/metadata"
 	ap "github.com/couchbase/goxdcr/adminport"
-	"github.com/couchbase/goxdcr/utils"
+	utils "github.com/couchbase/goxdcr/utils"
+	"github.com/couchbase/goxdcr/metadata"
 )
 
 var StaticPaths = [4]string{RemoteClustersPath, CreateReplicationPath, SettingsReplicationsPath, StatisticsPath}
@@ -274,7 +274,6 @@ func connectToRemoteClusterThroughHttps(hostName, userName, password string, cer
 	tlsConfig := &tls.Config{
 		//Certificates: []tls.Certificate{cert},
 		RootCAs: CA_Pool,
-		InsecureSkipVerify: true,
 	}
 	tlsConfig.BuildNameToCertificate() 
 	

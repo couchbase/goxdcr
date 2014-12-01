@@ -150,6 +150,7 @@ func (supervisor *GenericSupervisor) Stop() error {
 
 	supervisor.Logger().Debug("Wait for children goroutines to exit")
 	supervisor.childrenWaitGrp.Wait()
+
 	supervisor.heartbeat_ticker.Stop()
 	supervisor.Logger().Infof("Stopped supervisor %v.\n", supervisor.Id())
 	return err

@@ -99,6 +99,7 @@ func (rm *replicationManager) init(sourceKVHost string,
 	cluster_info_svc service_def.ClusterInfoSvc,
 	xdcr_topology_svc service_def.XDCRCompTopologySvc,
 	replication_settings_svc service_def.ReplicationSettingsSvc) {
+
 	rm.GenericSupervisor = *supervisor.NewGenericSupervisor(base.ReplicationManagerSupervisorId, log.DefaultLoggerContext, rm)
 	rm.pipelineMasterSupervisor = supervisor.NewGenericSupervisor(base.PipelineMasterSupervisorId, log.DefaultLoggerContext, rm)
 	rm.sourceKVHost = sourceKVHost
@@ -110,6 +111,7 @@ func (rm *replicationManager) init(sourceKVHost string,
 	rm.replication_settings_svc = replication_settings_svc
 	rm.adminport_finch = make(chan bool)
 	fac := factory.NewXDCRFactory(repl_spec_svc, cluster_info_svc, xdcr_topology_svc, log.DefaultLoggerContext, log.DefaultLoggerContext, rm)
+
 	pipeline_manager.PipelineManager(fac, log.DefaultLoggerContext)
 
 	logger_rm.Info("Replication manager is initialized")

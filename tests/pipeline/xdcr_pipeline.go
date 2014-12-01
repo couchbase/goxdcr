@@ -127,6 +127,7 @@ func setup() error {
 								 s.NewReplicationSpecService(metadata_svc, nil),
 							     s.NewRemoteClusterService(metadata_svc, nil),
 							     new(c.MockClusterInfoSvc), new(c.MockXDCRTopologySvc), new(c.MockReplicationSettingsSvc))
+
 	fmt.Println("Finish setup")
 	return nil
 }
