@@ -20,7 +20,7 @@ import (
 
 //SimpleConnector connects one source to one downstream
 type SimpleConnector struct {
-	component.AbstractComponent
+	*component.AbstractComponent
 	downStreamPart common.Part
 	stateLock sync.RWMutex
 }

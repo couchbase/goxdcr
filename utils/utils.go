@@ -1,20 +1,22 @@
 package utils
 
 import (
+	"encoding/binary"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/couchbase/goxdcr/log"
+	"github.com/couchbase/gomemcached"
 	base "github.com/couchbase/goxdcr/base"
+	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbaselabs/go-couchbase"
 	"io"
 	"io/ioutil"
 	"net/http"
 	"net/url"
 	"reflect"
-	"strings"
 	"strconv"
+	"strings"
 )
 
 type BucketBasicStats struct {
@@ -144,10 +146,10 @@ func Bucket(connectStr string, bucketName string, clusterUserName, clusterPasswo
 	} else {
 		url = fmt.Sprintf("http://%s", connectStr)
 	}
-		
-	bucketInfos, err := couchbase.GetBucketList (url)
+
+	bucketInfos, err := couchbase.GetBucketList(url)
 	if err != nil {
-		return nil, NewEnhancedError("Error getting bucketlist with url:" + url, err)
+		return nil, NewEnhancedError("Error getting bucketlist with url:"+url, err)
 	}
 
 	var password string
@@ -188,15 +190,15 @@ func InvalidPathInHttpRequestError(path string) error {
 	return errors.New(fmt.Sprintf("Invalid path, %v, in http request.", path))
 }
 
-func WrapError (err error) map[string]interface{} {
-	infos := make (map[string]interface{})
-	infos ["error"] = err
+func WrapError(err error) map[string]interface{} {
+	infos := make(map[string]interface{})
+	infos["error"] = err
 	return infos
 }
 
-func UnwrapError (infos map[string]interface{}) (err error) {
+func UnwrapError(infos map[string]interface{}) (err error) {
 	if infos != nil && len(infos) > 0 {
-		err = infos ["error"].(error)
+		err = infos["error"].(error)
 	}
 	return err
 }
@@ -222,7 +224,7 @@ func IncorrectValueTypeInMapError(key string, val interface{}, expectedType stri
 }
 
 // returns an enhanced error with erroe message being "msg + old error message"
-func NewEnhancedError (msg string, err error) error {
+func NewEnhancedError(msg string, err error) error {
 	return errors.New(msg + "\n" + err.Error())
 }
 
@@ -231,3 +233,8 @@ func GetHostAddr(hostName string, port int) string {
 	return hostName + base.UrlPortNumberDelimiter + strconv.FormatInt(int64(port), base.ParseIntBase)
 }
 
+func GetSeqNoFromMCRequest(req *gomemcached.MCRequest) uint64 {
+	extra := req.Extras
+	seqno := binary.BigEndian.Uint64(extra[:8])
+	return seqno
+}

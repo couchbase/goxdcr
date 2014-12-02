@@ -14,7 +14,7 @@ To start xdcr rest service:
 This will start xdcr rest service on the local machine at address 127.0.0.1:12100
 
 To send requests to xdcr rest service:
-1. To create replication: "curl -X POST http://127.0.0.1:12100/controller/createReplication -d fromBucket=... -d uuid=... -d toBucket=... -d xdcrSourceNozzlePerNode=... -d xdcrTargetNozzlePerNode=... -d xdcrWorkerBatchSize=... -d xdcrLogLevel=Error" 
+1. To create replication: "curl -X POST http://127.0.0.1:12100/controller/createReplication -d fromBucket=... -d uuid=... -d toBucket=... -d xdcrSourceNozzlePerNode=... -d xdcrTargetNozzlePerNode=... -d xdcrWorkerBatchSize=... -d xdcrLogLevel=Error -d xdcrStatsInterval=5" 
 2. To pause replication: "curl -X POST http://127.0.0.1:12100/controller/pauseXDCR/..."
 3. To resume replication: "curl -X POST http://127.0.0.1:12100/controller/resumeXDCR/..."
 4. To delete replication: "curl -X DELETE http://127.0.0.1:12100/controller/cancelXDCR/..."

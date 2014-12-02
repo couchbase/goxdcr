@@ -31,6 +31,7 @@ const (
 	default_replication_type                 string       = "capi"
 	default_active                           bool         = true
 	default_pipeline_log_level               log.LogLevel = log.LogLevelInfo
+	default_pipeline_stats_update_interval   int          = 5
 )
 
 const (
@@ -48,6 +49,7 @@ const (
 	MaxExpectedReplicationLag      = "max_expected_replication_lag"
 	TimeoutPercentageCap           = "timeout_percentage_cap"
 	PipelineLogLevel               = "log_level"
+	PipelineStatsInterval          = "stats_interval"
 )
 
 /***********************************
@@ -117,23 +119,27 @@ type ReplicationSettings struct {
 	TimeoutPercentageCap int `json:"timeout_percentage_cap"`
 
 	//log level
-	LogLevel log.LogLevel  `json:"log_level"`
+	LogLevel log.LogLevel `json:"log_level"`
+
+	//stats interval
+	StatsInterval int `json:"stats_interval"`
 }
 
 func DefaultSettings() *ReplicationSettings {
 	return &ReplicationSettings{FilterExpression: default_filter_expression,
-		Active:                           default_active,
-		CheckpointInterval:              default_checkpoint_interval,
-		BatchCount:                      default_batch_count,
-		BatchSize:                       default_batch_size,
+		Active:                         default_active,
+		CheckpointInterval:             default_checkpoint_interval,
+		BatchCount:                     default_batch_count,
+		BatchSize:                      default_batch_size,
 		FailureRestartInterval:         default_failure_restart_interval,
 		OptimisticReplicationThreshold: default_optimistic_replication_threshold,
-		HttpConnection:                  default_http_connection,
-		SourceNozzlePerNode:           default_source_nozzle_per_node,
-		TargetNozzlePerNode:           default_target_nozzle_per_node,
-		MaxExpectedReplicationLag:     default_max_expected_replication_lag,
+		HttpConnection:                 default_http_connection,
+		SourceNozzlePerNode:            default_source_nozzle_per_node,
+		TargetNozzlePerNode:            default_target_nozzle_per_node,
+		MaxExpectedReplicationLag:      default_max_expected_replication_lag,
 		TimeoutPercentageCap:           default_timeout_percentage_cap,
-		LogLevel:                        default_pipeline_log_level}
+		LogLevel:                       default_pipeline_log_level,
+		StatsInterval:                  default_pipeline_stats_update_interval}
 }
 
 func (s *ReplicationSettings) SetLogLevel(log_level string) error {
@@ -143,6 +149,7 @@ func (s *ReplicationSettings) SetLogLevel(log_level string) error {
 	}
 	return err
 }
+
 
 func SettingsFromMap(settingsMap map[string]interface{}) (*ReplicationSettings, error) {
 	settings := DefaultSettings()
@@ -242,6 +249,12 @@ func (s *ReplicationSettings) UpdateSettingsFromMap(settingsMap map[string]inter
 				return utils.IncorrectValueTypeInMapError(key, val, "string")
 			}
 			s.SetLogLevel(l)
+		case PipelineStatsInterval:
+			interval, ok := val.(int)
+			if !ok {
+				return utils.IncorrectValueTypeInMapError(key, val, "int")
+			}
+			s.StatsInterval = interval
 		default:
 			return errors.New(fmt.Sprintf("Invalid key in map, %v", key))
 
@@ -267,5 +280,6 @@ func (s *ReplicationSettings) ToMap() map[string]interface{} {
 	settings_map[MaxExpectedReplicationLag] = s.MaxExpectedReplicationLag
 	settings_map[TimeoutPercentageCap] = s.TimeoutPercentageCap
 	settings_map[PipelineLogLevel] = s.LogLevel.String()
+	settings_map[PipelineStatsInterval] = s.StatsInterval
 	return settings_map
 }

@@ -224,6 +224,7 @@ func (dcp *DcpNozzle) processData() (err error) {
 					return base.ErrorNotMyVbucket
 				}
 				dcp.counter++
+				dcp.RaiseEvent(common.DataReceived, m, dcp, nil /*derivedItems*/, nil /*otherInfos*/)
 				dcp.Logger().Tracef("%v, Mutation %v:%v:%v <%v>, counter=%v, ops_per_sec=%v\n",
 					dcp.Id(), m.VBucket, m.Seqno, m.Opcode, m.Key, dcp.counter, float64(dcp.counter)/time.Since(dcp.start_time).Seconds())
 
@@ -232,7 +233,7 @@ func (dcp *DcpNozzle) processData() (err error) {
 					dcp.handleGeneralError(err)
 				}
 				// raise event for statistics collection
-				dcp.RaiseEvent(common.DataProcessed, nil /*item*/, dcp, nil /*derivedItems*/, nil /*otherInfos*/)
+				dcp.RaiseEvent(common.DataProcessed, m, dcp, nil /*derivedItems*/, nil /*otherInfos*/)
 			}
 		}
 	}

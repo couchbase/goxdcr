@@ -28,7 +28,7 @@ var ErrorInvalidRoutingResult = errors.New("Invalid results from routing algorit
 type Routing_Callback_Func func(data interface{}) (map[string]interface{}, error)
 
 type Router struct {
-	component.AbstractComponent
+	*component.AbstractComponent
 	downStreamParts  map[string]common.Part // partId -> Part
 	routing_callback *Routing_Callback_Func
 

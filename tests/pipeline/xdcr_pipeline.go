@@ -22,12 +22,13 @@ import (
 	"github.com/couchbase/goxdcr/utils"
 	"github.com/couchbaselabs/go-couchbase"
 	"log"
-	//	"net/http"
+	"net/http"
 	"os"
 	"time"
 )
 
 //import _ "net/http/pprof"
+import _ "expvar"
 
 const (
 	NUM_SOURCE_CONN = 2
@@ -79,20 +80,20 @@ func usage() {
 }
 
 func main() {
-	//	go func() {
-	//		log.Println("Try to start pprof...")
-	//		err := http.ListenAndServe("localhost:7000", nil)
-	//		if err != nil {
-	//			panic(err)
-	//		} else {
-	//			log.Println("Http server for pprof is started")
-	//		}
-	//	}()
+	go func() {
+		log.Println("Try to start pprof...")
+		err := http.ListenAndServe("localhost:7000", nil)
+		if err != nil {
+			panic(err)
+		} else {
+			log.Println("Http server for pprof is started")
+		}
+	}()
 
 	//	c.SetLogLevel(c.LogLevelTrace)
 	fmt.Println("Start Testing ...")
 	argParse()
-	
+
 	options.source_cluster_addr = utils.GetHostAddr(options.source_kv_host, options.source_kv_port)
 
 	err := setup()
@@ -125,7 +126,8 @@ func setup() error {
 func test() {
 	fmt.Println("Start testing")
 	settings := make(map[string]interface{})
-	settings[metadata.PipelineLogLevel] = "Error"
+	settings[metadata.PipelineLogLevel] = "Debug"
+	settings[metadata.PipelineStatsInterval] = 2
 	settings[metadata.SourceNozzlePerNode] = NUM_SOURCE_CONN
 	settings[metadata.TargetNozzlePerNode] = NUM_TARGET_CONN
 	settings[metadata.BatchCount] = 500
@@ -134,28 +136,27 @@ func test() {
 	if err != nil {
 		fail(fmt.Sprintf("%v", err))
 	}
-	//	time.Sleep(1 * time.Second)
-	//
-	//	replication_manager.PauseReplication(topic)
-	//
-	//	err = replication_manager.SetPipelineLogLevel(topic, "Error")
-	//	if err != nil {
-	//		fail(fmt.Sprintf("%v", err))
-	//	}
-	//	fmt.Printf("Replication %s is paused\n", topic)
-	//	time.Sleep(100 * time.Millisecond)
-	//	err = replication_manager.ResumeReplication(topic)
-	//	if err != nil {
-	//		fail(fmt.Sprintf("%v", err))
-	//	}
-	//	fmt.Printf("Replication %s is resumed\n", topic)
-	//	time.Sleep(2 * time.Second)
-	//	summary(topic)
-	//
+	time.Sleep(1 * time.Second)
+
+	replication_manager.PauseReplication(topic)
+
+	err = replication_manager.SetPipelineLogLevel(topic, "Error")
+	if err != nil {
+		fail(fmt.Sprintf("%v", err))
+	}
+	fmt.Printf("Replication %s is paused\n", topic)
+	time.Sleep(100 * time.Millisecond)
+	err = replication_manager.ResumeReplication(topic)
+	if err != nil {
+		fail(fmt.Sprintf("%v", err))
+	}
+	fmt.Printf("Replication %s is resumed\n", topic)
+	time.Sleep(5 * time.Second)
+
 	time.Sleep(1 * time.Minute)
 
 	//delete the replication before we go
-	err = replication_manager.DeleteReplication(topic, true)
+	err = replication_manager.DeleteReplication(topic)
 	if err != nil {
 		fail(fmt.Sprintf("%v", err))
 	}
@@ -170,6 +171,7 @@ func summary(topic string) {
 		fmt.Println(targetNozzle.(*parts.XmemNozzle).StatusSummary())
 	}
 }
+
 func fail(msg string) {
 	panic(fmt.Sprintf("TEST FAILED - %s", msg))
 }

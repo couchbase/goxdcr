@@ -2,15 +2,15 @@ package factory
 
 import (
 	"errors"
+	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/common"
-    "github.com/couchbase/goxdcr/log"
-    pp "github.com/couchbase/goxdcr/pipeline"
-    pctx "github.com/couchbase/goxdcr/pipeline_ctx"
-    "github.com/couchbase/goxdcr/base"
-    "github.com/couchbase/goxdcr/metadata"
-    "github.com/couchbase/goxdcr/service_def"
-    "github.com/couchbase/goxdcr/parts"
-    "github.com/couchbase/goxdcr/pipeline_svc"
+	"github.com/couchbase/goxdcr/log"
+	"github.com/couchbase/goxdcr/metadata"
+	"github.com/couchbase/goxdcr/parts"
+	pp "github.com/couchbase/goxdcr/pipeline"
+	pctx "github.com/couchbase/goxdcr/pipeline_ctx"
+	"github.com/couchbase/goxdcr/pipeline_svc"
+	"github.com/couchbase/goxdcr/service_def"
 	"math"
 	"strconv"
 	"strings"
@@ -19,7 +19,7 @@ import (
 
 const (
 	PART_NAME_DELIMITER     = "_"
-	DCP_NOZZLE_NAME_PREFIX      = "dcp"
+	DCP_NOZZLE_NAME_PREFIX  = "dcp"
 	XMEM_NOZZLE_NAME_PREFIX = "xmem"
 )
 
@@ -30,7 +30,7 @@ var ErrorNoTargetNozzle = errors.New("Invalid configuration. No target nozzle ca
 
 // Factory for XDCR pipelines
 type XDCRFactory struct {
-	repl_spec_svc             service_def.ReplicationSpecSvc
+	repl_spec_svc            service_def.ReplicationSpecSvc
 	cluster_info_svc         service_def.ClusterInfoSvc
 	xdcr_topology_svc        service_def.XDCRCompTopologySvc
 	default_logger_ctx       *log.LoggerContext
@@ -70,7 +70,7 @@ func (xdcrf *XDCRFactory) NewPipeline(topic string) (common.Pipeline, error) {
 	if err != nil {
 		return nil, err
 	}
-	if (len(sourceNozzles) == 0) {
+	if len(sourceNozzles) == 0 {
 		// no pipeline is constructed if there is no source nozzle
 		return nil, ErrorNoSourceNozzle
 	}
@@ -144,9 +144,9 @@ func (xdcrf *XDCRFactory) constructSourceNozzles(spec *metadata.ReplicationSpeci
 		var kvaddr string
 		var vbnos []uint16
 		// iterate through serverVBMap and look for server addr that starts with "kvHost:"
-		for kvaddr_iter, vbnos_iter := range serverVBMap{
-			if strings.HasPrefix(kvaddr_iter, kvHost + base.UrlPortNumberDelimiter) {
-			xdcrf.logger.Infof("found kv")
+		for kvaddr_iter, vbnos_iter := range serverVBMap {
+			if strings.HasPrefix(kvaddr_iter, kvHost+base.UrlPortNumberDelimiter) {
+				xdcrf.logger.Infof("found kv")
 				kvaddr = kvaddr_iter
 				vbnos = vbnos_iter
 				break
@@ -154,7 +154,7 @@ func (xdcrf *XDCRFactory) constructSourceNozzles(spec *metadata.ReplicationSpeci
 		}
 
 		numOfVbs := len(vbnos)
-		
+
 		if numOfVbs == 0 {
 			continue
 		}
@@ -191,8 +191,8 @@ func (xdcrf *XDCRFactory) constructSourceNozzles(spec *metadata.ReplicationSpeci
 
 			// construct dcpNozzles
 			// partIds of the dcpNozzle nodes look like "dcpNozzle_$kvaddr_1"
-			dcpNozzle := parts.NewDcpNozzle(DCP_NOZZLE_NAME_PREFIX + PART_NAME_DELIMITER + kvaddr + PART_NAME_DELIMITER + strconv.Itoa(i), 
-			                                bucket, vbList, logger_ctx)
+			dcpNozzle := parts.NewDcpNozzle(DCP_NOZZLE_NAME_PREFIX+PART_NAME_DELIMITER+kvaddr+PART_NAME_DELIMITER+strconv.Itoa(i),
+				bucket, vbList, logger_ctx)
 			sourceNozzles[dcpNozzle.Id()] = dcpNozzle
 			xdcrf.logger.Debugf("Constructed source nozzle %v with vbList = %v \n", dcpNozzle.Id(), vbList)
 		}
@@ -388,7 +388,7 @@ func (xdcrf *XDCRFactory) constructSettingsForDcpNozzle(pipeline common.Pipeline
 	vbList := part.GetVBList()
 	partTs := make(map[uint16]*base.VBTimestamp)
 	for _, vb := range vbList {
-			partTs[vb] = ts[vb]
+		partTs[vb] = ts[vb]
 	}
 	xdcrf.logger.Debugf("start timestamps is %v\n", ts)
 	dcpNozzleSettings[parts.DCP_SETTINGS_KEY] = partTs
@@ -398,19 +398,23 @@ func (xdcrf *XDCRFactory) constructSettingsForDcpNozzle(pipeline common.Pipeline
 func (xdcrf *XDCRFactory) registerServices(pipeline common.Pipeline, logger_ctx *log.LoggerContext) {
 	ctx := pipeline.RuntimeContext()
 
-	//TODO:
 	//register pipeline supervisor
-	supervisor := pipeline_svc.NewPipelineSupervisor(base.PipelineSupervisorIdPrefix + pipeline.Topic(), logger_ctx, xdcrf.pipeline_failure_handler)
+	supervisor := pipeline_svc.NewPipelineSupervisor(base.PipelineSupervisorIdPrefix+pipeline.Topic(), logger_ctx, xdcrf.pipeline_failure_handler)
 	ctx.RegisterService(base.PIPELINE_SUPERVISOR_SVC, supervisor)
 	//register pipeline checkpoint manager
 	ctx.RegisterService(base.CHECKPOINT_MGR_SVC, &pipeline_svc.CheckpointManager{})
 	//register pipeline statistics manager
+	ctx.RegisterService(base.STATISTICS_MGR_SVC, pipeline_svc.NewStatisticsManager(logger_ctx))
 }
 
 func (xdcrf *XDCRFactory) ConstructSettingsForService(pipeline common.Pipeline, service common.PipelineService, settings map[string]interface{}) (map[string]interface{}, error) {
-	if _, ok := service.(*pipeline_svc.PipelineSupervisor); ok {
+	switch service.(type) {
+	case *pipeline_svc.PipelineSupervisor:
 		xdcrf.logger.Debug("Construct settings for PipelineSupervisor")
 		return xdcrf.constructSettingsForSupervisor(pipeline.Topic(), settings)
+	case *pipeline_svc.StatisticsManager:
+		xdcrf.logger.Debug("Construct settings for StatisticsManager")
+		return xdcrf.constructSettingsForStatsManager(pipeline.Topic(), settings)
 	}
 	return settings, nil
 }
@@ -422,5 +426,15 @@ func (xdcrf *XDCRFactory) constructSettingsForSupervisor(topic string, settings 
 		return nil, err
 	}
 	s[pipeline_svc.PIPELINE_LOG_LEVEL] = repSettings.LogLevel
+	return s, nil
+}
+
+func (xdcrf *XDCRFactory) constructSettingsForStatsManager(topic string, settings map[string]interface{}) (map[string]interface{}, error) {
+	s := make(map[string]interface{})
+	repSettings, err := metadata.SettingsFromMap(settings)
+	if err != nil {
+		return nil, err
+	}
+	s[pipeline_svc.PUBLISH_INTERVAL] = time.Duration(repSettings.StatsInterval)*time.Second
 	return s, nil
 }

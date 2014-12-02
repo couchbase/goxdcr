@@ -10,12 +10,12 @@
 package metadata
 
 import (
-	"strings"
 	"github.com/couchbase/goxdcr/base"
+	"strings"
 )
 
 const (
-	// ids of xdcr replication specs are used as keys in gometa service. 
+	// ids of xdcr replication specs are used as keys in gometa service.
 	// the following prefix distinguishes the replication specs from other entries
 	// and reduces the chance of naming conflicts
 	ReplicationSpecKeyPrefix = "replicationSpec"
@@ -27,18 +27,18 @@ const (
 type ReplicationSpecification struct {
 	//id of the replication
 	Id string `json:"id"`
-	
+
 	//Source Cluster UUID
 	SourceClusterUUID string `json:"sourceClusterUUID"`
 
-    // Source Bucket Name
-    SourceBucketName string `json:"sourceBucketName"`
+	// Source Bucket Name
+	SourceBucketName string `json:"sourceBucketName"`
 
 	//Target Cluster UUID
 	TargetClusterUUID string `json:"targetClusterUUID"`
 
-    // Target Bucket Name
-    TargetBucketName string `json:"targetBucketName"`
+	// Target Bucket Name
+	TargetBucketName string `json:"targetBucketName"`
 
 	//the filter name, it is going to be part of the key
 	//It will not change once the replication specification is created
@@ -50,11 +50,11 @@ type ReplicationSpecification struct {
 func NewReplicationSpecification(sourceClusterUUID string, sourceBucketName string, targetClusterUUID string, targetBucketName string, filterName string) *ReplicationSpecification {
 	return &ReplicationSpecification{Id: ReplicationId(sourceClusterUUID, sourceBucketName, targetClusterUUID, targetBucketName, filterName),
 		SourceClusterUUID: sourceClusterUUID,
-		SourceBucketName: sourceBucketName,
+		SourceBucketName:  sourceBucketName,
 		TargetClusterUUID: targetClusterUUID,
-		TargetBucketName: targetBucketName,
-		FilterName: filterName,
-		Settings:    DefaultSettings()}
+		TargetBucketName:  targetBucketName,
+		FilterName:        filterName,
+		Settings:          DefaultSettings()}
 }
 
 func ReplicationId(sourceClusterUUID string, sourceBucketName string, targetClusterUUID string, targetBucketName string, filterName string) string {
@@ -63,4 +63,14 @@ func ReplicationId(sourceClusterUUID string, sourceBucketName string, targetClus
 		parts = append(parts, filterName)
 	}
 	return strings.Join(parts, base.KeyPartsDelimiter)
+}
+
+func IsReplicationIdForSourceBucket(replicationId string, sourceBucketName string) bool {
+	parts := strings.Split(replicationId, base.KeyPartsDelimiter)
+
+	if parts[2] == sourceBucketName {
+		return true
+	} else {
+		return false
+	}
 }

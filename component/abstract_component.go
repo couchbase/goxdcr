@@ -22,15 +22,15 @@ type AbstractComponent struct {
 	logger    *log.CommonLogger
 }
 
-func NewAbstractComponentWithLogger(id string, logger *log.CommonLogger) AbstractComponent {
-	return AbstractComponent{
+func NewAbstractComponentWithLogger(id string, logger *log.CommonLogger) *AbstractComponent {
+	return &AbstractComponent{
 		id:                 id,
 		event_listeners:    make(map[common.ComponentEventType][]common.ComponentEventListener),
 		logger:             logger,
 	}
 }
 
-func NewAbstractComponent(id string) AbstractComponent {
+func NewAbstractComponent(id string) *AbstractComponent {
 	return NewAbstractComponentWithLogger(id, log.NewLogger("AbstractComponent", log.DefaultLoggerContext))
 }
 

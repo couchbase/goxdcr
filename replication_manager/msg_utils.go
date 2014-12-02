@@ -82,6 +82,7 @@ const (
 	MaxExpectedReplicationLag      = "xdcrMaxExpectedReplicationLag"
 	TimeoutPercentageCap           = "xdcrTimeoutPercentageCap"
 	LogLevel                       = "xdcrLogLevel"
+	StatsInterval				   = "xdcrStatsInterval"
 )
 
 // constants for parsing create replication request
@@ -140,6 +141,7 @@ var ReplSettingRestToInternalMap = map[string]string {
 	MaxExpectedReplicationLag: metadata.MaxExpectedReplicationLag,
 	TimeoutPercentageCap: metadata.TimeoutPercentageCap,
 	LogLevel: metadata.PipelineLogLevel,
+	StatsInterval: metadata.PipelineStatsInterval,
 } 
 
 // internal replication settings key -> replication settings key in rest api
@@ -157,6 +159,7 @@ var ReplSettingInternalToRestMap = map[string]string {
 	metadata.MaxExpectedReplicationLag: MaxExpectedReplicationLag,
 	metadata.TimeoutPercentageCap: TimeoutPercentageCap,
 	metadata.PipelineLogLevel: LogLevel,
+	metadata.PipelineStatsInterval: StatsInterval,
 } 
 
 var logger_msgutil *log.CommonLogger = log.NewLogger("MessageUtils", log.DefaultLoggerContext)

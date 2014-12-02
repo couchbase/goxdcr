@@ -17,10 +17,17 @@ import (
 //It is not required for Component to raise all those event
 type ComponentEventType int
 const (
+	//data received by the component
 	DataReceived ComponentEventType = iota
+	//data is processed by the component 
+	//and passed down to the downstream
 	DataProcessed ComponentEventType = iota
+	//data is fully passed through the 
+	//pipeline to the target system
 	DataSent ComponentEventType = iota
+	//data is filtered out by the component
 	DataFiltered ComponentEventType = iota
+	//error encountered by the component
 	ErrorEncountered ComponentEventType = iota
 )
 

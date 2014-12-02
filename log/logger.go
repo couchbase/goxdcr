@@ -110,6 +110,10 @@ func (l *CommonLogger) LoggerContext() *LoggerContext {
 	return l.context
 }
 
+func (l *CommonLogger) GetLogLevel () LogLevel {
+	return l.context.Log_level
+}
+
 func LogLevelFromStr(levelStr string) (LogLevel, error) {
 	var level LogLevel
 	switch levelStr {

@@ -22,7 +22,7 @@ import (
 type IsStarted_Callback_Func func() bool
 
 type AbstractPart struct {
-	component.AbstractComponent
+	*component.AbstractComponent
 	connector common.Connector
 
 	isStarted_callback *IsStarted_Callback_Func

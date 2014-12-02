@@ -140,6 +140,7 @@ func StartGometaService() (*exec.Cmd, error) {
 		fmt.Printf("Error executing gometa command err=%v\n", err)
 		return nil, err
 	}
+	fmt.Printf("output=%v\n", outputs)
 	
 	//wait for gometa service to finish starting
 	time.Sleep(time.Second * 3)

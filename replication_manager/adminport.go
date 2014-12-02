@@ -12,21 +12,21 @@
 package replication_manager
 
 import (
+	"bytes"
 	"encoding/json"
+	"errors"
+	ap "github.com/couchbase/goxdcr/adminport"
 	"github.com/couchbase/goxdcr/base"
+	"github.com/couchbase/goxdcr/gen_server"
+	"github.com/couchbase/goxdcr/log"
+	utils "github.com/couchbase/goxdcr/utils"
 	"net/http"
 	"strings"
-	"bytes"
 	"time"
-	"errors"
 	"fmt"
 	"io/ioutil"
 	"crypto/x509"
 	"crypto/tls"
-	"github.com/couchbase/goxdcr/log"
-	"github.com/couchbase/goxdcr/gen_server"
-	ap "github.com/couchbase/goxdcr/adminport"
-	utils "github.com/couchbase/goxdcr/utils"
 	"github.com/couchbase/goxdcr/metadata"
 )
 
@@ -45,7 +45,7 @@ type Adminport struct {
 	sourceKVHost  string
 	xdcrRestPort      int // port number of XDCR rest server
 	gen_server.GenServer
-	finch         chan bool
+	finch chan bool
 }
 
 func NewAdminport(laddr string, xdcrRestPort int, finch chan bool) *Adminport {
@@ -68,7 +68,7 @@ func NewAdminport(laddr string, xdcrRestPort int, finch chan bool) *Adminport {
 	msg_callback_func = adminport.processRequest
 	exit_callback_func = nil
 	error_handler_func = nil
-	
+
 	logger_ap.Infof("Constructed adminport\n")
 
 	return adminport
@@ -79,7 +79,7 @@ func NewAdminport(laddr string, xdcrRestPort int, finch chan bool) *Adminport {
 func (adminport *Adminport) Start() {
 	// start adminport gen_server
 	adminport.Start_server()
-	
+
 	// start http server
 	reqch := make(chan ap.Request)
 	hostAddr :=  utils.GetHostAddr(adminport.sourceKVHost, adminport.xdcrRestPort)
@@ -89,10 +89,10 @@ func (adminport *Adminport) Start() {
 	logger_ap.Infof("server started %v !\n", hostAddr)
 
 	finch := adminport.finch
-		count :=0
+	count := 0
 loop:
 	for {
-	count++
+		count++
 		select {
 		case <-finch:
 			break loop
@@ -100,16 +100,16 @@ loop:
 			if ok == false {
 				break loop
 			}
-			// forward message to adminport server for processing 
+			// forward message to adminport server for processing
 			adminport.SendMsg_async([]interface{}{req})
 		default:
 		}
 	}
-	
+
 	logger_ap.Infof("adminport exited !\n")
 	server.Stop()
 	adminport.Stop_server()
-	
+
 }
 
 // needed by Supervisor interface
@@ -121,8 +121,8 @@ func (adminport *Adminport) processRequest(msg []interface{}) error {
 	// msg should consists of a single Request
 	if len(msg) != 1 {
 		return errors.New("Failed to decode message")
-	} 
-	
+	}
+
 	req := msg[0].(ap.Request)
 	httpReq := req.GetHttpRequest()
 	if response, err := adminport.handleRequest(httpReq); err == nil {
@@ -134,8 +134,8 @@ func (adminport *Adminport) processRequest(msg []interface{}) error {
 }
 
 func (adminport *Adminport) handleRequest(
-	request *http.Request) (response []byte , err error) {
-	
+	request *http.Request) (response []byte, err error) {
+
 	logger_ap.Infof("handleRequest called\n")
 	// TODO change to debug
 	logger_ap.Infof("Request: %v \n", request)
@@ -156,7 +156,7 @@ func (adminport *Adminport) handleRequest(
 		response, err = adminport.doCreateReplicationRequest(request)
 	case DeleteReplicationPrefix + DynamicSuffix + base.UrlDelimiter + MethodDelete:
 		fallthrough
-	// historically, deleteReplication could use Post method	
+	// historically, deleteReplication could use Post method
 	case DeleteReplicationPrefix + DynamicSuffix + base.UrlDelimiter + MethodPost:
 		response, err = adminport.doDeleteReplicationRequest(request)
 	case PauseReplicationPrefix + DynamicSuffix + base.UrlDelimiter + MethodPost:
@@ -304,34 +304,34 @@ func (adminport *Adminport) doDeleteRemoteClusterRequest(request *http.Request) 
 
 func (adminport *Adminport) doCreateReplicationRequest(request *http.Request) ([]byte, error) {
 	logger_ap.Infof("doCreateReplicationRequest called\n")
-	
+
 	fromBucket, toClusterUuid, toBucket, filterName, forward, settings, err := DecodeCreateReplicationRequest(request)
 	if err != nil {
 		return nil, err
 	}
-	
+
 	fromClusterUuid, err := XDCRCompTopologyService().MyCluster()
 	if err != nil {
 		return nil, err
 	}
-	
+
 	logger_ap.Debugf("fromClusterUuid=%v \n", fromClusterUuid)
-	
+
 	// apply default replication settings
 	if err := ApplyDefaultSettings(&settings); err != nil {
 		return nil, err
 	}
 
 	replicationId, err := CreateReplication(fromClusterUuid, fromBucket, toClusterUuid, toBucket, filterName, settings, forward)
-	
+
 	if err != nil {
 		return nil, err
 	} else {
-		if forward {	
-		// forward replication request to other KV nodes involved if necessary
-		adminport.forwardReplicationRequest(request)	
+		if forward {
+			// forward replication request to other KV nodes involved if necessary
+			adminport.forwardReplicationRequest(request)
 		}
-		
+
 		return NewCreateReplicationResponse(replicationId), nil
 	}
 }
@@ -343,16 +343,20 @@ func (adminport *Adminport) doDeleteReplicationRequest(request *http.Request) ([
 	if err != nil {
 		return nil, err
 	}
-	
+
 	logger_ap.Debugf("Request params: replicationId=%v\n", replicationId)
-	
-	err = DeleteReplication(replicationId, forward)
-	
+
+	if forward {
+		err = DeleteReplication(replicationId)
+	} else {
+		go StopPipeline(replicationId)
+	}
+
 	if err != nil {
 		return nil, err
 	} else {
-		if forward {		
-			// forward replication request to other KV nodes involved 
+		if forward {
+			// forward replication request to other KV nodes involved
 			adminport.forwardReplicationRequest(request)
 		}
 		// no response body in success case
@@ -367,16 +371,20 @@ func (adminport *Adminport) doPauseReplicationRequest(request *http.Request) ([]
 	if err != nil {
 		return nil, err
 	}
-	
+
 	logger_ap.Debugf("Request params: replicationId=%v\n", replicationId)
-	
-	err = PauseReplication(replicationId, forward, false/*sync*/)
-	
+
+	if forward {
+		err = PauseReplication(replicationId)
+	} else {
+		go StopPipeline(replicationId)
+	}
+
 	if err != nil {
 		return nil, err
 	} else {
-		if forward {		
-			// forward replication request to other KV nodes involved 
+		if forward {
+			// forward replication request to other KV nodes involved
 			adminport.forwardReplicationRequest(request)
 		}
 		// no response body in success case
@@ -391,16 +399,20 @@ func (adminport *Adminport) doResumeReplicationRequest(request *http.Request) ([
 	if err != nil {
 		return nil, err
 	}
-	
+
 	logger_ap.Debugf("Request params: replicationId=%v\n", replicationId)
-	
-	err = ResumeReplication(replicationId, forward, false/*sync*/)
+
+	if forward {
+		err = ResumeReplication(replicationId)
+	} else {
+		go StartPipeline(replicationId)
+	}
 	
 	if err != nil {
 		return nil, err
 	} else {
-		if forward {		
-			// forward replication request to other KV nodes involved 
+		if forward {
+			// forward replication request to other KV nodes involved
 			adminport.forwardReplicationRequest(request)
 		}
 		// no response body in success case
@@ -412,28 +424,28 @@ func (adminport *Adminport) doViewReplicationSettingsRequest(request *http.Reque
 	logger_ap.Infof("doViewReplicationSettingsRequest\n")
 
 	// get input parameters from request
-	replicationId, err:= DecodeReplicationIdFromHttpRequest(request, SettingsReplicationsPath)
+	replicationId, err := DecodeReplicationIdFromHttpRequest(request, SettingsReplicationsPath)
 	if err != nil {
 		return nil, err
 	}
-	
+
 	logger_ap.Debugf("Request decoded: replicationId=%v", replicationId)
-	
+
 	// read replication spec with the specified replication id
 	replSpec, err := ReplicationSpecService().ReplicationSpec(replicationId)
 	if err != nil {
 		return nil, err
 	}
-	
+
 	// marshal replication settings in replication spec and return it
 	return NewViewReplicationSettingsResponse(replSpec.Settings)
 }
 
 func (adminport *Adminport) doChangeReplicationSettingsRequest(request *http.Request) ([]byte, error) {
 	logger_ap.Infof("doChangeReplicationSettingsRequest\n")
-	
+
 	// get input parameters from request
-	replicationId, err:= DecodeReplicationIdFromHttpRequest(request, SettingsReplicationsPath)
+	replicationId, err := DecodeReplicationIdFromHttpRequest(request, SettingsReplicationsPath)
 	if err != nil {
 		return nil, err
 	}
@@ -441,11 +453,11 @@ func (adminport *Adminport) doChangeReplicationSettingsRequest(request *http.Req
 	if err != nil {
 		return nil, err
 	}
-	
+
 	logger_ap.Debugf("Request decoded: replicationId=%v; inputSettings=%v", replicationId, inputSettingsMap)
-	
+
 	err = HandleChangesToReplicationSettings(replicationId, inputSettingsMap)
-	
+
 	return nil, err
 }
 
@@ -464,7 +476,7 @@ func (adminport *Adminport) doGetStatisticsRequest(request *http.Request) ([]byt
 // forward requests to other nodes.
 func (adminport *Adminport) forwardReplicationRequest(request *http.Request) error {
 	logger_ap.Infof("forwardReplicationRequest\n")
-	
+
 	myAddr, err := XDCRCompTopologyService().MyHost()
 	if err != nil {
 		return err
@@ -474,25 +486,25 @@ func (adminport *Adminport) forwardReplicationRequest(request *http.Request) err
 	if err != nil {
 		return err
 	}
-	
+
 	if len(xdcrNodesMap) > 1 {
 		if err = request.ParseForm(); err != nil {
 			return err
 		}
-		
+
 		// set "Forward" flag to false in the forwarded request
 		var paramMap = make(map[string]interface{}, 0)
 		for key, valArr := range request.Form {
 			if len(valArr) > 0 {
 				paramMap[key] = valArr[0]
-	    	}
+			}
 		}
-		paramMap[Forward] = "false" 
+		paramMap[Forward] = "false"
 		// this Encode op should never fail since paramMap is fully under control
 		newBody, _ := EncodeMapIntoByteArray(paramMap)
-	
+
 		for xdcrNode, port := range xdcrNodesMap {
-			// do not forward to current node 
+			// do not forward to current node
 			if xdcrNode != myAddr {
 				go forwardReplicationRequestToXDCRNode(request.URL.String(), newBody, xdcrNode, int(port))
 			}
@@ -502,8 +514,8 @@ func (adminport *Adminport) forwardReplicationRequest(request *http.Request) err
 }
 
 func forwardReplicationRequestToXDCRNode(oldRequestUrl string, newRequestBody []byte, xdcrAddr string, port int) (*http.Response, error) {
-	logger_ap.Infof("forwardReplicationRequestToXDCRNode. oldRequestUrl=%v, newRequestBody=%v, xdcrAddr=%v, port=%v\n", 
-	                oldRequestUrl, string(newRequestBody), xdcrAddr, port)
+	logger_ap.Infof("forwardReplicationRequestToXDCRNode. oldRequestUrl=%v, newRequestBody=%v, xdcrAddr=%v, port=%v\n",
+		oldRequestUrl, string(newRequestBody), xdcrAddr, port)
 
 	newUrl := "http://" + utils.GetHostAddr(xdcrAddr, port) + oldRequestUrl
 	newRequest, err := http.NewRequest(MethodPost, newUrl, bytes.NewBuffer(newRequestBody))
@@ -511,26 +523,26 @@ func forwardReplicationRequestToXDCRNode(oldRequestUrl string, newRequestBody []
 		return nil, err
 	}
 	newRequest.Header.Set(ContentType, DefaultContentType)
-   
-   	retryInterval := ForwardingRetryInterval
-    for i := 0; i <= MaxForwardingRetry; i++ {
-    	response, err := http.DefaultClient.Do(newRequest)
-    	logger_ap.Infof("forwarding request=%v for the %vth time\n", newRequest, i + 1)
-    	if err == nil && response.StatusCode == 200 {
-    		logger_ap.Infof("forwarding request succeeded")
+
+	retryInterval := ForwardingRetryInterval
+	for i := 0; i <= MaxForwardingRetry; i++ {
+		response, err := http.DefaultClient.Do(newRequest)
+		logger_ap.Infof("forwarding request=%v for the %vth time\n", newRequest, i+1)
+		if err == nil && response.StatusCode == 200 {
+			logger_ap.Infof("forwarding request succeeded")
 			return response, err
-    	}
-    	// if did not succeed, wait and try again
-    	if i < MaxForwardingRetry {
-    		time.Sleep(retryInterval)
-    		retryInterval *= 2
-    	}
-    }
+		}
+		// if did not succeed, wait and try again
+		if i < MaxForwardingRetry {
+			time.Sleep(retryInterval)
+			retryInterval *= 2
+		}
+	}
 
 	// give up after max retry. the target node is likely dead. hopefully it will
 	// get restarted and the required action, e.g., create/resumeReplication, will get performed then
-   	logger_ap.Errorf("Error forwarding request after max retry")
-   	return nil, errors.New("Error forwarding request after max retry")
+	logger_ap.Errorf("Error forwarding request after max retry")
+	return nil, errors.New("Error forwarding request after max retry")
 }
 
 // Get the message key from http request
@@ -542,7 +554,7 @@ func (adminport *Adminport) GetMessageKeyFromRequest(r *http.Request) (string, e
 	if strings.HasSuffix(path, base.UrlDelimiter) {
 		path = path[:len(path)-1]
 	}
-	
+
 	for _, staticPath := range StaticPaths {
 		if path == staticPath {
 			// if path in url is a static path, use it as name
@@ -580,7 +592,7 @@ func ApplyDefaultSettings(settings *map[string]interface{}) error {
 	if err != nil {
 		return err
 	}
-	
+
 	for key, val := range defaultSettings.ToMap() {
 		if _, ok := (*settings)[key]; !ok {
 			(*settings)[key] = val

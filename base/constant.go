@@ -48,6 +48,7 @@ const (
 const (
 	PIPELINE_SUPERVISOR_SVC string = "PipelineSupervisor"
 	CHECKPOINT_MGR_SVC string = "CheckpointManager"
+	STATISTICS_MGR_SVC string = "StatisticsManager"
 )
 
 // supervisor related constants
