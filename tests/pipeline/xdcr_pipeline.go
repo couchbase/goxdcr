@@ -17,6 +17,7 @@ import (
 	"github.com/couchbase/goxdcr/parts"
 	"github.com/couchbase/goxdcr/pipeline_manager"
 	"github.com/couchbase/goxdcr/replication_manager"
+	"github.com/couchbase/goxdcr/base"
 	s "github.com/couchbase/goxdcr/service_impl"
 	"github.com/couchbase/goxdcr/utils"
 	"github.com/couchbaselabs/go-couchbase"
@@ -40,7 +41,6 @@ var options struct {
 	target_cluster_addr     string //target connect string
 	source_kv_host string //source kv host name
 	source_kv_port      int //source kv admin port
-	gometa_port        int // gometa request port
 	source_cluster_username string //source cluster username
 	source_cluster_password string //source cluster password
 	target_cluster_username string //target cluster username
@@ -53,8 +53,6 @@ func argParse() {
 		"source KV host name")
 	flag.IntVar(&options.source_kv_port, "source_kv_port", 9000,
 		"admin port number for source kv")
-	flag.IntVar(&options.gometa_port, "gometa_port", 5003,
-		"port number for gometa requests")
 	flag.StringVar(&options.source_bucket, "source_bucket", "default",
 		"bucket to replicate from")
 	flag.StringVar(&options.target_cluster_addr, "target_cluster_addr", "127.0.0.1:9000",
@@ -124,6 +122,7 @@ func setup() error {
 		return err
 	}
 	replication_manager.StartReplicationManager(options.source_kv_host, options.source_kv_port,
+								 base.AdminportNumber, true,
 								 s.NewReplicationSpecService(metadata_svc, nil),
 							     s.NewRemoteClusterService(metadata_svc, nil),
 							     new(c.MockClusterInfoSvc), new(c.MockXDCRTopologySvc), new(c.MockReplicationSettingsSvc))

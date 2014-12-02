@@ -30,12 +30,12 @@ import (
 	"os"
 	"time"
 	"reflect"
+	"strings"
 )
 
 var options struct {
 	sourceKVHost string //source kv host name
 	sourceKVPort      int //source kv admin port
-	gometaPort        int // gometa request port
 	username     string //username
 	password     string //password
 	
@@ -54,8 +54,6 @@ func argParse() {
 		"source KV host name")
 	flag.IntVar(&options.sourceKVPort, "sourceKVPort", 9000,
 		"admin port number for source kv")
-	flag.IntVar(&options.gometaPort, "gometaPort", 5003,
-		"port number for gometa requests")
 	flag.StringVar(&options.username, "username", "Administrator", "userName to cluster admin console")
 	flag.StringVar(&options.password, "password", "welcome", "password to Cluster admin console")
 	
@@ -63,7 +61,7 @@ func argParse() {
 		"remote cluster uuid")
 	flag.StringVar(&options.remoteName, "remoteName", "remote",
 		"remote cluster name")
-	flag.StringVar(&options.remoteHostName, "remoteHostName", "127.0.0.1:9000", //"ec2-204-236-180-81.us-west-1.compute.amazonaws.com:8091",
+	flag.StringVar(&options.remoteHostName, "remoteHostName", "127.0.0.1:9000", //"ec2-54-193-132-195.us-west-1.compute.amazonaws.com:8091",
 		"remote cluster host name")
 	flag.StringVar(&options.remoteUserName, "remoteUserName", "Administrator", "remote cluster userName")
 	flag.StringVar(&options.remotePassword, "remotePassword", "welcome", "remote cluster password")
@@ -102,6 +100,7 @@ func startAdminport() {
 	}
 	
 	rm.StartReplicationManager(options.sourceKVHost, options.sourceKVPort,
+							   base.AdminportNumber, true,
 							   s.NewReplicationSpecService(metadata_svc, nil),
 							   s.NewRemoteClusterService(metadata_svc, nil),	
 							   new(ms.MockClusterInfoSvc), 
@@ -112,7 +111,10 @@ func startAdminport() {
 	time.Sleep(time.Second * 3)
 	
 	//testAuth()
-	//testSSLAuth()
+	/*if err := testSSLAuth(); err != nil {
+		fmt.Println(err.Error())
+		return
+	}*/
 		
 	if err := testRemoteClusters(false/*remoteClusterExpected*/); err != nil {
 		fmt.Println(err.Error())
@@ -175,27 +177,18 @@ func testAuth() error{
 	return nil
 }
 
-func testSSLAuth() {
-	// Load client cert
-	cert, err := tls.LoadX509KeyPair("/Users/yu/server.crt", 
-			"/Users/yu/server.key")
-	if err != nil {
-		fmt.Printf("Could not load client certificate! err=%v\n", err)
-		return 
-	} 
+func testSSLAuth() error {
 
 	CA_Pool := x509.NewCertPool()
 	serverCert, err := ioutil.ReadFile("/Users/yu/pem/remoteCert.pem")
 	if err != nil {
     	fmt.Printf("Could not load server certificate! err=%v\n", err)
-    	return
+    	return err
 	}
 	CA_Pool.AppendCertsFromPEM(serverCert)
 	
 	tlsConfig := &tls.Config{
-		Certificates: []tls.Certificate{cert},
 		RootCAs: CA_Pool,
-		InsecureSkipVerify : true,
 	}
 	tlsConfig.BuildNameToCertificate() 
 	
@@ -203,19 +196,21 @@ func testSSLAuth() {
 		TLSClientConfig:    tlsConfig,
 	}
 	client := &http.Client{Transport: tr}
-	url := fmt.Sprintf("https://%s:%s@%s/pools", options.remoteUserName, options.remotePassword, options.remoteHostName)
+	
+	remoteHost := strings.Split(options.remoteHostName, ":")[0]
+	url := fmt.Sprintf("https://%s:%s@%s:18091/pools", options.remoteUserName, options.remotePassword, remoteHost)
 	fmt.Printf("url=%v\n", url)
 	response, err := client.Get(url)
 	fmt.Printf("response=%v, err=%v\n", response, err)
 
-	if response == nil {
-		return 
+	if err != nil {
+		return err
 	}
 	// verify contents in response
 	defer response.Body.Close()
 	bodyBytes, err := ioutil.ReadAll(response.Body)
 	if err != nil {
-		return
+		return err
 	}
 
 	fmt.Printf("body=%v\n", bodyBytes)
@@ -226,7 +221,7 @@ func testSSLAuth() {
 	
 	uuid, ok := v["uuid"]
 	fmt.Printf("uuid=%v, ok=%v\n", uuid, ok)
-	return 
+	return nil
 }
 
 

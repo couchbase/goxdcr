@@ -43,11 +43,12 @@ var logger_ap *log.CommonLogger = log.NewLogger("AdminPort", log.DefaultLoggerCo
 *************************************/
 type Adminport struct {
 	sourceKVHost  string
+	xdcrRestPort      int // port number of XDCR rest server
 	gen_server.GenServer
 	finch         chan bool
 }
 
-func NewAdminport(laddr string, finch chan bool) *Adminport {
+func NewAdminport(laddr string, xdcrRestPort int, finch chan bool) *Adminport {
 
 	//callback functions from GenServer
 	var msg_callback_func gen_server.Msg_Callback_Func
@@ -59,6 +60,7 @@ func NewAdminport(laddr string, finch chan bool) *Adminport {
 
 	adminport := &Adminport{
 		sourceKVHost:  laddr,
+		xdcrRestPort:  xdcrRestPort,
 		GenServer:     server,           /*gen_server.GenServer*/
 		finch:         finch, 
 	}
@@ -80,7 +82,7 @@ func (adminport *Adminport) Start() {
 	
 	// start http server
 	reqch := make(chan ap.Request)
-	hostAddr :=  utils.GetHostAddr(adminport.sourceKVHost, base.AdminportNumber)
+	hostAddr :=  utils.GetHostAddr(adminport.sourceKVHost, adminport.xdcrRestPort)
 	server := ap.NewHTTPServer("xdcr", hostAddr, base.AdminportUrlPrefix, reqch, new(ap.Handler))
 
 	server.Start()

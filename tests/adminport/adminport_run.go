@@ -41,8 +41,7 @@ var options struct {
 	sourceBucket string // source bucket
 	targetBucket string //target bucket
 	sourceKVHost string //source kv host name
-	sourceKVPort      int //source kv admin port
-	gometaPort        int // gometa request port
+	sourceKVAdminPort      int //source kv admin port
 	filterName   string //filter name
 	username     string //username
 	password     string //password
@@ -51,10 +50,8 @@ var options struct {
 func argParse() {
 	flag.StringVar(&options.sourceKVHost, "sourceKVHost", "127.0.0.1",
 		"source KV host name")
-	flag.IntVar(&options.sourceKVPort, "sourceKVPort", 9000,
+	flag.IntVar(&options.sourceKVAdminPort, "sourceKVAdminPort", 9000,
 		"admin port number for source kv")
-	flag.IntVar(&options.gometaPort, "gometaPort", 5003,
-		"port number for gometa requests")
 	flag.StringVar(&options.sourceBucket, "sourceBucket", "default",
 		"bucket to replicate from")
 	flag.StringVar(&options.targetBucket, "targetBucket", "target",
@@ -81,7 +78,7 @@ func main() {
 }
 
 func startAdminport() {
-	ms.SetTestOptions(utils.GetHostAddr(options.sourceKVHost, options.sourceKVPort), options.sourceKVHost, options.username, options.password)
+	ms.SetTestOptions(utils.GetHostAddr(options.sourceKVHost, options.sourceKVAdminPort), options.sourceKVHost, options.username, options.password)
 
 	cmd, err := s.StartGometaService()
 	if err != nil {
@@ -97,7 +94,8 @@ func startAdminport() {
 		return
 	}
 	
-	rm.StartReplicationManager(options.sourceKVHost, options.sourceKVPort,
+	rm.StartReplicationManager(options.sourceKVHost, options.sourceKVAdminPort,
+							   base.AdminportNumber, true,
 							   s.NewReplicationSpecService(metadata_svc, nil),
 							   s.NewRemoteClusterService(metadata_svc, nil),	
 							   new(ms.MockClusterInfoSvc), 
@@ -155,7 +153,7 @@ func testCreateReplication() (string, error) {
 
 	params := make(map[string]interface{})
 	params[rm.FromBucket] = options.sourceBucket
-	params[rm.ToClusterUuid] = utils.GetHostAddr(options.sourceKVHost, options.sourceKVPort)
+	params[rm.ToClusterUuid] = utils.GetHostAddr(options.sourceKVHost, options.sourceKVAdminPort)
 	params[rm.ToBucket] = options.targetBucket
 	params[rm.FilterName] = options.filterName
 	params[rm.FilterExpression] = FilterExpression
