@@ -85,14 +85,6 @@ func main() {
 func startAdminport() {
 	ms.SetTestOptions(utils.GetHostAddr(options.sourceKVHost, options.sourceKVPort), options.sourceKVHost, options.username, options.password)
 
-	cmd, err := s.StartGometaService()
-	if err != nil {
-		fmt.Println("Test failed. err: ", err)
-		return
-	}
-
-	defer s.KillGometaService(cmd)
-
 	metadata_svc, err := s.DefaultMetadataSvc()
 	if err != nil {
 		fmt.Println("Test failed. err: ", err)

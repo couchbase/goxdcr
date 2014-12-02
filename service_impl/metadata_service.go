@@ -12,15 +12,11 @@ package service_impl
 
 import (
 	"net/rpc"
-	"os"
-	"os/exec"
 	"fmt"
-	"time"
-	"strings"
-	"errors"
 	"github.com/couchbase/gometa/server"
 	"github.com/couchbase/gometa/common"
 	"github.com/couchbase/goxdcr/log"
+	"github.com/couchbase/goxdcr/base"
 )
 
 var goMetadataServiceMethod = "RequestReceiver.NewRequest"
@@ -33,7 +29,7 @@ type MetadataSvc struct {
 
 // for testing only
 func DefaultMetadataSvc() (*MetadataSvc, error) {
-	return NewMetadataSvc("127.0.0.1:5003", nil)
+	return NewMetadataSvc("127.0.0.1:" + fmt.Sprintf("%v", base.GometaRequestPortNumber), nil)
 }
 
 func NewMetadataSvc(hostAddr string, logger_ctx *log.LoggerContext) (*MetadataSvc, error) {
@@ -89,6 +85,8 @@ func (meta_svc *MetadataSvc) sendRequest(opCode, key string, value []byte) ([]by
 // utility methods for starting and killing the gometa service which the metadata service depends on. 
 // mostly for testing
 
+/* no longer needed. Remove after things stablize
+
 // start the gometa service
 func StartGometaService() (*exec.Cmd, error) {
 	fmt.Println("starting gometa service. this will take a couple seconds")
@@ -125,7 +123,7 @@ func StartGometaService() (*exec.Cmd, error) {
 	}
 		
 	// build gometa executable
-	objPath := goxdcrDir + "../../../../../bin/gometa"
+	objPath := goxdcrDir + "/../../../../bin/gometa"
 	gometaSrcPath := gometaDir + "/cmd/gometa/*.go"
 	command := exec.Command("/bin/bash", "-c", "go build -o " + objPath + " " + gometaSrcPath)
 	err := command.Run()
@@ -135,10 +133,11 @@ func StartGometaService() (*exec.Cmd, error) {
 	}
 		
 	// run gometa executable to start server
-	command = exec.Command(objPath, "-config", goxdcrDir + "/service_impl/metadata_svc_config")
+	command = exec.Command("/bin/bash", "-c", objPath + " -config " + goxdcrDir + "/service_impl/metadata_svc_config")
+    command.Stdin = os.Stdout   
 	err = command.Start()
 	if err != nil {
-		fmt.Printf("Error executing command line - %v\n", command.Args)
+		fmt.Printf("Error executing gometa command err=%v\n", err)
 		return nil, err
 	}
 	
@@ -156,4 +155,4 @@ func KillGometaService(cmd *exec.Cmd) {
 	} else {
 		fmt.Println("killed gometa service successfully")
 	}
-}
+} */

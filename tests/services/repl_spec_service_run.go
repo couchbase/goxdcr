@@ -37,17 +37,10 @@ func usage() {
 }
 
 func main() {
-	fmt.Println("Start Testing metadata service ...")
-	
-	cmd, err := s.StartGometaService()
-	if err != nil {
-		fmt.Println("Test failed. err: ", err)
-		return
-	}
-	defer s.KillGometaService(cmd)
+	fmt.Println("Start Testing repl spec service ...")
 	
 	// start and test ReplicationSpec service
-	err = startReplicationSpecService()
+	err := startReplicationSpecService()
 	if err != nil {
 		fmt.Println("Test failed. err: ", err)
 	} else {

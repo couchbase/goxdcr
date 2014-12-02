@@ -13,7 +13,6 @@ import (
 	"flag"
 	"fmt"
 	"os"
-
 	rm "github.com/couchbase/goxdcr/replication_manager"
 	ms "github.com/couchbase/goxdcr/mock_services"
 	s "github.com/couchbase/goxdcr/service_impl"
@@ -42,7 +41,7 @@ func argParse() {
 		"admin port number for source kv")
 	flag.IntVar(&options.xdcrRestPort, "xdcrRestPort", base.AdminportNumber,
 		"port number of XDCR rest server")
-	flag.IntVar(&options.gometaRequestPort, "gometaRequestPort", 5003,
+	flag.IntVar(&options.gometaRequestPort, "gometaRequestPort", base.GometaRequestPortNumber,
 		"port number for gometa requests")
 	flag.BoolVar(&options.isEnterprise, "isEnterprise", true,
 		"whether couchbase is of enterprise edition")
@@ -63,14 +62,7 @@ func main() {
 	
 	// TODO remove after real services are implemented
 	ms.SetTestOptions(utils.GetHostAddr(options.sourceKVHost, options.sourceKVAdminPort), options.sourceKVHost, options.username, options.password)
-	
-	cmd, err := s.StartGometaService()
-	if err != nil {
-		fmt.Printf("Failed to start gometa service. err=%v\n", err)
-		os.Exit(1)
-	}
-	defer s.KillGometaService(cmd)
-	
+
 	metadata_svc, err := s.NewMetadataSvc(utils.GetHostAddr(options.sourceKVHost, options.gometaRequestPort), nil)
 	if err != nil {
 		fmt.Printf("Error starting metadata service. err=%v\n", err)

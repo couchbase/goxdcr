@@ -62,13 +62,6 @@ func main() {
 }
 
 func invokeFactory() error {
-	cmd, err := s.StartGometaService()
-	if err != nil {
-		fmt.Println("Test failed. err: ", err)
-		return err
-	}
-
-	defer s.KillGometaService(cmd)
 	
 	msvc, err := s.DefaultMetadataSvc()
 	if err != nil {

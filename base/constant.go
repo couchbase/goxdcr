@@ -37,6 +37,9 @@ var AdminportWriteTimeout = 0
 //outgoing nozzle type
 type XDCROutgoingNozzleType int
 
+// used as default value for tests
+var GometaRequestPortNumber = 11000
+
 const (
 	Xmem XDCROutgoingNozzleType = iota
 	Capi XDCROutgoingNozzleType = iota

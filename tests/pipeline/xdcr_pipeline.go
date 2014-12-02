@@ -95,16 +95,7 @@ func main() {
 	
 	options.source_cluster_addr = utils.GetHostAddr(options.source_kv_host, options.source_kv_port)
 
-	// set up gometa service
-	cmd, err := s.StartGometaService()
-	if err != nil {
-		fmt.Println("Test failed. Failed to start goMeta service. err: ", err)
-		return
-	}
-
-	defer s.KillGometaService(cmd)
-
-	err = setup()
+	err := setup()
 	if err != nil {
 		fmt.Println("Test failed. err: ", err)
 		return
