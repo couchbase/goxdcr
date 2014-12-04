@@ -154,7 +154,7 @@ func testCreateReplication() (string, error) {
 	paramsBytes, _ := rm.EncodeMapIntoByteArray(params)
 	paramsBuf := bytes.NewBuffer(paramsBytes)
 
-	request, err := http.NewRequest(rm.MethodPost, url, paramsBuf)
+	request, err := http.NewRequest(base.MethodPost, url, paramsBuf)
 	if err != nil {
 		return "", err
 	}
@@ -181,7 +181,7 @@ func testCreateReplication() (string, error) {
 func testPauseReplication(replicationId, escapedReplId string) error {
 	url := common.GetAdminportUrlPrefix(options.sourceKVHost) + rm.PauseReplicationPrefix + base.UrlDelimiter + escapedReplId
 
-	request, err := http.NewRequest(rm.MethodPost, url, nil)
+	request, err := http.NewRequest(base.MethodPost, url, nil)
 	if err != nil {
 		return err
 	}
@@ -204,7 +204,7 @@ func testPauseReplication(replicationId, escapedReplId string) error {
 func testResumeReplication(replicationId, escapedReplId string) error {
 	url := common.GetAdminportUrlPrefix(options.sourceKVHost) + rm.ResumeReplicationPrefix + base.UrlDelimiter + escapedReplId
 
-	request, err := http.NewRequest(rm.MethodPost, url, nil)
+	request, err := http.NewRequest(base.MethodPost, url, nil)
 	if err != nil {
 		return err
 	}
@@ -227,7 +227,7 @@ func testResumeReplication(replicationId, escapedReplId string) error {
 func testDeleteReplication(replicationId, escapedReplId string) error {
 	url := common.GetAdminportUrlPrefix(options.sourceKVHost) + rm.DeleteReplicationPrefix + base.UrlDelimiter + escapedReplId
 
-	request, err := http.NewRequest(rm.MethodPost, url, nil)
+	request, err := http.NewRequest(base.MethodPost, url, nil)
 	if err != nil {
 		return err
 	}
@@ -250,7 +250,7 @@ func testDeleteReplication(replicationId, escapedReplId string) error {
 func testViewReplicationSettings(replicationId string) error {
 	url := common.GetAdminportUrlPrefix(options.sourceKVHost) + rm.SettingsReplicationsPath + base.UrlDelimiter + replicationId
 
-	request, err := http.NewRequest(rm.MethodGet, url, nil)
+	request, err := http.NewRequest(base.MethodGet, url, nil)
 	if err != nil {
 		return err
 	}
@@ -272,7 +272,7 @@ func testChangeReplicationSettings(replicationId, escapedReplicationId string) e
 	paramsBytes, _ := rm.EncodeMapIntoByteArray(params)
 	paramsBuf := bytes.NewBuffer(paramsBytes)
 
-	request, err := http.NewRequest(rm.MethodPost, url, paramsBuf)
+	request, err := http.NewRequest(base.MethodPost, url, paramsBuf)
 	if err != nil {
 		return err
 	}
@@ -301,7 +301,7 @@ func testChangeReplicationSettings(replicationId, escapedReplicationId string) e
 func testGetStatistics() error {
 	url := common.GetAdminportUrlPrefix(options.sourceKVHost) + rm.StatisticsPath
 
-	request, err := http.NewRequest(rm.MethodGet, url, nil)
+	request, err := http.NewRequest(base.MethodGet, url, nil)
 	if err != nil {
 		return err
 	}

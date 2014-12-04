@@ -33,8 +33,8 @@ type RemoteClusterReference struct {
     Password string `json:"password"`
     
     // ignore the following fields during json serialization
-    DemandEncryption  bool `json:"-"`
-    Certificate  []byte  `json:"-"`
+    DemandEncryption  bool `json:"demandEncryption"`
+    Certificate  []byte  `json:"certificate"`
 }
 
 func NewRemoteClusterReference(uuid, name, hostName, userName, password string, 

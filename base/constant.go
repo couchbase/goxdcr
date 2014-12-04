@@ -17,9 +17,22 @@ import (
 var DefaultConnectionSize = 70
 var DefaultPoolName = "default"
 
+// URL Paths for retrieving cluster info
+var PoolsPath = "/pools"
+var SSLPortsPath = "/nodes/self/xdcrSSLPorts"
+
+var SSLPortKey = "httpsMgmt" 
+
 // URL related constants
 var UrlDelimiter = "/"
 var UrlPortNumberDelimiter = ":"
+
+// http request method types
+const (
+	MethodGet = "GET"
+	MethodPost = "POST"
+	MethodDelete = "DELETE"
+)
 
 // delimiter for multiple parts in a key
 var KeyPartsDelimiter = "_"

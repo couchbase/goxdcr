@@ -11,8 +11,6 @@
 package main
 
 import (
-	"crypto/tls"
-	"crypto/x509"
 	"bytes"
 	"errors"
 	"flag"
@@ -36,6 +34,7 @@ import (
 var options struct {
 	sourceKVHost string //source kv host name
 	sourceKVPort      int //source kv admin port
+
 	username     string //username
 	password     string //password
 	
@@ -46,7 +45,7 @@ var options struct {
 	remoteUserName     string //remote cluster userName
 	remotePassword     string //remote cluster password
 	remoteDemandEncryption  bool  // whether encryption is needed
-	remoteCertificate   string  // certificate for encryption
+	remoteCertificateFile  string // file containing certificate for encryption
 }
 
 func argParse() {
@@ -61,12 +60,12 @@ func argParse() {
 		"remote cluster uuid")
 	flag.StringVar(&options.remoteName, "remoteName", "remote",
 		"remote cluster name")
-	flag.StringVar(&options.remoteHostName, "remoteHostName", "127.0.0.1:9000", //"ec2-54-193-132-195.us-west-1.compute.amazonaws.com:8091",
+	flag.StringVar(&options.remoteHostName, "remoteHostName", /*"127.0.0.1:9000",//*/"ec2-204-236-128-120.us-west-1.compute.amazonaws.com:8091",
 		"remote cluster host name")
 	flag.StringVar(&options.remoteUserName, "remoteUserName", "Administrator", "remote cluster userName")
 	flag.StringVar(&options.remotePassword, "remotePassword", "welcome", "remote cluster password")
-	flag.BoolVar(&options.remoteDemandEncryption, "remoteDemandEncryption", false, "whether encryption is needed")
-	flag.StringVar(&options.remoteCertificate, "remoteCertificate", "", "certificate for encryption")
+	flag.BoolVar(&options.remoteDemandEncryption, "remoteDemandEncryption", true, "whether encryption is needed")
+	flag.StringVar(&options.remoteCertificateFile, "remoteCertificateFile", "/Users/yu/pem/remoteCert.pem", "file containing certificate for encryption")
 
 	flag.Parse()
 }
@@ -102,11 +101,20 @@ func startAdminport() {
 	//wait for server to finish starting
 	time.Sleep(time.Second * 3)
 	
-	//testAuth()
-	/*if err := testSSLAuth(); err != nil {
+	/*if err := testAuth(); err != nil {
+		fmt.Println(err.Error())
+		return
+	}
+	
+	if err := testSSLAuth(); err != nil {
 		fmt.Println(err.Error())
 		return
 	}*/
+	
+	if err := testDeleteRemoteCluster(); err != nil {
+		fmt.Println(err.Error())
+		return
+	}
 		
 	if err := testRemoteClusters(false/*remoteClusterExpected*/); err != nil {
 		fmt.Println(err.Error())
@@ -140,7 +148,7 @@ func startAdminport() {
 func testAuth() error{
 	url := fmt.Sprintf("http://%s:%s@%s/pools", options.remoteUserName, options.remotePassword, options.remoteHostName)
 	fmt.Printf("url=%v\n", url)
-	request, err := http.NewRequest(rm.MethodGet, url, nil)
+	request, err := http.NewRequest(base.MethodGet, url, nil)
 	if err != nil {
 		return err
 	}
@@ -149,6 +157,9 @@ func testAuth() error{
 	fmt.Println("request", request)
 
 	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		return err
+	}
 	fmt.Printf("response=%v\n", response)
 
 	// verify contents in response
@@ -171,29 +182,26 @@ func testAuth() error{
 
 func testSSLAuth() error {
 
-	CA_Pool := x509.NewCertPool()
-	serverCert, err := ioutil.ReadFile("/Users/yu/pem/remoteCert.pem")
+	serverCert, err := ioutil.ReadFile(options.remoteCertificateFile)
 	if err != nil {
     	fmt.Printf("Could not load server certificate! err=%v\n", err)
     	return err
 	}
-	CA_Pool.AppendCertsFromPEM(serverCert)
 	
-	tlsConfig := &tls.Config{
-		RootCAs: CA_Pool,
+	sslPort, err := utils. GetXDCRSSLPort(options.remoteHostName, options.remoteUserName, options.remotePassword)
+	if err != nil {
+		return err
 	}
-	tlsConfig.BuildNameToCertificate() 
 	
-	tr := &http.Transport{
-		TLSClientConfig:    tlsConfig,
+	hostNode := strings.Split(options.remoteHostName, base.UrlPortNumberDelimiter)[0]
+	newHostName := utils.GetHostAddr(hostNode, sslPort)
+	url := fmt.Sprintf("https://%s:%s@%s%s", options.remoteUserName, options.remotePassword, newHostName, base.PoolsPath)
+	request, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return err
 	}
-	client := &http.Client{Transport: tr}
-	
-	remoteHost := strings.Split(options.remoteHostName, ":")[0]
-	url := fmt.Sprintf("https://%s:%s@%s:18091/pools", options.remoteUserName, options.remotePassword, remoteHost)
 	fmt.Printf("url=%v\n", url)
-	response, err := client.Get(url)
-	fmt.Printf("response=%v, err=%v\n", response, err)
+	response, err := utils.SendHttpRequestThroughSSL(request, serverCert) 
 
 	if err != nil {
 		return err
@@ -220,7 +228,7 @@ func testSSLAuth() error {
 func testRemoteClusters(remoteClusterExpected bool) error {
 	url := common.GetAdminportUrlPrefix(options.sourceKVHost) + rm.RemoteClustersPath
 
-	request, err := http.NewRequest(rm.MethodGet, url, nil)
+	request, err := http.NewRequest(base.MethodGet, url, nil)
 	if err != nil {
 		return err
 	}
@@ -252,6 +260,7 @@ func testRemoteClusters(remoteClusterExpected bool) error {
 	for _, remoteCluster := range remoteClusters {
 		if remoteCluster.Name == options.remoteName {
 			remoteClusterExists = true
+			 fmt.Printf("ref demand=%v\n", remoteCluster.DemandEncryption)
 			// verify that fields of remote cluster are as expected
 			err = verifyRemoteCluster(&remoteCluster)
 			if err != nil {
@@ -280,18 +289,28 @@ func testCreateRemoteCluster() error {
 	params[rm.RemoteClusterUserName] = options.remoteUserName
 	params[rm.RemoteClusterPassword] = options.remotePassword
 	params[rm.RemoteClusterDemandEncryption] = options.remoteDemandEncryption
-	params[rm.RemoteClusterCertificate] = options.remoteCertificate
+	
+	// read certificate from file
+	if options.remoteCertificateFile != "" {
+		serverCert, err := ioutil.ReadFile(options.remoteCertificateFile)
+		if err != nil {
+    		fmt.Printf("Could not load server certificate! err=%v\n", err)
+    		return err
+		}
+		params[rm.RemoteClusterCertificate] = serverCert
+	}
 
-	paramsBytes, _ := rm.EncodeMapIntoByteArray(params)
+	paramsBytes, err := rm.EncodeMapIntoByteArray(params)
+	if err != nil {
+		return err
+	}
 	paramsBuf := bytes.NewBuffer(paramsBytes)
 
-	request, err := http.NewRequest(rm.MethodPost, url, paramsBuf)
+	request, err := http.NewRequest(base.MethodPost, url, paramsBuf)
 	if err != nil {
 		return err
 	}
 	request.Header.Set(rm.ContentType, rm.DefaultContentType)
-
-	fmt.Println("request", request)
 
 	response, err := http.DefaultClient.Do(request)
 
@@ -305,7 +324,7 @@ func testCreateRemoteCluster() error {
 func testDeleteRemoteCluster() error {
 	url := common.GetAdminportUrlPrefix(options.sourceKVHost) + rm.RemoteClustersPath + base.UrlDelimiter + options.remoteName
 
-	request, err := http.NewRequest(rm.MethodDelete, url, nil)
+	request, err := http.NewRequest(base.MethodDelete, url, nil)
 	if err != nil {
 		return err
 	}
@@ -332,9 +351,6 @@ func verifyRemoteCluster(remoteCluster *metadata.RemoteClusterReference) error {
 		return err
 	}
 	if err := common.ValidateFieldValue(rm.RemoteClusterDemandEncryption, options.remoteDemandEncryption, remoteCluster.DemandEncryption); err != nil {
-		return err
-	}
-	if err := common.ValidateFieldValue(rm.RemoteClusterCertificate, options.remoteCertificate, string(remoteCluster.Certificate)); err != nil {
 		return err
 	}
 	return nil

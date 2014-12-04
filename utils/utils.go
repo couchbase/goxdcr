@@ -16,6 +16,8 @@ import (
 	"net/url"
 	"reflect"
 	"strconv"
+	"crypto/x509"
+	"crypto/tls"
 	"strings"
 )
 
@@ -26,6 +28,8 @@ type CouchBucket struct {
 	Name string           `json:"name"`
 	Stat BucketBasicStats `json:"basicStats"`
 }
+
+var ErrorRetrievingSSLPort = errors.New("Could not get ssl port of remote cluster.")
 
 var logger_utils *log.CommonLogger = log.NewLogger("Utils", log.DefaultLoggerContext)
 var MaxIdleConnsPerHost = 256
@@ -231,6 +235,77 @@ func NewEnhancedError(msg string, err error) error {
 // return host address in the form of hostName:port
 func GetHostAddr(hostName string, port int) string {
 	return hostName + base.UrlPortNumberDelimiter + strconv.FormatInt(int64(port), base.ParseIntBase)
+}
+
+// TODO incorporate cbauth
+func SendHttpRequest(request *http.Request) (*http.Response, error) {
+	return http.DefaultClient.Do(request)
+}
+
+// TODO incorporate cbauth
+func SendHttpRequestThroughSSL(request *http.Request, certificate []byte) (*http.Response, error) {
+	caPool := x509.NewCertPool()
+	ok := caPool.AppendCertsFromPEM(certificate)
+	if !ok {
+		return nil, errors.New("Invalid certificate")
+	}
+	
+	tlsConfig := &tls.Config{
+		RootCAs: caPool,
+	}
+	tlsConfig.BuildNameToCertificate() 
+	
+	tr := &http.Transport{
+		TLSClientConfig:    tlsConfig,
+	}
+	client := &http.Client{Transport: tr}
+	return client.Do(request)
+}
+
+// TODO may need to be refactored into a more generic service
+func GetXDCRSSLPort(hostName, userName, password string) (int, error) {
+	url := fmt.Sprintf("http://%s:%s@%s%s", userName, password, hostName, base.SSLPortsPath)
+	request, err := http.NewRequest(base.MethodGet, url, nil)
+	if err != nil {
+		return 0, err
+	}
+	
+	response, err := SendHttpRequest(request)
+	if err != nil {
+		return 0, err
+	}
+	
+	defer response.Body.Close()
+	bodyBytes, err := ioutil.ReadAll(response.Body)
+	if err != nil {
+		return 0, err
+	}
+	
+	// /nodes/self/xdcrSSLPorts could return an empty array object in local dev env
+	if len(bodyBytes) <= 2 {
+		return 0, ErrorRetrievingSSLPort
+	}
+	
+	//  /nodes/self/xdcrSSLPorts returns a non-empty map in production
+	var portsInfo map[string]interface{}
+	err = json.Unmarshal(bodyBytes, &portsInfo)
+	if err != nil {
+		return 0, err
+	}
+	
+	// get ssl port from the map 
+	sslPort, ok := portsInfo[base.SSLPortKey]
+	if !ok {
+		// should never get here
+		return 0, ErrorRetrievingSSLPort
+	}
+	
+	sslPortFloat, ok := sslPort.(float64)
+	if !ok {
+		// should never get here
+		return 0, errors.New(fmt.Sprintf("ssl port of remote cluster is of wrong type. Expected type: float64; Actual type: %s", reflect.TypeOf(sslPort)))
+	}
+	return int(sslPortFloat), nil
 }
 
 func GetSeqNoFromMCRequest(req *gomemcached.MCRequest) uint64 {

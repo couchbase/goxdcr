@@ -24,13 +24,6 @@ import (
 	"encoding/json"
 )
 
-// http request method types
-const (
-	MethodGet = "GET"
-	MethodPost = "POST"
-	MethodDelete = "DELETE"
-)
-
 // http request related constants
 const (
 	ContentType = "Content-Type"
@@ -326,7 +319,7 @@ func DecodeCreateReplicationRequest(request *http.Request) (fromBucket, toCluste
 func NewDeleteReplicationRequest(replicationId, nodeAddr string, port int) (*http.Request, error) {
 	// replicatioId is cancatenated into the url 
 	url := utils.GetHostAddr(nodeAddr, port) + base.AdminportUrlPrefix + DeleteReplicationPrefix + base.UrlDelimiter + replicationId
-	return http.NewRequest(MethodDelete, url, nil)
+	return http.NewRequest(base.MethodDelete, url, nil)
 }
 
 // decode replicationId from create replication response
@@ -510,8 +503,8 @@ func DecodeReplicationIdFromHttpRequest(request *http.Request, pathPrefix string
 
 // encode data in a map into a byte array, which can then be used as 
 // the body part of a http response
-// so far only four types are supported: string, int, bool, LogLevel
-// which should be sufficient for almost all cases
+// so far only five types are supported: string, int, bool, LogLevel, []byte
+// which should be sufficient for all cases at hand
 func EncodeMapIntoByteArray(data map[string]interface{}) ([]byte, error) {
 	if len(data) == 0 {
 		return nil, nil
@@ -529,8 +522,10 @@ func EncodeMapIntoByteArray(data map[string]interface{}) ([]byte, error) {
 				strVal = strconv.FormatBool(val.(bool))
 			case log.LogLevel:
 				strVal = val.(log.LogLevel).String()
+			case []byte:
+				strVal = string(val.([]byte))
 			default:
-				return nil, utils.IncorrectValueTypeInMapError(key, val, "string/int/bool/LogLevel")
+				return nil, utils.IncorrectValueTypeInMapError(key, val, "string/int/bool/LogLevel/[]byte")
 		}
 		params.Add(key, strVal)
 	}

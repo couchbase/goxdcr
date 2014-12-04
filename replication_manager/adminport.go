@@ -14,20 +14,19 @@ package replication_manager
 import (
 	"bytes"
 	"encoding/json"
-	"errors"
-	ap "github.com/couchbase/goxdcr/adminport"
-	"github.com/couchbase/goxdcr/base"
-	"github.com/couchbase/goxdcr/gen_server"
-	"github.com/couchbase/goxdcr/log"
-	utils "github.com/couchbase/goxdcr/utils"
 	"net/http"
 	"strings"
 	"time"
 	"fmt"
 	"io/ioutil"
-	"crypto/x509"
-	"crypto/tls"
+	"reflect"
+	"errors"
+	"github.com/couchbase/goxdcr/log"
+	"github.com/couchbase/goxdcr/gen_server"
+	ap "github.com/couchbase/goxdcr/adminport"
+	utils "github.com/couchbase/goxdcr/utils"
 	"github.com/couchbase/goxdcr/metadata"
+	"github.com/couchbase/goxdcr/base"
 )
 
 var StaticPaths = [4]string{RemoteClustersPath, CreateReplicationPath, SettingsReplicationsPath, StatisticsPath}
@@ -43,7 +42,7 @@ var logger_ap *log.CommonLogger = log.NewLogger("AdminPort", log.DefaultLoggerCo
 *************************************/
 type Adminport struct {
 	sourceKVHost  string
-	xdcrRestPort      int // port number of XDCR rest server
+	xdcrRestPort  int
 	gen_server.GenServer
 	finch chan bool
 }
@@ -146,28 +145,28 @@ func (adminport *Adminport) handleRequest(
 	}
 	
 	switch (key) {
-	case RemoteClustersPath + base.UrlDelimiter + MethodGet:
+	case RemoteClustersPath + base.UrlDelimiter + base.MethodGet:
 		response, err = adminport.doGetRemoteClustersRequest(request)
-	case RemoteClustersPath + base.UrlDelimiter + MethodPost:
+	case RemoteClustersPath + base.UrlDelimiter + base.MethodPost:
 		response, err = adminport.doCreateRemoteClusterRequest(request)
-	case RemoteClustersPath + DynamicSuffix + base.UrlDelimiter + MethodDelete:
+	case RemoteClustersPath + DynamicSuffix + base.UrlDelimiter + base.MethodDelete:
 		response, err = adminport.doDeleteRemoteClusterRequest(request)
-	case CreateReplicationPath + base.UrlDelimiter + MethodPost:
+	case CreateReplicationPath + base.UrlDelimiter + base.MethodPost:
 		response, err = adminport.doCreateReplicationRequest(request)
-	case DeleteReplicationPrefix + DynamicSuffix + base.UrlDelimiter + MethodDelete:
+	case DeleteReplicationPrefix + DynamicSuffix + base.UrlDelimiter + base.MethodDelete:
 		fallthrough
-	// historically, deleteReplication could use Post method
-	case DeleteReplicationPrefix + DynamicSuffix + base.UrlDelimiter + MethodPost:
+	// historically, deleteReplication could use Post method	
+	case DeleteReplicationPrefix + DynamicSuffix + base.UrlDelimiter + base.MethodPost:
 		response, err = adminport.doDeleteReplicationRequest(request)
-	case PauseReplicationPrefix + DynamicSuffix + base.UrlDelimiter + MethodPost:
+	case PauseReplicationPrefix + DynamicSuffix + base.UrlDelimiter + base.MethodPost:
 		response, err = adminport.doPauseReplicationRequest(request)
-	case ResumeReplicationPrefix + DynamicSuffix + base.UrlDelimiter + MethodPost:
+	case ResumeReplicationPrefix + DynamicSuffix + base.UrlDelimiter + base.MethodPost:
 		response, err = adminport.doResumeReplicationRequest(request)
-	case SettingsReplicationsPath + DynamicSuffix + base.UrlDelimiter + MethodGet:
+	case SettingsReplicationsPath + DynamicSuffix + base.UrlDelimiter + base.MethodGet:
 		response, err = adminport.doViewReplicationSettingsRequest(request)
-	case SettingsReplicationsPath + DynamicSuffix + base.UrlDelimiter + MethodPost:
+	case SettingsReplicationsPath + DynamicSuffix + base.UrlDelimiter + base.MethodPost:
 		response, err = adminport.doChangeReplicationSettingsRequest(request)
-	case StatisticsPath + base.UrlDelimiter + MethodGet:
+	case StatisticsPath + base.UrlDelimiter + base.MethodGet:
 		response, err = adminport.doGetStatisticsRequest(request)
 	default:
 		err = ap.ErrorInvalidRequest
@@ -196,6 +195,10 @@ func (adminport *Adminport) doCreateRemoteClusterRequest(request *http.Request) 
 
 	logger_ap.Infof("Decoded parameters: uuid=%v, name=%v, hostName=%v, userName=%v, password=%v, demandEncryption=%v, certificate is nil? %v\n",
 					uuid, name, hostName, userName, password, demandEncryption, certificate == nil)
+					
+	if demandEncryption && !IsEnterprise() {
+		return nil, errors.New("Encryption can only be used in enterprise edition.")
+	}
 	
 	actualUuid, err := validateRemoteClusterInfo(hostName, userName, password, demandEncryption, certificate)
 	if err != nil {
@@ -247,43 +250,38 @@ func validateRemoteClusterInfo(hostName, userName, password string,
 		return "", errors.New("Could not get uuid of remote cluster.")
 	}
 	
-	return actualUuid.(string), nil
+	actualUuidStr, ok := actualUuid.(string)
+	if !ok {
+		// should never get here
+		return "", errors.New(fmt.Sprintf("uuid of remote cluster is of wrong type. Expected type: string; Actual type: %s", reflect.TypeOf(actualUuid)))
+	}
+	
+	return actualUuidStr, nil
 }
 
 func connectToRemoteClusterThroughHttp(hostName, userName, password string) (*http.Response, error) {
-	url := fmt.Sprintf("http://%s:%s@%s/pools", userName, password, hostName)
-	request, err := http.NewRequest(MethodGet, url, nil)
+	url := fmt.Sprintf("http://%s:%s@%s%s", userName, password, hostName, base.PoolsPath)
+	request, err := http.NewRequest(base.MethodGet, url, nil)
 	if err != nil {
 		return nil, err
 	}
-
-	return http.DefaultClient.Do(request)
+	return utils.SendHttpRequest(request)
 }
 
-func connectToRemoteClusterThroughHttps(hostName, userName, password string, certificate  []byte) (*http.Response, error) {
-	url := fmt.Sprintf("https://%s:%s@%s/pools", userName, password, hostName)
-	// TODO Load client cert -- is it needed?
-	/*cert, err := tls.LoadX509KeyPair("/Users/yu/server.crt", 
-			"/Users/yu/server.key")
+func connectToRemoteClusterThroughHttps(hostName, userName, password string, certificate []byte) (*http.Response, error) {
+	sslPort, err := utils. GetXDCRSSLPort(hostName, userName, password)
 	if err != nil {
-		fmt.Printf("Could not load client certificate! err=%v\n", err)
-		return 
-	} */
-
-	CA_Pool := x509.NewCertPool()
-	CA_Pool.AppendCertsFromPEM(certificate)
-	
-	tlsConfig := &tls.Config{
-		//Certificates: []tls.Certificate{cert},
-		RootCAs: CA_Pool,
+		return nil, err
 	}
-	tlsConfig.BuildNameToCertificate() 
 	
-	tr := &http.Transport{
-		TLSClientConfig:    tlsConfig,
+	hostNode := strings.Split(hostName, base.UrlPortNumberDelimiter)[0]
+	newHostName := utils.GetHostAddr(hostNode, sslPort)
+	url := fmt.Sprintf("https://%s:%s@%s%s", userName, password, newHostName, base.PoolsPath)
+	request, err := http.NewRequest(base.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
 	}
-	client := &http.Client{Transport: tr}
-	return client.Get(url)
+	return utils.SendHttpRequestThroughSSL(request, certificate) 
 }
 
 func (adminport *Adminport) doDeleteRemoteClusterRequest(request *http.Request) ([]byte, error) {
@@ -518,7 +516,7 @@ func forwardReplicationRequestToXDCRNode(oldRequestUrl string, newRequestBody []
 		oldRequestUrl, string(newRequestBody), xdcrAddr, port)
 
 	newUrl := "http://" + utils.GetHostAddr(xdcrAddr, port) + oldRequestUrl
-	newRequest, err := http.NewRequest(MethodPost, newUrl, bytes.NewBuffer(newRequestBody))
+	newRequest, err := http.NewRequest(base.MethodPost, newUrl, bytes.NewBuffer(newRequestBody))
 	if err != nil {
 		return nil, err
 	}
