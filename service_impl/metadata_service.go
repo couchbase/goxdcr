@@ -12,11 +12,11 @@ package service_impl
 
 import (
 	"net/rpc"
-	"fmt"
 	"github.com/couchbase/gometa/server"
 	"github.com/couchbase/gometa/common"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/base"
+	"github.com/couchbase/goxdcr/utils"
 )
 
 var goMetadataServiceMethod = "RequestReceiver.NewRequest"
@@ -29,7 +29,7 @@ type MetadataSvc struct {
 
 // for testing only
 func DefaultMetadataSvc() (*MetadataSvc, error) {
-	return NewMetadataSvc("127.0.0.1:" + fmt.Sprintf("%v", base.GometaRequestPortNumber), nil)
+	return NewMetadataSvc(utils.GetHostAddr(base.LocalHostName, base.GometaRequestPortNumber), nil)
 }
 
 func NewMetadataSvc(hostAddr string, logger_ctx *log.LoggerContext) (*MetadataSvc, error) {

@@ -23,10 +23,9 @@ import (
 var done = make(chan bool)
 
 var options struct {
-	sourceKVHost      string //source kv host name
-	sourceKVAdminPort      int //source kv admin port
-	xdcrRestPort      int // port number of XDCR rest server
-	gometaRequestPort        int // gometa request port
+	sourceKVAdminPort      uint64 //source kv admin port
+	xdcrRestPort      uint64 // port number of XDCR rest server
+	gometaRequestPort        uint64// gometa request port
 	isEnterprise    bool  // whether couchbase is of enterprise edition
 	isConvert    bool  // whether xdcr is running in conversion/upgrade mode
 	// TODO remove after auth changes
@@ -35,13 +34,11 @@ var options struct {
 }
 
 func argParse() {
-	flag.StringVar(&options.sourceKVHost, "sourceKVHost", "127.0.0.1",
-		"source KV host name")
-	flag.IntVar(&options.sourceKVAdminPort, "sourceKVAdminPort", 9000,
+	flag.Uint64Var(&options.sourceKVAdminPort, "sourceKVAdminPort", 9000,
 		"admin port number for source kv")
-	flag.IntVar(&options.xdcrRestPort, "xdcrRestPort", base.AdminportNumber,
+	flag.Uint64Var(&options.xdcrRestPort, "xdcrRestPort", uint64(base.AdminportNumber),
 		"port number of XDCR rest server")
-	flag.IntVar(&options.gometaRequestPort, "gometaRequestPort", base.GometaRequestPortNumber,
+	flag.Uint64Var(&options.gometaRequestPort, "gometaRequestPort", uint64(base.GometaRequestPortNumber),
 		"port number for gometa requests")
 	flag.BoolVar(&options.isEnterprise, "isEnterprise", true,
 		"whether couchbase is of enterprise edition")
@@ -60,10 +57,22 @@ func usage() {
 func main() {
 	argParse()
 	
+	top_svc, err := s.NewXDCRTopologySvc(options.username, options.password, uint16(options.sourceKVAdminPort), uint16(options.xdcrRestPort), options.isEnterprise, nil)
+	if err != nil {
+		fmt.Printf("Error starting xdcr topology service. err=%v\n", err)
+		os.Exit(1)
+	}
+	
+	host, err := top_svc.MyHost()
+	if err != nil {
+		fmt.Printf("Error getting current host. err=%v\n", err)
+		os.Exit(1)
+	}
+	
 	// TODO remove after real services are implemented
-	ms.SetTestOptions(utils.GetHostAddr(options.sourceKVHost, options.sourceKVAdminPort), options.sourceKVHost, options.username, options.password)
+	ms.SetTestOptions(utils.GetHostAddr(host, uint16(options.sourceKVAdminPort)), options.username, options.password)
 
-	metadata_svc, err := s.NewMetadataSvc(utils.GetHostAddr(options.sourceKVHost, options.gometaRequestPort), nil)
+	metadata_svc, err := s.NewMetadataSvc(utils.GetHostAddr(host, uint16(options.gometaRequestPort)), nil)
 	if err != nil {
 		fmt.Printf("Error starting metadata service. err=%v\n", err)
 		os.Exit(1)
@@ -72,18 +81,17 @@ func main() {
 	if options.isConvert {
 		fmt.Println("Starting replication manager in conversion/upgrade mode.")
 		// start replication manager in conversion/upgrade mode
-		rm.StartReplicationManagerForConversion(options.sourceKVHost, options.sourceKVAdminPort,
-							   options.isEnterprise, 
+		rm.StartReplicationManagerForConversion(
 							   s.NewReplicationSpecService(metadata_svc, nil),
 							   s.NewRemoteClusterService(metadata_svc, nil))
 	} else {
 		// start replication manager in normal mode
-		rm.StartReplicationManager(options.sourceKVHost, options.sourceKVAdminPort,
-							   options.xdcrRestPort, options.isEnterprise,
+		rm.StartReplicationManager(host,
+							   uint16(options.xdcrRestPort),
 							   s.NewReplicationSpecService(metadata_svc, nil),
 							   s.NewRemoteClusterService(metadata_svc, nil),	
 							   new(ms.MockClusterInfoSvc), 
-							   new(ms.MockXDCRTopologySvc), 
+							   top_svc, 
 							   new(ms.MockReplicationSettingsSvc))
 							   
 		// keep main alive in normal mode

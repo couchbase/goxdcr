@@ -316,7 +316,7 @@ func DecodeCreateReplicationRequest(request *http.Request) (fromBucket, toCluste
 }
 
 // create a new DeleteReplication request for specified replicationId and the specified node
-func NewDeleteReplicationRequest(replicationId, nodeAddr string, port int) (*http.Request, error) {
+func NewDeleteReplicationRequest(replicationId, nodeAddr string, port uint16) (*http.Request, error) {
 	// replicatioId is cancatenated into the url 
 	url := utils.GetHostAddr(nodeAddr, port) + base.AdminportUrlPrefix + DeleteReplicationPrefix + base.UrlDelimiter + replicationId
 	return http.NewRequest(base.MethodDelete, url, nil)

@@ -32,7 +32,6 @@ type RemoteClusterReference struct {
 	UserName string `json:"userName"`
     Password string `json:"password"`
     
-    // ignore the following fields during json serialization
     DemandEncryption  bool `json:"demandEncryption"`
     Certificate  []byte  `json:"certificate"`
 }

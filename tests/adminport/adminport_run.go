@@ -41,16 +41,14 @@ var options struct {
 	sourceBucket string // source bucket
 	targetBucket string //target bucket
 	sourceKVHost string //source kv host name
-	sourceKVAdminPort      int //source kv admin port
+	sourceKVAdminPort      uint64 //source kv admin port
 	filterName   string //filter name
 	username     string //username
 	password     string //password
 }
 
 func argParse() {
-	flag.StringVar(&options.sourceKVHost, "sourceKVHost", "127.0.0.1",
-		"source KV host name")
-	flag.IntVar(&options.sourceKVAdminPort, "sourceKVAdminPort", 9000,
+	flag.Uint64Var(&options.sourceKVAdminPort, "sourceKVAdminPort", 9000,
 		"admin port number for source kv")
 	flag.StringVar(&options.sourceBucket, "sourceBucket", "default",
 		"bucket to replicate from")
@@ -72,13 +70,24 @@ func usage() {
 func main() {
 	fmt.Println("Start Testing adminport...")
 	argParse()
-	fmt.Printf("sourceKVHost=%s\n", options.sourceKVHost)
 	fmt.Println("Done with parsing the arguments")
 	startAdminport()
 }
 
 func startAdminport() {
-	ms.SetTestOptions(utils.GetHostAddr(options.sourceKVHost, options.sourceKVAdminPort), options.sourceKVHost, options.username, options.password)
+	top_svc, err := s.NewXDCRTopologySvc(options.username, options.password, uint16(options.sourceKVAdminPort), base.AdminportNumber, true, nil)
+	if err != nil {
+		fmt.Printf("Error starting xdcr topology service. err=%v\n", err)
+		os.Exit(1)
+	}
+	
+	options.sourceKVHost, err = top_svc.MyHost()
+	if err != nil {
+		fmt.Printf("Error getting current host. err=%v\n", err)
+		os.Exit(1)
+	}
+	
+	ms.SetTestOptions(utils.GetHostAddr(options.sourceKVHost, uint16(options.sourceKVAdminPort)), options.username, options.password)
 
 	metadata_svc, err := s.DefaultMetadataSvc()
 	if err != nil {
@@ -86,12 +95,12 @@ func startAdminport() {
 		return
 	}
 	
-	rm.StartReplicationManager(options.sourceKVHost, options.sourceKVAdminPort,
-							   base.AdminportNumber, true,
+	rm.StartReplicationManager(options.sourceKVHost,
+							   base.AdminportNumber,
 							   s.NewReplicationSpecService(metadata_svc, nil),
 							   s.NewRemoteClusterService(metadata_svc, nil),	
 							   new(ms.MockClusterInfoSvc), 
-							   new(ms.MockXDCRTopologySvc), 
+							   top_svc, 
 							   new(ms.MockReplicationSettingsSvc))
 	
 	//wait for server to finish starting
@@ -145,7 +154,7 @@ func testCreateReplication() (string, error) {
 
 	params := make(map[string]interface{})
 	params[rm.FromBucket] = options.sourceBucket
-	params[rm.ToClusterUuid] = utils.GetHostAddr(options.sourceKVHost, options.sourceKVAdminPort)
+	params[rm.ToClusterUuid] = utils.GetHostAddr(options.sourceKVHost, uint16(options.sourceKVAdminPort))
 	params[rm.ToBucket] = options.targetBucket
 	params[rm.FilterName] = options.filterName
 	params[rm.FilterExpression] = FilterExpression

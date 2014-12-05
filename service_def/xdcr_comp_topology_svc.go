@@ -33,6 +33,9 @@ type XDCRCompTopologySvc interface {
 
 	//the cluster XDCR is serving
 	MyCluster() (string, error)
+	
+	//is the cluster XDCR is serving of enterprise edition
+	IsMyClusterEnterprise() (bool, error)
 
 	//return a map with the key to be the host name that a xdcr comp is
 	//running on and the value to be the admin port number on that host

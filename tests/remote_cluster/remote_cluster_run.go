@@ -33,7 +33,7 @@ import (
 
 var options struct {
 	sourceKVHost string //source kv host name
-	sourceKVPort      int //source kv admin port
+	sourceKVPort      uint64 //source kv admin port
 
 	username     string //username
 	password     string //password
@@ -49,9 +49,7 @@ var options struct {
 }
 
 func argParse() {
-	flag.StringVar(&options.sourceKVHost, "sourceKVHost", "127.0.0.1",
-		"source KV host name")
-	flag.IntVar(&options.sourceKVPort, "sourceKVPort", 9000,
+	flag.Uint64Var(&options.sourceKVPort, "sourceKVPort", 9000,
 		"admin port number for source kv")
 	flag.StringVar(&options.username, "username", "Administrator", "userName to cluster admin console")
 	flag.StringVar(&options.password, "password", "welcome", "password to Cluster admin console")
@@ -82,7 +80,19 @@ func main() {
 }
 
 func startAdminport() {
-	ms.SetTestOptions(utils.GetHostAddr(options.sourceKVHost, options.sourceKVPort), options.sourceKVHost, options.username, options.password)
+	top_svc, err := s.NewXDCRTopologySvc(options.username, options.password, uint16(options.sourceKVPort), base.AdminportNumber, true, nil)
+	if err != nil {
+		fmt.Printf("Error starting xdcr topology service. err=%v\n", err)
+		os.Exit(1)
+	}
+	
+	options.sourceKVHost, err = top_svc.MyHost()
+	if err != nil {
+		fmt.Printf("Error getting current host. err=%v\n", err)
+		os.Exit(1)
+	}
+	
+	ms.SetTestOptions(utils.GetHostAddr(options.sourceKVHost, uint16(options.sourceKVPort)), options.username, options.password)
 
 	metadata_svc, err := s.DefaultMetadataSvc()
 	if err != nil {
@@ -90,12 +100,12 @@ func startAdminport() {
 		return
 	}
 	
-	rm.StartReplicationManager(options.sourceKVHost, options.sourceKVPort,
-							   base.AdminportNumber, true,
+	rm.StartReplicationManager(options.sourceKVHost,
+							   base.AdminportNumber, 
 							   s.NewReplicationSpecService(metadata_svc, nil),
 							   s.NewRemoteClusterService(metadata_svc, nil),	
 							   new(ms.MockClusterInfoSvc), 
-							   new(ms.MockXDCRTopologySvc), 
+							   top_svc, 
 							   new(ms.MockReplicationSettingsSvc))
 	
 	//wait for server to finish starting
@@ -110,11 +120,6 @@ func startAdminport() {
 		fmt.Println(err.Error())
 		return
 	}*/
-	
-	if err := testDeleteRemoteCluster(); err != nil {
-		fmt.Println(err.Error())
-		return
-	}
 		
 	if err := testRemoteClusters(false/*remoteClusterExpected*/); err != nil {
 		fmt.Println(err.Error())
@@ -260,7 +265,6 @@ func testRemoteClusters(remoteClusterExpected bool) error {
 	for _, remoteCluster := range remoteClusters {
 		if remoteCluster.Name == options.remoteName {
 			remoteClusterExists = true
-			 fmt.Printf("ref demand=%v\n", remoteCluster.DemandEncryption)
 			// verify that fields of remote cluster are as expected
 			err = verifyRemoteCluster(&remoteCluster)
 			if err != nil {

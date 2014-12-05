@@ -17,10 +17,17 @@ import (
 var DefaultConnectionSize = 70
 var DefaultPoolName = "default"
 
+var LocalHostName = "localhost"
+
 // URL Paths for retrieving cluster info
 var PoolsPath = "/pools"
+var NodesPath = "/pools/nodes"
 var SSLPortsPath = "/nodes/self/xdcrSSLPorts"
 
+// keys used in parsing cluster info
+var NodesKey = "nodes"
+var HostNameKey = "hostname"
+var ThisNodeKey = "thisNode"
 var SSLPortKey = "httpsMgmt" 
 
 // URL related constants
@@ -39,7 +46,11 @@ var KeyPartsDelimiter = "_"
 
 //constants for adminport
 var AdminportUrlPrefix = UrlDelimiter
-var AdminportNumber = 12100
+
+// used as default value for tests
+var AdminportNumber uint16 = 12100
+var GometaRequestPortNumber uint16 = 11000
+
 // AdminportReadTimeout timeout, in milliseconds, is read timeout for
 // golib's http server.
 var AdminportReadTimeout = 0
@@ -49,9 +60,6 @@ var AdminportWriteTimeout = 0
 
 //outgoing nozzle type
 type XDCROutgoingNozzleType int
-
-// used as default value for tests
-var GometaRequestPortNumber = 11000
 
 const (
 	Xmem XDCROutgoingNozzleType = iota

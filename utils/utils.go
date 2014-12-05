@@ -233,8 +233,13 @@ func NewEnhancedError(msg string, err error) error {
 }
 
 // return host address in the form of hostName:port
-func GetHostAddr(hostName string, port int) string {
+func GetHostAddr(hostName string, port uint16) string {
 	return hostName + base.UrlPortNumberDelimiter + strconv.FormatInt(int64(port), base.ParseIntBase)
+}
+
+// extract host name from hostAddr, which is in the form of hostName:port
+func GetHostName(hostAddr string) string {
+	return strings.Split(hostAddr, base.UrlPortNumberDelimiter)[0]
 }
 
 // TODO incorporate cbauth
@@ -263,7 +268,7 @@ func SendHttpRequestThroughSSL(request *http.Request, certificate []byte) (*http
 }
 
 // TODO may need to be refactored into a more generic service
-func GetXDCRSSLPort(hostName, userName, password string) (int, error) {
+func GetXDCRSSLPort(hostName, userName, password string) (uint16, error) {
 	url := fmt.Sprintf("http://%s:%s@%s%s", userName, password, hostName, base.SSLPortsPath)
 	request, err := http.NewRequest(base.MethodGet, url, nil)
 	if err != nil {
@@ -305,7 +310,7 @@ func GetXDCRSSLPort(hostName, userName, password string) (int, error) {
 		// should never get here
 		return 0, errors.New(fmt.Sprintf("ssl port of remote cluster is of wrong type. Expected type: float64; Actual type: %s", reflect.TypeOf(sslPort)))
 	}
-	return int(sslPortFloat), nil
+	return uint16(sslPortFloat), nil
 }
 
 func GetSeqNoFromMCRequest(req *gomemcached.MCRequest) uint64 {

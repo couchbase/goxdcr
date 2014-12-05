@@ -12,24 +12,19 @@ package mock_services
 
 import (
 	"fmt"
-	"strings"
-	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/goxdcr/utils"
 	"github.com/couchbaselabs/go-couchbase"
-	rm "github.com/couchbase/goxdcr/replication_manager"
 )
 
 var options struct {
 	sourceClusterAddr      string //source cluster addr
-	sourceKVHost      string //source kv host name
 	username        string //username on source cluster
 	password        string //password on source cluster
 }
 
-func SetTestOptions(sourceClusterAddr, sourceKVHost, username, password string) {
+func SetTestOptions(sourceClusterAddr, username, password string) {
 	options.sourceClusterAddr = sourceClusterAddr
-	options.sourceKVHost = sourceKVHost
 	options.username = username
 	options.password = password
 }
@@ -92,7 +87,7 @@ func (mock_ci_svc *MockClusterInfoSvc) GetServerVBucketsMap(ClusterUUID string, 
 	}
 	fmt.Printf("ServerList=%v\n", bucket.VBServerMap().ServerList)
 	serverVBMap, err := bucket.GetVBmap(bucket.VBServerMap().ServerList)
-	fmt.Printf("ServerVBMap=%v\n", serverVBMap)
+	//fmt.Printf("ServerVBMap=%v\n", serverVBMap)
 	return serverVBMap, err
 }
 
@@ -106,51 +101,6 @@ func (mock_ci_svc *MockClusterInfoSvc) GetBucket(clusterUUID, bucketName string)
 		return nil, err
 	}
 	return utils.Bucket(clusterConnStr, bucketName, options.username, options.password)
-}
-
-
-type MockXDCRTopologySvc struct {
-}
-
-func (mock_top_svc *MockXDCRTopologySvc) MyHost() (string, error) {
-	return options.sourceKVHost, nil
-}
-
-func (mock_top_svc *MockXDCRTopologySvc) MyAdminPort() (uint16, error) {
-	return uint16(base.AdminportNumber), nil
-}
-
-func (mock_top_svc *MockXDCRTopologySvc) MyKVNodes() ([]string, error) {
-	// as of now each xdcr instance is responsible for only one kv node
-	nodes := make([]string, 1)
-	nodes[0] = options.sourceKVHost
-	return nodes, nil
-}
-
-func (mock_top_svc *MockXDCRTopologySvc) XDCRTopology() (map[string]uint16, error) {
-	retmap := make(map[string]uint16)
-	sourceCluster, err := mock_top_svc.MyCluster()
-		if err != nil {
-		return nil, err
-	}
-	serverList, err := rm.ClusterInfoService().GetServerList(sourceCluster, "default")
-	if err != nil {
-		return nil, err
-	}
-	for _, server := range serverList {
-		serverName := (strings.Split(server, ":"))[0]
-		retmap[serverName] = uint16(base.AdminportNumber)
-	}
-	return retmap, nil
-}
-
-func (mock_top_svc *MockXDCRTopologySvc) XDCRCompToKVNodeMap() (map[string][]string, error) {
-	retmap := make(map[string][]string)
-	return retmap, nil
-}
-
-func (mock_top_svc *MockXDCRTopologySvc) MyCluster() (string, error) {
-	return options.sourceClusterAddr, nil
 }
 
 type MockReplicationSettingsSvc struct {

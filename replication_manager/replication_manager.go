@@ -40,11 +40,6 @@ type replicationManager struct {
 	supervisor.GenericSupervisor  // supervises the livesness of adminport and pipelineMasterSupervisor
 	pipelineMasterSupervisor  *supervisor.GenericSupervisor  // supervises the liveness of all pipeline supervisors
 	
-	sourceKVHost      string //source kv host name
-	sourceKVPort      int //source kv admin port
-	
-	isEnterprise       bool  // whether couchbase is of enterprise edition
-	
 	repl_spec_svc            service_def.ReplicationSpecSvc
 	remote_cluster_svc       service_def.RemoteClusterSvc
 	cluster_info_svc         service_def.ClusterInfoSvc
@@ -57,8 +52,7 @@ type replicationManager struct {
 
 var replication_mgr replicationManager
 
-func StartReplicationManagerForConversion(sourceKVHost string, 
-	sourceKVPort int, isEnterprise bool,
+func StartReplicationManagerForConversion(
 	repl_spec_svc service_def.ReplicationSpecSvc,
 	remote_cluster_svc service_def.RemoteClusterSvc) {
 	// TODO implement
@@ -69,9 +63,7 @@ func StartReplicationManagerForConversion(sourceKVHost string,
 	})*/
 }
 
-func StartReplicationManager(sourceKVHost string, 
-	sourceKVPort, xdcrRestPort int,
-	isEnterprise bool,
+func StartReplicationManager(sourceKVHost string, xdcrRestPort uint16,
 	repl_spec_svc service_def.ReplicationSpecSvc,
 	remote_cluster_svc service_def.RemoteClusterSvc,
 	cluster_info_svc service_def.ClusterInfoSvc,
@@ -80,13 +72,13 @@ func StartReplicationManager(sourceKVHost string,
 	
 	replication_mgr.once.Do(func() {
 		// initializes replication manager
-		replication_mgr.init(sourceKVHost, sourceKVPort, isEnterprise, repl_spec_svc, remote_cluster_svc, cluster_info_svc, xdcr_topology_svc, replication_settings_svc)
+		replication_mgr.init(repl_spec_svc, remote_cluster_svc, cluster_info_svc, xdcr_topology_svc, replication_settings_svc)
 				
 		// start pipeline master supervisor
 		// TODO should we make heart beat settings configurable?
 		replication_mgr.pipelineMasterSupervisor.Start(nil)
 
-		// start adminport
+		// start adminport	
 		adminport := NewAdminport(sourceKVHost, xdcrRestPort, replication_mgr.adminport_finch)	
 		go adminport.Start()
 
@@ -107,8 +99,7 @@ func StartReplicationManager(sourceKVHost string,
 
 }
 
-func (rm *replicationManager) init(sourceKVHost string, 
-	sourceKVPort int, isEnterprise bool,
+func (rm *replicationManager) init(
 	repl_spec_svc service_def.ReplicationSpecSvc,
 	remote_cluster_svc service_def.RemoteClusterSvc,
 	cluster_info_svc service_def.ClusterInfoSvc,
@@ -117,9 +108,6 @@ func (rm *replicationManager) init(sourceKVHost string,
 
 	rm.GenericSupervisor = *supervisor.NewGenericSupervisor(base.ReplicationManagerSupervisorId, log.DefaultLoggerContext, rm)
 	rm.pipelineMasterSupervisor = supervisor.NewGenericSupervisor(base.PipelineMasterSupervisorId, log.DefaultLoggerContext, rm)
-	rm.sourceKVHost = sourceKVHost
-	rm.sourceKVPort = sourceKVPort
-	rm.isEnterprise = isEnterprise
 	rm.repl_spec_svc = repl_spec_svc
 	rm.remote_cluster_svc = remote_cluster_svc
 	rm.cluster_info_svc = cluster_info_svc
@@ -132,10 +120,6 @@ func (rm *replicationManager) init(sourceKVHost string,
 
 	logger_rm.Info("Replication manager is initialized")
 
-}
-
-func IsEnterprise() bool {
-	return replication_mgr.isEnterprise
 }
 
 func ReplicationSpecService() service_def.ReplicationSpecSvc {

@@ -41,7 +41,7 @@ var options struct {
 	source_cluster_addr     string //source connect string
 	target_cluster_addr     string //target connect string
 	source_kv_host string //source kv host name
-	source_kv_port      int //source kv admin port
+	source_kv_port      uint64 //source kv admin port
 	source_cluster_username string //source cluster username
 	source_cluster_password string //source cluster password
 	target_cluster_username string //target cluster username
@@ -50,9 +50,7 @@ var options struct {
 }
 
 func argParse() {
-	flag.StringVar(&options.source_kv_host, "source_kv_host", "127.0.0.1",
-		"source KV host name")
-	flag.IntVar(&options.source_kv_port, "source_kv_port", 9000,
+	flag.Uint64Var(&options.source_kv_port, "source_kv_port", 9000,
 		"admin port number for source kv")
 	flag.StringVar(&options.source_bucket, "source_bucket", "default",
 		"bucket to replicate from")
@@ -93,9 +91,7 @@ func main() {
 	//	c.SetLogLevel(c.LogLevelTrace)
 	fmt.Println("Start Testing ...")
 	argParse()
-
-	options.source_cluster_addr = utils.GetHostAddr(options.source_kv_host, options.source_kv_port)
-
+	
 	err := setup()
 	if err != nil {
 		fmt.Println("Test failed. err: ", err)
@@ -107,17 +103,30 @@ func main() {
 }
 
 func setup() error {
+	top_svc, err := s.NewXDCRTopologySvc(options.source_cluster_username, options.source_cluster_password, uint16(options.source_kv_port), base.AdminportNumber, true, nil)
+	if err != nil {
+		fmt.Printf("Error starting xdcr topology service. err=%v\n", err)
+		os.Exit(1)
+	}
+	
+	options.source_kv_host, err = top_svc.MyHost()
+	if err != nil {
+		fmt.Printf("Error getting current host. err=%v\n", err)
+		os.Exit(1)
+	}
+	
+	options.source_cluster_addr = utils.GetHostAddr(options.source_kv_host, uint16(options.source_kv_port))
+	
 	//	flushTargetBkt()
-	c.SetTestOptions(options.source_cluster_addr, options.source_kv_host, options.source_cluster_username, options.source_cluster_password)
+	c.SetTestOptions(options.source_cluster_addr, options.source_cluster_username, options.source_cluster_password)
 	metadata_svc, err := s.DefaultMetadataSvc()
 	if err != nil {
 		return err
 	}
-	replication_manager.StartReplicationManager(options.source_kv_host, options.source_kv_port,
-								 base.AdminportNumber, true,
+	replication_manager.StartReplicationManager(options.source_kv_host, base.AdminportNumber,
 								 s.NewReplicationSpecService(metadata_svc, nil),
 							     s.NewRemoteClusterService(metadata_svc, nil),
-							     new(c.MockClusterInfoSvc), new(c.MockXDCRTopologySvc), new(c.MockReplicationSettingsSvc))
+							     new(c.MockClusterInfoSvc), top_svc, new(c.MockReplicationSettingsSvc))
 
 	fmt.Println("Finish setup")
 	return nil

@@ -9,13 +9,16 @@ import (
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/factory"
 	"github.com/couchbase/goxdcr/parts"
-	c "github.com/couchbase/goxdcr/mock_services"
 	s "github.com/couchbase/goxdcr/service_impl"
     "github.com/couchbase/goxdcr/metadata"
+    base "github.com/couchbase/goxdcr/base"
+	ms "github.com/couchbase/goxdcr/mock_services"
+	utils "github.com/couchbase/goxdcr/utils"
 )
 
 var options struct {
 	sourceKVHost      string //source kv host name
+	sourceKVAdminPort      uint64 //source kv admin port
 	sourceBucket    string // source bucket
 	targetBucket    string //target bucket
 	connectStr      string //connect string
@@ -29,10 +32,8 @@ const (
 )
 
 func argParse() {
-	flag.StringVar(&options.connectStr, "connectStr", "127.0.0.1:9000",
-		"connection string to source cluster")
-	flag.StringVar(&options.sourceKVHost, "source_kv_host", "127.0.0.1",
-		"source KV host name")
+	flag.Uint64Var(&options.sourceKVAdminPort, "sourceKVAdminPort", 9000,
+		"admin port number for source kv")
 	flag.StringVar(&options.sourceBucket, "source_bucket", "default",
 		"bucket to replicate from")
 	flag.StringVar(&options.targetBucket, "target_bucket", "target",
@@ -62,6 +63,21 @@ func main() {
 }
 
 func invokeFactory() error {
+	top_svc, err := s.NewXDCRTopologySvc(options.username, options.password, uint16(options.sourceKVAdminPort), base.AdminportNumber, true, nil)
+	if err != nil {
+		fmt.Printf("Error starting xdcr topology service. err=%v\n", err)
+		os.Exit(1)
+	}
+	
+	options.sourceKVHost, err = top_svc.MyHost()
+	if err != nil {
+		fmt.Printf("Error getting current host. err=%v\n", err)
+		os.Exit(1)
+	}
+	
+	options.connectStr = utils.GetHostAddr(options.sourceKVHost, uint16(options.sourceKVAdminPort))
+	
+	ms.SetTestOptions(utils.GetHostAddr(options.sourceKVHost, uint16(options.sourceKVAdminPort)), options.username, options.password)
 	
 	msvc, err := s.DefaultMetadataSvc()
 	if err != nil {
@@ -70,12 +86,8 @@ func invokeFactory() error {
 	}
 	
 	replSpecSvc := s.NewReplicationSpecService(msvc, nil)
-	
-	mcisvc := &c.MockClusterInfoSvc{}
-	mxtsvc := &c.MockXDCRTopologySvc{}
 
-	c.SetTestOptions(options.connectStr, options.sourceKVHost, options.username, options.password)
-	fac := factory.NewXDCRFactory(replSpecSvc, mcisvc, mxtsvc, log.DefaultLoggerContext, log.DefaultLoggerContext, nil)
+	fac := factory.NewXDCRFactory(replSpecSvc, &ms.MockClusterInfoSvc{}, top_svc, log.DefaultLoggerContext, log.DefaultLoggerContext, nil)
 
 	replSpec := metadata.NewReplicationSpecification(options.connectStr, options.sourceBucket, options.connectStr, options.targetBucket, "")
 	replSpec.Settings.SourceNozzlePerNode = NUM_SOURCE_CONN

@@ -26,15 +26,21 @@ import (
 
 //configuration settings
 const (
+	// interval of sending heart beat signals
 	HEARTBEAT_INTERVAL     = "heartbeat_interval"
+	// child is considered to have missed a heart beat if it did not respond within this timeout period
 	HEARTBEAT_TIMEOUT = "heartbeat_timeout"
+	// child is considered to be broken if it had missed this number of heart beats consecutively
+	MISSED_HEARTBEAT_THRESHOLD = "missed_heartbeat_threshold"
 
 	default_heartbeat_interval     time.Duration = 1000 * time.Millisecond
 	default_heartbeat_timeout time.Duration = 4000 * time.Millisecond
+	default_missed_heartbeat_threshold = 5
 )
 
 var supervisor_setting_defs base.SettingDefinitions = base.SettingDefinitions{HEARTBEAT_TIMEOUT: base.NewSettingDef(reflect.TypeOf((*time.Duration)(nil)), false),
-	HEARTBEAT_INTERVAL: base.NewSettingDef(reflect.TypeOf((*time.Duration)(nil)), false)}
+	HEARTBEAT_INTERVAL: base.NewSettingDef(reflect.TypeOf((*time.Duration)(nil)), false),
+	MISSED_HEARTBEAT_THRESHOLD: base.NewSettingDef(reflect.TypeOf((*uint16)(nil)), false)}
 
 type heartbeatRespStatus int
 
@@ -53,6 +59,9 @@ type GenericSupervisor struct {
 	loggerContext *log.LoggerContext
 	heartbeat_timeout time.Duration
 	heartbeat_interval     time.Duration
+	missed_heartbeat_threshold  uint16
+	// key - child Id; value - number of consecutive heart beat misses
+	childrenBeatMissedMap     map[string]uint16
 	heartbeat_ticker       *time.Ticker
 	failure_handler        common.SupervisorFailureHandler
 	finch                  chan bool
@@ -70,6 +79,8 @@ func NewGenericSupervisor(id string, logger_ctx *log.LoggerContext, failure_hand
 		loggerContext: logger_ctx,
 		heartbeat_timeout: default_heartbeat_timeout,
 		heartbeat_interval:     default_heartbeat_interval,
+		missed_heartbeat_threshold:  default_missed_heartbeat_threshold,
+		childrenBeatMissedMap:  make(map[string]uint16, 0),
 		failure_handler:        failure_handler,
 		finch:                  make(chan bool, 1),
 		childrenWaitGrp:        sync.WaitGroup{},
@@ -282,9 +293,21 @@ func (supervisor *GenericSupervisor) processReport(heartbeat_report map[string]h
 	brokenChildren := make(map[string]error)
 	for childId, status := range heartbeat_report {
 		supervisor.Logger().Debugf("childId=%v, status=%v\n", childId, status)
+
 		if status == respondedNotOk || status == notYetResponded {
-			supervisor.Logger().Infof("Child %v of supervisor %v is not responding\n", childId, supervisor.Id())
-			brokenChildren[childId] = errors.New("Not responding")
+			var missedCount uint16
+			// missedCount would be zero when child is not yet in the map, which would be the correct value
+			missedCount, _ = supervisor.childrenBeatMissedMap[childId]
+			missedCount ++
+			supervisor.Logger().Infof("Child %v of supervisor %v missed %v consecutive heart beats\n", childId, supervisor.Id(), missedCount)
+			supervisor.childrenBeatMissedMap[childId] = missedCount
+			if missedCount > supervisor.missed_heartbeat_threshold {
+				// report the child as broken if it exceeded the beat_missed_threshold
+				brokenChildren[childId] = errors.New("Not responding")
+			} 
+		} else {
+			// reset missed count to 0 when child responds
+			supervisor.childrenBeatMissedMap[childId] = 0
 		}
 	}
 

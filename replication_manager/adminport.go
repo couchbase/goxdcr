@@ -42,12 +42,12 @@ var logger_ap *log.CommonLogger = log.NewLogger("AdminPort", log.DefaultLoggerCo
 *************************************/
 type Adminport struct {
 	sourceKVHost  string
-	xdcrRestPort  int
+	xdcrRestPort  uint16
 	gen_server.GenServer
 	finch chan bool
 }
 
-func NewAdminport(laddr string, xdcrRestPort int, finch chan bool) *Adminport {
+func NewAdminport(laddr string, xdcrRestPort uint16, finch chan bool) *Adminport {
 
 	//callback functions from GenServer
 	var msg_callback_func gen_server.Msg_Callback_Func
@@ -104,7 +104,6 @@ loop:
 		default:
 		}
 	}
-
 	logger_ap.Infof("adminport exited !\n")
 	server.Stop()
 	adminport.Stop_server()
@@ -195,8 +194,12 @@ func (adminport *Adminport) doCreateRemoteClusterRequest(request *http.Request) 
 
 	logger_ap.Infof("Decoded parameters: uuid=%v, name=%v, hostName=%v, userName=%v, password=%v, demandEncryption=%v, certificate is nil? %v\n",
 					uuid, name, hostName, userName, password, demandEncryption, certificate == nil)
-					
-	if demandEncryption && !IsEnterprise() {
+			
+	isEnterprise, err := XDCRCompTopologyService().IsMyClusterEnterprise()
+	if err != nil {
+		return nil, err
+	}		
+	if demandEncryption && !isEnterprise {
 		return nil, errors.New("Encryption can only be used in enterprise edition.")
 	}
 	
@@ -269,7 +272,7 @@ func connectToRemoteClusterThroughHttp(hostName, userName, password string) (*ht
 }
 
 func connectToRemoteClusterThroughHttps(hostName, userName, password string, certificate []byte) (*http.Response, error) {
-	sslPort, err := utils. GetXDCRSSLPort(hostName, userName, password)
+	sslPort, err := utils.GetXDCRSSLPort(hostName, userName, password)
 	if err != nil {
 		return nil, err
 	}
@@ -504,14 +507,14 @@ func (adminport *Adminport) forwardReplicationRequest(request *http.Request) err
 		for xdcrNode, port := range xdcrNodesMap {
 			// do not forward to current node
 			if xdcrNode != myAddr {
-				go forwardReplicationRequestToXDCRNode(request.URL.String(), newBody, xdcrNode, int(port))
+				go forwardReplicationRequestToXDCRNode(request.URL.String(), newBody, xdcrNode, port)
 			}
 		}
 	}
 	return nil
 }
 
-func forwardReplicationRequestToXDCRNode(oldRequestUrl string, newRequestBody []byte, xdcrAddr string, port int) (*http.Response, error) {
+func forwardReplicationRequestToXDCRNode(oldRequestUrl string, newRequestBody []byte, xdcrAddr string, port uint16) (*http.Response, error) {
 	logger_ap.Infof("forwardReplicationRequestToXDCRNode. oldRequestUrl=%v, newRequestBody=%v, xdcrAddr=%v, port=%v\n",
 		oldRequestUrl, string(newRequestBody), xdcrAddr, port)
 
