@@ -95,6 +95,7 @@ func (pipelineMgr *pipelineManager) addPipelineToMap(p common.Pipeline) {
 	defer pipelineMgr.mapLock.Unlock()
 
 	pipelineMgr.live_pipelines[p.Topic()] = p
+	pipelineMgr.logger.Infof("addPipelineToMap. live_pipelines=%v\n", pipelineMgr.live_pipelines)
 
 }
 
@@ -116,12 +117,18 @@ func (pipelineMgr *pipelineManager) stopPipeline(topic string) error {
 	pipelineMgr.logger.Infof("Try to stop the pipeline %s", topic)
 	var err error
 	if f, ok := pipelineMgr.live_pipelines[topic]; ok {
+		err = f.Stop()
+		if err != nil {
+			pipelineMgr.logger.Errorf("Failed to stop pipeline %v - %v\n", topic, err)
+			return err
+		}
 		pipelineMgr.removePipelineFromMap(f)
-		f.Stop()
-		pipelineMgr.logger.Debug("Pipeline is stopped")
+
+		pipelineMgr.logger.Infof("Pipeline is stopped")
 	} else {
 		//The named pipeline is not active
-		pipelineMgr.logger.Debug("The pipeline asked to be stopped is not running.")
+		pipelineMgr.logger.Infof("The pipeline asked to be stopped is not running.")
+		pipelineMgr.logger.Infof("live_pipelines=%v\n", pipelineMgr.live_pipelines)
 	}
 	return err
 }

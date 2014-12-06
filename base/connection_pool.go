@@ -15,7 +15,6 @@ import (
 	//	"log"
 	"github.com/couchbase/goxdcr/log"
 	mcc "github.com/couchbase/gomemcached/client"
-	cb "github.com/couchbaselabs/go-couchbase"
 	"sync"
 )
 
@@ -82,7 +81,7 @@ func (p *ConnPool) Get() (*mcc.Client, error) {
 		}
 	default:
 		//no more connection, create more
-		mcClient, err := newConn(p.hostName, p.userName, p.password)
+		mcClient, err := NewConn(p.hostName, p.userName, p.password)
 		return mcClient, err
 	}	
 		
@@ -178,7 +177,7 @@ func (connPoolMgr *connPoolMgr) CreatePool(poolName string, hostName string, use
 
 	//	 initialize the connection pool
 	for i := 0; i < connectionSize; i++ {
-		mcClient, err := newConn(hostName, username, password)
+		mcClient, err := NewConn(hostName, username, password)
 		if err == nil {
 			connPoolMgr.logger.Debug("A client connection is established")
 			p.clients <- mcClient
@@ -199,32 +198,7 @@ func (connPoolMgr *connPoolMgr) CreatePool(poolName string, hostName string, use
 //
 // This function creates a single connection to the vbucket master node.
 //
-func newConnection(bucket *cb.Bucket, vbid uint16, username string, password string) (conn *mcc.Client, err error) {
-	//	log.Println("start new connection")
-
-	// make sure we release resource upon unexpected error
-	defer func() {
-		if r := recover(); r != nil {
-			if conn != nil {
-				conn.Close()
-			}
-			panic(r)
-		}
-	}()
-
-	// Assertion
-	// ***TODO: Better error message
-	if bucket == nil {
-		return nil, errors.New("Illegal Arguments")
-	}
-
-	// Through the vbucket map, get the host which is the vbucket master
-	hostStr := GetHostStr(bucket, vbid)
-
-	return newConn(hostStr, username, password)
-}
-
-func newConn(hostName string, username string, password string) (conn *mcc.Client, err error) {
+func NewConn(hostName string, username string, password string) (conn *mcc.Client, err error) {
 	// connect to host
 	conn, err = mcc.Connect("tcp", hostName)
 	if err != nil {
@@ -271,9 +245,3 @@ func (connPoolMgr *connPoolMgr) Close() {
 	}
 }
 
-func GetHostStr(bucket *cb.Bucket, vbid uint16) string {
-	vbmap := bucket.VBServerMap()
-	serverIdx := vbmap.VBucketMap[vbid][0]
-	hostStr := bucket.VBSMJson.ServerList[serverIdx]
-	return hostStr
-}

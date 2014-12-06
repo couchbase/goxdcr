@@ -38,21 +38,22 @@ package adminport
 
 import (
 	"fmt"
+	base "github.com/couchbase/goxdcr/base"
+	"github.com/couchbase/goxdcr/log"
 	"net"
 	"net/http"
 	"sync"
 	"time"
-	"github.com/couchbase/goxdcr/log"
-	base "github.com/couchbase/goxdcr/base"
 )
+import _ "expvar"
 
 var logger_server *log.CommonLogger = log.NewLogger("HttpServer", log.DefaultLoggerContext)
 
 type httpServer struct {
 	mu        sync.RWMutex   // handle concurrent updates to this object
-	lis       net.Listener // TCP listener
-	srv       *http.Server // http server
-	urlPrefix string       // URL path prefix for adminport
+	lis       net.Listener   // TCP listener
+	srv       *http.Server   // http server
+	urlPrefix string         // URL path prefix for adminport
 	reqch     chan<- Request // request channel back to application
 
 	logPrefix string
@@ -68,12 +69,12 @@ func NewHTTPServer(name, connAddr, urlPrefix string, reqch chan<- Request, handl
 		logPrefix: fmt.Sprintf("[%s:%s]", name, connAddr),
 	}
 	logger_server.Infof("%v new http server %v %v %v\n", s.logPrefix, name, connAddr, urlPrefix)
-	mux := http.NewServeMux()
-    mux.Handle(s.urlPrefix, handler)
-    handler.SetServer(s)
+	//	mux := http.NewServeMux()
+	http.Handle(s.urlPrefix, handler)
+	handler.SetServer(s)
 	s.srv = &http.Server{
 		Addr:           connAddr,
-		Handler:        mux,
+		Handler:        nil,
 		ReadTimeout:    time.Duration(base.AdminportReadTimeout) * time.Millisecond,
 		WriteTimeout:   time.Duration(base.AdminportWriteTimeout) * time.Millisecond,
 		MaxHeaderBytes: 1 << 20,
@@ -122,7 +123,7 @@ func (s *httpServer) shutdown() {
 func (s *httpServer) systemHandler(w http.ResponseWriter, r *http.Request) {
 	var err error
 
-	// TODO change to Debugf 
+	// TODO change to Debugf
 	logger_server.Infof("Request with path, %v, method, %v, and content type %v\n", r.URL.Path, r.Method, r.Header.Get("Content-Type"))
 
 	// Fault-tolerance. No need to crash the server in case of panic.
@@ -134,25 +135,25 @@ func (s *httpServer) systemHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
-    waitch := make(chan interface{}, 1)
-    // send and wait
-    s.reqch <-  &httpAdminRequest{srv: s, req: r, waitch: waitch}
-    val := <-waitch
+	waitch := make(chan interface{}, 1)
+	// send and wait
+	s.reqch <- &httpAdminRequest{srv: s, req: r, waitch: waitch}
+	val := <-waitch
 
 	switch v := (val).(type) {
-		case error:
-			http.Error(w, v.Error(), http.StatusInternalServerError)
-			err = fmt.Errorf("%v, %v", ErrorInternal, v)
-			logger_server.Errorf("%v", err)
-		case []byte:
-			w.Write(v)
+	case error:
+		http.Error(w, v.Error(), http.StatusInternalServerError)
+		err = fmt.Errorf("%v, %v", ErrorInternal, v)
+		logger_server.Errorf("%v", err)
+	case []byte:
+		w.Write(v)
 	}
 }
 
 // concrete type implementing Request interface
 type httpAdminRequest struct {
 	srv    *httpServer
-	req	   *http.Request
+	req    *http.Request
 	waitch chan interface{}
 }
 
@@ -175,26 +176,24 @@ func (r *httpAdminRequest) SendError(err error) error {
 	return nil
 }
 
-//xdcr implementaton of RequestHandler 
-type Handler struct{
-        server  *httpServer
+//xdcr implementaton of RequestHandler
+type Handler struct {
+	server *httpServer
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-        h.server.systemHandler(w, r)
+	h.server.systemHandler(w, r)
 }
 
 func (h *Handler) SetServer(s Server) error {
-        server, ok := s.(*httpServer)
-        if !ok {
-                return ErrorInvalidServerType
-        }
-        h.server = server
-        return nil
+	server, ok := s.(*httpServer)
+	if !ok {
+		return ErrorInvalidServerType
+	}
+	h.server = server
+	return nil
 }
 
 func (h *Handler) GetServer() Server {
-        return h.server
+	return h.server
 }
-
-

@@ -61,7 +61,7 @@ func (ctx *PipelineRuntimeCtx) Start(params map[string]interface{}) error {
 		if err != nil {
 			ctx.logger.Errorf("Failed to start service %s", name)
 		}
-		ctx.logger.Debugf("Service %s has been started", name)
+		ctx.logger.Infof("Service %s has been started", name)
 	}
 
 	if err == nil {
@@ -78,13 +78,13 @@ func (ctx *PipelineRuntimeCtx) Start(params map[string]interface{}) error {
 }
 
 func (ctx *PipelineRuntimeCtx) Stop() error {
-
+	ctx.logger.Infof("Pipeline context is stopping...")
 	var err error = nil
 	//stop all registered services
-	for _, svc := range ctx.runtime_svcs {
+	for name, svc := range ctx.runtime_svcs {
 		err = svc.Stop()
 		if err != nil {
-			//TODO: log error
+			ctx.logger.Errorf("Failed to stop service %v - %v", name, err)
 		}
 	}
 

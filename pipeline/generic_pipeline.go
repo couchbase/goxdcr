@@ -13,6 +13,7 @@ import (
 	"fmt"
 	common "github.com/couchbase/goxdcr/common"
 	log "github.com/couchbase/goxdcr/log"
+	"github.com/couchbase/goxdcr/metadata"
 	"sync"
 )
 
@@ -52,12 +53,15 @@ type GenericPipeline struct {
 	//the map that contains the references to all parts used in the pipeline
 	//it only populated when GetAllParts called the first time
 	partsMap map[string]common.Part
-	
+
 	//the map that contains the references to all connectors used in the pipeline
 	//it only populated when GetAllConnectors called the first time
 	connectorsMap map[string]common.Connector
 
 	logger *log.CommonLogger
+
+	spec     *metadata.ReplicationSpecification
+	settings *metadata.ReplicationSettings
 }
 
 //Get the runtime context of this pipeline
@@ -252,15 +256,12 @@ func (genericPipeline *GenericPipeline) Stop() error {
 	genericPipeline.logger.Infof("stoppping pipeline %v\n", genericPipeline.Topic())
 	var err error
 
-//	genericPipeline.stateLock.Lock()
-//	defer genericPipeline.stateLock.Unlock()
-
 	// stop services before stopping parts to avoid spurious errors from services
 	err = genericPipeline.context.Stop()
 	if err != nil {
-			return err
+		return err
 	}
-	
+
 	//close the sources
 	for _, source := range genericPipeline.sources {
 		err = source.Close()
@@ -322,11 +323,13 @@ func (genericPipeline *GenericPipeline) waitToStop(finchan chan bool) {
 
 func NewGenericPipeline(t string,
 	sources map[string]common.Nozzle,
-	targets map[string]common.Nozzle) *GenericPipeline {
+	targets map[string]common.Nozzle,
+	spec *metadata.ReplicationSpecification) *GenericPipeline {
 	pipeline := &GenericPipeline{topic: t,
 		sources:  sources,
 		targets:  targets,
 		isActive: false,
+		spec:     spec,
 		logger:   log.NewLogger("GenericPipeline", nil)}
 	return pipeline
 }
@@ -334,11 +337,13 @@ func NewGenericPipeline(t string,
 func NewPipelineWithSettingConstructor(t string,
 	sources map[string]common.Nozzle,
 	targets map[string]common.Nozzle,
+	spec *metadata.ReplicationSpecification,
 	partsSettingsConstructor PartsSettingsConstructor,
 	logger_context *log.LoggerContext) *GenericPipeline {
 	pipeline := &GenericPipeline{topic: t,
 		sources:                 sources,
 		targets:                 targets,
+		spec:                    spec,
 		isActive:                false,
 		partSetting_constructor: partsSettingsConstructor,
 		logger:                  log.NewLogger("GenericPipeline", logger_context)}
@@ -362,7 +367,7 @@ func addPartToMap(part common.Part, partsMap map[string]common.Part) {
 	if _, ok := partsMap[part.Id()]; !ok {
 		// process the part if it has not been processed yet to avoid infinite loop
 		partsMap[part.Id()] = part
-		
+
 		connector := part.Connector()
 		if connector != nil {
 			for _, downStreamPart := range connector.DownStreams() {
@@ -390,7 +395,7 @@ func addConnectorToMap(connector common.Connector, connectorsMap map[string]comm
 	if _, ok := connectorsMap[connector.Id()]; !ok {
 		// process the connector if it has not been processed yet to avoid infinite loop
 		connectorsMap[connector.Id()] = connector
-	
+
 		for _, downStreamPart := range connector.DownStreams() {
 			downStreamConnector := downStreamPart.Connector()
 			if downStreamConnector != nil {
@@ -398,6 +403,14 @@ func addConnectorToMap(connector common.Connector, connectorsMap map[string]comm
 			}
 		}
 	}
+}
+
+func (genericPipeline *GenericPipeline) Specification() *metadata.ReplicationSpecification {
+	return genericPipeline.spec
+}
+
+func (genericPipeline *GenericPipeline) Settings () *metadata.ReplicationSettings {
+	return genericPipeline.spec.Settings
 }
 
 //enforcer for GenericPipeline to implement Pipeline

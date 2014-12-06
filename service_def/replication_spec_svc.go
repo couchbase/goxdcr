@@ -19,4 +19,5 @@ type ReplicationSpecSvc interface {
 	SetReplicationSpec(spec *metadata.ReplicationSpecification) error
 	DelReplicationSpec(replicationId string) error
 	ActiveReplicationSpecs() (map[string]*metadata.ReplicationSpecification, error)
+	ActiveReplicationSpecIdsForBucket(bucket string) ([]string, error)
 }

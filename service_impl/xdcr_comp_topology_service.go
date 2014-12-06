@@ -13,35 +13,35 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io/ioutil"
-	"net/http"	
 	"github.com/couchbase/goxdcr/base"
-	"github.com/couchbase/goxdcr/utils"
 	"github.com/couchbase/goxdcr/log"
 	rm "github.com/couchbase/goxdcr/replication_manager"
+	"github.com/couchbase/goxdcr/utils"
+	"io/ioutil"
+	"net/http"
 )
 
 var ErrorRetrievingHostInfo = errors.New("Could not parse current host name from server result.")
 
 type XDCRTopologySvc struct {
-	adminport  uint16
-	xdcrRestPort  uint16
-	username   string
-	password   string
-	isEnterprise  bool
-	logger      *log.CommonLogger
+	adminport        uint16
+	xdcrRestPort     uint16
+	username         string
+	password         string
+	isEnterprise     bool
+	logger           *log.CommonLogger
 }
 
-func NewXDCRTopologySvc(username, password string, adminport, xdcrRestPort uint16, 
-    isEnterprise bool, logger_ctx *log.LoggerContext) (*XDCRTopologySvc, error) {
+func NewXDCRTopologySvc(username, password string, adminport, xdcrRestPort uint16,
+	isEnterprise bool, logger_ctx *log.LoggerContext) (*XDCRTopologySvc, error) {
 	top_svc := &XDCRTopologySvc{
-					username:  username,
-					password:  password,
-					adminport:  adminport ,
-					xdcrRestPort:  xdcrRestPort,
-					isEnterprise: isEnterprise,
-					logger:    log.NewLogger("XDCRTopologyService", logger_ctx),
-					}
+		username:     username,
+		password:     password,
+		adminport:    adminport,
+		xdcrRestPort: xdcrRestPort,
+		isEnterprise: isEnterprise,
+		logger:       log.NewLogger("XDCRTopologyService", logger_ctx),
+	}
 	return top_svc, nil
 }
 
@@ -96,46 +96,46 @@ func (top_svc *XDCRTopologySvc) getHostName() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	
+
 	response, err := utils.SendHttpRequest(request)
 	if err != nil {
 		return "", err
 	}
-	
+
 	defer response.Body.Close()
 	bodyBytes, err := ioutil.ReadAll(response.Body)
 	if err != nil {
 		return "", err
 	}
-	
+
 	//  /pools/nodes returns a map
 	var nodesInfo map[string]interface{}
 	err = json.Unmarshal(bodyBytes, &nodesInfo)
 	if err != nil {
 		return "", err
 	}
-	
-	// get node list from the map 
+
+	// get node list from the map
 	nodes, ok := nodesInfo[base.NodesKey]
 	if !ok {
 		// should never get here
 		top_svc.logger.Errorf("no nodes")
 		return "", ErrorRetrievingHostInfo
 	}
-	
+
 	nodeList, ok := nodes.([]interface{})
 	if !ok {
 		// should never get here
 		return "", ErrorRetrievingHostInfo
 	}
-	
+
 	for _, node := range nodeList {
 		nodeInfoMap, ok := node.(map[string]interface{})
 		if !ok {
 			// should never get here
 			return "", ErrorRetrievingHostInfo
 		}
-		
+
 		thisNode, ok := nodeInfoMap[base.ThisNodeKey]
 		if ok {
 			thisNodeBool, ok := thisNode.(bool)
@@ -161,7 +161,7 @@ func (top_svc *XDCRTopologySvc) getHostName() (string, error) {
 			}
 		}
 	}
-	
+
 	return "", ErrorRetrievingHostInfo
 }
 

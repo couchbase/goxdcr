@@ -163,7 +163,7 @@ func startAdminport() {
 		return
 	}
 
-	if err := testGetStatistics(); err != nil {
+	if err := testGetStatistics(options.sourceBucket); err != nil {
 		fmt.Println(err.Error())
 		return
 	}
@@ -341,8 +341,8 @@ func testChangeReplicationSettings(replicationId, escapedReplicationId string) e
 	return nil
 }
 
-func testGetStatistics() error {
-	url := common.GetAdminportUrlPrefix(options.sourceKVHost) + rm.StatisticsPath
+func testGetStatistics(bucket string) error {
+	url := common.GetAdminportUrlPrefix(options.sourceKVHost) + rm.StatisticsPrefix +base.UrlDelimiter + bucket
 
 	request, err := http.NewRequest(base.MethodGet, url, nil)
 	if err != nil {

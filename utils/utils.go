@@ -24,6 +24,9 @@ import (
 type BucketBasicStats struct {
 	ItemCount int `json:"itemCount"`
 }
+
+//Only used by unit test
+//TODO: replace with go-couchbase bucket stats API
 type CouchBucket struct {
 	Name string           `json:"name"`
 	Stat BucketBasicStats `json:"basicStats"`

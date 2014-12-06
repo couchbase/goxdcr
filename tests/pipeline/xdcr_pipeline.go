@@ -149,7 +149,7 @@ func test() {
 	fmt.Println("Start testing")
 	settings := make(map[string]interface{})
 	settings[metadata.PipelineLogLevel] = "Debug"
-	settings[metadata.PipelineStatsInterval] = 2
+	settings[metadata.PipelineStatsInterval] = 1000
 	settings[metadata.SourceNozzlePerNode] = NUM_SOURCE_CONN
 	settings[metadata.TargetNozzlePerNode] = NUM_TARGET_CONN
 	settings[metadata.BatchCount] = 500

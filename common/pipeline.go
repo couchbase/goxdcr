@@ -10,7 +10,7 @@
 package common
 
 import (
-
+	"github.com/couchbase/goxdcr/metadata"
 )
 
 //interface for Pipeline
@@ -30,4 +30,7 @@ type Pipeline interface {
 	Start(settings map[string]interface{}) error
 	//stop the data exchange
 	Stop() error
+	
+	Specification() *metadata.ReplicationSpecification
+	Settings() *metadata.ReplicationSettings
 }

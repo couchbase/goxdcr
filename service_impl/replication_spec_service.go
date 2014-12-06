@@ -12,8 +12,8 @@ package service_impl
 
 import (
 	"encoding/json"
-	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/goxdcr/log"
+	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/goxdcr/service_def"
 )
 
@@ -23,15 +23,15 @@ const (
 )
 
 type ReplicationSpecService struct {
-	metadata_svc  service_def.MetadataSvc
-	logger      *log.CommonLogger
+	metadata_svc service_def.MetadataSvc
+	logger       *log.CommonLogger
 }
 
-func NewReplicationSpecService(metadata_svc  service_def.MetadataSvc, logger_ctx *log.LoggerContext) *ReplicationSpecService {
+func NewReplicationSpecService(metadata_svc service_def.MetadataSvc, logger_ctx *log.LoggerContext) *ReplicationSpecService {
 	return &ReplicationSpecService{
-					metadata_svc:  metadata_svc,  
-					logger:    log.NewLogger("ReplicationSpecService", logger_ctx),
-		}
+		metadata_svc: metadata_svc,
+		logger:       log.NewLogger("ReplicationSpecService", logger_ctx),
+	}
 }
 
 func (service *ReplicationSpecService) ReplicationSpec(replicationId string) (*metadata.ReplicationSpecification, error) {
@@ -40,14 +40,13 @@ func (service *ReplicationSpecService) ReplicationSpec(replicationId string) (*m
 		return nil, err
 	}
 	var spec = &metadata.ReplicationSpecification{}
-	err = json.Unmarshal(result, spec) 
+	err = json.Unmarshal(result, spec)
 	return spec, err
 }
 
 // this assumes that the spec to be added is not yet in gometa
 func (service *ReplicationSpecService) AddReplicationSpec(spec *metadata.ReplicationSpecification) error {
 	key := spec.Id
-		
 	value, err := json.Marshal(spec)
 	if err != nil {
 		return err
@@ -75,7 +74,7 @@ func (service *ReplicationSpecService) ActiveReplicationSpecs() (map[string]*met
 	if err != nil {
 		return nil, err
 	}
-	
+
 	if keys != nil {
 		for _, key := range keys {
 			// ignore error. it is ok for some keys in catalog to be invalid
@@ -85,6 +84,25 @@ func (service *ReplicationSpecService) ActiveReplicationSpecs() (map[string]*met
 			}
 		}
 	}
-	
+
 	return specs, nil
+}
+
+func (service *ReplicationSpecService) ActiveReplicationSpecIdsForBucket(bucket string) ([]string, error) {
+	var repIds []string
+	keys, err := service.metadata_svc.GetKeysFromCatalog(ReplicationSpecsCatalogKey)
+	if err != nil {
+		return nil, err
+	}
+
+	service.logger.Infof("keys=%v", keys)
+	
+	if keys != nil {
+		for _, key := range keys {
+			if metadata.IsReplicationIdForSourceBucket(key, bucket) {
+				repIds = append(repIds, key)
+			}
+		}
+	}
+	return repIds, nil
 }

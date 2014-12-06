@@ -32,15 +32,6 @@ func (ckmgr *CheckpointManager) Stop() error {
 	return nil
 }
 
-func (ckmgr *CheckpointManager) StartSequenceNum(topic string) []uint64 {
-	//TODO: implement
-	ret := make([]uint64, 1024)
-	for i := 0; i < 1024; i++ {
-		ret[i] = 0
-	}
-	return ret
-}
-
 func (ckmgr *CheckpointManager) VBTimestamps(topic string) map[uint16]*base.VBTimestamp {
 	//TODO: implement
     ret := make(map[uint16]*base.VBTimestamp)

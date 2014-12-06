@@ -37,9 +37,9 @@ const (
 	CreateReplicationPath    = "controller/createReplication"
 	DeleteReplicationPrefix  = "controller/cancelXDCR"
 	NotifySettingsChangePrefix  = "controller/notifySettingsChange"
+	StatisticsPrefix         = "stats/buckets"
 	InternalSettingsPath     = "internalSettings"
 	SettingsReplicationsPath = "settings/replications"
-	StatisticsPath         = "stats"
 	// Some url paths are not static and have variable contents, e.g., settings/replications/$replication_id
 	// The message keys for such paths are constructed by appending the dynamic suffix below to the static portion of the path.
 	// e.g., settings/replications/dynamic
@@ -261,20 +261,6 @@ func NewCreateRemoteClusterResponse(remoteClusterRef *metadata.RemoteClusterRefe
 	return json.Marshal(remoteClusterRef)
 }
 
-// decode remote cluster name from request
-func DecodeRemoteClusterNameFromHttpRequest(request *http.Request) (string, error) {
-	// length of prefix preceding remote cluster name in request url path 
-	prefixLength := len(base.AdminportUrlPrefix) + len(RemoteClustersPath) + len(base.UrlDelimiter)
-	
-	if len(request.URL.Path) <= prefixLength {		
-		return "", utils.MissingParameterInHttpRequestUrlError("remote cluster name", request.URL.Path)
-	}
-
-	remoteClusterName := request.URL.Path[prefixLength:]
-	return remoteClusterName, nil
-	
-}
-
 func NewDeleteRemoteClusterResponse() ([]byte, error) {
 	// return "ok" in success case
 	return []byte("ok"), nil
@@ -385,7 +371,7 @@ func DecodeCreateReplicationResponse(response *http.Response) (string, error) {
 }
 
 func DecodeReplicationIdAndForwardFlagFromHttpRequest(request *http.Request, pathPrefix string) (replicationId string, forward bool, err error) {
-	replicationId, err = DecodeReplicationIdFromHttpRequest(request, pathPrefix)
+	replicationId, err = DecodeDynamicParamInURL(request, pathPrefix, "Replication Id")
 	if err != nil {
 		return 
 	}
@@ -559,12 +545,12 @@ func NewViewReplicationSettingsResponse(settings *metadata.ReplicationSettings) 
 
 
 // decode replication id from http request
-func DecodeReplicationIdFromHttpRequest(request *http.Request, pathPrefix string) (string, error) {
+func DecodeDynamicParamInURL(request *http.Request, pathPrefix string, partName string) (string, error) {
 	// length of prefix preceding replicationId in request url path 
 	prefixLength := len(base.AdminportUrlPrefix) + len(pathPrefix) + len(base.UrlDelimiter)
 	
 	if len(request.URL.Path) <= prefixLength {		
-		return "", utils.MissingParameterInHttpRequestUrlError("replication id", request.URL.Path)
+		return "", utils.MissingParameterInHttpRequestUrlError(partName, request.URL.Path)
 	}
 
 	replicationId := request.URL.Path[prefixLength:]
@@ -610,5 +596,4 @@ func verifyFilterExpression(filterExpression string) error {
 	_, err := regexp.Compile(filterExpression)
 	return err
 }
-
 

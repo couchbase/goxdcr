@@ -14,16 +14,17 @@ package replication_manager
 import (
 	"bufio"
 	"errors"
+	"expvar"
 	"fmt"
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/common"
 	"github.com/couchbase/goxdcr/factory"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
-	"github.com/couchbase/goxdcr/service_def"
-	"github.com/couchbase/goxdcr/pipeline_svc"
-	"github.com/couchbase/goxdcr/supervisor"
 	"github.com/couchbase/goxdcr/pipeline_manager"
+	"github.com/couchbase/goxdcr/pipeline_svc"
+	"github.com/couchbase/goxdcr/service_def"
+	"github.com/couchbase/goxdcr/supervisor"
 	"io"
 	"os"
 	"reflect"
@@ -37,9 +38,9 @@ var logger_rm *log.CommonLogger = log.NewLogger("ReplicationManager", log.Defaul
 /* struct ReplicationManager
 *************************************/
 type replicationManager struct {
-	supervisor.GenericSupervisor  // supervises the livesness of adminport and pipelineMasterSupervisor
-	pipelineMasterSupervisor  *supervisor.GenericSupervisor  // supervises the liveness of all pipeline supervisors
-	
+	supervisor.GenericSupervisor                               // supervises the livesness of adminport and pipelineMasterSupervisor
+	pipelineMasterSupervisor     *supervisor.GenericSupervisor // supervises the liveness of all pipeline supervisors
+
 	repl_spec_svc            service_def.ReplicationSpecSvc
 	remote_cluster_svc       service_def.RemoteClusterSvc
 	cluster_info_svc         service_def.ClusterInfoSvc
@@ -57,10 +58,10 @@ func StartReplicationManagerForConversion(
 	remote_cluster_svc service_def.RemoteClusterSvc) {
 	// TODO implement
 	/*
-	replication_mgr.once.Do(func() {
-		// initializes replication manager
-		replication_mgr.init(sourceKVHost, sourceKVPort, isEnterprise, repl_spec_svc, remote_cluster_svc, nil, nil, nil)
-	})*/
+		replication_mgr.once.Do(func() {
+			// initializes replication manager
+			replication_mgr.init(sourceKVHost, sourceKVPort, isEnterprise, repl_spec_svc, remote_cluster_svc, nil, nil, nil)
+		})*/
 }
 
 func StartReplicationManager(sourceKVHost string, xdcrRestPort uint16,
@@ -69,17 +70,17 @@ func StartReplicationManager(sourceKVHost string, xdcrRestPort uint16,
 	cluster_info_svc service_def.ClusterInfoSvc,
 	xdcr_topology_svc service_def.XDCRCompTopologySvc,
 	replication_settings_svc service_def.ReplicationSettingsSvc) {
-	
+
 	replication_mgr.once.Do(func() {
 		// initializes replication manager
 		replication_mgr.init(repl_spec_svc, remote_cluster_svc, cluster_info_svc, xdcr_topology_svc, replication_settings_svc)
-				
+
 		// start pipeline master supervisor
 		// TODO should we make heart beat settings configurable?
 		replication_mgr.pipelineMasterSupervisor.Start(nil)
 
-		// start adminport	
-		adminport := NewAdminport(sourceKVHost, xdcrRestPort, replication_mgr.adminport_finch)	
+		// start adminport
+		adminport := NewAdminport(sourceKVHost, xdcrRestPort, replication_mgr.adminport_finch)
 		go adminport.Start()
 
 		// add pipeline master supervisor and adminport as children of replication manager supervisor
@@ -141,6 +142,7 @@ func XDCRCompTopologyService() service_def.XDCRCompTopologySvc {
 func ReplicationSettingsService() service_def.ReplicationSettingsSvc {
 	return replication_mgr.replication_settings_svc
 }
+
 //CreateReplication create the replication specification in metadata store
 //and start the replication pipeline
 func CreateReplication(sourceBucket, targetCluster, targetBucket, filterName string, settings map[string]interface{}, createReplSpec bool) (string, error) {
@@ -164,14 +166,14 @@ func CreateReplication(sourceBucket, targetCluster, targetBucket, filterName str
 		topic = metadata.ReplicationId(sourceBucket, targetClusterRef.Uuid, targetBucket, filterName)
 	}
 
-	go StartPipeline(topic)
+	StartPipeline(topic)
 	logger_rm.Infof("Pipeline %s is created and started\n", topic)
 
 	return topic, nil
 }
 
 //PauseReplication stops the pipeline on current node
-func PauseReplication(topic string) error {
+func PauseReplication(topic string) (err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			logger_rm.Errorf("PauseReplication on pipeline %v panic: %v\n", topic, r)
@@ -180,15 +182,17 @@ func PauseReplication(topic string) error {
 
 	logger_rm.Infof("Pausing replication %s\n", topic)
 
-	if err := validatePipelineExists(topic, "pausing", true); err != nil {
+	if err = validatePipelineExists(topic, "pausing", true); err != nil {
 		return err
 	}
 	
 	// TODO may need to update replication spec if this is to support public rest API
 
-	go StopPipeline(topic)
-	logger_rm.Infof("Pipeline %s is being paused\n", topic)
-	return nil
+	err = StopPipeline(topic)
+	if err == nil {
+		logger_rm.Infof("Pipeline %s is paused\n", topic)
+	}
+	return err
 }
 
 //ResumeReplication update the replication specification with resumed state in metadata store
@@ -202,16 +206,15 @@ func ResumeReplication(topic string) error {
 	
 	// TODO may need to update replication spec if this is to support public rest API
 
-	go StartPipeline(topic)
+	StartPipeline(topic)
 	logger_rm.Infof("Pipeline %s is being resumed\n", topic)
 	return nil
 }
 
-//DeleteReplication stops the running replication of given replicationId and 
+//DeleteReplication stops the running replication of given replicationId and
 //delete the replication specification from the metadata store
 func DeleteReplication(topic string) error {
 	logger_rm.Infof("Deleting replication %s\n", topic)
-
 
 	// delete replication spec
 	if err := validatePipelineExists(topic, "deleting", true); err != nil {
@@ -226,7 +229,7 @@ func DeleteReplication(topic string) error {
 		return err
 	}
 
-	go StopPipeline(topic)
+	StopPipeline(topic)
 
 	logger_rm.Infof("Pipeline %s is deleted\n", topic)
 
@@ -314,12 +317,34 @@ func HandleChangesToReplicationSettings(topic string, oldSettings, newSettings *
 //%    ]
 //% }
 
-func GetStatistics() (map[string]interface{}, error) {
-	
-	return nil, nil
+func GetStatistics(bucket string) (*expvar.Map, error) {
+	repIds, err := ReplicationSpecService().ActiveReplicationSpecIdsForBucket(bucket)
+	if err != nil {
+		return nil, err
+	}
+	logger_rm.Infof("repId=%v\n", repIds)
+	stats := new(expvar.Map).Init()
+	for _, repId := range repIds {
+		statsForPipeline, err := getStatisticsForPipeline(repId)
+		logger_rm.Infof("statsForPipeline=%v\n", statsForPipeline)
+		if err == nil {
+			stats.Set(repId, statsForPipeline)
+		}
+	}
+	logger_rm.Infof("stats=%v\n", stats)
+
+	return stats, nil
 }
 
-func getStatisticsForPipeline(pipeline_id string) {
+func getStatisticsForPipeline(pipeline_id string) (*expvar.Map, error) {
+	pipeline := pipeline_manager.Pipeline(pipeline_id)
+	if pipeline == nil {
+		return nil, errors.New(fmt.Sprintf("Replication %v is not running", pipeline_id))
+	}
+
+	ctx := pipeline.RuntimeContext()
+	stats_mgr := ctx.Service(base.STATISTICS_MGR_SVC)
+	return stats_mgr.(*pipeline_svc.StatisticsManager).Statistics(), nil
 }
 
 func (rm *replicationManager) createAndPersistReplicationSpec(sourceBucket, targetClusterUUID, targetBucket, filterName string, settings map[string]interface{}) (*metadata.ReplicationSpecification, error) {
@@ -347,7 +372,7 @@ func (rm *replicationManager) createAndPersistReplicationSpec(sourceBucket, targ
 }
 
 //update the replication specification's "active" setting
-func UpdateReplicationSpec(topic string, active bool, action string) error {	
+func UpdateReplicationSpec(topic string, active bool, action string) error {
 	spec, err := replication_mgr.repl_spec_svc.ReplicationSpec(topic)
 	if err != nil {
 		logger_rm.Errorf("%v\n", err)
@@ -418,7 +443,7 @@ func getPipelineFromPipelineSupevisor(s common.Supervisor) (common.Pipeline, err
 // start all replications with active replication spec
 func (rm *replicationManager) startReplications() {
 	logger_rm.Infof("Replication manager init - starting existing replications")
-	
+
 	specs, err := replication_mgr.repl_spec_svc.ActiveReplicationSpecs()
 	if err != nil {
 		logger_rm.Errorf("Error retrieving active replication specs")
@@ -433,6 +458,7 @@ func (rm *replicationManager) startReplications() {
 }
 
 func fixPipeline(pipeline common.Pipeline) error {
+	logger_rm.Infof("Try to fix Pipeline %v \n", pipeline.Topic())
 	topic := pipeline.Topic()
 	if checkPipelineOnFile(pipeline) {
 		err := StopPipeline(topic)

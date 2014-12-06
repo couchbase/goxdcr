@@ -31,7 +31,7 @@ const (
 	default_replication_type                 string       = "capi"
 	default_active                           bool         = true
 	default_pipeline_log_level               log.LogLevel = log.LogLevelInfo
-	default_pipeline_stats_update_interval   int          = 5
+	default_pipeline_stats_update_interval   int          = 100
 )
 
 const (

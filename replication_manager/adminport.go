@@ -13,21 +13,22 @@ package replication_manager
 
 import (
 	"bytes"
-	"encoding/json"
+
+	"errors"
+	ap "github.com/couchbase/goxdcr/adminport"
+	"github.com/couchbase/goxdcr/base"
+	"github.com/couchbase/goxdcr/gen_server"
+	"github.com/couchbase/goxdcr/log"
+	"github.com/couchbase/goxdcr/metadata"
+	utils "github.com/couchbase/goxdcr/utils"
 	"net/http"
 	"strings"
 	"time"
-	"errors"
-	"github.com/couchbase/goxdcr/log"
-	"github.com/couchbase/goxdcr/gen_server"
-	ap "github.com/couchbase/goxdcr/adminport"
-	utils "github.com/couchbase/goxdcr/utils"
-	"github.com/couchbase/goxdcr/metadata"
-	"github.com/couchbase/goxdcr/base"
+	"fmt"
 )
 
-var StaticPaths = [4]string{RemoteClustersPath, CreateReplicationPath, SettingsReplicationsPath, StatisticsPath}
-var DynamicPathPrefixes = [4]string{RemoteClustersPath, NotifySettingsChangePrefix, DeleteReplicationPrefix, SettingsReplicationsPath}
+var StaticPaths = [4]string{RemoteClustersPath, CreateReplicationPath, SettingsReplicationsPath}
+var DynamicPathPrefixes = [5]string{RemoteClustersPath, NotifySettingsChangePrefix, DeleteReplicationPrefix, SettingsReplicationsPath, StatisticsPrefix}
 
 var MaxForwardingRetry = 5
 var ForwardingRetryInterval = time.Second * 10
@@ -160,7 +161,7 @@ func (adminport *Adminport) handleRequest(
 		response, err = adminport.doChangeReplicationSettingsRequest(request)
 	case NotifySettingsChangePrefix + DynamicSuffix + base.UrlDelimiter + base.MethodPost:
 		response, err = adminport.doNotifyReplicationSettingsChangeRequest(request)
-	case StatisticsPath + base.UrlDelimiter + base.MethodGet:
+	case StatisticsPrefix + DynamicSuffix + base.UrlDelimiter + base.MethodGet:
 		response, err = adminport.doGetStatisticsRequest(request)
 	default:
 		err = ap.ErrorInvalidRequest
@@ -201,8 +202,7 @@ func (adminport *Adminport) doCreateRemoteClusterRequest(request *http.Request) 
 
 func (adminport *Adminport) doDeleteRemoteClusterRequest(request *http.Request) ([]byte, error) {
 	logger_ap.Infof("doDeleteRemoteClusterRequest\n")
-	
-	remoteClusterName, err := DecodeRemoteClusterNameFromHttpRequest(request)
+	remoteClusterName, err := DecodeDynamicParamInURL(request, RemoteClustersPath, "Remote Cluster Name")
 	if err != nil {
 		return nil, err
 	}
@@ -274,7 +274,7 @@ func (adminport *Adminport) doViewReplicationSettingsRequest(request *http.Reque
 	logger_ap.Infof("doViewReplicationSettingsRequest\n")
 
 	// get input parameters from request
-	replicationId, err := DecodeReplicationIdFromHttpRequest(request, SettingsReplicationsPath)
+	replicationId, err := DecodeDynamicParamInURL(request, SettingsReplicationsPath, "Replication Id")
 	if err != nil {
 		return nil, err
 	}
@@ -295,7 +295,7 @@ func (adminport *Adminport) doChangeReplicationSettingsRequest(request *http.Req
 	logger_ap.Infof("doChangeReplicationSettingsRequest\n")
 
 	// get input parameters from request
-	replicationId, err := DecodeReplicationIdFromHttpRequest(request, SettingsReplicationsPath)
+	replicationId, err := DecodeDynamicParamInURL(request, SettingsReplicationsPath, "Replication Id")
 	if err != nil {
 		return nil, err
 	}
@@ -313,6 +313,7 @@ func (adminport *Adminport) doChangeReplicationSettingsRequest(request *http.Req
 	if err != nil {
 		return nil, err
 	}
+	
 	oldSettings := replSpec.Settings
 	
 	err = UpdateReplicationSettings(replicationId, inputSettingsMap)
@@ -332,7 +333,8 @@ func (adminport *Adminport) doNotifyReplicationSettingsChangeRequest(request *ht
 	logger_ap.Infof("doNotifyReplicationSettingsChangeRequest\n")
 
 	// get input parameters from request
-	replicationId, err := DecodeReplicationIdFromHttpRequest(request, NotifySettingsChangePrefix)
+
+	replicationId, err := DecodeDynamicParamInURL(request, SettingsReplicationsPath, "Replication Id")
 	if err != nil {
 		return nil, err
 	}
@@ -362,9 +364,18 @@ func (adminport *Adminport) doNotifyReplicationSettingsChangeRequest(request *ht
 func (adminport *Adminport) doGetStatisticsRequest(request *http.Request) ([]byte, error) {
 	logger_ap.Infof("doGetStatisticsRequest\n")
 
-	statsMap, err := GetStatistics()
+	//pass the request to get the bucket name
+	bucket, err := DecodeDynamicParamInURL(request, StatisticsPrefix, "Bucket Name")
+	if err != nil {
+		return nil, err
+	}
+
+	statsMap, err := GetStatistics(bucket)
 	if err == nil {
-		return json.Marshal(statsMap)
+		if statsMap == nil {
+			return nil, errors.New(fmt.Sprintf("No replication for bucket %v", bucket))
+		}
+		return []byte(statsMap.String()), nil
 	} else {
 		return nil, err
 	}
