@@ -31,6 +31,7 @@ var ErrorNoTargetNozzle = errors.New("Invalid configuration. No target nozzle ca
 // Factory for XDCR pipelines
 type XDCRFactory struct {
 	repl_spec_svc            service_def.ReplicationSpecSvc
+	remote_cluster_svc       service_def.RemoteClusterSvc
 	cluster_info_svc         service_def.ClusterInfoSvc
 	xdcr_topology_svc        service_def.XDCRCompTopologySvc
 	default_logger_ctx       *log.LoggerContext
@@ -42,12 +43,14 @@ type XDCRFactory struct {
 
 // set call back functions is done only once
 func NewXDCRFactory(repl_spec_svc service_def.ReplicationSpecSvc,
+	remote_cluster_svc service_def.RemoteClusterSvc,
 	cluster_info_svc service_def.ClusterInfoSvc,
 	xdcr_topology_svc service_def.XDCRCompTopologySvc,
 	pipeline_default_logger_ctx *log.LoggerContext,
 	factory_logger_ctx *log.LoggerContext,
 	pipeline_failure_handler common.SupervisorFailureHandler) *XDCRFactory {
 	return &XDCRFactory{repl_spec_svc: repl_spec_svc,
+		remote_cluster_svc:       remote_cluster_svc,
 		cluster_info_svc:         cluster_info_svc,
 		xdcr_topology_svc:        xdcr_topology_svc,
 		default_logger_ctx:       pipeline_default_logger_ctx,
@@ -130,11 +133,9 @@ func (xdcrf *XDCRFactory) constructSourceNozzles(spec *metadata.ReplicationSpeci
 
 	bucketName := spec.SourceBucketName
 
-	sourceClusterUUID := spec.SourceClusterUUID
-
 	maxNozzlesPerNode := spec.Settings.SourceNozzlePerNode
-
-	serverVBMap, err := xdcrf.cluster_info_svc.GetServerVBucketsMap(sourceClusterUUID, bucketName)
+	
+	serverVBMap, err := xdcrf.cluster_info_svc.GetServerVBucketsMap(xdcrf.xdcr_topology_svc, bucketName)
 	if err != nil {
 		xdcrf.logger.Errorf("err=%v\n", err)
 		return nil, err
@@ -173,7 +174,7 @@ func (xdcrf *XDCRFactory) constructSourceNozzles(spec *metadata.ReplicationSpeci
 			//connection. Each Upr connection needs a separate socket
 			//TODO: look into if different DcpNozzles for the same kv node can share a
 			//upr connection
-			bucket, err := xdcrf.cluster_info_svc.GetBucket(sourceClusterUUID, bucketName)
+			bucket, err := xdcrf.cluster_info_svc.GetBucket(xdcrf.xdcr_topology_svc, bucketName)
 			if err != nil {
 				xdcrf.logger.Errorf("Error getting bucket. i=%d, err=%v\n", i, err)
 				return nil, err
@@ -208,10 +209,15 @@ func (xdcrf *XDCRFactory) constructOutgoingNozzles(spec *metadata.ReplicationSpe
 	vbNozzleMap := make(map[uint16]string)
 
 	//	kvVBMap, bucketPwd, err := (*xdcr_factory.get_target_topology_callback)(config.TargetCluster, config.TargetBucketn)
-	targetClusterUUID := spec.TargetClusterUUID
 	targetBucketName := spec.TargetBucketName
-
-	kvVBMap, err := xdcrf.cluster_info_svc.GetServerVBucketsMap(targetClusterUUID, targetBucketName)
+	
+	targetClusterRef, err := xdcrf.remote_cluster_svc.RemoteClusterByUuid(spec.TargetClusterUUID)
+	if err != nil {
+		xdcrf.logger.Errorf("Error getting remote cluster with uuid=%v, err=%v\n", spec.TargetClusterUUID, err)
+		return nil, nil, err
+	}
+	
+	kvVBMap, err := xdcrf.cluster_info_svc.GetServerVBucketsMap(targetClusterRef, targetBucketName)
 	if err != nil {
 		xdcrf.logger.Errorf("Error getting server vbuckets map, err=%v\n", err)
 		return nil, nil, err
@@ -220,7 +226,7 @@ func (xdcrf *XDCRFactory) constructOutgoingNozzles(spec *metadata.ReplicationSpe
 		return nil, nil, ErrorNoTargetNozzle
 	}
 
-	targetBucket, err := xdcrf.cluster_info_svc.GetBucket(targetClusterUUID, targetBucketName)
+	targetBucket, err := xdcrf.cluster_info_svc.GetBucket(targetClusterRef, targetBucketName)
 	if err != nil {
 		xdcrf.logger.Errorf("Error getting bucket, err=%v\n", err)
 		return nil, nil, err

@@ -20,7 +20,6 @@ import (
 	rm "github.com/couchbase/goxdcr/replication_manager"
 	s "github.com/couchbase/goxdcr/service_impl"
 	ms "github.com/couchbase/goxdcr/mock_services"
-	utils "github.com/couchbase/goxdcr/utils"
 	"github.com/couchbase/goxdcr/tests/common"
 	"net/http"
 	"net/url"
@@ -29,12 +28,10 @@ import (
 )
 
 const (
-	TestTopic        = "test"
 	NumSourceConn    = 2
 	NumTargetConn    = 3
-	FilterExpression = "testExpr"
-	BatchCount       = 20
-	BatchSize        = 30
+	BatchCount       = 400
+	BatchSize        = 1024
 )
 
 var options struct {
@@ -45,6 +42,15 @@ var options struct {
 	filterName   string //filter name
 	username     string //username
 	password     string //password
+	
+	// parameters of remote cluster
+	remoteUuid string // remote cluster uuid
+	remoteName string // remote cluster name
+	remoteHostName string // remote cluster host name
+	remoteUserName     string //remote cluster userName
+	remotePassword     string //remote cluster password
+	remoteDemandEncryption  bool  // whether encryption is needed
+	remoteCertificateFile  string // file containing certificate for encryption
 }
 
 func argParse() {
@@ -58,6 +64,18 @@ func argParse() {
 		"name of filter to use for replication")
 	flag.StringVar(&options.username, "username", "Administrator", "username to cluster admin console")
 	flag.StringVar(&options.password, "password", "welcome", "password to Cluster admin console")
+
+	flag.StringVar(&options.remoteUuid, "remoteUuid", "1234567",
+		"remote cluster uuid")
+	flag.StringVar(&options.remoteName, "remoteName", "remote",
+		"remote cluster name")
+	flag.StringVar(&options.remoteHostName, "remoteHostName", "127.0.0.1:9000",
+		"remote cluster host name")
+	flag.StringVar(&options.remoteUserName, "remoteUserName", "Administrator", "remote cluster userName")
+	flag.StringVar(&options.remotePassword, "remotePassword", "welcome", "remote cluster password")
+	flag.BoolVar(&options.remoteDemandEncryption, "remoteDemandEncryption", false, "whether encryption is needed")
+	flag.StringVar(&options.remoteCertificateFile, "remoteCertificateFile", "", "file containing certificate for encryption")
+
 
 	flag.Parse()
 }
@@ -87,25 +105,35 @@ func startAdminport() {
 		os.Exit(1)
 	}
 	
-	ms.SetTestOptions(utils.GetHostAddr(options.sourceKVHost, uint16(options.sourceKVAdminPort)), options.username, options.password)
-
 	metadata_svc, err := s.DefaultMetadataSvc()
 	if err != nil {
 		fmt.Println("Test failed. err: ", err)
 		return
 	}
 	
+	remote_cluster_svc := s.NewRemoteClusterService(metadata_svc, nil)
+	
 	rm.StartReplicationManager(options.sourceKVHost,
 							   base.AdminportNumber,
 							   s.NewReplicationSpecService(metadata_svc, nil),
-							   s.NewRemoteClusterService(metadata_svc, nil),	
-							   new(ms.MockClusterInfoSvc), 
+							   remote_cluster_svc,	
+							   s.NewClusterInfoSvc(nil), 
 							   top_svc, 
 							   new(ms.MockReplicationSettingsSvc))
 	
 	//wait for server to finish starting
 	time.Sleep(time.Second * 3)
-
+	
+	// create remote cluster reference needed by replication
+	err = common.CreateTestRemoteCluster(remote_cluster_svc, options.remoteUuid, options.remoteName, options.remoteHostName, options.remoteUserName, options.remotePassword, 
+                             options.remoteDemandEncryption, options.remoteCertificateFile)
+	if err != nil {
+		fmt.Println(err.Error())
+		return
+	}
+	
+	defer common.DeleteTestRemoteCluster(remote_cluster_svc, options.remoteName)
+	
 	replicationId, err := testCreateReplication()
 	if err != nil {
 		fmt.Println(err.Error())
@@ -144,7 +172,6 @@ func startAdminport() {
 		fmt.Println(err.Error())
 		return
 	}
-
 	fmt.Println("All tests passed.")
 
 }
@@ -154,10 +181,9 @@ func testCreateReplication() (string, error) {
 
 	params := make(map[string]interface{})
 	params[rm.FromBucket] = options.sourceBucket
-	params[rm.ToClusterUuid] = utils.GetHostAddr(options.sourceKVHost, uint16(options.sourceKVAdminPort))
+	params[rm.ToCluster] = options.remoteName
 	params[rm.ToBucket] = options.targetBucket
 	params[rm.FilterName] = options.filterName
-	params[rm.FilterExpression] = FilterExpression
 	params[rm.BatchCount] = BatchCount
 
 	paramsBytes, _ := rm.EncodeMapIntoByteArray(params)
@@ -188,9 +214,13 @@ func testCreateReplication() (string, error) {
 }
 
 func testPauseReplication(replicationId, escapedReplId string) error {
-	url := common.GetAdminportUrlPrefix(options.sourceKVHost) + rm.PauseReplicationPrefix + base.UrlDelimiter + escapedReplId
+	url := common.GetAdminportUrlPrefix(options.sourceKVHost) + rm.SettingsReplicationsPath + base.UrlDelimiter + escapedReplId
 
-	request, err := http.NewRequest(base.MethodPost, url, nil)
+	settings := make(map[string]interface{})
+	settings[rm.Paused] = true
+	paramsBytes, _ := rm.EncodeMapIntoByteArray(settings)
+	paramsBuf := bytes.NewBuffer(paramsBytes)
+	request, err := http.NewRequest(base.MethodPost, url, paramsBuf)
 	if err != nil {
 		return err
 	}
@@ -211,9 +241,13 @@ func testPauseReplication(replicationId, escapedReplId string) error {
 }
 
 func testResumeReplication(replicationId, escapedReplId string) error {
-	url := common.GetAdminportUrlPrefix(options.sourceKVHost) + rm.ResumeReplicationPrefix + base.UrlDelimiter + escapedReplId
+	url := common.GetAdminportUrlPrefix(options.sourceKVHost) + rm.SettingsReplicationsPath + base.UrlDelimiter + escapedReplId
 
-	request, err := http.NewRequest(base.MethodPost, url, nil)
+	settings := make(map[string]interface{})
+	settings[rm.Paused] = false
+	paramsBytes, _ := rm.EncodeMapIntoByteArray(settings)
+	paramsBuf := bytes.NewBuffer(paramsBytes)
+	request, err := http.NewRequest(base.MethodPost, url, paramsBuf)
 	if err != nil {
 		return err
 	}

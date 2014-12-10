@@ -91,8 +91,6 @@ func startAdminport() {
 		fmt.Printf("Error getting current host. err=%v\n", err)
 		os.Exit(1)
 	}
-	
-	ms.SetTestOptions(utils.GetHostAddr(options.sourceKVHost, uint16(options.sourceKVPort)), options.username, options.password)
 
 	metadata_svc, err := s.DefaultMetadataSvc()
 	if err != nil {
@@ -104,7 +102,7 @@ func startAdminport() {
 							   base.AdminportNumber, 
 							   s.NewReplicationSpecService(metadata_svc, nil),
 							   s.NewRemoteClusterService(metadata_svc, nil),	
-							   new(ms.MockClusterInfoSvc), 
+							   s.NewClusterInfoSvc(nil),  
 							   top_svc, 
 							   new(ms.MockReplicationSettingsSvc))
 	
@@ -117,6 +115,12 @@ func startAdminport() {
 	}
 	
 	if err := testSSLAuth(); err != nil {
+		fmt.Println(err.Error())
+		return
+	}*/
+	
+	// Uncomment if need to clean up residual test data
+	/*if err := testDeleteRemoteCluster(); err != nil {
 		fmt.Println(err.Error())
 		return
 	}*/

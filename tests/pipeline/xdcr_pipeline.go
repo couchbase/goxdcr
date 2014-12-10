@@ -21,6 +21,7 @@ import (
 	s "github.com/couchbase/goxdcr/service_impl"
 	"github.com/couchbase/goxdcr/utils"
 	"github.com/couchbaselabs/go-couchbase"
+	"github.com/couchbase/goxdcr/tests/common"
 	"log"
 	"net/http"
 	"os"
@@ -44,9 +45,16 @@ var options struct {
 	source_kv_port      uint64 //source kv admin port
 	source_cluster_username string //source cluster username
 	source_cluster_password string //source cluster password
-	target_cluster_username string //target cluster username
-	target_cluster_password string //target cluster password
 	target_bucket_password  string //target bucket password
+	
+	// parameters of remote cluster
+	remoteUuid string // remote cluster uuid
+	remoteName string // remote cluster name
+	remoteHostName string // remote cluster host name
+	remoteUserName     string //remote cluster userName
+	remotePassword     string //remote cluster password
+	remoteDemandEncryption  bool  // whether encryption is needed
+	remoteCertificateFile  string // file containing certificate for encryption
 }
 
 func argParse() {
@@ -62,10 +70,16 @@ func argParse() {
 		"user name to use for logging into source cluster")
 	flag.StringVar(&options.source_cluster_password, "source_cluster_password", "welcome",
 		"password to use for logging into source cluster")
-	flag.StringVar(&options.target_cluster_username, "target_cluster_username", "Administrator",
-		"user name to use for logging into target cluster")
-	flag.StringVar(&options.target_cluster_password, "target_cluster_password", "welcome",
-		"password to use for logging into target cluster")
+	flag.StringVar(&options.remoteUuid, "remoteUuid", "1234567",
+		"remote cluster uuid")
+	flag.StringVar(&options.remoteName, "remoteName", "remote",
+		"remote cluster name")
+	flag.StringVar(&options.remoteHostName, "remoteHostName", "127.0.0.1:9000",
+		"remote cluster host name")
+	flag.StringVar(&options.remoteUserName, "remoteUserName", "Administrator", "remote cluster userName")
+	flag.StringVar(&options.remotePassword, "remotePassword", "welcome", "remote cluster password")
+	flag.BoolVar(&options.remoteDemandEncryption, "remoteDemandEncryption", false, "whether encryption is needed")
+	flag.StringVar(&options.remoteCertificateFile, "remoteCertificateFile", "", "file containing certificate for encryption")
 	flag.StringVar(&options.target_bucket_password, "target_bucket_password", "",
 		"password to use for accessing target bucket")
 
@@ -116,17 +130,16 @@ func setup() error {
 	}
 	
 	options.source_cluster_addr = utils.GetHostAddr(options.source_kv_host, uint16(options.source_kv_port))
-	
-	//	flushTargetBkt()
-	c.SetTestOptions(options.source_cluster_addr, options.source_cluster_username, options.source_cluster_password)
+
 	metadata_svc, err := s.DefaultMetadataSvc()
 	if err != nil {
 		return err
 	}
+		
 	replication_manager.StartReplicationManager(options.source_kv_host, base.AdminportNumber,
 								 s.NewReplicationSpecService(metadata_svc, nil),
 							     s.NewRemoteClusterService(metadata_svc, nil),
-							     new(c.MockClusterInfoSvc), top_svc, new(c.MockReplicationSettingsSvc))
+							     s.NewClusterInfoSvc(nil), top_svc, new(c.MockReplicationSettingsSvc))
 
 	fmt.Println("Finish setup")
 	return nil
@@ -141,12 +154,22 @@ func test() {
 	settings[metadata.TargetNozzlePerNode] = NUM_TARGET_CONN
 	settings[metadata.BatchCount] = 500
 
-	topic, err := replication_manager.CreateReplication(options.source_cluster_addr, options.source_bucket, options.target_cluster_addr, options.target_bucket, "", settings, true)
+	// create remote cluster reference needed by replication
+	err := common.CreateTestRemoteCluster(replication_manager.RemoteClusterService(), options.remoteUuid, options.remoteName, options.remoteHostName, options.remoteUserName, options.remotePassword, 
+                             options.remoteDemandEncryption, options.remoteCertificateFile)
+	if err != nil {
+		fmt.Println(err.Error())
+		return
+	}
+	
+	defer common.DeleteTestRemoteCluster(replication_manager.RemoteClusterService(), options.remoteName)
+	
+	topic, err := replication_manager.CreateReplication(options.source_bucket, options.remoteName, options.target_bucket, "", settings, true)
 	if err != nil {
 		fail(fmt.Sprintf("%v", err))
 	}
 	time.Sleep(1 * time.Second)
-
+	
 	replication_manager.PauseReplication(topic)
 
 	err = replication_manager.SetPipelineLogLevel(topic, "Error")
@@ -224,8 +247,8 @@ func flushTargetBkt() {
 	if err == nil {
 		err = utils.QueryRestAPI(baseURL,
 			"/pools/default/buckets/"+options.target_bucket+"/controller/doFlush",
-			options.target_cluster_username,
-			options.target_cluster_password,
+			options.remoteUserName,
+			options.remotePassword,
 			"POST",
 			nil, nil)
 	}

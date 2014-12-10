@@ -12,6 +12,9 @@ package service_impl
 
 import (
 	"net/rpc"
+	"errors"
+	"fmt"
+	"encoding/json"
 	"github.com/couchbase/gometa/server"
 	"github.com/couchbase/gometa/common"
 	"github.com/couchbase/goxdcr/log"
@@ -59,6 +62,17 @@ func (meta_svc *MetadataSvc) Add(key string, value []byte) error {
 	return err
 }
 
+func (meta_svc *MetadataSvc) AddWithCatalog(catalogKey, key string, value []byte) error {
+	// first add the key
+ 	err := meta_svc.Add(key, value)
+	if err != nil {
+		return err
+	}
+	
+	// then add key to catalog
+	return meta_svc.AddKeyToCatalog(catalogKey, key)
+}
+
 func (meta_svc *MetadataSvc) Set(key string, value []byte) error {
 	opCode := common.GetOpCodeStr(common.OPCODE_SET)
 	_, err := meta_svc.sendRequest(opCode, key, value)
@@ -71,6 +85,17 @@ func (meta_svc *MetadataSvc) Del(key string) error {
 	return err
 }
 
+func (meta_svc *MetadataSvc) DelWithCatalog(catalogKey, key string) error {
+	// first remove key from catalog
+	err := meta_svc.RemoveKeyFromCatalog(catalogKey, key)
+	if err != nil {
+		return err
+	}
+	
+	// then delete the key
+ 	return meta_svc.Del(key)
+}
+
 func (meta_svc *MetadataSvc) sendRequest(opCode, key string, value []byte) ([]byte, error) {
 	request := &server.Request{OpCode: opCode, Key: key, Value: value}
 	var reply *server.Reply
@@ -80,6 +105,83 @@ func (meta_svc *MetadataSvc) sendRequest(opCode, key string, value []byte) ([]by
 	} else {
 		return reply.Result, err
 	}
+}
+
+// add a key to a catalog 
+func (meta_svc *MetadataSvc) AddKeyToCatalog(catalogKey, key string) error {
+	var catalog []string
+
+	result, err := meta_svc.Get(catalogKey)
+	if err != nil {
+		// if catalog does not exist, create a new catalog
+		catalog = make([]string, 0)
+		
+	} else {
+		// unmarshal catalog 
+		err = json.Unmarshal(result, &catalog) 
+		if err != nil {
+			return err
+		}
+	}
+	
+	// add key to catalog
+	catalog = append(catalog, key)
+	
+	catalogBytes, err := json.Marshal(catalog)
+	if err != nil {
+		return err
+	}
+	// update/insert catalog
+	return meta_svc.Set(catalogKey, catalogBytes)
+}
+
+// remove a key from a catalog 
+func (meta_svc *MetadataSvc) RemoveKeyFromCatalog(catalogKey, key string) error {
+	var catalog []string
+
+	result, err := meta_svc.Get(catalogKey)
+	if err != nil {
+		return errors.New(fmt.Sprintf("Error removing key %v from catalog %v since catalog does not exist\n", key, catalogKey))
+	} 
+	
+	// unmarshal catalog 
+	err = json.Unmarshal(result, &catalog) 
+	if err != nil {
+		return err
+	}
+	
+	newCatalog := make([]string, 0)
+	for _, oldKey := range catalog {
+		if oldKey != key {
+			newCatalog = append(newCatalog, oldKey)
+		}
+	}
+	
+	catalogBytes, err := json.Marshal(newCatalog)
+	if err != nil {
+		return err
+	}
+	// update catalog
+	return meta_svc.Set(catalogKey, catalogBytes)
+}
+
+// get all keys from a catalog 
+func (meta_svc *MetadataSvc) GetKeysFromCatalog(catalogKey string) ([]string, error) {
+	var catalog []string
+
+	result, err := meta_svc.Get(catalogKey)
+	if err != nil {
+		// no catalog is ok
+		return nil, nil
+	} 
+	
+	// unmarshal catalog 
+	err = json.Unmarshal(result, &catalog) 
+	if err != nil {
+		return nil, err
+	}
+	
+	return catalog, nil
 }
 
 // utility methods for starting and killing the gometa service which the metadata service depends on. 

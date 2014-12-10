@@ -68,9 +68,6 @@ func main() {
 		fmt.Printf("Error getting current host. err=%v\n", err)
 		os.Exit(1)
 	}
-	
-	// TODO remove after real services are implemented
-	ms.SetTestOptions(utils.GetHostAddr(host, uint16(options.sourceKVAdminPort)), options.username, options.password)
 
 	metadata_svc, err := s.NewMetadataSvc(utils.GetHostAddr(host, uint16(options.gometaRequestPort)), nil)
 	if err != nil {
@@ -90,7 +87,7 @@ func main() {
 							   uint16(options.xdcrRestPort),
 							   s.NewReplicationSpecService(metadata_svc, nil),
 							   s.NewRemoteClusterService(metadata_svc, nil),	
-							   new(ms.MockClusterInfoSvc), 
+							   s.NewClusterInfoSvc(nil), 
 							   top_svc, 
 							   new(ms.MockReplicationSettingsSvc))
 							   

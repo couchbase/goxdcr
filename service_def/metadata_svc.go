@@ -15,4 +15,9 @@ type MetadataSvc interface {
 	Add(key string, value []byte) error
 	Set(key string, value []byte) error
 	Del(key string) error
+	
+	// catalog related APIs
+	AddWithCatalog(catalogKey, key string, value []byte) error
+	DelWithCatalog(catalogKey, key string) error
+	GetKeysFromCatalog(catalogKey string) ([]string, error)
 }

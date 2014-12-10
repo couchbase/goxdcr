@@ -5,25 +5,34 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"os"
-	"github.com/couchbase/goxdcr/log"
+	base "github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/factory"
+	"github.com/couchbase/goxdcr/log"
+	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/goxdcr/parts"
 	s "github.com/couchbase/goxdcr/service_impl"
-    "github.com/couchbase/goxdcr/metadata"
-    base "github.com/couchbase/goxdcr/base"
-	ms "github.com/couchbase/goxdcr/mock_services"
-	utils "github.com/couchbase/goxdcr/utils"
+	c "github.com/couchbase/goxdcr/mock_services"
+	"github.com/couchbase/goxdcr/replication_manager"
+	"github.com/couchbase/goxdcr/tests/common"
+	"os"
 )
 
 var options struct {
 	sourceKVHost      string //source kv host name
-	sourceKVAdminPort      uint64 //source kv admin port
-	sourceBucket    string // source bucket
-	targetBucket    string //target bucket
-	connectStr      string //connect string
-	username        string //username
-	password        string //password
+	sourceKVAdminPort uint64 //source kv admin port
+	sourceBucket      string // source bucket
+	targetBucket      string //target bucket
+	username          string //username
+	password          string //password
+	
+	// parameters of remote cluster
+	remoteUuid string // remote cluster uuid
+	remoteName string // remote cluster name
+	remoteHostName string // remote cluster host name
+	remoteUserName     string //remote cluster userName
+	remotePassword     string //remote cluster password
+	remoteDemandEncryption  bool  // whether encryption is needed
+	remoteCertificateFile  string // file containing certificate for encryption
 }
 
 const (
@@ -41,6 +50,17 @@ func argParse() {
 	flag.StringVar(&options.username, "username", "Administrator", "username to cluster admin console")
 	flag.StringVar(&options.password, "password", "welcome", "password to Cluster admin console")
 
+	flag.StringVar(&options.remoteUuid, "remoteUuid", "1234567",
+		"remote cluster uuid")
+	flag.StringVar(&options.remoteName, "remoteName", "remote",
+		"remote cluster name")
+	flag.StringVar(&options.remoteHostName, "remoteHostName", "127.0.0.1:9000",
+		"remote cluster host name")
+	flag.StringVar(&options.remoteUserName, "remoteUserName", "Administrator", "remote cluster userName")
+	flag.StringVar(&options.remotePassword, "remotePassword", "welcome", "remote cluster password")
+	flag.BoolVar(&options.remoteDemandEncryption, "remoteDemandEncryption", false, "whether encryption is needed")
+	flag.StringVar(&options.remoteCertificateFile, "remoteCertificateFile", "", "file containing certificate for encryption")
+	
 	flag.Parse()
 }
 
@@ -52,7 +72,6 @@ func usage() {
 func main() {
 	fmt.Println("Start Testing ...")
 	argParse()
-	fmt.Printf("connectStr=%s\n", options.connectStr)
 	fmt.Println("Done with parsing the arguments")
 	err := invokeFactory()
 	if err == nil {
@@ -68,36 +87,55 @@ func invokeFactory() error {
 		fmt.Printf("Error starting xdcr topology service. err=%v\n", err)
 		os.Exit(1)
 	}
-	
+
 	options.sourceKVHost, err = top_svc.MyHost()
 	if err != nil {
 		fmt.Printf("Error getting current host. err=%v\n", err)
 		os.Exit(1)
 	}
-	
-	options.connectStr = utils.GetHostAddr(options.sourceKVHost, uint16(options.sourceKVAdminPort))
-	
-	ms.SetTestOptions(utils.GetHostAddr(options.sourceKVHost, uint16(options.sourceKVAdminPort)), options.username, options.password)
-	
+
 	msvc, err := s.DefaultMetadataSvc()
 	if err != nil {
 		fmt.Println("Test failed. err: ", err)
 		return err
 	}
 	
-	replSpecSvc := s.NewReplicationSpecService(msvc, nil)
+	repl_spec_svc := s.NewReplicationSpecService(msvc, nil)
+	remote_cluster_svc := s.NewRemoteClusterService(msvc, nil)
+	cluster_info_svc := s.NewClusterInfoSvc(nil)
+		
+	replication_manager.StartReplicationManager(options.sourceKVHost, base.AdminportNumber,
+								 repl_spec_svc,
+							     remote_cluster_svc,
+							     cluster_info_svc, top_svc, new(c.MockReplicationSettingsSvc))
 
-	fac := factory.NewXDCRFactory(replSpecSvc, &ms.MockClusterInfoSvc{}, top_svc, log.DefaultLoggerContext, log.DefaultLoggerContext, nil)
+	fac := factory.NewXDCRFactory(repl_spec_svc, remote_cluster_svc, cluster_info_svc, top_svc, log.DefaultLoggerContext, log.DefaultLoggerContext, nil)
 
-	replSpec := metadata.NewReplicationSpecification(options.connectStr, options.sourceBucket, options.connectStr, options.targetBucket, "")
+	// create remote cluster reference needed by replication
+	err = common.CreateTestRemoteCluster(remote_cluster_svc, options.remoteUuid, options.remoteName, options.remoteHostName, options.remoteUserName, options.remotePassword, 
+                             options.remoteDemandEncryption, options.remoteCertificateFile)
+	if err != nil {
+		fmt.Println(err.Error())
+		return err
+	}
+	
+	defer common.DeleteTestRemoteCluster(remote_cluster_svc, options.remoteName)
+	
+	remoteClusterRef, err := remote_cluster_svc.RemoteClusterByRefName(options.remoteName)
+	if err != nil {
+		fmt.Println(err.Error())
+		return err
+	}
+	
+	replSpec := metadata.NewReplicationSpecification(options.sourceBucket, remoteClusterRef.Uuid, options.targetBucket, "")
 	replSpec.Settings.SourceNozzlePerNode = NUM_SOURCE_CONN
 	replSpec.Settings.TargetNozzlePerNode = NUM_TARGET_CONN
-	err = replSpecSvc.AddReplicationSpec(replSpec)
+	err = repl_spec_svc.AddReplicationSpec(replSpec)
 	if err != nil {
 		return err
 	}
-	defer replSpecSvc.DelReplicationSpec(replSpec.Id)
-	
+	defer repl_spec_svc.DelReplicationSpec(replSpec.Id)
+
 	pl, err := fac.NewPipeline(replSpec.Id)
 	if err != nil {
 		return err
@@ -150,4 +188,3 @@ func invokeFactory() error {
 
 	return nil
 }
-

@@ -14,8 +14,10 @@ import (
 )
 
 type RemoteClusterSvc interface {
-	RemoteCluster(refId string) (*metadata.RemoteClusterReference, error)
+	RemoteClusterByRefId(refId string) (*metadata.RemoteClusterReference, error)
+	RemoteClusterByRefName(refName string) (*metadata.RemoteClusterReference, error)
+	RemoteClusterByUuid(uuid string) (*metadata.RemoteClusterReference, error)
 	AddRemoteCluster(ref *metadata.RemoteClusterReference) error
-	DelRemoteCluster(refId string) error
+	DelRemoteCluster(refName string) error
 	RemoteClusters() (map[string]*metadata.RemoteClusterReference, error)
 }

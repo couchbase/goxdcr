@@ -47,18 +47,12 @@ func (service *ReplicationSpecService) ReplicationSpec(replicationId string) (*m
 // this assumes that the spec to be added is not yet in gometa
 func (service *ReplicationSpecService) AddReplicationSpec(spec *metadata.ReplicationSpecification) error {
 	key := spec.Id
-	
-	// add key to catalog first
-	err := AddKeyToCatalog(key, ReplicationSpecsCatalogKey, service.metadata_svc)
-	if err != nil {
-		return err
-	}
-	
+		
 	value, err := json.Marshal(spec)
 	if err != nil {
 		return err
 	}
-	return service.metadata_svc.Add(key, value)
+	return service.metadata_svc.AddWithCatalog(ReplicationSpecsCatalogKey, key, value)
 }
 
 func (service *ReplicationSpecService) SetReplicationSpec(spec *metadata.ReplicationSpecification) error {
@@ -71,19 +65,13 @@ func (service *ReplicationSpecService) SetReplicationSpec(spec *metadata.Replica
 }
 
 func (service *ReplicationSpecService) DelReplicationSpec(replicationId string) error {
-	err := service.metadata_svc.Del(replicationId)
-	if err != nil {
-		return err
-	}
-	
-	// remove key from catalog
-	return RemoveKeyFromCatalog(replicationId, ReplicationSpecsCatalogKey, service.metadata_svc)
+	return service.metadata_svc.DelWithCatalog(ReplicationSpecsCatalogKey, replicationId)
 }
 
 func (service *ReplicationSpecService) ActiveReplicationSpecs() (map[string]*metadata.ReplicationSpecification, error) {
 	specs := make(map[string]*metadata.ReplicationSpecification, 0)
 
-	keys, err := GetKeysFromCatalog(ReplicationSpecsCatalogKey, service.metadata_svc)	
+	keys, err := service.metadata_svc.GetKeysFromCatalog(ReplicationSpecsCatalogKey)	
 	if err != nil {
 		return nil, err
 	}

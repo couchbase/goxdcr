@@ -67,11 +67,7 @@ func (top_svc *XDCRTopologySvc) MyKVNodes() ([]string, error) {
 
 func (top_svc *XDCRTopologySvc) XDCRTopology() (map[string]uint16, error) {
 	retmap := make(map[string]uint16)
-	sourceCluster, err := top_svc.MyCluster()
-		if err != nil {
-		return nil, err
-	}
-	serverList, err := rm.ClusterInfoService().GetServerList(sourceCluster, "default")
+	serverList, err := rm.ClusterInfoService().GetServerList(top_svc, "default")
 	if err != nil {
 		return nil, err
 	}
@@ -80,14 +76,6 @@ func (top_svc *XDCRTopologySvc) XDCRTopology() (map[string]uint16, error) {
 		retmap[serverName] = top_svc.xdcrRestPort
 	}
 	return retmap, nil
-}
-
-func (top_svc *XDCRTopologySvc) MyCluster() (string, error) {
-	host, err := top_svc.MyHost()
-	if err != nil {
-		return "", err
-	}
-	return utils.GetHostAddr(host, top_svc.adminport), nil
 }
 
 func (top_svc *XDCRTopologySvc) IsMyClusterEnterprise() (bool, error) {
@@ -175,4 +163,22 @@ func (top_svc *XDCRTopologySvc) getHostName() (string, error) {
 	}
 	
 	return "", ErrorRetrievingHostInfo
+}
+
+// implements base.ClusterConnectionInfoProvider
+func (top_svc *XDCRTopologySvc)	MyConnectionStr() string {
+	host, err := top_svc.MyHost()
+	if err != nil {
+		// should never get here
+		return ""
+	}
+	return utils.GetHostAddr(host, top_svc.adminport)
+}
+
+func (top_svc *XDCRTopologySvc)	MyUsername()  string {
+	return top_svc.username
+}
+
+func (top_svc *XDCRTopologySvc)	MyPassword()  string {
+	return top_svc.password
 }

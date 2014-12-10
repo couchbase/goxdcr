@@ -17,9 +17,6 @@ import (
 	"net/http"
 	"strings"
 	"time"
-	"fmt"
-	"io/ioutil"
-	"reflect"
 	"errors"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/gen_server"
@@ -30,7 +27,7 @@ import (
 )
 
 var StaticPaths = [4]string{RemoteClustersPath, CreateReplicationPath, SettingsReplicationsPath, StatisticsPath}
-var DynamicPathPrefixes = [5]string{RemoteClustersPath, DeleteReplicationPrefix, PauseReplicationPrefix, ResumeReplicationPrefix, SettingsReplicationsPath}
+var DynamicPathPrefixes = [4]string{RemoteClustersPath, NotifySettingsChangePrefix, DeleteReplicationPrefix, SettingsReplicationsPath}
 
 var MaxForwardingRetry = 5
 var ForwardingRetryInterval = time.Second * 10
@@ -157,14 +154,12 @@ func (adminport *Adminport) handleRequest(
 	// historically, deleteReplication could use Post method	
 	case DeleteReplicationPrefix + DynamicSuffix + base.UrlDelimiter + base.MethodPost:
 		response, err = adminport.doDeleteReplicationRequest(request)
-	case PauseReplicationPrefix + DynamicSuffix + base.UrlDelimiter + base.MethodPost:
-		response, err = adminport.doPauseReplicationRequest(request)
-	case ResumeReplicationPrefix + DynamicSuffix + base.UrlDelimiter + base.MethodPost:
-		response, err = adminport.doResumeReplicationRequest(request)
 	case SettingsReplicationsPath + DynamicSuffix + base.UrlDelimiter + base.MethodGet:
 		response, err = adminport.doViewReplicationSettingsRequest(request)
 	case SettingsReplicationsPath + DynamicSuffix + base.UrlDelimiter + base.MethodPost:
 		response, err = adminport.doChangeReplicationSettingsRequest(request)
+	case NotifySettingsChangePrefix + DynamicSuffix + base.UrlDelimiter + base.MethodPost:
+		response, err = adminport.doNotifyReplicationSettingsChangeRequest(request)
 	case StatisticsPath + base.UrlDelimiter + base.MethodGet:
 		response, err = adminport.doGetStatisticsRequest(request)
 	default:
@@ -194,97 +189,14 @@ func (adminport *Adminport) doCreateRemoteClusterRequest(request *http.Request) 
 
 	logger_ap.Infof("Decoded parameters: uuid=%v, name=%v, hostName=%v, userName=%v, password=%v, demandEncryption=%v, certificate is nil? %v\n",
 					uuid, name, hostName, userName, password, demandEncryption, certificate == nil)
-			
-	isEnterprise, err := XDCRCompTopologyService().IsMyClusterEnterprise()
-	if err != nil {
-		return nil, err
-	}		
-	if demandEncryption && !isEnterprise {
-		return nil, errors.New("Encryption can only be used in enterprise edition.")
-	}
 	
-	actualUuid, err := validateRemoteClusterInfo(hostName, userName, password, demandEncryption, certificate)
-	if err != nil {
-		return nil, err
-	}
-	
-	remoteClusterRef := metadata.NewRemoteClusterReference(actualUuid, name, hostName, userName, password, demandEncryption, certificate)
+	remoteClusterRef := metadata.NewRemoteClusterReference(uuid, name, hostName, userName, password, demandEncryption, certificate)
 	err = RemoteClusterService().AddRemoteCluster(remoteClusterRef)
 	if err != nil {
 		return nil, err
 	}
 	
 	return NewCreateRemoteClusterResponse(remoteClusterRef)
-}
-
-// validate remote cluster info and retrieve uuid 
-func validateRemoteClusterInfo(hostName, userName, password string, 
-	demandEncryption  bool, certificate  []byte) (string, error) {
-		
-	var response *http.Response
-	var err error
-	if demandEncryption {
-		response, err = connectToRemoteClusterThroughHttps(hostName, userName, password, certificate)
-	} else {
-		response, err = connectToRemoteClusterThroughHttp(hostName, userName, password)
-	}
-	if err != nil {
-		return "", err
-	}
-	
-	// verify contents in response
-	defer response.Body.Close()
-	bodyBytes, err := ioutil.ReadAll(response.Body)
-	if err != nil {
-		return "", err
-	}
-
-	// xxx/pools returns a map object
-	var poolsInfo map[string]interface{}
-	err = json.Unmarshal(bodyBytes, &poolsInfo)
-	if err != nil {
-		return "", err
-	}
-	
-	// get remote cluster uuid from the map 
-	actualUuid, ok := poolsInfo[RemoteClusterUuid]
-	if !ok {
-		// should never get here
-		return "", errors.New("Could not get uuid of remote cluster.")
-	}
-	
-	actualUuidStr, ok := actualUuid.(string)
-	if !ok {
-		// should never get here
-		return "", errors.New(fmt.Sprintf("uuid of remote cluster is of wrong type. Expected type: string; Actual type: %s", reflect.TypeOf(actualUuid)))
-	}
-	
-	return actualUuidStr, nil
-}
-
-func connectToRemoteClusterThroughHttp(hostName, userName, password string) (*http.Response, error) {
-	url := fmt.Sprintf("http://%s:%s@%s%s", userName, password, hostName, base.PoolsPath)
-	request, err := http.NewRequest(base.MethodGet, url, nil)
-	if err != nil {
-		return nil, err
-	}
-	return utils.SendHttpRequest(request)
-}
-
-func connectToRemoteClusterThroughHttps(hostName, userName, password string, certificate []byte) (*http.Response, error) {
-	sslPort, err := utils.GetXDCRSSLPort(hostName, userName, password)
-	if err != nil {
-		return nil, err
-	}
-	
-	hostNode := strings.Split(hostName, base.UrlPortNumberDelimiter)[0]
-	newHostName := utils.GetHostAddr(hostNode, sslPort)
-	url := fmt.Sprintf("https://%s:%s@%s%s", userName, password, newHostName, base.PoolsPath)
-	request, err := http.NewRequest(base.MethodGet, url, nil)
-	if err != nil {
-		return nil, err
-	}
-	return utils.SendHttpRequestThroughSSL(request, certificate) 
 }
 
 func (adminport *Adminport) doDeleteRemoteClusterRequest(request *http.Request) ([]byte, error) {
@@ -295,7 +207,7 @@ func (adminport *Adminport) doDeleteRemoteClusterRequest(request *http.Request) 
 		return nil, err
 	}
 	
-	err = RemoteClusterService().DelRemoteCluster(metadata.RemoteClusterRefId(remoteClusterName))
+	err = RemoteClusterService().DelRemoteCluster(remoteClusterName)
 	if err != nil {
 		return nil, err
 	}
@@ -306,24 +218,17 @@ func (adminport *Adminport) doDeleteRemoteClusterRequest(request *http.Request) 
 func (adminport *Adminport) doCreateReplicationRequest(request *http.Request) ([]byte, error) {
 	logger_ap.Infof("doCreateReplicationRequest called\n")
 
-	fromBucket, toClusterUuid, toBucket, filterName, forward, settings, err := DecodeCreateReplicationRequest(request)
+	fromBucket, toCluster, toBucket, filterName, forward, settings, err := DecodeCreateReplicationRequest(request)
 	if err != nil {
 		return nil, err
 	}
-
-	fromClusterUuid, err := XDCRCompTopologyService().MyCluster()
-	if err != nil {
-		return nil, err
-	}
-
-	logger_ap.Debugf("fromClusterUuid=%v \n", fromClusterUuid)
 
 	// apply default replication settings
 	if err := ApplyDefaultSettings(&settings); err != nil {
 		return nil, err
 	}
 
-	replicationId, err := CreateReplication(fromClusterUuid, fromBucket, toClusterUuid, toBucket, filterName, settings, forward)
+	replicationId, err := CreateReplication(fromBucket, toCluster, toBucket, filterName, settings, forward)
 
 	if err != nil {
 		return nil, err
@@ -365,62 +270,6 @@ func (adminport *Adminport) doDeleteReplicationRequest(request *http.Request) ([
 	}
 }
 
-func (adminport *Adminport) doPauseReplicationRequest(request *http.Request) ([]byte, error) {
-	logger_ap.Infof("doPauseReplicationRequest\n")
-
-	replicationId, forward, err := DecodeReplicationIdAndForwardFlagFromHttpRequest(request, PauseReplicationPrefix)
-	if err != nil {
-		return nil, err
-	}
-
-	logger_ap.Debugf("Request params: replicationId=%v\n", replicationId)
-
-	if forward {
-		err = PauseReplication(replicationId)
-	} else {
-		go StopPipeline(replicationId)
-	}
-
-	if err != nil {
-		return nil, err
-	} else {
-		if forward {
-			// forward replication request to other KV nodes involved
-			adminport.forwardReplicationRequest(request)
-		}
-		// no response body in success case
-		return nil, nil
-	}
-}
-
-func (adminport *Adminport) doResumeReplicationRequest(request *http.Request) ([]byte, error) {
-	logger_ap.Infof("doResumeReplicationRequest\n")
-
-	replicationId, forward, err := DecodeReplicationIdAndForwardFlagFromHttpRequest(request, ResumeReplicationPrefix)
-	if err != nil {
-		return nil, err
-	}
-
-	logger_ap.Debugf("Request params: replicationId=%v\n", replicationId)
-
-	if forward {
-		err = ResumeReplication(replicationId)
-	} else {
-		go StartPipeline(replicationId)
-	}
-	
-	if err != nil {
-		return nil, err
-	} else {
-		if forward {
-			// forward replication request to other KV nodes involved
-			adminport.forwardReplicationRequest(request)
-		}
-		// no response body in success case
-		return nil, nil
-	}
-}
-
 func (adminport *Adminport) doViewReplicationSettingsRequest(request *http.Request) ([]byte, error) {
 	logger_ap.Infof("doViewReplicationSettingsRequest\n")
 
@@ -450,16 +299,63 @@ func (adminport *Adminport) doChangeReplicationSettingsRequest(request *http.Req
 	if err != nil {
 		return nil, err
 	}
+	logger_ap.Infof("Request decoded: replicationId=%v\n", replicationId)
+	
 	inputSettingsMap, err := DecodeSettingsFromRequest(request, true)
 	if err != nil {
 		return nil, err
 	}
 
-	logger_ap.Debugf("Request decoded: replicationId=%v; inputSettings=%v", replicationId, inputSettingsMap)
+	logger_ap.Infof("Request decoded: inputSettings=%v\n", inputSettingsMap)
+	
+	// remember old settings
+	replSpec, err := ReplicationSpecService().ReplicationSpec(replicationId)
+	if err != nil {
+		return nil, err
+	}
+	oldSettings := replSpec.Settings
+	
+	err = UpdateReplicationSettings(replicationId, inputSettingsMap)
+	if err != nil {
+		return nil, err
+	}
+	
+	// forward notifications to other nodes
+	notifyRequest, err := NewNotifySettingsChangeRequest(replicationId, adminport.xdcrRestPort, oldSettings)
+	if err != nil {
+		return nil, err
+	}
+	return nil, adminport.forwardReplicationRequest(notifyRequest)
+}
 
-	err = HandleChangesToReplicationSettings(replicationId, inputSettingsMap)
+func (adminport *Adminport) doNotifyReplicationSettingsChangeRequest(request *http.Request) ([]byte, error) {
+	logger_ap.Infof("doNotifyReplicationSettingsChangeRequest\n")
 
-	return nil, err
+	// get input parameters from request
+	replicationId, err := DecodeReplicationIdFromHttpRequest(request, NotifySettingsChangePrefix)
+	if err != nil {
+		return nil, err
+	}
+	logger_ap.Infof("Request decoded: replicationId=%v\n", replicationId)
+	
+	oldSettings, err := DecodeOldSettingsFromRequest(request)
+	if err != nil {
+		return nil, err
+	}
+
+	logger_ap.Infof("Request decoded: oldSettings=%v\n", oldSettings)
+
+	replSpec, err := ReplicationSpecService().ReplicationSpec(replicationId)
+	if err != nil {
+		return nil, err
+	}
+	
+	err = HandleChangesToReplicationSettings(replicationId, oldSettings, replSpec.Settings)
+	if err != nil {
+		return nil, err
+	} else {
+		return nil, nil
+	}
 }
 
 // get statistics for all running replications
@@ -478,10 +374,14 @@ func (adminport *Adminport) doGetStatisticsRequest(request *http.Request) ([]byt
 func (adminport *Adminport) forwardReplicationRequest(request *http.Request) error {
 	logger_ap.Infof("forwardReplicationRequest\n")
 
-	myAddr, err := XDCRCompTopologyService().MyHost()
+	// have to get the actual name of the kvnode here
+	myKVNodes, err := XDCRCompTopologyService().MyKVNodes()
 	if err != nil {
 		return err
 	}
+	
+	// so far myKVNodes should contain one and only one node
+	myKVNode := myKVNodes[0]
 
 	xdcrNodesMap, err := XDCRCompTopologyService().XDCRTopology()
 	if err != nil {
@@ -506,7 +406,7 @@ func (adminport *Adminport) forwardReplicationRequest(request *http.Request) err
 
 		for xdcrNode, port := range xdcrNodesMap {
 			// do not forward to current node
-			if xdcrNode != myAddr {
+			if xdcrNode != myKVNode {
 				go forwardReplicationRequestToXDCRNode(request.URL.String(), newBody, xdcrNode, port)
 			}
 		}

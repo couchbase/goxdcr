@@ -28,9 +28,6 @@ type ReplicationSpecification struct {
 	//id of the replication
 	Id string `json:"id"`
 
-	//Source Cluster UUID
-	SourceClusterUUID string `json:"sourceClusterUUID"`
-
 	// Source Bucket Name
 	SourceBucketName string `json:"sourceBucketName"`
 
@@ -47,9 +44,8 @@ type ReplicationSpecification struct {
 	Settings *ReplicationSettings `json:"replicationSettings"`
 }
 
-func NewReplicationSpecification(sourceClusterUUID string, sourceBucketName string, targetClusterUUID string, targetBucketName string, filterName string) *ReplicationSpecification {
-	return &ReplicationSpecification{Id: ReplicationId(sourceClusterUUID, sourceBucketName, targetClusterUUID, targetBucketName, filterName),
-		SourceClusterUUID: sourceClusterUUID,
+func NewReplicationSpecification(sourceBucketName string, targetClusterUUID string, targetBucketName string, filterName string) *ReplicationSpecification {
+	return &ReplicationSpecification{Id: ReplicationId(sourceBucketName, targetClusterUUID, targetBucketName, filterName),
 		SourceBucketName:  sourceBucketName,
 		TargetClusterUUID: targetClusterUUID,
 		TargetBucketName:  targetBucketName,
@@ -57,8 +53,8 @@ func NewReplicationSpecification(sourceClusterUUID string, sourceBucketName stri
 		Settings:          DefaultSettings()}
 }
 
-func ReplicationId(sourceClusterUUID string, sourceBucketName string, targetClusterUUID string, targetBucketName string, filterName string) string {
-	parts := []string{ReplicationSpecKeyPrefix, sourceClusterUUID, sourceBucketName, targetClusterUUID, targetBucketName}
+func ReplicationId(sourceBucketName string, targetClusterUUID string, targetBucketName string, filterName string) string {
+	parts := []string{ReplicationSpecKeyPrefix, targetClusterUUID, sourceBucketName, targetBucketName}
 	if filterName != "" {
 		parts = append(parts, filterName)
 	}

@@ -56,3 +56,9 @@ type VBTimestamp struct{
     SnapshotEnd  uint64
 }
 
+type ClusterConnectionInfoProvider interface {
+	MyConnectionStr()  string
+	MyUsername()  string
+	MyPassword()  string
+}
+

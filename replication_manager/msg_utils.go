@@ -22,6 +22,7 @@ import (
 	"regexp"
 	"fmt"
 	"encoding/json"
+	"bytes"
 )
 
 // http request related constants
@@ -35,8 +36,7 @@ const (
 	RemoteClustersPath  = "pools/default/remoteClusters"
 	CreateReplicationPath    = "controller/createReplication"
 	DeleteReplicationPrefix  = "controller/cancelXDCR"
-	PauseReplicationPrefix  = "controller/pauseXDCR"
-	ResumeReplicationPrefix  = "controller/resumeXDCR"
+	NotifySettingsChangePrefix  = "controller/notifySettingsChange"
 	InternalSettingsPath     = "internalSettings"
 	SettingsReplicationsPath = "settings/replications"
 	StatisticsPath         = "stats"
@@ -60,7 +60,7 @@ const (
 var RequiredRemoteClusterParams = [4]string{RemoteClusterName, RemoteClusterHostName, RemoteClusterUserName, RemoteClusterPassword}
 
 // constants used for parsing internal settings
-const (
+/*const (
 	ReplicationType                = "xdcrReplicationType"
 	FilterExpression               = "xdcrFilterExpression"
 	Active                         = "xdcrActive"
@@ -76,12 +76,32 @@ const (
 	TimeoutPercentageCap           = "xdcrTimeoutPercentageCap"
 	LogLevel                       = "xdcrLogLevel"
 	StatsInterval				   = "xdcrStatsInterval"
+)*/
+
+// constants used for parsing replication settings
+const (
+	Type                           = "type"
+	ReplicationType                = "replicationType"
+	FilterExpression               = "filterExpression"
+	Paused                         = "pauseRequested"
+	CheckpointInterval             = "checkpointInterval"
+	BatchCount                     = "workerBatchSize"
+	BatchSize                      = "docBatchSizeKb"
+	FailureRestartInterval         = "failureRestartInterval"
+	OptimisticReplicationThreshold = "optimisticReplicationThreshold"
+	HttpConnection                 = "httpConnections"
+	SourceNozzlePerNode            = "sourceNozzlePerNode"
+	TargetNozzlePerNode            = "targetNozzlePerNode"
+	MaxExpectedReplicationLag      = "maxExpectedReplicationLag"
+	TimeoutPercentageCap           = "timeoutPercentageCap"
+	LogLevel                       = "logLevel"
+	StatsInterval				   = "statsInterval"
 )
 
 // constants for parsing create replication request
 const (
 	FromBucket = "fromBucket"
-	ToClusterUuid = "uuid"
+	ToCluster = "toCluster"
 	ToBucket = "toBucket"
 	FilterName = "filterName"
 	Forward = "forward"
@@ -90,6 +110,10 @@ const (
 // constants for parsing create replication response
 const (
 	ReplicationId = "id"
+)
+
+const (
+	OldReplicationSettings = "OldReplicationSettings"
 )
 
 // constants for stats names
@@ -118,12 +142,13 @@ const (
 
 // errors
 var MissingSettingsInRequest = errors.New("Invalid http request. No replication setting parameters have been supplied.")
+var MissingOldSettingsInRequest = errors.New("Invalid http request. No old replication settings have been supplied.")
 
 // replication settings key in rest api -> internal replication settings key
 var ReplSettingRestToInternalMap = map[string]string {
-	ReplicationType: metadata.ReplicationType,
+	Type:  metadata.ReplicationType,
 	FilterExpression: metadata.FilterExpression,
-	Active: metadata.Active,
+	Paused: metadata.Active,
 	CheckpointInterval: metadata.CheckpointInterval,
 	BatchCount: metadata.BatchCount,
 	BatchSize: metadata.BatchSize,
@@ -139,9 +164,9 @@ var ReplSettingRestToInternalMap = map[string]string {
 
 // internal replication settings key -> replication settings key in rest api
 var ReplSettingInternalToRestMap = map[string]string {
-	metadata.ReplicationType: ReplicationType,
+	metadata.ReplicationType:  Type,
 	metadata.FilterExpression: FilterExpression,
-	metadata.Active: Active,
+	metadata.Active: Paused,
 	metadata.CheckpointInterval: CheckpointInterval,
 	metadata.BatchCount: BatchCount,
 	metadata.BatchSize: BatchSize,
@@ -256,7 +281,7 @@ func NewDeleteRemoteClusterResponse() ([]byte, error) {
 }
 
 // decode parameters from create replication request
-func DecodeCreateReplicationRequest(request *http.Request) (fromBucket, toClusterUuid, toBucket, filterName string, forward bool, settings map[string]interface{}, err error) {	
+func DecodeCreateReplicationRequest(request *http.Request) (fromBucket, toCluster, toBucket, filterName string, forward bool, settings map[string]interface{}, err error) {	
 	if err = request.ParseForm(); err != nil {
 		return 
 	}
@@ -274,8 +299,8 @@ func DecodeCreateReplicationRequest(request *http.Request) (fromBucket, toCluste
 		switch key {
 		case FromBucket:
 			fromBucket = val
-		case ToClusterUuid:
-			toClusterUuid = val
+		case ToCluster:
+			toCluster = val
 		case ToBucket:
 			toBucket = val
 		case FilterName:
@@ -300,8 +325,8 @@ func DecodeCreateReplicationRequest(request *http.Request) (fromBucket, toCluste
 	if len(fromBucket) == 0 {
 		missingParams = append(missingParams, FromBucket)
 	}
-	if len(toClusterUuid) == 0 {
-		missingParams = append(missingParams, ToClusterUuid)
+	if len(toCluster) == 0 {
+		missingParams = append(missingParams, ToCluster)
 	}
 	if len(toBucket) == 0 {
 		missingParams = append(missingParams, ToBucket)
@@ -315,11 +340,21 @@ func DecodeCreateReplicationRequest(request *http.Request) (fromBucket, toCluste
 	return
 }
 
-// create a new DeleteReplication request for specified replicationId and the specified node
-func NewDeleteReplicationRequest(replicationId, nodeAddr string, port uint16) (*http.Request, error) {
-	// replicatioId is cancatenated into the url 
-	url := utils.GetHostAddr(nodeAddr, port) + base.AdminportUrlPrefix + DeleteReplicationPrefix + base.UrlDelimiter + replicationId
-	return http.NewRequest(base.MethodDelete, url, nil)
+// create a notify replication settings change request and attach old settings so that receiver can tell what the actual changes are
+func NewNotifySettingsChangeRequest(replicationId string, xdcrRestPort uint16, oldSettings *metadata.ReplicationSettings) (*http.Request, error) {
+	// replicationId is cancatenated into the url 
+	url := base.AdminportUrlPrefix + NotifySettingsChangePrefix + base.UrlDelimiter + replicationId
+	paramsMap := make(map[string]interface{})
+	settingsBytes, err := json.Marshal(oldSettings)
+	if err != nil {
+		return nil, err
+	}
+	paramsMap[OldReplicationSettings] = settingsBytes
+	paramsBytes, _ := EncodeMapIntoByteArray(paramsMap)
+	paramsBuf := bytes.NewBuffer(paramsBytes)
+	request, err := http.NewRequest(base.MethodPost, url, paramsBuf)
+	request.Header.Set(ContentType, DefaultContentType)
+	return request, err
 }
 
 // decode replicationId from create replication response
@@ -381,6 +416,42 @@ func DecodeReplicationIdAndForwardFlagFromHttpRequest(request *http.Request, pat
 	
 }
 
+func DecodeOldSettingsFromRequest(request *http.Request) (*metadata.ReplicationSettings, error) {
+	var oldSettings metadata.ReplicationSettings
+	
+	if err := request.ParseForm(); err != nil {
+		return nil, err
+	}
+	
+	bFound := false
+
+	for key, valArr := range request.Form {
+		if len(valArr) != 1 {
+			err := utils.InvalidValueInHttpRequestError(key, valArr)
+			return nil, err
+		}
+		
+		val := valArr[0]
+		
+		switch key {
+			case OldReplicationSettings:
+				bFound = true
+				err := json.Unmarshal([]byte(val), &oldSettings)
+				if err != nil {
+					return nil, err
+				}
+			default:
+				// ignore all other params
+		}
+	}
+	
+	if !bFound {
+		return nil, MissingOldSettingsInRequest
+	}
+	
+	return &oldSettings, nil
+}
+
 // decode replication settings related parameters from http request
 // if throwError is true, throw error if no settings are defined or 
 // keys in request do not match those in replication settings
@@ -412,8 +483,6 @@ func DecodeSettingsFromRequest(request *http.Request, throwError bool) (map[stri
 		val := valArr[0]
 		
 		switch key {
-			case ReplicationType:	
-				fallthrough
 			case FilterExpression:
 				err := verifyFilterExpression(val) 
 				if err != nil {
@@ -421,13 +490,17 @@ func DecodeSettingsFromRequest(request *http.Request, throwError bool) (map[stri
 					return nil, utils.NewEnhancedError(errMsg, err)
 				}
 				settings[internalKey] = val
-			case Active:
-				active, err := strconv.ParseBool(val)
+			case Type:	
+				settings[internalKey] = val
+			case ReplicationType:	
+				// nothing to do
+			case Paused:
+				paused, err := strconv.ParseBool(val)
 				if err != nil {
 					err = utils.InvalidValueInHttpRequestError(key, val)
 					return nil, err
 				}
-				settings[internalKey] = active
+				settings[internalKey] = !paused
 			case CheckpointInterval:
 				fallthrough
 			case BatchCount:

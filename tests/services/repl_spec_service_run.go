@@ -25,7 +25,7 @@ const(
 	
 	 sourceClusterUUID = "localhost:9000"
 	 sourceBucketName = "default"
-	 targetClusterUUID = "remote:9000"
+	 targetClusterUUID = "testuuid"
 	 targetBucketName = "target" 
 	 filterName = "myActive"
 	 newBatchCount = 345
@@ -57,7 +57,7 @@ func startReplicationSpecService() error {
 	service := s.NewReplicationSpecService(metadataSvc, nil)
 		
 	// create a test replication spec
-	spec := metadata.NewReplicationSpecification(sourceClusterUUID, sourceBucketName, 
+	spec := metadata.NewReplicationSpecification(sourceBucketName, 
 			targetClusterUUID, targetBucketName, filterName)
 			
 	specId := spec.Id
@@ -89,8 +89,8 @@ func startReplicationSpecService() error {
 	if err != nil {
 		return err
 	}
-	if spec2.Id != specId || spec2.SourceClusterUUID != spec.SourceClusterUUID || spec2.Settings.BatchCount != spec.Settings.BatchCount {
-		fmt.Println("params of spec retrieved: id=", spec2.Id, "; source cluster=", spec2.SourceClusterUUID, ";  batch count=", spec2.Settings.BatchCount)
+	if spec2.Id != specId || spec2.TargetClusterUUID != spec.TargetClusterUUID || spec2.Settings.BatchCount != spec.Settings.BatchCount {
+		fmt.Println("params of spec retrieved: id=", spec2.Id, "; target cluster=", spec2.TargetClusterUUID, ";  batch count=", spec2.Settings.BatchCount)
 		return errors.New("Read incorrect values of replication spec.")
 	}
 	

@@ -114,7 +114,7 @@ func (rm *replicationManager) init(
 	rm.xdcr_topology_svc = xdcr_topology_svc
 	rm.replication_settings_svc = replication_settings_svc
 	rm.adminport_finch = make(chan bool)
-	fac := factory.NewXDCRFactory(repl_spec_svc, cluster_info_svc, xdcr_topology_svc, log.DefaultLoggerContext, log.DefaultLoggerContext, rm)
+	fac := factory.NewXDCRFactory(repl_spec_svc, remote_cluster_svc, cluster_info_svc, xdcr_topology_svc, log.DefaultLoggerContext, log.DefaultLoggerContext, rm)
 
 	pipeline_manager.PipelineManager(fac, log.DefaultLoggerContext)
 
@@ -143,20 +143,25 @@ func ReplicationSettingsService() service_def.ReplicationSettingsSvc {
 }
 //CreateReplication create the replication specification in metadata store
 //and start the replication pipeline
-func CreateReplication(sourceClusterUUID, sourceBucket, targetClusterUUID, targetBucket, filterName string, settings map[string]interface{}, createReplSpec bool) (string, error) {
-	logger_rm.Infof("Creating replication - sourceCluterUUID=%s, sourceBucket=%s, targetClusterUUID=%s, targetBucket=%s, filterName=%s, settings=%v, createReplSpec=%v\n", sourceClusterUUID,
-		sourceBucket, targetClusterUUID, targetBucket, filterName, settings, createReplSpec)
+func CreateReplication(sourceBucket, targetCluster, targetBucket, filterName string, settings map[string]interface{}, createReplSpec bool) (string, error) {
+	logger_rm.Infof("Creating replication - sourceBucket=%s, targetCluster=%s, targetBucket=%s, filterName=%s, settings=%v, createReplSpec=%v\n",
+		sourceBucket, targetCluster, targetBucket, filterName, settings, createReplSpec)
 
+	targetClusterRef, err := RemoteClusterService().RemoteClusterByRefName(targetCluster)
+	if err != nil {
+		return "", err
+	}
+	
 	var topic string
 	if createReplSpec {
-		spec, err := replication_mgr.createAndPersistReplicationSpec(sourceClusterUUID, sourceBucket, targetClusterUUID, targetBucket, filterName, settings)
+		spec, err := replication_mgr.createAndPersistReplicationSpec(sourceBucket, targetClusterRef.Uuid, targetBucket, filterName, settings)
 		if err != nil {
 			logger_rm.Errorf("%v\n", err)
 			return "", err
 		}
 		topic = spec.Id
 	} else {
-		topic = metadata.ReplicationId(sourceClusterUUID, sourceBucket, targetClusterUUID, targetBucket, filterName)
+		topic = metadata.ReplicationId(sourceBucket, targetClusterRef.Uuid, targetBucket, filterName)
 	}
 
 	go StartPipeline(topic)
@@ -165,8 +170,7 @@ func CreateReplication(sourceClusterUUID, sourceBucket, targetClusterUUID, targe
 	return topic, nil
 }
 
-//PauseReplication update the replication specification with "pausing" state in metadata store
-//and stop the pipeline for the replication
+//PauseReplication stops the pipeline on current node
 func PauseReplication(topic string) error {
 	defer func() {
 		if r := recover(); r != nil {
@@ -176,18 +180,11 @@ func PauseReplication(topic string) error {
 
 	logger_rm.Infof("Pausing replication %s\n", topic)
 
-	// update replication spec
 	if err := validatePipelineExists(topic, "pausing", true); err != nil {
 		return err
 	}
-
-	err := UpdateReplicationSpec(topic, false, "pause")
-	if err == nil {
-		logger_rm.Debugf("Replication specification %s is updated\n", topic)
-	} else {
-		logger_rm.Errorf("%v\n", err)
-		return err
-	}
+	
+	// TODO may need to update replication spec if this is to support public rest API
 
 	go StopPipeline(topic)
 	logger_rm.Infof("Pipeline %s is being paused\n", topic)
@@ -199,18 +196,11 @@ func PauseReplication(topic string) error {
 func ResumeReplication(topic string) error {
 	logger_rm.Infof("Resuming replication %s\n", topic)
 
-	// update replication spec
 	if err := validatePipelineExists(topic, "resuming", true); err != nil {
 		return err
 	}
-
-	err := UpdateReplicationSpec(topic, true, "resume")
-	if err == nil {
-		logger_rm.Debugf("Replication specification %s is updated\n", topic)
-	} else {
-		logger_rm.Errorf("%v\n", err)
-		return err
-	}
+	
+	// TODO may need to update replication spec if this is to support public rest API
 
 	go StartPipeline(topic)
 	logger_rm.Infof("Pipeline %s is being resumed\n", topic)
@@ -272,22 +262,45 @@ func StopPipeline(topic string) error {
 	return pipeline_manager.StopPipeline(topic)
 }
 
-func HandleChangesToReplicationSettings(topic string, settings map[string]interface{}) error {
+func UpdateReplicationSettings(topic string, settings map[string]interface{}) error {
 	// read replication spec with the specified replication id
 	replSpec, err := ReplicationSpecService().ReplicationSpec(topic)
 	if err != nil {
 		return err
 	}
+	
+	// make a copy of old settings
+	oldSettings := *replSpec.Settings
 
 	// update replication spec with input settings
 	replSpec.Settings.UpdateSettingsFromMap(settings)
 	err = ReplicationSpecService().SetReplicationSpec(replSpec)
+	if err != nil {
+		return nil
+	}
+	
+	return HandleChangesToReplicationSettings(topic, &oldSettings, replSpec.Settings)
+}
+
+func HandleChangesToReplicationSettings(topic string, oldSettings, newSettings *metadata.ReplicationSettings) error {
+	
+	// handle changes to active flag
+	usedToBeActive := oldSettings.Active
+	activeNow := newSettings.Active
+	
+	if usedToBeActive && !activeNow {
+		// active changed from true to false, pause replication
+		return PauseReplication(topic)
+		
+	} else if !usedToBeActive && activeNow {
+		// active changed from false to true, restart replication
+		return ResumeReplication(topic)
+	}
 	
 	// TODO implement additional logic, e.g.,
 	// 1. reconstruct pipeline when source/targetNozzlePerNode is changed
-	// 2. pause pipeline when active is changed from true to false
-	// 3. restart pipeline when criteral settings are changed
-	return err
+	// 2. restart pipeline when criteral settings are changed
+	return nil
 }
 
 // get statistics for all running replications
@@ -309,17 +322,17 @@ func GetStatistics() (map[string]interface{}, error) {
 func getStatisticsForPipeline(pipeline_id string) {
 }
 
-func (rm *replicationManager) createAndPersistReplicationSpec(sourceClusterUUID, sourceBucket, targetClusterUUID, targetBucket, filterName string, settings map[string]interface{}) (*metadata.ReplicationSpecification, error) {
-	logger_rm.Infof("Creating replication spec - sourceCluterUUID=%s, sourceBucket=%s, targetClusterUUID=%s, targetBucket=%s, filterName=%s, settings=%v\n", sourceClusterUUID,
+func (rm *replicationManager) createAndPersistReplicationSpec(sourceBucket, targetClusterUUID, targetBucket, filterName string, settings map[string]interface{}) (*metadata.ReplicationSpecification, error) {
+	logger_rm.Infof("Creating replication spec - sourceBucket=%s, targetClusterUUID=%s, targetBucket=%s, filterName=%s, settings=%v\n",
 		sourceBucket, targetClusterUUID, targetBucket, filterName, settings)
 
 	// check if the same replication already exists
-	replicationId := metadata.ReplicationId(sourceClusterUUID, sourceBucket, targetClusterUUID, targetBucket, filterName)
+	replicationId := metadata.ReplicationId(sourceBucket, targetClusterUUID, targetBucket, filterName)
 	if err := validatePipelineExists(replicationId, "starting", false); err != nil {
 		return nil, err
 	}
 
-	spec := metadata.NewReplicationSpecification(sourceClusterUUID, sourceBucket, targetClusterUUID, targetBucket, filterName)
+	spec := metadata.NewReplicationSpecification(sourceBucket, targetClusterUUID, targetBucket, filterName)
 	s, err := metadata.SettingsFromMap(settings)
 	if err == nil {
 		spec.Settings = s
@@ -413,7 +426,9 @@ func (rm *replicationManager) startReplications() {
 	}
 
 	for _, spec := range specs {
-		go StartPipeline(spec.Id)
+		if spec.Settings.Active {
+			go StartPipeline(spec.Id)
+		}
 	}
 }
 

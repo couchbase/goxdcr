@@ -9,8 +9,6 @@
 
 package service_def
 
-import ()
-
 //XDCRCompTopologySvc abstracts the service interface that has the knowledge
 //of xdcr component topology - xdcr components in a cluster running on which nodes;
 //what are the port numbers for the admin port of xdcr component; which kv node that
@@ -30,9 +28,6 @@ type XDCRCompTopologySvc interface {
 
 	//the list of kv nodes (hostname:port) that this xdcr comp is responsible for
 	MyKVNodes() ([]string, error)
-
-	//the cluster XDCR is serving
-	MyCluster() (string, error)
 	
 	//is the cluster XDCR is serving of enterprise edition
 	IsMyClusterEnterprise() (bool, error)
@@ -45,4 +40,9 @@ type XDCRCompTopologySvc interface {
 	// and the value to be an array of kv node address which the xdcr component would
 	//be responsible for
 	XDCRCompToKVNodeMap() (map[string][]string, error)
+	
+	// implements base.ClusterConnectionInfoProvider
+	MyConnectionStr() string
+	MyUsername()  string
+	MyPassword()  string
 }

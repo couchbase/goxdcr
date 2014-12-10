@@ -38,7 +38,7 @@ type RemoteClusterReference struct {
 
 func NewRemoteClusterReference(uuid, name, hostName, userName, password string, 
 	demandEncryption  bool, certificate  []byte) *RemoteClusterReference {
-	return &RemoteClusterReference{Id:  RemoteClusterRefId(name),
+	return &RemoteClusterReference{Id:  RemoteClusterRefId(uuid),
 		Uuid:  uuid,
 		Name:  name,
 		HostName:  hostName,
@@ -49,8 +49,20 @@ func NewRemoteClusterReference(uuid, name, hostName, userName, password string,
 	}
 }
 
-func RemoteClusterRefId(name string) string {
-	// name alone should guarantee uniqueness of the remote cluster reference
-	parts := []string{RemoteClusterKeyPrefix, name}
+func RemoteClusterRefId(remoteClusterUuid string) string {
+	parts := []string{RemoteClusterKeyPrefix, remoteClusterUuid}
 	return strings.Join(parts, base.KeyPartsDelimiter)
+}
+
+// implements base.ClusterConnectionInfoProvider
+func (ref *RemoteClusterReference)	MyConnectionStr() string {
+	return ref.HostName
+}
+
+func (ref *RemoteClusterReference)	MyUsername() string {
+	return ref.UserName
+}
+
+func (ref *RemoteClusterReference)	MyPassword() string {
+	return ref.Password
 }

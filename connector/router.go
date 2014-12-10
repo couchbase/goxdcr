@@ -19,7 +19,7 @@ import (
 
 // Router routes data to downstream parts
 
-var ErrorInvalidRouterConfig = errors.New("Invalid Router configuration. Parts and/or routing call back function are not defined.")
+var ErrorInvalidRouterConfig = errors.New("Invalid Router configuration. Downstream parts and/or routing call back function are not defined.")
 var ErrorInvalidRoutingResult = errors.New("Invalid results from routing algorithm.")
 
 // call back function implementing the routing alrogithm
