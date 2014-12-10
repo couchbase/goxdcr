@@ -129,6 +129,14 @@ func (c *Client) Auth(user, pass string) (*gomemcached.MCResponse, error) {
 	return res, fmt.Errorf("auth mechanism PLAIN not supported")
 }
 
+// select bucket
+func (c *Client) SelectBucket(bucket string) (*gomemcached.MCResponse, error) {
+
+	return c.Send(&gomemcached.MCRequest{
+		Opcode: gomemcached.SELECT_BUCKET,
+		Key:    []byte(fmt.Sprintf("%s", bucket))})
+}
+
 func (c *Client) store(opcode gomemcached.CommandCode, vb uint16,
 	key string, flags int, exp int, body []byte) (*gomemcached.MCResponse, error) {
 
