@@ -34,9 +34,12 @@ const (
 	DOCS_REP_QUEUE_METRIC  = "docs_rep_queue"
 	DOCS_FILTERED_METRIC   = "docs_filtered"
 	CHANGES_LEFT_METRIC    = "changes_left"
-	DOCS_LATENCY_METRIC    = "docs_latency"
+	DOCS_LATENCY_METRIC    = "wtavg_docs_latency"
 
 	//	TIME_COMMITTING_METRIC = "time_committing"
+	//rate
+	RATE_REPLICATED	= "rate_replicated"
+	BANDWIDTH_USAGE = "bandwidth_usage"
 
 	VB_HIGHSEQNO_PREFIX = "vb_highseqno_"
 
@@ -57,7 +60,7 @@ const (
 
 const (
 	default_sample_size      = 1000
-	default_publish_interval = 100 * time.Millisecond
+	default_update_interval = 100 * time.Millisecond
 )
 
 //StatisticsManager mount the statics collector on the pipeline to collect raw stats
@@ -92,7 +95,7 @@ type StatisticsManager struct {
 	//settings - sample size
 	sample_size int
 	//settings - statistics update interval
-	publish_interval time.Duration
+	update_interval time.Duration
 
 	//the channel to communicate finish signal with statistic updater
 	finish_ch chan bool
@@ -116,7 +119,7 @@ func NewStatisticsManager(logger_ctx *log.LoggerContext, active_vbs map[string][
 		starttime_map:    make(map[string]interface{}),
 		finish_ch:        make(chan bool, 1),
 		sample_size:      default_sample_size,
-		publish_interval: default_publish_interval,
+		update_interval: default_update_interval,
 		logger:           log.NewLogger("StatisticsManager", logger_ctx),
 		active_vbs:       active_vbs,
 		wait_grp:         &sync.WaitGroup{},
@@ -154,7 +157,7 @@ func (stats_mgr *StatisticsManager) updateStats(finchan chan bool) error {
 			stats_mgr.logger.Infof("expvar=%v\n", stats_mgr.formatStatsForLog())
 			return nil
 		case <-stats_mgr.publish_ticker.C:
-			stats_mgr.logger.Infof("%v: Publishing the statistics for %v to expvar", time.Now(), stats_mgr.pipeline.Topic())
+			stats_mgr.logger.Debugf("%v: Publishing the statistics for %v to expvar", time.Now(), stats_mgr.pipeline.Topic())
 			stats_mgr.processRawStats()
 			if stats_mgr.logger.GetLogLevel() >= log.LogLevelInfo {
 				stats_mgr.logger.Info(stats_mgr.formatStatsForLog())
@@ -172,6 +175,7 @@ func (stats_mgr *StatisticsManager) formatStatsForLog() string {
 //process the raw stats, aggregate them into overview registry
 //expose the raw stats and overview stats to expvar
 func (stats_mgr *StatisticsManager) processRawStats() {
+	oldSample := stats_mgr.getOverviewRegistry()
 	stats_mgr.initOverviewRegistry()
 	expvar_stats_map := stats_mgr.getExpvarMap(stats_mgr.pipeline.Topic())
 
@@ -210,12 +214,12 @@ func (stats_mgr *StatisticsManager) processRawStats() {
 	})
 
 	//calculate the publish additional metrics
-	stats_mgr.processCalculatedStats(map_for_overview)
+	stats_mgr.processCalculatedStats(oldSample, map_for_overview)
 
 	expvar_stats_map.Set(OVERVIEW_METRICS_KEY, map_for_overview)
 }
 
-func (stats_mgr *StatisticsManager) processCalculatedStats(overview_expvar_map *expvar.Map) {
+func (stats_mgr *StatisticsManager) processCalculatedStats(oldSample metrics.Registry, overview_expvar_map *expvar.Map) {
 
 	//calculate changes_left
 	docs_written := stats_mgr.getOverviewRegistry().Get(DOCS_WRITTEN_METRIC).(metrics.Counter).Count()
@@ -227,6 +231,22 @@ func (stats_mgr *StatisticsManager) processCalculatedStats(overview_expvar_map *
 	} else {
 		stats_mgr.logger.Errorf("Failed to calculate changes_left - %v\n", err)
 	}
+	
+	//calculate rate_replication
+	docs_written_old := oldSample.Get(DOCS_WRITTEN_METRIC).(metrics.Counter).Count()
+	interval_in_sec := stats_mgr.update_interval.Seconds()
+	rate_replicated := float64(docs_written - docs_written_old)/interval_in_sec
+	rate_replicated_var := new(expvar.Float)
+	rate_replicated_var.Set(rate_replicated)
+	overview_expvar_map.Set(RATE_REPLICATED, rate_replicated_var)
+	
+	//calculate bandwidth_usage
+	data_replicated_old := oldSample.Get(DATA_REPLICATED_METRIC).(metrics.Counter).Count()
+	data_replicated := stats_mgr.getOverviewRegistry().Get(DATA_REPLICATED_METRIC).(metrics.Counter).Count()
+	bandwidth_usage := float64(data_replicated - data_replicated_old)/interval_in_sec
+	bandwidth_usage_var := new(expvar.Float)
+	bandwidth_usage_var.Set(bandwidth_usage)
+	overview_expvar_map.Set(BANDWIDTH_USAGE, bandwidth_usage_var)
 }
 
 func (stats_mgr *StatisticsManager) calculateChangesLeft(docs_written int64) (int64, error) {
@@ -318,7 +338,6 @@ func (stats_mgr *StatisticsManager) publishMetricToMap(expvar_map *expvar.Map, n
 		}
 
 	}
-
 }
 
 func (stats_mgr *StatisticsManager) processTimeSample() {
@@ -330,7 +349,8 @@ func (stats_mgr *StatisticsManager) processTimeSample() {
 		endtime := stats_mgr.endtime_map[name]
 		if endtime != nil {
 			rep_duration := endtime.(time.Time).Sub(starttime.(time.Time))
-			sample.Update(rep_duration.Nanoseconds())
+			//in millisecond
+			sample.Update(rep_duration.Nanoseconds()/1000000)
 		}
 	}
 
@@ -384,11 +404,11 @@ func (stats_mgr *StatisticsManager) Start(settings map[string]interface{}) error
 	stats_mgr.initConnection()
 
 	if _, ok := settings[PUBLISH_INTERVAL]; ok {
-		stats_mgr.publish_interval = settings[PUBLISH_INTERVAL].(time.Duration)
+		stats_mgr.update_interval = settings[PUBLISH_INTERVAL].(time.Duration)
 	}
-	stats_mgr.logger.Infof("StatisticsManager Starts: publish_interval=%v\n", stats_mgr.publish_interval)
+	stats_mgr.logger.Infof("StatisticsManager Starts: update_interval=%v\n", stats_mgr.update_interval)
 	debug.PrintStack()
-	stats_mgr.publish_ticker = time.NewTicker(stats_mgr.publish_interval)
+	stats_mgr.publish_ticker = time.NewTicker(stats_mgr.update_interval)
 
 	if _, ok := settings[VB_START_TS]; ok {
 		stats_mgr.current_vb_start_ts = settings[VB_START_TS].(map[uint16]*base.VBTimestamp)

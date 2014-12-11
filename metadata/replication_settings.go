@@ -31,7 +31,7 @@ const (
 	default_replication_type                 string       = "capi"
 	default_active                           bool         = true
 	default_pipeline_log_level               log.LogLevel = log.LogLevelInfo
-	default_pipeline_stats_update_interval   int          = 100
+	default_pipeline_stats_update_interval   int          = 5000
 )
 
 const (
@@ -119,9 +119,11 @@ type ReplicationSettings struct {
 	TimeoutPercentageCap int `json:"timeout_percentage_cap"`
 
 	//log level
+	//default:Error
 	LogLevel log.LogLevel `json:"log_level"`
 
 	//stats interval
+	//default:5 second
 	StatsInterval int `json:"stats_interval"`
 }
 
