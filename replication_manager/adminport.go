@@ -27,7 +27,7 @@ import (
 	"fmt"
 )
 
-var StaticPaths = [4]string{RemoteClustersPath, CreateReplicationPath, SettingsReplicationsPath}
+var StaticPaths = [4]string{RemoteClustersPath, CreateReplicationPath, InternalSettingsPath, SettingsReplicationsPath}
 var DynamicPathPrefixes = [5]string{RemoteClustersPath, NotifySettingsChangePrefix, DeleteReplicationPrefix, SettingsReplicationsPath, StatisticsPrefix}
 
 var MaxForwardingRetry = 5
@@ -155,6 +155,14 @@ func (adminport *Adminport) handleRequest(
 	// historically, deleteReplication could use Post method	
 	case DeleteReplicationPrefix + DynamicSuffix + base.UrlDelimiter + base.MethodPost:
 		response, err = adminport.doDeleteReplicationRequest(request)
+	case InternalSettingsPath + base.UrlDelimiter + base.MethodGet:
+		response, err = adminport.doViewInternalSettingsRequest(request)
+	case InternalSettingsPath + base.UrlDelimiter + base.MethodPost:
+		response, err = adminport.doChangeInternalSettingsRequest(request)
+	case SettingsReplicationsPath + base.UrlDelimiter + base.MethodGet:
+		response, err = adminport.doViewDefaultReplicationSettingsRequest(request)
+	case SettingsReplicationsPath + base.UrlDelimiter + base.MethodPost:
+		response, err = adminport.doChangeDefaultReplicationSettingsRequest(request)
 	case SettingsReplicationsPath + DynamicSuffix + base.UrlDelimiter + base.MethodGet:
 		response, err = adminport.doViewReplicationSettingsRequest(request)
 	case SettingsReplicationsPath + DynamicSuffix + base.UrlDelimiter + base.MethodPost:
@@ -270,6 +278,65 @@ func (adminport *Adminport) doDeleteReplicationRequest(request *http.Request) ([
 	}
 }
 
+func (adminport *Adminport) doViewInternalSettingsRequest(request *http.Request) ([]byte, error) {
+	logger_ap.Infof("doViewInternalSettingsRequest\n")
+
+	defaultSettings, err := ReplicationSettingsService().GetDefaultReplicationSettings()
+	if err != nil {
+		return nil, err
+	}
+
+	return NewInternalSettingsResponse(defaultSettings)
+}
+
+func (adminport *Adminport) doChangeInternalSettingsRequest(request *http.Request) ([]byte, error) {
+	logger_ap.Infof("doChangeInternalSettingsRequest\n")
+	
+	settingsMap, err := DecodeInternalSettingsFromRequest(request)
+	if err != nil {
+		return nil, err
+	}
+
+	logger_ap.Infof("Request decoded: inputSettings=%v\n", settingsMap)
+	
+	return nil, UpdateDefaultReplicationSettings(settingsMap)
+}
+
+func (adminport *Adminport) doViewDefaultReplicationSettingsRequest(request *http.Request) ([]byte, error) {
+	logger_ap.Infof("doViewDefaultReplicationSettingsRequest\n")
+
+	defaultSettings, err := ReplicationSettingsService().GetDefaultReplicationSettings()
+	if err != nil {
+		return nil, err
+	}
+
+	return NewReplicationSettingsResponse(defaultSettings)
+}
+
+func (adminport *Adminport) doChangeDefaultReplicationSettingsRequest(request *http.Request) ([]byte, error) {
+	logger_ap.Infof("doChangeDefaultReplicationSettingsRequest\n")
+	
+	settingsMap, err := DecodeSettingsFromRequest(request, true)
+	if err != nil {
+		return nil, err
+	}
+
+	logger_ap.Infof("Request decoded: inputSettings=%v\n", settingsMap)
+	
+	err = UpdateDefaultReplicationSettings(settingsMap)
+	if err != nil {
+		return nil, err
+	} else {
+		// change default settings returns the default settings after changes
+		defaultSettings, err := ReplicationSettingsService().GetDefaultReplicationSettings()
+		if err != nil {
+			return nil, err
+		}
+
+		return NewReplicationSettingsResponse(defaultSettings)
+	}
+}
+
 func (adminport *Adminport) doViewReplicationSettingsRequest(request *http.Request) ([]byte, error) {
 	logger_ap.Infof("doViewReplicationSettingsRequest\n")
 
@@ -288,7 +355,7 @@ func (adminport *Adminport) doViewReplicationSettingsRequest(request *http.Reque
 	}
 
 	// marshal replication settings in replication spec and return it
-	return NewViewReplicationSettingsResponse(replSpec.Settings)
+	return NewReplicationSettingsResponse(replSpec.Settings)
 }
 
 func (adminport *Adminport) doChangeReplicationSettingsRequest(request *http.Request) ([]byte, error) {
@@ -500,7 +567,7 @@ func (adminport *Adminport) GetMessageKeyFromRequest(r *http.Request) (string, e
 
 // apply default replication settings for the ones that are not explicitly specified
 func ApplyDefaultSettings(settings *map[string]interface{}) error {
-	defaultSettings, err := ReplicationSettingsService().GetReplicationSettings()
+	defaultSettings, err := ReplicationSettingsService().GetDefaultReplicationSettings()
 	if err != nil {
 		return err
 	}

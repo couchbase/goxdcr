@@ -14,7 +14,6 @@ import (
 	"fmt"
 	"os"
 	rm "github.com/couchbase/goxdcr/replication_manager"
-	ms "github.com/couchbase/goxdcr/mock_services"
 	s "github.com/couchbase/goxdcr/service_impl"
 	utils "github.com/couchbase/goxdcr/utils"	
 	base "github.com/couchbase/goxdcr/base"
@@ -89,7 +88,7 @@ func main() {
 							   s.NewRemoteClusterService(metadata_svc, nil),	
 							   s.NewClusterInfoSvc(nil), 
 							   top_svc, 
-							   new(ms.MockReplicationSettingsSvc))
+							   s.NewReplicationSettingsSvc(metadata_svc, nil))
 							   
 		// keep main alive in normal mode
 		<-done

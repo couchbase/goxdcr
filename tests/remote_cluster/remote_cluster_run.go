@@ -21,7 +21,6 @@ import (
 	"github.com/couchbase/goxdcr/metadata"
 	rm "github.com/couchbase/goxdcr/replication_manager"
 	s "github.com/couchbase/goxdcr/service_impl"
-	ms "github.com/couchbase/goxdcr/mock_services"
 	utils "github.com/couchbase/goxdcr/utils"
 	"github.com/couchbase/goxdcr/tests/common"
 	"net/http"
@@ -104,7 +103,7 @@ func startAdminport() {
 							   s.NewRemoteClusterService(metadata_svc, nil),	
 							   s.NewClusterInfoSvc(nil),  
 							   top_svc, 
-							   new(ms.MockReplicationSettingsSvc))
+							   s.NewReplicationSettingsSvc(metadata_svc, nil))
 	
 	//wait for server to finish starting
 	time.Sleep(time.Second * 3)

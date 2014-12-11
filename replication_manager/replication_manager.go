@@ -265,6 +265,20 @@ func StopPipeline(topic string) error {
 	return pipeline_manager.StopPipeline(topic)
 }
 
+func UpdateDefaultReplicationSettings(settings map[string]interface{}) error {
+	defaultSettings, err := ReplicationSettingsService().GetDefaultReplicationSettings()
+	if err != nil {
+		return err
+	}
+	
+	err = defaultSettings.UpdateSettingsFromMap(settings)
+	if err != nil {
+		return err
+	}
+	
+	return ReplicationSettingsService().SetDefaultReplicationSettings(defaultSettings)
+}
+
 func UpdateReplicationSettings(topic string, settings map[string]interface{}) error {
 	// read replication spec with the specified replication id
 	replSpec, err := ReplicationSpecService().ReplicationSpec(topic)

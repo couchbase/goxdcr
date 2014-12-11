@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"errors"
 	"io/ioutil"
+	"reflect"
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/utils"
 	"github.com/couchbase/goxdcr/metadata"
@@ -29,7 +30,8 @@ func ValidateResponse(testName string, response *http.Response, err error) error
 
 func ValidateFieldValue(fieldName string, expectedValue, actualValue interface{}) error {
 	if expectedValue != actualValue {
-		return errors.New(fmt.Sprintf("Incorrect value in field %v. Expected value=%v, actual value=%v\n", fieldName, expectedValue, actualValue))
+		return errors.New(fmt.Sprintf("Incorrect value in field %v. Expected value=%v with type=%v, actual value=%v with type=%v\n", 
+									fieldName, expectedValue, reflect.TypeOf(expectedValue), actualValue, reflect.TypeOf(actualValue)))
 	}
 	return nil
 }

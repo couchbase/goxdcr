@@ -11,7 +11,6 @@ import (
 	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/goxdcr/parts"
 	s "github.com/couchbase/goxdcr/service_impl"
-	c "github.com/couchbase/goxdcr/mock_services"
 	"github.com/couchbase/goxdcr/replication_manager"
 	"github.com/couchbase/goxdcr/tests/common"
 	"os"
@@ -107,7 +106,7 @@ func invokeFactory() error {
 	replication_manager.StartReplicationManager(options.sourceKVHost, base.AdminportNumber,
 								 repl_spec_svc,
 							     remote_cluster_svc,
-							     cluster_info_svc, top_svc, new(c.MockReplicationSettingsSvc))
+							     cluster_info_svc, top_svc, s.NewReplicationSettingsSvc(msvc, nil))
 
 	fac := factory.NewXDCRFactory(repl_spec_svc, remote_cluster_svc, cluster_info_svc, top_svc, log.DefaultLoggerContext, log.DefaultLoggerContext, nil)
 

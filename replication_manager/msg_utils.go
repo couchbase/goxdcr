@@ -23,7 +23,11 @@ import (
 	"fmt"
 	"encoding/json"
 	"bytes"
+	"strings"
 )
+
+// xdcr prefix for internal settings keys
+const XDCRPrefix = "xdcr"
 
 // http request related constants
 const (
@@ -58,25 +62,6 @@ const (
 )
 
 var RequiredRemoteClusterParams = [4]string{RemoteClusterName, RemoteClusterHostName, RemoteClusterUserName, RemoteClusterPassword}
-
-// constants used for parsing internal settings
-/*const (
-	ReplicationType                = "xdcrReplicationType"
-	FilterExpression               = "xdcrFilterExpression"
-	Active                         = "xdcrActive"
-	CheckpointInterval             = "xdcrCheckpointInterval"
-	BatchCount                     = "xdcrWorkerBatchSize"
-	BatchSize                      = "xdcrDocBatchSizeKb"
-	FailureRestartInterval         = "xdcrFailureRestartInterval"
-	OptimisticReplicationThreshold = "xdcrOptimisticReplicationThreshold"
-	HttpConnection                 = "httpConnections"
-	SourceNozzlePerNode            = "xdcrSourceNozzlePerNode"
-	TargetNozzlePerNode            = "xdcrTargetNozzlePerNode"
-	MaxExpectedReplicationLag      = "xdcrMaxExpectedReplicationLag"
-	TimeoutPercentageCap           = "xdcrTimeoutPercentageCap"
-	LogLevel                       = "xdcrLogLevel"
-	StatsInterval				   = "xdcrStatsInterval"
-)*/
 
 // constants used for parsing replication settings
 const (
@@ -145,13 +130,14 @@ var MissingSettingsInRequest = errors.New("Invalid http request. No replication 
 var MissingOldSettingsInRequest = errors.New("Invalid http request. No old replication settings have been supplied.")
 
 // replication settings key in rest api -> internal replication settings key
-var ReplSettingRestToInternalMap = map[string]string {
+var RestKeyToSettingsKeyMap = map[string]string {
 	Type:  metadata.ReplicationType,
 	FilterExpression: metadata.FilterExpression,
 	Paused: metadata.Active,
 	CheckpointInterval: metadata.CheckpointInterval,
 	BatchCount: metadata.BatchCount,
 	BatchSize: metadata.BatchSize,
+	HttpConnection: metadata.HttpConnection,
 	FailureRestartInterval: metadata.FailureRestartInterval,
 	OptimisticReplicationThreshold: metadata.OptimisticReplicationThreshold,
 	SourceNozzlePerNode: metadata.SourceNozzlePerNode,
@@ -163,13 +149,14 @@ var ReplSettingRestToInternalMap = map[string]string {
 } 
 
 // internal replication settings key -> replication settings key in rest api
-var ReplSettingInternalToRestMap = map[string]string {
+var SettingsKeyToRestKeyMap = map[string]string {
 	metadata.ReplicationType:  Type,
 	metadata.FilterExpression: FilterExpression,
 	metadata.Active: Paused,
 	metadata.CheckpointInterval: CheckpointInterval,
 	metadata.BatchCount: BatchCount,
 	metadata.BatchSize: BatchSize,
+	metadata.HttpConnection:  HttpConnection,
 	metadata.FailureRestartInterval: FailureRestartInterval,
 	metadata.OptimisticReplicationThreshold: OptimisticReplicationThreshold,
 	metadata.SourceNozzlePerNode: SourceNozzlePerNode,
@@ -231,8 +218,7 @@ func DecodeCreateRemoteClusterRequest(request *http.Request) (uuid, name, hostNa
 		case RemoteClusterCertificate:
 			certificate = []byte(val)
 		default:
-			err = utils.InvalidParameterInHttpRequestError(key)
-			return
+			// ignore other parameters
 		}
 	}
 	
@@ -276,34 +262,31 @@ func DecodeCreateReplicationRequest(request *http.Request) (fromBucket, toCluste
 	forward = true
 
 	for key, valArr := range request.Form {
-		if len(valArr) != 1 {
-			err = utils.InvalidValueInHttpRequestError(key, valArr)
-			return
-		}
-		val := valArr[0]
-		
 		switch key {
 		case FromBucket:
-			fromBucket = val
+			fromBucket, err = getStringFromValArr(key, valArr)
 		case ToCluster:
-			toCluster = val
+			toCluster, err = getStringFromValArr(key, valArr)
 		case ToBucket:
-			toBucket = val
+			toBucket, err = getStringFromValArr(key, valArr)
 		case FilterName:
-			filterName = val
+			filterName, err = getStringFromValArr(key, valArr)
 		case Forward:
-			forward, err = strconv.ParseBool(val)
+			var forwardStr string
+			forwardStr, err = getStringFromValArr(key, valArr)
 			if err != nil {
-				err = utils.InvalidValueInHttpRequestError(key, val)
+				return
+			}
+			forward, err = strconv.ParseBool(forwardStr)
+			if err != nil {
+				err = utils.InvalidValueInHttpRequestError(key, forwardStr)
 				return
 			}
 		default:
-			// other keys must be for replication settings.
-			_, ok := ReplSettingRestToInternalMap[key]
-			if !ok {
-				err = utils.InvalidParameterInHttpRequestError(key)
-				return
-			}
+			// ignore other parameters
+		}
+		if err != nil {
+			return
 		}
 	}
 	
@@ -352,21 +335,24 @@ func DecodeCreateReplicationResponse(response *http.Response) (string, error) {
 		return "", err
 	}
 	
-	params, err := url.ParseQuery(string(bodyBytes))
+	var paramsMap map[string]interface{}
+	err = json.Unmarshal(bodyBytes, &paramsMap) 
 	if err != nil {
-		return "", nil
-	}
-	if len(params) != 1 {
-		return "", errors.New("Invalid response. One and only one parameter should have been returned.")
+		return "", err
 	}
 	
-	replicationId := params.Get(ReplicationId)
+	replicationId, ok := paramsMap[ReplicationId]
 	
-	if len(replicationId) == 0 {
+	if !ok {
 		return "", utils.MissingParameterInHttpResponseError(ReplicationId)
 	}
 	
-	return replicationId, nil
+	replicationIdStr, ok := replicationId.(string)
+	if !ok {
+		return "", utils.IncorrectValueTypeInHttpResponseError(ReplicationId, replicationId, "string")
+	}
+	
+	return replicationIdStr, nil
 	
 }
 
@@ -384,17 +370,21 @@ func DecodeReplicationIdAndForwardFlagFromHttpRequest(request *http.Request, pat
 	
 	// forward defaults to true if not specified
 	forward = true
-	for key, val := range request.Form {
+	for key, valArr := range request.Form {
 		switch key {
 			case Forward:
-				forward, err = strconv.ParseBool(val[0])
+				var forwardStr string
+				forwardStr, err = getStringFromValArr(key, valArr)
 				if err != nil {
-					err = utils.InvalidValueInHttpRequestError(key, val[0])
+					return
+				}
+				forward, err = strconv.ParseBool(forwardStr)
+				if err != nil {
+					err = utils.InvalidValueInHttpRequestError(key, forwardStr)
 					return
 				}
 			default:
-				err = utils.InvalidParameterInHttpRequestError(key)
-				return
+				// ignore other parameters
 		}
 	}
 	
@@ -411,18 +401,15 @@ func DecodeOldSettingsFromRequest(request *http.Request) (*metadata.ReplicationS
 	
 	bFound := false
 
-	for key, valArr := range request.Form {
-		if len(valArr) != 1 {
-			err := utils.InvalidValueInHttpRequestError(key, valArr)
-			return nil, err
-		}
-		
-		val := valArr[0]
-		
+	for key, valArr := range request.Form {		
 		switch key {
 			case OldReplicationSettings:
+				settingsStr, err := getStringFromValArr(key, valArr)
+				if err != nil {
+					return nil, err
+				}
 				bFound = true
-				err := json.Unmarshal([]byte(val), &oldSettings)
+				err = json.Unmarshal([]byte(settingsStr), &oldSettings)
 				if err != nil {
 					return nil, err
 				}
@@ -451,69 +438,10 @@ func DecodeSettingsFromRequest(request *http.Request, throwError bool) (map[stri
 	}
 
 	for key, valArr := range request.Form {
-		internalKey, ok := ReplSettingRestToInternalMap[key]
-		if !ok {
-			if throwError {
-				err := utils.InvalidParameterInHttpRequestError(key)
-				return nil, err
-			} else {
-				continue
-			}
-		}
-		
-		if len(valArr) != 1 {
-			err := utils.InvalidValueInHttpRequestError(key, valArr)
+		settingsKey, _ := RestKeyToSettingsKeyMap[key]
+		err := processKey(key, settingsKey, valArr, &settings)
+		if err != nil {
 			return nil, err
-		}
-		
-		val := valArr[0]
-		
-		switch key {
-			case FilterExpression:
-				err := verifyFilterExpression(val) 
-				if err != nil {
-					errMsg := fmt.Sprintf("Invalid value, %v, for parameter, %v, in http request. It needs to be a valid regular expression.", val, key)
-					return nil, utils.NewEnhancedError(errMsg, err)
-				}
-				settings[internalKey] = val
-			case Type:	
-				settings[internalKey] = val
-			case ReplicationType:	
-				// nothing to do
-			case Paused:
-				paused, err := strconv.ParseBool(val)
-				if err != nil {
-					err = utils.InvalidValueInHttpRequestError(key, val)
-					return nil, err
-				}
-				settings[internalKey] = !paused
-			case CheckpointInterval:
-				fallthrough
-			case BatchCount:
-				fallthrough
-			case BatchSize:
-				fallthrough
-			case FailureRestartInterval:
-				fallthrough
-			case OptimisticReplicationThreshold:
-				fallthrough
-			case HttpConnection:
-				fallthrough
-			case SourceNozzlePerNode:
-				fallthrough
-			case TargetNozzlePerNode:
-				fallthrough
-			case MaxExpectedReplicationLag:
-				fallthrough
-			case TimeoutPercentageCap:
-				intVal, err := strconv.ParseInt(val, base.ParseIntBase, base.ParseIntBitSize)
-				if err != nil {
-					err = utils.InvalidValueInHttpRequestError(key, val)
-					return nil, err
-				}
-				settings[internalKey] = int(intVal)
-			case LogLevel:
-				settings[internalKey] = val
 		}
 	}
 	
@@ -527,19 +455,56 @@ func DecodeSettingsFromRequest(request *http.Request, throwError bool) (map[stri
 	
 }
 
+func DecodeInternalSettingsFromRequest(request *http.Request) (map[string]interface{}, error) {
+	settings := make(map[string]interface{})
+	var err error
+	
+	if err = request.ParseForm(); err != nil {
+		return nil, err
+	}
+
+	for key, valArr := range request.Form {
+		restKey, err := ConvertRestInternalKeyToRestKey(key)
+		if err != nil {
+			// ignore non-internal settings key
+			continue
+		}
+		settingsKey, _ := RestKeyToSettingsKeyMap[restKey]
+		
+		err = processKey(restKey, settingsKey, valArr, &settings)
+		if err != nil {
+			return nil, err
+		}
+	}
+	
+	logger_msgutil.Debugf("settings decoded from request: %v\n", settings)
+	
+	return settings, nil
+	
+}
+
+
 func NewCreateReplicationResponse(replicationId string) []byte {
 	params := make(map[string]interface{})
 	params[ReplicationId] = replicationId
 	// this should not fail
-	bytes, _ := EncodeMapIntoByteArray(params)
+	bytes, _ := json.Marshal(params)
 	return bytes
 }
 
-func NewViewReplicationSettingsResponse(settings *metadata.ReplicationSettings) ([]byte, error) {
+func NewReplicationSettingsResponse(settings *metadata.ReplicationSettings) ([]byte, error) {
 	if settings == nil {
 		return nil, nil
 	} else {
-		return EncodeMapIntoByteArray(settings.ToMap())
+		return json.Marshal(convertSettingsToRestSettingsMap(settings))
+	}
+}
+
+func NewInternalSettingsResponse(settings *metadata.ReplicationSettings) ([]byte, error) {
+	if settings == nil {
+		return nil, nil
+	} else {
+		return json.Marshal(convertSettingsToRestInternalSettingsMap(settings))
 	}
 }
 
@@ -561,7 +526,7 @@ func DecodeDynamicParamInURL(request *http.Request, pathPrefix string, partName 
 }
 
 // encode data in a map into a byte array, which can then be used as 
-// the body part of a http response
+// the body part of a http request
 // so far only five types are supported: string, int, bool, LogLevel, []byte
 // which should be sufficient for all cases at hand
 func EncodeMapIntoByteArray(data map[string]interface{}) ([]byte, error) {
@@ -597,3 +562,127 @@ func verifyFilterExpression(filterExpression string) error {
 	return err
 }
 
+func convertSettingsToRestSettingsMap(settings *metadata.ReplicationSettings) map[string]interface{} {
+	restSettingsMap := make(map[string]interface{})
+	settingsMap := settings.ToMap()
+	for key, value := range settingsMap {
+		restKey := SettingsKeyToRestKeyMap[key]
+		restSettingsMap[restKey] = value
+	}
+	return restSettingsMap
+}
+
+func convertSettingsToRestInternalSettingsMap(settings *metadata.ReplicationSettings) map[string]interface{} {
+	internalSettingsMap := make(map[string]interface{})
+	settingsMap := settings.ToMap()
+	for key, value := range settingsMap {
+		restKey := SettingsKeyToRestKeyMap[key]
+		internalSettingsKey := ConvertRestKeyToRestInternalKey(restKey)
+		internalSettingsMap[internalSettingsKey] = value
+	}
+	return internalSettingsMap
+}
+
+// turns the first char in key to upper case and prefix with "xdcr"
+// e.g., turns "checkpointInterval" into "xdcrCheckpointInterval"
+func ConvertRestKeyToRestInternalKey(key string) string {
+	if key == "" {
+		return XDCRPrefix
+	}
+	return XDCRPrefix + strings.ToUpper(key[0:1]) + key[1:]
+}
+
+func convertInternalSettingsMapToSettingsMap(internalSettingsMap map[string]interface{}) map[string]interface{} {
+	settingsMap := make(map[string]interface{})
+	for key, value := range internalSettingsMap {
+		settingsMap[ConvertRestKeyToRestInternalKey(key)] = value
+	}
+	return internalSettingsMap
+}
+
+// strip the "xdcr" prefix and then turns the first char to lower case
+// e.g., turns "xdcrCheckpointInterval" into "checkpointInterval"
+func ConvertRestInternalKeyToRestKey(key string) (string, error) {
+	prefixLen := len(XDCRPrefix)
+	if len(key) > prefixLen && strings.HasPrefix(key, XDCRPrefix) {
+		return strings.ToLower(key[prefixLen:prefixLen+1]) + key[prefixLen+1:], nil	
+	} else {
+		return "", errors.New("Not a valid internal settings key")
+	} 
+}
+
+func getStringFromValArr(key string, valArr []string) (string, error) {
+	if len(valArr) != 1 {
+		return "", utils.InvalidValueInHttpRequestError(key, valArr)
+	} else {
+		return valArr[0], nil
+	}
+}
+
+func processKey(restKey, settingsKey string, valArr []string, settingsPtr *map[string]interface{}) error {	
+	settings := *settingsPtr
+	var err error
+		switch restKey {
+			case FilterExpression:
+				val, err := getStringFromValArr(restKey, valArr)
+				if err != nil {
+					return err
+				}
+				err = verifyFilterExpression(val) 
+				if err != nil {
+					errMsg := fmt.Sprintf("Invalid value, %v, for parameter, %v, in http request. It needs to be a valid regular expression.", val, restKey)
+					return utils.NewEnhancedError(errMsg, err)
+				}
+				settings[settingsKey] = val
+			case Type:	
+				fallthrough
+			case LogLevel:
+				settings[settingsKey], err = getStringFromValArr(restKey, valArr)
+				if err != nil {
+					return err
+				}
+			case ReplicationType:	
+				// nothing to do
+			case Paused:
+				val, err := getStringFromValArr(restKey, valArr)
+				if err != nil {
+					return err
+				}
+				paused, err := strconv.ParseBool(val)
+				if err != nil {
+					return utils.InvalidValueInHttpRequestError(restKey, val)
+				}
+				settings[settingsKey] = !paused
+			case CheckpointInterval:
+				fallthrough
+			case BatchCount:
+				fallthrough
+			case BatchSize:
+				fallthrough
+			case FailureRestartInterval:
+				fallthrough
+			case OptimisticReplicationThreshold:
+				fallthrough
+			case HttpConnection:
+				fallthrough
+			case SourceNozzlePerNode:
+				fallthrough
+			case TargetNozzlePerNode:
+				fallthrough
+			case MaxExpectedReplicationLag:
+				fallthrough
+			case TimeoutPercentageCap:
+				val, err := getStringFromValArr(restKey, valArr)
+				if err != nil {
+					return err
+				}
+				intVal, err := strconv.ParseInt(val, base.ParseIntBase, base.ParseIntBitSize)
+				if err != nil {
+					return utils.InvalidValueInHttpRequestError(restKey, val)
+				}
+				settings[settingsKey] = int(intVal)
+			default:
+				// ignore all other params
+		}
+	return nil
+}
