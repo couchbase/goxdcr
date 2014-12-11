@@ -28,7 +28,7 @@ INCLUDE (FindCouchbaseGo)
 
 SET (_forestdb_dep)
 IF (DEFINED FORESTDB_TARGET)
-  SET (_forestdb_dep "DEPENDS ${FORESTDB_TARGET}")
+  SET (_forestdb_dep DEPENDS ${FORESTDB_TARGET})
 ENDIF (DEFINED FORESTDB_TARGET)
 
 GoInstall (TARGET goxdcr PACKAGE github.com/couchbase/goxdcr/main
