@@ -238,7 +238,9 @@ func (c *Client) GetBulk(vb uint16, keys []string) (map[string]*gomemcached.MCRe
 		for going {
 			res, err := c.Receive()
 			if err != nil {
-				errch <- err
+				if res.Status != gomemcached.KEY_ENOENT {
+					errch <- err
+				}
 				return
 			}
 			switch res.Opcode {
