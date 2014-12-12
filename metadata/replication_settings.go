@@ -122,7 +122,7 @@ type ReplicationSettings struct {
 	//default:Error
 	LogLevel log.LogLevel `json:"log_level"`
 
-	//stats interval
+	//stats updating interval in milliseconds
 	//default:5 second
 	StatsInterval int `json:"stats_interval"`
 }
