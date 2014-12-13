@@ -242,9 +242,13 @@ func StartPipeline(topic string) error {
 	if err != nil {
 		return err
 	}
+	
+	logger_rm.Infof("got spec")
 
 	settings := spec.Settings
 	settingsMap := settings.ToMap()
+	
+	logger_rm.Infof("tomap finished")
 
 	pipeline, err := pipeline_manager.StartPipeline(topic, settingsMap)
 	if err == nil {
@@ -265,38 +269,41 @@ func StopPipeline(topic string) error {
 	return pipeline_manager.StopPipeline(topic)
 }
 
-func UpdateDefaultReplicationSettings(settings map[string]interface{}) error {
+func UpdateDefaultReplicationSettings(settings map[string]interface{}) (map[string]error, error) {
 	defaultSettings, err := ReplicationSettingsService().GetDefaultReplicationSettings()
 	if err != nil {
-		return err
+		return nil, err
 	}
 	
-	err = defaultSettings.UpdateSettingsFromMap(settings)
-	if err != nil {
-		return err
+	errorMap := defaultSettings.UpdateSettingsFromMap(settings)
+	if len(errorMap) != 0 {
+		return errorMap, nil
 	}
 	
-	return ReplicationSettingsService().SetDefaultReplicationSettings(defaultSettings)
+	return nil, ReplicationSettingsService().SetDefaultReplicationSettings(defaultSettings)
 }
 
-func UpdateReplicationSettings(topic string, settings map[string]interface{}) error {
+func UpdateReplicationSettings(topic string, settings map[string]interface{}) (map[string]error, error) {
 	// read replication spec with the specified replication id
 	replSpec, err := ReplicationSpecService().ReplicationSpec(topic)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	
 	// make a copy of old settings
 	oldSettings := *replSpec.Settings
 
 	// update replication spec with input settings
-	replSpec.Settings.UpdateSettingsFromMap(settings)
+	errorMap := replSpec.Settings.UpdateSettingsFromMap(settings)
+	if len(errorMap) != 0 {
+		return errorMap, nil
+	}
 	err = ReplicationSpecService().SetReplicationSpec(replSpec)
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	
-	return HandleChangesToReplicationSettings(topic, &oldSettings, replSpec.Settings)
+	return nil, HandleChangesToReplicationSettings(topic, &oldSettings, replSpec.Settings)
 }
 
 func HandleChangesToReplicationSettings(topic string, oldSettings, newSettings *metadata.ReplicationSettings) error {
@@ -372,17 +379,17 @@ func (rm *replicationManager) createAndPersistReplicationSpec(sourceBucket, targ
 	}
 
 	spec := metadata.NewReplicationSpecification(sourceBucket, targetClusterUUID, targetBucket, filterName)
-	s, err := metadata.SettingsFromMap(settings)
-	if err == nil {
-		spec.Settings = s
-
-		//persist it
-		replication_mgr.repl_spec_svc.AddReplicationSpec(spec)
-		logger_rm.Debugf("replication specification %s is created and persisted\n", spec.Id)
-		return spec, nil
-	} else {
+	replSettings, err := ReplicationSettingsService().GetDefaultReplicationSettings()
+	if err != nil {
 		return nil, err
 	}
+	replSettings.UpdateSettingsFromMap(settings)
+	spec.Settings = replSettings
+
+	//persist it
+	replication_mgr.repl_spec_svc.AddReplicationSpec(spec)
+	logger_rm.Debugf("replication specification %s is created and persisted\n", spec.Id)
+	return spec, nil
 }
 
 //update the replication specification's "active" setting

@@ -53,7 +53,7 @@ If the replication is created successfully, a replication id will be returned, w
 		(e) workerBatchSize, int, the number of mutations in a batch, range: 500-10000
 		(f) docBatchSizeKb, int, the size of a batch in KB, range: 10-10000
 		(g) failureRestartInterval, int, the number of seconds to wait after failure before restarting replication, range: 1-300
-		(h) optimisticReplicationThreshold, int, documents with size less than this threshold (in KB) will be replicated optimistically, range: 0-20*1024
+		(h) optimisticReplicationThreshold, int, documents with size less than this threshold (in bytes) will be replicated optimistically, range: 0-20*1024*1024
  		(i) httpConnections, int, the number of maximum simultaneous HTTP connections, range: 1-100
  		(j) sourceNozzlePerNode, int, the number of source nozzles per source node, range: 1-10
  		(k) targetNozzlePerNode, int, the number of outgoing nozzles per target node, range: 1-10

@@ -57,12 +57,12 @@ func argParse() {
 		"remote cluster uuid")
 	flag.StringVar(&options.remoteName, "remoteName", "remote",
 		"remote cluster name")
-	flag.StringVar(&options.remoteHostName, "remoteHostName", /*"127.0.0.1:9000",//*/"ec2-204-236-128-120.us-west-1.compute.amazonaws.com:8091",
+	flag.StringVar(&options.remoteHostName, "remoteHostName", "127.0.0.1:9000",
 		"remote cluster host name")
 	flag.StringVar(&options.remoteUserName, "remoteUserName", "Administrator", "remote cluster userName")
 	flag.StringVar(&options.remotePassword, "remotePassword", "welcome", "remote cluster password")
-	flag.BoolVar(&options.remoteDemandEncryption, "remoteDemandEncryption", true, "whether encryption is needed")
-	flag.StringVar(&options.remoteCertificateFile, "remoteCertificateFile", "/Users/yu/pem/remoteCert.pem", "file containing certificate for encryption")
+	flag.BoolVar(&options.remoteDemandEncryption, "remoteDemandEncryption", false, "whether encryption is needed")
+	flag.StringVar(&options.remoteCertificateFile, "remoteCertificateFile", "", "file containing certificate for encryption")
 
 	flag.Parse()
 }

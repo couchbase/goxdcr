@@ -31,7 +31,7 @@ import (
 const (
 	NumSourceConn    = 2
 	NumTargetConn    = 3
-	BatchCount       = 400
+	BatchCount       = 600
 	BatchSizeInternal       = 512
 	BatchSizeDefault       = 1024
 	BatchSizePerRepl        = 3036

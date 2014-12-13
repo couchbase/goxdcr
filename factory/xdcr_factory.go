@@ -327,7 +327,7 @@ func (xdcrf *XDCRFactory) ConstructSettingsForPart(pipeline common.Pipeline, par
 
 	if _, ok := part.(*parts.XmemNozzle); ok {
 		xdcrf.logger.Debugf("Construct settings for XmemNozzle %s", part.Id())
-		return xdcrf.constructSettingsForXmemNozzle(pipeline.Topic(), settings)
+		return xdcrf.constructSettingsForXmemNozzle(pipeline, settings)
 	} else if _, ok := part.(*parts.DcpNozzle); ok {
 		xdcrf.logger.Debugf("Construct settings for DcpNozzle %s", part.Id())
 		return xdcrf.constructSettingsForDcpNozzle(pipeline, part.(*parts.DcpNozzle), settings)
@@ -336,16 +336,13 @@ func (xdcrf *XDCRFactory) ConstructSettingsForPart(pipeline common.Pipeline, par
 	}
 }
 
-func (xdcrf *XDCRFactory) constructSettingsForXmemNozzle(topic string, settings map[string]interface{}) (map[string]interface{}, error) {
+func (xdcrf *XDCRFactory) constructSettingsForXmemNozzle(pipeline common.Pipeline, settings map[string]interface{}) (map[string]interface{}, error) {
 	xmemSettings := make(map[string]interface{})
-	// TODO this may break
-	repSettings, err := metadata.SettingsFromMap(settings)
-	if err != nil {
-		return nil, err
-	}
+	repSettings := pipeline.Specification().Settings
+
 	xmemSettings[parts.XMEM_SETTING_BATCHCOUNT] = repSettings.BatchCount
 	xmemSettings[parts.XMEM_SETTING_BATCHSIZE] = repSettings.BatchSize
-	xmemSettings[parts.XMEM_SETTING_RESP_TIMEOUT] = xdcrf.getTargetTimeoutEstimate(topic)
+	xmemSettings[parts.XMEM_SETTING_RESP_TIMEOUT] = xdcrf.getTargetTimeoutEstimate(pipeline.Topic())
 	xmemSettings[parts.XMEM_SETTING_BATCH_EXPIRATION_TIME] = time.Duration(float64(repSettings.MaxExpectedReplicationLag)*0.7) * time.Millisecond
 
 	return xmemSettings, nil
@@ -431,7 +428,7 @@ func (xdcrf *XDCRFactory) ConstructSettingsForService(pipeline common.Pipeline, 
 	switch service.(type) {
 	case *pipeline_svc.PipelineSupervisor:
 		xdcrf.logger.Debug("Construct settings for PipelineSupervisor")
-		return xdcrf.constructSettingsForSupervisor(pipeline.Topic(), settings)
+		return xdcrf.constructSettingsForSupervisor(pipeline, settings)
 	case *pipeline_svc.StatisticsManager:
 		xdcrf.logger.Debug("Construct settings for StatisticsManager")
 		return xdcrf.constructSettingsForStatsManager(pipeline, settings)
@@ -439,22 +436,17 @@ func (xdcrf *XDCRFactory) ConstructSettingsForService(pipeline common.Pipeline, 
 	return settings, nil
 }
 
-func (xdcrf *XDCRFactory) constructSettingsForSupervisor(topic string, settings map[string]interface{}) (map[string]interface{}, error) {
+func (xdcrf *XDCRFactory) constructSettingsForSupervisor(pipeline common.Pipeline, settings map[string]interface{}) (map[string]interface{}, error) {
 	s := make(map[string]interface{})
-	repSettings, err := metadata.SettingsFromMap(settings)
-	if err != nil {
-		return nil, err
-	}
+	repSettings := pipeline.Specification().Settings
 	s[pipeline_svc.PIPELINE_LOG_LEVEL] = repSettings.LogLevel
 	return s, nil
 }
 
 func (xdcrf *XDCRFactory) constructSettingsForStatsManager(pipeline common.Pipeline, settings map[string]interface{}) (map[string]interface{}, error) {
 	s := make(map[string]interface{})
-	repSettings, err := metadata.SettingsFromMap(settings)
-	if err != nil {
-		return nil, err
-	}
+	repSettings := pipeline.Specification().Settings	
+	
 	s[pipeline_svc.PUBLISH_INTERVAL] = time.Duration(repSettings.StatsInterval) * time.Millisecond
 
 	//set the start vb sequence no map to statistics manager

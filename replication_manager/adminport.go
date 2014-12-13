@@ -191,9 +191,11 @@ func (adminport *Adminport) doGetRemoteClustersRequest(request *http.Request) ([
 func (adminport *Adminport) doCreateRemoteClusterRequest(request *http.Request) ([]byte, error) {
 	logger_ap.Infof("doCreateRemoteClusterRequest\n")
 	
-	uuid, name, hostName, userName, password, demandEncryption, certificate, err := DecodeCreateRemoteClusterRequest(request)
+	uuid, name, hostName, userName, password, demandEncryption, certificate, errorsMap, err := DecodeCreateRemoteClusterRequest(request)
 	if err != nil {
 		return nil, err
+	} else if len(errorsMap) > 0 {
+		return EncodeErrorsMapIntoByteArray(errorsMap)
 	}
 
 	logger_ap.Infof("Decoded parameters: uuid=%v, name=%v, hostName=%v, userName=%v, password=%v, demandEncryption=%v, certificate is nil? %v\n",
@@ -226,15 +228,15 @@ func (adminport *Adminport) doDeleteRemoteClusterRequest(request *http.Request) 
 func (adminport *Adminport) doCreateReplicationRequest(request *http.Request) ([]byte, error) {
 	logger_ap.Infof("doCreateReplicationRequest called\n")
 
-	fromBucket, toCluster, toBucket, filterName, forward, settings, err := DecodeCreateReplicationRequest(request)
+	fromBucket, toCluster, toBucket, filterName, forward, settings, errorsMap, err := DecodeCreateReplicationRequest(request)
 	if err != nil {
 		return nil, err
+	} else if len(errorsMap) > 0 {
+		return EncodeErrorsMapIntoByteArray(errorsMap)
 	}
-
-	// apply default replication settings
-	if err := ApplyDefaultSettings(&settings); err != nil {
-		return nil, err
-	}
+	
+	logger_ap.Infof("Decoded parameters: fromBucket=%v, toCluster=%v, toBucket=%v, filterName=%v, forward=%v, settings=%v\n",
+					fromBucket, toCluster, toBucket, filterName, forward, settings)
 
 	replicationId, err := CreateReplication(fromBucket, toCluster, toBucket, filterName, settings, forward)
 
@@ -292,14 +294,23 @@ func (adminport *Adminport) doViewInternalSettingsRequest(request *http.Request)
 func (adminport *Adminport) doChangeInternalSettingsRequest(request *http.Request) ([]byte, error) {
 	logger_ap.Infof("doChangeInternalSettingsRequest\n")
 	
-	settingsMap, err := DecodeInternalSettingsFromRequest(request)
+	settingsMap, errorsMap, err := DecodeSettingsFromInternalSettingsRequest(request)
 	if err != nil {
 		return nil, err
+	} else if len(errorsMap) > 0 {
+		return EncodeErrorsMapIntoByteArray(errorsMap)
 	}
 
 	logger_ap.Infof("Request decoded: inputSettings=%v\n", settingsMap)
 	
-	return nil, UpdateDefaultReplicationSettings(settingsMap)
+	errorsMap, err = UpdateDefaultReplicationSettings(settingsMap)
+	if err != nil {
+		return nil, err
+	} else if len(errorsMap) > 0 {
+		return EncodeErrorsMapIntoByteArray(errorsMap)
+	} else {
+		return nil, nil
+	}
 }
 
 func (adminport *Adminport) doViewDefaultReplicationSettingsRequest(request *http.Request) ([]byte, error) {
@@ -316,25 +327,29 @@ func (adminport *Adminport) doViewDefaultReplicationSettingsRequest(request *htt
 func (adminport *Adminport) doChangeDefaultReplicationSettingsRequest(request *http.Request) ([]byte, error) {
 	logger_ap.Infof("doChangeDefaultReplicationSettingsRequest\n")
 	
-	settingsMap, err := DecodeSettingsFromRequest(request, true)
+	settingsMap, errorsMap, err := DecodeSettingsFromRequest(request)
 	if err != nil {
 		return nil, err
+	} else if len(errorsMap) > 0 {
+		return EncodeErrorsMapIntoByteArray(errorsMap)
 	}
 
 	logger_ap.Infof("Request decoded: inputSettings=%v\n", settingsMap)
 	
-	err = UpdateDefaultReplicationSettings(settingsMap)
+	errorsMap, err = UpdateDefaultReplicationSettings(settingsMap)
 	if err != nil {
 		return nil, err
-	} else {
-		// change default settings returns the default settings after changes
-		defaultSettings, err := ReplicationSettingsService().GetDefaultReplicationSettings()
-		if err != nil {
-			return nil, err
-		}
-
-		return NewReplicationSettingsResponse(defaultSettings)
+	} else if len(errorsMap) > 0 {
+		return EncodeErrorsMapIntoByteArray(errorsMap)
+	} 
+	
+	// change default settings returns the default settings after changes
+	defaultSettings, err := ReplicationSettingsService().GetDefaultReplicationSettings()
+	if err != nil {
+		return nil, err
 	}
+
+	return NewReplicationSettingsResponse(defaultSettings)
 }
 
 func (adminport *Adminport) doViewReplicationSettingsRequest(request *http.Request) ([]byte, error) {
@@ -368,9 +383,11 @@ func (adminport *Adminport) doChangeReplicationSettingsRequest(request *http.Req
 	}
 	logger_ap.Infof("Request decoded: replicationId=%v\n", replicationId)
 	
-	inputSettingsMap, err := DecodeSettingsFromRequest(request, true)
+	inputSettingsMap, errorsMap, err := DecodeSettingsFromRequest(request)
 	if err != nil {
 		return nil, err
+	} else if len(errorsMap) > 0 {
+		return EncodeErrorsMapIntoByteArray(errorsMap)
 	}
 
 	logger_ap.Infof("Request decoded: inputSettings=%v\n", inputSettingsMap)
@@ -383,10 +400,12 @@ func (adminport *Adminport) doChangeReplicationSettingsRequest(request *http.Req
 	
 	oldSettings := replSpec.Settings
 	
-	err = UpdateReplicationSettings(replicationId, inputSettingsMap)
+	errorsMap, err = UpdateReplicationSettings(replicationId, inputSettingsMap)
 	if err != nil {
 		return nil, err
-	}
+	} else if len(errorsMap) > 0 {
+		return EncodeErrorsMapIntoByteArray(errorsMap)
+	} 
 	
 	// forward notifications to other nodes
 	notifyRequest, err := NewNotifySettingsChangeRequest(replicationId, adminport.xdcrRestPort, oldSettings)
@@ -563,19 +582,4 @@ func (adminport *Adminport) GetMessageKeyFromRequest(r *http.Request) (string, e
 
 		return key, nil
 	}
-}
-
-// apply default replication settings for the ones that are not explicitly specified
-func ApplyDefaultSettings(settings *map[string]interface{}) error {
-	defaultSettings, err := ReplicationSettingsService().GetDefaultReplicationSettings()
-	if err != nil {
-		return err
-	}
-
-	for key, val := range defaultSettings.ToMap() {
-		if _, ok := (*settings)[key]; !ok {
-			(*settings)[key] = val
-		}
-	}
-	return nil
 }

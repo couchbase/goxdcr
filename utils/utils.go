@@ -181,16 +181,16 @@ func Bucket(connectStr string, bucketName string, clusterUserName, clusterPasswo
 	return bucket, err
 }
 
-func InvalidParameterInHttpRequestError(param string) error {
-	return errors.New(fmt.Sprintf("Invalid parameter, %v, in http request.", param))
-}
-
-func InvalidValueInHttpRequestError(param string, val interface{}) error {
-	return errors.New(fmt.Sprintf("Invalid value, %v, for parameter, %v, in http request.", val, param))
-}
-
 func IncorrectValueTypeInHttpRequestError(key string, val interface{}, expectedType string) error {
 	return errors.New(fmt.Sprintf("Value, %v, for key, %v, in http request has incorrect data type. Expected type: %v. Actual type: %v", val, key, expectedType, reflect.TypeOf(val)))
+}
+
+func IncorrectValueTypeError(expectedType string) error {
+	return errors.New(fmt.Sprintf("The value must be %v", expectedType))
+}
+
+func InvalidValueError(expectedType string, minVal, maxVal interface{}) error {
+	return errors.New(fmt.Sprintf("The value must be %v between %v and %v", expectedType, minVal, maxVal))
 }
 
 func InvalidPathInHttpRequestError(path string) error {
@@ -210,8 +210,12 @@ func UnwrapError(infos map[string]interface{}) (err error) {
 	return err
 }
 
-func MissingParametersInHttpRequestError(params []string) error {
-	return errors.New(fmt.Sprintf("Parameters, %v, are missing in http request.", params))
+func MissingValueError(param string) error {
+	return errors.New(fmt.Sprintf("%v cannot be empty", param))
+}
+
+func MissingParameterError(param string) error {
+	return errors.New(fmt.Sprintf("%v is missing", param))
 }
 
 func MissingParameterInHttpRequestUrlError(paramName, path string) error {
@@ -321,3 +325,4 @@ func GetSeqNoFromMCRequest(req *gomemcached.MCRequest) uint64 {
 	seqno := binary.BigEndian.Uint64(extra[:8])
 	return seqno
 }
+
