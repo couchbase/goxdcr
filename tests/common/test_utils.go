@@ -6,6 +6,8 @@ import (
 	"errors"
 	"io/ioutil"
 	"reflect"
+	"bytes"
+	rm "github.com/couchbase/goxdcr/replication_manager"
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/utils"
 	"github.com/couchbase/goxdcr/metadata"
@@ -59,4 +61,19 @@ func DeleteTestRemoteCluster(remote_cluster_service service_def.RemoteClusterSvc
 	err := remote_cluster_service.DelRemoteCluster(remoteName)
 	fmt.Printf("Deleted remote cluster reference with name=%v, err=%v\n", remoteName, err)
 	return err
+}
+
+func SendRequestAndValidateResponse(testName, httpMethod, url string, body []byte) (*http.Response, error) {
+	request, err := http.NewRequest(httpMethod, url, bytes.NewBuffer(body))
+	if err != nil {
+		return nil, err
+	}
+	request.Header.Set(rm.ContentType, rm.DefaultContentType)
+
+	fmt.Println("request", request)
+
+	response, err := http.DefaultClient.Do(request)
+	err = ValidateResponse(testName, response, err)
+	fmt.Printf("err=%v, response=%v\n", err, response)
+	return response, err
 }

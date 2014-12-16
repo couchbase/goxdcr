@@ -82,18 +82,46 @@ func (service *RemoteClusterService) RemoteClusterByRefName(refName string) (*me
 func (service *RemoteClusterService) AddRemoteCluster(ref *metadata.RemoteClusterReference) error {
 	service.logger.Infof("Adding remote cluster with referenceId %v\n", ref.Id)
 	
-	err := validateRemoteClusterInfo(ref)
+	err := service.ValidateRemoteCluster(ref)
 	if err != nil {
 		return err
 	}
 	
-	key := ref.Id
-	value, err := json.Marshal(ref)
+	return service.addRemoteCluster(ref)
+}
+
+// this assumes that the ref to be added is not yet in gometa
+func (service *RemoteClusterService) SetRemoteCluster(refName string, ref *metadata.RemoteClusterReference) error {
+	service.logger.Infof("Setting remote cluster with refName %v\n", refName)
+	
+	err := service.ValidateRemoteCluster(ref)
 	if err != nil {
 		return err
 	}
-	service.logger.Debugf("Remote cluster being added: key=%v, value=%v\n", key, string(value))
-	return service.metadata_svc.AddWithCatalog(RemoteClustersCatalogKey, key, value)
+	
+	oldRef, err := service.RemoteClusterByRefName(refName)
+	if err != nil {
+		return err
+	}
+	
+	if ref.Id == oldRef.Id {
+		// if the id of the remote cluster reference has not been changed, simply update the existing reference
+		key := ref.Id
+		value, err := json.Marshal(ref)
+		if err != nil {
+			return err
+		}
+		service.logger.Debugf("Remote cluster being changed: key=%v, value=%v\n", key, string(value))
+		return service.metadata_svc.Set(key, value)
+	} else {
+		// if id of the remote cluster reference has been changed, delete the existing reference and create a new one
+		err = service.metadata_svc.DelWithCatalog(RemoteClustersCatalogKey, oldRef.Id)
+		if err != nil {
+			return err
+		}
+		return service.addRemoteCluster(ref)	
+	}
+	
 }
 
 func (service *RemoteClusterService) DelRemoteCluster(refName string) error {
@@ -134,7 +162,7 @@ func (service *RemoteClusterService) RemoteClusters() (map[string]*metadata.Remo
 }
 
 // validate remote cluster info and retrieve actual uuid 
-func validateRemoteClusterInfo(ref *metadata.RemoteClusterReference) error {
+func (service *RemoteClusterService) ValidateRemoteCluster(ref *metadata.RemoteClusterReference) error {
 
 	isEnterprise, err := rm.XDCRCompTopologyService().IsMyClusterEnterprise()
 	if err != nil {
@@ -211,4 +239,16 @@ func connectToRemoteClusterThroughHttps(hostName, userName, password string, cer
 		return nil, err
 	}
 	return utils.SendHttpRequestThroughSSL(request, certificate) 
+}
+
+// this internal api differs from AddRemoteCluster in that it does not perform validation
+func (service *RemoteClusterService) addRemoteCluster(ref *metadata.RemoteClusterReference) error {
+	
+	key := ref.Id
+	value, err := json.Marshal(ref)
+	if err != nil {
+		return err
+	}
+	service.logger.Debugf("Remote cluster being added: key=%v, value=%v\n", key, string(value))
+	return service.metadata_svc.AddWithCatalog(RemoteClustersCatalogKey, key, value)
 }

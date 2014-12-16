@@ -146,6 +146,8 @@ func (adminport *Adminport) handleRequest(
 		response, err = adminport.doGetRemoteClustersRequest(request)
 	case RemoteClustersPath + base.UrlDelimiter + base.MethodPost:
 		response, err = adminport.doCreateRemoteClusterRequest(request)
+	case RemoteClustersPath + DynamicSuffix + base.UrlDelimiter + base.MethodPost:
+		response, err = adminport.doChangeRemoteClusterRequest(request)
 	case RemoteClustersPath + DynamicSuffix + base.UrlDelimiter + base.MethodDelete:
 		response, err = adminport.doDeleteRemoteClusterRequest(request)
 	case CreateReplicationPath + base.UrlDelimiter + base.MethodPost:
@@ -191,23 +193,72 @@ func (adminport *Adminport) doGetRemoteClustersRequest(request *http.Request) ([
 func (adminport *Adminport) doCreateRemoteClusterRequest(request *http.Request) ([]byte, error) {
 	logger_ap.Infof("doCreateRemoteClusterRequest\n")
 	
-	uuid, name, hostName, userName, password, demandEncryption, certificate, errorsMap, err := DecodeCreateRemoteClusterRequest(request)
+	justValidate, uuid, name, hostName, userName, password, demandEncryption, certificate, errorsMap, err := DecodeCreateRemoteClusterRequest(request)
 	if err != nil {
 		return nil, err
 	} else if len(errorsMap) > 0 {
+		logger_ap.Errorf("Validation error in inputs. errorsMap=%v\n", errorsMap) 
 		return EncodeErrorsMapIntoByteArray(errorsMap)
 	}
 
-	logger_ap.Infof("Decoded parameters: uuid=%v, name=%v, hostName=%v, userName=%v, password=%v, demandEncryption=%v, certificate is nil? %v\n",
-					uuid, name, hostName, userName, password, demandEncryption, certificate == nil)
+	logger_ap.Infof("Request params: justValidate=%v, uuid=%v, name=%v, hostName=%v, userName=%v, password=%v, demandEncryption=%v, certificate is nil? %v\n",
+					justValidate, uuid, name, hostName, userName, password, demandEncryption, certificate == nil)
 	
 	remoteClusterRef := metadata.NewRemoteClusterReference(uuid, name, hostName, userName, password, demandEncryption, certificate)
-	err = RemoteClusterService().AddRemoteCluster(remoteClusterRef)
+	if justValidate {
+		err = RemoteClusterService().ValidateRemoteCluster(remoteClusterRef)
+		if err != nil {
+			return nil, err
+		} else {
+			return nil, nil
+		}
+	} else {
+		err = RemoteClusterService().AddRemoteCluster(remoteClusterRef)
+		if err != nil {
+			return nil, err
+		} else {
+			return NewCreateRemoteClusterResponse(remoteClusterRef)
+		}
+	}
+}
+
+func (adminport *Adminport) doChangeRemoteClusterRequest(request *http.Request) ([]byte, error) {
+	logger_ap.Infof("doChangeRemoteClusterRequest\n")
+	remoteClusterName, err := DecodeDynamicParamInURL(request, RemoteClustersPath, "Remote Cluster Name")
 	if err != nil {
 		return nil, err
 	}
 	
-	return NewCreateRemoteClusterResponse(remoteClusterRef)
+	logger_ap.Infof("Request params: remoteClusterName=%v\n", remoteClusterName)
+	
+	justValidate, uuid, name, hostName, userName, password, demandEncryption, certificate, errorsMap, err := DecodeCreateRemoteClusterRequest(request)
+	if err != nil {
+		return nil, err
+	} else if len(errorsMap) > 0 {
+		logger_ap.Errorf("Validation error in inputs. errorsMap=%v\n", errorsMap) 
+		return EncodeErrorsMapIntoByteArray(errorsMap)
+	}
+
+	logger_ap.Infof("Request params: justValidate=%v, uuid=%v, name=%v, hostName=%v, userName=%v, password=%v, demandEncryption=%v, certificate is nil? %v\n",
+					justValidate, uuid, name, hostName, userName, password, demandEncryption, certificate == nil)
+
+	
+	remoteClusterRef := metadata.NewRemoteClusterReference(uuid, name, hostName, userName, password, demandEncryption, certificate)
+	if justValidate {
+		err = RemoteClusterService().ValidateRemoteCluster(remoteClusterRef)
+		if err != nil {
+			return nil, err
+		} else {
+			return nil, nil
+		}
+	} else {
+		err = RemoteClusterService().SetRemoteCluster(remoteClusterName, remoteClusterRef)
+		if err != nil {
+			return nil, err
+		} else {
+			return NewCreateRemoteClusterResponse(remoteClusterRef)
+		}
+	}
 }
 
 func (adminport *Adminport) doDeleteRemoteClusterRequest(request *http.Request) ([]byte, error) {
@@ -216,6 +267,8 @@ func (adminport *Adminport) doDeleteRemoteClusterRequest(request *http.Request) 
 	if err != nil {
 		return nil, err
 	}
+	
+	logger_ap.Infof("Request params: remoteClusterName=%v\n", remoteClusterName)
 	
 	err = RemoteClusterService().DelRemoteCluster(remoteClusterName)
 	if err != nil {
@@ -232,10 +285,11 @@ func (adminport *Adminport) doCreateReplicationRequest(request *http.Request) ([
 	if err != nil {
 		return nil, err
 	} else if len(errorsMap) > 0 {
+		logger_ap.Errorf("Validation error in inputs. errorsMap=%v\n", errorsMap) 
 		return EncodeErrorsMapIntoByteArray(errorsMap)
 	}
 	
-	logger_ap.Infof("Decoded parameters: fromBucket=%v, toCluster=%v, toBucket=%v, filterName=%v, forward=%v, settings=%v\n",
+	logger_ap.Infof("Request parameters: fromBucket=%v, toCluster=%v, toBucket=%v, filterName=%v, forward=%v, settings=%v\n",
 					fromBucket, toCluster, toBucket, filterName, forward, settings)
 
 	replicationId, err := CreateReplication(fromBucket, toCluster, toBucket, filterName, settings, forward)
@@ -298,15 +352,17 @@ func (adminport *Adminport) doChangeInternalSettingsRequest(request *http.Reques
 	if err != nil {
 		return nil, err
 	} else if len(errorsMap) > 0 {
+		logger_ap.Errorf("Validation error in inputs. errorsMap=%v\n", errorsMap) 
 		return EncodeErrorsMapIntoByteArray(errorsMap)
 	}
 
-	logger_ap.Infof("Request decoded: inputSettings=%v\n", settingsMap)
+	logger_ap.Infof("Request params: inputSettings=%v\n", settingsMap)
 	
 	errorsMap, err = UpdateDefaultReplicationSettings(settingsMap)
 	if err != nil {
 		return nil, err
 	} else if len(errorsMap) > 0 {
+		logger_ap.Errorf("Validation error in inputs. errorsMap=%v\n", errorsMap) 
 		return EncodeErrorsMapIntoByteArray(errorsMap)
 	} else {
 		return nil, nil
@@ -327,19 +383,25 @@ func (adminport *Adminport) doViewDefaultReplicationSettingsRequest(request *htt
 func (adminport *Adminport) doChangeDefaultReplicationSettingsRequest(request *http.Request) ([]byte, error) {
 	logger_ap.Infof("doChangeDefaultReplicationSettingsRequest\n")
 	
-	settingsMap, errorsMap, err := DecodeSettingsFromRequest(request)
+	justValidate, settingsMap, errorsMap, err := DecodeChangeReplicationSettings(request)
 	if err != nil {
 		return nil, err
 	} else if len(errorsMap) > 0 {
+		logger_ap.Errorf("Validation error in inputs. errorsMap=%v\n", errorsMap) 
 		return EncodeErrorsMapIntoByteArray(errorsMap)
 	}
 
-	logger_ap.Infof("Request decoded: inputSettings=%v\n", settingsMap)
+	logger_ap.Infof("Request params: justValidate=%v, inputSettings=%v\n", justValidate, settingsMap)
+	
+	if justValidate {
+		return nil, nil
+	}
 	
 	errorsMap, err = UpdateDefaultReplicationSettings(settingsMap)
 	if err != nil {
 		return nil, err
 	} else if len(errorsMap) > 0 {
+		logger_ap.Errorf("Validation error in inputs. errorsMap=%v\n", errorsMap) 
 		return EncodeErrorsMapIntoByteArray(errorsMap)
 	} 
 	
@@ -361,7 +423,7 @@ func (adminport *Adminport) doViewReplicationSettingsRequest(request *http.Reque
 		return nil, err
 	}
 
-	logger_ap.Debugf("Request decoded: replicationId=%v", replicationId)
+	logger_ap.Debugf("Request params: replicationId=%v", replicationId)
 
 	// read replication spec with the specified replication id
 	replSpec, err := ReplicationSpecService().ReplicationSpec(replicationId)
@@ -381,16 +443,21 @@ func (adminport *Adminport) doChangeReplicationSettingsRequest(request *http.Req
 	if err != nil {
 		return nil, err
 	}
-	logger_ap.Infof("Request decoded: replicationId=%v\n", replicationId)
+	logger_ap.Infof("Request params: replicationId=%v\n", replicationId)
 	
-	inputSettingsMap, errorsMap, err := DecodeSettingsFromRequest(request)
+	justValidate, settingsMap, errorsMap, err := DecodeChangeReplicationSettings(request)
 	if err != nil {
 		return nil, err
 	} else if len(errorsMap) > 0 {
+		logger_ap.Errorf("Validation error in inputs. errorsMap=%v\n", errorsMap) 
 		return EncodeErrorsMapIntoByteArray(errorsMap)
 	}
 
-	logger_ap.Infof("Request decoded: inputSettings=%v\n", inputSettingsMap)
+	logger_ap.Infof("Request params: justValidate=%v, inputSettings=%v\n", justValidate, settingsMap)
+	
+	if justValidate {
+		return nil, nil
+	}
 	
 	// remember old settings
 	replSpec, err := ReplicationSpecService().ReplicationSpec(replicationId)
@@ -400,10 +467,11 @@ func (adminport *Adminport) doChangeReplicationSettingsRequest(request *http.Req
 	
 	oldSettings := replSpec.Settings
 	
-	errorsMap, err = UpdateReplicationSettings(replicationId, inputSettingsMap)
+	errorsMap, err = UpdateReplicationSettings(replicationId, settingsMap)
 	if err != nil {
 		return nil, err
 	} else if len(errorsMap) > 0 {
+		logger_ap.Errorf("Validation error in inputs. errorsMap=%v\n", errorsMap) 
 		return EncodeErrorsMapIntoByteArray(errorsMap)
 	} 
 	
@@ -424,14 +492,14 @@ func (adminport *Adminport) doNotifyReplicationSettingsChangeRequest(request *ht
 	if err != nil {
 		return nil, err
 	}
-	logger_ap.Infof("Request decoded: replicationId=%v\n", replicationId)
+	logger_ap.Infof("Request params: replicationId=%v\n", replicationId)
 	
 	oldSettings, err := DecodeOldSettingsFromRequest(request)
 	if err != nil {
 		return nil, err
 	}
 
-	logger_ap.Infof("Request decoded: oldSettings=%v\n", oldSettings)
+	logger_ap.Infof("Request params: oldSettings=%v\n", oldSettings)
 
 	replSpec, err := ReplicationSpecService().ReplicationSpec(replicationId)
 	if err != nil {

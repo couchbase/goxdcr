@@ -50,6 +50,11 @@ const (
 	DynamicSuffix = "/dynamic"
 )
 
+// constant used by more than one rest apis
+const (
+ 	JustValidate = "just_validate"
+)
+
 // constants used for remote cluster references
 const (
 	RemoteClusterUuid   = "uuid"
@@ -60,8 +65,6 @@ const (
 	RemoteClusterDemandEncryption = "demandEncryption"
 	RemoteClusterCertificate = "certificate"
 )
-
-var RequiredRemoteClusterParams = [4]string{RemoteClusterName, RemoteClusterHostName, RemoteClusterUserName, RemoteClusterPassword}
 
 // constants used for parsing replication settings
 const (
@@ -178,12 +181,37 @@ func NewGetRemoteClustersResponse(remoteClusters map[string]*metadata.RemoteClus
 	return b, err
 }
 
+// this func assumes that the request.ParseForm() has already been called, which 
+// should be the case since justValidate always come with some other required parameters
+// As a result, the error returned by this func is always a validation error
+func DecodeJustValidateFromRequest(request *http.Request) (bool, error) {	
+	for key, valArr := range request.Form {		
+		switch key {
+		case JustValidate:
+			justValidate, err := getBoolFromValArr(key, valArr, false)
+			if err != nil {
+				return false, err
+			} else {
+				return justValidate, nil
+			}
+		default:
+			// ignore other parameters
+		}
+	}
+	return false, nil
+}
+
 // decode parameters from create remote cluster request
-func DecodeCreateRemoteClusterRequest(request *http.Request) (uuid, name, hostName, userName, password string, demandEncryption bool, certificate []byte, errorsMap map[string]error, err error) {	
+func DecodeCreateRemoteClusterRequest(request *http.Request) (justValidate bool, uuid, name, hostName, userName, password string, demandEncryption bool, certificate []byte, errorsMap map[string]error, err error) {	
 	errorsMap = make(map[string]error)
 	
 	if err = request.ParseForm(); err != nil {
 		return 
+	}
+	
+	justValidate, err = DecodeJustValidateFromRequest(request)
+	if err != nil{
+		errorsMap[JustValidate] = err
 	}
 		
 	for key, valArr := range request.Form {		
@@ -290,6 +318,25 @@ func DecodeCreateReplicationRequest(request *http.Request) (fromBucket, toCluste
 	}
 	if len(toBucket) == 0 {
 		errorsMap[ToBucket] = utils.MissingValueError("target bucket")
+	}
+	 
+	settings, settingsErrorsMap, err := DecodeSettingsFromRequest(request)
+	for key, value := range settingsErrorsMap {
+		errorsMap[key] = value
+	}
+	return
+}
+
+func DecodeChangeReplicationSettings(request *http.Request) (justValidate bool, settings map[string]interface{}, errorsMap map[string]error, err error) {	
+	errorsMap = make(map[string]error)
+	
+	if err = request.ParseForm(); err != nil {
+		return 
+	}
+	
+	justValidate, err = DecodeJustValidateFromRequest(request)
+	if err != nil{
+		errorsMap[JustValidate] = err
 	}
 	 
 	settings, settingsErrorsMap, err := DecodeSettingsFromRequest(request)

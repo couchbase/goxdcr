@@ -11,7 +11,6 @@
 package main
 
 import (
-	"bytes"
 	"errors"
 	"flag"
 	"fmt"
@@ -207,7 +206,7 @@ func testChangeInternalSettings() error {
 
 	paramsBytes, _ := rm.EncodeMapIntoByteArray(params)
 
-	_, err := sendRequestAndValidateResponse(base.MethodPost, url, paramsBytes)
+	_, err := common.SendRequestAndValidateResponse("testChangeInternalSettings", base.MethodPost, url, paramsBytes)
 	if err != nil {
 		return err
 	}
@@ -221,7 +220,7 @@ func testChangeInternalSettings() error {
 
 func testViewInternalSettings() error {
 	url := common.GetAdminportUrlPrefix(options.sourceKVHost) + rm.InternalSettingsPath
-	response, err := sendRequestAndValidateResponse(base.MethodGet, url, nil)
+	response, err := common.SendRequestAndValidateResponse("testViewInternalSettings", base.MethodGet, url, nil)
 	if err != nil {
 		return err
 	}
@@ -242,7 +241,7 @@ func testChangeDefaultReplicationSettings() error {
 
 	paramsBytes, _ := rm.EncodeMapIntoByteArray(params)
 
-	_, err := sendRequestAndValidateResponse(base.MethodPost, url, paramsBytes)
+	_, err := common.SendRequestAndValidateResponse("testChangeDefaultReplicationSettings", base.MethodPost, url, paramsBytes)
 	if err != nil {
 		return err
 	}
@@ -256,7 +255,7 @@ func testChangeDefaultReplicationSettings() error {
 
 func testViewDefaultReplicationSettings() error {
 	url := common.GetAdminportUrlPrefix(options.sourceKVHost) + rm.SettingsReplicationsPath
-	response, err := sendRequestAndValidateResponse(base.MethodGet, url, nil)
+	response, err := common.SendRequestAndValidateResponse("testViewDefaultReplicationSettings", base.MethodGet, url, nil)
 	if err != nil {
 		return err
 	}
@@ -282,7 +281,7 @@ func testCreateReplication() (string, error) {
 
 	paramsBytes, _ := rm.EncodeMapIntoByteArray(params)
 
-	response, err := sendRequestAndValidateResponse(base.MethodPost, url, paramsBytes)
+	response, err := common.SendRequestAndValidateResponse("testCreateReplication", base.MethodPost, url, paramsBytes)
 	if err != nil {
 		return "", err
 	}
@@ -303,7 +302,7 @@ func testPauseReplication(replicationId, escapedReplId string) error {
 	settings[rm.Paused] = true
 	paramsBytes, _ := rm.EncodeMapIntoByteArray(settings)
 
-	_, err := sendRequestAndValidateResponse(base.MethodPost, url, paramsBytes)
+	_, err := common.SendRequestAndValidateResponse("testPauseReplication", base.MethodPost, url, paramsBytes)
 	if err != nil {
 		return err
 	}
@@ -320,7 +319,7 @@ func testResumeReplication(replicationId, escapedReplId string) error {
 	settings[rm.Paused] = false
 	paramsBytes, _ := rm.EncodeMapIntoByteArray(settings)
 	
-	_, err := sendRequestAndValidateResponse(base.MethodPost, url, paramsBytes)
+	_, err := common.SendRequestAndValidateResponse("testResumeReplication", base.MethodPost, url, paramsBytes)
 	if err != nil {
 		return err
 	}
@@ -333,7 +332,7 @@ func testResumeReplication(replicationId, escapedReplId string) error {
 func testDeleteReplication(replicationId, escapedReplId string) error {
 	url := common.GetAdminportUrlPrefix(options.sourceKVHost) + rm.DeleteReplicationPrefix + base.UrlDelimiter + escapedReplId
 
-	_, err := sendRequestAndValidateResponse(base.MethodDelete, url, nil)
+	_, err := common.SendRequestAndValidateResponse("testDeleteReplication", base.MethodDelete, url, nil)
 	if err != nil {
 		return err
 	}
@@ -346,7 +345,7 @@ func testDeleteReplication(replicationId, escapedReplId string) error {
 func testViewReplicationSettings(replicationId string) error {
 	url := common.GetAdminportUrlPrefix(options.sourceKVHost) + rm.SettingsReplicationsPath + base.UrlDelimiter + replicationId
 
-	response, err := sendRequestAndValidateResponse(base.MethodGet, url, nil)
+	response, err := common.SendRequestAndValidateResponse("testViewReplicationSettings", base.MethodGet, url, nil)
 	if err != nil {
 		return err
 	}
@@ -367,7 +366,7 @@ func testChangeReplicationSettings(replicationId, escapedReplicationId string) e
 
 	paramsBytes, _ := rm.EncodeMapIntoByteArray(params)
 
-	_, err := sendRequestAndValidateResponse(base.MethodPost, url, paramsBytes)
+	_, err := common.SendRequestAndValidateResponse("testChangeReplicationSettings", base.MethodPost, url, paramsBytes)
 	if err != nil {
 		return err
 	}
@@ -393,7 +392,7 @@ func testChangeReplicationSettings(replicationId, escapedReplicationId string) e
 
 func testGetStatistics(bucket string) error {
 	url := common.GetAdminportUrlPrefix(options.sourceKVHost) + rm.StatisticsPrefix +base.UrlDelimiter + bucket
-	_, err := sendRequestAndValidateResponse(base.MethodGet, url, nil)
+	_, err := common.SendRequestAndValidateResponse("testGetStatistics", base.MethodGet, url, nil)
 	return err
 }
 
@@ -410,21 +409,6 @@ func validatePipeline(testName string, replicationId string, pipelineRunning boo
 		fmt.Println("Test ", testName, " passed.")
 		return nil
 	}
-}
-
-func sendRequestAndValidateResponse(httpMethod, url string, body []byte) (*http.Response, error) {
-	request, err := http.NewRequest(httpMethod, url, bytes.NewBuffer(body))
-	if err != nil {
-		return nil, err
-	}
-	request.Header.Set(rm.ContentType, rm.DefaultContentType)
-
-	fmt.Println("request", request)
-
-	response, err := http.DefaultClient.Do(request)
-	err = common.ValidateResponse("ChangeReplicationSettings", response, err)
-	fmt.Printf("err=%v, response=%v\n", err, response)
-	return response, err
 }
 
 func decodeSettingsMapFromResponse(response *http.Response) (map[string]interface{}, error) {

@@ -242,13 +242,9 @@ func StartPipeline(topic string) error {
 	if err != nil {
 		return err
 	}
-	
-	logger_rm.Infof("got spec")
 
 	settings := spec.Settings
 	settingsMap := settings.ToMap()
-	
-	logger_rm.Infof("tomap finished")
 
 	pipeline, err := pipeline_manager.StartPipeline(topic, settingsMap)
 	if err == nil {
