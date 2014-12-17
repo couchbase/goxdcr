@@ -214,6 +214,10 @@ func MissingValueError(param string) error {
 	return errors.New(fmt.Sprintf("%v cannot be empty", param))
 }
 
+func GenericInvalidValueError(param string) error {
+	return errors.New(fmt.Sprintf("%v is invalid", param))
+}
+
 func MissingParameterError(param string) error {
 	return errors.New(fmt.Sprintf("%v is missing", param))
 }

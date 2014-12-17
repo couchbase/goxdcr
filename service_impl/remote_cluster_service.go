@@ -90,7 +90,6 @@ func (service *RemoteClusterService) AddRemoteCluster(ref *metadata.RemoteCluste
 	return service.addRemoteCluster(ref)
 }
 
-// this assumes that the ref to be added is not yet in gometa
 func (service *RemoteClusterService) SetRemoteCluster(refName string, ref *metadata.RemoteClusterReference) error {
 	service.logger.Infof("Setting remote cluster with refName %v\n", refName)
 	
@@ -197,7 +196,7 @@ func (service *RemoteClusterService) ValidateRemoteCluster(ref *metadata.RemoteC
 	}
 	
 	// get remote cluster uuid from the map 
-	actualUuid, ok := poolsInfo[rm.RemoteClusterUuid]
+	actualUuid, ok := poolsInfo[base.RemoteClusterUuid]
 	if !ok {
 		// should never get here
 		return errors.New("Could not get uuid of remote cluster.")

@@ -19,7 +19,6 @@ import (
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/gen_server"
 	"github.com/couchbase/goxdcr/log"
-	"github.com/couchbase/goxdcr/metadata"
 	utils "github.com/couchbase/goxdcr/utils"
 	"net/http"
 	"strings"
@@ -27,8 +26,8 @@ import (
 	"fmt"
 )
 
-var StaticPaths = [4]string{RemoteClustersPath, CreateReplicationPath, InternalSettingsPath, SettingsReplicationsPath}
-var DynamicPathPrefixes = [5]string{RemoteClustersPath, NotifySettingsChangePrefix, DeleteReplicationPrefix, SettingsReplicationsPath, StatisticsPrefix}
+var StaticPaths = [4]string{base.RemoteClustersPath, CreateReplicationPath, InternalSettingsPath, SettingsReplicationsPath}
+var DynamicPathPrefixes = [5]string{base.RemoteClustersPath, NotifySettingsChangePrefix, DeleteReplicationPrefix, SettingsReplicationsPath, StatisticsPrefix}
 
 var MaxForwardingRetry = 5
 var ForwardingRetryInterval = time.Second * 10
@@ -141,13 +140,13 @@ func (adminport *Adminport) handleRequest(
 	}
 	
 	switch (key) {
-	case RemoteClustersPath + base.UrlDelimiter + base.MethodGet:
+	case base.RemoteClustersPath + base.UrlDelimiter + base.MethodGet:
 		response, err = adminport.doGetRemoteClustersRequest(request)
-	case RemoteClustersPath + base.UrlDelimiter + base.MethodPost:
+	case base.RemoteClustersPath + base.UrlDelimiter + base.MethodPost:
 		response, err = adminport.doCreateRemoteClusterRequest(request)
-	case RemoteClustersPath + DynamicSuffix + base.UrlDelimiter + base.MethodPost:
+	case base.RemoteClustersPath + DynamicSuffix + base.UrlDelimiter + base.MethodPost:
 		response, err = adminport.doChangeRemoteClusterRequest(request)
-	case RemoteClustersPath + DynamicSuffix + base.UrlDelimiter + base.MethodDelete:
+	case base.RemoteClustersPath + DynamicSuffix + base.UrlDelimiter + base.MethodDelete:
 		response, err = adminport.doDeleteRemoteClusterRequest(request)
 	case CreateReplicationPath + base.UrlDelimiter + base.MethodPost:
 		response, err = adminport.doCreateReplicationRequest(request)
@@ -192,7 +191,7 @@ func (adminport *Adminport) doGetRemoteClustersRequest(request *http.Request) ([
 func (adminport *Adminport) doCreateRemoteClusterRequest(request *http.Request) ([]byte, error) {
 	logger_ap.Infof("doCreateRemoteClusterRequest\n")
 	
-	justValidate, uuid, name, hostName, userName, password, demandEncryption, certificate, errorsMap, err := DecodeCreateRemoteClusterRequest(request)
+	justValidate, remoteClusterRef, errorsMap, err := DecodeCreateRemoteClusterRequest(request)
 	if err != nil {
 		return nil, err
 	} else if len(errorsMap) > 0 {
@@ -200,10 +199,9 @@ func (adminport *Adminport) doCreateRemoteClusterRequest(request *http.Request) 
 		return EncodeErrorsMapIntoByteArray(errorsMap)
 	}
 
-	logger_ap.Infof("Request params: justValidate=%v, uuid=%v, name=%v, hostName=%v, userName=%v, password=%v, demandEncryption=%v, certificate is nil? %v\n",
-					justValidate, uuid, name, hostName, userName, password, demandEncryption, certificate == nil)
+	logger_ap.Infof("Request params: justValidate=%v, remoterClusterRef=%v\n",
+					justValidate, *remoteClusterRef)
 	
-	remoteClusterRef := metadata.NewRemoteClusterReference(uuid, name, hostName, userName, password, demandEncryption, certificate)
 	if justValidate {
 		err = RemoteClusterService().ValidateRemoteCluster(remoteClusterRef)
 		if err != nil {
@@ -223,14 +221,14 @@ func (adminport *Adminport) doCreateRemoteClusterRequest(request *http.Request) 
 
 func (adminport *Adminport) doChangeRemoteClusterRequest(request *http.Request) ([]byte, error) {
 	logger_ap.Infof("doChangeRemoteClusterRequest\n")
-	remoteClusterName, err := DecodeDynamicParamInURL(request, RemoteClustersPath, "Remote Cluster Name")
+	remoteClusterName, err := DecodeDynamicParamInURL(request, base.RemoteClustersPath, "Remote Cluster Name")
 	if err != nil {
 		return nil, err
 	}
 	
 	logger_ap.Infof("Request params: remoteClusterName=%v\n", remoteClusterName)
 	
-	justValidate, uuid, name, hostName, userName, password, demandEncryption, certificate, errorsMap, err := DecodeCreateRemoteClusterRequest(request)
+	justValidate, remoteClusterRef, errorsMap, err := DecodeCreateRemoteClusterRequest(request)
 	if err != nil {
 		return nil, err
 	} else if len(errorsMap) > 0 {
@@ -238,11 +236,9 @@ func (adminport *Adminport) doChangeRemoteClusterRequest(request *http.Request) 
 		return EncodeErrorsMapIntoByteArray(errorsMap)
 	}
 
-	logger_ap.Infof("Request params: justValidate=%v, uuid=%v, name=%v, hostName=%v, userName=%v, password=%v, demandEncryption=%v, certificate is nil? %v\n",
-					justValidate, uuid, name, hostName, userName, password, demandEncryption, certificate == nil)
-
-	
-	remoteClusterRef := metadata.NewRemoteClusterReference(uuid, name, hostName, userName, password, demandEncryption, certificate)
+	logger_ap.Infof("Request params: justValidate=%v, remoterClusterRef=%v\n",
+					justValidate, *remoteClusterRef)
+					
 	if justValidate {
 		err = RemoteClusterService().ValidateRemoteCluster(remoteClusterRef)
 		if err != nil {
@@ -262,7 +258,7 @@ func (adminport *Adminport) doChangeRemoteClusterRequest(request *http.Request) 
 
 func (adminport *Adminport) doDeleteRemoteClusterRequest(request *http.Request) ([]byte, error) {
 	logger_ap.Infof("doDeleteRemoteClusterRequest\n")
-	remoteClusterName, err := DecodeDynamicParamInURL(request, RemoteClustersPath, "Remote Cluster Name")
+	remoteClusterName, err := DecodeDynamicParamInURL(request, base.RemoteClustersPath, "Remote Cluster Name")
 	if err != nil {
 		return nil, err
 	}
@@ -328,8 +324,7 @@ func (adminport *Adminport) doDeleteReplicationRequest(request *http.Request) ([
 			// forward replication request to other KV nodes involved
 			adminport.forwardReplicationRequest(request)
 		}
-		// no response body in success case
-		return nil, nil
+		return NewDeleteReplicationResponse()
 	}
 }
 
@@ -479,7 +474,15 @@ func (adminport *Adminport) doChangeReplicationSettingsRequest(request *http.Req
 	if err != nil {
 		return nil, err
 	}
-	return nil, adminport.forwardReplicationRequest(notifyRequest)
+	
+	adminport.forwardReplicationRequest(notifyRequest)
+	
+	// return replication settings after changes
+	replSpec, err = ReplicationSpecService().ReplicationSpec(replicationId)
+	if err != nil {
+		return nil, err
+	}
+	return NewReplicationSettingsResponse(replSpec.Settings)
 }
 
 func (adminport *Adminport) doNotifyReplicationSettingsChangeRequest(request *http.Request) ([]byte, error) {

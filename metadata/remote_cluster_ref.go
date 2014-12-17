@@ -66,3 +66,18 @@ func (ref *RemoteClusterReference)	MyUsername() string {
 func (ref *RemoteClusterReference)	MyPassword() string {
 	return ref.Password
 }
+
+// convert to a map for output
+func (ref *RemoteClusterReference) ToMap() map[string]interface{} {
+	uri := base.UrlDelimiter + base.RemoteClustersPath + base.UrlDelimiter + ref.Name
+	validateUri := uri + "?" + base.JustValidate + "=1"
+	outputMap := make(map[string]interface{})
+	outputMap[base.RemoteClusterUuid] = ref.Uuid
+	outputMap[base.RemoteClusterName] = ref.Name
+	outputMap[base.RemoteClusterUri] = uri
+	outputMap[base.RemoteClusterValidateUri] = validateUri
+	outputMap[base.RemoteClusterHostName] = ref.HostName
+	outputMap[base.RemoteClusterUserName] = ref.UserName
+	outputMap[base.RemoteClusterDeleted] = false
+	return outputMap
+}

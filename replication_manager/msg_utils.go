@@ -37,7 +37,6 @@ const (
 
 // constants used for parsing url path
 const (
-	RemoteClustersPath  = "pools/default/remoteClusters"
 	CreateReplicationPath    = "controller/createReplication"
 	DeleteReplicationPrefix  = "controller/cancelXDCR"
 	NotifySettingsChangePrefix  = "controller/notifySettingsChange"
@@ -50,28 +49,12 @@ const (
 	DynamicSuffix = "/dynamic"
 )
 
-// constant used by more than one rest apis
-const (
- 	JustValidate = "just_validate"
-)
-
-// constants used for remote cluster references
-const (
-	RemoteClusterUuid   = "uuid"
-	RemoteClusterName  = "name"
-	RemoteClusterHostName = "hostname"
-	RemoteClusterUserName = "username"
-	RemoteClusterPassword = "password"
-	RemoteClusterDemandEncryption = "demandEncryption"
-	RemoteClusterCertificate = "certificate"
-)
-
 // constants used for parsing replication settings
 const (
 	Type                           = "type"
 	ReplicationType                = "replicationType"
 	FilterExpression               = "filterExpression"
-	Paused                         = "pauseRequested"
+	PauseRequested                 = "pauseRequested"
 	CheckpointInterval             = "checkpointInterval"
 	BatchCount                     = "workerBatchSize"
 	BatchSize                      = "docBatchSizeKb"
@@ -84,6 +67,8 @@ const (
 	TimeoutPercentageCap           = "timeoutPercentageCap"
 	LogLevel                       = "logLevel"
 	StatsInterval				   = "statsInterval"
+
+	ReplicationTypeValue           = "continuous"
 )
 
 // constants for parsing create replication request
@@ -136,7 +121,7 @@ var MissingOldSettingsInRequest = errors.New("Invalid http request. No old repli
 var RestKeyToSettingsKeyMap = map[string]string {
 	Type:  metadata.ReplicationType,
 	FilterExpression: metadata.FilterExpression,
-	Paused: metadata.Active,
+	PauseRequested: metadata.Active,
 	CheckpointInterval: metadata.CheckpointInterval,
 	BatchCount: metadata.BatchCount,
 	BatchSize: metadata.BatchSize,
@@ -155,7 +140,7 @@ var RestKeyToSettingsKeyMap = map[string]string {
 var SettingsKeyToRestKeyMap = map[string]string {
 	metadata.ReplicationType:  Type,
 	metadata.FilterExpression: FilterExpression,
-	metadata.Active: Paused,
+	metadata.Active: PauseRequested,
 	metadata.CheckpointInterval: CheckpointInterval,
 	metadata.BatchCount: BatchCount,
 	metadata.BatchSize: BatchSize,
@@ -173,9 +158,9 @@ var SettingsKeyToRestKeyMap = map[string]string {
 var logger_msgutil *log.CommonLogger = log.NewLogger("MessageUtils", log.DefaultLoggerContext)
 
 func NewGetRemoteClustersResponse(remoteClusters map[string]*metadata.RemoteClusterReference) ([]byte, error) {
-	remoteClusterArr := make([]metadata.RemoteClusterReference, 0)
+	remoteClusterArr := make([]map[string]interface{}, 0)
 	for _, remoteCluster := range remoteClusters {
-		remoteClusterArr = append(remoteClusterArr, *remoteCluster)
+		remoteClusterArr = append(remoteClusterArr, remoteCluster.ToMap())
 	}
 	b, err := json.Marshal(remoteClusterArr)
 	return b, err
@@ -187,7 +172,7 @@ func NewGetRemoteClustersResponse(remoteClusters map[string]*metadata.RemoteClus
 func DecodeJustValidateFromRequest(request *http.Request) (bool, error) {	
 	for key, valArr := range request.Form {		
 		switch key {
-		case JustValidate:
+		case base.JustValidate:
 			justValidate, err := getBoolFromValArr(key, valArr, false)
 			if err != nil {
 				return false, err
@@ -202,8 +187,11 @@ func DecodeJustValidateFromRequest(request *http.Request) (bool, error) {
 }
 
 // decode parameters from create remote cluster request
-func DecodeCreateRemoteClusterRequest(request *http.Request) (justValidate bool, uuid, name, hostName, userName, password string, demandEncryption bool, certificate []byte, errorsMap map[string]error, err error) {	
+func DecodeCreateRemoteClusterRequest(request *http.Request) (justValidate bool, remoteClusterRef *metadata.RemoteClusterReference, errorsMap map[string]error, err error) {	
 	errorsMap = make(map[string]error)
+	var uuid, name, hostName, userName, password string
+	var demandEncryption bool
+	var certificate []byte
 	
 	if err = request.ParseForm(); err != nil {
 		return 
@@ -211,27 +199,27 @@ func DecodeCreateRemoteClusterRequest(request *http.Request) (justValidate bool,
 	
 	justValidate, err = DecodeJustValidateFromRequest(request)
 	if err != nil{
-		errorsMap[JustValidate] = err
+		errorsMap[base.JustValidate] = err
 	}
 		
 	for key, valArr := range request.Form {		
 		switch key {
-		case RemoteClusterUuid:
+		case base.RemoteClusterUuid:
 			uuid = getStringFromValArr(key, valArr)
-		case RemoteClusterName:
+		case base.RemoteClusterName:
 			name = getStringFromValArr(key, valArr)
-		case RemoteClusterHostName:
+		case base.RemoteClusterHostName:
 			hostName = getStringFromValArr(key, valArr)
-		case RemoteClusterUserName:
+		case base.RemoteClusterUserName:
 			userName = getStringFromValArr(key, valArr)
-		case RemoteClusterPassword:
+		case base.RemoteClusterPassword:
 			password = getStringFromValArr(key, valArr)
-		case RemoteClusterDemandEncryption:
+		case base.RemoteClusterDemandEncryption:
 			demandEncryption, err = getBoolFromValArr(key, valArr, false)
 			if err != nil {
-				errorsMap[RemoteClusterDemandEncryption] = err
+				errorsMap[base.RemoteClusterDemandEncryption] = err
 			}
-		case RemoteClusterCertificate:
+		case base.RemoteClusterCertificate:
 			certificateStr := getStringFromValArr(key, valArr)
 			certificate = []byte(certificateStr)
 		default:
@@ -241,16 +229,16 @@ func DecodeCreateRemoteClusterRequest(request *http.Request) (justValidate bool,
 	
 	// check required parameters
 	if len(name) == 0 {
-		errorsMap[RemoteClusterName] = utils.MissingParameterError("cluster name")
+		errorsMap[base.RemoteClusterName] = utils.MissingParameterError("cluster name")
 	}
 	if len(hostName) == 0 {
-		errorsMap[RemoteClusterHostName] = utils.MissingParameterError("hostname (ip)")
+		errorsMap[base.RemoteClusterHostName] = utils.MissingParameterError("hostname (ip)")
 	}
 	if len(userName) == 0 {
-		errorsMap[RemoteClusterUserName] = utils.MissingParameterError("username")
+		errorsMap[base.RemoteClusterUserName] = utils.MissingParameterError("username")
 	}
 	if len(password) == 0 {
-		errorsMap[RemoteClusterPassword] = utils.MissingParameterError("password")
+		errorsMap[base.RemoteClusterPassword] = utils.MissingParameterError("password")
 	}
 	
 	// demandEncryption can be set only on enterprise editions
@@ -259,29 +247,39 @@ func DecodeCreateRemoteClusterRequest(request *http.Request) (justValidate bool,
 		return
 	}		
 	if demandEncryption && !isEnterprise {
-		errorsMap[RemoteClusterDemandEncryption] = errors.New("Encryption can only be used in enterprise edition")
+		errorsMap[base.RemoteClusterDemandEncryption] = errors.New("Encryption can only be used in enterprise edition")
 	}
 	
 	// certificate is required if demandEncryption is set to true
 	if demandEncryption && len(certificate) == 0 {
-		errorsMap[RemoteClusterCertificate] = errors.New("Certificate is required when encryption is enabled")
+		errorsMap[base.RemoteClusterCertificate] = errors.New("Certificate is required when encryption is enabled")
+	}
+	
+	if len(errorsMap) == 0 {
+		remoteClusterRef = metadata.NewRemoteClusterReference(uuid, name, hostName, userName, password, demandEncryption, certificate)
 	}
 	
 	return
 }
 
 func NewCreateRemoteClusterResponse(remoteClusterRef *metadata.RemoteClusterReference) ([]byte, error) {
-	return json.Marshal(remoteClusterRef)
+	return json.Marshal(remoteClusterRef.ToMap())
 }
 
 func NewDeleteRemoteClusterResponse() ([]byte, error) {
 	// return "ok" in success case
-	return []byte("ok"), nil
+	return json.Marshal("ok")
+}
+
+func NewDeleteReplicationResponse() ([]byte, error) {
+	emptyArr := make([]string, 0)
+	return json.Marshal(emptyArr)
 }
 
 // decode parameters from create replication request
 func DecodeCreateReplicationRequest(request *http.Request) (fromBucket, toCluster, toBucket, filterName string, forward bool, settings map[string]interface{}, errorsMap map[string]error, err error) {	
 	errorsMap = make(map[string]error)
+	var replicationType string
 	
 	if err = request.ParseForm(); err != nil {
 		return 
@@ -292,6 +290,11 @@ func DecodeCreateReplicationRequest(request *http.Request) (fromBucket, toCluste
 
 	for key, valArr := range request.Form {
 		switch key {
+		case ReplicationType:
+			replicationType = getStringFromValArr(key, valArr)
+			if replicationType != ReplicationTypeValue {
+				errorsMap[ReplicationType] = utils.GenericInvalidValueError(ReplicationType)
+			}
 		case FromBucket:
 			fromBucket = getStringFromValArr(key, valArr)
 		case ToCluster:
@@ -308,6 +311,10 @@ func DecodeCreateReplicationRequest(request *http.Request) (fromBucket, toCluste
 		default:
 			// ignore other parameters
 		}
+	}
+	
+	if len(replicationType) == 0 {
+		errorsMap[ReplicationType] = utils.MissingValueError("replication type")
 	}
 	
 	if len(fromBucket) == 0 {
@@ -336,7 +343,7 @@ func DecodeChangeReplicationSettings(request *http.Request) (justValidate bool, 
 	
 	justValidate, err = DecodeJustValidateFromRequest(request)
 	if err != nil{
-		errorsMap[JustValidate] = err
+		errorsMap[base.JustValidate] = err
 	}
 	 
 	settings, settingsErrorsMap, err := DecodeSettingsFromRequest(request)
@@ -590,7 +597,13 @@ func convertSettingsToRestSettingsMap(settings *metadata.ReplicationSettings) ma
 	settingsMap := settings.ToMap()
 	for key, value := range settingsMap {
 		restKey := SettingsKeyToRestKeyMap[key]
-		restSettingsMap[restKey] = value
+		if restKey == PauseRequested {
+			// pauseRequested = !active
+			valueBool := value.(bool)
+			restSettingsMap[restKey] = !valueBool
+		} else {
+			restSettingsMap[restKey] = value
+		}
 	}
 	return restSettingsMap
 }

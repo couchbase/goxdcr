@@ -48,7 +48,7 @@ var KeyPartsDelimiter = "_"
 var AdminportUrlPrefix = UrlDelimiter
 
 // used as default value for tests
-var AdminportNumber uint16 = 12100
+var AdminportNumber uint16 = 13000
 var GometaRequestPortNumber uint16 = 11000
 
 // AdminportReadTimeout timeout, in milliseconds, is read timeout for
@@ -85,4 +85,25 @@ var ParseIntBase    = 10
 var ParseIntBitSize = 64
 
 var ErrorNotMyVbucket = errors.New("NOT_MY_VBUCKET")
+
+// constants used for remote cluster references
+const (
+	RemoteClustersPath  = "pools/default/remoteClusters"
+	
+	RemoteClusterUuid   = "uuid"
+	RemoteClusterName  = "name"
+	RemoteClusterHostName = "hostname"
+	RemoteClusterUserName = "username"
+	RemoteClusterPassword = "password"
+	RemoteClusterDemandEncryption = "demandEncryption"
+	RemoteClusterCertificate = "certificate"
+	RemoteClusterUri = "uri"
+	RemoteClusterValidateUri = "validateURI"
+	RemoteClusterDeleted = "deleted"
+)
+
+// constant used by more than one rest apis
+const (
+ 	JustValidate = "just_validate"
+)
 

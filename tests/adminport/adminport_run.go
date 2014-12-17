@@ -17,9 +17,7 @@ import (
 	"io/ioutil"
 	"encoding/json"
 	base "github.com/couchbase/goxdcr/base"
-	pm "github.com/couchbase/goxdcr/pipeline_manager"
 	rm "github.com/couchbase/goxdcr/replication_manager"
-	s "github.com/couchbase/goxdcr/service_impl"
 	"github.com/couchbase/goxdcr/tests/common"
 	"net/http"
 	"net/url"
@@ -95,82 +93,33 @@ func main() {
 }
 
 func startAdminport() {
-	top_svc, err := s.NewXDCRTopologySvc(options.username, options.password, uint16(options.sourceKVAdminPort), base.AdminportNumber, true, nil)
-	if err != nil {
-		fmt.Printf("Error starting xdcr topology service. err=%v\n", err)
-		os.Exit(1)
-	}
-	
-	options.sourceKVHost, err = top_svc.MyHost()
-	if err != nil {
-		fmt.Printf("Error getting current host. err=%v\n", err)
-		os.Exit(1)
-	}
-	
-	metadata_svc, err := s.DefaultMetadataSvc()
-	if err != nil {
-		fmt.Println("Test failed. err: ", err)
-		return
-	}
-	
-	remote_cluster_svc := s.NewRemoteClusterService(metadata_svc, nil)
-	
-	rm.StartReplicationManager(options.sourceKVHost,
-							   base.AdminportNumber,
-							   s.NewReplicationSpecService(metadata_svc, nil),
-							   remote_cluster_svc,	
-							   s.NewClusterInfoSvc(nil), 
-							   top_svc, 
-							   s.NewReplicationSettingsSvc(metadata_svc, nil))
-	
-	//wait for server to finish starting
-	time.Sleep(time.Second * 3)
-	
 	// create remote cluster reference needed by replication
-	err = common.CreateTestRemoteCluster(remote_cluster_svc, options.remoteUuid, options.remoteName, options.remoteHostName, options.remoteUserName, options.remotePassword, 
+	err := common.CreateTestRemoteClusterThroughRest(options.sourceKVHost, options.sourceKVAdminPort, options.username, options.password, options.remoteUuid, options.remoteName, options.remoteHostName, options.remoteUserName, options.remotePassword, 
                              options.remoteDemandEncryption, options.remoteCertificateFile)
 	if err != nil {
 		fmt.Println(err.Error())
 		return
 	}
 	
-	defer common.DeleteTestRemoteCluster(remote_cluster_svc, options.remoteName)
+	defer common.DeleteTestRemoteClusterThroughRest(options.sourceKVHost, options.sourceKVAdminPort, options.username, options.password, options.remoteName)
 	
-	if err := testChangeInternalSettings(); err != nil {
+	if err := testInternalSettings(); err != nil {
 		fmt.Println(err.Error())
 		return
 	}
 	
-	if err := testViewInternalSettings(); err != nil {
+	if err := testDefaultReplicationSettings(); err != nil {
 		fmt.Println(err.Error())
 		return
 	}
 	
-	if err := testChangeDefaultReplicationSettings(); err != nil {
-		fmt.Println(err.Error())
-		return
-	}
-	
-	if err := testViewDefaultReplicationSettings(); err != nil {
-		fmt.Println(err.Error())
-		return
-	}
-	
-	replicationId, err := testCreateReplication()
+	replicationId, escapedReplId, err := testCreateReplication()
 	if err != nil {
 		fmt.Println(err.Error())
 		return
 	}
 
-	escapedReplId := url.QueryEscape(replicationId)
-	fmt.Println("replicationId: ", replicationId, " escaped replication id: "+escapedReplId)
-
-	if err := testViewReplicationSettings(escapedReplId); err != nil {
-		fmt.Println(err.Error())
-		return
-	}
-
-	if err := testChangeReplicationSettings(replicationId, escapedReplId); err != nil {
+	if err := testReplicationSettings(escapedReplId); err != nil {
 		fmt.Println(err.Error())
 		return
 	}
@@ -198,29 +147,23 @@ func startAdminport() {
 
 }
 
-func testChangeInternalSettings() error {
-	url := common.GetAdminportUrlPrefix(options.sourceKVHost) + rm.InternalSettingsPath
+func testInternalSettings() error {
+	fmt.Println("Start 	testInternalSettings")
+	// change internal settings
+	url := common.GetAdminportUrlPrefix(options.sourceKVHost, options.sourceKVAdminPort) + rm.InternalSettingsPath
 
 	params := make(map[string]interface{})
 	params[rm.ConvertRestKeyToRestInternalKey(rm.BatchSize)] = BatchSizeInternal
 
 	paramsBytes, _ := rm.EncodeMapIntoByteArray(params)
 
-	_, err := common.SendRequestAndValidateResponse("testChangeInternalSettings", base.MethodPost, url, paramsBytes)
+	_, err := common.SendRequestAndValidateResponse("testChangeInternalSettings", base.MethodPost, url, paramsBytes, options.username, options.password)
 	if err != nil {
 		return err
 	}
 	
-	defaultSettings, err := rm.ReplicationSettingsService().GetDefaultReplicationSettings()
-	if err != nil {
-		return err
-	}
-	return common.ValidateFieldValue("internal BatchSize", BatchSizeInternal, defaultSettings.BatchSize)
-}
-
-func testViewInternalSettings() error {
-	url := common.GetAdminportUrlPrefix(options.sourceKVHost) + rm.InternalSettingsPath
-	response, err := common.SendRequestAndValidateResponse("testViewInternalSettings", base.MethodGet, url, nil)
+	// view internal settings and verify changes
+	response, err := common.SendRequestAndValidateResponse("testInternalSettings", base.MethodGet, url, nil, options.username, options.password)
 	if err != nil {
 		return err
 	}
@@ -233,46 +176,39 @@ func testViewInternalSettings() error {
 	return common.ValidateFieldValue("internal BatchSize", BatchSizeInternal, newBatchSize)
 }
 
-func testChangeDefaultReplicationSettings() error {
-	url := common.GetAdminportUrlPrefix(options.sourceKVHost) + rm.SettingsReplicationsPath
+func testDefaultReplicationSettings() error {
+	fmt.Println("Start testDefaultReplicationSettings")
+
+	// change default settings
+	url := common.GetAdminportUrlPrefix(options.sourceKVHost, options.sourceKVAdminPort) + rm.SettingsReplicationsPath
 
 	params := make(map[string]interface{})
 	params[rm.BatchSize] = BatchSizeDefault
 
 	paramsBytes, _ := rm.EncodeMapIntoByteArray(params)
 
-	_, err := common.SendRequestAndValidateResponse("testChangeDefaultReplicationSettings", base.MethodPost, url, paramsBytes)
+	_, err := common.SendRequestAndValidateResponse("testChangeDefaultReplicationSettings", base.MethodPost, url, paramsBytes, options.username, options.password)
 	if err != nil {
 		return err
 	}
 	
-	defaultSettings, err := rm.ReplicationSettingsService().GetDefaultReplicationSettings()
-	if err != nil {
-		return err
-	}
-	return common.ValidateFieldValue("default BatchSize", BatchSizeDefault, defaultSettings.BatchSize)
-}
-
-func testViewDefaultReplicationSettings() error {
-	url := common.GetAdminportUrlPrefix(options.sourceKVHost) + rm.SettingsReplicationsPath
-	response, err := common.SendRequestAndValidateResponse("testViewDefaultReplicationSettings", base.MethodGet, url, nil)
+	// view default settings and verify changes	
+	settingsMap, err := getDefaultSettings("testDefaultReplicationSettings")
 	if err != nil {
 		return err
 	}
 	
-	settingsMap, err := decodeSettingsMapFromResponse(response)
-	fmt.Printf("m=%v\n", settingsMap)
-	if err != nil {
-		return err
-	}
 	newBatchSize := int(settingsMap[rm.BatchSize].(float64))
 	return common.ValidateFieldValue("default BatchSize", BatchSizeDefault, newBatchSize)
 }
 	
-func testCreateReplication() (string, error) {
-	url := common.GetAdminportUrlPrefix(options.sourceKVHost) + rm.CreateReplicationPath
+func testCreateReplication() (string, string, error) {
+	fmt.Println("Start testCreateReplication")
+
+	restUrl := common.GetAdminportUrlPrefix(options.sourceKVHost, options.sourceKVAdminPort) + rm.CreateReplicationPath
 
 	params := make(map[string]interface{})
+	params[rm.ReplicationType] = rm.ReplicationTypeValue
 	params[rm.FromBucket] = options.sourceBucket
 	params[rm.ToCluster] = options.remoteName
 	params[rm.ToBucket] = options.targetBucket
@@ -281,133 +217,171 @@ func testCreateReplication() (string, error) {
 
 	paramsBytes, _ := rm.EncodeMapIntoByteArray(params)
 
-	response, err := common.SendRequestAndValidateResponse("testCreateReplication", base.MethodPost, url, paramsBytes)
+	response, err := common.SendRequestAndValidateResponse("testCreateReplication", base.MethodPost, restUrl, paramsBytes, options.username, options.password)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 
 	replicationId, err := rm.DecodeCreateReplicationResponse(response)
+	escapedReplId := url.QueryEscape(replicationId)
 	
+	fmt.Println("Waiting for replication to finish starting")
 	time.Sleep(30 * time.Second)
 
 	// verify that the replication is created and started and is being
 	// managed by pipeline manager
-	return replicationId, validatePipeline("CreateReplication", replicationId, true)
+	return replicationId, escapedReplId, validatePipeline("CreateReplication", replicationId, escapedReplId, true, true)
 }
 
 func testPauseReplication(replicationId, escapedReplId string) error {
-	url := common.GetAdminportUrlPrefix(options.sourceKVHost) + rm.SettingsReplicationsPath + base.UrlDelimiter + escapedReplId
+	fmt.Println("Start testPauseReplication")
+
+	url := common.GetAdminportUrlPrefix(options.sourceKVHost, options.sourceKVAdminPort) + rm.SettingsReplicationsPath + base.UrlDelimiter + escapedReplId
 
 	settings := make(map[string]interface{})
-	settings[rm.Paused] = true
+	settings[rm.PauseRequested] = true
 	paramsBytes, _ := rm.EncodeMapIntoByteArray(settings)
 
-	_, err := common.SendRequestAndValidateResponse("testPauseReplication", base.MethodPost, url, paramsBytes)
+	_, err := common.SendRequestAndValidateResponse("testPauseReplication", base.MethodPost, url, paramsBytes, options.username, options.password)
 	if err != nil {
 		return err
 	}
 	
+	fmt.Println("Waiting for replication to finish pausing")
 	time.Sleep(10 * time.Second)
 
-	return validatePipeline("PauseReplication", replicationId, false)
+	return validatePipeline("PauseReplication", replicationId, escapedReplId, true, false)
 }
 
 func testResumeReplication(replicationId, escapedReplId string) error {
-	url := common.GetAdminportUrlPrefix(options.sourceKVHost) + rm.SettingsReplicationsPath + base.UrlDelimiter + escapedReplId
+	fmt.Println("Start testResumeReplication")
+	
+	url := common.GetAdminportUrlPrefix(options.sourceKVHost, options.sourceKVAdminPort) + rm.SettingsReplicationsPath + base.UrlDelimiter + escapedReplId
 
 	settings := make(map[string]interface{})
-	settings[rm.Paused] = false
+	settings[rm.PauseRequested] = false
 	paramsBytes, _ := rm.EncodeMapIntoByteArray(settings)
 	
-	_, err := common.SendRequestAndValidateResponse("testResumeReplication", base.MethodPost, url, paramsBytes)
+	_, err := common.SendRequestAndValidateResponse("testResumeReplication", base.MethodPost, url, paramsBytes, options.username, options.password)
 	if err != nil {
 		return err
 	}
 	
+	fmt.Println("Waiting for replication to finish resuming")
 	time.Sleep(10 * time.Second)
 
-	return validatePipeline("ResumeReplication", replicationId, true)
+	return validatePipeline("ResumeReplication", replicationId, escapedReplId, true, true)
 }
 
 func testDeleteReplication(replicationId, escapedReplId string) error {
-	url := common.GetAdminportUrlPrefix(options.sourceKVHost) + rm.DeleteReplicationPrefix + base.UrlDelimiter + escapedReplId
+	fmt.Println("Start testDeleteReplication")
+	url := common.GetAdminportUrlPrefix(options.sourceKVHost, options.sourceKVAdminPort) + rm.DeleteReplicationPrefix + base.UrlDelimiter + escapedReplId
 
-	_, err := common.SendRequestAndValidateResponse("testDeleteReplication", base.MethodDelete, url, nil)
+	_, err := common.SendRequestAndValidateResponse("testDeleteReplication", base.MethodDelete, url, nil, options.username, options.password)
 	if err != nil {
 		return err
 	}
 	
+	fmt.Println("Waiting for replication to finish deleting")
 	time.Sleep(10 * time.Second)
 
-	return validatePipeline("DeleteReplication", replicationId, false)
+	return validatePipeline("DeleteReplication", replicationId, escapedReplId, false, false)
 }
 
-func testViewReplicationSettings(replicationId string) error {
-	url := common.GetAdminportUrlPrefix(options.sourceKVHost) + rm.SettingsReplicationsPath + base.UrlDelimiter + replicationId
-
-	response, err := common.SendRequestAndValidateResponse("testViewReplicationSettings", base.MethodGet, url, nil)
+func testReplicationSettings(escapedReplId string) error {
+	fmt.Println("Start testReplicationSettings")
+	testName := "testReplicationSettings"
+	
+	// first verify replication settings before changes
+	
+	settingsMap, err := getReplicationSettings(testName, escapedReplId)
+	if err != nil {
+		return err
+	}
+	replBatchCount := int(settingsMap[rm.BatchCount].(float64))
+	replBatchSize := int(settingsMap[rm.BatchSize].(float64))
+	
+	// BatchCount should take the value that is explicitly passed in from CreateReplication
+	err = common.ValidateFieldValue("BatchCount in replication", BatchCount, replBatchCount)
+	if err != nil {
+		return err
+	}
+	// BatchSize should take the value from default settings
+	err = common.ValidateFieldValue("BatchSize in replication", BatchSizeDefault, replBatchSize)
 	if err != nil {
 		return err
 	}
 	
-	settingsMap, err := decodeSettingsMapFromResponse(response)
-	if err != nil {
-		return err
-	}
-	newBatchSize := int(settingsMap[rm.BatchSize].(float64))
-	return common.ValidateFieldValue("BatchSize in replication", BatchSizeDefault, newBatchSize)
-}
-
-func testChangeReplicationSettings(replicationId, escapedReplicationId string) error {
-	url := common.GetAdminportUrlPrefix(options.sourceKVHost) + rm.SettingsReplicationsPath + base.UrlDelimiter + escapedReplicationId
+	// change replication settings
+	url := common.GetAdminportUrlPrefix(options.sourceKVHost, options.sourceKVAdminPort) + rm.SettingsReplicationsPath + base.UrlDelimiter + escapedReplId
 
 	params := make(map[string]interface{})
 	params[rm.BatchSize] = BatchSizePerRepl
 
 	paramsBytes, _ := rm.EncodeMapIntoByteArray(params)
 
-	_, err := common.SendRequestAndValidateResponse("testChangeReplicationSettings", base.MethodPost, url, paramsBytes)
+	_, err = common.SendRequestAndValidateResponse(testName, base.MethodPost, url, paramsBytes, options.username, options.password)
 	if err != nil {
 		return err
 	}
 	
-	// verify that batchsize of the particular replication has been changed
-	spec, err := rm.ReplicationSpecService().ReplicationSpec(replicationId)
-	if err != nil {
-		return err
-	}
-	err = common.ValidateFieldValue("BatchSize in replication", BatchSizePerRepl, spec.Settings.BatchSize)
+	// verify that BatchSize in repl settings is changed
+	settingsMap, err = getReplicationSettings(testName, escapedReplId)
 	if err != nil {
 		return err
 	}
 	
-	// verify that default batchsize has not been changed
-	defaultSettings, err := rm.ReplicationSettingsService().GetDefaultReplicationSettings()
-
+	newBatchSize := int(settingsMap[rm.BatchSize].(float64))
+	err = common.ValidateFieldValue("BatchSize in Replication", BatchSizePerRepl, newBatchSize)
 	if err != nil {
 		return err
 	}
-	return common.ValidateFieldValue("default BatchSize", BatchSizeDefault, defaultSettings.BatchSize)
+	
+	// view that BatchSize in default settings is not changed	
+	settingsMap, err = getDefaultSettings(testName)
+	if err != nil {
+		return err
+	}
+	
+	defaultBatchSize := int(settingsMap[rm.BatchSize].(float64))
+	return common.ValidateFieldValue("default BatchSize", BatchSizeDefault, defaultBatchSize)
 }
 
 func testGetStatistics(bucket string) error {
-	url := common.GetAdminportUrlPrefix(options.sourceKVHost) + rm.StatisticsPrefix +base.UrlDelimiter + bucket
-	_, err := common.SendRequestAndValidateResponse("testGetStatistics", base.MethodGet, url, nil)
+	fmt.Println("Start testGetStatistics")
+	// NOTE this is the only API that uses the xdcr internal rest port. The same api does not exist on the couchbase adminport
+	url := common.GetAdminportUrlPrefix(options.sourceKVHost, uint64(base.AdminportNumber)) + rm.StatisticsPrefix +base.UrlDelimiter + bucket
+	_, err := common.SendRequestAndValidateResponse("testGetStatistics", base.MethodGet, url, nil, options.username, options.password)
 	return err
 }
 
-func validatePipeline(testName string, replicationId string, pipelineRunning bool) error {
-	if (pm.Pipeline(replicationId) == nil) == pipelineRunning {
-		var errMsg string
-		if pipelineRunning {
-			errMsg = ", should be running but was not"
-		} else {
-			errMsg = ", should not be running but was"
+// may need to find a better way to tell whether the pipeline is actually running
+func validatePipeline(testName, replicationId, escapedReplId string, pipelineExists bool, pipelineActive bool) error {
+	settingsMap, _ := getReplicationSettings(testName, escapedReplId)
+	
+	if !pipelineExists {
+		if settingsMap != nil {
+			return errors.New(fmt.Sprintf("Test %v failed. Pipeline, %v, should not exist but does.\n", testName, replicationId))
 		}
-		return errors.New(fmt.Sprintf("Test %v failed. Pipeline, %v%v\n", testName, replicationId, errMsg))
-	} else {
-		fmt.Println("Test ", testName, " passed.")
 		return nil
+	} else {
+		if settingsMap == nil {
+			return errors.New(fmt.Sprintf("Test %v failed. Pipeline, %v, should exist but does not.\n", testName, replicationId))
+		}
+		
+		// now check if pipeline is active
+		pauseRequsted := settingsMap[rm.PauseRequested].(bool)
+		if pauseRequsted == pipelineActive {
+			var errMsg string
+			if pipelineActive {
+				errMsg = ", should be active but was not"
+			} else {
+				errMsg = ", should not be active but was"
+			}
+			return errors.New(fmt.Sprintf("Test %v failed. Pipeline, %v%v.\n", testName, replicationId, errMsg))
+		} else {
+			return nil
+		}
 	}
 }
 
@@ -425,4 +399,25 @@ func decodeSettingsMapFromResponse(response *http.Response) (map[string]interfac
 	} else {
 		return settingsMap, nil
 	}
+}
+
+func getDefaultSettings(testName string) (map[string]interface{}, error) {
+	url := common.GetAdminportUrlPrefix(options.sourceKVHost, options.sourceKVAdminPort) + rm.SettingsReplicationsPath
+	response, err := common.SendRequestAndValidateResponse(testName, base.MethodGet, url, nil, options.username, options.password)
+	if err != nil {
+		return nil, err
+	}
+	
+	return decodeSettingsMapFromResponse(response)
+}
+
+func getReplicationSettings(testName, escapedReplId string) (map[string]interface{}, error) {
+	url := common.GetAdminportUrlPrefix(options.sourceKVHost, options.sourceKVAdminPort) + rm.SettingsReplicationsPath + base.UrlDelimiter + escapedReplId
+
+	response, err := common.SendRequestAndValidateResponse(testName, base.MethodGet, url, nil, options.username, options.password)
+	if err != nil {
+		return nil, err
+	}
+	
+	return decodeSettingsMapFromResponse(response)
 }
