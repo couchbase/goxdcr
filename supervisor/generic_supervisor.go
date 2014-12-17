@@ -183,9 +183,7 @@ func (supervisor *GenericSupervisor) supervising() error {
 				select {
 					case supervisor.err_ch <- true:
 						supervisor.sendHeartBeats()		
-					default:
 				}
-			default:
 		}
 	}
 	

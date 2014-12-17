@@ -99,7 +99,6 @@ loop:
 			}
 			// forward message to adminport server for processing
 			adminport.SendMsg_async([]interface{}{req})
-		default:
 		}
 	}
 	logger_ap.Infof("adminport exited !\n")
