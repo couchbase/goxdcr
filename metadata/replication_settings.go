@@ -37,6 +37,11 @@ const (
 	PipelineStatsInterval          = "stats_interval"
 )
 
+const (
+	ReplicationTypeXmem = "xmem"
+	ReplicationTypeCapi = "capi"
+)
+
 type SettingsConfig struct {
 	defaultValue  interface{}
 	*Range
@@ -48,7 +53,7 @@ type Range struct {
 }
 
 // TODO change to "capi"?
-var ReplicationTypeConfig = &SettingsConfig{"xmem", nil}
+var ReplicationTypeConfig = &SettingsConfig{ReplicationTypeXmem, nil}
 var FilterExpressionConfig = &SettingsConfig{"", nil}
 var ActiveConfig = &SettingsConfig{true, nil}
 var CheckpointIntervalConfig = &SettingsConfig{1800, &Range{60, 14400}}

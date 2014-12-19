@@ -105,5 +105,6 @@ const (
 // constant used by more than one rest apis
 const (
  	JustValidate = "just_validate"
+ 	JustValidatePostfix = "?" + JustValidate + "=1"
 )
 

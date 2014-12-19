@@ -85,58 +85,24 @@ func main() {
 }
 
 func startAdminport() {
-	/*top_svc, err := s.NewXDCRTopologySvc(options.username, options.password, uint16(options.sourceKVPort), base.AdminportNumber, true, nil)
-	if err != nil {
-		fmt.Printf("Error starting xdcr topology service. err=%v\n", err)
-		os.Exit(1)
-	}
-	
-	options.sourceKVHost, err = top_svc.MyHost()
-	if err != nil {
-		fmt.Printf("Error getting current host. err=%v\n", err)
-		os.Exit(1)
-	}
-
-	metadata_svc, err := s.DefaultMetadataSvc()
-	if err != nil {
-		fmt.Println("Test failed. err: ", err)
-		return
-	}
-	
-	rm.StartReplicationManager(options.sourceKVHost,
-							   base.AdminportNumber, 
-							   s.NewReplicationSpecService(metadata_svc, nil),
-							   s.NewRemoteClusterService(metadata_svc, nil),	
-							   s.NewClusterInfoSvc(nil),  
-							   top_svc, 
-							   s.NewReplicationSettingsSvc(metadata_svc, nil))
-	
-	//wait for server to finish starting
-	time.Sleep(time.Second * 3)*/
-	
-	/*if err := testAuth(); err != nil {
-		fmt.Println(err.Error())
-		return
-	}
-	
-	if err := testSSLAuth(); err != nil {
-		fmt.Println(err.Error())
-		return
-	}*/
-	
-	// Uncomment if need to clean up residual test data
-	/*if err := testDeleteRemoteCluster(options.remoteName); err != nil {
-		fmt.Println(err.Error())
-		return
-	}*/
 		
 	// verify that tests start from a clean slate
 	if _, err := getRemoteClusterAndVerifyExistence("test set up", options.remoteName, false); err != nil {
 		fmt.Println(err.Error())
 		return
 	}
+	
+	if err := testCreateRemoteClusterWithJustValidate(); err != nil {
+		fmt.Println(err.Error())
+		return
+	}
 
 	if err := testCreateRemoteCluster(); err != nil {
+		fmt.Println(err.Error())
+		return
+	}
+	
+	if err := testChangeRemoteClusterWithJustValidate(); err != nil {
 		fmt.Println(err.Error())
 		return
 	}
@@ -289,6 +255,23 @@ func getRemoteClusterAndVerifyExistence(testName, remoteClusterName string, expe
 	return ref, nil
 }
 	
+func testCreateRemoteClusterWithJustValidate() error {
+	fmt.Println("Starting testCreateRemoteClusterWithJustValidate")
+	url := common.GetAdminportUrlPrefix(options.sourceKVHost, options.sourceKVPort) + base.RemoteClustersPath + base.JustValidatePostfix
+	paramsBytes, err := createRequestBody(options.remoteName, options.remoteHostName, options.remoteUserName, 
+										options.remotePassword, options.remoteDemandEncryption, options.remoteCertificateFile)
+	if err != nil {
+		return err
+	}
+	_, err = common.SendRequestAndValidateResponse("testCreateRemoteClusterWithJustValidate", base.MethodPost, url, paramsBytes, options.username, options.password)
+	if err != nil {
+		return err
+	}
+	
+	_, err = getRemoteClusterAndVerifyExistence("testCreateRemoteClusterWithJustValidate", options.remoteName, false)
+	return err
+}
+	
 func testCreateRemoteCluster() error {
 	fmt.Println("Starting testCreateRemoteCluster")
 	url := common.GetAdminportUrlPrefix(options.sourceKVHost, options.sourceKVPort) + base.RemoteClustersPath
@@ -308,6 +291,29 @@ func testCreateRemoteCluster() error {
 	}
 	
 	return verifyRemoteClusterWithoutId(ref, options.remoteName, options.remoteHostName, options.remoteUserName, options.remotePassword, options.remoteDemandEncryption)
+}
+
+func testChangeRemoteClusterWithJustValidate() error {
+	fmt.Println("Starting testChangeRemoteClusterWithJustValidate")
+	
+	url := common.GetAdminportUrlPrefix(options.sourceKVHost, options.sourceKVPort) + base.RemoteClustersPath + base.UrlDelimiter + options.remoteName + base.JustValidatePostfix
+	paramsBytes, err := createRequestBody(options.newRemoteName, options.remoteHostName, options.remoteUserName, 
+										options.remotePassword, options.remoteDemandEncryption, options.remoteCertificateFile)
+	if err != nil {
+		return err
+	}
+	_, err = common.SendRequestAndValidateResponse("testChangeRemoteClusterWithJustValidate", base.MethodPost, url, paramsBytes, options.username, options.password)
+	if err != nil {
+		return err
+	}
+	
+	_, err = getRemoteClusterAndVerifyExistence("testChangeRemoteClusterWithJustValidate", options.remoteName, true)
+	if err != nil {
+		return err
+	}
+	
+	_, err = getRemoteClusterAndVerifyExistence("testChangeRemoteClusterWithJustValidate", options.newRemoteName, false)
+	return err
 }
 
 // change name of remote cluster, which does not lead to id change of the corresponding reference

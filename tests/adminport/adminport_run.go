@@ -90,6 +90,7 @@ func main() {
 }
 
 func startAdminport() {
+
 	// create remote cluster reference needed by replication
 	err := common.CreateTestRemoteClusterThroughRest(options.sourceKVHost, options.sourceKVAdminPort, options.username, options.password, options.remoteUuid, options.remoteName, options.remoteHostName, options.remoteUserName, options.remotePassword, 
                              options.remoteDemandEncryption, options.remoteCertificateFile)
@@ -105,6 +106,11 @@ func startAdminport() {
 		return
 	}
 	
+	if err := testDefaultReplicationSettingsWithJustValidate(); err != nil {
+		fmt.Println(err.Error())
+		return
+	}
+	
 	if err := testDefaultReplicationSettings(); err != nil {
 		fmt.Println(err.Error())
 		return
@@ -115,8 +121,18 @@ func startAdminport() {
 		fmt.Println(err.Error())
 		return
 	}
+	
+	if err := testReplicationSettingsWithJustValidate(escapedReplId); err != nil {
+		fmt.Println(err.Error())
+		return
+	}
 
 	if err := testReplicationSettings(escapedReplId); err != nil {
+		fmt.Println(err.Error())
+		return
+	}
+	
+	if err := testGetAllReplications(replicationId); err != nil {
 		fmt.Println(err.Error())
 		return
 	}
@@ -173,6 +189,36 @@ func testInternalSettings() error {
 	return common.ValidateFieldValue("internal BatchSize", BatchSizeInternal, newBatchSize)
 }
 
+func testDefaultReplicationSettingsWithJustValidate() error {
+	fmt.Println("Start testDefaultReplicationSettingsWithJustValidate")
+	
+	// change default settings with just_validate flag specified in request url
+	url := common.GetAdminportUrlPrefix(options.sourceKVHost, options.sourceKVAdminPort) + rm.SettingsReplicationsPath + base.UrlDelimiter + base.JustValidatePostfix
+
+	params := make(map[string]interface{})
+	params[rm.BatchSize] = BatchSizeDefault
+
+	paramsBytes, _ := rm.EncodeMapIntoByteArray(params)
+
+	_, err := common.SendRequestAndValidateResponse("testChangeDefaultReplicationSettingsWithJustValidate", base.MethodPost, url, paramsBytes, options.username, options.password)
+	if err != nil {
+		return err
+	}
+	
+	// view default settings and verify that changes are not applied	
+	settingsMap, err := getDefaultSettings("testDefaultReplicationSettingsWithJustValidate")
+	if err != nil {
+		return err
+	}
+	
+	newBatchSize := int(settingsMap[rm.BatchSize].(float64))
+	err = common.ValidateFieldValue("default BatchSize", BatchSizeDefault, newBatchSize)
+	if err == nil {
+		return errors.New("BatchSize should not have been changed")
+	}
+	return nil
+}
+
 func testDefaultReplicationSettings() error {
 	fmt.Println("Start testDefaultReplicationSettings")
 
@@ -224,9 +270,78 @@ func testCreateReplication() (string, string, error) {
 	fmt.Println("Waiting for replication to finish starting")
 	time.Sleep(30 * time.Second)
 
-	// verify that the replication is created and started and is being
-	// managed by pipeline manager
-	return replicationId, escapedReplId, validatePipeline("CreateReplication", replicationId, escapedReplId, true, true)
+	// verify that the replication is created and started 
+	err = validatePipeline("CreateReplication", replicationId, escapedReplId, true, true)
+	if err != nil {
+		return "", "", err
+	}
+	
+	// verify replication settings
+	settingsMap, err := getReplicationSettings("testCreateReplication", escapedReplId)
+	if err != nil {
+		return "", "", err
+	}
+	replBatchCount := int(settingsMap[rm.BatchCount].(float64))
+	replBatchSize := int(settingsMap[rm.BatchSize].(float64))
+	
+	// BatchCount should take the value that is explicitly passed in from CreateReplication
+	err = common.ValidateFieldValue("BatchCount in replication", BatchCount, replBatchCount)
+	if err != nil {
+		return "", "", err
+	}
+	// BatchSize should take the value from default settings
+	err = common.ValidateFieldValue("BatchSize in replication", BatchSizeDefault, replBatchSize)
+	if err != nil {
+		return "", "", err
+	}
+	
+	return replicationId, escapedReplId, nil
+}
+
+func testGetAllReplications(replicationId string) error {
+	fmt.Println("Start testGetAllReplications")
+
+	// has to use internal rest port for this since it is not a public api
+	url := common.GetAdminportUrlPrefix(options.sourceKVHost, uint64(base.AdminportNumber)) + rm.AllReplicationsPath
+
+	response, err := common.SendRequestAndValidateResponse("testGetAllReplications", base.MethodGet, url, nil, options.username, options.password)
+	if err != nil {
+		return err
+	}
+	
+	defer response.Body.Close()
+
+	bodyBytes, err := ioutil.ReadAll(response.Body)
+	if err != nil {
+		return err
+	}
+	var replInfoMapArr []map[string]interface{}
+	err = json.Unmarshal(bodyBytes, &replInfoMapArr)
+	if err != nil {
+		return err
+	} 
+	
+	if len(replInfoMapArr) != 1 {
+		return errors.New(fmt.Sprintf("Number of replications returned is %v instead of 1\n", len(replInfoMapArr)))
+	}
+	
+	var rightReplInfoMap map[string]interface{}
+	for _, replInfoMap := range replInfoMapArr {
+		if replInfoMap[rm.ReplicationDocId] == replicationId {
+			rightReplInfoMap = replInfoMap
+			break
+		}
+	}
+	
+	if rightReplInfoMap == nil {
+		return errors.New(fmt.Sprintf("Did not find replication with id %v\n", replicationId))
+	}
+	
+	err = common.ValidateFieldValue("Type", rm.ReplicationDocTypeXmem, rightReplInfoMap[rm.ReplicationDocType])
+	if err != nil {
+		return err
+	} 
+	return common.ValidateFieldValue("PauseRequested", false, rightReplInfoMap[rm.ReplicationDocPauseRequested]) 
 }
 
 func testPauseReplication(replicationId, escapedReplId string) error {
@@ -284,29 +399,44 @@ func testDeleteReplication(replicationId, escapedReplId string) error {
 	return validatePipeline("DeleteReplication", replicationId, escapedReplId, false, false)
 }
 
-func testReplicationSettings(escapedReplId string) error {
-	fmt.Println("Start testReplicationSettings")
-	testName := "testReplicationSettings"
+func testReplicationSettingsWithJustValidate(escapedReplId string) error {
+	fmt.Println("Start testReplicationSettingsWithJustValidate")
+	testName := "testReplicationSettingsWithJustValidate"
 	
-	// first verify replication settings before changes
+	// change replication settings
+	url := common.GetAdminportUrlPrefix(options.sourceKVHost, options.sourceKVAdminPort) + rm.SettingsReplicationsPath + base.UrlDelimiter + escapedReplId
+
+	params := make(map[string]interface{})
+	params[rm.BatchSize] = BatchSizePerRepl
+	// specify just_validate in request body
+	params[base.JustValidate] = true
+
+	paramsBytes, _ := rm.EncodeMapIntoByteArray(params)
+
+	_, err := common.SendRequestAndValidateResponse(testName, base.MethodPost, url, paramsBytes, options.username, options.password)
+	if err != nil {
+		return err
+	}
 	
+	// verify that BatchSize in repl settings is not changed
 	settingsMap, err := getReplicationSettings(testName, escapedReplId)
 	if err != nil {
 		return err
 	}
-	replBatchCount := int(settingsMap[rm.BatchCount].(float64))
-	replBatchSize := int(settingsMap[rm.BatchSize].(float64))
 	
-	// BatchCount should take the value that is explicitly passed in from CreateReplication
-	err = common.ValidateFieldValue("BatchCount in replication", BatchCount, replBatchCount)
-	if err != nil {
-		return err
+	newBatchSize := int(settingsMap[rm.BatchSize].(float64))
+	err = common.ValidateFieldValue("BatchSize in Replication", BatchSizePerRepl, newBatchSize)
+	if err == nil {
+		return errors.New("BatchSize should not have been changed")
 	}
-	// BatchSize should take the value from default settings
-	err = common.ValidateFieldValue("BatchSize in replication", BatchSizeDefault, replBatchSize)
-	if err != nil {
-		return err
-	}
+	
+	return nil
+}
+
+
+func testReplicationSettings(escapedReplId string) error {
+	fmt.Println("Start testReplicationSettings")
+	testName := "testReplicationSettings"
 	
 	// change replication settings
 	url := common.GetAdminportUrlPrefix(options.sourceKVHost, options.sourceKVAdminPort) + rm.SettingsReplicationsPath + base.UrlDelimiter + escapedReplId
@@ -316,13 +446,13 @@ func testReplicationSettings(escapedReplId string) error {
 
 	paramsBytes, _ := rm.EncodeMapIntoByteArray(params)
 
-	_, err = common.SendRequestAndValidateResponse(testName, base.MethodPost, url, paramsBytes, options.username, options.password)
+	_, err := common.SendRequestAndValidateResponse(testName, base.MethodPost, url, paramsBytes, options.username, options.password)
 	if err != nil {
 		return err
 	}
 	
 	// verify that BatchSize in repl settings is changed
-	settingsMap, err = getReplicationSettings(testName, escapedReplId)
+	settingsMap, err := getReplicationSettings(testName, escapedReplId)
 	if err != nil {
 		return err
 	}

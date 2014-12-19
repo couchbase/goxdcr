@@ -38,11 +38,12 @@ const (
 // constants used for parsing url path
 const (
 	CreateReplicationPath    = "controller/createReplication"
-	DeleteReplicationPrefix  = "controller/cancelXDCR"
 	NotifySettingsChangePrefix  = "controller/notifySettingsChange"
 	StatisticsPrefix         = "stats/buckets"
 	InternalSettingsPath     = "internalSettings"
-	SettingsReplicationsPath = "settings/replications"
+	AllReplicationsPath =      "pools/default/replications"
+	DeleteReplicationPrefix  = "controller/cancelXDCR"
+	SettingsReplicationsPath = "settings/replications" 
 	// Some url paths are not static and have variable contents, e.g., settings/replications/$replication_id
 	// The message keys for such paths are constructed by appending the dynamic suffix below to the static portion of the path.
 	// e.g., settings/replications/dynamic
@@ -154,6 +155,22 @@ var SettingsKeyToRestKeyMap = map[string]string {
 	metadata.PipelineStatsInterval: StatsInterval,
 } 
 
+//constants for outputing replication docs
+const (
+	RemoteClustersForReplicationDoc = "remoteClusters"
+	BucketsPath = "buckets"
+	
+	ReplicationDocType = "type"
+	ReplicationDocId = "id"
+	ReplicationDocSource = "source"
+	ReplicationDocTarget = "target"
+	ReplicationDocContinuous = "continuous"
+	ReplicationDocPauseRequested = "pauseRequested"
+	
+	ReplicationDocTypeXmem = "xdc-xmem"
+	ReplicationDocTypeCapi = "xdc"
+)
+
 var logger_msgutil *log.CommonLogger = log.NewLogger("MessageUtils", log.DefaultLoggerContext)
 
 func NewGetRemoteClustersResponse(remoteClusters map[string]*metadata.RemoteClusterReference) ([]byte, error) {
@@ -163,6 +180,34 @@ func NewGetRemoteClustersResponse(remoteClusters map[string]*metadata.RemoteClus
 	}
 	b, err := json.Marshal(remoteClusterArr)
 	return b, err
+}
+
+func NewGetAllReplicationsResponse(replSpecs map[string]*metadata.ReplicationSpecification) ([]byte, error) {
+	replArr := make([]map[string]interface{}, 0)
+	for _, replSpec := range replSpecs {
+		replArr = append(replArr, getReplicationDocMap(replSpec))
+	}
+	b, err := json.Marshal(replArr)
+	return b, err
+}
+
+func getReplicationDocMap(replSpec *metadata.ReplicationSpecification) map[string]interface{} {
+	replDocMap := make(map[string]interface{})
+	if replSpec != nil {
+		replDocMap[ReplicationDocId] = replSpec.Id
+		replDocMap[ReplicationDocContinuous] = true
+		replDocMap[ReplicationDocSource] = replSpec.SourceBucketName
+		replDocMap[ReplicationDocTarget] = base.UrlDelimiter + RemoteClustersForReplicationDoc + base.UrlDelimiter + replSpec.TargetClusterUUID + base.UrlDelimiter + BucketsPath + base.UrlDelimiter + replSpec.TargetBucketName
+		replDocMap[ReplicationDocPauseRequested] = !replSpec.Settings.Active
+		if replSpec.Settings.RepType == metadata.ReplicationTypeXmem {
+			replDocMap[ReplicationDocType] = ReplicationDocTypeXmem
+		} else {
+			replDocMap[ReplicationDocType] = ReplicationDocTypeCapi
+		}
+		// pass filter expression back, which is needed by running replications ui display
+		replDocMap[FilterExpression] = replSpec.Settings.FilterExpression
+	}
+	return replDocMap
 }
 
 // this func assumes that the request.ParseForm() has already been called, which 

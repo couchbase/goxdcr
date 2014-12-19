@@ -26,7 +26,7 @@ import (
 	"fmt"
 )
 
-var StaticPaths = [4]string{base.RemoteClustersPath, CreateReplicationPath, InternalSettingsPath, SettingsReplicationsPath}
+var StaticPaths = [5]string{base.RemoteClustersPath, CreateReplicationPath, InternalSettingsPath, SettingsReplicationsPath, AllReplicationsPath}
 var DynamicPathPrefixes = [5]string{base.RemoteClustersPath, NotifySettingsChangePrefix, DeleteReplicationPrefix, SettingsReplicationsPath, StatisticsPrefix}
 
 var MaxForwardingRetry = 5
@@ -148,6 +148,8 @@ func (adminport *Adminport) handleRequest(
 		response, err = adminport.doChangeRemoteClusterRequest(request)
 	case base.RemoteClustersPath + DynamicSuffix + base.UrlDelimiter + base.MethodDelete:
 		response, err = adminport.doDeleteRemoteClusterRequest(request)
+	case AllReplicationsPath + base.UrlDelimiter + base.MethodGet:
+		response, err = adminport.doGetAllReplicationsRequest(request)
 	case CreateReplicationPath + base.UrlDelimiter + base.MethodPost:
 		response, err = adminport.doCreateReplicationRequest(request)
 	case DeleteReplicationPrefix + DynamicSuffix + base.UrlDelimiter + base.MethodDelete:
@@ -271,6 +273,17 @@ func (adminport *Adminport) doDeleteRemoteClusterRequest(request *http.Request) 
 	}
 	
 	return NewDeleteRemoteClusterResponse()
+}
+
+func (adminport *Adminport) doGetAllReplicationsRequest(request *http.Request) ([]byte, error) {
+	logger_ap.Infof("doGetAllReplicationsRequest\n")
+	
+	replSpecs, err := ReplicationSpecService().ActiveReplicationSpecs()
+	if err != nil {
+		return nil, err
+	}
+	
+	return NewGetAllReplicationsResponse(replSpecs)
 }
 
 func (adminport *Adminport) doCreateReplicationRequest(request *http.Request) ([]byte, error) {
