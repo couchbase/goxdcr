@@ -17,6 +17,8 @@ import (
 	s "github.com/couchbase/goxdcr/service_impl"
 	utils "github.com/couchbase/goxdcr/utils"	
 	base "github.com/couchbase/goxdcr/base"
+
+	"github.com/couchbase/goxdcr/metakv/metakvsanity"
 )
 
 var done = make(chan bool)
@@ -55,7 +57,9 @@ func usage() {
 
 func main() {
 	argParse()
-	
+
+	metakvsanity.MaybeRun()
+
 	top_svc, err := s.NewXDCRTopologySvc(options.username, options.password, uint16(options.sourceKVAdminPort), uint16(options.xdcrRestPort), options.isEnterprise, nil)
 	if err != nil {
 		fmt.Printf("Error starting xdcr topology service. err=%v\n", err)
