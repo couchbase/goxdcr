@@ -17,6 +17,8 @@ import (
 	s "github.com/couchbase/goxdcr/service_impl"
 	utils "github.com/couchbase/goxdcr/utils"	
 	base "github.com/couchbase/goxdcr/base"
+
+	"github.com/couchbase/goxdcr/metakv/metakvsanity"
 	log "github.com/couchbase/goxdcr/log"
 )
 
@@ -70,6 +72,9 @@ func usage() {
 
 func main() {
 	argParse()
+
+	metakvsanity.MaybeRun()
+
 	
 	// initializes logger
 	log.Init(options.logFileDir, options.maxLogFileSize, options.maxNumberOfLogFiles)
