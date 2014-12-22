@@ -10,7 +10,6 @@
 package parts
 
 import (
-	"encoding/binary"
 	"errors"
 	"fmt"
 	mc "github.com/couchbase/gomemcached"
@@ -45,7 +44,7 @@ const (
 
 	XMEM_STATS_QUEUE_SIZE       = "queue_size"
 	XMEM_STATS_QUEUE_SIZE_BYTES = "queue_size_bytes"
-	XMEM_EVENT_ADDI_SEQNO = "source_seqno"
+	XMEM_EVENT_ADDI_SEQNO       = "source_seqno"
 
 	//default configuration
 	default_batchcount int = 500
@@ -666,7 +665,7 @@ func (xmem *XmemNozzle) onExit() {
 	xmem.childrenWaitGrp.Wait()
 
 	//cleanup
-	pool := base.ConnPoolMgr().GetPool(xmem.getPoolName(xmem.config.connectStr))
+	pool := base.ConnPoolMgr().GetPool(xmem.getPoolName(xmem.config))
 	if pool != nil {
 		pool.Release(xmem.memClient)
 	}
@@ -786,16 +785,16 @@ func (xmem *XmemNozzle) sendSingle(adjustRequest bool, item *mc.MCRequest, index
 //
 func (xmem *XmemNozzle) initializeConnection() (err error) {
 	xmem.Logger().Debugf("xmem.config= %v", xmem.config.connectStr)
-	xmem.Logger().Debugf("poolName=%v", xmem.getPoolName(xmem.config.connectStr))
-	pool, err := base.ConnPoolMgr().GetOrCreatePool(xmem.getPoolName(xmem.config.connectStr), xmem.config.connectStr, xmem.config.bucketName, xmem.config.password, base.DefaultConnectionSize)
+	xmem.Logger().Debugf("poolName=%v", xmem.getPoolName(xmem.config))
+	pool, err := base.ConnPoolMgr().GetOrCreatePool(xmem.getPoolName(xmem.config), xmem.config.connectStr, xmem.config.bucketName, xmem.config.bucketName, xmem.config.password, base.DefaultConnectionSize)
 	if err == nil {
 		xmem.memClient, err = pool.Get()
 	}
 	return err
 }
 
-func (xmem *XmemNozzle) getPoolName(connectionStr string) string {
-	return "Couch_Xmem_" + connectionStr
+func (xmem *XmemNozzle) getPoolName(config xmemConfig) string {
+	return "Couch_Xmem_" + config.connectStr + base. KeyPartsDelimiter + config.bucketName
 }
 
 func (xmem *XmemNozzle) initNewBatch() {
@@ -839,7 +838,7 @@ func (xmem *XmemNozzle) repairConn(client *mcc.Client) {
 
 	if client == xmem.memClient {
 		xmem.Logger().Infof("%v connection is broken, try to repair...\n", xmem.Id())
-		pool, err := base.ConnPoolMgr().GetOrCreatePool(xmem.getPoolName(xmem.config.connectStr), xmem.config.connectStr, xmem.config.bucketName, xmem.config.password, base.DefaultConnectionSize)
+		pool, err := base.ConnPoolMgr().GetOrCreatePool(xmem.getPoolName(xmem.config), xmem.config.connectStr, xmem.config.bucketName, xmem.config.bucketName, xmem.config.password, base.DefaultConnectionSize)
 		xmem.memClient.Close()
 		if err == nil {
 			xmem.memClient, err = pool.Get()
@@ -901,6 +900,11 @@ func (xmem *XmemNozzle) receiveResponse(finch chan bool, waitGrp *sync.WaitGroup
 				seqno, req, _ := xmem.buf.slot(pos)
 				if req != nil && req.Opaque == response.Opaque {
 					xmem.Logger().Debugf("%v Got the response, response.Opaque=%v, req.Opaque=%v\n", xmem.Id(), response.Opaque, req.Opaque)
+
+					if response.Status != mc.SUCCESS {
+						xmem.Logger().Infof("*****%v-%v Got the response, response.Status=%v*******\n", xmem.config.bucketName, xmem.Id(), response.Status)
+						xmem.Logger().Infof("req.key=%v, req.Extras=%v, req.Cas=%v, req=%v\n", req.Key, req.Extras, req.Cas, req)
+					}
 					additionalInfo := make(map[string]interface{})
 					additionalInfo[XMEM_EVENT_ADDI_SEQNO] = seqno
 					xmem.RaiseEvent(common.DataSent, req, xmem, nil, additionalInfo)
@@ -1023,14 +1027,6 @@ func (xmem *XmemNozzle) adjustRequest(mc_req *mc.MCRequest, index uint16) {
 	mc_req.Opcode = xmem.encodeOpCode(mc_req.Opcode)
 	mc_req.Cas = 0
 	mc_req.Opaque = xmem.getOpaque(index, xmem.buf.sequences[int(index)])
-	mc_req.Extras = []byte{0, 0, 0, 0,
-		0, 0, 0, 0,
-		0, 0, 0, 0,
-		0, 0, 0, 0,
-		0, 0, 0, 0,
-		0, 0, 0, 0}
-	binary.BigEndian.PutUint64(mc_req.Extras, uint64(0)<<32|uint64(0))
-
 }
 
 func (xmem *XmemNozzle) getOpaque(index, sequence uint16) uint32 {
