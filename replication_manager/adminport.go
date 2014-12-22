@@ -276,7 +276,7 @@ func (adminport *Adminport) doDeleteRemoteClusterRequest(request *http.Request) 
 func (adminport *Adminport) doCreateReplicationRequest(request *http.Request) ([]byte, error) {
 	logger_ap.Infof("doCreateReplicationRequest called\n")
 
-	fromBucket, toCluster, toBucket, filterName, forward, settings, errorsMap, err := DecodeCreateReplicationRequest(request)
+	fromBucket, toCluster, toBucket, forward, settings, errorsMap, err := DecodeCreateReplicationRequest(request)
 	if err != nil {
 		return nil, err
 	} else if len(errorsMap) > 0 {
@@ -284,10 +284,10 @@ func (adminport *Adminport) doCreateReplicationRequest(request *http.Request) ([
 		return EncodeErrorsMapIntoByteArray(errorsMap)
 	}
 	
-	logger_ap.Infof("Request parameters: fromBucket=%v, toCluster=%v, toBucket=%v, filterName=%v, forward=%v, settings=%v\n",
-					fromBucket, toCluster, toBucket, filterName, forward, settings)
+	logger_ap.Infof("Request parameters: fromBucket=%v, toCluster=%v, toBucket=%v, forward=%v, settings=%v\n",
+					fromBucket, toCluster, toBucket, forward, settings)
 
-	replicationId, err := CreateReplication(fromBucket, toCluster, toBucket, filterName, settings, forward)
+	replicationId, err := CreateReplication(fromBucket, toCluster, toBucket, settings, forward)
 
 	if err != nil {
 		return nil, err

@@ -39,7 +39,6 @@ var options struct {
 	targetBucket string //target bucket
 	sourceKVHost string //source kv host name
 	sourceKVAdminPort      uint64 //source kv admin port
-	filterName   string //filter name
 	username     string //username
 	password     string //password
 	
@@ -60,8 +59,6 @@ func argParse() {
 		"bucket to replicate from")
 	flag.StringVar(&options.targetBucket, "targetBucket", "target",
 		"bucket to replicate to")
-	flag.StringVar(&options.filterName, "filterName", "myActive",
-		"name of filter to use for replication")
 	flag.StringVar(&options.username, "username", "Administrator", "username to cluster admin console")
 	flag.StringVar(&options.password, "password", "welcome", "password to Cluster admin console")
 
@@ -212,7 +209,6 @@ func testCreateReplication() (string, string, error) {
 	params[rm.FromBucket] = options.sourceBucket
 	params[rm.ToCluster] = options.remoteName
 	params[rm.ToBucket] = options.targetBucket
-	params[rm.FilterName] = options.filterName
 	params[rm.BatchCount] = BatchCount
 
 	paramsBytes, _ := rm.EncodeMapIntoByteArray(params)

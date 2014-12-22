@@ -145,9 +145,9 @@ func ReplicationSettingsService() service_def.ReplicationSettingsSvc {
 
 //CreateReplication create the replication specification in metadata store
 //and start the replication pipeline
-func CreateReplication(sourceBucket, targetCluster, targetBucket, filterName string, settings map[string]interface{}, createReplSpec bool) (string, error) {
-	logger_rm.Infof("Creating replication - sourceBucket=%s, targetCluster=%s, targetBucket=%s, filterName=%s, settings=%v, createReplSpec=%v\n",
-		sourceBucket, targetCluster, targetBucket, filterName, settings, createReplSpec)
+func CreateReplication(sourceBucket, targetCluster, targetBucket string, settings map[string]interface{}, createReplSpec bool) (string, error) {
+	logger_rm.Infof("Creating replication - sourceBucket=%s, targetCluster=%s, targetBucket=%s, settings=%v, createReplSpec=%v\n",
+		sourceBucket, targetCluster, targetBucket, settings, createReplSpec)
 
 	targetClusterRef, err := RemoteClusterService().RemoteClusterByRefName(targetCluster)
 	if err != nil {
@@ -156,14 +156,14 @@ func CreateReplication(sourceBucket, targetCluster, targetBucket, filterName str
 	
 	var topic string
 	if createReplSpec {
-		spec, err := replication_mgr.createAndPersistReplicationSpec(sourceBucket, targetClusterRef.Uuid, targetBucket, filterName, settings)
+		spec, err := replication_mgr.createAndPersistReplicationSpec(sourceBucket, targetClusterRef.Uuid, targetBucket, settings)
 		if err != nil {
 			logger_rm.Errorf("%v\n", err)
 			return "", err
 		}
 		topic = spec.Id
 	} else {
-		topic = metadata.ReplicationId(sourceBucket, targetClusterRef.Uuid, targetBucket, filterName)
+		topic = metadata.ReplicationId(sourceBucket, targetClusterRef.Uuid, targetBucket)
 	}
 
 	StartPipeline(topic)
@@ -364,17 +364,17 @@ func getStatisticsForPipeline(pipeline_id string) (*expvar.Map, error) {
 	return stats_mgr.(*pipeline_svc.StatisticsManager).Statistics(), nil
 }
 
-func (rm *replicationManager) createAndPersistReplicationSpec(sourceBucket, targetClusterUUID, targetBucket, filterName string, settings map[string]interface{}) (*metadata.ReplicationSpecification, error) {
-	logger_rm.Infof("Creating replication spec - sourceBucket=%s, targetClusterUUID=%s, targetBucket=%s, filterName=%s, settings=%v\n",
-		sourceBucket, targetClusterUUID, targetBucket, filterName, settings)
+func (rm *replicationManager) createAndPersistReplicationSpec(sourceBucket, targetClusterUUID, targetBucket string, settings map[string]interface{}) (*metadata.ReplicationSpecification, error) {
+	logger_rm.Infof("Creating replication spec - sourceBucket=%s, targetClusterUUID=%s, targetBucket=%s, settings=%v\n",
+		sourceBucket, targetClusterUUID, targetBucket, settings)
 
 	// check if the same replication already exists
-	replicationId := metadata.ReplicationId(sourceBucket, targetClusterUUID, targetBucket, filterName)
+	replicationId := metadata.ReplicationId(sourceBucket, targetClusterUUID, targetBucket)
 	if err := validatePipelineExists(replicationId, "starting", false); err != nil {
 		return nil, err
 	}
 
-	spec := metadata.NewReplicationSpecification(sourceBucket, targetClusterUUID, targetBucket, filterName)
+	spec := metadata.NewReplicationSpecification(sourceBucket, targetClusterUUID, targetBucket)
 	replSettings, err := ReplicationSettingsService().GetDefaultReplicationSettings()
 	if err != nil {
 		return nil, err

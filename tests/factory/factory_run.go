@@ -126,7 +126,7 @@ func invokeFactory() error {
 		return err
 	}
 	
-	replSpec := metadata.NewReplicationSpecification(options.sourceBucket, remoteClusterRef.Uuid, options.targetBucket, "")
+	replSpec := metadata.NewReplicationSpecification(options.sourceBucket, remoteClusterRef.Uuid, options.targetBucket)
 	replSpec.Settings.SourceNozzlePerNode = NUM_SOURCE_CONN
 	replSpec.Settings.TargetNozzlePerNode = NUM_TARGET_CONN
 	err = repl_spec_svc.AddReplicationSpec(replSpec)

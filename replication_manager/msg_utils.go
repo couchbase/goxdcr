@@ -76,7 +76,6 @@ const (
 	FromBucket = "fromBucket"
 	ToCluster = "toCluster"
 	ToBucket = "toBucket"
-	FilterName = "filterName"
 	Forward = "forward"
 )
 
@@ -277,7 +276,7 @@ func NewDeleteReplicationResponse() ([]byte, error) {
 }
 
 // decode parameters from create replication request
-func DecodeCreateReplicationRequest(request *http.Request) (fromBucket, toCluster, toBucket, filterName string, forward bool, settings map[string]interface{}, errorsMap map[string]error, err error) {	
+func DecodeCreateReplicationRequest(request *http.Request) (fromBucket, toCluster, toBucket string, forward bool, settings map[string]interface{}, errorsMap map[string]error, err error) {	
 	errorsMap = make(map[string]error)
 	var replicationType string
 	
@@ -301,8 +300,6 @@ func DecodeCreateReplicationRequest(request *http.Request) (fromBucket, toCluste
 			toCluster = getStringFromValArr(key, valArr)
 		case ToBucket:
 			toBucket = getStringFromValArr(key, valArr)
-		case FilterName:
-			filterName = getStringFromValArr(key, valArr)
 		case Forward:
 			forward, err = getBoolFromValArr(key, valArr, forward)
 			if err != nil {
