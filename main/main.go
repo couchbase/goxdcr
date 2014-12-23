@@ -17,7 +17,6 @@ import (
 	s "github.com/couchbase/goxdcr/service_impl"
 	utils "github.com/couchbase/goxdcr/utils"	
 	base "github.com/couchbase/goxdcr/base"
-	log "github.com/couchbase/goxdcr/log"
 )
 
 var done = make(chan bool)
@@ -28,12 +27,6 @@ var options struct {
 	gometaRequestPort        uint64// gometa request port
 	isEnterprise    bool  // whether couchbase is of enterprise edition
 	isConvert    bool  // whether xdcr is running in conversion/upgrade mode
-	
-	// logging related parameters
-	logFileDir        string
-	maxLogFileSize   uint64
-	maxNumberOfLogFiles  uint64
-		
 	// TODO remove after auth changes
 	username        string //username on source cluster
 	password        string //password on source cluster	
@@ -50,14 +43,6 @@ func argParse() {
 		"whether couchbase is of enterprise edition")
 	flag.BoolVar(&options.isConvert, "isConvert", false,
 		"whether xdcr is running in convertion/upgrade mode")
-		
-	flag.StringVar(&options.logFileDir, "logFileDir", "logs/n_0",
-		"directory for couchbase server logs")
-	flag.Uint64Var(&options.maxLogFileSize, "maxLogFileSize", 40*1024*1024,
-		"maximum log file size")
-	flag.Uint64Var(&options.maxNumberOfLogFiles, "maxNumberOfLogFiles", 5,
-		"maximum number of log files")
-		
 	flag.StringVar(&options.username, "username", "Administrator", "username to cluster admin console")
 	flag.StringVar(&options.password, "password", "welcome", "password to Cluster admin console")
 	flag.Parse()
@@ -70,9 +55,6 @@ func usage() {
 
 func main() {
 	argParse()
-	
-	// initializes logger
-	log.Init(options.logFileDir, options.maxLogFileSize, options.maxNumberOfLogFiles)
 	
 	top_svc, err := s.NewXDCRTopologySvc(options.username, options.password, uint16(options.sourceKVAdminPort), uint16(options.xdcrRestPort), options.isEnterprise, nil)
 	if err != nil {
