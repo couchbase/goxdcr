@@ -198,14 +198,21 @@ func getReplicationDocMap(replSpec *metadata.ReplicationSpecification) map[strin
 		replDocMap[ReplicationDocContinuous] = true
 		replDocMap[ReplicationDocSource] = replSpec.SourceBucketName
 		replDocMap[ReplicationDocTarget] = base.UrlDelimiter + RemoteClustersForReplicationDoc + base.UrlDelimiter + replSpec.TargetClusterUUID + base.UrlDelimiter + BucketsPath + base.UrlDelimiter + replSpec.TargetBucketName
+	
+		// special transformation for replication type and active flag
 		replDocMap[ReplicationDocPauseRequested] = !replSpec.Settings.Active
 		if replSpec.Settings.RepType == metadata.ReplicationTypeXmem {
 			replDocMap[ReplicationDocType] = ReplicationDocTypeXmem
 		} else {
 			replDocMap[ReplicationDocType] = ReplicationDocTypeCapi
 		}
-		// pass filter expression back, which is needed by running replications ui display
-		replDocMap[FilterExpression] = replSpec.Settings.FilterExpression
+		
+		// copy other replication settings into replication doc
+		for key, value := range replSpec.Settings.ToMap() {
+			if key != metadata.ReplicationType && key != metadata.Active {
+				replDocMap[key] = value
+			} 
+		}
 	}
 	return replDocMap
 }
