@@ -92,11 +92,15 @@ func main() {
 			}
 		} else if op.String() == "UPR_STREAMEND" {
 			log.Printf("Received stream end event for vbucket %d", op.VBucket)
+		} else if op.String() == "UPR_DELETION" {
+			log.Printf("Received deletion for vbucket %d Seq No %d Rev Seq No %d", op.VBucket, op.Seqno, op.RevSeqno)
 		}
 
 		if op.Status != 0 {
 			log.Printf("Got an Error for vbucket %d, Error %s", op.VBucket, op.Error.Error())
 		}
+
+		log.Printf(" Receiving %v", op.String())
 	}
 	log.Printf("Upr feed closed; err = %v.", uf.Error)
 }

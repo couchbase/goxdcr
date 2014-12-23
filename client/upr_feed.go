@@ -14,7 +14,9 @@ import (
 	"sync"
 )
 
-const uprMutationExtraLen = 16
+const uprMutationExtraLen = 30
+const uprDeletetionExtraLen = 18
+const uprSnapshotExtraLen = 20
 const bufferAckThreshold = 0.2
 const opaqueOpen = 0xBEAF0001
 const opaqueFailover = 0xDEADBEEF
@@ -32,6 +34,9 @@ type UprEvent struct {
 	OldValue     []byte                  // TODO: TBD: old document value
 	Cas          uint64                  // CAS value of the item
 	Seqno        uint64                  // sequence number of the mutation
+	RevSeqno     uint64                  // rev sequence number : deletions
+	LockTime     uint32                  // Lock time
+	MetadataSize uint16                  // Metadata size
 	SnapstartSeq uint64                  // start sequence number of this snapshot
 	SnapendSeq   uint64                  // End sequence number of the snapshot
 	SnapshotType uint32                  // 0: disk 1: memory
@@ -100,19 +105,25 @@ func makeUprEvent(rq gomemcached.MCRequest, stream *UprStream) *UprEvent {
 	// 16 MSBits are left for application to multiplex on opaque value.
 	event.Opaque = appOpaque(rq.Opaque)
 
-	if len(rq.Extras) >= tapMutationExtraLen {
-		event.Seqno = binary.BigEndian.Uint64(rq.Extras[:8])
-	}
+	if len(rq.Extras) >= uprMutationExtraLen &&
+		event.Opcode == gomemcached.UPR_MUTATION {
 
-	if len(rq.Extras) >= tapMutationExtraLen &&
-		event.Opcode == gomemcached.UPR_MUTATION ||
+		event.Seqno = binary.BigEndian.Uint64(rq.Extras[:8])
+		event.RevSeqno = binary.BigEndian.Uint64(rq.Extras[8:16])
+		event.Flags = binary.BigEndian.Uint32(rq.Extras[16:20])
+		event.Expiry = binary.BigEndian.Uint32(rq.Extras[20:24])
+		event.LockTime = binary.BigEndian.Uint32(rq.Extras[24:28])
+		event.MetadataSize = binary.BigEndian.Uint16(rq.Extras[28:30])
+
+	} else if len(rq.Extras) >= uprDeletetionExtraLen &&
 		event.Opcode == gomemcached.UPR_DELETION ||
 		event.Opcode == gomemcached.UPR_EXPIRATION {
 
-		event.Flags = binary.BigEndian.Uint32(rq.Extras[8:])
-		event.Expiry = binary.BigEndian.Uint32(rq.Extras[12:])
+		event.Seqno = binary.BigEndian.Uint64(rq.Extras[:8])
+		event.RevSeqno = binary.BigEndian.Uint64(rq.Extras[8:16])
+		event.MetadataSize = binary.BigEndian.Uint16(rq.Extras[16:18])
 
-	} else if len(rq.Extras) >= tapMutationExtraLen &&
+	} else if len(rq.Extras) >= uprSnapshotExtraLen &&
 		event.Opcode == gomemcached.UPR_SNAPSHOT {
 
 		event.SnapstartSeq = binary.BigEndian.Uint64(rq.Extras[:8])
@@ -477,9 +488,6 @@ loop:
 				}
 				// snapshot marker
 				event = makeUprEvent(pkt, stream)
-				event.SnapstartSeq = binary.BigEndian.Uint64(pkt.Extras[0:8])
-				event.SnapendSeq = binary.BigEndian.Uint64(pkt.Extras[8:16])
-				event.SnapshotType = binary.BigEndian.Uint32(pkt.Extras[16:20])
 				uprStats.TotalSnapShot++
 				sendAck = true
 
