@@ -150,10 +150,12 @@ func (stats_mgr *StatisticsManager) updateStats(finchan chan bool) error {
 		select {
 		case <-finchan:
 			expvar_stats_map := stats_mgr.getExpvarMap(stats_mgr.pipeline.Topic())
+			errlist := expvar_stats_map.Get("Errors")
 			expvar_stats_map.Init()
 			statusVar := new(expvar.String)
-			statusVar.Set("Stopped")
+			statusVar.Set(base.Pending)
 			expvar_stats_map.Set("Status", statusVar)
+			expvar_stats_map.Set("Errors", errlist)
 			stats_mgr.logger.Infof("expvar=%v\n", stats_mgr.formatStatsForLog())
 			return nil
 		case <-stats_mgr.publish_ticker.C:
@@ -384,9 +386,7 @@ func (stats_mgr *StatisticsManager) Attach(pipeline common.Pipeline) error {
 	expvar_map := expvar.Get(stats_mgr.pipeline.Topic())
 	if expvar_map == nil {
 		expvar.NewMap(stats_mgr.pipeline.Topic())
-	} else {
-		expvar_map.(*expvar.Map).Init()
-	}
+	} 
 	return nil
 }
 
@@ -416,9 +416,8 @@ func (stats_mgr *StatisticsManager) Start(settings map[string]interface{}) error
 
 	//publishing status to expvar
 	expvar_stats_map := stats_mgr.getExpvarMap(stats_mgr.pipeline.Topic())
-	expvar_stats_map.Init()
 	statusVar := new(expvar.String)
-	statusVar.Set("Started")
+	statusVar.Set(base.Replicating)
 	expvar_stats_map.Set("Status", statusVar)
 	stats_mgr.wait_grp.Add(1)
 	go stats_mgr.updateStats(stats_mgr.finish_ch)

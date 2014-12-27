@@ -13,6 +13,7 @@ package replication_manager
 
 import (
 	"bufio"
+	"encoding/json"
 	"errors"
 	"expvar"
 	"fmt"
@@ -30,29 +31,198 @@ import (
 	"reflect"
 	"strings"
 	"sync"
+	"time"
 )
 
 var logger_rm *log.CommonLogger = log.NewLogger("ReplicationManager", log.DefaultLoggerContext)
+var ReplicationSpecNotActive error = errors.New("Replication specification not found or no longer active")
 
 /************************************
 /* struct ReplicationManager
 *************************************/
 type replicationManager struct {
-	supervisor.GenericSupervisor                               // supervises the livesness of adminport and pipelineMasterSupervisor
-	pipelineMasterSupervisor     *supervisor.GenericSupervisor // supervises the liveness of all pipeline supervisors
+	// supervises the livesness of adminport and pipelineMasterSupervisor
+	supervisor.GenericSupervisor
+	// supervises the liveness of all pipeline supervisors
+	pipelineMasterSupervisor *supervisor.GenericSupervisor
 
-	repl_spec_svc            service_def.ReplicationSpecSvc
-	remote_cluster_svc       service_def.RemoteClusterSvc
-	cluster_info_svc         service_def.ClusterInfoSvc
-	xdcr_topology_svc        service_def.XDCRCompTopologySvc
+	//replication specification service handle
+	repl_spec_svc service_def.ReplicationSpecSvc
+	//remote cluster service handle
+	remote_cluster_svc service_def.RemoteClusterSvc
+	//cluster info service handle
+	cluster_info_svc service_def.ClusterInfoSvc
+	//xdcr topology service handle
+	xdcr_topology_svc service_def.XDCRCompTopologySvc
+	//replication settings service handle
 	replication_settings_svc service_def.ReplicationSettingsSvc
 	once                     sync.Once
 
-	adminport_finch chan bool //finish channel for adminport
+	//finish channel for adminport
+	adminport_finch chan bool
+
+	//lock to pipeline_pending_for_repair map
+	repair_map_lock *sync.RWMutex
+	//keep track of the pipeline in repair
+	pipeline_pending_for_repair map[string]*pipelineRepairer
+	repairer_waitgrp            *sync.WaitGroup
 }
 
+//singleton
 var replication_mgr replicationManager
 
+//pipelineRepairer is responsible to repair a failing pipeline
+//it will retry after the retry_interval
+type pipelineRepairer struct {
+	//the name of the pipeline to be repaired
+	pipeline_name string
+	//the interval to wait after the failure for next retry
+	retry_interval time.Duration
+	//the number of retries
+	num_of_retries uint64
+	//finish channel
+	fin_ch chan bool
+	//the current error
+	current_error error
+
+	expvar_map *expvar.Map
+
+	waitGrp *sync.WaitGroup
+}
+
+func newPipelineRepairer(pipeline_name string, retry_interval int, waitGrp *sync.WaitGroup, cur_err error) (*pipelineRepairer, error) {
+	if retry_interval < 0 {
+		return nil, errors.New(fmt.Sprintf("Invalid retry interval %v", retry_interval))
+	}
+
+	repairer := &pipelineRepairer{pipeline_name: pipeline_name,
+		retry_interval: time.Duration(retry_interval) * time.Second,
+		num_of_retries: 0,
+		fin_ch:         make(chan bool, 1),
+		waitGrp:        waitGrp,
+		current_error:  cur_err}
+
+	repairer.expvar_map = getOrInitExpvarMap(pipeline_name)
+	return repairer, nil
+}
+
+func getOrInitExpvarMap(pipeline_name string) *expvar.Map {
+	var ret_map *expvar.Map
+	expvar_map := expvar.Get(pipeline_name)
+	if expvar_map == nil {
+		ret_map = expvar.NewMap(pipeline_name)
+	} else {
+		ret_map = expvar_map.(*expvar.Map)
+	}
+
+	statusVar := new(expvar.String)
+	statusVar.Set(base.Pending)
+	ret_map.Set("Status", statusVar)
+
+	errArr := ret_map.Get("Errors")
+	if errArr == nil {
+		errArr := pipelineErrorArray{}
+		ret_map.Set("Errors", errArr)
+	}
+
+	return ret_map
+}
+
+//start the repairer
+func (r *pipelineRepairer) start() {
+	defer r.waitGrp.Done()
+
+	r.reportStatus()
+
+	ticker := time.NewTicker(r.retry_interval)
+	for {
+		select {
+		case <-ticker.C:
+			r.current_error = r.repair()
+			if r.current_error == nil {
+				logger_rm.Infof("Pipeline %v is fixed\n", r.pipeline_name)
+				replication_mgr.reportFixed(r.pipeline_name)
+				return
+			} else if r.current_error == ReplicationSpecNotActive {
+				logger_rm.Infof("Stop repairing - replication %v is no longer active\n", r.pipeline_name)
+				return
+			} else {
+				logger_rm.Errorf("Reparing pipeline failed. error=%v\n", r.current_error)
+				r.num_of_retries++
+			}
+
+			r.reportStatus()
+		case <-r.fin_ch:
+			logger_rm.Infof("Quit repairing pipeline %v\n", r.pipeline_name)
+			return
+
+		}
+	}
+}
+
+//repair the pipeline
+func (r *pipelineRepairer) repair() (err error) {
+	err = nil
+	logger_rm.Infof("Try to fix Pipeline %v \n", r.pipeline_name)
+	if checkPipelineOnFile(r.pipeline_name) {
+		logger_rm.Infof("Try to stop pipeline %v\n", r.pipeline_name)
+		err = stopPipeline(r.pipeline_name)
+	}
+	if err != nil {
+		goto RE
+	}
+
+	err = r.checkPipelineActiveness()
+	if err != nil {
+		goto RE
+	}
+
+	err = startPipeline(r.pipeline_name)
+RE:
+	if err == nil {
+		logger_rm.Infof("Replication %v is fixed, back to business\n", r.pipeline_name)
+	} else {
+		logger_rm.Errorf("Failed to fix pipeline %v, err=%v\n", r.pipeline_name, err)
+		//TODO: propagate the error to ns_server
+
+	}
+	return
+
+}
+
+func (r *pipelineRepairer) reportStatus() {
+	//update the error array
+	existing_errArr := r.expvar_map.Get("Errors").(pipelineErrorArray)
+	new_errArr := pipelineErrorArray{}
+
+	new_errArr[0] = r.current_error.Error()
+	for i := 1; i < 10; i++ {
+		new_errArr[i] = existing_errArr[i-1]
+	}
+
+	logger_rm.Infof("new_errArr=%v, r.current_error=%v\n", new_errArr, r.current_error)
+	r.expvar_map.Set("Errors", new_errArr)
+}
+
+type pipelineErrorArray [10]string
+
+func (errArray pipelineErrorArray) String() string {
+	bytes, err := json.Marshal(errArray)
+	if err != nil {
+		return ""
+	}
+
+	return string(bytes)
+}
+
+func (r *pipelineRepairer) checkPipelineActiveness() (err error) {
+	spec, err := ReplicationSpecService().ReplicationSpec(r.pipeline_name)
+	if err != nil || spec == nil || !spec.Settings.Active {
+		err = ReplicationSpecNotActive
+	}
+	logger_rm.Debugf("Pipeline %v is not paused or deleted\n", r.pipeline_name)
+	return
+}
 func StartReplicationManagerForConversion(
 	repl_spec_svc service_def.ReplicationSpecSvc,
 	remote_cluster_svc service_def.RemoteClusterSvc) {
@@ -78,13 +248,14 @@ func StartReplicationManager(sourceKVHost string, xdcrRestPort uint16,
 		// start pipeline master supervisor
 		// TODO should we make heart beat settings configurable?
 		replication_mgr.pipelineMasterSupervisor.Start(nil)
+		logger_rm.Info("Master supervisor has started")
 
 		// start adminport
 		adminport := NewAdminport(sourceKVHost, xdcrRestPort, replication_mgr.adminport_finch)
 		go adminport.Start()
+		logger_rm.Info("Admin port has been launched")
 
-		// add pipeline master supervisor and adminport as children of replication manager supervisor
-		replication_mgr.GenericSupervisor.AddChild(replication_mgr.pipelineMasterSupervisor)
+		// add adminport as children of replication manager supervisor
 		replication_mgr.GenericSupervisor.AddChild(adminport)
 
 		// start replication manager supervisor
@@ -107,20 +278,29 @@ func (rm *replicationManager) init(
 	xdcr_topology_svc service_def.XDCRCompTopologySvc,
 	replication_settings_svc service_def.ReplicationSettingsSvc) {
 
-	rm.GenericSupervisor = *supervisor.NewGenericSupervisor(base.ReplicationManagerSupervisorId, log.DefaultLoggerContext, rm)
-	rm.pipelineMasterSupervisor = supervisor.NewGenericSupervisor(base.PipelineMasterSupervisorId, log.DefaultLoggerContext, rm)
+	rm.GenericSupervisor = *supervisor.NewGenericSupervisor(base.ReplicationManagerSupervisorId, log.DefaultLoggerContext, rm, nil)
+	rm.pipelineMasterSupervisor = supervisor.NewGenericSupervisor(base.PipelineMasterSupervisorId, log.DefaultLoggerContext, rm, &rm.GenericSupervisor)
 	rm.repl_spec_svc = repl_spec_svc
 	rm.remote_cluster_svc = remote_cluster_svc
 	rm.cluster_info_svc = cluster_info_svc
 	rm.xdcr_topology_svc = xdcr_topology_svc
 	rm.replication_settings_svc = replication_settings_svc
-	rm.adminport_finch = make(chan bool)
-	fac := factory.NewXDCRFactory(repl_spec_svc, remote_cluster_svc, cluster_info_svc, xdcr_topology_svc, log.DefaultLoggerContext, log.DefaultLoggerContext, rm)
+	rm.adminport_finch = make(chan bool, 1)
+	fac := factory.NewXDCRFactory(repl_spec_svc, remote_cluster_svc, cluster_info_svc, xdcr_topology_svc, log.DefaultLoggerContext, log.DefaultLoggerContext, rm, rm.pipelineMasterSupervisor)
 
 	pipeline_manager.PipelineManager(fac, log.DefaultLoggerContext)
 
+	rm.pipeline_pending_for_repair = make(map[string]*pipelineRepairer)
+	rm.repair_map_lock = &sync.RWMutex{}
+	rm.repairer_waitgrp = &sync.WaitGroup{}
 	logger_rm.Info("Replication manager is initialized")
 
+}
+
+func (rm *replicationManager) reportFixed(topic string) {
+	rm.repair_map_lock.Lock()
+	defer rm.repair_map_lock.Unlock()
+	delete(rm.pipeline_pending_for_repair, topic)
 }
 
 func ReplicationSpecService() service_def.ReplicationSpecSvc {
@@ -153,10 +333,11 @@ func CreateReplication(sourceBucket, targetCluster, targetBucket string, setting
 	if err != nil {
 		return "", err
 	}
-	
+
 	var topic string
+	var spec *metadata.ReplicationSpecification
 	if createReplSpec {
-		spec, err := replication_mgr.createAndPersistReplicationSpec(sourceBucket, targetClusterRef.Uuid, targetBucket, settings)
+		spec, err = replication_mgr.createAndPersistReplicationSpec(sourceBucket, targetClusterRef.Uuid, targetBucket, settings)
 		if err != nil {
 			logger_rm.Errorf("%v\n", err)
 			return "", err
@@ -164,51 +345,17 @@ func CreateReplication(sourceBucket, targetCluster, targetBucket string, setting
 		topic = spec.Id
 	} else {
 		topic = metadata.ReplicationId(sourceBucket, targetClusterRef.Uuid, targetBucket)
+		spec, err = ReplicationSpecService().ReplicationSpec(topic)
+		if err != nil {
+			return "", err
+		}
 	}
 
-	StartPipeline(topic)
+	//notify
+	HandleReplicationDefChanges(topic, nil, spec.Settings)
 	logger_rm.Infof("Pipeline %s is created and started\n", topic)
 
 	return topic, nil
-}
-
-//PauseReplication stops the pipeline on current node
-func PauseReplication(topic string) (err error) {
-	defer func() {
-		if r := recover(); r != nil {
-			logger_rm.Errorf("PauseReplication on pipeline %v panic: %v\n", topic, r)
-		}
-	}()
-
-	logger_rm.Infof("Pausing replication %s\n", topic)
-
-	if err = validatePipelineExists(topic, "pausing", true); err != nil {
-		return err
-	}
-	
-	// TODO may need to update replication spec if this is to support public rest API
-
-	err = StopPipeline(topic)
-	if err == nil {
-		logger_rm.Infof("Pipeline %s is paused\n", topic)
-	}
-	return err
-}
-
-//ResumeReplication update the replication specification with resumed state in metadata store
-//and start the pipeline for the replication
-func ResumeReplication(topic string) error {
-	logger_rm.Infof("Resuming replication %s\n", topic)
-
-	if err := validatePipelineExists(topic, "resuming", true); err != nil {
-		return err
-	}
-	
-	// TODO may need to update replication spec if this is to support public rest API
-
-	StartPipeline(topic)
-	logger_rm.Infof("Pipeline %s is being resumed\n", topic)
-	return nil
 }
 
 //DeleteReplication stops the running replication of given replicationId and
@@ -218,18 +365,32 @@ func DeleteReplication(topic string) error {
 
 	// delete replication spec
 	if err := validatePipelineExists(topic, "deleting", true); err != nil {
+		specs, _ := replication_mgr.repl_spec_svc.ActiveReplicationSpecs()
+		logger_rm.Info("Can't find the replication spec.")
+		logger_rm.Infof("Specs=%v\n", specs)
+		if checkPipelineOnFile(topic) {
+			//weird situation, but there is an orphan pipeline running
+			err1 := stopPipeline(topic)
+			if err1 == nil {
+				logger_rm.Infof("Pipeline %s is deleted\n", topic)
+
+				return nil
+			}
+		}
 		return err
 	}
+	oldspec, _ := replication_mgr.repl_spec_svc.ReplicationSpec(topic)
 
 	err := ReplicationSpecService().DelReplicationSpec(topic)
 	if err == nil {
-		logger_rm.Debugf("Replication specification %s is deleted\n", topic)
+		logger_rm.Infof("Replication specification %s is deleted\n", topic)
 	} else {
 		logger_rm.Errorf("%v\n", err)
 		return err
 	}
 
-	StopPipeline(topic)
+	//notify
+	HandleReplicationDefChanges(topic, oldspec.Settings, nil)
 
 	logger_rm.Infof("Pipeline %s is deleted\n", topic)
 
@@ -237,7 +398,21 @@ func DeleteReplication(topic string) error {
 }
 
 //start the replication for the given replicationId
-func StartPipeline(topic string) error {
+func startPipelineWithRetry(topic string) error {
+	err := startPipeline(topic)
+	if err != nil {
+
+		err = replication_mgr.lauchRepairer(topic, err)
+	}
+	return err
+}
+
+func PipelineMasterSupervisor() *supervisor.GenericSupervisor {
+	return replication_mgr.pipelineMasterSupervisor
+}
+
+//start pipeline in synchronous fashion
+func startPipeline(topic string) error {
 	spec, err := ReplicationSpecService().ReplicationSpec(topic)
 	if err != nil {
 		return err
@@ -246,46 +421,41 @@ func StartPipeline(topic string) error {
 	settings := spec.Settings
 	settingsMap := settings.ToMap()
 
-	pipeline, err := pipeline_manager.StartPipeline(topic, settingsMap)
-	if err == nil {
-		//add pipeline supervisor to the children of replication manager supervisor
-		replication_mgr.GenericSupervisor.AddChild(pipeline.RuntimeContext().Service(base.PIPELINE_SUPERVISOR_SVC).(*pipeline_svc.PipelineSupervisor))
-	}
-	return nil
+	_, err = pipeline_manager.StartPipeline(topic, settingsMap)
+
+	logger_rm.Infof("Failed to start pipeline - %v\n", err)
+	return err
 }
 
 //stop the running replication with the given replicationId
-func StopPipeline(topic string) error {
-	//remove pipeline supervisor from the children of replication manager supervisor
-	pipeline := pipeline_manager.Pipeline(topic)
-	if pipeline != nil {
-		replication_mgr.GenericSupervisor.RemoveChild(pipeline.RuntimeContext().Service(base.PIPELINE_SUPERVISOR_SVC).(*pipeline_svc.PipelineSupervisor).Id())
-	}
-
+//in synchronous fashion
+func stopPipeline(topic string) error {
 	return pipeline_manager.StopPipeline(topic)
 }
 
+//update the default replication settings
 func UpdateDefaultReplicationSettings(settings map[string]interface{}) (map[string]error, error) {
 	defaultSettings, err := ReplicationSettingsService().GetDefaultReplicationSettings()
 	if err != nil {
 		return nil, err
 	}
-	
+
 	errorMap := defaultSettings.UpdateSettingsFromMap(settings)
 	if len(errorMap) != 0 {
 		return errorMap, nil
 	}
-	
+
 	return nil, ReplicationSettingsService().SetDefaultReplicationSettings(defaultSettings)
 }
 
+//update the per-replication settings
 func UpdateReplicationSettings(topic string, settings map[string]interface{}) (map[string]error, error) {
 	// read replication spec with the specified replication id
 	replSpec, err := ReplicationSpecService().ReplicationSpec(topic)
 	if err != nil {
 		return nil, err
 	}
-	
+
 	// make a copy of old settings
 	oldSettings := *replSpec.Settings
 
@@ -298,28 +468,33 @@ func UpdateReplicationSettings(topic string, settings map[string]interface{}) (m
 	if err != nil {
 		return nil, err
 	}
-	
-	return nil, HandleChangesToReplicationSettings(topic, &oldSettings, replSpec.Settings)
+
+	return nil, HandleReplicationDefChanges(topic, &oldSettings, replSpec.Settings)
 }
 
-func HandleChangesToReplicationSettings(topic string, oldSettings, newSettings *metadata.ReplicationSettings) error {
-	
-	// handle changes to active flag
-	usedToBeActive := oldSettings.Active
-	activeNow := newSettings.Active
-	
-	if usedToBeActive && !activeNow {
-		// active changed from true to false, pause replication
-		return PauseReplication(topic)
-		
-	} else if !usedToBeActive && activeNow {
-		// active changed from false to true, restart replication
-		return ResumeReplication(topic)
+//handler for any replication specification or settings change
+func HandleReplicationDefChanges(topic string, oldSettings, newSettings *metadata.ReplicationSettings) error {
+
+	if oldSettings == nil {
+		//create replication
+		return startPipelineWithRetry(topic)
+	} else if newSettings == nil {
+		//delete replication
+		return stopPipeline(topic)
+	} else {
+		// handle changes to active flag
+		usedToBeActive := oldSettings.Active
+		activeNow := newSettings.Active
+
+		if usedToBeActive && !activeNow {
+			// active changed from true to false, pause replication
+			return stopPipeline(topic)
+
+		} else if !usedToBeActive && activeNow {
+			// active changed from false to true, restart replication
+			return startPipelineWithRetry(topic)
+		}
 	}
-	
-	// TODO implement additional logic, e.g.,
-	// 1. reconstruct pipeline when source/targetNozzlePerNode is changed
-	// 2. restart pipeline when criteral settings are changed
 	return nil
 }
 
@@ -353,6 +528,7 @@ func GetStatistics(bucket string) (*expvar.Map, error) {
 	return stats, nil
 }
 
+//get per-pipeline statistics
 func getStatisticsForPipeline(pipeline_id string) (*expvar.Map, error) {
 	pipeline := pipeline_manager.Pipeline(pipeline_id)
 	if pipeline == nil {
@@ -364,6 +540,7 @@ func getStatisticsForPipeline(pipeline_id string) (*expvar.Map, error) {
 	return stats_mgr.(*pipeline_svc.StatisticsManager).Statistics(), nil
 }
 
+//create and persist the replication specification
 func (rm *replicationManager) createAndPersistReplicationSpec(sourceBucket, targetClusterUUID, targetBucket string, settings map[string]interface{}) (*metadata.ReplicationSpecification, error) {
 	logger_rm.Infof("Creating replication spec - sourceBucket=%s, targetClusterUUID=%s, targetBucket=%s, settings=%v\n",
 		sourceBucket, targetClusterUUID, targetBucket, settings)
@@ -388,30 +565,9 @@ func (rm *replicationManager) createAndPersistReplicationSpec(sourceBucket, targ
 	return spec, nil
 }
 
-//update the replication specification's "active" setting
-func UpdateReplicationSpec(topic string, active bool, action string) error {
-	spec, err := replication_mgr.repl_spec_svc.ReplicationSpec(topic)
-	if err != nil {
-		logger_rm.Errorf("%v\n", err)
-		return err
-	}
-
-	settings := spec.Settings
-	if settings.Active == active {
-		state := "not"
-		if active {
-			state = "already"
-		}
-		return errors.New(fmt.Sprintf("Invalid operation. Cannot %v replication with id, %v, since it is %v actively running.\n", action, topic, state))
-	}
-	settings.Active = active
-	err = replication_mgr.repl_spec_svc.SetReplicationSpec(spec)
-	logger_rm.Debugf("Replication specification %s is set to active=%v\n", topic, active)
-	return err
-}
-
-func (rm *replicationManager) OnError(s common.Supervisor, errors map[string]error) {
-	logger_rm.Infof("Supervisor %v of type %v reported errors %v\n", s.Id(), reflect.TypeOf(s), errors)
+//error handler
+func (rm *replicationManager) OnError(s common.Supervisor, errMap map[string]error) {
+	logger_rm.Infof("Supervisor %v of type %v reported errors %v\n", s.Id(), reflect.TypeOf(s), errMap)
 
 	if s.Id() == base.ReplicationManagerSupervisorId {
 		// the errors came from the replication manager supervisor because adminport or pipeline master supervisor is not longer alive.
@@ -419,14 +575,14 @@ func (rm *replicationManager) OnError(s common.Supervisor, errors map[string]err
 		stop()
 	} else if s.Id() == base.PipelineMasterSupervisorId {
 		// the errors came from the pipeline master supervisor because some pipeline supervisors are not longer alive.
-		for childId, _ := range errors {
+		for childId, err1 := range errMap {
 			child, _ := s.Child(childId)
 			// child could be null if the pipeline has been stopped so far. //TODO should we restart it here?
 			if child != nil {
 				pipeline, err := getPipelineFromPipelineSupevisor(child.(common.Supervisor))
 				if err == nil {
 					// try to fix the pipeline
-					go fixPipeline(pipeline)
+					rm.lauchRepairer(pipeline.Topic(), err1)
 				}
 			}
 		}
@@ -435,9 +591,31 @@ func (rm *replicationManager) OnError(s common.Supervisor, errors map[string]err
 		pipeline, err := getPipelineFromPipelineSupevisor(s)
 		if err == nil {
 			// try to fix the pipeline
-			go fixPipeline(pipeline)
+			rm.lauchRepairer(pipeline.Topic(), errors.New(fmt.Sprintf("%v", errMap)))
 		}
 	}
+}
+
+//lauch the repairer for a pipeline
+//in asynchronous fashion
+func (rm *replicationManager) lauchRepairer(topic string, cur_err error) error {
+	spec, err := ReplicationSpecService().ReplicationSpec(topic)
+	if err != nil {
+		return err
+	}
+
+	settings := spec.Settings
+	settingsMap := settings.ToMap()
+	retry_interval := settingsMap[metadata.FailureRestartInterval].(int)
+
+	repairer, err := newPipelineRepairer(topic, retry_interval, rm.repairer_waitgrp, cur_err)
+	if err != nil {
+		return err
+	}
+	rm.repairer_waitgrp.Add(1)
+	go repairer.start()
+	logger_rm.Infof("Repairer to fix pipeline %v is lauched with retry_interval=%v\n", topic, retry_interval)
+	return nil
 }
 
 func getPipelineFromPipelineSupevisor(s common.Supervisor) (common.Pipeline, error) {
@@ -466,39 +644,18 @@ func (rm *replicationManager) startReplications() {
 		logger_rm.Errorf("Error retrieving active replication specs")
 		return
 	}
+	logger_rm.Infof("Active replication specs=%v\n", specs)
 
 	for _, spec := range specs {
 		if spec.Settings.Active {
-			go StartPipeline(spec.Id)
+			startPipelineWithRetry(spec.Id)
 		}
 	}
-}
-
-func fixPipeline(pipeline common.Pipeline) error {
-	logger_rm.Infof("Try to fix Pipeline %v \n", pipeline.Topic())
-	topic := pipeline.Topic()
-	if checkPipelineOnFile(pipeline) {
-		err := StopPipeline(topic)
-		if err == nil {
-			err = StartPipeline(topic)
-		}
-		if err == nil {
-			logger_rm.Infof("Pipeline %v is fixed, back to business\n", pipeline.Topic())
-		} else {
-			logger_rm.Errorf("Failed to fix pipeline %v, err=%v\n", pipeline.Topic(), err)
-			//panic("Failed to fix pipeline")
-			//TODO: propagate the error to ns_server
-
-			//TODO: schedule the retry
-		}
-		return err
-	}
-	return nil
 }
 
 // check if a specified pipeline is on file
-func checkPipelineOnFile(pipeline common.Pipeline) bool {
-	var isOnFile = (pipeline_manager.Pipeline(pipeline.Topic()) == pipeline)
+func checkPipelineOnFile(topic string) bool {
+	var isOnFile = (pipeline_manager.Pipeline(topic) != nil)
 	if !isOnFile {
 		logger_rm.Debug("Ignore the error report, as the error is reported on a pipeline that is not on file")
 	}
@@ -595,6 +752,15 @@ func stop() {
 		pipeline_manager.StopPipeline(topic)
 	}
 
+	//send finish signal to all repairer
+	logger_rm.Infof("Send finish signal to all running repairer")
+	for _, repairer := range replication_mgr.pipeline_pending_for_repair {
+		repairer.fin_ch <- true
+	}
+
+	replication_mgr.repairer_waitgrp.Wait()
+
+	logger_rm.Infof("Replication manager exists")
 	// exit main routine
 	os.Exit(0)
 }

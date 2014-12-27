@@ -106,6 +106,7 @@ type requestBuffer struct {
 	notifych        chan bool   /*notify channel is set when the buffer is below threshold*/
 	//	notify_allowed  bool   /*notify is allowed*/
 	notify_threshold uint16
+	fin_ch           chan bool
 	logger           *log.CommonLogger
 }
 
@@ -118,6 +119,7 @@ func newReqBuffer(size uint16, threshold uint16, logger *log.CommonLogger) *requ
 		size,
 		nil,
 		threshold,
+		make(chan bool, 1),
 		logger}
 
 	logger.Debug("Slots is initialized")
@@ -127,6 +129,11 @@ func newReqBuffer(size uint16, threshold uint16, logger *log.CommonLogger) *requ
 
 	logger.Debugf("new request buffer of size %d is created\n", size)
 	return buf
+}
+
+func (buf *requestBuffer) close() {
+	close(buf.fin_ch)
+	buf.logger.Info("request buffer is closed. No blocking on flow control")
 }
 
 //not concurrent safe. Caller need to be aware
@@ -150,9 +157,14 @@ func (buf *requestBuffer) flowControl() {
 		return
 	}
 	buf.notifych = make(chan bool, 1)
-	<-buf.notifych
-	buf.notifych = nil
-	return
+	select {
+	case <-buf.notifych:
+		buf.notifych = nil
+		return
+	case <-buf.fin_ch:
+		buf.notifych = nil
+		return
+	}
 }
 
 func (buf *requestBuffer) validatePos(pos uint16) (err error) {
@@ -462,6 +474,7 @@ type XmemNozzle struct {
 	counter_sent     int
 	counter_received int
 	start_time       time.Time
+	handle_error     bool
 }
 
 func NewXmemNozzle(id string,
@@ -500,6 +513,7 @@ func NewXmemNozzle(id string,
 		sender_finch:    make(chan bool),
 		//		send_allow_ch:    make(chan bool, 1), /*send_allow_ch chan bool*/
 		counter_sent:     0,
+		handle_error:     true,
 		counter_received: 0}
 
 	xmem.config.connectStr = connectString
@@ -571,7 +585,6 @@ func (xmem *XmemNozzle) getReadyToShutdown() {
 
 func (xmem *XmemNozzle) Stop() error {
 	xmem.Logger().Infof("Stop XmemNozzle %v\n", xmem.Id())
-	xmem.getReadyToShutdown()
 
 	conn := xmem.memClient.Hijack()
 	conn.(*net.TCPConn).SetReadDeadline(time.Now())
@@ -638,30 +651,42 @@ func (xmem *XmemNozzle) processData_batch(finch chan bool, waitGrp *sync.WaitGro
 	defer waitGrp.Done()
 	for {
 		xmem.Logger().Debugf("%v processData ....\n", xmem.Id())
-		if xmem.IsOpen() {
+		select {
+		case <-finch:
+			goto done
+		case batch := <-xmem.batches_ready:
 			select {
 			case <-finch:
 				goto done
-			case batch := <-xmem.batches_ready:
-				xmem.buf.flowControl()
-				xmem.Logger().Debugf("%v Batch Send..., %v batches ready, %v items in queue, count_recieved=%v, count_sent=%v\n", xmem.Id(), len(xmem.batches_ready), len(xmem.dataChan), xmem.counter_received, xmem.counter_sent)
-				err = xmem.send_internal(batch)
-				if err != nil {
-					xmem.handleGeneralError(err)
+			default:
+				if xmem.IsOpen() {
+					xmem.buf.flowControl()
+					xmem.Logger().Debugf("%v Batch Send..., %v batches ready, %v items in queue, count_recieved=%v, count_sent=%v\n", xmem.Id(), len(xmem.batches_ready), len(xmem.dataChan), xmem.counter_received, xmem.counter_sent)
+					err = xmem.send_internal(batch)
+					if err != nil {
+						xmem.handleGeneralError(err)
+					}
 				}
 			}
+
 		}
 	}
+
 done:
 	xmem.Logger().Infof("%v processData_batch exits\n", xmem.Id())
 	return
 }
 
 func (xmem *XmemNozzle) onExit() {
+	//in the process of stopping, no need to report any error to replication manager anymore
+	xmem.handle_error = false
+
+	xmem.buf.close()
+
 	//notify the data processing routine
-	xmem.sender_finch <- true
-	xmem.receiver_finch <- true
-	xmem.checker_finch <- true
+	close(xmem.sender_finch)
+	close(xmem.receiver_finch)
+	close(xmem.checker_finch)
 	xmem.childrenWaitGrp.Wait()
 
 	//cleanup
@@ -794,7 +819,7 @@ func (xmem *XmemNozzle) initializeConnection() (err error) {
 }
 
 func (xmem *XmemNozzle) getPoolName(config xmemConfig) string {
-	return "Couch_Xmem_" + config.connectStr + base. KeyPartsDelimiter + config.bucketName
+	return "Couch_Xmem_" + config.connectStr + base.KeyPartsDelimiter + config.bucketName
 }
 
 func (xmem *XmemNozzle) initNewBatch() {
@@ -892,6 +917,16 @@ func (xmem *XmemNozzle) receiveResponse(finch chan bool, waitGrp *sync.WaitGroup
 				xmem.Logger().Infof("%v pos=%d, Received error = %v in response, err = %v, response=%v\n", xmem.Id(), pos, response.Status.String(), err, response.Bytes())
 				_, err = xmem.buf.modSlot(pos, xmem.resend)
 			} else if err != nil && mc.IsFatal(err) {
+				if response.Status == 0x08 {
+					//PROTOCOL_BINARY_RESPONSE_NO_BUCKET
+					//bucket must be recreated, drop the connection pool
+					poolName := xmem.getPoolName(xmem.config)
+					pool := base.ConnPoolMgr().GetPool(poolName)
+					if pool != nil {
+						pool.ReleaseConnections()
+					}
+
+				}
 				xmem.handleGeneralError(err)
 				return
 			} else {
@@ -1056,7 +1091,11 @@ func (xmem *XmemNozzle) StatusSummary() string {
 }
 
 func (xmem *XmemNozzle) handleGeneralError(err error) {
-	xmem.Logger().Errorf("Raise error condition %v\n", err)
-	otherInfo := utils.WrapError(err)
-	xmem.RaiseEvent(common.ErrorEncountered, nil, xmem, nil, otherInfo)
+	if xmem.handle_error {
+		xmem.Logger().Errorf("Raise error condition %v\n", err)
+		otherInfo := utils.WrapError(err)
+		xmem.RaiseEvent(common.ErrorEncountered, nil, xmem, nil, otherInfo)
+	} else {
+		xmem.Logger().Debugf("%v in shutdown process, err=%v is ignored\n", xmem.Id(), err)
+	}
 }

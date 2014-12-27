@@ -327,7 +327,7 @@ func (adminport *Adminport) doDeleteReplicationRequest(request *http.Request) ([
 	if forward {
 		err = DeleteReplication(replicationId)
 	} else {
-		go StopPipeline(replicationId)
+		go stopPipeline(replicationId)
 	}
 
 	if err != nil {
@@ -521,7 +521,7 @@ func (adminport *Adminport) doNotifyReplicationSettingsChangeRequest(request *ht
 		return nil, err
 	}
 	
-	err = HandleChangesToReplicationSettings(replicationId, oldSettings, replSpec.Settings)
+	err = HandleReplicationDefChanges(replicationId, oldSettings, replSpec.Settings)
 	if err != nil {
 		return nil, err
 	} else {

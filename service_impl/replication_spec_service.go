@@ -76,6 +76,7 @@ func (service *ReplicationSpecService) ActiveReplicationSpecs() (map[string]*met
 	}
 
 	if keys != nil {
+		service.logger.Infof("active replications =%v\n", keys)
 		for _, key := range keys {
 			// ignore error. it is ok for some keys in catalog to be invalid
 			spec, _ := service.ReplicationSpec(key)

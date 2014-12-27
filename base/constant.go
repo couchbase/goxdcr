@@ -108,3 +108,9 @@ const (
  	JustValidatePostfix = "?" + JustValidate + "=1"
 )
 
+//constant for replication tasklist status
+const (
+	Pending = "Pending"
+	Replicating = "Replicating"
+	Paused = "Paused"
+)
