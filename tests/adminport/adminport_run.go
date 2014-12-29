@@ -39,8 +39,9 @@ var options struct {
 	targetBucket string //target bucket
 	sourceKVHost string //source kv host name
 	sourceKVAdminPort      uint64 //source kv admin port
-	username     string //username
-	password     string //password
+	// used by tests for internal rest apis (for which cbauth.SetRequestAuth() does not work)
+	username string //username
+	password string //password
 	
 	// parameters of remote cluster
 	remoteUuid string // remote cluster uuid
@@ -93,14 +94,14 @@ func main() {
 func startAdminport() {
 
 	// create remote cluster reference needed by replication
-	err := common.CreateTestRemoteClusterThroughRest(options.sourceKVHost, options.sourceKVAdminPort, options.username, options.password, options.remoteUuid, options.remoteName, options.remoteHostName, options.remoteUserName, options.remotePassword, 
-                             options.remoteDemandEncryption, options.remoteCertificateFile)
+	err := common.CreateTestRemoteClusterThroughRest(options.sourceKVHost, options.sourceKVAdminPort, options.remoteUuid, options.remoteName, options.remoteHostName, options.remoteUserName, options.remotePassword, 
+                             options.remoteDemandEncryption, options.remoteCertificateFile, options.username, options.password)
 	if err != nil {
 		fmt.Println(err.Error())
 		return
 	}
 	
-	defer common.DeleteTestRemoteClusterThroughRest(options.sourceKVHost, options.sourceKVAdminPort, options.username, options.password, options.remoteName)
+	defer common.DeleteTestRemoteClusterThroughRest(options.sourceKVHost, options.sourceKVAdminPort, options.remoteName, options.username, options.password)
 	
 	if err := testInternalSettings(); err != nil {
 		fmt.Println(err.Error())
@@ -391,6 +392,7 @@ func testPauseReplication(replicationId, escapedReplId string) error {
 	paramsBytes, _ := rm.EncodeMapIntoByteArray(settings)
 
 	_, err := common.SendRequestWithEscapedIdAndValidateResponse("testPauseReplication", base.MethodPost, url, escapedReplId, paramsBytes, options.username, options.password)
+
 	if err != nil {
 		return err
 	}
@@ -484,6 +486,7 @@ func testReplicationSettings(escapedReplId string) error {
 	paramsBytes, _ := rm.EncodeMapIntoByteArray(params)
 
 	_, err := common.SendRequestWithEscapedIdAndValidateResponse(testName, base.MethodPost, url, escapedReplId, paramsBytes, options.username, options.password)
+
 	if err != nil {
 		return err
 	}
@@ -512,7 +515,7 @@ func testReplicationSettings(escapedReplId string) error {
 
 func testGetStatistics(bucket string) error {
 	fmt.Println("Start testGetStatistics")
-	// NOTE this is the only API that uses the xdcr internal rest port. The same api does not exist on the couchbase adminport
+	// NOTE this API uses the xdcr internal rest port. The same api does not exist on the couchbase adminport
 	url := common.GetAdminportUrlPrefix(options.sourceKVHost, uint64(base.AdminportNumber)) + rm.StatisticsPrefix +base.UrlDelimiter + bucket
 	_, err := common.SendRequestAndValidateResponse("testGetStatistics", base.MethodGet, url, nil, options.username, options.password)
 	return err
@@ -578,6 +581,7 @@ func getReplicationSettings(testName, escapedReplId string) (map[string]interfac
 	url := common.GetAdminportUrlPrefix(options.sourceKVHost, options.sourceKVAdminPort) + rm.SettingsReplicationsPath
 	response, err := common.SendRequestWithEscapedIdAndValidateResponse(testName, base.MethodGet, url, escapedReplId, nil, options.username, options.password)
 	fmt.Printf("url=%v, res=%v, err=%v\n", url, response, err)
+
 	if err != nil {
 		return nil, err
 	}

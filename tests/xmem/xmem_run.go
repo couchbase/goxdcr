@@ -18,6 +18,7 @@ import (
 	utils "github.com/couchbase/goxdcr/utils"
 	mc "github.com/couchbase/gomemcached"
 	mcc "github.com/couchbase/gomemcached/client"
+	"github.com/couchbase/goxdcr/cbauth"
 	"github.com/couchbaselabs/go-couchbase"
 	"github.com/couchbase/goxdcr/log"
 	"net/http"
@@ -128,6 +129,8 @@ func main() {
 		}
 	}()
 	argParse()
+	
+	couchbase.HTTPClient.Transport = cbauth.WrapHTTPTransport(couchbase.HTTPTransport)
 
 	test(500, 100000)
 //	test(5, 50, parts.Batch_XMEM)
@@ -159,7 +162,7 @@ func test(batch_count int, data_count int) {
 }
 func startUpr(cluster, bucketn string, waitGrp *sync.WaitGroup, data_count int) {
 	logger.Info("Start Upr...")
-	b, err := utils.Bucket(cluster, bucketn, "", "")
+	b, err := utils.LocalBucket(cluster, bucketn)
 	mf(err, "bucket")
 
 	uprFeed, err = b.StartUprFeed("rawupr", uint32(0))

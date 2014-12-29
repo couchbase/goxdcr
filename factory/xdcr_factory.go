@@ -82,7 +82,7 @@ func (xdcrf *XDCRFactory) NewPipeline(topic string) (common.Pipeline, error) {
 		return nil, ErrorNoSourceNozzle
 	}
 
-	outNozzles, vbNozzleMap, bucketPwd, err := xdcrf.constructOutgoingNozzles(spec, logger_ctx)
+	outNozzles, vbNozzleMap, err := xdcrf.constructOutgoingNozzles(spec, logger_ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -111,7 +111,7 @@ func (xdcrf *XDCRFactory) NewPipeline(topic string) (common.Pipeline, error) {
 
 		//register services
 		pipeline.SetRuntimeContext(pipelineContext)
-		xdcrf.registerServices(pipeline, logger_ctx, kv_vb_map, bucketPwd)
+		xdcrf.registerServices(pipeline, logger_ctx, kv_vb_map)
 	}
 
 	xdcrf.logger.Infof("XDCR pipeline constructed")
@@ -185,7 +185,7 @@ func (xdcrf *XDCRFactory) constructSourceNozzles(spec *metadata.ReplicationSpeci
 }
 
 func (xdcrf *XDCRFactory) constructOutgoingNozzles(spec *metadata.ReplicationSpecification,
-	logger_ctx *log.LoggerContext) (map[string]common.Nozzle, map[uint16]string, string, error) {
+	logger_ctx *log.LoggerContext) (map[string]common.Nozzle, map[uint16]string, error) {
 	outNozzles := make(map[string]common.Nozzle)
 	vbNozzleMap := make(map[uint16]string)
 
@@ -195,22 +195,22 @@ func (xdcrf *XDCRFactory) constructOutgoingNozzles(spec *metadata.ReplicationSpe
 	targetClusterRef, err := xdcrf.remote_cluster_svc.RemoteClusterByUuid(spec.TargetClusterUUID)
 	if err != nil {
 		xdcrf.logger.Errorf("Error getting remote cluster with uuid=%v, err=%v\n", spec.TargetClusterUUID, err)
-		return nil, nil, "", err
+		return nil, nil, err
 	}
 	
 	kvVBMap, err := xdcrf.cluster_info_svc.GetServerVBucketsMap(targetClusterRef, targetBucketName)
 	if err != nil {
 		xdcrf.logger.Errorf("Error getting server vbuckets map, err=%v\n", err)
-		return nil, nil, "", err
+		return nil, nil, err
 	}
 	if len(kvVBMap) == 0 {
-		return nil, nil, "", ErrorNoTargetNozzle
+		return nil, nil, ErrorNoTargetNozzle
 	}
 
 	targetBucket, err := xdcrf.cluster_info_svc.GetBucket(targetClusterRef, targetBucketName)
 	if err != nil {
 		xdcrf.logger.Errorf("Error getting bucket, err=%v\n", err)
-		return nil, nil, "", err
+		return nil, nil, err
 	}
 	defer targetBucket.Close()
 
@@ -235,7 +235,7 @@ func (xdcrf *XDCRFactory) constructOutgoingNozzles(spec *metadata.ReplicationSpe
 
 			if err != nil {
 				xdcrf.logger.Errorf("err=%v\n", err)
-				return nil, nil, "", err
+				return nil, nil, err
 			}
 
 			outNozzles[outNozzle.Id()] = outNozzle
@@ -258,7 +258,7 @@ func (xdcrf *XDCRFactory) constructOutgoingNozzles(spec *metadata.ReplicationSpe
 
 	xdcrf.logger.Infof("Constructed %v outgoing nozzles\n", len(outNozzles))
 	xdcrf.logger.Debugf("vbNozzleMap = %v\n", vbNozzleMap)
-	return outNozzles, vbNozzleMap, bucketPwd, nil
+	return outNozzles, vbNozzleMap, nil
 }
 
 func (xdcrf *XDCRFactory) constructRouter(spec *metadata.ReplicationSpecification,
@@ -380,7 +380,7 @@ func (xdcrf *XDCRFactory) constructSettingsForDcpNozzle(pipeline common.Pipeline
 	return dcpNozzleSettings, nil
 }
 
-func (xdcrf *XDCRFactory) registerServices(pipeline common.Pipeline, logger_ctx *log.LoggerContext, kv_vb_map map[string][]uint16, bucketPwd string) error {
+func (xdcrf *XDCRFactory) registerServices(pipeline common.Pipeline, logger_ctx *log.LoggerContext, kv_vb_map map[string][]uint16) error {
 	ctx := pipeline.RuntimeContext()
 
 	//register pipeline supervisor
@@ -390,7 +390,7 @@ func (xdcrf *XDCRFactory) registerServices(pipeline common.Pipeline, logger_ctx 
 	ctx.RegisterService(base.CHECKPOINT_MGR_SVC, &pipeline_svc.CheckpointManager{})
 	//register pipeline statistics manager
 	bucket_name := pipeline.Specification().SourceBucketName
-	ctx.RegisterService(base.STATISTICS_MGR_SVC, pipeline_svc.NewStatisticsManager(logger_ctx, kv_vb_map, bucket_name, bucketPwd))
+	ctx.RegisterService(base.STATISTICS_MGR_SVC, pipeline_svc.NewStatisticsManager(logger_ctx, kv_vb_map, bucket_name))
 	return nil
 }
 

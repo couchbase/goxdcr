@@ -21,8 +21,6 @@ var options struct {
 	sourceKVAdminPort uint64 //source kv admin port
 	sourceBucket      string // source bucket
 	targetBucket      string //target bucket
-	username          string //username
-	password          string //password
 	
 	// parameters of remote cluster
 	remoteUuid string // remote cluster uuid
@@ -46,8 +44,6 @@ func argParse() {
 		"bucket to replicate from")
 	flag.StringVar(&options.targetBucket, "target_bucket", "target",
 		"bucket to replicate to")
-	flag.StringVar(&options.username, "username", "Administrator", "username to cluster admin console")
-	flag.StringVar(&options.password, "password", "welcome", "password to Cluster admin console")
 
 	flag.StringVar(&options.remoteUuid, "remoteUuid", "1234567",
 		"remote cluster uuid")
@@ -81,7 +77,7 @@ func main() {
 }
 
 func invokeFactory() error {
-	top_svc, err := s.NewXDCRTopologySvc(options.username, options.password, uint16(options.sourceKVAdminPort), base.AdminportNumber, true, nil)
+	top_svc, err := s.NewXDCRTopologySvc(uint16(options.sourceKVAdminPort), base.AdminportNumber, true, nil)
 	if err != nil {
 		fmt.Printf("Error starting xdcr topology service. err=%v\n", err)
 		os.Exit(1)

@@ -13,6 +13,7 @@ import (
 	"errors"
 	"expvar"
 	"fmt"
+	"github.com/couchbase/cbauth"
 	"github.com/couchbase/gomemcached"
 	mcc "github.com/couchbase/gomemcached/client"
 	base "github.com/couchbase/goxdcr/base"
@@ -110,12 +111,12 @@ type StatisticsManager struct {
 	current_vb_start_ts map[uint16]*base.VBTimestamp
 	active_vbs          map[string][]uint16
 	bucket_name         string
-	bucket_password     string
 	kv_mem_clients      map[string]*mcc.Client
 }
 
-func NewStatisticsManager(logger_ctx *log.LoggerContext, active_vbs map[string][]uint16, bucket_name string, bucket_password string) *StatisticsManager {
+func NewStatisticsManager(logger_ctx *log.LoggerContext, active_vbs map[string][]uint16, bucket_name string) *StatisticsManager {
 	stats_mgr := &StatisticsManager{registries: make(map[string]metrics.Registry),
+		bucket_name:     bucket_name,
 		starttime_map:   make(map[string]interface{}),
 		finish_ch:       make(chan bool, 1),
 		sample_size:     default_sample_size,
@@ -441,11 +442,25 @@ func (stats_mgr *StatisticsManager) Stop() error {
 }
 
 func (stats_mgr *StatisticsManager) initConnection() error {
+
 	for serverAddr, _ := range stats_mgr.active_vbs {
-		conn, err := base.NewConn(serverAddr, stats_mgr.bucket_name, stats_mgr.bucket_password)
+
+		username, password, err := cbauth.GetMemcachedServiceAuth(serverAddr)
+		stats_mgr.logger.Debugf("memcached auth: username=%v, password=%v, err=%v\n", username, password, err)
 		if err != nil {
 			return err
 		}
+
+		conn, err := base.NewConn(serverAddr, username, password)
+		if err != nil {
+			return err
+		}
+		
+		_, err = conn.SelectBucket(stats_mgr.bucket_name)
+		if err != nil {
+			return err
+		}
+
 		stats_mgr.kv_mem_clients[serverAddr] = conn
 	}
 

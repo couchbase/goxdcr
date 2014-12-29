@@ -1,11 +1,15 @@
 package utils
 
 import (
-	"encoding/binary"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
+	"expvar"
 	"fmt"
+	"github.com/couchbase/cbauth"
 	"github.com/couchbase/gomemcached"
 	base "github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
@@ -16,10 +20,7 @@ import (
 	"net/url"
 	"reflect"
 	"strconv"
-	"crypto/x509"
-	"crypto/tls"
 	"strings"
-	"expvar"
 )
 
 type BucketBasicStats struct {
@@ -147,38 +148,58 @@ func maybeAddAuth(req *http.Request, username string, password string) {
 	}
 }
 
-func Bucket(connectStr string, bucketName string, clusterUserName, clusterPassword string) (*couchbase.Bucket, error) {
-	var url string
-	if clusterUserName != "" && clusterPassword != "" {
-		url = fmt.Sprintf("http://%s:%s@%s", clusterUserName, clusterPassword, connectStr)
-	} else {
-		url = fmt.Sprintf("http://%s", connectStr)
+// Get bucket in local cluster
+func LocalBucket(localConnectStr, bucketName string) (*couchbase.Bucket, error) {
+	url := fmt.Sprintf("http://%s", localConnectStr)
+	client, err := couchbase.ConnectWithAuth(url, cbauth.NewAuthHandler(nil))
+	if err != nil {
+		return nil, NewEnhancedError(fmt.Sprintf("Error connecting to couchbase. url=%v", url), err)
+	}
+	pool, err := client.GetPool("default")
+	if err != nil {
+		return nil, NewEnhancedError("Error getting pool with name 'default'.", err)
+	}
+	bucket, err := pool.GetBucket(bucketName)
+	if err != nil {
+		return nil, NewEnhancedError(fmt.Sprintf("Error getting bucket, %v, from pool.", bucketName), err)
 	}
 
+	logger_utils.Debugf("Got local bucket successfully name=%v\n", bucket.Name)
+	return bucket, err
+}
+
+func RemoteBucket(remoteConnectStr, bucketName, remoteUsername, remotePassword string) (*couchbase.Bucket, error) {
+	var url string
+	if remoteUsername == "" || remotePassword == "" {
+		return nil, errors.New(fmt.Sprintf("Error retrieving remote bucket, %v, since remote username and/or password are missing.", bucketName))
+		
+	} 
+	url = fmt.Sprintf("http://%s:%s@%s", remoteUsername, remotePassword, remoteConnectStr)
 	bucketInfos, err := couchbase.GetBucketList(url)
 	if err != nil {
 		return nil, NewEnhancedError("Error getting bucketlist with url:"+url, err)
 	}
-
+	
 	var password string
 	for _, bucketInfo := range bucketInfos {
 		if bucketInfo.Name == bucketName {
 			password = bucketInfo.Password
 		}
 	}
-	couch, err := couchbase.Connect("http://" + bucketName + ":" + password + "@" + connectStr)
+	couch, err := couchbase.Connect("http://" + bucketName + ":" + password + "@" + remoteConnectStr)
 	if err != nil {
-		return nil, NewEnhancedError(fmt.Sprintf("Error connecting to couchbase. bucketName=%v; password=%v; connectStr=%v", bucketName, password, connectStr), err)
+		return nil, NewEnhancedError(fmt.Sprintf("Error connecting to couchbase. bucketName=%v; password=%v; remoteConnectStr=%v", bucketName, password, remoteConnectStr), err)
 	}
 	pool, err := couch.GetPool("default")
 	if err != nil {
 		return nil, NewEnhancedError("Error getting pool with name 'default'.", err)
 	}
-
 	bucket, err := pool.GetBucket(bucketName)
 	if err != nil {
 		return nil, NewEnhancedError(fmt.Sprintf("Error getting bucket, %v, from pool.", bucketName), err)
 	}
+	
+	logger_utils.Debugf("Got remote bucket successfully name=%v\n", bucket.Name)
 	return bucket, err
 }
 
@@ -266,14 +287,14 @@ func SendHttpRequestThroughSSL(request *http.Request, certificate []byte) (*http
 	if !ok {
 		return nil, errors.New("Invalid certificate")
 	}
-	
+
 	tlsConfig := &tls.Config{
 		RootCAs: caPool,
 	}
-	tlsConfig.BuildNameToCertificate() 
-	
+	tlsConfig.BuildNameToCertificate()
+
 	tr := &http.Transport{
-		TLSClientConfig:    tlsConfig,
+		TLSClientConfig: tlsConfig,
 	}
 	client := &http.Client{Transport: tr}
 	return client.Do(request)
@@ -286,37 +307,37 @@ func GetXDCRSSLPort(hostName, userName, password string) (uint16, error) {
 	if err != nil {
 		return 0, err
 	}
-	
+
 	response, err := SendHttpRequest(request)
 	if err != nil {
 		return 0, err
 	}
-	
+
 	defer response.Body.Close()
 	bodyBytes, err := ioutil.ReadAll(response.Body)
 	if err != nil {
 		return 0, err
 	}
-	
+
 	// /nodes/self/xdcrSSLPorts could return an empty array object in local dev env
 	if len(bodyBytes) <= 2 {
 		return 0, ErrorRetrievingSSLPort
 	}
-	
+
 	//  /nodes/self/xdcrSSLPorts returns a non-empty map in production
 	var portsInfo map[string]interface{}
 	err = json.Unmarshal(bodyBytes, &portsInfo)
 	if err != nil {
 		return 0, err
 	}
-	
-	// get ssl port from the map 
+
+	// get ssl port from the map
 	sslPort, ok := portsInfo[base.SSLPortKey]
 	if !ok {
 		// should never get here
 		return 0, ErrorRetrievingSSLPort
 	}
-	
+
 	sslPortFloat, ok := sslPort.(float64)
 	if !ok {
 		// should never get here
@@ -333,11 +354,10 @@ func GetSeqNoFromMCRequest(req *gomemcached.MCRequest) uint64 {
 
 func GetMapFromExpvarMap(expvarMap *expvar.Map) map[string]string {
 	regMap := make(map[string]string)
-	
+
 	expvarMap.Do(func(keyValue expvar.KeyValue) {
 		regMap[keyValue.Key] = keyValue.Value.String()
 		return
 	})
 	return regMap
 }
-

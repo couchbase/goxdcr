@@ -10,6 +10,7 @@ import (
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/parts"
 	"github.com/couchbase/goxdcr/utils"
+	"github.com/couchbase/goxdcr/cbauth"
 	"github.com/couchbaselabs/go-couchbase"
 	"log"
 	"os"
@@ -63,7 +64,9 @@ func main() {
 	fmt.Printf("connectStr=%s\n", options.connectStr)
 	fmt.Println("Done with parsing the arguments")
 	
-	bucket, err := utils.Bucket(options.connectStr, options.source_bucket, "", "")
+	couchbase.HTTPClient.Transport = cbauth.WrapHTTPTransport(couchbase.HTTPTransport)
+	
+	bucket, err := utils.LocalBucket(options.connectStr, options.source_bucket)
 	mf(err, "bucket")
 	
 	vblist, err := getVBListFromBucket(bucket, options.kvaddr)

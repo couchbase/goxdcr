@@ -58,9 +58,9 @@ type VBTimestamp struct{
 }
 
 type ClusterConnectionInfoProvider interface {
-	MyConnectionStr()  string
-	MyUsername()  string
-	MyPassword()  string
+	MyConnectionStr()  (string, error)
+	// returns username and password
+	MyCredentials()  (string, string, error)
 }
 
 type ReplicationInfo struct {

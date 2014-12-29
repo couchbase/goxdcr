@@ -10,9 +10,9 @@
 package service_impl
 
 import (
-	"fmt"
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
+	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/goxdcr/utils"
 	"github.com/couchbaselabs/go-couchbase"
 )
@@ -68,7 +68,7 @@ func (ci_svc *ClusterInfoSvc) GetServerVBucketsMap(clusterConnInfoProvider base.
 	}
 	defer bucket.Close()
 	
-	fmt.Printf("ServerList=%v\n", bucket.VBServerMap().ServerList)
+	ci_svc.logger.Debugf("ServerList=%v\n", bucket.VBServerMap().ServerList)
 	serverVBMap, err := bucket.GetVBmap(bucket.VBServerMap().ServerList)
 
 	return serverVBMap, err
@@ -79,5 +79,19 @@ func (ci_svc *ClusterInfoSvc) IsNodeCompatible(node string, version string) (boo
 }
 
 func (ci_svc *ClusterInfoSvc) GetBucket(clusterConnInfoProvider base.ClusterConnectionInfoProvider, bucketName string) (*couchbase.Bucket, error) {
-	return utils.Bucket(clusterConnInfoProvider.MyConnectionStr(), bucketName, clusterConnInfoProvider.MyUsername(), clusterConnInfoProvider.MyPassword())
+	connStr, err := clusterConnInfoProvider.MyConnectionStr()
+	if err != nil {
+		return nil, err
+	}
+	
+	switch clusterConnInfoProvider.(type) {
+		case *metadata.RemoteClusterReference:
+			username, password, err := clusterConnInfoProvider.MyCredentials()
+			if err != nil {
+				return nil, err
+			}
+			return utils.RemoteBucket(connStr, bucketName, username, password)
+		default:
+			return utils.LocalBucket(connStr, bucketName)
+	}
 }

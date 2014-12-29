@@ -13,6 +13,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/couchbase/cbauth"
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
 	rm "github.com/couchbase/goxdcr/replication_manager"
@@ -26,17 +27,13 @@ var ErrorRetrievingHostInfo = errors.New("Could not parse current host name from
 type XDCRTopologySvc struct {
 	adminport        uint16
 	xdcrRestPort     uint16
-	username         string
-	password         string
 	isEnterprise     bool
 	logger           *log.CommonLogger
 }
 
-func NewXDCRTopologySvc(username, password string, adminport, xdcrRestPort uint16,
+func NewXDCRTopologySvc(adminport, xdcrRestPort uint16,
 	isEnterprise bool, logger_ctx *log.LoggerContext) (*XDCRTopologySvc, error) {
 	top_svc := &XDCRTopologySvc{
-		username:     username,
-		password:     password,
 		adminport:    adminport,
 		xdcrRestPort: xdcrRestPort,
 		isEnterprise: isEnterprise,
@@ -90,12 +87,18 @@ func (top_svc *XDCRTopologySvc) XDCRCompToKVNodeMap() (map[string][]string, erro
 
 // get hostname from nodeService at /pools/nodes
 func (top_svc *XDCRTopologySvc) getHostName() (string, error) {
-	hostAddr := utils.GetHostAddr(base.LocalHostName, top_svc.adminport)
-	url := fmt.Sprintf("http://%s:%s@%s%s", top_svc.username, top_svc.password, hostAddr, base.NodesPath)
+	connStr, err := top_svc.MyConnectionStr()
+	if err != nil {
+		return "", err
+	}
+	
+	url := fmt.Sprintf("http://%s%s", connStr, base.NodesPath)
 	request, err := http.NewRequest(base.MethodGet, url, nil)
 	if err != nil {
 		return "", err
 	}
+	
+	cbauth.SetRequestAuth(request)
 
 	response, err := utils.SendHttpRequest(request)
 	if err != nil {
@@ -166,19 +169,19 @@ func (top_svc *XDCRTopologySvc) getHostName() (string, error) {
 }
 
 // implements base.ClusterConnectionInfoProvider
-func (top_svc *XDCRTopologySvc)	MyConnectionStr() string {
+func (top_svc *XDCRTopologySvc)	MyConnectionStr() (string, error) {
 	host, err := top_svc.MyHost()
 	if err != nil {
 		// should never get here
-		return ""
+		return "", err
 	}
-	return utils.GetHostAddr(host, top_svc.adminport)
+	return utils.GetHostAddr(host, top_svc.adminport), nil
 }
 
-func (top_svc *XDCRTopologySvc)	MyUsername()  string {
-	return top_svc.username
-}
-
-func (top_svc *XDCRTopologySvc)	MyPassword()  string {
-	return top_svc.password
+func (top_svc *XDCRTopologySvc)	MyCredentials() (string, string, error) {
+	connStr, err := top_svc.MyConnectionStr()
+	if err != nil {
+		return "", "", err
+	}
+	return cbauth.GetHTTPServiceAuth(connStr)
 }

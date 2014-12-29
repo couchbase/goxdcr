@@ -18,6 +18,7 @@ import (
 	"expvar"
 	"fmt"
 	"github.com/couchbase/goxdcr/base"
+	"github.com/couchbase/goxdcr/cbauth"
 	"github.com/couchbase/goxdcr/common"
 	"github.com/couchbase/goxdcr/factory"
 	"github.com/couchbase/goxdcr/log"
@@ -27,6 +28,7 @@ import (
 	"github.com/couchbase/goxdcr/service_def"
 	"github.com/couchbase/goxdcr/supervisor"
 	"github.com/couchbase/goxdcr/utils"
+	"github.com/couchbaselabs/go-couchbase"
 	"io"
 	"os"
 	"reflect"
@@ -294,6 +296,11 @@ func (rm *replicationManager) init(
 	rm.pipeline_pending_for_repair = make(map[string]*pipelineRepairer)
 	rm.repair_map_lock = &sync.RWMutex{}
 	rm.repairer_waitgrp = &sync.WaitGroup{}
+	
+	// use xdcr transport when talking to go-couchbase, which sets authentication info
+	// on requests on local cluster
+	couchbase.HTTPClient.Transport = cbauth.WrapHTTPTransport(couchbase.HTTPTransport)
+	
 	logger_rm.Info("Replication manager is initialized")
 
 }
@@ -424,7 +431,7 @@ func startPipeline(topic string) error {
 
 	_, err = pipeline_manager.StartPipeline(topic, settingsMap)
 
-	logger_rm.Infof("Failed to start pipeline - %v\n", err)
+	logger_rm.Infof("Started pipeline - err = %v\n", err)
 	return err
 }
 

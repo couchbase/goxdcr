@@ -42,8 +42,7 @@ var options struct {
 	target_cluster_addr     string //target connect string
 	source_kv_host          string //source kv host name
 	source_kv_port          uint64 //source kv admin port
-	source_cluster_username string //source cluster username
-	source_cluster_password string //source cluster password
+
 	target_bucket_password  string //target bucket password
 
 	// parameters of remote cluster
@@ -65,10 +64,6 @@ func argParse() {
 		"target cluster address")
 	flag.StringVar(&options.target_bucket, "target_bucket", "target",
 		"bucket to replicate to")
-	flag.StringVar(&options.source_cluster_username, "source_cluster_username", "Administrator",
-		"user name to use for logging into source cluster")
-	flag.StringVar(&options.source_cluster_password, "source_cluster_password", "welcome",
-		"password to use for logging into source cluster")
 	flag.StringVar(&options.remoteUuid, "remoteUuid", "1234567",
 		"remote cluster uuid")
 	flag.StringVar(&options.remoteName, "remoteName", "remote",
@@ -116,7 +111,7 @@ func main() {
 }
 
 func setup() error {
-	top_svc, err := s.NewXDCRTopologySvc(options.source_cluster_username, options.source_cluster_password, uint16(options.source_kv_port), base.AdminportNumber, true, nil)
+	top_svc, err := s.NewXDCRTopologySvc(uint16(options.source_kv_port), base.AdminportNumber, true, nil)
 	if err != nil {
 		fmt.Printf("Error starting xdcr topology service. err=%v\n", err)
 		os.Exit(1)
@@ -130,7 +125,7 @@ func setup() error {
 
 	options.source_cluster_addr = utils.GetHostAddr(options.source_kv_host, uint16(options.source_kv_port))
 
-	metadata_svc, err := s.DefaultMetadataSvc()
+	metadata_svc, err := s.NewMetaKVMetadataSvc(nil)
 	if err != nil {
 		return err
 	}

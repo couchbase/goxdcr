@@ -100,7 +100,7 @@ func main() {
 }
 
 func startUpr(cluster, bucketn string, waitGrp *sync.WaitGroup) {
-	b, err := utils.Bucket(cluster, bucketn, "", "")
+	b, err := utils.LocalBucket(cluster, bucketn)
 	mf(err, "bucket")
 
 	uprFeed, err = b.StartUprFeed("rawupr", uint32(0))
