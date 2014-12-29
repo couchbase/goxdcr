@@ -34,6 +34,9 @@ type RemoteClusterReference struct {
     
     DemandEncryption  bool `json:"demandEncryption"`
     Certificate  []byte  `json:"certificate"`
+    
+    // revision number to be used by metadata service. not included in json
+	Revision  interface{}
 }
 
 func NewRemoteClusterReference(uuid, name, hostName, userName, password string, 

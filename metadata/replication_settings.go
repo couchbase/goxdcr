@@ -160,6 +160,9 @@ type ReplicationSettings struct {
 	//stats updating interval in milliseconds
 	//default:5 second
 	StatsInterval int `json:"stats_interval"`
+	
+    // revision number to be used by metadata service. not included in json
+	Revision  interface{}
 }
 
 func DefaultSettings() *ReplicationSettings {

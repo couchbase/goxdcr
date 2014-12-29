@@ -15,7 +15,6 @@ import (
 	"os"
 	rm "github.com/couchbase/goxdcr/replication_manager"
 	s "github.com/couchbase/goxdcr/service_impl"
-	utils "github.com/couchbase/goxdcr/utils"	
 	base "github.com/couchbase/goxdcr/base"
 
 	"github.com/couchbase/goxdcr/metakv/metakvsanity"
@@ -91,7 +90,8 @@ func main() {
 		os.Exit(1)
 	}
 
-	metadata_svc, err := s.NewMetadataSvc(utils.GetHostAddr(host, uint16(options.gometaRequestPort)), nil)
+	//metadata_svc, err := s.NewMetadataSvc(utils.GetHostAddr(host, uint16(options.gometaRequestPort)), nil)
+	metadata_svc, err := s.NewMetaKVMetadataSvc(nil)
 	if err != nil {
 		fmt.Printf("Error starting metadata service. err=%v\n", err)
 		os.Exit(1)

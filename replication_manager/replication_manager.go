@@ -378,7 +378,7 @@ func DeleteReplication(topic string) error {
 				return nil
 			}
 		}
-		return err
+		return base.ErrorRequestedResourceNotFound
 	}
 	oldspec, _ := replication_mgr.repl_spec_svc.ReplicationSpec(topic)
 
@@ -549,7 +549,8 @@ func (rm *replicationManager) createAndPersistReplicationSpec(sourceBucket, targ
 	// check if the same replication already exists
 	replicationId := metadata.ReplicationId(sourceBucket, targetClusterUUID, targetBucket)
 	if err := validatePipelineExists(replicationId, "starting", false); err != nil {
-		return nil, err
+		// TODO the error is being returned in an error list in old xdcr. may need to comform to that
+		return nil, errors.New("Replication to the same remote cluster and bucket already exists")
 	}
 
 	spec := metadata.NewReplicationSpecification(sourceBucket, targetClusterUUID, targetBucket)

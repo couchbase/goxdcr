@@ -38,6 +38,9 @@ type ReplicationSpecification struct {
 	TargetBucketName string `json:"targetBucketName"`
 
 	Settings *ReplicationSettings `json:"replicationSettings"`
+	
+    // revision number to be used by metadata service. not included in json
+	Revision  interface{}
 }
 
 func NewReplicationSpecification(sourceBucketName string, targetClusterUUID string, targetBucketName string) *ReplicationSpecification {

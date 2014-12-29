@@ -42,7 +42,7 @@ const (
 )
 
 // delimiter for multiple parts in a key
-var KeyPartsDelimiter = "_"
+var KeyPartsDelimiter = "/"
 
 //constants for adminport
 var AdminportUrlPrefix = UrlDelimiter
@@ -85,6 +85,7 @@ var ParseIntBase    = 10
 var ParseIntBitSize = 64
 
 var ErrorNotMyVbucket = errors.New("NOT_MY_VBUCKET")
+var ErrorRequestedResourceNotFound = errors.New("Requested resource not found")
 
 // constants used for remote cluster references
 const (

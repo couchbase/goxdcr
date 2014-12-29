@@ -8,6 +8,7 @@
 // and limitations under the License.
 
 // metadata service implementation leveraging gometa
+// gometa service does not use revision number. "rev" in all metadata service APIs are set to nil or ignored
 package service_impl
 
 import (
@@ -20,6 +21,7 @@ import (
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/utils"
+	"github.com/couchbase/goxdcr/service_def"
 )
 
 var goMetadataServiceMethod = "RequestReceiver.NewRequest"
@@ -51,9 +53,10 @@ func NewMetadataSvc(hostAddr string, logger_ctx *log.LoggerContext) (*MetadataSv
 	}
 }
 
-func (meta_svc *MetadataSvc) Get(key string) ([] byte, error) {
+func (meta_svc *MetadataSvc) Get(key string) ([] byte, interface{}, error) {
 	opCode := common.GetOpCodeStr(common.OPCODE_GET)
-	return meta_svc.sendRequest(opCode, key, nil)
+	value, err := meta_svc.sendRequest(opCode, key, nil)
+	return value, nil, err
 }
 
 func (meta_svc *MetadataSvc) Add(key string, value []byte) error {
@@ -73,19 +76,19 @@ func (meta_svc *MetadataSvc) AddWithCatalog(catalogKey, key string, value []byte
 	return meta_svc.AddKeyToCatalog(catalogKey, key)
 }
 
-func (meta_svc *MetadataSvc) Set(key string, value []byte) error {
+func (meta_svc *MetadataSvc) Set(key string, value []byte, rev interface{}) error {
 	opCode := common.GetOpCodeStr(common.OPCODE_SET)
 	_, err := meta_svc.sendRequest(opCode, key, value)
 	return err
 }
 
-func (meta_svc *MetadataSvc) Del(key string) error {
+func (meta_svc *MetadataSvc) Del(key string, rev interface{}) error {
 	opCode := common.GetOpCodeStr(common.OPCODE_DELETE)
 	_, err := meta_svc.sendRequest(opCode, key, nil)
 	return err
 }
 
-func (meta_svc *MetadataSvc) DelWithCatalog(catalogKey, key string) error {
+func (meta_svc *MetadataSvc) DelWithCatalog(catalogKey, key string, rev interface{}) error {
 	// first remove key from catalog
 	err := meta_svc.RemoveKeyFromCatalog(catalogKey, key)
 	if err != nil {
@@ -93,7 +96,7 @@ func (meta_svc *MetadataSvc) DelWithCatalog(catalogKey, key string) error {
 	}
 	
 	// then delete the key
- 	return meta_svc.Del(key)
+ 	return meta_svc.Del(key, rev)
 }
 
 func (meta_svc *MetadataSvc) sendRequest(opCode, key string, value []byte) ([]byte, error) {
@@ -111,7 +114,7 @@ func (meta_svc *MetadataSvc) sendRequest(opCode, key string, value []byte) ([]by
 func (meta_svc *MetadataSvc) AddKeyToCatalog(catalogKey, key string) error {
 	var catalog []string
 
-	result, err := meta_svc.Get(catalogKey)
+	result, _, err := meta_svc.Get(catalogKey)
 	if err != nil {
 		// if catalog does not exist, create a new catalog
 		catalog = make([]string, 0)
@@ -132,14 +135,14 @@ func (meta_svc *MetadataSvc) AddKeyToCatalog(catalogKey, key string) error {
 		return err
 	}
 	// update/insert catalog
-	return meta_svc.Set(catalogKey, catalogBytes)
+	return meta_svc.Set(catalogKey, catalogBytes, nil)
 }
 
 // remove a key from a catalog 
 func (meta_svc *MetadataSvc) RemoveKeyFromCatalog(catalogKey, key string) error {
 	var catalog []string
 
-	result, err := meta_svc.Get(catalogKey)
+	result, _, err := meta_svc.Get(catalogKey)
 	if err != nil {
 		return errors.New(fmt.Sprintf("Error removing key %v from catalog %v since catalog does not exist\n", key, catalogKey))
 	} 
@@ -162,100 +165,43 @@ func (meta_svc *MetadataSvc) RemoveKeyFromCatalog(catalogKey, key string) error 
 		return err
 	}
 	// update catalog
-	return meta_svc.Set(catalogKey, catalogBytes)
+	return meta_svc.Set(catalogKey, catalogBytes, nil)
 }
 
-// get all keys from a catalog 
-func (meta_svc *MetadataSvc) GetKeysFromCatalog(catalogKey string) ([]string, error) {
-	var catalog []string
-
-	result, err := meta_svc.Get(catalogKey)
+// get all keys from a catalog
+func (meta_svc *MetadataSvc) GetAllKeysFromCatalog(catalogKey string) ([]string, error) {
+	catalog := make([]string, 0)
+	
+	result, _, err := meta_svc.Get(catalogKey)
 	if err != nil {
 		// no catalog is ok
-		return nil, nil
-	} 
-	
-	// unmarshal catalog 
-	err = json.Unmarshal(result, &catalog) 
+		return catalog, nil
+	}
+	// unmarshal catalog
+	err = json.Unmarshal(result, &catalog)
 	if err != nil {
 		return nil, err
 	}
-	
 	return catalog, nil
 }
 
-// utility methods for starting and killing the gometa service which the metadata service depends on. 
-// mostly for testing
+// get all key values from a catalog 
+func (meta_svc *MetadataSvc) GetAllMetadataFromCatalog(catalogKey string) ([]*service_def.MetadataEntry, error) {
+	entries := make([]*service_def.MetadataEntry, 0)
 
-/* no longer needed. Remove after things stablize
-
-// start the gometa service
-func StartGometaService() (*exec.Cmd, error) {
-	fmt.Println("starting gometa service. this will take a couple seconds")
-	goPaths := os.Getenv("GOPATH")
-
-	goPathArr := strings.Split(goPaths, ":")
-	
-	// iterate through all defined gopath till we find the source path for gometa and goxdcr 
-	var gometaDir string
-	var goxdcrDir string
-	for _, goPath := range goPathArr {
- 		gometaDirCur := goPath + "/src/github.com/couchbase/gometa"
- 		goxdcrDirCur := goPath + "/src/github.com/couchbase/goxdcr"
- 		
- 		command := exec.Command("/bin/bash", "-c", "test -d " + gometaDirCur)
- 		err := command.Run()
-		if err == nil {
-			gometaDir = gometaDirCur
-		} 
-		
-		command = exec.Command("/bin/bash", "-c", "test -d " + goxdcrDirCur)
- 		err = command.Run()
-		if err == nil {
-			goxdcrDir = goxdcrDirCur
-		}
-		
-		if gometaDir != "" && goxdcrDir != "" {
-			break
-		}
-	}
-	
-	if gometaDir == "" || goxdcrDir == "" {
- 		return nil, errors.New(fmt.Sprintf("Cannot find gometa or goxdcr in source path, %v\n", goPaths))	
-	}
-		
-	// build gometa executable
-	objPath := goxdcrDir + "/../../../../bin/gometa"
-	gometaSrcPath := gometaDir + "/cmd/gometa/*.go"
-	command := exec.Command("/bin/bash", "-c", "go build -o " + objPath + " " + gometaSrcPath)
-	err := command.Run()
+	keys, err := meta_svc.GetAllKeysFromCatalog(catalogKey)
 	if err != nil {
-		fmt.Printf("Error executing command line - %v\n", command.Args)
 		return nil, err
 	}
-		
-	// run gometa executable to start server
-	command = exec.Command("/bin/bash", "-c", objPath + " -config " + goxdcrDir + "/service_impl/metadata_svc_config")
-    command.Stdin = os.Stdout   
-	err = command.Start()
-	if err != nil {
-		fmt.Printf("Error executing gometa command err=%v\n", err)
-		return nil, err
-	}
-	fmt.Printf("output=%v\n", outputs)
 	
-	//wait for gometa service to finish starting
-	time.Sleep(time.Second * 3)
-		
-	fmt.Println("started gometa service.")
-	return command, nil
+	for _, key := range keys {
+		value, rev, err := meta_svc.Get(key)
+		if err != nil {
+			// ignore error. it is ok for some keys in catalog to be invalid
+			continue
+		}
+		entries = append(entries, &service_def.MetadataEntry{key, value, rev})
+	}
+	
+	return entries, nil
 }
-
-// kill the gometa service
-func KillGometaService(cmd *exec.Cmd) {
-	if err := cmd.Process.Kill(); err != nil {
-		fmt.Println("failed to kill gometa service. Please kill it manually")
-	} else {
-		fmt.Println("killed gometa service successfully")
-	}
-} */

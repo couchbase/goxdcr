@@ -63,14 +63,34 @@ func DeleteTestRemoteCluster(remote_cluster_service service_def.RemoteClusterSvc
 	return err
 }
 
-func SendRequestAndValidateResponse(testName, httpMethod, url string, body []byte, username, password string) (*http.Response, error) {
-	request, err := http.NewRequest(httpMethod, url, bytes.NewBuffer(body))
+func SendRequestAndValidateResponse(testName, httpMethod, urlStr string, body []byte, username, password string) (*http.Response, error) {
+	request, err := http.NewRequest(httpMethod, urlStr, bytes.NewBuffer(body))
+	if err != nil {
+		return nil, err
+	}	
+	
+	request.Header.Set(rm.ContentType, rm.DefaultContentType)
+	request.SetBasicAuth(username, password)
+	//fmt.Printf("request=%v, url=%v\n", request, request.URL)
+	response, err := http.DefaultClient.Do(request)
+
+	err = ValidateResponse(testName, response, err)
+	//fmt.Printf("err=%v, response=%v\n", err, response)
+	return response, err
+}
+
+func SendRequestWithEscapedIdAndValidateResponse(testName, httpMethod, urlStr, escapedId string, body []byte, username, password string) (*http.Response, error) {
+	request, err := http.NewRequest(httpMethod, urlStr, bytes.NewBuffer(body))
 	if err != nil {
 		return nil, err
 	}
+	
+	// golang does not provide APIs to construct Request or URL with escaped path. Has to do this as a workaround
+	request.URL.Path += base.UrlDelimiter + escapedId	
+	
 	request.Header.Set(rm.ContentType, rm.DefaultContentType)
 	request.SetBasicAuth(username, password)
-	//fmt.Println("request", request)
+	//fmt.Printf("request=%v, url=%v\n", request, request.URL)
 	response, err := http.DefaultClient.Do(request)
 
 	err = ValidateResponse(testName, response, err)

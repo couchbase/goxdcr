@@ -53,6 +53,7 @@ var options struct {
 }
 
 func argParse() {
+	flag.StringVar(&options.sourceKVHost, "sourceKVHost", base.LocalHostName, "source kv host")
 	flag.Uint64Var(&options.sourceKVAdminPort, "sourceKVAdminPort", 9000,
 		"admin port number for source kv")
 	flag.StringVar(&options.sourceBucket, "sourceBucket", "default",
@@ -272,6 +273,8 @@ func testCreateReplication() (string, string, error) {
 	replicationId, err := rm.DecodeCreateReplicationResponse(response)
 	escapedReplId := url.QueryEscape(replicationId)
 	
+	fmt.Printf("id=%v, eid=%v\n", replicationId, escapedReplId)
+	
 	fmt.Println("Waiting for replication to finish starting")
 	time.Sleep(30 * time.Second)
 
@@ -381,13 +384,13 @@ func testGetAllReplicationInfos(replicationId string) error {
 func testPauseReplication(replicationId, escapedReplId string) error {
 	fmt.Println("Start testPauseReplication")
 
-	url := common.GetAdminportUrlPrefix(options.sourceKVHost, options.sourceKVAdminPort) + rm.SettingsReplicationsPath + base.UrlDelimiter + escapedReplId
+	url := common.GetAdminportUrlPrefix(options.sourceKVHost, options.sourceKVAdminPort) + rm.SettingsReplicationsPath
 
 	settings := make(map[string]interface{})
 	settings[rm.PauseRequested] = true
 	paramsBytes, _ := rm.EncodeMapIntoByteArray(settings)
 
-	_, err := common.SendRequestAndValidateResponse("testPauseReplication", base.MethodPost, url, paramsBytes, options.username, options.password)
+	_, err := common.SendRequestWithEscapedIdAndValidateResponse("testPauseReplication", base.MethodPost, url, escapedReplId, paramsBytes, options.username, options.password)
 	if err != nil {
 		return err
 	}
@@ -401,13 +404,13 @@ func testPauseReplication(replicationId, escapedReplId string) error {
 func testResumeReplication(replicationId, escapedReplId string) error {
 	fmt.Println("Start testResumeReplication")
 	
-	url := common.GetAdminportUrlPrefix(options.sourceKVHost, options.sourceKVAdminPort) + rm.SettingsReplicationsPath + base.UrlDelimiter + escapedReplId
+	url := common.GetAdminportUrlPrefix(options.sourceKVHost, options.sourceKVAdminPort) + rm.SettingsReplicationsPath
 
 	settings := make(map[string]interface{})
 	settings[rm.PauseRequested] = false
 	paramsBytes, _ := rm.EncodeMapIntoByteArray(settings)
 	
-	_, err := common.SendRequestAndValidateResponse("testResumeReplication", base.MethodPost, url, paramsBytes, options.username, options.password)
+	_, err := common.SendRequestWithEscapedIdAndValidateResponse("testResumeReplication", base.MethodPost, url, escapedReplId, paramsBytes, options.username, options.password)
 	if err != nil {
 		return err
 	}
@@ -420,9 +423,9 @@ func testResumeReplication(replicationId, escapedReplId string) error {
 
 func testDeleteReplication(replicationId, escapedReplId string) error {
 	fmt.Println("Start testDeleteReplication")
-	url := common.GetAdminportUrlPrefix(options.sourceKVHost, options.sourceKVAdminPort) + rm.DeleteReplicationPrefix + base.UrlDelimiter + escapedReplId
+	url := common.GetAdminportUrlPrefix(options.sourceKVHost, options.sourceKVAdminPort) + rm.DeleteReplicationPrefix
 
-	_, err := common.SendRequestAndValidateResponse("testDeleteReplication", base.MethodDelete, url, nil, options.username, options.password)
+	_, err := common.SendRequestWithEscapedIdAndValidateResponse("testDeleteReplication", base.MethodDelete, url, escapedReplId, nil, options.username, options.password)
 	if err != nil {
 		return err
 	}
@@ -438,7 +441,7 @@ func testReplicationSettingsWithJustValidate(escapedReplId string) error {
 	testName := "testReplicationSettingsWithJustValidate"
 	
 	// change replication settings
-	url := common.GetAdminportUrlPrefix(options.sourceKVHost, options.sourceKVAdminPort) + rm.SettingsReplicationsPath + base.UrlDelimiter + escapedReplId
+	url := common.GetAdminportUrlPrefix(options.sourceKVHost, options.sourceKVAdminPort) + rm.SettingsReplicationsPath
 
 	params := make(map[string]interface{})
 	params[rm.BatchSize] = BatchSizePerRepl
@@ -447,7 +450,7 @@ func testReplicationSettingsWithJustValidate(escapedReplId string) error {
 
 	paramsBytes, _ := rm.EncodeMapIntoByteArray(params)
 
-	_, err := common.SendRequestAndValidateResponse(testName, base.MethodPost, url, paramsBytes, options.username, options.password)
+	_, err := common.SendRequestWithEscapedIdAndValidateResponse(testName, base.MethodPost, url, escapedReplId, paramsBytes, options.username, options.password)
 	if err != nil {
 		return err
 	}
@@ -473,14 +476,14 @@ func testReplicationSettings(escapedReplId string) error {
 	testName := "testReplicationSettings"
 	
 	// change replication settings
-	url := common.GetAdminportUrlPrefix(options.sourceKVHost, options.sourceKVAdminPort) + rm.SettingsReplicationsPath + base.UrlDelimiter + escapedReplId
+	url := common.GetAdminportUrlPrefix(options.sourceKVHost, options.sourceKVAdminPort) + rm.SettingsReplicationsPath
 
 	params := make(map[string]interface{})
 	params[rm.BatchSize] = BatchSizePerRepl
 
 	paramsBytes, _ := rm.EncodeMapIntoByteArray(params)
 
-	_, err := common.SendRequestAndValidateResponse(testName, base.MethodPost, url, paramsBytes, options.username, options.password)
+	_, err := common.SendRequestWithEscapedIdAndValidateResponse(testName, base.MethodPost, url, escapedReplId, paramsBytes, options.username, options.password)
 	if err != nil {
 		return err
 	}
@@ -572,9 +575,9 @@ func getDefaultSettings(testName string) (map[string]interface{}, error) {
 }
 
 func getReplicationSettings(testName, escapedReplId string) (map[string]interface{}, error) {
-	url := common.GetAdminportUrlPrefix(options.sourceKVHost, options.sourceKVAdminPort) + rm.SettingsReplicationsPath + base.UrlDelimiter + escapedReplId
-
-	response, err := common.SendRequestAndValidateResponse(testName, base.MethodGet, url, nil, options.username, options.password)
+	url := common.GetAdminportUrlPrefix(options.sourceKVHost, options.sourceKVAdminPort) + rm.SettingsReplicationsPath
+	response, err := common.SendRequestWithEscapedIdAndValidateResponse(testName, base.MethodGet, url, escapedReplId, nil, options.username, options.password)
+	fmt.Printf("url=%v, res=%v, err=%v\n", url, response, err)
 	if err != nil {
 		return nil, err
 	}
