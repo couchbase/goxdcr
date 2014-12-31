@@ -19,6 +19,7 @@ import (
 	"crypto/x509"
 	"crypto/tls"
 	"strings"
+	"expvar"
 )
 
 type BucketBasicStats struct {
@@ -328,5 +329,15 @@ func GetSeqNoFromMCRequest(req *gomemcached.MCRequest) uint64 {
 	extra := req.Extras
 	seqno := binary.BigEndian.Uint64(extra[:8])
 	return seqno
+}
+
+func GetMapFromExpvarMap(expvarMap *expvar.Map) map[string]string {
+	regMap := make(map[string]string)
+	
+	expvarMap.Do(func(keyValue expvar.KeyValue) {
+		regMap[keyValue.Key] = keyValue.Value.String()
+		return
+	})
+	return regMap
 }
 

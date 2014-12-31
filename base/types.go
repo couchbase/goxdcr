@@ -13,6 +13,7 @@ import (
 	"bytes"
 	"fmt"
 	"reflect"
+	"time"
 )
 
 type SettingDef struct {
@@ -60,5 +61,16 @@ type ClusterConnectionInfoProvider interface {
 	MyConnectionStr()  string
 	MyUsername()  string
 	MyPassword()  string
+}
+
+type ReplicationInfo struct {
+	Id string
+	StatsMap  map[string]string
+	ErrorList []ErrorInfo
+}
+
+type ErrorInfo struct {
+	Time time.Time
+	ErrorMsg  string
 }
 

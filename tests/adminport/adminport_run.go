@@ -136,6 +136,11 @@ func startAdminport() {
 		fmt.Println(err.Error())
 		return
 	}
+	
+	if err := testGetAllReplicationInfos(replicationId); err != nil {
+		fmt.Println(err.Error())
+		return
+	}
 
 	if err := testPauseReplication(replicationId, escapedReplId); err != nil {
 		fmt.Println(err.Error())
@@ -315,33 +320,62 @@ func testGetAllReplications(replicationId string) error {
 	if err != nil {
 		return err
 	}
-	var replInfoMapArr []map[string]interface{}
-	err = json.Unmarshal(bodyBytes, &replInfoMapArr)
+	var replMapArr []map[string]interface{}
+	err = json.Unmarshal(bodyBytes, &replMapArr)
 	if err != nil {
 		return err
 	} 
 	
-	if len(replInfoMapArr) != 1 {
-		return errors.New(fmt.Sprintf("Number of replications returned is %v instead of 1\n", len(replInfoMapArr)))
+	if len(replMapArr) != 1 {
+		return errors.New(fmt.Sprintf("Number of replications returned is %v instead of 1\n", len(replMapArr)))
 	}
 	
-	var rightReplInfoMap map[string]interface{}
-	for _, replInfoMap := range replInfoMapArr {
-		if replInfoMap[rm.ReplicationDocId] == replicationId {
-			rightReplInfoMap = replInfoMap
-			break
-		}
-	}
-	
-	if rightReplInfoMap == nil {
+	replMap := replMapArr[0] 
+		
+	if replMap[rm.ReplicationDocId] != replicationId {
 		return errors.New(fmt.Sprintf("Did not find replication with id %v\n", replicationId))
 	}
 	
-	err = common.ValidateFieldValue("Type", rm.ReplicationDocTypeXmem, rightReplInfoMap[rm.ReplicationDocType])
+	err = common.ValidateFieldValue("Type", rm.ReplicationDocTypeXmem, replMap[rm.ReplicationDocType])
 	if err != nil {
 		return err
 	} 
-	return common.ValidateFieldValue("PauseRequested", false, rightReplInfoMap[rm.ReplicationDocPauseRequested]) 
+	return common.ValidateFieldValue("PauseRequested", false, replMap[rm.ReplicationDocPauseRequested]) 
+}
+
+func testGetAllReplicationInfos(replicationId string) error {
+	fmt.Println("Start testGetAllReplicationInfos")
+
+	// has to use internal rest port for this since it is not a public api
+	url := common.GetAdminportUrlPrefix(options.sourceKVHost, uint64(base.AdminportNumber)) + rm.AllReplicationInfosPath
+
+	response, err := common.SendRequestAndValidateResponse("testGetAllReplicationInfos", base.MethodGet, url, nil, options.username, options.password)
+	if err != nil {
+		return err
+	}
+	
+	defer response.Body.Close()
+
+	bodyBytes, err := ioutil.ReadAll(response.Body)
+	if err != nil {
+		return err
+	}
+	var replInfoArr []base.ReplicationInfo
+	err = json.Unmarshal(bodyBytes, &replInfoArr)
+	if err != nil {
+		return err
+	} 
+	
+	if len(replInfoArr) != 1 {
+		return errors.New(fmt.Sprintf("Number of replications returned is %v instead of 1\n", len(replInfoArr)))
+	}
+	
+	replInfo := replInfoArr[0] 
+		
+	if replInfo.Id != replicationId {
+		return errors.New(fmt.Sprintf("Did not find replication info with id %v\n", replicationId))
+	}
+	return nil
 }
 
 func testPauseReplication(replicationId, escapedReplId string) error {

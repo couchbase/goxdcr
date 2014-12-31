@@ -26,7 +26,7 @@ import (
 	"fmt"
 )
 
-var StaticPaths = [5]string{base.RemoteClustersPath, CreateReplicationPath, InternalSettingsPath, SettingsReplicationsPath, AllReplicationsPath}
+var StaticPaths = [6]string{base.RemoteClustersPath, CreateReplicationPath, InternalSettingsPath, SettingsReplicationsPath, AllReplicationsPath, AllReplicationInfosPath}
 var DynamicPathPrefixes = [5]string{base.RemoteClustersPath, NotifySettingsChangePrefix, DeleteReplicationPrefix, SettingsReplicationsPath, StatisticsPrefix}
 
 var MaxForwardingRetry = 5
@@ -150,6 +150,8 @@ func (adminport *Adminport) handleRequest(
 		response, err = adminport.doDeleteRemoteClusterRequest(request)
 	case AllReplicationsPath + base.UrlDelimiter + base.MethodGet:
 		response, err = adminport.doGetAllReplicationsRequest(request)
+	case AllReplicationInfosPath + base.UrlDelimiter + base.MethodGet:
+		response, err = adminport.doGetAllReplicationInfosRequest(request)
 	case CreateReplicationPath + base.UrlDelimiter + base.MethodPost:
 		response, err = adminport.doCreateReplicationRequest(request)
 	case DeleteReplicationPrefix + DynamicSuffix + base.UrlDelimiter + base.MethodDelete:
@@ -284,6 +286,12 @@ func (adminport *Adminport) doGetAllReplicationsRequest(request *http.Request) (
 	}
 	
 	return NewGetAllReplicationsResponse(replSpecs)
+}
+
+func (adminport *Adminport) doGetAllReplicationInfosRequest(request *http.Request) ([]byte, error) {
+	logger_ap.Infof("doGetAllReplicationInfosRequest\n")
+	replInfos := GetReplicationInfos()
+	return NewGetAllReplicationInfosResponse(replInfos)
 }
 
 func (adminport *Adminport) doCreateReplicationRequest(request *http.Request) ([]byte, error) {

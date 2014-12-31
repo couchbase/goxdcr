@@ -42,6 +42,7 @@ const (
 	StatisticsPrefix         = "stats/buckets"
 	InternalSettingsPath     = "internalSettings"
 	AllReplicationsPath =      "pools/default/replications"
+	AllReplicationInfosPath =      "pools/default/replicationInfos"
 	DeleteReplicationPrefix  = "controller/cancelXDCR"
 	SettingsReplicationsPath = "settings/replications" 
 	// Some url paths are not static and have variable contents, e.g., settings/replications/$replication_id
@@ -189,6 +190,10 @@ func NewGetAllReplicationsResponse(replSpecs map[string]*metadata.ReplicationSpe
 	}
 	b, err := json.Marshal(replArr)
 	return b, err
+}
+
+func NewGetAllReplicationInfosResponse(replInfos []base.ReplicationInfo) ([]byte, error) {
+	return json.Marshal(replInfos)
 }
 
 func getReplicationDocMap(replSpec *metadata.ReplicationSpecification) map[string]interface{} {

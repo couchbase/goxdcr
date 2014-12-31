@@ -26,6 +26,7 @@ import (
 	"github.com/couchbase/goxdcr/pipeline_svc"
 	"github.com/couchbase/goxdcr/service_def"
 	"github.com/couchbase/goxdcr/supervisor"
+	"github.com/couchbase/goxdcr/utils"
 	"io"
 	"os"
 	"reflect"
@@ -563,6 +564,30 @@ func (rm *replicationManager) createAndPersistReplicationSpec(sourceBucket, targ
 	replication_mgr.repl_spec_svc.AddReplicationSpec(spec)
 	logger_rm.Debugf("replication specification %s is created and persisted\n", spec.Id)
 	return spec, nil
+}
+
+// get info of all running replications
+func GetReplicationInfos() []base.ReplicationInfo {
+	replInfos := make([]base.ReplicationInfo, 0)
+	// TODO paused replications are not returned
+	// if we need to return paused replications, we will need to cache statistics 
+	// and errors for paused replications somewhere, e.g., in repl_mgr.
+	for topic, _ := range pipeline_manager.Pipelines() {
+		replInfo := base.ReplicationInfo{}
+		replInfo.Id = topic
+		statsMap, err := getStatisticsForPipeline(topic)
+		logger_rm.Infof("statsmap=%v\n", statsMap.String())
+		if err != nil {
+			logger_rm.Debugf("Failed to retrieve statst for pipeline %v\n", topic)
+			continue
+		}
+		replInfo.StatsMap = utils.GetMapFromExpvarMap(statsMap)
+		replInfo.ErrorList = make([]base.ErrorInfo, 0)
+		// TODO populate ErrorList
+		
+		replInfos = append(replInfos, replInfo)
+	}
+	return replInfos
 }
 
 //error handler
