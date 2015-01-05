@@ -82,7 +82,7 @@ func (c *Client) Transmit(req *gomemcached.MCRequest) error {
 // Receive a response
 func (c *Client) Receive() (*gomemcached.MCResponse, error) {
 	resp, _, err := getResponse(c.conn, c.hdrBuf)
-	if err != nil {
+	if err != nil && resp.Status != gomemcached.KEY_ENOENT {
 		c.healthy = false
 	}
 	return resp, err
