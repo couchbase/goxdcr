@@ -14,8 +14,8 @@ import (
 	"github.com/couchbase/goxdcr/service_def"
 )
 
-func GetAdminportUrlPrefix(hostName string) string {
-	return "http://" + utils.GetHostAddr(hostName, base.AdminportNumber) + base.AdminportUrlPrefix
+func GetAdminportUrlPrefix(hostName string, adminportNumber uint64) string {
+	return "http://" + utils.GetHostAddr(hostName, uint16(adminportNumber)) + base.AdminportUrlPrefix
 }
 
 func ValidateResponse(testName string, response *http.Response, err error) error {
@@ -63,17 +63,75 @@ func DeleteTestRemoteCluster(remote_cluster_service service_def.RemoteClusterSvc
 	return err
 }
 
-func SendRequestAndValidateResponse(testName, httpMethod, url string, body []byte) (*http.Response, error) {
-	request, err := http.NewRequest(httpMethod, url, bytes.NewBuffer(body))
+func SendRequestAndValidateResponse(testName, httpMethod, urlStr string, body []byte, username, password string) (*http.Response, error) {
+	request, err := http.NewRequest(httpMethod, urlStr, bytes.NewBuffer(body))
+	if err != nil {
+		return nil, err
+	}	
+	
+	request.Header.Set(rm.ContentType, rm.DefaultContentType)
+	request.SetBasicAuth(username, password)
+	//fmt.Printf("request=%v, url=%v\n", request, request.URL)
+	response, err := http.DefaultClient.Do(request)
+
+	err = ValidateResponse(testName, response, err)
+	//fmt.Printf("err=%v, response=%v\n", err, response)
+	return response, err
+}
+
+func SendRequestWithEscapedIdAndValidateResponse(testName, httpMethod, urlStr, escapedId string, body []byte, username, password string) (*http.Response, error) {
+	request, err := http.NewRequest(httpMethod, urlStr, bytes.NewBuffer(body))
 	if err != nil {
 		return nil, err
 	}
+	
+	// golang does not provide APIs to construct Request or URL with escaped path. Has to do this as a workaround
+	request.URL.Path += base.UrlDelimiter + escapedId	
+	
 	request.Header.Set(rm.ContentType, rm.DefaultContentType)
-
-	fmt.Println("request", request)
-
+	request.SetBasicAuth(username, password)
+	//fmt.Printf("request=%v, url=%v\n", request, request.URL)
 	response, err := http.DefaultClient.Do(request)
+
 	err = ValidateResponse(testName, response, err)
-	fmt.Printf("err=%v, response=%v\n", err, response)
+	//fmt.Printf("err=%v, response=%v\n", err, response)
 	return response, err
+}
+
+func CreateTestRemoteClusterThroughRest(sourceKVHost string, adminport uint64, username, password, remoteUuid, remoteName, remoteHostName, remoteUserName, remotePassword string, 
+                             remoteDemandEncryption bool, remoteCertificateFile string) error {
+	url := GetAdminportUrlPrefix(sourceKVHost, adminport) + base.RemoteClustersPath
+
+	params := make(map[string]interface{})
+	params[base.RemoteClusterUuid] = remoteUuid
+	params[base.RemoteClusterName] = remoteName
+	params[base.RemoteClusterHostName] = remoteHostName
+	params[base.RemoteClusterUserName] = remoteUserName
+	params[base.RemoteClusterPassword] = remotePassword
+	params[base.RemoteClusterDemandEncryption] = remoteDemandEncryption
+	
+	// read certificate from file
+	if remoteCertificateFile != "" {
+		serverCert, err := ioutil.ReadFile(remoteCertificateFile)
+		if err != nil {
+    		fmt.Printf("Could not load server certificate! err=%v\n", err)
+    		return err
+		}
+		params[base.RemoteClusterCertificate] = serverCert
+	}
+
+	paramsBytes, err := rm.EncodeMapIntoByteArray(params)
+	if err != nil {
+		return err
+	}
+	
+	_, err = SendRequestAndValidateResponse("CreateTestRemoteClusterThroughRest", base.MethodPost, url, paramsBytes, username, password)
+	return err
+}
+
+func DeleteTestRemoteClusterThroughRest(sourceKVHost string, adminport uint64,  username, password, remoteName string) error {
+	url := GetAdminportUrlPrefix(sourceKVHost, adminport) + base.RemoteClustersPath + base.UrlDelimiter + remoteName
+	
+	_, err := SendRequestAndValidateResponse("DeleteTestRemoteClusterThroughRest", base.MethodDelete, url, nil, username, password)
+	return err
 }

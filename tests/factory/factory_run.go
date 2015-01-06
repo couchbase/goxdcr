@@ -108,7 +108,7 @@ func invokeFactory() error {
 							     remote_cluster_svc,
 							     cluster_info_svc, top_svc, s.NewReplicationSettingsSvc(msvc, nil))
 
-	fac := factory.NewXDCRFactory(repl_spec_svc, remote_cluster_svc, cluster_info_svc, top_svc, log.DefaultLoggerContext, log.DefaultLoggerContext, nil)
+	fac := factory.NewXDCRFactory(repl_spec_svc, remote_cluster_svc, cluster_info_svc, top_svc, log.DefaultLoggerContext, log.DefaultLoggerContext, nil, nil)
 
 	// create remote cluster reference needed by replication
 	err = common.CreateTestRemoteCluster(remote_cluster_svc, options.remoteUuid, options.remoteName, options.remoteHostName, options.remoteUserName, options.remotePassword, 
@@ -126,7 +126,7 @@ func invokeFactory() error {
 		return err
 	}
 	
-	replSpec := metadata.NewReplicationSpecification(options.sourceBucket, remoteClusterRef.Uuid, options.targetBucket, "")
+	replSpec := metadata.NewReplicationSpecification(options.sourceBucket, remoteClusterRef.Uuid, options.targetBucket)
 	replSpec.Settings.SourceNozzlePerNode = NUM_SOURCE_CONN
 	replSpec.Settings.TargetNozzlePerNode = NUM_TARGET_CONN
 	err = repl_spec_svc.AddReplicationSpec(replSpec)

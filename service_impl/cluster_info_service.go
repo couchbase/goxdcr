@@ -28,10 +28,11 @@ func NewClusterInfoSvc(logger_ctx *log.LoggerContext) *ClusterInfoSvc {
 }
 
 func (ci_svc *ClusterInfoSvc) GetMyActiveVBuckets(clusterConnInfoProvider base.ClusterConnectionInfoProvider, bucketName, NodeId string) ([]uint16, error) {
-	bucket, err := ci_svc.GetBucket(clusterConnInfoProvider, bucketName)
+	bucket, err := ci_svc.GetBucket(clusterConnInfoProvider, bucketName)	
 	if err != nil {
 		return nil, err
 	}
+	defer bucket.Close()
 
 	// in test env, there should be only one kv in bucket server list
 	kvaddr := bucket.VBServerMap().ServerList[0]
@@ -43,22 +44,20 @@ func (ci_svc *ClusterInfoSvc) GetMyActiveVBuckets(clusterConnInfoProvider base.C
 
 	vbList := m[kvaddr]
 	
-	bucket.Close()
 
 	return vbList, nil
 }
 
 func (ci_svc *ClusterInfoSvc) GetServerList(clusterConnInfoProvider base.ClusterConnectionInfoProvider, bucketName string) ([]string, error) {
-	bucket, err := ci_svc.GetBucket(clusterConnInfoProvider, bucketName)
+	bucket, err := ci_svc.GetBucket(clusterConnInfoProvider, bucketName)	
 	if err != nil {
 		return nil, err
 	}
+	defer bucket.Close()
 
 	// in test env, there should be only one kv in bucket server list
 	serverlist := bucket.VBServerMap().ServerList
 	
-	bucket.Close()
-
 	return serverlist, nil
 }
 
@@ -67,10 +66,11 @@ func (ci_svc *ClusterInfoSvc) GetServerVBucketsMap(clusterConnInfoProvider base.
 	if err != nil {
 		return nil, err
 	}
+	defer bucket.Close()
+	
 	fmt.Printf("ServerList=%v\n", bucket.VBServerMap().ServerList)
 	serverVBMap, err := bucket.GetVBmap(bucket.VBServerMap().ServerList)
-	//fmt.Printf("ServerVBMap=%v\n", serverVBMap)
-	bucket.Close()
+
 	return serverVBMap, err
 }
 

@@ -57,8 +57,9 @@ type DcpNozzle struct {
 
 	childrenWaitGrp sync.WaitGroup
 
-	counter    int
-	start_time time.Time
+	counter      int
+	start_time   time.Time
+	handle_error bool
 }
 
 func NewDcpNozzle(id string,
@@ -85,6 +86,7 @@ func NewDcpNozzle(id string,
 		AbstractPart:    part,             /*AbstractPart*/
 		bOpen:           true,             /*bOpen	bool*/
 		childrenWaitGrp: sync.WaitGroup{}, /*childrenWaitGrp sync.WaitGroup*/
+		handle_error:    true,
 		lock_uprFeed:    sync.Mutex{},
 	}
 
@@ -149,7 +151,7 @@ func (dcp *DcpNozzle) Start(settings map[string]interface{}) error {
 	// start vbstreams
 	err = dcp.startUprStream(settings)
 	if err != nil {
-		dcp.Stop()
+		dcp.handleGeneralError(err)
 		return err
 	}
 
@@ -159,22 +161,12 @@ func (dcp *DcpNozzle) Start(settings map[string]interface{}) error {
 }
 
 func (dcp *DcpNozzle) Stop() error {
-	// Stop() could be called from more than one go routines in dcp nozzle
-	// Here we are using uprFeed to prevent the actual stop operations
-	// from being executed more than once. In other words, the first call to Stop()
-	// would get uprFeed to be closed and set to nil, and subsequent call(s) to Stop()
-	// would be no ops.
-	if dcp.closeUprFeed() {
-		dcp.Logger().Infof("Stopping DcpNozzle %v\n", dcp.Id())
-		dcp.Logger().Debugf("DcpNozzle %v processed %v items\n", dcp.Id(), dcp.counter)
-		err := dcp.Stop_server()
-		dcp.Logger().Infof("DcpNozzle %v is stopped\n", dcp.Id())
-		return err
-	} else {
-		dcp.Logger().Debugf("Stop() on DcpNozzle %v is skipped since the nozzle has already been stopped\n", dcp.Id())
-	}
-
-	return nil
+	dcp.Logger().Infof("Stopping DcpNozzle %v\n", dcp.Id())
+	dcp.closeUprFeed()
+	dcp.Logger().Debugf("DcpNozzle %v processed %v items\n", dcp.Id(), dcp.counter)
+	err := dcp.Stop_server()
+	dcp.Logger().Infof("DcpNozzle %v is stopped\n", dcp.Id())
+	return err
 
 }
 
@@ -183,10 +175,17 @@ func (dcp *DcpNozzle) closeUprFeed() bool {
 	dcp.lock_uprFeed.Lock()
 	defer dcp.lock_uprFeed.Unlock()
 	if dcp.uprFeed != nil {
+		dcp.Logger().Info("Ask uprfeed to close")
+		//in the process of stopping, no need to report any error to replication manager anymore
+		dcp.handle_error = false
+
 		dcp.uprFeed.Close()
 		dcp.uprFeed = nil
 		actionTaken = true
+	} else {
+		dcp.Logger().Info("uprfeed is already closed. No-op")
 	}
+
 	return actionTaken
 }
 
@@ -212,11 +211,14 @@ func (dcp *DcpNozzle) processData() (err error) {
 		case <-finch:
 			goto done
 		case m, ok := <-mutch: // mutation from upstream
+			if !ok {
+				dcp.Logger().Infof("DCP mutation channel is closed.Stop dcp nozzle now.")
+				//set uprFeed to nil
+				dcp.uprFeed = nil
+				dcp.handleGeneralError(errors.New("DCP stream is closed."))
+				goto done
+			}
 			if dcp.IsOpen() {
-				if ok == false {
-					dcp.Stop()
-					goto done
-				}
 				if m.Status == gomemcached.NOT_MY_VBUCKET {
 					dcp.Logger().Errorf("Raise error condition %v\n", base.ErrorNotMyVbucket)
 					otherInfo := utils.WrapError(base.ErrorNotMyVbucket)
@@ -253,9 +255,13 @@ func (dcp *DcpNozzle) StatusSummary() string {
 }
 
 func (dcp *DcpNozzle) handleGeneralError(err error) {
-	dcp.Logger().Errorf("Raise error condition %v\n", err)
-	otherInfo := utils.WrapError(err)
-	dcp.RaiseEvent(common.ErrorEncountered, nil, dcp, nil, otherInfo)
+	if dcp.handle_error {
+		dcp.Logger().Errorf("Raise error condition %v\n", err)
+		otherInfo := utils.WrapError(err)
+		dcp.RaiseEvent(common.ErrorEncountered, nil, dcp, nil, otherInfo)
+	} else {
+		dcp.Logger().Debugf("%v in shutdown process. err=%v is ignored\n", dcp.Id(), err)
+	}
 }
 
 // start, restart or shutdown streams

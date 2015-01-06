@@ -74,16 +74,18 @@ func ComposeMCRequest(event *mcc.UprEvent) *mc.MCRequest {
 		VBucket: event.VBucket,
 		Key:     event.Key,
 		Body:    event.Value,
-		Extras:  make([]byte, 224)}
+		Extras:  make([]byte, 24)}
 	//opCode
 	req.Opcode = event.Opcode
 
 	//extra
 	if event.Opcode == mc.UPR_MUTATION || event.Opcode == mc.UPR_DELETION ||
 		event.Opcode == mc.UPR_EXPIRATION {
-		binary.BigEndian.PutUint64(req.Extras[0:8], event.Seqno)
-		binary.BigEndian.PutUint32(req.Extras[8:12], event.Flags)
-		binary.BigEndian.PutUint32(req.Extras[12:16], event.Expiry)
+//    <<Flg:32, Exp:32, SeqNo:64, CASPart:64, 0:32>>.
+		binary.BigEndian.PutUint32(req.Extras[0:4], event.Flags)
+		binary.BigEndian.PutUint32(req.Extras[4:8], event.Expiry)
+		binary.BigEndian.PutUint64(req.Extras[8:16], event.RevSeqno)
+		binary.BigEndian.PutUint64(req.Extras[16:24], event.Cas)
 	} else if event.Opcode == mc.UPR_SNAPSHOT {
 		binary.BigEndian.PutUint64(req.Extras[0:8], event.Seqno)
 		binary.BigEndian.PutUint64(req.Extras[8:16], event.SnapstartSeq)

@@ -27,7 +27,6 @@ const(
 	 sourceBucketName = "default"
 	 targetClusterUUID = "testuuid"
 	 targetBucketName = "target" 
-	 filterName = "myActive"
 	 newBatchCount = 345
 )
 
@@ -58,7 +57,7 @@ func startReplicationSpecService() error {
 		
 	// create a test replication spec
 	spec := metadata.NewReplicationSpecification(sourceBucketName, 
-			targetClusterUUID, targetBucketName, filterName)
+			targetClusterUUID, targetBucketName)
 			
 	specId := spec.Id
 	

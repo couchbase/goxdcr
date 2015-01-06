@@ -65,7 +65,7 @@ func RuntimeCtx(topic string) common.PipelineRuntimeContext {
 
 func (pipelineMgr *pipelineManager) startPipeline(topic string, settings map[string]interface{}) (common.Pipeline, error) {
 	var err error
-	pipelineMgr.logger.Infof("Starting the pipeline %s", topic)
+	pipelineMgr.logger.Infof("Starting the pipeline %s with settings = %v\n", topic, settings)
 
 	if f, ok := pipelineMgr.live_pipelines[topic]; !ok {
 		f, err = pipelineMgr.pipeline_factory.NewPipeline(topic)

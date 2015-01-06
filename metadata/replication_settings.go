@@ -24,17 +24,22 @@ const (
 	FilterExpression               = "filter_expression"
 	Active                         = "active"
 	CheckpointInterval             = "checkpoint_interval"
-	BatchCount                     = "batch_count"
-	BatchSize                      = "batch_size"
+	BatchCount                     = "worker_batch_size"
+	BatchSize                      = "doc_batch_size_kb"
 	FailureRestartInterval         = "failure_restart_interval"
 	OptimisticReplicationThreshold = "optimistic_replication_threshold"
-	HttpConnection                 = "http_connection"
+	HttpConnection                 = "http_connections"
 	SourceNozzlePerNode            = "source_nozzle_per_node"
 	TargetNozzlePerNode            = "target_nozzle_per_node"
 	MaxExpectedReplicationLag      = "max_expected_replication_lag"
 	TimeoutPercentageCap           = "timeout_percentage_cap"
 	PipelineLogLevel               = "log_level"
 	PipelineStatsInterval          = "stats_interval"
+)
+
+const (
+	ReplicationTypeXmem = "xmem"
+	ReplicationTypeCapi = "capi"
 )
 
 type SettingsConfig struct {
@@ -48,7 +53,7 @@ type Range struct {
 }
 
 // TODO change to "capi"?
-var ReplicationTypeConfig = &SettingsConfig{"xmem", nil}
+var ReplicationTypeConfig = &SettingsConfig{ReplicationTypeXmem, nil}
 var FilterExpressionConfig = &SettingsConfig{"", nil}
 var ActiveConfig = &SettingsConfig{true, nil}
 var CheckpointIntervalConfig = &SettingsConfig{1800, &Range{60, 14400}}
@@ -155,6 +160,9 @@ type ReplicationSettings struct {
 	//stats updating interval in milliseconds
 	//default:5 second
 	StatsInterval int `json:"stats_interval"`
+	
+    // revision number to be used by metadata service. not included in json
+	Revision  interface{}
 }
 
 func DefaultSettings() *ReplicationSettings {

@@ -37,27 +37,22 @@ type ReplicationSpecification struct {
 	// Target Bucket Name
 	TargetBucketName string `json:"targetBucketName"`
 
-	//the filter name, it is going to be part of the key
-	//It will not change once the replication specification is created
-	FilterName string `json:"filterName"`
-
 	Settings *ReplicationSettings `json:"replicationSettings"`
+	
+    // revision number to be used by metadata service. not included in json
+	Revision  interface{}
 }
 
-func NewReplicationSpecification(sourceBucketName string, targetClusterUUID string, targetBucketName string, filterName string) *ReplicationSpecification {
-	return &ReplicationSpecification{Id: ReplicationId(sourceBucketName, targetClusterUUID, targetBucketName, filterName),
+func NewReplicationSpecification(sourceBucketName string, targetClusterUUID string, targetBucketName string) *ReplicationSpecification {
+	return &ReplicationSpecification{Id: ReplicationId(sourceBucketName, targetClusterUUID, targetBucketName),
 		SourceBucketName:  sourceBucketName,
 		TargetClusterUUID: targetClusterUUID,
 		TargetBucketName:  targetBucketName,
-		FilterName:        filterName,
 		Settings:          DefaultSettings()}
 }
 
-func ReplicationId(sourceBucketName string, targetClusterUUID string, targetBucketName string, filterName string) string {
+func ReplicationId(sourceBucketName string, targetClusterUUID string, targetBucketName string) string {
 	parts := []string{ReplicationSpecKeyPrefix, targetClusterUUID, sourceBucketName, targetBucketName}
-	if filterName != "" {
-		parts = append(parts, filterName)
-	}
 	return strings.Join(parts, base.KeyPartsDelimiter)
 }
 

@@ -28,7 +28,7 @@ import (
 
 const (
 	// the key to the metadata that stores the keys of all remote clusters
-	RemoteClustersCatalogKey = "remoteClustersCatalog"
+	RemoteClustersCatalogKey = metadata.RemoteClusterKeyPrefix
 )
 
 type RemoteClusterService struct {
@@ -44,13 +44,11 @@ func NewRemoteClusterService(metadata_svc service_def.MetadataSvc, logger_ctx *l
 }
 
 func (service *RemoteClusterService) RemoteClusterByRefId(refId string) (*metadata.RemoteClusterReference, error) {
-	result, err := service.metadata_svc.Get(refId)
+	result, rev, err := service.metadata_svc.Get(refId)
 	if err != nil {
 		return nil, err
 	}
-	var ref = &metadata.RemoteClusterReference{}
-	err = json.Unmarshal(result, ref) 
-	return ref, err
+	return constructRemoteClusterReference(result, rev)
 }
 
 func (service *RemoteClusterService) RemoteClusterByUuid(uuid string) (*metadata.RemoteClusterReference, error) {
@@ -72,7 +70,7 @@ func (service *RemoteClusterService) RemoteClusterByRefName(refName string) (*me
 	}
 	
 	if ref == nil {
-		return nil, errors.New(fmt.Sprintf("Cannot find remote reference with name=%v\n", refName))
+		return nil, errors.New("unknown remote cluster")
 	} else {
 		return ref, nil
 	}
@@ -90,7 +88,6 @@ func (service *RemoteClusterService) AddRemoteCluster(ref *metadata.RemoteCluste
 	return service.addRemoteCluster(ref)
 }
 
-// this assumes that the ref to be added is not yet in gometa
 func (service *RemoteClusterService) SetRemoteCluster(refName string, ref *metadata.RemoteClusterReference) error {
 	service.logger.Infof("Setting remote cluster with refName %v\n", refName)
 	
@@ -112,10 +109,10 @@ func (service *RemoteClusterService) SetRemoteCluster(refName string, ref *metad
 			return err
 		}
 		service.logger.Debugf("Remote cluster being changed: key=%v, value=%v\n", key, string(value))
-		return service.metadata_svc.Set(key, value)
+		return service.metadata_svc.Set(key, value, oldRef.Revision)
 	} else {
 		// if id of the remote cluster reference has been changed, delete the existing reference and create a new one
-		err = service.metadata_svc.DelWithCatalog(RemoteClustersCatalogKey, oldRef.Id)
+		err = service.metadata_svc.DelWithCatalog(RemoteClustersCatalogKey, oldRef.Id, oldRef.Revision)
 		if err != nil {
 			return err
 		}
@@ -134,7 +131,7 @@ func (service *RemoteClusterService) DelRemoteCluster(refName string) error {
 	
 	key := ref.Id
 	
-	return service.metadata_svc.DelWithCatalog(RemoteClustersCatalogKey, key)
+	return service.metadata_svc.DelWithCatalog(RemoteClustersCatalogKey, key, ref.Revision)
 }
 
 func (service *RemoteClusterService) RemoteClusters() (map[string]*metadata.RemoteClusterReference, error) {
@@ -142,20 +139,18 @@ func (service *RemoteClusterService) RemoteClusters() (map[string]*metadata.Remo
 	
 	refs := make(map[string]*metadata.RemoteClusterReference, 0)
 
-	keys, err := service.metadata_svc.GetKeysFromCatalog(RemoteClustersCatalogKey)	
-	service.logger.Debugf("keys for remote clusters %v\n", keys)
+	entries, err := service.metadata_svc.GetAllMetadataFromCatalog(RemoteClustersCatalogKey)	
+	service.logger.Debugf("entries for remote clusters %v\n", entries)
 	if err != nil {
 		return nil, err
 	}
 	
-	if keys != nil {
-		for _, key := range keys {
-			// ignore error. it is ok for some keys in catalog to be invalid
-			ref, _ := service.RemoteClusterByRefId(key)
-			if ref != nil {
-				refs[key] = ref
-			}
+	for _, entry := range entries {
+		ref, err := constructRemoteClusterReference(entry.Value, entry.Rev)
+		if err != nil {
+			return nil, err
 		}
+		refs[entry.Key] = ref
 	}
 
 	return refs, nil
@@ -197,7 +192,7 @@ func (service *RemoteClusterService) ValidateRemoteCluster(ref *metadata.RemoteC
 	}
 	
 	// get remote cluster uuid from the map 
-	actualUuid, ok := poolsInfo[rm.RemoteClusterUuid]
+	actualUuid, ok := poolsInfo[base.RemoteClusterUuid]
 	if !ok {
 		// should never get here
 		return errors.New("Could not get uuid of remote cluster.")
@@ -252,3 +247,13 @@ func (service *RemoteClusterService) addRemoteCluster(ref *metadata.RemoteCluste
 	service.logger.Debugf("Remote cluster being added: key=%v, value=%v\n", key, string(value))
 	return service.metadata_svc.AddWithCatalog(RemoteClustersCatalogKey, key, value)
 }
+
+func constructRemoteClusterReference(value []byte, rev interface{}) (*metadata.RemoteClusterReference, error) {
+	ref := &metadata.RemoteClusterReference{}
+	err := json.Unmarshal(value, ref) 
+	if err != nil {
+		return nil, err
+	}
+	ref.Revision = rev
+	return ref, nil
+} 

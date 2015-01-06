@@ -81,8 +81,8 @@ func (ctx *PipelineRuntimeCtx) Stop() error {
 	ctx.logger.Infof("Pipeline context is stopping...")
 	var err error = nil
 	//stop all registered services
-	for name, svc := range ctx.runtime_svcs {
-		err = svc.Stop()
+	for name, _ := range ctx.runtime_svcs {
+		err = ctx.UnregisterService (name) 
 		if err != nil {
 			ctx.logger.Errorf("Failed to stop service %v - %v", name, err)
 		}

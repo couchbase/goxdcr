@@ -11,15 +11,15 @@ package supervisor
 
 import (
 	"errors"
-	"github.com/couchbase/goxdcr/log"
+	"fmt"
 	"github.com/couchbase/goxdcr/base"
-	"github.com/couchbase/goxdcr/gen_server"
-	"github.com/couchbase/goxdcr/utils"
 	"github.com/couchbase/goxdcr/common"
+	"github.com/couchbase/goxdcr/gen_server"
+	"github.com/couchbase/goxdcr/log"
+	"github.com/couchbase/goxdcr/utils"
 	"reflect"
 	"sync"
 	"time"
-	"fmt"
 )
 
 // Generic implementation of the Supervisor interface
@@ -27,19 +27,19 @@ import (
 //configuration settings
 const (
 	// interval of sending heart beat signals
-	HEARTBEAT_INTERVAL     = "heartbeat_interval"
+	HEARTBEAT_INTERVAL = "heartbeat_interval"
 	// child is considered to have missed a heart beat if it did not respond within this timeout period
 	HEARTBEAT_TIMEOUT = "heartbeat_timeout"
 	// child is considered to be broken if it had missed this number of heart beats consecutively
 	MISSED_HEARTBEAT_THRESHOLD = "missed_heartbeat_threshold"
 
-	default_heartbeat_interval     time.Duration = 1000 * time.Millisecond
-	default_heartbeat_timeout time.Duration = 4000 * time.Millisecond
-	default_missed_heartbeat_threshold = 5
+	default_heartbeat_interval         time.Duration = 1000 * time.Millisecond
+	default_heartbeat_timeout          time.Duration = 4000 * time.Millisecond
+	default_missed_heartbeat_threshold               = 5
 )
 
 var supervisor_setting_defs base.SettingDefinitions = base.SettingDefinitions{HEARTBEAT_TIMEOUT: base.NewSettingDef(reflect.TypeOf((*time.Duration)(nil)), false),
-	HEARTBEAT_INTERVAL: base.NewSettingDef(reflect.TypeOf((*time.Duration)(nil)), false),
+	HEARTBEAT_INTERVAL:         base.NewSettingDef(reflect.TypeOf((*time.Duration)(nil)), false),
 	MISSED_HEARTBEAT_THRESHOLD: base.NewSettingDef(reflect.TypeOf((*uint16)(nil)), false)}
 
 type heartbeatRespStatus int
@@ -52,41 +52,47 @@ const (
 )
 
 type GenericSupervisor struct {
-	id  string
+	id string
 	gen_server.GenServer
-	children     map[string]common.Supervisable
-	children_lock  sync.RWMutex
-	loggerContext *log.LoggerContext
-	heartbeat_timeout time.Duration
-	heartbeat_interval     time.Duration
-	missed_heartbeat_threshold  uint16
+	children                   map[string]common.Supervisable
+	children_lock              sync.RWMutex
+	loggerContext              *log.LoggerContext
+	heartbeat_timeout          time.Duration
+	heartbeat_interval         time.Duration
+	missed_heartbeat_threshold uint16
 	// key - child Id; value - number of consecutive heart beat misses
-	childrenBeatMissedMap     map[string]uint16
-	heartbeat_ticker       *time.Ticker
-	failure_handler        common.SupervisorFailureHandler
-	finch                  chan bool
-	childrenWaitGrp        sync.WaitGroup
-	err_ch chan bool
-	resp_waiter_chs []chan bool
+	childrenBeatMissedMap map[string]uint16
+	heartbeat_ticker      *time.Ticker
+	failure_handler       common.SupervisorFailureHandler
+	finch                 chan bool
+	childrenWaitGrp       sync.WaitGroup
+	err_ch                chan bool
+	resp_waiter_chs       []chan bool
+	parent_supervisor     *GenericSupervisor
 }
 
-func NewGenericSupervisor(id string, logger_ctx *log.LoggerContext, failure_handler common.SupervisorFailureHandler) *GenericSupervisor {
+func NewGenericSupervisor(id string, logger_ctx *log.LoggerContext, failure_handler common.SupervisorFailureHandler, parent_supervisor *GenericSupervisor) *GenericSupervisor {
 	server := gen_server.NewGenServer(nil,
-	   nil, nil, logger_ctx, "GenericSupervisor")
-	supervisor := &GenericSupervisor{id:  id,
-		GenServer: server,
-		children:  make(map[string]common.Supervisable, 0),
-		loggerContext: logger_ctx,
-		heartbeat_timeout: default_heartbeat_timeout,
-		heartbeat_interval:     default_heartbeat_interval,
-		missed_heartbeat_threshold:  default_missed_heartbeat_threshold,
-		childrenBeatMissedMap:  make(map[string]uint16, 0),
-		failure_handler:        failure_handler,
-		finch:                  make(chan bool, 1),
-		childrenWaitGrp:        sync.WaitGroup{},
-		err_ch: make(chan bool, 1),
-		resp_waiter_chs: []chan bool{}}
+		nil, nil, logger_ctx, "GenericSupervisor")
+	supervisor := &GenericSupervisor{id: id,
+		GenServer:                  server,
+		children:                   make(map[string]common.Supervisable, 0),
+		loggerContext:              logger_ctx,
+		heartbeat_timeout:          default_heartbeat_timeout,
+		heartbeat_interval:         default_heartbeat_interval,
+		missed_heartbeat_threshold: default_missed_heartbeat_threshold,
+		childrenBeatMissedMap:      make(map[string]uint16, 0),
+		failure_handler:            failure_handler,
+		finch:                      make(chan bool, 1),
+		childrenWaitGrp:            sync.WaitGroup{},
+		err_ch:                     make(chan bool, 1),
+		resp_waiter_chs:            []chan bool{},
+		parent_supervisor:			parent_supervisor}
 
+	if parent_supervisor != nil {
+		parent_supervisor.AddChild(supervisor)
+	}
+	
 	return supervisor
 }
 
@@ -100,10 +106,10 @@ func (supervisor *GenericSupervisor) LoggerContext() *log.LoggerContext {
 
 func (supervisor *GenericSupervisor) AddChild(child common.Supervisable) error {
 	supervisor.Logger().Infof("Adding child %v to supervisor %v\n", child.Id(), supervisor.Id())
-	
+
 	supervisor.children_lock.Lock()
 	defer supervisor.children_lock.Unlock()
-	supervisor.children[child.Id()] = child	
+	supervisor.children[child.Id()] = child
 	return nil
 }
 
@@ -111,8 +117,8 @@ func (supervisor *GenericSupervisor) RemoveChild(childId string) error {
 	supervisor.Logger().Infof("Removing child %v from supervisor %v\n", childId, supervisor.Id())
 	supervisor.children_lock.Lock()
 	defer supervisor.children_lock.Unlock()
-	// TODO should we return error when childId does not exist? 
-	delete(supervisor.children, childId)	
+	// TODO should we return error when childId does not exist?
+	delete(supervisor.children, childId)
 	return nil
 }
 
@@ -128,18 +134,18 @@ func (supervisor *GenericSupervisor) Child(childId string) (common.Supervisable,
 
 func (supervisor *GenericSupervisor) Start(settings map[string]interface{}) error {
 	supervisor.Logger().Infof("Starting supervisor %v.\n", supervisor.Id())
-	
+
 	err := supervisor.Init(settings)
 	if err == nil {
 		//start heartbeat ticker
 		supervisor.heartbeat_ticker = time.NewTicker(supervisor.heartbeat_interval)
-		
+
 		supervisor.childrenWaitGrp.Add(1)
 		go supervisor.supervising()
 
 		//start the sever looping
 		supervisor.GenServer.Start_server()
-		
+
 		supervisor.Logger().Infof("Started supervisor %v.\n", supervisor.Id())
 	} else {
 		supervisor.Logger().Errorf("Failed to start supervisor %v. error=%v\n", supervisor.Id(), err)
@@ -149,13 +155,13 @@ func (supervisor *GenericSupervisor) Start(settings map[string]interface{}) erro
 
 func (supervisor *GenericSupervisor) Stop() error {
 	supervisor.Logger().Infof("Stopping supervisor %v.\n", supervisor.Id())
-	
+
 	// make waiting for response routines finish to avoid receiving spurious timeout errors
 	supervisor.notifyWaitersToFinish()
-	
+
 	// stop gen_server
 	err := supervisor.Stop_server()
-	
+
 	// stop supervising routine
 	close(supervisor.finch)
 
@@ -164,43 +170,45 @@ func (supervisor *GenericSupervisor) Stop() error {
 
 	supervisor.heartbeat_ticker.Stop()
 	supervisor.Logger().Infof("Stopped supervisor %v.\n", supervisor.Id())
+	
+	supervisor.parent_supervisor.RemoveChild (supervisor.Id())
 	return err
 }
 
 func (supervisor *GenericSupervisor) supervising() error {
 	defer supervisor.childrenWaitGrp.Done()
-	
+
 	//heart beat
-	count :=0
-	loop:
+	count := 0
+loop:
 	for {
 		count++
 		select {
-			case <-supervisor.finch:
-				break loop
-			case <-supervisor.heartbeat_ticker.C:
-				supervisor.Logger().Debugf("heart beat tick from super %v\n", supervisor.Id())
-				select {
-					case supervisor.err_ch <- true:
-						supervisor.sendHeartBeats()		
-				}
+		case <-supervisor.finch:
+			break loop
+		case <-supervisor.heartbeat_ticker.C:
+			supervisor.Logger().Debugf("heart beat tick from super %v\n", supervisor.Id())
+			select {
+			case supervisor.err_ch <- true:
+				supervisor.sendHeartBeats()
+			}
 		}
 	}
-	
+
 	supervisor.Logger().Infof("Supervisor %v exited\n", supervisor.Id())
 	return nil
 }
 
 func (supervisor *GenericSupervisor) sendHeartBeats() {
 	supervisor.Logger().Debugf("Sending heart beat msg from supervisor %v\n", supervisor.Id())
-	
+
 	supervisor.children_lock.RLock()
 	defer supervisor.children_lock.RUnlock()
-	
+
 	if len(supervisor.children) > 0 {
 		heartbeat_report := make(map[string]heartbeatRespStatus)
 		heartbeat_resp_chs := make(map[string]chan []interface{})
-	
+
 		for childId, child := range supervisor.children {
 			respch := make(chan []interface{}, 1)
 			supervisor.Logger().Debugf("heart beat sent to child %v from super %v\n", childId, supervisor.Id())
@@ -216,9 +224,9 @@ func (supervisor *GenericSupervisor) sendHeartBeats() {
 		supervisor.resp_waiter_chs = append(supervisor.resp_waiter_chs, fin_ch)
 		go supervisor.waitForResponse(heartbeat_report, heartbeat_resp_chs, fin_ch)
 	} else {
-		 <-supervisor.err_ch
+		<-supervisor.err_ch
 	}
-		
+
 	return
 }
 
@@ -259,7 +267,7 @@ func (supervisor *GenericSupervisor) waitForResponse(heartbeat_report map[string
 			return
 		case <-heartbeat_timeout_ch:
 			//time is up
-			supervisor.Logger().Errorf("Heartbeat timeout in supervisor %v! not_yet_resp_count=%v\n", supervisor.Id(), len(heartbeat_report) - responded_count)
+			supervisor.Logger().Errorf("Heartbeat timeout in supervisor %v! not_yet_resp_count=%v\n", supervisor.Id(), len(heartbeat_report)-responded_count)
 			goto REPORT
 		default:
 			for childId, status := range heartbeat_report {
@@ -296,13 +304,13 @@ func (supervisor *GenericSupervisor) processReport(heartbeat_report map[string]h
 			var missedCount uint16
 			// missedCount would be zero when child is not yet in the map, which would be the correct value
 			missedCount, _ = supervisor.childrenBeatMissedMap[childId]
-			missedCount ++
+			missedCount++
 			supervisor.Logger().Infof("Child %v of supervisor %v missed %v consecutive heart beats\n", childId, supervisor.Id(), missedCount)
 			supervisor.childrenBeatMissedMap[childId] = missedCount
 			if missedCount > supervisor.missed_heartbeat_threshold {
 				// report the child as broken if it exceeded the beat_missed_threshold
 				brokenChildren[childId] = errors.New("Not responding")
-			} 
+			}
 		} else {
 			// reset missed count to 0 when child responds
 			supervisor.childrenBeatMissedMap[childId] = 0

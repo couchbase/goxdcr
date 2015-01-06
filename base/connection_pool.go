@@ -137,7 +137,7 @@ func (p *ConnPool) ReleaseConnections() {
 	p.clients = nil
 }
 
-func (connPoolMgr *connPoolMgr) GetOrCreatePool(poolNameToCreate string, hostname string, username string, password string, connsize int) (*ConnPool, error) {
+func (connPoolMgr *connPoolMgr) GetOrCreatePool(poolNameToCreate string, hostname string, bucketname string, username string, password string, connsize int) (*ConnPool, error) {
 	pool := connPoolMgr.GetPool(poolNameToCreate)
 	var err error
 	size := connsize
@@ -145,7 +145,7 @@ func (connPoolMgr *connPoolMgr) GetOrCreatePool(poolNameToCreate string, hostnam
 		size = DefaultConnectionSize
 	}
 	if pool == nil {
-		pool, err = connPoolMgr.CreatePool(poolNameToCreate, hostname, username, password, size)
+		pool, err = connPoolMgr.CreatePool(poolNameToCreate, hostname, bucketname, username, password, size)
 	}
 	return pool, err
 }
@@ -158,7 +158,7 @@ func (connPoolMgr *connPoolMgr) GetPool(poolName string) *ConnPool {
 	return pool
 }
 
-func (connPoolMgr *connPoolMgr) CreatePool(poolName string, hostName string, username string, password string, connectionSize int) (p *ConnPool, err error) {
+func (connPoolMgr *connPoolMgr) CreatePool(poolName string, hostName string, bucketname string, username string, password string, connectionSize int) (p *ConnPool, err error) {
 	connPoolMgr.logger.Infof("Create Pool - poolName=%v,", poolName)
 	connPoolMgr.logger.Infof("connectionSize=%d", connectionSize)
 	p = &ConnPool{clients: make(chan *mcc.Client, connectionSize),
@@ -178,6 +178,7 @@ func (connPoolMgr *connPoolMgr) CreatePool(poolName string, hostName string, use
 	//	 initialize the connection pool
 	for i := 0; i < connectionSize; i++ {
 		mcClient, err := NewConn(hostName, username, password)
+		mcClient.SelectBucket (bucketname)
 		if err == nil {
 			connPoolMgr.logger.Debug("A client connection is established")
 			p.clients <- mcClient

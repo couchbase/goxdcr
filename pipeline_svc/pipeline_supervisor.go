@@ -40,8 +40,8 @@ type PipelineSupervisor struct {
 	pipeline               common.Pipeline
 }
 
-func NewPipelineSupervisor(id string, logger_ctx *log.LoggerContext, failure_handler common.SupervisorFailureHandler) *PipelineSupervisor {
-	supervisor := supervisor.NewGenericSupervisor(id, logger_ctx, failure_handler)
+func NewPipelineSupervisor(id string, logger_ctx *log.LoggerContext, failure_handler common.SupervisorFailureHandler, parentSupervisor *supervisor.GenericSupervisor) *PipelineSupervisor {
+	supervisor := supervisor.NewGenericSupervisor(id, logger_ctx, failure_handler, parentSupervisor)
 	pipelineSupervisor := &PipelineSupervisor{GenericSupervisor: supervisor}
 	return pipelineSupervisor
 }

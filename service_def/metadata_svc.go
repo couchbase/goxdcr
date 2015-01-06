@@ -10,14 +10,29 @@
 // wrapper service that retrieves data from gometa service
 package service_def
 
+import (
+	"errors"
+)
+
+var ErrorKeyAlreadyExist = errors.New("key being added already exists")
+var ErrorRevisionMismatch = errors.New("revision number does not match")
+
+// struct for general metadata entry maintained by metadata service
+type MetadataEntry struct {
+	Key string
+	Value []byte
+	Rev interface{}
+}
+
 type MetadataSvc interface {
-	Get(key string) ([] byte, error)
+	Get(key string) ([] byte, interface{}, error)
 	Add(key string, value []byte) error
-	Set(key string, value []byte) error
-	Del(key string) error
+	Set(key string, value []byte, rev interface{}) error
+	Del(key string, rev interface{}) error
 	
 	// catalog related APIs
 	AddWithCatalog(catalogKey, key string, value []byte) error
-	DelWithCatalog(catalogKey, key string) error
-	GetKeysFromCatalog(catalogKey string) ([]string, error)
+	DelWithCatalog(catalogKey, key string, rev interface{}) error
+	GetAllMetadataFromCatalog(catalogKey string) ([]*MetadataEntry, error)
+	GetAllKeysFromCatalog(catalogKey string) ([]string, error)
 }

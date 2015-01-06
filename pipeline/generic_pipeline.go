@@ -15,6 +15,8 @@ import (
 	log "github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
 	"sync"
+	"time"
+	"github.com/couchbase/goxdcr/utils"
 )
 
 //the function can construct part specific settings for the pipeline
@@ -170,7 +172,7 @@ func (genericPipeline *GenericPipeline) stopPart(part common.Part) error {
 			genericPipeline.logger.Debugf("part %v is already stopped\n", part.Id())
 			return nil
 		}
-		err = part.Stop()
+		err = utils.ExecWithTimeout (part.Stop, 600 * time.Millisecond, genericPipeline.logger)
 		if err == nil {
 			genericPipeline.logger.Infof("part %v is stopped\n", part.Id())
 			if part.Connector() != nil {
@@ -253,6 +255,9 @@ func (genericPipeline *GenericPipeline) isUpstreamTo(target_part common.Part, pa
 
 //Stop stops the pipeline
 func (genericPipeline *GenericPipeline) Stop() error {
+	genericPipeline.stateLock.Lock()
+	defer genericPipeline.stateLock.Unlock()
+
 	genericPipeline.logger.Infof("stoppping pipeline %v\n", genericPipeline.Topic())
 	var err error
 
@@ -310,7 +315,7 @@ func (genericPipeline *GenericPipeline) waitToStop(finchan chan bool) {
 	for {
 		for _, target := range genericPipeline.targets {
 			if target.IsStarted() {
-				genericPipeline.logger.Infof("outgoing nozzle %s is still running", target.Id())
+				genericPipeline.logger.Debugf("outgoing nozzle %s is still running", target.Id())
 				done = false
 			}
 		}
@@ -409,7 +414,7 @@ func (genericPipeline *GenericPipeline) Specification() *metadata.ReplicationSpe
 	return genericPipeline.spec
 }
 
-func (genericPipeline *GenericPipeline) Settings () *metadata.ReplicationSettings {
+func (genericPipeline *GenericPipeline) Settings() *metadata.ReplicationSettings {
 	return genericPipeline.spec.Settings
 }
 
