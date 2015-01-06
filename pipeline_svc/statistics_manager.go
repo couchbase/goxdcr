@@ -38,7 +38,7 @@ const (
 
 	//	TIME_COMMITTING_METRIC = "time_committing"
 	//rate
-	RATE_REPLICATED	= "rate_replicated"
+	RATE_REPLICATED = "rate_replicated"
 	BANDWIDTH_USAGE = "bandwidth_usage"
 
 	VB_HIGHSEQNO_PREFIX = "vb_highseqno_"
@@ -59,7 +59,7 @@ const (
 )
 
 const (
-	default_sample_size      = 1000
+	default_sample_size     = 1000
 	default_update_interval = 100 * time.Millisecond
 )
 
@@ -116,15 +116,15 @@ type StatisticsManager struct {
 
 func NewStatisticsManager(logger_ctx *log.LoggerContext, active_vbs map[string][]uint16, bucket_name string, bucket_password string) *StatisticsManager {
 	stats_mgr := &StatisticsManager{registries: make(map[string]metrics.Registry),
-		starttime_map:    make(map[string]interface{}),
-		finish_ch:        make(chan bool, 1),
-		sample_size:      default_sample_size,
+		starttime_map:   make(map[string]interface{}),
+		finish_ch:       make(chan bool, 1),
+		sample_size:     default_sample_size,
 		update_interval: default_update_interval,
-		logger:           log.NewLogger("StatisticsManager", logger_ctx),
-		active_vbs:       active_vbs,
-		wait_grp:         &sync.WaitGroup{},
-		kv_mem_clients:   make(map[string]*mcc.Client),
-		endtime_map:      make(map[string]interface{})}
+		logger:          log.NewLogger("StatisticsManager", logger_ctx),
+		active_vbs:      active_vbs,
+		wait_grp:        &sync.WaitGroup{},
+		kv_mem_clients:  make(map[string]*mcc.Client),
+		endtime_map:     make(map[string]interface{})}
 	stats_mgr.collectors = []MetricsCollector{&xmemCollector{}, &dcpCollector{}, &routerCollector{}}
 	return stats_mgr
 }
@@ -194,7 +194,7 @@ func (stats_mgr *StatisticsManager) processRawStats() {
 					if orig_registry != nil {
 						orig_val, _ := strconv.ParseInt(orig_registry.(*expvar.Map).Get(name).String(), 10, 64)
 						if m.Count() < orig_val {
-							panic(fmt.Sprintf("counter %v goes backward\n", name))
+							stats_mgr.logger.Infof("counter %v goes backward, maybe due to the pipeline is restarted\n", name)
 						}
 					}
 					metric_overview := stats_mgr.getOverviewRegistry().Get(name)
@@ -233,19 +233,19 @@ func (stats_mgr *StatisticsManager) processCalculatedStats(oldSample metrics.Reg
 	} else {
 		stats_mgr.logger.Errorf("Failed to calculate changes_left - %v\n", err)
 	}
-	
+
 	//calculate rate_replication
 	docs_written_old := oldSample.Get(DOCS_WRITTEN_METRIC).(metrics.Counter).Count()
 	interval_in_sec := stats_mgr.update_interval.Seconds()
-	rate_replicated := float64(docs_written - docs_written_old)/interval_in_sec
+	rate_replicated := float64(docs_written-docs_written_old) / interval_in_sec
 	rate_replicated_var := new(expvar.Float)
 	rate_replicated_var.Set(rate_replicated)
 	overview_expvar_map.Set(RATE_REPLICATED, rate_replicated_var)
-	
+
 	//calculate bandwidth_usage
 	data_replicated_old := oldSample.Get(DATA_REPLICATED_METRIC).(metrics.Counter).Count()
 	data_replicated := stats_mgr.getOverviewRegistry().Get(DATA_REPLICATED_METRIC).(metrics.Counter).Count()
-	bandwidth_usage := float64(data_replicated - data_replicated_old)/interval_in_sec
+	bandwidth_usage := float64(data_replicated-data_replicated_old) / interval_in_sec
 	bandwidth_usage_var := new(expvar.Float)
 	bandwidth_usage_var.Set(bandwidth_usage)
 	overview_expvar_map.Set(BANDWIDTH_USAGE, bandwidth_usage_var)
@@ -352,7 +352,7 @@ func (stats_mgr *StatisticsManager) processTimeSample() {
 		if endtime != nil {
 			rep_duration := endtime.(time.Time).Sub(starttime.(time.Time))
 			//in millisecond
-			sample.Update(rep_duration.Nanoseconds()/1000000)
+			sample.Update(rep_duration.Nanoseconds() / 1000000)
 		}
 	}
 
@@ -386,7 +386,7 @@ func (stats_mgr *StatisticsManager) Attach(pipeline common.Pipeline) error {
 	expvar_map := expvar.Get(stats_mgr.pipeline.Topic())
 	if expvar_map == nil {
 		expvar.NewMap(stats_mgr.pipeline.Topic())
-	} 
+	}
 	return nil
 }
 
