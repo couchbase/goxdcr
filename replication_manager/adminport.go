@@ -27,7 +27,7 @@ import (
 )
 
 var StaticPaths = [6]string{base.RemoteClustersPath, CreateReplicationPath, InternalSettingsPath, SettingsReplicationsPath, AllReplicationsPath, AllReplicationInfosPath}
-var DynamicPathPrefixes = [5]string{base.RemoteClustersPath, NotifySettingsChangePrefix, DeleteReplicationPrefix, SettingsReplicationsPath, StatisticsPrefix}
+var DynamicPathPrefixes = [6]string{base.RemoteClustersPath, NotifySettingsChangePrefix, DeleteReplicationPrefix, SettingsReplicationsPath, StatisticsPrefix, AllReplicationsPath}
 
 var MaxForwardingRetry = 5
 var ForwardingRetryInterval = time.Second * 10
@@ -162,6 +162,8 @@ func (adminport *Adminport) handleRequest(
 		response, err = adminport.doDeleteRemoteClusterRequest(request)
 	case AllReplicationsPath + base.UrlDelimiter + base.MethodGet:
 		response, err = adminport.doGetAllReplicationsRequest(request)
+	case AllReplicationsPath + DynamicSuffix + base.UrlDelimiter + base.MethodDelete:
+		response, err = adminport.doDeleteAllReplicationsRequest(request)
 	case AllReplicationInfosPath + base.UrlDelimiter + base.MethodGet:
 		response, err = adminport.doGetAllReplicationInfosRequest(request)
 	case CreateReplicationPath + base.UrlDelimiter + base.MethodPost:
@@ -298,6 +300,20 @@ func (adminport *Adminport) doGetAllReplicationsRequest(request *http.Request) (
 	}
 
 	return NewGetAllReplicationsResponse(replSpecs)
+}
+
+func (adminport *Adminport) doDeleteAllReplicationsRequest(request *http.Request) ([]byte, error) {
+	logger_ap.Infof("doDeleteAllReplicationsRequest\n")
+
+	// get input parameters from request
+	bucket, err := DecodeDynamicParamInURL(request, AllReplicationsPath, "Bucket Name")
+	if err != nil {
+		return nil, err
+	}
+
+	logger_ap.Debugf("Request params: bucket=%v", bucket)
+
+	return nil, DeleteAllReplications(bucket)
 }
 
 func (adminport *Adminport) doGetAllReplicationInfosRequest(request *http.Request) ([]byte, error) {

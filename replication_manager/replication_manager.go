@@ -506,6 +506,32 @@ func HandleReplicationDefChanges(topic string, oldSettings, newSettings *metadat
 	return nil
 }
 
+// delete all replications for the specified bucket
+func DeleteAllReplications(bucket string) error {
+	repIds, err := ReplicationSpecService().ActiveReplicationSpecIdsForBucket(bucket)
+	if err != nil {
+		return err
+	}
+	logger_rm.Infof("repIds to be deleted = %v\n", repIds)
+	
+	failedRepMap := make(map[string]string)
+	
+	for _, repId := range repIds {
+		err = DeleteReplication(repId)
+		if err != nil {
+			failedRepMap[repId] = err.Error()
+		}
+	}
+	
+	if len(failedRepMap) == 0 {
+		return nil
+	} else {	
+		errMsg := fmt.Sprintf("Error deleting replications. %v", failedRepMap)
+		logger_rm.Errorf(errMsg)
+		return errors.New(errMsg)
+	}
+}
+
 // get statistics for all running replications
 //% returns a list of replication stats for the bucket. the format for each
 //% item in the list is:

@@ -163,6 +163,21 @@ func startAdminport() {
 		fmt.Println(err.Error())
 		return
 	}
+	
+	// re-create replication
+	replicationId, escapedReplId, err = testCreateReplication()
+	if err != nil {
+		fmt.Println(err.Error())
+		return
+	}
+	
+	// delete the replication through DeleteAllReplications API
+	if err := testDeleteAllReplications(replicationId, escapedReplId); err != nil {
+		fmt.Println(err.Error())
+		return
+	}
+	
+	
 	fmt.Println("All tests passed.")
 
 }
@@ -436,6 +451,21 @@ func testDeleteReplication(replicationId, escapedReplId string) error {
 	time.Sleep(10 * time.Second)
 
 	return validatePipeline("DeleteReplication", replicationId, escapedReplId, false, false)
+}
+
+func testDeleteAllReplications(replicationId, escapedReplId string) error {
+	fmt.Println("Start testDeleteAllReplications")
+	url := common.GetAdminportUrlPrefix(options.sourceKVHost, uint64(base.AdminportNumber)) + rm.AllReplicationsPath + base.UrlDelimiter + options.sourceBucket
+
+	_, err := common.SendRequestAndValidateResponse("testDeleteAllReplications", base.MethodDelete, url, nil, options.username, options.password)
+	if err != nil {
+		return err
+	}
+	
+	fmt.Println("Waiting for replication to finish deleting")
+	time.Sleep(10 * time.Second)
+
+	return validatePipeline("DeleteAllReplications", replicationId, escapedReplId, false, false)
 }
 
 func testReplicationSettingsWithJustValidate(escapedReplId string) error {
