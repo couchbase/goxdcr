@@ -109,6 +109,13 @@ const (
  	JustValidatePostfix = "?" + JustValidate + "=1"
 )
 
+// http request related constants
+const (
+	ContentType = "Content-Type"
+	DefaultContentType = "application/x-www-form-urlencoded"
+	JsonContentType = "application/json"
+)
+
 //constant for replication tasklist status
 const (
 	Pending = "Pending"

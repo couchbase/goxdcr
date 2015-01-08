@@ -19,18 +19,14 @@ import (
 	"github.com/couchbase/goxdcr/metadata"
 	rm "github.com/couchbase/goxdcr/replication_manager"
 	"github.com/couchbase/goxdcr/tests/common"
-	utils "github.com/couchbase/goxdcr/utils"
 	"io/ioutil"
-	"net/http"
 	"os"
-	"reflect"
-	"strings"
 )
 
 var options struct {
 	sourceKVHost string //source kv host name
 	sourceKVPort uint64 //source kv admin port
-	
+
 	username string //username
 	password string //password
 
@@ -128,85 +124,6 @@ func startAdminport() {
 
 	fmt.Println("All tests passed.")
 
-}
-
-func testAuth() error {
-	url := fmt.Sprintf("http://%s:%s@%s/pools", options.remoteUserName, options.remotePassword, options.remoteHostName)
-	fmt.Printf("url=%v\n", url)
-	request, err := http.NewRequest(base.MethodGet, url, nil)
-	if err != nil {
-		return err
-	}
-	request.Header.Set(rm.ContentType, rm.DefaultContentType)
-
-	fmt.Println("request", request)
-
-	response, err := http.DefaultClient.Do(request)
-	if err != nil {
-		return err
-	}
-	fmt.Printf("response=%v\n", response)
-
-	// verify contents in response
-	defer response.Body.Close()
-	bodyBytes, err := ioutil.ReadAll(response.Body)
-	if err != nil {
-		return err
-	}
-
-	fmt.Printf("body=%v\n", bodyBytes)
-
-	var v map[string]interface{}
-	err = json.Unmarshal(bodyBytes, &v)
-	fmt.Printf("v=%v, v.type=%v, err=%v\n", v, reflect.TypeOf(v), err)
-
-	uuid, ok := v["uuid"]
-	fmt.Printf("uuid=%v, ok=%v\n", uuid, ok)
-	return nil
-}
-
-func testSSLAuth() error {
-
-	serverCert, err := ioutil.ReadFile(options.remoteCertificateFile)
-	if err != nil {
-		fmt.Printf("Could not load server certificate! err=%v\n", err)
-		return err
-	}
-
-	sslPort, err := utils.GetXDCRSSLPort(options.remoteHostName, options.remoteUserName, options.remotePassword)
-	if err != nil {
-		return err
-	}
-
-	hostNode := strings.Split(options.remoteHostName, base.UrlPortNumberDelimiter)[0]
-	newHostName := utils.GetHostAddr(hostNode, sslPort)
-	url := fmt.Sprintf("https://%s:%s@%s%s", options.remoteUserName, options.remotePassword, newHostName, base.PoolsPath)
-	request, err := http.NewRequest("GET", url, nil)
-	if err != nil {
-		return err
-	}
-	fmt.Printf("url=%v\n", url)
-	response, err := utils.SendHttpRequestThroughSSL(request, serverCert)
-
-	if err != nil {
-		return err
-	}
-	// verify contents in response
-	defer response.Body.Close()
-	bodyBytes, err := ioutil.ReadAll(response.Body)
-	if err != nil {
-		return err
-	}
-
-	fmt.Printf("body=%v\n", bodyBytes)
-
-	var v map[string]interface{}
-	err = json.Unmarshal(bodyBytes, &v)
-	fmt.Printf("v=%v, v.type=%v, err=%v\n", v, reflect.TypeOf(v), err)
-
-	uuid, ok := v["uuid"]
-	fmt.Printf("uuid=%v, ok=%v\n", uuid, ok)
-	return nil
 }
 
 // GetRemoteCluster by calling RemoteClusters() API.

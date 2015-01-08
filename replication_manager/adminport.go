@@ -639,7 +639,7 @@ func forwardReplicationRequestToXDCRNode(oldRequestUrl string, newRequestBody []
 	if err != nil {
 		return nil, err
 	}
-	newRequest.Header.Set(ContentType, DefaultContentType)
+	newRequest.Header.Set(base.ContentType, base.DefaultContentType)
 
 	retryInterval := ForwardingRetryInterval
 	for i := 0; i <= MaxForwardingRetry; i++ {

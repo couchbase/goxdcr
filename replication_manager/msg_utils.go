@@ -29,12 +29,6 @@ import (
 var XDCRPrefix = "xdcr"
 var ErrorsKey = "errors"
 
-// http request related constants
-const (
-	ContentType = "Content-Type"
-	DefaultContentType = "application/x-www-form-urlencoded"
-)
-
 // constants used for parsing url path
 const (
 	CreateReplicationPath    = "controller/createReplication"
@@ -420,7 +414,7 @@ func NewNotifySettingsChangeRequest(replicationId string, xdcrRestPort uint16, o
 	paramsBytes, _ := EncodeMapIntoByteArray(paramsMap)
 	paramsBuf := bytes.NewBuffer(paramsBytes)
 	request, err := http.NewRequest(base.MethodPost, url, paramsBuf)
-	request.Header.Set(ContentType, DefaultContentType)
+	request.Header.Set(base.ContentType, base.DefaultContentType)
 	return request, err
 }
 

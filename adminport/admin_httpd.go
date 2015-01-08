@@ -146,6 +146,8 @@ func (s *httpServer) systemHandler(w http.ResponseWriter, r *http.Request) {
 		err = fmt.Errorf("%v, %v", ErrorInternal, v)
 		logger_server.Errorf("%v", err)
 	case []byte:
+		// all xdcr responses are of json type
+		w.Header().Set(base.ContentType, base.JsonContentType)
 		w.Write(v)
 	}
 }

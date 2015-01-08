@@ -95,7 +95,7 @@ func constructRequest(httpMethod, url string, body []byte) (*http.Request, error
 	if err != nil {
 		return nil, err
 	}	
-	request.Header.Set(rm.ContentType, rm.DefaultContentType)
+	request.Header.Set(base.ContentType, base.DefaultContentType)
 	return request, nil
 }
 
