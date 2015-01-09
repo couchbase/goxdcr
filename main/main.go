@@ -48,7 +48,7 @@ func argParse() {
 	flag.BoolVar(&options.isConvert, "isConvert", false,
 		"whether xdcr is running in convertion/upgrade mode")
 		
-	flag.StringVar(&options.logFileDir, "logFileDir", "logs/n_0",
+	flag.StringVar(&options.logFileDir, "logFileDir", "",
 		"directory for couchbase server logs")
 	flag.Uint64Var(&options.maxLogFileSize, "maxLogFileSize", 40*1024*1024,
 		"maximum log file size")
@@ -68,9 +68,10 @@ func main() {
 
 	metakvsanity.MaybeRun()
 
-	
-	// initializes logger
-	log.Init(options.logFileDir, options.maxLogFileSize, options.maxNumberOfLogFiles)
+	// initializes logger 
+	if options.logFileDir != "" {
+		log.Init(options.logFileDir, options.maxLogFileSize, options.maxNumberOfLogFiles)
+	}
 	
 	top_svc, err := s.NewXDCRTopologySvc(uint16(options.sourceKVAdminPort), uint16(options.xdcrRestPort), options.isEnterprise, nil)
 	if err != nil {
