@@ -12,7 +12,6 @@
 package replication_manager
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
 	"github.com/couchbase/cbauth"
@@ -23,14 +22,10 @@ import (
 	utils "github.com/couchbase/goxdcr/utils"
 	"net/http"
 	"strings"
-	"time"
 )
 
 var StaticPaths = [6]string{base.RemoteClustersPath, CreateReplicationPath, InternalSettingsPath, SettingsReplicationsPath, AllReplicationsPath, AllReplicationInfosPath}
-var DynamicPathPrefixes = [6]string{base.RemoteClustersPath, NotifySettingsChangePrefix, DeleteReplicationPrefix, SettingsReplicationsPath, StatisticsPrefix, AllReplicationsPath}
-
-var MaxForwardingRetry = 5
-var ForwardingRetryInterval = time.Second * 10
+var DynamicPathPrefixes = [5]string{base.RemoteClustersPath, DeleteReplicationPrefix, SettingsReplicationsPath, StatisticsPrefix, AllReplicationsPath}
 
 var logger_ap *log.CommonLogger = log.NewLogger("AdminPort", log.DefaultLoggerContext)
 
@@ -185,8 +180,6 @@ func (adminport *Adminport) handleRequest(
 		response, err = adminport.doViewReplicationSettingsRequest(request)
 	case SettingsReplicationsPath + DynamicSuffix + base.UrlDelimiter + base.MethodPost:
 		response, err = adminport.doChangeReplicationSettingsRequest(request)
-	case NotifySettingsChangePrefix + DynamicSuffix + base.UrlDelimiter + base.MethodPost:
-		response, err = adminport.doNotifyReplicationSettingsChangeRequest(request)
 	case StatisticsPrefix + DynamicSuffix + base.UrlDelimiter + base.MethodGet:
 		response, err = adminport.doGetStatisticsRequest(request)
 	default:
@@ -325,7 +318,7 @@ func (adminport *Adminport) doGetAllReplicationInfosRequest(request *http.Reques
 func (adminport *Adminport) doCreateReplicationRequest(request *http.Request) ([]byte, error) {
 	logger_ap.Infof("doCreateReplicationRequest called\n")
 
-	fromBucket, toCluster, toBucket, forward, settings, errorsMap, err := DecodeCreateReplicationRequest(request)
+	fromBucket, toCluster, toBucket, settings, errorsMap, err := DecodeCreateReplicationRequest(request)
 	if err != nil {
 		return nil, err
 	} else if len(errorsMap) > 0 {
@@ -333,19 +326,14 @@ func (adminport *Adminport) doCreateReplicationRequest(request *http.Request) ([
 		return EncodeErrorsMapIntoByteArray(errorsMap)
 	}
 
-	logger_ap.Infof("Request parameters: fromBucket=%v, toCluster=%v, toBucket=%v, forward=%v, settings=%v\n",
-		fromBucket, toCluster, toBucket, forward, settings)
+	logger_ap.Infof("Request parameters: fromBucket=%v, toCluster=%v, toBucket=%v, settings=%v\n",
+		fromBucket, toCluster, toBucket, settings)
 
-	replicationId, err := CreateReplication(fromBucket, toCluster, toBucket, settings, forward)
+	replicationId, err := CreateReplication(fromBucket, toCluster, toBucket, settings)
 
 	if err != nil {
 		return nil, err
 	} else {
-		if forward {
-			// forward replication request to other KV nodes involved if necessary
-			adminport.forwardReplicationRequest(request)
-		}
-
 		return NewCreateReplicationResponse(replicationId), nil
 	}
 }
@@ -353,26 +341,18 @@ func (adminport *Adminport) doCreateReplicationRequest(request *http.Request) ([
 func (adminport *Adminport) doDeleteReplicationRequest(request *http.Request) ([]byte, error) {
 	logger_ap.Infof("doDeleteReplicationRequest\n")
 
-	replicationId, forward, err := DecodeReplicationIdAndForwardFlagFromHttpRequest(request, DeleteReplicationPrefix)
+	replicationId, err := DecodeDynamicParamInURL(request, DeleteReplicationPrefix, "Replication Id")
 	if err != nil {
 		return nil, err
 	}
 
 	logger_ap.Debugf("Request params: replicationId=%v\n", replicationId)
 
-	if forward {
-		err = DeleteReplication(replicationId)
-	} else {
-		go stopPipeline(replicationId)
-	}
+	err = DeleteReplication(replicationId)
 
 	if err != nil {
 		return nil, err
 	} else {
-		if forward {
-			// forward replication request to other KV nodes involved
-			adminport.forwardReplicationRequest(request)
-		}
 		return NewDeleteReplicationResponse()
 	}
 }
@@ -508,8 +488,6 @@ func (adminport *Adminport) doChangeReplicationSettingsRequest(request *http.Req
 		return nil, err
 	}
 
-	oldSettings := replSpec.Settings
-
 	errorsMap, err = UpdateReplicationSettings(replicationId, settingsMap)
 	if err != nil {
 		return nil, err
@@ -518,51 +496,12 @@ func (adminport *Adminport) doChangeReplicationSettingsRequest(request *http.Req
 		return EncodeErrorsMapIntoByteArray(errorsMap)
 	}
 
-	// forward notifications to other nodes
-	notifyRequest, err := NewNotifySettingsChangeRequest(replicationId, adminport.xdcrRestPort, oldSettings)
-	if err != nil {
-		return nil, err
-	}
-
-	adminport.forwardReplicationRequest(notifyRequest)
-
 	// return replication settings after changes
 	replSpec, err = ReplicationSpecService().ReplicationSpec(replicationId)
 	if err != nil {
 		return nil, err
 	}
 	return NewReplicationSettingsResponse(replSpec.Settings)
-}
-
-func (adminport *Adminport) doNotifyReplicationSettingsChangeRequest(request *http.Request) ([]byte, error) {
-	logger_ap.Infof("doNotifyReplicationSettingsChangeRequest\n")
-
-	// get input parameters from request
-
-	replicationId, err := DecodeDynamicParamInURL(request, SettingsReplicationsPath, "Replication Id")
-	if err != nil {
-		return nil, err
-	}
-	logger_ap.Infof("Request params: replicationId=%v\n", replicationId)
-
-	oldSettings, err := DecodeOldSettingsFromRequest(request)
-	if err != nil {
-		return nil, err
-	}
-
-	logger_ap.Infof("Request params: oldSettings=%v\n", oldSettings)
-
-	replSpec, err := ReplicationSpecService().ReplicationSpec(replicationId)
-	if err != nil {
-		return nil, err
-	}
-
-	err = HandleReplicationDefChanges(replicationId, oldSettings, replSpec.Settings)
-	if err != nil {
-		return nil, err
-	} else {
-		return nil, nil
-	}
 }
 
 // get statistics for all running replications
@@ -584,82 +523,6 @@ func (adminport *Adminport) doGetStatisticsRequest(request *http.Request) ([]byt
 	} else {
 		return nil, err
 	}
-}
-
-// forward requests to other nodes.
-func (adminport *Adminport) forwardReplicationRequest(request *http.Request) error {
-	logger_ap.Infof("forwardReplicationRequest\n")
-
-	// have to get the actual name of the kvnode here
-	myKVNodes, err := XDCRCompTopologyService().MyKVNodes()
-	if err != nil {
-		return err
-	}
-
-	// so far myKVNodes should contain one and only one node
-	myKVNode := myKVNodes[0]
-
-	xdcrNodesMap, err := XDCRCompTopologyService().XDCRTopology()
-	if err != nil {
-		return err
-	}
-
-	if len(xdcrNodesMap) > 1 {
-		if err = request.ParseForm(); err != nil {
-			return err
-		}
-
-		// set "Forward" flag to false in the forwarded request
-		var paramMap = make(map[string]interface{}, 0)
-		for key, valArr := range request.Form {
-			if len(valArr) > 0 {
-				paramMap[key] = valArr[0]
-			}
-		}
-		paramMap[Forward] = "false"
-		// this Encode op should never fail since paramMap is fully under control
-		newBody, _ := EncodeMapIntoByteArray(paramMap)
-
-		for xdcrNode, port := range xdcrNodesMap {
-			// do not forward to current node
-			if xdcrNode != myKVNode {
-				go forwardReplicationRequestToXDCRNode(request.URL.String(), newBody, xdcrNode, port)
-			}
-		}
-	}
-	return nil
-}
-
-func forwardReplicationRequestToXDCRNode(oldRequestUrl string, newRequestBody []byte, xdcrAddr string, port uint16) (*http.Response, error) {
-	logger_ap.Infof("forwardReplicationRequestToXDCRNode. oldRequestUrl=%v, newRequestBody=%v, xdcrAddr=%v, port=%v\n",
-		oldRequestUrl, string(newRequestBody), xdcrAddr, port)
-
-	newUrl := "http://" + utils.GetHostAddr(xdcrAddr, port) + oldRequestUrl
-	newRequest, err := http.NewRequest(base.MethodPost, newUrl, bytes.NewBuffer(newRequestBody))
-	if err != nil {
-		return nil, err
-	}
-	newRequest.Header.Set(base.ContentType, base.DefaultContentType)
-
-	retryInterval := ForwardingRetryInterval
-	for i := 0; i <= MaxForwardingRetry; i++ {
-		response, err := http.DefaultClient.Do(newRequest)
-		logger_ap.Infof("forwarding request=%v for the %vth time\n", newRequest, i+1)
-		if err == nil && response.StatusCode == 200 {
-			logger_ap.Infof("forwarding request succeeded")
-			return response, err
-		}
-		// if did not succeed, wait and try again
-		if i < MaxForwardingRetry {
-			time.Sleep(retryInterval)
-			retryInterval *= 2
-		}
-	}
-
-	// give up after max retry. the target node is likely dead. hopefully it will
-	// get restarted and the required action, e.g., create/resumeReplication, will get performed then
-	logger_ap.Errorf("Error forwarding request after max retry")
-	return nil, errors.New("Error forwarding request after max retry")
 }
 
 // Get the message key from http request
@@ -713,7 +576,7 @@ func authAdminCreds(request *http.Request, readOnly bool) error {
 	if err != nil {
 		return err
 	}
-	
+
 	if readOnly {
 		isAdmin, err = creds.IsROAdmin()
 

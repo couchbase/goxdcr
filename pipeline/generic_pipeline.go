@@ -63,7 +63,6 @@ type GenericPipeline struct {
 	logger *log.CommonLogger
 
 	spec     *metadata.ReplicationSpecification
-	settings *metadata.ReplicationSettings
 }
 
 //Get the runtime context of this pipeline

@@ -159,7 +159,7 @@ func test() {
 
 	defer common.DeleteTestRemoteCluster(replication_manager.RemoteClusterService(), options.remoteName)
 
-	topic, err := replication_manager.CreateReplication(options.source_bucket, options.remoteName, options.target_bucket, settings, true)
+	topic, err := replication_manager.CreateReplication(options.source_bucket, options.remoteName, options.target_bucket, settings)
 	if err != nil {
 		fail(fmt.Sprintf("%v", err))
 	}

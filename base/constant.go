@@ -17,7 +17,7 @@ import (
 var DefaultConnectionSize = 10
 var DefaultPoolName = "default"
 
-var LocalHostName = "localhost"
+var LocalHostName = "127.0.0.1"
 
 // URL Paths for retrieving cluster info
 var PoolsPath = "/pools"

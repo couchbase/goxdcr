@@ -28,7 +28,6 @@ const (
 	BatchSize                      = "doc_batch_size_kb"
 	FailureRestartInterval         = "failure_restart_interval"
 	OptimisticReplicationThreshold = "optimistic_replication_threshold"
-	HttpConnection                 = "http_connections"
 	SourceNozzlePerNode            = "source_nozzle_per_node"
 	TargetNozzlePerNode            = "target_nozzle_per_node"
 	MaxExpectedReplicationLag      = "max_expected_replication_lag"
@@ -61,7 +60,6 @@ var BatchCountConfig = &SettingsConfig{500, &Range{500, 10000}}
 var BatchSizeConfig = &SettingsConfig{2048, &Range{10, 10000}}
 var FailureRestartIntervalConfig = &SettingsConfig{30, &Range{1, 300}}
 var OptimisticReplicationThresholdConfig = &SettingsConfig{256, &Range{0, 20*1024*1024}}
-var HttpConnectionConfig = &SettingsConfig{20, &Range{1, 100}}
 var SourceNozzlePerNodeConfig = &SettingsConfig{2, &Range{1, 10}}
 var TargetNozzlePerNodeConfig = &SettingsConfig{2, &Range{1, 10}}
 var MaxExpectedReplicationLagConfig = &SettingsConfig{1000, nil}
@@ -78,7 +76,6 @@ var SettingsConfigMap = map[string]*SettingsConfig{
 	BatchSize: BatchSizeConfig,
 	FailureRestartInterval: FailureRestartIntervalConfig,
 	OptimisticReplicationThreshold: OptimisticReplicationThresholdConfig,
-	HttpConnection: HttpConnectionConfig,
 	SourceNozzlePerNode: SourceNozzlePerNodeConfig,
 	TargetNozzlePerNode: TargetNozzlePerNodeConfig,
 	MaxExpectedReplicationLag: MaxExpectedReplicationLagConfig,
@@ -126,11 +123,6 @@ type ReplicationSettings struct {
 	//range: 0-20*1024*1024
 	OptimisticReplicationThreshold int `json:"optimistic_replication_threshold"`
 
-	//number of maximum simultaneous HTTP connections used for REST protocol
-	//default: 20
-	//range: 1-100
-	HttpConnection int `json:"http_connection"`
-
 	//the number of nozzles can be used for this replication per source cluster node
 	//This together with target_nozzle_per_node controls the parallism of the replication
 	//default: 2
@@ -175,7 +167,6 @@ func DefaultSettings() *ReplicationSettings {
 		BatchSize:                      BatchSizeConfig.defaultValue.(int),
 		FailureRestartInterval:         FailureRestartIntervalConfig.defaultValue.(int),
 		OptimisticReplicationThreshold: OptimisticReplicationThresholdConfig.defaultValue.(int),
-		HttpConnection:                 HttpConnectionConfig.defaultValue.(int),
 		SourceNozzlePerNode:            SourceNozzlePerNodeConfig.defaultValue.(int),
 		TargetNozzlePerNode:            TargetNozzlePerNodeConfig.defaultValue.(int),
 		MaxExpectedReplicationLag:      MaxExpectedReplicationLagConfig.defaultValue.(int),
@@ -193,11 +184,14 @@ func (s *ReplicationSettings) SetLogLevel(log_level string) error {
 	return err
 }
 
+// returns true if real changes are done. false otherwise
+
 // normally this method should return an empty errorsMap since the input settingsMap 
 // is constructed internally and necessary checks should have been applied then
 // I am leaving the error checks just in case.
-func (s *ReplicationSettings) UpdateSettingsFromMap(settingsMap map[string]interface{}) map[string]error {
+func (s *ReplicationSettings) UpdateSettingsFromMap(settingsMap map[string]interface{}) (map[string]error, bool) {
 	errorMap := make(map[string]error)
+	changed := false
 	for key, val := range settingsMap {		
 		switch key {
 		case ReplicationType:
@@ -206,112 +200,147 @@ func (s *ReplicationSettings) UpdateSettingsFromMap(settingsMap map[string]inter
 				errorMap[key] = utils.IncorrectValueTypeInMapError(key, val, "string")
 				continue
 			}
-			s.RepType = repType
+			if s.RepType != repType {
+				changed = true
+				s.RepType = repType
+			}
 		case FilterExpression:
 			filterExpression, ok := val.(string)
 			if !ok {
 				errorMap[key] = utils.IncorrectValueTypeInMapError(key, val, "string")
 				continue
 			}
-			s.FilterExpression = filterExpression
+			if s.FilterExpression != filterExpression {
+				errorMap[key] = errors.New("Filter expression cannot be changed after the replication is created")
+			}
 		case Active:
 			active, ok := val.(bool)
 			if !ok {
 				errorMap[key] = utils.IncorrectValueTypeInMapError(key, val, "bool")
 				continue
 			}
-			s.Active = active
+			if s.Active != active {
+				changed = true
+				s.Active = active
+			}
 		case CheckpointInterval:
 			checkpointInterval, ok := val.(int)
 			if !ok {
 				errorMap[key] = utils.IncorrectValueTypeInMapError(key, val, "int")
 				continue
 			}
-			s.CheckpointInterval = checkpointInterval
+			if s.CheckpointInterval != checkpointInterval {
+				changed = true
+				s.CheckpointInterval = checkpointInterval
+			}
+			
 		case BatchCount:
 			batchCount, ok := val.(int)
 			if !ok {
 				errorMap[key] = utils.IncorrectValueTypeInMapError(key, val, "int")
 				continue
 			}
-			s.BatchCount = batchCount
+			if s.BatchCount != batchCount {
+				changed = true
+				s.BatchCount = batchCount
+			}
 		case BatchSize:
 			batchSize, ok := val.(int)
 			if !ok {
 				errorMap[key] = utils.IncorrectValueTypeInMapError(key, val, "int")
 				continue
 			}
-			s.BatchSize = batchSize
+			if s.BatchSize != batchSize {
+				changed = true
+				s.BatchSize = batchSize
+			}
 		case FailureRestartInterval:
 			failureRestartInterval, ok := val.(int)
 			if !ok {
 				errorMap[key] = utils.IncorrectValueTypeInMapError(key, val, "int")
 				continue
 			}
-			s.FailureRestartInterval = failureRestartInterval
+			if s.FailureRestartInterval != failureRestartInterval {
+				changed = true
+				s.FailureRestartInterval = failureRestartInterval
+			}
 		case OptimisticReplicationThreshold:
 			optimisticReplicationThreshold, ok := val.(int)
 			if !ok {
 				errorMap[key] = utils.IncorrectValueTypeInMapError(key, val, "int")
 				continue
 			}
-			s.OptimisticReplicationThreshold = optimisticReplicationThreshold
-		case HttpConnection:
-			httpConnection, ok := val.(int)
-			if !ok {
-				errorMap[key] = utils.IncorrectValueTypeInMapError(key, val, "int")
-				continue
+			if s.OptimisticReplicationThreshold != optimisticReplicationThreshold {
+				changed = true
+				s.OptimisticReplicationThreshold = optimisticReplicationThreshold
 			}
-			s.HttpConnection = httpConnection
 		case SourceNozzlePerNode:
 			sourceNozzlePerNode, ok := val.(int)
 			if !ok {
 				errorMap[key] = utils.IncorrectValueTypeInMapError(key, val, "int")
 				continue
 			}
-			s.SourceNozzlePerNode = sourceNozzlePerNode
+			if s.SourceNozzlePerNode != sourceNozzlePerNode {
+				changed = true
+				s.SourceNozzlePerNode = sourceNozzlePerNode
+			}
 		case TargetNozzlePerNode:
 			targetNozzlePerNode, ok := val.(int)
 			if !ok {
 				errorMap[key] = utils.IncorrectValueTypeInMapError(key, val, "int")
 				continue
 			}
-			s.TargetNozzlePerNode = targetNozzlePerNode
+			if s.TargetNozzlePerNode != targetNozzlePerNode {
+				changed = true
+				s.TargetNozzlePerNode = targetNozzlePerNode
+			}		
 		case MaxExpectedReplicationLag:
 			maxExpectedReplicationLag, ok := val.(int)
 			if !ok {
 				errorMap[key] = utils.IncorrectValueTypeInMapError(key, val, "int")
 				continue
 			}
-			s.MaxExpectedReplicationLag = maxExpectedReplicationLag
+			if s.MaxExpectedReplicationLag != maxExpectedReplicationLag {
+				changed = true
+				s.MaxExpectedReplicationLag = maxExpectedReplicationLag
+			}			
 		case TimeoutPercentageCap:
 			timeoutPercentageCap, ok := val.(int)
 			if !ok {
 				errorMap[key] = utils.IncorrectValueTypeInMapError(key, val, "int")
 				continue
 			}
-			s.TimeoutPercentageCap = timeoutPercentageCap
+			if 	s.TimeoutPercentageCap != timeoutPercentageCap {
+				changed = true
+				s.TimeoutPercentageCap = timeoutPercentageCap
+			}	
 		case PipelineLogLevel:
 			l, ok := val.(string)
 			if !ok {
 				errorMap[key] = utils.IncorrectValueTypeInMapError(key, val, "string")
 				continue
 			}
-			s.SetLogLevel(l)
+			if 	s.LogLevel.String() != l {
+				changed = true
+				s.SetLogLevel(l)
+			}			
 		case PipelineStatsInterval:
 			interval, ok := val.(int)
 			if !ok {
 				errorMap[key] = utils.IncorrectValueTypeInMapError(key, val, "int")
 				continue
 			}
-			s.StatsInterval = interval
+			if 	s.StatsInterval != interval {
+				changed = true
+				s.StatsInterval = interval
+			}
 		default:
 			errorMap[key] = errors.New(fmt.Sprintf("Invalid key in map, %v", key))
 
 		}
 	}
 
-	return errorMap
+	return errorMap, changed
 }
 
 func (s *ReplicationSettings) ToMap() map[string]interface{} {
@@ -324,7 +353,6 @@ func (s *ReplicationSettings) ToMap() map[string]interface{} {
 	settings_map[BatchSize] = s.BatchSize
 	settings_map[FailureRestartInterval] = s.FailureRestartInterval
 	settings_map[OptimisticReplicationThreshold] = s.OptimisticReplicationThreshold
-	settings_map[HttpConnection] = s.HttpConnection
 	settings_map[SourceNozzlePerNode] = s.SourceNozzlePerNode
 	settings_map[TargetNozzlePerNode] = s.TargetNozzlePerNode
 	settings_map[MaxExpectedReplicationLag] = s.MaxExpectedReplicationLag
@@ -356,7 +384,7 @@ func ValidateAndConvertSettingsValue(key string, value string) (convertedValue i
 			convertedValue = !paused
 
 		case CheckpointInterval, BatchCount, BatchSize, FailureRestartInterval, 
-			 OptimisticReplicationThreshold, HttpConnection, SourceNozzlePerNode, 
+			 OptimisticReplicationThreshold, SourceNozzlePerNode, 
 			 TargetNozzlePerNode,  MaxExpectedReplicationLag, TimeoutPercentageCap, 
 			 PipelineStatsInterval	:
 			convertedValue, err = strconv.ParseInt(value, base.ParseIntBase, base.ParseIntBitSize)
@@ -384,3 +412,4 @@ func ValidateAndConvertSettingsValue(key string, value string) (convertedValue i
 		
 	return		
 }
+
