@@ -21,8 +21,14 @@ var LocalHostName = "127.0.0.1"
 
 // URL Paths for retrieving cluster info
 var PoolsPath = "/pools"
+var DefaultPoolPath = "/pools/default"
 var NodesPath = "/pools/nodes"
+var NodesSelfPath = "/nodes/self"
 var SSLPortsPath = "/nodes/self/xdcrSSLPorts"
+
+//keys in the map which /nodes/self returns
+var CouchApiBase = "couchApiBase"
+var CouchApiBaseHttps = "couchApiBaseHttps"
 
 // keys used in parsing cluster info
 var NodesKey = "nodes"
@@ -121,4 +127,11 @@ const (
 	Pending = "Pending"
 	Replicating = "Replicating"
 	Paused = "Paused"
+)
+
+const (
+	//Bucket sequence number statistics
+	VBUCKET_SEQNO_STAT_NAME            = "vbucket-seqno"
+	VBUCKET_HIGH_SEQNO_STAT_KEY_FORMAT = "vb_%v:high_seqno"
+
 )

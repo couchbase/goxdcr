@@ -70,6 +70,7 @@ func (meta_svc *MetaKVMetadataSvc) GetAllMetadataFromCatalog(catalogKey string) 
 	var entries = make([]*service_def.MetadataEntry, 0)
 	kvEntries, err := metakv.ListAllChildren(GetCatalogPathFromCatalogKey(catalogKey))
 	if err != nil {
+		meta_svc.logger.Errorf("Failed to list all children. err=%v\n", err)
 		return nil, err
 	}
 	for _, kvEntry := range kvEntries {

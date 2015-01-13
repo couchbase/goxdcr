@@ -10,6 +10,7 @@
 package parts
 
 import (
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"github.com/couchbase/gomemcached"
@@ -60,6 +61,7 @@ type DcpNozzle struct {
 	counter      int
 	start_time   time.Time
 	handle_error bool
+	cur_ts       map[uint16]*base.VBTimestamp
 }
 
 func NewDcpNozzle(id string,
@@ -218,24 +220,44 @@ func (dcp *DcpNozzle) processData() (err error) {
 				dcp.handleGeneralError(errors.New("DCP stream is closed."))
 				goto done
 			}
-			if dcp.IsOpen() {
-				if m.Status == gomemcached.NOT_MY_VBUCKET {
-					dcp.Logger().Errorf("Raise error condition %v\n", base.ErrorNotMyVbucket)
-					otherInfo := utils.WrapError(base.ErrorNotMyVbucket)
-					dcp.RaiseEvent(common.ErrorEncountered, nil, dcp, nil, otherInfo)
-					return base.ErrorNotMyVbucket
-				}
-				dcp.counter++
-				dcp.RaiseEvent(common.DataReceived, m, dcp, nil /*derivedItems*/, nil /*otherInfos*/)
-				dcp.Logger().Tracef("%v, Mutation %v:%v:%v <%v>, counter=%v, ops_per_sec=%v\n",
-					dcp.Id(), m.VBucket, m.Seqno, m.Opcode, m.Key, dcp.counter, float64(dcp.counter)/time.Since(dcp.start_time).Seconds())
+			if m.Status == gomemcached.NOT_MY_VBUCKET {
+				dcp.Logger().Errorf("Raise error condition %v\n", base.ErrorNotMyVbucket)
+				otherInfo := utils.WrapError(base.ErrorNotMyVbucket)
+				dcp.RaiseEvent(common.ErrorEncountered, nil, dcp, nil, otherInfo)
+				return base.ErrorNotMyVbucket
+			} else if m.Status == gomemcached.ROLLBACK {
+				rollbackseq := binary.BigEndian.Uint64(m.Value[:8])
+				vbno := m.VBucket
 
-				// forward mutation downstream through connector
-				if err := dcp.Connector().Forward(m); err != nil {
-					dcp.handleGeneralError(err)
+				//need to request the uprstream for the vbucket again
+				opaque := newOpaque()
+				flags := uint32(0)
+				seqEnd := uint64(0xFFFFFFFFFFFFFFFF)
+				dcp.Logger().Infof("%v re-starting vb stream for vb=%v after receiving roll-back event\n", dcp.Id(), vbno)
+				vbts := dcp.cur_ts[vbno]
+				dcp.Logger().Infof("%v starting vb stream for vb=%v, starting seqno=%v\n", dcp.Id(), vbts.Vbno, rollbackseq)
+				err := dcp.uprFeed.UprRequestStream(vbno, opaque, flags, vbts.Vbuuid, rollbackseq, seqEnd, rollbackseq, rollbackseq)
+				if err != nil {
+					dcp.Logger().Errorf("Failed to request dcp stream after receiving roll-back for vb=%v\n", vbno)
+					otherInfo := utils.WrapError(err)
+					dcp.RaiseEvent(common.ErrorEncountered, nil, dcp, nil, otherInfo)
+					return err
 				}
-				// raise event for statistics collection
-				dcp.RaiseEvent(common.DataProcessed, m, dcp, nil /*derivedItems*/, nil /*otherInfos*/)
+
+			} else {
+				if dcp.IsOpen() {
+					dcp.counter++
+					dcp.RaiseEvent(common.DataReceived, m, dcp, nil /*derivedItems*/, nil /*otherInfos*/)
+					dcp.Logger().Tracef("%v, Mutation %v:%v:%v <%v>, counter=%v, ops_per_sec=%v\n",
+						dcp.Id(), m.VBucket, m.Seqno, m.Opcode, m.Key, dcp.counter, float64(dcp.counter)/time.Since(dcp.start_time).Seconds())
+
+					// forward mutation downstream through connector
+					if err := dcp.Connector().Forward(m); err != nil {
+						dcp.handleGeneralError(err)
+					}
+					// raise event for statistics collection
+					dcp.RaiseEvent(common.DataProcessed, m, dcp, nil /*derivedItems*/, nil /*otherInfos*/)
+				}
 			}
 		}
 	}
@@ -268,13 +290,13 @@ func (dcp *DcpNozzle) handleGeneralError(err error) {
 func (dcp *DcpNozzle) startUprStream(settings map[string]interface{}) error {
 
 	// fetch restart-timestamp from settings
-	ts := settings[DCP_SETTINGS_KEY].(map[uint16]*base.VBTimestamp)
+	dcp.cur_ts = settings[DCP_SETTINGS_KEY].(map[uint16]*base.VBTimestamp)
 
 	opaque := newOpaque()
 	flags := uint32(0)
 	seqEnd := uint64(0xFFFFFFFFFFFFFFFF)
-	for _, vbts := range ts {
-		dcp.Logger().Infof("%v starting vb stream for vb=%v\n", dcp.Id(), vbts.Vbno)
+	for _, vbts := range dcp.cur_ts {
+		dcp.Logger().Debugf("%v starting vb stream for vb=%v\n", dcp.Id(), vbts.Vbno)
 		err := dcp.uprFeed.UprRequestStream(vbts.Vbno, opaque, flags, vbts.Vbuuid, vbts.Seqno, seqEnd, vbts.SnapshotStart, vbts.SnapshotEnd)
 		if err != nil {
 			return err

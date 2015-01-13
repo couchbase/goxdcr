@@ -74,7 +74,7 @@ func (pipelineMgr *pipelineManager) startPipeline(topic string, settings map[str
 			return f, err
 		}
 
-		pipelineMgr.logger.Info("Pipeline is constructed, start it")
+		pipelineMgr.logger.Infof("Pipeline %v is constructed, start it", f.InstanceId())
 		err = f.Start(settings)
 		if err != nil {
 			pipelineMgr.logger.Error("Failed to start the pipeline")

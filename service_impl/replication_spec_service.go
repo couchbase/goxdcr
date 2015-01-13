@@ -109,6 +109,7 @@ func (service *ReplicationSpecService) ActiveReplicationSpecs() (map[string]*met
 
 	entries, err := service.metadata_svc.GetAllMetadataFromCatalog(ReplicationSpecsCatalogKey)
 	if err != nil {
+		service.logger.Errorf("Failed to get all entries, err=%v\n", err)
 		return nil, err
 	}
 

@@ -10,17 +10,21 @@
 package pipeline
 
 import (
+	"errors"
 	"fmt"
+	"github.com/couchbase/goxdcr/base"
 	common "github.com/couchbase/goxdcr/common"
 	log "github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
+	"github.com/couchbase/goxdcr/utils"
 	"sync"
 	"time"
-	"github.com/couchbase/goxdcr/utils"
 )
 
 //the function can construct part specific settings for the pipeline
-type PartsSettingsConstructor func(pipeline common.Pipeline, part common.Part, pipeline_settings map[string]interface{}) (map[string]interface{}, error)
+type PartsSettingsConstructor func(pipeline common.Pipeline, part common.Part, pipeline_settings map[string]interface{}, ts map[uint16]*base.VBTimestamp) (map[string]interface{}, error)
+
+type StartingSeqnoConstructor func(pipeline common.Pipeline) (map[uint16]*base.VBTimestamp, error)
 
 //GenericPipeline is the generic implementation of a data processing pipeline
 //
@@ -44,13 +48,12 @@ type GenericPipeline struct {
 	//	//communication channel with PipelineManager
 	//	reqch chan []interface{}
 
-	//if the pipeline is active running
-	isActive bool
-
 	//the lock to serialize the request to start\stop the pipeline
 	stateLock sync.Mutex
 
 	partSetting_constructor PartsSettingsConstructor
+
+	startingSeqno_constructor StartingSeqnoConstructor
 
 	//the map that contains the references to all parts used in the pipeline
 	//it only populated when GetAllParts called the first time
@@ -62,7 +65,12 @@ type GenericPipeline struct {
 
 	logger *log.CommonLogger
 
-	spec     *metadata.ReplicationSpecification
+	spec              *metadata.ReplicationSpecification
+	settings_at_start map[string]interface{}
+
+	state common.PipelineState
+
+	instance_id int
 }
 
 //Get the runtime context of this pipeline
@@ -74,14 +82,14 @@ func (genericPipeline *GenericPipeline) SetRuntimeContext(ctx common.PipelineRun
 	genericPipeline.context = ctx
 }
 
-func (genericPipeline *GenericPipeline) startPart(part common.Part, settings map[string]interface{}) error {
+func (genericPipeline *GenericPipeline) startPart(part common.Part, settings map[string]interface{}, ts map[uint16]*base.VBTimestamp) error {
 	var err error = nil
 
 	//start downstreams
 	if part.Connector() != nil {
 		downstreamParts := part.Connector().DownStreams()
 		for _, p := range downstreamParts {
-			err = genericPipeline.startPart(p, settings)
+			err = genericPipeline.startPart(p, settings, ts)
 			if err != nil {
 				return err
 			}
@@ -91,7 +99,7 @@ func (genericPipeline *GenericPipeline) startPart(part common.Part, settings map
 	partSettings := settings
 	if genericPipeline.partSetting_constructor != nil {
 		genericPipeline.logger.Debugf("Calling part setting constructor\n")
-		partSettings, err = genericPipeline.partSetting_constructor(genericPipeline, part, settings)
+		partSettings, err = genericPipeline.partSetting_constructor(genericPipeline, part, settings, ts)
 		if err != nil {
 			return err
 		}
@@ -112,17 +120,30 @@ func (genericPipeline *GenericPipeline) startPart(part common.Part, settings map
 //settings - a map of parameter to start the pipeline. it can contain initialization paramters
 //			 for each processing steps and for runtime context of the pipeline.
 func (genericPipeline *GenericPipeline) Start(settings map[string]interface{}) error {
+	if genericPipeline.state != common.Pipeline_Stopped {
+		return errors.New(fmt.Sprintf("Can't start the pipeline, the state is wrong. The current state is %v\n", genericPipeline.state))
+	}
+
 	genericPipeline.logger.Debugf("Try to start the pipeline with settings = %s", fmt.Sprint(settings))
 	var err error
 
 	genericPipeline.stateLock.Lock()
 	defer genericPipeline.stateLock.Unlock()
 
+	//get starting vb timestamp
+	ts, err := genericPipeline.startingSeqno_constructor(genericPipeline)
+	if err != nil {
+		return err
+	}
+
+	settings["VBTimestamps"] = ts
+	genericPipeline.logger.Debugf("Pipeline %v's starting seqno is %v\n", genericPipeline.InstanceId(), ts)
+
 	//start all the processing steps of the Pipeline
 	//start the incoming nozzle which would start the downstream steps
 	//subsequently
 	for _, source := range genericPipeline.sources {
-		err = genericPipeline.startPart(source, settings)
+		err = genericPipeline.startPart(source, settings, ts)
 		if err != nil {
 			return err
 		}
@@ -133,6 +154,9 @@ func (genericPipeline *GenericPipeline) Start(settings map[string]interface{}) e
 	genericPipeline.logger.Debug("Try to start the runtime context")
 	//start the runtime
 	err = genericPipeline.context.Start(settings)
+	if err != nil {
+		return err
+	}
 	genericPipeline.logger.Debug("The runtime context is started")
 
 	//open targets
@@ -155,23 +179,24 @@ func (genericPipeline *GenericPipeline) Start(settings map[string]interface{}) e
 	}
 	genericPipeline.logger.Debug("All incoming nozzles have been opened")
 
-	//set its state to be active
-	genericPipeline.isActive = true
+	genericPipeline.logger.Infof("-----------Pipeline %s is started----------", genericPipeline.InstanceId())
 
-	genericPipeline.logger.Infof("-----------Pipeline %s is started----------", genericPipeline.Topic())
+	genericPipeline.settings_at_start = settings
+
+	genericPipeline.state = common.Pipeline_Running
 
 	return err
 }
 
 func (genericPipeline *GenericPipeline) stopPart(part common.Part) error {
 	var err error = nil
-	genericPipeline.logger.Infof("Trying to stop part %v\n", part.Id())
+	genericPipeline.logger.Infof("Trying to stop part %v for %v\n", part.Id(), genericPipeline.InstanceId())
 	if genericPipeline.canStop(part) {
 		if !part.IsStarted() {
 			genericPipeline.logger.Debugf("part %v is already stopped\n", part.Id())
 			return nil
 		}
-		err = utils.ExecWithTimeout (part.Stop, 600 * time.Millisecond, genericPipeline.logger)
+		err = utils.ExecWithTimeout(part.Stop, 600*time.Millisecond, genericPipeline.logger)
 		if err == nil {
 			genericPipeline.logger.Infof("part %v is stopped\n", part.Id())
 			if part.Connector() != nil {
@@ -253,11 +278,20 @@ func (genericPipeline *GenericPipeline) isUpstreamTo(target_part common.Part, pa
 }
 
 //Stop stops the pipeline
+//it can result the pipeline in either "Stopped" if the operation is successful or "Pending" otherwise
 func (genericPipeline *GenericPipeline) Stop() error {
+	if genericPipeline.State() == common.Pipeline_Stopped {
+		//pipeline is already stopped, no-op
+		return nil
+	}
+
 	genericPipeline.stateLock.Lock()
 	defer genericPipeline.stateLock.Unlock()
 
-	genericPipeline.logger.Infof("stoppping pipeline %v\n", genericPipeline.Topic())
+	//first move the pipeline state to pending to signal this pipeline is in shutting-down phase
+	genericPipeline.state = common.Pipeline_Pending
+
+	genericPipeline.logger.Infof("stoppping pipeline %v\n", genericPipeline.InstanceId())
 	var err error
 
 	// stop services before stopping parts to avoid spurious errors from services
@@ -290,9 +324,8 @@ func (genericPipeline *GenericPipeline) Stop() error {
 	go genericPipeline.waitToStop(finchan)
 	<-finchan
 
-	genericPipeline.isActive = false
-
-	genericPipeline.logger.Infof("Pipeline %v is stopped\n", genericPipeline.Topic())
+	genericPipeline.state = common.Pipeline_Stopped
+	genericPipeline.logger.Infof("Pipeline %v is stopped\n", genericPipeline.InstanceId(), )
 	return err
 
 }
@@ -330,11 +363,12 @@ func NewGenericPipeline(t string,
 	targets map[string]common.Nozzle,
 	spec *metadata.ReplicationSpecification) *GenericPipeline {
 	pipeline := &GenericPipeline{topic: t,
-		sources:  sources,
-		targets:  targets,
-		isActive: false,
-		spec:     spec,
-		logger:   log.NewLogger("GenericPipeline", nil)}
+		sources: sources,
+		targets: targets,
+		spec:    spec,
+		logger:  log.NewLogger("GenericPipeline", nil),
+		instance_id: time.Now().Nanosecond(),
+		state:   common.Pipeline_Stopped}
 	return pipeline
 }
 
@@ -343,14 +377,17 @@ func NewPipelineWithSettingConstructor(t string,
 	targets map[string]common.Nozzle,
 	spec *metadata.ReplicationSpecification,
 	partsSettingsConstructor PartsSettingsConstructor,
+	startingSeqnoConstructor StartingSeqnoConstructor,
 	logger_context *log.LoggerContext) *GenericPipeline {
 	pipeline := &GenericPipeline{topic: t,
-		sources:                 sources,
-		targets:                 targets,
-		spec:                    spec,
-		isActive:                false,
-		partSetting_constructor: partsSettingsConstructor,
-		logger:                  log.NewLogger("GenericPipeline", logger_context)}
+		sources: sources,
+		targets: targets,
+		spec:    spec,
+		partSetting_constructor:   partsSettingsConstructor,
+		startingSeqno_constructor: startingSeqnoConstructor,
+		logger: log.NewLogger("GenericPipeline", logger_context),
+		instance_id: time.Now().Nanosecond(),
+		state:  common.Pipeline_Stopped}
 	pipeline.logger.Debugf("Pipeline %s is initialized with a part setting constructor %v", t, partsSettingsConstructor)
 
 	return pipeline
@@ -413,9 +450,20 @@ func (genericPipeline *GenericPipeline) Specification() *metadata.ReplicationSpe
 	return genericPipeline.spec
 }
 
-func (genericPipeline *GenericPipeline) Settings() *metadata.ReplicationSettings {
-	return genericPipeline.spec.Settings
+func (genericPipeline *GenericPipeline) Settings() map[string]interface{} {
+	return genericPipeline.settings_at_start
 }
 
+func (genericPipeline *GenericPipeline) State() common.PipelineState {
+	return genericPipeline.state
+}
+
+func (genericPipeline *GenericPipeline) InstanceId() string {
+	return fmt.Sprintf("%v-%v", genericPipeline.topic, genericPipeline.instance_id)
+}
+
+func (genericPipeline *GenericPipeline) String() string {
+	return genericPipeline.InstanceId()
+}
 //enforcer for GenericPipeline to implement Pipeline
 var _ common.Pipeline = (*GenericPipeline)(nil)

@@ -11,11 +11,14 @@ package pipeline_ctx
 
 import (
 	"errors"
+	"fmt"
+	"github.com/couchbase/goxdcr/base"
 	common "github.com/couchbase/goxdcr/common"
 	"github.com/couchbase/goxdcr/log"
 )
 
-type ServiceSettingsConstructor func(pipeline common.Pipeline, service common.PipelineService, pipeline_settings map[string]interface{}) (map[string]interface{}, error)
+type ServiceSettingsConstructor func(pipeline common.Pipeline, service common.PipelineService, pipeline_settings map[string]interface{}, ts map[uint16]*base.VBTimestamp) (map[string]interface{}, error)
+type StartSeqnoConstructor func(pipeline common.Pipeline) (map[uint16]*base.VBTimestamp, error)
 
 type PipelineRuntimeCtx struct {
 	//registered runtime pipeline service
@@ -28,21 +31,23 @@ type PipelineRuntimeCtx struct {
 	isRunning                    bool
 	logger                       *log.CommonLogger
 	service_settings_constructor ServiceSettingsConstructor
+	start_seqno_constructor      StartSeqnoConstructor
 }
 
-func NewWithSettingConstructor(p common.Pipeline, service_settings_constructor ServiceSettingsConstructor, logger_context *log.LoggerContext) (*PipelineRuntimeCtx, error) {
+func NewWithSettingConstructor(p common.Pipeline, service_settings_constructor ServiceSettingsConstructor, start_seqno_constructor StartSeqnoConstructor, logger_context *log.LoggerContext) (*PipelineRuntimeCtx, error) {
 	ctx := &PipelineRuntimeCtx{
 		runtime_svcs: make(map[string]common.PipelineService),
 		pipeline:     p,
 		isRunning:    false,
 		logger:       log.NewLogger("PipelineRuntimeCtx", logger_context),
-		service_settings_constructor: service_settings_constructor}
+		service_settings_constructor: service_settings_constructor,
+		start_seqno_constructor:      start_seqno_constructor}
 
 	return ctx, nil
 }
 
 func New(p common.Pipeline) (*PipelineRuntimeCtx, error) {
-	return NewWithSettingConstructor(p, nil, log.DefaultLoggerContext)
+	return NewWithSettingConstructor(p, nil, nil, log.DefaultLoggerContext)
 }
 
 func (ctx *PipelineRuntimeCtx) Start(params map[string]interface{}) error {
@@ -51,8 +56,13 @@ func (ctx *PipelineRuntimeCtx) Start(params map[string]interface{}) error {
 	//start all registered services
 	for name, svc := range ctx.runtime_svcs {
 		settings := params
-		if ctx.service_settings_constructor != nil {
-			settings, err = ctx.service_settings_constructor (ctx.pipeline, svc, params)
+		if ctx.service_settings_constructor != nil && ctx.start_seqno_constructor != nil {
+			ts, ok := params["VBTimestamps"]
+			if !ok {
+				ctx.logger.Errorf("VBTimestamps is missing. params=%v\n", params)
+				return errors.New("VBTimestamps is missing")
+			}
+			settings, err = ctx.service_settings_constructor(ctx.pipeline, svc, params, ts.(map[uint16]*base.VBTimestamp))
 			if err != nil {
 				return err
 			}
@@ -60,6 +70,7 @@ func (ctx *PipelineRuntimeCtx) Start(params map[string]interface{}) error {
 		err = svc.Start(settings)
 		if err != nil {
 			ctx.logger.Errorf("Failed to start service %s", name)
+			break
 		}
 		ctx.logger.Infof("Service %s has been started", name)
 	}
@@ -80,18 +91,30 @@ func (ctx *PipelineRuntimeCtx) Start(params map[string]interface{}) error {
 func (ctx *PipelineRuntimeCtx) Stop() error {
 	ctx.logger.Infof("Pipeline context is stopping...")
 	var err error = nil
+	errMap := make (map[string]error)
+	
+	services_stopped := []string {}
 	//stop all registered services
 	for name, _ := range ctx.runtime_svcs {
-		err = ctx.UnregisterService (name) 
-		if err != nil {
-			ctx.logger.Errorf("Failed to stop service %v - %v", name, err)
+		err1 := ctx.UnregisterService(name)
+		if err1 != nil {
+			errMap[name] = err1
+			ctx.logger.Errorf("Failed to stop service %v - %v", name, err1)
+		}else {
+			services_stopped = append (services_stopped, name)
 		}
+		
 	}
 
-	if err == nil {
+	for _, service_stopped_name := range services_stopped {
+		delete (ctx.runtime_svcs, service_stopped_name)
+	}
+	
+	if len(errMap) == 0 {
 		ctx.isRunning = false
+		ctx.logger.Infof("Pipeline context for %v has been stopped", ctx.pipeline.InstanceId())
 	} else {
-		panic("Pipeline runtime context failed to stop")
+		err = errors.New(fmt.Sprintf("Pipeline runtime context failed to stop, err = %v\n", errMap))
 	}
 	return err
 }
@@ -110,6 +133,7 @@ func (ctx *PipelineRuntimeCtx) RegisterService(svc_name string, svc common.Pipel
 		return errors.New("Can't register service when PipelineRuntimeContext is already running")
 	}
 
+	ctx.logger.Infof("Try to attach %v to pipeline %v\n", svc_name, ctx.pipeline.InstanceId())
 	ctx.runtime_svcs[svc_name] = svc
 
 	return svc.Attach(ctx.pipeline)
@@ -124,11 +148,10 @@ func (ctx *PipelineRuntimeCtx) UnregisterService(srv_name string) error {
 		err = svc.Stop()
 		if err != nil {
 			//log error
+			ctx.logger.Errorf(fmt.Sprintf("Failed to stop service %v", srv_name))
 		}
 	}
 
-	//remove it from the map
-	delete(ctx.runtime_svcs, srv_name)
 
 	return err
 }

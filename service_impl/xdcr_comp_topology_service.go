@@ -10,16 +10,12 @@
 package service_impl
 
 import (
-	"encoding/json"
 	"errors"
-	"fmt"
 	"github.com/couchbase/cbauth"
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
 	rm "github.com/couchbase/goxdcr/replication_manager"
 	"github.com/couchbase/goxdcr/utils"
-	"io/ioutil"
-	"net/http"
 )
 
 var ErrorRetrievingHostInfo = errors.New("Could not parse current host name from server result.")
@@ -87,37 +83,15 @@ func (top_svc *XDCRTopologySvc) XDCRCompToKVNodeMap() (map[string][]string, erro
 
 // get hostname from nodeService at /pools/nodes
 func (top_svc *XDCRTopologySvc) getHostName() (string, error) {
-	connStr, err := top_svc.MyConnectionStr()
-	if err != nil {
-		return "", err
-	}
-	
-	url := fmt.Sprintf("http://%s%s", connStr, base.NodesPath)
-	request, err := http.NewRequest(base.MethodGet, url, nil)
-	if err != nil {
-		return "", err
-	}
-	
-	cbauth.SetRequestAuth(request)
-
-	response, err := utils.SendHttpRequest(request)
-	if err != nil {
-		return "", err
-	}
-
-	defer response.Body.Close()
-	bodyBytes, err := ioutil.ReadAll(response.Body)
-	if err != nil {
-		return "", err
-	}
-
-	//  /pools/nodes returns a map
+	hostAddr := "http://" + utils.GetHostAddr(base.LocalHostName, top_svc.adminport)
 	var nodesInfo map[string]interface{}
-	err = json.Unmarshal(bodyBytes, &nodesInfo)
+	if hostAddr == "" {
+		panic ("hostAddr can't be empty")
+	}
+	err, _ := utils.QueryRestApi(hostAddr, base.NodesPath, base.MethodGet, "", nil, &nodesInfo, top_svc.logger, nil)
 	if err != nil {
 		return "", err
 	}
-
 	// get node list from the map
 	nodes, ok := nodesInfo[base.NodesKey]
 	if !ok {
@@ -182,6 +156,9 @@ func (top_svc *XDCRTopologySvc)	MyCredentials() (string, string, error) {
 	connStr, err := top_svc.MyConnectionStr()
 	if err != nil {
 		return "", "", err
+	}
+	if connStr == "" {
+		panic ("connStr == ")
 	}
 	return cbauth.GetHTTPServiceAuth(connStr)
 }

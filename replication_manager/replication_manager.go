@@ -59,7 +59,11 @@ type replicationManager struct {
 	xdcr_topology_svc service_def.XDCRCompTopologySvc
 	//replication settings service handle
 	replication_settings_svc service_def.ReplicationSettingsSvc
-	once                     sync.Once
+	//checkpoint service handle
+	checkpoint_svc service_def.CheckpointsService
+	//capi service handle
+	capi_svc service_def.CAPIService
+	once     sync.Once
 
 	//finish channel for adminport
 	adminport_finch chan bool
@@ -245,11 +249,13 @@ func StartReplicationManager(sourceKVHost string, xdcrRestPort uint16,
 	remote_cluster_svc service_def.RemoteClusterSvc,
 	cluster_info_svc service_def.ClusterInfoSvc,
 	xdcr_topology_svc service_def.XDCRCompTopologySvc,
-	replication_settings_svc service_def.ReplicationSettingsSvc) {
+	replication_settings_svc service_def.ReplicationSettingsSvc,
+	checkpoints_svc service_def.CheckpointsService,
+	capi_svc service_def.CAPIService) {
 
 	replication_mgr.once.Do(func() {
 		// initializes replication manager
-		replication_mgr.init(repl_spec_svc, remote_cluster_svc, cluster_info_svc, xdcr_topology_svc, replication_settings_svc)
+		replication_mgr.init(repl_spec_svc, remote_cluster_svc, cluster_info_svc, xdcr_topology_svc, replication_settings_svc, checkpoints_svc, capi_svc)
 
 		// start pipeline master supervisor
 		// TODO should we make heart beat settings configurable?
@@ -287,7 +293,9 @@ func (rm *replicationManager) init(
 	remote_cluster_svc service_def.RemoteClusterSvc,
 	cluster_info_svc service_def.ClusterInfoSvc,
 	xdcr_topology_svc service_def.XDCRCompTopologySvc,
-	replication_settings_svc service_def.ReplicationSettingsSvc) {
+	replication_settings_svc service_def.ReplicationSettingsSvc,
+	checkpoint_svc service_def.CheckpointsService,
+	capi_svc service_def.CAPIService) {
 
 	rm.GenericSupervisor = *supervisor.NewGenericSupervisor(base.ReplicationManagerSupervisorId, log.DefaultLoggerContext, rm, nil)
 	rm.pipelineMasterSupervisor = supervisor.NewGenericSupervisor(base.PipelineMasterSupervisorId, log.DefaultLoggerContext, rm, &rm.GenericSupervisor)
@@ -296,8 +304,10 @@ func (rm *replicationManager) init(
 	rm.cluster_info_svc = cluster_info_svc
 	rm.xdcr_topology_svc = xdcr_topology_svc
 	rm.replication_settings_svc = replication_settings_svc
+	rm.checkpoint_svc = checkpoint_svc
+	rm.capi_svc = capi_svc
 	rm.adminport_finch = make(chan bool, 1)
-	fac := factory.NewXDCRFactory(repl_spec_svc, remote_cluster_svc, cluster_info_svc, xdcr_topology_svc, log.DefaultLoggerContext, log.DefaultLoggerContext, rm, rm.pipelineMasterSupervisor)
+	fac := factory.NewXDCRFactory(repl_spec_svc, remote_cluster_svc, cluster_info_svc, xdcr_topology_svc, checkpoint_svc, capi_svc, log.DefaultLoggerContext, log.DefaultLoggerContext, rm, rm.pipelineMasterSupervisor)
 
 	pipeline_manager.PipelineManager(fac, log.DefaultLoggerContext)
 
@@ -377,6 +387,9 @@ func DeleteReplication(topic string) error {
 		logger_rm.Errorf("%v\n", err)
 		return err
 	}
+
+	//delete all checkpoint docs in an async fashion
+	go replication_mgr.checkpoint_svc.DelCheckpointsDocs(topic)
 
 	logger_rm.Infof("Pipeline %s is deleted\n", topic)
 
@@ -581,6 +594,10 @@ func GetReplicationInfos() []base.ReplicationInfo {
 	return replInfos
 }
 
+func Pipeline(topic string) common.Pipeline {
+	return pipeline_manager.Pipeline(topic)
+}
+
 //error handler
 func (rm *replicationManager) OnError(s common.Supervisor, errMap map[string]error) {
 	logger_rm.Infof("Supervisor %v of type %v reported errors %v\n", s.Id(), reflect.TypeOf(s), errMap)
@@ -615,22 +632,30 @@ func (rm *replicationManager) OnError(s common.Supervisor, errMap map[string]err
 //lauch the repairer for a pipeline
 //in asynchronous fashion
 func (rm *replicationManager) lauchRepairer(topic string, cur_err error) error {
-	spec, err := ReplicationSpecService().ReplicationSpec(topic)
-	if err != nil {
-		return err
-	}
+	rm.repair_map_lock.Lock()
+	defer rm.repair_map_lock.Unlock()
 
-	settings := spec.Settings
-	settingsMap := settings.ToMap()
-	retry_interval := settingsMap[metadata.FailureRestartInterval].(int)
+	if _, ok := rm.pipeline_pending_for_repair[topic]; !ok {
+		spec, err := ReplicationSpecService().ReplicationSpec(topic)
+		if err != nil {
+			return err
+		}
+
+		settings := spec.Settings
+		settingsMap := settings.ToMap()
+		retry_interval := settingsMap[metadata.FailureRestartInterval].(int)
 
 	repairer, err := newPipelineRepairer(topic, retry_interval, rm.children_waitgrp, cur_err)
 	if err != nil {
 		return err
 	}
 	rm.children_waitgrp.Add(1)
-	go repairer.start()
-	logger_rm.Infof("Repairer to fix pipeline %v is lauched with retry_interval=%v\n", topic, retry_interval)
+		rm.pipeline_pending_for_repair[topic] = repairer
+		go repairer.start()
+		logger_rm.Infof("Repairer to fix pipeline %v is lauched with retry_interval=%v\n", topic, retry_interval)
+	} else {
+		logger_rm.Infof("There is already an repairer launched for the replication, no-op")
+	}
 	return nil
 }
 
@@ -652,13 +677,13 @@ func getPipelineFromPipelineSupevisor(s common.Supervisor) (common.Pipeline, err
 }
 
 // start all replications with active replication spec
-func (rm *replicationManager) startReplications() {
+func (rm *replicationManager) startReplications() error {
 	logger_rm.Infof("Replication manager init - starting existing replications")
 
 	specs, err := replication_mgr.repl_spec_svc.ActiveReplicationSpecs()
 	if err != nil {
-		logger_rm.Errorf("Error retrieving active replication specs")
-		return
+		logger_rm.Errorf("Error retrieving active replication specs, err=%v\n", err)
+		return err
 	}
 	logger_rm.Infof("Active replication specs=%v\n", specs)
 
@@ -667,6 +692,8 @@ func (rm *replicationManager) startReplications() {
 			startPipelineWithRetry(spec.Id)
 		}
 	}
+
+	return nil
 }
 
 // check if a specified pipeline is on file
@@ -812,7 +839,7 @@ func specChangedCallback(changedSpecId string, changedSpec *metadata.Replication
 	if pipelineRunning && specActive {
 		// some replication settings have been changed.
 
-		oldSettings := pipeline_manager.Pipeline(topic).Settings()
+		oldSettings := pipeline_manager.Pipeline(topic).Specification().Settings
 
 		// if some critical settings have been changed, stop, reconstruct, and restart pipeline
 		if needToReconstructPipeline(oldSettings, changedSpec.Settings) {

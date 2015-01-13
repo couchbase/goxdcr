@@ -15,6 +15,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/metadata"
 	rm "github.com/couchbase/goxdcr/replication_manager"
@@ -23,10 +24,11 @@ import (
 	"os"
 )
 
+var logger *log.CommonLogger = log.NewLogger("remote_cluster_run", log.DefaultLoggerContext)
+
 var options struct {
 	sourceKVHost string //source kv host name
 	sourceKVPort uint64 //source kv admin port
-
 	username string //username
 	password string //password
 
@@ -77,7 +79,7 @@ func usage() {
 }
 
 func main() {
-	fmt.Println("Start Testing adminport...")
+	fmt.Println("Start Testing remote_cluster_run...")
 	argParse()
 	startAdminport()
 }

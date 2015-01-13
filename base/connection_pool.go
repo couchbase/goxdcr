@@ -13,8 +13,8 @@ import (
 	"errors"
 	"net/url"
 	//	"log"
-	"github.com/couchbase/goxdcr/log"
 	mcc "github.com/couchbase/gomemcached/client"
+	"github.com/couchbase/goxdcr/log"
 	"sync"
 )
 
@@ -83,8 +83,8 @@ func (p *ConnPool) Get() (*mcc.Client, error) {
 		//no more connection, create more
 		mcClient, err := NewConn(p.hostName, p.userName, p.password)
 		return mcClient, err
-	}	
-		
+	}
+
 	return nil, errors.New("connection pool is closed")
 }
 
@@ -165,7 +165,7 @@ func (connPoolMgr *connPoolMgr) CreatePool(poolName string, hostName string, buc
 		hostName: hostName,
 		userName: username,
 		password: password,
-		logger: log.NewLogger("ConnPool", connPoolMgr.logger.LoggerContext())}
+		logger:   log.NewLogger("ConnPool", connPoolMgr.logger.LoggerContext())}
 
 	// make sure we release resource upon unexpected error
 	defer func() {
@@ -178,14 +178,15 @@ func (connPoolMgr *connPoolMgr) CreatePool(poolName string, hostName string, buc
 	//	 initialize the connection pool
 	for i := 0; i < connectionSize; i++ {
 		mcClient, err := NewConn(hostName, username, password)
-		mcClient.SelectBucket (bucketname)
 		if err == nil {
-			connPoolMgr.logger.Debug("A client connection is established")
-			p.clients <- mcClient
-		} else {
-			connPoolMgr.logger.Debugf("error establishing connection with hostname=%s, username=%s, password=%s - %s", hostName, username, password, err)
+			_, err = mcClient.SelectBucket(bucketname)
+			if err == nil {
+				connPoolMgr.logger.Debug("A client connection is established")
+				p.clients <- mcClient
+			} else {
+				connPoolMgr.logger.Debugf("error establishing connection with hostname=%s, username=%s, password=%s - %s", hostName, username, password, err)
+			}
 		}
-
 	}
 
 	connPoolMgr.token.Lock()
@@ -245,4 +246,3 @@ func (connPoolMgr *connPoolMgr) Close() {
 		pool.ReleaseConnections()
 	}
 }
-

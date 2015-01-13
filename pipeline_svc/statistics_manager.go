@@ -19,10 +19,11 @@ import (
 	base "github.com/couchbase/goxdcr/base"
 	common "github.com/couchbase/goxdcr/common"
 	"github.com/couchbase/goxdcr/log"
+	"github.com/couchbase/goxdcr/metadata"
 	parts "github.com/couchbase/goxdcr/parts"
+	"github.com/couchbase/goxdcr/utils"
 	"github.com/rcrowley/go-metrics"
 	"reflect"
-	"runtime/debug"
 	"strconv"
 	"sync"
 	"time"
@@ -36,6 +37,12 @@ const (
 	DOCS_FILTERED_METRIC   = "docs_filtered"
 	CHANGES_LEFT_METRIC    = "changes_left"
 	DOCS_LATENCY_METRIC    = "wtavg_docs_latency"
+	//checkpointing related statistics
+	DOCS_CHECKED_METRIC    = "docs_checked" //calculated
+	NUM_CHECKPOINTS_METRIC = "num_checkpoints"
+	TIME_COMMITING_METRIC  = "time_committing"
+	NUM_FAILEDCKPTS_METRIC = "num_failedckpts"
+	RATE_DOC_CHECKS_METRIC = "rate_doc_checks"
 
 	//	TIME_COMMITTING_METRIC = "time_committing"
 	//rate
@@ -53,10 +60,6 @@ const (
 	SAMPLE_SIZE          = "sample_size"
 	PUBLISH_INTERVAL     = "publish_interval"
 	VB_START_TS          = "v_start_ts"
-
-	//Bucket sequence number statistics
-	VBUCKET_SEQNO_STAT_NAME            = "vbucket-seqno"
-	VBUCKET_HIGH_SEQNO_STAT_KEY_FORMAT = "vb_%v:high_seqno"
 )
 
 const (
@@ -89,6 +92,9 @@ type StatisticsManager struct {
 	//This map will be emptied after the replication lags are calculated to get ready for
 	//next collection period
 	endtime_map map[string]interface{}
+
+	//temporary map to keep current through seqno
+	through_seqnos map[uint16]uint64
 
 	//statistics update ticker
 	publish_ticker *time.Ticker
@@ -125,8 +131,9 @@ func NewStatisticsManager(logger_ctx *log.LoggerContext, active_vbs map[string][
 		active_vbs:      active_vbs,
 		wait_grp:        &sync.WaitGroup{},
 		kv_mem_clients:  make(map[string]*mcc.Client),
-		endtime_map:     make(map[string]interface{})}
-	stats_mgr.collectors = []MetricsCollector{&xmemCollector{}, &dcpCollector{}, &routerCollector{}}
+		endtime_map:     make(map[string]interface{}),
+		through_seqnos:  make(map[uint16]uint64)}
+	stats_mgr.collectors = []MetricsCollector{&xmemCollector{}, &dcpCollector{}, &routerCollector{}, &checkpointMgrCollector{}}
 	return stats_mgr
 }
 
@@ -142,6 +149,17 @@ func (stats_mgr *StatisticsManager) Statistics() *expvar.Map {
 
 }
 
+func (stats_mgr *StatisticsManager) cleanupBeforeExit() {
+	expvar_stats_map := stats_mgr.getExpvarMap(stats_mgr.pipeline.Topic())
+	errlist := expvar_stats_map.Get("Errors")
+	expvar_stats_map.Init()
+	statusVar := new(expvar.String)
+	statusVar.Set(base.Pending)
+	expvar_stats_map.Set("Status", statusVar)
+	expvar_stats_map.Set("Errors", errlist)
+	stats_mgr.logger.Infof("expvar=%v\n", stats_mgr.formatStatsForLog())
+}
+
 //updateStats runs until it get finish signal
 //It processes the raw stats and publish the overview stats along with the raw stats to expvar
 //It also log the stats to log
@@ -150,20 +168,24 @@ func (stats_mgr *StatisticsManager) updateStats(finchan chan bool) error {
 	for {
 		select {
 		case <-finchan:
-			expvar_stats_map := stats_mgr.getExpvarMap(stats_mgr.pipeline.Topic())
-			errlist := expvar_stats_map.Get("Errors")
-			expvar_stats_map.Init()
-			statusVar := new(expvar.String)
-			statusVar.Set(base.Pending)
-			expvar_stats_map.Set("Status", statusVar)
-			expvar_stats_map.Set("Errors", errlist)
-			stats_mgr.logger.Infof("expvar=%v\n", stats_mgr.formatStatsForLog())
+			stats_mgr.cleanupBeforeExit()
 			return nil
 		case <-stats_mgr.publish_ticker.C:
-			stats_mgr.logger.Debugf("%v: Publishing the statistics for %v to expvar", time.Now(), stats_mgr.pipeline.Topic())
-			stats_mgr.processRawStats()
-			if stats_mgr.logger.GetLogLevel() >= log.LogLevelInfo {
-				stats_mgr.logger.Info(stats_mgr.formatStatsForLog())
+			if stats_mgr.pipeline.State() != common.Pipeline_Running {
+				//the pipeline is no longer running, kill myself
+				stats_mgr.logger.Infof("Pipeline is no longer running, exit.")
+				stats_mgr.cleanupBeforeExit()
+				return nil
+			}
+			stats_mgr.logger.Debugf("%v: Publishing the statistics for %v to expvar", time.Now(), stats_mgr.pipeline.InstanceId())
+			err := stats_mgr.processRawStats()
+
+			if err == nil {
+				if stats_mgr.logger.GetLogLevel() >= log.LogLevelInfo {
+					stats_mgr.logger.Info(stats_mgr.formatStatsForLog())
+				}
+			} else {
+				stats_mgr.logger.Info("Failed to calculate the statistics for this round. Move on")
 			}
 		}
 	}
@@ -172,12 +194,12 @@ func (stats_mgr *StatisticsManager) updateStats(finchan chan bool) error {
 
 func (stats_mgr *StatisticsManager) formatStatsForLog() string {
 	expvar_stats_map := stats_mgr.getExpvarMap(stats_mgr.pipeline.Topic())
-	return fmt.Sprintf("Stats for pipeline %v\n %v\n", stats_mgr.pipeline.Topic(), expvar_stats_map.String())
+	return fmt.Sprintf("Stats for pipeline %v %v\n", stats_mgr.pipeline.InstanceId(), expvar_stats_map.String())
 }
 
 //process the raw stats, aggregate them into overview registry
 //expose the raw stats and overview stats to expvar
-func (stats_mgr *StatisticsManager) processRawStats() {
+func (stats_mgr *StatisticsManager) processRawStats() error {
 	oldSample := stats_mgr.getOverviewRegistry()
 	stats_mgr.initOverviewRegistry()
 	expvar_stats_map := stats_mgr.getExpvarMap(stats_mgr.pipeline.Topic())
@@ -202,7 +224,14 @@ func (stats_mgr *StatisticsManager) processRawStats() {
 					if metric_overview != nil {
 						metric_overview.(metrics.Counter).Inc(m.Count())
 					}
-
+				case metrics.Histogram:
+					//raw counter in its registry is type of Histogram, put its mean value
+					//to overview registry
+					metric_overview := stats_mgr.getOverviewRegistry().Get(name)
+					if metric_overview != nil {
+						metric_overview.(metrics.Counter).Clear()
+						metric_overview.(metrics.Counter).Inc(int64(m.Mean()))
+					}
 				}
 			})
 			expvar_stats_map.Set(registry_name, map_for_registry)
@@ -217,12 +246,16 @@ func (stats_mgr *StatisticsManager) processRawStats() {
 	})
 
 	//calculate the publish additional metrics
-	stats_mgr.processCalculatedStats(oldSample, map_for_overview)
+	err := stats_mgr.processCalculatedStats(oldSample, map_for_overview)
+	if err != nil {
+		return err
+	}
 
 	expvar_stats_map.Set(OVERVIEW_METRICS_KEY, map_for_overview)
+	return nil
 }
 
-func (stats_mgr *StatisticsManager) processCalculatedStats(oldSample metrics.Registry, overview_expvar_map *expvar.Map) {
+func (stats_mgr *StatisticsManager) processCalculatedStats(oldSample metrics.Registry, overview_expvar_map *expvar.Map) error {
 
 	//calculate changes_left
 	docs_written := stats_mgr.getOverviewRegistry().Get(DOCS_WRITTEN_METRIC).(metrics.Counter).Count()
@@ -250,8 +283,42 @@ func (stats_mgr *StatisticsManager) processCalculatedStats(oldSample metrics.Reg
 	bandwidth_usage_var := new(expvar.Float)
 	bandwidth_usage_var.Set(bandwidth_usage)
 	overview_expvar_map.Set(BANDWIDTH_USAGE, bandwidth_usage_var)
+
+	//calculate docs_checked
+	docs_checked_old_var := overview_expvar_map.Get(DOCS_CHECKED_METRIC)
+	var docs_checked_old uint64 = 0
+	if docs_checked_old_var != nil {
+		docs_checked_old, err = strconv.ParseUint(docs_checked_old_var.String(), 10, 64)
+		if err != nil {
+			return err
+		}
+	}
+	docs_checked := stats_mgr.calculateDocsChecked()
+	docs_checked_var := new(expvar.Int)
+	docs_checked_var.Set(int64(docs_checked))
+	overview_expvar_map.Set(DOCS_CHECKED_METRIC, docs_checked_var)
+
+	//calculate rate_doc_checks
+	rate_doc_checks := float64(docs_checked-uint64(docs_checked_old)) / interval_in_sec
+	rate_doc_checks_var := new(expvar.Float)
+	rate_doc_checks_var.Set(rate_doc_checks)
+	overview_expvar_map.Set(RATE_DOC_CHECKS_METRIC, rate_doc_checks_var)
+
+	return nil
 }
 
+func (stats_mgr *StatisticsManager) calculateDocsChecked() uint64 {
+	var docs_checked uint64 = 0
+	for vbno, vbts := range stats_mgr.current_vb_start_ts {
+		start_seqno := vbts.Seqno
+		var docs_checked_vb uint64 = 0
+		if stats_mgr.through_seqnos[vbno] > start_seqno {
+			docs_checked_vb = stats_mgr.through_seqnos[vbno] - start_seqno
+		}
+		docs_checked = docs_checked + docs_checked_vb
+	}
+	return docs_checked
+}
 func (stats_mgr *StatisticsManager) calculateChangesLeft(docs_written int64) (int64, error) {
 	total_doc, err := stats_mgr.calculateTotalChanges()
 	if err != nil {
@@ -284,22 +351,13 @@ func (stats_mgr *StatisticsManager) getHighSeqNos(serverAddr string, vbnos []uin
 		return nil, errors.New("connection for serverAddr is not initialized")
 	}
 
-	stats_map, err := conn.StatsMap(VBUCKET_SEQNO_STAT_NAME)
+	stats_map, err := conn.StatsMap(base.VBUCKET_SEQNO_STAT_NAME)
 	if err != nil {
 		return nil, err
 	}
 
-	for _, vbno := range vbnos {
-		stats_key := fmt.Sprintf(VBUCKET_HIGH_SEQNO_STAT_KEY_FORMAT, vbno)
-		highseqnostr := stats_map[stats_key]
-		highseqno, err := strconv.ParseUint(highseqnostr, 10, 64)
-		if err != nil {
-			return nil, err
-		}
-		highseqno_map[vbno] = highseqno
-	}
-
-	return highseqno_map, nil
+	err = utils.ParseHighSeqnoStat(vbnos, stats_map, highseqno_map)
+	return highseqno_map, err
 }
 
 func (stats_mgr *StatisticsManager) getExpvarMap(name string) *expvar.Map {
@@ -397,6 +455,9 @@ func (stats_mgr *StatisticsManager) initOverviewRegistry() {
 	overview_registry.Register(DOCS_WRITTEN_METRIC, metrics.NewCounter())
 	overview_registry.Register(DATA_REPLICATED_METRIC, metrics.NewCounter())
 	overview_registry.Register(DOCS_FILTERED_METRIC, metrics.NewCounter())
+	overview_registry.Register(NUM_CHECKPOINTS_METRIC, metrics.NewCounter())
+	overview_registry.Register(NUM_FAILEDCKPTS_METRIC, metrics.NewCounter())
+	overview_registry.Register(TIME_COMMITING_METRIC, metrics.NewCounter())
 }
 
 func (stats_mgr *StatisticsManager) Start(settings map[string]interface{}) error {
@@ -406,9 +467,10 @@ func (stats_mgr *StatisticsManager) Start(settings map[string]interface{}) error
 
 	if _, ok := settings[PUBLISH_INTERVAL]; ok {
 		stats_mgr.update_interval = settings[PUBLISH_INTERVAL].(time.Duration)
+	} else {
+		stats_mgr.logger.Infof("There is no update_interval in settings map. settings=%v\n", settings)
 	}
-	stats_mgr.logger.Infof("StatisticsManager Starts: update_interval=%v\n", stats_mgr.update_interval)
-	debug.PrintStack()
+	stats_mgr.logger.Debugf("StatisticsManager Starts: update_interval=%v, settings=%v\n", stats_mgr.update_interval, settings)
 	stats_mgr.publish_ticker = time.NewTicker(stats_mgr.update_interval)
 
 	if _, ok := settings[VB_START_TS]; ok {
@@ -444,7 +506,9 @@ func (stats_mgr *StatisticsManager) Stop() error {
 func (stats_mgr *StatisticsManager) initConnection() error {
 
 	for serverAddr, _ := range stats_mgr.active_vbs {
-
+		if serverAddr == "" {
+			panic("serverAddr is empty")
+		}
 		username, password, err := cbauth.GetMemcachedServiceAuth(serverAddr)
 		stats_mgr.logger.Debugf("memcached auth: username=%v, password=%v, err=%v\n", username, password, err)
 		if err != nil {
@@ -455,7 +519,6 @@ func (stats_mgr *StatisticsManager) initConnection() error {
 		if err != nil {
 			return err
 		}
-		
 		_, err = conn.SelectBucket(stats_mgr.bucket_name)
 		if err != nil {
 			return err
@@ -572,5 +635,63 @@ func (l_collector *routerCollector) OnEvent(eventType common.ComponentEventType,
 		l_collector.stats_mgr.logger.Debugf("Received a DataFiltered event for %v", seqno)
 		registry := l_collector.stats_mgr.registries[component.Id()]
 		registry.Get(DOCS_FILTERED_METRIC).(metrics.Counter).Inc(1)
+	}
+}
+
+//metrics collector for checkpointmanager
+type checkpointMgrCollector struct {
+	stats_mgr *StatisticsManager
+}
+
+func (ckpt_collector *checkpointMgrCollector) Mount(pipeline common.Pipeline, stats_mgr *StatisticsManager) error {
+	ckpt_collector.stats_mgr = stats_mgr
+	ckptmgr := pipeline.RuntimeContext().Service(base.CHECKPOINT_MGR_SVC)
+	if ckptmgr == nil {
+		return errors.New("CheckpointMgr has to exist")
+	}
+
+	err := ckptmgr.(common.Component).RegisterComponentEventListener(common.ErrorEncountered, ckpt_collector)
+	if err != nil {
+		return err
+	}
+	err = ckptmgr.(common.Component).RegisterComponentEventListener(common.CheckpointDone, ckpt_collector)
+	if err != nil {
+		return err
+	}
+
+	err = ckptmgr.(common.Component).RegisterComponentEventListener(common.CheckpointDoneForVB, ckpt_collector)
+	if err != nil {
+		return err
+	}
+	ckpt_collector.initRegistry()
+	return nil
+}
+
+func (ckpt_collector *checkpointMgrCollector) initRegistry() {
+	registry_ckpt := ckpt_collector.stats_mgr.getOrCreateRegistry("CkptMgr")
+	registry_ckpt.Register(TIME_COMMITING_METRIC, metrics.NewHistogram(metrics.NewUniformSample(ckpt_collector.stats_mgr.sample_size)))
+	registry_ckpt.Register(NUM_CHECKPOINTS_METRIC, metrics.NewCounter())
+	registry_ckpt.Register(NUM_FAILEDCKPTS_METRIC, metrics.NewCounter())
+
+}
+
+func (ckpt_collector *checkpointMgrCollector) OnEvent(eventType common.ComponentEventType,
+	item interface{},
+	component common.Component,
+	derivedItems []interface{},
+	otherInfos map[string]interface{}) {
+	registry := ckpt_collector.stats_mgr.registries["CkptMgr"]
+	if eventType == common.ErrorEncountered {
+		registry.Get(NUM_FAILEDCKPTS_METRIC).(metrics.Counter).Inc(1)
+
+	} else if eventType == common.CheckpointDoneForVB {
+		vbno := otherInfos[Vbno].(uint16)
+		ckpt_record := item.(metadata.CheckpointRecord)
+		ckpt_collector.stats_mgr.through_seqnos[vbno] = ckpt_record.Seqno
+
+	} else if eventType == common.CheckpointDone {
+		time_commit := otherInfos[TimeCommiting].(time.Duration).Seconds()
+		registry.Get(NUM_CHECKPOINTS_METRIC).(metrics.Counter).Inc(1)
+		registry.Get(TIME_COMMITING_METRIC).(metrics.Histogram).Sample().Update(int64(time_commit))
 	}
 }

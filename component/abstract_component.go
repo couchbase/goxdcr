@@ -47,7 +47,7 @@ func (c *AbstractComponent) RegisterComponentEventListener(eventType common.Comp
 
 	listenerList = append(listenerList, listener)
 	c.event_listeners[eventType] = listenerList
-	c.logger.Infof("listener %s is registered on event %s for Component %s", fmt.Sprint(listener), fmt.Sprint(eventType), c.Id())
+	c.logger.Debugf("listener %s is registered on event %s for Component %s", fmt.Sprint(listener), fmt.Sprint(eventType), c.Id())
 	return nil
 }
 

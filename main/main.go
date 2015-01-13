@@ -106,7 +106,9 @@ func main() {
 							   s.NewRemoteClusterService(metadata_svc, nil),	
 							   s.NewClusterInfoSvc(nil), 
 							   top_svc, 
-							   s.NewReplicationSettingsSvc(metadata_svc, nil))
+							   s.NewReplicationSettingsSvc(metadata_svc, nil),
+							   s.NewCheckpointsService(metadata_svc, nil),
+							   s.NewCAPIService(nil))
 							   
 		// keep main alive in normal mode
 		<-done
