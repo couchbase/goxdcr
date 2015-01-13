@@ -129,10 +129,10 @@ func getOrInitExpvarMap(pipeline_name string) *expvar.Map {
 	statusVar.Set(base.Pending)
 	ret_map.Set("Status", statusVar)
 
-	errArr := ret_map.Get("Errors")
+	errArr := ret_map.Get(base.ErrorsStatsKey)
 	if errArr == nil {
 		errArr := pipelineErrorArray{}
-		ret_map.Set("Errors", errArr)
+		ret_map.Set(base.ErrorsStatsKey, errArr)
 	}
 
 	return ret_map
@@ -202,7 +202,7 @@ RE:
 
 func (r *pipelineRepairer) reportStatus() {
 	//update the error array
-	existing_errArr := r.expvar_map.Get("Errors").(pipelineErrorArray)
+	existing_errArr := r.expvar_map.Get(base.ErrorsStatsKey).(pipelineErrorArray)
 	new_errArr := pipelineErrorArray{}
 
 	new_errArr[0] = r.current_error.Error()
@@ -211,7 +211,7 @@ func (r *pipelineRepairer) reportStatus() {
 	}
 
 	logger_rm.Infof("new_errArr=%v, r.current_error=%v\n", new_errArr, r.current_error)
-	r.expvar_map.Set("Errors", new_errArr)
+	r.expvar_map.Set(base.ErrorsStatsKey, new_errArr)
 }
 
 type pipelineErrorArray [10]string
@@ -521,7 +521,7 @@ func GetStatistics(bucket string) (*expvar.Map, error) {
 	logger_rm.Infof("repId=%v\n", repIds)
 	stats := new(expvar.Map).Init()
 	for _, repId := range repIds {
-		statsForPipeline, err := getStatisticsForPipeline(repId)
+		statsForPipeline := pipeline_svc.GetStatisticsForPipeline(repId)
 		logger_rm.Infof("statsForPipeline=%v\n", statsForPipeline)
 		if err == nil {
 			stats.Set(repId, statsForPipeline)
@@ -530,18 +530,6 @@ func GetStatistics(bucket string) (*expvar.Map, error) {
 	logger_rm.Infof("stats=%v\n", stats)
 
 	return stats, nil
-}
-
-//get per-pipeline statistics
-func getStatisticsForPipeline(pipeline_id string) (*expvar.Map, error) {
-	pipeline := pipeline_manager.Pipeline(pipeline_id)
-	if pipeline == nil {
-		return nil, errors.New(fmt.Sprintf("Replication %v is not running", pipeline_id))
-	}
-
-	ctx := pipeline.RuntimeContext()
-	stats_mgr := ctx.Service(base.STATISTICS_MGR_SVC)
-	return stats_mgr.(*pipeline_svc.StatisticsManager).Statistics(), nil
 }
 
 //create and persist the replication specification
@@ -571,27 +559,55 @@ func (rm *replicationManager) createAndPersistReplicationSpec(sourceBucket, targ
 }
 
 // get info of all running replications
-func GetReplicationInfos() []base.ReplicationInfo {
+func GetReplicationInfos() ([]base.ReplicationInfo, error) {
 	replInfos := make([]base.ReplicationInfo, 0)
-	// TODO paused replications are not returned
-	// if we need to return paused replications, we will need to cache statistics
-	// and errors for paused replications somewhere, e.g., in repl_mgr.
-	for topic, _ := range pipeline_manager.Pipelines() {
+
+	replSpecs, err := ReplicationSpecService().ActiveReplicationSpecs()
+	if err != nil {
+		return nil, err
+	}
+
+	for _, replSpec := range replSpecs {
 		replInfo := base.ReplicationInfo{}
-		replInfo.Id = topic
-		statsMap, err := getStatisticsForPipeline(topic)
-		logger_rm.Infof("statsmap=%v\n", statsMap.String())
-		if err != nil {
-			logger_rm.Debugf("Failed to retrieve statst for pipeline %v\n", topic)
-			continue
+		replInfo.Id = replSpec.Id
+
+		// set stats map
+		expvarMap := pipeline_svc.GetStatisticsForPipeline(replSpec.Id)
+		if expvarMap != nil {
+			replInfo.StatsMap = utils.GetMapFromExpvarMap(expvarMap)
 		}
-		replInfo.StatsMap = utils.GetMapFromExpvarMap(statsMap)
+
+		// set error list
 		replInfo.ErrorList = make([]base.ErrorInfo, 0)
-		// TODO populate ErrorList
+		errorArr := getErrorsForPipeline(replSpec.Id)
+		if errorArr != nil {
+			for _, errMsg := range errorArr {
+				// TODO add timestamp to error list in expvar
+				errInfo := base.ErrorInfo{time.Now(), errMsg}
+				replInfo.ErrorList = append(replInfo.ErrorList, errInfo)
+			}
+		}
 
 		replInfos = append(replInfos, replInfo)
 	}
-	return replInfos
+	return replInfos, nil
+}
+
+// errors of a pipeline which may or may not be running
+func getErrorsForPipeline(topic string) *pipelineErrorArray {
+	expvarVar := expvar.Get(topic)
+	if expvarVar != nil {
+		expvarMap := expvarVar.(*expvar.Map)
+		errorVar := expvarMap.Get(base.ErrorsStatsKey)
+		if errorVar != nil {
+			errorArr := errorVar.(pipelineErrorArray)
+			return &errorArr
+		} else {
+			return nil
+		}
+	} else {
+		return nil
+	}
 }
 
 func Pipeline(topic string) common.Pipeline {
@@ -801,7 +817,7 @@ func stop() {
 	// stop listening to spec changed events
 	replication_mgr.repl_spec_callback_cancel_ch <- struct{}{}
 	logger_rm.Infof("Sent cancel signal to spec change observer")
-	
+
 	//send finish signal to all repairer
 	for _, repairer := range replication_mgr.pipeline_pending_for_repair {
 		repairer.fin_ch <- true

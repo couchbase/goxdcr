@@ -311,7 +311,10 @@ func (adminport *Adminport) doDeleteAllReplicationsRequest(request *http.Request
 
 func (adminport *Adminport) doGetAllReplicationInfosRequest(request *http.Request) ([]byte, error) {
 	logger_ap.Infof("doGetAllReplicationInfosRequest\n")
-	replInfos := GetReplicationInfos()
+	replInfos, err := GetReplicationInfos()
+	if err != nil {
+		return nil, err
+	}
 	return NewGetAllReplicationInfosResponse(replInfos)
 }
 

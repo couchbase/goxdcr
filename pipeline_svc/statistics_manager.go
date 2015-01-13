@@ -137,16 +137,19 @@ func NewStatisticsManager(logger_ctx *log.LoggerContext, active_vbs map[string][
 	return stats_mgr
 }
 
-//Statistics of this pipeline which is reported to ReplicationManager
-func (stats_mgr *StatisticsManager) Statistics() *expvar.Map {
-	expvar_stats_map := stats_mgr.getExpvarMap(stats_mgr.pipeline.Topic())
-	overview_map := expvar_stats_map.Get(OVERVIEW_METRICS_KEY)
-	if overview_map != nil {
-		return overview_map.(*expvar.Map)
+//Statistics of a pipeline which may or may not be running
+func GetStatisticsForPipeline(topic string) *expvar.Map {
+	expvar_var := expvar.Get(topic)
+	if expvar_var != nil {
+		overview_map := expvar_var.(*expvar.Map).Get(OVERVIEW_METRICS_KEY)
+		if overview_map != nil {
+			return overview_map.(*expvar.Map)
+		} else {
+			return nil
+		}
 	} else {
 		return nil
 	}
-
 }
 
 func (stats_mgr *StatisticsManager) cleanupBeforeExit() {
@@ -519,6 +522,7 @@ func (stats_mgr *StatisticsManager) initConnection() error {
 		if err != nil {
 			return err
 		}
+
 		_, err = conn.SelectBucket(stats_mgr.bucket_name)
 		if err != nil {
 			return err

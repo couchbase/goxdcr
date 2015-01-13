@@ -135,3 +135,5 @@ const (
 	VBUCKET_HIGH_SEQNO_STAT_KEY_FORMAT = "vb_%v:high_seqno"
 
 )
+
+var ErrorsStatsKey = "Errors"
