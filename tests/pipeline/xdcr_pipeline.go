@@ -163,9 +163,11 @@ func test() {
 
 	defer testcommon.DeleteTestRemoteCluster(replication_manager.RemoteClusterService(), options.remoteName)
 
-	topic, err := replication_manager.CreateReplication(options.source_bucket, options.remoteName, options.target_bucket, settings)
+	topic, errorsMap, err := replication_manager.CreateReplication(options.source_bucket, options.remoteName, options.target_bucket, settings)
 	if err != nil {
 		fail(fmt.Sprintf("%v", err))
+	} else if len(errorsMap) != 0 {
+		fail(fmt.Sprintf("%v", errorsMap))
 	}
 	//delete the replication before we go
 	defer func() {

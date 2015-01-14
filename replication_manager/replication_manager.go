@@ -353,25 +353,27 @@ func ReplicationSettingsService() service_def.ReplicationSettingsSvc {
 
 //CreateReplication create the replication specification in metadata store
 //and start the replication pipeline
-func CreateReplication(sourceBucket, targetCluster, targetBucket string, settings map[string]interface{}) (string, error) {
+func CreateReplication(sourceBucket, targetCluster, targetBucket string, settings map[string]interface{}) (string, map[string]error, error) {
 	logger_rm.Infof("Creating replication - sourceBucket=%s, targetCluster=%s, targetBucket=%s, settings=%v\n",
 		sourceBucket, targetCluster, targetBucket, settings)
 
 	targetClusterRef, err := RemoteClusterService().RemoteClusterByRefName(targetCluster)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 
 	var spec *metadata.ReplicationSpecification
-	spec, err = replication_mgr.createAndPersistReplicationSpec(sourceBucket, targetClusterRef.Uuid, targetBucket, settings)
+	spec, errorsMap, err := replication_mgr.createAndPersistReplicationSpec(sourceBucket, targetClusterRef.Uuid, targetBucket, settings)
 	if err != nil {
 		logger_rm.Errorf("%v\n", err)
-		return "", err
+		return "", nil, err
+	} else if len(errorsMap) != 0 {
+		return "", errorsMap, nil
 	}
 
 	logger_rm.Infof("Pipeline %s is created\n", spec.Id)
 
-	return spec.Id, nil
+	return spec.Id, nil, nil
 }
 
 //DeleteReplication stops the running replication of given replicationId and
@@ -460,9 +462,20 @@ func UpdateReplicationSettings(topic string, settings map[string]interface{}) (m
 	if err != nil {
 		return nil, err
 	}
-
+	
+	oldFilterExpression := replSpec.Settings.FilterExpression
+	
 	// update replication spec with input settings
 	errorMap, changed := replSpec.Settings.UpdateSettingsFromMap(settings)
+	
+	// enforce that filter expression cannot be changed
+	newFilterExpression, ok := settings[FilterExpression]
+	if ok {
+		if newFilterExpression != oldFilterExpression {
+			errorMap[FilterExpression] = errors.New("Filter expression cannot be changed after the replication is created")
+		}
+	}
+
 	if len(errorMap) != 0 {
 		return errorMap, nil
 	}
@@ -533,29 +546,34 @@ func GetStatistics(bucket string) (*expvar.Map, error) {
 }
 
 //create and persist the replication specification
-func (rm *replicationManager) createAndPersistReplicationSpec(sourceBucket, targetClusterUUID, targetBucket string, settings map[string]interface{}) (*metadata.ReplicationSpecification, error) {
+func (rm *replicationManager) createAndPersistReplicationSpec(sourceBucket, targetClusterUUID, targetBucket string, settings map[string]interface{}) (*metadata.ReplicationSpecification, map[string]error, error) {
 	logger_rm.Infof("Creating replication spec - sourceBucket=%s, targetClusterUUID=%s, targetBucket=%s, settings=%v\n",
 		sourceBucket, targetClusterUUID, targetBucket, settings)
-
-	// check if the same replication already exists
-	replicationId := metadata.ReplicationId(sourceBucket, targetClusterUUID, targetBucket)
-	if err := validatePipelineExists(replicationId, "starting", false); err != nil {
-		// TODO the error is being returned in an error list in old xdcr. may need to comform to that
-		return nil, errors.New("Replication to the same remote cluster and bucket already exists")
-	}
 
 	spec := metadata.NewReplicationSpecification(sourceBucket, targetClusterUUID, targetBucket)
 	replSettings, err := ReplicationSettingsService().GetDefaultReplicationSettings()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	replSettings.UpdateSettingsFromMap(settings)
+	errorMap, _ := replSettings.UpdateSettingsFromMap(settings)
+	
+	// check if the same replication already exists
+	replicationId := metadata.ReplicationId(sourceBucket, targetClusterUUID, targetBucket)
+	if err := validatePipelineExists(replicationId, "starting", false); err != nil {
+		// for backward compatibility with old xdcr
+		errorMap["_"] = errors.New("Replication to the same remote cluster and bucket already exists") 
+	}
+	
+	if len(errorMap) != 0 {
+		return nil, errorMap, nil
+	}
+	
 	spec.Settings = replSettings
 
 	//persist it
 	replication_mgr.repl_spec_svc.AddReplicationSpec(spec)
 	logger_rm.Debugf("replication specification %s is created and persisted\n", spec.Id)
-	return spec, nil
+	return spec, nil, nil
 }
 
 // get info of all running replications

@@ -332,10 +332,13 @@ func (adminport *Adminport) doCreateReplicationRequest(request *http.Request) ([
 	logger_ap.Infof("Request parameters: fromBucket=%v, toCluster=%v, toBucket=%v, settings=%v\n",
 		fromBucket, toCluster, toBucket, settings)
 
-	replicationId, err := CreateReplication(fromBucket, toCluster, toBucket, settings)
+	replicationId, errorsMap, err := CreateReplication(fromBucket, toCluster, toBucket, settings)
 
 	if err != nil {
 		return nil, err
+	} else if len(errorsMap) > 0 {
+		logger_ap.Errorf("Error creating replication. errorsMap=%v\n", errorsMap)
+		return EncodeErrorsMapIntoByteArray(errorsMap)
 	} else {
 		return NewCreateReplicationResponse(replicationId), nil
 	}

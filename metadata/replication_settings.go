@@ -12,11 +12,11 @@ package metadata
 import (
 	"errors"
 	"fmt"
-	"strconv"
-	"regexp"
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/utils"
+	"regexp"
+	"strconv"
 )
 
 const (
@@ -42,13 +42,13 @@ const (
 )
 
 type SettingsConfig struct {
-	defaultValue  interface{}
+	defaultValue interface{}
 	*Range
 }
 
 type Range struct {
-	minValue   int
-	maxValue   int
+	minValue int
+	maxValue int
 }
 
 // TODO change to "capi"?
@@ -59,7 +59,7 @@ var CheckpointIntervalConfig = &SettingsConfig{60, &Range{60, 14400}}
 var BatchCountConfig = &SettingsConfig{500, &Range{500, 10000}}
 var BatchSizeConfig = &SettingsConfig{2048, &Range{10, 10000}}
 var FailureRestartIntervalConfig = &SettingsConfig{30, &Range{1, 300}}
-var OptimisticReplicationThresholdConfig = &SettingsConfig{256, &Range{0, 20*1024*1024}}
+var OptimisticReplicationThresholdConfig = &SettingsConfig{256, &Range{0, 20 * 1024 * 1024}}
 var SourceNozzlePerNodeConfig = &SettingsConfig{2, &Range{1, 10}}
 var TargetNozzlePerNodeConfig = &SettingsConfig{2, &Range{1, 10}}
 var MaxExpectedReplicationLagConfig = &SettingsConfig{1000, nil}
@@ -68,20 +68,20 @@ var PipelineLogLevelConfig = &SettingsConfig{log.LogLevelInfo, nil}
 var PipelineStatsIntervalConfig = &SettingsConfig{10000, nil}
 
 var SettingsConfigMap = map[string]*SettingsConfig{
-	ReplicationType: ReplicationTypeConfig,
-	FilterExpression: FilterExpressionConfig,
-	Active: ActiveConfig,
-	CheckpointInterval: CheckpointIntervalConfig,
-	BatchCount: BatchCountConfig,
-	BatchSize: BatchSizeConfig,
-	FailureRestartInterval: FailureRestartIntervalConfig,
+	ReplicationType:                ReplicationTypeConfig,
+	FilterExpression:               FilterExpressionConfig,
+	Active:                         ActiveConfig,
+	CheckpointInterval:             CheckpointIntervalConfig,
+	BatchCount:                     BatchCountConfig,
+	BatchSize:                      BatchSizeConfig,
+	FailureRestartInterval:         FailureRestartIntervalConfig,
 	OptimisticReplicationThreshold: OptimisticReplicationThresholdConfig,
-	SourceNozzlePerNode: SourceNozzlePerNodeConfig,
-	TargetNozzlePerNode: TargetNozzlePerNodeConfig,
-	MaxExpectedReplicationLag: MaxExpectedReplicationLagConfig,
-	TimeoutPercentageCap: TimeoutPercentageCapConfig,
-	PipelineLogLevel: PipelineLogLevelConfig,
-	PipelineStatsInterval: PipelineStatsIntervalConfig,
+	SourceNozzlePerNode:            SourceNozzlePerNodeConfig,
+	TargetNozzlePerNode:            TargetNozzlePerNodeConfig,
+	MaxExpectedReplicationLag:      MaxExpectedReplicationLagConfig,
+	TimeoutPercentageCap:           TimeoutPercentageCapConfig,
+	PipelineLogLevel:               PipelineLogLevelConfig,
+	PipelineStatsInterval:          PipelineStatsIntervalConfig,
 }
 
 /***********************************
@@ -152,15 +152,15 @@ type ReplicationSettings struct {
 	//stats updating interval in milliseconds
 	//default:5 second
 	StatsInterval int `json:"stats_interval"`
-	
-    // revision number to be used by metadata service. not included in json
-	Revision  interface{}
+
+	// revision number to be used by metadata service. not included in json
+	Revision interface{}
 }
 
 func DefaultSettings() *ReplicationSettings {
 	return &ReplicationSettings{
-		RepType: ReplicationTypeConfig.defaultValue.(string),
-		FilterExpression: FilterExpressionConfig.defaultValue.(string),
+		RepType:                        ReplicationTypeConfig.defaultValue.(string),
+		FilterExpression:               FilterExpressionConfig.defaultValue.(string),
 		Active:                         ActiveConfig.defaultValue.(bool),
 		CheckpointInterval:             CheckpointIntervalConfig.defaultValue.(int),
 		BatchCount:                     BatchCountConfig.defaultValue.(int),
@@ -186,13 +186,13 @@ func (s *ReplicationSettings) SetLogLevel(log_level string) error {
 
 // returns true if real changes are done. false otherwise
 
-// normally this method should return an empty errorsMap since the input settingsMap 
+// normally this method should return an empty errorsMap since the input settingsMap
 // is constructed internally and necessary checks should have been applied then
 // I am leaving the error checks just in case.
 func (s *ReplicationSettings) UpdateSettingsFromMap(settingsMap map[string]interface{}) (map[string]error, bool) {
 	errorMap := make(map[string]error)
 	changed := false
-	for key, val := range settingsMap {		
+	for key, val := range settingsMap {
 		switch key {
 		case ReplicationType:
 			repType, ok := val.(string)
@@ -211,7 +211,8 @@ func (s *ReplicationSettings) UpdateSettingsFromMap(settingsMap map[string]inter
 				continue
 			}
 			if s.FilterExpression != filterExpression {
-				errorMap[key] = errors.New("Filter expression cannot be changed after the replication is created")
+				changed = true
+				s.FilterExpression = filterExpression
 			}
 		case Active:
 			active, ok := val.(bool)
@@ -233,7 +234,7 @@ func (s *ReplicationSettings) UpdateSettingsFromMap(settingsMap map[string]inter
 				changed = true
 				s.CheckpointInterval = checkpointInterval
 			}
-			
+
 		case BatchCount:
 			batchCount, ok := val.(int)
 			if !ok {
@@ -293,7 +294,7 @@ func (s *ReplicationSettings) UpdateSettingsFromMap(settingsMap map[string]inter
 			if s.TargetNozzlePerNode != targetNozzlePerNode {
 				changed = true
 				s.TargetNozzlePerNode = targetNozzlePerNode
-			}		
+			}
 		case MaxExpectedReplicationLag:
 			maxExpectedReplicationLag, ok := val.(int)
 			if !ok {
@@ -303,34 +304,34 @@ func (s *ReplicationSettings) UpdateSettingsFromMap(settingsMap map[string]inter
 			if s.MaxExpectedReplicationLag != maxExpectedReplicationLag {
 				changed = true
 				s.MaxExpectedReplicationLag = maxExpectedReplicationLag
-			}			
+			}
 		case TimeoutPercentageCap:
 			timeoutPercentageCap, ok := val.(int)
 			if !ok {
 				errorMap[key] = utils.IncorrectValueTypeInMapError(key, val, "int")
 				continue
 			}
-			if 	s.TimeoutPercentageCap != timeoutPercentageCap {
+			if s.TimeoutPercentageCap != timeoutPercentageCap {
 				changed = true
 				s.TimeoutPercentageCap = timeoutPercentageCap
-			}	
+			}
 		case PipelineLogLevel:
 			l, ok := val.(string)
 			if !ok {
 				errorMap[key] = utils.IncorrectValueTypeInMapError(key, val, "string")
 				continue
 			}
-			if 	s.LogLevel.String() != l {
+			if s.LogLevel.String() != l {
 				changed = true
 				s.SetLogLevel(l)
-			}			
+			}
 		case PipelineStatsInterval:
 			interval, ok := val.(int)
 			if !ok {
 				errorMap[key] = utils.IncorrectValueTypeInMapError(key, val, "int")
 				continue
 			}
-			if 	s.StatsInterval != interval {
+			if s.StatsInterval != interval {
 				changed = true
 				s.StatsInterval = interval
 			}
@@ -364,52 +365,51 @@ func (s *ReplicationSettings) ToMap() map[string]interface{} {
 
 func ValidateAndConvertSettingsValue(key string, value string) (convertedValue interface{}, err error) {
 	switch key {
-		case ReplicationType, PipelineLogLevel:
-			// string parameters need no conversion
-			convertedValue = value
-		case FilterExpression:
-			// check that filter expression is a valid regular expression
-			_, err = regexp.Compile(value)
-			if err != nil {
-				return
-			}
-			convertedValue = value
-		case Active:
-			var paused bool
-			paused, err = strconv.ParseBool(value)
-			if err != nil {
-				err = utils.IncorrectValueTypeError("a boolean")
-				return
-			}
-			convertedValue = !paused
+	case ReplicationType, PipelineLogLevel:
+		// string parameters need no conversion
+		convertedValue = value
+	case FilterExpression:
+		// check that filter expression is a valid regular expression
+		_, err = regexp.Compile(value)
+		if err != nil {
+			return
+		}
+		convertedValue = value
+	case Active:
+		var paused bool
+		paused, err = strconv.ParseBool(value)
+		if err != nil {
+			err = utils.IncorrectValueTypeError("a boolean")
+			return
+		}
+		convertedValue = !paused
 
-		case CheckpointInterval, BatchCount, BatchSize, FailureRestartInterval, 
-			 OptimisticReplicationThreshold, SourceNozzlePerNode, 
-			 TargetNozzlePerNode,  MaxExpectedReplicationLag, TimeoutPercentageCap, 
-			 PipelineStatsInterval	:
-			convertedValue, err = strconv.ParseInt(value, base.ParseIntBase, base.ParseIntBitSize)
-			if err != nil {
-				err = utils.IncorrectValueTypeError("an integer")
+	case CheckpointInterval, BatchCount, BatchSize, FailureRestartInterval,
+		OptimisticReplicationThreshold, SourceNozzlePerNode,
+		TargetNozzlePerNode, MaxExpectedReplicationLag, TimeoutPercentageCap,
+		PipelineStatsInterval:
+		convertedValue, err = strconv.ParseInt(value, base.ParseIntBase, base.ParseIntBitSize)
+		if err != nil {
+			err = utils.IncorrectValueTypeError("an integer")
+			return
+		}
+
+		// convert it to int to make future processing easier
+		convertedValue = int(convertedValue.(int64))
+
+		// range check for int parameters
+		settingsConfig, _ := SettingsConfigMap[key]
+		if settingsConfig.Range != nil {
+			intValue := convertedValue.(int)
+			if intValue < settingsConfig.Range.minValue || intValue > settingsConfig.Range.maxValue {
+				err = utils.InvalidValueError("an integer", settingsConfig.Range.minValue, settingsConfig.Range.maxValue)
 				return
 			}
-			
-			// convert it to int to make future processing easier
-			convertedValue = int(convertedValue.(int64))
-			
-			// range check for int parameters
-			settingsConfig, _ := SettingsConfigMap[key]
-			if settingsConfig.Range != nil {
-				intValue := convertedValue.(int)
-				if intValue < settingsConfig.Range.minValue || intValue > settingsConfig.Range.maxValue {
-					err =  utils.InvalidValueError("an integer", settingsConfig.Range.minValue, settingsConfig.Range.maxValue)
-					return
-				}
-			}
-		default:
-			// a nil converted value indicates that the key is not a settings key
-			convertedValue = nil
+		}
+	default:
+		// a nil converted value indicates that the key is not a settings key
+		convertedValue = nil
 	}
-		
-	return		
-}
 
+	return
+}
