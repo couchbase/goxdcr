@@ -11,19 +11,17 @@
 package service_impl
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
-	"encoding/json"
-	"io/ioutil"
-	"reflect"
-	"net/http"
-	"strings"
 	"github.com/couchbase/goxdcr/base"
-	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/goxdcr/log"
+	"github.com/couchbase/goxdcr/metadata"
+	rm "github.com/couchbase/goxdcr/replication_manager"
 	"github.com/couchbase/goxdcr/service_def"
 	"github.com/couchbase/goxdcr/utils"
-	rm "github.com/couchbase/goxdcr/replication_manager"
+	"reflect"
+	"strings"
 )
 
 const (
@@ -32,15 +30,15 @@ const (
 )
 
 type RemoteClusterService struct {
-	metadata_svc  service_def.MetadataSvc
-	logger      *log.CommonLogger
+	metadata_svc service_def.MetadataSvc
+	logger       *log.CommonLogger
 }
 
 func NewRemoteClusterService(metadata_svc service_def.MetadataSvc, logger_ctx *log.LoggerContext) *RemoteClusterService {
 	return &RemoteClusterService{
-					metadata_svc:  metadata_svc,  
-					logger:    log.NewLogger("RemoteClusterService", logger_ctx),
-		}
+		metadata_svc: metadata_svc,
+		logger:       log.NewLogger("RemoteClusterService", logger_ctx),
+	}
 }
 
 func (service *RemoteClusterService) RemoteClusterByRefId(refId string) (*metadata.RemoteClusterReference, error) {
@@ -56,19 +54,17 @@ func (service *RemoteClusterService) RemoteClusterByUuid(uuid string) (*metadata
 }
 
 func (service *RemoteClusterService) RemoteClusterByRefName(refName string) (*metadata.RemoteClusterReference, error) {
-	var ref *metadata.RemoteClusterReference   
+	var ref *metadata.RemoteClusterReference
 	results, err := service.RemoteClusters()
 	if err != nil {
 		return nil, err
 	}
-	
 	for _, result := range results {
 		if result.Name == refName {
 			ref = result
 			break
 		}
 	}
-	
 	if ref == nil {
 		return nil, errors.New("unknown remote cluster")
 	} else {
@@ -76,31 +72,30 @@ func (service *RemoteClusterService) RemoteClusterByRefName(refName string) (*me
 	}
 }
 
-// this assumes that the ref to be added is not yet in gometa
 func (service *RemoteClusterService) AddRemoteCluster(ref *metadata.RemoteClusterReference) error {
 	service.logger.Infof("Adding remote cluster with referenceId %v\n", ref.Id)
-	
+
 	err := service.ValidateRemoteCluster(ref)
 	if err != nil {
 		return err
 	}
-	
+
 	return service.addRemoteCluster(ref)
 }
 
 func (service *RemoteClusterService) SetRemoteCluster(refName string, ref *metadata.RemoteClusterReference) error {
 	service.logger.Infof("Setting remote cluster with refName %v\n", refName)
-	
+
 	err := service.ValidateRemoteCluster(ref)
 	if err != nil {
 		return err
 	}
-	
+
 	oldRef, err := service.RemoteClusterByRefName(refName)
 	if err != nil {
 		return err
 	}
-	
+
 	if ref.Id == oldRef.Id {
 		// if the id of the remote cluster reference has not been changed, simply update the existing reference
 		key := ref.Id
@@ -116,35 +111,32 @@ func (service *RemoteClusterService) SetRemoteCluster(refName string, ref *metad
 		if err != nil {
 			return err
 		}
-		return service.addRemoteCluster(ref)	
+		return service.addRemoteCluster(ref)
 	}
-	
+
 }
 
 func (service *RemoteClusterService) DelRemoteCluster(refName string) error {
 	service.logger.Infof("Deleting remote cluster with reference name=%v\n", refName)
-	
 	ref, err := service.RemoteClusterByRefName(refName)
 	if err != nil {
 		return err
 	}
-	
 	key := ref.Id
-	
+
 	return service.metadata_svc.DelWithCatalog(RemoteClustersCatalogKey, key, ref.Revision)
 }
 
 func (service *RemoteClusterService) RemoteClusters() (map[string]*metadata.RemoteClusterReference, error) {
 	service.logger.Infof("Getting remote clusters")
-	
 	refs := make(map[string]*metadata.RemoteClusterReference, 0)
 
-	entries, err := service.metadata_svc.GetAllMetadataFromCatalog(RemoteClustersCatalogKey)	
+	entries, err := service.metadata_svc.GetAllMetadataFromCatalog(RemoteClustersCatalogKey)
 	service.logger.Debugf("entries for remote clusters %v\n", entries)
 	if err != nil {
 		return nil, err
 	}
-	
+
 	for _, entry := range entries {
 		ref, err := constructRemoteClusterReference(entry.Value, entry.Rev)
 		if err != nil {
@@ -156,89 +148,74 @@ func (service *RemoteClusterService) RemoteClusters() (map[string]*metadata.Remo
 	return refs, nil
 }
 
-// validate remote cluster info and retrieve actual uuid 
+// validate remote cluster info and retrieve actual uuid
 func (service *RemoteClusterService) ValidateRemoteCluster(ref *metadata.RemoteClusterReference) error {
 
 	isEnterprise, err := rm.XDCRCompTopologyService().IsMyClusterEnterprise()
 	if err != nil {
 		return err
-	}		
+	}
 	if ref.DemandEncryption && !isEnterprise {
 		return errors.New("Encryption can only be used in enterprise edition.")
 	}
-		
-	var response *http.Response
+
+	var hostAddr string
 	if ref.DemandEncryption {
-		response, err = connectToRemoteClusterThroughHttps(ref.HostName, ref.UserName, ref.Password, ref.Certificate)
+		hostAddr, err = service.httpsHostAddress(ref.HostName, ref.UserName, ref.Password)
+		if err != nil {
+			return err
+		}
 	} else {
-		response, err = connectToRemoteClusterThroughHttp(ref.HostName, ref.UserName, ref.Password)
+		hostAddr = ref.HostName
 	}
-	if err != nil {
-		return err
+	var poolsInfo map[string]interface{}
+
+	if ref.DemandEncryption {
+		hostAddr = utils.EnforcePrefix("https://", hostAddr)
+	} else {
+		hostAddr = utils.EnforcePrefix("http://", hostAddr)
 	}
 	
-	// verify contents in response
-	defer response.Body.Close()
-	bodyBytes, err := ioutil.ReadAll(response.Body)
+	err, _ = utils.QueryRestApiWithAuth(hostAddr, base.PoolsPath, ref.UserName, ref.Password, base.MethodGet, "", nil, &poolsInfo, service.logger, ref.Certificate)
 	if err != nil {
+		service.logger.Errorf("err=%v\n", err)
 		return err
 	}
 
-	// xxx/pools returns a map object
-	var poolsInfo map[string]interface{}
-	err = json.Unmarshal(bodyBytes, &poolsInfo)
-	if err != nil {
-		return err
-	}
-	
-	// get remote cluster uuid from the map 
+	// get remote cluster uuid from the map
+	service.logger.Infof("poolsInfo=%v\n", poolsInfo)
 	actualUuid, ok := poolsInfo[base.RemoteClusterUuid]
 	if !ok {
 		// should never get here
 		return errors.New("Could not get uuid of remote cluster.")
 	}
-	
 	actualUuidStr, ok := actualUuid.(string)
 	if !ok {
 		// should never get here
 		return errors.New(fmt.Sprintf("uuid of remote cluster is of wrong type. Expected type: string; Actual type: %s", reflect.TypeOf(actualUuid)))
 	}
-	
+
 	// update uuid in ref to real value
 	ref.Uuid = actualUuidStr
 	ref.Id = metadata.RemoteClusterRefId(ref.Uuid)
-	
+
 	return nil
 }
 
-func connectToRemoteClusterThroughHttp(hostName, userName, password string) (*http.Response, error) {
-	url := fmt.Sprintf("http://%s:%s@%s%s", userName, password, hostName, base.PoolsPath)
-	request, err := http.NewRequest(base.MethodGet, url, nil)
+func (service *RemoteClusterService) httpsHostAddress(hostName, userName, password string) (string, error) {
+	sslPort, err := utils.GetXDCRSSLPort(hostName, userName, password, service.logger)
 	if err != nil {
-		return nil, err
+		return "", err
 	}
-	return utils.SendHttpRequest(request)
-}
 
-func connectToRemoteClusterThroughHttps(hostName, userName, password string, certificate []byte) (*http.Response, error) {
-	sslPort, err := utils.GetXDCRSSLPort(hostName, userName, password)
-	if err != nil {
-		return nil, err
-	}
-	
 	hostNode := strings.Split(hostName, base.UrlPortNumberDelimiter)[0]
 	newHostName := utils.GetHostAddr(hostNode, sslPort)
-	url := fmt.Sprintf("https://%s:%s@%s%s", userName, password, newHostName, base.PoolsPath)
-	request, err := http.NewRequest(base.MethodGet, url, nil)
-	if err != nil {
-		return nil, err
-	}
-	return utils.SendHttpRequestThroughSSL(request, certificate) 
+	return newHostName, nil
 }
 
 // this internal api differs from AddRemoteCluster in that it does not perform validation
 func (service *RemoteClusterService) addRemoteCluster(ref *metadata.RemoteClusterReference) error {
-	
+
 	key := ref.Id
 	value, err := json.Marshal(ref)
 	if err != nil {
@@ -250,10 +227,10 @@ func (service *RemoteClusterService) addRemoteCluster(ref *metadata.RemoteCluste
 
 func constructRemoteClusterReference(value []byte, rev interface{}) (*metadata.RemoteClusterReference, error) {
 	ref := &metadata.RemoteClusterReference{}
-	err := json.Unmarshal(value, ref) 
+	err := json.Unmarshal(value, ref)
 	if err != nil {
 		return nil, err
 	}
 	ref.Revision = rev
 	return ref, nil
-} 
+}

@@ -11,7 +11,11 @@ package service_def
 
 import (
 	"github.com/couchbase/goxdcr/metadata"
+	"sync"
 )
+
+// Callback function for spec changed event
+type SpecChangedCallback func(changedSpecId string, changedSpec *metadata.ReplicationSpecification) error
 
 type ReplicationSpecSvc interface {
 	ReplicationSpec(replicationId string) (*metadata.ReplicationSpecification, error)
@@ -20,4 +24,7 @@ type ReplicationSpecSvc interface {
 	DelReplicationSpec(replicationId string) error
 	ActiveReplicationSpecs() (map[string]*metadata.ReplicationSpecification, error)
 	ActiveReplicationSpecIdsForBucket(bucket string) ([]string, error)
+
+	// Register call back function for spec changed event
+	StartSpecChangedCallBack(callBack SpecChangedCallback, cancel <-chan struct{}, waitGrp *sync.WaitGroup) error
 }

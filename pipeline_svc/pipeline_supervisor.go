@@ -51,7 +51,7 @@ func (pipelineSupervisor *PipelineSupervisor) Pipeline() common.Pipeline {
 }
 
 func (pipelineSupervisor *PipelineSupervisor) Attach(p common.Pipeline) error {
-	pipelineSupervisor.Logger().Infof("Attaching pipeline %v to supervior service %v\n", p.Topic(), pipelineSupervisor.Id())
+	pipelineSupervisor.Logger().Infof("Attaching pipeline %v to supervior service %v\n", p.InstanceId(), pipelineSupervisor.Id())
 
 	pipelineSupervisor.pipeline = p
 
@@ -115,5 +115,11 @@ func (pipelineSupervisor *PipelineSupervisor) SetPipelineLogLevel(log_level_str 
 	}
 	pipelineSupervisor.LoggerContext().Log_level = level
 	return nil
+}
+
+func (pipelineSupervisor *PipelineSupervisor) ReportFailure(errors map[string]error) {
+	pipelineSupervisor.StopHeartBeatTicker ()
+	//report the failure to decision maker
+	pipelineSupervisor.GenericSupervisor.ReportFailure(errors)
 }
 

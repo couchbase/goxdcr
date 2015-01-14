@@ -17,12 +17,18 @@ import (
 var DefaultConnectionSize = 10
 var DefaultPoolName = "default"
 
-var LocalHostName = "localhost"
+var LocalHostName = "127.0.0.1"
 
 // URL Paths for retrieving cluster info
 var PoolsPath = "/pools"
+var DefaultPoolPath = "/pools/default"
 var NodesPath = "/pools/nodes"
+var NodesSelfPath = "/nodes/self"
 var SSLPortsPath = "/nodes/self/xdcrSSLPorts"
+
+//keys in the map which /nodes/self returns
+var CouchApiBase = "couchApiBase"
+var CouchApiBaseHttps = "couchApiBaseHttps"
 
 // keys used in parsing cluster info
 var NodesKey = "nodes"
@@ -109,9 +115,25 @@ const (
  	JustValidatePostfix = "?" + JustValidate + "=1"
 )
 
+// http request related constants
+const (
+	ContentType = "Content-Type"
+	DefaultContentType = "application/x-www-form-urlencoded"
+	JsonContentType = "application/json"
+)
+
 //constant for replication tasklist status
 const (
 	Pending = "Pending"
 	Replicating = "Replicating"
 	Paused = "Paused"
 )
+
+const (
+	//Bucket sequence number statistics
+	VBUCKET_SEQNO_STAT_NAME            = "vbucket-seqno"
+	VBUCKET_HIGH_SEQNO_STAT_KEY_FORMAT = "vb_%v:high_seqno"
+
+)
+
+var ErrorsStatsKey = "Errors"

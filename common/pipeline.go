@@ -13,8 +13,14 @@ import (
 	"github.com/couchbase/goxdcr/metadata"
 )
 
-//interface for Pipeline
+type PipelineState int
+const (
+	Pipeline_Running PipelineState=iota
+	Pipeline_Pending PipelineState=iota
+	Pipeline_Stopped PipelineState=iota
+)
 
+//interface for Pipeline
 type Pipeline interface {
 	//Name of the Pipeline
 	Topic() string
@@ -32,5 +38,8 @@ type Pipeline interface {
 	Stop() error
 	
 	Specification() *metadata.ReplicationSpecification
-	Settings() *metadata.ReplicationSettings
+	Settings() map[string]interface{}
+	
+	State () PipelineState
+	InstanceId() string
 }

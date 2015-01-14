@@ -14,6 +14,7 @@ import (
 	"errors"
 	mc "github.com/couchbase/gomemcached"
 	mcc "github.com/couchbase/gomemcached/client"
+	"github.com/couchbase/goxdcr/base"
 	common "github.com/couchbase/goxdcr/common"
 	connector "github.com/couchbase/goxdcr/connector"
 	"github.com/couchbase/goxdcr/log"
@@ -68,7 +69,7 @@ func NewRouter(filterExpression string,
 	return router, nil
 }
 
-func ComposeMCRequest(event *mcc.UprEvent) *mc.MCRequest {
+func ComposeMCRequest(event *mcc.UprEvent) *base.WrappedMCRequest {
 	req := &mc.MCRequest{Cas: event.Cas,
 		Opaque:  0,
 		VBucket: event.VBucket,
@@ -81,7 +82,7 @@ func ComposeMCRequest(event *mcc.UprEvent) *mc.MCRequest {
 	//extra
 	if event.Opcode == mc.UPR_MUTATION || event.Opcode == mc.UPR_DELETION ||
 		event.Opcode == mc.UPR_EXPIRATION {
-//    <<Flg:32, Exp:32, SeqNo:64, CASPart:64, 0:32>>.
+		//    <<Flg:32, Exp:32, SeqNo:64, CASPart:64, 0:32>>.
 		binary.BigEndian.PutUint32(req.Extras[0:4], event.Flags)
 		binary.BigEndian.PutUint32(req.Extras[4:8], event.Expiry)
 		binary.BigEndian.PutUint64(req.Extras[8:16], event.RevSeqno)
@@ -93,7 +94,7 @@ func ComposeMCRequest(event *mcc.UprEvent) *mc.MCRequest {
 		binary.BigEndian.PutUint32(req.Extras[24:28], event.SnapshotType)
 	}
 
-	return req
+	return &base.WrappedMCRequest{Seqno: event.Seqno, Req: req}
 }
 
 // Implementation of the routing algorithm

@@ -11,48 +11,48 @@
 package main
 
 import (
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
-	"io/ioutil"
-	"encoding/json"
+	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/metadata"
 	rm "github.com/couchbase/goxdcr/replication_manager"
-	utils "github.com/couchbase/goxdcr/utils"
 	"github.com/couchbase/goxdcr/tests/common"
-	"net/http"
+	"io/ioutil"
 	"os"
-	"reflect"
-	"strings"
 )
+
+var logger *log.CommonLogger = log.NewLogger("remote_cluster_run", log.DefaultLoggerContext)
 
 var options struct {
 	sourceKVHost string //source kv host name
-	sourceKVPort      uint64 //source kv admin port
+	sourceKVPort uint64 //source kv admin port
+	username string //username
+	password string //password
 
-	username     string //username
-	password     string //password
-	
 	// parameters of remote cluster
-	remoteUuid string // remote cluster uuid
-	remoteName string // remote cluster name
-	remoteHostName string // remote cluster host name
-	remoteUserName     string //remote cluster userName
-	remotePassword     string //remote cluster password
-	remoteDemandEncryption  bool  // whether encryption is needed
+	remoteUuid             string // remote cluster uuid
+	remoteName             string // remote cluster name
+	remoteHostName         string // remote cluster host name
+	remoteUserName         string //remote cluster userName
+	remotePassword         string //remote cluster password
+	remoteDemandEncryption bool   // whether encryption is needed
 	remoteCertificateFile  string // file containing certificate for encryption
-	
-	newRemoteName string // new remote cluster name
+
+	newRemoteName     string // new remote cluster name
 	newRemoteHostName string // new remote cluster host name
 }
 
 func argParse() {
+	flag.StringVar(&options.sourceKVHost, "sourceKVHost", base.LocalHostName,
+		"source kv host")
 	flag.Uint64Var(&options.sourceKVPort, "sourceKVPort", 9000,
 		"admin port number for source kv")
 	flag.StringVar(&options.username, "username", "Administrator", "userName to cluster admin console")
 	flag.StringVar(&options.password, "password", "welcome", "password to Cluster admin console")
-	
+
 	flag.StringVar(&options.remoteUuid, "remoteUuid", "1234567",
 		"remote cluster uuid")
 	flag.StringVar(&options.remoteName, "remoteName", "remote",
@@ -63,10 +63,10 @@ func argParse() {
 	flag.StringVar(&options.remotePassword, "remotePassword", "welcome", "remote cluster password")
 	flag.BoolVar(&options.remoteDemandEncryption, "remoteDemandEncryption", false, "whether encryption is needed")
 	flag.StringVar(&options.remoteCertificateFile, "remoteCertificateFile", "", "file containing certificate for encryption")
-	
+
 	flag.StringVar(&options.newRemoteName, "newRemoteName", "newRemote",
 		"remote cluster name")
-	// This is for testChangeRemoteClusterWithIdChange(). This needs to be manually changed to point to a valid non-local cluster for the test to work	
+	// This is for testChangeRemoteClusterWithIdChange(). This needs to be manually changed to point to a valid non-local cluster for the test to work
 	flag.StringVar(&options.newRemoteHostName, "newRemoteHostName", "", //"ec2-204-236-128-120.us-west-1.compute.amazonaws.com:8091",
 		"remote cluster host name")
 
@@ -79,19 +79,19 @@ func usage() {
 }
 
 func main() {
-	fmt.Println("Start Testing adminport...")
+	fmt.Println("Start Testing remote_cluster_run...")
 	argParse()
 	startAdminport()
 }
 
 func startAdminport() {
-		
+
 	// verify that tests start from a clean slate
 	if _, err := getRemoteClusterAndVerifyExistence("test set up", options.remoteName, false); err != nil {
 		fmt.Println(err.Error())
 		return
 	}
-	
+
 	if err := testCreateRemoteClusterWithJustValidate(); err != nil {
 		fmt.Println(err.Error())
 		return
@@ -101,24 +101,24 @@ func startAdminport() {
 		fmt.Println(err.Error())
 		return
 	}
-	
+
 	if err := testChangeRemoteClusterWithJustValidate(); err != nil {
 		fmt.Println(err.Error())
 		return
 	}
-	
+
 	if err := testChangeRemoteClusterWithoutIdChange(); err != nil {
 		fmt.Println(err.Error())
 		return
 	}
-	
-	// Note, this test does not work by default. 
+
+	// Note, this test does not work by default.
 	// To make it work, modify options.newRemoteName to point to a valid non-local cluster.
 	/*if err := testChangeRemoteClusterWithIdChange(); err != nil {
 		fmt.Println(err.Error())
 		return
 	}*/
-	
+
 	if err := testDeleteRemoteCluster(options.newRemoteName); err != nil {
 		fmt.Println(err.Error())
 		return
@@ -126,85 +126,6 @@ func startAdminport() {
 
 	fmt.Println("All tests passed.")
 
-}
-
-func testAuth() error{
-	url := fmt.Sprintf("http://%s:%s@%s/pools", options.remoteUserName, options.remotePassword, options.remoteHostName)
-	fmt.Printf("url=%v\n", url)
-	request, err := http.NewRequest(base.MethodGet, url, nil)
-	if err != nil {
-		return err
-	}
-	request.Header.Set(rm.ContentType, rm.DefaultContentType)
-
-	fmt.Println("request", request)
-
-	response, err := http.DefaultClient.Do(request)
-	if err != nil {
-		return err
-	}
-	fmt.Printf("response=%v\n", response)
-
-	// verify contents in response
-	defer response.Body.Close()
-	bodyBytes, err := ioutil.ReadAll(response.Body)
-	if err != nil {
-		return err
-	}
-
-	fmt.Printf("body=%v\n", bodyBytes)
-
-	var v map[string]interface{}
-	err = json.Unmarshal(bodyBytes, &v)
-	fmt.Printf("v=%v, v.type=%v, err=%v\n", v, reflect.TypeOf(v), err)
-	
-	uuid, ok := v["uuid"]
-	fmt.Printf("uuid=%v, ok=%v\n", uuid, ok)
-	return nil
-}
-
-func testSSLAuth() error {
-
-	serverCert, err := ioutil.ReadFile(options.remoteCertificateFile)
-	if err != nil {
-    	fmt.Printf("Could not load server certificate! err=%v\n", err)
-    	return err
-	}
-	
-	sslPort, err := utils. GetXDCRSSLPort(options.remoteHostName, options.remoteUserName, options.remotePassword)
-	if err != nil {
-		return err
-	}
-	
-	hostNode := strings.Split(options.remoteHostName, base.UrlPortNumberDelimiter)[0]
-	newHostName := utils.GetHostAddr(hostNode, sslPort)
-	url := fmt.Sprintf("https://%s:%s@%s%s", options.remoteUserName, options.remotePassword, newHostName, base.PoolsPath)
-	request, err := http.NewRequest("GET", url, nil)
-	if err != nil {
-		return err
-	}
-	fmt.Printf("url=%v\n", url)
-	response, err := utils.SendHttpRequestThroughSSL(request, serverCert) 
-
-	if err != nil {
-		return err
-	}
-	// verify contents in response
-	defer response.Body.Close()
-	bodyBytes, err := ioutil.ReadAll(response.Body)
-	if err != nil {
-		return err
-	}
-
-	fmt.Printf("body=%v\n", bodyBytes)
-
-	var v map[string]interface{}
-	err = json.Unmarshal(bodyBytes, &v)
-	fmt.Printf("v=%v, v.type=%v, err=%v\n", v, reflect.TypeOf(v), err)
-	
-	uuid, ok := v["uuid"]
-	fmt.Printf("uuid=%v, ok=%v\n", uuid, ok)
-	return nil
 }
 
 // GetRemoteCluster by calling RemoteClusters() API.
@@ -215,7 +136,7 @@ func getRemoteCluster(testName, remoteClusterName string) (*metadata.RemoteClust
 	if err != nil {
 		return nil, err
 	}
-	
+
 	// verify contents in response
 	defer response.Body.Close()
 	bodyBytes, err := ioutil.ReadAll(response.Body)
@@ -228,14 +149,14 @@ func getRemoteCluster(testName, remoteClusterName string) (*metadata.RemoteClust
 	if err != nil {
 		return nil, err
 	}
-	
+
 	for _, remoteCluster := range remoteClusters {
 		if remoteCluster.Name == remoteClusterName {
 			ref = &remoteCluster
 			break
 		}
 	}
-	
+
 	return ref, nil
 }
 
@@ -244,22 +165,22 @@ func getRemoteClusterAndVerifyExistence(testName, remoteClusterName string, expe
 	if err != nil {
 		return nil, err
 	}
-	
+
 	if !expectedToExist && ref != nil {
 		return nil, errors.New("Did not expect remote cluster to exist but it did.")
 	}
 	if expectedToExist && ref == nil {
 		return nil, errors.New("Expected remote cluster to exist but it did not.")
 	}
-	
+
 	return ref, nil
 }
-	
+
 func testCreateRemoteClusterWithJustValidate() error {
 	fmt.Println("Starting testCreateRemoteClusterWithJustValidate")
 	url := common.GetAdminportUrlPrefix(options.sourceKVHost, options.sourceKVPort) + base.RemoteClustersPath + base.JustValidatePostfix
-	paramsBytes, err := createRequestBody(options.remoteName, options.remoteHostName, options.remoteUserName, 
-										options.remotePassword, options.remoteDemandEncryption, options.remoteCertificateFile)
+	paramsBytes, err := createRequestBody(options.remoteName, options.remoteHostName, options.remoteUserName,
+		options.remotePassword, options.remoteDemandEncryption, options.remoteCertificateFile)
 	if err != nil {
 		return err
 	}
@@ -267,16 +188,16 @@ func testCreateRemoteClusterWithJustValidate() error {
 	if err != nil {
 		return err
 	}
-	
+
 	_, err = getRemoteClusterAndVerifyExistence("testCreateRemoteClusterWithJustValidate", options.remoteName, false)
 	return err
 }
-	
+
 func testCreateRemoteCluster() error {
 	fmt.Println("Starting testCreateRemoteCluster")
 	url := common.GetAdminportUrlPrefix(options.sourceKVHost, options.sourceKVPort) + base.RemoteClustersPath
-	paramsBytes, err := createRequestBody(options.remoteName, options.remoteHostName, options.remoteUserName, 
-										options.remotePassword, options.remoteDemandEncryption, options.remoteCertificateFile)
+	paramsBytes, err := createRequestBody(options.remoteName, options.remoteHostName, options.remoteUserName,
+		options.remotePassword, options.remoteDemandEncryption, options.remoteCertificateFile)
 	if err != nil {
 		return err
 	}
@@ -284,21 +205,21 @@ func testCreateRemoteCluster() error {
 	if err != nil {
 		return err
 	}
-	
+
 	ref, err := getRemoteClusterAndVerifyExistence("testCreateRemoteCluster", options.remoteName, true)
 	if err != nil {
 		return err
 	}
-	
+
 	return verifyRemoteClusterWithoutId(ref, options.remoteName, options.remoteHostName, options.remoteUserName, options.remotePassword, options.remoteDemandEncryption)
 }
 
 func testChangeRemoteClusterWithJustValidate() error {
 	fmt.Println("Starting testChangeRemoteClusterWithJustValidate")
-	
+
 	url := common.GetAdminportUrlPrefix(options.sourceKVHost, options.sourceKVPort) + base.RemoteClustersPath + base.UrlDelimiter + options.remoteName + base.JustValidatePostfix
-	paramsBytes, err := createRequestBody(options.newRemoteName, options.remoteHostName, options.remoteUserName, 
-										options.remotePassword, options.remoteDemandEncryption, options.remoteCertificateFile)
+	paramsBytes, err := createRequestBody(options.newRemoteName, options.remoteHostName, options.remoteUserName,
+		options.remotePassword, options.remoteDemandEncryption, options.remoteCertificateFile)
 	if err != nil {
 		return err
 	}
@@ -306,12 +227,12 @@ func testChangeRemoteClusterWithJustValidate() error {
 	if err != nil {
 		return err
 	}
-	
+
 	_, err = getRemoteClusterAndVerifyExistence("testChangeRemoteClusterWithJustValidate", options.remoteName, true)
 	if err != nil {
 		return err
 	}
-	
+
 	_, err = getRemoteClusterAndVerifyExistence("testChangeRemoteClusterWithJustValidate", options.newRemoteName, false)
 	return err
 }
@@ -323,12 +244,12 @@ func testChangeRemoteClusterWithoutIdChange() error {
 	if err != nil {
 		return err
 	}
-	
+
 	oldRefId := oldRef.Id
-	
+
 	url := common.GetAdminportUrlPrefix(options.sourceKVHost, options.sourceKVPort) + base.RemoteClustersPath + base.UrlDelimiter + options.remoteName
-	paramsBytes, err := createRequestBody(options.newRemoteName, options.remoteHostName, options.remoteUserName, 
-										options.remotePassword, options.remoteDemandEncryption, options.remoteCertificateFile)
+	paramsBytes, err := createRequestBody(options.newRemoteName, options.remoteHostName, options.remoteUserName,
+		options.remotePassword, options.remoteDemandEncryption, options.remoteCertificateFile)
 	if err != nil {
 		return err
 	}
@@ -336,20 +257,20 @@ func testChangeRemoteClusterWithoutIdChange() error {
 	if err != nil {
 		return err
 	}
-	
+
 	ref, err := getRemoteClusterAndVerifyExistence("testChangeRemoteClusterWithoutIdChange", options.newRemoteName, true)
 	if err != nil {
 		return err
 	}
-	
+
 	// verify that ref id stay the same
-	err = verifyRemoteClusterId(ref, oldRefId, true/*sameIdExpected*/)
+	err = verifyRemoteClusterId(ref, oldRefId, true /*sameIdExpected*/)
 	if err != nil {
 		return err
 	}
-	
+
 	// verify other cluster fields
-	return verifyRemoteClusterWithoutId(ref, options.newRemoteName, options.remoteHostName, options.remoteUserName, options.remotePassword, options.remoteDemandEncryption) 
+	return verifyRemoteClusterWithoutId(ref, options.newRemoteName, options.remoteHostName, options.remoteUserName, options.remotePassword, options.remoteDemandEncryption)
 }
 
 // change hostname of remote cluster, which should lead to id change of the corresponding reference
@@ -359,12 +280,12 @@ func testChangeRemoteClusterWithIdChange() error {
 	if err != nil {
 		return err
 	}
-	
+
 	oldRefId := oldRef.Id
-	
+
 	url := common.GetAdminportUrlPrefix(options.sourceKVHost, options.sourceKVPort) + base.RemoteClustersPath + base.UrlDelimiter + options.newRemoteName
-	paramsBytes, err := createRequestBody(options.newRemoteName, options.newRemoteHostName, options.remoteUserName, 
-										options.remotePassword, options.remoteDemandEncryption, options.remoteCertificateFile)
+	paramsBytes, err := createRequestBody(options.newRemoteName, options.newRemoteHostName, options.remoteUserName,
+		options.remotePassword, options.remoteDemandEncryption, options.remoteCertificateFile)
 	if err != nil {
 		return err
 	}
@@ -372,20 +293,20 @@ func testChangeRemoteClusterWithIdChange() error {
 	if err != nil {
 		return err
 	}
-	
+
 	ref, err := getRemoteClusterAndVerifyExistence("testChangeRemoteClusterWithIdChange", options.newRemoteName, true)
 	if err != nil {
 		return err
 	}
-	
-	// verify that ref id changed 
-	err = verifyRemoteClusterId(ref, oldRefId, false/*sameIdExpected*/)
+
+	// verify that ref id changed
+	err = verifyRemoteClusterId(ref, oldRefId, false /*sameIdExpected*/)
 	if err != nil {
 		return err
 	}
-	
+
 	// verify other cluster fields
-	return verifyRemoteClusterWithoutId(ref, options.newRemoteName, options.remoteHostName, options.remoteUserName, options.remotePassword, options.remoteDemandEncryption) 
+	return verifyRemoteClusterWithoutId(ref, options.newRemoteName, options.remoteHostName, options.remoteUserName, options.remotePassword, options.remoteDemandEncryption)
 }
 
 func testDeleteRemoteCluster(remoteName string) error {
@@ -396,7 +317,7 @@ func testDeleteRemoteCluster(remoteName string) error {
 	if err != nil {
 		return err
 	}
-	
+
 	_, err = getRemoteClusterAndVerifyExistence("testDeleteRemoteCluster", remoteName, false)
 	return err
 }
@@ -405,23 +326,23 @@ func verifyRemoteClusterWithoutId(remoteCluster *metadata.RemoteClusterReference
 	if err := common.ValidateFieldValue(base.RemoteClusterUuid, name, remoteCluster.Name); err == nil {
 		return err
 	}
-	
+
 	if err := common.ValidateFieldValue(base.RemoteClusterHostName, hostname, remoteCluster.HostName); err != nil {
 		return err
 	}
-	
+
 	if err := common.ValidateFieldValue(base.RemoteClusterUserName, username, remoteCluster.UserName); err != nil {
 		return err
 	}
-	
+
 	if err := common.ValidateFieldValue(base.RemoteClusterPassword, password, remoteCluster.Password); err != nil {
 		return err
 	}
-	
+
 	if err := common.ValidateFieldValue(base.RemoteClusterDemandEncryption, demandEncryption, remoteCluster.DemandEncryption); err != nil {
 		return err
 	}
-	
+
 	return nil
 }
 
@@ -432,7 +353,7 @@ func verifyRemoteClusterId(remoteCluster *metadata.RemoteClusterReference, id st
 	return nil
 }
 
-func createRequestBody(name, hostname, username, password string, demandEncryption bool, certificateFile string) ([] byte, error) {
+func createRequestBody(name, hostname, username, password string, demandEncryption bool, certificateFile string) ([]byte, error) {
 
 	params := make(map[string]interface{})
 	params[base.RemoteClusterName] = name

@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"reflect"
 	"time"
+	"github.com/couchbase/gomemcached"
 )
 
 type SettingDef struct {
@@ -57,10 +58,14 @@ type VBTimestamp struct{
     SnapshotEnd  uint64
 }
 
+func (vbts *VBTimestamp) String() string {
+	return fmt.Sprintf("[vbno=%v, uuid=%v, seqno=%v, sn_start=%v, sn_end=%v]", vbts.Vbno, vbts.Vbuuid, vbts.Seqno, vbts.SnapshotStart, vbts.SnapshotEnd)
+}
+
 type ClusterConnectionInfoProvider interface {
-	MyConnectionStr()  string
-	MyUsername()  string
-	MyPassword()  string
+	MyConnectionStr()  (string, error)
+	// returns username and password
+	MyCredentials()  (string, string, error)
 }
 
 type ReplicationInfo struct {
@@ -74,3 +79,7 @@ type ErrorInfo struct {
 	ErrorMsg  string
 }
 
+type WrappedMCRequest struct {
+	Seqno uint64
+	Req	  *gomemcached.MCRequest
+}

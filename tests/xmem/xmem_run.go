@@ -14,12 +14,13 @@ import (
 	"encoding/binary"
 	"flag"
 	"fmt"
-	parts "github.com/couchbase/goxdcr/parts"
-	utils "github.com/couchbase/goxdcr/utils"
 	mc "github.com/couchbase/gomemcached"
 	mcc "github.com/couchbase/gomemcached/client"
-	"github.com/couchbaselabs/go-couchbase"
+	"github.com/couchbase/goxdcr/cbauth"
 	"github.com/couchbase/goxdcr/log"
+	parts "github.com/couchbase/goxdcr/parts"
+	utils "github.com/couchbase/goxdcr/utils"
+	"github.com/couchbaselabs/go-couchbase"
 	"net/http"
 	"os"
 	"sync"
@@ -31,13 +32,13 @@ import _ "net/http/pprof"
 var logger *log.CommonLogger = log.NewLogger("Xmem_run", log.DefaultLoggerContext)
 
 var options struct {
-	source_bucket      string // source bucket
-	target_bucket      string //target bucket
+	source_bucket       string // source bucket
+	target_bucket       string //target bucket
 	source_cluster_addr string //source connect string
 	target_cluster_addr string //target connect string
-	username           string //username
-	password           string //password
-	maxVbno            int    // maximum number of vbuckets
+	username            string //username
+	password            string //password
+	maxVbno             int    // maximum number of vbuckets
 }
 
 var done = make(chan bool, 16)
@@ -77,15 +78,13 @@ func setup() (err error) {
 	logger.Info("Done with parsing the arguments")
 
 	//flush the target bucket
-	baseURL, err := couchbase.ParseURL("http://" + options.target_bucket + ":" + options.password + "@" + options.target_cluster_addr)
-
 	if err == nil {
-		err = utils.QueryRestAPI(baseURL,
+		err, _ = utils.QueryRestApiWithAuth(options.target_cluster_addr,
 			"/pools/default/buckets/target/controller/doFlush",
-			options.username,
+			options.target_bucket,
 			options.password,
-			"POST",
-			nil, logger)
+			"POST", "", nil,
+			nil, logger, nil)
 	}
 
 	if err != nil {
@@ -99,16 +98,13 @@ func setup() (err error) {
 
 func verify(data_count int) bool {
 	output := &utils.CouchBucket{}
-	baseURL, err := couchbase.ParseURL("http://" + options.target_cluster_addr)
 
-	if err == nil {
-		err = utils.QueryRestAPI(baseURL,
-			"/pools/default/buckets/target",
-			options.target_bucket,
-			options.password,
-			"GET",
-			output, logger)
-	}
+	err, _ := utils.QueryRestApiWithAuth(options.target_cluster_addr,
+		"/pools/default/buckets/target",
+		options.target_bucket,
+		options.password,
+		"GET", "", nil,
+		output, logger, nil)
 	if err != nil {
 		panic(err)
 	}
@@ -129,19 +125,21 @@ func main() {
 	}()
 	argParse()
 
-	test(500, 100000)
-//	test(5, 50, parts.Batch_XMEM)
+	couchbase.HTTPClient.Transport = cbauth.WrapHTTPTransport(couchbase.HTTPTransport)
+
+	test(500, 1000)
+	//	test(5, 50, parts.Batch_XMEM)
 
 }
 
 func test(batch_count int, data_count int) {
 	logger.Info("------------START testing Xmem-------------------")
 	logger.Infof("batch_count=%d, data_count=%d\n", batch_count, data_count)
-//	err := setup()
+	//	err := setup()
 
-//	if err != nil {
-//		panic(err)
-//	}
+	//	if err != nil {
+	//		panic(err)
+	//	}
 	startXmem(batch_count)
 	logger.Info("XMEM is started")
 	waitGrp := &sync.WaitGroup{}
@@ -159,7 +157,7 @@ func test(batch_count int, data_count int) {
 }
 func startUpr(cluster, bucketn string, waitGrp *sync.WaitGroup, data_count int) {
 	logger.Info("Start Upr...")
-	b, err := utils.Bucket(cluster, bucketn, "", "")
+	b, err := utils.LocalBucket(cluster, bucketn)
 	mf(err, "bucket")
 
 	uprFeed, err = b.StartUprFeed("rawupr", uint32(0))
@@ -220,22 +218,22 @@ func composeMCRequest(event *mcc.UprEvent) *mc.MCRequest {
 
 	//opCode
 	req.Opcode = event.Opcode
-//	switch event.Opcode {
-//	case mcc.UprStreamRequest:
-//		req.Opcode = mc.UPR_STREAMREQ
-//	case mcc.UprMutation:
-//		req.Opcode = mc.UPR_MUTATION
-//	case mcc.UprDeletion:
-//		req.Opcode = mc.UPR_DELETION
-//	case mcc.UprExpiration:
-//		req.Opcode = mc.UPR_EXPIRATION
-//	case mcc.UprCloseStream:
-//		req.Opcode = mc.UPR_CLOSESTREAM
-//	case mcc.UprSnapshot:
-//		req.Opcode = mc.UPR_SNAPSHOT
-//	case mcc.UprFlush:
-//		req.Opcode = mc.UPR_FLUSH
-//	}
+	//	switch event.Opcode {
+	//	case mcc.UprStreamRequest:
+	//		req.Opcode = mc.UPR_STREAMREQ
+	//	case mcc.UprMutation:
+	//		req.Opcode = mc.UPR_MUTATION
+	//	case mcc.UprDeletion:
+	//		req.Opcode = mc.UPR_DELETION
+	//	case mcc.UprExpiration:
+	//		req.Opcode = mc.UPR_EXPIRATION
+	//	case mcc.UprCloseStream:
+	//		req.Opcode = mc.UPR_CLOSESTREAM
+	//	case mcc.UprSnapshot:
+	//		req.Opcode = mc.UPR_SNAPSHOT
+	//	case mcc.UprFlush:
+	//		req.Opcode = mc.UPR_FLUSH
+	//	}
 
 	//extra
 	if event.Opcode == mc.UPR_MUTATION || event.Opcode == mc.UPR_DELETION ||
@@ -317,8 +315,8 @@ func startXmem(batch_count int) {
 
 	xmem = parts.NewXmemNozzle("xmem", target_connectStr, options.target_bucket, options.password, logger.LoggerContext())
 	var configs map[string]interface{} = map[string]interface{}{parts.XMEM_SETTING_BATCHCOUNT: batch_count,
-		parts.XMEM_SETTING_RESP_TIMEOUT:    time.Millisecond * 10,
-		parts.XMEM_SETTING_NUMOFRETRY: 3}
+		parts.XMEM_SETTING_RESP_TIMEOUT: time.Millisecond * 10,
+		parts.XMEM_SETTING_NUMOFRETRY:   3}
 
 	xmem.Start(configs)
 }

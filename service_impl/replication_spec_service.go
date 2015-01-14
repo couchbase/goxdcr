@@ -15,7 +15,9 @@ import (
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
+	"github.com/couchbase/goxdcr/metakv"
 	"github.com/couchbase/goxdcr/service_def"
+	"sync"
 )
 
 const (
@@ -25,6 +27,7 @@ const (
 
 type ReplicationSpecService struct {
 	metadata_svc service_def.MetadataSvc
+	call_back    service_def.SpecChangedCallback
 	logger       *log.CommonLogger
 }
 
@@ -33,6 +36,34 @@ func NewReplicationSpecService(metadata_svc service_def.MetadataSvc, logger_ctx 
 		metadata_svc: metadata_svc,
 		logger:       log.NewLogger("ReplicationSpecService", logger_ctx),
 	}
+}
+
+func (service *ReplicationSpecService) StartSpecChangedCallBack(call_back service_def.SpecChangedCallback, cancel <-chan struct{}, waitGrp *sync.WaitGroup) error {
+	// start listening to changed to specs
+	service.call_back = call_back
+
+	// ensure that the parent path for replication specs exists so that we can observe its children
+	replSpecCatalogPath := GetCatalogPathFromCatalogKey(ReplicationSpecsCatalogKey)
+	replSpecCatalog, _, err := service.metadata_svc.Get(replSpecCatalogPath)
+	if err != nil {
+		return err
+	}
+	if replSpecCatalog == nil {
+		err := service.metadata_svc.Add(replSpecCatalogPath, nil)
+		if err != nil {
+			return err
+		}
+	}
+
+	waitGrp.Add(1)
+	go service.observeChildren(replSpecCatalogPath, cancel, waitGrp)
+
+	return nil
+}
+
+func (service *ReplicationSpecService) observeChildren(dirpath string, cancel <-chan struct{}, waitGrp *sync.WaitGroup) {
+	defer waitGrp.Done()
+	metakv.RunObserveChildren(dirpath, service.metakvCallback, cancel)
 }
 
 func (service *ReplicationSpecService) ReplicationSpec(replicationId string) (*metadata.ReplicationSpecification, error) {
@@ -76,18 +107,19 @@ func (service *ReplicationSpecService) DelReplicationSpec(replicationId string) 
 func (service *ReplicationSpecService) ActiveReplicationSpecs() (map[string]*metadata.ReplicationSpecification, error) {
 	specs := make(map[string]*metadata.ReplicationSpecification, 0)
 
-	entries, err := service.metadata_svc.GetAllMetadataFromCatalog(ReplicationSpecsCatalogKey)	
+	entries, err := service.metadata_svc.GetAllMetadataFromCatalog(ReplicationSpecsCatalogKey)
 	if err != nil {
+		service.logger.Errorf("Failed to get all entries, err=%v\n", err)
 		return nil, err
 	}
-		
-		for _, entry := range entries {
-			spec, err := constructReplicationSpec(entry.Value, entry.Rev)
-			if err != nil {
-				return nil, err
-			}
-			specs[entry.Key] = spec
+
+	for _, entry := range entries {
+		spec, err := constructReplicationSpec(entry.Value, entry.Rev)
+		if err != nil {
+			return nil, err
 		}
+		specs[entry.Key] = spec
+	}
 
 	return specs, nil
 }
@@ -100,7 +132,7 @@ func (service *ReplicationSpecService) ActiveReplicationSpecIdsForBucket(bucket 
 	}
 
 	service.logger.Infof("keys=%v", keys)
-	
+
 	if keys != nil {
 		for _, key := range keys {
 			if metadata.IsReplicationIdForSourceBucket(key, bucket) {
@@ -112,6 +144,10 @@ func (service *ReplicationSpecService) ActiveReplicationSpecIdsForBucket(bucket 
 }
 
 func constructReplicationSpec(value []byte, rev interface{}) (*metadata.ReplicationSpecification, error) {
+	if value == nil {
+		return nil, nil
+	}
+
 	spec := &metadata.ReplicationSpecification{}
 	err := json.Unmarshal(value, spec)
 	if err != nil {
@@ -119,4 +155,20 @@ func constructReplicationSpec(value []byte, rev interface{}) (*metadata.Replicat
 	}
 	spec.Revision = rev
 	return spec, nil
-} 
+}
+
+// Implement callback function for metakv
+func (service *ReplicationSpecService) metakvCallback(path string, value []byte, rev interface{}) error {
+	service.logger.Debugf("metakvCallback called on path = %v\n", path)
+
+	if service.call_back != nil {
+		spec, err := constructReplicationSpec(value, rev)
+		if err != nil {
+			return err
+		}
+
+		return service.call_back(GetKeyFromPath(path), spec)
+	} else {
+		return nil
+	}
+}

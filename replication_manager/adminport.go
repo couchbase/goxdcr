@@ -12,9 +12,9 @@
 package replication_manager
 
 import (
-	"bytes"
-
 	"errors"
+	"fmt"
+	"github.com/couchbase/cbauth"
 	ap "github.com/couchbase/goxdcr/adminport"
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/gen_server"
@@ -22,15 +22,10 @@ import (
 	utils "github.com/couchbase/goxdcr/utils"
 	"net/http"
 	"strings"
-	"time"
-	"fmt"
 )
 
 var StaticPaths = [6]string{base.RemoteClustersPath, CreateReplicationPath, InternalSettingsPath, SettingsReplicationsPath, AllReplicationsPath, AllReplicationInfosPath}
-var DynamicPathPrefixes = [5]string{base.RemoteClustersPath, NotifySettingsChangePrefix, DeleteReplicationPrefix, SettingsReplicationsPath, StatisticsPrefix}
-
-var MaxForwardingRetry = 5
-var ForwardingRetryInterval = time.Second * 10
+var DynamicPathPrefixes = [5]string{base.RemoteClustersPath, DeleteReplicationPrefix, SettingsReplicationsPath, StatisticsPrefix, AllReplicationsPath}
 
 var logger_ap *log.CommonLogger = log.NewLogger("AdminPort", log.DefaultLoggerContext)
 
@@ -38,8 +33,8 @@ var logger_ap *log.CommonLogger = log.NewLogger("AdminPort", log.DefaultLoggerCo
 /* struct Adminport
 *************************************/
 type Adminport struct {
-	sourceKVHost  string
-	xdcrRestPort  uint16
+	sourceKVHost string
+	xdcrRestPort uint16
 	gen_server.GenServer
 	finch chan bool
 }
@@ -55,10 +50,10 @@ func NewAdminport(laddr string, xdcrRestPort uint16, finch chan bool) *Adminport
 		&exit_callback_func, &error_handler_func, log.DefaultLoggerContext, "Adminport")
 
 	adminport := &Adminport{
-		sourceKVHost:  laddr,
-		xdcrRestPort:  xdcrRestPort,
-		GenServer:     server,           /*gen_server.GenServer*/
-		finch:         finch, 
+		sourceKVHost: laddr,
+		xdcrRestPort: xdcrRestPort,
+		GenServer:    server, /*gen_server.GenServer*/
+		finch:        finch,
 	}
 
 	msg_callback_func = adminport.processRequest
@@ -78,7 +73,7 @@ func (adminport *Adminport) Start() {
 
 	// start http server
 	reqch := make(chan ap.Request)
-	hostAddr :=  utils.GetHostAddr(adminport.sourceKVHost, adminport.xdcrRestPort)
+	hostAddr := utils.GetHostAddr(adminport.sourceKVHost, adminport.xdcrRestPort)
 	server := ap.NewHTTPServer("xdcr", hostAddr, base.AdminportUrlPrefix, reqch, new(ap.Handler))
 
 	server.Start()
@@ -131,15 +126,27 @@ func (adminport *Adminport) handleRequest(
 	request *http.Request) (response []byte, err error) {
 
 	logger_ap.Infof("handleRequest called\n")
-	// TODO change to debug
-	logger_ap.Infof("Request: %v \n", request)
+	logger_ap.Debugf("Request: %v \n", request)
 
 	key, err := adminport.GetMessageKeyFromRequest(request)
 	if err != nil {
 		return nil, err
 	}
-	
-	switch (key) {
+
+	// authentication
+	if key != base.RemoteClustersPath+base.UrlDelimiter+base.MethodGet {
+		// most APIs require admin credentials
+		err = authAdminCreds(request, false)
+	} else {
+		// getRemoteClusters() requires only read only admin credential
+		err = authAdminCreds(request, true)
+	}
+
+	if err != nil {
+		return nil, err
+	}
+
+	switch key {
 	case base.RemoteClustersPath + base.UrlDelimiter + base.MethodGet:
 		response, err = adminport.doGetRemoteClustersRequest(request)
 	case base.RemoteClustersPath + base.UrlDelimiter + base.MethodPost:
@@ -150,13 +157,15 @@ func (adminport *Adminport) handleRequest(
 		response, err = adminport.doDeleteRemoteClusterRequest(request)
 	case AllReplicationsPath + base.UrlDelimiter + base.MethodGet:
 		response, err = adminport.doGetAllReplicationsRequest(request)
+	case AllReplicationsPath + DynamicSuffix + base.UrlDelimiter + base.MethodDelete:
+		response, err = adminport.doDeleteAllReplicationsRequest(request)
 	case AllReplicationInfosPath + base.UrlDelimiter + base.MethodGet:
 		response, err = adminport.doGetAllReplicationInfosRequest(request)
 	case CreateReplicationPath + base.UrlDelimiter + base.MethodPost:
 		response, err = adminport.doCreateReplicationRequest(request)
 	case DeleteReplicationPrefix + DynamicSuffix + base.UrlDelimiter + base.MethodDelete:
 		fallthrough
-	// historically, deleteReplication could use Post method	
+	// historically, deleteReplication could use Post method
 	case DeleteReplicationPrefix + DynamicSuffix + base.UrlDelimiter + base.MethodPost:
 		response, err = adminport.doDeleteReplicationRequest(request)
 	case InternalSettingsPath + base.UrlDelimiter + base.MethodGet:
@@ -171,8 +180,6 @@ func (adminport *Adminport) handleRequest(
 		response, err = adminport.doViewReplicationSettingsRequest(request)
 	case SettingsReplicationsPath + DynamicSuffix + base.UrlDelimiter + base.MethodPost:
 		response, err = adminport.doChangeReplicationSettingsRequest(request)
-	case NotifySettingsChangePrefix + DynamicSuffix + base.UrlDelimiter + base.MethodPost:
-		response, err = adminport.doNotifyReplicationSettingsChangeRequest(request)
 	case StatisticsPrefix + DynamicSuffix + base.UrlDelimiter + base.MethodGet:
 		response, err = adminport.doGetStatisticsRequest(request)
 	default:
@@ -183,29 +190,29 @@ func (adminport *Adminport) handleRequest(
 
 func (adminport *Adminport) doGetRemoteClustersRequest(request *http.Request) ([]byte, error) {
 	logger_ap.Infof("doGetRemoteClustersRequest\n")
-	
+
 	remoteClusters, err := RemoteClusterService().RemoteClusters()
 	if err != nil {
 		return nil, err
 	}
-	
+
 	return NewGetRemoteClustersResponse(remoteClusters)
 }
 
 func (adminport *Adminport) doCreateRemoteClusterRequest(request *http.Request) ([]byte, error) {
 	logger_ap.Infof("doCreateRemoteClusterRequest\n")
-	
+
 	justValidate, remoteClusterRef, errorsMap, err := DecodeCreateRemoteClusterRequest(request)
 	if err != nil {
 		return nil, err
 	} else if len(errorsMap) > 0 {
-		logger_ap.Errorf("Validation error in inputs. errorsMap=%v\n", errorsMap) 
+		logger_ap.Errorf("Validation error in inputs. errorsMap=%v\n", errorsMap)
 		return EncodeErrorsMapIntoByteArray(errorsMap)
 	}
 
 	logger_ap.Infof("Request params: justValidate=%v, remoterClusterRef=%v\n",
-					justValidate, *remoteClusterRef)
-	
+		justValidate, *remoteClusterRef)
+
 	if justValidate {
 		err = RemoteClusterService().ValidateRemoteCluster(remoteClusterRef)
 		if err != nil {
@@ -229,20 +236,20 @@ func (adminport *Adminport) doChangeRemoteClusterRequest(request *http.Request) 
 	if err != nil {
 		return nil, err
 	}
-	
+
 	logger_ap.Infof("Request params: remoteClusterName=%v\n", remoteClusterName)
-	
+
 	justValidate, remoteClusterRef, errorsMap, err := DecodeCreateRemoteClusterRequest(request)
 	if err != nil {
 		return nil, err
 	} else if len(errorsMap) > 0 {
-		logger_ap.Errorf("Validation error in inputs. errorsMap=%v\n", errorsMap) 
+		logger_ap.Errorf("Validation error in inputs. errorsMap=%v\n", errorsMap)
 		return EncodeErrorsMapIntoByteArray(errorsMap)
 	}
 
 	logger_ap.Infof("Request params: justValidate=%v, remoterClusterRef=%v\n",
-					justValidate, *remoteClusterRef)
-					
+		justValidate, *remoteClusterRef)
+
 	if justValidate {
 		err = RemoteClusterService().ValidateRemoteCluster(remoteClusterRef)
 		if err != nil {
@@ -266,58 +273,73 @@ func (adminport *Adminport) doDeleteRemoteClusterRequest(request *http.Request) 
 	if err != nil {
 		return nil, err
 	}
-	
+
 	logger_ap.Infof("Request params: remoteClusterName=%v\n", remoteClusterName)
-	
+
 	err = RemoteClusterService().DelRemoteCluster(remoteClusterName)
 	if err != nil {
 		return nil, err
 	}
-	
+
 	return NewDeleteRemoteClusterResponse()
 }
 
 func (adminport *Adminport) doGetAllReplicationsRequest(request *http.Request) ([]byte, error) {
 	logger_ap.Infof("doGetAllReplicationsRequest\n")
-	
+
 	replSpecs, err := ReplicationSpecService().ActiveReplicationSpecs()
 	if err != nil {
 		return nil, err
 	}
-	
+
 	return NewGetAllReplicationsResponse(replSpecs)
+}
+
+func (adminport *Adminport) doDeleteAllReplicationsRequest(request *http.Request) ([]byte, error) {
+	logger_ap.Infof("doDeleteAllReplicationsRequest\n")
+
+	// get input parameters from request
+	bucket, err := DecodeDynamicParamInURL(request, AllReplicationsPath, "Bucket Name")
+	if err != nil {
+		return nil, err
+	}
+
+	logger_ap.Debugf("Request params: bucket=%v", bucket)
+
+	return nil, DeleteAllReplications(bucket)
 }
 
 func (adminport *Adminport) doGetAllReplicationInfosRequest(request *http.Request) ([]byte, error) {
 	logger_ap.Infof("doGetAllReplicationInfosRequest\n")
-	replInfos := GetReplicationInfos()
+	replInfos, err := GetReplicationInfos()
+	if err != nil {
+		return nil, err
+	}
 	return NewGetAllReplicationInfosResponse(replInfos)
 }
 
 func (adminport *Adminport) doCreateReplicationRequest(request *http.Request) ([]byte, error) {
 	logger_ap.Infof("doCreateReplicationRequest called\n")
 
-	fromBucket, toCluster, toBucket, forward, settings, errorsMap, err := DecodeCreateReplicationRequest(request)
+	fromBucket, toCluster, toBucket, settings, errorsMap, err := DecodeCreateReplicationRequest(request)
 	if err != nil {
 		return nil, err
 	} else if len(errorsMap) > 0 {
-		logger_ap.Errorf("Validation error in inputs. errorsMap=%v\n", errorsMap) 
+		logger_ap.Errorf("Validation error in inputs. errorsMap=%v\n", errorsMap)
 		return EncodeErrorsMapIntoByteArray(errorsMap)
 	}
-	
-	logger_ap.Infof("Request parameters: fromBucket=%v, toCluster=%v, toBucket=%v, forward=%v, settings=%v\n",
-					fromBucket, toCluster, toBucket, forward, settings)
 
-	replicationId, err := CreateReplication(fromBucket, toCluster, toBucket, settings, forward)
+	logger_ap.Infof("Request parameters: fromBucket=%v, toCluster=%v, toBucket=%v, settings=%v\n",
+		fromBucket, toCluster, toBucket, settings)
+
+	replicationId, errorsMap, err := CreateReplication(fromBucket, toCluster, toBucket, settings)
 
 	if err != nil {
 		return nil, err
+	} else if len(errorsMap) > 0 {
+		logger_ap.Errorf("Error creating replication. errorsMap=%v\n", errorsMap)
+		return EncodeErrorsMapIntoByteArray(errorsMap)
 	} else {
-		if forward {
-			// forward replication request to other KV nodes involved if necessary
-			adminport.forwardReplicationRequest(request)
-		}
-
 		return NewCreateReplicationResponse(replicationId), nil
 	}
 }
@@ -325,26 +347,18 @@ func (adminport *Adminport) doCreateReplicationRequest(request *http.Request) ([
 func (adminport *Adminport) doDeleteReplicationRequest(request *http.Request) ([]byte, error) {
 	logger_ap.Infof("doDeleteReplicationRequest\n")
 
-	replicationId, forward, err := DecodeReplicationIdAndForwardFlagFromHttpRequest(request, DeleteReplicationPrefix)
+	replicationId, err := DecodeDynamicParamInURL(request, DeleteReplicationPrefix, "Replication Id")
 	if err != nil {
 		return nil, err
 	}
 
 	logger_ap.Debugf("Request params: replicationId=%v\n", replicationId)
 
-	if forward {
-		err = DeleteReplication(replicationId)
-	} else {
-		go stopPipeline(replicationId)
-	}
+	err = DeleteReplication(replicationId)
 
 	if err != nil {
 		return nil, err
 	} else {
-		if forward {
-			// forward replication request to other KV nodes involved
-			adminport.forwardReplicationRequest(request)
-		}
 		return NewDeleteReplicationResponse()
 	}
 }
@@ -362,22 +376,22 @@ func (adminport *Adminport) doViewInternalSettingsRequest(request *http.Request)
 
 func (adminport *Adminport) doChangeInternalSettingsRequest(request *http.Request) ([]byte, error) {
 	logger_ap.Infof("doChangeInternalSettingsRequest\n")
-	
+
 	settingsMap, errorsMap, err := DecodeSettingsFromInternalSettingsRequest(request)
 	if err != nil {
 		return nil, err
 	} else if len(errorsMap) > 0 {
-		logger_ap.Errorf("Validation error in inputs. errorsMap=%v\n", errorsMap) 
+		logger_ap.Errorf("Validation error in inputs. errorsMap=%v\n", errorsMap)
 		return EncodeErrorsMapIntoByteArray(errorsMap)
 	}
 
 	logger_ap.Infof("Request params: inputSettings=%v\n", settingsMap)
-	
+
 	errorsMap, err = UpdateDefaultReplicationSettings(settingsMap)
 	if err != nil {
 		return nil, err
 	} else if len(errorsMap) > 0 {
-		logger_ap.Errorf("Validation error in inputs. errorsMap=%v\n", errorsMap) 
+		logger_ap.Errorf("Validation error in inputs. errorsMap=%v\n", errorsMap)
 		return EncodeErrorsMapIntoByteArray(errorsMap)
 	} else {
 		return nil, nil
@@ -397,29 +411,29 @@ func (adminport *Adminport) doViewDefaultReplicationSettingsRequest(request *htt
 
 func (adminport *Adminport) doChangeDefaultReplicationSettingsRequest(request *http.Request) ([]byte, error) {
 	logger_ap.Infof("doChangeDefaultReplicationSettingsRequest\n")
-	
+
 	justValidate, settingsMap, errorsMap, err := DecodeChangeReplicationSettings(request)
 	if err != nil {
 		return nil, err
 	} else if len(errorsMap) > 0 {
-		logger_ap.Errorf("Validation error in inputs. errorsMap=%v\n", errorsMap) 
+		logger_ap.Errorf("Validation error in inputs. errorsMap=%v\n", errorsMap)
 		return EncodeErrorsMapIntoByteArray(errorsMap)
 	}
 
 	logger_ap.Infof("Request params: justValidate=%v, inputSettings=%v\n", justValidate, settingsMap)
-	
+
 	if justValidate {
 		return nil, nil
 	}
-	
+
 	errorsMap, err = UpdateDefaultReplicationSettings(settingsMap)
 	if err != nil {
 		return nil, err
 	} else if len(errorsMap) > 0 {
-		logger_ap.Errorf("Validation error in inputs. errorsMap=%v\n", errorsMap) 
+		logger_ap.Errorf("Validation error in inputs. errorsMap=%v\n", errorsMap)
 		return EncodeErrorsMapIntoByteArray(errorsMap)
-	} 
-	
+	}
+
 	// change default settings returns the default settings after changes
 	defaultSettings, err := ReplicationSettingsService().GetDefaultReplicationSettings()
 	if err != nil {
@@ -459,82 +473,41 @@ func (adminport *Adminport) doChangeReplicationSettingsRequest(request *http.Req
 		return nil, err
 	}
 	logger_ap.Infof("Request params: replicationId=%v\n", replicationId)
-	
+
 	justValidate, settingsMap, errorsMap, err := DecodeChangeReplicationSettings(request)
 	if err != nil {
 		return nil, err
 	} else if len(errorsMap) > 0 {
-		logger_ap.Errorf("Validation error in inputs. errorsMap=%v\n", errorsMap) 
+		logger_ap.Errorf("Validation error in inputs. errorsMap=%v\n", errorsMap)
 		return EncodeErrorsMapIntoByteArray(errorsMap)
 	}
 
 	logger_ap.Infof("Request params: justValidate=%v, inputSettings=%v\n", justValidate, settingsMap)
-	
+
 	if justValidate {
 		return nil, nil
 	}
-	
+
 	// remember old settings
 	replSpec, err := ReplicationSpecService().ReplicationSpec(replicationId)
 	if err != nil {
 		return nil, err
 	}
-	
-	oldSettings := replSpec.Settings
-	
+
 	errorsMap, err = UpdateReplicationSettings(replicationId, settingsMap)
 	if err != nil {
 		return nil, err
 	} else if len(errorsMap) > 0 {
-		logger_ap.Errorf("Validation error in inputs. errorsMap=%v\n", errorsMap) 
+		logger_ap.Errorf("Validation error in inputs. errorsMap=%v\n", errorsMap)
 		return EncodeErrorsMapIntoByteArray(errorsMap)
-	} 
-	
-	// forward notifications to other nodes
-	notifyRequest, err := NewNotifySettingsChangeRequest(replicationId, adminport.xdcrRestPort, oldSettings)
-	if err != nil {
-		return nil, err
 	}
-	
-	adminport.forwardReplicationRequest(notifyRequest)
-	
+
 	// return replication settings after changes
 	replSpec, err = ReplicationSpecService().ReplicationSpec(replicationId)
 	if err != nil {
 		return nil, err
 	}
 	return NewReplicationSettingsResponse(replSpec.Settings)
-}
-
-func (adminport *Adminport) doNotifyReplicationSettingsChangeRequest(request *http.Request) ([]byte, error) {
-	logger_ap.Infof("doNotifyReplicationSettingsChangeRequest\n")
-
-	// get input parameters from request
-
-	replicationId, err := DecodeDynamicParamInURL(request, SettingsReplicationsPath, "Replication Id")
-	if err != nil {
-		return nil, err
-	}
-	logger_ap.Infof("Request params: replicationId=%v\n", replicationId)
-	
-	oldSettings, err := DecodeOldSettingsFromRequest(request)
-	if err != nil {
-		return nil, err
-	}
-
-	logger_ap.Infof("Request params: oldSettings=%v\n", oldSettings)
-
-	replSpec, err := ReplicationSpecService().ReplicationSpec(replicationId)
-	if err != nil {
-		return nil, err
-	}
-	
-	err = HandleReplicationDefChanges(replicationId, oldSettings, replSpec.Settings)
-	if err != nil {
-		return nil, err
-	} else {
-		return nil, nil
-	}
 }
 
 // get statistics for all running replications
@@ -556,82 +529,6 @@ func (adminport *Adminport) doGetStatisticsRequest(request *http.Request) ([]byt
 	} else {
 		return nil, err
 	}
-}
-
-// forward requests to other nodes.
-func (adminport *Adminport) forwardReplicationRequest(request *http.Request) error {
-	logger_ap.Infof("forwardReplicationRequest\n")
-
-	// have to get the actual name of the kvnode here
-	myKVNodes, err := XDCRCompTopologyService().MyKVNodes()
-	if err != nil {
-		return err
-	}
-	
-	// so far myKVNodes should contain one and only one node
-	myKVNode := myKVNodes[0]
-
-	xdcrNodesMap, err := XDCRCompTopologyService().XDCRTopology()
-	if err != nil {
-		return err
-	}
-
-	if len(xdcrNodesMap) > 1 {
-		if err = request.ParseForm(); err != nil {
-			return err
-		}
-
-		// set "Forward" flag to false in the forwarded request
-		var paramMap = make(map[string]interface{}, 0)
-		for key, valArr := range request.Form {
-			if len(valArr) > 0 {
-				paramMap[key] = valArr[0]
-			}
-		}
-		paramMap[Forward] = "false"
-		// this Encode op should never fail since paramMap is fully under control
-		newBody, _ := EncodeMapIntoByteArray(paramMap)
-
-		for xdcrNode, port := range xdcrNodesMap {
-			// do not forward to current node
-			if xdcrNode != myKVNode {
-				go forwardReplicationRequestToXDCRNode(request.URL.String(), newBody, xdcrNode, port)
-			}
-		}
-	}
-	return nil
-}
-
-func forwardReplicationRequestToXDCRNode(oldRequestUrl string, newRequestBody []byte, xdcrAddr string, port uint16) (*http.Response, error) {
-	logger_ap.Infof("forwardReplicationRequestToXDCRNode. oldRequestUrl=%v, newRequestBody=%v, xdcrAddr=%v, port=%v\n",
-		oldRequestUrl, string(newRequestBody), xdcrAddr, port)
-
-	newUrl := "http://" + utils.GetHostAddr(xdcrAddr, port) + oldRequestUrl
-	newRequest, err := http.NewRequest(base.MethodPost, newUrl, bytes.NewBuffer(newRequestBody))
-	if err != nil {
-		return nil, err
-	}
-	newRequest.Header.Set(ContentType, DefaultContentType)
-
-	retryInterval := ForwardingRetryInterval
-	for i := 0; i <= MaxForwardingRetry; i++ {
-		response, err := http.DefaultClient.Do(newRequest)
-		logger_ap.Infof("forwarding request=%v for the %vth time\n", newRequest, i+1)
-		if err == nil && response.StatusCode == 200 {
-			logger_ap.Infof("forwarding request succeeded")
-			return response, err
-		}
-		// if did not succeed, wait and try again
-		if i < MaxForwardingRetry {
-			time.Sleep(retryInterval)
-			retryInterval *= 2
-		}
-	}
-
-	// give up after max retry. the target node is likely dead. hopefully it will
-	// get restarted and the required action, e.g., create/resumeReplication, will get performed then
-	logger_ap.Errorf("Error forwarding request after max retry")
-	return nil, errors.New("Error forwarding request after max retry")
 }
 
 // Get the message key from http request
@@ -673,4 +570,31 @@ func (adminport *Adminport) GetMessageKeyFromRequest(r *http.Request) (string, e
 
 		return key, nil
 	}
+}
+
+// returns error if credentials in request are not admin/read only admin
+func authAdminCreds(request *http.Request, readOnly bool) error {
+	// authentication
+	var err error
+	var isAdmin bool
+	creds, err := cbauth.AuthWebCreds(request)
+	logger_ap.Debugf("creds user = %v\n", creds.Name())
+	if err != nil {
+		return err
+	}
+
+	if readOnly {
+		isAdmin, err = creds.IsROAdmin()
+
+	} else {
+		isAdmin, err = creds.IsAdmin()
+	}
+
+	if err != nil {
+		return err
+	}
+	if !isAdmin {
+		return errors.New("Unauthorized")
+	}
+	return nil
 }

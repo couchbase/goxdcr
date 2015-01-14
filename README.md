@@ -23,12 +23,10 @@ Optional input arguments to xdcr:
 1. sourceKVAdminPort - adminport for source KV where xdcr is running on. Defaulted to 9000. 
 If the xdcr instance is running on AWS instances, the source KV adminport may be different and need to be explicitly specified: 
 ./xdcr -sourceKVAdminPort=8091	
-2. username - admin username of the cluster that xdcr is running. Defaulted to "Aministrator".
-3. password - password of the admin user of the cluster that xdcr is running. Defaulted to "welcome".
-4. xdcrRestPort - port number for xdcr rest server. Defaulted to 13000. Generally there is no need to change it.
-5. gometaRequestPort - request port number for gometa service. Defaulted to 11000. Generally there is no need to change it.
-6. isEnterprise - whether couchbase is of enterprise edition. Defaulted to true.
-7. isConvert - whether xdcr is running in convert/upgrade mode. Defaulted to false.
+2. xdcrRestPort - port number for xdcr rest server. Defaulted to 13000. Generally there is no need to change it.
+3. gometaRequestPort - request port number for gometa service. Defaulted to 11000. Generally there is no need to change it.
+4. isEnterprise - whether couchbase is of enterprise edition. Defaulted to true.
+5. isConvert - whether xdcr is running in convert/upgrade mode. Defaulted to false.
 
 
 To send requests to xdcr rest service:
@@ -59,7 +57,6 @@ If the replication is created successfully, a replication id will be returned, w
 		(f) docBatchSizeKb, int, the size of a batch in KB, range: 10-10000
 		(g) failureRestartInterval, int, the number of seconds to wait after failure before restarting replication, range: 1-300
 		(h) optimisticReplicationThreshold, int, documents with size less than this threshold (in bytes) will be replicated optimistically, range: 0-20*1024*1024
- 		(i) httpConnections, int, the number of maximum simultaneous HTTP connections, range: 1-100
  		(j) sourceNozzlePerNode, int, the number of source nozzles per source node, range: 1-10
  		(k) targetNozzlePerNode, int, the number of outgoing nozzles per target node, range: 1-10
  		(l) maxExpectedReplicationLag, int, the maximum replication lag (in millisecond) that can be tolerated before it is considered timeout

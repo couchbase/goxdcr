@@ -29,6 +29,10 @@ const (
 	DataFiltered ComponentEventType = iota
 	//error encountered by the component
 	ErrorEncountered ComponentEventType = iota
+	//checkpointing suceeded for vb
+	CheckpointDoneForVB	ComponentEventType = iota
+	//checkpointing succeed 
+	CheckpointDone		ComponentEventType = iota
 )
 
 //ComponentEventListener abstracts anybody who is interested in an event of a component

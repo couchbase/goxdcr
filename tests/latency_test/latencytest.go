@@ -48,8 +48,6 @@ var options struct {
 	target_bucket           string //target bucket
 	source_cluster_addr     string //source connect string
 	target_cluster_addr     string //target connect string
-	source_cluster_username string //source cluster username
-	source_cluster_password string //source cluster password
 	target_cluster_username string //target cluster username
 	target_cluster_password string //target cluster password
 	target_bucket_password  string //target bucket password
@@ -273,10 +271,6 @@ func parseArgs() {
 		"target cluster address")
 	flag.StringVar(&options.target_bucket, "target_bucket", "target",
 		"bucket to replicate to")
-	flag.StringVar(&options.source_cluster_username, "source_cluster_username", "Administrator",
-		"user name to use for logging into source cluster")
-	flag.StringVar(&options.source_cluster_password, "source_cluster_password", "welcome",
-		"password to use for logging into source cluster")
 	flag.StringVar(&options.target_cluster_username, "target_cluster_username", "Administrator",
 		"user name to use for logging into target cluster")
 	flag.StringVar(&options.target_cluster_password, "target_cluster_password", "welcome",

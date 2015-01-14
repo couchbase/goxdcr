@@ -15,24 +15,25 @@ import (
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metakv"
 	"github.com/couchbase/goxdcr/service_def"
+	"strings"
 )
 
 type MetaKVMetadataSvc struct {
-	logger      *log.CommonLogger
+	logger *log.CommonLogger
 }
 
 func NewMetaKVMetadataSvc(logger_ctx *log.LoggerContext) (*MetaKVMetadataSvc, error) {
 	return &MetaKVMetadataSvc{
-					logger:    log.NewLogger("MetadataService", logger_ctx),
-					}, nil
+		logger: log.NewLogger("MetadataService", logger_ctx),
+	}, nil
 }
 
-func (meta_svc *MetaKVMetadataSvc) Get(key string) ([] byte, interface{}, error) {
-	return metakv.Get(base.KeyPartsDelimiter + key)
+func (meta_svc *MetaKVMetadataSvc) Get(key string) ([]byte, interface{}, error) {
+	return metakv.Get(getPathFromKey(key))
 }
 
 func (meta_svc *MetaKVMetadataSvc) Add(key string, value []byte) error {
-	err := metakv.Add(base.KeyPartsDelimiter + key, value)
+	err := metakv.Add(getPathFromKey(key), value)
 	if err == metakv.ErrRevMismatch {
 		err = service_def.ErrorKeyAlreadyExist
 	}
@@ -45,7 +46,7 @@ func (meta_svc *MetaKVMetadataSvc) AddWithCatalog(catalogKey, key string, value 
 }
 
 func (meta_svc *MetaKVMetadataSvc) Set(key string, value []byte, rev interface{}) error {
-	err := metakv.Set(base.KeyPartsDelimiter + key, value, rev)
+	err := metakv.Set(getPathFromKey(key), value, rev)
 	if err == metakv.ErrRevMismatch {
 		err = service_def.ErrorRevisionMismatch
 	}
@@ -53,7 +54,7 @@ func (meta_svc *MetaKVMetadataSvc) Set(key string, value []byte, rev interface{}
 }
 
 func (meta_svc *MetaKVMetadataSvc) Del(key string, rev interface{}) error {
-	err := metakv.Delete(base.KeyPartsDelimiter + key, rev)
+	err := metakv.Delete(getPathFromKey(key), rev)
 	if err == metakv.ErrRevMismatch {
 		err = service_def.ErrorRevisionMismatch
 	}
@@ -67,12 +68,13 @@ func (meta_svc *MetaKVMetadataSvc) DelWithCatalog(catalogKey, key string, rev in
 
 func (meta_svc *MetaKVMetadataSvc) GetAllMetadataFromCatalog(catalogKey string) ([]*service_def.MetadataEntry, error) {
 	var entries = make([]*service_def.MetadataEntry, 0)
-	kvEntries, err := metakv.ListAllChildren(base.KeyPartsDelimiter + catalogKey + base.KeyPartsDelimiter)
+	kvEntries, err := metakv.ListAllChildren(GetCatalogPathFromCatalogKey(catalogKey))
 	if err != nil {
+		meta_svc.logger.Errorf("Failed to list all children. err=%v\n", err)
 		return nil, err
 	}
 	for _, kvEntry := range kvEntries {
-		entries = append(entries, &service_def.MetadataEntry{kvEntry.Path[len(base.KeyPartsDelimiter):], kvEntry.Value, kvEntry.Rev})
+		entries = append(entries, &service_def.MetadataEntry{GetKeyFromPath(kvEntry.Path), kvEntry.Value, kvEntry.Rev})
 	}
 	return entries, nil
 }
@@ -80,13 +82,34 @@ func (meta_svc *MetaKVMetadataSvc) GetAllMetadataFromCatalog(catalogKey string) 
 // get all keys from a catalog
 func (meta_svc *MetaKVMetadataSvc) GetAllKeysFromCatalog(catalogKey string) ([]string, error) {
 	keys := make([]string, 0)
-	
-	kvEntries, err := metakv.ListAllChildren(base.KeyPartsDelimiter + catalogKey + base.KeyPartsDelimiter)
+
+	kvEntries, err := metakv.ListAllChildren(GetCatalogPathFromCatalogKey(catalogKey))
 	if err != nil {
 		return nil, err
 	}
 	for _, kvEntry := range kvEntries {
-		keys = append(keys, kvEntry.Path[len(base.KeyPartsDelimiter):])
+		keys = append(keys, GetKeyFromPath(kvEntry.Path))
 	}
 	return keys, nil
+}
+
+// metakv requires that all paths start with "/"
+func getPathFromKey(key string) string {
+	return base.KeyPartsDelimiter + key
+}
+
+// the following are exposed since they are needed by metakv call back function
+
+// metakv requires that all parent paths start and end with "/"
+func GetCatalogPathFromCatalogKey(catalogKey string) string {
+	return base.KeyPartsDelimiter + catalogKey + base.KeyPartsDelimiter
+}
+
+func GetKeyFromPath(path string) string {
+	if strings.HasPrefix(path, base.KeyPartsDelimiter) {
+		return path[len(base.KeyPartsDelimiter):]
+	} else {
+		// should never get here
+		return ""
+	}
 }

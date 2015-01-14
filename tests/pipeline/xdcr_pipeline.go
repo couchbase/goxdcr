@@ -10,18 +10,19 @@
 package main
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"github.com/couchbase/goxdcr/base"
+	"github.com/couchbase/goxdcr/common"
+	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/goxdcr/parts"
 	"github.com/couchbase/goxdcr/pipeline_manager"
 	"github.com/couchbase/goxdcr/replication_manager"
 	s "github.com/couchbase/goxdcr/service_impl"
-	"github.com/couchbase/goxdcr/tests/common"
+	testcommon "github.com/couchbase/goxdcr/tests/common"
 	"github.com/couchbase/goxdcr/utils"
-	"github.com/couchbaselabs/go-couchbase"
-	"log"
 	"net/http"
 	"os"
 	"time"
@@ -36,15 +37,14 @@ const (
 )
 
 var options struct {
-	source_bucket           string // source bucket
-	target_bucket           string //target bucket
-	source_cluster_addr     string //source connect string
-	target_cluster_addr     string //target connect string
-	source_kv_host          string //source kv host name
-	source_kv_port          uint64 //source kv admin port
-	source_cluster_username string //source cluster username
-	source_cluster_password string //source cluster password
-	target_bucket_password  string //target bucket password
+	source_bucket       string // source bucket
+	target_bucket       string //target bucket
+	source_cluster_addr string //source connect string
+	target_cluster_addr string //target connect string
+	source_kv_host      string //source kv host name
+	source_kv_port      uint64 //source kv admin port
+
+	target_bucket_password string //target bucket password
 
 	// parameters of remote cluster
 	remoteUuid             string // remote cluster uuid
@@ -56,6 +56,8 @@ var options struct {
 	remoteCertificateFile  string // file containing certificate for encryption
 }
 
+var logger *log.CommonLogger = log.NewLogger("xdcr_pipeline", log.DefaultLoggerContext)
+
 func argParse() {
 	flag.Uint64Var(&options.source_kv_port, "source_kv_port", 9000,
 		"admin port number for source kv")
@@ -65,10 +67,6 @@ func argParse() {
 		"target cluster address")
 	flag.StringVar(&options.target_bucket, "target_bucket", "target",
 		"bucket to replicate to")
-	flag.StringVar(&options.source_cluster_username, "source_cluster_username", "Administrator",
-		"user name to use for logging into source cluster")
-	flag.StringVar(&options.source_cluster_password, "source_cluster_password", "welcome",
-		"password to use for logging into source cluster")
 	flag.StringVar(&options.remoteUuid, "remoteUuid", "1234567",
 		"remote cluster uuid")
 	flag.StringVar(&options.remoteName, "remoteName", "remote",
@@ -92,12 +90,12 @@ func usage() {
 
 func main() {
 	go func() {
-		log.Println("Try to start pprof...")
+		logger.Info("Try to start pprof...")
 		err := http.ListenAndServe("localhost:7000", nil)
 		if err != nil {
 			panic(err)
 		} else {
-			log.Println("Http server for pprof is started")
+			logger.Info("Http server for pprof is started")
 		}
 	}()
 
@@ -116,7 +114,7 @@ func main() {
 }
 
 func setup() error {
-	top_svc, err := s.NewXDCRTopologySvc(options.source_cluster_username, options.source_cluster_password, uint16(options.source_kv_port), base.AdminportNumber, true, nil)
+	top_svc, err := s.NewXDCRTopologySvc(uint16(options.source_kv_port), base.AdminportNumber, true, nil)
 	if err != nil {
 		fmt.Printf("Error starting xdcr topology service. err=%v\n", err)
 		os.Exit(1)
@@ -130,7 +128,7 @@ func setup() error {
 
 	options.source_cluster_addr = utils.GetHostAddr(options.source_kv_host, uint16(options.source_kv_port))
 
-	metadata_svc, err := s.DefaultMetadataSvc()
+	metadata_svc, err := s.NewMetaKVMetadataSvc(nil)
 	if err != nil {
 		return err
 	}
@@ -138,7 +136,7 @@ func setup() error {
 	replication_manager.StartReplicationManager(options.source_kv_host, base.AdminportNumber,
 		s.NewReplicationSpecService(metadata_svc, nil),
 		s.NewRemoteClusterService(metadata_svc, nil),
-		s.NewClusterInfoSvc(nil), top_svc, s.NewReplicationSettingsSvc(metadata_svc, nil))
+		s.NewClusterInfoSvc(nil), top_svc, s.NewReplicationSettingsSvc(metadata_svc, nil), s.NewCheckpointsService(metadata_svc, nil), s.NewCAPIService(nil))
 
 	fmt.Println("Finish setup")
 	return nil
@@ -148,25 +146,28 @@ func test() {
 	fmt.Println("Start testing")
 	settings := make(map[string]interface{})
 	settings[metadata.PipelineLogLevel] = "Debug"
-	settings[metadata.PipelineStatsInterval] = 1000
+	settings[metadata.CheckpointInterval] = 20
+	settings[metadata.PipelineStatsInterval] = 10000
 	settings[metadata.SourceNozzlePerNode] = NUM_SOURCE_CONN
 	settings[metadata.TargetNozzlePerNode] = NUM_TARGET_CONN
 	settings[metadata.BatchCount] = 500
 	settings[metadata.Active] = true
 
 	// create remote cluster reference needed by replication
-	err := common.CreateTestRemoteCluster(replication_manager.RemoteClusterService(), options.remoteUuid, options.remoteName, options.remoteHostName, options.remoteUserName, options.remotePassword,
+	err := testcommon.CreateTestRemoteCluster(replication_manager.RemoteClusterService(), options.remoteUuid, options.remoteName, options.remoteHostName, options.remoteUserName, options.remotePassword,
 		options.remoteDemandEncryption, options.remoteCertificateFile)
 	if err != nil {
 		fmt.Println(err.Error())
-		return
+		fail(fmt.Sprintf("%v", err))
 	}
 
-	defer common.DeleteTestRemoteCluster(replication_manager.RemoteClusterService(), options.remoteName)
+	defer testcommon.DeleteTestRemoteCluster(replication_manager.RemoteClusterService(), options.remoteName)
 
-	topic, err := replication_manager.CreateReplication(options.source_bucket, options.remoteName, options.target_bucket, settings, true)
+	topic, errorsMap, err := replication_manager.CreateReplication(options.source_bucket, options.remoteName, options.target_bucket, settings)
 	if err != nil {
 		fail(fmt.Sprintf("%v", err))
+	} else if len(errorsMap) != 0 {
+		fail(fmt.Sprintf("%v", errorsMap))
 	}
 	//delete the replication before we go
 	defer func() {
@@ -176,7 +177,10 @@ func test() {
 		}
 		fmt.Printf("Replication %s is deleted\n", topic)
 	}()
-	time.Sleep(1 * time.Second)
+	time.Sleep(30 * time.Second)
+
+	pipeline := replication_manager.Pipeline(topic)
+	verifyStartingTimestamps(pipeline, true)
 
 	err = replication_manager.SetPipelineLogLevel(topic, "Info")
 	if err != nil {
@@ -196,8 +200,35 @@ func test() {
 	}
 	fmt.Printf("Replication %s is resumed\n", topic)
 
+	pipeline = replication_manager.Pipeline(topic)
+	verifyStartingTimestamps(pipeline, false)
+
 	time.Sleep(1 * time.Minute)
 
+}
+
+func verifyStartingTimestamps(pipeline common.Pipeline, noPreviousCkpts bool) error {
+	settings := pipeline.Settings()
+	vbts_map, ok := settings["VBTimestamps"].(map[uint16]*base.VBTimestamp)
+
+	if !ok {
+		return errors.New(fmt.Sprintf("VBTimestamps is not set in pipeline %v's settings", pipeline.InstanceId()))
+	}
+	for vbno, vbts := range vbts_map {
+		if noPreviousCkpts {
+			if vbts.Vbuuid != 0 && vbts.Seqno == 0 {
+				break
+			}
+			return errors.New(fmt.Sprintf("VBTimestamps for vb=%v is not valid, Failover_uuid should not be null, seqno should 0", vbno))
+		} else {
+			if vbts.Vbuuid != 0 && vbts.Seqno != 0 {
+				break
+			}
+			return errors.New(fmt.Sprintf("VBTimestamps for vb=%v is not valid, Failover_uuid should not be null, seqno should not be 0", vbno))
+
+		}
+	}
+	return nil
 }
 
 func summary(topic string) {
@@ -226,41 +257,36 @@ func verify() {
 
 func getDocCounts(clusterAddress string, bucketName string, password string) int {
 	output := &utils.CouchBucket{}
-	baseURL, err := couchbase.ParseURL("http://" + clusterAddress)
 
-	if err == nil {
-		err = utils.QueryRestAPI(baseURL,
-			"/pools/default/buckets/"+bucketName,
-			bucketName,
-			password,
-			"GET",
-			output, nil)
-	}
+	err, _ := utils.QueryRestApiWithAuth("http://"+clusterAddress,
+		"/pools/default/buckets/"+bucketName,
+		bucketName,
+		password,
+		"GET", "", nil,
+		output, logger, nil)
 	if err != nil {
 		panic(err)
 	}
-	log.Printf("name=%s itemCount=%d\n, out=%v\n", output.Name, output.Stat.ItemCount, output)
+	logger.Infof("name=%s itemCount=%d\n, out=%v\n", output.Name, output.Stat.ItemCount, output)
 	return output.Stat.ItemCount
 
 }
 
 func flushTargetBkt() {
 	//flush the target bucket
-	baseURL, err := couchbase.ParseURL("http://" + options.target_bucket + ":" + options.target_bucket_password + "@" + options.target_cluster_addr)
+	baseURL := "http://" + options.target_bucket + ":" + options.target_bucket_password + "@" + options.target_cluster_addr
 
-	if err == nil {
-		err = utils.QueryRestAPI(baseURL,
-			"/pools/default/buckets/"+options.target_bucket+"/controller/doFlush",
-			options.remoteUserName,
-			options.remotePassword,
-			"POST",
-			nil, nil)
-	}
+	err, _ := utils.QueryRestApiWithAuth(baseURL,
+		"/pools/default/buckets/"+options.target_bucket+"/controller/doFlush",
+		options.remoteUserName,
+		options.remotePassword,
+		"POST", "", nil,
+		nil, logger, nil)
 
 	if err != nil {
-		log.Printf("Setup error=%v\n", err)
+		logger.Infof("Setup error=%v\n", err)
 	} else {
-		log.Println("Setup is done")
+		logger.Infof("Setup is done")
 	}
 
 }

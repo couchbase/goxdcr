@@ -58,16 +58,12 @@ func RemoteClusterRefId(remoteClusterUuid string) string {
 }
 
 // implements base.ClusterConnectionInfoProvider
-func (ref *RemoteClusterReference)	MyConnectionStr() string {
-	return ref.HostName
+func (ref *RemoteClusterReference)	MyConnectionStr() (string, error) {
+	return ref.HostName, nil
 }
 
-func (ref *RemoteClusterReference)	MyUsername() string {
-	return ref.UserName
-}
-
-func (ref *RemoteClusterReference)	MyPassword() string {
-	return ref.Password
+func (ref *RemoteClusterReference)	MyCredentials() (string, string, error) {
+	return ref.UserName, ref.Password, nil
 }
 
 // convert to a map for output

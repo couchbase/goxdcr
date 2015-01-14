@@ -34,10 +34,6 @@ var options struct {
 	logFileDir        string
 	maxLogFileSize   uint64
 	maxNumberOfLogFiles  uint64
-		
-	// TODO remove after auth changes
-	username        string //username on source cluster
-	password        string //password on source cluster	
 }
 
 func argParse() {
@@ -52,15 +48,13 @@ func argParse() {
 	flag.BoolVar(&options.isConvert, "isConvert", false,
 		"whether xdcr is running in convertion/upgrade mode")
 		
-	flag.StringVar(&options.logFileDir, "logFileDir", "logs/n_0",
+	flag.StringVar(&options.logFileDir, "logFileDir", "",
 		"directory for couchbase server logs")
 	flag.Uint64Var(&options.maxLogFileSize, "maxLogFileSize", 40*1024*1024,
 		"maximum log file size")
 	flag.Uint64Var(&options.maxNumberOfLogFiles, "maxNumberOfLogFiles", 5,
 		"maximum number of log files")
-		
-	flag.StringVar(&options.username, "username", "Administrator", "username to cluster admin console")
-	flag.StringVar(&options.password, "password", "welcome", "password to Cluster admin console")
+
 	flag.Parse()
 }
 
@@ -74,11 +68,12 @@ func main() {
 
 	metakvsanity.MaybeRun()
 
+	// initializes logger 
+	if options.logFileDir != "" {
+		log.Init(options.logFileDir, options.maxLogFileSize, options.maxNumberOfLogFiles)
+	}
 	
-	// initializes logger
-	log.Init(options.logFileDir, options.maxLogFileSize, options.maxNumberOfLogFiles)
-	
-	top_svc, err := s.NewXDCRTopologySvc(options.username, options.password, uint16(options.sourceKVAdminPort), uint16(options.xdcrRestPort), options.isEnterprise, nil)
+	top_svc, err := s.NewXDCRTopologySvc(uint16(options.sourceKVAdminPort), uint16(options.xdcrRestPort), options.isEnterprise, nil)
 	if err != nil {
 		fmt.Printf("Error starting xdcr topology service. err=%v\n", err)
 		os.Exit(1)
@@ -111,7 +106,9 @@ func main() {
 							   s.NewRemoteClusterService(metadata_svc, nil),	
 							   s.NewClusterInfoSvc(nil), 
 							   top_svc, 
-							   s.NewReplicationSettingsSvc(metadata_svc, nil))
+							   s.NewReplicationSettingsSvc(metadata_svc, nil),
+							   s.NewCheckpointsService(metadata_svc, nil),
+							   s.NewCAPIService(nil))
 							   
 		// keep main alive in normal mode
 		<-done

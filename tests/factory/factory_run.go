@@ -21,8 +21,6 @@ var options struct {
 	sourceKVAdminPort uint64 //source kv admin port
 	sourceBucket      string // source bucket
 	targetBucket      string //target bucket
-	username          string //username
-	password          string //password
 	
 	// parameters of remote cluster
 	remoteUuid string // remote cluster uuid
@@ -46,8 +44,6 @@ func argParse() {
 		"bucket to replicate from")
 	flag.StringVar(&options.targetBucket, "target_bucket", "target",
 		"bucket to replicate to")
-	flag.StringVar(&options.username, "username", "Administrator", "username to cluster admin console")
-	flag.StringVar(&options.password, "password", "welcome", "password to Cluster admin console")
 
 	flag.StringVar(&options.remoteUuid, "remoteUuid", "1234567",
 		"remote cluster uuid")
@@ -81,7 +77,7 @@ func main() {
 }
 
 func invokeFactory() error {
-	top_svc, err := s.NewXDCRTopologySvc(options.username, options.password, uint16(options.sourceKVAdminPort), base.AdminportNumber, true, nil)
+	top_svc, err := s.NewXDCRTopologySvc(uint16(options.sourceKVAdminPort), base.AdminportNumber, true, nil)
 	if err != nil {
 		fmt.Printf("Error starting xdcr topology service. err=%v\n", err)
 		os.Exit(1)
@@ -102,13 +98,15 @@ func invokeFactory() error {
 	repl_spec_svc := s.NewReplicationSpecService(msvc, nil)
 	remote_cluster_svc := s.NewRemoteClusterService(msvc, nil)
 	cluster_info_svc := s.NewClusterInfoSvc(nil)
+	checkpoints_svc := s.NewCheckpointsService (msvc, nil)
+	capi_svc := s.NewCAPIService(nil)
 		
 	replication_manager.StartReplicationManager(options.sourceKVHost, base.AdminportNumber,
 								 repl_spec_svc,
 							     remote_cluster_svc,
-							     cluster_info_svc, top_svc, s.NewReplicationSettingsSvc(msvc, nil))
+							     cluster_info_svc, top_svc, s.NewReplicationSettingsSvc(msvc, nil), checkpoints_svc, capi_svc)
 
-	fac := factory.NewXDCRFactory(repl_spec_svc, remote_cluster_svc, cluster_info_svc, top_svc, log.DefaultLoggerContext, log.DefaultLoggerContext, nil, nil)
+	fac := factory.NewXDCRFactory(repl_spec_svc, remote_cluster_svc, cluster_info_svc, top_svc, checkpoints_svc, capi_svc, log.DefaultLoggerContext, log.DefaultLoggerContext, nil, nil)
 
 	// create remote cluster reference needed by replication
 	err = common.CreateTestRemoteCluster(remote_cluster_svc, options.remoteUuid, options.remoteName, options.remoteHostName, options.remoteUserName, options.remotePassword, 

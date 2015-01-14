@@ -49,8 +49,17 @@ type CommonLogger struct {
 }
 
 type LoggerContext struct {
-	Log_writers  map[LogLevel] io.Writer
+	Log_writers  map[LogLevel] *LogWriter
 	Log_level LogLevel
+}
+
+type LogWriter struct {
+	writer  io.Writer
+}
+
+// LogWriter implements io.Writer interface
+func (lw *LogWriter) Write(p []byte) (n int, err error) {
+	return lw.writer.Write(p)
 }
 
 func CopyCtx(ctx_to_copy *LoggerContext) *LoggerContext {
@@ -62,11 +71,12 @@ var DefaultLoggerContext *LoggerContext
 
 // before logging paramters become available, direct all logging to stdout 
 func init() {
-	logWriters := make(map[LogLevel] io.Writer)
-	logWriters[LogLevelInfo] = os.Stdout
-	logWriters[LogLevelDebug] = os.Stdout
-	logWriters[LogLevelTrace] = os.Stdout
-	logWriters[LogLevelError] = os.Stdout
+	logWriters := make(map[LogLevel] *LogWriter)
+	logWriter := &LogWriter{os.Stdout}
+	logWriters[LogLevelInfo] = logWriter
+	logWriters[LogLevelDebug] = logWriter
+	logWriters[LogLevelTrace] = logWriter
+	logWriters[LogLevelError] = logWriter
 	
 	DefaultLoggerContext = &LoggerContext {
 		Log_writers: logWriters,
@@ -78,34 +88,34 @@ func init() {
 // re-initializes default logger context with runtime logging parameters 
 // log entries will be written to log files after this point
 func Init(logFileDir string, maxLogFileSize, maxNumberOfLogFiles uint64) error {
-	logWriters := make(map[LogLevel] io.Writer)
 	// xdcr log file
 	xdcrLogFilePath := filepath.Join(logFileDir, XdcrLogFileName)
 	xdcrLogWriter, err := NewRotatingLogFileWriter(xdcrLogFilePath, maxLogFileSize, maxNumberOfLogFiles)
 	if err != nil {
 		return err
 	}
-	logWriters[LogLevelInfo] = xdcrLogWriter
+	xdcrLogWriterWrapper := DefaultLoggerContext.Log_writers[LogLevelInfo]
+	xdcrLogWriterWrapper.writer = xdcrLogWriter
+	
 	// xdcr trace log -- both debug level and trace level entries are written to this file
 	xdcrTraceFilePath := filepath.Join(logFileDir, XdcrTraceLogFileName)
 	xdcrTraceWriter, err := NewRotatingLogFileWriter(xdcrTraceFilePath, maxLogFileSize, maxNumberOfLogFiles)
 	if err != nil {
 		return err
 	}
-	logWriters[LogLevelDebug] = xdcrTraceWriter
-	logWriters[LogLevelTrace] = xdcrTraceWriter
+	xdcrDebugWriterWrapper := DefaultLoggerContext.Log_writers[LogLevelDebug]
+	xdcrDebugWriterWrapper.writer = xdcrTraceWriter
+	xdcrTraceWriterWrapper := DefaultLoggerContext.Log_writers[LogLevelTrace]
+	xdcrTraceWriterWrapper.writer = xdcrTraceWriter
+	
 	// xdcr error log file
 	xdcrErrorFilePath := filepath.Join(logFileDir, XdcrErrorLogFileName)
 	xdcrErrorWriter, err := NewRotatingLogFileWriter(xdcrErrorFilePath, maxLogFileSize, maxNumberOfLogFiles)
 	if err != nil {
 		return err
 	}
-	logWriters[LogLevelError] = xdcrErrorWriter
-	
-	DefaultLoggerContext = &LoggerContext {
-		Log_writers: logWriters,
-		Log_level: LogLevelInfo,
-	}
+	xdcrErrorWriterWrapper := DefaultLoggerContext.Log_writers[LogLevelError]
+	xdcrErrorWriterWrapper.writer = xdcrErrorWriter
 	
 	return nil
 }

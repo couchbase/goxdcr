@@ -63,24 +63,20 @@ func DeleteTestRemoteCluster(remote_cluster_service service_def.RemoteClusterSvc
 	return err
 }
 
-func SendRequestAndValidateResponse(testName, httpMethod, urlStr string, body []byte, username, password string) (*http.Response, error) {
-	request, err := http.NewRequest(httpMethod, urlStr, bytes.NewBuffer(body))
+func SendRequestAndValidateResponse(testName, httpMethod, url string, body []byte, username, password string) (*http.Response, error) {
+	request, err := constructRequest(httpMethod, url, body)
 	if err != nil {
 		return nil, err
-	}	
+	}
 	
-	request.Header.Set(rm.ContentType, rm.DefaultContentType)
+	// set auth parameters
 	request.SetBasicAuth(username, password)
-	//fmt.Printf("request=%v, url=%v\n", request, request.URL)
-	response, err := http.DefaultClient.Do(request)
-
-	err = ValidateResponse(testName, response, err)
-	//fmt.Printf("err=%v, response=%v\n", err, response)
-	return response, err
+	
+	return sendRequest(testName, request)
 }
 
-func SendRequestWithEscapedIdAndValidateResponse(testName, httpMethod, urlStr, escapedId string, body []byte, username, password string) (*http.Response, error) {
-	request, err := http.NewRequest(httpMethod, urlStr, bytes.NewBuffer(body))
+func SendRequestWithEscapedIdAndValidateResponse(testName, httpMethod, url, escapedId string, body []byte, username, password string) (*http.Response, error) {
+	request, err := constructRequest(httpMethod, url, body)
 	if err != nil {
 		return nil, err
 	}
@@ -88,18 +84,30 @@ func SendRequestWithEscapedIdAndValidateResponse(testName, httpMethod, urlStr, e
 	// golang does not provide APIs to construct Request or URL with escaped path. Has to do this as a workaround
 	request.URL.Path += base.UrlDelimiter + escapedId	
 	
-	request.Header.Set(rm.ContentType, rm.DefaultContentType)
+	// set auth parameters 
 	request.SetBasicAuth(username, password)
-	//fmt.Printf("request=%v, url=%v\n", request, request.URL)
-	response, err := http.DefaultClient.Do(request)
+	
+	return sendRequest(testName, request)
+}
 
+func constructRequest(httpMethod, url string, body []byte) (*http.Request, error) {
+	request, err := http.NewRequest(httpMethod, url, bytes.NewBuffer(body))
+	if err != nil {
+		return nil, err
+	}	
+	request.Close = true
+	request.Header.Set(base.ContentType, base.DefaultContentType)
+	return request, nil
+}
+
+func sendRequest(testName string, request *http.Request) (*http.Response, error) {
+	response, err := http.DefaultClient.Do(request)
 	err = ValidateResponse(testName, response, err)
-	//fmt.Printf("err=%v, response=%v\n", err, response)
 	return response, err
 }
 
-func CreateTestRemoteClusterThroughRest(sourceKVHost string, adminport uint64, username, password, remoteUuid, remoteName, remoteHostName, remoteUserName, remotePassword string, 
-                             remoteDemandEncryption bool, remoteCertificateFile string) error {
+func CreateTestRemoteClusterThroughRest(sourceKVHost string, adminport uint64, remoteUuid, remoteName, remoteHostName, remoteUserName, remotePassword string, 
+                             remoteDemandEncryption bool, remoteCertificateFile, username, password string) error {
 	url := GetAdminportUrlPrefix(sourceKVHost, adminport) + base.RemoteClustersPath
 
 	params := make(map[string]interface{})
@@ -129,7 +137,7 @@ func CreateTestRemoteClusterThroughRest(sourceKVHost string, adminport uint64, u
 	return err
 }
 
-func DeleteTestRemoteClusterThroughRest(sourceKVHost string, adminport uint64,  username, password, remoteName string) error {
+func DeleteTestRemoteClusterThroughRest(sourceKVHost string, adminport uint64, remoteName string, username, password string) error {
 	url := GetAdminportUrlPrefix(sourceKVHost, adminport) + base.RemoteClustersPath + base.UrlDelimiter + remoteName
 	
 	_, err := SendRequestAndValidateResponse("DeleteTestRemoteClusterThroughRest", base.MethodDelete, url, nil, username, password)
