@@ -176,10 +176,10 @@ func (service *RemoteClusterService) ValidateRemoteCluster(ref *metadata.RemoteC
 		hostAddr = utils.EnforcePrefix("http://", hostAddr)
 	}
 	
-	err, _ = utils.QueryRestApiWithAuth(hostAddr, base.PoolsPath, ref.UserName, ref.Password, base.MethodGet, "", nil, &poolsInfo, service.logger, ref.Certificate)
-	if err != nil {
-		service.logger.Errorf("err=%v\n", err)
-		return err
+	err, statusCode := utils.QueryRestApiWithAuth(hostAddr, base.PoolsPath, ref.UserName, ref.Password, base.MethodGet, "", nil, &poolsInfo, service.logger, ref.Certificate)
+	if err != nil || statusCode != 200 {
+		service.logger.Errorf("err=%v, statusCode=%v\n", err, statusCode)
+		return errors.New(fmt.Sprintf("Failed on calling %v, err=%v, statusCode=%v", base.PoolsPath, err, statusCode))
 	}
 
 	// get remote cluster uuid from the map

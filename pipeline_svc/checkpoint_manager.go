@@ -100,8 +100,8 @@ func NewCheckpointManager(checkpoints_svc service_def.CheckpointsService, capi_s
 		cur_ckpts:          make(map[uint16]*metadata.CheckpointRecord),
 		cur_ckpts_locks:    make(map[uint16]*sync.RWMutex),
 		active_vbs:         active_vbs,
-		wait_grp:			&sync.WaitGroup{},
-		vb_highseqno_map:	make(map[uint16]uint64)}, nil
+		wait_grp:           &sync.WaitGroup{},
+		vb_highseqno_map:   make(map[uint16]uint64)}, nil
 }
 
 func (ckmgr *CheckpointManager) Attach(pipeline common.Pipeline) error {
@@ -112,7 +112,7 @@ func (ckmgr *CheckpointManager) Attach(pipeline common.Pipeline) error {
 
 	//populate the remote bucket information at the time of attaching
 	err := ckmgr.populateRemoteBucketInfo(pipeline)
-	
+
 	if err != nil {
 		return err
 	}
@@ -148,10 +148,10 @@ func (ckmgr *CheckpointManager) populateRemoteBucketInfo(pipeline common.Pipelin
 func (ckmgr *CheckpointManager) Start(settings map[string]interface{}) error {
 	if ckpt_interval, ok := settings[metadata.CheckpointInterval].(int); ok {
 		ckmgr.ckpt_interval = time.Duration(ckpt_interval) * time.Second
-	}else {
+	} else {
 		return errors.New(fmt.Sprintf("%v should be provided in settings", metadata.CheckpointInterval))
 	}
-	
+
 	ckmgr.logger.Infof("CheckpointManager starting with ckpt_interval=%v s\n", ckmgr.ckpt_interval.Seconds())
 
 	ckmgr.checkpoint_ticker = time.NewTicker(ckmgr.ckpt_interval)
@@ -286,56 +286,66 @@ func (ckmgr *CheckpointManager) startSeqnoGetter(getter_id int, listOfVbs []uint
 		ckmgr.logger.Debugf("StartSeqnoGetter %v is done\n", getter_id)
 	}()
 
+	//Issues:  MB-13114 - _pre_replicate return found for non-existing seqno 
+	//	1. In failover case, we should be able to check the existing checkpoint record against new vb master
+	//		by setting the vb_uuid to the current uuid and calling _pre_replicate again.But found issues with bucket flash case
+	//		In bucket flash case, _pre_replicate should return 400, but instead it returns 200. It seems it found the seqno
+	//		in dcp failover log. Follow up with ep-engine team. For now, once we got the return from _pre_replicate that vb_uuid does
+	//		not match, we no longer retry to work around the issue
 	for _, vbno := range listOfVbs {
 		var agreeedIndex int = -1
-		var new_vb_uuid uint64 = ckmgr.currentVBUUID(vbno)
+//		var new_vb_uuid uint64 = ckmgr.currentVBUUID(vbno)
 		ckptDoc, _ := ckptDocs[vbno]
+		
+		//get the existing checkpoint records if they exist, otherwise return an empty ckpt record
 		ckpt_list := ckmgr.ckptRecords(ckptDoc, vbno)
 		for index, ckpt_record := range ckpt_list {
-			if len(errMap) > 0 {
-				//there is already error
-				return
-			}
-			var vb_uuid uint64
-			if new_vb_uuid == 0 {
-				vb_uuid = ckpt_record.Target_vb_uuid
-			} else {
-				vb_uuid = new_vb_uuid
-			}
-			remote_vb_status := &service_def.RemoteVBReplicationStatus{VBUUID: vb_uuid,
-				VBSeqno: ckpt_record.Commitopaque,
-				VBNo:    vbno}
+			if ckpt_record != nil {
+				if len(errMap) > 0 {
+					//there is already error
+					return
+				}
+				
+				//set the target vb uuid from the value returned 
+				var vb_uuid uint64
+//				if new_vb_uuid == 0 {
+					vb_uuid = ckpt_record.Target_vb_uuid
+//				} else {
+//					vb_uuid = new_vb_uuid
+//				}
+				remote_vb_status := &service_def.RemoteVBReplicationStatus{VBUUID: vb_uuid,
+					VBSeqno: ckpt_record.Commitopaque,
+					VBNo:    vbno}
 
-			ckmgr.logger.Debugf("Negotiate checkpoint record %v...\n", ckpt_record)
-			var current_remoteVBUUID uint64 = 0
-			bMatch := false
-			var err error
-			for {
+				ckmgr.logger.Debugf("Negotiate checkpoint record %v...\n", ckpt_record)
+				var current_remoteVBUUID uint64 = 0
+				bMatch := false
+				var err error
 				bMatch, current_remoteVBUUID, err = ckmgr.capi_svc.PreReplicate(ckmgr.remote_bucket, remote_vb_status, disableCkptBackwardsCompat)
 				if current_remoteVBUUID != remote_vb_status.VBUUID {
 					//remote vb topology changed
 					//udpate the vb_uuid and try again
 					ckmgr.updateCurrentVBUUID(vbno, current_remoteVBUUID)
-					remote_vb_status.VBUUID = current_remoteVBUUID
-					ckmgr.logger.Debugf("Remote vbucket %v has a new uuid %v, update and call _pre_replicate again\n", new_vb_uuid, vbno)
+					ckmgr.logger.Debugf("Remote vbucket %v has a new uuid %v, update and call _pre_replicate again\n", current_remoteVBUUID, vbno)
 				} else {
-					ckmgr.logger.Debugf("Done with _pre_prelicate call for %v for vbno=%v", remote_vb_status, vbno)
-					break
+					ckmgr.logger.Debugf("Done with _pre_prelicate call for %v for vbno=%v, bMatch=%v", remote_vb_status, vbno, bMatch)
 				}
-			}
-			if err != nil || bMatch {
-				if bMatch {
-					ckmgr.logger.Debugf("Remote bucket %v vbno %v agreed on the checkpoint %v\n", ckmgr.remote_bucket, vbno, ckpt_record)
-					if ckptDoc != nil {
-						agreeedIndex = index
-					}
 
-				} else {
-					//there is an error
-					errMap[vbno] = err
-					return
+				if err != nil || bMatch {
+					if bMatch {
+						ckmgr.logger.Debugf("Remote bucket %v vbno %v agreed on the checkpoint %v\n", ckmgr.remote_bucket, vbno, ckpt_record)
+						if ckptDoc != nil {
+							agreeedIndex = index
+						}
+
+					} else {
+						//there is an error
+						errMap[vbno] = err
+						ckmgr.logger.Errorf("err=%v\n", err)
+						return
+					}
+					goto POPULATE
 				}
-				goto POPULATE
 			}
 		}
 	POPULATE:
@@ -346,7 +356,7 @@ func (ckmgr *CheckpointManager) startSeqnoGetter(getter_id int, listOfVbs []uint
 
 func (ckmgr *CheckpointManager) ckptRecords(ckptDoc *metadata.CheckpointsDoc, vbno uint16) []*metadata.CheckpointRecord {
 	if ckptDoc != nil {
-		ckmgr.logger.Info("Found checkpoint doc")
+		ckmgr.logger.Infof("Found checkpoint doc for vb=%v\n", vbno)
 		return ckptDoc.Checkpoint_records
 	} else {
 		ret := []*metadata.CheckpointRecord{}
@@ -468,12 +478,13 @@ func (ckmgr *CheckpointManager) checkpointing() {
 			ckmgr.logger.Info("Received finish signal")
 			return
 		case <-ckmgr.checkpoint_ticker.C:
+			ckmgr.checkpoint_ticker.Stop()
 			if ckmgr.pipeline.State() != common.Pipeline_Running {
 				//pipeline is no longer running, kill itself
 				ckmgr.logger.Info("Pipeline is no longer running, exit.")
 			}
 			ckmgr.performCkpt(false)
-
+			ckmgr.checkpoint_ticker = time.NewTicker(ckmgr.ckpt_interval)
 		}
 	}
 
@@ -536,7 +547,7 @@ func (ckmgr *CheckpointManager) executeCkptTask(executor_id int, listOfVbs []uin
 		}
 		err := ckmgr.do_checkpoint(vbno, skip_error)
 		if err == nil {
-			ckmgr.logger.Infof("Checkpointing is done for vb=%v\n", vbno)
+			ckmgr.logger.Debugf("Checkpointing is done for vb=%v\n", vbno)
 
 		} else {
 			//break on the first error

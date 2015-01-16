@@ -11,6 +11,7 @@ package service_impl
 
 import (
 	"errors"
+	"fmt"
 	"github.com/couchbase/cbauth"
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
@@ -88,9 +89,9 @@ func (top_svc *XDCRTopologySvc) getHostName() (string, error) {
 	if hostAddr == "" {
 		panic ("hostAddr can't be empty")
 	}
-	err, _ := utils.QueryRestApi(hostAddr, base.NodesPath, base.MethodGet, "", nil, &nodesInfo, top_svc.logger, nil)
-	if err != nil {
-		return "", err
+	err, statusCode := utils.QueryRestApi(hostAddr, base.NodesPath, base.MethodGet, "", nil, &nodesInfo, top_svc.logger, nil)
+	if err != nil  || statusCode != 200{
+		return "", errors.New(fmt.Sprintf("Failed on calling %v, err=%v, statusCode=%v", base.NodesPath, err, statusCode))
 	}
 	// get node list from the map
 	nodes, ok := nodesInfo[base.NodesKey]

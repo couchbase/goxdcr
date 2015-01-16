@@ -43,11 +43,14 @@ const (
 	TIME_COMMITING_METRIC  = "time_committing"
 	NUM_FAILEDCKPTS_METRIC = "num_failedckpts"
 	RATE_DOC_CHECKS_METRIC = "rate_doc_checks"
+	//optimistic replication replated statistics
+	DOCS_OPT_REPD_METRIC = "docs_opt_repd"
+	RATE_OPT_REPD_METRIC = "rate_doc_opt_repd"
 
 	//	TIME_COMMITTING_METRIC = "time_committing"
 	//rate
-	RATE_REPLICATED = "rate_replicated"
-	BANDWIDTH_USAGE = "bandwidth_usage"
+	RATE_REPLICATED_METRIC = "rate_replicated"
+	BANDWIDTH_USAGE_METRIC = "bandwidth_usage"
 
 	VB_HIGHSEQNO_PREFIX = "vb_highseqno_"
 
@@ -277,7 +280,15 @@ func (stats_mgr *StatisticsManager) processCalculatedStats(oldSample metrics.Reg
 	rate_replicated := float64(docs_written-docs_written_old) / interval_in_sec
 	rate_replicated_var := new(expvar.Float)
 	rate_replicated_var.Set(rate_replicated)
-	overview_expvar_map.Set(RATE_REPLICATED, rate_replicated_var)
+	overview_expvar_map.Set(RATE_REPLICATED_METRIC, rate_replicated_var)
+	
+	//calculate rate_doc_opt_repd
+	docs_opt_repd_old := oldSample.Get(DOCS_OPT_REPD_METRIC).(metrics.Counter).Count()
+	docs_opt_repd := stats_mgr.getOverviewRegistry().Get(DOCS_OPT_REPD_METRIC).(metrics.Counter).Count()
+	rate_opt_repd := float64(docs_opt_repd - docs_opt_repd_old)/interval_in_sec
+	rate_opt_repd_var := new (expvar.Float)
+	rate_opt_repd_var.Set(rate_opt_repd)
+	overview_expvar_map.Set(RATE_OPT_REPD_METRIC, rate_opt_repd_var)
 
 	//calculate bandwidth_usage
 	data_replicated_old := oldSample.Get(DATA_REPLICATED_METRIC).(metrics.Counter).Count()
@@ -285,7 +296,7 @@ func (stats_mgr *StatisticsManager) processCalculatedStats(oldSample metrics.Reg
 	bandwidth_usage := float64(data_replicated-data_replicated_old) / interval_in_sec
 	bandwidth_usage_var := new(expvar.Float)
 	bandwidth_usage_var.Set(bandwidth_usage)
-	overview_expvar_map.Set(BANDWIDTH_USAGE, bandwidth_usage_var)
+	overview_expvar_map.Set(BANDWIDTH_USAGE_METRIC, bandwidth_usage_var)
 
 	//calculate docs_checked
 	docs_checked_old_var := overview_expvar_map.Get(DOCS_CHECKED_METRIC)
@@ -405,7 +416,7 @@ func (stats_mgr *StatisticsManager) publishMetricToMap(expvar_map *expvar.Map, n
 }
 
 func (stats_mgr *StatisticsManager) processTimeSample() {
-	stats_mgr.logger.Info("Process Time Sample...")
+	stats_mgr.logger.Debug("Process Time Sample...")
 	time_committing := stats_mgr.getOverviewRegistry().GetOrRegister(DOCS_LATENCY_METRIC, metrics.NewHistogram(metrics.NewUniformSample(stats_mgr.sample_size))).(metrics.Histogram)
 	time_committing.Clear()
 	sample := time_committing.Sample()
@@ -461,6 +472,7 @@ func (stats_mgr *StatisticsManager) initOverviewRegistry() {
 	overview_registry.Register(NUM_CHECKPOINTS_METRIC, metrics.NewCounter())
 	overview_registry.Register(NUM_FAILEDCKPTS_METRIC, metrics.NewCounter())
 	overview_registry.Register(TIME_COMMITING_METRIC, metrics.NewCounter())
+	overview_registry.Register(DOCS_OPT_REPD_METRIC, metrics.NewCounter())
 }
 
 func (stats_mgr *StatisticsManager) Start(settings map[string]interface{}) error {
@@ -552,6 +564,7 @@ func (xmem_collector *xmemCollector) Mount(pipeline common.Pipeline, stats_mgr *
 		registry.Register(DOCS_REP_QUEUE_METRIC, metrics.NewHistogram(metrics.NewUniformSample(stats_mgr.sample_size)))
 		registry.Register(DOCS_WRITTEN_METRIC, metrics.NewCounter())
 		registry.Register(DATA_REPLICATED_METRIC, metrics.NewCounter())
+		registry.Register(DOCS_OPT_REPD_METRIC, metrics.NewCounter())
 		part.RegisterComponentEventListener(common.DataSent, xmem_collector)
 		part.RegisterComponentEventListener(common.DataReceived, xmem_collector)
 
@@ -575,10 +588,13 @@ func (xmem_collector *xmemCollector) OnEvent(eventType common.ComponentEventType
 		endTime := time.Now()
 		size := item.(*gomemcached.MCRequest).Size()
 		seqno := otherInfos[parts.XMEM_EVENT_ADDI_SEQNO].(uint64)
+		opti_replicated := otherInfos[parts.XMEM_EVENT_ADDI_OPT_REPD].(bool)
 		registry := xmem_collector.stats_mgr.registries[component.Id()]
 		registry.Get(DOCS_WRITTEN_METRIC).(metrics.Counter).Inc(1)
 		registry.Get(DATA_REPLICATED_METRIC).(metrics.Counter).Inc(int64(size))
-
+		if opti_replicated {
+			registry.Get(DOCS_OPT_REPD_METRIC).(metrics.Counter).Inc(1)
+		}
 		xmem_collector.stats_mgr.endtime_map[fmt.Sprintf("%v", seqno)] = endTime
 	}
 }
