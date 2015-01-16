@@ -847,6 +847,10 @@ func stop() {
 	}
 	logger_rm.Infof("Sent finish signal to all running repairer")
 
+
+	//clean up the connection pool
+	base.ConnPoolMgr().Close()
+	
 	replication_mgr.children_waitgrp.Wait()
 
 	logger_rm.Infof("Replication manager exists")

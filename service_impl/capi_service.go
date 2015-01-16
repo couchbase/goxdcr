@@ -95,6 +95,7 @@ func (capi_svc *CAPIService) CommitForCheckpoint(remoteBucket *service_def.Remot
 				vb_uuid = uint64(vb_uuid_val.(float64))
 				return 0, vb_uuid, VB_OPAQUE_MISMATCH_ERR
 			} else {
+				capi_svc.logger.Errorf("No vb uuid found in resp. respMap=%v, err=%v\n", respMap, err)
 				return 0, 0, NO_VB_OPAQUE_IN_RESP_ERR
 			}
 		} else {

@@ -630,10 +630,14 @@ func (xmem *XmemNozzle) Stop() error {
 	conn := xmem.memClient.Hijack()
 	conn.(*net.TCPConn).SetReadDeadline(time.Now())
 
+	conn_getmeta := xmem.client_for_getMeta.Hijack()
+	conn_getmeta.(*net.TCPConn).SetReadDeadline(time.Now())
+
 	xmem.Logger().Debugf("XmemNozzle %v processed %v items\n", xmem.Id(), xmem.counter_sent)
 	err := xmem.Stop_server()
 
 	conn.(*net.TCPConn).SetReadDeadline(time.Date(1, time.January, 0, 0, 0, 0, 0, time.UTC))
+	conn_getmeta.(*net.TCPConn).SetReadDeadline(time.Date(1, time.January, 0, 0, 0, 0, 0, time.UTC))
 	xmem.Logger().Debugf("XmemNozzle %v is stopped\n", xmem.Id())
 	return err
 }
@@ -743,6 +747,7 @@ func (xmem *XmemNozzle) onExit() {
 	pool := base.ConnPoolMgr().GetPool(xmem.getPoolName(xmem.config))
 	if pool != nil {
 		pool.Release(xmem.memClient)
+		pool.Release(xmem.client_for_getMeta)
 	}
 
 }
@@ -962,15 +967,16 @@ func (xmem *XmemNozzle) batchGetMeta(key_map map[string]uint16) (map[string]docu
 	for opaque, resp := range respMap {
 		key, ok := opaque_key_map[opaque]
 		if !ok {
-			panic("opaque_key_map should contain this opaque")
-		}
-		if resp.Status == mc.SUCCESS {
-			ret[key] = xmem.decodeGetMetaResp([]byte(key), resp)
+			xmem.Logger().Errorf(fmt.Sprintf("opaque_key_map should contain this opaque %v, resp=%v", opaque, resp))
 		} else {
-			xmem.Logger().Infof("batchGetMeta: doc %s is not found in target system, send it", key)
+			if resp.Status == mc.SUCCESS {
+				ret[key] = xmem.decodeGetMetaResp([]byte(key), resp)
+			} else {
+				xmem.Logger().Debugf("batchGetMeta: doc %s is not found in target system, send it", key)
+			}
 		}
 	}
-	xmem.Logger().Infof("Done with batchGetMeta, ret=%v\n", ret)
+	xmem.Logger().Debugf("Done with batchGetMeta, ret=%v\n", ret)
 	return ret, nil
 }
 
@@ -1136,7 +1142,7 @@ func (xmem *XmemNozzle) receiveResponse(finch chan bool, waitGrp *sync.WaitGroup
 			} else if err != nil && isNetError(err) {
 				if isSeriousError(err) {
 					xmem.repairConn(xmem.memClient)
-					read_retry =0
+					read_retry = 0
 				} else {
 					//retry in 100 millisecond
 					if read_retry > 10 && (int(xmem.buf.bufferSize())-len(xmem.buf.empty_slots_pos)) > 0 {
@@ -1150,12 +1156,12 @@ func (xmem *XmemNozzle) receiveResponse(finch chan bool, waitGrp *sync.WaitGroup
 			} else if err != nil && isRecoverableMCError(response.Status) {
 				//reset read_retry
 				read_retry = 0
-				
+
 				pos := xmem.getPosFromOpaque(response.Opaque)
 				xmem.Logger().Infof("%v pos=%d, Received error = %v in response, err = %v, response=%v\n", xmem.Id(), pos, response.Status.String(), err, response.Bytes())
 				_, err = xmem.buf.modSlot(pos, xmem.resend)
 			} else if err != nil && mc.IsFatal(err) {
-				
+
 				if response.Status == 0x08 {
 					//PROTOCOL_BINARY_RESPONSE_NO_BUCKET
 					//bucket must be recreated, drop the connection pool
@@ -1170,8 +1176,8 @@ func (xmem *XmemNozzle) receiveResponse(finch chan bool, waitGrp *sync.WaitGroup
 				return
 			} else {
 				//rest read_retry
-				read_retry =0
-				
+				read_retry = 0
+
 				//raiseEvent
 				pos := xmem.getPosFromOpaque(response.Opaque)
 				seqno, req, _ := xmem.buf.slot(pos)
