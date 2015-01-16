@@ -10,54 +10,36 @@
 package cbauth
 
 import (
-	"net/http"
 	"github.com/couchbase/cbauth"
+	"net/http"
 )
 
 type XdcrRoundTripper struct {
-        slave http.RoundTripper
+	httpSlave   http.RoundTripper
+	cbauthSlave http.RoundTripper
 }
 
 func (rt *XdcrRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
-        creds, err := cbauth.AuthWebCreds(req)
-        if err != nil {
-                return nil, err
-        }
-        
-        if creds.Name() == "" {
-          	req = dupRequest(req)
-        	// if no credentials are provides, this is a request on local cluster
-        	// call cbauth to automatically fill in auth info
-       		if err := cbauth.SetRequestAuth(req); err != nil {
-                return nil, err
-      		}
-      	}
-        return rt.slave.RoundTrip(req)
+	creds, err := cbauth.AuthWebCreds(req)
+	if err != nil {
+		return nil, err
+	}
+
+	if creds.Name() == "" || creds.Name() == "anonymous" {
+		// if no credentials are provided, this is a request on local cluster
+		// call cbauth to automatically fill in auth info
+		return rt.cbauthSlave.RoundTrip(req)
+	} else {
+		// if credentials are provided, bypass cbauth. This is needed when dealing with remote cluster
+		return rt.httpSlave.RoundTrip(req)
+	}
 }
 
 // WrapHTTPTransport constructs http transport that automatically does
-// SetRequestAuth for requests when needed. 
+// SetRequestAuth for requests when needed.
 func WrapHTTPTransport(transport http.RoundTripper) http.RoundTripper {
-        return &XdcrRoundTripper{
-                slave: transport,
-        }
-}
-
-func dupRequest(req *http.Request) *http.Request {
-        rv := *req
-        rv.Header = dupHeader(req.Header)
-        rv.Trailer = dupHeader(req.Trailer)
-        return &rv
-}
-
-func dupHeader(h http.Header) http.Header {
-        rv := make(http.Header)
-        for k, v := range h {
-                rv[k] = duplicateStringsSlice(v)
-        }
-        return rv
-}
-
-func duplicateStringsSlice(in []string) []string {
-        return append([]string{}, in...)
+	return &XdcrRoundTripper{
+		httpSlave:   transport,
+		cbauthSlave: cbauth.WrapHTTPTransport(transport, nil),
+	}
 }
