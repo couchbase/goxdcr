@@ -66,7 +66,7 @@ func (capi_svc *CAPIService) PreReplicate(remoteBucket *service_def.RemoteBucket
 	}
 
 	status_code, respMap, err := capi_svc.send_post(PRE_REPLICATE_CMD, api_base, HTTP_RETRIES)
-	capi_svc.logger.Debugf("response from _pre_replicate is %v\n", respMap)
+	capi_svc.logger.Debugf("response from _pre_replicate is status_code=%v respMap=%v for %v\n", status_code, respMap, knownRemoteVBStatus)
 	bMatch, current_remoteVBUUID, err = capi_svc.parsePreReplicateResp(api_base.url, status_code, respMap, disableCkptBackwardsCompat)
 	return
 
@@ -95,6 +95,7 @@ func (capi_svc *CAPIService) CommitForCheckpoint(remoteBucket *service_def.Remot
 				vb_uuid = uint64(vb_uuid_val.(float64))
 				return 0, vb_uuid, VB_OPAQUE_MISMATCH_ERR
 			} else {
+				capi_svc.logger.Errorf("No vb uuid found in resp. respMap=%v, err=%v\n", respMap, err)
 				return 0, 0, NO_VB_OPAQUE_IN_RESP_ERR
 			}
 		} else {

@@ -186,10 +186,6 @@ func QueryRestApiWithAuth(
 			l.Errorf("Failed to read response body, err=%v\n", e)
 			return err, res.StatusCode
 		}
-		if res.StatusCode != 200 {
-			err = fmt.Errorf("HTTP error %v getting %q: %s",
-				res.Status, u.String(), bod)
-		}
 
 		if out != nil {
 			err_marshal := json.Unmarshal(bod, out)
