@@ -276,7 +276,7 @@ func StartReplicationManager(sourceKVHost string, xdcrRestPort uint16,
 
 		// start listening to repl spec changed events
 		// this will start replications for active replication specs
-		err := repl_spec_svc.StartSpecChangedCallBack(specChangedCallback, replication_mgr.repl_spec_callback_cancel_ch, replication_mgr.children_waitgrp)
+		err := repl_spec_svc.StartSpecChangedCallBack(specChangedCallback, specChangeObservationFailureCallBack, replication_mgr.repl_spec_callback_cancel_ch, replication_mgr.children_waitgrp)
 		if err != nil {
 			logger_rm.Errorf("Failed to start spec changed call back, err=%v", err)
 			stop()
@@ -922,6 +922,13 @@ func specChangedCallback(changedSpecId string, changedSpec *metadata.Replication
 		// nothing needs to be done
 		return nil
 	}
+}
+
+// Callback function for replication spec observation failed event
+func specChangeObservationFailureCallBack(err error) {
+	// the only thing we can do is to abort
+	logger_rm.Errorf("Aborting replication manager since failed to listen to replication specification changes. err=%v\n", err)
+	stop()
 }
 
 // whether there are critical changes to the replication spec that require pipeline reconstruction
