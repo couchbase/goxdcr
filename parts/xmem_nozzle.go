@@ -656,12 +656,6 @@ func (xmem *XmemNozzle) batchReady() error {
 	}()
 	if xmem.batch.count() > 0 {
 		xmem.Logger().Debugf("%v move the batch (count=%d) ready queue\n", xmem.Id(), xmem.batch.count())
-		meta_map, err := xmem.batchGetMeta(xmem.batch.bigDoc_key_map)
-		if err != nil {
-			return err
-		}
-		xmem.batch.bigDoc_meta_map = meta_map
-
 		select {
 		case xmem.batches_ready <- xmem.batch:
 			xmem.Logger().Debugf("There are %d batches in ready queue\n", len(xmem.batches_ready))
@@ -858,6 +852,12 @@ func (xmem *XmemNozzle) sendSetMeta_internal(batch *xmemBatch) error {
 
 		xmem.counter_sent = xmem.counter_sent + count
 		xmem.Logger().Debugf("So far, xmem %v processed %d items", xmem.Id(), xmem.counter_sent)
+
+		meta_map, err := xmem.batchGetMeta(xmem.batch.bigDoc_key_map)
+		if err != nil {
+			return err
+		}
+		xmem.batch.bigDoc_meta_map = meta_map
 
 		//batch send
 		err = xmem.batchSetMetaWithRetry(batch, xmem.config.maxRetry)
@@ -1172,6 +1172,7 @@ func (xmem *XmemNozzle) receiveResponse(finch chan bool, waitGrp *sync.WaitGroup
 					}
 
 				}
+				xmem.Logger().Infof("bad response=%v\n", response)
 				xmem.handleGeneralError(err)
 				return
 			} else {
