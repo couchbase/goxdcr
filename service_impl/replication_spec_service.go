@@ -28,6 +28,7 @@ const (
 type ReplicationSpecService struct {
 	metadata_svc service_def.MetadataSvc
 	call_back    service_def.SpecChangedCallback
+	failure_call_back service_def.SpecChangeListenerFailureCallBack
 	logger       *log.CommonLogger
 }
 
@@ -38,22 +39,13 @@ func NewReplicationSpecService(metadata_svc service_def.MetadataSvc, logger_ctx 
 	}
 }
 
-func (service *ReplicationSpecService) StartSpecChangedCallBack(call_back service_def.SpecChangedCallback, cancel <-chan struct{}, waitGrp *sync.WaitGroup) error {
+func (service *ReplicationSpecService) StartSpecChangedCallBack(call_back service_def.SpecChangedCallback, failure_call_back service_def.SpecChangeListenerFailureCallBack, 
+      cancel <-chan struct{}, waitGrp *sync.WaitGroup) error {
 	// start listening to changed to specs
 	service.call_back = call_back
-
-	// ensure that the parent path for replication specs exists so that we can observe its children
+	service.failure_call_back = failure_call_back
+	
 	replSpecCatalogPath := GetCatalogPathFromCatalogKey(ReplicationSpecsCatalogKey)
-	replSpecCatalog, _, err := service.metadata_svc.Get(replSpecCatalogPath)
-	if err != nil {
-		return err
-	}
-	if replSpecCatalog == nil {
-		err := service.metadata_svc.Add(replSpecCatalogPath, nil)
-		if err != nil {
-			return err
-		}
-	}
 
 	waitGrp.Add(1)
 	go service.observeChildren(replSpecCatalogPath, cancel, waitGrp)
@@ -63,7 +55,12 @@ func (service *ReplicationSpecService) StartSpecChangedCallBack(call_back servic
 
 func (service *ReplicationSpecService) observeChildren(dirpath string, cancel <-chan struct{}, waitGrp *sync.WaitGroup) {
 	defer waitGrp.Done()
-	metakv.RunObserveChildren(dirpath, service.metakvCallback, cancel)
+	err := metakv.RunObserveChildren(dirpath, service.metakvCallback, cancel)
+	// call failure call back only when there are real errors
+	// err may be nil when observeChildren is canceled, in which case there is no need to call failure call back
+	if err != nil {
+		service.failure_call_back(err)
+	}
 }
 
 func (service *ReplicationSpecService) ReplicationSpec(replicationId string) (*metadata.ReplicationSpecification, error) {
@@ -163,12 +160,20 @@ func (service *ReplicationSpecService) metakvCallback(path string, value []byte,
 
 	if service.call_back != nil {
 		spec, err := constructReplicationSpec(value, rev)
-		if err != nil {
+		if err != nil {	
+			// should never get here. 
+			service.logger.Errorf("Error marshaling replication spec. value=%v, err=%v\n", string(value), err)
 			return err
 		}
 
-		return service.call_back(GetKeyFromPath(path), spec)
-	} else {
+		err = service.call_back(GetKeyFromPath(path), spec)
+		if err != nil {
+			service.logger.Errorf("Replication spec change call back returned err=%v\n", err)
+		}
+		// do not return err since we do not want RunObserveChildren to abort
 		return nil
 	}
+		
+	return nil
+
 }

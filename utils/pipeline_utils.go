@@ -31,7 +31,7 @@ func ExecWithTimeout(action Action, timeout_duration time.Duration, logger *log.
 			logger.Info("****************************")
 			var buf []byte = make([]byte, 1000000)
 			runtime.Stack(buf, true)
-			logger.Debugf("%v", string(buf))
+			logger.Errorf("%v", string(buf))
 			return retErr
 		}
 	}
