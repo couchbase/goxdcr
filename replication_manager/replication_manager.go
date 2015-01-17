@@ -278,6 +278,7 @@ func StartReplicationManager(sourceKVHost string, xdcrRestPort uint16,
 		// this will start replications for active replication specs
 		err := repl_spec_svc.StartSpecChangedCallBack(specChangedCallback, replication_mgr.repl_spec_callback_cancel_ch, replication_mgr.children_waitgrp)
 		if err != nil {
+			logger_rm.Errorf("Failed to start spec changed call back, err=%v", err)
 			stop()
 		}
 
@@ -351,6 +352,10 @@ func ReplicationSettingsService() service_def.ReplicationSettingsSvc {
 	return replication_mgr.replication_settings_svc
 }
 
+func CheckpointService() service_def.CheckpointsService {
+	return replication_mgr.checkpoint_svc
+}
+
 //CreateReplication create the replication specification in metadata store
 //and start the replication pipeline
 func CreateReplication(sourceBucket, targetCluster, targetBucket string, settings map[string]interface{}) (string, map[string]error, error) {
@@ -391,7 +396,7 @@ func DeleteReplication(topic string) error {
 	}
 
 	//delete all checkpoint docs in an async fashion
-	go replication_mgr.checkpoint_svc.DelCheckpointsDocs(topic)
+	replication_mgr.checkpoint_svc.DelCheckpointsDocs(topic)
 
 	logger_rm.Infof("Pipeline %s is deleted\n", topic)
 
@@ -842,6 +847,10 @@ func stop() {
 	}
 	logger_rm.Infof("Sent finish signal to all running repairer")
 
+
+	//clean up the connection pool
+	base.ConnPoolMgr().Close()
+	
 	replication_mgr.children_waitgrp.Wait()
 
 	logger_rm.Infof("Replication manager exists")

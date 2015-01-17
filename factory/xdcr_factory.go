@@ -365,6 +365,7 @@ func (xdcrf *XDCRFactory) constructSettingsForXmemNozzle(pipeline common.Pipelin
 	xmemSettings[parts.XMEM_SETTING_BATCHSIZE] = repSettings.BatchSize
 	xmemSettings[parts.XMEM_SETTING_RESP_TIMEOUT] = xdcrf.getTargetTimeoutEstimate(pipeline.Topic())
 	xmemSettings[parts.XMEM_SETTING_BATCH_EXPIRATION_TIME] = time.Duration(float64(repSettings.MaxExpectedReplicationLag)*0.7) * time.Millisecond
+	xmemSettings[parts.XMEM_SETTING_OPTI_REP_THRESHOLD] = repSettings.OptimisticReplicationThreshold
 
 	return xmemSettings, nil
 

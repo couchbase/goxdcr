@@ -28,7 +28,7 @@ import (
 	"time"
 )
 
-//import _ "net/http/pprof"
+import _ "net/http/pprof"
 import _ "expvar"
 
 const (
@@ -100,7 +100,7 @@ func main() {
 	}()
 
 	//	c.SetLogLevel(c.LogLevelTrace)
-	fmt.Println("Start Testing ...")
+	logger.Info("Start Testing ...")
 	argParse()
 
 	err := setup()
@@ -114,15 +114,16 @@ func main() {
 }
 
 func setup() error {
+	logger.Info("setup....")
 	top_svc, err := s.NewXDCRTopologySvc(uint16(options.source_kv_port), base.AdminportNumber, true, nil)
 	if err != nil {
-		fmt.Printf("Error starting xdcr topology service. err=%v\n", err)
+		logger.Errorf("Error starting xdcr topology service. err=%v\n", err)
 		os.Exit(1)
 	}
 
 	options.source_kv_host, err = top_svc.MyHost()
 	if err != nil {
-		fmt.Printf("Error getting current host. err=%v\n", err)
+		logger.Errorf("Error getting current host. err=%v\n", err)
 		os.Exit(1)
 	}
 
@@ -138,19 +139,20 @@ func setup() error {
 		s.NewRemoteClusterService(metadata_svc, nil),
 		s.NewClusterInfoSvc(nil), top_svc, s.NewReplicationSettingsSvc(metadata_svc, nil), s.NewCheckpointsService(metadata_svc, nil), s.NewCAPIService(nil))
 
-	fmt.Println("Finish setup")
+	logger.Info("Finish setup")
 	return nil
 }
 
 func test() {
-	fmt.Println("Start testing")
+	logger.Info("Start testing")
 	settings := make(map[string]interface{})
 	settings[metadata.PipelineLogLevel] = "Debug"
-	settings[metadata.CheckpointInterval] = 20
+	settings[metadata.CheckpointInterval] = 40
 	settings[metadata.PipelineStatsInterval] = 10000
 	settings[metadata.SourceNozzlePerNode] = NUM_SOURCE_CONN
 	settings[metadata.TargetNozzlePerNode] = NUM_TARGET_CONN
 	settings[metadata.BatchCount] = 500
+	settings[metadata.OptimisticReplicationThreshold] = 20
 	settings[metadata.Active] = true
 
 	// create remote cluster reference needed by replication
@@ -160,6 +162,7 @@ func test() {
 		fmt.Println(err.Error())
 		fail(fmt.Sprintf("%v", err))
 	}
+	logger.Info("CreateTestRemoteCluster succeeded")
 
 	defer testcommon.DeleteTestRemoteCluster(replication_manager.RemoteClusterService(), options.remoteName)
 
@@ -177,33 +180,52 @@ func test() {
 		}
 		fmt.Printf("Replication %s is deleted\n", topic)
 	}()
+	logger.Info("CreateReplication succeeded")
+
 	time.Sleep(30 * time.Second)
 
 	pipeline := replication_manager.Pipeline(topic)
-	verifyStartingTimestamps(pipeline, true)
+	err = verifyStartingTimestamps(pipeline, true)
+	if err != nil {
+		fail(fmt.Sprintf("%v", err))
+	}
 
 	err = replication_manager.SetPipelineLogLevel(topic, "Info")
 	if err != nil {
 		fail(fmt.Sprintf("%v", err))
 	}
 
+	time.Sleep(30 * time.Second)
+	ckpt_docs, err := replication_manager.CheckpointService().CheckpointsDocs(topic)
+	if err != nil {
+		fail(err.Error())
+	}
+	if len(ckpt_docs) == 0 {
+		fail(fmt.Sprintf("No checkpointing happended as it is supposed to"))
+	}
 	settings[metadata.Active] = false
 	replication_manager.UpdateReplicationSettings(topic, settings)
 
-	fmt.Printf("Replication %s is paused\n", topic)
+	logger.Infof("Replication %s is paused\n", topic)
 	time.Sleep(100 * time.Millisecond)
 
 	settings[metadata.Active] = true
-	replication_manager.UpdateReplicationSettings(topic, settings)
+	errMap, err := replication_manager.UpdateReplicationSettings(topic, settings)
+	if err != nil || len(errMap) > 0 {
+		fail(fmt.Sprintf("err= %v, errMap=%v", err, errMap))
+	}
+	time.Sleep(1 * time.Second)
+	pipeline = replication_manager.Pipeline(topic)
+	if pipeline == nil {
+		fail(fmt.Sprintf("Failed to resume replication %s", topic))
+	}
+	logger.Infof("Replication %s is resumed\n", topic)
+	err = verifyStartingTimestamps(pipeline, false)
 	if err != nil {
 		fail(fmt.Sprintf("%v", err))
 	}
-	fmt.Printf("Replication %s is resumed\n", topic)
 
-	pipeline = replication_manager.Pipeline(topic)
-	verifyStartingTimestamps(pipeline, false)
-
-	time.Sleep(1 * time.Minute)
+	time.Sleep(2 * time.Minute)
 
 }
 
@@ -216,18 +238,17 @@ func verifyStartingTimestamps(pipeline common.Pipeline, noPreviousCkpts bool) er
 	}
 	for vbno, vbts := range vbts_map {
 		if noPreviousCkpts {
-			if vbts.Vbuuid != 0 && vbts.Seqno == 0 {
-				break
+			if vbts.Vbuuid == 0 || vbts.Seqno != 0 {
+				return errors.New(fmt.Sprintf("VBTimestamps for vb=%v is not valid, Failover_uuid should not be null, seqno should 0, Vbuuid=%v, seqno=%v", vbno, vbts.Vbuuid, vbts.Seqno))
 			}
-			return errors.New(fmt.Sprintf("VBTimestamps for vb=%v is not valid, Failover_uuid should not be null, seqno should 0", vbno))
 		} else {
-			if vbts.Vbuuid != 0 && vbts.Seqno != 0 {
-				break
+			if vbts.Vbuuid == 0 || vbts.Seqno == 0 {
+				return errors.New(fmt.Sprintf("VBTimestamps for vb=%v is not valid, Failover_uuid should not be null, seqno should not be 0, Vbuuid=%v, seqno=%v", vbno, vbts.Vbuuid, vbts.Seqno))
 			}
-			return errors.New(fmt.Sprintf("VBTimestamps for vb=%v is not valid, Failover_uuid should not be null, seqno should not be 0", vbno))
 
 		}
 	}
+	logger.Infof("Start seqno is verified")
 	return nil
 }
 

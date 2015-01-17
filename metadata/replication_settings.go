@@ -55,7 +55,7 @@ type Range struct {
 var ReplicationTypeConfig = &SettingsConfig{ReplicationTypeXmem, nil}
 var FilterExpressionConfig = &SettingsConfig{"", nil}
 var ActiveConfig = &SettingsConfig{true, nil}
-var CheckpointIntervalConfig = &SettingsConfig{60, &Range{60, 14400}}
+var CheckpointIntervalConfig = &SettingsConfig{1800, &Range{60, 14400}}
 var BatchCountConfig = &SettingsConfig{500, &Range{500, 10000}}
 var BatchSizeConfig = &SettingsConfig{2048, &Range{10, 10000}}
 var FailureRestartIntervalConfig = &SettingsConfig{30, &Range{1, 300}}
