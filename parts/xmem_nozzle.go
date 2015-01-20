@@ -24,6 +24,7 @@ import (
 	"math/rand"
 	"net"
 	"reflect"
+	"strings"
 	"sync"
 	"time"
 )
@@ -855,9 +856,10 @@ func (xmem *XmemNozzle) sendSetMeta_internal(batch *xmemBatch) error {
 
 		meta_map, err := xmem.batchGetMeta(xmem.batch.bigDoc_key_map)
 		if err != nil {
-			return err
+			xmem.Logger().Errorf("batchGetMeta failed. err=%v\n", err)
+		} else {
+			xmem.batch.bigDoc_meta_map = meta_map
 		}
-		xmem.batch.bigDoc_meta_map = meta_map
 
 		//batch send
 		err = xmem.batchSetMetaWithRetry(batch, xmem.config.maxRetry)
@@ -883,16 +885,20 @@ func (xmem *XmemNozzle) batchGetMeta(key_map map[string]uint16) (map[string]docu
 		return ret, nil
 	}
 
+	err_list := []error{}
 	//launch the receiver
 	waitGrp.Add(1)
-	go func(count int, finch chan bool, respMap map[uint32]*mc.MCResponse, waitGrp *sync.WaitGroup, logger *log.CommonLogger) {
+	go func(count int, finch chan bool, respMap map[uint32]*mc.MCResponse, timeout_duration time.Duration, err_list []error, waitGrp *sync.WaitGroup, logger *log.CommonLogger) {
 		defer waitGrp.Done()
-		received_count := 0
 		read_retry := 0
+		ticker := time.NewTicker(timeout_duration)
 		var response *mc.MCResponse
 		for {
 			select {
 			case <-finch:
+				return
+			case <-ticker.C:
+				err_list = append(err_list, errors.New("batchGetMeta timedout"))
 				return
 			default:
 				conn := xmem.client_for_getMeta.Hijack()
@@ -905,7 +911,7 @@ func (xmem *XmemNozzle) batchGetMeta(key_map map[string]uint16) (map[string]docu
 				} else if err != nil && isNetError(err) {
 					if isSeriousError(err) {
 						xmem.repairConn(xmem.client_for_getMeta)
-						read_retry = 0
+						return
 					} else {
 						//retry in 100 millisecond
 						if read_retry > 10 {
@@ -916,6 +922,11 @@ func (xmem *XmemNozzle) batchGetMeta(key_map map[string]uint16) (map[string]docu
 						time.Sleep(100 * time.Millisecond)
 						read_retry++
 					}
+				} else if err != nil && strings.HasPrefix(err.Error(), "bad magic") {
+					//the connection to couchbase server is ruined. it is not supposed to return response with bad magic number
+					//now the only sensible thing to do is to repair the connection, then return
+					xmem.Logger().Infof("err=%v\n", err)
+					xmem.repairConn(xmem.memClient)
 					return
 				} else if err != nil && mc.IsFatal(err) {
 					if response.Status == 0x08 {
@@ -926,12 +937,12 @@ func (xmem *XmemNozzle) batchGetMeta(key_map map[string]uint16) (map[string]docu
 						if pool != nil {
 							pool.ReleaseConnections()
 						}
-
 					}
+					xmem.Logger().Infof("bad response=%v\n", response)
+					err_list = append(err_list, err)
 					return
 				} else {
 					//success
-					received_count++
 					respMap[response.Opaque] = response
 
 					//reset read_retry counter to 0
@@ -939,16 +950,16 @@ func (xmem *XmemNozzle) batchGetMeta(key_map map[string]uint16) (map[string]docu
 
 				}
 
-				if received_count >= count {
+				if len(respMap) >= count {
 					logger.Infof("Expected %v response, got all", count)
 					return
 				}
 			}
 		}
 
-	}(len(key_map), receiver_fin_ch, respMap, waitGrp, xmem.Logger())
+	}(len(key_map), receiver_fin_ch, respMap, 1*time.Second, err_list, waitGrp, xmem.Logger())
 
-	var opaque uint32 = 0
+	var opaque uint32 = uint32(time.Now().Unix())
 	opaque_key_map := make(map[uint32]string)
 	for key, vb := range key_map {
 		req := xmem.composeRequestForGetMeta(key, vb, opaque)
@@ -964,6 +975,10 @@ func (xmem *XmemNozzle) batchGetMeta(key_map map[string]uint16) (map[string]docu
 	}
 
 	waitGrp.Wait()
+	if len(err_list) > 0 {
+		return nil, err_list[0]
+	}
+
 	for opaque, resp := range respMap {
 		key, ok := opaque_key_map[opaque]
 		if !ok {
@@ -1101,14 +1116,14 @@ func (xmem *XmemNozzle) repairConn(client *mcc.Client) {
 	defer xmem.lock_connection.Unlock()
 
 	if client == xmem.memClient {
-		xmem.Logger().Infof("%v connection is broken, try to repair...\n", xmem.Id())
+		xmem.Logger().Infof("%v connection for setMeta is broken, try to repair...\n", xmem.Id())
 		pool, err := base.ConnPoolMgr().GetOrCreatePool(xmem.getPoolName(xmem.config), xmem.config.connectStr, xmem.config.bucketName, xmem.config.bucketName, xmem.config.password, base.DefaultConnectionSize)
 		xmem.memClient.Close()
 		if err == nil {
 			xmem.memClient, err = pool.Get()
 		}
 		if err == nil {
-			xmem.Logger().Infof("%v - The connection is repaired\n", xmem.Id())
+			xmem.Logger().Infof("%v - The connection for setMeta is repaired\n", xmem.Id())
 			size := xmem.buf.bufferSize()
 			for i := 0; i < int(size); i++ {
 				xmem.buf.modSlot(uint16(i), xmem.resend)
@@ -1116,6 +1131,19 @@ func (xmem *XmemNozzle) repairConn(client *mcc.Client) {
 			xmem.Logger().Infof("%v - The unresponded items are resent\n", xmem.Id())
 		} else {
 			xmem.Logger().Infof("%v - Connection repair failed\n", xmem.Id())
+			xmem.handleGeneralError(err)
+		}
+	} else if client == xmem.client_for_getMeta {
+		xmem.Logger().Infof("%v connection for getMeta is broken, try to repair...\n", xmem.Id())
+		pool, err := base.ConnPoolMgr().GetOrCreatePool(xmem.getPoolName(xmem.config), xmem.config.connectStr, xmem.config.bucketName, xmem.config.bucketName, xmem.config.password, base.DefaultConnectionSize)
+		xmem.client_for_getMeta.Close()
+		if err == nil {
+			xmem.client_for_getMeta, err = pool.Get()
+		}
+		if err == nil {
+			xmem.Logger().Infof("%v - The connection for getMeta is repaired\n", xmem.Id())
+		} else {
+			xmem.Logger().Infof("%v - Connection repair for getMeta failed\n", xmem.Id())
 			xmem.handleGeneralError(err)
 		}
 	}
@@ -1160,6 +1188,12 @@ func (xmem *XmemNozzle) receiveResponse(finch chan bool, waitGrp *sync.WaitGroup
 				pos := xmem.getPosFromOpaque(response.Opaque)
 				xmem.Logger().Infof("%v pos=%d, Received error = %v in response, err = %v, response=%v\n", xmem.Id(), pos, response.Status.String(), err, response.Bytes())
 				_, err = xmem.buf.modSlot(pos, xmem.resend)
+			} else if err != nil && strings.HasPrefix(err.Error(), "bad magic") {
+				//the connection to couchbase server is ruined. it is not supposed to return response with bad magic number
+				//now the only sensible thing to do is to repair the connection, then retry
+				xmem.Logger().Infof("err=%v\n", err)
+				xmem.repairConn(xmem.memClient)
+				read_retry = 0
 			} else if err != nil && mc.IsFatal(err) {
 
 				if response.Status == 0x08 {
