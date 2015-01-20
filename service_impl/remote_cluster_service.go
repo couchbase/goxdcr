@@ -81,6 +81,7 @@ func (service *RemoteClusterService) AddRemoteCluster(ref *metadata.RemoteCluste
 	}
 
 	return service.addRemoteCluster(ref)
+	
 }
 
 func (service *RemoteClusterService) SetRemoteCluster(refName string, ref *metadata.RemoteClusterReference) error {
@@ -183,7 +184,6 @@ func (service *RemoteClusterService) ValidateRemoteCluster(ref *metadata.RemoteC
 	}
 
 	// get remote cluster uuid from the map
-	service.logger.Infof("poolsInfo=%v\n", poolsInfo)
 	actualUuid, ok := poolsInfo[base.RemoteClusterUuid]
 	if !ok {
 		// should never get here

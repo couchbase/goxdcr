@@ -16,6 +16,7 @@ import (
 //constants
 var DefaultConnectionSize = 5
 var DefaultPoolName = "default"
+var AuditServicePoolName = "auditService"
 
 var LocalHostName = "127.0.0.1"
 
@@ -35,6 +36,8 @@ var NodesKey = "nodes"
 var HostNameKey = "hostname"
 var ThisNodeKey = "thisNode"
 var SSLPortKey = "httpsMgmt" 
+var PortsKey = "ports"
+var DirectPortKey = "direct"
 
 // URL related constants
 var UrlDelimiter = "/"

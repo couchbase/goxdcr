@@ -1264,7 +1264,11 @@ func (xmem *XmemNozzle) initializeConnection() (err error) {
 	xmem.Logger().Debugf("xmem.config= %v", xmem.config.connectStr)
 	xmem.Logger().Debugf("poolName=%v", getPoolName(xmem.config))
 	pool, err := base.ConnPoolMgr().GetOrCreatePool(getPoolName(xmem.config), xmem.config.connectStr, xmem.config.bucketName, xmem.config.bucketName, xmem.config.password, base.DefaultConnectionSize)
+	if err != nil {
+		return
+	}
 	memClient_setMeta, err := pool.Get()
+
 	if err != nil {
 		return
 	}

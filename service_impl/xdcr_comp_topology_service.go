@@ -19,13 +19,13 @@ import (
 	"github.com/couchbase/goxdcr/utils"
 )
 
-var ErrorRetrievingHostInfo = errors.New("Could not parse current host name from server result.")
+var ErrorParsingHostInfo = errors.New("Could not parse current host info from server result.")
 
 type XDCRTopologySvc struct {
-	adminport        uint16
-	xdcrRestPort     uint16
-	isEnterprise     bool
-	logger           *log.CommonLogger
+	adminport    uint16
+	xdcrRestPort uint16
+	isEnterprise bool
+	logger       *log.CommonLogger
 }
 
 func NewXDCRTopologySvc(adminport, xdcrRestPort uint16,
@@ -41,6 +41,19 @@ func NewXDCRTopologySvc(adminport, xdcrRestPort uint16,
 
 func (top_svc *XDCRTopologySvc) MyHost() (string, error) {
 	return base.LocalHostName, nil
+}
+
+func (top_svc *XDCRTopologySvc) MyHostAddr() (string, error) {
+	return top_svc.getHostAddr()
+}
+
+func (top_svc *XDCRTopologySvc) MyMemcachedAddr() (string, error) {
+	port, err := top_svc.getHostMemcachedPort()
+	if err != nil {
+		return "", err
+	}
+
+	return utils.GetHostAddr(base.LocalHostName, port), nil
 }
 
 func (top_svc *XDCRTopologySvc) MyAdminPort() (uint16, error) {
@@ -82,36 +95,36 @@ func (top_svc *XDCRTopologySvc) XDCRCompToKVNodeMap() (map[string][]string, erro
 	return retmap, nil
 }
 
-// get hostname from nodeService at /pools/nodes
-func (top_svc *XDCRTopologySvc) getHostName() (string, error) {
+// get information about current node from nodeService at /pools/nodes
+func (top_svc *XDCRTopologySvc) getHostInfo() (map[string]interface{}, error) {
 	hostAddr := "http://" + utils.GetHostAddr(base.LocalHostName, top_svc.adminport)
 	var nodesInfo map[string]interface{}
 	if hostAddr == "" {
-		panic ("hostAddr can't be empty")
+		panic("hostAddr can't be empty")
 	}
 	err, statusCode := utils.QueryRestApi(hostAddr, base.NodesPath, base.MethodGet, "", nil, &nodesInfo, top_svc.logger, nil)
-	if err != nil  || statusCode != 200{
-		return "", errors.New(fmt.Sprintf("Failed on calling %v, err=%v, statusCode=%v", base.NodesPath, err, statusCode))
+	if err != nil || statusCode != 200 {
+		return nil, errors.New(fmt.Sprintf("Failed on calling %v, err=%v, statusCode=%v", base.NodesPath, err, statusCode))
 	}
 	// get node list from the map
 	nodes, ok := nodesInfo[base.NodesKey]
 	if !ok {
 		// should never get here
 		top_svc.logger.Errorf("no nodes")
-		return "", ErrorRetrievingHostInfo
+		return nil, ErrorParsingHostInfo
 	}
 
 	nodeList, ok := nodes.([]interface{})
 	if !ok {
 		// should never get here
-		return "", ErrorRetrievingHostInfo
+		return nil, ErrorParsingHostInfo
 	}
 
 	for _, node := range nodeList {
 		nodeInfoMap, ok := node.(map[string]interface{})
 		if !ok {
 			// should never get here
-			return "", ErrorRetrievingHostInfo
+			return nil, ErrorParsingHostInfo
 		}
 
 		thisNode, ok := nodeInfoMap[base.ThisNodeKey]
@@ -119,32 +132,82 @@ func (top_svc *XDCRTopologySvc) getHostName() (string, error) {
 			thisNodeBool, ok := thisNode.(bool)
 			if !ok {
 				// should never get here
-				return "", ErrorRetrievingHostInfo
+				return nil, ErrorParsingHostInfo
 			}
 			if thisNodeBool {
 				// found current node
-				hostAddr, ok := nodeInfoMap[base.HostNameKey]
-				if !ok {
-					// should never get here
-					return "", ErrorRetrievingHostInfo
-				}
-				hostAddrStr, ok := hostAddr.(string)
-				if !ok {
-					// should never get here
-					return "", ErrorRetrievingHostInfo
-				}
-				hostname := utils.GetHostName(hostAddrStr)
-				top_svc.logger.Infof("MyHost() returned %v\n", hostname)
-				return hostname, nil
+				return nodeInfoMap, nil
 			}
 		}
 	}
 
-	return "", ErrorRetrievingHostInfo
+	return nil, ErrorParsingHostInfo
+}
+
+// get address of current node
+func (top_svc *XDCRTopologySvc) getHostAddr() (string, error) {
+	nodeInfoMap, err := top_svc.getHostInfo()
+	if err != nil {
+		return "", err
+	}
+
+	hostAddr, ok := nodeInfoMap[base.HostNameKey]
+	if !ok {
+		// should never get here
+		return "", ErrorParsingHostInfo
+	}
+	hostAddrStr, ok := hostAddr.(string)
+	if !ok {
+		// should never get here
+		return "", ErrorParsingHostInfo
+	}
+	return hostAddrStr, nil
+}
+
+// get name of current node
+func (top_svc *XDCRTopologySvc) getHostName() (string, error) {
+	hostAddrStr, err := top_svc.getHostAddr()
+	if err != nil {
+		return "", nil
+	}
+	hostname := utils.GetHostName(hostAddrStr)
+	return hostname, nil
+}
+
+// get memcached port of current node
+func (top_svc *XDCRTopologySvc) getHostMemcachedPort() (uint16, error) {
+	nodeInfoMap, err := top_svc.getHostInfo()
+	if err != nil {
+		return 0, err
+	}
+
+	ports, ok := nodeInfoMap[base.PortsKey]
+	if !ok {
+		// should never get here
+		return 0, ErrorParsingHostInfo
+	}
+	portsMap, ok := ports.(map[string]interface{})
+	if !ok {
+		// should never get here
+		return 0, ErrorParsingHostInfo
+	}
+
+	directPort, ok := portsMap[base.DirectPortKey]
+	if !ok {
+		// should never get here
+		return 0, ErrorParsingHostInfo
+	}
+	directPortFloat, ok := directPort.(float64)
+	if !ok {
+		// should never get here
+		return 0, ErrorParsingHostInfo
+	}
+
+	return uint16(directPortFloat), nil
 }
 
 // implements base.ClusterConnectionInfoProvider
-func (top_svc *XDCRTopologySvc)	MyConnectionStr() (string, error) {
+func (top_svc *XDCRTopologySvc) MyConnectionStr() (string, error) {
 	host, err := top_svc.MyHost()
 	if err != nil {
 		// should never get here
@@ -153,13 +216,13 @@ func (top_svc *XDCRTopologySvc)	MyConnectionStr() (string, error) {
 	return utils.GetHostAddr(host, top_svc.adminport), nil
 }
 
-func (top_svc *XDCRTopologySvc)	MyCredentials() (string, string, error) {
+func (top_svc *XDCRTopologySvc) MyCredentials() (string, string, error) {
 	connStr, err := top_svc.MyConnectionStr()
 	if err != nil {
 		return "", "", err
 	}
 	if connStr == "" {
-		panic ("connStr == ")
+		panic("connStr == ")
 	}
 	return cbauth.GetHTTPServiceAuth(connStr)
 }

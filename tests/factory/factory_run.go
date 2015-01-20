@@ -10,8 +10,8 @@ import (
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/goxdcr/parts"
-	s "github.com/couchbase/goxdcr/service_impl"
 	"github.com/couchbase/goxdcr/replication_manager"
+	s "github.com/couchbase/goxdcr/service_impl"
 	"github.com/couchbase/goxdcr/tests/common"
 	"os"
 )
@@ -21,14 +21,14 @@ var options struct {
 	sourceKVAdminPort uint64 //source kv admin port
 	sourceBucket      string // source bucket
 	targetBucket      string //target bucket
-	
+
 	// parameters of remote cluster
-	remoteUuid string // remote cluster uuid
-	remoteName string // remote cluster name
-	remoteHostName string // remote cluster host name
-	remoteUserName     string //remote cluster userName
-	remotePassword     string //remote cluster password
-	remoteDemandEncryption  bool  // whether encryption is needed
+	remoteUuid             string // remote cluster uuid
+	remoteName             string // remote cluster name
+	remoteHostName         string // remote cluster host name
+	remoteUserName         string //remote cluster userName
+	remotePassword         string //remote cluster password
+	remoteDemandEncryption bool   // whether encryption is needed
 	remoteCertificateFile  string // file containing certificate for encryption
 }
 
@@ -55,7 +55,7 @@ func argParse() {
 	flag.StringVar(&options.remotePassword, "remotePassword", "welcome", "remote cluster password")
 	flag.BoolVar(&options.remoteDemandEncryption, "remoteDemandEncryption", false, "whether encryption is needed")
 	flag.StringVar(&options.remoteCertificateFile, "remoteCertificateFile", "", "file containing certificate for encryption")
-	
+
 	flag.Parse()
 }
 
@@ -89,41 +89,47 @@ func invokeFactory() error {
 		os.Exit(1)
 	}
 
-	msvc, err := s.DefaultMetadataSvc()
+	msvc, err := s.NewMetaKVMetadataSvc(nil)
 	if err != nil {
-		fmt.Println("Test failed. err: ", err)
-		return err
+		fmt.Printf("Error creating metadata service. err=%v\n", err)
+		os.Exit(1)
 	}
 	
+	audit_svc, err := s.NewAuditSvc(top_svc, nil)
+	if err != nil {
+		fmt.Printf("Error starting audit service. err=%v\n", err)
+		os.Exit(1)
+	}
+
 	repl_spec_svc := s.NewReplicationSpecService(msvc, nil)
 	remote_cluster_svc := s.NewRemoteClusterService(msvc, nil)
 	cluster_info_svc := s.NewClusterInfoSvc(nil)
-	checkpoints_svc := s.NewCheckpointsService (msvc, nil)
+	checkpoints_svc := s.NewCheckpointsService(msvc, nil)
 	capi_svc := s.NewCAPIService(nil)
-		
+
 	replication_manager.StartReplicationManager(options.sourceKVHost, base.AdminportNumber,
-								 repl_spec_svc,
-							     remote_cluster_svc,
-							     cluster_info_svc, top_svc, s.NewReplicationSettingsSvc(msvc, nil), checkpoints_svc, capi_svc)
+		repl_spec_svc,
+		remote_cluster_svc,
+		cluster_info_svc, top_svc, s.NewReplicationSettingsSvc(msvc, nil), checkpoints_svc, capi_svc, audit_svc)
 
 	fac := factory.NewXDCRFactory(repl_spec_svc, remote_cluster_svc, cluster_info_svc, top_svc, checkpoints_svc, capi_svc, log.DefaultLoggerContext, log.DefaultLoggerContext, nil, nil)
 
 	// create remote cluster reference needed by replication
-	err = common.CreateTestRemoteCluster(remote_cluster_svc, options.remoteUuid, options.remoteName, options.remoteHostName, options.remoteUserName, options.remotePassword, 
-                             options.remoteDemandEncryption, options.remoteCertificateFile)
+	err = common.CreateTestRemoteCluster(remote_cluster_svc, options.remoteUuid, options.remoteName, options.remoteHostName, options.remoteUserName, options.remotePassword,
+		options.remoteDemandEncryption, options.remoteCertificateFile)
 	if err != nil {
 		fmt.Println(err.Error())
 		return err
 	}
-	
+
 	defer common.DeleteTestRemoteCluster(remote_cluster_svc, options.remoteName)
-	
+
 	remoteClusterRef, err := remote_cluster_svc.RemoteClusterByRefName(options.remoteName)
 	if err != nil {
 		fmt.Println(err.Error())
 		return err
 	}
-	
+
 	replSpec := metadata.NewReplicationSpecification(options.sourceBucket, remoteClusterRef.Uuid, options.targetBucket)
 	replSpec.Settings.SourceNozzlePerNode = NUM_SOURCE_CONN
 	replSpec.Settings.TargetNozzlePerNode = NUM_TARGET_CONN

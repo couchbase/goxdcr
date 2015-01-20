@@ -131,13 +131,20 @@ func setup() error {
 
 	metadata_svc, err := s.NewMetaKVMetadataSvc(nil)
 	if err != nil {
-		return err
+		fmt.Printf("Error creating metadata service. err=%v\n", err)
+		os.Exit(1)
+	}
+
+	audit_svc, err := s.NewAuditSvc(top_svc, nil)
+	if err != nil {
+		fmt.Printf("Error starting audit service. err=%v\n", err)
+		os.Exit(1)
 	}
 
 	replication_manager.StartReplicationManager(options.source_kv_host, base.AdminportNumber,
 		s.NewReplicationSpecService(metadata_svc, nil),
 		s.NewRemoteClusterService(metadata_svc, nil),
-		s.NewClusterInfoSvc(nil), top_svc, s.NewReplicationSettingsSvc(metadata_svc, nil), s.NewCheckpointsService(metadata_svc, nil), s.NewCAPIService(nil))
+		s.NewClusterInfoSvc(nil), top_svc, s.NewReplicationSettingsSvc(metadata_svc, nil), s.NewCheckpointsService(metadata_svc, nil), s.NewCAPIService(nil), audit_svc)
 
 	logger.Info("Finish setup")
 	return nil
@@ -166,7 +173,7 @@ func test() {
 
 	defer testcommon.DeleteTestRemoteCluster(replication_manager.RemoteClusterService(), options.remoteName)
 
-	topic, errorsMap, err := replication_manager.CreateReplication(options.source_bucket, options.remoteName, options.target_bucket, settings)
+	topic, errorsMap, err := replication_manager.CreateReplication(options.source_bucket, options.remoteName, options.target_bucket, settings, &base.RealUserId{})
 	if err != nil {
 		fail(fmt.Sprintf("%v", err))
 	} else if len(errorsMap) != 0 {
@@ -174,7 +181,7 @@ func test() {
 	}
 	//delete the replication before we go
 	defer func() {
-		err = replication_manager.DeleteReplication(topic)
+		err = replication_manager.DeleteReplication(topic, &base.RealUserId{})
 		if err != nil {
 			fail(fmt.Sprintf("%v", err))
 		}
@@ -207,13 +214,13 @@ func test() {
 		fail(fmt.Sprintf("No checkpointing happended as it is supposed to"))
 	}
 	settings[metadata.Active] = false
-	replication_manager.UpdateReplicationSettings(topic, settings)
+	replication_manager.UpdateReplicationSettings(topic, settings, &base.RealUserId{})
 
 	logger.Infof("Replication %s is paused\n", topic)
 	time.Sleep(100 * time.Millisecond)
 
 	settings[metadata.Active] = true
-	errMap, err := replication_manager.UpdateReplicationSettings(topic, settings)
+	errMap, err := replication_manager.UpdateReplicationSettings(topic, settings, &base.RealUserId{})
 	if err != nil || len(errMap) > 0 {
 		fail(fmt.Sprintf("err= %v, errMap=%v", err, errMap))
 	}

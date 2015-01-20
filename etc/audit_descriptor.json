@@ -1,0 +1,139 @@
+{
+    "version" : 1,
+    "module" : "xdcr",
+    "events" : [
+                {  "id" : 16384,
+                   "name" : "remote cluster ref creation",
+                   "description" : "created remote cluster ref",
+                   "sync" : false,
+                   "enabled" : true,
+                   "mandatory_fields" : {
+                                         "timestamp" : "",
+                                         "real_userid" : {"source" : "", "user" : ""},
+					 "cluster_name" : "",
+					 "cluster_hostname" : "",
+					 "is_encrypted" : true
+                                        },
+		   "optional_fields" : {}
+                },
+		{  "id" : 16385,
+                   "name" : "remote cluster ref update",
+                   "description" : "updated remote cluster ref",
+                   "sync" : false,
+                   "enabled" : true,
+                   "mandatory_fields" : {
+                                         "timestamp" : "",
+                                         "real_userid" : {"source" : "", "user" : ""},
+					 "cluster_name" : "",
+                                         "cluster_hostname" : "",
+                                         "is_encrypted" : true                                        
+					},
+                   "optional_fields" : {}
+                },
+		{  "id" : 16386,
+                   "name" : "remote cluster ref deletion",
+                   "description" : "deleted remote cluster ref",
+                   "sync" : false,
+                   "enabled" : true,
+                   "mandatory_fields" : {
+                                         "timestamp" : "",
+                                         "real_userid" : {"source" : "", "user" : ""},
+                                         "cluster_name" : "",
+                                         "cluster_hostname" : "",
+                                         "is_encrypted" : true  
+                                        },
+                   "optional_fields" : {}
+                },
+		{  "id" : 16387,
+                   "name" : "replication creation",
+                   "description" : "created replication",
+                   "sync" : false,
+                   "enabled" : true,
+                   "mandatory_fields" : {
+                                         "timestamp" : "",
+                                         "real_userid" : {"source" : "", "user" : ""},
+					 "local_cluster_name" : "",
+					 "source_bucket_name" : "",
+					 "remote_cluster_name" : "",
+                                         "target_bucket_name" : ""
+                                        },
+                   "optional_fields" : {
+					 "filter_expression" : ""
+				       }
+                },
+		{  "id" : 16388,
+                   "name" : "replication pause",
+                   "description" : "paused replication",
+                   "sync" : false,
+                   "enabled" : true,
+                   "mandatory_fields" : {
+                                         "timestamp" : "",
+                   			 "real_userid" : {"source" : "", "user" : ""},
+					 "local_cluster_name" : "",
+                                         "source_bucket_name" : "",
+                                         "remote_cluster_name" : "",
+                                         "target_bucket_name" : ""
+					},
+                   "optional_fields" : {}
+                },
+		{  "id" : 16389,
+                   "name" : "replication resume",
+                   "description" : "resumed replication",
+                   "sync" : false,
+                   "enabled" : true,
+                   "mandatory_fields" : {
+                                         "timestamp" : "",
+                                         "real_userid" : {"source" : "", "user" : ""},
+                                         "local_cluster_name" : "",
+					 "source_bucket_name" : "",
+                                         "remote_cluster_name" : "",
+                                         "target_bucket_name" : ""  
+                                        },
+                   "optional_fields" : {}
+                },
+		{  "id" : 16390,
+                   "name" : "replication cancellation",
+                   "description" : "canceled replication",
+                   "sync" : false,
+                   "enabled" : true,
+                   "mandatory_fields" : {
+                                         "timestamp" : "",
+                                         "real_userid" : {"source" : "", "user" : ""},
+					 "local_cluster_name" : "",                                         
+					 "source_bucket_name" : "",
+                                         "remote_cluster_name" : "",
+                                         "target_bucket_name" : "" 
+                                        },
+                   "optional_fields" : {}
+                },
+		{  "id" : 16391,
+                   "name" : "default replication settings update",
+                   "description" : "updated default replication settings",
+                   "sync" : false,
+                   "enabled" : true,
+                   "mandatory_fields" : {
+                                         "timestamp" : "",
+                                         "real_userid" : {"source" : "", "user" : ""},
+					 "local_cluster_name" : "",
+					 "updated_settings" : {}
+ 					},
+                   "optional_fields" : {}
+                },
+ 		{  "id" : 16392,
+                   "name" : "individual replication settings update",
+                   "description" : "updated individual replication settings",
+                   "sync" : false,
+                   "enabled" : true,
+                   "mandatory_fields" : {
+                                         "timestamp" : "",
+                                         "real_userid" : {"source" : "", "user" : ""},
+					 "local_cluster_name" : "",                                         
+				         "source_bucket_name" : "",
+                                         "remote_cluster_name" : "",
+                                         "target_bucket_name" : "" ,
+					 "updated_settings" : {}
+ 					},
+                   "optional_fields" : {}
+                }
+		]
+}

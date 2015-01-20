@@ -22,6 +22,14 @@ package service_def
 type XDCRCompTopologySvc interface {
 	//the host name that this xdcr comp is running on
 	MyHost() (string, error)
+	
+	// the address, ip:couchbaseAdminport, of the host that this xdcr comp is running on
+	// note that ip is the public ip of the host, which may not be the same as what MyHost() returns.
+	// this is used as local cluster address by audit
+	MyHostAddr() (string, error)
+	
+	//the address, ip:memcachedport, of the kv that this xdcr comp is running on
+	MyMemcachedAddr() (string, error)
 
 	//the admin port number of this xdcr comp
 	MyAdminPort() (uint16, error)
