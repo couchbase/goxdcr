@@ -17,7 +17,7 @@ import (
 	s "github.com/couchbase/goxdcr/service_impl"
 	base "github.com/couchbase/goxdcr/base"
 
-	"github.com/couchbase/goxdcr/metakv/metakvsanity"
+	"github.com/couchbase/cbauth/metakv/metakvsanity"
 	log "github.com/couchbase/goxdcr/log"
 )
 
