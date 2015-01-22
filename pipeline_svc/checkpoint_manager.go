@@ -286,15 +286,8 @@ func (ckmgr *CheckpointManager) startSeqnoGetter(getter_id int, listOfVbs []uint
 		ckmgr.logger.Debugf("StartSeqnoGetter %v is done\n", getter_id)
 	}()
 
-	//Issues:  MB-13114 - _pre_replicate return found for non-existing seqno 
-	//	1. In failover case, we should be able to check the existing checkpoint record against new vb master
-	//		by setting the vb_uuid to the current uuid and calling _pre_replicate again.But found issues with bucket flash case
-	//		In bucket flash case, _pre_replicate should return 400, but instead it returns 200. It seems it found the seqno
-	//		in dcp failover log. Follow up with ep-engine team. For now, once we got the return from _pre_replicate that vb_uuid does
-	//		not match, we no longer retry to work around the issue
 	for _, vbno := range listOfVbs {
 		var agreeedIndex int = -1
-//		var new_vb_uuid uint64 = ckmgr.currentVBUUID(vbno)
 		ckptDoc, _ := ckptDocs[vbno]
 		
 		//get the existing checkpoint records if they exist, otherwise return an empty ckpt record
@@ -308,11 +301,7 @@ func (ckmgr *CheckpointManager) startSeqnoGetter(getter_id int, listOfVbs []uint
 				
 				//set the target vb uuid from the value returned 
 				var vb_uuid uint64
-//				if new_vb_uuid == 0 {
 					vb_uuid = ckpt_record.Target_vb_uuid
-//				} else {
-//					vb_uuid = new_vb_uuid
-//				}
 				remote_vb_status := &service_def.RemoteVBReplicationStatus{VBUUID: vb_uuid,
 					VBSeqno: ckpt_record.Commitopaque,
 					VBNo:    vbno}

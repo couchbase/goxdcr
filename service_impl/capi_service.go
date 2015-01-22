@@ -38,7 +38,7 @@ type apiRequest struct {
 //		3. _commit_for_checkpoint: ask the remote vbucket to commit and return back the seqno, or if the remote vbucket's UUID
 //								   has changed due to the topology change, in that case, new vb UUID would be returned
 type CAPIService struct {
-	logger             *log.CommonLogger
+	logger *log.CommonLogger
 }
 
 func NewCAPIService(logger_ctx *log.LoggerContext) *CAPIService {
@@ -88,27 +88,28 @@ func (capi_svc *CAPIService) CommitForCheckpoint(remoteBucket *service_def.Remot
 	api_base.body["vb"] = vbno
 	api_base.body["vbopaque"] = remoteVBUUID
 	status_code, respMap, err := capi_svc.send_post(COMMIT_FOR_CKPT_CMD, api_base, HTTP_RETRIES)
-	if err != nil {
-		if status_code == 400 {
-			vb_uuid_val, ok := respMap["vbopaque"]
-			if ok {
-				vb_uuid = uint64(vb_uuid_val.(float64))
-				return 0, vb_uuid, VB_OPAQUE_MISMATCH_ERR
-			} else {
-				capi_svc.logger.Errorf("No vb uuid found in resp. respMap=%v, err=%v\n", respMap, err)
-				return 0, 0, NO_VB_OPAQUE_IN_RESP_ERR
-			}
+	if err == nil && status_code == 400 {
+		vb_uuid_val, ok := respMap["vbopaque"]
+		if ok {
+			vb_uuid = uint64(vb_uuid_val.(float64))
+			return 0, vb_uuid, VB_OPAQUE_MISMATCH_ERR
 		} else {
-			return 0, 0, err
+			capi_svc.logger.Errorf("No vb uuid found in resp. respMap=%v, err=%v\n", respMap, err)
+			return 0, 0, NO_VB_OPAQUE_IN_RESP_ERR
 		}
-	}
+	} else if err == nil && status_code == 200 {
+		remote_seqno_pair, ok := respMap["commitopaque"].([]interface{})
+		if !ok || len(remote_seqno_pair) != 2 {
+			capi_svc.logger.Errorf("No commitopaque found in resp. respMap=%v, err=%v\n", respMap, err)
+			return 0, 0, NO_REMOTE_OPAQUE_IN_RESP_ERR
+		}
 
-	remote_seqno_pair, ok := respMap["commitopaque"].([]interface{})
-	if !ok || len(remote_seqno_pair) != 2 {
-		return 0, 0, NO_REMOTE_OPAQUE_IN_RESP_ERR
+		remote_seqno = uint64(remote_seqno_pair[1].(float64))
+	} else {
+		//error case
+		capi_svc.logger.Errorf("err=%v\n", err)
+		return 0, 0, err
 	}
-
-	remote_seqno = uint64(remote_seqno_pair[1].(float64))
 	return
 }
 
@@ -165,7 +166,7 @@ func (capi_svc *CAPIService) parseMassValidateSeqNosResp(url string, resp_status
 
 func (capi_svc *CAPIService) composeAPIRequestBase(remoteBucket *service_def.RemoteBucketInfo) (*apiRequest, error) {
 	if remoteBucket.RemoteClusterRef == nil || remoteBucket.UUID == "" {
-			return nil, errors.New("Remote Bucket information is not fully populated")
+		return nil, errors.New("Remote Bucket information is not fully populated")
 	}
 	connectionStr, err := remoteBucket.RemoteClusterRef.MyConnectionStr()
 	if err != nil {
@@ -175,7 +176,7 @@ func (capi_svc *CAPIService) composeAPIRequestBase(remoteBucket *service_def.Rem
 	if err != nil {
 		return nil, err
 	}
-	
+
 	couchApiBaseUrl := "http://" + connectionStr
 
 	//	    BodyBase = [{<<"bucket">>, Bucket},
