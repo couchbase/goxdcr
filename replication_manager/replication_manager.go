@@ -1088,15 +1088,14 @@ func constructGenericReplicationFields(realUserId *base.RealUserId) (*base.Gener
 }
 
 func constructReplicationSpecificFieldsFromSpec(spec *metadata.ReplicationSpecification) (*base.ReplicationSpecificFields, error) {
-	//get remote cluster name from remote cluster uuid
-	remoteClusterRef, err := RemoteClusterService().RemoteClusterByUuid(spec.TargetClusterUUID)
+	remoteClusterName, err := getRemoteClusterNameFromClusterUuid(spec.TargetClusterUUID)
 	if err != nil {
 		return nil, err
 	}
 	
 	return &base.ReplicationSpecificFields{ 
 		SourceBucketName:  spec.SourceBucketName,
-		RemoteClusterName: remoteClusterRef.Name,
+		RemoteClusterName: remoteClusterName,
 		TargetBucketName:  spec.TargetBucketName}, nil
 }
 
@@ -1137,10 +1136,20 @@ func constructUpdateDefaultReplicationSettingsEvent(changedSettingsMap *map[stri
 		UpdatedSettings: convertedSettingsMap}, nil
 }
 
+//get remote cluster name from remote cluster uuid
+func getRemoteClusterNameFromClusterUuid (remoteClusterUUID string) (string, error) {
+	remoteClusterRef, err := RemoteClusterService().RemoteClusterByUuid(remoteClusterUUID)
+	if err != nil {
+		return "", err
+	}
+	return remoteClusterRef.Name, nil
+}
+
 func logAuditErrors(err error) {
 	if err != nil {
 		err = utils.NewEnhancedError(base.ErrorWritingAudit, err)
 		logger_rm.Errorf(err.Error())
 	}
 }
+
 

@@ -544,38 +544,6 @@ func DecodeDynamicParamInURL(request *http.Request, pathPrefix string, partName 
 	return unescapedReplId, err
 }
 
-// encode data in a map into a byte array, which can then be used as
-// the body part of a http request
-// so far only five types are supported: string, int, bool, LogLevel, []byte
-// which should be sufficient for all cases at hand
-func EncodeMapIntoByteArray(data map[string]interface{}) ([]byte, error) {
-	if len(data) == 0 {
-		return nil, nil
-	}
-
-	params := make(url.Values)
-	for key, val := range data {
-		var strVal string
-		switch val.(type) {
-		case string:
-			strVal = val.(string)
-		case int:
-			strVal = strconv.FormatInt(int64(val.(int)), base.ParseIntBase)
-		case bool:
-			strVal = strconv.FormatBool(val.(bool))
-		case log.LogLevel:
-			strVal = val.(log.LogLevel).String()
-		case []byte:
-			strVal = string(val.([]byte))
-		default:
-			return nil, utils.IncorrectValueTypeInMapError(key, val, "string/int/bool/LogLevel/[]byte")
-		}
-		params.Add(key, strVal)
-	}
-
-	return []byte(params.Encode()), nil
-}
-
 func verifyFilterExpression(filterExpression string) error {
 	_, err := regexp.Compile(filterExpression)
 	return err

@@ -15,11 +15,11 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/base"
+	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
-	rm "github.com/couchbase/goxdcr/replication_manager"
 	"github.com/couchbase/goxdcr/tests/common"
+	"github.com/couchbase/goxdcr/utils"
 	"io/ioutil"
 	"os"
 )
@@ -29,8 +29,8 @@ var logger *log.CommonLogger = log.NewLogger("remote_cluster_run", log.DefaultLo
 var options struct {
 	sourceKVHost string //source kv host name
 	sourceKVPort uint64 //source kv admin port
-	username string //username
-	password string //password
+	username     string //username
+	password     string //password
 
 	// parameters of remote cluster
 	remoteUuid             string // remote cluster uuid
@@ -371,5 +371,5 @@ func createRequestBody(name, hostname, username, password string, demandEncrypti
 		}
 		params[base.RemoteClusterCertificate] = serverCert
 	}
-	return rm.EncodeMapIntoByteArray(params)
+	return utils.EncodeMapIntoByteArray(params)
 }

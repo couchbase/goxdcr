@@ -12,10 +12,11 @@ package service_impl
 
 import (
 	"encoding/json"
+	"fmt"
+	"github.com/couchbase/cbauth/metakv"
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
-	"github.com/couchbase/cbauth/metakv"
 	"github.com/couchbase/goxdcr/service_def"
 	"sync"
 )
@@ -26,25 +27,29 @@ const (
 )
 
 type ReplicationSpecService struct {
-	metadata_svc service_def.MetadataSvc
-	call_back    service_def.SpecChangedCallback
-	failure_call_back service_def.SpecChangeListenerFailureCallBack
-	logger       *log.CommonLogger
+	metadata_svc       service_def.MetadataSvc
+	uilog_svc          service_def.UILogSvc
+	remote_cluster_svc service_def.RemoteClusterSvc
+	call_back          service_def.SpecChangedCallback
+	failure_call_back  service_def.SpecChangeListenerFailureCallBack
+	logger             *log.CommonLogger
 }
 
-func NewReplicationSpecService(metadata_svc service_def.MetadataSvc, logger_ctx *log.LoggerContext) *ReplicationSpecService {
+func NewReplicationSpecService(uilog_svc service_def.UILogSvc, remote_cluster_svc service_def.RemoteClusterSvc, metadata_svc service_def.MetadataSvc, logger_ctx *log.LoggerContext) *ReplicationSpecService {
 	return &ReplicationSpecService{
-		metadata_svc: metadata_svc,
-		logger:       log.NewLogger("ReplicationSpecService", logger_ctx),
+		metadata_svc:       metadata_svc,
+		uilog_svc:          uilog_svc,
+		remote_cluster_svc: remote_cluster_svc,
+		logger:             log.NewLogger("ReplicationSpecService", logger_ctx),
 	}
 }
 
-func (service *ReplicationSpecService) StartSpecChangedCallBack(call_back service_def.SpecChangedCallback, failure_call_back service_def.SpecChangeListenerFailureCallBack, 
-      cancel <-chan struct{}, waitGrp *sync.WaitGroup) error {
+func (service *ReplicationSpecService) StartSpecChangedCallBack(call_back service_def.SpecChangedCallback, failure_call_back service_def.SpecChangeListenerFailureCallBack,
+	cancel <-chan struct{}, waitGrp *sync.WaitGroup) error {
 	// start listening to changed to specs
 	service.call_back = call_back
 	service.failure_call_back = failure_call_back
-	
+
 	replSpecCatalogPath := GetCatalogPathFromCatalogKey(ReplicationSpecsCatalogKey)
 
 	waitGrp.Add(1)
@@ -82,7 +87,12 @@ func (service *ReplicationSpecService) AddReplicationSpec(spec *metadata.Replica
 	if err != nil {
 		return err
 	}
-	return service.metadata_svc.AddWithCatalog(ReplicationSpecsCatalogKey, key, value)
+	err = service.metadata_svc.AddWithCatalog(ReplicationSpecsCatalogKey, key, value)
+	if err != nil {
+		return err
+	}
+	service.writeUiLog(spec, "created")
+	return nil
 }
 
 func (service *ReplicationSpecService) SetReplicationSpec(spec *metadata.ReplicationSpecification) error {
@@ -95,11 +105,21 @@ func (service *ReplicationSpecService) SetReplicationSpec(spec *metadata.Replica
 }
 
 func (service *ReplicationSpecService) DelReplicationSpec(replicationId string) error {
+	spec, err := service.ReplicationSpec(replicationId)
+	if err != nil {
+		return err
+	}
 	_, rev, err := service.metadata_svc.Get(replicationId)
 	if err != nil {
 		return err
 	}
-	return service.metadata_svc.DelWithCatalog(ReplicationSpecsCatalogKey, replicationId, rev)
+	err = service.metadata_svc.DelWithCatalog(ReplicationSpecsCatalogKey, replicationId, rev)
+	if err != nil {
+		return err
+	}
+
+	service.writeUiLog(spec, "removed")
+	return nil
 }
 
 func (service *ReplicationSpecService) ActiveReplicationSpecs() (map[string]*metadata.ReplicationSpecification, error) {
@@ -161,8 +181,8 @@ func (service *ReplicationSpecService) metakvCallback(path string, value []byte,
 
 	if service.call_back != nil {
 		spec, err := constructReplicationSpec(value, rev)
-		if err != nil {	
-			// should never get here. 
+		if err != nil {
+			// should never get here.
 			service.logger.Errorf("Error marshaling replication spec. value=%v, err=%v\n", string(value), err)
 			return err
 		}
@@ -174,7 +194,18 @@ func (service *ReplicationSpecService) metakvCallback(path string, value []byte,
 		// do not return err since we do not want RunObserveChildren to abort
 		return nil
 	}
-		
+
 	return nil
 
+}
+
+func (service *ReplicationSpecService) writeUiLog(spec *metadata.ReplicationSpecification, action string) {
+	remoteClusterRef, err := service.remote_cluster_svc.RemoteClusterByUuid(spec.TargetClusterUUID)
+	if err != nil {
+		service.logger.Errorf("Cannot find remote cluster with uuid %s\n", spec.TargetClusterUUID)
+		return
+	}
+
+	uiLogMsg := fmt.Sprintf("Replication from bucket \"%s\" to bucket \"%s\" on cluster \"%s\" %s.", spec.SourceBucketName, spec.TargetBucketName, remoteClusterRef.Name, action)
+	service.uilog_svc.Write(uiLogMsg)
 }

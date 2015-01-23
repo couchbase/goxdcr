@@ -140,10 +140,14 @@ func setup() error {
 		fmt.Printf("Error starting audit service. err=%v\n", err)
 		os.Exit(1)
 	}
+	
+	uilog_svc := s.NewUILogSvc(top_svc, nil)
+	remote_cluster_svc := s.NewRemoteClusterService(uilog_svc, metadata_svc, nil)
+	repl_spec_svc := s.NewReplicationSpecService(uilog_svc, remote_cluster_svc, metadata_svc, nil)
 
 	replication_manager.StartReplicationManager(options.source_kv_host, base.AdminportNumber,
-		s.NewReplicationSpecService(metadata_svc, nil),
-		s.NewRemoteClusterService(metadata_svc, nil),
+		repl_spec_svc,
+		remote_cluster_svc,
 		s.NewClusterInfoSvc(nil), top_svc, s.NewReplicationSettingsSvc(metadata_svc, nil), s.NewCheckpointsService(metadata_svc, nil), s.NewCAPIService(nil), audit_svc)
 
 	logger.Info("Finish setup")

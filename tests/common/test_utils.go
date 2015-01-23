@@ -7,7 +7,6 @@ import (
 	"io/ioutil"
 	"reflect"
 	"bytes"
-	rm "github.com/couchbase/goxdcr/replication_manager"
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/utils"
 	"github.com/couchbase/goxdcr/metadata"
@@ -128,7 +127,7 @@ func CreateTestRemoteClusterThroughRest(sourceKVHost string, adminport uint64, r
 		params[base.RemoteClusterCertificate] = serverCert
 	}
 
-	paramsBytes, err := rm.EncodeMapIntoByteArray(params)
+	paramsBytes, err := utils.EncodeMapIntoByteArray(params)
 	if err != nil {
 		return err
 	}

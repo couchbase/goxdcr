@@ -31,12 +31,14 @@ const (
 
 type RemoteClusterService struct {
 	metadata_svc service_def.MetadataSvc
+	uilog_svc    service_def.UILogSvc
 	logger       *log.CommonLogger
 }
 
-func NewRemoteClusterService(metadata_svc service_def.MetadataSvc, logger_ctx *log.LoggerContext) *RemoteClusterService {
+func NewRemoteClusterService(uilog_svc service_def.UILogSvc, metadata_svc service_def.MetadataSvc, logger_ctx *log.LoggerContext) *RemoteClusterService {
 	return &RemoteClusterService{
 		metadata_svc: metadata_svc,
+		uilog_svc:    uilog_svc,
 		logger:       log.NewLogger("RemoteClusterService", logger_ctx),
 	}
 }
@@ -80,8 +82,14 @@ func (service *RemoteClusterService) AddRemoteCluster(ref *metadata.RemoteCluste
 		return err
 	}
 
-	return service.addRemoteCluster(ref)
-	
+	err = service.addRemoteCluster(ref)
+	if err != nil {
+		return err
+	}
+
+	uiLogMsg := fmt.Sprintf("Created remote cluster reference \"%s\" via %s.", ref.Name, ref.HostName)
+	service.uilog_svc.Write(uiLogMsg)
+	return nil
 }
 
 func (service *RemoteClusterService) SetRemoteCluster(refName string, ref *metadata.RemoteClusterReference) error {
@@ -105,16 +113,33 @@ func (service *RemoteClusterService) SetRemoteCluster(refName string, ref *metad
 			return err
 		}
 		service.logger.Debugf("Remote cluster being changed: key=%v, value=%v\n", key, string(value))
-		return service.metadata_svc.Set(key, value, oldRef.Revision)
+		err = service.metadata_svc.Set(key, value, oldRef.Revision)
+		if err != nil {
+			return err
+		}
 	} else {
 		// if id of the remote cluster reference has been changed, delete the existing reference and create a new one
 		err = service.metadata_svc.DelWithCatalog(RemoteClustersCatalogKey, oldRef.Id, oldRef.Revision)
 		if err != nil {
 			return err
 		}
-		return service.addRemoteCluster(ref)
+		err = service.addRemoteCluster(ref)
+		if err != nil {
+			return err
+		}
 	}
 
+	nameChangeMsg := ""
+	hostnameChangeMsg := ""
+	if oldRef.Name != ref.Name {
+		nameChangeMsg = fmt.Sprintf(" New name is \"%s\".", ref.Name)
+	}
+	if oldRef.HostName != ref.HostName {
+		hostnameChangeMsg = fmt.Sprintf(" New contact point is %s.", ref.HostName)
+	}
+	uiLogMsg := fmt.Sprintf("Remote cluster reference \"%s\" updated.%s%s", oldRef.Name, nameChangeMsg, hostnameChangeMsg)
+	service.uilog_svc.Write(uiLogMsg)
+	return nil
 }
 
 func (service *RemoteClusterService) DelRemoteCluster(refName string) error {
@@ -125,7 +150,14 @@ func (service *RemoteClusterService) DelRemoteCluster(refName string) error {
 	}
 	key := ref.Id
 
-	return service.metadata_svc.DelWithCatalog(RemoteClustersCatalogKey, key, ref.Revision)
+	err = service.metadata_svc.DelWithCatalog(RemoteClustersCatalogKey, key, ref.Revision)
+	if err != nil {
+		return err
+	}
+
+	uiLogMsg := fmt.Sprintf("Remote cluster reference \"%s\" known via %s removed.", ref.Name, ref.HostName)
+	service.uilog_svc.Write(uiLogMsg)
+	return nil
 }
 
 func (service *RemoteClusterService) RemoteClusters() (map[string]*metadata.RemoteClusterReference, error) {
@@ -176,7 +208,7 @@ func (service *RemoteClusterService) ValidateRemoteCluster(ref *metadata.RemoteC
 	} else {
 		hostAddr = utils.EnforcePrefix("http://", hostAddr)
 	}
-	
+
 	err, statusCode := utils.QueryRestApiWithAuth(hostAddr, base.PoolsPath, ref.UserName, ref.Password, base.MethodGet, "", nil, &poolsInfo, service.logger, ref.Certificate)
 	if err != nil || statusCode != 200 {
 		service.logger.Errorf("err=%v, statusCode=%v\n", err, statusCode)

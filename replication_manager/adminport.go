@@ -253,20 +253,23 @@ func (adminport *Adminport) doChangeRemoteClusterRequest(request *http.Request) 
 
 	logger_ap.Infof("Request params: justValidate=%v, remoterClusterRef=%v\n",
 		justValidate, *remoteClusterRef)
+		
+	remoteClusterService := RemoteClusterService()
 
 	if justValidate {
-		err = RemoteClusterService().ValidateRemoteCluster(remoteClusterRef)
+		err = remoteClusterService.ValidateRemoteCluster(remoteClusterRef)
 		if err != nil {
 			return nil, err
 		} else {
 			return nil, nil
 		}
 	} else {
-		err = RemoteClusterService().SetRemoteCluster(remoteClusterName, remoteClusterRef)
+		err = remoteClusterService.SetRemoteCluster(remoteClusterName, remoteClusterRef)
 		if err != nil {
 			return nil, err
 		} else {
 			writeRemoteClusterAuditEvent(base.UpdateRemoteClusterRefEventId, remoteClusterRef, getRealUserIdFromRequest(request))
+			
 			return NewCreateRemoteClusterResponse(remoteClusterRef)
 		}
 	}
@@ -627,3 +630,4 @@ func getRealUserIdFromRequest(request *http.Request) *base.RealUserId {
 	// TODO get source from creds
 	return &base.RealUserId{"internal", creds.Name()}
 }
+

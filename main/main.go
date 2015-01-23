@@ -64,7 +64,7 @@ func usage() {
 func main() {
 	argParse()
 
-	// initializes logger 
+	// initializes logger
 	if options.logFileDir != "" {
 		log.Init(options.logFileDir, options.maxLogFileSize, options.maxNumberOfLogFiles)
 	}
@@ -94,18 +94,22 @@ func main() {
 		os.Exit(1)
 	}
 
+	uilog_svc := s.NewUILogSvc(top_svc, nil)
+	remote_cluster_svc := s.NewRemoteClusterService(uilog_svc, metadata_svc, nil)
+	repl_spec_svc := s.NewReplicationSpecService(uilog_svc, remote_cluster_svc, metadata_svc, nil)
+
 	if options.isConvert {
 		fmt.Println("Starting replication manager in conversion/upgrade mode.")
 		// start replication manager in conversion/upgrade mode
 		rm.StartReplicationManagerForConversion(
-			s.NewReplicationSpecService(metadata_svc, nil),
-			s.NewRemoteClusterService(metadata_svc, nil))
+			repl_spec_svc,
+			remote_cluster_svc)
 	} else {
 		// start replication manager in normal mode
 		rm.StartReplicationManager(host,
 			uint16(options.xdcrRestPort),
-			s.NewReplicationSpecService(metadata_svc, nil),
-			s.NewRemoteClusterService(metadata_svc, nil),
+			repl_spec_svc,
+			remote_cluster_svc,
 			s.NewClusterInfoSvc(nil),
 			top_svc,
 			s.NewReplicationSettingsSvc(metadata_svc, nil),

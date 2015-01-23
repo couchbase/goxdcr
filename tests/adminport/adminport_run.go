@@ -18,6 +18,7 @@ import (
 	base "github.com/couchbase/goxdcr/base"
 	rm "github.com/couchbase/goxdcr/replication_manager"
 	"github.com/couchbase/goxdcr/tests/common"
+	"github.com/couchbase/goxdcr/utils"
 	"io/ioutil"
 	"net/http"
 	"net/url"
@@ -190,7 +191,7 @@ func testInternalSettings() error {
 	params := make(map[string]interface{})
 	params[rm.ConvertRestKeyToRestInternalKey(rm.BatchSize)] = BatchSizeInternal
 
-	paramsBytes, _ := rm.EncodeMapIntoByteArray(params)
+	paramsBytes, _ := utils.EncodeMapIntoByteArray(params)
 
 	_, err := common.SendRequestAndValidateResponse("testChangeInternalSettings", base.MethodPost, url, paramsBytes, options.username, options.password)
 	if err != nil {
@@ -220,7 +221,7 @@ func testDefaultReplicationSettingsWithJustValidate() error {
 	params := make(map[string]interface{})
 	params[rm.BatchSize] = BatchSizeDefault
 
-	paramsBytes, _ := rm.EncodeMapIntoByteArray(params)
+	paramsBytes, _ := utils.EncodeMapIntoByteArray(params)
 
 	_, err := common.SendRequestAndValidateResponse("testChangeDefaultReplicationSettingsWithJustValidate", base.MethodPost, url, paramsBytes, options.username, options.password)
 	if err != nil {
@@ -250,7 +251,7 @@ func testDefaultReplicationSettings() error {
 	params := make(map[string]interface{})
 	params[rm.BatchSize] = BatchSizeDefault
 
-	paramsBytes, _ := rm.EncodeMapIntoByteArray(params)
+	paramsBytes, _ := utils.EncodeMapIntoByteArray(params)
 
 	_, err := common.SendRequestAndValidateResponse("testChangeDefaultReplicationSettings", base.MethodPost, url, paramsBytes, options.username, options.password)
 	if err != nil {
@@ -279,7 +280,7 @@ func testCreateReplication() (string, string, error) {
 	params[rm.ToBucket] = options.targetBucket
 	params[rm.BatchCount] = BatchCount
 
-	paramsBytes, _ := rm.EncodeMapIntoByteArray(params)
+	paramsBytes, _ := utils.EncodeMapIntoByteArray(params)
 
 	response, err := common.SendRequestAndValidateResponse("testCreateReplication", base.MethodPost, restUrl, paramsBytes, options.username, options.password)
 	if err != nil {
@@ -404,7 +405,7 @@ func testPauseReplication(replicationId, escapedReplId string) error {
 
 	settings := make(map[string]interface{})
 	settings[rm.PauseRequested] = true
-	paramsBytes, _ := rm.EncodeMapIntoByteArray(settings)
+	paramsBytes, _ := utils.EncodeMapIntoByteArray(settings)
 
 	_, err := common.SendRequestWithEscapedIdAndValidateResponse("testPauseReplication", base.MethodPost, url, escapedReplId, paramsBytes, options.username, options.password)
 
@@ -425,7 +426,7 @@ func testResumeReplication(replicationId, escapedReplId string) error {
 
 	settings := make(map[string]interface{})
 	settings[rm.PauseRequested] = false
-	paramsBytes, _ := rm.EncodeMapIntoByteArray(settings)
+	paramsBytes, _ := utils.EncodeMapIntoByteArray(settings)
 
 	_, err := common.SendRequestWithEscapedIdAndValidateResponse("testResumeReplication", base.MethodPost, url, escapedReplId, paramsBytes, options.username, options.password)
 	if err != nil {
@@ -480,7 +481,7 @@ func testReplicationSettingsWithJustValidate(escapedReplId string) error {
 	// specify just_validate in request body
 	params[base.JustValidate] = true
 
-	paramsBytes, _ := rm.EncodeMapIntoByteArray(params)
+	paramsBytes, _ := utils.EncodeMapIntoByteArray(params)
 
 	_, err := common.SendRequestWithEscapedIdAndValidateResponse(testName, base.MethodPost, url, escapedReplId, paramsBytes, options.username, options.password)
 	if err != nil {
@@ -512,7 +513,7 @@ func testReplicationSettings(escapedReplId string) error {
 	params := make(map[string]interface{})
 	params[rm.BatchSize] = BatchSizePerRepl
 
-	paramsBytes, _ := rm.EncodeMapIntoByteArray(params)
+	paramsBytes, _ := utils.EncodeMapIntoByteArray(params)
 
 	_, err := common.SendRequestWithEscapedIdAndValidateResponse(testName, base.MethodPost, url, escapedReplId, paramsBytes, options.username, options.password)
 

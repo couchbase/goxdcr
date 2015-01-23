@@ -100,9 +100,10 @@ func invokeFactory() error {
 		fmt.Printf("Error starting audit service. err=%v\n", err)
 		os.Exit(1)
 	}
-
-	repl_spec_svc := s.NewReplicationSpecService(msvc, nil)
-	remote_cluster_svc := s.NewRemoteClusterService(msvc, nil)
+	
+	uilog_svc := s.NewUILogSvc(top_svc, nil)
+	remote_cluster_svc := s.NewRemoteClusterService(uilog_svc, msvc, nil)
+	repl_spec_svc := s.NewReplicationSpecService(uilog_svc, remote_cluster_svc, msvc, nil)
 	cluster_info_svc := s.NewClusterInfoSvc(nil)
 	checkpoints_svc := s.NewCheckpointsService(msvc, nil)
 	capi_svc := s.NewCAPIService(nil)

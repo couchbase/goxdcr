@@ -140,3 +140,14 @@ const (
 )
 
 var ErrorsStatsKey = "Errors"
+
+// ui log related constants
+var UILogPath = "_log"
+var UILogRetry = 3
+var UILogMessageKey = "message"
+var UILogLogLevelKey = "logLevel"
+var UILogComponentKey = "component"
+// so far all xdcr logs are of info level, thus we can hardcode it here
+var UILogXDCRLogLevel = "info"
+var UILogXDCRComponent = "xdcr"
+
