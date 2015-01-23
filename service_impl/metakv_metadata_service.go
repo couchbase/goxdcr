@@ -13,7 +13,7 @@ package service_impl
 import (
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
-	"github.com/couchbase/goxdcr/metakv"
+	"github.com/couchbase/cbauth/metakv"
 	"github.com/couchbase/goxdcr/service_def"
 	"strings"
 )

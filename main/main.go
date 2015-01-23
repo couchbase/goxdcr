@@ -17,7 +17,6 @@ import (
 	s "github.com/couchbase/goxdcr/service_impl"
 	base "github.com/couchbase/goxdcr/base"
 
-	"github.com/couchbase/goxdcr/metakv/metakvsanity"
 	log "github.com/couchbase/goxdcr/log"
 )
 
@@ -65,8 +64,6 @@ func usage() {
 
 func main() {
 	argParse()
-
-	metakvsanity.MaybeRun()
 
 	// initializes logger 
 	if options.logFileDir != "" {
