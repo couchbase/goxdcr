@@ -383,6 +383,31 @@ func (ckmgr *CheckpointManager) populateFailoverUUIDs(failoverlogMap couchbase.F
 	return nil
 }
 
+type failoverLogRetriever struct {
+	listOfVbs        []uint16
+	sourceBucket     *couchbase.Bucket
+	cur_failover_log couchbase.FailoverLog
+	logger           *log.CommonLogger
+}
+
+func newFailoverLogRetriever(listOfVbs []uint16, sourceBucket *couchbase.Bucket, logger *log.CommonLogger) *failoverLogRetriever {
+	return &failoverLogRetriever{listOfVbs: listOfVbs,
+		sourceBucket:     sourceBucket,
+		cur_failover_log: nil,
+		logger:           logger}
+}
+
+func (retriever *failoverLogRetriever) getFailiverLog() (err error) {
+	retriever.cur_failover_log, err = retriever.sourceBucket.GetFailoverLogs(retriever.listOfVbs)
+	if err != nil {
+		//the err returned is too long
+		err = errors.New(fmt.Sprintf("Failed to get FailoverLogs for %v", retriever.listOfVbs))
+		return
+	}
+	retriever.logger.Debugf("failoverlogMap=%v\n", retriever.cur_failover_log)
+	return nil
+}
+
 func (ckmgr *CheckpointManager) getFailoverLogAndHighSeqno() (couchbase.FailoverLog, map[uint16]uint64, error) {
 	topic := ckmgr.pipeline.Topic()
 	spec, err := ckmgr.rep_spec_svc.ReplicationSpec(topic)
@@ -398,15 +423,13 @@ func (ckmgr *CheckpointManager) getFailoverLogAndHighSeqno() (couchbase.Failover
 	defer bucket.Close()
 	ckmgr.logger.Debugf("Got the bucket %v\n", sourcBucketName)
 
-	listOfvbs := ckmgr.getMyVBs()
-	failoverlogMap, err := bucket.GetFailoverLogs(listOfvbs)
+	//Get failover log can hang, timeout the executation if it takes too long.
+	failoverLogRetriever := newFailoverLogRetriever(ckmgr.getMyVBs(), bucket, ckmgr.logger)
+	err = utils.ExecWithTimeout(failoverLogRetriever.getFailiverLog, 1*time.Minute, ckmgr.logger)	
 	if err != nil {
-		//the err returned is too long
-		err = errors.New(fmt.Sprintf("Failed to get FailoverLogs for %v", listOfvbs))
-		return nil, nil, err
+		return nil, nil, errors.New("Failed to get failover log in 1 minute")
 	}
-	ckmgr.logger.Debugf("failoverlogMap=%v\n", failoverlogMap)
-
+	
 	//GetStats(which string) map[string]map[string]string
 	statsMap := bucket.GetStats(base.VBUCKET_SEQNO_STAT_NAME)
 
@@ -418,7 +441,7 @@ func (ckmgr *CheckpointManager) getFailoverLogAndHighSeqno() (couchbase.Failover
 		}
 		utils.ParseHighSeqnoStat(vbnos, statsMapForServer, vb_highseqno_map)
 	}
-	return failoverlogMap, vb_highseqno_map, nil
+	return failoverLogRetriever.cur_failover_log, vb_highseqno_map, nil
 }
 
 func (ckmgr *CheckpointManager) retrieveCkptDoc(vbno uint16) (*metadata.CheckpointsDoc, error) {

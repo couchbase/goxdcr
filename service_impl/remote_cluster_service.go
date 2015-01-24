@@ -462,7 +462,7 @@ func (service *RemoteClusterService) refresh(ref *metadata.RemoteClusterReferenc
 
 //get remote cluster name from remote cluster uuid. Return unknown if remote cluster cannot be found
 func (service *RemoteClusterService) GetRemoteClusterNameFromClusterUuid(uuid string) string {
-	remoteClusterRef, err := service.RemoteClusterByUuid(uuid, true)
+	remoteClusterRef, err := service.RemoteClusterByUuid(uuid, false)
 	if err != nil || remoteClusterRef == nil {
 		errMsg := fmt.Sprintf("Error getting the name of the remote cluster with uuid=%v.", uuid)
 		if err != nil {

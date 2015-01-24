@@ -23,9 +23,11 @@ import (
 )
 
 //the function can construct part specific settings for the pipeline
-type PartsSettingsConstructor func(pipeline common.Pipeline, part common.Part, pipeline_settings map[string]interface{}, ts map[uint16]*base.VBTimestamp) (map[string]interface{}, error)
+type PartsSettingsConstructor func(pipeline common.Pipeline, part common.Part, pipeline_settings map[string]interface{}, ts map[uint16]*base.VBTimestamp, targetClusterref *metadata.RemoteClusterReference) (map[string]interface{}, error)
 
 type StartingSeqnoConstructor func(pipeline common.Pipeline) (map[uint16]*base.VBTimestamp, error)
+
+type RemoteClsuterRefRetriever func(remoteClusterUUID string, refresh bool) (*metadata.RemoteClusterReference, error)
 
 //GenericPipeline is the generic implementation of a data processing pipeline
 //
@@ -55,6 +57,8 @@ type GenericPipeline struct {
 	partSetting_constructor PartsSettingsConstructor
 
 	startingSeqno_constructor StartingSeqnoConstructor
+	
+	remoteClusterRef_retriever RemoteClsuterRefRetriever
 
 	//the map that contains the references to all parts used in the pipeline
 	//it only populated when GetAllParts called the first time
@@ -83,18 +87,33 @@ func (genericPipeline *GenericPipeline) SetRuntimeContext(ctx common.PipelineRun
 	genericPipeline.context = ctx
 }
 
-func (genericPipeline *GenericPipeline) startPart(part common.Part, settings map[string]interface{}, ts map[uint16]*base.VBTimestamp) error {
+func (genericPipeline *GenericPipeline) startPart(part common.Part, settings map[string]interface{}, ts map[uint16]*base.VBTimestamp, targetClusterRef *metadata.RemoteClusterReference) error {
 	var err error = nil
 
 	//start downstreams
 	if part.Connector() != nil {
 		downstreamParts := part.Connector().DownStreams()
+		waitGrp := &sync.WaitGroup{}
+		errMap := make(map[string]error)
 		for _, p := range downstreamParts {
-			if p.State() == common.Part_Initial {
-				err = genericPipeline.startPart(p, settings, ts)
-				if err != nil {
-					return err
+			waitGrp.Add(1)
+			go func(waitGrp *sync.WaitGroup, errMap map[string]error, p common.Part, settings map[string]interface{}, ts map[uint16]*base.VBTimestamp) {
+				defer waitGrp.Done()
+				if p.State() == common.Part_Initial {
+					err = genericPipeline.startPart(p, settings, ts, targetClusterRef)
+					if err != nil {
+						errMap[p.Id()] = err
+					}
 				}
+			}(waitGrp, errMap, p, settings, ts)
+		}
+
+		waitGrp.Wait()
+
+		if len(errMap) > 0{
+			for _, err := range errMap {
+				//return the first error
+				return err
 			}
 		}
 	}
@@ -102,7 +121,7 @@ func (genericPipeline *GenericPipeline) startPart(part common.Part, settings map
 	partSettings := settings
 	if genericPipeline.partSetting_constructor != nil {
 		genericPipeline.logger.Debugf("Calling part setting constructor\n")
-		partSettings, err = genericPipeline.partSetting_constructor(genericPipeline, part, settings, ts)
+		partSettings, err = genericPipeline.partSetting_constructor(genericPipeline, part, settings, ts, targetClusterRef)
 		if err != nil {
 			return err
 		}
@@ -119,7 +138,7 @@ func (genericPipeline *GenericPipeline) startPart(part common.Part, settings map
 //settings - a map of parameter to start the pipeline. it can contain initialization paramters
 //			 for each processing steps and for runtime context of the pipeline.
 func (genericPipeline *GenericPipeline) Start(settings map[string]interface{}) error {
-	genericPipeline.logger.Infof("Starting pipeline %s %s settings = %s\n", genericPipeline.Topic(), genericPipeline.Layout(), fmt.Sprint(settings))
+	genericPipeline.logger.Infof("Starting pipeline %s\n %s \n settings = %s\n", genericPipeline.Topic(), genericPipeline.Layout(), fmt.Sprint(settings))
 	var err error
 
 	err = genericPipeline.SetState(common.Pipeline_Starting)
@@ -131,6 +150,12 @@ func (genericPipeline *GenericPipeline) Start(settings map[string]interface{}) e
 	//get starting vb timestamp
 	ts, err := genericPipeline.startingSeqno_constructor(genericPipeline)
 	if err != nil {
+		return err
+	}
+
+	targetClusterRef, err := genericPipeline.remoteClusterRef_retriever(genericPipeline.spec.TargetClusterUUID, true)
+	if err != nil {
+		genericPipeline.logger.Errorf("Error getting remote cluster with uuid=%v, err=%v\n", genericPipeline.spec.TargetClusterUUID, err)
 		return err
 	}
 
@@ -153,7 +178,7 @@ func (genericPipeline *GenericPipeline) Start(settings map[string]interface{}) e
 		waitGrp.Add(1)
 		go func(errMap map[string]error, source common.Nozzle, settings map[string]interface{}, waitGrp *sync.WaitGroup) {
 			defer waitGrp.Done()
-			err = genericPipeline.startPart(source, settings, ts)
+			err = genericPipeline.startPart(source, settings, ts, targetClusterRef)
 			if err != nil {
 				errMap[source.Id()] = err
 			} else {
@@ -340,6 +365,7 @@ func NewPipelineWithSettingConstructor(t string,
 	spec *metadata.ReplicationSpecification,
 	partsSettingsConstructor PartsSettingsConstructor,
 	startingSeqnoConstructor StartingSeqnoConstructor,
+	remoteClusterRefRetriever RemoteClsuterRefRetriever, 
 	logger_context *log.LoggerContext) *GenericPipeline {
 	pipeline := &GenericPipeline{topic: t,
 		sources: sources,
@@ -347,6 +373,7 @@ func NewPipelineWithSettingConstructor(t string,
 		spec:    spec,
 		partSetting_constructor:   partsSettingsConstructor,
 		startingSeqno_constructor: startingSeqnoConstructor,
+		remoteClusterRef_retriever: remoteClusterRefRetriever, 
 		logger:      log.NewLogger("GenericPipeline", logger_context),
 		instance_id: time.Now().Nanosecond(),
 		state:       common.Pipeline_Initial}

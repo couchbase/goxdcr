@@ -59,6 +59,8 @@ type baseConfig struct {
 	//exceeding this number indicate the possibility of stuck
 	//due to network issues
 	maxIdleCount int
+	connPoolNamePrefix string
+	connPoolSize int
 	connectStr string
 	username   string
 	password   string

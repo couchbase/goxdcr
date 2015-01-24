@@ -71,7 +71,9 @@ func (ci_svc *ClusterInfoSvc) GetServerVBucketsMap(clusterConnInfoProvider base.
 		}
 	}()
 
-	ci_svc.logger.Debugf("ServerList=%v\n", bucket.VBServerMap().ServerList)
+	if bucket == nil {
+		panic("Failed to get bucket")
+	}
 	serverVBMap, err := bucket.GetVBmap(bucket.VBServerMap().ServerList)
 
 	return serverVBMap, err

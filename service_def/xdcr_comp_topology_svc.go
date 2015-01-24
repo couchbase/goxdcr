@@ -33,6 +33,9 @@ type XDCRCompTopologySvc interface {
 
 	//the admin port number of this xdcr comp
 	MyAdminPort() (uint16, error)
+	
+	//the local proxy port
+	MyProxyPort() (uint16, error)
 
 	//the list of kv nodes (hostname:port) that this xdcr comp is responsible for
 	MyKVNodes() ([]string, error)

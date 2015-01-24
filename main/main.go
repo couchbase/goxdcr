@@ -24,9 +24,11 @@ var done = make(chan bool)
 var options struct {
 	sourceKVAdminPort uint64 //source kv admin port
 	xdcrRestPort      uint64 // port number of XDCR rest server
-	gometaRequestPort uint64 // gometa request port
-	isEnterprise      bool   // whether couchbase is of enterprise edition
-	isConvert         bool   // whether xdcr is running in conversion/upgrade mode
+
+	sslProxyUpstreamPort        uint64// gometa request port
+	isEnterprise    bool  // whether couchbase is of enterprise edition
+	isConvert    bool  // whether xdcr is running in conversion/upgrade mode
+	
 
 	// logging related parameters
 	logFileDir          string
@@ -39,8 +41,8 @@ func argParse() {
 		"admin port number for source kv")
 	flag.Uint64Var(&options.xdcrRestPort, "xdcrRestPort", uint64(base.AdminportNumber),
 		"port number of XDCR rest server")
-	flag.Uint64Var(&options.gometaRequestPort, "gometaRequestPort", uint64(base.GometaRequestPortNumber),
-		"port number for gometa requests")
+	flag.Uint64Var(&options.sslProxyUpstreamPort, "localProxyPort", 0,
+		"port number for ssl proxy upstream port")
 	flag.BoolVar(&options.isEnterprise, "isEnterprise", true,
 		"whether couchbase is of enterprise edition")
 	flag.BoolVar(&options.isConvert, "isConvert", false,
@@ -69,7 +71,7 @@ func main() {
 		log.Init(options.logFileDir, options.maxLogFileSize, options.maxNumberOfLogFiles)
 	}
 
-	top_svc, err := s.NewXDCRTopologySvc(uint16(options.sourceKVAdminPort), uint16(options.xdcrRestPort), options.isEnterprise, nil)
+	top_svc, err := s.NewXDCRTopologySvc(uint16(options.sourceKVAdminPort), uint16(options.xdcrRestPort), uint16(options.sslProxyUpstreamPort), options.isEnterprise, nil)
 	if err != nil {
 		fmt.Printf("Error starting xdcr topology service. err=%v\n", err)
 		os.Exit(1)

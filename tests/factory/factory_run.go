@@ -77,7 +77,7 @@ func main() {
 }
 
 func invokeFactory() error {
-	top_svc, err := s.NewXDCRTopologySvc(uint16(options.sourceKVAdminPort), base.AdminportNumber, true, nil)
+	top_svc, err := s.NewXDCRTopologySvc(uint16(options.sourceKVAdminPort), base.AdminportNumber, 12001, true, nil)
 	if err != nil {
 		fmt.Printf("Error starting xdcr topology service. err=%v\n", err)
 		os.Exit(1)

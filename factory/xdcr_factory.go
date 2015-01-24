@@ -12,6 +12,8 @@ import (
 	pctx "github.com/couchbase/goxdcr/pipeline_ctx"
 	"github.com/couchbase/goxdcr/pipeline_svc"
 	"github.com/couchbase/goxdcr/pipeline_utils"
+	"github.com/couchbase/goxdcr/capi_utils"
+	"github.com/couchbase/goxdcr/utils"
 	"github.com/couchbase/goxdcr/service_def"
 	"github.com/couchbase/goxdcr/supervisor"
 	"math"
@@ -118,7 +120,7 @@ func (xdcrf *XDCRFactory) NewPipeline(topic string) (common.Pipeline, error) {
 	}
 
 	// construct pipeline
-	pipeline := pp.NewPipelineWithSettingConstructor(topic, sourceNozzles, outNozzles, spec, xdcrf.ConstructSettingsForPart, xdcrf.StartSeqno, logger_ctx)
+	pipeline := pp.NewPipelineWithSettingConstructor(topic, sourceNozzles, outNozzles, spec, xdcrf.ConstructSettingsForPart, xdcrf.StartSeqno, xdcrf.remote_cluster_svc.RemoteClusterByUuid, logger_ctx)
 	if pipelineContext, err := pctx.NewWithSettingConstructor(pipeline, xdcrf.ConstructSettingsForService, xdcrf.StartSeqno, logger_ctx); err != nil {
 		return nil, err
 	} else {
@@ -262,7 +264,7 @@ func (xdcrf *XDCRFactory) constructOutgoingNozzles(spec *metadata.ReplicationSpe
 	xdcrf.logger.Debugf("Target topology retrived. kvVBMap = %v\n", kvVBMap)
 
 	var vbCouchApiBaseMap map[uint16]string
-
+	
 	for kvaddr, kvVBList := range kvVBMap {
 		nozzleType, err := xdcrf.getNozzleType(kvaddr, spec)
 		if err != nil {
@@ -272,7 +274,7 @@ func (xdcrf *XDCRFactory) constructOutgoingNozzles(spec *metadata.ReplicationSpe
 		isCapiNozzle := (nozzleType == base.Capi)
 		if isCapiNozzle && len(vbCouchApiBaseMap) == 0 {
 			// construct vbCouchApiBaseMap only when nessary and only once
-			vbCouchApiBaseMap, err = ConstructVBCouchApiBaseMap(targetBucket, targetClusterRef)
+			vbCouchApiBaseMap, err = capi_utils.ConstructVBCouchApiBaseMap(targetBucket, targetClusterRef)
 			if err != nil {
 				xdcrf.logger.Errorf("Failed to construct vbCouchApiBase map, err=%v\n", err)
 				return nil, nil, err
@@ -313,7 +315,8 @@ func (xdcrf *XDCRFactory) constructOutgoingNozzles(spec *metadata.ReplicationSpe
 					return nil, nil, err
 				}
 			} else {
-				outNozzle = xdcrf.constructXMEMNozzle(spec.Id, kvaddr, targetBucketName, bucketPwd, i, logger_ctx)
+				connSize := numOfNozzles *2
+				outNozzle = xdcrf.constructXMEMNozzle(spec.Id, kvaddr, targetBucketName, bucketPwd, i, connSize, logger_ctx)
 			}
 
 			outNozzles[outNozzle.Id()] = outNozzle
@@ -368,10 +371,11 @@ func (xdcrf *XDCRFactory) constructXMEMNozzle(topic string, kvaddr string,
 	bucketName string,
 	bucketPwd string,
 	nozzle_index int,
+	connPoolSize int,
 	logger_ctx *log.LoggerContext) common.Nozzle {
 	// partIds of the xmem nozzles look like "xmem_$topic_$kvaddr_1"
 	xmemNozzle_Id := xdcrf.partId(XMEM_NOZZLE_NAME_PREFIX, topic, kvaddr, nozzle_index)
-	nozzle := parts.NewXmemNozzle(xmemNozzle_Id, kvaddr, bucketName, bucketPwd, logger_ctx)
+	nozzle := parts.NewXmemNozzle(xmemNozzle_Id, topic, connPoolSize, kvaddr, bucketName, bucketPwd, logger_ctx)
 	return nozzle
 }
 
@@ -395,7 +399,7 @@ func (xdcrf *XDCRFactory) constructCAPINozzle(topic string,
 	}
 	// get capi connection string
 	couchApiBase := subVBCouchApiBaseMap[vbList[0]]
-	capiConnectionStr, err := GetCapiConnectionStrFromCouchApiBase(couchApiBase)
+	capiConnectionStr, err := capi_utils.GetCapiConnectionStrFromCouchApiBase(couchApiBase)
 	if err != nil {
 		return nil, err
 	}
@@ -406,11 +410,11 @@ func (xdcrf *XDCRFactory) constructCAPINozzle(topic string,
 	return nozzle, nil
 }
 
-func (xdcrf *XDCRFactory) ConstructSettingsForPart(pipeline common.Pipeline, part common.Part, settings map[string]interface{}, ts map[uint16]*base.VBTimestamp) (map[string]interface{}, error) {
+func (xdcrf *XDCRFactory) ConstructSettingsForPart(pipeline common.Pipeline, part common.Part, settings map[string]interface{}, ts map[uint16]*base.VBTimestamp, targetClusterRef *metadata.RemoteClusterReference) (map[string]interface{}, error) {
 
 	if _, ok := part.(*parts.XmemNozzle); ok {
 		xdcrf.logger.Debugf("Construct settings for XmemNozzle %s", part.Id())
-		return xdcrf.constructSettingsForXmemNozzle(pipeline, settings)
+		return xdcrf.constructSettingsForXmemNozzle(pipeline, part, targetClusterRef, settings)
 	} else if _, ok := part.(*parts.DcpNozzle); ok {
 		xdcrf.logger.Debugf("Construct settings for DcpNozzle %s", part.Id())
 		return xdcrf.constructSettingsForDcpNozzle(pipeline, part.(*parts.DcpNozzle), settings, ts)
@@ -433,16 +437,52 @@ func (xdcrf *XDCRFactory) StartSeqno(pipeline common.Pipeline) (map[uint16]*base
 	return ckpt_mgr.(*pipeline_svc.CheckpointManager).VBTimestamps(pipeline.Topic())
 }
 
-func (xdcrf *XDCRFactory) constructSettingsForXmemNozzle(pipeline common.Pipeline, settings map[string]interface{}) (map[string]interface{}, error) {
+func (xdcrf *XDCRFactory) constructSettingsForXmemNozzle(pipeline common.Pipeline, part common.Part, targetClusterRef *metadata.RemoteClusterReference, settings map[string]interface{}) (map[string]interface{}, error) {
 	xmemSettings := make(map[string]interface{})
-	repSettings := pipeline.Specification().Settings
+	spec := pipeline.Specification()
+	repSettings := spec.Settings
+	xmemConnStr := part.(*parts.XmemNozzle).ConnStr()
 
 	xmemSettings[parts.SETTING_BATCHCOUNT] = repSettings.BatchCount
 	xmemSettings[parts.SETTING_BATCHSIZE] = repSettings.BatchSize
 	xmemSettings[parts.SETTING_RESP_TIMEOUT] = xdcrf.getTargetTimeoutEstimate(pipeline.Topic())
 	xmemSettings[parts.SETTING_BATCH_EXPIRATION_TIME] = time.Duration(float64(repSettings.MaxExpectedReplicationLag)*0.7) * time.Millisecond
 	xmemSettings[parts.SETTING_OPTI_REP_THRESHOLD] = repSettings.OptimisticReplicationThreshold
+	
 
+	demandEncryption := targetClusterRef.DemandEncryption
+	certificate := targetClusterRef.Certificate
+	if demandEncryption {
+			local_proxy_port, err := xdcrf.xdcr_topology_svc.MyProxyPort()
+			if err != nil {
+				return nil, err
+			}
+			
+			var remote_proxy_port uint16 = 0
+			targetBucket, err := xdcrf.cluster_info_svc.GetBucket(targetClusterRef, spec.TargetBucketName)
+			if err != nil {
+				xdcrf.logger.Errorf("Error getting bucket. err=%v\n", err)
+				return nil, err
+			}
+			
+			for _, node := range targetBucket.Nodes() {
+				hostname := utils.GetHostName(node.Hostname)
+				memcachedPort := uint16(node.Ports[base.DirectPortKey])
+				hostAddr := utils.GetHostAddr(hostname, memcachedPort)
+				if hostAddr == xmemConnStr {
+					remote_proxy_port = uint16(node.Ports[base.SSLProxyPortKey])
+					break
+				}
+			}		
+			if remote_proxy_port == 0 {
+				return nil, errors.New(fmt.Sprintf("Can't find remote proxy port for remote bucket %v", spec.TargetBucketName))
+			}
+			
+			xmemSettings[parts.XMEM_SETTING_DEMAND_ENCRYPTION] = demandEncryption
+			xmemSettings[parts.XMEM_SETTING_CERTIFICATE] = certificate
+			xmemSettings[parts.XMEM_SETTING_REMOTE_PROXY_PORT] = remote_proxy_port
+			xmemSettings[parts.XMEM_SETTING_LOCAL_PROXY_PORT] = local_proxy_port
+	}
 	return xmemSettings, nil
 
 }

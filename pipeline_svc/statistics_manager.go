@@ -23,6 +23,7 @@ import (
 	parts "github.com/couchbase/goxdcr/parts"
 	"github.com/couchbase/goxdcr/utils"
 	"github.com/rcrowley/go-metrics"
+	"github.com/couchbase/goxdcr/pipeline"
 	"reflect"
 	"strconv"
 	"sync"
@@ -171,9 +172,9 @@ func NewStatisticsManager(logger_ctx *log.LoggerContext, active_vbs map[string][
 
 //Statistics of a pipeline which may or may not be running
 func GetStatisticsForPipeline(topic string) *expvar.Map {
-	expvar_var := expvar.Get(topic)
+	expvar_var := pipeline.StorageForRep(topic)
 	if expvar_var != nil {
-		overview_map := expvar_var.(*expvar.Map).Get(OVERVIEW_METRICS_KEY)
+		overview_map := expvar_var.Get(OVERVIEW_METRICS_KEY)
 		if overview_map != nil {
 			return overview_map.(*expvar.Map)
 		} else {
@@ -185,7 +186,7 @@ func GetStatisticsForPipeline(topic string) *expvar.Map {
 }
 
 func (stats_mgr *StatisticsManager) cleanupBeforeExit() {
-	expvar_stats_map := stats_mgr.getExpvarMap(stats_mgr.pipeline.Topic())
+	expvar_stats_map := pipeline.StorageForRep(stats_mgr.pipeline.Topic())
 	errlist := expvar_stats_map.Get("Errors")
 	expvar_stats_map.Init()
 	statusVar := new(expvar.String)
@@ -206,7 +207,7 @@ func (stats_mgr *StatisticsManager) updateStats(finchan chan bool) error {
 			stats_mgr.cleanupBeforeExit()
 			return nil
 		case <-stats_mgr.publish_ticker.C:
-			if stats_mgr.pipeline.State() != common.Pipeline_Running {
+			if stats_mgr.pipeline.State() != common.Pipeline_Running && stats_mgr.pipeline.State() != common.Pipeline_Starting{
 				//the pipeline is no longer running, kill myself
 				stats_mgr.logger.Infof("Pipeline is no longer running, exit.")
 				stats_mgr.cleanupBeforeExit()
@@ -245,7 +246,7 @@ func (stats_mgr *StatisticsManager) updateStats(finchan chan bool) error {
 }
 
 func (stats_mgr *StatisticsManager) formatStatsForLog() string {
-	expvar_stats_map := stats_mgr.getExpvarMap(stats_mgr.pipeline.Topic())
+	expvar_stats_map := pipeline.StorageForRep(stats_mgr.pipeline.Topic())
 	return fmt.Sprintf("Stats for pipeline %v %v\n", stats_mgr.pipeline.InstanceId(), expvar_stats_map.String())
 }
 
@@ -254,7 +255,7 @@ func (stats_mgr *StatisticsManager) formatStatsForLog() string {
 func (stats_mgr *StatisticsManager) processRawStats() error {
 	oldSample := stats_mgr.getOverviewRegistry()
 	stats_mgr.initOverviewRegistry()
-	expvar_stats_map := stats_mgr.getExpvarMap(stats_mgr.pipeline.Topic())
+	expvar_stats_map := pipeline.StorageForRep(stats_mgr.pipeline.Topic())
 
 	stats_mgr.processTimeSample()
 	for registry_name, registry := range stats_mgr.registries {
@@ -420,12 +421,6 @@ func (stats_mgr *StatisticsManager) getHighSeqNos(serverAddr string, vbnos []uin
 	return highseqno_map, err
 }
 
-func (stats_mgr *StatisticsManager) getExpvarMap(name string) *expvar.Map {
-	pipeline_map := expvar.Get(name)
-
-	return pipeline_map.(*expvar.Map)
-}
-
 func (stats_mgr *StatisticsManager) getOverviewRegistry() metrics.Registry {
 	return stats_mgr.registries[OVERVIEW_METRICS_KEY]
 }
@@ -539,11 +534,6 @@ func (stats_mgr *StatisticsManager) Attach(pipeline common.Pipeline) error {
 	stats_mgr.initOverviewRegistry()
 	stats_mgr.logger.Infof("StatisticsManager is started for pipeline %v", stats_mgr.pipeline.Topic)
 
-	//publish the statistics to expvar
-	expvar_map := expvar.Get(stats_mgr.pipeline.Topic())
-	if expvar_map == nil {
-		expvar.NewMap(stats_mgr.pipeline.Topic())
-	}
 	return nil
 }
 
@@ -578,7 +568,7 @@ func (stats_mgr *StatisticsManager) Start(settings map[string]interface{}) error
 	}
 
 	//publishing status to expvar
-	expvar_stats_map := stats_mgr.getExpvarMap(stats_mgr.pipeline.Topic())
+	expvar_stats_map := pipeline.StorageForRep(stats_mgr.pipeline.Topic())
 	statusVar := new(expvar.String)
 	statusVar.Set(base.Replicating)
 	expvar_stats_map.Set("Status", statusVar)

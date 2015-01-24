@@ -22,6 +22,7 @@ import (
 	"github.com/couchbase/goxdcr/utils"
 	"io/ioutil"
 	"os"
+	"time"
 )
 
 var logger *log.CommonLogger = log.NewLogger("capi_service", log.DefaultLoggerContext)
@@ -201,13 +202,16 @@ func createRemoteCluster() error {
 	var respMap map[string]interface{}
 	err, _ = utils.QueryRestApiWithAuth(url,
 		base.RemoteClustersPath,
+		false,
 		options.username,
 		options.password,
+		[]byte{},
 		base.MethodPost,
 		"",
 		paramsBytes,
+		2*time.Second,
 		respMap,
-		logger, nil)
+		logger)
 
 	if err != nil {
 		return err
@@ -246,13 +250,16 @@ func deleteRemoteCluster() error {
 	url := common.GetAdminportUrlPrefix(options.sourceKVHost, options.sourceKVPort)
 	err, _ := utils.QueryRestApiWithAuth(url,
 		base.RemoteClustersPath+base.UrlDelimiter+options.remoteName,
+		false,
 		options.username,
 		options.password,
+		[]byte{},
 		base.MethodDelete,
 		"",
+		nil, 
+		2*time.Second,
 		nil,
-		nil,
-		logger, nil)
+		logger)
 
 	if err != nil {
 		return err

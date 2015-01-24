@@ -15,6 +15,8 @@ import (
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/goxdcr/utils"
+	"github.com/couchbase/goxdcr/capi_utils"
+	"net/url"
 )
 
 type RemoteBucketInfo struct {
@@ -85,15 +87,21 @@ func (remoteBucket *RemoteBucketInfo) refresh_internal(remote_cluster_svc Remote
 	}
 
 	remoteBucket.MemcachedAddrRestAddrMap = make(map[string]string)
-	nodes := bucket.Nodes()
-	for _, node := range nodes {
-		restAddr := node.Hostname
-		host := utils.GetHostName(restAddr)
-		memcachedPort := node.Ports["direct"]
-		memcachedAddr := utils.GetHostAddr(host, uint16(memcachedPort))
-		remoteBucket.MemcachedAddrRestAddrMap[memcachedAddr] = restAddr
+	
+	urlmap, err := capi_utils.ConstructServerCouchApiBaseMap(bucket, remoteBucket.RemoteClusterRef) 
+	if err != nil {
+		return err
 	}
-
+	
+	//the url it returns http://127.0.0.1:9500/default%2B77aceaa5b49efbd92a261b8a1e72dab5
+	//we only need the host part
+	for serverAddr, urlstr := range urlmap {
+		u, err := url.Parse(urlstr)
+		if err != nil {
+			return err
+		}
+		remoteBucket.MemcachedAddrRestAddrMap[serverAddr] = u.Host
+	}
 	remoteBucket.logger.Infof("remoteBucket.MemcachedAddrRestAddrMap=%v\n", remoteBucket.MemcachedAddrRestAddrMap)
 	return nil
 }

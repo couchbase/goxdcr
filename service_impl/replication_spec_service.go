@@ -63,9 +63,7 @@ func (service *ReplicationSpecService) observeChildren(dirpath string, cancel <-
 	err := metakv.RunObserveChildren(dirpath, service.metakvCallback, cancel)
 	// call failure call back only when there are real errors
 	// err may be nil when observeChildren is canceled, in which case there is no need to call failure call back
-	if err != nil {
-		service.failure_call_back(err)
-	}
+	service.failure_call_back(err)
 }
 
 func (service *ReplicationSpecService) ReplicationSpec(replicationId string) (*metadata.ReplicationSpecification, error) {
@@ -82,16 +80,21 @@ func (service *ReplicationSpecService) ReplicationSpec(replicationId string) (*m
 
 // this assumes that the spec to be added is not yet in gometa
 func (service *ReplicationSpecService) AddReplicationSpec(spec *metadata.ReplicationSpecification) error {
+	service.logger.Infof("Start AddReplicationSpec, spec=%v\n", spec)
 	key := spec.Id
 	value, err := json.Marshal(spec)
 	if err != nil {
 		return err
 	}
+
+	service.logger.Info("Adding it to metadata store...")
 	err = service.metadata_svc.AddWithCatalog(ReplicationSpecsCatalogKey, key, value)
 	if err != nil {
 		return err
 	}
+	service.logger.Info("log it with ale logger...")
 	service.writeUiLog(spec, "created")
+	service.logger.Info("Done with logging...")
 	return nil
 }
 
@@ -177,7 +180,7 @@ func constructReplicationSpec(value []byte, rev interface{}) (*metadata.Replicat
 
 // Implement callback function for metakv
 func (service *ReplicationSpecService) metakvCallback(path string, value []byte, rev interface{}) error {
-	service.logger.Debugf("metakvCallback called on path = %v\n", path)
+	service.logger.Infof("metakvCallback called on path = %v\n", path)
 
 	if service.call_back != nil {
 		spec, err := constructReplicationSpec(value, rev)

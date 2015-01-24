@@ -24,15 +24,17 @@ var ErrorParsingHostInfo = errors.New("Could not parse current host info from se
 type XDCRTopologySvc struct {
 	adminport    uint16
 	xdcrRestPort uint16
+	local_proxy_port uint16
 	isEnterprise bool
 	logger       *log.CommonLogger
 }
 
-func NewXDCRTopologySvc(adminport, xdcrRestPort uint16,
+func NewXDCRTopologySvc(adminport, xdcrRestPort, localProxyPort uint16,
 	isEnterprise bool, logger_ctx *log.LoggerContext) (*XDCRTopologySvc, error) {
 	top_svc := &XDCRTopologySvc{
 		adminport:    adminport,
 		xdcrRestPort: xdcrRestPort,
+		local_proxy_port: localProxyPort,
 		isEnterprise: isEnterprise,
 		logger:       log.NewLogger("XDCRTopologyService", logger_ctx),
 	}
@@ -226,4 +228,8 @@ func (top_svc *XDCRTopologySvc) MyCredentials() (string, string, error) {
 		panic("connStr == ")
 	}
 	return cbauth.GetHTTPServiceAuth(connStr)
+}
+
+func (top_svc *XDCRTopologySvc) MyProxyPort() (uint16, error) {
+	return top_svc.local_proxy_port, nil
 }

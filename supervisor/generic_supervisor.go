@@ -171,7 +171,9 @@ func (supervisor *GenericSupervisor) Stop() error {
 	supervisor.heartbeat_ticker.Stop()
 	supervisor.Logger().Infof("Stopped supervisor %v.\n", supervisor.Id())
 
-	supervisor.parent_supervisor.RemoveChild(supervisor.Id())
+	if supervisor.parent_supervisor != nil {
+		supervisor.parent_supervisor.RemoveChild(supervisor.Id())
+	}
 	return err
 }
 
@@ -210,23 +212,25 @@ func (supervisor *GenericSupervisor) sendHeartBeats() {
 		heartbeat_resp_chs := make(map[string]chan []interface{})
 		numResponseToWait := 0
 		for childId, child := range supervisor.children {
-			respch := make(chan []interface{}, 1)
-			supervisor.Logger().Debugf("heart beat sent to child %v from super %v\n", childId, supervisor.Id())
-			err := child.HeartBeat_async(respch, time.Now())
-			heartbeat_resp_chs[childId] = respch
-			if err != nil {
-				supervisor.Logger().Errorf("Send heartbeat failed for %v, err=%v\n", childId, err)
-				heartbeat_report[childId] = skip
-			} else {
-				heartbeat_report[childId] = notYetResponded
-				numResponseToWait++
+			if child.IsReadyForHeartBeat() {
+				respch := make(chan []interface{}, 1)
+				supervisor.Logger().Debugf("heart beat sent to child %v from super %v\n", childId, supervisor.Id())
+				err := child.HeartBeat_async(respch, time.Now())
+				heartbeat_resp_chs[childId] = respch
+				if err != nil {
+					supervisor.Logger().Infof("Send heartbeat failed for %v, err=%v\n", childId, err)
+					heartbeat_report[childId] = skip
+				} else {
+					heartbeat_report[childId] = notYetResponded
+					numResponseToWait++
+				}
 			}
 		}
 		fin_ch := make(chan bool, 1)
 		supervisor.resp_waiter_chs = append(supervisor.resp_waiter_chs, fin_ch)
 		if numResponseToWait > 0 {
 			go supervisor.waitForResponse(heartbeat_report, heartbeat_resp_chs, fin_ch)
-		}else {
+		} else {
 			supervisor.Logger().Infof("No response to be waited.")
 		}
 	} else {
@@ -325,6 +329,7 @@ func (supervisor *GenericSupervisor) processReport(heartbeat_report map[string]h
 	}
 
 	if len(brokenChildren) > 0 {
+		supervisor.Logger().Errorf("%v has exceeded heartbeat_missed_threshold", brokenChildren)
 		supervisor.ReportFailure(brokenChildren)
 	}
 }
@@ -348,4 +353,8 @@ func (supervisor *GenericSupervisor) StopHeartBeatTicker() {
 	if supervisor.heartbeat_ticker != nil {
 		supervisor.heartbeat_ticker.Stop()
 	}
+}
+
+func (supervisor *GenericSupervisor) IsReadyForHeartBeat() bool {
+	return supervisor.IsStarted()
 }

@@ -65,7 +65,7 @@ func (pipelineSupervisor *PipelineSupervisor) Attach(p common.Pipeline) error {
 
 		//register itself with all parts' ErrorEncountered event
 		part.RegisterComponentEventListener(common.ErrorEncountered, pipelineSupervisor)
-		pipelineSupervisor.Logger().Infof("Registering ErrorEncountered event on part %v\n", part.Id())
+		pipelineSupervisor.Logger().Debugf("Registering ErrorEncountered event on part %v\n", part.Id())
 	}
 
 	//register itself with all connectors' ErrorEncountered event
@@ -73,7 +73,7 @@ func (pipelineSupervisor *PipelineSupervisor) Attach(p common.Pipeline) error {
 
 	for _, connector := range connectorsMap {
 		connector.RegisterComponentEventListener(common.ErrorEncountered, pipelineSupervisor)
-		pipelineSupervisor.Logger().Infof("Registering ErrorEncountered event on connector %v\n", connector.Id())
+		pipelineSupervisor.Logger().Debugf("Registering ErrorEncountered event on connector %v\n", connector.Id())
 	}
 
 	return nil

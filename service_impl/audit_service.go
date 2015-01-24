@@ -37,17 +37,19 @@ var WriteTimeout = 1000 * time.Millisecond
 var ReadTimeout = 1000 * time.Millisecond
 
 type AuditSvc struct {
-	top_svc service_def.XDCRCompTopologySvc
-	kvaddr  string
-	username  string
-	password  string
-	logger  *log.CommonLogger
+	top_svc     service_def.XDCRCompTopologySvc
+	kvaddr      string
+	username    string
+	password    string
+	logger      *log.CommonLogger
+	initialized bool
 }
 
 func NewAuditSvc(top_svc service_def.XDCRCompTopologySvc, loggerCtx *log.LoggerContext) (*AuditSvc, error) {
 	service := &AuditSvc{
-		top_svc: top_svc,
-		logger:  log.NewLogger("AuditService", loggerCtx),
+		top_svc:     top_svc,
+		logger:      log.NewLogger("AuditService", loggerCtx),
+		initialized: false,
 	}
 
 	service.logger.Infof("Created audit service.\n")
@@ -55,30 +57,23 @@ func NewAuditSvc(top_svc service_def.XDCRCompTopologySvc, loggerCtx *log.LoggerC
 }
 
 func (service *AuditSvc) Write(eventId uint32, event interface{}) error {
-	if service.kvaddr == "" {
-		err := service.init()
-		if err != nil {
-			return err
-		}	
+	err := service.init()
+	if err != nil {
+		return err
 	}
-
-	go service.write(eventId, event)
-	return nil
-}
-
-func (service *AuditSvc) write(eventId uint32, event interface{}) {
 	client, err := service.getClient()
 	if err != nil {
-		return
+		return nil
 	}
 	defer service.releaseClient(client)
-	
+
 	err = service.write_internal(client, eventId, event)
 	// ignore errors when writing audit logs. simply log them
 	if err != nil {
 		err = utils.NewEnhancedError(base.ErrorWritingAudit, err)
 		service.logger.Error(err.Error())
 	}
+	return nil
 }
 
 func (service *AuditSvc) write_internal(client *mcc.Client, eventId uint32, event interface{}) error {
@@ -134,29 +129,34 @@ func composeAuditRequest(eventId uint32, event interface{}) (*mc.MCRequest, erro
 
 func (service *AuditSvc) init() error {
 	var err error
-	service.kvaddr, err = service.top_svc.MyMemcachedAddr()
-	if err != nil {
-		return utils.NewEnhancedError(ErrorInitializingAuditService+" Error getting memcached address of current host.", err)
-	}
+	if !service.initialized {
+		service.kvaddr, err = service.top_svc.MyMemcachedAddr()
+		if err != nil {
+			return utils.NewEnhancedError(ErrorInitializingAuditService+" Error getting memcached address of current host.", err)
+		}
 
-	clusterAddr, err := service.top_svc.MyConnectionStr()
-	if err != nil {
-		return utils.NewEnhancedError(ErrorInitializingAuditService+" Error getting address of current cluster.", err)
+		clusterAddr, err := service.top_svc.MyConnectionStr()
+		if err != nil {
+			return utils.NewEnhancedError(ErrorInitializingAuditService+" Error getting address of current cluster.", err)
+		}
+
+		service.username, service.password, err = cbauth.GetMemcachedServiceAuth(clusterAddr)
+		if err != nil {
+			err = utils.NewEnhancedError(fmt.Sprintf(ErrorInitializingAuditService+" Error getting memcached credentials for cluster %v\n.", clusterAddr), err)
+			return err
+		}
+
+		_, err = base.ConnPoolMgr().GetOrCreatePool(base.AuditServicePoolName, service.kvaddr, "", service.username, service.password, base.DefaultConnectionSize)
+		if err == nil {
+			service.initialized = true
+		}
 	}
-	
-	service.username, service.password, err = cbauth.GetMemcachedServiceAuth(clusterAddr)
-	if err != nil {
-		err = utils.NewEnhancedError(fmt.Sprintf(ErrorInitializingAuditService+" Error getting memcached credentials for cluster %v\n.", clusterAddr), err)
-		return err
-	}
-	
-	_, err = base.ConnPoolMgr().GetOrCreatePool(base.AuditServicePoolName, service.kvaddr, "", service.username, service.password, base.DefaultConnectionSize)
 	return err
 }
-	
+
 func (service *AuditSvc) getClient() (*mcc.Client, error) {
 	pool := base.ConnPoolMgr().GetPool(base.AuditServicePoolName)
-	
+
 	client, err := pool.Get()
 	if err != nil {
 		return nil, err

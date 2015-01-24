@@ -134,19 +134,25 @@ func (adminport *Adminport) handleRequest(
 	if err != nil {
 		return nil, err
 	}
+	logger_ap.Infof("MessageKey=%v\n", key)
 
 	// authentication
-	if key != base.RemoteClustersPath+base.UrlDelimiter+base.MethodGet {
-		// most APIs require admin credentials
-		err = authAdminCreds(request, false)
-	} else {
-		// getRemoteClusters() requires only read only admin credential
-		err = authAdminCreds(request, true)
+	//TODO: authAdminCreds sometimes take a long time to return
+	//for now, skip authentication for pools/default/replicationInfos because it is called a lot
+	if key != AllReplicationInfosPath+base.UrlDelimiter+base.MethodGet {
+		if key != base.RemoteClustersPath+base.UrlDelimiter+base.MethodGet {
+			// most APIs require admin credentials
+			err = authAdminCreds(request, false)
+		} else {
+			// getRemoteClusters() requires only read only admin credential
+			err = authAdminCreds(request, true)
+		}
 	}
 
 	if err != nil {
 		return nil, err
 	}
+	logger_ap.Info("Authenticated....")
 
 	switch key {
 	case base.RemoteClustersPath + base.UrlDelimiter + base.MethodGet:
@@ -253,7 +259,7 @@ func (adminport *Adminport) doChangeRemoteClusterRequest(request *http.Request) 
 
 	logger_ap.Infof("Request params: justValidate=%v, remoterClusterRef=%v\n",
 		justValidate, *remoteClusterRef)
-		
+
 	remoteClusterService := RemoteClusterService()
 
 	if justValidate {
@@ -269,7 +275,7 @@ func (adminport *Adminport) doChangeRemoteClusterRequest(request *http.Request) 
 			return nil, err
 		} else {
 			writeRemoteClusterAuditEvent(base.UpdateRemoteClusterRefEventId, remoteClusterRef, getRealUserIdFromRequest(request))
-			
+
 			return NewCreateRemoteClusterResponse(remoteClusterRef)
 		}
 	}
@@ -334,7 +340,8 @@ func (adminport *Adminport) doGetAllReplicationInfosRequest(request *http.Reques
 }
 
 func (adminport *Adminport) doCreateReplicationRequest(request *http.Request) ([]byte, error) {
-	logger_ap.Infof("doCreateReplicationRequest called\n")
+	logger_ap.Info("doCreateReplicationRequest called")
+	defer logger_ap.Info("Finish doCreateReplicationREquest call")
 
 	fromBucket, toCluster, toBucket, settings, errorsMap, err := DecodeCreateReplicationRequest(request)
 	if err != nil {
@@ -516,6 +523,7 @@ func (adminport *Adminport) doChangeReplicationSettingsRequest(request *http.Req
 	if err != nil {
 		return nil, err
 	}
+	logger_ap.Info("Done with doChangeReplicationSettingsRequest")
 	return NewReplicationSettingsResponse(replSpec.Settings)
 }
 
@@ -584,10 +592,11 @@ func (adminport *Adminport) GetMessageKeyFromRequest(r *http.Request) (string, e
 // returns error if credentials in request are not admin/read only admin
 func authAdminCreds(request *http.Request, readOnly bool) error {
 	// authentication
+	logger_ap.Info("Start authAdminCreds")
 	var err error
 	var isAdmin bool
 	creds, err := cbauth.AuthWebCreds(request)
-	logger_ap.Debugf("creds user = %v\n", creds.Name())
+	logger_ap.Infof("creds user = %v\n", creds.Name())
 	if err != nil {
 		return err
 	}
@@ -599,6 +608,7 @@ func authAdminCreds(request *http.Request, readOnly bool) error {
 		isAdmin, err = creds.IsAdmin()
 	}
 
+	logger_ap.Infof("done with authentication")
 	if err != nil {
 		return err
 	}
@@ -629,4 +639,8 @@ func getRealUserIdFromRequest(request *http.Request) *base.RealUserId {
 
 	// TODO get source from creds
 	return &base.RealUserId{"internal", creds.Name()}
+}
+
+func (adminport *Adminport) IsReadyForHeartBeat() bool {
+	return adminport.IsStarted()
 }

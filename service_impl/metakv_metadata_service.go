@@ -16,6 +16,7 @@ import (
 	"github.com/couchbase/cbauth/metakv"
 	"github.com/couchbase/goxdcr/service_def"
 	"strings"
+	"time"
 )
 
 type MetaKVMetadataSvc struct {
@@ -29,14 +30,18 @@ func NewMetaKVMetadataSvc(logger_ctx *log.LoggerContext) (*MetaKVMetadataSvc, er
 }
 
 func (meta_svc *MetaKVMetadataSvc) Get(key string) ([]byte, interface{}, error) {
+	start_time := time.Now()
+	defer meta_svc.logger.Debugf("Took %vs to get %v to metakv\n", time.Since(start_time).Seconds(), key)
 	return metakv.Get(getPathFromKey(key))
 }
 
 func (meta_svc *MetaKVMetadataSvc) Add(key string, value []byte) error {
+	start_time := time.Now()
 	err := metakv.Add(getPathFromKey(key), value)
 	if err == metakv.ErrRevMismatch {
 		err = service_def.ErrorKeyAlreadyExist
 	}
+	meta_svc.logger.Debugf("Took %vs to add %v to metakv\n", time.Since(start_time).Seconds(), key)
 	return err
 }
 
@@ -46,6 +51,8 @@ func (meta_svc *MetaKVMetadataSvc) AddWithCatalog(catalogKey, key string, value 
 }
 
 func (meta_svc *MetaKVMetadataSvc) Set(key string, value []byte, rev interface{}) error {
+	start_time := time.Now()
+	defer meta_svc.logger.Debugf("Took %vs to set %v to metakv\n", time.Since(start_time).Seconds(), key)
 	err := metakv.Set(getPathFromKey(key), value, rev)
 	if err == metakv.ErrRevMismatch {
 		err = service_def.ErrorRevisionMismatch

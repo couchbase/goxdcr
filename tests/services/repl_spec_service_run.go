@@ -53,7 +53,8 @@ func startReplicationSpecService() error {
 		return errors.New(fmt.Sprintf("Error starting metadata service. err=%v\n", err.Error()))
 	}
 	
-	service := s.NewReplicationSpecService(nil, metadataSvc, nil)
+	remote_cluster_svc := s.NewRemoteClusterService(nil, metadataSvc, nil)	
+	service := s.NewReplicationSpecService(nil, remote_cluster_svc, metadataSvc, nil)
 		
 	// create a test replication spec
 	spec := metadata.NewReplicationSpecification(sourceBucketName, 

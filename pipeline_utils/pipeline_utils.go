@@ -29,11 +29,11 @@ func ExecWithTimeout(action Action, timeout_duration time.Duration, logger *log.
 	for {
 		select {
 		case retErr = <-ret:
-			logger.Infof("Finish executating %v\n", action)
+			logger.Infof("Finish executing %v\n", action)
 			return retErr
 		case <-timeoutticker.C:
-			retErr = errors.New(fmt.Sprintf("Executating %v timed out", action))
-			logger.Infof("Executating %v timed out", action)
+			retErr = errors.New(fmt.Sprintf("Executing %v timed out", action))
+			logger.Infof("Executing %v timed out", action)
 			logger.Info("****************************")
 			var buf []byte = make([]byte, 1000000)
 			runtime.Stack(buf, true)
