@@ -5,9 +5,9 @@ import (
 	"expvar"
 	"fmt"
 	"github.com/couchbase/cbauth"
+	"github.com/couchbase/go-couchbase"
 	base "github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
-	"github.com/couchbase/go-couchbase"
 	"net/http"
 	"net/url"
 	"reflect"
@@ -322,7 +322,9 @@ func EncodeMapIntoByteArray(data map[string]interface{}) ([]byte, error) {
 func UrlForLog(urlStr string) string {
 	result, err := url.Parse(urlStr)
 	if err == nil {
-		result.User = url.UserPassword(result.User.Username(), "xxxx")
+		if result.User != nil {
+			result.User = url.UserPassword(result.User.Username(), "xxxx")
+		}
 		return result.String()
 	} else {
 		return urlStr

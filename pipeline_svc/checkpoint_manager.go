@@ -495,10 +495,9 @@ func (ckmgr *CheckpointManager) populateVBTimestamp(ckptDoc *metadata.Checkpoint
 }
 
 func (ckmgr *CheckpointManager) checkpointing() {
-	defer func() {
-		ckmgr.wait_grp.Done()
-		ckmgr.logger.Info("Exits checkpointing routine.")
-	}()
+	defer ckmgr.logger.Info("Exits checkpointing routine.")
+	defer ckmgr.wait_grp.Done()
+
 	for {
 		select {
 		case <-ckmgr.finish_ch:

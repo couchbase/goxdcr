@@ -124,8 +124,9 @@ func run_testcase() error {
 	if err != nil {
 		return err
 	}
-
-	top_svc, err := service_impl.NewXDCRTopologySvc(uint16(options.sourceKVPort), uint16(options.xdcrRestPort), uint16(options.sslProxyUpstreamPort), options.isEnterprise, nil)
+	
+	cluster_info_svc := service_impl.NewClusterInfoSvc(nil)
+	top_svc, err := service_impl.NewXDCRTopologySvc(uint16(options.sourceKVPort), uint16(options.xdcrRestPort), uint16(options.sslProxyUpstreamPort), options.isEnterprise, cluster_info_svc, nil)
 	if err != nil {
 		return err
 	}

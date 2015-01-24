@@ -28,6 +28,7 @@ var DefaultPoolPath = "/pools/default"
 var NodesPath = "/pools/nodes"
 var NodesSelfPath = "/nodes/self"
 var SSLPortsPath = "/nodes/self/xdcrSSLPorts"
+var NodeServicesPath = "/pools/default/nodeServices"
 
 
 // constants for CAPI nozzle
@@ -47,6 +48,10 @@ var PortsKey = "ports"
 var DirectPortKey = "direct"
 var ProxyPortKey ="proxy"
 var SSLProxyPortKey = "sslProxy"
+var NodeExtKey = "nodesExt"
+var KVPortKey = "kv"
+var KVSSLPortKey = "kvSSL"
+var ServicesKey= "services"
 
 // URL related constants
 var UrlDelimiter = "/"
@@ -122,6 +127,7 @@ const (
 	RemoteClusterUri = "uri"
 	RemoteClusterValidateUri = "validateURI"
 	RemoteClusterDeleted = "deleted"
+	IsEnterprise = "isEnterprise"
 )
 
 // constant used by more than one rest apis

@@ -19,10 +19,10 @@ import (
 	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/goxdcr/service_def"
 	"github.com/couchbase/goxdcr/utils"
+	"net/http"
 	"reflect"
 	"strings"
 	"sync"
-	"net/http"
 )
 
 const (
@@ -40,22 +40,22 @@ type remoteClusterCache struct {
 }
 
 type RemoteClusterService struct {
-	metadata_svc service_def.MetadataSvc
-	uilog_svc    service_def.UILogSvc
+	metadata_svc      service_def.MetadataSvc
+	uilog_svc         service_def.UILogSvc
 	xdcr_topology_svc service_def.XDCRCompTopologySvc
-	logger       *log.CommonLogger
-	cache_lock   *sync.RWMutex
-	cache_map    map[string]*remoteClusterCache
+	logger            *log.CommonLogger
+	cache_lock        *sync.RWMutex
+	cache_map         map[string]*remoteClusterCache
 }
 
 func NewRemoteClusterService(uilog_svc service_def.UILogSvc, metadata_svc service_def.MetadataSvc, xdcr_topology_svc service_def.XDCRCompTopologySvc, logger_ctx *log.LoggerContext) *RemoteClusterService {
 	return &RemoteClusterService{
-		metadata_svc: metadata_svc,
-		cache_lock:   &sync.RWMutex{},
-		cache_map:    make(map[string]*remoteClusterCache),
-		uilog_svc:    uilog_svc,
+		metadata_svc:      metadata_svc,
+		cache_lock:        &sync.RWMutex{},
+		cache_map:         make(map[string]*remoteClusterCache),
+		uilog_svc:         uilog_svc,
 		xdcr_topology_svc: xdcr_topology_svc,
-		logger:       log.NewLogger("RemoteClusterService", logger_ctx),
+		logger:            log.NewLogger("RemoteClusterService", logger_ctx),
 	}
 }
 
@@ -258,7 +258,7 @@ func (service *RemoteClusterService) ValidateRemoteCluster(ref *metadata.RemoteC
 	if err != nil {
 		return wrapAsInvalidRemoteClusterError(errors.New(fmt.Sprintf("Failed to resolve address for \"%v\". The hostname may be incorrect or not resolvable.", ref.HostName)))
 	}
-		
+
 	var hostAddr string
 	var isInternalError bool
 	if ref.DemandEncryption {
@@ -287,15 +287,24 @@ func (service *RemoteClusterService) ValidateRemoteCluster(ref *metadata.RemoteC
 		if statusCode == http.StatusUnauthorized {
 			return wrapAsInvalidRemoteClusterError(errors.New(fmt.Sprintf("Authentication failed. Verify username and password. Got HTTP status %v from REST call get to %v%v. Body was: []", statusCode, hostAddr, base.PoolsPath)))
 		} else if !ref.DemandEncryption {
-			// if encryption is not on, most likely the error is caused by incorrect hostname or firewall. 
+			// if encryption is not on, most likely the error is caused by incorrect hostname or firewall.
 			return wrapAsInvalidRemoteClusterError(errors.New(fmt.Sprintf("Could not connect to \"%v\" on port %v. This could be due to an incorrect host/port combination or a firewall in place between the servers.", hostName, port)))
 		} else {
 			// if encryption is on, several different errors could be returned here, e.g., invalid hostname, invalid certificate, certificate by unknown authority, etc.
 			// just return the err
-			return wrapAsInvalidRemoteClusterError(err)	
+			return wrapAsInvalidRemoteClusterError(err)
 		}
 	}
 
+	//get isEnterprise from the map
+	isEnterprise_remote, ok := poolsInfo[base.IsEnterprise].(bool)
+	if !ok {
+		isEnterprise_remote = false
+	}
+
+	if ref.DemandEncryption && !isEnterprise_remote {
+		return fmt.Errorf("Remote cluster %v is not enterprise version, so no SSL support", hostAddr)
+	}
 	// get remote cluster uuid from the map
 	actualUuid, ok := poolsInfo[base.RemoteClusterUuid]
 	if !ok {
@@ -453,7 +462,6 @@ func (service *RemoteClusterService) refresh(ref *metadata.RemoteClusterReferenc
 
 	service.logger.Infof("ref_cache=%v\n", ref_cache)
 
-
 	var working_conn_str string = ""
 	for _, alt_conn_str := range ref_cache.nodes_connectionstr {
 		_, err = utils.RemotePool(alt_conn_str, username, password)
@@ -514,7 +522,7 @@ func (service *RemoteClusterService) CheckAndUnwrapRemoteClusterError(err error)
 			return true, err
 		} else {
 			return false, err
-		}		
+		}
 	} else {
 		return false, nil
 	}

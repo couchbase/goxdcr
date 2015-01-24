@@ -9,9 +9,9 @@ import (
 	"errors"
 	"fmt"
 	"github.com/couchbase/cbauth"
+	"github.com/couchbase/go-couchbase"
 	base "github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
-	"github.com/couchbase/go-couchbase"
 	"io"
 	"io/ioutil"
 	"net/http"
@@ -22,11 +22,84 @@ import (
 
 //errors
 var ErrorRetrievingSSLPort = errors.New("Could not get ssl port of remote cluster.")
+var ErrorRetrievingMemcachedSSLPort = errors.New("Could not get memcached ssl port of remote cluster")
 var ErrorRetrievingCouchApiBase = errors.New("Could not get couchApiBase in the response of /nodes/self.")
 var InvalidCerfiticateError = errors.New("certificate must be a single, PEM-encoded x509 certificate and nothing more (failed to parse given certificate)")
 
+func GetMemcachedSSLPort(hostName, username, password string, logger *log.CommonLogger) (map[string]uint16, error) {
+	ret := make(map[string]uint16)
+	servicesInfo := make(map[string]interface{})
 
-// the return bool value indicates whether the error returned, if not nil, is an internal server error
+	logger.Infof("GetMemcachedSSLPort, hostName=%v\n", hostName)
+	err, _ := QueryRestApiWithAuth(hostName, base.NodeServicesPath, false, username, password, nil, base.MethodGet, "", nil, 0, &servicesInfo, logger)
+	if err != nil {
+		return nil, err
+	}
+
+	nodesExt, ok := servicesInfo[base.NodeExtKey]
+	if !ok {
+		return nil, ErrorRetrievingMemcachedSSLPort
+	}
+
+	nodesExtArray, ok := nodesExt.([]interface{})
+	if !ok {
+		return nil, ErrorRetrievingMemcachedSSLPort
+	}
+
+	for _, nodeExt := range nodesExtArray {
+		nodeExtMap, ok := nodeExt.(map[string]interface{})
+		if !ok {
+			return nil, ErrorRetrievingMemcachedSSLPort
+		}
+
+		hostname, ok := nodeExtMap[base.HostNameKey]
+		if !ok {
+			return nil, ErrorRetrievingMemcachedSSLPort
+		}
+		hostnameStr, ok := hostname.(string)
+		if !ok {
+			return nil, ErrorRetrievingMemcachedSSLPort
+		}
+
+		service, ok := nodeExtMap[base.ServicesKey]
+		if !ok {
+			return nil, ErrorRetrievingMemcachedSSLPort
+		}
+
+		services_map, ok := service.(map[string]interface{})
+		if !ok {
+			return nil, ErrorRetrievingMemcachedSSLPort
+		}
+
+		kv_port, ok := services_map[base.KVPortKey]
+		if !ok {
+			return nil, ErrorRetrievingMemcachedSSLPort
+		}
+		kvPortFloat, ok := kv_port.(float64)
+		if !ok {
+			// should never get here
+			return nil, ErrorRetrievingMemcachedSSLPort
+		}
+
+		hostAddr := GetHostAddr(hostnameStr, uint16(kvPortFloat))
+
+		kv_ssl_port, ok := services_map[base.KVSSLPortKey]
+		if !ok {
+			// should never get here
+			return nil, ErrorRetrievingMemcachedSSLPort
+		}
+
+		kvSSLPortFloat, ok := kv_ssl_port.(float64)
+		if !ok {
+			// should never get here
+			return nil, ErrorRetrievingMemcachedSSLPort
+		}
+
+		ret[hostAddr] = uint16(kvSSLPortFloat)
+	}
+
+	return ret, nil
+}
 func GetXDCRSSLPort(hostName, userName, password string, logger *log.CommonLogger) (uint16, error, bool) {
 
 	portsInfo := make(map[string]interface{})

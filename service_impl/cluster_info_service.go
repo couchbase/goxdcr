@@ -80,8 +80,39 @@ func (ci_svc *ClusterInfoSvc) GetServerVBucketsMap(clusterConnInfoProvider base.
 	return serverVBMap, err
 }
 
-func (ci_svc *ClusterInfoSvc) IsNodeCompatible(node string, version string) (bool, error) {
-	return true, nil
+func (ci_svc *ClusterInfoSvc) IsClusterCompatible(clusterConnInfoProvider base.ClusterConnectionInfoProvider, version []int) (bool, error) {
+	nodes, err := ci_svc.GetNodes(clusterConnInfoProvider)
+	if err == nil && len(nodes) > 0 {
+		clusterCompatibility := nodes[0].ClusterCompatibility
+		effectiveVersion := ci_svc.encodeVersionToEffectiveVersion (version)
+		compatible := ci_svc.isVersionCompatible(clusterCompatibility, effectiveVersion)
+		return compatible, nil
+
+	} else {
+		//should not ever get here
+		constr, _ := clusterConnInfoProvider.MyConnectionStr()
+		return false, fmt.Errorf("Can't get nodes information for cluster %v", constr)
+	}
+}
+
+func (ci_svc *ClusterInfoSvc) encodeVersionToEffectiveVersion(version []int) int {
+	majorVersion := 0
+	minorVersion := 0
+	if len(version) > 0 {
+		majorVersion = version[0]
+	}
+	if len(version) > 1 {
+		minorVersion = version[1]
+	}
+
+	effectiveVersion := majorVersion*0x1000 + minorVersion
+
+	ci_svc.logger.Infof("version=%v, effectiveVersion=%v\n", version, effectiveVersion)
+	return effectiveVersion
+}
+
+func (ci_svc *ClusterInfoSvc) isVersionCompatible(clusterCompatibleVersion int, version int) bool {
+	return clusterCompatibleVersion > version
 }
 
 func (ci_svc *ClusterInfoSvc) GetBucket(clusterConnInfoProvider base.ClusterConnectionInfoProvider, bucketName string) (*couchbase.Bucket, error) {
@@ -129,3 +160,4 @@ func (ci_svc *ClusterInfoSvc) GetNodes(clusterConnInfoProvider base.ClusterConne
 	return pool.Nodes, nil
 
 }
+

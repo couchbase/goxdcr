@@ -264,7 +264,8 @@ func (dcp *DcpNozzle) processData() (err error) {
 					//need to request the uprstream for the vbucket again
 					dcp.cur_ts[vbno], err = dcp.vbtimestamp_updater(vbno, rollbackseq)
 					if err != nil {
-						dcp.handleGeneralError(err)
+						dcp.Logger().Errorf("Failed to request dcp stream after receiving roll-back for vb=%v\n", vbno)
+						dcp.handleGeneralError (err)
 						return err
 					}
 					dcp.startUprStream(vbno)

@@ -271,12 +271,13 @@ func (xdcrf *XDCRFactory) constructOutgoingNozzles(spec *metadata.ReplicationSpe
 
 	var vbCouchApiBaseMap map[uint16]string
 
+	nozzleType, err := xdcrf.getNozzleType(targetClusterRef, spec)
+	if err != nil {
+		xdcrf.logger.Errorf("Failed to get the nozzle type, err=%v\n", err)
+		return nil, nil, err
+	}
+
 	for kvaddr, kvVBList := range kvVBMap {
-		nozzleType, err := xdcrf.getNozzleType(kvaddr, spec)
-		if err != nil {
-			xdcrf.logger.Errorf("Failed to get the nozzle type, err=%v\n", err)
-			return nil, nil, err
-		}
 		isCapiNozzle := (nozzleType == base.Capi)
 		if isCapiNozzle && len(vbCouchApiBaseMap) == 0 {
 			// construct vbCouchApiBaseMap only when nessary and only once
@@ -351,10 +352,10 @@ func (xdcrf *XDCRFactory) constructRouter(id string, spec *metadata.ReplicationS
 	return router, err
 }
 
-func (xdcrf *XDCRFactory) getNozzleType(kvaddr string, spec *metadata.ReplicationSpecification) (base.XDCROutgoingNozzleType, error) {
+func (xdcrf *XDCRFactory) getNozzleType(targetClusterRef *metadata.RemoteClusterReference, spec *metadata.ReplicationSpecification) (base.XDCROutgoingNozzleType, error) {
 	switch spec.Settings.RepType {
 	case metadata.ReplicationTypeXmem:
-		xmemCompatible, err := xdcrf.cluster_info_svc.IsNodeCompatible(kvaddr, "2.5")
+		xmemCompatible, err := xdcrf.cluster_info_svc.IsClusterCompatible(targetClusterRef, []int{2, 5})
 		if err != nil {
 			xdcrf.logger.Errorf("Failed to get the version information, err=%v\n", err)
 			return -1, err
@@ -362,7 +363,7 @@ func (xdcrf *XDCRFactory) getNozzleType(kvaddr string, spec *metadata.Replicatio
 		if xmemCompatible {
 			return base.Xmem, nil
 		} else {
-			xdcrf.logger.Infof("Using capi nozzle for %v since the node is not xmem compatible\n", kvaddr)
+			xdcrf.logger.Infof("Using capi nozzle for %v since the node is not xmem compatible\n", targetClusterRef.HostName)
 			return base.Capi, nil
 		}
 	case metadata.ReplicationTypeCapi:
@@ -459,35 +460,60 @@ func (xdcrf *XDCRFactory) constructSettingsForXmemNozzle(pipeline common.Pipelin
 	demandEncryption := targetClusterRef.DemandEncryption
 	certificate := targetClusterRef.Certificate
 	if demandEncryption {
-		local_proxy_port, err := xdcrf.xdcr_topology_svc.MyProxyPort()
+		sslOverMem, err := xdcrf.cluster_info_svc.IsClusterCompatible(targetClusterRef, []int{3, 0})
 		if err != nil {
 			return nil, err
 		}
-
-		var remote_proxy_port uint16 = 0
-		targetBucket, err := xdcrf.cluster_info_svc.GetBucket(targetClusterRef, spec.TargetBucketName)
-		if err != nil {
-			xdcrf.logger.Errorf("Error getting bucket. err=%v\n", err)
-			return nil, err
-		}
-
-		for _, node := range targetBucket.Nodes() {
-			hostname := utils.GetHostName(node.Hostname)
-			memcachedPort := uint16(node.Ports[base.DirectPortKey])
-			hostAddr := utils.GetHostAddr(hostname, memcachedPort)
-			if hostAddr == xmemConnStr {
-				remote_proxy_port = uint16(node.Ports[base.SSLProxyPortKey])
-				break
+		xdcrf.logger.Infof("sslOverMem=%v\n", sslOverMem)
+		var ssl_map map[string]uint16
+		if sslOverMem {
+			ssl_map, err = utils.GetMemcachedSSLPort(targetClusterRef.HostName, targetClusterRef.UserName, targetClusterRef.Password, xdcrf.logger)
+			if err != nil {
+				xdcrf.logger.Infof("Failed to get memcached ssl port, err=%v\n", err)
+				return nil, err
 			}
-		}
-		if remote_proxy_port == 0 {
-			return nil, errors.New(fmt.Sprintf("Can't find remote proxy port for remote bucket %v", spec.TargetBucketName))
-		}
+			mem_ssl_port, ok := ssl_map[xmemConnStr]
+			if !ok {
+				return nil, fmt.Errorf("Can't get remote memcached ssl port for %v", xmemConnStr)
+			}
+			xdcrf.logger.Infof("mem_ssl_port=%v\n", mem_ssl_port)
 
-		xmemSettings[parts.XMEM_SETTING_DEMAND_ENCRYPTION] = demandEncryption
-		xmemSettings[parts.XMEM_SETTING_CERTIFICATE] = certificate
-		xmemSettings[parts.XMEM_SETTING_REMOTE_PROXY_PORT] = remote_proxy_port
-		xmemSettings[parts.XMEM_SETTING_LOCAL_PROXY_PORT] = local_proxy_port
+			xmemSettings[parts.XMEM_SETTING_REMOTE_MEM_SSL_PORT] = mem_ssl_port
+			xmemSettings[parts.XMEM_SETTING_CERTIFICATE] = certificate
+			xmemSettings[parts.XMEM_SETTING_DEMAND_ENCRYPTION] = demandEncryption
+
+		} else {
+			local_proxy_port, err := xdcrf.xdcr_topology_svc.MyProxyPort()
+
+			if err != nil {
+				return nil, err
+			}
+
+			var remote_proxy_port uint16 = 0
+			targetBucket, err := xdcrf.cluster_info_svc.GetBucket(targetClusterRef, spec.TargetBucketName)
+			if err != nil {
+				xdcrf.logger.Errorf("Error getting bucket. err=%v\n", err)
+				return nil, err
+			}
+			defer targetBucket.Close()
+
+			for _, node := range targetBucket.Nodes() {
+				hostname := utils.GetHostName(node.Hostname)
+				memcachedPort := uint16(node.Ports[base.DirectPortKey])
+				hostAddr := utils.GetHostAddr(hostname, memcachedPort)
+				if hostAddr == xmemConnStr {
+					remote_proxy_port = uint16(node.Ports[base.SSLProxyPortKey])
+					break
+				}
+			}
+			if remote_proxy_port == 0 {
+				return nil, errors.New(fmt.Sprintf("Can't find remote proxy port for remote bucket %v", spec.TargetBucketName))
+			}
+			xmemSettings[parts.XMEM_SETTING_DEMAND_ENCRYPTION] = demandEncryption
+			xmemSettings[parts.XMEM_SETTING_CERTIFICATE] = certificate
+			xmemSettings[parts.XMEM_SETTING_REMOTE_PROXY_PORT] = remote_proxy_port
+			xmemSettings[parts.XMEM_SETTING_LOCAL_PROXY_PORT] = local_proxy_port
+		}
 	}
 	return xmemSettings, nil
 
@@ -566,7 +592,7 @@ func (xdcrf *XDCRFactory) registerServices(pipeline common.Pipeline, logger_ctx 
 	}
 
 	//register topology change detect service
-	top_detect_svc := pipeline_svc.NewTopologyChangeDetectorSvc(xdcrf.cluster_info_svc, xdcrf.xdcr_topology_svc, logger_ctx)
+	top_detect_svc := pipeline_svc.NewTopologyChangeDetectorSvc(xdcrf.cluster_info_svc, xdcrf.xdcr_topology_svc, xdcrf.remote_cluster_svc, logger_ctx)
 	err = ctx.RegisterService(base.TOPOLOGY_CHANGE_DETECT_SVC, top_detect_svc)
 	if err != nil {
 		return err

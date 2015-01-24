@@ -88,22 +88,22 @@ func (genericPipeline *GenericPipeline) SetRuntimeContext(ctx common.PipelineRun
 	genericPipeline.context = ctx
 }
 
-func (genericPipeline *GenericPipeline) startPart(part common.Part, settings map[string]interface{}, ts map[uint16]*base.VBTimestamp, targetClusterRef *metadata.RemoteClusterReference) error {
+func (genericPipeline *GenericPipeline) startPart(part common.Part, settings map[string]interface{}, ts map[uint16]*base.VBTimestamp, targetClusterRef *metadata.RemoteClusterReference) map[string]error {
 	var err error = nil
+	errMap := make(map[string]error)
 
 	//start downstreams
 	if part.Connector() != nil {
 		downstreamParts := part.Connector().DownStreams()
 		waitGrp := &sync.WaitGroup{}
-		errMap := make(map[string]error)
 		for _, p := range downstreamParts {
 			waitGrp.Add(1)
 			go func(waitGrp *sync.WaitGroup, errMap map[string]error, p common.Part, settings map[string]interface{}, ts map[uint16]*base.VBTimestamp) {
 				defer waitGrp.Done()
 				if p.State() == common.Part_Initial {
-					err = genericPipeline.startPart(p, settings, ts, targetClusterRef)
-					if err != nil {
-						errMap[p.Id()] = err
+					errs := genericPipeline.startPart(p, settings, ts, targetClusterRef)
+					for partId, err := range errs {
+						errMap[partId] = err
 					}
 				}
 			}(waitGrp, errMap, p, settings, ts)
@@ -112,10 +112,7 @@ func (genericPipeline *GenericPipeline) startPart(part common.Part, settings map
 		waitGrp.Wait()
 
 		if len(errMap) > 0 {
-			for _, err := range errMap {
-				//return the first error
-				return err
-			}
+			return errMap
 		}
 	}
 
@@ -124,14 +121,18 @@ func (genericPipeline *GenericPipeline) startPart(part common.Part, settings map
 		genericPipeline.logger.Debugf("Calling part setting constructor\n")
 		partSettings, err = genericPipeline.partSetting_constructor(genericPipeline, part, settings, ts, targetClusterRef)
 		if err != nil {
-			return err
+			errMap[part.Id()] = err
+			return errMap
 		}
 
 	}
 
 	err = part.Start(partSettings)
+	if err != nil {
+		errMap[part.Id()] = err
+	}
 
-	return err
+	return errMap
 }
 
 //Start starts the pipeline
@@ -142,18 +143,18 @@ func (genericPipeline *GenericPipeline) Start(settings map[string]interface{}) e
 	genericPipeline.logger.Infof("Starting pipeline %s\n %s \n settings = %s\n", genericPipeline.InstanceId(), genericPipeline.Layout(), fmt.Sprint(settings))
 	var err error
 
-	defer func() {
+	defer func(genericPipeline *GenericPipeline, err error) {
 		if err != nil {
 			genericPipeline.ReportProgress(fmt.Sprintf("Pipeline failed to start, err=%v", err))
 		}
-	}()
+	}(genericPipeline, err)
 
 	err = genericPipeline.SetState(common.Pipeline_Starting)
 	if err != nil {
 		return err
 	}
 
-	genericPipeline.settings_at_start = settings	
+	genericPipeline.settings_at_start = settings
 	genericPipeline.ReportProgress("Try to get start seqno")
 	genericPipeline.logger.Info("Try to get start seqno")
 	//get starting vb timestamp
@@ -187,9 +188,12 @@ func (genericPipeline *GenericPipeline) Start(settings map[string]interface{}) e
 		go func(errMap map[string]error, source common.Nozzle, settings map[string]interface{}, waitGrp *sync.WaitGroup) {
 			defer waitGrp.Done()
 			ts := settings["VBTimestamps"].(map[uint16]*base.VBTimestamp)
-			err = genericPipeline.startPart(source, settings, ts, targetClusterRef)
-			if err != nil {
-				errMap[source.Id()] = err
+
+			errs := genericPipeline.startPart(source, settings, ts, targetClusterRef)
+			if len(errs) > 0 {
+				for partId, err := range errs {
+					errMap[partId] = err
+				}
 			} else {
 				genericPipeline.logger.Infof("Incoming nozzle %s is started", source.Id())
 			}

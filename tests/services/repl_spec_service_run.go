@@ -52,8 +52,9 @@ func startReplicationSpecService() error {
 	if err != nil {
 		return errors.New(fmt.Sprintf("Error starting metadata service. err=%v\n", err.Error()))
 	}
-	
-	top_svc, err := s.NewXDCRTopologySvc(9000, 13000, 11977, false, nil)
+
+	cluster_info_svc := s.NewClusterInfoSvc(nil)	
+	top_svc, err := s.NewXDCRTopologySvc(9000, 13000, 11977, false, cluster_info_svc, nil)
 	if err != nil {
 		return err
 	}

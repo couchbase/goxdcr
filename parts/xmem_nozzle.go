@@ -33,11 +33,12 @@ import (
 
 //configuration settings for XmemNozzle
 const (
-	SETTING_RESP_TIMEOUT           = "resp_timeout"
-	XMEM_SETTING_DEMAND_ENCRYPTION = "demandEncryption"
-	XMEM_SETTING_CERTIFICATE       = "certificate"
-	XMEM_SETTING_REMOTE_PROXY_PORT = "remote_proxy_port"
-	XMEM_SETTING_LOCAL_PROXY_PORT  = "local_proxy_port"
+	SETTING_RESP_TIMEOUT             = "resp_timeout"
+	XMEM_SETTING_DEMAND_ENCRYPTION   = "demandEncryption"
+	XMEM_SETTING_CERTIFICATE         = "certificate"
+	XMEM_SETTING_REMOTE_PROXY_PORT   = "remote_proxy_port"
+	XMEM_SETTING_LOCAL_PROXY_PORT    = "local_proxy_port"
+	XMEM_SETTING_REMOTE_MEM_SSL_PORT = "remote_ssl_port"
 
 	//default configuration
 	default_numofretry          int           = 10
@@ -71,6 +72,8 @@ var xmem_setting_defs base.SettingDefinitions = base.SettingDefinitions{SETTING_
 	SETTING_OPTI_REP_THRESHOLD:     base.NewSettingDef(reflect.TypeOf((*int)(nil)), true),
 	XMEM_SETTING_DEMAND_ENCRYPTION: base.NewSettingDef(reflect.TypeOf((*bool)(nil)), false),
 	XMEM_SETTING_CERTIFICATE:       base.NewSettingDef(reflect.TypeOf((*[]byte)(nil)), false),
+
+	//only used for xmem over ssl for 2.5
 	XMEM_SETTING_REMOTE_PROXY_PORT: base.NewSettingDef(reflect.TypeOf((*uint16)(nil)), false),
 	XMEM_SETTING_LOCAL_PROXY_PORT:  base.NewSettingDef(reflect.TypeOf((*uint16)(nil)), false)}
 
@@ -471,13 +474,14 @@ type xmemConfig struct {
 	baseConfig
 	bucketName string
 	//the duration to wait for the batch-sending to finish
-	certificate       []byte
-	demandEncryption  bool
-	remote_proxy_port uint16
-	local_proxy_port  uint16
-	respTimeout       time.Duration
-	max_downtime      time.Duration
-	logger            *log.CommonLogger
+	certificate        []byte
+	demandEncryption   bool
+	remote_proxy_port  uint16
+	local_proxy_port   uint16
+	memcached_ssl_port uint16
+	respTimeout        time.Duration
+	max_downtime       time.Duration
+	logger             *log.CommonLogger
 }
 
 func newConfig(logger *log.CommonLogger) xmemConfig {
@@ -495,13 +499,14 @@ func newConfig(logger *log.CommonLogger) xmemConfig {
 			username:            "",
 			password:            "",
 		},
-		bucketName:        "",
-		respTimeout:       default_resptimeout,
-		demandEncryption:  default_demandEncryption,
-		certificate:       []byte{},
-		remote_proxy_port: 0,
-		local_proxy_port:  0,
-		max_downtime:      default_max_downtime,
+		bucketName:         "",
+		respTimeout:        default_resptimeout,
+		demandEncryption:   default_demandEncryption,
+		certificate:        []byte{},
+		remote_proxy_port:  0,
+		local_proxy_port:   0,
+		max_downtime:       default_max_downtime,
+		memcached_ssl_port: 0,
 	}
 
 }
@@ -520,15 +525,19 @@ func (config *xmemConfig) initializeConfig(settings map[string]interface{}) erro
 			} else {
 				return errors.New("demandEncryption=true, but certificate is not set in settings")
 			}
-			if val, ok := settings[XMEM_SETTING_REMOTE_PROXY_PORT]; ok {
-				config.remote_proxy_port = val.(uint16)
+			if val, ok := settings[XMEM_SETTING_REMOTE_MEM_SSL_PORT]; ok {
+				config.memcached_ssl_port = val.(uint16)
 			} else {
-				return errors.New("demandEncryption=true, but remote_proxy_port is not set in settings")
-			}
-			if val, ok := settings[XMEM_SETTING_LOCAL_PROXY_PORT]; ok {
-				config.local_proxy_port = val.(uint16)
-			} else {
-				return errors.New("demandEncryption=true, but local_proxy_port is not set in settings")
+				if val, ok := settings[XMEM_SETTING_REMOTE_PROXY_PORT]; ok {
+					config.remote_proxy_port = val.(uint16)
+				} else {
+					return errors.New("demandEncryption=true, but neither remote_proxy_port nor remote_ssl_port is set in settings")
+				}
+				if val, ok := settings[XMEM_SETTING_LOCAL_PROXY_PORT]; ok {
+					config.local_proxy_port = val.(uint16)
+				} else {
+					return errors.New("demandEncryption=true, but neither local_proxy_port nor remote_ssl_port is set in settings")
+				}
 			}
 		}
 	}
@@ -619,10 +628,10 @@ func (client *xmemClient) getConn(readTimeout bool, writeTimeout bool) (io.ReadW
 
 	conn := client.memClient.Hijack()
 	if readTimeout {
-		conn.(*net.TCPConn).SetReadDeadline(time.Now().Add(client.read_timeout))
+		conn.(net.Conn).SetReadDeadline(time.Now().Add(client.read_timeout))
 	}
 	if writeTimeout {
-		conn.(*net.TCPConn).SetWriteDeadline(time.Now().Add(client.write_timeout))
+		conn.(net.Conn).SetWriteDeadline(time.Now().Add(client.write_timeout))
 	}
 	return conn, nil
 }
@@ -708,6 +717,8 @@ type XmemNozzle struct {
 	maxseqno_received_map map[uint16]uint64
 
 	receive_token_ch chan int
+
+	connType base.ConnType
 }
 
 func NewXmemNozzle(id string,
@@ -983,11 +994,9 @@ func (xmem *XmemNozzle) onExit() {
 func (xmem *XmemNozzle) batchSetMetaWithRetry(batch *dataBatch, numOfRetry int) error {
 	var err error
 	count := batch.count()
-
-	reqs_bytes := []byte{}
-
-	index_reservation_map := make(map[uint16]int)
 	batch_replicated_count := 0
+	reqs_bytes := []byte{}
+	index_reservation_map := make(map[uint16]int)
 
 	for i := 0; i < count; i++ {
 		//check xmem's state, if it is already in stopping or stopped state, return
@@ -1328,13 +1337,24 @@ func (xmem *XmemNozzle) getConnPool() (pool base.ConnPool, err error) {
 			return nil, err
 		}
 	} else {
+		//create a pool of SSL connection
+		poolName := getPoolName(xmem.config)
 		hostName := utils.GetHostName(xmem.config.connectStr)
 		remote_mem_port, err := utils.GetPortNumber(xmem.config.connectStr)
 		if err != nil {
 			return nil, err
 		}
-		pool, err = base.ConnPoolMgr().GetOrCreateSSLPool(poolName, hostName, xmem.config.bucketName, xmem.config.bucketName, xmem.config.password,
-			base.DefaultConnectionSize, int(remote_mem_port), int(xmem.config.local_proxy_port), int(xmem.config.remote_proxy_port), xmem.config.certificate)
+
+		if xmem.config.memcached_ssl_port != 0 {
+			xmem.Logger().Infof("Get or create ssl over memcached connection, memcached_ssl_port=%v\n", int(xmem.config.memcached_ssl_port))
+			pool, err = base.ConnPoolMgr().GetOrCreateSSLOverMemPool(poolName, hostName, xmem.config.bucketName, xmem.config.bucketName, xmem.config.password,
+				base.DefaultConnectionSize, int(xmem.config.memcached_ssl_port), xmem.config.certificate)
+
+		} else {
+			xmem.Logger().Infof("Get or create ssl over proxy connection")
+			pool, err = base.ConnPoolMgr().GetOrCreateSSLOverProxyPool(poolName, hostName, xmem.config.bucketName, xmem.config.bucketName, xmem.config.password,
+				base.DefaultConnectionSize, int(remote_mem_port), int(xmem.config.local_proxy_port), int(xmem.config.remote_proxy_port), xmem.config.certificate)
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -1354,6 +1374,7 @@ func (xmem *XmemNozzle) initializeConnection() (err error) {
 	if err != nil {
 		return
 	}
+	xmem.connType = pool.ConnType()
 
 	memClient_setMeta, err := pool.Get()
 
@@ -1398,9 +1419,6 @@ func (xmem *XmemNozzle) initialize(settings map[string]interface{}) error {
 
 	xmem.counter_received = 0
 	xmem.counter_sent = 0
-
-	//enable send
-	//	xmem.send_allow_ch <- true
 
 	//init a new batch
 	xmem.initNewBatch()
@@ -1717,9 +1735,14 @@ func (xmem *XmemNozzle) encodeOpCode(code mc.CommandCode) mc.CommandCode {
 	return code
 }
 
+func (xmem *XmemNozzle) ConnType() base.ConnType {
+	return xmem.connType
+}
+
 func (xmem *XmemNozzle) StatusSummary() string {
 	if xmem.State() == common.Part_Running {
-		return fmt.Sprintf("Xmem %v state =%v received %v items, sent %v items, %v items waiting to confirm, %v in queue", xmem.Id(), xmem.State(), xmem.counter_received, xmem.counter_sent, int(xmem.buf.bufferSize())-len(xmem.buf.empty_slots_pos), len(xmem.dataChan))
+		connType := xmem.connType
+		return fmt.Sprintf("Xmem %v state =%v connType=%v received %v items, sent %v items, %v items waiting to confirm, %v in queue", xmem.Id(), xmem.State(), connType, xmem.counter_received, xmem.counter_sent, int(xmem.buf.bufferSize())-len(xmem.buf.empty_slots_pos), len(xmem.dataChan))
 	} else {
 		return fmt.Sprintf("Xmem %v state =%v ", xmem.Id(), xmem.State())
 	}
@@ -1926,7 +1949,7 @@ func (xmem *XmemNozzle) ConnStr() string {
 }
 
 func (xmem *XmemNozzle) packageRequest(count int, reqs_bytes []byte) []byte {
-	if xmem.config.demandEncryption {
+	if xmem.ConnType() == base.SSLOverProxy {
 		bytes := make([]byte, 8+len(reqs_bytes))
 		binary.BigEndian.PutUint32(bytes[0:4], uint32(len(reqs_bytes)))
 		binary.BigEndian.PutUint32(bytes[4:8], uint32(count))

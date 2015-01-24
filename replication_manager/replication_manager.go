@@ -16,7 +16,6 @@ import (
 	"errors"
 	"expvar"
 	"fmt"
-	"github.com/couchbase/go-couchbase"
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/common"
 	"github.com/couchbase/goxdcr/factory"
@@ -29,7 +28,6 @@ import (
 	"github.com/couchbase/goxdcr/supervisor"
 	"github.com/couchbase/goxdcr/utils"
 	"io"
-	"net/http"
 	"os"
 	"reflect"
 	"strings"
@@ -148,13 +146,13 @@ func (rm *replicationManager) initReplications() {
 		logger_rm.Errorf("Failed to get all replication specs, err=%v", err)
 		exitProcess(true)
 	}
-	
+
 	for _, spec := range specs {
 		if !spec.Settings.Active {
 			pipeline_manager.SetReplicationStatusForPausedReplication(spec)
 		}
 	}
-	
+
 	// start listening to repl spec changed events
 	// this will start replications with active replication specs
 	err = rm.repl_spec_svc.StartSpecChangedCallBack(specChangedCallback, specChangeObservationFailureCallBack, replication_mgr.repl_spec_callback_cancel_ch, replication_mgr.children_waitgrp)
@@ -204,10 +202,6 @@ func (rm *replicationManager) init(
 	pipeline_manager.PipelineManager(fac, rm.repl_spec_svc, log.DefaultLoggerContext)
 
 	rm.repl_spec_callback_cancel_ch = make(chan struct{}, 1)
-
-	//workaround MB-13738 until go-couchbase fix it properly
-	//go-couchbase's built-in Transport has MaxIdleConnsPerHost settings
-	couchbase.HTTPClient.Transport = http.DefaultTransport
 
 	logger_rm.Info("Replication manager is initialized")
 

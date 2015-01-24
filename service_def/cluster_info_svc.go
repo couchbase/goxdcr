@@ -19,6 +19,6 @@ type ClusterInfoSvc interface {
 	GetServerList(clusterConnInfoProvider base.ClusterConnectionInfoProvider, Bucket string) ([]string, error)
 	GetNodes(clusterConnInfoProvider base.ClusterConnectionInfoProvider) ([]couchbase.Node, error)
 	GetServerVBucketsMap(clusterConnInfoProvider base.ClusterConnectionInfoProvider, Bucket string) (map[string][]uint16, error)
-	IsNodeCompatible(node string, version string) (bool, error)
+	IsClusterCompatible(clusterConnInfoProvider base.ClusterConnectionInfoProvider, version []int) (bool, error)
 	GetBucket(clusterConnInfoProvider base.ClusterConnectionInfoProvider, bucketName string) (*couchbase.Bucket, error)
 }
