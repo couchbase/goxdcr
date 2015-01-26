@@ -14,7 +14,7 @@ import (
 )
 
 //constants
-var DefaultConnectionSize = 10
+var DefaultConnectionSize = 5
 var DefaultPoolName = "default"
 
 var LocalHostName = "127.0.0.1"

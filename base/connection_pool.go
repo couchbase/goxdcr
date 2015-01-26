@@ -15,7 +15,9 @@ import (
 	//	"log"
 	mcc "github.com/couchbase/gomemcached/client"
 	"github.com/couchbase/goxdcr/log"
+	"net"
 	"sync"
+	"time"
 )
 
 type ConnPool struct {
@@ -94,6 +96,13 @@ func (p *ConnPool) Get() (*mcc.Client, error) {
 func (p *ConnPool) Release(client *mcc.Client) {
 	// This would panic if p.clients is closed.  This
 	// is intentional.
+
+	//reset connection deadlines
+	conn := client.Hijack()
+
+	conn.(*net.TCPConn).SetReadDeadline(time.Date(1, time.January, 0, 0, 0, 0, 0, time.UTC))
+	conn.(*net.TCPConn).SetWriteDeadline(time.Date(1, time.January, 0, 0, 0, 0, 0, time.UTC))
+
 	select {
 	case p.clients <- client:
 		return
@@ -178,15 +187,14 @@ func (connPoolMgr *connPoolMgr) CreatePool(poolName string, hostName string, buc
 	//	 initialize the connection pool
 	for i := 0; i < connectionSize; i++ {
 		mcClient, err := NewConn(hostName, username, password)
-		if err == nil {
-			_, err = mcClient.SelectBucket(bucketname)
-			if err == nil {
-				connPoolMgr.logger.Debug("A client connection is established")
-				p.clients <- mcClient
-			} else {
-				connPoolMgr.logger.Debugf("error establishing connection with hostname=%s, username=%s, password=%s - %s", hostName, username, password, err)
-			}
+		if err != nil {
+			connPoolMgr.logger.Errorf("error establishing connection with hostname=%s, username=%s, password=%s - %s", hostName, username, password, err)
+			return nil, err
 		}
+		if err == nil {
+			connPoolMgr.logger.Debug("A client connection is established")
+			p.clients <- mcClient
+		} 
 	}
 
 	connPoolMgr.token.Lock()
@@ -208,7 +216,7 @@ func NewConn(hostName string, username string, password string) (conn *mcc.Clien
 	}
 
 	// authentic using user/pass
-	if len(username) != 0 && username != "default" {
+	if username != "" {
 		_connPoolMgr.logger.Debug("Authenticate...")
 		_, err = conn.Auth(username, password)
 		if err != nil {

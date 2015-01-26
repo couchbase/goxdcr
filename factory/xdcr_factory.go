@@ -81,7 +81,7 @@ func (xdcrf *XDCRFactory) NewPipeline(topic string) (common.Pipeline, error) {
 	}
 
 	// popuplate pipeline using config
-	sourceNozzles, kv_vb_map, err := xdcrf.constructSourceNozzles(spec, topic, logger_ctx)
+	sourceNozzles, kv_vb_map, sourceNozzle_vb_map, err := xdcrf.constructSourceNozzles(spec, topic, logger_ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -90,24 +90,27 @@ func (xdcrf *XDCRFactory) NewPipeline(topic string) (common.Pipeline, error) {
 		return nil, ErrorNoSourceNozzle
 	}
 
-	outNozzles, vbNozzleMap, err := xdcrf.constructOutgoingNozzles(spec, logger_ctx)
+	outNozzles, vbNozzleMap, err := xdcrf.constructOutgoingNozzles(spec, kv_vb_map, logger_ctx)
 	if err != nil {
 		return nil, err
 	}
 
 	// TODO construct queue parts. This will affect vbMap in router. may need an additional outNozzle -> downStreamPart/queue map in constructRouter
-	downStreamParts := make(map[string]common.Part)
-	for partId, outNozzle := range outNozzles {
-		downStreamParts[partId] = outNozzle
-	}
-
-	router, err := xdcrf.constructRouter(spec, downStreamParts, vbNozzleMap, logger_ctx)
-	if err != nil {
-		return nil, err
-	}
 
 	// connect parts
 	for _, sourceNozzle := range sourceNozzles {
+		vblist := sourceNozzle_vb_map[sourceNozzle.Id()]
+		downStreamParts := make(map[string]common.Part)
+		for _, vb := range vblist {
+			targetNozzleId := vbNozzleMap[vb]
+
+			downStreamParts[targetNozzleId] = outNozzles[targetNozzleId]
+		}
+
+		router, err := xdcrf.constructRouter(sourceNozzle.Id(), spec, downStreamParts, vbNozzleMap, logger_ctx)
+		if err != nil {
+			return nil, err
+		}
 		sourceNozzle.SetConnector(router)
 	}
 
@@ -119,7 +122,10 @@ func (xdcrf *XDCRFactory) NewPipeline(topic string) (common.Pipeline, error) {
 
 		//register services
 		pipeline.SetRuntimeContext(pipelineContext)
-		xdcrf.registerServices(pipeline, logger_ctx, kv_vb_map)
+		err = xdcrf.registerServices(pipeline, logger_ctx, kv_vb_map)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	xdcrf.logger.Infof("XDCR pipeline constructed")
@@ -129,8 +135,9 @@ func (xdcrf *XDCRFactory) NewPipeline(topic string) (common.Pipeline, error) {
 // construct source nozzles for the requested/current kv node
 func (xdcrf *XDCRFactory) constructSourceNozzles(spec *metadata.ReplicationSpecification,
 	topic string,
-	logger_ctx *log.LoggerContext) (map[string]common.Nozzle, map[string][]uint16, error) {
+	logger_ctx *log.LoggerContext) (map[string]common.Nozzle, map[string][]uint16, map[string][]uint16, error) {
 	sourceNozzles := make(map[string]common.Nozzle)
+	sourceNozzleVBsMap := make(map[string][]uint16)
 
 	bucketName := spec.SourceBucketName
 
@@ -138,7 +145,7 @@ func (xdcrf *XDCRFactory) constructSourceNozzles(spec *metadata.ReplicationSpeci
 
 	kv_vb_map, err := xdcrf.getKVVBMap(spec)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	for kvaddr, vbnos := range kv_vb_map {
@@ -166,7 +173,7 @@ func (xdcrf *XDCRFactory) constructSourceNozzles(spec *metadata.ReplicationSpeci
 			bucket, err := xdcrf.cluster_info_svc.GetBucket(xdcrf.xdcr_topology_svc, bucketName)
 			if err != nil {
 				xdcrf.logger.Errorf("Error getting bucket. i=%d, err=%v\n", i, err)
-				return nil, nil, err
+				return nil, nil, nil, err
 			}
 			vbList := make([]uint16, 0, 15)
 			for j := 0; j < numOfVbPerDcpNozzle; j++ {
@@ -181,23 +188,43 @@ func (xdcrf *XDCRFactory) constructSourceNozzles(spec *metadata.ReplicationSpeci
 
 			// construct dcpNozzles
 			// partIds of the dcpNozzle nodes look like "dcpNozzle_$kvaddr_1"
-			dcpNozzle := parts.NewDcpNozzle(DCP_NOZZLE_NAME_PREFIX+PART_NAME_DELIMITER+kvaddr+PART_NAME_DELIMITER+strconv.Itoa(i),
+			id := xdcrf.partId(DCP_NOZZLE_NAME_PREFIX, spec.Id, kvaddr, i)
+			dcpNozzle := parts.NewDcpNozzle(id,
 				bucket, vbList, logger_ctx)
 			sourceNozzles[dcpNozzle.Id()] = dcpNozzle
+			sourceNozzleVBsMap[dcpNozzle.Id()] = vbList
 			xdcrf.logger.Debugf("Constructed source nozzle %v with vbList = %v \n", dcpNozzle.Id(), vbList)
 		}
 	}
 	xdcrf.logger.Infof("Constructed %v source nozzles\n", len(sourceNozzles))
 
-	return sourceNozzles, kv_vb_map, nil
+	return sourceNozzles, kv_vb_map, sourceNozzleVBsMap, nil
 }
 
-func (xdcrf *XDCRFactory) constructOutgoingNozzles(spec *metadata.ReplicationSpecification,
+func (xdcrf *XDCRFactory) partId(prefix string, topic string, kvaddr string, index int) string {
+	return prefix + PART_NAME_DELIMITER + topic + PART_NAME_DELIMITER + kvaddr + PART_NAME_DELIMITER + strconv.Itoa(index)
+}
+
+func (xdcrf *XDCRFactory) filterVBList(targetkvVBList []uint16, kv_vb_map map[string][]uint16) []uint16{
+	ret := []uint16{}
+	for _, vb := range targetkvVBList {
+		for _, sourcevblist := range kv_vb_map {
+			for _, sourcevb := range sourcevblist {
+				if sourcevb == vb {
+					ret = append(ret, vb)
+				}
+			}
+		}
+	}
+
+	return ret
+}
+
+func (xdcrf *XDCRFactory) constructOutgoingNozzles(spec *metadata.ReplicationSpecification, kv_vb_map map[string][]uint16,
 	logger_ctx *log.LoggerContext) (map[string]common.Nozzle, map[uint16]string, error) {
 	outNozzles := make(map[string]common.Nozzle)
 	vbNozzleMap := make(map[uint16]string)
 
-	//	kvVBMap, bucketPwd, err := (*xdcr_factory.get_target_topology_callback)(config.TargetCluster, config.TargetBucketn)
 	targetBucketName := spec.TargetBucketName
 	targetClusterRef, err := xdcrf.remote_cluster_svc.RemoteClusterByUuid(spec.TargetClusterUUID)
 	if err != nil {
@@ -225,7 +252,8 @@ func (xdcrf *XDCRFactory) constructOutgoingNozzles(spec *metadata.ReplicationSpe
 	xdcrf.logger.Debugf("Target topology retrived. kvVBMap = %v\n", kvVBMap)
 
 	for kvaddr, kvVBList := range kvVBMap {
-		numOfVbs := len(kvVBList)
+		relevantVBs := xdcrf.filterVBList(kvVBList, kv_vb_map)
+		numOfVbs := len(relevantVBs)
 		// the number of xmem nozzles to construct is the smaller of vbucket list size and target connection size
 		numOfNozzles := int(math.Min(float64(numOfVbs), float64(maxTargetNozzlePerNode)))
 
@@ -237,7 +265,7 @@ func (xdcrf *XDCRFactory) constructOutgoingNozzles(spec *metadata.ReplicationSpe
 
 			// construct xmem nozzle
 			// partIds of the xmem nozzles look like "xmem_$kvaddr_1"
-			outNozzle, err := xdcrf.constructNozzleForTargetNode(kvaddr, targetBucketName, bucketPwd, i, logger_ctx)
+			outNozzle, err := xdcrf.constructNozzleForTargetNode(spec.Id, kvaddr, targetBucketName, bucketPwd, i, logger_ctx)
 
 			if err != nil {
 				xdcrf.logger.Errorf("Failed to construct target nozzles, err=%v\n", err)
@@ -250,7 +278,7 @@ func (xdcrf *XDCRFactory) constructOutgoingNozzles(spec *metadata.ReplicationSpe
 			// before statistics info is available, the default load balancing stragegy is to evenly distribute vbuckets among out nozzles
 			for i := 0; i < numOfVbPerNozzle; i++ {
 				if index < numOfVbs {
-					vbNozzleMap[kvVBList[index]] = outNozzle.Id()
+					vbNozzleMap[relevantVBs[index]] = outNozzle.Id()
 					index++
 				} else {
 					// no more vbs to process
@@ -267,16 +295,17 @@ func (xdcrf *XDCRFactory) constructOutgoingNozzles(spec *metadata.ReplicationSpe
 	return outNozzles, vbNozzleMap, nil
 }
 
-func (xdcrf *XDCRFactory) constructRouter(spec *metadata.ReplicationSpecification,
+func (xdcrf *XDCRFactory) constructRouter(id string, spec *metadata.ReplicationSpecification,
 	downStreamParts map[string]common.Part,
 	vbNozzleMap map[uint16]string,
 	logger_ctx *log.LoggerContext) (*parts.Router, error) {
-	router, err := parts.NewRouter(spec.Settings.FilterExpression, downStreamParts, vbNozzleMap, logger_ctx)
+	routerId := "Router" + PART_NAME_DELIMITER + id
+	router, err := parts.NewRouter(routerId, spec.Settings.FilterExpression, downStreamParts, vbNozzleMap, logger_ctx)
 	xdcrf.logger.Infof("Constructed router")
 	return router, err
 }
 
-func (xdcrf *XDCRFactory) constructNozzleForTargetNode(kvaddr string,
+func (xdcrf *XDCRFactory) constructNozzleForTargetNode(topic string, kvaddr string,
 	bucketName string,
 	bucketPwd string,
 	nozzle_index int,
@@ -291,9 +320,9 @@ func (xdcrf *XDCRFactory) constructNozzleForTargetNode(kvaddr string,
 
 	switch nozzleType {
 	case base.Xmem:
-		nozzle = xdcrf.constructXMEMNozzle(kvaddr, bucketName, bucketPwd, nozzle_index, logger_ctx)
+		nozzle = xdcrf.constructXMEMNozzle(topic, kvaddr, bucketName, bucketPwd, nozzle_index, logger_ctx)
 	case base.Capi:
-		nozzle = xdcrf.constructCAPINozzle(kvaddr, bucketName, bucketPwd, nozzle_index, logger_ctx)
+		nozzle = xdcrf.constructCAPINozzle(topic, kvaddr, bucketName, bucketPwd, nozzle_index, logger_ctx)
 	}
 
 	return nozzle, err
@@ -314,17 +343,17 @@ func (xdcrf *XDCRFactory) getNozzleType(kvaddr string) (base.XDCROutgoingNozzleT
 	}
 }
 
-func (xdcrf *XDCRFactory) constructXMEMNozzle(kvaddr string,
+func (xdcrf *XDCRFactory) constructXMEMNozzle(topic string, kvaddr string,
 	bucketName string,
 	bucketPwd string,
 	nozzle_index int,
 	logger_ctx *log.LoggerContext) common.Nozzle {
-	xmemNozzle_Id := XMEM_NOZZLE_NAME_PREFIX + PART_NAME_DELIMITER + kvaddr + PART_NAME_DELIMITER + strconv.Itoa(nozzle_index)
+	xmemNozzle_Id := xdcrf.partId(XMEM_NOZZLE_NAME_PREFIX, topic, kvaddr, nozzle_index)
 	nozzle := parts.NewXmemNozzle(xmemNozzle_Id, kvaddr, bucketName, bucketPwd, logger_ctx)
 	return nozzle
 }
 
-func (xdcrf *XDCRFactory) constructCAPINozzle(kvaddr string,
+func (xdcrf *XDCRFactory) constructCAPINozzle(topic string, kvaddr string,
 	bucketName string,
 	bucketPwd string,
 	nozzle_index int,
