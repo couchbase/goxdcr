@@ -6,7 +6,6 @@ import (
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/goxdcr/utils"
-	"github.com/couchbaselabs/go-couchbase"
 )
 
 type RemoteBucketInfo struct {
@@ -16,7 +15,7 @@ type RemoteBucketInfo struct {
 	RemoteClusterRef *metadata.RemoteClusterReference
 	Capabilities     []string
 	UUID             string
-	VBucketServerMap *couchbase.VBucketServerMap
+	VBServerMap 	map[string][]uint16
 	logger           *log.CommonLogger
 }
 
@@ -65,8 +64,11 @@ func (remoteBucket *RemoteBucketInfo) refresh_internal(remote_cluster_svc Remote
 
 	remoteBucket.UUID = bucket.UUID
 	remoteBucket.Capabilities = bucket.Capabilities
-	remoteBucket.VBucketServerMap = bucket.VBServerMap()
-
+	
+	remoteBucket.VBServerMap, err = bucket.GetVBmap(bucket.VBServerMap().ServerList)
+	if err != nil {
+		return errors.New(fmt.Sprintf("Failed to get VBServerMap for remote bucket %v", remoteBucket.BucketName))
+	}
 
 	return nil
 }

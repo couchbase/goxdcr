@@ -209,6 +209,16 @@ func GetHostName(hostAddr string) string {
 	return strings.Split(hostAddr, base.UrlPortNumberDelimiter)[0]
 }
 
+func GetPortNumber(hostAddr string) (uint16, error) {
+	port_str := strings.Split(hostAddr, base.UrlPortNumberDelimiter)[1]
+	port, err :=  strconv.ParseUint(port_str, 10, 16)
+	if err == nil {
+		return uint16(port), nil
+	}else {
+		return 0, err
+	}
+}
+
 func GetMapFromExpvarMap(expvarMap *expvar.Map) map[string]string {
 	regMap := make(map[string]string)
 

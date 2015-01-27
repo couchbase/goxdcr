@@ -335,10 +335,9 @@ func (ckmgr *CheckpointManager) startSeqnoGetter(getter_id int, listOfVbs []uint
 						}
 
 					} else {
-						//there is an error
-						errMap[vbno] = err
-						ckmgr.logger.Errorf("err=%v\n", err)
-						return
+						//there is an error to do _pre_replicate
+						//so the start seqno for this vb should be 0
+						ckmgr.logger.Errorf("Pre_replicate failed. err=%v\n", err)
 					}
 					goto POPULATE
 				}

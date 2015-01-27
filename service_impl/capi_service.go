@@ -56,7 +56,7 @@ func NewCAPIService(logger_ctx *log.LoggerContext) *CAPIService {
 func (capi_svc *CAPIService) PreReplicate(remoteBucket *service_def.RemoteBucketInfo,
 	knownRemoteVBStatus *service_def.RemoteVBReplicationStatus, disableCkptBackwardsCompat bool) (bMatch bool, current_remoteVBUUID uint64, err error) {
 	capi_svc.logger.Debug("Calling _pre_replicate")
-	api_base, err := capi_svc.composeAPIRequestBase(remoteBucket)
+	api_base, err := capi_svc.composeAPIRequestBase(remoteBucket, knownRemoteVBStatus.VBNo)
 	if err != nil {
 		return
 	}
@@ -67,6 +67,9 @@ func (capi_svc *CAPIService) PreReplicate(remoteBucket *service_def.RemoteBucket
 
 	status_code, respMap, err := capi_svc.send_post(PRE_REPLICATE_CMD, api_base, HTTP_RETRIES)
 	capi_svc.logger.Debugf("response from _pre_replicate is status_code=%v respMap=%v for %v\n", status_code, respMap, knownRemoteVBStatus)
+	if err != nil {
+		capi_svc.logger.Errorf("Calling _pre_replicate on %v failed, err=%v\n", api_base.url, err)
+	}
 	bMatch, current_remoteVBUUID, err = capi_svc.parsePreReplicateResp(api_base.url, status_code, respMap, disableCkptBackwardsCompat)
 	return
 
@@ -81,7 +84,7 @@ func (capi_svc *CAPIService) PreReplicate(remoteBucket *service_def.RemoteBucket
 //			  err
 func (capi_svc *CAPIService) CommitForCheckpoint(remoteBucket *service_def.RemoteBucketInfo, remoteVBUUID uint64, vbno uint16) (remote_seqno uint64, vb_uuid uint64, err error) {
 	capi_svc.logger.Debug("Calling _commit_for_checkpoint")
-	api_base, err := capi_svc.composeAPIRequestBase(remoteBucket)
+	api_base, err := capi_svc.composeAPIRequestBase(remoteBucket, vbno)
 	if err != nil {
 		return
 	}
@@ -121,7 +124,9 @@ func (capi_svc *CAPIService) CommitForCheckpoint(remoteBucket *service_def.Remot
 //		   missing	- the list of vb numbers whose vbuuid is not kept on file
 func (capi_svc *CAPIService) MassValidateVBUUIDs(remoteBucket *service_def.RemoteBucketInfo, remoteVBUUIDs [][]uint64) (matching []interface{}, mismatching []interface{}, missing []interface{}, err error) {
 	capi_svc.logger.Debug("Calling _mass_vbopaque_check")
-	api_base, err := capi_svc.composeAPIRequestBase(remoteBucket)
+	
+	//use the vbucket 0's capi api url
+	api_base, err := capi_svc.composeAPIRequestBase(remoteBucket, 0)
 	if err != nil {
 		return
 	}
@@ -164,11 +169,12 @@ func (capi_svc *CAPIService) parseMassValidateSeqNosResp(url string, resp_status
 	return
 }
 
-func (capi_svc *CAPIService) composeAPIRequestBase(remoteBucket *service_def.RemoteBucketInfo) (*apiRequest, error) {
+func (capi_svc *CAPIService) composeAPIRequestBase(remoteBucket *service_def.RemoteBucketInfo, vbno uint16) (*apiRequest, error) {
 	if remoteBucket.RemoteClusterRef == nil || remoteBucket.UUID == "" {
 		return nil, errors.New("Remote Bucket information is not fully populated")
 	}
-	connectionStr, err := remoteBucket.RemoteClusterRef.MyConnectionStr()
+
+	connectionStr, err := capi_svc.lookUpConnectionStr (remoteBucket, vbno)
 	if err != nil {
 		return nil, err
 	}
@@ -252,4 +258,44 @@ func (capi_svc *CAPIService) parsePreReplicateResp(hostName string,
 		return false, 0, retError
 
 	}
+}
+
+func (capi_svc *CAPIService) lookUpConnectionStr (remoteBucket *service_def.RemoteBucketInfo, vbno uint16) (string, error){
+	if remoteBucket == nil {
+		return "", errors.New("Not a valid remote bucket, VBServerMap is not populated correctly")
+	}
+	var foundServerAddr string = ""
+	
+	for server_addr, vblist := range remoteBucket.VBServerMap {
+		for _, vb := range vblist {
+			if vb == vbno {
+				foundServerAddr = server_addr
+				goto Done
+			}
+		}
+	}
+
+Done:
+	if foundServerAddr != "" {
+		hostName := utils.GetHostName(foundServerAddr)
+		port_num, err1 := capi_svc.lookupRemoteCouchRestPort(remoteBucket)
+		if err1 != nil {
+			return "", err1
+		}
+		
+		connectionStr := utils.GetHostAddr(hostName, port_num)
+		return connectionStr, nil	
+	}else {
+		return "", errors.New(fmt.Sprintf("failed to find server for vb=%v", vbno))
+	}
+	
+}
+
+func (capi_svc *CAPIService) lookupRemoteCouchRestPort (remoteBucket *service_def.RemoteBucketInfo) (uint16, error) {
+	connectionStr, err := remoteBucket.RemoteClusterRef.MyConnectionStr()
+	if err != nil {
+		return 0, err
+	}
+
+	return utils.GetPortNumber (connectionStr)
 }
