@@ -15,9 +15,9 @@ import (
 	"io"
 	"io/ioutil"
 	"net/http"
-	"net/url"
 	"reflect"
 	"strings"
+	"time"
 )
 
 //errors
@@ -49,16 +49,10 @@ var ErrorRetrievingCouchApiBase = errors.New("Could not get couchApiBase in the 
 //	return client.Do(request)
 //}
 
-const (
-	ContentType        = "Content-Type"
-	DefaultContentType = "application/x-www-form-urlencoded"
-	JsonContentType    = "application/json"
-)
-
 func GetXDCRSSLPort(hostName, userName, password string, logger *log.CommonLogger) (uint16, error) {
 
 	portsInfo := make(map[string]interface{})
-	QueryRestApiWithAuth(hostName, base.SSLPortsPath, userName, password, base.MethodGet, "", nil, &portsInfo, logger, nil)
+	QueryRestApiWithAuth(hostName, base.SSLPortsPath, false, userName, password, nil, base.MethodGet, "", nil, 0, &portsInfo, logger)
 	// get ssl port from the map
 	sslPort, ok := portsInfo[base.SSLPortKey]
 	if !ok {
@@ -76,7 +70,7 @@ func GetXDCRSSLPort(hostName, userName, password string, logger *log.CommonLogge
 
 func CouchApiBase(hostName, userName, password string, logger *log.CommonLogger, bSSL bool) (string, error) {
 	nodeInfo := make(map[string]interface{})
-	err, _ := QueryRestApiWithAuth(hostName, base.NodesSelfPath, userName, password, base.MethodGet, "", nil, &nodeInfo, logger, nil)
+	err, _ := QueryRestApiWithAuth(hostName, base.NodesSelfPath, false, userName, password, nil, base.MethodGet, "", nil, 0, &nodeInfo, logger)
 	if err != nil {
 		return "", err
 	}
@@ -100,12 +94,14 @@ func CouchApiBase(hostName, userName, password string, logger *log.CommonLogger,
 //convenient api for rest calls to local cluster
 func QueryRestApi(baseURL string,
 	path string,
+	preservePathEncoding bool,
 	httpCommand string,
 	contentType string,
 	body []byte,
+	timeout time.Duration,
 	out interface{},
-	logger *log.CommonLogger, certificate []byte) (error, int) {
-	return QueryRestApiWithAuth(baseURL, path, "", "", httpCommand, contentType, body, out, logger, certificate)
+	logger *log.CommonLogger) (error, int) {
+	return QueryRestApiWithAuth(baseURL, path, preservePathEncoding, "", "", nil, httpCommand, contentType, body, timeout, out, logger)
 }
 
 func EnforcePrefix(prefix string, str string) string {
@@ -122,58 +118,23 @@ func EnforcePrefix(prefix string, str string) string {
 func QueryRestApiWithAuth(
 	baseURL string,
 	path string,
+	preservePathEncoding bool,
 	username string,
 	password string,
+	certificate []byte,
 	httpCommand string,
 	contentType string,
 	body []byte,
+	timeout time.Duration,
 	out interface{},
-	logger *log.CommonLogger, certificate []byte) (error, int) {
-	var baseURL_new string
+	logger *log.CommonLogger) (error, int) {
 
-	//process the URL
-	if len(certificate) == 0 {
-		baseURL_new = EnforcePrefix("http://", baseURL)
-	} else {
-		baseURL_new = EnforcePrefix("https://", baseURL)
-	}
-	u, err := couchbase.ParseURL(baseURL_new)
+	req, err := ConstructHttpRequest(baseURL, path, preservePathEncoding, username, password, certificate, httpCommand, contentType, body, logger)
 	if err != nil {
 		return err, 0
 	}
 
 	var l *log.CommonLogger = loggerForFunc(logger)
-
-	if username != "" {
-		u.User = url.UserPassword(username, password)
-	}
-	if q := strings.Index(path, "?"); q > 0 {
-		u.Path = path[:q]
-		u.RawQuery = path[q+1:]
-	} else {
-		u.Path = path
-	}
-
-	req, err := http.NewRequest(httpCommand, u.String(), bytes.NewBuffer(body))
-	if err != nil {
-		return err, 0
-	}
-	if contentType == "" {
-		contentType = DefaultContentType
-	}
-	req.Header.Set(ContentType, contentType)
-
-	//TODO: log request would log password barely
-	l.Debugf("req=%v\n", req)
-
-	//if username is nil, assume it is local rest call
-	if username == "" {
-		err := cbauth.SetRequestAuth(req)
-		if err != nil {
-			l.Errorf("Failed to set authentication to request, req=%v\n", req)
-			return err, 0
-		}
-	}
 
 	client, err := getHttpClient(certificate)
 	if err != nil {
@@ -181,22 +142,21 @@ func QueryRestApiWithAuth(
 		return err, 0
 	}
 
+	client.Timeout = timeout
+
 	res, err := client.Do(req)
 	if res != nil && res.Body != nil {
 		defer res.Body.Close()
-
 		bod, e := ioutil.ReadAll(io.LimitReader(res.Body, res.ContentLength))
 		if e != nil {
 			l.Errorf("Failed to read response body, err=%v\n", e)
 			return err, res.StatusCode
 		}
-
 		if out != nil {
 			err_marshal := json.Unmarshal(bod, out)
 			if err_marshal != nil {
 				l.Debugf("Failed to unmarshal the response as json, err=%v\n", err)
 				out = bod
-
 			} else {
 				l.Debugf("out=%v\n", out)
 			}
@@ -211,31 +171,37 @@ func QueryRestApiWithAuth(
 //convenient api for rest calls to local cluster
 func InvokeRestWithRetry(baseURL string,
 	path string,
+	preservePathEncoding bool,
 	httpCommand string,
 	contentType string,
 	body []byte,
+	timeout time.Duration,
 	out interface{},
-	logger *log.CommonLogger, certificate []byte, num_retry int) (error, int) {
-	return InvokeRestWithRetryWithAuth(baseURL, path, "", "", httpCommand, contentType, body, out, logger, certificate, num_retry)
+	logger *log.CommonLogger, num_retry int) (error, int) {
+	return InvokeRestWithRetryWithAuth(baseURL, path, preservePathEncoding, "", "", nil, httpCommand, contentType, body, timeout, out, logger, num_retry)
 }
 
 func InvokeRestWithRetryWithAuth(baseURL string,
 	path string,
+	preservePathEncoding bool,
 	username string,
 	password string,
+	certificate []byte,
 	httpCommand string,
 	contentType string,
 	body []byte,
+	timeout time.Duration,
 	out interface{},
-	logger *log.CommonLogger, certificate []byte, num_retry int) (error, int) {
+	logger *log.CommonLogger, num_retry int) (error, int) {
 	err, statusCode := QueryRestApiWithAuth(baseURL,
-		path, username,
-		password,
+		path, preservePathEncoding, username,
+		password, certificate,
 		httpCommand,
 		contentType,
 		body,
+		timeout,
 		out,
-		logger, certificate)
+		logger)
 	if err != nil {
 		if len(certificate) != 0 {
 			//got https error, no need to retry
@@ -245,7 +211,7 @@ func InvokeRestWithRetryWithAuth(baseURL string,
 			if remain_retries < 0 {
 				return err, statusCode
 			} else {
-				return InvokeRestWithRetryWithAuth(baseURL, path, username, password, httpCommand, contentType, body, out, logger, certificate, remain_retries)
+				return InvokeRestWithRetryWithAuth(baseURL, path, preservePathEncoding, username, password, certificate, httpCommand, contentType, body, timeout, out, logger, remain_retries)
 			}
 		}
 	}
@@ -278,4 +244,136 @@ func maybeAddAuth(req *http.Request, username string, password string) {
 		req.Header.Set("Authorization", "Basic "+
 			base64.StdEncoding.EncodeToString([]byte(username+":"+password)))
 	}
+}
+
+//this expect the baseURL doesn't contain username and password
+//if username and password passed in is "", assume it is local rest call,
+//then call cbauth to add authenticate information
+func ConstructHttpRequest(
+	baseURL string,
+	path string,
+	preservePathEncoding bool,
+	username string,
+	password string,
+	certificate []byte,
+	httpCommand string,
+	contentType string,
+	body []byte,
+	logger *log.CommonLogger) (*http.Request, error) {
+	var baseURL_new string
+
+	//process the URL
+	if certificate == nil {
+		baseURL_new = EnforcePrefix("http://", baseURL)
+	} else {
+		baseURL_new = EnforcePrefix("https://", baseURL)
+	}
+	u, err := couchbase.ParseURL(baseURL_new)
+	if err != nil {
+		return nil, err
+	}
+
+	var l *log.CommonLogger = loggerForFunc(logger)
+	var req *http.Request
+
+	if !preservePathEncoding {
+		if q := strings.Index(path, "?"); q > 0 {
+			u.Path = path[:q]
+			u.RawQuery = path[q+1:]
+		} else {
+			u.Path = path
+		}
+
+		req, err = http.NewRequest(httpCommand, u.String(), bytes.NewBuffer(body))
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		// use url.Opaque to preserve encoding
+		u.Opaque = "//"
+
+		index := strings.Index(baseURL_new, "//")
+		if index < len(baseURL_new)-2 {
+			u.Opaque += baseURL_new[index+2:]
+		}
+		u.Opaque += path
+
+		req, err = http.NewRequest(httpCommand, baseURL_new, bytes.NewBuffer(body))
+		if err != nil {
+			return nil, err
+		}
+
+		// get the original Opaque back
+		req.URL.Opaque = u.Opaque
+	}
+
+	if contentType == "" {
+		contentType = base.DefaultContentType
+	}
+	req.Header.Set(base.ContentType, contentType)
+	
+	//if username is nil, assume it is local rest call
+	if username == "" {
+		err := cbauth.SetRequestAuth(req)
+		if err != nil {
+			l.Errorf("Failed to set authentication to request, req=%v\n", req)
+			return nil, err
+		}
+	} else {
+		req.SetBasicAuth(username, password)
+	}
+
+	//TODO: log request would log password barely
+	l.Debugf("http request=%v\n", req)
+
+	return req, nil
+}
+
+// encode http request into wire format
+// it differs from HttpRequest.Write() in that it preserves the Content-Length in the header,
+// and ignores Body in request
+func EncodeHttpRequest(req *http.Request) ([]byte, error) {
+	reqBytes := make([]byte, 0)
+	reqBytes = append(reqBytes, []byte(req.Method)...)
+	reqBytes = append(reqBytes, []byte(" ")...)
+	reqBytes = append(reqBytes, []byte(req.URL.String())...)
+	reqBytes = append(reqBytes, []byte(" HTTP/1.1\r\n")...)
+
+	hasHost := false
+	for key, value := range req.Header {
+		if key == "Host" {
+			hasHost = true
+		}
+		if value != nil && len(value) > 0 {
+			reqBytes = EncodeHttpRequestHeader(reqBytes, key, value[0])
+		} else {
+			reqBytes = EncodeHttpRequestHeader(reqBytes, key, "")
+		}
+	}
+	if !hasHost {
+		// ensure that host name is in header
+		reqBytes = EncodeHttpRequestHeader(reqBytes, "Host", req.Host)
+	}
+
+	// add extra "\r\n" as separator for Body
+	reqBytes = append(reqBytes, []byte("\r\n")...)
+
+	if req.Body != nil {
+		defer req.Body.Close()
+
+		bodyBytes, err := ioutil.ReadAll(req.Body)
+		if err != nil {
+			return nil, err
+		}
+		reqBytes = append(reqBytes, bodyBytes...)
+	}
+	return reqBytes, nil
+}
+
+func EncodeHttpRequestHeader(reqBytes []byte, key, value string) []byte {
+	reqBytes = append(reqBytes, []byte(key)...)
+	reqBytes = append(reqBytes, []byte(": ")...)
+	reqBytes = append(reqBytes, []byte(value)...)
+	reqBytes = append(reqBytes, []byte("\r\n")...)
+	return reqBytes
 }

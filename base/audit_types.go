@@ -26,6 +26,9 @@ const (
 )
 
 var ErrorWritingAudit = "Could not write audit logs."
+// used in the place where a remote cluster referenced by a replication can 
+// no longer be found, e.g., when the cluster has been deleted prior
+var UnknownRemoteClusterName = "Unknown"
 
 type RemoteClusterRefEvent struct {
 	GenericFields

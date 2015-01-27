@@ -605,13 +605,13 @@ func (ckmgr *CheckpointManager) OnEvent(eventType common.ComponentEventType,
 	derivedItems []interface{},
 	otherInfos map[string]interface{}) {
 	if eventType == common.DataSent {
-		hiseqno, ok := otherInfos[parts.XMEM_EVENT_ADDI_HISEQNO].(uint64)
+		hiseqno, ok := otherInfos[parts.EVENT_ADDI_HISEQNO].(uint64)
 		if ok {
 			vbno := item.(*gomemcached.MCRequest).VBucket
 			ckmgr.cur_ckpts_locks[vbno].Lock()
 			defer ckmgr.cur_ckpts_locks[vbno].Unlock()
 			ckmgr.cur_ckpts[vbno].Seqno = hiseqno
-			ckmgr.logger.Debugf("ckmgr.cur_ckpts[%v].Seqno =%v\n", vbno, otherInfos[parts.XMEM_EVENT_ADDI_SEQNO])
+			ckmgr.logger.Debugf("ckmgr.cur_ckpts[%v].Seqno =%v\n", vbno, otherInfos[parts.EVENT_ADDI_SEQNO])
 		}
 	}
 }

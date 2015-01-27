@@ -30,26 +30,9 @@ import (
 	"time"
 )
 
-type XMEM_MODE int
-
 //configuration settings for XmemNozzle
 const (
-	//configuration param names
-	XMEM_SETTING_BATCHCOUNT            = "batch_count"
-	XMEM_SETTING_BATCHSIZE             = "batch_size"
-	XMEM_SETTING_MODE                  = "mode"
-	XMEM_SETTING_NUMOFRETRY            = "max_retry"
-	XMEM_SETTING_RESP_TIMEOUT          = "resp_timeout"
-	XMEM_SETTING_WRITE_TIMEOUT         = "write_timeout"
-	XMEM_SETTING_BATCH_EXPIRATION_TIME = "batch_expiration_time"
-	XMEM_SETTING_MAX_RETRY_INTERVAL    = "max_retry_interval"
-	XMEM_SETTING_OPTI_REP_THRESHOLD    = "optimistic_replication_threshold"
-
-	XMEM_STATS_QUEUE_SIZE       = "queue_size"
-	XMEM_STATS_QUEUE_SIZE_BYTES = "queue_size_bytes"
-	XMEM_EVENT_ADDI_SEQNO       = "source_seqno"
-	XMEM_EVENT_ADDI_OPT_REPD    = "optimistic_replicated"
-	XMEM_EVENT_ADDI_HISEQNO     = "source_hiseqno"
+	SETTING_RESP_TIMEOUT = "resp_timeout"
 
 	//default configuration
 	default_numofretry          int           = 10
@@ -69,15 +52,16 @@ const (
 	DELETE_WITH_META = mc.CommandCode(0xa8)
 )
 
-var xmem_setting_defs base.SettingDefinitions = base.SettingDefinitions{XMEM_SETTING_BATCHCOUNT: base.NewSettingDef(reflect.TypeOf((*int)(nil)), true),
-	XMEM_SETTING_BATCHSIZE:             base.NewSettingDef(reflect.TypeOf((*int)(nil)), true),
-	XMEM_SETTING_MODE:                  base.NewSettingDef(reflect.TypeOf((*XMEM_MODE)(nil)), false),
-	XMEM_SETTING_NUMOFRETRY:            base.NewSettingDef(reflect.TypeOf((*int)(nil)), false),
-	XMEM_SETTING_RESP_TIMEOUT:          base.NewSettingDef(reflect.TypeOf((*time.Duration)(nil)), false),
-	XMEM_SETTING_WRITE_TIMEOUT:         base.NewSettingDef(reflect.TypeOf((*time.Duration)(nil)), false),
-	XMEM_SETTING_MAX_RETRY_INTERVAL:    base.NewSettingDef(reflect.TypeOf((*time.Duration)(nil)), false),
-	XMEM_SETTING_BATCH_EXPIRATION_TIME: base.NewSettingDef(reflect.TypeOf((*time.Duration)(nil)), false),
-	XMEM_SETTING_OPTI_REP_THRESHOLD:    base.NewSettingDef(reflect.TypeOf((*int)(nil)), true)}
+var xmem_setting_defs base.SettingDefinitions = base.SettingDefinitions{SETTING_BATCHCOUNT: base.NewSettingDef(reflect.TypeOf((*int)(nil)), true),
+	SETTING_BATCHSIZE:             base.NewSettingDef(reflect.TypeOf((*int)(nil)), true),
+	SETTING_NUMOFRETRY:            base.NewSettingDef(reflect.TypeOf((*int)(nil)), false),
+	SETTING_RESP_TIMEOUT:          base.NewSettingDef(reflect.TypeOf((*time.Duration)(nil)), false),
+	SETTING_WRITE_TIMEOUT:         base.NewSettingDef(reflect.TypeOf((*time.Duration)(nil)), false),
+	SETTING_READ_TIMEOUT:          base.NewSettingDef(reflect.TypeOf((*time.Duration)(nil)), false),
+	SETTING_MAX_RETRY_INTERVAL:    base.NewSettingDef(reflect.TypeOf((*time.Duration)(nil)), false),
+	SETTING_SELF_MONITOR_INTERVAL: base.NewSettingDef(reflect.TypeOf((*time.Duration)(nil)), false),
+	SETTING_BATCH_EXPIRATION_TIME: base.NewSettingDef(reflect.TypeOf((*time.Duration)(nil)), false),
+	SETTING_OPTI_REP_THRESHOLD:    base.NewSettingDef(reflect.TypeOf((*int)(nil)), true)}
 
 type documentMetadata struct {
 	key      []byte
@@ -427,49 +411,30 @@ func (buf *requestBuffer) hasSeqno(vbno uint16, seqno uint64) bool {
 /* struct xmemConfig
 *************************************/
 type xmemConfig struct {
-	maxCount int
-	maxSize  int
+	baseConfig
+	bucketName string
 	//the duration to wait for the batch-sending to finish
-	respTimeout      time.Duration
-	maxRetryInterval time.Duration
-	//the max time that a batch can wait in the queue
-	batchExpirationTime time.Duration
-	//the write timeout for tcp connection
-	writeTimeout time.Duration
-	//the read timeout for tcp connection
-	readTimeout time.Duration
-	//the max number of retry for read\write
-	maxRetry int
-
-	//the interval on which selfMonitor would be conducted
-	selfMonitorInterval time.Duration
-
-	//the maximum number of idle round that xmem can have
-	//exceeding this number indicate the possibility of stuck
-	//due to network issues
-	maxIdleCount     int
-	optiRepThreshold int
-	connectStr       string
-	userName         string
-	bucketName       string
-	password         string
-	logger           *log.CommonLogger
+	respTimeout time.Duration
+	logger      *log.CommonLogger
 }
 
 func newConfig(logger *log.CommonLogger) xmemConfig {
-	return xmemConfig{maxCount: -1,
-		maxSize:             -1,
-		respTimeout:         default_resptimeout,
-		batchExpirationTime: default_batchExpirationTime,
-		writeTimeout:        default_writeTimeOut,
-		readTimeout:         default_readTimeout,
-		maxRetryInterval:    default_maxRetryInterval,
-		maxRetry:            default_numofretry,
-		maxIdleCount:        default_maxIdleCount,
-		selfMonitorInterval: default_selfMonitorInterval,
-		connectStr:          "",
-		bucketName:          "",
-		password:            "",
+	return xmemConfig{
+		baseConfig: baseConfig{maxCount: -1,
+			maxSize:             -1,
+			batchExpirationTime: default_batchExpirationTime,
+			writeTimeout:        default_writeTimeOut,
+			readTimeout:         default_readTimeout,
+			maxRetryInterval:    default_maxRetryInterval,
+			maxRetry:            default_numofretry,
+			selfMonitorInterval: default_selfMonitorInterval,
+			maxIdleCount:        default_maxIdleCount,
+			connectStr:          "",
+			username:            "",
+			password:            "",
+		},
+		bucketName:  "",
+		respTimeout: default_resptimeout,
 	}
 
 }
@@ -478,30 +443,7 @@ func (config *xmemConfig) initializeConfig(settings map[string]interface{}) erro
 	err := utils.ValidateSettings(xmem_setting_defs, settings, config.logger)
 
 	if err == nil {
-		if val, ok := settings[XMEM_SETTING_BATCHSIZE]; ok {
-			config.maxSize = val.(int)
-		}
-		if val, ok := settings[XMEM_SETTING_BATCHCOUNT]; ok {
-			config.maxCount = val.(int)
-		}
-		if val, ok := settings[XMEM_SETTING_RESP_TIMEOUT]; ok {
-			config.respTimeout = val.(time.Duration)
-		}
-		if val, ok := settings[XMEM_SETTING_NUMOFRETRY]; ok {
-			config.maxRetry = val.(int)
-		}
-		if val, ok := settings[XMEM_SETTING_BATCH_EXPIRATION_TIME]; ok {
-			config.batchExpirationTime = val.(time.Duration)
-		}
-		if val, ok := settings[XMEM_SETTING_WRITE_TIMEOUT]; ok {
-			config.writeTimeout = val.(time.Duration)
-		}
-		if val, ok := settings[XMEM_SETTING_MAX_RETRY_INTERVAL]; ok {
-			config.maxRetryInterval = val.(time.Duration)
-		}
-		if val, ok := settings[XMEM_SETTING_OPTI_REP_THRESHOLD]; ok {
-			config.optiRepThreshold = val.(int)
-		}
+		config.baseConfig.initializeConfig(settings)
 	}
 	return err
 }
@@ -619,73 +561,6 @@ func (client *xmemClient) close() {
 }
 
 /************************************
-/* struct xmemBatch
-*************************************/
-type xmemBatch struct {
-	//the document whose size is larger than optimistic replication threshold
-	//key of the map is the document key, value is the vbucket number
-	bigDoc_key_map map[string]uint16
-	//the document metadata retrieved from target system for the big docs
-	bigDoc_meta_map   map[string]documentMetadata
-	curCount          int
-	curSize           int
-	capacity_count    int
-	capacity_size     int
-	start_time        time.Time
-	frozen            bool
-	logger            *log.CommonLogger
-	expiring_duration time.Duration
-	expire_ch         <-chan time.Time
-	expiration_set    bool
-}
-
-func newXmemBatch(cap_count int, cap_size int, expiring_duration time.Duration, logger *log.CommonLogger) *xmemBatch {
-	return &xmemBatch{
-		curCount:          0,
-		curSize:           0,
-		capacity_count:    cap_count,
-		capacity_size:     cap_size,
-		expiring_duration: expiring_duration,
-		bigDoc_key_map:    make(map[string]uint16),
-		bigDoc_meta_map:   make(map[string]documentMetadata),
-		expiration_set:    false,
-		logger:            logger}
-}
-
-func (b *xmemBatch) accumuBatch(req *base.WrappedMCRequest, classifyFunc func(req *mc.MCRequest) bool) bool {
-
-	var ret bool = true
-
-	if req != nil && req.Req != nil {
-		size := req.Req.Size()
-		key := string(req.Req.Key)
-
-		b.curCount++
-		if !b.expiration_set {
-			b.start_time = time.Now()
-			b.expire_ch = time.After(b.expiring_duration)
-			b.expiration_set = true
-		}
-		if !classifyFunc(req.Req) {
-			b.bigDoc_key_map[key] = req.Req.VBucket
-		}
-		b.curSize += size
-		if b.curCount < b.capacity_count && b.curSize < b.capacity_size*1000 {
-			ret = false
-		}
-	}
-	return ret
-}
-
-func (b *xmemBatch) count() int {
-	return b.curCount
-}
-
-func (b *xmemBatch) size() int {
-	return b.curSize
-}
-
-/************************************
 /* struct XmemNozzle
 *************************************/
 type XmemNozzle struct {
@@ -711,10 +586,10 @@ type XmemNozzle struct {
 	config xmemConfig
 
 	//queue for ready batches
-	batches_ready chan *xmemBatch
+	batches_ready chan *dataBatch
 
 	//batch to be accumulated
-	batch           *xmemBatch
+	batch           *dataBatch
 	batch_move_lock sync.Mutex
 
 	childrenWaitGrp sync.WaitGroup
@@ -871,6 +746,12 @@ func (xmem *XmemNozzle) batchReady() error {
 	xmem.batch_move_lock.Lock()
 	defer func() {
 		xmem.batch_move_lock.Unlock()
+		if r := recover(); r != nil {
+			if xmem.validateRunningState() == nil {
+				// report error only when xmem is still in running state
+				xmem.handleGeneralError(errors.New(fmt.Sprintf("%v", r)))
+			}
+		}
 		xmem.Logger().Debugf("%v End moving batch, %v batches ready\n", xmem.Id(), len(xmem.batches_ready))
 	}()
 	if xmem.batch.count() > 0 {
@@ -937,8 +818,8 @@ func (xmem *XmemNozzle) Receive(data interface{}) error {
 
 	//raise DataReceived event
 	additionalInfo := make(map[string]interface{})
-	additionalInfo[XMEM_STATS_QUEUE_SIZE] = len(xmem.dataChan)
-	additionalInfo[XMEM_STATS_QUEUE_SIZE_BYTES] = xmem.bytes_in_dataChan
+	additionalInfo[STATS_QUEUE_SIZE] = len(xmem.dataChan)
+	additionalInfo[STATS_QUEUE_SIZE_BYTES] = xmem.bytes_in_dataChan
 	xmem.RaiseEvent(common.DataReceived, request, xmem, nil, additionalInfo)
 	xmem.Logger().Debugf("Xmem %v received %v items, queue_size = %v, bytes_in_dataChan=%v\n", xmem.Id(), xmem.counter_received, len(xmem.dataChan), xmem.bytes_in_dataChan)
 
@@ -1001,7 +882,7 @@ func (xmem *XmemNozzle) onExit() {
 
 }
 
-func (xmem *XmemNozzle) batchSetMetaWithRetry(batch *xmemBatch, numOfRetry int) error {
+func (xmem *XmemNozzle) batchSetMetaWithRetry(batch *dataBatch, numOfRetry int) error {
 	var err error
 	count := batch.count()
 
@@ -1023,25 +904,27 @@ func (xmem *XmemNozzle) batchSetMetaWithRetry(batch *xmemBatch, numOfRetry int) 
 			return PartStoppedError
 		}
 
-		if item != nil && xmem.needSend(item.Req, batch) {
+		if item != nil {
 			xmem.bytes_in_dataChan = xmem.bytes_in_dataChan - item.Req.Size()
-			//blocking
-			err, index, reserv_num := xmem.buf.reserveSlot()
-			if err != nil {
-				return err
-			}
-			xmem.adjustRequest(item, index)
-			item_byte := item.Req.Bytes()
-			err = xmem.sendWithRetry(xmem.client_for_setMeta, numOfRetry, item_byte)
-			if err == nil {
-				err = xmem.buf.enSlot(index, item, reserv_num)
 
-			}
+			if needSend(item.Req, batch, xmem.logger) {
+				//blocking
+				err, index, reserv_num := xmem.buf.reserveSlot()
+				if err != nil {
+					return err
+				}
+				xmem.adjustRequest(item, index)
+				item_byte := item.Req.Bytes()
+				err = xmem.sendWithRetry(xmem.client_for_setMeta, numOfRetry, item_byte)
+				if err == nil {
+					err = xmem.buf.enSlot(index, item, reserv_num)
+				}
 
-			if err != nil {
-				xmem.Logger().Errorf("%v Failed to send. err=%v\n", xmem.Id(), err)
-				xmem.buf.cancelReservation(index, reserv_num)
-				return err
+				if err != nil {
+					xmem.Logger().Errorf("%v Failed to send. err=%v\n", xmem.Id(), err)
+					xmem.buf.cancelReservation(index, reserv_num)
+					return err
+				}
 			}
 		} else {
 			//lost on conflict resolution on source side
@@ -1052,23 +935,6 @@ func (xmem *XmemNozzle) batchSetMetaWithRetry(batch *xmemBatch, numOfRetry int) 
 
 	//log the data
 	return err
-}
-
-func (xmem *XmemNozzle) needSend(req *mc.MCRequest, batch *xmemBatch) bool {
-	if req == nil {
-		xmem.Logger().Info("req is null, not need to send")
-		return false
-	} else {
-		key := string(req.Key)
-		if doc_meta_target, ok := batch.bigDoc_meta_map[key]; ok {
-			doc_meta_source := xmem.decodeSetMetaReq(req)
-			if !xmem.conflict_resolver(doc_meta_source, doc_meta_target, xmem.logger) {
-				xmem.Logger().Infof("doc %v (%v)failed on conflict resolution to %v, no need to send\n", key, doc_meta_source, doc_meta_target)
-				return false
-			}
-		}
-	}
-	return true
 }
 
 //return true if doc_meta_source win; false otherwise
@@ -1108,7 +974,7 @@ func (xmem *XmemNozzle) sendWithRetry(client *xmemClient, numOfRetry int, item_b
 	return err
 }
 
-func (xmem *XmemNozzle) sendSetMeta_internal(batch *xmemBatch) error {
+func (xmem *XmemNozzle) sendSetMeta_internal(batch *dataBatch) error {
 	var err error
 	if batch != nil {
 		count := batch.count()
@@ -1117,11 +983,11 @@ func (xmem *XmemNozzle) sendSetMeta_internal(batch *xmemBatch) error {
 
 		xmem.Logger().Debugf("So far, xmem %v processed %d items", xmem.Id(), xmem.counter_sent)
 
-		meta_map, err := xmem.batchGetMeta(xmem.batch.bigDoc_key_map)
+		bigDoc_noRep_map, err := xmem.batchGetMeta(batch.bigDoc_map)
 		if err != nil {
 			xmem.Logger().Errorf("batchGetMeta failed. err=%v\n", err)
 		} else {
-			xmem.batch.bigDoc_meta_map = meta_map
+			batch.bigDoc_noRep_map = bigDoc_noRep_map
 		}
 
 		//batch send
@@ -1135,23 +1001,23 @@ func (xmem *XmemNozzle) sendSetMeta_internal(batch *xmemBatch) error {
 }
 
 //batch call to memcached GetMeta command for document size larger than the optimistic threshold
-func (xmem *XmemNozzle) batchGetMeta(key_map map[string]uint16) (map[string]documentMetadata, error) {
-	xmem.Logger().Infof("batchGetMeta, key_map length=%v\n", len(key_map))
-	ret := make(map[string]documentMetadata)
+func (xmem *XmemNozzle) batchGetMeta(bigDoc_map map[string]*mc.MCRequest) (map[string]bool, error) {
+	bigDoc_noRep_map := make(map[string]bool)
+
+	//if the bigDoc_map size is 0, return
+	if len(bigDoc_map) == 0 {
+		return bigDoc_noRep_map, nil
+	}
+
 	respMap := make(map[string]*mc.MCResponse)
 	opaque_key_map := make(map[uint32]string)
 	waitGrp := &sync.WaitGroup{}
 	receiver_fin_ch := make(chan bool, 1)
 
-	//if the key_map size is 0, return
-	if len(key_map) == 0 {
-		return ret, nil
-	}
-
 	err_list := []error{}
 	//launch the receiver
 	waitGrp.Add(1)
-	go func(count int, finch chan bool, opaque_key_map map[uint32]string, respMap map[string]*mc.MCResponse, timeout_duration time.Duration, err_list []error, waitGrp *sync.WaitGroup, logger *log.CommonLogger) {
+	go func(count int, finch chan bool, opaque_bigDoc_map map[uint32]string, respMap map[string]*mc.MCResponse, timeout_duration time.Duration, err_list []error, waitGrp *sync.WaitGroup, logger *log.CommonLogger) {
 		defer waitGrp.Done()
 		ticker := time.NewTicker(timeout_duration)
 		for {
@@ -1189,11 +1055,11 @@ func (xmem *XmemNozzle) batchGetMeta(key_map map[string]uint16) (map[string]docu
 			}
 		}
 
-	}(len(key_map), receiver_fin_ch, opaque_key_map, respMap, 1*time.Second, err_list, waitGrp, xmem.Logger())
+	}(len(bigDoc_map), receiver_fin_ch, opaque_key_map, respMap, 1*time.Second, err_list, waitGrp, xmem.Logger())
 
 	var opaque uint32 = uint32(time.Now().Unix())
-	for key, vb := range key_map {
-		req := xmem.composeRequestForGetMeta(key, vb, opaque)
+	for key, originalReq := range bigDoc_map {
+		req := xmem.composeRequestForGetMeta(key, originalReq.VBucket, opaque)
 		err := xmem.sendWithRetry(xmem.client_for_getMeta, xmem.config.maxRetry, req.Bytes())
 		if err != nil {
 			//kill the receiver and return
@@ -1212,13 +1078,19 @@ func (xmem *XmemNozzle) batchGetMeta(key_map map[string]uint16) (map[string]docu
 
 	for key, resp := range respMap {
 		if resp.Status == mc.SUCCESS {
-			ret[key] = xmem.decodeGetMetaResp([]byte(key), resp)
+			doc_meta_target := xmem.decodeGetMetaResp([]byte(key), resp)
+			doc_meta_source := decodeSetMetaReq(bigDoc_map[key])
+			if !xmem.conflict_resolver(doc_meta_source, doc_meta_target, xmem.logger) {
+				xmem.Logger().Infof("doc %v (%v)failed on conflict resolution to %v, no need to send\n", key, doc_meta_source, doc_meta_target)
+				bigDoc_noRep_map[key] = true
+			}
 		} else {
 			xmem.Logger().Debugf("batchGetMeta: doc %s is not found in target system, send it", key)
 		}
 	}
-	xmem.Logger().Debugf("Done with batchGetMeta, ret=%v\n", ret)
-	return ret, nil
+
+	xmem.Logger().Debugf("Done with batchGetMeta, bigDoc_noRep_map=%v\n", bigDoc_noRep_map)
+	return bigDoc_noRep_map, nil
 }
 
 func (xmem *XmemNozzle) decodeGetMetaResp(key []byte, resp *mc.MCResponse) documentMetadata {
@@ -1240,7 +1112,7 @@ func (xmem *XmemNozzle) decodeGetMetaResp(key []byte, resp *mc.MCResponse) docum
 
 }
 
-func (xmem *XmemNozzle) decodeSetMetaReq(req *mc.MCRequest) documentMetadata {
+func decodeSetMetaReq(req *mc.MCRequest) documentMetadata {
 	ret := documentMetadata{}
 	ret.key = req.Key
 	ret.flags = binary.BigEndian.Uint32(req.Extras[0:4])
@@ -1307,7 +1179,7 @@ func getPoolName(config xmemConfig) string {
 
 func (xmem *XmemNozzle) initNewBatch() {
 	xmem.Logger().Debug("init a new batch")
-	xmem.batch = newXmemBatch(xmem.config.maxCount, xmem.config.maxSize, xmem.config.batchExpirationTime, xmem.Logger())
+	xmem.batch = newBatch(xmem.config.maxCount, xmem.config.maxSize, xmem.config.batchExpirationTime, xmem.Logger())
 }
 
 func (xmem *XmemNozzle) initialize(settings map[string]interface{}) error {
@@ -1317,7 +1189,7 @@ func (xmem *XmemNozzle) initialize(settings map[string]interface{}) error {
 	}
 	xmem.dataChan = make(chan *base.WrappedMCRequest, xmem.config.maxCount*100)
 	xmem.bytes_in_dataChan = 0
-	xmem.batches_ready = make(chan *xmemBatch, 100)
+	xmem.batches_ready = make(chan *dataBatch, 100)
 
 	xmem.counter_received = 0
 	xmem.counter_sent = 0
@@ -1371,7 +1243,6 @@ func (xmem *XmemNozzle) receiveResponse(finch chan bool, waitGrp *sync.WaitGroup
 						_, err = xmem.buf.modSlot(pos, xmem.resend)
 					}
 				} else {
-
 					//raiseEvent
 					pos := xmem.getPosFromOpaque(response.Opaque)
 					wrappedReq, err := xmem.buf.slot(pos)
@@ -1389,21 +1260,20 @@ func (xmem *XmemNozzle) receiveResponse(finch chan bool, waitGrp *sync.WaitGroup
 
 					if req != nil && req.Opaque == response.Opaque {
 						xmem.Logger().Debugf("%v Got the response, key=%s, status=%v\n", xmem.Id(), req.Key, response.Status)
-
 						if response.Status != mc.SUCCESS {
 							xmem.Logger().Debugf("*****%v-%v Got the response, response.Status=%v for doc %s*******\n", xmem.config.bucketName, xmem.Id(), response.Status, req.Key)
 							xmem.Logger().Debugf("req.key=%s, req.Extras=%v, req.Cas=%v, req=%v\n", req.Key, req.Extras, req.Cas, req)
 						}
 
 						additionalInfo := make(map[string]interface{})
-						additionalInfo[XMEM_EVENT_ADDI_SEQNO] = seqno
-						additionalInfo[XMEM_EVENT_ADDI_OPT_REPD] = xmem.optimisticRep(req)
+						additionalInfo[EVENT_ADDI_SEQNO] = seqno
+						additionalInfo[EVENT_ADDI_OPT_REPD] = xmem.optimisticRep(req)
 
 						//add additional information about hiseqno, which is going to be used
 						//for checkpointing
 						highseqno, err := xmem.getCurSeenHighSeqno(wrappedReq)
 						if err == nil {
-							additionalInfo[XMEM_EVENT_ADDI_HISEQNO] = highseqno
+							additionalInfo[EVENT_ADDI_HISEQNO] = highseqno
 						}
 
 						xmem.RaiseEvent(common.DataSent, req, xmem, nil, additionalInfo)

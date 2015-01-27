@@ -630,4 +630,3 @@ func getRealUserIdFromRequest(request *http.Request) *base.RealUserId {
 	// TODO get source from creds
 	return &base.RealUserId{"internal", creds.Name()}
 }
-

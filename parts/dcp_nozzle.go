@@ -43,8 +43,8 @@ type DcpNozzle struct {
 	gen_server.GenServer
 	AbstractPart
 
-	// the list of vbuckets that the kvfeed is responsible for
-	// this allows multiple kvfeeds to be created for a kv node
+	// the list of vbuckets that the dcp nozzle is responsible for
+	// this allows multiple  dcp nozzles to be created for a kv node
 	vbnos []uint16
 	// immutable fields
 	bucket  *couchbase.Bucket

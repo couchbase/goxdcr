@@ -341,7 +341,7 @@ func (s *ReplicationSettings) UpdateSettingsFromMap(settingsMap map[string]inter
 		}
 	}
 
-	return 
+	return
 }
 
 func (s *ReplicationSettings) ToMap() map[string]interface{} {
@@ -365,6 +365,7 @@ func (s *ReplicationSettings) ToMap() map[string]interface{} {
 
 func ValidateAndConvertSettingsValue(key string, value string) (convertedValue interface{}, err error) {
 	switch key {
+	// TODO add validation for these enum values
 	case ReplicationType, PipelineLogLevel:
 		// string parameters need no conversion
 		convertedValue = value

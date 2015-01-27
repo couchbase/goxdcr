@@ -87,14 +87,14 @@ func (service *RemoteClusterService) RemoteClusterByRefName(refName string, refr
 			break
 		}
 	}
-	if ref == nil {
-		return nil, errors.New("unknown remote cluster")
-	} else {
+
+	if ref != nil {
 		if refresh {
 			ref, err = service.refresh(ref)
 		}
-		return ref, err
 	}
+
+	return ref, err
 }
 
 func (service *RemoteClusterService) AddRemoteCluster(ref *metadata.RemoteClusterReference) error {
@@ -113,7 +113,7 @@ func (service *RemoteClusterService) AddRemoteCluster(ref *metadata.RemoteCluste
 	if err != nil {
 		return err
 	}
-	
+
 	if service.uilog_svc != nil {
 		uiLogMsg := fmt.Sprintf("Created remote cluster reference \"%s\" via %s.", ref.Name, ref.HostName)
 		service.uilog_svc.Write(uiLogMsg)
@@ -132,9 +132,9 @@ func (service *RemoteClusterService) updateRemoteCluster(ref *metadata.RemoteClu
 	if err != nil {
 		return err
 	}
-	
+
 	err = service.validateCache(ref)
-	
+
 	return err
 }
 
@@ -264,7 +264,7 @@ func (service *RemoteClusterService) ValidateRemoteCluster(ref *metadata.RemoteC
 		hostAddr = utils.EnforcePrefix("http://", hostAddr)
 	}
 
-	err, statusCode := utils.QueryRestApiWithAuth(hostAddr, base.PoolsPath, ref.UserName, ref.Password, base.MethodGet, "", nil, &poolsInfo, service.logger, ref.Certificate)
+	err, statusCode := utils.QueryRestApiWithAuth(hostAddr, base.PoolsPath, false, ref.UserName, ref.Password, ref.Certificate, base.MethodGet, "", nil, 0, &poolsInfo, service.logger)
 	if err != nil || statusCode != 200 {
 		service.logger.Errorf("err=%v, statusCode=%v\n", err, statusCode)
 		return errors.New(fmt.Sprintf("Failed on calling %v, err=%v, statusCode=%v", base.PoolsPath, err, statusCode))
@@ -318,6 +318,10 @@ func (service *RemoteClusterService) addRemoteCluster(ref *metadata.RemoteCluste
 }
 
 func (service *RemoteClusterService) constructRemoteClusterReference(value []byte, rev interface{}) (*metadata.RemoteClusterReference, error) {
+	if len(value) == 0 {
+		return nil, errors.New("unknown remote cluster")
+	}
+
 	ref := &metadata.RemoteClusterReference{}
 	err := json.Unmarshal(value, ref)
 	if err != nil {
@@ -452,4 +456,20 @@ func (service *RemoteClusterService) refresh(ref *metadata.RemoteClusterReferenc
 
 	return nil, errors.New(fmt.Sprintf("Failed to connect to cluster reference %v\n", ref.Id))
 
+}
+
+//get remote cluster name from remote cluster uuid. Return unknown if remote cluster cannot be found
+func (service *RemoteClusterService) GetRemoteClusterNameFromClusterUuid(uuid string) string {
+	remoteClusterRef, err := service.RemoteClusterByUuid(uuid, true)
+	if err != nil || remoteClusterRef == nil {
+		errMsg := fmt.Sprintf("Error getting the name of the remote cluster with uuid=%v.", uuid)
+		if err != nil {
+			errMsg += fmt.Sprintf(" err=%v", err)
+		} else {
+			errMsg += " The remote cluster may have been deleted."
+		}
+		service.logger.Error(errMsg)
+		return base.UnknownRemoteClusterName
+	}
+	return remoteClusterRef.Name
 }
