@@ -5,7 +5,6 @@ build_xdcr(){
     echo "Building xdcr..."
     cd main
     go build -o xdcr
-    mv xdcr ../bin/
     cd ..
     echo "Done"
     echo "xdcr binary under bin/"

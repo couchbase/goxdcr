@@ -74,12 +74,9 @@ func NewDcpNozzle(id string,
 	var exit_callback_func gen_server.Exit_Callback_Func
 	var error_handler_func gen_server.Error_Handler_Func
 
-	var isStarted_callback_func IsStarted_Callback_Func
-
 	server := gen_server.NewGenServer(&msg_callback_func,
 		&exit_callback_func, &error_handler_func, logger_context, "DcpNozzle")
-	isStarted_callback_func = server.IsStarted
-	part := NewAbstractPartWithLogger(id, &isStarted_callback_func, server.Logger())
+	part := NewAbstractPartWithLogger(id, server.Logger())
 
 	dcp := &DcpNozzle{
 		bucket:          bucket,
@@ -127,7 +124,12 @@ func (dcp *DcpNozzle) Close() error {
 func (dcp *DcpNozzle) Start(settings map[string]interface{}) error {
 	dcp.Logger().Infof("Dcp nozzle %v starting ....\n", dcp.Id())
 
-	err := utils.ValidateSettings(dcp_setting_defs, settings, dcp.Logger())
+	err := dcp.SetState(common.Part_Starting)
+	if err != nil {
+		return err
+	}
+
+	err = utils.ValidateSettings(dcp_setting_defs, settings, dcp.Logger())
 	if err != nil {
 		return err
 	}
@@ -157,16 +159,30 @@ func (dcp *DcpNozzle) Start(settings map[string]interface{}) error {
 		return err
 	}
 
-	dcp.Logger().Info("Dcp nozzle is started")
+	err = dcp.SetState(common.Part_Running)
+
+	if err == nil {
+		dcp.Logger().Info("Dcp nozzle is started")
+	}
 
 	return err
 }
 
 func (dcp *DcpNozzle) Stop() error {
 	dcp.Logger().Infof("Stopping DcpNozzle %v\n", dcp.Id())
+	err := dcp.SetState(common.Part_Stopping)
+	if err != nil {
+		return err
+	}
+
 	dcp.closeUprFeed()
 	dcp.Logger().Debugf("DcpNozzle %v processed %v items\n", dcp.Id(), dcp.counter)
-	err := dcp.Stop_server()
+	err = dcp.Stop_server()
+
+	err = dcp.SetState(common.Part_Stopped)
+	if err != nil {
+		return err
+	}
 	dcp.Logger().Infof("DcpNozzle %v is stopped\n", dcp.Id())
 	return err
 
@@ -246,17 +262,22 @@ func (dcp *DcpNozzle) processData() (err error) {
 
 			} else {
 				if dcp.IsOpen() {
-					dcp.counter++
-					dcp.RaiseEvent(common.DataReceived, m, dcp, nil /*derivedItems*/, nil /*otherInfos*/)
-					dcp.Logger().Tracef("%v, Mutation %v:%v:%v <%v>, counter=%v, ops_per_sec=%v\n",
-						dcp.Id(), m.VBucket, m.Seqno, m.Opcode, m.Key, dcp.counter, float64(dcp.counter)/time.Since(dcp.start_time).Seconds())
+					switch m.Opcode {
+					case gomemcached.UPR_MUTATION, gomemcached.UPR_DELETION, gomemcached.UPR_EXPIRATION:
+						dcp.counter++
+						dcp.RaiseEvent(common.DataReceived, m, dcp, nil /*derivedItems*/, nil /*otherInfos*/)
+						dcp.Logger().Tracef("%v, Mutation %v:%v:%v <%v>, counter=%v, ops_per_sec=%v\n",
+							dcp.Id(), m.VBucket, m.Seqno, m.Opcode, m.Key, dcp.counter, float64(dcp.counter)/time.Since(dcp.start_time).Seconds())
 
-					// forward mutation downstream through connector
-					if err := dcp.Connector().Forward(m); err != nil {
-						dcp.handleGeneralError(err)
+						// forward mutation downstream through connector
+						if err := dcp.Connector().Forward(m); err != nil {
+							dcp.handleGeneralError(err)
+						}
+						// raise event for statistics collection
+						dcp.RaiseEvent(common.DataProcessed, m, dcp, nil /*derivedItems*/, nil /*otherInfos*/)
+					default:
+						dcp.Logger().Debugf("Uprevent OpCode=%v, is skipped\n", m.Opcode)
 					}
-					// raise event for statistics collection
-					dcp.RaiseEvent(common.DataProcessed, m, dcp, nil /*derivedItems*/, nil /*otherInfos*/)
 				}
 			}
 		}

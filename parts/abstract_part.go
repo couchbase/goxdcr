@@ -11,41 +11,39 @@ package parts
 
 import (
 	"errors"
+	"fmt"
 	common "github.com/couchbase/goxdcr/common"
 	component "github.com/couchbase/goxdcr/component"
 	"github.com/couchbase/goxdcr/log"
 	"sync"
 )
 
-//var logger = log.NewLogger("AbstractPart", log.LogLevelInfo)
-
-type IsStarted_Callback_Func func() bool
+var invalidStateTransitionErrMsg = "Can't move to state %v - Part's current state is %v, can only move to state [%v]"
+//This is the error message any part goroutine would throw when it finds out 
+//the part is already requested to stop and it is left as orphan. The caller 
+//see this error message, it should stop itself and exit
+var PartStoppedError = errors.New("Part is stopping or already stopped, exit")
 
 type AbstractPart struct {
 	*component.AbstractComponent
 	connector common.Connector
-
-	isStarted_callback *IsStarted_Callback_Func
-
 	stateLock sync.RWMutex
+	state     common.PartState
 	logger    *log.CommonLogger
 }
 
 func NewAbstractPartWithLogger(id string,
-	isStarted_callback *IsStarted_Callback_Func,
 	logger *log.CommonLogger) AbstractPart {
 	return AbstractPart{
 		AbstractComponent: component.NewAbstractComponentWithLogger(id, logger),
-		connector:          nil,
-		isStarted_callback: isStarted_callback,
+		state:             common.Part_Initial,
+		connector:         nil,
 	}
 }
 
-func NewAbstractPart(id string,
-	isStarted_callback *IsStarted_Callback_Func) AbstractPart {
-	return NewAbstractPartWithLogger(id, isStarted_callback, log.NewLogger("AbstractPart", log.DefaultLoggerContext))
+func NewAbstractPart(id string) AbstractPart {
+	return NewAbstractPartWithLogger(id, log.NewLogger("AbstractPart", log.DefaultLoggerContext))
 }
-
 
 func (p *AbstractPart) Connector() common.Connector {
 	p.stateLock.RLock()
@@ -55,17 +53,47 @@ func (p *AbstractPart) Connector() common.Connector {
 }
 
 func (p *AbstractPart) SetConnector(connector common.Connector) error {
-	if p.isStarted_callback == nil || (*p.isStarted_callback) == nil {
-		return errors.New("IsStarted() call back func has not been defined for part " + p.Id())
-	}
-	if (*p.isStarted_callback)() {
-		return errors.New("Cannot set connector on part" + p.Id() + " since the part is still running.")
+	if p.State() != common.Part_Initial {
+		return errors.New("Cannot set connector on part" + p.Id() + " since its state is not Part_Initial")
 	}
 
 	p.stateLock.Lock()
 	defer p.stateLock.Unlock()
 
 	p.connector = connector
+	return nil
+}
+
+func (p *AbstractPart) State() common.PartState {
+	return p.state
+}
+
+func (p *AbstractPart) SetState(state common.PartState) error {
+	p.stateLock.Lock()
+	defer p.stateLock.Unlock()
+
+	//validate the state transition
+	switch p.State() {
+	case common.Part_Initial:
+		if state != common.Part_Starting && state != common.Part_Stopping {
+			return errors.New(fmt.Sprintf(invalidStateTransitionErrMsg, state, "Initial", "Started, Stopping"))
+		}
+	case common.Part_Starting:
+		if state != common.Part_Running && state != common.Part_Stopping {
+			return errors.New(fmt.Sprintf(invalidStateTransitionErrMsg, state, "Starting", "Running, Stopping"))
+		}
+	case common.Part_Running:
+		if state != common.Part_Stopping {
+			return errors.New(fmt.Sprintf(invalidStateTransitionErrMsg, state, "Running", "Stopping"))
+		}
+	case common.Part_Stopping:
+		if state != common.Part_Stopped {
+			return errors.New(fmt.Sprintf(invalidStateTransitionErrMsg, state, "Stopping", "Stopped"))
+		}
+	case common.Part_Stopped:
+		return errors.New(fmt.Sprintf(invalidStateTransitionErrMsg, state, "Stopped", ""))
+	}
+	p.state = state
 	return nil
 }
 

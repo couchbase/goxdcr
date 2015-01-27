@@ -18,7 +18,6 @@ import (
 	"expvar"
 	"fmt"
 	"github.com/couchbase/goxdcr/base"
-	"github.com/couchbase/goxdcr/cbauth"
 	"github.com/couchbase/goxdcr/common"
 	"github.com/couchbase/goxdcr/factory"
 	"github.com/couchbase/goxdcr/log"
@@ -28,7 +27,6 @@ import (
 	"github.com/couchbase/goxdcr/service_def"
 	"github.com/couchbase/goxdcr/supervisor"
 	"github.com/couchbase/goxdcr/utils"
-	"github.com/couchbaselabs/go-couchbase"
 	"io"
 	"os"
 	"reflect"
@@ -74,6 +72,8 @@ type replicationManager struct {
 	pipeline_pending_for_repair map[string]*pipelineRepairer
 
 	repl_spec_callback_cancel_ch chan struct{}
+
+	running bool
 
 	children_waitgrp *sync.WaitGroup
 }
@@ -155,6 +155,7 @@ func (r *pipelineRepairer) start() {
 				return
 			} else if r.current_error == ReplicationSpecNotActive {
 				logger_rm.Infof("Stop repairing - replication %v is no longer active\n", r.pipeline_name)
+				replication_mgr.reportFixed(r.pipeline_name)
 				return
 			} else {
 				logger_rm.Errorf("Reparing pipeline failed. error=%v\n", r.current_error)
@@ -279,9 +280,10 @@ func StartReplicationManager(sourceKVHost string, xdcrRestPort uint16,
 		err := repl_spec_svc.StartSpecChangedCallBack(specChangedCallback, specChangeObservationFailureCallBack, replication_mgr.repl_spec_callback_cancel_ch, replication_mgr.children_waitgrp)
 		if err != nil {
 			logger_rm.Errorf("Failed to start spec changed call back, err=%v", err)
-			stop()
+			exitProcess(true)
 		}
 
+		replication_mgr.running = true
 		// ns_server shutdown protocol: poll stdin and exit upon reciept of EOF
 		go pollStdin()
 
@@ -317,10 +319,6 @@ func (rm *replicationManager) init(
 	rm.children_waitgrp = &sync.WaitGroup{}
 
 	rm.repl_spec_callback_cancel_ch = make(chan struct{}, 1)
-
-	// use xdcr transport when talking to go-couchbase, which sets authentication info
-	// on requests on local cluster
-	couchbase.HTTPClient.Transport = cbauth.WrapHTTPTransport(couchbase.HTTPTransport)
 
 	logger_rm.Info("Replication manager is initialized")
 
@@ -467,12 +465,12 @@ func UpdateReplicationSettings(topic string, settings map[string]interface{}) (m
 	if err != nil {
 		return nil, err
 	}
-	
+
 	oldFilterExpression := replSpec.Settings.FilterExpression
-	
+
 	// update replication spec with input settings
 	errorMap, changed := replSpec.Settings.UpdateSettingsFromMap(settings)
-	
+
 	// enforce that filter expression cannot be changed
 	newFilterExpression, ok := settings[FilterExpression]
 	if ok {
@@ -561,18 +559,18 @@ func (rm *replicationManager) createAndPersistReplicationSpec(sourceBucket, targ
 		return nil, nil, err
 	}
 	errorMap, _ := replSettings.UpdateSettingsFromMap(settings)
-	
+
 	// check if the same replication already exists
 	replicationId := metadata.ReplicationId(sourceBucket, targetClusterUUID, targetBucket)
 	if err := validatePipelineExists(replicationId, "starting", false); err != nil {
 		// for backward compatibility with old xdcr
-		errorMap["_"] = errors.New("Replication to the same remote cluster and bucket already exists") 
+		errorMap["_"] = errors.New("Replication to the same remote cluster and bucket already exists")
 	}
-	
+
 	if len(errorMap) != 0 {
 		return nil, errorMap, nil
 	}
-	
+
 	spec.Settings = replSettings
 
 	//persist it
@@ -644,7 +642,7 @@ func (rm *replicationManager) OnError(s common.Supervisor, errMap map[string]err
 	if s.Id() == base.ReplicationManagerSupervisorId {
 		// the errors came from the replication manager supervisor because adminport or pipeline master supervisor is not longer alive.
 		// there is nothing we can do except to abort xdcr. ns_server will restart xdcr while later
-		stop()
+		exitProcess(false)
 	} else if s.Id() == base.PipelineMasterSupervisorId {
 		// the errors came from the pipeline master supervisor because some pipeline supervisors are not longer alive.
 		for childId, err1 := range errMap {
@@ -684,11 +682,11 @@ func (rm *replicationManager) lauchRepairer(topic string, cur_err error) error {
 		settingsMap := settings.ToMap()
 		retry_interval := settingsMap[metadata.FailureRestartInterval].(int)
 
-	repairer, err := newPipelineRepairer(topic, retry_interval, rm.children_waitgrp, cur_err)
-	if err != nil {
-		return err
-	}
-	rm.children_waitgrp.Add(1)
+		repairer, err := newPipelineRepairer(topic, retry_interval, rm.children_waitgrp, cur_err)
+		if err != nil {
+			return err
+		}
+		rm.children_waitgrp.Add(1)
 		rm.pipeline_pending_for_repair[topic] = repairer
 		go repairer.start()
 		logger_rm.Infof("Repairer to fix pipeline %v is lauched with retry_interval=%v\n", topic, retry_interval)
@@ -813,49 +811,64 @@ func pollStdin() {
 		logger_rm.Infof("received byte %v\n", ch)
 		if err == io.EOF {
 			logger_rm.Infof("Received EOF; Exiting...")
-			stop()
+			exitProcess(false)
 		}
 		if err != nil {
 			logger_rm.Errorf("Unexpected error polling stdin: %v\n", err)
-			os.Exit(1)
+			exitProcess(true)
 		}
 		if ch == '\n' || ch == '\r' {
 			logger_rm.Infof("Received EOL; Exiting...")
-			stop()
+			exitProcess(false)
 		}
 	}
 }
 
-func stop() {
-	// kill adminport to stop receiving new requests
-	close(replication_mgr.adminport_finch)
+//gracefull stop
+func cleanup() {
+	if replication_mgr.running {
 
-	// TODO checkpointing
+		replication_mgr.running = false
 
-	// stop running pipelines
-	for _, topic := range pipeline_manager.Topics() {
-		pipeline_manager.StopPipeline(topic)
+		//stop pipelineMasterSupervisor
+		replication_mgr.pipelineMasterSupervisor.Stop()
+
+		// stop listening to spec changed events
+		replication_mgr.repl_spec_callback_cancel_ch <- struct{}{}
+		logger_rm.Infof("Sent cancel signal to spec change observer")
+
+		// kill adminport to stop receiving new requests
+		close(replication_mgr.adminport_finch)
+
+		// stop running pipelines
+		for _, topic := range pipeline_manager.Topics() {
+			pipeline_manager.StopPipeline(topic)
+		}
+
+		//send finish signal to all repairer
+		for _, repairer := range replication_mgr.pipeline_pending_for_repair {
+			repairer.fin_ch <- true
+		}
+		logger_rm.Infof("Sent finish signal to all running repairer")
+
+		replication_mgr.children_waitgrp.Wait()
+
+		logger_rm.Infof("Replication manager exists")
+	} else {
+		logger_rm.Info("Replication manager is already in the processof stopping, no-op on this stop request")
 	}
+}
 
-	// stop listening to spec changed events
-	replication_mgr.repl_spec_callback_cancel_ch <- struct{}{}
-	logger_rm.Infof("Sent cancel signal to spec change observer")
-
-	//send finish signal to all repairer
-	for _, repairer := range replication_mgr.pipeline_pending_for_repair {
-		repairer.fin_ch <- true
-	}
-	logger_rm.Infof("Sent finish signal to all running repairer")
-
-
+//crash
+func exitProcess(byForce bool) {
 	//clean up the connection pool
-	base.ConnPoolMgr().Close()
+	defer base.ConnPoolMgr().Close()
 	
-	replication_mgr.children_waitgrp.Wait()
-
-	logger_rm.Infof("Replication manager exists")
-	// exit main routine
+	if !byForce {
+		cleanup ()
+	}
 	os.Exit(0)
+
 }
 
 // Implement callback function for replication spec service
@@ -873,6 +886,7 @@ func specChangedCallback(changedSpecId string, changedSpec *metadata.Replication
 			logger_rm.Infof("Stopping pipeline %v since the replication spec has been deleted\n", topic)
 			return stopPipeline(topic)
 		} else {
+
 			return nil
 		}
 	}
@@ -928,7 +942,7 @@ func specChangedCallback(changedSpecId string, changedSpec *metadata.Replication
 func specChangeObservationFailureCallBack(err error) {
 	// the only thing we can do is to abort
 	logger_rm.Errorf("Aborting replication manager since failed to listen to replication specification changes. err=%v\n", err)
-	stop()
+	exitProcess(true)
 }
 
 // whether there are critical changes to the replication spec that require pipeline reconstruction

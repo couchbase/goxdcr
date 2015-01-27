@@ -106,11 +106,7 @@ func (genericPipeline *GenericPipeline) startPart(part common.Part, settings map
 
 	}
 
-	if !part.IsStarted() {
-		err = part.Start(partSettings)
-	} else {
-		genericPipeline.logger.Debugf("Part is already started\n")
-	}
+	err = part.Start(partSettings)
 
 	return err
 }
@@ -124,12 +120,13 @@ func (genericPipeline *GenericPipeline) Start(settings map[string]interface{}) e
 		return errors.New(fmt.Sprintf("Can't start the pipeline, the state is wrong. The current state is %v\n", genericPipeline.state))
 	}
 
-	genericPipeline.logger.Debugf("Try to start the pipeline with settings = %s", fmt.Sprint(settings))
+	genericPipeline.logger.Infof("Try to start the pipeline with settings = %s", fmt.Sprint(settings))
 	var err error
 
 	genericPipeline.stateLock.Lock()
 	defer genericPipeline.stateLock.Unlock()
 
+	genericPipeline.logger.Info("Try to get start seqno")
 	//get starting vb timestamp
 	ts, err := genericPipeline.startingSeqno_constructor(genericPipeline)
 	if err != nil {
@@ -137,7 +134,7 @@ func (genericPipeline *GenericPipeline) Start(settings map[string]interface{}) e
 	}
 
 	settings["VBTimestamps"] = ts
-	genericPipeline.logger.Debugf("Pipeline %v's starting seqno is %v\n", genericPipeline.InstanceId(), ts)
+	genericPipeline.logger.Infof("Pipeline %v's starting seqno is %v\n", genericPipeline.InstanceId(), ts)
 
 	//start all the processing steps of the Pipeline
 	//start the incoming nozzle which would start the downstream steps
@@ -147,7 +144,7 @@ func (genericPipeline *GenericPipeline) Start(settings map[string]interface{}) e
 		if err != nil {
 			return err
 		}
-		genericPipeline.logger.Debugf("Incoming nozzle %s is started", source.Id())
+		genericPipeline.logger.Infof("Incoming nozzle %s is started", source.Id())
 	}
 	genericPipeline.logger.Info("All parts has been started")
 
@@ -191,56 +188,27 @@ func (genericPipeline *GenericPipeline) Start(settings map[string]interface{}) e
 func (genericPipeline *GenericPipeline) stopPart(part common.Part) error {
 	var err error = nil
 	genericPipeline.logger.Infof("Trying to stop part %v for %v\n", part.Id(), genericPipeline.InstanceId())
-	if genericPipeline.canStop(part) {
-		if !part.IsStarted() {
-			genericPipeline.logger.Debugf("part %v is already stopped\n", part.Id())
-			return nil
-		}
-		err = utils.ExecWithTimeout(part.Stop, 600*time.Millisecond, genericPipeline.logger)
-		if err == nil {
-			genericPipeline.logger.Infof("part %v is stopped\n", part.Id())
-			if part.Connector() != nil {
-				downstreamParts := part.Connector().DownStreams()
-				for _, p := range downstreamParts {
-					err = genericPipeline.stopPart(p)
-					if err != nil {
-						return err
-					}
-				}
-			}
-		} else {
-			genericPipeline.logger.Errorf("Failed to stop part %v, err=%v\n", part.Id(), err)
-		}
+	err = utils.ExecWithTimeout(part.Stop, 600*time.Millisecond, genericPipeline.logger)
+	if err == nil {
+		genericPipeline.logger.Infof("part %v is stopped\n", part.Id())
+	} else {
+		genericPipeline.logger.Infof("Failed to stop part %v, err=%v, let it alone to die\n", part.Id(), err)
 	}
 	return err
 }
 
-//part can't be stopped if one of its upstreams is still running
-func (genericPipeline *GenericPipeline) canStop(part common.Part) bool {
-	parents := genericPipeline.findUpstreams(part)
-	genericPipeline.logger.Debugf("part %v's parents=%v\n", part.Id(), parents)
-	for _, parent := range parents {
-		if parent.IsStarted() {
-			genericPipeline.logger.Debugf("Part %v can't stop, parent %v is still running\n", part.Id(), parent.Id())
-			return false
-		}
-	}
-	genericPipeline.logger.Debugf("Part %v can stop\n", part.Id())
-	return true
-}
-
-func (genericPipeline *GenericPipeline) findUpstreams(part common.Part) []common.Part {
-	upstreams := []common.Part{}
-
-	//searching down each source nozzle
-	for _, source := range genericPipeline.sources {
-		searchResults := genericPipeline.searchUpStreamsWithStartingPoint(part, source)
-		if searchResults != nil && len(searchResults) > 0 {
-			upstreams = append(upstreams, searchResults...)
-		}
-	}
-	return upstreams
-}
+//func (genericPipeline *GenericPipeline) findUpstreams(part common.Part) []common.Part {
+//	upstreams := []common.Part{}
+//
+//	//searching down each source nozzle
+//	for _, source := range genericPipeline.sources {
+//		searchResults := genericPipeline.searchUpStreamsWithStartingPoint(part, source)
+//		if searchResults != nil && len(searchResults) > 0 {
+//			upstreams = append(upstreams, searchResults...)
+//		}
+//	}
+//	return upstreams
+//}
 
 func (genericPipeline *GenericPipeline) searchUpStreamsWithStartingPoint(target_part common.Part, starting_part common.Part) []common.Part {
 	upstreams := []common.Part{}
@@ -309,23 +277,18 @@ func (genericPipeline *GenericPipeline) Stop() error {
 	}
 	genericPipeline.logger.Debug("Incoming nozzles are closed, preparing to stop.")
 
-	//stop the sources
-	//source nozzle would notify the stop intention to its downsteam steps
-	for _, source := range genericPipeline.sources {
-		err = genericPipeline.stopPart(source)
-		if err != nil {
-			return err
-		}
+	partsMap := GetAllParts(genericPipeline)
+	for _, part := range partsMap {
+		go func(part common.Part) {
+			err = genericPipeline.stopPart(part)
+			if err != nil {
+				genericPipeline.logger.Infof("Source nozzle %v failed to stop in time, left it alone to die.", part.Id())
+			}
+		}(part)
 	}
 
-	//stop runtime context only if all the processing steps in the pipeline
-	//has been stopped.
-	finchan := make(chan bool, 1)
-	go genericPipeline.waitToStop(finchan)
-	<-finchan
-
 	genericPipeline.state = common.Pipeline_Stopped
-	genericPipeline.logger.Infof("Pipeline %v is stopped\n", genericPipeline.InstanceId(), )
+	genericPipeline.logger.Infof("Pipeline %v is stopped\n", genericPipeline.InstanceId())
 	return err
 
 }
@@ -342,33 +305,17 @@ func (genericPipeline *GenericPipeline) Topic() string {
 	return genericPipeline.topic
 }
 
-func (genericPipeline *GenericPipeline) waitToStop(finchan chan bool) {
-	done := true
-	for {
-		for _, target := range genericPipeline.targets {
-			if target.IsStarted() {
-				genericPipeline.logger.Debugf("outgoing nozzle %s is still running", target.Id())
-				done = false
-			}
-		}
-		if done {
-			break
-		}
-	}
-	finchan <- true
-}
-
 func NewGenericPipeline(t string,
 	sources map[string]common.Nozzle,
 	targets map[string]common.Nozzle,
 	spec *metadata.ReplicationSpecification) *GenericPipeline {
 	pipeline := &GenericPipeline{topic: t,
-		sources: sources,
-		targets: targets,
-		spec:    spec,
-		logger:  log.NewLogger("GenericPipeline", nil),
+		sources:     sources,
+		targets:     targets,
+		spec:        spec,
+		logger:      log.NewLogger("GenericPipeline", nil),
 		instance_id: time.Now().Nanosecond(),
-		state:   common.Pipeline_Stopped}
+		state:       common.Pipeline_Stopped}
 	return pipeline
 }
 
@@ -385,9 +332,9 @@ func NewPipelineWithSettingConstructor(t string,
 		spec:    spec,
 		partSetting_constructor:   partsSettingsConstructor,
 		startingSeqno_constructor: startingSeqnoConstructor,
-		logger: log.NewLogger("GenericPipeline", logger_context),
+		logger:      log.NewLogger("GenericPipeline", logger_context),
 		instance_id: time.Now().Nanosecond(),
-		state:  common.Pipeline_Stopped}
+		state:       common.Pipeline_Stopped}
 	pipeline.logger.Debugf("Pipeline %s is initialized with a part setting constructor %v", t, partsSettingsConstructor)
 
 	return pipeline
@@ -465,5 +412,6 @@ func (genericPipeline *GenericPipeline) InstanceId() string {
 func (genericPipeline *GenericPipeline) String() string {
 	return genericPipeline.InstanceId()
 }
+
 //enforcer for GenericPipeline to implement Pipeline
 var _ common.Pipeline = (*GenericPipeline)(nil)

@@ -69,6 +69,7 @@ func (service *ReplicationSpecService) ReplicationSpec(replicationId string) (*m
 		return nil, err
 	}
 	if result == nil || len(result) == 0 {
+		service.logger.Errorf("Failed to get metadata %v, err=%v\n", replicationId, err)
 		return nil, base.ErrorRequestedResourceNotFound
 	}
 	return constructReplicationSpec(result, rev)

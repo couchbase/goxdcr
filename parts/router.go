@@ -12,6 +12,7 @@ package parts
 import (
 	"encoding/binary"
 	"errors"
+	"fmt"
 	mc "github.com/couchbase/gomemcached"
 	mcc "github.com/couchbase/gomemcached/client"
 	"github.com/couchbase/goxdcr/base"
@@ -32,6 +33,7 @@ var ErrorInvalidVbMapForRouter = errors.New("vbMap in Router is invalid.")
 // 1. converts UprEvent to MCRequest
 // 2. routes MCRequest to downstream parts
 type Router struct {
+	id string
 	*connector.Router
 	filterRegexp *regexp.Regexp    // filter expression
 	vbMap        map[uint16]string // pvbno -> partId. This defines the loading balancing strategy of which vbnos would be routed to which part
@@ -39,7 +41,7 @@ type Router struct {
 	counter map[string]int
 }
 
-func NewRouter(filterExpression string,
+func NewRouter(id string, filterExpression string,
 	downStreamParts map[string]common.Part,
 	vbMap map[uint16]string,
 	logger_context *log.LoggerContext) (*Router, error) {
@@ -53,6 +55,7 @@ func NewRouter(filterExpression string,
 		}
 	}
 	router := &Router{
+		id : id, 
 		filterRegexp: filterRegexp,
 		vbMap:        vbMap,
 		counter:      make(map[string]int)}
@@ -120,23 +123,18 @@ func (router *Router) route(data interface{}) (map[string]interface{}, error) {
 
 	router.Logger().Debugf("Data with vbno=%d, opCode=%v is routed to downstream part %s", uprEvent.VBucket, uprEvent.Opcode, partId)
 
-	switch uprEvent.Opcode {
-	case mc.UPR_MUTATION, mc.UPR_DELETION, mc.UPR_EXPIRATION:
-		// filter data if filter expession has been defined
-		if router.filterRegexp != nil {
-			if !router.filterRegexp.Match(uprEvent.Key) {
-				// if data does not match filter expression, drop it. return empty result
-				router.RaiseEvent(common.DataFiltered, uprEvent, router, nil, nil)
-				router.Logger().Debugf("Data with key=%v has been filtered out", string(uprEvent.Key))
-				return result, nil
-			}
+	// filter data if filter expession has been defined
+	if router.filterRegexp != nil {
+		if !router.filterRegexp.Match(uprEvent.Key) {
+			// if data does not match filter expression, drop it. return empty result
+			router.RaiseEvent(common.DataFiltered, uprEvent, router, nil, nil)
+			router.Logger().Debugf("Data with key=%v has been filtered out", string(uprEvent.Key))
+			return result, nil
 		}
-		result[partId] = ComposeMCRequest(uprEvent)
-		router.counter[partId] = router.counter[partId] + 1
-		router.Logger().Debugf("Rounting counter = %v\n", router.counter)
-	default:
-		router.Logger().Debugf("Uprevent OpCode=%v, is skipped\n", uprEvent.Opcode)
 	}
+	result[partId] = ComposeMCRequest(uprEvent)
+	router.counter[partId] = router.counter[partId] + 1
+	router.Logger().Debugf("Rounting counter = %v\n", router.counter)
 	return result, nil
 }
 
@@ -144,4 +142,9 @@ func (router *Router) SetVbMap(vbMap map[uint16]string) {
 	router.vbMap = vbMap
 	router.Logger().Infof("Set vbMap in Router")
 	router.Logger().Debugf("vbMap: %v", vbMap)
+}
+
+func (router *Router) StatusSummary () string {
+	return fmt.Sprintf("Rounter %v = %v", router.id, router.counter)
+
 }

@@ -47,6 +47,8 @@ const (
 	DOCS_OPT_REPD_METRIC = "docs_opt_repd"
 	RATE_OPT_REPD_METRIC = "rate_doc_opt_repd"
 
+	DOCS_RECEIVED_DCP_METRICS = "docs_received_from_dcp"
+
 	//	TIME_COMMITTING_METRIC = "time_committing"
 	//rate
 	RATE_REPLICATED_METRIC = "rate_replicated"
@@ -189,7 +191,20 @@ func (stats_mgr *StatisticsManager) updateStats(finchan chan bool) error {
 			if err == nil {
 				if stats_mgr.logger.GetLogLevel() >= log.LogLevelInfo {
 					stats_mgr.logger.Info(stats_mgr.formatStatsForLog())
+
+					//log parts summary
+					xmem_parts := stats_mgr.pipeline.Targets()
+					for _, part := range xmem_parts {
+						stats_mgr.logger.Info(part.(*parts.XmemNozzle).StatusSummary())
+					}
+					dcp_parts := stats_mgr.pipeline.Sources()
+					for _, part := range dcp_parts {
+						conn := part.Connector()
+						stats_mgr.logger.Info(conn.(*parts.Router).StatusSummary())
+						stats_mgr.logger.Info(part.(*parts.DcpNozzle).StatusSummary())
+					}
 				}
+
 			} else {
 				stats_mgr.logger.Info("Failed to calculate the statistics for this round. Move on")
 			}
@@ -281,12 +296,12 @@ func (stats_mgr *StatisticsManager) processCalculatedStats(oldSample metrics.Reg
 	rate_replicated_var := new(expvar.Float)
 	rate_replicated_var.Set(rate_replicated)
 	overview_expvar_map.Set(RATE_REPLICATED_METRIC, rate_replicated_var)
-	
+
 	//calculate rate_doc_opt_repd
 	docs_opt_repd_old := oldSample.Get(DOCS_OPT_REPD_METRIC).(metrics.Counter).Count()
 	docs_opt_repd := stats_mgr.getOverviewRegistry().Get(DOCS_OPT_REPD_METRIC).(metrics.Counter).Count()
-	rate_opt_repd := float64(docs_opt_repd - docs_opt_repd_old)/interval_in_sec
-	rate_opt_repd_var := new (expvar.Float)
+	rate_opt_repd := float64(docs_opt_repd-docs_opt_repd_old) / interval_in_sec
+	rate_opt_repd_var := new(expvar.Float)
 	rate_opt_repd_var.Set(rate_opt_repd)
 	overview_expvar_map.Set(RATE_OPT_REPD_METRIC, rate_opt_repd_var)
 
@@ -473,6 +488,7 @@ func (stats_mgr *StatisticsManager) initOverviewRegistry() {
 	overview_registry.Register(NUM_FAILEDCKPTS_METRIC, metrics.NewCounter())
 	overview_registry.Register(TIME_COMMITING_METRIC, metrics.NewCounter())
 	overview_registry.Register(DOCS_OPT_REPD_METRIC, metrics.NewCounter())
+	overview_registry.Register(DOCS_RECEIVED_DCP_METRICS, metrics.NewCounter())
 }
 
 func (stats_mgr *StatisticsManager) Start(settings map[string]interface{}) error {
@@ -608,7 +624,8 @@ func (dcp_collector *dcpCollector) Mount(pipeline common.Pipeline, stats_mgr *St
 	dcp_collector.stats_mgr = stats_mgr
 	dcp_parts := pipeline.Sources()
 	for _, dcp_part := range dcp_parts {
-		stats_mgr.getOrCreateRegistry(dcp_part.Id())
+		registry := stats_mgr.getOrCreateRegistry(dcp_part.Id())
+		registry.Register(DOCS_RECEIVED_DCP_METRICS, metrics.NewCounter())
 		dcp_part.RegisterComponentEventListener(common.DataReceived, dcp_collector)
 	}
 	return nil
@@ -624,6 +641,10 @@ func (dcp_collector *dcpCollector) OnEvent(eventType common.ComponentEventType,
 		startTime := time.Now()
 		seqno := item.(*mcc.UprEvent).Seqno
 		dcp_collector.stats_mgr.starttime_map[fmt.Sprintf("%v", seqno)] = startTime
+
+		registry := dcp_collector.stats_mgr.registries[component.Id()]
+		registry.Get(DOCS_RECEIVED_DCP_METRICS).(metrics.Counter).Inc(1)
+
 	}
 }
 

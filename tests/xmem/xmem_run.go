@@ -16,7 +16,6 @@ import (
 	"fmt"
 	mc "github.com/couchbase/gomemcached"
 	mcc "github.com/couchbase/gomemcached/client"
-	"github.com/couchbase/goxdcr/cbauth"
 	"github.com/couchbase/goxdcr/log"
 	parts "github.com/couchbase/goxdcr/parts"
 	utils "github.com/couchbase/goxdcr/utils"
@@ -124,8 +123,6 @@ func main() {
 		}
 	}()
 	argParse()
-
-	couchbase.HTTPClient.Transport = cbauth.WrapHTTPTransport(couchbase.HTTPTransport)
 
 	test(500, 1000)
 	//	test(5, 50, parts.Batch_XMEM)

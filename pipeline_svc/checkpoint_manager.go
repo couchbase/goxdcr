@@ -228,8 +228,13 @@ func (ckmgr *CheckpointManager) updateCurrentVBUUID(vbno uint16, vbuuid uint64) 
 }
 
 func (ckmgr *CheckpointManager) VBTimestamps(topic string) (map[uint16]*base.VBTimestamp, error) {
+	ckmgr.logger.Info("Getting VBTimestamps...")
 	//refresh the remote bucket
-	ckmgr.remote_bucket.Refresh(ckmgr.remote_cluster_svc)
+	err := ckmgr.remote_bucket.Refresh(ckmgr.remote_cluster_svc)
+	if err != nil {
+		return nil, err
+	}
+	
 	disableCkptBackwardsCompat := ckmgr.backward_compat
 
 	//populate failover uuid on cur_ckpts
@@ -238,6 +243,8 @@ func (ckmgr *CheckpointManager) VBTimestamps(topic string) (map[uint16]*base.VBT
 		return nil, err
 	}
 	ckmgr.populateFailoverUUIDs(failoverLogMap)
+	ckmgr.logger.Info("Got failoverlog...")
+
 
 	ret := make(map[uint16]*base.VBTimestamp)
 	listOfVbs := ckmgr.getMyVBs()
@@ -385,6 +392,7 @@ func (ckmgr *CheckpointManager) getFailoverLogAndHighSeqno() (couchbase.Failover
 		return nil, nil, err
 	}
 	defer bucket.Close()
+	ckmgr.logger.Debugf("Got the bucket %v\n", sourcBucketName)
 
 	listOfvbs := ckmgr.getMyVBs()
 	failoverlogMap, err := bucket.GetFailoverLogs(listOfvbs)
@@ -423,6 +431,7 @@ func (ckmgr *CheckpointManager) populateVBTimestamp(ckptDoc *metadata.Checkpoint
 
 		//validate and adjust vbts
 		highseqno := highseqno_map[vbno]
+		ckmgr.logger.Infof("Seqno =%v, highseqno=%v", vbts.Seqno, highseqno)
 		if vbts.Seqno > highseqno {
 			vbts.Seqno = highseqno
 		}

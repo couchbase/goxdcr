@@ -79,6 +79,8 @@ func RecoverPanic(err *error) {
 
 // Get bucket in local cluster
 func LocalBucket(localConnectStr, bucketName string) (*couchbase.Bucket, error) {
+	logger_utils.Debugf("Getting local bucket name=%v\n", bucketName)
+	
 	url := fmt.Sprintf("http://%s", localConnectStr)
 	client, err := couchbase.ConnectWithAuth(url, cbauth.NewAuthHandler(nil))
 	if err != nil {
@@ -98,11 +100,14 @@ func LocalBucket(localConnectStr, bucketName string) (*couchbase.Bucket, error) 
 }
 
 func RemoteBucket(remoteConnectStr, bucketName, remoteUsername, remotePassword string) (*couchbase.Bucket, error) {
+	logger_utils.Debugf("Getting remote bucket name=%v connstr=%v\n", bucketName, remoteConnectStr)
+
 	var url string
 	if remoteUsername == "" || remotePassword == "" {
 		return nil, errors.New(fmt.Sprintf("Error retrieving remote bucket, %v, since remote username and/or password are missing.", bucketName))
 
 	}
+	
 	url = fmt.Sprintf("http://%s:%s@%s", remoteUsername, remotePassword, remoteConnectStr)
 	bucketInfos, err := couchbase.GetBucketList(url)
 	if err != nil {

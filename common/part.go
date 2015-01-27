@@ -13,6 +13,15 @@ import (
 
 )
 
+type PartState int
+const (
+	Part_Initial PartState=iota	
+	Part_Starting PartState=iota
+	Part_Running PartState=iota
+	Part_Stopping PartState=iota
+	Part_Stopped PartState=iota
+)
+
 type Part interface {
 	Component
 	Connectable
@@ -26,7 +35,7 @@ type Part interface {
 	//Receive accepts data passed down from its upstream
 	Receive (data interface {}) error
 
-	//IsStarted returns true if the part is started; otherwise returns false
-	IsStarted () bool
+	//return the state of the part
+	State() PartState
 	
 }

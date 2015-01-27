@@ -147,7 +147,7 @@ func test() {
 	logger.Info("Start testing")
 	settings := make(map[string]interface{})
 	settings[metadata.PipelineLogLevel] = "Debug"
-	settings[metadata.CheckpointInterval] = 40
+	settings[metadata.CheckpointInterval] = 20
 	settings[metadata.PipelineStatsInterval] = 10000
 	settings[metadata.SourceNozzlePerNode] = NUM_SOURCE_CONN
 	settings[metadata.TargetNozzlePerNode] = NUM_TARGET_CONN
@@ -196,11 +196,14 @@ func test() {
 	}
 
 	time.Sleep(30 * time.Second)
+	logger.Info("........Verifying checkpointing ....")
 	ckpt_docs, err := replication_manager.CheckpointService().CheckpointsDocs(topic)
 	if err != nil {
 		fail(err.Error())
 	}
+	
 	if len(ckpt_docs) == 0 {
+		logger.Info("Didn't find any checkpoint doc")
 		fail(fmt.Sprintf("No checkpointing happended as it is supposed to"))
 	}
 	settings[metadata.Active] = false
@@ -214,9 +217,10 @@ func test() {
 	if err != nil || len(errMap) > 0 {
 		fail(fmt.Sprintf("err= %v, errMap=%v", err, errMap))
 	}
-	time.Sleep(1 * time.Second)
+	time.Sleep(30 * time.Second)
 	pipeline = replication_manager.Pipeline(topic)
 	if pipeline == nil {
+		logger.Info("Failed to resume replication")
 		fail(fmt.Sprintf("Failed to resume replication %s", topic))
 	}
 	logger.Infof("Replication %s is resumed\n", topic)

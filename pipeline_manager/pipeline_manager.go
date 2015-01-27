@@ -23,7 +23,7 @@ type pipelineManager struct {
 
 	once sync.Once
 
-	mapLock sync.Mutex
+	mapLock sync.RWMutex
 	logger  *log.CommonLogger
 }
 
@@ -100,8 +100,8 @@ func (pipelineMgr *pipelineManager) addPipelineToMap(p common.Pipeline) {
 }
 
 func (pipelineMgr *pipelineManager) getPipelineFromMap(topic string) common.Pipeline {
-	pipelineMgr.mapLock.Lock()
-	defer pipelineMgr.mapLock.Unlock()
+	pipelineMgr.mapLock.RLock()
+	defer pipelineMgr.mapLock.RUnlock()
 
 	return pipelineMgr.live_pipelines[topic]
 }
@@ -120,7 +120,8 @@ func (pipelineMgr *pipelineManager) stopPipeline(topic string) error {
 		err = f.Stop()
 		if err != nil {
 			pipelineMgr.logger.Errorf("Failed to stop pipeline %v - %v\n", topic, err)
-			return err
+			//pipeline failed to stopped gracefully in time. ignore the error.
+			//the parts tof the pipeline will eventually commit suicide.
 		}
 		pipelineMgr.removePipelineFromMap(f)
 
