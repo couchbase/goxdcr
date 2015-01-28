@@ -65,7 +65,7 @@ var TargetNozzlePerNodeConfig = &SettingsConfig{2, &Range{1, 10}}
 var MaxExpectedReplicationLagConfig = &SettingsConfig{1000, nil}
 var TimeoutPercentageCapConfig = &SettingsConfig{50, &Range{0, 100}}
 var PipelineLogLevelConfig = &SettingsConfig{log.LogLevelInfo, nil}
-var PipelineStatsIntervalConfig = &SettingsConfig{10000, nil}
+var PipelineStatsIntervalConfig = &SettingsConfig{60000, nil}
 
 var SettingsConfigMap = map[string]*SettingsConfig{
 	ReplicationType:                ReplicationTypeConfig,
