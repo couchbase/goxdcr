@@ -75,11 +75,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	host, err := top_svc.MyHost()
-	if err != nil {
-		fmt.Printf("Error getting current host. err=%v\n", err)
-		os.Exit(1)
-	}
+	host := base.LocalHostName
 
 	//metadata_svc, err := s.NewMetadataSvc(utils.GetHostAddr(host, uint16(options.gometaRequestPort)), nil)
 	metadata_svc, err := s.NewMetaKVMetadataSvc(nil)

@@ -115,7 +115,7 @@ func run_testcase() error {
 		return err
 	}
 
-	remote_cluster_svc := service_impl.NewRemoteClusterService(metadata_svc, log.DefaultLoggerContext)
+	remote_cluster_svc := service_impl.NewRemoteClusterService(nil, metadata_svc, log.DefaultLoggerContext)
 	if err != nil {
 		return err
 	}
@@ -238,7 +238,7 @@ func createRequestBody(name, hostname, username, password string, demandEncrypti
 		}
 		params[base.RemoteClusterCertificate] = serverCert
 	}
-	return rm.EncodeMapIntoByteArray(params)
+	return utils.EncodeMapIntoByteArray(params)
 }
 
 func deleteRemoteCluster() error {

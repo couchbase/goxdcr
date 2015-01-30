@@ -8,6 +8,7 @@ import (
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/goxdcr/parts"
+	"github.com/couchbase/goxdcr/pipeline_utils"
 	pp "github.com/couchbase/goxdcr/pipeline"
 	pctx "github.com/couchbase/goxdcr/pipeline_ctx"
 	"github.com/couchbase/goxdcr/pipeline_svc"
@@ -15,7 +16,6 @@ import (
 	"github.com/couchbase/goxdcr/supervisor"
 	"math"
 	"strconv"
-	"strings"
 	"time"
 )
 
@@ -26,7 +26,6 @@ const (
 )
 
 // errors
-var ErrorNoSourceKV = errors.New("Invalid configuration. No source kv node is found.")
 var ErrorNoSourceNozzle = errors.New("Invalid configuration. No source nozzle can be constructed since the source kv nodes are not the master for any vbuckets.")
 var ErrorNoTargetNozzle = errors.New("Invalid configuration. No target nozzle can be constructed.")
 
@@ -81,7 +80,7 @@ func (xdcrf *XDCRFactory) NewPipeline(topic string) (common.Pipeline, error) {
 	}
 
 	// popuplate pipeline using config
-	sourceNozzles, kv_vb_map, sourceNozzle_vb_map, err := xdcrf.constructSourceNozzles(spec, topic, logger_ctx)
+	sourceNozzles, kv_vb_map, err := xdcrf.constructSourceNozzles(spec, topic, logger_ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -90,6 +89,7 @@ func (xdcrf *XDCRFactory) NewPipeline(topic string) (common.Pipeline, error) {
 		return nil, ErrorNoSourceNozzle
 	}
 
+	xdcrf.logger.Infof("kv_vb_map=%v\n", kv_vb_map)
 	outNozzles, vbNozzleMap, err := xdcrf.constructOutgoingNozzles(spec, kv_vb_map, logger_ctx)
 	if err != nil {
 		return nil, err
@@ -99,7 +99,7 @@ func (xdcrf *XDCRFactory) NewPipeline(topic string) (common.Pipeline, error) {
 
 	// connect parts
 	for _, sourceNozzle := range sourceNozzles {
-		vblist := sourceNozzle_vb_map[sourceNozzle.Id()]
+		vblist := sourceNozzle.(*parts.DcpNozzle).GetVBList()
 		downStreamParts := make(map[string]common.Part)
 		for _, vb := range vblist {
 			targetNozzleId := vbNozzleMap[vb]
@@ -135,17 +135,16 @@ func (xdcrf *XDCRFactory) NewPipeline(topic string) (common.Pipeline, error) {
 // construct source nozzles for the requested/current kv node
 func (xdcrf *XDCRFactory) constructSourceNozzles(spec *metadata.ReplicationSpecification,
 	topic string,
-	logger_ctx *log.LoggerContext) (map[string]common.Nozzle, map[string][]uint16, map[string][]uint16, error) {
+	logger_ctx *log.LoggerContext) (map[string]common.Nozzle, map[string][]uint16, error) {
 	sourceNozzles := make(map[string]common.Nozzle)
-	sourceNozzleVBsMap := make(map[string][]uint16)
 
 	bucketName := spec.SourceBucketName
 
 	maxNozzlesPerNode := spec.Settings.SourceNozzlePerNode
 
-	kv_vb_map, err := xdcrf.getKVVBMap(spec)
+	kv_vb_map, err := pipeline_utils.GetSourceVBListForReplication(xdcrf.cluster_info_svc, xdcrf.xdcr_topology_svc, spec, xdcrf.logger)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, err
 	}
 
 	for kvaddr, vbnos := range kv_vb_map {
@@ -173,7 +172,7 @@ func (xdcrf *XDCRFactory) constructSourceNozzles(spec *metadata.ReplicationSpeci
 			bucket, err := xdcrf.cluster_info_svc.GetBucket(xdcrf.xdcr_topology_svc, bucketName)
 			if err != nil {
 				xdcrf.logger.Errorf("Error getting bucket. i=%d, err=%v\n", i, err)
-				return nil, nil, nil, err
+				return nil, nil, err
 			}
 			vbList := make([]uint16, 0, 15)
 			for j := 0; j < numOfVbPerDcpNozzle; j++ {
@@ -192,20 +191,28 @@ func (xdcrf *XDCRFactory) constructSourceNozzles(spec *metadata.ReplicationSpeci
 			dcpNozzle := parts.NewDcpNozzle(id,
 				bucket, vbList, logger_ctx)
 			sourceNozzles[dcpNozzle.Id()] = dcpNozzle
-			sourceNozzleVBsMap[dcpNozzle.Id()] = vbList
 			xdcrf.logger.Debugf("Constructed source nozzle %v with vbList = %v \n", dcpNozzle.Id(), vbList)
 		}
-	}
-	xdcrf.logger.Infof("Constructed %v source nozzles\n", len(sourceNozzles))
 
-	return sourceNozzles, kv_vb_map, sourceNozzleVBsMap, nil
+		total := 0
+		for _, sourceNozzle := range sourceNozzles {
+			total = total + len(sourceNozzle.(*parts.DcpNozzle).GetVBList())
+		}
+
+		if total != numOfVbs {
+			panic(fmt.Sprintf("numOfVbs = %v, total =%v", numOfVbs, total))
+		}
+		xdcrf.logger.Infof("Constructed %v source nozzles for %v vbs on %v\n", len(sourceNozzles), numOfVbs, kvaddr)
+	}
+
+	return sourceNozzles, kv_vb_map, nil
 }
 
 func (xdcrf *XDCRFactory) partId(prefix string, topic string, kvaddr string, index int) string {
 	return prefix + PART_NAME_DELIMITER + topic + PART_NAME_DELIMITER + kvaddr + PART_NAME_DELIMITER + strconv.Itoa(index)
 }
 
-func (xdcrf *XDCRFactory) filterVBList(targetkvVBList []uint16, kv_vb_map map[string][]uint16) []uint16{
+func (xdcrf *XDCRFactory) filterVBList(targetkvVBList []uint16, kv_vb_map map[string][]uint16) []uint16 {
 	ret := []uint16{}
 	for _, vb := range targetkvVBList {
 		for _, sourcevblist := range kv_vb_map {
@@ -226,11 +233,12 @@ func (xdcrf *XDCRFactory) constructOutgoingNozzles(spec *metadata.ReplicationSpe
 	vbNozzleMap := make(map[uint16]string)
 
 	targetBucketName := spec.TargetBucketName
-	targetClusterRef, err := xdcrf.remote_cluster_svc.RemoteClusterByUuid(spec.TargetClusterUUID)
+	targetClusterRef, err := xdcrf.remote_cluster_svc.RemoteClusterByUuid(spec.TargetClusterUUID, true)
 	if err != nil {
 		xdcrf.logger.Errorf("Error getting remote cluster with uuid=%v, err=%v\n", spec.TargetClusterUUID, err)
 		return nil, nil, err
 	}
+	
 	kvVBMap, err := xdcrf.cluster_info_svc.GetServerVBucketsMap(targetClusterRef, targetBucketName)
 	if err != nil {
 		xdcrf.logger.Errorf("Error getting server vbuckets map, err=%v\n", err)
@@ -253,6 +261,9 @@ func (xdcrf *XDCRFactory) constructOutgoingNozzles(spec *metadata.ReplicationSpe
 
 	for kvaddr, kvVBList := range kvVBMap {
 		relevantVBs := xdcrf.filterVBList(kvVBList, kv_vb_map)
+
+		xdcrf.logger.Debugf("kvaddr = %v; kvVbList=%v, relevantVBs=-%v\n", kvaddr, kvVBList, relevantVBs)
+
 		numOfVbs := len(relevantVBs)
 		// the number of xmem nozzles to construct is the smaller of vbucket list size and target connection size
 		numOfNozzles := int(math.Min(float64(numOfVbs), float64(maxTargetNozzlePerNode)))
@@ -452,41 +463,14 @@ func (xdcrf *XDCRFactory) registerServices(pipeline common.Pipeline, logger_ctx 
 	if err != nil {
 		return err
 	}
+	
+	//register topology change detect service
+	top_detect_svc := pipeline_svc.NewTopologyChangeDetectorSvc (xdcrf.cluster_info_svc, xdcrf.xdcr_topology_svc, logger_ctx)
+	err = ctx.RegisterService(base.TOPOLOGY_CHANGE_DETECT_SVC, top_detect_svc)
+	if err != nil {
+		return err
+	}
 	return nil
-}
-
-func (xdcrf *XDCRFactory) getKVVBMap(spec *metadata.ReplicationSpecification) (map[string][]uint16, error) {
-	kv_vb_map := make(map[string][]uint16)
-	server_vbmap, err := xdcrf.cluster_info_svc.GetServerVBucketsMap(xdcrf.xdcr_topology_svc, spec.SourceBucketName)
-	if err != nil {
-		return nil, err
-	}
-
-	nodes, err := xdcrf.xdcr_topology_svc.MyKVNodes()
-	if err != nil {
-		xdcrf.logger.Errorf("Failed to get my KV nodes, err=%v\n", err)
-		return nil, err
-	}
-	xdcrf.logger.Infof("kvHosts=%v\n", nodes)
-	if len(nodes) == 0 {
-		return nil, ErrorNoSourceKV
-	}
-
-	for _, node := range nodes {
-		var kvaddr string
-		var vbnos []uint16
-		// iterate through serverVBMap and look for server addr that starts with "kvHost:"
-		for kvaddr_iter, vbnos_iter := range server_vbmap {
-			if strings.HasPrefix(kvaddr_iter, node+base.UrlPortNumberDelimiter) {
-				xdcrf.logger.Infof("found kv")
-				kvaddr = kvaddr_iter
-				vbnos = vbnos_iter
-				break
-			}
-		}
-		kv_vb_map[kvaddr] = vbnos
-	}
-	return kv_vb_map, nil
 }
 
 func (xdcrf *XDCRFactory) ConstructSettingsForService(pipeline common.Pipeline, service common.PipelineService, settings map[string]interface{}, ts map[uint16]*base.VBTimestamp) (map[string]interface{}, error) {

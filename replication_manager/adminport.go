@@ -193,7 +193,7 @@ func (adminport *Adminport) handleRequest(
 func (adminport *Adminport) doGetRemoteClustersRequest(request *http.Request) ([]byte, error) {
 	logger_ap.Infof("doGetRemoteClustersRequest\n")
 
-	remoteClusters, err := RemoteClusterService().RemoteClusters()
+	remoteClusters, err := RemoteClusterService().RemoteClusters(false)
 	if err != nil {
 		return nil, err
 	}
@@ -284,7 +284,7 @@ func (adminport *Adminport) doDeleteRemoteClusterRequest(request *http.Request) 
 
 	logger_ap.Infof("Request params: remoteClusterName=%v\n", remoteClusterName)
 
-	remoteClusterRef, err := RemoteClusterService().RemoteClusterByRefName(remoteClusterName)
+	remoteClusterRef, err := RemoteClusterService().RemoteClusterByRefName(remoteClusterName, false)
 	if err != nil {
 		return nil, err
 	}

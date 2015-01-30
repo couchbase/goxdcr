@@ -125,7 +125,7 @@ func invokeFactory() error {
 
 	defer common.DeleteTestRemoteCluster(remote_cluster_svc, options.remoteName)
 
-	remoteClusterRef, err := remote_cluster_svc.RemoteClusterByRefName(options.remoteName)
+	remoteClusterRef, err := remote_cluster_svc.RemoteClusterByRefName(options.remoteName, false)
 	if err != nil {
 		fmt.Println(err.Error())
 		return err

@@ -40,7 +40,7 @@ func NewXDCRTopologySvc(adminport, xdcrRestPort uint16,
 }
 
 func (top_svc *XDCRTopologySvc) MyHost() (string, error) {
-	return base.LocalHostName, nil
+	return top_svc.getHostName()
 }
 
 func (top_svc *XDCRTopologySvc) MyHostAddr() (string, error) {
@@ -52,8 +52,13 @@ func (top_svc *XDCRTopologySvc) MyMemcachedAddr() (string, error) {
 	if err != nil {
 		return "", err
 	}
-
-	return utils.GetHostAddr(base.LocalHostName, port), nil
+	
+	hostName, err := top_svc.getHostName()
+	if err != nil {
+		return "", err
+	}
+	
+	return utils.GetHostAddr(hostName, port), nil
 }
 
 func (top_svc *XDCRTopologySvc) MyAdminPort() (uint16, error) {
@@ -64,11 +69,11 @@ func (top_svc *XDCRTopologySvc) MyKVNodes() ([]string, error) {
 	// as of now each xdcr instance is responsible for only one kv node
 	nodes := make([]string, 1)
 	// get the actual hostname used in server list and server vb map
-	hostname, err := top_svc.getHostName()
+	memcachedAddr, err := top_svc.MyMemcachedAddr()
 	if err != nil {
 		return nil, err
 	}
-	nodes[0] = hostname
+	nodes[0] = memcachedAddr
 	return nodes, nil
 }
 
@@ -208,11 +213,7 @@ func (top_svc *XDCRTopologySvc) getHostMemcachedPort() (uint16, error) {
 
 // implements base.ClusterConnectionInfoProvider
 func (top_svc *XDCRTopologySvc) MyConnectionStr() (string, error) {
-	host, err := top_svc.MyHost()
-	if err != nil {
-		// should never get here
-		return "", err
-	}
+	host := base.LocalHostName
 	return utils.GetHostAddr(host, top_svc.adminport), nil
 }
 

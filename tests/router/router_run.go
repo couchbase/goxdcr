@@ -181,7 +181,7 @@ func startRouter() {
 		partMap[partId] = NewTestPart(partId)
 	}
 
-	router, _ = parts.NewRouter(options.filter_expression, partMap, buildVbMap(partMap), couchlog.DefaultLoggerContext)
+	router, _ = parts.NewRouter("router1", options.filter_expression, partMap, buildVbMap(partMap), couchlog.DefaultLoggerContext)
 }
 
 func buildVbMap(downStreamParts map[string]pc.Part) map[uint16]string {
@@ -215,8 +215,7 @@ type TestPart struct {
 
 func NewTestPart(id string) *TestPart {
 	tp := new(TestPart)
-	var isStarted_callback_func parts.IsStarted_Callback_Func = tp.IsStarted
-	tp.AbstractPart = parts.NewAbstractPart(id, &isStarted_callback_func)
+	tp.AbstractPart = parts.NewAbstractPart(id)
 	return tp
 }
 

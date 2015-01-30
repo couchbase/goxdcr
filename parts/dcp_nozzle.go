@@ -85,7 +85,6 @@ func NewDcpNozzle(id string,
 		AbstractPart:    part,             /*AbstractPart*/
 		bOpen:           true,             /*bOpen	bool*/
 		childrenWaitGrp: sync.WaitGroup{}, /*childrenWaitGrp sync.WaitGroup*/
-		handle_error:    true,
 		lock_uprFeed:    sync.Mutex{},
 	}
 
@@ -272,6 +271,7 @@ func (dcp *DcpNozzle) processData() (err error) {
 						// forward mutation downstream through connector
 						if err := dcp.Connector().Forward(m); err != nil {
 							dcp.handleGeneralError(err)
+							goto done
 						}
 						// raise event for statistics collection
 						dcp.RaiseEvent(common.DataProcessed, m, dcp, nil /*derivedItems*/, nil /*otherInfos*/)
@@ -298,8 +298,10 @@ func (dcp *DcpNozzle) StatusSummary() string {
 }
 
 func (dcp *DcpNozzle) handleGeneralError(err error) {
-	if dcp.handle_error {
-		dcp.Logger().Errorf("Raise error condition %v\n", err)
+	dcp.Logger().Errorf("Raise error condition %v\n", err)
+
+	err1 := dcp.SetState(common.Part_Error)
+	if err1 == nil {
 		otherInfo := utils.WrapError(err)
 		dcp.RaiseEvent(common.ErrorEncountered, nil, dcp, nil, otherInfo)
 	} else {

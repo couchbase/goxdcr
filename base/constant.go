@@ -79,6 +79,7 @@ const (
 	PIPELINE_SUPERVISOR_SVC string = "PipelineSupervisor"
 	CHECKPOINT_MGR_SVC string = "CheckpointManager"
 	STATISTICS_MGR_SVC string = "StatisticsManager"
+	TOPOLOGY_CHANGE_DETECT_SVC string = "TopologyChangeDetectSvc"
 )
 
 // supervisor related constants
@@ -95,6 +96,9 @@ var ParseIntBitSize = 64
 
 var ErrorNotMyVbucket = errors.New("NOT_MY_VBUCKET")
 var ErrorRequestedResourceNotFound = errors.New("Requested resource not found")
+
+var InvalidStateTransitionErrMsg = "Can't move to state %v - %v's current state is %v, can only move to state [%v]"
+
 
 // constants used for remote cluster references
 const (

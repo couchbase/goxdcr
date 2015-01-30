@@ -6,7 +6,7 @@
 // License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND,
 // either express or implied. See the License for the specific language governing permissions
 // and limitations under the License.
- 
+
 package service_impl
 
 import (
@@ -18,17 +18,17 @@ import (
 )
 
 type ClusterInfoSvc struct {
-	logger      *log.CommonLogger
+	logger *log.CommonLogger
 }
 
 func NewClusterInfoSvc(logger_ctx *log.LoggerContext) *ClusterInfoSvc {
 	return &ClusterInfoSvc{
-					logger:    log.NewLogger("ClusterInfoService", logger_ctx),
-					}
+		logger: log.NewLogger("ClusterInfoService", logger_ctx),
+	}
 }
 
 func (ci_svc *ClusterInfoSvc) GetMyActiveVBuckets(clusterConnInfoProvider base.ClusterConnectionInfoProvider, bucketName, NodeId string) ([]uint16, error) {
-	bucket, err := ci_svc.GetBucket(clusterConnInfoProvider, bucketName)	
+	bucket, err := ci_svc.GetBucket(clusterConnInfoProvider, bucketName)
 	if err != nil {
 		return nil, err
 	}
@@ -43,13 +43,12 @@ func (ci_svc *ClusterInfoSvc) GetMyActiveVBuckets(clusterConnInfoProvider base.C
 	}
 
 	vbList := m[kvaddr]
-	
 
 	return vbList, nil
 }
 
 func (ci_svc *ClusterInfoSvc) GetServerList(clusterConnInfoProvider base.ClusterConnectionInfoProvider, bucketName string) ([]string, error) {
-	bucket, err := ci_svc.GetBucket(clusterConnInfoProvider, bucketName)	
+	bucket, err := ci_svc.GetBucket(clusterConnInfoProvider, bucketName)
 	if err != nil {
 		return nil, err
 	}
@@ -57,7 +56,7 @@ func (ci_svc *ClusterInfoSvc) GetServerList(clusterConnInfoProvider base.Cluster
 
 	// in test env, there should be only one kv in bucket server list
 	serverlist := bucket.VBServerMap().ServerList
-	
+
 	return serverlist, nil
 }
 
@@ -66,8 +65,12 @@ func (ci_svc *ClusterInfoSvc) GetServerVBucketsMap(clusterConnInfoProvider base.
 	if err != nil {
 		return nil, err
 	}
-	defer bucket.Close()
-	
+	defer func() {
+		if bucket != nil {
+			bucket.Close()
+		}
+	}()
+
 	ci_svc.logger.Debugf("ServerList=%v\n", bucket.VBServerMap().ServerList)
 	serverVBMap, err := bucket.GetVBmap(bucket.VBServerMap().ServerList)
 
@@ -83,15 +86,43 @@ func (ci_svc *ClusterInfoSvc) GetBucket(clusterConnInfoProvider base.ClusterConn
 	if err != nil {
 		return nil, err
 	}
-	
+	var bucket *couchbase.Bucket = nil
+
 	switch clusterConnInfoProvider.(type) {
-		case *metadata.RemoteClusterReference:
-			username, password, err := clusterConnInfoProvider.MyCredentials()
-			if err != nil {
-				return nil, err
-			}
-			return utils.RemoteBucket(connStr, bucketName, username, password)
-		default:
-			return utils.LocalBucket(connStr, bucketName)
+	case *metadata.RemoteClusterReference:
+		username, password, err := clusterConnInfoProvider.MyCredentials()
+		if err != nil {
+			return nil, err
+		}
+		bucket, err = utils.RemoteBucket(connStr, bucketName, username, password)
+	default:
+		bucket, err = utils.LocalBucket(connStr, bucketName)
 	}
+	return bucket, err
+}
+
+func (ci_svc *ClusterInfoSvc) GetNodes(clusterConnInfoProvider base.ClusterConnectionInfoProvider) ([]couchbase.Node, error) {
+	connStr, err := clusterConnInfoProvider.MyConnectionStr()
+	if err != nil {
+		return nil, err
+	}
+
+	var pool couchbase.Pool
+	switch clusterConnInfoProvider.(type) {
+	case *metadata.RemoteClusterReference:
+		username, password, err := clusterConnInfoProvider.MyCredentials()
+		if err != nil {
+			return nil, err
+		}
+		pool, err = utils.RemotePool(connStr, username, password)
+	default:
+		pool, err = utils.LocalPool(connStr)
+	}
+
+	if err != nil {
+		return nil, err
+	}
+
+	return pool.Nodes, nil
+
 }

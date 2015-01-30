@@ -14,12 +14,12 @@ import (
 )
 
 type RemoteClusterSvc interface {
-	RemoteClusterByRefId(refId string) (*metadata.RemoteClusterReference, error)
-	RemoteClusterByRefName(refName string) (*metadata.RemoteClusterReference, error)
-	RemoteClusterByUuid(uuid string) (*metadata.RemoteClusterReference, error)
+	RemoteClusterByRefId(refId string, refresh bool) (*metadata.RemoteClusterReference, error)
+	RemoteClusterByRefName(refName string, refresh bool) (*metadata.RemoteClusterReference, error)
+	RemoteClusterByUuid(uuid string, refresh bool) (*metadata.RemoteClusterReference, error)
 	AddRemoteCluster(ref *metadata.RemoteClusterReference) error
 	SetRemoteCluster(refName string, ref *metadata.RemoteClusterReference) error
 	DelRemoteCluster(refName string) error
-	RemoteClusters() (map[string]*metadata.RemoteClusterReference, error)
+	RemoteClusters(refresh bool) (map[string]*metadata.RemoteClusterReference, error)
 	ValidateRemoteCluster(ref *metadata.RemoteClusterReference) error
 }

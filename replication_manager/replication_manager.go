@@ -146,7 +146,6 @@ func (r *pipelineRepairer) start() {
 	defer r.waitGrp.Done()
 
 	r.reportStatus()
-
 	ticker := time.NewTicker(r.retry_interval)
 	for {
 		select {
@@ -370,7 +369,7 @@ func CreateReplication(sourceBucket, targetCluster, targetBucket string, setting
 	logger_rm.Infof("Creating replication - sourceBucket=%s, targetCluster=%s, targetBucket=%s, settings=%v\n",
 		sourceBucket, targetCluster, targetBucket, settings)
 
-	targetClusterRef, err := RemoteClusterService().RemoteClusterByRefName(targetCluster)
+	targetClusterRef, err := RemoteClusterService().RemoteClusterByRefName(targetCluster, false)
 	if err != nil {
 		return "", nil, err
 	}
@@ -528,6 +527,7 @@ func UpdateReplicationSettings(topic string, settings map[string]interface{}, re
 				writeGenericReplicationEvent(base.PauseReplicationEventId, replSpec, realUserId)
 			}
 		}
+		logger_rm.Infof("Done with replication settings auditing for replication %v\n", topic)
 
 	} else {
 		logger_rm.Infof("Did not update replication settings for replication %v since there are no real changes", topic)
@@ -908,9 +908,9 @@ func cleanup() {
 func exitProcess(byForce bool) {
 	//clean up the connection pool
 	defer base.ConnPoolMgr().Close()
-	
+
 	if !byForce {
-		cleanup ()
+		cleanup()
 	}
 
 	os.Exit(0)
@@ -1037,7 +1037,7 @@ func writeGenericReplicationEvent(eventId uint32, spec *metadata.ReplicationSpec
 	if err == nil {
 		err = AuditService().Write(eventId, event)
 	}
-	
+
 	logAuditErrors(err)
 }
 
@@ -1045,10 +1045,10 @@ func writeCreateReplicationEvent(spec *metadata.ReplicationSpecification, realUs
 	genericReplicationEvent, err := constructGenericReplicationEvent(spec, realUserId)
 	if err == nil {
 		createReplicationEvent := &base.CreateReplicationEvent{
-		GenericReplicationEvent: *genericReplicationEvent,
-		FilterExpression:        spec.Settings.FilterExpression}
+			GenericReplicationEvent: *genericReplicationEvent,
+			FilterExpression:        spec.Settings.FilterExpression}
 
-	 	err = AuditService().Write(base.CreateReplicationEventId, createReplicationEvent)
+		err = AuditService().Write(base.CreateReplicationEventId, createReplicationEvent)
 	}
 
 	logAuditErrors(err)
@@ -1062,14 +1062,14 @@ func writeUpdateDefaultReplicationSettingsEvent(changedSettingsMap *map[string]i
 	logAuditErrors(err)
 }
 
-func writeUpdateReplicationSettingsEvent(spec *metadata.ReplicationSpecification, changedSettingsMap *map[string]interface{}, realUserId *base.RealUserId)  {
+func writeUpdateReplicationSettingsEvent(spec *metadata.ReplicationSpecification, changedSettingsMap *map[string]interface{}, realUserId *base.RealUserId) {
 	replicationSpecificFields, err := constructReplicationSpecificFieldsFromSpec(spec)
 	if err == nil {
 		updateDefaultReplicationSettingsEvent, err := constructUpdateDefaultReplicationSettingsEvent(changedSettingsMap, realUserId)
 		if err == nil {
 			updateReplicationSettingsEvent := &base.UpdateReplicationSettingsEvent{
-							ReplicationSpecificFields:                     *replicationSpecificFields,
-							UpdateDefaultReplicationSettingsEvent: *updateDefaultReplicationSettingsEvent}
+				ReplicationSpecificFields:             *replicationSpecificFields,
+				UpdateDefaultReplicationSettingsEvent: *updateDefaultReplicationSettingsEvent}
 			err = AuditService().Write(base.UpdateReplicationSettingsEventId, updateReplicationSettingsEvent)
 		}
 	}
@@ -1081,10 +1081,10 @@ func constructGenericReplicationFields(realUserId *base.RealUserId) (*base.Gener
 	if err != nil {
 		return nil, err
 	}
-	
-	return &base.GenericReplicationFields{ 
-		GenericFields:  base.GenericFields{time.Now(), *realUserId},
-		LocalClusterName:  localClusterName}, nil
+
+	return &base.GenericReplicationFields{
+		GenericFields:    base.GenericFields{time.Now(), *realUserId},
+		LocalClusterName: localClusterName}, nil
 }
 
 func constructReplicationSpecificFieldsFromSpec(spec *metadata.ReplicationSpecification) (*base.ReplicationSpecificFields, error) {
@@ -1092,8 +1092,8 @@ func constructReplicationSpecificFieldsFromSpec(spec *metadata.ReplicationSpecif
 	if err != nil {
 		return nil, err
 	}
-	
-	return &base.ReplicationSpecificFields{ 
+
+	return &base.ReplicationSpecificFields{
 		SourceBucketName:  spec.SourceBucketName,
 		RemoteClusterName: remoteClusterName,
 		TargetBucketName:  spec.TargetBucketName}, nil
@@ -1104,14 +1104,14 @@ func constructGenericReplicationEvent(spec *metadata.ReplicationSpecification, r
 	if err != nil {
 		return nil, err
 	}
-	
+
 	replicationSpecificFields, err := constructReplicationSpecificFieldsFromSpec(spec)
 	if err != nil {
 		return nil, err
 	}
 
 	return &base.GenericReplicationEvent{
-		GenericReplicationFields:    *genericReplicationFields,
+		GenericReplicationFields:  *genericReplicationFields,
 		ReplicationSpecificFields: *replicationSpecificFields}, nil
 }
 
@@ -1120,7 +1120,7 @@ func constructUpdateDefaultReplicationSettingsEvent(changedSettingsMap *map[stri
 	if err != nil {
 		return nil, err
 	}
-	
+
 	// convert keys in changedSettingsMap from internal metadata keys to external facing rest api keys
 	convertedSettingsMap := make(map[string]interface{})
 	for key, value := range *changedSettingsMap {
@@ -1132,13 +1132,13 @@ func constructUpdateDefaultReplicationSettingsEvent(changedSettingsMap *map[stri
 	}
 
 	return &base.UpdateDefaultReplicationSettingsEvent{
-		GenericReplicationFields:    *genericReplicationFields,
-		UpdatedSettings: convertedSettingsMap}, nil
+		GenericReplicationFields: *genericReplicationFields,
+		UpdatedSettings:          convertedSettingsMap}, nil
 }
 
 //get remote cluster name from remote cluster uuid
-func getRemoteClusterNameFromClusterUuid (remoteClusterUUID string) (string, error) {
-	remoteClusterRef, err := RemoteClusterService().RemoteClusterByUuid(remoteClusterUUID)
+func getRemoteClusterNameFromClusterUuid(remoteClusterUUID string) (string, error) {
+	remoteClusterRef, err := RemoteClusterService().RemoteClusterByUuid(remoteClusterUUID, false)
 	if err != nil {
 		return "", err
 	}
@@ -1151,5 +1151,3 @@ func logAuditErrors(err error) {
 		logger_rm.Errorf(err.Error())
 	}
 }
-
-

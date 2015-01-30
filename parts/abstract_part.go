@@ -12,13 +12,13 @@ package parts
 import (
 	"errors"
 	"fmt"
+	"github.com/couchbase/goxdcr/base"
 	common "github.com/couchbase/goxdcr/common"
 	component "github.com/couchbase/goxdcr/component"
 	"github.com/couchbase/goxdcr/log"
 	"sync"
 )
 
-var invalidStateTransitionErrMsg = "Can't move to state %v - Part's current state is %v, can only move to state [%v]"
 //This is the error message any part goroutine would throw when it finds out 
 //the part is already requested to stop and it is left as orphan. The caller 
 //see this error message, it should stop itself and exit
@@ -76,22 +76,26 @@ func (p *AbstractPart) SetState(state common.PartState) error {
 	switch p.State() {
 	case common.Part_Initial:
 		if state != common.Part_Starting && state != common.Part_Stopping {
-			return errors.New(fmt.Sprintf(invalidStateTransitionErrMsg, state, "Initial", "Started, Stopping"))
+			return errors.New(fmt.Sprintf(base.InvalidStateTransitionErrMsg, state, p.Id(), "Initial", "Started, Stopping"))
 		}
 	case common.Part_Starting:
-		if state != common.Part_Running && state != common.Part_Stopping {
-			return errors.New(fmt.Sprintf(invalidStateTransitionErrMsg, state, "Starting", "Running, Stopping"))
+		if state != common.Part_Running && state != common.Part_Stopping && state != common.Part_Error {
+			return errors.New(fmt.Sprintf(base.InvalidStateTransitionErrMsg, state, p.Id(), "Starting", "Running, Stopping"))
 		}
 	case common.Part_Running:
-		if state != common.Part_Stopping {
-			return errors.New(fmt.Sprintf(invalidStateTransitionErrMsg, state, "Running", "Stopping"))
+		if state != common.Part_Stopping && state != common.Part_Error {
+			return errors.New(fmt.Sprintf(base.InvalidStateTransitionErrMsg, state, p.Id(), "Running", "Stopping"))
 		}
 	case common.Part_Stopping:
 		if state != common.Part_Stopped {
-			return errors.New(fmt.Sprintf(invalidStateTransitionErrMsg, state, "Stopping", "Stopped"))
+			return errors.New(fmt.Sprintf(base.InvalidStateTransitionErrMsg, state, p.Id(), "Stopping", "Stopped"))
 		}
 	case common.Part_Stopped:
-		return errors.New(fmt.Sprintf(invalidStateTransitionErrMsg, state, "Stopped", ""))
+		return errors.New(fmt.Sprintf(base.InvalidStateTransitionErrMsg, state, p.Id(), "Stopped", ""))
+	case common.Part_Error:
+		if state != common.Part_Stopping {
+			return errors.New(fmt.Sprintf(base.InvalidStateTransitionErrMsg, state, p.Id(), "Error", "Stopping"))
+		}
 	}
 	p.state = state
 	return nil

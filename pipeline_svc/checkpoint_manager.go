@@ -133,7 +133,7 @@ func (ckmgr *CheckpointManager) populateRemoteBucketInfo(pipeline common.Pipelin
 	if err != nil {
 		return err
 	}
-	remoteClusterRef, err := ckmgr.remote_cluster_svc.RemoteClusterByUuid(spec.TargetClusterUUID)
+	remoteClusterRef, err := ckmgr.remote_cluster_svc.RemoteClusterByUuid(spec.TargetClusterUUID, true)
 	if err != nil {
 		return err
 	}
@@ -237,19 +237,22 @@ func (ckmgr *CheckpointManager) VBTimestamps(topic string) (map[uint16]*base.VBT
 
 	disableCkptBackwardsCompat := ckmgr.backward_compat
 
-	//populate failover uuid on cur_ckpts
-	failoverLogMap, highseqnomap, err := ckmgr.getFailoverLogAndHighSeqno()
-	if err != nil {
-		return nil, err
-	}
-	ckmgr.populateFailoverUUIDs(failoverLogMap)
-	ckmgr.logger.Info("Got failoverlog...")
-
 	ret := make(map[uint16]*base.VBTimestamp)
 	listOfVbs := ckmgr.getMyVBs()
 	ckptDocs, err := ckmgr.checkpoints_svc.CheckpointsDocs(topic)
 	if err != nil {
 		return nil, err
+	}
+	var failoverLogMap couchbase.FailoverLog
+	var highseqnomap = make(map[uint16]uint64)
+	if len(ckptDocs) > 0 {
+		//populate failover uuid on cur_ckpts
+		failoverLogMap, highseqnomap, err = ckmgr.getFailoverLogAndHighSeqno()
+		if err != nil {
+			return nil, err
+		}
+		ckmgr.populateFailoverUUIDs(failoverLogMap)
+		ckmgr.logger.Info("Got failoverlog...")
 	}
 
 	//divide the workload to several getter and run the getter parallelly
@@ -337,6 +340,7 @@ func (ckmgr *CheckpointManager) startSeqnoGetter(getter_id int, listOfVbs []uint
 						//there is an error to do _pre_replicate
 						//so the start seqno for this vb should be 0
 						ckmgr.logger.Errorf("Pre_replicate failed. err=%v\n", err)
+
 					}
 					goto POPULATE
 				}
@@ -395,6 +399,8 @@ func (ckmgr *CheckpointManager) getFailoverLogAndHighSeqno() (couchbase.Failover
 	listOfvbs := ckmgr.getMyVBs()
 	failoverlogMap, err := bucket.GetFailoverLogs(listOfvbs)
 	if err != nil {
+		//the err returned is too long
+		err = errors.New(fmt.Sprintf("Failed to get FailoverLogs for %v", listOfvbs))
 		return nil, nil, err
 	}
 	ckmgr.logger.Debugf("failoverlogMap=%v\n", failoverlogMap)

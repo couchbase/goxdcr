@@ -24,10 +24,9 @@ import (
 
 var ErrorInvalidDataForRouter = errors.New("Input data to Router is invalid.")
 var ErrorNoDownStreamNodesForRouter = errors.New("No downstream nodes have been defined for the Router.")
-var ErrorNoVbMapForRouter = errors.New("No vbMap has been defined for Router.")
-var ErrorInvalidVbMapForRouter = errors.New("vbMap in Router is invalid.")
+var ErrorNoRoutingMapForRouter = errors.New("No routingMap has been defined for Router.")
+var ErrorInvalidRoutingMapForRouter = errors.New("routingMap in Router is invalid.")
 
-//var logger_router *log.CommonLogger = log.NewLogger("Router", log.LogLevelInfo)
 
 // XDCR Router does two things:
 // 1. converts UprEvent to MCRequest
@@ -36,14 +35,14 @@ type Router struct {
 	id string
 	*connector.Router
 	filterRegexp *regexp.Regexp    // filter expression
-	vbMap        map[uint16]string // pvbno -> partId. This defines the loading balancing strategy of which vbnos would be routed to which part
+	routingMap        map[uint16]string // pvbno -> partId. This defines the loading balancing strategy of which vbnos would be routed to which part
 	//Debug only, need to be rolled into statistics and monitoring
 	counter map[string]int
 }
 
 func NewRouter(id string, filterExpression string,
 	downStreamParts map[string]common.Part,
-	vbMap map[uint16]string,
+	routingMap map[uint16]string,
 	logger_context *log.LoggerContext) (*Router, error) {
 	// compile filter expression
 	var filterRegexp *regexp.Regexp
@@ -57,7 +56,7 @@ func NewRouter(id string, filterExpression string,
 	router := &Router{
 		id : id, 
 		filterRegexp: filterRegexp,
-		vbMap:        vbMap,
+		routingMap:        routingMap,
 		counter:      make(map[string]int)}
 
 	var routingFunc connector.Routing_Callback_Func = router.route
@@ -111,14 +110,14 @@ func (router *Router) route(data interface{}) (map[string]interface{}, error) {
 		return nil, ErrorInvalidDataForRouter
 	}
 
-	if router.vbMap == nil {
-		return nil, ErrorNoVbMapForRouter
+	if router.routingMap == nil {
+		return nil, ErrorNoRoutingMapForRouter
 	}
 
 	// use vbMap to determine which downstream part to route the request
-	partId, ok := router.vbMap[uprEvent.VBucket]
+	partId, ok := router.routingMap[uprEvent.VBucket]
 	if !ok {
-		return nil, ErrorInvalidVbMapForRouter
+		return nil, ErrorInvalidRoutingMapForRouter
 	}
 
 	router.Logger().Debugf("Data with vbno=%d, opCode=%v is routed to downstream part %s", uprEvent.VBucket, uprEvent.Opcode, partId)
@@ -138,12 +137,29 @@ func (router *Router) route(data interface{}) (map[string]interface{}, error) {
 	return result, nil
 }
 
-func (router *Router) SetVbMap(vbMap map[uint16]string) {
-	router.vbMap = vbMap
-	router.Logger().Infof("Set vbMap in Router")
-	router.Logger().Debugf("vbMap: %v", vbMap)
+func (router *Router) SetRoutingMap(routingMap map[uint16]string) {
+	router.routingMap = routingMap
+	router.Logger().Debugf("Set vbMap %v in Router", routingMap)
 }
 
+func (router *Router)RoutingMap () map[uint16]string {
+	return router.routingMap
+}
+
+func (router *Router)RoutingMapByDownstreams () map[string][]uint16 {
+	ret := make(map[string][]uint16)
+	for vbno, partId := range router.routingMap {
+		vblist, ok := ret[partId]
+		if !ok {
+			vblist = []uint16{}
+			ret[partId] = vblist
+		}
+		
+		vblist = append (vblist, vbno)
+		ret[partId] = vblist
+	}
+	return ret
+}
 func (router *Router) StatusSummary () string {
 	return fmt.Sprintf("Rounter %v = %v", router.id, router.counter)
 

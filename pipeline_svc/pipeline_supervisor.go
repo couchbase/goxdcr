@@ -10,10 +10,10 @@
 package pipeline_svc
 
 import (
+	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/common"
 	"github.com/couchbase/goxdcr/log"
 	generic_p "github.com/couchbase/goxdcr/pipeline"
-	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/supervisor"
 	"github.com/couchbase/goxdcr/utils"
 	"reflect"
@@ -23,8 +23,8 @@ import (
 
 //configuration settings
 const (
-	PIPELINE_LOG_LEVEL     = "pipeline_loglevel"
-	default_pipeline_log_level                   = log.LogLevelInfo
+	PIPELINE_LOG_LEVEL         = "pipeline_loglevel"
+	default_pipeline_log_level = log.LogLevelInfo
 )
 
 const (
@@ -32,17 +32,19 @@ const (
 )
 
 var pipeline_supervisor_setting_defs base.SettingDefinitions = base.SettingDefinitions{supervisor.HEARTBEAT_TIMEOUT: base.NewSettingDef(reflect.TypeOf((*time.Duration)(nil)), false),
-	PIPELINE_LOG_LEVEL: base.NewSettingDef(reflect.TypeOf((*log.LogLevel)(nil)), false),
+	PIPELINE_LOG_LEVEL:            base.NewSettingDef(reflect.TypeOf((*log.LogLevel)(nil)), false),
 	supervisor.HEARTBEAT_INTERVAL: base.NewSettingDef(reflect.TypeOf((*time.Duration)(nil)), false)}
 
 type PipelineSupervisor struct {
 	*supervisor.GenericSupervisor
-	pipeline               common.Pipeline
+	pipeline    common.Pipeline
+	errors_seen map[string]error
 }
 
 func NewPipelineSupervisor(id string, logger_ctx *log.LoggerContext, failure_handler common.SupervisorFailureHandler, parentSupervisor *supervisor.GenericSupervisor) *PipelineSupervisor {
 	supervisor := supervisor.NewGenericSupervisor(id, logger_ctx, failure_handler, parentSupervisor)
-	pipelineSupervisor := &PipelineSupervisor{GenericSupervisor: supervisor}
+	pipelineSupervisor := &PipelineSupervisor{GenericSupervisor: supervisor,
+		errors_seen: make(map[string]error)}
 	return pipelineSupervisor
 }
 
@@ -59,21 +61,21 @@ func (pipelineSupervisor *PipelineSupervisor) Attach(p common.Pipeline) error {
 
 	for _, part := range partsMap {
 		// the assumption here is that all XDCR parts are Supervisable
-		pipelineSupervisor.AddChild(part.(common.Supervisable))			
+		pipelineSupervisor.AddChild(part.(common.Supervisable))
 
 		//register itself with all parts' ErrorEncountered event
 		part.RegisterComponentEventListener(common.ErrorEncountered, pipelineSupervisor)
-		pipelineSupervisor.Logger().Infof("Registering ErrorEncountered event on part %v\n", part.Id()) 
+		pipelineSupervisor.Logger().Infof("Registering ErrorEncountered event on part %v\n", part.Id())
 	}
-	
+
 	//register itself with all connectors' ErrorEncountered event
 	connectorsMap := generic_p.GetAllConnectors(p)
 
 	for _, connector := range connectorsMap {
 		connector.RegisterComponentEventListener(common.ErrorEncountered, pipelineSupervisor)
-		pipelineSupervisor.Logger().Infof("Registering ErrorEncountered event on connector %v\n", connector.Id()) 
+		pipelineSupervisor.Logger().Infof("Registering ErrorEncountered event on connector %v\n", connector.Id())
 	}
-	
+
 	return nil
 }
 
@@ -83,9 +85,9 @@ func (pipelineSupervisor *PipelineSupervisor) OnEvent(eventType common.Component
 	derivedItems []interface{},
 	otherInfos map[string]interface{}) {
 	if eventType == common.ErrorEncountered {
-		partsError := make(map[string]error)
-		partsError[component.Id()] = otherInfos["error"].(error)
-		pipelineSupervisor.ReportFailure(partsError)
+		pipelineSupervisor.errors_seen[component.Id()] = otherInfos["error"].(error)
+		pipelineSupervisor.declarePipelineBroken()
+
 	} else {
 		pipelineSupervisor.Logger().Errorf("Pipeline supervisor didn't register to recieve event %v for component %v", eventType, component.Id())
 	}
@@ -100,7 +102,7 @@ func (pipelineSupervisor *PipelineSupervisor) init(settings map[string]interface
 	}
 
 	pipelineSupervisor.Init(settings)
-	
+
 	if val, ok := settings[PIPELINE_LOG_LEVEL]; ok {
 		pipelineSupervisor.LoggerContext().Log_level = val.(log.LogLevel)
 	}
@@ -118,8 +120,16 @@ func (pipelineSupervisor *PipelineSupervisor) SetPipelineLogLevel(log_level_str 
 }
 
 func (pipelineSupervisor *PipelineSupervisor) ReportFailure(errors map[string]error) {
-	pipelineSupervisor.StopHeartBeatTicker ()
+	pipelineSupervisor.StopHeartBeatTicker()
 	//report the failure to decision maker
 	pipelineSupervisor.GenericSupervisor.ReportFailure(errors)
 }
 
+func (pipelineSupervisor *PipelineSupervisor) declarePipelineBroken() {
+	pipelineSupervisor.Logger().Errorf("Received error report : %v, declare pipeline broken")
+	err := pipelineSupervisor.pipeline.SetState(common.Pipeline_Error)
+	if err == nil {
+		pipelineSupervisor.ReportFailure(pipelineSupervisor.errors_seen)
+
+	}
+}

@@ -70,7 +70,7 @@ func (capi_svc *CAPIService) PreReplicate(remoteBucket *service_def.RemoteBucket
 	if err != nil {
 		capi_svc.logger.Errorf("Calling _pre_replicate on %v failed, err=%v\n", api_base.url, err)
 	}
-	bMatch, current_remoteVBUUID, err = capi_svc.parsePreReplicateResp(api_base.url, status_code, respMap, disableCkptBackwardsCompat)
+	bMatch, current_remoteVBUUID, err = capi_svc.parsePreReplicateResp(api_base.url, status_code, respMap, knownRemoteVBStatus.VBNo, disableCkptBackwardsCompat)
 	return
 
 }
@@ -124,7 +124,7 @@ func (capi_svc *CAPIService) CommitForCheckpoint(remoteBucket *service_def.Remot
 //		   missing	- the list of vb numbers whose vbuuid is not kept on file
 func (capi_svc *CAPIService) MassValidateVBUUIDs(remoteBucket *service_def.RemoteBucketInfo, remoteVBUUIDs [][]uint64) (matching []interface{}, mismatching []interface{}, missing []interface{}, err error) {
 	capi_svc.logger.Debug("Calling _mass_vbopaque_check")
-	
+
 	//use the vbucket 0's capi api url
 	api_base, err := capi_svc.composeAPIRequestBase(remoteBucket, 0)
 	if err != nil {
@@ -174,7 +174,7 @@ func (capi_svc *CAPIService) composeAPIRequestBase(remoteBucket *service_def.Rem
 		return nil, errors.New("Remote Bucket information is not fully populated")
 	}
 
-	connectionStr, err := capi_svc.lookUpConnectionStr (remoteBucket, vbno)
+	connectionStr, err := capi_svc.lookUpConnectionStr(remoteBucket, vbno)
 	if err != nil {
 		return nil, err
 	}
@@ -232,6 +232,7 @@ func (capi_svc *CAPIService) send_post(restMethodName string, api_base *apiReque
 func (capi_svc *CAPIService) parsePreReplicateResp(hostName string,
 	resp_status_code int,
 	respMap map[string]interface{},
+	vbno uint16,
 	disableCkptBackwardsCompat bool) (bool, uint64, error) {
 	if resp_status_code == 200 || resp_status_code == 400 {
 		bMatch := (resp_status_code == 200)
@@ -249,8 +250,7 @@ func (capi_svc *CAPIService) parsePreReplicateResp(hostName string,
 		//double check again disableCkptBackwardsCompat
 		if resp_status_code == 404 && disableCkptBackwardsCompat == false {
 			//throw error
-			capi_svc.logger.Debugf("_pre_replicate failed. Target node %v is an old node", hostName)
-			retError = errors.New(fmt.Sprintf("_pre_replicate failed. Target node %v is an old node", hostName))
+			retError = errors.New(fmt.Sprintf("_pre_replicate failed on target node %v for vb=%v", hostName, vbno))
 		} else {
 			retError = errors.New(fmt.Sprintf("_pre_replicate failed: resp_status=%v, respMap=%v\n", resp_status_code, respMap))
 		}
@@ -260,12 +260,12 @@ func (capi_svc *CAPIService) parsePreReplicateResp(hostName string,
 	}
 }
 
-func (capi_svc *CAPIService) lookUpConnectionStr (remoteBucket *service_def.RemoteBucketInfo, vbno uint16) (string, error){
+func (capi_svc *CAPIService) lookUpConnectionStr(remoteBucket *service_def.RemoteBucketInfo, vbno uint16) (string, error) {
 	if remoteBucket == nil {
 		return "", errors.New("Not a valid remote bucket, VBServerMap is not populated correctly")
 	}
 	var foundServerAddr string = ""
-	
+
 	for server_addr, vblist := range remoteBucket.VBServerMap {
 		for _, vb := range vblist {
 			if vb == vbno {
@@ -277,25 +277,13 @@ func (capi_svc *CAPIService) lookUpConnectionStr (remoteBucket *service_def.Remo
 
 Done:
 	if foundServerAddr != "" {
-		hostName := utils.GetHostName(foundServerAddr)
-		port_num, err1 := capi_svc.lookupRemoteCouchRestPort(remoteBucket)
-		if err1 != nil {
-			return "", err1
+		connectionStr, ok := remoteBucket.MemcachedAddrRestAddrMap[foundServerAddr]
+		if !ok {
+			return "", errors.New(fmt.Sprintf("failed to find server for vb=%v", vbno))
 		}
-		
-		connectionStr := utils.GetHostAddr(hostName, port_num)
-		return connectionStr, nil	
-	}else {
+		return connectionStr, nil
+	} else {
 		return "", errors.New(fmt.Sprintf("failed to find server for vb=%v", vbno))
 	}
-	
-}
 
-func (capi_svc *CAPIService) lookupRemoteCouchRestPort (remoteBucket *service_def.RemoteBucketInfo) (uint16, error) {
-	connectionStr, err := remoteBucket.RemoteClusterRef.MyConnectionStr()
-	if err != nil {
-		return 0, err
-	}
-
-	return utils.GetPortNumber (connectionStr)
 }
