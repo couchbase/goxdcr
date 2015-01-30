@@ -234,7 +234,7 @@ func (ckmgr *CheckpointManager) VBTimestamps(topic string) (map[uint16]*base.VBT
 	if err != nil {
 		return nil, err
 	}
-	
+
 	disableCkptBackwardsCompat := ckmgr.backward_compat
 
 	//populate failover uuid on cur_ckpts
@@ -244,7 +244,6 @@ func (ckmgr *CheckpointManager) VBTimestamps(topic string) (map[uint16]*base.VBT
 	}
 	ckmgr.populateFailoverUUIDs(failoverLogMap)
 	ckmgr.logger.Info("Got failoverlog...")
-
 
 	ret := make(map[uint16]*base.VBTimestamp)
 	listOfVbs := ckmgr.getMyVBs()
@@ -296,7 +295,7 @@ func (ckmgr *CheckpointManager) startSeqnoGetter(getter_id int, listOfVbs []uint
 	for _, vbno := range listOfVbs {
 		var agreeedIndex int = -1
 		ckptDoc, _ := ckptDocs[vbno]
-		
+
 		//get the existing checkpoint records if they exist, otherwise return an empty ckpt record
 		ckpt_list := ckmgr.ckptRecords(ckptDoc, vbno)
 		for index, ckpt_record := range ckpt_list {
@@ -305,10 +304,10 @@ func (ckmgr *CheckpointManager) startSeqnoGetter(getter_id int, listOfVbs []uint
 					//there is already error
 					return
 				}
-				
-				//set the target vb uuid from the value returned 
+
+				//set the target vb uuid from the value returned
 				var vb_uuid uint64
-					vb_uuid = ckpt_record.Target_vb_uuid
+				vb_uuid = ckpt_record.Target_vb_uuid
 				remote_vb_status := &service_def.RemoteVBReplicationStatus{VBUUID: vb_uuid,
 					VBSeqno: ckpt_record.Commitopaque,
 					VBNo:    vbno}
@@ -590,6 +589,7 @@ func (ckmgr *CheckpointManager) raiseSuccessCkptForVbEvent(ckpt_record metadata.
 }
 
 func (ckmgr *CheckpointManager) persistCkptRecord(vbno uint16, ckpt_record *metadata.CheckpointRecord) error {
+	ckmgr.logger.Debugf("Persist vb=%v ckpt_record=%v\n", vbno, ckpt_record)
 	return ckmgr.checkpoints_svc.UpsertCheckpoints(ckmgr.pipeline.Topic(), vbno, ckpt_record)
 }
 
@@ -599,12 +599,14 @@ func (ckmgr *CheckpointManager) OnEvent(eventType common.ComponentEventType,
 	derivedItems []interface{},
 	otherInfos map[string]interface{}) {
 	if eventType == common.DataSent {
-		seqno := otherInfos[parts.XMEM_EVENT_ADDI_SEQNO].(uint64)
-		vbno := item.(*gomemcached.MCRequest).VBucket
-		ckmgr.cur_ckpts_locks[vbno].Lock()
-		defer ckmgr.cur_ckpts_locks[vbno].Unlock()
-		ckmgr.cur_ckpts[vbno].Seqno = seqno
-		ckmgr.logger.Debugf("ckmgr.cur_ckpts[vbno].Seqno =%v\n", otherInfos[parts.XMEM_EVENT_ADDI_SEQNO])
+		hiseqno, ok := otherInfos[parts.XMEM_EVENT_ADDI_HISEQNO].(uint64)
+		if ok {
+			vbno := item.(*gomemcached.MCRequest).VBucket
+			ckmgr.cur_ckpts_locks[vbno].Lock()
+			defer ckmgr.cur_ckpts_locks[vbno].Unlock()
+			ckmgr.cur_ckpts[vbno].Seqno = hiseqno
+			ckmgr.logger.Debugf("ckmgr.cur_ckpts[%v].Seqno =%v\n", vbno, otherInfos[parts.XMEM_EVENT_ADDI_SEQNO])
+		}
 	}
 }
 
