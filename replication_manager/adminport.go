@@ -209,7 +209,7 @@ func (adminport *Adminport) doCreateRemoteClusterRequest(request *http.Request) 
 		return nil, err
 	} else if len(errorsMap) > 0 {
 		logger_ap.Errorf("Validation error in inputs. errorsMap=%v\n", errorsMap)
-		return EncodeErrorsMapIntoByteArray(errorsMap)
+		return EncodeRemoteClusterErrorsMapIntoByteArray(errorsMap)
 	}
 
 	logger_ap.Infof("Request params: justValidate=%v, remoterClusterRef=%v\n",
@@ -248,7 +248,7 @@ func (adminport *Adminport) doChangeRemoteClusterRequest(request *http.Request) 
 		return nil, err
 	} else if len(errorsMap) > 0 {
 		logger_ap.Errorf("Validation error in inputs. errorsMap=%v\n", errorsMap)
-		return EncodeErrorsMapIntoByteArray(errorsMap)
+		return EncodeRemoteClusterErrorsMapIntoByteArray(errorsMap)
 	}
 
 	logger_ap.Infof("Request params: justValidate=%v, remoterClusterRef=%v\n",
@@ -341,7 +341,7 @@ func (adminport *Adminport) doCreateReplicationRequest(request *http.Request) ([
 		return nil, err
 	} else if len(errorsMap) > 0 {
 		logger_ap.Errorf("Validation error in inputs. errorsMap=%v\n", errorsMap)
-		return EncodeErrorsMapIntoByteArray(errorsMap)
+		return EncodeReplicationErrorsMapIntoByteArray(errorsMap)
 	}
 
 	logger_ap.Infof("Request parameters: fromBucket=%v, toCluster=%v, toBucket=%v, settings=%v\n",
@@ -353,7 +353,7 @@ func (adminport *Adminport) doCreateReplicationRequest(request *http.Request) ([
 		return nil, err
 	} else if len(errorsMap) > 0 {
 		logger_ap.Errorf("Error creating replication. errorsMap=%v\n", errorsMap)
-		return EncodeErrorsMapIntoByteArray(errorsMap)
+		return EncodeReplicationErrorsMapIntoByteArray(errorsMap)
 	} else {
 		return NewCreateReplicationResponse(replicationId), nil
 	}
@@ -397,7 +397,7 @@ func (adminport *Adminport) doChangeInternalSettingsRequest(request *http.Reques
 		return nil, err
 	} else if len(errorsMap) > 0 {
 		logger_ap.Errorf("Validation error in inputs. errorsMap=%v\n", errorsMap)
-		return EncodeErrorsMapIntoByteArray(errorsMap)
+		return EncodeReplicationErrorsMapIntoByteArray(errorsMap)
 	}
 
 	logger_ap.Infof("Request params: inputSettings=%v\n", settingsMap)
@@ -407,7 +407,7 @@ func (adminport *Adminport) doChangeInternalSettingsRequest(request *http.Reques
 		return nil, err
 	} else if len(errorsMap) > 0 {
 		logger_ap.Errorf("Validation error in inputs. errorsMap=%v\n", errorsMap)
-		return EncodeErrorsMapIntoByteArray(errorsMap)
+		return EncodeReplicationErrorsMapIntoByteArray(errorsMap)
 	} else {
 		return nil, nil
 	}
@@ -432,7 +432,7 @@ func (adminport *Adminport) doChangeDefaultReplicationSettingsRequest(request *h
 		return nil, err
 	} else if len(errorsMap) > 0 {
 		logger_ap.Errorf("Validation error in inputs. errorsMap=%v\n", errorsMap)
-		return EncodeErrorsMapIntoByteArray(errorsMap)
+		return EncodeReplicationErrorsMapIntoByteArray(errorsMap)
 	}
 
 	logger_ap.Infof("Request params: justValidate=%v, inputSettings=%v\n", justValidate, settingsMap)
@@ -446,7 +446,7 @@ func (adminport *Adminport) doChangeDefaultReplicationSettingsRequest(request *h
 		return nil, err
 	} else if len(errorsMap) > 0 {
 		logger_ap.Errorf("Validation error in inputs. errorsMap=%v\n", errorsMap)
-		return EncodeErrorsMapIntoByteArray(errorsMap)
+		return EncodeReplicationErrorsMapIntoByteArray(errorsMap)
 	}
 
 	// change default settings returns the default settings after changes
@@ -494,7 +494,7 @@ func (adminport *Adminport) doChangeReplicationSettingsRequest(request *http.Req
 		return nil, err
 	} else if len(errorsMap) > 0 {
 		logger_ap.Errorf("Validation error in inputs. errorsMap=%v\n", errorsMap)
-		return EncodeErrorsMapIntoByteArray(errorsMap)
+		return EncodeReplicationErrorsMapIntoByteArray(errorsMap)
 	}
 
 	logger_ap.Infof("Request params: justValidate=%v, inputSettings=%v\n", justValidate, settingsMap)
@@ -508,7 +508,7 @@ func (adminport *Adminport) doChangeReplicationSettingsRequest(request *http.Req
 		return nil, err
 	} else if len(errorsMap) > 0 {
 		logger_ap.Errorf("Validation error in inputs. errorsMap=%v\n", errorsMap)
-		return EncodeErrorsMapIntoByteArray(errorsMap)
+		return EncodeReplicationErrorsMapIntoByteArray(errorsMap)
 	}
 
 	// return replication settings after changes

@@ -38,7 +38,7 @@ func ValidateFieldValue(fieldName string, expectedValue, actualValue interface{}
 }
 
 func CreateTestRemoteCluster(remote_cluster_service service_def.RemoteClusterSvc, remoteUuid, remoteName, remoteHostName, remoteUserName, remotePassword string, 
-                             remoteDemandEncryption bool, remoteCertificateFile string) error {
+                             remoteDemandEncryption uint64, remoteCertificateFile string) error {
 	var serverCert []byte
 	var err error
 	// read certificate from file
@@ -50,7 +50,7 @@ func CreateTestRemoteCluster(remote_cluster_service service_def.RemoteClusterSvc
 		}
 	}
 	
-	remoteClusterRef := metadata.NewRemoteClusterReference(remoteUuid, remoteName, remoteHostName, remoteUserName, remotePassword, remoteDemandEncryption, serverCert)
+	remoteClusterRef := metadata.NewRemoteClusterReference(remoteUuid, remoteName, remoteHostName, remoteUserName, remotePassword, remoteDemandEncryption != 0, serverCert)
 	err = remote_cluster_service.AddRemoteCluster(remoteClusterRef)
 	fmt.Printf("Added remote cluster reference with name=%v, err=%v\n", remoteName, err)
 	return err
@@ -106,7 +106,7 @@ func sendRequest(testName string, request *http.Request) (*http.Response, error)
 }
 
 func CreateTestRemoteClusterThroughRest(sourceKVHost string, adminport uint64, remoteUuid, remoteName, remoteHostName, remoteUserName, remotePassword string, 
-                             remoteDemandEncryption bool, remoteCertificateFile, username, password string) error {
+                             remoteDemandEncryption uint64, remoteCertificateFile, username, password string) error {
 	url := GetAdminportUrlPrefix(sourceKVHost, adminport) + base.RemoteClustersPath
 
 	params := make(map[string]interface{})
@@ -115,7 +115,7 @@ func CreateTestRemoteClusterThroughRest(sourceKVHost string, adminport uint64, r
 	params[base.RemoteClusterHostName] = remoteHostName
 	params[base.RemoteClusterUserName] = remoteUserName
 	params[base.RemoteClusterPassword] = remotePassword
-	params[base.RemoteClusterDemandEncryption] = remoteDemandEncryption
+	params[base.RemoteClusterDemandEncryption] = int(remoteDemandEncryption)
 	
 	// read certificate from file
 	if remoteCertificateFile != "" {

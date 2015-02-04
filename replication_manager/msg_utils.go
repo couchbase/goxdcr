@@ -217,7 +217,7 @@ func DecodeJustValidateFromRequest(request *http.Request) (bool, error) {
 	for key, valArr := range request.Form {
 		switch key {
 		case base.JustValidate:
-			justValidate, err := getBoolFromValArr(key, valArr, false)
+			justValidate, err := getBoolFromValArr(valArr, false)
 			if err != nil {
 				return false, err
 			} else {
@@ -234,8 +234,10 @@ func DecodeJustValidateFromRequest(request *http.Request) (bool, error) {
 func DecodeCreateRemoteClusterRequest(request *http.Request) (justValidate bool, remoteClusterRef *metadata.RemoteClusterReference, errorsMap map[string]error, err error) {
 	errorsMap = make(map[string]error)
 	var uuid, name, hostName, userName, password string
-	var demandEncryption bool
 	var certificate []byte
+
+	// default to false if not passed in
+	demandEncryption := false
 
 	if err = request.ParseForm(); err != nil {
 		return
@@ -249,22 +251,19 @@ func DecodeCreateRemoteClusterRequest(request *http.Request) (justValidate bool,
 	for key, valArr := range request.Form {
 		switch key {
 		case base.RemoteClusterUuid:
-			uuid = getStringFromValArr(key, valArr)
+			uuid = getStringFromValArr(valArr)
 		case base.RemoteClusterName:
-			name = getStringFromValArr(key, valArr)
+			name = getStringFromValArr(valArr)
 		case base.RemoteClusterHostName:
-			hostName = getStringFromValArr(key, valArr)
+			hostName = getStringFromValArr(valArr)
 		case base.RemoteClusterUserName:
-			userName = getStringFromValArr(key, valArr)
+			userName = getStringFromValArr(valArr)
 		case base.RemoteClusterPassword:
-			password = getStringFromValArr(key, valArr)
+			password = getStringFromValArr(valArr)
 		case base.RemoteClusterDemandEncryption:
-			demandEncryption, err = getBoolFromValArr(key, valArr, false)
-			if err != nil {
-				errorsMap[base.RemoteClusterDemandEncryption] = err
-			}
+			demandEncryption = getDemandEncryptionFromValArr(valArr)
 		case base.RemoteClusterCertificate:
-			certificateStr := getStringFromValArr(key, valArr)
+			certificateStr := getStringFromValArr(valArr)
 			certificate = []byte(certificateStr)
 		default:
 			// ignore other parameters
@@ -332,16 +331,16 @@ func DecodeCreateReplicationRequest(request *http.Request) (fromBucket, toCluste
 	for key, valArr := range request.Form {
 		switch key {
 		case ReplicationType:
-			replicationType = getStringFromValArr(key, valArr)
+			replicationType = getStringFromValArr(valArr)
 			if replicationType != ReplicationTypeValue {
 				errorsMap[ReplicationType] = utils.GenericInvalidValueError(ReplicationType)
 			}
 		case FromBucket:
-			fromBucket = getStringFromValArr(key, valArr)
+			fromBucket = getStringFromValArr(valArr)
 		case ToCluster:
-			toCluster = getStringFromValArr(key, valArr)
+			toCluster = getStringFromValArr(valArr)
 		case ToBucket:
-			toBucket = getStringFromValArr(key, valArr)
+			toBucket = getStringFromValArr(valArr)
 		default:
 			// ignore other parameters
 		}
@@ -429,7 +428,7 @@ func DecodeOldSettingsFromRequest(request *http.Request) (*metadata.ReplicationS
 	for key, valArr := range request.Form {
 		switch key {
 		case OldReplicationSettings:
-			settingsStr := getStringFromValArr(key, valArr)
+			settingsStr := getStringFromValArr(valArr)
 			if settingsStr == "" {
 				return nil, utils.MissingParameterError(OldReplicationSettings)
 			}
@@ -604,7 +603,7 @@ func ConvertRestInternalKeyToRestKey(key string) (string, error) {
 	}
 }
 
-func getStringFromValArr(key string, valArr []string) string {
+func getStringFromValArr(valArr []string) string {
 	if len(valArr) == 0 {
 		return ""
 	} else {
@@ -612,8 +611,8 @@ func getStringFromValArr(key string, valArr []string) string {
 	}
 }
 
-func getBoolFromValArr(key string, valArr []string, defaultValue bool) (bool, error) {
-	boolStr := getStringFromValArr(key, valArr)
+func getBoolFromValArr(valArr []string, defaultValue bool) (bool, error) {
+	boolStr := getStringFromValArr(valArr)
 	if boolStr != "" {
 		result, err := strconv.ParseBool(boolStr)
 		if err != nil {
@@ -625,14 +624,28 @@ func getBoolFromValArr(key string, valArr []string, defaultValue bool) (bool, er
 	return defaultValue, nil
 }
 
-// encode a map of errors into a byte array, which can then be returned in a http response
-func EncodeErrorsMapIntoByteArray(errorsMap map[string]error) ([]byte, error) {
-	errorMsgMap := make(map[string]string)
-	result := make(map[string]interface{})
+func EncodeReplicationErrorsMapIntoByteArray(errorsMap map[string]error) ([]byte, error) {
+	return EncodeErrorsMapIntoByteArray(errorsMap, true)
+}
 
+func EncodeRemoteClusterErrorsMapIntoByteArray(errorsMap map[string]error) ([]byte, error) {
+	return EncodeErrorsMapIntoByteArray(errorsMap, false)
+}
+
+// encode a map of errors into a byte array, which can then be returned in a http response
+// when withErrorsWrapper is false, simply return a map of error messages -- this is needed by remote cluster rest APIs
+// when withErrorsWrapper is true, wrap the map of error messages in an outer map -- this is needed by replication rest APIs
+func EncodeErrorsMapIntoByteArray(errorsMap map[string]error, withErrorsWrapper bool) ([]byte, error) {
+	errorMsgMap := make(map[string]string)
 	for key, err := range errorsMap {
 		errorMsgMap[key] = err.Error()
 	}
+
+	if !withErrorsWrapper {
+		return json.Marshal(errorMsgMap)
+	}
+
+	result := make(map[string]interface{})
 	result[ErrorsKey] = errorMsgMap
 
 	return json.Marshal(result)
@@ -652,4 +665,17 @@ func processKey(restKey string, valArr []string, settingsPtr *map[string]interfa
 		(*settingsPtr)[settingsKey] = convertedValue
 	}
 	return err
+}
+
+// check if encryption is enabled from the valArr of demandEncryption parameter in http request
+func getDemandEncryptionFromValArr(valArr []string) bool {
+	demandEncryptionStr := getStringFromValArr(valArr)
+	demandEncryptionInt, err := strconv.ParseInt(demandEncryptionStr, base.ParseIntBase, base.ParseIntBitSize)
+	if err == nil && demandEncryptionInt == 0 {
+		// int value of 0 indicates that encryption is not enabled
+		return false
+	} else {
+		// any other value, e.g., "", 1, "on", "true", "false", etc., indicates that encryption is enabled
+		return true
+	}
 }

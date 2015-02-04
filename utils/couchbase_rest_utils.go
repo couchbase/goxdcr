@@ -132,7 +132,7 @@ func QueryRestApiWithAuth(
 	var baseURL_new string
 
 	//process the URL
-	if certificate == nil {
+	if len(certificate) == 0 {
 		baseURL_new = EnforcePrefix("http://", baseURL)
 	} else {
 		baseURL_new = EnforcePrefix("https://", baseURL)
@@ -176,6 +176,10 @@ func QueryRestApiWithAuth(
 	}
 
 	client, err := getHttpClient(certificate)
+	if err != nil {
+		l.Errorf("Failed to get client for request, req=%v\n", req)
+		return err, 0
+	}
 
 	res, err := client.Do(req)
 	if res != nil && res.Body != nil {
@@ -233,7 +237,7 @@ func InvokeRestWithRetryWithAuth(baseURL string,
 		out,
 		logger, certificate)
 	if err != nil {
-		if certificate != nil {
+		if len(certificate) != 0 {
 			//got https error, no need to retry
 			return err, statusCode
 		} else {
@@ -251,7 +255,7 @@ func InvokeRestWithRetryWithAuth(baseURL string,
 
 func getHttpClient(certificate []byte) (*http.Client, error) {
 	var client *http.Client
-	if certificate != nil {
+	if len(certificate) != 0 {
 		//https
 		caPool := x509.NewCertPool()
 		ok := caPool.AppendCertsFromPEM(certificate)
