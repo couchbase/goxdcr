@@ -93,7 +93,7 @@ func NewDcpNozzle(id string,
 	exit_callback_func = dcp.onExit
 	error_handler_func = dcp.handleGeneralError
 
-	dcp.Logger().Infof("Constructed Dcp nozzle %v with vblist %v\n", dcp.Id(), vbnos)
+	dcp.Logger().Debugf("Constructed Dcp nozzle %v with vblist %v\n", dcp.Id(), vbnos)
 
 	return dcp
 

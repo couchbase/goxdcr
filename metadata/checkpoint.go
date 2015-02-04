@@ -1,6 +1,8 @@
 package metadata
 
-import ()
+import (
+	"fmt"
+)
 
 const (
 	//the maximum number of checkpoints ketp in the file
@@ -27,6 +29,12 @@ type CheckpointRecord struct {
 	Target_vb_uuid uint64 `json:"target_vb_uuid"`
 	//target vb high sequence number
 	Commitopaque uint64 `json:"commitopaque"`
+}
+
+func (ckpt_record *CheckpointRecord) String() string{
+	return fmt.Sprintf("{Failover_uuid=%v; Seqno=%v; Dcp_snapshot_seqno=%v; Dcp_snapshot_end_seqno=%v; Target_vb_uuid=%v; Commitopaque=%v}", 
+	ckpt_record.Failover_uuid, ckpt_record.Seqno, ckpt_record.Dcp_snapshot_seqno, ckpt_record.Dcp_snapshot_end_seqno, ckpt_record.Target_vb_uuid,
+	ckpt_record.Commitopaque)
 }
 
 type CheckpointsDoc struct {

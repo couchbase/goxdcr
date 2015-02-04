@@ -12,27 +12,26 @@ package main
 import (
 	"flag"
 	"fmt"
-	"os"
+	base "github.com/couchbase/goxdcr/base"
+	log "github.com/couchbase/goxdcr/log"
 	rm "github.com/couchbase/goxdcr/replication_manager"
 	s "github.com/couchbase/goxdcr/service_impl"
-	base "github.com/couchbase/goxdcr/base"
-
-	log "github.com/couchbase/goxdcr/log"
+	"os"
 )
 
 var done = make(chan bool)
 
 var options struct {
-	sourceKVAdminPort      uint64 //source kv admin port
+	sourceKVAdminPort uint64 //source kv admin port
 	xdcrRestPort      uint64 // port number of XDCR rest server
-	gometaRequestPort        uint64// gometa request port
-	isEnterprise    bool  // whether couchbase is of enterprise edition
-	isConvert    bool  // whether xdcr is running in conversion/upgrade mode
-	
+	gometaRequestPort uint64 // gometa request port
+	isEnterprise      bool   // whether couchbase is of enterprise edition
+	isConvert         bool   // whether xdcr is running in conversion/upgrade mode
+
 	// logging related parameters
-	logFileDir        string
-	maxLogFileSize   uint64
-	maxNumberOfLogFiles  uint64
+	logFileDir          string
+	maxLogFileSize      uint64
+	maxNumberOfLogFiles uint64
 }
 
 func argParse() {
@@ -46,7 +45,7 @@ func argParse() {
 		"whether couchbase is of enterprise edition")
 	flag.BoolVar(&options.isConvert, "isConvert", false,
 		"whether xdcr is running in convertion/upgrade mode")
-		
+
 	flag.StringVar(&options.logFileDir, "logFileDir", "",
 		"directory for couchbase server logs")
 	flag.Uint64Var(&options.maxLogFileSize, "maxLogFileSize", 40*1024*1024,
@@ -65,17 +64,17 @@ func usage() {
 func main() {
 	argParse()
 
-	// initializes logger 
+	// initializes logger
 	if options.logFileDir != "" {
 		log.Init(options.logFileDir, options.maxLogFileSize, options.maxNumberOfLogFiles)
 	}
-	
+
 	top_svc, err := s.NewXDCRTopologySvc(uint16(options.sourceKVAdminPort), uint16(options.xdcrRestPort), options.isEnterprise, nil)
 	if err != nil {
 		fmt.Printf("Error starting xdcr topology service. err=%v\n", err)
 		os.Exit(1)
 	}
-	
+
 	host, err := top_svc.MyHost()
 	if err != nil {
 		fmt.Printf("Error getting current host. err=%v\n", err)
@@ -88,26 +87,37 @@ func main() {
 		fmt.Printf("Error starting metadata service. err=%v\n", err)
 		os.Exit(1)
 	}
-	
+
+	audit_svc, err := s.NewAuditSvc(top_svc, nil)
+	if err != nil {
+		fmt.Printf("Error starting audit service. err=%v\n", err)
+		os.Exit(1)
+	}
+
+	uilog_svc := s.NewUILogSvc(top_svc, nil)
+	remote_cluster_svc := s.NewRemoteClusterService(uilog_svc, metadata_svc, nil)
+	repl_spec_svc := s.NewReplicationSpecService(uilog_svc, remote_cluster_svc, metadata_svc, nil)
+
 	if options.isConvert {
 		fmt.Println("Starting replication manager in conversion/upgrade mode.")
 		// start replication manager in conversion/upgrade mode
 		rm.StartReplicationManagerForConversion(
-							   s.NewReplicationSpecService(metadata_svc, nil),
-							   s.NewRemoteClusterService(metadata_svc, nil))
+			repl_spec_svc,
+			remote_cluster_svc)
 	} else {
 		// start replication manager in normal mode
 		rm.StartReplicationManager(host,
-							   uint16(options.xdcrRestPort),
-							   s.NewReplicationSpecService(metadata_svc, nil),
-							   s.NewRemoteClusterService(metadata_svc, nil),	
-							   s.NewClusterInfoSvc(nil), 
-							   top_svc, 
-							   s.NewReplicationSettingsSvc(metadata_svc, nil),
-							   s.NewCheckpointsService(metadata_svc, nil),
-							   s.NewCAPIService(nil))
-							   
+			uint16(options.xdcrRestPort),
+			repl_spec_svc,
+			remote_cluster_svc,
+			s.NewClusterInfoSvc(nil),
+			top_svc,
+			s.NewReplicationSettingsSvc(metadata_svc, nil),
+			s.NewCheckpointsService(metadata_svc, nil),
+			s.NewCAPIService(nil),
+			audit_svc)
+
 		// keep main alive in normal mode
 		<-done
-	}						 
+	}
 }

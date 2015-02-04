@@ -40,9 +40,6 @@ go install
 cd ../remote_cluster
 go clean
 go install
-cd ../services
-go clean
-go install
 cd ..
 echo "Done"
 }
@@ -74,10 +71,7 @@ cd ../dcpnozzle
 go clean
 cd ../pipeline
 go clean
-cd ..
 cd ../remote_cluster
-go clean
-cd ../services
 go clean
 cd ..
 echo "Done"

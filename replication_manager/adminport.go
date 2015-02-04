@@ -19,9 +19,11 @@ import (
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/gen_server"
 	"github.com/couchbase/goxdcr/log"
+	"github.com/couchbase/goxdcr/metadata"
 	utils "github.com/couchbase/goxdcr/utils"
 	"net/http"
 	"strings"
+	"time"
 )
 
 var StaticPaths = [6]string{base.RemoteClustersPath, CreateReplicationPath, InternalSettingsPath, SettingsReplicationsPath, AllReplicationsPath, AllReplicationInfosPath}
@@ -225,6 +227,8 @@ func (adminport *Adminport) doCreateRemoteClusterRequest(request *http.Request) 
 		if err != nil {
 			return nil, err
 		} else {
+			writeRemoteClusterAuditEvent(base.CreateRemoteClusterRefEventId, remoteClusterRef, getRealUserIdFromRequest(request))
+
 			return NewCreateRemoteClusterResponse(remoteClusterRef)
 		}
 	}
@@ -249,19 +253,23 @@ func (adminport *Adminport) doChangeRemoteClusterRequest(request *http.Request) 
 
 	logger_ap.Infof("Request params: justValidate=%v, remoterClusterRef=%v\n",
 		justValidate, *remoteClusterRef)
+		
+	remoteClusterService := RemoteClusterService()
 
 	if justValidate {
-		err = RemoteClusterService().ValidateRemoteCluster(remoteClusterRef)
+		err = remoteClusterService.ValidateRemoteCluster(remoteClusterRef)
 		if err != nil {
 			return nil, err
 		} else {
 			return nil, nil
 		}
 	} else {
-		err = RemoteClusterService().SetRemoteCluster(remoteClusterName, remoteClusterRef)
+		err = remoteClusterService.SetRemoteCluster(remoteClusterName, remoteClusterRef)
 		if err != nil {
 			return nil, err
 		} else {
+			writeRemoteClusterAuditEvent(base.UpdateRemoteClusterRefEventId, remoteClusterRef, getRealUserIdFromRequest(request))
+			
 			return NewCreateRemoteClusterResponse(remoteClusterRef)
 		}
 	}
@@ -276,10 +284,17 @@ func (adminport *Adminport) doDeleteRemoteClusterRequest(request *http.Request) 
 
 	logger_ap.Infof("Request params: remoteClusterName=%v\n", remoteClusterName)
 
+	remoteClusterRef, err := RemoteClusterService().RemoteClusterByRefName(remoteClusterName)
+	if err != nil {
+		return nil, err
+	}
+
 	err = RemoteClusterService().DelRemoteCluster(remoteClusterName)
 	if err != nil {
 		return nil, err
 	}
+
+	writeRemoteClusterAuditEvent(base.DeleteRemoteClusterRefEventId, remoteClusterRef, getRealUserIdFromRequest(request))
 
 	return NewDeleteRemoteClusterResponse()
 }
@@ -306,7 +321,7 @@ func (adminport *Adminport) doDeleteAllReplicationsRequest(request *http.Request
 
 	logger_ap.Debugf("Request params: bucket=%v", bucket)
 
-	return nil, DeleteAllReplications(bucket)
+	return nil, DeleteAllReplications(bucket, getRealUserIdFromRequest(request))
 }
 
 func (adminport *Adminport) doGetAllReplicationInfosRequest(request *http.Request) ([]byte, error) {
@@ -332,7 +347,7 @@ func (adminport *Adminport) doCreateReplicationRequest(request *http.Request) ([
 	logger_ap.Infof("Request parameters: fromBucket=%v, toCluster=%v, toBucket=%v, settings=%v\n",
 		fromBucket, toCluster, toBucket, settings)
 
-	replicationId, errorsMap, err := CreateReplication(fromBucket, toCluster, toBucket, settings)
+	replicationId, errorsMap, err := CreateReplication(fromBucket, toCluster, toBucket, settings, getRealUserIdFromRequest(request))
 
 	if err != nil {
 		return nil, err
@@ -354,7 +369,7 @@ func (adminport *Adminport) doDeleteReplicationRequest(request *http.Request) ([
 
 	logger_ap.Debugf("Request params: replicationId=%v\n", replicationId)
 
-	err = DeleteReplication(replicationId)
+	err = DeleteReplication(replicationId, getRealUserIdFromRequest(request))
 
 	if err != nil {
 		return nil, err
@@ -387,7 +402,7 @@ func (adminport *Adminport) doChangeInternalSettingsRequest(request *http.Reques
 
 	logger_ap.Infof("Request params: inputSettings=%v\n", settingsMap)
 
-	errorsMap, err = UpdateDefaultReplicationSettings(settingsMap)
+	errorsMap, err = UpdateDefaultReplicationSettings(settingsMap, getRealUserIdFromRequest(request))
 	if err != nil {
 		return nil, err
 	} else if len(errorsMap) > 0 {
@@ -426,7 +441,7 @@ func (adminport *Adminport) doChangeDefaultReplicationSettingsRequest(request *h
 		return nil, nil
 	}
 
-	errorsMap, err = UpdateDefaultReplicationSettings(settingsMap)
+	errorsMap, err = UpdateDefaultReplicationSettings(settingsMap, getRealUserIdFromRequest(request))
 	if err != nil {
 		return nil, err
 	} else if len(errorsMap) > 0 {
@@ -488,13 +503,7 @@ func (adminport *Adminport) doChangeReplicationSettingsRequest(request *http.Req
 		return nil, nil
 	}
 
-	// remember old settings
-	replSpec, err := ReplicationSpecService().ReplicationSpec(replicationId)
-	if err != nil {
-		return nil, err
-	}
-
-	errorsMap, err = UpdateReplicationSettings(replicationId, settingsMap)
+	errorsMap, err = UpdateReplicationSettings(replicationId, settingsMap, getRealUserIdFromRequest(request))
 	if err != nil {
 		return nil, err
 	} else if len(errorsMap) > 0 {
@@ -503,7 +512,7 @@ func (adminport *Adminport) doChangeReplicationSettingsRequest(request *http.Req
 	}
 
 	// return replication settings after changes
-	replSpec, err = ReplicationSpecService().ReplicationSpec(replicationId)
+	replSpec, err := ReplicationSpecService().ReplicationSpec(replicationId)
 	if err != nil {
 		return nil, err
 	}
@@ -598,3 +607,27 @@ func authAdminCreds(request *http.Request, readOnly bool) error {
 	}
 	return nil
 }
+
+func writeRemoteClusterAuditEvent(eventId uint32, remoteClusterRef *metadata.RemoteClusterReference, realUserId *base.RealUserId) {
+	event := &base.RemoteClusterRefEvent{
+		GenericFields:         base.GenericFields{time.Now(), *realUserId},
+		RemoteClusterName:     remoteClusterRef.Name,
+		RemoteClusterHostname: remoteClusterRef.HostName,
+		IsEncrypted:           remoteClusterRef.DemandEncryption}
+
+	err := AuditService().Write(eventId, event)
+	logAuditErrors(err)
+}
+
+func getRealUserIdFromRequest(request *http.Request) *base.RealUserId {
+	creds, err := cbauth.AuthWebCreds(request)
+	if err != nil {
+		logger_rm.Errorf("Error getting real user id from http request. err=%v\n", err)
+		// put unknown user in the audit log.
+		return &base.RealUserId{"internal", "unknown"}
+	}
+
+	// TODO get source from creds
+	return &base.RealUserId{"internal", creds.Name()}
+}
+

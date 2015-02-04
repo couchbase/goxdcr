@@ -13,7 +13,7 @@ type Action func() error
 func ExecWithTimeout(action Action, timeout_duration time.Duration, logger *log.CommonLogger) error {
 	ret := make(chan error, 1)
 	go func(finch chan error) {
-		logger.Info("About to call function")
+		logger.Debug("About to call function")
 		err1 := action()
 		ret <- err1
 	}(ret)

@@ -184,14 +184,14 @@ func (s *ReplicationSettings) SetLogLevel(log_level string) error {
 	return err
 }
 
-// returns true if real changes are done. false otherwise
-
-// normally this method should return an empty errorsMap since the input settingsMap
-// is constructed internally and necessary checks should have been applied then
+// returns a map of settings that ghave indeed been changed and their new values.
+// returns a map of validation errors, which should normally be empty since the input settingsMap
+// is constructed internally and necessary checks should have been applied before
 // I am leaving the error checks just in case.
-func (s *ReplicationSettings) UpdateSettingsFromMap(settingsMap map[string]interface{}) (map[string]error, bool) {
-	errorMap := make(map[string]error)
-	changed := false
+func (s *ReplicationSettings) UpdateSettingsFromMap(settingsMap map[string]interface{}) (changedSettingsMap map[string]interface{}, errorMap map[string]error) {
+	changedSettingsMap = make(map[string]interface{})
+	errorMap = make(map[string]error)
+
 	for key, val := range settingsMap {
 		switch key {
 		case ReplicationType:
@@ -201,8 +201,8 @@ func (s *ReplicationSettings) UpdateSettingsFromMap(settingsMap map[string]inter
 				continue
 			}
 			if s.RepType != repType {
-				changed = true
 				s.RepType = repType
+				changedSettingsMap[key] = repType
 			}
 		case FilterExpression:
 			filterExpression, ok := val.(string)
@@ -211,8 +211,8 @@ func (s *ReplicationSettings) UpdateSettingsFromMap(settingsMap map[string]inter
 				continue
 			}
 			if s.FilterExpression != filterExpression {
-				changed = true
 				s.FilterExpression = filterExpression
+				changedSettingsMap[key] = filterExpression
 			}
 		case Active:
 			active, ok := val.(bool)
@@ -221,8 +221,8 @@ func (s *ReplicationSettings) UpdateSettingsFromMap(settingsMap map[string]inter
 				continue
 			}
 			if s.Active != active {
-				changed = true
 				s.Active = active
+				changedSettingsMap[key] = active
 			}
 		case CheckpointInterval:
 			checkpointInterval, ok := val.(int)
@@ -231,8 +231,8 @@ func (s *ReplicationSettings) UpdateSettingsFromMap(settingsMap map[string]inter
 				continue
 			}
 			if s.CheckpointInterval != checkpointInterval {
-				changed = true
 				s.CheckpointInterval = checkpointInterval
+				changedSettingsMap[key] = checkpointInterval
 			}
 
 		case BatchCount:
@@ -242,8 +242,8 @@ func (s *ReplicationSettings) UpdateSettingsFromMap(settingsMap map[string]inter
 				continue
 			}
 			if s.BatchCount != batchCount {
-				changed = true
 				s.BatchCount = batchCount
+				changedSettingsMap[key] = batchCount
 			}
 		case BatchSize:
 			batchSize, ok := val.(int)
@@ -252,8 +252,8 @@ func (s *ReplicationSettings) UpdateSettingsFromMap(settingsMap map[string]inter
 				continue
 			}
 			if s.BatchSize != batchSize {
-				changed = true
 				s.BatchSize = batchSize
+				changedSettingsMap[key] = batchSize
 			}
 		case FailureRestartInterval:
 			failureRestartInterval, ok := val.(int)
@@ -262,8 +262,8 @@ func (s *ReplicationSettings) UpdateSettingsFromMap(settingsMap map[string]inter
 				continue
 			}
 			if s.FailureRestartInterval != failureRestartInterval {
-				changed = true
 				s.FailureRestartInterval = failureRestartInterval
+				changedSettingsMap[key] = failureRestartInterval
 			}
 		case OptimisticReplicationThreshold:
 			optimisticReplicationThreshold, ok := val.(int)
@@ -272,8 +272,8 @@ func (s *ReplicationSettings) UpdateSettingsFromMap(settingsMap map[string]inter
 				continue
 			}
 			if s.OptimisticReplicationThreshold != optimisticReplicationThreshold {
-				changed = true
 				s.OptimisticReplicationThreshold = optimisticReplicationThreshold
+				changedSettingsMap[key] = optimisticReplicationThreshold
 			}
 		case SourceNozzlePerNode:
 			sourceNozzlePerNode, ok := val.(int)
@@ -282,8 +282,8 @@ func (s *ReplicationSettings) UpdateSettingsFromMap(settingsMap map[string]inter
 				continue
 			}
 			if s.SourceNozzlePerNode != sourceNozzlePerNode {
-				changed = true
 				s.SourceNozzlePerNode = sourceNozzlePerNode
+				changedSettingsMap[key] = sourceNozzlePerNode
 			}
 		case TargetNozzlePerNode:
 			targetNozzlePerNode, ok := val.(int)
@@ -292,8 +292,8 @@ func (s *ReplicationSettings) UpdateSettingsFromMap(settingsMap map[string]inter
 				continue
 			}
 			if s.TargetNozzlePerNode != targetNozzlePerNode {
-				changed = true
 				s.TargetNozzlePerNode = targetNozzlePerNode
+				changedSettingsMap[key] = targetNozzlePerNode
 			}
 		case MaxExpectedReplicationLag:
 			maxExpectedReplicationLag, ok := val.(int)
@@ -302,8 +302,8 @@ func (s *ReplicationSettings) UpdateSettingsFromMap(settingsMap map[string]inter
 				continue
 			}
 			if s.MaxExpectedReplicationLag != maxExpectedReplicationLag {
-				changed = true
 				s.MaxExpectedReplicationLag = maxExpectedReplicationLag
+				changedSettingsMap[key] = maxExpectedReplicationLag
 			}
 		case TimeoutPercentageCap:
 			timeoutPercentageCap, ok := val.(int)
@@ -312,8 +312,8 @@ func (s *ReplicationSettings) UpdateSettingsFromMap(settingsMap map[string]inter
 				continue
 			}
 			if s.TimeoutPercentageCap != timeoutPercentageCap {
-				changed = true
 				s.TimeoutPercentageCap = timeoutPercentageCap
+				changedSettingsMap[key] = timeoutPercentageCap
 			}
 		case PipelineLogLevel:
 			l, ok := val.(string)
@@ -322,8 +322,8 @@ func (s *ReplicationSettings) UpdateSettingsFromMap(settingsMap map[string]inter
 				continue
 			}
 			if s.LogLevel.String() != l {
-				changed = true
 				s.SetLogLevel(l)
+				changedSettingsMap[key] = l
 			}
 		case PipelineStatsInterval:
 			interval, ok := val.(int)
@@ -332,8 +332,8 @@ func (s *ReplicationSettings) UpdateSettingsFromMap(settingsMap map[string]inter
 				continue
 			}
 			if s.StatsInterval != interval {
-				changed = true
 				s.StatsInterval = interval
+				changedSettingsMap[key] = interval
 			}
 		default:
 			errorMap[key] = errors.New(fmt.Sprintf("Invalid key in map, %v", key))
@@ -341,7 +341,7 @@ func (s *ReplicationSettings) UpdateSettingsFromMap(settingsMap map[string]inter
 		}
 	}
 
-	return errorMap, changed
+	return 
 }
 
 func (s *ReplicationSettings) ToMap() map[string]interface{} {

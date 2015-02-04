@@ -9,6 +9,7 @@ import (
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbaselabs/go-couchbase"
 	"net/http"
+	"net/url"
 	"reflect"
 	"strconv"
 	"strings"
@@ -80,7 +81,7 @@ func RecoverPanic(err *error) {
 // Get bucket in local cluster
 func LocalBucket(localConnectStr, bucketName string) (*couchbase.Bucket, error) {
 	logger_utils.Debugf("Getting local bucket name=%v\n", bucketName)
-	
+
 	url := fmt.Sprintf("http://%s", localConnectStr)
 	client, err := couchbase.ConnectWithAuth(url, cbauth.NewAuthHandler(nil))
 	if err != nil {
@@ -107,7 +108,7 @@ func RemoteBucket(remoteConnectStr, bucketName, remoteUsername, remotePassword s
 		return nil, errors.New(fmt.Sprintf("Error retrieving remote bucket, %v, since remote username and/or password are missing.", bucketName))
 
 	}
-	
+
 	url = fmt.Sprintf("http://%s:%s@%s", remoteUsername, remotePassword, remoteConnectStr)
 	bucketInfos, err := couchbase.GetBucketList(url)
 	if err != nil {
@@ -196,7 +197,7 @@ func IncorrectValueTypeInMapError(key string, val interface{}, expectedType stri
 
 // returns an enhanced error with erroe message being "msg + old error message"
 func NewEnhancedError(msg string, err error) error {
-	return errors.New(msg + "\n" + err.Error())
+	return errors.New(msg + "\n err = " + err.Error())
 }
 
 // return host address in the form of hostName:port
@@ -211,10 +212,10 @@ func GetHostName(hostAddr string) string {
 
 func GetPortNumber(hostAddr string) (uint16, error) {
 	port_str := strings.Split(hostAddr, base.UrlPortNumberDelimiter)[1]
-	port, err :=  strconv.ParseUint(port_str, 10, 16)
+	port, err := strconv.ParseUint(port_str, 10, 16)
 	if err == nil {
 		return uint16(port), nil
-	}else {
+	} else {
 		return 0, err
 	}
 }
@@ -239,7 +240,7 @@ func Contains(value interface{}, slice []interface{}) bool {
 }
 
 //convert the format returned by go-memcached StatMap - map[string]string to map[uint16]uint64
-func ParseHighSeqnoStat(vbnos []uint16, stats_map map[string]string, highseqno_map map[uint16]uint64)  error {
+func ParseHighSeqnoStat(vbnos []uint16, stats_map map[string]string, highseqno_map map[uint16]uint64) error {
 
 	for _, vbno := range vbnos {
 		stats_key := fmt.Sprintf(base.VBUCKET_HIGH_SEQNO_STAT_KEY_FORMAT, vbno)
@@ -252,4 +253,36 @@ func ParseHighSeqnoStat(vbnos []uint16, stats_map map[string]string, highseqno_m
 	}
 
 	return nil
+}
+
+// encode data in a map into a byte array, which can then be used as
+// the body part of a http request
+// so far only five types are supported: string, int, bool, LogLevel, []byte
+// which should be sufficient for all cases at hand
+func EncodeMapIntoByteArray(data map[string]interface{}) ([]byte, error) {
+	if len(data) == 0 {
+		return nil, nil
+	}
+
+	params := make(url.Values)
+	for key, val := range data {
+		var strVal string
+		switch val.(type) {
+		case string:
+			strVal = val.(string)
+		case int:
+			strVal = strconv.FormatInt(int64(val.(int)), base.ParseIntBase)
+		case bool:
+			strVal = strconv.FormatBool(val.(bool))
+		case log.LogLevel:
+			strVal = val.(log.LogLevel).String()
+		case []byte:
+			strVal = string(val.([]byte))
+		default:
+			return nil, IncorrectValueTypeInMapError(key, val, "string/int/bool/LogLevel/[]byte")
+		}
+		params.Add(key, strVal)
+	}
+
+	return []byte(params.Encode()), nil
 }
