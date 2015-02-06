@@ -370,21 +370,19 @@ func (buf *requestBuffer) updateSeqnoList(req *base.WrappedMCRequest) {
 	vbno := req.Req.VBucket
 	buf.seqno_list_lock[vbno].Lock()
 	defer buf.seqno_list_lock[vbno].Unlock()
-	
 	sorted_seqno_list, ok := buf.seqno_sorted_list[vbno]
 	if !ok {
 		sorted_seqno_list = []int{}
 	}
-	
+
 	seqno := req.Seqno
 	index := sort.Search(len(sorted_seqno_list), func(i int) bool { return sorted_seqno_list[i] > int(seqno) })
-	newlist := []int {}
-	newlist = append (newlist, sorted_seqno_list[0:index]...)
-	newlist = append (newlist, int(seqno))
-	newlist = append (newlist, sorted_seqno_list[index:]...)
-	buf.seqno_sorted_list[vbno] = newlist	
+	newlist := []int{}
+	newlist = append(newlist, sorted_seqno_list[0:index]...)
+	newlist = append(newlist, int(seqno))
+	newlist = append(newlist, sorted_seqno_list[index:]...)
+	buf.seqno_sorted_list[vbno] = newlist
 }
-
 
 func (buf *requestBuffer) removeSeqnoFromSeqnoList(req *base.WrappedMCRequest) {
 	vbno := req.Req.VBucket
@@ -685,7 +683,6 @@ func (b *xmemBatch) count() int {
 
 func (b *xmemBatch) size() int {
 	return b.curSize
-
 }
 
 /************************************
@@ -700,6 +697,7 @@ type XmemNozzle struct {
 	bOpen      bool
 	lock_bOpen sync.RWMutex
 
+	dataChan_lock sync.RWMutex
 	//data channel to accept the incoming data
 	dataChan chan *base.WrappedMCRequest
 	//the total size of data (in byte) queued in dataChan
@@ -716,10 +714,8 @@ type XmemNozzle struct {
 	batches_ready chan *xmemBatch
 
 	//batch to be accumulated
-	batch *xmemBatch
-
-	//channel to signal if batch can be transitioned to batches_ready
-	batch_move_ch chan bool
+	batch           *xmemBatch
+	batch_move_lock sync.Mutex
 
 	childrenWaitGrp sync.WaitGroup
 
@@ -737,7 +733,6 @@ type XmemNozzle struct {
 	counter_sent     int
 	counter_received int
 	start_time       time.Time
-	handle_error     bool
 
 	//the big seqno that is confirmed to be received on the vbucket
 	//it is still possible that smaller seqno hasn't been received
@@ -763,13 +758,14 @@ func NewXmemNozzle(id string,
 		AbstractPart:          part,
 		bOpen:                 true,
 		lock_bOpen:            sync.RWMutex{},
+		dataChan_lock:         sync.RWMutex{},
 		dataChan:              nil,
 		client_for_setMeta:    nil,
 		client_for_getMeta:    nil,
 		config:                newConfig(server.Logger()),
 		batches_ready:         nil,
 		batch:                 nil,
-		batch_move_ch:         nil,
+		batch_move_lock:       sync.Mutex{},
 		childrenWaitGrp:       sync.WaitGroup{},
 		buf:                   nil,
 		receiver_finch:        make(chan bool, 1),
@@ -777,7 +773,6 @@ func NewXmemNozzle(id string,
 		sender_finch:          make(chan bool, 1),
 		selfMonitor_finch:     make(chan bool, 1),
 		counter_sent:          0,
-		handle_error:          true,
 		counter_received:      0,
 		maxseqno_received_map: make(map[uint16]uint64)}
 
@@ -853,7 +848,6 @@ func (xmem *XmemNozzle) Stop() error {
 	//close data channel
 	close(xmem.dataChan)
 	close(xmem.batches_ready)
-	close(xmem.batch_move_ch)
 
 	err = xmem.Stop_server()
 	if err != nil {
@@ -874,9 +868,9 @@ func (xmem *XmemNozzle) IsOpen() bool {
 
 func (xmem *XmemNozzle) batchReady() error {
 	//move the batch to ready batches channel
-	<-xmem.batch_move_ch
+	xmem.batch_move_lock.Lock()
 	defer func() {
-		xmem.batch_move_ch <- true
+		xmem.batch_move_lock.Unlock()
 		xmem.Logger().Debugf("%v End moving batch, %v batches ready\n", xmem.Id(), len(xmem.batches_ready))
 	}()
 	if xmem.batch.count() > 0 {
@@ -889,11 +883,12 @@ func (xmem *XmemNozzle) batchReady() error {
 		}
 	}
 	return nil
-
 }
 
 func (xmem *XmemNozzle) Receive(data interface{}) error {
+	xmem.dataChan_lock.Lock()
 	defer func() {
+		xmem.dataChan_lock.Unlock()
 		if r := recover(); r != nil {
 			xmem.handleGeneralError(errors.New(fmt.Sprintf("%v", r)))
 		}
@@ -908,11 +903,25 @@ func (xmem *XmemNozzle) Receive(data interface{}) error {
 	xmem.Logger().Debugf("data key=%v seq=%v is received", data.(*base.WrappedMCRequest).Req.Key, data.(*base.WrappedMCRequest).Seqno)
 	xmem.Logger().Debugf("data channel len is %d\n", len(xmem.dataChan))
 
-	request := data.(*base.WrappedMCRequest)
+	request, ok := data.(*base.WrappedMCRequest)
+
+	if !ok {
+		err = fmt.Errorf("Got data of unexpected type. data=%v", data)
+		xmem.handleGeneralError(errors.New(fmt.Sprintf("%v", err)))
+		return err
+
+	}
+
+	dataChan_len_old := len(xmem.dataChan)
+	received_old := xmem.counter_received
 
 	xmem.dataChan <- request
-
 	xmem.counter_received++
+
+	if xmem.counter_received <= received_old || len(xmem.dataChan) <= dataChan_len_old {
+		panic(fmt.Sprintf("counter_received_old=%v, counter_received=%v, dataChan_len_old=%v, dataChan_len=%v",
+			received_old, xmem.counter_received, dataChan_len_old, len(xmem.dataChan)))
+	}
 
 	if xmem.counter_received != len(xmem.dataChan)+xmem.counter_sent {
 		xmem.Logger().Errorf("received=%v, sent=%v data buffered=%v", xmem.counter_received, xmem.counter_sent, len(xmem.dataChan))
@@ -950,7 +959,7 @@ func (xmem *XmemNozzle) processData_batch(finch chan bool, waitGrp *sync.WaitGro
 				goto done
 			default:
 				if xmem.validateRunningState() != nil {
-					xmem.Logger().Infof("xmem %v has stopped.")
+					xmem.Logger().Infof("xmem %v has stopped.", xmem.Id())
 					goto done
 				}
 				if xmem.IsOpen() {
@@ -976,7 +985,6 @@ done:
 
 func (xmem *XmemNozzle) onExit() {
 	//in the process of stopping, no need to report any error to replication manager anymore
-	xmem.handle_error = false
 
 	xmem.buf.close()
 
@@ -1007,7 +1015,7 @@ func (xmem *XmemNozzle) batchSetMetaWithRetry(batch *xmemBatch, numOfRetry int) 
 		item, ok := <-xmem.dataChan
 		xmem.counter_sent++
 		if xmem.counter_received != len(xmem.dataChan)+xmem.counter_sent {
-			panic(fmt.Sprintf("received=%v, sent=%v data buffered=%v", xmem.counter_received, xmem.counter_sent, len(xmem.dataChan)))
+			xmem.Logger().Errorf(fmt.Sprintf("received=%v, sent=%v data buffered=%v", xmem.counter_received, xmem.counter_sent, len(xmem.dataChan)))
 		}
 
 		if !ok {
@@ -1217,9 +1225,15 @@ func (xmem *XmemNozzle) decodeGetMetaResp(key []byte, resp *mc.MCResponse) docum
 	ret := documentMetadata{}
 	ret.key = key
 	extras := resp.Extras
-	ret.flags = binary.BigEndian.Uint32(extras[0:4])
-	ret.expiry = binary.BigEndian.Uint32(extras[4:8])
-	ret.revSeq = binary.BigEndian.Uint64(extras[8:16])
+	//	Deleted    (24-27): 0x00000000 (0)
+	//  Flags      (28-31): 0x00000001 (1)
+	//  Exptime    (32-35): 0x00000007 (7)
+	//  Seqno      (36-43): 0x0000000000000009 (9)
+	//  ConfRes    (44)   : 0x01 (1)
+	ret.deletion = (binary.BigEndian.Uint32(extras[0:4]) != 0)
+	ret.flags = binary.BigEndian.Uint32(extras[4:8])
+	ret.expiry = binary.BigEndian.Uint32(extras[8:12])
+	ret.revSeq = binary.BigEndian.Uint64(extras[12:20])
 	ret.cas = resp.Cas
 
 	return ret
@@ -1314,9 +1328,6 @@ func (xmem *XmemNozzle) initialize(settings map[string]interface{}) error {
 	//init a new batch
 	xmem.initNewBatch()
 
-	xmem.batch_move_ch = make(chan bool, 1)
-	xmem.batch_move_ch <- true
-
 	xmem.buf = newReqBuffer(uint16(xmem.config.maxCount*100), uint16(float64(xmem.config.maxCount)*0.2), xmem.Logger())
 
 	xmem.receiver_finch = make(chan bool, 1)
@@ -1340,6 +1351,11 @@ func (xmem *XmemNozzle) receiveResponse(finch chan bool, waitGrp *sync.WaitGroup
 		case <-finch:
 			goto done
 		default:
+			if xmem.validateRunningState() != nil {
+				xmem.Logger().Infof("xmem %v has stopped", xmem.Id())
+				goto done
+			}
+
 			if (int(xmem.buf.bufferSize()) - len(xmem.buf.empty_slots_pos)) > 0 {
 				response, err := xmem.readFromClient(xmem.client_for_setMeta)
 				if err != nil {
@@ -1464,6 +1480,11 @@ func (xmem *XmemNozzle) selfMonitor(finch chan bool, waitGrp *sync.WaitGroup) {
 		case <-finch:
 			goto done
 		case <-ticker:
+			if xmem.validateRunningState() != nil {
+				xmem.Logger().Infof("xmem %v has stopped.", xmem.Id())
+				goto done
+			}
+
 			count++
 			if xmem.counter_sent == sent_count {
 				if len(xmem.dataChan) > 0 {
@@ -1491,6 +1512,7 @@ func (xmem *XmemNozzle) selfMonitor(finch chan bool, waitGrp *sync.WaitGroup) {
 				xmem.client_for_setMeta.markConnUnhealthy()
 				xmem.client_for_getMeta.markConnUnhealthy()
 				xmem.handleGeneralError(errors.New("Xmem is stuck"))
+				goto done
 			}
 		}
 	}
@@ -1612,16 +1634,17 @@ func (xmem *XmemNozzle) encodeOpCode(code mc.CommandCode) mc.CommandCode {
 }
 
 func (xmem *XmemNozzle) StatusSummary() string {
-	return fmt.Sprintf("Xmem %v received %v items, sent %v items, %v items waiting to confirm", xmem.Id(), xmem.counter_received, xmem.counter_sent, int(xmem.buf.bufferSize())-len(xmem.buf.empty_slots_pos))
+	return fmt.Sprintf("Xmem %v state =%v received %v items, sent %v items, %v items waiting to confirm, %v in queue", xmem.Id(), xmem.State(), xmem.counter_received, xmem.counter_sent, int(xmem.buf.bufferSize())-len(xmem.buf.empty_slots_pos), len(xmem.dataChan))
 }
 
 func (xmem *XmemNozzle) handleGeneralError(err error) {
-	if xmem.handle_error {
-		xmem.Logger().Errorf("Raise error condition %v\n", err)
+	err1 := xmem.SetState(common.Part_Error)
+	if err1 == nil {
 		otherInfo := utils.WrapError(err)
 		xmem.RaiseEvent(common.ErrorEncountered, nil, xmem, nil, otherInfo)
+		xmem.Logger().Errorf("Raise error condition %v\n", err)
 	} else {
-		xmem.Logger().Debugf("%v in shutdown process, err=%v is ignored\n", xmem.Id(), err)
+		xmem.Logger().Infof("%v in shutdown process, err=%v is ignored\n", xmem.Id(), err)
 	}
 }
 
@@ -1642,7 +1665,7 @@ func (xmem *XmemNozzle) getConn(client *xmemClient, readTimeout bool, writeTimeo
 }
 
 func (xmem *XmemNozzle) validateRunningState() error {
-	if xmem.State() == common.Part_Stopping || xmem.State() == common.Part_Stopped {
+	if xmem.State() == common.Part_Stopping || xmem.State() == common.Part_Stopped || xmem.State() == common.Part_Error {
 		return PartStoppedError
 	}
 	return nil
@@ -1713,8 +1736,12 @@ func (xmem *XmemNozzle) readFromClient(client *xmemClient) (*mc.MCResponse, erro
 				if pool != nil {
 					pool.ReleaseConnections()
 				}
-				xmem.handleGeneralError(err)
+			} else if response.Status == mc.NOT_MY_VBUCKET {
+				//the original error message is too long, which clogs the log
+				err = base.ErrorNotMyVbucket
+				xmem.repairConn(client, err.Error())
 			}
+			xmem.handleGeneralError(err)
 			client.logger.Errorf("fatal err=%v", err)
 			return nil, fatalError
 		} else if err == response {
@@ -1783,7 +1810,6 @@ func (xmem *XmemNozzle) getCurSeenHighSeqno(wrappedReq *base.WrappedMCRequest) (
 	if !ok || cur_maxseqno < seqno {
 		xmem.maxseqno_received_map[vbno] = seqno
 	}
-	
 	if seqno < smallestSeqnoInBuf {
 		//invalid state
 		panic(fmt.Sprintf("Seqno %v is not tracked in buf, the smallestSeqnoInBuf = %v", seqno, smallestSeqnoInBuf))
@@ -1794,8 +1820,8 @@ func (xmem *XmemNozzle) getCurSeenHighSeqno(wrappedReq *base.WrappedMCRequest) (
 		//see if all seqno between smallest seqno and maxseqno are all received
 		for i := smallestSeqnoInBuf; i <= xmem.maxseqno_received_map[vbno]; i++ {
 			if xmem.buf.hasSeqno(vbno, i) {
-				break;
-			}else {
+				break
+			} else {
 				highseqno = i
 			}
 		}

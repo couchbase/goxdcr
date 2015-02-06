@@ -200,12 +200,14 @@ func (service *ReplicationSpecService) metakvCallback(path string, value []byte,
 }
 
 func (service *ReplicationSpecService) writeUiLog(spec *metadata.ReplicationSpecification, action string) {
-	remoteClusterRef, err := service.remote_cluster_svc.RemoteClusterByUuid(spec.TargetClusterUUID)
-	if err != nil {
-		service.logger.Errorf("Cannot find remote cluster with uuid %s\n", spec.TargetClusterUUID)
-		return
-	}
+	if service.uilog_svc != nil {
+		remoteClusterRef, err := service.remote_cluster_svc.RemoteClusterByUuid(spec.TargetClusterUUID, false)
+		if err != nil {
+			service.logger.Errorf("Cannot find remote cluster with uuid %s\n", spec.TargetClusterUUID)
+			return
+		}
 
-	uiLogMsg := fmt.Sprintf("Replication from bucket \"%s\" to bucket \"%s\" on cluster \"%s\" %s.", spec.SourceBucketName, spec.TargetBucketName, remoteClusterRef.Name, action)
-	service.uilog_svc.Write(uiLogMsg)
+		uiLogMsg := fmt.Sprintf("Replication from bucket \"%s\" to bucket \"%s\" on cluster \"%s\" %s.", spec.SourceBucketName, spec.TargetBucketName, remoteClusterRef.Name, action)
+		service.uilog_svc.Write(uiLogMsg)
+	}
 }

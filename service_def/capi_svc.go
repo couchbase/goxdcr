@@ -21,11 +21,12 @@ type RemoteBucketInfo struct {
 	RemoteClusterRefName string
 	BucketName           string
 
-	RemoteClusterRef *metadata.RemoteClusterReference
-	Capabilities     []string
-	UUID             string
-	VBServerMap 	map[string][]uint16
-	logger           *log.CommonLogger
+	RemoteClusterRef         *metadata.RemoteClusterReference
+	Capabilities             []string
+	UUID                     string
+	VBServerMap              map[string][]uint16
+	MemcachedAddrRestAddrMap map[string]string
+	logger                   *log.CommonLogger
 }
 
 func NewRemoteBucketInfo(remoteClusterRefName string, bucketName string, remote_cluster_ref *metadata.RemoteClusterReference,
@@ -49,14 +50,16 @@ func (remoteBucket *RemoteBucketInfo) Refresh(remote_cluster_svc RemoteClusterSv
 
 func (remoteBucket *RemoteBucketInfo) refresh_internal(remote_cluster_svc RemoteClusterSvc, full bool) error {
 	if remoteBucket.RemoteClusterRef == nil && !full {
-		remoteClusterRef, err := remote_cluster_svc.RemoteClusterByRefName(remoteBucket.RemoteClusterRefName)
+		remoteClusterRef, err := remote_cluster_svc.RemoteClusterByRefName(remoteBucket.RemoteClusterRefName, true)
 		if err != nil {
 			remoteBucket.logger.Errorf("Failed to get remote cluster reference with refName=%v, err=%v\n", remoteBucket.RemoteClusterRefName, err)
 			return err
 		}
+				
 		remoteBucket.RemoteClusterRef = remoteClusterRef
 	}
-	username, password , err := remoteBucket.RemoteClusterRef.MyCredentials()
+	
+	username, password, err := remoteBucket.RemoteClusterRef.MyCredentials()
 	if err != nil {
 		return err
 	}
@@ -64,7 +67,7 @@ func (remoteBucket *RemoteBucketInfo) refresh_internal(remote_cluster_svc Remote
 	if err != nil {
 		return err
 	}
-	
+
 	bucket, err := utils.RemoteBucket(connectionStr, remoteBucket.BucketName, username, password)
 	if err != nil {
 		return err
@@ -73,12 +76,23 @@ func (remoteBucket *RemoteBucketInfo) refresh_internal(remote_cluster_svc Remote
 
 	remoteBucket.UUID = bucket.UUID
 	remoteBucket.Capabilities = bucket.Capabilities
-	
+
 	remoteBucket.VBServerMap, err = bucket.GetVBmap(bucket.VBServerMap().ServerList)
 	if err != nil {
 		return errors.New(fmt.Sprintf("Failed to get VBServerMap for remote bucket %v", remoteBucket.BucketName))
 	}
 
+	remoteBucket.MemcachedAddrRestAddrMap = make(map[string]string)
+	nodes := bucket.Nodes()
+	for _, node := range nodes {
+		restAddr := node.Hostname
+		host := utils.GetHostName (restAddr)
+		memcachedPort := node.Ports["direct"]
+		memcachedAddr := utils.GetHostAddr (host, uint16(memcachedPort))
+		remoteBucket.MemcachedAddrRestAddrMap[memcachedAddr] = restAddr		
+	}
+	
+	remoteBucket.logger.Infof("remoteBucket.MemcachedAddrRestAddrMap=%v\n", remoteBucket.MemcachedAddrRestAddrMap)
 	return nil
 }
 

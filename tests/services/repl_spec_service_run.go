@@ -48,12 +48,12 @@ func main() {
 }
 
 func startReplicationSpecService() error {
-	metadataSvc, err := s.DefaultMetadataSvc()
+	metadataSvc, err := s.NewMetaKVMetadataSvc(nil)
 	if err != nil {
 		return errors.New(fmt.Sprintf("Error starting metadata service. err=%v\n", err.Error()))
 	}
 	
-	service := s.NewReplicationSpecService(metadataSvc, nil)
+	service := s.NewReplicationSpecService(nil, metadataSvc, nil)
 		
 	// create a test replication spec
 	spec := metadata.NewReplicationSpecification(sourceBucketName, 

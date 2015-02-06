@@ -20,6 +20,7 @@ const (
 	Part_Running PartState=iota
 	Part_Stopping PartState=iota
 	Part_Stopped PartState=iota
+	Part_Error	PartState=iota
 )
 
 type Part interface {

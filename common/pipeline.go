@@ -15,9 +15,12 @@ import (
 
 type PipelineState int
 const (
+	Pipeline_Initial PipelineState=iota
+	Pipeline_Starting PipelineState=iota
 	Pipeline_Running PipelineState=iota
-	Pipeline_Pending PipelineState=iota
+	Pipeline_Stopping PipelineState=iota
 	Pipeline_Stopped PipelineState=iota
+	Pipeline_Error	PipelineState=iota
 )
 
 //interface for Pipeline
@@ -41,5 +44,6 @@ type Pipeline interface {
 	Settings() map[string]interface{}
 	
 	State () PipelineState
+	SetState(state PipelineState) error
 	InstanceId() string
 }

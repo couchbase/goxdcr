@@ -38,7 +38,7 @@ var options struct {
 	remoteHostName         string // remote cluster host name
 	remoteUserName         string //remote cluster userName
 	remotePassword         string //remote cluster password
-	remoteDemandEncryption bool   // whether encryption is needed
+	remoteDemandEncryption uint64 // whether encryption is needed
 	remoteCertificateFile  string // file containing certificate for encryption
 
 	newRemoteName     string // new remote cluster name
@@ -61,7 +61,7 @@ func argParse() {
 		"remote cluster host name")
 	flag.StringVar(&options.remoteUserName, "remoteUserName", "Administrator", "remote cluster userName")
 	flag.StringVar(&options.remotePassword, "remotePassword", "welcome", "remote cluster password")
-	flag.BoolVar(&options.remoteDemandEncryption, "remoteDemandEncryption", false, "whether encryption is needed")
+	flag.Uint64Var(&options.remoteDemandEncryption, "remoteDemandEncryption", 0, "whether encryption is needed")
 	flag.StringVar(&options.remoteCertificateFile, "remoteCertificateFile", "", "file containing certificate for encryption")
 
 	flag.StringVar(&options.newRemoteName, "newRemoteName", "newRemote",
@@ -322,7 +322,7 @@ func testDeleteRemoteCluster(remoteName string) error {
 	return err
 }
 
-func verifyRemoteClusterWithoutId(remoteCluster *metadata.RemoteClusterReference, name, hostname, username, password string, demandEncryption bool) error {
+func verifyRemoteClusterWithoutId(remoteCluster *metadata.RemoteClusterReference, name, hostname, username, password string, demandEncryption uint64) error {
 	if err := common.ValidateFieldValue(base.RemoteClusterUuid, name, remoteCluster.Name); err == nil {
 		return err
 	}
@@ -339,7 +339,7 @@ func verifyRemoteClusterWithoutId(remoteCluster *metadata.RemoteClusterReference
 		return err
 	}
 
-	if err := common.ValidateFieldValue(base.RemoteClusterDemandEncryption, demandEncryption, remoteCluster.DemandEncryption); err != nil {
+	if err := common.ValidateFieldValue(base.RemoteClusterDemandEncryption, demandEncryption != 0, remoteCluster.DemandEncryption); err != nil {
 		return err
 	}
 
@@ -353,14 +353,14 @@ func verifyRemoteClusterId(remoteCluster *metadata.RemoteClusterReference, id st
 	return nil
 }
 
-func createRequestBody(name, hostname, username, password string, demandEncryption bool, certificateFile string) ([]byte, error) {
+func createRequestBody(name, hostname, username, password string, demandEncryption uint64, certificateFile string) ([]byte, error) {
 
 	params := make(map[string]interface{})
 	params[base.RemoteClusterName] = name
 	params[base.RemoteClusterHostName] = hostname
 	params[base.RemoteClusterUserName] = username
 	params[base.RemoteClusterPassword] = password
-	params[base.RemoteClusterDemandEncryption] = demandEncryption
+	params[base.RemoteClusterDemandEncryption] = int(demandEncryption)
 
 	// read certificate from file
 	if certificateFile != "" {

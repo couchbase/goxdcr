@@ -217,10 +217,10 @@ func NewConn(hostName string, username string, password string) (conn *mcc.Clien
 
 	// authentic using user/pass
 	if username != "" {
-		_connPoolMgr.logger.Debug("Authenticate...")
+		ConnPoolMgr().logger.Debug("Authenticate...")
 		_, err = conn.Auth(username, password)
 		if err != nil {
-			_connPoolMgr.logger.Errorf("err=%v\n", err)
+			ConnPoolMgr().logger.Errorf("err=%v\n", err)
 			conn.Close()
 			return nil, err
 		}

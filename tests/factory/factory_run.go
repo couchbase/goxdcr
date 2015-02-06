@@ -28,7 +28,7 @@ var options struct {
 	remoteHostName         string // remote cluster host name
 	remoteUserName         string //remote cluster userName
 	remotePassword         string //remote cluster password
-	remoteDemandEncryption bool   // whether encryption is needed
+	remoteDemandEncryption uint64   // whether encryption is needed
 	remoteCertificateFile  string // file containing certificate for encryption
 }
 
@@ -53,7 +53,7 @@ func argParse() {
 		"remote cluster host name")
 	flag.StringVar(&options.remoteUserName, "remoteUserName", "Administrator", "remote cluster userName")
 	flag.StringVar(&options.remotePassword, "remotePassword", "welcome", "remote cluster password")
-	flag.BoolVar(&options.remoteDemandEncryption, "remoteDemandEncryption", false, "whether encryption is needed")
+	flag.Uint64Var(&options.remoteDemandEncryption, "remoteDemandEncryption", 0, "whether encryption is needed")
 	flag.StringVar(&options.remoteCertificateFile, "remoteCertificateFile", "", "file containing certificate for encryption")
 
 	flag.Parse()
@@ -125,7 +125,7 @@ func invokeFactory() error {
 
 	defer common.DeleteTestRemoteCluster(remote_cluster_svc, options.remoteName)
 
-	remoteClusterRef, err := remote_cluster_svc.RemoteClusterByRefName(options.remoteName)
+	remoteClusterRef, err := remote_cluster_svc.RemoteClusterByRefName(options.remoteName, false)
 	if err != nil {
 		fmt.Println(err.Error())
 		return err

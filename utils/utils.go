@@ -78,19 +78,35 @@ func RecoverPanic(err *error) {
 	}
 }
 
+
+func LocalPool(localConnectStr string) (couchbase.Pool, error) {
+	url := fmt.Sprintf("http://%s", localConnectStr)
+	client, err := couchbase.ConnectWithAuth(url, cbauth.NewAuthHandler(nil))
+	if err != nil {
+		return couchbase.Pool{}, NewEnhancedError(fmt.Sprintf("Error connecting to couchbase. url=%v", url), err)
+	}
+	return client.GetPool("default")
+}
+
+func RemotePool(remoteConnectStr string, remoteUsername string, remotePassword string) (couchbase.Pool, error) {
+	url := fmt.Sprintf("http://%s:%s@%s", remoteUsername, remotePassword, remoteConnectStr)
+	client, err := couchbase.Connect(url)
+	if err != nil {
+		return couchbase.Pool{}, NewEnhancedError(fmt.Sprintf("Error connecting to couchbase. url=%v", url), err)
+	}
+	logger_utils.Infof("client=%v\n", client)
+	return client.GetPool("default")
+}
+
 // Get bucket in local cluster
 func LocalBucket(localConnectStr, bucketName string) (*couchbase.Bucket, error) {
 	logger_utils.Debugf("Getting local bucket name=%v\n", bucketName)
 
-	url := fmt.Sprintf("http://%s", localConnectStr)
-	client, err := couchbase.ConnectWithAuth(url, cbauth.NewAuthHandler(nil))
+	pool, err := LocalPool(localConnectStr)
 	if err != nil {
-		return nil, NewEnhancedError(fmt.Sprintf("Error connecting to couchbase. url=%v", url), err)
+		return nil, err
 	}
-	pool, err := client.GetPool("default")
-	if err != nil {
-		return nil, NewEnhancedError("Error getting pool with name 'default'.", err)
-	}
+
 	bucket, err := pool.GetBucket(bucketName)
 	if err != nil {
 		return nil, NewEnhancedError(fmt.Sprintf("Error getting bucket, %v, from pool.", bucketName), err)
