@@ -46,6 +46,9 @@ type DcpNozzle struct {
 	// the list of vbuckets that the dcp nozzle is responsible for
 	// this allows multiple  dcp nozzles to be created for a kv node
 	vbnos []uint16
+	
+	vb_stream_status map[uint16]bool
+	
 	// immutable fields
 	bucket  *couchbase.Bucket
 	uprFeed *couchbase.UprFeed
@@ -86,6 +89,7 @@ func NewDcpNozzle(id string,
 		bOpen:           true,             /*bOpen	bool*/
 		childrenWaitGrp: sync.WaitGroup{}, /*childrenWaitGrp sync.WaitGroup*/
 		lock_uprFeed:    sync.Mutex{},
+		vb_stream_status: make(map[uint16]bool), 
 	}
 
 	msg_callback_func = nil
@@ -102,6 +106,11 @@ func (dcp *DcpNozzle) initialize(settings map[string]interface{}) (err error) {
 	dcp.finch = make(chan bool)
 	feedName := fmt.Sprintf("%v", time.Now().UnixNano())
 	dcp.uprFeed, err = dcp.bucket.StartUprFeed(feedName, uint32(0))
+	
+	//initialize vb_stream_status
+	for _, vb := range dcp.vbnos {
+		dcp.vb_stream_status[vb] = false
+	}
 	return
 }
 
@@ -235,28 +244,38 @@ func (dcp *DcpNozzle) processData() (err error) {
 				dcp.handleGeneralError(errors.New("DCP stream is closed."))
 				goto done
 			}
-			if m.Status == gomemcached.NOT_MY_VBUCKET {
-				dcp.Logger().Errorf("Raise error condition %v\n", base.ErrorNotMyVbucket)
-				otherInfo := utils.WrapError(base.ErrorNotMyVbucket)
-				dcp.RaiseEvent(common.ErrorEncountered, nil, dcp, nil, otherInfo)
-				return base.ErrorNotMyVbucket
-			} else if m.Status == gomemcached.ROLLBACK {
-				rollbackseq := binary.BigEndian.Uint64(m.Value[:8])
-				vbno := m.VBucket
-
-				//need to request the uprstream for the vbucket again
-				opaque := newOpaque()
-				flags := uint32(0)
-				seqEnd := uint64(0xFFFFFFFFFFFFFFFF)
-				dcp.Logger().Infof("%v re-starting vb stream for vb=%v after receiving roll-back event\n", dcp.Id(), vbno)
-				vbts := dcp.cur_ts[vbno]
-				dcp.Logger().Infof("%v starting vb stream for vb=%v, starting seqno=%v\n", dcp.Id(), vbts.Vbno, rollbackseq)
-				err := dcp.uprFeed.UprRequestStream(vbno, opaque, flags, vbts.Vbuuid, rollbackseq, seqEnd, rollbackseq, rollbackseq)
-				if err != nil {
-					dcp.Logger().Errorf("Failed to request dcp stream after receiving roll-back for vb=%v\n", vbno)
-					otherInfo := utils.WrapError(err)
+			if m.Opcode == gomemcached.UPR_STREAMREQ {
+				if m.Status == gomemcached.NOT_MY_VBUCKET {
+					dcp.Logger().Errorf("Raise error condition %v\n", base.ErrorNotMyVbucket)
+					otherInfo := utils.WrapError(base.ErrorNotMyVbucket)
 					dcp.RaiseEvent(common.ErrorEncountered, nil, dcp, nil, otherInfo)
-					return err
+					return base.ErrorNotMyVbucket
+				} else if m.Status == gomemcached.ROLLBACK {
+					rollbackseq := binary.BigEndian.Uint64(m.Value[:8])
+					vbno := m.VBucket
+
+					//need to request the uprstream for the vbucket again
+					opaque := newOpaque()
+					flags := uint32(0)
+					seqEnd := uint64(0xFFFFFFFFFFFFFFFF)
+					dcp.Logger().Infof("%v re-starting vb stream for vb=%v after receiving roll-back event\n", dcp.Id(), vbno)
+					vbts := dcp.cur_ts[vbno]
+					dcp.Logger().Infof("%v starting vb stream for vb=%v, starting seqno=%v\n", dcp.Id(), vbts.Vbno, rollbackseq)
+					err := dcp.uprFeed.UprRequestStream(vbno, opaque, flags, vbts.Vbuuid, rollbackseq, seqEnd, rollbackseq, rollbackseq)
+					if err != nil {
+						dcp.Logger().Errorf("Failed to request dcp stream after receiving roll-back for vb=%v\n", vbno)
+						otherInfo := utils.WrapError(err)
+						dcp.RaiseEvent(common.ErrorEncountered, nil, dcp, nil, otherInfo)
+						return err
+					}
+				}else if m.Status == gomemcached.SUCCESS {
+					vbno := m.VBucket
+					_, ok := dcp.vb_stream_status[vbno] 
+					if ok {
+						dcp.vb_stream_status[vbno] = true
+					}else {
+						panic(fmt.Sprintf("Stream for vb=%v is not supposed to be opened\n", vbno))
+					}
 				}
 
 			} else {
@@ -294,7 +313,7 @@ func (dcp *DcpNozzle) onExit() {
 }
 
 func (dcp *DcpNozzle) StatusSummary() string {
-	return fmt.Sprintf("Dcp %v streamed %v items", dcp.Id(), dcp.counter)
+	return fmt.Sprintf("Dcp %v streamed %v items. %v streams inactive", dcp.Id(), dcp.counter, dcp.closedDcpStream())
 }
 
 func (dcp *DcpNozzle) handleGeneralError(err error) {
@@ -342,6 +361,15 @@ func (dcp *DcpNozzle) GetVBList() []uint16 {
 	return dcp.vbnos
 }
 
+func (dcp *DcpNozzle) closedDcpStream () []uint16 {
+	ret := []uint16{}
+	for vb, active := range dcp.vb_stream_status {
+		if !active {
+			ret = append (ret, vb)
+		}
+	}
+	return ret
+}
 // generate a new 16 bit opaque value set as MSB.
 func newOpaque() uint16 {
 	// bit 26 ... 42 from UnixNano().

@@ -241,7 +241,6 @@ func (xdcrf *XDCRFactory) constructOutgoingNozzles(spec *metadata.ReplicationSpe
 		xdcrf.logger.Errorf("Error getting remote cluster with uuid=%v, err=%v\n", spec.TargetClusterUUID, err)
 		return nil, nil, err
 	}
-
 	kvVBMap, err := xdcrf.cluster_info_svc.GetServerVBucketsMap(targetClusterRef, targetBucketName)
 	if err != nil {
 		xdcrf.logger.Errorf("Error getting server vbuckets map, err=%v\n", err)

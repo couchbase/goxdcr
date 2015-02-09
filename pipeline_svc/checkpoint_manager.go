@@ -225,6 +225,7 @@ func (ckmgr *CheckpointManager) updateCurrentVBUUID(vbno uint16, vbuuid uint64) 
 	ckmgr.cur_ckpts_locks[vbno].Unlock()
 	record := ckmgr.cur_ckpts[vbno]
 	record.Target_vb_uuid = vbuuid
+	ckmgr.cur_ckpts[vbno] = record
 }
 
 func (ckmgr *CheckpointManager) VBTimestamps(topic string) (map[uint16]*base.VBTimestamp, error) {
@@ -245,6 +246,7 @@ func (ckmgr *CheckpointManager) VBTimestamps(topic string) (map[uint16]*base.VBT
 	}
 	var failoverLogMap couchbase.FailoverLog
 	var highseqnomap = make(map[uint16]uint64)
+	ckmgr.logger.Debugf("Found %v checkpoit document for replication %v\n", len(ckptDocs), topic)
 	if len(ckptDocs) > 0 {
 		//populate failover uuid on cur_ckpts
 		failoverLogMap, highseqnomap, err = ckmgr.getFailoverLogAndHighSeqno()
@@ -320,15 +322,14 @@ func (ckmgr *CheckpointManager) startSeqnoGetter(getter_id int, listOfVbs []uint
 				bMatch := false
 				var err error
 				bMatch, current_remoteVBUUID, err = ckmgr.capi_svc.PreReplicate(ckmgr.remote_bucket, remote_vb_status, disableCkptBackwardsCompat)
-				if current_remoteVBUUID != remote_vb_status.VBUUID {
-					//remote vb topology changed
-					//udpate the vb_uuid and try again
+				//remote vb topology changed
+				//udpate the vb_uuid and try again
+				if err == nil {
 					ckmgr.updateCurrentVBUUID(vbno, current_remoteVBUUID)
-					ckmgr.logger.Debugf("Remote vbucket %v has a new uuid %v, update and call _pre_replicate again\n", current_remoteVBUUID, vbno)
-				} else {
+					ckmgr.logger.Infof("Remote vbucket %v has a new uuid %v, update\n", current_remoteVBUUID, vbno)
 					ckmgr.logger.Debugf("Done with _pre_prelicate call for %v for vbno=%v, bMatch=%v", remote_vb_status, vbno, bMatch)
 				}
-
+				
 				if err != nil || bMatch {
 					if bMatch {
 						ckmgr.logger.Debugf("Remote bucket %v vbno %v agreed on the checkpoint %v\n", ckmgr.remote_bucket, vbno, ckpt_record)
@@ -340,6 +341,7 @@ func (ckmgr *CheckpointManager) startSeqnoGetter(getter_id int, listOfVbs []uint
 						//there is an error to do _pre_replicate
 						//so the start seqno for this vb should be 0
 						ckmgr.logger.Errorf("Pre_replicate failed. err=%v\n", err)
+						errMap[vbno] = err
 
 					}
 					goto POPULATE
@@ -435,7 +437,7 @@ func (ckmgr *CheckpointManager) populateVBTimestamp(ckptDoc *metadata.Checkpoint
 
 		//validate and adjust vbts
 		highseqno := highseqno_map[vbno]
-		ckmgr.logger.Infof("Seqno =%v, highseqno=%v", vbts.Seqno, highseqno)
+		ckmgr.logger.Infof("vbno=%v, Seqno =%v, highseqno=%v", vbno, vbts.Seqno, highseqno)
 		if vbts.Seqno > highseqno {
 			vbts.Seqno = highseqno
 		}

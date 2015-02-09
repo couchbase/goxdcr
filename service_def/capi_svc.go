@@ -56,8 +56,10 @@ func (remoteBucket *RemoteBucketInfo) refresh_internal(remote_cluster_svc Remote
 			return err
 		}
 
+
 		remoteBucket.RemoteClusterRef = remoteClusterRef
 	}
+
 
 	username, password, err := remoteBucket.RemoteClusterRef.MyCredentials()
 	if err != nil {

@@ -799,7 +799,7 @@ func (xmem *XmemNozzle) Receive(data interface{}) error {
 	xmem.dataChan <- request
 	xmem.counter_received++
 
-	if xmem.counter_received <= received_old || len(xmem.dataChan) <= dataChan_len_old {
+	if xmem.counter_received <= received_old {
 		panic(fmt.Sprintf("counter_received_old=%v, counter_received=%v, dataChan_len_old=%v, dataChan_len=%v",
 			received_old, xmem.counter_received, dataChan_len_old, len(xmem.dataChan)))
 	}
@@ -1609,11 +1609,14 @@ func (xmem *XmemNozzle) readFromClient(client *xmemClient) (*mc.MCResponse, erro
 			} else if response.Status == mc.NOT_MY_VBUCKET {
 				//the original error message is too long, which clogs the log
 				err = base.ErrorNotMyVbucket
-				xmem.repairConn(client, err.Error())
+				pool := base.ConnPoolMgr().GetPool(client.poolName)
+				if pool != nil {
+					pool.ReleaseConnections()
+				}
 			}
 			xmem.handleGeneralError(err)
 			client.logger.Errorf("fatal err=%v", err)
-			return nil, fatalError
+			return response, fatalError
 		} else if err == response {
 			//response.Status != SUCCESSFUL, in this case, gomemcached return the response as err as well
 			//return the err as nil so that caller can differentiate the application error from transport
