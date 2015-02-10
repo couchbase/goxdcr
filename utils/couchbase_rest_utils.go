@@ -263,7 +263,7 @@ func ConstructHttpRequest(
 	var baseURL_new string
 
 	//process the URL
-	if certificate == nil {
+	if len(certificate) == 0 {
 		baseURL_new = EnforcePrefix("http://", baseURL)
 	} else {
 		baseURL_new = EnforcePrefix("https://", baseURL)
