@@ -61,7 +61,7 @@ var BatchSizeConfig = &SettingsConfig{2048, &Range{10, 10000}}
 var FailureRestartIntervalConfig = &SettingsConfig{30, &Range{1, 300}}
 var OptimisticReplicationThresholdConfig = &SettingsConfig{256, &Range{0, 20 * 1024 * 1024}}
 var SourceNozzlePerNodeConfig = &SettingsConfig{2, &Range{1, 10}}
-var TargetNozzlePerNodeConfig = &SettingsConfig{2, &Range{1, 10}}
+var TargetNozzlePerNodeConfig = &SettingsConfig{2, &Range{1, 100}}
 var MaxExpectedReplicationLagConfig = &SettingsConfig{1000, nil}
 var TimeoutPercentageCapConfig = &SettingsConfig{50, &Range{0, 100}}
 var PipelineLogLevelConfig = &SettingsConfig{log.LogLevelInfo, nil}
@@ -341,7 +341,7 @@ func (s *ReplicationSettings) UpdateSettingsFromMap(settingsMap map[string]inter
 		}
 	}
 
-	return 
+	return
 }
 
 func (s *ReplicationSettings) ToMap() map[string]interface{} {
@@ -365,6 +365,7 @@ func (s *ReplicationSettings) ToMap() map[string]interface{} {
 
 func ValidateAndConvertSettingsValue(key string, value string) (convertedValue interface{}, err error) {
 	switch key {
+	// TODO add validation for these enum values
 	case ReplicationType, PipelineLogLevel:
 		// string parameters need no conversion
 		convertedValue = value

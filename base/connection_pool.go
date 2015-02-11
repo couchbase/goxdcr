@@ -38,6 +38,11 @@ type connPoolMgr struct {
 
 var _connPoolMgr connPoolMgr
 
+// ensure that _connPoolMgr is initialized
+func init() {
+	ConnPoolMgr()
+}
+
 /******************************************************************
  *
  *  Connection management

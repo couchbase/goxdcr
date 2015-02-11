@@ -908,6 +908,9 @@ func cleanup() {
 func exitProcess(byForce bool) {
 	//clean up the connection pool
 	defer base.ConnPoolMgr().Close()
+	
+	//clean up the tcp connection pool
+	defer base.TCPConnPoolMgr().Close()
 
 	if !byForce {
 		cleanup()
@@ -1088,10 +1091,7 @@ func constructGenericReplicationFields(realUserId *base.RealUserId) (*base.Gener
 }
 
 func constructReplicationSpecificFieldsFromSpec(spec *metadata.ReplicationSpecification) (*base.ReplicationSpecificFields, error) {
-	remoteClusterName, err := getRemoteClusterNameFromClusterUuid(spec.TargetClusterUUID)
-	if err != nil {
-		return nil, err
-	}
+	remoteClusterName := RemoteClusterService().GetRemoteClusterNameFromClusterUuid(spec.TargetClusterUUID)
 
 	return &base.ReplicationSpecificFields{
 		SourceBucketName:  spec.SourceBucketName,
@@ -1134,15 +1134,6 @@ func constructUpdateDefaultReplicationSettingsEvent(changedSettingsMap *map[stri
 	return &base.UpdateDefaultReplicationSettingsEvent{
 		GenericReplicationFields: *genericReplicationFields,
 		UpdatedSettings:          convertedSettingsMap}, nil
-}
-
-//get remote cluster name from remote cluster uuid
-func getRemoteClusterNameFromClusterUuid(remoteClusterUUID string) (string, error) {
-	remoteClusterRef, err := RemoteClusterService().RemoteClusterByUuid(remoteClusterUUID, false)
-	if err != nil {
-		return "", err
-	}
-	return remoteClusterRef.Name, nil
 }
 
 func logAuditErrors(err error) {
