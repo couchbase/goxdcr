@@ -46,9 +46,9 @@ type DcpNozzle struct {
 	// the list of vbuckets that the dcp nozzle is responsible for
 	// this allows multiple  dcp nozzles to be created for a kv node
 	vbnos []uint16
-	
+
 	vb_stream_status map[uint16]bool
-	
+
 	// immutable fields
 	bucket  *couchbase.Bucket
 	uprFeed *couchbase.UprFeed
@@ -82,14 +82,14 @@ func NewDcpNozzle(id string,
 	part := NewAbstractPartWithLogger(id, server.Logger())
 
 	dcp := &DcpNozzle{
-		bucket:          bucket,
-		vbnos:           vbnos,
-		GenServer:       server,           /*gen_server.GenServer*/
-		AbstractPart:    part,             /*AbstractPart*/
-		bOpen:           true,             /*bOpen	bool*/
-		childrenWaitGrp: sync.WaitGroup{}, /*childrenWaitGrp sync.WaitGroup*/
-		lock_uprFeed:    sync.Mutex{},
-		vb_stream_status: make(map[uint16]bool), 
+		bucket:           bucket,
+		vbnos:            vbnos,
+		GenServer:        server,           /*gen_server.GenServer*/
+		AbstractPart:     part,             /*AbstractPart*/
+		bOpen:            true,             /*bOpen	bool*/
+		childrenWaitGrp:  sync.WaitGroup{}, /*childrenWaitGrp sync.WaitGroup*/
+		lock_uprFeed:     sync.Mutex{},
+		vb_stream_status: make(map[uint16]bool),
 	}
 
 	msg_callback_func = nil
@@ -106,7 +106,7 @@ func (dcp *DcpNozzle) initialize(settings map[string]interface{}) (err error) {
 	dcp.finch = make(chan bool)
 	feedName := fmt.Sprintf("%v", time.Now().UnixNano())
 	dcp.uprFeed, err = dcp.bucket.StartUprFeed(feedName, uint32(0))
-	
+
 	//initialize vb_stream_status
 	for _, vb := range dcp.vbnos {
 		dcp.vb_stream_status[vb] = false
@@ -268,15 +268,21 @@ func (dcp *DcpNozzle) processData() (err error) {
 						dcp.RaiseEvent(common.ErrorEncountered, nil, dcp, nil, otherInfo)
 						return err
 					}
-				}else if m.Status == gomemcached.SUCCESS {
+				} else if m.Status == gomemcached.SUCCESS {
 					vbno := m.VBucket
-					_, ok := dcp.vb_stream_status[vbno] 
+					_, ok := dcp.vb_stream_status[vbno]
 					if ok {
 						dcp.vb_stream_status[vbno] = true
-					}else {
+					} else {
 						panic(fmt.Sprintf("Stream for vb=%v is not supposed to be opened\n", vbno))
 					}
 				}
+
+			} else if m.Opcode == gomemcached.UPR_STREAMEND {
+				err_streamend := fmt.Errorf("dcp stream for vb=%v is closed by producer", m.VBucket)
+				dcp.Logger().Infof("%v: %v", dcp.Id(), err_streamend)
+				dcp.handleGeneralError(err_streamend)
+				goto done
 
 			} else {
 				if dcp.IsOpen() {
@@ -317,12 +323,12 @@ func (dcp *DcpNozzle) StatusSummary() string {
 }
 
 func (dcp *DcpNozzle) handleGeneralError(err error) {
-	dcp.Logger().Errorf("Raise error condition %v\n", err)
 
 	err1 := dcp.SetState(common.Part_Error)
 	if err1 == nil {
 		otherInfo := utils.WrapError(err)
 		dcp.RaiseEvent(common.ErrorEncountered, nil, dcp, nil, otherInfo)
+		dcp.Logger().Errorf("Raise error condition %v\n", err)
 	} else {
 		dcp.Logger().Debugf("%v in shutdown process. err=%v is ignored\n", dcp.Id(), err)
 	}
@@ -361,15 +367,16 @@ func (dcp *DcpNozzle) GetVBList() []uint16 {
 	return dcp.vbnos
 }
 
-func (dcp *DcpNozzle) closedDcpStream () []uint16 {
+func (dcp *DcpNozzle) closedDcpStream() []uint16 {
 	ret := []uint16{}
 	for vb, active := range dcp.vb_stream_status {
 		if !active {
-			ret = append (ret, vb)
+			ret = append(ret, vb)
 		}
 	}
 	return ret
 }
+
 // generate a new 16 bit opaque value set as MSB.
 func newOpaque() uint16 {
 	// bit 26 ... 42 from UnixNano().

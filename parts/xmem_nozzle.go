@@ -1057,10 +1057,12 @@ func (xmem *XmemNozzle) batchGetMeta(bigDoc_map map[string]*mc.MCRequest) (map[s
 
 	}(len(bigDoc_map), receiver_fin_ch, opaque_key_map, respMap, 1*time.Second, err_list, waitGrp, xmem.Logger())
 
-	var opaque uint32 = uint32(time.Now().Unix())
+	var sequence uint16 = uint16(time.Now().Unix()<<32)
+	var index uint16 =0
 	for key, originalReq := range bigDoc_map {
+		opaque := xmem.getOpaque (index, sequence)
 		req := xmem.composeRequestForGetMeta(key, originalReq.VBucket, opaque)
-		err := xmem.sendWithRetry(xmem.client_for_getMeta, xmem.config.maxRetry, req.Bytes())
+		err := xmem.writeToClient(xmem.client_for_getMeta, req.Bytes())
 		if err != nil {
 			//kill the receiver and return
 			close(receiver_fin_ch)

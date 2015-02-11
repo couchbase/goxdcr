@@ -88,6 +88,12 @@ func (top_detect_svc *TopologyChangeDetectorSvc) watch(fin_ch chan bool, waitGrp
 			top_detect_svc.logger.Info("Received finish signal, watch routine exit")
 			return
 		case <-ticker.C:
+					if top_detect_svc.pipeline.State() != common.Pipeline_Running {
+				//pipeline is no longer running, kill itself
+				top_detect_svc.logger.Info("Pipeline is no longer running, exit.")
+				return
+			}
+		
 			err := top_detect_svc.validateSourceTopology()
 			if err != nil && err == source_topology_changedErr {
 				otherInfo := utils.WrapError(err)

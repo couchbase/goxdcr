@@ -352,9 +352,9 @@ func (service *RemoteClusterService) validateCache(ref *metadata.RemoteClusterRe
 	service.logger.Infof("Remote Cluster reference %v need to be updated", ref.HostName)
 	err := service.cacheRef(ref)
 	if err != nil {
-		service.logger.Infof("Didn't cache the remote cluster, err=%v\n", err)
+		service.logger.Infof("Didn't update the cache for remote cluster %v, err=%v\n", ref.Id, err)
 	}
-	return nil
+	return err
 }
 
 func (service *RemoteClusterService) cacheRef(ref *metadata.RemoteClusterReference) error {
@@ -400,6 +400,13 @@ func (service *RemoteClusterService) getCache(key string) (*remoteClusterCache, 
 
 func (service *RemoteClusterService) refresh(ref *metadata.RemoteClusterReference) (*metadata.RemoteClusterReference, error) {
 	service.logger.Infof("Refresh remote cluster reference %v\n", ref.Id)
+
+	err := service.validateCache(ref)
+
+	if err == nil {
+		return ref, nil
+	}
+
 	connStr, err := ref.MyConnectionStr()
 	if err != nil {
 		return nil, err
@@ -407,11 +414,6 @@ func (service *RemoteClusterService) refresh(ref *metadata.RemoteClusterReferenc
 	username, password, err := ref.MyCredentials()
 	if err != nil {
 		return nil, err
-	}
-
-	_, err = utils.RemotePool(connStr, username, password)
-	if err == nil {
-		return ref, nil
 	}
 
 	service.logger.Infof("Connstr %v in remote cluster reference failed to connect. Try to use alternative connStr", connStr)
@@ -425,6 +427,7 @@ func (service *RemoteClusterService) refresh(ref *metadata.RemoteClusterReferenc
 	}
 
 	service.logger.Infof("ref_cache=%v\n", ref_cache)
+
 
 	var working_conn_str string = ""
 	for _, alt_conn_str := range ref_cache.nodes_connectionstr {
@@ -445,9 +448,6 @@ func (service *RemoteClusterService) refresh(ref *metadata.RemoteClusterReferenc
 		if err != nil {
 			return ref, err
 		}
-
-		//update the cache
-		err = service.validateCache(ref)
 
 		if err != nil {
 			return ref, err
