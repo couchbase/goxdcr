@@ -126,7 +126,7 @@ func (pipelineSupervisor *PipelineSupervisor) ReportFailure(errors map[string]er
 }
 
 func (pipelineSupervisor *PipelineSupervisor) declarePipelineBroken() {
-	pipelineSupervisor.Logger().Errorf("Received error report : %v, declare pipeline broken", pipelineSupervisor.errors_seen)
+	pipelineSupervisor.Logger().Errorf("Received error report : %v, declare pipeline broken")
 	err := pipelineSupervisor.pipeline.SetState(common.Pipeline_Error)
 	if err == nil {
 		pipelineSupervisor.ReportFailure(pipelineSupervisor.errors_seen)

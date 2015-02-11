@@ -14,9 +14,7 @@ import (
 )
 
 //constants
-
 var DefaultConnectionSize = 5
-var DefaultCAPIConnectionSize = 5
 var DefaultPoolName = "default"
 var AuditServicePoolName = "auditService"
 
@@ -29,14 +27,9 @@ var NodesPath = "/pools/nodes"
 var NodesSelfPath = "/nodes/self"
 var SSLPortsPath = "/nodes/self/xdcrSSLPorts"
 
-
-// constants for CAPI nozzle
-var RevsDiffPath = "/_revs_diff"
-var BulkDocsPath = "/_bulk_docs"
-
 //keys in the map which /nodes/self returns
 var CouchApiBase = "couchApiBase"
-var CouchApiBaseHttps = "couchApiBaseHTTPS"
+var CouchApiBaseHttps = "couchApiBaseHttps"
 
 // keys used in parsing cluster info
 var NodesKey = "nodes"
@@ -134,7 +127,6 @@ const (
 	ContentType = "Content-Type"
 	DefaultContentType = "application/x-www-form-urlencoded"
 	JsonContentType = "application/json"
-	ContentLength = "Content-Length"
 )
 
 //constant for replication tasklist status
@@ -162,6 +154,4 @@ var UILogComponentKey = "component"
 // so far all xdcr logs are of info level, thus we can hardcode it here
 var UILogXDCRLogLevel = "info"
 var UILogXDCRComponent = "xdcr"
-
-var CouchApiBaseUriDelimiter = "%2f"
 

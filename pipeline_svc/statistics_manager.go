@@ -138,7 +138,7 @@ func NewStatisticsManager(logger_ctx *log.LoggerContext, active_vbs map[string][
 		kv_mem_clients:  make(map[string]*mcc.Client),
 		endtime_map:     make(map[string]interface{}),
 		through_seqnos:  make(map[uint16]uint64)}
-	stats_mgr.collectors = []MetricsCollector{&outNozzleCollector{}, &dcpCollector{}, &routerCollector{}, &checkpointMgrCollector{}}
+	stats_mgr.collectors = []MetricsCollector{&xmemCollector{}, &dcpCollector{}, &routerCollector{}, &checkpointMgrCollector{}}
 	return stats_mgr
 }
 
@@ -193,13 +193,9 @@ func (stats_mgr *StatisticsManager) updateStats(finchan chan bool) error {
 					stats_mgr.logger.Info(stats_mgr.formatStatsForLog())
 
 					//log parts summary
-					outNozzle_parts := stats_mgr.pipeline.Targets()
-					for _, part := range outNozzle_parts {
-						if stats_mgr.pipeline.Specification().Settings.RepType == metadata.ReplicationTypeXmem {
-							stats_mgr.logger.Info(part.(*parts.XmemNozzle).StatusSummary())
-						} else {
-							stats_mgr.logger.Info(part.(*parts.CapiNozzle).StatusSummary())
-						}
+					xmem_parts := stats_mgr.pipeline.Targets()
+					for _, part := range xmem_parts {
+						stats_mgr.logger.Info(part.(*parts.XmemNozzle).StatusSummary())
 					}
 					dcp_parts := stats_mgr.pipeline.Sources()
 					for _, part := range dcp_parts {
@@ -570,52 +566,52 @@ type MetricsCollector interface {
 	Mount(pipeline common.Pipeline, stats_mgr *StatisticsManager) error
 }
 
-//metrics collector for XMem/CapiNozzle
-type outNozzleCollector struct {
+//metrics collector for XMemNozzle
+type xmemCollector struct {
 	stats_mgr *StatisticsManager
 }
 
-func (outNozzle_collector *outNozzleCollector) Mount(pipeline common.Pipeline, stats_mgr *StatisticsManager) error {
-	outNozzle_collector.stats_mgr = stats_mgr
-	outNozzle_parts := pipeline.Targets()
-	for _, part := range outNozzle_parts {
+func (xmem_collector *xmemCollector) Mount(pipeline common.Pipeline, stats_mgr *StatisticsManager) error {
+	xmem_collector.stats_mgr = stats_mgr
+	xmem_parts := pipeline.Targets()
+	for _, part := range xmem_parts {
 		registry := stats_mgr.getOrCreateRegistry(part.Id())
 		registry.Register(SIZE_REP_QUEUE_METRIC, metrics.NewHistogram(metrics.NewUniformSample(stats_mgr.sample_size)))
 		registry.Register(DOCS_REP_QUEUE_METRIC, metrics.NewHistogram(metrics.NewUniformSample(stats_mgr.sample_size)))
 		registry.Register(DOCS_WRITTEN_METRIC, metrics.NewCounter())
 		registry.Register(DATA_REPLICATED_METRIC, metrics.NewCounter())
 		registry.Register(DOCS_OPT_REPD_METRIC, metrics.NewCounter())
-		part.RegisterComponentEventListener(common.DataSent, outNozzle_collector)
-		part.RegisterComponentEventListener(common.DataReceived, outNozzle_collector)
+		part.RegisterComponentEventListener(common.DataSent, xmem_collector)
+		part.RegisterComponentEventListener(common.DataReceived, xmem_collector)
 
 	}
 	return nil
 }
 
-func (outNozzle_collector *outNozzleCollector) OnEvent(eventType common.ComponentEventType,
+func (xmem_collector *xmemCollector) OnEvent(eventType common.ComponentEventType,
 	item interface{},
 	component common.Component,
 	derivedItems []interface{},
 	otherInfos map[string]interface{}) {
 	if eventType == common.DataReceived {
-		outNozzle_collector.stats_mgr.logger.Debugf("Received a DataReceived event from %v", reflect.TypeOf(component))
-		queue_size := otherInfos[parts.STATS_QUEUE_SIZE].(int)
-		queue_size_bytes := otherInfos[parts.STATS_QUEUE_SIZE_BYTES].(int)
-		registry := outNozzle_collector.stats_mgr.registries[component.Id()]
+		xmem_collector.stats_mgr.logger.Debugf("Received a DataReceived event from %v", reflect.TypeOf(component))
+		queue_size := otherInfos[parts.XMEM_STATS_QUEUE_SIZE].(int)
+		queue_size_bytes := otherInfos[parts.XMEM_STATS_QUEUE_SIZE_BYTES].(int)
+		registry := xmem_collector.stats_mgr.registries[component.Id()]
 		registry.Get(DOCS_REP_QUEUE_METRIC).(metrics.Histogram).Sample().Update(int64(queue_size))
 		registry.Get(SIZE_REP_QUEUE_METRIC).(metrics.Histogram).Sample().Update(int64(queue_size_bytes))
 	} else if eventType == common.DataSent {
 		endTime := time.Now()
 		size := item.(*gomemcached.MCRequest).Size()
-		seqno := otherInfos[parts.EVENT_ADDI_SEQNO].(uint64)
-		opti_replicated := otherInfos[parts.EVENT_ADDI_OPT_REPD].(bool)
-		registry := outNozzle_collector.stats_mgr.registries[component.Id()]
+		seqno := otherInfos[parts.XMEM_EVENT_ADDI_SEQNO].(uint64)
+		opti_replicated := otherInfos[parts.XMEM_EVENT_ADDI_OPT_REPD].(bool)
+		registry := xmem_collector.stats_mgr.registries[component.Id()]
 		registry.Get(DOCS_WRITTEN_METRIC).(metrics.Counter).Inc(1)
 		registry.Get(DATA_REPLICATED_METRIC).(metrics.Counter).Inc(int64(size))
 		if opti_replicated {
 			registry.Get(DOCS_OPT_REPD_METRIC).(metrics.Counter).Inc(1)
 		}
-		outNozzle_collector.stats_mgr.endtime_map[fmt.Sprintf("%v", seqno)] = endTime
+		xmem_collector.stats_mgr.endtime_map[fmt.Sprintf("%v", seqno)] = endTime
 	}
 }
 

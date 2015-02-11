@@ -8,10 +8,10 @@ import (
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/goxdcr/parts"
+	"github.com/couchbase/goxdcr/pipeline_utils"
 	pp "github.com/couchbase/goxdcr/pipeline"
 	pctx "github.com/couchbase/goxdcr/pipeline_ctx"
 	"github.com/couchbase/goxdcr/pipeline_svc"
-	"github.com/couchbase/goxdcr/pipeline_utils"
 	"github.com/couchbase/goxdcr/service_def"
 	"github.com/couchbase/goxdcr/supervisor"
 	"math"
@@ -23,7 +23,6 @@ const (
 	PART_NAME_DELIMITER     = "_"
 	DCP_NOZZLE_NAME_PREFIX  = "dcp"
 	XMEM_NOZZLE_NAME_PREFIX = "xmem"
-	CAPI_NOZZLE_NAME_PREFIX = "capi"
 )
 
 // errors
@@ -71,16 +70,14 @@ func NewXDCRFactory(repl_spec_svc service_def.ReplicationSpecSvc,
 }
 
 func (xdcrf *XDCRFactory) NewPipeline(topic string) (common.Pipeline, error) {
+	logger_ctx := log.CopyCtx(xdcrf.default_logger_ctx)
+
 	spec, err := xdcrf.repl_spec_svc.ReplicationSpec(topic)
 	xdcrf.logger.Debugf("replication specification = %v\n", spec)
 	if err != nil {
 		xdcrf.logger.Errorf("Failed to get replication specification, err=%v\n", err)
 		return nil, err
 	}
-
-	logger_ctx := log.CopyCtx(xdcrf.default_logger_ctx)
-	logger_ctx.Log_level = spec.Settings.LogLevel
-	//TODO should we change log level on xdcrf.logger?
 
 	// popuplate pipeline using config
 	sourceNozzles, kv_vb_map, err := xdcrf.constructSourceNozzles(spec, topic, logger_ctx)
@@ -241,6 +238,7 @@ func (xdcrf *XDCRFactory) constructOutgoingNozzles(spec *metadata.ReplicationSpe
 		xdcrf.logger.Errorf("Error getting remote cluster with uuid=%v, err=%v\n", spec.TargetClusterUUID, err)
 		return nil, nil, err
 	}
+	
 	kvVBMap, err := xdcrf.cluster_info_svc.GetServerVBucketsMap(targetClusterRef, targetBucketName)
 	if err != nil {
 		xdcrf.logger.Errorf("Error getting server vbuckets map, err=%v\n", err)
@@ -261,24 +259,7 @@ func (xdcrf *XDCRFactory) constructOutgoingNozzles(spec *metadata.ReplicationSpe
 	maxTargetNozzlePerNode := spec.Settings.TargetNozzlePerNode
 	xdcrf.logger.Debugf("Target topology retrived. kvVBMap = %v\n", kvVBMap)
 
-	var vbCouchApiBaseMap map[uint16]string
-
 	for kvaddr, kvVBList := range kvVBMap {
-		nozzleType, err := xdcrf.getNozzleType(kvaddr, spec)
-		if err != nil {
-			xdcrf.logger.Errorf("Failed to get the nozzle type, err=%v\n", err)
-			return nil, nil, err
-		}
-		isCapiNozzle := (nozzleType == base.Capi)
-		if isCapiNozzle && len(vbCouchApiBaseMap) == 0 {
-			// construct vbCouchApiBaseMap only when nessary and only once
-			vbCouchApiBaseMap, err = ConstructVBCouchApiBaseMap(targetBucket, targetClusterRef)
-			if err != nil {
-				xdcrf.logger.Errorf("Failed to construct vbCouchApiBase map, err=%v\n", err)
-				return nil, nil, err
-			}
-		}
-
 		relevantVBs := xdcrf.filterVBList(kvVBList, kv_vb_map)
 
 		xdcrf.logger.Debugf("kvaddr = %v; kvVbList=%v, relevantVBs=-%v\n", kvaddr, kvVBList, relevantVBs)
@@ -292,35 +273,28 @@ func (xdcrf *XDCRFactory) constructOutgoingNozzles(spec *metadata.ReplicationSpe
 		xdcrf.logger.Debugf("Constructing %d nozzles, each is responsible for %d vbuckets\n", numOfNozzles, numOfVbPerNozzle)
 		var index int = 0
 		for i := 0; i < numOfNozzles; i++ {
-			// construct vb list for the out nozzle, which is needed by capi nozzle
+
+			// construct xmem nozzle
+			// partIds of the xmem nozzles look like "xmem_$kvaddr_1"
+			outNozzle, err := xdcrf.constructNozzleForTargetNode(spec.Id, kvaddr, targetBucketName, bucketPwd, i, logger_ctx)
+
+			if err != nil {
+				xdcrf.logger.Errorf("Failed to construct target nozzles, err=%v\n", err)
+				return nil, nil, err
+			}
+
+			outNozzles[outNozzle.Id()] = outNozzle
+
+			// construct vbMap for the out nozzle, which is needed by the router
 			// before statistics info is available, the default load balancing stragegy is to evenly distribute vbuckets among out nozzles
-			vbList := make([]uint16, 0)
 			for i := 0; i < numOfVbPerNozzle; i++ {
 				if index < numOfVbs {
-					vbList = append(vbList, relevantVBs[index])
+					vbNozzleMap[relevantVBs[index]] = outNozzle.Id()
 					index++
 				} else {
 					// no more vbs to process
 					break
 				}
-			}
-
-			// construct outgoing nozzle
-			var outNozzle common.Nozzle
-			if isCapiNozzle {
-				outNozzle, err = xdcrf.constructCAPINozzle(spec.Id, targetClusterRef.UserName, targetClusterRef.Password, targetClusterRef.Certificate, vbList, vbCouchApiBaseMap, i, logger_ctx)
-				if err != nil {
-					return nil, nil, err
-				}
-			} else {
-				outNozzle = xdcrf.constructXMEMNozzle(spec.Id, kvaddr, targetBucketName, bucketPwd, i, logger_ctx)
-			}
-
-			outNozzles[outNozzle.Id()] = outNozzle
-
-			// construct vbNozzleMap for the out nozzle, which is needed by the router
-			for _, vbno := range vbList {
-				vbNozzleMap[vbno] = outNozzle.Id()
 			}
 
 			xdcrf.logger.Debugf("Constructed out nozzle %v\n", outNozzle.Id())
@@ -342,25 +316,41 @@ func (xdcrf *XDCRFactory) constructRouter(id string, spec *metadata.ReplicationS
 	return router, err
 }
 
-func (xdcrf *XDCRFactory) getNozzleType(kvaddr string, spec *metadata.ReplicationSpecification) (base.XDCROutgoingNozzleType, error) {
-	switch spec.Settings.RepType {
-	case metadata.ReplicationTypeXmem:
-		xmemCompatible, err := xdcrf.cluster_info_svc.IsNodeCompatible(kvaddr, "2.5")
-		if err != nil {
-			xdcrf.logger.Errorf("Failed to get the version information, err=%v\n", err)
-			return -1, err
-		}
-		if xmemCompatible {
-			return base.Xmem, nil
-		} else {
-			xdcrf.logger.Infof("Using capi nozzle for %v since the node is not xmem compatible\n", kvaddr)
-			return base.Capi, nil
-		}
-	case metadata.ReplicationTypeCapi:
+func (xdcrf *XDCRFactory) constructNozzleForTargetNode(topic string, kvaddr string,
+	bucketName string,
+	bucketPwd string,
+	nozzle_index int,
+	logger_ctx *log.LoggerContext) (common.Nozzle, error) {
+	var nozzle common.Nozzle
+	nozzleType, err := xdcrf.getNozzleType(kvaddr)
+
+	if err != nil {
+		xdcrf.logger.Errorf("Failed to get the nozzle type, err=%v\n", err)
+		return nil, err
+	}
+
+	switch nozzleType {
+	case base.Xmem:
+		nozzle = xdcrf.constructXMEMNozzle(topic, kvaddr, bucketName, bucketPwd, nozzle_index, logger_ctx)
+	case base.Capi:
+		nozzle = xdcrf.constructCAPINozzle(topic, kvaddr, bucketName, bucketPwd, nozzle_index, logger_ctx)
+	}
+
+	return nozzle, err
+
+}
+
+func (xdcrf *XDCRFactory) getNozzleType(kvaddr string) (base.XDCROutgoingNozzleType, error) {
+	beforeXMEM, err := xdcrf.cluster_info_svc.IsNodeCompatible(kvaddr, "2.5")
+	if err != nil {
+		xdcrf.logger.Errorf("Failed to get the version information, err=%v\n", err)
+		return -1, err
+	}
+
+	if beforeXMEM {
+		return base.Xmem, nil
+	} else {
 		return base.Capi, nil
-	default:
-		// should never get here
-		return base.Xmem, errors.New(fmt.Sprintf("Invalid replication type %v", spec.Settings.RepType))
 	}
 }
 
@@ -369,41 +359,18 @@ func (xdcrf *XDCRFactory) constructXMEMNozzle(topic string, kvaddr string,
 	bucketPwd string,
 	nozzle_index int,
 	logger_ctx *log.LoggerContext) common.Nozzle {
-	// partIds of the xmem nozzles look like "xmem_$topic_$kvaddr_1"
 	xmemNozzle_Id := xdcrf.partId(XMEM_NOZZLE_NAME_PREFIX, topic, kvaddr, nozzle_index)
 	nozzle := parts.NewXmemNozzle(xmemNozzle_Id, kvaddr, bucketName, bucketPwd, logger_ctx)
 	return nozzle
 }
 
-func (xdcrf *XDCRFactory) constructCAPINozzle(topic string,
-	username string,
-	password string,
-	certificate []byte,
-	vbList []uint16,
-	vbCouchApiBaseMap map[uint16]string,
+func (xdcrf *XDCRFactory) constructCAPINozzle(topic string, kvaddr string,
+	bucketName string,
+	bucketPwd string,
 	nozzle_index int,
-	logger_ctx *log.LoggerContext) (common.Nozzle, error) {
-	if len(vbList) == 0 {
-		// should never get here
-		xdcrf.logger.Errorf("Skip constructing capi nozzle with index %v since it contains no vbucket", nozzle_index)
-	}
-
-	// construct a sub map of vbCouchApiBaseMap with keys in vbList
-	subVBCouchApiBaseMap := make(map[uint16]string)
-	for _, vbno := range vbList {
-		subVBCouchApiBaseMap[vbno] = vbCouchApiBaseMap[vbno]
-	}
-	// get capi connection string
-	couchApiBase := subVBCouchApiBaseMap[vbList[0]]
-	capiConnectionStr, err := GetCapiConnectionStrFromCouchApiBase(couchApiBase)
-	if err != nil {
-		return nil, err
-	}
-	xdcrf.logger.Debugf("Construct CapiNozzle: topic=%s, kvaddr=%s", topic, capiConnectionStr)
-	// partIds of the capi nozzles look like "capi_$topic_$kvaddr_1"
-	capiNozzle_Id := xdcrf.partId(CAPI_NOZZLE_NAME_PREFIX, topic, capiConnectionStr, nozzle_index)
-	nozzle := parts.NewCapiNozzle(capiNozzle_Id, capiConnectionStr, username, password, certificate, subVBCouchApiBaseMap, logger_ctx)
-	return nozzle, nil
+	logger_ctx *log.LoggerContext) common.Nozzle {
+	//TODO: implement it
+	return nil
 }
 
 func (xdcrf *XDCRFactory) ConstructSettingsForPart(pipeline common.Pipeline, part common.Part, settings map[string]interface{}, ts map[uint16]*base.VBTimestamp) (map[string]interface{}, error) {
@@ -414,9 +381,6 @@ func (xdcrf *XDCRFactory) ConstructSettingsForPart(pipeline common.Pipeline, par
 	} else if _, ok := part.(*parts.DcpNozzle); ok {
 		xdcrf.logger.Debugf("Construct settings for DcpNozzle %s", part.Id())
 		return xdcrf.constructSettingsForDcpNozzle(pipeline, part.(*parts.DcpNozzle), settings, ts)
-	} else if _, ok := part.(*parts.CapiNozzle); ok {
-		xdcrf.logger.Debugf("Construct settings for CapiNozzle %s", part.Id())
-		return xdcrf.constructSettingsForCapiNozzle(pipeline, settings)
 	} else {
 		return settings, nil
 	}
@@ -437,26 +401,13 @@ func (xdcrf *XDCRFactory) constructSettingsForXmemNozzle(pipeline common.Pipelin
 	xmemSettings := make(map[string]interface{})
 	repSettings := pipeline.Specification().Settings
 
-	xmemSettings[parts.SETTING_BATCHCOUNT] = repSettings.BatchCount
-	xmemSettings[parts.SETTING_BATCHSIZE] = repSettings.BatchSize
-	xmemSettings[parts.SETTING_RESP_TIMEOUT] = xdcrf.getTargetTimeoutEstimate(pipeline.Topic())
-	xmemSettings[parts.SETTING_BATCH_EXPIRATION_TIME] = time.Duration(float64(repSettings.MaxExpectedReplicationLag)*0.7) * time.Millisecond
-	xmemSettings[parts.SETTING_OPTI_REP_THRESHOLD] = repSettings.OptimisticReplicationThreshold
+	xmemSettings[parts.XMEM_SETTING_BATCHCOUNT] = repSettings.BatchCount
+	xmemSettings[parts.XMEM_SETTING_BATCHSIZE] = repSettings.BatchSize
+	xmemSettings[parts.XMEM_SETTING_RESP_TIMEOUT] = xdcrf.getTargetTimeoutEstimate(pipeline.Topic())
+	xmemSettings[parts.XMEM_SETTING_BATCH_EXPIRATION_TIME] = time.Duration(float64(repSettings.MaxExpectedReplicationLag)*0.7) * time.Millisecond
+	xmemSettings[parts.XMEM_SETTING_OPTI_REP_THRESHOLD] = repSettings.OptimisticReplicationThreshold
 
 	return xmemSettings, nil
-
-}
-
-func (xdcrf *XDCRFactory) constructSettingsForCapiNozzle(pipeline common.Pipeline, settings map[string]interface{}) (map[string]interface{}, error) {
-	capiSettings := make(map[string]interface{})
-	repSettings := pipeline.Specification().Settings
-
-	capiSettings[parts.SETTING_BATCHCOUNT] = repSettings.BatchCount
-	capiSettings[parts.SETTING_BATCHSIZE] = repSettings.BatchSize
-	capiSettings[parts.SETTING_RESP_TIMEOUT] = xdcrf.getTargetTimeoutEstimate(pipeline.Topic())
-	capiSettings[parts.SETTING_OPTI_REP_THRESHOLD] = repSettings.OptimisticReplicationThreshold
-
-	return capiSettings, nil
 
 }
 
@@ -512,9 +463,9 @@ func (xdcrf *XDCRFactory) registerServices(pipeline common.Pipeline, logger_ctx 
 	if err != nil {
 		return err
 	}
-
+	
 	//register topology change detect service
-	top_detect_svc := pipeline_svc.NewTopologyChangeDetectorSvc(xdcrf.cluster_info_svc, xdcrf.xdcr_topology_svc, logger_ctx)
+	top_detect_svc := pipeline_svc.NewTopologyChangeDetectorSvc (xdcrf.cluster_info_svc, xdcrf.xdcr_topology_svc, logger_ctx)
 	err = ctx.RegisterService(base.TOPOLOGY_CHANGE_DETECT_SVC, top_detect_svc)
 	if err != nil {
 		return err

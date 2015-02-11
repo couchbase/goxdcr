@@ -22,6 +22,4 @@ type RemoteClusterSvc interface {
 	DelRemoteCluster(refName string) error
 	RemoteClusters(refresh bool) (map[string]*metadata.RemoteClusterReference, error)
 	ValidateRemoteCluster(ref *metadata.RemoteClusterReference) error
-	// used by auditing and ui logging
-	GetRemoteClusterNameFromClusterUuid(uuid string) string
 }

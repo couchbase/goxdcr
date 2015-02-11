@@ -55,12 +55,10 @@ func (remoteBucket *RemoteBucketInfo) refresh_internal(remote_cluster_svc Remote
 			remoteBucket.logger.Errorf("Failed to get remote cluster reference with refName=%v, err=%v\n", remoteBucket.RemoteClusterRefName, err)
 			return err
 		}
-
-
+				
 		remoteBucket.RemoteClusterRef = remoteClusterRef
 	}
-
-
+	
 	username, password, err := remoteBucket.RemoteClusterRef.MyCredentials()
 	if err != nil {
 		return err
@@ -88,12 +86,12 @@ func (remoteBucket *RemoteBucketInfo) refresh_internal(remote_cluster_svc Remote
 	nodes := bucket.Nodes()
 	for _, node := range nodes {
 		restAddr := node.Hostname
-		host := utils.GetHostName(restAddr)
+		host := utils.GetHostName (restAddr)
 		memcachedPort := node.Ports["direct"]
-		memcachedAddr := utils.GetHostAddr(host, uint16(memcachedPort))
-		remoteBucket.MemcachedAddrRestAddrMap[memcachedAddr] = restAddr
+		memcachedAddr := utils.GetHostAddr (host, uint16(memcachedPort))
+		remoteBucket.MemcachedAddrRestAddrMap[memcachedAddr] = restAddr		
 	}
-
+	
 	remoteBucket.logger.Infof("remoteBucket.MemcachedAddrRestAddrMap=%v\n", remoteBucket.MemcachedAddrRestAddrMap)
 	return nil
 }

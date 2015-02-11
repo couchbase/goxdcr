@@ -296,12 +296,10 @@ func getDocCounts(clusterAddress string, bucketName string, password string) int
 
 	err, _ := utils.QueryRestApiWithAuth("http://"+clusterAddress,
 		"/pools/default/buckets/"+bucketName,
-		false,
 		bucketName,
 		password,
-		nil,
 		"GET", "", nil,
-		0, output, logger)
+		output, logger, nil)
 	if err != nil {
 		panic(err)
 	}
@@ -316,12 +314,10 @@ func flushTargetBkt() {
 
 	err, _ := utils.QueryRestApiWithAuth(baseURL,
 		"/pools/default/buckets/"+options.target_bucket+"/controller/doFlush",
-		false,
 		options.remoteUserName,
 		options.remotePassword,
-		nil,
 		"POST", "", nil,
-		0, nil, logger)
+		nil, logger, nil)
 
 	if err != nil {
 		logger.Infof("Setup error=%v\n", err)

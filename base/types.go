@@ -83,4 +83,3 @@ type WrappedMCRequest struct {
 	Seqno uint64
 	Req	  *gomemcached.MCRequest
 }
-
