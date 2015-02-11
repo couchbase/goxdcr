@@ -225,7 +225,7 @@ func (capi_svc *CAPIService) send_post(restMethodName string, api_base *apiReque
 	}
 	//	body :=  []byte(`{"bucket":"default","bucketUUID":0,"vb":0}`)
 	capi_svc.logger.Debugf("body=%s\n", body)
-	err, statusCode := utils.InvokeRestWithRetryWithAuth(api_base.url, restMethodName, api_base.username, api_base.password, base.MethodPost, utils.JsonContentType, body, &ret_map, capi_svc.logger, nil, num_retry)
+	err, statusCode := utils.InvokeRestWithRetryWithAuth(api_base.url, restMethodName, false, api_base.username, api_base.password, nil, base.MethodPost, base.JsonContentType, body, 0, &ret_map, capi_svc.logger, num_retry)
 	return statusCode, ret_map, err
 }
 

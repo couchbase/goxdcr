@@ -107,7 +107,7 @@ func (top_svc *XDCRTopologySvc) getHostInfo() (map[string]interface{}, error) {
 	if hostAddr == "" {
 		panic("hostAddr can't be empty")
 	}
-	err, statusCode := utils.QueryRestApi(hostAddr, base.NodesPath, base.MethodGet, "", nil, &nodesInfo, top_svc.logger, nil)
+	err, statusCode := utils.QueryRestApi(hostAddr, base.NodesPath, false, base.MethodGet, "", nil, 0, &nodesInfo, top_svc.logger)
 	if err != nil || statusCode != 200 {
 		return nil, errors.New(fmt.Sprintf("Failed on calling %v, err=%v, statusCode=%v", base.NodesPath, err, statusCode))
 	}

@@ -80,10 +80,12 @@ func setup() (err error) {
 	if err == nil {
 		err, _ = utils.QueryRestApiWithAuth(options.target_cluster_addr,
 			"/pools/default/buckets/target/controller/doFlush",
+			false,
 			options.target_bucket,
 			options.password,
+			nil,
 			"POST", "", nil,
-			nil, logger, nil)
+			0, nil, logger)
 	}
 
 	if err != nil {
@@ -100,10 +102,12 @@ func verify(data_count int) bool {
 
 	err, _ := utils.QueryRestApiWithAuth(options.target_cluster_addr,
 		"/pools/default/buckets/target",
+		false,
 		options.target_bucket,
 		options.password,
+		nil,
 		"GET", "", nil,
-		output, logger, nil)
+		0, output, logger)
 	if err != nil {
 		panic(err)
 	}
@@ -311,9 +315,9 @@ func startXmem(batch_count int) {
 	logger.Infof("target_connectStr=%s\n", target_connectStr)
 
 	xmem = parts.NewXmemNozzle("xmem", target_connectStr, options.target_bucket, options.password, logger.LoggerContext())
-	var configs map[string]interface{} = map[string]interface{}{parts.XMEM_SETTING_BATCHCOUNT: batch_count,
-		parts.XMEM_SETTING_RESP_TIMEOUT: time.Millisecond * 10,
-		parts.XMEM_SETTING_NUMOFRETRY:   3}
+	var configs map[string]interface{} = map[string]interface{}{parts.SETTING_BATCHCOUNT: batch_count,
+		parts.SETTING_RESP_TIMEOUT: time.Millisecond * 10,
+		parts.SETTING_NUMOFRETRY:   3}
 
 	xmem.Start(configs)
 }
