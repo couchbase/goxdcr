@@ -88,13 +88,14 @@ func (service *RemoteClusterService) RemoteClusterByRefName(refName string, refr
 		}
 	}
 
-	if ref != nil {
+	if ref == nil {
+		return nil, errors.New("unknown remote cluster")
+	} else {
 		if refresh {
 			ref, err = service.refresh(ref)
 		}
+		return ref, err
 	}
-
-	return ref, err
 }
 
 func (service *RemoteClusterService) AddRemoteCluster(ref *metadata.RemoteClusterReference) error {

@@ -1017,7 +1017,7 @@ func (xmem *XmemNozzle) batchGetMeta(bigDoc_map map[string]*mc.MCRequest) (map[s
 	err_list := []error{}
 	//launch the receiver
 	waitGrp.Add(1)
-	go func(count int, finch chan bool, opaque_bigDoc_map map[uint32]string, respMap map[string]*mc.MCResponse, timeout_duration time.Duration, err_list []error, waitGrp *sync.WaitGroup, logger *log.CommonLogger) {
+	go func(count int, finch chan bool, opaque_key_map map[uint32]string, respMap map[string]*mc.MCResponse, timeout_duration time.Duration, err_list []error, waitGrp *sync.WaitGroup, logger *log.CommonLogger) {
 		defer waitGrp.Done()
 		ticker := time.NewTicker(timeout_duration)
 		for {
