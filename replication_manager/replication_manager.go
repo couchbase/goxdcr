@@ -236,16 +236,6 @@ func (r *pipelineRepairer) checkPipelineActiveness() (err error) {
 	logger_rm.Debugf("Pipeline %v is not paused or deleted\n", r.pipeline_name)
 	return
 }
-func StartReplicationManagerForConversion(
-	repl_spec_svc service_def.ReplicationSpecSvc,
-	remote_cluster_svc service_def.RemoteClusterSvc) {
-	// TODO implement
-	/*
-		replication_mgr.once.Do(func() {
-			// initializes replication manager
-			replication_mgr.init(sourceKVHost, sourceKVPort, isEnterprise, repl_spec_svc, remote_cluster_svc, nil, nil, nil)
-		})*/
-}
 
 func StartReplicationManager(sourceKVHost string, xdcrRestPort uint16,
 	repl_spec_svc service_def.ReplicationSpecSvc,
@@ -908,7 +898,7 @@ func cleanup() {
 func exitProcess(byForce bool) {
 	//clean up the connection pool
 	defer base.ConnPoolMgr().Close()
-	
+
 	//clean up the tcp connection pool
 	defer base.TCPConnPoolMgr().Close()
 

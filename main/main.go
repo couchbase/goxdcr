@@ -89,22 +89,28 @@ func main() {
 		fmt.Printf("Error starting audit service. err=%v\n", err)
 		os.Exit(1)
 	}
-
-	uilog_svc := s.NewUILogSvc(top_svc, nil)
-	remote_cluster_svc := s.NewRemoteClusterService(uilog_svc, metadata_svc, nil)
-	repl_spec_svc := s.NewReplicationSpecService(uilog_svc, remote_cluster_svc, metadata_svc, nil)
-
+	
 	if options.isConvert {
-		fmt.Println("Starting replication manager in conversion/upgrade mode.")
-		// start replication manager in conversion/upgrade mode
-		rm.StartReplicationManagerForConversion(
-			repl_spec_svc,
-			remote_cluster_svc)
+		// disable uilogging during upgrade by specifying a nil uilog service
+		remote_cluster_svc := s.NewRemoteClusterService(nil, metadata_svc, top_svc, nil)
+		migration_svc := s.NewMigrationSvc(remote_cluster_svc, 
+			s.NewReplicationSpecService(nil, remote_cluster_svc, metadata_svc, nil),
+			s.NewReplicationSettingsSvc(metadata_svc, nil),
+			s.NewCheckpointsService(metadata_svc, nil),
+			nil)
+		err = migration_svc.Migrate()
+		if err == nil {
+			os.Exit(0)
+		} else {
+			os.Exit(1)
+		}
 	} else {
+		uilog_svc := s.NewUILogSvc(top_svc, nil)
+		remote_cluster_svc := s.NewRemoteClusterService(uilog_svc, metadata_svc, top_svc, nil)
 		// start replication manager in normal mode
 		rm.StartReplicationManager(host,
 			uint16(options.xdcrRestPort),
-			repl_spec_svc,
+			s.NewReplicationSpecService(uilog_svc, remote_cluster_svc, metadata_svc, nil),
 			remote_cluster_svc,
 			s.NewClusterInfoSvc(nil),
 			top_svc,

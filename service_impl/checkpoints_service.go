@@ -65,6 +65,10 @@ func (ckpt_svc *CheckpointsService) DelCheckpointsDocs(replicationId string) err
 	if err != nil {
 		return err
 	}
+	
+	if len(ckpt_meta_entries) == 0 {
+		return nil
+	}
 
 	worker_load := 5
 	num_of_workers := int(math.Ceil(float64(len(ckpt_meta_entries)) / float64(worker_load)))

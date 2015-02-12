@@ -165,3 +165,20 @@ var UILogXDCRComponent = "xdcr"
 
 var CouchApiBaseUriDelimiter = "%2f"
 
+//constants for replication docs
+const (
+	RemoteClustersForReplicationDoc = "remoteClusters"
+	BucketsPath                     = "buckets"
+
+	ReplicationDocType           = "type"
+	ReplicationDocId             = "id"
+	ReplicationDocSource         = "source"
+	ReplicationDocTarget         = "target"
+	ReplicationDocContinuous     = "continuous"
+	ReplicationDocPauseRequested = "pause_requested"
+	ReplicationDocPauseRequestedOutput = "pauseRequested"
+
+	ReplicationDocTypeXmem = "xdc-xmem"
+	ReplicationDocTypeCapi = "xdc"
+)
+
