@@ -326,10 +326,10 @@ func (ckmgr *CheckpointManager) startSeqnoGetter(getter_id int, listOfVbs []uint
 				//udpate the vb_uuid and try again
 				if err == nil {
 					ckmgr.updateCurrentVBUUID(vbno, current_remoteVBUUID)
-					ckmgr.logger.Infof("Remote vbucket %v has a new uuid %v, update\n", current_remoteVBUUID, vbno)
+					ckmgr.logger.Debugf("Remote vbucket %v has a new uuid %v, update\n", current_remoteVBUUID, vbno)
 					ckmgr.logger.Debugf("Done with _pre_prelicate call for %v for vbno=%v, bMatch=%v", remote_vb_status, vbno, bMatch)
 				}
-				
+
 				if err != nil || bMatch {
 					if bMatch {
 						ckmgr.logger.Debugf("Remote bucket %v vbno %v agreed on the checkpoint %v\n", ckmgr.remote_bucket, vbno, ckpt_record)
@@ -451,7 +451,9 @@ func (ckmgr *CheckpointManager) populateVBTimestamp(ckptDoc *metadata.Checkpoint
 			vbts.SnapshotEnd = vbts.Seqno
 		}
 
-	} else {
+	}
+
+	if vbts.Vbuuid == 0 {
 		vbts.Vbuuid = ckmgr.cur_ckpts[vbno].Failover_uuid
 	}
 
@@ -486,6 +488,7 @@ func (ckmgr *CheckpointManager) checkpointing() {
 			if ckmgr.pipeline.State() != common.Pipeline_Running {
 				//pipeline is no longer running, kill itself
 				ckmgr.logger.Info("Pipeline is no longer running, exit.")
+				return
 			}
 			ckmgr.performCkpt(false)
 			ckmgr.checkpoint_ticker = time.NewTicker(ckmgr.ckpt_interval)
