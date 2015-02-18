@@ -1001,7 +1001,7 @@ func (xmem *XmemNozzle) sendSetMeta_internal(batch *dataBatch) error {
 }
 
 //batch call to memcached GetMeta command for document size larger than the optimistic threshold
-func (xmem *XmemNozzle) batchGetMeta(bigDoc_map map[string]*mc.MCRequest) (map[string]bool, error) {
+func (xmem *XmemNozzle) batchGetMeta(bigDoc_map map[string]*base.WrappedMCRequest) (map[string]bool, error) {
 	bigDoc_noRep_map := make(map[string]bool)
 
 	//if the bigDoc_map size is 0, return
@@ -1011,13 +1011,14 @@ func (xmem *XmemNozzle) batchGetMeta(bigDoc_map map[string]*mc.MCRequest) (map[s
 
 	respMap := make(map[string]*mc.MCResponse)
 	opaque_key_map := make(map[uint32]string)
+	opaque_seqno_map := make(map[uint32]uint64)
 	waitGrp := &sync.WaitGroup{}
 	receiver_fin_ch := make(chan bool, 1)
 
 	err_list := []error{}
 	//launch the receiver
 	waitGrp.Add(1)
-	go func(count int, finch chan bool, opaque_key_map map[uint32]string, respMap map[string]*mc.MCResponse, timeout_duration time.Duration, err_list []error, waitGrp *sync.WaitGroup, logger *log.CommonLogger) {
+	go func(count int, finch chan bool, opaque_key_map map[uint32]string, opaque_seqno_map map[uint32]uint64, respMap map[string]*mc.MCResponse, timeout_duration time.Duration, err_list []error, waitGrp *sync.WaitGroup, logger *log.CommonLogger) {
 		defer waitGrp.Done()
 		ticker := time.NewTicker(timeout_duration)
 		for {
@@ -1043,7 +1044,14 @@ func (xmem *XmemNozzle) batchGetMeta(bigDoc_map map[string]*mc.MCRequest) (map[s
 					if ok {
 						//success
 						respMap[key] = response
-
+						
+						seqno, ok := opaque_seqno_map[response.Opaque]
+						if ok {
+							additionalInfo := make(map[string]interface{})
+							additionalInfo[EVENT_ADDI_DOC_KEY] = key
+							additionalInfo[EVENT_ADDI_SEQNO] = seqno
+							xmem.RaiseEvent(common.GetMetaReceived, nil, xmem, nil, additionalInfo)
+						}
 					}
 				}
 
@@ -1055,13 +1063,12 @@ func (xmem *XmemNozzle) batchGetMeta(bigDoc_map map[string]*mc.MCRequest) (map[s
 			}
 		}
 
-	}(len(bigDoc_map), receiver_fin_ch, opaque_key_map, respMap, 1*time.Second, err_list, waitGrp, xmem.Logger())
+	}(len(bigDoc_map), receiver_fin_ch, opaque_key_map, opaque_seqno_map, respMap, 1*time.Second, err_list, waitGrp, xmem.Logger())
 
-	var sequence uint16 = uint16(time.Now().Unix()<<32)
-	var index uint16 =0
+	var sequence uint16 = uint16(time.Now().UnixNano())
+	opaque := xmem.getOpaque (0, sequence)
 	for key, originalReq := range bigDoc_map {
-		opaque := xmem.getOpaque (index, sequence)
-		req := xmem.composeRequestForGetMeta(key, originalReq.VBucket, opaque)
+		req := xmem.composeRequestForGetMeta(key, originalReq.Req.VBucket, opaque)
 		err := xmem.writeToClient(xmem.client_for_getMeta, req.Bytes())
 		if err != nil {
 			//kill the receiver and return
@@ -1070,7 +1077,14 @@ func (xmem *XmemNozzle) batchGetMeta(bigDoc_map map[string]*mc.MCRequest) (map[s
 			return nil, err
 		}
 		opaque_key_map[opaque] = key
+		opaque_seqno_map[opaque] = originalReq.Seqno
 		opaque++
+		
+		additionalInfo := make(map[string]interface{})
+		additionalInfo[EVENT_ADDI_DOC_KEY] = key
+		additionalInfo[EVENT_ADDI_SEQNO] = originalReq.Seqno
+		
+		xmem.RaiseEvent(common.GetMetaSent, nil, xmem, nil, additionalInfo)
 	}
 
 	waitGrp.Wait()
@@ -1081,7 +1095,7 @@ func (xmem *XmemNozzle) batchGetMeta(bigDoc_map map[string]*mc.MCRequest) (map[s
 	for key, resp := range respMap {
 		if resp.Status == mc.SUCCESS {
 			doc_meta_target := xmem.decodeGetMetaResp([]byte(key), resp)
-			doc_meta_source := decodeSetMetaReq(bigDoc_map[key])
+			doc_meta_source := decodeSetMetaReq(bigDoc_map[key].Req)
 			if !xmem.conflict_resolver(doc_meta_source, doc_meta_target, xmem.logger) {
 				xmem.Logger().Infof("doc %v (%v)failed on conflict resolution to %v, no need to send\n", key, doc_meta_source, doc_meta_target)
 				bigDoc_noRep_map[key] = true

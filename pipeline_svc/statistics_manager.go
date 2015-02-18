@@ -37,6 +37,8 @@ const (
 	DOCS_FILTERED_METRIC   = "docs_filtered"
 	CHANGES_LEFT_METRIC    = "changes_left"
 	DOCS_LATENCY_METRIC    = "wtavg_docs_latency"
+	META_LATENCY_METRIC    = "wtavg_meta_latency"
+
 	//checkpointing related statistics
 	DOCS_CHECKED_METRIC    = "docs_checked" //calculated
 	NUM_CHECKPOINTS_METRIC = "num_checkpoints"
@@ -91,12 +93,31 @@ type StatisticsManager struct {
 	//This map will be emptied after the replication lags are calculated to get ready for
 	//next collection period
 	starttime_map map[string]interface{}
+	starttime_map_lock sync.RWMutex
 
 	//temporary map to keep all the collected end time for data item during this collection
 	//interval.
 	//This map will be emptied after the replication lags are calculated to get ready for
 	//next collection period
 	endtime_map map[string]interface{}
+	endtime_map_lock sync.RWMutex
+
+	//temporary map to keep all the collected start time for getMeta requests
+	//during this collection interval.
+	//At the end of the collection interval, collected starttime and endtime will be correlated
+	//to calculate the latencies for getMeta. The calculated latencies will be kept in "Overall"
+	//entry in registries.
+	//This map will be emptied after the latencies are calculated to get ready for
+	//next collection period
+	meta_starttime_map map[string]interface{}
+	meta_starttime_map_lock sync.RWMutex
+
+	//temporary map to keep all the collected end time for getMeta requests during this collection
+	//interval.
+	//This map will be emptied after the latencies are calculated to get ready for
+	//next collection period
+	meta_endtime_map map[string]interface{}
+	meta_endtime_map_lock sync.RWMutex
 
 	//temporary map to keep current through seqno
 	through_seqnos map[uint16]uint64
@@ -127,17 +148,23 @@ type StatisticsManager struct {
 
 func NewStatisticsManager(logger_ctx *log.LoggerContext, active_vbs map[string][]uint16, bucket_name string) *StatisticsManager {
 	stats_mgr := &StatisticsManager{registries: make(map[string]metrics.Registry),
-		bucket_name:     bucket_name,
-		starttime_map:   make(map[string]interface{}),
-		finish_ch:       make(chan bool, 1),
-		sample_size:     default_sample_size,
-		update_interval: default_update_interval,
-		logger:          log.NewLogger("StatisticsManager", logger_ctx),
-		active_vbs:      active_vbs,
-		wait_grp:        &sync.WaitGroup{},
-		kv_mem_clients:  make(map[string]*mcc.Client),
-		endtime_map:     make(map[string]interface{}),
-		through_seqnos:  make(map[uint16]uint64)}
+		bucket_name:        bucket_name,
+		starttime_map:      make(map[string]interface{}),
+		meta_starttime_map: make(map[string]interface{}),
+		endtime_map:        make(map[string]interface{}),
+		meta_endtime_map:   make(map[string]interface{}),
+		starttime_map_lock:  sync.RWMutex{},
+		endtime_map_lock:  sync.RWMutex{},
+		meta_starttime_map_lock:  sync.RWMutex{},
+		meta_endtime_map_lock:  sync.RWMutex{},
+		finish_ch:          make(chan bool, 1),
+		sample_size:        default_sample_size,
+		update_interval:    default_update_interval,
+		logger:             log.NewLogger("StatisticsManager", logger_ctx),
+		active_vbs:         active_vbs,
+		wait_grp:           &sync.WaitGroup{},
+		kv_mem_clients:     make(map[string]*mcc.Client),
+		through_seqnos:     make(map[uint16]uint64)}
 	stats_mgr.collectors = []MetricsCollector{&outNozzleCollector{}, &dcpCollector{}, &routerCollector{}, &checkpointMgrCollector{}}
 	return stats_mgr
 }
@@ -435,10 +462,22 @@ func (stats_mgr *StatisticsManager) publishMetricToMap(expvar_map *expvar.Map, n
 }
 
 func (stats_mgr *StatisticsManager) processTimeSample() {
-	stats_mgr.logger.Debug("Process Time Sample...")
+	stats_mgr.processDocsLatencyTimeSample()
+	stats_mgr.processMetaLatencyTimeSample()	
+}
+
+// compute docs_latency metric
+func (stats_mgr *StatisticsManager) processDocsLatencyTimeSample() {
+	stats_mgr.logger.Debug("Process Docs Latency Time Sample...")
+
 	time_committing := stats_mgr.getOverviewRegistry().GetOrRegister(DOCS_LATENCY_METRIC, metrics.NewHistogram(metrics.NewUniformSample(stats_mgr.sample_size))).(metrics.Histogram)
 	time_committing.Clear()
 	sample := time_committing.Sample()
+	
+	stats_mgr.starttime_map_lock.RLock()
+	stats_mgr.endtime_map_lock.RLock()
+	defer stats_mgr.starttime_map_lock.RUnlock()
+	defer stats_mgr.endtime_map_lock.RUnlock()
 	for name, starttime := range stats_mgr.starttime_map {
 		endtime := stats_mgr.endtime_map[name]
 		if endtime != nil {
@@ -451,6 +490,32 @@ func (stats_mgr *StatisticsManager) processTimeSample() {
 	//clear both starttime_registry and endtime_registry
 	stats_mgr.starttime_map = make(map[string]interface{})
 	stats_mgr.endtime_map = make(map[string]interface{})
+}
+
+// compute meta_latency metric
+func (stats_mgr *StatisticsManager) processMetaLatencyTimeSample() {
+	stats_mgr.logger.Debug("Process Meta Latency Time Sample...")
+	
+	meta_time_committing := stats_mgr.getOverviewRegistry().GetOrRegister(META_LATENCY_METRIC, metrics.NewHistogram(metrics.NewUniformSample(stats_mgr.sample_size))).(metrics.Histogram)
+	meta_time_committing.Clear()
+	sample := meta_time_committing.Sample()
+	
+	stats_mgr.meta_starttime_map_lock.RLock()
+	stats_mgr.meta_endtime_map_lock.RLock()
+	defer stats_mgr.meta_starttime_map_lock.RUnlock()
+	defer stats_mgr.meta_endtime_map_lock.RUnlock()
+	for name, starttime := range stats_mgr.meta_starttime_map {
+		endtime := stats_mgr.meta_endtime_map[name]
+		if endtime != nil {
+			meta_latency := endtime.(time.Time).Sub(starttime.(time.Time))
+			//in millisecond
+			sample.Update(meta_latency.Nanoseconds() / 1000000)
+		}
+	}
+
+	//clear both starttime_registry and endtime_registry
+	stats_mgr.meta_starttime_map = make(map[string]interface{})
+	stats_mgr.meta_endtime_map = make(map[string]interface{})
 }
 
 func (stats_mgr *StatisticsManager) getOrCreateRegistry(name string) metrics.Registry {
@@ -587,6 +652,8 @@ func (outNozzle_collector *outNozzleCollector) Mount(pipeline common.Pipeline, s
 		registry.Register(DOCS_OPT_REPD_METRIC, metrics.NewCounter())
 		part.RegisterComponentEventListener(common.DataSent, outNozzle_collector)
 		part.RegisterComponentEventListener(common.DataReceived, outNozzle_collector)
+		part.RegisterComponentEventListener(common.GetMetaSent, outNozzle_collector)
+		part.RegisterComponentEventListener(common.GetMetaReceived, outNozzle_collector)
 
 	}
 	return nil
@@ -605,7 +672,9 @@ func (outNozzle_collector *outNozzleCollector) OnEvent(eventType common.Componen
 		registry.Get(DOCS_REP_QUEUE_METRIC).(metrics.Histogram).Sample().Update(int64(queue_size))
 		registry.Get(SIZE_REP_QUEUE_METRIC).(metrics.Histogram).Sample().Update(int64(queue_size_bytes))
 	} else if eventType == common.DataSent {
+		outNozzle_collector.stats_mgr.logger.Debugf("Received a DataSent event from %v", reflect.TypeOf(component))
 		endTime := time.Now()
+		key := string(item.(*gomemcached.MCRequest).Key)
 		size := item.(*gomemcached.MCRequest).Size()
 		seqno := otherInfos[parts.EVENT_ADDI_SEQNO].(uint64)
 		opti_replicated := otherInfos[parts.EVENT_ADDI_OPT_REPD].(bool)
@@ -615,8 +684,33 @@ func (outNozzle_collector *outNozzleCollector) OnEvent(eventType common.Componen
 		if opti_replicated {
 			registry.Get(DOCS_OPT_REPD_METRIC).(metrics.Counter).Inc(1)
 		}
-		outNozzle_collector.stats_mgr.endtime_map[fmt.Sprintf("%v", seqno)] = endTime
+		
+		outNozzle_collector.stats_mgr.endtime_map_lock.Lock()
+		defer outNozzle_collector.stats_mgr.endtime_map_lock.Unlock()
+		outNozzle_collector.stats_mgr.endtime_map[getStatsKeyFromDocKeyAndSeqno(key, seqno)] = endTime
+	} else if eventType == common.GetMetaSent {
+		outNozzle_collector.stats_mgr.logger.Debugf("Received a GetMetaSent event from %v", reflect.TypeOf(component))
+		startTime := time.Now()
+		key := otherInfos[parts.EVENT_ADDI_DOC_KEY].(string)
+		seqno := otherInfos[parts.EVENT_ADDI_SEQNO].(uint64)
+		
+		outNozzle_collector.stats_mgr.meta_starttime_map_lock.Lock()
+		defer outNozzle_collector.stats_mgr.meta_starttime_map_lock.Unlock()
+		outNozzle_collector.stats_mgr.meta_starttime_map[getStatsKeyFromDocKeyAndSeqno(key, seqno)] = startTime
+	} else if eventType == common.GetMetaReceived {
+		outNozzle_collector.stats_mgr.logger.Debugf("Received a GetMetaReceived event from %v", reflect.TypeOf(component))
+		endTime := time.Now()
+		key := otherInfos[parts.EVENT_ADDI_DOC_KEY].(string)
+		seqno := otherInfos[parts.EVENT_ADDI_SEQNO].(uint64)
+		
+		outNozzle_collector.stats_mgr.meta_endtime_map_lock.Lock()
+		defer outNozzle_collector.stats_mgr.meta_endtime_map_lock.Unlock()
+		outNozzle_collector.stats_mgr.meta_endtime_map[getStatsKeyFromDocKeyAndSeqno(key, seqno)] = endTime
 	}
+}
+
+func getStatsKeyFromDocKeyAndSeqno(key string, seqno uint64) string {
+	return fmt.Sprintf("%v-%v", key, seqno)
 }
 
 //metrics collector for DcpNozzle
@@ -643,12 +737,14 @@ func (dcp_collector *dcpCollector) OnEvent(eventType common.ComponentEventType,
 	if eventType == common.DataReceived {
 		dcp_collector.stats_mgr.logger.Debugf("Received a DataReceived event from %v", reflect.TypeOf(component))
 		startTime := time.Now()
+		key := string(item.(*mcc.UprEvent).Key)
 		seqno := item.(*mcc.UprEvent).Seqno
-		dcp_collector.stats_mgr.starttime_map[fmt.Sprintf("%v", seqno)] = startTime
-
 		registry := dcp_collector.stats_mgr.registries[component.Id()]
 		registry.Get(DOCS_RECEIVED_DCP_METRICS).(metrics.Counter).Inc(1)
-
+		
+		dcp_collector.stats_mgr.starttime_map_lock.Lock()
+		defer dcp_collector.stats_mgr.starttime_map_lock.Unlock()
+		dcp_collector.stats_mgr.starttime_map[getStatsKeyFromDocKeyAndSeqno(key, seqno)] = startTime
 	}
 }
 

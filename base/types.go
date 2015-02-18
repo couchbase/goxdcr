@@ -13,7 +13,6 @@ import (
 	"bytes"
 	"fmt"
 	"reflect"
-	"time"
 	"github.com/couchbase/gomemcached"
 )
 
@@ -75,7 +74,8 @@ type ReplicationInfo struct {
 }
 
 type ErrorInfo struct {
-	Time time.Time
+	// Time is the number of nano seconds elapsed since 1/1/1970 UTC
+	Time int64
 	ErrorMsg  string
 }
 

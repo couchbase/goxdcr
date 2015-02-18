@@ -31,6 +31,7 @@ const (
 
 	STATS_QUEUE_SIZE       = "queue_size"
 	STATS_QUEUE_SIZE_BYTES = "queue_size_bytes"
+	EVENT_ADDI_DOC_KEY     = "doc_key"
 	EVENT_ADDI_SEQNO       = "source_seqno"
 	EVENT_ADDI_OPT_REPD    = "optimistic_replicated"
 	EVENT_ADDI_HISEQNO     = "source_hiseqno"
@@ -102,7 +103,7 @@ func (config *baseConfig) initializeConfig(settings map[string]interface{}) {
 type dataBatch struct {
 	// the document whose size is larger than optimistic replication threshold
 	// key of the map is the document key
-	bigDoc_map map[string]*mc.MCRequest
+	bigDoc_map map[string]*base.WrappedMCRequest
 	// the big docs that failed conflict resolution and do not need to be replicated
 	// key of the map is the document key
 	// the bool value in the map does not matter - the presence of a key does
@@ -126,7 +127,7 @@ func newBatch(cap_count int, cap_size int, expiring_duration time.Duration, logg
 		capacity_count:    cap_count,
 		capacity_size:     cap_size,
 		expiring_duration: expiring_duration,
-		bigDoc_map:        make(map[string]*mc.MCRequest),
+		bigDoc_map:        make(map[string]*base.WrappedMCRequest),
 		bigDoc_noRep_map:  make(map[string]bool),
 		expiration_set:    false,
 		logger:            logger}
@@ -146,7 +147,7 @@ func (b *dataBatch) accumuBatch(req *base.WrappedMCRequest, classifyFunc func(re
 			b.expiration_set = true
 		}
 		if !classifyFunc(req.Req) {
-			b.bigDoc_map[key] = req.Req
+			b.bigDoc_map[key] = req
 		}
 		b.curSize += size
 		if b.curCount < b.capacity_count && b.curSize < b.capacity_size*1000 {

@@ -649,7 +649,7 @@ func GetReplicationInfos() ([]base.ReplicationInfo, error) {
 		if errorArr != nil {
 			for _, errMsg := range errorArr {
 				// TODO add timestamp to error list in expvar
-				errInfo := base.ErrorInfo{time.Now(), errMsg}
+				errInfo := base.ErrorInfo{time.Now().UnixNano(), errMsg}
 				replInfo.ErrorList = append(replInfo.ErrorList, errInfo)
 			}
 		}
