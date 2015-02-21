@@ -548,6 +548,8 @@ func (stats_mgr *StatisticsManager) initOverviewRegistry() {
 	overview_registry.Register(TIME_COMMITING_METRIC, metrics.NewCounter())
 	overview_registry.Register(DOCS_OPT_REPD_METRIC, metrics.NewCounter())
 	overview_registry.Register(DOCS_RECEIVED_DCP_METRICS, metrics.NewCounter())
+	overview_registry.Register(SIZE_REP_QUEUE_METRIC, metrics.NewCounter())
+	overview_registry.Register(DOCS_REP_QUEUE_METRIC, metrics.NewCounter())
 }
 
 func (stats_mgr *StatisticsManager) Start(settings map[string]interface{}) error {
