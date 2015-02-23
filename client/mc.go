@@ -24,7 +24,13 @@ type Client struct {
 	hdrBuf []byte
 }
 
-var dialFun = net.Dial
+var (
+	DefaultDialTimeout = time.Duration(0) // No timeout
+
+	dialFun = func(prot, dest string) (net.Conn, error) {
+		return net.DialTimeout(prot, dest, DefaultDialTimeout)
+	}
+)
 
 // Connect to a memcached server.
 func Connect(prot, dest string) (rv *Client, err error) {
