@@ -72,7 +72,7 @@ func NewXDCRFactory(repl_spec_svc service_def.ReplicationSpecSvc,
 		logger: log.NewLogger("XDCRFactory", factory_logger_ctx)}
 }
 
-func (xdcrf *XDCRFactory) NewPipeline(topic string) (common.Pipeline, error) {
+func (xdcrf *XDCRFactory) NewPipeline(topic string, progress_recorder common.PipelineProgressRecorder) (common.Pipeline, error) {
 	spec, err := xdcrf.repl_spec_svc.ReplicationSpec(topic)
 	xdcrf.logger.Debugf("replication specification = %v\n", spec)
 	if err != nil {
@@ -94,11 +94,14 @@ func (xdcrf *XDCRFactory) NewPipeline(topic string) (common.Pipeline, error) {
 		return nil, ErrorNoSourceNozzle
 	}
 
+	progress_recorder(fmt.Sprintf("%v source nozzles have been constructed", len(sourceNozzles)))
+
 	xdcrf.logger.Infof("kv_vb_map=%v\n", kv_vb_map)
 	outNozzles, vbNozzleMap, err := xdcrf.constructOutgoingNozzles(spec, kv_vb_map, logger_ctx)
 	if err != nil {
 		return nil, err
 	}
+	progress_recorder(fmt.Sprintf("%v target nozzles have been constructed", len(outNozzles)))
 
 	// TODO construct queue parts. This will affect vbMap in router. may need an additional outNozzle -> downStreamPart/queue map in constructRouter
 
@@ -118,6 +121,8 @@ func (xdcrf *XDCRFactory) NewPipeline(topic string) (common.Pipeline, error) {
 		}
 		sourceNozzle.SetConnector(router)
 	}
+	progress_recorder("Source nozzles are wired to target nozzles")
+
 
 	// construct pipeline
 	pipeline := pp.NewPipelineWithSettingConstructor(topic, sourceNozzles, outNozzles, spec, xdcrf.ConstructSettingsForPart, xdcrf.StartSeqno, xdcrf.remote_cluster_svc.RemoteClusterByUuid, logger_ctx)
@@ -132,6 +137,7 @@ func (xdcrf *XDCRFactory) NewPipeline(topic string) (common.Pipeline, error) {
 			return nil, err
 		}
 	}
+	progress_recorder("Pipeline is constructed")
 
 	xdcrf.logger.Infof("XDCR pipeline constructed")
 	return pipeline, nil

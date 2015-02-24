@@ -23,6 +23,8 @@ const (
 	Pipeline_Error	PipelineState=iota
 )
 
+type PipelineProgressRecorder func (progress string) 
+
 //interface for Pipeline
 type Pipeline interface {
 	//Name of the Pipeline
@@ -46,4 +48,7 @@ type Pipeline interface {
 	State () PipelineState
 	SetState(state PipelineState) error
 	InstanceId() string
+	
+	SetProgressRecorder (recorder PipelineProgressRecorder)
+	ReportProgress (progress string)
 }

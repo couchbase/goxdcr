@@ -38,7 +38,7 @@ type pipelineManager struct {
 	//lock to pipeline_pending_for_repair map
 	repair_map_lock *sync.RWMutex
 	//keep track of the pipeline in repair
-	pipeline_pending_for_repair map[string]*pipelineRepairer
+	pipeline_pending_for_update map[string]*pipelineUpdater
 	child_waitGrp               *sync.WaitGroup
 }
 
@@ -52,7 +52,7 @@ func PipelineManager(factory common.PipelineFactory, repl_spec_svc service_def.R
 		pipeline_mgr.logger = log.NewLogger("PipelineManager", logger_context)
 		pipeline_mgr.logger.Info("Pipeline Manager is constucted")
 		pipeline_mgr.child_waitGrp = &sync.WaitGroup{}
-		pipeline_mgr.pipeline_pending_for_repair = make(map[string]*pipelineRepairer)
+		pipeline_mgr.pipeline_pending_for_update = make(map[string]*pipelineUpdater)
 		pipeline_mgr.repair_map_lock = &sync.RWMutex{}
 	})
 }
@@ -74,12 +74,29 @@ func OnExit() error {
 	return pipeline_mgr.onExit()
 }
 
-func Repair(topic string, cur_err error) error {
-	return pipeline_mgr.repair(topic, cur_err)
+func Update(topic string, cur_err error, settings map[string]interface{}) error {
+	return pipeline_mgr.update(topic, cur_err, settings)
 }
 
 func ReplicationStatus(topic string) *pipeline.ReplicationStatus {
 	return pipeline_mgr.pipelines_map[topic]
+}
+
+func RemoveReplicationStatus (topic string) error {
+	pipeline_mgr.mapLock.Lock()
+	defer pipeline_mgr.mapLock.Unlock()
+	
+	delete(pipeline_mgr.pipelines_map, topic)
+	
+	pipeline.ResetRootStorage()
+	for _, rs := range pipeline_mgr.pipelines_map {
+		rs.Publish()
+	}
+	return nil
+}
+
+func LogStatusSummary ()  {
+	pipeline_mgr.logger.Infof("Replication Status = %v\n", pipeline_mgr.pipelines_map)
 }
 
 func IsPipelineRunning(topic string) bool {
@@ -100,7 +117,7 @@ func (pipelineMgr *pipelineManager) onExit() error {
 	}
 
 	//send finish signal to all repairer
-	for _, repairer := range pipelineMgr.pipeline_pending_for_repair {
+	for _, repairer := range pipelineMgr.pipeline_pending_for_update {
 		close(repairer.fin_ch)
 	}
 
@@ -122,9 +139,16 @@ func (pipelineMgr *pipelineManager) startPipeline(topic string, settings map[str
 			return nil, err
 		}
 
-		p, err := pipelineMgr.pipeline_factory.NewPipeline(topic)
+		rep_status.RecordProgress ("Start pipeline construction")
+		p, err := pipelineMgr.pipeline_factory.NewPipeline(topic, rep_status.RecordProgress)
 		if err != nil {
 			pipelineMgr.logger.Errorf("Failed to construct a new pipeline: %s", err.Error())
+			return p, err
+		}
+
+		rep_status.RecordProgress("Pipeline is constructed")
+		err = pipelineMgr.addPipelineToReplicationStatus(p)
+		if err != nil {
 			return p, err
 		}
 
@@ -132,10 +156,6 @@ func (pipelineMgr *pipelineManager) startPipeline(topic string, settings map[str
 		err = p.Start(settings)
 		if err != nil {
 			pipelineMgr.logger.Error("Failed to start the pipeline")
-			return p, err
-		}
-		err = pipelineMgr.addPipelineToReplicationStatus(p)
-		if err != nil {
 			return p, err
 		}
 
@@ -175,6 +195,7 @@ func (pipelineMgr *pipelineManager) addPipelineToReplicationStatus(p common.Pipe
 	rep_status, ok := pipelineMgr.pipelines_map[p.Topic()]
 	if ok {
 		rep_status.SetPipeline(p)
+		p.SetProgressRecorder (rep_status.RecordProgress)
 		pipelineMgr.logger.Infof("addPipelineToMap. pipelines=%v\n", pipelineMgr.pipelines_map)
 	} else {
 		return fmt.Errorf("replication %v hasn't been registered with PipelineManager yet", p.Topic())
@@ -206,7 +227,6 @@ func (pipelineMgr *pipelineManager) removePipelineFromReplicationStatus(p common
 	}
 	return nil
 }
-
 
 func (pipelineMgr *pipelineManager) stopPipeline(topic string) error {
 	pipelineMgr.logger.Infof("Try to stop the pipeline %s", topic)
@@ -266,33 +286,44 @@ func (pipelineMgr *pipelineManager) livePipelines() map[string]common.Pipeline {
 func (pipelineMgr *pipelineManager) reportFixed(topic string) {
 	pipelineMgr.repair_map_lock.Lock()
 	defer pipelineMgr.repair_map_lock.Unlock()
-	delete(pipelineMgr.pipeline_pending_for_repair, topic)
+	delete(pipelineMgr.pipeline_pending_for_update, topic)
 }
 
-func (pipelineMgr *pipelineManager) repair(topic string, cur_err error) error {
+func (pipelineMgr *pipelineManager) update(topic string, cur_err error, settings map[string]interface{}) error {
 	pipelineMgr.repair_map_lock.Lock()
 	defer pipelineMgr.repair_map_lock.Unlock()
 
-	if _, ok := pipelineMgr.pipeline_pending_for_repair[topic]; !ok {
-		spec, err := pipelineMgr.repl_spec_svc.ReplicationSpec(topic)
-		if err != nil {
-			return err
-		}
+	if _, ok := pipelineMgr.pipeline_pending_for_update[topic]; !ok {
 
-		settings := spec.Settings
-		settingsMap := settings.ToMap()
-		retry_interval := settingsMap[metadata.FailureRestartInterval].(int)
+		var settingsMap map[string]interface{} = settings
+		if settingsMap == nil {
+			spec, err := pipelineMgr.repl_spec_svc.ReplicationSpec(topic)
+			if err != nil {
+				return err
+			}
+			
+			s := spec.Settings
+			settingsMap = s.ToMap()
+		}
 
 		rep_status, ok := pipelineMgr.pipelines_map[topic]
 		if !ok {
-			return fmt.Errorf("Replication %v never registered with pipeline manager", topic)
+			err := pipelineMgr.updateReplicationStatus(topic, settingsMap)
+			if  err == nil {
+				rep_status = pipelineMgr.pipelines_map[topic]
+			}else {
+				return err
+			}
 		}
-		repairer, err := newPipelineRepairer(topic, retry_interval, pipelineMgr.child_waitGrp, cur_err, rep_status, pipelineMgr.logger)
+
+		retry_interval := settingsMap[metadata.FailureRestartInterval].(int)
+
+		repairer, err := newPipelineUpdater(topic, retry_interval, pipelineMgr.child_waitGrp, cur_err, rep_status, pipelineMgr.logger)
 		if err != nil {
 			return err
 		}
 		pipelineMgr.child_waitGrp.Add(1)
-		pipelineMgr.pipeline_pending_for_repair[topic] = repairer
+		pipelineMgr.pipeline_pending_for_update[topic] = repairer
 		go repairer.start()
 		pipelineMgr.logger.Infof("Repairer to fix pipeline %v is lauched with retry_interval=%v\n", topic, retry_interval)
 	} else {
@@ -303,7 +334,7 @@ func (pipelineMgr *pipelineManager) repair(topic string, cur_err error) error {
 
 //pipelineRepairer is responsible to repair a failing pipeline
 //it will retry after the retry_interval
-type pipelineRepairer struct {
+type pipelineUpdater struct {
 	//the name of the pipeline to be repaired
 	pipeline_name string
 	//the interval to wait after the failure for next retry
@@ -321,12 +352,15 @@ type pipelineRepairer struct {
 	logger     *log.CommonLogger
 }
 
-func newPipelineRepairer(pipeline_name string, retry_interval int, waitGrp *sync.WaitGroup, cur_err error, rep_status *pipeline.ReplicationStatus, logger *log.CommonLogger) (*pipelineRepairer, error) {
+func newPipelineUpdater(pipeline_name string, retry_interval int, waitGrp *sync.WaitGroup, cur_err error, rep_status *pipeline.ReplicationStatus, logger *log.CommonLogger) (*pipelineUpdater, error) {
 	if retry_interval < 0 {
 		return nil, fmt.Errorf("Invalid retry interval %v", retry_interval)
 	}
 
-	repairer := &pipelineRepairer{pipeline_name: pipeline_name,
+	if rep_status == nil {
+		panic ("nil ReplicationStatus")
+	}
+	repairer := &pipelineUpdater{pipeline_name: pipeline_name,
 		retry_interval: time.Duration(retry_interval) * time.Second,
 		num_of_retries: 0,
 		fin_ch:         make(chan bool, 1),
@@ -339,7 +373,7 @@ func newPipelineRepairer(pipeline_name string, retry_interval int, waitGrp *sync
 }
 
 //start the repairer
-func (r *pipelineRepairer) start() {
+func (r *pipelineUpdater) start() {
 	defer r.waitGrp.Done()
 
 	r.reportStatus()
@@ -347,7 +381,7 @@ func (r *pipelineRepairer) start() {
 	for {
 		select {
 		case <-ticker.C:
-			r.current_error = r.repair()
+			r.current_error = r.update()
 			if r.current_error == nil {
 				r.logger.Infof("Pipeline %v is fixed\n", r.pipeline_name)
 				pipeline_mgr.reportFixed(r.pipeline_name)
@@ -371,7 +405,7 @@ func (r *pipelineRepairer) start() {
 }
 
 //repair the pipeline
-func (r *pipelineRepairer) repair() (err error) {
+func (r *pipelineUpdater) update() (err error) {
 	err = nil
 	r.logger.Infof("Try to fix Pipeline %v \n", r.pipeline_name)
 
@@ -381,7 +415,7 @@ func (r *pipelineRepairer) repair() (err error) {
 		goto RE
 	}
 
-	err = r.checkPipelineActiveness()
+	err = r.checkReplicationActiveness()
 	if err != nil {
 		goto RE
 	}
@@ -399,11 +433,11 @@ RE:
 
 }
 
-func (r *pipelineRepairer) reportStatus() {
+func (r *pipelineUpdater) reportStatus() {
 	r.rep_status.AddError(r.current_error)
 }
 
-func (r *pipelineRepairer) checkPipelineActiveness() (err error) {
+func (r *pipelineUpdater) checkReplicationActiveness() (err error) {
 	spec, err := pipeline_mgr.repl_spec_svc.ReplicationSpec(r.pipeline_name)
 	if err != nil || spec == nil || !spec.Settings.Active {
 		err = ReplicationSpecNotActive

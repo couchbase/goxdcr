@@ -229,7 +229,7 @@ func (ckmgr *CheckpointManager) updateCurrentVBUUID(vbno uint16, vbuuid uint64) 
 }
 
 func (ckmgr *CheckpointManager) VBTimestamps(topic string) (map[uint16]*base.VBTimestamp, error) {
-	ckmgr.logger.Info("Getting VBTimestamps...")
+	ckmgr.logger.Infof("Getting VBTimestamps pipeline %v...", ckmgr.pipeline.InstanceId())
 	//refresh the remote bucket
 	err := ckmgr.remote_bucket.Refresh(ckmgr.remote_cluster_svc)
 	if err != nil {
@@ -244,18 +244,56 @@ func (ckmgr *CheckpointManager) VBTimestamps(topic string) (map[uint16]*base.VBT
 	if err != nil {
 		return nil, err
 	}
-	var failoverLogMap couchbase.FailoverLog
-	var highseqnomap = make(map[uint16]uint64)
+	//	var highseqnomap = make(map[uint16]uint64)
 	ckmgr.logger.Debugf("Found %v checkpoit document for replication %v\n", len(ckptDocs), topic)
-	if len(ckptDocs) > 0 {
-		//populate failover uuid on cur_ckpts
-		failoverLogMap, highseqnomap, err = ckmgr.getFailoverLogAndHighSeqno()
+	//	if len(ckptDocs) > 0 && need {
+	//		//populate failover uuid on cur_ckpts
+	//		failoverLogMap, highseqnomap, err = ckmgr.getFailoverLogAndHighSeqno()
+	//		if err != nil {
+	//			return nil, err
+	//		}
+	//		ckmgr.populateFailoverUUIDs(failoverLogMap)
+	//		ckmgr.logger.Info("Got failoverlog...")
+	//	}
+	vbs_need_failoveruuid := []uint16{}
+	for _, vb := range ckmgr.getMyVBs() {
+		found_failoveruuid := false
+		ckptDoc, ok := ckptDocs[vb]
+		if ok {
+			record := ckmgr.cur_ckpts[vb]
+			if ckptDoc != nil && len(ckptDoc.Checkpoint_records) > 0 {
+				ckptRecord := ckptDoc.Checkpoint_records[0]
+				if ckptRecord.Failover_uuid != 0 {
+					record.Failover_uuid = ckptRecord.Failover_uuid
+					found_failoveruuid = true
+					ckmgr.logger.Infof("got failoveruuid=%v in ckpt record for vb=%v\n", record.Failover_uuid, vb)
+				}
+			}
+		}
+		if !found_failoveruuid {
+			vbs_need_failoveruuid = append(vbs_need_failoveruuid, vb)
+		}
+	}
+	ckmgr.logger.Infof("vbs_need_failoveruuid=%v\n", vbs_need_failoveruuid)
+
+	bucket, err := ckmgr.getSourceBucket()
+	defer bucket.Close()
+	if err != nil {
+		return nil, err
+	}
+	if len(ckptDocs) > 0 && len(vbs_need_failoveruuid) > 0 {
+		failoverLogMap, err := ckmgr.getFailoverLog(bucket, vbs_need_failoveruuid)
 		if err != nil {
 			return nil, err
 		}
 		ckmgr.populateFailoverUUIDs(failoverLogMap)
 		ckmgr.logger.Info("Got failoverlog...")
 	}
+	highseqnomap, err := ckmgr.getHighSeqno(bucket)
+	if err != nil {
+		return nil, err
+	}
+
 
 	//divide the workload to several getter and run the getter parallelly
 	workload := 5
@@ -408,28 +446,35 @@ func (retriever *failoverLogRetriever) getFailiverLog() (err error) {
 	return nil
 }
 
-func (ckmgr *CheckpointManager) getFailoverLogAndHighSeqno() (couchbase.FailoverLog, map[uint16]uint64, error) {
+func (ckmgr *CheckpointManager) getFailoverLog(bucket *couchbase.Bucket, listOfVbs []uint16) (couchbase.FailoverLog, error) {
+	//Get failover log can hang, timeout the executation if it takes too long.
+	failoverLogRetriever := newFailoverLogRetriever(listOfVbs, bucket, ckmgr.logger)
+	err := utils.ExecWithTimeout(failoverLogRetriever.getFailiverLog, 20*time.Second, ckmgr.logger)
+	if err != nil {
+		return nil, errors.New("Failed to get failover log in 1 minute")
+	}
+
+	return failoverLogRetriever.cur_failover_log, nil
+}
+
+func (ckmgr *CheckpointManager) getSourceBucket() (*couchbase.Bucket, error) {
 	topic := ckmgr.pipeline.Topic()
 	spec, err := ckmgr.rep_spec_svc.ReplicationSpec(topic)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	sourcBucketName := spec.SourceBucketName
 
 	bucket, err := ckmgr.cluster_info_svc.GetBucket(ckmgr.xdcr_topology_svc, sourcBucketName)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
-	defer bucket.Close()
-	ckmgr.logger.Debugf("Got the bucket %v\n", sourcBucketName)
+	ckmgr.logger.Infof("Got the bucket %v\n", sourcBucketName)
+	return bucket, nil
+}
 
-	//Get failover log can hang, timeout the executation if it takes too long.
-	failoverLogRetriever := newFailoverLogRetriever(ckmgr.getMyVBs(), bucket, ckmgr.logger)
-	err = utils.ExecWithTimeout(failoverLogRetriever.getFailiverLog, 1*time.Minute, ckmgr.logger)	
-	if err != nil {
-		return nil, nil, errors.New("Failed to get failover log in 1 minute")
-	}
-	
+func (ckmgr *CheckpointManager) getHighSeqno(bucket *couchbase.Bucket) (map[uint16]uint64, error) {
+
 	//GetStats(which string) map[string]map[string]string
 	statsMap := bucket.GetStats(base.VBUCKET_SEQNO_STAT_NAME)
 
@@ -437,11 +482,11 @@ func (ckmgr *CheckpointManager) getFailoverLogAndHighSeqno() (couchbase.Failover
 	for serverAddr, vbnos := range ckmgr.active_vbs {
 		statsMapForServer, ok := statsMap[serverAddr]
 		if !ok {
-			return nil, nil, errors.New(fmt.Sprintf("Failed to find highseqno stats in statsMap returned for server=%v", serverAddr))
+			return nil, errors.New(fmt.Sprintf("Failed to find highseqno stats in statsMap returned for server=%v", serverAddr))
 		}
 		utils.ParseHighSeqnoStat(vbnos, statsMapForServer, vb_highseqno_map)
 	}
-	return failoverLogRetriever.cur_failover_log, vb_highseqno_map, nil
+	return vb_highseqno_map, nil
 }
 
 func (ckmgr *CheckpointManager) retrieveCkptDoc(vbno uint16) (*metadata.CheckpointsDoc, error) {
