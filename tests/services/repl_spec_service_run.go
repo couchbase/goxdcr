@@ -53,7 +53,12 @@ func startReplicationSpecService() error {
 		return errors.New(fmt.Sprintf("Error starting metadata service. err=%v\n", err.Error()))
 	}
 	
-	remote_cluster_svc := s.NewRemoteClusterService(nil, metadataSvc, nil)	
+	top_svc, err := s.NewXDCRTopologySvc(9000, 13000, 11977, false, nil)
+	if err != nil {
+		return err
+	}
+
+	remote_cluster_svc := s.NewRemoteClusterService(nil, metadataSvc, top_svc, nil)	
 	service := s.NewReplicationSpecService(nil, remote_cluster_svc, metadataSvc, nil)
 		
 	// create a test replication spec
@@ -63,7 +68,7 @@ func startReplicationSpecService() error {
 	specId := spec.Id
 	
 	// cleanup to ensure that there is no residue replication spec, e.g., from previously failed test runs
-	err = service.DelReplicationSpec(specId)
+	_, err = service.DelReplicationSpec(specId)
 	if err != nil {
 		return err
 	}
@@ -75,7 +80,7 @@ func startReplicationSpecService() error {
 	}
 	
 	// delete non-existent key is ok
-	err = service.DelReplicationSpec(specId)
+	_, err = service.DelReplicationSpec(specId)
 	if err != nil {
 		return err
 	}
@@ -111,7 +116,7 @@ func startReplicationSpecService() error {
 		return errors.New("Update to replication spec is lost")
 	}
 	
-	err = service.DelReplicationSpec(specId)
+	_, err = service.DelReplicationSpec(specId)
 	if err != nil {
 		return err
 	}

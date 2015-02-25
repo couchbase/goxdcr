@@ -19,7 +19,7 @@ type RemoteClusterSvc interface {
 	RemoteClusterByUuid(uuid string, refresh bool) (*metadata.RemoteClusterReference, error)
 	AddRemoteCluster(ref *metadata.RemoteClusterReference) error
 	SetRemoteCluster(refName string, ref *metadata.RemoteClusterReference) error
-	DelRemoteCluster(refName string) error
+	DelRemoteCluster(refName string) (*metadata.RemoteClusterReference, error)
 	RemoteClusters(refresh bool) (map[string]*metadata.RemoteClusterReference, error)
 	ValidateRemoteCluster(ref *metadata.RemoteClusterReference) error
 	// used by auditing and ui logging

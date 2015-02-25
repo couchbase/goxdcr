@@ -107,22 +107,19 @@ func (service *ReplicationSpecService) SetReplicationSpec(spec *metadata.Replica
 	return service.metadata_svc.Set(key, value, spec.Revision)
 }
 
-func (service *ReplicationSpecService) DelReplicationSpec(replicationId string) error {
+func (service *ReplicationSpecService) DelReplicationSpec(replicationId string) (*metadata.ReplicationSpecification, error) {
 	spec, err := service.ReplicationSpec(replicationId)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	_, rev, err := service.metadata_svc.Get(replicationId)
+
+	err = service.metadata_svc.DelWithCatalog(ReplicationSpecsCatalogKey, replicationId, spec.Revision)
 	if err != nil {
-		return err
-	}
-	err = service.metadata_svc.DelWithCatalog(ReplicationSpecsCatalogKey, replicationId, rev)
-	if err != nil {
-		return err
+		return nil, err
 	}
 
 	service.writeUiLog(spec, "removed")
-	return nil
+	return spec, nil
 }
 
 func (service *ReplicationSpecService) ActiveReplicationSpecs() (map[string]*metadata.ReplicationSpecification, error) {

@@ -6,7 +6,7 @@ import (
 
 const (
 	//the maximum number of checkpoints ketp in the file
-	MaxCheckpointsKept int = 1000
+	MaxCheckpointsKept int = 10
 
 	FailOverUUID        string = "failover_uuid"
 	Seqno               string = "seqno"
@@ -60,7 +60,7 @@ func NewCheckpointsDoc() *CheckpointsDoc {
 	ckpt_doc := &CheckpointsDoc{Checkpoint_records: []*CheckpointRecord {},
 		Revision: nil}
 
-	for i := 0; i < 100; i++ {
+	for i := 0; i < MaxCheckpointsKept; i++ {
 		ckpt_doc.Checkpoint_records = append(ckpt_doc.Checkpoint_records, nil)
 	}
 
@@ -71,7 +71,7 @@ func NewCheckpointsDoc() *CheckpointsDoc {
 func (ckptsDoc *CheckpointsDoc) AddRecord(record *CheckpointRecord) {
 	if len(ckptsDoc.Checkpoint_records) > 0 {
 		for i := len(ckptsDoc.Checkpoint_records) - 1; i >= 0; i-- {
-			if i+1 < 100 {
+			if i+1 < MaxCheckpointsKept {
 				ckptsDoc.Checkpoint_records[i+1] = ckptsDoc.Checkpoint_records[i]
 			}
 		}

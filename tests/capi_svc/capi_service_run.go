@@ -30,6 +30,8 @@ var logger *log.CommonLogger = log.NewLogger("capi_service", log.DefaultLoggerCo
 var options struct {
 	sourceKVHost string //source kv host name
 	sourceKVPort uint64 //source kv admin port
+	sslProxyUpstreamPort uint64
+	xdcrRestPort uint64
 
 	username string //username
 	password string //password
@@ -41,6 +43,7 @@ var options struct {
 	remotePassword         string //remote cluster password
 	remoteDemandEncryption bool   // whether encryption is needed
 	remoteCertificateFile  string // file containing certificate for encryption
+	isEnterprise	bool
 
 }
 
@@ -50,6 +53,8 @@ func argParse() {
 		"admin port number for source kv")
 	flag.StringVar(&options.username, "username", "Administrator", "userName to cluster admin console")
 	flag.StringVar(&options.password, "password", "welcome", "password to Cluster admin console")
+	flag.Uint64Var(&options.xdcrRestPort, "xdcrRestPort", uint64(base.AdminportNumber),
+		"port number of XDCR rest server")
 
 	flag.StringVar(&options.remoteUuid, "remoteUuid", "1234567",
 		"remote cluster uuid")
@@ -61,6 +66,10 @@ func argParse() {
 	flag.StringVar(&options.remotePassword, "remotePassword", "welcome", "remote cluster password")
 	flag.BoolVar(&options.remoteDemandEncryption, "remoteDemandEncryption", false, "whether encryption is needed")
 	flag.StringVar(&options.remoteCertificateFile, "remoteCertificateFile", "", "file containing certificate for encryption")
+	flag.Uint64Var(&options.sslProxyUpstreamPort, "localProxyPort", 0,
+		"port number for ssl proxy upstream port")
+	flag.BoolVar(&options.isEnterprise, "isEnterprise", true,
+		"whether couchbase is of enterprise edition")
 
 	flag.Parse()
 }
@@ -116,7 +125,12 @@ func run_testcase() error {
 		return err
 	}
 
-	remote_cluster_svc := service_impl.NewRemoteClusterService(nil, metadata_svc, log.DefaultLoggerContext)
+	top_svc, err := service_impl.NewXDCRTopologySvc(uint16(options.sourceKVPort), uint16(options.xdcrRestPort), uint16(options.sslProxyUpstreamPort), options.isEnterprise, nil)
+	if err != nil {
+		return err
+	}
+
+	remote_cluster_svc := service_impl.NewRemoteClusterService(nil, metadata_svc, top_svc, log.DefaultLoggerContext)
 	if err != nil {
 		return err
 	}

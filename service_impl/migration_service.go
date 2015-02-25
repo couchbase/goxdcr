@@ -320,7 +320,7 @@ func (service *MigrationSvc) migrateRemoteCluster(remoteClusterData interface{},
 	service.logger.Infof("Remote cluster constructed = %v\n", ref)
 
 	// delete remote cluster if it already exists
-	err := service.remote_cluster_svc.DelRemoteCluster(name)
+	_, err := service.remote_cluster_svc.DelRemoteCluster(name)
 	if err == nil {
 		service.logger.Infof("Deleted existing remote cluster with name=%v\n", name)
 	}
@@ -515,7 +515,7 @@ func (service *MigrationSvc) migrateReplicationDoc(replicationDocData interface{
 	}
 
 	// delete replication spec if it already exists
-	err := service.repl_spec_svc.DelReplicationSpec(spec.Id)
+	_, err := service.repl_spec_svc.DelReplicationSpec(spec.Id)
 	if err == nil {
 		service.logger.Infof("Deleted existing replication spec with id=%v\n", spec.Id)
 	}

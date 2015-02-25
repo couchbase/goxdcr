@@ -250,13 +250,7 @@ func DeleteReplication(topic string, realUserId *base.RealUserId) error {
 	logger_rm.Infof("Deleting replication %s\n", topic)
 
 	// delete replication spec
-	replSpecService := ReplicationSpecService()
-	spec, err := replSpecService.ReplicationSpec(topic)
-	if err != nil {
-		return err
-	}
-
-	err = ReplicationSpecService().DelReplicationSpec(topic)
+	spec, err := ReplicationSpecService().DelReplicationSpec(topic)
 	if err == nil {
 		logger_rm.Infof("Replication specification %s is deleted\n", topic)
 	} else {

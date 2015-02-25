@@ -290,17 +290,12 @@ func (adminport *Adminport) doDeleteRemoteClusterRequest(request *http.Request) 
 
 	logger_ap.Infof("Request params: remoteClusterName=%v\n", remoteClusterName)
 
-	remoteClusterRef, err := RemoteClusterService().RemoteClusterByRefName(remoteClusterName, false)
+	ref, err := RemoteClusterService().DelRemoteCluster(remoteClusterName)
 	if err != nil {
 		return nil, err
 	}
 
-	err = RemoteClusterService().DelRemoteCluster(remoteClusterName)
-	if err != nil {
-		return nil, err
-	}
-
-	go writeRemoteClusterAuditEvent(base.DeleteRemoteClusterRefEventId, remoteClusterRef, getRealUserIdFromRequest(request))
+	go writeRemoteClusterAuditEvent(base.DeleteRemoteClusterRefEventId, ref, getRealUserIdFromRequest(request))
 
 	return NewDeleteRemoteClusterResponse()
 }
@@ -368,7 +363,6 @@ func (adminport *Adminport) doCreateReplicationRequest(request *http.Request) ([
 
 func (adminport *Adminport) doDeleteReplicationRequest(request *http.Request) ([]byte, error) {
 	logger_ap.Infof("doDeleteReplicationRequest\n")
-
 	replicationId, err := DecodeDynamicParamInURL(request, DeleteReplicationPrefix, "Replication Id")
 	if err != nil {
 		return nil, err

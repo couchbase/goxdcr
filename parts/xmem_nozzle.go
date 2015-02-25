@@ -47,7 +47,7 @@ const (
 	default_maxRetryInterval                  = 30 * time.Second
 	default_writeTimeOut        time.Duration = time.Duration(1) * time.Second
 	default_readTimeout         time.Duration = time.Duration(1) * time.Second
-	default_maxIdleCount        int           = 30
+	default_maxIdleCount        int           = 60
 	default_selfMonitorInterval time.Duration = 1 * time.Second
 	default_demandEncryption    bool          = false
 	default_max_downtime        time.Duration = 3 * time.Second

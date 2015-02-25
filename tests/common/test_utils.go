@@ -57,7 +57,7 @@ func CreateTestRemoteCluster(remote_cluster_service service_def.RemoteClusterSvc
 }
 
 func DeleteTestRemoteCluster(remote_cluster_service service_def.RemoteClusterSvc, remoteName string) error {
-	err := remote_cluster_service.DelRemoteCluster(remoteName)
+	_, err := remote_cluster_service.DelRemoteCluster(remoteName)
 	fmt.Printf("Deleted remote cluster reference with name=%v, err=%v\n", remoteName, err)
 	return err
 }

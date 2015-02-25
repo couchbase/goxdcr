@@ -82,12 +82,12 @@ func ReplicationStatus(topic string) *pipeline.ReplicationStatus {
 	return pipeline_mgr.pipelines_map[topic]
 }
 
-func RemoveReplicationStatus (topic string) error {
+func RemoveReplicationStatus(topic string) error {
 	pipeline_mgr.mapLock.Lock()
 	defer pipeline_mgr.mapLock.Unlock()
-	
+
 	delete(pipeline_mgr.pipelines_map, topic)
-	
+
 	pipeline.ResetRootStorage()
 	for _, rs := range pipeline_mgr.pipelines_map {
 		rs.Publish()
@@ -95,7 +95,7 @@ func RemoveReplicationStatus (topic string) error {
 	return nil
 }
 
-func LogStatusSummary ()  {
+func LogStatusSummary() {
 	pipeline_mgr.logger.Infof("Replication Status = %v\n", pipeline_mgr.pipelines_map)
 }
 
@@ -153,7 +153,7 @@ func (pipelineMgr *pipelineManager) startPipeline(topic string, settings map[str
 			return nil, err
 		}
 
-		rep_status.RecordProgress ("Start pipeline construction")
+		rep_status.RecordProgress("Start pipeline construction")
 		p, err := pipelineMgr.pipeline_factory.NewPipeline(topic, rep_status.RecordProgress)
 		if err != nil {
 			pipelineMgr.logger.Errorf("Failed to construct a new pipeline: %s", err.Error())
@@ -209,7 +209,7 @@ func (pipelineMgr *pipelineManager) addPipelineToReplicationStatus(p common.Pipe
 	rep_status, ok := pipelineMgr.pipelines_map[p.Topic()]
 	if ok {
 		rep_status.SetPipeline(p)
-		p.SetProgressRecorder (rep_status.RecordProgress)
+		p.SetProgressRecorder(rep_status.RecordProgress)
 		pipelineMgr.logger.Infof("addPipelineToMap. pipelines=%v\n", pipelineMgr.pipelines_map)
 	} else {
 		return fmt.Errorf("replication %v hasn't been registered with PipelineManager yet", p.Topic())
@@ -315,16 +315,16 @@ func (pipelineMgr *pipelineManager) update(topic string, cur_err error, settings
 			if err != nil {
 				return err
 			}
-			
+
 			s := spec.Settings
 			settingsMap = s.ToMap()
 		}
 
-        err := pipelineMgr.updateReplicationStatus(topic, settingsMap)
-        if  err != nil {
-            return err
-        }
-        rep_status := pipelineMgr.pipelines_map[topic]
+		err := pipelineMgr.updateReplicationStatus(topic, settingsMap)
+		if err != nil {
+			return err
+		}
+		rep_status := pipelineMgr.pipelines_map[topic]
 
 		retry_interval := settingsMap[metadata.FailureRestartInterval].(int)
 
@@ -368,7 +368,7 @@ func newPipelineUpdater(pipeline_name string, retry_interval int, waitGrp *sync.
 	}
 
 	if rep_status == nil {
-		panic ("nil ReplicationStatus")
+		panic("nil ReplicationStatus")
 	}
 	repairer := &pipelineUpdater{pipeline_name: pipeline_name,
 		retry_interval: time.Duration(retry_interval) * time.Second,
@@ -386,41 +386,37 @@ func newPipelineUpdater(pipeline_name string, retry_interval int, waitGrp *sync.
 func (r *pipelineUpdater) start() {
 	defer r.waitGrp.Done()
 
-	r.reportStatus()
+	if r.current_error == nil {
+		//the update is not initiated from a failure case, so don't wait, update now
+		if r.update() {
+			return
+		}
+	} else {
+		r.reportStatus()
+	}
+
 	ticker := time.NewTicker(r.retry_interval)
 	for {
 		select {
 		case <-ticker.C:
-			r.current_error = r.update()
-			if r.current_error == nil {
-				r.logger.Infof("Pipeline %v is fixed\n", r.pipeline_name)
-				pipeline_mgr.reportFixed(r.pipeline_name)
-				return
-			} else if r.current_error == ReplicationSpecNotActive {
-				r.logger.Infof("Stop repairing - replication %v is no longer active\n", r.pipeline_name)
-				pipeline_mgr.reportFixed(r.pipeline_name)
+			if r.update() {
 				return
 			} else {
-				r.logger.Errorf("Reparing pipeline failed. error=%v\n", r.current_error)
 				r.num_of_retries++
 			}
-
-			r.reportStatus()
 		case <-r.fin_ch:
-			r.logger.Infof("Quit repairing pipeline %v\n", r.pipeline_name)
+			r.logger.Infof("Quit updating pipeline %v\n", r.pipeline_name)
 			return
-
 		}
 	}
 }
 
-//repair the pipeline
-func (r *pipelineUpdater) update() (err error) {
-	err = nil
+//update the pipeline
+func (r *pipelineUpdater) update() bool {
 	r.logger.Infof("Try to fix Pipeline %v \n", r.pipeline_name)
 
 	r.logger.Infof("Try to stop pipeline %v\n", r.pipeline_name)
-	err = pipeline_mgr.stopPipeline(r.pipeline_name)
+	err := pipeline_mgr.stopPipeline(r.pipeline_name)
 	if err != nil {
 		goto RE
 	}
@@ -433,13 +429,21 @@ func (r *pipelineUpdater) update() (err error) {
 	_, err = pipeline_mgr.startPipeline(r.pipeline_name, r.rep_status.Settings())
 RE:
 	if err == nil {
-		r.logger.Infof("Replication %v is fixed, back to business\n", r.pipeline_name)
+		r.logger.Infof("Replication %v is updated, back to business\n", r.pipeline_name)
 	} else {
-		r.logger.Errorf("Failed to fix pipeline %v, err=%v\n", r.pipeline_name, err)
-		//TODO: propagate the error to ns_server
-
+		r.logger.Errorf("Failed to update pipeline %v, err=%v\n", r.pipeline_name, err)
 	}
-	return
+
+	r.current_error = err
+
+	if r.current_error == nil || r.current_error == ReplicationSpecNotActive {
+		r.logger.Infof("Pipeline %v is updated\n", r.pipeline_name)
+		pipeline_mgr.reportFixed(r.pipeline_name)
+		return true
+	}
+	r.reportStatus()
+
+	return false
 
 }
 

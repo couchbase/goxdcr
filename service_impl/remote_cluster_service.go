@@ -188,17 +188,17 @@ func (service *RemoteClusterService) SetRemoteCluster(refName string, ref *metad
 	return nil
 }
 
-func (service *RemoteClusterService) DelRemoteCluster(refName string) error {
+func (service *RemoteClusterService) DelRemoteCluster(refName string) (*metadata.RemoteClusterReference, error) {
 	service.logger.Infof("Deleting remote cluster with reference name=%v\n", refName)
 	ref, err := service.RemoteClusterByRefName(refName, false)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	key := ref.Id
 
 	err = service.metadata_svc.DelWithCatalog(RemoteClustersCatalogKey, key, ref.Revision)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	service.invalidateCache(key)
@@ -207,7 +207,7 @@ func (service *RemoteClusterService) DelRemoteCluster(refName string) error {
 		uiLogMsg := fmt.Sprintf("Remote cluster reference \"%s\" known via %s removed.", ref.Name, ref.HostName)
 		service.uilog_svc.Write(uiLogMsg)
 	}
-	return nil
+	return ref, nil
 }
 
 func (service *RemoteClusterService) RemoteClusters(refresh bool) (map[string]*metadata.RemoteClusterReference, error) {
