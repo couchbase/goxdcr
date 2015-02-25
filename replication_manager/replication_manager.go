@@ -237,7 +237,7 @@ func CreateReplication(sourceBucket, targetCluster, targetBucket string, setting
 	//trigger specChangedCallback explicitly asynchronously
 	go specChangedCallback(spec.Id, spec)
 
-	writeCreateReplicationEvent(spec, realUserId)
+	go writeCreateReplicationEvent(spec, realUserId)
 
 	logger_rm.Infof("Replication specification %s is created\n", spec.Id)
 
@@ -329,7 +329,7 @@ func UpdateDefaultReplicationSettings(settings map[string]interface{}, realUserI
 		}
 		logger_rm.Infof("Updated default replication settings\n")
 
-		writeUpdateDefaultReplicationSettingsEvent(&changedSettingsMap, realUserId)
+		go writeUpdateDefaultReplicationSettingsEvent(&changedSettingsMap, realUserId)
 
 	} else {
 		logger_rm.Infof("Did not update default replication settings since there are no real changes")
@@ -374,7 +374,7 @@ func UpdateReplicationSettings(topic string, settings map[string]interface{}, re
 		//trigger specChangedCallback explicitly asynchronously
 		go specChangedCallback(topic, replSpec)
 
-		writeUpdateReplicationSettingsEvent(replSpec, &changedSettingsMap, realUserId)
+		go writeUpdateReplicationSettingsEvent(replSpec, &changedSettingsMap, realUserId)
 
 		// if the active flag has been changed, log Pause/ResumeReplication event
 		active, ok := changedSettingsMap[metadata.Active]
@@ -432,16 +432,14 @@ func DeleteAllReplications(bucket string, realUserId *base.RealUserId) error {
 //% }
 
 func GetStatistics(bucket string) (*expvar.Map, error) {
-	repIds, err := ReplicationSpecService().ActiveReplicationSpecIdsForBucket(bucket)
-	if err != nil {
-		return nil, err
-	}
+	repIds := pipeline_manager.ActiveReplications(bucket)
 	logger_rm.Infof("repId=%v\n", repIds)
+
 	stats := new(expvar.Map).Init()
 	for _, repId := range repIds {
 		statsForPipeline := pipeline_svc.GetStatisticsForPipeline(repId)
 		logger_rm.Infof("statsForPipeline=%v\n", statsForPipeline)
-		if err == nil {
+		if statsForPipeline != nil {
 			stats.Set(repId, statsForPipeline)
 		}
 	}
@@ -486,20 +484,17 @@ func (rm *replicationManager) createAndPersistReplicationSpec(sourceBucket, targ
 func GetReplicationInfos() ([]base.ReplicationInfo, error) {
 	replInfos := make([]base.ReplicationInfo, 0)
 
-	replSpecs, err := ReplicationSpecService().ActiveReplicationSpecs()
-	if err != nil {
-		return nil, err
-	}
+	replIds := pipeline_manager.AllActiveReplications()
 
-	for _, replSpec := range replSpecs {
-		rep_status := pipeline_manager.ReplicationStatus(replSpec.Id)
+	for _, replId := range replIds {
+		rep_status := pipeline_manager.ReplicationStatus(replId)
 		if rep_status != nil {
 
 			replInfo := base.ReplicationInfo{}
-			replInfo.Id = replSpec.Id
+			replInfo.Id = replId
 
 			// set stats map
-			expvarMap := pipeline_svc.GetStatisticsForPipeline(replSpec.Id)
+			expvarMap := pipeline_svc.GetStatisticsForPipeline(replId)
 			if expvarMap != nil {
 				replInfo.StatsMap = utils.GetMapFromExpvarMap(expvarMap)
 			}

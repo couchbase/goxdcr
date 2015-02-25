@@ -233,7 +233,7 @@ func (adminport *Adminport) doCreateRemoteClusterRequest(request *http.Request) 
 		if err != nil {
 			return nil, err
 		} else {
-			writeRemoteClusterAuditEvent(base.CreateRemoteClusterRefEventId, remoteClusterRef, getRealUserIdFromRequest(request))
+			go writeRemoteClusterAuditEvent(base.CreateRemoteClusterRefEventId, remoteClusterRef, getRealUserIdFromRequest(request))
 
 			return NewCreateRemoteClusterResponse(remoteClusterRef)
 		}
@@ -274,7 +274,7 @@ func (adminport *Adminport) doChangeRemoteClusterRequest(request *http.Request) 
 		if err != nil {
 			return nil, err
 		} else {
-			writeRemoteClusterAuditEvent(base.UpdateRemoteClusterRefEventId, remoteClusterRef, getRealUserIdFromRequest(request))
+			go writeRemoteClusterAuditEvent(base.UpdateRemoteClusterRefEventId, remoteClusterRef, getRealUserIdFromRequest(request))
 
 			return NewCreateRemoteClusterResponse(remoteClusterRef)
 		}
@@ -300,7 +300,7 @@ func (adminport *Adminport) doDeleteRemoteClusterRequest(request *http.Request) 
 		return nil, err
 	}
 
-	writeRemoteClusterAuditEvent(base.DeleteRemoteClusterRefEventId, remoteClusterRef, getRealUserIdFromRequest(request))
+	go writeRemoteClusterAuditEvent(base.DeleteRemoteClusterRefEventId, remoteClusterRef, getRealUserIdFromRequest(request))
 
 	return NewDeleteRemoteClusterResponse()
 }

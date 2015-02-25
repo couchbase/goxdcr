@@ -99,6 +99,20 @@ func LogStatusSummary ()  {
 	pipeline_mgr.logger.Infof("Replication Status = %v\n", pipeline_mgr.pipelines_map)
 }
 
+func ActiveReplications(bucket string) []string {
+	var repIds []string
+	for _, key := range pipeline_mgr.liveTopics() {
+		if metadata.IsReplicationIdForSourceBucket(key, bucket) {
+			repIds = append(repIds, key)
+		}
+	}
+	return repIds
+}
+
+func AllActiveReplications() []string {
+	return pipeline_mgr.liveTopics()
+}
+
 func IsPipelineRunning(topic string) bool {
 	if ReplicationStatus(topic) != nil {
 		return (ReplicationStatus(topic).RuntimeStatus() == pipeline.Replicating)

@@ -140,7 +140,7 @@ func invokeFactory() error {
 	}
 	defer repl_spec_svc.DelReplicationSpec(replSpec.Id)
 
-	pl, err := fac.NewPipeline(replSpec.Id)
+	pl, err := fac.NewPipeline(replSpec.Id, nil)
 	if err != nil {
 		return err
 	}
