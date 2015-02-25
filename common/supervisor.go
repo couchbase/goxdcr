@@ -28,6 +28,7 @@ type Supervisor interface {
 // Components that can be supervised, e.g., parts, replication manager, etc.
 type Supervisable interface {
 	Id()  string
+	IsReadyForHeartBeat() bool
 	HeartBeat_sync() bool
 	HeartBeat_async(respchan chan []interface{}, timestamp time.Time) error
 }

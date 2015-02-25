@@ -439,7 +439,7 @@ func (capi *CapiNozzle) send_internal(batch *capiBatch) error {
 }
 
 //batch call for document size larger than the optimistic threshold
-func (capi *CapiNozzle) batchGetMeta(vbno uint16, bigDoc_map map[string]*mc.MCRequest) (map[string]bool, error) {
+func (capi *CapiNozzle) batchGetMeta(vbno uint16, bigDoc_map map[string]*base.WrappedMCRequest) (map[string]bool, error) {
 	capi.Logger().Debugf("batchGetMeta called for vb %v and bigDoc_map with len %v\n", vbno, len(bigDoc_map))
 
 	bigDoc_noRep_map := make(map[string]bool)
@@ -455,14 +455,21 @@ func (capi *CapiNozzle) batchGetMeta(vbno uint16, bigDoc_map map[string]*mc.MCRe
 
 	key_rev_map := make(map[string]string)
 	for key, req := range bigDoc_map {
-		key_rev_map[key] = getSerializedRevision(req)
+		key_rev_map[key] = getSerializedRevision(req.Req)
 	}
 
 	body, err := json.Marshal(key_rev_map)
 	if err != nil {
 		return nil, err
 	}
-
+		
+	for _, req := range bigDoc_map {
+		additionalInfo := make(map[string]interface{})
+		additionalInfo[EVENT_ADDI_DOC_KEY] = string(req.Req.Key)
+		additionalInfo[EVENT_ADDI_SEQNO] = req.Seqno
+		capi.RaiseEvent(common.GetMetaSent, nil, capi, nil, additionalInfo)
+	}
+	
 	var out interface{}
 	err, statusCode := utils.QueryRestApiWithAuth(couchApiBaseHost, couchApiBasePath+base.RevsDiffPath, true, capi.config.username, capi.config.password, capi.config.certificate, base.MethodPost, base.JsonContentType,
 		body, capi.config.connectionTimeout, &out, capi.Logger())
@@ -474,6 +481,13 @@ func (capi *CapiNozzle) batchGetMeta(vbno uint16, bigDoc_map map[string]*mc.MCRe
 		errMsg := fmt.Sprintf("Received unexpected status code %v from _revs_diff query for vbucket %v.\n", statusCode, vbno)
 		capi.Logger().Error(errMsg)
 		return nil, errors.New(errMsg)
+	}
+	
+	for _, req := range bigDoc_map {
+		additionalInfo := make(map[string]interface{})
+		additionalInfo[EVENT_ADDI_DOC_KEY] = string(req.Req.Key)
+		additionalInfo[EVENT_ADDI_SEQNO] = req.Seqno
+		capi.RaiseEvent(common.GetMetaReceived, nil, capi, nil, additionalInfo)
 	}
 
 	bigDoc_rep_map, ok := out.(map[string]interface{})

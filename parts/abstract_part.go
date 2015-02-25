@@ -101,6 +101,7 @@ func (p *AbstractPart) SetState(state common.PartState) error {
 	return nil
 }
 
-//func (p *AbstractPart) Logger() *log.CommonLogger {
-//	return p.logger
-//}
+func (p *AbstractPart) IsReadyForHeartBeat () bool {
+	return p.state == common.Part_Running
+}
+

@@ -65,24 +65,33 @@ func (ckpt_svc *CheckpointsService) DelCheckpointsDocs(replicationId string) err
 	if err != nil {
 		return err
 	}
+	
+	if len(ckpt_meta_entries) == 0 {
+		return nil
+	}
 
 	worker_load := 5
 	num_of_workers := int(math.Ceil(float64(len(ckpt_meta_entries)) / float64(worker_load)))
 	task_index_start := 0
 	worker_wait_grp := &sync.WaitGroup{}
-	errMap := make(map[int]error)
+	errMap := make(map[int][]error)
 	for i := 0; i < num_of_workers; i++ {
 		task_index_end := int(math.Min(float64(task_index_start+worker_load), float64(len(ckpt_meta_entries))))
 
 		worker_wait_grp.Add(1)
-		go func(key_entries []*service_def.MetadataEntry, ckpt_svc *CheckpointsService, waitGrp *sync.WaitGroup, errMap map[int]error, workerId int) {
+		go func(key_entries []*service_def.MetadataEntry, ckpt_svc *CheckpointsService, waitGrp *sync.WaitGroup, errMap map[int][]error, workerId int) {
 			defer worker_wait_grp.Done()
+			errs := []error{}
 			for _, entry := range key_entries {
 				err := ckpt_svc.metadata_svc.DelWithCatalog(catalogKey, entry.Key, entry.Rev)
 				if err != nil {
-					errMap[workerId] = err
+					errs = append(errs, err)
 				}
 				ckpt_svc.logger.Debugf("checkpoint file %v for replication %v is deleted\n", entry.Key, replicationId)
+			}
+			
+			if len(errs) > 0 {
+				errMap[workerId] = errs
 			}
 		}(ckpt_meta_entries[task_index_start:task_index_end], ckpt_svc, worker_wait_grp, errMap, i)
 

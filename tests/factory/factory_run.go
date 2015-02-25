@@ -28,7 +28,7 @@ var options struct {
 	remoteHostName         string // remote cluster host name
 	remoteUserName         string //remote cluster userName
 	remotePassword         string //remote cluster password
-	remoteDemandEncryption uint64   // whether encryption is needed
+	remoteDemandEncryption uint64 // whether encryption is needed
 	remoteCertificateFile  string // file containing certificate for encryption
 }
 
@@ -77,7 +77,7 @@ func main() {
 }
 
 func invokeFactory() error {
-	top_svc, err := s.NewXDCRTopologySvc(uint16(options.sourceKVAdminPort), base.AdminportNumber, true, nil)
+	top_svc, err := s.NewXDCRTopologySvc(uint16(options.sourceKVAdminPort), base.AdminportNumber, 12001, true, nil)
 	if err != nil {
 		fmt.Printf("Error starting xdcr topology service. err=%v\n", err)
 		os.Exit(1)
@@ -94,15 +94,15 @@ func invokeFactory() error {
 		fmt.Printf("Error creating metadata service. err=%v\n", err)
 		os.Exit(1)
 	}
-	
+
 	audit_svc, err := s.NewAuditSvc(top_svc, nil)
 	if err != nil {
 		fmt.Printf("Error starting audit service. err=%v\n", err)
 		os.Exit(1)
 	}
-	
+
 	uilog_svc := s.NewUILogSvc(top_svc, nil)
-	remote_cluster_svc := s.NewRemoteClusterService(uilog_svc, msvc, nil)
+	remote_cluster_svc := s.NewRemoteClusterService(uilog_svc, msvc, top_svc, nil)
 	repl_spec_svc := s.NewReplicationSpecService(uilog_svc, remote_cluster_svc, msvc, nil)
 	cluster_info_svc := s.NewClusterInfoSvc(nil)
 	checkpoints_svc := s.NewCheckpointsService(msvc, nil)
@@ -140,7 +140,7 @@ func invokeFactory() error {
 	}
 	defer repl_spec_svc.DelReplicationSpec(replSpec.Id)
 
-	pl, err := fac.NewPipeline(replSpec.Id)
+	pl, err := fac.NewPipeline(replSpec.Id, nil)
 	if err != nil {
 		return err
 	}

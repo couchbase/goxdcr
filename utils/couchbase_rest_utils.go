@@ -24,31 +24,6 @@ import (
 var ErrorRetrievingSSLPort = errors.New("Could not get ssl port of remote cluster.")
 var ErrorRetrievingCouchApiBase = errors.New("Could not get couchApiBase in the response of /nodes/self.")
 
-//// TODO incorporate cbauth
-//func SendHttpRequest(request *http.Request) (*http.Response, error) {
-//	return http.DefaultClient.Do(request)
-//}
-//
-//// TODO incorporate cbauth
-//func SendHttpRequestThroughSSL(request *http.Request, certificate []byte) (*http.Response, error) {
-//	caPool := x509.NewCertPool()
-//	ok := caPool.AppendCertsFromPEM(certificate)
-//	if !ok {
-//		return nil, errors.New("Invalid certificate")
-//	}
-//
-//	tlsConfig := &tls.Config{
-//		RootCAs: caPool,
-//	}
-//	tlsConfig.BuildNameToCertificate()
-//
-//	tr := &http.Transport{
-//		TLSClientConfig: tlsConfig,
-//	}
-//	client := &http.Client{Transport: tr}
-//	return client.Do(request)
-//}
-
 func GetXDCRSSLPort(hostName, userName, password string, logger *log.CommonLogger) (uint16, error) {
 
 	portsInfo := make(map[string]interface{})
@@ -66,29 +41,6 @@ func GetXDCRSSLPort(hostName, userName, password string, logger *log.CommonLogge
 		return 0, errors.New(fmt.Sprintf("ssl port of remote cluster is of wrong type. Expected type: float64; Actual type: %s", reflect.TypeOf(sslPort)))
 	}
 	return uint16(sslPortFloat), nil
-}
-
-func CouchApiBase(hostName, userName, password string, logger *log.CommonLogger, bSSL bool) (string, error) {
-	nodeInfo := make(map[string]interface{})
-	err, _ := QueryRestApiWithAuth(hostName, base.NodesSelfPath, false, userName, password, nil, base.MethodGet, "", nil, 0, &nodeInfo, logger)
-	if err != nil {
-		return "", err
-	}
-
-	var attrName string
-	if bSSL {
-		attrName = base.CouchApiBaseHttps
-	} else {
-		attrName = base.CouchApiBase
-	}
-	logger.Infof("nodeInfo=%v\n", nodeInfo)
-	logger.Infof("attrName=%v\n", attrName)
-	couchApiBase, ok := nodeInfo[attrName]
-	if !ok {
-		return "", ErrorRetrievingCouchApiBase
-	}
-
-	return couchApiBase.(string), nil
 }
 
 //convenient api for rest calls to local cluster
@@ -136,11 +88,16 @@ func QueryRestApiWithAuth(
 
 	var l *log.CommonLogger = loggerForFunc(logger)
 
-	client, err := getHttpClient(certificate)
+	client, err := getHttpClient(certificate, logger)
 	if err != nil {
 		l.Errorf("Failed to get client for request, req=%v\n", req)
 		return err, 0
 	}
+	defer func() {
+		if client.Transport != nil {
+			client.Transport.(*http.Transport).CloseIdleConnections()
+		}
+	}()
 
 	client.Timeout = timeout
 
@@ -165,6 +122,7 @@ func QueryRestApiWithAuth(
 		}
 		return err, res.StatusCode
 	}
+
 	return err, 0
 }
 
@@ -203,23 +161,18 @@ func InvokeRestWithRetryWithAuth(baseURL string,
 		out,
 		logger)
 	if err != nil {
-		if len(certificate) != 0 {
-			//got https error, no need to retry
+		remain_retries := num_retry - 1
+		if remain_retries < 0 {
 			return err, statusCode
 		} else {
-			remain_retries := num_retry - 1
-			if remain_retries < 0 {
-				return err, statusCode
-			} else {
-				return InvokeRestWithRetryWithAuth(baseURL, path, preservePathEncoding, username, password, certificate, httpCommand, contentType, body, timeout, out, logger, remain_retries)
-			}
+			return InvokeRestWithRetryWithAuth(baseURL, path, preservePathEncoding, username, password, certificate, httpCommand, contentType, body, timeout, out, logger, remain_retries)
 		}
 	}
 	return err, statusCode
 
 }
 
-func getHttpClient(certificate []byte) (*http.Client, error) {
+func getHttpClient(certificate []byte, logger *log.CommonLogger) (*http.Client, error) {
 	var client *http.Client
 	if len(certificate) != 0 {
 		//https
@@ -232,7 +185,9 @@ func getHttpClient(certificate []byte) (*http.Client, error) {
 		tlsConfig := &tls.Config{RootCAs: caPool}
 		tlsConfig.BuildNameToCertificate()
 		tr := &http.Transport{TLSClientConfig: tlsConfig}
+		tr.DisableKeepAlives = true
 		client = &http.Client{Transport: tr}
+
 	} else {
 		client = http.DefaultClient
 	}
@@ -311,7 +266,7 @@ func ConstructHttpRequest(
 		contentType = base.DefaultContentType
 	}
 	req.Header.Set(base.ContentType, contentType)
-	
+
 	//if username is nil, assume it is local rest call
 	if username == "" {
 		err := cbauth.SetRequestAuth(req)

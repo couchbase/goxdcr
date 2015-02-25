@@ -13,9 +13,9 @@ import (
 const (
 	HTTP_RETRIES int = 5
 
-	PRE_REPLICATE_CMD       string = "couchBase/_pre_replicate"
-	MASS_VBOPAQUE_CHECK_CMD string = "couchBase/_mass_vbopaque_check"
-	COMMIT_FOR_CKPT_CMD     string = "couchBase/_commit_for_checkpoint"
+	PRE_REPLICATE_CMD       string = "_pre_replicate"
+	MASS_VBOPAQUE_CHECK_CMD string = "_mass_vbopaque_check"
+	COMMIT_FOR_CKPT_CMD     string = "_commit_for_checkpoint"
 )
 
 //errors
@@ -29,6 +29,7 @@ type apiRequest struct {
 	username string
 	password string
 	body     map[string]interface{}
+	certificate []byte
 }
 
 //CAPIService is a wrapper around the rest interface provided by couchbase server
@@ -71,6 +72,10 @@ func (capi_svc *CAPIService) PreReplicate(remoteBucket *service_def.RemoteBucket
 		capi_svc.logger.Errorf("Calling _pre_replicate on %v failed, err=%v\n", api_base.url, err)
 	}
 	bMatch, current_remoteVBUUID, err = capi_svc.parsePreReplicateResp(api_base.url, status_code, respMap, knownRemoteVBStatus.VBNo, disableCkptBackwardsCompat)
+	
+	if err == nil {
+		capi_svc.logger.Debugf("_pre_replicate succeeded for vb=%v\n", knownRemoteVBStatus.VBNo)
+	}
 	return
 
 }
@@ -110,7 +115,7 @@ func (capi_svc *CAPIService) CommitForCheckpoint(remoteBucket *service_def.Remot
 		remote_seqno = uint64(remote_seqno_pair[1].(float64))
 	} else {
 		//error case
-		capi_svc.logger.Errorf("err=%v\n", err)
+		capi_svc.logger.Errorf("_commit_for_checkpoint failed, err=%v, status_code=%v\n", err, status_code)
 		return 0, 0, err
 	}
 	return
@@ -183,7 +188,7 @@ func (capi_svc *CAPIService) composeAPIRequestBase(remoteBucket *service_def.Rem
 		return nil, err
 	}
 
-	couchApiBaseUrl := "http://" + connectionStr
+	couchApiBaseUrl := connectionStr
 
 	//	    BodyBase = [{<<"bucket">>, Bucket},
 	//                {<<"bucketUUID">>, BucketUUID}],
@@ -194,6 +199,7 @@ func (capi_svc *CAPIService) composeAPIRequestBase(remoteBucket *service_def.Rem
 	api_base.body = make(map[string]interface{})
 	api_base.body["bucket"] = remoteBucket.BucketName
 	api_base.body["bucketUUID"] = remoteBucket.UUID
+	api_base.certificate = remoteBucket.RemoteClusterRef.Certificate
 	return api_base, nil
 }
 
@@ -225,7 +231,7 @@ func (capi_svc *CAPIService) send_post(restMethodName string, api_base *apiReque
 	}
 	//	body :=  []byte(`{"bucket":"default","bucketUUID":0,"vb":0}`)
 	capi_svc.logger.Debugf("body=%s\n", body)
-	err, statusCode := utils.InvokeRestWithRetryWithAuth(api_base.url, restMethodName, false, api_base.username, api_base.password, nil, base.MethodPost, base.JsonContentType, body, 0, &ret_map, capi_svc.logger, num_retry)
+	err, statusCode := utils.InvokeRestWithRetryWithAuth(api_base.url, restMethodName, false, api_base.username, api_base.password, api_base.certificate, base.MethodPost, base.JsonContentType, body, 0, &ret_map, capi_svc.logger, num_retry)
 	return statusCode, ret_map, err
 }
 
@@ -251,8 +257,6 @@ func (capi_svc *CAPIService) parsePreReplicateResp(hostName string,
 		if resp_status_code == 404 && disableCkptBackwardsCompat == false {
 			//throw error
 			retError = errors.New(fmt.Sprintf("_pre_replicate failed on target node %v for vb=%v", hostName, vbno))
-		} else {
-			retError = errors.New(fmt.Sprintf("_pre_replicate failed: resp_status=%v, respMap=%v\n", resp_status_code, respMap))
 		}
 
 		return false, 0, retError

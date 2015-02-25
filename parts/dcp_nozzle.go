@@ -184,6 +184,7 @@ func (dcp *DcpNozzle) Stop() error {
 	}
 
 	dcp.closeUprFeed()
+	dcp.bucket.Close()
 	dcp.Logger().Debugf("DcpNozzle %v processed %v items\n", dcp.Id(), dcp.counter)
 	err = dcp.Stop_server()
 
@@ -247,8 +248,7 @@ func (dcp *DcpNozzle) processData() (err error) {
 			if m.Opcode == gomemcached.UPR_STREAMREQ {
 				if m.Status == gomemcached.NOT_MY_VBUCKET {
 					dcp.Logger().Errorf("Raise error condition %v\n", base.ErrorNotMyVbucket)
-					otherInfo := utils.WrapError(base.ErrorNotMyVbucket)
-					dcp.RaiseEvent(common.ErrorEncountered, nil, dcp, nil, otherInfo)
+					dcp.handleGeneralError (base.ErrorNotMyVbucket)
 					return base.ErrorNotMyVbucket
 				} else if m.Status == gomemcached.ROLLBACK {
 					rollbackseq := binary.BigEndian.Uint64(m.Value[:8])
@@ -264,8 +264,7 @@ func (dcp *DcpNozzle) processData() (err error) {
 					err := dcp.uprFeed.UprRequestStream(vbno, opaque, flags, vbts.Vbuuid, rollbackseq, seqEnd, rollbackseq, rollbackseq)
 					if err != nil {
 						dcp.Logger().Errorf("Failed to request dcp stream after receiving roll-back for vb=%v\n", vbno)
-						otherInfo := utils.WrapError(err)
-						dcp.RaiseEvent(common.ErrorEncountered, nil, dcp, nil, otherInfo)
+						dcp.handleGeneralError (err)
 						return err
 					}
 				} else if m.Status == gomemcached.SUCCESS {
@@ -344,7 +343,7 @@ func (dcp *DcpNozzle) startUprStream(settings map[string]interface{}) error {
 	flags := uint32(0)
 	seqEnd := uint64(0xFFFFFFFFFFFFFFFF)
 	for _, vbts := range dcp.cur_ts {
-		dcp.Logger().Debugf("%v starting vb stream for vb=%v\n", dcp.Id(), vbts.Vbno)
+		dcp.Logger().Debugf("%v starting vb stream for vb=%v, opaque=%v\n", dcp.Id(), vbts.Vbno, opaque)
 		err := dcp.uprFeed.UprRequestStream(vbts.Vbno, opaque, flags, vbts.Vbuuid, vbts.Seqno, seqEnd, vbts.SnapshotStart, vbts.SnapshotEnd)
 		if err != nil {
 			return err

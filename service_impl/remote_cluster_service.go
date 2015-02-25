@@ -17,7 +17,6 @@ import (
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
-	rm "github.com/couchbase/goxdcr/replication_manager"
 	"github.com/couchbase/goxdcr/service_def"
 	"github.com/couchbase/goxdcr/utils"
 	"reflect"
@@ -39,17 +38,19 @@ type remoteClusterCache struct {
 type RemoteClusterService struct {
 	metadata_svc service_def.MetadataSvc
 	uilog_svc    service_def.UILogSvc
+	xdcr_topology_svc service_def.XDCRCompTopologySvc
 	logger       *log.CommonLogger
 	cache_lock   *sync.RWMutex
 	cache_map    map[string]*remoteClusterCache
 }
 
-func NewRemoteClusterService(uilog_svc service_def.UILogSvc, metadata_svc service_def.MetadataSvc, logger_ctx *log.LoggerContext) *RemoteClusterService {
+func NewRemoteClusterService(uilog_svc service_def.UILogSvc, metadata_svc service_def.MetadataSvc, xdcr_topology_svc service_def.XDCRCompTopologySvc, logger_ctx *log.LoggerContext) *RemoteClusterService {
 	return &RemoteClusterService{
 		metadata_svc: metadata_svc,
 		cache_lock:   &sync.RWMutex{},
 		cache_map:    make(map[string]*remoteClusterCache),
 		uilog_svc:    uilog_svc,
+		xdcr_topology_svc: xdcr_topology_svc,
 		logger:       log.NewLogger("RemoteClusterService", logger_ctx),
 	}
 }
@@ -240,7 +241,7 @@ func (service *RemoteClusterService) RemoteClusters(refresh bool) (map[string]*m
 // validate remote cluster info and retrieve actual uuid
 func (service *RemoteClusterService) ValidateRemoteCluster(ref *metadata.RemoteClusterReference) error {
 
-	isEnterprise, err := rm.XDCRCompTopologyService().IsMyClusterEnterprise()
+	isEnterprise, err := service.xdcr_topology_svc.IsMyClusterEnterprise()
 	if err != nil {
 		return err
 	}
@@ -461,7 +462,7 @@ func (service *RemoteClusterService) refresh(ref *metadata.RemoteClusterReferenc
 
 //get remote cluster name from remote cluster uuid. Return unknown if remote cluster cannot be found
 func (service *RemoteClusterService) GetRemoteClusterNameFromClusterUuid(uuid string) string {
-	remoteClusterRef, err := service.RemoteClusterByUuid(uuid, true)
+	remoteClusterRef, err := service.RemoteClusterByUuid(uuid, false)
 	if err != nil || remoteClusterRef == nil {
 		errMsg := fmt.Sprintf("Error getting the name of the remote cluster with uuid=%v.", uuid)
 		if err != nil {

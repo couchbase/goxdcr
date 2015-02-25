@@ -14,6 +14,7 @@ import (
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/service_def"
 	"github.com/couchbase/goxdcr/utils"
+	"time"
 )
 
 type UILogSvc struct {
@@ -40,6 +41,8 @@ func (service *UILogSvc) Write(message string) {
 }
 
 func (service *UILogSvc) writeUILog_async(message string) {
+	start_time := time.Now()
+	defer service.logger.Infof("It took %vs to call writeUILog_async\n", time.Since(start_time).Seconds())
 	hostname, err := service.top_svc.MyConnectionStr()
 	if err != nil {
 		// should never get here

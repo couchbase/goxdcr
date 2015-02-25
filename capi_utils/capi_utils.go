@@ -1,4 +1,4 @@
-package factory
+package capi_utils
 
 import (
 	"errors"
@@ -67,7 +67,7 @@ func ConstructServerCouchApiBaseMap(targetBucket *couchbase.Bucket, remoteCluste
 	parseError := ErrorBuildingVBCouchApiBaseMap(targetBucket.Name, remoteClusterRef.Name)
 
 	var out interface{}
-	err, _ := utils.QueryRestApiWithAuth(remoteClusterRef.HostName, targetBucket.URI, false, remoteClusterRef.UserName, remoteClusterRef.Password, remoteClusterRef.Certificate, base.MethodGet, "", nil, 0, &out, logger_capi_utils)
+	err, _ := utils.QueryRestApiWithAuth(remoteClusterRef.HostName, targetBucket.URI, false, remoteClusterRef.UserName, remoteClusterRef.Password, []byte{}, base.MethodGet, "", nil, 0, &out, logger_capi_utils)
 	if err != nil {
 		return nil, utils.NewEnhancedError(fmt.Sprintf("Error constructing vb couchApiBase map for bucket %v on remote cluster %v because of failure to retrieve bucket info\n", targetBucket.Name, remoteClusterRef.Name), err)
 	}

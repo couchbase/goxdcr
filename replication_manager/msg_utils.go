@@ -144,22 +144,6 @@ var SettingsKeyToRestKeyMap = map[string]string{
 	metadata.PipelineStatsInterval:          StatsInterval,
 }
 
-//constants for outputing replication docs
-const (
-	RemoteClustersForReplicationDoc = "remoteClusters"
-	BucketsPath                     = "buckets"
-
-	ReplicationDocType           = "type"
-	ReplicationDocId             = "id"
-	ReplicationDocSource         = "source"
-	ReplicationDocTarget         = "target"
-	ReplicationDocContinuous     = "continuous"
-	ReplicationDocPauseRequested = "pauseRequested"
-
-	ReplicationDocTypeXmem = "xdc-xmem"
-	ReplicationDocTypeCapi = "xdc"
-)
-
 var logger_msgutil *log.CommonLogger = log.NewLogger("MessageUtils", log.DefaultLoggerContext)
 
 func NewGetRemoteClustersResponse(remoteClusters map[string]*metadata.RemoteClusterReference) ([]byte, error) {
@@ -187,17 +171,17 @@ func NewGetAllReplicationInfosResponse(replInfos []base.ReplicationInfo) ([]byte
 func getReplicationDocMap(replSpec *metadata.ReplicationSpecification) map[string]interface{} {
 	replDocMap := make(map[string]interface{})
 	if replSpec != nil {
-		replDocMap[ReplicationDocId] = replSpec.Id
-		replDocMap[ReplicationDocContinuous] = true
-		replDocMap[ReplicationDocSource] = replSpec.SourceBucketName
-		replDocMap[ReplicationDocTarget] = base.UrlDelimiter + RemoteClustersForReplicationDoc + base.UrlDelimiter + replSpec.TargetClusterUUID + base.UrlDelimiter + BucketsPath + base.UrlDelimiter + replSpec.TargetBucketName
+		replDocMap[base.ReplicationDocId] = replSpec.Id
+		replDocMap[base.ReplicationDocContinuous] = true
+		replDocMap[base.ReplicationDocSource] = replSpec.SourceBucketName
+		replDocMap[base.ReplicationDocTarget] = base.UrlDelimiter + base.RemoteClustersForReplicationDoc + base.UrlDelimiter + replSpec.TargetClusterUUID + base.UrlDelimiter + base.BucketsPath + base.UrlDelimiter + replSpec.TargetBucketName
 
 		// special transformation for replication type and active flag
-		replDocMap[ReplicationDocPauseRequested] = !replSpec.Settings.Active
+		replDocMap[base.ReplicationDocPauseRequestedOutput] = !replSpec.Settings.Active
 		if replSpec.Settings.RepType == metadata.ReplicationTypeXmem {
-			replDocMap[ReplicationDocType] = ReplicationDocTypeXmem
+			replDocMap[base.ReplicationDocType] = base.ReplicationDocTypeXmem
 		} else {
-			replDocMap[ReplicationDocType] = ReplicationDocTypeCapi
+			replDocMap[base.ReplicationDocType] = base.ReplicationDocTypeCapi
 		}
 
 		// copy other replication settings into replication doc

@@ -45,6 +45,8 @@ var ThisNodeKey = "thisNode"
 var SSLPortKey = "httpsMgmt" 
 var PortsKey = "ports"
 var DirectPortKey = "direct"
+var ProxyPortKey ="proxy"
+var SSLProxyPortKey = "sslProxy"
 
 // URL related constants
 var UrlDelimiter = "/"
@@ -165,3 +167,20 @@ var UILogXDCRComponent = "xdcr"
 
 var CouchApiBaseUriDelimiter = "%2f"
 
+var XDCR_EXPVAR_ROOT = "XDCR_Replications"
+//constants for replication docs
+const (
+	RemoteClustersForReplicationDoc = "remoteClusters"
+	BucketsPath                     = "buckets"
+
+	ReplicationDocType           = "type"
+	ReplicationDocId             = "id"
+	ReplicationDocSource         = "source"
+	ReplicationDocTarget         = "target"
+	ReplicationDocContinuous     = "continuous"
+	ReplicationDocPauseRequested = "pause_requested"
+	ReplicationDocPauseRequestedOutput = "pauseRequested"
+
+	ReplicationDocTypeXmem = "xdc-xmem"
+	ReplicationDocTypeCapi = "xdc"
+)

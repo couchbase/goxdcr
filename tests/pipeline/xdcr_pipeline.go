@@ -115,7 +115,7 @@ func main() {
 
 func setup() error {
 	logger.Info("setup....")
-	top_svc, err := s.NewXDCRTopologySvc(uint16(options.source_kv_port), base.AdminportNumber, true, nil)
+	top_svc, err := s.NewXDCRTopologySvc(uint16(options.source_kv_port), base.AdminportNumber, 11997, true, nil)
 	if err != nil {
 		logger.Errorf("Error starting xdcr topology service. err=%v\n", err)
 		os.Exit(1)
@@ -142,7 +142,7 @@ func setup() error {
 	}
 	
 	uilog_svc := s.NewUILogSvc(top_svc, nil)
-	remote_cluster_svc := s.NewRemoteClusterService(uilog_svc, metadata_svc, nil)
+	remote_cluster_svc := s.NewRemoteClusterService(uilog_svc, metadata_svc, top_svc, nil)
 	repl_spec_svc := s.NewReplicationSpecService(uilog_svc, remote_cluster_svc, metadata_svc, nil)
 
 	replication_manager.StartReplicationManager(options.source_kv_host, base.AdminportNumber,
@@ -157,13 +157,12 @@ func setup() error {
 func test() {
 	logger.Info("Start testing")
 	settings := make(map[string]interface{})
-	settings[metadata.PipelineLogLevel] = "Debug"
+	settings[metadata.PipelineLogLevel] = "Info"
 	settings[metadata.CheckpointInterval] = 20
 	settings[metadata.PipelineStatsInterval] = 10000
 	settings[metadata.SourceNozzlePerNode] = NUM_SOURCE_CONN
-	settings[metadata.TargetNozzlePerNode] = NUM_TARGET_CONN
 	settings[metadata.BatchCount] = 500
-	settings[metadata.OptimisticReplicationThreshold] = 20
+	settings[metadata.OptimisticReplicationThreshold] = 60
 	settings[metadata.Active] = true
 
 	// create remote cluster reference needed by replication
@@ -195,7 +194,12 @@ func test() {
 
 	time.Sleep(30 * time.Second)
 
-	pipeline := replication_manager.Pipeline(topic)
+	pipeline := pipeline_manager.Pipeline(topic)
+	
+	if pipeline == nil {
+		fail(fmt.Sprintf("Failed to start pipeline %v", topic))
+	}
+	
 	err = verifyStartingTimestamps(pipeline, true)
 	if err != nil {
 		fail(fmt.Sprintf("%v", err))
@@ -229,7 +233,7 @@ func test() {
 		fail(fmt.Sprintf("err= %v, errMap=%v", err, errMap))
 	}
 	time.Sleep(30 * time.Second)
-	pipeline = replication_manager.Pipeline(topic)
+	pipeline = pipeline_manager.Pipeline(topic)
 	if pipeline == nil {
 		logger.Info("Failed to resume replication")
 		fail(fmt.Sprintf("Failed to resume replication %s", topic))

@@ -52,7 +52,7 @@ func CreateTestRemoteCluster(remote_cluster_service service_def.RemoteClusterSvc
 	
 	remoteClusterRef := metadata.NewRemoteClusterReference(remoteUuid, remoteName, remoteHostName, remoteUserName, remotePassword, remoteDemandEncryption != 0, serverCert)
 	err = remote_cluster_service.AddRemoteCluster(remoteClusterRef)
-	fmt.Printf("Added remote cluster reference with name=%v, err=%v\n", remoteName, err)
+	fmt.Printf("Added remote cluster reference with name=%v, remoteDemandEncryption=%v, err=%v\n", remoteName, remoteDemandEncryption != 0, err)
 	return err
 }
 

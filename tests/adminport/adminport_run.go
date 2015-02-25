@@ -352,15 +352,15 @@ func testGetAllReplications(replicationId string) error {
 
 	replMap := replMapArr[0]
 
-	if replMap[rm.ReplicationDocId] != replicationId {
+	if replMap[base.ReplicationDocId] != replicationId {
 		return errors.New(fmt.Sprintf("Did not find replication with id %v\n", replicationId))
 	}
 
-	err = common.ValidateFieldValue("Type", rm.ReplicationDocTypeXmem, replMap[rm.ReplicationDocType])
+	err = common.ValidateFieldValue("Type", base.ReplicationDocTypeXmem, replMap[base.ReplicationDocType])
 	if err != nil {
 		return err
 	}
-	return common.ValidateFieldValue("PauseRequested", false, replMap[rm.ReplicationDocPauseRequested])
+	return common.ValidateFieldValue("PauseRequested", false, replMap[base.ReplicationDocPauseRequested])
 }
 
 func testGetAllReplicationInfos(replicationId string) error {

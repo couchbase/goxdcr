@@ -24,9 +24,11 @@ var done = make(chan bool)
 var options struct {
 	sourceKVAdminPort uint64 //source kv admin port
 	xdcrRestPort      uint64 // port number of XDCR rest server
-	gometaRequestPort uint64 // gometa request port
-	isEnterprise      bool   // whether couchbase is of enterprise edition
-	isConvert         bool   // whether xdcr is running in conversion/upgrade mode
+
+	sslProxyUpstreamPort        uint64// gometa request port
+	isEnterprise    bool  // whether couchbase is of enterprise edition
+	isConvert    bool  // whether xdcr is running in conversion/upgrade mode
+	
 
 	// logging related parameters
 	logFileDir          string
@@ -39,8 +41,8 @@ func argParse() {
 		"admin port number for source kv")
 	flag.Uint64Var(&options.xdcrRestPort, "xdcrRestPort", uint64(base.AdminportNumber),
 		"port number of XDCR rest server")
-	flag.Uint64Var(&options.gometaRequestPort, "gometaRequestPort", uint64(base.GometaRequestPortNumber),
-		"port number for gometa requests")
+	flag.Uint64Var(&options.sslProxyUpstreamPort, "localProxyPort", 0,
+		"port number for ssl proxy upstream port")
 	flag.BoolVar(&options.isEnterprise, "isEnterprise", true,
 		"whether couchbase is of enterprise edition")
 	flag.BoolVar(&options.isConvert, "isConvert", false,
@@ -69,7 +71,7 @@ func main() {
 		log.Init(options.logFileDir, options.maxLogFileSize, options.maxNumberOfLogFiles)
 	}
 
-	top_svc, err := s.NewXDCRTopologySvc(uint16(options.sourceKVAdminPort), uint16(options.xdcrRestPort), options.isEnterprise, nil)
+	top_svc, err := s.NewXDCRTopologySvc(uint16(options.sourceKVAdminPort), uint16(options.xdcrRestPort), uint16(options.sslProxyUpstreamPort), options.isEnterprise, nil)
 	if err != nil {
 		fmt.Printf("Error starting xdcr topology service. err=%v\n", err)
 		os.Exit(1)
@@ -89,22 +91,28 @@ func main() {
 		fmt.Printf("Error starting audit service. err=%v\n", err)
 		os.Exit(1)
 	}
-
-	uilog_svc := s.NewUILogSvc(top_svc, nil)
-	remote_cluster_svc := s.NewRemoteClusterService(uilog_svc, metadata_svc, nil)
-	repl_spec_svc := s.NewReplicationSpecService(uilog_svc, remote_cluster_svc, metadata_svc, nil)
-
+	
 	if options.isConvert {
-		fmt.Println("Starting replication manager in conversion/upgrade mode.")
-		// start replication manager in conversion/upgrade mode
-		rm.StartReplicationManagerForConversion(
-			repl_spec_svc,
-			remote_cluster_svc)
+		// disable uilogging during upgrade by specifying a nil uilog service
+		remote_cluster_svc := s.NewRemoteClusterService(nil, metadata_svc, top_svc, nil)
+		migration_svc := s.NewMigrationSvc(remote_cluster_svc, 
+			s.NewReplicationSpecService(nil, remote_cluster_svc, metadata_svc, nil),
+			s.NewReplicationSettingsSvc(metadata_svc, nil),
+			s.NewCheckpointsService(metadata_svc, nil),
+			nil)
+		err = migration_svc.Migrate()
+		if err == nil {
+			os.Exit(0)
+		} else {
+			os.Exit(1)
+		}
 	} else {
+		uilog_svc := s.NewUILogSvc(top_svc, nil)
+		remote_cluster_svc := s.NewRemoteClusterService(uilog_svc, metadata_svc, top_svc, nil)
 		// start replication manager in normal mode
 		rm.StartReplicationManager(host,
 			uint16(options.xdcrRestPort),
-			repl_spec_svc,
+			s.NewReplicationSpecService(uilog_svc, remote_cluster_svc, metadata_svc, nil),
 			remote_cluster_svc,
 			s.NewClusterInfoSvc(nil),
 			top_svc,
