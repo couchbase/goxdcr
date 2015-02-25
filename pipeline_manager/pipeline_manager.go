@@ -320,15 +320,11 @@ func (pipelineMgr *pipelineManager) update(topic string, cur_err error, settings
 			settingsMap = s.ToMap()
 		}
 
-		rep_status, ok := pipelineMgr.pipelines_map[topic]
-		if !ok {
-			err := pipelineMgr.updateReplicationStatus(topic, settingsMap)
-			if  err == nil {
-				rep_status = pipelineMgr.pipelines_map[topic]
-			}else {
-				return err
-			}
-		}
+        err := pipelineMgr.updateReplicationStatus(topic, settingsMap)
+        if  err != nil {
+            return err
+        }
+        rep_status := pipelineMgr.pipelines_map[topic]
 
 		retry_interval := settingsMap[metadata.FailureRestartInterval].(int)
 
