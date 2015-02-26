@@ -6,14 +6,14 @@ import (
 
 const (
 	//the maximum number of checkpoints ketp in the file
-	MaxCheckpointsKept int = 10
+	MaxCheckpointsKept int = 100
 
 	FailOverUUID        string = "failover_uuid"
 	Seqno               string = "seqno"
 	DcpSnapshotSeqno    string = "dcp_snapshot_seqno"
 	DcpSnapshotEndSeqno string = "dcp_snapshot_end_seqno"
 	TargetVbUUID        string = "target_vb_uuid"
-	CommitOpaque        string = "commitopaque"
+	TargetSeqno        string = "target_seqno"
 )
 
 type CheckpointRecord struct {
@@ -28,13 +28,13 @@ type CheckpointRecord struct {
 	//target vb uuid
 	Target_vb_uuid uint64 `json:"target_vb_uuid"`
 	//target vb high sequence number
-	Commitopaque uint64 `json:"commitopaque"`
+	Target_Seqno uint64 `json:"target_seqno"`
 }
 
 func (ckpt_record *CheckpointRecord) String() string{
 	return fmt.Sprintf("{Failover_uuid=%v; Seqno=%v; Dcp_snapshot_seqno=%v; Dcp_snapshot_end_seqno=%v; Target_vb_uuid=%v; Commitopaque=%v}", 
 	ckpt_record.Failover_uuid, ckpt_record.Seqno, ckpt_record.Dcp_snapshot_seqno, ckpt_record.Dcp_snapshot_end_seqno, ckpt_record.Target_vb_uuid,
-	ckpt_record.Commitopaque)
+	ckpt_record.Target_Seqno)
 }
 
 type CheckpointsDoc struct {
@@ -52,7 +52,7 @@ func (ckpt *CheckpointRecord) ToMap() map[string]interface{} {
 	ckpt_record_map[DcpSnapshotSeqno] = ckpt.Dcp_snapshot_seqno
 	ckpt_record_map[DcpSnapshotEndSeqno] = ckpt.Dcp_snapshot_end_seqno
 	ckpt_record_map[TargetVbUUID] = ckpt.Target_vb_uuid
-	ckpt_record_map[CommitOpaque] = ckpt.Commitopaque
+	ckpt_record_map[TargetSeqno] = ckpt.Target_Seqno
 	return ckpt_record_map
 }
 

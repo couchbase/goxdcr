@@ -194,7 +194,7 @@ func test() {
 
 	time.Sleep(30 * time.Second)
 
-	pipeline := pipeline_manager.Pipeline(topic)
+	pipeline := pipeline_manager.ReplicationStatus(topic).Pipeline()
 	
 	if pipeline == nil {
 		fail(fmt.Sprintf("Failed to start pipeline %v", topic))
@@ -233,7 +233,7 @@ func test() {
 		fail(fmt.Sprintf("err= %v, errMap=%v", err, errMap))
 	}
 	time.Sleep(30 * time.Second)
-	pipeline = pipeline_manager.Pipeline(topic)
+	pipeline = pipeline_manager.ReplicationStatus(topic).Pipeline()
 	if pipeline == nil {
 		logger.Info("Failed to resume replication")
 		fail(fmt.Sprintf("Failed to resume replication %s", topic))
@@ -272,7 +272,7 @@ func verifyStartingTimestamps(pipeline common.Pipeline, noPreviousCkpts bool) er
 }
 
 func summary(topic string) {
-	pipeline := pipeline_manager.Pipeline(topic)
+	pipeline := pipeline_manager.ReplicationStatus(topic).Pipeline()
 	targetNozzles := pipeline.Targets()
 	for _, targetNozzle := range targetNozzles {
 		fmt.Println(targetNozzle.(*parts.XmemNozzle).StatusSummary())

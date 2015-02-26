@@ -57,8 +57,8 @@ func PipelineManager(factory common.PipelineFactory, repl_spec_svc service_def.R
 	})
 }
 
-func StartPipeline(topic string, settings map[string]interface{}) (common.Pipeline, error) {
-	p, err := pipeline_mgr.startPipeline(topic, settings)
+func StartPipeline(topic string) (common.Pipeline, error) {
+	p, err := pipeline_mgr.startPipeline(topic)
 	return p, err
 }
 
@@ -66,16 +66,16 @@ func StopPipeline(topic string) error {
 	return pipeline_mgr.stopPipeline(topic)
 }
 
-func Pipeline(topic string) common.Pipeline {
-	return pipeline_mgr.pipeline(topic)
-}
+//func Pipeline(topic string) common.Pipeline {
+//	return pipeline_mgr.pipeline(topic)
+//}
 
 func OnExit() error {
 	return pipeline_mgr.onExit()
 }
 
-func Update(topic string, cur_err error, settings map[string]interface{}) error {
-	return pipeline_mgr.update(topic, cur_err, settings)
+func Update(topic string, cur_err error) error {
+	return pipeline_mgr.update(topic, cur_err)
 }
 
 func ReplicationStatus(topic string) *pipeline.ReplicationStatus {
@@ -88,11 +88,24 @@ func RemoveReplicationStatus(topic string) error {
 
 	delete(pipeline_mgr.pipelines_map, topic)
 
+	//ask the updater on this topic if any to stop
+	stopUpdater(topic)
+
 	pipeline.ResetRootStorage()
 	for _, rs := range pipeline_mgr.pipelines_map {
 		rs.Publish()
 	}
 	return nil
+}
+
+func stopUpdater(topic string) {
+	pipeline_mgr.repair_map_lock.Lock()
+	defer pipeline_mgr.repair_map_lock.Unlock()
+	updater := pipeline_mgr.pipeline_pending_for_update[topic]
+	if updater != nil {
+		updater.stop()
+		delete(pipeline_mgr.pipeline_pending_for_update, topic)
+	}
 }
 
 func LogStatusSummary() {
@@ -142,13 +155,13 @@ func (pipelineMgr *pipelineManager) onExit() error {
 
 }
 
-func (pipelineMgr *pipelineManager) startPipeline(topic string, settings map[string]interface{}) (common.Pipeline, error) {
+func (pipelineMgr *pipelineManager) startPipeline(topic string) (common.Pipeline, error) {
 	var err error
-	pipelineMgr.logger.Infof("Starting the pipeline %s with settings = %v\n", topic, settings)
+	pipelineMgr.logger.Infof("Starting the pipeline %s\n", topic)
 
 	if rep_status, ok := pipelineMgr.pipelines_map[topic]; !ok || rep_status.RuntimeStatus() != pipeline.Replicating {
 
-		err := pipelineMgr.updateReplicationStatus(topic, settings)
+		err := pipelineMgr.updateReplicationStatus(topic)
 		if err != nil {
 			return nil, err
 		}
@@ -167,7 +180,7 @@ func (pipelineMgr *pipelineManager) startPipeline(topic string, settings map[str
 		}
 
 		pipelineMgr.logger.Infof("Pipeline %v is constructed, start it", p.InstanceId())
-		err = p.Start(settings)
+		err = p.Start(rep_status.SettingsMap())
 		if err != nil {
 			pipelineMgr.logger.Error("Failed to start the pipeline")
 			return p, err
@@ -182,7 +195,7 @@ func (pipelineMgr *pipelineManager) startPipeline(topic string, settings map[str
 	return nil, err
 }
 
-func (pipelineMgr *pipelineManager) updateReplicationStatus(topic string, settings map[string]interface{}) error {
+func (pipelineMgr *pipelineManager) updateReplicationStatus(topic string) error {
 	pipelineMgr.mapLock.Lock()
 	defer pipelineMgr.mapLock.Unlock()
 
@@ -194,9 +207,8 @@ func (pipelineMgr *pipelineManager) updateReplicationStatus(topic string, settin
 	rep_status, ok := pipelineMgr.pipelines_map[topic]
 	if ok {
 		rep_status.SetSpec(replication_spec)
-		rep_status.PutSettings(settings)
 	} else {
-		pipelineMgr.pipelines_map[topic] = pipeline.NewReplicationStatus(replication_spec, settings, pipelineMgr.logger)
+		pipelineMgr.pipelines_map[topic] = pipeline.NewReplicationStatus(replication_spec, pipelineMgr.logger)
 	}
 
 	return nil
@@ -254,7 +266,8 @@ func (pipelineMgr *pipelineManager) stopPipeline(topic string) error {
 			//the parts tof the pipeline will eventually commit suicide.
 		}
 		pipelineMgr.removePipelineFromReplicationStatus(p)
-		pipelineMgr.updateReplicationStatus(topic, nil)
+
+		pipelineMgr.updateReplicationStatus(topic)
 
 		pipelineMgr.logger.Infof("Pipeline is stopped")
 	} else {
@@ -303,29 +316,18 @@ func (pipelineMgr *pipelineManager) reportFixed(topic string) {
 	delete(pipelineMgr.pipeline_pending_for_update, topic)
 }
 
-func (pipelineMgr *pipelineManager) update(topic string, cur_err error, settings map[string]interface{}) error {
+func (pipelineMgr *pipelineManager) update(topic string, cur_err error) error {
 	pipelineMgr.repair_map_lock.Lock()
 	defer pipelineMgr.repair_map_lock.Unlock()
 
-	if _, ok := pipelineMgr.pipeline_pending_for_update[topic]; !ok {
+	err := pipelineMgr.updateReplicationStatus(topic)
+	if err != nil {
+		return err
+	}
+	rep_status := pipelineMgr.pipelines_map[topic]
 
-		var settingsMap map[string]interface{} = settings
-		if settingsMap == nil {
-			spec, err := pipelineMgr.repl_spec_svc.ReplicationSpec(topic)
-			if err != nil {
-				return err
-			}
-
-			s := spec.Settings
-			settingsMap = s.ToMap()
-		}
-
-		err := pipelineMgr.updateReplicationStatus(topic, settingsMap)
-		if err != nil {
-			return err
-		}
-		rep_status := pipelineMgr.pipelines_map[topic]
-
+	if updater, ok := pipelineMgr.pipeline_pending_for_update[topic]; !ok {
+		settingsMap := rep_status.SettingsMap()
 		retry_interval := settingsMap[metadata.FailureRestartInterval].(int)
 
 		repairer, err := newPipelineUpdater(topic, retry_interval, pipelineMgr.child_waitGrp, cur_err, rep_status, pipelineMgr.logger)
@@ -335,12 +337,27 @@ func (pipelineMgr *pipelineManager) update(topic string, cur_err error, settings
 		pipelineMgr.child_waitGrp.Add(1)
 		pipelineMgr.pipeline_pending_for_update[topic] = repairer
 		go repairer.start()
-		pipelineMgr.logger.Infof("Repairer to fix pipeline %v is lauched with retry_interval=%v\n", topic, retry_interval)
+		pipelineMgr.logger.Infof("Pipeline updater %v is lauched with retry_interval=%v\n", topic, retry_interval)
 	} else {
-		pipelineMgr.logger.Infof("There is already an repairer launched for the replication, no-op")
+		if cur_err == nil {
+			//update is not initiated by error, update the replication status
+			//trigger updater to update immediately, not to wait for the retry interval
+			updater.refreshReplicationStatus(rep_status)
+		}
+		pipelineMgr.logger.Infof("There is already an updater launched for the replication, no-op")
 	}
 	return nil
 }
+
+type pipelineUpdaterState int
+
+const (
+	Updater_Initialized = iota
+	Updater_Running     = iota
+	Updater_Done        = iota
+)
+
+var updaterStateErrorStr = "Can't move update state from %v to %v"
 
 //pipelineRepairer is responsible to repair a failing pipeline
 //it will retry after the retry_interval
@@ -353,6 +370,8 @@ type pipelineUpdater struct {
 	num_of_retries uint64
 	//finish channel
 	fin_ch chan bool
+	//update-now channel
+	update_now_ch chan bool
 	//the current error
 	current_error error
 
@@ -360,6 +379,8 @@ type pipelineUpdater struct {
 
 	rep_status *pipeline.ReplicationStatus
 	logger     *log.CommonLogger
+	state_lock sync.RWMutex
+	state      pipelineUpdaterState
 }
 
 func newPipelineUpdater(pipeline_name string, retry_interval int, waitGrp *sync.WaitGroup, cur_err error, rep_status *pipeline.ReplicationStatus, logger *log.CommonLogger) (*pipelineUpdater, error) {
@@ -377,6 +398,7 @@ func newPipelineUpdater(pipeline_name string, retry_interval int, waitGrp *sync.
 		waitGrp:        waitGrp,
 		rep_status:     rep_status,
 		logger:         logger,
+		state:          Updater_Initialized,
 		current_error:  cur_err}
 
 	return repairer, nil
@@ -397,16 +419,25 @@ func (r *pipelineUpdater) start() {
 
 	ticker := time.NewTicker(r.retry_interval)
 	for {
+		r.updateState(Updater_Running)
 		select {
-		case <-ticker.C:
+		case <-r.fin_ch:
+			r.logger.Infof("Quit updating pipeline %v\n", r.pipeline_name)
+			return
+		case <-r.update_now_ch:
+			r.logger.Infof("Replication %v's status is changed, update now\n", r.pipeline_name)
 			if r.update() {
 				return
 			} else {
 				r.num_of_retries++
 			}
-		case <-r.fin_ch:
-			r.logger.Infof("Quit updating pipeline %v\n", r.pipeline_name)
-			return
+		case <-ticker.C:
+
+			if r.update() {
+				return
+			} else {
+				r.num_of_retries++
+			}
 		}
 	}
 }
@@ -426,7 +457,7 @@ func (r *pipelineUpdater) update() bool {
 		goto RE
 	}
 
-	_, err = pipeline_mgr.startPipeline(r.pipeline_name, r.rep_status.Settings())
+	_, err = pipeline_mgr.startPipeline(r.pipeline_name)
 RE:
 	if err == nil {
 		r.logger.Infof("Replication %v is updated, back to business\n", r.pipeline_name)
@@ -434,12 +465,15 @@ RE:
 		r.logger.Errorf("Failed to update pipeline %v, err=%v\n", r.pipeline_name, err)
 	}
 
-	r.current_error = err
-
-	if r.current_error == nil || r.current_error == ReplicationSpecNotActive {
+	if err == nil || err == ReplicationSpecNotActive {
 		r.logger.Infof("Pipeline %v is updated\n", r.pipeline_name)
-		pipeline_mgr.reportFixed(r.pipeline_name)
-		return true
+		if r.updateState(Updater_Done) == nil {
+			pipeline_mgr.reportFixed(r.pipeline_name)
+			r.current_error = nil
+			return true
+		}
+	} else {
+		r.current_error = err
 	}
 	r.reportStatus()
 
@@ -454,8 +488,56 @@ func (r *pipelineUpdater) reportStatus() {
 func (r *pipelineUpdater) checkReplicationActiveness() (err error) {
 	spec, err := pipeline_mgr.repl_spec_svc.ReplicationSpec(r.pipeline_name)
 	if err != nil || spec == nil || !spec.Settings.Active {
-		err = ReplicationSpecNotActive
+		if err == nil && spec != nil {
+			err = ReplicationSpecNotActive
+		}
 	}
 	r.logger.Debugf("Pipeline %v is not paused or deleted\n", r.pipeline_name)
 	return
+}
+
+//It should be called only once.
+func (r *pipelineUpdater) stop() {
+	defer func() {
+		if e := recover(); e != nil {
+			r.logger.Infof("Updater for pipeline is already stopped\n", r.pipeline_name)
+		}
+	}()
+	close(r.fin_ch)
+}
+
+func (r *pipelineUpdater) refreshReplicationStatus(rep_status *pipeline.ReplicationStatus) {
+	r.state_lock.Lock()
+	defer r.state_lock.Unlock()
+
+	r.rep_status = rep_status
+	r.state = Updater_Initialized
+	select {
+	case r.update_now_ch <- true:
+	default:
+		r.logger.Infof("Update-now message is already delivered for %v", r.pipeline_name)
+	}
+	r.logger.Infof("Replication status is updated, current status=%v\n", rep_status)
+}
+
+func (r *pipelineUpdater) updateState(new_state pipelineUpdaterState) error {
+	r.state_lock.Lock()
+	defer r.state_lock.Unlock()
+
+	switch r.state {
+	case Updater_Initialized:
+		if new_state != Updater_Running {
+			r.logger.Infof("Updater %v can't move to %v from %v\n", r.pipeline_name, new_state, r.state)
+			return fmt.Errorf(updaterStateErrorStr, Updater_Initialized, Updater_Running)
+		}
+	case Updater_Done:
+		r.logger.Infof("Updater %v can't move to %v from %v\n", r.pipeline_name, new_state, r.state)
+		return fmt.Errorf(updaterStateErrorStr, Updater_Done, new_state)
+
+	}
+	
+	r.logger.Infof("Updater %v moved to %v from %v\n", r.pipeline_name, new_state, r.state)
+	r.state = new_state
+
+	return nil
 }

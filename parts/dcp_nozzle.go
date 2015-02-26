@@ -27,10 +27,11 @@ import (
 
 const (
 	// start settings key name
-	DCP_SETTINGS_KEY = "dcp"
+	DCP_VBTimestamp        = "VBTimestamp"
+	DCP_VBTimestampUpdator = "VBTimestampUpdater"
 )
 
-var dcp_setting_defs base.SettingDefinitions = base.SettingDefinitions{DCP_SETTINGS_KEY: base.NewSettingDef(reflect.TypeOf((*map[uint16]*base.VBTimestamp)(nil)), true)}
+var dcp_setting_defs base.SettingDefinitions = base.SettingDefinitions{DCP_VBTimestamp: base.NewSettingDef(reflect.TypeOf((*map[uint16]*base.VBTimestamp)(nil)), true)}
 
 var ErrorEmptyVBList = errors.New("Invalid configuration for DCP nozzle. VB list cannot be empty.")
 
@@ -61,10 +62,11 @@ type DcpNozzle struct {
 
 	childrenWaitGrp sync.WaitGroup
 
-	counter      int
-	start_time   time.Time
-	handle_error bool
-	cur_ts       map[uint16]*base.VBTimestamp
+	counter             int
+	start_time          time.Time
+	handle_error        bool
+	cur_ts              map[uint16]*base.VBTimestamp
+	vbtimestamp_updater func(uint16, uint64) (*base.VBTimestamp, error)
 }
 
 func NewDcpNozzle(id string,
@@ -104,8 +106,12 @@ func NewDcpNozzle(id string,
 
 func (dcp *DcpNozzle) initialize(settings map[string]interface{}) (err error) {
 	dcp.finch = make(chan bool)
-	feedName := fmt.Sprintf("%v", time.Now().UnixNano())
-	dcp.uprFeed, err = dcp.bucket.StartUprFeed(feedName, uint32(0))
+
+	dcp.uprFeed, err = dcp.bucket.StartUprFeed(dcp.Id(), uint32(0))
+
+	// fetch start timestamp from settings
+	dcp.cur_ts = settings[DCP_VBTimestamp].(map[uint16]*base.VBTimestamp)
+	dcp.vbtimestamp_updater = settings[DCP_VBTimestampUpdator].(func(uint16, uint64) (*base.VBTimestamp, error))
 
 	//initialize vb_stream_status
 	for _, vb := range dcp.vbnos {
@@ -161,7 +167,7 @@ func (dcp *DcpNozzle) Start(settings map[string]interface{}) error {
 	go dcp.processData()
 
 	// start vbstreams
-	err = dcp.startUprStream(settings)
+	err = dcp.startUprStreams()
 	if err != nil {
 		dcp.handleGeneralError(err)
 		return err
@@ -248,30 +254,26 @@ func (dcp *DcpNozzle) processData() (err error) {
 			if m.Opcode == gomemcached.UPR_STREAMREQ {
 				if m.Status == gomemcached.NOT_MY_VBUCKET {
 					dcp.Logger().Errorf("Raise error condition %v\n", base.ErrorNotMyVbucket)
-					dcp.handleGeneralError (base.ErrorNotMyVbucket)
+					dcp.handleGeneralError(base.ErrorNotMyVbucket)
 					return base.ErrorNotMyVbucket
 				} else if m.Status == gomemcached.ROLLBACK {
 					rollbackseq := binary.BigEndian.Uint64(m.Value[:8])
 					vbno := m.VBucket
 
 					//need to request the uprstream for the vbucket again
-					opaque := newOpaque()
-					flags := uint32(0)
-					seqEnd := uint64(0xFFFFFFFFFFFFFFFF)
-					dcp.Logger().Infof("%v re-starting vb stream for vb=%v after receiving roll-back event\n", dcp.Id(), vbno)
-					vbts := dcp.cur_ts[vbno]
-					dcp.Logger().Infof("%v starting vb stream for vb=%v, starting seqno=%v\n", dcp.Id(), vbts.Vbno, rollbackseq)
-					err := dcp.uprFeed.UprRequestStream(vbno, opaque, flags, vbts.Vbuuid, rollbackseq, seqEnd, rollbackseq, rollbackseq)
+					dcp.cur_ts[vbno], err = dcp.vbtimestamp_updater(vbno, rollbackseq)
 					if err != nil {
-						dcp.Logger().Errorf("Failed to request dcp stream after receiving roll-back for vb=%v\n", vbno)
-						dcp.handleGeneralError (err)
+						dcp.handleGeneralError(err)
 						return err
 					}
+					dcp.startUprStream(vbno)
+
 				} else if m.Status == gomemcached.SUCCESS {
 					vbno := m.VBucket
 					_, ok := dcp.vb_stream_status[vbno]
 					if ok {
 						dcp.vb_stream_status[vbno] = true
+						dcp.RaiseEvent(common.StreamingStart, m, dcp, nil, nil)
 					} else {
 						panic(fmt.Sprintf("Stream for vb=%v is not supposed to be opened\n", vbno))
 					}
@@ -315,6 +317,7 @@ func (dcp *DcpNozzle) onExit() {
 	//notify the data processing routine
 	close(dcp.finch)
 	dcp.childrenWaitGrp.Wait()
+
 }
 
 func (dcp *DcpNozzle) StatusSummary() string {
@@ -334,23 +337,24 @@ func (dcp *DcpNozzle) handleGeneralError(err error) {
 }
 
 // start, restart or shutdown streams
-func (dcp *DcpNozzle) startUprStream(settings map[string]interface{}) error {
-
-	// fetch restart-timestamp from settings
-	dcp.cur_ts = settings[DCP_SETTINGS_KEY].(map[uint16]*base.VBTimestamp)
-
-	opaque := newOpaque()
-	flags := uint32(0)
-	seqEnd := uint64(0xFFFFFFFFFFFFFFFF)
+func (dcp *DcpNozzle) startUprStreams() error {
 	for _, vbts := range dcp.cur_ts {
-		dcp.Logger().Debugf("%v starting vb stream for vb=%v, opaque=%v\n", dcp.Id(), vbts.Vbno, opaque)
-		err := dcp.uprFeed.UprRequestStream(vbts.Vbno, opaque, flags, vbts.Vbuuid, vbts.Seqno, seqEnd, vbts.SnapshotStart, vbts.SnapshotEnd)
+		err := dcp.startUprStream(vbts.Vbno)
 		if err != nil {
 			return err
 		}
 	}
 
 	return nil
+}
+
+func (dcp *DcpNozzle) startUprStream(vbno uint16) error {
+	opaque := newOpaque()
+	flags := uint32(0)
+	seqEnd := uint64(0xFFFFFFFFFFFFFFFF)
+	vbts := dcp.cur_ts[vbno]
+	dcp.Logger().Debugf("%v starting vb stream for vb=%v, opaque=%v\n", dcp.Id(), vbno, opaque)
+	return dcp.uprFeed.UprRequestStream(vbno, opaque, flags, vbts.Vbuuid, vbts.Seqno, seqEnd, vbts.SnapshotStart, vbts.SnapshotEnd)
 }
 
 // Set vb list in dcp nozzle

@@ -270,38 +270,16 @@ func DeleteReplication(topic string, realUserId *base.RealUserId) error {
 
 //start the replication for the given replicationId
 func startPipelineWithRetry(topic string) error {
-	err := startPipeline(topic)
+	_, err := pipeline_manager.StartPipeline(topic)
 	if err != nil {
 
-		err = pipeline_manager.Update(topic, err, nil)
+		err = pipeline_manager.Update(topic, err)
 	}
 	return err
 }
 
 func PipelineMasterSupervisor() *supervisor.GenericSupervisor {
 	return replication_mgr.pipelineMasterSupervisor
-}
-
-//start pipeline in synchronous fashion
-func startPipeline(topic string) error {
-	spec, err := ReplicationSpecService().ReplicationSpec(topic)
-	if err != nil {
-		return err
-	}
-
-	settings := spec.Settings
-	settingsMap := settings.ToMap()
-
-	_, err = pipeline_manager.StartPipeline(topic, settingsMap)
-
-	logger_rm.Infof("Started pipeline - err = %v\n", err)
-	return err
-}
-
-//stop the running replication with the given replicationId
-//in synchronous fashion
-func stopPipeline(topic string) error {
-	return pipeline_manager.StopPipeline(topic)
 }
 
 //update the default replication settings
@@ -525,7 +503,7 @@ func (rm *replicationManager) OnError(s common.Supervisor, errMap map[string]err
 				pipeline, err := getPipelineFromPipelineSupevisor(child.(common.Supervisor))
 				if err == nil {
 					// try to fix the pipeline
-					pipeline_manager.Update(pipeline.Topic(), err1, nil)
+					pipeline_manager.Update(pipeline.Topic(), err1)
 				}
 			}
 		}
@@ -534,7 +512,7 @@ func (rm *replicationManager) OnError(s common.Supervisor, errMap map[string]err
 		pipeline, err := getPipelineFromPipelineSupevisor(s)
 		if err == nil {
 			// try to fix the pipeline
-			pipeline_manager.Update(pipeline.Topic(), errors.New(fmt.Sprintf("%v", errMap)), nil)
+			pipeline_manager.Update(pipeline.Topic(), errors.New(fmt.Sprintf("%v", errMap)))
 		}
 	}
 }
@@ -546,7 +524,7 @@ func getPipelineFromPipelineSupevisor(s common.Supervisor) (common.Pipeline, err
 	supervisorId := s.Id()
 	if strings.HasPrefix(supervisorId, base.PipelineSupervisorIdPrefix) {
 		pipelineId := supervisorId[len(base.PipelineSupervisorIdPrefix):]
-		pipeline := pipeline_manager.Pipeline(pipelineId)
+		pipeline := pipeline_manager.ReplicationStatus(pipelineId).Pipeline()
 		if pipeline != nil {
 			return pipeline, nil
 		} else {
@@ -580,7 +558,7 @@ func (rm *replicationManager) startReplications() error {
 }
 
 func SetPipelineLogLevel(topic string, levelStr string) error {
-	pipeline := pipeline_manager.Pipeline(topic)
+	pipeline := pipeline_manager.ReplicationStatus(topic).Pipeline()
 
 	//update the setting
 	spec, err := ReplicationSpecService().ReplicationSpec(topic)
@@ -623,18 +601,6 @@ func validatePipelineExists(topic, action string, exist bool) error {
 			state = "does not exist"
 		}
 		return errors.New(fmt.Sprintf("Error %v replication with id, %v, since it %v.\n", action, topic, state))
-	}
-	return nil
-}
-
-func validatePipelineState(topic, action string, active bool) error {
-	pipelineActive := (pipeline_manager.Pipeline(topic) != nil)
-	if pipelineActive != active {
-		state := "already"
-		if active {
-			state = "not"
-		}
-		return errors.New(fmt.Sprintf("Warning: Cannot %v replication with id, %v, since it is %v actively running.\n", action, topic, state))
 	}
 	return nil
 }
@@ -721,7 +687,7 @@ func specChangedCallback(changedSpecId string, changedSpec *metadata.Replication
 		pipelineRunning := pipeline_manager.IsPipelineRunning(topic)
 		if pipelineRunning {
 			logger_rm.Infof("Stopping pipeline %v since the replication spec has been deleted\n", topic)
-			err := stopPipeline(topic)
+			err := pipeline_manager.StopPipeline(topic)
 			if err != nil {
 				logger_rm.Infof("Stopping pipeline %v failed with err = %v, leave it alone\n", topic, err)
 			}
@@ -743,8 +709,8 @@ func specChangedCallback(changedSpecId string, changedSpec *metadata.Replication
 	//if the replication doesn't exit, it is treated the same as it exits, but it is paused
 	specActive_old := false
 	var oldSettings *metadata.ReplicationSettings = nil
-	if pipeline_manager.Pipeline(topic) != nil {
-		oldSettings = pipeline_manager.Pipeline(topic).Specification().Settings
+	if pipeline_manager.ReplicationStatus(topic) != nil {
+		oldSettings = pipeline_manager.ReplicationStatus(topic).Settings()
 		specActive_old = oldSettings.Active
 	}
 
@@ -752,7 +718,7 @@ func specChangedCallback(changedSpecId string, changedSpec *metadata.Replication
 		// if some critical settings have been changed, stop, reconstruct, and restart pipeline
 		if needToReconstructPipeline(oldSettings, changedSpec.Settings) {
 			logger_rm.Infof("Restarting pipeline %v since the changes to replication spec are critical\n", topic)
-			return pipeline_manager.Update(topic, nil, changedSpec.Settings.ToMap())
+			return pipeline_manager.Update(topic, nil)
 
 		} else {
 			// otherwise, perform live update to pipeline
@@ -771,13 +737,13 @@ func specChangedCallback(changedSpecId string, changedSpec *metadata.Replication
 		//stop replication
 		logger_rm.Infof("Stopping pipeline %v since the replication spec has been changed to inactive\n", topic)
 
-		return pipeline_manager.Update(topic, nil, changedSpec.Settings.ToMap())
+		return pipeline_manager.Update(topic, nil)
 
 	} else if !specActive_old && specActive {
 		// start replication
 		logger_rm.Infof("Starting pipeline %v since the replication spec has been changed to active\n", topic)
 
-		return pipeline_manager.Update(topic, nil, changedSpec.Settings.ToMap())
+		return pipeline_manager.Update(topic, nil)
 
 	} else {
 		// this is the case where pipeline is not running and spec is not active.

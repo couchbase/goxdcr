@@ -640,7 +640,7 @@ func (service *MigrationSvc) migrateCheckpoint(checkpointDocId string, checkpoin
 		Dcp_snapshot_seqno:     dcpSnapshotSeqno,
 		Dcp_snapshot_end_seqno: dcpSnapshotEndSeqno,
 		Target_vb_uuid:         targetVbUuid,
-		Commitopaque:           commitOpaque,
+		Target_Seqno:           commitOpaque,
 	}
 
 	service.logger.Infof("Checkpoint record constructed = %v\n", checkpointRecord)

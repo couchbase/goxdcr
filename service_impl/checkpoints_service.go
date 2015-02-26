@@ -78,16 +78,18 @@ func (ckpt_svc *CheckpointsService) DelCheckpointsDocs(replicationId string) err
 	for i := 0; i < num_of_workers; i++ {
 		task_index_end := int(math.Min(float64(task_index_start+worker_load), float64(len(ckpt_meta_entries))))
 
+		ckpt_svc.logger.Infof("Starting job for deleting ckpt #%v - #%v\n", task_index_start, task_index_end)
 		worker_wait_grp.Add(1)
 		go func(key_entries []*service_def.MetadataEntry, ckpt_svc *CheckpointsService, waitGrp *sync.WaitGroup, errMap map[int][]error, workerId int) {
 			defer worker_wait_grp.Done()
 			errs := []error{}
 			for _, entry := range key_entries {
+				ckpt_svc.logger.Infof("try to delete checkpoint file %v for replication %v\n", entry.Key, replicationId)
 				err := ckpt_svc.metadata_svc.DelWithCatalog(catalogKey, entry.Key, entry.Rev)
 				if err != nil {
 					errs = append(errs, err)
 				}
-				ckpt_svc.logger.Debugf("checkpoint file %v for replication %v is deleted\n", entry.Key, replicationId)
+				ckpt_svc.logger.Infof("checkpoint file %v for replication %v is deleted\n", entry.Key, replicationId)
 			}
 			
 			if len(errs) > 0 {

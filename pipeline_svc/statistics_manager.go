@@ -141,7 +141,6 @@ type StatisticsManager struct {
 
 	collectors []MetricsCollector
 
-	current_vb_start_ts map[uint16]*base.VBTimestamp
 	active_vbs          map[string][]uint16
 	bucket_name         string
 	kv_mem_clients      map[string]*mcc.Client
@@ -296,6 +295,7 @@ func (stats_mgr *StatisticsManager) processRawStats() error {
 					}
 					metric_overview := stats_mgr.getOverviewRegistry().Get(name)
 					if metric_overview != nil {
+						stats_mgr.logger.Debugf("Update counter %v by %v in overview registry", name, m.Count())
 						metric_overview.(metrics.Counter).Inc(m.Count())
 					}
 				case metrics.Histogram:
@@ -325,6 +325,7 @@ func (stats_mgr *StatisticsManager) processRawStats() error {
 		return err
 	}
 
+	stats_mgr.logger.Debugf("Overview=%v for pipeline %v\n", map_for_overview, stats_mgr.pipeline.Topic())
 	expvar_stats_map.Set(OVERVIEW_METRICS_KEY, map_for_overview)
 	return nil
 }
@@ -389,9 +390,10 @@ func (stats_mgr *StatisticsManager) processCalculatedStats(oldSample metrics.Reg
 	return nil
 }
 
+
 func (stats_mgr *StatisticsManager) calculateDocsChecked() uint64 {
 	var docs_checked uint64 = 0
-	for vbno, vbts := range stats_mgr.current_vb_start_ts {
+	for vbno, vbts := range GetStartSeqnos(stats_mgr.pipeline, stats_mgr.logger) {
 		start_seqno := vbts.Seqno
 		var docs_checked_vb uint64 = 0
 		if stats_mgr.through_seqnos[vbno] > start_seqno {
@@ -416,7 +418,11 @@ func (stats_mgr *StatisticsManager) calculateTotalChanges() (int64, error) {
 	for serverAddr, vbnos := range stats_mgr.active_vbs {
 		highseqno_map, err := stats_mgr.getHighSeqNos(serverAddr, vbnos)
 		for _, vbno := range vbnos {
-			ts := stats_mgr.current_vb_start_ts[vbno]
+			startSeqnos_map := GetStartSeqnos(stats_mgr.pipeline, stats_mgr.logger)
+			ts, ok := startSeqnos_map[vbno]
+			if !ok {
+				return 0, fmt.Errorf("Can't find start seqno for vbno=%v\n", vbno)
+			}
 			current_vb_highseqno := highseqno_map[vbno]
 			if err != nil {
 				return 0, err
@@ -585,10 +591,6 @@ func (stats_mgr *StatisticsManager) Start(settings map[string]interface{}) error
 	}
 	stats_mgr.logger.Debugf("StatisticsManager Starts: update_interval=%v, settings=%v\n", stats_mgr.update_interval, settings)
 	stats_mgr.publish_ticker = time.NewTicker(stats_mgr.update_interval)
-
-	if _, ok := settings[VB_START_TS]; ok {
-		stats_mgr.current_vb_start_ts = settings[VB_START_TS].(map[uint16]*base.VBTimestamp)
-	}
 
 	//publishing status to expvar
 	expvar_stats_map := pipeline.StorageForRep(stats_mgr.pipeline.Topic())

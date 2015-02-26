@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/couchbase/goxdcr/base"
+	"github.com/couchbase/goxdcr/capi_utils"
 	"github.com/couchbase/goxdcr/common"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
@@ -12,10 +13,9 @@ import (
 	pctx "github.com/couchbase/goxdcr/pipeline_ctx"
 	"github.com/couchbase/goxdcr/pipeline_svc"
 	"github.com/couchbase/goxdcr/pipeline_utils"
-	"github.com/couchbase/goxdcr/capi_utils"
-	"github.com/couchbase/goxdcr/utils"
 	"github.com/couchbase/goxdcr/service_def"
 	"github.com/couchbase/goxdcr/supervisor"
+	"github.com/couchbase/goxdcr/utils"
 	"math"
 	"strconv"
 	"time"
@@ -79,7 +79,7 @@ func (xdcrf *XDCRFactory) NewPipeline(topic string, progress_recorder common.Pip
 		xdcrf.logger.Errorf("Failed to get replication specification, err=%v\n", err)
 		return nil, err
 	}
-
+	
 	logger_ctx := log.CopyCtx(xdcrf.default_logger_ctx)
 	logger_ctx.Log_level = spec.Settings.LogLevel
 	//TODO should we change log level on xdcrf.logger?
@@ -123,10 +123,9 @@ func (xdcrf *XDCRFactory) NewPipeline(topic string, progress_recorder common.Pip
 	}
 	progress_recorder("Source nozzles are wired to target nozzles")
 
-
 	// construct pipeline
-	pipeline := pp.NewPipelineWithSettingConstructor(topic, sourceNozzles, outNozzles, spec, xdcrf.ConstructSettingsForPart, xdcrf.StartSeqno, xdcrf.remote_cluster_svc.RemoteClusterByUuid, logger_ctx)
-	if pipelineContext, err := pctx.NewWithSettingConstructor(pipeline, xdcrf.ConstructSettingsForService, xdcrf.StartSeqno, logger_ctx); err != nil {
+	pipeline := pp.NewPipelineWithSettingConstructor(topic, sourceNozzles, outNozzles, spec, xdcrf.ConstructSettingsForPart, xdcrf.SetStartSeqno, xdcrf.remote_cluster_svc.RemoteClusterByUuid, logger_ctx)
+	if pipelineContext, err := pctx.NewWithSettingConstructor(pipeline, xdcrf.ConstructSettingsForService, logger_ctx); err != nil {
 		return nil, err
 	} else {
 
@@ -259,7 +258,7 @@ func (xdcrf *XDCRFactory) constructOutgoingNozzles(spec *metadata.ReplicationSpe
 	}
 
 	targetBucket, err := xdcrf.cluster_info_svc.GetBucket(targetClusterRef, targetBucketName)
-	if err != nil {
+	if err != nil  || targetBucket == nil {
 		xdcrf.logger.Errorf("Error getting bucket, err=%v\n", err)
 		return nil, nil, err
 	}
@@ -270,7 +269,7 @@ func (xdcrf *XDCRFactory) constructOutgoingNozzles(spec *metadata.ReplicationSpe
 	xdcrf.logger.Debugf("Target topology retrived. kvVBMap = %v\n", kvVBMap)
 
 	var vbCouchApiBaseMap map[uint16]string
-	
+
 	for kvaddr, kvVBList := range kvVBMap {
 		nozzleType, err := xdcrf.getNozzleType(kvaddr, spec)
 		if err != nil {
@@ -321,7 +320,7 @@ func (xdcrf *XDCRFactory) constructOutgoingNozzles(spec *metadata.ReplicationSpe
 					return nil, nil, err
 				}
 			} else {
-				connSize := numOfNozzles *2
+				connSize := numOfNozzles * 2
 				outNozzle = xdcrf.constructXMEMNozzle(spec.Id, kvaddr, targetBucketName, bucketPwd, i, connSize, logger_ctx)
 			}
 
@@ -432,15 +431,15 @@ func (xdcrf *XDCRFactory) ConstructSettingsForPart(pipeline common.Pipeline, par
 	}
 }
 
-func (xdcrf *XDCRFactory) StartSeqno(pipeline common.Pipeline) (map[uint16]*base.VBTimestamp, error) {
+func (xdcrf *XDCRFactory) SetStartSeqno(pipeline common.Pipeline) error {
 	if pipeline == nil {
-		return nil, errors.New("pipeline=nil")
+		return errors.New("pipeline=nil")
 	}
 	ckpt_mgr := pipeline.RuntimeContext().Service(base.CHECKPOINT_MGR_SVC)
 	if ckpt_mgr == nil {
-		return nil, errors.New(fmt.Sprintf("CheckpoingManager is not attached to pipeline %v", pipeline.Topic()))
+		return errors.New(fmt.Sprintf("CheckpoingManager is not attached to pipeline %v", pipeline.Topic()))
 	}
-	return ckpt_mgr.(*pipeline_svc.CheckpointManager).VBTimestamps(pipeline.Topic())
+	return ckpt_mgr.(*pipeline_svc.CheckpointManager).SetVBTimestamps(pipeline.Topic())
 }
 
 func (xdcrf *XDCRFactory) constructSettingsForXmemNozzle(pipeline common.Pipeline, part common.Part, targetClusterRef *metadata.RemoteClusterReference, settings map[string]interface{}) (map[string]interface{}, error) {
@@ -454,40 +453,39 @@ func (xdcrf *XDCRFactory) constructSettingsForXmemNozzle(pipeline common.Pipelin
 	xmemSettings[parts.SETTING_RESP_TIMEOUT] = xdcrf.getTargetTimeoutEstimate(pipeline.Topic())
 	xmemSettings[parts.SETTING_BATCH_EXPIRATION_TIME] = time.Duration(float64(repSettings.MaxExpectedReplicationLag)*0.7) * time.Millisecond
 	xmemSettings[parts.SETTING_OPTI_REP_THRESHOLD] = repSettings.OptimisticReplicationThreshold
-	
 
 	demandEncryption := targetClusterRef.DemandEncryption
 	certificate := targetClusterRef.Certificate
 	if demandEncryption {
-			local_proxy_port, err := xdcrf.xdcr_topology_svc.MyProxyPort()
-			if err != nil {
-				return nil, err
+		local_proxy_port, err := xdcrf.xdcr_topology_svc.MyProxyPort()
+		if err != nil {
+			return nil, err
+		}
+
+		var remote_proxy_port uint16 = 0
+		targetBucket, err := xdcrf.cluster_info_svc.GetBucket(targetClusterRef, spec.TargetBucketName)
+		if err != nil {
+			xdcrf.logger.Errorf("Error getting bucket. err=%v\n", err)
+			return nil, err
+		}
+
+		for _, node := range targetBucket.Nodes() {
+			hostname := utils.GetHostName(node.Hostname)
+			memcachedPort := uint16(node.Ports[base.DirectPortKey])
+			hostAddr := utils.GetHostAddr(hostname, memcachedPort)
+			if hostAddr == xmemConnStr {
+				remote_proxy_port = uint16(node.Ports[base.SSLProxyPortKey])
+				break
 			}
-			
-			var remote_proxy_port uint16 = 0
-			targetBucket, err := xdcrf.cluster_info_svc.GetBucket(targetClusterRef, spec.TargetBucketName)
-			if err != nil {
-				xdcrf.logger.Errorf("Error getting bucket. err=%v\n", err)
-				return nil, err
-			}
-			
-			for _, node := range targetBucket.Nodes() {
-				hostname := utils.GetHostName(node.Hostname)
-				memcachedPort := uint16(node.Ports[base.DirectPortKey])
-				hostAddr := utils.GetHostAddr(hostname, memcachedPort)
-				if hostAddr == xmemConnStr {
-					remote_proxy_port = uint16(node.Ports[base.SSLProxyPortKey])
-					break
-				}
-			}		
-			if remote_proxy_port == 0 {
-				return nil, errors.New(fmt.Sprintf("Can't find remote proxy port for remote bucket %v", spec.TargetBucketName))
-			}
-			
-			xmemSettings[parts.XMEM_SETTING_DEMAND_ENCRYPTION] = demandEncryption
-			xmemSettings[parts.XMEM_SETTING_CERTIFICATE] = certificate
-			xmemSettings[parts.XMEM_SETTING_REMOTE_PROXY_PORT] = remote_proxy_port
-			xmemSettings[parts.XMEM_SETTING_LOCAL_PROXY_PORT] = local_proxy_port
+		}
+		if remote_proxy_port == 0 {
+			return nil, errors.New(fmt.Sprintf("Can't find remote proxy port for remote bucket %v", spec.TargetBucketName))
+		}
+
+		xmemSettings[parts.XMEM_SETTING_DEMAND_ENCRYPTION] = demandEncryption
+		xmemSettings[parts.XMEM_SETTING_CERTIFICATE] = certificate
+		xmemSettings[parts.XMEM_SETTING_REMOTE_PROXY_PORT] = remote_proxy_port
+		xmemSettings[parts.XMEM_SETTING_LOCAL_PROXY_PORT] = local_proxy_port
 	}
 	return xmemSettings, nil
 
@@ -516,7 +514,8 @@ func (xdcrf *XDCRFactory) constructSettingsForDcpNozzle(pipeline common.Pipeline
 	xdcrf.logger.Debugf("Construct settings for DcpNozzle ....")
 	dcpNozzleSettings := make(map[string]interface{})
 
-	if pipeline.RuntimeContext().Service(base.CHECKPOINT_MGR_SVC) == nil {
+	ckpt_svc := pipeline.RuntimeContext().Service(base.CHECKPOINT_MGR_SVC)
+	if ckpt_svc == nil {
 		return nil, errors.New("No checkpoint manager is registered with the pipeline")
 	}
 
@@ -526,7 +525,8 @@ func (xdcrf *XDCRFactory) constructSettingsForDcpNozzle(pipeline common.Pipeline
 		partTs[vb] = ts[vb]
 	}
 	xdcrf.logger.Debugf("start timestamps is %v\n", ts)
-	dcpNozzleSettings[parts.DCP_SETTINGS_KEY] = partTs
+	dcpNozzleSettings[parts.DCP_VBTimestamp] = partTs
+	dcpNozzleSettings[parts.DCP_VBTimestampUpdator] = ckpt_svc.(*pipeline_svc.CheckpointManager).UpdateVBTimestamps
 	return dcpNozzleSettings, nil
 }
 

@@ -10,6 +10,7 @@
 package service_impl
 
 import (
+	"fmt"
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
@@ -64,16 +65,16 @@ func (ci_svc *ClusterInfoSvc) GetServerVBucketsMap(clusterConnInfoProvider base.
 	bucket, err := ci_svc.GetBucket(clusterConnInfoProvider, bucketName)
 	if err != nil {
 		return nil, err
+	} else if bucket == nil {
+		return nil, fmt.Errorf("Failed to get bucket %v", bucketName)
 	}
+
 	defer func() {
 		if bucket != nil {
 			bucket.Close()
 		}
 	}()
 
-	if bucket == nil {
-		panic("Failed to get bucket")
-	}
 	serverVBMap, err := bucket.GetVBmap(bucket.VBServerMap().ServerList)
 
 	return serverVBMap, err

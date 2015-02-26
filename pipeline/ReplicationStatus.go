@@ -52,16 +52,14 @@ type ReplicationStatus struct {
 	rep_spec *metadata.ReplicationSpecification
 	pipeline common.Pipeline
 	err_list PipelineErrorArray
-	settings map[string]interface{}
 	progress string
 	logger   *log.CommonLogger
 }
 
-func NewReplicationStatus(rep_spec *metadata.ReplicationSpecification, settings map[string]interface{}, logger *log.CommonLogger) *ReplicationStatus {
+func NewReplicationStatus(rep_spec *metadata.ReplicationSpecification, logger *log.CommonLogger) *ReplicationStatus {
 	rep_status := &ReplicationStatus{rep_spec: rep_spec,
 		pipeline: nil,
 		logger:   logger,
-		settings: settings,
 		err_list: PipelineErrorArray{},
 		progress: ""}
 	rep_status.Publish()
@@ -164,13 +162,17 @@ func (rs *ReplicationStatus) Pipeline() common.Pipeline {
 	return rs.pipeline
 }
 
-func (rs *ReplicationStatus) Settings() map[string]interface{} {
-	return rs.settings
+func (rs *ReplicationStatus) SettingsMap() map[string]interface{} {
+	return rs.rep_spec.Settings.ToMap()
 }
 
-func (rs *ReplicationStatus) PutSettings(settings map[string]interface{}) {
-	rs.settings = settings
+func (rs *ReplicationStatus) Settings() *metadata.ReplicationSettings{
+	return rs.rep_spec.Settings
 }
+
+//func (rs *ReplicationStatus) PutSettings(settings map[string]interface{}) {
+//	rs.settings = settings
+//}
 
 func (rs *ReplicationStatus) Errors() PipelineErrorArray {
 	return rs.err_list

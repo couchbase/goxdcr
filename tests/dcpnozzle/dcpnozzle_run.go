@@ -131,7 +131,7 @@ func constructStartSettings(dcpNozzle *parts.DcpNozzle) map[string]interface{} {
 			ts[vb] = &base.VBTimestamp{}
 			ts[vb].Vbno = vb
 		}
-		settings[parts.DCP_SETTINGS_KEY] = ts
+		settings[parts.DCP_VBTimestamp] = ts
 	return settings
 }
 

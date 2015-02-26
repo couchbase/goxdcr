@@ -17,6 +17,8 @@ import (
 //It is not required for Component to raise all those event
 type ComponentEventType int
 const (
+	//data streaming starts
+	StreamingStart	ComponentEventType = iota
 	//data received by the component
 	DataReceived ComponentEventType = iota
 	//data is processed by the component 

@@ -62,6 +62,7 @@ func (service *RemoteClusterService) RemoteClusterByRefId(refId string, refresh 
 	}
 	ref, err := service.constructRemoteClusterReference(result, rev)
 	if err != nil {
+		service.logger.Errorf("Failed to get remote cluster refId=%v, err=%v\n", refId, err)
 		return nil, err
 	}
 
@@ -321,7 +322,7 @@ func (service *RemoteClusterService) addRemoteCluster(ref *metadata.RemoteCluste
 
 func (service *RemoteClusterService) constructRemoteClusterReference(value []byte, rev interface{}) (*metadata.RemoteClusterReference, error) {
 	if len(value) == 0 {
-		return nil, errors.New("unknown remote cluster")
+		return nil, errors.New("Failed to construct remote cluster value returned by metakv is empty")
 	}
 
 	ref := &metadata.RemoteClusterReference{}

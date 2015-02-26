@@ -128,9 +128,10 @@ type requestBuffer struct {
 	notifych_lock     sync.RWMutex
 	seqno_sorted_list map[uint16][]int
 	seqno_list_lock   map[uint16]*sync.RWMutex
+	token_ch          chan int
 }
 
-func newReqBuffer(size uint16, threshold uint16, logger *log.CommonLogger) *requestBuffer {
+func newReqBuffer(size uint16, threshold uint16, token_ch chan int, logger *log.CommonLogger) *requestBuffer {
 	logger.Debugf("Create a new request buffer of size %d\n", size)
 	buf := &requestBuffer{
 		slots:             make([]*bufferedMCRequest, size, size),
@@ -140,6 +141,7 @@ func newReqBuffer(size uint16, threshold uint16, logger *log.CommonLogger) *requ
 		notifych:          nil,
 		notify_threshold:  threshold,
 		fin_ch:            make(chan bool, 1),
+		token_ch:          token_ch,
 		logger:            logger,
 		notifych_lock:     sync.RWMutex{},
 		seqno_sorted_list: make(map[uint16][]int),
@@ -361,6 +363,7 @@ func (buf *requestBuffer) enSlot(pos uint16, req *base.WrappedMCRequest, reserva
 		}
 		r.req = req
 		buf.updateSeqnoList(req)
+		buf.token_ch <- 1
 	}
 	buf.logger.Debugf("slot %d is occupied\n", pos)
 	return nil
@@ -705,6 +708,8 @@ type XmemNozzle struct {
 	//the big seqno that is confirmed to be received on the vbucket
 	//it is still possible that smaller seqno hasn't been received
 	maxseqno_received_map map[uint16]uint64
+
+	receive_token_ch chan int
 }
 
 func NewXmemNozzle(id string,
@@ -730,6 +735,7 @@ func NewXmemNozzle(id string,
 		lock_bOpen:            sync.RWMutex{},
 		dataChan_lock:         sync.RWMutex{},
 		dataChan:              nil,
+		receive_token_ch:      nil,
 		client_for_setMeta:    nil,
 		client_for_getMeta:    nil,
 		config:                newConfig(server.Logger()),
@@ -1202,7 +1208,6 @@ func (xmem *XmemNozzle) batchGetMeta(bigDoc_map map[string]*base.WrappedMCReques
 
 	}(len(bigDoc_map), receiver_fin_ch, opaque_key_map, opaque_seqno_map, respMap, 1*time.Second, err_list, waitGrp, xmem.Logger())
 
-
 	var sequence uint16 = uint16(time.Now().UnixNano())
 	reqs_bytes := []byte{}
 	counter := 0
@@ -1398,7 +1403,8 @@ func (xmem *XmemNozzle) initialize(settings map[string]interface{}) error {
 	//init a new batch
 	xmem.initNewBatch()
 
-	xmem.buf = newReqBuffer(uint16(xmem.config.maxCount*100), uint16(float64(xmem.config.maxCount)*0.2), xmem.Logger())
+	xmem.receive_token_ch = make(chan int, xmem.config.maxCount*100)
+	xmem.buf = newReqBuffer(uint16(xmem.config.maxCount*100), uint16(float64(xmem.config.maxCount)*0.2), xmem.receive_token_ch, xmem.Logger())
 
 	xmem.receiver_finch = make(chan bool, 1)
 	xmem.checker_finch = make(chan bool, 1)
@@ -1420,71 +1426,72 @@ func (xmem *XmemNozzle) receiveResponse(finch chan bool, waitGrp *sync.WaitGroup
 		select {
 		case <-finch:
 			goto done
-		default:
+		case <-xmem.receive_token_ch:
 			if xmem.validateRunningState() != nil {
 				xmem.Logger().Infof("xmem %v has stopped", xmem.Id())
 				goto done
 			}
 
-			if xmem.buf.itemCountInBuffer() > 0 {
-				response, err := xmem.readFromClient(xmem.client_for_setMeta)
-				if err != nil {
-					if err == PartStoppedError || err == connectionClosedError || err == fatalError {
-						goto done
-					} else if err == badConnectionError {
-						xmem.repairConn(xmem.client_for_setMeta, err.Error())
-						xmem.Logger().Error("The connection is ruined. Repair the connection and retry.")
-					} else if response != nil && isRecoverableMCError(response.Status) {
+			response, err := xmem.readFromClient(xmem.client_for_setMeta)
+			if err != nil {
+				if err == PartStoppedError || err == connectionClosedError || err == fatalError {
+					goto done
+				} else if err == badConnectionError {
+					xmem.repairConn(xmem.client_for_setMeta, err.Error())
+					xmem.Logger().Error("The connection is ruined. Repair the connection and retry.")
+				} else if response != nil && isRecoverableMCError(response.Status) {
 
-						pos := xmem.getPosFromOpaque(response.Opaque)
-						xmem.Logger().Infof("%v pos=%d, Received error = %v in response, err = %v, response=%v\n", xmem.Id(), pos, response.Status.String(), err, response.Bytes())
-						_, err = xmem.buf.modSlot(pos, xmem.resend)
+					pos := xmem.getPosFromOpaque(response.Opaque)
+					xmem.Logger().Infof("%v pos=%d, Received error = %v in response, err = %v, response=%v\n", xmem.Id(), pos, response.Status.String(), err, response.Bytes())
+					_, err = xmem.buf.modSlot(pos, xmem.resend)
+				}
+				
+				//read is unsuccessful, put the token back
+				xmem.receive_token_ch <- 1
+			} else {
+				//raiseEvent
+				pos := xmem.getPosFromOpaque(response.Opaque)
+				wrappedReq, err := xmem.buf.slot(pos)
+				if err != nil {
+					xmem.Logger().Errorf("xmem buffer is in invalid state")
+					xmem.handleGeneralError(errors.New("xmem buffer is in invalid state"))
+					goto done
+				}
+				var req *mc.MCRequest
+				var seqno uint64
+				if wrappedReq != nil {
+					req = wrappedReq.Req
+					seqno = wrappedReq.Seqno
+				}
+
+				if req != nil && req.Opaque == response.Opaque {
+					xmem.Logger().Debugf("%v Got the response, key=%s, status=%v\n", xmem.Id(), req.Key, response.Status)
+					if response.Status != mc.SUCCESS {
+						xmem.Logger().Debugf("*****%v-%v Got the response, response.Status=%v for doc %s*******\n", xmem.config.bucketName, xmem.Id(), response.Status, req.Key)
+						xmem.Logger().Debugf("req.key=%s, req.Extras=%v, req.Cas=%v, req=%v\n", req.Key, req.Extras, req.Cas, req)
+					}
+
+					additionalInfo := make(map[string]interface{})
+					additionalInfo[EVENT_ADDI_SEQNO] = seqno
+					additionalInfo[EVENT_ADDI_OPT_REPD] = xmem.optimisticRep(req)
+
+					//add additional information about hiseqno, which is going to be used
+					//for checkpointing
+					highseqno, err := xmem.getCurSeenHighSeqno(wrappedReq)
+					if err == nil {
+						additionalInfo[EVENT_ADDI_HISEQNO] = highseqno
+					}
+
+					xmem.RaiseEvent(common.DataSent, req, xmem, nil, additionalInfo)
+					//empty the slot in the buffer
+					if xmem.buf.evictSlot(pos) != nil {
+						xmem.Logger().Errorf("Failed to evict slot %d\n", pos)
 					}
 				} else {
-					//raiseEvent
-					pos := xmem.getPosFromOpaque(response.Opaque)
-					wrappedReq, err := xmem.buf.slot(pos)
-					if err != nil {
-						xmem.Logger().Errorf("xmem buffer is in invalid state")
-						xmem.handleGeneralError(errors.New("xmem buffer is in invalid state"))
-						goto done
-					}
-					var req *mc.MCRequest
-					var seqno uint64
-					if wrappedReq != nil {
-						req = wrappedReq.Req
-						seqno = wrappedReq.Seqno
-					}
-
-					if req != nil && req.Opaque == response.Opaque {
-						xmem.Logger().Debugf("%v Got the response, key=%s, status=%v\n", xmem.Id(), req.Key, response.Status)
-						if response.Status != mc.SUCCESS {
-							xmem.Logger().Debugf("*****%v-%v Got the response, response.Status=%v for doc %s*******\n", xmem.config.bucketName, xmem.Id(), response.Status, req.Key)
-							xmem.Logger().Debugf("req.key=%s, req.Extras=%v, req.Cas=%v, req=%v\n", req.Key, req.Extras, req.Cas, req)
-						}
-
-						additionalInfo := make(map[string]interface{})
-						additionalInfo[EVENT_ADDI_SEQNO] = seqno
-						additionalInfo[EVENT_ADDI_OPT_REPD] = xmem.optimisticRep(req)
-
-						//add additional information about hiseqno, which is going to be used
-						//for checkpointing
-						highseqno, err := xmem.getCurSeenHighSeqno(wrappedReq)
-						if err == nil {
-							additionalInfo[EVENT_ADDI_HISEQNO] = highseqno
-						}
-
-						xmem.RaiseEvent(common.DataSent, req, xmem, nil, additionalInfo)
-						//empty the slot in the buffer
-						if xmem.buf.evictSlot(pos) != nil {
-							xmem.Logger().Errorf("Failed to evict slot %d\n", pos)
-						}
+					if req != nil {
+						xmem.Logger().Debugf("%v Got the response, response.Opaque=%v, req.Opaque=%v\n", xmem.Id(), response.Opaque, req.Opaque)
 					} else {
-						if req != nil {
-							xmem.Logger().Debugf("%v Got the response, response.Opaque=%v, req.Opaque=%v\n", xmem.Id(), response.Opaque, req.Opaque)
-						} else {
-							xmem.Logger().Debugf("%v Got the response, pos=%v, req in that pos is nil\n", xmem.Id(), pos)
-						}
+						xmem.Logger().Debugf("%v Got the response, pos=%v, req in that pos is nil\n", xmem.Id(), pos)
 					}
 				}
 			}

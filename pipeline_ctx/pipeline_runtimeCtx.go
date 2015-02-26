@@ -18,7 +18,7 @@ import (
 )
 
 type ServiceSettingsConstructor func(pipeline common.Pipeline, service common.PipelineService, pipeline_settings map[string]interface{}, ts map[uint16]*base.VBTimestamp) (map[string]interface{}, error)
-type StartSeqnoConstructor func(pipeline common.Pipeline) (map[uint16]*base.VBTimestamp, error)
+type StartSeqnoConstructor func(pipeline common.Pipeline) error
 
 type PipelineRuntimeCtx struct {
 	//registered runtime pipeline service
@@ -31,23 +31,21 @@ type PipelineRuntimeCtx struct {
 	isRunning                    bool
 	logger                       *log.CommonLogger
 	service_settings_constructor ServiceSettingsConstructor
-	start_seqno_constructor      StartSeqnoConstructor
 }
 
-func NewWithSettingConstructor(p common.Pipeline, service_settings_constructor ServiceSettingsConstructor, start_seqno_constructor StartSeqnoConstructor, logger_context *log.LoggerContext) (*PipelineRuntimeCtx, error) {
+func NewWithSettingConstructor(p common.Pipeline, service_settings_constructor ServiceSettingsConstructor, logger_context *log.LoggerContext) (*PipelineRuntimeCtx, error) {
 	ctx := &PipelineRuntimeCtx{
 		runtime_svcs: make(map[string]common.PipelineService),
 		pipeline:     p,
 		isRunning:    false,
 		logger:       log.NewLogger("PipelineRuntimeCtx", logger_context),
-		service_settings_constructor: service_settings_constructor,
-		start_seqno_constructor:      start_seqno_constructor}
+		service_settings_constructor: service_settings_constructor}
 
 	return ctx, nil
 }
 
 func New(p common.Pipeline) (*PipelineRuntimeCtx, error) {
-	return NewWithSettingConstructor(p, nil, nil, log.DefaultLoggerContext)
+	return NewWithSettingConstructor(p, nil, log.DefaultLoggerContext)
 }
 
 func (ctx *PipelineRuntimeCtx) Start(params map[string]interface{}) error {
@@ -56,7 +54,7 @@ func (ctx *PipelineRuntimeCtx) Start(params map[string]interface{}) error {
 	//start all registered services
 	for name, svc := range ctx.runtime_svcs {
 		settings := params
-		if ctx.service_settings_constructor != nil && ctx.start_seqno_constructor != nil {
+		if ctx.service_settings_constructor != nil {
 			ts, ok := params["VBTimestamps"]
 			if !ok {
 				ctx.logger.Errorf("VBTimestamps is missing. params=%v\n", params)

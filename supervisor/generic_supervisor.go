@@ -210,7 +210,7 @@ func (supervisor *GenericSupervisor) sendHeartBeats() {
 	if len(supervisor.children) > 0 {
 		heartbeat_report := make(map[string]heartbeatRespStatus)
 		heartbeat_resp_chs := make(map[string]chan []interface{})
-		numResponseToWait := 0
+		responseToWaitTokens := make(chan int, len(supervisor.children))
 		for childId, child := range supervisor.children {
 			if child.IsReadyForHeartBeat() {
 				respch := make(chan []interface{}, 1)
@@ -222,14 +222,14 @@ func (supervisor *GenericSupervisor) sendHeartBeats() {
 					heartbeat_report[childId] = skip
 				} else {
 					heartbeat_report[childId] = notYetResponded
-					numResponseToWait++
+					responseToWaitTokens <- 1
 				}
 			}
 		}
 		fin_ch := make(chan bool, 1)
 		supervisor.resp_waiter_chs = append(supervisor.resp_waiter_chs, fin_ch)
-		if numResponseToWait > 0 {
-			go supervisor.waitForResponse(heartbeat_report, heartbeat_resp_chs, fin_ch)
+		if len(responseToWaitTokens) > 0 {
+			go supervisor.waitForResponse(heartbeat_report, heartbeat_resp_chs, fin_ch, responseToWaitTokens)
 		} else {
 			supervisor.Logger().Infof("No response to be waited.")
 		}
@@ -258,7 +258,7 @@ func (supervisor *GenericSupervisor) Init(settings map[string]interface{}) error
 	return nil
 }
 
-func (supervisor *GenericSupervisor) waitForResponse(heartbeat_report map[string]heartbeatRespStatus, heartbeat_resp_chs map[string]chan []interface{}, finch chan bool) {
+func (supervisor *GenericSupervisor) waitForResponse(heartbeat_report map[string]heartbeatRespStatus, heartbeat_resp_chs map[string]chan []interface{}, finch chan bool, reponseToWaitTokens chan int) {
 	defer func() {
 		<-supervisor.err_ch
 		supervisor.Logger().Debugf("Exiting waitForResponse from supervisor %v\n", supervisor.Id())
@@ -279,7 +279,7 @@ func (supervisor *GenericSupervisor) waitForResponse(heartbeat_report map[string
 			//time is up
 			supervisor.Logger().Errorf("Heartbeat timeout in supervisor %v! not_yet_resp_count=%v\n", supervisor.Id(), len(heartbeat_report)-responded_count)
 			goto REPORT
-		default:
+		case <-reponseToWaitTokens:
 			for childId, status := range heartbeat_report {
 				if status == notYetResponded {
 					select {
@@ -288,6 +288,8 @@ func (supervisor *GenericSupervisor) waitForResponse(heartbeat_report map[string
 						supervisor.Logger().Debugf("Child %v has responded to the heartbeat ping sent at %v to supervisor %v\n", childId, ping_time, supervisor.Id())
 						heartbeat_report[childId] = respondedOk
 					default:
+						//didn't get the response, put the token back
+						reponseToWaitTokens <- 1
 					}
 				}
 			}
