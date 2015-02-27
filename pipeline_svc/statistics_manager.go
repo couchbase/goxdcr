@@ -21,9 +21,9 @@ import (
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
 	parts "github.com/couchbase/goxdcr/parts"
+	"github.com/couchbase/goxdcr/pipeline"
 	"github.com/couchbase/goxdcr/utils"
 	"github.com/rcrowley/go-metrics"
-	"github.com/couchbase/goxdcr/pipeline"
 	"reflect"
 	"strconv"
 	"sync"
@@ -93,14 +93,14 @@ type StatisticsManager struct {
 	//entry in registries.
 	//This map will be emptied after the replication lags are calculated to get ready for
 	//next collection period
-	starttime_map map[string]interface{}
+	starttime_map      map[string]interface{}
 	starttime_map_lock sync.RWMutex
 
 	//temporary map to keep all the collected end time for data item during this collection
 	//interval.
 	//This map will be emptied after the replication lags are calculated to get ready for
 	//next collection period
-	endtime_map map[string]interface{}
+	endtime_map      map[string]interface{}
 	endtime_map_lock sync.RWMutex
 
 	//temporary map to keep all the collected start time for getMeta requests
@@ -110,14 +110,14 @@ type StatisticsManager struct {
 	//entry in registries.
 	//This map will be emptied after the latencies are calculated to get ready for
 	//next collection period
-	meta_starttime_map map[string]interface{}
+	meta_starttime_map      map[string]interface{}
 	meta_starttime_map_lock sync.RWMutex
 
 	//temporary map to keep all the collected end time for getMeta requests during this collection
 	//interval.
 	//This map will be emptied after the latencies are calculated to get ready for
 	//next collection period
-	meta_endtime_map map[string]interface{}
+	meta_endtime_map      map[string]interface{}
 	meta_endtime_map_lock sync.RWMutex
 
 	//temporary map to keep current through seqno
@@ -149,23 +149,23 @@ type StatisticsManager struct {
 
 func NewStatisticsManager(logger_ctx *log.LoggerContext, active_vbs map[string][]uint16, bucket_name string) *StatisticsManager {
 	stats_mgr := &StatisticsManager{registries: make(map[string]metrics.Registry),
-		bucket_name:        bucket_name,
-		starttime_map:      make(map[string]interface{}),
-		meta_starttime_map: make(map[string]interface{}),
-		endtime_map:        make(map[string]interface{}),
-		meta_endtime_map:   make(map[string]interface{}),
-		starttime_map_lock:  sync.RWMutex{},
-		endtime_map_lock:  sync.RWMutex{},
-		meta_starttime_map_lock:  sync.RWMutex{},
-		meta_endtime_map_lock:  sync.RWMutex{},
-		finish_ch:          make(chan bool, 1),
-		sample_size:        default_sample_size,
-		update_interval:    default_update_interval,
-		logger:             log.NewLogger("StatisticsManager", logger_ctx),
-		active_vbs:         active_vbs,
-		wait_grp:           &sync.WaitGroup{},
-		kv_mem_clients:     make(map[string]*mcc.Client),
-		through_seqnos:     make(map[uint16]uint64)}
+		bucket_name:             bucket_name,
+		starttime_map:           make(map[string]interface{}),
+		meta_starttime_map:      make(map[string]interface{}),
+		endtime_map:             make(map[string]interface{}),
+		meta_endtime_map:        make(map[string]interface{}),
+		starttime_map_lock:      sync.RWMutex{},
+		endtime_map_lock:        sync.RWMutex{},
+		meta_starttime_map_lock: sync.RWMutex{},
+		meta_endtime_map_lock:   sync.RWMutex{},
+		finish_ch:               make(chan bool, 1),
+		sample_size:             default_sample_size,
+		update_interval:         default_update_interval,
+		logger:                  log.NewLogger("StatisticsManager", logger_ctx),
+		active_vbs:              active_vbs,
+		wait_grp:                &sync.WaitGroup{},
+		kv_mem_clients:          make(map[string]*mcc.Client),
+		through_seqnos:          make(map[uint16]uint64)}
 	stats_mgr.collectors = []MetricsCollector{&outNozzleCollector{}, &dcpCollector{}, &routerCollector{}, &checkpointMgrCollector{}}
 	return stats_mgr
 }
@@ -200,47 +200,68 @@ func (stats_mgr *StatisticsManager) cleanupBeforeExit() {
 //It processes the raw stats and publish the overview stats along with the raw stats to expvar
 //It also log the stats to log
 func (stats_mgr *StatisticsManager) updateStats(finchan chan bool) error {
+	stats_mgr.logger.Info("updateStats started")
+
 	defer stats_mgr.wait_grp.Done()
+
+	init_ch := make(chan bool, 1)
+	init_ch <- true
 	for {
 		select {
 		case <-finchan:
 			stats_mgr.cleanupBeforeExit()
 			return nil
-		case <-stats_mgr.publish_ticker.C:
-			if stats_mgr.pipeline.State() != common.Pipeline_Running && stats_mgr.pipeline.State() != common.Pipeline_Starting{
-				//the pipeline is no longer running, kill myself
-				stats_mgr.logger.Infof("Pipeline is no longer running, exit.")
-				stats_mgr.cleanupBeforeExit()
+		// this ensures that stats are printed out immediately after updateStats is started
+		case <-init_ch:
+			err := stats_mgr.updateStatsOnce()
+			if err != nil {
 				return nil
 			}
-			stats_mgr.logger.Debugf("%v: Publishing the statistics for %v to expvar", time.Now(), stats_mgr.pipeline.InstanceId())
-			err := stats_mgr.processRawStats()
-
-			if err == nil {
-				if stats_mgr.logger.GetLogLevel() >= log.LogLevelInfo {
-					stats_mgr.logger.Info(stats_mgr.formatStatsForLog())
-
-					//log parts summary
-					outNozzle_parts := stats_mgr.pipeline.Targets()
-					for _, part := range outNozzle_parts {
-						if stats_mgr.pipeline.Specification().Settings.RepType == metadata.ReplicationTypeXmem {
-							stats_mgr.logger.Info(part.(*parts.XmemNozzle).StatusSummary())
-						} else {
-							stats_mgr.logger.Info(part.(*parts.CapiNozzle).StatusSummary())
-						}
-					}
-					dcp_parts := stats_mgr.pipeline.Sources()
-					for _, part := range dcp_parts {
-						conn := part.Connector()
-						stats_mgr.logger.Info(conn.(*parts.Router).StatusSummary())
-						stats_mgr.logger.Info(part.(*parts.DcpNozzle).StatusSummary())
-					}
-				}
-
-			} else {
-				stats_mgr.logger.Info("Failed to calculate the statistics for this round. Move on")
+		case <-stats_mgr.publish_ticker.C:
+			err := stats_mgr.updateStatsOnce()
+			if err != nil {
+				return nil
 			}
 		}
+	}
+	return nil
+}
+
+func (stats_mgr *StatisticsManager) updateStatsOnce() error {
+	if stats_mgr.pipeline.State() != common.Pipeline_Running && stats_mgr.pipeline.State() != common.Pipeline_Starting {
+		//the pipeline is no longer running, kill myself
+		message := "Pipeline is no longer running, exit."
+		stats_mgr.logger.Info(message)
+		stats_mgr.cleanupBeforeExit()
+		return errors.New(message)
+	}
+	
+	stats_mgr.logger.Debugf("%v: Publishing the statistics for %v to expvar", time.Now(), stats_mgr.pipeline.InstanceId())
+	err := stats_mgr.processRawStats()
+
+	if err == nil {
+		if stats_mgr.logger.GetLogLevel() >= log.LogLevelInfo {
+			stats_mgr.logger.Info(stats_mgr.formatStatsForLog())
+
+			//log parts summary
+			outNozzle_parts := stats_mgr.pipeline.Targets()
+			for _, part := range outNozzle_parts {
+				if stats_mgr.pipeline.Specification().Settings.RepType == metadata.ReplicationTypeXmem {
+					stats_mgr.logger.Info(part.(*parts.XmemNozzle).StatusSummary())
+				} else {
+					stats_mgr.logger.Info(part.(*parts.CapiNozzle).StatusSummary())
+				}
+			}
+			dcp_parts := stats_mgr.pipeline.Sources()
+			for _, part := range dcp_parts {
+				conn := part.Connector()
+				stats_mgr.logger.Info(conn.(*parts.Router).StatusSummary())
+				stats_mgr.logger.Info(part.(*parts.DcpNozzle).StatusSummary())
+			}
+		}
+
+	} else {
+		stats_mgr.logger.Info("Failed to calculate the statistics for this round. Move on")
 	}
 	return nil
 }
@@ -458,7 +479,7 @@ func (stats_mgr *StatisticsManager) publishMetricToMap(expvar_map *expvar.Map, n
 
 func (stats_mgr *StatisticsManager) processTimeSample() {
 	stats_mgr.processDocsLatencyTimeSample()
-	stats_mgr.processMetaLatencyTimeSample()	
+	stats_mgr.processMetaLatencyTimeSample()
 }
 
 // compute docs_latency metric
@@ -468,7 +489,7 @@ func (stats_mgr *StatisticsManager) processDocsLatencyTimeSample() {
 	time_committing := stats_mgr.getOverviewRegistry().GetOrRegister(DOCS_LATENCY_METRIC, metrics.NewHistogram(metrics.NewUniformSample(stats_mgr.sample_size))).(metrics.Histogram)
 	time_committing.Clear()
 	sample := time_committing.Sample()
-	
+
 	stats_mgr.starttime_map_lock.RLock()
 	stats_mgr.endtime_map_lock.RLock()
 	defer stats_mgr.starttime_map_lock.RUnlock()
@@ -490,11 +511,11 @@ func (stats_mgr *StatisticsManager) processDocsLatencyTimeSample() {
 // compute meta_latency metric
 func (stats_mgr *StatisticsManager) processMetaLatencyTimeSample() {
 	stats_mgr.logger.Debug("Process Meta Latency Time Sample...")
-	
+
 	meta_time_committing := stats_mgr.getOverviewRegistry().GetOrRegister(META_LATENCY_METRIC, metrics.NewHistogram(metrics.NewUniformSample(stats_mgr.sample_size))).(metrics.Histogram)
 	meta_time_committing.Clear()
 	sample := meta_time_committing.Sample()
-	
+
 	stats_mgr.meta_starttime_map_lock.RLock()
 	stats_mgr.meta_endtime_map_lock.RLock()
 	defer stats_mgr.meta_starttime_map_lock.RUnlock()
@@ -676,7 +697,7 @@ func (outNozzle_collector *outNozzleCollector) OnEvent(eventType common.Componen
 		if opti_replicated {
 			registry.Get(DOCS_OPT_REPD_METRIC).(metrics.Counter).Inc(1)
 		}
-		
+
 		outNozzle_collector.stats_mgr.endtime_map_lock.Lock()
 		defer outNozzle_collector.stats_mgr.endtime_map_lock.Unlock()
 		outNozzle_collector.stats_mgr.endtime_map[getStatsKeyFromDocKeyAndSeqno(key, seqno)] = endTime
@@ -685,7 +706,7 @@ func (outNozzle_collector *outNozzleCollector) OnEvent(eventType common.Componen
 		startTime := time.Now()
 		key := otherInfos[parts.EVENT_ADDI_DOC_KEY].(string)
 		seqno := otherInfos[parts.EVENT_ADDI_SEQNO].(uint64)
-		
+
 		outNozzle_collector.stats_mgr.meta_starttime_map_lock.Lock()
 		defer outNozzle_collector.stats_mgr.meta_starttime_map_lock.Unlock()
 		outNozzle_collector.stats_mgr.meta_starttime_map[getStatsKeyFromDocKeyAndSeqno(key, seqno)] = startTime
@@ -694,7 +715,7 @@ func (outNozzle_collector *outNozzleCollector) OnEvent(eventType common.Componen
 		endTime := time.Now()
 		key := otherInfos[parts.EVENT_ADDI_DOC_KEY].(string)
 		seqno := otherInfos[parts.EVENT_ADDI_SEQNO].(uint64)
-		
+
 		outNozzle_collector.stats_mgr.meta_endtime_map_lock.Lock()
 		defer outNozzle_collector.stats_mgr.meta_endtime_map_lock.Unlock()
 		outNozzle_collector.stats_mgr.meta_endtime_map[getStatsKeyFromDocKeyAndSeqno(key, seqno)] = endTime
@@ -733,7 +754,7 @@ func (dcp_collector *dcpCollector) OnEvent(eventType common.ComponentEventType,
 		seqno := item.(*mcc.UprEvent).Seqno
 		registry := dcp_collector.stats_mgr.registries[component.Id()]
 		registry.Get(DOCS_RECEIVED_DCP_METRICS).(metrics.Counter).Inc(1)
-		
+
 		dcp_collector.stats_mgr.starttime_map_lock.Lock()
 		defer dcp_collector.stats_mgr.starttime_map_lock.Unlock()
 		dcp_collector.stats_mgr.starttime_map[getStatsKeyFromDocKeyAndSeqno(key, seqno)] = startTime
