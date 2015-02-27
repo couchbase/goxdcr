@@ -23,24 +23,30 @@ import (
 //errors
 var ErrorRetrievingSSLPort = errors.New("Could not get ssl port of remote cluster.")
 var ErrorRetrievingCouchApiBase = errors.New("Could not get couchApiBase in the response of /nodes/self.")
+var InvalidCerfiticateError = errors.New("certificate must be a single, PEM-encoded x509 certificate and nothing more (failed to parse given certificate)")
 
-func GetXDCRSSLPort(hostName, userName, password string, logger *log.CommonLogger) (uint16, error) {
+
+// the return bool value indicates whether the error returned, if not nil, is an internal server error
+func GetXDCRSSLPort(hostName, userName, password string, logger *log.CommonLogger) (uint16, error, bool) {
 
 	portsInfo := make(map[string]interface{})
-	QueryRestApiWithAuth(hostName, base.SSLPortsPath, false, userName, password, nil, base.MethodGet, "", nil, 0, &portsInfo, logger)
+	err, _ := QueryRestApiWithAuth(hostName, base.SSLPortsPath, false, userName, password, nil, base.MethodGet, "", nil, 0, &portsInfo, logger)
+	if err != nil {
+		return 0, err, false
+	}
 	// get ssl port from the map
 	sslPort, ok := portsInfo[base.SSLPortKey]
 	if !ok {
 		// should never get here
-		return 0, ErrorRetrievingSSLPort
+		return 0, ErrorRetrievingSSLPort, true
 	}
 
 	sslPortFloat, ok := sslPort.(float64)
 	if !ok {
 		// should never get here
-		return 0, errors.New(fmt.Sprintf("ssl port of remote cluster is of wrong type. Expected type: float64; Actual type: %s", reflect.TypeOf(sslPort)))
+		return 0, errors.New(fmt.Sprintf("ssl port of remote cluster is of wrong type. Expected type: float64; Actual type: %s", reflect.TypeOf(sslPort))), true
 	}
-	return uint16(sslPortFloat), nil
+	return uint16(sslPortFloat), nil, false
 }
 
 //convenient api for rest calls to local cluster
@@ -179,7 +185,7 @@ func getHttpClient(certificate []byte, logger *log.CommonLogger) (*http.Client, 
 		caPool := x509.NewCertPool()
 		ok := caPool.AppendCertsFromPEM(certificate)
 		if !ok {
-			return nil, errors.New("Invalid certificate")
+			return nil, InvalidCerfiticateError
 		}
 
 		tlsConfig := &tls.Config{RootCAs: caPool}

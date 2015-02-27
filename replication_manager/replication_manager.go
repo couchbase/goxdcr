@@ -433,13 +433,6 @@ func (rm *replicationManager) createAndPersistReplicationSpec(sourceBucket, targ
 
 	_, errorMap := replSettings.UpdateSettingsFromMap(settings)
 
-	// check if the same replication already exists
-	replicationId := metadata.ReplicationId(sourceBucket, targetClusterUUID, targetBucket)
-	if err := validatePipelineExists(replicationId, "starting", false); err != nil {
-		// for backward compatibility with old xdcr
-		errorMap["_"] = errors.New("Replication to the same remote cluster and bucket already exists")
-	}
-
 	if len(errorMap) != 0 {
 		return nil, errorMap, nil
 	}
@@ -447,9 +440,14 @@ func (rm *replicationManager) createAndPersistReplicationSpec(sourceBucket, targ
 	spec.Settings = replSettings
 
 	//persist it
-	replication_mgr.repl_spec_svc.AddReplicationSpec(spec)
-	logger_rm.Infof("replication specification %s is created and persisted\n", spec.Id)
-	return spec, nil, nil
+	err = replication_mgr.repl_spec_svc.AddReplicationSpec(spec)
+	if err == nil {
+		logger_rm.Infof("replication specification %s is created and persisted\n", spec.Id)
+		return spec, nil, nil
+	} else {
+		logger_rm.Errorf("Error persisting replication specification %s. err=%v\n", spec.Id, err)
+		return spec, nil, err
+	}
 }
 
 // get info of all running replications

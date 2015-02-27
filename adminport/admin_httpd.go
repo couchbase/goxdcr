@@ -144,11 +144,11 @@ func (s *httpServer) systemHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, v.Error(), http.StatusInternalServerError)
 		err = fmt.Errorf("%v, %v", ErrorInternal, v)
 		logger_server.Errorf("%v", err)
-	case []byte:
-		logger_server.Infof("Response from goxdcr rest server: %v\nResponse in string form: %v\n", v, string(v))
-		// all xdcr responses are of json type
+	case *Response:
+		logger_server.Infof("Response from goxdcr rest server. status=%v, body=%v\n body in string form=%v", v.StatusCode, v.Body, string(v.Body))
 		w.Header().Set(base.ContentType, base.JsonContentType)
-		w.Write(v)
+		w.WriteHeader(v.StatusCode)
+		w.Write(v.Body)
 	}
 }
 
@@ -165,7 +165,7 @@ func (r *httpAdminRequest) GetHttpRequest() *http.Request {
 }
 
 // Send is part of Request interface.
-func (r *httpAdminRequest) Send(response interface{}) error {
+func (r *httpAdminRequest) Send(response *Response) error {
 	r.waitch <- response
 	close(r.waitch)
 	return nil

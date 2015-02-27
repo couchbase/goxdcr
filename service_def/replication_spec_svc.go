@@ -26,6 +26,11 @@ type ReplicationSpecSvc interface {
 	DelReplicationSpec(replicationId string) (*metadata.ReplicationSpecification, error)
 	ActiveReplicationSpecs() (map[string]*metadata.ReplicationSpecification, error)
 	ActiveReplicationSpecIdsForBucket(bucket string) ([]string, error)
+	
+	// checks if an error returned by the replication spec service is an internal server error or a validation error,
+	// e.g., an error indicating the replication spec involved should exist but does not, or the other way around
+	// adminport needs this info to tell what status code it should return to client
+	IsReplicationValidationError(err error) bool
 
 	// Register call back function for spec changed event
 	StartSpecChangedCallBack(callBack SpecChangedCallback, failureCallBack SpecChangeListenerFailureCallBack, cancel <-chan struct{}, waitGrp *sync.WaitGroup) error

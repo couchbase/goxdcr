@@ -24,4 +24,16 @@ type RemoteClusterSvc interface {
 	ValidateRemoteCluster(ref *metadata.RemoteClusterReference) error
 	// used by auditing and ui logging
 	GetRemoteClusterNameFromClusterUuid(uuid string) string
+	
+	// Remote cluster service could return two different types of errors:
+	// 1. unexpected internal server error
+	// 2. validation error indicating the remote cluster involved is not valid or does not exist
+	// Distinction between the different types of errors is needed by adminport to decide what status code it should return to client
+	// To enable the distinction, remote cluster service wraps validation errors with additional info.
+	// This method checks which type the passed in error is, and unwraps the underlying error for validation errors,
+	// so as to hide the wrapping implementation from callers.
+	// This method returns
+	// 1. false and the original error for internal server errors.
+	// 2. true and unwrapped error for validation errors.
+	CheckAndUnwrapRemoteClusterError(err error) (bool, error)
 }

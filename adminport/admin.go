@@ -43,7 +43,7 @@ type Request interface {
 	GetHttpRequest() *http.Request
 
 	// Send a response back to the client.
-	Send(response interface{}) error
+	Send(response *Response) error
 
 	// Send error back to the client.
 	SendError(error) error
@@ -56,4 +56,10 @@ type RequestHandler interface{
         // sets server, which will be doing the actual handling
         SetServer(Server) error
         GetServer() Server
+}
+
+// response returned from request handler
+type Response struct {
+	StatusCode int
+	Body []byte
 }

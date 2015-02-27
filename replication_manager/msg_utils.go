@@ -12,6 +12,7 @@ package replication_manager
 import (
 	"encoding/json"
 	"errors"
+	ap "github.com/couchbase/goxdcr/adminport"
 	base "github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
 	metadata "github.com/couchbase/goxdcr/metadata"
@@ -105,6 +106,7 @@ const (
 )
 
 // errors
+var ErrorParsingForm = errors.New("Error parsing http request")
 var MissingSettingsInRequest = errors.New("Invalid http request. No replication setting parameters have been supplied.")
 var MissingOldSettingsInRequest = errors.New("Invalid http request. No old replication settings have been supplied.")
 
@@ -146,26 +148,24 @@ var SettingsKeyToRestKeyMap = map[string]string{
 
 var logger_msgutil *log.CommonLogger = log.NewLogger("MessageUtils", log.DefaultLoggerContext)
 
-func NewGetRemoteClustersResponse(remoteClusters map[string]*metadata.RemoteClusterReference) ([]byte, error) {
+func NewGetRemoteClustersResponse(remoteClusters map[string]*metadata.RemoteClusterReference) (*ap.Response, error) {
 	remoteClusterArr := make([]map[string]interface{}, 0)
 	for _, remoteCluster := range remoteClusters {
 		remoteClusterArr = append(remoteClusterArr, remoteCluster.ToMap())
 	}
-	b, err := json.Marshal(remoteClusterArr)
-	return b, err
+	return EncodeObjectIntoResponse(remoteClusterArr)
 }
 
-func NewGetAllReplicationsResponse(replSpecs map[string]*metadata.ReplicationSpecification) ([]byte, error) {
+func NewGetAllReplicationsResponse(replSpecs map[string]*metadata.ReplicationSpecification) (*ap.Response, error) {
 	replArr := make([]map[string]interface{}, 0)
 	for _, replSpec := range replSpecs {
 		replArr = append(replArr, getReplicationDocMap(replSpec))
 	}
-	b, err := json.Marshal(replArr)
-	return b, err
+	return EncodeObjectIntoResponse(replArr)
 }
 
-func NewGetAllReplicationInfosResponse(replInfos []base.ReplicationInfo) ([]byte, error) {
-	return json.Marshal(replInfos)
+func NewGetAllReplicationInfosResponse(replInfos []base.ReplicationInfo) (*ap.Response, error) {
+	return EncodeObjectIntoResponse(replInfos)
 }
 
 func getReplicationDocMap(replSpec *metadata.ReplicationSpecification) map[string]interface{} {
@@ -224,6 +224,8 @@ func DecodeCreateRemoteClusterRequest(request *http.Request) (justValidate bool,
 	demandEncryption := false
 
 	if err = request.ParseForm(); err != nil {
+		errorsMap[base.PlaceHolderFieldKey] = ErrorParsingForm
+		err = nil
 		return
 	}
 
@@ -274,12 +276,12 @@ func DecodeCreateRemoteClusterRequest(request *http.Request) (justValidate bool,
 		return
 	}
 	if demandEncryption && !isEnterprise {
-		errorsMap[base.RemoteClusterDemandEncryption] = errors.New("Encryption can only be used in enterprise edition")
+		errorsMap[base.RemoteClusterDemandEncryption] = errors.New("encryption can only be used in enterprise edition when the entire cluster is running at least 2.5 version of Couchbase Server")
 	}
 
 	// certificate is required if demandEncryption is set to true
 	if demandEncryption && len(certificate) == 0 {
-		errorsMap[base.RemoteClusterCertificate] = errors.New("Certificate is required when encryption is enabled")
+		errorsMap[base.RemoteClusterCertificate] = errors.New("certificate must be given if demand encryption is on")
 	}
 
 	if len(errorsMap) == 0 {
@@ -289,18 +291,18 @@ func DecodeCreateRemoteClusterRequest(request *http.Request) (justValidate bool,
 	return
 }
 
-func NewCreateRemoteClusterResponse(remoteClusterRef *metadata.RemoteClusterReference) ([]byte, error) {
-	return json.Marshal(remoteClusterRef.ToMap())
+func NewCreateRemoteClusterResponse(remoteClusterRef *metadata.RemoteClusterReference) (*ap.Response, error) {
+	return EncodeObjectIntoResponse(remoteClusterRef.ToMap())
 }
 
-func NewDeleteRemoteClusterResponse() ([]byte, error) {
+func NewDeleteRemoteClusterResponse() (*ap.Response, error) {
 	// return "ok" in success case
-	return json.Marshal("ok")
+	return EncodeByteArrayIntoResponse([]byte("\"ok\""))
 }
 
-func NewDeleteReplicationResponse() ([]byte, error) {
-	emptyArr := make([]string, 0)
-	return json.Marshal(emptyArr)
+func NewEmptyArrayResponse() (*ap.Response, error) {
+	// return empty array in success case
+	return EncodeObjectIntoResponse(make([]map[string]interface{}, 0))
 }
 
 // decode parameters from create replication request
@@ -309,6 +311,8 @@ func DecodeCreateReplicationRequest(request *http.Request) (fromBucket, toCluste
 	var replicationType string
 
 	if err = request.ParseForm(); err != nil {
+		errorsMap[base.PlaceHolderFieldKey] = ErrorParsingForm
+		err = nil
 		return
 	}
 
@@ -344,26 +348,27 @@ func DecodeCreateReplicationRequest(request *http.Request) (fromBucket, toCluste
 		errorsMap[ToBucket] = utils.MissingValueError("target bucket")
 	}
 
-	settings, settingsErrorsMap, err := DecodeSettingsFromRequest(request)
+	settings, settingsErrorsMap := DecodeSettingsFromRequest(request)
 	for key, value := range settingsErrorsMap {
 		errorsMap[key] = value
 	}
 	return
 }
 
-func DecodeChangeReplicationSettings(request *http.Request) (justValidate bool, settings map[string]interface{}, errorsMap map[string]error, err error) {
+func DecodeChangeReplicationSettings(request *http.Request) (justValidate bool, settings map[string]interface{}, errorsMap map[string]error) {
 	errorsMap = make(map[string]error)
 
-	if err = request.ParseForm(); err != nil {
+	if err := request.ParseForm(); err != nil {
+		errorsMap[base.PlaceHolderFieldKey] = ErrorParsingForm
 		return
 	}
 
-	justValidate, err = DecodeJustValidateFromRequest(request)
+	justValidate, err := DecodeJustValidateFromRequest(request)
 	if err != nil {
 		errorsMap[base.JustValidate] = err
 	}
 
-	settings, settingsErrorsMap, err := DecodeSettingsFromRequest(request)
+	settings, settingsErrorsMap := DecodeSettingsFromRequest(request)
 	for key, value := range settingsErrorsMap {
 		errorsMap[key] = value
 	}
@@ -400,46 +405,14 @@ func DecodeCreateReplicationResponse(response *http.Response) (string, error) {
 
 }
 
-func DecodeOldSettingsFromRequest(request *http.Request) (*metadata.ReplicationSettings, error) {
-	var oldSettings metadata.ReplicationSettings
-
-	if err := request.ParseForm(); err != nil {
-		return nil, err
-	}
-
-	bFound := false
-
-	for key, valArr := range request.Form {
-		switch key {
-		case OldReplicationSettings:
-			settingsStr := getStringFromValArr(valArr)
-			if settingsStr == "" {
-				return nil, utils.MissingParameterError(OldReplicationSettings)
-			}
-			bFound = true
-			err := json.Unmarshal([]byte(settingsStr), &oldSettings)
-			if err != nil {
-				return nil, err
-			}
-		default:
-			// ignore all other params
-		}
-	}
-
-	if !bFound {
-		return nil, MissingOldSettingsInRequest
-	}
-
-	return &oldSettings, nil
-}
-
 // decode replication settings related parameters from http request
-func DecodeSettingsFromRequest(request *http.Request) (map[string]interface{}, map[string]error, error) {
+func DecodeSettingsFromRequest(request *http.Request) (map[string]interface{}, map[string]error) {
 	settings := make(map[string]interface{})
 	errorsMap := make(map[string]error)
 
 	if err := request.ParseForm(); err != nil {
-		return nil, nil, err
+		errorsMap[base.PlaceHolderFieldKey] = ErrorParsingForm
+		return nil, errorsMap
 	}
 
 	for key, valArr := range request.Form {
@@ -450,20 +423,21 @@ func DecodeSettingsFromRequest(request *http.Request) (map[string]interface{}, m
 	}
 
 	if len(errorsMap) > 0 {
-		return nil, errorsMap, nil
+		return nil, errorsMap
 	}
 
 	logger_msgutil.Debugf("settings decoded from request: %v\n", settings)
-	return settings, nil, nil
+	return settings, nil
 }
 
 // decode replication settings related parameters from /internalSettings http request
-func DecodeSettingsFromInternalSettingsRequest(request *http.Request) (map[string]interface{}, map[string]error, error) {
+func DecodeSettingsFromInternalSettingsRequest(request *http.Request) (map[string]interface{}, map[string]error) {
 	settings := make(map[string]interface{})
 	errorsMap := make(map[string]error)
 
 	if err := request.ParseForm(); err != nil {
-		return nil, nil, err
+		errorsMap[base.PlaceHolderFieldKey] = ErrorParsingForm
+		return nil, errorsMap
 	}
 
 	for key, valArr := range request.Form {
@@ -480,38 +454,36 @@ func DecodeSettingsFromInternalSettingsRequest(request *http.Request) (map[strin
 	}
 
 	if len(errorsMap) > 0 {
-		return nil, errorsMap, nil
+		return nil, errorsMap
 	}
 
 	logger_msgutil.Debugf("settings decoded from request: %v\n", settings)
-	return settings, nil, nil
+	return settings, nil
 }
 
-func NewCreateReplicationResponse(replicationId string) []byte {
+func NewCreateReplicationResponse(replicationId string) (*ap.Response, error) {
 	params := make(map[string]interface{})
 	params[ReplicationId] = replicationId
-	// this should not fail
-	bytes, _ := json.Marshal(params)
-	return bytes
+	return EncodeObjectIntoResponse(params)
 }
 
-func NewReplicationSettingsResponse(settings *metadata.ReplicationSettings) ([]byte, error) {
+func NewReplicationSettingsResponse(settings *metadata.ReplicationSettings) (*ap.Response, error) {
 	if settings == nil {
 		return nil, nil
 	} else {
-		return json.Marshal(convertSettingsToRestSettingsMap(settings))
+		return EncodeObjectIntoResponse(convertSettingsToRestSettingsMap(settings))
 	}
 }
 
-func NewInternalSettingsResponse(settings *metadata.ReplicationSettings) ([]byte, error) {
+func NewInternalSettingsResponse(settings *metadata.ReplicationSettings) (*ap.Response, error) {
 	if settings == nil {
 		return nil, nil
 	} else {
-		return json.Marshal(convertSettingsToRestInternalSettingsMap(settings))
+		return EncodeObjectIntoResponse(convertSettingsToRestInternalSettingsMap(settings))
 	}
 }
 
-// decode replication id from http request
+// decode dynamic paramater from the path of http request
 func DecodeDynamicParamInURL(request *http.Request, pathPrefix string, paramName string, needToUnescape bool) (string, error) {
 	// length of prefix preceding replicationId in request url path
 	prefixLength := len(base.AdminportUrlPrefix) + len(pathPrefix) + len(base.UrlDelimiter)
@@ -521,6 +493,7 @@ func DecodeDynamicParamInURL(request *http.Request, pathPrefix string, paramName
 	}
 
 	paramValue := request.URL.Path[prefixLength:]
+
 	logger_msgutil.Debugf("param value decoded from request: %v\n", paramValue)
 	if needToUnescape {
 		var err error
@@ -614,31 +587,109 @@ func getBoolFromValArr(valArr []string, defaultValue bool) (bool, error) {
 	return defaultValue, nil
 }
 
-func EncodeReplicationErrorsMapIntoByteArray(errorsMap map[string]error) ([]byte, error) {
-	return EncodeErrorsMapIntoByteArray(errorsMap, true)
+func EncodeReplicationErrorsMapIntoResponse(errorsMap map[string]error) (*ap.Response, error) {
+	return EncodeErrorsMapIntoResponse(errorsMap, true)
 }
 
-func EncodeRemoteClusterErrorsMapIntoByteArray(errorsMap map[string]error) ([]byte, error) {
-	return EncodeErrorsMapIntoByteArray(errorsMap, false)
+func EncodeRemoteClusterErrorsMapIntoResponse(errorsMap map[string]error) (*ap.Response, error) {
+	return EncodeErrorsMapIntoResponse(errorsMap, false)
 }
 
-// encode a map of errors into a byte array, which can then be returned in a http response
+// encode a map of validation errors into a Response object, which can then be returned in a http response
 // when withErrorsWrapper is false, simply return a map of error messages -- this is needed by remote cluster rest APIs
 // when withErrorsWrapper is true, wrap the map of error messages in an outer map -- this is needed by replication rest APIs
-func EncodeErrorsMapIntoByteArray(errorsMap map[string]error, withErrorsWrapper bool) ([]byte, error) {
+func EncodeErrorsMapIntoResponse(errorsMap map[string]error, withErrorsWrapper bool) (*ap.Response, error) {
 	errorMsgMap := make(map[string]string)
 	for key, err := range errorsMap {
 		errorMsgMap[key] = err.Error()
 	}
 
 	if !withErrorsWrapper {
-		return json.Marshal(errorMsgMap)
+		// validation errors cause StatusBadRequest to be returned to client
+		return EncodeObjectIntoResponseWithStatusCode(errorMsgMap, http.StatusBadRequest)
 	}
 
 	result := make(map[string]interface{})
 	result[ErrorsKey] = errorMsgMap
 
-	return json.Marshal(result)
+	// validation errors cause StatusBadRequest to be returned to client
+	return EncodeObjectIntoResponseWithStatusCode(result, http.StatusBadRequest)
+}
+
+func EncodeReplicationValidationErrorIntoResponse(err error) (*ap.Response, error) {
+	return EncodeValidationErrorIntoResponse(err, true)
+}
+
+func EncodeRemoteClusterValidationErrorIntoResponse(err error) (*ap.Response, error) {
+	return EncodeValidationErrorIntoResponse(err, false)
+}
+
+// encode a validation error into Response object
+func EncodeValidationErrorIntoResponse(err error, withErrorsWrapper bool) (*ap.Response, error) {
+	errorsMap := make(map[string]error)
+	errorsMap[base.PlaceHolderFieldKey] = err
+	return EncodeErrorsMapIntoResponse(errorsMap, withErrorsWrapper)
+}
+
+// encode a byte array into Response object with default status code of StatusOK
+func EncodeByteArrayIntoResponse(data []byte) (*ap.Response, error) {
+	return EncodeByteArrayIntoResponseWithStatusCode(data, http.StatusOK)
+}
+
+// encode a byte array into Response object with specified status code
+func EncodeByteArrayIntoResponseWithStatusCode(data []byte, statusCode int) (*ap.Response, error) {
+	return &ap.Response{statusCode, data}, nil
+}
+
+// encode an arbitrary object into Response object with default status code of StatusOK
+func EncodeObjectIntoResponse(object interface{}) (*ap.Response, error) {
+	return EncodeObjectIntoResponseWithStatusCode(object, http.StatusOK)
+}
+
+// encode an arbitrary object into Response object with specified status code
+func EncodeObjectIntoResponseWithStatusCode(object interface{}, statusCode int) (*ap.Response, error) {
+	var body []byte
+	if object == nil {
+		body = []byte{}
+	} else {
+		var err error
+		body, err = json.Marshal(object)
+		if err != nil {
+			return nil, err
+		}
+	}
+	logger_msgutil.Infof("object=%v, body=%v\n", object, body)
+	return EncodeByteArrayIntoResponseWithStatusCode(body, statusCode)
+}
+
+// Remote cluster related errors can be internal server error or less servere invalid/unknown remote cluster errors,
+// return different Response for them
+func EncodeRemoteClusterErrorIntoResponse(err error) (*ap.Response, error) {
+	if err != nil {
+		isValidationError, unwrapperError := RemoteClusterService().CheckAndUnwrapRemoteClusterError(err)
+		if isValidationError {
+			return EncodeRemoteClusterValidationErrorIntoResponse(unwrapperError)
+		} else {
+			return nil, err
+		}
+	} else {
+		return NewEmptyArrayResponse()
+	}
+}
+
+// Replication spec related errors can be internal server error or less servere replication spec not found/already exists errors,
+// return different Response for them
+func EncodeReplicationSpecErrorIntoResponse(err error) (*ap.Response, error) {
+	if err != nil {
+		if ReplicationSpecService().IsReplicationValidationError(err) {
+			return EncodeReplicationValidationErrorIntoResponse(err)
+		} else {
+			return nil, err
+		}
+	} else {
+		return NewEmptyArrayResponse()
+	}
+
 }
 
 func processKey(restKey string, valArr []string, settingsPtr *map[string]interface{}) error {

@@ -22,12 +22,16 @@ import (
 	"reflect"
 	"strings"
 	"sync"
+	"net/http"
 )
 
 const (
 	// the key to the metadata that stores the keys of all remote clusters
 	RemoteClustersCatalogKey = metadata.RemoteClusterKeyPrefix
 )
+
+var InvalidRemoteClusterErrorMessage = "Invalid remote cluster. "
+var UnknownRemoteClusterErrorMessage = "unknown remote cluster"
 
 type remoteClusterCache struct {
 	key                 string
@@ -91,7 +95,7 @@ func (service *RemoteClusterService) RemoteClusterByRefName(refName string, refr
 	}
 
 	if ref == nil {
-		return nil, errors.New("unknown remote cluster")
+		return nil, errors.New(UnknownRemoteClusterErrorMessage)
 	} else {
 		if refresh {
 			ref, err = service.refresh(ref)
@@ -241,20 +245,30 @@ func (service *RemoteClusterService) RemoteClusters(refresh bool) (map[string]*m
 
 // validate remote cluster info and retrieve actual uuid
 func (service *RemoteClusterService) ValidateRemoteCluster(ref *metadata.RemoteClusterReference) error {
-
 	isEnterprise, err := service.xdcr_topology_svc.IsMyClusterEnterprise()
 	if err != nil {
 		return err
 	}
 	if ref.DemandEncryption && !isEnterprise {
-		return errors.New("Encryption can only be used in enterprise edition.")
+		return wrapAsInvalidRemoteClusterError(errors.New("encryption can only be used in enterprise edition when the entire cluster is running at least 2.5 version of Couchbase Server"))
 	}
 
+	hostName := utils.GetHostName(ref.HostName)
+	port, err := utils.GetPortNumber(ref.HostName)
+	if err != nil {
+		return wrapAsInvalidRemoteClusterError(errors.New(fmt.Sprintf("Failed to resolve address for \"%v\". The hostname may be incorrect or not resolvable.", ref.HostName)))
+	}
+		
 	var hostAddr string
+	var isInternalError bool
 	if ref.DemandEncryption {
-		hostAddr, err = service.httpsHostAddress(ref.HostName, ref.UserName, ref.Password)
+		hostAddr, err, isInternalError = service.httpsHostAddress(ref.HostName, ref.UserName, ref.Password)
 		if err != nil {
-			return err
+			if isInternalError {
+				return err
+			} else {
+				return wrapAsInvalidRemoteClusterError(errors.New(fmt.Sprintf("Could not connect to \"%v\" on port %v. This could be due to an incorrect host/port combination or a firewall in place between the servers.", hostName, port)))
+			}
 		}
 	} else {
 		hostAddr = ref.HostName
@@ -268,9 +282,18 @@ func (service *RemoteClusterService) ValidateRemoteCluster(ref *metadata.RemoteC
 	}
 
 	err, statusCode := utils.QueryRestApiWithAuth(hostAddr, base.PoolsPath, false, ref.UserName, ref.Password, ref.Certificate, base.MethodGet, "", nil, 0, &poolsInfo, service.logger)
-	if err != nil || statusCode != 200 {
-		service.logger.Errorf("err=%v, statusCode=%v\n", err, statusCode)
-		return errors.New(fmt.Sprintf("Failed on calling %v, err=%v, statusCode=%v", base.PoolsPath, err, statusCode))
+	service.logger.Infof("Result from validate remote cluster call: err=%v, statusCode=%v\n", err, statusCode)
+	if err != nil || statusCode != http.StatusOK {
+		if statusCode == http.StatusUnauthorized {
+			return wrapAsInvalidRemoteClusterError(errors.New(fmt.Sprintf("Authentication failed. Verify username and password. Got HTTP status %v from REST call get to %v%v. Body was: []", statusCode, hostAddr, base.PoolsPath)))
+		} else if !ref.DemandEncryption {
+			// if encryption is not on, most likely the error is caused by incorrect hostname or firewall. 
+			return wrapAsInvalidRemoteClusterError(errors.New(fmt.Sprintf("Could not connect to \"%v\" on port %v. This could be due to an incorrect host/port combination or a firewall in place between the servers.", hostName, port)))
+		} else {
+			// if encryption is on, several different errors could be returned here, e.g., invalid hostname, invalid certificate, certificate by unknown authority, etc.
+			// just return the err
+			return wrapAsInvalidRemoteClusterError(err)	
+		}
 	}
 
 	// get remote cluster uuid from the map
@@ -292,15 +315,15 @@ func (service *RemoteClusterService) ValidateRemoteCluster(ref *metadata.RemoteC
 	return nil
 }
 
-func (service *RemoteClusterService) httpsHostAddress(hostName, userName, password string) (string, error) {
-	sslPort, err := utils.GetXDCRSSLPort(hostName, userName, password, service.logger)
+func (service *RemoteClusterService) httpsHostAddress(hostName, userName, password string) (string, error, bool) {
+	sslPort, err, isInternalError := utils.GetXDCRSSLPort(hostName, userName, password, service.logger)
 	if err != nil {
-		return "", err
+		return "", err, isInternalError
 	}
 
 	hostNode := strings.Split(hostName, base.UrlPortNumberDelimiter)[0]
 	newHostName := utils.GetHostAddr(hostNode, sslPort)
-	return newHostName, nil
+	return newHostName, nil, false
 }
 
 // this internal api differs from AddRemoteCluster in that it does not perform validation
@@ -475,4 +498,24 @@ func (service *RemoteClusterService) GetRemoteClusterNameFromClusterUuid(uuid st
 		return base.UnknownRemoteClusterName
 	}
 	return remoteClusterRef.Name
+}
+
+// wrap/mark an error as invalid remote cluster error - by adding "invalid remote cluster" message to the front
+func wrapAsInvalidRemoteClusterError(err error) error {
+	return errors.New(InvalidRemoteClusterErrorMessage + err.Error())
+}
+
+func (service *RemoteClusterService) CheckAndUnwrapRemoteClusterError(err error) (bool, error) {
+	if err != nil {
+		errMsg := err.Error()
+		if strings.HasPrefix(errMsg, InvalidRemoteClusterErrorMessage) {
+			return true, errors.New(errMsg[len(InvalidRemoteClusterErrorMessage):])
+		} else if strings.HasPrefix(err.Error(), UnknownRemoteClusterErrorMessage) {
+			return true, err
+		} else {
+			return false, err
+		}		
+	} else {
+		return false, nil
+	}
 }

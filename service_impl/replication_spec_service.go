@@ -14,17 +14,21 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/couchbase/cbauth/metakv"
-	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/goxdcr/service_def"
 	"sync"
+	"errors"
+	"strings"
 )
 
 const (
 	// the key to the metadata that stores the keys of all Replication Specs
 	ReplicationSpecsCatalogKey = metadata.ReplicationSpecKeyPrefix
 )
+
+var ReplicationSpecAlreadyExistErrorMessage = "Replication to the same remote cluster and bucket already exists"
+var ReplicationSpecNotFoundErrorMessage = "Requested resource not found"
 
 type ReplicationSpecService struct {
 	metadata_svc       service_def.MetadataSvc
@@ -73,15 +77,20 @@ func (service *ReplicationSpecService) ReplicationSpec(replicationId string) (*m
 	}
 	if result == nil || len(result) == 0 {
 		service.logger.Errorf("Failed to get metadata %v, err=%v\n", replicationId, err)
-		return nil, base.ErrorRequestedResourceNotFound
+		return nil, errors.New(ReplicationSpecNotFoundErrorMessage)
 	}
 	return constructReplicationSpec(result, rev)
 }
 
-// this assumes that the spec to be added is not yet in gometa
 func (service *ReplicationSpecService) AddReplicationSpec(spec *metadata.ReplicationSpecification) error {
 	service.logger.Infof("Start AddReplicationSpec, spec=%v\n", spec)
+	
 	key := spec.Id
+	_, err := service.ReplicationSpec(key)
+	if err == nil {
+		return errors.New(ReplicationSpecAlreadyExistErrorMessage)
+	}
+	
 	value, err := json.Marshal(spec)
 	if err != nil {
 		return err
@@ -110,7 +119,7 @@ func (service *ReplicationSpecService) SetReplicationSpec(spec *metadata.Replica
 func (service *ReplicationSpecService) DelReplicationSpec(replicationId string) (*metadata.ReplicationSpecification, error) {
 	spec, err := service.ReplicationSpec(replicationId)
 	if err != nil {
-		return nil, err
+		return nil, errors.New(ReplicationSpecNotFoundErrorMessage)
 	}
 
 	err = service.metadata_svc.DelWithCatalog(ReplicationSpecsCatalogKey, replicationId, spec.Revision)
@@ -205,5 +214,13 @@ func (service *ReplicationSpecService) writeUiLog(spec *metadata.ReplicationSpec
 
 		uiLogMsg := fmt.Sprintf("Replication from bucket \"%s\" to bucket \"%s\" on cluster \"%s\" %s.", spec.SourceBucketName, spec.TargetBucketName, remoteClusterName, action)
 		service.uilog_svc.Write(uiLogMsg)
+	}
+}
+
+func (service *ReplicationSpecService) IsReplicationValidationError(err error) bool {
+	if err != nil {
+		return strings.HasPrefix(err.Error(), ReplicationSpecAlreadyExistErrorMessage) || strings.HasPrefix(err.Error(), ReplicationSpecNotFoundErrorMessage)
+	} else {
+		return false
 	}
 }

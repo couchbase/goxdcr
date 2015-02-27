@@ -104,7 +104,6 @@ var ParseIntBase    = 10
 var ParseIntBitSize = 64
 
 var ErrorNotMyVbucket = errors.New("NOT_MY_VBUCKET")
-var ErrorRequestedResourceNotFound = errors.New("Requested resource not found")
 
 var InvalidStateTransitionErrMsg = "Can't move to state %v - %v's current state is %v, can only move to state [%v]"
 
@@ -130,6 +129,9 @@ const (
  	JustValidate = "just_validate"
  	JustValidatePostfix = "?" + JustValidate + "=1"
 )
+
+// Key used for general validation errors that are not related to any specific http request parameters
+var PlaceHolderFieldKey = "_"  
 
 // http request related constants
 const (
