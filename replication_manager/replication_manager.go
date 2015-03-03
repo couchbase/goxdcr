@@ -469,6 +469,7 @@ func GetReplicationInfos() ([]base.ReplicationInfo, error) {
 			expvarMap := pipeline_svc.GetStatisticsForPipeline(replId)
 			if expvarMap != nil {
 				replInfo.StatsMap = utils.GetMapFromExpvarMap(expvarMap)
+				validateStatsMap(replInfo.StatsMap)
 			}
 
 			// set error list
@@ -484,6 +485,22 @@ func GetReplicationInfos() ([]base.ReplicationInfo, error) {
 		}
 	}
 	return replInfos, nil
+}
+
+func validateStatsMap(statsMap map[string]interface{}) {
+	missingStats := make([]string, 0)
+	if _, ok := statsMap[pipeline_svc.CHANGES_LEFT_METRIC]; !ok {
+		missingStats = append(missingStats, pipeline_svc.CHANGES_LEFT_METRIC)
+	}
+	if _, ok := statsMap[pipeline_svc.DOCS_WRITTEN_METRIC]; !ok {
+		missingStats = append(missingStats, pipeline_svc.DOCS_WRITTEN_METRIC)
+	}
+	if _, ok := statsMap[pipeline_svc.DOCS_CHECKED_METRIC]; !ok {
+		missingStats = append(missingStats, pipeline_svc.DOCS_CHECKED_METRIC)
+	}
+	if len(missingStats) > 0 {
+		logger_rm.Errorf("Stats missing when constructing replication infos: %v", missingStats)
+	}
 }
 
 //error handler

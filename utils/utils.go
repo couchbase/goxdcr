@@ -273,7 +273,10 @@ func ParseHighSeqnoStat(vbnos []uint16, stats_map map[string]string, highseqno_m
 
 	for _, vbno := range vbnos {
 		stats_key := fmt.Sprintf(base.VBUCKET_HIGH_SEQNO_STAT_KEY_FORMAT, vbno)
-		highseqnostr := stats_map[stats_key]
+		highseqnostr, ok := stats_map[stats_key]
+		if !ok {
+			return fmt.Errorf("Can't find high seqno for vbno=%v in stats map\n", vbno)
+		}
 		highseqno, err := strconv.ParseUint(highseqnostr, 10, 64)
 		if err != nil {
 			return err

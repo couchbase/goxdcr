@@ -123,8 +123,7 @@ func (s *httpServer) shutdown() {
 func (s *httpServer) systemHandler(w http.ResponseWriter, r *http.Request) {
 	var err error
 
-	// TODO change to Debugf
-	logger_server.Infof("Request with path, %v, method, %v, and content type %v\n", r.URL.Path, r.Method, r.Header.Get("Content-Type"))
+	logger_server.Infof("Request r=%v\nwith path, %v, method, %v, and content type %v\n", r, r.URL.Path, r.Method, r.Header.Get("Content-Type"))
 
 	// Fault-tolerance. No need to crash the server in case of panic.
 	defer func() {
@@ -146,6 +145,7 @@ func (s *httpServer) systemHandler(w http.ResponseWriter, r *http.Request) {
 		err = fmt.Errorf("%v, %v", ErrorInternal, v)
 		logger_server.Errorf("%v", err)
 	case []byte:
+		logger_server.Infof("Response from goxdcr rest server: %v\nResponse in string form: %v\n", v, string(v))
 		// all xdcr responses are of json type
 		w.Header().Set(base.ContentType, base.JsonContentType)
 		w.Write(v)

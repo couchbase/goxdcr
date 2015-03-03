@@ -335,13 +335,14 @@ func (stats_mgr *StatisticsManager) processCalculatedStats(oldSample metrics.Reg
 	//calculate changes_left
 	docs_written := stats_mgr.getOverviewRegistry().Get(DOCS_WRITTEN_METRIC).(metrics.Counter).Count()
 	changes_left_val, err := stats_mgr.calculateChangesLeft(docs_written)
+	changes_left_var := new(expvar.Int)
 	if err == nil {
-		changes_left_var := new(expvar.Int)
 		changes_left_var.Set(changes_left_val)
-		overview_expvar_map.Set(CHANGES_LEFT_METRIC, changes_left_var)
 	} else {
 		stats_mgr.logger.Errorf("Failed to calculate changes_left - %v\n", err)
+		changes_left_var.Set(-1)
 	}
+	overview_expvar_map.Set(CHANGES_LEFT_METRIC, changes_left_var)
 
 	//calculate rate_replication
 	docs_written_old := oldSample.Get(DOCS_WRITTEN_METRIC).(metrics.Counter).Count()
@@ -417,16 +418,18 @@ func (stats_mgr *StatisticsManager) calculateTotalChanges() (int64, error) {
 	var total_doc uint64 = 0
 	for serverAddr, vbnos := range stats_mgr.active_vbs {
 		highseqno_map, err := stats_mgr.getHighSeqNos(serverAddr, vbnos)
+		if err != nil {
+				return 0, err
+		}
 		for _, vbno := range vbnos {
 			startSeqnos_map := GetStartSeqnos(stats_mgr.pipeline, stats_mgr.logger)
+			
 			ts, ok := startSeqnos_map[vbno]
 			if !ok {
 				return 0, fmt.Errorf("Can't find start seqno for vbno=%v\n", vbno)
 			}
 			current_vb_highseqno := highseqno_map[vbno]
-			if err != nil {
-				return 0, err
-			}
+			
 			total_doc = total_doc + current_vb_highseqno - ts.Seqno
 		}
 	}
@@ -434,8 +437,8 @@ func (stats_mgr *StatisticsManager) calculateTotalChanges() (int64, error) {
 }
 func (stats_mgr *StatisticsManager) getHighSeqNos(serverAddr string, vbnos []uint16) (map[uint16]uint64, error) {
 	highseqno_map := make(map[uint16]uint64)
-	conn := stats_mgr.kv_mem_clients[serverAddr]
-	if conn == nil {
+	conn, ok := stats_mgr.kv_mem_clients[serverAddr]
+	if !ok || conn == nil {
 		return nil, errors.New("connection for serverAddr is not initialized")
 	}
 
@@ -582,7 +585,10 @@ func (stats_mgr *StatisticsManager) initOverviewRegistry() {
 func (stats_mgr *StatisticsManager) Start(settings map[string]interface{}) error {
 
 	//initialize connection
-	stats_mgr.initConnection()
+	err := stats_mgr.initConnection()
+	if err != nil {
+		return err
+	}
 
 	if _, ok := settings[PUBLISH_INTERVAL]; ok {
 		stats_mgr.update_interval = settings[PUBLISH_INTERVAL].(time.Duration)
