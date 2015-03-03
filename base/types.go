@@ -69,7 +69,7 @@ type ClusterConnectionInfoProvider interface {
 
 type ReplicationInfo struct {
 	Id string
-	StatsMap  map[string]string
+	StatsMap  map[string]interface{}
 	ErrorList []ErrorInfo
 }
 

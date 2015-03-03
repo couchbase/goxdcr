@@ -236,12 +236,25 @@ func GetPortNumber(hostAddr string) (uint16, error) {
 	}
 }
 
-func GetMapFromExpvarMap(expvarMap *expvar.Map) map[string]string {
-	regMap := make(map[string]string)
+func GetMapFromExpvarMap(expvarMap *expvar.Map) map[string]interface{} {
+	regMap := make(map[string]interface{})
 
 	expvarMap.Do(func(keyValue expvar.KeyValue) {
-		regMap[keyValue.Key] = keyValue.Value.String()
-		return
+		valueStr := keyValue.Value.String()
+		// first check if valueStr is an integer
+		valueInt, err := strconv.Atoi(valueStr)
+		if err == nil {
+			regMap[keyValue.Key] = valueInt
+		} else {
+			// then check if valueStr is a float
+			valueFloat, err := strconv.ParseFloat(valueStr, 64)
+			if err == nil {
+				regMap[keyValue.Key] = valueFloat
+			} else {
+				// should never happen
+				logger_utils.Errorf("Invalid value in expvarMap. Only float and integer values are supported")
+			}
+		}
 	})
 	return regMap
 }
