@@ -236,6 +236,7 @@ func (ckmgr *CheckpointManager) updateCurrentVBUUID(vbno uint16, vbuuid uint64) 
 }
 
 func (ckmgr *CheckpointManager) SetVBTimestamps(topic string) error {
+	defer ckmgr.logger.Info("Done with SetVBTimestamps")
 	ckmgr.logger.Infof("Set start seqnos for pipeline %v...", ckmgr.pipeline.InstanceId())
 
 	//refresh the remote bucket
@@ -267,7 +268,7 @@ func (ckmgr *CheckpointManager) SetVBTimestamps(topic string) error {
 	workload := 5
 	start_index := 0
 
-	getter_wait_grp := sync.WaitGroup{}
+	getter_wait_grp := &sync.WaitGroup{}
 	errMap := make(map[uint16]error)
 	getter_id := 0
 	for {
@@ -277,7 +278,7 @@ func (ckmgr *CheckpointManager) SetVBTimestamps(topic string) error {
 		}
 		vbs_for_getter := listOfVbs[start_index:end_index]
 		getter_wait_grp.Add(1)
-		go ckmgr.startSeqnoGetter(getter_id, vbs_for_getter, ckptDocs, disableCkptBackwardsCompat, ret, highseqnomap, &getter_wait_grp, errMap)
+		go ckmgr.startSeqnoGetter(getter_id, vbs_for_getter, ckptDocs, disableCkptBackwardsCompat, ret, highseqnomap, getter_wait_grp, errMap)
 
 		start_index = end_index
 		if start_index >= len(listOfVbs) {
@@ -300,12 +301,9 @@ func (ckmgr *CheckpointManager) SetVBTimestamps(topic string) error {
 
 func (ckmgr *CheckpointManager) startSeqnoGetter(getter_id int, listOfVbs []uint16, ckptDocs map[uint16]*metadata.CheckpointsDoc,
 	disableCkptBackwardsCompat bool, ret map[uint16]*base.VBTimestamp, highseqnomap map[uint16]uint64, waitGrp *sync.WaitGroup, errMap map[uint16]error) {
-	ckmgr.logger.Debugf("StartSeqnoGetter %v is started to do _pre_prelicate for vb %v\n", getter_id, listOfVbs)
-	defer func() {
-		waitGrp.Done()
-		ckmgr.logger.Debugf("StartSeqnoGetter %v is done\n", getter_id)
-	}()
-
+	ckmgr.logger.Debugf("StartSeqnoGetter %v is started to do _pre_prelicate for vb %v, waitGrp=%v\n", getter_id, listOfVbs, *waitGrp)
+	defer waitGrp.Done()
+	
 	for _, vbno := range listOfVbs {
 		var agreeedIndex int = -1
 		ckptDoc, _ := ckptDocs[vbno]
@@ -566,12 +564,11 @@ func (ckmgr *CheckpointManager) performCkpt(skip_error bool) {
 
 func (ckmgr *CheckpointManager) executeCkptTask(executor_id int, listOfVbs []uint16, skip_error bool, errMap map[uint16]error, wait_grp *sync.WaitGroup) {
 	ckmgr.logger.Debugf("Checkpoing executor %v is checkpointing for vbuckets %v", executor_id, listOfVbs)
-	if wait_grp != nil {
-		defer func() {
-			wait_grp.Done()
-			ckmgr.logger.Debugf("Checkpoing executor %v is done", executor_id)
-		}()
+	if wait_grp == nil {
+		panic ("wait_grp can't be nil")
 	}
+	defer wait_grp.Done()
+	
 
 	for _, vbno := range listOfVbs {
 		if len(errMap) > 0 {

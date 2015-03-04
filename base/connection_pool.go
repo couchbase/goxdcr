@@ -72,6 +72,7 @@ func init() {
 	ConnPoolMgr()
 }
 
+var WrongConnTypeError = errors.New("There is an exiting pool with the same name but with different connection type")
 /******************************************************************
  *
  *  Connection management
@@ -211,7 +212,7 @@ func (connPoolMgr *connPoolMgr) GetOrCreatePool(poolNameToCreate string, hostnam
 		if ok {
 			return pool, nil
 		} else {
-			return nil, errors.New("There is an exiting ssl pool with the same name")
+			return nil, WrongConnTypeError
 		}
 	}
 
@@ -244,7 +245,7 @@ func (connPoolMgr *connPoolMgr) GetOrCreateSSLPool(poolNameToCreate string, host
 		if ok {
 			return pool, nil
 		} else {
-			return nil, errors.New("There is an existing non-ssl pool with the same name")
+			return nil, WrongConnTypeError
 		}
 	}
 

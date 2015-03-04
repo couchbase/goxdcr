@@ -41,10 +41,10 @@ const (
 
 	//default configuration
 	default_numofretry          int           = 10
-	default_resptimeout         time.Duration = 500 * time.Millisecond
+	default_resptimeout         time.Duration = 2000 * time.Millisecond
 	default_dataChannelSize                   = 5000
 	default_batchExpirationTime               = 300 * time.Millisecond
-	default_maxRetryInterval                  = 30 * time.Second
+	default_maxRetryInterval                  = 120 * time.Second
 	default_writeTimeOut        time.Duration = time.Duration(1) * time.Second
 	default_readTimeout         time.Duration = time.Duration(1) * time.Second
 	default_maxIdleCount        int           = 60
@@ -1349,6 +1349,11 @@ func (xmem *XmemNozzle) initializeConnection() (err error) {
 	xmem.Logger().Debugf("xmem.config= %v", xmem.config.connectStr)
 	xmem.Logger().Debugf("poolName=%v", getPoolName(xmem.config))
 	pool, err := xmem.getConnPool()
+	if err != nil && err == base.WrongConnTypeError {
+		//there is a stale pool, the remote cluster settings are changed
+		base.ConnPoolMgr().RemovePool(getPoolName(xmem.config))
+		pool, err = xmem.getConnPool()
+	}
 	if err != nil {
 		return
 	}
@@ -1445,7 +1450,7 @@ func (xmem *XmemNozzle) receiveResponse(finch chan bool, waitGrp *sync.WaitGroup
 					xmem.Logger().Infof("%v pos=%d, Received error = %v in response, err = %v, response=%v\n", xmem.Id(), pos, response.Status.String(), err, response.Bytes())
 					_, err = xmem.buf.modSlot(pos, xmem.resend)
 				}
-				
+
 				//read is unsuccessful, put the token back
 				xmem.receive_token_ch <- 1
 			} else {
@@ -1808,7 +1813,10 @@ func (xmem *XmemNozzle) readFromClient(client *xmemClient) (*mc.MCResponse, erro
 			client.logger.Infof("err=%v\n", err)
 			xmem.repairConn(client, err.Error())
 			return nil, badConnectionError
-		} else if mc.IsFatal(err) {
+		} else if response.Status == mc.ENOMEM {
+			//this is recoverable, it can succeed when ep-engine evic items out to free up memory
+			return response, err
+		}else if mc.IsFatal(err) {
 
 			if response.Status == 0x08 {
 				//PROTOCOL_BINARY_RESPONSE_NO_BUCKET
