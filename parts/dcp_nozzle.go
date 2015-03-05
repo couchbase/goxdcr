@@ -29,6 +29,7 @@ const (
 	// start settings key name
 	DCP_VBTimestamp        = "VBTimestamp"
 	DCP_VBTimestampUpdator = "VBTimestampUpdater"
+	DCP_Connection_Prefix = "xdcr:"
 )
 
 var dcp_setting_defs base.SettingDefinitions = base.SettingDefinitions{DCP_VBTimestamp: base.NewSettingDef(reflect.TypeOf((*map[uint16]*base.VBTimestamp)(nil)), true)}
@@ -106,8 +107,8 @@ func NewDcpNozzle(id string,
 
 func (dcp *DcpNozzle) initialize(settings map[string]interface{}) (err error) {
 	dcp.finch = make(chan bool)
-
-	dcp.uprFeed, err = dcp.bucket.StartUprFeed(dcp.Id(), uint32(0))
+	
+	dcp.uprFeed, err = dcp.bucket.StartUprFeed(DCP_Connection_Prefix + dcp.Id(), uint32(0))
 
 	// fetch start timestamp from settings
 	dcp.cur_ts = settings[DCP_VBTimestamp].(map[uint16]*base.VBTimestamp)
