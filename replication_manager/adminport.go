@@ -242,7 +242,7 @@ func (adminport *Adminport) doCreateRemoteClusterRequest(request *http.Request) 
 
 func (adminport *Adminport) doChangeRemoteClusterRequest(request *http.Request) ([]byte, error) {
 	logger_ap.Infof("doChangeRemoteClusterRequest\n")
-	remoteClusterName, err := DecodeDynamicParamInURL(request, base.RemoteClustersPath, "Remote Cluster Name")
+	remoteClusterName, err := DecodeDynamicParamInURL(request, base.RemoteClustersPath, "Remote Cluster Name", false)
 	if err != nil {
 		return nil, err
 	}
@@ -283,7 +283,7 @@ func (adminport *Adminport) doChangeRemoteClusterRequest(request *http.Request) 
 
 func (adminport *Adminport) doDeleteRemoteClusterRequest(request *http.Request) ([]byte, error) {
 	logger_ap.Infof("doDeleteRemoteClusterRequest\n")
-	remoteClusterName, err := DecodeDynamicParamInURL(request, base.RemoteClustersPath, "Remote Cluster Name")
+	remoteClusterName, err := DecodeDynamicParamInURL(request, base.RemoteClustersPath, "Remote Cluster Name", false)
 	if err != nil {
 		return nil, err
 	}
@@ -315,7 +315,7 @@ func (adminport *Adminport) doDeleteAllReplicationsRequest(request *http.Request
 	logger_ap.Infof("doDeleteAllReplicationsRequest\n")
 
 	// get input parameters from request
-	bucket, err := DecodeDynamicParamInURL(request, AllReplicationsPath, "Bucket Name")
+	bucket, err := DecodeDynamicParamInURL(request, AllReplicationsPath, "Bucket Name", false)
 	if err != nil {
 		return nil, err
 	}
@@ -363,7 +363,7 @@ func (adminport *Adminport) doCreateReplicationRequest(request *http.Request) ([
 
 func (adminport *Adminport) doDeleteReplicationRequest(request *http.Request) ([]byte, error) {
 	logger_ap.Infof("doDeleteReplicationRequest\n")
-	replicationId, err := DecodeDynamicParamInURL(request, DeleteReplicationPrefix, "Replication Id")
+	replicationId, err := DecodeDynamicParamInURL(request, DeleteReplicationPrefix, "Replication Id", true)
 	if err != nil {
 		return nil, err
 	}
@@ -463,7 +463,7 @@ func (adminport *Adminport) doViewReplicationSettingsRequest(request *http.Reque
 	logger_ap.Infof("doViewReplicationSettingsRequest\n")
 
 	// get input parameters from request
-	replicationId, err := DecodeDynamicParamInURL(request, SettingsReplicationsPath, "Replication Id")
+	replicationId, err := DecodeDynamicParamInURL(request, SettingsReplicationsPath, "Replication Id", true)
 	if err != nil {
 		return nil, err
 	}
@@ -484,7 +484,7 @@ func (adminport *Adminport) doChangeReplicationSettingsRequest(request *http.Req
 	logger_ap.Infof("doChangeReplicationSettingsRequest\n")
 
 	// get input parameters from request
-	replicationId, err := DecodeDynamicParamInURL(request, SettingsReplicationsPath, "Replication Id")
+	replicationId, err := DecodeDynamicParamInURL(request, SettingsReplicationsPath, "Replication Id", true)
 	if err != nil {
 		return nil, err
 	}
@@ -526,7 +526,7 @@ func (adminport *Adminport) doGetStatisticsRequest(request *http.Request) ([]byt
 	logger_ap.Infof("doGetStatisticsRequest\n")
 
 	//pass the request to get the bucket name
-	bucket, err := DecodeDynamicParamInURL(request, StatisticsPrefix, "Bucket Name")
+	bucket, err := DecodeDynamicParamInURL(request, StatisticsPrefix, "Bucket Name", false)
 	if err != nil {
 		return nil, err
 	}

@@ -512,19 +512,25 @@ func NewInternalSettingsResponse(settings *metadata.ReplicationSettings) ([]byte
 }
 
 // decode replication id from http request
-func DecodeDynamicParamInURL(request *http.Request, pathPrefix string, partName string) (string, error) {
+func DecodeDynamicParamInURL(request *http.Request, pathPrefix string, paramName string, needToUnescape bool) (string, error) {
 	// length of prefix preceding replicationId in request url path
 	prefixLength := len(base.AdminportUrlPrefix) + len(pathPrefix) + len(base.UrlDelimiter)
 
 	if len(request.URL.Path) <= prefixLength {
-		return "", utils.MissingParameterInHttpRequestUrlError(partName, request.URL.Path)
+		return "", utils.MissingParameterInHttpRequestUrlError(paramName, request.URL.Path)
 	}
 
-	replicationId := request.URL.Path[prefixLength:]
-	unescapedReplId, err := url.QueryUnescape(replicationId)
-	logger_msgutil.Debugf("replication id decoded from request: %v\n", replicationId)
-	logger_msgutil.Debugf("unescaped replication id: %v\n", unescapedReplId)
-	return unescapedReplId, err
+	paramValue := request.URL.Path[prefixLength:]
+	logger_msgutil.Debugf("param value decoded from request: %v\n", paramValue)
+	if needToUnescape {
+		var err error
+		paramValue, err = url.QueryUnescape(paramValue)
+		if err != nil {
+			return "", err
+		}
+		logger_msgutil.Debugf("param value after unescape: %v\n", paramValue)
+	}
+	return paramValue, nil
 }
 
 func verifyFilterExpression(filterExpression string) error {
