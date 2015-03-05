@@ -133,6 +133,20 @@ func IsPipelineRunning(topic string) bool {
 		return false
 	}
 }
+
+func CheckPipelines() {
+	//See if any pending pipelines has a updater to attend it
+	for rep_name, rep_status := range pipeline_mgr.pipelines_map {
+		if rep_status.RuntimeStatus() == pipeline.Pending {
+			if _, ok := pipeline_mgr.pipeline_pending_for_update[rep_name]; !ok {
+				pipeline_mgr.logger.Infof("Pipeline %v is broken, but not yet attended, launch updater", rep_name)
+				pipeline_mgr.launchUpdater(rep_name, nil, rep_status)
+			}
+		}
+	}
+	LogStatusSummary()
+}
+
 func RuntimeCtx(topic string) common.PipelineRuntimeContext {
 	return pipeline_mgr.runtimeCtx(topic)
 }
@@ -316,6 +330,21 @@ func (pipelineMgr *pipelineManager) reportFixed(topic string) {
 	delete(pipelineMgr.pipeline_pending_for_update, topic)
 }
 
+func (pipelineMgr *pipelineManager) launchUpdater(topic string, cur_err error, rep_status *pipeline.ReplicationStatus) error {
+	settingsMap := rep_status.SettingsMap()
+	retry_interval := settingsMap[metadata.FailureRestartInterval].(int)
+
+	updater, err := newPipelineUpdater(topic, retry_interval, pipelineMgr.child_waitGrp, cur_err, rep_status, pipelineMgr.logger)
+	if err != nil {
+		return err
+	}
+	pipelineMgr.child_waitGrp.Add(1)
+	pipelineMgr.pipeline_pending_for_update[topic] = updater
+	go updater.start()
+	pipelineMgr.logger.Infof("Pipeline updater %v is lauched with retry_interval=%v\n", topic, retry_interval)
+	return nil
+}
+
 func (pipelineMgr *pipelineManager) update(topic string, cur_err error) error {
 	pipelineMgr.repair_map_lock.Lock()
 	defer pipelineMgr.repair_map_lock.Unlock()
@@ -327,22 +356,15 @@ func (pipelineMgr *pipelineManager) update(topic string, cur_err error) error {
 	rep_status := pipelineMgr.pipelines_map[topic]
 
 	if updater, ok := pipelineMgr.pipeline_pending_for_update[topic]; !ok {
-		settingsMap := rep_status.SettingsMap()
-		retry_interval := settingsMap[metadata.FailureRestartInterval].(int)
-
-		repairer, err := newPipelineUpdater(topic, retry_interval, pipelineMgr.child_waitGrp, cur_err, rep_status, pipelineMgr.logger)
-		if err != nil {
-			return err
-		}
-		pipelineMgr.child_waitGrp.Add(1)
-		pipelineMgr.pipeline_pending_for_update[topic] = repairer
-		go repairer.start()
-		pipelineMgr.logger.Infof("Pipeline updater %v is lauched with retry_interval=%v\n", topic, retry_interval)
+		return pipelineMgr.launchUpdater(topic, cur_err, rep_status)
 	} else {
 		if cur_err == nil {
 			//update is not initiated by error, update the replication status
 			//trigger updater to update immediately, not to wait for the retry interval
-			updater.refreshReplicationStatus(rep_status)
+			updater.refreshReplicationStatus(rep_status, true)
+		} else {
+			rep_status.AddError(cur_err)
+			updater.refreshReplicationStatus(rep_status, false)
 		}
 		pipelineMgr.logger.Infof("There is already an updater launched for the replication, no-op")
 	}
@@ -506,16 +528,18 @@ func (r *pipelineUpdater) stop() {
 	close(r.fin_ch)
 }
 
-func (r *pipelineUpdater) refreshReplicationStatus(rep_status *pipeline.ReplicationStatus) {
+func (r *pipelineUpdater) refreshReplicationStatus(rep_status *pipeline.ReplicationStatus, updateNow bool) {
 	r.state_lock.Lock()
 	defer r.state_lock.Unlock()
 
 	r.rep_status = rep_status
 	r.state = Updater_Initialized
-	select {
-	case r.update_now_ch <- true:
-	default:
-		r.logger.Infof("Update-now message is already delivered for %v", r.pipeline_name)
+	if updateNow {
+		select {
+		case r.update_now_ch <- true:
+		default:
+			r.logger.Infof("Update-now message is already delivered for %v", r.pipeline_name)
+		}
 	}
 	r.logger.Infof("Replication status is updated, current status=%v\n", rep_status)
 }
@@ -535,7 +559,7 @@ func (r *pipelineUpdater) updateState(new_state pipelineUpdaterState) error {
 		return fmt.Errorf(updaterStateErrorStr, Updater_Done, new_state)
 
 	}
-	
+
 	r.logger.Infof("Updater %v moved to %v from %v\n", r.pipeline_name, new_state, r.state)
 	r.state = new_state
 

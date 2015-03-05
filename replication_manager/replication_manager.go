@@ -136,20 +136,20 @@ func StartReplicationManager(sourceKVHost string, xdcrRestPort uint16,
 		go pollStdin()
 		
 		replication_mgr.status_logger_finch = make (chan bool, 1)
-		go replication_mgr.logReplicationStatus (replication_mgr.status_logger_finch)
+		go replication_mgr.checkReplicationStatus (replication_mgr.status_logger_finch)
 
 	})
 
 }
 
-func (rm *replicationManager) logReplicationStatus(fin_chan chan bool) {
+func (rm *replicationManager) checkReplicationStatus(fin_chan chan bool) {
 	ticker := time.NewTicker(5*time.Second)
 	for {
 		select {
 			case <-fin_chan:
 				return
 			case <-ticker.C:
-				pipeline_manager.LogStatusSummary()
+				pipeline_manager.CheckPipelines()
 			}
 	}
 }
