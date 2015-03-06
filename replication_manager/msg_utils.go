@@ -12,6 +12,7 @@ package replication_manager
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	ap "github.com/couchbase/goxdcr/adminport"
 	base "github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
@@ -33,6 +34,7 @@ var ErrorsKey = "errors"
 const (
 	CreateReplicationPath    = "controller/createReplication"
 	StatisticsPrefix         = "stats/buckets"
+	RegexpValidationPrefix   = "controller/regexpValidation"
 	InternalSettingsPath     = "internalSettings"
 	AllReplicationsPath      = "pools/default/replications"
 	AllReplicationInfosPath  = "pools/default/replicationInfos"
@@ -79,6 +81,14 @@ const (
 
 const (
 	OldReplicationSettings = "OldReplicationSettings"
+)
+
+// constants for RegexpValidation request
+const (
+	Expression = "expression"
+	Keys       = "keys"
+	StartIndex = "startIndex"
+	EndIndex   = "endIndex"
 )
 
 // constants for stats names
@@ -461,6 +471,36 @@ func DecodeSettingsFromInternalSettingsRequest(request *http.Request) (map[strin
 	return settings, nil
 }
 
+func DecodeRegexpValidationRequest(request *http.Request) (string, []string, error) {
+	var expression string
+	var keys []string
+
+	if err := request.ParseForm(); err != nil {
+		return "", nil, err
+	}
+
+	for key, valArr := range request.Form {
+		switch key {
+		case Expression:
+			expression = getStringFromValArr(valArr)
+		case Keys:
+			keysStr := getStringFromValArr(valArr)
+			err := json.Unmarshal([]byte(keysStr), &keys)
+			if err != nil {
+				return "", nil, utils.NewEnhancedError(fmt.Sprintf("Error parsing keys=%v.", keysStr), err)
+			}
+		default:
+			// ignore other parameters
+		}
+	}
+
+	if len(expression) == 0 {
+		return "", nil, utils.MissingParameterError("expression")
+	}
+
+	return expression, keys, nil
+}
+
 func NewCreateReplicationResponse(replicationId string) (*ap.Response, error) {
 	params := make(map[string]interface{})
 	params[ReplicationId] = replicationId
@@ -481,6 +521,23 @@ func NewInternalSettingsResponse(settings *metadata.ReplicationSettings) (*ap.Re
 	} else {
 		return EncodeObjectIntoResponse(convertSettingsToRestInternalSettingsMap(settings))
 	}
+}
+
+func NewRegexpValidationResponse(matchesMap map[string][][]int) (*ap.Response, error) {
+	returnMap := make(map[string]interface{})
+
+	for key, matches := range matchesMap {
+		convertedMatches := make([]map[string]int, 0)
+		for _, match := range matches {
+			convertedMatch := make(map[string]int)
+			convertedMatch[StartIndex] = match[0]
+			convertedMatch[EndIndex] = match[1]
+			convertedMatches = append(convertedMatches, convertedMatch)
+		}
+		returnMap[key] = convertedMatches
+	}
+
+	return EncodeObjectIntoResponse(returnMap)
 }
 
 // decode dynamic paramater from the path of http request
@@ -624,11 +681,20 @@ func EncodeRemoteClusterValidationErrorIntoResponse(err error) (*ap.Response, er
 	return EncodeValidationErrorIntoResponse(err, false)
 }
 
-// encode a validation error into Response object
+// encode a validation error into Response object by wrapping it in an errorMap
 func EncodeValidationErrorIntoResponse(err error, withErrorsWrapper bool) (*ap.Response, error) {
 	errorsMap := make(map[string]error)
 	errorsMap[base.PlaceHolderFieldKey] = err
 	return EncodeErrorsMapIntoResponse(errorsMap, withErrorsWrapper)
+}
+
+// encode the error message of a validation error, without any wrapping, into Response object. 
+func EncodeValidationErrorMessageIntoResponse(err error) (*ap.Response, error) {
+	if err != nil {
+		return EncodeByteArrayIntoResponseWithStatusCode([]byte(err.Error()), http.StatusBadRequest)
+	} else {
+		return NewEmptyArrayResponse()
+	}
 }
 
 // encode a byte array into Response object with default status code of StatusOK
@@ -658,7 +724,6 @@ func EncodeObjectIntoResponseWithStatusCode(object interface{}, statusCode int) 
 			return nil, err
 		}
 	}
-	logger_msgutil.Infof("object=%v, body=%v\n", object, body)
 	return EncodeByteArrayIntoResponseWithStatusCode(body, statusCode)
 }
 

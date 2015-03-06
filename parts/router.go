@@ -19,6 +19,7 @@ import (
 	common "github.com/couchbase/goxdcr/common"
 	connector "github.com/couchbase/goxdcr/connector"
 	"github.com/couchbase/goxdcr/log"
+	"github.com/couchbase/goxdcr/utils"
 	"regexp"
 )
 
@@ -27,7 +28,6 @@ var ErrorNoDownStreamNodesForRouter = errors.New("No downstream nodes have been 
 var ErrorNoRoutingMapForRouter = errors.New("No routingMap has been defined for Router.")
 var ErrorInvalidRoutingMapForRouter = errors.New("routingMap in Router is invalid.")
 
-
 // XDCR Router does two things:
 // 1. converts UprEvent to MCRequest
 // 2. routes MCRequest to downstream parts
@@ -35,7 +35,7 @@ type Router struct {
 	id string
 	*connector.Router
 	filterRegexp *regexp.Regexp    // filter expression
-	routingMap        map[uint16]string // pvbno -> partId. This defines the loading balancing strategy of which vbnos would be routed to which part
+	routingMap   map[uint16]string // pvbno -> partId. This defines the loading balancing strategy of which vbnos would be routed to which part
 	//Debug only, need to be rolled into statistics and monitoring
 	counter map[string]int
 }
@@ -54,9 +54,9 @@ func NewRouter(id string, filterExpression string,
 		}
 	}
 	router := &Router{
-		id : id, 
+		id:           id,
 		filterRegexp: filterRegexp,
-		routingMap:        routingMap,
+		routingMap:   routingMap,
 		counter:      make(map[string]int)}
 
 	var routingFunc connector.Routing_Callback_Func = router.route
@@ -124,7 +124,7 @@ func (router *Router) route(data interface{}) (map[string]interface{}, error) {
 
 	// filter data if filter expession has been defined
 	if router.filterRegexp != nil {
-		if !router.filterRegexp.Match(uprEvent.Key) {
+		if !utils.RegexpMatch(router.filterRegexp, uprEvent.Key) {
 			// if data does not match filter expression, drop it. return empty result
 			router.RaiseEvent(common.DataFiltered, uprEvent, router, nil, nil)
 			router.Logger().Debugf("Data with key=%v has been filtered out", string(uprEvent.Key))
@@ -142,11 +142,11 @@ func (router *Router) SetRoutingMap(routingMap map[uint16]string) {
 	router.Logger().Debugf("Set vbMap %v in Router", routingMap)
 }
 
-func (router *Router)RoutingMap () map[uint16]string {
+func (router *Router) RoutingMap() map[uint16]string {
 	return router.routingMap
 }
 
-func (router *Router)RoutingMapByDownstreams () map[string][]uint16 {
+func (router *Router) RoutingMapByDownstreams() map[string][]uint16 {
 	ret := make(map[string][]uint16)
 	for vbno, partId := range router.routingMap {
 		vblist, ok := ret[partId]
@@ -154,13 +154,13 @@ func (router *Router)RoutingMapByDownstreams () map[string][]uint16 {
 			vblist = []uint16{}
 			ret[partId] = vblist
 		}
-		
-		vblist = append (vblist, vbno)
+
+		vblist = append(vblist, vbno)
 		ret[partId] = vblist
 	}
 	return ret
 }
-func (router *Router) StatusSummary () string {
+func (router *Router) StatusSummary() string {
 	return fmt.Sprintf("Rounter %v = %v", router.id, router.counter)
 
 }

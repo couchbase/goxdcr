@@ -25,7 +25,7 @@ import (
 	"time"
 )
 
-var StaticPaths = [6]string{base.RemoteClustersPath, CreateReplicationPath, InternalSettingsPath, SettingsReplicationsPath, AllReplicationsPath, AllReplicationInfosPath}
+var StaticPaths = [7]string{base.RemoteClustersPath, CreateReplicationPath, InternalSettingsPath, SettingsReplicationsPath, AllReplicationsPath, AllReplicationInfosPath, RegexpValidationPrefix}
 var DynamicPathPrefixes = [5]string{base.RemoteClustersPath, DeleteReplicationPrefix, SettingsReplicationsPath, StatisticsPrefix, AllReplicationsPath}
 
 var logger_ap *log.CommonLogger = log.NewLogger("AdminPort", log.DefaultLoggerContext)
@@ -191,6 +191,8 @@ func (adminport *Adminport) handleRequest(
 		response, err = adminport.doChangeReplicationSettingsRequest(request)
 	case StatisticsPrefix + DynamicSuffix + base.UrlDelimiter + base.MethodGet:
 		response, err = adminport.doGetStatisticsRequest(request)
+	case RegexpValidationPrefix + base.UrlDelimiter + base.MethodPost:
+		response, err = adminport.doRegexpValidationRequest(request)
 	default:
 		err = ap.ErrorInvalidRequest
 	}
@@ -628,4 +630,24 @@ func getRealUserIdFromRequest(request *http.Request) *base.RealUserId {
 
 func (adminport *Adminport) IsReadyForHeartBeat() bool {
 	return adminport.IsStarted()
+}
+
+func (adminport *Adminport) doRegexpValidationRequest(request *http.Request) (*ap.Response, error) {
+	logger_ap.Infof("doRegexpValidationRequest\n")
+
+	expression, keys, err := DecodeRegexpValidationRequest(request)
+	if err != nil {
+		return EncodeValidationErrorMessageIntoResponse(err)
+	}
+	
+	logger_ap.Infof("Request params: expression=%v, keys=%v\n",
+		expression, keys)
+	
+	matchesMap, err := utils.GetMatchedKeys(expression, keys)
+	if err != nil {
+		return EncodeValidationErrorMessageIntoResponse(err)
+	} 		
+
+	return NewRegexpValidationResponse(matchesMap)
+	
 }

@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"reflect"
+	"regexp"
 	"strconv"
 	"strings"
 )
@@ -77,7 +78,6 @@ func RecoverPanic(err *error) {
 		*err = errors.New(fmt.Sprint(r))
 	}
 }
-
 
 func LocalPool(localConnectStr string) (couchbase.Pool, error) {
 	url := fmt.Sprintf("http://%s", localConnectStr)
@@ -317,4 +317,29 @@ func EncodeMapIntoByteArray(data map[string]interface{}) ([]byte, error) {
 	}
 
 	return []byte(params.Encode()), nil
+}
+
+func GetMatchedKeys(expression string, keys []string) (map[string][][]int, error) {
+	regExp, err := regexp.Compile(expression)
+	if err != nil {
+		return nil, err
+	}
+
+	matchesMap := make(map[string][][]int)
+
+	for _, key := range keys {
+		var matches [][]int 
+		if RegexpMatch(regExp, []byte(key)) {
+			matches = regExp.FindAllStringIndex(key, -1)
+		} else {
+			matches = make([][]int, 0)
+		} 
+		matchesMap[key] = matches
+	}
+
+	return matchesMap, nil
+}
+
+func RegexpMatch(regExp *regexp.Regexp, key []byte) bool {
+	return regExp.Match(key)
 }
