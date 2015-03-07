@@ -671,7 +671,7 @@ func (ckmgr *CheckpointManager) UpdateVBTimestamps(vbno uint16, rollbackseqno ui
 	ckmgr.logger.Infof("Received rollback from DCP stream vb=%v, rollbackseqno=%v\n", vbno, rollbackseqno)
 	pipeline_startSeqnos_map := GetStartSeqnos(ckmgr.pipeline, ckmgr.logger)
 	pipeline_start_seqno, ok := pipeline_startSeqnos_map[vbno]
-	if ok {
+	if !ok {
 		return nil, fmt.Errorf("Invalid vbno=%v\n", vbno)
 	}
 	if rollbackseqno >= pipeline_start_seqno.Seqno {

@@ -83,7 +83,7 @@ func LocalPool(localConnectStr string) (couchbase.Pool, error) {
 	url := fmt.Sprintf("http://%s", localConnectStr)
 	client, err := couchbase.ConnectWithAuth(url, cbauth.NewAuthHandler(nil))
 	if err != nil {
-		return couchbase.Pool{}, NewEnhancedError(fmt.Sprintf("Error connecting to couchbase. url=%v", url), err)
+		return couchbase.Pool{}, NewEnhancedError(fmt.Sprintf("Error connecting to couchbase. url=%v", UrlForLog(url)), err)
 	}
 	return client.GetPool("default")
 }
@@ -92,7 +92,7 @@ func RemotePool(remoteConnectStr string, remoteUsername string, remotePassword s
 	url := fmt.Sprintf("http://%s:%s@%s", remoteUsername, remotePassword, remoteConnectStr)
 	client, err := couchbase.Connect(url)
 	if err != nil {
-		return couchbase.Pool{}, NewEnhancedError(fmt.Sprintf("Error connecting to couchbase. url=%v", url), err)
+		return couchbase.Pool{}, NewEnhancedError(fmt.Sprintf("Error connecting to couchbase. url=%v", UrlForLog(url)), err)
 	}
 	logger_utils.Infof("client=%v\n", client)
 	return client.GetPool("default")
@@ -128,7 +128,7 @@ func RemoteBucket(remoteConnectStr, bucketName, remoteUsername, remotePassword s
 	url = fmt.Sprintf("http://%s:%s@%s", remoteUsername, remotePassword, remoteConnectStr)
 	bucketInfos, err := couchbase.GetBucketList(url)
 	if err != nil {
-		return nil, NewEnhancedError("Error getting bucketlist with url:"+url, err)
+		return nil, NewEnhancedError("Error getting bucketlist with url:"+UrlForLog(url), err)
 	}
 
 	var password string
@@ -319,6 +319,16 @@ func EncodeMapIntoByteArray(data map[string]interface{}) ([]byte, error) {
 	return []byte(params.Encode()), nil
 }
 
+func UrlForLog(urlStr string) string {
+	result, err := url.Parse(urlStr)
+	if err == nil {
+		result.User = url.UserPassword(result.User.Username(), "xxxx")
+		return result.String()
+	} else {
+		return urlStr
+	}
+}
+
 func GetMatchedKeys(expression string, keys []string) (map[string][][]int, error) {
 	regExp, err := regexp.Compile(expression)
 	if err != nil {
@@ -328,12 +338,12 @@ func GetMatchedKeys(expression string, keys []string) (map[string][][]int, error
 	matchesMap := make(map[string][][]int)
 
 	for _, key := range keys {
-		var matches [][]int 
+		var matches [][]int
 		if RegexpMatch(regExp, []byte(key)) {
 			matches = regExp.FindAllStringIndex(key, -1)
 		} else {
 			matches = make([][]int, 0)
-		} 
+		}
 		matchesMap[key] = matches
 	}
 
