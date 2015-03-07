@@ -23,6 +23,7 @@ import (
 	"github.com/couchbase/goxdcr/service_def"
 	"github.com/couchbase/goxdcr/utils"
 	"github.com/couchbaselabs/go-couchbase"
+	"sort"
 	"sync"
 	"time"
 )
@@ -76,6 +77,11 @@ type CheckpointManager struct {
 	active_vbs       map[string][]uint16
 	vb_highseqno_map map[uint16]uint64
 	failoverlog_map  map[uint16]*mcc.FailoverLog
+	// some docs may not be sent to target, e.g., because they were filtered out or failed conflict resolution on source,
+	// such docs still need to be included for hiseqno computation for checkpointing
+	// this map stores a sorted list of such seqnos for each vb to faciliate hiseqno computation
+	vb_notsent_seqno_list_map   map[uint16][]int
+	vb_notsent_seqno_list_locks map[uint16]*sync.RWMutex
 
 	logger          *log.CommonLogger
 	cur_ckpts_locks map[uint16]*sync.RWMutex
@@ -89,22 +95,24 @@ func NewCheckpointManager(checkpoints_svc service_def.CheckpointsService, capi_s
 	}
 	logger := log.NewLogger("CheckpointManager", logger_ctx)
 	return &CheckpointManager{
-		AbstractComponent:  component.NewAbstractComponentWithLogger(CheckpointMgrId, logger),
-		pipeline:           nil,
-		checkpoints_svc:    checkpoints_svc,
-		capi_svc:           capi_svc,
-		rep_spec_svc:       rep_spec_svc,
-		remote_cluster_svc: remote_cluster_svc,
-		cluster_info_svc:   cluster_info_svc,
-		xdcr_topology_svc:  xdcr_topology_svc,
-		finish_ch:          make(chan bool, 1),
-		logger:             logger,
-		cur_ckpts:          make(map[uint16]*metadata.CheckpointRecord),
-		cur_ckpts_locks:    make(map[uint16]*sync.RWMutex),
-		active_vbs:         active_vbs,
-		wait_grp:           &sync.WaitGroup{},
-		failoverlog_map:    make(map[uint16]*mcc.FailoverLog),
-		vb_highseqno_map:   make(map[uint16]uint64)}, nil
+		AbstractComponent:           component.NewAbstractComponentWithLogger(CheckpointMgrId, logger),
+		pipeline:                    nil,
+		checkpoints_svc:             checkpoints_svc,
+		capi_svc:                    capi_svc,
+		rep_spec_svc:                rep_spec_svc,
+		remote_cluster_svc:          remote_cluster_svc,
+		cluster_info_svc:            cluster_info_svc,
+		xdcr_topology_svc:           xdcr_topology_svc,
+		finish_ch:                   make(chan bool, 1),
+		logger:                      logger,
+		cur_ckpts:                   make(map[uint16]*metadata.CheckpointRecord),
+		cur_ckpts_locks:             make(map[uint16]*sync.RWMutex),
+		active_vbs:                  active_vbs,
+		wait_grp:                    &sync.WaitGroup{},
+		failoverlog_map:             make(map[uint16]*mcc.FailoverLog),
+		vb_highseqno_map:            make(map[uint16]uint64),
+		vb_notsent_seqno_list_map:   make(map[uint16][]int),
+		vb_notsent_seqno_list_locks: make(map[uint16]*sync.RWMutex)}, nil
 }
 
 func (ckmgr *CheckpointManager) Attach(pipeline common.Pipeline) error {
@@ -120,16 +128,21 @@ func (ckmgr *CheckpointManager) Attach(pipeline common.Pipeline) error {
 		return err
 	}
 
-	xmem_parts := pipeline.Targets()
-	for _, part := range xmem_parts {
+	outNozzle_parts := pipeline.Targets()
+	for _, part := range outNozzle_parts {
 		part.RegisterComponentEventListener(common.DataSent, ckmgr)
+		part.RegisterComponentEventListener(common.DataFailedCRSource, ckmgr)
 	}
 
 	dcp_parts := pipeline.Sources()
 	for _, dcp := range dcp_parts {
 		dcp.RegisterComponentEventListener(common.StreamingStart, ckmgr)
+		//get connector, which is a router
+		router := dcp.Connector().(*parts.Router)
+		router.RegisterComponentEventListener(common.DataFiltered, ckmgr)
 	}
-	ckmgr.initCurrentCkptMap()
+
+	ckmgr.initialize()
 
 	return err
 }
@@ -179,11 +192,14 @@ func (ckmgr *CheckpointManager) Start(settings map[string]interface{}) error {
 	return nil
 }
 
-func (ckmgr *CheckpointManager) initCurrentCkptMap() {
+func (ckmgr *CheckpointManager) initialize() {
 	listOfVbs := ckmgr.getMyVBs()
 	for _, vbno := range listOfVbs {
 		ckmgr.cur_ckpts[vbno] = &metadata.CheckpointRecord{}
 		ckmgr.cur_ckpts_locks[vbno] = &sync.RWMutex{}
+
+		ckmgr.vb_notsent_seqno_list_map[vbno] = make([]int, 0)
+		ckmgr.vb_notsent_seqno_list_locks[vbno] = &sync.RWMutex{}
 	}
 }
 
@@ -303,7 +319,7 @@ func (ckmgr *CheckpointManager) startSeqnoGetter(getter_id int, listOfVbs []uint
 	disableCkptBackwardsCompat bool, ret map[uint16]*base.VBTimestamp, highseqnomap map[uint16]uint64, waitGrp *sync.WaitGroup, errMap map[uint16]error) {
 	ckmgr.logger.Debugf("StartSeqnoGetter %v is started to do _pre_prelicate for vb %v, waitGrp=%v\n", getter_id, listOfVbs, *waitGrp)
 	defer waitGrp.Done()
-	
+
 	for _, vbno := range listOfVbs {
 		var agreeedIndex int = -1
 		ckptDoc, _ := ckptDocs[vbno]
@@ -565,10 +581,9 @@ func (ckmgr *CheckpointManager) performCkpt(skip_error bool) {
 func (ckmgr *CheckpointManager) executeCkptTask(executor_id int, listOfVbs []uint16, skip_error bool, errMap map[uint16]error, wait_grp *sync.WaitGroup) {
 	ckmgr.logger.Debugf("Checkpoing executor %v is checkpointing for vbuckets %v", executor_id, listOfVbs)
 	if wait_grp == nil {
-		panic ("wait_grp can't be nil")
+		panic("wait_grp can't be nil")
 	}
 	defer wait_grp.Done()
-	
 
 	for _, vbno := range listOfVbs {
 		if len(errMap) > 0 {
@@ -590,11 +605,23 @@ func (ckmgr *CheckpointManager) executeCkptTask(executor_id int, listOfVbs []uin
 }
 
 func (ckmgr *CheckpointManager) do_checkpoint(vbno uint16, skip_error bool) (err error) {
-	//locking the current ckpt record for this vb, no update is allowed during the checkpointing
+	//locking the current ckpt record and notsent_seqno list for this vb, no update is allowed during the checkpointing
 	ckmgr.cur_ckpts_locks[vbno].Lock()
+	ckmgr.vb_notsent_seqno_list_locks[vbno].Lock()
 	defer ckmgr.cur_ckpts_locks[vbno].Unlock()
+	defer ckmgr.vb_notsent_seqno_list_locks[vbno].Unlock()
 
 	ckpt_record := ckmgr.cur_ckpts[vbno]
+	seqno_list := ckmgr.vb_notsent_seqno_list_map[vbno]
+
+	// re-compute seqno based on the original seqno, which is the seqno of actually sent docs, and the seqnos of docs that are not sent
+	var endIndex int
+	ckpt_record.Seqno, endIndex = recomputeSeqno(ckpt_record.Seqno, seqno_list)
+	if endIndex >= 0 {
+		ckmgr.vb_notsent_seqno_list_map[vbno] = seqno_list[endIndex+1:]
+	}
+	ckmgr.logger.Debugf("Actual seqno number used for checkpointing for vb %v is %v\n", vbno, ckpt_record.Seqno)
+
 	if ckpt_record.Seqno == 0 {
 		ckmgr.logger.Debugf("No replication happened yet, skip checkpointing for vb=%v pipeline=%v\n", vbno, ckmgr.pipeline.InstanceId())
 		return nil
@@ -606,7 +633,9 @@ func (ckmgr *CheckpointManager) do_checkpoint(vbno uint16, skip_error bool) (err
 		ckpt_record.Target_Seqno = remote_seqno
 		ckpt_record.Failover_uuid = ckmgr.getFailoverUUIDForSeqno(vbno, ckpt_record.Seqno)
 		err = ckmgr.persistCkptRecord(vbno, ckpt_record)
-		ckmgr.raiseSuccessCkptForVbEvent(*ckpt_record, vbno)
+		if err == nil {
+			ckmgr.raiseSuccessCkptForVbEvent(*ckpt_record, vbno)
+		}
 
 	} else {
 		ckpt_record.Target_vb_uuid = vb_uuid
@@ -615,6 +644,27 @@ func (ckmgr *CheckpointManager) do_checkpoint(vbno uint16, skip_error bool) (err
 	ckpt_record.Target_Seqno = 0
 	ckpt_record.Failover_uuid = 0
 	return
+}
+
+// algorithm:
+// if seqno+1 can be found in seqno_list, find the biggest N such that seqno+1, seqno+2, .., seqno+N all exist in seqno_list
+// return seqno+N as the highest seqno for checkpointing. Also return the index of seqno+N so that we can remove all entries
+// up to and including seqno+N from seqno_list, as so to make future computations faster
+// if seqno+1 cannot be found in seqno_list, return original seqno and an index of -1 to indicate that list truncation is not needed
+func recomputeSeqno(seqno uint64, seqno_list []int) (uint64, int) {
+	index := sort.Search(len(seqno_list), func(i int) bool {
+		return seqno_list[i] >= int(seqno+1)
+	})
+	if index < len(seqno_list) && seqno_list[index] == int(seqno+1) {
+		endIndex := index
+		for ; endIndex < len(seqno_list)-1; endIndex++ {
+			if seqno_list[endIndex+1] != seqno_list[endIndex]+1 {
+				break
+			}
+		}
+		return uint64(seqno_list[endIndex]), endIndex
+	}
+	return seqno, -1
 }
 
 func (ckmgr *CheckpointManager) raiseSuccessCkptForVbEvent(ckpt_record metadata.CheckpointRecord, vbno uint16) {
@@ -643,6 +693,16 @@ func (ckmgr *CheckpointManager) OnEvent(eventType common.ComponentEventType,
 			ckmgr.cur_ckpts[vbno].Seqno = hiseqno
 			ckmgr.logger.Debugf("ckmgr.cur_ckpts[%v].Seqno =%v\n", vbno, otherInfos[parts.EVENT_ADDI_SEQNO])
 		}
+	} else if eventType == common.DataFiltered {
+		seqno := item.(*mcc.UprEvent).Seqno
+		vbno := item.(*mcc.UprEvent).VBucket
+		ckmgr.addNotSentSeqno(vbno, seqno)
+	} else if eventType == common.DataFailedCRSource {
+		seqno, ok := otherInfos[parts.EVENT_ADDI_SEQNO].(uint64)
+		if ok {
+			vbno := item.(*gomemcached.MCRequest).VBucket
+			ckmgr.addNotSentSeqno(vbno, seqno)
+		}
 	} else if eventType == common.StreamingStart {
 		event, ok := item.(*mcc.UprEvent)
 		if ok {
@@ -653,6 +713,13 @@ func (ckmgr *CheckpointManager) OnEvent(eventType common.ComponentEventType,
 		}
 	}
 
+}
+
+func (ckmgr *CheckpointManager) addNotSentSeqno(vbno uint16, notsent_seqno uint64) {
+	ckmgr.vb_notsent_seqno_list_locks[vbno].Lock()
+	defer ckmgr.vb_notsent_seqno_list_locks[vbno].Unlock()
+	ckmgr.vb_notsent_seqno_list_map[vbno] = append(ckmgr.vb_notsent_seqno_list_map[vbno], int(notsent_seqno))
+	ckmgr.logger.Debugf("ckmgr.vb_notsent_seqno_list_map[%v]=%v\n", vbno, ckmgr.vb_notsent_seqno_list_map[vbno])
 }
 
 func (ckmgr *CheckpointManager) getFailoverUUIDForSeqno(vbno uint16, seqno uint64) uint64 {

@@ -39,6 +39,10 @@ const (
 	GetMetaSent ComponentEventType = iota
 	// get meta response received from target cluster
 	GetMetaReceived ComponentEventType = iota
+	//data failed conflict resolution on source cluster side due to optimistic replication
+	DataFailedCRSource ComponentEventType = iota
+	// generic stats update event for the component
+	StatsUpdate ComponentEventType = iota
 )
 
 //ComponentEventListener abstracts anybody who is interested in an event of a component

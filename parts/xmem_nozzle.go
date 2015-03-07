@@ -381,7 +381,6 @@ func (buf *requestBuffer) updateSeqnoList(req *base.WrappedMCRequest) {
 	if !ok {
 		sorted_seqno_list = []int{}
 	}
-
 	seqno := req.Seqno
 	oldlen := len(sorted_seqno_list)
 	index := sort.Search(oldlen, func(i int) bool { return sorted_seqno_list[i] > int(seqno) })
@@ -396,7 +395,6 @@ func (buf *requestBuffer) updateSeqnoList(req *base.WrappedMCRequest) {
 		newlist = append(newlist, int(seqno))
 	}
 	newlen := len(newlist)
-
 	buf.seqno_sorted_list[vbno] = newlist
 	if !sort.IntsAreSorted(buf.seqno_sorted_list[vbno]) || newlen != oldlen+1 {
 		panic(fmt.Sprintf("list %v is not valid. vbno=%v", buf.seqno_sorted_list[vbno], vbno))
@@ -921,11 +919,6 @@ func (xmem *XmemNozzle) Receive(data interface{}) error {
 		xmem.batchReady()
 	}
 
-	//raise DataReceived event
-	additionalInfo := make(map[string]interface{})
-	additionalInfo[STATS_QUEUE_SIZE] = len(xmem.dataChan)
-	additionalInfo[STATS_QUEUE_SIZE_BYTES] = xmem.bytes_in_dataChan
-	xmem.RaiseEvent(common.DataReceived, request, xmem, nil, additionalInfo)
 	xmem.Logger().Debugf("Xmem %v received %v items, queue_size = %v, bytes_in_dataChan=%v\n", xmem.Id(), xmem.counter_received, len(xmem.dataChan), xmem.bytes_in_dataChan)
 
 	return nil
@@ -1048,10 +1041,14 @@ func (xmem *XmemNozzle) batchSetMetaWithRetry(batch *dataBatch, numOfRetry int) 
 					reqs_bytes = []byte{}
 					index_reservation_map = make(map[uint16]int)
 				}
+			} else {
+				//lost on conflict resolution on source side
+				// this still counts as data sent
+
+				additionalInfo := make(map[string]interface{})
+				additionalInfo[EVENT_ADDI_SEQNO] = item.Seqno
+				xmem.RaiseEvent(common.DataFailedCRSource, item.Req, xmem, nil, additionalInfo)
 			}
-		} else {
-			//lost on conflict resolution on source side
-			//TODO: raise event
 		}
 
 	}
@@ -1479,15 +1476,14 @@ func (xmem *XmemNozzle) receiveResponse(finch chan bool, waitGrp *sync.WaitGroup
 					additionalInfo := make(map[string]interface{})
 					additionalInfo[EVENT_ADDI_SEQNO] = seqno
 					additionalInfo[EVENT_ADDI_OPT_REPD] = xmem.optimisticRep(req)
-
 					//add additional information about hiseqno, which is going to be used
 					//for checkpointing
 					highseqno, err := xmem.getCurSeenHighSeqno(wrappedReq)
 					if err == nil {
 						additionalInfo[EVENT_ADDI_HISEQNO] = highseqno
 					}
-
 					xmem.RaiseEvent(common.DataSent, req, xmem, nil, additionalInfo)
+
 					//empty the slot in the buffer
 					if xmem.buf.evictSlot(pos) != nil {
 						xmem.Logger().Errorf("Failed to evict slot %d\n", pos)
@@ -1551,6 +1547,7 @@ func isRecoverableMCError(resp_status mc.Status) bool {
 func (xmem *XmemNozzle) selfMonitor(finch chan bool, waitGrp *sync.WaitGroup) {
 	defer waitGrp.Done()
 	ticker := time.Tick(xmem.config.selfMonitorInterval)
+	statsTicker := time.Tick(xmem.config.statsInterval)
 	var sent_count int = 0
 	var count uint64
 	freeze_counter := 0
@@ -1594,6 +1591,11 @@ func (xmem *XmemNozzle) selfMonitor(finch chan bool, waitGrp *sync.WaitGroup) {
 				xmem.handleGeneralError(errors.New("Xmem is stuck"))
 				goto done
 			}
+		case <-statsTicker:
+			additionalInfo := make(map[string]interface{})
+			additionalInfo[STATS_QUEUE_SIZE] = len(xmem.dataChan)
+			additionalInfo[STATS_QUEUE_SIZE_BYTES] = xmem.bytes_in_dataChan
+			xmem.RaiseEvent(common.StatsUpdate, nil, xmem, nil, additionalInfo)
 		}
 	}
 done:
@@ -1816,7 +1818,7 @@ func (xmem *XmemNozzle) readFromClient(client *xmemClient) (*mc.MCResponse, erro
 		} else if response.Status == mc.ENOMEM {
 			//this is recoverable, it can succeed when ep-engine evic items out to free up memory
 			return response, err
-		}else if mc.IsFatal(err) {
+		} else if mc.IsFatal(err) {
 
 			if response.Status == 0x08 {
 				//PROTOCOL_BINARY_RESPONSE_NO_BUCKET
@@ -1901,6 +1903,7 @@ func (xmem *XmemNozzle) getCurSeenHighSeqno(wrappedReq *base.WrappedMCRequest) (
 		//invalid state
 		panic(fmt.Sprintf("Seqno %v is not tracked in buf, the smallestSeqnoInBuf = %v, vbno=%v, sorted_seqno_list=%v", seqno, smallestSeqnoInBuf, vbno, xmem.buf.seqno_sorted_list[vbno]))
 	}
+
 	if seqno == smallestSeqnoInBuf {
 
 		highseqno := smallestSeqnoInBuf

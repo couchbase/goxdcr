@@ -453,6 +453,7 @@ func (xdcrf *XDCRFactory) constructSettingsForXmemNozzle(pipeline common.Pipelin
 	xmemSettings[parts.SETTING_RESP_TIMEOUT] = xdcrf.getTargetTimeoutEstimate(pipeline.Topic())
 	xmemSettings[parts.SETTING_BATCH_EXPIRATION_TIME] = time.Duration(float64(repSettings.MaxExpectedReplicationLag)*0.7) * time.Millisecond
 	xmemSettings[parts.SETTING_OPTI_REP_THRESHOLD] = repSettings.OptimisticReplicationThreshold
+	xmemSettings[parts.SETTING_STATS_INTERVAL] = repSettings.StatsInterval
 
 	demandEncryption := targetClusterRef.DemandEncryption
 	certificate := targetClusterRef.Certificate
@@ -499,6 +500,7 @@ func (xdcrf *XDCRFactory) constructSettingsForCapiNozzle(pipeline common.Pipelin
 	capiSettings[parts.SETTING_BATCHSIZE] = repSettings.BatchSize
 	capiSettings[parts.SETTING_RESP_TIMEOUT] = xdcrf.getTargetTimeoutEstimate(pipeline.Topic())
 	capiSettings[parts.SETTING_OPTI_REP_THRESHOLD] = repSettings.OptimisticReplicationThreshold
+	capiSettings[parts.SETTING_STATS_INTERVAL] = repSettings.StatsInterval
 
 	return capiSettings, nil
 

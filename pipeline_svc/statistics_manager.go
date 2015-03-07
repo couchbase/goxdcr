@@ -31,11 +31,16 @@ import (
 )
 
 const (
+	// the number of docs written/sent to target cluster
 	DOCS_WRITTEN_METRIC    = "docs_written"
+	// the number of docs processed by pipeline
+	DOCS_PROCESSED_METRIC    = "docs_processed"
 	DATA_REPLICATED_METRIC = "data_replicated"
 	SIZE_REP_QUEUE_METRIC  = "size_rep_queue"
 	DOCS_REP_QUEUE_METRIC  = "docs_rep_queue"
 	DOCS_FILTERED_METRIC   = "docs_filtered"
+	// the number of docs that failed conflict resolution on the source cluster side due to optimistic replication
+	DOCS_FAILED_CR_SOURCE_METRIC   = "docs_failed_cr_source"
 	CHANGES_LEFT_METRIC    = "changes_left"
 	DOCS_LATENCY_METRIC    = "wtavg_docs_latency"
 	META_LATENCY_METRIC    = "wtavg_meta_latency"
@@ -50,7 +55,8 @@ const (
 	DOCS_OPT_REPD_METRIC = "docs_opt_repd"
 	RATE_OPT_REPD_METRIC = "rate_doc_opt_repd"
 
-	DOCS_RECEIVED_DCP_METRICS = "docs_received_from_dcp"
+	DOCS_RECEIVED_DCP_METRIC = "docs_received_from_dcp"
+	RATE_RECEIVED_DCP_METRIC = "rate_received_from_dcp"
 
 	//	TIME_COMMITTING_METRIC = "time_committing"
 	//rate
@@ -141,9 +147,13 @@ type StatisticsManager struct {
 
 	collectors []MetricsCollector
 
-	active_vbs          map[string][]uint16
-	bucket_name         string
-	kv_mem_clients      map[string]*mcc.Client
+	active_vbs     map[string][]uint16
+	bucket_name    string
+	kv_mem_clients map[string]*mcc.Client
+	
+	// the number of docs that have been checkpointed in previous pipeline runs
+	// and should be counted toward docs_processed stats of the current pipeline run
+	initial_docs_processed  int64
 }
 
 func NewStatisticsManager(logger_ctx *log.LoggerContext, active_vbs map[string][]uint16, bucket_name string) *StatisticsManager {
@@ -234,7 +244,7 @@ func (stats_mgr *StatisticsManager) updateStatsOnce() error {
 		stats_mgr.cleanupBeforeExit()
 		return errors.New(message)
 	}
-	
+
 	stats_mgr.logger.Debugf("%v: Publishing the statistics for %v to expvar", time.Now(), stats_mgr.pipeline.InstanceId())
 	err := stats_mgr.processRawStats()
 
@@ -332,9 +342,17 @@ func (stats_mgr *StatisticsManager) processRawStats() error {
 
 func (stats_mgr *StatisticsManager) processCalculatedStats(oldSample metrics.Registry, overview_expvar_map *expvar.Map) error {
 
-	//calculate changes_left
+	//calculate docs_processed
 	docs_written := stats_mgr.getOverviewRegistry().Get(DOCS_WRITTEN_METRIC).(metrics.Counter).Count()
-	changes_left_val, err := stats_mgr.calculateChangesLeft(docs_written)
+	docs_filtered := stats_mgr.getOverviewRegistry().Get(DOCS_FILTERED_METRIC).(metrics.Counter).Count()
+	docs_failed_cr_source := stats_mgr.getOverviewRegistry().Get(DOCS_FAILED_CR_SOURCE_METRIC).(metrics.Counter).Count()
+	docs_processed := stats_mgr.initial_docs_processed + docs_written + docs_filtered + docs_failed_cr_source
+	docs_processed_var := new(expvar.Int)
+	docs_processed_var.Set(docs_processed)
+	overview_expvar_map.Set(DOCS_PROCESSED_METRIC, docs_processed_var)
+	
+	//calculate changes_left
+	changes_left_val, err := stats_mgr.calculateChangesLeft(docs_processed)
 	changes_left_var := new(expvar.Int)
 	if err == nil {
 		changes_left_var.Set(changes_left_val)
@@ -351,6 +369,14 @@ func (stats_mgr *StatisticsManager) processCalculatedStats(oldSample metrics.Reg
 	rate_replicated_var := new(expvar.Float)
 	rate_replicated_var.Set(rate_replicated)
 	overview_expvar_map.Set(RATE_REPLICATED_METRIC, rate_replicated_var)
+	
+	//calculate rate_received_from_dcp
+	docs_received_dcp := stats_mgr.getOverviewRegistry().Get(DOCS_RECEIVED_DCP_METRIC).(metrics.Counter).Count()
+	docs_received_dcp_old := oldSample.Get(DOCS_RECEIVED_DCP_METRIC).(metrics.Counter).Count()
+	rate_received_dcp := float64(docs_received_dcp-docs_received_dcp_old) / interval_in_sec
+	rate_received_dcp_var := new(expvar.Float)
+	rate_received_dcp_var.Set(rate_received_dcp)
+	overview_expvar_map.Set(RATE_RECEIVED_DCP_METRIC, rate_received_dcp_var)
 
 	//calculate rate_doc_opt_repd
 	docs_opt_repd_old := oldSample.Get(DOCS_OPT_REPD_METRIC).(metrics.Counter).Count()
@@ -369,21 +395,18 @@ func (stats_mgr *StatisticsManager) processCalculatedStats(oldSample metrics.Reg
 	overview_expvar_map.Set(BANDWIDTH_USAGE_METRIC, bandwidth_usage_var)
 
 	//calculate docs_checked
-	docs_checked_old_var := overview_expvar_map.Get(DOCS_CHECKED_METRIC)
-	var docs_checked_old uint64 = 0
-	if docs_checked_old_var != nil {
-		docs_checked_old, err = strconv.ParseUint(docs_checked_old_var.String(), 10, 64)
-		if err != nil {
-			return err
-		}
-	}
 	docs_checked := stats_mgr.calculateDocsChecked()
 	docs_checked_var := new(expvar.Int)
 	docs_checked_var.Set(int64(docs_checked))
 	overview_expvar_map.Set(DOCS_CHECKED_METRIC, docs_checked_var)
 
 	//calculate rate_doc_checks
-	rate_doc_checks := float64(docs_checked-uint64(docs_checked_old)) / interval_in_sec
+	docs_checked_old_var := oldSample.Get(DOCS_CHECKED_METRIC)
+	var docs_checked_old uint64 = 0
+	if docs_checked_old_var != nil {
+		docs_checked_old = uint64(docs_checked_old_var.(metrics.Counter).Count())
+	}
+	rate_doc_checks := float64(docs_checked-docs_checked_old) / interval_in_sec
 	rate_doc_checks_var := new(expvar.Float)
 	rate_doc_checks_var.Set(rate_doc_checks)
 	overview_expvar_map.Set(RATE_DOC_CHECKS_METRIC, rate_doc_checks_var)
@@ -391,26 +414,27 @@ func (stats_mgr *StatisticsManager) processCalculatedStats(oldSample metrics.Reg
 	return nil
 }
 
-
 func (stats_mgr *StatisticsManager) calculateDocsChecked() uint64 {
 	var docs_checked uint64 = 0
 	for vbno, vbts := range GetStartSeqnos(stats_mgr.pipeline, stats_mgr.logger) {
 		start_seqno := vbts.Seqno
 		var docs_checked_vb uint64 = 0
 		if stats_mgr.through_seqnos[vbno] > start_seqno {
-			docs_checked_vb = stats_mgr.through_seqnos[vbno] - start_seqno
+			docs_checked_vb = stats_mgr.through_seqnos[vbno]
+		} else {
+			docs_checked_vb = start_seqno
 		}
 		docs_checked = docs_checked + docs_checked_vb
 	}
 	return docs_checked
 }
-func (stats_mgr *StatisticsManager) calculateChangesLeft(docs_written int64) (int64, error) {
+func (stats_mgr *StatisticsManager) calculateChangesLeft(docs_processed int64) (int64, error) {
 	total_doc, err := stats_mgr.calculateTotalChanges()
 	if err != nil {
 		return 0, err
 	}
-	changes_left := total_doc - docs_written
-	stats_mgr.logger.Debugf("total_doc=%v, docs_written=%v, changes_left=%v\n", total_doc, docs_written, changes_left)
+	changes_left := total_doc - docs_processed
+	stats_mgr.logger.Infof("total_doc=%v, docs_processed=%v, changes_left=%v\n", total_doc, docs_processed, changes_left)
 	return changes_left, nil
 }
 
@@ -419,18 +443,11 @@ func (stats_mgr *StatisticsManager) calculateTotalChanges() (int64, error) {
 	for serverAddr, vbnos := range stats_mgr.active_vbs {
 		highseqno_map, err := stats_mgr.getHighSeqNos(serverAddr, vbnos)
 		if err != nil {
-				return 0, err
+			return 0, err
 		}
 		for _, vbno := range vbnos {
-			startSeqnos_map := GetStartSeqnos(stats_mgr.pipeline, stats_mgr.logger)
-			
-			ts, ok := startSeqnos_map[vbno]
-			if !ok {
-				return 0, fmt.Errorf("Can't find start seqno for vbno=%v\n", vbno)
-			}
 			current_vb_highseqno := highseqno_map[vbno]
-			
-			total_doc = total_doc + current_vb_highseqno - ts.Seqno
+			total_doc = total_doc + current_vb_highseqno
 		}
 	}
 	return int64(total_doc), nil
@@ -509,11 +526,12 @@ func (stats_mgr *StatisticsManager) processDocsLatencyTimeSample() {
 			rep_duration := endtime.(time.Time).Sub(starttime.(time.Time))
 			//in millisecond
 			sample.Update(rep_duration.Nanoseconds() / 1000000)
+			// now it is safe to remove the entry from starttime_map
+			delete(stats_mgr.starttime_map, name)
 		}
 	}
 
-	//clear both starttime_registry and endtime_registry
-	stats_mgr.starttime_map = make(map[string]interface{})
+	//clear endtime_registry
 	stats_mgr.endtime_map = make(map[string]interface{})
 }
 
@@ -535,11 +553,12 @@ func (stats_mgr *StatisticsManager) processMetaLatencyTimeSample() {
 			meta_latency := endtime.(time.Time).Sub(starttime.(time.Time))
 			//in millisecond
 			sample.Update(meta_latency.Nanoseconds() / 1000000)
+			// now it is safe to remove the entry from starttime_map
+			delete(stats_mgr.meta_starttime_map, name)
 		}
 	}
 
-	//clear both starttime_registry and endtime_registry
-	stats_mgr.meta_starttime_map = make(map[string]interface{})
+	//clear endtime_registry
 	stats_mgr.meta_endtime_map = make(map[string]interface{})
 }
 
@@ -571,19 +590,22 @@ func (stats_mgr *StatisticsManager) initOverviewRegistry() {
 	overview_registry := metrics.NewRegistry()
 	stats_mgr.registries[OVERVIEW_METRICS_KEY] = overview_registry
 	overview_registry.Register(DOCS_WRITTEN_METRIC, metrics.NewCounter())
+	overview_registry.Register(DOCS_PROCESSED_METRIC, metrics.NewCounter())
+	overview_registry.Register(DOCS_FAILED_CR_SOURCE_METRIC, metrics.NewCounter())
 	overview_registry.Register(DATA_REPLICATED_METRIC, metrics.NewCounter())
 	overview_registry.Register(DOCS_FILTERED_METRIC, metrics.NewCounter())
 	overview_registry.Register(NUM_CHECKPOINTS_METRIC, metrics.NewCounter())
 	overview_registry.Register(NUM_FAILEDCKPTS_METRIC, metrics.NewCounter())
 	overview_registry.Register(TIME_COMMITING_METRIC, metrics.NewCounter())
 	overview_registry.Register(DOCS_OPT_REPD_METRIC, metrics.NewCounter())
-	overview_registry.Register(DOCS_RECEIVED_DCP_METRICS, metrics.NewCounter())
+	overview_registry.Register(DOCS_RECEIVED_DCP_METRIC, metrics.NewCounter())
 	overview_registry.Register(SIZE_REP_QUEUE_METRIC, metrics.NewCounter())
 	overview_registry.Register(DOCS_REP_QUEUE_METRIC, metrics.NewCounter())
 }
 
 func (stats_mgr *StatisticsManager) Start(settings map[string]interface{}) error {
-
+	stats_mgr.logger.Infof("StatisticsManager Starting...")
+	
 	//initialize connection
 	err := stats_mgr.initConnection()
 	if err != nil {
@@ -597,6 +619,11 @@ func (stats_mgr *StatisticsManager) Start(settings map[string]interface{}) error
 	}
 	stats_mgr.logger.Debugf("StatisticsManager Starts: update_interval=%v, settings=%v\n", stats_mgr.update_interval, settings)
 	stats_mgr.publish_ticker = time.NewTicker(stats_mgr.update_interval)
+	
+	for _, vbts := range GetStartSeqnos(stats_mgr.pipeline, stats_mgr.logger) {
+		// initialize initial_docs_processed
+		stats_mgr.initial_docs_processed += int64(vbts.Seqno)
+	}
 
 	//publishing status to expvar
 	expvar_stats_map := pipeline.StorageForRep(stats_mgr.pipeline.Topic())
@@ -666,13 +693,15 @@ func (outNozzle_collector *outNozzleCollector) Mount(pipeline common.Pipeline, s
 	outNozzle_parts := pipeline.Targets()
 	for _, part := range outNozzle_parts {
 		registry := stats_mgr.getOrCreateRegistry(part.Id())
-		registry.Register(SIZE_REP_QUEUE_METRIC, metrics.NewHistogram(metrics.NewUniformSample(stats_mgr.sample_size)))
-		registry.Register(DOCS_REP_QUEUE_METRIC, metrics.NewHistogram(metrics.NewUniformSample(stats_mgr.sample_size)))
+		registry.Register(SIZE_REP_QUEUE_METRIC, metrics.NewCounter())
+		registry.Register(DOCS_REP_QUEUE_METRIC, metrics.NewCounter())
 		registry.Register(DOCS_WRITTEN_METRIC, metrics.NewCounter())
+		registry.Register(DOCS_FAILED_CR_SOURCE_METRIC, metrics.NewCounter())
 		registry.Register(DATA_REPLICATED_METRIC, metrics.NewCounter())
 		registry.Register(DOCS_OPT_REPD_METRIC, metrics.NewCounter())
 		part.RegisterComponentEventListener(common.DataSent, outNozzle_collector)
-		part.RegisterComponentEventListener(common.DataReceived, outNozzle_collector)
+		part.RegisterComponentEventListener(common.DataFailedCRSource, outNozzle_collector)
+		part.RegisterComponentEventListener(common.StatsUpdate, outNozzle_collector)
 		part.RegisterComponentEventListener(common.GetMetaSent, outNozzle_collector)
 		part.RegisterComponentEventListener(common.GetMetaReceived, outNozzle_collector)
 
@@ -685,13 +714,13 @@ func (outNozzle_collector *outNozzleCollector) OnEvent(eventType common.Componen
 	component common.Component,
 	derivedItems []interface{},
 	otherInfos map[string]interface{}) {
-	if eventType == common.DataReceived {
-		outNozzle_collector.stats_mgr.logger.Debugf("Received a DataReceived event from %v", reflect.TypeOf(component))
+	if eventType == common.StatsUpdate {
+		outNozzle_collector.stats_mgr.logger.Debugf("Received a StatsUpdate event from %v", reflect.TypeOf(component))
 		queue_size := otherInfos[parts.STATS_QUEUE_SIZE].(int)
 		queue_size_bytes := otherInfos[parts.STATS_QUEUE_SIZE_BYTES].(int)
 		registry := outNozzle_collector.stats_mgr.registries[component.Id()]
-		registry.Get(DOCS_REP_QUEUE_METRIC).(metrics.Histogram).Sample().Update(int64(queue_size))
-		registry.Get(SIZE_REP_QUEUE_METRIC).(metrics.Histogram).Sample().Update(int64(queue_size_bytes))
+		setCounter(registry.Get(DOCS_REP_QUEUE_METRIC).(metrics.Counter), queue_size)
+		setCounter(registry.Get(SIZE_REP_QUEUE_METRIC).(metrics.Counter), queue_size_bytes)
 	} else if eventType == common.DataSent {
 		outNozzle_collector.stats_mgr.logger.Debugf("Received a DataSent event from %v", reflect.TypeOf(component))
 		endTime := time.Now()
@@ -709,6 +738,10 @@ func (outNozzle_collector *outNozzleCollector) OnEvent(eventType common.Componen
 		outNozzle_collector.stats_mgr.endtime_map_lock.Lock()
 		defer outNozzle_collector.stats_mgr.endtime_map_lock.Unlock()
 		outNozzle_collector.stats_mgr.endtime_map[getStatsKeyFromDocKeyAndSeqno(key, seqno)] = endTime
+	} else if eventType == common.DataFailedCRSource {
+		outNozzle_collector.stats_mgr.logger.Debugf("Received a DataFailedCRSource event from %v", reflect.TypeOf(component))
+		registry := outNozzle_collector.stats_mgr.registries[component.Id()]
+		registry.Get(DOCS_FAILED_CR_SOURCE_METRIC).(metrics.Counter).Inc(1)
 	} else if eventType == common.GetMetaSent {
 		outNozzle_collector.stats_mgr.logger.Debugf("Received a GetMetaSent event from %v", reflect.TypeOf(component))
 		startTime := time.Now()
@@ -744,7 +777,7 @@ func (dcp_collector *dcpCollector) Mount(pipeline common.Pipeline, stats_mgr *St
 	dcp_parts := pipeline.Sources()
 	for _, dcp_part := range dcp_parts {
 		registry := stats_mgr.getOrCreateRegistry(dcp_part.Id())
-		registry.Register(DOCS_RECEIVED_DCP_METRICS, metrics.NewCounter())
+		registry.Register(DOCS_RECEIVED_DCP_METRIC, metrics.NewCounter())
 		dcp_part.RegisterComponentEventListener(common.DataReceived, dcp_collector)
 	}
 	return nil
@@ -761,7 +794,7 @@ func (dcp_collector *dcpCollector) OnEvent(eventType common.ComponentEventType,
 		key := string(item.(*mcc.UprEvent).Key)
 		seqno := item.(*mcc.UprEvent).Seqno
 		registry := dcp_collector.stats_mgr.registries[component.Id()]
-		registry.Get(DOCS_RECEIVED_DCP_METRICS).(metrics.Counter).Inc(1)
+		registry.Get(DOCS_RECEIVED_DCP_METRIC).(metrics.Counter).Inc(1)
 
 		dcp_collector.stats_mgr.starttime_map_lock.Lock()
 		defer dcp_collector.stats_mgr.starttime_map_lock.Unlock()
@@ -852,8 +885,13 @@ func (ckpt_collector *checkpointMgrCollector) OnEvent(eventType common.Component
 		ckpt_collector.stats_mgr.through_seqnos[vbno] = ckpt_record.Seqno
 
 	} else if eventType == common.CheckpointDone {
-		time_commit := otherInfos[TimeCommiting].(time.Duration).Seconds()
+		time_commit := otherInfos[TimeCommiting].(time.Duration).Seconds()*1000
 		registry.Get(NUM_CHECKPOINTS_METRIC).(metrics.Counter).Inc(1)
 		registry.Get(TIME_COMMITING_METRIC).(metrics.Histogram).Sample().Update(int64(time_commit))
 	}
+}
+
+func setCounter(counter metrics.Counter, count int) {
+	counter.Clear()
+	counter.Inc(int64(count))
 }

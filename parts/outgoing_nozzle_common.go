@@ -28,6 +28,7 @@ const (
 	SETTING_READ_TIMEOUT          = "read_timeout"
 	SETTING_MAX_RETRY_INTERVAL    = "max_retry_interval"
 	SETTING_SELF_MONITOR_INTERVAL    = "self_monitor_interval"
+	SETTING_STATS_INTERVAL    = "stats_interval"
 
 	STATS_QUEUE_SIZE       = "queue_size"
 	STATS_QUEUE_SIZE_BYTES = "queue_size_bytes"
@@ -55,6 +56,8 @@ type baseConfig struct {
 	maxRetry   int
 	//the interval on which selfMonitor would be conducted
 	selfMonitorInterval time.Duration
+	//the interval on which stats are collected
+	statsInterval time.Duration
 	//the maximum number of idle round that xmem can have
 	//exceeding this number indicate the possibility of stuck
 	//due to network issues
@@ -77,6 +80,9 @@ func (config *baseConfig) initializeConfig(settings map[string]interface{}) {
 	}
 	if val, ok := settings[SETTING_SELF_MONITOR_INTERVAL]; ok {
 		config.selfMonitorInterval = val.(time.Duration)
+	}
+	if val, ok := settings[SETTING_STATS_INTERVAL]; ok {
+		config.statsInterval = time.Duration(val.(int)) * time.Millisecond
 	}
 	if val, ok := settings[SETTING_NUMOFRETRY]; ok {
 		config.maxRetry = val.(int)

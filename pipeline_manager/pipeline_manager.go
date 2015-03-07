@@ -432,6 +432,7 @@ func (r *pipelineUpdater) start() {
 
 	if r.current_error == nil {
 		//the update is not initiated from a failure case, so don't wait, update now
+		r.updateState(Updater_Running)
 		if r.update() {
 			return
 		}

@@ -39,7 +39,7 @@ const (
 	SETTING_RETRY_INTERVAL     = "retry_interval"
 
 	//default configuration
-	default_numofretry_capi          int           = 3 
+	default_numofretry_capi          int           = 3
 	default_batchExpirationTime_capi               = 10 * time.Second
 	default_retry_interval_capi      time.Duration = 10 * time.Millisecond
 	default_maxRetryInterval_capi                  = 30 * time.Second
@@ -258,9 +258,8 @@ func (capi *CapiNozzle) Start(settings map[string]interface{}) error {
 	err := capi.initialize(settings)
 	capi.Logger().Infof("Capi %v initialized\n", capi.Id())
 	if err == nil {
-		// self monitor has some issues. commenting out for now
-		//capi.childrenWaitGrp.Add(1)
-		//go capi.selfMonitor(capi.selfMonitor_finch, &capi.childrenWaitGrp)
+		capi.childrenWaitGrp.Add(1)
+		go capi.selfMonitor(capi.selfMonitor_finch, &capi.childrenWaitGrp)
 
 		capi.childrenWaitGrp.Add(1)
 		go capi.check(capi.checker_finch, &capi.childrenWaitGrp)
@@ -317,14 +316,14 @@ func (capi *CapiNozzle) batchReady(vbno uint16) error {
 	capi.vb_batch_move_lock[vbno].Lock()
 	defer func() {
 		capi.vb_batch_move_lock[vbno].Unlock()
-		
+
 		if r := recover(); r != nil {
 			if capi.validateRunningState() == nil {
 				// report error only when capi is still in running state
 				capi.handleGeneralError(errors.New(fmt.Sprintf("%v", r)))
 			}
 		}
-		
+
 		capi.Logger().Debugf("%v End moving batch, %v batches ready\n", capi.Id(), len(capi.batches_ready))
 	}()
 
@@ -370,12 +369,6 @@ func (capi *CapiNozzle) Receive(data interface{}) error {
 	}
 
 	capi.Logger().Debugf("batch for vb %v: batch=%v, batch.count=%v, batch.start_time=%v\n", vbno, batch, batch.count(), batch.start_time)
-
-	//raise DataReceived event
-	additionalInfo := make(map[string]interface{})
-	additionalInfo[STATS_QUEUE_SIZE] = capi.items_in_dataChan
-	additionalInfo[STATS_QUEUE_SIZE_BYTES] = capi.bytes_in_dataChan
-	capi.RaiseEvent(common.DataReceived, req, capi, nil, additionalInfo)
 	capi.Logger().Debugf("%v received %v items, queue_size = %v, bytes_in_dataChan=%v\n", capi.Id(), capi.counter_received, capi.items_in_dataChan, capi.bytes_in_dataChan)
 
 	return nil
@@ -462,14 +455,14 @@ func (capi *CapiNozzle) batchGetMeta(vbno uint16, bigDoc_map map[string]*base.Wr
 	if err != nil {
 		return nil, err
 	}
-		
+
 	for _, req := range bigDoc_map {
 		additionalInfo := make(map[string]interface{})
 		additionalInfo[EVENT_ADDI_DOC_KEY] = string(req.Req.Key)
 		additionalInfo[EVENT_ADDI_SEQNO] = req.Seqno
 		capi.RaiseEvent(common.GetMetaSent, nil, capi, nil, additionalInfo)
 	}
-	
+
 	var out interface{}
 	err, statusCode := utils.QueryRestApiWithAuth(couchApiBaseHost, couchApiBasePath+base.RevsDiffPath, true, capi.config.username, capi.config.password, capi.config.certificate, base.MethodPost, base.JsonContentType,
 		body, capi.config.connectionTimeout, &out, capi.Logger())
@@ -482,7 +475,7 @@ func (capi *CapiNozzle) batchGetMeta(vbno uint16, bigDoc_map map[string]*base.Wr
 		capi.Logger().Error(errMsg)
 		return nil, errors.New(errMsg)
 	}
-	
+
 	for _, req := range bigDoc_map {
 		additionalInfo := make(map[string]interface{})
 		additionalInfo[EVENT_ADDI_DOC_KEY] = string(req.Req.Key)
@@ -525,24 +518,22 @@ func (capi *CapiNozzle) batchSendWithRetry(batch *capiBatch) error {
 		} else {
 			capi.Logger().Debugf("did not send doc with key %v since it failed conflict resolution\n", string(item.Req.Key))
 			//lost on conflict resolution on source side
-			//TODO: raise event
+			additionalInfo := make(map[string]interface{})
+			additionalInfo[EVENT_ADDI_SEQNO] = item.Seqno
+			capi.RaiseEvent(common.DataFailedCRSource, item, capi, nil, additionalInfo)
 		}
 
 	}
 
 	err = capi.batchUpdateDocsWithRetry(vbno, &req_list)
 	if err == nil {
-		for index, req := range req_list {
+		for _, req := range req_list {
+			// requests in req_list have strictly increasing seqnos
+			// each seqno is the new high seqno
 			additionalInfo := make(map[string]interface{})
 			additionalInfo[EVENT_ADDI_SEQNO] = req.Seqno
 			additionalInfo[EVENT_ADDI_OPT_REPD] = capi.optimisticRep(req.Req)
-
-			// requests in req_list have strictly increasing seqnos
-			// the seqno of the last request is the largest in list and is the new high seqno
-			if index == len(req_list)-1 {
-				additionalInfo[EVENT_ADDI_HISEQNO] = req.Seqno
-			}
-
+			additionalInfo[EVENT_ADDI_HISEQNO] = req.Seqno
 			capi.RaiseEvent(common.DataSent, req.Req, capi, nil, additionalInfo)
 		}
 	} else {
@@ -576,46 +567,54 @@ func (capi *CapiNozzle) onExit() {
 
 func (capi *CapiNozzle) selfMonitor(finch chan bool, waitGrp *sync.WaitGroup) {
 	defer waitGrp.Done()
-	ticker := time.Tick(capi.config.selfMonitorInterval)
+	statsTicker := time.Tick(capi.config.statsInterval)
+	// commenting these out till they are tested
+	/*ticker := time.Tick(capi.config.selfMonitorInterval)
 	var sent_count int = 0
 	var count uint64
 	freeze_counter := 0
-	idle_counter := 0
+	idle_counter := 0*/
 	for {
 		select {
 		case <-finch:
 			goto done
-		case <-ticker:
-			if capi.validateRunningState() != nil {
-				capi.Logger().Infof("capi %v has stopped.", capi.Id())
-				goto done
-			}
+		/*case <-ticker:
+		if capi.validateRunningState() != nil {
+			capi.Logger().Infof("capi %v has stopped.", capi.Id())
+			goto done
+		}
 
-			count++
-			if capi.counter_sent == sent_count {
-				if capi.items_in_dataChan > 0 {
-					freeze_counter++
-					idle_counter = 0
-				} else {
-					freeze_counter = 0
-					idle_counter++
-				}
+		count++
+		if capi.counter_sent == sent_count {
+			if capi.items_in_dataChan > 0 {
+				freeze_counter++
+				idle_counter = 0
 			} else {
 				freeze_counter = 0
-				idle_counter = 0
+				idle_counter++
 			}
-			sent_count = capi.counter_sent
-			if count == 10 {
-				capi.Logger().Debugf("%v- freeze_counter=%v, capi.counter_sent=%v, capi.items_in_dataChan=%v, receive_count-%v\n", capi.Id(), freeze_counter, capi.counter_sent, capi.items_in_dataChan, capi.counter_received)
-				capi.Logger().Debugf("%v open=%v checking..., %v item unsent, received %v items, sent %v items, %v batches ready\n", capi.Id(), capi.IsOpen(), capi.items_in_dataChan, capi.counter_received, capi.counter_sent, len(capi.batches_ready))
-				count = 0
-			}
-			if freeze_counter > capi.config.maxIdleCount {
-				capi.Logger().Errorf("Capi hasn't sent any item out for %v ticks, %v data in queue", capi.config.maxIdleCount, capi.items_in_dataChan)
-				capi.Logger().Infof("%v open=%v checking..., %v item unsent, received %v items, sent %v items, %v batches ready\n", capi.Id(), capi.IsOpen(), capi.items_in_dataChan, capi.counter_received, capi.counter_sent, len(capi.batches_ready))
-				capi.handleGeneralError(errors.New("Capi is stuck"))
-				goto done
-			}
+		} else {
+			freeze_counter = 0
+			idle_counter = 0
+		}
+		sent_count = capi.counter_sent
+		if count == 10 {
+			capi.Logger().Debugf("%v- freeze_counter=%v, capi.counter_sent=%v, capi.items_in_dataChan=%v, receive_count-%v\n", capi.Id(), freeze_counter, capi.counter_sent, capi.items_in_dataChan, capi.counter_received)
+			capi.Logger().Debugf("%v open=%v checking..., %v item unsent, received %v items, sent %v items, %v batches ready\n", capi.Id(), capi.IsOpen(), capi.items_in_dataChan, capi.counter_received, capi.counter_sent, len(capi.batches_ready))
+			count = 0
+		}
+		if freeze_counter > capi.config.maxIdleCount {
+			capi.Logger().Errorf("Capi hasn't sent any item out for %v ticks, %v data in queue", capi.config.maxIdleCount, capi.items_in_dataChan)
+			capi.Logger().Infof("%v open=%v checking..., %v item unsent, received %v items, sent %v items, %v batches ready\n", capi.Id(), capi.IsOpen(), capi.items_in_dataChan, capi.counter_received, capi.counter_sent, len(capi.batches_ready))
+			capi.handleGeneralError(errors.New("Capi is stuck"))
+			goto done
+		}*/
+
+		case <-statsTicker:
+			additionalInfo := make(map[string]interface{})
+			additionalInfo[STATS_QUEUE_SIZE] = capi.items_in_dataChan
+			additionalInfo[STATS_QUEUE_SIZE_BYTES] = capi.bytes_in_dataChan
+			capi.RaiseEvent(common.StatsUpdate, nil, capi, nil, additionalInfo)
 		}
 	}
 done:
@@ -655,7 +654,7 @@ func (capi *CapiNozzle) check(finch chan bool, waitGrp *sync.WaitGroup) {
 				// that expired earlier to batches_ready queue earlier to ensure fairness
 				sort.Float64s(start_times)
 				for _, start_time := range start_times {
-			
+
 					vbno := start_time_vb_map[start_time]
 					capi.Logger().Infof("%v batch for vb %v expired, moving it to ready queue\n", capi.Id(), vbno)
 					capi.batchReady(vbno)
@@ -742,7 +741,7 @@ func (capi *CapiNozzle) batchUpdateDocsWithRetry(vbno uint16, req_list *[]*base.
 		isMalformedResponseError := strings.HasPrefix(err.Error(), MalformedResponseError)
 		// The idea here is that if batchUpdateDocs failed with malformedResponse error, it will be retried at least once,
 		// even when maxRetry has been reached. This is because a malformedResponse often signals that the update
-		// has already been done successfully on the target side. We want to give it another shot, which very likely 
+		// has already been done successfully on the target side. We want to give it another shot, which very likely
 		// will succeed, before we declare the update to have failed, which likely will lead to pipeline failure.
 		if (isMalformedResponseError && (!retriedMalformedResponse || num_of_retry < capi.config.maxRetry)) ||
 			(!isMalformedResponseError && num_of_retry < capi.config.maxRetry) {
@@ -763,7 +762,7 @@ func (capi *CapiNozzle) batchUpdateDocsWithRetry(vbno uint16, req_list *[]*base.
 
 func (capi *CapiNozzle) batchUpdateDocs(vbno uint16, req_list *[]*base.WrappedMCRequest) (err error) {
 	capi.Logger().Debugf("batchUpdateDocs, vbno=%v, len(req_list)=%v\n", vbno, len(*req_list))
-	
+
 	//capi.resetConn()
 
 	couchApiBaseHost, couchApiBasePath, err := capi.getCouchApiBaseHostAndPathForVB(vbno)
@@ -921,9 +920,9 @@ func (capi *CapiNozzle) tcpProxy(vbno uint16, part_ch chan []byte, resp_ch chan 
 					err_ch <- err
 					return
 				}
-				
-				if num_bytes == len(MalformedOK)  && string(res_buf[:num_bytes]) == MalformedOK {
-					// oocasionally batchUpdateDocs receive MalformedOK {{ok:true}) instead of 
+
+				if num_bytes == len(MalformedOK) && string(res_buf[:num_bytes]) == MalformedOK {
+					// oocasionally batchUpdateDocs receive MalformedOK {{ok:true}) instead of
 					// a well formed http response
 					// when this happens, reset the connection to ensure that subsequent writes have a clean start
 					// the previous update should have succeeded. there is no need to retry
@@ -951,7 +950,7 @@ func (capi *CapiNozzle) tcpProxy(vbno uint16, part_ch chan []byte, resp_ch chan 
 					// "broken pipe" error was often received after a while when connections are shared
 					// between requests. Resetting the connection for now. May need to look for a better way.
 					//capi.resetConn()
-					
+
 					// notify caller that write succeeded
 					resp_ch <- true
 				}
@@ -976,7 +975,7 @@ func getDocMap(req *mc.MCRequest) map[string]interface{} {
 	meta_map[ExpirationKey] = binary.BigEndian.Uint32(req.Extras[4:8])
 	meta_map[FlagsKey] = binary.BigEndian.Uint32(req.Extras[0:4])
 	meta_map[DeletedKey] = (req.Opcode == DELETE_WITH_META)
-	
+
 	return doc_map
 }
 
