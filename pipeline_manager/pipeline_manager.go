@@ -271,7 +271,7 @@ func (pipelineMgr *pipelineManager) removePipelineFromReplicationStatus(p common
 func (pipelineMgr *pipelineManager) stopPipeline(topic string) error {
 	pipelineMgr.logger.Infof("Try to stop the pipeline %s", topic)
 	var err error
-	if rep_status, ok := pipelineMgr.pipelines_map[topic]; ok && rep_status.RuntimeStatus() == pipeline.Replicating {
+	if rep_status, ok := pipelineMgr.pipelines_map[topic]; ok && rep_status.Pipeline() != nil && (rep_status.Pipeline().State() == common.Pipeline_Running || rep_status.Pipeline().State() == common.Pipeline_Starting || rep_status.Pipeline().State() == common.Pipeline_Error) {
 		p := rep_status.Pipeline()
 		err = p.Stop()
 		if err != nil {
