@@ -19,7 +19,6 @@ import (
 	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/goxdcr/service_def"
 	"github.com/couchbase/goxdcr/utils"
-	"io"
 	"os"
 	"reflect"
 	"strconv"
@@ -120,15 +119,15 @@ func (service *MigrationSvc) readMetadataFromStdin() ([]byte, error) {
 	dataBytes := make([]byte, 0)
 	for {
 		line, err := reader.ReadBytes('\n')
-		if err == nil {
-			dataBytes = append(dataBytes, line...)
-		} else if err == io.EOF {
-			fmt.Printf(" err=%v\n", err)
-			dataBytes = append(dataBytes, line...)
-			break
-		} else {
+		if err != nil {
 			service.logger.Infof("Error reading metadata from stdin. err=%v\n", err)
 			return nil, err
+		}
+
+		if len(line) == 1 {
+			break
+		} else {
+			dataBytes = append(dataBytes, line[:len(line) - 1]...)
 		}
 	}
 	service.logger.Infof("metadata read: dataBytes=%v\ndataBytes_str=%v\n", dataBytes, string(dataBytes))
