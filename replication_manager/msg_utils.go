@@ -30,6 +30,9 @@ import (
 var XDCRPrefix = "xdcr"
 var ErrorsKey = "errors"
 
+const (
+	DefaultAdminPort = "8091"
+)
 // constants used for parsing url path
 const (
 	CreateReplicationPath    = "controller/createReplication"
@@ -294,6 +297,10 @@ func DecodeCreateRemoteClusterRequest(request *http.Request) (justValidate bool,
 		errorsMap[base.RemoteClusterCertificate] = errors.New("certificate must be given if demand encryption is on")
 	}
 
+	//validate the format of hostName, if it doesn't contain port number, append default port number 8091
+	if !strings.Contains (hostName, base.UrlPortNumberDelimiter) {
+		hostName = hostName + base.UrlPortNumberDelimiter + DefaultAdminPort
+	}
 	if len(errorsMap) == 0 {
 		remoteClusterRef = metadata.NewRemoteClusterReference(uuid, name, hostName, userName, password, demandEncryption, certificate)
 	}
