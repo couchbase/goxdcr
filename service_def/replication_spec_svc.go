@@ -24,8 +24,9 @@ type ReplicationSpecSvc interface {
 	AddReplicationSpec(spec *metadata.ReplicationSpecification) error
 	SetReplicationSpec(spec *metadata.ReplicationSpecification) error
 	DelReplicationSpec(replicationId string) (*metadata.ReplicationSpecification, error)
-	ActiveReplicationSpecs() (map[string]*metadata.ReplicationSpecification, error)
-	ActiveReplicationSpecIdsForBucket(bucket string) ([]string, error)
+	AllReplicationSpecs() (map[string]*metadata.ReplicationSpecification, error)
+	AllReplicationSpecIds() ([]string, error)
+	AllReplicationSpecIdsForBucket(bucket string) ([]string, error)
 	
 	// checks if an error returned by the replication spec service is an internal server error or a validation error,
 	// e.g., an error indicating the replication spec involved should exist but does not, or the other way around

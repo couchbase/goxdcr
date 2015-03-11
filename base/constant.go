@@ -186,3 +186,6 @@ const (
 	ReplicationDocTypeXmem = "xdc-xmem"
 	ReplicationDocTypeCapi = "xdc"
 )
+
+// constant used in replication info to ensure compatibility with erlang xdcr
+var MaxVBReps = "max_vbreps"

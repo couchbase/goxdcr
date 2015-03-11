@@ -32,18 +32,18 @@ import (
 
 const (
 	// the number of docs written/sent to target cluster
-	DOCS_WRITTEN_METRIC    = "docs_written"
+	DOCS_WRITTEN_METRIC = "docs_written"
 	// the number of docs processed by pipeline
-	DOCS_PROCESSED_METRIC    = "docs_processed"
+	DOCS_PROCESSED_METRIC  = "docs_processed"
 	DATA_REPLICATED_METRIC = "data_replicated"
 	SIZE_REP_QUEUE_METRIC  = "size_rep_queue"
 	DOCS_REP_QUEUE_METRIC  = "docs_rep_queue"
 	DOCS_FILTERED_METRIC   = "docs_filtered"
 	// the number of docs that failed conflict resolution on the source cluster side due to optimistic replication
-	DOCS_FAILED_CR_SOURCE_METRIC   = "docs_failed_cr_source"
-	CHANGES_LEFT_METRIC    = "changes_left"
-	DOCS_LATENCY_METRIC    = "wtavg_docs_latency"
-	META_LATENCY_METRIC    = "wtavg_meta_latency"
+	DOCS_FAILED_CR_SOURCE_METRIC = "docs_failed_cr_source"
+	CHANGES_LEFT_METRIC          = "changes_left"
+	DOCS_LATENCY_METRIC          = "wtavg_docs_latency"
+	META_LATENCY_METRIC          = "wtavg_meta_latency"
 
 	//checkpointing related statistics
 	DOCS_CHECKED_METRIC    = "docs_checked" //calculated
@@ -150,10 +150,10 @@ type StatisticsManager struct {
 	active_vbs     map[string][]uint16
 	bucket_name    string
 	kv_mem_clients map[string]*mcc.Client
-	
+
 	// the number of docs that have been checkpointed in previous pipeline runs
 	// and should be counted toward docs_processed stats of the current pipeline run
-	initial_docs_processed  int64
+	initial_docs_processed int64
 }
 
 func NewStatisticsManager(logger_ctx *log.LoggerContext, active_vbs map[string][]uint16, bucket_name string) *StatisticsManager {
@@ -350,7 +350,7 @@ func (stats_mgr *StatisticsManager) processCalculatedStats(oldSample metrics.Reg
 	docs_processed_var := new(expvar.Int)
 	docs_processed_var.Set(docs_processed)
 	overview_expvar_map.Set(DOCS_PROCESSED_METRIC, docs_processed_var)
-	
+
 	//calculate changes_left
 	changes_left_val, err := stats_mgr.calculateChangesLeft(docs_processed)
 	changes_left_var := new(expvar.Int)
@@ -369,7 +369,7 @@ func (stats_mgr *StatisticsManager) processCalculatedStats(oldSample metrics.Reg
 	rate_replicated_var := new(expvar.Float)
 	rate_replicated_var.Set(rate_replicated)
 	overview_expvar_map.Set(RATE_REPLICATED_METRIC, rate_replicated_var)
-	
+
 	//calculate rate_received_from_dcp
 	docs_received_dcp := stats_mgr.getOverviewRegistry().Get(DOCS_RECEIVED_DCP_METRIC).(metrics.Counter).Count()
 	docs_received_dcp_old := oldSample.Get(DOCS_RECEIVED_DCP_METRIC).(metrics.Counter).Count()
@@ -605,7 +605,7 @@ func (stats_mgr *StatisticsManager) initOverviewRegistry() {
 
 func (stats_mgr *StatisticsManager) Start(settings map[string]interface{}) error {
 	stats_mgr.logger.Infof("StatisticsManager Starting...")
-	
+
 	//initialize connection
 	err := stats_mgr.initConnection()
 	if err != nil {
@@ -619,7 +619,7 @@ func (stats_mgr *StatisticsManager) Start(settings map[string]interface{}) error
 	}
 	stats_mgr.logger.Debugf("StatisticsManager Starts: update_interval=%v, settings=%v\n", stats_mgr.update_interval, settings)
 	stats_mgr.publish_ticker = time.NewTicker(stats_mgr.update_interval)
-	
+
 	for _, vbts := range GetStartSeqnos(stats_mgr.pipeline, stats_mgr.logger) {
 		// initialize initial_docs_processed
 		stats_mgr.initial_docs_processed += int64(vbts.Seqno)
@@ -885,7 +885,7 @@ func (ckpt_collector *checkpointMgrCollector) OnEvent(eventType common.Component
 		ckpt_collector.stats_mgr.through_seqnos[vbno] = ckpt_record.Seqno
 
 	} else if eventType == common.CheckpointDone {
-		time_commit := otherInfos[TimeCommiting].(time.Duration).Seconds()*1000
+		time_commit := otherInfos[TimeCommiting].(time.Duration).Seconds() * 1000
 		registry.Get(NUM_CHECKPOINTS_METRIC).(metrics.Counter).Inc(1)
 		registry.Get(TIME_COMMITING_METRIC).(metrics.Histogram).Sample().Update(int64(time_commit))
 	}

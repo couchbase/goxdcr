@@ -131,7 +131,7 @@ func (service *ReplicationSpecService) DelReplicationSpec(replicationId string) 
 	return spec, nil
 }
 
-func (service *ReplicationSpecService) ActiveReplicationSpecs() (map[string]*metadata.ReplicationSpecification, error) {
+func (service *ReplicationSpecService) AllReplicationSpecs() (map[string]*metadata.ReplicationSpecification, error) {
 	specs := make(map[string]*metadata.ReplicationSpecification, 0)
 
 	entries, err := service.metadata_svc.GetAllMetadataFromCatalog(ReplicationSpecsCatalogKey)
@@ -151,19 +151,25 @@ func (service *ReplicationSpecService) ActiveReplicationSpecs() (map[string]*met
 	return specs, nil
 }
 
-func (service *ReplicationSpecService) ActiveReplicationSpecIdsForBucket(bucket string) ([]string, error) {
+func (service *ReplicationSpecService) AllReplicationSpecIds() ([]string, error) {
+	repIds, err := service.metadata_svc.GetAllKeysFromCatalog(ReplicationSpecsCatalogKey)
+	if err != nil {
+		return nil, err
+	}
+	return repIds, nil
+}
+
+func (service *ReplicationSpecService) AllReplicationSpecIdsForBucket(bucket string) ([]string, error) {
 	var repIds []string
-	keys, err := service.metadata_svc.GetAllKeysFromCatalog(ReplicationSpecsCatalogKey)
+	allRepIds, err := service.AllReplicationSpecIds()
 	if err != nil {
 		return nil, err
 	}
 
-	service.logger.Infof("keys=%v", keys)
-
-	if keys != nil {
-		for _, key := range keys {
-			if metadata.IsReplicationIdForSourceBucket(key, bucket) {
-				repIds = append(repIds, key)
+	if allRepIds != nil {
+		for _, repId := range allRepIds {
+			if metadata.IsReplicationIdForSourceBucket(repId, bucket) {
+				repIds = append(repIds, repId)
 			}
 		}
 	}

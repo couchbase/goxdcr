@@ -275,7 +275,7 @@ func parseArgs() {
 		"user name to use for logging into target cluster")
 	flag.StringVar(&options.target_cluster_password, "target_cluster_password", "welcome",
 		"password to use for logging into target cluster")
-	flag.StringVar(&options.target_bucket_password, "target_bucket_password", "welcome",
+	flag.StringVar(&options.target_bucket_password, "target_bucket_password", "",
 		"password to use for accessing target bucket")
 	flag.IntVar(&options.doc_size, "doc_size", 1000, "size (in byte) of the documents app writer generates")
 	flag.IntVar(&options.doc_count, "doc_count", 100000, "the number of documents app writer generates")

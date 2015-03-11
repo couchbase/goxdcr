@@ -19,6 +19,7 @@ import (
 	"github.com/couchbase/goxdcr/gen_server"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
+	"github.com/couchbase/goxdcr/pipeline_manager"
 	utils "github.com/couchbase/goxdcr/utils"
 	"net/http"
 	"strings"
@@ -302,9 +303,10 @@ func (adminport *Adminport) doDeleteRemoteClusterRequest(request *http.Request) 
 func (adminport *Adminport) doGetAllReplicationsRequest(request *http.Request) (*ap.Response, error) {
 	logger_ap.Infof("doGetAllReplicationsRequest\n")
 
-	replSpecs, err := ReplicationSpecService().ActiveReplicationSpecs()
-	if err != nil {
-		return nil, err
+	replIds := pipeline_manager.AllReplications()
+	replSpecs := make(map[string]*metadata.ReplicationSpecification)
+	for _, replId := range replIds {
+		replSpecs[replId] = pipeline_manager.ReplicationStatus(replId).Spec()
 	}
 
 	return NewGetAllReplicationsResponse(replSpecs)
@@ -639,15 +641,15 @@ func (adminport *Adminport) doRegexpValidationRequest(request *http.Request) (*a
 	if err != nil {
 		return EncodeValidationErrorMessageIntoResponse(err)
 	}
-	
+
 	logger_ap.Infof("Request params: expression=%v, keys=%v\n",
 		expression, keys)
-	
+
 	matchesMap, err := utils.GetMatchedKeys(expression, keys)
 	if err != nil {
 		return EncodeValidationErrorMessageIntoResponse(err)
-	} 		
+	}
 
 	return NewRegexpValidationResponse(matchesMap)
-	
+
 }

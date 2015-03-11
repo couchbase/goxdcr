@@ -82,6 +82,10 @@ func ReplicationStatus(topic string) *pipeline.ReplicationStatus {
 	return pipeline_mgr.pipelines_map[topic]
 }
 
+func SetReplicationStatusForPausedReplication(spec *metadata.ReplicationSpecification) {
+	pipeline_mgr.pipelines_map[spec.Id] = pipeline.NewReplicationStatus(spec, pipeline_mgr.logger)
+}
+
 func RemoveReplicationStatus(topic string) error {
 	pipeline_mgr.mapLock.Lock()
 	defer pipeline_mgr.mapLock.Unlock()
@@ -112,9 +116,9 @@ func LogStatusSummary() {
 	pipeline_mgr.logger.Infof("Replication Status = %v\n", pipeline_mgr.pipelines_map)
 }
 
-func ActiveReplications(bucket string) []string {
+func AllReplicationsForBucket(bucket string) []string {
 	var repIds []string
-	for _, key := range pipeline_mgr.liveTopics() {
+	for _, key := range pipeline_mgr.topics() {
 		if metadata.IsReplicationIdForSourceBucket(key, bucket) {
 			repIds = append(repIds, key)
 		}
@@ -122,8 +126,8 @@ func ActiveReplications(bucket string) []string {
 	return repIds
 }
 
-func AllActiveReplications() []string {
-	return pipeline_mgr.liveTopics()
+func AllReplications() []string {
+	return pipeline_mgr.topics()
 }
 
 func IsPipelineRunning(topic string) bool {
@@ -307,8 +311,18 @@ func (pipelineMgr *pipelineManager) pipeline(topic string) common.Pipeline {
 
 func (pipelineMgr *pipelineManager) liveTopics() []string {
 	topics := make([]string, 0, len(pipelineMgr.pipelines_map))
-	for k, _ := range pipelineMgr.pipelines_map {
-		topics = append(topics, k)
+	for topic, rep_status := range pipelineMgr.pipelines_map {
+		if rep_status.RuntimeStatus() == pipeline.Replicating {
+			topics = append(topics, topic)
+		}
+	}
+	return topics
+}
+
+func (pipelineMgr *pipelineManager) topics() []string {
+	topics := make([]string, 0, len(pipelineMgr.pipelines_map))
+	for topic, _ := range pipelineMgr.pipelines_map {
+		topics = append(topics, topic)
 	}
 	return topics
 }

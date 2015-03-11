@@ -162,6 +162,10 @@ func (rs *ReplicationStatus) Pipeline() common.Pipeline {
 	return rs.pipeline
 }
 
+func (rs *ReplicationStatus) Spec() *metadata.ReplicationSpecification{
+	return rs.rep_spec
+}
+
 func (rs *ReplicationStatus) SettingsMap() map[string]interface{} {
 	return rs.rep_spec.Settings.ToMap()
 }
