@@ -17,7 +17,7 @@ import (
 	parts "github.com/couchbase/goxdcr/parts"
 	utils "github.com/couchbase/goxdcr/utils"
 	mc "github.com/couchbase/gomemcached"
-	"github.com/couchbaselabs/go-couchbase"
+	"github.com/couchbase/go-couchbase"
 	"log"
 	couchlog "github.com/couchbase/goxdcr/log"
 	"math"

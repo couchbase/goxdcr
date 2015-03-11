@@ -11,7 +11,7 @@ import (
 	"github.com/couchbase/cbauth"
 	base "github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
-	"github.com/couchbaselabs/go-couchbase"
+	"github.com/couchbase/go-couchbase"
 	"io"
 	"io/ioutil"
 	"net/http"

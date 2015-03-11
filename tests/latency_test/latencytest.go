@@ -23,7 +23,7 @@ import (
 	"github.com/couchbase/goxdcr/metadata"
 //	"github.com/couchbase/gomemcached"
 	mc "github.com/couchbase/gomemcached/client"
-	"github.com/couchbaselabs/go-couchbase"
+	"github.com/couchbase/go-couchbase"
 	"log"
 	"net/http"
 	"net/url"

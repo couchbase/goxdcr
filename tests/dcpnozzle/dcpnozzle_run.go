@@ -10,7 +10,7 @@ import (
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/parts"
 	"github.com/couchbase/goxdcr/utils"
-	"github.com/couchbaselabs/go-couchbase"
+	"github.com/couchbase/go-couchbase"
 	"log"
 	"os"
 	"time"

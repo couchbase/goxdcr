@@ -19,7 +19,7 @@ import (
 	"github.com/couchbase/goxdcr/log"
 	parts "github.com/couchbase/goxdcr/parts"
 	utils "github.com/couchbase/goxdcr/utils"
-	"github.com/couchbaselabs/go-couchbase"
+	"github.com/couchbase/go-couchbase"
 	"net/http"
 	"os"
 	"sync"

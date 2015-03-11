@@ -10,7 +10,7 @@
 package service_def
 
 import (
-	"github.com/couchbaselabs/go-couchbase"
+	"github.com/couchbase/go-couchbase"
 	"github.com/couchbase/goxdcr/base"
 )
 
