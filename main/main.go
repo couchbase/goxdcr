@@ -70,8 +70,10 @@ func main() {
 	if options.logFileDir != "" {
 		log.Init(options.logFileDir, options.maxLogFileSize, options.maxNumberOfLogFiles)
 	}
+	
+	cluster_info_svc := s.NewClusterInfoSvc(nil)
 
-	top_svc, err := s.NewXDCRTopologySvc(uint16(options.sourceKVAdminPort), uint16(options.xdcrRestPort), uint16(options.sslProxyUpstreamPort), options.isEnterprise, nil)
+	top_svc, err := s.NewXDCRTopologySvc(uint16(options.sourceKVAdminPort), uint16(options.xdcrRestPort), uint16(options.sslProxyUpstreamPort), options.isEnterprise, cluster_info_svc, nil)
 	if err != nil {
 		fmt.Printf("Error starting xdcr topology service. err=%v\n", err)
 		os.Exit(1)
@@ -114,7 +116,7 @@ func main() {
 			uint16(options.xdcrRestPort),
 			s.NewReplicationSpecService(uilog_svc, remote_cluster_svc, metadata_svc, nil),
 			remote_cluster_svc,
-			s.NewClusterInfoSvc(nil),
+			cluster_info_svc,
 			top_svc,
 			s.NewReplicationSettingsSvc(metadata_svc, nil),
 			s.NewCheckpointsService(metadata_svc, nil),

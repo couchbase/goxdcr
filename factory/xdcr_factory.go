@@ -14,6 +14,7 @@ import (
 	"github.com/couchbase/goxdcr/pipeline_svc"
 	"github.com/couchbase/goxdcr/pipeline_utils"
 	"github.com/couchbase/goxdcr/service_def"
+	"github.com/couchbase/goxdcr/service_impl"
 	"github.com/couchbase/goxdcr/supervisor"
 	"github.com/couchbase/goxdcr/utils"
 	"math"
@@ -79,7 +80,7 @@ func (xdcrf *XDCRFactory) NewPipeline(topic string, progress_recorder common.Pip
 		xdcrf.logger.Errorf("Failed to get replication specification, err=%v\n", err)
 		return nil, err
 	}
-	
+
 	logger_ctx := log.CopyCtx(xdcrf.default_logger_ctx)
 	logger_ctx.Log_level = spec.Settings.LogLevel
 	//TODO should we change log level on xdcrf.logger?
@@ -258,7 +259,7 @@ func (xdcrf *XDCRFactory) constructOutgoingNozzles(spec *metadata.ReplicationSpe
 	}
 
 	targetBucket, err := xdcrf.cluster_info_svc.GetBucket(targetClusterRef, targetBucketName)
-	if err != nil  || targetBucket == nil {
+	if err != nil || targetBucket == nil {
 		xdcrf.logger.Errorf("Error getting bucket, err=%v\n", err)
 		return nil, nil, err
 	}
@@ -533,6 +534,9 @@ func (xdcrf *XDCRFactory) constructSettingsForDcpNozzle(pipeline common.Pipeline
 }
 
 func (xdcrf *XDCRFactory) registerServices(pipeline common.Pipeline, logger_ctx *log.LoggerContext, kv_vb_map map[string][]uint16) error {
+	through_seqno_tracker_svc := service_impl.NewThroughSeqnoTrackerSvc(logger_ctx)
+	through_seqno_tracker_svc.Attach(pipeline)
+
 	ctx := pipeline.RuntimeContext()
 
 	//register pipeline supervisor
@@ -544,7 +548,7 @@ func (xdcrf *XDCRFactory) registerServices(pipeline common.Pipeline, logger_ctx 
 	//register pipeline checkpoint manager
 	ckptMgr, err := pipeline_svc.NewCheckpointManager(xdcrf.checkpoint_svc, xdcrf.capi_svc,
 		xdcrf.remote_cluster_svc, xdcrf.repl_spec_svc, xdcrf.cluster_info_svc,
-		xdcrf.xdcr_topology_svc, kv_vb_map, logger_ctx)
+		xdcrf.xdcr_topology_svc, through_seqno_tracker_svc, kv_vb_map, logger_ctx)
 	if err != nil {
 		xdcrf.logger.Errorf("Failed to construct CheckpointManager, err=%v ckpt_svc=%v, capi_svc=%v, remote_cluster_svc=%v, repl_spec_svc=%v\n", err, xdcrf.checkpoint_svc, xdcrf.capi_svc,
 			xdcrf.remote_cluster_svc, xdcrf.repl_spec_svc)
@@ -556,7 +560,7 @@ func (xdcrf *XDCRFactory) registerServices(pipeline common.Pipeline, logger_ctx 
 	}
 	//register pipeline statistics manager
 	bucket_name := pipeline.Specification().SourceBucketName
-	err = ctx.RegisterService(base.STATISTICS_MGR_SVC, pipeline_svc.NewStatisticsManager(logger_ctx, kv_vb_map, bucket_name))
+	err = ctx.RegisterService(base.STATISTICS_MGR_SVC, pipeline_svc.NewStatisticsManager(through_seqno_tracker_svc, logger_ctx, kv_vb_map, bucket_name))
 	if err != nil {
 		return err
 	}

@@ -115,7 +115,8 @@ func main() {
 
 func setup() error {
 	logger.Info("setup....")
-	top_svc, err := s.NewXDCRTopologySvc(uint16(options.source_kv_port), base.AdminportNumber, 11997, true, nil)
+	cluster_info_svc := s.NewClusterInfoSvc(nil)
+	top_svc, err := s.NewXDCRTopologySvc(uint16(options.source_kv_port), base.AdminportNumber, 11997, true, cluster_info_svc, nil)
 	if err != nil {
 		logger.Errorf("Error starting xdcr topology service. err=%v\n", err)
 		os.Exit(1)
@@ -148,7 +149,7 @@ func setup() error {
 	replication_manager.StartReplicationManager(options.source_kv_host, base.AdminportNumber,
 		repl_spec_svc,
 		remote_cluster_svc,
-		s.NewClusterInfoSvc(nil), top_svc, s.NewReplicationSettingsSvc(metadata_svc, nil), s.NewCheckpointsService(metadata_svc, nil), s.NewCAPIService(nil), audit_svc)
+		cluster_info_svc, top_svc, s.NewReplicationSettingsSvc(metadata_svc, nil), s.NewCheckpointsService(metadata_svc, nil), s.NewCAPIService(nil), audit_svc)
 
 	logger.Info("Finish setup")
 	return nil

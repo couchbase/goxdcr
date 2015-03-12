@@ -77,7 +77,9 @@ func main() {
 }
 
 func invokeFactory() error {
-	top_svc, err := s.NewXDCRTopologySvc(uint16(options.sourceKVAdminPort), base.AdminportNumber, 12001, true, nil)
+	cluster_info_svc := s.NewClusterInfoSvc(nil)
+	
+	top_svc, err := s.NewXDCRTopologySvc(uint16(options.sourceKVAdminPort), base.AdminportNumber, 12001, true, cluster_info_svc, nil)
 	if err != nil {
 		fmt.Printf("Error starting xdcr topology service. err=%v\n", err)
 		os.Exit(1)
@@ -104,7 +106,6 @@ func invokeFactory() error {
 	uilog_svc := s.NewUILogSvc(top_svc, nil)
 	remote_cluster_svc := s.NewRemoteClusterService(uilog_svc, msvc, top_svc, nil)
 	repl_spec_svc := s.NewReplicationSpecService(uilog_svc, remote_cluster_svc, msvc, nil)
-	cluster_info_svc := s.NewClusterInfoSvc(nil)
 	checkpoints_svc := s.NewCheckpointsService(msvc, nil)
 	capi_svc := s.NewCAPIService(nil)
 

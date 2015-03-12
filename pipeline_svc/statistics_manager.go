@@ -22,6 +22,7 @@ import (
 	"github.com/couchbase/goxdcr/metadata"
 	parts "github.com/couchbase/goxdcr/parts"
 	"github.com/couchbase/goxdcr/pipeline"
+	"github.com/couchbase/goxdcr/service_def"
 	"github.com/couchbase/goxdcr/utils"
 	"github.com/rcrowley/go-metrics"
 	"reflect"
@@ -126,8 +127,8 @@ type StatisticsManager struct {
 	meta_endtime_map      map[string]interface{}
 	meta_endtime_map_lock sync.RWMutex
 
-	//temporary map to keep current through seqno
-	through_seqnos map[uint16]uint64
+	//temporary map to keep checkpointed seqnos
+	checkpointed_seqnos map[uint16]uint64
 
 	//statistics update ticker
 	publish_ticker *time.Ticker
@@ -151,30 +152,29 @@ type StatisticsManager struct {
 	bucket_name    string
 	kv_mem_clients map[string]*mcc.Client
 
-	// the number of docs that have been checkpointed in previous pipeline runs
-	// and should be counted toward docs_processed stats of the current pipeline run
-	initial_docs_processed int64
+	through_seqno_tracker_svc service_def.ThroughSeqnoTrackerSvc
 }
 
-func NewStatisticsManager(logger_ctx *log.LoggerContext, active_vbs map[string][]uint16, bucket_name string) *StatisticsManager {
+func NewStatisticsManager(through_seqno_tracker_svc service_def.ThroughSeqnoTrackerSvc, logger_ctx *log.LoggerContext, active_vbs map[string][]uint16, bucket_name string) *StatisticsManager {
 	stats_mgr := &StatisticsManager{registries: make(map[string]metrics.Registry),
-		bucket_name:             bucket_name,
-		starttime_map:           make(map[string]interface{}),
-		meta_starttime_map:      make(map[string]interface{}),
-		endtime_map:             make(map[string]interface{}),
-		meta_endtime_map:        make(map[string]interface{}),
-		starttime_map_lock:      sync.RWMutex{},
-		endtime_map_lock:        sync.RWMutex{},
-		meta_starttime_map_lock: sync.RWMutex{},
-		meta_endtime_map_lock:   sync.RWMutex{},
-		finish_ch:               make(chan bool, 1),
-		sample_size:             default_sample_size,
-		update_interval:         default_update_interval,
-		logger:                  log.NewLogger("StatisticsManager", logger_ctx),
-		active_vbs:              active_vbs,
-		wait_grp:                &sync.WaitGroup{},
-		kv_mem_clients:          make(map[string]*mcc.Client),
-		through_seqnos:          make(map[uint16]uint64)}
+		bucket_name:               bucket_name,
+		starttime_map:             make(map[string]interface{}),
+		meta_starttime_map:        make(map[string]interface{}),
+		endtime_map:               make(map[string]interface{}),
+		meta_endtime_map:          make(map[string]interface{}),
+		starttime_map_lock:        sync.RWMutex{},
+		endtime_map_lock:          sync.RWMutex{},
+		meta_starttime_map_lock:   sync.RWMutex{},
+		meta_endtime_map_lock:     sync.RWMutex{},
+		finish_ch:                 make(chan bool, 1),
+		sample_size:               default_sample_size,
+		update_interval:           default_update_interval,
+		logger:                    log.NewLogger("StatisticsManager", logger_ctx),
+		active_vbs:                active_vbs,
+		wait_grp:                  &sync.WaitGroup{},
+		kv_mem_clients:            make(map[string]*mcc.Client),
+		checkpointed_seqnos:       make(map[uint16]uint64),
+		through_seqno_tracker_svc: through_seqno_tracker_svc}
 	stats_mgr.collectors = []MetricsCollector{&outNozzleCollector{}, &dcpCollector{}, &routerCollector{}, &checkpointMgrCollector{}}
 	return stats_mgr
 }
@@ -343,10 +343,7 @@ func (stats_mgr *StatisticsManager) processRawStats() error {
 func (stats_mgr *StatisticsManager) processCalculatedStats(oldSample metrics.Registry, overview_expvar_map *expvar.Map) error {
 
 	//calculate docs_processed
-	docs_written := stats_mgr.getOverviewRegistry().Get(DOCS_WRITTEN_METRIC).(metrics.Counter).Count()
-	docs_filtered := stats_mgr.getOverviewRegistry().Get(DOCS_FILTERED_METRIC).(metrics.Counter).Count()
-	docs_failed_cr_source := stats_mgr.getOverviewRegistry().Get(DOCS_FAILED_CR_SOURCE_METRIC).(metrics.Counter).Count()
-	docs_processed := stats_mgr.initial_docs_processed + docs_written + docs_filtered + docs_failed_cr_source
+	docs_processed := stats_mgr.calculateDocsProcessed()
 	docs_processed_var := new(expvar.Int)
 	docs_processed_var.Set(docs_processed)
 	overview_expvar_map.Set(DOCS_PROCESSED_METRIC, docs_processed_var)
@@ -363,6 +360,7 @@ func (stats_mgr *StatisticsManager) processCalculatedStats(oldSample metrics.Reg
 	overview_expvar_map.Set(CHANGES_LEFT_METRIC, changes_left_var)
 
 	//calculate rate_replication
+	docs_written := stats_mgr.getOverviewRegistry().Get(DOCS_WRITTEN_METRIC).(metrics.Counter).Count()
 	docs_written_old := oldSample.Get(DOCS_WRITTEN_METRIC).(metrics.Counter).Count()
 	interval_in_sec := stats_mgr.update_interval.Seconds()
 	rate_replicated := float64(docs_written-docs_written_old) / interval_in_sec
@@ -414,13 +412,22 @@ func (stats_mgr *StatisticsManager) processCalculatedStats(oldSample metrics.Reg
 	return nil
 }
 
+func (stats_mgr *StatisticsManager) calculateDocsProcessed() int64 {
+	var docs_processed uint64 = 0
+	hiseqno_map := stats_mgr.through_seqno_tracker_svc.GetThroughSeqnos()
+	for _, hiseqno := range hiseqno_map {
+		docs_processed += hiseqno
+	}
+	return int64(docs_processed)
+}
+
 func (stats_mgr *StatisticsManager) calculateDocsChecked() uint64 {
 	var docs_checked uint64 = 0
 	for vbno, vbts := range GetStartSeqnos(stats_mgr.pipeline, stats_mgr.logger) {
 		start_seqno := vbts.Seqno
 		var docs_checked_vb uint64 = 0
-		if stats_mgr.through_seqnos[vbno] > start_seqno {
-			docs_checked_vb = stats_mgr.through_seqnos[vbno]
+		if stats_mgr.checkpointed_seqnos[vbno] > start_seqno {
+			docs_checked_vb = stats_mgr.checkpointed_seqnos[vbno]
 		} else {
 			docs_checked_vb = start_seqno
 		}
@@ -442,6 +449,7 @@ func (stats_mgr *StatisticsManager) calculateTotalChanges() (int64, error) {
 	var total_doc uint64 = 0
 	for serverAddr, vbnos := range stats_mgr.active_vbs {
 		highseqno_map, err := stats_mgr.getHighSeqNos(serverAddr, vbnos)
+		stats_mgr.logger.Infof("highseqno_map=%v\n", highseqno_map)
 		if err != nil {
 			return 0, err
 		}
@@ -619,11 +627,6 @@ func (stats_mgr *StatisticsManager) Start(settings map[string]interface{}) error
 	}
 	stats_mgr.logger.Debugf("StatisticsManager Starts: update_interval=%v, settings=%v\n", stats_mgr.update_interval, settings)
 	stats_mgr.publish_ticker = time.NewTicker(stats_mgr.update_interval)
-
-	for _, vbts := range GetStartSeqnos(stats_mgr.pipeline, stats_mgr.logger) {
-		// initialize initial_docs_processed
-		stats_mgr.initial_docs_processed += int64(vbts.Seqno)
-	}
 
 	//publishing status to expvar
 	expvar_stats_map := pipeline.StorageForRep(stats_mgr.pipeline.Topic())
@@ -882,7 +885,7 @@ func (ckpt_collector *checkpointMgrCollector) OnEvent(eventType common.Component
 	} else if eventType == common.CheckpointDoneForVB {
 		vbno := otherInfos[Vbno].(uint16)
 		ckpt_record := item.(metadata.CheckpointRecord)
-		ckpt_collector.stats_mgr.through_seqnos[vbno] = ckpt_record.Seqno
+		ckpt_collector.stats_mgr.checkpointed_seqnos[vbno] = ckpt_record.Seqno
 
 	} else if eventType == common.CheckpointDone {
 		time_commit := otherInfos[TimeCommiting].(time.Duration).Seconds() * 1000

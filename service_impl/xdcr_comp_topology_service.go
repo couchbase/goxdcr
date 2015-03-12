@@ -15,28 +15,31 @@ import (
 	"github.com/couchbase/cbauth"
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
-	rm "github.com/couchbase/goxdcr/replication_manager"
+	"github.com/couchbase/goxdcr/service_def"
 	"github.com/couchbase/goxdcr/utils"
 )
 
 var ErrorParsingHostInfo = errors.New("Could not parse current host info from server result.")
 
 type XDCRTopologySvc struct {
-	adminport    uint16
-	xdcrRestPort uint16
+	adminport        uint16
+	xdcrRestPort     uint16
 	local_proxy_port uint16
-	isEnterprise bool
-	logger       *log.CommonLogger
+	isEnterprise     bool
+	cluster_info_svc service_def.ClusterInfoSvc
+	logger           *log.CommonLogger
 }
 
 func NewXDCRTopologySvc(adminport, xdcrRestPort, localProxyPort uint16,
-	isEnterprise bool, logger_ctx *log.LoggerContext) (*XDCRTopologySvc, error) {
+	isEnterprise bool, cluster_info_svc service_def.ClusterInfoSvc,
+	logger_ctx *log.LoggerContext) (*XDCRTopologySvc, error) {
 	top_svc := &XDCRTopologySvc{
-		adminport:    adminport,
-		xdcrRestPort: xdcrRestPort,
+		adminport:        adminport,
+		xdcrRestPort:     xdcrRestPort,
 		local_proxy_port: localProxyPort,
-		isEnterprise: isEnterprise,
-		logger:       log.NewLogger("XDCRTopologyService", logger_ctx),
+		isEnterprise:     isEnterprise,
+		cluster_info_svc: cluster_info_svc,
+		logger:           log.NewLogger("XDCRTopologyService", logger_ctx),
 	}
 	return top_svc, nil
 }
@@ -54,12 +57,12 @@ func (top_svc *XDCRTopologySvc) MyMemcachedAddr() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	
+
 	hostName, err := top_svc.getHostName()
 	if err != nil {
 		return "", err
 	}
-	
+
 	return utils.GetHostAddr(hostName, port), nil
 }
 
@@ -81,7 +84,7 @@ func (top_svc *XDCRTopologySvc) MyKVNodes() ([]string, error) {
 
 func (top_svc *XDCRTopologySvc) XDCRTopology() (map[string]uint16, error) {
 	retmap := make(map[string]uint16)
-	serverList, err := rm.ClusterInfoService().GetServerList(top_svc, "default")
+	serverList, err := top_svc.cluster_info_svc.GetServerList(top_svc, "default")
 	if err != nil {
 		return nil, err
 	}
