@@ -182,6 +182,7 @@ func (supervisor *GenericSupervisor) supervising() error {
 
 	//heart beat
 	count := 0
+	waitGrp := &sync.WaitGroup{}
 loop:
 	for {
 		count++
@@ -190,10 +191,9 @@ loop:
 			break loop
 		case <-supervisor.heartbeat_ticker.C:
 			supervisor.Logger().Debugf("heart beat tick from super %v\n", supervisor.Id())
-			select {
-			case supervisor.err_ch <- true:
-				supervisor.sendHeartBeats()
-			}
+			//wait until the previous heartbeat response are received or timed-out to send a new heartbeat
+			waitGrp.Wait()
+			supervisor.sendHeartBeats(waitGrp)
 		}
 	}
 
@@ -201,7 +201,7 @@ loop:
 	return nil
 }
 
-func (supervisor *GenericSupervisor) sendHeartBeats() {
+func (supervisor *GenericSupervisor) sendHeartBeats(waitGrp *sync.WaitGroup) {
 	supervisor.Logger().Debugf("Sending heart beat msg from supervisor %v\n", supervisor.Id())
 
 	supervisor.children_lock.RLock()
@@ -229,14 +229,12 @@ func (supervisor *GenericSupervisor) sendHeartBeats() {
 		fin_ch := make(chan bool, 1)
 		supervisor.resp_waiter_chs = append(supervisor.resp_waiter_chs, fin_ch)
 		if len(responseToWaitTokens) > 0 {
-			go supervisor.waitForResponse(heartbeat_report, heartbeat_resp_chs, fin_ch, responseToWaitTokens)
+			waitGrp.Add(1)
+			go supervisor.waitForResponse(heartbeat_report, heartbeat_resp_chs, fin_ch, responseToWaitTokens, waitGrp)
 		} else {
 			supervisor.Logger().Infof("No response to be waited.")
 		}
-	} else {
-		<-supervisor.err_ch
 	}
-
 	return
 }
 
@@ -258,11 +256,10 @@ func (supervisor *GenericSupervisor) Init(settings map[string]interface{}) error
 	return nil
 }
 
-func (supervisor *GenericSupervisor) waitForResponse(heartbeat_report map[string]heartbeatRespStatus, heartbeat_resp_chs map[string]chan []interface{}, finch chan bool, reponseToWaitTokens chan int) {
-	defer func() {
-		<-supervisor.err_ch
-		supervisor.Logger().Debugf("Exiting waitForResponse from supervisor %v\n", supervisor.Id())
-	}()
+func (supervisor *GenericSupervisor) waitForResponse(heartbeat_report map[string]heartbeatRespStatus, heartbeat_resp_chs map[string]chan []interface{}, finch chan bool, reponseToWaitTokens chan int, waitGrp *sync.WaitGroup) {
+	defer waitGrp.Done()
+	defer supervisor.Logger().Debugf("Exiting waitForResponse from supervisor %v\n", supervisor.Id())
+
 
 	//start a timer
 	ping_time := time.Now()
@@ -343,12 +340,11 @@ func (supervisor *GenericSupervisor) ReportFailure(errors map[string]error) {
 
 func (supervisor *GenericSupervisor) notifyWaitersToFinish() {
 	for _, ctrl_ch := range supervisor.resp_waiter_chs {
-		select {
-		case ctrl_ch <- true:
-		default:
-		}
+		close(ctrl_ch)
+
 	}
 
+	supervisor.resp_waiter_chs = []chan bool{}
 }
 
 func (supervisor *GenericSupervisor) StopHeartBeatTicker() {
