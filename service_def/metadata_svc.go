@@ -19,20 +19,21 @@ var ErrorRevisionMismatch = errors.New("revision number does not match")
 
 // struct for general metadata entry maintained by metadata service
 type MetadataEntry struct {
-	Key string
+	Key   string
 	Value []byte
-	Rev interface{}
+	Rev   interface{}
 }
 
 type MetadataSvc interface {
-	Get(key string) ([] byte, interface{}, error)
+	Get(key string) ([]byte, interface{}, error)
 	Add(key string, value []byte) error
 	Set(key string, value []byte, rev interface{}) error
 	Del(key string, rev interface{}) error
-	
+
 	// catalog related APIs
 	AddWithCatalog(catalogKey, key string, value []byte) error
 	DelWithCatalog(catalogKey, key string, rev interface{}) error
 	GetAllMetadataFromCatalog(catalogKey string) ([]*MetadataEntry, error)
 	GetAllKeysFromCatalog(catalogKey string) ([]string, error)
+	DelAllFromCatalog(catalogKey string) error
 }

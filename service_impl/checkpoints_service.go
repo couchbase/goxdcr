@@ -8,10 +8,8 @@ import (
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/goxdcr/service_def"
-	"math"
 	"strconv"
 	"strings"
-	"sync"
 )
 
 const (
@@ -61,53 +59,12 @@ func (ckpt_svc *CheckpointsService) decodeVbnoFromCkptDocKey(ckptDocKey string) 
 func (ckpt_svc *CheckpointsService) DelCheckpointsDocs(replicationId string) error {
 	ckpt_svc.logger.Info("DelCheckpointsDocs...")
 	catalogKey := ckpt_svc.getCheckpointCatalogKey(replicationId)
-	ckpt_meta_entries, err := ckpt_svc.metadata_svc.GetAllMetadataFromCatalog(catalogKey)
-	if err != nil {
-		return err
+	err_ret := ckpt_svc.metadata_svc.DelAllFromCatalog(catalogKey)
+	if err_ret != nil {
+		ckpt_svc.logger.Errorf("Failed to delete checkpoints docs for %v\n", replicationId)
+	} else {
+		ckpt_svc.logger.Infof("DelCheckpointsDocs is done for %v\n", replicationId)
 	}
-	
-	if len(ckpt_meta_entries) == 0 {
-		return nil
-	}
-
-	worker_load := 5
-	num_of_workers := int(math.Ceil(float64(len(ckpt_meta_entries)) / float64(worker_load)))
-	task_index_start := 0
-	worker_wait_grp := &sync.WaitGroup{}
-	errMap := make(map[int][]error)
-	for i := 0; i < num_of_workers; i++ {
-		task_index_end := int(math.Min(float64(task_index_start+worker_load), float64(len(ckpt_meta_entries))))
-
-		ckpt_svc.logger.Infof("Starting job for deleting ckpt #%v - #%v\n", task_index_start, task_index_end)
-		worker_wait_grp.Add(1)
-		go func(key_entries []*service_def.MetadataEntry, ckpt_svc *CheckpointsService, waitGrp *sync.WaitGroup, errMap map[int][]error, workerId int) {
-			defer worker_wait_grp.Done()
-			errs := []error{}
-			for _, entry := range key_entries {
-				ckpt_svc.logger.Infof("try to delete checkpoint file %v for replication %v\n", entry.Key, replicationId)
-				err := ckpt_svc.metadata_svc.DelWithCatalog(catalogKey, entry.Key, entry.Rev)
-				if err != nil {
-					errs = append(errs, err)
-				}
-				ckpt_svc.logger.Infof("checkpoint file %v for replication %v is deleted\n", entry.Key, replicationId)
-			}
-			
-			if len(errs) > 0 {
-				errMap[workerId] = errs
-			}
-		}(ckpt_meta_entries[task_index_start:task_index_end], ckpt_svc, worker_wait_grp, errMap, i)
-
-		task_index_start = task_index_end
-	}
-
-	worker_wait_grp.Wait()
-
-	var err_ret error = nil
-	if len(errMap) > 0 {
-		ckpt_svc.logger.Errorf("Failed to delete checkpoint files for %v, err=%v", replicationId, errMap)
-		err_ret = errors.New(fmt.Sprintf("Failed to delete checkpoint files for %v, err=%v", replicationId, errMap))
-	}
-	ckpt_svc.logger.Infof("DelCheckpointsDocs is done for %v\n", replicationId)
 	return err_ret
 }
 

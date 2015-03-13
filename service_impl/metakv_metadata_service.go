@@ -73,6 +73,10 @@ func (meta_svc *MetaKVMetadataSvc) DelWithCatalog(catalogKey, key string, rev in
 	return meta_svc.Del(key, rev)
 }
 
+func (meta_svc *MetaKVMetadataSvc) DelAllFromCatalog (catalogKey string) error {
+	return metakv.RecursiveDelete (GetCatalogPathFromCatalogKey(catalogKey))
+}
+
 func (meta_svc *MetaKVMetadataSvc) GetAllMetadataFromCatalog(catalogKey string) ([]*service_def.MetadataEntry, error) {
 	var entries = make([]*service_def.MetadataEntry, 0)
 	kvEntries, err := metakv.ListAllChildren(GetCatalogPathFromCatalogKey(catalogKey))
