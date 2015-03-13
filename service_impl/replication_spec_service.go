@@ -12,19 +12,21 @@ package service_impl
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"github.com/couchbase/cbauth/metakv"
+	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/goxdcr/service_def"
-	"sync"
-	"errors"
+	"github.com/couchbase/goxdcr/utils"
 	"strings"
+	"sync"
 )
 
 const (
-	// the key to the metadata that stores the keys of all Replication Specs
-	ReplicationSpecsCatalogKey = metadata.ReplicationSpecKeyPrefix
+	// parent dir of all Replication Specs
+	ReplicationSpecsCatalogKey = "replicationSpec"
 )
 
 var ReplicationSpecAlreadyExistErrorMessage = "Replication to the same remote cluster and bucket already exists"
@@ -71,7 +73,7 @@ func (service *ReplicationSpecService) observeChildren(dirpath string, cancel <-
 }
 
 func (service *ReplicationSpecService) ReplicationSpec(replicationId string) (*metadata.ReplicationSpecification, error) {
-	result, rev, err := service.metadata_svc.Get(replicationId)
+	result, rev, err := service.metadata_svc.Get(getKeyFromReplicationId(replicationId))
 	if err != nil {
 		return nil, err
 	}
@@ -82,22 +84,40 @@ func (service *ReplicationSpecService) ReplicationSpec(replicationId string) (*m
 	return constructReplicationSpec(result, rev)
 }
 
+func (service *ReplicationSpecService) ValidateNewReplicationSpec(sourceBucket, targetCluster, targetBucket string) map[string]error {
+	service.logger.Infof("Start ValidateAddReplicationSpec, sourceBucket=%v, targetCluster=%v, targetBucket=%v\n", sourceBucket, targetCluster, targetBucket)
+
+	errorMap := make(map[string]error)
+
+	//TODO validate buckets
+
+	// validate remote cluster ref
+	targetClusterRef, err := service.remote_cluster_svc.RemoteClusterByRefName(targetCluster, false)
+	if err != nil {
+		errorMap["remote cluster"] = utils.NewEnhancedError("cannot find remote cluster", err)
+		// cannot proceed without targetClusterRef
+		return errorMap
+	}
+
+	repId := metadata.ReplicationId(sourceBucket, targetClusterRef.Uuid, targetBucket)
+	_, err = service.ReplicationSpec(repId)
+	if err == nil {
+		errorMap[base.PlaceHolderFieldKey] = errors.New(ReplicationSpecAlreadyExistErrorMessage)
+	}
+
+	return errorMap
+}
+
 func (service *ReplicationSpecService) AddReplicationSpec(spec *metadata.ReplicationSpecification) error {
 	service.logger.Infof("Start AddReplicationSpec, spec=%v\n", spec)
-	
-	key := spec.Id
-	_, err := service.ReplicationSpec(key)
-	if err == nil {
-		return errors.New(ReplicationSpecAlreadyExistErrorMessage)
-	}
-	
+
 	value, err := json.Marshal(spec)
 	if err != nil {
 		return err
 	}
 
 	service.logger.Info("Adding it to metadata store...")
-	err = service.metadata_svc.AddWithCatalog(ReplicationSpecsCatalogKey, key, value)
+	err = service.metadata_svc.AddWithCatalog(ReplicationSpecsCatalogKey, getKeyFromReplicationId(spec.Id), value)
 	if err != nil {
 		return err
 	}
@@ -108,12 +128,11 @@ func (service *ReplicationSpecService) AddReplicationSpec(spec *metadata.Replica
 }
 
 func (service *ReplicationSpecService) SetReplicationSpec(spec *metadata.ReplicationSpecification) error {
-	key := spec.Id
 	value, err := json.Marshal(spec)
 	if err != nil {
 		return err
 	}
-	return service.metadata_svc.Set(key, value, spec.Revision)
+	return service.metadata_svc.Set(getKeyFromReplicationId(spec.Id), value, spec.Revision)
 }
 
 func (service *ReplicationSpecService) DelReplicationSpec(replicationId string) (*metadata.ReplicationSpecification, error) {
@@ -122,7 +141,7 @@ func (service *ReplicationSpecService) DelReplicationSpec(replicationId string) 
 		return nil, errors.New(ReplicationSpecNotFoundErrorMessage)
 	}
 
-	err = service.metadata_svc.DelWithCatalog(ReplicationSpecsCatalogKey, replicationId, spec.Revision)
+	err = service.metadata_svc.DelWithCatalog(ReplicationSpecsCatalogKey, getKeyFromReplicationId(replicationId), spec.Revision)
 	if err != nil {
 		return nil, err
 	}
@@ -152,9 +171,13 @@ func (service *ReplicationSpecService) AllReplicationSpecs() (map[string]*metada
 }
 
 func (service *ReplicationSpecService) AllReplicationSpecIds() ([]string, error) {
-	repIds, err := service.metadata_svc.GetAllKeysFromCatalog(ReplicationSpecsCatalogKey)
+	repIds := make([]string, 0)
+	keys, err := service.metadata_svc.GetAllKeysFromCatalog(ReplicationSpecsCatalogKey)
 	if err != nil {
 		return nil, err
+	}
+	for _, key := range keys {
+		repIds = append(repIds, service.getReplicationIdFromKey(key))
 	}
 	return repIds, nil
 }
@@ -202,7 +225,7 @@ func (service *ReplicationSpecService) metakvCallback(path string, value []byte,
 			return err
 		}
 
-		err = service.call_back(GetKeyFromPath(path), spec)
+		err = service.call_back(service.getReplicationIdFromKey(GetKeyFromPath(path)), spec)
 		if err != nil {
 			service.logger.Errorf("Replication spec change call back returned err=%v\n", err)
 		}
@@ -229,4 +252,17 @@ func (service *ReplicationSpecService) IsReplicationValidationError(err error) b
 	} else {
 		return false
 	}
+}
+
+func getKeyFromReplicationId(replicationId string) string {
+	return ReplicationSpecsCatalogKey + base.KeyPartsDelimiter + replicationId
+}
+
+func (service *ReplicationSpecService) getReplicationIdFromKey(key string) string {
+	prefix := ReplicationSpecsCatalogKey + base.KeyPartsDelimiter
+	if !strings.HasPrefix(key, prefix) {
+		// should never get here.
+		panic(fmt.Sprintf("Got unexpected key %v for replication spec", key))
+	}
+	return key[len(prefix):]
 }

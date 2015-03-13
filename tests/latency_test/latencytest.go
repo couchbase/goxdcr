@@ -14,14 +14,7 @@ import (
 	"flag"
 	"fmt"
 	xdcrlog "github.com/couchbase/goxdcr/log"
-	//	"github.com/couchbase/goxdcr/adminport"
-	//	couchdoc "github.com/couchbase/goxdcr/couchdoc_metadata"
-	//	c "github.com/couchbase/goxdcr/mock_services"
-	//	"github.com/couchbase/goxdcr/replication_manager"
-	//	s "github.com/couchbase/goxdcr/services"
 	"github.com/couchbase/goxdcr/base"
-	"github.com/couchbase/goxdcr/metadata"
-//	"github.com/couchbase/gomemcached"
 	mc "github.com/couchbase/gomemcached/client"
 	"github.com/couchbase/go-couchbase"
 	"log"
@@ -370,7 +363,7 @@ func startGoXDCRReplicationByRest() error {
 }
 
 func stopGoXDCRReplicationByRest() (err error) {
-	replicationId := metadata.ReplicationSpecKeyPrefix + "_" + options.source_cluster_addr + "_" + options.source_bucket + "_" + options.target_cluster_addr + "_" + options.target_bucket;
+	replicationId := options.source_cluster_addr + "_" + options.source_bucket + "_" + options.target_cluster_addr + "_" + options.target_bucket;
 	cmd := exec.Command("curl", "-X", "POST", "http://" + source_rest_server_addr + "/controller/cancelXDCR/" + replicationId)
 	logger_latency.Infof("cmd =%v, path=%v\n", cmd.Args, cmd.Path)
 	bytes, err := cmd.Output()

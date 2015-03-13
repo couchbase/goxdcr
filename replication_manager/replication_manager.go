@@ -237,22 +237,21 @@ func AuditService() service_def.AuditSvc {
 
 //CreateReplication create the replication specification in metadata store
 //and start the replication pipeline
-func CreateReplication(sourceBucket, targetCluster, targetBucket string, settings map[string]interface{}, realUserId *base.RealUserId) (string, map[string]error, error) {
-	logger_rm.Infof("Creating replication - sourceBucket=%s, targetCluster=%s, targetBucket=%s, settings=%v\n",
-		sourceBucket, targetCluster, targetBucket, settings)
-
-	targetClusterRef, err := RemoteClusterService().RemoteClusterByRefName(targetCluster, false)
-	if err != nil {
-		return "", nil, err
-	}
+func CreateReplication(justValidate bool, sourceBucket, targetCluster, targetBucket string, settings map[string]interface{}, realUserId *base.RealUserId) (string, map[string]error, error) {
+	logger_rm.Infof("Creating replication - justValidate=%v, sourceBucket=%s, targetCluster=%s, targetBucket=%s, settings=%v\n",
+		justValidate, sourceBucket, targetCluster, targetBucket, settings)
 
 	var spec *metadata.ReplicationSpecification
-	spec, errorsMap, err := replication_mgr.createAndPersistReplicationSpec(sourceBucket, targetClusterRef.Uuid, targetBucket, settings)
+	spec, errorsMap, err := replication_mgr.createAndPersistReplicationSpec(justValidate, sourceBucket, targetCluster, targetBucket, settings)
 	if err != nil {
 		logger_rm.Errorf("%v\n", err)
 		return "", nil, err
 	} else if len(errorsMap) != 0 {
 		return "", errorsMap, nil
+	}
+
+	if justValidate {
+		return spec.Id, nil, nil
 	}
 
 	//trigger specChangedCallback explicitly asynchronously
@@ -441,31 +440,44 @@ func GetStatistics(bucket string) (*expvar.Map, error) {
 }
 
 //create and persist the replication specification
-func (rm *replicationManager) createAndPersistReplicationSpec(sourceBucket, targetClusterUUID, targetBucket string, settings map[string]interface{}) (*metadata.ReplicationSpecification, map[string]error, error) {
-	logger_rm.Infof("Creating replication spec - sourceBucket=%s, targetClusterUUID=%s, targetBucket=%s, settings=%v\n",
-		sourceBucket, targetClusterUUID, targetBucket, settings)
+func (rm *replicationManager) createAndPersistReplicationSpec(justValidate bool, sourceBucket, targetCluster, targetBucket string, settings map[string]interface{}) (*metadata.ReplicationSpecification, map[string]error, error) {
+	logger_rm.Infof("Creating replication spec - justValidate=%v, sourceBucket=%s, targetCluster=%s, targetBucket=%s, settings=%v\n",
+		justValidate, sourceBucket, targetCluster, targetBucket, settings)
 
-	spec := metadata.NewReplicationSpecification(sourceBucket, targetClusterUUID, targetBucket)
+	// validate that everything is alright with the replication configuration before actually creating it
+	errorMap := replication_mgr.repl_spec_svc.ValidateNewReplicationSpec(sourceBucket, targetCluster, targetBucket)
+	if len(errorMap) > 0 {
+		return nil, errorMap, nil
+	}
+	
+	//this will not fail because of the validation above
+	targetClusterRef, err := rm.remote_cluster_svc.RemoteClusterByRefName(targetCluster, false)
+	if err != nil {
+		return nil, nil, err
+	}
+	
+	spec := metadata.NewReplicationSpecification(sourceBucket, targetClusterRef.Uuid, targetBucket)
 	replSettings, err := ReplicationSettingsService().GetDefaultReplicationSettings()
 	if err != nil {
 		return nil, nil, err
 	}
-
-	_, errorMap := replSettings.UpdateSettingsFromMap(settings)
-
+	_, errorMap = replSettings.UpdateSettingsFromMap(settings)
 	if len(errorMap) != 0 {
 		return nil, errorMap, nil
 	}
-
 	spec.Settings = replSettings
+
+	if justValidate {
+		return spec, nil, nil
+	}
 
 	//persist it
 	err = replication_mgr.repl_spec_svc.AddReplicationSpec(spec)
 	if err == nil {
-		logger_rm.Infof("replication specification %s is created and persisted\n", spec.Id)
+		logger_rm.Infof("Success adding replication specification %s\n", spec.Id)
 		return spec, nil, nil
 	} else {
-		logger_rm.Errorf("Error persisting replication specification %s. err=%v\n", spec.Id, err)
+		logger_rm.Errorf("Error adding replication specification %s. err=%v\n", spec.Id, err)
 		return spec, nil, err
 	}
 }

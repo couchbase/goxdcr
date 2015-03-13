@@ -22,6 +22,7 @@ type SpecChangeListenerFailureCallBack func(err error)
 type ReplicationSpecSvc interface {
 	ReplicationSpec(replicationId string) (*metadata.ReplicationSpecification, error)
 	AddReplicationSpec(spec *metadata.ReplicationSpecification) error
+	ValidateNewReplicationSpec(sourceBucket, targetCluster, targetBucket string) map[string]error
 	SetReplicationSpec(spec *metadata.ReplicationSpecification) error
 	DelReplicationSpec(replicationId string) (*metadata.ReplicationSpecification, error)
 	AllReplicationSpecs() (map[string]*metadata.ReplicationSpecification, error)

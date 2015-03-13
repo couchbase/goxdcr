@@ -152,7 +152,7 @@ func (adminport *Adminport) handleRequest(
 	}
 
 	if err != nil {
-		return nil, err
+		return EncodeErrorMessageIntoResponse(err, http.StatusUnauthorized)
 	}
 	logger_ap.Info("Authenticated....")
 
@@ -339,7 +339,7 @@ func (adminport *Adminport) doCreateReplicationRequest(request *http.Request) (*
 	logger_ap.Info("doCreateReplicationRequest called")
 	defer logger_ap.Info("Finish doCreateReplicationRequest call")
 
-	fromBucket, toCluster, toBucket, settings, errorsMap, err := DecodeCreateReplicationRequest(request)
+	justValidate, fromBucket, toCluster, toBucket, settings, errorsMap, err := DecodeCreateReplicationRequest(request)
 	if err != nil {
 		return nil, err
 	} else if len(errorsMap) > 0 {
@@ -347,10 +347,10 @@ func (adminport *Adminport) doCreateReplicationRequest(request *http.Request) (*
 		return EncodeReplicationErrorsMapIntoResponse(errorsMap)
 	}
 
-	logger_ap.Infof("Request parameters: fromBucket=%v, toCluster=%v, toBucket=%v, settings=%v\n",
-		fromBucket, toCluster, toBucket, settings)
+	logger_ap.Infof("Request parameters: justValidate=%v, fromBucket=%v, toCluster=%v, toBucket=%v, settings=%v\n",
+		justValidate, fromBucket, toCluster, toBucket, settings)
 
-	replicationId, errorsMap, err := CreateReplication(fromBucket, toCluster, toBucket, settings, getRealUserIdFromRequest(request))
+	replicationId, errorsMap, err := CreateReplication(justValidate, fromBucket, toCluster, toBucket, settings, getRealUserIdFromRequest(request))
 
 	if err != nil {
 		return EncodeReplicationSpecErrorIntoResponse(err)
@@ -639,7 +639,7 @@ func (adminport *Adminport) doRegexpValidationRequest(request *http.Request) (*a
 
 	expression, keys, err := DecodeRegexpValidationRequest(request)
 	if err != nil {
-		return EncodeValidationErrorMessageIntoResponse(err)
+		return EncodeErrorMessageIntoResponse(err, http.StatusBadRequest)
 	}
 
 	logger_ap.Infof("Request params: expression=%v, keys=%v\n",
@@ -647,7 +647,7 @@ func (adminport *Adminport) doRegexpValidationRequest(request *http.Request) (*a
 
 	matchesMap, err := utils.GetMatchedKeys(expression, keys)
 	if err != nil {
-		return EncodeValidationErrorMessageIntoResponse(err)
+		return EncodeErrorMessageIntoResponse(err, http.StatusBadRequest)
 	}
 
 	return NewRegexpValidationResponse(matchesMap)

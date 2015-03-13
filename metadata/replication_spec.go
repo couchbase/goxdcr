@@ -14,13 +14,6 @@ import (
 	"strings"
 )
 
-const (
-	// ids of xdcr replication specs are used as keys in gometa service.
-	// the following prefix distinguishes the replication specs from other entries
-	// and reduces the chance of naming conflicts
-	ReplicationSpecKeyPrefix = "replicationSpec"
-)
-
 /************************************
 /* struct ReplicationSpecification
 *************************************/
@@ -52,14 +45,14 @@ func NewReplicationSpecification(sourceBucketName string, targetClusterUUID stri
 }
 
 func ReplicationId(sourceBucketName string, targetClusterUUID string, targetBucketName string) string {
-	parts := []string{ReplicationSpecKeyPrefix, targetClusterUUID, sourceBucketName, targetBucketName}
+	parts := []string{targetClusterUUID, sourceBucketName, targetBucketName}
 	return strings.Join(parts, base.KeyPartsDelimiter)
 }
 
 func IsReplicationIdForSourceBucket(replicationId string, sourceBucketName string) bool {
 	parts := strings.Split(replicationId, base.KeyPartsDelimiter)
 
-	if parts[2] == sourceBucketName {
+	if parts[1] == sourceBucketName {
 		return true
 	} else {
 		return false

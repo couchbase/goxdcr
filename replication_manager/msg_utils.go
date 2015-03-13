@@ -242,13 +242,13 @@ func DecodeCreateRemoteClusterRequest(request *http.Request) (justValidate bool,
 		return
 	}
 
-	justValidate, err = DecodeJustValidateFromRequest(request)
-	if err != nil {
-		errorsMap[base.JustValidate] = err
-	}
-
 	for key, valArr := range request.Form {
 		switch key {
+		case base.JustValidate:
+			justValidate, err = getBoolFromValArr(valArr, false)
+			if err != nil {
+				errorsMap[base.JustValidate] = err
+			} 
 		case base.RemoteClusterUuid:
 			uuid = getStringFromValArr(valArr)
 		case base.RemoteClusterName:
@@ -323,7 +323,7 @@ func NewEmptyArrayResponse() (*ap.Response, error) {
 }
 
 // decode parameters from create replication request
-func DecodeCreateReplicationRequest(request *http.Request) (fromBucket, toCluster, toBucket string, settings map[string]interface{}, errorsMap map[string]error, err error) {
+func DecodeCreateReplicationRequest(request *http.Request) (justValidate bool, fromBucket, toCluster, toBucket string, settings map[string]interface{}, errorsMap map[string]error, err error) {
 	errorsMap = make(map[string]error)
 	var replicationType string
 
@@ -346,6 +346,11 @@ func DecodeCreateReplicationRequest(request *http.Request) (fromBucket, toCluste
 			toCluster = getStringFromValArr(valArr)
 		case ToBucket:
 			toBucket = getStringFromValArr(valArr)
+		case base.JustValidate:
+			justValidate, err = getBoolFromValArr(valArr, false)
+			if err != nil {
+				errorsMap[base.JustValidate] = err
+			} 
 		default:
 			// ignore other parameters
 		}
@@ -695,10 +700,10 @@ func EncodeValidationErrorIntoResponse(err error, withErrorsWrapper bool) (*ap.R
 	return EncodeErrorsMapIntoResponse(errorsMap, withErrorsWrapper)
 }
 
-// encode the error message of a validation error, without any wrapping, into Response object. 
-func EncodeValidationErrorMessageIntoResponse(err error) (*ap.Response, error) {
+// encode the error message of an error, without any wrapping, into Response object. 
+func EncodeErrorMessageIntoResponse(err error, statusCode int) (*ap.Response, error) {
 	if err != nil {
-		return EncodeByteArrayIntoResponseWithStatusCode([]byte(err.Error()), http.StatusBadRequest)
+		return EncodeByteArrayIntoResponseWithStatusCode([]byte(err.Error()), statusCode)
 	} else {
 		return NewEmptyArrayResponse()
 	}
