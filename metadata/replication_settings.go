@@ -36,6 +36,9 @@ const (
 	PipelineStatsInterval          = "stats_interval"
 )
 
+// settings whose default values cannot be viewed or changed through rest apis
+var ImmutableDefaultSettings = [3]string{ReplicationType, FilterExpression, Active}
+
 const (
 	ReplicationTypeXmem = "xmem"
 	ReplicationTypeCapi = "capi"
@@ -345,10 +348,20 @@ func (s *ReplicationSettings) UpdateSettingsFromMap(settingsMap map[string]inter
 }
 
 func (s *ReplicationSettings) ToMap() map[string]interface{} {
+	return s.toMap(false)
+}
+
+func (s *ReplicationSettings) ToDefaultSettingsMap() map[string]interface{} {
+	return s.toMap(true)
+}
+
+func (s *ReplicationSettings) toMap(isDefaultSettings bool) map[string]interface{} {
 	settings_map := make(map[string]interface{})
-	settings_map[ReplicationType] = s.RepType
-	settings_map[FilterExpression] = s.FilterExpression
-	settings_map[Active] = s.Active
+	if !isDefaultSettings {
+		settings_map[ReplicationType] = s.RepType
+		settings_map[FilterExpression] = s.FilterExpression
+		settings_map[Active] = s.Active
+	}
 	settings_map[CheckpointInterval] = s.CheckpointInterval
 	settings_map[BatchCount] = s.BatchCount
 	settings_map[BatchSize] = s.BatchSize
@@ -413,4 +426,17 @@ func ValidateAndConvertSettingsValue(key string, value string) (convertedValue i
 	}
 
 	return
+}
+
+// check if the default value of the specified settings can be changed through rest api
+// it assumes that the key provided is a valid settings key
+func IsSettingDefaultValueMutable(key string) bool {
+	mutable := true
+	for _, immutableSetting := range ImmutableDefaultSettings {
+		if immutableSetting == key {
+			mutable = false
+			break
+		}
+	}
+	return mutable
 }

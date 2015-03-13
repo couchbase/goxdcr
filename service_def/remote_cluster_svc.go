@@ -17,11 +17,13 @@ type RemoteClusterSvc interface {
 	RemoteClusterByRefId(refId string, refresh bool) (*metadata.RemoteClusterReference, error)
 	RemoteClusterByRefName(refName string, refresh bool) (*metadata.RemoteClusterReference, error)
 	RemoteClusterByUuid(uuid string, refresh bool) (*metadata.RemoteClusterReference, error)
+	ValidateAddRemoteCluster(ref *metadata.RemoteClusterReference) error
 	AddRemoteCluster(ref *metadata.RemoteClusterReference) error
+	ValidateSetRemoteCluster(refName string, ref *metadata.RemoteClusterReference) error
 	SetRemoteCluster(refName string, ref *metadata.RemoteClusterReference) error
 	DelRemoteCluster(refName string) (*metadata.RemoteClusterReference, error)
 	RemoteClusters(refresh bool) (map[string]*metadata.RemoteClusterReference, error)
-	ValidateRemoteCluster(ref *metadata.RemoteClusterReference) error
+
 	// used by auditing and ui logging
 	GetRemoteClusterNameFromClusterUuid(uuid string) string
 	

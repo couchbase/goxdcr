@@ -33,6 +33,7 @@ var ErrorsKey = "errors"
 const (
 	DefaultAdminPort = "8091"
 )
+
 // constants used for parsing url path
 const (
 	CreateReplicationPath    = "controller/createReplication"
@@ -298,7 +299,7 @@ func DecodeCreateRemoteClusterRequest(request *http.Request) (justValidate bool,
 	}
 
 	//validate the format of hostName, if it doesn't contain port number, append default port number 8091
-	if !strings.Contains (hostName, base.UrlPortNumberDelimiter) {
+	if !strings.Contains(hostName, base.UrlPortNumberDelimiter) {
 		hostName = hostName + base.UrlPortNumberDelimiter + DefaultAdminPort
 	}
 	if len(errorsMap) == 0 {
@@ -370,14 +371,14 @@ func DecodeCreateReplicationRequest(request *http.Request) (justValidate bool, f
 		errorsMap[ToBucket] = utils.MissingValueError("target bucket")
 	}
 
-	settings, settingsErrorsMap := DecodeSettingsFromRequest(request)
+	settings, settingsErrorsMap := DecodeSettingsFromRequest(request, false)
 	for key, value := range settingsErrorsMap {
 		errorsMap[key] = value
 	}
 	return
 }
 
-func DecodeChangeReplicationSettings(request *http.Request) (justValidate bool, settings map[string]interface{}, errorsMap map[string]error) {
+func DecodeChangeReplicationSettings(request *http.Request, isDefaultSettings bool) (justValidate bool, settings map[string]interface{}, errorsMap map[string]error) {
 	errorsMap = make(map[string]error)
 
 	if err := request.ParseForm(); err != nil {
@@ -390,7 +391,7 @@ func DecodeChangeReplicationSettings(request *http.Request) (justValidate bool, 
 		errorsMap[base.JustValidate] = err
 	}
 
-	settings, settingsErrorsMap := DecodeSettingsFromRequest(request)
+	settings, settingsErrorsMap := DecodeSettingsFromRequest(request, isDefaultSettings)
 	for key, value := range settingsErrorsMap {
 		errorsMap[key] = value
 	}
@@ -428,7 +429,7 @@ func DecodeCreateReplicationResponse(response *http.Response) (string, error) {
 }
 
 // decode replication settings related parameters from http request
-func DecodeSettingsFromRequest(request *http.Request) (map[string]interface{}, map[string]error) {
+func DecodeSettingsFromRequest(request *http.Request, isDefaultSettings bool) (map[string]interface{}, map[string]error) {
 	settings := make(map[string]interface{})
 	errorsMap := make(map[string]error)
 
@@ -438,7 +439,7 @@ func DecodeSettingsFromRequest(request *http.Request) (map[string]interface{}, m
 	}
 
 	for key, valArr := range request.Form {
-		err := processKey(key, valArr, &settings)
+		err := processKey(key, valArr, &settings, isDefaultSettings)
 		if err != nil {
 			errorsMap[key] = err
 		}
@@ -469,7 +470,7 @@ func DecodeSettingsFromInternalSettingsRequest(request *http.Request) (map[strin
 			continue
 		}
 
-		err = processKey(restKey, valArr, &settings)
+		err = processKey(restKey, valArr, &settings, true /*isDefaultSettings*/)
 		if err != nil {
 			errorsMap[restKey] = err
 		}
@@ -521,15 +522,24 @@ func NewCreateReplicationResponse(replicationId string) (*ap.Response, error) {
 
 func NewReplicationSettingsResponse(settings *metadata.ReplicationSettings) (*ap.Response, error) {
 	if settings == nil {
-		return nil, nil
+		return NewEmptyArrayResponse()
+
 	} else {
-		return EncodeObjectIntoResponse(convertSettingsToRestSettingsMap(settings))
+		return EncodeObjectIntoResponse(convertSettingsToRestSettingsMap(settings, false))
+	}
+}
+
+func NewDefaultReplicationSettingsResponse(settings *metadata.ReplicationSettings) (*ap.Response, error) {
+	if settings == nil {
+		return NewEmptyArrayResponse()
+	} else {
+		return EncodeObjectIntoResponse(convertSettingsToRestSettingsMap(settings, true))
 	}
 }
 
 func NewInternalSettingsResponse(settings *metadata.ReplicationSettings) (*ap.Response, error) {
 	if settings == nil {
-		return nil, nil
+		return NewEmptyArrayResponse()
 	} else {
 		return EncodeObjectIntoResponse(convertSettingsToRestInternalSettingsMap(settings))
 	}
@@ -580,9 +590,15 @@ func verifyFilterExpression(filterExpression string) error {
 	return err
 }
 
-func convertSettingsToRestSettingsMap(settings *metadata.ReplicationSettings) map[string]interface{} {
+func convertSettingsToRestSettingsMap(settings *metadata.ReplicationSettings, isDefaultSettings bool) map[string]interface{} {
 	restSettingsMap := make(map[string]interface{})
-	settingsMap := settings.ToMap()
+	var settingsMap map[string]interface{}
+	if isDefaultSettings {
+		settingsMap = settings.ToDefaultSettingsMap()
+	} else {
+		settingsMap = settings.ToMap()
+	}
+
 	for key, value := range settingsMap {
 		restKey := SettingsKeyToRestKeyMap[key]
 		if restKey == PauseRequested {
@@ -598,7 +614,7 @@ func convertSettingsToRestSettingsMap(settings *metadata.ReplicationSettings) ma
 
 func convertSettingsToRestInternalSettingsMap(settings *metadata.ReplicationSettings) map[string]interface{} {
 	internalSettingsMap := make(map[string]interface{})
-	settingsMap := settings.ToMap()
+	settingsMap := settings.ToDefaultSettingsMap()
 	for key, value := range settingsMap {
 		restKey := SettingsKeyToRestKeyMap[key]
 		internalSettingsKey := ConvertRestKeyToRestInternalKey(restKey)
@@ -769,12 +785,18 @@ func EncodeReplicationSpecErrorIntoResponse(err error) (*ap.Response, error) {
 
 }
 
-func processKey(restKey string, valArr []string, settingsPtr *map[string]interface{}) error {
+func processKey(restKey string, valArr []string, settingsPtr *map[string]interface{}, isDefaultSettings bool) error {
 	settingsKey, ok := RestKeyToSettingsKeyMap[restKey]
 	if !ok {
 		// ignore non-settings key
 		return nil
 	}
+
+	if isDefaultSettings && !metadata.IsSettingDefaultValueMutable(settingsKey) {
+		// ignore settings whose default values cannot be changed
+		return nil
+	}
+
 	if len(valArr) == 0 || valArr[0] == "" {
 		return nil
 	}

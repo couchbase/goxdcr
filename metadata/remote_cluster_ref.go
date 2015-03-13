@@ -78,7 +78,9 @@ func (ref *RemoteClusterReference) ToMap() map[string]interface{} {
 	outputMap[base.RemoteClusterHostName] = ref.HostName
 	outputMap[base.RemoteClusterUserName] = ref.UserName
 	outputMap[base.RemoteClusterDeleted] = false
-	outputMap[base.RemoteClusterDemandEncryption] = ref.DemandEncryption
-	outputMap[base.RemoteClusterCertificate] = string(ref.Certificate)
+	if ref.DemandEncryption { 
+		outputMap[base.RemoteClusterDemandEncryption] = ref.DemandEncryption
+		outputMap[base.RemoteClusterCertificate] = string(ref.Certificate)
+	}
 	return outputMap
 }

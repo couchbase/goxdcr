@@ -228,7 +228,7 @@ func (adminport *Adminport) doCreateRemoteClusterRequest(request *http.Request) 
 		justValidate, *remoteClusterRef)
 
 	if justValidate {
-		err = remoteClusterService.ValidateRemoteCluster(remoteClusterRef)
+		err = remoteClusterService.ValidateAddRemoteCluster(remoteClusterRef)
 		return EncodeRemoteClusterErrorIntoResponse(err)
 	} else {
 		err = remoteClusterService.AddRemoteCluster(remoteClusterRef)
@@ -265,7 +265,7 @@ func (adminport *Adminport) doChangeRemoteClusterRequest(request *http.Request) 
 	remoteClusterService := RemoteClusterService()
 
 	if justValidate {
-		err = remoteClusterService.ValidateRemoteCluster(remoteClusterRef)
+		err = remoteClusterService.ValidateSetRemoteCluster(remoteClusterName, remoteClusterRef)
 		return EncodeRemoteClusterErrorIntoResponse(err)
 	} else {
 		err = remoteClusterService.SetRemoteCluster(remoteClusterName, remoteClusterRef)
@@ -323,7 +323,12 @@ func (adminport *Adminport) doDeleteAllReplicationsRequest(request *http.Request
 
 	logger_ap.Infof("Request params: bucket=%v", bucket)
 
-	return nil, DeleteAllReplications(bucket, getRealUserIdFromRequest(request))
+	err = DeleteAllReplications(bucket, getRealUserIdFromRequest(request))
+	if err != nil {
+		return nil, err
+	} else {
+		return NewEmptyArrayResponse()
+	}
 }
 
 func (adminport *Adminport) doGetAllReplicationInfosRequest(request *http.Request) (*ap.Response, error) {
@@ -409,7 +414,7 @@ func (adminport *Adminport) doChangeInternalSettingsRequest(request *http.Reques
 		logger_ap.Errorf("Validation error in inputs. errorsMap=%v\n", errorsMap)
 		return EncodeReplicationErrorsMapIntoResponse(errorsMap)
 	} else {
-		return nil, nil
+		return NewEmptyArrayResponse()
 	}
 }
 
@@ -421,13 +426,13 @@ func (adminport *Adminport) doViewDefaultReplicationSettingsRequest(request *htt
 		return nil, err
 	}
 
-	return NewReplicationSettingsResponse(defaultSettings)
+	return NewDefaultReplicationSettingsResponse(defaultSettings)
 }
 
 func (adminport *Adminport) doChangeDefaultReplicationSettingsRequest(request *http.Request) (*ap.Response, error) {
 	logger_ap.Infof("doChangeDefaultReplicationSettingsRequest\n")
 
-	justValidate, settingsMap, errorsMap := DecodeChangeReplicationSettings(request)
+	justValidate, settingsMap, errorsMap := DecodeChangeReplicationSettings(request, true)
 	if len(errorsMap) > 0 {
 		logger_ap.Errorf("Validation error in inputs. errorsMap=%v\n", errorsMap)
 		return EncodeReplicationErrorsMapIntoResponse(errorsMap)
@@ -435,16 +440,14 @@ func (adminport *Adminport) doChangeDefaultReplicationSettingsRequest(request *h
 
 	logger_ap.Infof("Request params: justValidate=%v, inputSettings=%v\n", justValidate, settingsMap)
 
-	if justValidate {
-		return nil, nil
-	}
-
-	errorsMap, err := UpdateDefaultReplicationSettings(settingsMap, getRealUserIdFromRequest(request))
-	if err != nil {
-		return nil, err
-	} else if len(errorsMap) > 0 {
-		logger_ap.Errorf("Validation error in inputs. errorsMap=%v\n", errorsMap)
-		return EncodeReplicationErrorsMapIntoResponse(errorsMap)
+	if !justValidate {
+		errorsMap, err := UpdateDefaultReplicationSettings(settingsMap, getRealUserIdFromRequest(request))
+		if err != nil {
+			return nil, err
+		} else if len(errorsMap) > 0 {
+			logger_ap.Errorf("Validation error in inputs. errorsMap=%v\n", errorsMap)
+			return EncodeReplicationErrorsMapIntoResponse(errorsMap)
+		}
 	}
 
 	// change default settings returns the default settings after changes
@@ -453,7 +456,7 @@ func (adminport *Adminport) doChangeDefaultReplicationSettingsRequest(request *h
 		return nil, err
 	}
 
-	return NewReplicationSettingsResponse(defaultSettings)
+	return NewDefaultReplicationSettingsResponse(defaultSettings)
 }
 
 func (adminport *Adminport) doViewReplicationSettingsRequest(request *http.Request) (*ap.Response, error) {
@@ -487,7 +490,7 @@ func (adminport *Adminport) doChangeReplicationSettingsRequest(request *http.Req
 	}
 	logger_ap.Infof("Request params: replicationId=%v\n", replicationId)
 
-	justValidate, settingsMap, errorsMap := DecodeChangeReplicationSettings(request)
+	justValidate, settingsMap, errorsMap := DecodeChangeReplicationSettings(request, false)
 	if len(errorsMap) > 0 {
 		logger_ap.Errorf("Validation error in inputs. errorsMap=%v\n", errorsMap)
 		return EncodeReplicationErrorsMapIntoResponse(errorsMap)
@@ -496,7 +499,7 @@ func (adminport *Adminport) doChangeReplicationSettingsRequest(request *http.Req
 	logger_ap.Infof("Request params: justValidate=%v, inputSettings=%v\n", justValidate, settingsMap)
 
 	if justValidate {
-		return nil, nil
+		return NewEmptyArrayResponse()
 	}
 
 	errorsMap, err = UpdateReplicationSettings(replicationId, settingsMap, getRealUserIdFromRequest(request))
@@ -529,7 +532,7 @@ func (adminport *Adminport) doGetStatisticsRequest(request *http.Request) (*ap.R
 	statsMap, err := GetStatistics(bucket)
 	if err == nil {
 		if statsMap == nil {
-			return nil, nil
+			return NewEmptyArrayResponse()
 		}
 		return EncodeByteArrayIntoResponse([]byte(statsMap.String()))
 	} else {

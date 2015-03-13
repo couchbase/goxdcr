@@ -107,7 +107,7 @@ func (service *RemoteClusterService) RemoteClusterByRefName(refName string, refr
 func (service *RemoteClusterService) AddRemoteCluster(ref *metadata.RemoteClusterReference) error {
 	service.logger.Infof("Adding remote cluster with referenceId %v\n", ref.Id)
 
-	err := service.ValidateRemoteCluster(ref)
+	err := service.ValidateAddRemoteCluster(ref)
 	if err != nil {
 		return err
 	}
@@ -147,13 +147,13 @@ func (service *RemoteClusterService) updateRemoteCluster(ref *metadata.RemoteClu
 
 func (service *RemoteClusterService) SetRemoteCluster(refName string, ref *metadata.RemoteClusterReference) error {
 	service.logger.Infof("Setting remote cluster with refName %v\n", refName)
-
-	err := service.ValidateRemoteCluster(ref)
+	
+	oldRef, err := service.RemoteClusterByRefName(refName, false)
 	if err != nil {
 		return err
 	}
-
-	oldRef, err := service.RemoteClusterByRefName(refName, false)
+	
+	err = service.ValidateSetRemoteCluster(refName, ref)
 	if err != nil {
 		return err
 	}
@@ -243,8 +243,43 @@ func (service *RemoteClusterService) RemoteClusters(refresh bool) (map[string]*m
 	return refs, nil
 }
 
+// validate that the remote cluster ref itself is valid, and that it does not collide with any of the existing remote clusters.
+func (service *RemoteClusterService) ValidateAddRemoteCluster(ref *metadata.RemoteClusterReference) error {
+	return service.validateChangeRemoteCluster(ref, "")
+}
+
+// validate that the remote cluster ref itself is valid, and that it does not collide with any of the existing remote clusters except the one being updated
+func (service *RemoteClusterService) ValidateSetRemoteCluster(refName string, ref *metadata.RemoteClusterReference) error {
+	return service.validateChangeRemoteCluster(ref, refName)
+}
+
+// validate that the remote cluster ref itself is valid, and that it does not collide with existing remote clusters 
+// if refName is not empty, collision with existing cluster with refName is allowed since that existing cluster is being updated
+func (service *RemoteClusterService) validateChangeRemoteCluster(ref *metadata.RemoteClusterReference, refName string) error {
+
+	oldRef, err := service.RemoteClusterByRefName(ref.Name, false)
+	// collision with the remote cluster ref being updating is fine
+	if oldRef != nil  && oldRef.Name != refName {
+		return wrapAsInvalidRemoteClusterError(errors.New("duplicate cluster names are not allowed"))
+	}
+
+	err = service.validateRemoteCluster(ref)
+	if err != nil {
+		return err
+	}
+	
+	oldRef, err = service.RemoteClusterByUuid(ref.Uuid, false)
+	// collision with the remote cluster ref be updated is fine
+	if oldRef != nil  &&  oldRef.Name != refName {
+		return wrapAsInvalidRemoteClusterError(fmt.Errorf("Cluster reference to the same cluster already exists under the name `%v`", oldRef.Name))
+	}
+	
+	return nil
+}
+	
+
 // validate remote cluster info and retrieve actual uuid
-func (service *RemoteClusterService) ValidateRemoteCluster(ref *metadata.RemoteClusterReference) error {
+func (service *RemoteClusterService) validateRemoteCluster(ref *metadata.RemoteClusterReference) error {
 	isEnterprise, err := service.xdcr_topology_svc.IsMyClusterEnterprise()
 	if err != nil {
 		return err
@@ -303,7 +338,7 @@ func (service *RemoteClusterService) ValidateRemoteCluster(ref *metadata.RemoteC
 	}
 
 	if ref.DemandEncryption && !isEnterprise_remote {
-		return fmt.Errorf("Remote cluster %v is not enterprise version, so no SSL support", hostAddr)
+		return wrapAsInvalidRemoteClusterError(fmt.Errorf("Remote cluster %v is not enterprise version, so no SSL support", hostAddr))
 	}
 	// get remote cluster uuid from the map
 	actualUuid, ok := poolsInfo[base.RemoteClusterUuid]
