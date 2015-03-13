@@ -520,7 +520,7 @@ func (capi *CapiNozzle) batchSendWithRetry(batch *capiBatch) error {
 			//lost on conflict resolution on source side
 			additionalInfo := make(map[string]interface{})
 			additionalInfo[EVENT_ADDI_SEQNO] = item.Seqno
-			capi.RaiseEvent(common.DataFailedCRSource, item, capi, nil, additionalInfo)
+			capi.RaiseEvent(common.DataFailedCRSource, item.Req, capi, nil, additionalInfo)
 		}
 
 	}

@@ -16,6 +16,7 @@ import (
 	"errors"
 	"expvar"
 	"fmt"
+	"github.com/couchbase/go-couchbase"
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/common"
 	"github.com/couchbase/goxdcr/factory"
@@ -28,6 +29,7 @@ import (
 	"github.com/couchbase/goxdcr/supervisor"
 	"github.com/couchbase/goxdcr/utils"
 	"io"
+	"net/http"
 	"os"
 	"reflect"
 	"strings"
@@ -202,6 +204,10 @@ func (rm *replicationManager) init(
 	pipeline_manager.PipelineManager(fac, rm.repl_spec_svc, log.DefaultLoggerContext)
 
 	rm.repl_spec_callback_cancel_ch = make(chan struct{}, 1)
+
+	//workaround MB-13738 until go-couchbase fix it properly
+	//go-couchbase's built-in Transport has MaxIdleConnsPerHost settings
+	couchbase.HTTPClient.Transport = http.DefaultTransport
 
 	logger_rm.Info("Replication manager is initialized")
 

@@ -127,7 +127,7 @@ func NewLogger(module string, logger_context *LoggerContext) *CommonLogger {
 	}
 	loggers := make(map[LogLevel]*log.Logger)
 	for logLevel, logWriter := range context.Log_writers {
-		loggers[logLevel] = log.New(logWriter, module, log.Lmicroseconds)
+		loggers[logLevel] = log.New(logWriter, module, log.Ldate |log.Lmicroseconds)
 	}
 	return &CommonLogger{loggers, context}
 }
