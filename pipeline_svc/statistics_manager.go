@@ -22,6 +22,8 @@ import (
 	"github.com/couchbase/goxdcr/metadata"
 	parts "github.com/couchbase/goxdcr/parts"
 	"github.com/couchbase/goxdcr/pipeline"
+	"github.com/couchbase/goxdcr/pipeline_manager"
+	"github.com/couchbase/goxdcr/pipeline_utils"
 	"github.com/couchbase/goxdcr/service_def"
 	"github.com/couchbase/goxdcr/utils"
 	"github.com/rcrowley/go-metrics"
@@ -81,6 +83,18 @@ const (
 	default_sample_size     = 1000
 	default_update_interval = 100 * time.Millisecond
 )
+
+// stats to initialize for paused replications that have never been run -- mostly the stats visible from UI
+var StatsToInitializeForPausedReplications = [10]string{DOCS_WRITTEN_METRIC, DOCS_FAILED_CR_SOURCE_METRIC, DOCS_FILTERED_METRIC,
+	RATE_DOC_CHECKS_METRIC, RATE_OPT_REPD_METRIC, RATE_RECEIVED_DCP_METRIC, RATE_REPLICATED_METRIC,
+	BANDWIDTH_USAGE_METRIC, DOCS_LATENCY_METRIC, META_LATENCY_METRIC}
+
+// stats to clear when replications are paused
+// 1. all rate type stats
+// 2. internal stats that are not visible on UI
+var StatsToClearForPausedReplications = [13]string{SIZE_REP_QUEUE_METRIC, DOCS_REP_QUEUE_METRIC, DOCS_LATENCY_METRIC, META_LATENCY_METRIC, NUM_CHECKPOINTS_METRIC,
+	TIME_COMMITING_METRIC, NUM_FAILEDCKPTS_METRIC, RATE_DOC_CHECKS_METRIC, RATE_OPT_REPD_METRIC, DOCS_RECEIVED_DCP_METRIC, RATE_RECEIVED_DCP_METRIC,
+	RATE_REPLICATED_METRIC, BANDWIDTH_USAGE_METRIC}
 
 //StatisticsManager mount the statics collector on the pipeline to collect raw stats
 //It does stats correlation and processing on raw stats periodically (controlled by publish_interval)
@@ -180,29 +194,127 @@ func NewStatisticsManager(through_seqno_tracker_svc service_def.ThroughSeqnoTrac
 }
 
 //Statistics of a pipeline which may or may not be running
-func GetStatisticsForPipeline(topic string) *expvar.Map {
-	expvar_var := pipeline.StorageForRep(topic)
-	if expvar_var != nil {
-		overview_map := expvar_var.Get(OVERVIEW_METRICS_KEY)
-		if overview_map != nil {
-			return overview_map.(*expvar.Map)
-		} else {
-			return nil
-		}
-	} else {
-		return nil
+func GetStatisticsForPipeline(topic string, cluster_info_svc service_def.ClusterInfoSvc, xdcr_topology_svc service_def.XDCRCompTopologySvc, checkpoints_svc service_def.CheckpointsService, logger *log.CommonLogger) (*expvar.Map, error) {
+	rs := pipeline_manager.ReplicationStatus(topic)
+	if rs == nil {
+		return nil, nil
 	}
+
+	overviewStats := rs.GetOverviewStats()
+	if overviewStats == nil {
+		// overview stats may be nil the first time GetStats is called on a paused replication that has never been run in the current goxdcr session
+		// or it may be nil when the underying replication is not paused but has not completed startup process
+		// construct it
+		overviewStats, err := constructOverviewStats(cluster_info_svc, xdcr_topology_svc, checkpoints_svc, rs.Spec(), logger)
+		if err != nil {
+			return nil, err
+		}
+		rs.SetOverviewStats(overviewStats)
+	} else if rs.RuntimeStatus() != pipeline.Replicating {
+		// if pipeline is not running, update changes_left stats, which is not being
+		// updated by running pipeline and may have become inaccurate
+
+		docs_processed, err := strconv.ParseInt(overviewStats.Get(DOCS_PROCESSED_METRIC).String(), base.ParseIntBase, base.ParseIntBitSize)
+		if err != nil {
+			return nil, err
+		}
+
+		total_changes, err := getTotalChangesForPausedReplication(cluster_info_svc, xdcr_topology_svc, rs.Spec(), logger)
+		if err != nil {
+			return nil, err
+		}
+
+		changes_left := int64(total_changes) - docs_processed
+		changes_left_var := new(expvar.Int)
+		changes_left_var.Set(changes_left)
+
+		overviewStats.Set(CHANGES_LEFT_METRIC, changes_left_var)
+	}
+
+	return overviewStats, nil
 }
 
-func (stats_mgr *StatisticsManager) cleanupBeforeExit() {
-	expvar_stats_map := pipeline.StorageForRep(stats_mgr.pipeline.Topic())
-	errlist := expvar_stats_map.Get("Errors")
-	expvar_stats_map.Init()
-	statusVar := new(expvar.String)
-	statusVar.Set(base.Pending)
-	expvar_stats_map.Set("Status", statusVar)
-	expvar_stats_map.Set("Errors", errlist)
-	stats_mgr.logger.Infof("expvar=%v\n", stats_mgr.formatStatsForLog())
+// compute and set changes_left and docs_processed stats. set other stats to 0
+func constructOverviewStats(cluster_info_svc service_def.ClusterInfoSvc, xdcr_topology_svc service_def.XDCRCompTopologySvc,
+	checkpoints_svc service_def.CheckpointsService, spec *metadata.ReplicationSpecification, logger *log.CommonLogger) (*expvar.Map, error) {
+	docs_processed, err := getDocsProcessedForPausedReplication(spec.Id, checkpoints_svc, logger)
+	if err != nil {
+		return nil, err
+	}
+	logger.Infof("docs_processed for paused replication %v is %v\n", spec.Id, docs_processed)
+
+	total_changes, err := getTotalChangesForPausedReplication(cluster_info_svc, xdcr_topology_svc, spec, logger)
+	if err != nil {
+		return nil, err
+	}
+
+	logger.Infof("total_changes for paused replication %v is %v\n", spec.Id, total_changes)
+
+	changes_left := total_changes - docs_processed
+
+	overview_map := new(expvar.Map).Init()
+	overview_map.Add(DOCS_PROCESSED_METRIC, int64(docs_processed))
+	overview_map.Add(CHANGES_LEFT_METRIC, int64(changes_left))
+	for _, statsToInitialize := range StatsToInitializeForPausedReplications {
+		overview_map.Add(statsToInitialize, 0)
+	}
+	return overview_map, nil
+}
+
+func getTotalChangesForPausedReplication(cluster_info_svc service_def.ClusterInfoSvc, xdcr_topology_svc service_def.XDCRCompTopologySvc,
+	spec *metadata.ReplicationSpecification, logger *log.CommonLogger) (uint64, error) {
+	var total_doc uint64
+
+	kv_vb_map, err := pipeline_utils.GetSourceVBListForReplication(cluster_info_svc, xdcr_topology_svc, spec, logger)
+	if err != nil {
+		return 0, err
+	}
+
+	for serverAddr, vbnos := range kv_vb_map {
+		highseqno_map, err := getHighSeqNosForServer(serverAddr, spec.SourceBucketName, vbnos, logger)
+		if err != nil {
+			return 0, err
+		}
+		logger.Debugf("serverAddr=%v, highseqno_map=%v\n", serverAddr, highseqno_map)
+
+		for _, vbno := range vbnos {
+			total_doc = total_doc + highseqno_map[vbno]
+		}
+	}
+	return total_doc, nil
+}
+
+func getHighSeqNosForServer(serverAddr, bucket_name string, vbnos []uint16, logger *log.CommonLogger) (map[uint16]uint64, error) {
+	conn, err := initConnection(serverAddr, bucket_name, logger)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+
+	return getHighSeqNos(serverAddr, vbnos, conn)
+}
+
+func getHighSeqNos(serverAddr string, vbnos []uint16, conn *mcc.Client) (map[uint16]uint64, error) {
+	highseqno_map := make(map[uint16]uint64)
+
+	stats_map, err := conn.StatsMap(base.VBUCKET_SEQNO_STAT_NAME)
+	if err != nil {
+		return nil, err
+	}
+
+	err = utils.ParseHighSeqnoStat(vbnos, stats_map, highseqno_map)
+	return highseqno_map, err
+}
+
+func (stats_mgr *StatisticsManager) cleanupBeforeExit() error {
+	rs, err := stats_mgr.getReplicationStatus()
+	if err != nil {
+		return err
+	}
+	rs.CleanupBeforeExit(StatsToClearForPausedReplications[:])
+	statsLog, _ := stats_mgr.formatStatsForLog()
+	stats_mgr.logger.Infof("expvar=%v\n", statsLog)
+	return nil
 }
 
 //updateStats runs until it get finish signal
@@ -250,7 +362,11 @@ func (stats_mgr *StatisticsManager) updateStatsOnce() error {
 
 	if err == nil {
 		if stats_mgr.logger.GetLogLevel() >= log.LogLevelInfo {
-			stats_mgr.logger.Info(stats_mgr.formatStatsForLog())
+			statsLog, err := stats_mgr.formatStatsForLog()
+			if err != nil {
+				return err
+			}
+			stats_mgr.logger.Info(statsLog)
 
 			//log parts summary
 			outNozzle_parts := stats_mgr.pipeline.Targets()
@@ -275,30 +391,38 @@ func (stats_mgr *StatisticsManager) updateStatsOnce() error {
 	return nil
 }
 
-func (stats_mgr *StatisticsManager) formatStatsForLog() string {
-	expvar_stats_map := pipeline.StorageForRep(stats_mgr.pipeline.Topic())
-	return fmt.Sprintf("Stats for pipeline %v %v\n", stats_mgr.pipeline.InstanceId(), expvar_stats_map.String())
+func (stats_mgr *StatisticsManager) formatStatsForLog() (string, error) {
+	rs, err := stats_mgr.getReplicationStatus()
+	if err != nil {
+		return "", err
+	}
+	expvar_stats_map := rs.Storage()
+	return fmt.Sprintf("Stats for pipeline %v %v\n", stats_mgr.pipeline.InstanceId(), expvar_stats_map.String()), nil
 }
 
 //process the raw stats, aggregate them into overview registry
 //expose the raw stats and overview stats to expvar
 func (stats_mgr *StatisticsManager) processRawStats() error {
+	rs, err := stats_mgr.getReplicationStatus()
+	if err != nil {
+		return err
+	}
+
 	oldSample := stats_mgr.getOverviewRegistry()
 	stats_mgr.initOverviewRegistry()
-	expvar_stats_map := pipeline.StorageForRep(stats_mgr.pipeline.Topic())
 
 	stats_mgr.processTimeSample()
 	for registry_name, registry := range stats_mgr.registries {
 		if registry_name != OVERVIEW_METRICS_KEY {
 			map_for_registry := new(expvar.Map).Init()
 
-			orig_registry := expvar_stats_map.Get(registry_name)
+			orig_registry := rs.GetStats(registry_name)
 			registry.Each(func(name string, i interface{}) {
 				stats_mgr.publishMetricToMap(map_for_registry, name, i, true)
 				switch m := i.(type) {
 				case metrics.Counter:
 					if orig_registry != nil {
-						orig_val, _ := strconv.ParseInt(orig_registry.(*expvar.Map).Get(name).String(), 10, 64)
+						orig_val, _ := strconv.ParseInt(orig_registry.Get(name).String(), 10, 64)
 						if m.Count() < orig_val {
 							stats_mgr.logger.Infof("counter %v goes backward, maybe due to the pipeline is restarted\n", name)
 						}
@@ -318,7 +442,7 @@ func (stats_mgr *StatisticsManager) processRawStats() error {
 					}
 				}
 			})
-			expvar_stats_map.Set(registry_name, map_for_registry)
+			rs.SetStats(registry_name, map_for_registry)
 		}
 	}
 
@@ -329,14 +453,14 @@ func (stats_mgr *StatisticsManager) processRawStats() error {
 		stats_mgr.publishMetricToMap(map_for_overview, name, i, false)
 	})
 
-	//calculate the publish additional metrics
-	err := stats_mgr.processCalculatedStats(oldSample, map_for_overview)
+	//calculate additional metrics
+	err = stats_mgr.processCalculatedStats(oldSample, map_for_overview)
 	if err != nil {
 		return err
 	}
 
 	stats_mgr.logger.Debugf("Overview=%v for pipeline %v\n", map_for_overview, stats_mgr.pipeline.Topic())
-	expvar_stats_map.Set(OVERVIEW_METRICS_KEY, map_for_overview)
+	rs.SetOverviewStats(map_for_overview)
 	return nil
 }
 
@@ -397,26 +521,32 @@ func (stats_mgr *StatisticsManager) processCalculatedStats(oldSample metrics.Reg
 	docs_checked_var := new(expvar.Int)
 	docs_checked_var.Set(int64(docs_checked))
 	overview_expvar_map.Set(DOCS_CHECKED_METRIC, docs_checked_var)
+	setCounter(stats_mgr.getOverviewRegistry().Get(DOCS_CHECKED_METRIC).(metrics.Counter), int(docs_checked))
 
 	//calculate rate_doc_checks
+	var rate_doc_checks float64
 	docs_checked_old_var := oldSample.Get(DOCS_CHECKED_METRIC)
-	var docs_checked_old uint64 = 0
+	var docs_checked_old int64 = 0
 	if docs_checked_old_var != nil {
-		docs_checked_old = uint64(docs_checked_old_var.(metrics.Counter).Count())
+		docs_checked_old = docs_checked_old_var.(metrics.Counter).Count()
 	}
-	rate_doc_checks := float64(docs_checked-docs_checked_old) / interval_in_sec
+	if docs_checked_old < 0 {
+		// a negative value indicates that this is the first stats run and there is no old value yet
+		rate_doc_checks = 0
+	} else {
+		rate_doc_checks = (float64(docs_checked) - float64(docs_checked_old)) / interval_in_sec
+	}
 	rate_doc_checks_var := new(expvar.Float)
 	rate_doc_checks_var.Set(rate_doc_checks)
 	overview_expvar_map.Set(RATE_DOC_CHECKS_METRIC, rate_doc_checks_var)
-
 	return nil
 }
 
 func (stats_mgr *StatisticsManager) calculateDocsProcessed() int64 {
 	var docs_processed uint64 = 0
-	hiseqno_map := stats_mgr.through_seqno_tracker_svc.GetThroughSeqnos()
-	for _, hiseqno := range hiseqno_map {
-		docs_processed += hiseqno
+	through_seqno_map := stats_mgr.through_seqno_tracker_svc.GetThroughSeqnos()
+	for _, through_seqno := range through_seqno_map {
+		docs_processed += through_seqno
 	}
 	return int64(docs_processed)
 }
@@ -448,7 +578,8 @@ func (stats_mgr *StatisticsManager) calculateChangesLeft(docs_processed int64) (
 func (stats_mgr *StatisticsManager) calculateTotalChanges() (int64, error) {
 	var total_doc uint64 = 0
 	for serverAddr, vbnos := range stats_mgr.active_vbs {
-		highseqno_map, err := stats_mgr.getHighSeqNos(serverAddr, vbnos)
+		highseqno_map, err := getHighSeqNos(serverAddr, vbnos, stats_mgr.kv_mem_clients[serverAddr])
+		stats_mgr.logger.Debugf("serverAddr=%v, highseqno_map=%v\n", serverAddr, highseqno_map)
 		if err != nil {
 			return 0, err
 		}
@@ -458,21 +589,6 @@ func (stats_mgr *StatisticsManager) calculateTotalChanges() (int64, error) {
 		}
 	}
 	return int64(total_doc), nil
-}
-func (stats_mgr *StatisticsManager) getHighSeqNos(serverAddr string, vbnos []uint16) (map[uint16]uint64, error) {
-	highseqno_map := make(map[uint16]uint64)
-	conn, ok := stats_mgr.kv_mem_clients[serverAddr]
-	if !ok || conn == nil {
-		return nil, errors.New("connection for serverAddr is not initialized")
-	}
-
-	stats_map, err := conn.StatsMap(base.VBUCKET_SEQNO_STAT_NAME)
-	if err != nil {
-		return nil, err
-	}
-
-	err = utils.ParseHighSeqnoStat(vbnos, stats_map, highseqno_map)
-	return highseqno_map, err
 }
 
 func (stats_mgr *StatisticsManager) getOverviewRegistry() metrics.Registry {
@@ -594,6 +710,15 @@ func (stats_mgr *StatisticsManager) Attach(pipeline common.Pipeline) error {
 }
 
 func (stats_mgr *StatisticsManager) initOverviewRegistry() {
+	// preserve old docs_checked if it exists. use a negative value to indicate that it does not exist
+	var old_docs_checked int = -1
+	old_overview := stats_mgr.registries[OVERVIEW_METRICS_KEY]
+	if old_overview != nil {
+		old_docs_checked = int(old_overview.Get(DOCS_CHECKED_METRIC).(metrics.Counter).Count())
+	}
+	docs_checked_counter := metrics.NewCounter()
+	setCounter(docs_checked_counter, old_docs_checked)
+
 	overview_registry := metrics.NewRegistry()
 	stats_mgr.registries[OVERVIEW_METRICS_KEY] = overview_registry
 	overview_registry.Register(DOCS_WRITTEN_METRIC, metrics.NewCounter())
@@ -608,13 +733,14 @@ func (stats_mgr *StatisticsManager) initOverviewRegistry() {
 	overview_registry.Register(DOCS_RECEIVED_DCP_METRIC, metrics.NewCounter())
 	overview_registry.Register(SIZE_REP_QUEUE_METRIC, metrics.NewCounter())
 	overview_registry.Register(DOCS_REP_QUEUE_METRIC, metrics.NewCounter())
+	overview_registry.Register(DOCS_CHECKED_METRIC, docs_checked_counter)
 }
 
 func (stats_mgr *StatisticsManager) Start(settings map[string]interface{}) error {
 	stats_mgr.logger.Infof("StatisticsManager Starting...")
 
 	//initialize connection
-	err := stats_mgr.initConnection()
+	err := stats_mgr.initConnections()
 	if err != nil {
 		return err
 	}
@@ -627,11 +753,6 @@ func (stats_mgr *StatisticsManager) Start(settings map[string]interface{}) error
 	stats_mgr.logger.Debugf("StatisticsManager Starts: update_interval=%v, settings=%v\n", stats_mgr.update_interval, settings)
 	stats_mgr.publish_ticker = time.NewTicker(stats_mgr.update_interval)
 
-	//publishing status to expvar
-	expvar_stats_map := pipeline.StorageForRep(stats_mgr.pipeline.Topic())
-	statusVar := new(expvar.String)
-	statusVar.Set(base.Replicating)
-	expvar_stats_map.Set("Status", statusVar)
 	stats_mgr.wait_grp.Add(1)
 	go stats_mgr.updateStats(stats_mgr.finish_ch)
 
@@ -653,24 +774,9 @@ func (stats_mgr *StatisticsManager) Stop() error {
 	return nil
 }
 
-func (stats_mgr *StatisticsManager) initConnection() error {
-
+func (stats_mgr *StatisticsManager) initConnections() error {
 	for serverAddr, _ := range stats_mgr.active_vbs {
-		if serverAddr == "" {
-			panic("serverAddr is empty")
-		}
-		username, password, err := cbauth.GetMemcachedServiceAuth(serverAddr)
-		stats_mgr.logger.Debugf("memcached auth: username=%v, password=%v, err=%v\n", username, password, err)
-		if err != nil {
-			return err
-		}
-
-		conn, err := base.NewConn(serverAddr, username, password)
-		if err != nil {
-			return err
-		}
-
-		_, err = conn.SelectBucket(stats_mgr.bucket_name)
+		conn, err := initConnection(serverAddr, stats_mgr.bucket_name, stats_mgr.logger)
 		if err != nil {
 			return err
 		}
@@ -679,6 +785,30 @@ func (stats_mgr *StatisticsManager) initConnection() error {
 	}
 
 	return nil
+}
+
+func initConnection(serverAddr, bucket_name string, logger *log.CommonLogger) (*mcc.Client, error) {
+
+	if serverAddr == "" {
+		panic("serverAddr is empty")
+	}
+	username, password, err := cbauth.GetMemcachedServiceAuth(serverAddr)
+	logger.Debugf("memcached auth: username=%v, password=%v, err=%v\n", username, password, err)
+	if err != nil {
+		return nil, err
+	}
+
+	conn, err := base.NewConn(serverAddr, username, password)
+	if err != nil {
+		return nil, err
+	}
+
+	_, err = conn.SelectBucket(bucket_name)
+	if err != nil {
+		return nil, err
+	}
+
+	return conn, nil
 }
 
 type MetricsCollector interface {
@@ -896,4 +1026,14 @@ func (ckpt_collector *checkpointMgrCollector) OnEvent(eventType common.Component
 func setCounter(counter metrics.Counter, count int) {
 	counter.Clear()
 	counter.Inc(int64(count))
+}
+
+func (stats_mgr *StatisticsManager) getReplicationStatus() (*pipeline.ReplicationStatus, error) {
+	topic := stats_mgr.pipeline.Topic()
+	rs := pipeline_manager.ReplicationStatus(topic)
+	if rs == nil {
+		return nil, utils.ReplicationStatusNotFoundError(topic)
+	} else {
+		return rs, nil
+	}
 }

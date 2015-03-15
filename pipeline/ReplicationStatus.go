@@ -19,6 +19,8 @@ const (
 	Paused      ReplicationState = iota
 )
 
+var OVERVIEW_METRICS_KEY = "Overview"
+
 func (rep_state ReplicationState) String() string {
 	if rep_state == Pending {
 		return base.Pending
@@ -105,17 +107,12 @@ func (rs *ReplicationStatus) RuntimeStatus() ReplicationState {
 
 //return the corresponding expvar map as its storage
 func (rs *ReplicationStatus) Storage() *expvar.Map {
-	name := rs.rep_spec.Id
-	return StorageForRep(name)
-}
-
-func StorageForRep(name string) *expvar.Map {
 	var rep_map *expvar.Map
-	root_map := RootStorage()
-	rep_map_var := root_map.Get(name)
+	root_map := rootStorage()
+	rep_map_var := root_map.Get(rs.rep_spec.Id)
 	if rep_map_var == nil {
 		rep_map = new(expvar.Map).Init()
-		root_map.Set(name, rep_map)
+		root_map.Set(rs.rep_spec.Id, rep_map)
 	} else {
 		rep_map = rep_map_var.(*expvar.Map)
 	}
@@ -123,7 +120,51 @@ func StorageForRep(name string) *expvar.Map {
 	return rep_map
 }
 
-func RootStorage() *expvar.Map {
+func (rs *ReplicationStatus) GetStats(registryName string) *expvar.Map {
+	expvar_var := rs.Storage()
+	stats := expvar_var.Get(registryName)
+	if stats != nil {
+		statsMap, ok := stats.(*expvar.Map)
+		if ok {
+			return statsMap
+		}
+	}
+	return nil
+}
+
+func (rs *ReplicationStatus) GetOverviewStats() *expvar.Map {
+	return rs.GetStats(OVERVIEW_METRICS_KEY)
+}
+
+func (rs *ReplicationStatus) SetStats(registryName string, stats *expvar.Map) {
+	expvar_var := rs.Storage()
+	expvar_var.Set(registryName, stats)
+}
+
+func (rs *ReplicationStatus) SetOverviewStats(stats *expvar.Map) {
+	rs.SetStats(OVERVIEW_METRICS_KEY, stats)
+}
+
+func (rs *ReplicationStatus) CleanupBeforeExit(statsToClear []string) {
+	errList := rs.Errors()
+	overviewStats := rs.GetOverviewStats()
+	rs.ResetStorage()
+	// preserve error list
+	rs.err_list = errList
+	// clear a subset of stats and preserve the rest
+	if overviewStats != nil {
+		zero_var := new(expvar.Int)
+		zero_var.Set(0)
+		for _, statsToClear := range statsToClear {
+			overviewStats.Set(statsToClear, zero_var)
+		}
+		rs.SetOverviewStats(overviewStats)
+	}
+
+	rs.publishWithStatus(base.Pending)
+}
+
+func rootStorage() *expvar.Map {
 	replications_root_map := expvar.Get(base.XDCR_EXPVAR_ROOT)
 	if replications_root_map == nil {
 		return expvar.NewMap(base.XDCR_EXPVAR_ROOT)
@@ -131,16 +172,21 @@ func RootStorage() *expvar.Map {
 	return replications_root_map.(*expvar.Map)
 }
 
-func ResetRootStorage() {
-	root_map := RootStorage()
-	root_map.Init()
+func (rs *ReplicationStatus) ResetStorage() {
+	root_map := rootStorage()
+	root_map.Set(rs.rep_spec.Id, nil)
 }
 
 func (rs *ReplicationStatus) Publish() {
+	rs.publishWithStatus(rs.RuntimeStatus().String())
+}
+
+// there may be cases, e.g., when we are about to pause the replication, where we want to publish
+// a specified status instead of the one inferred from pipeline.State()
+func (rs *ReplicationStatus) publishWithStatus(status string) {
 	rep_map := rs.Storage()
 
 	//publish status
-	status := rs.RuntimeStatus().String()
 	statusVar := new(expvar.String)
 	statusVar.Set(status)
 	rep_map.Set("Status", statusVar)
@@ -162,7 +208,7 @@ func (rs *ReplicationStatus) Pipeline() common.Pipeline {
 	return rs.pipeline
 }
 
-func (rs *ReplicationStatus) Spec() *metadata.ReplicationSpecification{
+func (rs *ReplicationStatus) Spec() *metadata.ReplicationSpecification {
 	return rs.rep_spec
 }
 
@@ -170,7 +216,7 @@ func (rs *ReplicationStatus) SettingsMap() map[string]interface{} {
 	return rs.rep_spec.Settings.ToMap()
 }
 
-func (rs *ReplicationStatus) Settings() *metadata.ReplicationSettings{
+func (rs *ReplicationStatus) Settings() *metadata.ReplicationSettings {
 	return rs.rep_spec.Settings
 }
 

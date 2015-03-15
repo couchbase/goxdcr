@@ -146,9 +146,8 @@ func (rm *replicationManager) initReplications() {
 			logger_rm.Errorf("Failed to get all replication specs, err=%v, num_of_retry=%v\n", err, i)
 
 		} else {
-
 			for _, spec := range specs {
-				if !spec.Settings.Active {
+				if !spec.Settings.Active && pipeline_manager.ReplicationStatus(spec.Id) == nil {
 					pipeline_manager.SetReplicationStatusForPausedReplication(spec)
 				}
 			}
@@ -406,8 +405,8 @@ func GetStatistics(bucket string) (*expvar.Map, error) {
 
 	stats := new(expvar.Map).Init()
 	for _, repId := range repIds {
-		statsForPipeline := pipeline_svc.GetStatisticsForPipeline(repId)
-		if statsForPipeline != nil {
+		statsForPipeline, err := pipeline_svc.GetStatisticsForPipeline(repId, ClusterInfoService(), XDCRCompTopologyService(), CheckpointService(), logger_rm)
+		if err == nil && statsForPipeline != nil {
 			stats.Set(repId, statsForPipeline)
 		}
 	}
@@ -478,8 +477,8 @@ func GetReplicationInfos() ([]base.ReplicationInfo, error) {
 		rep_status := pipeline_manager.ReplicationStatus(replId)
 		if rep_status != nil {
 			// set stats map
-			expvarMap := pipeline_svc.GetStatisticsForPipeline(replId)
-			if expvarMap != nil {
+			expvarMap, err := pipeline_svc.GetStatisticsForPipeline(replId, ClusterInfoService(), XDCRCompTopologyService(), CheckpointService(), logger_rm)
+			if err == nil && expvarMap != nil {
 				replInfo.StatsMap = utils.GetMapFromExpvarMap(expvarMap)
 				validateStatsMap(replInfo.StatsMap)
 			}

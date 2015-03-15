@@ -447,3 +447,7 @@ func RemoteBucketUUID(remote_connStr, remote_userName, remote_password, bucketNa
 	return bucket.UUID, nil
 
 }
+
+func ReplicationStatusNotFoundError(topic string) error {
+	return fmt.Errorf("Cannot find replication status for topic %v", topic)
+}

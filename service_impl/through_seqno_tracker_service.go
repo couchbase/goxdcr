@@ -199,3 +199,18 @@ func (tsTracker *ThroughSeqnoTrackerSvc) getThroughSeqnos(executor_id int, listO
 		through_seqno_map[vbno] = tsTracker.GetThroughSeqno(vbno)
 	}
 }
+
+func (tsTracker *ThroughSeqnoTrackerSvc) SetStartSeqnos(start_seqno_map map[uint16]uint64) {
+	for vbno, _ := range start_seqno_map {
+		tsTracker.setStartSeqno(vbno, start_seqno_map[vbno])
+	}
+
+	tsTracker.logger.Infof("through_seqno_map in through seqno tracker has been set to %v\n", tsTracker.through_seqno_map)
+}
+
+func (tsTracker *ThroughSeqnoTrackerSvc) setStartSeqno(vbno uint16, seqno uint64) {
+	tsTracker.through_seqno_map_locks[vbno].Lock()
+	defer tsTracker.through_seqno_map_locks[vbno].Unlock()
+
+	tsTracker.through_seqno_map[vbno] = seqno
+}

@@ -17,6 +17,7 @@ import (
 	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/goxdcr/pipeline"
 	"github.com/couchbase/goxdcr/service_def"
+	"github.com/couchbase/goxdcr/utils"
 	"sync"
 	"time"
 )
@@ -82,23 +83,27 @@ func ReplicationStatus(topic string) *pipeline.ReplicationStatus {
 	return pipeline_mgr.pipelines_map[topic]
 }
 
-func SetReplicationStatusForPausedReplication(spec *metadata.ReplicationSpecification) {
-	pipeline_mgr.pipelines_map[spec.Id] = pipeline.NewReplicationStatus(spec, pipeline_mgr.logger)
+func SetReplicationStatusForPausedReplication(spec *metadata.ReplicationSpecification) *pipeline.ReplicationStatus {
+	rs := pipeline.NewReplicationStatus(spec, pipeline_mgr.logger)
+	pipeline_mgr.pipelines_map[spec.Id] = rs
+	return rs
 }
 
 func RemoveReplicationStatus(topic string) error {
 	pipeline_mgr.mapLock.Lock()
 	defer pipeline_mgr.mapLock.Unlock()
 
+	rs := ReplicationStatus(topic)
+	if rs == nil {
+		return utils.ReplicationStatusNotFoundError(topic)
+	}
+	rs.ResetStorage()
+
 	delete(pipeline_mgr.pipelines_map, topic)
 
 	//ask the updater on this topic if any to stop
 	stopUpdater(topic)
 
-	pipeline.ResetRootStorage()
-	for _, rs := range pipeline_mgr.pipelines_map {
-		rs.Publish()
-	}
 	return nil
 }
 

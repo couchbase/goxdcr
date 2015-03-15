@@ -240,6 +240,31 @@ func (ckmgr *CheckpointManager) updateCurrentVBUUID(vbno uint16, vbuuid uint64) 
 	ckmgr.cur_ckpts[vbno] = record
 }
 
+func getDocsProcessedForPausedReplication(topic string, checkpoints_svc service_def.CheckpointsService,
+	logger *log.CommonLogger) (uint64, error) {
+	defer logger.Info("Done with GetDocsProcessedForPausedReplication")
+	logger.Infof("Start GetDocsProcessedForPausedReplication for replication %v...", topic)
+
+	logger.Debugf("Getting checkpoint for %v\n", topic)
+	ckptDocs, err := checkpoints_svc.CheckpointsDocs(topic)
+	logger.Debugf("Done getting checkpoint for %v\n", topic)
+	if err != nil {
+		return 0, err
+	}
+
+	var docsProcessed uint64
+
+	for _, ckptDoc := range ckptDocs {
+		// if checkpoint records exist, use the seqno in the first checkpoint record, which is the highest in all checkpoint records
+		if ckptDoc != nil && ckptDoc.Checkpoint_records != nil && ckptDoc.Checkpoint_records[0] != nil {
+			docsProcessed += ckptDoc.Checkpoint_records[0].Seqno
+		}
+	}
+
+	return docsProcessed, nil
+
+}
+
 func (ckmgr *CheckpointManager) SetVBTimestamps(topic string) error {
 	defer ckmgr.logger.Info("Done with SetVBTimestamps")
 	ckmgr.logger.Infof("Set start seqnos for pipeline %v...", ckmgr.pipeline.InstanceId())
@@ -299,6 +324,12 @@ func (ckmgr *CheckpointManager) SetVBTimestamps(topic string) error {
 	}
 	settings := ckmgr.pipeline.Settings()
 	settings["VBTimestamps"] = ret
+
+	start_seqno_map := make(map[uint16]uint64)
+	for vbno, ts := range ret {
+		start_seqno_map[vbno] = ts.Seqno
+	}
+	ckmgr.through_seqno_tracker_svc.SetStartSeqnos(start_seqno_map)
 
 	ckmgr.logger.Infof("Done with setting starting seqno for pipeline %v\n", ckmgr.pipeline.InstanceId())
 	return nil
@@ -665,6 +696,9 @@ func (ckmgr *CheckpointManager) UpdateVBTimestamps(vbno uint16, rollbackseqno ui
 
 	foundIndex := -1
 	for index, ckpt_record := range checkpointDoc.Checkpoint_records {
+		if ckpt_record == nil {
+			break
+		}
 		//found the first ckpt record whose Seqno <= rollbackseqno
 		if ckpt_record.Seqno <= rollbackseqno {
 			foundIndex = index
