@@ -257,6 +257,9 @@ func (c *Client) GetBulk(vb uint16, keys []string) (map[string]*gomemcached.MCRe
 				log.Panicf("Unexpected opcode in GETQ response: %+v",
 					res)
 			}
+			if res.Opaque >= uint32(len(keys)) {
+				log.Panicf(" Invalid opaque Value. Debug info : Res.opaque : %v, Keys %v, Response received %v", res.Opaque, len(keys), res)
+			}
 			rv[keys[res.Opaque]] = res
 		}
 	}()
