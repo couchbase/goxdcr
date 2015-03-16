@@ -672,10 +672,6 @@ func getBoolFromValArr(valArr []string, defaultValue bool) (bool, error) {
 	return defaultValue, nil
 }
 
-func EncodeReplicationErrorsMapIntoResponse(errorsMap map[string]error) (*ap.Response, error) {
-	return EncodeErrorsMapIntoResponse(errorsMap, true)
-}
-
 func EncodeRemoteClusterErrorsMapIntoResponse(errorsMap map[string]error) (*ap.Response, error) {
 	return EncodeErrorsMapIntoResponse(errorsMap, false)
 }
@@ -699,6 +695,17 @@ func EncodeErrorsMapIntoResponse(errorsMap map[string]error, withErrorsWrapper b
 
 	// validation errors cause StatusBadRequest to be returned to client
 	return EncodeObjectIntoResponseWithStatusCode(result, http.StatusBadRequest)
+}
+
+func EncodeInternalSettingsErrorsMapIntoResponse(errorsMap map[string]error) (*ap.Response, error) {
+	errorMsgMap := make(map[string]string)
+	for key, _ := range errorsMap {
+		internalSettingsKey := ConvertRestKeyToRestInternalKey(key)
+		// this is to be backward compatible with old xdcr
+		errorMsgMap[internalSettingsKey] = utils.GenericInvalidValueError(internalSettingsKey).Error()
+	}
+
+	return EncodeObjectIntoResponseWithStatusCode(errorMsgMap, http.StatusBadRequest)
 }
 
 func EncodeReplicationValidationErrorIntoResponse(err error) (*ap.Response, error) {
@@ -800,7 +807,7 @@ func processKey(restKey string, valArr []string, settingsPtr *map[string]interfa
 	if len(valArr) == 0 || valArr[0] == "" {
 		return nil
 	}
-	convertedValue, err := metadata.ValidateAndConvertSettingsValue(settingsKey, valArr[0])
+	convertedValue, err := metadata.ValidateAndConvertSettingsValue(settingsKey, valArr[0], restKey)
 	if err == nil {
 		(*settingsPtr)[settingsKey] = convertedValue
 	}

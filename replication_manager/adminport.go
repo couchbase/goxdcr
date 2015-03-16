@@ -349,7 +349,7 @@ func (adminport *Adminport) doCreateReplicationRequest(request *http.Request) (*
 		return nil, err
 	} else if len(errorsMap) > 0 {
 		logger_ap.Errorf("Validation error in inputs. errorsMap=%v\n", errorsMap)
-		return EncodeReplicationErrorsMapIntoResponse(errorsMap)
+		return EncodeErrorsMapIntoResponse(errorsMap, true)
 	}
 
 	logger_ap.Infof("Request parameters: justValidate=%v, fromBucket=%v, toCluster=%v, toBucket=%v, settings=%v\n",
@@ -361,7 +361,7 @@ func (adminport *Adminport) doCreateReplicationRequest(request *http.Request) (*
 		return EncodeReplicationSpecErrorIntoResponse(err)
 	} else if len(errorsMap) > 0 {
 		logger_ap.Errorf("Error creating replication. errorsMap=%v\n", errorsMap)
-		return EncodeReplicationErrorsMapIntoResponse(errorsMap)
+		return EncodeErrorsMapIntoResponse(errorsMap, true)
 	} else {
 		return NewCreateReplicationResponse(replicationId)
 	}
@@ -402,7 +402,7 @@ func (adminport *Adminport) doChangeInternalSettingsRequest(request *http.Reques
 	settingsMap, errorsMap := DecodeSettingsFromInternalSettingsRequest(request)
 	if len(errorsMap) > 0 {
 		logger_ap.Errorf("Validation error in inputs. errorsMap=%v\n", errorsMap)
-		return EncodeReplicationErrorsMapIntoResponse(errorsMap)
+		return EncodeInternalSettingsErrorsMapIntoResponse(errorsMap)
 	}
 
 	logger_ap.Infof("Request params: inputSettings=%v\n", settingsMap)
@@ -412,7 +412,7 @@ func (adminport *Adminport) doChangeInternalSettingsRequest(request *http.Reques
 		return nil, err
 	} else if len(errorsMap) > 0 {
 		logger_ap.Errorf("Validation error in inputs. errorsMap=%v\n", errorsMap)
-		return EncodeReplicationErrorsMapIntoResponse(errorsMap)
+		return EncodeInternalSettingsErrorsMapIntoResponse(errorsMap)
 	} else {
 		return NewEmptyArrayResponse()
 	}
@@ -435,7 +435,7 @@ func (adminport *Adminport) doChangeDefaultReplicationSettingsRequest(request *h
 	justValidate, settingsMap, errorsMap := DecodeChangeReplicationSettings(request, true)
 	if len(errorsMap) > 0 {
 		logger_ap.Errorf("Validation error in inputs. errorsMap=%v\n", errorsMap)
-		return EncodeReplicationErrorsMapIntoResponse(errorsMap)
+		return EncodeErrorsMapIntoResponse(errorsMap, false)
 	}
 
 	logger_ap.Infof("Request params: justValidate=%v, inputSettings=%v\n", justValidate, settingsMap)
@@ -446,7 +446,7 @@ func (adminport *Adminport) doChangeDefaultReplicationSettingsRequest(request *h
 			return nil, err
 		} else if len(errorsMap) > 0 {
 			logger_ap.Errorf("Validation error in inputs. errorsMap=%v\n", errorsMap)
-			return EncodeReplicationErrorsMapIntoResponse(errorsMap)
+			return EncodeErrorsMapIntoResponse(errorsMap, false)
 		}
 	}
 
@@ -493,7 +493,7 @@ func (adminport *Adminport) doChangeReplicationSettingsRequest(request *http.Req
 	justValidate, settingsMap, errorsMap := DecodeChangeReplicationSettings(request, false)
 	if len(errorsMap) > 0 {
 		logger_ap.Errorf("Validation error in inputs. errorsMap=%v\n", errorsMap)
-		return EncodeReplicationErrorsMapIntoResponse(errorsMap)
+		return EncodeErrorsMapIntoResponse(errorsMap, false)
 	}
 
 	logger_ap.Infof("Request params: justValidate=%v, inputSettings=%v\n", justValidate, settingsMap)
@@ -507,7 +507,7 @@ func (adminport *Adminport) doChangeReplicationSettingsRequest(request *http.Req
 		return nil, err
 	} else if len(errorsMap) > 0 {
 		logger_ap.Errorf("Validation error in inputs. errorsMap=%v\n", errorsMap)
-		return EncodeReplicationErrorsMapIntoResponse(errorsMap)
+		return EncodeErrorsMapIntoResponse(errorsMap, false)
 	}
 
 	// return replication settings after changes

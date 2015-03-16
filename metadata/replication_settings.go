@@ -65,10 +65,10 @@ var FailureRestartIntervalConfig = &SettingsConfig{30, &Range{1, 300}}
 var OptimisticReplicationThresholdConfig = &SettingsConfig{256, &Range{0, 20 * 1024 * 1024}}
 var SourceNozzlePerNodeConfig = &SettingsConfig{2, &Range{1, 10}}
 var TargetNozzlePerNodeConfig = &SettingsConfig{2, &Range{1, 100}}
-var MaxExpectedReplicationLagConfig = &SettingsConfig{1000, nil}
+var MaxExpectedReplicationLagConfig = &SettingsConfig{1000, &Range{100, 60000}}
 var TimeoutPercentageCapConfig = &SettingsConfig{50, &Range{0, 100}}
 var PipelineLogLevelConfig = &SettingsConfig{log.LogLevelInfo, nil}
-var PipelineStatsIntervalConfig = &SettingsConfig{60000, nil}
+var PipelineStatsIntervalConfig = &SettingsConfig{60000, &Range{200, 600000}}
 
 var SettingsConfigMap = map[string]*SettingsConfig{
 	ReplicationType:                ReplicationTypeConfig,
@@ -376,12 +376,20 @@ func (s *ReplicationSettings) toMap(isDefaultSettings bool) map[string]interface
 	return settings_map
 }
 
-func ValidateAndConvertSettingsValue(key string, value string) (convertedValue interface{}, err error) {
+func ValidateAndConvertSettingsValue(key, value, errorKey string) (convertedValue interface{}, err error) {
 	switch key {
-	// TODO add validation for these enum values
-	case ReplicationType, PipelineLogLevel:
-		// string parameters need no conversion
-		convertedValue = value
+	case ReplicationType:
+		if value != ReplicationTypeXmem && value != ReplicationTypeCapi {
+			err = utils.GenericInvalidValueError(errorKey)
+		} else {
+			convertedValue = value
+		}
+	case PipelineLogLevel:
+		if _, err = log.LogLevelFromStr(value); err != nil {
+			err = utils.GenericInvalidValueError(errorKey)
+		} else {
+			convertedValue = value
+		}
 	case FilterExpression:
 		// check that filter expression is a valid regular expression
 		_, err = regexp.Compile(value)
