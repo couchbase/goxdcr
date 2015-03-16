@@ -70,37 +70,47 @@ func NewAdminport(laddr string, xdcrRestPort uint16, finch chan bool) *Adminport
 
 // admin-port entry point
 func (adminport *Adminport) Start() {
+
 	// start adminport gen_server
-	adminport.Start_server()
+	err := adminport.Start_server()
+	if err != nil {
+		logger_ap.Errorf("Error calling Start_Server on adminport. err=%v\n", err)
+		return
+	}
 
 	// start http server
 	reqch := make(chan ap.Request)
 	hostAddr := utils.GetHostAddr(adminport.sourceKVHost, adminport.xdcrRestPort)
 	server := ap.NewHTTPServer("xdcr", hostAddr, base.AdminportUrlPrefix, reqch, new(ap.Handler))
-
-	server.Start()
-	logger_ap.Infof("server started %v !\n", hostAddr)
-
 	finch := adminport.finch
-	count := 0
-loop:
+
+	err = server.Start()
+	if err != nil {
+		goto done
+	}
+
+	logger_ap.Infof("http server started %v !\n", hostAddr)
+
 	for {
-		count++
 		select {
 		case <-finch:
-			break loop
+			goto done
 		case req, ok := <-reqch: // admin requests are serialized here
 			if ok == false {
-				break loop
+				goto done
 			}
 			// forward message to adminport server for processing
 			adminport.SendMsg_async([]interface{}{req})
 		}
 	}
-	logger_ap.Infof("adminport exited !\n")
+done:
 	server.Stop()
 	adminport.Stop_server()
-
+	if err != nil {
+		logger_ap.Errorf("adminport exited with error. err=%v\n", err)
+	} else {
+		logger_ap.Info("adminport exited !\n")
+	}
 }
 
 // needed by Supervisor interface
@@ -612,7 +622,7 @@ func authAdminCreds(request *http.Request, readOnly bool) error {
 
 func writeRemoteClusterAuditEvent(eventId uint32, remoteClusterRef *metadata.RemoteClusterReference, realUserId *base.RealUserId) {
 	event := &base.RemoteClusterRefEvent{
-		GenericFields:         base.GenericFields{time.Now(), *realUserId},
+		GenericFields:         base.GenericFields{utils.FormatTimeWithMilliSecondPrecision(time.Now()), *realUserId},
 		RemoteClusterName:     remoteClusterRef.Name,
 		RemoteClusterHostname: remoteClusterRef.HostName,
 		IsEncrypted:           remoteClusterRef.DemandEncryption}

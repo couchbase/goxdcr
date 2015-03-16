@@ -69,7 +69,6 @@ func NewHTTPServer(name, connAddr, urlPrefix string, reqch chan<- Request, handl
 		logPrefix: fmt.Sprintf("[%s:%s]", name, connAddr),
 	}
 	logger_server.Infof("%v new http server %v %v %v\n", s.logPrefix, name, connAddr, urlPrefix)
-	//	mux := http.NewServeMux()
 	http.Handle(s.urlPrefix, handler)
 	handler.SetServer(s)
 	s.srv = &http.Server{
@@ -96,7 +95,7 @@ func (s *httpServer) Start() (err error) {
 		logger_server.Infof("%s starting ...\n", s.logPrefix)
 		err := s.srv.Serve(s.lis) // serve until listener is closed.
 		if err != nil {
-			logger_server.Errorf("%s %v\n", s.logPrefix, err)
+			logger_server.Errorf("%s exited with error %v\n", s.logPrefix, err)
 		}
 	}()
 	return
@@ -122,8 +121,6 @@ func (s *httpServer) shutdown() {
 // handle incoming request.
 func (s *httpServer) systemHandler(w http.ResponseWriter, r *http.Request) {
 	var err error
-
-	logger_server.Infof("Request r=%v\nwith path, %v, method, %v, and content type %v\n", r, r.URL.Path, r.Method, r.Header.Get("Content-Type"))
 
 	// Fault-tolerance. No need to crash the server in case of panic.
 	defer func() {
@@ -184,6 +181,7 @@ type Handler struct {
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	logger_server.Infof("Request received from ServeHTTP. r=%v\nwith path, %v and method, %v\n", r, r.URL.Path, r.Method)
 	h.server.systemHandler(w, r)
 }
 

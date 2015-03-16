@@ -30,7 +30,6 @@ var NodesSelfPath = "/nodes/self"
 var SSLPortsPath = "/nodes/self/xdcrSSLPorts"
 var NodeServicesPath = "/pools/default/nodeServices"
 
-
 // constants for CAPI nozzle
 var RevsDiffPath = "/_revs_diff"
 var BulkDocsPath = "/_bulk_docs"
@@ -43,15 +42,15 @@ var CouchApiBaseHttps = "couchApiBaseHTTPS"
 var NodesKey = "nodes"
 var HostNameKey = "hostname"
 var ThisNodeKey = "thisNode"
-var SSLPortKey = "httpsMgmt" 
+var SSLPortKey = "httpsMgmt"
 var PortsKey = "ports"
 var DirectPortKey = "direct"
-var ProxyPortKey ="proxy"
+var ProxyPortKey = "proxy"
 var SSLProxyPortKey = "sslProxy"
 var NodeExtKey = "nodesExt"
 var KVPortKey = "kv"
 var KVSSLPortKey = "kvSSL"
-var ServicesKey= "services"
+var ServicesKey = "services"
 
 // URL related constants
 var UrlDelimiter = "/"
@@ -59,8 +58,8 @@ var UrlPortNumberDelimiter = ":"
 
 // http request method types
 const (
-	MethodGet = "GET"
-	MethodPost = "POST"
+	MethodGet    = "GET"
+	MethodPost   = "POST"
 	MethodDelete = "DELETE"
 )
 
@@ -76,10 +75,11 @@ var GometaRequestPortNumber uint16 = 11000
 
 // AdminportReadTimeout timeout, in milliseconds, is read timeout for
 // golib's http server.
-var AdminportReadTimeout = 0
+var AdminportReadTimeout = 30000
+
 // AdminportWriteTimeout timeout, in milliseconds, is write timeout for
 // golib's http server.
-var AdminportWriteTimeout = 0
+var AdminportWriteTimeout = 30000
 
 //outgoing nozzle type
 type XDCROutgoingNozzleType int
@@ -90,75 +90,73 @@ const (
 )
 
 const (
-	PIPELINE_SUPERVISOR_SVC string = "PipelineSupervisor"
-	CHECKPOINT_MGR_SVC string = "CheckpointManager"
-	STATISTICS_MGR_SVC string = "StatisticsManager"
+	PIPELINE_SUPERVISOR_SVC    string = "PipelineSupervisor"
+	CHECKPOINT_MGR_SVC         string = "CheckpointManager"
+	STATISTICS_MGR_SVC         string = "StatisticsManager"
 	TOPOLOGY_CHANGE_DETECT_SVC string = "TopologyChangeDetectSvc"
 )
 
 // supervisor related constants
-const(
+const (
 	ReplicationManagerSupervisorId = "ReplicationManagerSupervisor"
-	PipelineMasterSupervisorId = "PipelineMasterSupervisor"
-	AdminportSupervisorId = "AdminportSupervisor"
-	PipelineSupervisorIdPrefix = "PipelineSupervisor_"
+	PipelineMasterSupervisorId     = "PipelineMasterSupervisor"
+	AdminportSupervisorId          = "AdminportSupervisor"
+	PipelineSupervisorIdPrefix     = "PipelineSupervisor_"
 )
 
 // constants for integer parsing
-var ParseIntBase    = 10
+var ParseIntBase = 10
 var ParseIntBitSize = 64
 
 var ErrorNotMyVbucket = errors.New("NOT_MY_VBUCKET")
 
 var InvalidStateTransitionErrMsg = "Can't move to state %v - %v's current state is %v, can only move to state [%v]"
 
-
 // constants used for remote cluster references
 const (
-	RemoteClustersPath  = "pools/default/remoteClusters"
-	
-	RemoteClusterUuid   = "uuid"
-	RemoteClusterName  = "name"
-	RemoteClusterHostName = "hostname"
-	RemoteClusterUserName = "username"
-	RemoteClusterPassword = "password"
+	RemoteClustersPath = "pools/default/remoteClusters"
+
+	RemoteClusterUuid             = "uuid"
+	RemoteClusterName             = "name"
+	RemoteClusterHostName         = "hostname"
+	RemoteClusterUserName         = "username"
+	RemoteClusterPassword         = "password"
 	RemoteClusterDemandEncryption = "demandEncryption"
-	RemoteClusterCertificate = "certificate"
-	RemoteClusterUri = "uri"
-	RemoteClusterValidateUri = "validateURI"
-	RemoteClusterDeleted = "deleted"
-	IsEnterprise = "isEnterprise"
+	RemoteClusterCertificate      = "certificate"
+	RemoteClusterUri              = "uri"
+	RemoteClusterValidateUri      = "validateURI"
+	RemoteClusterDeleted          = "deleted"
+	IsEnterprise                  = "isEnterprise"
 )
 
 // constant used by more than one rest apis
 const (
- 	JustValidate = "just_validate"
- 	JustValidatePostfix = "?" + JustValidate + "=1"
+	JustValidate        = "just_validate"
+	JustValidatePostfix = "?" + JustValidate + "=1"
 )
 
 // Key used for general validation errors that are not related to any specific http request parameters
-var PlaceHolderFieldKey = "_"  
+var PlaceHolderFieldKey = "_"
 
 // http request related constants
 const (
-	ContentType = "Content-Type"
+	ContentType        = "Content-Type"
 	DefaultContentType = "application/x-www-form-urlencoded"
-	JsonContentType = "application/json"
-	ContentLength = "Content-Length"
+	JsonContentType    = "application/json"
+	ContentLength      = "Content-Length"
 )
 
 //constant for replication tasklist status
 const (
-	Pending = "Pending"
+	Pending     = "Pending"
 	Replicating = "Replicating"
-	Paused = "Paused"
+	Paused      = "Paused"
 )
 
 const (
 	//Bucket sequence number statistics
 	VBUCKET_SEQNO_STAT_NAME            = "vbucket-seqno"
 	VBUCKET_HIGH_SEQNO_STAT_KEY_FORMAT = "vb_%v:high_seqno"
-
 )
 
 var ErrorsStatsKey = "Errors"
@@ -169,6 +167,7 @@ var UILogRetry = 3
 var UILogMessageKey = "message"
 var UILogLogLevelKey = "logLevel"
 var UILogComponentKey = "component"
+
 // so far all xdcr logs are of info level, thus we can hardcode it here
 var UILogXDCRLogLevel = "info"
 var UILogXDCRComponent = "xdcr"
@@ -176,17 +175,18 @@ var UILogXDCRComponent = "xdcr"
 var CouchApiBaseUriDelimiter = "%2f"
 
 var XDCR_EXPVAR_ROOT = "XDCR_Replications"
+
 //constants for replication docs
 const (
 	RemoteClustersForReplicationDoc = "remoteClusters"
 	BucketsPath                     = "buckets"
 
-	ReplicationDocType           = "type"
-	ReplicationDocId             = "id"
-	ReplicationDocSource         = "source"
-	ReplicationDocTarget         = "target"
-	ReplicationDocContinuous     = "continuous"
-	ReplicationDocPauseRequested = "pause_requested"
+	ReplicationDocType                 = "type"
+	ReplicationDocId                   = "id"
+	ReplicationDocSource               = "source"
+	ReplicationDocTarget               = "target"
+	ReplicationDocContinuous           = "continuous"
+	ReplicationDocPauseRequested       = "pause_requested"
 	ReplicationDocPauseRequestedOutput = "pauseRequested"
 
 	ReplicationDocTypeXmem = "xdc-xmem"

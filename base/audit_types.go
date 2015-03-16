@@ -10,7 +10,6 @@
 package base
 
 import (
-	"time"
 )
 
 const (
@@ -59,7 +58,7 @@ type GenericReplicationEvent struct {
 
 // fields applicable to all events
 type GenericFields struct {
-	Timestamp  time.Time  `json:"timestamp"`
+	Timestamp  string  `json:"timestamp"`
 	RealUserid RealUserId `json:"real_userid"`
 }
 

@@ -14,6 +14,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 )
 
 type BucketBasicStats struct {
@@ -332,6 +333,11 @@ func UrlForLog(urlStr string) string {
 }
 
 func GetMatchedKeys(expression string, keys []string) (map[string][][]int, error) {
+	logger_utils.Infof("GetMatchedKeys expression=%v\n", expression)
+	for _, key := range keys {
+		logger_utils.Infof("GetMatchedKeys key=%v, key_bytes=%v\n", key, []byte(key))
+	}
+
 	regExp, err := regexp.Compile(expression)
 	if err != nil {
 		return nil, err
@@ -349,9 +355,16 @@ func GetMatchedKeys(expression string, keys []string) (map[string][][]int, error
 		matchesMap[key] = matches
 	}
 
+	logger_utils.Infof("matchesMap=%v\n", matchesMap)
+
 	return matchesMap, nil
 }
 
 func RegexpMatch(regExp *regexp.Regexp, key []byte) bool {
 	return regExp.Match(key)
+}
+
+// example format: 2015-03-17T10:15:06.717-07:00
+func FormatTimeWithMilliSecondPrecision(origTime time.Time) string {
+	return origTime.Format("2006-01-02T15:04:05.000Z07:00")
 }
