@@ -98,27 +98,24 @@ func (ckpt_svc *CheckpointsService) UpsertCheckpoints(replicationId string, vbno
 func (ckpt_svc *CheckpointsService) CheckpointsDocs(replicationId string) (map[uint16]*metadata.CheckpointsDoc, error) {
 	checkpointsDocs := make(map[uint16]*metadata.CheckpointsDoc)
 	catalogKey := ckpt_svc.getCheckpointCatalogKey(replicationId)
-	ckpt_keys, err := ckpt_svc.metadata_svc.GetAllKeysFromCatalog(catalogKey)
+	ckpt_entries, err := ckpt_svc.metadata_svc.GetAllMetadataFromCatalog(catalogKey)
 	if err != nil {
 		return nil, err
 	}
 
-	for _, ckpt_key := range ckpt_keys {
-		vbno, err := ckpt_svc.decodeVbnoFromCkptDocKey(ckpt_key)
-		if err != nil {
-			return nil, err
-		}
+	for _, ckpt_entry := range ckpt_entries {
+		if ckpt_entry != nil {
+			vbno, err := ckpt_svc.decodeVbnoFromCkptDocKey(ckpt_entry.Key)
+			if err != nil {
+				return nil, err
+			}
 
-		result, rev, err := ckpt_svc.metadata_svc.Get(ckpt_key)
-		if err != nil {
-			return nil, err
+			ckpt_doc, err := ckpt_svc.constructCheckpointDoc(ckpt_entry.Value, ckpt_entry.Rev)
+			if err != nil {
+				return nil, err
+			}
+			checkpointsDocs[vbno] = ckpt_doc
 		}
-
-		ckpt_doc, err := ckpt_svc.constructCheckpointDoc(result, rev)
-		if err != nil {
-			return nil, err
-		}
-		checkpointsDocs[vbno] = ckpt_doc
 	}
 	return checkpointsDocs, nil
 }
