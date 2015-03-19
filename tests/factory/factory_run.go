@@ -8,7 +8,6 @@ import (
 	base "github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/factory"
 	"github.com/couchbase/goxdcr/log"
-	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/goxdcr/parts"
 	"github.com/couchbase/goxdcr/replication_manager"
 	s "github.com/couchbase/goxdcr/service_impl"
@@ -78,7 +77,7 @@ func main() {
 
 func invokeFactory() error {
 	cluster_info_svc := s.NewClusterInfoSvc(nil)
-	
+
 	top_svc, err := s.NewXDCRTopologySvc(uint16(options.sourceKVAdminPort), base.AdminportNumber, 12001, true, cluster_info_svc, nil)
 	if err != nil {
 		fmt.Printf("Error starting xdcr topology service. err=%v\n", err)
@@ -105,7 +104,7 @@ func invokeFactory() error {
 
 	uilog_svc := s.NewUILogSvc(top_svc, nil)
 	remote_cluster_svc := s.NewRemoteClusterService(uilog_svc, msvc, top_svc, nil)
-	repl_spec_svc := s.NewReplicationSpecService(uilog_svc, remote_cluster_svc, msvc, nil)
+	repl_spec_svc := s.NewReplicationSpecService(uilog_svc, remote_cluster_svc, msvc, top_svc, nil)
 	checkpoints_svc := s.NewCheckpointsService(msvc, nil)
 	capi_svc := s.NewCAPIService(nil)
 
@@ -132,7 +131,12 @@ func invokeFactory() error {
 		return err
 	}
 
-	replSpec := metadata.NewReplicationSpecification(options.sourceBucket, remoteClusterRef.Uuid, options.targetBucket)
+	replSpec, err := repl_spec_svc.ConstructNewReplicationSpec(options.sourceBucket, remoteClusterRef.Uuid, options.targetBucket)
+	if err != nil {
+		fmt.Println(err.Error())
+		return err
+	}
+
 	replSpec.Settings.SourceNozzlePerNode = NUM_SOURCE_CONN
 	replSpec.Settings.TargetNozzlePerNode = NUM_TARGET_CONN
 	err = repl_spec_svc.AddReplicationSpec(replSpec)

@@ -139,28 +139,32 @@ func StartReplicationManager(sourceKVHost string, xdcrRestPort uint16,
 }
 
 func (rm *replicationManager) initReplications() {
-	// set ReplicationStatus for paused replications so that they will show up in task list
-	specs, err := rm.repl_spec_svc.AllReplicationSpecs()
-	if err != nil {
-		// likely metakv is not yet ready. abort
-		logger_rm.Errorf("Failed to get all replication specs, err=%v", err)
-		exitProcess(true)
-	}
+	for i := 0; i < service_def.MaxNumOfRetries; i++ {
+		// set ReplicationStatus for paused replications so that they will show up in task list
+		specs, err := rm.repl_spec_svc.AllReplicationSpecs()
+		if err != nil {
+			logger_rm.Errorf("Failed to get all replication specs, err=%v, num_of_retry=%v\n", err, i)
 
-	for _, spec := range specs {
-		if !spec.Settings.Active {
-			pipeline_manager.SetReplicationStatusForPausedReplication(spec)
+		} else {
+
+			for _, spec := range specs {
+				if !spec.Settings.Active {
+					pipeline_manager.SetReplicationStatusForPausedReplication(spec)
+				}
+			}
+
+			// start listening to repl spec changed events
+			// this will start replications with active replication specs
+			err = rm.repl_spec_svc.StartSpecChangedCallBack(specChangedCallback, specChangeObservationFailureCallBack, replication_mgr.repl_spec_callback_cancel_ch, replication_mgr.children_waitgrp)
+			if err != nil {
+				logger_rm.Errorf("Failed to start spec changed call back, err=%v, num_of_retry=%v\n", err, i)
+			} else {
+				return
+			}
 		}
 	}
-
-	// start listening to repl spec changed events
-	// this will start replications with active replication specs
-	err = rm.repl_spec_svc.StartSpecChangedCallBack(specChangedCallback, specChangeObservationFailureCallBack, replication_mgr.repl_spec_callback_cancel_ch, replication_mgr.children_waitgrp)
-	if err != nil {
-		// likely metakv is not yet ready. abort
-		logger_rm.Errorf("Failed to start spec changed call back, err=%v", err)
-		exitProcess(true)
-	}
+	logger_rm.Errorf("Can't initReplications after %v retries. Exit replicaiton manager", service_def.MaxNumOfRetries)
+	exitProcess(false)
 }
 
 func (rm *replicationManager) checkReplicationStatus(fin_chan chan bool) {
@@ -388,28 +392,9 @@ func UpdateReplicationSettings(topic string, settings map[string]interface{}, re
 
 // delete all replications for the specified bucket
 func DeleteAllReplications(bucket string, realUserId *base.RealUserId) error {
-	repIds, err := ReplicationSpecService().AllReplicationSpecIdsForBucket(bucket)
-	if err != nil {
-		return err
-	}
-	logger_rm.Infof("repIds to be deleted = %v\n", repIds)
-
-	failedRepMap := make(map[string]string)
-
-	for _, repId := range repIds {
-		err = DeleteReplication(repId, realUserId)
-		if err != nil {
-			failedRepMap[repId] = err.Error()
-		}
-	}
-
-	if len(failedRepMap) == 0 {
-		return nil
-	} else {
-		errMsg := fmt.Sprintf("Error deleting replications. %v", failedRepMap)
-		logger_rm.Errorf(errMsg)
-		return errors.New(errMsg)
-	}
+	//no-op
+	//deprecate
+	return nil
 }
 
 // get statistics for all running replications
@@ -449,14 +434,18 @@ func (rm *replicationManager) createAndPersistReplicationSpec(justValidate bool,
 	if len(errorMap) > 0 {
 		return nil, errorMap, nil
 	}
-	
+
 	//this will not fail because of the validation above
 	targetClusterRef, err := rm.remote_cluster_svc.RemoteClusterByRefName(targetCluster, false)
 	if err != nil {
 		return nil, nil, err
 	}
-	
-	spec := metadata.NewReplicationSpecification(sourceBucket, targetClusterRef.Uuid, targetBucket)
+
+	spec, err := rm.repl_spec_svc.ConstructNewReplicationSpec(sourceBucket, targetClusterRef.Uuid, targetBucket)
+	if err != nil {
+		return nil, nil, err
+	}
+
 	replSettings, err := ReplicationSettingsService().GetDefaultReplicationSettings()
 	if err != nil {
 		return nil, nil, err
@@ -780,13 +769,13 @@ func specChangedCallback(changedSpecId string, changedSpec *metadata.Replication
 // Callback function for replication spec observation failed event
 func specChangeObservationFailureCallBack(err error) {
 	// the only thing we can do is to abort
-	logger_rm.Errorf("Aborting replication manager since failed to listen to replication specification changes. err=%v\n", err)
+	logger_rm.Infof("metakv.RunObserveChildren failed, err=%v. Restart it\n", err)
 	if err == nil && !replication_mgr.running {
 		//callback is cannceled and replication_mgr is exiting.
 		//no-op
 		return
 	}
-	exitProcess(true)
+	replication_mgr.initReplications()
 }
 
 // whether there are critical changes to the replication spec that require pipeline reconstruction

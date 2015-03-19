@@ -72,6 +72,7 @@ var InvalidIntValue int = -1
 var NonExistentIntValue int = -2
 
 type MigrationSvc struct {
+	xdcr_comp_topology_svc   service_def.XDCRCompTopologySvc
 	remote_cluster_svc       service_def.RemoteClusterSvc
 	repl_spec_svc            service_def.ReplicationSpecSvc
 	replication_settings_svc service_def.ReplicationSettingsSvc
@@ -79,10 +80,11 @@ type MigrationSvc struct {
 	logger                   *log.CommonLogger
 }
 
-func NewMigrationSvc(remote_cluster_svc service_def.RemoteClusterSvc, repl_spec_svc service_def.ReplicationSpecSvc,
+func NewMigrationSvc(xdcr_comp_topology_svc service_def.XDCRCompTopologySvc, remote_cluster_svc service_def.RemoteClusterSvc, repl_spec_svc service_def.ReplicationSpecSvc,
 	replication_settings_svc service_def.ReplicationSettingsSvc, checkpoints_svc service_def.CheckpointsService,
 	loggerCtx *log.LoggerContext) *MigrationSvc {
 	service := &MigrationSvc{
+		xdcr_comp_topology_svc:   xdcr_comp_topology_svc,
 		remote_cluster_svc:       remote_cluster_svc,
 		repl_spec_svc:            repl_spec_svc,
 		replication_settings_svc: replication_settings_svc,
@@ -127,7 +129,7 @@ func (service *MigrationSvc) readMetadataFromStdin() ([]byte, error) {
 		if len(line) == 1 {
 			break
 		} else {
-			dataBytes = append(dataBytes, line[:len(line) - 1]...)
+			dataBytes = append(dataBytes, line[:len(line)-1]...)
 		}
 	}
 	service.logger.Infof("metadata read: dataBytes=%v\ndataBytes_str=%v\n", dataBytes, string(dataBytes))
@@ -502,32 +504,82 @@ func (service *MigrationSvc) migrateReplicationDoc(replicationDocData interface{
 	}
 
 	// save replication spec if there are no validation errors
-	spec := metadata.NewReplicationSpecification(sourceBucket, targetClusterUuid, targetBucket)
-	_, errorMap := spec.Settings.UpdateSettingsFromMap(settingsMap)
-
-	service.logger.Infof("Replication spec constructed = %v\n", spec)
-
-	errorList = addErrorMapToErrorList(errorMap, errorList)
-
-	if len(errorList) > 0 {
+	sourceBucketUUID, err_source := service.sourceBucketUUID(sourceBucket)
+	targetBucketUUID, err_target := service.targetBucketUUID(targetClusterUuid, targetBucket)
+	if err_source != nil && err_source != utils.NonExistentBucketError &&
+		err_target != nil && err_target != utils.NonExistentBucketError {
+		if err_source != nil {
+			errorList = append(errorList, err_source)
+		}
+		if err_target != nil {
+			errorList = append(errorList, err_target)
+		}
 		return errorList
 	}
 
-	// delete replication spec if it already exists
-	_, err := service.repl_spec_svc.DelReplicationSpec(spec.Id)
-	if err == nil {
-		service.logger.Infof("Deleted existing replication spec with id=%v\n", spec.Id)
+	if err_source == utils.NonExistentBucketError || err_target == utils.NonExistentBucketError {
+		if err_source == utils.NonExistentBucketError && err_target == utils.NonExistentBucketError {
+			service.logger.Infof("replication doc with sourceBucket=%v, targetClusterUuid=%v, targetBucket=%v has non-existent source and target bucket, skip it.\n", sourceBucket, targetClusterUuid, targetBucket)
+		} else if err_source == utils.NonExistentBucketError {
+			service.logger.Infof("replication doc with sourceBucket=%v, targetClusterUuid=%v, targetBucket=%v has non-existent source bucket, skip it.\n", sourceBucket, targetClusterUuid, targetBucket)
+		} else {
+			service.logger.Infof("replication doc with sourceBucket=%v, targetClusterUuid=%v, targetBucket=%v has non-existent target bucket, skip it.\n", sourceBucket, targetClusterUuid, targetBucket)
+		}
+	} else {
+		spec := metadata.NewReplicationSpecification(sourceBucket, sourceBucketUUID, targetClusterUuid, targetBucket, targetBucketUUID)
+		_, errorMap := spec.Settings.UpdateSettingsFromMap(settingsMap)
+
+		service.logger.Infof("Replication spec constructed = %v\n", spec)
+
+		errorList = addErrorMapToErrorList(errorMap, errorList)
+
+		if len(errorList) > 0 {
+			return errorList
+		}
+
+		// delete replication spec if it already exists
+		_, err := service.repl_spec_svc.DelReplicationSpec(spec.Id)
+		if err == nil {
+			service.logger.Infof("Deleted existing replication spec with id=%v\n", spec.Id)
+		}
+
+		err = service.repl_spec_svc.AddReplicationSpec(spec)
+		if err != nil {
+			errorList = append(errorList, err)
+		}
+
+		service.logger.Infof("Done with migrating replication doc with id=%v. errorList=%v\n", id, errorList)
+
 	}
-
-	err = service.repl_spec_svc.AddReplicationSpec(spec)
-	if err != nil {
-		errorList = append(errorList, err)
-	}
-
-	service.logger.Infof("Done with migrating replication doc with id=%v. errorList=%v\n", id, errorList)
-
 	return errorList
+
 }
+
+func (service *MigrationSvc) sourceBucketUUID(bucketName string) (string, error) {
+	local_connStr, _ := service.xdcr_comp_topology_svc.MyConnectionStr()
+	if local_connStr == "" {
+		panic("XDCRTopologySvc.MyConnectionStr() should not return empty string")
+	}
+	return utils.LocalBucketUUID(local_connStr, bucketName)
+}
+
+func (service *MigrationSvc) targetBucketUUID(targetClusterUUID, bucketName string) (string, error) {
+	ref, err_target := service.remote_cluster_svc.RemoteClusterByUuid(targetClusterUUID, false)
+	if err_target != nil {
+		return "", err_target
+	}
+	remote_connStr, err_target := ref.MyConnectionStr()
+	if err_target != nil {
+		return "", err_target
+	}
+	remote_userName, remote_password, err_target := ref.MyCredentials()
+	if err_target != nil {
+		return "", err_target
+	}
+
+	return utils.RemoteBucketUUID(remote_connStr, remote_userName, remote_password, bucketName)
+}
+
 
 func (service *MigrationSvc) migrateCheckpoints(checkpointsData interface{}) []error {
 	service.logger.Info("Starting to migrate checkpoints")
@@ -845,3 +897,4 @@ func getReplicationIdAndVBFromCheckpointId(checkpointDocId string) (string, uint
 		return "", 0, invalidFieldValueError(CheckpointDocId, checkpointDocId, TypeCheckpoint)
 	}
 }
+

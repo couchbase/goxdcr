@@ -16,6 +16,7 @@ import (
 
 // Callback function for spec changed event
 type SpecChangedCallback func(changedSpecId string, changedSpec *metadata.ReplicationSpecification) error
+
 // Callback function for spec change listener failure event
 type SpecChangeListenerFailureCallBack func(err error)
 
@@ -28,7 +29,7 @@ type ReplicationSpecSvc interface {
 	AllReplicationSpecs() (map[string]*metadata.ReplicationSpecification, error)
 	AllReplicationSpecIds() ([]string, error)
 	AllReplicationSpecIdsForBucket(bucket string) ([]string, error)
-	
+
 	// checks if an error returned by the replication spec service is an internal server error or a validation error,
 	// e.g., an error indicating the replication spec involved should exist but does not, or the other way around
 	// adminport needs this info to tell what status code it should return to client
@@ -36,4 +37,8 @@ type ReplicationSpecSvc interface {
 
 	// Register call back function for spec changed event
 	StartSpecChangedCallBack(callBack SpecChangedCallback, failureCallBack SpecChangeListenerFailureCallBack, cancel <-chan struct{}, waitGrp *sync.WaitGroup) error
+
+	ValidateAndGC(spec *metadata.ReplicationSpecification)
+
+	ConstructNewReplicationSpec(sourceBucketName string, targetClusterUUID string, targetBucketName string) (*metadata.ReplicationSpecification, error)
 }

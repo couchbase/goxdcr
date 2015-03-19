@@ -25,10 +25,9 @@ var options struct {
 	sourceKVAdminPort uint64 //source kv admin port
 	xdcrRestPort      uint64 // port number of XDCR rest server
 
-	sslProxyUpstreamPort        uint64// gometa request port
-	isEnterprise    bool  // whether couchbase is of enterprise edition
-	isConvert    bool  // whether xdcr is running in conversion/upgrade mode
-	
+	sslProxyUpstreamPort uint64 // gometa request port
+	isEnterprise         bool   // whether couchbase is of enterprise edition
+	isConvert            bool   // whether xdcr is running in conversion/upgrade mode
 
 	// logging related parameters
 	logFileDir          string
@@ -70,7 +69,7 @@ func main() {
 	if options.logFileDir != "" {
 		log.Init(options.logFileDir, options.maxLogFileSize, options.maxNumberOfLogFiles)
 	}
-	
+
 	cluster_info_svc := s.NewClusterInfoSvc(nil)
 
 	top_svc, err := s.NewXDCRTopologySvc(uint16(options.sourceKVAdminPort), uint16(options.xdcrRestPort), uint16(options.sslProxyUpstreamPort), options.isEnterprise, cluster_info_svc, nil)
@@ -93,12 +92,12 @@ func main() {
 		fmt.Printf("Error starting audit service. err=%v\n", err)
 		os.Exit(1)
 	}
-	
+
 	if options.isConvert {
 		// disable uilogging during upgrade by specifying a nil uilog service
 		remote_cluster_svc := s.NewRemoteClusterService(nil, metadata_svc, top_svc, nil)
-		migration_svc := s.NewMigrationSvc(remote_cluster_svc, 
-			s.NewReplicationSpecService(nil, remote_cluster_svc, metadata_svc, nil),
+		migration_svc := s.NewMigrationSvc(top_svc, remote_cluster_svc,
+			s.NewReplicationSpecService(nil, remote_cluster_svc, metadata_svc, top_svc, nil),
 			s.NewReplicationSettingsSvc(metadata_svc, nil),
 			s.NewCheckpointsService(metadata_svc, nil),
 			nil)
@@ -114,7 +113,7 @@ func main() {
 		// start replication manager in normal mode
 		rm.StartReplicationManager(host,
 			uint16(options.xdcrRestPort),
-			s.NewReplicationSpecService(uilog_svc, remote_cluster_svc, metadata_svc, nil),
+			s.NewReplicationSpecService(uilog_svc, remote_cluster_svc, metadata_svc, top_svc, nil),
 			remote_cluster_svc,
 			cluster_info_svc,
 			top_svc,

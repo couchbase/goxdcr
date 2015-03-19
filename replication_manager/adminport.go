@@ -140,13 +140,13 @@ func (adminport *Adminport) processRequest(msg []interface{}) error {
 func (adminport *Adminport) handleRequest(
 	request *http.Request) (response *ap.Response, err error) {
 
-	logger_ap.Infof("handleRequest called\n")
+	logger_ap.Debugf("handleRequest called\n")
 
 	key, err := adminport.GetMessageKeyFromRequest(request)
 	if err != nil {
 		return nil, err
 	}
-	logger_ap.Infof("MessageKey=%v\n", key)
+	logger_ap.Debugf("MessageKey=%v\n", key)
 
 	// authentication
 	//TODO: authAdminCreds sometimes take a long time to return
@@ -164,7 +164,7 @@ func (adminport *Adminport) handleRequest(
 	if err != nil {
 		return EncodeErrorMessageIntoResponse(err, http.StatusUnauthorized)
 	}
-	logger_ap.Info("Authenticated....")
+	logger_ap.Debug("Authenticated....")
 
 	switch key {
 	case base.RemoteClustersPath + base.UrlDelimiter + base.MethodGet:
@@ -211,7 +211,7 @@ func (adminport *Adminport) handleRequest(
 }
 
 func (adminport *Adminport) doGetRemoteClustersRequest(request *http.Request) (*ap.Response, error) {
-	logger_ap.Infof("doGetRemoteClustersRequest\n")
+	logger_ap.Debugf("doGetRemoteClustersRequest\n")
 
 	remoteClusters, err := RemoteClusterService().RemoteClusters(false)
 	if err != nil {
@@ -253,7 +253,7 @@ func (adminport *Adminport) doCreateRemoteClusterRequest(request *http.Request) 
 }
 
 func (adminport *Adminport) doChangeRemoteClusterRequest(request *http.Request) (*ap.Response, error) {
-	logger_ap.Infof("doChangeRemoteClusterRequest\n")
+	logger_ap.Debugf("doChangeRemoteClusterRequest\n")
 	remoteClusterName, err := DecodeDynamicParamInURL(request, base.RemoteClustersPath, "Remote Cluster Name", false)
 	if err != nil {
 		return EncodeRemoteClusterValidationErrorIntoResponse(err)
@@ -342,7 +342,7 @@ func (adminport *Adminport) doDeleteAllReplicationsRequest(request *http.Request
 }
 
 func (adminport *Adminport) doGetAllReplicationInfosRequest(request *http.Request) (*ap.Response, error) {
-	logger_ap.Infof("doGetAllReplicationInfosRequest\n")
+	logger_ap.Debugf("doGetAllReplicationInfosRequest\n")
 	replInfos, err := GetReplicationInfos()
 	if err != nil {
 		return nil, err
@@ -351,7 +351,7 @@ func (adminport *Adminport) doGetAllReplicationInfosRequest(request *http.Reques
 }
 
 func (adminport *Adminport) doCreateReplicationRequest(request *http.Request) (*ap.Response, error) {
-	logger_ap.Info("doCreateReplicationRequest called")
+	logger_ap.Info("doCreateReplicationRequest")
 	defer logger_ap.Info("Finish doCreateReplicationRequest call")
 
 	justValidate, fromBucket, toCluster, toBucket, settings, errorsMap, err := DecodeCreateReplicationRequest(request)
@@ -531,7 +531,7 @@ func (adminport *Adminport) doChangeReplicationSettingsRequest(request *http.Req
 
 // get statistics for all running replications
 func (adminport *Adminport) doGetStatisticsRequest(request *http.Request) (*ap.Response, error) {
-	logger_ap.Infof("doGetStatisticsRequest\n")
+	logger_ap.Debugf("doGetStatisticsRequest\n")
 
 	//pass the request to get the bucket name
 	bucket, err := DecodeDynamicParamInURL(request, StatisticsPrefix, "Bucket Name", false)

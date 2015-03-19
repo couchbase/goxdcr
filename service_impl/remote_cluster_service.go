@@ -64,6 +64,7 @@ func (service *RemoteClusterService) RemoteClusterByRefId(refId string, refresh 
 	if err != nil {
 		return nil, err
 	}
+
 	ref, err := service.constructRemoteClusterReference(result, rev)
 	if err != nil {
 		service.logger.Errorf("Failed to get remote cluster refId=%v, err=%v\n", refId, err)
@@ -147,12 +148,12 @@ func (service *RemoteClusterService) updateRemoteCluster(ref *metadata.RemoteClu
 
 func (service *RemoteClusterService) SetRemoteCluster(refName string, ref *metadata.RemoteClusterReference) error {
 	service.logger.Infof("Setting remote cluster with refName %v\n", refName)
-	
+
 	oldRef, err := service.RemoteClusterByRefName(refName, false)
 	if err != nil {
 		return err
 	}
-	
+
 	err = service.ValidateSetRemoteCluster(refName, ref)
 	if err != nil {
 		return err
@@ -253,13 +254,13 @@ func (service *RemoteClusterService) ValidateSetRemoteCluster(refName string, re
 	return service.validateChangeRemoteCluster(ref, refName)
 }
 
-// validate that the remote cluster ref itself is valid, and that it does not collide with existing remote clusters 
+// validate that the remote cluster ref itself is valid, and that it does not collide with existing remote clusters
 // if refName is not empty, collision with existing cluster with refName is allowed since that existing cluster is being updated
 func (service *RemoteClusterService) validateChangeRemoteCluster(ref *metadata.RemoteClusterReference, refName string) error {
 
 	oldRef, err := service.RemoteClusterByRefName(ref.Name, false)
 	// collision with the remote cluster ref being updating is fine
-	if oldRef != nil  && oldRef.Name != refName {
+	if oldRef != nil && oldRef.Name != refName {
 		return wrapAsInvalidRemoteClusterError(errors.New("duplicate cluster names are not allowed"))
 	}
 
@@ -267,16 +268,15 @@ func (service *RemoteClusterService) validateChangeRemoteCluster(ref *metadata.R
 	if err != nil {
 		return err
 	}
-	
+
 	oldRef, err = service.RemoteClusterByUuid(ref.Uuid, false)
 	// collision with the remote cluster ref be updated is fine
-	if oldRef != nil  &&  oldRef.Name != refName {
+	if oldRef != nil && oldRef.Name != refName {
 		return wrapAsInvalidRemoteClusterError(fmt.Errorf("Cluster reference to the same cluster already exists under the name `%v`", oldRef.Name))
 	}
-	
+
 	return nil
 }
-	
 
 // validate remote cluster info and retrieve actual uuid
 func (service *RemoteClusterService) validateRemoteCluster(ref *metadata.RemoteClusterReference) error {
@@ -388,10 +388,6 @@ func (service *RemoteClusterService) addRemoteCluster(ref *metadata.RemoteCluste
 }
 
 func (service *RemoteClusterService) constructRemoteClusterReference(value []byte, rev interface{}) (*metadata.RemoteClusterReference, error) {
-	if len(value) == 0 {
-		return nil, errors.New("Failed to construct remote cluster value returned by metakv is empty")
-	}
-
 	ref := &metadata.RemoteClusterReference{}
 	err := json.Unmarshal(value, ref)
 	if err != nil {

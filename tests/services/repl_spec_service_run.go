@@ -11,23 +11,22 @@
 package main
 
 import (
+	"errors"
 	"flag"
 	"fmt"
-	"os"
-	"errors"
-	metadata "github.com/couchbase/goxdcr/metadata"
 	s "github.com/couchbase/goxdcr/service_impl"
+	"os"
 )
 
 // test parameters
-const(
-	 gometaExecutableName = "gometa"
-	
-	 sourceClusterUUID = "localhost:9000"
-	 sourceBucketName = "default"
-	 targetClusterUUID = "testuuid"
-	 targetBucketName = "target" 
-	 newBatchCount = 345
+const (
+	gometaExecutableName = "gometa"
+
+	sourceClusterUUID = "localhost:9000"
+	sourceBucketName  = "default"
+	targetClusterUUID = "testuuid"
+	targetBucketName  = "target"
+	newBatchCount     = 345
 )
 
 func usage() {
@@ -37,13 +36,13 @@ func usage() {
 
 func main() {
 	fmt.Println("Start Testing repl spec service ...")
-	
+
 	// start and test ReplicationSpec service
 	err := startReplicationSpecService()
 	if err != nil {
 		fmt.Println("Test failed. err: ", err)
 	} else {
-		fmt.Println("Test passed.") 
+		fmt.Println("Test passed.")
 	}
 }
 
@@ -53,44 +52,46 @@ func startReplicationSpecService() error {
 		return errors.New(fmt.Sprintf("Error starting metadata service. err=%v\n", err.Error()))
 	}
 
-	cluster_info_svc := s.NewClusterInfoSvc(nil)	
+	cluster_info_svc := s.NewClusterInfoSvc(nil)
 	top_svc, err := s.NewXDCRTopologySvc(9000, 13000, 11977, false, cluster_info_svc, nil)
 	if err != nil {
 		return err
 	}
 
-	remote_cluster_svc := s.NewRemoteClusterService(nil, metadataSvc, top_svc, nil)	
-	service := s.NewReplicationSpecService(nil, remote_cluster_svc, metadataSvc, nil)
-		
+	remote_cluster_svc := s.NewRemoteClusterService(nil, metadataSvc, top_svc, nil)
+	service := s.NewReplicationSpecService(nil, remote_cluster_svc, metadataSvc, top_svc, nil)
+
 	// create a test replication spec
-	spec := metadata.NewReplicationSpecification(sourceBucketName, 
-			targetClusterUUID, targetBucketName)
-			
+	spec, err := service.ConstructNewReplicationSpec (sourceBucketName, targetClusterUUID, targetBucketName)
+	if err != nil {
+		return err
+	}
+
 	specId := spec.Id
-	
+
 	// cleanup to ensure that there is no residue replication spec, e.g., from previously failed test runs
 	_, err = service.DelReplicationSpec(specId)
 	if err != nil {
 		return err
 	}
-	
+
 	// lookup non-existent key should fail
 	spec2, err := service.ReplicationSpec(specId)
 	if err == nil {
 		return errors.New("Should have errored out looking up non-existent key")
 	}
-	
+
 	// delete non-existent key is ok
 	_, err = service.DelReplicationSpec(specId)
 	if err != nil {
 		return err
 	}
-	
+
 	err = service.AddReplicationSpec(spec)
 	if err != nil {
 		return err
 	}
-	
+
 	spec2, err = service.ReplicationSpec(specId)
 	if err != nil {
 		return err
@@ -99,35 +100,35 @@ func startReplicationSpecService() error {
 		fmt.Println("params of spec retrieved: id=", spec2.Id, "; target cluster=", spec2.TargetClusterUUID, ";  batch count=", spec2.Settings.BatchCount)
 		return errors.New("Read incorrect values of replication spec.")
 	}
-	
+
 	// update spec
 	spec.Settings.BatchCount = newBatchCount
-	
+
 	err = service.SetReplicationSpec(spec)
 	if err != nil {
 		return err
 	}
-	
+
 	// verify update
 	spec2, err = service.ReplicationSpec(specId)
 	if err != nil {
 		return err
 	}
-	if  spec2.Settings.BatchCount != newBatchCount {
+	if spec2.Settings.BatchCount != newBatchCount {
 		return errors.New("Update to replication spec is lost")
 	}
-	
+
 	_, err = service.DelReplicationSpec(specId)
 	if err != nil {
 		return err
 	}
-	
+
 	// verify replication spec no longer exists after delete
 	spec, err = service.ReplicationSpec(specId)
 	if err == nil {
 		return errors.New("Should have errored out looking up non-existent key")
 	}
-	
+
 	return nil
-	
+
 }

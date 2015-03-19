@@ -24,19 +24,24 @@ type ReplicationSpecification struct {
 	// Source Bucket Name
 	SourceBucketName string `json:"sourceBucketName"`
 
+	//Source Bucket UUID
+	SourceBucketUUID string `json:"sourceBucketUUID"`
+
 	//Target Cluster UUID
 	TargetClusterUUID string `json:"targetClusterUUID"`
 
 	// Target Bucket Name
 	TargetBucketName string `json:"targetBucketName"`
 
+	TargetBucketUUID string `json:"targetBucketUUID"`
+
 	Settings *ReplicationSettings `json:"replicationSettings"`
-	
-    // revision number to be used by metadata service. not included in json
-	Revision  interface{}
+
+	// revision number to be used by metadata service. not included in json
+	Revision interface{}
 }
 
-func NewReplicationSpecification(sourceBucketName string, targetClusterUUID string, targetBucketName string) *ReplicationSpecification {
+func NewReplicationSpecification(sourceBucketName string, sourceBucketUUID string, targetClusterUUID string, targetBucketName string, targetBucketUUID string) *ReplicationSpecification {
 	return &ReplicationSpecification{Id: ReplicationId(sourceBucketName, targetClusterUUID, targetBucketName),
 		SourceBucketName:  sourceBucketName,
 		TargetClusterUUID: targetClusterUUID,

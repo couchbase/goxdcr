@@ -141,6 +141,9 @@ func IsPipelineRunning(topic string) bool {
 func CheckPipelines() {
 	//See if any pending pipelines has a updater to attend it
 	for rep_name, rep_status := range pipeline_mgr.pipelines_map {
+		//validate replication spec
+		pipeline_mgr.repl_spec_svc.ValidateAndGC(rep_status.Spec())
+
 		if rep_status.RuntimeStatus() == pipeline.Pending {
 			if _, ok := pipeline_mgr.pipeline_pending_for_update[rep_name]; !ok {
 				pipeline_mgr.logger.Infof("Pipeline %v is broken, but not yet attended, launch updater", rep_name)
@@ -497,12 +500,14 @@ func (r *pipelineUpdater) update() bool {
 	_, err = pipeline_mgr.startPipeline(r.pipeline_name)
 RE:
 	if err == nil {
-		r.logger.Infof("Replication %v is updated, back to business\n", r.pipeline_name)
+		r.logger.Infof("Replication %v is updated. Back to business\n", r.pipeline_name)
+	} else if err == service_def.MetadataNotFoundErr {
+		r.logger.Infof("Replication %v is deleted. no need to update\n", r.pipeline_name)
 	} else {
 		r.logger.Errorf("Failed to update pipeline %v, err=%v\n", r.pipeline_name, err)
 	}
 
-	if err == nil || err == ReplicationSpecNotActive {
+	if err == nil || err == ReplicationSpecNotActive || err == service_def.MetadataNotFoundErr {
 		r.logger.Infof("Pipeline %v is updated\n", r.pipeline_name)
 		if r.updateState(Updater_Done) == nil {
 			pipeline_mgr.reportFixed(r.pipeline_name)
@@ -528,8 +533,9 @@ func (r *pipelineUpdater) checkReplicationActiveness() (err error) {
 		if err == nil && spec != nil {
 			err = ReplicationSpecNotActive
 		}
+	} else {
+		r.logger.Debugf("Pipeline %v is not paused or deleted\n", r.pipeline_name)
 	}
-	r.logger.Debugf("Pipeline %v is not paused or deleted\n", r.pipeline_name)
 	return
 }
 

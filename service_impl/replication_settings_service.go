@@ -33,18 +33,18 @@ func NewReplicationSettingsSvc(metadata_svc service_def.MetadataSvc, logger_ctx 
 func (repl_settings_svc *ReplicationSettingsSvc) GetDefaultReplicationSettings() (*metadata.ReplicationSettings, error) {
 	var defaultSettings metadata.ReplicationSettings
 	bytes, rev, err := repl_settings_svc.metadata_svc.Get(DefaultReplicationSettingsKey)
-	if err != nil {
+	if err != nil && err != service_def.MetadataNotFoundErr {
 		return nil, err
 	}
-	if bytes == nil || len(bytes) == 0 {
+	if err == service_def.MetadataNotFoundErr {
 		// initialize default settings if it does not exist
 		defaultSettings = *metadata.DefaultSettings()
 		repl_settings_svc.SetDefaultReplicationSettings(&defaultSettings)
-		
+
 		// reload default settings to get its revision field set correctly
 		_, rev, err := repl_settings_svc.metadata_svc.Get(DefaultReplicationSettingsKey)
 		if err != nil {
-		return nil, err
+			return nil, err
 		}
 		// set rev number
 		defaultSettings.Revision = rev

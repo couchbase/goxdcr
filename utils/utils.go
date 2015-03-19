@@ -8,7 +8,6 @@ import (
 	"github.com/couchbase/go-couchbase"
 	base "github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
-	"net/http"
 	"net/url"
 	"reflect"
 	"regexp"
@@ -29,9 +28,8 @@ type CouchBucket struct {
 }
 
 var logger_utils *log.CommonLogger = log.NewLogger("Utils", log.DefaultLoggerContext)
-var MaxIdleConnsPerHost = 256
-var HTTPTransport = &http.Transport{MaxIdleConnsPerHost: MaxIdleConnsPerHost}
-var HTTPClient = &http.Client{Transport: HTTPTransport}
+
+var NonExistentBucketError error = errors.New("Bucket doesn't exist")
 
 func loggerForFunc(logger *log.CommonLogger) *log.CommonLogger {
 	var l *log.CommonLogger
@@ -367,4 +365,29 @@ func RegexpMatch(regExp *regexp.Regexp, key []byte) bool {
 // example format: 2015-03-17T10:15:06.717-07:00
 func FormatTimeWithMilliSecondPrecision(origTime time.Time) string {
 	return origTime.Format("2006-01-02T15:04:05.000Z07:00")
+}
+
+func LocalBucketUUID(local_connStr string, bucketName string) (string, error) {
+	local_default_pool, err := LocalPool(local_connStr)
+	if err != nil {
+		return "", err
+	}
+	bucket, ok := local_default_pool.BucketMap[bucketName]
+	if !ok {
+		return "", NonExistentBucketError
+	}
+	return bucket.UUID, nil
+}
+
+func RemoteBucketUUID(remote_connStr, remote_userName, remote_password, bucketName string) (string, error) {
+	remote_default_pool, err := RemotePool(remote_connStr, remote_userName, remote_password)
+	if err != nil {
+		return "", err
+	}
+	bucket, ok := remote_default_pool.BucketMap[bucketName]
+	if !ok {
+		return "", NonExistentBucketError
+	}
+	return bucket.UUID, nil
+
 }

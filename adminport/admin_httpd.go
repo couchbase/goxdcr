@@ -142,7 +142,7 @@ func (s *httpServer) systemHandler(w http.ResponseWriter, r *http.Request) {
 		err = fmt.Errorf("%v, %v", ErrorInternal, v)
 		logger_server.Errorf("%v", err)
 	case *Response:
-		logger_server.Infof("Response from goxdcr rest server. status=%v, body=%v\n body in string form=%v", v.StatusCode, v.Body, string(v.Body))
+		logger_server.Infof("Response from goxdcr rest server. status=%v\n body in string form=%v", v.StatusCode, string(v.Body))
 		w.Header().Set(base.ContentType, base.JsonContentType)
 		w.WriteHeader(v.StatusCode)
 		w.Write(v.Body)

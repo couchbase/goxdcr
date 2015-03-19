@@ -115,7 +115,9 @@ func (capi_svc *CAPIService) CommitForCheckpoint(remoteBucket *service_def.Remot
 		remote_seqno = uint64(remote_seqno_pair[1].(float64))
 	} else {
 		//error case
-		capi_svc.logger.Errorf("_commit_for_checkpoint failed, err=%v, status_code=%v\n", err, status_code)
+		msg := fmt.Sprintf("_commit_for_checkpoint failed for vb=%v, err=%v, status_code=%v\n", vbno, err, status_code)
+		capi_svc.logger.Error(msg)
+		err = errors.New(msg)
 		return 0, 0, err
 	}
 	return
