@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 type BucketBasicStats struct {
@@ -331,9 +332,15 @@ func UrlForLog(urlStr string) string {
 }
 
 func GetMatchedKeys(expression string, keys []string) (map[string][][]int, error) {
-	logger_utils.Infof("GetMatchedKeys expression=%v\n", expression)
+	logger_utils.Infof("GetMatchedKeys expression=%v, expression in bytes=%v\n", expression, []byte(expression))
+	if !utf8.ValidString(expression) {
+		return nil, errors.New("expression is not valid utf8")
+	}
 	for _, key := range keys {
-		logger_utils.Infof("GetMatchedKeys key=%v, key_bytes=%v\n", key, []byte(key))
+		logger_utils.Infof("key=%v, key_bytes=%v\n", key, []byte(key))
+		if !utf8.ValidString(key) {
+			return nil, errors.New("key is not valid utf8")
+		}
 	}
 
 	regExp, err := regexp.Compile(expression)
@@ -350,16 +357,72 @@ func GetMatchedKeys(expression string, keys []string) (map[string][][]int, error
 		} else {
 			matches = make([][]int, 0)
 		}
-		matchesMap[key] = matches
+		logger_utils.Debugf("key=%v, matches with byte index=%v\n", key, matches)
+		convertedMatches, err := convertByteIndexToRuneIndex(key, matches)
+		if err != nil {
+			return nil, err
+		}
+		matchesMap[key] = convertedMatches
 	}
-
-	logger_utils.Infof("matchesMap=%v\n", matchesMap)
 
 	return matchesMap, nil
 }
 
 func RegexpMatch(regExp *regexp.Regexp, key []byte) bool {
 	return regExp.Match(key)
+}
+
+// given a matches map, convert the indices from byte index to rune index
+func convertByteIndexToRuneIndex(key string, matches [][]int) ([][]int, error) {
+	convertedMatches := make([][]int, 0)
+	if len(key) == 0 || len(matches) == 0 {
+		return matches, nil
+	}
+
+	// parse key and build a byte index to rune index map
+	indexMap := make(map[int]int)
+	byteIndex := 0
+	runeIndex := 0
+	keyBytes := []byte(key)
+	keyLen := len(key)
+	for {
+		indexMap[byteIndex] = runeIndex
+		if byteIndex < keyLen {
+			_, runeLen := utf8.DecodeRune(keyBytes[byteIndex:])
+			byteIndex += runeLen
+			runeIndex++
+		} else {
+			break
+		}
+	}
+
+	logger_utils.Debugf("key=%v, indexMap=%v\n", key, indexMap)
+
+	var ok bool
+	for _, match := range matches {
+		convertedMatch := make([]int, 2)
+		convertedMatch[0], ok = indexMap[match[0]]
+		if !ok {
+			// should not happen
+			errMsg := InvalidRuneIndexErrorMessage(key, match[0])
+			logger_utils.Errorf(errMsg)
+			return nil, errors.New(errMsg)
+		}
+		convertedMatch[1], ok = indexMap[match[1]]
+		if !ok {
+			// should not happen
+			errMsg := InvalidRuneIndexErrorMessage(key, match[1])
+			logger_utils.Errorf(errMsg)
+			return nil, errors.New(errMsg)
+		}
+		convertedMatches = append(convertedMatches, convertedMatch)
+	}
+
+	return convertedMatches, nil
+}
+
+func InvalidRuneIndexErrorMessage(key string, index int) string {
+	return fmt.Sprintf("byte index, %v, in match for key, %v, is not a starting index for a rune", index, key)
 }
 
 // example format: 2015-03-17T10:15:06.717-07:00
