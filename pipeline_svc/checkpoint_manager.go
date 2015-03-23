@@ -70,7 +70,7 @@ type CheckpointManager struct {
 	//remote bucket
 	remote_bucket *service_def.RemoteBucketInfo
 
-	backward_compat bool
+	support_ckpt bool
 
 	cur_ckpts        map[uint16]*metadata.CheckpointRecord
 	active_vbs       map[string][]uint16
@@ -89,23 +89,23 @@ func NewCheckpointManager(checkpoints_svc service_def.CheckpointsService, capi_s
 	}
 	logger := log.NewLogger("CheckpointManager", logger_ctx)
 	return &CheckpointManager{
-		AbstractComponent:   component.NewAbstractComponentWithLogger(CheckpointMgrId, logger),
-		pipeline:            nil,
-		checkpoints_svc:     checkpoints_svc,
-		capi_svc:            capi_svc,
-		rep_spec_svc:        rep_spec_svc,
-		remote_cluster_svc:  remote_cluster_svc,
-		cluster_info_svc:    cluster_info_svc,
-		xdcr_topology_svc:   xdcr_topology_svc,
+		AbstractComponent:         component.NewAbstractComponentWithLogger(CheckpointMgrId, logger),
+		pipeline:                  nil,
+		checkpoints_svc:           checkpoints_svc,
+		capi_svc:                  capi_svc,
+		rep_spec_svc:              rep_spec_svc,
+		remote_cluster_svc:        remote_cluster_svc,
+		cluster_info_svc:          cluster_info_svc,
+		xdcr_topology_svc:         xdcr_topology_svc,
 		through_seqno_tracker_svc: through_seqno_tracker_svc,
-		finish_ch:           make(chan bool, 1),
-		logger:              logger,
-		cur_ckpts:           make(map[uint16]*metadata.CheckpointRecord),
-		cur_ckpts_locks:     make(map[uint16]*sync.RWMutex),
-		active_vbs:          active_vbs,
-		wait_grp:            &sync.WaitGroup{},
-		failoverlog_map:     make(map[uint16]*mcc.FailoverLog),
-		vb_highseqno_map:    make(map[uint16]uint64)}, nil
+		finish_ch:                 make(chan bool, 1),
+		logger:                    logger,
+		cur_ckpts:                 make(map[uint16]*metadata.CheckpointRecord),
+		cur_ckpts_locks:           make(map[uint16]*sync.RWMutex),
+		active_vbs:                active_vbs,
+		wait_grp:                  &sync.WaitGroup{},
+		failoverlog_map:           make(map[uint16]*mcc.FailoverLog),
+		vb_highseqno_map:          make(map[uint16]uint64)}, nil
 }
 
 func (ckmgr *CheckpointManager) Attach(pipeline common.Pipeline) error {
@@ -146,6 +146,9 @@ func (ckmgr *CheckpointManager) populateRemoteBucketInfo(pipeline common.Pipelin
 		return err
 	}
 	ckmgr.remote_bucket = remote_bucket
+
+	ckmgr.checkCkptCapability()
+
 	return nil
 }
 
@@ -202,17 +205,17 @@ func (ckmgr *CheckpointManager) getMyVBs() []uint16 {
 	return vbList
 }
 
-func (ckmgr *CheckpointManager) checkBackwardCompatability() {
-	backward_compat := false
+func (ckmgr *CheckpointManager) checkCkptCapability() {
+	support_ckpt := false
 	bk_capabilities := ckmgr.remote_bucket.Capabilities
 	for _, c := range bk_capabilities {
 		if c == XDCRCheckpointing {
-			backward_compat = true
+			support_ckpt = true
 			break
 		}
 	}
-	ckmgr.backward_compat = backward_compat
-	ckmgr.logger.Infof("Remote bucket %v supporting xdcrcheckpoing is %v\n", ckmgr.remote_bucket, ckmgr.backward_compat)
+	ckmgr.support_ckpt = support_ckpt
+	ckmgr.logger.Infof("Remote bucket %v supporting xdcrcheckpoing is %v\n", ckmgr.remote_bucket, ckmgr.support_ckpt)
 }
 
 func (ckmgr *CheckpointManager) currentVBUUID(vbno uint16) uint64 {
@@ -242,7 +245,7 @@ func (ckmgr *CheckpointManager) SetVBTimestamps(topic string) error {
 		return err
 	}
 
-	disableCkptBackwardsCompat := ckmgr.backward_compat
+	support_ckpt := ckmgr.support_ckpt
 
 	ret := make(map[uint16]*base.VBTimestamp)
 	listOfVbs := ckmgr.getMyVBs()
@@ -275,7 +278,7 @@ func (ckmgr *CheckpointManager) SetVBTimestamps(topic string) error {
 		}
 		vbs_for_getter := listOfVbs[start_index:end_index]
 		getter_wait_grp.Add(1)
-		go ckmgr.startSeqnoGetter(getter_id, vbs_for_getter, ckptDocs, disableCkptBackwardsCompat, ret, highseqnomap, getter_wait_grp, errMap)
+		go ckmgr.startSeqnoGetter(getter_id, vbs_for_getter, ckptDocs, support_ckpt, ret, highseqnomap, getter_wait_grp, errMap)
 
 		start_index = end_index
 		if start_index >= len(listOfVbs) {
@@ -305,6 +308,7 @@ func (ckmgr *CheckpointManager) startSeqnoGetter(getter_id int, listOfVbs []uint
 		var agreeedIndex int = -1
 		ckptDoc, _ := ckptDocs[vbno]
 
+		//do checkpointing only when the remote bucket supports xdcrcheckpointing
 		//get the existing checkpoint records if they exist, otherwise return an empty ckpt record
 		ckpt_list := ckmgr.ckptRecords(ckptDoc, vbno)
 		for index, ckpt_record := range ckpt_list {
@@ -325,7 +329,7 @@ func (ckmgr *CheckpointManager) startSeqnoGetter(getter_id int, listOfVbs []uint
 				var current_remoteVBUUID uint64 = 0
 				bMatch := false
 				var err error
-				bMatch, current_remoteVBUUID, err = ckmgr.capi_svc.PreReplicate(ckmgr.remote_bucket, remote_vb_status, disableCkptBackwardsCompat)
+				bMatch, current_remoteVBUUID, err = ckmgr.capi_svc.PreReplicate(ckmgr.remote_bucket, remote_vb_status, ckmgr.support_ckpt)
 				//remote vb topology changed
 				//udpate the vb_uuid and try again
 				if err == nil {
@@ -340,6 +344,10 @@ func (ckmgr *CheckpointManager) startSeqnoGetter(getter_id int, listOfVbs []uint
 						if ckptDoc != nil {
 							agreeedIndex = index
 						}
+
+					} else if err == service_def.NoSupportForXDCRCheckpointingError {
+						ckmgr.updateCurrentVBUUID(vbno, 0)
+						ckmgr.logger.Infof("Remote vbucket %v is on a old node which doesn't support checkpointing, update target_vb_uuid=0\n", vbno)
 
 					} else {
 						//there is an error to do _pre_replicate
@@ -596,6 +604,11 @@ func (ckmgr *CheckpointManager) do_checkpoint(vbno uint16, skip_error bool) (err
 
 	if ckpt_record.Seqno == 0 {
 		ckmgr.logger.Debugf("No replication happened yet, skip checkpointing for vb=%v pipeline=%v\n", vbno, ckmgr.pipeline.InstanceId())
+		return nil
+	}
+
+	if ckpt_record.Target_vb_uuid == 0 {
+		ckmgr.logger.Info("remote bucket is no an older node, no checkpointing should be done.")
 		return nil
 	}
 

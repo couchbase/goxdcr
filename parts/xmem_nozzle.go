@@ -835,8 +835,13 @@ func (xmem *XmemNozzle) Stop() error {
 	xmem.Logger().Debugf("XmemNozzle %v processed %v items\n", xmem.Id(), xmem.counter_sent)
 
 	//close data channel
-	close(xmem.dataChan)
-	close(xmem.batches_ready)
+	if xmem.dataChan != nil {
+		close(xmem.dataChan)
+	}
+
+	if xmem.batches_ready != nil {
+		close(xmem.batches_ready)
+	}
 
 	err = xmem.Stop_server()
 	if err != nil {
@@ -1267,7 +1272,7 @@ func (xmem *XmemNozzle) batchGetMeta(bigDoc_map map[string]*base.WrappedMCReques
 			doc_meta_target := xmem.decodeGetMetaResp([]byte(key), resp)
 			doc_meta_source := decodeSetMetaReq(bigDoc_map[key].Req)
 			if !xmem.conflict_resolver(doc_meta_source, doc_meta_target, xmem.logger) {
-				xmem.Logger().Debugf("doc %v (%v)failed on conflict resolution to %v, no need to send\n", key, doc_meta_source, doc_meta_target)
+				xmem.Logger().Infof("doc %v (%v)failed on conflict resolution to %v, no need to send\n", key, doc_meta_source, doc_meta_target)
 				bigDoc_noRep_map[key] = true
 			}
 		} else {

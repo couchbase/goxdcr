@@ -55,7 +55,7 @@ func NewCAPIService(logger_ctx *log.LoggerContext) *CAPIService {
 //		  current_remoteVBUUID - new remote vb uuid might be retured if bMatch = false and there was a topology change on remote vb
 //		  err
 func (capi_svc *CAPIService) PreReplicate(remoteBucket *service_def.RemoteBucketInfo,
-	knownRemoteVBStatus *service_def.RemoteVBReplicationStatus, disableCkptBackwardsCompat bool) (bMatch bool, current_remoteVBUUID uint64, err error) {
+	knownRemoteVBStatus *service_def.RemoteVBReplicationStatus, xdcrCheckpoingCapbility bool) (bMatch bool, current_remoteVBUUID uint64, err error) {
 	capi_svc.logger.Debug("Calling _pre_replicate")
 	api_base, err := capi_svc.composeAPIRequestBase(remoteBucket, knownRemoteVBStatus.VBNo)
 	if err != nil {
@@ -71,7 +71,7 @@ func (capi_svc *CAPIService) PreReplicate(remoteBucket *service_def.RemoteBucket
 	if err != nil {
 		capi_svc.logger.Errorf("Calling _pre_replicate on %v failed, err=%v\n", api_base.url, err)
 	}
-	bMatch, current_remoteVBUUID, err = capi_svc.parsePreReplicateResp(api_base.url, status_code, respMap, knownRemoteVBStatus.VBNo, disableCkptBackwardsCompat)
+	bMatch, current_remoteVBUUID, err = capi_svc.parsePreReplicateResp(api_base.url, status_code, respMap, knownRemoteVBStatus.VBNo, xdcrCheckpoingCapbility)
 	
 	if err == nil {
 		capi_svc.logger.Debugf("_pre_replicate succeeded for vb=%v\n", knownRemoteVBStatus.VBNo)
@@ -241,7 +241,7 @@ func (capi_svc *CAPIService) parsePreReplicateResp(hostName string,
 	resp_status_code int,
 	respMap map[string]interface{},
 	vbno uint16,
-	disableCkptBackwardsCompat bool) (bool, uint64, error) {
+	xdcrCheckpoingCapbility bool) (bool, uint64, error) {
 	if resp_status_code == 200 || resp_status_code == 400 {
 		bMatch := (resp_status_code == 200)
 		vbuuidfloat, ok := respMap["vbopaque"].(float64)
@@ -256,9 +256,9 @@ func (capi_svc *CAPIService) parsePreReplicateResp(hostName string,
 		var retError error = nil
 
 		//double check again disableCkptBackwardsCompat
-		if resp_status_code == 404 && disableCkptBackwardsCompat == false {
+		if resp_status_code == 404 && xdcrCheckpoingCapbility == false {
 			//throw error
-			retError = errors.New(fmt.Sprintf("_pre_replicate failed on target node %v for vb=%v", hostName, vbno))
+			retError = service_def.NoSupportForXDCRCheckpointingError
 		}
 
 		return false, 0, retError
