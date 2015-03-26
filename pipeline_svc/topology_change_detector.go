@@ -167,23 +167,28 @@ func (top_detect_svc *TopologyChangeDetectorSvc) validateTarget() (err error) {
 }
 
 func (top_detect_svc *TopologyChangeDetectorSvc) needCheckTarget() bool {
-	pipeline := top_detect_svc.pipeline
-	targets := pipeline.Targets()
-	for _, target := range targets {
-		//only check the first target nozzle, then return
-		//the assumption is all target nozzle should have the same type
-		//- capi, xmem with MemConn, xmem with SSLOverMem or xmem with SSLOverProxy
-		if _, ok := target.(*parts.XmemNozzle); !ok {
-			return false
-		}
-		if target.State() == common.Part_Running {
-			connType := target.(*parts.XmemNozzle).ConnType()
-			if connType == base.SSLOverMem || connType == base.MemConn {
+	spec := top_detect_svc.pipeline.Specification()
+	targetClusterRef, err := top_detect_svc.remote_cluster_svc.RemoteClusterByUuid(spec.TargetClusterUUID, true)
+	if err == nil && targetClusterRef.DemandEncryption {
+		pipeline := top_detect_svc.pipeline
+		targets := pipeline.Targets()
+		for _, target := range targets {
+			//only check the first target nozzle, then return
+			//the assumption is all target nozzle should have the same type
+			//- capi, xmem with MemConn, xmem with SSLOverMem or xmem with SSLOverProxy
+			if _, ok := target.(*parts.XmemNozzle); !ok {
 				return false
-			} else {
-				return true
+			}
+			if target.State() == common.Part_Running {
+				connType := target.(*parts.XmemNozzle).ConnType()
+				if connType == base.SSLOverMem || connType == base.MemConn {
+					return false
+				} else {
+					return true
+				}
 			}
 		}
+
 	}
-	return true
+	return false
 }

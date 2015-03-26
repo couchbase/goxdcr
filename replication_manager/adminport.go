@@ -177,8 +177,6 @@ func (adminport *Adminport) handleRequest(
 		response, err = adminport.doDeleteRemoteClusterRequest(request)
 	case AllReplicationsPath + base.UrlDelimiter + base.MethodGet:
 		response, err = adminport.doGetAllReplicationsRequest(request)
-	case AllReplicationsPath + DynamicSuffix + base.UrlDelimiter + base.MethodDelete:
-		response, err = adminport.doDeleteAllReplicationsRequest(request)
 	case AllReplicationInfosPath + base.UrlDelimiter + base.MethodGet:
 		response, err = adminport.doGetAllReplicationInfosRequest(request)
 	case CreateReplicationPath + base.UrlDelimiter + base.MethodPost:
@@ -311,7 +309,7 @@ func (adminport *Adminport) doDeleteRemoteClusterRequest(request *http.Request) 
 }
 
 func (adminport *Adminport) doGetAllReplicationsRequest(request *http.Request) (*ap.Response, error) {
-	logger_ap.Infof("doGetAllReplicationsRequest\n")
+	logger_ap.Debugf("doGetAllReplicationsRequest\n")
 
 	replIds := pipeline_manager.AllReplications()
 	replSpecs := make(map[string]*metadata.ReplicationSpecification)
@@ -320,25 +318,6 @@ func (adminport *Adminport) doGetAllReplicationsRequest(request *http.Request) (
 	}
 
 	return NewGetAllReplicationsResponse(replSpecs)
-}
-
-func (adminport *Adminport) doDeleteAllReplicationsRequest(request *http.Request) (*ap.Response, error) {
-	logger_ap.Infof("doDeleteAllReplicationsRequest\n")
-
-	// get input parameters from request
-	bucket, err := DecodeDynamicParamInURL(request, AllReplicationsPath, "Bucket Name", false)
-	if err != nil {
-		return EncodeReplicationValidationErrorIntoResponse(err)
-	}
-
-	logger_ap.Infof("Request params: bucket=%v", bucket)
-
-	err = DeleteAllReplications(bucket, getRealUserIdFromRequest(request))
-	if err != nil {
-		return nil, err
-	} else {
-		return NewEmptyArrayResponse()
-	}
 }
 
 func (adminport *Adminport) doGetAllReplicationInfosRequest(request *http.Request) (*ap.Response, error) {
@@ -584,8 +563,7 @@ func (adminport *Adminport) GetMessageKeyFromRequest(r *http.Request) (string, e
 		// add http method suffix to name to ensure uniqueness
 		key += base.UrlDelimiter + strings.ToUpper(r.Method)
 
-		//todo change to debug
-		logger_ap.Infof("Request key decoded: %v\n", key)
+		logger_ap.Debugf("Request key decoded: %v\n", key)
 
 		return key, nil
 	}
@@ -594,11 +572,11 @@ func (adminport *Adminport) GetMessageKeyFromRequest(r *http.Request) (string, e
 // returns error if credentials in request are not admin/read only admin
 func authAdminCreds(request *http.Request, readOnly bool) error {
 	// authentication
-	logger_ap.Info("Start authAdminCreds")
+	logger_ap.Debug("Start authAdminCreds")
 	var err error
 	var isAdmin bool
 	creds, err := cbauth.AuthWebCreds(request)
-	logger_ap.Infof("creds user = %v\n", creds.Name())
+	logger_ap.Debugf("creds user = %v\n", creds.Name())
 	if err != nil {
 		return err
 	}
@@ -610,7 +588,7 @@ func authAdminCreds(request *http.Request, readOnly bool) error {
 		isAdmin, err = creds.IsAdmin()
 	}
 
-	logger_ap.Infof("done with authentication")
+	logger_ap.Debugf("done with authentication")
 	if err != nil {
 		return err
 	}

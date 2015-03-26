@@ -107,7 +107,7 @@ func (ci_svc *ClusterInfoSvc) encodeVersionToEffectiveVersion(version []int) int
 
 	effectiveVersion := majorVersion*0x1000 + minorVersion
 
-	ci_svc.logger.Infof("version=%v, effectiveVersion=%v\n", version, effectiveVersion)
+	ci_svc.logger.Debugf("version=%v, effectiveVersion=%v\n", version, effectiveVersion)
 	return effectiveVersion
 }
 

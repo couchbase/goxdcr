@@ -97,7 +97,7 @@ func (service *ReplicationSpecService) ValidateNewReplicationSpec(sourceBucket, 
 
 	if err_source == utils.NonExistentBucketError {
 		service.logger.Errorf("Spec [sourceBucket=%v, targetClusterUuid=%v, targetBucket=%v] refers to non-existent bucket\n", sourceBucket, targetCluster, targetBucket)
-		errorMap[base.ReplicationDocSource] = InvalidReplicationSpecError
+		errorMap[base.ReplicationDocSource] = utils.NonExistentBucketError
 	}
 
 	// validate remote cluster ref
@@ -122,7 +122,7 @@ func (service *ReplicationSpecService) ValidateNewReplicationSpec(sourceBucket, 
 	_, err_target := utils.RemoteBucketUUID(remote_connStr, remote_userName, remote_password, targetBucket)
 	if err_target == utils.NonExistentBucketError {
 		service.logger.Errorf("Spec [sourceBucket=%v, targetClusterUuid=%v, targetBucket=%v] refers to non-existent target bucket\n", sourceBucket, targetCluster, targetBucket)
-		errorMap[base.ReplicationDocTarget] = InvalidReplicationSpecError
+		errorMap[base.ReplicationDocTarget] = utils.NonExistentBucketError
 	}
 
 	repId := metadata.ReplicationId(sourceBucket, targetClusterRef.Uuid, targetBucket)

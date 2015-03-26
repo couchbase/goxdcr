@@ -217,7 +217,7 @@ func (service *RemoteClusterService) DelRemoteCluster(refName string) (*metadata
 }
 
 func (service *RemoteClusterService) RemoteClusters(refresh bool) (map[string]*metadata.RemoteClusterReference, error) {
-	service.logger.Infof("Getting remote clusters")
+	service.logger.Debugf("Getting remote clusters")
 	refs := make(map[string]*metadata.RemoteClusterReference, 0)
 
 	entries, err := service.metadata_svc.GetAllMetadataFromCatalog(RemoteClustersCatalogKey)
@@ -414,7 +414,7 @@ func (service *RemoteClusterService) validateCache(ref *metadata.RemoteClusterRe
 	service.cache_lock.Lock()
 	defer service.cache_lock.Unlock()
 
-	service.logger.Infof("Remote Cluster reference %v need to be updated", ref.HostName)
+	service.logger.Debugf("Remote Cluster reference %v need to be updated", ref.HostName)
 	err := service.cacheRef(ref)
 	if err != nil {
 		service.logger.Infof("Didn't update the cache for remote cluster %v, err=%v\n", ref.Id, err)
@@ -435,7 +435,7 @@ func (service *RemoteClusterService) cacheRef(ref *metadata.RemoteClusterReferen
 	pool, err := utils.RemotePool(connStr, username, password)
 
 	if err == nil {
-		service.logger.Infof("Pool.Nodes=%v\n", pool.Nodes)
+		service.logger.Debugf("Pool.Nodes=%v\n", pool.Nodes)
 
 		nodes_connStrs := []string{}
 		for _, node := range pool.Nodes {
@@ -464,7 +464,7 @@ func (service *RemoteClusterService) getCache(key string) (*remoteClusterCache, 
 }
 
 func (service *RemoteClusterService) refresh(ref *metadata.RemoteClusterReference) (*metadata.RemoteClusterReference, error) {
-	service.logger.Infof("Refresh remote cluster reference %v\n", ref.Id)
+	service.logger.Debugf("Refresh remote cluster reference %v\n", ref.Id)
 
 	err := service.validateCache(ref)
 
@@ -491,7 +491,7 @@ func (service *RemoteClusterService) refresh(ref *metadata.RemoteClusterReferenc
 		return nil, errors.New(fmt.Sprintf("Failed to connect to cluster reference %v\n", ref.Id))
 	}
 
-	service.logger.Infof("ref_cache=%v\n", ref_cache)
+	service.logger.Debugf("ref_cache=%v\n", ref_cache)
 
 	var working_conn_str string = ""
 	for _, alt_conn_str := range ref_cache.nodes_connectionstr {

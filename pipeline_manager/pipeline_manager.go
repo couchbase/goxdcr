@@ -113,7 +113,9 @@ func stopUpdater(topic string) {
 }
 
 func LogStatusSummary() {
-	pipeline_mgr.logger.Infof("Replication Status = %v\n", pipeline_mgr.pipelines_map)
+	if len(pipeline_mgr.pipelines_map) > 0 {
+		pipeline_mgr.logger.Infof("Replication Status = %v\n", pipeline_mgr.pipelines_map)
+	}
 }
 
 func AllReplicationsForBucket(bucket string) []string {

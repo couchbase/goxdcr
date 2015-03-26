@@ -142,7 +142,7 @@ func (s *httpServer) systemHandler(w http.ResponseWriter, r *http.Request) {
 		err = fmt.Errorf("%v, %v", ErrorInternal, v)
 		logger_server.Errorf("%v", err)
 	case *Response:
-		logger_server.Infof("Response from goxdcr rest server. status=%v\n body in string form=%v", v.StatusCode, string(v.Body))
+		logger_server.Debugf("Response from goxdcr rest server. status=%v\n body in string form=%v", v.StatusCode, string(v.Body))
 		w.Header().Set(base.ContentType, base.JsonContentType)
 		w.WriteHeader(v.StatusCode)
 		w.Write(v.Body)
@@ -181,7 +181,7 @@ type Handler struct {
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	logger_server.Infof("Request received from ServeHTTP. r=%v\nwith path, %v and method, %v\n", r, r.URL.Path, r.Method)
+	logger_server.Debugf("Request received from ServeHTTP. r=%v\nwith path, %v and method, %v\n", r, r.URL.Path, r.Method)
 	h.server.systemHandler(w, r)
 }
 

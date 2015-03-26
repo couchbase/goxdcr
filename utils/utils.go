@@ -94,7 +94,6 @@ func RemotePool(remoteConnectStr string, remoteUsername string, remotePassword s
 	if err != nil {
 		return couchbase.Pool{}, NewEnhancedError(fmt.Sprintf("Error connecting to couchbase. url=%v", UrlForLog(url)), err)
 	}
-	logger_utils.Infof("client=%v\n", client)
 	return client.GetPool("default")
 }
 

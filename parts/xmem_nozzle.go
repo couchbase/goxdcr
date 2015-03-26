@@ -1269,7 +1269,7 @@ func (xmem *XmemNozzle) batchGetMeta(bigDoc_map map[string]*base.WrappedMCReques
 			doc_meta_target := xmem.decodeGetMetaResp([]byte(key), resp)
 			doc_meta_source := decodeSetMetaReq(wrappedReq.Req)
 			if !xmem.conflict_resolver(doc_meta_source, doc_meta_target, xmem.logger) {
-				xmem.Logger().Infof("doc %v (%v)failed on conflict resolution to %v, no need to send\n", key, doc_meta_source, doc_meta_target)
+				xmem.Logger().Debugf("doc %v (%v)failed on conflict resolution to %v, no need to send\n", key, doc_meta_source, doc_meta_target)
 				bigDoc_noRep_map[doc_meta_source.uniqueKey()] = true
 			}
 		} else {

@@ -390,13 +390,6 @@ func UpdateReplicationSettings(topic string, settings map[string]interface{}, re
 	return nil, nil
 }
 
-// delete all replications for the specified bucket
-func DeleteAllReplications(bucket string, realUserId *base.RealUserId) error {
-	//no-op
-	//deprecate
-	return nil
-}
-
 // get statistics for all running replications
 //% returns a list of replication stats for the bucket. the format for each
 //% item in the list is:
@@ -407,10 +400,9 @@ func DeleteAllReplications(bucket string, realUserId *base.RealUserId) error {
 //%     ...
 //%    ]
 //% }
-
 func GetStatistics(bucket string) (*expvar.Map, error) {
 	repIds := pipeline_manager.AllReplicationsForBucket(bucket)
-	logger_rm.Infof("repIds=%v\n", repIds)
+	logger_rm.Debugf("repIds=%v\n", repIds)
 
 	stats := new(expvar.Map).Init()
 	for _, repId := range repIds {
@@ -419,7 +411,7 @@ func GetStatistics(bucket string) (*expvar.Map, error) {
 			stats.Set(repId, statsForPipeline)
 		}
 	}
-	logger_rm.Infof("stats=%v\n", stats)
+	logger_rm.Debugf("stats=%v\n", stats)
 
 	return stats, nil
 }
