@@ -77,15 +77,6 @@ var xmem_setting_defs base.SettingDefinitions = base.SettingDefinitions{SETTING_
 	XMEM_SETTING_REMOTE_PROXY_PORT: base.NewSettingDef(reflect.TypeOf((*uint16)(nil)), false),
 	XMEM_SETTING_LOCAL_PROXY_PORT:  base.NewSettingDef(reflect.TypeOf((*uint16)(nil)), false)}
 
-type documentMetadata struct {
-	key      []byte
-	revSeq   uint64 //Item revision seqno
-	cas      uint64 //Item cas
-	flags    uint32 // Item flags
-	expiry   uint32 // Item expiration time
-	deletion bool
-}
-
 func (doc_meta documentMetadata) String() string {
 	return fmt.Sprintf("[key=%s; revSeq=%v;cas=%v;flags=%v;expiry=%v;deletion=%v]", doc_meta.key, doc_meta.revSeq, doc_meta.cas, doc_meta.flags, doc_meta.expiry, doc_meta.deletion)
 }
@@ -658,9 +649,8 @@ func (client *xmemClient) close() {
 		if pool != nil {
 			pool.Release(client.memClient)
 		}
-	} else {
-		client.memClient.Close()
 	}
+	client.memClient.Close()
 }
 
 /************************************
@@ -1223,31 +1213,36 @@ func (xmem *XmemNozzle) batchGetMeta(bigDoc_map map[string]*base.WrappedMCReques
 	reqs_bytes := []byte{}
 	counter := 0
 	opaque := xmem.getOpaque(0, sequence)
-	for key, originalReq := range bigDoc_map {
-		req := xmem.composeRequestForGetMeta(key, originalReq.Req.VBucket, opaque)
-		reqs_bytes = append(reqs_bytes, req.Bytes()...)
-		opaque_key_map[opaque] = key
-		opaque_seqno_map[opaque] = originalReq.Seqno
-		opaque++
-		counter++
+	sent_key_map := make(map[string]bool)
+	for _, originalReq := range bigDoc_map {
+		docKey := string(originalReq.Req.Key)
+		if _, ok := sent_key_map[docKey]; !ok {
+			req := xmem.composeRequestForGetMeta(docKey, originalReq.Req.VBucket, opaque)
+			reqs_bytes = append(reqs_bytes, req.Bytes()...)
+			opaque_key_map[opaque] = docKey
+			opaque_seqno_map[opaque] = originalReq.Seqno
+			opaque++
+			counter++
+			sent_key_map[docKey] = true
 
-		additionalInfo := make(map[string]interface{})
-		additionalInfo[EVENT_ADDI_DOC_KEY] = key
-		additionalInfo[EVENT_ADDI_SEQNO] = originalReq.Seqno
+			additionalInfo := make(map[string]interface{})
+			additionalInfo[EVENT_ADDI_DOC_KEY] = docKey
+			additionalInfo[EVENT_ADDI_SEQNO] = originalReq.Seqno
 
-		xmem.RaiseEvent(common.GetMetaSent, nil, xmem, nil, additionalInfo)
+			xmem.RaiseEvent(common.GetMetaSent, nil, xmem, nil, additionalInfo)
 
-		if counter > 50 {
-			err := xmem.writeToClient(xmem.client_for_getMeta, xmem.packageRequest(counter, reqs_bytes))
-			if err != nil {
-				//kill the receiver and return
-				close(receiver_fin_ch)
-				waitGrp.Wait()
-				return nil, err
+			if counter > 50 {
+				err := xmem.writeToClient(xmem.client_for_getMeta, xmem.packageRequest(counter, reqs_bytes))
+				if err != nil {
+					//kill the receiver and return
+					close(receiver_fin_ch)
+					waitGrp.Wait()
+					return nil, err
+				}
+
+				counter = 0
+				reqs_bytes = []byte{}
 			}
-
-			counter = 0
-			reqs_bytes = []byte{}
 		}
 	}
 
@@ -1267,13 +1262,15 @@ func (xmem *XmemNozzle) batchGetMeta(bigDoc_map map[string]*base.WrappedMCReques
 		return nil, err_list[0]
 	}
 
-	for key, resp := range respMap {
-		if resp.Status == mc.SUCCESS {
+	for _, wrappedReq := range bigDoc_map {
+		key := string(wrappedReq.Req.Key)
+		resp, ok := respMap[key]
+		if ok && resp.Status == mc.SUCCESS {
 			doc_meta_target := xmem.decodeGetMetaResp([]byte(key), resp)
-			doc_meta_source := decodeSetMetaReq(bigDoc_map[key].Req)
+			doc_meta_source := decodeSetMetaReq(wrappedReq.Req)
 			if !xmem.conflict_resolver(doc_meta_source, doc_meta_target, xmem.logger) {
 				xmem.Logger().Infof("doc %v (%v)failed on conflict resolution to %v, no need to send\n", key, doc_meta_source, doc_meta_target)
-				bigDoc_noRep_map[key] = true
+				bigDoc_noRep_map[doc_meta_source.uniqueKey()] = true
 			}
 		} else {
 			xmem.Logger().Debugf("batchGetMeta: doc %s is not found in target system, send it", key)
@@ -1288,11 +1285,6 @@ func (xmem *XmemNozzle) decodeGetMetaResp(key []byte, resp *mc.MCResponse) docum
 	ret := documentMetadata{}
 	ret.key = key
 	extras := resp.Extras
-	//	Deleted    (24-27): 0x00000000 (0)
-	//  Flags      (28-31): 0x00000001 (1)
-	//  Exptime    (32-35): 0x00000007 (7)
-	//  Seqno      (36-43): 0x0000000000000009 (9)
-	//  ConfRes    (44)   : 0x01 (1)
 	ret.deletion = (binary.BigEndian.Uint32(extras[0:4]) != 0)
 	ret.flags = binary.BigEndian.Uint32(extras[4:8])
 	ret.expiry = binary.BigEndian.Uint32(extras[8:12])
@@ -1301,17 +1293,6 @@ func (xmem *XmemNozzle) decodeGetMetaResp(key []byte, resp *mc.MCResponse) docum
 
 	return ret
 
-}
-
-func decodeSetMetaReq(req *mc.MCRequest) documentMetadata {
-	ret := documentMetadata{}
-	ret.key = req.Key
-	ret.flags = binary.BigEndian.Uint32(req.Extras[0:4])
-	ret.expiry = binary.BigEndian.Uint32(req.Extras[4:8])
-	ret.revSeq = binary.BigEndian.Uint64(req.Extras[8:16])
-	ret.cas = req.Cas
-	ret.deletion = (req.Opcode == DELETE_WITH_META)
-	return ret
 }
 
 func (xmem *XmemNozzle) composeRequestForGetMeta(key string, vb uint16, opaque uint32) *mc.MCRequest {
@@ -1734,7 +1715,7 @@ func (xmem *XmemNozzle) getPosFromOpaque(opaque uint32) uint16 {
 func (xmem *XmemNozzle) encodeOpCode(code mc.CommandCode) mc.CommandCode {
 	if code == mc.UPR_MUTATION || code == mc.TAP_MUTATION {
 		return SET_WITH_META
-	} else if code == mc.TAP_DELETE || code == mc.UPR_DELETION {
+	} else if code == mc.TAP_DELETE || code == mc.UPR_DELETION || code == mc.UPR_EXPIRATION {
 		return DELETE_WITH_META
 	}
 	return code

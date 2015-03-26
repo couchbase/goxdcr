@@ -447,8 +447,11 @@ func (capi *CapiNozzle) batchGetMeta(vbno uint16, bigDoc_map map[string]*base.Wr
 	}
 
 	key_rev_map := make(map[string]string)
-	for key, req := range bigDoc_map {
+	sent_id_map := make(map[string]bool)
+	for id, req := range bigDoc_map {
+		key := string(req.Req.Key)
 		key_rev_map[key] = getSerializedRevision(req.Req)
+		sent_id_map[id] = true
 	}
 
 	body, err := json.Marshal(key_rev_map)
@@ -489,9 +492,12 @@ func (capi *CapiNozzle) batchGetMeta(vbno uint16, bigDoc_map map[string]*base.Wr
 	}
 
 	// bigDoc_noRep_map = doc_map - bigDoc_rep_map
-	for key, _ := range bigDoc_map {
-		if _, ok = bigDoc_rep_map[key]; !ok {
-			bigDoc_noRep_map[key] = true
+	for id, req := range bigDoc_map {
+		if _, found := sent_id_map[id]; found {
+			docKey := string(req.Req.Key)
+			if _, ok = bigDoc_rep_map[docKey]; !ok {
+				bigDoc_noRep_map[id] = true
+			}
 		}
 	}
 

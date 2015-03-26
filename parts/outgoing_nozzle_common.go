@@ -11,6 +11,8 @@
 package parts
 
 import (
+	"encoding/binary"
+	"fmt"
 	mc "github.com/couchbase/gomemcached"
 	base "github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
@@ -27,8 +29,8 @@ const (
 	SETTING_WRITE_TIMEOUT         = "write_timeout"
 	SETTING_READ_TIMEOUT          = "read_timeout"
 	SETTING_MAX_RETRY_INTERVAL    = "max_retry_interval"
-	SETTING_SELF_MONITOR_INTERVAL    = "self_monitor_interval"
-	SETTING_STATS_INTERVAL    = "stats_interval"
+	SETTING_SELF_MONITOR_INTERVAL = "self_monitor_interval"
+	SETTING_STATS_INTERVAL        = "stats_interval"
 
 	STATS_QUEUE_SIZE       = "queue_size"
 	STATS_QUEUE_SIZE_BYTES = "queue_size_bytes"
@@ -53,7 +55,7 @@ type baseConfig struct {
 	//the read timeout for tcp connection
 	readTimeout time.Duration
 	//the max number of retry for read\write
-	maxRetry   int
+	maxRetry int
 	//the interval on which selfMonitor would be conducted
 	selfMonitorInterval time.Duration
 	//the interval on which stats are collected
@@ -61,13 +63,26 @@ type baseConfig struct {
 	//the maximum number of idle round that xmem can have
 	//exceeding this number indicate the possibility of stuck
 	//due to network issues
-	maxIdleCount int
+	maxIdleCount       int
 	connPoolNamePrefix string
-	connPoolSize int
-	connectStr string
-	username   string
-	password   string
-	logger     *log.CommonLogger
+	connPoolSize       int
+	connectStr         string
+	username           string
+	password           string
+	logger             *log.CommonLogger
+}
+
+type documentMetadata struct {
+	key      []byte
+	revSeq   uint64 //Item revision seqno
+	cas      uint64 //Item cas
+	flags    uint32 // Item flags
+	expiry   uint32 // Item expiration time
+	deletion bool
+}
+
+func (doc_meta documentMetadata) uniqueKey() string {
+	return fmt.Sprintf("%s_%v", doc_meta.key, doc_meta.revSeq)
 }
 
 // does not return error since the assumption is that settings have been validated prior
@@ -113,7 +128,7 @@ type dataBatch struct {
 	// key of the map is the document key
 	bigDoc_map map[string]*base.WrappedMCRequest
 	// the big docs that failed conflict resolution and do not need to be replicated
-	// key of the map is the document key
+	// key of the map is the document key_revSeqno
 	// the bool value in the map does not matter - the presence of a key does
 	bigDoc_noRep_map  map[string]bool
 	curCount          int
@@ -146,7 +161,6 @@ func (b *dataBatch) accumuBatch(req *base.WrappedMCRequest, classifyFunc func(re
 
 	if req != nil && req.Req != nil {
 		size := req.Req.Size()
-		key := string(req.Req.Key)
 
 		b.curCount++
 		if !b.expiration_set {
@@ -155,7 +169,8 @@ func (b *dataBatch) accumuBatch(req *base.WrappedMCRequest, classifyFunc func(re
 			b.expiration_set = true
 		}
 		if !classifyFunc(req.Req) {
-			b.bigDoc_map[key] = req
+			docMetadata := decodeSetMetaReq(req.Req)
+			b.bigDoc_map[docMetadata.uniqueKey()] = req
 		}
 		b.curSize += size
 		if b.curCount < b.capacity_count && b.curSize < b.capacity_size*1000 {
@@ -179,10 +194,21 @@ func needSend(req *mc.MCRequest, batch *dataBatch, logger *log.CommonLogger) boo
 		logger.Info("req is null, not need to send")
 		return false
 	} else {
-		key := string(req.Key)
-		_, ok := batch.bigDoc_noRep_map[key]
+		docMetadata := decodeSetMetaReq(req)
+		_, ok := batch.bigDoc_noRep_map[docMetadata.uniqueKey()]
 		return !ok
 	}
+}
+
+func decodeSetMetaReq(req *mc.MCRequest) documentMetadata {
+	ret := documentMetadata{}
+	ret.key = req.Key
+	ret.flags = binary.BigEndian.Uint32(req.Extras[0:4])
+	ret.expiry = binary.BigEndian.Uint32(req.Extras[4:8])
+	ret.revSeq = binary.BigEndian.Uint64(req.Extras[8:16])
+	ret.cas = req.Cas
+	ret.deletion = (req.Opcode == DELETE_WITH_META)
+	return ret
 }
 
 // TODO more common functions, e.g., data queuing and batch processing,
