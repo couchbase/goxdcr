@@ -258,6 +258,7 @@ func (capi_svc *CAPIService) parsePreReplicateResp(hostName string,
 		//double check again disableCkptBackwardsCompat
 		if resp_status_code == 404 && xdcrCheckpoingCapbility == false {
 			//throw error
+			capi_svc.logger.Infof("_pre_replicate failed. Response: 404 , reason: Target node %v is an old node", hostName)
 			retError = service_def.NoSupportForXDCRCheckpointingError
 		}
 
