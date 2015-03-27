@@ -249,7 +249,7 @@ func DecodeCreateRemoteClusterRequest(request *http.Request) (justValidate bool,
 			justValidate, err = getBoolFromValArr(valArr, false)
 			if err != nil {
 				errorsMap[base.JustValidate] = err
-			} 
+			}
 		case base.RemoteClusterUuid:
 			uuid = getStringFromValArr(valArr)
 		case base.RemoteClusterName:
@@ -351,7 +351,7 @@ func DecodeCreateReplicationRequest(request *http.Request) (justValidate bool, f
 			justValidate, err = getBoolFromValArr(valArr, false)
 			if err != nil {
 				errorsMap[base.JustValidate] = err
-			} 
+			}
 		default:
 			// ignore other parameters
 		}
@@ -371,10 +371,23 @@ func DecodeCreateReplicationRequest(request *http.Request) (justValidate bool, f
 		errorsMap[ToBucket] = utils.MissingValueError("target bucket")
 	}
 
-	settings, settingsErrorsMap := DecodeSettingsFromRequest(request, false)
+	settings, settingsErrorsMap := DecodeSettingsFromRequest(request, false, false)
 	for key, value := range settingsErrorsMap {
 		errorsMap[key] = value
 	}
+
+	isEnterprise, err := XDCRCompTopologyService().IsMyClusterEnterprise()
+	if err != nil {
+		return
+	}
+
+	if !isEnterprise {
+		filterExpression, ok := settings[metadata.FilterExpression]
+		if ok && len(filterExpression.(string)) > 0 {
+			errorsMap[FilterExpression] = errors.New("Filter expression can be specified in Enterprise edition only")
+		}
+	}
+
 	return
 }
 
@@ -391,10 +404,11 @@ func DecodeChangeReplicationSettings(request *http.Request, isDefaultSettings bo
 		errorsMap[base.JustValidate] = err
 	}
 
-	settings, settingsErrorsMap := DecodeSettingsFromRequest(request, isDefaultSettings)
+	settings, settingsErrorsMap := DecodeSettingsFromRequest(request, isDefaultSettings, true)
 	for key, value := range settingsErrorsMap {
 		errorsMap[key] = value
 	}
+
 	return
 }
 
@@ -429,7 +443,7 @@ func DecodeCreateReplicationResponse(response *http.Response) (string, error) {
 }
 
 // decode replication settings related parameters from http request
-func DecodeSettingsFromRequest(request *http.Request, isDefaultSettings bool) (map[string]interface{}, map[string]error) {
+func DecodeSettingsFromRequest(request *http.Request, isDefaultSettings bool, isUpdate bool) (map[string]interface{}, map[string]error) {
 	settings := make(map[string]interface{})
 	errorsMap := make(map[string]error)
 
@@ -439,7 +453,7 @@ func DecodeSettingsFromRequest(request *http.Request, isDefaultSettings bool) (m
 	}
 
 	for key, valArr := range request.Form {
-		err := processKey(key, valArr, &settings, isDefaultSettings)
+		err := processKey(key, valArr, &settings, isDefaultSettings, isUpdate)
 		if err != nil {
 			errorsMap[key] = err
 		}
@@ -470,7 +484,7 @@ func DecodeSettingsFromInternalSettingsRequest(request *http.Request) (map[strin
 			continue
 		}
 
-		err = processKey(restKey, valArr, &settings, true /*isDefaultSettings*/)
+		err = processKey(restKey, valArr, &settings, true /*isDefaultSettings*/, false /*isUpdate*/)
 		if err != nil {
 			errorsMap[restKey] = err
 		}
@@ -723,7 +737,7 @@ func EncodeValidationErrorIntoResponse(err error, withErrorsWrapper bool) (*ap.R
 	return EncodeErrorsMapIntoResponse(errorsMap, withErrorsWrapper)
 }
 
-// encode the error message of an error, without any wrapping, into Response object. 
+// encode the error message of an error, without any wrapping, into Response object.
 func EncodeErrorMessageIntoResponse(err error, statusCode int) (*ap.Response, error) {
 	if err != nil {
 		return EncodeByteArrayIntoResponseWithStatusCode([]byte(err.Error()), statusCode)
@@ -792,7 +806,7 @@ func EncodeReplicationSpecErrorIntoResponse(err error) (*ap.Response, error) {
 
 }
 
-func processKey(restKey string, valArr []string, settingsPtr *map[string]interface{}, isDefaultSettings bool) error {
+func processKey(restKey string, valArr []string, settingsPtr *map[string]interface{}, isDefaultSettings bool, isUpdate bool) error {
 	settingsKey, ok := RestKeyToSettingsKeyMap[restKey]
 	if !ok {
 		// ignore non-settings key
@@ -802,6 +816,10 @@ func processKey(restKey string, valArr []string, settingsPtr *map[string]interfa
 	if isDefaultSettings && !metadata.IsSettingDefaultValueMutable(settingsKey) {
 		// ignore settings whose default values cannot be changed
 		return nil
+	}
+
+	if isUpdate && !metadata.IsSettingValueMutable(settingsKey) {
+		return errors.New("Setting value cannot be modified after replication is created.")
 	}
 
 	if len(valArr) == 0 || valArr[0] == "" {

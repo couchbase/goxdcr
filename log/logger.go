@@ -12,10 +12,11 @@ package log
 import (
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"os"
-	"io"
 	"path/filepath"
+	"time"
 )
 
 type LogLevel int
@@ -38,23 +39,23 @@ const (
 )
 
 const (
-	XdcrLogFileName = "xdcr.log"
+	XdcrLogFileName      = "xdcr.log"
 	XdcrTraceLogFileName = "xdcr_trace.log"
 	XdcrErrorLogFileName = "xdcr_errors.log"
 )
 
 type CommonLogger struct {
-	loggers  map[LogLevel]*log.Logger
+	loggers map[LogLevel]*log.Logger
 	context *LoggerContext
 }
 
 type LoggerContext struct {
-	Log_writers  map[LogLevel] *LogWriter
-	Log_level LogLevel
+	Log_writers map[LogLevel]*LogWriter
+	Log_level   LogLevel
 }
 
 type LogWriter struct {
-	writer  io.Writer
+	writer io.Writer
 }
 
 // LogWriter implements io.Writer interface
@@ -67,25 +68,24 @@ func CopyCtx(ctx_to_copy *LoggerContext) *LoggerContext {
 		Log_level: ctx_to_copy.Log_level}
 }
 
-var DefaultLoggerContext *LoggerContext 
+var DefaultLoggerContext *LoggerContext
 
-// before logging paramters become available, direct all logging to stdout 
+// before logging paramters become available, direct all logging to stdout
 func init() {
-	logWriters := make(map[LogLevel] *LogWriter)
+	logWriters := make(map[LogLevel]*LogWriter)
 	logWriter := &LogWriter{os.Stdout}
 	logWriters[LogLevelInfo] = logWriter
 	logWriters[LogLevelDebug] = logWriter
 	logWriters[LogLevelTrace] = logWriter
 	logWriters[LogLevelError] = logWriter
-	
-	DefaultLoggerContext = &LoggerContext {
+
+	DefaultLoggerContext = &LoggerContext{
 		Log_writers: logWriters,
-		Log_level: LogLevelInfo,
+		Log_level:   LogLevelInfo,
 	}
 }
 
-
-// re-initializes default logger context with runtime logging parameters 
+// re-initializes default logger context with runtime logging parameters
 // log entries will be written to log files after this point
 func Init(logFileDir string, maxLogFileSize, maxNumberOfLogFiles uint64) error {
 	// xdcr log file
@@ -96,7 +96,7 @@ func Init(logFileDir string, maxLogFileSize, maxNumberOfLogFiles uint64) error {
 	}
 	xdcrLogWriterWrapper := DefaultLoggerContext.Log_writers[LogLevelInfo]
 	xdcrLogWriterWrapper.writer = xdcrLogWriter
-	
+
 	// xdcr trace log -- both debug level and trace level entries are written to this file
 	xdcrTraceFilePath := filepath.Join(logFileDir, XdcrTraceLogFileName)
 	xdcrTraceWriter, err := NewRotatingLogFileWriter(xdcrTraceFilePath, maxLogFileSize, maxNumberOfLogFiles)
@@ -107,7 +107,7 @@ func Init(logFileDir string, maxLogFileSize, maxNumberOfLogFiles uint64) error {
 	xdcrDebugWriterWrapper.writer = xdcrTraceWriter
 	xdcrTraceWriterWrapper := DefaultLoggerContext.Log_writers[LogLevelTrace]
 	xdcrTraceWriterWrapper.writer = xdcrTraceWriter
-	
+
 	// xdcr error log file
 	xdcrErrorFilePath := filepath.Join(logFileDir, XdcrErrorLogFileName)
 	xdcrErrorWriter, err := NewRotatingLogFileWriter(xdcrErrorFilePath, maxLogFileSize, maxNumberOfLogFiles)
@@ -116,7 +116,7 @@ func Init(logFileDir string, maxLogFileSize, maxNumberOfLogFiles uint64) error {
 	}
 	xdcrErrorWriterWrapper := DefaultLoggerContext.Log_writers[LogLevelError]
 	xdcrErrorWriterWrapper.writer = xdcrErrorWriter
-	
+
 	return nil
 }
 
@@ -127,20 +127,20 @@ func NewLogger(module string, logger_context *LoggerContext) *CommonLogger {
 	}
 	loggers := make(map[LogLevel]*log.Logger)
 	for logLevel, logWriter := range context.Log_writers {
-		loggers[logLevel] = log.New(logWriter, module, log.Ldate |log.Lmicroseconds)
+		loggers[logLevel] = log.New(logWriter, module, 0)
 	}
 	return &CommonLogger{loggers, context}
 }
 
 func (l *CommonLogger) logMsgf(level LogLevel, prefix string, format string, v ...interface{}) {
 	if l.context.Log_level >= level {
-		l.loggers[level].Printf(prefix + format, v...)
+		l.loggers[level].Printf(addTimestampToPrefix(prefix)+format, v...)
 	}
 }
 
 func (l *CommonLogger) logMsg(level LogLevel, prefix string, msg string) {
 	if l.context.Log_level >= level {
-		l.loggers[level].Println(prefix + msg)
+		l.loggers[level].Println(addTimestampToPrefix(prefix) + msg)
 	}
 }
 
@@ -180,7 +180,7 @@ func (l *CommonLogger) LoggerContext() *LoggerContext {
 	return l.context
 }
 
-func (l *CommonLogger) GetLogLevel () LogLevel {
+func (l *CommonLogger) GetLogLevel() LogLevel {
 	return l.context.Log_level
 }
 
@@ -215,4 +215,13 @@ func (level LogLevel) String() string {
 	return ""
 }
 
+// example log entry:
+// PipelineManager 2015-03-27T11:56:02.221-07:00 [INFO] Pipeline Manager is constucted
+func addTimestampToPrefix(prefix string) string {
+	return " " + FormatTimeWithMilliSecondPrecision(time.Now()) + " " + prefix
+}
 
+// example format: 2015-03-17T10:15:06.717-07:00
+func FormatTimeWithMilliSecondPrecision(origTime time.Time) string {
+	return origTime.Format("2006-01-02T15:04:05.000Z07:00")
+}

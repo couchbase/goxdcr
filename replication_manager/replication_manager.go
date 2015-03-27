@@ -862,7 +862,7 @@ func constructGenericReplicationFields(realUserId *base.RealUserId) (*base.Gener
 	}
 
 	return &base.GenericReplicationFields{
-		GenericFields:    base.GenericFields{utils.FormatTimeWithMilliSecondPrecision(time.Now()), *realUserId},
+		GenericFields:    base.GenericFields{log.FormatTimeWithMilliSecondPrecision(time.Now()), *realUserId},
 		LocalClusterName: localClusterName}, nil
 }
 

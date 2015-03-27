@@ -600,7 +600,7 @@ func authAdminCreds(request *http.Request, readOnly bool) error {
 
 func writeRemoteClusterAuditEvent(eventId uint32, remoteClusterRef *metadata.RemoteClusterReference, realUserId *base.RealUserId) {
 	event := &base.RemoteClusterRefEvent{
-		GenericFields:         base.GenericFields{utils.FormatTimeWithMilliSecondPrecision(time.Now()), *realUserId},
+		GenericFields:         base.GenericFields{log.FormatTimeWithMilliSecondPrecision(time.Now()), *realUserId},
 		RemoteClusterName:     remoteClusterRef.Name,
 		RemoteClusterHostname: remoteClusterRef.HostName,
 		IsEncrypted:           remoteClusterRef.DemandEncryption}

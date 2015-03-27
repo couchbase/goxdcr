@@ -13,7 +13,6 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-	"time"
 	"unicode/utf8"
 )
 
@@ -422,11 +421,6 @@ func convertByteIndexToRuneIndex(key string, matches [][]int) ([][]int, error) {
 
 func InvalidRuneIndexErrorMessage(key string, index int) string {
 	return fmt.Sprintf("byte index, %v, in match for key, %v, is not a starting index for a rune", index, key)
-}
-
-// example format: 2015-03-17T10:15:06.717-07:00
-func FormatTimeWithMilliSecondPrecision(origTime time.Time) string {
-	return origTime.Format("2006-01-02T15:04:05.000Z07:00")
 }
 
 func LocalBucketUUID(local_connStr string, bucketName string) (string, error) {

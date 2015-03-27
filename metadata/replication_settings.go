@@ -39,6 +39,9 @@ const (
 // settings whose default values cannot be viewed or changed through rest apis
 var ImmutableDefaultSettings = [3]string{ReplicationType, FilterExpression, Active}
 
+// settings whose values cannot be changed after replication is created
+var ImmutableSettings = [1]string{FilterExpression}
+
 const (
 	ReplicationTypeXmem = "xmem"
 	ReplicationTypeCapi = "capi"
@@ -440,8 +443,21 @@ func ValidateAndConvertSettingsValue(key, value, errorKey string) (convertedValu
 // it assumes that the key provided is a valid settings key
 func IsSettingDefaultValueMutable(key string) bool {
 	mutable := true
-	for _, immutableSetting := range ImmutableDefaultSettings {
-		if immutableSetting == key {
+	for _, setting := range ImmutableDefaultSettings {
+		if setting == key {
+			mutable = false
+			break
+		}
+	}
+	return mutable
+}
+
+// check if the value the specified settings can be changed after replication is created
+// it assumes that the key provided is a valid settings key
+func IsSettingValueMutable(key string) bool {
+	mutable := true
+	for _, setting := range ImmutableSettings {
+		if setting == key {
 			mutable = false
 			break
 		}
