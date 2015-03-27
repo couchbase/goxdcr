@@ -104,6 +104,9 @@ func StartReplicationManager(sourceKVHost string, xdcrRestPort uint16,
 	audit_svc service_def.AuditSvc) {
 
 	replication_mgr.once.Do(func() {
+		// ns_server shutdown protocol: poll stdin and exit upon reciept of EOF
+		go pollStdin()
+
 		// initializes replication manager
 		replication_mgr.init(repl_spec_svc, remote_cluster_svc, cluster_info_svc, xdcr_topology_svc, replication_settings_svc, checkpoints_svc, capi_svc, audit_svc)
 
@@ -111,14 +114,6 @@ func StartReplicationManager(sourceKVHost string, xdcrRestPort uint16,
 		// TODO should we make heart beat settings configurable?
 		replication_mgr.pipelineMasterSupervisor.Start(nil)
 		logger_rm.Info("Master supervisor has started")
-
-		// start adminport
-		adminport := NewAdminport(sourceKVHost, xdcrRestPort, replication_mgr.adminport_finch)
-		go adminport.Start()
-		logger_rm.Info("Admin port has been launched")
-
-		// add adminport as children of replication manager supervisor
-		replication_mgr.GenericSupervisor.AddChild(adminport)
 
 		// start replication manager supervisor
 		// TODO should we make heart beat settings configurable?
@@ -128,11 +123,16 @@ func StartReplicationManager(sourceKVHost string, xdcrRestPort uint16,
 		replication_mgr.initReplications()
 
 		replication_mgr.running = true
-		// ns_server shutdown protocol: poll stdin and exit upon reciept of EOF
-		go pollStdin()
 
 		replication_mgr.status_logger_finch = make(chan bool, 1)
 		go replication_mgr.checkReplicationStatus(replication_mgr.status_logger_finch)
+
+		// start adminport
+		adminport := NewAdminport(sourceKVHost, xdcrRestPort, replication_mgr.adminport_finch)
+		go adminport.Start()
+		logger_rm.Info("Admin port has been launched")
+		// add adminport as children of replication manager supervisor
+		replication_mgr.GenericSupervisor.AddChild(adminport)
 
 	})
 
