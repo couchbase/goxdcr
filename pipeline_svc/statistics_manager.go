@@ -449,7 +449,6 @@ func (stats_mgr *StatisticsManager) calculateTotalChanges() (int64, error) {
 	var total_doc uint64 = 0
 	for serverAddr, vbnos := range stats_mgr.active_vbs {
 		highseqno_map, err := stats_mgr.getHighSeqNos(serverAddr, vbnos)
-		stats_mgr.logger.Infof("highseqno_map=%v\n", highseqno_map)
 		if err != nil {
 			return 0, err
 		}

@@ -41,7 +41,7 @@ func (meta_svc *MetaKVMetadataSvc) Get(key string) ([]byte, interface{}, error) 
 	for i = 0; i < service_def.MaxNumOfRetries; i++ {
 		value, rev, err := metakv.Get(getPathFromKey(key))
 		if value == nil && rev == nil && err == nil {
-			meta_svc.logger.Infof("Can't find key=%v", key)	
+			meta_svc.logger.Debugf("Can't find key=%v", key)	
 			return nil, nil, service_def.MetadataNotFoundErr
 		} else if err == nil {
 			return value, rev, nil

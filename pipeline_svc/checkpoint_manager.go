@@ -21,6 +21,7 @@ import (
 	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/goxdcr/service_def"
 	"github.com/couchbase/goxdcr/utils"
+	"math/rand"
 	"sync"
 	"time"
 )
@@ -161,7 +162,11 @@ func (ckmgr *CheckpointManager) Start(settings map[string]interface{}) error {
 
 	ckmgr.logger.Infof("CheckpointManager starting with ckpt_interval=%v s\n", ckmgr.ckpt_interval.Seconds())
 
-	ckmgr.checkpoint_ticker = time.NewTicker(ckmgr.ckpt_interval)
+	//randomize the starting point so that the checkpoint manager for the same
+	//replication on different node the starting point is randomized.
+	starting_time := time.Duration(rand.Intn(5000))*time.Millisecond + ckmgr.ckpt_interval
+	ckmgr.logger.Infof("Checkpointing starts in %v sec", starting_time.Seconds())
+	ckmgr.checkpoint_ticker = time.NewTicker(starting_time)
 
 	//register itself with pipeline supervisor
 	supervisor := ckmgr.pipeline.RuntimeContext().Service(base.PIPELINE_SUPERVISOR_SVC)
@@ -518,89 +523,58 @@ func (ckmgr *CheckpointManager) checkpointing() {
 				ckmgr.logger.Info("Pipeline is no longer running, exit.")
 				return
 			}
-			ckmgr.performCkpt(false)
+			go ckmgr.performCkpt()
 			ckmgr.checkpoint_ticker = time.NewTicker(ckmgr.ckpt_interval)
 		}
 	}
 
 }
 
-func (ckmgr *CheckpointManager) performCkpt(skip_error bool) {
-	//divide the work to several executor and execute them parallelly
-	listOfVbs := ckmgr.getMyVBs()
-	startTime := time.Now()
-	workload := 5
-	start_index := 0
+func (ckmgr *CheckpointManager) performCkpt() {
+	interval_btwn_vb := time.Duration((ckmgr.ckpt_interval.Seconds()/float64(len(ckmgr.getMyVBs())))*1000) * time.Millisecond
+	ckmgr.logger.Infof("Checkpointing for replication %v, interval_btwn_vb=%v sec\n", ckmgr.pipeline.Topic(), interval_btwn_vb.Seconds())
+	interval_ticker := time.NewTicker(1 * time.Millisecond)
+	first_vb := true
+	err_map := make(map[uint16]error)
+	for _, vb := range ckmgr.getMyVBs() {
+		select {
+		case <-interval_ticker.C:
+			if first_vb {
+				interval_ticker.Stop()
+				interval_ticker = time.NewTicker(interval_btwn_vb)
+				first_vb = false
+			}
+			err := ckmgr.do_checkpoint(vb)
+			if err != nil {
+				err_map[vb] = err
+			}
 
-	executor_wait_grp := &sync.WaitGroup{}
-	errMap := make(map[uint16]error)
-	executor_id := 0
-	for {
-		end_index := start_index + workload
-		if end_index > len(listOfVbs) {
-			end_index = len(listOfVbs)
-		}
-		vbs_for_executor := listOfVbs[start_index:end_index]
-		executor_wait_grp.Add(1)
-		go ckmgr.executeCkptTask(executor_id, vbs_for_executor, false, errMap, executor_wait_grp)
-		start_index = end_index
-		executor_id++
-		if start_index >= len(listOfVbs) {
-			break
 		}
 	}
 
-	//wait for all executator is done and then gather result
-	executor_wait_grp.Wait()
-	success := len(errMap) == 0
-	if success {
-		otherInfo := make(map[string]interface{})
-		otherInfo[TimeCommiting] = time.Since(startTime)
-		ckmgr.RaiseEvent(common.CheckpointDone, nil, ckmgr, nil, otherInfo)
-	} else {
+	if len(err_map) > 0 {
 		//error
+		ckmgr.logger.Errorf("Checkpointing failed for replication %v, err=%v\n", ckmgr.pipeline.Topic(), err_map)
 		err := errors.New("Checkpointing failed")
 		otherInfo := utils.WrapError(err)
 		ckmgr.RaiseEvent(common.ErrorEncountered, nil, ckmgr, nil, otherInfo)
-	}
-	ckmgr.logger.Infof("Done with checkpointing for pipeline %v\n", ckmgr.pipeline.InstanceId())
-}
+	} else {
+		ckmgr.logger.Infof("Done checkpointing for replication %v\n", ckmgr.pipeline.Topic())
 
-func (ckmgr *CheckpointManager) executeCkptTask(executor_id int, listOfVbs []uint16, skip_error bool, errMap map[uint16]error, wait_grp *sync.WaitGroup) {
-	ckmgr.logger.Debugf("Checkpoing executor %v is checkpointing for vbuckets %v", executor_id, listOfVbs)
-	if wait_grp == nil {
-		panic("wait_grp can't be nil")
-	}
-	defer wait_grp.Done()
-
-	for _, vbno := range listOfVbs {
-		if len(errMap) > 0 {
-			//there is already error reported by other executor
-			return
-		}
-		err := ckmgr.do_checkpoint(vbno, skip_error)
-		if err == nil {
-			ckmgr.logger.Debugf("Checkpointing is done for vb=%v\n", vbno)
-
-		} else {
-			//break on the first error
-			ckmgr.logger.Errorf("Failed to checkpointing for vb=%v, err=%v\n", vbno, err)
-			errMap[vbno] = err
-			return
-		}
 	}
 
 }
 
-func (ckmgr *CheckpointManager) do_checkpoint(vbno uint16, skip_error bool) (err error) {
+func (ckmgr *CheckpointManager) do_checkpoint(vbno uint16) (err error) {
 	//locking the current ckpt record and notsent_seqno list for this vb, no update is allowed during the checkpointing
+	ckmgr.logger.Debugf("Checkpointing for vb=%v\n", vbno)
 	ckmgr.cur_ckpts_locks[vbno].Lock()
 	defer ckmgr.cur_ckpts_locks[vbno].Unlock()
 
 	ckpt_record := ckmgr.cur_ckpts[vbno]
 
 	ckpt_record.Seqno = ckmgr.through_seqno_tracker_svc.GetThroughSeqno(vbno)
-	ckmgr.logger.Debugf("Sseqno number used for checkpointing for vb %v is %v\n", vbno, ckpt_record.Seqno)
+	ckmgr.logger.Debugf("Seqno number used for checkpointing for vb %v is %v\n", vbno, ckpt_record.Seqno)
 
 	if ckpt_record.Seqno == 0 {
 		ckmgr.logger.Debugf("No replication happened yet, skip checkpointing for vb=%v pipeline=%v\n", vbno, ckmgr.pipeline.InstanceId())
@@ -623,6 +597,7 @@ func (ckmgr *CheckpointManager) do_checkpoint(vbno uint16, skip_error bool) (err
 		}
 
 	} else {
+
 		ckpt_record.Target_vb_uuid = vb_uuid
 	}
 	ckpt_record.Seqno = 0
@@ -639,7 +614,7 @@ func (ckmgr *CheckpointManager) raiseSuccessCkptForVbEvent(ckpt_record metadata.
 }
 
 func (ckmgr *CheckpointManager) persistCkptRecord(vbno uint16, ckpt_record *metadata.CheckpointRecord) error {
-	ckmgr.logger.Debugf("Persist vb=%v ckpt_record=%v\n", vbno, ckpt_record)
+	ckmgr.logger.Debugf("Persist vb=%v ckpt_record=%v for %v\n", vbno, ckpt_record, ckmgr.pipeline.Topic())
 	return ckmgr.checkpoints_svc.UpsertCheckpoints(ckmgr.pipeline.Topic(), vbno, ckpt_record)
 }
 
