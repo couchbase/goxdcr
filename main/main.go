@@ -17,6 +17,7 @@ import (
 	rm "github.com/couchbase/goxdcr/replication_manager"
 	s "github.com/couchbase/goxdcr/service_impl"
 	"os"
+	"runtime"
 )
 
 var done = make(chan bool)
@@ -63,6 +64,8 @@ func usage() {
 }
 
 func main() {
+	runtime.GOMAXPROCS(rm.GoMaxProcs())
+
 	argParse()
 
 	// initializes logger

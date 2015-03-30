@@ -30,6 +30,7 @@ import (
 	"io"
 	"os"
 	"reflect"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -133,6 +134,8 @@ func StartReplicationManager(sourceKVHost string, xdcrRestPort uint16,
 		logger_rm.Info("Admin port has been launched")
 		// add adminport as children of replication manager supervisor
 		replication_mgr.GenericSupervisor.AddChild(adminport)
+
+		logger_rm.Info("ReplicationManager is running")
 
 	})
 
@@ -918,4 +921,13 @@ func logAuditErrors(err error) {
 		err = utils.NewEnhancedError(base.ErrorWritingAudit, err)
 		logger_rm.Errorf(err.Error())
 	}
+}
+
+func GoMaxProcs() int {
+	max_procs := 4
+	if runtime.NumCPU() < 4 {
+		max_procs = runtime.NumCPU()
+	}
+	logger_rm.Infof("GOMAXPROCS=%v\n", max_procs)
+	return max_procs
 }

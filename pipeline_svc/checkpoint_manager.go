@@ -73,10 +73,11 @@ type CheckpointManager struct {
 
 	support_ckpt bool
 
-	cur_ckpts        map[uint16]*metadata.CheckpointRecord
-	active_vbs       map[string][]uint16
-	vb_highseqno_map map[uint16]uint64
-	failoverlog_map  map[uint16]*mcc.FailoverLog
+	cur_ckpts         map[uint16]*metadata.CheckpointRecord
+	active_vbs        map[string][]uint16
+	vb_highseqno_map  map[uint16]uint64
+	failoverlog_map   map[uint16]*mcc.FailoverLog
+	failoverlog_locks map[uint16]*sync.RWMutex
 
 	logger          *log.CommonLogger
 	cur_ckpts_locks map[uint16]*sync.RWMutex
@@ -106,6 +107,7 @@ func NewCheckpointManager(checkpoints_svc service_def.CheckpointsService, capi_s
 		active_vbs:                active_vbs,
 		wait_grp:                  &sync.WaitGroup{},
 		failoverlog_map:           make(map[uint16]*mcc.FailoverLog),
+		failoverlog_locks:         make(map[uint16]*sync.RWMutex),
 		vb_highseqno_map:          make(map[uint16]uint64)}, nil
 }
 
@@ -189,6 +191,8 @@ func (ckmgr *CheckpointManager) initialize() {
 	for _, vbno := range listOfVbs {
 		ckmgr.cur_ckpts[vbno] = &metadata.CheckpointRecord{}
 		ckmgr.cur_ckpts_locks[vbno] = &sync.RWMutex{}
+		ckmgr.failoverlog_map[vbno] = nil
+		ckmgr.failoverlog_locks[vbno] = &sync.RWMutex{}
 	}
 }
 
@@ -301,6 +305,7 @@ func (ckmgr *CheckpointManager) SetVBTimestamps(topic string) error {
 	getter_wait_grp := &sync.WaitGroup{}
 	errMap := make(map[uint16]error)
 	getter_id := 0
+	ret_map_map := make(map[int]map[uint16]*base.VBTimestamp)
 	for {
 		end_index := start_index + workload
 		if end_index > len(listOfVbs) {
@@ -308,7 +313,9 @@ func (ckmgr *CheckpointManager) SetVBTimestamps(topic string) error {
 		}
 		vbs_for_getter := listOfVbs[start_index:end_index]
 		getter_wait_grp.Add(1)
-		go ckmgr.startSeqnoGetter(getter_id, vbs_for_getter, ckptDocs, support_ckpt, ret, highseqnomap, getter_wait_grp, errMap)
+		ret_map_map[getter_id] = make(map[uint16]*base.VBTimestamp)
+
+		go ckmgr.startSeqnoGetter(getter_id, vbs_for_getter, ckptDocs, support_ckpt, ret_map_map[getter_id], highseqnomap, getter_wait_grp, errMap)
 
 		start_index = end_index
 		if start_index >= len(listOfVbs) {
@@ -322,6 +329,13 @@ func (ckmgr *CheckpointManager) SetVBTimestamps(topic string) error {
 	if len(errMap) > 0 {
 		return errors.New(fmt.Sprintf("Failed to get starting seqno for pipeline %v", ckmgr.pipeline.InstanceId()))
 	}
+
+	for _, ret_map := range ret_map_map {
+		for vbno, vbts := range ret_map {
+			ret[vbno] = vbts
+		}
+	}
+
 	settings := ckmgr.pipeline.Settings()
 	settings["VBTimestamps"] = ret
 
@@ -541,7 +555,6 @@ func (ckmgr *CheckpointManager) populateVBTimestamp(ckptDoc *metadata.Checkpoint
 func (ckmgr *CheckpointManager) checkpointing() {
 	defer ckmgr.logger.Info("Exits checkpointing routine.")
 	defer ckmgr.wait_grp.Done()
-
 	for {
 		select {
 		case <-ckmgr.finish_ch:
@@ -575,6 +588,13 @@ func (ckmgr *CheckpointManager) performCkpt() {
 				interval_ticker = time.NewTicker(interval_btwn_vb)
 				first_vb = false
 			}
+
+			if ckmgr.pipeline.State() != common.Pipeline_Running {
+				//pipeline is no longer running, return
+				ckmgr.logger.Info("Pipeline is no longer running, exit do_checkpointing")
+				return
+			}
+
 			err := ckmgr.do_checkpoint(vb)
 			if err != nil {
 				err_map[vb] = err
@@ -659,6 +679,9 @@ func (ckmgr *CheckpointManager) OnEvent(eventType common.ComponentEventType,
 		if ok {
 			flog := event.FailoverLog
 			vbno := event.VBucket
+			ckmgr.failoverlog_locks[vbno].Lock()
+			defer ckmgr.failoverlog_locks[vbno].Unlock()
+
 			ckmgr.failoverlog_map[vbno] = flog
 			ckmgr.logger.Infof("Got failover log for vb=%v\n", vbno)
 		}
@@ -667,6 +690,9 @@ func (ckmgr *CheckpointManager) OnEvent(eventType common.ComponentEventType,
 }
 
 func (ckmgr *CheckpointManager) getFailoverUUIDForSeqno(vbno uint16, seqno uint64) uint64 {
+	ckmgr.failoverlog_locks[vbno].RLock()
+	ckmgr.failoverlog_locks[vbno].RUnlock()
+
 	flog := ckmgr.failoverlog_map[vbno]
 	for _, entry := range *flog {
 		failover_uuid := entry[0]
@@ -699,11 +725,13 @@ func (ckmgr *CheckpointManager) UpdateVBTimestamps(vbno uint16, rollbackseqno ui
 		if ckpt_record == nil {
 			break
 		}
+
 		//found the first ckpt record whose Seqno <= rollbackseqno
 		if ckpt_record.Seqno <= rollbackseqno {
 			foundIndex = index
 			break
 		}
+
 	}
 
 	vbts := ckmgr.populateVBTimestamp(checkpointDoc, foundIndex, vbno, pipeline_start_seqno.Seqno)

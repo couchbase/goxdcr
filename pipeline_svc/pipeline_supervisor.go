@@ -18,8 +18,8 @@ import (
 	"github.com/couchbase/goxdcr/utils"
 	"reflect"
 	//	"sync"
-	"time"
 	"fmt"
+	"time"
 )
 
 //configuration settings
@@ -127,11 +127,14 @@ func (pipelineSupervisor *PipelineSupervisor) ReportFailure(errors map[string]er
 }
 
 func (pipelineSupervisor *PipelineSupervisor) declarePipelineBroken() {
-	pipelineSupervisor.pipeline.ReportProgress(fmt.Sprintf("Received error report : %v, declare pipeline broken", pipelineSupervisor.errors_seen))
-	pipelineSupervisor.Logger().Errorf("Received error report : %v, declare pipeline broken", pipelineSupervisor.errors_seen)
 	err := pipelineSupervisor.pipeline.SetState(common.Pipeline_Error)
 	if err == nil {
+		pipelineSupervisor.Logger().Errorf("Received error report : %v", pipelineSupervisor.errors_seen)
 		pipelineSupervisor.ReportFailure(pipelineSupervisor.errors_seen)
+		pipelineSupervisor.pipeline.ReportProgress(fmt.Sprintf("Received error report : %v", pipelineSupervisor.errors_seen))
+
+	} else {
+		pipelineSupervisor.Logger().Infof("Received error report : %v, but error is ignored. pipeline_state=%v\n", pipelineSupervisor.errors_seen, pipelineSupervisor.pipeline.State())
 
 	}
 }

@@ -13,13 +13,13 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"github.com/couchbase/go-couchbase"
 	"github.com/couchbase/gomemcached"
 	base "github.com/couchbase/goxdcr/base"
 	common "github.com/couchbase/goxdcr/common"
 	gen_server "github.com/couchbase/goxdcr/gen_server"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/utils"
-	"github.com/couchbase/go-couchbase"
 	"reflect"
 	"sync"
 	"time"
@@ -29,7 +29,7 @@ const (
 	// start settings key name
 	DCP_VBTimestamp        = "VBTimestamp"
 	DCP_VBTimestampUpdator = "VBTimestampUpdater"
-	DCP_Connection_Prefix = "xdcr:"
+	DCP_Connection_Prefix  = "xdcr:"
 )
 
 var dcp_setting_defs base.SettingDefinitions = base.SettingDefinitions{DCP_VBTimestamp: base.NewSettingDef(reflect.TypeOf((*map[uint16]*base.VBTimestamp)(nil)), true)}
@@ -107,8 +107,8 @@ func NewDcpNozzle(id string,
 
 func (dcp *DcpNozzle) initialize(settings map[string]interface{}) (err error) {
 	dcp.finch = make(chan bool)
-	
-	dcp.uprFeed, err = dcp.bucket.StartUprFeed(DCP_Connection_Prefix + dcp.Id(), uint32(0))
+
+	dcp.uprFeed, err = dcp.bucket.StartUprFeed(DCP_Connection_Prefix+dcp.Id(), uint32(0))
 
 	// fetch start timestamp from settings
 	dcp.cur_ts = settings[DCP_VBTimestamp].(map[uint16]*base.VBTimestamp)
@@ -189,7 +189,7 @@ func (dcp *DcpNozzle) Stop() error {
 	if err != nil {
 		return err
 	}
-
+	dcp.closeUprStreams()
 	dcp.closeUprFeed()
 	dcp.bucket.Close()
 	dcp.Logger().Debugf("DcpNozzle %v processed %v items\n", dcp.Id(), dcp.counter)
@@ -204,8 +204,29 @@ func (dcp *DcpNozzle) Stop() error {
 
 }
 
+func (dcp *DcpNozzle) closeUprStreams() error {
+	dcp.Logger().Infof("Closing dcp streams for vb=%v\n", dcp.GetVBList())
+	opaque := newOpaque()
+	errMap := make(map[uint16]error)
+
+	for _, vbno := range dcp.GetVBList() {
+		err := dcp.uprFeed.UprCloseStream(vbno, opaque)
+		if err != nil {
+			errMap[vbno] = err
+		}
+	}
+
+	if len(errMap) > 0 {
+		msg := fmt.Sprintf("Failed to close upr streams, err=%v\n", errMap)
+		dcp.Logger().Error(msg)
+		return errors.New(msg)
+	}
+	return nil
+}
+
 func (dcp *DcpNozzle) closeUprFeed() bool {
 	var actionTaken = false
+
 	dcp.lock_uprFeed.Lock()
 	defer dcp.lock_uprFeed.Unlock()
 	if dcp.uprFeed != nil {
@@ -265,7 +286,7 @@ func (dcp *DcpNozzle) processData() (err error) {
 					dcp.cur_ts[vbno], err = dcp.vbtimestamp_updater(vbno, rollbackseq)
 					if err != nil {
 						dcp.Logger().Errorf("Failed to request dcp stream after receiving roll-back for vb=%v\n", vbno)
-						dcp.handleGeneralError (err)
+						dcp.handleGeneralError(err)
 						return err
 					}
 					dcp.startUprStream(vbno)

@@ -318,6 +318,8 @@ func (service *ReplicationSpecService) ValidateExistingReplicationSpec(spec *met
 		//remote cluster is no longer valid
 		service.logger.Errorf("Spec %v refers to non-existent remote cluster reference %v\n", spec.Id, spec.TargetClusterUUID)
 		return InvalidReplicationSpecError
+	}else if err != nil {
+		return err
 	}
 
 	remote_connStr, err := targetClusterRef.MyConnectionStr()

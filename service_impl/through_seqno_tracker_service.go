@@ -55,6 +55,8 @@ func (tsTracker *ThroughSeqnoTrackerSvc) initialize(pipeline common.Pipeline) {
 
 		tsTracker.vb_notsent_seqno_list_map[vbno] = make([]int, 0)
 		tsTracker.vb_notsent_seqno_list_locks[vbno] = &sync.RWMutex{}
+		
+		tsTracker.through_seqno_map[vbno] = 0
 	}
 }
 
@@ -161,7 +163,7 @@ func (tsTracker *ThroughSeqnoTrackerSvc) GetThroughSeqno(vbno uint16) uint64 {
 }
 
 func (tsTracker *ThroughSeqnoTrackerSvc) GetThroughSeqnos() map[uint16]uint64 {
-	through_seqno_map := make(map[uint16]uint64)
+	result_map := make(map[uint16]uint64)
 
 	listOfVbs := tsTracker.vb_list
 	vb_per_worker := 20
@@ -169,14 +171,16 @@ func (tsTracker *ThroughSeqnoTrackerSvc) GetThroughSeqnos() map[uint16]uint64 {
 
 	wait_grp := &sync.WaitGroup{}
 	executor_id := 0
+	result_map_map := make(map[int]map[uint16]uint64)
 	for {
 		end_index := start_index + vb_per_worker
 		if end_index > len(listOfVbs) {
 			end_index = len(listOfVbs)
 		}
 		vbs_for_executor := listOfVbs[start_index:end_index]
+		result_map_map[executor_id] = make(map[uint16]uint64)
 		wait_grp.Add(1)
-		go tsTracker.getThroughSeqnos(executor_id, vbs_for_executor, through_seqno_map, wait_grp)
+		go tsTracker.getThroughSeqnos(executor_id, vbs_for_executor, result_map_map[executor_id], wait_grp)
 		start_index = end_index
 		executor_id++
 		if start_index >= len(listOfVbs) {
@@ -185,10 +189,20 @@ func (tsTracker *ThroughSeqnoTrackerSvc) GetThroughSeqnos() map[uint16]uint64 {
 	}
 
 	wait_grp.Wait()
-	return through_seqno_map
+
+	for _, exec_result_map := range result_map_map {
+		for vbno, seqno := range exec_result_map {
+			result_map[vbno] = seqno
+		}
+	}
+
+	return result_map
 }
 
-func (tsTracker *ThroughSeqnoTrackerSvc) getThroughSeqnos(executor_id int, listOfVbs []uint16, through_seqno_map map[uint16]uint64, wait_grp *sync.WaitGroup) {
+func (tsTracker *ThroughSeqnoTrackerSvc) getThroughSeqnos(executor_id int, listOfVbs []uint16, result_map map[uint16]uint64, wait_grp *sync.WaitGroup) {
+	if result_map == nil {
+		panic("through_seqno_map is nil")
+	}
 	tsTracker.logger.Debugf("getThroughSeqnos executor %v is working on vbuckets %v", executor_id, listOfVbs)
 	if wait_grp == nil {
 		panic("wait_grp can't be nil")
@@ -196,7 +210,7 @@ func (tsTracker *ThroughSeqnoTrackerSvc) getThroughSeqnos(executor_id int, listO
 	defer wait_grp.Done()
 
 	for _, vbno := range listOfVbs {
-		through_seqno_map[vbno] = tsTracker.GetThroughSeqno(vbno)
+		result_map[vbno] = tsTracker.GetThroughSeqno(vbno)
 	}
 }
 

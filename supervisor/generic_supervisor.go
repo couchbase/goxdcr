@@ -165,10 +165,11 @@ func (supervisor *GenericSupervisor) Stop() error {
 	// stop supervising routine
 	close(supervisor.finch)
 
+	supervisor.heartbeat_ticker.Stop()
+
 	supervisor.Logger().Debug("Wait for children goroutines to exit")
 	supervisor.childrenWaitGrp.Wait()
 
-	supervisor.heartbeat_ticker.Stop()
 	supervisor.Logger().Infof("Stopped supervisor %v.\n", supervisor.Id())
 
 	if supervisor.parent_supervisor != nil {
@@ -216,11 +217,11 @@ func (supervisor *GenericSupervisor) sendHeartBeats(waitGrp *sync.WaitGroup) {
 				respch := make(chan []interface{}, 1)
 				supervisor.Logger().Debugf("heart beat sent to child %v from super %v\n", childId, supervisor.Id())
 				err := child.HeartBeat_async(respch, time.Now())
-				heartbeat_resp_chs[childId] = respch
 				if err != nil {
 					supervisor.Logger().Infof("Send heartbeat failed for %v, err=%v\n", childId, err)
 					heartbeat_report[childId] = skip
 				} else {
+					heartbeat_resp_chs[childId] = respch
 					heartbeat_report[childId] = notYetResponded
 					responseToWaitTokens <- 1
 				}
@@ -229,6 +230,12 @@ func (supervisor *GenericSupervisor) sendHeartBeats(waitGrp *sync.WaitGroup) {
 		fin_ch := make(chan bool, 1)
 		supervisor.resp_waiter_chs = append(supervisor.resp_waiter_chs, fin_ch)
 		if len(responseToWaitTokens) > 0 {
+
+			//validate the parameter to waitForResponse is valid
+			if len(heartbeat_resp_chs) != len(responseToWaitTokens) {
+				panic("len(responseToWaitTokens) != len(heartbeat_resp_chs)")
+			}
+
 			waitGrp.Add(1)
 			go supervisor.waitForResponse(heartbeat_report, heartbeat_resp_chs, fin_ch, responseToWaitTokens, waitGrp)
 		} else {
@@ -260,7 +267,6 @@ func (supervisor *GenericSupervisor) waitForResponse(heartbeat_report map[string
 	defer waitGrp.Done()
 	defer supervisor.Logger().Debugf("Exiting waitForResponse from supervisor %v\n", supervisor.Id())
 
-
 	//start a timer
 	ping_time := time.Now()
 	heartbeat_timeout_ch := time.After(supervisor.heartbeat_timeout)
@@ -286,12 +292,21 @@ func (supervisor *GenericSupervisor) waitForResponse(heartbeat_report map[string
 						heartbeat_report[childId] = respondedOk
 					default:
 						//didn't get the response, put the token back
-						reponseToWaitTokens <- 1
+						select {
+						case reponseToWaitTokens <- 1:
+						default:
+						}
 					}
-				}
+				} else if status == skip {
+					//no need to wait for child's response, put the token back
+					select {
+					case reponseToWaitTokens <- 1:
+					default:
+					}
+					}
 			}
 
-			if responded_count == len(heartbeat_report) {
+			if responded_count == len(heartbeat_resp_chs) {
 				goto REPORT
 			}
 		}
