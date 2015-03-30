@@ -8,6 +8,7 @@ import (
 	"log"
 	"math"
 	"net"
+	"runtime/debug"
 	"strings"
 	"time"
 
@@ -239,7 +240,7 @@ func (c *Client) GetBulk(vb uint16, keys []string) (map[string]*gomemcached.MCRe
 
 	errch := make(chan error, 2)
 
-	go func() {
+	go func(keys []string) {
 		defer func() { errch <- nil }()
 		for going {
 			res, err := c.Receive()
@@ -258,11 +259,11 @@ func (c *Client) GetBulk(vb uint16, keys []string) (map[string]*gomemcached.MCRe
 					res)
 			}
 			if res.Opaque >= uint32(len(keys)) {
-				log.Panicf(" Invalid opaque Value. Debug info : Res.opaque : %v, Keys %v, Response received %v", res.Opaque, len(keys), res)
+				log.Panicf(" Invalid opaque Value. Debug info : Res.opaque : %v, Keys %v, Response received %v \n Stack trace : %s", res.Opaque, len(keys), res, debug.Stack())
 			}
 			rv[keys[res.Opaque]] = res
 		}
-	}()
+	}(keys)
 
 	for i, k := range keys {
 		op := gomemcached.GETQ
