@@ -433,7 +433,7 @@ func (capi *CapiNozzle) send_internal(batch *capiBatch) error {
 
 //batch call for document size larger than the optimistic threshold
 func (capi *CapiNozzle) batchGetMeta(vbno uint16, bigDoc_map map[string]*base.WrappedMCRequest) (map[string]bool, error) {
-	capi.Logger().Debugf("batchGetMeta called for vb %v and bigDoc_map with len %v\n", vbno, len(bigDoc_map))
+	capi.Logger().Debugf("batchGetMeta called for vb %v and bigDoc_map with len %v, map=%v\n", vbno, len(bigDoc_map), bigDoc_map)
 
 	bigDoc_noRep_map := make(map[string]bool)
 
@@ -447,11 +447,15 @@ func (capi *CapiNozzle) batchGetMeta(vbno uint16, bigDoc_map map[string]*base.Wr
 	}
 
 	key_rev_map := make(map[string]string)
+	key_seqno_map := make(map[string]uint64)
 	sent_id_map := make(map[string]bool)
 	for id, req := range bigDoc_map {
 		key := string(req.Req.Key)
-		key_rev_map[key] = getSerializedRevision(req.Req)
-		sent_id_map[id] = true
+		if _, ok := key_rev_map[key]; !ok {
+			key_rev_map[key] = getSerializedRevision(req.Req)
+			key_seqno_map[key] = req.Seqno
+			sent_id_map[id] = true
+		}
 	}
 
 	body, err := json.Marshal(key_rev_map)
@@ -459,10 +463,10 @@ func (capi *CapiNozzle) batchGetMeta(vbno uint16, bigDoc_map map[string]*base.Wr
 		return nil, err
 	}
 
-	for _, req := range bigDoc_map {
+	for key, seqno := range key_seqno_map {
 		additionalInfo := make(map[string]interface{})
-		additionalInfo[EVENT_ADDI_DOC_KEY] = string(req.Req.Key)
-		additionalInfo[EVENT_ADDI_SEQNO] = req.Seqno
+		additionalInfo[EVENT_ADDI_DOC_KEY] = key
+		additionalInfo[EVENT_ADDI_SEQNO] = seqno
 		capi.RaiseEvent(common.GetMetaSent, nil, capi, nil, additionalInfo)
 	}
 
@@ -479,14 +483,15 @@ func (capi *CapiNozzle) batchGetMeta(vbno uint16, bigDoc_map map[string]*base.Wr
 		return nil, errors.New(errMsg)
 	}
 
-	for _, req := range bigDoc_map {
+	for key, seqno := range key_seqno_map {
 		additionalInfo := make(map[string]interface{})
-		additionalInfo[EVENT_ADDI_DOC_KEY] = string(req.Req.Key)
-		additionalInfo[EVENT_ADDI_SEQNO] = req.Seqno
+		additionalInfo[EVENT_ADDI_DOC_KEY] = key
+		additionalInfo[EVENT_ADDI_SEQNO] = seqno
 		capi.RaiseEvent(common.GetMetaReceived, nil, capi, nil, additionalInfo)
 	}
 
 	bigDoc_rep_map, ok := out.(map[string]interface{})
+	capi.Logger().Debugf("bigDoc_rep_map=%v\n", bigDoc_rep_map)
 	if !ok {
 		return nil, errors.New(fmt.Sprintf("Error parsing return value from _revs_diff query for vbucket %v", vbno))
 	}
