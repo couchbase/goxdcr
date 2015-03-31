@@ -10,6 +10,7 @@ import (
 	"net"
 	"runtime/debug"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/couchbase/gomemcached"
@@ -232,38 +233,55 @@ func (c *Client) Append(vb uint16, key string, data []byte) (*gomemcached.MCResp
 // GetBulk gets keys in bulk
 func (c *Client) GetBulk(vb uint16, keys []string) (map[string]*gomemcached.MCResponse, error) {
 	rv := map[string]*gomemcached.MCResponse{}
-	going := true
+
+	stopch := make(chan bool)
+	var wg sync.WaitGroup
 
 	defer func() {
-		going = false
+		close(stopch)
+		wg.Wait()
 	}()
 
 	errch := make(chan error, 2)
 
-	go func(keys []string) {
-		defer func() { errch <- nil }()
-		for going {
-			res, err := c.Receive()
-			if err != nil {
-				if res.Status != gomemcached.KEY_ENOENT {
-					errch <- err
-				}
+	wg.Add(1)
+	go func() {
+		defer func() {
+			errch <- nil
+			wg.Done()
+		}()
+
+		ok := true
+		for ok {
+
+			select {
+			case <-stopch:
 				return
-			}
-			switch res.Opcode {
-			case gomemcached.GET:
-				going = false
-			case gomemcached.GETQ:
 			default:
-				log.Panicf("Unexpected opcode in GETQ response: %+v",
-					res)
+
+				res, err := c.Receive()
+				if err != nil {
+					if res.Status != gomemcached.KEY_ENOENT {
+						errch <- err
+					}
+					return
+				}
+
+				switch res.Opcode {
+				case gomemcached.GET:
+					ok = false
+				case gomemcached.GETQ:
+				default:
+					log.Panicf("Unexpected opcode in GETQ response: %+v",
+						res)
+				}
+				if res.Opaque >= uint32(len(keys)) {
+					log.Panicf(" Invalid opaque Value. Debug info : Res.opaque : %v, Keys %v, Response received %v \n Stack trace : %s", res.Opaque, len(keys), res, debug.Stack())
+				}
+				rv[keys[res.Opaque]] = res
 			}
-			if res.Opaque >= uint32(len(keys)) {
-				log.Panicf(" Invalid opaque Value. Debug info : Res.opaque : %v, Keys %v, Response received %v \n Stack trace : %s", res.Opaque, len(keys), res, debug.Stack())
-			}
-			rv[keys[res.Opaque]] = res
 		}
-	}(keys)
+	}()
 
 	for i, k := range keys {
 		op := gomemcached.GETQ
@@ -277,6 +295,7 @@ func (c *Client) GetBulk(vb uint16, keys []string) (map[string]*gomemcached.MCRe
 			Opaque:  uint32(i),
 		})
 		if err != nil {
+			log.Printf(" Transmit failed in GetBulk %v", err)
 			return rv, err
 		}
 	}
