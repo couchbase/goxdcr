@@ -186,13 +186,13 @@ func (service *MigrationSvc) migrate_internal(data []byte) []error {
 		}
 	}
 
-	checkpointsData, ok := dataObj[CheckpointsKey]
+	/*checkpointsData, ok := dataObj[CheckpointsKey]
 	if ok {
 		indErrorList := service.migrateCheckpoints(checkpointsData)
 		if len(indErrorList) != 0 {
 			errorList = append(errorList, indErrorList...)
 		}
-	}
+	}*/
 
 	return errorList
 }
@@ -580,7 +580,7 @@ func (service *MigrationSvc) targetBucketUUID(targetClusterUUID, bucketName stri
 	return utils.RemoteBucketUUID(remote_connStr, remote_userName, remote_password, bucketName)
 }
 
-
+/*
 func (service *MigrationSvc) migrateCheckpoints(checkpointsData interface{}) []error {
 	service.logger.Info("Starting to migrate checkpoints")
 	service.logger.Infof("data=%v\n", checkpointsData)
@@ -709,6 +709,8 @@ func (service *MigrationSvc) migrateCheckpoint(checkpointDocId string, checkpoin
 
 	return errorList
 }
+
+*/
 
 func addErrorMapToErrorList(errorMap map[string]error, errorList []error) []error {
 	if len(errorMap) > 0 {

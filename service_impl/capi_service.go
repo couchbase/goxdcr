@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
+	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/goxdcr/service_def"
 	"github.com/couchbase/goxdcr/utils"
 )
@@ -21,14 +22,13 @@ const (
 //errors
 var VB_OPAQUE_MISMATCH_ERR error = errors.New("The remote vb opaque doesn't match with the one provided")
 var NO_VB_OPAQUE_IN_RESP_ERR error = errors.New("No vb opaque in the response")
-var NO_REMOTE_OPAQUE_IN_RESP_ERR error = errors.New("No remote opaque in the response")
 
 //apiRequest is a structure for http request used for CAPI
 type apiRequest struct {
-	url      string
-	username string
-	password string
-	body     map[string]interface{}
+	url         string
+	username    string
+	password    string
+	body        map[string]interface{}
 	certificate []byte
 }
 
@@ -55,7 +55,7 @@ func NewCAPIService(logger_ctx *log.LoggerContext) *CAPIService {
 //		  current_remoteVBUUID - new remote vb uuid might be retured if bMatch = false and there was a topology change on remote vb
 //		  err
 func (capi_svc *CAPIService) PreReplicate(remoteBucket *service_def.RemoteBucketInfo,
-	knownRemoteVBStatus *service_def.RemoteVBReplicationStatus, xdcrCheckpoingCapbility bool) (bMatch bool, current_remoteVBUUID uint64, err error) {
+	knownRemoteVBStatus *service_def.RemoteVBReplicationStatus, xdcrCheckpoingCapbility bool) (bMatch bool, current_remoteVBOpaque metadata.TargetVBOpaque, err error) {
 	capi_svc.logger.Debug("Calling _pre_replicate")
 	api_base, err := capi_svc.composeAPIRequestBase(remoteBucket, knownRemoteVBStatus.VBNo)
 	if err != nil {
@@ -66,13 +66,16 @@ func (capi_svc *CAPIService) PreReplicate(remoteBucket *service_def.RemoteBucket
 		return
 	}
 
+	capi_svc.logger.Debugf("request to _pre_replicate = %v\n", api_base)
 	status_code, respMap, err := capi_svc.send_post(PRE_REPLICATE_CMD, api_base, HTTP_RETRIES)
 	capi_svc.logger.Debugf("response from _pre_replicate is status_code=%v respMap=%v for %v\n", status_code, respMap, knownRemoteVBStatus)
 	if err != nil {
 		capi_svc.logger.Errorf("Calling _pre_replicate on %v failed, err=%v\n", api_base.url, err)
+		return false, nil, err
 	}
-	bMatch, current_remoteVBUUID, err = capi_svc.parsePreReplicateResp(api_base.url, status_code, respMap, knownRemoteVBStatus.VBNo, xdcrCheckpoingCapbility)
-	
+
+	bMatch, current_remoteVBOpaque, err = capi_svc.parsePreReplicateResp(api_base.url, status_code, respMap, knownRemoteVBStatus.VBNo, xdcrCheckpoingCapbility)
+
 	if err == nil {
 		capi_svc.logger.Debugf("_pre_replicate succeeded for vb=%v\n", knownRemoteVBStatus.VBNo)
 	}
@@ -87,38 +90,54 @@ func (capi_svc *CAPIService) PreReplicate(remoteBucket *service_def.RemoteBucket
 //returns:	  remote_seqno - the remote vbucket's high sequence number
 //			  vb_uuid	   - the new vb uuid if there was a topology change
 //			  err
-func (capi_svc *CAPIService) CommitForCheckpoint(remoteBucket *service_def.RemoteBucketInfo, remoteVBUUID uint64, vbno uint16) (remote_seqno uint64, vb_uuid uint64, err error) {
+func (capi_svc *CAPIService) CommitForCheckpoint(remoteBucket *service_def.RemoteBucketInfo, remoteVBOpaque metadata.TargetVBOpaque, vbno uint16) (remote_seqno uint64, vbOpaque metadata.TargetVBOpaque, err error) {
 	capi_svc.logger.Debug("Calling _commit_for_checkpoint")
 	api_base, err := capi_svc.composeAPIRequestBase(remoteBucket, vbno)
 	if err != nil {
 		return
 	}
 	api_base.body["vb"] = vbno
-	api_base.body["vbopaque"] = remoteVBUUID
+	api_base.body["vbopaque"] = remoteVBOpaque.Value()
 	status_code, respMap, err := capi_svc.send_post(COMMIT_FOR_CKPT_CMD, api_base, HTTP_RETRIES)
 	if err == nil && status_code == 400 {
-		vb_uuid_val, ok := respMap["vbopaque"]
-		if ok {
-			vb_uuid = uint64(vb_uuid_val.(float64))
-			return 0, vb_uuid, VB_OPAQUE_MISMATCH_ERR
-		} else {
-			capi_svc.logger.Errorf("No vb uuid found in resp. respMap=%v, err=%v\n", respMap, err)
-			return 0, 0, NO_VB_OPAQUE_IN_RESP_ERR
-		}
-	} else if err == nil && status_code == 200 {
-		remote_seqno_pair, ok := respMap["commitopaque"].([]interface{})
-		if !ok || len(remote_seqno_pair) != 2 {
-			capi_svc.logger.Errorf("No commitopaque found in resp. respMap=%v, err=%v\n", respMap, err)
-			return 0, 0, NO_REMOTE_OPAQUE_IN_RESP_ERR
+		vbOpaque, err := getVBOpaqueFromRespMap(status_code, respMap, vbno)
+		if err != nil {
+			return 0, nil, err
 		}
 
-		remote_seqno = uint64(remote_seqno_pair[1].(float64))
+		return 0, vbOpaque, VB_OPAQUE_MISMATCH_ERR
+	} else if err == nil && status_code == 200 {
+		commitOpaque, ok := respMap["commitopaque"]
+		if !ok {
+			errMsg := fmt.Sprintf("No commitopaque found in resp. respMap=%v, err=%v", respMap, err)
+			capi_svc.logger.Errorf(errMsg)
+			return 0, nil, errors.New(errMsg)
+		}
+
+		commitOpaquePair, ok := commitOpaque.([]interface{})
+		if ok {
+			if len(commitOpaquePair) != 2 {
+				errMsg := fmt.Sprintf("invalid commitopaque found in resp. respMap=%v, err=%v\n", respMap, err)
+				capi_svc.logger.Errorf(errMsg)
+				return 0, nil, errors.New(errMsg)
+			}
+			remote_seqno = uint64(commitOpaquePair[1].(float64))
+		} else {
+			// older cluster may return a commit opaque consisting of a string with remote vbuuid value. leave remote_seqno as 0 in this case
+			_, ok := commitOpaque.(string)
+			if !ok {
+				errMsg := fmt.Sprintf("invalid commitopaque found in resp. respMap=%v, err=%v\n", respMap, err)
+				capi_svc.logger.Errorf(errMsg)
+				return 0, nil, errors.New(errMsg)
+			}
+		}
+
 	} else {
 		//error case
 		msg := fmt.Sprintf("_commit_for_checkpoint failed for vb=%v, err=%v, status_code=%v\n", vbno, err, status_code)
 		capi_svc.logger.Error(msg)
 		err = errors.New(msg)
-		return 0, 0, err
+		return 0, nil, err
 	}
 	return
 }
@@ -218,8 +237,17 @@ func (capi_svc *CAPIService) composePreReplicateBody(api_base *apiRequest, known
 	}
 	api_base.body["vb"] = knownRemoteVBStatus.VBNo
 	if !knownRemoteVBStatus.IsEmpty() {
-		//commitopaque is a pair of vbuuid and seqno
-		remote_commit_opaque := []interface{}{knownRemoteVBStatus.VBUUID, knownRemoteVBStatus.VBSeqno}
+		var remote_commit_opaque interface{}
+		if targetVBUuid, ok := knownRemoteVBStatus.VBOpaque.(*metadata.TargetVBUuid); ok {
+			//for newer clusters, commitopaque is a pair of vbuuid and seqno
+			remote_commit_opaque = []interface{}{targetVBUuid.Value(), knownRemoteVBStatus.VBSeqno}
+		} else if targetVBUuidAndTimestamp, ok := knownRemoteVBStatus.VBOpaque.(*metadata.TargetVBUuidAndTimestamp); ok {
+			//for older clusters, commitopaque is just vbuuid
+			remote_commit_opaque = targetVBUuidAndTimestamp.Target_vb_uuid
+		} else {
+			return fmt.Errorf("Invalid target vb opaque, %v, in knownRemoteVBStatus.", knownRemoteVBStatus.VBOpaque)
+		}
+
 		api_base.body["commitopaque"] = remote_commit_opaque
 	}
 	return nil
@@ -241,19 +269,20 @@ func (capi_svc *CAPIService) parsePreReplicateResp(hostName string,
 	resp_status_code int,
 	respMap map[string]interface{},
 	vbno uint16,
-	xdcrCheckpoingCapbility bool) (bool, uint64, error) {
+	xdcrCheckpoingCapbility bool) (bool, metadata.TargetVBOpaque, error) {
 	if resp_status_code == 200 || resp_status_code == 400 {
 		bMatch := (resp_status_code == 200)
-		vbuuidfloat, ok := respMap["vbopaque"].(float64)
-		if !ok {
-			return false, 0, errors.New("missing vbopaque in _pre_replicate response")
+
+		vbOpaque, err := getVBOpaqueFromRespMap(resp_status_code, respMap, vbno)
+		if err != nil {
+			return false, nil, err
 		}
-		vbuuid := uint64(vbuuidfloat)
-		capi_svc.logger.Debugf("_re_replicate returns remote VBOpaque=%v\n", vbuuid)
+
+		capi_svc.logger.Debugf("_re_replicate returns remote VBOpaque=%v\n", vbOpaque)
 		capi_svc.logger.Debugf("_pre_replicate returned %v status", bMatch)
-		return bMatch, vbuuid, nil
+		return bMatch, vbOpaque, nil
 	} else {
-		var retError error = nil
+		var retError error = fmt.Errorf("unexpected status code, %v, in _pre_replicate response", resp_status_code)
 
 		//double check again disableCkptBackwardsCompat
 		if resp_status_code == 404 && xdcrCheckpoingCapbility == false {
@@ -262,9 +291,61 @@ func (capi_svc *CAPIService) parsePreReplicateResp(hostName string,
 			retError = service_def.NoSupportForXDCRCheckpointingError
 		}
 
-		return false, 0, retError
+		return false, nil, retError
 
 	}
+}
+
+func getVBOpaqueFromRespMap(resp_status_code int,
+	respMap map[string]interface{},
+	vbno uint16) (metadata.TargetVBOpaque, error) {
+	vbOpaqueObj, ok := respMap["vbopaque"]
+	if !ok {
+		return nil, missingVBOpaqueError(resp_status_code, respMap, vbno)
+	}
+
+	vbOpaqueFloat, ok := vbOpaqueObj.(float64)
+	if ok {
+		// newer clusters returns a single vbuuid as vb opaque
+		return &metadata.TargetVBUuid{uint64(vbOpaqueFloat)}, nil
+	}
+
+	// older clusters returns a pair of vbuuid + startup time as vb opaque
+	vbOpaquePair, ok := vbOpaqueObj.([]interface{})
+	if !ok {
+		// other types of vb opaques are invalid
+		return nil, invalidVBOpaqueError(resp_status_code, respMap, vbno)
+	}
+
+	if len(vbOpaquePair) != 2 {
+		return nil, invalidVBOpaqueError(resp_status_code, respMap, vbno)
+	}
+
+	vbUuid := vbOpaquePair[0]
+	vbUuidStr, ok := vbUuid.(string)
+	if !ok {
+		return nil, invalidVBOpaqueError(resp_status_code, respMap, vbno)
+	}
+
+	startupTime := vbOpaquePair[1]
+	startupTimeStr, ok := startupTime.(string)
+	if !ok {
+		return nil, invalidVBOpaqueError(resp_status_code, respMap, vbno)
+	}
+
+	return &metadata.TargetVBUuidAndTimestamp{vbUuidStr, startupTimeStr}, nil
+}
+
+func missingVBOpaqueError(resp_status_code int,
+	respMap map[string]interface{},
+	vbno uint16) error {
+	return fmt.Errorf("missing vbopaque in _pre_replicate response. status_code=%v respMap=%v vbno=%v\n", resp_status_code, respMap, vbno)
+}
+
+func invalidVBOpaqueError(resp_status_code int,
+	respMap map[string]interface{},
+	vbno uint16) error {
+	return fmt.Errorf("invalid vbopaque in _pre_replicate response. status_code=%v respMap=%v vbno=%v\n", resp_status_code, respMap, vbno)
 }
 
 func (capi_svc *CAPIService) lookUpConnectionStr(remoteBucket *service_def.RemoteBucketInfo, vbno uint16) (string, error) {

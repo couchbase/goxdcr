@@ -12,10 +12,10 @@ package service_def
 import (
 	"errors"
 	"fmt"
+	"github.com/couchbase/goxdcr/capi_utils"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/goxdcr/utils"
-	"github.com/couchbase/goxdcr/capi_utils"
 	"net/url"
 )
 
@@ -60,10 +60,8 @@ func (remoteBucket *RemoteBucketInfo) refresh_internal(remote_cluster_svc Remote
 			return err
 		}
 
-
 		remoteBucket.RemoteClusterRef = remoteClusterRef
 	}
-
 
 	username, password, err := remoteBucket.RemoteClusterRef.MyCredentials()
 	if err != nil {
@@ -89,12 +87,12 @@ func (remoteBucket *RemoteBucketInfo) refresh_internal(remote_cluster_svc Remote
 	}
 
 	remoteBucket.MemcachedAddrRestAddrMap = make(map[string]string)
-	
-	urlmap, err := capi_utils.ConstructServerCouchApiBaseMap(bucket, remoteBucket.RemoteClusterRef) 
+
+	urlmap, err := capi_utils.ConstructServerCouchApiBaseMap(bucket, remoteBucket.RemoteClusterRef)
 	if err != nil {
 		return err
 	}
-	
+
 	//the url it returns http://127.0.0.1:9500/default%2B77aceaa5b49efbd92a261b8a1e72dab5
 	//we only need the host part
 	for serverAddr, urlstr := range urlmap {
@@ -113,13 +111,13 @@ func (remoteBucket *RemoteBucketInfo) String() string {
 }
 
 type RemoteVBReplicationStatus struct {
-	VBUUID  uint64
-	VBSeqno uint64
-	VBNo    uint16
+	VBOpaque metadata.TargetVBOpaque
+	VBSeqno  uint64
+	VBNo     uint16
 }
 
 func (rep_status *RemoteVBReplicationStatus) IsEmpty() bool {
-	return rep_status.VBUUID == 0
+	return rep_status.VBOpaque == nil
 }
 
 func NewEmptyRemoteVBReplicationStatus(vbno uint16) *RemoteVBReplicationStatus {
@@ -137,7 +135,7 @@ type CAPIService interface {
 	//		  bMatch - true if the remote vbucket matches the current replication status
 	//		  current_remoteVBUUID - new remote vb uuid might be retured if bMatch = false and there was a topology change on remote vb
 	//		  err
-	PreReplicate(remoteBucket *RemoteBucketInfo, knownRemoteVBStatus *RemoteVBReplicationStatus, xdcrCheckpoingCapbility bool) (bVBMatch bool, current_remoteVBUUID uint64, err error)
+	PreReplicate(remoteBucket *RemoteBucketInfo, knownRemoteVBStatus *RemoteVBReplicationStatus, xdcrCheckpoingCapbility bool) (bVBMatch bool, current_remoteVBOpaque metadata.TargetVBOpaque, err error)
 	//call to do disk commit on the remote cluster, which ensure that the mutations replicated are durable
 	//CommitForCheckpoint (_commit_for_checkpoint)
 	//Parameters: remoteBucket - the information about the remote bucket
@@ -146,7 +144,7 @@ type CAPIService interface {
 	//returns:	  remote_seqno - the remote vbucket's high sequence number
 	//			  vb_uuid	   - the new vb uuid if there was a topology change
 	//			  err
-	CommitForCheckpoint(remoteBucket *RemoteBucketInfo, remoteVBUUID uint64, vbno uint16) (remote_seqno uint64, vb_uuid uint64, err error)
+	CommitForCheckpoint(remoteBucket *RemoteBucketInfo, remoteVBOpaque metadata.TargetVBOpaque, vbno uint16) (remote_seqno uint64, vbOpaque metadata.TargetVBOpaque, err error)
 	//call to mass validate vb uuids on remote cluster
 	//Parameters: remoteBucket - the information about the remote bucket
 	//			  remoteVBUUIDs - the map of vbno and vbuuid

@@ -227,21 +227,13 @@ func (ckmgr *CheckpointManager) checkCkptCapability() {
 	ckmgr.logger.Infof("Remote bucket %v supporting xdcrcheckpoing is %v\n", ckmgr.remote_bucket, ckmgr.support_ckpt)
 }
 
-func (ckmgr *CheckpointManager) currentVBUUID(vbno uint16) uint64 {
-	ckmgr.cur_ckpts_locks[vbno].RLock()
-	ckmgr.cur_ckpts_locks[vbno].RUnlock()
-
-	record := ckmgr.cur_ckpts[vbno]
-	return record.Target_vb_uuid
-
-}
-
-func (ckmgr *CheckpointManager) updateCurrentVBUUID(vbno uint16, vbuuid uint64) {
+func (ckmgr *CheckpointManager) updateCurrentVBOpaque(vbno uint16, vbOpaque metadata.TargetVBOpaque) error {
 	ckmgr.cur_ckpts_locks[vbno].Lock()
-	ckmgr.cur_ckpts_locks[vbno].Unlock()
+	defer ckmgr.cur_ckpts_locks[vbno].Unlock()
 	record := ckmgr.cur_ckpts[vbno]
-	record.Target_vb_uuid = vbuuid
+	record.Target_vb_opaque = vbOpaque
 	ckmgr.cur_ckpts[vbno] = record
+	return nil
 }
 
 func getDocsProcessedForPausedReplication(topic string, checkpoints_svc service_def.CheckpointsService,
@@ -368,23 +360,18 @@ func (ckmgr *CheckpointManager) startSeqnoGetter(getter_id int, listOfVbs []uint
 					return
 				}
 
-				//set the target vb uuid from the value returned
-				var vb_uuid uint64
-				vb_uuid = ckpt_record.Target_vb_uuid
-				remote_vb_status := &service_def.RemoteVBReplicationStatus{VBUUID: vb_uuid,
+				remote_vb_status := &service_def.RemoteVBReplicationStatus{VBOpaque: ckpt_record.Target_vb_opaque,
 					VBSeqno: ckpt_record.Target_Seqno,
 					VBNo:    vbno}
 
 				ckmgr.logger.Debugf("Negotiate checkpoint record %v...\n", ckpt_record)
-				var current_remoteVBUUID uint64 = 0
 				bMatch := false
-				var err error
-				bMatch, current_remoteVBUUID, err = ckmgr.capi_svc.PreReplicate(ckmgr.remote_bucket, remote_vb_status, ckmgr.support_ckpt)
+				bMatch, current_remoteVBOpaque, err := ckmgr.capi_svc.PreReplicate(ckmgr.remote_bucket, remote_vb_status, ckmgr.support_ckpt)
 				//remote vb topology changed
 				//udpate the vb_uuid and try again
 				if err == nil {
-					ckmgr.updateCurrentVBUUID(vbno, current_remoteVBUUID)
-					ckmgr.logger.Debugf("Remote vbucket %v has a new uuid %v, update\n", current_remoteVBUUID, vbno)
+					ckmgr.updateCurrentVBOpaque(vbno, current_remoteVBOpaque)
+					ckmgr.logger.Debugf("Remote vbucket %v has a new opaque %v, update\n", current_remoteVBOpaque, vbno)
 					ckmgr.logger.Debugf("Done with _pre_prelicate call for %v for vbno=%v, bMatch=%v", remote_vb_status, vbno, bMatch)
 				}
 
@@ -396,7 +383,7 @@ func (ckmgr *CheckpointManager) startSeqnoGetter(getter_id int, listOfVbs []uint
 						}
 
 					} else if err == service_def.NoSupportForXDCRCheckpointingError {
-						ckmgr.updateCurrentVBUUID(vbno, 0)
+						ckmgr.updateCurrentVBOpaque(vbno, nil)
 						ckmgr.logger.Infof("Remote vbucket %v is on a old node which doesn't support checkpointing, update target_vb_uuid=0\n", vbno)
 
 					} else {
@@ -632,12 +619,12 @@ func (ckmgr *CheckpointManager) do_checkpoint(vbno uint16) (err error) {
 		return nil
 	}
 
-	if ckpt_record.Target_vb_uuid == 0 {
+	if ckpt_record.Target_vb_opaque == nil {
 		ckmgr.logger.Info("remote bucket is no an older node, no checkpointing should be done.")
 		return nil
 	}
 
-	remote_seqno, vb_uuid, err := ckmgr.capi_svc.CommitForCheckpoint(ckmgr.remote_bucket, ckpt_record.Target_vb_uuid, vbno)
+	remote_seqno, vbOpaque, err := ckmgr.capi_svc.CommitForCheckpoint(ckmgr.remote_bucket, ckpt_record.Target_vb_opaque, vbno)
 	if err == nil {
 		//succeed
 		ckpt_record.Target_Seqno = remote_seqno
@@ -648,8 +635,7 @@ func (ckmgr *CheckpointManager) do_checkpoint(vbno uint16) (err error) {
 		}
 
 	} else {
-
-		ckpt_record.Target_vb_uuid = vb_uuid
+		ckpt_record.Target_vb_opaque = vbOpaque
 	}
 	ckpt_record.Seqno = 0
 	ckpt_record.Target_Seqno = 0
