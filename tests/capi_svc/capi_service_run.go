@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
+	"github.com/couchbase/goxdcr/metadata"
 	rm "github.com/couchbase/goxdcr/replication_manager"
 	"github.com/couchbase/goxdcr/service_def"
 	"github.com/couchbase/goxdcr/service_impl"
@@ -131,12 +132,12 @@ func run_testcase() error {
 		return err
 	}
 
-	remote_cluster_svc := service_impl.NewRemoteClusterService(nil, metadata_svc, top_svc, log.DefaultLoggerContext)
+	remote_cluster_svc := service_impl.NewRemoteClusterService(nil, metadata_svc, top_svc, cluster_info_svc, log.DefaultLoggerContext)
 	if err != nil {
 		return err
 	}
 
-	capi_svc := service_impl.NewCAPIService(log.DefaultLoggerContext)
+	capi_svc := service_impl.NewCAPIService(cluster_info_svc, log.DefaultLoggerContext)
 	if err != nil {
 		return err
 	}
@@ -156,13 +157,13 @@ func run_testcase() error {
 		return errors.New(fmt.Sprintf("testCommitForCheckpoint failed - err=%v", err))
 	}
 
-	if vbuuid_1 != 0 {
+	if vbuuid_1.(*metadata.TargetVBUuid).Target_vb_uuid != 0 {
 		vbuuid = vbuuid_1
 	}
 	logger.Infof("vb=%v, remote_seqno=%v, vb_uuid=%v\n", vbno, remote_seqno, vbuuid)
 
 	remoteVBUUIDs := [][]uint64{}
-	vb0_pair := []uint64{0, vbuuid}
+	vb0_pair := []uint64{0, vbuuid.(*metadata.TargetVBUuid).Target_vb_uuid}
 	remoteVBUUIDs = append(remoteVBUUIDs, vb0_pair)
 	err = testMassValidateVBUUIDs(capi_svc, remoteBucket, remoteVBUUIDs)
 	if err != nil {
@@ -172,21 +173,21 @@ func run_testcase() error {
 	return nil
 }
 
-func testPreReplicate(capi_svc *service_impl.CAPIService, remoteBucket *service_def.RemoteBucketInfo, vbno uint16) (uint64, error) {
+func testPreReplicate(capi_svc *service_impl.CAPIService, remoteBucket *service_def.RemoteBucketInfo, vbno uint16) (metadata.TargetVBOpaque, error) {
 
-	knownRemoteVBStatus := &service_def.RemoteVBReplicationStatus{VBNo: vbno, VBUUID: 0, VBSeqno: 0}
+	knownRemoteVBStatus := &service_def.RemoteVBReplicationStatus{VBNo: vbno, VBOpaque: &metadata.TargetVBUuid{0}, VBSeqno: 0}
 	bVBMatch, current_remoteVBUUID, err := capi_svc.PreReplicate(remoteBucket,
 		knownRemoteVBStatus, true)
 
 	logger.Infof("_pre_replicate returns for vb=%v:\n", knownRemoteVBStatus.VBNo)
 	logger.Infof("bVBMatch=%v, current_remteVBUUID=%v, err=%v\n", bVBMatch, current_remoteVBUUID, err)
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
 	return current_remoteVBUUID, nil
 }
 
-func testCommitForCheckpoint(capi_svc *service_impl.CAPIService, remoteBucket *service_def.RemoteBucketInfo, vbuuid uint64) (remote_seqno uint64, vb_uuid uint64, err error) {
+func testCommitForCheckpoint(capi_svc *service_impl.CAPIService, remoteBucket *service_def.RemoteBucketInfo, vbuuid metadata.TargetVBOpaque) (remote_seqno uint64, vb_uuid metadata.TargetVBOpaque, err error) {
 	remote_seqno, vb_uuid, err = capi_svc.CommitForCheckpoint(remoteBucket, vbuuid, 0)
 	return
 }
@@ -221,6 +222,7 @@ func createRemoteCluster() error {
 		options.username,
 		options.password,
 		[]byte{},
+		true,
 		base.MethodPost,
 		"",
 		paramsBytes,
@@ -269,6 +271,7 @@ func deleteRemoteCluster() error {
 		options.username,
 		options.password,
 		[]byte{},
+		true,
 		base.MethodDelete,
 		"",
 		nil, 

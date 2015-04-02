@@ -25,11 +25,12 @@ var NO_VB_OPAQUE_IN_RESP_ERR error = errors.New("No vb opaque in the response")
 
 //apiRequest is a structure for http request used for CAPI
 type apiRequest struct {
-	url         string
-	username    string
-	password    string
-	body        map[string]interface{}
-	certificate []byte
+	url                string
+	username           string
+	password           string
+	body               map[string]interface{}
+	certificate        []byte
+	insecureSkipVerify bool
 }
 
 //CAPIService is a wrapper around the rest interface provided by couchbase server
@@ -39,11 +40,15 @@ type apiRequest struct {
 //		3. _commit_for_checkpoint: ask the remote vbucket to commit and return back the seqno, or if the remote vbucket's UUID
 //								   has changed due to the topology change, in that case, new vb UUID would be returned
 type CAPIService struct {
-	logger *log.CommonLogger
+	cluster_info_service *ClusterInfoSvc
+	logger               *log.CommonLogger
 }
 
-func NewCAPIService(logger_ctx *log.LoggerContext) *CAPIService {
-	return &CAPIService{logger: log.NewLogger("CAPIService", logger_ctx)}
+func NewCAPIService(cluster_info_service *ClusterInfoSvc, logger_ctx *log.LoggerContext) *CAPIService {
+	return &CAPIService{
+		cluster_info_service: cluster_info_service,
+		logger:               log.NewLogger("CAPIService", logger_ctx),
+	}
 }
 
 //PrePrelicate (_pre_replicate)
@@ -211,6 +216,11 @@ func (capi_svc *CAPIService) composeAPIRequestBase(remoteBucket *service_def.Rem
 
 	couchApiBaseUrl := connectionStr
 
+	is40, err := capi_svc.cluster_info_service.IsClusterCompatible(remoteBucket.RemoteClusterRef, []int{4, 0})
+	if err != nil {
+		return nil, err
+	}
+
 	//	    BodyBase = [{<<"bucket">>, Bucket},
 	//                {<<"bucketUUID">>, BucketUUID}],
 	api_base := &apiRequest{}
@@ -221,6 +231,7 @@ func (capi_svc *CAPIService) composeAPIRequestBase(remoteBucket *service_def.Rem
 	api_base.body["bucket"] = remoteBucket.BucketName
 	api_base.body["bucketUUID"] = remoteBucket.UUID
 	api_base.certificate = remoteBucket.RemoteClusterRef.Certificate
+	api_base.insecureSkipVerify = !is40
 	return api_base, nil
 }
 
@@ -261,7 +272,7 @@ func (capi_svc *CAPIService) send_post(restMethodName string, api_base *apiReque
 	}
 	//	body :=  []byte(`{"bucket":"default","bucketUUID":0,"vb":0}`)
 	capi_svc.logger.Debugf("body=%s\n", body)
-	err, statusCode := utils.InvokeRestWithRetryWithAuth(api_base.url, restMethodName, false, api_base.username, api_base.password, api_base.certificate, base.MethodPost, base.JsonContentType, body, 0, &ret_map, capi_svc.logger, num_retry)
+	err, statusCode := utils.InvokeRestWithRetryWithAuth(api_base.url, restMethodName, false, api_base.username, api_base.password, api_base.certificate, api_base.insecureSkipVerify, base.MethodPost, base.JsonContentType, body, 0, &ret_map, capi_svc.logger, num_retry)
 	return statusCode, ret_map, err
 }
 

@@ -43,18 +43,20 @@ type RemoteClusterService struct {
 	metadata_svc      service_def.MetadataSvc
 	uilog_svc         service_def.UILogSvc
 	xdcr_topology_svc service_def.XDCRCompTopologySvc
+	cluster_info_svc  service_def.ClusterInfoSvc
 	logger            *log.CommonLogger
 	cache_lock        *sync.RWMutex
 	cache_map         map[string]*remoteClusterCache
 }
 
-func NewRemoteClusterService(uilog_svc service_def.UILogSvc, metadata_svc service_def.MetadataSvc, xdcr_topology_svc service_def.XDCRCompTopologySvc, logger_ctx *log.LoggerContext) *RemoteClusterService {
+func NewRemoteClusterService(uilog_svc service_def.UILogSvc, metadata_svc service_def.MetadataSvc, xdcr_topology_svc service_def.XDCRCompTopologySvc, cluster_info_svc service_def.ClusterInfoSvc, logger_ctx *log.LoggerContext) *RemoteClusterService {
 	return &RemoteClusterService{
 		metadata_svc:      metadata_svc,
 		cache_lock:        &sync.RWMutex{},
 		cache_map:         make(map[string]*remoteClusterCache),
 		uilog_svc:         uilog_svc,
 		xdcr_topology_svc: xdcr_topology_svc,
+		cluster_info_svc:  cluster_info_svc,
 		logger:            log.NewLogger("RemoteClusterService", logger_ctx),
 	}
 }
@@ -316,7 +318,12 @@ func (service *RemoteClusterService) validateRemoteCluster(ref *metadata.RemoteC
 		hostAddr = utils.EnforcePrefix("http://", hostAddr)
 	}
 
-	err, statusCode := utils.QueryRestApiWithAuth(hostAddr, base.PoolsPath, false, ref.UserName, ref.Password, ref.Certificate, base.MethodGet, "", nil, 0, &poolsInfo, service.logger)
+	is40, err := service.cluster_info_svc.IsClusterCompatible(ref, []int{4, 0})
+	if err != nil {
+		return err
+	}
+
+	err, statusCode := utils.QueryRestApiWithAuth(hostAddr, base.PoolsPath, false, ref.UserName, ref.Password, ref.Certificate, !is40, base.MethodGet, "", nil, 0, &poolsInfo, service.logger)
 	service.logger.Infof("Result from validate remote cluster call: err=%v, statusCode=%v\n", err, statusCode)
 	if err != nil || statusCode != http.StatusOK {
 		if statusCode == http.StatusUnauthorized {

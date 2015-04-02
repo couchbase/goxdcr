@@ -210,9 +210,13 @@ func (dcp *DcpNozzle) closeUprStreams() error {
 	errMap := make(map[uint16]error)
 
 	for _, vbno := range dcp.GetVBList() {
-		err := dcp.uprFeed.UprCloseStream(vbno, opaque)
-		if err != nil {
-			errMap[vbno] = err
+		if active, ok := dcp.vb_stream_status[vbno]; ok&&active {
+			err := dcp.uprFeed.UprCloseStream(vbno, opaque)
+			if err != nil {
+				errMap[vbno] = err
+			}
+		}else {
+			dcp.Logger().Infof("There is no active stream for vb=%v\n", vbno)
 		}
 	}
 

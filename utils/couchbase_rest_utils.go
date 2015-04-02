@@ -26,84 +26,88 @@ var ErrorRetrievingMemcachedSSLPort = errors.New("Could not get memcached ssl po
 var ErrorRetrievingCouchApiBase = errors.New("Could not get couchApiBase in the response of /nodes/self.")
 var InvalidCerfiticateError = errors.New("certificate must be a single, PEM-encoded x509 certificate and nothing more (failed to parse given certificate)")
 
-func GetMemcachedSSLPort(hostName, username, password string, logger *log.CommonLogger) (map[string]uint16, error) {
+func GetMemcachedSSLPort(hostName, username, password, bucket string, logger *log.CommonLogger) (map[string]uint16, error) {
 	ret := make(map[string]uint16)
 	servicesInfo := make(map[string]interface{})
 
-	logger.Infof("GetMemcachedSSLPort, hostName=%v\n", hostName)
-	err, _ := QueryRestApiWithAuth(hostName, base.NodeServicesPath, false, username, password, nil, base.MethodGet, "", nil, 0, &servicesInfo, logger)
+	pool, err := RemotePool(hostName, username, password)
 	if err != nil {
 		return nil, err
 	}
+	nodes := pool.Nodes
 
-	nodesExt, ok := servicesInfo[base.NodeExtKey]
-	if !ok {
-		return nil, ErrorRetrievingMemcachedSSLPort
+	if len(nodes) > 0 {
+
+		logger.Infof("GetMemcachedSSLPort, hostName=%v\n", hostName)
+		url := base.BPath + base.UrlDelimiter + bucket
+		err, _ = QueryRestApiWithAuth(hostName, url, false, username, password, nil, true, base.MethodGet, "", nil, 0, &servicesInfo, logger)
+		if err != nil {
+			return nil, err
+		}
+
+		nodesExt, ok := servicesInfo[base.NodeExtKey]
+		if !ok {
+			return nil, ErrorRetrievingMemcachedSSLPort
+		}
+
+		nodesExtArray, ok := nodesExt.([]interface{})
+		if !ok {
+			return nil, ErrorRetrievingMemcachedSSLPort
+		}
+
+		for index, nodeExt := range nodesExtArray {
+			nodeExtMap, ok := nodeExt.(map[string]interface{})
+			if !ok {
+				return nil, ErrorRetrievingMemcachedSSLPort
+			}
+
+			hostnameStr := GetHostName(nodes[index].Hostname)
+
+			service, ok := nodeExtMap[base.ServicesKey]
+			if !ok {
+				return nil, ErrorRetrievingMemcachedSSLPort
+			}
+
+			services_map, ok := service.(map[string]interface{})
+			if !ok {
+				return nil, ErrorRetrievingMemcachedSSLPort
+			}
+
+			kv_port, ok := services_map[base.KVPortKey]
+			if !ok {
+				return nil, ErrorRetrievingMemcachedSSLPort
+			}
+			kvPortFloat, ok := kv_port.(float64)
+			if !ok {
+				// should never get here
+				return nil, ErrorRetrievingMemcachedSSLPort
+			}
+
+			hostAddr := GetHostAddr(hostnameStr, uint16(kvPortFloat))
+
+			kv_ssl_port, ok := services_map[base.KVSSLPortKey]
+			if !ok {
+				// should never get here
+				return nil, ErrorRetrievingMemcachedSSLPort
+			}
+
+			kvSSLPortFloat, ok := kv_ssl_port.(float64)
+			if !ok {
+				// should never get here
+				return nil, ErrorRetrievingMemcachedSSLPort
+			}
+
+			ret[hostAddr] = uint16(kvSSLPortFloat)
+		}
 	}
-
-	nodesExtArray, ok := nodesExt.([]interface{})
-	if !ok {
-		return nil, ErrorRetrievingMemcachedSSLPort
-	}
-
-	for _, nodeExt := range nodesExtArray {
-		nodeExtMap, ok := nodeExt.(map[string]interface{})
-		if !ok {
-			return nil, ErrorRetrievingMemcachedSSLPort
-		}
-
-		hostname, ok := nodeExtMap[base.HostNameKey]
-		if !ok {
-			return nil, ErrorRetrievingMemcachedSSLPort
-		}
-		hostnameStr, ok := hostname.(string)
-		if !ok {
-			return nil, ErrorRetrievingMemcachedSSLPort
-		}
-
-		service, ok := nodeExtMap[base.ServicesKey]
-		if !ok {
-			return nil, ErrorRetrievingMemcachedSSLPort
-		}
-
-		services_map, ok := service.(map[string]interface{})
-		if !ok {
-			return nil, ErrorRetrievingMemcachedSSLPort
-		}
-
-		kv_port, ok := services_map[base.KVPortKey]
-		if !ok {
-			return nil, ErrorRetrievingMemcachedSSLPort
-		}
-		kvPortFloat, ok := kv_port.(float64)
-		if !ok {
-			// should never get here
-			return nil, ErrorRetrievingMemcachedSSLPort
-		}
-
-		hostAddr := GetHostAddr(hostnameStr, uint16(kvPortFloat))
-
-		kv_ssl_port, ok := services_map[base.KVSSLPortKey]
-		if !ok {
-			// should never get here
-			return nil, ErrorRetrievingMemcachedSSLPort
-		}
-
-		kvSSLPortFloat, ok := kv_ssl_port.(float64)
-		if !ok {
-			// should never get here
-			return nil, ErrorRetrievingMemcachedSSLPort
-		}
-
-		ret[hostAddr] = uint16(kvSSLPortFloat)
-	}
+	logger.Infof("ret=%v\n", ret)
 
 	return ret, nil
 }
 func GetXDCRSSLPort(hostName, userName, password string, logger *log.CommonLogger) (uint16, error, bool) {
 
 	portsInfo := make(map[string]interface{})
-	err, _ := QueryRestApiWithAuth(hostName, base.SSLPortsPath, false, userName, password, nil, base.MethodGet, "", nil, 0, &portsInfo, logger)
+	err, _ := QueryRestApiWithAuth(hostName, base.SSLPortsPath, false, userName, password, nil, true, base.MethodGet, "", nil, 0, &portsInfo, logger)
 	if err != nil {
 		return 0, err, false
 	}
@@ -132,7 +136,7 @@ func QueryRestApi(baseURL string,
 	timeout time.Duration,
 	out interface{},
 	logger *log.CommonLogger) (error, int) {
-	return QueryRestApiWithAuth(baseURL, path, preservePathEncoding, "", "", nil, httpCommand, contentType, body, timeout, out, logger)
+	return QueryRestApiWithAuth(baseURL, path, preservePathEncoding, "", "", nil, true, httpCommand, contentType, body, timeout, out, logger)
 }
 
 func EnforcePrefix(prefix string, str string) string {
@@ -140,6 +144,11 @@ func EnforcePrefix(prefix string, str string) string {
 	if !strings.HasPrefix(str, prefix) {
 		ret_str = prefix + str
 	}
+	return ret_str
+}
+
+func RemovePrefix(prefix string, str string) string {
+	ret_str := strings.Replace(str, prefix, "", 1)
 	return ret_str
 }
 
@@ -153,6 +162,7 @@ func QueryRestApiWithAuth(
 	username string,
 	password string,
 	certificate []byte,
+	insecureSkipVerify bool,
 	httpCommand string,
 	contentType string,
 	body []byte,
@@ -167,7 +177,7 @@ func QueryRestApiWithAuth(
 
 	var l *log.CommonLogger = loggerForFunc(logger)
 
-	client, err := getHttpClient(certificate, logger)
+	client, err := getHttpClient(certificate, insecureSkipVerify, logger)
 	if err != nil {
 		l.Errorf("Failed to get client for request, req=%v\n", req)
 		return err, 0
@@ -215,7 +225,7 @@ func InvokeRestWithRetry(baseURL string,
 	timeout time.Duration,
 	out interface{},
 	logger *log.CommonLogger, num_retry int) (error, int) {
-	return InvokeRestWithRetryWithAuth(baseURL, path, preservePathEncoding, "", "", nil, httpCommand, contentType, body, timeout, out, logger, num_retry)
+	return InvokeRestWithRetryWithAuth(baseURL, path, preservePathEncoding, "", "", nil, true, httpCommand, contentType, body, timeout, out, logger, num_retry)
 }
 
 func InvokeRestWithRetryWithAuth(baseURL string,
@@ -224,6 +234,7 @@ func InvokeRestWithRetryWithAuth(baseURL string,
 	username string,
 	password string,
 	certificate []byte,
+	insecureSkipVerify bool,
 	httpCommand string,
 	contentType string,
 	body []byte,
@@ -232,7 +243,7 @@ func InvokeRestWithRetryWithAuth(baseURL string,
 	logger *log.CommonLogger, num_retry int) (error, int) {
 	err, statusCode := QueryRestApiWithAuth(baseURL,
 		path, preservePathEncoding, username,
-		password, certificate,
+		password, certificate, insecureSkipVerify,
 		httpCommand,
 		contentType,
 		body,
@@ -244,14 +255,14 @@ func InvokeRestWithRetryWithAuth(baseURL string,
 		if remain_retries < 0 {
 			return err, statusCode
 		} else {
-			return InvokeRestWithRetryWithAuth(baseURL, path, preservePathEncoding, username, password, certificate, httpCommand, contentType, body, timeout, out, logger, remain_retries)
+			return InvokeRestWithRetryWithAuth(baseURL, path, preservePathEncoding, username, password, certificate, insecureSkipVerify, httpCommand, contentType, body, timeout, out, logger, remain_retries)
 		}
 	}
 	return err, statusCode
 
 }
 
-func getHttpClient(certificate []byte, logger *log.CommonLogger) (*http.Client, error) {
+func getHttpClient(certificate []byte, insecureSkipVerify bool, logger *log.CommonLogger) (*http.Client, error) {
 	var client *http.Client
 	if len(certificate) != 0 {
 		//https
@@ -263,6 +274,7 @@ func getHttpClient(certificate []byte, logger *log.CommonLogger) (*http.Client, 
 
 		tlsConfig := &tls.Config{RootCAs: caPool}
 		tlsConfig.BuildNameToCertificate()
+		tlsConfig.InsecureSkipVerify = insecureSkipVerify
 		tr := &http.Transport{TLSClientConfig: tlsConfig}
 		tr.DisableKeepAlives = true
 		client = &http.Client{Transport: tr}

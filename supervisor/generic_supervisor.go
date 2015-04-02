@@ -239,7 +239,7 @@ func (supervisor *GenericSupervisor) sendHeartBeats(waitGrp *sync.WaitGroup) {
 			waitGrp.Add(1)
 			go supervisor.waitForResponse(heartbeat_report, heartbeat_resp_chs, fin_ch, responseToWaitTokens, waitGrp)
 		} else {
-			supervisor.Logger().Infof("No response to be waited.")
+			supervisor.Logger().Debugf("No response to be waited.")
 		}
 	}
 	return

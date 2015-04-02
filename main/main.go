@@ -98,7 +98,7 @@ func main() {
 
 	if options.isConvert {
 		// disable uilogging during upgrade by specifying a nil uilog service
-		remote_cluster_svc := s.NewRemoteClusterService(nil, metadata_svc, top_svc, nil)
+		remote_cluster_svc := s.NewRemoteClusterService(nil, metadata_svc, top_svc, cluster_info_svc, nil)
 		migration_svc := s.NewMigrationSvc(top_svc, remote_cluster_svc,
 			s.NewReplicationSpecService(nil, remote_cluster_svc, metadata_svc, top_svc, nil),
 			s.NewReplicationSettingsSvc(metadata_svc, nil),
@@ -112,7 +112,7 @@ func main() {
 		}
 	} else {
 		uilog_svc := s.NewUILogSvc(top_svc, nil)
-		remote_cluster_svc := s.NewRemoteClusterService(uilog_svc, metadata_svc, top_svc, nil)
+		remote_cluster_svc := s.NewRemoteClusterService(uilog_svc, metadata_svc, top_svc, cluster_info_svc, nil)
 		// start replication manager in normal mode
 		rm.StartReplicationManager(host,
 			uint16(options.xdcrRestPort),
@@ -122,7 +122,7 @@ func main() {
 			top_svc,
 			s.NewReplicationSettingsSvc(metadata_svc, nil),
 			s.NewCheckpointsService(metadata_svc, nil),
-			s.NewCAPIService(nil),
+			s.NewCAPIService(cluster_info_svc, nil),
 			audit_svc)
 
 		// keep main alive in normal mode

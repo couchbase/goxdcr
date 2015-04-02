@@ -58,7 +58,7 @@ func startReplicationSpecService() error {
 		return err
 	}
 
-	remote_cluster_svc := s.NewRemoteClusterService(nil, metadataSvc, top_svc, nil)
+	remote_cluster_svc := s.NewRemoteClusterService(nil, metadataSvc, top_svc, cluster_info_svc, nil)
 	service := s.NewReplicationSpecService(nil, remote_cluster_svc, metadataSvc, top_svc, nil)
 
 	// create a test replication spec

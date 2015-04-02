@@ -143,13 +143,13 @@ func setup() error {
 	}
 	
 	uilog_svc := s.NewUILogSvc(top_svc, nil)
-	remote_cluster_svc := s.NewRemoteClusterService(uilog_svc, metadata_svc, top_svc, nil)
+	remote_cluster_svc := s.NewRemoteClusterService(uilog_svc, metadata_svc, top_svc, cluster_info_svc, nil)
 	repl_spec_svc := s.NewReplicationSpecService(uilog_svc, remote_cluster_svc, metadata_svc, top_svc, nil)
 
 	replication_manager.StartReplicationManager(options.source_kv_host, base.AdminportNumber,
 		repl_spec_svc,
 		remote_cluster_svc,
-		cluster_info_svc, top_svc, s.NewReplicationSettingsSvc(metadata_svc, nil), s.NewCheckpointsService(metadata_svc, nil), s.NewCAPIService(nil), audit_svc)
+		cluster_info_svc, top_svc, s.NewReplicationSettingsSvc(metadata_svc, nil), s.NewCheckpointsService(metadata_svc, nil), s.NewCAPIService(cluster_info_svc, nil), audit_svc)
 
 	logger.Info("Finish setup")
 	return nil
@@ -305,6 +305,7 @@ func getDocCounts(clusterAddress string, bucketName string, password string) int
 		bucketName,
 		password,
 		nil,
+		true,
 		"GET", "", nil,
 		0, output, logger)
 	if err != nil {
@@ -325,6 +326,7 @@ func flushTargetBkt() {
 		options.remoteUserName,
 		options.remotePassword,
 		nil,
+		true,
 		"POST", "", nil,
 		0, nil, logger)
 

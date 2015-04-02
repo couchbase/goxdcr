@@ -91,7 +91,7 @@ func (ci_svc *ClusterInfoSvc) IsClusterCompatible(clusterConnInfoProvider base.C
 	} else {
 		//should not ever get here
 		constr, _ := clusterConnInfoProvider.MyConnectionStr()
-		return false, fmt.Errorf("Can't get nodes information for cluster %v", constr)
+		return false, fmt.Errorf("Can't get nodes information for cluster %v, err=%v", constr, err)
 	}
 }
 
@@ -105,14 +105,14 @@ func (ci_svc *ClusterInfoSvc) encodeVersionToEffectiveVersion(version []int) int
 		minorVersion = version[1]
 	}
 
-	effectiveVersion := majorVersion*0x1000 + minorVersion
+	effectiveVersion := majorVersion*0x10000 + minorVersion
 
-	ci_svc.logger.Debugf("version=%v, effectiveVersion=%v\n", version, effectiveVersion)
+	ci_svc.logger.Debugf("version=%v, effectiveVersion=%d\n", version, effectiveVersion)
 	return effectiveVersion
 }
 
 func (ci_svc *ClusterInfoSvc) isVersionCompatible(clusterCompatibleVersion int, version int) bool {
-	return clusterCompatibleVersion > version
+	return clusterCompatibleVersion >= version
 }
 
 func (ci_svc *ClusterInfoSvc) GetBucket(clusterConnInfoProvider base.ClusterConnectionInfoProvider, bucketName string) (*couchbase.Bucket, error) {

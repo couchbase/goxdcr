@@ -36,6 +36,7 @@ const (
 	SETTING_RESP_TIMEOUT             = "resp_timeout"
 	XMEM_SETTING_DEMAND_ENCRYPTION   = "demandEncryption"
 	XMEM_SETTING_CERTIFICATE         = "certificate"
+	XMEM_SETTING_INSECURESKIPVERIFY  = "insecureSkipVerify"
 	XMEM_SETTING_REMOTE_PROXY_PORT   = "remote_proxy_port"
 	XMEM_SETTING_LOCAL_PROXY_PORT    = "local_proxy_port"
 	XMEM_SETTING_REMOTE_MEM_SSL_PORT = "remote_ssl_port"
@@ -52,6 +53,7 @@ const (
 	default_selfMonitorInterval time.Duration = 1 * time.Second
 	default_demandEncryption    bool          = false
 	default_max_downtime        time.Duration = 3 * time.Second
+	default_insecureSkipVerify  bool          = false
 )
 
 const (
@@ -61,19 +63,20 @@ const (
 )
 
 var xmem_setting_defs base.SettingDefinitions = base.SettingDefinitions{SETTING_BATCHCOUNT: base.NewSettingDef(reflect.TypeOf((*int)(nil)), true),
-	SETTING_BATCHSIZE:              base.NewSettingDef(reflect.TypeOf((*int)(nil)), true),
-	SETTING_NUMOFRETRY:             base.NewSettingDef(reflect.TypeOf((*int)(nil)), false),
-	SETTING_RESP_TIMEOUT:           base.NewSettingDef(reflect.TypeOf((*time.Duration)(nil)), false),
-	SETTING_WRITE_TIMEOUT:          base.NewSettingDef(reflect.TypeOf((*time.Duration)(nil)), false),
-	SETTING_READ_TIMEOUT:           base.NewSettingDef(reflect.TypeOf((*time.Duration)(nil)), false),
-	SETTING_MAX_RETRY_INTERVAL:     base.NewSettingDef(reflect.TypeOf((*time.Duration)(nil)), false),
-	SETTING_SELF_MONITOR_INTERVAL:  base.NewSettingDef(reflect.TypeOf((*time.Duration)(nil)), false),
-	SETTING_BATCH_EXPIRATION_TIME:  base.NewSettingDef(reflect.TypeOf((*time.Duration)(nil)), false),
-	SETTING_OPTI_REP_THRESHOLD:     base.NewSettingDef(reflect.TypeOf((*int)(nil)), true),
-	XMEM_SETTING_DEMAND_ENCRYPTION: base.NewSettingDef(reflect.TypeOf((*bool)(nil)), false),
-	XMEM_SETTING_CERTIFICATE:       base.NewSettingDef(reflect.TypeOf((*[]byte)(nil)), false),
+	SETTING_BATCHSIZE:               base.NewSettingDef(reflect.TypeOf((*int)(nil)), true),
+	SETTING_NUMOFRETRY:              base.NewSettingDef(reflect.TypeOf((*int)(nil)), false),
+	SETTING_RESP_TIMEOUT:            base.NewSettingDef(reflect.TypeOf((*time.Duration)(nil)), false),
+	SETTING_WRITE_TIMEOUT:           base.NewSettingDef(reflect.TypeOf((*time.Duration)(nil)), false),
+	SETTING_READ_TIMEOUT:            base.NewSettingDef(reflect.TypeOf((*time.Duration)(nil)), false),
+	SETTING_MAX_RETRY_INTERVAL:      base.NewSettingDef(reflect.TypeOf((*time.Duration)(nil)), false),
+	SETTING_SELF_MONITOR_INTERVAL:   base.NewSettingDef(reflect.TypeOf((*time.Duration)(nil)), false),
+	SETTING_BATCH_EXPIRATION_TIME:   base.NewSettingDef(reflect.TypeOf((*time.Duration)(nil)), false),
+	SETTING_OPTI_REP_THRESHOLD:      base.NewSettingDef(reflect.TypeOf((*int)(nil)), true),
+	XMEM_SETTING_DEMAND_ENCRYPTION:  base.NewSettingDef(reflect.TypeOf((*bool)(nil)), false),
+	XMEM_SETTING_CERTIFICATE:        base.NewSettingDef(reflect.TypeOf((*[]byte)(nil)), false),
+	XMEM_SETTING_INSECURESKIPVERIFY: base.NewSettingDef(reflect.TypeOf((*bool)(nil)), false),
 
-	//only used for xmem over ssl for 2.5
+	//only used for xmem over ssl via ns_proxy for 2.5
 	XMEM_SETTING_REMOTE_PROXY_PORT: base.NewSettingDef(reflect.TypeOf((*uint16)(nil)), false),
 	XMEM_SETTING_LOCAL_PROXY_PORT:  base.NewSettingDef(reflect.TypeOf((*uint16)(nil)), false)}
 
@@ -466,6 +469,7 @@ type xmemConfig struct {
 	bucketName string
 	//the duration to wait for the batch-sending to finish
 	certificate        []byte
+	insecureSkipVerify bool
 	demandEncryption   bool
 	remote_proxy_port  uint16
 	local_proxy_port   uint16
@@ -493,11 +497,13 @@ func newConfig(logger *log.CommonLogger) xmemConfig {
 		bucketName:         "",
 		respTimeout:        default_resptimeout,
 		demandEncryption:   default_demandEncryption,
+		insecureSkipVerify: default_insecureSkipVerify,
 		certificate:        []byte{},
 		remote_proxy_port:  0,
 		local_proxy_port:   0,
 		max_downtime:       default_max_downtime,
 		memcached_ssl_port: 0,
+		logger: logger,
 	}
 
 }
@@ -516,6 +522,10 @@ func (config *xmemConfig) initializeConfig(settings map[string]interface{}) erro
 			} else {
 				return errors.New("demandEncryption=true, but certificate is not set in settings")
 			}
+			if val, ok := settings[XMEM_SETTING_INSECURESKIPVERIFY]; ok {
+				config.insecureSkipVerify = val.(bool)
+			}
+
 			if val, ok := settings[XMEM_SETTING_REMOTE_MEM_SSL_PORT]; ok {
 				config.memcached_ssl_port = val.(uint16)
 			} else {
@@ -781,7 +791,7 @@ func (xmem *XmemNozzle) Close() error {
 
 func (xmem *XmemNozzle) Start(settings map[string]interface{}) error {
 	t := time.Now()
-	xmem.Logger().Info("Xmem starting ....")
+	xmem.Logger().Infof("Xmem starting ....settings=%v\n", settings)
 	defer xmem.Logger().Infof("%v took %vs to start\n", xmem.Id(), time.Since(t).Seconds())
 
 	xmem.SetState(common.Part_Starting)
@@ -1334,7 +1344,7 @@ func (xmem *XmemNozzle) getConnPool() (pool base.ConnPool, err error) {
 		if xmem.config.memcached_ssl_port != 0 {
 			xmem.Logger().Infof("Get or create ssl over memcached connection, memcached_ssl_port=%v\n", int(xmem.config.memcached_ssl_port))
 			pool, err = base.ConnPoolMgr().GetOrCreateSSLOverMemPool(poolName, hostName, xmem.config.bucketName, xmem.config.bucketName, xmem.config.password,
-				base.DefaultConnectionSize, int(xmem.config.memcached_ssl_port), xmem.config.certificate)
+				base.DefaultConnectionSize, int(xmem.config.memcached_ssl_port), xmem.config.certificate, xmem.config.insecureSkipVerify)
 
 		} else {
 			xmem.Logger().Infof("Get or create ssl over proxy connection")

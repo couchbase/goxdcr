@@ -101,6 +101,7 @@ type capiConfig struct {
 	connectionTimeout time.Duration
 	retryInterval     time.Duration
 	certificate       []byte
+	insecureSkipVerify bool
 	// key = vbno; value = couchApiBase for capi calls, e.g., http://127.0.0.1:9500/target%2Baa3466851d268241d9465826d3d8dd11%2f13
 	// this map serves two purposes: 1. provides a list of vbs that the capi is responsible for
 	// 2. provides the couchApiBase for each of the vbs
@@ -196,6 +197,7 @@ func NewCapiNozzle(id string,
 	username string,
 	password string,
 	certificate []byte,
+	insecureSkipVerify bool,
 	vbCouchApiBaseMap map[uint16]string,
 	logger_context *log.LoggerContext) *CapiNozzle {
 
@@ -228,6 +230,7 @@ func NewCapiNozzle(id string,
 	capi.config.username = username
 	capi.config.password = password
 	capi.config.certificate = certificate
+	capi.config.insecureSkipVerify = insecureSkipVerify
 	capi.config.vbCouchApiBaseMap = vbCouchApiBaseMap
 
 	msg_callback_func = nil
@@ -471,7 +474,7 @@ func (capi *CapiNozzle) batchGetMeta(vbno uint16, bigDoc_map map[string]*base.Wr
 	}
 
 	var out interface{}
-	err, statusCode := utils.QueryRestApiWithAuth(couchApiBaseHost, couchApiBasePath+base.RevsDiffPath, true, capi.config.username, capi.config.password, capi.config.certificate, base.MethodPost, base.JsonContentType,
+	err, statusCode := utils.QueryRestApiWithAuth(couchApiBaseHost, couchApiBasePath+base.RevsDiffPath, true, capi.config.username, capi.config.password, capi.config.certificate, capi.config.insecureSkipVerify, base.MethodPost, base.JsonContentType,
 		body, capi.config.connectionTimeout, &out, capi.Logger())
 	capi.Logger().Debugf("results of _revs_diff query for vb %v: err=%v, status=%v\n", vbno, err, statusCode)
 	if err != nil {

@@ -29,6 +29,7 @@ var NodesPath = "/pools/nodes"
 var NodesSelfPath = "/nodes/self"
 var SSLPortsPath = "/nodes/self/xdcrSSLPorts"
 var NodeServicesPath = "/pools/default/nodeServices"
+var BPath = "/pools/default/b"
 
 // constants for CAPI nozzle
 var RevsDiffPath = "/_revs_diff"

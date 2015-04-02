@@ -572,14 +572,13 @@ func (adminport *Adminport) GetMessageKeyFromRequest(r *http.Request) (string, e
 // returns error if credentials in request are not admin/read only admin
 func authAdminCreds(request *http.Request, readOnly bool) error {
 	// authentication
-	logger_ap.Debug("Start authAdminCreds")
 	var err error
 	var isAdmin bool
 	creds, err := cbauth.AuthWebCreds(request)
-	logger_ap.Debugf("creds user = %v\n", creds.Name())
 	if err != nil {
 		return err
 	}
+	logger_ap.Debugf("creds user = %v\n", creds.Name())
 
 	if readOnly {
 		isAdmin, err = creds.IsROAdmin()

@@ -64,6 +64,12 @@ type ConnPool interface {
 	IsFull() bool
 	Size() int
 	ConnType() ConnType
+	Hostname() string
+}
+
+type SSLConnPool interface {
+	ConnPool
+	Certificate() []byte
 }
 
 type connPool struct {
@@ -90,6 +96,7 @@ type sslOverMemConnPool struct {
 	connPool
 	remote_memcached_port int
 	certificate           []byte
+	insecureSkipVerify    bool
 }
 
 type connPoolMgr struct {
@@ -149,6 +156,10 @@ func (p *connPool) Name() string {
 	return p.name
 }
 
+func (p *connPool) Hostname() string {
+	return p.hostName
+}
+
 func (p *connPool) IsFull() bool {
 	return len(p.clients) >= p.maxConn
 }
@@ -186,6 +197,10 @@ func (p *connPool) ConnType() ConnType {
 
 func (p *sslOverProxyConnPool) init() {
 	p.newConnFunc = p.newConn
+}
+
+func (p *sslOverProxyConnPool) Certificate() []byte {
+	return p.certificate
 }
 
 func (p *sslOverProxyConnPool) newConn() (*mcc.Client, error) {
@@ -269,6 +284,10 @@ func (p *sslOverMemConnPool) init() {
 	p.newConnFunc = p.newConn
 }
 
+func (p *sslOverMemConnPool) Certificate() []byte {
+	return p.certificate
+}
+
 func (p *sslOverMemConnPool) newConn() (*mcc.Client, error) {
 
 	//connect to local proxy port
@@ -285,8 +304,10 @@ func (p *sslOverMemConnPool) newConn() (*mcc.Client, error) {
 		panic("failed to parse root certificate")
 	}
 
+	ConnPoolMgr().logger.Infof("InSecureSkipVerify=%v\n", p.insecureSkipVerify)
 	conn, err := tls.Dial("tcp", ssl_con_str, &tls.Config{
-		RootCAs: roots,
+		RootCAs:            roots,
+		InsecureSkipVerify: p.insecureSkipVerify,
 	})
 	if err != nil {
 		return nil, err
@@ -407,7 +428,7 @@ func (connPoolMgr *connPoolMgr) GetOrCreatePool(poolNameToCreate string, hostnam
 	return pool, err
 }
 
-func (connPoolMgr *connPoolMgr) GetOrCreateSSLOverMemPool(poolNameToCreate string, hostname string, bucketname string, username string, password string, connsize int, remote_mem_port int, cert []byte) (ConnPool, error) {
+func (connPoolMgr *connPoolMgr) GetOrCreateSSLOverMemPool(poolNameToCreate string, hostname string, bucketname string, username string, password string, connsize int, remote_mem_port int, cert []byte, insecureSkipVerify bool) (ConnPool, error) {
 	connPoolMgr.map_lock.Lock()
 	defer connPoolMgr.map_lock.Unlock()
 
@@ -436,6 +457,7 @@ func (connPoolMgr *connPoolMgr) GetOrCreateSSLOverMemPool(poolNameToCreate strin
 			name:       poolNameToCreate,
 			logger:     log.NewLogger("sslConnPool", connPoolMgr.logger.LoggerContext())},
 		remote_memcached_port: remote_mem_port,
+		insecureSkipVerify:    insecureSkipVerify,
 		certificate:           cert}
 	p.init()
 
