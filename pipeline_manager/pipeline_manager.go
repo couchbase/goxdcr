@@ -138,8 +138,9 @@ func stopUpdater(topic string) {
 	updater, _ := pipeline_mgr.pipeline_pending_for_update[topic]
 	pipeline_mgr.repair_map_lock.RUnlock()
 	if updater != nil {
-		pipeline_mgr.logger.Infof("found updater for %v\n", topic)
+		pipeline_mgr.logger.Infof("found updater for %v. stopping it\n", topic)
 		updater.stop()
+		pipeline_mgr.logger.Infof("updater for %v stopped\n", topic)
 		pipeline_mgr.repair_map_lock.Lock()
 		defer pipeline_mgr.repair_map_lock.Unlock()
 		delete(pipeline_mgr.pipeline_pending_for_update, topic)
@@ -160,6 +161,28 @@ func AllReplicationsForBucket(bucket string) []string {
 		}
 	}
 	return repIds
+}
+
+func AllReplicationSpecsForTargetCluster(targetClusterUuid string) map[string]*metadata.ReplicationSpecification {
+	ret := make(map[string]*metadata.ReplicationSpecification)
+	for topic, rep_status := range pipeline_mgr.pipelines_map {
+		if rep_status.Spec().TargetClusterUUID == targetClusterUuid {
+			ret[topic] = rep_status.Spec()
+		}
+	}
+
+	return ret
+}
+
+func AllReplicationsForTargetCluster(targetClusterUuid string) []string {
+	ret := make([]string, 0)
+	specs := AllReplicationSpecsForTargetCluster(targetClusterUuid)
+
+	for topic, _ := range specs {
+		ret = append(ret, topic)
+	}
+
+	return ret
 }
 
 func AllReplications() []string {

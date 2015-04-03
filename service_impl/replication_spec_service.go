@@ -66,16 +66,19 @@ func (service *ReplicationSpecService) ValidateNewReplicationSpec(sourceBucket, 
 
 	errorMap := make(map[string]error)
 
+	var sourceBucketUUID string
+
 	//validate the existence of source bucket
 	local_connStr, _ := service.xdcr_comp_topology_svc.MyConnectionStr()
 	if local_connStr == "" {
 		panic("XDCRTopologySvc.MyConnectionStr() should not return empty string")
 	}
 
-	sourceBucketUUID, err_source := utils.LocalBucketUUID(local_connStr, sourceBucket)
+	var err_source error
+	sourceBucketUUID, err_source = utils.LocalBucketUUID(local_connStr, sourceBucket)
 
 	if err_source == utils.NonExistentBucketError {
-		service.logger.Errorf("Spec [sourceBucket=%v, targetClusterUuid=%v, targetBucket=%v] refers to non-existent source bucket\n", sourceBucket, targetCluster, targetBucket)
+		service.logger.Errorf("Spec [sourceBucket=%v, targetClusterUuid=%v, targetBucket=%v] refers to non-existent bucket\n", sourceBucket, targetCluster, targetBucket)
 		errorMap[base.FromBucket] = utils.BucketNotFoundError(sourceBucket)
 	}
 

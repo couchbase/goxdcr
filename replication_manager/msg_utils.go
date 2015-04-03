@@ -298,7 +298,7 @@ func DecodeCreateRemoteClusterRequest(request *http.Request) (justValidate bool,
 		hostName = hostName + base.UrlPortNumberDelimiter + DefaultAdminPort
 	}
 	if len(errorsMap) == 0 {
-		remoteClusterRef = metadata.NewRemoteClusterReference(uuid, name, hostName, userName, password, demandEncryption, certificate)
+		remoteClusterRef, err = metadata.NewRemoteClusterReference(uuid, name, hostName, userName, password, demandEncryption, certificate)
 	}
 
 	return

@@ -1,16 +1,16 @@
 package common
 
 import (
-	"net/http"
-	"fmt"
-	"errors"
-	"io/ioutil"
-	"reflect"
 	"bytes"
+	"errors"
+	"fmt"
 	"github.com/couchbase/goxdcr/base"
-	"github.com/couchbase/goxdcr/utils"
 	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/goxdcr/service_def"
+	"github.com/couchbase/goxdcr/utils"
+	"io/ioutil"
+	"net/http"
+	"reflect"
 )
 
 func GetAdminportUrlPrefix(hostName string, adminportNumber uint64) string {
@@ -31,26 +31,30 @@ func ValidateResponse(testName string, response *http.Response, err error) error
 
 func ValidateFieldValue(fieldName string, expectedValue, actualValue interface{}) error {
 	if expectedValue != actualValue {
-		return errors.New(fmt.Sprintf("Incorrect value in field %v. Expected value=%v with type=%v, actual value=%v with type=%v\n", 
-									fieldName, expectedValue, reflect.TypeOf(expectedValue), actualValue, reflect.TypeOf(actualValue)))
+		return errors.New(fmt.Sprintf("Incorrect value in field %v. Expected value=%v with type=%v, actual value=%v with type=%v\n",
+			fieldName, expectedValue, reflect.TypeOf(expectedValue), actualValue, reflect.TypeOf(actualValue)))
 	}
 	return nil
 }
 
-func CreateTestRemoteCluster(remote_cluster_service service_def.RemoteClusterSvc, remoteUuid, remoteName, remoteHostName, remoteUserName, remotePassword string, 
-                             remoteDemandEncryption uint64, remoteCertificateFile string) error {
+func CreateTestRemoteCluster(remote_cluster_service service_def.RemoteClusterSvc, remoteUuid, remoteName, remoteHostName, remoteUserName, remotePassword string,
+	remoteDemandEncryption uint64, remoteCertificateFile string) error {
 	var serverCert []byte
 	var err error
 	// read certificate from file
 	if remoteCertificateFile != "" {
 		serverCert, err = ioutil.ReadFile(remoteCertificateFile)
 		if err != nil {
-    		fmt.Printf("Could not load server certificate! err=%v\n", err)
-    		return err
+			fmt.Printf("Could not load server certificate! err=%v\n", err)
+			return err
 		}
 	}
-	
-	remoteClusterRef := metadata.NewRemoteClusterReference(remoteUuid, remoteName, remoteHostName, remoteUserName, remotePassword, remoteDemandEncryption != 0, serverCert)
+
+	remoteClusterRef, err := metadata.NewRemoteClusterReference(remoteUuid, remoteName, remoteHostName, remoteUserName, remotePassword, remoteDemandEncryption != 0, serverCert)
+	if err != nil {
+		return err
+	}
+
 	err = remote_cluster_service.AddRemoteCluster(remoteClusterRef)
 	fmt.Printf("Added remote cluster reference with name=%v, remoteDemandEncryption=%v, err=%v\n", remoteName, remoteDemandEncryption != 0, err)
 	return err
@@ -67,10 +71,10 @@ func SendRequestAndValidateResponse(testName, httpMethod, url string, body []byt
 	if err != nil {
 		return nil, err
 	}
-	
+
 	// set auth parameters
 	request.SetBasicAuth(username, password)
-	
+
 	return sendRequest(testName, request)
 }
 
@@ -79,13 +83,13 @@ func SendRequestWithEscapedIdAndValidateResponse(testName, httpMethod, url, esca
 	if err != nil {
 		return nil, err
 	}
-	
+
 	// golang does not provide APIs to construct Request or URL with escaped path. Has to do this as a workaround
-	request.URL.Path += base.UrlDelimiter + escapedId	
-	
-	// set auth parameters 
+	request.URL.Path += base.UrlDelimiter + escapedId
+
+	// set auth parameters
 	request.SetBasicAuth(username, password)
-	
+
 	return sendRequest(testName, request)
 }
 
@@ -93,7 +97,7 @@ func constructRequest(httpMethod, url string, body []byte) (*http.Request, error
 	request, err := http.NewRequest(httpMethod, url, bytes.NewBuffer(body))
 	if err != nil {
 		return nil, err
-	}	
+	}
 	request.Close = true
 	request.Header.Set(base.ContentType, base.DefaultContentType)
 	return request, nil
@@ -105,8 +109,8 @@ func sendRequest(testName string, request *http.Request) (*http.Response, error)
 	return response, err
 }
 
-func CreateTestRemoteClusterThroughRest(sourceKVHost string, adminport uint64, remoteUuid, remoteName, remoteHostName, remoteUserName, remotePassword string, 
-                             remoteDemandEncryption uint64, remoteCertificateFile, username, password string) error {
+func CreateTestRemoteClusterThroughRest(sourceKVHost string, adminport uint64, remoteUuid, remoteName, remoteHostName, remoteUserName, remotePassword string,
+	remoteDemandEncryption uint64, remoteCertificateFile, username, password string) error {
 	url := GetAdminportUrlPrefix(sourceKVHost, adminport) + base.RemoteClustersPath
 
 	params := make(map[string]interface{})
@@ -116,13 +120,13 @@ func CreateTestRemoteClusterThroughRest(sourceKVHost string, adminport uint64, r
 	params[base.RemoteClusterUserName] = remoteUserName
 	params[base.RemoteClusterPassword] = remotePassword
 	params[base.RemoteClusterDemandEncryption] = int(remoteDemandEncryption)
-	
+
 	// read certificate from file
 	if remoteCertificateFile != "" {
 		serverCert, err := ioutil.ReadFile(remoteCertificateFile)
 		if err != nil {
-    		fmt.Printf("Could not load server certificate! err=%v\n", err)
-    		return err
+			fmt.Printf("Could not load server certificate! err=%v\n", err)
+			return err
 		}
 		params[base.RemoteClusterCertificate] = serverCert
 	}
@@ -131,14 +135,14 @@ func CreateTestRemoteClusterThroughRest(sourceKVHost string, adminport uint64, r
 	if err != nil {
 		return err
 	}
-	
+
 	_, err = SendRequestAndValidateResponse("CreateTestRemoteClusterThroughRest", base.MethodPost, url, paramsBytes, username, password)
 	return err
 }
 
 func DeleteTestRemoteClusterThroughRest(sourceKVHost string, adminport uint64, remoteName string, username, password string) error {
 	url := GetAdminportUrlPrefix(sourceKVHost, adminport) + base.RemoteClustersPath + base.UrlDelimiter + remoteName
-	
+
 	_, err := SendRequestAndValidateResponse("DeleteTestRemoteClusterThroughRest", base.MethodDelete, url, nil, username, password)
 	return err
 }

@@ -11,6 +11,8 @@ package metadata
 
 import (
 	"bytes"
+	"crypto/rand"
+	"encoding/base64"
 	"fmt"
 	"github.com/couchbase/goxdcr/base"
 	"reflect"
@@ -23,6 +25,9 @@ const (
 	// and reduces the chance of naming conflicts
 	RemoteClusterKeyPrefix = "remoteCluster"
 )
+
+var SizeOfRemoteClusterRefId = 32
+var MaxRetryForIdGeneration = 5
 
 /************************************
 /* struct RemoteClusterReference
@@ -43,8 +48,12 @@ type RemoteClusterReference struct {
 }
 
 func NewRemoteClusterReference(uuid, name, hostName, userName, password string,
-	demandEncryption bool, certificate []byte) *RemoteClusterReference {
-	return &RemoteClusterReference{Id: RemoteClusterRefId(uuid),
+	demandEncryption bool, certificate []byte) (*RemoteClusterReference, error) {
+	refId, err := RemoteClusterRefId()
+	if err != nil {
+		return nil, err
+	}
+	return &RemoteClusterReference{Id: refId,
 		Uuid:             uuid,
 		Name:             name,
 		HostName:         hostName,
@@ -52,12 +61,16 @@ func NewRemoteClusterReference(uuid, name, hostName, userName, password string,
 		Password:         password,
 		DemandEncryption: demandEncryption,
 		Certificate:      certificate,
-	}
+	}, nil
 }
 
-func RemoteClusterRefId(remoteClusterUuid string) string {
-	parts := []string{RemoteClusterKeyPrefix, remoteClusterUuid}
-	return strings.Join(parts, base.KeyPartsDelimiter)
+func RemoteClusterRefId() (string, error) {
+	refUuid, err := remoteClusterRefUuid()
+	if err != nil {
+		return "", err
+	}
+	parts := []string{RemoteClusterKeyPrefix, refUuid}
+	return strings.Join(parts, base.KeyPartsDelimiter), nil
 }
 
 // implements base.ClusterConnectionInfoProvider
@@ -102,4 +115,28 @@ func (ref *RemoteClusterReference) SameRef(newRef *RemoteClusterReference) bool 
 
 func (ref *RemoteClusterReference) String() string {
 	return fmt.Sprintf("id:%v; uuid:%v; name:%v; hostName:%v; userName:%v; password:xxxx; demandEncryption:%v;certificate:%v;revision:%v", ref.Id, ref.Uuid, ref.Name, ref.HostName, ref.UserName, ref.DemandEncryption, ref.Certificate, ref.Revision)
+}
+
+// generate a randomized string UUID which should be unique enough for all practical purposes
+func remoteClusterRefUuid() (string, error) {
+	numOfRetry := 0
+	var err error
+	for {
+		rb := make([]byte, SizeOfRemoteClusterRefId)
+		_, err := rand.Read(rb)
+
+		if err != nil {
+			if numOfRetry < MaxRetryForIdGeneration {
+				numOfRetry++
+			} else {
+				break
+			}
+		}
+
+		id := base64.URLEncoding.EncodeToString(rb)
+		return id, nil
+	}
+
+	return "", fmt.Errorf("Error generating Id for remote cluster. err=%v", err)
+
 }

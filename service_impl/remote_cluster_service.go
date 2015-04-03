@@ -31,6 +31,7 @@ const (
 	RemoteClustersCatalogKey = metadata.RemoteClusterKeyPrefix
 )
 
+var InvalidRemoteClusterOperationErrorMessage = "Invalid remote cluster operation. "
 var InvalidRemoteClusterErrorMessage = "Invalid remote cluster. "
 var UnknownRemoteClusterErrorMessage = "unknown remote cluster"
 
@@ -78,14 +79,32 @@ func (service *RemoteClusterService) RemoteClusterByRefId(refId string, refresh 
 	return ref, err
 }
 
-func (service *RemoteClusterService) RemoteClusterByUuid(uuid string, refresh bool) (*metadata.RemoteClusterReference, error) {
-	return service.RemoteClusterByRefId(metadata.RemoteClusterRefId(uuid), refresh)
-}
-
 func (service *RemoteClusterService) RemoteClusterByRefName(refName string, refresh bool) (*metadata.RemoteClusterReference, error) {
 	var ref *metadata.RemoteClusterReference
 	for _, ref_in_cache := range service.RemoteClusterMap() {
 		if ref_in_cache.Name == refName {
+			ref = ref_in_cache
+			break
+		}
+	}
+
+	if ref == nil {
+		return nil, errors.New(UnknownRemoteClusterErrorMessage)
+	} else {
+		var err error
+		if refresh {
+			ref, err = service.refresh(ref)
+		}
+		return ref, err
+	}
+}
+
+func (service *RemoteClusterService) RemoteClusterByUuid(uuid string, refresh bool) (*metadata.RemoteClusterReference, error) {
+	fmt.Printf("byuuid=%v\n", uuid)
+	var ref *metadata.RemoteClusterReference
+	for _, ref_in_cache := range service.RemoteClusterMap() {
+		fmt.Printf("ref_in_cache=%v\n", ref_in_cache)
+		if ref_in_cache.Uuid == uuid {
 			ref = ref_in_cache
 			break
 		}
@@ -129,7 +148,7 @@ func (service *RemoteClusterService) updateRemoteCluster(ref *metadata.RemoteClu
 		return err
 	}
 	service.logger.Debugf("Remote cluster being changed: key=%v, value=%v\n", key, string(value))
-	err = service.metadata_svc.SetSensitive(key, value, revision)
+	err = service.metadata_svc.Set(key, value, revision)
 	if err != nil {
 		return err
 	}
@@ -148,46 +167,31 @@ func (service *RemoteClusterService) updateRemoteCluster(ref *metadata.RemoteClu
 func (service *RemoteClusterService) SetRemoteCluster(refName string, ref *metadata.RemoteClusterReference) error {
 	service.logger.Infof("Setting remote cluster with refName %v\n", refName)
 
+	err := service.ValidateSetRemoteCluster(refName, ref)
+	if err != nil {
+		return err
+	}
+
 	oldRef, err := service.RemoteClusterByRefName(refName, false)
 	if err != nil {
 		return err
 	}
 
-	err = service.ValidateSetRemoteCluster(refName, ref)
+	// these are critical to ensure a successful update operation on oldRef
+	ref.Id = oldRef.Id
+	ref.Revision = oldRef.Revision
+
+	err = service.updateRemoteCluster(ref, oldRef.Revision)
 	if err != nil {
 		return err
 	}
 
-	if ref.Id == oldRef.Id {
-		// if the id of the remote cluster reference has not been changed, simply update the existing reference
-		err = service.updateRemoteCluster(ref, oldRef.Revision)
-		if err != nil {
-			return err
-		}
-		return nil
-
-	} else {
-		// if id of the remote cluster reference has been changed, delete the existing reference and create a new one
-		err = service.metadata_svc.DelWithCatalog(RemoteClustersCatalogKey, oldRef.Id, oldRef.Revision)
-		if err != nil {
-			return err
-		}
-		err = service.addRemoteCluster(ref)
-		if err != nil {
-			return err
-		}
-	}
-
 	if service.uilog_svc != nil {
-		nameChangeMsg := ""
 		hostnameChangeMsg := ""
-		if oldRef.Name != ref.Name {
-			nameChangeMsg = fmt.Sprintf(" New name is \"%s\".", ref.Name)
-		}
 		if oldRef.HostName != ref.HostName {
 			hostnameChangeMsg = fmt.Sprintf(" New contact point is %s.", ref.HostName)
 		}
-		uiLogMsg := fmt.Sprintf("Remote cluster reference \"%s\" updated.%s%s", oldRef.Name, nameChangeMsg, hostnameChangeMsg)
+		uiLogMsg := fmt.Sprintf("Remote cluster reference \"%s\" updated.%s", oldRef.Name, hostnameChangeMsg)
 		service.uilog_svc.Write(uiLogMsg)
 	}
 	return nil
@@ -199,6 +203,7 @@ func (service *RemoteClusterService) DelRemoteCluster(refName string) (*metadata
 	if err != nil {
 		return nil, err
 	}
+
 	key := ref.Id
 
 	err = service.metadata_svc.DelWithCatalog(RemoteClustersCatalogKey, key, ref.Revision)
@@ -252,29 +257,29 @@ func (service *RemoteClusterService) RemoteClusterMap() map[string]*metadata.Rem
 
 // validate that the remote cluster ref itself is valid, and that it does not collide with any of the existing remote clusters.
 func (service *RemoteClusterService) ValidateAddRemoteCluster(ref *metadata.RemoteClusterReference) error {
-	return service.validateChangeRemoteCluster(ref, "")
-}
+	oldRef, _ := service.RemoteClusterByRefName(ref.Name, false)
 
-// validate that the remote cluster ref itself is valid, and that it does not collide with any of the existing remote clusters except the one being updated
-func (service *RemoteClusterService) ValidateSetRemoteCluster(refName string, ref *metadata.RemoteClusterReference) error {
-	return service.validateChangeRemoteCluster(ref, refName)
-}
-
-// validate that the remote cluster ref itself is valid, and that it does not collide with existing remote clusters
-// if refName is not empty, collision with existing cluster with refName is allowed since that existing cluster is being updated
-func (service *RemoteClusterService) validateChangeRemoteCluster(ref *metadata.RemoteClusterReference, refName string) error {
-	var oldRef *metadata.RemoteClusterReference
-	var err error
-	if refName != "" {
-		oldRef, err = service.RemoteClusterByRefName(ref.Name, false)
-		if err != nil {
-			return err
-		}
+	if oldRef != nil {
+		return wrapAsInvalidRemoteClusterOperationError(errors.New("duplicate cluster names are not allowed"))
 	}
 
-	// collision with the remote cluster ref being updating is fine
-	if oldRef != nil && oldRef.Name != refName {
-		return wrapAsInvalidRemoteClusterError(errors.New("duplicate cluster names are not allowed"))
+	err := service.validateRemoteCluster(ref)
+	if err != nil {
+		return err
+	}
+
+	oldRef, err = service.RemoteClusterByUuid(ref.Uuid, false)
+	if oldRef != nil {
+		return wrapAsInvalidRemoteClusterOperationError(fmt.Errorf("Cluster reference to the same cluster already exists under the name `%v`", oldRef.Name))
+	}
+
+	return nil
+}
+
+func (service *RemoteClusterService) ValidateSetRemoteCluster(refName string, ref *metadata.RemoteClusterReference) error {
+	oldRef, err := service.RemoteClusterByRefName(refName, false)
+	if err != nil {
+		return err
 	}
 
 	err = service.validateRemoteCluster(ref)
@@ -282,10 +287,8 @@ func (service *RemoteClusterService) validateChangeRemoteCluster(ref *metadata.R
 		return err
 	}
 
-	oldRef, err = service.RemoteClusterByUuid(ref.Uuid, false)
-	// collision with the remote cluster ref be updated is fine
-	if oldRef != nil && oldRef.Name != refName {
-		return wrapAsInvalidRemoteClusterError(fmt.Errorf("Cluster reference to the same cluster already exists under the name `%v`", oldRef.Name))
+	if oldRef.Uuid != ref.Uuid {
+		return wrapAsInvalidRemoteClusterOperationError(errors.New("The new hostname points to a different remote cluster, which is not allowed."))
 	}
 
 	return nil
@@ -362,7 +365,6 @@ func (service *RemoteClusterService) validateRemoteCluster(ref *metadata.RemoteC
 
 	// update uuid in ref to real value
 	ref.Uuid = actualUuidStr
-	ref.Id = metadata.RemoteClusterRefId(ref.Uuid)
 
 	return nil
 }
@@ -398,7 +400,7 @@ func (service *RemoteClusterService) addRemoteCluster(ref *metadata.RemoteCluste
 		return err
 	}
 	service.logger.Debugf("Remote cluster being added: key=%v, value=%v\n", key, string(value))
-	err = service.metadata_svc.AddSensitiveWithCatalog(RemoteClustersCatalogKey, key, value)
+	err = service.metadata_svc.AddWithCatalog(RemoteClustersCatalogKey, key, value)
 	if err != nil {
 		return err
 	}
@@ -586,11 +588,18 @@ func wrapAsInvalidRemoteClusterError(err error) error {
 	return errors.New(InvalidRemoteClusterErrorMessage + err.Error())
 }
 
+// wrap/mark an error as invalid remote cluster operation error - by adding "invalid remote cluster operation" message to the front
+func wrapAsInvalidRemoteClusterOperationError(err error) error {
+	return errors.New(InvalidRemoteClusterOperationErrorMessage + err.Error())
+}
+
 func (service *RemoteClusterService) CheckAndUnwrapRemoteClusterError(err error) (bool, error) {
 	if err != nil {
 		errMsg := err.Error()
 		if strings.HasPrefix(errMsg, InvalidRemoteClusterErrorMessage) {
 			return true, errors.New(errMsg[len(InvalidRemoteClusterErrorMessage):])
+		} else if strings.HasPrefix(errMsg, InvalidRemoteClusterOperationErrorMessage) {
+			return true, errors.New(errMsg[len(InvalidRemoteClusterOperationErrorMessage):])
 		} else if strings.HasPrefix(err.Error(), UnknownRemoteClusterErrorMessage) {
 			return true, err
 		} else {
@@ -609,6 +618,7 @@ func (service *RemoteClusterService) RemoteClusterServiceCallback(path string, v
 	var err error
 	if len(value) != 0 {
 		newRef, err = service.constructRemoteClusterReference(value, rev)
+		fmt.Printf("newref=%v\n", newRef)
 		if err != nil {
 			service.logger.Errorf("Error marshaling remote cluster. value=%v, err=%v\n", string(value), err)
 			return "", nil, nil, err

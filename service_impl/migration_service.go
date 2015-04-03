@@ -305,12 +305,16 @@ func (service *MigrationSvc) migrateRemoteCluster(remoteClusterData interface{},
 	}
 
 	// save remote cluster if there are no validation errors
-	ref := metadata.NewRemoteClusterReference(uuid, name, hostname, username, password, demandEncryption, certificate)
+	ref, err := metadata.NewRemoteClusterReference(uuid, name, hostname, username, password, demandEncryption, certificate)
+	if err != nil {
+		errorList = append(errorList, err)
+		return deletedRemoteClusterUuidList, errorList
+	}
 
 	service.logger.Infof("Remote cluster constructed = %v\n", ref)
 
 	// delete remote cluster if it already exists
-	_, err := service.remote_cluster_svc.DelRemoteCluster(name)
+	_, err = service.remote_cluster_svc.DelRemoteCluster(name)
 	if err == nil {
 		service.logger.Infof("Deleted existing remote cluster with name=%v\n", name)
 	}
@@ -757,15 +761,14 @@ func getReplicationIdAndVBFromCheckpointId(checkpointDocId string) (string, uint
 	}
 }
 
-func sanitizeForLogging (data map[string]interface{}) map[string]interface{}{
+func sanitizeForLogging(data map[string]interface{}) map[string]interface{} {
 	ret_map := make(map[string]interface{})
 	for key, value := range data {
 		if key == "password" {
 			ret_map[key] = "xxxx"
-		}else {
+		} else {
 			ret_map[key] = value
 		}
 	}
 	return ret_map
 }
-

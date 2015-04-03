@@ -84,25 +84,31 @@ func (mcl *MetakvChangeListener) observeChildren() {
 }
 
 // Implement callback function for metakv
+// Never returns err since we do not want RunObserveChildren to abort
 func (mcl *MetakvChangeListener) metakvCallback(path string, value []byte, rev interface{}) error {
 	mcl.logger.Infof("metakvCallback called on listener %v with path = %v\n", mcl.Id(), path)
 
+	go mcl.metakvCallback_async(path, value, rev)
+
+	return nil
+}
+
+// Implement callback function for metakv
+func (mcl *MetakvChangeListener) metakvCallback_async(path string, value []byte, rev interface{}) {
 	metadataId, oldMetadata, newMetadata, err := mcl.metadata_service_call_back(path, value, rev)
 	if err != nil {
 		mcl.logger.Errorf("Error calling metadata service call back for listener %v. err=%v\n", mcl.Id(), err)
-		return err
+		return
 	}
 
 	if mcl.metadata_change_handler_call_back != nil {
 		err = mcl.metadata_change_handler_call_back(metadataId, oldMetadata, newMetadata)
 		if err != nil {
 			mcl.logger.Errorf("Error calling metadata change handler call back for listener %v. err=%v\n", mcl.Id(), err)
-			// do not return err since we do not want RunObserveChildren to abort in this case
-			return nil
 		}
 	}
 
-	return nil
+	return
 
 }
 
@@ -167,11 +173,10 @@ func (rscl *ReplicationSpecChangeListener) replicationSpecChangeHandlerCallback(
 	}
 
 	if newSpec == nil {
-		// replication spec has been deleted
-		pipeline_manager.RemoveReplicationStatus(topic)
-
-		//delete all checkpoint docs in an async fashion
-		replication_mgr.checkpoint_svc.DelCheckpointsDocs(topic)
+		err := deleteReplication(topic, rscl.logger)
+		if err != nil {
+			return err
+		}
 
 		//close the connection pool for the replication
 		pools := base.ConnPoolMgr().FindPoolNamesByPrefix(topic)
@@ -272,9 +277,12 @@ func (rscl *ReplicationSpecChangeListener) liveUpdatePipeline(topic string, oldS
 // listener for remote clusters
 type RemoteClusterChangeListener struct {
 	*MetakvChangeListener
+	repl_spec_svc      service_def.ReplicationSpecSvc
+	remote_cluster_svc service_def.RemoteClusterSvc
 }
 
 func NewRemoteClusterChangeListener(remote_cluster_svc service_def.RemoteClusterSvc,
+	repl_spec_svc service_def.ReplicationSpecSvc,
 	cancel_chan chan struct{},
 	children_waitgrp *sync.WaitGroup,
 	logger_ctx *log.LoggerContext) *RemoteClusterChangeListener {
@@ -287,6 +295,8 @@ func NewRemoteClusterChangeListener(remote_cluster_svc service_def.RemoteCluster
 			nil,
 			logger_ctx,
 			"RemoteClusterChangeListener"),
+		repl_spec_svc,
+		remote_cluster_svc,
 	}
 
 	rccl.metadata_change_handler_call_back = rccl.remoteClusterChangeHandlerCallback
@@ -294,10 +304,85 @@ func NewRemoteClusterChangeListener(remote_cluster_svc service_def.RemoteCluster
 }
 
 // Handler callback for remote cluster changed event
-func (rccl *RemoteClusterChangeListener) remoteClusterChangeHandlerCallback(remoteClusterRefId string, oldRemoteClusterRef interface{}, newRemoteClusterRef interface{}) error {
+func (rccl *RemoteClusterChangeListener) remoteClusterChangeHandlerCallback(remoteClusterRefId string, oldRemoteClusterRefObj interface{}, newRemoteClusterRefObj interface{}) error {
 	rccl.logger.Infof("remoteClusterChangedCallback called on refId = %v\n", remoteClusterRefId)
 
-	// TODO MB-9500 handle live update to remote clusters
+	oldRemoteClusterRef, err := rccl.validateRemoteClusterRef(oldRemoteClusterRefObj)
+	if err != nil {
+		return err
+	}
+	newRemoteClusterRef, err := rccl.validateRemoteClusterRef(newRemoteClusterRefObj)
+	if err != nil {
+		return err
+	}
 
+	if oldRemoteClusterRef == nil {
+		// nothing to do if remote cluster has been created
+		return nil
+	}
+
+	if newRemoteClusterRef == nil {
+		// oldRemoteClusterRef has been deleted
+
+		// if there are existing replications referencing the old cluster ref, there must have been a racing condition
+		// between the replication creation and the cluster ref deletion. Delete the now orphaned replications to ensure consistency
+		topics := pipeline_manager.AllReplicationsForTargetCluster(oldRemoteClusterRef.Uuid)
+		if len(topics) > 0 {
+			rccl.logger.Infof("Deleting replications, %v, since the referenced remote cluster, %v, has been deleted\n", topics, oldRemoteClusterRef.Name)
+			for _, topic := range topics {
+				err = deleteReplication(topic, rccl.logger)
+				if err != nil {
+					rccl.logger.Errorf("Error deleting replication %v. err=%v", topic, err)
+				}
+			}
+		}
+		return nil
+	}
+
+	if oldRemoteClusterRef.DemandEncryption != newRemoteClusterRef.DemandEncryption ||
+		// TODO there may be less disruptive ways to handle the following updates without restarting the pipelines
+		// restarting the pipelines seems to be acceptable considering the low frequency of such updates.
+		string(oldRemoteClusterRef.Certificate) != string(newRemoteClusterRef.Certificate) ||
+		oldRemoteClusterRef.UserName != newRemoteClusterRef.UserName ||
+		oldRemoteClusterRef.Password != newRemoteClusterRef.Password {
+		specs := pipeline_manager.AllReplicationSpecsForTargetCluster(oldRemoteClusterRef.Uuid)
+		for _, spec := range specs {
+			if spec.Settings.Active {
+				rccl.logger.Infof("Restarting pipeline %v since the referenced remote cluster has been changed\n", spec.Id)
+				pipeline_manager.Update(spec.Id, nil)
+			}
+		}
+	}
+
+	// other updates to remote clusters do not require any actions
+
+	return nil
+}
+
+func (rccl *RemoteClusterChangeListener) validateRemoteClusterRef(remoteClusterRefObj interface{}) (*metadata.RemoteClusterReference, error) {
+	if remoteClusterRefObj == nil {
+		return nil, nil
+	}
+
+	remoteClusterRef, ok := remoteClusterRefObj.(*metadata.RemoteClusterReference)
+	if !ok {
+		errMsg := fmt.Sprintf("Metadata, %v, is not of remote cluster type\n", remoteClusterRefObj)
+		rccl.logger.Errorf(errMsg)
+		return nil, errors.New(errMsg)
+	}
+	return remoteClusterRef, nil
+}
+
+func deleteReplication(topic string, logger *log.CommonLogger) error {
+	err := pipeline_manager.RemoveReplicationStatus(topic)
+	if err != nil {
+		return err
+	}
+
+	//delete all checkpoint docs in an async fashion
+	err = replication_mgr.checkpoint_svc.DelCheckpointsDocs(topic)
+	if err != nil {
+		logger.Errorf("Error deleting checkpoint docs for replication %v", topic)
+	}
 	return nil
 }

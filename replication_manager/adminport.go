@@ -14,6 +14,7 @@ package replication_manager
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"github.com/couchbase/cbauth"
 	ap "github.com/couchbase/goxdcr/adminport"
 	"github.com/couchbase/goxdcr/base"
@@ -303,8 +304,18 @@ func (adminport *Adminport) doDeleteRemoteClusterRequest(request *http.Request) 
 	logger_ap.Infof("Request params: remoteClusterName=%v\n", remoteClusterName)
 
 	remoteClusterService := RemoteClusterService()
+	ref, err := remoteClusterService.RemoteClusterByRefName(remoteClusterName, false)
+	if err != nil {
+		return EncodeRemoteClusterValidationErrorIntoResponse(err)
+	}
 
-	ref, err := remoteClusterService.DelRemoteCluster(remoteClusterName)
+	replIds := pipeline_manager.AllReplicationsForTargetCluster(ref.Uuid)
+	if len(replIds) > 0 {
+		err = fmt.Errorf("Cannot delete remote cluster `%v` since it is referenced by replications %v", ref.Name, replIds)
+		return EncodeRemoteClusterValidationErrorIntoResponse(err)
+	}
+
+	ref, err = remoteClusterService.DelRemoteCluster(remoteClusterName)
 	if err != nil {
 		return EncodeRemoteClusterErrorIntoResponse(err)
 	}

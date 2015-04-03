@@ -160,6 +160,7 @@ func (rm *replicationManager) initMetadataChangeMonitor() {
 
 	remoteClusterChangeListener := NewRemoteClusterChangeListener(
 		rm.remote_cluster_svc,
+		rm.repl_spec_svc,
 		rm.metadata_change_callback_cancel_ch,
 		rm.children_waitgrp,
 		log.DefaultLoggerContext)
