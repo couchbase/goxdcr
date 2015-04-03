@@ -84,3 +84,8 @@ type WrappedMCRequest struct {
 	Req	  *gomemcached.MCRequest
 }
 
+type MetadataChangeListener interface {
+	Id() string
+	Start() error
+}
+

@@ -26,7 +26,7 @@ type RemoteClusterSvc interface {
 
 	// used by auditing and ui logging
 	GetRemoteClusterNameFromClusterUuid(uuid string) string
-	
+
 	// Remote cluster service could return two different types of errors:
 	// 1. unexpected internal server error
 	// 2. validation error indicating the remote cluster involved is not valid or does not exist
@@ -38,4 +38,7 @@ type RemoteClusterSvc interface {
 	// 1. false and the original error for internal server errors.
 	// 2. true and unwrapped error for validation errors.
 	CheckAndUnwrapRemoteClusterError(err error) (bool, error)
+
+	// Service call back function for remote cluster changed event
+	RemoteClusterServiceCallback(path string, value []byte, rev interface{}) (string, interface{}, interface{}, error)
 }

@@ -105,6 +105,12 @@ const (
 	PipelineSupervisorIdPrefix     = "PipelineSupervisor_"
 )
 
+// metadata change listener related constants
+const (
+	ReplicationSpecChangeListener = "ReplicationSpecChangeListener"
+	RemoteClusterChangeListener = "RemoteClusterChangeListener"
+)
+
 // constants for integer parsing
 var ParseIntBase = 10
 var ParseIntBitSize = 64

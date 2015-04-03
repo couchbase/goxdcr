@@ -11,14 +11,7 @@ package service_def
 
 import (
 	"github.com/couchbase/goxdcr/metadata"
-	"sync"
 )
-
-// Callback function for spec changed event
-type SpecChangedCallback func(changedSpecId string, changedSpec *metadata.ReplicationSpecification) error
-
-// Callback function for spec change listener failure event
-type SpecChangeListenerFailureCallBack func(err error)
 
 type ReplicationSpecSvc interface {
 	ReplicationSpec(replicationId string) (*metadata.ReplicationSpecification, error)
@@ -35,8 +28,8 @@ type ReplicationSpecSvc interface {
 	// adminport needs this info to tell what status code it should return to client
 	IsReplicationValidationError(err error) bool
 
-	// Register call back function for spec changed event
-	StartSpecChangedCallBack(callBack SpecChangedCallback, failureCallBack SpecChangeListenerFailureCallBack, cancel <-chan struct{}, waitGrp *sync.WaitGroup) error
+	// Service call back function for replication spec changed event
+	ReplicationSpecServiceCallback(path string, value []byte, rev interface{}) (string, interface{}, interface{}, error)
 
 	ValidateAndGC(spec *metadata.ReplicationSpecification)
 

@@ -14,14 +14,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/couchbase/cbauth/metakv"
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/goxdcr/service_def"
 	"github.com/couchbase/goxdcr/utils"
 	"strings"
-	"sync"
 )
 
 const (
@@ -38,8 +36,6 @@ type ReplicationSpecService struct {
 	metadata_svc           service_def.MetadataSvc
 	uilog_svc              service_def.UILogSvc
 	remote_cluster_svc     service_def.RemoteClusterSvc
-	call_back              service_def.SpecChangedCallback
-	failure_call_back      service_def.SpecChangeListenerFailureCallBack
 	logger                 *log.CommonLogger
 }
 
@@ -51,28 +47,6 @@ func NewReplicationSpecService(uilog_svc service_def.UILogSvc, remote_cluster_sv
 		xdcr_comp_topology_svc: xdcr_comp_topology_svc,
 		logger:                 log.NewLogger("ReplicationSpecService", logger_ctx),
 	}
-}
-
-func (service *ReplicationSpecService) StartSpecChangedCallBack(call_back service_def.SpecChangedCallback, failure_call_back service_def.SpecChangeListenerFailureCallBack,
-	cancel <-chan struct{}, waitGrp *sync.WaitGroup) error {
-	// start listening to changed to specs
-	service.call_back = call_back
-	service.failure_call_back = failure_call_back
-
-	replSpecCatalogPath := GetCatalogPathFromCatalogKey(ReplicationSpecsCatalogKey)
-
-	waitGrp.Add(1)
-	go service.observeChildren(replSpecCatalogPath, cancel, waitGrp)
-
-	return nil
-}
-
-func (service *ReplicationSpecService) observeChildren(dirpath string, cancel <-chan struct{}, waitGrp *sync.WaitGroup) {
-	defer waitGrp.Done()
-	err := metakv.RunObserveChildren(dirpath, service.metakvCallback, cancel)
-	// call failure call back only when there are real errors
-	// err may be nil when observeChildren is canceled, in which case there is no need to call failure call back
-	service.failure_call_back(err)
 }
 
 func (service *ReplicationSpecService) ReplicationSpec(replicationId string) (*metadata.ReplicationSpecification, error) {
@@ -240,26 +214,16 @@ func constructReplicationSpec(value []byte, rev interface{}) (*metadata.Replicat
 }
 
 // Implement callback function for metakv
-func (service *ReplicationSpecService) metakvCallback(path string, value []byte, rev interface{}) error {
-	service.logger.Infof("metakvCallback called on path = %v\n", path)
+func (service *ReplicationSpecService) ReplicationSpecServiceCallback(path string, value []byte, rev interface{}) (string, interface{}, interface{}, error) {
+	service.logger.Infof("ReplicationSpecServiceCallback called on path = %v\n", path)
 
-	if service.call_back != nil {
-		spec, err := constructReplicationSpec(value, rev)
-		if err != nil {
-			// should never get here.
-			service.logger.Errorf("Error marshaling replication spec. value=%v, err=%v\n", string(value), err)
-			return err
-		}
-
-		err = service.call_back(service.getReplicationIdFromKey(GetKeyFromPath(path)), spec)
-		if err != nil {
-			service.logger.Errorf("Replication spec change call back returned err=%v\n", err)
-		}
-		// do not return err since we do not want RunObserveChildren to abort
-		return nil
+	spec, err := constructReplicationSpec(value, rev)
+	if err != nil {
+		service.logger.Errorf("Error marshaling replication spec. value=%v, err=%v\n", string(value), err)
+		return "", nil, nil, err
 	}
 
-	return nil
+	return service.getReplicationIdFromKey(GetKeyFromPath(path)), nil, spec, nil
 
 }
 
@@ -318,7 +282,7 @@ func (service *ReplicationSpecService) ValidateExistingReplicationSpec(spec *met
 		//remote cluster is no longer valid
 		service.logger.Errorf("Spec %v refers to non-existent remote cluster reference %v\n", spec.Id, spec.TargetClusterUUID)
 		return InvalidReplicationSpecError
-	}else if err != nil {
+	} else if err != nil {
 		return err
 	}
 

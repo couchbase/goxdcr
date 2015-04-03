@@ -82,7 +82,7 @@ type replicationManager struct {
 	//finish channel for adminport
 	adminport_finch chan bool
 
-	repl_spec_callback_cancel_ch chan struct{}
+	metadata_change_callback_cancel_ch chan struct{}
 
 	running bool
 
@@ -120,8 +120,11 @@ func StartReplicationManager(sourceKVHost string, xdcrRestPort uint16,
 		// TODO should we make heart beat settings configurable?
 		replication_mgr.GenericSupervisor.Start(nil)
 
-		// start replications with active spec and set ReplicationStatus for paused replications
-		replication_mgr.initReplications()
+		replication_mgr.initMetadataChangeMonitor()
+
+		// set ReplicationStatus for paused replications
+		replication_mgr.initPausedReplications()
+		logger_rm.Info("initPausedReplications succeeded")
 
 		replication_mgr.running = true
 
@@ -141,12 +144,34 @@ func StartReplicationManager(sourceKVHost string, xdcrRestPort uint16,
 
 }
 
-func (rm *replicationManager) initReplications() {
+func (rm *replicationManager) initMetadataChangeMonitor() {
+	mcm := NewMetadataChangeMonitor()
+
+	replicationSpecChangeListener := NewReplicationSpecChangeListener(
+		rm.repl_spec_svc,
+		rm.metadata_change_callback_cancel_ch,
+		rm.children_waitgrp,
+		log.DefaultLoggerContext)
+	mcm.RegisterListener(replicationSpecChangeListener)
+
+	remoteClusterChangeListener := NewRemoteClusterChangeListener(
+		rm.remote_cluster_svc,
+		rm.metadata_change_callback_cancel_ch,
+		rm.children_waitgrp,
+		log.DefaultLoggerContext)
+
+	mcm.RegisterListener(remoteClusterChangeListener)
+
+	mcm.Start()
+}
+
+func (rm *replicationManager) initPausedReplications() {
 	for i := 0; i < service_def.MaxNumOfRetries; i++ {
 		// set ReplicationStatus for paused replications so that they will show up in task list
 		specs, err := rm.repl_spec_svc.AllReplicationSpecs()
 		if err != nil {
 			logger_rm.Errorf("Failed to get all replication specs, err=%v, num_of_retry=%v\n", err, i)
+			continue
 
 		} else {
 			for _, spec := range specs {
@@ -154,18 +179,11 @@ func (rm *replicationManager) initReplications() {
 					pipeline_manager.SetReplicationStatusForPausedReplication(spec)
 				}
 			}
-
-			// start listening to repl spec changed events
-			// this will start replications with active replication specs
-			err = rm.repl_spec_svc.StartSpecChangedCallBack(specChangedCallback, specChangeObservationFailureCallBack, replication_mgr.repl_spec_callback_cancel_ch, replication_mgr.children_waitgrp)
-			if err != nil {
-				logger_rm.Errorf("Failed to start spec changed call back, err=%v, num_of_retry=%v\n", err, i)
-			} else {
-				return
-			}
+			return
 		}
 	}
-	logger_rm.Errorf("Can't initReplications after %v retries. Exit replicaiton manager", service_def.MaxNumOfRetries)
+
+	logger_rm.Errorf("Faile to initPausedReplications after %v retries.", service_def.MaxNumOfRetries)
 	exitProcess(false)
 }
 
@@ -207,7 +225,7 @@ func (rm *replicationManager) init(
 
 	pipeline_manager.PipelineManager(fac, rm.repl_spec_svc, log.DefaultLoggerContext)
 
-	rm.repl_spec_callback_cancel_ch = make(chan struct{}, 1)
+	rm.metadata_change_callback_cancel_ch = make(chan struct{}, 1)
 
 	logger_rm.Info("Replication manager is initialized")
 
@@ -260,9 +278,6 @@ func CreateReplication(justValidate bool, sourceBucket, targetCluster, targetBuc
 		return spec.Id, nil, nil
 	}
 
-	//trigger specChangedCallback explicitly asynchronously
-	go specChangedCallback(spec.Id, spec)
-
 	go writeCreateReplicationEvent(spec, realUserId)
 
 	logger_rm.Infof("Replication specification %s is created\n", spec.Id)
@@ -283,9 +298,6 @@ func DeleteReplication(topic string, realUserId *base.RealUserId) error {
 		logger_rm.Errorf("%v\n", err)
 		return err
 	}
-
-	//trigger specChangedCallback explicitly asynchronously
-	go specChangedCallback(topic, nil)
 
 	go writeGenericReplicationEvent(base.CancelReplicationEventId, spec, realUserId)
 
@@ -368,9 +380,6 @@ func UpdateReplicationSettings(topic string, settings map[string]interface{}, re
 			return nil, err
 		}
 		logger_rm.Infof("Updated replication settings for replication %v\n", topic)
-
-		//trigger specChangedCallback explicitly asynchronously
-		go specChangedCallback(topic, replSpec)
 
 		go writeUpdateReplicationSettingsEvent(replSpec, &changedSettingsMap, realUserId)
 
@@ -648,8 +657,8 @@ func cleanup() {
 		replication_mgr.pipelineMasterSupervisor.Stop()
 
 		// stop listening to spec changed events
-		replication_mgr.repl_spec_callback_cancel_ch <- struct{}{}
-		logger_rm.Infof("Sent cancel signal to spec change observer")
+		replication_mgr.metadata_change_callback_cancel_ch <- struct{}{}
+		logger_rm.Infof("Sent cancel signal to metadata change listeners")
 
 		// kill adminport to stop receiving new requests
 		close(replication_mgr.adminport_finch)
@@ -682,94 +691,8 @@ func exitProcess(byForce bool) {
 
 }
 
-// Implement callback function for replication spec service
-func specChangedCallback(changedSpecId string, changedSpec *metadata.ReplicationSpecification) error {
-	logger_rm.Infof("specChangedCallback called on id = %v\n", changedSpecId)
-
-	topic := changedSpecId
-
-	if changedSpec == nil {
-		// replication spec has been deleted
-
-		// stop replication if it is running
-		pipelineRunning := pipeline_manager.IsPipelineRunning(topic)
-		if pipelineRunning {
-			logger_rm.Infof("Stopping pipeline %v since the replication spec has been deleted\n", topic)
-			err := pipeline_manager.StopPipeline(topic)
-			if err != nil {
-				logger_rm.Infof("Stopping pipeline %v failed with err = %v, leave it alone\n", topic, err)
-			}
-		}
-		pipeline_manager.RemoveReplicationStatus(topic)
-
-		//delete all checkpoint docs in an async fashion
-		replication_mgr.checkpoint_svc.DelCheckpointsDocs(topic)
-
-		//close the connection pool for the replication
-		pools := base.ConnPoolMgr().FindPoolNamesByPrefix(topic)
-		for _, poolName := range pools {
-			base.ConnPoolMgr().RemovePool(poolName)
-		}
-		return nil
-	}
-
-	specActive := changedSpec.Settings.Active
-	//if the replication doesn't exit, it is treated the same as it exits, but it is paused
-	specActive_old := false
-	var oldSettings *metadata.ReplicationSettings = nil
-	if pipeline_manager.ReplicationStatus(topic) != nil {
-		oldSettings = pipeline_manager.ReplicationStatus(topic).Settings()
-		specActive_old = oldSettings.Active
-	}
-
-	if specActive_old && specActive {
-		// if some critical settings have been changed, stop, reconstruct, and restart pipeline
-		if needToReconstructPipeline(oldSettings, changedSpec.Settings) {
-			logger_rm.Infof("Restarting pipeline %v since the changes to replication spec are critical\n", topic)
-			return pipeline_manager.Update(topic, nil)
-
-		} else {
-			// otherwise, perform live update to pipeline
-			err := liveUpdatePipeline(topic, oldSettings, changedSpec.Settings)
-			if err != nil {
-				logger_rm.Errorf("Failed to perform live update on pipeline %v, err=%v\n", topic, err)
-				return err
-			} else {
-
-				logger_rm.Infof("Kept pipeline %v running since the changes to replication spec are not critical\n", topic)
-				return nil
-			}
-		}
-
-	} else if specActive_old && !specActive {
-		//stop replication
-		logger_rm.Infof("Stopping pipeline %v since the replication spec has been changed to inactive\n", topic)
-
-		return pipeline_manager.Update(topic, nil)
-
-	} else if !specActive_old && specActive {
-		// start replication
-		logger_rm.Infof("Starting pipeline %v since the replication spec has been changed to active\n", topic)
-
-		return pipeline_manager.Update(topic, nil)
-
-	} else {
-		// this is the case where pipeline is not running and spec is not active.
-		// nothing needs to be done
-		return nil
-	}
-}
-
-// Callback function for replication spec observation failed event
-func specChangeObservationFailureCallBack(err error) {
-	// the only thing we can do is to abort
-	logger_rm.Infof("metakv.RunObserveChildren failed, err=%v. Restart it\n", err)
-	if err == nil && !replication_mgr.running {
-		//callback is cannceled and replication_mgr is exiting.
-		//no-op
-		return
-	}
-	replication_mgr.initReplications()
+func isReplicationManagerRunning() bool {
+	return replication_mgr.running
 }
 
 // whether there are critical changes to the replication spec that require pipeline reconstruction
