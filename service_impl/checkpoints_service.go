@@ -80,18 +80,23 @@ func (ckpt_svc *CheckpointsService) UpsertCheckpoints(replicationId string, vbno
 	}
 	if err == service_def.MetadataNotFoundErr {
 		ckpt_doc = metadata.NewCheckpointsDoc()
+		err = nil
 	}
-	ckpt_doc.AddRecord(ckpt_record)
-	ckpt_json, err := json.Marshal(ckpt_doc)
-	if err != nil {
-		return err
-	}
+	added := ckpt_doc.AddRecord(ckpt_record)
+	if !added {
+		ckpt_svc.logger.Debug("the ckpt record to be added is the same as the current ckpt record in the ckpt doc. no-op.")
+	} else {
+		ckpt_json, err := json.Marshal(ckpt_doc)
+		if err != nil {
+			return err
+		}
 
-	//always update the checkpoint without revision
-	err = ckpt_svc.metadata_svc.Set(key, ckpt_json, nil)
+		//always update the checkpoint without revision
+		err = ckpt_svc.metadata_svc.Set(key, ckpt_json, nil)
 
-	if err != nil {
-		ckpt_svc.logger.Errorf("Failed to set checkpoint doc key=%v, err=%v\n", key, err)
+		if err != nil {
+			ckpt_svc.logger.Errorf("Failed to set checkpoint doc key=%v, err=%v\n", key, err)
+		}
 	}
 	return err
 }

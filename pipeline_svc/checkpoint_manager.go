@@ -567,6 +567,7 @@ func (ckmgr *CheckpointManager) performCkpt() {
 	interval_ticker := time.NewTicker(1 * time.Millisecond)
 	first_vb := true
 	err_map := make(map[uint16]error)
+	var total_committing_time float64 = 0
 	for _, vb := range ckmgr.getMyVBs() {
 		select {
 		case <-interval_ticker.C:
@@ -581,8 +582,11 @@ func (ckmgr *CheckpointManager) performCkpt() {
 				ckmgr.logger.Info("Pipeline is no longer running, exit do_checkpointing")
 				return
 			}
-
+			
+			start_time_vb := time.Now()
 			err := ckmgr.do_checkpoint(vb)
+			committing_time_vb := time.Since (start_time_vb)
+			total_committing_time += committing_time_vb.Seconds()
 			if err != nil {
 				err_map[vb] = err
 			}
@@ -598,7 +602,9 @@ func (ckmgr *CheckpointManager) performCkpt() {
 		ckmgr.RaiseEvent(common.ErrorEncountered, nil, ckmgr, nil, otherInfo)
 	} else {
 		ckmgr.logger.Infof("Done checkpointing for replication %v\n", ckmgr.pipeline.Topic())
-
+		otherInfo := make(map[string]interface{})
+		otherInfo[TimeCommiting] = time.Duration(total_committing_time)*time.Second
+		ckmgr.RaiseEvent(common.CheckpointDone, nil, ckmgr, nil, otherInfo)
 	}
 
 }

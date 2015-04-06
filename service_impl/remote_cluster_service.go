@@ -318,7 +318,7 @@ func (service *RemoteClusterService) validateRemoteCluster(ref *metadata.RemoteC
 
 	is40, err := service.cluster_info_svc.IsClusterCompatible(ref, []int{4, 0})
 	if err != nil {
-		return err
+		return service.formErrorFromValidatingRemotehost(ref, hostName, port, err)
 	}
 
 	err, statusCode := utils.QueryRestApiWithAuth(hostAddr, base.PoolsPath, false, ref.UserName, ref.Password, ref.Certificate, !is40, base.MethodGet, "", nil, 0, &poolsInfo, service.logger)
@@ -326,13 +326,8 @@ func (service *RemoteClusterService) validateRemoteCluster(ref *metadata.RemoteC
 	if err != nil || statusCode != http.StatusOK {
 		if statusCode == http.StatusUnauthorized {
 			return wrapAsInvalidRemoteClusterError(errors.New(fmt.Sprintf("Authentication failed. Verify username and password. Got HTTP status %v from REST call get to %v%v. Body was: []", statusCode, hostAddr, base.PoolsPath)))
-		} else if !ref.DemandEncryption {
-			// if encryption is not on, most likely the error is caused by incorrect hostname or firewall.
-			return wrapAsInvalidRemoteClusterError(errors.New(fmt.Sprintf("Could not connect to \"%v\" on port %v. This could be due to an incorrect host/port combination or a firewall in place between the servers.", hostName, port)))
 		} else {
-			// if encryption is on, several different errors could be returned here, e.g., invalid hostname, invalid certificate, certificate by unknown authority, etc.
-			// just return the err
-			return wrapAsInvalidRemoteClusterError(err)
+			return service.formErrorFromValidatingRemotehost(ref, hostName, port, err)
 		}
 	}
 
@@ -362,6 +357,17 @@ func (service *RemoteClusterService) validateRemoteCluster(ref *metadata.RemoteC
 	ref.Id = metadata.RemoteClusterRefId(ref.Uuid)
 
 	return nil
+}
+
+func (service *RemoteClusterService) formErrorFromValidatingRemotehost(ref *metadata.RemoteClusterReference, hostName string, port uint16, err error) error {
+	if !ref.DemandEncryption {
+		// if encryption is not on, most likely the error is caused by incorrect hostname or firewall.
+		return wrapAsInvalidRemoteClusterError(errors.New(fmt.Sprintf("Could not connect to \"%v\" on port %v. This could be due to an incorrect host/port combination or a firewall in place between the servers.", hostName, port)))
+	} else {
+		// if encryption is on, several different errors could be returned here, e.g., invalid hostname, invalid certificate, certificate by unknown authority, etc.
+		// just return the err
+		return wrapAsInvalidRemoteClusterError(err)
+	}
 }
 
 func (service *RemoteClusterService) httpsHostAddress(hostName, userName, password string) (string, error, bool) {

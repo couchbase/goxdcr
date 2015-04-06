@@ -34,6 +34,24 @@ type CheckpointRecord struct {
 	Target_Seqno uint64 `json:"target_seqno"`
 }
 
+func (ckptRecord *CheckpointRecord) IsSame(new_record *CheckpointRecord) bool {
+	if ckptRecord == nil && new_record != nil {
+		return false
+	} else if ckptRecord != nil && new_record == nil {
+		return false
+	} else if ckptRecord == nil && new_record == nil {
+		return true
+	} else if ckptRecord.Failover_uuid == new_record.Failover_uuid &&
+		ckptRecord.Seqno == new_record.Seqno &&
+		ckptRecord.Dcp_snapshot_seqno == new_record.Dcp_snapshot_seqno &&
+		ckptRecord.Dcp_snapshot_end_seqno == new_record.Dcp_snapshot_end_seqno &&
+		ckptRecord.Target_vb_opaque.IsSame(new_record.Target_vb_opaque) &&
+		ckptRecord.Target_Seqno == new_record.Target_Seqno {
+		return true
+	} else {
+		return false
+	}
+}
 func (ckptRecord *CheckpointRecord) UnmarshalJSON(data []byte) error {
 	var fieldMap map[string]interface{}
 	err := json.Unmarshal(data, &fieldMap)
@@ -81,6 +99,7 @@ func (ckptRecord *CheckpointRecord) UnmarshalJSON(data []byte) error {
 
 type TargetVBOpaque interface {
 	Value() interface{}
+	IsSame(targetVBOpaque TargetVBOpaque) bool
 }
 
 type TargetVBUuid struct {
@@ -91,16 +110,50 @@ func (targetVBUuid *TargetVBUuid) Value() interface{} {
 	return targetVBUuid.Target_vb_uuid
 }
 
+func (targetVBUuid *TargetVBUuid) IsSame(targetVBOpaque TargetVBOpaque) bool {
+	if targetVBUuid == nil && targetVBOpaque == nil {
+		return true
+	} else if targetVBUuid == nil && targetVBOpaque != nil {
+		return false
+	} else if targetVBUuid != nil && targetVBOpaque == nil {
+		return false
+	} else {
+		new_targetVBUuid, ok := targetVBOpaque.(*TargetVBUuid)
+		if !ok {
+			return false
+		} else {
+			return targetVBUuid.Target_vb_uuid == new_targetVBUuid.Target_vb_uuid
+		}
+	}
+}
+
 type TargetVBUuidAndTimestamp struct {
 	Target_vb_uuid string `json:"target_vb_uuid"`
 	Startup_time   string `json:"startup_time"`
 }
 
-func (targetVBUuidAndTimestamp TargetVBUuidAndTimestamp) Value() interface{} {
+func (targetVBUuidAndTimestamp *TargetVBUuidAndTimestamp) Value() interface{} {
 	valueArr := make([]interface{}, 2)
 	valueArr[0] = targetVBUuidAndTimestamp.Target_vb_uuid
 	valueArr[1] = targetVBUuidAndTimestamp.Startup_time
 	return valueArr
+}
+
+func (targetVBUuidAndTimestamp *TargetVBUuidAndTimestamp) IsSame(targetVBOpaque TargetVBOpaque) bool {
+	if targetVBUuidAndTimestamp == nil && targetVBOpaque == nil {
+		return true
+	} else if targetVBUuidAndTimestamp == nil && targetVBOpaque != nil {
+		return false
+	} else if targetVBUuidAndTimestamp != nil && targetVBOpaque == nil {
+		return false
+	} else {
+		new_targetVBUuidAndTimestamp, ok := targetVBOpaque.(*TargetVBUuidAndTimestamp)
+		if !ok {
+			return false
+		} else {
+			return targetVBUuidAndTimestamp.Target_vb_uuid == new_targetVBUuidAndTimestamp.Target_vb_uuid && targetVBUuidAndTimestamp.Startup_time == new_targetVBUuidAndTimestamp.Startup_time
+		}
+	}
 }
 
 func UnmarshalTargetVBOpaque(data interface{}) (TargetVBOpaque, error) {
@@ -195,15 +248,21 @@ func NewCheckpointsDoc() *CheckpointsDoc {
 }
 
 //Not currentcy safe. It should be used by one goroutine only
-func (ckptsDoc *CheckpointsDoc) AddRecord(record *CheckpointRecord) {
+func (ckptsDoc *CheckpointsDoc) AddRecord(record *CheckpointRecord) bool {
 	if len(ckptsDoc.Checkpoint_records) > 0 {
-		for i := len(ckptsDoc.Checkpoint_records) - 1; i >= 0; i-- {
-			if i+1 < MaxCheckpointsKept {
-				ckptsDoc.Checkpoint_records[i+1] = ckptsDoc.Checkpoint_records[i]
+		if !ckptsDoc.Checkpoint_records[0].IsSame(record) {
+			for i := len(ckptsDoc.Checkpoint_records) - 1; i >= 0; i-- {
+				if i+1 < MaxCheckpointsKept {
+					ckptsDoc.Checkpoint_records[i+1] = ckptsDoc.Checkpoint_records[i]
+				}
 			}
+			ckptsDoc.Checkpoint_records[0] = record
+			return true
+		} else {
+			return false
 		}
-		ckptsDoc.Checkpoint_records[0] = record
 	} else {
 		ckptsDoc.Checkpoint_records = append(ckptsDoc.Checkpoint_records, record)
+		return true
 	}
 }
