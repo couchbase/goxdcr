@@ -16,7 +16,7 @@ import (
 type ReplicationSpecSvc interface {
 	ReplicationSpec(replicationId string) (*metadata.ReplicationSpecification, error)
 	AddReplicationSpec(spec *metadata.ReplicationSpecification) error
-	ValidateNewReplicationSpec(sourceBucket, targetCluster, targetBucket string) map[string]error
+	ValidateNewReplicationSpec(sourceBucket, targetCluster, targetBucket string) (string, string, map[string]error)
 	SetReplicationSpec(spec *metadata.ReplicationSpecification) error
 	DelReplicationSpec(replicationId string) (*metadata.ReplicationSpecification, error)
 	AllReplicationSpecs() (map[string]*metadata.ReplicationSpecification, error)
@@ -33,5 +33,6 @@ type ReplicationSpecSvc interface {
 
 	ValidateAndGC(spec *metadata.ReplicationSpecification)
 
-	ConstructNewReplicationSpec(sourceBucketName string, targetClusterUUID string, targetBucketName string) (*metadata.ReplicationSpecification, error)
+	// being used by unit tests only
+	ConstructNewReplicationSpec(sourceBucketName, targetClusterUUID, targetBucketName string) (*metadata.ReplicationSpecification, error)
 }

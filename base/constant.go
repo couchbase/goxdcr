@@ -136,6 +136,13 @@ const (
 	IsEnterprise                  = "isEnterprise"
 )
 
+// constants used for create replication request
+const (
+	FromBucket = "fromBucket"
+	ToCluster  = "toCluster"
+	ToBucket   = "toBucket"
+)
+
 // constant used by more than one rest apis
 const (
 	JustValidate        = "just_validate"

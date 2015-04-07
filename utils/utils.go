@@ -27,9 +27,9 @@ type CouchBucket struct {
 	Stat BucketBasicStats `json:"basicStats"`
 }
 
-var logger_utils *log.CommonLogger = log.NewLogger("Utils", log.DefaultLoggerContext)
-
 var NonExistentBucketError error = errors.New("Bucket doesn't exist")
+
+var logger_utils *log.CommonLogger = log.NewLogger("Utils", log.DefaultLoggerContext)
 
 func loggerForFunc(logger *log.CommonLogger) *log.CommonLogger {
 	var l *log.CommonLogger
@@ -450,4 +450,8 @@ func RemoteBucketUUID(remote_connStr, remote_userName, remote_password, bucketNa
 
 func ReplicationStatusNotFoundError(topic string) error {
 	return fmt.Errorf("Cannot find replication status for topic %v", topic)
+}
+
+func BucketNotFoundError(bucketName string) error {
+	return fmt.Errorf("Bucket `%v` not found.", bucketName)
 }

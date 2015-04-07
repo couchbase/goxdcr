@@ -275,9 +275,9 @@ func testCreateReplication() (string, string, error) {
 
 	params := make(map[string]interface{})
 	params[rm.ReplicationType] = rm.ReplicationTypeValue
-	params[rm.FromBucket] = options.sourceBucket
-	params[rm.ToCluster] = options.remoteName
-	params[rm.ToBucket] = options.targetBucket
+	params[base.FromBucket] = options.sourceBucket
+	params[base.ToCluster] = options.remoteName
+	params[base.ToBucket] = options.targetBucket
 	params[rm.BatchCount] = BatchCount
 
 	paramsBytes, _ := utils.EncodeMapIntoByteArray(params)

@@ -57,7 +57,7 @@ func (service *ReplicationSpecService) ReplicationSpec(replicationId string) (*m
 	return constructReplicationSpec(result, rev)
 }
 
-func (service *ReplicationSpecService) ValidateNewReplicationSpec(sourceBucket, targetCluster, targetBucket string) map[string]error {
+func (service *ReplicationSpecService) ValidateNewReplicationSpec(sourceBucket, targetCluster, targetBucket string) (string, string, map[string]error) {
 	service.logger.Infof("Start ValidateAddReplicationSpec, sourceBucket=%v, targetCluster=%v, targetBucket=%v\n", sourceBucket, targetCluster, targetBucket)
 
 	errorMap := make(map[string]error)
@@ -67,36 +67,37 @@ func (service *ReplicationSpecService) ValidateNewReplicationSpec(sourceBucket, 
 	if local_connStr == "" {
 		panic("XDCRTopologySvc.MyConnectionStr() should not return empty string")
 	}
-	_, err_source := utils.LocalBucketUUID(local_connStr, sourceBucket)
+	
+	sourceBucketUUID, err_source := utils.LocalBucketUUID(local_connStr, sourceBucket)
 
 	if err_source == utils.NonExistentBucketError {
 		service.logger.Errorf("Spec [sourceBucket=%v, targetClusterUuid=%v, targetBucket=%v] refers to non-existent bucket\n", sourceBucket, targetCluster, targetBucket)
-		errorMap[base.ReplicationDocSource] = utils.NonExistentBucketError
+		errorMap[base.FromBucket] = utils.BucketNotFoundError(sourceBucket)
 	}
 
 	// validate remote cluster ref
 	targetClusterRef, err := service.remote_cluster_svc.RemoteClusterByRefName(targetCluster, false)
 	if err != nil {
 		errorMap["remote cluster"] = utils.NewEnhancedError("cannot find remote cluster", err)
-		return errorMap
+		return "", "", errorMap
 	}
 
 	remote_connStr, err := targetClusterRef.MyConnectionStr()
 	if err != nil {
 		errorMap["remote cluster"] = utils.NewEnhancedError("invalid remote cluter, MyConnectionStr() failed.", err)
-		return errorMap
+		return "", "", errorMap
 	}
 	remote_userName, remote_password, err := targetClusterRef.MyCredentials()
 	if err != nil {
 		errorMap["remote cluster"] = utils.NewEnhancedError("invalid remote cluter, MyCredentials() failed.", err)
-		return errorMap
+		return "", "", errorMap
 	}
 
 	//validate target bucket
-	_, err_target := utils.RemoteBucketUUID(remote_connStr, remote_userName, remote_password, targetBucket)
+	targetBucketUUID, err_target := utils.RemoteBucketUUID(remote_connStr, remote_userName, remote_password, targetBucket)
 	if err_target == utils.NonExistentBucketError {
 		service.logger.Errorf("Spec [sourceBucket=%v, targetClusterUuid=%v, targetBucket=%v] refers to non-existent target bucket\n", sourceBucket, targetCluster, targetBucket)
-		errorMap[base.ReplicationDocTarget] = utils.NonExistentBucketError
+		errorMap[base.ToBucket] = utils.BucketNotFoundError(targetBucket)
 	}
 
 	repId := metadata.ReplicationId(sourceBucket, targetClusterRef.Uuid, targetBucket)
@@ -105,7 +106,7 @@ func (service *ReplicationSpecService) ValidateNewReplicationSpec(sourceBucket, 
 		errorMap[base.PlaceHolderFieldKey] = errors.New(ReplicationSpecAlreadyExistErrorMessage)
 	}
 
-	return errorMap
+	return sourceBucketUUID, targetBucketUUID, errorMap
 }
 
 func (service *ReplicationSpecService) AddReplicationSpec(spec *metadata.ReplicationSpecification) error {
@@ -348,7 +349,7 @@ func (service *ReplicationSpecService) targetBucketUUID(targetClusterUUID, bucke
 	return utils.RemoteBucketUUID(remote_connStr, remote_userName, remote_password, bucketName)
 }
 
-func (service *ReplicationSpecService) ConstructNewReplicationSpec(sourceBucketName string, targetClusterUUID string, targetBucketName string) (*metadata.ReplicationSpecification, error) {
+func (service *ReplicationSpecService) ConstructNewReplicationSpec(sourceBucketName, targetClusterUUID, targetBucketName string) (*metadata.ReplicationSpecification, error) {
 	sourceBucketUUID, err := service.sourceBucketUUID(sourceBucketName)
 	if err != nil {
 		return nil, err

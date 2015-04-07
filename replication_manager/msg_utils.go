@@ -71,13 +71,6 @@ const (
 	ReplicationTypeValue = "continuous"
 )
 
-// constants for parsing create replication request
-const (
-	FromBucket = "fromBucket"
-	ToCluster  = "toCluster"
-	ToBucket   = "toBucket"
-)
-
 // constants for parsing create replication response
 const (
 	ReplicationId = "id"
@@ -341,11 +334,11 @@ func DecodeCreateReplicationRequest(request *http.Request) (justValidate bool, f
 			if replicationType != ReplicationTypeValue {
 				errorsMap[ReplicationType] = utils.GenericInvalidValueError(ReplicationType)
 			}
-		case FromBucket:
+		case base.FromBucket:
 			fromBucket = getStringFromValArr(valArr)
-		case ToCluster:
+		case base.ToCluster:
 			toCluster = getStringFromValArr(valArr)
-		case ToBucket:
+		case base.ToBucket:
 			toBucket = getStringFromValArr(valArr)
 		case base.JustValidate:
 			justValidate, err = getBoolFromValArr(valArr, false)
@@ -362,13 +355,13 @@ func DecodeCreateReplicationRequest(request *http.Request) (justValidate bool, f
 	}
 
 	if len(fromBucket) == 0 {
-		errorsMap[FromBucket] = utils.MissingValueError("source bucket")
+		errorsMap[base.FromBucket] = utils.MissingValueError("source bucket")
 	}
 	if len(toCluster) == 0 {
-		errorsMap[ToCluster] = utils.MissingValueError("target cluster")
+		errorsMap[base.ToCluster] = utils.MissingValueError("target cluster")
 	}
 	if len(toBucket) == 0 {
-		errorsMap[ToBucket] = utils.MissingValueError("target bucket")
+		errorsMap[base.ToBucket] = utils.MissingValueError("target bucket")
 	}
 
 	settings, settingsErrorsMap := DecodeSettingsFromRequest(request, false, false)
