@@ -13,7 +13,6 @@ import (
 	"errors"
 	"expvar"
 	"fmt"
-	"github.com/couchbase/cbauth"
 	"github.com/couchbase/gomemcached"
 	mcc "github.com/couchbase/gomemcached/client"
 	base "github.com/couchbase/goxdcr/base"
@@ -169,7 +168,8 @@ type StatisticsManager struct {
 	through_seqno_tracker_svc service_def.ThroughSeqnoTrackerSvc
 }
 
-func NewStatisticsManager(through_seqno_tracker_svc service_def.ThroughSeqnoTrackerSvc, logger_ctx *log.LoggerContext, active_vbs map[string][]uint16, bucket_name string) *StatisticsManager {
+func NewStatisticsManager(through_seqno_tracker_svc service_def.ThroughSeqnoTrackerSvc,
+	logger_ctx *log.LoggerContext, active_vbs map[string][]uint16, bucket_name string) *StatisticsManager {
 	stats_mgr := &StatisticsManager{registries: make(map[string]metrics.Registry),
 		bucket_name:               bucket_name,
 		starttime_map:             make(map[string]interface{}),
@@ -194,104 +194,24 @@ func NewStatisticsManager(through_seqno_tracker_svc service_def.ThroughSeqnoTrac
 }
 
 //Statistics of a pipeline which may or may not be running
-func GetStatisticsForPipeline(topic string, cluster_info_svc service_def.ClusterInfoSvc, xdcr_topology_svc service_def.XDCRCompTopologySvc, checkpoints_svc service_def.CheckpointsService, logger *log.CommonLogger) (*expvar.Map, error) {
-	rs := pipeline_manager.ReplicationStatus(topic)
-	if rs == nil {
+func GetStatisticsForPipeline(topic string) (*expvar.Map, error) {
+	repl_status := pipeline_manager.ReplicationStatus(topic)
+	if repl_status == nil {
 		return nil, nil
 	}
 
-	overviewStats := rs.GetOverviewStats()
-	if overviewStats == nil {
-		// overview stats may be nil the first time GetStats is called on a paused replication that has never been run in the current goxdcr session
-		// or it may be nil when the underying replication is not paused but has not completed startup process
-		// construct it
-		overviewStats, err := constructOverviewStats(cluster_info_svc, xdcr_topology_svc, checkpoints_svc, rs.Spec(), logger)
-		if err != nil {
-			return nil, err
-		}
-		rs.SetOverviewStats(overviewStats)
-	} else if rs.RuntimeStatus() != pipeline.Replicating {
-		// if pipeline is not running, update changes_left stats, which is not being
-		// updated by running pipeline and may have become inaccurate
-
-		docs_processed, err := strconv.ParseInt(overviewStats.Get(DOCS_PROCESSED_METRIC).String(), base.ParseIntBase, base.ParseIntBitSize)
-		if err != nil {
-			return nil, err
-		}
-
-		total_changes, err := getTotalChangesForPausedReplication(cluster_info_svc, xdcr_topology_svc, rs.Spec(), logger)
-		if err != nil {
-			return nil, err
-		}
-
-		changes_left := int64(total_changes) - docs_processed
-		changes_left_var := new(expvar.Int)
-		changes_left_var.Set(changes_left)
-
-		overviewStats.Set(CHANGES_LEFT_METRIC, changes_left_var)
-	}
-
-	return overviewStats, nil
+	return repl_status.GetOverviewStats(), nil
 }
 
-// compute and set changes_left and docs_processed stats. set other stats to 0
-func constructOverviewStats(cluster_info_svc service_def.ClusterInfoSvc, xdcr_topology_svc service_def.XDCRCompTopologySvc,
-	checkpoints_svc service_def.CheckpointsService, spec *metadata.ReplicationSpecification, logger *log.CommonLogger) (*expvar.Map, error) {
-	docs_processed, err := getDocsProcessedForPausedReplication(spec.Id, checkpoints_svc, logger)
+func (stats_mgr *StatisticsManager) cleanupBeforeExit() error {
+	rs, err := stats_mgr.getReplicationStatus()
 	if err != nil {
-		return nil, err
+		return err
 	}
-	logger.Infof("docs_processed for paused replication %v is %v\n", spec.Id, docs_processed)
-
-	total_changes, err := getTotalChangesForPausedReplication(cluster_info_svc, xdcr_topology_svc, spec, logger)
-	if err != nil {
-		return nil, err
-	}
-
-	logger.Infof("total_changes for paused replication %v is %v\n", spec.Id, total_changes)
-
-	changes_left := total_changes - docs_processed
-
-	overview_map := new(expvar.Map).Init()
-	overview_map.Add(DOCS_PROCESSED_METRIC, int64(docs_processed))
-	overview_map.Add(CHANGES_LEFT_METRIC, int64(changes_left))
-	for _, statsToInitialize := range StatsToInitializeForPausedReplications {
-		overview_map.Add(statsToInitialize, 0)
-	}
-	return overview_map, nil
-}
-
-func getTotalChangesForPausedReplication(cluster_info_svc service_def.ClusterInfoSvc, xdcr_topology_svc service_def.XDCRCompTopologySvc,
-	spec *metadata.ReplicationSpecification, logger *log.CommonLogger) (uint64, error) {
-	var total_doc uint64
-
-	kv_vb_map, err := pipeline_utils.GetSourceVBListForReplication(cluster_info_svc, xdcr_topology_svc, spec, logger)
-	if err != nil {
-		return 0, err
-	}
-
-	for serverAddr, vbnos := range kv_vb_map {
-		highseqno_map, err := getHighSeqNosForServer(serverAddr, spec.SourceBucketName, vbnos, logger)
-		if err != nil {
-			return 0, err
-		}
-		logger.Debugf("serverAddr=%v, highseqno_map=%v\n", serverAddr, highseqno_map)
-
-		for _, vbno := range vbnos {
-			total_doc = total_doc + highseqno_map[vbno]
-		}
-	}
-	return total_doc, nil
-}
-
-func getHighSeqNosForServer(serverAddr, bucket_name string, vbnos []uint16, logger *log.CommonLogger) (map[uint16]uint64, error) {
-	conn, err := initConnection(serverAddr, bucket_name, logger)
-	if err != nil {
-		return nil, err
-	}
-	defer conn.Close()
-
-	return getHighSeqNos(serverAddr, vbnos, conn)
+	rs.CleanupBeforeExit(StatsToClearForPausedReplications[:])
+	statsLog, _ := stats_mgr.formatStatsForLog()
+	stats_mgr.logger.Infof("expvar=%v\n", statsLog)
+	return nil
 }
 
 func getHighSeqNos(serverAddr string, vbnos []uint16, conn *mcc.Client) (map[uint16]uint64, error) {
@@ -304,17 +224,6 @@ func getHighSeqNos(serverAddr string, vbnos []uint16, conn *mcc.Client) (map[uin
 
 	err = utils.ParseHighSeqnoStat(vbnos, stats_map, highseqno_map)
 	return highseqno_map, err
-}
-
-func (stats_mgr *StatisticsManager) cleanupBeforeExit() error {
-	rs, err := stats_mgr.getReplicationStatus()
-	if err != nil {
-		return err
-	}
-	rs.CleanupBeforeExit(StatsToClearForPausedReplications[:])
-	statsLog, _ := stats_mgr.formatStatsForLog()
-	stats_mgr.logger.Infof("expvar=%v\n", statsLog)
-	return nil
 }
 
 //updateStats runs until it get finish signal
@@ -776,7 +685,7 @@ func (stats_mgr *StatisticsManager) Stop() error {
 
 func (stats_mgr *StatisticsManager) initConnections() error {
 	for serverAddr, _ := range stats_mgr.active_vbs {
-		conn, err := initConnection(serverAddr, stats_mgr.bucket_name, stats_mgr.logger)
+		conn, err := utils.GetMemcachedConnection(serverAddr, stats_mgr.bucket_name, stats_mgr.logger)
 		if err != nil {
 			return err
 		}
@@ -785,30 +694,6 @@ func (stats_mgr *StatisticsManager) initConnections() error {
 	}
 
 	return nil
-}
-
-func initConnection(serverAddr, bucket_name string, logger *log.CommonLogger) (*mcc.Client, error) {
-
-	if serverAddr == "" {
-		panic("serverAddr is empty")
-	}
-	username, password, err := cbauth.GetMemcachedServiceAuth(serverAddr)
-	logger.Debugf("memcached auth: username=%v, password=%v, err=%v\n", username, password, err)
-	if err != nil {
-		return nil, err
-	}
-
-	conn, err := base.NewConn(serverAddr, username, password)
-	if err != nil {
-		return nil, err
-	}
-
-	_, err = conn.SelectBucket(bucket_name)
-	if err != nil {
-		return nil, err
-	}
-
-	return conn, nil
 }
 
 type MetricsCollector interface {
@@ -1035,5 +920,128 @@ func (stats_mgr *StatisticsManager) getReplicationStatus() (*pipeline.Replicatio
 		return nil, utils.ReplicationStatusNotFoundError(topic)
 	} else {
 		return rs, nil
+	}
+}
+
+func UpdateStats(cluster_info_svc service_def.ClusterInfoSvc, xdcr_topology_svc service_def.XDCRCompTopologySvc,
+	checkpoints_svc service_def.CheckpointsService, kv_mem_clients map[string]*mcc.Client, logger *log.CommonLogger) {
+	logger.Debug("updateStats for paused replications")
+
+	for _, repl_id := range pipeline_manager.AllReplications() {
+		repl_status := pipeline_manager.ReplicationStatus(repl_id)
+		overview_stats := repl_status.GetOverviewStats()
+		if overview_stats == nil {
+			// overview stats may be nil the first time GetStats is called on a paused replication that has never been run in the current goxdcr session
+			// or it may be nil when the underying replication is not paused but has not completed startup process
+			// construct it
+			overview_stats, err := constructStatsForReplication(repl_status.Spec(), cluster_info_svc, xdcr_topology_svc, checkpoints_svc, kv_mem_clients, logger)
+			if err != nil {
+				logger.Errorf("Error constructing stats for paused replication %v. err=%v", repl_id, err)
+			}
+			repl_status.SetOverviewStats(overview_stats)
+		} else {
+			if repl_status.RuntimeStatus() != pipeline.Replicating {
+				err := updateStatsForReplication(repl_status.Spec(), repl_status.GetOverviewStats(), cluster_info_svc, xdcr_topology_svc, checkpoints_svc, kv_mem_clients, logger)
+				if err != nil {
+					logger.Errorf("Error updating stats for paused replication %v. err=%v", repl_id, err)
+				}
+			}
+		}
+	}
+}
+
+// compute and set changes_left and docs_processed stats. set other stats to 0
+func constructStatsForReplication(spec *metadata.ReplicationSpecification, cluster_info_svc service_def.ClusterInfoSvc,
+	xdcr_topology_svc service_def.XDCRCompTopologySvc, checkpoints_svc service_def.CheckpointsService,
+	kv_mem_clients map[string]*mcc.Client, logger *log.CommonLogger) (*expvar.Map, error) {
+	docs_processed, err := getDocsProcessedForReplication(spec.Id, checkpoints_svc, logger)
+	if err != nil {
+		return nil, err
+	}
+	logger.Infof("docs_processed for paused replication %v is %v\n", spec.Id, docs_processed)
+
+	total_changes, err := getTotalChangesForReplication(spec, cluster_info_svc, xdcr_topology_svc, checkpoints_svc, kv_mem_clients, logger)
+	if err != nil {
+		return nil, err
+	}
+
+	logger.Infof("total_changes for paused replication %v is %v\n", spec.Id, total_changes)
+
+	changes_left := total_changes - docs_processed
+
+	overview_map := new(expvar.Map).Init()
+	overview_map.Add(DOCS_PROCESSED_METRIC, int64(docs_processed))
+	overview_map.Add(CHANGES_LEFT_METRIC, int64(changes_left))
+	for _, statsToInitialize := range StatsToInitializeForPausedReplications {
+		overview_map.Add(statsToInitialize, 0)
+	}
+	return overview_map, nil
+}
+
+func getTotalChangesForReplication(spec *metadata.ReplicationSpecification, cluster_info_svc service_def.ClusterInfoSvc,
+	xdcr_topology_svc service_def.XDCRCompTopologySvc, checkpoints_svc service_def.CheckpointsService,
+	kv_mem_clients map[string]*mcc.Client, logger *log.CommonLogger) (uint64, error) {
+	var total_doc uint64
+
+	kv_vb_map, err := pipeline_utils.GetSourceVBListForReplication(cluster_info_svc, xdcr_topology_svc, spec, logger)
+	if err != nil {
+		return 0, err
+	}
+
+	for serverAddr, vbnos := range kv_vb_map {
+		client, err := getClient(serverAddr, spec.SourceBucketName, kv_mem_clients, logger)
+		if err != nil {
+			return 0, err
+		}
+		highseqno_map, err := getHighSeqNos(serverAddr, vbnos, client)
+		if err != nil {
+			return 0, err
+		}
+		logger.Debugf("serverAddr=%v, highseqno_map=%v\n", serverAddr, highseqno_map)
+
+		for _, vbno := range vbnos {
+			total_doc = total_doc + highseqno_map[vbno]
+		}
+	}
+	return total_doc, nil
+}
+
+func updateStatsForReplication(spec *metadata.ReplicationSpecification, overview_stats *expvar.Map,
+	cluster_info_svc service_def.ClusterInfoSvc, xdcr_topology_svc service_def.XDCRCompTopologySvc,
+	checkpoints_svc service_def.CheckpointsService, kv_mem_clients map[string]*mcc.Client, logger *log.CommonLogger) error {
+
+	// if pipeline is not running, update changes_left stats, which is not being
+	// updated by running pipeline and may have become inaccurate
+
+	docs_processed, err := strconv.ParseInt(overview_stats.Get(DOCS_PROCESSED_METRIC).String(), base.ParseIntBase, base.ParseIntBitSize)
+	if err != nil {
+		return err
+	}
+
+	total_changes, err := getTotalChangesForReplication(spec, cluster_info_svc, xdcr_topology_svc, checkpoints_svc, kv_mem_clients, logger)
+	if err != nil {
+		return err
+	}
+
+	changes_left := int64(total_changes) - docs_processed
+	changes_left_var := new(expvar.Int)
+	changes_left_var.Set(changes_left)
+
+	overview_stats.Set(CHANGES_LEFT_METRIC, changes_left_var)
+	return nil
+}
+
+func getClient(serverAddr, bucketName string, kv_mem_clients map[string]*mcc.Client, logger *log.CommonLogger) (*mcc.Client, error) {
+	client, ok := kv_mem_clients[serverAddr]
+	if ok {
+		return client, nil
+	} else {
+		var client, err = utils.GetMemcachedConnection(serverAddr, bucketName, logger)
+		if err == nil {
+			kv_mem_clients[serverAddr] = client
+			return client, nil
+		} else {
+			return nil, err
+		}
 	}
 }

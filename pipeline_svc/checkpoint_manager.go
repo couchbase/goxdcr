@@ -236,7 +236,7 @@ func (ckmgr *CheckpointManager) updateCurrentVBOpaque(vbno uint16, vbOpaque meta
 	return nil
 }
 
-func getDocsProcessedForPausedReplication(topic string, checkpoints_svc service_def.CheckpointsService,
+func getDocsProcessedForReplication(topic string, checkpoints_svc service_def.CheckpointsService,
 	logger *log.CommonLogger) (uint64, error) {
 	defer logger.Info("Done with GetDocsProcessedForPausedReplication")
 	logger.Infof("Start GetDocsProcessedForPausedReplication for replication %v...", topic)
@@ -582,10 +582,10 @@ func (ckmgr *CheckpointManager) performCkpt() {
 				ckmgr.logger.Info("Pipeline is no longer running, exit do_checkpointing")
 				return
 			}
-			
+
 			start_time_vb := time.Now()
 			err := ckmgr.do_checkpoint(vb)
-			committing_time_vb := time.Since (start_time_vb)
+			committing_time_vb := time.Since(start_time_vb)
 			total_committing_time += committing_time_vb.Seconds()
 			if err != nil {
 				err_map[vb] = err
@@ -603,7 +603,7 @@ func (ckmgr *CheckpointManager) performCkpt() {
 	} else {
 		ckmgr.logger.Infof("Done checkpointing for replication %v\n", ckmgr.pipeline.Topic())
 		otherInfo := make(map[string]interface{})
-		otherInfo[TimeCommiting] = time.Duration(total_committing_time)*time.Second
+		otherInfo[TimeCommiting] = time.Duration(total_committing_time) * time.Second
 		ckmgr.RaiseEvent(common.CheckpointDone, nil, ckmgr, nil, otherInfo)
 	}
 

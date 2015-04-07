@@ -16,6 +16,7 @@ import (
 	"errors"
 	"expvar"
 	"fmt"
+	mcc "github.com/couchbase/gomemcached/client"
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/common"
 	"github.com/couchbase/goxdcr/factory"
@@ -37,6 +38,8 @@ import (
 )
 
 var logger_rm *log.CommonLogger = log.NewLogger("ReplicationManager", log.DefaultLoggerContext)
+var StatsUpdateIntervalForPausedReplications = 60 * time.Second
+var StatusCheckInterval = 5 * time.Second
 
 var GoXDCROptions struct {
 	SourceKVAdminPort    uint64 //source kv admin port
@@ -188,13 +191,18 @@ func (rm *replicationManager) initPausedReplications() {
 }
 
 func (rm *replicationManager) checkReplicationStatus(fin_chan chan bool) {
-	ticker := time.NewTicker(5 * time.Second)
+	status_check_ticker := time.NewTicker(StatusCheckInterval)
+	stats_update_ticker := time.NewTicker(StatsUpdateIntervalForPausedReplications)
+	kv_mem_clients := make(map[string]*mcc.Client)
+
 	for {
 		select {
 		case <-fin_chan:
 			return
-		case <-ticker.C:
+		case <-status_check_ticker.C:
 			pipeline_manager.CheckPipelines()
+		case <-stats_update_ticker.C:
+			pipeline_svc.UpdateStats(ClusterInfoService(), XDCRCompTopologyService(), CheckpointService(), kv_mem_clients, logger_rm)
 		}
 	}
 }
@@ -417,7 +425,7 @@ func GetStatistics(bucket string) (*expvar.Map, error) {
 
 	stats := new(expvar.Map).Init()
 	for _, repId := range repIds {
-		statsForPipeline, err := pipeline_svc.GetStatisticsForPipeline(repId, ClusterInfoService(), XDCRCompTopologyService(), CheckpointService(), logger_rm)
+		statsForPipeline, err := pipeline_svc.GetStatisticsForPipeline(repId)
 		if err == nil && statsForPipeline != nil {
 			stats.Set(repId, statsForPipeline)
 		}
@@ -486,7 +494,7 @@ func GetReplicationInfos() ([]base.ReplicationInfo, error) {
 		rep_status := pipeline_manager.ReplicationStatus(replId)
 		if rep_status != nil {
 			// set stats map
-			expvarMap, err := pipeline_svc.GetStatisticsForPipeline(replId, ClusterInfoService(), XDCRCompTopologyService(), CheckpointService(), logger_rm)
+			expvarMap, err := pipeline_svc.GetStatisticsForPipeline(replId)
 			if err == nil && expvarMap != nil {
 				replInfo.StatsMap = utils.GetMapFromExpvarMap(expvarMap)
 				validateStatsMap(replInfo.StatsMap)

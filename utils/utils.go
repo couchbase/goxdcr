@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"github.com/couchbase/cbauth"
 	"github.com/couchbase/go-couchbase"
+	mcc "github.com/couchbase/gomemcached/client"
 	base "github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
 	"net/url"
@@ -454,4 +455,28 @@ func ReplicationStatusNotFoundError(topic string) error {
 
 func BucketNotFoundError(bucketName string) error {
 	return fmt.Errorf("Bucket `%v` not found.", bucketName)
+}
+
+func GetMemcachedConnection(serverAddr, bucketName string, logger *log.CommonLogger) (*mcc.Client, error) {
+
+	if serverAddr == "" {
+		panic("serverAddr is empty")
+	}
+	username, password, err := cbauth.GetMemcachedServiceAuth(serverAddr)
+	logger.Debugf("memcached auth: username=%v, password=%v, err=%v\n", username, password, err)
+	if err != nil {
+		return nil, err
+	}
+
+	conn, err := base.NewConn(serverAddr, username, password)
+	if err != nil {
+		return nil, err
+	}
+
+	_, err = conn.SelectBucket(bucketName)
+	if err != nil {
+		return nil, err
+	}
+
+	return conn, nil
 }
