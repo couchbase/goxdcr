@@ -9,9 +9,8 @@
 
 package service_def
 
-import (
-)
+import ()
 
 type UILogSvc interface {
-	Write (message string) 
+	Write(message string)
 }

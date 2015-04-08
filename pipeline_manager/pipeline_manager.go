@@ -507,9 +507,11 @@ func (r *pipelineUpdater) update() bool {
 	_, err = pipeline_mgr.startPipeline(r.pipeline_name)
 RE:
 	if err == nil {
-		r.logger.Infof("Replication %v is updated. Back to business\n", r.pipeline_name)
+		r.logger.Infof("Replication %v has been updated. Back to business\n", r.pipeline_name)
+	} else if err == ReplicationSpecNotActive {
+		r.logger.Infof("Replication %v has been paused. no need to update\n", r.pipeline_name)
 	} else if err == service_def.MetadataNotFoundErr {
-		r.logger.Infof("Replication %v is deleted. no need to update\n", r.pipeline_name)
+		r.logger.Infof("Replication %v has been deleted. no need to update\n", r.pipeline_name)
 	} else {
 		r.logger.Errorf("Failed to update pipeline %v, err=%v\n", r.pipeline_name, err)
 	}

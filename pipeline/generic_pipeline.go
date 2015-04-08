@@ -18,9 +18,12 @@ import (
 	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/goxdcr/parts"
 	"github.com/couchbase/goxdcr/pipeline_utils"
+	"github.com/couchbase/goxdcr/service_def"
 	"sync"
 	"time"
 )
+
+var ErrorKey = "Error"
 
 //the function can construct part specific settings for the pipeline
 type PartsSettingsConstructor func(pipeline common.Pipeline, part common.Part, pipeline_settings map[string]interface{}, ts map[uint16]*base.VBTimestamp, targetClusterref *metadata.RemoteClusterReference) (map[string]interface{}, error)
@@ -77,6 +80,8 @@ type GenericPipeline struct {
 
 	instance_id       int
 	progress_recorder common.PipelineProgressRecorder
+
+	uilog_svc service_def.UILogSvc
 }
 
 //Get the runtime context of this pipeline
@@ -149,7 +154,7 @@ func (genericPipeline *GenericPipeline) Start(settings map[string]interface{}) e
 		}
 	}(genericPipeline, err)
 
-	err = genericPipeline.SetState(common.Pipeline_Starting)
+	err = genericPipeline.SetState(common.Pipeline_Starting, nil)
 	if err != nil {
 		return err
 	}
@@ -232,7 +237,7 @@ func (genericPipeline *GenericPipeline) Start(settings map[string]interface{}) e
 	genericPipeline.logger.Debug("All incoming nozzles have been opened")
 	genericPipeline.ReportProgress("All incoming nozzles have been openedL¬")
 
-	err = genericPipeline.SetState(common.Pipeline_Running)
+	err = genericPipeline.SetState(common.Pipeline_Running, nil)
 	if err == nil {
 		genericPipeline.logger.Infof("-----------Pipeline %s is started----------", genericPipeline.InstanceId())
 		genericPipeline.ReportProgress("Pipeline is running")
@@ -298,7 +303,7 @@ func (genericPipeline *GenericPipeline) Stop() error {
 	genericPipeline.logger.Infof("stoppping pipeline %v\n", genericPipeline.InstanceId())
 	var err error
 
-	err = genericPipeline.SetState(common.Pipeline_Stopping)
+	err = genericPipeline.SetState(common.Pipeline_Stopping, nil)
 	if err != nil {
 		return err
 	}
@@ -332,7 +337,7 @@ func (genericPipeline *GenericPipeline) Stop() error {
 
 	genericPipeline.ReportProgress("Pipeline is stopped")
 
-	err = genericPipeline.SetState(common.Pipeline_Stopped)
+	err = genericPipeline.SetState(common.Pipeline_Stopped, nil)
 	genericPipeline.logger.Infof("Pipeline %v is stopped\n", genericPipeline.InstanceId())
 	return err
 
@@ -353,14 +358,16 @@ func (genericPipeline *GenericPipeline) Topic() string {
 func NewGenericPipeline(t string,
 	sources map[string]common.Nozzle,
 	targets map[string]common.Nozzle,
-	spec *metadata.ReplicationSpecification) *GenericPipeline {
+	spec *metadata.ReplicationSpecification,
+	uilog_svc service_def.UILogSvc) *GenericPipeline {
 	pipeline := &GenericPipeline{topic: t,
 		sources:     sources,
 		targets:     targets,
 		spec:        spec,
 		logger:      log.NewLogger("GenericPipeline", nil),
 		instance_id: time.Now().Nanosecond(),
-		state:       common.Pipeline_Initial}
+		state:       common.Pipeline_Initial,
+		uilog_svc:   uilog_svc}
 	return pipeline
 }
 
@@ -371,7 +378,8 @@ func NewPipelineWithSettingConstructor(t string,
 	partsSettingsConstructor PartsSettingsConstructor,
 	startingSeqnoConstructor StartingSeqnoConstructor,
 	remoteClusterRefRetriever RemoteClsuterRefRetriever,
-	logger_context *log.LoggerContext) *GenericPipeline {
+	logger_context *log.LoggerContext,
+	uilog_svc service_def.UILogSvc) *GenericPipeline {
 	pipeline := &GenericPipeline{topic: t,
 		sources: sources,
 		targets: targets,
@@ -381,7 +389,8 @@ func NewPipelineWithSettingConstructor(t string,
 		remoteClusterRef_retriever: remoteClusterRefRetriever,
 		logger:      log.NewLogger("GenericPipeline", logger_context),
 		instance_id: time.Now().Nanosecond(),
-		state:       common.Pipeline_Initial}
+		state:       common.Pipeline_Initial,
+		uilog_svc:   uilog_svc}
 	pipeline.logger.Debugf("Pipeline %s is initialized with a part setting constructor %v", t, partsSettingsConstructor)
 
 	return pipeline
@@ -479,7 +488,7 @@ func (genericPipeline *GenericPipeline) Layout() string {
 	return fmt.Sprintf("%s\n%s\n%s\n", header, content, footer)
 }
 
-func (genericPipeline *GenericPipeline) SetState(state common.PipelineState) error {
+func (genericPipeline *GenericPipeline) SetState(state common.PipelineState, additionalInfo map[string]interface{}) error {
 	genericPipeline.stateLock.Lock()
 	defer genericPipeline.stateLock.Unlock()
 
@@ -508,7 +517,24 @@ func (genericPipeline *GenericPipeline) SetState(state common.PipelineState) err
 			return errors.New(fmt.Sprintf(base.InvalidStateTransitionErrMsg, state, genericPipeline.InstanceId(), "Error", "Stopping"))
 		}
 	}
+
 	genericPipeline.state = state
+
+	// write uilog for pipeline running/error events
+	if genericPipeline.State() == common.Pipeline_Error {
+		message := fmt.Sprintf("Replication %v failed.", genericPipeline.topic)
+		if additionalInfo != nil {
+			err, ok := additionalInfo[ErrorKey]
+			if ok {
+				message += fmt.Sprintf(" err=%v", err)
+			}
+		}
+		genericPipeline.uilog_svc.Write(message)
+	} else if genericPipeline.State() == common.Pipeline_Running {
+		message := fmt.Sprintf("Replication %v started running.", genericPipeline.topic)
+		genericPipeline.uilog_svc.Write(message)
+	}
+
 	return nil
 }
 

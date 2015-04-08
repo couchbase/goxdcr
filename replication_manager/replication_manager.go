@@ -105,14 +105,15 @@ func StartReplicationManager(sourceKVHost string, xdcrRestPort uint16,
 	replication_settings_svc service_def.ReplicationSettingsSvc,
 	checkpoints_svc service_def.CheckpointsService,
 	capi_svc service_def.CAPIService,
-	audit_svc service_def.AuditSvc) {
+	audit_svc service_def.AuditSvc,
+	uilog_svc service_def.UILogSvc) {
 
 	replication_mgr.once.Do(func() {
 		// ns_server shutdown protocol: poll stdin and exit upon reciept of EOF
 		go pollStdin()
 
 		// initializes replication manager
-		replication_mgr.init(repl_spec_svc, remote_cluster_svc, cluster_info_svc, xdcr_topology_svc, replication_settings_svc, checkpoints_svc, capi_svc, audit_svc)
+		replication_mgr.init(repl_spec_svc, remote_cluster_svc, cluster_info_svc, xdcr_topology_svc, replication_settings_svc, checkpoints_svc, capi_svc, audit_svc, uilog_svc)
 
 		// start pipeline master supervisor
 		// TODO should we make heart beat settings configurable?
@@ -215,7 +216,8 @@ func (rm *replicationManager) init(
 	replication_settings_svc service_def.ReplicationSettingsSvc,
 	checkpoint_svc service_def.CheckpointsService,
 	capi_svc service_def.CAPIService,
-	audit_svc service_def.AuditSvc) {
+	audit_svc service_def.AuditSvc,
+	uilog_svc service_def.UILogSvc) {
 
 	rm.GenericSupervisor = *supervisor.NewGenericSupervisor(base.ReplicationManagerSupervisorId, log.DefaultLoggerContext, rm, nil)
 	rm.pipelineMasterSupervisor = supervisor.NewGenericSupervisor(base.PipelineMasterSupervisorId, log.DefaultLoggerContext, rm, &rm.GenericSupervisor)
@@ -229,7 +231,7 @@ func (rm *replicationManager) init(
 	rm.audit_svc = audit_svc
 	rm.adminport_finch = make(chan bool, 1)
 	rm.children_waitgrp = &sync.WaitGroup{}
-	fac := factory.NewXDCRFactory(repl_spec_svc, remote_cluster_svc, cluster_info_svc, xdcr_topology_svc, checkpoint_svc, capi_svc, log.DefaultLoggerContext, log.DefaultLoggerContext, rm, rm.pipelineMasterSupervisor)
+	fac := factory.NewXDCRFactory(repl_spec_svc, remote_cluster_svc, cluster_info_svc, xdcr_topology_svc, checkpoint_svc, capi_svc, uilog_svc, log.DefaultLoggerContext, log.DefaultLoggerContext, rm, rm.pipelineMasterSupervisor)
 
 	pipeline_manager.PipelineManager(fac, rm.repl_spec_svc, log.DefaultLoggerContext)
 

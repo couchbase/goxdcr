@@ -123,7 +123,8 @@ func main() {
 			s.NewReplicationSettingsSvc(metadata_svc, nil),
 			s.NewCheckpointsService(metadata_svc, nil),
 			s.NewCAPIService(cluster_info_svc, nil),
-			audit_svc)
+			audit_svc,
+			uilog_svc)
 
 		// keep main alive in normal mode
 		<-done

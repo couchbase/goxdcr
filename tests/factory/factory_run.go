@@ -111,9 +111,9 @@ func invokeFactory() error {
 	replication_manager.StartReplicationManager(options.sourceKVHost, base.AdminportNumber,
 		repl_spec_svc,
 		remote_cluster_svc,
-		cluster_info_svc, top_svc, s.NewReplicationSettingsSvc(msvc, nil), checkpoints_svc, capi_svc, audit_svc)
+		cluster_info_svc, top_svc, s.NewReplicationSettingsSvc(msvc, nil), checkpoints_svc, capi_svc, audit_svc, uilog_svc)
 
-	fac := factory.NewXDCRFactory(repl_spec_svc, remote_cluster_svc, cluster_info_svc, top_svc, checkpoints_svc, capi_svc, log.DefaultLoggerContext, log.DefaultLoggerContext, nil, nil)
+	fac := factory.NewXDCRFactory(repl_spec_svc, remote_cluster_svc, cluster_info_svc, top_svc, checkpoints_svc, capi_svc, uilog_svc, log.DefaultLoggerContext, log.DefaultLoggerContext, nil, nil)
 
 	// create remote cluster reference needed by replication
 	err = common.CreateTestRemoteCluster(remote_cluster_svc, options.remoteUuid, options.remoteName, options.remoteHostName, options.remoteUserName, options.remotePassword,

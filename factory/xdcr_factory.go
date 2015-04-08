@@ -41,6 +41,7 @@ type XDCRFactory struct {
 	xdcr_topology_svc  service_def.XDCRCompTopologySvc
 	checkpoint_svc     service_def.CheckpointsService
 	capi_svc           service_def.CAPIService
+	uilog_svc          service_def.UILogSvc
 
 	default_logger_ctx         *log.LoggerContext
 	pipeline_failure_handler   common.SupervisorFailureHandler
@@ -57,6 +58,7 @@ func NewXDCRFactory(repl_spec_svc service_def.ReplicationSpecSvc,
 	xdcr_topology_svc service_def.XDCRCompTopologySvc,
 	checkpoint_svc service_def.CheckpointsService,
 	capi_svc service_def.CAPIService,
+	uilog_svc service_def.UILogSvc,
 	pipeline_default_logger_ctx *log.LoggerContext,
 	factory_logger_ctx *log.LoggerContext,
 	pipeline_failure_handler common.SupervisorFailureHandler,
@@ -67,6 +69,7 @@ func NewXDCRFactory(repl_spec_svc service_def.ReplicationSpecSvc,
 		xdcr_topology_svc:          xdcr_topology_svc,
 		checkpoint_svc:             checkpoint_svc,
 		capi_svc:                   capi_svc,
+		uilog_svc:                  uilog_svc,
 		default_logger_ctx:         pipeline_default_logger_ctx,
 		pipeline_failure_handler:   pipeline_failure_handler,
 		pipeline_master_supervisor: pipeline_master_supervisor,
@@ -125,7 +128,7 @@ func (xdcrf *XDCRFactory) NewPipeline(topic string, progress_recorder common.Pip
 	progress_recorder("Source nozzles are wired to target nozzles")
 
 	// construct pipeline
-	pipeline := pp.NewPipelineWithSettingConstructor(topic, sourceNozzles, outNozzles, spec, xdcrf.ConstructSettingsForPart, xdcrf.SetStartSeqno, xdcrf.remote_cluster_svc.RemoteClusterByUuid, logger_ctx)
+	pipeline := pp.NewPipelineWithSettingConstructor(topic, sourceNozzles, outNozzles, spec, xdcrf.ConstructSettingsForPart, xdcrf.SetStartSeqno, xdcrf.remote_cluster_svc.RemoteClusterByUuid, logger_ctx, xdcrf.uilog_svc)
 	if pipelineContext, err := pctx.NewWithSettingConstructor(pipeline, xdcrf.ConstructSettingsForService, logger_ctx); err != nil {
 		return nil, err
 	} else {
@@ -490,12 +493,12 @@ func (xdcrf *XDCRFactory) constructSettingsForXmemNozzle(pipeline common.Pipelin
 				return nil, err
 			}
 			xdcrf.logger.Infof("is40=%v\n", is40)
-			
+
 			xmemSettings[parts.XMEM_SETTING_REMOTE_MEM_SSL_PORT] = mem_ssl_port
 			xmemSettings[parts.XMEM_SETTING_CERTIFICATE] = certificate
 			xmemSettings[parts.XMEM_SETTING_DEMAND_ENCRYPTION] = demandEncryption
 			xmemSettings[parts.XMEM_SETTING_INSECURESKIPVERIFY] = !is40
-			
+
 			xdcrf.logger.Infof("xmemSettings=%v\n", xmemSettings)
 
 		} else {

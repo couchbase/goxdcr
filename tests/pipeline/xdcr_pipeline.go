@@ -52,7 +52,7 @@ var options struct {
 	remoteHostName         string // remote cluster host name
 	remoteUserName         string //remote cluster userName
 	remotePassword         string //remote cluster password
-	remoteDemandEncryption uint64   // whether encryption is needed
+	remoteDemandEncryption uint64 // whether encryption is needed
 	remoteCertificateFile  string // file containing certificate for encryption
 }
 
@@ -141,15 +141,16 @@ func setup() error {
 		fmt.Printf("Error starting audit service. err=%v\n", err)
 		os.Exit(1)
 	}
-	
+
 	uilog_svc := s.NewUILogSvc(top_svc, nil)
 	remote_cluster_svc := s.NewRemoteClusterService(uilog_svc, metadata_svc, top_svc, cluster_info_svc, nil)
 	repl_spec_svc := s.NewReplicationSpecService(uilog_svc, remote_cluster_svc, metadata_svc, top_svc, nil)
 
 	replication_manager.StartReplicationManager(options.source_kv_host, base.AdminportNumber,
-		repl_spec_svc,
-		remote_cluster_svc,
-		cluster_info_svc, top_svc, s.NewReplicationSettingsSvc(metadata_svc, nil), s.NewCheckpointsService(metadata_svc, nil), s.NewCAPIService(cluster_info_svc, nil), audit_svc)
+		repl_spec_svc, remote_cluster_svc,
+		cluster_info_svc, top_svc, s.NewReplicationSettingsSvc(metadata_svc, nil),
+		s.NewCheckpointsService(metadata_svc, nil), s.NewCAPIService(cluster_info_svc, nil),
+		audit_svc, uilog_svc)
 
 	logger.Info("Finish setup")
 	return nil
@@ -196,11 +197,11 @@ func test() {
 	time.Sleep(30 * time.Second)
 
 	pipeline := pipeline_manager.ReplicationStatus(topic).Pipeline()
-	
+
 	if pipeline == nil {
 		fail(fmt.Sprintf("Failed to start pipeline %v", topic))
 	}
-	
+
 	err = verifyStartingTimestamps(pipeline, true)
 	if err != nil {
 		fail(fmt.Sprintf("%v", err))
@@ -217,7 +218,7 @@ func test() {
 	if err != nil {
 		fail(err.Error())
 	}
-	
+
 	if len(ckpt_docs) == 0 {
 		logger.Info("Didn't find any checkpoint doc")
 		fail(fmt.Sprintf("No checkpointing happended as it is supposed to"))

@@ -14,41 +14,42 @@ import (
 )
 
 type PipelineState int
+
 const (
-	Pipeline_Initial PipelineState=iota
-	Pipeline_Starting PipelineState=iota
-	Pipeline_Running PipelineState=iota
-	Pipeline_Stopping PipelineState=iota
-	Pipeline_Stopped PipelineState=iota
-	Pipeline_Error	PipelineState=iota
+	Pipeline_Initial  PipelineState = iota
+	Pipeline_Starting PipelineState = iota
+	Pipeline_Running  PipelineState = iota
+	Pipeline_Stopping PipelineState = iota
+	Pipeline_Stopped  PipelineState = iota
+	Pipeline_Error    PipelineState = iota
 )
 
-type PipelineProgressRecorder func (progress string) 
+type PipelineProgressRecorder func(progress string)
 
 //interface for Pipeline
 type Pipeline interface {
 	//Name of the Pipeline
 	Topic() string
 
-	Sources () map[string]Nozzle
-	Targets () map[string]Nozzle
-	
+	Sources() map[string]Nozzle
+	Targets() map[string]Nozzle
+
 	//getter\setter of the runtime environment
 	RuntimeContext() PipelineRuntimeContext
-	SetRuntimeContext (ctx PipelineRuntimeContext)
+	SetRuntimeContext(ctx PipelineRuntimeContext)
 
 	//start the data exchange
 	Start(settings map[string]interface{}) error
 	//stop the data exchange
 	Stop() error
-	
+
 	Specification() *metadata.ReplicationSpecification
 	Settings() map[string]interface{}
-	
-	State () PipelineState
-	SetState(state PipelineState) error
+
+	State() PipelineState
+	SetState(state PipelineState, additionalInfo map[string]interface{}) error
 	InstanceId() string
-	
-	SetProgressRecorder (recorder PipelineProgressRecorder)
-	ReportProgress (progress string)
+
+	SetProgressRecorder(recorder PipelineProgressRecorder)
+	ReportProgress(progress string)
 }

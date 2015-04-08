@@ -13,7 +13,7 @@ import (
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/common"
 	"github.com/couchbase/goxdcr/log"
-	generic_p "github.com/couchbase/goxdcr/pipeline"
+	"github.com/couchbase/goxdcr/pipeline"
 	"github.com/couchbase/goxdcr/supervisor"
 	"github.com/couchbase/goxdcr/utils"
 	"reflect"
@@ -58,7 +58,7 @@ func (pipelineSupervisor *PipelineSupervisor) Attach(p common.Pipeline) error {
 
 	pipelineSupervisor.pipeline = p
 
-	partsMap := generic_p.GetAllParts(p)
+	partsMap := pipeline.GetAllParts(p)
 
 	for _, part := range partsMap {
 		// the assumption here is that all XDCR parts are Supervisable
@@ -70,7 +70,7 @@ func (pipelineSupervisor *PipelineSupervisor) Attach(p common.Pipeline) error {
 	}
 
 	//register itself with all connectors' ErrorEncountered event
-	connectorsMap := generic_p.GetAllConnectors(p)
+	connectorsMap := pipeline.GetAllConnectors(p)
 
 	for _, connector := range connectorsMap {
 		connector.RegisterComponentEventListener(common.ErrorEncountered, pipelineSupervisor)
@@ -127,7 +127,9 @@ func (pipelineSupervisor *PipelineSupervisor) ReportFailure(errors map[string]er
 }
 
 func (pipelineSupervisor *PipelineSupervisor) declarePipelineBroken() {
-	err := pipelineSupervisor.pipeline.SetState(common.Pipeline_Error)
+	additionalInfo := make(map[string]interface{})
+	additionalInfo[pipeline.ErrorKey] = pipelineSupervisor.errors_seen
+	err := pipelineSupervisor.pipeline.SetState(common.Pipeline_Error, additionalInfo)
 	if err == nil {
 		pipelineSupervisor.Logger().Errorf("Received error report : %v", pipelineSupervisor.errors_seen)
 		pipelineSupervisor.ReportFailure(pipelineSupervisor.errors_seen)

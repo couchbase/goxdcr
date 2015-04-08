@@ -503,7 +503,7 @@ func newConfig(logger *log.CommonLogger) xmemConfig {
 		local_proxy_port:   0,
 		max_downtime:       default_max_downtime,
 		memcached_ssl_port: 0,
-		logger: logger,
+		logger:             logger,
 	}
 
 }
