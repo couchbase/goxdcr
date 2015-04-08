@@ -153,8 +153,8 @@ func (capi_svc *CAPIService) CommitForCheckpoint(remoteBucket *service_def.Remot
 //returns: matching - the list of vb numbers whose vbuuid matches
 //		   mismatching - the list of vb numbers whose vbuuid mismatches
 //		   missing	- the list of vb numbers whose vbuuid is not kept on file
-func (capi_svc *CAPIService) MassValidateVBUUIDs(remoteBucket *service_def.RemoteBucketInfo, remoteVBUUIDs [][]uint64) (matching []interface{}, mismatching []interface{}, missing []interface{}, err error) {
-	capi_svc.logger.Debug("Calling _mass_vbopaque_check")
+func (capi_svc *CAPIService) MassValidateVBUUIDs(remoteBucket *service_def.RemoteBucketInfo, remoteVBUUIDs map[uint16]metadata.TargetVBOpaque) (matching []uint16, mismatching []uint16, missing []uint16, err error) {
+	capi_svc.logger.Info("Calling _mass_vbopaque_check")
 
 	//use the vbucket 0's capi api url
 	api_base, err := capi_svc.composeAPIRequestBase(remoteBucket, 0)
@@ -162,41 +162,58 @@ func (capi_svc *CAPIService) MassValidateVBUUIDs(remoteBucket *service_def.Remot
 		return
 	}
 
-	//    Body = [{<<"vbopaques">>, Pairs}],
-	api_base.body["vbopaques"] = remoteVBUUIDs
+	vbopaques := [][]interface{}{}
+	for vb, remotevbuuid := range remoteVBUUIDs {
+		vbopaques = append(vbopaques, []interface{}{vb, remotevbuuid.Value()})
+	}
+	api_base.body["vbopaques"] = vbopaques
 	status_code, respMap, err := capi_svc.send_post(MASS_VBOPAQUE_CHECK_CMD, api_base, HTTP_RETRIES)
-	capi_svc.logger.Debugf("response from _mass_vbopaque_check is %v\n", respMap)
+	capi_svc.logger.Debugf("vbopaques=%v\n", vbopaques)
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	matching, mismatching, missing, err = capi_svc.parseMassValidateSeqNosResp(api_base.url, status_code, respMap, remoteVBUUIDs)
+	matching, mismatching, missing, err = capi_svc.parseMassValidateSeqNosResp(api_base.url, status_code, respMap, vbopaques)
 	return
 }
 
 func (capi_svc *CAPIService) parseMassValidateSeqNosResp(url string, resp_status_code int,
-	respMap map[string]interface{}, remoteVBUUIDs [][]uint64) (matching []interface{}, mismatching []interface{}, missing []interface{}, err error) {
+	respMap map[string]interface{}, vbOpaques [][]interface{}) (matching []uint16, mismatching []uint16, missing []uint16, err error) {
 	mismatchingobj, ok := respMap["mismatched"]
 	if !ok {
 		err = errors.New("Can't find 'mismatched' in response")
 		return
 	}
-	mismatching = mismatchingobj.([]interface{})
+	mismatching_pairs := mismatchingobj.([]interface{})
+	mismatching, err = getVBLists(mismatching_pairs)
+	if err != nil {
+		return
+	}
 	missingobj, ok := respMap["missing"]
 	if !ok {
 		err = errors.New("Can't find 'missing' in response")
 		return
 	}
-	missing = missingobj.([]interface{})
-	bad_vb_list := append(missing, mismatching...)
-	matching = []interface{}{}
-	//loop through the provided remoteVBUUIDs
-	for _, vbpair := range remoteVBUUIDs {
-		vb := vbpair[0]
-		if !utils.Contains(vb, bad_vb_list) {
+	missing_pairs := missingobj.([]interface{})
+	missing, err = getVBLists(missing_pairs)
+	if err != nil {
+		return
+	}
+
+	bad_vb_list := []uint16{}
+	bad_vb_list = append(mismatching, missing...)
+	matching = []uint16{}
+	//loop through the provided vbOpaques
+	for _, vbpair := range vbOpaques {
+		vb, ok := vbpair[0].(uint16)
+		if !ok {
+			panic(fmt.Sprintf("wrong format of vbOpaques, the first element in %v is expected to be uint16", vbpair))
+		}
+		if !isInBadList(vb, bad_vb_list, capi_svc.logger) {
 			matching = append(matching, vb)
 		}
 
 	}
+	capi_svc.logger.Debugf("mismatching=%v, missing=%v, matching=%v\n", mismatching, missing, matching)
 	return
 }
 
@@ -385,4 +402,28 @@ Done:
 		return "", errors.New(fmt.Sprintf("failed to find server for vb=%v", vbno))
 	}
 
+}
+
+//helper function to MassValidateVBUUIDs
+//it returns a list of vbno given a list of [vbno, vbuuid] pair
+func getVBLists(pair_list []interface{}) ([]uint16, error) {
+	ret := []uint16{}
+	for _, pairObj := range pair_list {
+		pair, ok := pairObj.([]interface{})
+		if !ok || len(pair) != 2 {
+			return ret, fmt.Errorf("_commit_for_checkpoint retruns an invalid response. element in mismatch field should have format of [vbno, vbuuid], it is %v", pairObj)
+		}
+		vb := uint16(pair[0].(float64))
+		ret = append(ret, vb)
+	}
+	return ret, nil
+}
+
+func isInBadList(vb uint16, bad_vb_list []uint16, logger *log.CommonLogger) bool {
+	for _, vbno := range bad_vb_list {
+		if vb == vbno {
+			return true
+		}
+	}
+	return false
 }

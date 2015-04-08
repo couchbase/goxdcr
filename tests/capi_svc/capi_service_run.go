@@ -162,9 +162,8 @@ func run_testcase() error {
 	}
 	logger.Infof("vb=%v, remote_seqno=%v, vb_uuid=%v\n", vbno, remote_seqno, vbuuid)
 
-	remoteVBUUIDs := [][]uint64{}
-	vb0_pair := []uint64{0, vbuuid.(*metadata.TargetVBUuid).Target_vb_uuid}
-	remoteVBUUIDs = append(remoteVBUUIDs, vb0_pair)
+	remoteVBUUIDs := make(map[uint16]metadata.TargetVBOpaque)
+	remoteVBUUIDs[0] =  vbuuid
 	err = testMassValidateVBUUIDs(capi_svc, remoteBucket, remoteVBUUIDs)
 	if err != nil {
 		return errors.New(fmt.Sprintf("testMassValidateVBUUIDs failed - err=%v", err))
@@ -192,7 +191,7 @@ func testCommitForCheckpoint(capi_svc *service_impl.CAPIService, remoteBucket *s
 	return
 }
 
-func testMassValidateVBUUIDs(capi_svc *service_impl.CAPIService, remoteBucket *service_def.RemoteBucketInfo, remoteVBUUIDs [][]uint64) error {
+func testMassValidateVBUUIDs(capi_svc *service_impl.CAPIService, remoteBucket *service_def.RemoteBucketInfo, remoteVBUUIDs map[uint16]metadata.TargetVBOpaque) error {
 	matching, mismatching, missing, err := capi_svc.MassValidateVBUUIDs(remoteBucket, remoteVBUUIDs)
 
 	if err != nil {

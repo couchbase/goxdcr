@@ -151,5 +151,5 @@ type CAPIService interface {
 	//returns: matching - the list of vb numbers whose vbuuid matches
 	//		   mismatching - the list of vb numbers whose vbuuid mismatches
 	//		   missing	- the list of vb numbers whose vbuuid is not kept on file
-	MassValidateVBUUIDs(remoteBucket *RemoteBucketInfo, remoteVBUUIDs [][]uint64) (matching []interface{}, mismatching []interface{}, missing []interface{}, err error)
+	MassValidateVBUUIDs(remoteBucket *RemoteBucketInfo, remoteVBUUIDs map[uint16]metadata.TargetVBOpaque) (matching []uint16, mismatching []uint16, missing []uint16, err error)
 }

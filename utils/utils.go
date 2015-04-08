@@ -258,15 +258,6 @@ func GetMapFromExpvarMap(expvarMap *expvar.Map) map[string]interface{} {
 	return regMap
 }
 
-func Contains(value interface{}, slice []interface{}) bool {
-	for _, v := range slice {
-		if v == value {
-			return true
-		}
-	}
-	return false
-}
-
 //convert the format returned by go-memcached StatMap - map[string]string to map[uint16]uint64
 func ParseHighSeqnoStat(vbnos []uint16, stats_map map[string]string, highseqno_map map[uint16]uint64) error {
 

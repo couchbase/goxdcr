@@ -183,6 +183,8 @@ func (ckmgr *CheckpointManager) Start(settings map[string]interface{}) error {
 	//start checkpointing loop
 	ckmgr.wait_grp.Add(1)
 	go ckmgr.checkpointing()
+	ckmgr.wait_grp.Add(1)
+	go ckmgr.massCheckVBOpaquesJob()
 	return nil
 }
 
@@ -751,12 +753,53 @@ func GetStartSeqnos(pipeline common.Pipeline, logger *log.CommonLogger) map[uint
 	return make(map[uint16]*base.VBTimestamp)
 }
 
-//TODO: erlang xdcr also registers current remote bucket and vb information in xdcr_stats
-//Think about how incorporate this in statistics manager
-//register_vb_stats(Id, Vb, CurrRemoteBucket, Target, RemoteVBOpaque) ->
-//    R = #xdcr_vb_stats_sample{id_and_vb = {Id, Vb},
-//                              pid = self(),
-//                              httpdb = Target,
-//                              bucket_uuid = CurrRemoteBucket#remote_bucket.uuid,
-//                              remote_vbopaque = RemoteVBOpaque},
-//    ets:insert(xdcr_stats, R).
+func (ckmgr *CheckpointManager) massCheckVBOpaquesJob() {
+	defer ckmgr.logger.Info("Exits massCheckVBOpaquesJob routine.")
+	defer ckmgr.wait_grp.Done()
+
+	ticker := time.NewTicker(60 * time.Second)
+	for {
+		select {
+		case <-ckmgr.finish_ch:
+			ckmgr.logger.Info("Received finish signal")
+			return
+		case <-ticker.C:
+			ckmgr.checkpoint_ticker.Stop()
+			if ckmgr.pipeline.State() != common.Pipeline_Running {
+				//pipeline is no longer running, kill itself
+				ckmgr.logger.Info("Pipeline is no longer running, exit.")
+				return
+			}
+			go ckmgr.massCheckVBOpaues()
+		}
+	}
+
+}
+
+func (ckmgr *CheckpointManager) massCheckVBOpaues() error {
+	//validate target bucket's vbucket uuid
+	target_vb_vbuuid_map := make(map[uint16]metadata.TargetVBOpaque)
+	for vb, latest_ckpt_record := range ckmgr.cur_ckpts {
+		target_vb_uuid := latest_ckpt_record.Target_vb_opaque
+		target_vb_vbuuid_map[vb] = target_vb_uuid
+	}
+
+	matching, mismatching, missing, err1 := ckmgr.capi_svc.MassValidateVBUUIDs(ckmgr.remote_bucket, target_vb_vbuuid_map)
+	if err1 != nil {
+		ckmgr.logger.Errorf("MassValidateVBUUID failed, err=%v", err1)
+		return err1
+	} else {
+		if len(matching) != len(target_vb_vbuuid_map) {
+			//error
+			ckmgr.logger.Errorf("Target bucket for replication %v's topology has changed. mismatch=%v, missing=%v\n", ckmgr.pipeline.Topic(), mismatching, missing)
+			err := errors.New("Target bucket's topology has changed")
+			otherInfo := utils.WrapError(err)
+			ckmgr.RaiseEvent(common.ErrorEncountered, nil, ckmgr, nil, otherInfo)
+
+		} else {
+			ckmgr.logger.Infof("No target bucket topology change is detected for replication %v", ckmgr.pipeline.Topic())
+		}
+		return nil
+	}
+
+}
