@@ -1158,8 +1158,8 @@ func (xmem *XmemNozzle) batchGetMeta(bigDoc_map map[string]*base.WrappedMCReques
 
 	xmem.Logger().Infof("GetMeta for %v\n", len(bigDoc_map))
 	respMap := make(map[string]*mc.MCResponse)
-	opaque_key_map := make(map[uint32]string)
-	opaque_seqno_map := make(map[uint32]uint64)
+	lock := &sync.RWMutex{}
+	opaque_keySeqno_map := make(map[uint32][]interface{})
 	waitGrp := &sync.WaitGroup{}
 	receiver_fin_ch := make(chan bool, 1)
 
@@ -1167,7 +1167,7 @@ func (xmem *XmemNozzle) batchGetMeta(bigDoc_map map[string]*base.WrappedMCReques
 
 	//launch the receiver
 	waitGrp.Add(1)
-	go func(count int, finch chan bool, opaque_key_map map[uint32]string, opaque_seqno_map map[uint32]uint64, respMap map[string]*mc.MCResponse, timeout_duration time.Duration, err_list []error, waitGrp *sync.WaitGroup, logger *log.CommonLogger) {
+	go func(count int, finch chan bool, opaque_keySeqno_map map[uint32][]interface{}, respMap map[string]*mc.MCResponse, timeout_duration time.Duration, err_list []error, waitGrp *sync.WaitGroup, logger *log.CommonLogger, lock *sync.RWMutex) {
 		defer waitGrp.Done()
 		ticker := time.NewTicker(timeout_duration)
 		for {
@@ -1194,17 +1194,20 @@ func (xmem *XmemNozzle) batchGetMeta(bigDoc_map map[string]*base.WrappedMCReques
 					err_list = append(err_list, err)
 
 				} else {
-					key, ok := opaque_key_map[response.Opaque]
+					lock.RLock()
+					keySeqno, ok := opaque_keySeqno_map[response.Opaque]
+					lock.RUnlock()
 					if ok {
 						//success
-						respMap[key] = response
-
-						seqno, ok := opaque_seqno_map[response.Opaque]
-						if ok {
+						key, ok1 := keySeqno[0].(string)
+						seqno, ok2 := keySeqno[1].(uint64)
+						if ok1 && ok2 {
 							additionalInfo := make(map[string]interface{})
 							additionalInfo[EVENT_ADDI_DOC_KEY] = key
 							additionalInfo[EVENT_ADDI_SEQNO] = seqno
 							xmem.RaiseEvent(common.GetMetaReceived, nil, xmem, nil, additionalInfo)
+						} else {
+							panic("KeySeqno list is not formated as expected [string, uint64]")
 						}
 					}
 				}
@@ -1217,7 +1220,7 @@ func (xmem *XmemNozzle) batchGetMeta(bigDoc_map map[string]*base.WrappedMCReques
 			}
 		}
 
-	}(len(bigDoc_map), receiver_fin_ch, opaque_key_map, opaque_seqno_map, respMap, 1*time.Second, err_list, waitGrp, xmem.Logger())
+	}(len(bigDoc_map), receiver_fin_ch, opaque_keySeqno_map, respMap, 1*time.Second, err_list, waitGrp, xmem.Logger(), lock)
 
 	var sequence uint16 = uint16(time.Now().UnixNano())
 	reqs_bytes := []byte{}
@@ -1229,8 +1232,9 @@ func (xmem *XmemNozzle) batchGetMeta(bigDoc_map map[string]*base.WrappedMCReques
 		if _, ok := sent_key_map[docKey]; !ok {
 			req := xmem.composeRequestForGetMeta(docKey, originalReq.Req.VBucket, opaque)
 			reqs_bytes = append(reqs_bytes, req.Bytes()...)
-			opaque_key_map[opaque] = docKey
-			opaque_seqno_map[opaque] = originalReq.Seqno
+			lock.Lock()
+			opaque_keySeqno_map[opaque] = []interface{}{docKey, originalReq.Seqno}
+			lock.Unlock()
 			opaque++
 			counter++
 			sent_key_map[docKey] = true

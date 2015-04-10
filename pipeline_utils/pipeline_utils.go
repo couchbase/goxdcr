@@ -3,11 +3,11 @@ package pipeline_utils
 import (
 	"errors"
 	"fmt"
+	"github.com/couchbase/goxdcr/common"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
-	"github.com/couchbase/goxdcr/service_def"
-	"github.com/couchbase/goxdcr/common"
 	"github.com/couchbase/goxdcr/parts"
+	"github.com/couchbase/goxdcr/service_def"
 	"runtime"
 	"time"
 )
@@ -64,7 +64,7 @@ func GetSourceVBListForReplication(cluster_info_svc service_def.ClusterInfoSvc, 
 	}
 
 	for _, node := range nodes {
-		var kvaddr string
+		var kvaddr string = ""
 		var vbnos []uint16
 		// iterate through serverVBMap and look for server addr that starts with "kvHost:"
 		for kvaddr_iter, vbnos_iter := range server_vbmap {
@@ -74,16 +74,18 @@ func GetSourceVBListForReplication(cluster_info_svc service_def.ClusterInfoSvc, 
 				break
 			}
 		}
-		kv_vb_map[kvaddr] = vbnos
+		if kvaddr != "" {
+			kv_vb_map[kvaddr] = vbnos
+		}
 	}
 	return kv_vb_map, nil
 }
 
-func GetSourceVBListPerPipeline (pipeline common.Pipeline) []uint16{
+func GetSourceVBListPerPipeline(pipeline common.Pipeline) []uint16 {
 	ret := []uint16{}
-	sourceNozzles := pipeline.Sources() 
+	sourceNozzles := pipeline.Sources()
 	for _, sourceNozzle := range sourceNozzles {
-		ret = append (ret, sourceNozzle.(*parts.DcpNozzle).GetVBList()...)
+		ret = append(ret, sourceNozzle.(*parts.DcpNozzle).GetVBList()...)
 	}
 	return ret
 }

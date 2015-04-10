@@ -568,12 +568,18 @@ func getPipelineFromPipelineSupevisor(s common.Supervisor) (common.Pipeline, err
 	supervisorId := s.Id()
 	if strings.HasPrefix(supervisorId, base.PipelineSupervisorIdPrefix) {
 		pipelineId := supervisorId[len(base.PipelineSupervisorIdPrefix):]
-		pipeline := pipeline_manager.ReplicationStatus(pipelineId).Pipeline()
-		if pipeline != nil {
-			return pipeline, nil
+		rep_status := pipeline_manager.ReplicationStatus(pipelineId)
+		if rep_status != nil {
+			pipeline := rep_status.Pipeline()
+			if pipeline != nil {
+				return pipeline, nil
+			} else {
+				// should never get here
+				return nil, errors.New(fmt.Sprintf("Internal error. Pipeline, %v, is not found", pipelineId))
+			}
 		} else {
-			// should never get here
-			return nil, errors.New(fmt.Sprintf("Internal error. Pipeline, %v, is not found", pipelineId))
+			logger_rm.Errorf("Replication %v does no longer exist", pipelineId)
+			return nil, errors.New(fmt.Sprintf("Internal error. Replication %v, is not found", pipelineId))
 		}
 	} else {
 		// should never get here
