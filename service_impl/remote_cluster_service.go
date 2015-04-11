@@ -23,6 +23,7 @@ import (
 	"reflect"
 	"strings"
 	"sync"
+	"time"
 )
 
 const (
@@ -82,13 +83,10 @@ func (service *RemoteClusterService) RemoteClusterByUuid(uuid string, refresh bo
 }
 
 func (service *RemoteClusterService) RemoteClusterByRefName(refName string, refresh bool) (*metadata.RemoteClusterReference, error) {
-	service.cache_lock.RLock()
-	defer service.cache_lock.RUnlock()
-
 	var ref *metadata.RemoteClusterReference
-	for _, cache := range service.cache_map {
-		if cache.ref.Name == refName {
-			ref = cache.ref
+	for _, ref_in_cache := range service.RemoteClusterMap() {
+		if ref_in_cache.Name == refName {
+			ref = ref_in_cache
 			break
 		}
 	}
@@ -233,7 +231,9 @@ func (service *RemoteClusterService) RemoteClusters(refresh bool) (map[string]*m
 }
 
 func (service *RemoteClusterService) RemoteClusterMap() map[string]*metadata.RemoteClusterReference {
+	startTime := time.Now()
 	service.cache_lock.RLock()
+	service.logger.Debugf("Acquired lock in RemoteClusterMap(). Time taken=%v", time.Now().Sub(startTime))
 	defer service.cache_lock.RUnlock()
 
 	// make a copy of remote_cluster_map and return it
@@ -257,8 +257,15 @@ func (service *RemoteClusterService) ValidateSetRemoteCluster(refName string, re
 // validate that the remote cluster ref itself is valid, and that it does not collide with existing remote clusters
 // if refName is not empty, collision with existing cluster with refName is allowed since that existing cluster is being updated
 func (service *RemoteClusterService) validateChangeRemoteCluster(ref *metadata.RemoteClusterReference, refName string) error {
+	var oldRef *metadata.RemoteClusterReference
+	var err error
+	if refName != "" {
+		oldRef, err = service.RemoteClusterByRefName(ref.Name, false)
+		if err != nil {
+			return err
+		}
+	}
 
-	oldRef, err := service.RemoteClusterByRefName(ref.Name, false)
 	// collision with the remote cluster ref being updating is fine
 	if oldRef != nil && oldRef.Name != refName {
 		return wrapAsInvalidRemoteClusterError(errors.New("duplicate cluster names are not allowed"))
@@ -422,8 +429,6 @@ func (service *RemoteClusterService) invalidateCache(key string) {
 }
 
 func (service *RemoteClusterService) validateCache(ref *metadata.RemoteClusterReference) error {
-	service.cache_lock.Lock()
-	defer service.cache_lock.Unlock()
 
 	service.logger.Debugf("Remote Cluster reference %v need to be updated", ref.HostName)
 	err := service.cacheRef(ref)
@@ -460,17 +465,27 @@ func (service *RemoteClusterService) cacheRef(ref *metadata.RemoteClusterReferen
 	ref_cache := &remoteClusterCache{key: ref.Id,
 		nodes_connectionstr: nodes_connStrs,
 		ref:                 ref}
-	service.cache_map[ref.Id] = ref_cache
+
+	service.addToCache(ref.Id, ref_cache)
 
 	return err
 }
 
 func (service *RemoteClusterService) getCache(key string) (*remoteClusterCache, bool) {
+	startTime := time.Now()
 	service.cache_lock.RLock()
+	service.logger.Debugf("Acquired lock in getCache(). Time taken=%v", time.Now().Sub(startTime))
 	defer service.cache_lock.RUnlock()
 	cache, ok := service.cache_map[key]
 	return cache, ok
 }
+
+func (service *RemoteClusterService) addToCache(key string, ref_cache *remoteClusterCache) {
+	service.cache_lock.Lock()
+	defer service.cache_lock.Unlock()
+	service.cache_map[key] = ref_cache
+}
+
 
 func (service *RemoteClusterService) refresh(ref *metadata.RemoteClusterReference) (*metadata.RemoteClusterReference, error) {
 	service.logger.Debugf("Refresh remote cluster reference %v\n", ref.Id)
@@ -591,18 +606,16 @@ func (service *RemoteClusterService) RemoteClusterServiceCallback(path string, v
 }
 
 func (service *RemoteClusterService) updateCache(refId string, ref *metadata.RemoteClusterReference) {
-	service.cache_lock.Lock()
-	defer service.cache_lock.Unlock()
 
 	if ref == nil {
 		// remote cluster has been deleted
-		delete(service.cache_map, refId)
+		service.invalidateCache(refId)
 	} else {
 		// remote cluster is created or updated
 		var cached_ref *metadata.RemoteClusterReference
-		old_ref_cache, ok := service.cache_map[ref.Id]
+		ref_cache, ok := service.getCache(ref.Id)
 		if ok {
-			cached_ref = old_ref_cache.ref
+			cached_ref = ref_cache.ref
 		}
 
 		// no need to update cache if passed in ref is the same as the one already in cache
@@ -611,3 +624,4 @@ func (service *RemoteClusterService) updateCache(refId string, ref *metadata.Rem
 		}
 	}
 }
+
