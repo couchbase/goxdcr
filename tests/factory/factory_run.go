@@ -104,7 +104,7 @@ func invokeFactory() error {
 
 	uilog_svc := s.NewUILogSvc(top_svc, nil)
 	remote_cluster_svc := s.NewRemoteClusterService(uilog_svc, msvc, top_svc, cluster_info_svc, nil)
-	repl_spec_svc := s.NewReplicationSpecService(uilog_svc, remote_cluster_svc, msvc, top_svc, nil)
+	repl_spec_svc := s.NewReplicationSpecService(uilog_svc, remote_cluster_svc, msvc, top_svc, cluster_info_svc, nil)
 	checkpoints_svc := s.NewCheckpointsService(msvc, nil)
 	capi_svc := s.NewCAPIService(cluster_info_svc, nil)
 

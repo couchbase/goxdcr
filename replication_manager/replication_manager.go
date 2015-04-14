@@ -443,7 +443,7 @@ func (rm *replicationManager) createAndPersistReplicationSpec(justValidate bool,
 		justValidate, sourceBucket, targetCluster, targetBucket, settings)
 
 	// validate that everything is alright with the replication configuration before actually creating it
-	sourceBucketUUID, targetBucketUUID, targetClusterRef, errorMap := replication_mgr.repl_spec_svc.ValidateNewReplicationSpec(sourceBucket, targetCluster, targetBucket)
+	sourceBucketUUID, targetBucketUUID, targetClusterRef, errorMap := replication_mgr.repl_spec_svc.ValidateNewReplicationSpec(sourceBucket, targetCluster, targetBucket, settings)
 	if len(errorMap) > 0 {
 		return nil, errorMap, nil
 	}

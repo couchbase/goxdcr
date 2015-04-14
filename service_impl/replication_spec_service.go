@@ -36,15 +36,19 @@ type ReplicationSpecService struct {
 	metadata_svc           service_def.MetadataSvc
 	uilog_svc              service_def.UILogSvc
 	remote_cluster_svc     service_def.RemoteClusterSvc
+	cluster_info_svc       service_def.ClusterInfoSvc
 	logger                 *log.CommonLogger
 }
 
-func NewReplicationSpecService(uilog_svc service_def.UILogSvc, remote_cluster_svc service_def.RemoteClusterSvc, metadata_svc service_def.MetadataSvc, xdcr_comp_topology_svc service_def.XDCRCompTopologySvc, logger_ctx *log.LoggerContext) *ReplicationSpecService {
+func NewReplicationSpecService(uilog_svc service_def.UILogSvc, remote_cluster_svc service_def.RemoteClusterSvc,
+	metadata_svc service_def.MetadataSvc, xdcr_comp_topology_svc service_def.XDCRCompTopologySvc, cluster_info_svc service_def.ClusterInfoSvc,
+	logger_ctx *log.LoggerContext) *ReplicationSpecService {
 	return &ReplicationSpecService{
 		metadata_svc:           metadata_svc,
 		uilog_svc:              uilog_svc,
 		remote_cluster_svc:     remote_cluster_svc,
 		xdcr_comp_topology_svc: xdcr_comp_topology_svc,
+		cluster_info_svc:       cluster_info_svc,
 		logger:                 log.NewLogger("ReplicationSpecService", logger_ctx),
 	}
 }
@@ -57,7 +61,7 @@ func (service *ReplicationSpecService) ReplicationSpec(replicationId string) (*m
 	return constructReplicationSpec(result, rev)
 }
 
-func (service *ReplicationSpecService) ValidateNewReplicationSpec(sourceBucket, targetCluster, targetBucket string) (string, string, *metadata.RemoteClusterReference, map[string]error) {
+func (service *ReplicationSpecService) ValidateNewReplicationSpec(sourceBucket, targetCluster, targetBucket string, settings map[string]interface{}) (string, string, *metadata.RemoteClusterReference, map[string]error) {
 	service.logger.Infof("Start ValidateAddReplicationSpec, sourceBucket=%v, targetCluster=%v, targetBucket=%v\n", sourceBucket, targetCluster, targetBucket)
 
 	errorMap := make(map[string]error)
@@ -78,7 +82,7 @@ func (service *ReplicationSpecService) ValidateNewReplicationSpec(sourceBucket, 
 	// validate remote cluster ref
 	targetClusterRef, err := service.remote_cluster_svc.RemoteClusterByRefName(targetCluster, false)
 	if err != nil {
-		errorMap["remote cluster"] = utils.NewEnhancedError("cannot find remote cluster", err)
+		errorMap[base.ToCluster] = utils.NewEnhancedError("cannot find remote cluster", err)
 		return "", "", nil, errorMap
 	}
 
@@ -100,12 +104,12 @@ func (service *ReplicationSpecService) ValidateNewReplicationSpec(sourceBucket, 
 
 	remote_connStr, err := targetClusterRef.MyConnectionStr()
 	if err != nil {
-		errorMap["remote cluster"] = utils.NewEnhancedError("invalid remote cluter, MyConnectionStr() failed.", err)
+		errorMap[base.ToCluster] = utils.NewEnhancedError("invalid remote cluster, MyConnectionStr() failed.", err)
 		return "", "", nil, errorMap
 	}
 	remote_userName, remote_password, err := targetClusterRef.MyCredentials()
 	if err != nil {
-		errorMap["remote cluster"] = utils.NewEnhancedError("invalid remote cluter, MyCredentials() failed.", err)
+		errorMap[base.ToCluster] = utils.NewEnhancedError("invalid remote cluster, MyCredentials() failed.", err)
 		return "", "", nil, errorMap
 	}
 
@@ -120,6 +124,21 @@ func (service *ReplicationSpecService) ValidateNewReplicationSpec(sourceBucket, 
 	_, err = service.ReplicationSpec(repId)
 	if err == nil {
 		errorMap[base.PlaceHolderFieldKey] = errors.New(ReplicationSpecAlreadyExistErrorMessage)
+	}
+
+	// if replication type is set to xmem, validate that the target cluster is xmem compatible
+	repl_type, ok := settings[metadata.ReplicationType]
+	if !ok || repl_type == metadata.ReplicationTypeXmem {
+		xmemCompatible, err := service.cluster_info_svc.IsClusterCompatible(targetClusterRef, []int{2, 2})
+		if err != nil {
+			errMsg := fmt.Sprintf("Failed to get cluster version information, err=%v\n", err)
+			service.logger.Error(errMsg)
+			errorMap[base.ToCluster] = errors.New(errMsg)
+		} else {
+			if !xmemCompatible {
+				errorMap[base.ToCluster] = errors.New("Version 2 replication is disallowed. Cluster has nodes with versions less than 2.2.")
+			}
+		}
 	}
 
 	return sourceBucketUUID, targetBucketUUID, targetClusterRef, errorMap

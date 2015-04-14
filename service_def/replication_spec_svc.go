@@ -16,7 +16,7 @@ import (
 type ReplicationSpecSvc interface {
 	ReplicationSpec(replicationId string) (*metadata.ReplicationSpecification, error)
 	AddReplicationSpec(spec *metadata.ReplicationSpecification) error
-	ValidateNewReplicationSpec(sourceBucket, targetCluster, targetBucket string) (string, string, *metadata.RemoteClusterReference, map[string]error)
+	ValidateNewReplicationSpec(sourceBucket, targetCluster, targetBucket string, settings map[string]interface{}) (string, string, *metadata.RemoteClusterReference, map[string]error)
 	SetReplicationSpec(spec *metadata.ReplicationSpecification) error
 	DelReplicationSpec(replicationId string) (*metadata.ReplicationSpecification, error)
 	AllReplicationSpecs() (map[string]*metadata.ReplicationSpecification, error)

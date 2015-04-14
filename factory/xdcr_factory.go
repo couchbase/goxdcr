@@ -364,22 +364,21 @@ func (xdcrf *XDCRFactory) constructRouter(id string, spec *metadata.ReplicationS
 func (xdcrf *XDCRFactory) getNozzleType(targetClusterRef *metadata.RemoteClusterReference, spec *metadata.ReplicationSpecification) (base.XDCROutgoingNozzleType, error) {
 	switch spec.Settings.RepType {
 	case metadata.ReplicationTypeXmem:
-		xmemCompatible, err := xdcrf.cluster_info_svc.IsClusterCompatible(targetClusterRef, []int{2, 5})
+		xmemCompatible, err := xdcrf.cluster_info_svc.IsClusterCompatible(targetClusterRef, []int{2, 2})
 		if err != nil {
-			xdcrf.logger.Errorf("Failed to get the version information, err=%v\n", err)
+			xdcrf.logger.Errorf("Failed to get cluster version information, err=%v\n", err)
 			return -1, err
 		}
 		if xmemCompatible {
 			return base.Xmem, nil
 		} else {
-			xdcrf.logger.Infof("Using capi nozzle for %v since the node is not xmem compatible\n", targetClusterRef.HostName)
-			return base.Capi, nil
+			return -1, fmt.Errorf("Invalid configuration. Xmem replication type is specified when the target cluster, %v, is not xmem compatible.\n", targetClusterRef.HostName)
 		}
 	case metadata.ReplicationTypeCapi:
 		return base.Capi, nil
 	default:
 		// should never get here
-		return base.Xmem, errors.New(fmt.Sprintf("Invalid replication type %v", spec.Settings.RepType))
+		return -1, errors.New(fmt.Sprintf("Invalid replication type %v", spec.Settings.RepType))
 	}
 }
 
