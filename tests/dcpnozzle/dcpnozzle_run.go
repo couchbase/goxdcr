@@ -94,7 +94,7 @@ func startDcpNozzle(kvaddr string, bucket *couchbase.Bucket, vbList []uint16, nu
 		}
 		dcpVbList = append(dcpVbList, uint16(j))
 	} 
-	dcpNozzle := parts.NewDcpNozzle("test_dcp", bucket, dcpVbList, nil)
+	dcpNozzle := parts.NewDcpNozzle("test_dcp", bucket, dcpVbList, nil, nil)
 	dcpNozzle.SetConnector(NewTestConnector())
 	dcpNozzle.Start(constructStartSettings(dcpNozzle))
 	fmt.Println("DcpNozzle is started")

@@ -14,8 +14,8 @@ import (
 	"fmt"
 	"github.com/couchbase/go-couchbase"
 	mcc "github.com/couchbase/gomemcached/client"
-	base "github.com/couchbase/goxdcr/base"
-	common "github.com/couchbase/goxdcr/common"
+	"github.com/couchbase/goxdcr/base"
+	"github.com/couchbase/goxdcr/common"
 	component "github.com/couchbase/goxdcr/component"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
@@ -99,7 +99,8 @@ type failoverlogWithLock struct {
 
 func NewCheckpointManager(checkpoints_svc service_def.CheckpointsService, capi_svc service_def.CAPIService,
 	remote_cluster_svc service_def.RemoteClusterSvc, rep_spec_svc service_def.ReplicationSpecSvc, cluster_info_svc service_def.ClusterInfoSvc,
-	xdcr_topology_svc service_def.XDCRCompTopologySvc, through_seqno_tracker_svc service_def.ThroughSeqnoTrackerSvc, active_vbs map[string][]uint16, logger_ctx *log.LoggerContext) (*CheckpointManager, error) {
+	xdcr_topology_svc service_def.XDCRCompTopologySvc, through_seqno_tracker_svc service_def.ThroughSeqnoTrackerSvc,
+	active_vbs map[string][]uint16, logger_ctx *log.LoggerContext) (*CheckpointManager, error) {
 	if checkpoints_svc == nil || capi_svc == nil || remote_cluster_svc == nil || rep_spec_svc == nil || cluster_info_svc == nil || xdcr_topology_svc == nil {
 		return nil, errors.New("checkpoints_svc, capi_svc, remote_cluster_svc, rep_spec_svc, cluster_info_svc and xdcr_topology_svc can't be nil")
 	}
@@ -530,18 +531,12 @@ func (ckmgr *CheckpointManager) getFailoverLog(bucket *couchbase.Bucket, listOfV
 }
 
 func (ckmgr *CheckpointManager) getSourceBucket() (*couchbase.Bucket, error) {
-	topic := ckmgr.pipeline.Topic()
-	spec, err := ckmgr.rep_spec_svc.ReplicationSpec(topic)
+	bucket_name := ckmgr.pipeline.Specification().SourceBucketName
+	bucket, err := ckmgr.cluster_info_svc.GetBucket(ckmgr.xdcr_topology_svc, bucket_name)
 	if err != nil {
 		return nil, err
 	}
-	sourcBucketName := spec.SourceBucketName
-
-	bucket, err := ckmgr.cluster_info_svc.GetBucket(ckmgr.xdcr_topology_svc, sourcBucketName)
-	if err != nil {
-		return nil, err
-	}
-	ckmgr.logger.Infof("Got the bucket %v\n", sourcBucketName)
+	ckmgr.logger.Infof("Got the bucket %v for ckmgr\n", bucket_name)
 	return bucket, nil
 }
 

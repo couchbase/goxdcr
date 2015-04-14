@@ -17,11 +17,11 @@ import (
 	"github.com/couchbase/gomemcached"
 	mc "github.com/couchbase/gomemcached"
 	mcc "github.com/couchbase/gomemcached/client"
-	base "github.com/couchbase/goxdcr/base"
-	common "github.com/couchbase/goxdcr/common"
+	"github.com/couchbase/goxdcr/base"
+	"github.com/couchbase/goxdcr/common"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
-	parts "github.com/couchbase/goxdcr/parts"
+	"github.com/couchbase/goxdcr/parts"
 	"github.com/couchbase/goxdcr/pipeline"
 	"github.com/couchbase/goxdcr/pipeline_manager"
 	"github.com/couchbase/goxdcr/pipeline_utils"
@@ -125,6 +125,7 @@ type SampleStats struct {
 //, then stores the result in expvar
 //The result in expvar can be exposed to outside via different channels - log or to ns_server.
 type StatisticsManager struct {
+
 	//a map of registry with the part id as key
 	//the aggregated metrics for the pipeline is the entry with key="Overall"
 	//this map will be exported to expval, but only
@@ -175,11 +176,16 @@ type StatisticsManager struct {
 	kv_mem_clients map[string]*mcc.Client
 
 	through_seqno_tracker_svc service_def.ThroughSeqnoTrackerSvc
+	cluster_info_svc          service_def.ClusterInfoSvc
+	xdcr_topology_svc         service_def.XDCRCompTopologySvc
 }
 
 func NewStatisticsManager(through_seqno_tracker_svc service_def.ThroughSeqnoTrackerSvc,
+	cluster_info_svc service_def.ClusterInfoSvc, xdcr_topology_svc service_def.XDCRCompTopologySvc,
 	logger_ctx *log.LoggerContext, active_vbs map[string][]uint16, bucket_name string) *StatisticsManager {
-	stats_mgr := &StatisticsManager{registries: make(map[string]metrics.Registry),
+	stats_mgr := &StatisticsManager{
+		registries:                make(map[string]metrics.Registry),
+		logger:                    log.NewLogger("StatisticsManager", logger_ctx),
 		bucket_name:               bucket_name,
 		meta_starttime_map:        make(map[string]interface{}),
 		meta_endtime_map:          make(map[string]interface{}),
@@ -190,12 +196,13 @@ func NewStatisticsManager(through_seqno_tracker_svc service_def.ThroughSeqnoTrac
 		update_ticker_ch:          make(chan *time.Ticker, 1000),
 		sample_size:               default_sample_size,
 		update_interval:           default_update_interval,
-		logger:                    log.NewLogger("StatisticsManager", logger_ctx),
 		active_vbs:                active_vbs,
 		wait_grp:                  &sync.WaitGroup{},
 		kv_mem_clients:            make(map[string]*mcc.Client),
 		checkpointed_seqnos:       make(map[uint16]uint64),
-		through_seqno_tracker_svc: through_seqno_tracker_svc}
+		through_seqno_tracker_svc: through_seqno_tracker_svc,
+		cluster_info_svc:          cluster_info_svc,
+		xdcr_topology_svc:         xdcr_topology_svc}
 	stats_mgr.collectors = []MetricsCollector{&outNozzleCollector{}, &dcpCollector{}, &routerCollector{}, &checkpointMgrCollector{}}
 	return stats_mgr
 }
@@ -361,7 +368,6 @@ func (stats_mgr *StatisticsManager) processRawStats() error {
 					}
 					metric_overview := stats_mgr.getOverviewRegistry().Get(name)
 					if metric_overview != nil {
-						stats_mgr.logger.Debugf("Update counter %v by %v in overview registry", name, m.Count())
 						metric_overview.(metrics.Counter).Inc(m.Count())
 					}
 				case metrics.Histogram:
@@ -535,6 +541,7 @@ func (stats_mgr *StatisticsManager) calculateChangesLeft(docs_processed int64) (
 		return 0, err
 	}
 	changes_left := total_changes - docs_processed
+	stats_mgr.logger.Infof("%v total_docs=%v, docs_processed=%v, changes_left=%v\n", total_changes, docs_processed, changes_left)
 	return changes_left, nil
 }
 
@@ -652,6 +659,7 @@ func (stats_mgr *StatisticsManager) Start(settings map[string]interface{}) error
 	} else {
 		stats_mgr.logger.Infof("There is no update_interval in settings map. settings=%v\n", settings)
 	}
+
 	stats_mgr.logger.Debugf("StatisticsManager Starts: update_interval=%v, settings=%v\n", stats_mgr.update_interval, settings)
 	stats_mgr.update_ticker_ch <- time.NewTicker(stats_mgr.update_interval)
 
@@ -1142,4 +1150,13 @@ func getClient(serverAddr, bucketName string, kv_mem_clients map[string]*mcc.Cli
 			return nil, err
 		}
 	}
+}
+
+// get stats update interval based
+func StatsUpdateInterval(settings map[string]interface{}) time.Duration {
+	update_interval := default_update_interval
+	if _, ok := settings[PUBLISH_INTERVAL]; ok {
+		update_interval = settings[PUBLISH_INTERVAL].(time.Duration)
+	}
+	return update_interval
 }

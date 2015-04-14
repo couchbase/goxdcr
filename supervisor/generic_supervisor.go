@@ -355,3 +355,11 @@ func (supervisor *GenericSupervisor) StopHeartBeatTicker() {
 func (supervisor *GenericSupervisor) IsReadyForHeartBeat() bool {
 	return supervisor.IsStarted()
 }
+
+func (supervisor *GenericSupervisor) ChidrenWaitGroup() *sync.WaitGroup {
+	return &supervisor.childrenWaitGrp
+}
+
+func (supervisor *GenericSupervisor) FinishChannel() chan bool {
+	return supervisor.finch
+}

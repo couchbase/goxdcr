@@ -10,15 +10,17 @@
 package pipeline_svc
 
 import (
+	"errors"
+	"fmt"
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/common"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/pipeline"
+	"github.com/couchbase/goxdcr/service_def"
 	"github.com/couchbase/goxdcr/supervisor"
 	"github.com/couchbase/goxdcr/utils"
+	"github.com/couchbase/goxdcr/parts"
 	"reflect"
-	//	"sync"
-	"fmt"
 	"time"
 )
 
@@ -32,6 +34,11 @@ const (
 	CMD_CHANGE_LOG_LEVEL int = 2
 )
 
+const (
+	default_health_check_interval = 15 * time.Second
+	default_max_dcp_miss_count    = 3
+)
+
 var pipeline_supervisor_setting_defs base.SettingDefinitions = base.SettingDefinitions{supervisor.HEARTBEAT_TIMEOUT: base.NewSettingDef(reflect.TypeOf((*time.Duration)(nil)), false),
 	PIPELINE_LOG_LEVEL:            base.NewSettingDef(reflect.TypeOf((*log.LogLevel)(nil)), false),
 	supervisor.HEARTBEAT_INTERVAL: base.NewSettingDef(reflect.TypeOf((*time.Duration)(nil)), false)}
@@ -40,12 +47,19 @@ type PipelineSupervisor struct {
 	*supervisor.GenericSupervisor
 	pipeline    common.Pipeline
 	errors_seen map[string]error
+
+	cluster_info_svc  service_def.ClusterInfoSvc
+	xdcr_topology_svc service_def.XDCRCompTopologySvc
 }
 
-func NewPipelineSupervisor(id string, logger_ctx *log.LoggerContext, failure_handler common.SupervisorFailureHandler, parentSupervisor *supervisor.GenericSupervisor) *PipelineSupervisor {
+func NewPipelineSupervisor(id string, logger_ctx *log.LoggerContext, failure_handler common.SupervisorFailureHandler,
+	parentSupervisor *supervisor.GenericSupervisor, cluster_info_svc service_def.ClusterInfoSvc,
+	xdcr_topology_svc service_def.XDCRCompTopologySvc) *PipelineSupervisor {
 	supervisor := supervisor.NewGenericSupervisor(id, logger_ctx, failure_handler, parentSupervisor)
 	pipelineSupervisor := &PipelineSupervisor{GenericSupervisor: supervisor,
-		errors_seen: make(map[string]error)}
+		errors_seen:       make(map[string]error),
+		cluster_info_svc:  cluster_info_svc,
+		xdcr_topology_svc: xdcr_topology_svc}
 	return pipelineSupervisor
 }
 
@@ -77,6 +91,59 @@ func (pipelineSupervisor *PipelineSupervisor) Attach(p common.Pipeline) error {
 		pipelineSupervisor.Logger().Debugf("Registering ErrorEncountered event on connector %v\n", connector.Id())
 	}
 
+	return nil
+}
+
+func (pipelineSupervisor *PipelineSupervisor) Start(settings map[string]interface{}) error {
+	// when doing health check, we want to wait long enough to ensure that we see bad stats in at least two different stats collection intervals
+	// before we declare the pipeline to be broken
+	var max_dcp_miss_count int
+	stats_update_interval := StatsUpdateInterval(settings)
+	number_of_waits_to_ensure_stats_update := int(stats_update_interval.Nanoseconds()/default_health_check_interval.Nanoseconds()) + 1
+	if number_of_waits_to_ensure_stats_update < default_max_dcp_miss_count {
+		max_dcp_miss_count = default_max_dcp_miss_count
+	} else {
+		max_dcp_miss_count = number_of_waits_to_ensure_stats_update
+	}
+
+	for _, dcp_nozzle := range pipelineSupervisor.pipeline.Sources() {
+		dcp_nozzle.(*parts.DcpNozzle).SetMaxMissCount(max_dcp_miss_count)
+	}
+
+	// do the generic supervisor start stuff
+	err := pipelineSupervisor.GenericSupervisor.Start(settings)
+	if err != nil {
+		return err
+	}
+
+	// start an additional go routine for pipeline health monitoring
+	pipelineSupervisor.GenericSupervisor.ChidrenWaitGroup().Add(1)
+	go pipelineSupervisor.monitorPipelineHealth()
+
+	return err
+}
+
+func (pipelineSupervisor *PipelineSupervisor) monitorPipelineHealth() error {
+	pipelineSupervisor.Logger().Info("monitorPipelineHealth started")
+
+	defer pipelineSupervisor.GenericSupervisor.ChidrenWaitGroup().Done()
+
+	health_check_ticker := time.NewTicker(default_health_check_interval)
+
+	fin_ch := pipelineSupervisor.GenericSupervisor.FinishChannel()
+
+	for {
+		select {
+		case <-fin_ch:
+			pipelineSupervisor.Logger().Infof("monitorPipelineHealth routine is exiting because parent supervisor %v has been stopped\n", pipelineSupervisor.Id())
+			return nil
+		case <-health_check_ticker.C:
+			err := pipelineSupervisor.checkPipelineHealth()
+			if err != nil {
+				return nil
+			}
+		}
+	}
 	return nil
 }
 
@@ -150,4 +217,43 @@ func (pipelineSupervisor *PipelineSupervisor) declarePipelineBroken() {
 		pipelineSupervisor.Logger().Infof("Received error report : %v, but error is ignored. pipeline_state=%v\n", pipelineSupervisor.errors_seen, pipelineSupervisor.pipeline.State())
 
 	}
+}
+
+// check if any runtime stats indicates that pipeline is broken
+func (pipelineSupervisor *PipelineSupervisor) checkPipelineHealth() error {
+	if pipelineSupervisor.pipeline.State() != common.Pipeline_Running && pipelineSupervisor.pipeline.State() != common.Pipeline_Starting {
+		//the pipeline is no longer running, kill myself
+		message := "Pipeline is no longer running, exit."
+		pipelineSupervisor.Logger().Info(message)
+		return errors.New(message)
+	}
+
+	dcp_stats, err := pipelineSupervisor.getDcpStats()
+	if err != nil {
+		pipelineSupervisor.Logger().Error("Failed to get dcp stats. Skipping dcp health check.")
+		return nil
+	}
+
+	for _, dcp_nozzle := range pipelineSupervisor.pipeline.Sources() {
+		err = dcp_nozzle.(*parts.DcpNozzle).CheckDcpHealth(dcp_stats)
+		if err != nil {
+			//declare pipeline broken
+			pipelineSupervisor.errors_seen[dcp_nozzle.Id()] = err
+			pipelineSupervisor.declarePipelineBroken()
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (pipelineSupervisor *PipelineSupervisor) getDcpStats() (map[string]map[string]string, error) {
+	bucket_name := pipelineSupervisor.pipeline.Specification().SourceBucketName
+	bucket, err := pipelineSupervisor.cluster_info_svc.GetBucket(pipelineSupervisor.xdcr_topology_svc, bucket_name)
+	if err != nil {
+		return nil, err
+	}
+	defer bucket.Close()
+
+	return bucket.GetStats(base.DCP_STAT_NAME), nil
 }

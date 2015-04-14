@@ -211,7 +211,7 @@ func (xdcrf *XDCRFactory) constructSourceNozzles(spec *metadata.ReplicationSpeci
 			// partIds of the dcpNozzle nodes look like "dcpNozzle_$kvaddr_1"
 			id := xdcrf.partId(DCP_NOZZLE_NAME_PREFIX, spec.Id, kvaddr, i)
 			dcpNozzle := parts.NewDcpNozzle(id,
-				bucket, vbList, logger_ctx)
+				bucket, vbList, xdcrf.xdcr_topology_svc, logger_ctx)
 			sourceNozzles[dcpNozzle.Id()] = dcpNozzle
 			xdcrf.logger.Debugf("Constructed source nozzle %v with vbList = %v \n", dcpNozzle.Id(), vbList)
 		}
@@ -585,7 +585,8 @@ func (xdcrf *XDCRFactory) registerServices(pipeline common.Pipeline, logger_ctx 
 	ctx := pipeline.RuntimeContext()
 
 	//register pipeline supervisor
-	supervisor := pipeline_svc.NewPipelineSupervisor(base.PipelineSupervisorIdPrefix+pipeline.Topic(), logger_ctx, xdcrf.pipeline_failure_handler, xdcrf.pipeline_master_supervisor)
+	supervisor := pipeline_svc.NewPipelineSupervisor(base.PipelineSupervisorIdPrefix+pipeline.Topic(), logger_ctx,
+		xdcrf.pipeline_failure_handler, xdcrf.pipeline_master_supervisor, xdcrf.cluster_info_svc, xdcrf.xdcr_topology_svc)
 	err := ctx.RegisterService(base.PIPELINE_SUPERVISOR_SVC, supervisor)
 	if err != nil {
 		return err
@@ -605,7 +606,8 @@ func (xdcrf *XDCRFactory) registerServices(pipeline common.Pipeline, logger_ctx 
 	}
 	//register pipeline statistics manager
 	bucket_name := pipeline.Specification().SourceBucketName
-	err = ctx.RegisterService(base.STATISTICS_MGR_SVC, pipeline_svc.NewStatisticsManager(through_seqno_tracker_svc, logger_ctx, kv_vb_map, bucket_name))
+	err = ctx.RegisterService(base.STATISTICS_MGR_SVC, pipeline_svc.NewStatisticsManager(through_seqno_tracker_svc, xdcrf.cluster_info_svc,
+		xdcrf.xdcr_topology_svc, logger_ctx, kv_vb_map, bucket_name))
 	if err != nil {
 		return err
 	}

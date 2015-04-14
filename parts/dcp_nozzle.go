@@ -19,9 +19,12 @@ import (
 	common "github.com/couchbase/goxdcr/common"
 	gen_server "github.com/couchbase/goxdcr/gen_server"
 	"github.com/couchbase/goxdcr/log"
+	"github.com/couchbase/goxdcr/service_def"
 	"github.com/couchbase/goxdcr/utils"
 	"reflect"
+	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -67,7 +70,7 @@ type DcpNozzle struct {
 	// this allows multiple  dcp nozzles to be created for a kv node
 	vbnos []uint16
 
-	vb_stream_status map[uint16]*streamStatusWithLock
+	vb_stream_status      map[uint16]*streamStatusWithLock
 	vb_stream_status_lock *sync.RWMutex
 
 	// immutable fields
@@ -82,16 +85,29 @@ type DcpNozzle struct {
 
 	childrenWaitGrp sync.WaitGroup
 
-	counter             int
+	counter_received uint32
+	counter_sent     uint32
+	// the counter_received stats from last dcp check
+	counter_received_last uint32
+
 	start_time          time.Time
 	handle_error        bool
 	cur_ts              map[uint16]*vbtsWithLock
 	vbtimestamp_updater func(uint16, uint64) (*base.VBTimestamp, error)
+
+	// the number of times that the dcp nozzle did not receive anything from dcp when there are
+	// items remaining in dcp
+	// dcp is considered to be stuck and pipeline broken when this number reaches a limit
+	dcp_miss_count     int
+	max_dcp_miss_count int
+
+	xdcr_topology_svc service_def.XDCRCompTopologySvc
 }
 
 func NewDcpNozzle(id string,
 	bucket *couchbase.Bucket,
 	vbnos []uint16,
+	xdcr_topology_svc service_def.XDCRCompTopologySvc,
 	logger_context *log.LoggerContext) *DcpNozzle {
 
 	//callback functions from GenServer
@@ -104,16 +120,17 @@ func NewDcpNozzle(id string,
 	part := NewAbstractPartWithLogger(id, server.Logger())
 
 	dcp := &DcpNozzle{
-		bucket:           bucket,
-		vbnos:            vbnos,
-		GenServer:        server,           /*gen_server.GenServer*/
-		AbstractPart:     part,             /*AbstractPart*/
-		bOpen:            true,             /*bOpen	bool*/
-		childrenWaitGrp:  sync.WaitGroup{}, /*childrenWaitGrp sync.WaitGroup*/
-		lock_uprFeed:     sync.Mutex{},
-		cur_ts:           make(map[uint16]*vbtsWithLock),
-		vb_stream_status: make(map[uint16]*streamStatusWithLock),
+		bucket:                bucket,
+		vbnos:                 vbnos,
+		GenServer:             server,           /*gen_server.GenServer*/
+		AbstractPart:          part,             /*AbstractPart*/
+		bOpen:                 true,             /*bOpen	bool*/
+		childrenWaitGrp:       sync.WaitGroup{}, /*childrenWaitGrp sync.WaitGroup*/
+		lock_uprFeed:          sync.Mutex{},
+		cur_ts:                make(map[uint16]*vbtsWithLock),
+		vb_stream_status:      make(map[uint16]*streamStatusWithLock),
 		vb_stream_status_lock: &sync.RWMutex{},
+		xdcr_topology_svc:     xdcr_topology_svc,
 	}
 
 	msg_callback_func = nil
@@ -220,7 +237,7 @@ func (dcp *DcpNozzle) Stop() error {
 	dcp.closeUprStreams()
 	dcp.closeUprFeed()
 	dcp.bucket.Close()
-	dcp.Logger().Debugf("DcpNozzle %v processed %v items\n", dcp.Id(), dcp.counter)
+	dcp.Logger().Debugf("DcpNozzle %v received %v items, sent %v items\n", dcp.Id(), dcp.counterReceived(), dcp.counterSent())
 	err = dcp.Stop_server()
 
 	err = dcp.SetState(common.Part_Stopped)
@@ -358,16 +375,17 @@ func (dcp *DcpNozzle) processData() (err error) {
 				if dcp.IsOpen() {
 					switch m.Opcode {
 					case gomemcached.UPR_MUTATION, gomemcached.UPR_DELETION, gomemcached.UPR_EXPIRATION:
-						dcp.counter++
+						dcp.incCounterReceived()
 						dcp.RaiseEvent(common.DataReceived, m, dcp, nil /*derivedItems*/, nil /*otherInfos*/)
 						dcp.Logger().Tracef("%v, Mutation %v:%v:%v <%v>, counter=%v, ops_per_sec=%v\n",
-							dcp.Id(), m.VBucket, m.Seqno, m.Opcode, m.Key, dcp.counter, float64(dcp.counter)/time.Since(dcp.start_time).Seconds())
+							dcp.Id(), m.VBucket, m.Seqno, m.Opcode, m.Key, dcp.counterReceived(), float64(dcp.counterReceived())/time.Since(dcp.start_time).Seconds())
 
 						// forward mutation downstream through connector
 						if err := dcp.Connector().Forward(m); err != nil {
 							dcp.handleGeneralError(err)
 							goto done
 						}
+						dcp.incCounterSent()
 						// raise event for statistics collection
 						dcp.RaiseEvent(common.DataProcessed, m, dcp, nil /*derivedItems*/, nil /*otherInfos*/)
 					default:
@@ -388,7 +406,7 @@ func (dcp *DcpNozzle) onExit() {
 }
 
 func (dcp *DcpNozzle) StatusSummary() string {
-	return fmt.Sprintf("Dcp %v streamed %v items. %v streams inactive", dcp.Id(), dcp.counter, dcp.inactiveDcpStreams())
+	return fmt.Sprintf("Dcp %v received %v items, sent %v items. %v streams inactive", dcp.Id(), dcp.counterReceived(), dcp.counterSent(), dcp.inactiveDcpStreams())
 }
 
 func (dcp *DcpNozzle) handleGeneralError(err error) {
@@ -608,4 +626,91 @@ func (dcp *DcpNozzle) getStreamState(vbno uint16) DcpStreamState {
 	} else {
 		panic(fmt.Sprintf("Try to get stream state to invalid vbno=%v", vbno))
 	}
+}
+
+func (dcp *DcpNozzle) SetMaxMissCount(max_dcp_miss_count int) {
+	dcp.max_dcp_miss_count = max_dcp_miss_count
+}
+
+func (dcp *DcpNozzle) CheckDcpHealth(dcp_stats map[string]map[string]string) error {
+	counter_received := dcp.counterReceived()
+	if counter_received > dcp.counter_received_last {
+		// dcp is ok if received more items from dcp
+		dcp.counter_received_last = counter_received
+		dcp.dcp_miss_count = 0
+		return nil
+	}
+
+	if counter_received > dcp.counterSent() {
+		// if dcp nozzle is holding an item that has not been processed by downstream parts,
+		// cannot declare dcp broken regardless of what other stats say
+		dcp.dcp_miss_count = 0
+		return nil
+	}
+
+	// check if there are items remaining in dcp
+	dcp_has_items := dcp.dcpHasRemainingItemsForXdcr(dcp_stats)
+	if !dcp_has_items {
+		dcp.dcp_miss_count = 0
+		return nil
+	}
+
+	// if we get here, there is probably something wrong with dcp
+	dcp.dcp_miss_count++
+	dcp.Logger().Infof("Incrementing dcp miss count for %v. Dcp miss count = %v\n", dcp.Id(), dcp.dcp_miss_count)
+
+	if dcp.dcp_miss_count > dcp.max_dcp_miss_count {
+		//declare pipeline broken
+		return fmt.Errorf("Dcp is stuck for dcp nozzle %v", dcp.Id())
+	}
+
+	return nil
+
+}
+
+func (dcp *DcpNozzle) dcpHasRemainingItemsForXdcr(dcp_stats map[string]map[string]string) bool {
+	// Each dcp nozzle has an "items_remaining" stats in stats_map.
+	// An example key for the stats is "eq_dcpq:xdcr:dcp_f58e0727200a19771e4459925908dd66/default/target_10.17.2.102:12000_0:items_remaining"
+	xdcr_items_remaining_key := base.DCP_XDCR_STATS_PREFIX + dcp.Id() + base.DCP_XDCR_ITEMS_REMAINING_SUFFIX
+
+	kv_nodes, err := dcp.xdcr_topology_svc.MyKVNodes()
+	if err != nil {
+		panic("Cannot get kv nodes")
+	}
+
+	for _, kv_node := range kv_nodes {
+		per_node_stats_map, ok := dcp_stats[kv_node]
+		if ok {
+			if items_remaining_stats_str, ok := per_node_stats_map[xdcr_items_remaining_key]; ok {
+				items_remaining_stats_int, err := strconv.ParseInt(items_remaining_stats_str, base.ParseIntBase, base.ParseIntBitSize)
+				if err != nil {
+					dcp.Logger().Errorf("Items remaining stats, %v, is not of integer type.", items_remaining_stats_str)
+					continue
+				}
+				if items_remaining_stats_int > 0 {
+					return true
+				}
+			}
+		} else {
+			dcp.Logger().Errorf("Failed to find dcp stats in statsMap returned for server=%v", kv_node)
+		}
+	}
+
+	return false
+}
+
+func (dcp *DcpNozzle) counterReceived() uint32 {
+	return atomic.LoadUint32(&dcp.counter_received)
+}
+
+func (dcp *DcpNozzle) incCounterReceived() {
+	atomic.AddUint32(&dcp.counter_received, 1)
+}
+
+func (dcp *DcpNozzle) counterSent() uint32 {
+	return atomic.LoadUint32(&dcp.counter_sent)
+}
+
+func (dcp *DcpNozzle) incCounterSent() {
+	atomic.AddUint32(&dcp.counter_sent, 1)
 }

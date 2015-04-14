@@ -40,7 +40,7 @@ import (
 
 var logger_rm *log.CommonLogger = log.NewLogger("ReplicationManager", log.DefaultLoggerContext)
 var StatsUpdateIntervalForPausedReplications = 60 * time.Second
-var StatusCheckInterval = 5 * time.Second
+var StatusCheckInterval = 15 * time.Second
 
 var GoXDCROptions struct {
 	SourceKVAdminPort    uint64 //source kv admin port
