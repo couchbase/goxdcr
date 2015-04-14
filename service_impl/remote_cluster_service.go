@@ -134,6 +134,12 @@ func (service *RemoteClusterService) updateRemoteCluster(ref *metadata.RemoteClu
 		return err
 	}
 
+	_, rev, err := service.metadata_svc.Get(key)
+	if err != nil {
+		return err
+	}
+	ref.Revision = rev
+
 	err = service.validateCache(ref)
 
 	return err
@@ -401,6 +407,12 @@ func (service *RemoteClusterService) addRemoteCluster(ref *metadata.RemoteCluste
 	if err != nil {
 		return err
 	}
+
+	_, rev, err := service.metadata_svc.Get(key)
+	if err != nil {
+		return err
+	}
+	ref.Revision = rev
 	err = service.validateCache(ref)
 	return err
 }
@@ -439,6 +451,7 @@ func (service *RemoteClusterService) validateCache(ref *metadata.RemoteClusterRe
 }
 
 func (service *RemoteClusterService) cacheRef(ref *metadata.RemoteClusterReference) error {
+	var bAddToCache bool = true
 	username, password, err := ref.MyCredentials()
 	if err != nil {
 		return err
@@ -459,14 +472,25 @@ func (service *RemoteClusterService) cacheRef(ref *metadata.RemoteClusterReferen
 			}
 		}
 	} else {
+		//keep the old connection string if it is in cache
+		old_cache_val, ok := service.getCache(ref.Id)
+		if ok && old_cache_val != nil {
+			old_ref := old_cache_val.ref
+			if ref.HostName == old_ref.HostName {
+				bAddToCache = false
+			}
+		}
+
 		service.logger.Infof("Remote cluster reference %v has a bad connectivity, didn't populate alternative connection strings. err=%v", ref.Id, err)
 	}
 
-	ref_cache := &remoteClusterCache{key: ref.Id,
-		nodes_connectionstr: nodes_connStrs,
-		ref:                 ref}
+	if bAddToCache {
+		ref_cache := &remoteClusterCache{key: ref.Id,
+			nodes_connectionstr: nodes_connStrs,
+			ref:                 ref}
 
-	service.addToCache(ref.Id, ref_cache)
+		service.addToCache(ref.Id, ref_cache)
+	}
 
 	return err
 }
@@ -485,7 +509,6 @@ func (service *RemoteClusterService) addToCache(key string, ref_cache *remoteClu
 	defer service.cache_lock.Unlock()
 	service.cache_map[key] = ref_cache
 }
-
 
 func (service *RemoteClusterService) refresh(ref *metadata.RemoteClusterReference) (*metadata.RemoteClusterReference, error) {
 	service.logger.Debugf("Refresh remote cluster reference %v\n", ref.Id)
@@ -624,4 +647,3 @@ func (service *RemoteClusterService) updateCache(refId string, ref *metadata.Rem
 		}
 	}
 }
-
