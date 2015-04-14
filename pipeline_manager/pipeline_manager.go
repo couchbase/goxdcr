@@ -23,6 +23,7 @@ import (
 )
 
 var ReplicationSpecNotActive error = errors.New("Replication specification not found or no longer active")
+var ReplicationSpecNotFound error = errors.New("Replication specification not found")
 
 type func_report_fixed func(topic string)
 
@@ -90,9 +91,26 @@ func SetReplicationStatusForPausedReplication(spec *metadata.ReplicationSpecific
 }
 
 func RemoveReplicationStatus(topic string) error {
+	pipeline_mgr.logger.Infof("Removing replication status for %v\n", topic)
+
+	//ask the updater on this topic if any to stop so as to avoid racing condition
+	stopUpdater(topic)
+
+	// stop replication if it is running
+	pipeline_mgr.mapLock.RLock()
+	pipelineRunning := IsPipelineRunning(topic)
+	pipeline_mgr.mapLock.RUnlock()
+	if pipelineRunning {
+		pipeline_mgr.logger.Infof("Stopping pipeline %v since the replication spec has been deleted\n", topic)
+		err := StopPipeline(topic)
+		if err != nil {
+			pipeline_mgr.logger.Infof("Stopping pipeline %v failed with err = %v\n", topic, err)
+		}
+	}
+
+	// now we are ready to actually remove the replication status
 	pipeline_mgr.mapLock.Lock()
 	defer pipeline_mgr.mapLock.Unlock()
-
 	rs := ReplicationStatus(topic)
 	if rs == nil {
 		return utils.ReplicationStatusNotFoundError(topic)
@@ -101,18 +119,18 @@ func RemoveReplicationStatus(topic string) error {
 
 	delete(pipeline_mgr.pipelines_map, topic)
 
-	//ask the updater on this topic if any to stop
-	stopUpdater(topic)
-
 	return nil
 }
 
 func stopUpdater(topic string) {
-	pipeline_mgr.repair_map_lock.Lock()
-	defer pipeline_mgr.repair_map_lock.Unlock()
-	updater := pipeline_mgr.pipeline_pending_for_update[topic]
+	pipeline_mgr.repair_map_lock.RLock()
+	updater, _ := pipeline_mgr.pipeline_pending_for_update[topic]
+	pipeline_mgr.repair_map_lock.RUnlock()
 	if updater != nil {
+		pipeline_mgr.logger.Infof("found updater for %v\n", topic)
 		updater.stop()
+		pipeline_mgr.repair_map_lock.Lock()
+		defer pipeline_mgr.repair_map_lock.Unlock()
 		delete(pipeline_mgr.pipeline_pending_for_update, topic)
 	}
 }
@@ -348,10 +366,16 @@ func (pipelineMgr *pipelineManager) livePipelines() map[string]common.Pipeline {
 	return ret
 }
 
-func (pipelineMgr *pipelineManager) reportFixed(topic string) {
+func (pipelineMgr *pipelineManager) reportFixed(r *pipelineUpdater) error {
 	pipelineMgr.repair_map_lock.Lock()
 	defer pipelineMgr.repair_map_lock.Unlock()
-	delete(pipelineMgr.pipeline_pending_for_update, topic)
+	err := r.updateState(Updater_Done)
+	if err == nil {
+		delete(pipelineMgr.pipeline_pending_for_update, r.pipeline_name)
+		return nil
+	} else {
+		return err
+	}
 }
 
 func (pipelineMgr *pipelineManager) launchUpdater(topic string, cur_err error, rep_status *pipeline.ReplicationStatus) error {
@@ -418,9 +442,12 @@ type pipelineUpdater struct {
 	fin_ch chan bool
 	//update-now channel
 	update_now_ch chan bool
+	// channel indicating whether updater is really done
+	done_ch chan bool
 	//the current error
 	current_error error
 
+	// passed in from and managed by pipeline_manager
 	waitGrp *sync.WaitGroup
 
 	rep_status *pipeline.ReplicationStatus
@@ -441,6 +468,7 @@ func newPipelineUpdater(pipeline_name string, retry_interval int, waitGrp *sync.
 		retry_interval: time.Duration(retry_interval) * time.Second,
 		num_of_retries: 0,
 		fin_ch:         make(chan bool, 1),
+		done_ch:        make(chan bool, 1),
 		waitGrp:        waitGrp,
 		rep_status:     rep_status,
 		logger:         logger,
@@ -453,6 +481,7 @@ func newPipelineUpdater(pipeline_name string, retry_interval int, waitGrp *sync.
 //start the repairer
 func (r *pipelineUpdater) start() {
 	defer r.waitGrp.Done()
+	defer close(r.done_ch)
 
 	if r.current_error == nil {
 		//the update is not initiated from a failure case, so don't wait, update now
@@ -518,8 +547,7 @@ RE:
 
 	if err == nil || err == ReplicationSpecNotActive || err == service_def.MetadataNotFoundErr {
 		r.logger.Infof("Pipeline %v is updated\n", r.pipeline_name)
-		if r.updateState(Updater_Done) == nil {
-			pipeline_mgr.reportFixed(r.pipeline_name)
+		if pipeline_mgr.reportFixed(r) == nil {
 			r.current_error = nil
 			return true
 		}
@@ -539,9 +567,7 @@ func (r *pipelineUpdater) reportStatus() {
 func (r *pipelineUpdater) checkReplicationActiveness() (err error) {
 	spec, err := pipeline_mgr.repl_spec_svc.ReplicationSpec(r.pipeline_name)
 	if err != nil || spec == nil || !spec.Settings.Active {
-		if err == nil && spec != nil {
-			err = ReplicationSpecNotActive
-		}
+		err = ReplicationSpecNotActive
 	} else {
 		r.logger.Debugf("Pipeline %v is not paused or deleted\n", r.pipeline_name)
 	}
@@ -555,7 +581,11 @@ func (r *pipelineUpdater) stop() {
 			r.logger.Infof("Updater for pipeline is already stopped\n", r.pipeline_name)
 		}
 	}()
+
 	close(r.fin_ch)
+
+	// wait for updater to really stop
+	<-r.done_ch
 }
 
 func (r *pipelineUpdater) refreshReplicationStatus(rep_status *pipeline.ReplicationStatus, updateNow bool) {

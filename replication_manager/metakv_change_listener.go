@@ -168,16 +168,6 @@ func (rscl *ReplicationSpecChangeListener) replicationSpecChangeHandlerCallback(
 
 	if newSpec == nil {
 		// replication spec has been deleted
-
-		// stop replication if it is running
-		pipelineRunning := pipeline_manager.IsPipelineRunning(topic)
-		if pipelineRunning {
-			rscl.logger.Infof("Stopping pipeline %v since the replication spec has been deleted\n", topic)
-			err := pipeline_manager.StopPipeline(topic)
-			if err != nil {
-				rscl.logger.Infof("Stopping pipeline %v failed with err = %v, leave it alone\n", topic, err)
-			}
-		}
 		pipeline_manager.RemoveReplicationStatus(topic)
 
 		//delete all checkpoint docs in an async fashion

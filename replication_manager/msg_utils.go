@@ -815,9 +815,6 @@ func processKey(restKey string, valArr []string, settingsPtr *map[string]interfa
 		return errors.New("Setting value cannot be modified after replication is created.")
 	}
 
-	if len(valArr) == 0 || valArr[0] == "" {
-		return nil
-	}
 	convertedValue, err := metadata.ValidateAndConvertSettingsValue(settingsKey, valArr[0], restKey)
 	if err == nil {
 		(*settingsPtr)[settingsKey] = convertedValue

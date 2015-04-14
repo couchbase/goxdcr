@@ -22,24 +22,27 @@ package service_def
 type XDCRCompTopologySvc interface {
 	//the host name that this xdcr comp is running on
 	MyHost() (string, error)
-	
+
 	// the address, ip:couchbaseAdminport, of the host that this xdcr comp is running on
 	// note that ip is the public ip of the host, which may not be the same as what MyHost() returns.
 	// this is used as local cluster address by audit
 	MyHostAddr() (string, error)
-	
+
 	//the address, ip:memcachedport, of the kv that this xdcr comp is running on
 	MyMemcachedAddr() (string, error)
 
 	//the admin port number of this xdcr comp
 	MyAdminPort() (uint16, error)
-	
+
 	//the local proxy port
 	MyProxyPort() (uint16, error)
 
 	//the list of kv nodes (hostname:port) that this xdcr comp is responsible for
 	MyKVNodes() ([]string, error)
-	
+
+	// the uuid of the cluster that this xdcr comp is running on
+	MyClusterUuid() (string, error)
+
 	//is the cluster XDCR is serving of enterprise edition
 	IsMyClusterEnterprise() (bool, error)
 
@@ -51,7 +54,7 @@ type XDCRCompTopologySvc interface {
 	// and the value to be an array of kv node address which the xdcr component would
 	//be responsible for
 	XDCRCompToKVNodeMap() (map[string][]string, error)
-	
+
 	// implements base.ClusterConnectionInfoProvider
 	MyConnectionStr() (string, error)
 	MyCredentials() (string, string, error)

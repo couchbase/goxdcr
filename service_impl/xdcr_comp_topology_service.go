@@ -17,6 +17,7 @@ import (
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/service_def"
 	"github.com/couchbase/goxdcr/utils"
+	"reflect"
 )
 
 var ErrorParsingHostInfo = errors.New("Could not parse current host info from server result.")
@@ -107,12 +108,8 @@ func (top_svc *XDCRTopologySvc) XDCRCompToKVNodeMap() (map[string][]string, erro
 
 // get information about current node from nodeService at /pools/nodes
 func (top_svc *XDCRTopologySvc) getHostInfo() (map[string]interface{}, error) {
-	hostAddr := "http://" + utils.GetHostAddr(base.LocalHostName, top_svc.adminport)
 	var nodesInfo map[string]interface{}
-	if hostAddr == "" {
-		panic("hostAddr can't be empty")
-	}
-	err, statusCode := utils.QueryRestApi(hostAddr, base.NodesPath, false, base.MethodGet, "", nil, 0, &nodesInfo, top_svc.logger)
+	err, statusCode := utils.QueryRestApi(top_svc.staticHostAddr(), base.NodesPath, false, base.MethodGet, "", nil, 0, &nodesInfo, top_svc.logger)
 	if err != nil || statusCode != 200 {
 		return nil, errors.New(fmt.Sprintf("Failed on calling %v, err=%v, statusCode=%v", base.NodesPath, err, statusCode))
 	}
@@ -235,4 +232,31 @@ func (top_svc *XDCRTopologySvc) MyCredentials() (string, string, error) {
 
 func (top_svc *XDCRTopologySvc) MyProxyPort() (uint16, error) {
 	return top_svc.local_proxy_port, nil
+}
+
+func (top_svc *XDCRTopologySvc) MyClusterUuid() (string, error) {
+	var poolsInfo map[string]interface{}
+	err, statusCode := utils.QueryRestApi(top_svc.staticHostAddr(), base.PoolsPath, false, base.MethodGet, "", nil, 0, &poolsInfo, top_svc.logger)
+	if err != nil || statusCode != 200 {
+		return "", errors.New(fmt.Sprintf("Failed on calling %v, err=%v, statusCode=%v", base.PoolsPath, err, statusCode))
+	}
+
+	uuidObj, ok := poolsInfo[base.RemoteClusterUuid]
+	if !ok {
+		return "", errors.New("Could not get uuid of local cluster.")
+	}
+	uuid, ok := uuidObj.(string)
+	if !ok {
+		return "", errors.New(fmt.Sprintf("uuid of local cluster is of wrong type. Expected type: string; Actual type: %s", reflect.TypeOf(uuid)))
+	}
+
+	return uuid, nil
+}
+
+func (top_svc *XDCRTopologySvc) staticHostAddr() string {
+	hostAddr := "http://" + utils.GetHostAddr(base.LocalHostName, top_svc.adminport)
+	if hostAddr == "" {
+		panic("hostAddr can't be empty")
+	}
+	return hostAddr
 }
