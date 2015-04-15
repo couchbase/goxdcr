@@ -8,7 +8,7 @@
 // and limitations under the License.
 
 // metadata service implementation leveraging gometa
-package service_impl
+package metadata_svc
 
 import (
 	"encoding/json"
@@ -31,34 +31,86 @@ var ReplicationSpecAlreadyExistErrorMessage = "Replication to the same remote cl
 var ReplicationSpecNotFoundErrorMessage = "Requested resource not found"
 var InvalidReplicationSpecError = errors.New("Invalid Replication spec")
 
+//replication spec and its derived object
+//This is what is put into the cache
+type ReplicationSpecVal struct {
+	spec       *metadata.ReplicationSpecification
+	derivedObj interface{}
+}
+
 type ReplicationSpecService struct {
 	xdcr_comp_topology_svc service_def.XDCRCompTopologySvc
 	metadata_svc           service_def.MetadataSvc
 	uilog_svc              service_def.UILogSvc
 	remote_cluster_svc     service_def.RemoteClusterSvc
 	cluster_info_svc       service_def.ClusterInfoSvc
+	cache                  *MetadataCache
 	logger                 *log.CommonLogger
 }
 
 func NewReplicationSpecService(uilog_svc service_def.UILogSvc, remote_cluster_svc service_def.RemoteClusterSvc,
 	metadata_svc service_def.MetadataSvc, xdcr_comp_topology_svc service_def.XDCRCompTopologySvc, cluster_info_svc service_def.ClusterInfoSvc,
 	logger_ctx *log.LoggerContext) *ReplicationSpecService {
-	return &ReplicationSpecService{
+	logger := log.NewLogger("ReplicationSpecService", logger_ctx)
+	svc := &ReplicationSpecService{
 		metadata_svc:           metadata_svc,
 		uilog_svc:              uilog_svc,
 		remote_cluster_svc:     remote_cluster_svc,
 		xdcr_comp_topology_svc: xdcr_comp_topology_svc,
 		cluster_info_svc:       cluster_info_svc,
-		logger:                 log.NewLogger("ReplicationSpecService", logger_ctx),
+		cache:                  nil,
+		logger:                 logger,
 	}
+
+	err := svc.initCache()
+	if err != nil {
+		panic (fmt.Sprintf("NewReplicationSpecService failed. err=%v", err))
+	}
+	return svc
+}
+
+func (service *ReplicationSpecService) initCache() error {
+	service.logger.Info("Init cache for ReplicationSpecService...")
+	cache := NewMetadataCache(service.logger)
+
+	entries, err := service.metadata_svc.GetAllMetadataFromCatalog(ReplicationSpecsCatalogKey)
+	if err != nil {
+		service.logger.Errorf("Failed to get all entries, err=%v\n", err)
+		return err
+	}
+
+	for _, entry := range entries {
+		spec, err := constructReplicationSpec(entry.Value, entry.Rev)
+		if err != nil || spec == nil {
+			service.logger.Errorf("failed to contruct replication spec, key=%v, err=%v\n", entry.Key, err)
+			return err
+		}
+		service.cacheSpec(cache, spec.Id, spec)
+	}
+	service.cache = cache
+	service.logger.Info("Cache is initialized for ReplicationSpecService")
+	return nil
+}
+
+func (service *ReplicationSpecService) getCache() (*MetadataCache, error) {
+	if service.cache == nil {
+		return nil, errors.New("Can't instantiate cahe")
+	}
+	return service.cache, nil
 }
 
 func (service *ReplicationSpecService) ReplicationSpec(replicationId string) (*metadata.ReplicationSpecification, error) {
-	result, rev, err := service.metadata_svc.Get(getKeyFromReplicationId(replicationId))
+	cache, err := service.getCache()
 	if err != nil {
 		return nil, err
 	}
-	return constructReplicationSpec(result, rev)
+
+	val, ok := cache.Get(replicationId)
+	if !ok || val == nil || val.(*ReplicationSpecVal).spec == nil {
+		return nil, errors.New(ReplicationSpecNotFoundErrorMessage)
+	}
+
+	return val.(*ReplicationSpecVal).spec, nil
 }
 
 func (service *ReplicationSpecService) ValidateNewReplicationSpec(sourceBucket, targetCluster, targetBucket string, settings map[string]interface{}) (string, string, *metadata.RemoteClusterReference, map[string]error) {
@@ -156,13 +208,24 @@ func (service *ReplicationSpecService) AddReplicationSpec(spec *metadata.Replica
 	}
 
 	service.logger.Info("Adding it to metadata store...")
-	err = service.metadata_svc.AddWithCatalog(ReplicationSpecsCatalogKey, getKeyFromReplicationId(spec.Id), value)
+	key := getKeyFromReplicationId(spec.Id)
+	err = service.metadata_svc.AddWithCatalog(ReplicationSpecsCatalogKey, key, value)
 	if err != nil {
 		return err
 	}
-	service.logger.Info("log it with ale logger...")
+
+	_, rev, err := service.metadata_svc.Get(key)
+	if err != nil {
+		return fmt.Errorf("Failed to query newly added replication spec %v back, err=%v\n", spec.Id, err)
+	}
+	spec.Revision = rev
+	cache, err := service.getCache()
+	if err != nil {
+		panic("cache is not initialized for ReplicationSpecService")
+	}
+	service.cacheSpec(cache, spec.Id, spec)
+
 	service.writeUiLog(spec, "created", "")
-	service.logger.Info("Done with logging...")
 	return nil
 }
 
@@ -171,7 +234,23 @@ func (service *ReplicationSpecService) SetReplicationSpec(spec *metadata.Replica
 	if err != nil {
 		return err
 	}
-	return service.metadata_svc.Set(getKeyFromReplicationId(spec.Id), value, spec.Revision)
+	key := getKeyFromReplicationId(spec.Id)
+	err = service.metadata_svc.Set(key, value, spec.Revision)
+	if err != nil {
+		return err
+	}
+
+	_, rev, err := service.metadata_svc.Get(key)
+	spec.Revision = rev
+	cache, err := service.getCache()
+	if err != nil {
+		panic("cache is not initialized for ReplicationSpecService")
+	}
+	service.cacheSpec(cache, spec.Id, spec)
+
+	service.logger.Infof("replication spec %s is updated, rev=%v\n", rev)
+
+	return nil
 }
 
 func (service *ReplicationSpecService) DelReplicationSpec(replicationId string) (*metadata.ReplicationSpecification, error) {
@@ -184,43 +263,55 @@ func (service *ReplicationSpecService) delReplicationSpec_internal(replicationId
 		return nil, errors.New(ReplicationSpecNotFoundErrorMessage)
 	}
 
-	err = service.metadata_svc.DelWithCatalog(ReplicationSpecsCatalogKey, getKeyFromReplicationId(replicationId), spec.Revision)
+	key := getKeyFromReplicationId(replicationId)
+	err = service.metadata_svc.DelWithCatalog(ReplicationSpecsCatalogKey, key, spec.Revision)
 	if err != nil {
+		service.logger.Errorf("Failed to delete replication spec, key=%v, rev=%v\n", key, spec.Revision)
 		return nil, err
 	}
 
-	service.writeUiLog(spec, "removed", reason)
+	cache, err := service.getCache()
+	if err != nil {
+		return nil, errors.New("Can't instantiate cahe")
+	}
+	
+	//soft remove it from cache by setting SpecVal.spec = nil, but keep the key there 
+	//so that the derived object can still be retrieved and be acted on for cleaning-up.
+	val, ok := cache.Get(key)
+	if ok && val != nil {
+		specVal, ok1 := val.(*ReplicationSpecVal)
+		if ok1 {
+			specVal.spec = nil
+		}
+	}
+	service.writeUiLog(spec, "removed", "")
+
 	return spec, nil
 }
 
 func (service *ReplicationSpecService) AllReplicationSpecs() (map[string]*metadata.ReplicationSpecification, error) {
 	specs := make(map[string]*metadata.ReplicationSpecification, 0)
-
-	entries, err := service.metadata_svc.GetAllMetadataFromCatalog(ReplicationSpecsCatalogKey)
+	cache, err := service.getCache()
 	if err != nil {
-		service.logger.Errorf("Failed to get all entries, err=%v\n", err)
-		return nil, err
+		return nil, errors.New("Can't instantiate cahe")
 	}
-
-	for _, entry := range entries {
-		spec, err := constructReplicationSpec(entry.Value, entry.Rev)
-		if err != nil {
-			return nil, err
+	values_map := cache.GetMap()
+	for key, val := range values_map {
+		if val.(*ReplicationSpecVal).spec != nil {
+			specs[key] = val.(*ReplicationSpecVal).spec
 		}
-		specs[entry.Key] = spec
 	}
-
 	return specs, nil
 }
 
 func (service *ReplicationSpecService) AllReplicationSpecIds() ([]string, error) {
-	repIds := make([]string, 0)
-	keys, err := service.metadata_svc.GetAllKeysFromCatalog(ReplicationSpecsCatalogKey)
+	repIds := []string{}
+	rep_map, err := service.AllReplicationSpecs()
 	if err != nil {
 		return nil, err
 	}
-	for _, key := range keys {
-		repIds = append(repIds, service.getReplicationIdFromKey(key))
+	for key, _ := range rep_map {
+		repIds = append(repIds, key)
 	}
 	return repIds, nil
 }
@@ -266,7 +357,21 @@ func (service *ReplicationSpecService) ReplicationSpecServiceCallback(path strin
 		return "", nil, nil, err
 	}
 
-	return service.getReplicationIdFromKey(GetKeyFromPath(path)), nil, spec, nil
+	repId := service.getReplicationIdFromKey(GetKeyFromPath(path))
+
+	cache, err := service.getCache()
+	if err != nil || cache == nil {
+		return "", nil, nil, err
+	}
+
+	if spec != nil {
+		service.cacheSpec(cache, repId, spec)
+	} else {
+		//the spec is deleted, remove it from the cache
+		service.cacheSpec(cache, repId, nil)
+	}
+
+	return repId, nil, spec, nil
 
 }
 
@@ -415,4 +520,64 @@ func (service *ReplicationSpecService) ConstructNewReplicationSpec(sourceBucketN
 
 	spec := metadata.NewReplicationSpecification(sourceBucketName, sourceBucketUUID, targetClusterUUID, targetBucketName, targetBucketUUID)
 	return spec, nil
+}
+
+func (service *ReplicationSpecService) cacheSpec(cache *MetadataCache, specId string, spec *metadata.ReplicationSpecification) {
+	var cachedObj *ReplicationSpecVal = nil
+	var ok1 bool
+	cachedVal, ok := cache.Get(specId)
+	if ok && cachedVal != nil {
+		cachedObj, ok1 = cachedVal.(*ReplicationSpecVal)
+		if !ok1 || cachedObj == nil {
+			panic("Object in ReplicationSpecServcie cache is not of type *replciationSpecVal")
+		}
+		cachedObj.spec = spec
+	} else {
+		//never being cached before
+		cachedObj = &ReplicationSpecVal{spec: spec}
+	}
+	cache.Upsert(specId, cachedObj)
+}
+
+func (service *ReplicationSpecService) SetDerivedObj(specId string, derivedObj interface{}) error {
+	cache, err := service.getCache()
+	if err != nil {
+		return errors.New("Can't instantiate cahe")
+	}
+
+	cachedVal, ok := cache.Get(specId)
+	if !ok || cachedVal == nil {
+		return fmt.Errorf(ReplicationSpecNotFoundErrorMessage)
+	}
+	cachedObj, ok := cachedVal.(*ReplicationSpecVal)
+	if !ok {
+		panic("Object in ReplicationSpecServcie cache is not of type *replciationSpecVal")
+	}
+	cachedObj.derivedObj = derivedObj
+
+	if cachedObj.spec == nil && cachedObj.derivedObj == nil {
+		//remove it from the cache
+		service.logger.Infof("Remove spec %v from the cache\n", specId)
+		cache.Delete(specId)
+	} else {
+		cache.Upsert(specId, cachedObj)
+	}
+	return nil
+}
+
+func (service *ReplicationSpecService) GetDerviedObj(specId string) (interface{}, error) {
+	cache, err := service.getCache()
+	if err != nil {
+		return nil, errors.New("Can't instantiate cahe")
+	}
+	cachedVal, ok := cache.Get(specId)
+	if !ok || cachedVal == nil {
+		return nil, fmt.Errorf(ReplicationSpecNotFoundErrorMessage)
+	}
+
+	cachedObj, ok := cachedVal.(*ReplicationSpecVal)
+	if !ok || cachedObj == nil {
+		panic("Object in ReplicationSpecServcie cache is not of type *replciationSpecVal")
+	}
+	return cachedObj.derivedObj, nil
 }

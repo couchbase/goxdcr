@@ -18,6 +18,7 @@ import (
 	"github.com/couchbase/goxdcr/metadata"
 	rm "github.com/couchbase/goxdcr/replication_manager"
 	"github.com/couchbase/goxdcr/service_def"
+	"github.com/couchbase/goxdcr/metadata_svc"
 	"github.com/couchbase/goxdcr/service_impl"
 	"github.com/couchbase/goxdcr/tests/common"
 	"github.com/couchbase/goxdcr/utils"
@@ -121,7 +122,7 @@ func teardown() error {
 }
 
 func run_testcase() error {
-	metadata_svc, err := service_impl.NewMetaKVMetadataSvc(log.DefaultLoggerContext)
+	metadatakv_svc, err := metadata_svc.NewMetaKVMetadataSvc(log.DefaultLoggerContext)
 	if err != nil {
 		return err
 	}
@@ -132,7 +133,7 @@ func run_testcase() error {
 		return err
 	}
 
-	remote_cluster_svc := service_impl.NewRemoteClusterService(nil, metadata_svc, top_svc, cluster_info_svc, log.DefaultLoggerContext)
+	remote_cluster_svc := metadata_svc.NewRemoteClusterService(nil, metadatakv_svc, top_svc, cluster_info_svc, log.DefaultLoggerContext)
 	if err != nil {
 		return err
 	}

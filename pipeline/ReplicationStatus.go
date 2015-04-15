@@ -2,12 +2,14 @@ package pipeline
 
 import (
 	"encoding/json"
+	"errors"
 	"expvar"
 	"fmt"
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/common"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
+	"sync"
 	"time"
 )
 
@@ -40,6 +42,8 @@ type PipelineError struct {
 
 type PipelineErrorArray []PipelineError
 
+type ReplicationSpecGetter func(specId string) (*metadata.ReplicationSpecification, error)
+
 func (errArray PipelineErrorArray) String() string {
 	bytes, err := json.Marshal(errArray)
 	if err != nil {
@@ -51,21 +55,26 @@ func (errArray PipelineErrorArray) String() string {
 }
 
 type ReplicationStatus struct {
-	rep_spec *metadata.ReplicationSpecification
-	pipeline common.Pipeline
-	err_list PipelineErrorArray
-	progress string
-	obj_pool *base.MCRequestPool
-	logger   *log.CommonLogger
+	pipeline         common.Pipeline
+	err_list         PipelineErrorArray
+	progress         string
+	logger           *log.CommonLogger
+	specId           string
+	spec_getter      ReplicationSpecGetter
+	pipeline_updater interface{}
+	obj_pool         *base.MCRequestPool
+	Lock             *sync.RWMutex
 }
 
-func NewReplicationStatus(rep_spec *metadata.ReplicationSpecification, logger *log.CommonLogger) *ReplicationStatus {
-	rep_status := &ReplicationStatus{rep_spec: rep_spec,
-		pipeline: nil,
-		logger:   logger,
-		err_list: PipelineErrorArray{},
-		progress: "",
-		obj_pool: base.NewMCRequestPool(rep_spec.Id, 0, logger)}
+func NewReplicationStatus(specId string, spec_getter ReplicationSpecGetter, logger *log.CommonLogger) *ReplicationStatus {
+	rep_status := &ReplicationStatus{specId: specId,
+		pipeline:    nil,
+		logger:      logger,
+		err_list:    PipelineErrorArray{},
+		spec_getter: spec_getter,
+		Lock:        &sync.RWMutex{},
+		obj_pool:    base.NewMCRequestPool(specId, 0, logger),
+		progress:    ""}
 	rep_status.Publish()
 	return rep_status
 }
@@ -76,9 +85,23 @@ func (rs *ReplicationStatus) SetPipeline(pipeline common.Pipeline) {
 	rs.Publish()
 }
 
-func (rs *ReplicationStatus) SetSpec(rep_spec *metadata.ReplicationSpecification) {
-	rs.rep_spec = rep_spec
-	rs.Publish()
+func (rs *ReplicationStatus) Spec() *metadata.ReplicationSpecification {
+	spec, err := rs.spec_getter(rs.specId)
+	if err != nil {
+		rs.logger.Errorf("Invalid replication status %v, failed to retrieve spec. err=%v", rs.specId, err)
+
+	} else if spec == nil {
+		//it is possible that spec is nil. When replication specification is deleted,
+		//ReplicationSpecVal.spec is set to nil, but it is not removed from cached to keep
+		//replication status there so that we have a place to retrieve pipeline and proper action
+		//can be taken, like stop the pipline etc.
+		rs.logger.Infof("Spec=nil for replication status %v, which means replication specification has been deleted.", rs.specId)
+	}
+	return spec
+}
+
+func (rs *ReplicationStatus) RepId() string {
+	return rs.specId
 }
 
 func (rs *ReplicationStatus) AddError(err error) {
@@ -98,9 +121,10 @@ func (rs *ReplicationStatus) AddError(err error) {
 }
 
 func (rs *ReplicationStatus) RuntimeStatus() ReplicationState {
+	spec := rs.Spec()
 	if rs.pipeline != nil && rs.pipeline.State() == common.Pipeline_Running {
 		return Replicating
-	} else if !rs.rep_spec.Settings.Active {
+	} else if spec != nil && !spec.Settings.Active {
 		return Paused
 	} else {
 		return Pending
@@ -111,10 +135,10 @@ func (rs *ReplicationStatus) RuntimeStatus() ReplicationState {
 func (rs *ReplicationStatus) Storage() *expvar.Map {
 	var rep_map *expvar.Map
 	root_map := rootStorage()
-	rep_map_var := root_map.Get(rs.rep_spec.Id)
+	rep_map_var := root_map.Get(rs.specId)
 	if rep_map_var == nil {
 		rep_map = new(expvar.Map).Init()
-		root_map.Set(rs.rep_spec.Id, rep_map)
+		root_map.Set(rs.specId, rep_map)
 	} else {
 		rep_map = rep_map_var.(*expvar.Map)
 	}
@@ -176,7 +200,7 @@ func rootStorage() *expvar.Map {
 
 func (rs *ReplicationStatus) ResetStorage() {
 	root_map := rootStorage()
-	root_map.Set(rs.rep_spec.Id, nil)
+	root_map.Set(rs.specId, nil)
 }
 
 func (rs *ReplicationStatus) Publish() {
@@ -210,16 +234,23 @@ func (rs *ReplicationStatus) Pipeline() common.Pipeline {
 	return rs.pipeline
 }
 
-func (rs *ReplicationStatus) Spec() *metadata.ReplicationSpecification {
-	return rs.rep_spec
-}
-
 func (rs *ReplicationStatus) SettingsMap() map[string]interface{} {
-	return rs.rep_spec.Settings.ToMap()
+	settings := rs.Settings()
+	if settings != nil {
+		return settings.ToMap()
+	} else {
+		//empty map
+		return make(map[string]interface{})
+	}
 }
 
 func (rs *ReplicationStatus) Settings() *metadata.ReplicationSettings {
-	return rs.rep_spec.Settings
+	spec := rs.Spec()
+	if spec != nil {
+		return spec.Settings
+	} else {
+		return nil
+	}
 }
 
 func (rs *ReplicationStatus) Errors() PipelineErrorArray {
@@ -236,7 +267,19 @@ func (rs *ReplicationStatus) RecordProgress(progress string) {
 }
 
 func (rs *ReplicationStatus) String() string {
-	return fmt.Sprintf("name={%v}, status={%v}, errors={%v}, progress={%v}, request_pool={%v}\n", rs.rep_spec.Id, rs.RuntimeStatus(), rs.Errors(), rs.progress, rs.obj_pool)
+	return fmt.Sprintf("name={%v}, status={%v}, errors={%v}, progress={%v}\n", rs.specId, rs.RuntimeStatus(), rs.Errors(), rs.progress)
+}
+
+func (rs *ReplicationStatus) Updater() interface{} {
+	return rs.pipeline_updater
+}
+
+func (rs *ReplicationStatus) SetUpdater(updater interface{}) error {
+	if rs.pipeline_updater != nil && updater != nil {
+		return errors.New("There is already an updater in place, can't set the updater")
+	}
+	rs.pipeline_updater = updater
+	return nil
 }
 
 func (rs *ReplicationStatus) ObjectPool() *base.MCRequestPool {

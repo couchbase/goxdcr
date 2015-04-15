@@ -17,10 +17,11 @@ import (
 	"github.com/couchbase/goxdcr/common"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
+	"github.com/couchbase/goxdcr/metadata_svc"
 	"github.com/couchbase/goxdcr/parts"
 	"github.com/couchbase/goxdcr/pipeline_manager"
 	"github.com/couchbase/goxdcr/replication_manager"
-	s "github.com/couchbase/goxdcr/service_impl"
+	"github.com/couchbase/goxdcr/service_impl"
 	testcommon "github.com/couchbase/goxdcr/tests/common"
 	"github.com/couchbase/goxdcr/utils"
 	"net/http"
@@ -115,8 +116,8 @@ func main() {
 
 func setup() error {
 	logger.Info("setup....")
-	cluster_info_svc := s.NewClusterInfoSvc(nil)
-	top_svc, err := s.NewXDCRTopologySvc(uint16(options.source_kv_port), base.AdminportNumber, 11997, true, cluster_info_svc, nil)
+	cluster_info_svc := service_impl.NewClusterInfoSvc(nil)
+	top_svc, err := service_impl.NewXDCRTopologySvc(uint16(options.source_kv_port), base.AdminportNumber, 11997, true, cluster_info_svc, nil)
 	if err != nil {
 		logger.Errorf("Error starting xdcr topology service. err=%v\n", err)
 		os.Exit(1)
@@ -130,26 +131,26 @@ func setup() error {
 
 	options.source_cluster_addr = utils.GetHostAddr(options.source_kv_host, uint16(options.source_kv_port))
 
-	metadata_svc, err := s.NewMetaKVMetadataSvc(nil)
+	metakv_svc, err := metadata_svc.NewMetaKVMetadataSvc(nil)
 	if err != nil {
 		fmt.Printf("Error creating metadata service. err=%v\n", err)
 		os.Exit(1)
 	}
 
-	audit_svc, err := s.NewAuditSvc(top_svc, nil)
+	audit_svc, err := service_impl.NewAuditSvc(top_svc, nil)
 	if err != nil {
 		fmt.Printf("Error starting audit service. err=%v\n", err)
 		os.Exit(1)
 	}
 
-	uilog_svc := s.NewUILogSvc(top_svc, nil)
-	remote_cluster_svc := s.NewRemoteClusterService(uilog_svc, metadata_svc, top_svc, cluster_info_svc, nil)
-	repl_spec_svc := s.NewReplicationSpecService(uilog_svc, remote_cluster_svc, metadata_svc, top_svc, cluster_info_svc, nil)
+	uilog_svc := service_impl.NewUILogSvc(top_svc, nil)
+	remote_cluster_svc := metadata_svc.NewRemoteClusterService(uilog_svc, metakv_svc, top_svc, cluster_info_svc, nil)
+	repl_spec_svc := metadata_svc.NewReplicationSpecService(uilog_svc, remote_cluster_svc, metakv_svc, top_svc, cluster_info_svc, nil)
 
 	replication_manager.StartReplicationManager(options.source_kv_host, base.AdminportNumber,
 		repl_spec_svc, remote_cluster_svc,
-		cluster_info_svc, top_svc, s.NewReplicationSettingsSvc(metadata_svc, nil),
-		s.NewCheckpointsService(metadata_svc, nil), s.NewCAPIService(cluster_info_svc, nil),
+		cluster_info_svc, top_svc, metadata_svc.NewReplicationSettingsSvc(metakv_svc, nil),
+		metadata_svc.NewCheckpointsService(metakv_svc, nil), service_impl.NewCAPIService(cluster_info_svc, nil),
 		audit_svc, uilog_svc)
 
 	logger.Info("Finish setup")

@@ -8,7 +8,7 @@
 // and limitations under the License.
 
 // metadata service implementation leveraging metakv
-package service_impl
+package metadata_svc
 
 import (
 	"fmt"

@@ -18,7 +18,7 @@ import (
 	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/goxdcr/pipeline_manager"
 	"github.com/couchbase/goxdcr/service_def"
-	"github.com/couchbase/goxdcr/service_impl"
+	"github.com/couchbase/goxdcr/metadata_svc"
 	"sync"
 )
 
@@ -141,7 +141,7 @@ func NewReplicationSpecChangeListener(repl_spec_svc service_def.ReplicationSpecS
 	logger_ctx *log.LoggerContext) *ReplicationSpecChangeListener {
 	rscl := &ReplicationSpecChangeListener{
 		NewMetakvChangeListener(base.ReplicationSpecChangeListener,
-			service_impl.GetCatalogPathFromCatalogKey(service_impl.ReplicationSpecsCatalogKey),
+			metadata_svc.GetCatalogPathFromCatalogKey(metadata_svc.ReplicationSpecsCatalogKey),
 			cancel_chan,
 			children_waitgrp,
 			repl_spec_svc.ReplicationSpecServiceCallback,
@@ -288,7 +288,7 @@ func NewRemoteClusterChangeListener(remote_cluster_svc service_def.RemoteCluster
 	logger_ctx *log.LoggerContext) *RemoteClusterChangeListener {
 	rccl := &RemoteClusterChangeListener{
 		NewMetakvChangeListener(base.RemoteClusterChangeListener,
-			service_impl.GetCatalogPathFromCatalogKey(service_impl.RemoteClustersCatalogKey),
+			metadata_svc.GetCatalogPathFromCatalogKey(metadata_svc.RemoteClustersCatalogKey),
 			cancel_chan,
 			children_waitgrp,
 			remote_cluster_svc.RemoteClusterServiceCallback,

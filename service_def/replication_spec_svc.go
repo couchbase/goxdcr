@@ -35,4 +35,11 @@ type ReplicationSpecSvc interface {
 
 	// being used by unit tests only
 	ConstructNewReplicationSpec(sourceBucketName, targetClusterUUID, targetBucketName string) (*metadata.ReplicationSpecification, error)
+
+	//get the derived object (i.e. ReplicationStatus) for the specification
+	//this is used to keep the derived object and replication spec in the same cache
+	GetDerviedObj(specId string) (interface{}, error)
+
+	//set the derived object (i.e ReplicationStatus) for the specification
+	SetDerivedObj(specId string, derivedObj interface{}) error
 }

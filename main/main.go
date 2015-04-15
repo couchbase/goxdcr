@@ -15,7 +15,8 @@ import (
 	base "github.com/couchbase/goxdcr/base"
 	log "github.com/couchbase/goxdcr/log"
 	rm "github.com/couchbase/goxdcr/replication_manager"
-	s "github.com/couchbase/goxdcr/service_impl"
+	"github.com/couchbase/goxdcr/metadata_svc"
+	"github.com/couchbase/goxdcr/service_impl"
 	"os"
 	"runtime"
 )
@@ -76,9 +77,9 @@ func main() {
 		log.Init(options.logFileDir, options.maxLogFileSize, options.maxNumberOfLogFiles)
 	}
 
-	cluster_info_svc := s.NewClusterInfoSvc(nil)
+	cluster_info_svc := service_impl.NewClusterInfoSvc(nil)
 
-	top_svc, err := s.NewXDCRTopologySvc(uint16(options.sourceKVAdminPort), uint16(options.xdcrRestPort), uint16(options.sslProxyUpstreamPort), options.isEnterprise, cluster_info_svc, nil)
+	top_svc, err := service_impl.NewXDCRTopologySvc(uint16(options.sourceKVAdminPort), uint16(options.xdcrRestPort), uint16(options.sslProxyUpstreamPort), options.isEnterprise, cluster_info_svc, nil)
 	if err != nil {
 		fmt.Printf("Error starting xdcr topology service. err=%v\n", err)
 		os.Exit(1)
@@ -87,13 +88,13 @@ func main() {
 	host := base.LocalHostName
 
 	//metadata_svc, err := s.NewMetadataSvc(utils.GetHostAddr(host, uint16(options.gometaRequestPort)), nil)
-	metadata_svc, err := s.NewMetaKVMetadataSvc(nil)
+	metakv_svc, err := metadata_svc.NewMetaKVMetadataSvc(nil)
 	if err != nil {
 		fmt.Printf("Error starting metadata service. err=%v\n", err)
 		os.Exit(1)
 	}
 
-	audit_svc, err := s.NewAuditSvc(top_svc, nil)
+	audit_svc, err := service_impl.NewAuditSvc(top_svc, nil)
 	if err != nil {
 		fmt.Printf("Error starting audit service. err=%v\n", err)
 		os.Exit(1)
@@ -101,11 +102,11 @@ func main() {
 
 	if options.isConvert {
 		// disable uilogging during upgrade by specifying a nil uilog service
-		remote_cluster_svc := s.NewRemoteClusterService(nil, metadata_svc, top_svc, cluster_info_svc, nil)
-		migration_svc := s.NewMigrationSvc(top_svc, remote_cluster_svc,
-			s.NewReplicationSpecService(nil, remote_cluster_svc, metadata_svc, top_svc, cluster_info_svc, nil),
-			s.NewReplicationSettingsSvc(metadata_svc, nil),
-			s.NewCheckpointsService(metadata_svc, nil),
+		remote_cluster_svc := metadata_svc.NewRemoteClusterService(nil, metakv_svc, top_svc, cluster_info_svc, nil)
+		migration_svc := service_impl.NewMigrationSvc(top_svc, remote_cluster_svc,
+			metadata_svc.NewReplicationSpecService(nil, remote_cluster_svc, metakv_svc, top_svc, cluster_info_svc, nil),
+			metadata_svc.NewReplicationSettingsSvc(metakv_svc, nil),
+			metadata_svc.NewCheckpointsService(metakv_svc, nil),
 			nil)
 		err = migration_svc.Migrate()
 		if err == nil {
@@ -114,18 +115,18 @@ func main() {
 			os.Exit(1)
 		}
 	} else {
-		uilog_svc := s.NewUILogSvc(top_svc, nil)
-		remote_cluster_svc := s.NewRemoteClusterService(uilog_svc, metadata_svc, top_svc, cluster_info_svc, nil)
+		uilog_svc := service_impl.NewUILogSvc(top_svc, nil)
+		remote_cluster_svc := metadata_svc.NewRemoteClusterService(uilog_svc, metakv_svc, top_svc, cluster_info_svc, nil)
 		// start replication manager in normal mode
 		rm.StartReplicationManager(host,
 			uint16(options.xdcrRestPort),
-			s.NewReplicationSpecService(uilog_svc, remote_cluster_svc, metadata_svc, top_svc, cluster_info_svc, nil),
+			metadata_svc.NewReplicationSpecService(uilog_svc, remote_cluster_svc, metakv_svc, top_svc, cluster_info_svc, nil),
 			remote_cluster_svc,
 			cluster_info_svc,
 			top_svc,
-			s.NewReplicationSettingsSvc(metadata_svc, nil),
-			s.NewCheckpointsService(metadata_svc, nil),
-			s.NewCAPIService(cluster_info_svc, nil),
+			metadata_svc.NewReplicationSettingsSvc(metakv_svc, nil),
+			metadata_svc.NewCheckpointsService(metakv_svc, nil),
+			service_impl.NewCAPIService(cluster_info_svc, nil),
 			audit_svc,
 			uilog_svc)
 

@@ -10,7 +10,8 @@ import (
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/parts"
 	"github.com/couchbase/goxdcr/replication_manager"
-	s "github.com/couchbase/goxdcr/service_impl"
+	"github.com/couchbase/goxdcr/metadata_svc"
+	"github.com/couchbase/goxdcr/service_impl"
 	"github.com/couchbase/goxdcr/tests/common"
 	"os"
 )
@@ -76,9 +77,9 @@ func main() {
 }
 
 func invokeFactory() error {
-	cluster_info_svc := s.NewClusterInfoSvc(nil)
+	cluster_info_svc := service_impl.NewClusterInfoSvc(nil)
 
-	top_svc, err := s.NewXDCRTopologySvc(uint16(options.sourceKVAdminPort), base.AdminportNumber, 12001, true, cluster_info_svc, nil)
+	top_svc, err := service_impl.NewXDCRTopologySvc(uint16(options.sourceKVAdminPort), base.AdminportNumber, 12001, true, cluster_info_svc, nil)
 	if err != nil {
 		fmt.Printf("Error starting xdcr topology service. err=%v\n", err)
 		os.Exit(1)
@@ -90,28 +91,28 @@ func invokeFactory() error {
 		os.Exit(1)
 	}
 
-	msvc, err := s.NewMetaKVMetadataSvc(nil)
+	msvc, err := metadata_svc.NewMetaKVMetadataSvc(nil)
 	if err != nil {
 		fmt.Printf("Error creating metadata service. err=%v\n", err)
 		os.Exit(1)
 	}
 
-	audit_svc, err := s.NewAuditSvc(top_svc, nil)
+	audit_svc, err := service_impl.NewAuditSvc(top_svc, nil)
 	if err != nil {
 		fmt.Printf("Error starting audit service. err=%v\n", err)
 		os.Exit(1)
 	}
 
-	uilog_svc := s.NewUILogSvc(top_svc, nil)
-	remote_cluster_svc := s.NewRemoteClusterService(uilog_svc, msvc, top_svc, cluster_info_svc, nil)
-	repl_spec_svc := s.NewReplicationSpecService(uilog_svc, remote_cluster_svc, msvc, top_svc, cluster_info_svc, nil)
-	checkpoints_svc := s.NewCheckpointsService(msvc, nil)
-	capi_svc := s.NewCAPIService(cluster_info_svc, nil)
+	uilog_svc := service_impl.NewUILogSvc(top_svc, nil)
+	remote_cluster_svc := metadata_svc.NewRemoteClusterService(uilog_svc, msvc, top_svc, cluster_info_svc, nil)
+	repl_spec_svc := metadata_svc.NewReplicationSpecService(uilog_svc, remote_cluster_svc, msvc, top_svc, cluster_info_svc, nil)
+	checkpoints_svc := metadata_svc.NewCheckpointsService(msvc, nil)
+	capi_svc := service_impl.NewCAPIService(cluster_info_svc, nil)
 
 	replication_manager.StartReplicationManager(options.sourceKVHost, base.AdminportNumber,
 		repl_spec_svc,
 		remote_cluster_svc,
-		cluster_info_svc, top_svc, s.NewReplicationSettingsSvc(msvc, nil), checkpoints_svc, capi_svc, audit_svc, uilog_svc)
+		cluster_info_svc, top_svc, metadata_svc.NewReplicationSettingsSvc(msvc, nil), checkpoints_svc, capi_svc, audit_svc, uilog_svc)
 
 	fac := factory.NewXDCRFactory(repl_spec_svc, remote_cluster_svc, cluster_info_svc, top_svc, checkpoints_svc, capi_svc, uilog_svc, log.DefaultLoggerContext, log.DefaultLoggerContext, nil, nil)
 

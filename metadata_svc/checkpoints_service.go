@@ -1,4 +1,4 @@
-package service_impl
+package metadata_svc
 
 import (
 	"encoding/json"

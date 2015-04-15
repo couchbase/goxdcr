@@ -8,7 +8,7 @@
 // and limitations under the License.
 
 // metadata service implementation leveraging gometa
-package service_impl
+package metadata_svc
 
 import (
 	"encoding/json"
@@ -22,8 +22,6 @@ import (
 	"net/http"
 	"reflect"
 	"strings"
-	"sync"
-	"time"
 )
 
 const (
@@ -35,43 +33,91 @@ var InvalidRemoteClusterOperationErrorMessage = "Invalid remote cluster operatio
 var InvalidRemoteClusterErrorMessage = "Invalid remote cluster. "
 var UnknownRemoteClusterErrorMessage = "unknown remote cluster"
 
-type remoteClusterCache struct {
+type remoteClusterVal struct {
 	key                 string
 	nodes_connectionstr []string
 	ref                 *metadata.RemoteClusterReference
 }
 
 type RemoteClusterService struct {
-	metadata_svc      service_def.MetadataSvc
+	metakv_svc        service_def.MetadataSvc
 	uilog_svc         service_def.UILogSvc
 	xdcr_topology_svc service_def.XDCRCompTopologySvc
 	cluster_info_svc  service_def.ClusterInfoSvc
 	logger            *log.CommonLogger
-	cache_lock        *sync.RWMutex
-	cache_map         map[string]*remoteClusterCache
+	cache             *MetadataCache
 }
 
-func NewRemoteClusterService(uilog_svc service_def.UILogSvc, metadata_svc service_def.MetadataSvc, xdcr_topology_svc service_def.XDCRCompTopologySvc, cluster_info_svc service_def.ClusterInfoSvc, logger_ctx *log.LoggerContext) *RemoteClusterService {
-	return &RemoteClusterService{
-		metadata_svc:      metadata_svc,
-		cache_lock:        &sync.RWMutex{},
-		cache_map:         make(map[string]*remoteClusterCache),
+func NewRemoteClusterService(uilog_svc service_def.UILogSvc, metakv_svc service_def.MetadataSvc, xdcr_topology_svc service_def.XDCRCompTopologySvc, cluster_info_svc service_def.ClusterInfoSvc, logger_ctx *log.LoggerContext) *RemoteClusterService {
+	logger := log.NewLogger("RemoteClusterService", logger_ctx)
+	svc := &RemoteClusterService{
+		metakv_svc:        metakv_svc,
 		uilog_svc:         uilog_svc,
 		xdcr_topology_svc: xdcr_topology_svc,
 		cluster_info_svc:  cluster_info_svc,
-		logger:            log.NewLogger("RemoteClusterService", logger_ctx),
+		cache:             nil,
+		logger:            logger,
 	}
+
+	err := svc.initCache()
+	if err != nil {
+		panic(fmt.Sprintf("NewRemoteClusterService failed, err=%v", err))
+	}
+	return svc
 }
 
-func (service *RemoteClusterService) RemoteClusterByRefId(refId string, refresh bool) (*metadata.RemoteClusterReference, error) {
-	cache, ok := service.getCache(refId)
-	if !ok {
+//fill the cache the first time
+func (service *RemoteClusterService) initCache() error {
+	service.cache = NewMetadataCache(service.logger)
+
+	entries, err := service.metakv_svc.GetAllMetadataFromCatalog(RemoteClustersCatalogKey)
+	if err != nil {
+		service.logger.Errorf("Failed to get all entries, err=%v\n", err)
+		service.cache = nil
+		return err
+	}
+
+	for _, entry := range entries {
+		ref, err := service.constructRemoteClusterReference(entry.Value, entry.Rev)
+		if err != nil {
+			service.cache = nil
+			return err
+		}
+		service.cacheRef(ref)
+	}
+	return nil
+
+}
+
+func (service *RemoteClusterService) getCache() (*MetadataCache, error) {
+	if service.cache == nil {
+		return nil, errors.New("Can't instantiate cahe")
+	}
+	return service.cache, nil
+}
+
+func (service *RemoteClusterService) getCacheVal(refId string) (*remoteClusterVal, error) {
+	cache, err := service.getCache()
+	if err != nil {
+		return nil, err
+	}
+
+	val, ok := cache.Get(refId)
+	if !ok || val == nil {
 		return nil, errors.New(UnknownRemoteClusterErrorMessage)
 	}
 
-	ref := cache.ref
+	return val.(*remoteClusterVal), nil
+}
 
+func (service *RemoteClusterService) RemoteClusterByRefId(refId string, refresh bool) (*metadata.RemoteClusterReference, error) {
 	var err error
+	val, err := service.getCacheVal(refId)
+	if err != nil && val == nil {
+		return nil, errors.New(UnknownRemoteClusterErrorMessage)
+	}
+
+	ref := val.ref
 	if refresh {
 		ref, err = service.refresh(ref)
 	}
@@ -81,7 +127,11 @@ func (service *RemoteClusterService) RemoteClusterByRefId(refId string, refresh 
 
 func (service *RemoteClusterService) RemoteClusterByRefName(refName string, refresh bool) (*metadata.RemoteClusterReference, error) {
 	var ref *metadata.RemoteClusterReference
-	for _, ref_in_cache := range service.RemoteClusterMap() {
+	ref_map, err := service.RemoteClusterMap()
+	if err != nil {
+		return nil, err
+	}
+	for _, ref_in_cache := range ref_map {
 		if ref_in_cache.Name == refName {
 			ref = ref_in_cache
 			break
@@ -101,7 +151,12 @@ func (service *RemoteClusterService) RemoteClusterByRefName(refName string, refr
 
 func (service *RemoteClusterService) RemoteClusterByUuid(uuid string, refresh bool) (*metadata.RemoteClusterReference, error) {
 	var ref *metadata.RemoteClusterReference
-	for _, ref_in_cache := range service.RemoteClusterMap() {
+	remote_cluster_map, err := service.RemoteClusterMap()
+	if err != nil {
+		return nil, err
+	}
+
+	for _, ref_in_cache := range remote_cluster_map {
 		if ref_in_cache.Uuid == uuid {
 			ref = ref_in_cache
 			break
@@ -146,18 +201,18 @@ func (service *RemoteClusterService) updateRemoteCluster(ref *metadata.RemoteClu
 		return err
 	}
 	service.logger.Debugf("Remote cluster being changed: key=%v, value=%v\n", key, string(value))
-	err = service.metadata_svc.Set(key, value, revision)
+	err = service.metakv_svc.Set(key, value, revision)
 	if err != nil {
 		return err
 	}
 
-	_, rev, err := service.metadata_svc.Get(key)
+	_, rev, err := service.metakv_svc.Get(key)
 	if err != nil {
 		return err
 	}
 	ref.Revision = rev
 
-	service.validateCache(ref)
+	service.cacheRef(ref)
 
 	return nil
 }
@@ -204,12 +259,16 @@ func (service *RemoteClusterService) DelRemoteCluster(refName string) (*metadata
 
 	key := ref.Id
 
-	err = service.metadata_svc.DelWithCatalog(RemoteClustersCatalogKey, key, ref.Revision)
+	err = service.metakv_svc.DelWithCatalog(RemoteClustersCatalogKey, key, ref.Revision)
 	if err != nil {
 		return nil, err
 	}
 
-	service.invalidateCache(key)
+	cache, err := service.getCache()
+	if err != nil {
+		return nil, err
+	}
+	cache.Delete(key)
 
 	if service.uilog_svc != nil {
 		uiLogMsg := fmt.Sprintf("Remote cluster reference \"%s\" known via %s removed.", ref.Name, ref.HostName)
@@ -221,7 +280,10 @@ func (service *RemoteClusterService) DelRemoteCluster(refName string) (*metadata
 func (service *RemoteClusterService) RemoteClusters(refresh bool) (map[string]*metadata.RemoteClusterReference, error) {
 	service.logger.Debugf("Getting remote clusters")
 
-	remote_cluster_map := service.RemoteClusterMap()
+	remote_cluster_map, err := service.RemoteClusterMap()
+	if err != nil {
+		return remote_cluster_map, err
+	}
 
 	if refresh {
 		for key, ref := range remote_cluster_map {
@@ -239,18 +301,18 @@ func (service *RemoteClusterService) RemoteClusters(refresh bool) (map[string]*m
 	return remote_cluster_map, nil
 }
 
-func (service *RemoteClusterService) RemoteClusterMap() map[string]*metadata.RemoteClusterReference {
-	startTime := time.Now()
-	service.cache_lock.RLock()
-	service.logger.Debugf("Acquired lock in RemoteClusterMap(). Time taken=%v", time.Now().Sub(startTime))
-	defer service.cache_lock.RUnlock()
-
-	// make a copy of remote_cluster_map and return it
-	remote_cluster_map := make(map[string]*metadata.RemoteClusterReference)
-	for refId, cache := range service.cache_map {
-		remote_cluster_map[refId] = cache.ref
+func (service *RemoteClusterService) RemoteClusterMap() (map[string]*metadata.RemoteClusterReference, error) {
+	ret := make(map[string]*metadata.RemoteClusterReference)
+	cache, err := service.getCache()
+	if err != nil {
+		return ret, err
 	}
-	return remote_cluster_map
+	values_map := cache.GetMap()
+	for key, val := range values_map {
+		cachedVal := val.(*remoteClusterVal)
+		ret[key] = cachedVal.ref
+	}
+	return ret, nil
 }
 
 // validate that the remote cluster ref itself is valid, and that it does not collide with any of the existing remote clusters.
@@ -398,17 +460,17 @@ func (service *RemoteClusterService) addRemoteCluster(ref *metadata.RemoteCluste
 		return err
 	}
 	service.logger.Debugf("Remote cluster being added: key=%v, value=%v\n", key, string(value))
-	err = service.metadata_svc.AddWithCatalog(RemoteClustersCatalogKey, key, value)
+	err = service.metakv_svc.AddWithCatalog(RemoteClustersCatalogKey, key, value)
 	if err != nil {
 		return err
 	}
 
-	_, rev, err := service.metadata_svc.Get(key)
+	_, rev, err := service.metakv_svc.Get(key)
 	if err != nil {
 		return err
 	}
 	ref.Revision = rev
-	service.validateCache(ref)
+	service.cacheRef(ref)
 	return nil
 }
 
@@ -423,30 +485,11 @@ func (service *RemoteClusterService) constructRemoteClusterReference(value []byt
 	return ref, err
 }
 
-func (service *RemoteClusterService) invalidateCache(key string) {
-	service.cache_lock.Lock()
-	defer service.cache_lock.Unlock()
-
-	_, ok := service.cache_map[key]
-	if ok {
-		delete(service.cache_map, key)
-		service.logger.Infof("Remote cluster reference %v is removed from the cache", key)
-
-	}
-}
-
-func (service *RemoteClusterService) validateCache(ref *metadata.RemoteClusterReference) error {
-
-	service.logger.Debugf("Remote Cluster reference %v need to be updated", ref.HostName)
-	err := service.cacheRef(ref)
-	if err != nil {
-		service.logger.Infof("Didn't update the cache for remote cluster %v, err=%v\n", ref.Id, err)
-	}
-	return err
-}
-
 func (service *RemoteClusterService) cacheRef(ref *metadata.RemoteClusterReference) error {
-	var bAddToCache bool = true
+	cache, err := service.getCache()
+	if err != nil {
+		return err
+	}
 	username, password, err := ref.MyCredentials()
 	if err != nil {
 		return err
@@ -468,47 +511,36 @@ func (service *RemoteClusterService) cacheRef(ref *metadata.RemoteClusterReferen
 		}
 	} else {
 		//keep the old connection string if it is in cache
-		old_cache_val, ok := service.getCache(ref.Id)
-		if ok && old_cache_val != nil {
+		cache, err := service.getCache()
+		if err != nil {
+			return err
+		}
+		old_cache_obj, ok := cache.Get(ref.Id)
+		if ok && old_cache_obj != nil {
+			old_cache_val := old_cache_obj.(*remoteClusterVal)
 			old_ref := old_cache_val.ref
 			if ref.HostName == old_ref.HostName {
-				bAddToCache = false
+				nodes_connStrs = old_cache_val.nodes_connectionstr
 			}
 		}
 
 		service.logger.Infof("Remote cluster reference %v has a bad connectivity, didn't populate alternative connection strings. err=%v", ref.Id, err)
 	}
 
-	if bAddToCache {
-		ref_cache := &remoteClusterCache{key: ref.Id,
-			nodes_connectionstr: nodes_connStrs,
-			ref:                 ref}
+	ref_cache := &remoteClusterVal{key: ref.Id,
+		nodes_connectionstr: nodes_connStrs,
+		ref:                 ref}
 
-		service.addToCache(ref.Id, ref_cache)
-	}
+	cache.Upsert(ref.Id, ref_cache)
+	service.logger.Debugf("Remote cluster reference %v is cahced\n", ref.Id)
 
 	return err
-}
-
-func (service *RemoteClusterService) getCache(key string) (*remoteClusterCache, bool) {
-	startTime := time.Now()
-	service.cache_lock.RLock()
-	service.logger.Debugf("Acquired lock in getCache(). Time taken=%v", time.Now().Sub(startTime))
-	defer service.cache_lock.RUnlock()
-	cache, ok := service.cache_map[key]
-	return cache, ok
-}
-
-func (service *RemoteClusterService) addToCache(key string, ref_cache *remoteClusterCache) {
-	service.cache_lock.Lock()
-	defer service.cache_lock.Unlock()
-	service.cache_map[key] = ref_cache
 }
 
 func (service *RemoteClusterService) refresh(ref *metadata.RemoteClusterReference) (*metadata.RemoteClusterReference, error) {
 	service.logger.Debugf("Refresh remote cluster reference %v\n", ref.Id)
 
-	err := service.validateCache(ref)
+	err := service.cacheRef(ref)
 
 	if err == nil {
 		return ref, nil
@@ -525,12 +557,11 @@ func (service *RemoteClusterService) refresh(ref *metadata.RemoteClusterReferenc
 
 	service.logger.Infof("Connstr %v in remote cluster reference failed to connect. Try to use alternative connStr", connStr)
 
-	//the hostname in the remote cluster reference doesn't work
-	//try on other connection strings in the cache
-	ref_cache, ok := service.getCache(ref.Id)
-	if !ok {
+	ref_cache, err := service.getCacheVal(ref.Id)
+	if err != nil {
 		service.logger.Errorf("Failed to connect to cluster reference %v - %v doesn't work, no alternative connStr\n", ref.Id, connStr)
 		return nil, errors.New(fmt.Sprintf("Failed to connect to cluster reference %v\n", ref.Id))
+
 	}
 
 	service.logger.Debugf("ref_cache=%v\n", ref_cache)
@@ -630,22 +661,27 @@ func (service *RemoteClusterService) RemoteClusterServiceCallback(path string, v
 	return refId, oldRef, newRef, nil
 }
 
-func (service *RemoteClusterService) updateCache(refId string, ref *metadata.RemoteClusterReference) {
+func (service *RemoteClusterService) updateCache(refId string, ref *metadata.RemoteClusterReference) error {
+	cache, err := service.getCache()
+	if err != nil {
+		return err
+	}
 
 	if ref == nil {
 		// remote cluster has been deleted
-		service.invalidateCache(refId)
+		cache.Delete(refId)
 	} else {
 		// remote cluster is created or updated
-		var cached_ref *metadata.RemoteClusterReference
-		ref_cache, ok := service.getCache(ref.Id)
-		if ok {
-			cached_ref = ref_cache.ref
+		var cached_ref *metadata.RemoteClusterReference = nil
+		ref_cache_val, err := service.getCacheVal(refId)
+		if err == nil {
+			cached_ref = ref_cache_val.ref
 		}
-
 		// no need to update cache if passed in ref is the same as the one already in cache
 		if !ref.SameRef(cached_ref) {
 			service.cacheRef(ref)
 		}
+
 	}
+	return nil
 }
