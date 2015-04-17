@@ -75,7 +75,7 @@ func (service *ReplicationSpecService) ValidateNewReplicationSpec(sourceBucket, 
 	sourceBucketUUID, err_source := utils.LocalBucketUUID(local_connStr, sourceBucket)
 
 	if err_source == utils.NonExistentBucketError {
-		service.logger.Errorf("Spec [sourceBucket=%v, targetClusterUuid=%v, targetBucket=%v] refers to non-existent bucket\n", sourceBucket, targetCluster, targetBucket)
+		service.logger.Errorf("Spec [sourceBucket=%v, targetClusterUuid=%v, targetBucket=%v] refers to non-existent source bucket\n", sourceBucket, targetCluster, targetBucket)
 		errorMap[base.FromBucket] = utils.BucketNotFoundError(sourceBucket)
 	}
 
@@ -302,7 +302,7 @@ func (service *ReplicationSpecService) ValidateExistingReplicationSpec(spec *met
 	sourceBucketUuid, err_source := utils.LocalBucketUUID(local_connStr, spec.SourceBucketName)
 
 	if err_source == utils.NonExistentBucketError {
-		service.logger.Errorf("Spec %v refers to non-existent bucket %v\n", spec.Id, spec.SourceBucketName)
+		service.logger.Errorf("Spec %v refers to non-existent source bucket %v\n", spec.Id, spec.SourceBucketName)
 		return InvalidReplicationSpecError
 	}
 
@@ -336,7 +336,7 @@ func (service *ReplicationSpecService) ValidateExistingReplicationSpec(spec *met
 	//validate target bucket
 	targetBucketUuid, err_target := utils.RemoteBucketUUID(remote_connStr, remote_userName, remote_password, spec.TargetBucketName)
 	if err_target == utils.NonExistentBucketError {
-		service.logger.Errorf("Spec %v refers to non-existent bucket %v\n", spec.Id, spec.TargetBucketName)
+		service.logger.Errorf("Spec %v refers to non-existent target bucket %v\n", spec.Id, spec.TargetBucketName)
 		return InvalidReplicationSpecError
 	}
 

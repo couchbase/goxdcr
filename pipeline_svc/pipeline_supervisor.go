@@ -111,12 +111,20 @@ func (pipelineSupervisor *PipelineSupervisor) init(settings map[string]interface
 	return nil
 }
 
-func (pipelineSupervisor *PipelineSupervisor) SetPipelineLogLevel(log_level_str string) error {
-	level, err := log.LogLevelFromStr(log_level_str)
-	if err != nil {
-		return err
+func (pipelineSupervisor *PipelineSupervisor) UpdateSettings(settings map[string]interface{}) error {
+	pipelineSupervisor.Logger().Infof("Updating settings on pipelineSupervisor %v. settings=%v\n", pipelineSupervisor.Id(), settings)
+	logLevelObj := utils.GetSettingFromSettings(settings, PIPELINE_LOG_LEVEL)
+
+	if logLevelObj == 0 {
+		// logLevel not specified. no op
+		return nil
 	}
-	pipelineSupervisor.LoggerContext().Log_level = level
+
+	logLevel, ok := logLevelObj.(log.LogLevel)
+	if !ok {
+		return fmt.Errorf("Log level %v is of wrong type", logLevelObj)
+	}
+	pipelineSupervisor.LoggerContext().Log_level = logLevel
 	return nil
 }
 

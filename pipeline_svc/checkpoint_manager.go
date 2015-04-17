@@ -33,6 +33,8 @@ const (
 	Vbno              string = "vbno"
 )
 
+var CHECKPOINT_INTERVAL = "checkpoint_interval"
+
 type CheckpointManager struct {
 	*component.AbstractComponent
 
@@ -65,8 +67,8 @@ type CheckpointManager struct {
 	finish_ch chan bool
 	wait_grp  *sync.WaitGroup
 
-	//checkpointing ticker
-	checkpoint_ticker *time.Ticker
+	//chan for checkpointing tickers -- new tickers are added each time checkpoint interval is changed
+	checkpoint_ticker_ch chan *time.Ticker
 
 	//remote bucket
 	remote_bucket *service_def.RemoteBucketInfo
@@ -101,6 +103,7 @@ func NewCheckpointManager(checkpoints_svc service_def.CheckpointsService, capi_s
 		xdcr_topology_svc:         xdcr_topology_svc,
 		through_seqno_tracker_svc: through_seqno_tracker_svc,
 		finish_ch:                 make(chan bool, 1),
+		checkpoint_ticker_ch:      make(chan *time.Ticker, 1000),
 		logger:                    logger,
 		cur_ckpts:                 make(map[uint16]*metadata.CheckpointRecord),
 		cur_ckpts_locks:           make(map[uint16]*sync.RWMutex),
@@ -156,19 +159,15 @@ func (ckmgr *CheckpointManager) populateRemoteBucketInfo(pipeline common.Pipelin
 }
 
 func (ckmgr *CheckpointManager) Start(settings map[string]interface{}) error {
-	if ckpt_interval, ok := settings[metadata.CheckpointInterval].(int); ok {
+	if ckpt_interval, ok := settings[CHECKPOINT_INTERVAL].(int); ok {
 		ckmgr.ckpt_interval = time.Duration(ckpt_interval) * time.Second
 	} else {
-		return errors.New(fmt.Sprintf("%v should be provided in settings", metadata.CheckpointInterval))
+		return errors.New(fmt.Sprintf("%v should be provided in settings", CHECKPOINT_INTERVAL))
 	}
 
 	ckmgr.logger.Infof("CheckpointManager starting with ckpt_interval=%v s\n", ckmgr.ckpt_interval.Seconds())
 
-	//randomize the starting point so that the checkpoint manager for the same
-	//replication on different node the starting point is randomized.
-	starting_time := time.Duration(rand.Intn(5000))*time.Millisecond + ckmgr.ckpt_interval
-	ckmgr.logger.Infof("Checkpointing starts in %v sec", starting_time.Seconds())
-	ckmgr.checkpoint_ticker = time.NewTicker(starting_time)
+	ckmgr.startRandomizedCheckpointingTicker()
 
 	//register itself with pipeline supervisor
 	supervisor := ckmgr.pipeline.RuntimeContext().Service(base.PIPELINE_SUPERVISOR_SVC)
@@ -186,6 +185,14 @@ func (ckmgr *CheckpointManager) Start(settings map[string]interface{}) error {
 	ckmgr.wait_grp.Add(1)
 	go ckmgr.massCheckVBOpaquesJob()
 	return nil
+}
+
+func (ckmgr *CheckpointManager) startRandomizedCheckpointingTicker() {
+	//randomize the starting point so that the checkpoint manager for the same
+	//replication on different node the starting point is randomized.
+	starting_time := time.Duration(rand.Intn(5000))*time.Millisecond + ckmgr.ckpt_interval
+	ckmgr.logger.Infof("Checkpointing starts in %v sec", starting_time.Seconds())
+	ckmgr.checkpoint_ticker_ch <- time.NewTicker(starting_time)
 }
 
 func (ckmgr *CheckpointManager) initialize() {
@@ -297,7 +304,7 @@ func (ckmgr *CheckpointManager) SetVBTimestamps(topic string) error {
 	start_index := 0
 
 	getter_wait_grp := &sync.WaitGroup{}
-	errMap := make(map[uint16]error)
+	err_ch := make(chan error, len(listOfVbs))
 	getter_id := 0
 	ret_map_map := make(map[int]map[uint16]*base.VBTimestamp)
 	for {
@@ -309,7 +316,7 @@ func (ckmgr *CheckpointManager) SetVBTimestamps(topic string) error {
 		getter_wait_grp.Add(1)
 		ret_map_map[getter_id] = make(map[uint16]*base.VBTimestamp)
 
-		go ckmgr.startSeqnoGetter(getter_id, vbs_for_getter, ckptDocs, support_ckpt, ret_map_map[getter_id], highseqnomap, getter_wait_grp, errMap)
+		go ckmgr.startSeqnoGetter(getter_id, vbs_for_getter, ckptDocs, support_ckpt, ret_map_map[getter_id], highseqnomap, getter_wait_grp, err_ch)
 
 		start_index = end_index
 		if start_index >= len(listOfVbs) {
@@ -320,7 +327,7 @@ func (ckmgr *CheckpointManager) SetVBTimestamps(topic string) error {
 
 	//wait for all the getter done, then gather result
 	getter_wait_grp.Wait()
-	if len(errMap) > 0 {
+	if len(err_ch) > 0 {
 		return errors.New(fmt.Sprintf("Failed to get starting seqno for pipeline %v", ckmgr.pipeline.InstanceId()))
 	}
 
@@ -344,7 +351,7 @@ func (ckmgr *CheckpointManager) SetVBTimestamps(topic string) error {
 }
 
 func (ckmgr *CheckpointManager) startSeqnoGetter(getter_id int, listOfVbs []uint16, ckptDocs map[uint16]*metadata.CheckpointsDoc,
-	disableCkptBackwardsCompat bool, ret map[uint16]*base.VBTimestamp, highseqnomap map[uint16]uint64, waitGrp *sync.WaitGroup, errMap map[uint16]error) {
+	disableCkptBackwardsCompat bool, ret map[uint16]*base.VBTimestamp, highseqnomap map[uint16]uint64, waitGrp *sync.WaitGroup, err_ch chan error) {
 	ckmgr.logger.Debugf("StartSeqnoGetter %v is started to do _pre_prelicate for vb %v, waitGrp=%v\n", getter_id, listOfVbs, *waitGrp)
 	defer waitGrp.Done()
 
@@ -357,7 +364,7 @@ func (ckmgr *CheckpointManager) startSeqnoGetter(getter_id int, listOfVbs []uint
 		ckpt_list := ckmgr.ckptRecords(ckptDoc, vbno)
 		for index, ckpt_record := range ckpt_list {
 			if ckpt_record != nil {
-				if len(errMap) > 0 {
+				if len(err_ch) > 0 {
 					//there is already error
 					return
 				}
@@ -392,7 +399,7 @@ func (ckmgr *CheckpointManager) startSeqnoGetter(getter_id int, listOfVbs []uint
 						//there is an error to do _pre_replicate
 						//so the start seqno for this vb should be 0
 						ckmgr.logger.Errorf("Pre_replicate failed. err=%v\n", err)
-						errMap[vbno] = err
+						err_ch <- err
 
 					}
 					goto POPULATE
@@ -418,6 +425,30 @@ func (ckmgr *CheckpointManager) ckptRecords(ckptDoc *metadata.CheckpointsDoc, vb
 		ret = append(ret, ckmgr.cur_ckpts[vbno])
 		return ret
 	}
+}
+
+func (ckmgr *CheckpointManager) UpdateSettings(settings map[string]interface{}) error {
+	ckmgr.logger.Infof("Updating settings on checkpoint manager for pipeline %v. settings=%v\n", ckmgr.pipeline.Topic(), settings)
+	checkpoint_interval, err := utils.GetIntSettingFromSettings(settings, CHECKPOINT_INTERVAL)
+	if err != nil {
+		return err
+	}
+
+	if checkpoint_interval < 0 {
+		// checkpoint_interval not specified. no op
+		return nil
+	}
+
+	if int(ckmgr.ckpt_interval.Seconds()) == checkpoint_interval {
+		// no op if no real updates
+		return nil
+	}
+
+	// update checkpoint interval
+	ckmgr.ckpt_interval = time.Duration(checkpoint_interval) * time.Second
+	ckmgr.startRandomizedCheckpointingTicker()
+
+	return nil
 }
 
 type failoverLogRetriever struct {
@@ -542,28 +573,58 @@ func (ckmgr *CheckpointManager) populateVBTimestamp(ckptDoc *metadata.Checkpoint
 }
 
 func (ckmgr *CheckpointManager) checkpointing() {
+	ckmgr.logger.Info("checkpointing rountine started")
+
 	defer ckmgr.logger.Info("Exits checkpointing routine.")
 	defer ckmgr.wait_grp.Done()
+
+	ticker := <-ckmgr.checkpoint_ticker_ch
+
+	children_fin_ch := make(chan bool)
+	children_wait_grp := &sync.WaitGroup{}
+
+	first := true
+
 	for {
 		select {
+		case new_ticker := <-ckmgr.checkpoint_ticker_ch:
+			ckmgr.logger.Info("Received new ticker due to changes to checkpoint interval setting")
+
+			// wait for existing, if any, performCkpt routine to finish before setting new ticker
+			close(children_fin_ch)
+			children_wait_grp.Wait()
+			children_fin_ch = make(chan bool)
+
+			ticker.Stop()
+			ticker = new_ticker
+			first = true
 		case <-ckmgr.finish_ch:
 			ckmgr.logger.Info("Received finish signal")
 			return
-		case <-ckmgr.checkpoint_ticker.C:
-			ckmgr.checkpoint_ticker.Stop()
+		case <-ticker.C:
 			if ckmgr.pipeline.State() != common.Pipeline_Running {
 				//pipeline is no longer running, kill itself
 				ckmgr.logger.Info("Pipeline is no longer running, exit.")
 				return
 			}
-			go ckmgr.performCkpt()
-			ckmgr.checkpoint_ticker = time.NewTicker(ckmgr.ckpt_interval)
+			children_wait_grp.Add(1)
+			go ckmgr.performCkpt(children_fin_ch, children_wait_grp)
+
+			if first {
+				// the beginning tick has a randomized time element to randomize start time
+				// reset the second and onward ticks to remove the randomized time element
+				ticker.Stop()
+				ticker = time.NewTicker(ckmgr.ckpt_interval)
+				first = false
+			}
 		}
 	}
 
 }
 
-func (ckmgr *CheckpointManager) performCkpt() {
+func (ckmgr *CheckpointManager) performCkpt(fin_ch chan bool, wait_grp *sync.WaitGroup) {
+	defer wait_grp.Done()
+
 	interval_btwn_vb := time.Duration((ckmgr.ckpt_interval.Seconds()/float64(len(ckmgr.getMyVBs())))*1000) * time.Millisecond
 	ckmgr.logger.Infof("Checkpointing for replication %v, interval_btwn_vb=%v sec\n", ckmgr.pipeline.Topic(), interval_btwn_vb.Seconds())
 	interval_ticker := time.NewTicker(1 * time.Millisecond)
@@ -572,6 +633,9 @@ func (ckmgr *CheckpointManager) performCkpt() {
 	var total_committing_time float64 = 0
 	for _, vb := range ckmgr.getMyVBs() {
 		select {
+		case <-fin_ch:
+			ckmgr.logger.Info("Aborting checkpointing routine since received finish signal for checkpointing")
+			return
 		case <-interval_ticker.C:
 			if first_vb {
 				interval_ticker.Stop()

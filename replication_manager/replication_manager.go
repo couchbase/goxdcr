@@ -581,41 +581,6 @@ func getPipelineFromPipelineSupevisor(s common.Supervisor) (common.Pipeline, err
 	}
 }
 
-func SetPipelineLogLevel(topic string, levelStr string) error {
-	pipeline := pipeline_manager.ReplicationStatus(topic).Pipeline()
-
-	//update the setting
-	spec, err := ReplicationSpecService().ReplicationSpec(topic)
-	if err != nil && spec == nil {
-		return errors.New(fmt.Sprintf("Failed to lookup replication specification %v, err=%v", topic, err))
-	}
-
-	settings := spec.Settings
-	err = settings.SetLogLevel(levelStr)
-	if err != nil {
-		return err
-	}
-
-	if pipeline != nil {
-		if pipeline.RuntimeContext() == nil {
-			return errors.New("Pipeline doesn't have the runtime context")
-		}
-		if pipeline.RuntimeContext().Service(base.PIPELINE_SUPERVISOR_SVC) == nil {
-			return errors.New("Pipeline doesn't have the PipelineSupervisor registered")
-		}
-		supervisor := pipeline.RuntimeContext().Service(base.PIPELINE_SUPERVISOR_SVC).(*pipeline_svc.PipelineSupervisor)
-
-		if supervisor != nil {
-			err := supervisor.SetPipelineLogLevel(levelStr)
-			if err == nil {
-				logger_rm.Infof("Changed log level to %v for pipeline %v\n", levelStr, topic)
-			}
-			return err
-		}
-	}
-	return nil
-}
-
 func validatePipelineExists(topic, action string, exist bool) error {
 	_, err := replication_mgr.repl_spec_svc.ReplicationSpec(topic)
 	pipelineExist := (err == nil)
@@ -700,47 +665,6 @@ func exitProcess(byForce bool) {
 
 func isReplicationManagerRunning() bool {
 	return replication_mgr.running
-}
-
-// whether there are critical changes to the replication spec that require pipeline reconstruction
-func needToReconstructPipeline(oldSettings *metadata.ReplicationSettings, newSettings *metadata.ReplicationSettings) bool {
-
-	// the following require reconstuction of pipeline
-	repTypeChanged := !(oldSettings.RepType == newSettings.RepType)
-	sourceNozzlePerNodeChanged := !(oldSettings.SourceNozzlePerNode == newSettings.SourceNozzlePerNode)
-	targetNozzlePerNodeChanged := !(oldSettings.TargetNozzlePerNode == newSettings.TargetNozzlePerNode)
-
-	// the following may qualify for live update in the future. The corresponding
-	// parts need to expose APIs to change the settings on the fly
-	batchCountChanged := (oldSettings.BatchCount != newSettings.BatchCount)
-	batchSizeChanged := (oldSettings.BatchSize != newSettings.BatchSize)
-	statsIntervalChanged := (oldSettings.StatsInterval != newSettings.StatsInterval)
-
-	return repTypeChanged || sourceNozzlePerNodeChanged || targetNozzlePerNodeChanged ||
-		batchCountChanged || batchSizeChanged || statsIntervalChanged
-
-}
-
-func liveUpdatePipeline(topic string, oldSettings *metadata.ReplicationSettings, newSettings *metadata.ReplicationSettings) error {
-	logger_rm.Infof("Performing live update on pipeline %v \n", topic)
-	logLevelChanged := (oldSettings.LogLevel != newSettings.LogLevel)
-
-	if logLevelChanged {
-		err := SetPipelineLogLevel(topic, newSettings.LogLevel.String())
-		if err != nil {
-			return err
-		}
-	}
-
-	// the following do not require any actions
-	// FailureRestartInterval
-
-	// TODO other live updates
-
-	// TODO need to decide what to do with the following after they are implemented.
-	// CheckpointInterval, OptimisticReplicationThreshold, MaxExpectedReplicationLag, TimeoutPercentageCap
-
-	return nil
 }
 
 func writeGenericReplicationEvent(eventId uint32, spec *metadata.ReplicationSpecification, realUserId *base.RealUserId) {

@@ -194,3 +194,7 @@ func (top_detect_svc *TopologyChangeDetectorSvc) validateSourceTopology() error 
 
 	return nil
 }
+
+func (top_detect_svc *TopologyChangeDetectorSvc) UpdateSettings(settings map[string]interface{}) error {
+	return nil
+}

@@ -52,4 +52,6 @@ type Pipeline interface {
 
 	SetProgressRecorder(recorder PipelineProgressRecorder)
 	ReportProgress(progress string)
+
+	UpdateSettings(settings map[string]interface{}) error
 }

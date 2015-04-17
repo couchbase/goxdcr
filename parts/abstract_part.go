@@ -19,8 +19,8 @@ import (
 	"sync"
 )
 
-//This is the error message any part goroutine would throw when it finds out 
-//the part is already requested to stop and it is left as orphan. The caller 
+//This is the error message any part goroutine would throw when it finds out
+//the part is already requested to stop and it is left as orphan. The caller
 //see this error message, it should stop itself and exit
 var PartStoppedError = errors.New("Part is stopping or already stopped, exit")
 
@@ -101,7 +101,10 @@ func (p *AbstractPart) SetState(state common.PartState) error {
 	return nil
 }
 
-func (p *AbstractPart) IsReadyForHeartBeat () bool {
+func (p *AbstractPart) IsReadyForHeartBeat() bool {
 	return p.state == common.Part_Running
 }
 
+func (p *AbstractPart) UpdateSettings(settings map[string]interface{}) error {
+	return nil
+}

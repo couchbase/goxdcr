@@ -372,8 +372,9 @@ func (s *ReplicationSettings) toMap(isDefaultSettings bool) map[string]interface
 	settings_map[OptimisticReplicationThreshold] = s.OptimisticReplicationThreshold
 	settings_map[SourceNozzlePerNode] = s.SourceNozzlePerNode
 	settings_map[TargetNozzlePerNode] = s.TargetNozzlePerNode
-	settings_map[MaxExpectedReplicationLag] = s.MaxExpectedReplicationLag
-	settings_map[TimeoutPercentageCap] = s.TimeoutPercentageCap
+	// commenting these out since not yet supported
+	/*settings_map[MaxExpectedReplicationLag] = s.MaxExpectedReplicationLag
+	settings_map[TimeoutPercentageCap] = s.TimeoutPercentageCap*/
 	settings_map[PipelineLogLevel] = s.LogLevel.String()
 	settings_map[PipelineStatsInterval] = s.StatsInterval
 	return settings_map

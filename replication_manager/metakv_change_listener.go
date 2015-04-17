@@ -15,8 +15,8 @@ import (
 	"github.com/couchbase/cbauth/metakv"
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
-	"github.com/couchbase/goxdcr/pipeline_manager"
 	"github.com/couchbase/goxdcr/metadata"
+	"github.com/couchbase/goxdcr/pipeline_manager"
 	"github.com/couchbase/goxdcr/service_def"
 	"github.com/couchbase/goxdcr/service_impl"
 	"sync"
@@ -198,12 +198,11 @@ func (rscl *ReplicationSpecChangeListener) replicationSpecChangeHandlerCallback(
 
 		} else {
 			// otherwise, perform live update to pipeline
-			err := liveUpdatePipeline(topic, oldSettings, newSpec.Settings)
+			err := rscl.liveUpdatePipeline(topic, oldSettings, newSpec.Settings)
 			if err != nil {
 				rscl.logger.Errorf("Failed to perform live update on pipeline %v, err=%v\n", topic, err)
 				return err
 			} else {
-
 				rscl.logger.Infof("Kept pipeline %v running since the changes to replication spec are not critical\n", topic)
 				return nil
 			}
@@ -226,6 +225,48 @@ func (rscl *ReplicationSpecChangeListener) replicationSpecChangeHandlerCallback(
 		// nothing needs to be done
 		return nil
 	}
+}
+
+// whether there are critical changes to the replication spec that require pipeline reconstruction
+func needToReconstructPipeline(oldSettings *metadata.ReplicationSettings, newSettings *metadata.ReplicationSettings) bool {
+
+	// the following require reconstuction of pipeline
+	repTypeChanged := !(oldSettings.RepType == newSettings.RepType)
+	sourceNozzlePerNodeChanged := !(oldSettings.SourceNozzlePerNode == newSettings.SourceNozzlePerNode)
+	targetNozzlePerNodeChanged := !(oldSettings.TargetNozzlePerNode == newSettings.TargetNozzlePerNode)
+
+	// the following may qualify for live update in the future.
+	// batchCount is tricky since the sizes of xmem data channels depend on it.
+	// batchsize is easier to live update but it may not be intuitive to have different behaviors for batchCount and batchSize
+	batchCountChanged := (oldSettings.BatchCount != newSettings.BatchCount)
+	batchSizeChanged := (oldSettings.BatchSize != newSettings.BatchSize)
+
+	return repTypeChanged || sourceNozzlePerNodeChanged || targetNozzlePerNodeChanged ||
+		batchCountChanged || batchSizeChanged
+}
+
+func (rscl *ReplicationSpecChangeListener) liveUpdatePipeline(topic string, oldSettings *metadata.ReplicationSettings, newSettings *metadata.ReplicationSettings) error {
+	rscl.logger.Infof("Performing live update on pipeline %v \n", topic)
+
+	// perform live update on pipeline if qualifying settings have been changed
+	if oldSettings.LogLevel != newSettings.LogLevel || oldSettings.CheckpointInterval != newSettings.CheckpointInterval ||
+		oldSettings.StatsInterval != newSettings.StatsInterval ||
+		oldSettings.OptimisticReplicationThreshold != newSettings.OptimisticReplicationThreshold {
+
+		rs := pipeline_manager.ReplicationStatus(topic)
+		if rs == nil {
+			return fmt.Errorf("Cannot find replication status for pipeline %v", topic)
+		}
+
+		pipeline := rs.Pipeline()
+		if pipeline == nil {
+			return fmt.Errorf("Cannot find pipeline with topic %v", topic)
+		}
+
+		return pipeline.UpdateSettings(newSettings.ToMap())
+	}
+
+	return nil
 }
 
 // listener for remote clusters

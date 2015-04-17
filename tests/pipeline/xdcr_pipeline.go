@@ -207,11 +207,6 @@ func test() {
 		fail(fmt.Sprintf("%v", err))
 	}
 
-	err = replication_manager.SetPipelineLogLevel(topic, "Info")
-	if err != nil {
-		fail(fmt.Sprintf("%v", err))
-	}
-
 	time.Sleep(30 * time.Second)
 	logger.Info("........Verifying checkpointing ....")
 	ckpt_docs, err := replication_manager.CheckpointService().CheckpointsDocs(topic)

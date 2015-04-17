@@ -19,6 +19,7 @@ import (
 	common "github.com/couchbase/goxdcr/common"
 	gen_server "github.com/couchbase/goxdcr/gen_server"
 	"github.com/couchbase/goxdcr/log"
+	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/goxdcr/utils"
 	"io"
 	"math/rand"
@@ -1992,4 +1993,13 @@ func (xmem *XmemNozzle) releasePool() {
 		pool.ReleaseConnections()
 	}
 
+}
+
+func (xmem *XmemNozzle) UpdateSettings(settings map[string]interface{}) error {
+	optimisticReplicationThreshold, err := utils.GetIntSettingFromSettings(settings, metadata.OptimisticReplicationThreshold)
+	if err != nil {
+		return err
+	}
+	xmem.config.optiRepThreshold = optimisticReplicationThreshold
+	return nil
 }

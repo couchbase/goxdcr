@@ -143,8 +143,8 @@ type StatisticsManager struct {
 	//temporary map to keep checkpointed seqnos
 	checkpointed_seqnos map[uint16]uint64
 
-	//statistics update ticker
-	publish_ticker *time.Ticker
+	//chan for stats update tickers -- new tickers are added each time stats interval is changed
+	update_ticker_ch chan *time.Ticker
 
 	//settings - sample size
 	sample_size int
@@ -153,6 +153,7 @@ type StatisticsManager struct {
 
 	//the channel to communicate finish signal with statistic updater
 	finish_ch chan bool
+	done_ch   chan bool
 	wait_grp  *sync.WaitGroup
 
 	pipeline common.Pipeline
@@ -181,6 +182,8 @@ func NewStatisticsManager(through_seqno_tracker_svc service_def.ThroughSeqnoTrac
 		meta_starttime_map_lock:   sync.RWMutex{},
 		meta_endtime_map_lock:     sync.RWMutex{},
 		finish_ch:                 make(chan bool, 1),
+		done_ch:                   make(chan bool, 1),
+		update_ticker_ch:          make(chan *time.Ticker, 1000),
 		sample_size:               default_sample_size,
 		update_interval:           default_update_interval,
 		logger:                    log.NewLogger("StatisticsManager", logger_ctx),
@@ -229,16 +232,23 @@ func getHighSeqNos(serverAddr string, vbnos []uint16, conn *mcc.Client) (map[uin
 //updateStats runs until it get finish signal
 //It processes the raw stats and publish the overview stats along with the raw stats to expvar
 //It also log the stats to log
-func (stats_mgr *StatisticsManager) updateStats(finchan chan bool) error {
+func (stats_mgr *StatisticsManager) updateStats() error {
 	stats_mgr.logger.Info("updateStats started")
 
 	defer stats_mgr.wait_grp.Done()
+	defer close(stats_mgr.done_ch)
+
+	ticker := <-stats_mgr.update_ticker_ch
 
 	init_ch := make(chan bool, 1)
 	init_ch <- true
 	for {
 		select {
-		case <-finchan:
+		case new_ticker := <-stats_mgr.update_ticker_ch:
+			stats_mgr.logger.Info("Received new ticker due to changes to stats interval setting")
+			ticker.Stop()
+			ticker = new_ticker
+		case <-stats_mgr.finish_ch:
 			stats_mgr.cleanupBeforeExit()
 			return nil
 		// this ensures that stats are printed out immediately after updateStats is started
@@ -247,7 +257,7 @@ func (stats_mgr *StatisticsManager) updateStats(finchan chan bool) error {
 			if err != nil {
 				return nil
 			}
-		case <-stats_mgr.publish_ticker.C:
+		case <-ticker.C:
 			err := stats_mgr.updateStatsOnce()
 			if err != nil {
 				return nil
@@ -655,15 +665,15 @@ func (stats_mgr *StatisticsManager) Start(settings map[string]interface{}) error
 	}
 
 	if _, ok := settings[PUBLISH_INTERVAL]; ok {
-		stats_mgr.update_interval = settings[PUBLISH_INTERVAL].(time.Duration)
+		stats_mgr.update_interval = time.Duration(settings[PUBLISH_INTERVAL].(int)) * time.Millisecond
 	} else {
 		stats_mgr.logger.Infof("There is no update_interval in settings map. settings=%v\n", settings)
 	}
 	stats_mgr.logger.Debugf("StatisticsManager Starts: update_interval=%v, settings=%v\n", stats_mgr.update_interval, settings)
-	stats_mgr.publish_ticker = time.NewTicker(stats_mgr.update_interval)
+	stats_mgr.update_ticker_ch <- time.NewTicker(stats_mgr.update_interval)
 
 	stats_mgr.wait_grp.Add(1)
-	go stats_mgr.updateStats(stats_mgr.finish_ch)
+	go stats_mgr.updateStats()
 
 	return nil
 }
@@ -692,6 +702,30 @@ func (stats_mgr *StatisticsManager) initConnections() error {
 
 		stats_mgr.kv_mem_clients[serverAddr] = conn
 	}
+
+	return nil
+}
+
+func (stats_mgr *StatisticsManager) UpdateSettings(settings map[string]interface{}) error {
+	stats_mgr.logger.Infof("Updating settings on stats manager. settings=%v\n", settings)
+
+	stats_interval, err := utils.GetIntSettingFromSettings(settings, PUBLISH_INTERVAL)
+	if err != nil {
+		return err
+	}
+
+	if stats_interval < 0 {
+		// stats_interval not specified. no op
+		return nil
+	}
+
+	if int(stats_mgr.update_interval.Nanoseconds()) == stats_interval*1000000 {
+		// no op if no real updates
+		return nil
+	}
+
+	stats_mgr.update_interval = time.Duration(stats_interval) * time.Millisecond
+	stats_mgr.update_ticker_ch <- time.NewTicker(stats_mgr.update_interval)
 
 	return nil
 }

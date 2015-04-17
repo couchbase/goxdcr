@@ -129,7 +129,7 @@ func (service *RemoteClusterService) updateRemoteCluster(ref *metadata.RemoteClu
 		return err
 	}
 	service.logger.Debugf("Remote cluster being changed: key=%v, value=%v\n", key, string(value))
-	err = service.metadata_svc.Set(key, value, revision)
+	err = service.metadata_svc.SetSensitive(key, value, revision)
 	if err != nil {
 		return err
 	}
@@ -398,7 +398,7 @@ func (service *RemoteClusterService) addRemoteCluster(ref *metadata.RemoteCluste
 		return err
 	}
 	service.logger.Debugf("Remote cluster being added: key=%v, value=%v\n", key, string(value))
-	err = service.metadata_svc.AddWithCatalog(RemoteClustersCatalogKey, key, value)
+	err = service.metadata_svc.AddSensitiveWithCatalog(RemoteClustersCatalogKey, key, value)
 	if err != nil {
 		return err
 	}

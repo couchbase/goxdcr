@@ -9,34 +9,34 @@
 
 package common
 
-import (
-
-)
+import ()
 
 type PartState int
+
 const (
-	Part_Initial PartState=iota	
-	Part_Starting PartState=iota
-	Part_Running PartState=iota
-	Part_Stopping PartState=iota
-	Part_Stopped PartState=iota
-	Part_Error	PartState=iota
+	Part_Initial  PartState = iota
+	Part_Starting PartState = iota
+	Part_Running  PartState = iota
+	Part_Stopping PartState = iota
+	Part_Stopped  PartState = iota
+	Part_Error    PartState = iota
 )
 
 type Part interface {
 	Component
 	Connectable
-	
+
 	//Start makes goroutine for the part working
-	Start (settings map[string]interface{} ) error
-	
+	Start(settings map[string]interface{}) error
+
 	//Stop stops the part,
-	Stop () error
-	
+	Stop() error
+
 	//Receive accepts data passed down from its upstream
-	Receive (data interface {}) error
+	Receive(data interface{}) error
 
 	//return the state of the part
 	State() PartState
-	
+
+	UpdateSettings(settings map[string]interface{}) error
 }

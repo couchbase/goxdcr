@@ -471,3 +471,44 @@ func GetMemcachedConnection(serverAddr, bucketName string, logger *log.CommonLog
 
 	return conn, nil
 }
+
+func GetIntSettingFromSettings(settings map[string]interface{}, settingName string) (int, error) {
+	settingObj := GetSettingFromSettings(settings, settingName)
+	if settingObj == nil {
+		return -1, nil
+	}
+
+	setting, ok := settingObj.(int)
+	if !ok {
+		return -1, fmt.Errorf("Setting %v is of wrong type", settingName)
+	}
+
+	return setting, nil
+}
+
+func GetStringSettingFromSettings(settings map[string]interface{}, settingName string) (string, error) {
+	settingObj := GetSettingFromSettings(settings, settingName)
+	if settingObj == nil {
+		return "", nil
+	}
+
+	setting, ok := settingObj.(string)
+	if !ok {
+		return "", fmt.Errorf("Setting %v is of wrong type", settingName)
+	}
+
+	return setting, nil
+}
+
+func GetSettingFromSettings(settings map[string]interface{}, settingName string) interface{} {
+	if settings == nil {
+		return nil
+	}
+
+	setting, ok := settings[settingName]
+	if !ok {
+		return nil
+	}
+
+	return setting
+}

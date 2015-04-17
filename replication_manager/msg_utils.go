@@ -129,8 +129,8 @@ var RestKeyToSettingsKeyMap = map[string]string{
 	OptimisticReplicationThreshold: metadata.OptimisticReplicationThreshold,
 	SourceNozzlePerNode:            metadata.SourceNozzlePerNode,
 	TargetNozzlePerNode:            metadata.TargetNozzlePerNode,
-	MaxExpectedReplicationLag:      metadata.MaxExpectedReplicationLag,
-	TimeoutPercentageCap:           metadata.TimeoutPercentageCap,
+	/*MaxExpectedReplicationLag:      metadata.MaxExpectedReplicationLag,
+	TimeoutPercentageCap:           metadata.TimeoutPercentageCap,*/
 	LogLevel:                       metadata.PipelineLogLevel,
 	StatsInterval:                  metadata.PipelineStatsInterval,
 }
@@ -147,8 +147,8 @@ var SettingsKeyToRestKeyMap = map[string]string{
 	metadata.OptimisticReplicationThreshold: OptimisticReplicationThreshold,
 	metadata.SourceNozzlePerNode:            SourceNozzlePerNode,
 	metadata.TargetNozzlePerNode:            TargetNozzlePerNode,
-	metadata.MaxExpectedReplicationLag:      MaxExpectedReplicationLag,
-	metadata.TimeoutPercentageCap:           TimeoutPercentageCap,
+	/*metadata.MaxExpectedReplicationLag:      MaxExpectedReplicationLag,
+	metadata.TimeoutPercentageCap:           TimeoutPercentageCap,*/
 	metadata.PipelineLogLevel:               LogLevel,
 	metadata.PipelineStatsInterval:          StatsInterval,
 }

@@ -25,8 +25,11 @@ import (
 
 var ErrorKey = "Error"
 
-//the function can construct part specific settings for the pipeline
+//the function constructs start settings for parts of the pipeline
 type PartsSettingsConstructor func(pipeline common.Pipeline, part common.Part, pipeline_settings map[string]interface{}, ts map[uint16]*base.VBTimestamp, targetClusterref *metadata.RemoteClusterReference) (map[string]interface{}, error)
+
+//the function constructs update settings for parts of the pipeline
+type PartsUpdateSettingsConstructor func(pipeline common.Pipeline, part common.Part, pipeline_settings map[string]interface{}) (map[string]interface{}, error)
 
 type StartingSeqnoConstructor func(pipeline common.Pipeline) error
 
@@ -57,7 +60,8 @@ type GenericPipeline struct {
 	//the lock to serialize the request to start\stop the pipeline
 	stateLock sync.Mutex
 
-	partSetting_constructor PartsSettingsConstructor
+	partSetting_constructor       PartsSettingsConstructor
+	partUpdateSetting_constructor PartsUpdateSettingsConstructor
 
 	startingSeqno_constructor StartingSeqnoConstructor
 
@@ -73,8 +77,8 @@ type GenericPipeline struct {
 
 	logger *log.CommonLogger
 
-	spec              *metadata.ReplicationSpecification
-	settings_at_start map[string]interface{}
+	spec     *metadata.ReplicationSpecification
+	settings map[string]interface{}
 
 	state common.PipelineState
 
@@ -159,7 +163,7 @@ func (genericPipeline *GenericPipeline) Start(settings map[string]interface{}) e
 		return err
 	}
 
-	genericPipeline.settings_at_start = settings
+	genericPipeline.settings = settings
 	genericPipeline.ReportProgress("Try to get start seqno")
 	genericPipeline.logger.Info("Try to get start seqno")
 	//get starting vb timestamp
@@ -176,7 +180,7 @@ func (genericPipeline *GenericPipeline) Start(settings map[string]interface{}) e
 	}
 
 	//start the runtime
-	err = genericPipeline.context.Start(genericPipeline.settings_at_start)
+	err = genericPipeline.context.Start(genericPipeline.settings)
 	if err != nil {
 		return err
 	}
@@ -204,7 +208,7 @@ func (genericPipeline *GenericPipeline) Start(settings map[string]interface{}) e
 			}
 			return
 
-		}(errMap, source, genericPipeline.settings_at_start, waitGrp)
+		}(errMap, source, genericPipeline.settings, waitGrp)
 
 		waitGrp.Wait()
 		if len(errMap) != 0 {
@@ -376,6 +380,7 @@ func NewPipelineWithSettingConstructor(t string,
 	targets map[string]common.Nozzle,
 	spec *metadata.ReplicationSpecification,
 	partsSettingsConstructor PartsSettingsConstructor,
+	partsUpdateSettingsConstructor PartsUpdateSettingsConstructor,
 	startingSeqnoConstructor StartingSeqnoConstructor,
 	remoteClusterRefRetriever RemoteClsuterRefRetriever,
 	logger_context *log.LoggerContext,
@@ -384,9 +389,10 @@ func NewPipelineWithSettingConstructor(t string,
 		sources: sources,
 		targets: targets,
 		spec:    spec,
-		partSetting_constructor:    partsSettingsConstructor,
-		startingSeqno_constructor:  startingSeqnoConstructor,
-		remoteClusterRef_retriever: remoteClusterRefRetriever,
+		partSetting_constructor:       partsSettingsConstructor,
+		partUpdateSetting_constructor: partsUpdateSettingsConstructor,
+		startingSeqno_constructor:     startingSeqnoConstructor,
+		remoteClusterRef_retriever:    remoteClusterRefRetriever,
 		logger:      log.NewLogger("GenericPipeline", logger_context),
 		instance_id: time.Now().Nanosecond(),
 		state:       common.Pipeline_Initial,
@@ -454,7 +460,7 @@ func (genericPipeline *GenericPipeline) Specification() *metadata.ReplicationSpe
 }
 
 func (genericPipeline *GenericPipeline) Settings() map[string]interface{} {
-	return genericPipeline.settings_at_start
+	return genericPipeline.settings
 }
 
 func (genericPipeline *GenericPipeline) State() common.PipelineState {
@@ -546,6 +552,30 @@ func (genericPipeline *GenericPipeline) ReportProgress(progress string) {
 
 func (genericPipeline *GenericPipeline) SetProgressRecorder(recorder common.PipelineProgressRecorder) {
 	genericPipeline.progress_recorder = recorder
+}
+
+func (genericPipeline *GenericPipeline) UpdateSettings(settings map[string]interface{}) error {
+	if genericPipeline.partSetting_constructor != nil {
+		genericPipeline.logger.Infof("Calling part update setting constructor with settings=%v\n", settings)
+		for _, part := range GetAllParts(genericPipeline) {
+			partSettings, err := genericPipeline.partUpdateSetting_constructor(genericPipeline, part, settings)
+			if err != nil {
+				return err
+			}
+			err = part.UpdateSettings(partSettings)
+			if err != nil {
+				return err
+			}
+		}
+	}
+
+	if genericPipeline.context != nil {
+		genericPipeline.logger.Infof("Calling update setting constructor on runtime context with settings=%v\n", settings)
+		return genericPipeline.context.UpdateSettings(settings)
+	}
+
+	return nil
+
 }
 
 //enforcer for GenericPipeline to implement Pipeline

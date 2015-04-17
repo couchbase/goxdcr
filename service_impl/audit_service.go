@@ -57,6 +57,8 @@ func NewAuditSvc(top_svc service_def.XDCRCompTopologySvc, loggerCtx *log.LoggerC
 }
 
 func (service *AuditSvc) Write(eventId uint32, event interface{}) error {
+	service.logger.Debugf("Writing audit event. eventId=%v, event=%v\n", eventId, event)
+
 	err := service.init()
 	if err != nil {
 		return err

@@ -41,7 +41,7 @@ func (meta_svc *MetaKVMetadataSvc) Get(key string) ([]byte, interface{}, error) 
 	for i = 0; i < service_def.MaxNumOfRetries; i++ {
 		value, rev, err := metakv.Get(getPathFromKey(key))
 		if value == nil && rev == nil && err == nil {
-			meta_svc.logger.Debugf("Can't find key=%v", key)	
+			meta_svc.logger.Debugf("Can't find key=%v", key)
 			return nil, nil, service_def.MetadataNotFoundErr
 		} else if err == nil {
 			return value, rev, nil
@@ -53,16 +53,29 @@ func (meta_svc *MetaKVMetadataSvc) Get(key string) ([]byte, interface{}, error) 
 	return nil, nil, service_def.MetaKVFailedAfterMaxTries
 }
 
+func (meta_svc *MetaKVMetadataSvc) Add(key string, value []byte) error {
+	return meta_svc.add(key, value, false)
+}
+
+func (meta_svc *MetaKVMetadataSvc) AddSensitive(key string, value []byte) error {
+	return meta_svc.add(key, value, true)
+}
+
 //Wrap metakv.Add with retries
 //if the key is already exist in metakv, return service_def.ErrorKeyAlreadyExist
 //if metakv operation failed after max number of retries, return service_def.MetaKVFailedAfterMaxTries
-func (meta_svc *MetaKVMetadataSvc) Add(key string, value []byte) error {
+func (meta_svc *MetaKVMetadataSvc) add(key string, value []byte, sensitive bool) error {
 	start_time := time.Now()
 	var i int = 0
 	defer meta_svc.logger.Debugf("Took %vs to add %v to metakv, retried=%v\n", time.Since(start_time).Seconds(), key, i)
 
 	for i = 0; i < service_def.MaxNumOfRetries; i++ {
-		err := metakv.Add(getPathFromKey(key), value)
+		var err error
+		if sensitive {
+			err = metakv.AddSensitive(getPathFromKey(key), value)
+		} else {
+			err = metakv.Add(getPathFromKey(key), value)
+		}
 		if err == metakv.ErrRevMismatch {
 			return service_def.ErrorKeyAlreadyExist
 		} else if err == nil {
@@ -79,16 +92,34 @@ func (meta_svc *MetaKVMetadataSvc) AddWithCatalog(catalogKey, key string, value 
 	return meta_svc.Add(key, value)
 }
 
+func (meta_svc *MetaKVMetadataSvc) AddSensitiveWithCatalog(catalogKey, key string, value []byte) error {
+	// ignore catalogKey
+	return meta_svc.AddSensitive(key, value)
+}
+
+func (meta_svc *MetaKVMetadataSvc) Set(key string, value []byte, rev interface{}) error {
+	return meta_svc.set(key, value, rev, false)
+}
+
+func (meta_svc *MetaKVMetadataSvc) SetSensitive(key string, value []byte, rev interface{}) error {
+	return meta_svc.set(key, value, rev, true)
+}
+
 //Wrap metakv.Set with retries
 //if the rev provided doesn't match with the rev metakv has, return service_def.ErrorRevisionMismatch
 //if metakv operation failed after max number of retries, return service_def.MetaKVFailedAfterMaxTries
-func (meta_svc *MetaKVMetadataSvc) Set(key string, value []byte, rev interface{}) error {
+func (meta_svc *MetaKVMetadataSvc) set(key string, value []byte, rev interface{}, sensitive bool) error {
 	start_time := time.Now()
 	var i int = 0
 	defer meta_svc.logger.Debugf("Took %vs to set %v to metakv, retried=%v\n", time.Since(start_time).Seconds(), key, i)
 
 	for i = 0; i < service_def.MaxNumOfRetries; i++ {
-		err := metakv.Set(getPathFromKey(key), value, rev)
+		var err error
+		if sensitive {
+			err = metakv.SetSensitive(getPathFromKey(key), value, rev)
+		} else {
+			err = metakv.Set(getPathFromKey(key), value, rev)
+		}
 		if err == metakv.ErrRevMismatch {
 			return service_def.ErrorRevisionMismatch
 		} else if err == nil {

@@ -616,8 +616,7 @@ func getRealUserIdFromRequest(request *http.Request) *base.RealUserId {
 		return &base.RealUserId{"internal", "unknown"}
 	}
 
-	// TODO get source from creds
-	return &base.RealUserId{"internal", creds.Name()}
+	return &base.RealUserId{creds.Source(), creds.Name()}
 }
 
 func (adminport *Adminport) IsReadyForHeartBeat() bool {

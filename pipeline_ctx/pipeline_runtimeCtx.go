@@ -27,7 +27,6 @@ type PipelineRuntimeCtx struct {
 	//pipeline
 	pipeline common.Pipeline
 
-
 	isRunning                    bool
 	logger                       *log.CommonLogger
 	service_settings_constructor ServiceSettingsConstructor
@@ -89,25 +88,25 @@ func (ctx *PipelineRuntimeCtx) Start(params map[string]interface{}) error {
 func (ctx *PipelineRuntimeCtx) Stop() error {
 	ctx.logger.Infof("Pipeline context is stopping...")
 	var err error = nil
-	errMap := make (map[string]error)
-	
-	services_stopped := []string {}
+	errMap := make(map[string]error)
+
+	services_stopped := []string{}
 	//stop all registered services
 	for name, _ := range ctx.runtime_svcs {
 		err1 := ctx.UnregisterService(name)
 		if err1 != nil {
 			errMap[name] = err1
 			ctx.logger.Errorf("Failed to stop service %v - %v", name, err1)
-		}else {
-			services_stopped = append (services_stopped, name)
+		} else {
+			services_stopped = append(services_stopped, name)
 		}
-		
+
 	}
 
 	for _, service_stopped_name := range services_stopped {
-		delete (ctx.runtime_svcs, service_stopped_name)
+		delete(ctx.runtime_svcs, service_stopped_name)
 	}
-	
+
 	if len(errMap) == 0 {
 		ctx.isRunning = false
 		ctx.logger.Infof("Pipeline context for %v has been stopped", ctx.pipeline.InstanceId())
@@ -150,8 +149,27 @@ func (ctx *PipelineRuntimeCtx) UnregisterService(srv_name string) error {
 		}
 	}
 
-
 	return err
+}
+
+func (ctx *PipelineRuntimeCtx) UpdateSettings(settings map[string]interface{}) error {
+	if ctx.service_settings_constructor == nil {
+		return nil
+	}
+
+	for _, svc := range ctx.runtime_svcs {
+		service_settings, err := ctx.service_settings_constructor(ctx.pipeline, svc, settings, nil)
+		if err != nil {
+			return err
+
+		}
+		err = svc.UpdateSettings(service_settings)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 //enforcer for PipelineRuntimeCtx to implement PipelineRuntimeContext
