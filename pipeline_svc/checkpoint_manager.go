@@ -764,7 +764,6 @@ func (ckmgr *CheckpointManager) massCheckVBOpaquesJob() {
 			ckmgr.logger.Info("Received finish signal")
 			return
 		case <-ticker.C:
-			ckmgr.checkpoint_ticker.Stop()
 			if ckmgr.pipeline.State() != common.Pipeline_Running {
 				//pipeline is no longer running, kill itself
 				ckmgr.logger.Info("Pipeline is no longer running, exit.")
