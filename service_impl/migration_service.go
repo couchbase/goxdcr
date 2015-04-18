@@ -132,13 +132,11 @@ func (service *MigrationSvc) readMetadataFromStdin() ([]byte, error) {
 			dataBytes = append(dataBytes, line[:len(line)-1]...)
 		}
 	}
-	service.logger.Infof("metadata read: dataBytes=%v\ndataBytes_str=%v\n", dataBytes, string(dataBytes))
 	return dataBytes, nil
 }
 
 func (service *MigrationSvc) migrate_internal(data []byte) []error {
 	service.logger.Info("Starting to migrate xdcr metadata")
-	service.logger.Infof("data_as_bytes=%v\ndata_as_string=%v\n", data, string(data))
 
 	errorList := make([]error, 0)
 
@@ -149,7 +147,7 @@ func (service *MigrationSvc) migrate_internal(data []byte) []error {
 	dataObj := make(map[string]interface{})
 	err := json.Unmarshal(data, &dataObj)
 	if err != nil {
-		errorList = append(errorList, utils.NewEnhancedError(fmt.Sprintf("Error unmarshaling metadata. data_as_bytes=%v\n data_as_string=%v\n", data, string(data)), err))
+		errorList = append(errorList, utils.NewEnhancedError(fmt.Sprintf("Error unmarshaling metadata"), err))
 		// fetal error. stop right away
 		return errorList
 	}
@@ -186,20 +184,11 @@ func (service *MigrationSvc) migrate_internal(data []byte) []error {
 		}
 	}
 
-	/*checkpointsData, ok := dataObj[CheckpointsKey]
-	if ok {
-		indErrorList := service.migrateCheckpoints(checkpointsData)
-		if len(indErrorList) != 0 {
-			errorList = append(errorList, indErrorList...)
-		}
-	}*/
-
 	return errorList
 }
 
 func (service *MigrationSvc) migrateRemoteClusters(remoteClustersData interface{}) ([]string, []error) {
 	service.logger.Info("Starting to migrate remote clusters")
-	service.logger.Infof("data=%v\n", remoteClustersData)
 
 	deletedRemoteClusterUuidList := make([]string, 0)
 	errorList := make([]error, 0)
@@ -228,8 +217,6 @@ func (service *MigrationSvc) migrateRemoteClusters(remoteClustersData interface{
 }
 
 func (service *MigrationSvc) migrateRemoteCluster(remoteClusterData interface{}, deletedRemoteClusterUuidList []string) ([]string, []error) {
-	service.logger.Info("Starting to migrate remote cluster")
-	service.logger.Infof("data=%v\n", remoteClusterData)
 
 	errorList := make([]error, 0)
 
@@ -239,6 +226,8 @@ func (service *MigrationSvc) migrateRemoteCluster(remoteClusterData interface{},
 		errorList = append(errorList, err)
 		return deletedRemoteClusterUuidList, errorList
 	}
+	service.logger.Info("Starting to migrate remote cluster")
+	service.logger.Infof("data=%v\n", sanitizeForLogging(remoteCluster))
 
 	name := ""
 	uuid := ""
@@ -308,7 +297,7 @@ func (service *MigrationSvc) migrateRemoteCluster(remoteClusterData interface{},
 	}
 
 	if demandEncryption && len(certificate) == 0 {
-		errorList = append(errorList, errors.New(fmt.Sprintf("Certificate of remote cluster is required when demandEncryption is enabled. data=%v", remoteCluster)))
+		errorList = append(errorList, errors.New(fmt.Sprintf("Certificate of remote cluster is required when demandEncryption is enabled. data=%v", sanitizeForLogging(remoteCluster))))
 	}
 
 	if len(errorList) != 0 {
@@ -580,138 +569,6 @@ func (service *MigrationSvc) targetBucketUUID(targetClusterUUID, bucketName stri
 	return utils.RemoteBucketUUID(remote_connStr, remote_userName, remote_password, bucketName)
 }
 
-/*
-func (service *MigrationSvc) migrateCheckpoints(checkpointsData interface{}) []error {
-	service.logger.Info("Starting to migrate checkpoints")
-	service.logger.Infof("data=%v\n", checkpointsData)
-
-	errorList := make([]error, 0)
-
-	if checkpointsData == nil {
-		return errorList
-	}
-
-	checkpointsMap, ok := checkpointsData.(map[string]interface{})
-	if !ok {
-		err := incorrectMetadataValueTypeError(TypeCheckpoint, checkpointsData, "map[string]interface{}")
-		errorList = append(errorList, err)
-		return errorList
-	}
-
-	for checkpointDocId, checkpointData := range checkpointsMap {
-		indErrorList := service.migrateCheckpoint(checkpointDocId, checkpointData)
-		if len(indErrorList) != 0 {
-			errorList = append(errorList, indErrorList...)
-		}
-	}
-
-	return errorList
-
-}
-
-func (service *MigrationSvc) migrateCheckpoint(checkpointDocId string, checkpointData interface{}) []error {
-	service.logger.Info("Starting to migrate checkpoint")
-	service.logger.Infof("checkpointDocId=%v, checkpointData=%v\n", checkpointDocId, checkpointData)
-
-	errorList := make([]error, 0)
-
-	replicationId, vbno, err := getReplicationIdAndVBFromCheckpointId(checkpointDocId)
-	if err != nil {
-		errorList = append(errorList, err)
-		return errorList
-	}
-
-	checkpoint, ok := checkpointData.(map[string]interface{})
-	if !ok {
-		err := incorrectMetadataValueTypeError(TypeCheckpoint, checkpointData, "map[string]interface{}")
-		errorList = append(errorList, err)
-		return errorList
-	}
-
-	var failoverUuid uint64
-	var seqno uint64
-	var dcpSnapshotSeqno uint64
-	var dcpSnapshotEndSeqno uint64
-	var targetVbUuid uint64
-	var commitOpaque uint64
-
-	failoverUuidData, ok := checkpoint[CheckpointFailoverUuid]
-	if ok {
-		failoverUuid, errorList = getUint64Value(CheckpointFailoverUuid, failoverUuidData, TypeCheckpoint, errorList)
-	} else {
-		errorList = append(errorList, missingRequiredFieldError(CheckpointFailoverUuid, TypeCheckpoint, checkpoint))
-	}
-
-	seqnoData, ok := checkpoint[CheckpointSeqno]
-	if ok {
-		seqno, errorList = getUint64Value(CheckpointSeqno, seqnoData, TypeCheckpoint, errorList)
-	} else {
-		errorList = append(errorList, missingRequiredFieldError(CheckpointSeqno, TypeCheckpoint, checkpoint))
-	}
-
-	// erlang commitOpaque consists of two parts, which are mapped to the following two fields in goxdcr, respectively:
-	// 1. targetVbUuid
-	// 2. commitOpaque
-	commitOaqueData, ok := checkpoint[CheckpointCommitOpaque]
-	if ok {
-		commitOpaqueArr, ok := commitOaqueData.([]interface{})
-		if !ok {
-			errorList = append(errorList, incorrectFieldValueTypeError(CheckpointCommitOpaque, commitOaqueData, TypeCheckpoint, "[]interface{}"))
-		} else {
-			if len(commitOpaqueArr) == 2 {
-				targetVbUuid, errorList = getUint64Value(CheckpointTargetVbUuid, commitOpaqueArr[0], TypeCheckpoint, errorList)
-				commitOpaque, errorList = getUint64Value(CheckpointCommitOpaque, commitOpaqueArr[1], TypeCheckpoint, errorList)
-			} else {
-				errorList = append(errorList, invalidFieldValueError(CheckpointCommitOpaque, commitOaqueData, TypeCheckpoint))
-			}
-		}
-
-	} else {
-		errorList = append(errorList, missingRequiredFieldError(CheckpointCommitOpaque, TypeCheckpoint, checkpoint))
-	}
-
-	// following are optional fields
-	dcpSnapshotSeqnoData, ok := checkpoint[CheckpointDCPSnapshotSeqno]
-	if ok {
-		dcpSnapshotSeqno, errorList = getUint64Value(CheckpointDCPSnapshotSeqno, dcpSnapshotSeqnoData, TypeCheckpoint, errorList)
-	}
-
-	dcpSnapshotEndSeqnoData, ok := checkpoint[CheckpointDCPSnapshotEndSeqno]
-	if ok {
-		dcpSnapshotEndSeqno, errorList = getUint64Value(CheckpointDCPSnapshotEndSeqno, dcpSnapshotEndSeqnoData, TypeCheckpoint, errorList)
-	}
-
-	if len(errorList) > 0 {
-		return errorList
-	}
-
-	checkpointRecord := &metadata.CheckpointRecord{
-		Failover_uuid:          failoverUuid,
-		Seqno:                  seqno,
-		Dcp_snapshot_seqno:     dcpSnapshotSeqno,
-		Dcp_snapshot_end_seqno: dcpSnapshotEndSeqno,
-		Target_vb_uuid:         targetVbUuid,
-		Target_Seqno:           commitOpaque,
-	}
-
-	service.logger.Infof("Checkpoint record constructed = %v\n", checkpointRecord)
-
-	// may need to delete the individual checkpoint doc for the vb if migration can be performed in multiple nodes
-	// delete checkpoint docs if they already exist
-	service.checkpoints_svc.DelCheckpointsDocs(replicationId)
-
-	err = service.checkpoints_svc.UpsertCheckpoints(replicationId, vbno, checkpointRecord)
-	if err != nil {
-		errorList = append(errorList, err)
-	}
-
-	service.logger.Infof("Done with checkpoint doc with id=%v. errorList=%v\n", checkpointDocId, errorList)
-
-	return errorList
-}
-
-*/
-
 func addErrorMapToErrorList(errorMap map[string]error, errorList []error) []error {
 	if len(errorMap) > 0 {
 		for _, indError := range errorMap {
@@ -898,5 +755,17 @@ func getReplicationIdAndVBFromCheckpointId(checkpointDocId string) (string, uint
 	} else {
 		return "", 0, invalidFieldValueError(CheckpointDocId, checkpointDocId, TypeCheckpoint)
 	}
+}
+
+func sanitizeForLogging (data map[string]interface{}) map[string]interface{}{
+	ret_map := make(map[string]interface{})
+	for key, value := range data {
+		if key == "password" {
+			ret_map[key] = "xxxx"
+		}else {
+			ret_map[key] = value
+		}
+	}
+	return ret_map
 }
 

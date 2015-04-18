@@ -10,6 +10,7 @@
 package metadata
 
 import (
+	"fmt"
 	"github.com/couchbase/goxdcr/base"
 	"strings"
 )
@@ -93,4 +94,8 @@ func (ref *RemoteClusterReference) SameRef(newRef *RemoteClusterReference) bool 
 	}
 	return ref.Id == newRef.Id && ref.Uuid == newRef.Uuid && ref.Name == newRef.Name &&
 		ref.HostName == newRef.HostName && ref.UserName == newRef.UserName && ref.Password == newRef.Password
+}
+
+func (ref *RemoteClusterReference) String() string {
+	return fmt.Sprintf("id:%v; uuid:%v; name:%v; hostName:%v; userName:%v; password:xxxx; demandEncryption:%v;certificate:%v", ref.Id, ref.Uuid, ref.Name, ref.HostName, ref.DemandEncryption, ref.Certificate) 
 }
