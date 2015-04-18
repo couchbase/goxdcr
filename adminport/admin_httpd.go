@@ -43,7 +43,6 @@ import (
 	"net"
 	"net/http"
 	"sync"
-	"time"
 )
 import _ "expvar"
 
@@ -74,8 +73,8 @@ func NewHTTPServer(name, connAddr, urlPrefix string, reqch chan<- Request, handl
 	s.srv = &http.Server{
 		Addr:           connAddr,
 		Handler:        nil,
-		ReadTimeout:    time.Duration(base.AdminportReadTimeout) * time.Millisecond,
-		WriteTimeout:   time.Duration(base.AdminportWriteTimeout) * time.Millisecond,
+		ReadTimeout:    base.AdminportReadTimeout,
+		WriteTimeout:   base.AdminportWriteTimeout,
 		MaxHeaderBytes: 1 << 20,
 	}
 	return s

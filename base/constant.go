@@ -11,6 +11,7 @@ package base
 
 import (
 	"errors"
+	"time"
 )
 
 //constants
@@ -74,13 +75,14 @@ var AdminportUrlPrefix = UrlDelimiter
 var AdminportNumber uint16 = 13000
 var GometaRequestPortNumber uint16 = 11000
 
-// AdminportReadTimeout timeout, in milliseconds, is read timeout for
-// golib's http server.
-var AdminportReadTimeout = 30000
+// read timeout for golib's http server.
+var AdminportReadTimeout = 1 * time.Second
 
-// AdminportWriteTimeout timeout, in milliseconds, is write timeout for
-// golib's http server.
-var AdminportWriteTimeout = 30000
+// write timeout for golib's http server.
+var AdminportWriteTimeout = 10 * time.Second
+
+// default time out for outgoing http requests if it is not explicitly specified
+var DefaultHttpTimeout = 180 * time.Second
 
 //outgoing nozzle type
 type XDCROutgoingNozzleType int
@@ -108,7 +110,7 @@ const (
 // metadata change listener related constants
 const (
 	ReplicationSpecChangeListener = "ReplicationSpecChangeListener"
-	RemoteClusterChangeListener = "RemoteClusterChangeListener"
+	RemoteClusterChangeListener   = "RemoteClusterChangeListener"
 )
 
 // constants for integer parsing

@@ -188,7 +188,11 @@ func QueryRestApiWithAuth(
 		}
 	}()
 
-	client.Timeout = timeout
+	if timeout > 0 {
+		client.Timeout = timeout
+	} else {
+		client.Timeout = base.DefaultHttpTimeout
+	}
 
 	res, err := client.Do(req)
 	if res != nil && res.Body != nil {

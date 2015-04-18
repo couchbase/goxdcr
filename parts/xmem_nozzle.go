@@ -1202,6 +1202,8 @@ func (xmem *XmemNozzle) batchGetMeta(bigDoc_map map[string]*base.WrappedMCReques
 						key, ok1 := keySeqno[0].(string)
 						seqno, ok2 := keySeqno[1].(uint64)
 						if ok1 && ok2 {
+							respMap[key] = response
+
 							additionalInfo := make(map[string]interface{})
 							additionalInfo[EVENT_ADDI_DOC_KEY] = key
 							additionalInfo[EVENT_ADDI_SEQNO] = seqno
