@@ -97,5 +97,5 @@ func (ref *RemoteClusterReference) SameRef(newRef *RemoteClusterReference) bool 
 }
 
 func (ref *RemoteClusterReference) String() string {
-	return fmt.Sprintf("id:%v; uuid:%v; name:%v; hostName:%v; userName:%v; password:xxxx; demandEncryption:%v;certificate:%v", ref.Id, ref.Uuid, ref.Name, ref.HostName, ref.DemandEncryption, ref.Certificate) 
+	return fmt.Sprintf("id:%v; uuid:%v; name:%v; hostName:%v; userName:%v; password:xxxx; demandEncryption:%v;certificate:%v", ref.Id, ref.Uuid, ref.Name, ref.HostName, ref.UserName, ref.DemandEncryption, ref.Certificate)
 }
