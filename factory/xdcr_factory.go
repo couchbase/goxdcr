@@ -261,12 +261,6 @@ func (xdcrf *XDCRFactory) constructOutgoingNozzles(spec *metadata.ReplicationSpe
 		return nil, nil, ErrorNoTargetNozzle
 	}
 
-	//if target cluster is prior to 4.0, set insecureSkipVerify=true
-	is40, err := xdcrf.cluster_info_svc.IsClusterCompatible(targetClusterRef, []int{4, 0})
-	if err != nil {
-		return nil, nil, err
-	}
-
 	targetBucket, err := xdcrf.cluster_info_svc.GetBucket(targetClusterRef, targetBucketName)
 	if err != nil || targetBucket == nil {
 		xdcrf.logger.Errorf("Error getting bucket, err=%v\n", err)
@@ -326,7 +320,7 @@ func (xdcrf *XDCRFactory) constructOutgoingNozzles(spec *metadata.ReplicationSpe
 			// construct outgoing nozzle
 			var outNozzle common.Nozzle
 			if isCapiNozzle {
-				outNozzle, err = xdcrf.constructCAPINozzle(spec.Id, targetClusterRef.UserName, targetClusterRef.Password, targetClusterRef.Certificate, !is40, vbList, vbCouchApiBaseMap, i, logger_ctx)
+				outNozzle, err = xdcrf.constructCAPINozzle(spec.Id, targetClusterRef.UserName, targetClusterRef.Password, targetClusterRef.Certificate, vbList, vbCouchApiBaseMap, i, logger_ctx)
 				if err != nil {
 					return nil, nil, err
 				}
@@ -398,7 +392,6 @@ func (xdcrf *XDCRFactory) constructCAPINozzle(topic string,
 	username string,
 	password string,
 	certificate []byte,
-	insecureSkipVerify bool,
 	vbList []uint16,
 	vbCouchApiBaseMap map[uint16]string,
 	nozzle_index int,
@@ -422,7 +415,7 @@ func (xdcrf *XDCRFactory) constructCAPINozzle(topic string,
 	xdcrf.logger.Debugf("Construct CapiNozzle: topic=%s, kvaddr=%s", topic, capiConnectionStr)
 	// partIds of the capi nozzles look like "capi_$topic_$kvaddr_1"
 	capiNozzle_Id := xdcrf.partId(CAPI_NOZZLE_NAME_PREFIX, topic, capiConnectionStr, nozzle_index)
-	nozzle := parts.NewCapiNozzle(capiNozzle_Id, capiConnectionStr, username, password, certificate, insecureSkipVerify, subVBCouchApiBaseMap, logger_ctx)
+	nozzle := parts.NewCapiNozzle(capiNozzle_Id, capiConnectionStr, username, password, certificate, subVBCouchApiBaseMap, logger_ctx)
 	return nozzle, nil
 }
 
@@ -487,17 +480,9 @@ func (xdcrf *XDCRFactory) constructSettingsForXmemNozzle(pipeline common.Pipelin
 			}
 			xdcrf.logger.Infof("mem_ssl_port=%v\n", mem_ssl_port)
 
-			is40, err := xdcrf.cluster_info_svc.IsClusterCompatible(targetClusterRef, []int{4, 0})
-			if err != nil {
-				return nil, err
-			}
-			xdcrf.logger.Infof("is40=%v\n", is40)
-
 			xmemSettings[parts.XMEM_SETTING_REMOTE_MEM_SSL_PORT] = mem_ssl_port
 			xmemSettings[parts.XMEM_SETTING_CERTIFICATE] = certificate
 			xmemSettings[parts.XMEM_SETTING_DEMAND_ENCRYPTION] = demandEncryption
-			xmemSettings[parts.XMEM_SETTING_INSECURESKIPVERIFY] = !is40
-
 			xdcrf.logger.Infof("xmemSettings=%v\n", xmemSettings)
 
 		} else {

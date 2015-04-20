@@ -103,6 +103,7 @@ func (remoteBucket *RemoteBucketInfo) refresh_internal(remote_cluster_svc Remote
 		remoteBucket.MemcachedAddrRestAddrMap[serverAddr] = u.Host
 	}
 	remoteBucket.logger.Infof("remoteBucket.MemcachedAddrRestAddrMap=%v\n", remoteBucket.MemcachedAddrRestAddrMap)
+
 	return nil
 }
 

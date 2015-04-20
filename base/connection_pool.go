@@ -96,7 +96,6 @@ type sslOverMemConnPool struct {
 	connPool
 	remote_memcached_port int
 	certificate           []byte
-	insecureSkipVerify    bool
 }
 
 type connPoolMgr struct {
@@ -205,7 +204,7 @@ func (p *sslOverProxyConnPool) Certificate() []byte {
 
 func (p *sslOverProxyConnPool) newConn() (*mcc.Client, error) {
 	//connect to local proxy port
-	ssl_con_str := p.hostName + UrlPortNumberDelimiter + strconv.FormatInt(int64(p.local_proxy_port), ParseIntBase)
+	ssl_con_str := LocalHostName + UrlPortNumberDelimiter + strconv.FormatInt(int64(p.local_proxy_port), ParseIntBase)
 	conn, err := net.Dial("tcp", ssl_con_str)
 	if err != nil {
 		ConnPoolMgr().logger.Errorf("Failed to establish ssl over proxy connection. err=%v\n", err)
@@ -298,17 +297,7 @@ func (p *sslOverMemConnPool) newConn() (*mcc.Client, error) {
 	ssl_con_str := p.hostName + UrlPortNumberDelimiter + strconv.FormatInt(int64(p.remote_memcached_port), ParseIntBase)
 
 	ConnPoolMgr().logger.Infof("Try to create a ssl over memcached connection on %v", ssl_con_str)
-	roots := x509.NewCertPool()
-	ok := roots.AppendCertsFromPEM(p.certificate)
-	if !ok {
-		panic("failed to parse root certificate")
-	}
-
-	ConnPoolMgr().logger.Infof("InSecureSkipVerify=%v\n", p.insecureSkipVerify)
-	conn, err := tls.Dial("tcp", ssl_con_str, &tls.Config{
-		RootCAs:            roots,
-		InsecureSkipVerify: p.insecureSkipVerify,
-	})
+	conn, _, err := MakeTLSConn(ssl_con_str, p.certificate, p.logger)
 	if err != nil {
 		return nil, err
 	}
@@ -428,7 +417,7 @@ func (connPoolMgr *connPoolMgr) GetOrCreatePool(poolNameToCreate string, hostnam
 	return pool, err
 }
 
-func (connPoolMgr *connPoolMgr) GetOrCreateSSLOverMemPool(poolNameToCreate string, hostname string, bucketname string, username string, password string, connsize int, remote_mem_port int, cert []byte, insecureSkipVerify bool) (ConnPool, error) {
+func (connPoolMgr *connPoolMgr) GetOrCreateSSLOverMemPool(poolNameToCreate string, hostname string, bucketname string, username string, password string, connsize int, remote_mem_port int, cert []byte) (ConnPool, error) {
 	connPoolMgr.map_lock.Lock()
 	defer connPoolMgr.map_lock.Unlock()
 
@@ -457,7 +446,6 @@ func (connPoolMgr *connPoolMgr) GetOrCreateSSLOverMemPool(poolNameToCreate strin
 			name:       poolNameToCreate,
 			logger:     log.NewLogger("sslConnPool", connPoolMgr.logger.LoggerContext())},
 		remote_memcached_port: remote_mem_port,
-		insecureSkipVerify:    insecureSkipVerify,
 		certificate:           cert}
 	p.init()
 
@@ -644,4 +632,50 @@ func NewConn(hostName string, username string, password string) (conn *mcc.Clien
 
 	ConnPoolMgr().logger.Debugf("%vs spent on authenticate to %v", time.Since(start_time).Seconds(), hostName)
 	return conn, nil
+}
+
+func MakeTLSConn(ssl_con_str string, certificate []byte, logger *log.CommonLogger) (*tls.Conn, *tls.Config, error) {
+	caPool := x509.NewCertPool()
+	ok := caPool.AppendCertsFromPEM(certificate)
+	if !ok {
+		return nil, nil, InvalidCerfiticateError
+	}
+
+	tlsConfig := &tls.Config{RootCAs: caPool}
+	tlsConfig.BuildNameToCertificate()
+	tlsConfig.InsecureSkipVerify = true
+
+	conn, err := tls.Dial("tcp", ssl_con_str, tlsConfig)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	connState := conn.ConnectionState()
+	peer_certs := connState.PeerCertificates
+
+	opts := x509.VerifyOptions{
+		Roots:         tlsConfig.RootCAs,
+		CurrentTime:   time.Now(),
+		Intermediates: x509.NewCertPool(),
+	}
+	if len(peer_certs[0].IPAddresses) > 0 {
+		opts.DNSName = connState.ServerName
+	} else {
+		logger.Debug("remote peer has a certificate which doesn't have IP SANs, skip verifying ServerName")
+	}
+
+	for i, cert := range peer_certs {
+		if i == 0 {
+			continue
+		}
+		opts.Intermediates.AddCert(cert)
+	}
+	_, err = peer_certs[0].Verify(opts)
+	if err != nil {
+		//close the conn
+		conn.Close()
+		return nil, nil, err
+	}
+	return conn, tlsConfig, nil
+
 }

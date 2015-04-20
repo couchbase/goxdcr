@@ -2,7 +2,6 @@ package utils
 
 import (
 	"bytes"
-	"crypto/tls"
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
@@ -24,7 +23,6 @@ import (
 var ErrorRetrievingSSLPort = errors.New("Could not get ssl port of remote cluster.")
 var ErrorRetrievingMemcachedSSLPort = errors.New("Could not get memcached ssl port of remote cluster")
 var ErrorRetrievingCouchApiBase = errors.New("Could not get couchApiBase in the response of /nodes/self.")
-var InvalidCerfiticateError = errors.New("certificate must be a single, PEM-encoded x509 certificate and nothing more (failed to parse given certificate)")
 
 func GetMemcachedSSLPort(hostName, username, password, bucket string, logger *log.CommonLogger) (map[string]uint16, error) {
 	ret := make(map[string]uint16)
@@ -40,7 +38,7 @@ func GetMemcachedSSLPort(hostName, username, password, bucket string, logger *lo
 
 		logger.Infof("GetMemcachedSSLPort, hostName=%v\n", hostName)
 		url := base.BPath + base.UrlDelimiter + bucket
-		err, _ = QueryRestApiWithAuth(hostName, url, false, username, password, nil, true, base.MethodGet, "", nil, 0, &servicesInfo, logger)
+		err, _ = QueryRestApiWithAuth(hostName, url, false, username, password, nil, base.MethodGet, "", nil, 0, &servicesInfo, logger)
 		if err != nil {
 			return nil, err
 		}
@@ -107,7 +105,7 @@ func GetMemcachedSSLPort(hostName, username, password, bucket string, logger *lo
 func GetXDCRSSLPort(hostName, userName, password string, logger *log.CommonLogger) (uint16, error, bool) {
 
 	portsInfo := make(map[string]interface{})
-	err, _ := QueryRestApiWithAuth(hostName, base.SSLPortsPath, false, userName, password, nil, true, base.MethodGet, "", nil, 0, &portsInfo, logger)
+	err, _ := QueryRestApiWithAuth(hostName, base.SSLPortsPath, false, userName, password, nil, base.MethodGet, "", nil, 0, &portsInfo, logger)
 	if err != nil {
 		return 0, err, false
 	}
@@ -136,7 +134,7 @@ func QueryRestApi(baseURL string,
 	timeout time.Duration,
 	out interface{},
 	logger *log.CommonLogger) (error, int) {
-	return QueryRestApiWithAuth(baseURL, path, preservePathEncoding, "", "", nil, true, httpCommand, contentType, body, timeout, out, logger)
+	return QueryRestApiWithAuth(baseURL, path, preservePathEncoding, "", "", nil, httpCommand, contentType, body, timeout, out, logger)
 }
 
 func EnforcePrefix(prefix string, str string) string {
@@ -162,7 +160,6 @@ func QueryRestApiWithAuth(
 	username string,
 	password string,
 	certificate []byte,
-	insecureSkipVerify bool,
 	httpCommand string,
 	contentType string,
 	body []byte,
@@ -170,14 +167,14 @@ func QueryRestApiWithAuth(
 	out interface{},
 	logger *log.CommonLogger) (error, int) {
 
-	req, err := ConstructHttpRequest(baseURL, path, preservePathEncoding, username, password, certificate, httpCommand, contentType, body, logger)
+	req, host, err := ConstructHttpRequest(baseURL, path, preservePathEncoding, username, password, certificate, httpCommand, contentType, body, logger)
 	if err != nil {
 		return err, 0
 	}
 
 	var l *log.CommonLogger = loggerForFunc(logger)
 
-	client, err := getHttpClient(certificate, insecureSkipVerify, logger)
+	client, err := getHttpClient(certificate, host, logger)
 	if err != nil {
 		l.Errorf("Failed to get client for request, req=%v\n", req)
 		return err, 0
@@ -247,7 +244,7 @@ func InvokeRestWithRetryWithAuth(baseURL string,
 	logger *log.CommonLogger, num_retry int) (error, int) {
 	err, statusCode := QueryRestApiWithAuth(baseURL,
 		path, preservePathEncoding, username,
-		password, certificate, insecureSkipVerify,
+		password, certificate,
 		httpCommand,
 		contentType,
 		body,
@@ -266,19 +263,24 @@ func InvokeRestWithRetryWithAuth(baseURL string,
 
 }
 
-func getHttpClient(certificate []byte, insecureSkipVerify bool, logger *log.CommonLogger) (*http.Client, error) {
+func getHttpClient(certificate []byte, ssl_con_str string, logger *log.CommonLogger) (*http.Client, error) {
 	var client *http.Client
 	if len(certificate) != 0 {
 		//https
 		caPool := x509.NewCertPool()
 		ok := caPool.AppendCertsFromPEM(certificate)
 		if !ok {
-			return nil, InvalidCerfiticateError
+			return nil, base.InvalidCerfiticateError
 		}
 
-		tlsConfig := &tls.Config{RootCAs: caPool}
-		tlsConfig.BuildNameToCertificate()
-		tlsConfig.InsecureSkipVerify = insecureSkipVerify
+		//using a separate tls connection to verify certificate
+		//it can be changed in 1.4 when DialTLS is avaialbe in http.Transport
+		conn, tlsConfig, err := base.MakeTLSConn(ssl_con_str, certificate, logger)
+		if err != nil {
+			return nil, err
+		}
+		conn.Close()
+
 		tr := &http.Transport{TLSClientConfig: tlsConfig}
 		tr.DisableKeepAlives = true
 		client = &http.Client{Transport: tr}
@@ -309,7 +311,7 @@ func ConstructHttpRequest(
 	httpCommand string,
 	contentType string,
 	body []byte,
-	logger *log.CommonLogger) (*http.Request, error) {
+	logger *log.CommonLogger) (*http.Request, string, error) {
 	var baseURL_new string
 
 	//process the URL
@@ -320,7 +322,7 @@ func ConstructHttpRequest(
 	}
 	u, err := couchbase.ParseURL(baseURL_new)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 
 	var l *log.CommonLogger = loggerForFunc(logger)
@@ -336,7 +338,7 @@ func ConstructHttpRequest(
 
 		req, err = http.NewRequest(httpCommand, u.String(), bytes.NewBuffer(body))
 		if err != nil {
-			return nil, err
+			return nil, "", err
 		}
 	} else {
 		// use url.Opaque to preserve encoding
@@ -350,7 +352,7 @@ func ConstructHttpRequest(
 
 		req, err = http.NewRequest(httpCommand, baseURL_new, bytes.NewBuffer(body))
 		if err != nil {
-			return nil, err
+			return nil, "", err
 		}
 
 		// get the original Opaque back
@@ -367,7 +369,7 @@ func ConstructHttpRequest(
 		err := cbauth.SetRequestAuth(req)
 		if err != nil {
 			l.Errorf("Failed to set authentication to request, req=%v\n", req)
-			return nil, err
+			return nil, "", err
 		}
 	} else {
 		req.SetBasicAuth(username, password)
@@ -376,7 +378,7 @@ func ConstructHttpRequest(
 	//TODO: log request would log password barely
 	l.Debugf("http request=%v\n", req)
 
-	return req, nil
+	return req, u.Host, nil
 }
 
 // encode http request into wire format

@@ -233,11 +233,6 @@ func (capi_svc *CAPIService) composeAPIRequestBase(remoteBucket *service_def.Rem
 
 	couchApiBaseUrl := connectionStr
 
-	is40, err := capi_svc.cluster_info_service.IsClusterCompatible(remoteBucket.RemoteClusterRef, []int{4, 0})
-	if err != nil {
-		return nil, err
-	}
-
 	//	    BodyBase = [{<<"bucket">>, Bucket},
 	//                {<<"bucketUUID">>, BucketUUID}],
 	api_base := &apiRequest{}
@@ -248,7 +243,6 @@ func (capi_svc *CAPIService) composeAPIRequestBase(remoteBucket *service_def.Rem
 	api_base.body["bucket"] = remoteBucket.BucketName
 	api_base.body["bucketUUID"] = remoteBucket.UUID
 	api_base.certificate = remoteBucket.RemoteClusterRef.Certificate
-	api_base.insecureSkipVerify = !is40
 	return api_base, nil
 }
 

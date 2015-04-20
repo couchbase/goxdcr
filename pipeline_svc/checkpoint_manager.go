@@ -780,25 +780,29 @@ func (ckmgr *CheckpointManager) massCheckVBOpaues() error {
 	target_vb_vbuuid_map := make(map[uint16]metadata.TargetVBOpaque)
 	for vb, latest_ckpt_record := range ckmgr.cur_ckpts {
 		target_vb_uuid := latest_ckpt_record.Target_vb_opaque
-		target_vb_vbuuid_map[vb] = target_vb_uuid
-	}
-
-	matching, mismatching, missing, err1 := ckmgr.capi_svc.MassValidateVBUUIDs(ckmgr.remote_bucket, target_vb_vbuuid_map)
-	if err1 != nil {
-		ckmgr.logger.Errorf("MassValidateVBUUID failed, err=%v", err1)
-		return err1
-	} else {
-		if len(matching) != len(target_vb_vbuuid_map) {
-			//error
-			ckmgr.logger.Errorf("Target bucket for replication %v's topology has changed. mismatch=%v, missing=%v\n", ckmgr.pipeline.Topic(), mismatching, missing)
-			err := errors.New("Target bucket's topology has changed")
-			otherInfo := utils.WrapError(err)
-			ckmgr.RaiseEvent(common.ErrorEncountered, nil, ckmgr, nil, otherInfo)
-
-		} else {
-			ckmgr.logger.Infof("No target bucket topology change is detected for replication %v", ckmgr.pipeline.Topic())
+		if target_vb_uuid != nil {
+			target_vb_vbuuid_map[vb] = target_vb_uuid
 		}
-		return nil
 	}
 
+	if len(target_vb_vbuuid_map) > 0 {
+		matching, mismatching, missing, err1 := ckmgr.capi_svc.MassValidateVBUUIDs(ckmgr.remote_bucket, target_vb_vbuuid_map)
+		if err1 != nil {
+			ckmgr.logger.Errorf("MassValidateVBUUID failed, err=%v", err1)
+			return err1
+		} else {
+			if len(matching) != len(target_vb_vbuuid_map) {
+				//error
+				ckmgr.logger.Errorf("Target bucket for replication %v's topology has changed. mismatch=%v, missing=%v\n", ckmgr.pipeline.Topic(), mismatching, missing)
+				err := errors.New("Target bucket's topology has changed")
+				otherInfo := utils.WrapError(err)
+				ckmgr.RaiseEvent(common.ErrorEncountered, nil, ckmgr, nil, otherInfo)
+
+			} else {
+				ckmgr.logger.Infof("No target bucket topology change is detected for replication %v", ckmgr.pipeline.Topic())
+			}
+			return nil
+		}
+	}
+	return nil
 }

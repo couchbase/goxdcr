@@ -233,7 +233,7 @@ func (adminport *Adminport) doCreateRemoteClusterRequest(request *http.Request) 
 	}
 
 	logger_ap.Infof("Request params: justValidate=%v, remoterClusterRef=%v\n",
-		justValidate, *remoteClusterRef)
+		justValidate, remoteClusterRef)
 
 	if justValidate {
 		err = remoteClusterService.ValidateAddRemoteCluster(remoteClusterRef)

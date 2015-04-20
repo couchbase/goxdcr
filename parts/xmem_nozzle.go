@@ -53,7 +53,6 @@ const (
 	default_selfMonitorInterval time.Duration = 1 * time.Second
 	default_demandEncryption    bool          = false
 	default_max_downtime        time.Duration = 3 * time.Second
-	default_insecureSkipVerify  bool          = false
 )
 
 const (
@@ -469,7 +468,6 @@ type xmemConfig struct {
 	bucketName string
 	//the duration to wait for the batch-sending to finish
 	certificate        []byte
-	insecureSkipVerify bool
 	demandEncryption   bool
 	remote_proxy_port  uint16
 	local_proxy_port   uint16
@@ -497,7 +495,6 @@ func newConfig(logger *log.CommonLogger) xmemConfig {
 		bucketName:         "",
 		respTimeout:        default_resptimeout,
 		demandEncryption:   default_demandEncryption,
-		insecureSkipVerify: default_insecureSkipVerify,
 		certificate:        []byte{},
 		remote_proxy_port:  0,
 		local_proxy_port:   0,
@@ -521,9 +518,6 @@ func (config *xmemConfig) initializeConfig(settings map[string]interface{}) erro
 				config.certificate = val.([]byte)
 			} else {
 				return errors.New("demandEncryption=true, but certificate is not set in settings")
-			}
-			if val, ok := settings[XMEM_SETTING_INSECURESKIPVERIFY]; ok {
-				config.insecureSkipVerify = val.(bool)
 			}
 
 			if val, ok := settings[XMEM_SETTING_REMOTE_MEM_SSL_PORT]; ok {
@@ -1350,7 +1344,7 @@ func (xmem *XmemNozzle) getConnPool() (pool base.ConnPool, err error) {
 		if xmem.config.memcached_ssl_port != 0 {
 			xmem.Logger().Infof("Get or create ssl over memcached connection, memcached_ssl_port=%v\n", int(xmem.config.memcached_ssl_port))
 			pool, err = base.ConnPoolMgr().GetOrCreateSSLOverMemPool(poolName, hostName, xmem.config.bucketName, xmem.config.bucketName, xmem.config.password,
-				base.DefaultConnectionSize, int(xmem.config.memcached_ssl_port), xmem.config.certificate, xmem.config.insecureSkipVerify)
+				base.DefaultConnectionSize, int(xmem.config.memcached_ssl_port), xmem.config.certificate)
 
 		} else {
 			xmem.Logger().Infof("Get or create ssl over proxy connection")

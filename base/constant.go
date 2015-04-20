@@ -211,3 +211,5 @@ const (
 
 // constant used in replication info to ensure compatibility with erlang xdcr
 var MaxVBReps = "max_vbreps"
+
+var InvalidCerfiticateError = errors.New("certificate must be a single, PEM-encoded x509 certificate and nothing more (failed to parse given certificate)")
