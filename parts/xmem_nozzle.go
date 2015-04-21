@@ -42,7 +42,7 @@ const (
 	XMEM_SETTING_REMOTE_MEM_SSL_PORT = "remote_ssl_port"
 
 	//default configuration
-	default_numofretry          int           = 10
+	default_numofretry          int           = 5
 	default_resptimeout         time.Duration = 2000 * time.Millisecond
 	default_dataChannelSize                   = 5000
 	default_batchExpirationTime               = 300 * time.Millisecond
@@ -563,6 +563,7 @@ type xmemClient struct {
 	logger                 *log.CommonLogger
 	poolName               string
 	healthy                bool
+	num_of_repairs         int
 }
 
 func newXmemClient(name string, read_timeout, write_timeout time.Duration,
@@ -578,6 +579,7 @@ func newXmemClient(name string, read_timeout, write_timeout time.Duration,
 		max_downtime:           max_downtime,
 		max_continuous_failure: max_continuous_failure,
 		healthy:                true,
+		num_of_repairs:         0,
 		lock:                   sync.RWMutex{}}
 }
 
@@ -638,6 +640,7 @@ func (client *xmemClient) repairConn(memClient *mcc.Client) {
 	client.memClient.Close()
 	client.memClient = memClient
 	client.continuous_failure_counter = 0
+	client.num_of_repairs++
 	client.healthy = true
 }
 
@@ -655,6 +658,13 @@ func (client *xmemClient) close() {
 		}
 	}
 	client.memClient.Close()
+}
+
+func (client *xmemClient) repairCount() int {
+	client.lock.RLock()
+	defer client.lock.RUnlock()
+
+	return client.num_of_repairs
 }
 
 /************************************
@@ -1563,6 +1573,9 @@ func (xmem *XmemNozzle) selfMonitor(finch chan bool, waitGrp *sync.WaitGroup) {
 	ticker := time.Tick(xmem.config.selfMonitorInterval)
 	statsTicker := time.Tick(xmem.config.statsInterval)
 	var sent_count int = 0
+	var resp_waitingConfirm_count int = 0
+	var repairCount_setMeta = 0
+	var repairCount_getMeta = 0
 	var count uint64
 	freeze_counter := 0
 	idle_counter := 0
@@ -1577,8 +1590,10 @@ func (xmem *XmemNozzle) selfMonitor(finch chan bool, waitGrp *sync.WaitGroup) {
 			}
 
 			count++
-			if xmem.counter_sent == sent_count {
-				if len(xmem.dataChan) > 0 {
+			if xmem.counter_sent == sent_count && int(xmem.buf.itemCountInBuffer()) == resp_waitingConfirm_count {
+				if (len(xmem.dataChan) > 0 || xmem.buf.itemCountInBuffer() != 0) &&
+					repairCount_setMeta == xmem.client_for_setMeta.repairCount() &&
+					repairCount_getMeta == xmem.client_for_getMeta.repairCount() {
 					freeze_counter++
 					idle_counter = 0
 				} else {
@@ -1590,6 +1605,9 @@ func (xmem *XmemNozzle) selfMonitor(finch chan bool, waitGrp *sync.WaitGroup) {
 				idle_counter = 0
 			}
 			sent_count = xmem.counter_sent
+			resp_waitingConfirm_count = int(xmem.buf.itemCountInBuffer())
+			repairCount_setMeta = xmem.client_for_setMeta.repairCount()
+			repairCount_getMeta = xmem.client_for_getMeta.repairCount()
 			if count == 10 {
 				xmem.Logger().Debugf("%v- freeze_counter=%v, xmem.counter_sent=%v, len(xmem.dataChan)=%v, receive_count-%v, cur_batch_count=%v\n", xmem.Id(), freeze_counter, xmem.counter_sent, len(xmem.dataChan), xmem.counter_received, xmem.batch.count())
 				xmem.Logger().Debugf("%v open=%v checking..., %v item unsent, received %v items, sent %v items, %v items waiting for response, %v batches ready, current batch timeout at %v, current batch expire_ch size is %v\n", xmem.Id(), xmem.IsOpen(), len(xmem.dataChan), xmem.counter_received, xmem.counter_sent, int(xmem.buf.bufferSize())-len(xmem.buf.empty_slots_pos), len(xmem.batches_ready), xmem.batch.start_time.Add(xmem.batch.expiring_duration), len(xmem.batch.expire_ch))
@@ -1702,6 +1720,12 @@ func (xmem *XmemNozzle) resend(req *bufferedMCRequest, pos uint16) (bool, error)
 	return false, err
 }
 
+func (xmem *XmemNozzle) resendForNewConn(req *bufferedMCRequest, pos uint16) (bool, error) {
+	xmem.Logger().Debugf("%v Retry sending %s, retry=%v", xmem.Id(), req.req.Req.Key, req.num_of_retry)
+	err := xmem.sendSingleSetMeta(false, req.req, pos)
+	return false, err
+}
+
 func (xmem *XmemNozzle) adjustRequest(req *base.WrappedMCRequest, index uint16) {
 	mc_req := req.Req
 	mc_req.Opcode = xmem.encodeOpCode(mc_req.Opcode)
@@ -1792,6 +1816,8 @@ func (xmem *XmemNozzle) writeToClient(client *xmemClient, bytes []byte) error {
 		xmem.Logger().Errorf("%v writeToClient error: %s\n", xmem.Id(), fmt.Sprint(err))
 
 		if isSeriousError(err) {
+			//in this case, it is likely the connections in this pool would suffer the same problem, release all the connections
+			xmem.releasePool()
 			xmem.repairConn(client, err.Error())
 
 		} else if isNetError(err) {
@@ -1823,6 +1849,8 @@ func (xmem *XmemNozzle) readFromClient(client *xmemClient) (*mc.MCResponse, erro
 		if err == io.EOF {
 			return nil, connectionClosedError
 		} else if isSeriousError(err) {
+			//in this case, it is likely the connections in this pool would suffer the same problem, release all the connections
+			xmem.releasePool()
 			xmem.repairConn(client, err.Error())
 			return nil, badConnectionError
 		} else if isNetError(err) {
@@ -1898,7 +1926,7 @@ func (xmem *XmemNozzle) repairConn(client *xmemClient, reason string) error {
 func (xmem *XmemNozzle) onSetMetaConnRepaired() {
 	size := xmem.buf.bufferSize()
 	for i := 0; i < int(size); i++ {
-		xmem.buf.modSlot(uint16(i), xmem.resend)
+		xmem.buf.modSlot(uint16(i), xmem.resendForNewConn)
 	}
 	xmem.Logger().Infof("%v - The unresponded items are resent\n", xmem.Id())
 
@@ -1958,6 +1986,7 @@ func (xmem *XmemNozzle) packageRequest(count int, reqs_bytes []byte) []byte {
 }
 
 func (xmem *XmemNozzle) releasePool() {
+	xmem.Logger().Infof("release pool %v\n", getPoolName(xmem.config))
 	pool := base.ConnPoolMgr().GetPool(getPoolName(xmem.config))
 	if pool != nil {
 		pool.ReleaseConnections()

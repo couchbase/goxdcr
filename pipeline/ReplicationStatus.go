@@ -220,10 +220,6 @@ func (rs *ReplicationStatus) Settings() *metadata.ReplicationSettings {
 	return rs.rep_spec.Settings
 }
 
-//func (rs *ReplicationStatus) PutSettings(settings map[string]interface{}) {
-//	rs.settings = settings
-//}
-
 func (rs *ReplicationStatus) Errors() PipelineErrorArray {
 	return rs.err_list
 }

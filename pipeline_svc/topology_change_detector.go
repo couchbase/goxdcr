@@ -7,6 +7,7 @@ import (
 	comp "github.com/couchbase/goxdcr/component"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/parts"
+	"github.com/couchbase/goxdcr/pipeline_utils"
 	"github.com/couchbase/goxdcr/service_def"
 	"github.com/couchbase/goxdcr/utils"
 	"sync"
@@ -101,6 +102,12 @@ func (top_detect_svc *TopologyChangeDetectorSvc) watch(fin_ch chan bool, waitGrp
 }
 
 func (top_detect_svc *TopologyChangeDetectorSvc) validate(checkingTargetVersion bool) {
+	err := top_detect_svc.validateSourceTopology()
+	if err != nil && err == source_topology_changedErr {
+		otherInfo := utils.WrapError(err)
+		top_detect_svc.RaiseEvent(common.ErrorEncountered, nil, top_detect_svc, nil, otherInfo)
+	}
+
 	if checkingTargetVersion {
 		err := top_detect_svc.validateTargetVersion()
 		if err != nil && err == target_cluster_versionChangeErr {
@@ -148,4 +155,42 @@ func (top_detect_svc *TopologyChangeDetectorSvc) needCheckTarget() bool {
 
 	}
 	return false
+}
+
+func (top_detect_svc *TopologyChangeDetectorSvc) validateSourceTopology() error {
+	top_detect_svc.logger.Info("validateSourceTopology...")
+	vblist_now := pipeline_utils.GetSourceVBListPerPipeline(top_detect_svc.pipeline)
+
+	vblist_supposed := []uint16{}
+	kv_vb_map, err := pipeline_utils.GetSourceVBListForReplication(top_detect_svc.cluster_info_svc, top_detect_svc.xdcr_topology_svc, top_detect_svc.pipeline.Specification(), top_detect_svc.logger)
+	if err != nil {
+		return err
+	}
+
+	for _, vblist := range kv_vb_map {
+		vblist_supposed = append(vblist_supposed, vblist...)
+	}
+
+	if len(vblist_now) != len(vblist_supposed) {
+		return source_topology_changedErr
+	} else {
+		for _, vbno := range vblist_supposed {
+			found := func(vbno uint16, vblist_now []uint16) bool {
+				for _, vb := range vblist_now {
+					if vb == vbno {
+						return true
+					}
+				}
+
+				return false
+			}(vbno, vblist_now)
+			if !found {
+				top_detect_svc.logger.Errorf("Source topology has changed - vblist_supposed=%v, vblist_now=%v\n", vblist_supposed, vblist_now)
+				return source_topology_changedErr
+
+			}
+		}
+	}
+
+	return nil
 }
