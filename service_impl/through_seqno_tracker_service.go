@@ -55,7 +55,7 @@ func (tsTracker *ThroughSeqnoTrackerSvc) initialize(pipeline common.Pipeline) {
 
 		tsTracker.vb_notsent_seqno_list_map[vbno] = make([]int, 0)
 		tsTracker.vb_notsent_seqno_list_locks[vbno] = &sync.RWMutex{}
-		
+
 		tsTracker.through_seqno_map[vbno] = 0
 	}
 }
@@ -147,16 +147,15 @@ func (tsTracker *ThroughSeqnoTrackerSvc) GetThroughSeqno(vbno uint16) uint64 {
 		// seqno+N = seqno_list[endIndex] by now
 		through_seqno = uint64(seqno_list[endIndex])
 		tsTracker.through_seqno_map[vbno] = through_seqno
-		// truncate all entries up to and including through_seqno to expedite future searches
+		// truncate all entries no larger than through_seqno to expedite future searches
 		tsTracker.vb_notsent_seqno_list_map[vbno] = seqno_list[endIndex+1:]
 	} else {
 		// did not find seqno + 1
 
 		through_seqno = seqno
-		if index > 0 {
-			// truncate all entries smaller than through_seqno to expedite future searches
-			tsTracker.vb_notsent_seqno_list_map[vbno] = seqno_list[index:]
-		}
+		tsTracker.through_seqno_map[vbno] = through_seqno
+		// truncate all entries no larger than through_seqno to expedite future searches
+		tsTracker.vb_notsent_seqno_list_map[vbno] = seqno_list[index:]
 	}
 
 	return through_seqno
