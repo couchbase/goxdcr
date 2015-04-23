@@ -14,6 +14,7 @@ import (
 	"crypto/x509"
 	"encoding/binary"
 	"encoding/json"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	mcc "github.com/couchbase/gomemcached/client"
@@ -641,6 +642,15 @@ func MakeTLSConn(ssl_con_str string, certificate []byte, logger *log.CommonLogge
 		return nil, nil, InvalidCerfiticateError
 	}
 
+	block, _ := pem.Decode([]byte(certificate))
+	if block == nil {
+		return nil, nil, InvalidCerfiticateError
+	}
+	cert_remote, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		return nil, nil, InvalidCerfiticateError
+	}
+
 	tlsConfig := &tls.Config{RootCAs: caPool}
 	tlsConfig.BuildNameToCertificate()
 	tlsConfig.InsecureSkipVerify = true
@@ -650,31 +660,35 @@ func MakeTLSConn(ssl_con_str string, certificate []byte, logger *log.CommonLogge
 		return nil, nil, err
 	}
 
-	connState := conn.ConnectionState()
-	peer_certs := connState.PeerCertificates
+	if cert_remote.IsCA {
+		connState := conn.ConnectionState()
+		peer_certs := connState.PeerCertificates
 
-	opts := x509.VerifyOptions{
-		Roots:         tlsConfig.RootCAs,
-		CurrentTime:   time.Now(),
-		Intermediates: x509.NewCertPool(),
-	}
-	if len(peer_certs[0].IPAddresses) > 0 {
-		opts.DNSName = connState.ServerName
-	} else {
-		logger.Debug("remote peer has a certificate which doesn't have IP SANs, skip verifying ServerName")
-	}
-
-	for i, cert := range peer_certs {
-		if i == 0 {
-			continue
+		opts := x509.VerifyOptions{
+			Roots:         tlsConfig.RootCAs,
+			CurrentTime:   time.Now(),
+			Intermediates: x509.NewCertPool(),
 		}
-		opts.Intermediates.AddCert(cert)
-	}
-	_, err = peer_certs[0].Verify(opts)
-	if err != nil {
-		//close the conn
-		conn.Close()
-		return nil, nil, err
+
+		if len(peer_certs[0].IPAddresses) > 0 {
+			opts.DNSName = connState.ServerName
+		} else {
+			logger.Debug("remote peer has a certificate which doesn't have IP SANs, skip verifying ServerName")
+		}
+
+		for i, cert := range peer_certs {
+			if i == 0 {
+				continue
+			}
+			opts.Intermediates.AddCert(cert)
+		}
+		_, err = peer_certs[0].Verify(opts)
+
+		if err != nil {
+			//close the conn
+			conn.Close()
+			return nil, nil, err
+		}
 	}
 	return conn, tlsConfig, nil
 
