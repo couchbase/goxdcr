@@ -11,6 +11,7 @@ package base
 
 import (
 	"errors"
+	mc "github.com/couchbase/gomemcached"
 	"time"
 )
 
@@ -213,3 +214,9 @@ const (
 var MaxVBReps = "max_vbreps"
 
 var InvalidCerfiticateError = errors.New("certificate must be a single, PEM-encoded x509 certificate and nothing more (failed to parse given certificate)")
+
+const (
+	GET_WITH_META    = mc.CommandCode(0xa0)
+	SET_WITH_META    = mc.CommandCode(0xa2)
+	DELETE_WITH_META = mc.CommandCode(0xa8)
+)

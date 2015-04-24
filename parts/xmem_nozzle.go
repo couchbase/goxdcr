@@ -59,12 +59,6 @@ const (
 	default_backoff_wait_time time.Duration = 10 * time.Millisecond
 )
 
-const (
-	GET_WITH_META    = mc.CommandCode(0xa0)
-	SET_WITH_META    = mc.CommandCode(0xa2)
-	DELETE_WITH_META = mc.CommandCode(0xa8)
-)
-
 var xmem_setting_defs base.SettingDefinitions = base.SettingDefinitions{SETTING_BATCHCOUNT: base.NewSettingDef(reflect.TypeOf((*int)(nil)), true),
 	SETTING_BATCHSIZE:               base.NewSettingDef(reflect.TypeOf((*int)(nil)), true),
 	SETTING_NUMOFRETRY:              base.NewSettingDef(reflect.TypeOf((*int)(nil)), false),
@@ -1341,7 +1335,7 @@ func (xmem *XmemNozzle) composeRequestForGetMeta(key string, vb uint16, opaque u
 	return &mc.MCRequest{VBucket: vb,
 		Key:    []byte(key),
 		Opaque: opaque,
-		Opcode: GET_WITH_META}
+		Opcode: base.GET_WITH_META}
 }
 
 func (xmem *XmemNozzle) sendSingleSetMeta(adjustRequest bool, item *base.WrappedMCRequest, index uint16) error {
@@ -1780,9 +1774,9 @@ func (xmem *XmemNozzle) getPosFromOpaque(opaque uint32) uint16 {
 
 func (xmem *XmemNozzle) encodeOpCode(code mc.CommandCode) mc.CommandCode {
 	if code == mc.UPR_MUTATION || code == mc.TAP_MUTATION {
-		return SET_WITH_META
+		return base.SET_WITH_META
 	} else if code == mc.TAP_DELETE || code == mc.UPR_DELETION || code == mc.UPR_EXPIRATION {
-		return DELETE_WITH_META
+		return base.DELETE_WITH_META
 	}
 	return code
 }

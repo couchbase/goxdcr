@@ -10,10 +10,12 @@
 package pipeline_svc
 
 import (
+	"encoding/binary"
 	"errors"
 	"expvar"
 	"fmt"
 	"github.com/couchbase/gomemcached"
+	mc "github.com/couchbase/gomemcached"
 	mcc "github.com/couchbase/gomemcached/client"
 	base "github.com/couchbase/goxdcr/base"
 	common "github.com/couchbase/goxdcr/common"
@@ -34,18 +36,31 @@ import (
 
 const (
 	// the number of docs written/sent to target cluster
-	DOCS_WRITTEN_METRIC = "docs_written"
+	DOCS_WRITTEN_METRIC          = "docs_written"
+	EXPIRY_DOCS_WRITTEN_METRIC   = "expiry_docs_written"
+	DELETION_DOCS_WRITTEN_METRIC = "deletion_docs_written"
+	SET_DOCS_WRITTEN_METRIC      = "set_docs_written"
+
 	// the number of docs processed by pipeline
 	DOCS_PROCESSED_METRIC  = "docs_processed"
 	DATA_REPLICATED_METRIC = "data_replicated"
 	SIZE_REP_QUEUE_METRIC  = "size_rep_queue"
 	DOCS_REP_QUEUE_METRIC  = "docs_rep_queue"
-	DOCS_FILTERED_METRIC   = "docs_filtered"
+
+	DOCS_FILTERED_METRIC     = "docs_filtered"
+	EXPIRY_FILTERED_METRIC   = "expiry_filtered"
+	DELETION_FILTERED_METRIC = "deletion_filtered"
+	SET_FILTERED_METRIC      = "set_filtered"
+
 	// the number of docs that failed conflict resolution on the source cluster side due to optimistic replication
-	DOCS_FAILED_CR_SOURCE_METRIC = "docs_failed_cr_source"
-	CHANGES_LEFT_METRIC          = "changes_left"
-	DOCS_LATENCY_METRIC          = "wtavg_docs_latency"
-	META_LATENCY_METRIC          = "wtavg_meta_latency"
+	DOCS_FAILED_CR_SOURCE_METRIC     = "docs_failed_cr_source"
+	EXPIRY_FAILED_CR_SOURCE_METRIC   = "expiry_failed_cr_source"
+	DELETION_FAILED_CR_SOURCE_METRIC = "deletion_failed_cr_source"
+	SET_FAILED_CR_SOURCE_METRIC      = "set_failed_cr_source"
+
+	CHANGES_LEFT_METRIC = "changes_left"
+	DOCS_LATENCY_METRIC = "wtavg_docs_latency"
+	META_LATENCY_METRIC = "wtavg_meta_latency"
 
 	//checkpointing related statistics
 	DOCS_CHECKED_METRIC    = "docs_checked" //calculated
@@ -59,6 +74,10 @@ const (
 
 	DOCS_RECEIVED_DCP_METRIC = "docs_received_from_dcp"
 	RATE_RECEIVED_DCP_METRIC = "rate_received_from_dcp"
+
+	EXPIRY_RECEIVED_DCP_METRIC   = "expiry_received_from_dcp"
+	DELETION_RECEIVED_DCP_METRIC = "deletion_received_from_dcp"
+	SET_RECEIVED_DCP_METRIC      = "set_received_from_dcp"
 
 	//	TIME_COMMITTING_METRIC = "time_committing"
 	//rate
@@ -641,15 +660,27 @@ func (stats_mgr *StatisticsManager) initOverviewRegistry() {
 	overview_registry := metrics.NewRegistry()
 	stats_mgr.registries[OVERVIEW_METRICS_KEY] = overview_registry
 	overview_registry.Register(DOCS_WRITTEN_METRIC, metrics.NewCounter())
+	overview_registry.Register(EXPIRY_DOCS_WRITTEN_METRIC, metrics.NewCounter())
+	overview_registry.Register(DELETION_DOCS_WRITTEN_METRIC, metrics.NewCounter())
+	overview_registry.Register(SET_DOCS_WRITTEN_METRIC, metrics.NewCounter())
 	overview_registry.Register(DOCS_PROCESSED_METRIC, metrics.NewCounter())
 	overview_registry.Register(DOCS_FAILED_CR_SOURCE_METRIC, metrics.NewCounter())
+	overview_registry.Register(EXPIRY_FAILED_CR_SOURCE_METRIC, metrics.NewCounter())
+	overview_registry.Register(DELETION_FAILED_CR_SOURCE_METRIC, metrics.NewCounter())
+	overview_registry.Register(SET_FAILED_CR_SOURCE_METRIC, metrics.NewCounter())
 	overview_registry.Register(DATA_REPLICATED_METRIC, metrics.NewCounter())
 	overview_registry.Register(DOCS_FILTERED_METRIC, metrics.NewCounter())
+	overview_registry.Register(EXPIRY_FILTERED_METRIC, metrics.NewCounter())
+	overview_registry.Register(DELETION_FILTERED_METRIC, metrics.NewCounter())
+	overview_registry.Register(SET_FILTERED_METRIC, metrics.NewCounter())
 	overview_registry.Register(NUM_CHECKPOINTS_METRIC, metrics.NewCounter())
 	overview_registry.Register(NUM_FAILEDCKPTS_METRIC, metrics.NewCounter())
 	overview_registry.Register(TIME_COMMITING_METRIC, metrics.NewCounter())
 	overview_registry.Register(DOCS_OPT_REPD_METRIC, metrics.NewCounter())
 	overview_registry.Register(DOCS_RECEIVED_DCP_METRIC, metrics.NewCounter())
+	overview_registry.Register(EXPIRY_RECEIVED_DCP_METRIC, metrics.NewCounter())
+	overview_registry.Register(DELETION_RECEIVED_DCP_METRIC, metrics.NewCounter())
+	overview_registry.Register(SET_RECEIVED_DCP_METRIC, metrics.NewCounter())
 	overview_registry.Register(SIZE_REP_QUEUE_METRIC, metrics.NewCounter())
 	overview_registry.Register(DOCS_REP_QUEUE_METRIC, metrics.NewCounter())
 	overview_registry.Register(DOCS_CHECKED_METRIC, docs_checked_counter)
@@ -747,7 +778,13 @@ func (outNozzle_collector *outNozzleCollector) Mount(pipeline common.Pipeline, s
 		registry.Register(SIZE_REP_QUEUE_METRIC, metrics.NewCounter())
 		registry.Register(DOCS_REP_QUEUE_METRIC, metrics.NewCounter())
 		registry.Register(DOCS_WRITTEN_METRIC, metrics.NewCounter())
+		registry.Register(EXPIRY_DOCS_WRITTEN_METRIC, metrics.NewCounter())
+		registry.Register(DELETION_DOCS_WRITTEN_METRIC, metrics.NewCounter())
+		registry.Register(SET_DOCS_WRITTEN_METRIC, metrics.NewCounter())
 		registry.Register(DOCS_FAILED_CR_SOURCE_METRIC, metrics.NewCounter())
+		registry.Register(EXPIRY_FAILED_CR_SOURCE_METRIC, metrics.NewCounter())
+		registry.Register(DELETION_FAILED_CR_SOURCE_METRIC, metrics.NewCounter())
+		registry.Register(SET_FAILED_CR_SOURCE_METRIC, metrics.NewCounter())
 		registry.Register(DATA_REPLICATED_METRIC, metrics.NewCounter())
 		registry.Register(DOCS_OPT_REPD_METRIC, metrics.NewCounter())
 		part.RegisterComponentEventListener(common.DataSent, outNozzle_collector)
@@ -776,7 +813,8 @@ func (outNozzle_collector *outNozzleCollector) OnEvent(eventType common.Componen
 		outNozzle_collector.stats_mgr.logger.Debugf("Received a DataSent event from %v", reflect.TypeOf(component))
 		endTime := time.Now()
 		key := string(item.(*gomemcached.MCRequest).Key)
-		size := item.(*gomemcached.MCRequest).Size()
+		req := item.(*gomemcached.MCRequest)
+		size := req.Size()
 		seqno := otherInfos[parts.EVENT_ADDI_SEQNO].(uint64)
 		opti_replicated := otherInfos[parts.EVENT_ADDI_OPT_REPD].(bool)
 		registry := outNozzle_collector.stats_mgr.registries[component.Id()]
@@ -786,13 +824,38 @@ func (outNozzle_collector *outNozzleCollector) OnEvent(eventType common.Componen
 			registry.Get(DOCS_OPT_REPD_METRIC).(metrics.Counter).Inc(1)
 		}
 
+		expiry := binary.BigEndian.Uint32(req.Extras[4:8])
+		if expiry != 0 {
+			registry.Get(EXPIRY_DOCS_WRITTEN_METRIC).(metrics.Counter).Inc(1)
+		}
+		if req.Opcode == base.DELETE_WITH_META {
+			registry.Get(DELETION_DOCS_WRITTEN_METRIC).(metrics.Counter).Inc(1)
+		} else if req.Opcode == base.SET_WITH_META {
+			registry.Get(SET_DOCS_WRITTEN_METRIC).(metrics.Counter).Inc(1)
+		} else {
+			panic(fmt.Sprintf("Invalid opcode, %v, in DataSent event from %v.", req.Opcode, component.Id()))
+		}
+
 		outNozzle_collector.stats_mgr.endtime_map_lock.Lock()
 		defer outNozzle_collector.stats_mgr.endtime_map_lock.Unlock()
 		outNozzle_collector.stats_mgr.endtime_map[getStatsKeyFromDocKeyAndSeqno(key, seqno)] = endTime
 	} else if eventType == common.DataFailedCRSource {
 		outNozzle_collector.stats_mgr.logger.Debugf("Received a DataFailedCRSource event from %v", reflect.TypeOf(component))
+		req := item.(*gomemcached.MCRequest)
 		registry := outNozzle_collector.stats_mgr.registries[component.Id()]
 		registry.Get(DOCS_FAILED_CR_SOURCE_METRIC).(metrics.Counter).Inc(1)
+
+		expiry := binary.BigEndian.Uint32(req.Extras[4:8])
+		if expiry != 0 {
+			registry.Get(EXPIRY_FAILED_CR_SOURCE_METRIC).(metrics.Counter).Inc(1)
+		}
+		if req.Opcode == mc.UPR_DELETION {
+			registry.Get(DELETION_FAILED_CR_SOURCE_METRIC).(metrics.Counter).Inc(1)
+		} else if req.Opcode == mc.UPR_MUTATION {
+			registry.Get(SET_FAILED_CR_SOURCE_METRIC).(metrics.Counter).Inc(1)
+		} else {
+			panic(fmt.Sprintf("Invalid opcode, %v, in DataFailedCRSource event from %v.", req.Opcode, component.Id()))
+		}
 	} else if eventType == common.GetMetaSent {
 		outNozzle_collector.stats_mgr.logger.Debugf("Received a GetMetaSent event from %v", reflect.TypeOf(component))
 		startTime := time.Now()
@@ -829,6 +892,9 @@ func (dcp_collector *dcpCollector) Mount(pipeline common.Pipeline, stats_mgr *St
 	for _, dcp_part := range dcp_parts {
 		registry := stats_mgr.getOrCreateRegistry(dcp_part.Id())
 		registry.Register(DOCS_RECEIVED_DCP_METRIC, metrics.NewCounter())
+		registry.Register(EXPIRY_RECEIVED_DCP_METRIC, metrics.NewCounter())
+		registry.Register(DELETION_RECEIVED_DCP_METRIC, metrics.NewCounter())
+		registry.Register(SET_RECEIVED_DCP_METRIC, metrics.NewCounter())
 		dcp_part.RegisterComponentEventListener(common.DataReceived, dcp_collector)
 	}
 	return nil
@@ -842,10 +908,22 @@ func (dcp_collector *dcpCollector) OnEvent(eventType common.ComponentEventType,
 	if eventType == common.DataReceived {
 		dcp_collector.stats_mgr.logger.Debugf("Received a DataReceived event from %v", reflect.TypeOf(component))
 		startTime := time.Now()
-		key := string(item.(*mcc.UprEvent).Key)
-		seqno := item.(*mcc.UprEvent).Seqno
+		uprEvent := item.(*mcc.UprEvent)
+		key := string(uprEvent.Key)
+		seqno := uprEvent.Seqno
 		registry := dcp_collector.stats_mgr.registries[component.Id()]
 		registry.Get(DOCS_RECEIVED_DCP_METRIC).(metrics.Counter).Inc(1)
+
+		if uprEvent.Expiry != 0 {
+			registry.Get(EXPIRY_RECEIVED_DCP_METRIC).(metrics.Counter).Inc(1)
+		}
+		if uprEvent.Opcode == mc.UPR_DELETION {
+			registry.Get(DELETION_RECEIVED_DCP_METRIC).(metrics.Counter).Inc(1)
+		} else if uprEvent.Opcode == mc.UPR_MUTATION {
+			registry.Get(SET_RECEIVED_DCP_METRIC).(metrics.Counter).Inc(1)
+		} else {
+			panic(fmt.Sprintf("Invalid opcode, %v, in DataReceived event from %v.", uprEvent.Opcode, component.Id()))
+		}
 
 		dcp_collector.stats_mgr.starttime_map_lock.Lock()
 		defer dcp_collector.stats_mgr.starttime_map_lock.Unlock()
@@ -866,6 +944,9 @@ func (r_collector *routerCollector) Mount(pipeline common.Pipeline, stats_mgr *S
 		conn := dcp_part.Connector()
 		registry_router := stats_mgr.getOrCreateRegistry(conn.Id())
 		registry_router.Register(DOCS_FILTERED_METRIC, metrics.NewCounter())
+		registry_router.Register(EXPIRY_FILTERED_METRIC, metrics.NewCounter())
+		registry_router.Register(DELETION_FILTERED_METRIC, metrics.NewCounter())
+		registry_router.Register(SET_FILTERED_METRIC, metrics.NewCounter())
 		conn.RegisterComponentEventListener(common.DataFiltered, r_collector)
 	}
 	return nil
@@ -877,10 +958,22 @@ func (l_collector *routerCollector) OnEvent(eventType common.ComponentEventType,
 	derivedItems []interface{},
 	otherInfos map[string]interface{}) {
 	if eventType == common.DataFiltered {
-		seqno := item.(*mcc.UprEvent).Seqno
+		uprEvent := item.(*mcc.UprEvent)
+		seqno := uprEvent.Seqno
 		l_collector.stats_mgr.logger.Debugf("Received a DataFiltered event for %v", seqno)
 		registry := l_collector.stats_mgr.registries[component.Id()]
 		registry.Get(DOCS_FILTERED_METRIC).(metrics.Counter).Inc(1)
+
+		if uprEvent.Expiry != 0 {
+			registry.Get(EXPIRY_FILTERED_METRIC).(metrics.Counter).Inc(1)
+		}
+		if uprEvent.Opcode == mc.UPR_DELETION {
+			registry.Get(DELETION_FILTERED_METRIC).(metrics.Counter).Inc(1)
+		} else if uprEvent.Opcode == mc.UPR_MUTATION {
+			registry.Get(SET_FILTERED_METRIC).(metrics.Counter).Inc(1)
+		} else {
+			panic(fmt.Sprintf("Invalid opcode, %v, in DataFiltered event from %v.", uprEvent.Opcode, component.Id()))
+		}
 	}
 }
 
