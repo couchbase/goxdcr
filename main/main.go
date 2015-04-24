@@ -64,6 +64,9 @@ func usage() {
 }
 
 func main() {
+	HideConsole(true)
+	defer HideConsole(false)
+
 	runtime.GOMAXPROCS(rm.GoMaxProcs())
 
 	argParse()
