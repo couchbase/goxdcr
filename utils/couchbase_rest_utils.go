@@ -176,7 +176,7 @@ func QueryRestApiWithAuth(
 
 	client, err := getHttpClient(certificate, host, logger)
 	if err != nil {
-		l.Errorf("Failed to get client for request, req=%v\n", req)
+		l.Errorf("Failed to get client for request, err=%v, req=%v\n", err, req)
 		return err, 0
 	}
 	defer func() {
