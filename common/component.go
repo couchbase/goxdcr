@@ -35,8 +35,6 @@ const (
 	CheckpointDoneForVB	ComponentEventType = iota
 	//checkpointing succeed 
 	CheckpointDone		ComponentEventType = iota
-	// get meta request sent to target cluster
-	GetMetaSent ComponentEventType = iota
 	// get meta response received from target cluster
 	GetMetaReceived ComponentEventType = iota
 	//data failed conflict resolution on source cluster side due to optimistic replication

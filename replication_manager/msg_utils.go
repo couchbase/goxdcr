@@ -44,6 +44,8 @@ const (
 	AllReplicationInfosPath  = "pools/default/replicationInfos"
 	DeleteReplicationPrefix  = "controller/cancelXDCR"
 	SettingsReplicationsPath = "settings/replications"
+	MemStatsPath             = "stats/mem"
+
 	// Some url paths are not static and have variable contents, e.g., settings/replications/$replication_id
 	// The message keys for such paths are constructed by appending the dynamic suffix below to the static portion of the path.
 	// e.g., settings/replications/dynamic
@@ -131,8 +133,8 @@ var RestKeyToSettingsKeyMap = map[string]string{
 	TargetNozzlePerNode:            metadata.TargetNozzlePerNode,
 	/*MaxExpectedReplicationLag:      metadata.MaxExpectedReplicationLag,
 	TimeoutPercentageCap:           metadata.TimeoutPercentageCap,*/
-	LogLevel:                       metadata.PipelineLogLevel,
-	StatsInterval:                  metadata.PipelineStatsInterval,
+	LogLevel:      metadata.PipelineLogLevel,
+	StatsInterval: metadata.PipelineStatsInterval,
 }
 
 // internal replication settings key -> replication settings key in rest api
@@ -149,8 +151,8 @@ var SettingsKeyToRestKeyMap = map[string]string{
 	metadata.TargetNozzlePerNode:            TargetNozzlePerNode,
 	/*metadata.MaxExpectedReplicationLag:      MaxExpectedReplicationLag,
 	metadata.TimeoutPercentageCap:           TimeoutPercentageCap,*/
-	metadata.PipelineLogLevel:               LogLevel,
-	metadata.PipelineStatsInterval:          StatsInterval,
+	metadata.PipelineLogLevel:      LogLevel,
+	metadata.PipelineStatsInterval: StatsInterval,
 }
 
 var logger_msgutil *log.CommonLogger = log.NewLogger("MessageUtils", log.DefaultLoggerContext)

@@ -125,23 +125,6 @@ type StatisticsManager struct {
 	//the entry with key="Overview" will be reported to ns_server
 	registries map[string]metrics.Registry
 
-	//temporary map to keep all the collected start time for data item
-	//during this collection interval.
-	//At the end of the collection interval, collected starttime and endtime will be correlated
-	//to calculate the replication lag. The calculated replication lag will be kept in "Overall"
-	//entry in registries.
-	//This map will be emptied after the replication lags are calculated to get ready for
-	//next collection period
-	starttime_map      map[string]interface{}
-	starttime_map_lock sync.RWMutex
-
-	//temporary map to keep all the collected end time for data item during this collection
-	//interval.
-	//This map will be emptied after the replication lags are calculated to get ready for
-	//next collection period
-	endtime_map      map[string]interface{}
-	endtime_map_lock sync.RWMutex
-
 	//temporary map to keep all the collected start time for getMeta requests
 	//during this collection interval.
 	//At the end of the collection interval, collected starttime and endtime will be correlated
@@ -192,12 +175,8 @@ func NewStatisticsManager(through_seqno_tracker_svc service_def.ThroughSeqnoTrac
 	logger_ctx *log.LoggerContext, active_vbs map[string][]uint16, bucket_name string) *StatisticsManager {
 	stats_mgr := &StatisticsManager{registries: make(map[string]metrics.Registry),
 		bucket_name:               bucket_name,
-		starttime_map:             make(map[string]interface{}),
 		meta_starttime_map:        make(map[string]interface{}),
-		endtime_map:               make(map[string]interface{}),
 		meta_endtime_map:          make(map[string]interface{}),
-		starttime_map_lock:        sync.RWMutex{},
-		endtime_map_lock:          sync.RWMutex{},
 		meta_starttime_map_lock:   sync.RWMutex{},
 		meta_endtime_map_lock:     sync.RWMutex{},
 		finish_ch:                 make(chan bool, 1),
@@ -349,7 +328,6 @@ func (stats_mgr *StatisticsManager) processRawStats() error {
 	oldSample := stats_mgr.getOverviewRegistry()
 	stats_mgr.initOverviewRegistry()
 
-	stats_mgr.processTimeSample()
 	for registry_name, registry := range stats_mgr.registries {
 		if registry_name != OVERVIEW_METRICS_KEY {
 			map_for_registry := new(expvar.Map).Init()
@@ -375,8 +353,14 @@ func (stats_mgr *StatisticsManager) processRawStats() error {
 					//to overview registry
 					metric_overview := stats_mgr.getOverviewRegistry().Get(name)
 					if metric_overview != nil {
-						metric_overview.(metrics.Counter).Clear()
-						metric_overview.(metrics.Counter).Inc(int64(m.Mean()))
+						switch metric_overview.(type) {
+						case metrics.Counter:
+							metric_overview.(metrics.Counter).Clear()
+							metric_overview.(metrics.Counter).Inc(int64(m.Mean()))
+						case metrics.Histogram:
+							sample := metric_overview.(metrics.Histogram).Sample()
+							sample.Update(int64(m.Mean()))
+						}
 					}
 				}
 			})
@@ -564,65 +548,6 @@ func (stats_mgr *StatisticsManager) publishMetricToMap(expvar_map *expvar.Map, n
 	}
 }
 
-func (stats_mgr *StatisticsManager) processTimeSample() {
-	stats_mgr.processDocsLatencyTimeSample()
-	stats_mgr.processMetaLatencyTimeSample()
-}
-
-// compute docs_latency metric
-func (stats_mgr *StatisticsManager) processDocsLatencyTimeSample() {
-	stats_mgr.logger.Debug("Process Docs Latency Time Sample...")
-
-	time_committing := stats_mgr.getOverviewRegistry().GetOrRegister(DOCS_LATENCY_METRIC, metrics.NewHistogram(metrics.NewUniformSample(stats_mgr.sample_size))).(metrics.Histogram)
-	time_committing.Clear()
-	sample := time_committing.Sample()
-
-	stats_mgr.starttime_map_lock.RLock()
-	stats_mgr.endtime_map_lock.RLock()
-	defer stats_mgr.starttime_map_lock.RUnlock()
-	defer stats_mgr.endtime_map_lock.RUnlock()
-	for name, starttime := range stats_mgr.starttime_map {
-		endtime := stats_mgr.endtime_map[name]
-		if endtime != nil {
-			rep_duration := endtime.(time.Time).Sub(starttime.(time.Time))
-			//in millisecond
-			sample.Update(rep_duration.Nanoseconds() / 1000000)
-			// now it is safe to remove the entry from starttime_map
-			delete(stats_mgr.starttime_map, name)
-		}
-	}
-
-	//clear endtime_registry
-	stats_mgr.endtime_map = make(map[string]interface{})
-}
-
-// compute meta_latency metric
-func (stats_mgr *StatisticsManager) processMetaLatencyTimeSample() {
-	stats_mgr.logger.Debug("Process Meta Latency Time Sample...")
-
-	meta_time_committing := stats_mgr.getOverviewRegistry().GetOrRegister(META_LATENCY_METRIC, metrics.NewHistogram(metrics.NewUniformSample(stats_mgr.sample_size))).(metrics.Histogram)
-	meta_time_committing.Clear()
-	sample := meta_time_committing.Sample()
-
-	stats_mgr.meta_starttime_map_lock.RLock()
-	stats_mgr.meta_endtime_map_lock.RLock()
-	defer stats_mgr.meta_starttime_map_lock.RUnlock()
-	defer stats_mgr.meta_endtime_map_lock.RUnlock()
-	for name, starttime := range stats_mgr.meta_starttime_map {
-		endtime := stats_mgr.meta_endtime_map[name]
-		if endtime != nil {
-			meta_latency := endtime.(time.Time).Sub(starttime.(time.Time))
-			//in millisecond
-			sample.Update(meta_latency.Nanoseconds() / 1000000)
-			// now it is safe to remove the entry from starttime_map
-			delete(stats_mgr.meta_starttime_map, name)
-		}
-	}
-
-	//clear endtime_registry
-	stats_mgr.meta_endtime_map = make(map[string]interface{})
-}
-
 func (stats_mgr *StatisticsManager) getOrCreateRegistry(name string) metrics.Registry {
 	registry := stats_mgr.registries[name]
 	if registry == nil {
@@ -787,10 +712,12 @@ func (outNozzle_collector *outNozzleCollector) Mount(pipeline common.Pipeline, s
 		registry.Register(SET_FAILED_CR_SOURCE_METRIC, metrics.NewCounter())
 		registry.Register(DATA_REPLICATED_METRIC, metrics.NewCounter())
 		registry.Register(DOCS_OPT_REPD_METRIC, metrics.NewCounter())
+		registry.Register(DOCS_LATENCY_METRIC, metrics.NewHistogram(metrics.NewUniformSample(stats_mgr.sample_size)))
+		registry.Register(META_LATENCY_METRIC, metrics.NewHistogram(metrics.NewUniformSample(stats_mgr.sample_size)))
+
 		part.RegisterComponentEventListener(common.DataSent, outNozzle_collector)
 		part.RegisterComponentEventListener(common.DataFailedCRSource, outNozzle_collector)
 		part.RegisterComponentEventListener(common.StatsUpdate, outNozzle_collector)
-		part.RegisterComponentEventListener(common.GetMetaSent, outNozzle_collector)
 		part.RegisterComponentEventListener(common.GetMetaReceived, outNozzle_collector)
 
 	}
@@ -811,12 +738,10 @@ func (outNozzle_collector *outNozzleCollector) OnEvent(eventType common.Componen
 		setCounter(registry.Get(SIZE_REP_QUEUE_METRIC).(metrics.Counter), queue_size_bytes)
 	} else if eventType == common.DataSent {
 		outNozzle_collector.stats_mgr.logger.Debugf("Received a DataSent event from %v", reflect.TypeOf(component))
-		endTime := time.Now()
-		key := string(item.(*gomemcached.MCRequest).Key)
 		req := item.(*gomemcached.MCRequest)
 		size := req.Size()
-		seqno := otherInfos[parts.EVENT_ADDI_SEQNO].(uint64)
 		opti_replicated := otherInfos[parts.EVENT_ADDI_OPT_REPD].(bool)
+		commit_time := otherInfos[parts.EVENT_ADDI_SETMETA_COMMIT_TIME].(time.Duration)
 		registry := outNozzle_collector.stats_mgr.registries[component.Id()]
 		registry.Get(DOCS_WRITTEN_METRIC).(metrics.Counter).Inc(1)
 		registry.Get(DATA_REPLICATED_METRIC).(metrics.Counter).Inc(int64(size))
@@ -836,9 +761,9 @@ func (outNozzle_collector *outNozzleCollector) OnEvent(eventType common.Componen
 			panic(fmt.Sprintf("Invalid opcode, %v, in DataSent event from %v.", req.Opcode, component.Id()))
 		}
 
-		outNozzle_collector.stats_mgr.endtime_map_lock.Lock()
-		defer outNozzle_collector.stats_mgr.endtime_map_lock.Unlock()
-		outNozzle_collector.stats_mgr.endtime_map[getStatsKeyFromDocKeyAndSeqno(key, seqno)] = endTime
+		time_committing_reg := registry.Get(DOCS_LATENCY_METRIC).(metrics.Histogram)
+		sample := time_committing_reg.Sample()
+		sample.Update(commit_time.Nanoseconds() / 1000000)
 	} else if eventType == common.DataFailedCRSource {
 		outNozzle_collector.stats_mgr.logger.Debugf("Received a DataFailedCRSource event from %v", reflect.TypeOf(component))
 		req := item.(*gomemcached.MCRequest)
@@ -856,24 +781,15 @@ func (outNozzle_collector *outNozzleCollector) OnEvent(eventType common.Componen
 		} else {
 			panic(fmt.Sprintf("Invalid opcode, %v, in DataFailedCRSource event from %v.", req.Opcode, component.Id()))
 		}
-	} else if eventType == common.GetMetaSent {
-		outNozzle_collector.stats_mgr.logger.Debugf("Received a GetMetaSent event from %v", reflect.TypeOf(component))
-		startTime := time.Now()
-		key := otherInfos[parts.EVENT_ADDI_DOC_KEY].(string)
-		seqno := otherInfos[parts.EVENT_ADDI_SEQNO].(uint64)
-
-		outNozzle_collector.stats_mgr.meta_starttime_map_lock.Lock()
-		defer outNozzle_collector.stats_mgr.meta_starttime_map_lock.Unlock()
-		outNozzle_collector.stats_mgr.meta_starttime_map[getStatsKeyFromDocKeyAndSeqno(key, seqno)] = startTime
 	} else if eventType == common.GetMetaReceived {
 		outNozzle_collector.stats_mgr.logger.Debugf("Received a GetMetaReceived event from %v", reflect.TypeOf(component))
-		endTime := time.Now()
-		key := otherInfos[parts.EVENT_ADDI_DOC_KEY].(string)
-		seqno := otherInfos[parts.EVENT_ADDI_SEQNO].(uint64)
 
-		outNozzle_collector.stats_mgr.meta_endtime_map_lock.Lock()
-		defer outNozzle_collector.stats_mgr.meta_endtime_map_lock.Unlock()
-		outNozzle_collector.stats_mgr.meta_endtime_map[getStatsKeyFromDocKeyAndSeqno(key, seqno)] = endTime
+		commit_time := otherInfos[parts.EVENT_ADDI_GETMETA_COMMIT_TIME].(time.Duration)
+
+		registry := outNozzle_collector.stats_mgr.registries[component.Id()]
+		time_committing_reg := registry.Get(META_LATENCY_METRIC).(metrics.Histogram)
+		sample := time_committing_reg.Sample()
+		sample.Update(commit_time.Nanoseconds() / 1000000)
 	}
 }
 
@@ -907,10 +823,7 @@ func (dcp_collector *dcpCollector) OnEvent(eventType common.ComponentEventType,
 	otherInfos map[string]interface{}) {
 	if eventType == common.DataReceived {
 		dcp_collector.stats_mgr.logger.Debugf("Received a DataReceived event from %v", reflect.TypeOf(component))
-		startTime := time.Now()
 		uprEvent := item.(*mcc.UprEvent)
-		key := string(uprEvent.Key)
-		seqno := uprEvent.Seqno
 		registry := dcp_collector.stats_mgr.registries[component.Id()]
 		registry.Get(DOCS_RECEIVED_DCP_METRIC).(metrics.Counter).Inc(1)
 
@@ -924,10 +837,6 @@ func (dcp_collector *dcpCollector) OnEvent(eventType common.ComponentEventType,
 		} else {
 			panic(fmt.Sprintf("Invalid opcode, %v, in DataReceived event from %v.", uprEvent.Opcode, component.Id()))
 		}
-
-		dcp_collector.stats_mgr.starttime_map_lock.Lock()
-		defer dcp_collector.stats_mgr.starttime_map_lock.Unlock()
-		dcp_collector.stats_mgr.starttime_map[getStatsKeyFromDocKeyAndSeqno(key, seqno)] = startTime
 	}
 }
 

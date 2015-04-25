@@ -181,7 +181,7 @@ func startRouter() {
 		partMap[partId] = NewTestPart(partId)
 	}
 
-	router, _ = parts.NewRouter("router1", options.filter_expression, partMap, buildVbMap(partMap), couchlog.DefaultLoggerContext)
+	router, _ = parts.NewRouter("router1", "router1", options.filter_expression, partMap, buildVbMap(partMap), couchlog.DefaultLoggerContext, nil)
 }
 
 func buildVbMap(downStreamParts map[string]pc.Part) map[uint16]string {

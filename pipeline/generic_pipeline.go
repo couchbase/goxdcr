@@ -256,7 +256,7 @@ func (genericPipeline *GenericPipeline) Start(settings map[string]interface{}) e
 func (genericPipeline *GenericPipeline) stopPart(part common.Part) error {
 	var err error = nil
 	genericPipeline.logger.Infof("Trying to stop part %v for %v\n", part.Id(), genericPipeline.InstanceId())
-	err = pipeline_utils.ExecWithTimeout(part.Stop, 600*time.Millisecond, genericPipeline.logger)
+	err = pipeline_utils.ExecWithTimeout(part.Stop, 1000*time.Millisecond, genericPipeline.logger)
 	if err == nil {
 		genericPipeline.logger.Infof("part %v is stopped\n", part.Id())
 	} else {

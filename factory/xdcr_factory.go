@@ -11,6 +11,7 @@ import (
 	"github.com/couchbase/goxdcr/parts"
 	pp "github.com/couchbase/goxdcr/pipeline"
 	pctx "github.com/couchbase/goxdcr/pipeline_ctx"
+	"github.com/couchbase/goxdcr/pipeline_manager"
 	"github.com/couchbase/goxdcr/pipeline_svc"
 	"github.com/couchbase/goxdcr/pipeline_utils"
 	"github.com/couchbase/goxdcr/service_def"
@@ -350,7 +351,7 @@ func (xdcrf *XDCRFactory) constructRouter(id string, spec *metadata.ReplicationS
 	vbNozzleMap map[uint16]string,
 	logger_ctx *log.LoggerContext) (*parts.Router, error) {
 	routerId := "Router" + PART_NAME_DELIMITER + id
-	router, err := parts.NewRouter(routerId, spec.Settings.FilterExpression, downStreamParts, vbNozzleMap, logger_ctx)
+	router, err := parts.NewRouter(routerId, spec.Id, spec.Settings.FilterExpression, downStreamParts, vbNozzleMap, logger_ctx, pipeline_manager.NewMCRequestObj)
 	xdcrf.logger.Infof("Constructed router")
 	return router, err
 }
@@ -384,7 +385,7 @@ func (xdcrf *XDCRFactory) constructXMEMNozzle(topic string, kvaddr string,
 	logger_ctx *log.LoggerContext) common.Nozzle {
 	// partIds of the xmem nozzles look like "xmem_$topic_$kvaddr_1"
 	xmemNozzle_Id := xdcrf.partId(XMEM_NOZZLE_NAME_PREFIX, topic, kvaddr, nozzle_index)
-	nozzle := parts.NewXmemNozzle(xmemNozzle_Id, topic, connPoolSize, kvaddr, bucketName, bucketPwd, logger_ctx)
+	nozzle := parts.NewXmemNozzle(xmemNozzle_Id, topic, topic, connPoolSize, kvaddr, bucketName, bucketPwd, pipeline_manager.RecycleMCRequestObj, logger_ctx)
 	return nozzle
 }
 
@@ -415,7 +416,7 @@ func (xdcrf *XDCRFactory) constructCAPINozzle(topic string,
 	xdcrf.logger.Debugf("Construct CapiNozzle: topic=%s, kvaddr=%s", topic, capiConnectionStr)
 	// partIds of the capi nozzles look like "capi_$topic_$kvaddr_1"
 	capiNozzle_Id := xdcrf.partId(CAPI_NOZZLE_NAME_PREFIX, topic, capiConnectionStr, nozzle_index)
-	nozzle := parts.NewCapiNozzle(capiNozzle_Id, capiConnectionStr, username, password, certificate, subVBCouchApiBaseMap, logger_ctx)
+	nozzle := parts.NewCapiNozzle(capiNozzle_Id, topic, capiConnectionStr, username, password, certificate, subVBCouchApiBaseMap, pipeline_manager.RecycleMCRequestObj, logger_ctx)
 	return nozzle, nil
 }
 

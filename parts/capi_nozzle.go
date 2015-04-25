@@ -190,14 +190,18 @@ type CapiNozzle struct {
 	counter_received int
 	start_time       time.Time
 	handle_error     bool
+	dataObj_recycler DataObjRecycler
+	topic            string
 }
 
 func NewCapiNozzle(id string,
+	topic string,
 	connectString string,
 	username string,
 	password string,
 	certificate []byte,
 	vbCouchApiBaseMap map[uint16]string,
+	dataObj_recycler DataObjRecycler,
 	logger_context *log.LoggerContext) *CapiNozzle {
 
 	//callback functions from GenServer
@@ -223,6 +227,8 @@ func NewCapiNozzle(id string,
 		counter_sent:     0,
 		handle_error:     true,
 		counter_received: 0,
+		dataObj_recycler: dataObj_recycler,
+		topic:            topic,
 	}
 
 	capi.config.connectStr = connectString
@@ -448,13 +454,13 @@ func (capi *CapiNozzle) batchGetMeta(vbno uint16, bigDoc_map map[string]*base.Wr
 	}
 
 	key_rev_map := make(map[string]string)
-	key_seqno_map := make(map[string]uint64)
+	key_seqnostarttime_map := make(map[string][]interface{})
 	sent_id_map := make(map[string]bool)
 	for id, req := range bigDoc_map {
 		key := string(req.Req.Key)
 		if _, ok := key_rev_map[key]; !ok {
 			key_rev_map[key] = getSerializedRevision(req.Req)
-			key_seqno_map[key] = req.Seqno
+			key_seqnostarttime_map[key] = []interface{}{req.Seqno, time.Now()}
 			sent_id_map[id] = true
 		}
 	}
@@ -462,13 +468,6 @@ func (capi *CapiNozzle) batchGetMeta(vbno uint16, bigDoc_map map[string]*base.Wr
 	body, err := json.Marshal(key_rev_map)
 	if err != nil {
 		return nil, err
-	}
-
-	for key, seqno := range key_seqno_map {
-		additionalInfo := make(map[string]interface{})
-		additionalInfo[EVENT_ADDI_DOC_KEY] = key
-		additionalInfo[EVENT_ADDI_SEQNO] = seqno
-		capi.RaiseEvent(common.GetMetaSent, nil, capi, nil, additionalInfo)
 	}
 
 	var out interface{}
@@ -484,10 +483,11 @@ func (capi *CapiNozzle) batchGetMeta(vbno uint16, bigDoc_map map[string]*base.Wr
 		return nil, errors.New(errMsg)
 	}
 
-	for key, seqno := range key_seqno_map {
+	for key, seqnostarttime := range key_seqnostarttime_map {
 		additionalInfo := make(map[string]interface{})
 		additionalInfo[EVENT_ADDI_DOC_KEY] = key
-		additionalInfo[EVENT_ADDI_SEQNO] = seqno
+		additionalInfo[EVENT_ADDI_SEQNO] = seqnostarttime[0].(uint64)
+		additionalInfo[EVENT_ADDI_GETMETA_COMMIT_TIME] = time.Since(seqnostarttime[0].(time.Time))
 		capi.RaiseEvent(common.GetMetaReceived, nil, capi, nil, additionalInfo)
 	}
 
@@ -546,7 +546,11 @@ func (capi *CapiNozzle) batchSendWithRetry(batch *capiBatch) error {
 			additionalInfo[EVENT_ADDI_SEQNO] = req.Seqno
 			additionalInfo[EVENT_ADDI_OPT_REPD] = capi.optimisticRep(req.Req)
 			additionalInfo[EVENT_ADDI_HISEQNO] = req.Seqno
+			additionalInfo[EVENT_ADDI_SETMETA_COMMIT_TIME] = time.Since(req.Start_time)
 			capi.RaiseEvent(common.DataSent, req.Req, capi, nil, additionalInfo)
+
+			//recycle the request object
+			capi.recycleDataObj(req)
 		}
 	} else {
 		capi.Logger().Errorf("Error updating docs on target. err=%v\n", err)
@@ -1142,4 +1146,10 @@ func (capi *CapiNozzle) UpdateSettings(settings map[string]interface{}) error {
 
 	capi.config.optiRepThreshold = optimisticReplicationThreshold
 	return nil
+}
+
+func (capi *CapiNozzle) recycleDataObj(req *base.WrappedMCRequest) {
+	if capi.dataObj_recycler != nil {
+		capi.dataObj_recycler(capi.topic, req)
+	}
 }

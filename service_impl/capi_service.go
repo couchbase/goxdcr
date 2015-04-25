@@ -164,7 +164,9 @@ func (capi_svc *CAPIService) MassValidateVBUUIDs(remoteBucket *service_def.Remot
 
 	vbopaques := [][]interface{}{}
 	for vb, remotevbuuid := range remoteVBUUIDs {
-		vbopaques = append(vbopaques, []interface{}{vb, remotevbuuid.Value()})
+		if remotevbuuid != nil {
+			vbopaques = append(vbopaques, []interface{}{vb, remotevbuuid.Value()})
+		}
 	}
 	api_base.body["vbopaques"] = vbopaques
 	status_code, respMap, err := capi_svc.send_post(MASS_VBOPAQUE_CHECK_CMD, api_base, HTTP_RETRIES)

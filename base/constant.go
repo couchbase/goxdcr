@@ -220,3 +220,8 @@ const (
 	SET_WITH_META    = mc.CommandCode(0xa2)
 	DELETE_WITH_META = mc.CommandCode(0xa8)
 )
+
+const (
+	PipelineSetting_RequestPool = "RequestPool"
+	DefaultRequestPoolSize = 10000
+)

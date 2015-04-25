@@ -55,6 +55,7 @@ type ReplicationStatus struct {
 	pipeline common.Pipeline
 	err_list PipelineErrorArray
 	progress string
+	obj_pool *base.MCRequestPool
 	logger   *log.CommonLogger
 }
 
@@ -63,7 +64,8 @@ func NewReplicationStatus(rep_spec *metadata.ReplicationSpecification, logger *l
 		pipeline: nil,
 		logger:   logger,
 		err_list: PipelineErrorArray{},
-		progress: ""}
+		progress: "",
+		obj_pool: base.NewMCRequestPool(rep_spec.Id, 0, logger)}
 	rep_status.Publish()
 	return rep_status
 }
@@ -230,5 +232,9 @@ func (rs *ReplicationStatus) RecordProgress(progress string) {
 }
 
 func (rs *ReplicationStatus) String() string {
-	return fmt.Sprintf("name={%v}, status={%v}, errors={%v}, progress={%v}\n", rs.rep_spec.Id, rs.RuntimeStatus(), rs.Errors(), rs.progress)
+	return fmt.Sprintf("name={%v}, status={%v}, errors={%v}, progress={%v}, request_pool={%v}\n", rs.rep_spec.Id, rs.RuntimeStatus(), rs.Errors(), rs.progress, rs.obj_pool)
+}
+
+func (rs *ReplicationStatus) ObjectPool() *base.MCRequestPool {
+	return rs.obj_pool
 }

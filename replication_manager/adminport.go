@@ -12,6 +12,7 @@
 package replication_manager
 
 import (
+	"encoding/json"
 	"errors"
 	"github.com/couchbase/cbauth"
 	ap "github.com/couchbase/goxdcr/adminport"
@@ -22,13 +23,14 @@ import (
 	"github.com/couchbase/goxdcr/pipeline_manager"
 	utils "github.com/couchbase/goxdcr/utils"
 	"net/http"
+	"runtime"
 	"strings"
 	"time"
 )
 
 import _ "net/http/pprof"
 
-var StaticPaths = [7]string{base.RemoteClustersPath, CreateReplicationPath, InternalSettingsPath, SettingsReplicationsPath, AllReplicationsPath, AllReplicationInfosPath, RegexpValidationPrefix}
+var StaticPaths = [8]string{base.RemoteClustersPath, CreateReplicationPath, InternalSettingsPath, SettingsReplicationsPath, AllReplicationsPath, AllReplicationInfosPath, RegexpValidationPrefix, MemStatsPath}
 var DynamicPathPrefixes = [5]string{base.RemoteClustersPath, DeleteReplicationPrefix, SettingsReplicationsPath, StatisticsPrefix, AllReplicationsPath}
 
 var logger_ap *log.CommonLogger = log.NewLogger("AdminPort", log.DefaultLoggerContext)
@@ -153,7 +155,7 @@ func (adminport *Adminport) handleRequest(
 	// authentication
 	//TODO: authAdminCreds sometimes take a long time to return
 	//for now, skip authentication for pools/default/replicationInfos because it is called a lot
-	if key != AllReplicationInfosPath+base.UrlDelimiter+base.MethodGet {
+	if key != AllReplicationInfosPath+base.UrlDelimiter+base.MethodGet && key != MemStatsPath+base.UrlDelimiter+base.MethodGet {
 		if key != base.RemoteClustersPath+base.UrlDelimiter+base.MethodGet {
 			// most APIs require admin credentials
 			err = authAdminCreds(request, false)
@@ -204,6 +206,8 @@ func (adminport *Adminport) handleRequest(
 		response, err = adminport.doGetStatisticsRequest(request)
 	case RegexpValidationPrefix + base.UrlDelimiter + base.MethodPost:
 		response, err = adminport.doRegexpValidationRequest(request)
+	case MemStatsPath + base.UrlDelimiter + base.MethodGet:
+		response, err = adminport.doMemStatsRequest(request)
 	default:
 		err = ap.ErrorInvalidRequest
 	}
@@ -529,6 +533,14 @@ func (adminport *Adminport) doGetStatisticsRequest(request *http.Request) (*ap.R
 	} else {
 		return nil, err
 	}
+}
+
+func (adminport *Adminport) doMemStatsRequest(request *http.Request) (*ap.Response, error) {
+	logger_ap.Debugf("doMemStatsRequest\n")
+	stats := new(runtime.MemStats)
+	runtime.ReadMemStats(stats)
+	bytes, _ := json.Marshal(stats)
+	return EncodeByteArrayIntoResponse(bytes)
 }
 
 // Get the message key from http request

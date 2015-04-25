@@ -21,12 +21,15 @@ import (
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/utils"
 	"regexp"
+	"time"
 )
 
 var ErrorInvalidDataForRouter = errors.New("Input data to Router is invalid.")
 var ErrorNoDownStreamNodesForRouter = errors.New("No downstream nodes have been defined for the Router.")
 var ErrorNoRoutingMapForRouter = errors.New("No routingMap has been defined for Router.")
 var ErrorInvalidRoutingMapForRouter = errors.New("routingMap in Router is invalid.")
+
+type ReqCreator func(id string) *base.WrappedMCRequest
 
 // XDCR Router does two things:
 // 1. converts UprEvent to MCRequest
@@ -37,13 +40,15 @@ type Router struct {
 	filterRegexp *regexp.Regexp    // filter expression
 	routingMap   map[uint16]string // pvbno -> partId. This defines the loading balancing strategy of which vbnos would be routed to which part
 	//Debug only, need to be rolled into statistics and monitoring
-	counter map[string]int
+	counter     map[string]int
+	req_creator ReqCreator
+	topic       string
 }
 
-func NewRouter(id string, filterExpression string,
+func NewRouter(id string, topic string, filterExpression string,
 	downStreamParts map[string]common.Part,
 	routingMap map[uint16]string,
-	logger_context *log.LoggerContext) (*Router, error) {
+	logger_context *log.LoggerContext, req_creator ReqCreator) (*Router, error) {
 	// compile filter expression
 	var filterRegexp *regexp.Regexp
 	var err error
@@ -57,7 +62,9 @@ func NewRouter(id string, filterExpression string,
 		id:           id,
 		filterRegexp: filterRegexp,
 		routingMap:   routingMap,
-		counter:      make(map[string]int)}
+		counter:      make(map[string]int),
+		topic:        topic,
+		req_creator:  req_creator}
 
 	var routingFunc connector.Routing_Callback_Func = router.route
 	router.Router = connector.NewRouter("XDCRRouter", downStreamParts, &routingFunc, logger_context, "XDCRRouter")
@@ -71,13 +78,18 @@ func NewRouter(id string, filterExpression string,
 	return router, nil
 }
 
-func ComposeMCRequest(event *mcc.UprEvent) *base.WrappedMCRequest {
-	req := &mc.MCRequest{Cas: event.Cas,
-		Opaque:  0,
-		VBucket: event.VBucket,
-		Key:     event.Key,
-		Body:    event.Value,
-		Extras:  make([]byte, 24)}
+func (router *Router) ComposeMCRequest(event *mcc.UprEvent) *base.WrappedMCRequest {
+	wrapped_req := router.newWrappedMCRequest()
+
+	req := wrapped_req.Req
+	req.Cas = event.Cas
+	req.Opaque = 0
+	req.VBucket = event.VBucket
+	req.Key = event.Key
+	req.Body = event.Value
+	if req.Extras == nil{
+		req.Extras = make([]byte, 24)
+	}
 	//opCode
 	req.Opcode = event.Opcode
 
@@ -96,7 +108,9 @@ func ComposeMCRequest(event *mcc.UprEvent) *base.WrappedMCRequest {
 		binary.BigEndian.PutUint32(req.Extras[24:28], event.SnapshotType)
 	}
 
-	return &base.WrappedMCRequest{Seqno: event.Seqno, Req: req}
+	wrapped_req.Seqno = event.Seqno
+	wrapped_req.Start_time = time.Now()
+	return wrapped_req
 }
 
 // Implementation of the routing algorithm
@@ -131,7 +145,7 @@ func (router *Router) route(data interface{}) (map[string]interface{}, error) {
 			return result, nil
 		}
 	}
-	result[partId] = ComposeMCRequest(uprEvent)
+	result[partId] = router.ComposeMCRequest(uprEvent)
 	router.counter[partId] = router.counter[partId] + 1
 	router.Logger().Debugf("Rounting counter = %v\n", router.counter)
 	return result, nil
@@ -163,4 +177,14 @@ func (router *Router) RoutingMapByDownstreams() map[string][]uint16 {
 func (router *Router) StatusSummary() string {
 	return fmt.Sprintf("Rounter %v = %v", router.id, router.counter)
 
+}
+
+func (router *Router) newWrappedMCRequest() *base.WrappedMCRequest {
+	if router.req_creator != nil {
+		return router.req_creator(router.topic)
+	} else {
+		return &base.WrappedMCRequest{Seqno: 0,
+			Req: &mc.MCRequest{},
+		}
+	}
 }

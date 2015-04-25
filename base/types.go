@@ -12,8 +12,9 @@ package base
 import (
 	"bytes"
 	"fmt"
-	"reflect"
 	"github.com/couchbase/gomemcached"
+	"reflect"
+	"time"
 )
 
 type SettingDef struct {
@@ -49,12 +50,12 @@ func (se SettingsError) Add(key string, err error) {
 }
 
 // timestamp for a specific vb
-type VBTimestamp struct{
-    Vbno  uint16
-    Vbuuid uint64
-    Seqno  uint64
-    SnapshotStart  uint64
-    SnapshotEnd  uint64
+type VBTimestamp struct {
+	Vbno          uint16
+	Vbuuid        uint64
+	Seqno         uint64
+	SnapshotStart uint64
+	SnapshotEnd   uint64
 }
 
 func (vbts *VBTimestamp) String() string {
@@ -62,30 +63,30 @@ func (vbts *VBTimestamp) String() string {
 }
 
 type ClusterConnectionInfoProvider interface {
-	MyConnectionStr()  (string, error)
+	MyConnectionStr() (string, error)
 	// returns username and password
-	MyCredentials()  (string, string, error)
+	MyCredentials() (string, string, error)
 }
 
 type ReplicationInfo struct {
-	Id string
+	Id        string
 	StatsMap  map[string]interface{}
 	ErrorList []ErrorInfo
 }
 
 type ErrorInfo struct {
 	// Time is the number of nano seconds elapsed since 1/1/1970 UTC
-	Time int64
-	ErrorMsg  string
+	Time     int64
+	ErrorMsg string
 }
 
 type WrappedMCRequest struct {
-	Seqno uint64
-	Req	  *gomemcached.MCRequest
+	Seqno      uint64
+	Req        *gomemcached.MCRequest
+	Start_time time.Time
 }
 
 type MetadataChangeListener interface {
 	Id() string
 	Start() error
 }
-

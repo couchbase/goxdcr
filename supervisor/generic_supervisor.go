@@ -67,7 +67,6 @@ type GenericSupervisor struct {
 	finch                 chan bool
 	childrenWaitGrp       sync.WaitGroup
 	err_ch                chan bool
-	resp_waiter_chs       []chan bool
 	parent_supervisor     *GenericSupervisor
 }
 
@@ -86,7 +85,6 @@ func NewGenericSupervisor(id string, logger_ctx *log.LoggerContext, failure_hand
 		finch:                      make(chan bool, 1),
 		childrenWaitGrp:            sync.WaitGroup{},
 		err_ch:                     make(chan bool, 1),
-		resp_waiter_chs:            []chan bool{},
 		parent_supervisor:          parent_supervisor}
 
 	if parent_supervisor != nil {
@@ -156,14 +154,11 @@ func (supervisor *GenericSupervisor) Start(settings map[string]interface{}) erro
 func (supervisor *GenericSupervisor) Stop() error {
 	supervisor.Logger().Infof("Stopping supervisor %v.\n", supervisor.Id())
 
-	// make waiting for response routines finish to avoid receiving spurious timeout errors
-	supervisor.notifyWaitersToFinish()
+	// stop supervising routine
+	close(supervisor.finch)
 
 	// stop gen_server
 	err := supervisor.Stop_server()
-
-	// stop supervising routine
-	close(supervisor.finch)
 
 	supervisor.heartbeat_ticker.Stop()
 
@@ -227,8 +222,6 @@ func (supervisor *GenericSupervisor) sendHeartBeats(waitGrp *sync.WaitGroup) {
 				}
 			}
 		}
-		fin_ch := make(chan bool, 1)
-		supervisor.resp_waiter_chs = append(supervisor.resp_waiter_chs, fin_ch)
 		if len(responseToWaitTokens) > 0 {
 
 			//validate the parameter to waitForResponse is valid
@@ -237,7 +230,7 @@ func (supervisor *GenericSupervisor) sendHeartBeats(waitGrp *sync.WaitGroup) {
 			}
 
 			waitGrp.Add(1)
-			go supervisor.waitForResponse(heartbeat_report, heartbeat_resp_chs, fin_ch, responseToWaitTokens, waitGrp)
+			go supervisor.waitForResponse(heartbeat_report, heartbeat_resp_chs, supervisor.finch, responseToWaitTokens, waitGrp)
 		} else {
 			supervisor.Logger().Debugf("No response to be waited.")
 		}
@@ -351,15 +344,6 @@ func (supervisor *GenericSupervisor) processReport(heartbeat_report map[string]h
 func (supervisor *GenericSupervisor) ReportFailure(errors map[string]error) {
 	//report the failure to decision maker
 	supervisor.failure_handler.OnError(supervisor, errors)
-}
-
-func (supervisor *GenericSupervisor) notifyWaitersToFinish() {
-	for _, ctrl_ch := range supervisor.resp_waiter_chs {
-		close(ctrl_ch)
-
-	}
-
-	supervisor.resp_waiter_chs = []chan bool{}
 }
 
 func (supervisor *GenericSupervisor) StopHeartBeatTicker() {

@@ -86,8 +86,13 @@ func (pipelineSupervisor *PipelineSupervisor) OnEvent(eventType common.Component
 	derivedItems []interface{},
 	otherInfos map[string]interface{}) {
 	if eventType == common.ErrorEncountered {
-		pipelineSupervisor.errors_seen[component.Id()] = otherInfos["error"].(error)
-		pipelineSupervisor.declarePipelineBroken()
+		if pipelineSupervisor.pipeline.State() != common.Pipeline_Error {
+			pipelineSupervisor.errors_seen[component.Id()] = otherInfos["error"].(error)
+			pipelineSupervisor.declarePipelineBroken()
+		} else {
+			pipelineSupervisor.Logger().Infof("Received error report : %v, but error is ignored. pipeline_state=%v\n", pipelineSupervisor.errors_seen, pipelineSupervisor.pipeline.State())
+
+		}
 
 	} else {
 		pipelineSupervisor.Logger().Errorf("Pipeline supervisor didn't register to recieve event %v for component %v", eventType, component.Id())

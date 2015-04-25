@@ -821,6 +821,8 @@ func (ckmgr *CheckpointManager) massCheckVBOpaquesJob() {
 	defer ckmgr.logger.Info("Exits massCheckVBOpaquesJob routine.")
 	defer ckmgr.wait_grp.Done()
 
+	target_vb_vbuuid_map := make(map[uint16]metadata.TargetVBOpaque)
+
 	ticker := time.NewTicker(60 * time.Second)
 	for {
 		select {
@@ -833,20 +835,17 @@ func (ckmgr *CheckpointManager) massCheckVBOpaquesJob() {
 				ckmgr.logger.Info("Pipeline is no longer running, exit.")
 				return
 			}
-			go ckmgr.massCheckVBOpaues()
+			go ckmgr.massCheckVBOpaues(target_vb_vbuuid_map)
 		}
 	}
 
 }
 
-func (ckmgr *CheckpointManager) massCheckVBOpaues() error {
+func (ckmgr *CheckpointManager) massCheckVBOpaues(target_vb_vbuuid_map map[uint16]metadata.TargetVBOpaque) error {
 	//validate target bucket's vbucket uuid
-	target_vb_vbuuid_map := make(map[uint16]metadata.TargetVBOpaque)
 	for vb, latest_ckpt_record := range ckmgr.cur_ckpts {
 		target_vb_uuid := latest_ckpt_record.Target_vb_opaque
-		if target_vb_uuid != nil {
-			target_vb_vbuuid_map[vb] = target_vb_uuid
-		}
+		target_vb_vbuuid_map[vb] = target_vb_uuid
 	}
 
 	if len(target_vb_vbuuid_map) > 0 {

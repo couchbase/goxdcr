@@ -12,6 +12,7 @@ package pipeline_manager
 import (
 	"errors"
 	"fmt"
+	"github.com/couchbase/goxdcr/base"
 	common "github.com/couchbase/goxdcr/common"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
@@ -82,6 +83,16 @@ func Update(topic string, cur_err error) error {
 
 func ReplicationStatus(topic string) *pipeline.ReplicationStatus {
 	return pipeline_mgr.pipelines_map[topic]
+}
+
+func NewMCRequestObj(topic string) *base.WrappedMCRequest {
+	return ReplicationStatus(topic).ObjectPool().Get()
+}
+
+func RecycleMCRequestObj(topic string, obj *base.WrappedMCRequest) {
+	if ReplicationStatus(topic) != nil {
+		ReplicationStatus(topic).ObjectPool().Put(obj)
+	}
 }
 
 func SetReplicationStatusForPausedReplication(spec *metadata.ReplicationSpecification) *pipeline.ReplicationStatus {
@@ -225,6 +236,10 @@ func (pipelineMgr *pipelineManager) startPipeline(topic string) (common.Pipeline
 			return p, err
 		}
 
+		//config request pool
+		pool_max_size := getRequestPoolSize(rep_status, len(p.Targets()))
+		rep_status.ObjectPool().SetMaxSize(pool_max_size)
+
 		pipelineMgr.logger.Infof("Pipeline %v is constructed, start it", p.InstanceId())
 		err = p.Start(rep_status.SettingsMap())
 		if err != nil {
@@ -316,6 +331,7 @@ func (pipelineMgr *pipelineManager) stopPipeline(topic string) error {
 		pipelineMgr.updateReplicationStatus(topic)
 
 		pipelineMgr.logger.Infof("Pipeline is stopped")
+		pipelineMgr.logger.Infof("Replication Status=%v\n", rep_status)
 	} else {
 		//The named pipeline is not active
 		pipelineMgr.logger.Infof("The pipeline asked to be stopped is not running.")
@@ -624,4 +640,8 @@ func (r *pipelineUpdater) updateState(new_state pipelineUpdaterState) error {
 	r.state = new_state
 
 	return nil
+}
+
+func getRequestPoolSize (rep_status *pipeline.ReplicationStatus, numOfTargetNozzles int) int{
+	return rep_status.Spec().Settings.BatchCount *52 *numOfTargetNozzles
 }
