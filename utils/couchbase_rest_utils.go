@@ -281,7 +281,7 @@ func getHttpClient(certificate []byte, ssl_con_str string, logger *log.CommonLog
 		}
 		conn.Close()
 
-		tr := &http.Transport{TLSClientConfig: tlsConfig}
+		tr := &http.Transport{TLSClientConfig: tlsConfig, Dial: base.DialTCPWithTimeout}
 		tr.DisableKeepAlives = true
 		client = &http.Client{Transport: tr}
 
