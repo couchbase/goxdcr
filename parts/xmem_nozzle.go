@@ -22,6 +22,7 @@ import (
 	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/goxdcr/utils"
 	"io"
+	"math"
 	"math/rand"
 	"net"
 	"reflect"
@@ -54,6 +55,8 @@ const (
 	default_selfMonitorInterval time.Duration = 1 * time.Second
 	default_demandEncryption    bool          = false
 	default_max_downtime        time.Duration = 3 * time.Second
+	//wait time between write is default_backoff_wait_time*backoff_factor
+	default_backoff_wait_time time.Duration = 10 * time.Millisecond
 )
 
 const (
@@ -553,6 +556,8 @@ type xmemClient struct {
 	memClient *mcc.Client
 	//the count of continuous read\write failure on this client
 	continuous_failure_counter int
+	//the count of continuous successful read\write
+	success_counter int
 	//the maximum allowed continuous read\write failure on this client
 	//exceed this limit, would consider this client's health is ruined.
 	max_continuous_failure int
@@ -565,6 +570,8 @@ type xmemClient struct {
 	poolName               string
 	healthy                bool
 	num_of_repairs         int
+	last_failure           time.Time
+	backoff_factor         int
 }
 
 func newXmemClient(name string, read_timeout, write_timeout time.Duration,
@@ -573,15 +580,18 @@ func newXmemClient(name string, read_timeout, write_timeout time.Duration,
 	return &xmemClient{name: name,
 		memClient:                  client,
 		continuous_failure_counter: 0,
-		logger:                 logger,
-		poolName:               poolName,
-		read_timeout:           read_timeout,
-		write_timeout:          write_timeout,
-		max_downtime:           max_downtime,
-		max_continuous_failure: max_continuous_failure,
-		healthy:                true,
-		num_of_repairs:         0,
-		lock:                   sync.RWMutex{}}
+		success_counter:            0,
+		logger:                     logger,
+		poolName:                   poolName,
+		read_timeout:               read_timeout,
+		write_timeout:              write_timeout,
+		max_downtime:               max_downtime,
+		max_continuous_failure:     max_continuous_failure,
+		healthy:                    true,
+		num_of_repairs:             0,
+		lock:                       sync.RWMutex{},
+		backoff_factor:             0,
+	}
 }
 
 func (client *xmemClient) curFailureCounter() int {
@@ -607,6 +617,11 @@ func (client *xmemClient) reportOpSuccess() {
 	defer client.lock.Unlock()
 
 	client.continuous_failure_counter = 0
+	client.success_counter++
+	if client.success_counter > client.max_continuous_failure && client.backoff_factor > 0 {
+		client.backoff_factor--
+		client.success_counter = client.success_counter - client.max_continuous_failure
+	}
 	client.healthy = true
 
 }
@@ -637,6 +652,12 @@ func (client *xmemClient) getConn(readTimeout bool, writeTimeout bool) (io.ReadW
 func (client *xmemClient) repairConn(memClient *mcc.Client) {
 	client.lock.Lock()
 	defer client.lock.Unlock()
+
+	if time.Since(client.last_failure) < 1*time.Minute {
+		client.backoff_factor++
+	} else {
+		client.backoff_factor = 0
+	}
 
 	client.memClient.Close()
 	client.memClient = memClient
@@ -1569,6 +1590,18 @@ func isRecoverableMCError(resp_status mc.Status) bool {
 	}
 }
 
+func (xmem *XmemNozzle) getMaxIdleCount() int {
+	backoff_factor := math.Max(float64(xmem.client_for_getMeta.backoff_factor), float64(xmem.client_for_setMeta.backoff_factor))
+	backoff_factor = math.Max(float64(10), backoff_factor)
+
+	//if client_for_getMeta.backoff_factor > 0 or client_for_setMeta.backoff_factor > 0, it means the target system is possibly under load, need to be more patient before
+	//declare the stuckness.
+	if backoff_factor > 0 {
+		return xmem.config.maxIdleCount * int(backoff_factor)
+	}
+	return xmem.config.maxIdleCount
+}
+
 func (xmem *XmemNozzle) selfMonitor(finch chan bool, waitGrp *sync.WaitGroup) {
 	defer waitGrp.Done()
 	ticker := time.Tick(xmem.config.selfMonitorInterval)
@@ -1579,7 +1612,6 @@ func (xmem *XmemNozzle) selfMonitor(finch chan bool, waitGrp *sync.WaitGroup) {
 	var repairCount_getMeta = 0
 	var count uint64
 	freeze_counter := 0
-	idle_counter := 0
 	for {
 		select {
 		case <-finch:
@@ -1591,19 +1623,13 @@ func (xmem *XmemNozzle) selfMonitor(finch chan bool, waitGrp *sync.WaitGroup) {
 			}
 
 			count++
-			if xmem.counter_sent == sent_count && int(xmem.buf.itemCountInBuffer()) == resp_waitingConfirm_count {
-				if (len(xmem.dataChan) > 0 || xmem.buf.itemCountInBuffer() != 0) &&
-					repairCount_setMeta == xmem.client_for_setMeta.repairCount() &&
-					repairCount_getMeta == xmem.client_for_getMeta.repairCount() {
-					freeze_counter++
-					idle_counter = 0
-				} else {
-					freeze_counter = 0
-					idle_counter++
-				}
+			if xmem.counter_sent == sent_count && int(xmem.buf.itemCountInBuffer()) == resp_waitingConfirm_count &&
+				(len(xmem.dataChan) > 0 || xmem.buf.itemCountInBuffer() != 0) &&
+				repairCount_setMeta == xmem.client_for_setMeta.repairCount() &&
+				repairCount_getMeta == xmem.client_for_getMeta.repairCount() {
+				freeze_counter++
 			} else {
 				freeze_counter = 0
-				idle_counter = 0
 			}
 			sent_count = xmem.counter_sent
 			resp_waitingConfirm_count = int(xmem.buf.itemCountInBuffer())
@@ -1614,8 +1640,8 @@ func (xmem *XmemNozzle) selfMonitor(finch chan bool, waitGrp *sync.WaitGroup) {
 				xmem.Logger().Debugf("%v open=%v checking..., %v item unsent, received %v items, sent %v items, %v items waiting for response, %v batches ready, current batch timeout at %v, current batch expire_ch size is %v\n", xmem.Id(), xmem.IsOpen(), len(xmem.dataChan), xmem.counter_received, xmem.counter_sent, int(xmem.buf.bufferSize())-len(xmem.buf.empty_slots_pos), len(xmem.batches_ready), xmem.batch.start_time.Add(xmem.batch.expiring_duration), len(xmem.batch.expire_ch))
 				count = 0
 			}
-			if freeze_counter > xmem.config.maxIdleCount {
-				xmem.Logger().Errorf("Xmem hasn't sent any item out for %v ticks, %v data in queue, flowcontrol=%v, con_retry_limit=%v", xmem.config.maxIdleCount, len(xmem.dataChan), xmem.buf.itemCountInBuffer() <= xmem.buf.notify_threshold, xmem.client_for_setMeta.continuous_failure_counter)
+			if freeze_counter > xmem.getMaxIdleCount() {
+				xmem.Logger().Errorf("Xmem hasn't sent any item out for %v ticks, %v data in queue, flowcontrol=%v, con_retry_limit=%v, backoff_factor for client_setMeta is %v, backoff_factor for client_getMeta is %v", xmem.getMaxIdleCount(), len(xmem.dataChan), xmem.buf.itemCountInBuffer() <= xmem.buf.notify_threshold, xmem.client_for_setMeta.continuous_failure_counter, xmem.client_for_setMeta.backoff_factor, xmem.client_for_getMeta.backoff_factor)
 				xmem.Logger().Infof("%v open=%v checking..., %v item unsent, received %v items, sent %v items, %v items waiting for response, %v batches ready, current batch timeout at %v, current batch expire_ch size is %v\n", xmem.Id(), xmem.IsOpen(), len(xmem.dataChan), xmem.counter_received, xmem.counter_sent, int(xmem.buf.bufferSize())-len(xmem.buf.empty_slots_pos), len(xmem.batches_ready), xmem.batch.start_time.Add(xmem.batch.expiring_duration), len(xmem.batch.expire_ch))
 				//				utils.DumpStack(xmem.Logger())
 				//the connection might not be healthy, it should not go back to connection pool
@@ -1724,6 +1750,11 @@ func (xmem *XmemNozzle) resend(req *bufferedMCRequest, pos uint16) (bool, error)
 func (xmem *XmemNozzle) resendForNewConn(req *bufferedMCRequest, pos uint16) (bool, error) {
 	xmem.Logger().Debugf("%v Retry sending %s, retry=%v", xmem.Id(), req.req.Req.Key, req.num_of_retry)
 	err := xmem.sendSingleSetMeta(false, req.req, pos)
+	if err != nil {
+		req.err = err
+	} else {
+		req.num_of_retry = 0
+	}
 	return false, err
 }
 
@@ -1763,7 +1794,7 @@ func (xmem *XmemNozzle) ConnType() base.ConnType {
 func (xmem *XmemNozzle) StatusSummary() string {
 	if xmem.State() == common.Part_Running {
 		connType := xmem.connType
-		return fmt.Sprintf("Xmem %v state =%v connType=%v received %v items, sent %v items, %v items waiting to confirm, %v in queue", xmem.Id(), xmem.State(), connType, xmem.counter_received, xmem.counter_sent, int(xmem.buf.bufferSize())-len(xmem.buf.empty_slots_pos), len(xmem.dataChan))
+		return fmt.Sprintf("Xmem %v state =%v connType=%v received %v items, sent %v items, %v items waiting to confirm, %v in queue, getMeta's backoff_factor is %v, setMeta's backoff_factor is %v", xmem.Id(), xmem.State(), connType, xmem.counter_received, xmem.counter_sent, int(xmem.buf.bufferSize())-len(xmem.buf.empty_slots_pos), len(xmem.dataChan), xmem.client_for_getMeta.backoff_factor, xmem.client_for_setMeta.backoff_factor)
 	} else {
 		return fmt.Sprintf("Xmem %v state =%v ", xmem.Id(), xmem.State())
 	}
@@ -1804,11 +1835,12 @@ func (xmem *XmemNozzle) validateRunningState() error {
 }
 
 func (xmem *XmemNozzle) writeToClient(client *xmemClient, bytes []byte) error {
+	time.Sleep(time.Duration(client.backoff_factor) * default_backoff_wait_time)
+
 	conn, err := xmem.getConn(client, false, true)
 	if err != nil {
 		return err
 	}
-
 	_, err = conn.Write(bytes)
 	if err == nil {
 		client.reportOpSuccess()

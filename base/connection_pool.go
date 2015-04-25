@@ -43,6 +43,10 @@ const (
 	SSLOverMem   ConnType = iota
 )
 
+var (
+	dialer *net.Dialer = &net.Dialer{Timeout: DialTimeoutDuration}
+)
+
 func (connType ConnType) String() string {
 	if connType == MemConn {
 		return "MemConn"
@@ -209,7 +213,7 @@ func (p *sslOverProxyConnPool) Certificate() []byte {
 func (p *sslOverProxyConnPool) newConn() (*mcc.Client, error) {
 	//connect to local proxy port
 	ssl_con_str := LocalHostName + UrlPortNumberDelimiter + strconv.FormatInt(int64(p.local_proxy_port), ParseIntBase)
-	conn, err := net.DialTimeout("tcp", ssl_con_str, DialTimeoutDuration)
+	conn, err := DialTCPWithTimeout("tcp", ssl_con_str)
 	if err != nil {
 		ConnPoolMgr().logger.Errorf("Failed to establish ssl over proxy connection. err=%v\n", err)
 		return nil, err
@@ -658,31 +662,13 @@ func MakeTLSConn(ssl_con_str string, certificate []byte, logger *log.CommonLogge
 	tlsConfig.BuildNameToCertificate()
 	tlsConfig.InsecureSkipVerify = true
 
-	//Connect network
-	ipConn, err := net.DialTimeout("tcp", ssl_con_str, DialTimeoutDuration)
-	if err != nil {
-		logger.Errorf("Could not connect to %v, err=%v\n", ssl_con_str, err)
-		return nil, nil, err
-	}
 	// Connect to tls
-	conn := tls.Client(ipConn, tlsConfig)
+	conn, err := tls.DialWithDialer(dialer, "tcp", ssl_con_str, tlsConfig)
 
 	// Handshake with TLS to get cert
-	errc := make(chan error, 2)
-	var timer *time.Timer
-	timer = time.AfterFunc(DialTimeoutDuration, func() {
-		errc <- fmt.Errorf("TLS handshake timedout when connecting to %v", ssl_con_str)
-	})
-	go func() {
-		err := conn.Handshake()
-		if timer != nil {
-			timer.Stop()
-		}
-		errc <- err
-	}()
+	err = conn.Handshake()
 
-	if err = <-errc; err != nil {
-		ipConn.Close()
+	if err != nil {
 		logger.Errorf("TLS handshake failed when connecting to %v, err=%v\n", ssl_con_str, err)
 		return nil, nil, err
 	}
@@ -722,5 +708,5 @@ func MakeTLSConn(ssl_con_str string, certificate []byte, logger *log.CommonLogge
 }
 
 func DialTCPWithTimeout(network, address string) (net.Conn, error) {
-	return net.DialTimeout(network, address, DialTimeoutDuration)
+	return dialer.Dial(network, address)
 }

@@ -11,8 +11,9 @@ package base
 
 import (
 	"errors"
-	"net"
+	"fmt"
 	"github.com/couchbase/goxdcr/log"
+	"net"
 	"sync"
 )
 
@@ -171,12 +172,15 @@ func (tcpConnPoolMgr *tcpConnPoolMgr) CreatePool(poolName string, hostName strin
 // This function creates a single connection to the vbucket master node.
 //
 func NewTCPConn(hostName string) (conn *net.TCPConn, err error) {
-	// connect to host
-	hostAddr, err := net.ResolveTCPAddr(NetTCP, hostName)
+	con, err := DialTCPWithTimeout(NetTCP, hostName)
 	if err != nil {
 		return nil, err
 	}
-	return net.DialTCP(NetTCP, nil, hostAddr)
+	conn, ok := con.(*net.TCPConn)
+	if !ok {
+		return nil, fmt.Errorf("The connection to %v returned is not TCP type", hostName)
+	}
+	return conn, nil
 }
 
 //return the singleton TCPConnPoolMgr
