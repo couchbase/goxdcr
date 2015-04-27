@@ -665,6 +665,11 @@ func MakeTLSConn(ssl_con_str string, certificate []byte, logger *log.CommonLogge
 	// Connect to tls
 	conn, err := tls.DialWithDialer(dialer, "tcp", ssl_con_str, tlsConfig)
 
+	if err != nil {
+		logger.Errorf("Failed to connect to %v, err=%v\n", ssl_con_str, err)
+		return nil, nil, err
+	}
+
 	// Handshake with TLS to get cert
 	err = conn.Handshake()
 
