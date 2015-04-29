@@ -1475,13 +1475,13 @@ func (xmem *XmemNozzle) receiveResponse(finch chan bool, waitGrp *sync.WaitGroup
 			}
 
 			response, err := xmem.readFromClient(xmem.client_for_setMeta)
-			if err != nil {
+			if err != nil || (response != nil && response.Status != mc.SUCCESS && isRecoverableMCError(response.Status)) {
 				if err == PartStoppedError || err == connectionClosedError || err == fatalError {
 					goto done
 				} else if err == badConnectionError {
 					xmem.repairConn(xmem.client_for_setMeta, err.Error())
 					xmem.Logger().Error("The connection is ruined. Repair the connection and retry.")
-				} else if response != nil && isRecoverableMCError(response.Status) {
+				} else if err == nil && response != nil && response.Status != mc.SUCCESS && isRecoverableMCError(response.Status) {
 
 					pos := xmem.getPosFromOpaque(response.Opaque)
 					xmem.Logger().Infof("%v pos=%d, Received error = %v in response, err = %v, response=%v\n", xmem.Id(), pos, response.Status.String(), err, response.Bytes())
