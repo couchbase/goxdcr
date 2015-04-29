@@ -29,6 +29,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 )
@@ -695,11 +696,10 @@ type XmemNozzle struct {
 	bOpen      bool
 	lock_bOpen sync.RWMutex
 
-	dataChan_lock sync.RWMutex
 	//data channel to accept the incoming data
 	dataChan chan *base.WrappedMCRequest
 	//the total size of data (in byte) queued in dataChan
-	bytes_in_dataChan int
+	bytes_in_dataChan int32
 
 	//memcached client connected to the target bucket
 	client_for_setMeta *xmemClient
@@ -762,7 +762,6 @@ func NewXmemNozzle(id string,
 		AbstractPart:          part,
 		bOpen:                 true,
 		lock_bOpen:            sync.RWMutex{},
-		dataChan_lock:         sync.RWMutex{},
 		dataChan:              nil,
 		receive_token_ch:      nil,
 		client_for_setMeta:    nil,
@@ -906,9 +905,7 @@ func (xmem *XmemNozzle) batchReady() error {
 }
 
 func (xmem *XmemNozzle) Receive(data interface{}) error {
-	xmem.dataChan_lock.Lock()
 	defer func() {
-		xmem.dataChan_lock.Unlock()
 		if r := recover(); r != nil {
 			xmem.handleGeneralError(errors.New(fmt.Sprintf("%v", r)))
 		}
@@ -935,7 +932,7 @@ func (xmem *XmemNozzle) Receive(data interface{}) error {
 	dataChan_len_old := len(xmem.dataChan)
 	received_old := xmem.counter_received
 
-	xmem.dataChan <- request
+	xmem.writeToDataChan(request)
 	xmem.counter_received++
 
 	if xmem.counter_received <= received_old {
@@ -947,15 +944,12 @@ func (xmem *XmemNozzle) Receive(data interface{}) error {
 		xmem.Logger().Errorf("received=%v, sent=%v data buffered=%v", xmem.counter_received, xmem.counter_sent, len(xmem.dataChan))
 	}
 
-	size := request.Req.Size()
-	xmem.bytes_in_dataChan = xmem.bytes_in_dataChan + size
-
 	//accumulate the batchCount and batchSize
 	if xmem.batch.accumuBatch(request, xmem.optimisticRep) {
 		xmem.batchReady()
 	}
 
-	xmem.Logger().Debugf("Xmem %v received %v items, queue_size = %v, bytes_in_dataChan=%v\n", xmem.Id(), xmem.counter_received, len(xmem.dataChan), xmem.bytes_in_dataChan)
+	xmem.Logger().Debugf("Xmem %v received %v items, queue_size = %v\n", xmem.Id(), xmem.counter_received, len(xmem.dataChan))
 
 	return nil
 }
@@ -1030,20 +1024,16 @@ func (xmem *XmemNozzle) batchSetMetaWithRetry(batch *dataBatch, numOfRetry int) 
 			return err
 		}
 
-		item, ok := <-xmem.dataChan
+		item, err := xmem.readFromDataChan()
+		if err != nil {
+			return err
+		}
 		xmem.counter_sent++
 		if xmem.counter_received != len(xmem.dataChan)+xmem.counter_sent {
 			xmem.Logger().Errorf(fmt.Sprintf("received=%v, sent=%v data buffered=%v", xmem.counter_received, xmem.counter_sent, len(xmem.dataChan)))
 		}
 
-		if !ok {
-			//data channel is close, part must be stopped
-			return PartStoppedError
-		}
-
 		if item != nil {
-			xmem.bytes_in_dataChan = xmem.bytes_in_dataChan - item.Req.Size()
-
 			if needSend(item.Req, batch, xmem.logger) {
 				//blocking
 				err, index, reserv_num := xmem.buf.reserveSlot()
@@ -1487,7 +1477,7 @@ func (xmem *XmemNozzle) receiveResponse(finch chan bool, waitGrp *sync.WaitGroup
 				xmem.receive_token_ch <- 1
 			} else if response == nil {
 				panic("readFromClient returned nil error and nil response")
-			} else if response.Status != mc.SUCCESS && !isIgnorableMCError(response.Status){
+			} else if response.Status != mc.SUCCESS && !isIgnorableMCError(response.Status) {
 				if isRecoverableMCError(response.Status) {
 					// err is recoverable. resend doc
 					pos := xmem.getPosFromOpaque(response.Opaque)
@@ -1668,7 +1658,7 @@ func (xmem *XmemNozzle) selfMonitor(finch chan bool, waitGrp *sync.WaitGroup) {
 		case <-statsTicker:
 			additionalInfo := make(map[string]interface{})
 			additionalInfo[STATS_QUEUE_SIZE] = len(xmem.dataChan)
-			additionalInfo[STATS_QUEUE_SIZE_BYTES] = xmem.bytes_in_dataChan
+			additionalInfo[STATS_QUEUE_SIZE_BYTES] = xmem.bytesInDataChan()
 			xmem.RaiseEvent(common.StatsUpdate, nil, xmem, nil, additionalInfo)
 		}
 	}
@@ -2049,4 +2039,26 @@ func (xmem *XmemNozzle) UpdateSettings(settings map[string]interface{}) error {
 	}
 	xmem.config.optiRepThreshold = optimisticReplicationThreshold
 	return nil
+}
+
+func (xmem *XmemNozzle) writeToDataChan(item *base.WrappedMCRequest) {
+	xmem.dataChan <- item
+	atomic.AddInt32(&xmem.bytes_in_dataChan, int32(item.Req.Size()))
+}
+
+func (xmem *XmemNozzle) readFromDataChan() (*base.WrappedMCRequest, error) {
+	item, ok := <-xmem.dataChan
+
+	if !ok {
+		//data channel has been closed, part must have been stopped
+		return nil, PartStoppedError
+	}
+
+	atomic.AddInt32(&xmem.bytes_in_dataChan, int32(0-item.Req.Size()))
+
+	return item, nil
+}
+
+func (xmem *XmemNozzle) bytesInDataChan() int {
+	return int(atomic.LoadInt32(&xmem.bytes_in_dataChan))
 }
