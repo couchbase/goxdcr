@@ -1475,21 +1475,33 @@ func (xmem *XmemNozzle) receiveResponse(finch chan bool, waitGrp *sync.WaitGroup
 			}
 
 			response, err := xmem.readFromClient(xmem.client_for_setMeta)
-			if err != nil || (response != nil && response.Status != mc.SUCCESS && isRecoverableMCError(response.Status)) {
+			if err != nil {
 				if err == PartStoppedError || err == connectionClosedError || err == fatalError {
 					goto done
 				} else if err == badConnectionError {
 					xmem.repairConn(xmem.client_for_setMeta, err.Error())
 					xmem.Logger().Error("The connection is ruined. Repair the connection and retry.")
-				} else if err == nil && response != nil && response.Status != mc.SUCCESS && isRecoverableMCError(response.Status) {
-
-					pos := xmem.getPosFromOpaque(response.Opaque)
-					xmem.Logger().Infof("%v pos=%d, Received error = %v in response, err = %v, response=%v\n", xmem.Id(), pos, response.Status.String(), err, response.Bytes())
-					_, err = xmem.buf.modSlot(pos, xmem.resend)
 				}
 
 				//read is unsuccessful, put the token back
 				xmem.receive_token_ch <- 1
+			} else if response == nil {
+				panic("readFromClient returned nil error and nil response")
+			} else if response.Status != mc.SUCCESS && !isIgnorableMCError(response.Status){
+				if isRecoverableMCError(response.Status) {
+					// err is recoverable. resend doc
+					pos := xmem.getPosFromOpaque(response.Opaque)
+					xmem.Logger().Errorf("%v Received recoverable error in response. Response status=%v, err = %v, response=%v\n", xmem.Id(), response.Status.String(), err, response.Bytes())
+					_, err = xmem.buf.modSlot(pos, xmem.resend)
+
+					//read is unsuccessful, put the token back
+					xmem.receive_token_ch <- 1
+				} else {
+					// for non-recoverable errors, report failure
+					xmem.Logger().Errorf("%v received a response indicating non-recoverable error from xmem client. response status=%v", xmem.Id(), response.Status)
+					xmem.handleGeneralError(errors.New("Received non-recoverable error from memcached in target cluster"))
+					goto done
+				}
 			} else {
 				//raiseEvent
 				pos := xmem.getPosFromOpaque(response.Opaque)
@@ -1578,6 +1590,15 @@ func isSeriousError(err error) bool {
 func isRecoverableMCError(resp_status mc.Status) bool {
 	switch resp_status {
 	case mc.TMPFAIL:
+		return true
+	default:
+		return false
+	}
+}
+
+func isIgnorableMCError(resp_status mc.Status) bool {
+	switch resp_status {
+	case mc.KEY_EEXISTS:
 		return true
 	default:
 		return false

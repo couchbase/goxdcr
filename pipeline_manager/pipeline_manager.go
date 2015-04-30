@@ -520,7 +520,7 @@ func (r *pipelineUpdater) start() {
 
 //update the pipeline
 func (r *pipelineUpdater) update() bool {
-	r.logger.Infof("Try to fix Pipeline %v \n", r.pipeline_name)
+	r.logger.Infof("Try to fix Pipeline %v. Current error=%v \n", r.pipeline_name, r.current_error)
 
 	r.logger.Infof("Try to stop pipeline %v\n", r.pipeline_name)
 	err := pipeline_mgr.stopPipeline(r.pipeline_name)
