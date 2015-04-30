@@ -1689,18 +1689,16 @@ func (xmem *XmemNozzle) check(finch chan bool, waitGrp *sync.WaitGroup) {
 			default:
 			}
 			xmem.Logger().Debugf("%v open=%v checking..., %v item unsent, received %v items, sent %v items, %v items waiting for response, %v batches ready, current batch timeout at %v, current batch expire_ch size is %v\n", xmem.Id(), xmem.IsOpen(), len(xmem.dataChan), xmem.counter_received, xmem.counter_sent, int(xmem.buf.bufferSize())-len(xmem.buf.empty_slots_pos), len(xmem.batches_ready), xmem.batch.start_time.Add(xmem.batch.expiring_duration), len(xmem.batch.expire_ch))
-			if !xmem.config.demandEncryption {
-				size := xmem.buf.bufferSize()
-				timeoutCheckFunc := xmem.checkTimeout
-				for i := 0; i < int(size); i++ {
-					_, err := xmem.buf.modSlot(uint16(i), timeoutCheckFunc)
-					if err != nil {
-						xmem.Logger().Errorf("%v Failed to check timeout %v\n", xmem.Id(), err)
-						if err == badConnectionError {
-							xmem.repairConn(xmem.client_for_setMeta, err.Error())
-						}
-						break
+			size := xmem.buf.bufferSize()
+			timeoutCheckFunc := xmem.checkTimeout
+			for i := 0; i < int(size); i++ {
+				_, err := xmem.buf.modSlot(uint16(i), timeoutCheckFunc)
+				if err != nil {
+					xmem.Logger().Errorf("%v Failed to check timeout %v\n", xmem.Id(), err)
+					if err == badConnectionError {
+						xmem.repairConn(xmem.client_for_setMeta, err.Error())
 					}
+					break
 				}
 			}
 

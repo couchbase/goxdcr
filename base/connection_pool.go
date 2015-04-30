@@ -62,16 +62,15 @@ func (connType ConnType) String() string {
 type NewConnFunc func() (*mcc.Client, error)
 
 type ConnPool interface {
-	IsClosed() bool
 	Get() (*mcc.Client, error)
 	Release(client *mcc.Client)
 	ReleaseConnections()
 	NewConnFunc() NewConnFunc
 	Name() string
-	IsFull() bool
 	Size() int
 	ConnType() ConnType
 	Hostname() string
+	Close()
 }
 
 type SSLConnPool interface {
@@ -89,6 +88,7 @@ type connPool struct {
 	maxConn     int
 	newConnFunc NewConnFunc
 	logger      *log.CommonLogger
+	lock        *sync.RWMutex
 }
 
 type sslOverProxyConnPool struct {
@@ -155,10 +155,6 @@ func (p *connPool) init() {
 	p.newConnFunc = p.newConn
 }
 
-func (p *connPool) IsClosed() bool {
-	return p.clients == nil
-}
-
 func (p *connPool) Name() string {
 	return p.name
 }
@@ -167,27 +163,32 @@ func (p *connPool) Hostname() string {
 	return p.hostName
 }
 
-func (p *connPool) IsFull() bool {
-	return len(p.clients) >= p.maxConn
-}
-
 func (p *connPool) Size() int {
-	return len(p.clients)
+	p.lock.RLock()
+	defer p.lock.RUnlock()
+	if p.clients != nil {
+		return len(p.clients)
+	} else {
+		return 0
+	}
 }
 
 func (p *connPool) Get() (*mcc.Client, error) {
-	p.logger.Debugf("There are %d connections in the pool\n", len(p.clients))
-	select {
-	case client, ok := <-p.clients:
-		if ok {
-			return client, nil
+	p.lock.RLock()
+	defer p.lock.RUnlock()
+	if p.clients != nil {
+		p.logger.Debugf("There are %d connections in the pool\n", len(p.clients))
+		select {
+		case client, ok := <-p.clients:
+			if ok {
+				return client, nil
+			}
+		default:
+			//no more connection, create more
+			mcClient, err := p.newConnFunc()
+			return mcClient, err
 		}
-	default:
-		//no more connection, create more
-		mcClient, err := p.newConnFunc()
-		return mcClient, err
 	}
-
 	return nil, errors.New("connection pool is closed")
 }
 
@@ -340,21 +341,22 @@ func (p *sslOverMemConnPool) ConnType() ConnType {
 // Release connection back to the pool
 //
 func (p *connPool) Release(client *mcc.Client) {
-	// This would panic if p.clients is closed.  This
-	// is intentional.
-
 	//reset connection deadlines
 	conn := client.Hijack()
 
 	conn.(net.Conn).SetReadDeadline(time.Date(1, time.January, 0, 0, 0, 0, 0, time.UTC))
 	conn.(net.Conn).SetWriteDeadline(time.Date(1, time.January, 0, 0, 0, 0, 0, time.UTC))
 
-	select {
-	case p.clients <- client:
-		return
-	default:
-		//the pool reaches its capacity, drop the client on the floor
-		return
+	p.lock.RLock()
+	defer p.lock.RUnlock()
+	if p.clients != nil {
+		select {
+		case p.clients <- client:
+			return
+		default:
+			//the pool reaches its capacity, drop the client on the floor
+			return
+		}
 	}
 }
 
@@ -362,6 +364,8 @@ func (p *connPool) Release(client *mcc.Client) {
 // Release all connections in the connection pool.
 //
 func (p *connPool) ReleaseConnections() {
+	p.lock.Lock()
+	defer p.lock.Unlock()
 
 	if p.clients == nil {
 		return
@@ -388,10 +392,17 @@ func (p *connPool) ReleaseConnections() {
 		}
 	}
 
-	close(p.clients)
-	p.clients = nil
 }
 
+func (p *connPool) Close() {
+	p.ReleaseConnections()
+
+	p.lock.Lock()
+	defer p.lock.Unlock()
+	close(p.clients)
+	p.clients = nil
+
+}
 func (connPoolMgr *connPoolMgr) GetOrCreatePool(poolNameToCreate string, hostname string, bucketname string, username string, password string, connsize int) (ConnPool, error) {
 	connPoolMgr.map_lock.Lock()
 	defer connPoolMgr.map_lock.Unlock()
@@ -417,6 +428,7 @@ func (connPoolMgr *connPoolMgr) GetOrCreatePool(poolNameToCreate string, hostnam
 		password:   password,
 		bucketName: bucketname,
 		name:       poolNameToCreate,
+		lock:       &sync.RWMutex{},
 		logger:     log.NewLogger("ConnPool", connPoolMgr.logger.LoggerContext())}
 	connPoolMgr.conn_pools_map[poolNameToCreate] = pool
 
@@ -452,6 +464,7 @@ func (connPoolMgr *connPoolMgr) GetOrCreateSSLOverMemPool(poolNameToCreate strin
 			password:   password,
 			bucketName: bucketname,
 			name:       poolNameToCreate,
+			lock:       &sync.RWMutex{},
 			logger:     log.NewLogger("sslConnPool", connPoolMgr.logger.LoggerContext())},
 		remote_memcached_port: remote_mem_port,
 		certificate:           cert}
@@ -491,6 +504,7 @@ func (connPoolMgr *connPoolMgr) GetOrCreateSSLOverProxyPool(poolNameToCreate str
 			password:   password,
 			bucketName: bucketname,
 			name:       poolNameToCreate,
+			lock:       &sync.RWMutex{},
 			logger:     log.NewLogger("sslConnPool", connPoolMgr.logger.LoggerContext())},
 		remote_memcached_port: remote_mem_port,
 		local_proxy_port:      local_proxy_port,
@@ -530,7 +544,7 @@ func (connPoolMgr *connPoolMgr) RemovePool(poolName string) {
 	connPoolMgr.map_lock.Lock()
 	defer connPoolMgr.map_lock.Unlock()
 	pool := connPoolMgr.conn_pools_map[poolName]
-	pool.ReleaseConnections()
+	pool.Close()
 	delete(connPoolMgr.conn_pools_map, poolName)
 	connPoolMgr.logger.Infof("Pool %v is removed, all connections are released", poolName)
 }
