@@ -979,6 +979,7 @@ func (xmem *XmemNozzle) processData_batch(finch chan bool, waitGrp *sync.WaitGro
 						if err == PartStoppedError {
 							goto done
 						}
+
 						xmem.handleGeneralError(err)
 					}
 				}
@@ -1150,8 +1151,9 @@ func (xmem *XmemNozzle) sendSetMeta_internal(batch *dataBatch) error {
 		//batch send
 		err = xmem.batchSetMetaWithRetry(batch, xmem.config.maxRetry)
 		if err != nil && err != PartStoppedError {
-			xmem.handleGeneralError(err)
-
+			high_level_err := "Error writing documents to memcached in target cluster."
+			xmem.Logger().Errorf("%v. err=%v", high_level_err, err)
+			xmem.handleGeneralError(errors.New(high_level_err))
 		}
 	}
 	return err
@@ -1915,8 +1917,9 @@ func (xmem *XmemNozzle) readFromClient(client *xmemClient) (*mc.MCResponse, erro
 				err = base.ErrorNotMyVbucket
 				xmem.releasePool()
 			}
-			xmem.handleGeneralError(err)
-			client.logger.Errorf("fatal err=%v", err)
+			high_level_err := "Fatal error when receiving responses from memcached in target cluster."
+			xmem.handleGeneralError(errors.New(high_level_err))
+			client.logger.Errorf("%v. err=%v", high_level_err, err)
 			return response, fatalError
 		} else if err == response {
 			//response.Status != SUCCESSFUL, in this case, gomemcached return the response as err as well
@@ -1954,8 +1957,9 @@ func (xmem *XmemNozzle) repairConn(client *xmemClient, reason string) error {
 		xmem.Logger().Infof("%v - The connection for %v is repaired\n", xmem.Id(), client.name)
 
 	} else {
-		xmem.Logger().Infof("%v - Connection for %v repair failed\n", xmem.Id(), client.name)
-		xmem.handleGeneralError(err)
+		high_level_err := "Failed to repair connections to target cluster."
+		xmem.handleGeneralError(errors.New(high_level_err))
+		xmem.Logger().Errorf("%v - Failed to repair connections for %v. err=%v\n", xmem.Id(), client.name, err)
 		return err
 	}
 	return nil
