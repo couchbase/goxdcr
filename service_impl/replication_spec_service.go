@@ -158,7 +158,7 @@ func (service *ReplicationSpecService) AddReplicationSpec(spec *metadata.Replica
 		return err
 	}
 	service.logger.Info("log it with ale logger...")
-	service.writeUiLog(spec, "created")
+	service.writeUiLog(spec, "created", "")
 	service.logger.Info("Done with logging...")
 	return nil
 }
@@ -172,6 +172,10 @@ func (service *ReplicationSpecService) SetReplicationSpec(spec *metadata.Replica
 }
 
 func (service *ReplicationSpecService) DelReplicationSpec(replicationId string) (*metadata.ReplicationSpecification, error) {
+	return service.delReplicationSpec_internal(replicationId, "")
+}
+
+func (service *ReplicationSpecService) delReplicationSpec_internal(replicationId, reason string) (*metadata.ReplicationSpecification, error) {
 	spec, err := service.ReplicationSpec(replicationId)
 	if err != nil {
 		return nil, errors.New(ReplicationSpecNotFoundErrorMessage)
@@ -182,7 +186,7 @@ func (service *ReplicationSpecService) DelReplicationSpec(replicationId string) 
 		return nil, err
 	}
 
-	service.writeUiLog(spec, "removed")
+	service.writeUiLog(spec, "removed", reason)
 	return spec, nil
 }
 
@@ -263,11 +267,15 @@ func (service *ReplicationSpecService) ReplicationSpecServiceCallback(path strin
 
 }
 
-func (service *ReplicationSpecService) writeUiLog(spec *metadata.ReplicationSpecification, action string) {
+func (service *ReplicationSpecService) writeUiLog(spec *metadata.ReplicationSpecification, action, reason string) {
 	if service.uilog_svc != nil {
+		var uiLogMsg string
 		remoteClusterName := service.remote_cluster_svc.GetRemoteClusterNameFromClusterUuid(spec.TargetClusterUUID)
-
-		uiLogMsg := fmt.Sprintf("Replication from bucket \"%s\" to bucket \"%s\" on cluster \"%s\" %s.", spec.SourceBucketName, spec.TargetBucketName, remoteClusterName, action)
+		if reason != "" {
+			uiLogMsg = fmt.Sprintf("Replication from bucket \"%s\" to bucket \"%s\" on cluster \"%s\" %s, since %s", spec.SourceBucketName, spec.TargetBucketName, remoteClusterName, action, reason)
+		} else {
+			uiLogMsg = fmt.Sprintf("Replication from bucket \"%s\" to bucket \"%s\" on cluster \"%s\" %s.", spec.SourceBucketName, spec.TargetBucketName, remoteClusterName, action)
+		}
 		service.uilog_svc.Write(uiLogMsg)
 	}
 }
@@ -293,7 +301,7 @@ func (service *ReplicationSpecService) getReplicationIdFromKey(key string) strin
 	return key[len(prefix):]
 }
 
-func (service *ReplicationSpecService) ValidateExistingReplicationSpec(spec *metadata.ReplicationSpecification) error {
+func (service *ReplicationSpecService) ValidateExistingReplicationSpec(spec *metadata.ReplicationSpecification) (error, error) {
 	//validate the existence of source bucket
 	local_connStr, _ := service.xdcr_comp_topology_svc.MyConnectionStr()
 	if local_connStr == "" {
@@ -302,57 +310,64 @@ func (service *ReplicationSpecService) ValidateExistingReplicationSpec(spec *met
 	sourceBucketUuid, err_source := utils.LocalBucketUUID(local_connStr, spec.SourceBucketName)
 
 	if err_source == utils.NonExistentBucketError {
-		service.logger.Errorf("Spec %v refers to non-existent source bucket %v\n", spec.Id, spec.SourceBucketName)
-		return InvalidReplicationSpecError
+		errMsg := fmt.Sprintf("spec %v refers to non-existent source bucket \"%v\"", spec.Id, spec.SourceBucketName)
+		service.logger.Error(errMsg)
+		return InvalidReplicationSpecError, errors.New(errMsg)
 	}
 
 	if spec.SourceBucketUUID != "" && spec.SourceBucketUUID != sourceBucketUuid {
 		//spec is referring to a deleted bucket
-		service.logger.Errorf("Spec %v refers to bucket %v which was deleted and recreated\n", spec.Id, spec.SourceBucketName)
-		return InvalidReplicationSpecError
+		errMsg := fmt.Sprintf("spec %v refers to bucket %v which was deleted and recreated", spec.Id, spec.SourceBucketName)
+		service.logger.Error(errMsg)
+		return InvalidReplicationSpecError, errors.New(errMsg)
 	}
 
 	//validate target cluster
 	targetClusterRef, err := service.remote_cluster_svc.RemoteClusterByUuid(spec.TargetClusterUUID, false)
 	if err == service_def.MetadataNotFoundErr {
 		//remote cluster is no longer valid
-		service.logger.Errorf("Spec %v refers to non-existent remote cluster reference %v\n", spec.Id, spec.TargetClusterUUID)
-		return InvalidReplicationSpecError
+		errMsg := fmt.Sprintf("spec %v refers to non-existent remote cluster reference \"%v\"", spec.Id, spec.TargetClusterUUID)
+		service.logger.Errorf(errMsg)
+		return InvalidReplicationSpecError, errors.New(errMsg)
 	} else if err != nil {
-		return err
+		return err, nil
 	}
 
 	remote_connStr, err := targetClusterRef.MyConnectionStr()
 	if err != nil {
-		service.logger.Errorf("Spec %v refers to an invalid remote cluster reference %v, as RemoteClusterRef.MyConnectionStr() returns err=%v\n", spec.Id, spec.TargetClusterUUID, err)
-		return InvalidReplicationSpecError
+		errMsg := fmt.Sprintf("spec %v refers to an invalid remote cluster reference \"%v\", as RemoteClusterRef.MyConnectionStr() returns err=%v\n", spec.Id, spec.TargetClusterUUID, err)
+		service.logger.Errorf(errMsg)
+		return InvalidReplicationSpecError, errors.New(errMsg)
 	}
 	remote_userName, remote_password, err := targetClusterRef.MyCredentials()
 	if err != nil {
-		service.logger.Errorf("Spec %v refers to an invalid remote cluster reference %v, as RemoteClusterRef.MyCredentials() returns err=%v\n", spec.Id, spec.TargetClusterUUID, err)
-		return InvalidReplicationSpecError
+		errMsg := fmt.Sprintf("spec %v refers to an invalid remote cluster reference \"%v\", as RemoteClusterRef.MyCredentials() returns err=%v\n", spec.Id, spec.TargetClusterUUID, err)
+		service.logger.Errorf(errMsg)
+		return InvalidReplicationSpecError, errors.New(errMsg)
 	}
 
 	//validate target bucket
 	targetBucketUuid, err_target := utils.RemoteBucketUUID(remote_connStr, remote_userName, remote_password, spec.TargetBucketName)
 	if err_target == utils.NonExistentBucketError {
-		service.logger.Errorf("Spec %v refers to non-existent target bucket %v\n", spec.Id, spec.TargetBucketName)
-		return InvalidReplicationSpecError
+		errMsg := fmt.Sprintf("spec %v refers to non-existent target bucket \"%v\"\n", spec.Id, spec.TargetBucketName)
+		service.logger.Errorf(errMsg)
+		return InvalidReplicationSpecError, errors.New(errMsg)
 	}
 
 	if spec.TargetBucketUUID != "" && spec.TargetBucketUUID != targetBucketUuid {
 		//spec is referring to a deleted bucket
-		service.logger.Errorf("Spec %v refers to bucket %v which was deleted and recreated\n", spec.Id, spec.TargetBucketName)
-		return InvalidReplicationSpecError
+		errMsg := fmt.Sprintf("spec %v refers to bucket %v which was deleted and recreated\n", spec.Id, spec.TargetBucketName)
+		service.logger.Errorf(errMsg)
+		return InvalidReplicationSpecError, errors.New(errMsg)
 	}
-	return nil
+	return nil, nil
 }
 
 func (service *ReplicationSpecService) ValidateAndGC(spec *metadata.ReplicationSpecification) {
-	err := service.ValidateExistingReplicationSpec(spec)
+	err, detail_err := service.ValidateExistingReplicationSpec(spec)
 	if err == InvalidReplicationSpecError {
-		service.logger.Errorf("Replication specification %v is no longer valid, garbage collect it", spec.Id)
-		_, err1 := service.DelReplicationSpec(spec.Id)
+		service.logger.Errorf("Replication specification %v is no longer valid, garbage collect it. error=%v\n", spec.Id, detail_err)
+		_, err1 := service.delReplicationSpec_internal(spec.Id, detail_err.Error())
 		if err1 != nil {
 			service.logger.Infof("Failed to garbage collect spec %v, err=%v\n", spec.Id, err1)
 		}
