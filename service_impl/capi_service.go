@@ -193,10 +193,10 @@ func (capi_svc *CAPIService) parseMassValidateSeqNosResp(url string, resp_status
 		err = errors.New("Can't find 'missing' in response")
 		return
 	}
-	missing_pairs := missingobj.([]interface{})
-	missing, err = getVBLists(missing_pairs)
-	if err != nil {
-		return
+	missing_list := missingobj.([]interface{})
+	missing = make ([]uint16, len(missing_list))
+	for index, vb := range missing_list {
+		missing[index] = uint16(vb.(float64))
 	}
 
 	bad_vb_list := []uint16{}
@@ -405,7 +405,7 @@ func getVBLists(pair_list []interface{}) ([]uint16, error) {
 	for _, pairObj := range pair_list {
 		pair, ok := pairObj.([]interface{})
 		if !ok || len(pair) != 2 {
-			return ret, fmt.Errorf("_commit_for_checkpoint retruns an invalid response. element in mismatch field should have format of [vbno, vbuuid], it is %v", pairObj)
+			return ret, fmt.Errorf("_mass_vbopaque_check retruns an invalid response. element in mismatch field should have format of [vbno, vbuuid], it is %v, pair_list=%v", pairObj, pair_list)
 		}
 		vb := uint16(pair[0].(float64))
 		ret = append(ret, vb)
