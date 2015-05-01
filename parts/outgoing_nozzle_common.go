@@ -37,7 +37,6 @@ const (
 	EVENT_ADDI_DOC_KEY     = "doc_key"
 	EVENT_ADDI_SEQNO       = "source_seqno"
 	EVENT_ADDI_OPT_REPD    = "optimistic_replicated"
-	EVENT_ADDI_HISEQNO     = "source_hiseqno"
 	EVENT_ADDI_SETMETA_COMMIT_TIME = "setmeta_commit_time"
 	EVENT_ADDI_GETMETA_COMMIT_TIME = "getmeta_commit_time"
 )

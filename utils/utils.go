@@ -512,3 +512,15 @@ func GetSettingFromSettings(settings map[string]interface{}, settingName string)
 
 	return setting
 }
+
+func DeepCopyIntArray(in []int) []int {
+	if in == nil {
+		return nil
+	}
+
+	out := make([]int, 0)
+	for _, element := range in {
+		out = append(out, element)
+	}
+	return out
+}

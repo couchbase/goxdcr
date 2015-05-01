@@ -26,7 +26,6 @@ import (
 	"math/rand"
 	"net"
 	"reflect"
-	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -118,48 +117,35 @@ type requestBuffer struct {
 	size            uint16      /*the size of the buffer*/
 	notifych        chan bool   /*notify channel is set when the buffer is below threshold*/
 	//	notify_allowed  bool   /*notify is allowed*/
-	notify_threshold  uint16
-	fin_ch            chan bool
-	logger            *log.CommonLogger
-	notifych_lock     sync.RWMutex
-	seqno_sorted_list map[uint16][]int
-	seqno_list_lock   map[uint16]*sync.RWMutex
-	token_ch          chan int
+	notify_threshold uint16
+	fin_ch           chan bool
+	logger           *log.CommonLogger
+	notifych_lock    sync.RWMutex
+	token_ch         chan int
 }
 
 func newReqBuffer(size uint16, threshold uint16, token_ch chan int, logger *log.CommonLogger) *requestBuffer {
 	logger.Debugf("Create a new request buffer of size %d\n", size)
 	buf := &requestBuffer{
-		slots:             make([]*bufferedMCRequest, size, size),
-		sequences:         make([]uint16, size),
-		empty_slots_pos:   make(chan uint16, size),
-		size:              size,
-		notifych:          nil,
-		notify_threshold:  threshold,
-		fin_ch:            make(chan bool, 1),
-		token_ch:          token_ch,
-		logger:            logger,
-		notifych_lock:     sync.RWMutex{},
-		seqno_sorted_list: make(map[uint16][]int),
-		occupied_count:    0,
-		seqno_list_lock:   make(map[uint16]*sync.RWMutex)}
+		slots:            make([]*bufferedMCRequest, size, size),
+		sequences:        make([]uint16, size),
+		empty_slots_pos:  make(chan uint16, size),
+		size:             size,
+		notifych:         nil,
+		notify_threshold: threshold,
+		fin_ch:           make(chan bool, 1),
+		token_ch:         token_ch,
+		logger:           logger,
+		notifych_lock:    sync.RWMutex{},
+		occupied_count:   0}
 
 	logger.Debug("Slots is initialized")
 
 	//initialize the empty_slots_pos
 	buf.initializeEmptySlotPos()
 
-	buf.initializeSeqnoSortedList()
-
 	logger.Debugf("new request buffer of size %d is created\n", size)
 	return buf
-}
-
-func (buf *requestBuffer) initializeSeqnoSortedList() {
-	for i := 0; i < 1024; i++ {
-		buf.seqno_sorted_list[uint16(i)] = []int{}
-		buf.seqno_list_lock[uint16(i)] = &sync.RWMutex{}
-	}
 }
 
 func (buf *requestBuffer) close() {
@@ -282,7 +268,6 @@ func (buf *requestBuffer) evictSlot(pos uint16) error {
 			buf.sequences[pos] = buf.sequences[pos] + 1
 		}
 
-		buf.removeSeqnoFromSeqnoList(req.req)
 		buf.notifych_lock.RLock()
 		defer buf.notifych_lock.RUnlock()
 
@@ -363,7 +348,6 @@ func (buf *requestBuffer) enSlot(pos uint16, req *base.WrappedMCRequest, reserva
 			return errors.New(fmt.Sprintf("Can't enSlot %d, doesn't have the reservation", pos))
 		}
 		r.req = req
-		buf.updateSeqnoList(req)
 		buf.token_ch <- 1
 
 		//increase the occupied_count
@@ -378,90 +362,7 @@ func (buf *requestBuffer) bufferSize() uint16 {
 	return buf.size
 }
 
-func (buf *requestBuffer) updateSeqnoList(req *base.WrappedMCRequest) {
-	vbno := req.Req.VBucket
-	buf.seqno_list_lock[vbno].Lock()
-	defer buf.seqno_list_lock[vbno].Unlock()
-	sorted_seqno_list, ok := buf.seqno_sorted_list[vbno]
-	if !ok {
-		sorted_seqno_list = []int{}
-	}
-	seqno := req.Seqno
-	oldlen := len(sorted_seqno_list)
-	index := sort.Search(oldlen, func(i int) bool { return sorted_seqno_list[i] > int(seqno) })
-	newlist := []int{}
-	if index < len(sorted_seqno_list) && sorted_seqno_list[index] > int(seqno) {
-		newlist = append(newlist, sorted_seqno_list[0:index]...)
-		newlist = append(newlist, int(seqno))
-		newlist = append(newlist, sorted_seqno_list[index:]...)
-	} else {
-		//not founded, this seqno is bigger than all seqno in sorted_seqno_list, added to the end
-		newlist = append(newlist, sorted_seqno_list...)
-		newlist = append(newlist, int(seqno))
-	}
-	newlen := len(newlist)
-	buf.seqno_sorted_list[vbno] = newlist
-	if !sort.IntsAreSorted(buf.seqno_sorted_list[vbno]) || newlen != oldlen+1 {
-		panic(fmt.Sprintf("list %v is not valid. vbno=%v", buf.seqno_sorted_list[vbno], vbno))
-	}
-}
-
-func (buf *requestBuffer) removeSeqnoFromSeqnoList(req *base.WrappedMCRequest) {
-	vbno := req.Req.VBucket
-	buf.seqno_list_lock[vbno].Lock()
-	defer buf.seqno_list_lock[vbno].Unlock()
-	sorted_seqno_list_vb := buf.seqno_sorted_list[vbno]
-
-	seqno := req.Seqno
-	index := sort.Search(len(sorted_seqno_list_vb), func(i int) bool {
-		return sorted_seqno_list_vb[i] >= int(seqno)
-	})
-	if index < len(sorted_seqno_list_vb) && sorted_seqno_list_vb[index] == int(seqno) {
-		var newlist []int = []int{}
-		if index > 0 {
-			newlist = append(newlist, sorted_seqno_list_vb[0:index]...)
-		}
-		if index < len(sorted_seqno_list_vb)-1 {
-			newlist = append(newlist, sorted_seqno_list_vb[index+1:]...)
-		}
-
-		if len(newlist) != len(sorted_seqno_list_vb)-1 {
-			panic(fmt.Sprintf("removeSeqnoFromSeqnoList is wrong. newlist=%v, oldlist=%v\n", newlist, sorted_seqno_list_vb))
-		}
-
-		buf.seqno_sorted_list[vbno] = newlist
-
-	} else {
-		panic(fmt.Sprintf("seqno %v is not in the sorted_seqno_list %v for vb=%v\n, index=%v", int(seqno), sorted_seqno_list_vb, vbno, index))
-	}
-
-}
-
-func (buf *requestBuffer) getSmallestSeqnoInBuffer(vbno uint16) (uint64, error) {
-	buf.seqno_list_lock[vbno].RLock()
-	defer buf.seqno_list_lock[vbno].RUnlock()
-	if len(buf.seqno_sorted_list[vbno]) > 0 {
-		return uint64(buf.seqno_sorted_list[vbno][0]), nil
-	} else {
-		return 0, errors.New(fmt.Sprintf("No data items for vbucket %v in the buffer", vbno))
-	}
-}
-
-func (buf *requestBuffer) hasSeqno(vbno uint16, seqno uint64) bool {
-	buf.seqno_list_lock[vbno].RLock()
-	defer buf.seqno_list_lock[vbno].RUnlock()
-	seqno_sorted_list, ok := buf.seqno_sorted_list[vbno]
-	if ok {
-		index := sort.Search(len(seqno_sorted_list), func(i int) bool {
-			return seqno_sorted_list[i] >= int(seqno)
-		})
-		return index < len(seqno_sorted_list) && seqno_sorted_list[index] == int(seqno)
-	}
-	return false
-}
-
 func (buf *requestBuffer) itemCountInBuffer() uint16 {
-
 	return uint16(atomic.LoadInt32(&buf.occupied_count))
 }
 
@@ -1560,12 +1461,7 @@ func (xmem *XmemNozzle) receiveResponse(finch chan bool, waitGrp *sync.WaitGroup
 					additionalInfo[EVENT_ADDI_SEQNO] = seqno
 					additionalInfo[EVENT_ADDI_OPT_REPD] = xmem.optimisticRep(req)
 					additionalInfo[EVENT_ADDI_SETMETA_COMMIT_TIME] = committing_time
-					//add additional information about hiseqno, which is going to be used
-					//for checkpointing
-					highseqno, err := xmem.getCurSeenHighSeqno(wrappedReq)
-					if err == nil {
-						additionalInfo[EVENT_ADDI_HISEQNO] = highseqno
-					}
+
 					xmem.RaiseEvent(common.DataSent, req, xmem, nil, additionalInfo)
 
 					//feedback the most current commit_time to xmem.config.respTimeout
@@ -2025,42 +1921,6 @@ func (xmem *XmemNozzle) onSetMetaConnRepaired() {
 	}
 	xmem.Logger().Infof("%v - The unresponded items are resent\n", xmem.Id())
 
-}
-
-func (xmem *XmemNozzle) getCurSeenHighSeqno(wrappedReq *base.WrappedMCRequest) (uint64, error) {
-	req := wrappedReq.Req
-	seqno := wrappedReq.Seqno
-	vbno := req.VBucket
-	smallestSeqnoInBuf, err := xmem.buf.getSmallestSeqnoInBuffer(vbno)
-	if err != nil {
-		return 0, err
-	}
-
-	//update the maxseqno_received_map
-	cur_maxseqno, ok := xmem.maxseqno_received_map[vbno]
-	if !ok || cur_maxseqno < seqno {
-		xmem.maxseqno_received_map[vbno] = seqno
-	}
-	if seqno < smallestSeqnoInBuf {
-		//invalid state
-		panic(fmt.Sprintf("Seqno %v is not tracked in buf, the smallestSeqnoInBuf = %v, vbno=%v, sorted_seqno_list=%v", seqno, smallestSeqnoInBuf, vbno, xmem.buf.seqno_sorted_list[vbno]))
-	}
-
-	if seqno == smallestSeqnoInBuf {
-
-		highseqno := smallestSeqnoInBuf
-		//see if all seqno between smallest seqno and maxseqno are all received
-		for i := smallestSeqnoInBuf; i <= xmem.maxseqno_received_map[vbno]; i++ {
-			if xmem.buf.hasSeqno(vbno, i) {
-				break
-			} else {
-				highseqno = i
-			}
-		}
-
-		return highseqno, nil
-	}
-	return 0, errors.New("No high sequence number yet")
 }
 
 func (xmem *XmemNozzle) ConnStr() string {

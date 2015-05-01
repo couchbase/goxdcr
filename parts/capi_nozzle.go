@@ -545,7 +545,6 @@ func (capi *CapiNozzle) batchSendWithRetry(batch *capiBatch) error {
 			additionalInfo := make(map[string]interface{})
 			additionalInfo[EVENT_ADDI_SEQNO] = req.Seqno
 			additionalInfo[EVENT_ADDI_OPT_REPD] = capi.optimisticRep(req.Req)
-			additionalInfo[EVENT_ADDI_HISEQNO] = req.Seqno
 			additionalInfo[EVENT_ADDI_SETMETA_COMMIT_TIME] = time.Since(req.Start_time)
 			capi.RaiseEvent(common.DataSent, req.Req, capi, nil, additionalInfo)
 
