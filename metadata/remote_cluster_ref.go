@@ -10,8 +10,10 @@
 package metadata
 
 import (
+	"bytes"
 	"fmt"
 	"github.com/couchbase/goxdcr/base"
+	"reflect"
 	"strings"
 )
 
@@ -93,9 +95,11 @@ func (ref *RemoteClusterReference) SameRef(newRef *RemoteClusterReference) bool 
 		return false
 	}
 	return ref.Id == newRef.Id && ref.Uuid == newRef.Uuid && ref.Name == newRef.Name &&
-		ref.HostName == newRef.HostName && ref.UserName == newRef.UserName && ref.Password == newRef.Password
+		ref.HostName == newRef.HostName && ref.UserName == newRef.UserName &&
+		ref.Password == newRef.Password && reflect.DeepEqual(ref.Revision, newRef.Revision) &&
+		ref.DemandEncryption == newRef.DemandEncryption && bytes.Equal(ref.Certificate, newRef.Certificate)
 }
 
 func (ref *RemoteClusterReference) String() string {
-	return fmt.Sprintf("id:%v; uuid:%v; name:%v; hostName:%v; userName:%v; password:xxxx; demandEncryption:%v;certificate:%v", ref.Id, ref.Uuid, ref.Name, ref.HostName, ref.UserName, ref.DemandEncryption, ref.Certificate)
+	return fmt.Sprintf("id:%v; uuid:%v; name:%v; hostName:%v; userName:%v; password:xxxx; demandEncryption:%v;certificate:%v;revision:%v", ref.Id, ref.Uuid, ref.Name, ref.HostName, ref.UserName, ref.DemandEncryption, ref.Certificate, ref.Revision)
 }
