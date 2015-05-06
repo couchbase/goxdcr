@@ -309,7 +309,17 @@ func (adminport *Adminport) doDeleteRemoteClusterRequest(request *http.Request) 
 		return EncodeRemoteClusterValidationErrorIntoResponse(err)
 	}
 
-	replIds := pipeline_manager.AllReplicationsForTargetCluster(ref.Uuid)
+	// TODO get spec from replication status cache after the caching issue is fixed
+	specs, err := ReplicationSpecService().AllReplicationSpecs()
+	if err != nil {
+		return nil, err
+	}
+	replIds := make([]string, 0)
+	for _, spec := range specs {
+		if spec.TargetClusterUUID == ref.Uuid {
+			replIds = append(replIds, spec.Id)
+		}
+	}
 	if len(replIds) > 0 {
 		err = fmt.Errorf("Cannot delete remote cluster `%v` since it is referenced by replications %v", ref.Name, replIds)
 		return EncodeRemoteClusterValidationErrorIntoResponse(err)
