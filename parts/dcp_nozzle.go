@@ -205,25 +205,32 @@ func (dcp *DcpNozzle) Stop() error {
 }
 
 func (dcp *DcpNozzle) closeUprStreams() error {
-	dcp.Logger().Infof("Closing dcp streams for vb=%v\n", dcp.GetVBList())
-	opaque := newOpaque()
-	errMap := make(map[uint16]error)
+	dcp.lock_uprFeed.Lock()
+	defer dcp.lock_uprFeed.Unlock()
 
-	for _, vbno := range dcp.GetVBList() {
-		if active, ok := dcp.vb_stream_status[vbno]; ok&&active {
-			err := dcp.uprFeed.UprCloseStream(vbno, opaque)
-			if err != nil {
-				errMap[vbno] = err
+	if dcp.uprFeed != nil {
+		dcp.Logger().Infof("Closing dcp streams for vb=%v\n", dcp.GetVBList())
+		opaque := newOpaque()
+		errMap := make(map[uint16]error)
+
+		for _, vbno := range dcp.GetVBList() {
+			if active, ok := dcp.vb_stream_status[vbno]; ok && active {
+				err := dcp.uprFeed.UprCloseStream(vbno, opaque)
+				if err != nil {
+					errMap[vbno] = err
+				}
+			} else {
+				dcp.Logger().Infof("There is no active stream for vb=%v\n", vbno)
 			}
-		}else {
-			dcp.Logger().Infof("There is no active stream for vb=%v\n", vbno)
 		}
-	}
 
-	if len(errMap) > 0 {
-		msg := fmt.Sprintf("Failed to close upr streams, err=%v\n", errMap)
-		dcp.Logger().Error(msg)
-		return errors.New(msg)
+		if len(errMap) > 0 {
+			msg := fmt.Sprintf("Failed to close upr streams, err=%v\n", errMap)
+			dcp.Logger().Error(msg)
+			return errors.New(msg)
+		}
+	} else {
+		dcp.Logger().Info("uprfeed is already closed. No-op")
 	}
 	return nil
 }
