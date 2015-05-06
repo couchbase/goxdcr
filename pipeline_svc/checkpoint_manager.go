@@ -19,6 +19,7 @@ import (
 	component "github.com/couchbase/goxdcr/component"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
+	"github.com/couchbase/goxdcr/pipeline_utils"
 	"github.com/couchbase/goxdcr/service_def"
 	"github.com/couchbase/goxdcr/utils"
 	"math/rand"
@@ -479,7 +480,7 @@ func (retriever *failoverLogRetriever) getFailiverLog() (err error) {
 func (ckmgr *CheckpointManager) getFailoverLog(bucket *couchbase.Bucket, listOfVbs []uint16) (couchbase.FailoverLog, error) {
 	//Get failover log can hang, timeout the executation if it takes too long.
 	failoverLogRetriever := newFailoverLogRetriever(listOfVbs, bucket, ckmgr.logger)
-	err := utils.ExecWithTimeout(failoverLogRetriever.getFailiverLog, 20*time.Second, ckmgr.logger)
+	err := pipeline_utils.ExecWithTimeout(failoverLogRetriever.getFailiverLog, 20*time.Second, ckmgr.logger)
 	if err != nil {
 		return nil, errors.New("Failed to get failover log in 1 minute")
 	}

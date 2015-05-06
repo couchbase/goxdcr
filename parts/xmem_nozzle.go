@@ -1328,6 +1328,8 @@ func (xmem *XmemNozzle) batchGetMeta(bigDoc_map map[string]*base.WrappedMCReques
 			if !xmem.conflict_resolver(doc_meta_source, doc_meta_target, xmem.logger) {
 				xmem.Logger().Debugf("doc %v (%v)failed on conflict resolution to %v, no need to send\n", key, doc_meta_source, doc_meta_target)
 				bigDoc_noRep_map[doc_meta_source.uniqueKey()] = true
+			} else {
+				xmem.Logger().Debugf("doc %v (%v)succeeded on conflict resolution to %v, sending it to target\n", key, doc_meta_source, doc_meta_target)
 			}
 		} else {
 			xmem.Logger().Debugf("batchGetMeta: doc %s is not found in target system, send it", key)
