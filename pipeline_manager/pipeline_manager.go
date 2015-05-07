@@ -225,7 +225,7 @@ func (pipelineMgr *pipelineManager) onExit() error {
 
 	//send finish signal to all repairer
 	for _, repairer := range pipelineMgr.pipeline_pending_for_update {
-		close(repairer.fin_ch)
+		repairer.stop()
 	}
 
 	pipelineMgr.logger.Infof("Sent finish signal to all running repairer")
@@ -665,6 +665,6 @@ func (r *pipelineUpdater) updateState(new_state pipelineUpdaterState) error {
 	return nil
 }
 
-func getRequestPoolSize (rep_status *pipeline.ReplicationStatus, numOfTargetNozzles int) int{
-	return rep_status.Spec().Settings.BatchCount *52 *numOfTargetNozzles
+func getRequestPoolSize(rep_status *pipeline.ReplicationStatus, numOfTargetNozzles int) int {
+	return rep_status.Spec().Settings.BatchCount * 52 * numOfTargetNozzles
 }
