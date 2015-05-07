@@ -24,7 +24,7 @@ func ConstructVBCouchApiBaseMap(targetBucket *couchbase.Bucket, remoteClusterRef
 			// get direct port
 			directPort, ok := node.Ports[base.DirectPortKey]
 			if !ok {
-				return nil, ErrorBuildingVBCouchApiBaseMap(targetBucket.Name, remoteClusterRef.Name)
+				return nil, ErrorBuildingVBCouchApiBaseMap(targetBucket.Name, remoteClusterRef.Name, node)
 			}
 
 			// server addr = host:directPort
@@ -64,14 +64,14 @@ func ConstructVBCouchApiBaseMap(targetBucket *couchbase.Bucket, remoteClusterRef
 func ConstructServerCouchApiBaseMap(targetBucket *couchbase.Bucket, remoteClusterRef *metadata.RemoteClusterReference) (map[string]string, error) {
 	serverCouchApiBaseMap := make(map[string]string)
 
-	parseError := ErrorBuildingVBCouchApiBaseMap(targetBucket.Name, remoteClusterRef.Name)
-
 	var out interface{}
 
 	err, _ := utils.QueryRestApiWithAuth(remoteClusterRef.HostName, targetBucket.URI, false, remoteClusterRef.UserName, remoteClusterRef.Password, []byte{}, base.MethodGet, "", nil, 0, &out, logger_capi_utils)
 	if err != nil {
 		return nil, utils.NewEnhancedError(fmt.Sprintf("Error constructing vb couchApiBase map for bucket %v on remote cluster %v because of failure to retrieve bucket info\n", targetBucket.Name, remoteClusterRef.Name), err)
 	}
+
+	parseError := ErrorBuildingVBCouchApiBaseMap(targetBucket.Name, remoteClusterRef.Name, out)
 
 	infoMap, ok := out.(map[string]interface{})
 	if !ok {
@@ -166,6 +166,6 @@ func GetCapiConnectionStrFromCouchApiBase(couchApiBase string) (string, error) {
 	return couchApiBase2[:index], nil
 }
 
-func ErrorBuildingVBCouchApiBaseMap(bucketName, refName string) error {
-	return errors.New(fmt.Sprintf("Error constructing vb couchApiBase map for bucket %v on remote cluster %v because of failure to parse bucket info.", bucketName, refName))
+func ErrorBuildingVBCouchApiBaseMap(bucketName, refName string, info interface{}) error {
+	return errors.New(fmt.Sprintf("Error constructing vb couchApiBase map for bucket %v on remote cluster %v because of failure to parse bucket info, %v.", bucketName, refName, info))
 }

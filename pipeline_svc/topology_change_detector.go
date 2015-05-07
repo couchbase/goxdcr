@@ -121,7 +121,7 @@ func (top_detect_svc *TopologyChangeDetectorSvc) validateTargetVersion() (err er
 	spec := top_detect_svc.pipeline.Specification()
 	targetClusterRef, err := top_detect_svc.remote_cluster_svc.RemoteClusterByUuid(spec.TargetClusterUUID, true)
 	if err == nil {
-		hasSSLOverMemSupport, err := top_detect_svc.cluster_info_svc.IsClusterCompatible(targetClusterRef, []int{3, 0})
+		hasSSLOverMemSupport, err := pipeline_utils.HasSSLOverMemSupport(top_detect_svc.cluster_info_svc, targetClusterRef)
 		if err == nil && hasSSLOverMemSupport {
 			top_detect_svc.logger.Infof("Detected that remote cluster %v has upgraded to 3.0 or above", targetClusterRef.HostName)
 			err = target_cluster_versionChangeErr

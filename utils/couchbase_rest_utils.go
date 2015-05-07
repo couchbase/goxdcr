@@ -19,14 +19,9 @@ import (
 	"time"
 )
 
-//errors
-var ErrorRetrievingSSLPort = errors.New("Could not get ssl port of remote cluster.")
-var ErrorRetrievingMemcachedSSLPort = errors.New("Could not get memcached ssl port of remote cluster")
-var ErrorRetrievingCouchApiBase = errors.New("Could not get couchApiBase in the response of /nodes/self.")
-
 func GetMemcachedSSLPort(hostName, username, password, bucket string, logger *log.CommonLogger) (map[string]uint16, error) {
 	ret := make(map[string]uint16)
-	servicesInfo := make(map[string]interface{})
+	bucketInfo := make(map[string]interface{})
 
 	pool, err := RemotePool(hostName, username, password)
 	if err != nil {
@@ -38,61 +33,60 @@ func GetMemcachedSSLPort(hostName, username, password, bucket string, logger *lo
 
 		logger.Infof("GetMemcachedSSLPort, hostName=%v\n", hostName)
 		url := base.BPath + base.UrlDelimiter + bucket
-		err, _ = QueryRestApiWithAuth(hostName, url, false, username, password, nil, base.MethodGet, "", nil, 0, &servicesInfo, logger)
+		err, _ = QueryRestApiWithAuth(hostName, url, false, username, password, nil, base.MethodGet, "", nil, 0, &bucketInfo, logger)
 		if err != nil {
 			return nil, err
 		}
 
-		nodesExt, ok := servicesInfo[base.NodeExtKey]
+		parseError := fmt.Errorf("Error parsing memcached ssl port of remote cluster. bucketInfo=%v", bucketInfo)
+
+		nodesExt, ok := bucketInfo[base.NodeExtKey]
 		if !ok {
-			return nil, ErrorRetrievingMemcachedSSLPort
+			return nil, parseError
 		}
 
 		nodesExtArray, ok := nodesExt.([]interface{})
 		if !ok {
-			return nil, ErrorRetrievingMemcachedSSLPort
+			return nil, parseError
 		}
 
 		for index, nodeExt := range nodesExtArray {
 			nodeExtMap, ok := nodeExt.(map[string]interface{})
 			if !ok {
-				return nil, ErrorRetrievingMemcachedSSLPort
+				return nil, parseError
 			}
 
 			hostnameStr := GetHostName(nodes[index].Hostname)
 
 			service, ok := nodeExtMap[base.ServicesKey]
 			if !ok {
-				return nil, ErrorRetrievingMemcachedSSLPort
+				return nil, parseError
 			}
 
 			services_map, ok := service.(map[string]interface{})
 			if !ok {
-				return nil, ErrorRetrievingMemcachedSSLPort
+				return nil, parseError
 			}
 
 			kv_port, ok := services_map[base.KVPortKey]
 			if !ok {
-				return nil, ErrorRetrievingMemcachedSSLPort
+				return nil, parseError
 			}
 			kvPortFloat, ok := kv_port.(float64)
 			if !ok {
-				// should never get here
-				return nil, ErrorRetrievingMemcachedSSLPort
+				return nil, parseError
 			}
 
 			hostAddr := GetHostAddr(hostnameStr, uint16(kvPortFloat))
 
 			kv_ssl_port, ok := services_map[base.KVSSLPortKey]
 			if !ok {
-				// should never get here
-				return nil, ErrorRetrievingMemcachedSSLPort
+				return nil, parseError
 			}
 
 			kvSSLPortFloat, ok := kv_ssl_port.(float64)
 			if !ok {
-				// should never get here
-				return nil, ErrorRetrievingMemcachedSSLPort
+				return nil, parseError
 			}
 
 			ret[hostAddr] = uint16(kvSSLPortFloat)
@@ -102,6 +96,7 @@ func GetMemcachedSSLPort(hostName, username, password, bucket string, logger *lo
 
 	return ret, nil
 }
+
 func GetXDCRSSLPort(hostName, userName, password string, logger *log.CommonLogger) (uint16, error, bool) {
 
 	portsInfo := make(map[string]interface{})
@@ -113,7 +108,7 @@ func GetXDCRSSLPort(hostName, userName, password string, logger *log.CommonLogge
 	sslPort, ok := portsInfo[base.SSLPortKey]
 	if !ok {
 		// should never get here
-		return 0, ErrorRetrievingSSLPort, true
+		return 0, fmt.Errorf("Error parsing ssl port of remote cluster. portInfo=%v", portsInfo), true
 	}
 
 	sslPortFloat, ok := sslPort.(float64)

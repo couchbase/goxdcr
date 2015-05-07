@@ -26,7 +26,12 @@ import (
 var ErrorKey = "Error"
 
 //the function constructs start settings for parts of the pipeline
-type PartsSettingsConstructor func(pipeline common.Pipeline, part common.Part, pipeline_settings map[string]interface{}, ts map[uint16]*base.VBTimestamp, targetClusterref *metadata.RemoteClusterReference) (map[string]interface{}, error)
+type PartsSettingsConstructor func(pipeline common.Pipeline, part common.Part, pipeline_settings map[string]interface{},
+	ts map[uint16]*base.VBTimestamp, targetClusterref *metadata.RemoteClusterReference, ssl_port_map map[string]uint16,
+	isSSLOverMem bool) (map[string]interface{}, error)
+
+//the function constructs start settings for parts of the pipeline
+type SSLPortMapConstructor func(targetClusterRef *metadata.RemoteClusterReference, spec *metadata.ReplicationSpecification) (map[string]uint16, bool, error)
 
 //the function constructs update settings for parts of the pipeline
 type PartsUpdateSettingsConstructor func(pipeline common.Pipeline, part common.Part, pipeline_settings map[string]interface{}) (map[string]interface{}, error)
@@ -61,6 +66,7 @@ type GenericPipeline struct {
 	stateLock sync.Mutex
 
 	partSetting_constructor       PartsSettingsConstructor
+	sslPortMapConstructor         SSLPortMapConstructor
 	partUpdateSetting_constructor PartsUpdateSettingsConstructor
 
 	startingSeqno_constructor StartingSeqnoConstructor
@@ -97,7 +103,8 @@ func (genericPipeline *GenericPipeline) SetRuntimeContext(ctx common.PipelineRun
 	genericPipeline.context = ctx
 }
 
-func (genericPipeline *GenericPipeline) startPart(part common.Part, settings map[string]interface{}, ts map[uint16]*base.VBTimestamp, targetClusterRef *metadata.RemoteClusterReference) map[string]error {
+func (genericPipeline *GenericPipeline) startPart(part common.Part, settings map[string]interface{}, ts map[uint16]*base.VBTimestamp,
+	targetClusterRef *metadata.RemoteClusterReference, ssl_port_map map[string]uint16, isSSLOverMem bool) map[string]error {
 	var err error = nil
 	errMap := make(map[string]error)
 
@@ -110,7 +117,7 @@ func (genericPipeline *GenericPipeline) startPart(part common.Part, settings map
 			go func(waitGrp *sync.WaitGroup, errMap map[string]error, p common.Part, settings map[string]interface{}, ts map[uint16]*base.VBTimestamp) {
 				defer waitGrp.Done()
 				if p.State() == common.Part_Initial {
-					errs := genericPipeline.startPart(p, settings, ts, targetClusterRef)
+					errs := genericPipeline.startPart(p, settings, ts, targetClusterRef, ssl_port_map, isSSLOverMem)
 					for partId, err := range errs {
 						errMap[partId] = err
 					}
@@ -128,7 +135,7 @@ func (genericPipeline *GenericPipeline) startPart(part common.Part, settings map
 	partSettings := settings
 	if genericPipeline.partSetting_constructor != nil {
 		genericPipeline.logger.Debugf("Calling part setting constructor\n")
-		partSettings, err = genericPipeline.partSetting_constructor(genericPipeline, part, settings, ts, targetClusterRef)
+		partSettings, err = genericPipeline.partSetting_constructor(genericPipeline, part, settings, ts, targetClusterRef, ssl_port_map, isSSLOverMem)
 		if err != nil {
 			errMap[part.Id()] = err
 			return errMap
@@ -187,6 +194,15 @@ func (genericPipeline *GenericPipeline) Start(settings map[string]interface{}) e
 	genericPipeline.logger.Debug("The runtime context is started")
 	genericPipeline.ReportProgress("The runtime context is started")
 
+	var ssl_port_map map[string]uint16
+	var isSSLOverMem bool
+	if genericPipeline.sslPortMapConstructor != nil {
+		ssl_port_map, isSSLOverMem, err = genericPipeline.sslPortMapConstructor(targetClusterRef, genericPipeline.spec)
+		if err != nil {
+			return err
+		}
+	}
+
 	//start all the processing steps of the Pipeline
 	//start the incoming nozzle which would start the downstream steps
 	//subsequently
@@ -198,7 +214,7 @@ func (genericPipeline *GenericPipeline) Start(settings map[string]interface{}) e
 			defer waitGrp.Done()
 			ts := settings["VBTimestamps"].(map[uint16]*base.VBTimestamp)
 
-			errs := genericPipeline.startPart(source, settings, ts, targetClusterRef)
+			errs := genericPipeline.startPart(source, settings, ts, targetClusterRef, ssl_port_map, isSSLOverMem)
 			if len(errs) > 0 {
 				for partId, err := range errs {
 					errMap[partId] = err
@@ -380,6 +396,7 @@ func NewPipelineWithSettingConstructor(t string,
 	targets map[string]common.Nozzle,
 	spec *metadata.ReplicationSpecification,
 	partsSettingsConstructor PartsSettingsConstructor,
+	sslPortMapConstructor SSLPortMapConstructor,
 	partsUpdateSettingsConstructor PartsUpdateSettingsConstructor,
 	startingSeqnoConstructor StartingSeqnoConstructor,
 	remoteClusterRefRetriever RemoteClsuterRefRetriever,
@@ -390,6 +407,7 @@ func NewPipelineWithSettingConstructor(t string,
 		targets: targets,
 		spec:    spec,
 		partSetting_constructor:       partsSettingsConstructor,
+		sslPortMapConstructor:         sslPortMapConstructor,
 		partUpdateSetting_constructor: partsUpdateSettingsConstructor,
 		startingSeqno_constructor:     startingSeqnoConstructor,
 		remoteClusterRef_retriever:    remoteClusterRefRetriever,

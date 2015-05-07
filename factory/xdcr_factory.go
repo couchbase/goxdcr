@@ -129,7 +129,7 @@ func (xdcrf *XDCRFactory) NewPipeline(topic string, progress_recorder common.Pip
 	progress_recorder("Source nozzles are wired to target nozzles")
 
 	// construct pipeline
-	pipeline := pp.NewPipelineWithSettingConstructor(topic, sourceNozzles, outNozzles, spec, xdcrf.ConstructSettingsForPart, xdcrf.ConstructUpdateSettingsForPart, xdcrf.SetStartSeqno, xdcrf.remote_cluster_svc.RemoteClusterByUuid, logger_ctx, xdcrf.uilog_svc)
+	pipeline := pp.NewPipelineWithSettingConstructor(topic, sourceNozzles, outNozzles, spec, xdcrf.ConstructSettingsForPart, xdcrf.ConstructSSLPortMap, xdcrf.ConstructUpdateSettingsForPart, xdcrf.SetStartSeqno, xdcrf.remote_cluster_svc.RemoteClusterByUuid, logger_ctx, xdcrf.uilog_svc)
 	if pipelineContext, err := pctx.NewWithSettingConstructor(pipeline, xdcrf.ConstructSettingsForService, logger_ctx); err != nil {
 		return nil, err
 	} else {
@@ -420,11 +420,13 @@ func (xdcrf *XDCRFactory) constructCAPINozzle(topic string,
 	return nozzle, nil
 }
 
-func (xdcrf *XDCRFactory) ConstructSettingsForPart(pipeline common.Pipeline, part common.Part, settings map[string]interface{}, ts map[uint16]*base.VBTimestamp, targetClusterRef *metadata.RemoteClusterReference) (map[string]interface{}, error) {
+func (xdcrf *XDCRFactory) ConstructSettingsForPart(pipeline common.Pipeline, part common.Part, settings map[string]interface{},
+	ts map[uint16]*base.VBTimestamp, targetClusterRef *metadata.RemoteClusterReference, ssl_port_map map[string]uint16,
+	isSSLOverMem bool) (map[string]interface{}, error) {
 
 	if _, ok := part.(*parts.XmemNozzle); ok {
 		xdcrf.logger.Debugf("Construct settings for XmemNozzle %s", part.Id())
-		return xdcrf.constructSettingsForXmemNozzle(pipeline, part, targetClusterRef, settings)
+		return xdcrf.constructSettingsForXmemNozzle(pipeline, part, targetClusterRef, settings, ssl_port_map, isSSLOverMem)
 	} else if _, ok := part.(*parts.DcpNozzle); ok {
 		xdcrf.logger.Debugf("Construct settings for DcpNozzle %s", part.Id())
 		return xdcrf.constructSettingsForDcpNozzle(pipeline, part.(*parts.DcpNozzle), settings, ts)
@@ -477,7 +479,9 @@ func (xdcrf *XDCRFactory) SetStartSeqno(pipeline common.Pipeline) error {
 	return ckpt_mgr.(*pipeline_svc.CheckpointManager).SetVBTimestamps(pipeline.Topic())
 }
 
-func (xdcrf *XDCRFactory) constructSettingsForXmemNozzle(pipeline common.Pipeline, part common.Part, targetClusterRef *metadata.RemoteClusterReference, settings map[string]interface{}) (map[string]interface{}, error) {
+func (xdcrf *XDCRFactory) constructSettingsForXmemNozzle(pipeline common.Pipeline, part common.Part,
+	targetClusterRef *metadata.RemoteClusterReference, settings map[string]interface{},
+	ssl_port_map map[string]uint16, isSSLOverMem bool) (map[string]interface{}, error) {
 	xmemSettings := make(map[string]interface{})
 	spec := pipeline.Specification()
 	repSettings := spec.Settings
@@ -493,19 +497,8 @@ func (xdcrf *XDCRFactory) constructSettingsForXmemNozzle(pipeline common.Pipelin
 	demandEncryption := targetClusterRef.DemandEncryption
 	certificate := targetClusterRef.Certificate
 	if demandEncryption {
-		sslOverMem, err := xdcrf.cluster_info_svc.IsClusterCompatible(targetClusterRef, []int{3, 0})
-		if err != nil {
-			return nil, err
-		}
-		xdcrf.logger.Infof("sslOverMem=%v\n", sslOverMem)
-		var ssl_map map[string]uint16
-		if sslOverMem {
-			ssl_map, err = utils.GetMemcachedSSLPort(targetClusterRef.HostName, targetClusterRef.UserName, targetClusterRef.Password, spec.TargetBucketName, xdcrf.logger)
-			if err != nil {
-				xdcrf.logger.Infof("Failed to get memcached ssl port, err=%v\n", err)
-				return nil, err
-			}
-			mem_ssl_port, ok := ssl_map[xmemConnStr]
+		if isSSLOverMem {
+			mem_ssl_port, ok := ssl_port_map[xmemConnStr]
 			if !ok {
 				return nil, fmt.Errorf("Can't get remote memcached ssl port for %v", xmemConnStr)
 			}
@@ -523,26 +516,11 @@ func (xdcrf *XDCRFactory) constructSettingsForXmemNozzle(pipeline common.Pipelin
 				return nil, err
 			}
 
-			var remote_proxy_port uint16 = 0
-			targetBucket, err := xdcrf.cluster_info_svc.GetBucket(targetClusterRef, spec.TargetBucketName)
-			if err != nil {
-				xdcrf.logger.Errorf("Error getting bucket. err=%v\n", err)
-				return nil, err
-			}
-			defer targetBucket.Close()
-
-			for _, node := range targetBucket.Nodes() {
-				hostname := utils.GetHostName(node.Hostname)
-				memcachedPort := uint16(node.Ports[base.DirectPortKey])
-				hostAddr := utils.GetHostAddr(hostname, memcachedPort)
-				if hostAddr == xmemConnStr {
-					remote_proxy_port = uint16(node.Ports[base.SSLProxyPortKey])
-					break
-				}
-			}
-			if remote_proxy_port == 0 {
+			remote_proxy_port, ok := ssl_port_map[xmemConnStr]
+			if !ok {
 				return nil, errors.New(fmt.Sprintf("Can't find remote proxy port for remote bucket %v", spec.TargetBucketName))
 			}
+
 			xmemSettings[parts.XMEM_SETTING_DEMAND_ENCRYPTION] = demandEncryption
 			xmemSettings[parts.XMEM_SETTING_CERTIFICATE] = certificate
 			xmemSettings[parts.XMEM_SETTING_REMOTE_PROXY_PORT] = remote_proxy_port
@@ -692,4 +670,52 @@ func getSettingFromSettingsMap(settings map[string]interface{}, setting_name str
 	}
 
 	return default_value
+}
+
+func (xdcrf *XDCRFactory) ConstructSSLPortMap(targetClusterRef *metadata.RemoteClusterReference, spec *metadata.ReplicationSpecification) (map[string]uint16, bool, error) {
+
+	var ssl_port_map map[string]uint16
+	var hasSSLOverMemSupport bool
+
+	nozzleType, err := xdcrf.getNozzleType(targetClusterRef, spec)
+	if err != nil {
+		return nil, false, err
+	}
+	// if both xmem nozzles and ssl are involved, populate ssl_port_map
+	// if target cluster is post-3.0, the ssl ports in the map are memcached ssl ports
+	// otherwise, the ssl ports in the map are proxy ssl ports
+	if targetClusterRef.DemandEncryption && nozzleType == base.Xmem {
+		hasSSLOverMemSupport, err = pipeline_utils.HasSSLOverMemSupport(xdcrf.cluster_info_svc, targetClusterRef)
+		if err != nil {
+			return nil, false, err
+		}
+		xdcrf.logger.Infof("hasSSLOverMemSupport=%v\n", hasSSLOverMemSupport)
+
+		if hasSSLOverMemSupport {
+			ssl_port_map, err = utils.GetMemcachedSSLPort(targetClusterRef.HostName, targetClusterRef.UserName, targetClusterRef.Password, spec.TargetBucketName, xdcrf.logger)
+			if err != nil {
+				xdcrf.logger.Errorf("Failed to get memcached ssl port, err=%v\n", err)
+				return nil, false, err
+			}
+		} else {
+			targetBucket, err := xdcrf.cluster_info_svc.GetBucket(targetClusterRef, spec.TargetBucketName)
+			if err != nil {
+				xdcrf.logger.Errorf("Error getting bucket. err=%v\n", err)
+				return nil, false, err
+			}
+			defer targetBucket.Close()
+
+			ssl_port_map = make(map[string]uint16)
+			for _, node := range targetBucket.Nodes() {
+				hostname := utils.GetHostName(node.Hostname)
+				memcachedPort := uint16(node.Ports[base.DirectPortKey])
+				hostAddr := utils.GetHostAddr(hostname, memcachedPort)
+				ssl_port_map[hostAddr] = memcachedPort
+			}
+		}
+
+		xdcrf.logger.Debugf("ssl_port_map=%v\n", ssl_port_map)
+	}
+
+	return ssl_port_map, hasSSLOverMemSupport, nil
 }

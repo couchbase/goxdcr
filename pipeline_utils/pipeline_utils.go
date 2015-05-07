@@ -85,3 +85,8 @@ func GetSourceVBListPerPipeline(pipeline common.Pipeline) []uint16 {
 	}
 	return ret
 }
+
+// checks if target cluster supports ssl over memcached
+func HasSSLOverMemSupport(cluster_info_svc service_def.ClusterInfoSvc, targetClusterRef *metadata.RemoteClusterReference) (bool, error) {
+	return cluster_info_svc.IsClusterCompatible(targetClusterRef, []int{3, 0})
+}
