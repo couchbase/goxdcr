@@ -13,9 +13,11 @@ import (
 	"github.com/couchbase/goxdcr/log"
 	"io"
 	"io/ioutil"
+	"net"
 	"net/http"
 	"reflect"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -33,7 +35,7 @@ func GetMemcachedSSLPort(hostName, username, password, bucket string, logger *lo
 
 		logger.Infof("GetMemcachedSSLPort, hostName=%v\n", hostName)
 		url := base.BPath + base.UrlDelimiter + bucket
-		err, _ = QueryRestApiWithAuth(hostName, url, false, username, password, nil, base.MethodGet, "", nil, 0, &bucketInfo, logger)
+		err, _ = QueryRestApiWithAuth(hostName, url, false, username, password, nil, base.MethodGet, "", nil, 0, &bucketInfo, nil, false, logger)
 		if err != nil {
 			return nil, err
 		}
@@ -100,7 +102,7 @@ func GetMemcachedSSLPort(hostName, username, password, bucket string, logger *lo
 func GetXDCRSSLPort(hostName, userName, password string, logger *log.CommonLogger) (uint16, error, bool) {
 
 	portsInfo := make(map[string]interface{})
-	err, _ := QueryRestApiWithAuth(hostName, base.SSLPortsPath, false, userName, password, nil, base.MethodGet, "", nil, 0, &portsInfo, logger)
+	err, _ := QueryRestApiWithAuth(hostName, base.SSLPortsPath, false, userName, password, nil, base.MethodGet, "", nil, 0, &portsInfo, nil, false, logger)
 	if err != nil {
 		return 0, err, false
 	}
@@ -129,7 +131,7 @@ func QueryRestApi(baseURL string,
 	timeout time.Duration,
 	out interface{},
 	logger *log.CommonLogger) (error, int) {
-	return QueryRestApiWithAuth(baseURL, path, preservePathEncoding, "", "", nil, httpCommand, contentType, body, timeout, out, logger)
+	return QueryRestApiWithAuth(baseURL, path, preservePathEncoding, "", "", nil, httpCommand, contentType, body, timeout, out, nil, false, logger)
 }
 
 func EnforcePrefix(prefix string, str string) string {
@@ -160,26 +162,68 @@ func QueryRestApiWithAuth(
 	body []byte,
 	timeout time.Duration,
 	out interface{},
+	client *http.Client,
+	keep_client_alive bool,
 	logger *log.CommonLogger) (error, int) {
-
-	req, host, err := ConstructHttpRequest(baseURL, path, preservePathEncoding, username, password, certificate, httpCommand, contentType, body, logger)
+	http_client, req, err := prepareForRestCall(baseURL, path, preservePathEncoding, username, password, certificate, httpCommand, contentType, body, client, logger)
 	if err != nil {
 		return err, 0
 	}
 
+	err, statusCode := doRestCall(req, timeout, out, http_client, logger)
+	cleanupAfterRestCall(keep_client_alive, err, http_client, logger)
+
+	return err, statusCode
+}
+
+func prepareForRestCall(baseURL string,
+	path string,
+	preservePathEncoding bool,
+	username string,
+	password string,
+	certificate []byte,
+	httpCommand string,
+	contentType string,
+	body []byte,
+	client *http.Client,
+	logger *log.CommonLogger) (*http.Client, *http.Request, error) {
 	var l *log.CommonLogger = loggerForFunc(logger)
-
-	client, err := getHttpClient(certificate, host, logger)
+	var ret_client *http.Client = client
+	req, host, err := ConstructHttpRequest(baseURL, path, preservePathEncoding, username, password, certificate, httpCommand, contentType, body, l)
 	if err != nil {
-		l.Errorf("Failed to get client for request, err=%v, req=%v\n", err, req)
-		return err, 0
+		return nil, nil, err
 	}
-	defer func() {
-		if client.Transport != nil {
-			client.Transport.(*http.Transport).CloseIdleConnections()
-		}
-	}()
 
+	if ret_client == nil {
+		ret_client, err = GetHttpClient(certificate, host, l)
+		if err != nil {
+			l.Errorf("Failed to get client for request, err=%v, req=%v\n", err, req)
+			return nil, nil, err
+		}
+	}
+	return ret_client, req, nil
+}
+
+func cleanupAfterRestCall(keep_client_alive bool, err error, client *http.Client, logger *log.CommonLogger) {
+	if !keep_client_alive || IsSeriousNetError(err) {
+		if client.Transport != nil {
+			transport, ok := client.Transport.(*http.Transport)
+			if ok {
+				if IsSeriousNetError(err) {
+					logger.Debugf("Encountered %v, close all idle connections for this http client.\n", err)
+				}
+				transport.CloseIdleConnections()
+			}
+		}
+	}
+}
+
+func doRestCall(req *http.Request,
+	timeout time.Duration,
+	out interface{},
+	client *http.Client,
+	logger *log.CommonLogger) (error, int) {
+	var l *log.CommonLogger = loggerForFunc(logger)
 	if timeout > 0 {
 		client.Timeout = timeout
 	} else {
@@ -209,6 +253,7 @@ func QueryRestApiWithAuth(
 	}
 
 	return err, 0
+
 }
 
 //convenient api for rest calls to local cluster
@@ -220,8 +265,10 @@ func InvokeRestWithRetry(baseURL string,
 	body []byte,
 	timeout time.Duration,
 	out interface{},
-	logger *log.CommonLogger, num_retry int) (error, int) {
-	return InvokeRestWithRetryWithAuth(baseURL, path, preservePathEncoding, "", "", nil, true, httpCommand, contentType, body, timeout, out, logger, num_retry)
+	client *http.Client,
+	keep_client_alive bool,
+	logger *log.CommonLogger, num_retry int) (error, int, *http.Client) {
+	return InvokeRestWithRetryWithAuth(baseURL, path, preservePathEncoding, "", "", nil, true, httpCommand, contentType, body, timeout, out, client, keep_client_alive, logger, num_retry)
 }
 
 func InvokeRestWithRetryWithAuth(baseURL string,
@@ -236,29 +283,33 @@ func InvokeRestWithRetryWithAuth(baseURL string,
 	body []byte,
 	timeout time.Duration,
 	out interface{},
-	logger *log.CommonLogger, num_retry int) (error, int) {
-	err, statusCode := QueryRestApiWithAuth(baseURL,
-		path, preservePathEncoding, username,
-		password, certificate,
-		httpCommand,
-		contentType,
-		body,
-		timeout,
-		out,
-		logger)
+	client *http.Client,
+	keep_client_alive bool,
+	logger *log.CommonLogger, num_retry int) (error, int, *http.Client) {
+
+	http_client, req, err := prepareForRestCall(baseURL, path, preservePathEncoding, username, password, certificate, httpCommand, contentType, body, client, logger)
 	if err != nil {
-		remain_retries := num_retry - 1
-		if remain_retries < 0 {
-			return err, statusCode
-		} else {
-			return InvokeRestWithRetryWithAuth(baseURL, path, preservePathEncoding, username, password, certificate, insecureSkipVerify, httpCommand, contentType, body, timeout, out, logger, remain_retries)
-		}
+		return err, 0, nil
 	}
-	return err, statusCode
+
+	var statusCode int
+
+	for i := 0; i < num_retry; i++ {
+		err, statusCode = doRestCall(req, timeout, out, http_client, logger)
+		if err == nil {
+			break
+		}
+		//cleanup the idle connection if the error is serious network error
+		cleanupAfterRestCall(true, err, http_client, logger)
+	}
+
+	cleanupAfterRestCall(keep_client_alive, err, http_client, logger)
+
+	return err, statusCode, http_client
 
 }
 
-func getHttpClient(certificate []byte, ssl_con_str string, logger *log.CommonLogger) (*http.Client, error) {
+func GetHttpClient(certificate []byte, ssl_con_str string, logger *log.CommonLogger) (*http.Client, error) {
 	var client *http.Client
 	if len(certificate) != 0 {
 		//https
@@ -277,7 +328,6 @@ func getHttpClient(certificate []byte, ssl_con_str string, logger *log.CommonLog
 		conn.Close()
 
 		tr := &http.Transport{TLSClientConfig: tlsConfig, Dial: base.DialTCPWithTimeout}
-		tr.DisableKeepAlives = true
 		client = &http.Client{Transport: tr}
 
 	} else {
@@ -423,4 +473,12 @@ func EncodeHttpRequestHeader(reqBytes []byte, key, value string) []byte {
 	reqBytes = append(reqBytes, []byte(value)...)
 	reqBytes = append(reqBytes, []byte("\r\n")...)
 	return reqBytes
+}
+
+func IsSeriousNetError(err error) bool {
+	if err == nil {
+		return false
+	}
+	netError, ok := err.(*net.OpError)
+	return err == syscall.EPIPE || strings.Contains(err.Error(), "use of closed network connection") || strings.Contains(err.Error(), "connection reset by peer") || (ok && (!netError.Temporary() && !netError.Timeout()))
 }

@@ -302,7 +302,7 @@ func getDocCounts(clusterAddress string, bucketName string, password string) int
 		password,
 		nil,
 		"GET", "", nil,
-		0, output, logger)
+		0, output, nil, false, logger)
 	if err != nil {
 		panic(err)
 	}
@@ -322,7 +322,7 @@ func flushTargetBkt() {
 		options.remotePassword,
 		nil,
 		"POST", "", nil,
-		0, nil, logger)
+		0, nil, nil, false, logger)
 
 	if err != nil {
 		logger.Infof("Setup error=%v\n", err)

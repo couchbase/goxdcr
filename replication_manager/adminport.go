@@ -275,7 +275,7 @@ func (adminport *Adminport) doChangeRemoteClusterRequest(request *http.Request) 
 	}
 
 	logger_ap.Infof("Request params: justValidate=%v, remoterClusterRef=%v\n",
-		justValidate, *remoteClusterRef)
+		justValidate, remoteClusterRef)
 
 	remoteClusterService := RemoteClusterService()
 

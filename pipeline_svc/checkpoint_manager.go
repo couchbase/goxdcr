@@ -397,9 +397,7 @@ func (ckmgr *CheckpointManager) startSeqnoGetter(getter_id int, listOfVbs []uint
 						ckmgr.logger.Infof("Remote vbucket %v is on a old node which doesn't support checkpointing, update target_vb_uuid=0\n", vbno)
 
 					} else {
-						//there is an error to do _pre_replicate
-						//so the start seqno for this vb should be 0
-						ckmgr.logger.Errorf("Pre_replicate failed. err=%v\n", err)
+						ckmgr.logger.Errorf("Pre_replicate failed for %v. err=%v\n", vbno, err)
 						err_ch <- err
 
 					}

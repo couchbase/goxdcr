@@ -9,6 +9,7 @@ import (
 	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/goxdcr/service_def"
 	"github.com/couchbase/goxdcr/utils"
+	"net/http"
 )
 
 const (
@@ -72,7 +73,8 @@ func (capi_svc *CAPIService) PreReplicate(remoteBucket *service_def.RemoteBucket
 	}
 
 	capi_svc.logger.Debugf("request to _pre_replicate = %v\n", api_base)
-	status_code, respMap, err := capi_svc.send_post(PRE_REPLICATE_CMD, api_base, HTTP_RETRIES)
+	http_client := remoteBucket.RestAddrHttpClientMap [api_base.url]
+	status_code, respMap, _, err := capi_svc.send_post(PRE_REPLICATE_CMD, api_base, http_client, HTTP_RETRIES)
 	capi_svc.logger.Debugf("response from _pre_replicate is status_code=%v respMap=%v for %v\n", status_code, respMap, knownRemoteVBStatus)
 	if err != nil {
 		capi_svc.logger.Errorf("Calling _pre_replicate on %v failed, err=%v\n", api_base.url, err)
@@ -103,7 +105,9 @@ func (capi_svc *CAPIService) CommitForCheckpoint(remoteBucket *service_def.Remot
 	}
 	api_base.body["vb"] = vbno
 	api_base.body["vbopaque"] = remoteVBOpaque.Value()
-	status_code, respMap, err := capi_svc.send_post(COMMIT_FOR_CKPT_CMD, api_base, HTTP_RETRIES)
+	http_client := remoteBucket.RestAddrHttpClientMap [api_base.url]
+	status_code, respMap, _, err := capi_svc.send_post(COMMIT_FOR_CKPT_CMD, api_base, http_client, HTTP_RETRIES)
+
 	if err == nil && status_code == 400 {
 		vbOpaque, err := getVBOpaqueFromRespMap(status_code, respMap, vbno)
 		if err != nil {
@@ -169,7 +173,9 @@ func (capi_svc *CAPIService) MassValidateVBUUIDs(remoteBucket *service_def.Remot
 		}
 	}
 	api_base.body["vbopaques"] = vbopaques
-	status_code, respMap, err := capi_svc.send_post(MASS_VBOPAQUE_CHECK_CMD, api_base, HTTP_RETRIES)
+	http_client := remoteBucket.RestAddrHttpClientMap [api_base.url]
+	status_code, respMap, _, err := capi_svc.send_post(MASS_VBOPAQUE_CHECK_CMD, api_base, http_client, HTTP_RETRIES)
+
 	capi_svc.logger.Debugf("vbopaques=%v\n", vbopaques)
 	if err != nil {
 		return nil, nil, nil, err
@@ -196,7 +202,7 @@ func (capi_svc *CAPIService) parseMassValidateSeqNosResp(url string, resp_status
 		return
 	}
 	missing_list := missingobj.([]interface{})
-	missing = make ([]uint16, len(missing_list))
+	missing = make([]uint16, len(missing_list))
 	for index, vb := range missing_list {
 		missing[index] = uint16(vb.(float64))
 	}
@@ -277,16 +283,16 @@ func (capi_svc *CAPIService) composePreReplicateBody(api_base *apiRequest, known
 	return nil
 }
 
-func (capi_svc *CAPIService) send_post(restMethodName string, api_base *apiRequest, num_retry int) (int, map[string]interface{}, error) {
+func (capi_svc *CAPIService) send_post(restMethodName string, api_base *apiRequest, client *http.Client, num_retry int) (int, map[string]interface{}, *http.Client, error) {
 	var ret_map = make(map[string]interface{})
 	body, err := json.Marshal(api_base.body)
 	if err != nil {
-		return 0, nil, err
+		return 0, nil, nil, err
 	}
 	//	body :=  []byte(`{"bucket":"default","bucketUUID":0,"vb":0}`)
 	capi_svc.logger.Debugf("body=%s\n", body)
-	err, statusCode := utils.InvokeRestWithRetryWithAuth(api_base.url, restMethodName, false, api_base.username, api_base.password, api_base.certificate, api_base.insecureSkipVerify, base.MethodPost, base.JsonContentType, body, 0, &ret_map, capi_svc.logger, num_retry)
-	return statusCode, ret_map, err
+	err, statusCode, ret_client := utils.InvokeRestWithRetryWithAuth(api_base.url, restMethodName, false, api_base.username, api_base.password, api_base.certificate, api_base.insecureSkipVerify, base.MethodPost, base.JsonContentType, body, 0, &ret_map, client, true, capi_svc.logger, num_retry)
+	return statusCode, ret_map, ret_client, err
 }
 
 func (capi_svc *CAPIService) parsePreReplicateResp(hostName string,

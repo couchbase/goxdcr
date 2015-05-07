@@ -226,6 +226,8 @@ func createRemoteCluster() error {
 		paramsBytes,
 		2*time.Second,
 		respMap,
+		nil,
+		false,
 		logger)
 
 	if err != nil {
@@ -274,6 +276,8 @@ func deleteRemoteCluster() error {
 		nil, 
 		2*time.Second,
 		nil,
+		nil,
+		false,
 		logger)
 
 	if err != nil {

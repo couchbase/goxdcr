@@ -17,6 +17,7 @@ import (
 	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/goxdcr/utils"
 	"net/url"
+	"net/http"
 )
 
 var NoSupportForXDCRCheckpointingError = errors.New("No xdcrcheckpointing support on older node")
@@ -24,12 +25,12 @@ var NoSupportForXDCRCheckpointingError = errors.New("No xdcrcheckpointing suppor
 type RemoteBucketInfo struct {
 	RemoteClusterRefName string
 	BucketName           string
-
 	RemoteClusterRef         *metadata.RemoteClusterReference
 	Capabilities             []string
 	UUID                     string
 	VBServerMap              map[string][]uint16
 	MemcachedAddrRestAddrMap map[string]string
+	RestAddrHttpClientMap	 map[string]*http.Client
 	logger                   *log.CommonLogger
 }
 
@@ -87,6 +88,7 @@ func (remoteBucket *RemoteBucketInfo) refresh_internal(remote_cluster_svc Remote
 	}
 
 	remoteBucket.MemcachedAddrRestAddrMap = make(map[string]string)
+	remoteBucket.RestAddrHttpClientMap = make(map[string]*http.Client)
 
 	urlmap, err := capi_utils.ConstructServerCouchApiBaseMap(bucket, remoteBucket.RemoteClusterRef)
 	if err != nil {
@@ -101,6 +103,11 @@ func (remoteBucket *RemoteBucketInfo) refresh_internal(remote_cluster_svc Remote
 			return err
 		}
 		remoteBucket.MemcachedAddrRestAddrMap[serverAddr] = u.Host
+		http_client, err := utils.GetHttpClient (remoteBucket.RemoteClusterRef.Certificate, u.Host, remoteBucket.logger)
+		if err != nil {
+			return err
+		}
+		remoteBucket.RestAddrHttpClientMap[u.Host] = http_client
 	}
 	remoteBucket.logger.Infof("remoteBucket.MemcachedAddrRestAddrMap=%v\n", remoteBucket.MemcachedAddrRestAddrMap)
 

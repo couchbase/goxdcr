@@ -85,7 +85,7 @@ func setup() (err error) {
 			options.password,
 			nil,
 			"POST", "", nil,
-			0, nil, logger)
+			0, nil, nil, false, logger)
 	}
 
 	if err != nil {
@@ -107,7 +107,7 @@ func verify(data_count int) bool {
 		options.password,
 		nil,
 		"GET", "", nil,
-		0, output, logger)
+		0, output, nil, false, logger)
 	if err != nil {
 		panic(err)
 	}

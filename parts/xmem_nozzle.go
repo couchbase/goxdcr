@@ -29,7 +29,6 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
-	"syscall"
 	"time"
 )
 
@@ -363,7 +362,11 @@ func (buf *requestBuffer) bufferSize() uint16 {
 }
 
 func (buf *requestBuffer) itemCountInBuffer() uint16 {
-	return uint16(atomic.LoadInt32(&buf.occupied_count))
+	if buf != nil {
+		return uint16(atomic.LoadInt32(&buf.occupied_count))
+	} else {
+		return 0
+	}
 }
 
 /************************************
@@ -792,10 +795,12 @@ func (xmem *XmemNozzle) Stop() error {
 	}
 
 	//recycle all the bufferred MCRequest to object pool
-	xmem.Logger().Infof("XmemNozzle %v recycle %v objects in buffer\n", xmem.Id(), xmem.buf.itemCountInBuffer())
-	for _, bufferredReq := range xmem.buf.slots {
-		if bufferredReq != nil && bufferredReq.req != nil {
-			xmem.recycleDataObj(bufferredReq.req)
+	if xmem.buf != nil {
+		xmem.Logger().Infof("XmemNozzle %v recycle %v objects in buffer\n", xmem.Id(), xmem.buf.itemCountInBuffer())
+		for _, bufferredReq := range xmem.buf.slots {
+			if bufferredReq != nil && bufferredReq.req != nil {
+				xmem.recycleDataObj(bufferredReq.req)
+			}
 		}
 	}
 
@@ -873,10 +878,6 @@ func (xmem *XmemNozzle) Receive(data interface{}) error {
 	if xmem.counter_received <= received_old {
 		panic(fmt.Sprintf("counter_received_old=%v, counter_received=%v, dataChan_len_old=%v, dataChan_len=%v",
 			received_old, xmem.counter_received, dataChan_len_old, len(xmem.dataChan)))
-	}
-
-	if xmem.counter_received != len(xmem.dataChan)+xmem.counter_sent {
-		xmem.Logger().Errorf("received=%v, sent=%v data buffered=%v", xmem.counter_received, xmem.counter_sent, len(xmem.dataChan))
 	}
 
 	//accumulate the batchCount and batchSize
@@ -1518,14 +1519,6 @@ func isNetTemporaryError(err error) bool {
 	return ok && netError.Temporary()
 }
 
-func isSeriousError(err error) bool {
-	if err == nil {
-		return false
-	}
-	netError, ok := err.(*net.OpError)
-	return err == syscall.EPIPE || err.Error() == "use of closed network connection" || (ok && (!netError.Temporary() && !netError.Timeout()))
-}
-
 func isRecoverableMCError(resp_status mc.Status) bool {
 	switch resp_status {
 	case mc.TMPFAIL:
@@ -1804,7 +1797,7 @@ func (xmem *XmemNozzle) writeToClient(client *xmemClient, bytes []byte) (error, 
 	} else {
 		xmem.Logger().Errorf("%v writeToClient error: %s\n", xmem.Id(), fmt.Sprint(err))
 
-		if isSeriousError(err) {
+		if utils.IsSeriousNetError(err) {
 			//in this case, it is likely the connections in this pool would suffer the same problem, release all the connections
 			xmem.releasePool()
 			xmem.repairConn(client, err.Error(), rev)
@@ -1837,7 +1830,7 @@ func (xmem *XmemNozzle) readFromClient(client *xmemClient) (*mc.MCResponse, erro
 		xmem.Logger().Debugf("%v readFromClient: %v\n", xmem.Id(), err)
 		if err == io.EOF {
 			return nil, connectionClosedError, rev
-		} else if isSeriousError(err) {
+		} else if utils.IsSeriousNetError(err) {
 			//in this case, it is likely the connections in this pool would suffer the same problem, release all the connections
 			xmem.releasePool()
 			xmem.repairConn(client, err.Error(), rev)
