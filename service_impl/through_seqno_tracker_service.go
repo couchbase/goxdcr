@@ -88,6 +88,7 @@ func (tsTracker *ThroughSeqnoTrackerSvc) initialize(pipeline common.Pipeline) {
 		tsTracker.vb_gap_seqno_list_map[vbno] = make([]int, 0)
 		tsTracker.vb_gap_seqno_list_map_locks[vbno] = &sync.RWMutex{}
 
+		tsTracker.vb_last_seen_seqno_map[vbno] = 0
 		tsTracker.vb_last_seen_seqno_map_locks[vbno] = &sync.RWMutex{}
 	}
 	tsTracker.topic = pipeline.Topic()
