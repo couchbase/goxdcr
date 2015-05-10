@@ -16,6 +16,7 @@ import (
 	mc "github.com/couchbase/gomemcached"
 	base "github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
+	"sync"
 	"time"
 )
 
@@ -32,16 +33,16 @@ const (
 	SETTING_SELF_MONITOR_INTERVAL = "self_monitor_interval"
 	SETTING_STATS_INTERVAL        = "stats_interval"
 
-	STATS_QUEUE_SIZE       = "queue_size"
-	STATS_QUEUE_SIZE_BYTES = "queue_size_bytes"
-	EVENT_ADDI_DOC_KEY     = "doc_key"
-	EVENT_ADDI_SEQNO       = "source_seqno"
-	EVENT_ADDI_OPT_REPD    = "optimistic_replicated"
+	STATS_QUEUE_SIZE               = "queue_size"
+	STATS_QUEUE_SIZE_BYTES         = "queue_size_bytes"
+	EVENT_ADDI_DOC_KEY             = "doc_key"
+	EVENT_ADDI_SEQNO               = "source_seqno"
+	EVENT_ADDI_OPT_REPD            = "optimistic_replicated"
 	EVENT_ADDI_SETMETA_COMMIT_TIME = "setmeta_commit_time"
 	EVENT_ADDI_GETMETA_COMMIT_TIME = "getmeta_commit_time"
 )
 
-type DataObjRecycler func (topic string, dataObj *base.WrappedMCRequest)
+type DataObjRecycler func(topic string, dataObj *base.WrappedMCRequest)
 
 /************************************
 /* struct baseConfig
@@ -127,6 +128,7 @@ func (config *baseConfig) initializeConfig(settings map[string]interface{}) {
 /* struct dataBatch
 *************************************/
 type dataBatch struct {
+	lock *sync.RWMutex
 	// the document whose size is larger than optimistic replication threshold
 	// key of the map is the document key
 	bigDoc_map map[string]*base.WrappedMCRequest
@@ -153,6 +155,7 @@ func newBatch(cap_count int, cap_size int, expiring_duration time.Duration, logg
 		capacity_count:    cap_count,
 		capacity_size:     cap_size,
 		expiring_duration: expiring_duration,
+		lock:              &sync.RWMutex{},
 		bigDoc_map:        make(map[string]*base.WrappedMCRequest),
 		bigDoc_noRep_map:  make(map[string]bool),
 		expiration_set:    false,
@@ -161,6 +164,8 @@ func newBatch(cap_count int, cap_size int, expiring_duration time.Duration, logg
 
 func (b *dataBatch) accumuBatch(req *base.WrappedMCRequest, classifyFunc func(req *mc.MCRequest) bool) bool {
 	var ret bool = true
+	b.lock.Lock()
+	defer b.lock.Unlock()
 
 	if req != nil && req.Req != nil {
 		size := req.Req.Size()

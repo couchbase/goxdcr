@@ -432,14 +432,16 @@ func GetAllParts(p common.Pipeline) map[string]common.Part {
 }
 
 func addPartToMap(part common.Part, partsMap map[string]common.Part) {
-	if _, ok := partsMap[part.Id()]; !ok {
-		// process the part if it has not been processed yet to avoid infinite loop
-		partsMap[part.Id()] = part
+	if part != nil  && partsMap != nil{
+		if _, ok := partsMap[part.Id()]; !ok {
+			// process the part if it has not been processed yet to avoid infinite loop
+			partsMap[part.Id()] = part
 
-		connector := part.Connector()
-		if connector != nil {
-			for _, downStreamPart := range connector.DownStreams() {
-				addPartToMap(downStreamPart, partsMap)
+			connector := part.Connector()
+			if connector != nil {
+				for _, downStreamPart := range connector.DownStreams() {
+					addPartToMap(downStreamPart, partsMap)
+				}
 			}
 		}
 	}

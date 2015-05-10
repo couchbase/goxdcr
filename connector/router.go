@@ -40,8 +40,8 @@ func NewRouter(id string, downStreamParts map[string]common.Part,
 	logger_context *log.LoggerContext, logger_module string) *Router {
 	router := &Router{
 		AbstractComponent: component.NewAbstractComponentWithLogger(id, log.NewLogger(logger_module, logger_context)),
-		downStreamParts:  downStreamParts,
-		routing_callback: routing_callback,
+		downStreamParts:   downStreamParts,
+		routing_callback:  routing_callback,
 	}
 	return router
 }
@@ -81,8 +81,9 @@ func (router *Router) DownStreams() map[string]common.Part {
 func (router *Router) AddDownStream(partId string, part common.Part) error {
 	router.stateLock.Lock()
 	defer router.stateLock.Unlock()
-
-	router.downStreamParts[partId] = part
+	if part != nil {
+		router.downStreamParts[partId] = part
+	}
 	return nil
 }
 

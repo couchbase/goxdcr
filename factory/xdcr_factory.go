@@ -115,9 +115,16 @@ func (xdcrf *XDCRFactory) NewPipeline(topic string, progress_recorder common.Pip
 		vblist := sourceNozzle.(*parts.DcpNozzle).GetVBList()
 		downStreamParts := make(map[string]common.Part)
 		for _, vb := range vblist {
-			targetNozzleId := vbNozzleMap[vb]
+			targetNozzleId, ok := vbNozzleMap[vb]
+			if !ok {
+				panic(fmt.Sprintf("There is no target nozzle for vb=%v", vb))
+			}
 
-			downStreamParts[targetNozzleId] = outNozzles[targetNozzleId]
+			outNozzle, ok := outNozzles[targetNozzleId]
+			if !ok {
+				panic(fmt.Sprintf("There is no corresponding target nozzel for vb=%v, targetNozzleId=%v", vb, targetNozzleId))
+			}
+			downStreamParts[targetNozzleId] = outNozzle
 		}
 
 		router, err := xdcrf.constructRouter(sourceNozzle.Id(), spec, downStreamParts, vbNozzleMap, logger_ctx)
