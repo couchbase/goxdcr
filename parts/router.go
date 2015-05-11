@@ -67,7 +67,7 @@ func NewRouter(id string, topic string, filterExpression string,
 		req_creator:  req_creator}
 
 	var routingFunc connector.Routing_Callback_Func = router.route
-	router.Router = connector.NewRouter("XDCRRouter", downStreamParts, &routingFunc, logger_context, "XDCRRouter")
+	router.Router = connector.NewRouter(id, downStreamParts, &routingFunc, logger_context, "XDCRRouter")
 
 	//initialize counter
 	for partId, _ := range downStreamParts {
@@ -134,20 +134,19 @@ func (router *Router) route(data interface{}) (map[string]interface{}, error) {
 		return nil, ErrorInvalidRoutingMapForRouter
 	}
 
-	router.Logger().Debugf("Data with vbno=%d, opCode=%v is routed to downstream part %s", uprEvent.VBucket, uprEvent.Opcode, partId)
+	router.Logger().Debugf("Data with key=%v, vbno=%d, opCode=%v is routed to downstream part %s", string(uprEvent.Key), uprEvent.VBucket, uprEvent.Opcode, partId)
 
 	// filter data if filter expession has been defined
 	if router.filterRegexp != nil {
 		if !utils.RegexpMatch(router.filterRegexp, uprEvent.Key) {
 			// if data does not match filter expression, drop it. return empty result
 			router.RaiseEvent(common.DataFiltered, uprEvent, router, nil, nil)
-			router.Logger().Debugf("Data with key=%v has been filtered out", string(uprEvent.Key))
+			router.Logger().Debugf("Data with key=%v, vbno=%d, opCode=%v has been filtered out", string(uprEvent.Key), uprEvent.VBucket, uprEvent.Opcode)
 			return result, nil
 		}
 	}
 	result[partId] = router.ComposeMCRequest(uprEvent)
 	router.counter[partId] = router.counter[partId] + 1
-	router.Logger().Debugf("Rounting counter = %v\n", router.counter)
 	return result, nil
 }
 
