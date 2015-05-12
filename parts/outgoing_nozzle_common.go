@@ -16,7 +16,6 @@ import (
 	mc "github.com/couchbase/gomemcached"
 	base "github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
-	"sync"
 	"time"
 )
 
@@ -128,7 +127,6 @@ func (config *baseConfig) initializeConfig(settings map[string]interface{}) {
 /* struct dataBatch
 *************************************/
 type dataBatch struct {
-	lock *sync.RWMutex
 	// the document whose size is larger than optimistic replication threshold
 	// key of the map is the document key
 	bigDoc_map map[string]*base.WrappedMCRequest
@@ -155,17 +153,15 @@ func newBatch(cap_count int, cap_size int, expiring_duration time.Duration, logg
 		capacity_count:    cap_count,
 		capacity_size:     cap_size,
 		expiring_duration: expiring_duration,
-		lock:              &sync.RWMutex{},
 		bigDoc_map:        make(map[string]*base.WrappedMCRequest),
 		bigDoc_noRep_map:  make(map[string]bool),
 		expiration_set:    false,
+		expire_ch:         make(<-chan time.Time, 0),
 		logger:            logger}
 }
 
 func (b *dataBatch) accumuBatch(req *base.WrappedMCRequest, classifyFunc func(req *mc.MCRequest) bool) bool {
 	var ret bool = true
-	b.lock.Lock()
-	defer b.lock.Unlock()
 
 	if req != nil && req.Req != nil {
 		size := req.Req.Size()

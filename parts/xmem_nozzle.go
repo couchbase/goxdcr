@@ -626,8 +626,9 @@ type XmemNozzle struct {
 	batches_ready chan *dataBatch
 
 	//batch to be accumulated
-	batch           *dataBatch
-	batch_move_lock sync.Mutex
+	batch *dataBatch
+	// lock for adding requests to batch and for moving batches to batch ready queue
+	batch_lock sync.RWMutex
 
 	childrenWaitGrp sync.WaitGroup
 
@@ -689,7 +690,7 @@ func NewXmemNozzle(id string,
 		config:             newConfig(server.Logger()),
 		batches_ready:      nil,
 		batch:              nil,
-		batch_move_lock:    sync.Mutex{},
+		batch_lock:         sync.RWMutex{},
 		childrenWaitGrp:    sync.WaitGroup{},
 		buf:                nil,
 		receiver_finch:     make(chan bool, 1),
@@ -819,11 +820,13 @@ func (xmem *XmemNozzle) IsOpen() bool {
 	return ret
 }
 
-func (xmem *XmemNozzle) batchReady() error {
-	//move the batch to ready batches channel
-	xmem.batch_move_lock.Lock()
+func (xmem *XmemNozzle) batchReady(lock bool) error {
+	if lock {
+		xmem.batch_lock.Lock()
+		defer xmem.batch_lock.Unlock()
+	}
+
 	defer func() {
-		xmem.batch_move_lock.Unlock()
 		if r := recover(); r != nil {
 			if xmem.validateRunningState() == nil {
 				// report error only when xmem is still in running state
@@ -832,6 +835,8 @@ func (xmem *XmemNozzle) batchReady() error {
 		}
 		xmem.Logger().Debugf("%v End moving batch, %v batches ready\n", xmem.Id(), len(xmem.batches_ready))
 	}()
+
+	//move the batch to ready batches channel
 	if xmem.batch.count() > 0 {
 		xmem.Logger().Debugf("%v move the batch (count=%d) ready queue\n", xmem.Id(), xmem.batch.count())
 		select {
@@ -880,14 +885,25 @@ func (xmem *XmemNozzle) Receive(data interface{}) error {
 			received_old, xmem.counter_received, dataChan_len_old, len(xmem.dataChan)))
 	}
 
-	//accumulate the batchCount and batchSize
-	if xmem.batch.accumuBatch(request, xmem.optimisticRep) {
-		xmem.batchReady()
-	}
+	xmem.accumuBatch(request)
 
 	xmem.Logger().Debugf("Xmem %v received %v items, queue_size = %v\n", xmem.Id(), xmem.counter_received, len(xmem.dataChan))
 
 	return nil
+}
+
+func (xmem *XmemNozzle) accumuBatch(request *base.WrappedMCRequest) {
+	xmem.batch_lock.Lock()
+	defer xmem.batch_lock.Unlock()
+	if xmem.batch.accumuBatch(request, xmem.optimisticRep) {
+		xmem.batchReady(false)
+	}
+}
+
+func (xmem *XmemNozzle) batchSize() int {
+	xmem.batch_lock.RLock()
+	defer xmem.batch_lock.RUnlock()
+	return xmem.batch.size()
 }
 
 func (xmem *XmemNozzle) processData_batch(finch chan bool, waitGrp *sync.WaitGroup) (err error) {
@@ -1413,7 +1429,7 @@ func (xmem *XmemNozzle) receiveResponse(finch chan bool, waitGrp *sync.WaitGroup
 
 			response, err, rev := xmem.readFromClient(xmem.client_for_setMeta)
 			if err != nil {
-				if err == PartStoppedError  || err == fatalError{
+				if err == PartStoppedError || err == fatalError {
 					goto done
 				} else if err == badConnectionError || err == connectionClosedError {
 					xmem.repairConn(xmem.client_for_setMeta, err.Error(), rev)
@@ -1625,7 +1641,7 @@ func (xmem *XmemNozzle) check(finch chan bool, waitGrp *sync.WaitGroup) {
 			select {
 			case <-xmem.batch.expire_ch:
 				xmem.Logger().Debugf("%v batch expired, moving it to ready queue\n", xmem.Id())
-				xmem.batchReady()
+				xmem.batchReady(true)
 			default:
 			}
 			xmem.Logger().Debugf("%v open=%v checking..., %v item unsent, received %v items, sent %v items, %v items waiting for response, %v batches ready, current batch timeout at %v, current batch expire_ch size is %v\n", xmem.Id(), xmem.IsOpen(), len(xmem.dataChan), xmem.counter_received, xmem.counter_sent, int(xmem.buf.bufferSize())-len(xmem.buf.empty_slots_pos), len(xmem.batches_ready), xmem.batch.start_time.Add(xmem.batch.expiring_duration), len(xmem.batch.expire_ch))
@@ -1743,7 +1759,7 @@ func (xmem *XmemNozzle) ConnType() base.ConnType {
 func (xmem *XmemNozzle) StatusSummary() string {
 	if xmem.State() == common.Part_Running {
 		connType := xmem.connType
-		return fmt.Sprintf("Xmem %v state =%v connType=%v received %v items, sent %v items, %v items waiting to confirm, %v in queue, getMeta's backoff_factor is %v, setMeta's backoff_factor is %v", xmem.Id(), xmem.State(), connType, xmem.counter_received, xmem.counter_sent, xmem.buf.itemCountInBuffer(), len(xmem.dataChan), xmem.client_for_getMeta.backoff_factor, xmem.client_for_setMeta.backoff_factor)
+		return fmt.Sprintf("Xmem %v state =%v connType=%v received %v items, sent %v items, %v items waiting to confirm, %v in queue, %v in current batch, getMeta's backoff_factor is %v, setMeta's backoff_factor is %v", xmem.Id(), xmem.State(), connType, xmem.counter_received, xmem.counter_sent, xmem.buf.itemCountInBuffer(), len(xmem.dataChan), xmem.batchSize(), xmem.client_for_getMeta.backoff_factor, xmem.client_for_setMeta.backoff_factor)
 	} else {
 		return fmt.Sprintf("Xmem %v state =%v ", xmem.Id(), xmem.State())
 	}
