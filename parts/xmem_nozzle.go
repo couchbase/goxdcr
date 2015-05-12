@@ -1413,9 +1413,9 @@ func (xmem *XmemNozzle) receiveResponse(finch chan bool, waitGrp *sync.WaitGroup
 
 			response, err, rev := xmem.readFromClient(xmem.client_for_setMeta)
 			if err != nil {
-				if err == PartStoppedError || err == connectionClosedError || err == fatalError {
+				if err == PartStoppedError  || err == fatalError{
 					goto done
-				} else if err == badConnectionError {
+				} else if err == badConnectionError || err == connectionClosedError {
 					xmem.repairConn(xmem.client_for_setMeta, err.Error(), rev)
 					xmem.Logger().Error("The connection is ruined. Repair the connection and retry.")
 				}
