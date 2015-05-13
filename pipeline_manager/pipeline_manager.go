@@ -587,6 +587,7 @@ RE:
 	if err == nil || err == ReplicationSpecNotActive || err == service_def.MetadataNotFoundErr {
 		r.logger.Infof("Pipeline %v is updated\n", r.pipeline_name)
 		if pipeline_mgr.reportFixed(r) == nil {
+			r.rep_status.ClearErrors()
 			r.current_error = nil
 			return true
 		}
@@ -596,7 +597,6 @@ RE:
 	r.reportStatus()
 
 	return false
-
 }
 
 func (r *pipelineUpdater) reportStatus() {

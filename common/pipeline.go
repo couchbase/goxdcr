@@ -47,7 +47,7 @@ type Pipeline interface {
 	Settings() map[string]interface{}
 
 	State() PipelineState
-	SetState(state PipelineState, additionalInfo map[string]interface{}) error
+	SetState(state PipelineState) error
 	InstanceId() string
 
 	SetProgressRecorder(recorder PipelineProgressRecorder)

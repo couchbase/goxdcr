@@ -136,7 +136,7 @@ func (xdcrf *XDCRFactory) NewPipeline(topic string, progress_recorder common.Pip
 	progress_recorder("Source nozzles are wired to target nozzles")
 
 	// construct pipeline
-	pipeline := pp.NewPipelineWithSettingConstructor(topic, sourceNozzles, outNozzles, spec, xdcrf.ConstructSettingsForPart, xdcrf.ConstructSSLPortMap, xdcrf.ConstructUpdateSettingsForPart, xdcrf.SetStartSeqno, xdcrf.remote_cluster_svc.RemoteClusterByUuid, logger_ctx, xdcrf.uilog_svc)
+	pipeline := pp.NewPipelineWithSettingConstructor(topic, sourceNozzles, outNozzles, spec, xdcrf.ConstructSettingsForPart, xdcrf.ConstructSSLPortMap, xdcrf.ConstructUpdateSettingsForPart, xdcrf.SetStartSeqno, xdcrf.remote_cluster_svc.RemoteClusterByUuid, logger_ctx)
 	if pipelineContext, err := pctx.NewWithSettingConstructor(pipeline, xdcrf.ConstructSettingsForService, logger_ctx); err != nil {
 		return nil, err
 	} else {

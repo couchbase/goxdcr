@@ -226,6 +226,10 @@ func (rs *ReplicationStatus) Errors() PipelineErrorArray {
 	return rs.err_list
 }
 
+func (rs *ReplicationStatus) ClearErrors() {
+	rs.err_list = PipelineErrorArray{}
+}
+
 func (rs *ReplicationStatus) RecordProgress(progress string) {
 	rs.progress = progress
 	rs.Publish()

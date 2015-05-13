@@ -500,9 +500,18 @@ func GetReplicationInfos() ([]base.ReplicationInfo, error) {
 
 			// set error list
 			errs := rep_status.Errors()
-			for _, pipeline_error := range errs {
-				errInfo := base.ErrorInfo{pipeline_error.Timestamp.UnixNano(), pipeline_error.ErrMsg}
-				replInfo.ErrorList = append(replInfo.ErrorList, errInfo)
+			if len(errs) > 0 {
+				cur_node, err := XDCRCompTopologyService().MyHost()
+				if err != nil {
+					panic("cannot find current host")
+				}
+
+				for _, pipeline_error := range errs {
+					//prepend current node name to the error message to make it more helpful
+					err_msg := cur_node + ":" + pipeline_error.ErrMsg
+					errInfo := base.ErrorInfo{pipeline_error.Timestamp.UnixNano(), err_msg}
+					replInfo.ErrorList = append(replInfo.ErrorList, errInfo)
+				}
 			}
 		}
 
@@ -549,10 +558,25 @@ func (rm *replicationManager) OnError(s common.Supervisor, errMap map[string]err
 		}
 	} else {
 		// the errors came from a pipeline supervisor because some parts are not longer alive.
+
+		if len(errMap) == 0 {
+			panic("errMap is empty")
+		}
 		pipeline, err := getPipelineFromPipelineSupevisor(s)
 		if err == nil {
 			// try to fix the pipeline
-			pipeline_manager.Update(pipeline.Topic(), errors.New(fmt.Sprintf("%v", errMap)))
+
+			var errMsg string
+			if len(errMap) > 1 {
+				errMsg = fmt.Sprintf("%v", errMap)
+			} else {
+				// strip the "map[]" wapper when there is only one error in errMap
+				for partId, partMsg := range errMap {
+					errMsg = partId + ":" + partMsg.Error()
+					break
+				}
+			}
+			pipeline_manager.Update(pipeline.Topic(), errors.New(errMsg))
 		}
 	}
 }

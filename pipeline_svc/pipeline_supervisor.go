@@ -140,9 +140,7 @@ func (pipelineSupervisor *PipelineSupervisor) ReportFailure(errors map[string]er
 }
 
 func (pipelineSupervisor *PipelineSupervisor) declarePipelineBroken() {
-	additionalInfo := make(map[string]interface{})
-	additionalInfo[pipeline.ErrorKey] = pipelineSupervisor.errors_seen
-	err := pipelineSupervisor.pipeline.SetState(common.Pipeline_Error, additionalInfo)
+	err := pipelineSupervisor.pipeline.SetState(common.Pipeline_Error)
 	if err == nil {
 		pipelineSupervisor.Logger().Errorf("Received error report : %v", pipelineSupervisor.errors_seen)
 		pipelineSupervisor.ReportFailure(pipelineSupervisor.errors_seen)
