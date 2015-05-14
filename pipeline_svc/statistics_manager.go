@@ -493,7 +493,7 @@ func (stats_mgr *StatisticsManager) calculateChangesLeft(docs_processed int64) (
 		return 0, err
 	}
 	changes_left := total_doc - docs_processed
-	stats_mgr.logger.Infof("total_doc=%v, docs_processed=%v, changes_left=%v\n", total_doc, docs_processed, changes_left)
+	stats_mgr.logger.Infof("Replication %v: total_doc=%v, docs_processed=%v, changes_left=%v\n", stats_mgr.pipeline.Topic(), total_doc, docs_processed, changes_left)
 	return changes_left, nil
 }
 
@@ -501,10 +501,10 @@ func (stats_mgr *StatisticsManager) calculateTotalChanges() (int64, error) {
 	var total_doc uint64 = 0
 	for serverAddr, vbnos := range stats_mgr.active_vbs {
 		highseqno_map, err := getHighSeqNos(serverAddr, vbnos, stats_mgr.kv_mem_clients[serverAddr])
-		stats_mgr.logger.Debugf("serverAddr=%v, highseqno_map=%v\n", serverAddr, highseqno_map)
 		if err != nil {
 			return 0, err
 		}
+		stats_mgr.logger.Debugf("Calculating total changes for replication %v. stats_mgr.serverAddr=%v, vbnos=%v\n highseqno_map=%v\n", stats_mgr.pipeline.Topic(), serverAddr, vbnos, highseqno_map)
 		for _, vbno := range vbnos {
 			current_vb_highseqno := highseqno_map[vbno]
 			total_doc = total_doc + current_vb_highseqno
@@ -977,7 +977,7 @@ func UpdateStats(cluster_info_svc service_def.ClusterInfoSvc, xdcr_topology_svc 
 			repl_status.SetOverviewStats(overview_stats)
 		} else {
 			if repl_status.RuntimeStatus() != pipeline.Replicating {
-				err := updateStatsForReplication(repl_status.Spec(), repl_status.GetOverviewStats(), cluster_info_svc, xdcr_topology_svc, checkpoints_svc, kv_mem_clients, logger)
+				err := updateStatsForReplication(repl_status.Spec(), overview_stats, cluster_info_svc, xdcr_topology_svc, checkpoints_svc, kv_mem_clients, logger)
 				if err != nil {
 					logger.Errorf("Error updating stats for paused replication %v. err=%v", repl_id, err)
 				}
@@ -994,16 +994,15 @@ func constructStatsForReplication(spec *metadata.ReplicationSpecification, clust
 	if err != nil {
 		return nil, err
 	}
-	logger.Infof("docs_processed for paused replication %v is %v\n", spec.Id, docs_processed)
 
 	total_changes, err := getTotalChangesForReplication(spec, cluster_info_svc, xdcr_topology_svc, checkpoints_svc, kv_mem_clients, logger)
 	if err != nil {
 		return nil, err
 	}
 
-	logger.Infof("total_changes for paused replication %v is %v\n", spec.Id, total_changes)
-
 	changes_left := total_changes - docs_processed
+
+	logger.Infof("Calculating stats for never run replication %v. total_docs=%v, docs_processed=%v, changes_left=%v\n", spec.Id, total_changes, docs_processed, changes_left)
 
 	overview_map := new(expvar.Map).Init()
 	overview_map.Add(DOCS_PROCESSED_METRIC, int64(docs_processed))
@@ -1033,7 +1032,7 @@ func getTotalChangesForReplication(spec *metadata.ReplicationSpecification, clus
 		if err != nil {
 			return 0, err
 		}
-		logger.Debugf("serverAddr=%v, highseqno_map=%v\n", serverAddr, highseqno_map)
+		logger.Infof("getTotalChangesForReplication %v, serverAddr=%v, vbnos=%v\n highseqno_map=%v\n", spec.Id, serverAddr, vbnos, highseqno_map)
 
 		for _, vbno := range vbnos {
 			total_doc = total_doc + highseqno_map[vbno]
@@ -1048,7 +1047,6 @@ func updateStatsForReplication(spec *metadata.ReplicationSpecification, overview
 
 	// if pipeline is not running, update changes_left stats, which is not being
 	// updated by running pipeline and may have become inaccurate
-
 	docs_processed, err := strconv.ParseInt(overview_stats.Get(DOCS_PROCESSED_METRIC).String(), base.ParseIntBase, base.ParseIntBitSize)
 	if err != nil {
 		return err
@@ -1064,6 +1062,8 @@ func updateStatsForReplication(spec *metadata.ReplicationSpecification, overview
 	changes_left_var.Set(changes_left)
 
 	overview_stats.Set(CHANGES_LEFT_METRIC, changes_left_var)
+
+	logger.Infof("Updating status for paused replication %v. total_docs=%v, docs_processed=%v, changes_left=%v\n", spec.Id, total_changes, docs_processed, changes_left)
 	return nil
 }
 
