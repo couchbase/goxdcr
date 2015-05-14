@@ -1875,7 +1875,7 @@ func (xmem *XmemNozzle) readFromClient(client *xmemClient) (*mc.MCResponse, erro
 				err = base.ErrorNotMyVbucket
 				xmem.releasePool()
 			}
-			high_level_err := "Fatal error when receiving responses from memcached in target cluster."
+			high_level_err := "Received error response from memcached in target cluster."
 			xmem.handleGeneralError(errors.New(high_level_err))
 			client.logger.Errorf("%v. err=%v", high_level_err, err)
 			return response, fatalError, rev
