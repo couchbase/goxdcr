@@ -554,7 +554,7 @@ func (client *xmemClient) getConn(readTimeout bool, writeTimeout bool) (io.ReadW
 	return conn, client.num_of_repairs, nil
 }
 
-func (client *xmemClient) repairConn(memClient *mcc.Client, repair_count_at_error int) {
+func (client *xmemClient) repairConn(memClient *mcc.Client, repair_count_at_error int, xmem_id string) {
 	client.lock.Lock()
 	defer client.lock.Unlock()
 
@@ -571,7 +571,7 @@ func (client *xmemClient) repairConn(memClient *mcc.Client, repair_count_at_erro
 		client.num_of_repairs++
 		client.healthy = true
 	} else {
-		client.logger.Infof("client %v has been repaired (num_of_repairs=%v, repair_count_at_error=%v), the repair request is ignored\n", client.name, client.num_of_repairs, repair_count_at_error)
+		client.logger.Infof("client %v for %v has been repaired (num_of_repairs=%v, repair_count_at_error=%v), the repair request is ignored\n", client.name, xmem_id, client.num_of_repairs, repair_count_at_error)
 	}
 }
 
@@ -1088,13 +1088,13 @@ func (xmem *XmemNozzle) sendSetMeta_internal(batch *dataBatch) error {
 	if batch != nil {
 		count := batch.count()
 
-		xmem.Logger().Infof("Send batch count=%d\n", count)
+		xmem.Logger().Infof("%v send batch count=%d\n", xmem.Id(), count)
 
-		xmem.Logger().Debugf("So far, xmem %v processed %d items", xmem.Id(), xmem.counter_sent)
+		xmem.Logger().Debugf("So far, %v processed %d items", xmem.Id(), xmem.counter_sent)
 
 		bigDoc_noRep_map, err := xmem.batchGetMeta(batch.bigDoc_map)
 		if err != nil {
-			xmem.Logger().Errorf("batchGetMeta failed. err=%v\n", err)
+			xmem.Logger().Errorf("%v batchGetMeta failed. err=%v\n", xmem.Id(), err)
 		} else {
 			batch.bigDoc_noRep_map = bigDoc_noRep_map
 		}
@@ -1432,8 +1432,8 @@ func (xmem *XmemNozzle) receiveResponse(finch chan bool, waitGrp *sync.WaitGroup
 				if err == PartStoppedError || err == fatalError {
 					goto done
 				} else if err == badConnectionError || err == connectionClosedError {
-					xmem.repairConn(xmem.client_for_setMeta, err.Error(), rev)
 					xmem.Logger().Error("The connection is ruined. Repair the connection and retry.")
+					xmem.repairConn(xmem.client_for_setMeta, err.Error(), rev)
 				}
 
 				//read is unsuccessful, put the token back
@@ -1555,7 +1555,7 @@ func isIgnorableMCError(resp_status mc.Status) bool {
 
 func (xmem *XmemNozzle) getMaxIdleCount() int {
 	backoff_factor := math.Max(float64(xmem.client_for_getMeta.backoff_factor), float64(xmem.client_for_setMeta.backoff_factor))
-	backoff_factor = math.Max(float64(10), backoff_factor)
+	backoff_factor = math.Min(float64(10), backoff_factor)
 
 	//if client_for_getMeta.backoff_factor > 0 or client_for_setMeta.backoff_factor > 0, it means the target system is possibly under load, need to be more patient before
 	//declare the stuckness.
@@ -1820,8 +1820,9 @@ func (xmem *XmemNozzle) writeToClient(client *xmemClient, bytes []byte) (error, 
 
 		} else if isNetError(err) {
 			client.reportOpFailure()
-			xmem.Logger().Errorf("%v batchSend Failed, retry later\n", xmem.Id())
-			time.Sleep(time.Duration(2^(client.curFailureCounter())) * xmem.config.writeTimeout * time.Second)
+			wait_time := time.Duration(math.Pow(2, float64(client.curFailureCounter()))) * xmem.config.writeTimeout
+			xmem.Logger().Errorf("%v batchSend Failed, retry after %v\n", xmem.Id(), wait_time)
+			time.Sleep(wait_time)
 
 		}
 
@@ -1904,10 +1905,10 @@ func (xmem *XmemNozzle) repairConn(client *xmemClient, reason string, rev int) e
 	if err != nil {
 		return err
 	}
-	memClient_setMeta, err := pool.Get()
+	memClient, err := pool.Get()
 
 	if err == nil {
-		client.repairConn(memClient_setMeta, rev)
+		client.repairConn(memClient, rev, xmem.Id())
 		if client == xmem.client_for_setMeta {
 			xmem.onSetMetaConnRepaired()
 		}
@@ -1925,10 +1926,14 @@ func (xmem *XmemNozzle) repairConn(client *xmemClient, reason string, rev int) e
 
 func (xmem *XmemNozzle) onSetMetaConnRepaired() {
 	size := xmem.buf.bufferSize()
+	count := 0
 	for i := 0; i < int(size); i++ {
-		xmem.buf.modSlot(uint16(i), xmem.resendForNewConn)
+		sent, _ := xmem.buf.modSlot(uint16(i), xmem.resendForNewConn)
+		if sent {
+			count++
+		}
 	}
-	xmem.Logger().Infof("%v - The unresponded items are resent\n", xmem.Id())
+	xmem.Logger().Infof("%v - %v unresponded items are resent\n", xmem.Id(), count)
 
 }
 
