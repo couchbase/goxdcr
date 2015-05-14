@@ -43,6 +43,11 @@ func Connect(prot, dest string) (rv *Client, err error) {
 	return Wrap(conn)
 }
 
+func (c *Client) SetKeepAliveOptions(interval time.Duration) {
+	c.conn.(*net.TCPConn).SetKeepAlive(true)
+	c.conn.(*net.TCPConn).SetKeepAlivePeriod(interval)
+}
+
 // Wrap an existing transport.
 func Wrap(rwc io.ReadWriteCloser) (rv *Client, err error) {
 	return &Client{
