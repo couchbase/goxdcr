@@ -22,6 +22,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -166,9 +167,16 @@ func NewGetRemoteClustersResponse(remoteClusters map[string]*metadata.RemoteClus
 }
 
 func NewGetAllReplicationsResponse(replSpecs map[string]*metadata.ReplicationSpecification) (*ap.Response, error) {
+	// UI requires that the specs are in sorted order to avoid flicking
+	specIds := make([]string, 0)
+	for specId, _ := range replSpecs {
+		specIds = append(specIds, specId)
+	}
+	sort.Strings(specIds)
+
 	replArr := make([]map[string]interface{}, 0)
-	for _, replSpec := range replSpecs {
-		replArr = append(replArr, getReplicationDocMap(replSpec))
+	for _, specId := range specIds {
+		replArr = append(replArr, getReplicationDocMap(replSpecs[specId]))
 	}
 	return EncodeObjectIntoResponse(replArr)
 }
