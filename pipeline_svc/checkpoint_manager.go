@@ -32,6 +32,7 @@ const (
 	CheckpointMgrId   string = "CheckpointMgr"
 	TimeCommiting     string = "time_commiting"
 	Vbno              string = "vbno"
+	VBTimestamp       string = "VBTimestamps"
 )
 
 var CHECKPOINT_INTERVAL = "checkpoint_interval"
@@ -84,6 +85,8 @@ type CheckpointManager struct {
 
 	logger          *log.CommonLogger
 	cur_ckpts_locks map[uint16]*sync.RWMutex
+
+	vbts_update_lock *sync.Mutex
 }
 
 func NewCheckpointManager(checkpoints_svc service_def.CheckpointsService, capi_svc service_def.CAPIService,
@@ -112,6 +115,7 @@ func NewCheckpointManager(checkpoints_svc service_def.CheckpointsService, capi_s
 		wait_grp:                  &sync.WaitGroup{},
 		failoverlog_map:           make(map[uint16]*mcc.FailoverLog),
 		failoverlog_locks:         make(map[uint16]*sync.RWMutex),
+		vbts_update_lock:          &sync.Mutex{},
 		vb_highseqno_map:          make(map[uint16]uint64)}, nil
 }
 
@@ -278,17 +282,21 @@ func (ckmgr *CheckpointManager) SetVBTimestamps(topic string) error {
 	//refresh the remote bucket
 	err := ckmgr.remote_bucket.Refresh(ckmgr.remote_cluster_svc)
 	if err != nil {
+		otherInfo := utils.WrapError(err)
+		ckmgr.RaiseEvent(common.ErrorEncountered, nil, ckmgr, nil, otherInfo)
 		return err
 	}
 
 	support_ckpt := ckmgr.support_ckpt
 
-	ret := make(map[uint16]*base.VBTimestamp)
 	listOfVbs := ckmgr.getMyVBs()
+
 	ckmgr.logger.Infof("Getting checkpoint for %v\n", topic)
 	ckptDocs, err := ckmgr.checkpoints_svc.CheckpointsDocs(topic)
 	ckmgr.logger.Infof("Done getting checkpoint for %v\n", topic)
 	if err != nil {
+		otherInfo := utils.WrapError(err)
+		ckmgr.RaiseEvent(common.ErrorEncountered, nil, ckmgr, nil, otherInfo)
 		return err
 	}
 
@@ -307,7 +315,6 @@ func (ckmgr *CheckpointManager) SetVBTimestamps(topic string) error {
 	getter_wait_grp := &sync.WaitGroup{}
 	err_ch := make(chan error, len(listOfVbs))
 	getter_id := 0
-	ret_map_map := make(map[int]map[uint16]*base.VBTimestamp)
 	for {
 		end_index := start_index + workload
 		if end_index > len(listOfVbs) {
@@ -315,9 +322,7 @@ func (ckmgr *CheckpointManager) SetVBTimestamps(topic string) error {
 		}
 		vbs_for_getter := listOfVbs[start_index:end_index]
 		getter_wait_grp.Add(1)
-		ret_map_map[getter_id] = make(map[uint16]*base.VBTimestamp)
-
-		go ckmgr.startSeqnoGetter(getter_id, vbs_for_getter, ckptDocs, support_ckpt, ret_map_map[getter_id], highseqnomap, getter_wait_grp, err_ch)
+		go ckmgr.startSeqnoGetter(getter_id, vbs_for_getter, ckptDocs, support_ckpt, highseqnomap, getter_wait_grp, err_ch)
 
 		start_index = end_index
 		if start_index >= len(listOfVbs) {
@@ -329,31 +334,40 @@ func (ckmgr *CheckpointManager) SetVBTimestamps(topic string) error {
 	//wait for all the getter done, then gather result
 	getter_wait_grp.Wait()
 	if len(err_ch) > 0 {
-		return errors.New(fmt.Sprintf("Failed to get starting seqno for pipeline %v", ckmgr.pipeline.InstanceId()))
+		err = errors.New(fmt.Sprintf("Failed to get starting seqno for pipeline %v", ckmgr.pipeline.InstanceId()))
+		otherInfo := utils.WrapError(err)
+		ckmgr.RaiseEvent(common.ErrorEncountered, nil, ckmgr, nil, otherInfo)
+		return err
 	}
-
-	for _, ret_map := range ret_map_map {
-		for vbno, vbts := range ret_map {
-			ret[vbno] = vbts
-		}
-	}
-
-	settings := ckmgr.pipeline.Settings()
-	settings["VBTimestamps"] = ret
-
-	start_seqno_map := make(map[uint16]uint64)
-	for vbno, ts := range ret {
-		start_seqno_map[vbno] = ts.Seqno
-	}
-	ckmgr.through_seqno_tracker_svc.SetStartSeqnos(start_seqno_map)
 
 	ckmgr.logger.Infof("Done with setting starting seqno for pipeline %v\n", ckmgr.pipeline.InstanceId())
 	return nil
 }
 
+func (ckmgr *CheckpointManager) setTimestampForVB(vbno uint16, ts *base.VBTimestamp) error {
+	ckmgr.logger.Debugf("Set VBTimestamp: vb=%v, ts=%v\n", vbno, ts)
+	settings := ckmgr.pipeline.Settings()
+	ts_obj := utils.GetSettingFromSettings(settings, VBTimestamp)
+	if ts_obj != nil {
+		ts_map, _ := ts_obj.(map[uint16]*base.VBTimestamp)
+		ckmgr.vbts_update_lock.Lock()
+		defer ckmgr.vbts_update_lock.Unlock()
+		ts_map[vbno] = ts
+
+		//notify the settings change
+		ckmgr.pipeline.UpdateSettings(settings)
+	} else {
+		return errors.New("Setting 'VBTimestamp' is not in settings")
+	}
+
+	//set the start seqno on through_seqno_tracker_svc as well
+	ckmgr.through_seqno_tracker_svc.SetStartSeqno(vbno, ts.Seqno)
+	return nil
+}
+
 func (ckmgr *CheckpointManager) startSeqnoGetter(getter_id int, listOfVbs []uint16, ckptDocs map[uint16]*metadata.CheckpointsDoc,
-	disableCkptBackwardsCompat bool, ret map[uint16]*base.VBTimestamp, highseqnomap map[uint16]uint64, waitGrp *sync.WaitGroup, err_ch chan error) {
-	ckmgr.logger.Debugf("StartSeqnoGetter %v is started to do _pre_prelicate for vb %v, waitGrp=%v\n", getter_id, listOfVbs, *waitGrp)
+	disableCkptBackwardsCompat bool, highseqnomap map[uint16]uint64, waitGrp *sync.WaitGroup, err_ch chan error) {
+	ckmgr.logger.Infof("StartSeqnoGetter %v is started to do _pre_prelicate for vb %v\n", getter_id, listOfVbs)
 	defer waitGrp.Done()
 
 	for _, vbno := range listOfVbs {
@@ -411,7 +425,10 @@ func (ckmgr *CheckpointManager) startSeqnoGetter(getter_id int, listOfVbs []uint
 			highseqno_vb = highseqnomap[vbno]
 		}
 		vbts := ckmgr.populateVBTimestamp(ckptDoc, agreeedIndex, vbno, highseqno_vb)
-		ret[vbno] = vbts
+		err1 := ckmgr.setTimestampForVB(vbno, vbts)
+		if err1 != nil {
+			err_ch <- err1
+		}
 	}
 }
 
@@ -427,7 +444,7 @@ func (ckmgr *CheckpointManager) ckptRecords(ckptDoc *metadata.CheckpointsDoc, vb
 }
 
 func (ckmgr *CheckpointManager) UpdateSettings(settings map[string]interface{}) error {
-	ckmgr.logger.Infof("Updating settings on checkpoint manager for pipeline %v. settings=%v\n", ckmgr.pipeline.Topic(), settings)
+	ckmgr.logger.Debugf("Updating settings on checkpoint manager for pipeline %v. settings=%v\n", ckmgr.pipeline.Topic(), settings)
 	checkpoint_interval, err := utils.GetIntSettingFromSettings(settings, CHECKPOINT_INTERVAL)
 	if err != nil {
 		return err
@@ -751,11 +768,13 @@ func (ckmgr *CheckpointManager) getFailoverUUIDForSeqno(vbno uint16, seqno uint6
 	ckmgr.failoverlog_locks[vbno].RUnlock()
 
 	flog := ckmgr.failoverlog_map[vbno]
-	for _, entry := range *flog {
-		failover_uuid := entry[0]
-		starting_seqno := entry[1]
-		if seqno > starting_seqno {
-			return failover_uuid
+	if flog != nil {
+		for _, entry := range *flog {
+			failover_uuid := entry[0]
+			starting_seqno := entry[1]
+			if seqno > starting_seqno {
+				return failover_uuid
+			}
 		}
 	}
 	return 0

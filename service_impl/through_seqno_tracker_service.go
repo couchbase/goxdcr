@@ -454,17 +454,10 @@ func (tsTracker *ThroughSeqnoTrackerSvc) getThroughSeqnos(executor_id int, listO
 	}
 }
 
-func (tsTracker *ThroughSeqnoTrackerSvc) SetStartSeqnos(start_seqno_map map[uint16]uint64) {
-	for vbno, _ := range start_seqno_map {
-		tsTracker.setStartSeqno(vbno, start_seqno_map[vbno])
-	}
-
-	tsTracker.logger.Infof("%v through_seqno_map in through seqno tracker has been set to %v\n", tsTracker.topic, tsTracker.through_seqno_map)
-}
-
-func (tsTracker *ThroughSeqnoTrackerSvc) setStartSeqno(vbno uint16, seqno uint64) {
+func (tsTracker *ThroughSeqnoTrackerSvc) SetStartSeqno(vbno uint16, seqno uint64) {
 	tsTracker.validateVbno(vbno, "setStartSeqno")
-	tsTracker.through_seqno_map[vbno].setSeqno(seqno)
+	obj, _ := tsTracker.through_seqno_map[vbno]
+	obj.setSeqno(seqno)
 }
 
 func (tsTracker *ThroughSeqnoTrackerSvc) validateVbno(vbno uint16, caller string) {

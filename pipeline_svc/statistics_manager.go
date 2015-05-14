@@ -647,7 +647,7 @@ func (stats_mgr *StatisticsManager) initConnections() error {
 }
 
 func (stats_mgr *StatisticsManager) UpdateSettings(settings map[string]interface{}) error {
-	stats_mgr.logger.Infof("Updating settings on stats manager. settings=%v\n", settings)
+	stats_mgr.logger.Debugf("Updating settings on stats manager. settings=%v\n", settings)
 
 	stats_interval, err := utils.GetIntSettingFromSettings(settings, PUBLISH_INTERVAL)
 	if err != nil {

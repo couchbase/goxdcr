@@ -170,15 +170,11 @@ func (genericPipeline *GenericPipeline) Start(settings map[string]interface{}) e
 		return err
 	}
 
+	settings["VBTimestamps"] = make(map[uint16]*base.VBTimestamp)
 	genericPipeline.settings = settings
-	genericPipeline.ReportProgress("Try to get start seqno")
-	genericPipeline.logger.Info("Try to get start seqno")
+
 	//get starting vb timestamp
-	err = genericPipeline.startingSeqno_constructor(genericPipeline)
-	if err != nil {
-		return err
-	}
-	genericPipeline.ReportProgress("Got the start seqno")
+	go genericPipeline.startingSeqno_constructor(genericPipeline)
 
 	targetClusterRef, err := genericPipeline.remoteClusterRef_retriever(genericPipeline.spec.TargetClusterUUID, true)
 	if err != nil {
@@ -432,7 +428,7 @@ func GetAllParts(p common.Pipeline) map[string]common.Part {
 }
 
 func addPartToMap(part common.Part, partsMap map[string]common.Part) {
-	if part != nil  && partsMap != nil{
+	if part != nil && partsMap != nil {
 		if _, ok := partsMap[part.Id()]; !ok {
 			// process the part if it has not been processed yet to avoid infinite loop
 			partsMap[part.Id()] = part
@@ -576,21 +572,21 @@ func (genericPipeline *GenericPipeline) SetProgressRecorder(recorder common.Pipe
 
 func (genericPipeline *GenericPipeline) UpdateSettings(settings map[string]interface{}) error {
 	if genericPipeline.partSetting_constructor != nil {
-		genericPipeline.logger.Infof("Calling part update setting constructor with settings=%v\n", settings)
+		genericPipeline.logger.Debugf("Calling part update setting constructor with settings=%v\n", settings)
 		for _, part := range GetAllParts(genericPipeline) {
-			partSettings, err := genericPipeline.partUpdateSetting_constructor(genericPipeline, part, settings)
-			if err != nil {
-				return err
-			}
-			err = part.UpdateSettings(partSettings)
-			if err != nil {
-				return err
+				partSettings, err := genericPipeline.partUpdateSetting_constructor(genericPipeline, part, settings)
+				if err != nil {
+					return err
+				}
+				err = part.UpdateSettings(partSettings)
+				if err != nil {
+					return err
 			}
 		}
 	}
 
 	if genericPipeline.context != nil {
-		genericPipeline.logger.Infof("Calling update setting constructor on runtime context with settings=%v\n", settings)
+		genericPipeline.logger.Debugf("Calling update setting constructor on runtime context with settings=%v\n", settings)
 		return genericPipeline.context.UpdateSettings(settings)
 	}
 

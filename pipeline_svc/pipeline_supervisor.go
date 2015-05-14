@@ -117,7 +117,7 @@ func (pipelineSupervisor *PipelineSupervisor) init(settings map[string]interface
 }
 
 func (pipelineSupervisor *PipelineSupervisor) UpdateSettings(settings map[string]interface{}) error {
-	pipelineSupervisor.Logger().Infof("Updating settings on pipelineSupervisor %v. settings=%v\n", pipelineSupervisor.Id(), settings)
+	pipelineSupervisor.Logger().Debugf("Updating settings on pipelineSupervisor %v. settings=%v\n", pipelineSupervisor.Id(), settings)
 	logLevelObj := utils.GetSettingFromSettings(settings, PIPELINE_LOG_LEVEL)
 
 	if logLevelObj == 0 {
