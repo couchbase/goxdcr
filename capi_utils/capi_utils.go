@@ -167,5 +167,7 @@ func GetCapiConnectionStrFromCouchApiBase(couchApiBase string) (string, error) {
 }
 
 func ErrorBuildingVBCouchApiBaseMap(bucketName, refName string, info interface{}) error {
-	return errors.New(fmt.Sprintf("Error constructing vb couchApiBase map for bucket %v on remote cluster %v because of failure to parse bucket info, %v.", bucketName, refName, info))
+	errMsg := fmt.Sprintf("Error constructing vb couchApiBase map for bucket %v on remote cluster %v because of failure to parse bucket info.", bucketName, refName)
+	logger_capi_utils.Errorf("%v bucketInfo=%v.", errMsg, info)
+	return errors.New(errMsg)
 }
