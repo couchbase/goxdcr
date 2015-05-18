@@ -100,7 +100,6 @@ func (service *RemoteClusterService) RemoteClusterByRefName(refName string, refr
 }
 
 func (service *RemoteClusterService) RemoteClusterByUuid(uuid string, refresh bool) (*metadata.RemoteClusterReference, error) {
-	fmt.Printf("byuuid=%v\n", uuid)
 	var ref *metadata.RemoteClusterReference
 	for _, ref_in_cache := range service.RemoteClusterMap() {
 		fmt.Printf("ref_in_cache=%v\n", ref_in_cache)
@@ -479,6 +478,7 @@ func (service *RemoteClusterService) cacheRef(ref *metadata.RemoteClusterReferen
 		}
 
 		service.logger.Infof("Remote cluster reference %v has a bad connectivity, didn't populate alternative connection strings. err=%v", ref.Id, err)
+		err = nil
 	}
 
 	if bAddToCache {
