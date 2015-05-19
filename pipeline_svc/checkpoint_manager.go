@@ -77,16 +77,24 @@ type CheckpointManager struct {
 
 	support_ckpt bool
 
-	cur_ckpts         map[uint16]*metadata.CheckpointRecord
-	active_vbs        map[string][]uint16
-	vb_highseqno_map  map[uint16]uint64
-	failoverlog_map   map[uint16]*mcc.FailoverLog
-	failoverlog_locks map[uint16]*sync.RWMutex
+	cur_ckpts        map[uint16]*checkpointRecordWithLock
+	active_vbs       map[string][]uint16
+	vb_highseqno_map map[uint16]uint64
+	failoverlog_map  map[uint16]*failoverlogWithLock
 
-	logger          *log.CommonLogger
-	cur_ckpts_locks map[uint16]*sync.RWMutex
+	logger *log.CommonLogger
 
 	vbts_update_lock *sync.Mutex
+}
+
+type checkpointRecordWithLock struct {
+	ckpt *metadata.CheckpointRecord
+	lock *sync.RWMutex
+}
+
+type failoverlogWithLock struct {
+	failoverlog *mcc.FailoverLog
+	lock        *sync.RWMutex
 }
 
 func NewCheckpointManager(checkpoints_svc service_def.CheckpointsService, capi_svc service_def.CAPIService,
@@ -109,12 +117,10 @@ func NewCheckpointManager(checkpoints_svc service_def.CheckpointsService, capi_s
 		finish_ch:                 make(chan bool, 1),
 		checkpoint_ticker_ch:      make(chan *time.Ticker, 1000),
 		logger:                    logger,
-		cur_ckpts:                 make(map[uint16]*metadata.CheckpointRecord),
-		cur_ckpts_locks:           make(map[uint16]*sync.RWMutex),
+		cur_ckpts:                 make(map[uint16]*checkpointRecordWithLock),
 		active_vbs:                active_vbs,
 		wait_grp:                  &sync.WaitGroup{},
-		failoverlog_map:           make(map[uint16]*mcc.FailoverLog),
-		failoverlog_locks:         make(map[uint16]*sync.RWMutex),
+		failoverlog_map:           make(map[uint16]*failoverlogWithLock),
 		vbts_update_lock:          &sync.Mutex{},
 		vb_highseqno_map:          make(map[uint16]uint64)}, nil
 }
@@ -203,10 +209,8 @@ func (ckmgr *CheckpointManager) startRandomizedCheckpointingTicker() {
 func (ckmgr *CheckpointManager) initialize() {
 	listOfVbs := ckmgr.getMyVBs()
 	for _, vbno := range listOfVbs {
-		ckmgr.cur_ckpts[vbno] = &metadata.CheckpointRecord{}
-		ckmgr.cur_ckpts_locks[vbno] = &sync.RWMutex{}
-		ckmgr.failoverlog_map[vbno] = nil
-		ckmgr.failoverlog_locks[vbno] = &sync.RWMutex{}
+		ckmgr.cur_ckpts[vbno] = &checkpointRecordWithLock{ckpt: &metadata.CheckpointRecord{}, lock: &sync.RWMutex{}}
+		ckmgr.failoverlog_map[vbno] = &failoverlogWithLock{failoverlog: nil, lock: &sync.RWMutex{}}
 	}
 }
 
@@ -242,12 +246,16 @@ func (ckmgr *CheckpointManager) checkCkptCapability() {
 }
 
 func (ckmgr *CheckpointManager) updateCurrentVBOpaque(vbno uint16, vbOpaque metadata.TargetVBOpaque) error {
-	ckmgr.cur_ckpts_locks[vbno].Lock()
-	defer ckmgr.cur_ckpts_locks[vbno].Unlock()
-	record := ckmgr.cur_ckpts[vbno]
-	record.Target_vb_opaque = vbOpaque
-	ckmgr.cur_ckpts[vbno] = record
-	return nil
+	obj, ok := ckmgr.cur_ckpts[vbno]
+	if ok {
+		obj.lock.Lock()
+		defer obj.lock.Unlock()
+		record := obj.ckpt
+		record.Target_vb_opaque = vbOpaque
+		return nil
+	} else {
+		panic(fmt.Sprintf("Trying to update vbopaque on vb=%v which is not in MyVBList", vbno))
+	}
 }
 
 func getDocsProcessedForReplication(topic string, checkpoints_svc service_def.CheckpointsService,
@@ -438,7 +446,8 @@ func (ckmgr *CheckpointManager) ckptRecords(ckptDoc *metadata.CheckpointsDoc, vb
 		return ckptDoc.Checkpoint_records
 	} else {
 		ret := []*metadata.CheckpointRecord{}
-		ret = append(ret, ckmgr.cur_ckpts[vbno])
+
+		ret = append(ret, ckmgr.getCurrentCkpt(vbno))
 		return ret
 	}
 }
@@ -573,18 +582,22 @@ func (ckmgr *CheckpointManager) populateVBTimestamp(ckptDoc *metadata.Checkpoint
 	}
 
 	//update current ckpt map
-	ckmgr.cur_ckpts_locks[vbno].Lock()
-	defer ckmgr.cur_ckpts_locks[vbno].Unlock()
+	obj, ok := ckmgr.cur_ckpts[vbno]
+	if ok {
+		obj.lock.Lock()
+		defer obj.lock.Unlock()
 
-	//populate the next ckpt (in cur_ckpts)'s information based on the previous checkpoint information if it exists
-	if agreedIndex > -1 && ckptDoc != nil {
-		ckmgr.cur_ckpts[vbno].Failover_uuid = vbts.Vbuuid
-		ckmgr.cur_ckpts[vbno].Dcp_snapshot_seqno = vbts.SnapshotStart
-		ckmgr.cur_ckpts[vbno].Dcp_snapshot_end_seqno = vbts.SnapshotEnd
+		//populate the next ckpt (in cur_ckpts)'s information based on the previous checkpoint information if it exists
+		if agreedIndex > -1 && ckptDoc != nil {
+			obj.ckpt.Failover_uuid = vbts.Vbuuid
+			obj.ckpt.Dcp_snapshot_seqno = vbts.SnapshotStart
+			obj.ckpt.Dcp_snapshot_end_seqno = vbts.SnapshotEnd
+		}
+		//set the next ckpt's Seqno to 0 - the unset state
+		obj.ckpt.Seqno = 0
+	}else {
+		 panic(fmt.Sprintf("Calling populateVBTimestamp on vb=%v which is not in MyVBList", vbno))
 	}
-	//set the next ckpt's Seqno to 0 - the unset state
-	ckmgr.cur_ckpts[vbno].Seqno = 0
-
 	return vbts
 }
 
@@ -694,40 +707,47 @@ func (ckmgr *CheckpointManager) performCkpt(fin_ch chan bool, wait_grp *sync.Wai
 func (ckmgr *CheckpointManager) do_checkpoint(vbno uint16) (err error) {
 	//locking the current ckpt record and notsent_seqno list for this vb, no update is allowed during the checkpointing
 	ckmgr.logger.Debugf("Checkpointing for vb=%v\n", vbno)
-	ckmgr.cur_ckpts_locks[vbno].Lock()
-	defer ckmgr.cur_ckpts_locks[vbno].Unlock()
 
-	ckpt_record := ckmgr.cur_ckpts[vbno]
+	ckpt_obj, ok := ckmgr.cur_ckpts[vbno]
+	if ok {
+		ckpt_obj.lock.Lock()
+		defer ckpt_obj.lock.Unlock()
 
-	ckpt_record.Seqno = ckmgr.through_seqno_tracker_svc.GetThroughSeqno(vbno)
-	ckmgr.logger.Debugf("Seqno number used for checkpointing for vb %v is %v\n", vbno, ckpt_record.Seqno)
+		ckpt_record := ckpt_obj.ckpt
 
-	if ckpt_record.Seqno == 0 {
-		ckmgr.logger.Debugf("No replication happened yet, skip checkpointing for vb=%v pipeline=%v\n", vbno, ckmgr.pipeline.InstanceId())
-		return nil
-	}
+		ckpt_record.Seqno = ckmgr.through_seqno_tracker_svc.GetThroughSeqno(vbno)
+		ckmgr.logger.Debugf("Seqno number used for checkpointing for vb %v is %v\n", vbno, ckpt_record.Seqno)
 
-	if ckpt_record.Target_vb_opaque == nil {
-		ckmgr.logger.Info("remote bucket is no an older node, no checkpointing should be done.")
-		return nil
-	}
-
-	remote_seqno, vbOpaque, err := ckmgr.capi_svc.CommitForCheckpoint(ckmgr.remote_bucket, ckpt_record.Target_vb_opaque, vbno)
-	if err == nil {
-		//succeed
-		ckpt_record.Target_Seqno = remote_seqno
-		ckpt_record.Failover_uuid = ckmgr.getFailoverUUIDForSeqno(vbno, ckpt_record.Seqno)
-		err = ckmgr.persistCkptRecord(vbno, ckpt_record)
-		if err == nil {
-			ckmgr.raiseSuccessCkptForVbEvent(*ckpt_record, vbno)
+		if ckpt_record.Seqno == 0 {
+			ckmgr.logger.Debugf("No replication happened yet, skip checkpointing for vb=%v pipeline=%v\n", vbno, ckmgr.pipeline.InstanceId())
+			return nil
 		}
 
+		if ckpt_record.Target_vb_opaque == nil {
+			ckmgr.logger.Info("remote bucket is no an older node, no checkpointing should be done.")
+			return nil
+		}
+
+		remote_seqno, vbOpaque, err := ckmgr.capi_svc.CommitForCheckpoint(ckmgr.remote_bucket, ckpt_record.Target_vb_opaque, vbno)
+		if err == nil {
+			//succeed
+			ckpt_record.Target_Seqno = remote_seqno
+			ckpt_record.Failover_uuid = ckmgr.getFailoverUUIDForSeqno(vbno, ckpt_record.Seqno)
+			err = ckmgr.persistCkptRecord(vbno, ckpt_record)
+			if err == nil {
+				ckmgr.raiseSuccessCkptForVbEvent(*ckpt_record, vbno)
+			}
+
+		} else {
+			ckpt_record.Target_vb_opaque = vbOpaque
+		}
+		ckpt_record.Seqno = 0
+		ckpt_record.Target_Seqno = 0
+		ckpt_record.Failover_uuid = 0
 	} else {
-		ckpt_record.Target_vb_opaque = vbOpaque
+		panic(fmt.Sprintf("Trying to do_checkpoint on vb=%v which is not in MyVBList", vbno))
+
 	}
-	ckpt_record.Seqno = 0
-	ckpt_record.Target_Seqno = 0
-	ckpt_record.Failover_uuid = 0
 	return
 }
 
@@ -753,29 +773,41 @@ func (ckmgr *CheckpointManager) OnEvent(eventType common.ComponentEventType,
 		if ok {
 			flog := event.FailoverLog
 			vbno := event.VBucket
-			ckmgr.failoverlog_locks[vbno].Lock()
-			defer ckmgr.failoverlog_locks[vbno].Unlock()
 
-			ckmgr.failoverlog_map[vbno] = flog
-			ckmgr.logger.Infof("Got failover log for vb=%v\n", vbno)
+			failoverlog_obj, ok1 := ckmgr.failoverlog_map[vbno]
+			if ok1 {
+				failoverlog_obj.lock.Lock()
+				defer failoverlog_obj.lock.Unlock()
+
+				failoverlog_obj.failoverlog = flog
+				ckmgr.logger.Infof("Got failover log for vb=%v\n", vbno)
+			} else {
+				panic(fmt.Sprintf("Received failoverlog on an unknown vb=%v\n", vbno))
+			}
 		}
 	}
 
 }
 
 func (ckmgr *CheckpointManager) getFailoverUUIDForSeqno(vbno uint16, seqno uint64) uint64 {
-	ckmgr.failoverlog_locks[vbno].RLock()
-	ckmgr.failoverlog_locks[vbno].RUnlock()
+	failoverlog_obj, ok1 := ckmgr.failoverlog_map[vbno]
+	if ok1 {
+		failoverlog_obj.lock.RLock()
+		defer failoverlog_obj.lock.RUnlock()
 
-	flog := ckmgr.failoverlog_map[vbno]
-	if flog != nil {
-		for _, entry := range *flog {
-			failover_uuid := entry[0]
-			starting_seqno := entry[1]
-			if seqno > starting_seqno {
-				return failover_uuid
+		flog := failoverlog_obj.failoverlog
+		if flog != nil {
+			for _, entry := range *flog {
+				failover_uuid := entry[0]
+				starting_seqno := entry[1]
+				if seqno > starting_seqno {
+					return failover_uuid
+				}
 			}
 		}
+	} else {
+		panic(fmt.Sprintf("Calling getFailoverUUIDForSeqno on an unknown vb=%v\n", vbno))
+
 	}
 	return 0
 }
@@ -861,7 +893,8 @@ func (ckmgr *CheckpointManager) massCheckVBOpaquesJob() {
 
 func (ckmgr *CheckpointManager) massCheckVBOpaues(target_vb_vbuuid_map map[uint16]metadata.TargetVBOpaque) error {
 	//validate target bucket's vbucket uuid
-	for vb, latest_ckpt_record := range ckmgr.cur_ckpts {
+	for vb, _ := range ckmgr.cur_ckpts {
+		latest_ckpt_record := ckmgr.getCurrentCkpt(vb)
 		target_vb_uuid := latest_ckpt_record.Target_vb_opaque
 		target_vb_vbuuid_map[vb] = target_vb_uuid
 	}
@@ -884,6 +917,16 @@ func (ckmgr *CheckpointManager) massCheckVBOpaues(target_vb_vbuuid_map map[uint1
 			}
 			return nil
 		}
+	}
+	return nil
+}
+
+func (ckmgr *CheckpointManager) getCurrentCkpt(vbno uint16) *metadata.CheckpointRecord {
+	ckpt_obj, ok := ckmgr.cur_ckpts[vbno]
+	if ok {
+		ckpt_obj.lock.RLock()
+		defer ckpt_obj.lock.RUnlock()
+		return ckpt_obj.ckpt
 	}
 	return nil
 }
