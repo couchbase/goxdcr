@@ -114,6 +114,11 @@ var StatsToClearForPausedReplications = [13]string{SIZE_REP_QUEUE_METRIC, DOCS_R
 	TIME_COMMITING_METRIC, NUM_FAILEDCKPTS_METRIC, RATE_DOC_CHECKS_METRIC, RATE_OPT_REPD_METRIC, RATE_RECEIVED_DCP_METRIC,
 	RATE_REPLICATED_METRIC, BANDWIDTH_USAGE_METRIC}
 
+type SampleStats struct {
+	Count int64
+	Mean   float64
+}
+
 //StatisticsManager mount the statics collector on the pipeline to collect raw stats
 //It does stats correlation and processing on raw stats periodically (controlled by publish_interval)
 //, then stores the result in expvar
@@ -328,6 +333,8 @@ func (stats_mgr *StatisticsManager) processRawStats() error {
 	oldSample := stats_mgr.getOverviewRegistry()
 	stats_mgr.initOverviewRegistry()
 
+	sample_stats_list_map := make(map[string][]*SampleStats)
+
 	for registry_name, registry := range stats_mgr.registries {
 		if registry_name != OVERVIEW_METRICS_KEY {
 			map_for_registry := new(expvar.Map).Init()
@@ -349,22 +356,48 @@ func (stats_mgr *StatisticsManager) processRawStats() error {
 						metric_overview.(metrics.Counter).Inc(m.Count())
 					}
 				case metrics.Histogram:
-					//raw counter in its registry is type of Histogram, put its mean value
-					//to overview registry
-					metric_overview := stats_mgr.getOverviewRegistry().Get(name)
-					if metric_overview != nil {
-						switch metric_overview.(type) {
-						case metrics.Counter:
-							metric_overview.(metrics.Counter).Clear()
-							metric_overview.(metrics.Counter).Inc(int64(m.Mean()))
-						case metrics.Histogram:
-							sample := metric_overview.(metrics.Histogram).Sample()
-							sample.Update(int64(m.Mean()))
-						}
+					var sample_stats_list []*SampleStats
+					var ok bool
+					sample_stats_list, ok = sample_stats_list_map[name]
+					if !ok {
+						sample_stats_list = make([]*SampleStats, 0)
 					}
+
+					// track sample stats from individual components
+					sample := m.Sample()
+					sample_stats := &SampleStats{sample.Count(), sample.Mean()}
+					sample_stats_list = append(sample_stats_list, sample_stats)
+					sample_stats_list_map[name] = sample_stats_list
 				}
 			})
 			rs.SetStats(registry_name, map_for_registry)
+		}
+	}
+
+	// publish aggregated histogram stats to overview
+	for name, sample_stats_list := range sample_stats_list_map {
+		var aggregated_count int64
+		var aggregated_sum float64
+		var aggregated_mean int64
+		for _, sample_stats := range sample_stats_list {
+			aggregated_count += sample_stats.Count
+			aggregated_sum += float64(sample_stats.Count) * sample_stats.Mean
+		}
+
+		if aggregated_count != 0 {
+			aggregated_mean = int64(aggregated_sum / float64(aggregated_count))
+		}
+
+		metric_overview := stats_mgr.getOverviewRegistry().Get(name)
+		if metric_overview != nil {
+			switch metric_overview.(type) {
+			case metrics.Counter:
+				metric_overview.(metrics.Counter).Clear()
+				metric_overview.(metrics.Counter).Inc(aggregated_mean)
+			case metrics.Histogram:
+				sample := metric_overview.(metrics.Histogram).Sample()
+				sample.Update(aggregated_mean)
+			}
 		}
 	}
 
@@ -592,6 +625,8 @@ func (stats_mgr *StatisticsManager) initOverviewRegistry() {
 	overview_registry.Register(SET_RECEIVED_DCP_METRIC, metrics.NewCounter())
 	overview_registry.Register(SIZE_REP_QUEUE_METRIC, metrics.NewCounter())
 	overview_registry.Register(DOCS_REP_QUEUE_METRIC, metrics.NewCounter())
+	overview_registry.Register(DOCS_LATENCY_METRIC, metrics.NewCounter())
+	overview_registry.Register(META_LATENCY_METRIC, metrics.NewCounter())
 	overview_registry.Register(DOCS_CHECKED_METRIC, docs_checked_counter)
 }
 
@@ -1007,7 +1042,7 @@ func constructStatsForReplication(spec *metadata.ReplicationSpecification, kv_vb
 	return overview_map, nil
 }
 
-func calculateTotalChanges(kv_vb_map map[string][]uint16, kv_mem_clients map[string]*mcc.Client, 
+func calculateTotalChanges(kv_vb_map map[string][]uint16, kv_mem_clients map[string]*mcc.Client,
 	sourceBucketName string, logger *log.CommonLogger) (int64, error) {
 	var total_changes uint64 = 0
 	for serverAddr, vbnos := range kv_vb_map {
