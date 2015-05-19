@@ -224,4 +224,6 @@ const (
 const (
 	PipelineSetting_RequestPool = "RequestPool"
 	DefaultRequestPoolSize = 10000
+	HTTP_RETRIES int = 5
 )
+

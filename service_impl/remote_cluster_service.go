@@ -332,7 +332,7 @@ func (service *RemoteClusterService) validateRemoteCluster(ref *metadata.RemoteC
 		hostAddr = utils.EnforcePrefix("http://", hostAddr)
 	}
 
-	err, statusCode := utils.QueryRestApiWithAuth(hostAddr, base.PoolsPath, false, ref.UserName, ref.Password, ref.Certificate, base.MethodGet, "", nil, 0, &poolsInfo, nil, false, service.logger)
+	err, statusCode, _ := utils.InvokeRestWithRetryWithAuth(hostAddr, base.PoolsPath, false, ref.UserName, ref.Password, ref.Certificate, false, base.MethodGet, "", nil, 0, &poolsInfo, nil, false, service.logger, base.HTTP_RETRIES)
 	service.logger.Infof("Result from validate remote cluster call: err=%v, statusCode=%v\n", err, statusCode)
 	if err != nil || statusCode != http.StatusOK {
 		if statusCode == http.StatusUnauthorized {
