@@ -287,14 +287,16 @@ func InvokeRestWithRetryWithAuth(baseURL string,
 	keep_client_alive bool,
 	logger *log.CommonLogger, num_retry int) (error, int, *http.Client) {
 
-	http_client, req, err := prepareForRestCall(baseURL, path, preservePathEncoding, username, password, certificate, httpCommand, contentType, body, client, logger)
-	if err != nil {
-		return err, 0, nil
-	}
-
+	var http_client *http.Client = nil
+	var err error
 	var statusCode int
 
 	for i := 0; i < num_retry; i++ {
+		http_client, req, err := prepareForRestCall(baseURL, path, preservePathEncoding, username, password, certificate, httpCommand, contentType, body, client, logger)
+		if err != nil {
+			return err, 0, nil
+		}
+
 		err, statusCode = doRestCall(req, timeout, out, http_client, logger)
 		if err == nil {
 			break
@@ -302,8 +304,6 @@ func InvokeRestWithRetryWithAuth(baseURL string,
 		//cleanup the idle connection if the error is serious network error
 		cleanupAfterRestCall(true, err, http_client, logger)
 	}
-
-	cleanupAfterRestCall(keep_client_alive, err, http_client, logger)
 
 	return err, statusCode, http_client
 
@@ -480,5 +480,10 @@ func IsSeriousNetError(err error) bool {
 		return false
 	}
 	netError, ok := err.(*net.OpError)
-	return err == syscall.EPIPE || strings.Contains(err.Error(), "use of closed network connection") || strings.Contains(err.Error(), "connection reset by peer") || (ok && (!netError.Temporary() && !netError.Timeout()))
+	return err == syscall.EPIPE ||
+		err == io.EOF ||
+		strings.Contains(err.Error(), "use of closed network connection") ||
+		strings.Contains(err.Error(), "connection reset by peer") ||
+		strings.Contains(err.Error(), "http: can't write HTTP request on broken connection") ||
+		(ok && (!netError.Temporary() && !netError.Timeout()))
 }
