@@ -736,9 +736,12 @@ func (xmem *XmemNozzle) Start(settings map[string]interface{}) error {
 	xmem.Logger().Infof("Xmem starting ....settings=%v\n", settings)
 	defer xmem.Logger().Infof("%v took %vs to start\n", xmem.Id(), time.Since(t).Seconds())
 
-	xmem.SetState(common.Part_Starting)
+	err := xmem.SetState(common.Part_Starting)
+	if err != nil {
+		return err
+	}
 
-	err := xmem.initialize(settings)
+	err = xmem.initialize(settings)
 	xmem.Logger().Info("....Finish initializing....")
 	if err == nil {
 		xmem.childrenWaitGrp.Add(1)
@@ -986,7 +989,7 @@ func (xmem *XmemNozzle) batchSetMetaWithRetry(batch *dataBatch, numOfRetry int) 
 		}
 
 		if item != nil {
-			if needSend(item.Req, batch, xmem.logger) {
+			if needSend(item.Req, batch, xmem.Logger()) {
 				//blocking
 				err, index, reserv_num := xmem.buf.reserveSlot()
 				if err != nil {
@@ -1243,7 +1246,7 @@ func (xmem *XmemNozzle) batchGetMeta(bigDoc_map map[string]*base.WrappedMCReques
 		if ok && resp.Status == mc.SUCCESS {
 			doc_meta_target := xmem.decodeGetMetaResp([]byte(key), resp)
 			doc_meta_source := decodeSetMetaReq(wrappedReq.Req)
-			if !xmem.conflict_resolver(doc_meta_source, doc_meta_target, xmem.logger) {
+			if !xmem.conflict_resolver(doc_meta_source, doc_meta_target, xmem.Logger()) {
 				xmem.Logger().Debugf("doc %v (%v)failed on conflict resolution to %v, no need to send\n", key, doc_meta_source, doc_meta_target)
 				bigDoc_noRep_map[doc_meta_source.uniqueKey()] = true
 			} else {

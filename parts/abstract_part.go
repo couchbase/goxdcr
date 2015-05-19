@@ -24,12 +24,13 @@ import (
 //see this error message, it should stop itself and exit
 var PartStoppedError = errors.New("Part is stopping or already stopped, exit")
 
+var PartAlreadyStartedError = errors.New("Part has already been started before")
+
 type AbstractPart struct {
 	*component.AbstractComponent
 	connector common.Connector
 	stateLock sync.RWMutex
 	state     common.PartState
-	logger    *log.CommonLogger
 }
 
 func NewAbstractPartWithLogger(id string,
@@ -53,18 +54,19 @@ func (p *AbstractPart) Connector() common.Connector {
 }
 
 func (p *AbstractPart) SetConnector(connector common.Connector) error {
-	if p.State() != common.Part_Initial {
-		return errors.New("Cannot set connector on part" + p.Id() + " since its state is not Part_Initial")
-	}
-
 	p.stateLock.Lock()
 	defer p.stateLock.Unlock()
+	if p.state != common.Part_Initial {
+		return errors.New("Cannot set connector on part" + p.Id() + " since its state is not Part_Initial")
+	}
 
 	p.connector = connector
 	return nil
 }
 
 func (p *AbstractPart) State() common.PartState {
+	p.stateLock.RLock()
+	defer p.stateLock.RUnlock()
 	return p.state
 }
 
@@ -73,26 +75,46 @@ func (p *AbstractPart) SetState(state common.PartState) error {
 	defer p.stateLock.Unlock()
 
 	//validate the state transition
-	switch p.State() {
+	switch p.state {
 	case common.Part_Initial:
 		if state != common.Part_Starting && state != common.Part_Stopping {
 			return errors.New(fmt.Sprintf(base.InvalidStateTransitionErrMsg, state, p.Id(), "Initial", "Started, Stopping"))
 		}
 	case common.Part_Starting:
+		if state == common.Part_Starting {
+			// return a special error since caller likely needs to distinguish it from other errors
+			return PartAlreadyStartedError
+		}
 		if state != common.Part_Running && state != common.Part_Stopping && state != common.Part_Error {
 			return errors.New(fmt.Sprintf(base.InvalidStateTransitionErrMsg, state, p.Id(), "Starting", "Running, Stopping"))
 		}
 	case common.Part_Running:
+		if state == common.Part_Starting {
+			// return a special error since caller likely needs to distinguish it from other errors
+			return PartAlreadyStartedError
+		}
 		if state != common.Part_Stopping && state != common.Part_Error {
 			return errors.New(fmt.Sprintf(base.InvalidStateTransitionErrMsg, state, p.Id(), "Running", "Stopping"))
 		}
 	case common.Part_Stopping:
+		if state == common.Part_Starting {
+			// return a special error since caller likely needs to distinguish it from other errors
+			return PartAlreadyStartedError
+		}
 		if state != common.Part_Stopped {
 			return errors.New(fmt.Sprintf(base.InvalidStateTransitionErrMsg, state, p.Id(), "Stopping", "Stopped"))
 		}
 	case common.Part_Stopped:
+		if state == common.Part_Starting {
+			// return a special error since caller likely needs to distinguish it from other errors
+			return PartAlreadyStartedError
+		}
 		return errors.New(fmt.Sprintf(base.InvalidStateTransitionErrMsg, state, p.Id(), "Stopped", ""))
 	case common.Part_Error:
+		if state == common.Part_Starting {
+			// return a special error since caller likely needs to distinguish it from other errors
+			return PartAlreadyStartedError
+		}
 		if state != common.Part_Stopping {
 			return errors.New(fmt.Sprintf(base.InvalidStateTransitionErrMsg, state, p.Id(), "Error", "Stopping"))
 		}
@@ -102,6 +124,8 @@ func (p *AbstractPart) SetState(state common.PartState) error {
 }
 
 func (p *AbstractPart) IsReadyForHeartBeat() bool {
+	p.stateLock.RLock()
+	defer p.stateLock.RUnlock()
 	return p.state == common.Part_Running
 }
 

@@ -105,6 +105,7 @@ func (genericPipeline *GenericPipeline) SetRuntimeContext(ctx common.PipelineRun
 
 func (genericPipeline *GenericPipeline) startPart(part common.Part, settings map[string]interface{}, ts map[uint16]*base.VBTimestamp,
 	targetClusterRef *metadata.RemoteClusterReference, ssl_port_map map[string]uint16, isSSLOverMem bool) map[string]error {
+
 	var err error = nil
 	errMap := make(map[string]error)
 
@@ -119,7 +120,9 @@ func (genericPipeline *GenericPipeline) startPart(part common.Part, settings map
 				if p.State() == common.Part_Initial {
 					errs := genericPipeline.startPart(p, settings, ts, targetClusterRef, ssl_port_map, isSSLOverMem)
 					for partId, err := range errs {
-						errMap[partId] = err
+						if err.Error() != parts.PartAlreadyStartedError.Error() {
+							errMap[partId] = err
+						}
 					}
 				}
 			}(waitGrp, errMap, p, settings, ts)
@@ -144,7 +147,7 @@ func (genericPipeline *GenericPipeline) startPart(part common.Part, settings map
 	}
 
 	err = part.Start(partSettings)
-	if err != nil {
+	if err != nil && err.Error() != parts.PartAlreadyStartedError.Error() {
 		errMap[part.Id()] = err
 	}
 
@@ -574,13 +577,13 @@ func (genericPipeline *GenericPipeline) UpdateSettings(settings map[string]inter
 	if genericPipeline.partSetting_constructor != nil {
 		genericPipeline.logger.Debugf("Calling part update setting constructor with settings=%v\n", settings)
 		for _, part := range GetAllParts(genericPipeline) {
-				partSettings, err := genericPipeline.partUpdateSetting_constructor(genericPipeline, part, settings)
-				if err != nil {
-					return err
-				}
-				err = part.UpdateSettings(partSettings)
-				if err != nil {
-					return err
+			partSettings, err := genericPipeline.partUpdateSetting_constructor(genericPipeline, part, settings)
+			if err != nil {
+				return err
+			}
+			err = part.UpdateSettings(partSettings)
+			if err != nil {
+				return err
 			}
 		}
 	}

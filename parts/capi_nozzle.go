@@ -262,7 +262,13 @@ func (capi *CapiNozzle) Close() error {
 
 func (capi *CapiNozzle) Start(settings map[string]interface{}) error {
 	capi.Logger().Infof("Capi %v starting ....\n", capi.Id())
-	err := capi.initialize(settings)
+
+	err := capi.SetState(common.Part_Starting)
+	if err != nil {
+		return err
+	}
+
+	err = capi.initialize(settings)
 	capi.Logger().Infof("Capi %v initialized\n", capi.Id())
 	if err == nil {
 		capi.childrenWaitGrp.Add(1)
@@ -279,8 +285,12 @@ func (capi *CapiNozzle) Start(settings map[string]interface{}) error {
 	}
 
 	if err == nil {
-		capi.Logger().Infof("Capi %v is started successfully\n", capi.Id())
-	} else {
+		err = capi.SetState(common.Part_Running)
+		if err == nil {
+			capi.Logger().Infof("Capi %v is started successfully\n", capi.Id())
+		}
+	}
+	if err != nil {
 		capi.Logger().Errorf("Failed to start capi %v. err=%v\n", capi.Id(), err)
 	}
 	return err
@@ -525,7 +535,7 @@ func (capi *CapiNozzle) batchSendWithRetry(batch *capiBatch) error {
 		capi.items_in_dataChan--
 		capi.bytes_in_dataChan -= item.Req.Size()
 
-		if needSend(item.Req, &batch.dataBatch, capi.logger) {
+		if needSend(item.Req, &batch.dataBatch, capi.Logger()) {
 			req_list = append(req_list, item)
 		} else {
 			capi.Logger().Debugf("did not send doc with key %v since it failed conflict resolution\n", string(item.Req.Key))
