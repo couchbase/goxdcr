@@ -8,7 +8,6 @@ import (
 	"log"
 	"math"
 	"net"
-	"runtime/debug"
 	"strings"
 	"sync"
 	"time"
@@ -252,6 +251,9 @@ func (c *Client) GetBulk(vb uint16, keys []string) (map[string]*gomemcached.MCRe
 	wg.Add(1)
 	go func() {
 		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("Recovered in f %v", r)
+			}
 			errch <- nil
 			wg.Done()
 		}()
@@ -268,33 +270,28 @@ func (c *Client) GetBulk(vb uint16, keys []string) (map[string]*gomemcached.MCRe
 				if err != nil {
 					if res.Status != gomemcached.KEY_ENOENT {
 						errch <- err
+						return
 					}
-					return
+					// continue receiving in case of KEY_ENOENT
+				} else if res.Opcode == gomemcached.GET {
+					if res.Opaque >= uint32(len(keys)) {
+						log.Panicf(" Invalid opaque Value. Debug info : Res.opaque : %v, Keys %v, Response received %v \n key list %v this key %v", res.Opaque, len(keys), res, keys, string(res.Body))
+					}
+
+					rv[keys[res.Opaque]] = res
 				}
 
-				switch res.Opcode {
-				case gomemcached.GET:
+				if res.Opcode == gomemcached.NOOP {
 					ok = false
-				case gomemcached.GETQ:
-				default:
-					log.Panicf("Unexpected opcode in GETQ response: %+v",
-						res)
 				}
-				if res.Opaque >= uint32(len(keys)) {
-					log.Panicf(" Invalid opaque Value. Debug info : Res.opaque : %v, Keys %v, Response received %v \n Stack trace : %s", res.Opaque, len(keys), res, debug.Stack())
-				}
-				rv[keys[res.Opaque]] = res
+
 			}
 		}
 	}()
 
 	for i, k := range keys {
-		op := gomemcached.GETQ
-		if i == len(keys)-1 {
-			op = gomemcached.GET
-		}
 		err := c.Transmit(&gomemcached.MCRequest{
-			Opcode:  op,
+			Opcode:  gomemcached.GET,
 			VBucket: vb,
 			Key:     []byte(k),
 			Opaque:  uint32(i),
@@ -303,6 +300,16 @@ func (c *Client) GetBulk(vb uint16, keys []string) (map[string]*gomemcached.MCRe
 			log.Printf(" Transmit failed in GetBulk %v", err)
 			return rv, err
 		}
+	}
+
+	// finally transmit a NOOP
+	err := c.Transmit(&gomemcached.MCRequest{
+		Opcode: gomemcached.NOOP,
+	})
+
+	if err != nil {
+		log.Printf(" Transmit of NOOP failed  %v", err)
+		return rv, err
 	}
 
 	return rv, <-errch
