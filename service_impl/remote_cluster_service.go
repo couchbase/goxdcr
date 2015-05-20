@@ -100,10 +100,8 @@ func (service *RemoteClusterService) RemoteClusterByRefName(refName string, refr
 }
 
 func (service *RemoteClusterService) RemoteClusterByUuid(uuid string, refresh bool) (*metadata.RemoteClusterReference, error) {
-	fmt.Printf("byuuid=%v\n", uuid)
 	var ref *metadata.RemoteClusterReference
 	for _, ref_in_cache := range service.RemoteClusterMap() {
-		fmt.Printf("ref_in_cache=%v\n", ref_in_cache)
 		if ref_in_cache.Uuid == uuid {
 			ref = ref_in_cache
 			break
@@ -159,9 +157,9 @@ func (service *RemoteClusterService) updateRemoteCluster(ref *metadata.RemoteClu
 	}
 	ref.Revision = rev
 
-	err = service.validateCache(ref)
+	service.validateCache(ref)
 
-	return err
+	return nil
 }
 
 func (service *RemoteClusterService) SetRemoteCluster(refName string, ref *metadata.RemoteClusterReference) error {
@@ -410,8 +408,8 @@ func (service *RemoteClusterService) addRemoteCluster(ref *metadata.RemoteCluste
 		return err
 	}
 	ref.Revision = rev
-	err = service.validateCache(ref)
-	return err
+	service.validateCache(ref)
+	return nil
 }
 
 func (service *RemoteClusterService) constructRemoteClusterReference(value []byte, rev interface{}) (*metadata.RemoteClusterReference, error) {
@@ -618,7 +616,6 @@ func (service *RemoteClusterService) RemoteClusterServiceCallback(path string, v
 	var err error
 	if len(value) != 0 {
 		newRef, err = service.constructRemoteClusterReference(value, rev)
-		fmt.Printf("newref=%v\n", newRef)
 		if err != nil {
 			service.logger.Errorf("Error marshaling remote cluster. value=%v, err=%v\n", string(value), err)
 			return "", nil, nil, err
