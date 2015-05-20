@@ -75,7 +75,7 @@ func (capi_svc *CAPIService) PreReplicate(remoteBucket *service_def.RemoteBucket
 	status_code, respMap, _, err := capi_svc.send_post(PRE_REPLICATE_CMD, api_base, http_client, base.HTTP_RETRIES)
 	capi_svc.logger.Debugf("response from _pre_replicate is status_code=%v respMap=%v for %v\n", status_code, respMap, knownRemoteVBStatus)
 	if err != nil {
-		capi_svc.logger.Errorf("Calling _pre_replicate on %v failed, err=%v\n", api_base.url, err)
+		capi_svc.logger.Errorf("Calling _pre_replicate on %v failed for vb=%v, err=%v\n", api_base.url, knownRemoteVBStatus.VBNo, err)
 		return false, nil, err
 	}
 
@@ -324,8 +324,6 @@ func (capi_svc *CAPIService) send_post(restMethodName string, api_base *apiReque
 	if err != nil {
 		return 0, nil, nil, err
 	}
-	//	body :=  []byte(`{"bucket":"default","bucketUUID":0,"vb":0}`)
-	capi_svc.logger.Debugf("body=%s\n", body)
 	err, statusCode, ret_client := utils.InvokeRestWithRetryWithAuth(api_base.url, restMethodName, false, api_base.username, api_base.password, api_base.certificate, api_base.insecureSkipVerify, base.MethodPost, base.JsonContentType, body, 0, &ret_map, client, true, capi_svc.logger, num_retry)
 	return statusCode, ret_map, ret_client, err
 }

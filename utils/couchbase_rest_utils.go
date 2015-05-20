@@ -231,12 +231,12 @@ func doRestCall(req *http.Request,
 	}
 
 	res, err := client.Do(req)
-	if res != nil && res.Body != nil {
+	if err == nil && res != nil && res.Body != nil {
 		defer res.Body.Close()
 		bod, e := ioutil.ReadAll(io.LimitReader(res.Body, res.ContentLength))
 		if e != nil {
 			l.Errorf("Failed to read response body, err=%v\n", e)
-			return err, res.StatusCode
+			return e, res.StatusCode
 		}
 		if out != nil {
 			err_marshal := json.Unmarshal(bod, out)
@@ -249,7 +249,7 @@ func doRestCall(req *http.Request,
 		} else {
 			l.Debugf("out is nil")
 		}
-		return err, res.StatusCode
+		return nil, res.StatusCode
 	}
 
 	return err, 0
@@ -288,24 +288,30 @@ func InvokeRestWithRetryWithAuth(baseURL string,
 	logger *log.CommonLogger, num_retry int) (error, int, *http.Client) {
 
 	var http_client *http.Client = nil
-	var err error
+	var ret_err error
 	var statusCode int
+	var req *http.Request = nil
+	backoff_time := 500 * time.Millisecond
 
 	for i := 0; i < num_retry; i++ {
-		http_client, req, err := prepareForRestCall(baseURL, path, preservePathEncoding, username, password, certificate, httpCommand, contentType, body, client, logger)
-		if err != nil {
-			return err, 0, nil
+		http_client, req, ret_err = prepareForRestCall(baseURL, path, preservePathEncoding, username, password, certificate, httpCommand, contentType, body, client, logger)
+		if ret_err == nil {
+			ret_err, statusCode = doRestCall(req, timeout, out, http_client, logger)
 		}
 
-		err, statusCode = doRestCall(req, timeout, out, http_client, logger)
-		if err == nil {
+		if ret_err == nil {
 			break
 		}
+
 		//cleanup the idle connection if the error is serious network error
-		cleanupAfterRestCall(true, err, http_client, logger)
+		cleanupAfterRestCall(true, ret_err, http_client, logger)
+
+		//backoff
+		backoff_time = backoff_time + backoff_time
+		time.Sleep(backoff_time)
 	}
 
-	return err, statusCode, http_client
+	return ret_err, statusCode, http_client
 
 }
 
@@ -371,7 +377,7 @@ func ConstructHttpRequest(
 	}
 
 	var l *log.CommonLogger = loggerForFunc(logger)
-	var req *http.Request
+	var req *http.Request = nil
 
 	if !preservePathEncoding {
 		if q := strings.Index(path, "?"); q > 0 {
@@ -482,6 +488,7 @@ func IsSeriousNetError(err error) bool {
 	netError, ok := err.(*net.OpError)
 	return err == syscall.EPIPE ||
 		err == io.EOF ||
+		strings.Contains(err.Error(), "EOF") ||
 		strings.Contains(err.Error(), "use of closed network connection") ||
 		strings.Contains(err.Error(), "connection reset by peer") ||
 		strings.Contains(err.Error(), "http: can't write HTTP request on broken connection") ||

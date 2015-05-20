@@ -595,8 +595,8 @@ func (ckmgr *CheckpointManager) populateVBTimestamp(ckptDoc *metadata.Checkpoint
 		}
 		//set the next ckpt's Seqno to 0 - the unset state
 		obj.ckpt.Seqno = 0
-	}else {
-		 panic(fmt.Sprintf("Calling populateVBTimestamp on vb=%v which is not in MyVBList", vbno))
+	} else {
+		panic(fmt.Sprintf("Calling populateVBTimestamp on vb=%v which is not in MyVBList", vbno))
 	}
 	return vbts
 }
@@ -885,18 +885,22 @@ func (ckmgr *CheckpointManager) massCheckVBOpaquesJob() {
 				ckmgr.logger.Info("Pipeline is no longer running, exit.")
 				return
 			}
-			go ckmgr.massCheckVBOpaues(target_vb_vbuuid_map)
+			go ckmgr.massCheckVBOpaques(target_vb_vbuuid_map)
 		}
 	}
 
 }
 
-func (ckmgr *CheckpointManager) massCheckVBOpaues(target_vb_vbuuid_map map[uint16]metadata.TargetVBOpaque) error {
+func (ckmgr *CheckpointManager) massCheckVBOpaques(target_vb_vbuuid_map map[uint16]metadata.TargetVBOpaque) error {
 	//validate target bucket's vbucket uuid
 	for vb, _ := range ckmgr.cur_ckpts {
 		latest_ckpt_record := ckmgr.getCurrentCkpt(vb)
-		target_vb_uuid := latest_ckpt_record.Target_vb_opaque
-		target_vb_vbuuid_map[vb] = target_vb_uuid
+		if latest_ckpt_record.Target_vb_opaque == nil {
+			target_vb_uuid := latest_ckpt_record.Target_vb_opaque
+			target_vb_vbuuid_map[vb] = target_vb_uuid
+		} else {
+			ckmgr.logger.Debugf("remote bucket is no an older node, massCheckVBOpaque is not supported for vb=%v.", vb)
+		}
 	}
 
 	if len(target_vb_vbuuid_map) > 0 {
@@ -905,9 +909,9 @@ func (ckmgr *CheckpointManager) massCheckVBOpaues(target_vb_vbuuid_map map[uint1
 			ckmgr.logger.Errorf("MassValidateVBUUID failed, err=%v", err1)
 			return err1
 		} else {
-			if len(matching) != len(target_vb_vbuuid_map) {
+			if len(matching) != len(target_vb_vbuuid_map) && (len(mismatching) > 0 || len(missing) > 0) {
 				//error
-				ckmgr.logger.Errorf("Target bucket for replication %v's topology has changed. mismatch=%v, missing=%v\n", ckmgr.pipeline.Topic(), mismatching, missing)
+				ckmgr.logger.Errorf("Target bucket for replication %v's topology has changed. mismatch=%v, missing=%v, mataching\n", ckmgr.pipeline.Topic(), mismatching, missing)
 				err := errors.New("Target bucket's topology has changed")
 				otherInfo := utils.WrapError(err)
 				ckmgr.RaiseEvent(common.ErrorEncountered, nil, ckmgr, nil, otherInfo)
