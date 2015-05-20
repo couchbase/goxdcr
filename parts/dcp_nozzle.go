@@ -209,7 +209,9 @@ func (dcp *DcpNozzle) Stop() error {
 	}
 
 	//notify children routines
-	close(dcp.finch)
+	if dcp.finch != nil {
+		close(dcp.finch)
+	}
 
 	dcp.closeUprStreams()
 	dcp.closeUprFeed()
