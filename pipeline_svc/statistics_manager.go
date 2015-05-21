@@ -100,6 +100,7 @@ const (
 const (
 	default_sample_size     = 1000
 	default_update_interval = 100 * time.Millisecond
+	default_log_stats_interval = 10000 * time.Millisecond
 )
 
 // stats to initialize for paused replications that have never been run -- mostly the stats visible from UI
@@ -116,7 +117,7 @@ var StatsToClearForPausedReplications = [13]string{SIZE_REP_QUEUE_METRIC, DOCS_R
 
 type SampleStats struct {
 	Count int64
-	Mean   float64
+	Mean  float64
 }
 
 //StatisticsManager mount the statics collector on the pipeline to collect raw stats
@@ -242,6 +243,7 @@ func (stats_mgr *StatisticsManager) updateStats() error {
 	defer close(stats_mgr.done_ch)
 
 	ticker := <-stats_mgr.update_ticker_ch
+	logStats_ticker := time.NewTicker(default_log_stats_interval)
 
 	init_ch := make(chan bool, 1)
 	init_ch <- true
@@ -265,6 +267,11 @@ func (stats_mgr *StatisticsManager) updateStats() error {
 			if err != nil {
 				return nil
 			}
+		case <-logStats_ticker.C:
+			err := stats_mgr.logStats()
+			if 	err != nil {
+				stats_mgr.logger.Infof("Failed to log statistics. err=%v\n", err)
+			}
 		}
 	}
 	return nil
@@ -282,33 +289,35 @@ func (stats_mgr *StatisticsManager) updateStatsOnce() error {
 	stats_mgr.logger.Debugf("%v: Publishing the statistics for %v to expvar", time.Now(), stats_mgr.pipeline.InstanceId())
 	err := stats_mgr.processRawStats()
 
-	if err == nil {
-		if stats_mgr.logger.GetLogLevel() >= log.LogLevelInfo {
-			statsLog, err := stats_mgr.formatStatsForLog()
-			if err != nil {
-				return err
-			}
-			stats_mgr.logger.Info(statsLog)
+	if err != nil {
+		stats_mgr.logger.Info("Failed to calculate the statistics for this round. Move on")
+	}
+	return nil
+}
 
-			//log parts summary
-			outNozzle_parts := stats_mgr.pipeline.Targets()
-			for _, part := range outNozzle_parts {
-				if stats_mgr.pipeline.Specification().Settings.RepType == metadata.ReplicationTypeXmem {
-					stats_mgr.logger.Info(part.(*parts.XmemNozzle).StatusSummary())
-				} else {
-					stats_mgr.logger.Info(part.(*parts.CapiNozzle).StatusSummary())
-				}
-			}
-			dcp_parts := stats_mgr.pipeline.Sources()
-			for _, part := range dcp_parts {
-				conn := part.Connector()
-				stats_mgr.logger.Info(conn.(*parts.Router).StatusSummary())
-				stats_mgr.logger.Info(part.(*parts.DcpNozzle).StatusSummary())
+func (stats_mgr *StatisticsManager) logStats() error {
+	if stats_mgr.logger.GetLogLevel() >= log.LogLevelInfo {
+		statsLog, err := stats_mgr.formatStatsForLog()
+		if err != nil {
+			return err
+		}
+		stats_mgr.logger.Info(statsLog)
+
+		//log parts summary
+		outNozzle_parts := stats_mgr.pipeline.Targets()
+		for _, part := range outNozzle_parts {
+			if stats_mgr.pipeline.Specification().Settings.RepType == metadata.ReplicationTypeXmem {
+				stats_mgr.logger.Info(part.(*parts.XmemNozzle).StatusSummary())
+			} else {
+				stats_mgr.logger.Info(part.(*parts.CapiNozzle).StatusSummary())
 			}
 		}
-
-	} else {
-		stats_mgr.logger.Info("Failed to calculate the statistics for this round. Move on")
+		dcp_parts := stats_mgr.pipeline.Sources()
+		for _, part := range dcp_parts {
+			conn := part.Connector()
+			stats_mgr.logger.Info(conn.(*parts.Router).StatusSummary())
+			stats_mgr.logger.Info(part.(*parts.DcpNozzle).StatusSummary())
+		}
 	}
 	return nil
 }
@@ -526,7 +535,6 @@ func (stats_mgr *StatisticsManager) calculateChangesLeft(docs_processed int64) (
 		return 0, err
 	}
 	changes_left := total_changes - docs_processed
-	stats_mgr.logger.Infof("Replication %v: total_changes=%v, docs_processed=%v, changes_left=%v\n", stats_mgr.pipeline.Topic(), total_changes, docs_processed, changes_left)
 	return changes_left, nil
 }
 
