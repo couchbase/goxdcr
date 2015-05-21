@@ -71,55 +71,53 @@ func ConstructServerCouchApiBaseMap(targetBucket *couchbase.Bucket, remoteCluste
 		return nil, utils.NewEnhancedError(fmt.Sprintf("Error constructing vb couchApiBase map for bucket %v on remote cluster %v because of failure to retrieve bucket info\n", targetBucket.Name, remoteClusterRef.Name), err)
 	}
 
-	parseError := ErrorBuildingVBCouchApiBaseMap(targetBucket.Name, remoteClusterRef.Name, out)
-
 	infoMap, ok := out.(map[string]interface{})
 	if !ok {
-		return nil, parseError
+		return nil, ErrorBuildingVBCouchApiBaseMap(targetBucket.Name, remoteClusterRef.Name, out)
 	}
 
 	nodes, ok := infoMap[base.NodesKey]
 	if !ok {
-		return nil, parseError
+		return nil, ErrorBuildingVBCouchApiBaseMap(targetBucket.Name, remoteClusterRef.Name, out)
 	}
 
 	nodeList, ok := nodes.([]interface{})
 	if !ok {
-		return nil, parseError
+		return nil, ErrorBuildingVBCouchApiBaseMap(targetBucket.Name, remoteClusterRef.Name, out)
 	}
 
 	for _, node := range nodeList {
 		nodeInfoMap, ok := node.(map[string]interface{})
 		if !ok {
-			return nil, parseError
+			return nil, ErrorBuildingVBCouchApiBaseMap(targetBucket.Name, remoteClusterRef.Name, out)
 		}
 
 		// get hostname
 		hostname, ok := nodeInfoMap[base.HostNameKey]
 		if !ok {
-			return nil, parseError
+			return nil, ErrorBuildingVBCouchApiBaseMap(targetBucket.Name, remoteClusterRef.Name, out)
 		}
 		hostnameStr, ok := hostname.(string)
 		if !ok {
-			return nil, parseError
+			return nil, ErrorBuildingVBCouchApiBaseMap(targetBucket.Name, remoteClusterRef.Name, out)
 		}
 
 		// get direct port
 		ports, ok := nodeInfoMap[base.PortsKey]
 		if !ok {
-			return nil, parseError
+			return nil, ErrorBuildingVBCouchApiBaseMap(targetBucket.Name, remoteClusterRef.Name, out)
 		}
 		portsMap, ok := ports.(map[string]interface{})
 		if !ok {
-			return nil, parseError
+			return nil, ErrorBuildingVBCouchApiBaseMap(targetBucket.Name, remoteClusterRef.Name, out)
 		}
 		directPort, ok := portsMap[base.DirectPortKey]
 		if !ok {
-			return nil, parseError
+			return nil, ErrorBuildingVBCouchApiBaseMap(targetBucket.Name, remoteClusterRef.Name, out)
 		}
 		directPortFloat, ok := directPort.(float64)
 		if !ok {
-			return nil, parseError
+			return nil, ErrorBuildingVBCouchApiBaseMap(targetBucket.Name, remoteClusterRef.Name, out)
 		}
 		directPortInt := uint16(directPortFloat)
 
@@ -135,12 +133,12 @@ func ConstructServerCouchApiBaseMap(targetBucket *couchbase.Bucket, remoteCluste
 			couchApiBase, ok = nodeInfoMap[base.CouchApiBase]
 		}
 		if !ok {
-			return nil, parseError
+			return nil, ErrorBuildingVBCouchApiBaseMap(targetBucket.Name, remoteClusterRef.Name, out)
 		}
 
 		couchApiBaseStr, ok := couchApiBase.(string)
 		if !ok {
-			return nil, parseError
+			return nil, ErrorBuildingVBCouchApiBaseMap(targetBucket.Name, remoteClusterRef.Name, out)
 		}
 
 		serverCouchApiBaseMap[serverAddr] = couchApiBaseStr
