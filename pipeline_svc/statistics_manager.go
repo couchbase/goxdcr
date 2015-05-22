@@ -98,8 +98,8 @@ const (
 )
 
 const (
-	default_sample_size     = 1000
-	default_update_interval = 100 * time.Millisecond
+	default_sample_size        = 1000
+	default_update_interval    = 100 * time.Millisecond
 	default_log_stats_interval = 10000 * time.Millisecond
 )
 
@@ -269,7 +269,7 @@ func (stats_mgr *StatisticsManager) updateStats() error {
 			}
 		case <-logStats_ticker.C:
 			err := stats_mgr.logStats()
-			if 	err != nil {
+			if err != nil {
 				stats_mgr.logger.Infof("Failed to log statistics. err=%v\n", err)
 			}
 		}
@@ -987,7 +987,7 @@ func (stats_mgr *StatisticsManager) getReplicationStatus() (*pipeline.Replicatio
 }
 
 func UpdateStats(cluster_info_svc service_def.ClusterInfoSvc, xdcr_topology_svc service_def.XDCRCompTopologySvc,
-	checkpoints_svc service_def.CheckpointsService, kv_mem_clients map[string]*mcc.Client, logger *log.CommonLogger) {
+	checkpoints_svc service_def.CheckpointsService, logger *log.CommonLogger) {
 	logger.Debug("updateStats for paused replications")
 
 	for _, repl_id := range pipeline_manager.AllReplications() {
@@ -995,7 +995,7 @@ func UpdateStats(cluster_info_svc service_def.ClusterInfoSvc, xdcr_topology_svc 
 		overview_stats := repl_status.GetOverviewStats()
 		spec := repl_status.Spec()
 
-		kv_vb_map, err := pipeline_utils.GetSourceVBListForReplication(cluster_info_svc, xdcr_topology_svc, spec, logger)
+		cur_kv_vb_map, err := pipeline_utils.GetSourceVBMapForReplication(cluster_info_svc, xdcr_topology_svc, spec, logger)
 		if err != nil {
 			logger.Errorf("Error retrieving kv_vb_map for paused replication %v. err=%v", repl_id, err)
 			continue
@@ -1005,7 +1005,7 @@ func UpdateStats(cluster_info_svc service_def.ClusterInfoSvc, xdcr_topology_svc 
 			// overview stats may be nil the first time GetStats is called on a paused replication that has never been run in the current goxdcr session
 			// or it may be nil when the underying replication is not paused but has not completed startup process
 			// construct it
-			overview_stats, err := constructStatsForReplication(spec, kv_vb_map, checkpoints_svc, kv_mem_clients, logger)
+			overview_stats, err := constructStatsForReplication(spec, cur_kv_vb_map, checkpoints_svc, logger)
 			if err != nil {
 				logger.Errorf("Error constructing stats for paused replication %v. err=%v", repl_id, err)
 				continue
@@ -1013,7 +1013,7 @@ func UpdateStats(cluster_info_svc service_def.ClusterInfoSvc, xdcr_topology_svc 
 			repl_status.SetOverviewStats(overview_stats)
 		} else {
 			if repl_status.RuntimeStatus() != pipeline.Replicating {
-				err := updateStatsForReplication(spec, overview_stats, kv_vb_map, kv_mem_clients, logger)
+				err := updateStatsForReplication(repl_status, cur_kv_vb_map, checkpoints_svc, logger)
 				if err != nil {
 					logger.Errorf("Error updating stats for paused replication %v. err=%v", repl_id, err)
 					continue
@@ -1024,26 +1024,28 @@ func UpdateStats(cluster_info_svc service_def.ClusterInfoSvc, xdcr_topology_svc 
 }
 
 // compute and set changes_left and docs_processed stats. set other stats to 0
-func constructStatsForReplication(spec *metadata.ReplicationSpecification, kv_vb_map map[string][]uint16,
-	checkpoints_svc service_def.CheckpointsService, kv_mem_clients map[string]*mcc.Client,
-	logger *log.CommonLogger) (*expvar.Map, error) {
-	docs_processed, err := getDocsProcessedForReplication(spec.Id, checkpoints_svc, logger)
+func constructStatsForReplication(spec *metadata.ReplicationSpecification, cur_kv_vb_map map[string][]uint16,
+	checkpoints_svc service_def.CheckpointsService, logger *log.CommonLogger) (*expvar.Map, error) {
+	cur_vb_list := pipeline_utils.GetVbListFromKvVbMap(cur_kv_vb_map)
+	docs_processed, err := getDocsProcessedForReplication(spec.Id, cur_vb_list, checkpoints_svc, logger)
 	if err != nil {
 		return nil, err
 	}
 
-	total_changes, err := calculateTotalChanges(kv_vb_map, kv_mem_clients, spec.SourceBucketName, logger)
+	kv_mem_clients := make(map[string]*mcc.Client)
+
+	total_changes, err := calculateTotalChanges(cur_kv_vb_map, kv_mem_clients, spec.SourceBucketName, logger)
 	if err != nil {
 		return nil, err
 	}
 
-	changes_left := uint64(total_changes) - docs_processed
+	changes_left := total_changes - int64(docs_processed)
 
-	logger.Infof("Calculating stats for never run replication %v. kv_vb_map=%v, total_docs=%v, docs_processed=%v, changes_left=%v\n", spec.Id, kv_vb_map, total_changes, docs_processed, changes_left)
+	logger.Infof("Calculating stats for never run replication %v. kv_vb_map=%v, total_docs=%v, docs_processed=%v, changes_left=%v\n", spec.Id, cur_kv_vb_map, total_changes, docs_processed, changes_left)
 
 	overview_map := new(expvar.Map).Init()
 	overview_map.Add(DOCS_PROCESSED_METRIC, int64(docs_processed))
-	overview_map.Add(CHANGES_LEFT_METRIC, int64(changes_left))
+	overview_map.Add(CHANGES_LEFT_METRIC, changes_left)
 	for _, statsToInitialize := range StatsToInitializeForPausedReplications {
 		overview_map.Add(statsToInitialize, 0)
 	}
@@ -1070,28 +1072,56 @@ func calculateTotalChanges(kv_vb_map map[string][]uint16, kv_mem_clients map[str
 	return int64(total_changes), nil
 }
 
-func updateStatsForReplication(spec *metadata.ReplicationSpecification, overview_stats *expvar.Map,
-	kv_vb_map map[string][]uint16, kv_mem_clients map[string]*mcc.Client, logger *log.CommonLogger) error {
+func updateStatsForReplication(repl_status *pipeline.ReplicationStatus, cur_kv_vb_map map[string][]uint16,
+	checkpoints_svc service_def.CheckpointsService, logger *log.CommonLogger) error {
 
-	// if pipeline is not running, update changes_left stats, which is not being
+	// if pipeline is not running, update docs_processed and changes_left stats, which are not being
 	// updated by running pipeline and may have become inaccurate
-	docs_processed, err := strconv.ParseInt(overview_stats.Get(DOCS_PROCESSED_METRIC).String(), base.ParseIntBase, base.ParseIntBitSize)
+
+	// first check if vb list on source side has changed.
+	// if not, the doc_processed stats in overview stats is still accurate and we will just use it
+	// otherwise, need to re-compute docs_processed stats by filtering the checkpoint docs using the current kv_vb_map
+
+	var docs_processed int64
+	var docs_processed_uint64 uint64
+	var err error
+	// old_vb_list is already sorted
+	old_vb_list := repl_status.VbList()
+	overview_stats := repl_status.GetOverviewStats()
+	spec := repl_status.Spec()
+	cur_vb_list := pipeline_utils.GetVbListFromKvVbMap(cur_kv_vb_map)
+	pipeline_utils.SortUint16List(cur_vb_list)
+	sameList := pipeline_utils.AreSortedUint16ListsTheSame(old_vb_list, cur_vb_list)
+	if sameList {
+		docs_processed, err = strconv.ParseInt(overview_stats.Get(DOCS_PROCESSED_METRIC).String(), base.ParseIntBase, base.ParseIntBitSize)
+		if err != nil {
+			return err
+		}
+
+	} else {
+		logger.Infof("Source topology changed. Re-compute docs_processed. old_vb_list=%v, cur_vb_list=%v\n", old_vb_list, cur_vb_list)
+		docs_processed_uint64, err = getDocsProcessedForReplication(spec.Id, cur_vb_list, checkpoints_svc, logger)
+		if err != nil {
+			return err
+		}
+		docs_processed = int64(docs_processed_uint64)
+		repl_status.SetVbList(cur_vb_list)
+	}
+
+	kv_mem_clients := make(map[string]*mcc.Client)
+
+	total_changes, err := calculateTotalChanges(cur_kv_vb_map, kv_mem_clients, spec.SourceBucketName, logger)
 	if err != nil {
 		return err
 	}
 
-	total_changes, err := calculateTotalChanges(kv_vb_map, kv_mem_clients, spec.SourceBucketName, logger)
-	if err != nil {
-		return err
-	}
-
-	changes_left := int64(total_changes) - docs_processed
+	changes_left := total_changes - docs_processed
 	changes_left_var := new(expvar.Int)
 	changes_left_var.Set(changes_left)
 
 	overview_stats.Set(CHANGES_LEFT_METRIC, changes_left_var)
 
-	logger.Infof("Updating status for paused replication %v. kv_vb_map=%v, total_docs=%v, docs_processed=%v, changes_left=%v\n", spec.Id, kv_vb_map, total_changes, docs_processed, changes_left)
+	logger.Infof("Updating status for paused replication %v. kv_vb_map=%v, total_docs=%v, docs_processed=%v, changes_left=%v\n", spec.Id, cur_kv_vb_map, total_changes, docs_processed, changes_left)
 	return nil
 }
 

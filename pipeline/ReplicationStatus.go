@@ -9,6 +9,7 @@ import (
 	"github.com/couchbase/goxdcr/common"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
+	"github.com/couchbase/goxdcr/pipeline_utils"
 	"sync"
 	"time"
 )
@@ -64,6 +65,10 @@ type ReplicationStatus struct {
 	pipeline_updater interface{}
 	obj_pool         *base.MCRequestPool
 	Lock             *sync.RWMutex
+	// tracks the list of vbs managed by the replication.
+	// useful when replication is paused, when it can be compared with the current vb_list to determine
+	// whether topology change has occured on source
+	vb_list []uint16
 }
 
 func NewReplicationStatus(specId string, spec_getter ReplicationSpecGetter, logger *log.CommonLogger) *ReplicationStatus {
@@ -75,12 +80,17 @@ func NewReplicationStatus(specId string, spec_getter ReplicationSpecGetter, logg
 		Lock:        &sync.RWMutex{},
 		obj_pool:    base.NewMCRequestPool(specId, 0, logger),
 		progress:    ""}
+
 	rep_status.Publish()
 	return rep_status
 }
 
 func (rs *ReplicationStatus) SetPipeline(pipeline common.Pipeline) {
 	rs.pipeline = pipeline
+	if pipeline != nil {
+		rs.vb_list = pipeline_utils.GetSourceVBListPerPipeline(pipeline)
+		pipeline_utils.SortUint16List(rs.vb_list)
+	}
 
 	rs.Publish()
 }
@@ -232,6 +242,14 @@ func (rs *ReplicationStatus) publishWithStatus(status string) {
 
 func (rs *ReplicationStatus) Pipeline() common.Pipeline {
 	return rs.pipeline
+}
+
+func (rs *ReplicationStatus) VbList() []uint16 {
+	return rs.vb_list
+}
+
+func (rs *ReplicationStatus) SetVbList(vb_list []uint16) {
+	rs.vb_list = vb_list
 }
 
 func (rs *ReplicationStatus) SettingsMap() map[string]interface{} {

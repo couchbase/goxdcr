@@ -13,19 +13,19 @@ import (
 	//	"errors"
 	"flag"
 	"fmt"
-	xdcrlog "github.com/couchbase/goxdcr/log"
-	"github.com/couchbase/goxdcr/base"
-	mc "github.com/couchbase/gomemcached/client"
 	"github.com/couchbase/go-couchbase"
+	mc "github.com/couchbase/gomemcached/client"
+	"github.com/couchbase/goxdcr/base"
+	xdcrlog "github.com/couchbase/goxdcr/log"
 	"log"
+	"math"
 	"net/http"
 	"net/url"
 	"os"
 	"os/exec"
-	"time"
-	"strings"
 	"strconv"
-	"math"
+	"strings"
+	"time"
 	//	 "io/ioutil"
 )
 
@@ -34,7 +34,7 @@ import _ "net/http/pprof"
 var quit bool = false
 var logger_latency *xdcrlog.CommonLogger = xdcrlog.NewLogger("LatencyTest", xdcrlog.DefaultLoggerContext)
 var source_rest_server_addr string //source rest server address
-var num_worker int // number of read worker used by the test
+var num_worker int                 // number of read worker used by the test
 
 var options struct {
 	source_bucket           string // source bucket
@@ -46,8 +46,8 @@ var options struct {
 	target_bucket_password  string //target bucket password
 	doc_size                int    //doc_size
 	doc_count               int    //doc_count
-	num_write              int  // number of concurrent write routines
-	sample_frequency        int  // frequency of sampling - sample one in every sample_frequency data points
+	num_write               int    // number of concurrent write routines
+	sample_frequency        int    // frequency of sampling - sample one in every sample_frequency data points
 }
 
 //type docInfo struct {
@@ -98,15 +98,15 @@ func (w *appWriter) run() (err error) {
 	if num_write > w.doc_count {
 		num_write = w.doc_count
 	}
-	
+
 	couchbase.PoolSize = num_write
 	b, err := p.GetBucket(w.bucket)
 	if err != nil {
 		logger_latency.Errorf("Failed to get bucket %v", w.bucket)
 		return
 	}
-	
-	docs_per_write := int(math.Ceil(float64(w.doc_count)/float64(num_write)))
+
+	docs_per_write := int(math.Ceil(float64(w.doc_count) / float64(num_write)))
 	logger_latency.Infof("docs_per_write=%v\n", docs_per_write)
 	for start_index := 0; start_index < num_write; start_index++ {
 		logger_latency.Infof("Starting write routine #%v\n", start_index)
@@ -117,15 +117,15 @@ func (w *appWriter) run() (err error) {
 	return
 }
 
-// Each write routine writes docs at start_index, start_index+num_write, start_index+2*num_write, etc. 
-// This way the larger the doc index, the later it will be written. 
-// This, coupled with the current sampling algorithm based on doc index, can achieve approximate uniform sampling in the time dimension.   
+// Each write routine writes docs at start_index, start_index+num_write, start_index+2*num_write, etc.
+// This way the larger the doc index, the later it will be written.
+// This, coupled with the current sampling algorithm based on doc index, can achieve approximate uniform sampling in the time dimension.
 func (w *appWriter) write(b *couchbase.Bucket, start_index, num_write, docs_per_write int) error {
 	doc := w.genDoc(start_index)
-	
+
 	var err error
-	for i:=0; i< docs_per_write; i++ {
-		index := start_index + i * num_write
+	for i := 0; i < docs_per_write; i++ {
+		index := start_index + i*num_write
 		if index >= options.doc_count {
 			break
 		}
@@ -163,6 +163,7 @@ func getDoc(b *couchbase.Bucket, key string) error {
 		return err
 	})
 }
+
 //func recordWriteTime(id string, key string, write_time time.Time) {
 //	logger_latency.Infof("Record (%v, %v)--\n", id, write_time)
 //	if key_map == nil {
@@ -176,10 +177,10 @@ func getDoc(b *couchbase.Bucket, key string) error {
 //}
 
 type appReader struct {
-	cluster  string
-	bucket   string
-	password string
-	b        *couchbase.Bucket
+	cluster     string
+	bucket      string
+	password    string
+	b           *couchbase.Bucket
 	worker_pool []*appReadWorker
 }
 
@@ -213,20 +214,20 @@ func (r *appReader) init() (err error) {
 		return
 	}
 
-	r.worker_pool = make ([]*appReadWorker, num_worker)
-	
-	for i:=0; i<num_worker; i++ {
+	r.worker_pool = make([]*appReadWorker, num_worker)
+
+	for i := 0; i < num_worker; i++ {
 		r.worker_pool[i] = &appReadWorker{}
 	}
 	return
 }
 
 type appReadWorker struct {
-	key string
+	key      string
 	duration time.Duration
 }
 
-func (w *appReadWorker) run (write_time time.Time, r *appReader) {
+func (w *appReadWorker) run(write_time time.Time, r *appReader) {
 	defer func() {
 		if r := recover(); r != nil {
 			logger_latency.Infof("Recovered in function read ", r)
@@ -236,14 +237,14 @@ func (w *appReadWorker) run (write_time time.Time, r *appReader) {
 
 	logger_latency.Infof("Try to read doc key=%v\n", w.key)
 	for {
-		err := 	getDoc (r.b, w.key)
+		err := getDoc(r.b, w.key)
 		if err == nil {
 			w.duration = time.Since(write_time)
 			return
 		} else {
 			// sleep to avoid taking up too much CPU
-        	time.Sleep(time.Millisecond * 50)
-        }
+			time.Sleep(time.Millisecond * 50)
+		}
 	}
 	return
 
@@ -251,8 +252,8 @@ func (w *appReadWorker) run (write_time time.Time, r *appReader) {
 func (r *appReader) read(index int, key string, write_time time.Time) {
 	worker := r.worker_pool[index]
 	worker.key = key
-	
-	go worker.run(write_time, r)	
+
+	go worker.run(write_time, r)
 }
 
 func parseArgs() {
@@ -304,7 +305,6 @@ func main() {
 	// wait for replication to finish initializing
 	time.Sleep(time.Second * 20)
 
-
 	appR := &appReader{cluster: options.target_cluster_addr,
 		bucket: options.target_bucket, password: options.target_bucket_password}
 	appR.init()
@@ -330,21 +330,21 @@ func usage() {
 
 func setup() error {
 	parseArgs()
-	
+
 	// set source rest server address
 	hostName := strings.Split(options.source_cluster_addr, ":")[0]
 	source_rest_server_addr = hostName + ":" + strconv.FormatInt(int64(base.AdminportNumber), 10)
-	
+
 	// set number of read workers
 	num_worker = int(math.Ceil(float64(options.doc_count) / float64(options.sample_frequency)))
-	
+
 	logger_latency.Infof("Setup is done")
 	return nil
 }
 
 func startGoXDCRReplicationByRest() error {
 	go func() {
-		cmd := exec.Command("curl", "-X", "POST", "http://" + source_rest_server_addr + "/controller/createReplication", "-d", "fromBucket="+options.source_bucket, "-d", "uuid="+options.target_cluster_addr,
+		cmd := exec.Command("curl", "-X", "POST", "http://"+source_rest_server_addr+"/controller/createReplication", "-d", "fromBucket="+options.source_bucket, "-d", "uuid="+options.target_cluster_addr,
 			"-d", "toBucket="+options.target_bucket, "-d", "xdcrSourceNozzlePerNode=4", "-d", "xdcrTargetNozzlePerNode=4", "-d", "xdcrLogLevel=Error")
 		logger_latency.Infof("cmd =%v, path=%v\n", cmd.Args, cmd.Path)
 		bytes, err := cmd.Output()
@@ -363,8 +363,8 @@ func startGoXDCRReplicationByRest() error {
 }
 
 func stopGoXDCRReplicationByRest() (err error) {
-	replicationId := options.source_cluster_addr + "_" + options.source_bucket + "_" + options.target_cluster_addr + "_" + options.target_bucket;
-	cmd := exec.Command("curl", "-X", "POST", "http://" + source_rest_server_addr + "/controller/cancelXDCR/" + replicationId)
+	replicationId := options.source_cluster_addr + "_" + options.source_bucket + "_" + options.target_cluster_addr + "_" + options.target_bucket
+	cmd := exec.Command("curl", "-X", "POST", "http://"+source_rest_server_addr+"/controller/cancelXDCR/"+replicationId)
 	logger_latency.Infof("cmd =%v, path=%v\n", cmd.Args, cmd.Path)
 	bytes, err := cmd.Output()
 	if err != nil {

@@ -164,7 +164,7 @@ func (xdcrf *XDCRFactory) constructSourceNozzles(spec *metadata.ReplicationSpeci
 
 	maxNozzlesPerNode := spec.Settings.SourceNozzlePerNode
 
-	kv_vb_map, err := pipeline_utils.GetSourceVBListForReplication(xdcrf.cluster_info_svc, xdcrf.xdcr_topology_svc, spec, xdcrf.logger)
+	kv_vb_map, err := pipeline_utils.GetSourceVBMapForReplication(xdcrf.cluster_info_svc, xdcrf.xdcr_topology_svc, spec, xdcrf.logger)
 	if err != nil {
 		return nil, nil, err
 	}

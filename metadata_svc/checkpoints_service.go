@@ -57,7 +57,7 @@ func (ckpt_svc *CheckpointsService) decodeVbnoFromCkptDocKey(ckptDocKey string) 
 }
 
 func (ckpt_svc *CheckpointsService) DelCheckpointsDocs(replicationId string) error {
-	ckpt_svc.logger.Info("DelCheckpointsDocs...")
+	ckpt_svc.logger.Infof("DelCheckpointsDocs for replication %v...", replicationId)
 	catalogKey := ckpt_svc.getCheckpointCatalogKey(replicationId)
 	err_ret := ckpt_svc.metadata_svc.DelAllFromCatalog(catalogKey)
 	if err_ret != nil {
@@ -66,6 +66,23 @@ func (ckpt_svc *CheckpointsService) DelCheckpointsDocs(replicationId string) err
 		ckpt_svc.logger.Infof("DelCheckpointsDocs is done for %v\n", replicationId)
 	}
 	return err_ret
+}
+
+func (ckpt_svc *CheckpointsService) DelCheckpointsDoc(replicationId string, vbno uint16) error {
+	ckpt_svc.logger.Infof("DelCheckpointsDoc for replication %v and vbno %v...", replicationId, vbno)
+	key := ckpt_svc.getCheckpointDocKey(replicationId, vbno)
+	_, rev, err := ckpt_svc.metadata_svc.Get(key)
+	if err != nil {
+		return err
+	}
+	catalogKey := ckpt_svc.getCheckpointCatalogKey(replicationId)
+	err = ckpt_svc.metadata_svc.DelWithCatalog(catalogKey, key, rev)
+	if err != nil {
+		ckpt_svc.logger.Errorf("Failed to delete checkpoints doc for replication %v and vbno %v\n", replicationId, vbno)
+	} else {
+		ckpt_svc.logger.Infof("DelCheckpointsDocs is done for replication %v and vbno %v\n", replicationId, vbno)
+	}
+	return err
 }
 
 func (ckpt_svc *CheckpointsService) UpsertCheckpoints(replicationId string, vbno uint16, ckpt_record *metadata.CheckpointRecord) error {

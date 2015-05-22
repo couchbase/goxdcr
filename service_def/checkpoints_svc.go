@@ -15,6 +15,7 @@ import (
 
 type CheckpointsService interface {
 	CheckpointsDoc (replicationId string, vbno uint16) (*metadata.CheckpointsDoc, error)
+	DelCheckpointsDoc (replicationId string, vbno uint16) error
 	DelCheckpointsDocs (replicationId string) error
 	UpsertCheckpoints (replicationId string, vbno uint16, ckpt_record *metadata.CheckpointRecord) (error)
 	CheckpointsDocs (replicationId string) (map[uint16]*metadata.CheckpointsDoc, error)

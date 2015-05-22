@@ -258,10 +258,10 @@ func (ckmgr *CheckpointManager) updateCurrentVBOpaque(vbno uint16, vbOpaque meta
 	}
 }
 
-func getDocsProcessedForReplication(topic string, checkpoints_svc service_def.CheckpointsService,
+func getDocsProcessedForReplication(topic string, vb_list []uint16, checkpoints_svc service_def.CheckpointsService,
 	logger *log.CommonLogger) (uint64, error) {
-	defer logger.Info("Done with GetDocsProcessedForPausedReplication")
-	logger.Infof("Start GetDocsProcessedForPausedReplication for replication %v...", topic)
+	defer logger.Info("Done with GetDocsProcessedForReplication")
+	logger.Infof("Start GetDocsProcessedForReplication for replication %v...", topic)
 
 	logger.Debugf("Getting checkpoint for %v\n", topic)
 	ckptDocs, err := checkpoints_svc.CheckpointsDocs(topic)
@@ -272,10 +272,20 @@ func getDocsProcessedForReplication(topic string, checkpoints_svc service_def.Ch
 
 	var docsProcessed uint64
 
-	for _, ckptDoc := range ckptDocs {
-		// if checkpoint records exist, use the seqno in the first checkpoint record, which is the highest in all checkpoint records
-		if ckptDoc != nil && ckptDoc.Checkpoint_records != nil && ckptDoc.Checkpoint_records[0] != nil {
-			docsProcessed += ckptDoc.Checkpoint_records[0].Seqno
+	for vbno, ckptDoc := range ckptDocs {
+
+		if pipeline_utils.IsVbInList(vbno, vb_list) {
+			// if vbno is in vb_list, include its senqo in docs_processed computation
+
+			// if checkpoint records exist, use the seqno in the first checkpoint record, which is the highest in all checkpoint records
+			if ckptDoc != nil && ckptDoc.Checkpoint_records != nil && ckptDoc.Checkpoint_records[0] != nil {
+				docsProcessed += ckptDoc.Checkpoint_records[0].Seqno
+			}
+		} else {
+			// otherwise, delete the checkpoint doc since it is no longer valid
+
+			// ignore errors, which should have been logged
+			checkpoints_svc.DelCheckpointsDoc(topic, vbno)
 		}
 	}
 
@@ -301,14 +311,21 @@ func (ckmgr *CheckpointManager) SetVBTimestamps(topic string) error {
 
 	ckmgr.logger.Infof("Getting checkpoint for %v\n", topic)
 	ckptDocs, err := ckmgr.checkpoints_svc.CheckpointsDocs(topic)
-	ckmgr.logger.Infof("Done getting checkpoint for %v\n", topic)
 	if err != nil {
 		otherInfo := utils.WrapError(err)
 		ckmgr.RaiseEvent(common.ErrorEncountered, nil, ckmgr, nil, otherInfo)
 		return err
 	}
+	ckmgr.logger.Infof("Found %v checkpoit document for replication %v\n", len(ckptDocs), topic)
 
-	ckmgr.logger.Debugf("Found %v checkpoit document for replication %v\n", len(ckptDocs), topic)
+	for vbno, _ := range ckptDocs {
+		if !pipeline_utils.IsVbInList(vbno, listOfVbs) {
+			// if the vbno is no longer managed by the current checkpoint manager/pipeline,
+			// the checkpoint doc is no longer valid and needs to be deleted
+			// ignore errors, which should have been logged
+			ckmgr.checkpoints_svc.DelCheckpointsDoc(topic, vbno)
+		}
+	}
 
 	highseqnomap, err := ckmgr.getHighSeqno()
 	if err != nil {

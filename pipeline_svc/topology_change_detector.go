@@ -162,7 +162,7 @@ func (top_detect_svc *TopologyChangeDetectorSvc) validateSourceTopology() error 
 	vblist_now := pipeline_utils.GetSourceVBListPerPipeline(top_detect_svc.pipeline)
 
 	vblist_supposed := []uint16{}
-	kv_vb_map, err := pipeline_utils.GetSourceVBListForReplication(top_detect_svc.cluster_info_svc, top_detect_svc.xdcr_topology_svc, top_detect_svc.pipeline.Specification(), top_detect_svc.logger)
+	kv_vb_map, err := pipeline_utils.GetSourceVBMapForReplication(top_detect_svc.cluster_info_svc, top_detect_svc.xdcr_topology_svc, top_detect_svc.pipeline.Specification(), top_detect_svc.logger)
 	if err != nil {
 		return err
 	}

@@ -8,6 +8,7 @@ import (
 	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/goxdcr/parts"
 	"github.com/couchbase/goxdcr/service_def"
+	"sort"
 	"time"
 )
 
@@ -40,7 +41,7 @@ func ExecWithTimeout(action Action, timeout_duration time.Duration, logger *log.
 
 }
 
-func GetSourceVBListForReplication(cluster_info_svc service_def.ClusterInfoSvc, xdcr_topology_svc service_def.XDCRCompTopologySvc,
+func GetSourceVBMapForReplication(cluster_info_svc service_def.ClusterInfoSvc, xdcr_topology_svc service_def.XDCRCompTopologySvc,
 	spec *metadata.ReplicationSpecification, logger *log.CommonLogger) (map[string][]uint16, error) {
 	kv_vb_map := make(map[string][]uint16)
 	server_vbmap, err := cluster_info_svc.GetServerVBucketsMap(xdcr_topology_svc, spec.SourceBucketName)
@@ -89,4 +90,54 @@ func GetSourceVBListPerPipeline(pipeline common.Pipeline) []uint16 {
 // checks if target cluster supports ssl over memcached
 func HasSSLOverMemSupport(cluster_info_svc service_def.ClusterInfoSvc, targetClusterRef *metadata.RemoteClusterReference) (bool, error) {
 	return cluster_info_svc.IsClusterCompatible(targetClusterRef, []int{3, 0})
+}
+
+func GetVbListFromKvVbMap(kv_vb_map map[string][]uint16) []uint16 {
+	vb_list := make([]uint16, 0)
+	for _, kv_vb_list := range kv_vb_map {
+		vb_list = append(vb_list, kv_vb_list...)
+	}
+	return vb_list
+}
+
+// type to facilitate the sorting of uint16 lists
+type Uint16List []uint16
+
+func (u Uint16List) Len() int           { return len(u) }
+func (u Uint16List) Swap(i, j int)      { u[i], u[j] = u[j], u[i] }
+func (u Uint16List) Less(i, j int) bool { return u[i] < u[j] }
+
+func SortUint16List(list []uint16) []uint16 {
+	sort.Sort(Uint16List(list))
+	return list
+}
+
+func AreSortedUint16ListsTheSame(sorted_list_1, sorted_list_2 []uint16) bool {
+	if len(sorted_list_1) != len(sorted_list_2) {
+		return false
+	}
+
+	if len(sorted_list_1) == 0 {
+		return true
+	}
+
+	isSame := true
+	for i := 0; i < len(sorted_list_1); i++ {
+		if sorted_list_1[i] != sorted_list_2[i] {
+			isSame = false
+			break
+		}
+	}
+
+	return isSame
+}
+
+func IsVbInList(vbno uint16, vb_list []uint16) bool {
+	for _, vb_in_list := range vb_list {
+		if vb_in_list == vbno {
+			return true
+		}
+	}
+
+	return false
 }
