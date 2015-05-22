@@ -68,6 +68,7 @@ type DcpNozzle struct {
 	vbnos []uint16
 
 	vb_stream_status map[uint16]*streamStatusWithLock
+	vb_stream_status_lock *sync.RWMutex
 
 	// immutable fields
 	bucket  *couchbase.Bucket
@@ -112,6 +113,7 @@ func NewDcpNozzle(id string,
 		lock_uprFeed:     sync.Mutex{},
 		cur_ts:           make(map[uint16]*vbtsWithLock),
 		vb_stream_status: make(map[uint16]*streamStatusWithLock),
+		vb_stream_status_lock: &sync.RWMutex{},
 	}
 
 	msg_callback_func = nil
@@ -137,6 +139,8 @@ func (dcp *DcpNozzle) initialize(settings map[string]interface{}) (err error) {
 	dcp.vbtimestamp_updater = settings[DCP_VBTimestampUpdator].(func(uint16, uint64) (*base.VBTimestamp, error))
 
 	//initialize vb_stream_status
+	dcp.vb_stream_status_lock.Lock()
+	defer dcp.vb_stream_status_lock.Unlock()
 	for _, vb := range dcp.vbnos {
 		dcp.vb_stream_status[vb] = &streamStatusWithLock{lock: &sync.RWMutex{}, state: Dcp_Stream_NonInit}
 	}
@@ -384,7 +388,7 @@ func (dcp *DcpNozzle) onExit() {
 }
 
 func (dcp *DcpNozzle) StatusSummary() string {
-	return fmt.Sprintf("Dcp %v streamed %v items. %v streams inactive", dcp.Id(), dcp.counter, dcp.inactiveDcpStream())
+	return fmt.Sprintf("Dcp %v streamed %v items. %v streams inactive", dcp.Id(), dcp.counter, dcp.inactiveDcpStreams())
 }
 
 func (dcp *DcpNozzle) handleGeneralError(err error) {
@@ -467,8 +471,10 @@ func (dcp *DcpNozzle) GetVBList() []uint16 {
 	return dcp.vbnos
 }
 
-func (dcp *DcpNozzle) inactiveDcpStream() []uint16 {
+func (dcp *DcpNozzle) inactiveDcpStreams() []uint16 {
 	ret := []uint16{}
+	dcp.vb_stream_status_lock.RLock()
+	defer dcp.vb_stream_status_lock.RUnlock()
 	for vb, _ := range dcp.vb_stream_status {
 		if dcp.getStreamState(vb) != Dcp_Stream_Active {
 			ret = append(ret, vb)
@@ -479,6 +485,8 @@ func (dcp *DcpNozzle) inactiveDcpStream() []uint16 {
 
 func (dcp *DcpNozzle) nonInitDcpStreams() []uint16 {
 	ret := []uint16{}
+	dcp.vb_stream_status_lock.RLock()
+	defer dcp.vb_stream_status_lock.RUnlock()
 	for vb, _ := range dcp.vb_stream_status {
 		if dcp.getStreamState(vb) == Dcp_Stream_NonInit {
 			ret = append(ret, vb)
@@ -515,7 +523,7 @@ func (dcp *DcpNozzle) onUpdateStartingSeqno(new_startingSeqnos map[uint16]*base.
 			defer ts_withlock.lock.Unlock()
 			if !dcp.isTSSet(vbno, false) {
 				//only update the cur_ts if starting seqno has not been set yet
-				dcp.Logger().Debugf("%v: Starting dcp stream for vb=%v, len(closed streams)=%v\n", dcp.Id(), vbno, len(dcp.inactiveDcpStream()))
+				dcp.Logger().Debugf("%v: Starting dcp stream for vb=%v, len(closed streams)=%v\n", dcp.Id(), vbno, len(dcp.inactiveDcpStreams()))
 				dcp.setTS(vbno, vbts, false)
 			}
 		}
