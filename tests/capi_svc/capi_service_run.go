@@ -133,7 +133,7 @@ func run_testcase() error {
 		return err
 	}
 
-	remote_cluster_svc := metadata_svc.NewRemoteClusterService(nil, metadatakv_svc, top_svc, cluster_info_svc, log.DefaultLoggerContext)
+	remote_cluster_svc, err := metadata_svc.NewRemoteClusterService(nil, metadatakv_svc, top_svc, cluster_info_svc, log.DefaultLoggerContext)
 	if err != nil {
 		return err
 	}

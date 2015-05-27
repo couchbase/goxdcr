@@ -50,7 +50,7 @@ type ReplicationSpecService struct {
 
 func NewReplicationSpecService(uilog_svc service_def.UILogSvc, remote_cluster_svc service_def.RemoteClusterSvc,
 	metadata_svc service_def.MetadataSvc, xdcr_comp_topology_svc service_def.XDCRCompTopologySvc, cluster_info_svc service_def.ClusterInfoSvc,
-	logger_ctx *log.LoggerContext) *ReplicationSpecService {
+	logger_ctx *log.LoggerContext) (*ReplicationSpecService, error) {
 	logger := log.NewLogger("ReplicationSpecService", logger_ctx)
 	svc := &ReplicationSpecService{
 		metadata_svc:           metadata_svc,
@@ -64,9 +64,9 @@ func NewReplicationSpecService(uilog_svc service_def.UILogSvc, remote_cluster_sv
 
 	err := svc.initCache()
 	if err != nil {
-		panic (fmt.Sprintf("NewReplicationSpecService failed. err=%v", err))
+		return nil, err
 	}
-	return svc
+	return svc, nil
 }
 
 func (service *ReplicationSpecService) initCache() error {

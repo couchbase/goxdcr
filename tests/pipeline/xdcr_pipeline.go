@@ -144,8 +144,16 @@ func setup() error {
 	}
 
 	uilog_svc := service_impl.NewUILogSvc(top_svc, nil)
-	remote_cluster_svc := metadata_svc.NewRemoteClusterService(uilog_svc, metakv_svc, top_svc, cluster_info_svc, nil)
-	repl_spec_svc := metadata_svc.NewReplicationSpecService(uilog_svc, remote_cluster_svc, metakv_svc, top_svc, cluster_info_svc, nil)
+	remote_cluster_svc, err := metadata_svc.NewRemoteClusterService(uilog_svc, metakv_svc, top_svc, cluster_info_svc, nil)
+	if err != nil {
+		fmt.Println(err.Error())
+		return err
+	}
+	repl_spec_svc, err := metadata_svc.NewReplicationSpecService(uilog_svc, remote_cluster_svc, metakv_svc, top_svc, cluster_info_svc, nil)
+	if err != nil {
+		fmt.Println(err.Error())
+		return err
+	}
 
 	replication_manager.StartReplicationManager(options.source_kv_host, base.AdminportNumber,
 		repl_spec_svc, remote_cluster_svc,

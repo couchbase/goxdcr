@@ -1452,10 +1452,27 @@ func (xmem *XmemNozzle) receiveResponse(finch chan bool, waitGrp *sync.WaitGroup
 					//read is unsuccessful, put the token back
 				} else {
 					// for non-recoverable errors, report failure
-					xmem.Logger().Errorf("%v received a response indicating non-recoverable error from xmem client. response status=%v", xmem.Id(), response.Status)
-					xmem.handleGeneralError(errors.New("Received non-recoverable error from memcached in target cluster"))
-					goto done
+					var req *mc.MCRequest = nil
+					var seqno uint64
+					pos := xmem.getPosFromOpaque(response.Opaque)
+					wrappedReq, err := xmem.buf.slot(pos)
+					if err == nil && wrappedReq != nil {
+						req = wrappedReq.Req
+						seqno = wrappedReq.Seqno
+						if req != nil && req.Opaque == response.Opaque {
+							xmem.Logger().Errorf("%v received a response indicating non-recoverable error from xmem client. response status=%v, opcode=%v, seqno=%v, req.Key=%v, req.Cas=%v, req.Extras=%s\n", xmem.Id(), response.Status, response.Opcode, seqno, req.Key, req.Cas, req.Extras)
+							xmem.handleGeneralError(errors.New("Received non-recoverable error from memcached in target cluster"))
+							goto done
+						}
+					}
+					if req != nil {
+						xmem.Logger().Debugf("%v Got the response, response.Opaque=%v, req.Opaque=%v\n", xmem.Id(), response.Opaque, req.Opaque)
+					} else {
+						xmem.Logger().Debugf("%v Got the response, pos=%v, req in that pos is nil\n", xmem.Id(), pos)
+					}
+
 				}
+
 			} else {
 				//raiseEvent
 				pos := xmem.getPosFromOpaque(response.Opaque)

@@ -8,9 +8,9 @@ import (
 	base "github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/factory"
 	"github.com/couchbase/goxdcr/log"
+	"github.com/couchbase/goxdcr/metadata_svc"
 	"github.com/couchbase/goxdcr/parts"
 	"github.com/couchbase/goxdcr/replication_manager"
-	"github.com/couchbase/goxdcr/metadata_svc"
 	"github.com/couchbase/goxdcr/service_impl"
 	"github.com/couchbase/goxdcr/tests/common"
 	"os"
@@ -104,8 +104,18 @@ func invokeFactory() error {
 	}
 
 	uilog_svc := service_impl.NewUILogSvc(top_svc, nil)
-	remote_cluster_svc := metadata_svc.NewRemoteClusterService(uilog_svc, msvc, top_svc, cluster_info_svc, nil)
-	repl_spec_svc := metadata_svc.NewReplicationSpecService(uilog_svc, remote_cluster_svc, msvc, top_svc, cluster_info_svc, nil)
+	remote_cluster_svc, err := metadata_svc.NewRemoteClusterService(uilog_svc, msvc, top_svc, cluster_info_svc, nil)
+	if err != nil {
+		fmt.Println(err.Error())
+		return err
+	}
+
+	repl_spec_svc, err := metadata_svc.NewReplicationSpecService(uilog_svc, remote_cluster_svc, msvc, top_svc, cluster_info_svc, nil)
+	if err != nil {
+		fmt.Println(err.Error())
+		return err
+	}
+
 	checkpoints_svc := metadata_svc.NewCheckpointsService(msvc, nil)
 	capi_svc := service_impl.NewCAPIService(cluster_info_svc, nil)
 

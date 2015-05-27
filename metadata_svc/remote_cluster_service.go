@@ -48,7 +48,7 @@ type RemoteClusterService struct {
 	cache             *MetadataCache
 }
 
-func NewRemoteClusterService(uilog_svc service_def.UILogSvc, metakv_svc service_def.MetadataSvc, xdcr_topology_svc service_def.XDCRCompTopologySvc, cluster_info_svc service_def.ClusterInfoSvc, logger_ctx *log.LoggerContext) *RemoteClusterService {
+func NewRemoteClusterService(uilog_svc service_def.UILogSvc, metakv_svc service_def.MetadataSvc, xdcr_topology_svc service_def.XDCRCompTopologySvc, cluster_info_svc service_def.ClusterInfoSvc, logger_ctx *log.LoggerContext) (*RemoteClusterService, error) {
 	logger := log.NewLogger("RemoteClusterService", logger_ctx)
 	svc := &RemoteClusterService{
 		metakv_svc:        metakv_svc,
@@ -61,9 +61,9 @@ func NewRemoteClusterService(uilog_svc service_def.UILogSvc, metakv_svc service_
 
 	err := svc.initCache()
 	if err != nil {
-		panic(fmt.Sprintf("NewRemoteClusterService failed, err=%v", err))
+		return nil, err
 	}
-	return svc
+	return svc, nil
 }
 
 //fill the cache the first time
