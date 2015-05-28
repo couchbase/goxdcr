@@ -40,10 +40,6 @@ const (
 	Dcp_Stream_Active  = iota
 )
 
-const (
-	XDCR_DCP_BUFFER_SIZE uint32 = 1048576
-)
-
 var dcp_setting_defs base.SettingDefinitions = base.SettingDefinitions{DCP_VBTimestamp: base.NewSettingDef(reflect.TypeOf((*map[uint16]*base.VBTimestamp)(nil)), true)}
 
 var ErrorEmptyVBList = errors.New("Invalid configuration for DCP nozzle. VB list cannot be empty.")
@@ -137,7 +133,7 @@ func NewDcpNozzle(id string,
 func (dcp *DcpNozzle) initialize(settings map[string]interface{}) (err error) {
 	dcp.finch = make(chan bool)
 
-	dcp.uprFeed, err = dcp.bucket.StartUprFeed(DCP_Connection_Prefix+dcp.Id(), uint32(XDCR_DCP_BUFFER_SIZE))
+	dcp.uprFeed, err = dcp.bucket.StartUprFeed(DCP_Connection_Prefix+dcp.Id(), uint32(0))
 
 	// fetch start timestamp from settings
 	dcp.vbtimestamp_updater = settings[DCP_VBTimestampUpdator].(func(uint16, uint64) (*base.VBTimestamp, error))
@@ -273,16 +269,15 @@ func (dcp *DcpNozzle) closeUprFeed() bool {
 	dcp.lock_uprFeed.Lock()
 	defer dcp.lock_uprFeed.Unlock()
 	if dcp.uprFeed != nil {
-		dcp.Logger().Infof("%v ask uprfeed to close", dcp.Id())
+		dcp.Logger().Info("Ask uprfeed to close")
 		//in the process of stopping, no need to report any error to replication manager anymore
 		dcp.handle_error = false
 
 		dcp.uprFeed.Close()
-		dcp.Logger().Infof("%v uprfeed is closed", dcp.Id())
 		dcp.uprFeed = nil
 		actionTaken = true
 	} else {
-		dcp.Logger().Infof("%v uprfeed is already closed. No-op", dcp.Id())
+		dcp.Logger().Info("uprfeed is already closed. No-op")
 	}
 
 	return actionTaken
