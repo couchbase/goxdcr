@@ -91,7 +91,6 @@ func RecycleMCRequestObj(topic string, obj *base.WrappedMCRequest) {
 	}
 }
 
-
 func InitReplicationStatusForReplication(specId string) *pipeline.ReplicationStatus {
 	rs := pipeline.NewReplicationStatus(specId, pipeline_mgr.repl_spec_svc.ReplicationSpec, pipeline_mgr.logger)
 	pipeline_mgr.repl_spec_svc.SetDerivedObj(specId, rs)
@@ -210,15 +209,15 @@ func CheckPipelines() {
 	rep_status_map := ReplicationStatusMap()
 	for specId, rep_status := range rep_status_map {
 		//validate replication spec
-		pipeline_mgr.repl_spec_svc.ValidateAndGC(rep_status.Spec())
-
+		if rep_status.Spec() != nil {
+			pipeline_mgr.repl_spec_svc.ValidateAndGC(rep_status.Spec())
+		}
 		if rep_status.RuntimeStatus() == pipeline.Pending {
 			if rep_status.Updater() == nil {
 				pipeline_mgr.logger.Infof("Pipeline %v is broken, but not yet attended, launch updater", specId)
 				pipeline_mgr.launchUpdater(specId, nil, rep_status)
 			}
 		}
-
 	}
 	LogStatusSummary()
 }
@@ -416,7 +415,11 @@ func (pipelineMgr *pipelineManager) reportFixed(topic string, r *pipelineUpdater
 
 func (pipelineMgr *pipelineManager) launchUpdater(topic string, cur_err error, rep_status *pipeline.ReplicationStatus) error {
 	settingsMap := rep_status.SettingsMap()
-	retry_interval := settingsMap[metadata.FailureRestartInterval].(int)
+	retry_interval_obj := settingsMap[metadata.FailureRestartInterval]
+	var retry_interval int = 0
+	if retry_interval_obj != nil {
+		retry_interval = settingsMap[metadata.FailureRestartInterval].(int)
+	}
 
 	updater, err := newPipelineUpdater(topic, retry_interval, pipelineMgr.child_waitGrp, cur_err, rep_status, pipelineMgr.logger)
 	if err != nil {
