@@ -76,6 +76,8 @@ var xmem_setting_defs base.SettingDefinitions = base.SettingDefinitions{SETTING_
 	XMEM_SETTING_REMOTE_PROXY_PORT: base.NewSettingDef(reflect.TypeOf((*uint16)(nil)), false),
 	XMEM_SETTING_LOCAL_PROXY_PORT:  base.NewSettingDef(reflect.TypeOf((*uint16)(nil)), false)}
 
+var UninitializedReseverationNumber = -1
+
 func (doc_meta documentMetadata) String() string {
 	return fmt.Sprintf("[key=%s; revSeq=%v;cas=%v;flags=%v;expiry=%v;deletion=%v]", doc_meta.key, doc_meta.revSeq, doc_meta.cas, doc_meta.flags, doc_meta.expiry, doc_meta.deletion)
 }
@@ -88,20 +90,32 @@ type ConflictResolver func(doc_metadata_source documentMetadata, doc_metadata_ta
 
 type bufferedMCRequest struct {
 	req          *base.WrappedMCRequest
-	sent_time    time.Time
+	sent_time    *time.Time
 	num_of_retry int
 	err          error
 	timedout     bool
 	reservation  int
+	lock         sync.RWMutex
 }
 
-func newBufferedMCRequest(request *base.WrappedMCRequest, reservationNum int) *bufferedMCRequest {
-	return &bufferedMCRequest{req: request,
-		sent_time:    time.Now(),
+func newBufferedMCRequest() *bufferedMCRequest {
+	return &bufferedMCRequest{req: nil,
+		sent_time:    nil,
 		num_of_retry: 0,
 		err:          nil,
 		timedout:     false,
-		reservation:  reservationNum}
+		reservation:  UninitializedReseverationNumber,
+		lock:         sync.RWMutex{}}
+}
+
+// once a buffered request reaches the end of its life cycle, e.g., when the underlying mc request has been sent and acknowledged,
+// reset it to an empty state to enable it to be reused by future mc requests
+func resetBufferedMCRequest(request *bufferedMCRequest) {
+	request.req = nil
+	request.sent_time = nil
+	request.num_of_retry = 0
+	request.timedout = false
+	request.reservation = UninitializedReseverationNumber
 }
 
 /***********************************************************
@@ -140,8 +154,7 @@ func newReqBuffer(size uint16, threshold uint16, token_ch chan int, logger *log.
 
 	logger.Debug("Slots is initialized")
 
-	//initialize the empty_slots_pos
-	buf.initializeEmptySlotPos()
+	buf.initialize()
 
 	logger.Debugf("new request buffer of size %d is created\n", size)
 	return buf
@@ -157,8 +170,12 @@ func (buf *requestBuffer) setNotifyThreshold(threshold uint16) {
 	buf.notify_threshold = threshold
 }
 
-func (buf *requestBuffer) initializeEmptySlotPos() error {
+func (buf *requestBuffer) initialize() error {
 	for i := 0; i < int(buf.size); i++ {
+		// initialize all slots to empty requests
+		buf.slots[i] = newBufferedMCRequest()
+
+		//initialize the empty_slots_pos
 		buf.empty_slots_pos <- uint16(i)
 		buf.sequences[i] = 0
 	}
@@ -192,7 +209,7 @@ func (buf *requestBuffer) flowControl() {
 
 func (buf *requestBuffer) validatePos(pos uint16) (err error) {
 	err = nil
-	if pos < 0 || int(pos) >= len(buf.slots) {
+	if pos < 0 || pos >= buf.size {
 		buf.logger.Error("Invalid slot index")
 		err = errors.New("Invalid slot index")
 	}
@@ -211,12 +228,10 @@ func (buf *requestBuffer) slot(pos uint16) (*base.WrappedMCRequest, error) {
 
 	req := buf.slots[pos]
 
-	if req == nil || req.req == nil {
-		return nil, nil
-	} else {
-		return req.req, nil
-	}
+	req.lock.RLock()
+	defer req.lock.RUnlock()
 
+	return req.req, nil
 }
 
 //modSlot allow caller to do book-keeping on the slot, like updating num_of_retry, err
@@ -231,9 +246,12 @@ func (buf *requestBuffer) modSlot(pos uint16, modFunc func(req *bufferedMCReques
 
 	req := buf.slots[pos]
 
+	req.lock.Lock()
+	defer req.lock.Unlock()
+
 	var modified bool
 
-	if req != nil && req.req != nil {
+	if req.req != nil {
 		modified, err = modFunc(req, pos)
 	} else {
 		modified = false
@@ -250,10 +268,14 @@ func (buf *requestBuffer) evictSlot(pos uint16) error {
 	if err != nil {
 		return err
 	}
-	req := buf.slots[pos]
-	buf.slots[pos] = nil
 
-	if req != nil {
+	req := buf.slots[pos]
+	req.lock.Lock()
+	defer req.lock.Unlock()
+
+	if req.req != nil {
+		resetBufferedMCRequest(req)
+
 		buf.empty_slots_pos <- pos
 
 		//decrease the occupied_count
@@ -296,8 +318,17 @@ func (buf *requestBuffer) reserveSlot() (error, uint16, int) {
 	//non blocking
 	//generate a random number
 	reservation_num = rand.Int()
-	req := newBufferedMCRequest(nil, reservation_num)
-	buf.slots[index] = req
+
+	req := buf.slots[index]
+	req.lock.Lock()
+	defer req.lock.Unlock()
+
+	if req.req != nil || req.reservation != UninitializedReseverationNumber {
+		panic(fmt.Sprintf("reserveSlot called on non-empty slot. req=%v, reseveration=%v\n", req.req, req.reservation))
+	}
+
+	req.reservation = reservation_num
+
 	return nil, uint16(index), reservation_num
 }
 
@@ -310,11 +341,14 @@ func (buf *requestBuffer) cancelReservation(index uint16, reservation_num int) e
 		req := buf.slots[index]
 		var reservation_num int
 
+		req.lock.Lock()
+		defer req.lock.Unlock()
+
 		//non blocking
-		if req != nil {
+		if req.req != nil {
 
 			if req.reservation == reservation_num {
-				req = nil
+				resetBufferedMCRequest(req)
 			} else {
 				err = errors.New("Cancel reservation failed, reservation number doesn't match")
 			}
@@ -331,15 +365,16 @@ func (buf *requestBuffer) cancelReservation(index uint16, reservation_num int) e
 }
 
 func (buf *requestBuffer) enSlot(pos uint16, req *base.WrappedMCRequest, reservationNum int) error {
-	buf.logger.Debugf("enSlot: pos=%d\n", pos)
-
 	err := buf.validatePos(pos)
 	if err != nil {
 		return err
 	}
 	r := buf.slots[pos]
 
-	if r == nil {
+	r.lock.Lock()
+	defer r.lock.Unlock()
+
+	if r.reservation == UninitializedReseverationNumber {
 		return errors.New("Slot is not initialized, must be reserved first.")
 	} else {
 		if r.reservation != reservationNum {
@@ -347,6 +382,8 @@ func (buf *requestBuffer) enSlot(pos uint16, req *base.WrappedMCRequest, reserva
 			return errors.New(fmt.Sprintf("Can't enSlot %d, doesn't have the reservation", pos))
 		}
 		r.req = req
+		now := time.Now()
+		r.sent_time = &now
 		buf.token_ch <- 1
 
 		//increase the occupied_count
@@ -1696,7 +1733,7 @@ func (xmem *XmemNozzle) checkTimeout(req *bufferedMCRequest, pos uint16) (bool, 
 		return false, nil
 	}
 
-	respWaitTime := time.Since(req.sent_time)
+	respWaitTime := time.Since(*req.sent_time)
 	if respWaitTime > xmem.timeoutDuration(req.num_of_retry) {
 		modified, err := xmem.resend(req, pos)
 
