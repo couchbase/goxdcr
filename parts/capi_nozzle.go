@@ -497,7 +497,7 @@ func (capi *CapiNozzle) batchGetMeta(vbno uint16, bigDoc_map map[string]*base.Wr
 		additionalInfo := make(map[string]interface{})
 		additionalInfo[EVENT_ADDI_DOC_KEY] = key
 		additionalInfo[EVENT_ADDI_SEQNO] = seqnostarttime[0].(uint64)
-		additionalInfo[EVENT_ADDI_GETMETA_COMMIT_TIME] = time.Since(seqnostarttime[0].(time.Time))
+		additionalInfo[EVENT_ADDI_GETMETA_COMMIT_TIME] = time.Since(seqnostarttime[1].(time.Time))
 		capi.RaiseEvent(common.GetMetaReceived, nil, capi, nil, additionalInfo)
 	}
 
@@ -536,6 +536,7 @@ func (capi *CapiNozzle) batchSendWithRetry(batch *capiBatch) error {
 		capi.bytes_in_dataChan -= item.Req.Size()
 
 		if needSend(item.Req, &batch.dataBatch, capi.Logger()) {
+			capi.adjustRequest(item)
 			req_list = append(req_list, item)
 		} else {
 			capi.Logger().Debugf("did not send doc with key %v since it failed conflict resolution\n", string(item.Req.Key))
@@ -697,6 +698,12 @@ func (capi *CapiNozzle) validateRunningState() error {
 		return PartStoppedError
 	}
 	return nil
+}
+
+func (capi *CapiNozzle) adjustRequest(req *base.WrappedMCRequest) {
+	mc_req := req.Req
+	mc_req.Opcode = encodeOpCode(mc_req.Opcode)
+	mc_req.Cas = 0
 }
 
 // test func that uses http to update docs. may be helpful in debugging for isolating issues

@@ -136,7 +136,7 @@ func RemoteBucket(remoteConnectStr, bucketName, remoteUsername, remotePassword s
 			password = bucketInfo.Password
 		}
 	}
-	couch, err := couchbase.Connect("http://" + bucketName + ":" + password + "@" + remoteConnectStr)
+	couch, err := couchbase.Connect("http://" + remoteUsername + ":" + remotePassword + "@" + remoteConnectStr)
 	if err != nil {
 		return nil, NewEnhancedError(fmt.Sprintf("Error connecting to couchbase. bucketName=%v; password=%v; remoteConnectStr=%v", bucketName, password, remoteConnectStr), err)
 	}
@@ -144,7 +144,7 @@ func RemoteBucket(remoteConnectStr, bucketName, remoteUsername, remotePassword s
 	if err != nil {
 		return nil, NewEnhancedError("Error getting pool with name 'default'.", err)
 	}
-	bucket, err := pool.GetBucket(bucketName)
+	bucket, err := pool.GetBucketWithAuth(bucketName, bucketName, password)
 	if err != nil {
 		return nil, NewEnhancedError(fmt.Sprintf("Error getting bucket, %v, from pool.", bucketName), err)
 	}

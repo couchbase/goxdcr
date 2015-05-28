@@ -309,6 +309,9 @@ func (capi_svc *CAPIService) composePreReplicateBody(api_base *apiRequest, known
 		} else if targetVBUuidAndTimestamp, ok := knownRemoteVBStatus.VBOpaque.(*metadata.TargetVBUuidAndTimestamp); ok {
 			//for older clusters, commitopaque is just vbuuid
 			remote_commit_opaque = targetVBUuidAndTimestamp.Target_vb_uuid
+		} else if targetVBUuidStr, ok := knownRemoteVBStatus.VBOpaque.(*metadata.TargetVBUuidStr); ok {
+			//for elastic search clusters, commitopaque is a string vbuuid
+			remote_commit_opaque = targetVBUuidStr.Target_vb_uuid
 		} else {
 			return fmt.Errorf("Invalid target vb opaque, %v, in knownRemoteVBStatus.", knownRemoteVBStatus.VBOpaque)
 		}
@@ -369,11 +372,17 @@ func getVBOpaqueFromRespMap(resp_status_code int,
 
 	vbOpaqueFloat, ok := vbOpaqueObj.(float64)
 	if ok {
-		// newer clusters returns a single vbuuid as vb opaque
+		// newer clusters return a single vbuuid as vb opaque
 		return &metadata.TargetVBUuid{uint64(vbOpaqueFloat)}, nil
 	}
 
-	// older clusters returns a pair of vbuuid + startup time as vb opaque
+	vbOpaqueString, ok := vbOpaqueObj.(string)
+	if ok {
+		// elastic search clusters return a string vbuuid as vb opaque
+		return &metadata.TargetVBUuidStr{vbOpaqueString}, nil
+	}
+
+	// older clusters return a pair of vbuuid + startup time as vb opaque
 	vbOpaquePair, ok := vbOpaqueObj.([]interface{})
 	if !ok {
 		// other types of vb opaques are invalid

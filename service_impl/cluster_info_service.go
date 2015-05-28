@@ -124,9 +124,9 @@ func (ci_svc *ClusterInfoSvc) GetBucket(clusterConnInfoProvider base.ClusterConn
 
 	switch clusterConnInfoProvider.(type) {
 	case *metadata.RemoteClusterReference:
-		username, password, err := clusterConnInfoProvider.MyCredentials()
-		if err != nil {
-			return nil, err
+		username, password, err1 := clusterConnInfoProvider.MyCredentials()
+		if err1 != nil {
+			return nil, err1
 		}
 		bucket, err = utils.RemoteBucket(connStr, bucketName, username, password)
 	default:

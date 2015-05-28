@@ -1745,7 +1745,7 @@ func (xmem *XmemNozzle) resendForNewConn(req *bufferedMCRequest, pos uint16) (bo
 
 func (xmem *XmemNozzle) adjustRequest(req *base.WrappedMCRequest, index uint16) {
 	mc_req := req.Req
-	mc_req.Opcode = xmem.encodeOpCode(mc_req.Opcode)
+	mc_req.Opcode = encodeOpCode(mc_req.Opcode)
 	mc_req.Cas = 0
 	mc_req.Opaque = xmem.getOpaque(index, xmem.buf.sequences[int(index)])
 }
@@ -1763,7 +1763,7 @@ func (xmem *XmemNozzle) getPosFromOpaque(opaque uint32) uint16 {
 	return result
 }
 
-func (xmem *XmemNozzle) encodeOpCode(code mc.CommandCode) mc.CommandCode {
+func encodeOpCode(code mc.CommandCode) mc.CommandCode {
 	if code == mc.UPR_MUTATION || code == mc.TAP_MUTATION {
 		return base.SET_WITH_META
 	} else if code == mc.TAP_DELETE || code == mc.UPR_DELETION || code == mc.UPR_EXPIRATION {

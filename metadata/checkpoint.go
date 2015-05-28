@@ -102,6 +102,7 @@ type TargetVBOpaque interface {
 	IsSame(targetVBOpaque TargetVBOpaque) bool
 }
 
+// older clusters have a single int vbuuid
 type TargetVBUuid struct {
 	Target_vb_uuid uint64 `json:"target_vb_uuid"`
 }
@@ -127,6 +128,33 @@ func (targetVBUuid *TargetVBUuid) IsSame(targetVBOpaque TargetVBOpaque) bool {
 	}
 }
 
+// elasticSearch clusters have a single string vbuuid
+type TargetVBUuidStr struct {
+	Target_vb_uuid string `json:"target_vb_uuid"`
+}
+
+func (targetVBUuid *TargetVBUuidStr) Value() interface{} {
+	return targetVBUuid.Target_vb_uuid
+}
+
+func (targetVBUuid *TargetVBUuidStr) IsSame(targetVBOpaque TargetVBOpaque) bool {
+	if targetVBUuid == nil && targetVBOpaque == nil {
+		return true
+	} else if targetVBUuid == nil && targetVBOpaque != nil {
+		return false
+	} else if targetVBUuid != nil && targetVBOpaque == nil {
+		return false
+	} else {
+		new_targetVBUuid, ok := targetVBOpaque.(*TargetVBUuidStr)
+		if !ok {
+			return false
+		} else {
+			return targetVBUuid.Target_vb_uuid == new_targetVBUuid.Target_vb_uuid
+		}
+	}
+}
+
+// newer clusters have a pair of vbuuid and seqno
 type TargetVBUuidAndTimestamp struct {
 	Target_vb_uuid string `json:"target_vb_uuid"`
 	Startup_time   string `json:"startup_time"`
@@ -174,11 +202,17 @@ func UnmarshalTargetVBOpaque(data interface{}) (TargetVBOpaque, error) {
 		}
 
 		target_vb_uuid_float, ok := target_vb_uuid.(float64)
-		if !ok {
-			return nil, TargetVBOpaqueUnmarshalError(data)
+		if ok {
+			return &TargetVBUuid{uint64(target_vb_uuid_float)}, nil
 		}
 
-		return &TargetVBUuid{uint64(target_vb_uuid_float)}, nil
+		target_vb_uuid_string, ok := target_vb_uuid.(string)
+		if ok {
+			return &TargetVBUuidStr{target_vb_uuid_string}, nil
+		}
+
+		return nil, TargetVBOpaqueUnmarshalError(data)
+
 	} else if len(fieldMap) == 2 {
 		// unmarshal TargetVBUuidAndTimestamp
 		target_vb_uuid, ok := fieldMap[TargetVbUuid]
