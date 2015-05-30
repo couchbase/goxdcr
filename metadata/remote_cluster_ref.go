@@ -102,19 +102,39 @@ func (ref *RemoteClusterReference) ToMap() map[string]interface{} {
 }
 
 // checks if the passed in ref is the same as the current ref
-// used to determine whether a ref in remote cluster cache needs to be refreshed
-func (ref *RemoteClusterReference) SameRef(newRef *RemoteClusterReference) bool {
-	if newRef == nil {
+func (ref *RemoteClusterReference) SameRef(ref2 *RemoteClusterReference) bool {
+	if ref == nil {
+		return ref2 == nil
+	}
+	if ref2 == nil {
 		return false
 	}
-	return ref.Id == newRef.Id && ref.Uuid == newRef.Uuid && ref.Name == newRef.Name &&
-		ref.HostName == newRef.HostName && ref.UserName == newRef.UserName &&
-		ref.Password == newRef.Password && reflect.DeepEqual(ref.Revision, newRef.Revision) &&
-		ref.DemandEncryption == newRef.DemandEncryption && bytes.Equal(ref.Certificate, newRef.Certificate)
+	return ref.Id == ref2.Id && ref.Uuid == ref2.Uuid && ref.Name == ref2.Name &&
+		ref.HostName == ref2.HostName && ref.UserName == ref2.UserName &&
+		ref.Password == ref2.Password && reflect.DeepEqual(ref.Revision, ref2.Revision) &&
+		ref.DemandEncryption == ref2.DemandEncryption && bytes.Equal(ref.Certificate, ref2.Certificate)
 }
 
 func (ref *RemoteClusterReference) String() string {
+	if ref == nil {
+		return "nil"
+	}
 	return fmt.Sprintf("id:%v; uuid:%v; name:%v; hostName:%v; userName:%v; password:xxxx; demandEncryption:%v;certificate:%v;revision:%v", ref.Id, ref.Uuid, ref.Name, ref.HostName, ref.UserName, ref.DemandEncryption, ref.Certificate, ref.Revision)
+}
+
+func (ref *RemoteClusterReference) Clone() *RemoteClusterReference {
+	if ref == nil {
+		return nil
+	}
+	return &RemoteClusterReference{Id: ref.Id,
+		Uuid:             ref.Uuid,
+		Name:             ref.Name,
+		HostName:         ref.HostName,
+		UserName:         ref.UserName,
+		Password:         ref.Password,
+		DemandEncryption: ref.DemandEncryption,
+		Certificate:      ref.Certificate,
+	}
 }
 
 // generate a randomized string UUID which should be unique enough for all practical purposes

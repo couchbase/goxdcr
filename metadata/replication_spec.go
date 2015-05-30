@@ -11,6 +11,7 @@ package metadata
 
 import (
 	"github.com/couchbase/goxdcr/base"
+	"reflect"
 	"strings"
 )
 
@@ -47,6 +48,32 @@ func NewReplicationSpecification(sourceBucketName string, sourceBucketUUID strin
 		TargetClusterUUID: targetClusterUUID,
 		TargetBucketName:  targetBucketName,
 		Settings:          DefaultSettings()}
+}
+
+// checks if the passed in spec is the same as the current spec
+// used to check if a spec in cache needs to be refreshed
+func (spec *ReplicationSpecification) SameSpec(spec2 *ReplicationSpecification) bool {
+	if spec == nil {
+		return spec2 == nil
+	}
+	if spec2 == nil {
+		return false
+	}
+	// note that settings in spec are not compared. The assumption is that if settings are different, Revision will have to be different
+	return spec.Id == spec2.Id && spec.SourceBucketName == spec2.SourceBucketName &&
+		spec.TargetClusterUUID == spec2.TargetClusterUUID && spec.TargetBucketName == spec2.TargetBucketName &&
+		reflect.DeepEqual(spec.Revision, spec2.Revision)
+}
+
+func (spec *ReplicationSpecification) Clone() *ReplicationSpecification {
+	if spec == nil {
+		return nil
+	}
+	return &ReplicationSpecification{Id: spec.Id,
+		SourceBucketName:  spec.SourceBucketName,
+		TargetClusterUUID: spec.TargetClusterUUID,
+		TargetBucketName:  spec.TargetBucketName,
+		Settings:          spec.Settings.Clone()}
 }
 
 func ReplicationId(sourceBucketName string, targetClusterUUID string, targetBucketName string) string {

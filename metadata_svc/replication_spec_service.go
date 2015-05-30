@@ -20,6 +20,7 @@ import (
 	"github.com/couchbase/goxdcr/service_def"
 	"github.com/couchbase/goxdcr/utils"
 	"strings"
+	"sync"
 )
 
 const (
@@ -39,13 +40,15 @@ type ReplicationSpecVal struct {
 }
 
 type ReplicationSpecService struct {
-	xdcr_comp_topology_svc service_def.XDCRCompTopologySvc
-	metadata_svc           service_def.MetadataSvc
-	uilog_svc              service_def.UILogSvc
-	remote_cluster_svc     service_def.RemoteClusterSvc
-	cluster_info_svc       service_def.ClusterInfoSvc
-	cache                  *MetadataCache
-	logger                 *log.CommonLogger
+	xdcr_comp_topology_svc   service_def.XDCRCompTopologySvc
+	metadata_svc             service_def.MetadataSvc
+	uilog_svc                service_def.UILogSvc
+	remote_cluster_svc       service_def.RemoteClusterSvc
+	cluster_info_svc         service_def.ClusterInfoSvc
+	cache                    *MetadataCache
+	cache_lock               *sync.Mutex
+	logger                   *log.CommonLogger
+	metadata_change_callback base.MetadataChangeHandlerCallback
 }
 
 func NewReplicationSpecService(uilog_svc service_def.UILogSvc, remote_cluster_svc service_def.RemoteClusterSvc,
@@ -59,6 +62,7 @@ func NewReplicationSpecService(uilog_svc service_def.UILogSvc, remote_cluster_sv
 		xdcr_comp_topology_svc: xdcr_comp_topology_svc,
 		cluster_info_svc:       cluster_info_svc,
 		cache:                  nil,
+		cache_lock:             &sync.Mutex{},
 		logger:                 logger,
 	}
 
@@ -67,6 +71,10 @@ func NewReplicationSpecService(uilog_svc service_def.UILogSvc, remote_cluster_sv
 		return nil, err
 	}
 	return svc, nil
+}
+
+func (service *ReplicationSpecService) SetMetadataChangeHandlerCallback(call_back base.MetadataChangeHandlerCallback) {
+	service.metadata_change_callback = call_back
 }
 
 func (service *ReplicationSpecService) initCache() error {
@@ -92,20 +100,26 @@ func (service *ReplicationSpecService) initCache() error {
 	return nil
 }
 
-func (service *ReplicationSpecService) getCache() (*MetadataCache, error) {
+func (service *ReplicationSpecService) getCache() *MetadataCache {
 	if service.cache == nil {
-		return nil, errors.New("Can't instantiate cahe")
+		panic("cache is not initialized for ReplicationSpecService")
 	}
-	return service.cache, nil
+	return service.cache
 }
 
 func (service *ReplicationSpecService) ReplicationSpec(replicationId string) (*metadata.ReplicationSpecification, error) {
-	cache, err := service.getCache()
+	spec, err := service.replicationSpec(replicationId)
 	if err != nil {
 		return nil, err
 	}
 
-	val, ok := cache.Get(replicationId)
+	// return a clone so that modification to the spec returned won't affect the spec in cache
+	return spec.Clone(), nil
+}
+
+// this method is cheaper than ReplicationSpec() and should be called only when the spec returned won't be modified or that the modifications do not matter.
+func (service *ReplicationSpecService) replicationSpec(replicationId string) (*metadata.ReplicationSpecification, error) {
+	val, ok := service.getCache().Get(replicationId)
 	if !ok || val == nil || val.(*ReplicationSpecVal).spec == nil {
 		return nil, errors.New(ReplicationSpecNotFoundErrorMessage)
 	}
@@ -176,7 +190,7 @@ func (service *ReplicationSpecService) ValidateNewReplicationSpec(sourceBucket, 
 	}
 
 	repId := metadata.ReplicationId(sourceBucket, targetClusterRef.Uuid, targetBucket)
-	_, err = service.ReplicationSpec(repId)
+	_, err = service.replicationSpec(repId)
 	if err == nil {
 		errorMap[base.PlaceHolderFieldKey] = errors.New(ReplicationSpecAlreadyExistErrorMessage)
 	}
@@ -208,22 +222,14 @@ func (service *ReplicationSpecService) AddReplicationSpec(spec *metadata.Replica
 	}
 
 	service.logger.Info("Adding it to metadata store...")
+
 	key := getKeyFromReplicationId(spec.Id)
 	err = service.metadata_svc.AddWithCatalog(ReplicationSpecsCatalogKey, key, value)
 	if err != nil {
 		return err
 	}
 
-	_, rev, err := service.metadata_svc.Get(key)
-	if err != nil {
-		return fmt.Errorf("Failed to query newly added replication spec %v back, err=%v\n", spec.Id, err)
-	}
-	spec.Revision = rev
-	cache, err := service.getCache()
-	if err != nil {
-		panic("cache is not initialized for ReplicationSpecService")
-	}
-	service.cacheSpec(cache, spec.Id, spec)
+	service.updateCache(spec.Id, spec)
 
 	service.writeUiLog(spec, "created", "")
 	return nil
@@ -235,18 +241,19 @@ func (service *ReplicationSpecService) SetReplicationSpec(spec *metadata.Replica
 		return err
 	}
 	key := getKeyFromReplicationId(spec.Id)
+
 	err = service.metadata_svc.Set(key, value, spec.Revision)
 	if err != nil {
 		return err
 	}
 
 	_, rev, err := service.metadata_svc.Get(key)
-	spec.Revision = rev
-	cache, err := service.getCache()
 	if err != nil {
-		panic("cache is not initialized for ReplicationSpecService")
+		return err
 	}
-	service.cacheSpec(cache, spec.Id, spec)
+	spec.Revision = rev
+
+	service.updateCache(spec.Id, spec)
 
 	service.logger.Infof("replication spec %s is updated, rev=%v\n", rev)
 
@@ -258,7 +265,7 @@ func (service *ReplicationSpecService) DelReplicationSpec(replicationId string) 
 }
 
 func (service *ReplicationSpecService) delReplicationSpec_internal(replicationId, reason string) (*metadata.ReplicationSpecification, error) {
-	spec, err := service.ReplicationSpec(replicationId)
+	spec, err := service.replicationSpec(replicationId)
 	if err != nil {
 		return nil, errors.New(ReplicationSpecNotFoundErrorMessage)
 	}
@@ -270,20 +277,8 @@ func (service *ReplicationSpecService) delReplicationSpec_internal(replicationId
 		return nil, err
 	}
 
-	cache, err := service.getCache()
-	if err != nil {
-		return nil, errors.New("Can't instantiate cahe")
-	}
-	
-	//soft remove it from cache by setting SpecVal.spec = nil, but keep the key there 
-	//so that the derived object can still be retrieved and be acted on for cleaning-up.
-	val, ok := cache.Get(key)
-	if ok && val != nil {
-		specVal, ok1 := val.(*ReplicationSpecVal)
-		if ok1 {
-			specVal.spec = nil
-		}
-	}
+	service.updateCache(replicationId, nil)
+
 	service.writeUiLog(spec, "removed", "")
 
 	return spec, nil
@@ -291,11 +286,7 @@ func (service *ReplicationSpecService) delReplicationSpec_internal(replicationId
 
 func (service *ReplicationSpecService) AllReplicationSpecs() (map[string]*metadata.ReplicationSpecification, error) {
 	specs := make(map[string]*metadata.ReplicationSpecification, 0)
-	cache, err := service.getCache()
-	if err != nil {
-		return nil, errors.New("Can't instantiate cahe")
-	}
-	values_map := cache.GetMap()
+	values_map := service.getCache().GetMap()
 	for key, val := range values_map {
 		if val.(*ReplicationSpecVal).spec != nil {
 			specs[key] = val.(*ReplicationSpecVal).spec
@@ -333,6 +324,20 @@ func (service *ReplicationSpecService) AllReplicationSpecIdsForBucket(bucket str
 	return repIds, nil
 }
 
+func (service *ReplicationSpecService) removeSpecFromCache(specId string) error {
+	//soft remove it from cache by setting SpecVal.spec = nil, but keep the key there
+	//so that the derived object can still be retrieved and be acted on for cleaning-up.
+	val, ok := service.getCache().Get(specId)
+	if ok && val != nil {
+		specVal, ok1 := val.(*ReplicationSpecVal)
+		if ok1 {
+			specVal.spec = nil
+		}
+	}
+
+	return nil
+}
+
 func constructReplicationSpec(value []byte, rev interface{}) (*metadata.ReplicationSpecification, error) {
 	if value == nil {
 		return nil, nil
@@ -348,31 +353,61 @@ func constructReplicationSpec(value []byte, rev interface{}) (*metadata.Replicat
 }
 
 // Implement callback function for metakv
-func (service *ReplicationSpecService) ReplicationSpecServiceCallback(path string, value []byte, rev interface{}) (string, interface{}, interface{}, error) {
+func (service *ReplicationSpecService) ReplicationSpecServiceCallback(path string, value []byte, rev interface{}) error {
 	service.logger.Infof("ReplicationSpecServiceCallback called on path = %v\n", path)
 
-	spec, err := constructReplicationSpec(value, rev)
+	newSpec, err := constructReplicationSpec(value, rev)
 	if err != nil {
 		service.logger.Errorf("Error marshaling replication spec. value=%v, err=%v\n", string(value), err)
-		return "", nil, nil, err
+		return err
 	}
 
-	repId := service.getReplicationIdFromKey(GetKeyFromPath(path))
+	specId := service.getReplicationIdFromKey(GetKeyFromPath(path))
 
-	cache, err := service.getCache()
-	if err != nil || cache == nil {
-		return "", nil, nil, err
+	service.updateCache(specId, newSpec)
+
+	return nil
+
+}
+
+func (service *ReplicationSpecService) updateCache(specId string, newSpec *metadata.ReplicationSpecification) error {
+	//this ensures that all accesses to the cache in this method are a single atomic operation,
+	// this is needed because this method can be called concurrently
+	service.cache_lock.Lock()
+	defer service.cache_lock.Unlock()
+
+	oldSpec, err := service.replicationSpec(specId)
+	if err != nil {
+		oldSpec = nil
 	}
 
-	if spec != nil {
-		service.cacheSpec(cache, repId, spec)
+	updated := false
+	if newSpec == nil {
+		if oldSpec != nil {
+			// replication spec has been deleted
+			service.removeSpecFromCache(specId)
+			updated = true
+		}
 	} else {
-		//the spec is deleted, remove it from the cache
-		service.cacheSpec(cache, repId, nil)
+		// replication spec has been created or updated
+
+		// no need to update cache if newSpec is the same as the one already in cache
+		if !newSpec.SameSpec(oldSpec) {
+			service.cacheSpec(service.getCache(), specId, newSpec)
+			specId = newSpec.Id
+			updated = true
+		}
+
 	}
 
-	return repId, nil, spec, nil
+	if updated {
+		err := service.metadata_change_callback(specId, oldSpec, newSpec)
+		if err != nil {
+			service.logger.Error(err.Error())
+		}
+	}
 
+	return nil
 }
 
 func (service *ReplicationSpecService) writeUiLog(spec *metadata.ReplicationSpecification, action, reason string) {
@@ -540,10 +575,7 @@ func (service *ReplicationSpecService) cacheSpec(cache *MetadataCache, specId st
 }
 
 func (service *ReplicationSpecService) SetDerivedObj(specId string, derivedObj interface{}) error {
-	cache, err := service.getCache()
-	if err != nil {
-		return errors.New("Can't instantiate cahe")
-	}
+	cache := service.getCache()
 
 	cachedVal, ok := cache.Get(specId)
 	if !ok || cachedVal == nil {
@@ -566,11 +598,7 @@ func (service *ReplicationSpecService) SetDerivedObj(specId string, derivedObj i
 }
 
 func (service *ReplicationSpecService) GetDerviedObj(specId string) (interface{}, error) {
-	cache, err := service.getCache()
-	if err != nil {
-		return nil, errors.New("Can't instantiate cahe")
-	}
-	cachedVal, ok := cache.Get(specId)
+	cachedVal, ok := service.getCache().Get(specId)
 	if !ok || cachedVal == nil {
 		return nil, fmt.Errorf(ReplicationSpecNotFoundErrorMessage)
 	}

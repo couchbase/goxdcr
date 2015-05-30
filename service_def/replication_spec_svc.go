@@ -10,6 +10,7 @@
 package service_def
 
 import (
+	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/metadata"
 )
 
@@ -29,7 +30,7 @@ type ReplicationSpecSvc interface {
 	IsReplicationValidationError(err error) bool
 
 	// Service call back function for replication spec changed event
-	ReplicationSpecServiceCallback(path string, value []byte, rev interface{}) (string, interface{}, interface{}, error)
+	ReplicationSpecServiceCallback(path string, value []byte, rev interface{}) error
 
 	ValidateAndGC(spec *metadata.ReplicationSpecification)
 
@@ -42,4 +43,9 @@ type ReplicationSpecSvc interface {
 
 	//set the derived object (i.e ReplicationStatus) for the specification
 	SetDerivedObj(specId string, derivedObj interface{}) error
+
+	// set the metadata change call back method
+	// when the replication spec service makes changes, it needs to call the call back
+	// explicitly, so that the actions can be taken immediately
+	SetMetadataChangeHandlerCallback(callBack base.MetadataChangeHandlerCallback)
 }

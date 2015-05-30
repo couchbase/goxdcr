@@ -143,3 +143,10 @@ func (seqno_obj *SeqnoWithLock) setSeqno(seqno uint64, lock bool) {
 	}
 	seqno_obj.seqno = seqno
 }
+
+// Callback function, which typically is a method in metadata service, which translates metakv call back parameters into metadata objects
+// The function may do something addtional that is specific to the metadata service, e.g., caching the new metadata
+type MetadataServiceCallback func(path string, value []byte, rev interface{}) error
+
+// Callback function for the handling of metadata changed event
+type MetadataChangeHandlerCallback func(metadataId string, oldMetadata interface{}, newMetadata interface{}) error

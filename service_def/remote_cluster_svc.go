@@ -10,6 +10,7 @@
 package service_def
 
 import (
+	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/metadata"
 )
 
@@ -40,5 +41,10 @@ type RemoteClusterSvc interface {
 	CheckAndUnwrapRemoteClusterError(err error) (bool, error)
 
 	// Service call back function for remote cluster changed event
-	RemoteClusterServiceCallback(path string, value []byte, rev interface{}) (string, interface{}, interface{}, error)
+	RemoteClusterServiceCallback(path string, value []byte, rev interface{}) error
+
+	// set the metadata change call back method
+	// when the remote cluster service makes changes to remote cluster references, it needs to call the call back
+	// explicitly, so that the actions can be taken immediately
+	SetMetadataChangeHandlerCallback(callBack base.MetadataChangeHandlerCallback)
 }

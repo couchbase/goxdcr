@@ -358,6 +358,16 @@ func (s *ReplicationSettings) ToDefaultSettingsMap() map[string]interface{} {
 	return s.toMap(true)
 }
 
+func (s *ReplicationSettings) Clone() *ReplicationSettings {
+	if s == nil {
+		return nil
+	}
+
+	clone := &ReplicationSettings{}
+	clone.UpdateSettingsFromMap(s.ToMap())
+	return clone
+}
+
 func (s *ReplicationSettings) toMap(isDefaultSettings bool) map[string]interface{} {
 	settings_map := make(map[string]interface{})
 	if !isDefaultSettings {

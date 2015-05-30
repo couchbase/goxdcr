@@ -16,44 +16,34 @@ import (
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
+	"github.com/couchbase/goxdcr/metadata_svc"
 	"github.com/couchbase/goxdcr/pipeline_manager"
 	"github.com/couchbase/goxdcr/service_def"
-	"github.com/couchbase/goxdcr/metadata_svc"
 	"sync"
 )
 
-// Callback function, which typically is a method in metadata service, which translates metakv call back parameters into metadata objects
-// The function may do something addtional that is specific to the metadata service, e.g., caching the new metadata
-type MetadataServiceCallback func(path string, value []byte, rev interface{}) (metadataId string, oldMetadata interface{}, newMetadata interface{}, err error)
-
-// Callback function for the handling of metadata changed event
-type MetadataChangeHandlerCallback func(metadataId string, oldMetadata interface{}, newMetadata interface{}) error
-
 // generic listener for metadata stored in metakv
 type MetakvChangeListener struct {
-	id                                string
-	dirpath                           string
-	cancel_chan                       chan struct{}
-	number_of_retry                   int
-	children_waitgrp                  *sync.WaitGroup
-	metadata_service_call_back        MetadataServiceCallback
-	metadata_change_handler_call_back MetadataChangeHandlerCallback
-	logger                            *log.CommonLogger
+	id                         string
+	dirpath                    string
+	cancel_chan                chan struct{}
+	number_of_retry            int
+	children_waitgrp           *sync.WaitGroup
+	metadata_service_call_back base.MetadataServiceCallback
+	logger                     *log.CommonLogger
 }
 
 func NewMetakvChangeListener(id, dirpath string, cancel_chan chan struct{},
 	children_waitgrp *sync.WaitGroup,
-	metadata_service_call_back MetadataServiceCallback,
-	metadata_change_handler_call_back MetadataChangeHandlerCallback,
+	metadata_service_call_back base.MetadataServiceCallback,
 	logger_ctx *log.LoggerContext,
 	logger_name string) *MetakvChangeListener {
 	return &MetakvChangeListener{
-		id:                                id,
-		dirpath:                           dirpath,
-		cancel_chan:                       cancel_chan,
-		children_waitgrp:                  children_waitgrp,
-		metadata_service_call_back:        metadata_service_call_back,
-		metadata_change_handler_call_back: metadata_change_handler_call_back,
+		id:                         id,
+		dirpath:                    dirpath,
+		cancel_chan:                cancel_chan,
+		children_waitgrp:           children_waitgrp,
+		metadata_service_call_back: metadata_service_call_back,
 		logger: log.NewLogger(logger_name, logger_ctx),
 	}
 }
@@ -69,10 +59,6 @@ func (mcl *MetakvChangeListener) Start() error {
 
 	mcl.logger.Infof("Started MetakvChangeListener %v\n", mcl.Id())
 	return nil
-}
-
-func (mcl *MetakvChangeListener) SetMetadataChangeHandlerCallBack(metadata_change_handler_call_back MetadataChangeHandlerCallback) {
-	mcl.metadata_change_handler_call_back = metadata_change_handler_call_back
 }
 
 func (mcl *MetakvChangeListener) observeChildren() {
@@ -95,17 +81,9 @@ func (mcl *MetakvChangeListener) metakvCallback(path string, value []byte, rev i
 
 // Implement callback function for metakv
 func (mcl *MetakvChangeListener) metakvCallback_async(path string, value []byte, rev interface{}) {
-	metadataId, oldMetadata, newMetadata, err := mcl.metadata_service_call_back(path, value, rev)
+	err := mcl.metadata_service_call_back(path, value, rev)
 	if err != nil {
 		mcl.logger.Errorf("Error calling metadata service call back for listener %v. err=%v\n", mcl.Id(), err)
-		return
-	}
-
-	if mcl.metadata_change_handler_call_back != nil {
-		err = mcl.metadata_change_handler_call_back(metadataId, oldMetadata, newMetadata)
-		if err != nil {
-			mcl.logger.Errorf("Error calling metadata change handler call back for listener %v. err=%v\n", mcl.Id(), err)
-		}
 	}
 
 	return
@@ -145,31 +123,31 @@ func NewReplicationSpecChangeListener(repl_spec_svc service_def.ReplicationSpecS
 			cancel_chan,
 			children_waitgrp,
 			repl_spec_svc.ReplicationSpecServiceCallback,
-			nil,
 			logger_ctx,
 			"ReplicationSpecChangeListener"),
 	}
-
-	rscl.metadata_change_handler_call_back = rscl.replicationSpecChangeHandlerCallback
 	return rscl
 }
 
 // Handler callback for replication spec changed event
-// note that oldSpec is always nil since repl spec service has no way of retrieving it. it will be retrieved from pipeline_manager
 func (rscl *ReplicationSpecChangeListener) replicationSpecChangeHandlerCallback(changedSpecId string, oldSpecObj interface{}, newSpecObj interface{}) error {
-	rscl.logger.Infof("specChangedCallback called on id = %v\n", changedSpecId)
-
 	topic := changedSpecId
 
-	var newSpec *metadata.ReplicationSpecification
-	if newSpecObj != nil {
-		var ok bool
-		newSpec, ok = newSpecObj.(*metadata.ReplicationSpecification)
-		if !ok {
-			errMsg := fmt.Sprintf("Metadata, %v, is not of replication spec type\n", newSpecObj)
-			rscl.logger.Errorf(errMsg)
-			return errors.New(errMsg)
-		}
+	oldSpec, err := rscl.validateReplicationSpec(oldSpecObj)
+	if err != nil {
+		return err
+	}
+	newSpec, err := rscl.validateReplicationSpec(newSpecObj)
+	if err != nil {
+		return err
+	}
+
+	rscl.logger.Infof("specChangedCallback called on id = %v, oldSpec=%v, newSpec=%v\n", topic, oldSpec, newSpec)
+	if oldSpec != nil {
+		rscl.logger.Infof("old spec settings=%v\n", oldSpec.Settings)
+	}
+	if newSpec != nil {
+		rscl.logger.Infof("new spec settings=%v\n", newSpec.Settings)
 	}
 
 	if newSpec == nil {
@@ -190,8 +168,8 @@ func (rscl *ReplicationSpecChangeListener) replicationSpecChangeHandlerCallback(
 	//if the replication doesn't exit, it is treated the same as it exits, but it is paused
 	specActive_old := false
 	var oldSettings *metadata.ReplicationSettings = nil
-	if pipeline_manager.ReplicationStatus(topic) != nil {
-		oldSettings = pipeline_manager.ReplicationStatus(topic).Settings()
+	if oldSpec != nil {
+		oldSettings = oldSpec.Settings
 		specActive_old = oldSettings.Active
 	}
 
@@ -230,6 +208,21 @@ func (rscl *ReplicationSpecChangeListener) replicationSpecChangeHandlerCallback(
 		// nothing needs to be done
 		return nil
 	}
+}
+
+func (rscl *ReplicationSpecChangeListener) validateReplicationSpec(specObj interface{}) (*metadata.ReplicationSpecification, error) {
+	if specObj == nil {
+		return nil, nil
+	}
+
+	spec, ok := specObj.(*metadata.ReplicationSpecification)
+	if !ok {
+		errMsg := fmt.Sprintf("Metadata, %v, is not of replication spec type\n", specObj)
+		rscl.logger.Errorf(errMsg)
+		return nil, errors.New(errMsg)
+	}
+
+	return spec, nil
 }
 
 // whether there are critical changes to the replication spec that require pipeline reconstruction
@@ -292,21 +285,16 @@ func NewRemoteClusterChangeListener(remote_cluster_svc service_def.RemoteCluster
 			cancel_chan,
 			children_waitgrp,
 			remote_cluster_svc.RemoteClusterServiceCallback,
-			nil,
 			logger_ctx,
 			"RemoteClusterChangeListener"),
 		repl_spec_svc,
 		remote_cluster_svc,
 	}
-
-	rccl.metadata_change_handler_call_back = rccl.remoteClusterChangeHandlerCallback
 	return rccl
 }
 
 // Handler callback for remote cluster changed event
 func (rccl *RemoteClusterChangeListener) remoteClusterChangeHandlerCallback(remoteClusterRefId string, oldRemoteClusterRefObj interface{}, newRemoteClusterRefObj interface{}) error {
-	rccl.logger.Infof("remoteClusterChangedCallback called on refId = %v\n", remoteClusterRefId)
-
 	oldRemoteClusterRef, err := rccl.validateRemoteClusterRef(oldRemoteClusterRefObj)
 	if err != nil {
 		return err
@@ -315,6 +303,8 @@ func (rccl *RemoteClusterChangeListener) remoteClusterChangeHandlerCallback(remo
 	if err != nil {
 		return err
 	}
+
+	rccl.logger.Infof("remoteClusterChangedCallback called on id = %v, oldRef=%v, newRef=%v\n", remoteClusterRefId, oldRemoteClusterRef.String(), newRemoteClusterRef.String())
 
 	if oldRemoteClusterRef == nil {
 		// nothing to do if remote cluster has been created

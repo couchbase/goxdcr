@@ -32,10 +32,10 @@ import (
 	"os"
 	"reflect"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
-	"strconv"
 )
 
 var logger_rm *log.CommonLogger = log.NewLogger("ReplicationManager", log.DefaultLoggerContext)
@@ -158,6 +158,7 @@ func (rm *replicationManager) initMetadataChangeMonitor() {
 		rm.children_waitgrp,
 		log.DefaultLoggerContext)
 	mcm.RegisterListener(replicationSpecChangeListener)
+	rm.repl_spec_svc.SetMetadataChangeHandlerCallback(replicationSpecChangeListener.replicationSpecChangeHandlerCallback)
 
 	remoteClusterChangeListener := NewRemoteClusterChangeListener(
 		rm.remote_cluster_svc,
@@ -167,6 +168,7 @@ func (rm *replicationManager) initMetadataChangeMonitor() {
 		log.DefaultLoggerContext)
 
 	mcm.RegisterListener(remoteClusterChangeListener)
+	rm.remote_cluster_svc.SetMetadataChangeHandlerCallback(remoteClusterChangeListener.remoteClusterChangeHandlerCallback)
 
 	mcm.Start()
 }
