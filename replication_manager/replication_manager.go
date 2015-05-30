@@ -35,6 +35,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"strconv"
 )
 
 var logger_rm *log.CommonLogger = log.NewLogger("ReplicationManager", log.DefaultLoggerContext)
@@ -802,10 +803,16 @@ func logAuditErrors(err error) {
 }
 
 func GoMaxProcs() int {
-	max_procs := 4
-	if runtime.NumCPU() < 4 {
-		max_procs = runtime.NumCPU()
+	max_procs_str := os.Getenv("GOXDCR_GOMAXPROCS")
+	var max_procs int
+	max_procs, err := strconv.Atoi(max_procs_str)
+	if err != nil {
+		max_procs = 4
+		if runtime.NumCPU() < 4 {
+			max_procs = runtime.NumCPU()
+		}
 	}
 	logger_rm.Infof("GOMAXPROCS=%v\n", max_procs)
 	return max_procs
+
 }

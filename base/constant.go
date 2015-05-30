@@ -80,7 +80,7 @@ var GometaRequestPortNumber uint16 = 11000
 var AdminportReadTimeout = 1 * time.Second
 
 // write timeout for golib's http server.
-var AdminportWriteTimeout = 10 * time.Second
+var AdminportWriteTimeout = 180 * time.Second
 
 // default time out for outgoing http requests if it is not explicitly specified
 var DefaultHttpTimeout = 180 * time.Second
