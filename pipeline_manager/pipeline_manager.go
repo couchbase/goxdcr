@@ -279,10 +279,6 @@ func (pipelineMgr *pipelineManager) startPipeline(topic string) (common.Pipeline
 		rep_status.RecordProgress("Pipeline is constructed")
 		rep_status.SetPipeline(p)
 
-		//config request pool
-		pool_max_size := getRequestPoolSize(rep_status, len(p.Targets()))
-		rep_status.ObjectPool().SetMaxSize(pool_max_size)
-
 		pipelineMgr.logger.Infof("Pipeline %v is constructed, start it", p.InstanceId())
 		p.SetProgressRecorder(rep_status.RecordProgress)
 		err = p.Start(rep_status.SettingsMap())

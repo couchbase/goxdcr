@@ -485,12 +485,14 @@ func IsSeriousNetError(err error) bool {
 	if err == nil {
 		return false
 	}
+	
+	errStr := err.Error()
 	netError, ok := err.(*net.OpError)
 	return err == syscall.EPIPE ||
 		err == io.EOF ||
-		strings.Contains(err.Error(), "EOF") ||
-		strings.Contains(err.Error(), "use of closed network connection") ||
-		strings.Contains(err.Error(), "connection reset by peer") ||
-		strings.Contains(err.Error(), "http: can't write HTTP request on broken connection") ||
+		strings.Contains(errStr, "EOF") ||
+		strings.Contains(errStr, "use of closed network connection") ||
+		strings.Contains(errStr, "connection reset by peer") ||
+		strings.Contains(errStr, "http: can't write HTTP request on broken connection") ||
 		(ok && (!netError.Temporary() && !netError.Timeout()))
 }

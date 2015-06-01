@@ -792,7 +792,7 @@ func (ckmgr *CheckpointManager) OnEvent(eventType common.ComponentEventType,
 				defer failoverlog_obj.lock.Unlock()
 
 				failoverlog_obj.failoverlog = flog
-				ckmgr.logger.Infof("Got failover log for vb=%v\n", vbno)
+				ckmgr.logger.Tracef("Got failover log for vb=%v\n", vbno)
 			} else {
 				panic(fmt.Sprintf("Received failoverlog on an unknown vb=%v\n", vbno))
 			}

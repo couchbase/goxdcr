@@ -577,7 +577,7 @@ func (connPoolMgr *connPoolMgr) fillPool(p ConnPool, connectionSize int) error {
 					p.Release(mcClient)
 					connPoolMgr.logger.Info("A client connection is established")
 				} else {
-					connPoolMgr.logger.Errorf("error establishing new connection for pool %v", p.Name())
+					connPoolMgr.logger.Errorf("error establishing new connection for pool %v, connectionsToCreate=%v, err=%v", p.Name(), connectionsToCreate, err)
 				}
 			}
 		}(connectionsToCreate, waitGrp, f)

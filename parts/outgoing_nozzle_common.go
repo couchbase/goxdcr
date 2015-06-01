@@ -12,7 +12,6 @@ package parts
 
 import (
 	"encoding/binary"
-	"fmt"
 	mc "github.com/couchbase/gomemcached"
 	base "github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
@@ -84,8 +83,11 @@ type documentMetadata struct {
 	deletion bool
 }
 
-func (doc_meta documentMetadata) uniqueKey() string {
-	return fmt.Sprintf("%s_%v", doc_meta.key, doc_meta.revSeq)
+func (doc_meta documentMetadata) uniqueKey() []byte {
+	ret := make([]byte, len(doc_meta.key)+8)
+	copy(ret[0:len(doc_meta.key)], doc_meta.key)
+	binary.BigEndian.PutUint64 (ret[len(doc_meta.key):], doc_meta.revSeq)
+	return ret
 }
 
 // does not return error since the assumption is that settings have been validated prior
@@ -174,7 +176,7 @@ func (b *dataBatch) accumuBatch(req *base.WrappedMCRequest, classifyFunc func(re
 		}
 		if !classifyFunc(req.Req) {
 			docMetadata := decodeSetMetaReq(req.Req)
-			b.bigDoc_map[docMetadata.uniqueKey()] = req
+			b.bigDoc_map[string(docMetadata.uniqueKey())] = req
 		}
 		b.curSize += size
 		if b.curCount < b.capacity_count && b.curSize < b.capacity_size*1000 {
@@ -199,7 +201,7 @@ func needSend(req *mc.MCRequest, batch *dataBatch, logger *log.CommonLogger) boo
 		return false
 	} else {
 		docMetadata := decodeSetMetaReq(req)
-		_, ok := batch.bigDoc_noRep_map[docMetadata.uniqueKey()]
+		_, ok := batch.bigDoc_noRep_map[string(docMetadata.uniqueKey())]
 		return !ok
 	}
 }

@@ -79,6 +79,9 @@ const (
 	DELETION_RECEIVED_DCP_METRIC = "deletion_received_from_dcp"
 	SET_RECEIVED_DCP_METRIC      = "set_received_from_dcp"
 
+	DCP_DISPATCH_TIME_METRIC = "dcp_dispatch_time"
+	DCP_DATACH_LEN = "dcp_datach_length"
+
 	//	TIME_COMMITTING_METRIC = "time_committing"
 	//rate
 	RATE_REPLICATED_METRIC = "rate_replicated"
@@ -541,7 +544,7 @@ func (stats_mgr *StatisticsManager) calculateChangesLeft(docs_processed int64) (
 		return 0, err
 	}
 	changes_left := total_changes - docs_processed
-	stats_mgr.logger.Infof("%v total_docs=%v, docs_processed=%v, changes_left=%v\n", total_changes, docs_processed, changes_left)
+	stats_mgr.logger.Infof("%v total_docs=%v, docs_processed=%v, changes_left=%v\n", stats_mgr.pipeline.Topic(), total_changes, docs_processed, changes_left)
 	return changes_left, nil
 }
 
@@ -643,6 +646,8 @@ func (stats_mgr *StatisticsManager) initOverviewRegistry() {
 	overview_registry.Register(DOCS_LATENCY_METRIC, metrics.NewCounter())
 	overview_registry.Register(META_LATENCY_METRIC, metrics.NewCounter())
 	overview_registry.Register(DOCS_CHECKED_METRIC, docs_checked_counter)
+	overview_registry.Register(DCP_DISPATCH_TIME_METRIC, metrics.NewCounter())
+	overview_registry.Register(DCP_DATACH_LEN, metrics.NewCounter())
 }
 
 func (stats_mgr *StatisticsManager) Start(settings map[string]interface{}) error {
@@ -847,6 +852,9 @@ func (dcp_collector *dcpCollector) Mount(pipeline common.Pipeline, stats_mgr *St
 		registry.Register(DELETION_RECEIVED_DCP_METRIC, metrics.NewCounter())
 		registry.Register(SET_RECEIVED_DCP_METRIC, metrics.NewCounter())
 		dcp_part.RegisterComponentEventListener(common.DataReceived, dcp_collector)
+		registry.Register(DCP_DISPATCH_TIME_METRIC, metrics.NewHistogram(metrics.NewUniformSample(stats_mgr.sample_size)))
+		registry.Register(DCP_DATACH_LEN, metrics.NewCounter())
+
 	}
 	return nil
 }
@@ -872,6 +880,14 @@ func (dcp_collector *dcpCollector) OnEvent(eventType common.ComponentEventType,
 		} else {
 			panic(fmt.Sprintf("Invalid opcode, %v, in DataReceived event from %v.", uprEvent.Opcode, component.Id()))
 		}
+	} else if eventType == common.DataProcessed {
+		dcp_dispatch_time := otherInfos[parts.EVENT_DCP_DISPATCH_TIME].(float64)
+		registry := dcp_collector.stats_mgr.registries[component.Id()]
+		registry.Get(DCP_DISPATCH_TIME_METRIC).(metrics.Histogram).Sample().Update(int64(dcp_dispatch_time))
+	}else if eventType == common.StatsUpdate {
+		registry := dcp_collector.stats_mgr.registries[component.Id()]
+		dcp_datach_len := otherInfos[parts.EVENT_DCP_DATACH_LEN].(int)
+		setCounter(registry.Get(DCP_DATACH_LEN).(metrics.Counter), dcp_datach_len)
 	}
 }
 

@@ -30,9 +30,12 @@ import (
 
 const (
 	// start settings key name
-	DCP_VBTimestamp        = "VBTimestamps"
-	DCP_VBTimestampUpdator = "VBTimestampUpdater"
-	DCP_Connection_Prefix  = "xdcr:"
+	DCP_VBTimestamp         = "VBTimestamps"
+	DCP_VBTimestampUpdator  = "VBTimestampUpdater"
+	DCP_Connection_Prefix   = "xdcr:"
+	EVENT_DCP_DISPATCH_TIME = "dcp_dispatch_time"
+	EVENT_DCP_DATACH_LEN    = "dcp_datach_length"
+	DCP_Stats_Interval      = "stats_interval"
 )
 
 type DcpStreamState int
@@ -102,6 +105,9 @@ type DcpNozzle struct {
 	max_dcp_miss_count int
 
 	xdcr_topology_svc service_def.XDCRCompTopologySvc
+
+	stats_interval           time.Duration
+	stats_interval_change_ch chan bool
 }
 
 func NewDcpNozzle(id string,
@@ -120,17 +126,18 @@ func NewDcpNozzle(id string,
 	part := NewAbstractPartWithLogger(id, server.Logger())
 
 	dcp := &DcpNozzle{
-		bucket:                bucket,
-		vbnos:                 vbnos,
-		GenServer:             server,           /*gen_server.GenServer*/
-		AbstractPart:          part,             /*AbstractPart*/
-		bOpen:                 true,             /*bOpen	bool*/
-		childrenWaitGrp:       sync.WaitGroup{}, /*childrenWaitGrp sync.WaitGroup*/
-		lock_uprFeed:          sync.Mutex{},
-		cur_ts:                make(map[uint16]*vbtsWithLock),
-		vb_stream_status:      make(map[uint16]*streamStatusWithLock),
-		vb_stream_status_lock: &sync.RWMutex{},
-		xdcr_topology_svc:     xdcr_topology_svc,
+		bucket:                   bucket,
+		vbnos:                    vbnos,
+		GenServer:                server,           /*gen_server.GenServer*/
+		AbstractPart:             part,             /*AbstractPart*/
+		bOpen:                    true,             /*bOpen	bool*/
+		childrenWaitGrp:          sync.WaitGroup{}, /*childrenWaitGrp sync.WaitGroup*/
+		lock_uprFeed:             sync.Mutex{},
+		cur_ts:                   make(map[uint16]*vbtsWithLock),
+		vb_stream_status:         make(map[uint16]*streamStatusWithLock),
+		vb_stream_status_lock:    &sync.RWMutex{},
+		xdcr_topology_svc:        xdcr_topology_svc,
+		stats_interval_change_ch: make(chan bool, 1),
 	}
 
 	msg_callback_func = nil
@@ -152,8 +159,18 @@ func (dcp *DcpNozzle) initialize(settings map[string]interface{}) (err error) {
 
 	dcp.uprFeed, err = dcp.bucket.StartUprFeed(DCP_Connection_Prefix+dcp.Id(), uint32(0))
 
+	if err != nil {
+		return err
+	}
+
 	// fetch start timestamp from settings
 	dcp.vbtimestamp_updater = settings[DCP_VBTimestampUpdator].(func(uint16, uint64) (*base.VBTimestamp, error))
+
+	if val, ok := settings[DCP_Stats_Interval]; ok {
+		dcp.stats_interval = time.Duration(val.(int)) * time.Millisecond
+	} else {
+		return errors.New("setting 'stats_interval' is missing")
+	}
 
 	//initialize vb_stream_status
 	dcp.vb_stream_status_lock.Lock()
@@ -194,10 +211,10 @@ func (dcp *DcpNozzle) Start(settings map[string]interface{}) error {
 
 	dcp.Logger().Infof("%v starting ....\n", dcp.Id())
 	err = dcp.initialize(settings)
-	dcp.Logger().Infof("%v is initialized\n", dcp.Id())
 	if err != nil {
 		return err
 	}
+	dcp.Logger().Infof("%v is initialized\n", dcp.Id())
 
 	// start gen_server
 	dcp.start_time = time.Now()
@@ -205,6 +222,9 @@ func (dcp *DcpNozzle) Start(settings map[string]interface{}) error {
 	if err != nil {
 		return err
 	}
+
+	//start datachan length stats collection
+	go dcp.collectDcpDataChanLen(settings)
 
 	// start data processing routine
 	dcp.childrenWaitGrp.Add(1)
@@ -259,7 +279,11 @@ func (dcp *DcpNozzle) closeUprStreams() error {
 		errMap := make(map[uint16]error)
 
 		for _, vbno := range dcp.GetVBList() {
-			if dcp.getStreamState(vbno) == Dcp_Stream_Active {
+			stream_state, err := dcp.getStreamState(vbno)
+			if err != nil {
+				return err
+			}
+			if stream_state == Dcp_Stream_Active {
 				err := dcp.uprFeed.UprCloseStream(vbno, opaque)
 				if err != nil {
 					errMap[vbno] = err
@@ -375,6 +399,7 @@ func (dcp *DcpNozzle) processData() (err error) {
 				if dcp.IsOpen() {
 					switch m.Opcode {
 					case gomemcached.UPR_MUTATION, gomemcached.UPR_DELETION, gomemcached.UPR_EXPIRATION:
+						start_time := time.Now()
 						dcp.incCounterReceived()
 						dcp.RaiseEvent(common.DataReceived, m, dcp, nil /*derivedItems*/, nil /*otherInfos*/)
 						dcp.Logger().Tracef("%v, Mutation %v:%v:%v <%v>, counter=%v, ops_per_sec=%v\n",
@@ -387,7 +412,11 @@ func (dcp *DcpNozzle) processData() (err error) {
 						}
 						dcp.incCounterSent()
 						// raise event for statistics collection
-						dcp.RaiseEvent(common.DataProcessed, m, dcp, nil /*derivedItems*/, nil /*otherInfos*/)
+						dispatch_time := time.Since(start_time)
+						additionalInfo1 := make(map[string]interface{})
+						additionalInfo1[EVENT_DCP_DISPATCH_TIME] = dispatch_time.Seconds() * 1000
+
+						dcp.RaiseEvent(common.DataProcessed, m, dcp, nil /*derivedItems*/, additionalInfo1 /*otherInfos*/)
 					default:
 						dcp.Logger().Debugf("Uprevent OpCode=%v, is skipped\n", m.Opcode)
 					}
@@ -421,35 +450,56 @@ func (dcp *DcpNozzle) handleGeneralError(err error) {
 	}
 }
 
-// start, restart or shutdown streams
+// start steam request will be sent when starting seqno is negotiated, it may take a few
 func (dcp *DcpNozzle) startUprStreams() error {
-	dcp.Logger().Infof("%v: startUprStreams...\n", dcp.Id())
+	var err error = nil
+	dcp.Logger().Infof("%v: startUprStreams for %v...\n", dcp.Id(), dcp.GetVBList())
+
+	init_ch := make(chan bool, 1)
+	init_ch <- true
+
 	finch := dcp.finch
+
+	ticker := time.NewTicker(100 * time.Millisecond)
 	for {
 		select {
 		case <-finch:
 			goto done
-		default:
-			streams_to_start := dcp.nonInitDcpStreams()
-			if len(streams_to_start) == 0 {
+		case <-init_ch:
+			err = dcp.startUprStreams_internal(dcp.GetVBList())
+			if err != nil {
+				return err
+			}
+		case <-ticker.C:
+			streams_inactive := dcp.nonInitDcpStreams()
+			if len(streams_inactive) == 0 {
 				goto done
 			}
-			for _, vbno := range streams_to_start {
-				vbts, err := dcp.getTS(vbno, true)
-				if err == nil && vbts != nil {
-					err = dcp.startUprStream(vbno, vbts)
-					if err != nil {
-						dcp.handleGeneralError(err)
-						dcp.Logger().Infof("%v: startUprStreams errored out, err=%v\n", dcp.Id(), err)
-						return err
-					}
-
-				}
+			err = dcp.startUprStreams_internal(streams_inactive)
+			if err != nil {
+				return err
 			}
 		}
 	}
 done:
 	dcp.Logger().Infof("%v: all dcp stream are initialized.\n", dcp.Id())
+
+	return nil
+}
+
+func (dcp *DcpNozzle) startUprStreams_internal(streams_to_start []uint16) error {
+	for _, vbno := range streams_to_start {
+		vbts, err := dcp.getTS(vbno, true)
+		if err == nil && vbts != nil {
+			err = dcp.startUprStream(vbno, vbts)
+			if err != nil {
+				dcp.handleGeneralError(err)
+				dcp.Logger().Infof("%v: startUprStreams errored out, err=%v\n", dcp.Id(), err)
+				return err
+			}
+
+		}
+	}
 	return nil
 }
 
@@ -493,8 +543,8 @@ func (dcp *DcpNozzle) inactiveDcpStreams() []uint16 {
 	ret := []uint16{}
 	dcp.vb_stream_status_lock.RLock()
 	defer dcp.vb_stream_status_lock.RUnlock()
-	for vb, _ := range dcp.vb_stream_status {
-		if dcp.getStreamState(vb) != Dcp_Stream_Active {
+	for vb, statusobj := range dcp.vb_stream_status {
+		if statusobj.state != Dcp_Stream_Active {
 			ret = append(ret, vb)
 		}
 	}
@@ -505,8 +555,8 @@ func (dcp *DcpNozzle) nonInitDcpStreams() []uint16 {
 	ret := []uint16{}
 	dcp.vb_stream_status_lock.RLock()
 	defer dcp.vb_stream_status_lock.RUnlock()
-	for vb, _ := range dcp.vb_stream_status {
-		if dcp.getStreamState(vb) == Dcp_Stream_NonInit {
+	for vb, statusobj := range dcp.vb_stream_status {
+		if statusobj.state == Dcp_Stream_NonInit {
 			ret = append(ret, vb)
 		}
 	}
@@ -527,7 +577,15 @@ func (dcp *DcpNozzle) UpdateSettings(settings map[string]interface{}) error {
 		if !ok || new_ts == nil {
 			panic(fmt.Sprintf("setting %v should have type of map[uint16]*base.VBTimestamp", DCP_VBTimestamp))
 		}
-		return dcp.onUpdateStartingSeqno(new_ts)
+		err := dcp.onUpdateStartingSeqno(new_ts)
+		if err != nil {
+			return err
+		}
+	}
+
+	if _, ok := settings[DCP_Stats_Interval]; ok {
+		dcp.stats_interval = time.Duration(settings[DCP_Stats_Interval].(int)) *time.Millisecond
+		dcp.stats_interval_change_ch <-true
 	}
 
 	return nil
@@ -617,14 +675,14 @@ func (dcp *DcpNozzle) setStreamState(vbno uint16, streamState DcpStreamState, ne
 	}
 }
 
-func (dcp *DcpNozzle) getStreamState(vbno uint16) DcpStreamState {
+func (dcp *DcpNozzle) getStreamState(vbno uint16) (DcpStreamState, error) {
 	statusObj, ok := dcp.vb_stream_status[vbno]
 	if ok && statusObj != nil {
 		statusObj.lock.RLock()
 		defer statusObj.lock.RUnlock()
-		return statusObj.state
+		return statusObj.state, nil
 	} else {
-		panic(fmt.Sprintf("Try to get stream state to invalid vbno=%v", vbno))
+		return 0, fmt.Errorf("Try to get stream state to invalid vbno=%v", vbno)
 	}
 }
 
@@ -714,3 +772,22 @@ func (dcp *DcpNozzle) counterSent() uint32 {
 func (dcp *DcpNozzle) incCounterSent() {
 	atomic.AddUint32(&dcp.counter_sent, 1)
 }
+
+func (dcp *DcpNozzle) collectDcpDataChanLen(settings map[string]interface{}) {
+	ticker := time.NewTicker(dcp.stats_interval)
+	for {
+		select {
+		case <-dcp.finch:
+			return
+		case <-dcp.stats_interval_change_ch :
+			ticker.Stop()
+			ticker = time.NewTicker(dcp.stats_interval)	
+		case <-ticker.C:
+			additionalInfo := make(map[string]interface{})
+			additionalInfo[EVENT_DCP_DATACH_LEN] = len(dcp.uprFeed.C)
+			dcp.RaiseEvent(common.StatsUpdate, nil, dcp, nil, additionalInfo)
+		}
+	}
+
+}
+

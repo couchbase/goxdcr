@@ -79,7 +79,7 @@ func NewReplicationStatus(specId string, spec_getter ReplicationSpecGetter, logg
 		err_list:    PipelineErrorArray{},
 		spec_getter: spec_getter,
 		Lock:        &sync.RWMutex{},
-		obj_pool:    base.NewMCRequestPool(specId, 0, logger),
+		obj_pool:    base.NewMCRequestPool(specId, logger),
 		progress:    ""}
 
 	rep_status.Publish()
