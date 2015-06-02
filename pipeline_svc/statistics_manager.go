@@ -153,7 +153,7 @@ type StatisticsManager struct {
 	meta_endtime_map_lock sync.RWMutex
 
 	//temporary map to keep checkpointed seqnos
-	checkpointed_seqnos map[uint16]uint64
+	checkpointed_seqnos map[uint16]*base.SeqnoWithLock
 
 	//chan for stats update tickers -- new tickers are added each time stats interval is changed
 	update_ticker_ch chan *time.Ticker
@@ -202,11 +202,13 @@ func NewStatisticsManager(through_seqno_tracker_svc service_def.ThroughSeqnoTrac
 		active_vbs:                active_vbs,
 		wait_grp:                  &sync.WaitGroup{},
 		kv_mem_clients:            make(map[string]*mcc.Client),
-		checkpointed_seqnos:       make(map[uint16]uint64),
+		checkpointed_seqnos:       make(map[uint16]*base.SeqnoWithLock),
 		through_seqno_tracker_svc: through_seqno_tracker_svc,
 		cluster_info_svc:          cluster_info_svc,
 		xdcr_topology_svc:         xdcr_topology_svc}
 	stats_mgr.collectors = []MetricsCollector{&outNozzleCollector{}, &dcpCollector{}, &routerCollector{}, &checkpointMgrCollector{}}
+
+	stats_mgr.initialize()
 	return stats_mgr
 }
 
@@ -218,6 +220,14 @@ func GetStatisticsForPipeline(topic string) (*expvar.Map, error) {
 	}
 
 	return repl_status.GetOverviewStats(), nil
+}
+
+func (stats_mgr *StatisticsManager) initialize() {
+	for _, vb_list := range stats_mgr.active_vbs {
+		for _, vb := range vb_list {
+			stats_mgr.checkpointed_seqnos[vb] = base.NewSeqnoWithLock()
+		}
+	}
 }
 
 func (stats_mgr *StatisticsManager) cleanupBeforeExit() error {
@@ -529,8 +539,9 @@ func (stats_mgr *StatisticsManager) calculateDocsChecked() uint64 {
 	for vbno, vbts := range GetStartSeqnos(stats_mgr.pipeline, stats_mgr.logger) {
 		start_seqno := vbts.Seqno
 		var docs_checked_vb uint64 = 0
-		if stats_mgr.checkpointed_seqnos[vbno] > start_seqno {
-			docs_checked_vb = stats_mgr.checkpointed_seqnos[vbno]
+		checkpointed_seqno := stats_mgr.checkpointed_seqnos[vbno].GetSeqno()
+		if checkpointed_seqno > start_seqno {
+			docs_checked_vb = checkpointed_seqno
 		} else {
 			docs_checked_vb = start_seqno
 		}
@@ -986,7 +997,7 @@ func (ckpt_collector *checkpointMgrCollector) OnEvent(eventType common.Component
 	} else if eventType == common.CheckpointDoneForVB {
 		vbno := otherInfos[Vbno].(uint16)
 		ckpt_record := item.(metadata.CheckpointRecord)
-		ckpt_collector.stats_mgr.checkpointed_seqnos[vbno] = ckpt_record.Seqno
+		ckpt_collector.stats_mgr.checkpointed_seqnos[vbno].SetSeqno(ckpt_record.Seqno)
 
 	} else if eventType == common.CheckpointDone {
 		time_commit := otherInfos[TimeCommiting].(time.Duration).Seconds() * 1000

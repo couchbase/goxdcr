@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"github.com/couchbase/gomemcached"
 	"reflect"
+	"sync"
 	"time"
 )
 
@@ -89,4 +90,56 @@ type WrappedMCRequest struct {
 type MetadataChangeListener interface {
 	Id() string
 	Start() error
+}
+
+type SeqnoWithLock struct {
+	seqno uint64
+	lock  *sync.RWMutex
+}
+
+func NewSeqnoWithLock() *SeqnoWithLock {
+	return &SeqnoWithLock{0, &sync.RWMutex{}}
+}
+
+// the following methods should be sufficient for typical get/set operations
+func (seqno_obj *SeqnoWithLock) GetSeqno() uint64 {
+	return seqno_obj.getSeqno(true)
+}
+
+func (seqno_obj *SeqnoWithLock) SetSeqno(seqno uint64) {
+	seqno_obj.setSeqno(seqno, true)
+}
+
+// the following methods allow more than one get/set operations to be done in one transation
+func (seqno_obj *SeqnoWithLock) Lock() {
+	seqno_obj.lock.Lock()
+}
+
+func (seqno_obj *SeqnoWithLock) Unlock() {
+	seqno_obj.lock.Unlock()
+}
+
+func (seqno_obj *SeqnoWithLock) GetSeqnoWithoutLock() uint64 {
+	return seqno_obj.getSeqno(false)
+}
+
+func (seqno_obj *SeqnoWithLock) SetSeqnoWithoutLock(seqno uint64) {
+	seqno_obj.setSeqno(seqno, false)
+}
+
+
+func (seqno_obj *SeqnoWithLock) getSeqno(lock bool) uint64 {
+	if lock {
+		seqno_obj.lock.RLock()
+		defer seqno_obj.lock.RUnlock()
+	}
+	return seqno_obj.seqno
+}
+
+func (seqno_obj *SeqnoWithLock) setSeqno(seqno uint64, lock bool) {
+	if lock {
+		seqno_obj.lock.Lock()
+		defer seqno_obj.lock.Unlock()
+	}
+	seqno_obj.seqno = seqno
 }

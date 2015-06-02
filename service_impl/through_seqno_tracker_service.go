@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"github.com/couchbase/gomemcached"
 	mcc "github.com/couchbase/gomemcached/client"
+	"github.com/couchbase/goxdcr/base"
 	common "github.com/couchbase/goxdcr/common"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/parts"
@@ -27,7 +28,7 @@ type ThroughSeqnoTrackerSvc struct {
 	vb_map map[uint16]bool
 
 	// through_seqno seen by outnozzles based on the docs that are actually sent to target
-	through_seqno_map map[uint16]*SeqnoWithLock
+	through_seqno_map map[uint16]*base.SeqnoWithLock
 
 	// stores for each vb a sorted list of the seqnos that have been sent to and confirmed by target
 	vb_sent_seqno_list_map map[uint16]*SortedSeqnoListWithLock
@@ -46,32 +47,11 @@ type ThroughSeqnoTrackerSvc struct {
 
 	// tracks the last seen seqno streamed out by dcp, so that we can tell the gap between the last seen seqno
 	// and the current seen seqno
-	vb_last_seen_seqno_map map[uint16]*SeqnoWithLock
+	vb_last_seen_seqno_map map[uint16]*base.SeqnoWithLock
 
 	topic string
 
 	logger *log.CommonLogger
-}
-
-type SeqnoWithLock struct {
-	seqno uint64
-	lock  *sync.RWMutex
-}
-
-func newSeqnoWithLock() *SeqnoWithLock {
-	return &SeqnoWithLock{0, &sync.RWMutex{}}
-}
-
-func (seqno_obj *SeqnoWithLock) getSeqno() uint64 {
-	seqno_obj.lock.RLock()
-	defer seqno_obj.lock.RUnlock()
-	return seqno_obj.seqno
-}
-
-func (seqno_obj *SeqnoWithLock) setSeqno(seqno uint64) {
-	seqno_obj.lock.Lock()
-	defer seqno_obj.lock.Unlock()
-	seqno_obj.seqno = seqno
 }
 
 type SortedSeqnoListWithLock struct {
@@ -156,8 +136,8 @@ func NewThroughSeqnoTrackerSvc(logger_ctx *log.LoggerContext) *ThroughSeqnoTrack
 	tsTracker := &ThroughSeqnoTrackerSvc{
 		logger:                      logger,
 		vb_map:                      make(map[uint16]bool),
-		through_seqno_map:           make(map[uint16]*SeqnoWithLock),
-		vb_last_seen_seqno_map:      make(map[uint16]*SeqnoWithLock),
+		through_seqno_map:           make(map[uint16]*base.SeqnoWithLock),
+		vb_last_seen_seqno_map:      make(map[uint16]*base.SeqnoWithLock),
 		vb_sent_seqno_list_map:      make(map[uint16]*SortedSeqnoListWithLock),
 		vb_filtered_seqno_list_map:  make(map[uint16]*SortedSeqnoListWithLock),
 		vb_failed_cr_seqno_list_map: make(map[uint16]*SortedSeqnoListWithLock),
@@ -171,8 +151,8 @@ func (tsTracker *ThroughSeqnoTrackerSvc) initialize(pipeline common.Pipeline) {
 	for _, vbno := range pipeline_utils.GetSourceVBListPerPipeline(pipeline) {
 		tsTracker.vb_map[vbno] = true
 
-		tsTracker.through_seqno_map[vbno] = newSeqnoWithLock()
-		tsTracker.vb_last_seen_seqno_map[vbno] = newSeqnoWithLock()
+		tsTracker.through_seqno_map[vbno] = base.NewSeqnoWithLock()
+		tsTracker.vb_last_seen_seqno_map[vbno] = base.NewSeqnoWithLock()
 
 		tsTracker.vb_sent_seqno_list_map[vbno] = newSortedSeqnoListWithLock()
 		tsTracker.vb_filtered_seqno_list_map[vbno] = newSortedSeqnoListWithLock()
@@ -257,14 +237,14 @@ func (tsTracker *ThroughSeqnoTrackerSvc) processGapSeqnos(vbno uint16, current_s
 
 	last_seen_seqno_obj := tsTracker.vb_last_seen_seqno_map[vbno]
 
-	last_seen_seqno_obj.lock.Lock()
-	defer last_seen_seqno_obj.lock.Unlock()
-	last_seen_seqno := last_seen_seqno_obj.seqno
+	last_seen_seqno_obj.Lock()
+	defer last_seen_seqno_obj.Unlock()
+	last_seen_seqno := last_seen_seqno_obj.GetSeqnoWithoutLock()
 	if last_seen_seqno == 0 {
 		// this covers the case where the replication resumes from checkpoint docs
-		last_seen_seqno = tsTracker.through_seqno_map[vbno].getSeqno()
+		last_seen_seqno = tsTracker.through_seqno_map[vbno].GetSeqno()
 	}
-	last_seen_seqno_obj.seqno = current_seqno
+	last_seen_seqno_obj.SetSeqnoWithoutLock(current_seqno)
 
 	tsTracker.logger.Debugf("%v processing gap seqnos for seqno %v for vbno %v. last_seen_seqno=%v\n", tsTracker.topic, current_seqno, vbno, last_seen_seqno)
 
@@ -292,10 +272,10 @@ func (tsTracker *ThroughSeqnoTrackerSvc) GetThroughSeqno(vbno uint16) uint64 {
 	// two GetThroughSeqno() routines won't interleave, which would cause issues
 	// since we truncate seqno lists in accordance with through_seqno
 	through_seqno_obj := tsTracker.through_seqno_map[vbno]
-	through_seqno_obj.lock.Lock()
-	defer through_seqno_obj.lock.Unlock()
+	through_seqno_obj.Lock()
+	defer through_seqno_obj.Unlock()
 
-	last_through_seqno := through_seqno_obj.seqno
+	last_through_seqno := through_seqno_obj.GetSeqnoWithoutLock()
 	sent_seqno_list := tsTracker.vb_sent_seqno_list_map[vbno].getSortedSeqnoList()
 	max_sent_seqno := maxSeqno(sent_seqno_list)
 	filtered_seqno_list := tsTracker.vb_filtered_seqno_list_map[vbno].getSortedSeqnoList()
@@ -381,7 +361,7 @@ func (tsTracker *ThroughSeqnoTrackerSvc) GetThroughSeqno(vbno uint16) uint64 {
 			panic(fmt.Sprintf("unexpected found_seqno_type, %v", found_seqno_type))
 		}
 
-		through_seqno_obj.seqno = through_seqno
+		through_seqno_obj.SetSeqnoWithoutLock(through_seqno)
 
 		// truncate no longer needed entries from seqno lists to reduce memory/cpu overhead for future computations
 		go tsTracker.truncateSeqnoLists(vbno, through_seqno)
@@ -457,7 +437,7 @@ func (tsTracker *ThroughSeqnoTrackerSvc) getThroughSeqnos(executor_id int, listO
 func (tsTracker *ThroughSeqnoTrackerSvc) SetStartSeqno(vbno uint16, seqno uint64) {
 	tsTracker.validateVbno(vbno, "setStartSeqno")
 	obj, _ := tsTracker.through_seqno_map[vbno]
-	obj.setSeqno(seqno)
+	obj.SetSeqno(seqno)
 }
 
 func (tsTracker *ThroughSeqnoTrackerSvc) validateVbno(vbno uint16, caller string) {
