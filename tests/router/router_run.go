@@ -103,7 +103,7 @@ func startUpr(cluster, bucketn string, waitGrp *sync.WaitGroup) {
 	b, err := utils.LocalBucket(cluster, bucketn)
 	mf(err, "bucket")
 
-	uprFeed, err = b.StartUprFeed("rawupr", uint32(0))
+	uprFeed, err = b.StartUprFeedWithConfig("rawupr", uint32(0), 1000, 1024*1024)
 	mf(err, "- upr")
 
 	flogs := failoverLogs(b)

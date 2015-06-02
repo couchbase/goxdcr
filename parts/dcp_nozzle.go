@@ -157,7 +157,7 @@ func NewDcpNozzle(id string,
 func (dcp *DcpNozzle) initialize(settings map[string]interface{}) (err error) {
 	dcp.finch = make(chan bool)
 
-	dcp.uprFeed, err = dcp.bucket.StartUprFeed(DCP_Connection_Prefix+dcp.Id(), uint32(0))
+	dcp.uprFeed, err = dcp.bucket.StartUprFeedWithConfig(DCP_Connection_Prefix+dcp.Id(), uint32(0), 1000, 1024*1024)
 
 	if err != nil {
 		return err
