@@ -680,8 +680,8 @@ type XmemNozzle struct {
 	checker_finch     chan bool
 	selfMonitor_finch chan bool
 
-	counter_sent     int
-	counter_received int
+	counter_sent     uint32
+	counter_received uint32
 	start_time       time.Time
 
 	//the big seqno that is confirmed to be received on the vbucket
@@ -914,16 +914,8 @@ func (xmem *XmemNozzle) Receive(data interface{}) error {
 
 	}
 
-	dataChan_len_old := len(xmem.dataChan)
-	received_old := xmem.counter_received
-
 	xmem.writeToDataChan(request)
-	xmem.counter_received++
-
-	if xmem.counter_received <= received_old {
-		panic(fmt.Sprintf("counter_received_old=%v, counter_received=%v, dataChan_len_old=%v, dataChan_len=%v",
-			received_old, xmem.counter_received, dataChan_len_old, len(xmem.dataChan)))
-	}
+	atomic.AddUint32(&xmem.counter_received, 1)
 
 	xmem.accumuBatch(request)
 
@@ -1020,10 +1012,7 @@ func (xmem *XmemNozzle) batchSetMetaWithRetry(batch *dataBatch, numOfRetry int) 
 		if err != nil {
 			return err
 		}
-		xmem.counter_sent++
-		if xmem.counter_received != len(xmem.dataChan)+xmem.counter_sent {
-			xmem.Logger().Errorf(fmt.Sprintf("received=%v, sent=%v data buffered=%v", xmem.counter_received, xmem.counter_sent, len(xmem.dataChan)))
-		}
+		atomic.AddUint32(&xmem.counter_sent, 1)
 
 		if item != nil {
 			if needSend(item.Req, batch, xmem.Logger()) {
@@ -1626,7 +1615,7 @@ func (xmem *XmemNozzle) selfMonitor(finch chan bool, waitGrp *sync.WaitGroup) {
 	defer waitGrp.Done()
 	ticker := time.Tick(xmem.config.selfMonitorInterval)
 	statsTicker := time.Tick(xmem.config.statsInterval)
-	var sent_count int = 0
+	var sent_count uint32 = 0
 	var resp_waitingConfirm_count int = 0
 	var repairCount_setMeta = 0
 	var repairCount_getMeta = 0
@@ -1902,46 +1891,59 @@ func (xmem *XmemNozzle) readFromClient(client *xmemClient) (*mc.MCResponse, erro
 	response, err := client.memClient.Receive()
 	if err != nil {
 		xmem.Logger().Debugf("%v readFromClient: %v\n", xmem.Id(), err)
-		if err == io.EOF {
-			return nil, connectionClosedError, rev
-		} else if utils.IsSeriousNetError(err) {
-			//in this case, it is likely the connections in this pool would suffer the same problem, release all the connections
-			xmem.releasePool()
-			xmem.repairConn(client, err.Error(), rev)
-			return nil, badConnectionError, rev
-		} else if isNetError(err) {
-			client.reportOpFailure()
-			return response, err, rev
-		} else if strings.HasPrefix(err.Error(), "bad magic") {
-			//the connection to couchbase server is ruined. it is not supposed to return response with bad magic number
-			//now the only sensible thing to do is to repair the connection, then retry
-			client.logger.Infof("err=%v\n", err)
-			xmem.repairConn(client, err.Error(), rev)
-			return nil, badConnectionError, rev
-		} else if response.Status == mc.ENOMEM {
-			//this is recoverable, it can succeed when ep-engine evic items out to free up memory
-			return response, err, rev
-		} else if mc.IsFatal(err) {
+		isAppErr := false
+		var errMsg string = ""
+		if err == response {
+			isAppErr = true
+		} else {
+			errMsg = err.Error()
+		}
 
-			if response.Status == 0x08 {
-				//PROTOCOL_BINARY_RESPONSE_NO_BUCKET
-				//bucket must be recreated, drop the connection pool
+		if !isAppErr {
+			if err == io.EOF {
+				return nil, connectionClosedError, rev
+			} else if utils.IsSeriousNetError(err) {
+				//in this case, it is likely the connections in this pool would suffer the same problem, release all the connections
 				xmem.releasePool()
-				client.logger.Error("Got PROTOCOL_BINARY_RESPONSE_NO_BUCKET, release the connections in the pool")
-			} else if response.Status == mc.NOT_MY_VBUCKET {
-				//the original error message is too long, which clogs the log
-				err = base.ErrorNotMyVbucket
-				xmem.releasePool()
+				xmem.repairConn(client, errMsg, rev)
+				return nil, badConnectionError, rev
+			} else if isNetError(err) {
+				client.reportOpFailure()
+				return response, err, rev
+			} else if strings.HasPrefix(errMsg, "bad magic") {
+				//the connection to couchbase server is ruined. it is not supposed to return response with bad magic number
+				//now the only sensible thing to do is to repair the connection, then retry
+				client.logger.Infof("err=%v\n", err)
+				xmem.repairConn(client, errMsg, rev)
+				return nil, badConnectionError, rev
 			}
-			high_level_err := "Received error response from memcached in target cluster."
-			xmem.handleGeneralError(errors.New(high_level_err))
-			client.logger.Errorf("%v. err=%v", high_level_err, err)
-			return response, fatalError, rev
-		} else if err == response {
-			//response.Status != SUCCESSFUL, in this case, gomemcached return the response as err as well
-			//return the err as nil so that caller can differentiate the application error from transport
-			//error
-			return response, nil, rev
+		} else {
+			//need to be called before mc.IsFatal because mc.IsFatal would returns true for ENOMEM
+			if response.Status == mc.ENOMEM {
+				//this is recoverable, it can succeed when ep-engine evic items out to free up memory
+				return response, nil, rev
+			} else if mc.IsFatal(err) {
+
+				if response.Status == 0x08 {
+					//PROTOCOL_BINARY_RESPONSE_NO_BUCKET
+					//bucket must be recreated, drop the connection pool
+					xmem.releasePool()
+					client.logger.Error("Got PROTOCOL_BINARY_RESPONSE_NO_BUCKET, release the connections in the pool")
+				} else if response.Status == mc.NOT_MY_VBUCKET {
+					//the original error message is too long, which clogs the log
+					err = base.ErrorNotMyVbucket
+					xmem.releasePool()
+				}
+				high_level_err := "Received error response from memcached in target cluster."
+				xmem.handleGeneralError(errors.New(high_level_err))
+				client.logger.Errorf("%v. err=%v", high_level_err, err)
+				return response, fatalError, rev
+			} else {
+				//response.Status != SUCCESSFUL, in this case, gomemcached return the response as err as well
+				//return the err as nil so that caller can differentiate the application error from transport
+				//error
+				return response, nil, rev
+			}
 		}
 	} else {
 		//if no error, reset the client retry counter
