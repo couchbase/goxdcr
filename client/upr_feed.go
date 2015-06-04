@@ -323,7 +323,11 @@ func (feed *UprFeed) CloseStream(vbno, opaqueMSB uint16) error {
 
 // StartFeed to start the upper feed.
 func (feed *UprFeed) StartFeed() error {
-	ch := make(chan *UprEvent, 10)
+	return feed.StartFeedWithConfig(10)
+}
+
+func (feed *UprFeed) StartFeedWithConfig(datachan_len int) error {
+	ch := make(chan *UprEvent, datachan_len)
 	feed.C = ch
 	go feed.runFeed(ch)
 	return nil
