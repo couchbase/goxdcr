@@ -42,6 +42,7 @@ type PipelineError struct {
 }
 
 type PipelineErrorArray []PipelineError
+
 var PipelineErrorArray_Max_Size int = 20
 
 type ReplicationSpecGetter func(specId string) (*metadata.ReplicationSpecification, error)
@@ -116,14 +117,17 @@ func (rs *ReplicationStatus) RepId() string {
 }
 
 func (rs *ReplicationStatus) AddError(err error) {
+	// need to lock because this method could be called concurrently from pipeline_manager and updater
+	rs.Lock.Lock()
+	defer rs.Lock.Unlock()
+
 	if err != nil {
-		length := len(rs.err_list)
-		start := 0
-		if length > PipelineErrorArray_Max_Size - 1 {
-			start = length - PipelineErrorArray_Max_Size+1
+		end := len(rs.err_list)
+		if end > PipelineErrorArray_Max_Size-1 {
+			end = PipelineErrorArray_Max_Size - 1
 		}
-		rs.err_list = append(rs.err_list[start:], PipelineError{})
-		for i := length; i > 0; i-- {
+		rs.err_list = append(rs.err_list[:end], PipelineError{})
+		for i := len(rs.err_list) - 1; i > 0; i-- {
 			rs.err_list[i] = rs.err_list[i-1]
 		}
 		errStr := err.Error()
