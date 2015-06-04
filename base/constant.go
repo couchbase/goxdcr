@@ -156,6 +156,7 @@ const (
 const (
 	BlockProfileRate = "block_profile_rate"
 )
+
 // Key used for general validation errors that are not related to any specific http request parameters
 var PlaceHolderFieldKey = "_"
 
@@ -179,8 +180,8 @@ const (
 	VBUCKET_SEQNO_STAT_NAME            = "vbucket-seqno"
 	VBUCKET_HIGH_SEQNO_STAT_KEY_FORMAT = "vb_%v:high_seqno"
 	DCP_STAT_NAME                      = "dcp"
-	DCP_XDCR_STATS_PREFIX = "eq_dcpq:xdcr:"
-	DCP_XDCR_ITEMS_REMAINING_SUFFIX = ":items_remaining"
+	DCP_XDCR_STATS_PREFIX              = "eq_dcpq:xdcr:"
+	DCP_XDCR_ITEMS_REMAINING_SUFFIX    = ":items_remaining"
 )
 
 var ErrorsStatsKey = "Errors"
@@ -229,8 +230,9 @@ const (
 )
 
 const (
-	PipelineSetting_RequestPool = "RequestPool"
-	DefaultRequestPoolSize = 10000
-	HTTP_RETRIES int = 5
+	PipelineSetting_RequestPool     = "RequestPool"
+	DefaultRequestPoolSize          = 10000
+	HTTP_RETRIES                int = 5
 )
 
+var UprFeedDataChanLength = 1000

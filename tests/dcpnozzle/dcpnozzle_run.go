@@ -4,17 +4,17 @@ package main
 import (
 	"flag"
 	"fmt"
-	"math"
-	connector "github.com/couchbase/goxdcr/connector"
+	"github.com/couchbase/go-couchbase"
 	mcc "github.com/couchbase/gomemcached/client"
 	"github.com/couchbase/goxdcr/base"
+	connector "github.com/couchbase/goxdcr/connector"
 	"github.com/couchbase/goxdcr/parts"
 	"github.com/couchbase/goxdcr/utils"
-	"github.com/couchbase/go-couchbase"
 	"log"
+	"math"
+	"net/http"
 	"os"
 	"time"
-	"net/http"
 )
 
 import _ "net/http/pprof"
@@ -62,19 +62,19 @@ func main() {
 	argParse()
 	fmt.Printf("connectStr=%s\n", options.connectStr)
 	fmt.Println("Done with parsing the arguments")
-	
+
 	bucket, err := utils.LocalBucket(options.connectStr, options.source_bucket)
 	mf(err, "bucket")
-	
+
 	vblist, err := getVBListFromBucket(bucket, options.kvaddr)
 	mf(err, "vblist")
 	fmt.Printf("vblist in b=%v\n", vblist)
-	
-	for i:=0; i<1; i++ {
+
+	for i := 0; i < 1; i++ {
 		go startDcpNozzle(options.kvaddr, bucket, vblist, 16, i)
 	}
 
-	time.Sleep (1 * time.Minute)
+	time.Sleep(1 * time.Minute)
 }
 
 func mf(err error, msg string) {
@@ -84,17 +84,17 @@ func mf(err error, msg string) {
 }
 
 func startDcpNozzle(kvaddr string, bucket *couchbase.Bucket, vbList []uint16, numNozzle, i int) {
-	
+
 	numVbs := len(vbList)
- 	numVbPerNozzle := int(math.Ceil(float64(numVbs)/float64(numNozzle)))
+	numVbPerNozzle := int(math.Ceil(float64(numVbs) / float64(numNozzle)))
 	dcpVbList := make([]uint16, 0)
-	for j:= numVbPerNozzle*i; j<numVbPerNozzle*(i+1); j++ {
+	for j := numVbPerNozzle * i; j < numVbPerNozzle*(i+1); j++ {
 		if j >= numVbs {
 			break
 		}
 		dcpVbList = append(dcpVbList, uint16(j))
-	} 
-	dcpNozzle := parts.NewDcpNozzle("test_dcp", bucket, dcpVbList, nil, nil)
+	}
+	dcpNozzle := parts.NewDcpNozzle("test_dcp", bucket.Name, bucket.Password, dcpVbList, nil, nil)
 	dcpNozzle.SetConnector(NewTestConnector())
 	dcpNozzle.Start(constructStartSettings(dcpNozzle))
 	fmt.Println("DcpNozzle is started")
@@ -123,15 +123,15 @@ loop:
 }
 
 func constructStartSettings(dcpNozzle *parts.DcpNozzle) map[string]interface{} {
-		settings := make(map[string]interface{})
-		vblist := dcpNozzle.GetVBList()
-		fmt.Printf("vblist in dcp =%v\n", vblist)
-		ts := make(map[uint16]*base.VBTimestamp)
-		for _, vb := range vblist {
-			ts[vb] = &base.VBTimestamp{}
-			ts[vb].Vbno = vb
-		}
-		settings[parts.DCP_VBTimestamp] = ts
+	settings := make(map[string]interface{})
+	vblist := dcpNozzle.GetVBList()
+	fmt.Printf("vblist in dcp =%v\n", vblist)
+	ts := make(map[uint16]*base.VBTimestamp)
+	for _, vb := range vblist {
+		ts[vb] = &base.VBTimestamp{}
+		ts[vb].Vbno = vb
+	}
+	settings[parts.DCP_VBTimestamp] = ts
 	return settings
 }
 

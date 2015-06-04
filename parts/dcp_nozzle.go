@@ -13,8 +13,8 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"github.com/couchbase/go-couchbase"
 	"github.com/couchbase/gomemcached"
+	mcc "github.com/couchbase/gomemcached/client"
 	base "github.com/couchbase/goxdcr/base"
 	common "github.com/couchbase/goxdcr/common"
 	gen_server "github.com/couchbase/goxdcr/gen_server"
@@ -77,8 +77,10 @@ type DcpNozzle struct {
 	vb_stream_status_lock *sync.RWMutex
 
 	// immutable fields
-	bucket  *couchbase.Bucket
-	uprFeed *couchbase.UprFeed
+	bucketName     string
+	bucketPassword string
+	client         *mcc.Client
+	uprFeed        *mcc.UprFeed
 	// lock on uprFeed to avoid race condition
 	lock_uprFeed sync.Mutex
 
@@ -111,7 +113,7 @@ type DcpNozzle struct {
 }
 
 func NewDcpNozzle(id string,
-	bucket *couchbase.Bucket,
+	bucketName, bucketPassword string,
 	vbnos []uint16,
 	xdcr_topology_svc service_def.XDCRCompTopologySvc,
 	logger_context *log.LoggerContext) *DcpNozzle {
@@ -126,7 +128,8 @@ func NewDcpNozzle(id string,
 	part := NewAbstractPartWithLogger(id, server.Logger())
 
 	dcp := &DcpNozzle{
-		bucket:                   bucket,
+		bucketName:               bucketName,
+		bucketPassword:           bucketPassword,
 		vbnos:                    vbnos,
 		GenServer:                server,           /*gen_server.GenServer*/
 		AbstractPart:             part,             /*AbstractPart*/
@@ -157,7 +160,19 @@ func NewDcpNozzle(id string,
 func (dcp *DcpNozzle) initialize(settings map[string]interface{}) (err error) {
 	dcp.finch = make(chan bool)
 
-	dcp.uprFeed, err = dcp.bucket.StartUprFeedWithConfig(DCP_Connection_Prefix+dcp.Id(), uint32(0), 1000, 1024*1024)
+	addr, err := dcp.xdcr_topology_svc.MyMemcachedAddr()
+	if err != nil {
+		return err
+	}
+	dcp.client, err = base.NewConn(addr, dcp.bucketName, dcp.bucketPassword)
+	if err != nil {
+		return err
+	}
+	dcp.uprFeed, err = dcp.client.NewUprFeed()
+	if err != nil {
+		return err
+	}
+	dcp.uprFeed.UprOpen(DCP_Connection_Prefix+dcp.Id(), uint32(0), 1024*1024)
 
 	if err != nil {
 		return err
@@ -230,6 +245,8 @@ func (dcp *DcpNozzle) Start(settings map[string]interface{}) error {
 	dcp.childrenWaitGrp.Add(1)
 	go dcp.processData()
 
+	dcp.uprFeed.StartFeedWithConfig(base.UprFeedDataChanLength)
+
 	// start vbstreams
 	go dcp.startUprStreams()
 
@@ -256,7 +273,6 @@ func (dcp *DcpNozzle) Stop() error {
 
 	dcp.closeUprStreams()
 	dcp.closeUprFeed()
-	dcp.bucket.Close()
 	dcp.Logger().Debugf("DcpNozzle %v received %v items, sent %v items\n", dcp.Id(), dcp.counterReceived(), dcp.counterSent())
 	err = dcp.Stop_server()
 
@@ -284,7 +300,7 @@ func (dcp *DcpNozzle) closeUprStreams() error {
 				return err
 			}
 			if stream_state == Dcp_Stream_Active {
-				err := dcp.uprFeed.UprCloseStream(vbno, opaque)
+				err := dcp.uprFeed.CloseStream(vbno, opaque)
 				if err != nil {
 					errMap[vbno] = err
 				}
@@ -585,8 +601,8 @@ func (dcp *DcpNozzle) UpdateSettings(settings map[string]interface{}) error {
 	}
 
 	if _, ok := settings[DCP_Stats_Interval]; ok {
-		dcp.stats_interval = time.Duration(settings[DCP_Stats_Interval].(int)) *time.Millisecond
-		dcp.stats_interval_change_ch <-true
+		dcp.stats_interval = time.Duration(settings[DCP_Stats_Interval].(int)) * time.Millisecond
+		dcp.stats_interval_change_ch <- true
 	}
 
 	return nil
@@ -781,9 +797,9 @@ func (dcp *DcpNozzle) collectDcpDataChanLen(settings map[string]interface{}) {
 		select {
 		case <-dcp.finch:
 			return
-		case <-dcp.stats_interval_change_ch :
+		case <-dcp.stats_interval_change_ch:
 			ticker.Stop()
-			ticker = time.NewTicker(dcp.stats_interval)	
+			ticker = time.NewTicker(dcp.stats_interval)
 		case <-ticker.C:
 			additionalInfo := make(map[string]interface{})
 			additionalInfo[EVENT_DCP_DATACH_LEN] = len(dcp.uprFeed.C)
@@ -792,4 +808,3 @@ func (dcp *DcpNozzle) collectDcpDataChanLen(settings map[string]interface{}) {
 	}
 
 }
-

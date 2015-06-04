@@ -162,6 +162,14 @@ func (xdcrf *XDCRFactory) constructSourceNozzles(spec *metadata.ReplicationSpeci
 
 	bucketName := spec.SourceBucketName
 
+	bucket, err := xdcrf.cluster_info_svc.GetBucket(xdcrf.xdcr_topology_svc, bucketName)
+	if err != nil {
+		xdcrf.logger.Errorf("Error getting bucket %v. err=%v\n", bucketName, err)
+		return nil, nil, err
+	}
+	bucketPassword := bucket.Password
+	bucket.Close()
+
 	maxNozzlesPerNode := spec.Settings.SourceNozzlePerNode
 
 	kv_vb_map, err := pipeline_utils.GetSourceVBMapForReplication(xdcrf.cluster_info_svc, xdcrf.xdcr_topology_svc, spec, xdcrf.logger)
@@ -187,15 +195,6 @@ func (xdcrf *XDCRFactory) constructSourceNozzles(spec *metadata.ReplicationSpeci
 			// construct vbList for the dcpNozzle
 			// before statistics info is available, the default load balancing stragegy is to evenly distribute vbuckets among dcpNozzles
 
-			//bucket has to be created for each DcpNozzle as it uses its underline
-			//connection. Each Upr connection needs a separate socket
-			//TODO: look into if different DcpNozzles for the same kv node can share a
-			//upr connection
-			bucket, err := xdcrf.cluster_info_svc.GetBucket(xdcrf.xdcr_topology_svc, bucketName)
-			if err != nil {
-				xdcrf.logger.Errorf("Error getting bucket. i=%d, err=%v\n", i, err)
-				return nil, nil, err
-			}
 			vbList := make([]uint16, 0, 15)
 			for j := 0; j < numOfVbPerDcpNozzle; j++ {
 				if index < numOfVbs {
@@ -211,7 +210,7 @@ func (xdcrf *XDCRFactory) constructSourceNozzles(spec *metadata.ReplicationSpeci
 			// partIds of the dcpNozzle nodes look like "dcpNozzle_$kvaddr_1"
 			id := xdcrf.partId(DCP_NOZZLE_NAME_PREFIX, spec.Id, kvaddr, i)
 			dcpNozzle := parts.NewDcpNozzle(id,
-				bucket, vbList, xdcrf.xdcr_topology_svc, logger_ctx)
+				bucketName, bucketPassword, vbList, xdcrf.xdcr_topology_svc, logger_ctx)
 			sourceNozzles[dcpNozzle.Id()] = dcpNozzle
 			xdcrf.logger.Debugf("Constructed source nozzle %v with vbList = %v \n", dcpNozzle.Id(), vbList)
 		}
