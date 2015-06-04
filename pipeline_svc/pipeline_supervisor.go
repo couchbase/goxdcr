@@ -129,6 +129,7 @@ func (pipelineSupervisor *PipelineSupervisor) monitorPipelineHealth() error {
 	defer pipelineSupervisor.GenericSupervisor.ChidrenWaitGroup().Done()
 
 	health_check_ticker := time.NewTicker(default_health_check_interval)
+	defer health_check_ticker.Stop()
 
 	fin_ch := pipelineSupervisor.GenericSupervisor.FinishChannel()
 

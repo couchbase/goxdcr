@@ -536,6 +536,7 @@ func (r *pipelineUpdater) start() {
 	}
 
 	ticker := time.NewTicker(r.retry_interval)
+	defer ticker.Stop()
 	for {
 		r.updateState(Updater_Running)
 		select {

@@ -84,6 +84,7 @@ func (top_detect_svc *TopologyChangeDetectorSvc) watch(fin_ch chan bool, waitGrp
 	//run it once right at the beginning
 	top_detect_svc.validate(checkingTargetVersion)
 	ticker := time.NewTicker(10 * time.Second)
+	defer ticker.Stop()
 
 	for {
 		select {

@@ -461,6 +461,7 @@ func (dcp *DcpNozzle) startUprStreams() error {
 	finch := dcp.finch
 
 	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
 	for {
 		select {
 		case <-finch:
@@ -775,6 +776,7 @@ func (dcp *DcpNozzle) incCounterSent() {
 
 func (dcp *DcpNozzle) collectDcpDataChanLen(settings map[string]interface{}) {
 	ticker := time.NewTicker(dcp.stats_interval)
+	defer ticker.Stop()
 	for {
 		select {
 		case <-dcp.finch:

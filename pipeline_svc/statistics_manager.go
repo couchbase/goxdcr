@@ -264,6 +264,7 @@ func (stats_mgr *StatisticsManager) updateStats() error {
 
 	ticker := <-stats_mgr.update_ticker_ch
 	logStats_ticker := time.NewTicker(default_log_stats_interval)
+	defer logStats_ticker.Stop()
 
 	init_ch := make(chan bool, 1)
 	init_ch <- true

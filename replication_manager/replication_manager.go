@@ -197,7 +197,9 @@ func (rm *replicationManager) initPausedReplications() {
 
 func (rm *replicationManager) checkReplicationStatus(fin_chan chan bool) {
 	status_check_ticker := time.NewTicker(StatusCheckInterval)
+	defer status_check_ticker.Stop()
 	stats_update_ticker := time.NewTicker(StatsUpdateIntervalForPausedReplications)
+	defer stats_update_ticker.Stop()
 
 	for {
 		select {

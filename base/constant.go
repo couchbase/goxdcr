@@ -152,6 +152,10 @@ const (
 	JustValidatePostfix = "?" + JustValidate + "=1"
 )
 
+//const used by block profile
+const (
+	BlockProfileRate = "block_profile_rate"
+)
 // Key used for general validation errors that are not related to any specific http request parameters
 var PlaceHolderFieldKey = "_"
 

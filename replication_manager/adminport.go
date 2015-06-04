@@ -25,13 +25,14 @@ import (
 	utils "github.com/couchbase/goxdcr/utils"
 	"net/http"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 )
 
 import _ "net/http/pprof"
 
-var StaticPaths = [8]string{base.RemoteClustersPath, CreateReplicationPath, InternalSettingsPath, SettingsReplicationsPath, AllReplicationsPath, AllReplicationInfosPath, RegexpValidationPrefix, MemStatsPath}
+var StaticPaths = [10]string{base.RemoteClustersPath, CreateReplicationPath, InternalSettingsPath, SettingsReplicationsPath, AllReplicationsPath, AllReplicationInfosPath, RegexpValidationPrefix, MemStatsPath, BlockProfileStartPath, BlockProfileStopPath}
 var DynamicPathPrefixes = [5]string{base.RemoteClustersPath, DeleteReplicationPrefix, SettingsReplicationsPath, StatisticsPrefix, AllReplicationsPath}
 
 var logger_ap *log.CommonLogger = log.NewLogger("AdminPort", log.DefaultLoggerContext)
@@ -209,6 +210,10 @@ func (adminport *Adminport) handleRequest(
 		response, err = adminport.doRegexpValidationRequest(request)
 	case MemStatsPath + base.UrlDelimiter + base.MethodGet:
 		response, err = adminport.doMemStatsRequest(request)
+	case BlockProfileStartPath + base.UrlDelimiter + base.MethodPost:
+		response, err = adminport.doStartBlockProfile(request)
+	case BlockProfileStopPath + base.UrlDelimiter + base.MethodPost:
+		response, err = adminport.doStopBlockProfile(request)
 	default:
 		err = ap.ErrorInvalidRequest
 	}
@@ -676,4 +681,35 @@ func (adminport *Adminport) doRegexpValidationRequest(request *http.Request) (*a
 
 	return NewRegexpValidationResponse(matchesMap)
 
+}
+
+func (adminport *Adminport) doStartBlockProfile(request *http.Request) (*ap.Response, error) {
+	var err error = nil
+	block_profile_rate := 1000
+	err = request.ParseForm()
+	if err != nil {
+		return nil, err
+	}
+	for key, valArr := range request.Form {
+		switch key {
+		case base.BlockProfileRate:
+			blockProfileRateStr := getStringFromValArr(valArr)
+			if blockProfileRateStr != "" {
+				block_profile_rate, err = strconv.Atoi(blockProfileRateStr)
+			}
+		}
+	}
+	if err == nil {
+		runtime.SetBlockProfileRate(block_profile_rate)
+		logger_ap.Infof("doStartBlockProfile - SetBlockPofileRate to %v naosecond", block_profile_rate)
+		return NewEmptyArrayResponse()
+
+	}
+	return nil, err
+}
+
+func (adminport *Adminport) doStopBlockProfile(request *http.Request) (*ap.Response, error) {
+	runtime.SetBlockProfileRate(-1)
+	logger_ap.Info("doStopBlockProfile")
+	return NewEmptyArrayResponse()
 }

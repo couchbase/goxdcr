@@ -46,6 +46,8 @@ const (
 	DeleteReplicationPrefix  = "controller/cancelXDCR"
 	SettingsReplicationsPath = "settings/replications"
 	MemStatsPath             = "stats/mem"
+	BlockProfileStartPath    = "profile/block/start"
+	BlockProfileStopPath     = "profile/block/stop"
 
 	// Some url paths are not static and have variable contents, e.g., settings/replications/$replication_id
 	// The message keys for such paths are constructed by appending the dynamic suffix below to the static portion of the path.

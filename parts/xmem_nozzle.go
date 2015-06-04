@@ -694,7 +694,8 @@ type XmemNozzle struct {
 
 	dataObj_recycler DataObjRecycler
 
-	topic string
+	topic          string
+	getMeta_ticker *time.Ticker
 }
 
 func NewXmemNozzle(id string,
@@ -717,27 +718,28 @@ func NewXmemNozzle(id string,
 	part := NewAbstractPartWithLogger(id, server.Logger())
 
 	xmem := &XmemNozzle{GenServer: server,
-		AbstractPart:       part,
-		bOpen:              true,
-		lock_bOpen:         sync.RWMutex{},
-		dataChan:           nil,
-		receive_token_ch:   nil,
-		client_for_setMeta: nil,
-		client_for_getMeta: nil,
-		config:             newConfig(server.Logger()),
-		batches_ready:      nil,
-		batch:              nil,
-		batch_lock:         sync.RWMutex{},
-		childrenWaitGrp:    sync.WaitGroup{},
-		buf:                nil,
-		receiver_finch:     make(chan bool, 1),
-		checker_finch:      make(chan bool, 1),
-		sender_finch:       make(chan bool, 1),
-		selfMonitor_finch:  make(chan bool, 1),
-		counter_sent:       0,
-		counter_received:   0,
-		dataObj_recycler:   dataObj_recycler,
-		topic:              topic,
+		AbstractPart:          part,
+		bOpen:                 true,
+		lock_bOpen:            sync.RWMutex{},
+		dataChan:              nil,
+		receive_token_ch:      nil,
+		client_for_setMeta:    nil,
+		client_for_getMeta:    nil,
+		config:                newConfig(server.Logger()),
+		batches_ready:         nil,
+		batch:                 nil,
+		batch_lock:            sync.RWMutex{},
+		childrenWaitGrp:       sync.WaitGroup{},
+		buf:                   nil,
+		receiver_finch:        make(chan bool, 1),
+		checker_finch:         make(chan bool, 1),
+		sender_finch:          make(chan bool, 1),
+		selfMonitor_finch:     make(chan bool, 1),
+		counter_sent:          0,
+		counter_received:      0,
+		dataObj_recycler:      dataObj_recycler,
+		topic:                 topic,
+		getMeta_ticker:        nil,
 		maxseqno_received_map: make(map[uint16]uint64)}
 
 	xmem.config.connectStr = connectString
@@ -921,6 +923,9 @@ func (xmem *XmemNozzle) Receive(data interface{}) error {
 
 	xmem.Logger().Debugf("Xmem %v received %v items, queue_size = %v\n", xmem.Id(), xmem.counter_received, len(xmem.dataChan))
 
+	if xmem.getMeta_ticker != nil {
+		xmem.getMeta_ticker.Stop()
+	}
 	return nil
 }
 
@@ -1157,18 +1162,25 @@ func (xmem *XmemNozzle) batchGetMeta(bigDoc_map map[string]*base.WrappedMCReques
 
 	err_list := []error{}
 
+	if xmem.getMeta_ticker == nil {
+		xmem.getMeta_ticker = time.NewTicker(1 * time.Second)
+	}
+
 	//launch the receiver
 	waitGrp.Add(1)
-	go func(count int, finch chan bool, opaque_keySeqno_map map[uint32][]interface{}, respMap map[string]*mc.MCResponse, timeout_duration time.Duration, err_list []error, waitGrp *sync.WaitGroup, logger *log.CommonLogger, lock *sync.RWMutex) {
+	go func(count int, finch chan bool, opaque_keySeqno_map map[uint32][]interface{}, respMap map[string]*mc.MCResponse,  err_list []error, ticker *time.Ticker, waitGrp *sync.WaitGroup, logger *log.CommonLogger, lock *sync.RWMutex) {
 		defer waitGrp.Done()
-		ticker := time.NewTicker(timeout_duration)
+		timeout_count := 0
 		for {
 			select {
 			case <-finch:
 				return
 			case <-ticker.C:
+				timeout_count++
+				if timeout_count > 1 {
 				err_list = append(err_list, errors.New("batchGetMeta timedout"))
 				return
+				}
 			default:
 				if xmem.validateRunningState() != nil {
 					xmem.Logger().Infof("xmem %v has stopped, exit from getMeta receiver", xmem.Id())
@@ -1216,7 +1228,7 @@ func (xmem *XmemNozzle) batchGetMeta(bigDoc_map map[string]*base.WrappedMCReques
 			}
 		}
 
-	}(len(bigDoc_map), receiver_fin_ch, opaque_keySeqno_map, respMap, 1*time.Second, err_list, waitGrp, xmem.Logger(), lock)
+	}(len(bigDoc_map), receiver_fin_ch, opaque_keySeqno_map, respMap, err_list, xmem.getMeta_ticker, waitGrp, xmem.Logger(), lock)
 
 	var sequence uint16 = uint16(time.Now().UnixNano())
 	reqs_bytes := []byte{}

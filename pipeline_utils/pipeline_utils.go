@@ -26,6 +26,7 @@ func ExecWithTimeout(action Action, timeout_duration time.Duration, logger *log.
 
 	var retErr error
 	timeoutticker := time.NewTicker(timeout_duration)
+	defer timeoutticker.Stop()
 	for {
 		select {
 		case retErr = <-ret:

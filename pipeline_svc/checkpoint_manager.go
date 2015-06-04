@@ -668,22 +668,16 @@ func (ckmgr *CheckpointManager) performCkpt(fin_ch chan bool, wait_grp *sync.Wai
 
 	interval_btwn_vb := time.Duration((ckmgr.ckpt_interval.Seconds()/float64(len(ckmgr.getMyVBs())))*1000) * time.Millisecond
 	ckmgr.logger.Infof("Checkpointing for replication %v, interval_btwn_vb=%v sec\n", ckmgr.pipeline.Topic(), interval_btwn_vb.Seconds())
-	interval_ticker := time.NewTicker(1 * time.Millisecond)
-	first_vb := true
 	err_map := make(map[uint16]error)
 	var total_committing_time float64 = 0
-	for _, vb := range ckmgr.getMyVBs() {
+	listOfVBs := ckmgr.getMyVBs()
+
+	for index, vb := range listOfVBs {
 		select {
 		case <-fin_ch:
 			ckmgr.logger.Info("Aborting checkpointing routine since received finish signal for checkpointing")
 			return
-		case <-interval_ticker.C:
-			if first_vb {
-				interval_ticker.Stop()
-				interval_ticker = time.NewTicker(interval_btwn_vb)
-				first_vb = false
-			}
-
+		default:
 			if ckmgr.pipeline.State() != common.Pipeline_Running {
 				//pipeline is no longer running, return
 				ckmgr.logger.Info("Pipeline is no longer running, exit do_checkpointing")
@@ -696,6 +690,10 @@ func (ckmgr *CheckpointManager) performCkpt(fin_ch chan bool, wait_grp *sync.Wai
 			total_committing_time += committing_time_vb.Seconds()
 			if err != nil {
 				err_map[vb] = err
+			}
+
+			if index < len(listOfVBs)-1 {
+				time.Sleep(interval_btwn_vb)
 			}
 
 		}
