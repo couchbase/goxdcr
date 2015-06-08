@@ -1,45 +1,32 @@
+// Copyright (c) 2013 Couchbase, Inc.
+// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file
+// except in compliance with the License. You may obtain a copy of the License at
+//   http://www.apache.org/licenses/LICENSE-2.0
+// Unless required by applicable law or agreed to in writing, software distributed under the
+// License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND,
+// either express or implied. See the License for the specific language governing permissions
+// and limitations under the License.
+
 package pipeline_utils
 
 import (
 	"errors"
-	"fmt"
 	"github.com/couchbase/goxdcr/common"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/goxdcr/parts"
 	"github.com/couchbase/goxdcr/service_def"
-	"sort"
-	"time"
 )
 
 var ErrorNoSourceKV = errors.New("Invalid configuration. No source kv node is found.")
 
-type Action func() error
-
-func ExecWithTimeout(action Action, timeout_duration time.Duration, logger *log.CommonLogger) error {
-	ret := make(chan error, 1)
-	go func(finch chan error) {
-		logger.Info("About to call function")
-		err1 := action()
-		ret <- err1
-	}(ret)
-
-	var retErr error
-	timeoutticker := time.NewTicker(timeout_duration)
-	defer timeoutticker.Stop()
-	for {
-		select {
-		case retErr = <-ret:
-			logger.Infof("Finish executing %v\n", action)
-			return retErr
-		case <-timeoutticker.C:
-			retErr = errors.New(fmt.Sprintf("Executing %v timed out", action))
-			logger.Infof("Executing %v timed out", action)
-			logger.Info("****************************")
-			return retErr
-		}
+func GetSourceVBListPerPipeline(pipeline common.Pipeline) []uint16 {
+	ret := []uint16{}
+	sourceNozzles := pipeline.Sources()
+	for _, sourceNozzle := range sourceNozzles {
+		ret = append(ret, sourceNozzle.(*parts.DcpNozzle).GetVBList()...)
 	}
-
+	return ret
 }
 
 func GetSourceVBMapForReplication(cluster_info_svc service_def.ClusterInfoSvc, xdcr_topology_svc service_def.XDCRCompTopologySvc,
@@ -79,66 +66,12 @@ func GetSourceVBMapForReplication(cluster_info_svc service_def.ClusterInfoSvc, x
 	return kv_vb_map, nil
 }
 
-func GetSourceVBListPerPipeline(pipeline common.Pipeline) []uint16 {
-	ret := []uint16{}
-	sourceNozzles := pipeline.Sources()
-	for _, sourceNozzle := range sourceNozzles {
-		ret = append(ret, sourceNozzle.(*parts.DcpNozzle).GetVBList()...)
-	}
-	return ret
-}
-
 // checks if target cluster supports ssl over memcached
 func HasSSLOverMemSupport(cluster_info_svc service_def.ClusterInfoSvc, targetClusterRef *metadata.RemoteClusterReference) (bool, error) {
 	return cluster_info_svc.IsClusterCompatible(targetClusterRef, []int{3, 0})
 }
 
-func GetVbListFromKvVbMap(kv_vb_map map[string][]uint16) []uint16 {
-	vb_list := make([]uint16, 0)
-	for _, kv_vb_list := range kv_vb_map {
-		vb_list = append(vb_list, kv_vb_list...)
-	}
-	return vb_list
-}
 
-// type to facilitate the sorting of uint16 lists
-type Uint16List []uint16
-
-func (u Uint16List) Len() int           { return len(u) }
-func (u Uint16List) Swap(i, j int)      { u[i], u[j] = u[j], u[i] }
-func (u Uint16List) Less(i, j int) bool { return u[i] < u[j] }
-
-func SortUint16List(list []uint16) []uint16 {
-	sort.Sort(Uint16List(list))
-	return list
-}
-
-func AreSortedUint16ListsTheSame(sorted_list_1, sorted_list_2 []uint16) bool {
-	if len(sorted_list_1) != len(sorted_list_2) {
-		return false
-	}
-
-	if len(sorted_list_1) == 0 {
-		return true
-	}
-
-	isSame := true
-	for i := 0; i < len(sorted_list_1); i++ {
-		if sorted_list_1[i] != sorted_list_2[i] {
-			isSame = false
-			break
-		}
-	}
-
-	return isSame
-}
-
-func IsVbInList(vbno uint16, vb_list []uint16) bool {
-	for _, vb_in_list := range vb_list {
-		if vb_in_list == vbno {
-			return true
-		}
-	}
-
-	return false
+func GetAsyncComponentEventListenerId(pipeline common.Pipeline, listenerName string) string {
+	return pipeline.Topic() + "_" + listenerName
 }

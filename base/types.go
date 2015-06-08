@@ -127,7 +127,6 @@ func (seqno_obj *SeqnoWithLock) SetSeqnoWithoutLock(seqno uint64) {
 	seqno_obj.setSeqno(seqno, false)
 }
 
-
 func (seqno_obj *SeqnoWithLock) getSeqno(lock bool) uint64 {
 	if lock {
 		seqno_obj.lock.RLock()
@@ -150,3 +149,5 @@ type MetadataServiceCallback func(path string, value []byte, rev interface{}) er
 
 // Callback function for the handling of metadata changed event
 type MetadataChangeHandlerCallback func(metadataId string, oldMetadata interface{}, newMetadata interface{}) error
+
+type DataObjRecycler func(topic string, dataObj *WrappedMCRequest)

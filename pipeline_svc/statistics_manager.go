@@ -10,15 +10,14 @@
 package pipeline_svc
 
 import (
-	"encoding/binary"
 	"errors"
 	"expvar"
 	"fmt"
-	"github.com/couchbase/gomemcached"
 	mc "github.com/couchbase/gomemcached"
 	mcc "github.com/couchbase/gomemcached/client"
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/common"
+	component "github.com/couchbase/goxdcr/component"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/goxdcr/parts"
@@ -26,6 +25,7 @@ import (
 	"github.com/couchbase/goxdcr/pipeline_manager"
 	"github.com/couchbase/goxdcr/pipeline_utils"
 	"github.com/couchbase/goxdcr/service_def"
+	"github.com/couchbase/goxdcr/simple_utils"
 	"github.com/couchbase/goxdcr/utils"
 	"github.com/rcrowley/go-metrics"
 	"reflect"
@@ -80,7 +80,7 @@ const (
 	SET_RECEIVED_DCP_METRIC      = "set_received_from_dcp"
 
 	DCP_DISPATCH_TIME_METRIC = "dcp_dispatch_time"
-	DCP_DATACH_LEN = "dcp_datach_length"
+	DCP_DATACH_LEN           = "dcp_datach_length"
 
 	//	TIME_COMMITTING_METRIC = "time_committing"
 	//rate
@@ -745,10 +745,14 @@ type MetricsCollector interface {
 //metrics collector for XMem/CapiNozzle
 type outNozzleCollector struct {
 	stats_mgr *StatisticsManager
+	common.AsyncComponentEventListener
 }
 
 func (outNozzle_collector *outNozzleCollector) Mount(pipeline common.Pipeline, stats_mgr *StatisticsManager) error {
 	outNozzle_collector.stats_mgr = stats_mgr
+	outNozzle_collector.AsyncComponentEventListener = component.NewDefaultAsyncComponentEventListenerImpl(
+		pipeline_utils.GetAsyncComponentEventListenerId(pipeline, base.OutNozzleStatsCollector),
+		pipeline.Topic(), outNozzle_collector.ProcessEvent, stats_mgr.logger)
 	outNozzle_parts := pipeline.Targets()
 	for _, part := range outNozzle_parts {
 		registry := stats_mgr.getOrCreateRegistry(part.Id())
@@ -776,73 +780,73 @@ func (outNozzle_collector *outNozzleCollector) Mount(pipeline common.Pipeline, s
 	return nil
 }
 
-func (outNozzle_collector *outNozzleCollector) OnEvent(eventType common.ComponentEventType,
-	item interface{},
-	component common.Component,
-	derivedItems []interface{},
-	otherInfos map[string]interface{}) {
-	if eventType == common.StatsUpdate {
-		outNozzle_collector.stats_mgr.logger.Debugf("Received a StatsUpdate event from %v", reflect.TypeOf(component))
-		queue_size := otherInfos[parts.STATS_QUEUE_SIZE].(int)
-		queue_size_bytes := otherInfos[parts.STATS_QUEUE_SIZE_BYTES].(int)
-		registry := outNozzle_collector.stats_mgr.registries[component.Id()]
+func (outNozzle_collector *outNozzleCollector) ProcessEvent(event *common.Event) error {
+	if event.EventType == common.StatsUpdate {
+		outNozzle_collector.stats_mgr.logger.Debugf("Received a StatsUpdate event from %v", reflect.TypeOf(event.Component))
+		queue_size := event.OtherInfos[parts.STATS_QUEUE_SIZE].(int)
+		queue_size_bytes := event.OtherInfos[parts.STATS_QUEUE_SIZE_BYTES].(int)
+		registry := outNozzle_collector.stats_mgr.registries[event.Component.Id()]
 		setCounter(registry.Get(DOCS_REP_QUEUE_METRIC).(metrics.Counter), queue_size)
 		setCounter(registry.Get(SIZE_REP_QUEUE_METRIC).(metrics.Counter), queue_size_bytes)
-	} else if eventType == common.DataSent {
-		outNozzle_collector.stats_mgr.logger.Debugf("Received a DataSent event from %v", reflect.TypeOf(component))
-		req := item.(*gomemcached.MCRequest)
-		size := req.Size()
-		opti_replicated := otherInfos[parts.EVENT_ADDI_OPT_REPD].(bool)
-		commit_time := otherInfos[parts.EVENT_ADDI_SETMETA_COMMIT_TIME].(time.Duration)
-		registry := outNozzle_collector.stats_mgr.registries[component.Id()]
+	} else if event.EventType == common.DataSent {
+		outNozzle_collector.stats_mgr.logger.Debugf("Received a DataSent event from %v", reflect.TypeOf(event.Component))
+		req_size := event.OtherInfos[parts.EVENT_ADDI_REQ_SIZE].(int)
+		opti_replicated := event.OtherInfos[parts.EVENT_ADDI_OPT_REPD].(bool)
+		commit_time := event.OtherInfos[parts.EVENT_ADDI_SETMETA_COMMIT_TIME].(time.Duration)
+		registry := outNozzle_collector.stats_mgr.registries[event.Component.Id()]
 		registry.Get(DOCS_WRITTEN_METRIC).(metrics.Counter).Inc(1)
-		registry.Get(DATA_REPLICATED_METRIC).(metrics.Counter).Inc(int64(size))
+		registry.Get(DATA_REPLICATED_METRIC).(metrics.Counter).Inc(int64(req_size))
 		if opti_replicated {
 			registry.Get(DOCS_OPT_REPD_METRIC).(metrics.Counter).Inc(1)
 		}
 
-		expiry := binary.BigEndian.Uint32(req.Extras[4:8])
-		if expiry != 0 {
+		expiry_set := event.OtherInfos[parts.EVENT_ADDI_REQ_EXPIRY_SET].(bool)
+		if expiry_set {
 			registry.Get(EXPIRY_DOCS_WRITTEN_METRIC).(metrics.Counter).Inc(1)
 		}
-		if req.Opcode == base.DELETE_WITH_META {
+
+		req_opcode := event.OtherInfos[parts.EVENT_ADDI_REQ_OPCODE].(mc.CommandCode)
+		if req_opcode == base.DELETE_WITH_META {
 			registry.Get(DELETION_DOCS_WRITTEN_METRIC).(metrics.Counter).Inc(1)
-		} else if req.Opcode == base.SET_WITH_META {
+		} else if req_opcode == base.SET_WITH_META {
 			registry.Get(SET_DOCS_WRITTEN_METRIC).(metrics.Counter).Inc(1)
 		} else {
-			panic(fmt.Sprintf("Invalid opcode, %v, in DataSent event from %v.", req.Opcode, component.Id()))
+			panic(fmt.Sprintf("Invalid opcode, %v, in DataSent event from %v.", req_opcode, event.Component.Id()))
 		}
 
 		time_committing_reg := registry.Get(DOCS_LATENCY_METRIC).(metrics.Histogram)
 		sample := time_committing_reg.Sample()
 		sample.Update(commit_time.Nanoseconds() / 1000000)
-	} else if eventType == common.DataFailedCRSource {
-		outNozzle_collector.stats_mgr.logger.Debugf("Received a DataFailedCRSource event from %v", reflect.TypeOf(component))
-		req := item.(*gomemcached.MCRequest)
-		registry := outNozzle_collector.stats_mgr.registries[component.Id()]
+	} else if event.EventType == common.DataFailedCRSource {
+		outNozzle_collector.stats_mgr.logger.Debugf("Received a DataFailedCRSource event from %v", reflect.TypeOf(event.Component))
+		registry := outNozzle_collector.stats_mgr.registries[event.Component.Id()]
 		registry.Get(DOCS_FAILED_CR_SOURCE_METRIC).(metrics.Counter).Inc(1)
 
-		expiry := binary.BigEndian.Uint32(req.Extras[4:8])
-		if expiry != 0 {
+		expiry_set := event.OtherInfos[parts.EVENT_ADDI_REQ_EXPIRY_SET].(bool)
+		if expiry_set {
 			registry.Get(EXPIRY_FAILED_CR_SOURCE_METRIC).(metrics.Counter).Inc(1)
 		}
-		if req.Opcode == mc.UPR_DELETION {
+
+		req_opcode := event.OtherInfos[parts.EVENT_ADDI_REQ_OPCODE].(mc.CommandCode)
+		if req_opcode == mc.UPR_DELETION {
 			registry.Get(DELETION_FAILED_CR_SOURCE_METRIC).(metrics.Counter).Inc(1)
-		} else if req.Opcode == mc.UPR_MUTATION {
+		} else if req_opcode == mc.UPR_MUTATION {
 			registry.Get(SET_FAILED_CR_SOURCE_METRIC).(metrics.Counter).Inc(1)
 		} else {
-			panic(fmt.Sprintf("Invalid opcode, %v, in DataFailedCRSource event from %v.", req.Opcode, component.Id()))
+			panic(fmt.Sprintf("Invalid opcode, %v, in DataFailedCRSource event from %v.", req_opcode, event.Component.Id()))
 		}
-	} else if eventType == common.GetMetaReceived {
-		outNozzle_collector.stats_mgr.logger.Debugf("Received a GetMetaReceived event from %v", reflect.TypeOf(component))
+	} else if event.EventType == common.GetMetaReceived {
+		outNozzle_collector.stats_mgr.logger.Debugf("Received a GetMetaReceived event from %v", reflect.TypeOf(event.Component))
 
-		commit_time := otherInfos[parts.EVENT_ADDI_GETMETA_COMMIT_TIME].(time.Duration)
+		commit_time := event.OtherInfos[parts.EVENT_ADDI_GETMETA_COMMIT_TIME].(time.Duration)
 
-		registry := outNozzle_collector.stats_mgr.registries[component.Id()]
+		registry := outNozzle_collector.stats_mgr.registries[event.Component.Id()]
 		time_committing_reg := registry.Get(META_LATENCY_METRIC).(metrics.Histogram)
 		sample := time_committing_reg.Sample()
 		sample.Update(commit_time.Nanoseconds() / 1000000)
 	}
+
+	return nil
 }
 
 func getStatsKeyFromDocKeyAndSeqno(key string, seqno uint64) string {
@@ -852,10 +856,14 @@ func getStatsKeyFromDocKeyAndSeqno(key string, seqno uint64) string {
 //metrics collector for DcpNozzle
 type dcpCollector struct {
 	stats_mgr *StatisticsManager
+	common.AsyncComponentEventListener
 }
 
 func (dcp_collector *dcpCollector) Mount(pipeline common.Pipeline, stats_mgr *StatisticsManager) error {
 	dcp_collector.stats_mgr = stats_mgr
+	dcp_collector.AsyncComponentEventListener = component.NewDefaultAsyncComponentEventListenerImpl(
+		pipeline_utils.GetAsyncComponentEventListenerId(pipeline, base.DcpStatsCollector),
+		pipeline.Topic(), dcp_collector.ProcessEvent, stats_mgr.logger)
 	dcp_parts := pipeline.Sources()
 	for _, dcp_part := range dcp_parts {
 		registry := stats_mgr.getOrCreateRegistry(dcp_part.Id())
@@ -863,23 +871,19 @@ func (dcp_collector *dcpCollector) Mount(pipeline common.Pipeline, stats_mgr *St
 		registry.Register(EXPIRY_RECEIVED_DCP_METRIC, metrics.NewCounter())
 		registry.Register(DELETION_RECEIVED_DCP_METRIC, metrics.NewCounter())
 		registry.Register(SET_RECEIVED_DCP_METRIC, metrics.NewCounter())
-		dcp_part.RegisterComponentEventListener(common.DataReceived, dcp_collector)
 		registry.Register(DCP_DISPATCH_TIME_METRIC, metrics.NewHistogram(metrics.NewUniformSample(stats_mgr.sample_size)))
 		registry.Register(DCP_DATACH_LEN, metrics.NewCounter())
+		dcp_part.RegisterComponentEventListener(common.DataReceived, dcp_collector)
 
 	}
 	return nil
 }
 
-func (dcp_collector *dcpCollector) OnEvent(eventType common.ComponentEventType,
-	item interface{},
-	component common.Component,
-	derivedItems []interface{},
-	otherInfos map[string]interface{}) {
-	if eventType == common.DataReceived {
-		dcp_collector.stats_mgr.logger.Debugf("Received a DataReceived event from %v", reflect.TypeOf(component))
-		uprEvent := item.(*mcc.UprEvent)
-		registry := dcp_collector.stats_mgr.registries[component.Id()]
+func (dcp_collector *dcpCollector) ProcessEvent(event *common.Event) error {
+	if event.EventType == common.DataReceived {
+		dcp_collector.stats_mgr.logger.Debugf("Received a DataReceived event from %v", reflect.TypeOf(event.Component))
+		uprEvent := event.Data.(*mcc.UprEvent)
+		registry := dcp_collector.stats_mgr.registries[event.Component.Id()]
 		registry.Get(DOCS_RECEIVED_DCP_METRIC).(metrics.Counter).Inc(1)
 
 		if uprEvent.Expiry != 0 {
@@ -890,26 +894,32 @@ func (dcp_collector *dcpCollector) OnEvent(eventType common.ComponentEventType,
 		} else if uprEvent.Opcode == mc.UPR_MUTATION {
 			registry.Get(SET_RECEIVED_DCP_METRIC).(metrics.Counter).Inc(1)
 		} else {
-			panic(fmt.Sprintf("Invalid opcode, %v, in DataReceived event from %v.", uprEvent.Opcode, component.Id()))
+			panic(fmt.Sprintf("Invalid opcode, %v, in DataReceived event from %v.", uprEvent.Opcode, event.Component.Id()))
 		}
-	} else if eventType == common.DataProcessed {
-		dcp_dispatch_time := otherInfos[parts.EVENT_DCP_DISPATCH_TIME].(float64)
-		registry := dcp_collector.stats_mgr.registries[component.Id()]
+	} else if event.EventType == common.DataProcessed {
+		dcp_dispatch_time := event.OtherInfos[parts.EVENT_DCP_DISPATCH_TIME].(float64)
+		registry := dcp_collector.stats_mgr.registries[event.Component.Id()]
 		registry.Get(DCP_DISPATCH_TIME_METRIC).(metrics.Histogram).Sample().Update(int64(dcp_dispatch_time))
-	}else if eventType == common.StatsUpdate {
-		registry := dcp_collector.stats_mgr.registries[component.Id()]
-		dcp_datach_len := otherInfos[parts.EVENT_DCP_DATACH_LEN].(int)
+	} else if event.EventType == common.StatsUpdate {
+		registry := dcp_collector.stats_mgr.registries[event.Component.Id()]
+		dcp_datach_len := event.OtherInfos[parts.EVENT_DCP_DATACH_LEN].(int)
 		setCounter(registry.Get(DCP_DATACH_LEN).(metrics.Counter), dcp_datach_len)
 	}
+
+	return nil
 }
 
 //metrics collector for Router
 type routerCollector struct {
 	stats_mgr *StatisticsManager
+	common.AsyncComponentEventListener
 }
 
 func (r_collector *routerCollector) Mount(pipeline common.Pipeline, stats_mgr *StatisticsManager) error {
 	r_collector.stats_mgr = stats_mgr
+	r_collector.AsyncComponentEventListener = component.NewDefaultAsyncComponentEventListenerImpl(
+		pipeline_utils.GetAsyncComponentEventListenerId(pipeline, base.RouterStatsCollector),
+		pipeline.Topic(), r_collector.ProcessEvent, stats_mgr.logger)
 	dcp_parts := pipeline.Sources()
 	for _, dcp_part := range dcp_parts {
 		//get connector
@@ -924,16 +934,12 @@ func (r_collector *routerCollector) Mount(pipeline common.Pipeline, stats_mgr *S
 	return nil
 }
 
-func (l_collector *routerCollector) OnEvent(eventType common.ComponentEventType,
-	item interface{},
-	component common.Component,
-	derivedItems []interface{},
-	otherInfos map[string]interface{}) {
-	if eventType == common.DataFiltered {
-		uprEvent := item.(*mcc.UprEvent)
+func (r_collector *routerCollector) ProcessEvent(event *common.Event) error {
+	if event.EventType == common.DataFiltered {
+		uprEvent := event.Data.(*mcc.UprEvent)
 		seqno := uprEvent.Seqno
-		l_collector.stats_mgr.logger.Debugf("Received a DataFiltered event for %v", seqno)
-		registry := l_collector.stats_mgr.registries[component.Id()]
+		r_collector.stats_mgr.logger.Debugf("Received a DataFiltered event for %v", seqno)
+		registry := r_collector.stats_mgr.registries[event.Component.Id()]
 		registry.Get(DOCS_FILTERED_METRIC).(metrics.Counter).Inc(1)
 
 		if uprEvent.Expiry != 0 {
@@ -944,9 +950,11 @@ func (l_collector *routerCollector) OnEvent(eventType common.ComponentEventType,
 		} else if uprEvent.Opcode == mc.UPR_MUTATION {
 			registry.Get(SET_FILTERED_METRIC).(metrics.Counter).Inc(1)
 		} else {
-			panic(fmt.Sprintf("Invalid opcode, %v, in DataFiltered event from %v.", uprEvent.Opcode, component.Id()))
+			panic(fmt.Sprintf("Invalid opcode, %v, in DataFiltered event from %v.", uprEvent.Opcode, event.Component.Id()))
 		}
 	}
+
+	return nil
 }
 
 //metrics collector for checkpointmanager
@@ -986,22 +994,18 @@ func (ckpt_collector *checkpointMgrCollector) initRegistry() {
 
 }
 
-func (ckpt_collector *checkpointMgrCollector) OnEvent(eventType common.ComponentEventType,
-	item interface{},
-	component common.Component,
-	derivedItems []interface{},
-	otherInfos map[string]interface{}) {
+func (ckpt_collector *checkpointMgrCollector) OnEvent(event *common.Event) {
 	registry := ckpt_collector.stats_mgr.registries["CkptMgr"]
-	if eventType == common.ErrorEncountered {
+	if event.EventType == common.ErrorEncountered {
 		registry.Get(NUM_FAILEDCKPTS_METRIC).(metrics.Counter).Inc(1)
 
-	} else if eventType == common.CheckpointDoneForVB {
-		vbno := otherInfos[Vbno].(uint16)
-		ckpt_record := item.(metadata.CheckpointRecord)
+	} else if event.EventType == common.CheckpointDoneForVB {
+		vbno := event.OtherInfos[Vbno].(uint16)
+		ckpt_record := event.Data.(metadata.CheckpointRecord)
 		ckpt_collector.stats_mgr.checkpointed_seqnos[vbno].SetSeqno(ckpt_record.Seqno)
 
-	} else if eventType == common.CheckpointDone {
-		time_commit := otherInfos[TimeCommiting].(time.Duration).Seconds() * 1000
+	} else if event.EventType == common.CheckpointDone {
+		time_commit := event.OtherInfos[TimeCommiting].(time.Duration).Seconds() * 1000
 		registry.Get(NUM_CHECKPOINTS_METRIC).(metrics.Counter).Inc(1)
 		registry.Get(TIME_COMMITING_METRIC).(metrics.Histogram).Sample().Update(int64(time_commit))
 	}
@@ -1062,7 +1066,7 @@ func UpdateStats(cluster_info_svc service_def.ClusterInfoSvc, xdcr_topology_svc 
 // compute and set changes_left and docs_processed stats. set other stats to 0
 func constructStatsForReplication(spec *metadata.ReplicationSpecification, cur_kv_vb_map map[string][]uint16,
 	checkpoints_svc service_def.CheckpointsService, logger *log.CommonLogger) (*expvar.Map, error) {
-	cur_vb_list := pipeline_utils.GetVbListFromKvVbMap(cur_kv_vb_map)
+	cur_vb_list := simple_utils.GetVbListFromKvVbMap(cur_kv_vb_map)
 	docs_processed, err := getDocsProcessedForReplication(spec.Id, cur_vb_list, checkpoints_svc, logger)
 	if err != nil {
 		return nil, err
@@ -1125,9 +1129,9 @@ func updateStatsForReplication(repl_status *pipeline.ReplicationStatus, cur_kv_v
 	old_vb_list := repl_status.VbList()
 	overview_stats := repl_status.GetOverviewStats()
 	spec := repl_status.Spec()
-	cur_vb_list := pipeline_utils.GetVbListFromKvVbMap(cur_kv_vb_map)
-	pipeline_utils.SortUint16List(cur_vb_list)
-	sameList := pipeline_utils.AreSortedUint16ListsTheSame(old_vb_list, cur_vb_list)
+	cur_vb_list := simple_utils.GetVbListFromKvVbMap(cur_kv_vb_map)
+	simple_utils.SortUint16List(cur_vb_list)
+	sameList := simple_utils.AreSortedUint16ListsTheSame(old_vb_list, cur_vb_list)
 	if sameList {
 		docs_processed, err = strconv.ParseInt(overview_stats.Get(DOCS_PROCESSED_METRIC).String(), base.ParseIntBase, base.ParseIntBitSize)
 		if err != nil {

@@ -399,7 +399,7 @@ func (dcp *DcpNozzle) processData() (err error) {
 					_, ok := dcp.vb_stream_status[vbno]
 					if ok {
 						dcp.setStreamState(vbno, Dcp_Stream_Active, true)
-						dcp.RaiseEvent(common.StreamingStart, m, dcp, nil, nil)
+						dcp.RaiseEvent(common.NewEvent(common.StreamingStart, m, dcp, nil, nil))
 					} else {
 						panic(fmt.Sprintf("Stream for vb=%v is not supposed to be opened\n", vbno))
 					}
@@ -417,7 +417,7 @@ func (dcp *DcpNozzle) processData() (err error) {
 					case gomemcached.UPR_MUTATION, gomemcached.UPR_DELETION, gomemcached.UPR_EXPIRATION:
 						start_time := time.Now()
 						dcp.incCounterReceived()
-						dcp.RaiseEvent(common.DataReceived, m, dcp, nil /*derivedItems*/, nil /*otherInfos*/)
+						dcp.RaiseEvent(common.NewEvent(common.DataReceived, m, dcp, nil /*derivedItems*/, nil /*otherInfos*/))
 						dcp.Logger().Tracef("%v, Mutation %v:%v:%v <%v>, counter=%v, ops_per_sec=%v\n",
 							dcp.Id(), m.VBucket, m.Seqno, m.Opcode, m.Key, dcp.counterReceived(), float64(dcp.counterReceived())/time.Since(dcp.start_time).Seconds())
 
@@ -432,7 +432,7 @@ func (dcp *DcpNozzle) processData() (err error) {
 						additionalInfo1 := make(map[string]interface{})
 						additionalInfo1[EVENT_DCP_DISPATCH_TIME] = dispatch_time.Seconds() * 1000
 
-						dcp.RaiseEvent(common.DataProcessed, m, dcp, nil /*derivedItems*/, additionalInfo1 /*otherInfos*/)
+						dcp.RaiseEvent(common.NewEvent(common.DataProcessed, m, dcp, nil /*derivedItems*/, additionalInfo1 /*otherInfos*/))
 					default:
 						dcp.Logger().Debugf("Uprevent OpCode=%v, is skipped\n", m.Opcode)
 					}
@@ -459,7 +459,7 @@ func (dcp *DcpNozzle) handleGeneralError(err error) {
 	err1 := dcp.SetState(common.Part_Error)
 	if err1 == nil {
 		otherInfo := utils.WrapError(err)
-		dcp.RaiseEvent(common.ErrorEncountered, nil, dcp, nil, otherInfo)
+		dcp.RaiseEvent(common.NewEvent(common.ErrorEncountered, nil, dcp, nil, otherInfo))
 		dcp.Logger().Errorf("Raise error condition %v\n", err)
 	} else {
 		dcp.Logger().Debugf("%v in shutdown process. err=%v is ignored\n", dcp.Id(), err)
@@ -803,7 +803,7 @@ func (dcp *DcpNozzle) collectDcpDataChanLen(settings map[string]interface{}) {
 		case <-ticker.C:
 			additionalInfo := make(map[string]interface{})
 			additionalInfo[EVENT_DCP_DATACH_LEN] = len(dcp.uprFeed.C)
-			dcp.RaiseEvent(common.StatsUpdate, nil, dcp, nil, additionalInfo)
+			dcp.RaiseEvent(common.NewEvent(common.StatsUpdate, nil, dcp, nil, additionalInfo))
 		}
 	}
 

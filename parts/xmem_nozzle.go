@@ -692,7 +692,7 @@ type XmemNozzle struct {
 
 	connType base.ConnType
 
-	dataObj_recycler DataObjRecycler
+	dataObj_recycler base.DataObjRecycler
 
 	topic          string
 	getMeta_ticker *time.Ticker
@@ -705,7 +705,7 @@ func NewXmemNozzle(id string,
 	connectString string,
 	bucketName string,
 	password string,
-	dataObj_recycler DataObjRecycler,
+	dataObj_recycler base.DataObjRecycler,
 	logger_context *log.LoggerContext) *XmemNozzle {
 
 	//callback functions from GenServer
@@ -1057,7 +1057,12 @@ func (xmem *XmemNozzle) batchSetMetaWithRetry(batch *dataBatch, numOfRetry int) 
 
 				additionalInfo := make(map[string]interface{})
 				additionalInfo[EVENT_ADDI_SEQNO] = item.Seqno
-				xmem.RaiseEvent(common.DataFailedCRSource, item.Req, xmem, nil, additionalInfo)
+				additionalInfo[EVENT_ADDI_REQ_OPCODE] = item.Req.Opcode
+				additionalInfo[EVENT_ADDI_REQ_EXPIRY_SET] = (binary.BigEndian.Uint32(item.Req.Extras[4:8]) != 0)
+				additionalInfo[EVENT_ADDI_REQ_VBUCKET] = item.Req.VBucket
+				xmem.RaiseEvent(common.NewEvent(common.DataFailedCRSource, nil, xmem, nil, additionalInfo))
+
+				xmem.recycleDataObj(item)
 			}
 		}
 
@@ -1168,7 +1173,7 @@ func (xmem *XmemNozzle) batchGetMeta(bigDoc_map map[string]*base.WrappedMCReques
 
 	//launch the receiver
 	waitGrp.Add(1)
-	go func(count int, finch chan bool, opaque_keySeqno_map map[uint32][]interface{}, respMap map[string]*mc.MCResponse,  err_list []error, ticker *time.Ticker, waitGrp *sync.WaitGroup, logger *log.CommonLogger, lock *sync.RWMutex) {
+	go func(count int, finch chan bool, opaque_keySeqno_map map[uint32][]interface{}, respMap map[string]*mc.MCResponse, err_list []error, ticker *time.Ticker, waitGrp *sync.WaitGroup, logger *log.CommonLogger, lock *sync.RWMutex) {
 		defer waitGrp.Done()
 		timeout_count := 0
 		for {
@@ -1178,8 +1183,8 @@ func (xmem *XmemNozzle) batchGetMeta(bigDoc_map map[string]*base.WrappedMCReques
 			case <-ticker.C:
 				timeout_count++
 				if timeout_count > 1 {
-				err_list = append(err_list, errors.New("batchGetMeta timedout"))
-				return
+					err_list = append(err_list, errors.New("batchGetMeta timedout"))
+					return
 				}
 			default:
 				if xmem.validateRunningState() != nil {
@@ -1213,7 +1218,7 @@ func (xmem *XmemNozzle) batchGetMeta(bigDoc_map map[string]*base.WrappedMCReques
 							additionalInfo[EVENT_ADDI_DOC_KEY] = key
 							additionalInfo[EVENT_ADDI_SEQNO] = seqno
 							additionalInfo[EVENT_ADDI_GETMETA_COMMIT_TIME] = time.Since(start_time)
-							xmem.RaiseEvent(common.GetMetaReceived, nil, xmem, nil, additionalInfo)
+							xmem.RaiseEvent(common.NewEvent(common.GetMetaReceived, nil, xmem, nil, additionalInfo))
 						} else {
 							panic("KeySeqno list is not formated as expected [string, uint64]")
 						}
@@ -1535,9 +1540,13 @@ func (xmem *XmemNozzle) receiveResponse(finch chan bool, waitGrp *sync.WaitGroup
 					additionalInfo := make(map[string]interface{})
 					additionalInfo[EVENT_ADDI_SEQNO] = seqno
 					additionalInfo[EVENT_ADDI_OPT_REPD] = xmem.optimisticRep(req)
+					additionalInfo[EVENT_ADDI_REQ_OPCODE] = req.Opcode
+					additionalInfo[EVENT_ADDI_REQ_EXPIRY_SET] = (binary.BigEndian.Uint32(req.Extras[4:8]) != 0)
+					additionalInfo[EVENT_ADDI_REQ_VBUCKET] = req.VBucket
+					additionalInfo[EVENT_ADDI_REQ_SIZE] = req.Size()
 					additionalInfo[EVENT_ADDI_SETMETA_COMMIT_TIME] = committing_time
 
-					xmem.RaiseEvent(common.DataSent, req, xmem, nil, additionalInfo)
+					xmem.RaiseEvent(common.NewEvent(common.DataSent, nil, xmem, nil, additionalInfo))
 
 					//feedback the most current commit_time to xmem.config.respTimeout
 					xmem.adjustRespTimeout(committing_time)
@@ -1546,6 +1555,7 @@ func (xmem *XmemNozzle) receiveResponse(finch chan bool, waitGrp *sync.WaitGroup
 					if xmem.buf.evictSlot(pos) != nil {
 						panic(fmt.Sprintf("Failed to evict slot %d\n", pos))
 					}
+
 					//put the request object back into the pool
 					xmem.recycleDataObj(wrappedReq)
 				} else {
@@ -1675,7 +1685,7 @@ func (xmem *XmemNozzle) selfMonitor(finch chan bool, waitGrp *sync.WaitGroup) {
 			additionalInfo := make(map[string]interface{})
 			additionalInfo[STATS_QUEUE_SIZE] = len(xmem.dataChan)
 			additionalInfo[STATS_QUEUE_SIZE_BYTES] = xmem.bytesInDataChan()
-			xmem.RaiseEvent(common.StatsUpdate, nil, xmem, nil, additionalInfo)
+			xmem.RaiseEvent(common.NewEvent(common.StatsUpdate, nil, xmem, nil, additionalInfo))
 		}
 	}
 done:
@@ -1827,7 +1837,7 @@ func (xmem *XmemNozzle) handleGeneralError(err error) {
 	err1 := xmem.SetState(common.Part_Error)
 	if err1 == nil {
 		otherInfo := utils.WrapError(err)
-		xmem.RaiseEvent(common.ErrorEncountered, nil, xmem, nil, otherInfo)
+		xmem.RaiseEvent(common.NewEvent(common.ErrorEncountered, nil, xmem, nil, otherInfo))
 		xmem.Logger().Errorf("Raise error condition %v\n", err)
 	} else {
 		xmem.Logger().Infof("%v in shutdown process, err=%v is ignored\n", xmem.Id(), err)

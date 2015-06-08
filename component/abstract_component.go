@@ -12,21 +12,22 @@ package Component
 import (
 	"errors"
 	"fmt"
-	common "github.com/couchbase/goxdcr/common"
+	"github.com/couchbase/goxdcr/common"
 	"github.com/couchbase/goxdcr/log"
 )
 
 type AbstractComponent struct {
-	id        string
+	id              string
+	pipeline        common.Pipeline
 	event_listeners map[common.ComponentEventType][]common.ComponentEventListener
-	logger    *log.CommonLogger
+	logger          *log.CommonLogger
 }
 
 func NewAbstractComponentWithLogger(id string, logger *log.CommonLogger) *AbstractComponent {
 	return &AbstractComponent{
-		id:                 id,
-		event_listeners:    make(map[common.ComponentEventType][]common.ComponentEventListener),
-		logger:             logger,
+		id:              id,
+		event_listeners: make(map[common.ComponentEventType][]common.ComponentEventListener),
+		logger:          logger,
 	}
 }
 
@@ -47,6 +48,7 @@ func (c *AbstractComponent) RegisterComponentEventListener(eventType common.Comp
 
 	listenerList = append(listenerList, listener)
 	c.event_listeners[eventType] = listenerList
+
 	c.logger.Debugf("listener %v is registered on event %v for Component %v", listener, eventType, c.Id())
 	return nil
 }
@@ -73,20 +75,31 @@ func (c *AbstractComponent) UnRegisterComponentEventListener(eventType common.Co
 	return nil
 }
 
-func (c *AbstractComponent) RaiseEvent(eventType common.ComponentEventType, data interface{}, component common.Component, derivedData []interface{}, otherInfos map[string]interface{}) {
-
-	c.logger.Debugf("Raise event %d for component %s\n", eventType, component.Id())
-	listenerList := c.event_listeners[eventType]
+func (c *AbstractComponent) RaiseEvent(event *common.Event) {
+	c.logger.Debugf("Raise event %d for component %s\n", event.EventType, event.Component.Id())
+	listenerList := c.event_listeners[event.EventType]
 
 	for _, listener := range listenerList {
 		if listener != nil {
-			//			logger.LogDebug("", "", fmt.Sprintf("calling listener %s on event %s on part %s", fmt.Sprint(listener), fmt.Sprint(eventType), part.Id()))
-			listener.OnEvent(eventType, data, component, derivedData, otherInfos)
+			listener.OnEvent(event)
 		}
 	}
 }
 
-
 func (c *AbstractComponent) Logger() *log.CommonLogger {
 	return c.logger
+}
+
+func (c *AbstractComponent) AsyncComponentEventListeners() map[string]common.AsyncComponentEventListener {
+	listenerMap := make(map[string]common.AsyncComponentEventListener)
+	for _, listeners := range c.event_listeners {
+		for _, listener := range listeners {
+			if asyncListener, ok := listener.(common.AsyncComponentEventListener); ok {
+				if _, ok = listenerMap[asyncListener.Id()]; !ok {
+					listenerMap[asyncListener.Id()] = asyncListener
+				}
+			}
+		}
+	}
+	return listenerMap
 }

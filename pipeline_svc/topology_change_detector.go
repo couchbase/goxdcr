@@ -106,14 +106,14 @@ func (top_detect_svc *TopologyChangeDetectorSvc) validate(checkingTargetVersion 
 	err := top_detect_svc.validateSourceTopology()
 	if err != nil && err == source_topology_changedErr {
 		otherInfo := utils.WrapError(err)
-		top_detect_svc.RaiseEvent(common.ErrorEncountered, nil, top_detect_svc, nil, otherInfo)
+		top_detect_svc.RaiseEvent(common.NewEvent(common.ErrorEncountered, nil, top_detect_svc, nil, otherInfo))
 	}
 
 	if checkingTargetVersion {
 		err := top_detect_svc.validateTargetVersion()
 		if err != nil && err == target_cluster_versionChangeErr {
 			otherInfo := utils.WrapError(err)
-			top_detect_svc.RaiseEvent(common.ErrorEncountered, nil, top_detect_svc, nil, otherInfo)
+			top_detect_svc.RaiseEvent(common.NewEvent(common.ErrorEncountered, nil, top_detect_svc, nil, otherInfo))
 		}
 	}
 }

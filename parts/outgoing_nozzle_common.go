@@ -38,9 +38,12 @@ const (
 	EVENT_ADDI_OPT_REPD            = "optimistic_replicated"
 	EVENT_ADDI_SETMETA_COMMIT_TIME = "setmeta_commit_time"
 	EVENT_ADDI_GETMETA_COMMIT_TIME = "getmeta_commit_time"
+	// the following are for MCRequest related info
+	EVENT_ADDI_REQ_OPCODE  = "req_opcode"
+	EVENT_ADDI_REQ_VBUCKET = "req_vbucket"
+	EVENT_ADDI_REQ_EXPIRY_SET  = "req_expiry_set"
+	EVENT_ADDI_REQ_SIZE    = "req_size"
 )
-
-type DataObjRecycler func(topic string, dataObj *base.WrappedMCRequest)
 
 /************************************
 /* struct baseConfig
@@ -86,7 +89,7 @@ type documentMetadata struct {
 func (doc_meta documentMetadata) uniqueKey() []byte {
 	ret := make([]byte, len(doc_meta.key)+8)
 	copy(ret[0:len(doc_meta.key)], doc_meta.key)
-	binary.BigEndian.PutUint64 (ret[len(doc_meta.key):], doc_meta.revSeq)
+	binary.BigEndian.PutUint64(ret[len(doc_meta.key):], doc_meta.revSeq)
 	return ret
 }
 

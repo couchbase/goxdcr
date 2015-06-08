@@ -17,8 +17,8 @@ import (
 	log "github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/goxdcr/parts"
-	"github.com/couchbase/goxdcr/pipeline_utils"
 	"github.com/couchbase/goxdcr/service_def"
+	"github.com/couchbase/goxdcr/simple_utils"
 	"sync"
 	"time"
 )
@@ -183,6 +183,11 @@ func (genericPipeline *GenericPipeline) Start(settings map[string]interface{}) e
 		return err
 	}
 
+	// start async event listeners
+	for _, async_event_listener := range genericPipeline.getAllAsyncComponentEventListeners() {
+		async_event_listener.Start()
+	}
+
 	//start the runtime
 	err = genericPipeline.context.Start(genericPipeline.settings)
 	if err != nil {
@@ -269,7 +274,7 @@ func (genericPipeline *GenericPipeline) Start(settings map[string]interface{}) e
 func (genericPipeline *GenericPipeline) stopPart(part common.Part) error {
 	var err error = nil
 	genericPipeline.logger.Infof("Trying to stop part %v for %v\n", part.Id(), genericPipeline.InstanceId())
-	err = pipeline_utils.ExecWithTimeout(part.Stop, 1000*time.Millisecond, genericPipeline.logger)
+	err = simple_utils.ExecWithTimeout(part.Stop, 1000*time.Millisecond, genericPipeline.logger)
 	if err == nil {
 		genericPipeline.logger.Infof("part %v is stopped\n", part.Id())
 	} else {
@@ -350,6 +355,13 @@ func (genericPipeline *GenericPipeline) Stop() error {
 			}
 
 		}(part)
+	}
+
+	// stop async event listeners
+	for _, asyncEventListener := range genericPipeline.getAllAsyncComponentEventListeners() {
+		go func(asyncEventListener common.AsyncComponentEventListener) {
+			asyncEventListener.Stop()
+		}(asyncEventListener)
 	}
 
 	genericPipeline.ReportProgress("Pipeline is stopped")
@@ -437,6 +449,45 @@ func addPartToMap(part common.Part, partsMap map[string]common.Part) {
 					addPartToMap(downStreamPart, partsMap)
 				}
 			}
+		}
+	}
+}
+
+func (genericPipeline *GenericPipeline) getAllAsyncComponentEventListeners() map[string]common.AsyncComponentEventListener {
+	listenersMap := make(map[string]common.AsyncComponentEventListener)
+	partsMap := make(map[string]common.Part)
+	// add async listeners on parts and connectors to listeners map
+	for _, source := range genericPipeline.Sources() {
+		addAsyncListenersToMap(source, listenersMap, partsMap)
+	}
+
+	return listenersMap
+}
+
+func addAsyncListenersToMap(part common.Part, listenersMap map[string]common.AsyncComponentEventListener, partsMap map[string]common.Part) {
+	if part != nil {
+		// use partsMap to check if the part has been processed before to avoid infinite loop
+		if _, ok := partsMap[part.Id()]; !ok {
+			partsMap[part.Id()] = part
+
+			mergeListenersMap(listenersMap, part.AsyncComponentEventListeners())
+
+			connector := part.Connector()
+			if connector != nil {
+				mergeListenersMap(listenersMap, connector.AsyncComponentEventListeners())
+				for _, downStreamPart := range connector.DownStreams() {
+					addAsyncListenersToMap(downStreamPart, listenersMap, partsMap)
+				}
+			}
+		}
+	}
+}
+
+// add all entries in listenersMap2 to listenersMap
+func mergeListenersMap(listenersMap map[string]common.AsyncComponentEventListener, listenersMap2 map[string]common.AsyncComponentEventListener) {
+	for id, listener := range listenersMap2 {
+		if _, ok := listenersMap[id]; !ok {
+			listenersMap[id] = listener
 		}
 	}
 }

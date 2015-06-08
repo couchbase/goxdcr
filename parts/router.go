@@ -140,7 +140,7 @@ func (router *Router) route(data interface{}) (map[string]interface{}, error) {
 	if router.filterRegexp != nil {
 		if !utils.RegexpMatch(router.filterRegexp, uprEvent.Key) {
 			// if data does not match filter expression, drop it. return empty result
-			router.RaiseEvent(common.DataFiltered, uprEvent, router, nil, nil)
+			router.RaiseEvent(common.NewEvent(common.DataFiltered, uprEvent, router, nil, nil))
 			router.Logger().Debugf("Data with key=%v, vbno=%d, opCode=%v has been filtered out", string(uprEvent.Key), uprEvent.VBucket, uprEvent.Opcode)
 			return result, nil
 		}

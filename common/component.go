@@ -9,22 +9,21 @@
 
 package common
 
-import (
-
-)
+import ()
 
 //ComponentEventType is the common event type that Component can raise during its lifecycle
 //It is not required for Component to raise all those event
 type ComponentEventType int
+
 const (
 	//data streaming starts
-	StreamingStart	ComponentEventType = iota
+	StreamingStart ComponentEventType = iota
 	//data received by the component
 	DataReceived ComponentEventType = iota
-	//data is processed by the component 
+	//data is processed by the component
 	//and passed down to the downstream
 	DataProcessed ComponentEventType = iota
-	//data is fully passed through the 
+	//data is fully passed through the
 	//pipeline to the target system
 	DataSent ComponentEventType = iota
 	//data is filtered out by the component
@@ -32,9 +31,9 @@ const (
 	//error encountered by the component
 	ErrorEncountered ComponentEventType = iota
 	//checkpointing suceeded for vb
-	CheckpointDoneForVB	ComponentEventType = iota
-	//checkpointing succeed 
-	CheckpointDone		ComponentEventType = iota
+	CheckpointDoneForVB ComponentEventType = iota
+	//checkpointing succeed
+	CheckpointDone ComponentEventType = iota
 	// get meta response received from target cluster
 	GetMetaReceived ComponentEventType = iota
 	//data failed conflict resolution on source cluster side due to optimistic replication
@@ -43,26 +42,55 @@ const (
 	StatsUpdate ComponentEventType = iota
 )
 
+type Event struct {
+	//the type of component event
+	EventType ComponentEventType
+	//the data item
+	Data interface{}
+	//the originating component
+	Component Component
+	//the data items derived from the original item. This only used by DataProcessed event
+	DerivedData []interface{}
+	//any other information the event might be able to supply to its listener
+	OtherInfos map[string]interface{}
+}
+
+func NewEvent(eventType ComponentEventType, data interface{}, component Component, derivedData []interface{}, otherInfos map[string]interface{}) *Event {
+	return &Event{eventType, data, component, derivedData, otherInfos}
+}
+
 //ComponentEventListener abstracts anybody who is interested in an event of a component
 type ComponentEventListener interface {
 	//OnEvent is the callback function that component would notify listener on an event
-	//event - the type of component event
-	//item - the data item
-	//derivedItems - the data items derived from the original item. This only used by DataProcessed event
-	//otherinformation - any other information the event might be able to supply to its listener
-	OnEvent (eventType ComponentEventType, item interface{}, component Component, derivedItems []interface{}, otherInfos map[string]interface{})
+	OnEvent(event *Event)
 }
+
+//AsyncComponentEventListener is a subtype of ComponentEventListener which processes events asynchonously
+type AsyncComponentEventListener interface {
+	ComponentEventListener
+	// id of event listener
+	Id() string
+	Start() error
+	Stop() error
+}
+
+//ProcessEvent does the actual handling of the component event for async event listener
+//it is called from a separate go routine from OnEvent()
+type ProcessEvent func(event *Event) error
 
 type Component interface {
 	// id of component
 	Id() string
-	
+
 	//RegisterComponentEventListener registers a listener for component event
 	//
 	//if the eventType is not supported by the component, an error would be thrown
-	RegisterComponentEventListener (eventType ComponentEventType, listener ComponentEventListener) error
-	UnRegisterComponentEventListener (eventType ComponentEventType, listener ComponentEventListener) error	
-	
+	RegisterComponentEventListener(eventType ComponentEventType, listener ComponentEventListener) error
+	UnRegisterComponentEventListener(eventType ComponentEventType, listener ComponentEventListener) error
+
+	// returns the map of async event listeners registered on this component
+	AsyncComponentEventListeners() map[string]AsyncComponentEventListener
+
 	// raise event for a component
-	RaiseEvent(eventType ComponentEventType, data interface{}, component Component, derivedData []interface{}, otherInfos map[string]interface{})
+	RaiseEvent(event *Event)
 }

@@ -19,8 +19,8 @@ import (
 	component "github.com/couchbase/goxdcr/component"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
-	"github.com/couchbase/goxdcr/pipeline_utils"
 	"github.com/couchbase/goxdcr/service_def"
+	"github.com/couchbase/goxdcr/simple_utils"
 	"github.com/couchbase/goxdcr/utils"
 	"math/rand"
 	"sync"
@@ -275,7 +275,7 @@ func getDocsProcessedForReplication(topic string, vb_list []uint16, checkpoints_
 
 	for vbno, ckptDoc := range ckptDocs {
 
-		if pipeline_utils.IsVbInList(vbno, vb_list) {
+		if simple_utils.IsVbInList(vbno, vb_list) {
 			// if vbno is in vb_list, include its senqo in docs_processed computation
 
 			// if checkpoint records exist, use the seqno in the first checkpoint record, which is the highest in all checkpoint records
@@ -302,7 +302,7 @@ func (ckmgr *CheckpointManager) SetVBTimestamps(topic string) error {
 	err := ckmgr.remote_bucket.Refresh(ckmgr.remote_cluster_svc)
 	if err != nil {
 		otherInfo := utils.WrapError(err)
-		ckmgr.RaiseEvent(common.ErrorEncountered, nil, ckmgr, nil, otherInfo)
+		ckmgr.RaiseEvent(common.NewEvent(common.ErrorEncountered, nil, ckmgr, nil, otherInfo))
 		return err
 	}
 
@@ -314,13 +314,13 @@ func (ckmgr *CheckpointManager) SetVBTimestamps(topic string) error {
 	ckptDocs, err := ckmgr.checkpoints_svc.CheckpointsDocs(topic)
 	if err != nil {
 		otherInfo := utils.WrapError(err)
-		ckmgr.RaiseEvent(common.ErrorEncountered, nil, ckmgr, nil, otherInfo)
+		ckmgr.RaiseEvent(common.NewEvent(common.ErrorEncountered, nil, ckmgr, nil, otherInfo))
 		return err
 	}
 	ckmgr.logger.Infof("Found %v checkpoit document for replication %v\n", len(ckptDocs), topic)
 
 	for vbno, _ := range ckptDocs {
-		if !pipeline_utils.IsVbInList(vbno, listOfVbs) {
+		if !simple_utils.IsVbInList(vbno, listOfVbs) {
 			// if the vbno is no longer managed by the current checkpoint manager/pipeline,
 			// the checkpoint doc is no longer valid and needs to be deleted
 			// ignore errors, which should have been logged
@@ -362,7 +362,7 @@ func (ckmgr *CheckpointManager) SetVBTimestamps(topic string) error {
 	if len(err_ch) > 0 {
 		err = errors.New(fmt.Sprintf("Failed to get starting seqno for pipeline %v", ckmgr.pipeline.InstanceId()))
 		otherInfo := utils.WrapError(err)
-		ckmgr.RaiseEvent(common.ErrorEncountered, nil, ckmgr, nil, otherInfo)
+		ckmgr.RaiseEvent(common.NewEvent(common.ErrorEncountered, nil, ckmgr, nil, otherInfo))
 		return err
 	}
 
@@ -522,7 +522,7 @@ func (retriever *failoverLogRetriever) getFailiverLog() (err error) {
 func (ckmgr *CheckpointManager) getFailoverLog(bucket *couchbase.Bucket, listOfVbs []uint16) (couchbase.FailoverLog, error) {
 	//Get failover log can hang, timeout the executation if it takes too long.
 	failoverLogRetriever := newFailoverLogRetriever(listOfVbs, bucket, ckmgr.logger)
-	err := pipeline_utils.ExecWithTimeout(failoverLogRetriever.getFailiverLog, 20*time.Second, ckmgr.logger)
+	err := simple_utils.ExecWithTimeout(failoverLogRetriever.getFailiverLog, 20*time.Second, ckmgr.logger)
 	if err != nil {
 		return nil, errors.New("Failed to get failover log in 1 minute")
 	}
@@ -704,12 +704,12 @@ func (ckmgr *CheckpointManager) performCkpt(fin_ch chan bool, wait_grp *sync.Wai
 		ckmgr.logger.Errorf("Checkpointing failed for replication %v, err=%v\n", ckmgr.pipeline.Topic(), err_map)
 		err := errors.New("Checkpointing failed")
 		otherInfo := utils.WrapError(err)
-		ckmgr.RaiseEvent(common.ErrorEncountered, nil, ckmgr, nil, otherInfo)
+		ckmgr.RaiseEvent(common.NewEvent(common.ErrorEncountered, nil, ckmgr, nil, otherInfo))
 	} else {
 		ckmgr.logger.Infof("Done checkpointing for replication %v\n", ckmgr.pipeline.Topic())
 		otherInfo := make(map[string]interface{})
 		otherInfo[TimeCommiting] = time.Duration(total_committing_time) * time.Second
-		ckmgr.RaiseEvent(common.CheckpointDone, nil, ckmgr, nil, otherInfo)
+		ckmgr.RaiseEvent(common.NewEvent(common.CheckpointDone, nil, ckmgr, nil, otherInfo))
 	}
 
 }
@@ -765,7 +765,7 @@ func (ckmgr *CheckpointManager) raiseSuccessCkptForVbEvent(ckpt_record metadata.
 	//notify statisticsManager
 	otherInfo := make(map[string]interface{})
 	otherInfo[Vbno] = vbno
-	ckmgr.RaiseEvent(common.CheckpointDoneForVB, ckpt_record, ckmgr, nil, otherInfo)
+	ckmgr.RaiseEvent(common.NewEvent(common.CheckpointDoneForVB, ckpt_record, ckmgr, nil, otherInfo))
 }
 
 func (ckmgr *CheckpointManager) persistCkptRecord(vbno uint16, ckpt_record *metadata.CheckpointRecord) error {
@@ -773,16 +773,12 @@ func (ckmgr *CheckpointManager) persistCkptRecord(vbno uint16, ckpt_record *meta
 	return ckmgr.checkpoints_svc.UpsertCheckpoints(ckmgr.pipeline.Topic(), vbno, ckpt_record)
 }
 
-func (ckmgr *CheckpointManager) OnEvent(eventType common.ComponentEventType,
-	item interface{},
-	component common.Component,
-	derivedItems []interface{},
-	otherInfos map[string]interface{}) {
-	if eventType == common.StreamingStart {
-		event, ok := item.(*mcc.UprEvent)
+func (ckmgr *CheckpointManager) OnEvent(event *common.Event) {
+	if event.EventType == common.StreamingStart {
+		upr_event, ok := event.Data.(*mcc.UprEvent)
 		if ok {
-			flog := event.FailoverLog
-			vbno := event.VBucket
+			flog := upr_event.FailoverLog
+			vbno := upr_event.VBucket
 
 			failoverlog_obj, ok1 := ckmgr.failoverlog_map[vbno]
 			if ok1 {
@@ -924,7 +920,7 @@ func (ckmgr *CheckpointManager) massCheckVBOpaques(target_vb_vbuuid_map map[uint
 				ckmgr.logger.Errorf("Target bucket for replication %v's topology has changed. mismatch=%v, missing=%v, mataching\n", ckmgr.pipeline.Topic(), mismatching, missing)
 				err := errors.New("Target bucket's topology has changed")
 				otherInfo := utils.WrapError(err)
-				ckmgr.RaiseEvent(common.ErrorEncountered, nil, ckmgr, nil, otherInfo)
+				ckmgr.RaiseEvent(common.NewEvent(common.ErrorEncountered, nil, ckmgr, nil, otherInfo))
 
 			} else {
 				ckmgr.logger.Infof("No target bucket topology change is detected for replication %v", ckmgr.pipeline.Topic())

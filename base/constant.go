@@ -236,3 +236,13 @@ const (
 )
 
 var UprFeedDataChanLength = 1000
+
+var EventChanLength = 1000
+
+const (
+	OutNozzleStatsCollector  = "OutNozzleStatsCollector"
+	DcpStatsCollector        = "DcpStatsCollector"
+	RouterStatsCollector     = "RouterStatsCollector"
+	CheckpointStatsCollector = "CheckpointStatsCollector"
+	ThroughSeqnoTracker      = "ThroughSeqnoTracker"
+)

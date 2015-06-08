@@ -9,6 +9,7 @@ import (
 	mcc "github.com/couchbase/gomemcached/client"
 	base "github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
+	"github.com/couchbase/goxdcr/simple_utils"
 	"net/url"
 	"reflect"
 	"regexp"
@@ -153,22 +154,6 @@ func RemoteBucket(remoteConnectStr, bucketName, remoteUsername, remotePassword s
 	return bucket, err
 }
 
-func IncorrectValueTypeInHttpRequestError(key string, val interface{}, expectedType string) error {
-	return errors.New(fmt.Sprintf("Value, %v, for key, %v, in http request has incorrect data type. Expected type: %v. Actual type: %v", val, key, expectedType, reflect.TypeOf(val)))
-}
-
-func IncorrectValueTypeError(expectedType string) error {
-	return errors.New(fmt.Sprintf("The value must be %v", expectedType))
-}
-
-func InvalidValueError(expectedType string, minVal, maxVal interface{}) error {
-	return errors.New(fmt.Sprintf("The value must be %v between %v and %v", expectedType, minVal, maxVal))
-}
-
-func InvalidPathInHttpRequestError(path string) error {
-	return errors.New(fmt.Sprintf("Invalid path, %v, in http request.", path))
-}
-
 func WrapError(err error) map[string]interface{} {
 	infos := make(map[string]interface{})
 	infos["error"] = err
@@ -180,34 +165,6 @@ func UnwrapError(infos map[string]interface{}) (err error) {
 		err = infos["error"].(error)
 	}
 	return err
-}
-
-func MissingValueError(param string) error {
-	return errors.New(fmt.Sprintf("%v cannot be empty", param))
-}
-
-func GenericInvalidValueError(param string) error {
-	return errors.New(fmt.Sprintf("%v is invalid", param))
-}
-
-func MissingParameterError(param string) error {
-	return errors.New(fmt.Sprintf("%v is missing", param))
-}
-
-func MissingParameterInHttpRequestUrlError(paramName, path string) error {
-	return errors.New(fmt.Sprintf("%v is missing from request url, %v.", paramName, path))
-}
-
-func MissingParameterInHttpResponseError(param string) error {
-	return errors.New(fmt.Sprintf("Parameter, %v, is missing in http response.", param))
-}
-
-func IncorrectValueTypeInHttpResponseError(key string, val interface{}, expectedType string) error {
-	return errors.New(fmt.Sprintf("Value, %v, for key, %v, in http response has incorrect data type. Expected type: %v. Actual type: %v", val, key, expectedType, reflect.TypeOf(val)))
-}
-
-func IncorrectValueTypeInMapError(key string, val interface{}, expectedType string) error {
-	return errors.New(fmt.Sprintf("Value, %v, with key, %v, in map has incorrect data type. Expected type: %v. Actual type: %v", val, key, expectedType, reflect.TypeOf(val)))
 }
 
 // returns an enhanced error with erroe message being "msg + old error message"
@@ -301,7 +258,7 @@ func EncodeMapIntoByteArray(data map[string]interface{}) ([]byte, error) {
 		case []byte:
 			strVal = string(val.([]byte))
 		default:
-			return nil, IncorrectValueTypeInMapError(key, val, "string/int/bool/LogLevel/[]byte")
+			return nil, simple_utils.IncorrectValueTypeInMapError(key, val, "string/int/bool/LogLevel/[]byte")
 		}
 		params.Add(key, strVal)
 	}
@@ -511,16 +468,4 @@ func GetSettingFromSettings(settings map[string]interface{}, settingName string)
 	}
 
 	return setting
-}
-
-func DeepCopyIntArray(in []int) []int {
-	if in == nil {
-		return nil
-	}
-
-	out := make([]int, 0)
-	for _, element := range in {
-		out = append(out, element)
-	}
-	return out
 }

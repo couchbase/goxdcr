@@ -15,11 +15,11 @@ import (
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/common"
 	"github.com/couchbase/goxdcr/log"
+	"github.com/couchbase/goxdcr/parts"
 	"github.com/couchbase/goxdcr/pipeline"
 	"github.com/couchbase/goxdcr/service_def"
 	"github.com/couchbase/goxdcr/supervisor"
 	"github.com/couchbase/goxdcr/utils"
-	"github.com/couchbase/goxdcr/parts"
 	"reflect"
 	"time"
 )
@@ -148,15 +148,12 @@ func (pipelineSupervisor *PipelineSupervisor) monitorPipelineHealth() error {
 	return nil
 }
 
-func (pipelineSupervisor *PipelineSupervisor) OnEvent(eventType common.ComponentEventType,
-	item interface{},
-	component common.Component,
-	derivedItems []interface{},
-	otherInfos map[string]interface{}) {
-	if eventType == common.ErrorEncountered {
+func (pipelineSupervisor *PipelineSupervisor) OnEvent(event *common.Event) {
+	if event.EventType == common.ErrorEncountered {
 		if pipelineSupervisor.pipeline.State() != common.Pipeline_Error {
-			if otherInfos["error"] != nil {
-				pipelineSupervisor.errors_seen[component.Id()] = otherInfos["error"].(error)
+			errorInfo := event.OtherInfos["error"]
+			if errorInfo != nil {
+				pipelineSupervisor.errors_seen[event.Component.Id()] = errorInfo.(error)
 			}
 			pipelineSupervisor.declarePipelineBroken()
 		} else {
@@ -165,7 +162,7 @@ func (pipelineSupervisor *PipelineSupervisor) OnEvent(eventType common.Component
 		}
 
 	} else {
-		pipelineSupervisor.Logger().Errorf("Pipeline supervisor didn't register to recieve event %v for component %v", eventType, component.Id())
+		pipelineSupervisor.Logger().Errorf("Pipeline supervisor didn't register to recieve event %v for component %v", event.EventType, event.Component.Id())
 	}
 }
 

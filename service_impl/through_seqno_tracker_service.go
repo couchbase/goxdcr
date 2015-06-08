@@ -11,19 +11,21 @@ package service_impl
 
 import (
 	"fmt"
-	"github.com/couchbase/gomemcached"
 	mcc "github.com/couchbase/gomemcached/client"
 	"github.com/couchbase/goxdcr/base"
-	common "github.com/couchbase/goxdcr/common"
+	"github.com/couchbase/goxdcr/common"
+	component "github.com/couchbase/goxdcr/component"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/parts"
 	"github.com/couchbase/goxdcr/pipeline_utils"
-	"github.com/couchbase/goxdcr/utils"
+	"github.com/couchbase/goxdcr/simple_utils"
 	"sort"
 	"sync"
 )
 
 type ThroughSeqnoTrackerSvc struct {
+	common.AsyncComponentEventListener
+
 	// map of vbs that the tracker tracks.
 	vb_map map[uint16]bool
 
@@ -66,7 +68,7 @@ func newSortedSeqnoListWithLock() *SortedSeqnoListWithLock {
 func (list_obj *SortedSeqnoListWithLock) getSortedSeqnoList() []int {
 	list_obj.lock.RLock()
 	defer list_obj.lock.RUnlock()
-	return utils.DeepCopyIntArray(list_obj.seqno_list)
+	return simple_utils.DeepCopyIntArray(list_obj.seqno_list)
 }
 
 // insert seqno to the right position in seqno_list
@@ -159,6 +161,10 @@ func (tsTracker *ThroughSeqnoTrackerSvc) initialize(pipeline common.Pipeline) {
 		tsTracker.vb_failed_cr_seqno_list_map[vbno] = newSortedSeqnoListWithLock()
 		tsTracker.vb_gap_seqno_list_map[vbno] = newSortedSeqnoListWithLock()
 	}
+
+	tsTracker.AsyncComponentEventListener = component.NewDefaultAsyncComponentEventListenerImpl(
+		pipeline_utils.GetAsyncComponentEventListenerId(pipeline, base.ThroughSeqnoTracker),
+		pipeline.Topic(), tsTracker.ProcessEvent, tsTracker.logger)
 }
 
 func (tsTracker *ThroughSeqnoTrackerSvc) Attach(pipeline common.Pipeline) error {
@@ -184,32 +190,32 @@ func (tsTracker *ThroughSeqnoTrackerSvc) Attach(pipeline common.Pipeline) error 
 	return nil
 }
 
-func (tsTracker *ThroughSeqnoTrackerSvc) OnEvent(eventType common.ComponentEventType,
-	item interface{},
-	component common.Component,
-	derivedItems []interface{},
-	otherInfos map[string]interface{}) {
-	if eventType == common.DataSent {
-		vbno := item.(*gomemcached.MCRequest).VBucket
-		seqno := otherInfos[parts.EVENT_ADDI_SEQNO].(uint64)
+func (tsTracker *ThroughSeqnoTrackerSvc) ProcessEvent(event *common.Event) error {
+	if event.EventType == common.DataSent {
+		vbno := event.OtherInfos[parts.EVENT_ADDI_REQ_VBUCKET].(uint16)
+		seqno := event.OtherInfos[parts.EVENT_ADDI_SEQNO].(uint64)
 		tsTracker.addSentSeqno(vbno, seqno)
-	} else if eventType == common.DataFiltered {
-		seqno := item.(*mcc.UprEvent).Seqno
-		vbno := item.(*mcc.UprEvent).VBucket
+	} else if event.EventType == common.DataFiltered {
+		upr_event := event.Data.(*mcc.UprEvent)
+		seqno := upr_event.Seqno
+		vbno := upr_event.VBucket
 		tsTracker.addFilteredSeqno(vbno, seqno)
-	} else if eventType == common.DataFailedCRSource {
-		seqno, ok := otherInfos[parts.EVENT_ADDI_SEQNO].(uint64)
+	} else if event.EventType == common.DataFailedCRSource {
+		seqno, ok := event.OtherInfos[parts.EVENT_ADDI_SEQNO].(uint64)
 		if ok {
-			vbno := item.(*gomemcached.MCRequest).VBucket
+			vbno := event.OtherInfos[parts.EVENT_ADDI_REQ_VBUCKET].(uint16)
 			tsTracker.addFailedCRSeqno(vbno, seqno)
 		}
-	} else if eventType == common.DataReceived {
-		seqno := item.(*mcc.UprEvent).Seqno
-		vbno := item.(*mcc.UprEvent).VBucket
+	} else if event.EventType == common.DataReceived {
+		upr_event := event.Data.(*mcc.UprEvent)
+		seqno := upr_event.Seqno
+		vbno := upr_event.VBucket
 		tsTracker.processGapSeqnos(vbno, seqno)
 	} else {
-		panic(fmt.Sprintf("Incorrect event type, %v, received by through_seqno service for pipeline %v", eventType, tsTracker.topic))
+		panic(fmt.Sprintf("Incorrect event type, %v, received by through_seqno service for pipeline %v", event.EventType, tsTracker.topic))
 	}
+
+	return nil
 
 }
 
