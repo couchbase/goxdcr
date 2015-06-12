@@ -237,7 +237,7 @@ const (
 
 var UprFeedDataChanLength = 1000
 
-var EventChanLength = 1000
+var EventChanLength = 10000
 
 const (
 	OutNozzleStatsCollector  = "OutNozzleStatsCollector"

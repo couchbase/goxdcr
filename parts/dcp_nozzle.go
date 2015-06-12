@@ -430,7 +430,7 @@ func (dcp *DcpNozzle) processData() (err error) {
 						// raise event for statistics collection
 						dispatch_time := time.Since(start_time)
 						additionalInfo1 := make(map[string]interface{})
-						additionalInfo1[EVENT_DCP_DISPATCH_TIME] = dispatch_time.Seconds() * 1000
+						additionalInfo1[EVENT_DCP_DISPATCH_TIME] = dispatch_time.Seconds() * 1000000
 
 						dcp.RaiseEvent(common.NewEvent(common.DataProcessed, m, dcp, nil /*derivedItems*/, additionalInfo1 /*otherInfos*/))
 					default:

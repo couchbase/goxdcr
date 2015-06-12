@@ -874,6 +874,8 @@ func (dcp_collector *dcpCollector) Mount(pipeline common.Pipeline, stats_mgr *St
 		registry.Register(DCP_DISPATCH_TIME_METRIC, metrics.NewHistogram(metrics.NewUniformSample(stats_mgr.sample_size)))
 		registry.Register(DCP_DATACH_LEN, metrics.NewCounter())
 		dcp_part.RegisterComponentEventListener(common.DataReceived, dcp_collector)
+		dcp_part.RegisterComponentEventListener(common.DataProcessed, dcp_collector)
+		dcp_part.RegisterComponentEventListener(common.StatsUpdate, dcp_collector)
 
 	}
 	return nil
