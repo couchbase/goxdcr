@@ -275,7 +275,12 @@ func (c *Client) GetBulk(vb uint16, keys []string) (map[string]*gomemcached.MCRe
 					// continue receiving in case of KEY_ENOENT
 				} else if res.Opcode == gomemcached.GET {
 					if res.Opaque >= uint32(len(keys)) {
-						log.Panicf(" Invalid opaque Value. Debug info : Res.opaque : %v, Keys %v, Response received %v \n key list %v this key %v", res.Opaque, len(keys), res, keys, string(res.Body))
+						// Every now and then we seem to be seeing an invalid opaque
+						// value returned from the server. When this happens log the error
+						// and the calling function will retry the bulkGet. MB-15140
+						log.Printf(" Invalid opaque Value. Debug info : Res.opaque : %v, Keys %v, Response received %v \n key list %v this key %v", res.Opaque, len(keys), res, keys, string(res.Body))
+						errch <- fmt.Errorf("Out of Bounds error")
+						return
 					}
 
 					rv[keys[res.Opaque]] = res
