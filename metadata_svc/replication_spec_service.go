@@ -400,7 +400,7 @@ func (service *ReplicationSpecService) updateCache(specId string, newSpec *metad
 
 	}
 
-	if updated {
+	if updated && service.metadata_change_callback != nil {
 		err := service.metadata_change_callback(specId, oldSpec, newSpec)
 		if err != nil {
 			service.logger.Error(err.Error())

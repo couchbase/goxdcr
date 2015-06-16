@@ -688,7 +688,7 @@ func (service *RemoteClusterService) updateCache(refId string, newRef *metadata.
 
 	}
 
-	if updated {
+	if updated && service.metadata_change_callback != nil {
 		err := service.metadata_change_callback(refId, oldRef, newRef)
 		if err != nil {
 			service.logger.Error(err.Error())
