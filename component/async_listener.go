@@ -48,7 +48,7 @@ func NewDefaultAsyncComponentEventListenerImpl(id, topic string, processEvent co
 }
 
 func (l *AsyncComponentEventListenerImpl) OnEvent(event *common.Event) {
-	l.event_chan <- event
+	//l.event_chan <- event
 }
 
 func (l *AsyncComponentEventListenerImpl) Start() error {
