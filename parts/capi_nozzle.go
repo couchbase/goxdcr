@@ -535,7 +535,7 @@ func (capi *CapiNozzle) batchSendWithRetry(batch *capiBatch) error {
 		capi.items_in_dataChan--
 		capi.bytes_in_dataChan -= item.Req.Size()
 
-		if needSend(item.Req, &batch.dataBatch, capi.Logger()) {
+		if needSend(item, &batch.dataBatch, capi.Logger()) {
 			capi.adjustRequest(item)
 			req_list = append(req_list, item)
 		} else {
@@ -703,7 +703,8 @@ done:
 }
 
 func (capi *CapiNozzle) validateRunningState() error {
-	if capi.State() == common.Part_Stopping || capi.State() == common.Part_Stopped {
+	state := capi.State()
+	if state == common.Part_Stopping || state == common.Part_Stopped || state == common.Part_Error {
 		return PartStoppedError
 	}
 	return nil

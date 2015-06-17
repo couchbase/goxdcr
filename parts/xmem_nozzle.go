@@ -1020,7 +1020,7 @@ func (xmem *XmemNozzle) batchSetMetaWithRetry(batch *dataBatch, numOfRetry int) 
 		atomic.AddUint32(&xmem.counter_sent, 1)
 
 		if item != nil {
-			if needSend(item.Req, batch, xmem.Logger()) {
+			if needSend(item, batch, xmem.Logger()) {
 				//blocking
 				err, index, reserv_num := xmem.buf.reserveSlot()
 				if err != nil {
@@ -1291,7 +1291,7 @@ func (xmem *XmemNozzle) batchGetMeta(bigDoc_map map[string]*base.WrappedMCReques
 			doc_meta_source := decodeSetMetaReq(wrappedReq.Req)
 			if !xmem.conflict_resolver(doc_meta_source, doc_meta_target, xmem.Logger()) {
 				xmem.Logger().Debugf("doc %v (%v)failed on conflict resolution to %v, no need to send\n", key, doc_meta_source, doc_meta_target)
-				bigDoc_noRep_map[string(doc_meta_source.uniqueKey())] = true
+				bigDoc_noRep_map[wrappedReq.UniqueKey] = true
 			} else {
 				xmem.Logger().Debugf("doc %v (%v)succeeded on conflict resolution to %v, sending it to target\n", key, doc_meta_source, doc_meta_target)
 			}
@@ -1861,7 +1861,8 @@ func (xmem *XmemNozzle) getConn(client *xmemClient, readTimeout bool, writeTimeo
 }
 
 func (xmem *XmemNozzle) validateRunningState() error {
-	if xmem.State() == common.Part_Stopping || xmem.State() == common.Part_Stopped || xmem.State() == common.Part_Error {
+	state := xmem.State()
+	if state == common.Part_Stopping || state == common.Part_Stopped || state == common.Part_Error {
 		return PartStoppedError
 	}
 	return nil

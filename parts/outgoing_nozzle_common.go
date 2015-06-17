@@ -86,13 +86,6 @@ type documentMetadata struct {
 	deletion bool
 }
 
-func (doc_meta documentMetadata) uniqueKey() []byte {
-	ret := make([]byte, len(doc_meta.key)+8)
-	copy(ret[0:len(doc_meta.key)], doc_meta.key)
-	binary.BigEndian.PutUint64(ret[len(doc_meta.key):], doc_meta.revSeq)
-	return ret
-}
-
 // does not return error since the assumption is that settings have been validated prior
 func (config *baseConfig) initializeConfig(settings map[string]interface{}) {
 	if val, ok := settings[SETTING_BATCHSIZE]; ok {
@@ -178,8 +171,7 @@ func (b *dataBatch) accumuBatch(req *base.WrappedMCRequest, classifyFunc func(re
 			b.expiration_set = true
 		}
 		if !classifyFunc(req.Req) {
-			docMetadata := decodeSetMetaReq(req.Req)
-			b.bigDoc_map[string(docMetadata.uniqueKey())] = req
+			b.bigDoc_map[req.UniqueKey] = req
 		}
 		b.curSize += size
 		if b.curCount < b.capacity_count && b.curSize < b.capacity_size*1000 {
@@ -198,13 +190,12 @@ func (b *dataBatch) size() int {
 
 }
 
-func needSend(req *mc.MCRequest, batch *dataBatch, logger *log.CommonLogger) bool {
-	if req == nil {
+func needSend(req *base.WrappedMCRequest, batch *dataBatch, logger *log.CommonLogger) bool {
+	if req == nil || req.Req == nil {
 		logger.Info("req is null, not need to send")
 		return false
 	} else {
-		docMetadata := decodeSetMetaReq(req)
-		_, ok := batch.bigDoc_noRep_map[string(docMetadata.uniqueKey())]
+		_, ok := batch.bigDoc_noRep_map[req.UniqueKey]
 		return !ok
 	}
 }
