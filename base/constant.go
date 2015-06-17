@@ -239,6 +239,16 @@ var UprFeedDataChanLength = 1000
 
 var EventChanLength = 10000
 
+// names of async component event listeners
+const (
+	DataReceivedEventListener  = "DataReceivedEventListener"
+	DataProcessedEventListener  = "DataProcessedEventListener"
+	DataFilteredEventListener  = "DataFilteredEventListener"
+	DataSentEventListener  = "DataSentEventListener"
+	DataFailedCREventListener  = "DataFailedCREventListener"
+	GetMetaReceivedEventListener  = "GetMetaReceivedEventListener"
+)
+
 const (
 	OutNozzleStatsCollector  = "OutNozzleStatsCollector"
 	DcpStatsCollector        = "DcpStatsCollector"

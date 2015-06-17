@@ -6,6 +6,7 @@ import (
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/capi_utils"
 	"github.com/couchbase/goxdcr/common"
+	component "github.com/couchbase/goxdcr/component"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/goxdcr/parts"
@@ -137,6 +138,40 @@ func (xdcrf *XDCRFactory) NewPipeline(topic string, progress_recorder common.Pip
 
 	// construct pipeline
 	pipeline := pp.NewPipelineWithSettingConstructor(topic, sourceNozzles, outNozzles, spec, xdcrf.ConstructSettingsForPart, xdcrf.ConstructSSLPortMap, xdcrf.ConstructUpdateSettingsForPart, xdcrf.SetStartSeqno, xdcrf.remote_cluster_svc.RemoteClusterByUuid, logger_ctx)
+
+	// construct and register async componet event listeners
+	data_received_event_listener := component.NewDefaultAsyncComponentEventListenerImpl(
+		pipeline_utils.GetElementIdFromName(pipeline, base.DataReceivedEventListener),
+		pipeline.Topic(), logger_ctx)
+	data_processed_event_listener := component.NewDefaultAsyncComponentEventListenerImpl(
+		pipeline_utils.GetElementIdFromName(pipeline, base.DataProcessedEventListener),
+		pipeline.Topic(), logger_ctx)
+	data_filtered_event_listener := component.NewDefaultAsyncComponentEventListenerImpl(
+		pipeline_utils.GetElementIdFromName(pipeline, base.DataFilteredEventListener),
+		pipeline.Topic(), logger_ctx)
+	data_failed_cr_event_listener := component.NewDefaultAsyncComponentEventListenerImpl(
+		pipeline_utils.GetElementIdFromName(pipeline, base.DataFailedCREventListener),
+		pipeline.Topic(), logger_ctx)
+	data_sent_event_listener := component.NewDefaultAsyncComponentEventListenerImpl(
+		pipeline_utils.GetElementIdFromName(pipeline, base.DataSentEventListener),
+		pipeline.Topic(), logger_ctx)
+	get_meta_received_event_listener := component.NewDefaultAsyncComponentEventListenerImpl(
+		pipeline_utils.GetElementIdFromName(pipeline, base.GetMetaReceivedEventListener),
+		pipeline.Topic(), logger_ctx)
+	for _, dcp_part := range pipeline.Sources() {
+		dcp_part.RegisterComponentEventListener(common.DataReceived, data_received_event_listener)
+		dcp_part.RegisterComponentEventListener(common.DataProcessed, data_processed_event_listener)
+
+		conn := dcp_part.Connector()
+		conn.RegisterComponentEventListener(common.DataFiltered, data_filtered_event_listener)
+	}
+
+	for _, out_nozzle := range pipeline.Targets() {
+		out_nozzle.RegisterComponentEventListener(common.DataSent, data_sent_event_listener)
+		out_nozzle.RegisterComponentEventListener(common.DataFailedCRSource, data_failed_cr_event_listener)
+		out_nozzle.RegisterComponentEventListener(common.GetMetaReceived, get_meta_received_event_listener)
+	}
+
 	if pipelineContext, err := pctx.NewWithSettingConstructor(pipeline, xdcrf.ConstructSettingsForService, logger_ctx); err != nil {
 		return nil, err
 	} else {
@@ -148,6 +183,7 @@ func (xdcrf *XDCRFactory) NewPipeline(topic string, progress_recorder common.Pip
 			return nil, err
 		}
 	}
+
 	progress_recorder("Pipeline is constructed")
 
 	xdcrf.logger.Infof("XDCR pipeline constructed")

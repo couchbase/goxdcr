@@ -19,32 +19,32 @@ import (
 )
 
 type AsyncComponentEventListenerImpl struct {
-	id           string
-	topic        string
-	event_chan   chan *common.Event
-	fin_ch       chan bool
-	done_ch      chan bool
-	isStarted    bool
-	logger       *log.CommonLogger
-	processEvent common.ProcessEvent
+	id         string
+	topic      string
+	event_chan chan *common.Event
+	fin_ch     chan bool
+	done_ch    chan bool
+	isStarted  bool
+	logger     *log.CommonLogger
+	handlers   map[string]common.AsyncComponentEventHandler
 }
 
-func NewAsyncComponentEventListenerImpl(id, topic string, processEvent common.ProcessEvent,
-	logger *log.CommonLogger, event_chan_length int) *AsyncComponentEventListenerImpl {
+func NewAsyncComponentEventListenerImpl(id, topic string, logger_context *log.LoggerContext,
+	event_chan_length int) *AsyncComponentEventListenerImpl {
 	return &AsyncComponentEventListenerImpl{
-		id:           id,
-		topic:        topic,
-		event_chan:   make(chan *common.Event, event_chan_length),
-		fin_ch:       make(chan bool, 1),
-		done_ch:      make(chan bool, 1),
-		logger:       logger,
-		processEvent: processEvent,
+		id:         id,
+		topic:      topic,
+		event_chan: make(chan *common.Event, event_chan_length),
+		fin_ch:     make(chan bool, 1),
+		done_ch:    make(chan bool, 1),
+		handlers:   make(map[string]common.AsyncComponentEventHandler),
+		logger:     log.NewLogger("AsyncListener", logger_context),
 	}
 }
 
-func NewDefaultAsyncComponentEventListenerImpl(id, topic string, processEvent common.ProcessEvent,
-	logger *log.CommonLogger) *AsyncComponentEventListenerImpl {
-	return NewAsyncComponentEventListenerImpl(id, topic, processEvent, logger, base.EventChanLength)
+func NewDefaultAsyncComponentEventListenerImpl(id, topic string,
+	logger_context *log.LoggerContext) *AsyncComponentEventListenerImpl {
+	return NewAsyncComponentEventListenerImpl(id, topic, logger_context, base.EventChanLength)
 }
 
 func (l *AsyncComponentEventListenerImpl) OnEvent(event *common.Event) {
@@ -69,9 +69,11 @@ func (l *AsyncComponentEventListenerImpl) start() {
 			l.done_ch <- true
 			return
 		case event := <-l.event_chan:
-			err := l.processEvent(event)
-			if err != nil {
-				l.logger.Errorf("%v Error processing events. err = %v\n", l.Id(), err)
+			for _, handler := range l.handlers {
+				err := handler.ProcessEvent(event)
+				if err != nil {
+					l.logger.Errorf("%v Error processing event %v. err = %v\n", handler.Id(), event, err)
+				}
 			}
 		}
 	}
@@ -101,4 +103,10 @@ func (l *AsyncComponentEventListenerImpl) stop() error {
 
 func (l *AsyncComponentEventListenerImpl) Id() string {
 	return l.id
+}
+
+func (l *AsyncComponentEventListenerImpl) RegisterComponentEventHandler(handler common.AsyncComponentEventHandler) {
+	if handler != nil {
+		l.handlers[handler.Id()] = handler
+	}
 }

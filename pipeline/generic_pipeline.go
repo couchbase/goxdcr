@@ -81,6 +81,10 @@ type GenericPipeline struct {
 	//it only populated when GetAllConnectors called the first time
 	connectorsMap map[string]common.Connector
 
+	//the map that contains the references to all async event listeners used in the pipeline
+	//it only populated when GetAllAsyncComponentEventListeners is called the first time
+	asyncEventListenerMap map[string]common.AsyncComponentEventListener
+
 	logger *log.CommonLogger
 
 	spec     *metadata.ReplicationSpecification
@@ -184,7 +188,7 @@ func (genericPipeline *GenericPipeline) Start(settings map[string]interface{}) e
 	}
 
 	// start async event listeners
-	for _, async_event_listener := range genericPipeline.getAllAsyncComponentEventListeners() {
+	for _, async_event_listener := range GetAllAsyncComponentEventListeners(genericPipeline) {
 		async_event_listener.Start()
 	}
 
@@ -358,7 +362,7 @@ func (genericPipeline *GenericPipeline) Stop() error {
 	}
 
 	// stop async event listeners
-	for _, asyncEventListener := range genericPipeline.getAllAsyncComponentEventListeners() {
+	for _, asyncEventListener := range GetAllAsyncComponentEventListeners(genericPipeline) {
 		go func(asyncEventListener common.AsyncComponentEventListener) {
 			asyncEventListener.Stop()
 		}(asyncEventListener)
@@ -453,15 +457,18 @@ func addPartToMap(part common.Part, partsMap map[string]common.Part) {
 	}
 }
 
-func (genericPipeline *GenericPipeline) getAllAsyncComponentEventListeners() map[string]common.AsyncComponentEventListener {
-	listenersMap := make(map[string]common.AsyncComponentEventListener)
-	partsMap := make(map[string]common.Part)
-	// add async listeners on parts and connectors to listeners map
-	for _, source := range genericPipeline.Sources() {
-		addAsyncListenersToMap(source, listenersMap, partsMap)
+func GetAllAsyncComponentEventListeners(p common.Pipeline) map[string]common.AsyncComponentEventListener {
+	genericPipeline := p.(*GenericPipeline)
+	if genericPipeline.asyncEventListenerMap == nil {
+		genericPipeline.asyncEventListenerMap = make(map[string]common.AsyncComponentEventListener)
+		partsMap := make(map[string]common.Part)
+		// add async listeners on parts and connectors to listeners map
+		for _, source := range genericPipeline.Sources() {
+			addAsyncListenersToMap(source, genericPipeline.asyncEventListenerMap, partsMap)
+		}
 	}
 
-	return listenersMap
+	return genericPipeline.asyncEventListenerMap
 }
 
 func addAsyncListenersToMap(part common.Part, listenersMap map[string]common.AsyncComponentEventListener, partsMap map[string]common.Part) {

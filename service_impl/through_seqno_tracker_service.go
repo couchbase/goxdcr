@@ -14,9 +14,9 @@ import (
 	mcc "github.com/couchbase/gomemcached/client"
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/common"
-	component "github.com/couchbase/goxdcr/component"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/parts"
+	pipeline_pkg "github.com/couchbase/goxdcr/pipeline"
 	"github.com/couchbase/goxdcr/pipeline_utils"
 	"github.com/couchbase/goxdcr/simple_utils"
 	"sort"
@@ -24,8 +24,6 @@ import (
 )
 
 type ThroughSeqnoTrackerSvc struct {
-	common.AsyncComponentEventListener
-
 	// map of vbs that the tracker tracks.
 	vb_map map[uint16]bool
 
@@ -51,7 +49,7 @@ type ThroughSeqnoTrackerSvc struct {
 	// and the current seen seqno
 	vb_last_seen_seqno_map map[uint16]*base.SeqnoWithLock
 
-	topic string
+	id string
 
 	logger *log.CommonLogger
 }
@@ -149,7 +147,7 @@ func NewThroughSeqnoTrackerSvc(logger_ctx *log.LoggerContext) *ThroughSeqnoTrack
 }
 
 func (tsTracker *ThroughSeqnoTrackerSvc) initialize(pipeline common.Pipeline) {
-	tsTracker.topic = pipeline.Topic()
+	tsTracker.id = pipeline.Topic() + "_" + base.ThroughSeqnoTracker
 	for _, vbno := range pipeline_utils.GetSourceVBListPerPipeline(pipeline) {
 		tsTracker.vb_map[vbno] = true
 
@@ -161,10 +159,6 @@ func (tsTracker *ThroughSeqnoTrackerSvc) initialize(pipeline common.Pipeline) {
 		tsTracker.vb_failed_cr_seqno_list_map[vbno] = newSortedSeqnoListWithLock()
 		tsTracker.vb_gap_seqno_list_map[vbno] = newSortedSeqnoListWithLock()
 	}
-
-	tsTracker.AsyncComponentEventListener = component.NewDefaultAsyncComponentEventListenerImpl(
-		pipeline_utils.GetAsyncComponentEventListenerId(pipeline, base.ThroughSeqnoTracker),
-		pipeline.Topic(), tsTracker.ProcessEvent, tsTracker.logger)
 }
 
 func (tsTracker *ThroughSeqnoTrackerSvc) Attach(pipeline common.Pipeline) error {
@@ -172,21 +166,12 @@ func (tsTracker *ThroughSeqnoTrackerSvc) Attach(pipeline common.Pipeline) error 
 
 	tsTracker.initialize(pipeline)
 
-	outNozzle_parts := pipeline.Targets()
-	for _, part := range outNozzle_parts {
-		part.RegisterComponentEventListener(common.DataSent, tsTracker)
-		part.RegisterComponentEventListener(common.DataFailedCRSource, tsTracker)
-	}
+	asyncListenerMap := pipeline_pkg.GetAllAsyncComponentEventListeners(pipeline)
 
-	dcp_parts := pipeline.Sources()
-	for _, dcp := range dcp_parts {
-		dcp.RegisterComponentEventListener(common.DataReceived, tsTracker)
-
-		//get connector, which is a router
-		router := dcp.Connector().(*parts.Router)
-		router.RegisterComponentEventListener(common.DataFiltered, tsTracker)
-	}
-
+	pipeline_utils.GetAsyncComponentEventListener(asyncListenerMap, base.DataSentEventListener).RegisterComponentEventHandler(tsTracker)
+	pipeline_utils.GetAsyncComponentEventListener(asyncListenerMap, base.DataFailedCREventListener).RegisterComponentEventHandler(tsTracker)
+	pipeline_utils.GetAsyncComponentEventListener(asyncListenerMap, base.DataFilteredEventListener).RegisterComponentEventHandler(tsTracker)
+	pipeline_utils.GetAsyncComponentEventListener(asyncListenerMap, base.DataReceivedEventListener).RegisterComponentEventHandler(tsTracker)
 	return nil
 }
 
@@ -212,7 +197,7 @@ func (tsTracker *ThroughSeqnoTrackerSvc) ProcessEvent(event *common.Event) error
 		vbno := upr_event.VBucket
 		tsTracker.processGapSeqnos(vbno, seqno)
 	} else {
-		panic(fmt.Sprintf("Incorrect event type, %v, received by through_seqno service for pipeline %v", event.EventType, tsTracker.topic))
+		panic(fmt.Sprintf("Incorrect event type, %v, received by %v", event.EventType, tsTracker.id))
 	}
 
 	return nil
@@ -221,20 +206,20 @@ func (tsTracker *ThroughSeqnoTrackerSvc) ProcessEvent(event *common.Event) error
 
 func (tsTracker *ThroughSeqnoTrackerSvc) addSentSeqno(vbno uint16, sent_seqno uint64) {
 	tsTracker.validateVbno(vbno, "addSentSeqno")
-	tsTracker.logger.Debugf("%v adding sent seqno %v for vb %v.\n", tsTracker.topic, sent_seqno, vbno)
+	tsTracker.logger.Debugf("%v adding sent seqno %v for vb %v.\n", tsTracker.id, sent_seqno, vbno)
 	tsTracker.vb_sent_seqno_list_map[vbno].addSeqno(sent_seqno, tsTracker.logger)
 }
 
 func (tsTracker *ThroughSeqnoTrackerSvc) addFilteredSeqno(vbno uint16, filtered_seqno uint64) {
 	tsTracker.validateVbno(vbno, "addFilteredSeqno")
-	tsTracker.logger.Debugf("%v adding filtered seqno %v for vb %v.", tsTracker.topic, filtered_seqno, vbno)
+	tsTracker.logger.Debugf("%v adding filtered seqno %v for vb %v.", tsTracker.id, filtered_seqno, vbno)
 	tsTracker.vb_filtered_seqno_list_map[vbno].appendSeqno(filtered_seqno, tsTracker.logger)
 }
 
 func (tsTracker *ThroughSeqnoTrackerSvc) addFailedCRSeqno(vbno uint16, failed_cr_seqno uint64) {
 	tsTracker.validateVbno(vbno, "addFailedCRSeqno")
 
-	tsTracker.logger.Debugf("%v adding failed cr seqno %v for vb %v.", tsTracker.topic, failed_cr_seqno, vbno)
+	tsTracker.logger.Debugf("%v adding failed cr seqno %v for vb %v.", tsTracker.id, failed_cr_seqno, vbno)
 	tsTracker.vb_failed_cr_seqno_list_map[vbno].appendSeqno(failed_cr_seqno, tsTracker.logger)
 }
 
@@ -252,7 +237,7 @@ func (tsTracker *ThroughSeqnoTrackerSvc) processGapSeqnos(vbno uint16, current_s
 	}
 	last_seen_seqno_obj.SetSeqnoWithoutLock(current_seqno)
 
-	tsTracker.logger.Debugf("%v processing gap seqnos for seqno %v for vbno %v. last_seen_seqno=%v\n", tsTracker.topic, current_seqno, vbno, last_seen_seqno)
+	tsTracker.logger.Debugf("%v processing gap seqnos for seqno %v for vbno %v. last_seen_seqno=%v\n", tsTracker.id, current_seqno, vbno, last_seen_seqno)
 
 	if last_seen_seqno < current_seqno-1 {
 		gap_seqno_list := make([]uint64, 0)
@@ -291,7 +276,7 @@ func (tsTracker *ThroughSeqnoTrackerSvc) GetThroughSeqno(vbno uint16) uint64 {
 	gap_seqno_list := tsTracker.vb_gap_seqno_list_map[vbno].getSortedSeqnoList()
 	max_gap_seqno := maxSeqno(gap_seqno_list)
 
-	tsTracker.logger.Debugf("%v, vbno=%v, last_through_seqno=%v\n sent_seqno_list=%v\n filtered_seqno_list=%v\n failed_cr_seqno_list=%v\n gap_seqno_list=%v\n", tsTracker.topic, vbno, last_through_seqno, sent_seqno_list, filtered_seqno_list, failed_cr_seqno_list, gap_seqno_list)
+	tsTracker.logger.Debugf("%v, vbno=%v, last_through_seqno=%v\n sent_seqno_list=%v\n filtered_seqno_list=%v\n failed_cr_seqno_list=%v\n gap_seqno_list=%v\n", tsTracker.id, vbno, last_through_seqno, sent_seqno_list, filtered_seqno_list, failed_cr_seqno_list, gap_seqno_list)
 
 	// Goal of algorithm:
 	// Find the right through_seqno for stats and checkpointing, with the constraint that through_seqno cannot be
@@ -373,7 +358,7 @@ func (tsTracker *ThroughSeqnoTrackerSvc) GetThroughSeqno(vbno uint16) uint64 {
 		go tsTracker.truncateSeqnoLists(vbno, through_seqno)
 	}
 
-	tsTracker.logger.Debugf("%v, vbno=%v, through_seqno=%v\n", tsTracker.topic, vbno, through_seqno)
+	tsTracker.logger.Debugf("%v, vbno=%v, through_seqno=%v\n", tsTracker.id, vbno, through_seqno)
 	return through_seqno
 }
 
@@ -429,7 +414,7 @@ func (tsTracker *ThroughSeqnoTrackerSvc) getThroughSeqnos(executor_id int, listO
 	if result_map == nil {
 		panic("through_seqno_map is nil")
 	}
-	tsTracker.logger.Debugf("%v getThroughSeqnos executor %v is working on vbuckets %v", tsTracker.topic, executor_id, listOfVbs)
+	tsTracker.logger.Debugf("%v getThroughSeqnos executor %v is working on vbuckets %v", tsTracker.id, executor_id, listOfVbs)
 	if wait_grp == nil {
 		panic("wait_grp can't be nil")
 	}
@@ -449,7 +434,7 @@ func (tsTracker *ThroughSeqnoTrackerSvc) SetStartSeqno(vbno uint16, seqno uint64
 func (tsTracker *ThroughSeqnoTrackerSvc) validateVbno(vbno uint16, caller string) {
 	if _, ok := tsTracker.vb_map[vbno]; !ok {
 		panic(fmt.Sprintf("method %v in tracker service for pipeline %v received invalid vbno. vbno=%v; valid vbnos=%v",
-			caller, tsTracker.topic, vbno, tsTracker.vb_map))
+			caller, tsTracker.id, vbno, tsTracker.vb_map))
 	}
 }
 
@@ -459,6 +444,10 @@ func (tsTracker *ThroughSeqnoTrackerSvc) getVbList() []uint16 {
 		vb_list = append(vb_list, vbno)
 	}
 	return vb_list
+}
+
+func (tsTracker *ThroughSeqnoTrackerSvc) Id() string {
+	return tsTracker.id
 }
 
 func maxSeqno(seqno_list []int) uint64 {

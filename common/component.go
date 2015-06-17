@@ -72,11 +72,15 @@ type AsyncComponentEventListener interface {
 	Id() string
 	Start() error
 	Stop() error
+	RegisterComponentEventHandler(handler AsyncComponentEventHandler)
 }
 
-//ProcessEvent does the actual handling of the component event for async event listener
-//it is called from a separate go routine from OnEvent()
-type ProcessEvent func(event *Event) error
+type AsyncComponentEventHandler interface {
+	Id() string
+	//ProcessEvent does the actual handling of the component event for async event listener
+	//it is called from a separate go routine from OnEvent()
+	ProcessEvent(event *Event) error
+}
 
 type Component interface {
 	// id of component

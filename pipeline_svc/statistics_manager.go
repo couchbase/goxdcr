@@ -17,11 +17,10 @@ import (
 	mcc "github.com/couchbase/gomemcached/client"
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/common"
-	component "github.com/couchbase/goxdcr/component"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/goxdcr/parts"
-	"github.com/couchbase/goxdcr/pipeline"
+	pipeline_pkg "github.com/couchbase/goxdcr/pipeline"
 	"github.com/couchbase/goxdcr/pipeline_manager"
 	"github.com/couchbase/goxdcr/pipeline_utils"
 	"github.com/couchbase/goxdcr/service_def"
@@ -744,94 +743,137 @@ type MetricsCollector interface {
 
 //metrics collector for XMem/CapiNozzle
 type outNozzleCollector struct {
+	id        string
 	stats_mgr *StatisticsManager
-	common.AsyncComponentEventListener
+	common.AsyncComponentEventHandler
+	// key of outer map: component id
+	// key of inner map: metric name
+	// value of inner map: metric value
+	component_map map[string]map[string]interface{}
 }
 
 func (outNozzle_collector *outNozzleCollector) Mount(pipeline common.Pipeline, stats_mgr *StatisticsManager) error {
+	outNozzle_collector.id = pipeline_utils.GetElementIdFromName(pipeline, base.OutNozzleStatsCollector)
 	outNozzle_collector.stats_mgr = stats_mgr
-	outNozzle_collector.AsyncComponentEventListener = component.NewDefaultAsyncComponentEventListenerImpl(
-		pipeline_utils.GetAsyncComponentEventListenerId(pipeline, base.OutNozzleStatsCollector),
-		pipeline.Topic(), outNozzle_collector.ProcessEvent, stats_mgr.logger)
+	outNozzle_collector.component_map = make(map[string]map[string]interface{})
 	outNozzle_parts := pipeline.Targets()
 	for _, part := range outNozzle_parts {
 		registry := stats_mgr.getOrCreateRegistry(part.Id())
-		registry.Register(SIZE_REP_QUEUE_METRIC, metrics.NewCounter())
-		registry.Register(DOCS_REP_QUEUE_METRIC, metrics.NewCounter())
-		registry.Register(DOCS_WRITTEN_METRIC, metrics.NewCounter())
-		registry.Register(EXPIRY_DOCS_WRITTEN_METRIC, metrics.NewCounter())
-		registry.Register(DELETION_DOCS_WRITTEN_METRIC, metrics.NewCounter())
-		registry.Register(SET_DOCS_WRITTEN_METRIC, metrics.NewCounter())
-		registry.Register(DOCS_FAILED_CR_SOURCE_METRIC, metrics.NewCounter())
-		registry.Register(EXPIRY_FAILED_CR_SOURCE_METRIC, metrics.NewCounter())
-		registry.Register(DELETION_FAILED_CR_SOURCE_METRIC, metrics.NewCounter())
-		registry.Register(SET_FAILED_CR_SOURCE_METRIC, metrics.NewCounter())
-		registry.Register(DATA_REPLICATED_METRIC, metrics.NewCounter())
-		registry.Register(DOCS_OPT_REPD_METRIC, metrics.NewCounter())
-		registry.Register(DOCS_LATENCY_METRIC, metrics.NewHistogram(metrics.NewUniformSample(stats_mgr.sample_size)))
-		registry.Register(META_LATENCY_METRIC, metrics.NewHistogram(metrics.NewUniformSample(stats_mgr.sample_size)))
+		size_rep_queue := metrics.NewCounter()
+		registry.Register(SIZE_REP_QUEUE_METRIC, size_rep_queue)
+		docs_rep_queue := metrics.NewCounter()
+		registry.Register(DOCS_REP_QUEUE_METRIC, docs_rep_queue)
+		docs_written := metrics.NewCounter()
+		registry.Register(DOCS_WRITTEN_METRIC, docs_written)
+		expiry_docs_written := metrics.NewCounter()
+		registry.Register(EXPIRY_DOCS_WRITTEN_METRIC, expiry_docs_written)
+		deletion_docs_written := metrics.NewCounter()
+		registry.Register(DELETION_DOCS_WRITTEN_METRIC, deletion_docs_written)
+		set_docs_written := metrics.NewCounter()
+		registry.Register(SET_DOCS_WRITTEN_METRIC, set_docs_written)
+		docs_failed_cr := metrics.NewCounter()
+		registry.Register(DOCS_FAILED_CR_SOURCE_METRIC, docs_failed_cr)
+		expiry_failed_cr := metrics.NewCounter()
+		registry.Register(EXPIRY_FAILED_CR_SOURCE_METRIC, expiry_failed_cr)
+		deletion_failed_cr := metrics.NewCounter()
+		registry.Register(DELETION_FAILED_CR_SOURCE_METRIC, deletion_failed_cr)
+		set_failed_cr := metrics.NewCounter()
+		registry.Register(SET_FAILED_CR_SOURCE_METRIC, set_failed_cr)
+		data_replicated := metrics.NewCounter()
+		registry.Register(DATA_REPLICATED_METRIC, data_replicated)
+		docs_opt_repd := metrics.NewCounter()
+		registry.Register(DOCS_OPT_REPD_METRIC, docs_opt_repd)
+		docs_latency := metrics.NewHistogram(metrics.NewUniformSample(stats_mgr.sample_size))
+		registry.Register(DOCS_LATENCY_METRIC, docs_latency)
+		meta_latency := metrics.NewHistogram(metrics.NewUniformSample(stats_mgr.sample_size))
+		registry.Register(META_LATENCY_METRIC, meta_latency)
 
-		part.RegisterComponentEventListener(common.DataSent, outNozzle_collector)
-		part.RegisterComponentEventListener(common.DataFailedCRSource, outNozzle_collector)
+		metric_map := make(map[string]interface{})
+		metric_map[SIZE_REP_QUEUE_METRIC] = size_rep_queue
+		metric_map[DOCS_REP_QUEUE_METRIC] = docs_rep_queue
+		metric_map[DOCS_WRITTEN_METRIC] = docs_written
+		metric_map[EXPIRY_DOCS_WRITTEN_METRIC] = expiry_docs_written
+		metric_map[DELETION_DOCS_WRITTEN_METRIC] = deletion_docs_written
+		metric_map[SET_DOCS_WRITTEN_METRIC] = set_docs_written
+		metric_map[DOCS_FAILED_CR_SOURCE_METRIC] = docs_failed_cr
+		metric_map[EXPIRY_FAILED_CR_SOURCE_METRIC] = expiry_failed_cr
+		metric_map[DELETION_FAILED_CR_SOURCE_METRIC] = deletion_failed_cr
+		metric_map[SET_FAILED_CR_SOURCE_METRIC] = set_failed_cr
+		metric_map[DATA_REPLICATED_METRIC] = data_replicated
+		metric_map[DOCS_OPT_REPD_METRIC] = docs_opt_repd
+		metric_map[DOCS_LATENCY_METRIC] = docs_latency
+		metric_map[META_LATENCY_METRIC] = meta_latency
+		outNozzle_collector.component_map[part.Id()] = metric_map
+
+		// register outNozzle_collector as the sync event listener/handler for StatsUpdate event
 		part.RegisterComponentEventListener(common.StatsUpdate, outNozzle_collector)
-		part.RegisterComponentEventListener(common.GetMetaReceived, outNozzle_collector)
-
 	}
+
+	// register outNozzle_collector as the async event handler for relevant events
+	async_listener_map := pipeline_pkg.GetAllAsyncComponentEventListeners(pipeline)
+	pipeline_utils.GetAsyncComponentEventListener(async_listener_map, base.DataSentEventListener).RegisterComponentEventHandler(outNozzle_collector)
+	pipeline_utils.GetAsyncComponentEventListener(async_listener_map, base.DataFailedCREventListener).RegisterComponentEventHandler(outNozzle_collector)
+	pipeline_utils.GetAsyncComponentEventListener(async_listener_map, base.GetMetaReceivedEventListener).RegisterComponentEventHandler(outNozzle_collector)
+
 	return nil
 }
 
+func (outNozzle_collector *outNozzleCollector) Id() string {
+	return outNozzle_collector.id
+}
+
+func (outNozzle_collector *outNozzleCollector) OnEvent(event *common.Event) {
+	outNozzle_collector.ProcessEvent(event)
+}
+
 func (outNozzle_collector *outNozzleCollector) ProcessEvent(event *common.Event) error {
+	metric_map := outNozzle_collector.component_map[event.Component.Id()]
 	if event.EventType == common.StatsUpdate {
 		outNozzle_collector.stats_mgr.logger.Debugf("Received a StatsUpdate event from %v", reflect.TypeOf(event.Component))
 		queue_size := event.OtherInfos[parts.STATS_QUEUE_SIZE].(int)
 		queue_size_bytes := event.OtherInfos[parts.STATS_QUEUE_SIZE_BYTES].(int)
-		registry := outNozzle_collector.stats_mgr.registries[event.Component.Id()]
-		setCounter(registry.Get(DOCS_REP_QUEUE_METRIC).(metrics.Counter), queue_size)
-		setCounter(registry.Get(SIZE_REP_QUEUE_METRIC).(metrics.Counter), queue_size_bytes)
+		setCounter(metric_map[DOCS_REP_QUEUE_METRIC].(metrics.Counter), queue_size)
+		setCounter(metric_map[SIZE_REP_QUEUE_METRIC].(metrics.Counter), queue_size_bytes)
 	} else if event.EventType == common.DataSent {
 		outNozzle_collector.stats_mgr.logger.Debugf("Received a DataSent event from %v", reflect.TypeOf(event.Component))
 		req_size := event.OtherInfos[parts.EVENT_ADDI_REQ_SIZE].(int)
 		opti_replicated := event.OtherInfos[parts.EVENT_ADDI_OPT_REPD].(bool)
 		commit_time := event.OtherInfos[parts.EVENT_ADDI_SETMETA_COMMIT_TIME].(time.Duration)
-		registry := outNozzle_collector.stats_mgr.registries[event.Component.Id()]
-		registry.Get(DOCS_WRITTEN_METRIC).(metrics.Counter).Inc(1)
-		registry.Get(DATA_REPLICATED_METRIC).(metrics.Counter).Inc(int64(req_size))
+		metric_map[DOCS_WRITTEN_METRIC].(metrics.Counter).Inc(1)
+		metric_map[DATA_REPLICATED_METRIC].(metrics.Counter).Inc(int64(req_size))
 		if opti_replicated {
-			registry.Get(DOCS_OPT_REPD_METRIC).(metrics.Counter).Inc(1)
+			metric_map[DOCS_OPT_REPD_METRIC].(metrics.Counter).Inc(1)
 		}
 
 		expiry_set := event.OtherInfos[parts.EVENT_ADDI_REQ_EXPIRY_SET].(bool)
 		if expiry_set {
-			registry.Get(EXPIRY_DOCS_WRITTEN_METRIC).(metrics.Counter).Inc(1)
+			metric_map[EXPIRY_DOCS_WRITTEN_METRIC].(metrics.Counter).Inc(1)
 		}
 
 		req_opcode := event.OtherInfos[parts.EVENT_ADDI_REQ_OPCODE].(mc.CommandCode)
 		if req_opcode == base.DELETE_WITH_META {
-			registry.Get(DELETION_DOCS_WRITTEN_METRIC).(metrics.Counter).Inc(1)
+			metric_map[DELETION_DOCS_WRITTEN_METRIC].(metrics.Counter).Inc(1)
 		} else if req_opcode == base.SET_WITH_META {
-			registry.Get(SET_DOCS_WRITTEN_METRIC).(metrics.Counter).Inc(1)
+			metric_map[SET_DOCS_WRITTEN_METRIC].(metrics.Counter).Inc(1)
 		} else {
 			panic(fmt.Sprintf("Invalid opcode, %v, in DataSent event from %v.", req_opcode, event.Component.Id()))
 		}
 
-		time_committing_reg := registry.Get(DOCS_LATENCY_METRIC).(metrics.Histogram)
-		sample := time_committing_reg.Sample()
-		sample.Update(commit_time.Nanoseconds() / 1000000)
+		metric_map[DOCS_LATENCY_METRIC].(metrics.Histogram).Sample().Update(commit_time.Nanoseconds() / 1000000)
 	} else if event.EventType == common.DataFailedCRSource {
 		outNozzle_collector.stats_mgr.logger.Debugf("Received a DataFailedCRSource event from %v", reflect.TypeOf(event.Component))
-		registry := outNozzle_collector.stats_mgr.registries[event.Component.Id()]
-		registry.Get(DOCS_FAILED_CR_SOURCE_METRIC).(metrics.Counter).Inc(1)
+		metric_map[DOCS_FAILED_CR_SOURCE_METRIC].(metrics.Counter).Inc(1)
 
 		expiry_set := event.OtherInfos[parts.EVENT_ADDI_REQ_EXPIRY_SET].(bool)
 		if expiry_set {
-			registry.Get(EXPIRY_FAILED_CR_SOURCE_METRIC).(metrics.Counter).Inc(1)
+			metric_map[EXPIRY_FAILED_CR_SOURCE_METRIC].(metrics.Counter).Inc(1)
 		}
 
 		req_opcode := event.OtherInfos[parts.EVENT_ADDI_REQ_OPCODE].(mc.CommandCode)
 		if req_opcode == mc.UPR_DELETION {
-			registry.Get(DELETION_FAILED_CR_SOURCE_METRIC).(metrics.Counter).Inc(1)
+			metric_map[DELETION_FAILED_CR_SOURCE_METRIC].(metrics.Counter).Inc(1)
 		} else if req_opcode == mc.UPR_MUTATION {
-			registry.Get(SET_FAILED_CR_SOURCE_METRIC).(metrics.Counter).Inc(1)
+			metric_map[SET_FAILED_CR_SOURCE_METRIC].(metrics.Counter).Inc(1)
 		} else {
 			panic(fmt.Sprintf("Invalid opcode, %v, in DataFailedCRSource event from %v.", req_opcode, event.Component.Id()))
 		}
@@ -839,11 +881,7 @@ func (outNozzle_collector *outNozzleCollector) ProcessEvent(event *common.Event)
 		outNozzle_collector.stats_mgr.logger.Debugf("Received a GetMetaReceived event from %v", reflect.TypeOf(event.Component))
 
 		commit_time := event.OtherInfos[parts.EVENT_ADDI_GETMETA_COMMIT_TIME].(time.Duration)
-
-		registry := outNozzle_collector.stats_mgr.registries[event.Component.Id()]
-		time_committing_reg := registry.Get(META_LATENCY_METRIC).(metrics.Histogram)
-		sample := time_committing_reg.Sample()
-		sample.Update(commit_time.Nanoseconds() / 1000000)
+		metric_map[META_LATENCY_METRIC].(metrics.Histogram).Sample().Update(commit_time.Nanoseconds() / 1000000)
 	}
 
 	return nil
@@ -855,57 +893,84 @@ func getStatsKeyFromDocKeyAndSeqno(key string, seqno uint64) string {
 
 //metrics collector for DcpNozzle
 type dcpCollector struct {
+	id        string
 	stats_mgr *StatisticsManager
-	common.AsyncComponentEventListener
+	// key of outer map: component id
+	// key of inner map: metric name
+	// value of inner map: metric value
+	component_map map[string]map[string]interface{}
 }
 
 func (dcp_collector *dcpCollector) Mount(pipeline common.Pipeline, stats_mgr *StatisticsManager) error {
+	dcp_collector.id = pipeline_utils.GetElementIdFromName(pipeline, base.DcpStatsCollector)
 	dcp_collector.stats_mgr = stats_mgr
-	dcp_collector.AsyncComponentEventListener = component.NewDefaultAsyncComponentEventListenerImpl(
-		pipeline_utils.GetAsyncComponentEventListenerId(pipeline, base.DcpStatsCollector),
-		pipeline.Topic(), dcp_collector.ProcessEvent, stats_mgr.logger)
+	dcp_collector.component_map = make(map[string]map[string]interface{})
 	dcp_parts := pipeline.Sources()
 	for _, dcp_part := range dcp_parts {
 		registry := stats_mgr.getOrCreateRegistry(dcp_part.Id())
-		registry.Register(DOCS_RECEIVED_DCP_METRIC, metrics.NewCounter())
-		registry.Register(EXPIRY_RECEIVED_DCP_METRIC, metrics.NewCounter())
-		registry.Register(DELETION_RECEIVED_DCP_METRIC, metrics.NewCounter())
-		registry.Register(SET_RECEIVED_DCP_METRIC, metrics.NewCounter())
-		registry.Register(DCP_DISPATCH_TIME_METRIC, metrics.NewHistogram(metrics.NewUniformSample(stats_mgr.sample_size)))
-		registry.Register(DCP_DATACH_LEN, metrics.NewCounter())
-		dcp_part.RegisterComponentEventListener(common.DataReceived, dcp_collector)
-		dcp_part.RegisterComponentEventListener(common.DataProcessed, dcp_collector)
-		dcp_part.RegisterComponentEventListener(common.StatsUpdate, dcp_collector)
+		docs_received_dcp := metrics.NewCounter()
+		registry.Register(DOCS_RECEIVED_DCP_METRIC, docs_received_dcp)
+		expiry_received_dcp := metrics.NewCounter()
+		registry.Register(EXPIRY_RECEIVED_DCP_METRIC, expiry_received_dcp)
+		deletion_received_dcp := metrics.NewCounter()
+		registry.Register(DELETION_RECEIVED_DCP_METRIC, deletion_received_dcp)
+		set_received_dcp := metrics.NewCounter()
+		registry.Register(SET_RECEIVED_DCP_METRIC, set_received_dcp)
+		dcp_dispatch_time := metrics.NewHistogram(metrics.NewUniformSample(stats_mgr.sample_size))
+		registry.Register(DCP_DISPATCH_TIME_METRIC, dcp_dispatch_time)
+		dcp_datach_len := metrics.NewCounter()
+		registry.Register(DCP_DATACH_LEN, dcp_datach_len)
 
+		metric_map := make(map[string]interface{})
+		metric_map[DOCS_RECEIVED_DCP_METRIC] = docs_received_dcp
+		metric_map[EXPIRY_RECEIVED_DCP_METRIC] = expiry_received_dcp
+		metric_map[DELETION_RECEIVED_DCP_METRIC] = deletion_received_dcp
+		metric_map[SET_RECEIVED_DCP_METRIC] = set_received_dcp
+		metric_map[DCP_DISPATCH_TIME_METRIC] = dcp_dispatch_time
+		metric_map[DCP_DATACH_LEN] = dcp_datach_len
+		dcp_collector.component_map[dcp_part.Id()] = metric_map
+
+		dcp_part.RegisterComponentEventListener(common.StatsUpdate, dcp_collector)
 	}
+
+	async_listener_map := pipeline_pkg.GetAllAsyncComponentEventListeners(pipeline)
+	pipeline_utils.GetAsyncComponentEventListener(async_listener_map, base.DataReceivedEventListener).RegisterComponentEventHandler(dcp_collector)
+	pipeline_utils.GetAsyncComponentEventListener(async_listener_map, base.DataProcessedEventListener).RegisterComponentEventHandler(dcp_collector)
+
 	return nil
 }
 
+func (dcp_collector *dcpCollector) Id() string {
+	return dcp_collector.id
+}
+
+func (dcp_collector *dcpCollector) OnEvent(event *common.Event) {
+	dcp_collector.ProcessEvent(event)
+}
+
 func (dcp_collector *dcpCollector) ProcessEvent(event *common.Event) error {
+	metric_map := dcp_collector.component_map[event.Component.Id()]
 	if event.EventType == common.DataReceived {
 		dcp_collector.stats_mgr.logger.Debugf("Received a DataReceived event from %v", reflect.TypeOf(event.Component))
 		uprEvent := event.Data.(*mcc.UprEvent)
-		registry := dcp_collector.stats_mgr.registries[event.Component.Id()]
-		registry.Get(DOCS_RECEIVED_DCP_METRIC).(metrics.Counter).Inc(1)
+		metric_map[DOCS_RECEIVED_DCP_METRIC].(metrics.Counter).Inc(1)
 
 		if uprEvent.Expiry != 0 {
-			registry.Get(EXPIRY_RECEIVED_DCP_METRIC).(metrics.Counter).Inc(1)
+			metric_map[EXPIRY_RECEIVED_DCP_METRIC].(metrics.Counter).Inc(1)
 		}
 		if uprEvent.Opcode == mc.UPR_DELETION {
-			registry.Get(DELETION_RECEIVED_DCP_METRIC).(metrics.Counter).Inc(1)
+			metric_map[DELETION_RECEIVED_DCP_METRIC].(metrics.Counter).Inc(1)
 		} else if uprEvent.Opcode == mc.UPR_MUTATION {
-			registry.Get(SET_RECEIVED_DCP_METRIC).(metrics.Counter).Inc(1)
+			metric_map[SET_RECEIVED_DCP_METRIC].(metrics.Counter).Inc(1)
 		} else {
 			panic(fmt.Sprintf("Invalid opcode, %v, in DataReceived event from %v.", uprEvent.Opcode, event.Component.Id()))
 		}
 	} else if event.EventType == common.DataProcessed {
 		dcp_dispatch_time := event.OtherInfos[parts.EVENT_DCP_DISPATCH_TIME].(float64)
-		registry := dcp_collector.stats_mgr.registries[event.Component.Id()]
-		registry.Get(DCP_DISPATCH_TIME_METRIC).(metrics.Histogram).Sample().Update(int64(dcp_dispatch_time))
+		metric_map[DCP_DISPATCH_TIME_METRIC].(metrics.Histogram).Sample().Update(int64(dcp_dispatch_time))
 	} else if event.EventType == common.StatsUpdate {
-		registry := dcp_collector.stats_mgr.registries[event.Component.Id()]
 		dcp_datach_len := event.OtherInfos[parts.EVENT_DCP_DATACH_LEN].(int)
-		setCounter(registry.Get(DCP_DATACH_LEN).(metrics.Counter), dcp_datach_len)
+		setCounter(metric_map[DCP_DATACH_LEN].(metrics.Counter), dcp_datach_len)
 	}
 
 	return nil
@@ -913,44 +978,61 @@ func (dcp_collector *dcpCollector) ProcessEvent(event *common.Event) error {
 
 //metrics collector for Router
 type routerCollector struct {
-	stats_mgr *StatisticsManager
-	common.AsyncComponentEventListener
+	id            string
+	stats_mgr     *StatisticsManager
+	component_map map[string]map[string]interface{}
 }
 
 func (r_collector *routerCollector) Mount(pipeline common.Pipeline, stats_mgr *StatisticsManager) error {
+	r_collector.id = pipeline_utils.GetElementIdFromName(pipeline, base.RouterStatsCollector)
 	r_collector.stats_mgr = stats_mgr
-	r_collector.AsyncComponentEventListener = component.NewDefaultAsyncComponentEventListenerImpl(
-		pipeline_utils.GetAsyncComponentEventListenerId(pipeline, base.RouterStatsCollector),
-		pipeline.Topic(), r_collector.ProcessEvent, stats_mgr.logger)
+	r_collector.component_map = make(map[string]map[string]interface{})
 	dcp_parts := pipeline.Sources()
 	for _, dcp_part := range dcp_parts {
 		//get connector
 		conn := dcp_part.Connector()
 		registry_router := stats_mgr.getOrCreateRegistry(conn.Id())
-		registry_router.Register(DOCS_FILTERED_METRIC, metrics.NewCounter())
-		registry_router.Register(EXPIRY_FILTERED_METRIC, metrics.NewCounter())
-		registry_router.Register(DELETION_FILTERED_METRIC, metrics.NewCounter())
-		registry_router.Register(SET_FILTERED_METRIC, metrics.NewCounter())
-		conn.RegisterComponentEventListener(common.DataFiltered, r_collector)
+		docs_filtered := metrics.NewCounter()
+		registry_router.Register(DOCS_FILTERED_METRIC, docs_filtered)
+		expiry_filtered := metrics.NewCounter()
+		registry_router.Register(EXPIRY_FILTERED_METRIC, expiry_filtered)
+		deletion_filtered := metrics.NewCounter()
+		registry_router.Register(DELETION_FILTERED_METRIC, deletion_filtered)
+		set_filtered := metrics.NewCounter()
+		registry_router.Register(SET_FILTERED_METRIC, set_filtered)
+
+		metric_map := make(map[string]interface{})
+		metric_map[DOCS_FILTERED_METRIC] = docs_filtered
+		metric_map[EXPIRY_FILTERED_METRIC] = expiry_filtered
+		metric_map[DELETION_FILTERED_METRIC] = deletion_filtered
+		metric_map[SET_FILTERED_METRIC] = set_filtered
+		r_collector.component_map[conn.Id()] = metric_map
 	}
+
+	async_listener_map := pipeline_pkg.GetAllAsyncComponentEventListeners(pipeline)
+	pipeline_utils.GetAsyncComponentEventListener(async_listener_map, base.DataFilteredEventListener).RegisterComponentEventHandler(r_collector)
 	return nil
 }
 
+func (r_collector *routerCollector) Id() string {
+	return r_collector.id
+}
+
 func (r_collector *routerCollector) ProcessEvent(event *common.Event) error {
+	metric_map := r_collector.component_map[event.Component.Id()]
 	if event.EventType == common.DataFiltered {
 		uprEvent := event.Data.(*mcc.UprEvent)
 		seqno := uprEvent.Seqno
 		r_collector.stats_mgr.logger.Debugf("Received a DataFiltered event for %v", seqno)
-		registry := r_collector.stats_mgr.registries[event.Component.Id()]
-		registry.Get(DOCS_FILTERED_METRIC).(metrics.Counter).Inc(1)
+		metric_map[DOCS_FILTERED_METRIC].(metrics.Counter).Inc(1)
 
 		if uprEvent.Expiry != 0 {
-			registry.Get(EXPIRY_FILTERED_METRIC).(metrics.Counter).Inc(1)
+			metric_map[EXPIRY_FILTERED_METRIC].(metrics.Counter).Inc(1)
 		}
 		if uprEvent.Opcode == mc.UPR_DELETION {
-			registry.Get(DELETION_FILTERED_METRIC).(metrics.Counter).Inc(1)
+			metric_map[DELETION_FILTERED_METRIC].(metrics.Counter).Inc(1)
 		} else if uprEvent.Opcode == mc.UPR_MUTATION {
-			registry.Get(SET_FILTERED_METRIC).(metrics.Counter).Inc(1)
+			metric_map[SET_FILTERED_METRIC].(metrics.Counter).Inc(1)
 		} else {
 			panic(fmt.Sprintf("Invalid opcode, %v, in DataFiltered event from %v.", uprEvent.Opcode, event.Component.Id()))
 		}
@@ -1018,7 +1100,7 @@ func setCounter(counter metrics.Counter, count int) {
 	counter.Inc(int64(count))
 }
 
-func (stats_mgr *StatisticsManager) getReplicationStatus() (*pipeline.ReplicationStatus, error) {
+func (stats_mgr *StatisticsManager) getReplicationStatus() (*pipeline_pkg.ReplicationStatus, error) {
 	topic := stats_mgr.pipeline.Topic()
 	rs := pipeline_manager.ReplicationStatus(topic)
 	if rs == nil {
@@ -1054,7 +1136,7 @@ func UpdateStats(cluster_info_svc service_def.ClusterInfoSvc, xdcr_topology_svc 
 			}
 			repl_status.SetOverviewStats(overview_stats)
 		} else {
-			if repl_status.RuntimeStatus() != pipeline.Replicating {
+			if repl_status.RuntimeStatus() != pipeline_pkg.Replicating {
 				err := updateStatsForReplication(repl_status, cur_kv_vb_map, checkpoints_svc, logger)
 				if err != nil {
 					logger.Errorf("Error updating stats for paused replication %v. err=%v", repl_id, err)
@@ -1114,7 +1196,7 @@ func calculateTotalChanges(kv_vb_map map[string][]uint16, kv_mem_clients map[str
 	return int64(total_changes), nil
 }
 
-func updateStatsForReplication(repl_status *pipeline.ReplicationStatus, cur_kv_vb_map map[string][]uint16,
+func updateStatsForReplication(repl_status *pipeline_pkg.ReplicationStatus, cur_kv_vb_map map[string][]uint16,
 	checkpoints_svc service_def.CheckpointsService, logger *log.CommonLogger) error {
 
 	// if pipeline is not running, update docs_processed and changes_left stats, which are not being

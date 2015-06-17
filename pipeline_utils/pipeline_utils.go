@@ -16,6 +16,7 @@ import (
 	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/goxdcr/parts"
 	"github.com/couchbase/goxdcr/service_def"
+	"strings"
 )
 
 var ErrorNoSourceKV = errors.New("Invalid configuration. No source kv node is found.")
@@ -71,7 +72,24 @@ func HasSSLOverMemSupport(cluster_info_svc service_def.ClusterInfoSvc, targetClu
 	return cluster_info_svc.IsClusterCompatible(targetClusterRef, []int{3, 0})
 }
 
+// the element here can be ComponentEventListener, ComponentEventHandler, or other elements in pipeiline
+func GetElementIdFromName(pipeline common.Pipeline, name string) string {
+	return pipeline.Topic() + "_" + name
+}
 
-func GetAsyncComponentEventListenerId(pipeline common.Pipeline, listenerName string) string {
-	return pipeline.Topic() + "_" + listenerName
+func GetElementNameFromId(id string) string {
+	parts := strings.Split(id, "_")
+	if len(parts) > 0 {
+		return parts[len(parts)-1]
+	}
+	return ""
+}
+
+func GetAsyncComponentEventListener(listenerMap map[string]common.AsyncComponentEventListener, name string) common.AsyncComponentEventListener {
+	for id, listener := range listenerMap {
+		if name == GetElementNameFromId(id) {
+			return listener
+		}
+	}
+	return nil
 }
