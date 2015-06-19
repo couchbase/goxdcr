@@ -35,7 +35,7 @@ const (
 )
 
 const (
-	default_health_check_interval = 15 * time.Second
+	default_health_check_interval = 10 * time.Second
 	default_max_dcp_miss_count    = 3
 )
 

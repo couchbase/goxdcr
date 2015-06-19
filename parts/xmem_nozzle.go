@@ -937,10 +937,10 @@ func (xmem *XmemNozzle) accumuBatch(request *base.WrappedMCRequest) {
 	}
 }
 
-func (xmem *XmemNozzle) batchSize() int {
+func (xmem *XmemNozzle) batchCount() int {
 	xmem.batch_lock.RLock()
 	defer xmem.batch_lock.RUnlock()
-	return xmem.batch.size()
+	return xmem.batch.count()
 }
 
 func (xmem *XmemNozzle) processData_batch(finch chan bool, waitGrp *sync.WaitGroup) (err error) {
@@ -1504,7 +1504,7 @@ func (xmem *XmemNozzle) receiveResponse(finch chan bool, waitGrp *sync.WaitGroup
 						seqno = wrappedReq.Seqno
 						if req != nil && req.Opaque == response.Opaque {
 							xmem.Logger().Errorf("%v received a response indicating non-recoverable error from xmem client. response status=%v, opcode=%v, seqno=%v, req.Key=%v, req.Cas=%v, req.Extras=%s\n", xmem.Id(), response.Status, response.Opcode, seqno, req.Key, req.Cas, req.Extras)
-							xmem.handleGeneralError(errors.New("Received non-recoverable error from memcached in target cluster"))
+							xmem.handleGeneralError(errors.New("Received severe error from memcached in target cluster"))
 							goto done
 						}
 					}
@@ -1827,7 +1827,7 @@ func (xmem *XmemNozzle) ConnType() base.ConnType {
 func (xmem *XmemNozzle) StatusSummary() string {
 	if xmem.State() == common.Part_Running {
 		connType := xmem.connType
-		return fmt.Sprintf("Xmem %v state =%v connType=%v received %v items, sent %v items, %v items waiting to confirm, %v in queue, %v in current batch, getMeta's backoff_factor is %v, setMeta's backoff_factor is %v", xmem.Id(), xmem.State(), connType, xmem.counter_received, xmem.counter_sent, xmem.buf.itemCountInBuffer(), len(xmem.dataChan), xmem.batchSize(), xmem.client_for_getMeta.backoff_factor, xmem.client_for_setMeta.backoff_factor)
+		return fmt.Sprintf("Xmem %v state =%v connType=%v received %v items, sent %v items, %v items waiting to confirm, %v in queue, %v in current batch, getMeta's backoff_factor is %v, setMeta's backoff_factor is %v", xmem.Id(), xmem.State(), connType, xmem.counter_received, xmem.counter_sent, xmem.buf.itemCountInBuffer(), len(xmem.dataChan), xmem.batchCount(), xmem.client_for_getMeta.backoff_factor, xmem.client_for_setMeta.backoff_factor)
 	} else {
 		return fmt.Sprintf("Xmem %v state =%v ", xmem.Id(), xmem.State())
 	}
@@ -2037,12 +2037,11 @@ func (xmem *XmemNozzle) packageRequest(count int, reqs_bytes []byte) []byte {
 }
 
 func (xmem *XmemNozzle) releasePool() {
-	xmem.Logger().Infof("release pool %v\n", getPoolName(xmem.config))
+	xmem.Logger().Infof("%v release pool %v\n", xmem.Id(), getPoolName(xmem.config))
 	pool := base.ConnPoolMgr().GetPool(getPoolName(xmem.config))
 	if pool != nil {
-		pool.ReleaseConnections()
+		pool.ReleaseConnections(pool.GetCAS())
 	}
-
 }
 
 func (xmem *XmemNozzle) UpdateSettings(settings map[string]interface{}) error {

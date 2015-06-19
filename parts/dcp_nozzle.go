@@ -50,6 +50,8 @@ var dcp_setting_defs base.SettingDefinitions = base.SettingDefinitions{DCP_VBTim
 
 var ErrorEmptyVBList = errors.New("Invalid configuration for DCP nozzle. VB list cannot be empty.")
 
+var MaxCountStreamsInactive uint8 = 3
+
 type vbtsWithLock struct {
 	ts   *base.VBTimestamp
 	lock *sync.RWMutex
@@ -94,6 +96,10 @@ type DcpNozzle struct {
 	counter_sent     uint32
 	// the counter_received stats from last dcp check
 	counter_received_last uint32
+
+	// the number of health check intervals after which dcp still has inactive streams
+	// inactive streams will be restarted after this count exceeds MaxCountStreamsInactive
+	counter_streams_inactive uint8
 
 	start_time          time.Time
 	handle_error        bool
@@ -241,11 +247,11 @@ func (dcp *DcpNozzle) Start(settings map[string]interface{}) error {
 	//start datachan length stats collection
 	go dcp.collectDcpDataChanLen(settings)
 
+	dcp.uprFeed.StartFeedWithConfig(base.UprFeedDataChanLength)
+
 	// start data processing routine
 	dcp.childrenWaitGrp.Add(1)
 	go dcp.processData()
-
-	dcp.uprFeed.StartFeedWithConfig(base.UprFeedDataChanLength)
 
 	// start vbstreams
 	go dcp.startUprStreams()
@@ -451,7 +457,12 @@ func (dcp *DcpNozzle) onExit() {
 }
 
 func (dcp *DcpNozzle) StatusSummary() string {
-	return fmt.Sprintf("Dcp %v received %v items, sent %v items. %v streams inactive", dcp.Id(), dcp.counterReceived(), dcp.counterSent(), dcp.inactiveDcpStreams())
+	msg := fmt.Sprintf("Dcp %v received %v items, sent %v items.", dcp.Id(), dcp.counterReceived(), dcp.counterSent())
+	streams_inactive := dcp.inactiveDcpStreams()
+	if len(streams_inactive) > 0 {
+		msg += fmt.Sprintf(" streams inactive: %v", streams_inactive)
+	}
+	return msg
 }
 
 func (dcp *DcpNozzle) handleGeneralError(err error) {
@@ -488,11 +499,11 @@ func (dcp *DcpNozzle) startUprStreams() error {
 				return err
 			}
 		case <-ticker.C:
-			streams_inactive := dcp.nonInitDcpStreams()
-			if len(streams_inactive) == 0 {
+			streams_non_init := dcp.nonInitDcpStreams()
+			if len(streams_non_init) == 0 {
 				goto done
 			}
-			err = dcp.startUprStreams_internal(streams_inactive)
+			err = dcp.startUprStreams_internal(streams_non_init)
 			if err != nil {
 				return err
 			}
@@ -708,6 +719,40 @@ func (dcp *DcpNozzle) SetMaxMissCount(max_dcp_miss_count int) {
 }
 
 func (dcp *DcpNozzle) CheckDcpHealth(dcp_stats map[string]map[string]string) error {
+	err := dcp.checkInactiveStreams()
+	if err != nil {
+		return err
+	}
+	return dcp.checkStuckness(dcp_stats)
+}
+
+// check if inactive streams need to be restarted
+func (dcp *DcpNozzle) checkInactiveStreams() error {
+	streams_inactive := dcp.inactiveDcpStreams()
+	if len(streams_inactive) > 0 {
+		dcp.counter_streams_inactive++
+		dcp.Logger().Infof("%v incrementing counter for inactive streams %v\n", dcp.Id(), dcp.counter_streams_inactive)
+		if dcp.counter_streams_inactive > MaxCountStreamsInactive {
+			dcp.Logger().Infof("%v restarting inactive streams %v\n", dcp.Id(), streams_inactive)
+			opaque := newOpaque()
+			for _, vbno := range streams_inactive {
+				err := dcp.uprFeed.CloseStream(vbno, opaque)
+				if err != nil {
+					return err
+				}
+			}
+			err := dcp.startUprStreams_internal(streams_inactive)
+			if err != nil {
+				return err
+			}
+			dcp.counter_streams_inactive = 0
+		}
+	}
+	return nil
+}
+
+// check if dcp is stuck
+func (dcp *DcpNozzle) checkStuckness(dcp_stats map[string]map[string]string) error {
 	counter_received := dcp.counterReceived()
 	if counter_received > dcp.counter_received_last {
 		// dcp is ok if received more items from dcp
@@ -719,6 +764,12 @@ func (dcp *DcpNozzle) CheckDcpHealth(dcp_stats map[string]map[string]string) err
 	if counter_received > dcp.counterSent() {
 		// if dcp nozzle is holding an item that has not been processed by downstream parts,
 		// cannot declare dcp broken regardless of what other stats say
+		dcp.dcp_miss_count = 0
+		return nil
+	}
+
+	// skip checking if dcp still has inactive streams
+	if len(dcp.inactiveDcpStreams()) > 0 {
 		dcp.dcp_miss_count = 0
 		return nil
 	}
@@ -740,7 +791,6 @@ func (dcp *DcpNozzle) CheckDcpHealth(dcp_stats map[string]map[string]string) err
 	}
 
 	return nil
-
 }
 
 func (dcp *DcpNozzle) dcpHasRemainingItemsForXdcr(dcp_stats map[string]map[string]string) bool {

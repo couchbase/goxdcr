@@ -63,8 +63,9 @@ type NewConnFunc func() (*mcc.Client, error)
 
 type ConnPool interface {
 	Get() (*mcc.Client, error)
+	GetCAS() uint32
 	Release(client *mcc.Client)
-	ReleaseConnections()
+	ReleaseConnections(cas uint32)
 	NewConnFunc() NewConnFunc
 	Name() string
 	Size() int
@@ -89,6 +90,8 @@ type connPool struct {
 	newConnFunc NewConnFunc
 	logger      *log.CommonLogger
 	lock        *sync.RWMutex
+	cas         uint32
+	cas_lock    *sync.RWMutex
 }
 
 type sslOverProxyConnPool struct {
@@ -360,12 +363,40 @@ func (p *connPool) Release(client *mcc.Client) {
 	}
 }
 
+func (p *connPool) GetCAS() uint32 {
+	p.cas_lock.RLock()
+	defer p.cas_lock.RUnlock()
+	return p.cas
+}
+
+func (p *connPool) incrementCAS() {
+	p.cas_lock.Lock()
+	defer p.cas_lock.Unlock()
+	p.cas++
+}
+
+func (p *connPool) doesCASMatch(cas uint32) bool {
+	p.cas_lock.RLock()
+	defer p.cas_lock.RUnlock()
+	if p.cas == cas {
+		return true
+	}
+	return false
+}
+
 //
 // Release all connections in the connection pool.
 //
-func (p *connPool) ReleaseConnections() {
+func (p *connPool) ReleaseConnections(cas uint32) {
 	p.lock.Lock()
 	defer p.lock.Unlock()
+
+	if !p.doesCASMatch(cas) {
+		// no op if cas value does not match
+		return
+	}
+
+	defer p.incrementCAS()
 
 	if p.clients == nil {
 		return
@@ -391,11 +422,10 @@ func (p *connPool) ReleaseConnections() {
 			}
 		}
 	}
-
 }
 
 func (p *connPool) Close() {
-	p.ReleaseConnections()
+	p.ReleaseConnections(p.GetCAS())
 
 	p.lock.Lock()
 	defer p.lock.Unlock()
@@ -429,6 +459,7 @@ func (connPoolMgr *connPoolMgr) GetOrCreatePool(poolNameToCreate string, hostnam
 		bucketName: bucketname,
 		name:       poolNameToCreate,
 		lock:       &sync.RWMutex{},
+		cas_lock:   &sync.RWMutex{},
 		logger:     log.NewLogger("ConnPool", connPoolMgr.logger.LoggerContext())}
 	connPoolMgr.conn_pools_map[poolNameToCreate] = pool
 
@@ -465,6 +496,7 @@ func (connPoolMgr *connPoolMgr) GetOrCreateSSLOverMemPool(poolNameToCreate strin
 			bucketName: bucketname,
 			name:       poolNameToCreate,
 			lock:       &sync.RWMutex{},
+			cas_lock:   &sync.RWMutex{},
 			logger:     log.NewLogger("sslConnPool", connPoolMgr.logger.LoggerContext())},
 		remote_memcached_port: remote_mem_port,
 		certificate:           cert}
@@ -505,6 +537,7 @@ func (connPoolMgr *connPoolMgr) GetOrCreateSSLOverProxyPool(poolNameToCreate str
 			bucketName: bucketname,
 			name:       poolNameToCreate,
 			lock:       &sync.RWMutex{},
+			cas_lock:   &sync.RWMutex{},
 			logger:     log.NewLogger("sslConnPool", connPoolMgr.logger.LoggerContext())},
 		remote_memcached_port: remote_mem_port,
 		local_proxy_port:      local_proxy_port,
@@ -625,7 +658,7 @@ func (connPoolMgr *connPoolMgr) Close() {
 
 	for key, pool := range connPoolMgr.conn_pools_map {
 		connPoolMgr.logger.Infof("close pool %s", key)
-		pool.ReleaseConnections()
+		pool.ReleaseConnections(pool.GetCAS())
 	}
 
 	connPoolMgr.conn_pools_map = make(map[string]ConnPool)
