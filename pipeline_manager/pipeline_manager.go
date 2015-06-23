@@ -86,8 +86,9 @@ func NewMCRequestObj(topic string) *base.WrappedMCRequest {
 }
 
 func RecycleMCRequestObj(topic string, obj *base.WrappedMCRequest) {
-	if ReplicationStatus(topic) != nil {
-		ReplicationStatus(topic).ObjectPool().Put(obj)
+	rep_status := ReplicationStatus(topic)
+	if rep_status != nil {
+		rep_status.ObjectPool().Put(obj)
 	}
 }
 

@@ -44,18 +44,20 @@ const (
 
 	//default configuration
 	default_numofretry          int           = 5
-	default_resptimeout         time.Duration = 2000 * time.Millisecond
-	default_dataChannelSize                   = 5000
+	default_resptimeout         time.Duration = 6000 * time.Millisecond
 	default_batchExpirationTime               = 300 * time.Millisecond
 	default_maxRetryInterval                  = 300 * time.Second
-	default_writeTimeOut        time.Duration = time.Duration(1) * time.Second
+	default_writeTimeOut        time.Duration = time.Duration(120) * time.Second
 	default_readTimeout         time.Duration = time.Duration(1) * time.Second
 	default_maxIdleCount        int           = 60
-	default_selfMonitorInterval time.Duration = 1 * time.Second
+	default_selfMonitorInterval time.Duration = default_resptimeout
 	default_demandEncryption    bool          = false
-	default_max_downtime        time.Duration = 3 * time.Second
+	default_max_read_downtime   time.Duration = 60 * time.Second
 	//wait time between write is default_backoff_wait_time*backoff_factor
 	default_backoff_wait_time time.Duration = 10 * time.Millisecond
+
+	//the maximum data (in byte) data channel can hold
+	max_datachannelSize = 10 * 1024 * 1024
 )
 
 var xmem_setting_defs base.SettingDefinitions = base.SettingDefinitions{SETTING_BATCHCOUNT: base.NewSettingDef(reflect.TypeOf((*int)(nil)), true),
@@ -419,7 +421,7 @@ type xmemConfig struct {
 	local_proxy_port   uint16
 	memcached_ssl_port uint16
 	respTimeout        time.Duration
-	max_downtime       time.Duration
+	max_read_downtime  time.Duration
 	logger             *log.CommonLogger
 }
 
@@ -444,7 +446,7 @@ func newConfig(logger *log.CommonLogger) xmemConfig {
 		certificate:        []byte{},
 		remote_proxy_port:  0,
 		local_proxy_port:   0,
-		max_downtime:       default_max_downtime,
+		max_read_downtime:  default_max_read_downtime,
 		memcached_ssl_port: 0,
 		logger:             logger,
 	}
@@ -497,59 +499,62 @@ type xmemClient struct {
 	name      string
 	memClient *mcc.Client
 	//the count of continuous read\write failure on this client
-	continuous_failure_counter int
+	continuous_write_failure_counter int
 	//the count of continuous successful read\write
 	success_counter int
 	//the maximum allowed continuous read\write failure on this client
 	//exceed this limit, would consider this client's health is ruined.
-	max_continuous_failure int
-	max_downtime           time.Duration
-	downtime_start         time.Time
-	lock                   sync.RWMutex
-	read_timeout           time.Duration
-	write_timeout          time.Duration
-	logger                 *log.CommonLogger
-	poolName               string
-	healthy                bool
-	num_of_repairs         int
-	last_failure           time.Time
-	backoff_factor         int
+	max_continuous_write_failure int
+	max_downtime                 time.Duration
+	downtime_start               time.Time
+	lock                         sync.RWMutex
+	read_timeout                 time.Duration
+	write_timeout                time.Duration
+	logger                       *log.CommonLogger
+	poolName                     string
+	healthy                      bool
+	num_of_repairs               int
+	last_failure                 time.Time
+	backoff_factor               int
 }
 
 func newXmemClient(name string, read_timeout, write_timeout time.Duration,
 	client *mcc.Client, poolName string, max_continuous_failure int, max_downtime time.Duration, logger *log.CommonLogger) *xmemClient {
 	logger.Infof("xmem client %v is created with read_timeout=%v, write_timeout=%v, retry_limit=%v", name, read_timeout, write_timeout, max_continuous_failure)
 	return &xmemClient{name: name,
-		memClient:                  client,
-		continuous_failure_counter: 0,
-		success_counter:            0,
-		logger:                     logger,
-		poolName:                   poolName,
-		read_timeout:               read_timeout,
-		write_timeout:              write_timeout,
-		max_downtime:               max_downtime,
-		max_continuous_failure:     max_continuous_failure,
-		healthy:                    true,
-		num_of_repairs:             0,
-		lock:                       sync.RWMutex{},
-		backoff_factor:             0,
+		memClient:                        client,
+		continuous_write_failure_counter: 0,
+		success_counter:                  0,
+		logger:                           logger,
+		poolName:                         poolName,
+		read_timeout:                     read_timeout,
+		write_timeout:                    write_timeout,
+		max_downtime:                     max_downtime,
+		max_continuous_write_failure:     max_continuous_failure,
+		healthy:        true,
+		num_of_repairs: 0,
+		lock:           sync.RWMutex{},
+		backoff_factor: 0,
+		downtime_start: time.Date(1, time.January, 1, 0, 0, 0, 0, time.UTC),
 	}
 }
 
-func (client *xmemClient) curFailureCounter() int {
-	return client.continuous_failure_counter
+func (client *xmemClient) curWriteFailureCounter() int {
+	return client.continuous_write_failure_counter
 }
 
-func (client *xmemClient) reportOpFailure() {
+func (client *xmemClient) reportOpFailure(readOp bool) {
 	client.lock.Lock()
 	defer client.lock.Unlock()
 
-	if client.continuous_failure_counter == 0 {
+	if client.downtime_start.IsZero() {
 		client.downtime_start = time.Now()
 	}
 
-	client.continuous_failure_counter++
-	if client.continuous_failure_counter > client.max_continuous_failure && time.Since(client.downtime_start) > client.max_downtime {
+	if !readOp {
+		client.continuous_write_failure_counter++
+	}
+	if client.continuous_write_failure_counter > client.max_continuous_write_failure || time.Since(client.downtime_start) > client.max_downtime {
 		client.healthy = false
 	}
 }
@@ -558,11 +563,12 @@ func (client *xmemClient) reportOpSuccess() {
 	client.lock.Lock()
 	defer client.lock.Unlock()
 
-	client.continuous_failure_counter = 0
+	client.downtime_start = time.Date(1, time.January, 1, 0, 0, 0, 0, time.UTC)
+	client.continuous_write_failure_counter = 0
 	client.success_counter++
-	if client.success_counter > client.max_continuous_failure && client.backoff_factor > 0 {
+	if client.success_counter > client.max_continuous_write_failure && client.backoff_factor > 0 {
 		client.backoff_factor--
-		client.success_counter = client.success_counter - client.max_continuous_failure
+		client.success_counter = client.success_counter - client.max_continuous_write_failure
 	}
 	client.healthy = true
 
@@ -604,7 +610,7 @@ func (client *xmemClient) repairConn(memClient *mcc.Client, repair_count_at_erro
 
 		client.memClient.Close()
 		client.memClient = memClient
-		client.continuous_failure_counter = 0
+		client.continuous_write_failure_counter = 0
 		client.num_of_repairs++
 		client.healthy = true
 	} else {
@@ -651,6 +657,7 @@ type XmemNozzle struct {
 	dataChan chan *base.WrappedMCRequest
 	//the total size of data (in byte) queued in dataChan
 	bytes_in_dataChan int32
+	dataChan_control  chan bool
 
 	//memcached client connected to the target bucket
 	client_for_setMeta *xmemClient
@@ -1200,7 +1207,10 @@ func (xmem *XmemNozzle) batchGetMeta(bigDoc_map map[string]*base.WrappedMCReques
 						xmem.repairConn(xmem.client_for_getMeta, err.Error(), rev)
 						return
 					}
-					err_list = append(err_list, err)
+
+					if !isNetTimeoutError(err) {
+						err_list = append(err_list, err)
+					}
 
 				} else {
 					lock.RLock()
@@ -1408,10 +1418,10 @@ func (xmem *XmemNozzle) initializeConnection() (err error) {
 
 	xmem.client_for_setMeta = newXmemClient("client_setMeta", xmem.config.readTimeout,
 		xmem.config.writeTimeout, memClient_setMeta,
-		getPoolName(xmem.config), xmem.config.maxRetry, xmem.config.max_downtime, xmem.Logger())
+		getPoolName(xmem.config), xmem.config.maxRetry, xmem.config.max_read_downtime, xmem.Logger())
 	xmem.client_for_getMeta = newXmemClient("client_getMeta", xmem.config.readTimeout,
 		xmem.config.writeTimeout, memClient_getMeta,
-		getPoolName(xmem.config), xmem.config.maxRetry, xmem.config.max_downtime, xmem.Logger())
+		getPoolName(xmem.config), xmem.config.maxRetry, xmem.config.max_read_downtime, xmem.Logger())
 
 	if err == nil {
 		xmem.Logger().Infof("%v done with initializeConnection.", xmem.Id())
@@ -1433,8 +1443,11 @@ func (xmem *XmemNozzle) initialize(settings map[string]interface{}) error {
 	if err != nil {
 		return err
 	}
-	xmem.dataChan = make(chan *base.WrappedMCRequest, xmem.config.maxCount*50)
+	xmem.dataChan = make(chan *base.WrappedMCRequest, xmem.config.maxCount*10)
 	xmem.bytes_in_dataChan = 0
+	xmem.dataChan_control = make(chan bool, 1)
+	xmem.dataChan_control <- true
+
 	xmem.batches_ready = make(chan *dataBatch, 100)
 
 	xmem.counter_received = 0
@@ -1575,8 +1588,14 @@ done:
 }
 
 func (xmem *XmemNozzle) adjustRespTimeout(committing_time time.Duration) {
+	factor := committing_time.Seconds()/xmem.config.respTimeout.Seconds()
 	xmem.config.respTimeout = committing_time
-	//	xmem.Logger().Infof ("xmem.config.respTimeout=%v\n", xmem.config.respTimeout.Seconds())
+	
+	xmem.adjustMaxIdleCount(factor)
+}
+
+func (xmem *XmemNozzle) adjustMaxIdleCount(factor float64) {
+	xmem.config.maxIdleCount = int(float64(xmem.config.maxIdleCount) *factor)
 }
 
 func isNetError(err error) bool {
@@ -1672,7 +1691,7 @@ func (xmem *XmemNozzle) selfMonitor(finch chan bool, waitGrp *sync.WaitGroup) {
 				count = 0
 			}
 			if freeze_counter > xmem.getMaxIdleCount() {
-				xmem.Logger().Errorf("Xmem hasn't sent any item out for %v ticks, %v data in queue, flowcontrol=%v, con_retry_limit=%v, backoff_factor for client_setMeta is %v, backoff_factor for client_getMeta is %v", xmem.getMaxIdleCount(), len(xmem.dataChan), xmem.buf.itemCountInBuffer() <= xmem.buf.notify_threshold, xmem.client_for_setMeta.continuous_failure_counter, xmem.client_for_setMeta.backoff_factor, xmem.client_for_getMeta.backoff_factor)
+				xmem.Logger().Errorf("Xmem hasn't sent any item out for %v ticks, %v data in queue, flowcontrol=%v, con_retry_limit=%v, backoff_factor for client_setMeta is %v, backoff_factor for client_getMeta is %v", xmem.getMaxIdleCount(), len(xmem.dataChan), xmem.buf.itemCountInBuffer() <= xmem.buf.notify_threshold, xmem.client_for_setMeta.continuous_write_failure_counter, xmem.client_for_setMeta.backoff_factor, xmem.client_for_getMeta.backoff_factor)
 				xmem.Logger().Infof("%v open=%v checking..., %v item unsent, received %v items, sent %v items, %v items waiting for response, %v batches ready, current batch timeout at %v, current batch expire_ch size is %v\n", xmem.Id(), xmem.IsOpen(), len(xmem.dataChan), xmem.counter_received, xmem.counter_sent, int(xmem.buf.bufferSize())-len(xmem.buf.empty_slots_pos), len(xmem.batches_ready), xmem.batch.start_time.Add(xmem.batch.expiring_duration), len(xmem.batch.expire_ch))
 				//				utils.DumpStack(xmem.Logger())
 				//the connection might not be healthy, it should not go back to connection pool
@@ -1888,8 +1907,8 @@ func (xmem *XmemNozzle) writeToClient(client *xmemClient, bytes []byte) (error, 
 			xmem.repairConn(client, err.Error(), rev)
 
 		} else if isNetError(err) {
-			client.reportOpFailure()
-			wait_time := time.Duration(math.Pow(2, float64(client.curFailureCounter()))) * xmem.config.writeTimeout
+			client.reportOpFailure(false)
+			wait_time := time.Duration(math.Pow(2, float64(client.curWriteFailureCounter()))*float64(rand.Intn(10)/10)) * xmem.config.writeTimeout
 			xmem.Logger().Errorf("%v batchSend Failed, retry after %v\n", xmem.Id(), wait_time)
 			time.Sleep(wait_time)
 
@@ -1931,7 +1950,7 @@ func (xmem *XmemNozzle) readFromClient(client *xmemClient) (*mc.MCResponse, erro
 				xmem.repairConn(client, errMsg, rev)
 				return nil, badConnectionError, rev
 			} else if isNetError(err) {
-				client.reportOpFailure()
+				client.reportOpFailure(true)
 				return response, err, rev
 			} else if strings.HasPrefix(errMsg, "bad magic") {
 				//the connection to couchbase server is ruined. it is not supposed to return response with bad magic number
@@ -2053,9 +2072,23 @@ func (xmem *XmemNozzle) UpdateSettings(settings map[string]interface{}) error {
 	return nil
 }
 
+func (xmem *XmemNozzle) dataChanControl() {
+	if xmem.bytesInDataChan() < max_datachannelSize {
+		select {
+		case xmem.dataChan_control <- true:
+		default:
+			//dataChan_control is already flagged.
+		}
+	}
+}
+
 func (xmem *XmemNozzle) writeToDataChan(item *base.WrappedMCRequest) {
-	xmem.dataChan <- item
-	atomic.AddInt32(&xmem.bytes_in_dataChan, int32(item.Req.Size()))
+	select {
+	case <-xmem.dataChan_control:
+		xmem.dataChan <- item
+		atomic.AddInt32(&xmem.bytes_in_dataChan, int32(item.Req.Size()))
+		xmem.dataChanControl()
+	}
 }
 
 func (xmem *XmemNozzle) readFromDataChan() (*base.WrappedMCRequest, error) {
@@ -2067,7 +2100,7 @@ func (xmem *XmemNozzle) readFromDataChan() (*base.WrappedMCRequest, error) {
 	}
 
 	atomic.AddInt32(&xmem.bytes_in_dataChan, int32(0-item.Req.Size()))
-
+	xmem.dataChanControl()
 	return item, nil
 }
 

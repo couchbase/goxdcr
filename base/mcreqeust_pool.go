@@ -9,24 +9,21 @@ import (
 type MCRequestPool struct {
 	name     string
 	obj_pool *sync.Pool
-	lock     *sync.RWMutex
 	logger *log.CommonLogger
 }
 
 func NewMCRequestPool(name string, logger *log.CommonLogger) *MCRequestPool {
-	return &MCRequestPool{name: name,
+	pool := &MCRequestPool{name: name,
 		obj_pool: &sync.Pool{},
-		lock:     &sync.RWMutex{},
 		logger: logger,
 	}
+	pool.obj_pool.New = pool.addOne
+	return pool
 }
 
 func (pool *MCRequestPool) Get() *WrappedMCRequest {
 	var obj_ret *WrappedMCRequest = nil
 	obj := pool.obj_pool.Get()
-	if obj == nil {
-		obj = pool.addOne()
-	}
 	obj_ret, ok := obj.(*WrappedMCRequest)
 	if !ok {
 		panic("object in MCRequestPool should be of type *WrappedMCRequest")
@@ -35,7 +32,7 @@ func (pool *MCRequestPool) Get() *WrappedMCRequest {
 	return obj_ret
 }
 
-func (pool *MCRequestPool) addOne() *WrappedMCRequest {
+func (pool *MCRequestPool) addOne() interface{} {
 	obj := &WrappedMCRequest{Seqno: 0,
 		Req: &gomemcached.MCRequest{Extras: make([]byte, 24)},
 	}
@@ -70,6 +67,6 @@ func (pool *MCRequestPool) cleanMCReq(req *gomemcached.MCRequest) *gomemcached.M
 
 func (pool *MCRequestPool) cleanExtras(req *gomemcached.MCRequest) {
 	for i := 0; i < 24; i++ {
-		req.Extras[0] = 0
+		req.Extras[i] = 0
 	}
 }
