@@ -276,7 +276,7 @@ func (tsTracker *ThroughSeqnoTrackerSvc) GetThroughSeqno(vbno uint16) uint64 {
 	gap_seqno_list := tsTracker.vb_gap_seqno_list_map[vbno].getSortedSeqnoList()
 	max_gap_seqno := maxSeqno(gap_seqno_list)
 
-	tsTracker.logger.Debugf("%v, vbno=%v, last_through_seqno=%v\n sent_seqno_list=%v\n filtered_seqno_list=%v\n failed_cr_seqno_list=%v\n gap_seqno_list=%v\n", tsTracker.id, vbno, last_through_seqno, sent_seqno_list, filtered_seqno_list, failed_cr_seqno_list, gap_seqno_list)
+	tsTracker.logger.Infof("%v, vbno=%v, last_through_seqno=%v\n sent_seqno_list=%v\n filtered_seqno_list=%v\n failed_cr_seqno_list=%v\n gap_seqno_list=%v\n", tsTracker.id, vbno, last_through_seqno, sent_seqno_list, filtered_seqno_list, failed_cr_seqno_list, gap_seqno_list)
 
 	// Goal of algorithm:
 	// Find the right through_seqno for stats and checkpointing, with the constraint that through_seqno cannot be
@@ -358,7 +358,7 @@ func (tsTracker *ThroughSeqnoTrackerSvc) GetThroughSeqno(vbno uint16) uint64 {
 		go tsTracker.truncateSeqnoLists(vbno, through_seqno)
 	}
 
-	tsTracker.logger.Debugf("%v, vbno=%v, through_seqno=%v\n", tsTracker.id, vbno, through_seqno)
+	tsTracker.logger.Infof("%v, vbno=%v, through_seqno=%v\n", tsTracker.id, vbno, through_seqno)
 	return through_seqno
 }
 
