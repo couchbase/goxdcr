@@ -550,7 +550,7 @@ func (stats_mgr *StatisticsManager) calculateDocsChecked() uint64 {
 	return docs_checked
 }
 func (stats_mgr *StatisticsManager) calculateChangesLeft(docs_processed int64) (int64, error) {
-	total_changes, err := calculateTotalChanges(stats_mgr.active_vbs, stats_mgr.kv_mem_clients, "", stats_mgr.logger, stats_mgr.pipeline.Topic())
+	total_changes, err := calculateTotalChanges(stats_mgr.active_vbs, stats_mgr.kv_mem_clients, "", stats_mgr.logger)
 	if err != nil {
 		return 0, err
 	}
@@ -1158,7 +1158,7 @@ func constructStatsForReplication(spec *metadata.ReplicationSpecification, cur_k
 
 	kv_mem_clients := make(map[string]*mcc.Client)
 
-	total_changes, err := calculateTotalChanges(cur_kv_vb_map, kv_mem_clients, spec.SourceBucketName, logger, spec.Id)
+	total_changes, err := calculateTotalChanges(cur_kv_vb_map, kv_mem_clients, spec.SourceBucketName, logger)
 	if err != nil {
 		return nil, err
 	}
@@ -1177,7 +1177,7 @@ func constructStatsForReplication(spec *metadata.ReplicationSpecification, cur_k
 }
 
 func calculateTotalChanges(kv_vb_map map[string][]uint16, kv_mem_clients map[string]*mcc.Client,
-	sourceBucketName string, logger *log.CommonLogger, topic string) (int64, error) {
+	sourceBucketName string, logger *log.CommonLogger) (int64, error) {
 	var total_changes uint64 = 0
 	for serverAddr, vbnos := range kv_vb_map {
 		client, err := getClient(serverAddr, sourceBucketName, kv_mem_clients, logger)
@@ -1185,7 +1185,6 @@ func calculateTotalChanges(kv_vb_map map[string][]uint16, kv_mem_clients map[str
 			return 0, err
 		}
 		highseqno_map, err := getHighSeqNos(serverAddr, vbnos, client)
-		logger.Infof("%v highseqno_map=%v\n", topic, highseqno_map)
 		if err != nil {
 			return 0, err
 		}
@@ -1235,7 +1234,7 @@ func updateStatsForReplication(repl_status *pipeline_pkg.ReplicationStatus, cur_
 
 	kv_mem_clients := make(map[string]*mcc.Client)
 
-	total_changes, err := calculateTotalChanges(cur_kv_vb_map, kv_mem_clients, spec.SourceBucketName, logger, spec.Id)
+	total_changes, err := calculateTotalChanges(cur_kv_vb_map, kv_mem_clients, spec.SourceBucketName, logger)
 	if err != nil {
 		return err
 	}
