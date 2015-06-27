@@ -494,10 +494,9 @@ func (capi *CapiNozzle) batchGetMeta(vbno uint16, bigDoc_map map[string]*base.Wr
 	}
 
 	for key, seqnostarttime := range key_seqnostarttime_map {
-		additionalInfo := make(map[string]interface{})
-		additionalInfo[EVENT_ADDI_DOC_KEY] = key
-		additionalInfo[EVENT_ADDI_SEQNO] = seqnostarttime[0].(uint64)
-		additionalInfo[EVENT_ADDI_GETMETA_COMMIT_TIME] = time.Since(seqnostarttime[1].(time.Time))
+		additionalInfo := GetMetaReceivedEventAdditional{Key: key,
+			Seqno:       seqnostarttime[0].(uint64),
+			Commit_time: time.Since(seqnostarttime[1].(time.Time))}
 		capi.RaiseEvent(common.NewEvent(common.GetMetaReceived, nil, capi, nil, additionalInfo))
 	}
 
@@ -540,12 +539,11 @@ func (capi *CapiNozzle) batchSendWithRetry(batch *capiBatch) error {
 			req_list = append(req_list, item)
 		} else {
 			capi.Logger().Debugf("did not send doc with key %v since it failed conflict resolution\n", string(item.Req.Key))
-			//lost on conflict resolution on source side
-			additionalInfo := make(map[string]interface{})
-			additionalInfo[EVENT_ADDI_SEQNO] = item.Seqno
-			additionalInfo[EVENT_ADDI_REQ_OPCODE] = item.Req.Opcode
-			additionalInfo[EVENT_ADDI_REQ_EXPIRY_SET] = (binary.BigEndian.Uint32(item.Req.Extras[4:8]) != 0)
-			additionalInfo[EVENT_ADDI_REQ_VBUCKET] = item.Req.VBucket
+			additionalInfo := DataFailedCRSourceEventAdditional{Seqno: item.Seqno,
+				Opcode:      item.Req.Opcode,
+				IsExpirySet: (binary.BigEndian.Uint32(item.Req.Extras[4:8]) != 0),
+				VBucket:     item.Req.VBucket,
+			}
 			capi.RaiseEvent(common.NewEvent(common.DataFailedCRSource, nil, capi, nil, additionalInfo))
 
 			capi.recycleDataObj(item)
@@ -558,14 +556,14 @@ func (capi *CapiNozzle) batchSendWithRetry(batch *capiBatch) error {
 		for _, req := range req_list {
 			// requests in req_list have strictly increasing seqnos
 			// each seqno is the new high seqno
-			additionalInfo := make(map[string]interface{})
-			additionalInfo[EVENT_ADDI_SEQNO] = req.Seqno
-			additionalInfo[EVENT_ADDI_OPT_REPD] = capi.optimisticRep(req.Req)
-			additionalInfo[EVENT_ADDI_SETMETA_COMMIT_TIME] = time.Since(req.Start_time)
-			additionalInfo[EVENT_ADDI_REQ_OPCODE] = req.Req.Opcode
-			additionalInfo[EVENT_ADDI_REQ_EXPIRY_SET] = (binary.BigEndian.Uint32(req.Req.Extras[4:8]) != 0)
-			additionalInfo[EVENT_ADDI_REQ_VBUCKET] = req.Req.VBucket
-			additionalInfo[EVENT_ADDI_REQ_SIZE] = req.Req.Size()
+			additionalInfo := DataSentEventAdditional{Seqno: req.Seqno,
+				IsOptRepd:    capi.optimisticRep(req.Req),
+				Commit_time: time.Since(req.Start_time),
+				Opcode:      req.Req.Opcode,
+				IsExpirySet: (binary.BigEndian.Uint32(req.Req.Extras[4:8]) != 0),
+				VBucket:     req.Req.VBucket,
+				Req_size:    req.Req.Size(),
+			}
 			capi.RaiseEvent(common.NewEvent(common.DataSent, nil, capi, nil, additionalInfo))
 
 			//recycle the request object
@@ -646,10 +644,7 @@ func (capi *CapiNozzle) selfMonitor(finch chan bool, waitGrp *sync.WaitGroup) {
 		}*/
 
 		case <-statsTicker:
-			additionalInfo := make(map[string]interface{})
-			additionalInfo[STATS_QUEUE_SIZE] = capi.items_in_dataChan
-			additionalInfo[STATS_QUEUE_SIZE_BYTES] = capi.bytes_in_dataChan
-			capi.RaiseEvent(common.NewEvent(common.StatsUpdate, nil, capi, nil, additionalInfo))
+			capi.RaiseEvent(common.NewEvent(common.StatsUpdate, nil, capi, nil, []int{capi.items_in_dataChan, capi.bytes_in_dataChan}))
 		}
 	}
 done:
@@ -1100,8 +1095,7 @@ func (capi *CapiNozzle) StatusSummary() string {
 func (capi *CapiNozzle) handleGeneralError(err error) {
 	if capi.handle_error {
 		capi.Logger().Errorf("Raise error condition %v\n", err)
-		otherInfo := utils.WrapError(err)
-		capi.RaiseEvent(common.NewEvent(common.ErrorEncountered, nil, capi, nil, otherInfo))
+		capi.RaiseEvent(common.NewEvent(common.ErrorEncountered, nil, capi, nil, err))
 	} else {
 		capi.Logger().Debugf("%v in shutdown process, err=%v is ignored\n", capi.Id(), err)
 	}

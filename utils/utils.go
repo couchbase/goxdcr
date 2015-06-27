@@ -154,12 +154,6 @@ func RemoteBucket(remoteConnectStr, bucketName, remoteUsername, remotePassword s
 	return bucket, err
 }
 
-func WrapError(err error) map[string]interface{} {
-	infos := make(map[string]interface{})
-	infos["error"] = err
-	return infos
-}
-
 func UnwrapError(infos map[string]interface{}) (err error) {
 	if infos != nil && len(infos) > 0 {
 		err = infos["error"].(error)

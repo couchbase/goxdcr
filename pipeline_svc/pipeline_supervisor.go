@@ -151,9 +151,8 @@ func (pipelineSupervisor *PipelineSupervisor) monitorPipelineHealth() error {
 func (pipelineSupervisor *PipelineSupervisor) OnEvent(event *common.Event) {
 	if event.EventType == common.ErrorEncountered {
 		if pipelineSupervisor.pipeline.State() != common.Pipeline_Error {
-			errorInfo := event.OtherInfos["error"]
-			if errorInfo != nil {
-				pipelineSupervisor.errors_seen[event.Component.Id()] = errorInfo.(error)
+			if event.OtherInfos != nil {
+				pipelineSupervisor.errors_seen[event.Component.Id()] = event.OtherInfos.(error)
 			}
 			pipelineSupervisor.declarePipelineBroken()
 		} else {

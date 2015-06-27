@@ -39,10 +39,10 @@ const (
 	EVENT_ADDI_SETMETA_COMMIT_TIME = "setmeta_commit_time"
 	EVENT_ADDI_GETMETA_COMMIT_TIME = "getmeta_commit_time"
 	// the following are for MCRequest related info
-	EVENT_ADDI_REQ_OPCODE  = "req_opcode"
-	EVENT_ADDI_REQ_VBUCKET = "req_vbucket"
-	EVENT_ADDI_REQ_EXPIRY_SET  = "req_expiry_set"
-	EVENT_ADDI_REQ_SIZE    = "req_size"
+	EVENT_ADDI_REQ_OPCODE     = "req_opcode"
+	EVENT_ADDI_REQ_VBUCKET    = "req_vbucket"
+	EVENT_ADDI_REQ_EXPIRY_SET = "req_expiry_set"
+	EVENT_ADDI_REQ_SIZE       = "req_size"
 )
 
 /************************************
@@ -84,6 +84,29 @@ type documentMetadata struct {
 	flags    uint32 // Item flags
 	expiry   uint32 // Item expiration time
 	deletion bool
+}
+
+type GetMetaReceivedEventAdditional struct {
+	Key         string
+	Seqno       uint64
+	Commit_time time.Duration
+}
+
+type DataFailedCRSourceEventAdditional struct {
+	Seqno       uint64
+	Opcode      mc.CommandCode
+	IsExpirySet bool
+	VBucket     uint16
+}
+
+type DataSentEventAdditional struct {
+	Seqno       uint64
+	IsOptRepd    bool
+	Commit_time time.Duration
+	Opcode      mc.CommandCode
+	IsExpirySet bool
+	VBucket     uint16
+	Req_size    int
 }
 
 // does not return error since the assumption is that settings have been validated prior

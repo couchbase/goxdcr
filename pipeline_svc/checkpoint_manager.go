@@ -301,8 +301,7 @@ func (ckmgr *CheckpointManager) SetVBTimestamps(topic string) error {
 	//refresh the remote bucket
 	err := ckmgr.remote_bucket.Refresh(ckmgr.remote_cluster_svc)
 	if err != nil {
-		otherInfo := utils.WrapError(err)
-		ckmgr.RaiseEvent(common.NewEvent(common.ErrorEncountered, nil, ckmgr, nil, otherInfo))
+		ckmgr.RaiseEvent(common.NewEvent(common.ErrorEncountered, nil, ckmgr, nil, err))
 		return err
 	}
 
@@ -313,8 +312,7 @@ func (ckmgr *CheckpointManager) SetVBTimestamps(topic string) error {
 	ckmgr.logger.Infof("Getting checkpoint for %v\n", topic)
 	ckptDocs, err := ckmgr.checkpoints_svc.CheckpointsDocs(topic)
 	if err != nil {
-		otherInfo := utils.WrapError(err)
-		ckmgr.RaiseEvent(common.NewEvent(common.ErrorEncountered, nil, ckmgr, nil, otherInfo))
+		ckmgr.RaiseEvent(common.NewEvent(common.ErrorEncountered, nil, ckmgr, nil, err))
 		return err
 	}
 	ckmgr.logger.Infof("Found %v checkpoit document for replication %v\n", len(ckptDocs), topic)
@@ -361,8 +359,7 @@ func (ckmgr *CheckpointManager) SetVBTimestamps(topic string) error {
 	getter_wait_grp.Wait()
 	if len(err_ch) > 0 {
 		err = errors.New(fmt.Sprintf("Failed to get starting seqno for pipeline %v", ckmgr.pipeline.InstanceId()))
-		otherInfo := utils.WrapError(err)
-		ckmgr.RaiseEvent(common.NewEvent(common.ErrorEncountered, nil, ckmgr, nil, otherInfo))
+		ckmgr.RaiseEvent(common.NewEvent(common.ErrorEncountered, nil, ckmgr, nil, err))
 		return err
 	}
 
@@ -703,13 +700,10 @@ func (ckmgr *CheckpointManager) performCkpt(fin_ch chan bool, wait_grp *sync.Wai
 		//error
 		ckmgr.logger.Errorf("Checkpointing failed for replication %v, err=%v\n", ckmgr.pipeline.Topic(), err_map)
 		err := errors.New("Checkpointing failed")
-		otherInfo := utils.WrapError(err)
-		ckmgr.RaiseEvent(common.NewEvent(common.ErrorEncountered, nil, ckmgr, nil, otherInfo))
+		ckmgr.RaiseEvent(common.NewEvent(common.ErrorEncountered, nil, ckmgr, nil, err))
 	} else {
 		ckmgr.logger.Infof("Done checkpointing for replication %v\n", ckmgr.pipeline.Topic())
-		otherInfo := make(map[string]interface{})
-		otherInfo[TimeCommiting] = time.Duration(total_committing_time) * time.Second
-		ckmgr.RaiseEvent(common.NewEvent(common.CheckpointDone, nil, ckmgr, nil, otherInfo))
+		ckmgr.RaiseEvent(common.NewEvent(common.CheckpointDone, nil, ckmgr, nil, time.Duration(total_committing_time) * time.Second))
 	}
 
 }
@@ -763,9 +757,7 @@ func (ckmgr *CheckpointManager) do_checkpoint(vbno uint16) (err error) {
 
 func (ckmgr *CheckpointManager) raiseSuccessCkptForVbEvent(ckpt_record metadata.CheckpointRecord, vbno uint16) {
 	//notify statisticsManager
-	otherInfo := make(map[string]interface{})
-	otherInfo[Vbno] = vbno
-	ckmgr.RaiseEvent(common.NewEvent(common.CheckpointDoneForVB, ckpt_record, ckmgr, nil, otherInfo))
+	ckmgr.RaiseEvent(common.NewEvent(common.CheckpointDoneForVB, ckpt_record, ckmgr, nil, vbno))
 }
 
 func (ckmgr *CheckpointManager) persistCkptRecord(vbno uint16, ckpt_record *metadata.CheckpointRecord) error {
@@ -919,8 +911,7 @@ func (ckmgr *CheckpointManager) massCheckVBOpaques(target_vb_vbuuid_map map[uint
 				//error
 				ckmgr.logger.Errorf("Target bucket for replication %v's topology has changed. mismatch=%v, missing=%v, mataching\n", ckmgr.pipeline.Topic(), mismatching, missing)
 				err := errors.New("Target bucket's topology has changed")
-				otherInfo := utils.WrapError(err)
-				ckmgr.RaiseEvent(common.NewEvent(common.ErrorEncountered, nil, ckmgr, nil, otherInfo))
+				ckmgr.RaiseEvent(common.NewEvent(common.ErrorEncountered, nil, ckmgr, nil, err))
 
 			} else {
 				ckmgr.logger.Infof("No target bucket topology change is detected for replication %v", ckmgr.pipeline.Topic())

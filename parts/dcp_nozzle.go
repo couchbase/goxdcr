@@ -84,7 +84,7 @@ type DcpNozzle struct {
 	client         *mcc.Client
 	uprFeed        *mcc.UprFeed
 	// lock on uprFeed to avoid race condition
-	lock_uprFeed sync.Mutex
+	lock_uprFeed sync.RWMutex
 
 	finch chan bool
 
@@ -141,7 +141,7 @@ func NewDcpNozzle(id string,
 		AbstractPart:             part,             /*AbstractPart*/
 		bOpen:                    true,             /*bOpen	bool*/
 		childrenWaitGrp:          sync.WaitGroup{}, /*childrenWaitGrp sync.WaitGroup*/
-		lock_uprFeed:             sync.Mutex{},
+		lock_uprFeed:             sync.RWMutex{},
 		cur_ts:                   make(map[uint16]*vbtsWithLock),
 		vb_stream_status:         make(map[uint16]*streamStatusWithLock),
 		vb_stream_status_lock:    &sync.RWMutex{},
@@ -435,10 +435,7 @@ func (dcp *DcpNozzle) processData() (err error) {
 						dcp.incCounterSent()
 						// raise event for statistics collection
 						dispatch_time := time.Since(start_time)
-						additionalInfo1 := make(map[string]interface{})
-						additionalInfo1[EVENT_DCP_DISPATCH_TIME] = dispatch_time.Seconds() * 1000000
-
-						dcp.RaiseEvent(common.NewEvent(common.DataProcessed, m, dcp, nil /*derivedItems*/, additionalInfo1 /*otherInfos*/))
+						dcp.RaiseEvent(common.NewEvent(common.DataProcessed, m, dcp, nil /*derivedItems*/, dispatch_time.Seconds()*1000000 /*otherInfos*/))
 					default:
 						dcp.Logger().Debugf("Uprevent OpCode=%v, is skipped\n", m.Opcode)
 					}
@@ -469,8 +466,7 @@ func (dcp *DcpNozzle) handleGeneralError(err error) {
 
 	err1 := dcp.SetState(common.Part_Error)
 	if err1 == nil {
-		otherInfo := utils.WrapError(err)
-		dcp.RaiseEvent(common.NewEvent(common.ErrorEncountered, nil, dcp, nil, otherInfo))
+		dcp.RaiseEvent(common.NewEvent(common.ErrorEncountered, nil, dcp, nil, err))
 		dcp.Logger().Errorf("Raise error condition %v\n", err)
 	} else {
 		dcp.Logger().Debugf("%v in shutdown process. err=%v is ignored\n", dcp.Id(), err)
@@ -851,10 +847,22 @@ func (dcp *DcpNozzle) collectDcpDataChanLen(settings map[string]interface{}) {
 			ticker.Stop()
 			ticker = time.NewTicker(dcp.stats_interval)
 		case <-ticker.C:
-			additionalInfo := make(map[string]interface{})
-			additionalInfo[EVENT_DCP_DATACH_LEN] = len(dcp.uprFeed.C)
-			dcp.RaiseEvent(common.NewEvent(common.StatsUpdate, nil, dcp, nil, additionalInfo))
+			dcp.getDcpDataChanLen()
 		}
 	}
+
+}
+
+func (dcp *DcpNozzle) getDcpDataChanLen() {
+	dcp_dispatch_len := 0
+	dcp.lock_uprFeed.RLock()
+	defer dcp.lock_uprFeed.RUnlock()
+	if dcp.uprFeed == nil {
+		//upr feed has been closed
+		return
+	} else {
+		dcp_dispatch_len = len(dcp.uprFeed.C)
+	}
+	dcp.RaiseEvent(common.NewEvent(common.StatsUpdate, nil, dcp, nil, dcp_dispatch_len))
 
 }

@@ -837,27 +837,28 @@ func (outNozzle_collector *outNozzleCollector) ProcessEvent(event *common.Event)
 	metric_map := outNozzle_collector.component_map[event.Component.Id()]
 	if event.EventType == common.StatsUpdate {
 		outNozzle_collector.stats_mgr.logger.Debugf("Received a StatsUpdate event from %v", reflect.TypeOf(event.Component))
-		queue_size := event.OtherInfos[parts.STATS_QUEUE_SIZE].(int)
-		queue_size_bytes := event.OtherInfos[parts.STATS_QUEUE_SIZE_BYTES].(int)
+		queue_size := event.OtherInfos.([]int)[0]
+		queue_size_bytes := event.OtherInfos.([]int)[1]
 		setCounter(metric_map[DOCS_REP_QUEUE_METRIC].(metrics.Counter), queue_size)
 		setCounter(metric_map[SIZE_REP_QUEUE_METRIC].(metrics.Counter), queue_size_bytes)
 	} else if event.EventType == common.DataSent {
 		outNozzle_collector.stats_mgr.logger.Debugf("Received a DataSent event from %v", reflect.TypeOf(event.Component))
-		req_size := event.OtherInfos[parts.EVENT_ADDI_REQ_SIZE].(int)
-		opti_replicated := event.OtherInfos[parts.EVENT_ADDI_OPT_REPD].(bool)
-		commit_time := event.OtherInfos[parts.EVENT_ADDI_SETMETA_COMMIT_TIME].(time.Duration)
+		event_otherInfo := event.OtherInfos.(parts.DataSentEventAdditional)
+		req_size := event_otherInfo.Req_size
+		opti_replicated := event_otherInfo.IsOptRepd
+		commit_time := event_otherInfo.Commit_time
 		metric_map[DOCS_WRITTEN_METRIC].(metrics.Counter).Inc(1)
 		metric_map[DATA_REPLICATED_METRIC].(metrics.Counter).Inc(int64(req_size))
 		if opti_replicated {
 			metric_map[DOCS_OPT_REPD_METRIC].(metrics.Counter).Inc(1)
 		}
 
-		expiry_set := event.OtherInfos[parts.EVENT_ADDI_REQ_EXPIRY_SET].(bool)
+		expiry_set := event_otherInfo.IsExpirySet
 		if expiry_set {
 			metric_map[EXPIRY_DOCS_WRITTEN_METRIC].(metrics.Counter).Inc(1)
 		}
 
-		req_opcode := event.OtherInfos[parts.EVENT_ADDI_REQ_OPCODE].(mc.CommandCode)
+		req_opcode := event_otherInfo.Opcode
 		if req_opcode == base.DELETE_WITH_META {
 			metric_map[DELETION_DOCS_WRITTEN_METRIC].(metrics.Counter).Inc(1)
 		} else if req_opcode == base.SET_WITH_META {
@@ -870,13 +871,13 @@ func (outNozzle_collector *outNozzleCollector) ProcessEvent(event *common.Event)
 	} else if event.EventType == common.DataFailedCRSource {
 		outNozzle_collector.stats_mgr.logger.Debugf("Received a DataFailedCRSource event from %v", reflect.TypeOf(event.Component))
 		metric_map[DOCS_FAILED_CR_SOURCE_METRIC].(metrics.Counter).Inc(1)
-
-		expiry_set := event.OtherInfos[parts.EVENT_ADDI_REQ_EXPIRY_SET].(bool)
+		event_otherInfos := event.OtherInfos.(parts.DataFailedCRSourceEventAdditional)
+		expiry_set := event_otherInfos.IsExpirySet
 		if expiry_set {
 			metric_map[EXPIRY_FAILED_CR_SOURCE_METRIC].(metrics.Counter).Inc(1)
 		}
 
-		req_opcode := event.OtherInfos[parts.EVENT_ADDI_REQ_OPCODE].(mc.CommandCode)
+		req_opcode := event_otherInfos.Opcode
 		if req_opcode == mc.UPR_DELETION {
 			metric_map[DELETION_FAILED_CR_SOURCE_METRIC].(metrics.Counter).Inc(1)
 		} else if req_opcode == mc.UPR_MUTATION {
@@ -886,8 +887,8 @@ func (outNozzle_collector *outNozzleCollector) ProcessEvent(event *common.Event)
 		}
 	} else if event.EventType == common.GetMetaReceived {
 		outNozzle_collector.stats_mgr.logger.Debugf("Received a GetMetaReceived event from %v", reflect.TypeOf(event.Component))
-
-		commit_time := event.OtherInfos[parts.EVENT_ADDI_GETMETA_COMMIT_TIME].(time.Duration)
+		event_otherInfos := event.OtherInfos.(parts.GetMetaReceivedEventAdditional)
+		commit_time := event_otherInfos.Commit_time
 		metric_map[META_LATENCY_METRIC].(metrics.Histogram).Sample().Update(commit_time.Nanoseconds() / 1000000)
 	}
 
@@ -973,10 +974,10 @@ func (dcp_collector *dcpCollector) ProcessEvent(event *common.Event) error {
 			panic(fmt.Sprintf("Invalid opcode, %v, in DataReceived event from %v.", uprEvent.Opcode, event.Component.Id()))
 		}
 	} else if event.EventType == common.DataProcessed {
-		dcp_dispatch_time := event.OtherInfos[parts.EVENT_DCP_DISPATCH_TIME].(float64)
+		dcp_dispatch_time := event.OtherInfos.(float64)
 		metric_map[DCP_DISPATCH_TIME_METRIC].(metrics.Histogram).Sample().Update(int64(dcp_dispatch_time))
 	} else if event.EventType == common.StatsUpdate {
-		dcp_datach_len := event.OtherInfos[parts.EVENT_DCP_DATACH_LEN].(int)
+		dcp_datach_len := event.OtherInfos.(int)
 		setCounter(metric_map[DCP_DATACH_LEN].(metrics.Counter), dcp_datach_len)
 	}
 
@@ -1091,12 +1092,12 @@ func (ckpt_collector *checkpointMgrCollector) OnEvent(event *common.Event) {
 		registry.Get(NUM_FAILEDCKPTS_METRIC).(metrics.Counter).Inc(1)
 
 	} else if event.EventType == common.CheckpointDoneForVB {
-		vbno := event.OtherInfos[Vbno].(uint16)
+		vbno := event.OtherInfos.(uint16)
 		ckpt_record := event.Data.(metadata.CheckpointRecord)
 		ckpt_collector.stats_mgr.checkpointed_seqnos[vbno].SetSeqno(ckpt_record.Seqno)
 
 	} else if event.EventType == common.CheckpointDone {
-		time_commit := event.OtherInfos[TimeCommiting].(time.Duration).Seconds() * 1000
+		time_commit := event.OtherInfos.(time.Duration).Seconds() * 1000
 		registry.Get(NUM_CHECKPOINTS_METRIC).(metrics.Counter).Inc(1)
 		registry.Get(TIME_COMMITING_METRIC).(metrics.Histogram).Sample().Update(int64(time_commit))
 	}

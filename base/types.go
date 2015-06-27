@@ -11,7 +11,6 @@ package base
 
 import (
 	"bytes"
-	"encoding/binary"
 	"fmt"
 	"github.com/couchbase/gomemcached"
 	"reflect"
@@ -90,11 +89,10 @@ type WrappedMCRequest struct {
 }
 
 func (req *WrappedMCRequest) ConstructUniqueKey() {
-	key_len := len(req.Req.Key)
-	unique_key := make([]byte, key_len+8)
-	copy(unique_key[0:key_len], req.Req.Key)
-	binary.BigEndian.PutUint64(unique_key[key_len:], binary.BigEndian.Uint64(req.Req.Extras[8:16]))
-	req.UniqueKey = string(unique_key)
+	var buffer bytes.Buffer
+	buffer.Write(req.Req.Key)
+	buffer.Write(req.Req.Extras[8:16])
+	req.UniqueKey = buffer.String()
 }
 
 type MetadataChangeListener interface {

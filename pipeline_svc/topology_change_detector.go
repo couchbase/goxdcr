@@ -9,7 +9,6 @@ import (
 	"github.com/couchbase/goxdcr/parts"
 	"github.com/couchbase/goxdcr/pipeline_utils"
 	"github.com/couchbase/goxdcr/service_def"
-	"github.com/couchbase/goxdcr/utils"
 	"sync"
 	"time"
 )
@@ -105,15 +104,13 @@ func (top_detect_svc *TopologyChangeDetectorSvc) watch(fin_ch chan bool, waitGrp
 func (top_detect_svc *TopologyChangeDetectorSvc) validate(checkingTargetVersion bool) {
 	err := top_detect_svc.validateSourceTopology()
 	if err != nil && err == source_topology_changedErr {
-		otherInfo := utils.WrapError(err)
-		top_detect_svc.RaiseEvent(common.NewEvent(common.ErrorEncountered, nil, top_detect_svc, nil, otherInfo))
+		top_detect_svc.RaiseEvent(common.NewEvent(common.ErrorEncountered, nil, top_detect_svc, nil, err))
 	}
 
 	if checkingTargetVersion {
 		err := top_detect_svc.validateTargetVersion()
 		if err != nil && err == target_cluster_versionChangeErr {
-			otherInfo := utils.WrapError(err)
-			top_detect_svc.RaiseEvent(common.NewEvent(common.ErrorEncountered, nil, top_detect_svc, nil, otherInfo))
+			top_detect_svc.RaiseEvent(common.NewEvent(common.ErrorEncountered, nil, top_detect_svc, nil, err))
 		}
 	}
 }

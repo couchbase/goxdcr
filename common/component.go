@@ -52,10 +52,10 @@ type Event struct {
 	//the data items derived from the original item. This only used by DataProcessed event
 	DerivedData []interface{}
 	//any other information the event might be able to supply to its listener
-	OtherInfos map[string]interface{}
+	OtherInfos interface{}
 }
 
-func NewEvent(eventType ComponentEventType, data interface{}, component Component, derivedData []interface{}, otherInfos map[string]interface{}) *Event {
+func NewEvent(eventType ComponentEventType, data interface{}, component Component, derivedData []interface{}, otherInfos interface{}) *Event {
 	return &Event{eventType, data, component, derivedData, otherInfos}
 }
 

@@ -162,8 +162,8 @@ func (tsTracker *ThroughSeqnoTrackerSvc) Attach(pipeline common.Pipeline) error 
 
 func (tsTracker *ThroughSeqnoTrackerSvc) ProcessEvent(event *common.Event) error {
 	if event.EventType == common.DataSent {
-		vbno := event.OtherInfos[parts.EVENT_ADDI_REQ_VBUCKET].(uint16)
-		seqno := event.OtherInfos[parts.EVENT_ADDI_SEQNO].(uint64)
+		vbno := event.OtherInfos.(parts.DataSentEventAdditional).VBucket
+		seqno := event.OtherInfos.(parts.DataSentEventAdditional).Seqno
 		tsTracker.addSentSeqno(vbno, seqno)
 	} else if event.EventType == common.DataFiltered {
 		upr_event := event.Data.(*mcc.UprEvent)
@@ -171,11 +171,9 @@ func (tsTracker *ThroughSeqnoTrackerSvc) ProcessEvent(event *common.Event) error
 		vbno := upr_event.VBucket
 		tsTracker.addFilteredSeqno(vbno, seqno)
 	} else if event.EventType == common.DataFailedCRSource {
-		seqno, ok := event.OtherInfos[parts.EVENT_ADDI_SEQNO].(uint64)
-		if ok {
-			vbno := event.OtherInfos[parts.EVENT_ADDI_REQ_VBUCKET].(uint16)
-			tsTracker.addFailedCRSeqno(vbno, seqno)
-		}
+		seqno := event.OtherInfos.(parts.DataFailedCRSourceEventAdditional).Seqno
+		vbno := event.OtherInfos.(parts.DataFailedCRSourceEventAdditional).VBucket
+		tsTracker.addFailedCRSeqno(vbno, seqno)
 	} else if event.EventType == common.DataReceived {
 		upr_event := event.Data.(*mcc.UprEvent)
 		seqno := upr_event.Seqno
