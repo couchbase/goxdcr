@@ -237,7 +237,10 @@ const (
 
 var UprFeedDataChanLength = 1000
 
-var EventChanLength = 10000
+var EventChanLength = 1000
+
+// number of async listeners [for an event type]
+var MaxNumberOfAsyncListeners = 4
 
 // names of async component event listeners
 const (

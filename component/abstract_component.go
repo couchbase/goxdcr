@@ -76,7 +76,6 @@ func (c *AbstractComponent) UnRegisterComponentEventListener(eventType common.Co
 }
 
 func (c *AbstractComponent) RaiseEvent(event *common.Event) {
-	c.logger.Debugf("Raise event %d for component %s\n", event.EventType, event.Component.Id())
 	listenerList := c.event_listeners[event.EventType]
 
 	for _, listener := range listenerList {

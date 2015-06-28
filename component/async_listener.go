@@ -11,6 +11,7 @@
 package Component
 
 import (
+	"fmt"
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/common"
 	"github.com/couchbase/goxdcr/log"
@@ -80,6 +81,7 @@ func (l *AsyncComponentEventListenerImpl) start() {
 }
 
 func (l *AsyncComponentEventListenerImpl) Stop() error {
+	l.logger.Infof("%v stopping processing events\n", l.id)
 	err := simple_utils.ExecWithTimeout(l.stop, 500*time.Millisecond, l.logger)
 	if err == nil {
 		l.logger.Infof("%v stopped processing events\n", l.id)
@@ -105,8 +107,13 @@ func (l *AsyncComponentEventListenerImpl) Id() string {
 	return l.id
 }
 
+func (l *AsyncComponentEventListenerImpl) StatusSummary() string {
+	return fmt.Sprintf("%v chan size =%v ", l.id, len(l.event_chan))
+}
+
 func (l *AsyncComponentEventListenerImpl) RegisterComponentEventHandler(handler common.AsyncComponentEventHandler) {
 	if handler != nil {
 		l.handlers[handler.Id()] = handler
+		l.logger.Debugf("Registering handler %v on listener %v\n", handler.Id(), l.id)
 	}
 }

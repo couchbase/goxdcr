@@ -139,38 +139,8 @@ func (xdcrf *XDCRFactory) NewPipeline(topic string, progress_recorder common.Pip
 	// construct pipeline
 	pipeline := pp.NewPipelineWithSettingConstructor(topic, sourceNozzles, outNozzles, spec, xdcrf.ConstructSettingsForPart, xdcrf.ConstructSSLPortMap, xdcrf.ConstructUpdateSettingsForPart, xdcrf.SetStartSeqno, xdcrf.remote_cluster_svc.RemoteClusterByUuid, logger_ctx)
 
-	// construct and register async componet event listeners
-	data_received_event_listener := component.NewDefaultAsyncComponentEventListenerImpl(
-		pipeline_utils.GetElementIdFromName(pipeline, base.DataReceivedEventListener),
-		pipeline.Topic(), logger_ctx)
-	data_processed_event_listener := component.NewDefaultAsyncComponentEventListenerImpl(
-		pipeline_utils.GetElementIdFromName(pipeline, base.DataProcessedEventListener),
-		pipeline.Topic(), logger_ctx)
-	data_filtered_event_listener := component.NewDefaultAsyncComponentEventListenerImpl(
-		pipeline_utils.GetElementIdFromName(pipeline, base.DataFilteredEventListener),
-		pipeline.Topic(), logger_ctx)
-	data_failed_cr_event_listener := component.NewDefaultAsyncComponentEventListenerImpl(
-		pipeline_utils.GetElementIdFromName(pipeline, base.DataFailedCREventListener),
-		pipeline.Topic(), logger_ctx)
-	data_sent_event_listener := component.NewDefaultAsyncComponentEventListenerImpl(
-		pipeline_utils.GetElementIdFromName(pipeline, base.DataSentEventListener),
-		pipeline.Topic(), logger_ctx)
-	get_meta_received_event_listener := component.NewDefaultAsyncComponentEventListenerImpl(
-		pipeline_utils.GetElementIdFromName(pipeline, base.GetMetaReceivedEventListener),
-		pipeline.Topic(), logger_ctx)
-	for _, dcp_part := range pipeline.Sources() {
-		dcp_part.RegisterComponentEventListener(common.DataReceived, data_received_event_listener)
-		dcp_part.RegisterComponentEventListener(common.DataProcessed, data_processed_event_listener)
-
-		conn := dcp_part.Connector()
-		conn.RegisterComponentEventListener(common.DataFiltered, data_filtered_event_listener)
-	}
-
-	for _, out_nozzle := range pipeline.Targets() {
-		out_nozzle.RegisterComponentEventListener(common.DataSent, data_sent_event_listener)
-		out_nozzle.RegisterComponentEventListener(common.DataFailedCRSource, data_failed_cr_event_listener)
-		out_nozzle.RegisterComponentEventListener(common.GetMetaReceived, get_meta_received_event_listener)
-	}
+	xdcrf.registerAsyncListenersOnSources(pipeline, logger_ctx)
+	xdcrf.registerAsyncListenersOnTargets(pipeline, logger_ctx)
 
 	if pipelineContext, err := pctx.NewWithSettingConstructor(pipeline, xdcrf.ConstructSettingsForService, logger_ctx); err != nil {
 		return nil, err
@@ -188,6 +158,115 @@ func (xdcrf *XDCRFactory) NewPipeline(topic string, progress_recorder common.Pip
 
 	xdcrf.logger.Infof("XDCR pipeline constructed")
 	return pipeline, nil
+}
+
+func min(num1 int, num2 int) int {
+	return int(math.Min(float64(num1), float64(num2)))
+}
+
+// evenly distribute load across workers
+// assumes that num_of_worker <= num_of_load
+// returns load_distribution [][]int, where
+//     load_distribution[i][0] is the start index, inclusive, of load for ith worker
+//     load_distribution[i][1] is the end index, exclusive, of load for ith worker
+// note that load is zero indexed, i.e., indexed as 0, 1, .. N-1 for N loads
+func balanceLoad(num_of_worker int, num_of_load int) [][]int {
+	load_distribution := make([][]int, 0)
+
+	max_load_per_worker := int(math.Ceil(float64(num_of_load) / float64(num_of_worker)))
+	num_of_worker_with_max_load := num_of_load - (max_load_per_worker-1) * num_of_worker
+
+	index := 0
+	var num_of_load_per_worker int
+	for i := 0; i < num_of_worker; i++ {
+		if i < num_of_worker_with_max_load {
+			num_of_load_per_worker = max_load_per_worker
+		} else {
+			num_of_load_per_worker = max_load_per_worker - 1
+		}
+
+		load_for_worker := make([]int, 2)
+		load_for_worker[0] = index
+		index += num_of_load_per_worker
+		load_for_worker[1] = index
+
+		load_distribution = append(load_distribution, load_for_worker)
+	}
+
+	if index != num_of_load {
+		panic(fmt.Sprintf("number of load processed %v does not match total number of load %v", index, num_of_load))
+	}
+
+	return load_distribution
+}
+
+// get nozzle list from nozzle map
+func getNozzleList(nozzle_map map[string]common.Nozzle) []common.Nozzle {
+	nozzle_list := make([]common.Nozzle, 0)
+	for _, nozzle := range nozzle_map {
+		nozzle_list = append(nozzle_list, nozzle)
+	}
+	return nozzle_list
+}
+
+// construct and register async componet event listeners on source nozzles
+func (xdcrf *XDCRFactory) registerAsyncListenersOnSources(pipeline common.Pipeline, logger_ctx *log.LoggerContext) {
+	sources := getNozzleList(pipeline.Sources())
+
+	num_of_sources := len(sources)
+	num_of_listeners := min(num_of_sources, base.MaxNumberOfAsyncListeners)
+	load_distribution := balanceLoad(num_of_listeners, num_of_sources)
+	xdcrf.logger.Infof("topic=%v, num_of_sources=%v, num_of_listeners=%v, load_distribution=%v\n", pipeline.Topic(), num_of_sources, num_of_listeners, load_distribution)
+
+	for i := 0; i < num_of_listeners; i++ {
+		data_received_event_listener := component.NewDefaultAsyncComponentEventListenerImpl(
+			pipeline_utils.GetElementIdFromNameAndIndex(pipeline, base.DataReceivedEventListener, i),
+			pipeline.Topic(), logger_ctx)
+		data_processed_event_listener := component.NewDefaultAsyncComponentEventListenerImpl(
+			pipeline_utils.GetElementIdFromNameAndIndex(pipeline, base.DataProcessedEventListener, i),
+			pipeline.Topic(), logger_ctx)
+		data_filtered_event_listener := component.NewDefaultAsyncComponentEventListenerImpl(
+			pipeline_utils.GetElementIdFromNameAndIndex(pipeline, base.DataFilteredEventListener, i),
+			pipeline.Topic(), logger_ctx)
+
+		for index := load_distribution[i][0]; index < load_distribution[i][1]; index++ {
+			dcp_part := sources[index]
+
+			dcp_part.RegisterComponentEventListener(common.DataReceived, data_received_event_listener)
+			dcp_part.RegisterComponentEventListener(common.DataProcessed, data_processed_event_listener)
+
+			conn := dcp_part.Connector()
+			conn.RegisterComponentEventListener(common.DataFiltered, data_filtered_event_listener)
+		}
+	}
+}
+
+// construct and register async componet event listeners on target nozzles
+func (xdcrf *XDCRFactory) registerAsyncListenersOnTargets(pipeline common.Pipeline, logger_ctx *log.LoggerContext) {
+	targets := getNozzleList(pipeline.Targets())
+	num_of_targets := len(targets)
+	num_of_listeners := min(num_of_targets, base.MaxNumberOfAsyncListeners)
+	load_distribution := balanceLoad(num_of_listeners, num_of_targets)
+	xdcrf.logger.Infof("topic=%v, num_of_targets=%v, num_of_listeners=%v, load_distribution=%v\n", pipeline.Topic(), num_of_targets, num_of_listeners, load_distribution)
+
+	for i := 0; i < num_of_listeners; i++ {
+		data_failed_cr_event_listener := component.NewDefaultAsyncComponentEventListenerImpl(
+			pipeline_utils.GetElementIdFromNameAndIndex(pipeline, base.DataFailedCREventListener, i),
+			pipeline.Topic(), logger_ctx)
+		data_sent_event_listener := component.NewDefaultAsyncComponentEventListenerImpl(
+			pipeline_utils.GetElementIdFromNameAndIndex(pipeline, base.DataSentEventListener, i),
+			pipeline.Topic(), logger_ctx)
+		get_meta_received_event_listener := component.NewDefaultAsyncComponentEventListenerImpl(
+			pipeline_utils.GetElementIdFromNameAndIndex(pipeline, base.GetMetaReceivedEventListener, i),
+			pipeline.Topic(), logger_ctx)
+
+		for index := load_distribution[i][0]; index < load_distribution[i][1]; index++ {
+			out_nozzle := targets[index]
+			out_nozzle.RegisterComponentEventListener(common.DataSent, data_sent_event_listener)
+			out_nozzle.RegisterComponentEventListener(common.DataFailedCRSource, data_failed_cr_event_listener)
+			out_nozzle.RegisterComponentEventListener(common.GetMetaReceived, get_meta_received_event_listener)
+		}
+	}
 }
 
 // construct source nozzles for the requested/current kv node
@@ -216,30 +295,21 @@ func (xdcrf *XDCRFactory) constructSourceNozzles(spec *metadata.ReplicationSpeci
 	for kvaddr, vbnos := range kv_vb_map {
 
 		numOfVbs := len(vbnos)
-
 		if numOfVbs == 0 {
 			continue
 		}
 
 		// the number of dcpNozzle nodes to construct is the smaller of vbucket list size and source connection size
-		numOfDcpNozzles := int(math.Min(float64(numOfVbs), float64(maxNozzlesPerNode)))
+		numOfDcpNozzles := min(numOfVbs, maxNozzlesPerNode)
+		load_distribution := balanceLoad(numOfDcpNozzles, numOfVbs)
+		xdcrf.logger.Infof("topic=%v, numOfDcpNozzles=%v, numOfVbs=%v, load_distribution=%v\n", spec.Id, numOfDcpNozzles, numOfVbs, load_distribution)
 
-		numOfVbPerDcpNozzle := int(math.Ceil(float64(numOfVbs) / float64(numOfDcpNozzles)))
-
-		var index int
 		for i := 0; i < numOfDcpNozzles; i++ {
 			// construct vbList for the dcpNozzle
 			// before statistics info is available, the default load balancing stragegy is to evenly distribute vbuckets among dcpNozzles
-
 			vbList := make([]uint16, 0, 15)
-			for j := 0; j < numOfVbPerDcpNozzle; j++ {
-				if index < numOfVbs {
-					vbList = append(vbList, vbnos[index])
-					index++
-				} else {
-					// no more vbs to process
-					break
-				}
+			for index := load_distribution[i][0]; index < load_distribution[i][1]; index++ {
+				vbList = append(vbList, vbnos[index])
 			}
 
 			// construct dcpNozzles
@@ -251,14 +321,6 @@ func (xdcrf *XDCRFactory) constructSourceNozzles(spec *metadata.ReplicationSpeci
 			xdcrf.logger.Debugf("Constructed source nozzle %v with vbList = %v \n", dcpNozzle.Id(), vbList)
 		}
 
-		total := 0
-		for _, sourceNozzle := range sourceNozzles {
-			total = total + len(sourceNozzle.(*parts.DcpNozzle).GetVBList())
-		}
-
-		if total != numOfVbs {
-			panic(fmt.Sprintf("numOfVbs = %v, total =%v", numOfVbs, total))
-		}
 		xdcrf.logger.Infof("Constructed %v source nozzles for %v vbs on %v\n", len(sourceNozzles), numOfVbs, kvaddr)
 	}
 
@@ -340,24 +402,16 @@ func (xdcrf *XDCRFactory) constructOutgoingNozzles(spec *metadata.ReplicationSpe
 
 		numOfVbs := len(relevantVBs)
 		// the number of xmem nozzles to construct is the smaller of vbucket list size and target connection size
-		numOfNozzles := int(math.Min(float64(numOfVbs), float64(maxTargetNozzlePerNode)))
+		numOfOutNozzles := min(numOfVbs, maxTargetNozzlePerNode)
+		load_distribution := balanceLoad(numOfOutNozzles, numOfVbs)
+		xdcrf.logger.Infof("topic=%v, numOfOutNozzles=%v, numOfVbs=%v, load_distribution=%v\n", spec.Id, numOfOutNozzles, numOfVbs, load_distribution)
 
-		numOfVbPerNozzle := int(math.Ceil(float64(numOfVbs) / float64(numOfNozzles)))
-		xdcrf.logger.Debugf("maxTargetNozzlePerNode=%d\n", maxTargetNozzlePerNode)
-		xdcrf.logger.Debugf("Constructing %d nozzles, each is responsible for %d vbuckets\n", numOfNozzles, numOfVbPerNozzle)
-		var index int = 0
-		for i := 0; i < numOfNozzles; i++ {
+		for i := 0; i < numOfOutNozzles; i++ {
 			// construct vb list for the out nozzle, which is needed by capi nozzle
 			// before statistics info is available, the default load balancing stragegy is to evenly distribute vbuckets among out nozzles
 			vbList := make([]uint16, 0)
-			for i := 0; i < numOfVbPerNozzle; i++ {
-				if index < numOfVbs {
-					vbList = append(vbList, relevantVBs[index])
-					index++
-				} else {
-					// no more vbs to process
-					break
-				}
+			for index := load_distribution[i][0]; index < load_distribution[i][1]; index++ {
+				vbList = append(vbList, relevantVBs[index])
 			}
 
 			// construct outgoing nozzle
@@ -368,7 +422,7 @@ func (xdcrf *XDCRFactory) constructOutgoingNozzles(spec *metadata.ReplicationSpe
 					return nil, nil, err
 				}
 			} else {
-				connSize := numOfNozzles * 2
+				connSize := numOfOutNozzles * 2
 				outNozzle = xdcrf.constructXMEMNozzle(spec.Id, kvaddr, targetBucketName, bucketPwd, i, connSize, logger_ctx)
 			}
 

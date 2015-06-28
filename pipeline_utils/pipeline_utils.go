@@ -16,6 +16,7 @@ import (
 	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/goxdcr/parts"
 	"github.com/couchbase/goxdcr/service_def"
+	"strconv"
 	"strings"
 )
 
@@ -72,24 +73,28 @@ func HasSSLOverMemSupport(cluster_info_svc service_def.ClusterInfoSvc, targetClu
 	return cluster_info_svc.IsClusterCompatible(targetClusterRef, []int{3, 0})
 }
 
-// the element here can be ComponentEventListener, ComponentEventHandler, or other elements in pipeiline
 func GetElementIdFromName(pipeline common.Pipeline, name string) string {
 	return pipeline.Topic() + "_" + name
 }
 
-func GetElementNameFromId(id string) string {
+func GetElementIdFromNameAndIndex(pipeline common.Pipeline, name string, index int) string {
+	return pipeline.Topic() + "_" + name + "_" + strconv.Itoa(index)
+}
+
+// as the name indicates, this method works only on element ids with index at the end
+func GetElementNameFromIdWithIndex(id string) string {
 	parts := strings.Split(id, "_")
-	if len(parts) > 0 {
-		return parts[len(parts)-1]
+	if len(parts) > 2 {
+		return parts[len(parts) - 2]
 	}
 	return ""
 }
 
-func GetAsyncComponentEventListener(listenerMap map[string]common.AsyncComponentEventListener, name string) common.AsyncComponentEventListener {
+func RegisterAsyncComponentEventHandler(listenerMap map[string]common.AsyncComponentEventListener, listenerName string, handler common.AsyncComponentEventHandler) {
 	for id, listener := range listenerMap {
-		if name == GetElementNameFromId(id) {
-			return listener
+		if listenerName == GetElementNameFromIdWithIndex(id) {
+			listener.RegisterComponentEventHandler(handler)
 		}
 	}
-	return nil
+
 }

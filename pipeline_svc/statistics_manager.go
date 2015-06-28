@@ -17,6 +17,7 @@ import (
 	mcc "github.com/couchbase/gomemcached/client"
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/common"
+	component "github.com/couchbase/goxdcr/component"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/goxdcr/parts"
@@ -337,6 +338,12 @@ func (stats_mgr *StatisticsManager) logStats() error {
 			conn := part.Connector()
 			stats_mgr.logger.Info(conn.(*parts.Router).StatusSummary())
 			stats_mgr.logger.Info(part.(*parts.DcpNozzle).StatusSummary())
+		}
+
+		// log listener summary
+		async_listener_map := pipeline_pkg.GetAllAsyncComponentEventListeners(stats_mgr.pipeline)
+		for _, async_listener := range async_listener_map {
+			stats_mgr.logger.Info(async_listener.(*component.AsyncComponentEventListenerImpl).StatusSummary())
 		}
 	}
 	return nil
@@ -811,9 +818,9 @@ func (outNozzle_collector *outNozzleCollector) Mount(pipeline common.Pipeline, s
 
 	// register outNozzle_collector as the async event handler for relevant events
 	async_listener_map := pipeline_pkg.GetAllAsyncComponentEventListeners(pipeline)
-	pipeline_utils.GetAsyncComponentEventListener(async_listener_map, base.DataSentEventListener).RegisterComponentEventHandler(outNozzle_collector)
-	pipeline_utils.GetAsyncComponentEventListener(async_listener_map, base.DataFailedCREventListener).RegisterComponentEventHandler(outNozzle_collector)
-	pipeline_utils.GetAsyncComponentEventListener(async_listener_map, base.GetMetaReceivedEventListener).RegisterComponentEventHandler(outNozzle_collector)
+	pipeline_utils.RegisterAsyncComponentEventHandler(async_listener_map, base.DataSentEventListener, outNozzle_collector)
+	pipeline_utils.RegisterAsyncComponentEventHandler(async_listener_map, base.DataFailedCREventListener, outNozzle_collector)
+	pipeline_utils.RegisterAsyncComponentEventHandler(async_listener_map, base.GetMetaReceivedEventListener, outNozzle_collector)
 
 	return nil
 }
@@ -934,8 +941,8 @@ func (dcp_collector *dcpCollector) Mount(pipeline common.Pipeline, stats_mgr *St
 	}
 
 	async_listener_map := pipeline_pkg.GetAllAsyncComponentEventListeners(pipeline)
-	pipeline_utils.GetAsyncComponentEventListener(async_listener_map, base.DataReceivedEventListener).RegisterComponentEventHandler(dcp_collector)
-	pipeline_utils.GetAsyncComponentEventListener(async_listener_map, base.DataProcessedEventListener).RegisterComponentEventHandler(dcp_collector)
+	pipeline_utils.RegisterAsyncComponentEventHandler(async_listener_map, base.DataReceivedEventListener, dcp_collector)
+	pipeline_utils.RegisterAsyncComponentEventHandler(async_listener_map, base.DataProcessedEventListener, dcp_collector)
 
 	return nil
 }
@@ -1010,7 +1017,7 @@ func (r_collector *routerCollector) Mount(pipeline common.Pipeline, stats_mgr *S
 	}
 
 	async_listener_map := pipeline_pkg.GetAllAsyncComponentEventListeners(pipeline)
-	pipeline_utils.GetAsyncComponentEventListener(async_listener_map, base.DataFilteredEventListener).RegisterComponentEventHandler(r_collector)
+	pipeline_utils.RegisterAsyncComponentEventHandler(async_listener_map, base.DataFilteredEventListener, r_collector)
 	return nil
 }
 
