@@ -27,7 +27,6 @@ import (
 	"github.com/couchbase/goxdcr/simple_utils"
 	"github.com/couchbase/goxdcr/utils"
 	"github.com/rcrowley/go-metrics"
-	"math/rand"
 	"reflect"
 	"strconv"
 	"sync"
@@ -1189,12 +1188,6 @@ func calculateTotalChanges(kv_vb_map map[string][]uint16, kv_mem_clients map[str
 		if err != nil {
 			return 0, err
 		}
-
-		// print highseqno_map roughly 1 in 200th time.
-		if rand.Float32() < 0.005 {
-			logger.Infof("bucket=%v, serverAddr=%v, highseqno_map=%v\n", serverAddr, sourceBucketName, highseqno_map)
-		}
-
 		for _, vbno := range vbnos {
 			current_vb_highseqno := highseqno_map[vbno]
 			total_changes = total_changes + current_vb_highseqno

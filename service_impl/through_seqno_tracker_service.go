@@ -19,7 +19,6 @@ import (
 	pipeline_pkg "github.com/couchbase/goxdcr/pipeline"
 	"github.com/couchbase/goxdcr/pipeline_utils"
 	"github.com/couchbase/goxdcr/simple_utils"
-	"math/rand"
 	"sort"
 	"sync"
 )
@@ -98,12 +97,9 @@ func (list_obj *SortedSeqnoListWithLock) addSeqno(seqno uint64, logger *log.Comm
 }
 
 // append seqno to the end of seqno_list
-func (list_obj *SortedSeqnoListWithLock) appendSeqno(seqno uint64, logger *log.CommonLogger, listName string) {
+func (list_obj *SortedSeqnoListWithLock) appendSeqno(seqno uint64, logger *log.CommonLogger) {
 	list_obj.lock.Lock()
 	defer list_obj.lock.Unlock()
-	if len(list_obj.seqno_list) > 0 && seqno <= uint64(list_obj.seqno_list[len(list_obj.seqno_list)-1]) {
-		logger.Errorf("%v_seqno_list out of order. seqno=%v, seqno_list=%v\n", listName, seqno, list_obj.seqno_list)
-	}
 	list_obj.seqno_list = append(list_obj.seqno_list, int(seqno))
 	logger.Debugf("after adding seqno %v, seqno_list is %v\n", seqno, list_obj.seqno_list)
 }
@@ -111,10 +107,6 @@ func (list_obj *SortedSeqnoListWithLock) appendSeqno(seqno uint64, logger *log.C
 func (list_obj *SortedSeqnoListWithLock) appendSeqnos(seqno_list []uint64, logger *log.CommonLogger) {
 	list_obj.lock.Lock()
 	defer list_obj.lock.Unlock()
-	// this check assumes that seano_list is a sorted list and seqno_list[0] is the smallest element in list
-	if len(list_obj.seqno_list) > 0 && seqno_list[0] <= uint64(list_obj.seqno_list[len(list_obj.seqno_list)-1]) {
-		logger.Errorf("gap_seqno_list out of order. input seqno_list=%v, internal seqno_list=%v\n", seqno_list, list_obj.seqno_list)
-	}
 	for _, seqno := range seqno_list {
 		list_obj.seqno_list = append(list_obj.seqno_list, int(seqno))
 	}
@@ -221,14 +213,14 @@ func (tsTracker *ThroughSeqnoTrackerSvc) addSentSeqno(vbno uint16, sent_seqno ui
 func (tsTracker *ThroughSeqnoTrackerSvc) addFilteredSeqno(vbno uint16, filtered_seqno uint64) {
 	tsTracker.validateVbno(vbno, "addFilteredSeqno")
 	tsTracker.logger.Debugf("%v adding filtered seqno %v for vb %v.", tsTracker.id, filtered_seqno, vbno)
-	tsTracker.vb_filtered_seqno_list_map[vbno].appendSeqno(filtered_seqno, tsTracker.logger, "filtered")
+	tsTracker.vb_filtered_seqno_list_map[vbno].appendSeqno(filtered_seqno, tsTracker.logger)
 }
 
 func (tsTracker *ThroughSeqnoTrackerSvc) addFailedCRSeqno(vbno uint16, failed_cr_seqno uint64) {
 	tsTracker.validateVbno(vbno, "addFailedCRSeqno")
 
 	tsTracker.logger.Debugf("%v adding failed cr seqno %v for vb %v.", tsTracker.id, failed_cr_seqno, vbno)
-	tsTracker.vb_failed_cr_seqno_list_map[vbno].appendSeqno(failed_cr_seqno, tsTracker.logger, "failed_cr")
+	tsTracker.vb_failed_cr_seqno_list_map[vbno].appendSeqno(failed_cr_seqno, tsTracker.logger)
 }
 
 func (tsTracker *ThroughSeqnoTrackerSvc) processGapSeqnos(vbno uint16, current_seqno uint64) {
@@ -364,11 +356,6 @@ func (tsTracker *ThroughSeqnoTrackerSvc) GetThroughSeqno(vbno uint16) uint64 {
 
 		// truncate no longer needed entries from seqno lists to reduce memory/cpu overhead for future computations
 		go tsTracker.truncateSeqnoLists(vbno, through_seqno)
-	} else {
-		// if through_seqno has not changed, print it with 10% probability for debugging.
-		if rand.Float32() < 0.1 {
-			tsTracker.logger.Infof("%v, vbno=%v, last_through_seqno=%v\n sent_seqno_list=%v\n filtered_seqno_list=%v\n failed_cr_seqno_list=%v\n gap_seqno_list=%v\n", tsTracker.id, vbno, last_through_seqno, sent_seqno_list, filtered_seqno_list, failed_cr_seqno_list, gap_seqno_list)
-		}
 	}
 
 	tsTracker.logger.Debugf("%v, vbno=%v, through_seqno=%v\n", tsTracker.id, vbno, through_seqno)
