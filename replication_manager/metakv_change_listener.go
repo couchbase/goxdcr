@@ -151,7 +151,7 @@ func (rscl *ReplicationSpecChangeListener) replicationSpecChangeHandlerCallback(
 	}
 
 	if newSpec == nil {
-		err := deleteReplication(topic, rscl.logger)
+		err := onDeleteReplication(topic, rscl.logger)
 		if err != nil {
 			return err
 		}
@@ -177,8 +177,8 @@ func (rscl *ReplicationSpecChangeListener) replicationSpecChangeHandlerCallback(
 		// if some critical settings have been changed, stop, reconstruct, and restart pipeline
 		if needToReconstructPipeline(oldSettings, newSpec.Settings) {
 			rscl.logger.Infof("Restarting pipeline %v since the changes to replication spec are critical\n", topic)
-			return pipeline_manager.Update(topic, nil)
-
+			go rscl.launchPipelineUpdate(topic)
+			return nil
 		} else {
 			// otherwise, perform live update to pipeline
 			err := rscl.liveUpdatePipeline(topic, oldSettings, newSpec.Settings)
@@ -195,19 +195,29 @@ func (rscl *ReplicationSpecChangeListener) replicationSpecChangeHandlerCallback(
 		//stop replication
 		rscl.logger.Infof("Stopping pipeline %v since the replication spec has been changed to inactive\n", topic)
 
-		return pipeline_manager.Update(topic, nil)
+		go rscl.launchPipelineUpdate(topic)
+		return nil
 
 	} else if !specActive_old && specActive {
 		// start replication
 		rscl.logger.Infof("Starting pipeline %v since the replication spec has been changed to active\n", topic)
 
-		return pipeline_manager.Update(topic, nil)
+		go rscl.launchPipelineUpdate(topic)
+		return nil
 
 	} else {
 		// this is the case where pipeline is not running and spec is not active.
 		// nothing needs to be done
 		return nil
 	}
+}
+
+func (rscl *ReplicationSpecChangeListener) launchPipelineUpdate(topic string) {
+	err := pipeline_manager.Update(topic, nil)
+	if err != nil {
+		rscl.logger.Error(err.Error())
+	}
+
 }
 
 func (rscl *ReplicationSpecChangeListener) validateReplicationSpec(specObj interface{}) (*metadata.ReplicationSpecification, error) {
@@ -320,7 +330,7 @@ func (rccl *RemoteClusterChangeListener) remoteClusterChangeHandlerCallback(remo
 		if len(topics) > 0 {
 			rccl.logger.Infof("Deleting replications, %v, since the referenced remote cluster, %v, has been deleted\n", topics, oldRemoteClusterRef.Name)
 			for _, topic := range topics {
-				err = deleteReplication(topic, rccl.logger)
+				err = onDeleteReplication(topic, rccl.logger)
 				if err != nil {
 					rccl.logger.Errorf("Error deleting replication %v. err=%v", topic, err)
 				}
@@ -363,7 +373,7 @@ func (rccl *RemoteClusterChangeListener) validateRemoteClusterRef(remoteClusterR
 	return remoteClusterRef, nil
 }
 
-func deleteReplication(topic string, logger *log.CommonLogger) error {
+func onDeleteReplication(topic string, logger *log.CommonLogger) error {
 	err := pipeline_manager.RemoveReplicationStatus(topic)
 	if err != nil {
 		return err
