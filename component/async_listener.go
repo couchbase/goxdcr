@@ -45,7 +45,7 @@ func NewAsyncComponentEventListenerImpl(id, topic string, logger_context *log.Lo
 
 func NewDefaultAsyncComponentEventListenerImpl(id, topic string,
 	logger_context *log.LoggerContext) *AsyncComponentEventListenerImpl {
-	return NewAsyncComponentEventListenerImpl(id, topic, logger_context, base.EventChanLength)
+	return NewAsyncComponentEventListenerImpl(id, topic, logger_context, base.EventChanSize)
 }
 
 func (l *AsyncComponentEventListenerImpl) OnEvent(event *common.Event) {

@@ -237,19 +237,19 @@ const (
 
 var UprFeedDataChanLength = 1000
 
-var EventChanLength = 1000
+var EventChanSize = 10000
 
 // number of async listeners [for an event type]
 var MaxNumberOfAsyncListeners = 4
 
 // names of async component event listeners
 const (
-	DataReceivedEventListener  = "DataReceivedEventListener"
-	DataProcessedEventListener  = "DataProcessedEventListener"
-	DataFilteredEventListener  = "DataFilteredEventListener"
-	DataSentEventListener  = "DataSentEventListener"
-	DataFailedCREventListener  = "DataFailedCREventListener"
-	GetMetaReceivedEventListener  = "GetMetaReceivedEventListener"
+	DataReceivedEventListener    = "DataReceivedEventListener"
+	DataProcessedEventListener   = "DataProcessedEventListener"
+	DataFilteredEventListener    = "DataFilteredEventListener"
+	DataSentEventListener        = "DataSentEventListener"
+	DataFailedCREventListener    = "DataFailedCREventListener"
+	GetMetaReceivedEventListener = "GetMetaReceivedEventListener"
 )
 
 const (
