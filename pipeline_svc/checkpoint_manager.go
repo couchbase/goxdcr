@@ -368,9 +368,17 @@ func (ckmgr *CheckpointManager) SetVBTimestamps(topic string) error {
 }
 
 func (ckmgr *CheckpointManager) setTimestampForVB(vbno uint16, ts *base.VBTimestamp) error {
-	ckmgr.logger.Debugf("Set VBTimestamp: vb=%v, ts=%v\n", vbno, ts)
+	ckmgr.logger.Infof("%v Set VBTimestamp: vb=%v, ts.Seqno=%v\n", ckmgr.pipeline.Topic(), vbno, ts.Seqno)
+	ckmgr.logger.Debugf("%v vb=%v ts=%v\n", ckmgr.pipeline.Topic(), vbno, ts)
+	defer ckmgr.logger.Infof("%v Set VBTimestamp for vb=%v completed\n", ckmgr.pipeline.Topic(), vbno)
+
+	//set the start seqno on through_seqno_tracker_svc
+	ckmgr.through_seqno_tracker_svc.SetStartSeqno(vbno, ts.Seqno)
+	ckmgr.logger.Infof("%v Set startSeqno for vb=%v Seqno=%v\n", ckmgr.pipeline.Topic(), vbno, ts.Seqno)
+
 	settings := ckmgr.pipeline.Settings()
 	ts_obj := utils.GetSettingFromSettings(settings, VBTimestamp)
+
 	if ts_obj != nil {
 		ts_map, _ := ts_obj.(map[uint16]*base.VBTimestamp)
 		ckmgr.vbts_update_lock.Lock()
@@ -383,8 +391,6 @@ func (ckmgr *CheckpointManager) setTimestampForVB(vbno uint16, ts *base.VBTimest
 		return errors.New("Setting 'VBTimestamp' is not in settings")
 	}
 
-	//set the start seqno on through_seqno_tracker_svc as well
-	ckmgr.through_seqno_tracker_svc.SetStartSeqno(vbno, ts.Seqno)
 	return nil
 }
 
@@ -703,7 +709,7 @@ func (ckmgr *CheckpointManager) performCkpt(fin_ch chan bool, wait_grp *sync.Wai
 		ckmgr.RaiseEvent(common.NewEvent(common.ErrorEncountered, nil, ckmgr, nil, err))
 	} else {
 		ckmgr.logger.Infof("Done checkpointing for replication %v\n", ckmgr.pipeline.Topic())
-		ckmgr.RaiseEvent(common.NewEvent(common.CheckpointDone, nil, ckmgr, nil, time.Duration(total_committing_time) * time.Second))
+		ckmgr.RaiseEvent(common.NewEvent(common.CheckpointDone, nil, ckmgr, nil, time.Duration(total_committing_time)*time.Second))
 	}
 
 }

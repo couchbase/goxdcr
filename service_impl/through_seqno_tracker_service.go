@@ -335,6 +335,8 @@ func (tsTracker *ThroughSeqnoTrackerSvc) GetThroughSeqno(vbno uint16) uint64 {
 			panic(fmt.Sprintf("unexpected found_seqno_type, %v", found_seqno_type))
 		}
 
+		tsTracker.logger.Infof("%v, vbno=%v, setting new through_seqno=%v\n", tsTracker.id, vbno, through_seqno)
+
 		through_seqno_obj.SetSeqnoWithoutLock(through_seqno)
 
 		// truncate no longer needed entries from seqno lists to reduce memory/cpu overhead for future computations
