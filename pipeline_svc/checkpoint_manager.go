@@ -749,7 +749,9 @@ func (ckmgr *CheckpointManager) do_checkpoint(vbno uint16) (err error) {
 			}
 
 		} else {
-			ckpt_record.Target_vb_opaque = vbOpaque
+			if vbOpaque != nil {
+				ckpt_record.Target_vb_opaque = vbOpaque
+			}
 		}
 		ckpt_record.Seqno = 0
 		ckpt_record.Target_Seqno = 0
@@ -899,11 +901,11 @@ func (ckmgr *CheckpointManager) massCheckVBOpaques(target_vb_vbuuid_map map[uint
 	//validate target bucket's vbucket uuid
 	for vb, _ := range ckmgr.cur_ckpts {
 		latest_ckpt_record := ckmgr.getCurrentCkpt(vb)
-		if latest_ckpt_record.Target_vb_opaque == nil {
+		if latest_ckpt_record.Target_vb_opaque != nil {
 			target_vb_uuid := latest_ckpt_record.Target_vb_opaque
 			target_vb_vbuuid_map[vb] = target_vb_uuid
 		} else {
-			ckmgr.logger.Debugf("remote bucket is no an older node, massCheckVBOpaque is not supported for vb=%v.", vb)
+			ckmgr.logger.Infof("remote bucket is no an older node, massCheckVBOpaque is not supported for vb=%v.", vb)
 		}
 	}
 
