@@ -930,9 +930,6 @@ func (xmem *XmemNozzle) Receive(data interface{}) error {
 
 	xmem.Logger().Debugf("Xmem %v received %v items, queue_size = %v\n", xmem.Id(), xmem.counter_received, len(xmem.dataChan))
 
-	if xmem.getMeta_ticker != nil {
-		xmem.getMeta_ticker.Stop()
-	}
 	return nil
 }
 
@@ -985,6 +982,10 @@ func (xmem *XmemNozzle) processData_batch(finch chan bool, waitGrp *sync.WaitGro
 	}
 
 done:
+	if xmem.getMeta_ticker != nil {
+		xmem.getMeta_ticker.Stop()
+	}
+
 	xmem.Logger().Infof("%v processData_batch exits\n", xmem.Id())
 	return
 }
@@ -1175,30 +1176,19 @@ func (xmem *XmemNozzle) batchGetMeta(bigDoc_map map[string]*base.WrappedMCReques
 	respMap := make(map[string]*mc.MCResponse, xmem.config.maxCount)
 	lock := &sync.RWMutex{}
 	opaque_keySeqno_map := make(map[uint32][]interface{})
-	waitGrp := &sync.WaitGroup{}
 	receiver_fin_ch := make(chan bool, 1)
+	receiver_return_ch := make(chan bool, 1)
 
 	err_list := []error{}
 
-	if xmem.getMeta_ticker == nil {
-		xmem.getMeta_ticker = time.NewTicker(1 * time.Second)
-	}
-
 	//launch the receiver
-	waitGrp.Add(1)
-	go func(count int, finch chan bool, opaque_keySeqno_map map[uint32][]interface{}, respMap map[string]*mc.MCResponse, err_list []error, ticker *time.Ticker, waitGrp *sync.WaitGroup, logger *log.CommonLogger, lock *sync.RWMutex) {
-		defer waitGrp.Done()
-		timeout_count := 0
+	go func(count int, finch chan bool, return_ch chan bool, opaque_keySeqno_map map[uint32][]interface{}, respMap map[string]*mc.MCResponse, err_list []error, ticker *time.Ticker, logger *log.CommonLogger, lock *sync.RWMutex) {
+		defer close(return_ch)
+
 		for {
 			select {
 			case <-finch:
 				return
-			case <-ticker.C:
-				timeout_count++
-				if timeout_count > 1 {
-					err_list = append(err_list, errors.New("batchGetMeta timedout"))
-					return
-				}
 			default:
 				if xmem.validateRunningState() != nil {
 					xmem.Logger().Infof("xmem %v has stopped, exit from getMeta receiver", xmem.Id())
@@ -1249,7 +1239,7 @@ func (xmem *XmemNozzle) batchGetMeta(bigDoc_map map[string]*base.WrappedMCReques
 			}
 		}
 
-	}(len(bigDoc_map), receiver_fin_ch, opaque_keySeqno_map, respMap, err_list, xmem.getMeta_ticker, waitGrp, xmem.Logger(), lock)
+	}(len(bigDoc_map), receiver_fin_ch, receiver_return_ch, opaque_keySeqno_map, respMap, err_list, xmem.getMeta_ticker, xmem.Logger(), lock)
 
 	var sequence uint16 = uint16(time.Now().UnixNano())
 	reqs_bytes := []byte{}
@@ -1273,7 +1263,6 @@ func (xmem *XmemNozzle) batchGetMeta(bigDoc_map map[string]*base.WrappedMCReques
 				if err != nil {
 					//kill the receiver and return
 					close(receiver_fin_ch)
-					waitGrp.Wait()
 					return nil, err
 				}
 
@@ -1289,12 +1278,31 @@ func (xmem *XmemNozzle) batchGetMeta(bigDoc_map map[string]*base.WrappedMCReques
 		if err != nil {
 			//kill the receiver and return
 			close(receiver_fin_ch)
-			waitGrp.Wait()
 			return nil, err
 		}
 	}
 
-	waitGrp.Wait()
+	//sleep for 1 sec for receiver for getMeta to return
+	//if it doesn't. it should move on.
+	if xmem.getMeta_ticker == nil {
+		xmem.getMeta_ticker = time.NewTicker(1 * time.Second)
+	}
+	timeout_count := 0
+	for {
+		select {
+		case <-xmem.getMeta_ticker.C:
+			timeout_count++
+			if timeout_count > 1 {
+				err_list = append(err_list, errors.New("batchGetMeta timedout"))
+				goto RE
+			}
+		case <-receiver_return_ch:
+			goto RE
+		}
+	}
+
+RE:
+	close(receiver_fin_ch)
 	if len(err_list) > 0 {
 		return nil, err_list[0]
 	}
