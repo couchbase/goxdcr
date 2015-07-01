@@ -913,7 +913,7 @@ func (capi *CapiNozzle) writeDocs(vbno uint16, req_bytes []byte, doc_list [][]by
 				part_ch <- []byte(BodyPartsPrefix)
 			} else if partIndex < len(doc_list)+2 {
 				// write individual doc
-				capi.Logger().Debugf("writing %vth doc = %v\n", partIndex-2, doc_list[partIndex-2])
+				capi.Logger().Debugf("writing %vth doc = %v, doc_in_str=%v\n", partIndex-2, doc_list[partIndex-2], string(doc_list[partIndex-2]))
 				part_ch <- doc_list[partIndex-2]
 			} else {
 				// write body part suffix
@@ -1014,7 +1014,9 @@ func getDocMap(req *mc.MCRequest) map[string]interface{} {
 	meta_map[RevKey] = getSerializedRevision(req)
 	meta_map[ExpirationKey] = binary.BigEndian.Uint32(req.Extras[4:8])
 	meta_map[FlagsKey] = binary.BigEndian.Uint32(req.Extras[0:4])
-	meta_map[DeletedKey] = (req.Opcode == base.DELETE_WITH_META)
+	if req.Opcode == base.DELETE_WITH_META {
+		meta_map[DeletedKey] = true
+	}
 
 	if !simple_utils.IsJSON(req.Body) {
 		meta_map[AttReasonKey] = InvalidJson
