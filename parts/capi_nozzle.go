@@ -1011,7 +1011,7 @@ func getDocMap(req *mc.MCRequest) map[string]interface{} {
 	meta_map[RevKey] = getSerializedRevision(req)
 	meta_map[ExpirationKey] = binary.BigEndian.Uint32(req.Extras[4:8])
 	meta_map[FlagsKey] = binary.BigEndian.Uint32(req.Extras[0:4])
-	meta_map[DeletedKey] = (req.Opcode == mc.TAP_DELETE || req.Opcode == mc.UPR_DELETION || req.Opcode == mc.UPR_EXPIRATION)
+	meta_map[DeletedKey] = (req.Opcode == base.DELETE_WITH_META)
 
 	return doc_map
 }
@@ -1020,8 +1020,7 @@ func getDocMap(req *mc.MCRequest) map[string]interface{} {
 func getSerializedRevision(req *mc.MCRequest) string {
 	var revId [16]byte
 	// CAS
-	binary.BigEndian.PutUint64(revId[0:8], req.Cas)
-
+	copy(revId[0:8], req.Extras[16:24])
 	// expiration
 	copy(revId[8:12], req.Extras[4:8])
 	// flags
