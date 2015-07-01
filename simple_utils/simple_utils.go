@@ -11,6 +11,7 @@
 package simple_utils
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"github.com/couchbase/goxdcr/log"
@@ -153,4 +154,10 @@ func DeepCopyIntArray(in []int) []int {
 		out = append(out, element)
 	}
 	return out
+}
+
+func IsJSON(in []byte) bool {
+	var out interface{}
+	err := json.Unmarshal(in, &out)
+	return err == nil
 }

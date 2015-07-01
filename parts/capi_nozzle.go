@@ -23,6 +23,7 @@ import (
 	gen_server "github.com/couchbase/goxdcr/gen_server"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
+	"github.com/couchbase/goxdcr/simple_utils"
 	"github.com/couchbase/goxdcr/utils"
 	"net"
 	"net/http"
@@ -73,6 +74,8 @@ var RevKey = "rev"
 var ExpirationKey = "expiration"
 var FlagsKey = "flags"
 var DeletedKey = "deleted"
+var AttReasonKey = "att_reason"
+var InvalidJson = "invalid_json"
 
 var BodyPartsPrefix = "{\"new_edits\":false,\"docs\":["
 var BodyPartsSuffix = "]}"
@@ -557,7 +560,7 @@ func (capi *CapiNozzle) batchSendWithRetry(batch *capiBatch) error {
 			// requests in req_list have strictly increasing seqnos
 			// each seqno is the new high seqno
 			additionalInfo := DataSentEventAdditional{Seqno: req.Seqno,
-				IsOptRepd:    capi.optimisticRep(req.Req),
+				IsOptRepd:   capi.optimisticRep(req.Req),
 				Commit_time: time.Since(req.Start_time),
 				Opcode:      req.Req.Opcode,
 				IsExpirySet: (binary.BigEndian.Uint32(req.Req.Extras[4:8]) != 0),
@@ -1012,6 +1015,10 @@ func getDocMap(req *mc.MCRequest) map[string]interface{} {
 	meta_map[ExpirationKey] = binary.BigEndian.Uint32(req.Extras[4:8])
 	meta_map[FlagsKey] = binary.BigEndian.Uint32(req.Extras[0:4])
 	meta_map[DeletedKey] = (req.Opcode == base.DELETE_WITH_META)
+
+	if !simple_utils.IsJSON(req.Body) {
+		meta_map[AttReasonKey] = InvalidJson
+	}
 
 	return doc_map
 }
