@@ -597,7 +597,7 @@ func (client *xmemClient) getConn(readTimeout bool, writeTimeout bool) (io.ReadW
 	return conn, client.num_of_repairs, nil
 }
 
-func (client *xmemClient) repairConn(memClient *mcc.Client, repair_count_at_error int, xmem_id string) {
+func (client *xmemClient) repairConn(memClient *mcc.Client, repair_count_at_error int, xmem_id string) bool {
 	client.lock.Lock()
 	defer client.lock.Unlock()
 
@@ -613,8 +613,10 @@ func (client *xmemClient) repairConn(memClient *mcc.Client, repair_count_at_erro
 		client.continuous_write_failure_counter = 0
 		client.num_of_repairs++
 		client.healthy = true
+		return true
 	} else {
 		client.logger.Infof("client %v for %v has been repaired (num_of_repairs=%v, repair_count_at_error=%v), the repair request is ignored\n", client.name, xmem_id, client.num_of_repairs, repair_count_at_error)
+		return false
 	}
 }
 
@@ -1517,7 +1519,9 @@ func (xmem *XmemNozzle) receiveResponse(finch chan bool, waitGrp *sync.WaitGroup
 					// err is recoverable. resend doc
 					pos := xmem.getPosFromOpaque(response.Opaque)
 					xmem.Logger().Errorf("%v Received recoverable error in response. Response status=%v, err = %v, response=%v\n", xmem.Id(), response.Status.String(), err, response.Bytes())
-					_, err = xmem.buf.modSlot(pos, xmem.resend)
+					//resend and reset the retry=0 as retry is an indicator of network status,
+					//here we have received the response, so reset retry=0
+					_, err = xmem.buf.modSlot(pos, xmem.resendWithReset)
 
 					//read is unsuccessful, put the token back
 				} else {
@@ -1707,7 +1711,7 @@ func (xmem *XmemNozzle) selfMonitor(finch chan bool, waitGrp *sync.WaitGroup) {
 			}
 			max_idle_count := xmem.getMaxIdleCount()
 			if freeze_counter > max_idle_count {
-				xmem.Logger().Errorf("Xmem hasn't sent any item out for %v ticks, %v data in queue, flowcontrol=%v, con_retry_limit=%v, backoff_factor for client_setMeta is %v, backoff_factor for client_getMeta is %v",  max_idle_count, len(xmem.dataChan), xmem.buf.itemCountInBuffer() <= xmem.buf.notify_threshold, xmem.client_for_setMeta.continuous_write_failure_counter, xmem.client_for_setMeta.backoff_factor, xmem.client_for_getMeta.backoff_factor)
+				xmem.Logger().Errorf("Xmem hasn't sent any item out for %v ticks, %v data in queue, flowcontrol=%v, con_retry_limit=%v, backoff_factor for client_setMeta is %v, backoff_factor for client_getMeta is %v", max_idle_count, len(xmem.dataChan), xmem.buf.itemCountInBuffer() <= xmem.buf.notify_threshold, xmem.client_for_setMeta.continuous_write_failure_counter, xmem.client_for_setMeta.backoff_factor, xmem.client_for_getMeta.backoff_factor)
 				xmem.Logger().Infof("%v open=%v checking..., %v item unsent, received %v items, sent %v items, %v items waiting for response, %v batches ready, current batch timeout at %v, current batch expire_ch size is %v\n", xmem.Id(), xmem.IsOpen(), len(xmem.dataChan), xmem.counter_received, xmem.counter_sent, int(xmem.buf.bufferSize())-len(xmem.buf.empty_slots_pos), len(xmem.batches_ready), xmem.batch.start_time.Add(xmem.batch.expiring_duration), len(xmem.batch.expire_ch))
 				//				utils.DumpStack(xmem.Logger())
 				//the connection might not be healthy, it should not go back to connection pool
@@ -1773,7 +1777,7 @@ func (xmem *XmemNozzle) checkTimeout(req *bufferedMCRequest, pos uint16) (bool, 
 		xmem.Logger().Error(err.Error())
 
 		xmem.repairConn(xmem.client_for_setMeta, err.Error(), xmem.client_for_setMeta.repairCount())
-		return false, nil
+		return false, err
 	}
 
 	respWaitTime := time.Since(*req.sent_time)
@@ -1808,19 +1812,36 @@ func (xmem *XmemNozzle) resend(req *bufferedMCRequest, pos uint16) (bool, error)
 		req.num_of_retry = req.num_of_retry + 1
 	}
 
-	return false, err
+	return true, err
+}
+
+func (xmem *XmemNozzle) resendWithReset(req *bufferedMCRequest, pos uint16) (bool, error) {
+	xmem.Logger().Debugf("%v Retry sending %s, retry=%v, and reset retry=0 on successful send", xmem.Id(), req.req.Req.Key, req.num_of_retry)
+	err := xmem.sendSingleSetMeta(false, req.req, pos, xmem.config.maxRetry)
+
+	if err != nil {
+		req.err = err
+
+	} else {
+		//reset to 0
+		req.num_of_retry = 0
+	}
+
+	return true, err
+
 }
 
 func (xmem *XmemNozzle) resendForNewConn(req *bufferedMCRequest, pos uint16) (bool, error) {
 	xmem.Logger().Debugf("%v Retry sending %s, retry=%v", xmem.Id(), req.req.Req.Key, req.num_of_retry)
 	err := xmem.sendSingleSetMeta(false, req.req, pos, xmem.config.maxRetry)
-	req.num_of_retry = 0
 	if err != nil {
 		req.err = err
 		//report error
 		xmem.handleGeneralError(err)
+		return false, err
 	}
-	return false, err
+	req.num_of_retry = 0
+	return true, err
 }
 
 func (xmem *XmemNozzle) adjustRequest(req *base.WrappedMCRequest, index uint16) {
@@ -2019,9 +2040,9 @@ func (xmem *XmemNozzle) repairConn(client *xmemClient, reason string, rev int) e
 	memClient, err := pool.Get()
 
 	if err == nil {
-		client.repairConn(memClient, rev, xmem.Id())
-		if client == xmem.client_for_setMeta {
-			xmem.onSetMetaConnRepaired()
+		repaired := client.repairConn(memClient, rev, xmem.Id())
+		if repaired && client == xmem.client_for_setMeta {
+			go xmem.onSetMetaConnRepaired()
 		}
 
 		xmem.Logger().Infof("%v - The connection for %v is repaired\n", xmem.Id(), client.name)
@@ -2035,16 +2056,20 @@ func (xmem *XmemNozzle) repairConn(client *xmemClient, reason string, rev int) e
 	return nil
 }
 
-func (xmem *XmemNozzle) onSetMetaConnRepaired() {
+func (xmem *XmemNozzle) onSetMetaConnRepaired() error {
 	size := xmem.buf.bufferSize()
 	count := 0
 	for i := 0; i < int(size); i++ {
-		sent, _ := xmem.buf.modSlot(uint16(i), xmem.resendForNewConn)
+		sent, err := xmem.buf.modSlot(uint16(i), xmem.resendForNewConn)
+		if err != nil {
+			return err
+		}
 		if sent {
 			count++
 		}
 	}
 	xmem.Logger().Infof("%v - %v unresponded items are resent\n", xmem.Id(), count)
+	return nil
 
 }
 
