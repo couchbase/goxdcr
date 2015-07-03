@@ -21,7 +21,6 @@ import (
 	"github.com/couchbase/goxdcr/utils"
 	"io/ioutil"
 	"net/http"
-	"net/url"
 	"regexp"
 	"sort"
 	"strconv"
@@ -583,7 +582,7 @@ func NewRegexpValidationResponse(matchesMap map[string][][]int) (*ap.Response, e
 }
 
 // decode dynamic paramater from the path of http request
-func DecodeDynamicParamInURL(request *http.Request, pathPrefix string, paramName string, needToUnescape bool) (string, error) {
+func DecodeDynamicParamInURL(request *http.Request, pathPrefix string, paramName string) (string, error) {
 	// length of prefix preceding replicationId in request url path
 	prefixLength := len(base.AdminportUrlPrefix) + len(pathPrefix) + len(base.UrlDelimiter)
 
@@ -594,14 +593,6 @@ func DecodeDynamicParamInURL(request *http.Request, pathPrefix string, paramName
 	paramValue := request.URL.Path[prefixLength:]
 
 	logger_msgutil.Debugf("param value decoded from request: %v\n", paramValue)
-	if needToUnescape {
-		var err error
-		paramValue, err = url.QueryUnescape(paramValue)
-		if err != nil {
-			return "", err
-		}
-		logger_msgutil.Debugf("param value after unescape: %v\n", paramValue)
-	}
 	return paramValue, nil
 }
 
