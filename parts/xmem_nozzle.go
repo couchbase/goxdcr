@@ -54,7 +54,8 @@ const (
 	default_demandEncryption    bool          = false
 	default_max_read_downtime   time.Duration = 60 * time.Second
 	//wait time between write is default_backoff_wait_time*backoff_factor
-	default_backoff_wait_time time.Duration = 10 * time.Millisecond
+	default_backoff_wait_time   time.Duration = 10 * time.Millisecond
+	default_getMeta_readTimeout time.Duration = time.Duration(1) * time.Second
 
 	//the maximum data (in byte) data channel can hold
 	max_datachannelSize = 10 * 1024 * 1024
@@ -1185,7 +1186,20 @@ func (xmem *XmemNozzle) batchGetMeta(bigDoc_map map[string]*base.WrappedMCReques
 
 	//launch the receiver
 	go func(count int, finch chan bool, return_ch chan bool, opaque_keySeqno_map map[uint32][]interface{}, respMap map[string]*mc.MCResponse, err_list []error, ticker *time.Ticker, logger *log.CommonLogger, lock *sync.RWMutex) {
-		defer close(return_ch)
+		defer func() {
+			//handle the panic gracefully.
+			if r := recover(); r != nil {
+				if xmem.validateRunningState() == nil {
+					//add to the error list
+					panic_err := errors.New(fmt.Sprintf("%v", r))
+					err_list = append(err_list, panic_err)
+
+					//repair the connection
+					xmem.repairConn(xmem.client_for_getMeta, panic_err.Error(), xmem.client_for_getMeta.repairCount())
+				}
+			}
+			close(return_ch)
+		}()
 
 		for {
 			select {
@@ -1234,7 +1248,7 @@ func (xmem *XmemNozzle) batchGetMeta(bigDoc_map map[string]*base.WrappedMCReques
 				}
 
 				if len(respMap) >= count {
-					logger.Infof("Expected %v response, got all", count)
+					logger.Infof("%v Expected %v response, got all", xmem.Id(), count)
 					return
 				}
 
@@ -1287,7 +1301,7 @@ func (xmem *XmemNozzle) batchGetMeta(bigDoc_map map[string]*base.WrappedMCReques
 	//sleep for 1 sec for receiver for getMeta to return
 	//if it doesn't. it should move on.
 	if xmem.getMeta_ticker == nil {
-		xmem.getMeta_ticker = time.NewTicker(1 * time.Second)
+		xmem.getMeta_ticker = time.NewTicker(default_getMeta_readTimeout)
 	}
 	timeout_count := 0
 	for {
@@ -1295,7 +1309,7 @@ func (xmem *XmemNozzle) batchGetMeta(bigDoc_map map[string]*base.WrappedMCReques
 		case <-xmem.getMeta_ticker.C:
 			timeout_count++
 			if timeout_count > 1 {
-				err_list = append(err_list, errors.New("batchGetMeta timedout"))
+				err_list = append(err_list, errors.New(fmt.Sprintf("batchGetMeta timedout, Expect %v", len(bigDoc_map))))
 				goto RE
 			}
 		case <-receiver_return_ch:
@@ -1435,7 +1449,7 @@ func (xmem *XmemNozzle) initializeConnection() (err error) {
 	xmem.client_for_setMeta = newXmemClient("client_setMeta", xmem.config.readTimeout,
 		xmem.config.writeTimeout, memClient_setMeta,
 		getPoolName(xmem.config), xmem.config.maxRetry, xmem.config.max_read_downtime, xmem.Logger())
-	xmem.client_for_getMeta = newXmemClient("client_getMeta", xmem.config.readTimeout,
+	xmem.client_for_getMeta = newXmemClient("client_getMeta", default_getMeta_readTimeout,
 		xmem.config.writeTimeout, memClient_getMeta,
 		getPoolName(xmem.config), xmem.config.maxRetry, xmem.config.max_read_downtime, xmem.Logger())
 
