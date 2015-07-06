@@ -174,7 +174,7 @@ func balanceLoad(num_of_worker int, num_of_load int) [][]int {
 	load_distribution := make([][]int, 0)
 
 	max_load_per_worker := int(math.Ceil(float64(num_of_load) / float64(num_of_worker)))
-	num_of_worker_with_max_load := num_of_load - (max_load_per_worker-1) * num_of_worker
+	num_of_worker_with_max_load := num_of_load - (max_load_per_worker-1)*num_of_worker
 
 	index := 0
 	var num_of_load_per_worker int
@@ -811,7 +811,8 @@ func (xdcrf *XDCRFactory) ConstructSSLPortMap(targetClusterRef *metadata.RemoteC
 				hostname := utils.GetHostName(node.Hostname)
 				memcachedPort := uint16(node.Ports[base.DirectPortKey])
 				hostAddr := utils.GetHostAddr(hostname, memcachedPort)
-				ssl_port_map[hostAddr] = memcachedPort
+				proxyPort := uint16(node.Ports[base.SSLProxyPortKey])
+				ssl_port_map[hostAddr] = proxyPort
 			}
 		}
 
