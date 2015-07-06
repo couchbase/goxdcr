@@ -29,10 +29,11 @@ var ReplicationSpecNotFound error = errors.New("Replication specification not fo
 type func_report_fixed func(topic string)
 
 type pipelineManager struct {
-	pipeline_factory common.PipelineFactory
-	repl_spec_svc    service_def.ReplicationSpecSvc
-	once             sync.Once
-	logger           *log.CommonLogger
+	pipeline_factory  common.PipelineFactory
+	repl_spec_svc     service_def.ReplicationSpecSvc
+	xdcr_topology_svc service_def.XDCRCompTopologySvc
+	once              sync.Once
+	logger            *log.CommonLogger
 	//lock to pipeline_pending_for_repair map
 	repair_map_lock *sync.RWMutex
 	//keep track of the pipeline in repair
@@ -42,10 +43,11 @@ type pipelineManager struct {
 
 var pipeline_mgr pipelineManager
 
-func PipelineManager(factory common.PipelineFactory, repl_spec_svc service_def.ReplicationSpecSvc, logger_context *log.LoggerContext) {
+func PipelineManager(factory common.PipelineFactory, repl_spec_svc service_def.ReplicationSpecSvc, xdcr_topology_svc service_def.XDCRCompTopologySvc, logger_context *log.LoggerContext) {
 	pipeline_mgr.once.Do(func() {
 		pipeline_mgr.pipeline_factory = factory
 		pipeline_mgr.repl_spec_svc = repl_spec_svc
+		pipeline_mgr.xdcr_topology_svc = xdcr_topology_svc
 		pipeline_mgr.logger = log.NewLogger("PipelineManager", logger_context)
 		pipeline_mgr.logger.Info("Pipeline Manager is constucted")
 		pipeline_mgr.child_waitGrp = &sync.WaitGroup{}
@@ -411,6 +413,11 @@ func (pipelineMgr *pipelineManager) reportFixed(topic string, r *pipelineUpdater
 }
 
 func (pipelineMgr *pipelineManager) launchUpdater(topic string, cur_err error, rep_status *pipeline.ReplicationStatus) error {
+	isKV, err := pipelineMgr.xdcr_topology_svc.IsKVNode()
+	if err == nil && !isKV {
+		pipelineMgr.logger.Infof("This node is not a KV node, would not act on replication spec %s's update\n", topic)
+		return nil
+	}
 	settingsMap := rep_status.SettingsMap()
 	retry_interval_obj := settingsMap[metadata.FailureRestartInterval]
 	var retry_interval int = 0

@@ -20,7 +20,8 @@ import (
 	"reflect"
 )
 
-var ErrorParsingHostInfo = errors.New("Could not parse current host info from server result.")
+var ErrorParsingHostInfo = errors.New("Could not parse current host info from the result.server returned")
+var ErrorParsingServicesInfo = errors.New("Could not parse services from the result server returned.")
 
 type XDCRTopologySvc struct {
 	adminport        uint16
@@ -259,4 +260,33 @@ func (top_svc *XDCRTopologySvc) staticHostAddr() string {
 		panic("hostAddr can't be empty")
 	}
 	return hostAddr
+}
+
+func (top_svc *XDCRTopologySvc) IsKVNode() (bool, error) {
+	nodeInfoMap, err := top_svc.getHostInfo()
+	if err != nil {
+		return false, err
+	}
+
+	services, ok := nodeInfoMap[base.ServicesKey]
+	if !ok {
+		//if services is not there, it maybe a node prior to sherlock
+		return true, nil
+	}
+	serviceStrs, ok := services.([]interface{})
+	if !ok {
+		return false, ErrorParsingServicesInfo
+	}
+
+	for _, serviceStr := range serviceStrs {
+		svcStr, ok := serviceStr.(string)
+		if !ok {
+			return false, ErrorParsingServicesInfo
+
+		}
+		if svcStr == "kv" {
+			return true, nil
+		}
+	}
+	return false, nil
 }

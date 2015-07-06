@@ -58,4 +58,5 @@ type XDCRCompTopologySvc interface {
 	// implements base.ClusterConnectionInfoProvider
 	MyConnectionStr() (string, error)
 	MyCredentials() (string, string, error)
+	IsKVNode() (bool, error)
 }
