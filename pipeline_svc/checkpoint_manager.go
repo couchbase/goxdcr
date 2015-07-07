@@ -374,7 +374,7 @@ func (ckmgr *CheckpointManager) setTimestampForVB(vbno uint16, ts *base.VBTimest
 
 	//set the start seqno on through_seqno_tracker_svc
 	ckmgr.through_seqno_tracker_svc.SetStartSeqno(vbno, ts.Seqno)
-	ckmgr.logger.Infof("%v Set startSeqno for vb=%v Seqno=%v\n", ckmgr.pipeline.Topic(), vbno, ts.Seqno)
+	ckmgr.logger.Infof("%v Set startSeqno to %v for vb=%v\n", ckmgr.pipeline.Topic(), ts.Seqno, vbno)
 
 	settings := ckmgr.pipeline.Settings()
 	ts_obj := utils.GetSettingFromSettings(settings, VBTimestamp)
@@ -850,6 +850,11 @@ func (ckmgr *CheckpointManager) UpdateVBTimestamps(vbno uint16, rollbackseqno ui
 
 	vbts := ckmgr.populateVBTimestamp(checkpointDoc, foundIndex, vbno, pipeline_start_seqno.Seqno)
 	pipeline_startSeqnos_map[vbno] = vbts
+
+	//set the start seqno on through_seqno_tracker_svc
+	ckmgr.through_seqno_tracker_svc.SetStartSeqno(vbno, vbts.Seqno)
+	ckmgr.logger.Infof("%v Rolled back startSeqno to %v for vb=%v\n", ckmgr.pipeline.Topic(), vbts.Seqno, vbno)
+
 	ckmgr.logger.Infof("Retry vbts=%v\n", vbts)
 
 	return vbts, nil
