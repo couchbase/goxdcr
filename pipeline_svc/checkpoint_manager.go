@@ -232,7 +232,7 @@ func (ckmgr *CheckpointManager) initialize() {
 		ckmgr.failoverlog_map[vbno] = &failoverlogWithLock{failoverlog: nil, lock: &sync.RWMutex{}}
 		ckmgr.snapshot_history_map[vbno] = &snapshotHistoryWithLock{
 			snapshot_history: make([]*snapshot, 0, MAX_SNAPSHOT_HISTORY_LENGTH),
-			}
+		}
 	}
 }
 
@@ -640,9 +640,8 @@ func (ckmgr *CheckpointManager) populateVBTimestamp(ckptDoc *metadata.Checkpoint
 			obj.ckpt.Failover_uuid = vbts.Vbuuid
 			obj.ckpt.Dcp_snapshot_seqno = vbts.SnapshotStart
 			obj.ckpt.Dcp_snapshot_end_seqno = vbts.SnapshotEnd
+			obj.ckpt.Seqno = vbts.Seqno
 		}
-		//set the next ckpt's Seqno to 0 - the unset state
-		obj.ckpt.Seqno = 0
 	} else {
 		panic(fmt.Sprintf("Calling populateVBTimestamp on vb=%v which is not in MyVBList", vbno))
 	}
@@ -795,16 +794,22 @@ func (ckmgr *CheckpointManager) do_checkpoint(vbno uint16) (err error) {
 
 		ckpt_record := ckpt_obj.ckpt
 
-		ckpt_record.Seqno = ckmgr.through_seqno_tracker_svc.GetThroughSeqno(vbno)
-		ckmgr.logger.Debugf("Seqno number used for checkpointing for vb %v is %v\n", vbno, ckpt_record.Seqno)
-
-		if ckpt_record.Seqno == 0 {
-			ckmgr.logger.Debugf("No replication happened yet, skip checkpointing for vb=%v pipeline=%v\n", vbno, ckmgr.pipeline.InstanceId())
+		if ckpt_record.Target_vb_opaque == nil {
+			ckmgr.logger.Info("remote bucket is an older node, no checkpointing should be done.")
 			return nil
 		}
 
-		if ckpt_record.Target_vb_opaque == nil {
-			ckmgr.logger.Infof("%v remote bucket is an older node, no checkpointing on vb=%v is done.\n", ckmgr.pipeline.InstanceId(), vbno)
+		last_seqno := ckpt_record.Seqno
+
+		ckpt_record.Seqno = ckmgr.through_seqno_tracker_svc.GetThroughSeqno(vbno)
+		ckmgr.logger.Debugf("Seqno number used for checkpointing for vb %v is %v\n", vbno, ckpt_record.Seqno)
+
+		if ckpt_record.Seqno < last_seqno {
+			ckmgr.logger.Infof("%v Checkpoint seqno went backward, possibly due to rollback. vb=%v, old_seqno=%v, new_seqno=%v", ckmgr.pipeline.InstanceId(), vbno, last_seqno, ckpt_record.Seqno)
+		}
+
+		if ckpt_record.Seqno == last_seqno {
+			ckmgr.logger.Debugf("%v No replication has happened in vb %v since replication start or last checkpoint. seqno=%v. Skip checkpointing\\n", ckmgr.pipeline.InstanceId(), vbno, last_seqno)
 			return nil
 		}
 
@@ -841,7 +846,6 @@ func (ckmgr *CheckpointManager) do_checkpoint(vbno uint16) (err error) {
 				ckpt_record.Target_vb_opaque = vbOpaque
 			}
 		}
-		ckpt_record.Seqno = 0
 		ckpt_record.Target_Seqno = 0
 		ckpt_record.Failover_uuid = 0
 	} else {
@@ -895,10 +899,10 @@ func (ckmgr *CheckpointManager) OnEvent(event *common.Event) {
 					snapshot_history_obj.snapshot_history = append(snapshot_history_obj.snapshot_history, cur_snapshot)
 				} else {
 					// rotation is needed
-					for i:=0; i< MAX_SNAPSHOT_HISTORY_LENGTH - 1; i++ {
+					for i := 0; i < MAX_SNAPSHOT_HISTORY_LENGTH-1; i++ {
 						snapshot_history_obj.snapshot_history[i] = snapshot_history_obj.snapshot_history[i+1]
 					}
-					snapshot_history_obj.snapshot_history[MAX_SNAPSHOT_HISTORY_LENGTH - 1] = cur_snapshot
+					snapshot_history_obj.snapshot_history[MAX_SNAPSHOT_HISTORY_LENGTH-1] = cur_snapshot
 				}
 			} else {
 				panic(fmt.Sprintf("%v, Received snapshot marker on an unknown vb=%v\n", ckmgr.pipeline.Topic(), vbno))
