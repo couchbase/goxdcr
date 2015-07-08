@@ -151,16 +151,7 @@ func (rscl *ReplicationSpecChangeListener) replicationSpecChangeHandlerCallback(
 	}
 
 	if newSpec == nil {
-		err := onDeleteReplication(topic, rscl.logger)
-		if err != nil {
-			return err
-		}
-
-		//close the connection pool for the replication
-		pools := base.ConnPoolMgr().FindPoolNamesByPrefix(topic)
-		for _, poolName := range pools {
-			base.ConnPoolMgr().RemovePool(poolName)
-		}
+		go onDeleteReplication(topic, rscl.logger)
 		return nil
 	}
 
@@ -376,6 +367,7 @@ func (rccl *RemoteClusterChangeListener) validateRemoteClusterRef(remoteClusterR
 func onDeleteReplication(topic string, logger *log.CommonLogger) error {
 	err := pipeline_manager.RemoveReplicationStatus(topic)
 	if err != nil {
+		logger.Errorf("Error removing replication status for replication %v", topic)
 		return err
 	}
 
@@ -384,5 +376,12 @@ func onDeleteReplication(topic string, logger *log.CommonLogger) error {
 	if err != nil {
 		logger.Errorf("Error deleting checkpoint docs for replication %v", topic)
 	}
+
+	//close the connection pool for the replication
+	pools := base.ConnPoolMgr().FindPoolNamesByPrefix(topic)
+	for _, poolName := range pools {
+		base.ConnPoolMgr().RemovePool(poolName)
+	}
 	return nil
+
 }
