@@ -144,14 +144,14 @@ func (res *MCResponse) Transmit(w io.Writer) (n int, err error) {
 }
 
 // Receive will fill this MCResponse with the data from this reader.
-func (res *MCResponse) Receive(r io.Reader, hdrBytes []byte) (int, error) {
+func (res *MCResponse) Receive(r io.Reader, hdrBytes []byte) (n int, err error) {
 	if len(hdrBytes) < HDR_LEN {
 		hdrBytes = []byte{
 			0, 0, 0, 0, 0, 0, 0, 0,
 			0, 0, 0, 0, 0, 0, 0, 0,
 			0, 0, 0, 0, 0, 0, 0, 0}
 	}
-	n, err := io.ReadFull(r, hdrBytes)
+	n, err = io.ReadFull(r, hdrBytes)
 	if err != nil {
 		return n, err
 	}
@@ -169,6 +169,14 @@ func (res *MCResponse) Receive(r io.Reader, hdrBytes []byte) (int, error) {
 	res.Cas = binary.BigEndian.Uint64(hdrBytes[16:24])
 
 	bodyLen := int(binary.BigEndian.Uint32(hdrBytes[8:12])) - (klen + elen)
+
+	//defer function to debug the panic seen with MB-15557
+	defer func() {
+		if e := recover(); e != nil {
+			err = fmt.Errorf(`Panic in Receive. Response %v \n
+                        key len %v extra len %v bodylen %v`, res, klen, elen, bodyLen)
+		}
+	}()
 
 	buf := make([]byte, klen+elen+bodyLen)
 	m, err := io.ReadFull(r, buf)
