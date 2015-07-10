@@ -1221,6 +1221,11 @@ func updateStatsForReplication(repl_status *pipeline_pkg.ReplicationStatus, cur_
 	old_vb_list := repl_status.VbList()
 	overview_stats := repl_status.GetOverviewStats()
 	spec := repl_status.Spec()
+	if spec == nil {
+		logger.Infof("replication %v has been deleted, skip updating stats\n", repl_status.RepId())
+		return nil
+	}
+
 	cur_vb_list := simple_utils.GetVbListFromKvVbMap(cur_kv_vb_map)
 	simple_utils.SortUint16List(cur_vb_list)
 	sameList := simple_utils.AreSortedUint16ListsTheSame(old_vb_list, cur_vb_list)
