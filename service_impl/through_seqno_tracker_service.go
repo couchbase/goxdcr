@@ -17,6 +17,7 @@ import (
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/parts"
 	pipeline_pkg "github.com/couchbase/goxdcr/pipeline"
+	"github.com/couchbase/goxdcr/pipeline_manager"
 	"github.com/couchbase/goxdcr/pipeline_utils"
 	"github.com/couchbase/goxdcr/simple_utils"
 	"sort"
@@ -49,7 +50,8 @@ type ThroughSeqnoTrackerSvc struct {
 	// and the current seen seqno
 	vb_last_seen_seqno_map map[uint16]*base.SeqnoWithLock
 
-	id string
+	id     string
+	rep_id string
 
 	logger *log.CommonLogger
 }
@@ -132,6 +134,7 @@ func NewThroughSeqnoTrackerSvc(logger_ctx *log.LoggerContext) *ThroughSeqnoTrack
 }
 
 func (tsTracker *ThroughSeqnoTrackerSvc) initialize(pipeline common.Pipeline) {
+	tsTracker.rep_id = pipeline.Topic()
 	tsTracker.id = pipeline.Topic() + "_" + base.ThroughSeqnoTracker
 	for _, vbno := range pipeline_utils.GetSourceVBListPerPipeline(pipeline) {
 		tsTracker.vb_map[vbno] = true
@@ -161,6 +164,10 @@ func (tsTracker *ThroughSeqnoTrackerSvc) Attach(pipeline common.Pipeline) error 
 }
 
 func (tsTracker *ThroughSeqnoTrackerSvc) ProcessEvent(event *common.Event) error {
+	if !tsTracker.isPipelineRunning() {
+		tsTracker.logger.Infof("Pipeline %s is no longer running, skip ProcessEvent\n", tsTracker.rep_id)
+	}
+
 	if event.EventType == common.DataSent {
 		vbno := event.OtherInfos.(parts.DataSentEventAdditional).VBucket
 		seqno := event.OtherInfos.(parts.DataSentEventAdditional).Seqno
@@ -431,6 +438,17 @@ func (tsTracker *ThroughSeqnoTrackerSvc) getVbList() []uint16 {
 
 func (tsTracker *ThroughSeqnoTrackerSvc) Id() string {
 	return tsTracker.id
+}
+
+func (tsTracker *ThroughSeqnoTrackerSvc) isPipelineRunning() bool {
+	rep_status := pipeline_manager.ReplicationStatus(tsTracker.rep_id)
+	if rep_status != nil {
+		pipeline := rep_status.Pipeline()
+		if pipeline != nil && pipeline.State() == common.Pipeline_Running {
+			return true
+		}
+	}
+	return false
 }
 
 func maxSeqno(seqno_list []int) uint64 {

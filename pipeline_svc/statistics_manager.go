@@ -878,9 +878,9 @@ func (outNozzle_collector *outNozzleCollector) ProcessEvent(event *common.Event)
 		}
 
 		req_opcode := event_otherInfos.Opcode
-		if req_opcode == mc.UPR_DELETION {
+		if req_opcode == base.DELETE_WITH_META {
 			metric_map[DELETION_FAILED_CR_SOURCE_METRIC].(metrics.Counter).Inc(1)
-		} else if req_opcode == mc.UPR_MUTATION {
+		} else if req_opcode == base.SET_WITH_META {
 			metric_map[SET_FAILED_CR_SOURCE_METRIC].(metrics.Counter).Inc(1)
 		} else {
 			panic(fmt.Sprintf("Invalid opcode, %v, in DataFailedCRSource event from %v.", req_opcode, event.Component.Id()))

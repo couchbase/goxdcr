@@ -1074,7 +1074,7 @@ func (xmem *XmemNozzle) batchSetMetaWithRetry(batch *dataBatch, numOfRetry int) 
 				//lost on conflict resolution on source side
 				// this still counts as data sent
 				additionalInfo := DataFailedCRSourceEventAdditional{Seqno: item.Seqno,
-					Opcode:      item.Req.Opcode,
+					Opcode:      encodeOpCode(item.Req.Opcode),
 					IsExpirySet: (binary.BigEndian.Uint32(item.Req.Extras[4:8]) != 0),
 					VBucket:     item.Req.VBucket,
 				}
