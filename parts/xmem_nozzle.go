@@ -791,31 +791,30 @@ func (xmem *XmemNozzle) Start(settings map[string]interface{}) error {
 	}
 
 	err = xmem.initialize(settings)
-	xmem.Logger().Info("....Finish initializing....")
-	if err == nil {
-		xmem.childrenWaitGrp.Add(1)
-		go xmem.selfMonitor(xmem.selfMonitor_finch, &xmem.childrenWaitGrp)
-
-		xmem.childrenWaitGrp.Add(1)
-		go xmem.receiveResponse(xmem.receiver_finch, &xmem.childrenWaitGrp)
-
-		xmem.childrenWaitGrp.Add(1)
-		go xmem.check(xmem.checker_finch, &xmem.childrenWaitGrp)
-
-		xmem.childrenWaitGrp.Add(1)
-		go xmem.processData_batch(xmem.sender_finch, &xmem.childrenWaitGrp)
+	if err != nil {
+		return err
 	}
+	xmem.Logger().Info("....Finish initializing....")
+	xmem.childrenWaitGrp.Add(1)
+	go xmem.selfMonitor(xmem.selfMonitor_finch, &xmem.childrenWaitGrp)
+
+	xmem.childrenWaitGrp.Add(1)
+	go xmem.receiveResponse(xmem.receiver_finch, &xmem.childrenWaitGrp)
+
+	xmem.childrenWaitGrp.Add(1)
+	go xmem.check(xmem.checker_finch, &xmem.childrenWaitGrp)
+
+	xmem.childrenWaitGrp.Add(1)
+	go xmem.processData_batch(xmem.sender_finch, &xmem.childrenWaitGrp)
 
 	//set conflict resolver
 	xmem.conflict_resolver = resolveConflictByRevSeq
 
 	xmem.start_time = time.Now()
-	if err == nil {
-		err = xmem.Start_server()
-	}
-
+	err = xmem.Start_server()
 	xmem.SetState(common.Part_Running)
 	xmem.Logger().Info("Xmem nozzle is started")
+
 	return err
 }
 
