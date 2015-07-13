@@ -847,23 +847,6 @@ func (xmem *XmemNozzle) Stop() error {
 		xmem.Logger().Debugf("XmemNozzle %v is stopped\n", xmem.Id())
 	}
 
-	//recycle all the bufferred MCRequest to object pool
-	if xmem.buf != nil {
-		xmem.Logger().Infof("XmemNozzle %v recycle %v objects in buffer\n", xmem.Id(), xmem.buf.itemCountInBuffer())
-		for _, bufferredReq := range xmem.buf.slots {
-			if bufferredReq != nil && bufferredReq.req != nil {
-				xmem.recycleDataObj(bufferredReq.req)
-			}
-		}
-	}
-
-	if xmem.dataChan != nil {
-		xmem.Logger().Infof("XmemNozzle %v recycle %v objects in data channel\n", xmem.Id(), len(xmem.dataChan))
-		for data := range xmem.dataChan {
-			xmem.dataObj_recycler(xmem.topic, data)
-		}
-	}
-
 	return err
 }
 
@@ -1012,6 +995,23 @@ func (xmem *XmemNozzle) finalCleanup() {
 	//cleanup
 	xmem.client_for_setMeta.close()
 	xmem.client_for_getMeta.close()
+
+	//recycle all the bufferred MCRequest to object pool
+	if xmem.buf != nil {
+		xmem.Logger().Infof("XmemNozzle %v recycle %v objects in buffer\n", xmem.Id(), xmem.buf.itemCountInBuffer())
+		for _, bufferredReq := range xmem.buf.slots {
+			if bufferredReq != nil && bufferredReq.req != nil {
+				xmem.recycleDataObj(bufferredReq.req)
+			}
+		}
+	}
+
+	if xmem.dataChan != nil {
+		xmem.Logger().Infof("XmemNozzle %v recycle %v objects in data channel\n", xmem.Id(), len(xmem.dataChan))
+		for data := range xmem.dataChan {
+			xmem.dataObj_recycler(xmem.topic, data)
+		}
+	}
 
 }
 
