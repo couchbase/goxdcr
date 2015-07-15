@@ -18,6 +18,7 @@ import (
 	"github.com/couchbase/goxdcr/parts"
 	"github.com/couchbase/goxdcr/pipeline"
 	"github.com/couchbase/goxdcr/service_def"
+	"github.com/couchbase/goxdcr/simple_utils"
 	"github.com/couchbase/goxdcr/supervisor"
 	"github.com/couchbase/goxdcr/utils"
 	"reflect"
@@ -139,7 +140,7 @@ func (pipelineSupervisor *PipelineSupervisor) monitorPipelineHealth() error {
 			pipelineSupervisor.Logger().Infof("monitorPipelineHealth routine is exiting because parent supervisor %v has been stopped\n", pipelineSupervisor.Id())
 			return nil
 		case <-health_check_ticker.C:
-			err := pipelineSupervisor.checkPipelineHealth()
+			err := simple_utils.ExecWithTimeout(pipelineSupervisor.checkPipelineHealth, 1000*time.Millisecond, pipelineSupervisor.Logger())
 			if err != nil {
 				return nil
 			}

@@ -185,7 +185,7 @@ func (rscl *ReplicationSpecChangeListener) replicationSpecChangeHandlerCallback(
 	} else if specActive_old && !specActive {
 		//stop replication
 		rscl.logger.Infof("Stopping pipeline %v since the replication spec has been changed to inactive\n", topic)
-
+        pipeline_manager.InitReplicationStatusForReplication (topic)
 		go rscl.launchPipelineUpdate(topic)
 		return nil
 
