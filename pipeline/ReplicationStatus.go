@@ -163,7 +163,7 @@ func (rs *ReplicationStatus) RuntimeStatus() ReplicationState {
 //return the corresponding expvar map as its storage
 func (rs *ReplicationStatus) Storage() *expvar.Map {
 	var rep_map *expvar.Map
-	root_map := rootStorage()
+	root_map := RootStorage()
 	rep_map_var := root_map.Get(rs.specId)
 	if rep_map_var == nil {
 		rep_map = new(expvar.Map).Init()
@@ -219,7 +219,7 @@ func (rs *ReplicationStatus) CleanupBeforeExit(statsToClear []string) {
 	rs.publishWithStatus(base.Pending)
 }
 
-func rootStorage() *expvar.Map {
+func RootStorage() *expvar.Map {
 	replications_root_map := expvar.Get(base.XDCR_EXPVAR_ROOT)
 	if replications_root_map == nil {
 		return expvar.NewMap(base.XDCR_EXPVAR_ROOT)
@@ -228,7 +228,7 @@ func rootStorage() *expvar.Map {
 }
 
 func (rs *ReplicationStatus) ResetStorage() {
-	root_map := rootStorage()
+	root_map := RootStorage()
 	root_map.Set(rs.specId, nil)
 }
 

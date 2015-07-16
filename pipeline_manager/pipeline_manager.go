@@ -53,6 +53,9 @@ func PipelineManager(factory common.PipelineFactory, repl_spec_svc service_def.R
 		pipeline_mgr.child_waitGrp = &sync.WaitGroup{}
 		pipeline_mgr.pipeline_pending_for_update = make(map[string]*pipelineUpdater)
 		pipeline_mgr.repair_map_lock = &sync.RWMutex{}
+
+		//initialize the expvar storage for replication status
+		pipeline.RootStorage()
 	})
 }
 
