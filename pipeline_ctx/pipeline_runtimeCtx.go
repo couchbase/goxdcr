@@ -158,14 +158,16 @@ func (ctx *PipelineRuntimeCtx) UpdateSettings(settings map[string]interface{}) e
 	}
 
 	for _, svc := range ctx.runtime_svcs {
-		service_settings, err := ctx.service_settings_constructor(ctx.pipeline, svc, settings, nil)
-		if err != nil {
-			return err
+		if svc != nil {
+			service_settings, err := ctx.service_settings_constructor(ctx.pipeline, svc, settings, nil)
+			if err != nil {
+				return err
 
-		}
-		err = svc.UpdateSettings(service_settings)
-		if err != nil {
-			return err
+			}
+			err = svc.UpdateSettings(service_settings)
+			if err != nil {
+				return err
+			}
 		}
 	}
 
