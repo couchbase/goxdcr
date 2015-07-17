@@ -536,7 +536,11 @@ func (genericPipeline *GenericPipeline) Settings() map[string]interface{} {
 }
 
 func (genericPipeline *GenericPipeline) State() common.PipelineState {
-	return genericPipeline.state
+	if genericPipeline != nil {
+		return genericPipeline.state
+	} else {
+		return common.Pipeline_Stopped
+	}
 }
 
 func (genericPipeline *GenericPipeline) InstanceId() string {

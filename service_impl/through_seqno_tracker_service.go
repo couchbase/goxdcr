@@ -443,6 +443,8 @@ func (tsTracker *ThroughSeqnoTrackerSvc) Id() string {
 func (tsTracker *ThroughSeqnoTrackerSvc) isPipelineRunning() bool {
 	rep_status := pipeline_manager.ReplicationStatus(tsTracker.rep_id)
 	if rep_status != nil {
+		rep_status.Lock.RLock()
+		defer rep_status.Lock.RUnlock()
 		pipeline := rep_status.Pipeline()
 		if pipeline != nil && pipeline.State() == common.Pipeline_Running {
 			return true
