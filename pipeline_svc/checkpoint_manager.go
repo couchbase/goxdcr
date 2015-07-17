@@ -368,7 +368,7 @@ func (ckmgr *CheckpointManager) SetVBTimestamps(topic string) error {
 }
 
 func (ckmgr *CheckpointManager) setTimestampForVB(vbno uint16, ts *base.VBTimestamp) error {
-	ckmgr.logger.Infof("%v Set VBTimestamp: vb=%v, ts.Seqno=%v\n", ckmgr.pipeline.Topic(), vbno, ts.Seqno)
+	ckmgr.logger.Debugf("%v Set VBTimestamp: vb=%v, ts.Seqno=%v\n", ckmgr.pipeline.Topic(), vbno, ts.Seqno)
 	ckmgr.logger.Debugf("%v vb=%v ts=%v\n", ckmgr.pipeline.Topic(), vbno, ts)
 	defer ckmgr.logger.Infof("%v Set VBTimestamp for vb=%v completed\n", ckmgr.pipeline.Topic(), vbno)
 

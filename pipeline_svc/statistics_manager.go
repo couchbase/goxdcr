@@ -61,6 +61,7 @@ const (
 	CHANGES_LEFT_METRIC = "changes_left"
 	DOCS_LATENCY_METRIC = "wtavg_docs_latency"
 	META_LATENCY_METRIC = "wtavg_meta_latency"
+	RESP_WAIT_METRIC = "resp_wait_time"
 
 	//checkpointing related statistics
 	DOCS_CHECKED_METRIC    = "docs_checked" //calculated
@@ -662,6 +663,7 @@ func (stats_mgr *StatisticsManager) initOverviewRegistry() {
 	overview_registry.Register(SIZE_REP_QUEUE_METRIC, metrics.NewCounter())
 	overview_registry.Register(DOCS_REP_QUEUE_METRIC, metrics.NewCounter())
 	overview_registry.Register(DOCS_LATENCY_METRIC, metrics.NewCounter())
+	overview_registry.Register(RESP_WAIT_METRIC, metrics.NewCounter())
 	overview_registry.Register(META_LATENCY_METRIC, metrics.NewCounter())
 	overview_registry.Register(DOCS_CHECKED_METRIC, docs_checked_counter)
 	overview_registry.Register(DCP_DISPATCH_TIME_METRIC, metrics.NewCounter())
@@ -792,6 +794,8 @@ func (outNozzle_collector *outNozzleCollector) Mount(pipeline common.Pipeline, s
 		registry.Register(DOCS_OPT_REPD_METRIC, docs_opt_repd)
 		docs_latency := metrics.NewHistogram(metrics.NewUniformSample(stats_mgr.sample_size))
 		registry.Register(DOCS_LATENCY_METRIC, docs_latency)
+		resp_wait := metrics.NewHistogram(metrics.NewUniformSample(stats_mgr.sample_size))
+		registry.Register(RESP_WAIT_METRIC, resp_wait)
 		meta_latency := metrics.NewHistogram(metrics.NewUniformSample(stats_mgr.sample_size))
 		registry.Register(META_LATENCY_METRIC, meta_latency)
 
@@ -809,6 +813,7 @@ func (outNozzle_collector *outNozzleCollector) Mount(pipeline common.Pipeline, s
 		metric_map[DATA_REPLICATED_METRIC] = data_replicated
 		metric_map[DOCS_OPT_REPD_METRIC] = docs_opt_repd
 		metric_map[DOCS_LATENCY_METRIC] = docs_latency
+		metric_map[RESP_WAIT_METRIC] = resp_wait
 		metric_map[META_LATENCY_METRIC] = meta_latency
 		outNozzle_collector.component_map[part.Id()] = metric_map
 
@@ -847,6 +852,7 @@ func (outNozzle_collector *outNozzleCollector) ProcessEvent(event *common.Event)
 		req_size := event_otherInfo.Req_size
 		opti_replicated := event_otherInfo.IsOptRepd
 		commit_time := event_otherInfo.Commit_time
+		resp_wait_time := event_otherInfo.Resp_wait_time
 		metric_map[DOCS_WRITTEN_METRIC].(metrics.Counter).Inc(1)
 		metric_map[DATA_REPLICATED_METRIC].(metrics.Counter).Inc(int64(req_size))
 		if opti_replicated {
@@ -868,6 +874,7 @@ func (outNozzle_collector *outNozzleCollector) ProcessEvent(event *common.Event)
 		}
 
 		metric_map[DOCS_LATENCY_METRIC].(metrics.Histogram).Sample().Update(commit_time.Nanoseconds() / 1000000)
+		metric_map[RESP_WAIT_METRIC].(metrics.Histogram).Sample().Update(resp_wait_time.Nanoseconds() / 1000000)
 	} else if event.EventType == common.DataFailedCRSource {
 		outNozzle_collector.stats_mgr.logger.Debugf("Received a DataFailedCRSource event from %v", reflect.TypeOf(event.Component))
 		metric_map[DOCS_FAILED_CR_SOURCE_METRIC].(metrics.Counter).Inc(1)

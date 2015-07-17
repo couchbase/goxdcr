@@ -962,6 +962,11 @@ func (xmem *XmemNozzle) processData_batch(finch chan bool, waitGrp *sync.WaitGro
 					}
 				}
 			}
+		default:
+			if xmem.batch.count() > 0 {
+				xmem.Logger().Debugf("xmem %v idle, make the current batch(%v) ready", xmem.Id(), xmem.batch.count())
+				xmem.batchReady(true)
+			}
 
 		}
 	}
@@ -1036,12 +1041,17 @@ func (xmem *XmemNozzle) batchSetMetaWithRetry(batch *dataBatch, numOfRetry int) 
 
 		if item != nil {
 			if needSend(item, batch, xmem.Logger()) {
+
 				//blocking
 				err, index, reserv_num := xmem.buf.reserveSlot()
 				if err != nil {
 					return err
 				}
 				xmem.adjustRequest(item, index)
+
+				//set Sendtime
+				item.Send_time = time.Now()
+
 				item_byte := item.Req.Bytes()
 
 				reqs_bytes = append(reqs_bytes, item_byte...)
@@ -1572,26 +1582,30 @@ func (xmem *XmemNozzle) receiveResponse(finch chan bool, waitGrp *sync.WaitGroup
 				var req *mc.MCRequest
 				var seqno uint64
 				var committing_time time.Duration
+				var resp_wait_time time.Duration
 				if wrappedReq != nil {
 					req = wrappedReq.Req
 					seqno = wrappedReq.Seqno
 					committing_time = time.Since(wrappedReq.Start_time)
+					resp_wait_time = time.Since(wrappedReq.Send_time)
 				}
 
 				if req != nil && req.Opaque == response.Opaque {
 					xmem.Logger().Debugf("%v Got the response, key=%s, status=%v\n", xmem.Id(), req.Key, response.Status)
 
 					additionalInfo := DataSentEventAdditional{Seqno: seqno,
-						IsOptRepd:   xmem.optimisticRep(req),
-						Opcode:      req.Opcode,
-						IsExpirySet: (binary.BigEndian.Uint32(req.Extras[4:8]) != 0),
-						VBucket:     req.VBucket,
-						Req_size:    req.Size(),
+						IsOptRepd:      xmem.optimisticRep(req),
+						Opcode:         req.Opcode,
+						IsExpirySet:    (binary.BigEndian.Uint32(req.Extras[4:8]) != 0),
+						VBucket:        req.VBucket,
+						Req_size:       req.Size(),
+						Commit_time:    committing_time,
+						Resp_wait_time: resp_wait_time,
 					}
 					xmem.RaiseEvent(common.NewEvent(common.DataSent, nil, xmem, nil, additionalInfo))
 
 					//feedback the most current commit_time to xmem.config.respTimeout
-					xmem.adjustRespTimeout(committing_time)
+					xmem.adjustRespTimeout(resp_wait_time)
 
 					//empty the slot in the buffer
 					if xmem.buf.evictSlot(pos) != nil {

@@ -85,6 +85,7 @@ type WrappedMCRequest struct {
 	Seqno      uint64
 	Req        *gomemcached.MCRequest
 	Start_time time.Time
+	Send_time time.Time
 	UniqueKey  string
 }
 

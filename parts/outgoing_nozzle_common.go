@@ -103,6 +103,7 @@ type DataSentEventAdditional struct {
 	Seqno       uint64
 	IsOptRepd    bool
 	Commit_time time.Duration
+	Resp_wait_time time.Duration
 	Opcode      mc.CommandCode
 	IsExpirySet bool
 	VBucket     uint16
