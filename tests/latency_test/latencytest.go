@@ -129,7 +129,7 @@ func (w *appWriter) write(b *couchbase.Bucket, start_index, num_write, docs_per_
 		if index >= options.doc_count {
 			break
 		}
-		doc_key := w.key_prefix + "_" + fmt.Sprintf("%v", index)
+		doc_key := w.key_prefix + "_" + fmt.Sprintf("%v", time.Now())
 		err = b.SetRaw(doc_key, 0, doc)
 		if err != nil {
 			return err
@@ -142,6 +142,7 @@ func (w *appWriter) write(b *couchbase.Bucket, start_index, num_write, docs_per_
 				w.reader.read(index/options.sample_frequency, doc_key, write_time)
 			}
 		}
+		time.Sleep (50 *time.Millisecond)
 	}
 	return err
 }
@@ -343,21 +344,21 @@ func setup() error {
 }
 
 func startGoXDCRReplicationByRest() error {
-	go func() {
-		cmd := exec.Command("curl", "-X", "POST", "http://"+source_rest_server_addr+"/controller/createReplication", "-d", "fromBucket="+options.source_bucket, "-d", "uuid="+options.target_cluster_addr,
-			"-d", "toBucket="+options.target_bucket, "-d", "xdcrSourceNozzlePerNode=4", "-d", "xdcrTargetNozzlePerNode=4", "-d", "xdcrLogLevel=Error")
-		logger_latency.Infof("cmd =%v, path=%v\n", cmd.Args, cmd.Path)
-		bytes, err := cmd.Output()
-		if err != nil {
-			logger_latency.Errorf("Failed to start goxdcr replication, err=%v\n", err)
-			logger_latency.Infof("err=%v, out=%v\n", err, bytes)
-
-			quit = true
-			return
-
-		}
-		return
-	}()
+//	go func() {
+//		cmd := exec.Command("curl", "-X", "POST", "http://"+source_rest_server_addr+"/controller/createReplication", "-d", "fromBucket="+options.source_bucket, "-d", "uuid="+options.target_cluster_addr,
+//			"-d", "toBucket="+options.target_bucket, "-d", "xdcrSourceNozzlePerNode=64", "-d", "xdcrTargetNozzlePerNode=64", "-d", "xdcrLogLevel=Info")
+//		logger_latency.Infof("cmd =%v, path=%v\n", cmd.Args, cmd.Path)
+//		bytes, err := cmd.Output()
+//		if err != nil {
+//			logger_latency.Errorf("Failed to start goxdcr replication, err=%v\n", err)
+//			logger_latency.Infof("err=%v, out=%v\n", err, bytes)
+//
+//			quit = true
+//			return
+//
+//		}
+//		return
+//	}()
 
 	return nil
 }
