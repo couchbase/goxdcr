@@ -133,7 +133,8 @@ func ConstructServerCouchApiBaseMap(targetBucket *couchbase.Bucket, remoteCluste
 			couchApiBase, ok = nodeInfoMap[base.CouchApiBase]
 		}
 		if !ok {
-			return nil, ErrorBuildingVBCouchApiBaseMap(targetBucket.Name, remoteClusterRef.Name, out)
+			//skip this node, during rebalance it is possible that the node is on the server list, but it is not master for any vb, so no couchApiBase
+			continue
 		}
 
 		couchApiBaseStr, ok := couchApiBase.(string)
