@@ -96,6 +96,11 @@ type GenericPipeline struct {
 	progress_recorder common.PipelineProgressRecorder
 }
 
+type partError struct {
+	partId string
+	err    error
+}
+
 //Get the runtime context of this pipeline
 func (genericPipeline *GenericPipeline) RuntimeContext() common.PipelineRuntimeContext {
 	return genericPipeline.context
@@ -106,10 +111,9 @@ func (genericPipeline *GenericPipeline) SetRuntimeContext(ctx common.PipelineRun
 }
 
 func (genericPipeline *GenericPipeline) startPart(part common.Part, settings map[string]interface{}, ts map[uint16]*base.VBTimestamp,
-	targetClusterRef *metadata.RemoteClusterReference, ssl_port_map map[string]uint16, isSSLOverMem bool) map[string]error {
+	targetClusterRef *metadata.RemoteClusterReference, ssl_port_map map[string]uint16, isSSLOverMem bool, err_ch chan partError) {
 
 	var err error = nil
-	errMap := make(map[string]error)
 
 	//start downstreams
 	if part.Connector() != nil {
@@ -117,23 +121,18 @@ func (genericPipeline *GenericPipeline) startPart(part common.Part, settings map
 		waitGrp := &sync.WaitGroup{}
 		for _, p := range downstreamParts {
 			waitGrp.Add(1)
-			go func(waitGrp *sync.WaitGroup, errMap map[string]error, p common.Part, settings map[string]interface{}, ts map[uint16]*base.VBTimestamp) {
+			go func(waitGrp *sync.WaitGroup, err_ch chan partError, p common.Part, settings map[string]interface{}, ts map[uint16]*base.VBTimestamp) {
 				defer waitGrp.Done()
 				if p.State() == common.Part_Initial {
-					errs := genericPipeline.startPart(p, settings, ts, targetClusterRef, ssl_port_map, isSSLOverMem)
-					for partId, err := range errs {
-						if err.Error() != parts.PartAlreadyStartedError.Error() {
-							errMap[partId] = err
-						}
-					}
+					genericPipeline.startPart(p, settings, ts, targetClusterRef, ssl_port_map, isSSLOverMem, err_ch)
 				}
-			}(waitGrp, errMap, p, settings, ts)
+			}(waitGrp, err_ch, p, settings, ts)
 		}
 
 		waitGrp.Wait()
 
-		if len(errMap) > 0 {
-			return errMap
+		if len(err_ch) > 0 {
+			return
 		}
 	}
 
@@ -142,18 +141,16 @@ func (genericPipeline *GenericPipeline) startPart(part common.Part, settings map
 		genericPipeline.logger.Debugf("Calling part setting constructor\n")
 		partSettings, err = genericPipeline.partSetting_constructor(genericPipeline, part, settings, ts, targetClusterRef, ssl_port_map, isSSLOverMem)
 		if err != nil {
-			errMap[part.Id()] = err
-			return errMap
+			err_ch <- partError{part.Id(), err}
+			return
 		}
 
 	}
 
 	err = part.Start(partSettings)
 	if err != nil && err.Error() != parts.PartAlreadyStartedError.Error() {
-		errMap[part.Id()] = err
+		err_ch <- partError{part.Id(), err}
 	}
-
-	return errMap
 }
 
 //Start starts the pipeline
@@ -212,29 +209,26 @@ func (genericPipeline *GenericPipeline) Start(settings map[string]interface{}) e
 	//start all the processing steps of the Pipeline
 	//start the incoming nozzle which would start the downstream steps
 	//subsequently
+	err_ch := make(chan partError, 1000)
 	for _, source := range genericPipeline.sources {
-		errMap := make(map[string]error)
 		waitGrp := &sync.WaitGroup{}
 		waitGrp.Add(1)
-		go func(errMap map[string]error, source common.Nozzle, settings map[string]interface{}, waitGrp *sync.WaitGroup) {
+		go func(err_ch chan partError, source common.Nozzle, settings map[string]interface{}, waitGrp *sync.WaitGroup) {
 			defer waitGrp.Done()
 			ts := settings["VBTimestamps"].(map[uint16]*base.VBTimestamp)
 
-			errs := genericPipeline.startPart(source, settings, ts, targetClusterRef, ssl_port_map, isSSLOverMem)
-			if len(errs) > 0 {
-				for partId, err := range errs {
-					errMap[partId] = err
-				}
-			} else {
+			genericPipeline.startPart(source, settings, ts, targetClusterRef, ssl_port_map, isSSLOverMem, err_ch)
+			if len(err_ch) == 0 {
 				genericPipeline.logger.Infof("Incoming nozzle %s is started", source.Id())
 			}
 			return
 
-		}(errMap, source, genericPipeline.settings, waitGrp)
+		}(err_ch, source, genericPipeline.settings, waitGrp)
 
 		waitGrp.Wait()
-		if len(errMap) != 0 {
-			return fmt.Errorf("Pipeline %v failed to start, err=%v\n", genericPipeline.Topic(), errMap)
+		if len(err_ch) != 0 {
+			errMsg := formatErrMsg(err_ch)
+			return fmt.Errorf("Pipeline %v failed to start, err=%v\n", genericPipeline.Topic(), errMsg)
 		}
 	}
 	genericPipeline.logger.Info("All parts has been started")
@@ -273,6 +267,19 @@ func (genericPipeline *GenericPipeline) Start(settings map[string]interface{}) e
 	}
 
 	return err
+}
+
+func formatErrMsg(err_ch chan partError) map[string]error {
+	errMap := make(map[string]error)
+	for {
+		select {
+		case part_err := <-err_ch:
+			errMap[part_err.partId] = part_err.err
+		default:
+			return errMap
+		}
+	}
+	return errMap
 }
 
 func (genericPipeline *GenericPipeline) stopPart(part common.Part) error {
