@@ -158,7 +158,6 @@ type dataBatch struct {
 	start_time        time.Time
 	last_item_in_time time.Time
 	ready_time        time.Time
-	frozen            bool
 	logger            *log.CommonLogger
 	expiring_duration time.Duration
 	//	expire_ch         <-chan time.Time
@@ -191,7 +190,7 @@ func (b *dataBatch) accumuBatch(req *base.WrappedMCRequest, classifyFunc func(re
 		if !b.nonempty_set {
 			b.start_time = time_now
 			b.nonempty_set = true
-			b.batch_nonempty_ch <- true
+			close(b.batch_nonempty_ch)
 		}
 		if !classifyFunc(req.Req) {
 			b.bigDoc_map[req.UniqueKey] = req
