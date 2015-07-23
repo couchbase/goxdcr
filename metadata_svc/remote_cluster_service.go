@@ -326,7 +326,8 @@ func (service *RemoteClusterService) ValidateAddRemoteCluster(ref *metadata.Remo
 		return wrapAsInvalidRemoteClusterOperationError(errors.New("duplicate cluster names are not allowed"))
 	}
 
-	err := service.validateRemoteCluster(ref)
+	bUpdateUuid := (ref.Uuid == "")
+	err := service.validateRemoteCluster(ref, bUpdateUuid)
 	if err != nil {
 		return err
 	}
@@ -345,7 +346,7 @@ func (service *RemoteClusterService) ValidateSetRemoteCluster(refName string, re
 		return err
 	}
 
-	err = service.validateRemoteCluster(ref)
+	err = service.validateRemoteCluster(ref, true)
 	if err != nil {
 		return err
 	}
@@ -358,7 +359,7 @@ func (service *RemoteClusterService) ValidateSetRemoteCluster(refName string, re
 }
 
 // validate remote cluster info and retrieve actual uuid
-func (service *RemoteClusterService) validateRemoteCluster(ref *metadata.RemoteClusterReference) error {
+func (service *RemoteClusterService) validateRemoteCluster(ref *metadata.RemoteClusterReference, updateUUid bool) error {
 	isEnterprise, err := service.xdcr_topology_svc.IsMyClusterEnterprise()
 	if err != nil {
 		return err
@@ -415,20 +416,21 @@ func (service *RemoteClusterService) validateRemoteCluster(ref *metadata.RemoteC
 		return wrapAsInvalidRemoteClusterError(fmt.Errorf("Remote cluster %v is not enterprise version, so no SSL support", hostAddr))
 	}
 	// get remote cluster uuid from the map
-	actualUuid, ok := poolsInfo[base.RemoteClusterUuid]
-	if !ok {
-		// should never get here
-		return errors.New("Could not get uuid of remote cluster.")
-	}
-	actualUuidStr, ok := actualUuid.(string)
-	if !ok {
-		// should never get here
-		return errors.New(fmt.Sprintf("uuid of remote cluster is of wrong type. Expected type: string; Actual type: %s", reflect.TypeOf(actualUuid)))
-	}
+	if updateUUid {
+		actualUuid, ok := poolsInfo[base.RemoteClusterUuid]
+		if !ok {
+			// should never get here
+			return errors.New("Could not get uuid of remote cluster.")
+		}
+		actualUuidStr, ok := actualUuid.(string)
+		if !ok {
+			// should never get here
+			return errors.New(fmt.Sprintf("uuid of remote cluster is of wrong type. Expected type: string; Actual type: %s", reflect.TypeOf(actualUuid)))
+		}
 
-	// update uuid in ref to real value
-	ref.Uuid = actualUuidStr
-
+		// update uuid in ref to real value
+		ref.Uuid = actualUuidStr
+	}
 	return nil
 }
 
