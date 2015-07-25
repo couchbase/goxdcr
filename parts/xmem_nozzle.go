@@ -703,8 +703,9 @@ type XmemNozzle struct {
 
 	dataObj_recycler base.DataObjRecycler
 
-	topic          string
-	getMeta_ticker *time.Ticker
+	topic            string
+	getMeta_ticker   *time.Ticker
+	last_ready_batch int32
 }
 
 func NewXmemNozzle(id string,
@@ -860,6 +861,7 @@ func (xmem *XmemNozzle) batchReady(lock bool) error {
 		defer xmem.batch_lock.Unlock()
 	}
 
+	ready_batches_count_before := len(xmem.batches_ready)
 	defer func() {
 		if r := recover(); r != nil {
 			if xmem.validateRunningState() == nil {
@@ -885,6 +887,10 @@ func (xmem *XmemNozzle) batchReady(lock bool) error {
 		case xmem.batches_ready <- batch:
 			xmem.Logger().Debugf("There are %d batches in ready queue\n", len(xmem.batches_ready))
 			xmem.initNewBatch(false)
+		}
+
+		if len(xmem.batches_ready) > ready_batches_count_before+1 {
+			panic("DETECT CONCURRENT")
 		}
 	}
 	return nil
@@ -919,9 +925,6 @@ func (xmem *XmemNozzle) Receive(data interface{}) error {
 	xmem.Logger().Debugf("data key=%v seq=%v is received", request.Req.Key, data.(*base.WrappedMCRequest).Seqno)
 	xmem.Logger().Debugf("data channel len is %d\n", len(xmem.dataChan))
 
-	xmem.writeToDataChan(request)
-	atomic.AddUint32(&xmem.counter_received, 1)
-
 	xmem.accumuBatch(request)
 
 	xmem.Logger().Debugf("Xmem %v received %v items, queue_size = %v\n", xmem.Id(), xmem.counter_received, len(xmem.dataChan))
@@ -932,6 +935,11 @@ func (xmem *XmemNozzle) Receive(data interface{}) error {
 func (xmem *XmemNozzle) accumuBatch(request *base.WrappedMCRequest) {
 	xmem.batch_lock.Lock()
 	defer xmem.batch_lock.Unlock()
+	xmem.writeToDataChan(request)
+	atomic.AddUint32(&xmem.counter_received, 1)
+	if string(request.Req.Key) == "" {
+		panic(fmt.Sprintf("accumuBatch received request with Empty key, req.UniqueKey=%v\n", request.UniqueKey))
+	}
 	if xmem.batch.accumuBatch(request, xmem.optimisticRep) {
 		xmem.batchReady(false)
 	}
@@ -1163,7 +1171,6 @@ func (xmem *XmemNozzle) sendWithRetry(client *xmemClient, numOfRetry int, item_b
 func (xmem *XmemNozzle) sendSetMeta_internal(batch *dataBatch) error {
 	var err error
 	if batch != nil {
-
 		//batch send
 		err = xmem.batchSetMetaWithRetry(batch, xmem.config.maxRetry)
 		if err != nil && err != PartStoppedError {
@@ -1271,10 +1278,10 @@ func (xmem *XmemNozzle) batchGetMeta(bigDoc_map map[string]*base.WrappedMCReques
 	counter := 0
 	opaque := xmem.getOpaque(0, sequence)
 	sent_key_map := make(map[string]bool, len(bigDoc_map))
-	for _, originalReq := range bigDoc_map {
+	for key, originalReq := range bigDoc_map {
 		docKey := string(originalReq.Req.Key)
 		if docKey == "" {
-			panic(fmt.Sprintf("Empty docKey, req=%v", originalReq.Req))
+			panic(fmt.Sprintf("unique-key= %v, Empty docKey, req=%v, bigDoc_map=%v", key, originalReq.Req, bigDoc_map))
 		}
 		if _, ok := sent_key_map[docKey]; !ok {
 			req := xmem.composeRequestForGetMeta(docKey, originalReq.Req.VBucket, opaque)
@@ -1919,7 +1926,7 @@ func (xmem *XmemNozzle) handleGeneralError(err error) {
 	err1 := xmem.SetState(common.Part_Error)
 	if err1 == nil {
 		xmem.RaiseEvent(common.NewEvent(common.ErrorEncountered, nil, xmem, nil, err))
-		xmem.Logger().Errorf("Raise error condition %v\n", err)
+		xmem.Logger().Errorf("%v Raise error condition %v\n", xmem.Id(), err)
 	} else {
 		xmem.Logger().Infof("%v in shutdown process, err=%v is ignored\n", xmem.Id(), err)
 	}
