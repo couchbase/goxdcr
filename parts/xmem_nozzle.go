@@ -53,8 +53,8 @@ const (
 	default_demandEncryption    bool          = false
 	default_max_read_downtime   time.Duration = 60 * time.Second
 	//wait time between write is default_backoff_wait_time*backoff_factor
-	default_backoff_wait_time   time.Duration = 10 * time.Millisecond
-	default_getMeta_readTimeout time.Duration = time.Duration(1) * time.Second
+	default_backoff_wait_time time.Duration = 10 * time.Millisecond
+	default_getMeta_Timeout   time.Duration = time.Duration(1) * time.Second
 
 	//the maximum data (in byte) data channel can hold
 	max_datachannelSize = 10 * 1024 * 1024
@@ -705,11 +705,14 @@ type XmemNozzle struct {
 
 	dataObj_recycler base.DataObjRecycler
 
-	topic            string
-	getMeta_ticker   *time.Ticker
-	last_ready_batch int32
+	topic                 string
+	getMeta_ticker        *time.Ticker
+	last_ready_batch      int32
 	last_ten_batches_size []int
 	last_batch_id         int32
+	//to control the write from SetWithMeta and GetWithMeta
+	//to avoid the write has spike which causes write timeout
+	write_lock sync.Mutex
 }
 
 func NewXmemNozzle(id string,
@@ -757,6 +760,7 @@ func NewXmemNozzle(id string,
 		dataObj_recycler:    dataObj_recycler,
 		topic:               topic,
 		maxseqno_received_map: make(map[uint16]uint64),
+		write_lock:            sync.Mutex{},
 		last_ten_batches_size: []int{0, 0, 0, 0, 0, 0, 0, 0, 0, 0}}
 
 	xmem.config.connectStr = connectString
@@ -843,10 +847,6 @@ func (xmem *XmemNozzle) Stop() error {
 
 	if xmem.batches_queue != nil {
 		close(xmem.batches_queue)
-	}
-
-	if xmem.batches_ready_queue != nil {
-		close(xmem.batches_ready_queue)
 	}
 
 	err = xmem.Stop_server()
@@ -985,15 +985,6 @@ done:
 
 }
 
-func (xmem *XmemNozzle) shouldMoveBatch () <-chan bool {
-	return_ch := make (chan bool, 1)
-	if len(xmem.batches_queue) == 0 && xmem.batch.count() > 0 {
-		close(return_ch)
-		return return_ch
-	}
-	return return_ch
-}
-
 func (xmem *XmemNozzle) processData_sendbatch(finch chan bool, waitGrp *sync.WaitGroup) (err error) {
 	xmem.Logger().Infof("%v processData_sendbatch starts..........\n", xmem.Id())
 	defer waitGrp.Done()
@@ -1041,6 +1032,10 @@ func (xmem *XmemNozzle) onExit() {
 	close(xmem.receiver_finch)
 	close(xmem.checker_finch)
 	close(xmem.selfMonitor_finch)
+
+	if xmem.batches_ready_queue != nil {
+		close(xmem.batches_ready_queue)
+	}
 
 	go xmem.finalCleanup()
 }
@@ -1471,8 +1466,8 @@ func (xmem *XmemNozzle) initializeConnection() (err error) {
 	xmem.client_for_setMeta = newXmemClient("client_setMeta", xmem.config.readTimeout,
 		xmem.config.writeTimeout, memClient_setMeta,
 		getPoolName(xmem.config), xmem.config.maxRetry, xmem.config.max_read_downtime, xmem.Logger())
-	xmem.client_for_getMeta = newXmemClient("client_getMeta", default_getMeta_readTimeout,
-		xmem.config.writeTimeout, memClient_getMeta,
+	xmem.client_for_getMeta = newXmemClient("client_getMeta", default_getMeta_Timeout,
+		default_getMeta_Timeout, memClient_getMeta,
 		getPoolName(xmem.config), xmem.config.maxRetry, xmem.config.max_read_downtime, xmem.Logger())
 
 	if err == nil {
@@ -1967,7 +1962,11 @@ func (xmem *XmemNozzle) writeToClient(client *xmemClient, bytes []byte) (error, 
 	if err != nil {
 		return err, rev
 	}
+
+	xmem.write_lock.Lock()
 	_, err = conn.Write(bytes)
+	xmem.write_lock.Unlock()
+
 	if err == nil {
 		client.reportOpSuccess()
 		return err, rev
