@@ -165,7 +165,7 @@ func (tsTracker *ThroughSeqnoTrackerSvc) Attach(pipeline common.Pipeline) error 
 
 func (tsTracker *ThroughSeqnoTrackerSvc) ProcessEvent(event *common.Event) error {
 	if !tsTracker.isPipelineRunning() {
-		tsTracker.logger.Infof("Pipeline %s is no longer running, skip ProcessEvent\n", tsTracker.rep_id)
+		tsTracker.logger.Debugf("Pipeline %s is no longer running, skip ProcessEvent\n", tsTracker.rep_id)
 	}
 
 	if event.EventType == common.DataSent {

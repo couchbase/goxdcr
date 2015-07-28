@@ -50,7 +50,7 @@ var dcp_setting_defs base.SettingDefinitions = base.SettingDefinitions{DCP_VBTim
 
 var ErrorEmptyVBList = errors.New("Invalid configuration for DCP nozzle. VB list cannot be empty.")
 
-var MaxCountStreamsInactive uint8 = 3
+var MaxCountStreamsInactive uint8 = 40
 
 type vbtsWithLock struct {
 	ts   *base.VBTimestamp
@@ -412,10 +412,14 @@ func (dcp *DcpNozzle) processData() (err error) {
 				}
 
 			} else if m.Opcode == gomemcached.UPR_STREAMEND {
-				err_streamend := fmt.Errorf("dcp stream for vb=%v is closed by producer", m.VBucket)
-				dcp.Logger().Infof("%v: %v", dcp.Id(), err_streamend)
-				dcp.handleGeneralError(err_streamend)
-				goto done
+				vbno := m.VBucket
+				stream_status, err := dcp.getStreamState(vbno)
+				if err == nil && stream_status == Dcp_Stream_Active {
+					err_streamend := fmt.Errorf("dcp stream for vb=%v is closed by producer", m.VBucket)
+					dcp.Logger().Infof("%v: %v", dcp.Id(), err_streamend)
+					dcp.handleGeneralError(err_streamend)
+					goto done
+				}
 
 			} else {
 				if dcp.IsOpen() {

@@ -194,8 +194,6 @@ func (ckmgr *CheckpointManager) Start(settings map[string]interface{}) error {
 	//start checkpointing loop
 	ckmgr.wait_grp.Add(1)
 	go ckmgr.checkpointing()
-	ckmgr.wait_grp.Add(1)
-	go ckmgr.massCheckVBOpaquesJob()
 	return nil
 }
 
@@ -333,7 +331,7 @@ func (ckmgr *CheckpointManager) SetVBTimestamps(topic string) error {
 	}
 
 	//divide the workload to several getter and run the getter parallelly
-	workload := 5
+	workload := 100
 	start_index := 0
 
 	getter_wait_grp := &sync.WaitGroup{}
@@ -364,17 +362,21 @@ func (ckmgr *CheckpointManager) SetVBTimestamps(topic string) error {
 	}
 
 	ckmgr.logger.Infof("Done with setting starting seqno for pipeline %v\n", ckmgr.pipeline.InstanceId())
+
+	ckmgr.wait_grp.Add(1)
+	go ckmgr.massCheckVBOpaquesJob()
+
 	return nil
 }
 
 func (ckmgr *CheckpointManager) setTimestampForVB(vbno uint16, ts *base.VBTimestamp) error {
 	ckmgr.logger.Debugf("%v Set VBTimestamp: vb=%v, ts.Seqno=%v\n", ckmgr.pipeline.Topic(), vbno, ts.Seqno)
 	ckmgr.logger.Debugf("%v vb=%v ts=%v\n", ckmgr.pipeline.Topic(), vbno, ts)
-	defer ckmgr.logger.Infof("%v Set VBTimestamp for vb=%v completed\n", ckmgr.pipeline.Topic(), vbno)
+	defer ckmgr.logger.Debugf("%v Set VBTimestamp for vb=%v completed\n", ckmgr.pipeline.Topic(), vbno)
 
 	//set the start seqno on through_seqno_tracker_svc
 	ckmgr.through_seqno_tracker_svc.SetStartSeqno(vbno, ts.Seqno)
-	ckmgr.logger.Infof("%v Set startSeqno to %v for vb=%v\n", ckmgr.pipeline.Topic(), ts.Seqno, vbno)
+	ckmgr.logger.Debugf("%v Set startSeqno to %v for vb=%v\n", ckmgr.pipeline.Topic(), ts.Seqno, vbno)
 
 	settings := ckmgr.pipeline.Settings()
 	ts_obj := utils.GetSettingFromSettings(settings, VBTimestamp)
