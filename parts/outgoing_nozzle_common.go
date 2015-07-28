@@ -53,8 +53,6 @@ type baseConfig struct {
 	maxSize          int
 	optiRepThreshold int
 	maxRetryInterval time.Duration
-	//the max time that a batch can wait in the queue
-	batchExpirationTime time.Duration
 	//the write timeout for tcp connection
 	writeTimeout time.Duration
 	//the read timeout for tcp connection
@@ -100,14 +98,14 @@ type DataFailedCRSourceEventAdditional struct {
 }
 
 type DataSentEventAdditional struct {
-	Seqno       uint64
-	IsOptRepd    bool
-	Commit_time time.Duration
+	Seqno          uint64
+	IsOptRepd      bool
+	Commit_time    time.Duration
 	Resp_wait_time time.Duration
-	Opcode      mc.CommandCode
-	IsExpirySet bool
-	VBucket     uint16
-	Req_size    int
+	Opcode         mc.CommandCode
+	IsExpirySet    bool
+	VBucket        uint16
+	Req_size       int
 }
 
 // does not return error since the assumption is that settings have been validated prior
@@ -126,9 +124,6 @@ func (config *baseConfig) initializeConfig(settings map[string]interface{}) {
 	}
 	if val, ok := settings[SETTING_NUMOFRETRY]; ok {
 		config.maxRetry = val.(int)
-	}
-	if val, ok := settings[SETTING_BATCH_EXPIRATION_TIME]; ok {
-		config.batchExpirationTime = val.(time.Duration)
 	}
 	if val, ok := settings[SETTING_WRITE_TIMEOUT]; ok {
 		config.writeTimeout = val.(time.Duration)
@@ -161,24 +156,21 @@ type dataBatch struct {
 	capacity_count    int
 	capacity_size     int
 	start_time        time.Time
-	frozen            bool
 	logger            *log.CommonLogger
-	expiring_duration time.Duration
-	expire_ch         <-chan time.Time
-	expiration_set    bool
+	batch_nonempty_ch chan bool
+	nonempty_set      bool
 }
 
-func newBatch(cap_count int, cap_size int, expiring_duration time.Duration, logger *log.CommonLogger) *dataBatch {
+func newBatch(cap_count int, cap_size int, logger *log.CommonLogger) *dataBatch {
 	return &dataBatch{
 		curCount:          0,
 		curSize:           0,
 		capacity_count:    cap_count,
 		capacity_size:     cap_size,
-		expiring_duration: expiring_duration,
 		bigDoc_map:        make(map[string]*base.WrappedMCRequest),
 		bigDoc_noRep_map:  make(map[string]bool),
-		expiration_set:    false,
-		expire_ch:         make(<-chan time.Time, 0),
+		batch_nonempty_ch: make(chan bool),
+		nonempty_set:      false,
 		logger:            logger}
 }
 
@@ -189,10 +181,10 @@ func (b *dataBatch) accumuBatch(req *base.WrappedMCRequest, classifyFunc func(re
 		size := req.Req.Size()
 
 		b.curCount++
-		if !b.expiration_set {
+		if !b.nonempty_set {
 			b.start_time = time.Now()
-			b.expire_ch = time.After(b.expiring_duration)
-			b.expiration_set = true
+			b.nonempty_set = true
+			close(b.batch_nonempty_ch)
 		}
 		if !classifyFunc(req.Req) {
 			b.bigDoc_map[req.UniqueKey] = req

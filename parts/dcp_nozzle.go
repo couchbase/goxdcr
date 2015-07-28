@@ -50,7 +50,7 @@ var dcp_setting_defs base.SettingDefinitions = base.SettingDefinitions{DCP_VBTim
 
 var ErrorEmptyVBList = errors.New("Invalid configuration for DCP nozzle. VB list cannot be empty.")
 
-var MaxCountStreamsInactive uint8 = 3
+var MaxCountStreamsInactive uint8 = 40
 
 type vbtsWithLock struct {
 	ts   *base.VBTimestamp
@@ -412,10 +412,14 @@ func (dcp *DcpNozzle) processData() (err error) {
 				}
 
 			} else if m.Opcode == gomemcached.UPR_STREAMEND {
-				err_streamend := fmt.Errorf("dcp stream for vb=%v is closed by producer", m.VBucket)
-				dcp.Logger().Infof("%v: %v", dcp.Id(), err_streamend)
-				dcp.handleGeneralError(err_streamend)
-				goto done
+				vbno := m.VBucket
+				stream_status, err := dcp.getStreamState(vbno)
+				if err == nil && stream_status == Dcp_Stream_Active {
+					err_streamend := fmt.Errorf("dcp stream for vb=%v is closed by producer", m.VBucket)
+					dcp.Logger().Infof("%v: %v", dcp.Id(), err_streamend)
+					dcp.handleGeneralError(err_streamend)
+					goto done
+				}
 
 			} else {
 				if dcp.IsOpen() {
@@ -575,6 +579,18 @@ func (dcp *DcpNozzle) inactiveDcpStreams() []uint16 {
 	return ret
 }
 
+func (dcp *DcpNozzle) initedButInactiveDcpStreams() []uint16 {
+	ret := []uint16{}
+	dcp.vb_stream_status_lock.RLock()
+	defer dcp.vb_stream_status_lock.RUnlock()
+	for vb, statusobj := range dcp.vb_stream_status {
+		if statusobj.state == Dcp_Stream_Init {
+			ret = append(ret, vb)
+		}
+	}
+	return ret
+}
+
 func (dcp *DcpNozzle) nonInitDcpStreams() []uint16 {
 	ret := []uint16{}
 	dcp.vb_stream_status_lock.RLock()
@@ -724,7 +740,7 @@ func (dcp *DcpNozzle) CheckDcpHealth(dcp_stats map[string]map[string]string) err
 
 // check if inactive streams need to be restarted
 func (dcp *DcpNozzle) checkInactiveStreams() error {
-	streams_inactive := dcp.inactiveDcpStreams()
+	streams_inactive := dcp.initedButInactiveDcpStreams()
 	if len(streams_inactive) > 0 {
 		dcp.counter_streams_inactive++
 		dcp.Logger().Infof("%v incrementing counter for inactive streams %v\n", dcp.Id(), dcp.counter_streams_inactive)
@@ -732,10 +748,8 @@ func (dcp *DcpNozzle) checkInactiveStreams() error {
 			dcp.Logger().Infof("%v restarting inactive streams %v\n", dcp.Id(), streams_inactive)
 			opaque := newOpaque()
 			for _, vbno := range streams_inactive {
-				err := dcp.uprFeed.CloseStream(vbno, opaque)
-				if err != nil {
-					return err
-				}
+				//ignore the error
+				dcp.uprFeed.CloseStream(vbno, opaque)
 			}
 			err := dcp.startUprStreams_internal(streams_inactive)
 			if err != nil {

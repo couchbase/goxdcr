@@ -316,7 +316,7 @@ func main() {
 	//start app reader
 
 	//let it run for 3 minutes
-	time.Sleep(time.Second * 30)
+	time.Sleep(time.Second * 120)
 
 	quit = true
 
