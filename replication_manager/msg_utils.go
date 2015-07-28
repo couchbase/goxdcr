@@ -236,7 +236,7 @@ func DecodeJustValidateFromRequest(request *http.Request) (bool, error) {
 // decode parameters from create remote cluster request
 func DecodeCreateRemoteClusterRequest(request *http.Request) (justValidate bool, remoteClusterRef *metadata.RemoteClusterReference, errorsMap map[string]error, err error) {
 	errorsMap = make(map[string]error)
-	var uuid, name, hostName, userName, password string
+	var name, hostName, userName, password string
 	var certificate []byte
 
 	// default to false if not passed in
@@ -255,8 +255,6 @@ func DecodeCreateRemoteClusterRequest(request *http.Request) (justValidate bool,
 			if err != nil {
 				errorsMap[base.JustValidate] = err
 			}
-		case base.RemoteClusterUuid:
-			uuid = getStringFromValArr(valArr)
 		case base.RemoteClusterName:
 			name = getStringFromValArr(valArr)
 		case base.RemoteClusterHostName:
@@ -308,7 +306,7 @@ func DecodeCreateRemoteClusterRequest(request *http.Request) (justValidate bool,
 		hostName = hostName + base.UrlPortNumberDelimiter + DefaultAdminPort
 	}
 	if len(errorsMap) == 0 {
-		remoteClusterRef, err = metadata.NewRemoteClusterReference(uuid, name, hostName, userName, password, demandEncryption, certificate)
+		remoteClusterRef, err = metadata.NewRemoteClusterReference("", name, hostName, userName, password, demandEncryption, certificate)
 	}
 
 	return
