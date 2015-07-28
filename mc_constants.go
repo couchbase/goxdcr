@@ -104,6 +104,7 @@ const (
 	ROLLBACK        = Status(0x23)
 	UNKNOWN_COMMAND = Status(0x81)
 	ENOMEM          = Status(0x82)
+	NOT_SUPPORTED   = Status(0x83)
 	TMPFAIL         = Status(0x86)
 )
 
