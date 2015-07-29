@@ -1426,12 +1426,12 @@ func (xmem *XmemNozzle) getConnPool() (pool base.ConnPool, err error) {
 		if xmem.config.memcached_ssl_port != 0 {
 			xmem.Logger().Infof("Get or create ssl over memcached connection, memcached_ssl_port=%v\n", int(xmem.config.memcached_ssl_port))
 			pool, err = base.ConnPoolMgr().GetOrCreateSSLOverMemPool(poolName, hostName, xmem.config.bucketName, xmem.config.bucketName, xmem.config.password,
-				base.DefaultConnectionSize, int(xmem.config.memcached_ssl_port), xmem.config.certificate)
+				xmem.config.connPoolSize, int(xmem.config.memcached_ssl_port), xmem.config.certificate)
 
 		} else {
 			xmem.Logger().Infof("Get or create ssl over proxy connection")
 			pool, err = base.ConnPoolMgr().GetOrCreateSSLOverProxyPool(poolName, hostName, xmem.config.bucketName, xmem.config.bucketName, xmem.config.password,
-				base.DefaultConnectionSize, int(remote_mem_port), int(xmem.config.local_proxy_port), int(xmem.config.remote_proxy_port), xmem.config.certificate)
+				xmem.config.connPoolSize, int(remote_mem_port), int(xmem.config.local_proxy_port), int(xmem.config.remote_proxy_port), xmem.config.certificate)
 		}
 		if err != nil {
 			return nil, err
@@ -1459,6 +1459,7 @@ func (xmem *XmemNozzle) initializeConnection() (err error) {
 	if err != nil {
 		return
 	}
+
 	memClient_getMeta, err := pool.Get()
 	if err != nil {
 		return
@@ -2071,6 +2072,7 @@ func (xmem *XmemNozzle) repairConn(client *xmemClient, reason string, rev int) e
 	if err != nil {
 		return err
 	}
+
 	memClient, err := pool.Get()
 
 	if err == nil {

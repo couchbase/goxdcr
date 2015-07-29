@@ -358,6 +358,7 @@ func (p *connPool) Release(client *mcc.Client) {
 			return
 		default:
 			//the pool reaches its capacity, drop the client on the floor
+			client.Close()
 			return
 		}
 	}
