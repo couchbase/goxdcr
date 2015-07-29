@@ -28,6 +28,7 @@ import (
 	"net"
 	"net/http"
 	"reflect"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -41,6 +42,7 @@ const (
 
 	//default configuration
 	default_numofretry_capi          int           = 3
+	default_batchExpirationTime_capi               = 10 * time.Second
 	default_retry_interval_capi      time.Duration = 10 * time.Millisecond
 	default_maxRetryInterval_capi                  = 30 * time.Second
 	default_writeTimeout_capi        time.Duration = time.Duration(1) * time.Second
@@ -114,6 +116,7 @@ func newCapiConfig(logger *log.CommonLogger) capiConfig {
 		baseConfig: baseConfig{maxCount: -1,
 			maxSize:             -1,
 			maxRetry:            default_numofretry_capi,
+			batchExpirationTime: default_batchExpirationTime_capi,
 			writeTimeout:        default_writeTimeout_capi,
 			readTimeout:         default_readTimeout_capi,
 			maxRetryInterval:    default_maxRetryInterval_capi,
@@ -275,6 +278,9 @@ func (capi *CapiNozzle) Start(settings map[string]interface{}) error {
 		go capi.selfMonitor(capi.selfMonitor_finch, &capi.childrenWaitGrp)
 
 		capi.childrenWaitGrp.Add(1)
+		go capi.check(capi.checker_finch, &capi.childrenWaitGrp)
+
+		capi.childrenWaitGrp.Add(1)
 		go capi.processData_batch(capi.sender_finch, &capi.childrenWaitGrp)
 
 		capi.start_time = time.Now()
@@ -413,24 +419,7 @@ func (capi *CapiNozzle) processData_batch(finch chan bool, waitGrp *sync.WaitGro
 					}
 				}
 			}
-		default:
-			if capi.validateRunningState() != nil {
-				capi.Logger().Infof("capi %v has stopped.", capi.Id())
-				goto done
-			}
 
-			max_count := 0
-			var max_batch_vbno uint16 = 0
-			for vbno, batch := range capi.vb_batch_map {
-				if batch.count() > max_count {
-					max_count = batch.count()
-					max_batch_vbno = vbno
-				}
-			}
-
-			if max_count > 0 {
-				capi.batchReady(max_batch_vbno)
-			}
 		}
 	}
 
@@ -554,7 +543,7 @@ func (capi *CapiNozzle) batchSendWithRetry(batch *capiBatch) error {
 		} else {
 			capi.Logger().Debugf("did not send doc with key %v since it failed conflict resolution\n", string(item.Req.Key))
 			additionalInfo := DataFailedCRSourceEventAdditional{Seqno: item.Seqno,
-				Opcode:      encodeOpCode(item.Req.Opcode),
+				Opcode:      item.Req.Opcode,
 				IsExpirySet: (binary.BigEndian.Uint32(item.Req.Extras[4:8]) != 0),
 				VBucket:     item.Req.VBucket,
 			}
@@ -664,6 +653,51 @@ func (capi *CapiNozzle) selfMonitor(finch chan bool, waitGrp *sync.WaitGroup) {
 done:
 	capi.Logger().Infof("Capi %v selfMonitor routine exits", capi.Id())
 
+}
+
+func (capi *CapiNozzle) check(finch chan bool, waitGrp *sync.WaitGroup) {
+	capi.Logger().Infof("check routine for %v starting with check interval %v ...\n", capi.Id(), capi.config.batchExpirationTime)
+	defer waitGrp.Done()
+
+	ticker := time.Tick(capi.config.batchExpirationTime)
+	for {
+		select {
+		case <-finch:
+			goto done
+		case <-ticker:
+			if capi.validateRunningState() != nil {
+				goto done
+			}
+
+			// find all batches that have expired
+			start_time_vb_map := make(map[float64]uint16)
+			start_times := make([]float64, 0)
+			for vbno, batch := range capi.vb_batch_map {
+				select {
+				case <-batch.expire_ch:
+					start_time := float64(batch.start_time.UnixNano())
+					start_time_vb_map[start_time] = vbno
+					start_times = append(start_times, start_time)
+				default:
+				}
+			}
+
+			if len(start_times) > 0 {
+				// sort start time in increasing order, so that we can move batches
+				// that expired earlier to batches_ready queue earlier to ensure fairness
+				sort.Float64s(start_times)
+				for _, start_time := range start_times {
+
+					vbno := start_time_vb_map[start_time]
+					capi.Logger().Infof("%v batch for vb %v expired, moving it to ready queue\n", capi.Id(), vbno)
+					capi.batchReady(vbno)
+				}
+			}
+
+		}
+	}
+done:
+	capi.Logger().Infof("check routine for %v exiting ...\n", capi.Id())
 }
 
 func (capi *CapiNozzle) validateRunningState() error {
@@ -1009,7 +1043,7 @@ func getSerializedRevision(req *mc.MCRequest) string {
 
 func (capi *CapiNozzle) initNewBatch(vbno uint16) {
 	capi.Logger().Debugf("init a new batch for vb %v\n", vbno)
-	capi.vb_batch_map[vbno] = &capiBatch{*newBatch(capi.config.maxCount, capi.config.maxSize, capi.Logger()), vbno}
+	capi.vb_batch_map[vbno] = &capiBatch{*newBatch(capi.config.maxCount, capi.config.maxSize, capi.config.batchExpirationTime, capi.Logger()), vbno}
 }
 
 func (capi *CapiNozzle) initialize(settings map[string]interface{}) error {
