@@ -255,7 +255,7 @@ func (service *ReplicationSpecService) SetReplicationSpec(spec *metadata.Replica
 
 	service.updateCache(spec.Id, spec)
 
-	service.logger.Infof("replication spec %s is updated, rev=%v\n", rev)
+	service.logger.Infof("replication spec %s is updated, rev=%v\n", spec.Id, rev)
 
 	return nil
 }
@@ -466,7 +466,7 @@ func (service *ReplicationSpecService) ValidateExistingReplicationSpec(spec *met
 	}
 
 	//validate target cluster
-	targetClusterRef, err := service.remote_cluster_svc.RemoteClusterByUuid(spec.TargetClusterUUID, false)
+	targetClusterRef, err := service.remote_cluster_svc.RemoteClusterByUuid(spec.TargetClusterUUID, true)
 	if err == service_def.MetadataNotFoundErr {
 		//remote cluster is no longer valid
 		errMsg := fmt.Sprintf("spec %v refers to non-existent remote cluster reference \"%v\"", spec.Id, spec.TargetClusterUUID)
@@ -495,6 +495,9 @@ func (service *ReplicationSpecService) ValidateExistingReplicationSpec(spec *met
 		errMsg := fmt.Sprintf("spec %v refers to non-existent target bucket \"%v\"\n", spec.Id, spec.TargetBucketName)
 		service.logger.Errorf(errMsg)
 		return InvalidReplicationSpecError, errors.New(errMsg)
+	} else if err_target != nil {
+		service.logger.Infof("Received error %v when validating target bucket %v for spec %v. Skipping target bucket validation. remote_connStr=%v, remote_userName=%v\n",
+			err_target, spec.TargetBucketName, spec.Id, remote_connStr, remote_userName)
 	}
 
 	if spec.TargetBucketUUID != "" && spec.TargetBucketUUID != targetBucketUuid {
