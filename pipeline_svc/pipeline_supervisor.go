@@ -142,7 +142,12 @@ func (pipelineSupervisor *PipelineSupervisor) monitorPipelineHealth() error {
 		case <-health_check_ticker.C:
 			err := simple_utils.ExecWithTimeout(pipelineSupervisor.checkPipelineHealth, 1000*time.Millisecond, pipelineSupervisor.Logger())
 			if err != nil {
-				return nil
+				if _, ok := err.(*simple_utils.ExecutionTimeoutError); ok {
+					// ignore timeout error and continue
+					pipelineSupervisor.Logger().Infof("Received timeout error when checking pipeline health. topic=%v\n", pipelineSupervisor.pipeline.Topic())
+				} else {
+					return err
+				}
 			}
 		}
 	}

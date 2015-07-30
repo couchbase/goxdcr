@@ -248,7 +248,7 @@ func (p *sslOverProxyConnPool) newConn() (*mcc.Client, error) {
 	sizeBytes := make([]byte, 4)
 	_, err = io.ReadFull(conn, sizeBytes)
 	if err != nil {
-		ConnPoolMgr().logger.Errorf("Failed to read. err=%v\n", err)
+		ConnPoolMgr().logger.Errorf("Failed to read response to handshake message. err=%v\n", err)
 		return nil, err
 	}
 	size := binary.BigEndian.Uint32(sizeBytes)
@@ -259,7 +259,7 @@ func (p *sslOverProxyConnPool) newConn() (*mcc.Client, error) {
 	ackBytes := make([]byte, size)
 	_, err = io.ReadFull(conn, ackBytes)
 	if err != nil {
-		ConnPoolMgr().logger.Errorf("Failed to read. err=%v\n", err)
+		ConnPoolMgr().logger.Errorf("Failed to read ack. err=%v\n", err)
 		return nil, err
 	}
 

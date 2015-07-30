@@ -339,17 +339,20 @@ func (pipelineMgr *pipelineManager) stopPipeline(rep_status *pipeline.Replicatio
 		p := rep_status.Pipeline()
 		err = p.Stop()
 		if err != nil {
-			pipelineMgr.logger.Errorf("Failed to stop pipeline %v - %v\n", rep_status.RepId(), err)
+			pipelineMgr.logger.Errorf("Received error when stopping pipeline %v - %v\n", rep_status.RepId(), err)
 			//pipeline failed to stopped gracefully in time. ignore the error.
-			//the parts tof the pipeline will eventually commit suicide.
+			//the parts of the pipeline will eventually commit suicide.
+		} else {
+			pipelineMgr.logger.Infof("Pipeline %v is stopped\n", rep_status.RepId())
 		}
 		pipelineMgr.removePipelineFromReplicationStatus(p)
-
-		pipelineMgr.logger.Infof("Pipeline is stopped")
 		pipelineMgr.logger.Infof("Replication Status=%v\n", rep_status)
 	} else {
-		//The named pipeline is not active
-		pipelineMgr.logger.Infof("The pipeline asked to be stopped is not running.")
+		if rep_status.Pipeline() == nil {
+			pipelineMgr.logger.Infof("Pipeline %v is not running\n", rep_status.RepId())
+		} else {
+			pipelineMgr.logger.Infof("Pipeline %v is not in the right state to be stopped. state=%v\n", rep_status.RepId(), rep_status.Pipeline().State())
+		}
 	}
 	return err
 }

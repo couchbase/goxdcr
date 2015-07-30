@@ -20,6 +20,13 @@ import (
 	"time"
 )
 
+type ExecutionTimeoutError struct {
+}
+
+func (te *ExecutionTimeoutError) Error() string {
+	return "Execution timed out"
+}
+
 var ErrorNoSourceKV = errors.New("Invalid configuration. No source kv node is found.")
 
 type Action func() error
@@ -41,7 +48,7 @@ func ExecWithTimeout(action Action, timeout_duration time.Duration, logger *log.
 			logger.Infof("Finish executing %v\n", action)
 			return retErr
 		case <-timeoutticker.C:
-			retErr = errors.New(fmt.Sprintf("Executing %v timed out", action))
+			retErr = &ExecutionTimeoutError{}
 			logger.Infof("Executing %v timed out", action)
 			logger.Info("****************************")
 			return retErr

@@ -333,7 +333,7 @@ func (genericPipeline *GenericPipeline) isUpstreamTo(target_part common.Part, pa
 //it can result the pipeline in either "Stopped" if the operation is successful or "Pending" otherwise
 func (genericPipeline *GenericPipeline) Stop() error {
 
-	genericPipeline.logger.Infof("stoppping pipeline %v\n", genericPipeline.InstanceId())
+	genericPipeline.logger.Infof("Stopping pipeline %v\n", genericPipeline.InstanceId())
 	var err error
 
 	err = genericPipeline.SetState(common.Pipeline_Stopping)
