@@ -34,6 +34,10 @@ func GetSourceVBListPerPipeline(pipeline common.Pipeline) []uint16 {
 func GetSourceVBMapForReplication(cluster_info_svc service_def.ClusterInfoSvc, xdcr_topology_svc service_def.XDCRCompTopologySvc,
 	spec *metadata.ReplicationSpecification, logger *log.CommonLogger) (map[string][]uint16, error) {
 	kv_vb_map := make(map[string][]uint16)
+	if spec == nil {
+		return kv_vb_map, nil
+	}
+
 	server_vbmap, err := cluster_info_svc.GetServerVBucketsMap(xdcr_topology_svc, spec.SourceBucketName)
 	if err != nil {
 		return nil, err
@@ -85,7 +89,7 @@ func GetElementIdFromNameAndIndex(pipeline common.Pipeline, name string, index i
 func GetElementNameFromIdWithIndex(id string) string {
 	parts := strings.Split(id, "_")
 	if len(parts) > 2 {
-		return parts[len(parts) - 2]
+		return parts[len(parts)-2]
 	}
 	return ""
 }

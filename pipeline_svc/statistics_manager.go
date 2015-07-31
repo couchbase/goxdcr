@@ -61,7 +61,7 @@ const (
 	CHANGES_LEFT_METRIC = "changes_left"
 	DOCS_LATENCY_METRIC = "wtavg_docs_latency"
 	META_LATENCY_METRIC = "wtavg_meta_latency"
-	RESP_WAIT_METRIC = "resp_wait_time"
+	RESP_WAIT_METRIC    = "resp_wait_time"
 
 	//checkpointing related statistics
 	DOCS_CHECKED_METRIC    = "docs_checked" //calculated
@@ -1129,8 +1129,7 @@ func UpdateStats(cluster_info_svc service_def.ClusterInfoSvc, xdcr_topology_svc 
 	checkpoints_svc service_def.CheckpointsService, logger *log.CommonLogger) {
 	logger.Debug("updateStats for paused replications")
 
-	for _, repl_id := range pipeline_manager.AllReplications() {
-		repl_status := pipeline_manager.ReplicationStatus(repl_id)
+	for repl_id, repl_status := range pipeline_manager.ReplicationStatusMap() {
 		overview_stats := repl_status.GetOverviewStats()
 		spec := repl_status.Spec()
 

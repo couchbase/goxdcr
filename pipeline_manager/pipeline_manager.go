@@ -152,6 +152,7 @@ func ReplicationStatusMap() map[string]*pipeline.ReplicationStatus {
 			rep_status := ReplicationStatus(specId)
 			if rep_status == nil {
 				//create the replication status
+				pipeline_mgr.logger.Infof("rep_status for topic %v is nil. Initialize it\n", specId)
 				rep_status = InitReplicationStatusForReplication(specId)
 			}
 			ret[specId] = rep_status

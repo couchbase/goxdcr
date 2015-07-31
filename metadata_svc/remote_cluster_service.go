@@ -23,6 +23,7 @@ import (
 	"reflect"
 	"strings"
 	"sync"
+	"time"
 )
 
 const (
@@ -213,6 +214,8 @@ func (service *RemoteClusterService) updateRemoteCluster(ref *metadata.RemoteClu
 		return err
 	}
 
+	service.logger.Infof("Remote cluster %v in metadata store updated. value=%v, revision=%v\n", key, value, revision)
+
 	// update ref.Revision
 	_, rev, err := service.metakv_svc.Get(key)
 	if err != nil {
@@ -270,6 +273,8 @@ func (service *RemoteClusterService) DelRemoteCluster(refName string) (*metadata
 	if err != nil {
 		return nil, err
 	}
+
+	service.logger.Infof("Remote cluster %v deleted from metadata store\n", key)
 
 	service.updateCache(ref.Id, nil)
 
@@ -396,8 +401,9 @@ func (service *RemoteClusterService) validateRemoteCluster(ref *metadata.RemoteC
 		hostAddr = utils.EnforcePrefix("http://", hostAddr)
 	}
 
+	startTime := time.Now()
 	err, statusCode, _ := utils.InvokeRestWithRetryWithAuth(hostAddr, base.PoolsPath, false, ref.UserName, ref.Password, ref.Certificate, false, base.MethodGet, "", nil, 0, &poolsInfo, nil, false, service.logger, base.HTTP_RETRIES)
-	service.logger.Infof("Result from validate remote cluster call: err=%v, statusCode=%v\n", err, statusCode)
+	service.logger.Infof("Result from validate remote cluster call: err=%v, statusCode=%v. time taken=%v\n", err, statusCode, time.Since(startTime))
 	if err != nil || statusCode != http.StatusOK {
 		if statusCode == http.StatusUnauthorized {
 			return wrapAsInvalidRemoteClusterError(errors.New(fmt.Sprintf("Authentication failed. Verify username and password. Got HTTP status %v from REST call get to %v%v. Body was: []", statusCode, hostAddr, base.PoolsPath)))
@@ -463,12 +469,13 @@ func (service *RemoteClusterService) addRemoteCluster(ref *metadata.RemoteCluste
 	if err != nil {
 		return err
 	}
-	service.logger.Debugf("Remote cluster being added: key=%v, value=%v\n", key, string(value))
 
 	err = service.metakv_svc.AddSensitiveWithCatalog(RemoteClustersCatalogKey, key, value)
 	if err != nil {
 		return err
 	}
+
+	service.logger.Infof("Remote cluster %v added to metadata store. value=%v\n", key, value)
 
 	service.updateCache(ref.Id, ref)
 
@@ -687,7 +694,6 @@ func (service *RemoteClusterService) updateCache(refId string, newRef *metadata.
 			service.cacheRef(newRef)
 			updated = true
 		}
-
 	}
 
 	if updated && service.metadata_change_callback != nil {

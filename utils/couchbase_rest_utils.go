@@ -303,6 +303,8 @@ func InvokeRestWithRetryWithAuth(baseURL string,
 			break
 		}
 
+		logger.Infof("Received error when making rest call. baseURL=%v, path=%v, ret_err=%v, statusCode=%v, num_retry=%v\n", baseURL, path, ret_err, statusCode, num_retry)
+
 		//cleanup the idle connection if the error is serious network error
 		cleanupAfterRestCall(true, ret_err, http_client, logger)
 
@@ -485,7 +487,7 @@ func IsSeriousNetError(err error) bool {
 	if err == nil {
 		return false
 	}
-	
+
 	errStr := err.Error()
 	netError, ok := err.(*net.OpError)
 	return err == syscall.EPIPE ||

@@ -234,6 +234,7 @@ func (adminport *Adminport) doGetRemoteClustersRequest(request *http.Request) (*
 
 func (adminport *Adminport) doCreateRemoteClusterRequest(request *http.Request) (*ap.Response, error) {
 	logger_ap.Infof("doCreateRemoteClusterRequest\n")
+	defer logger_ap.Infof("Finished doCreateRemoteClusterRequest\n")
 
 	remoteClusterService := RemoteClusterService()
 
@@ -264,7 +265,8 @@ func (adminport *Adminport) doCreateRemoteClusterRequest(request *http.Request) 
 }
 
 func (adminport *Adminport) doChangeRemoteClusterRequest(request *http.Request) (*ap.Response, error) {
-	logger_ap.Debugf("doChangeRemoteClusterRequest\n")
+	logger_ap.Infof("doChangeRemoteClusterRequest\n")
+	defer logger_ap.Infof("Finished doChangeRemoteClusterRequest\n")
 	remoteClusterName, err := DecodeDynamicParamInURL(request, base.RemoteClustersPath, "Remote Cluster Name")
 	if err != nil {
 		return EncodeRemoteClusterValidationErrorIntoResponse(err)
@@ -302,6 +304,7 @@ func (adminport *Adminport) doChangeRemoteClusterRequest(request *http.Request) 
 
 func (adminport *Adminport) doDeleteRemoteClusterRequest(request *http.Request) (*ap.Response, error) {
 	logger_ap.Infof("doDeleteRemoteClusterRequest\n")
+	defer logger_ap.Infof("Finished doDeleteRemoteClusterRequest\n")
 	remoteClusterName, err := DecodeDynamicParamInURL(request, base.RemoteClustersPath, "Remote Cluster Name")
 	if err != nil {
 		return EncodeRemoteClusterValidationErrorIntoResponse(err)
@@ -364,7 +367,7 @@ func (adminport *Adminport) doGetAllReplicationInfosRequest(request *http.Reques
 
 func (adminport *Adminport) doCreateReplicationRequest(request *http.Request) (*ap.Response, error) {
 	logger_ap.Info("doCreateReplicationRequest")
-	defer logger_ap.Info("Finish doCreateReplicationRequest call")
+	defer logger_ap.Info("Finished doCreateReplicationRequest call")
 
 	justValidate, fromBucket, toCluster, toBucket, settings, errorsMap, err := DecodeCreateReplicationRequest(request)
 	if err != nil {
@@ -391,6 +394,8 @@ func (adminport *Adminport) doCreateReplicationRequest(request *http.Request) (*
 
 func (adminport *Adminport) doDeleteReplicationRequest(request *http.Request) (*ap.Response, error) {
 	logger_ap.Infof("doDeleteReplicationRequest\n")
+	defer logger_ap.Infof("Finished doDeleteReplicationRequest\n")
+
 	replicationId, err := DecodeDynamicParamInURL(request, DeleteReplicationPrefix, "Replication Id")
 	if err != nil {
 		return EncodeReplicationValidationErrorIntoResponse(err)

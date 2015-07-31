@@ -306,6 +306,7 @@ func (rccl *RemoteClusterChangeListener) remoteClusterChangeHandlerCallback(remo
 	}
 
 	rccl.logger.Infof("remoteClusterChangedCallback called on id = %v, oldRef=%v, newRef=%v\n", remoteClusterRefId, oldRemoteClusterRef.String(), newRemoteClusterRef.String())
+	defer rccl.logger.Infof("Completed remoteClusterChangedCallback called on id = %v", remoteClusterRefId)
 
 	if oldRemoteClusterRef == nil {
 		// nothing to do if remote cluster has been created
@@ -326,6 +327,8 @@ func (rccl *RemoteClusterChangeListener) remoteClusterChangeHandlerCallback(remo
 					rccl.logger.Errorf("Error deleting replication %v. err=%v", topic, err)
 				}
 			}
+		} else {
+			rccl.logger.Infof("Found no specs to delete for the deletion of remote cluster %v\n", oldRemoteClusterRef.Name)
 		}
 		return nil
 	}
@@ -337,9 +340,10 @@ func (rccl *RemoteClusterChangeListener) remoteClusterChangeHandlerCallback(remo
 		oldRemoteClusterRef.UserName != newRemoteClusterRef.UserName ||
 		oldRemoteClusterRef.Password != newRemoteClusterRef.Password {
 		specs := pipeline_manager.AllReplicationSpecsForTargetCluster(oldRemoteClusterRef.Uuid)
+
 		for _, spec := range specs {
 			if spec.Settings.Active {
-				rccl.logger.Infof("Restarting pipeline %v since the referenced remote cluster has been changed\n", spec.Id)
+				rccl.logger.Infof("Restarting pipelines %v since the referenced remote cluster %v has been changed\n", spec.Id, oldRemoteClusterRef.Name)
 				pipeline_manager.Update(spec.Id, nil)
 			}
 		}
