@@ -1229,9 +1229,6 @@ func (xmem *XmemNozzle) batchGetMeta(bigDoc_map map[string]*base.WrappedMCReques
 			close(return_ch)
 		}()
 
-		//set the read timeout once (default is 2 mins)
-		xmem.client_for_getMeta.setReadTimeout(xmem.client_for_getMeta.read_timeout)
-
 		for {
 			select {
 			case <-finch:
@@ -1242,8 +1239,7 @@ func (xmem *XmemNozzle) batchGetMeta(bigDoc_map map[string]*base.WrappedMCReques
 					return
 				}
 
-				//don't need to renew read timeout, renew read timeout is expansive in golang
-				response, err, rev := xmem.readFromClient(xmem.client_for_getMeta, false)
+				response, err, rev := xmem.readFromClient(xmem.client_for_getMeta, true)
 				if err != nil {
 					if err == PartStoppedError {
 						return
@@ -1296,8 +1292,6 @@ func (xmem *XmemNozzle) batchGetMeta(bigDoc_map map[string]*base.WrappedMCReques
 	counter := 0
 	opaque := xmem.getOpaque(0, sequence)
 	sent_key_map := make(map[string]bool, len(bigDoc_map))
-	//set the write timeout
-	xmem.client_for_getMeta.setWriteTimeout(xmem.client_for_getMeta.write_timeout)
 
 	for key, originalReq := range bigDoc_map {
 		docKey := string(originalReq.Req.Key)
@@ -1316,8 +1310,7 @@ func (xmem *XmemNozzle) batchGetMeta(bigDoc_map map[string]*base.WrappedMCReques
 			sent_key_map[docKey] = true
 
 			if counter > 50 {
-				//don't need to renew write timeout, renew write timeout is expansive in golang
-				err, _ := xmem.writeToClient(xmem.client_for_getMeta, xmem.packageRequest(counter, reqs_bytes), false)
+				err, _ := xmem.writeToClient(xmem.client_for_getMeta, xmem.packageRequest(counter, reqs_bytes), true)
 				if err != nil {
 					//kill the receiver and return
 					close(receiver_fin_ch)
@@ -1332,8 +1325,7 @@ func (xmem *XmemNozzle) batchGetMeta(bigDoc_map map[string]*base.WrappedMCReques
 
 	var err error
 	if counter > 0 {
-		//don't need to renew write timeout, renew write timeout is expansive in golang
-		err, _ = xmem.writeToClient(xmem.client_for_getMeta, xmem.packageRequest(counter, reqs_bytes), false)
+		err, _ = xmem.writeToClient(xmem.client_for_getMeta, xmem.packageRequest(counter, reqs_bytes), true)
 		if err != nil {
 			//kill the receiver and return
 			close(receiver_fin_ch)
