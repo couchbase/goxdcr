@@ -1059,6 +1059,7 @@ func (xmem *XmemNozzle) batchSetMetaWithRetry(batch *dataBatch, numOfRetry int) 
 		atomic.AddUint32(&xmem.counter_sent, 1)
 
 		if item != nil {
+			atomic.AddUint32(&xmem.counter_waittime, uint32(time.Since(item.Start_time).Seconds()*1000))
 			if needSend(item, batch, xmem.Logger()) {
 
 				//blocking
@@ -1197,15 +1198,48 @@ func (xmem *XmemNozzle) batchGetMeta(bigDoc_map map[string]*base.WrappedMCReques
 
 	xmem.Logger().Debugf("GetMeta for %v\n", len(bigDoc_map))
 	respMap := make(map[string]*mc.MCResponse, xmem.config.maxCount)
-	lock := &sync.RWMutex{}
 	opaque_keySeqno_map := make(map[uint32][]interface{})
 	receiver_fin_ch := make(chan bool, 1)
 	receiver_return_ch := make(chan bool, 1)
 
 	err_list := []error{}
+	reqs_bytes_list := [][]byte{}
+
+	var sequence uint16 = uint16(time.Now().UnixNano())
+	reqs_bytes := []byte{}
+	counter := 0
+	opaque := xmem.getOpaque(0, sequence)
+	sent_key_map := make(map[string]bool, len(bigDoc_map))
+
+	//de-dupe and prepare the packages
+	for key, originalReq := range bigDoc_map {
+		docKey := string(originalReq.Req.Key)
+		if docKey == "" {
+			panic(fmt.Sprintf("unique-key= %v, Empty docKey, req=%v, bigDoc_map=%v", key, originalReq.Req, bigDoc_map))
+		}
+
+		if _, ok := sent_key_map[docKey]; !ok {
+			req := xmem.composeRequestForGetMeta(docKey, originalReq.Req.VBucket, opaque)
+			reqs_bytes = append(reqs_bytes, req.Bytes()...)
+			opaque_keySeqno_map[opaque] = []interface{}{docKey, originalReq.Seqno, time.Now()}
+			opaque++
+			counter++
+			sent_key_map[docKey] = true
+
+			if counter > 50 {
+				reqs_bytes_list = append(reqs_bytes_list, reqs_bytes)
+				counter = 0
+				reqs_bytes = []byte{}
+			}
+		}
+	}
+
+	if counter > 0 {
+		reqs_bytes_list = append(reqs_bytes_list, reqs_bytes)
+	}
 
 	//launch the receiver
-	go func(count int, finch chan bool, return_ch chan bool, opaque_keySeqno_map map[uint32][]interface{}, respMap map[string]*mc.MCResponse, err_list []error, logger *log.CommonLogger, lock *sync.RWMutex) {
+	go func(count int, finch chan bool, return_ch chan bool, opaque_keySeqno_map map[uint32][]interface{}, respMap map[string]*mc.MCResponse, err_list []error, logger *log.CommonLogger) {
 		defer func() {
 			//handle the panic gracefully.
 			if r := recover(); r != nil {
@@ -1247,9 +1281,7 @@ func (xmem *XmemNozzle) batchGetMeta(bigDoc_map map[string]*base.WrappedMCReques
 					}
 
 				} else {
-					lock.RLock()
 					keySeqno, ok := opaque_keySeqno_map[response.Opaque]
-					lock.RUnlock()
 					if ok {
 						//success
 						key, ok1 := keySeqno[0].(string)
@@ -1269,6 +1301,7 @@ func (xmem *XmemNozzle) batchGetMeta(bigDoc_map map[string]*base.WrappedMCReques
 					}
 				}
 
+				//*count == 0 means write is still in session, can't return
 				if len(respMap) >= count {
 					logger.Debugf("%v Expected %v response, got all", xmem.Id(), count)
 					return
@@ -1277,47 +1310,11 @@ func (xmem *XmemNozzle) batchGetMeta(bigDoc_map map[string]*base.WrappedMCReques
 			}
 		}
 
-	}(len(bigDoc_map), receiver_fin_ch, receiver_return_ch, opaque_keySeqno_map, respMap, err_list, xmem.Logger(), lock)
+	}(len(opaque_keySeqno_map), receiver_fin_ch, receiver_return_ch, opaque_keySeqno_map, respMap, err_list, xmem.Logger())
 
-	var sequence uint16 = uint16(time.Now().UnixNano())
-	reqs_bytes := []byte{}
-	counter := 0
-	opaque := xmem.getOpaque(0, sequence)
-	sent_key_map := make(map[string]bool, len(bigDoc_map))
-
-	for key, originalReq := range bigDoc_map {
-		docKey := string(originalReq.Req.Key)
-		if docKey == "" {
-			panic(fmt.Sprintf("unique-key= %v, Empty docKey, req=%v, bigDoc_map=%v", key, originalReq.Req, bigDoc_map))
-		}
-
-		if _, ok := sent_key_map[docKey]; !ok {
-			req := xmem.composeRequestForGetMeta(docKey, originalReq.Req.VBucket, opaque)
-			reqs_bytes = append(reqs_bytes, req.Bytes()...)
-			lock.Lock()
-			opaque_keySeqno_map[opaque] = []interface{}{docKey, originalReq.Seqno, time.Now()}
-			lock.Unlock()
-			opaque++
-			counter++
-			sent_key_map[docKey] = true
-
-			if counter > 50 {
-				err, _ := xmem.writeToClient(xmem.client_for_getMeta, xmem.packageRequest(counter, reqs_bytes), true)
-				if err != nil {
-					//kill the receiver and return
-					close(receiver_fin_ch)
-					return nil, err
-				}
-
-				counter = 0
-				reqs_bytes = []byte{}
-			}
-		}
-	}
-
-	var err error
-	if counter > 0 {
-		err, _ = xmem.writeToClient(xmem.client_for_getMeta, xmem.packageRequest(counter, reqs_bytes), true)
+	//send the requests
+	for _, packet := range reqs_bytes_list {
+		err, _ := xmem.writeToClient(xmem.client_for_getMeta, xmem.packageRequest(counter, packet), true)
 		if err != nil {
 			//kill the receiver and return
 			close(receiver_fin_ch)
