@@ -1173,15 +1173,7 @@ func (xmem *XmemNozzle) sendSetMeta_internal(batch *dataBatch) error {
 	if batch != nil {
 		count := batch.count()
 		xmem.Logger().Debugf("%v send batch count=%d\n", xmem.Id(), count)
-
 		xmem.Logger().Debugf("So far, %v processed %d items", xmem.Id(), xmem.counter_sent)
-
-		bigDoc_noRep_map, err := xmem.batchGetMeta(batch.bigDoc_map)
-		if err != nil {
-			xmem.Logger().Errorf("%v batchGetMeta failed. err=%v\n", xmem.Id(), err)
-		} else {
-			batch.bigDoc_noRep_map = bigDoc_noRep_map
-		}
 
 		//batch send
 		err = xmem.batchSetMetaWithRetry(batch, xmem.config.maxRetry)
