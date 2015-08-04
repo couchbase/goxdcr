@@ -1133,6 +1133,10 @@ func UpdateStats(cluster_info_svc service_def.ClusterInfoSvc, xdcr_topology_svc 
 		overview_stats := repl_status.GetOverviewStats()
 		spec := repl_status.Spec()
 
+		if spec == nil {
+			continue
+		}
+
 		cur_kv_vb_map, err := pipeline_utils.GetSourceVBMapForReplication(cluster_info_svc, xdcr_topology_svc, spec, logger)
 		if err != nil {
 			logger.Errorf("Error retrieving kv_vb_map for paused replication %v. err=%v", repl_id, err)
