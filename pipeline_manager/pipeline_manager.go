@@ -603,12 +603,17 @@ RE:
 	}
 
 	if err == nil || err == ReplicationSpecNotActive || err == service_def.MetadataNotFoundErr {
-		r.logger.Infof("Pipeline %v is updated\n", r.pipeline_name)
-		if pipeline_mgr.reportFixed(r.pipeline_name, r) == nil {
+		r.logger.Infof("Pipeline %v has been updated successfully\n", r.pipeline_name)
+		if err1 := pipeline_mgr.reportFixed(r.pipeline_name, r); err1 == nil {
+			r.rep_status.ClearErrors()
 			r.current_error = nil
 			return true
+		} else {
+			r.logger.Errorf("Update of pipeline %v failed with error=%v\n", r.pipeline_name, err1)
+			r.current_error = err1
 		}
 	} else {
+		r.logger.Errorf("Update of pipeline %v failed with error=%v\n", r.pipeline_name, err)
 		r.current_error = err
 	}
 	r.reportStatus()
