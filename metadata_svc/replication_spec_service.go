@@ -14,6 +14,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/couchbase/go-couchbase"
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
@@ -133,8 +134,6 @@ func (service *ReplicationSpecService) ValidateNewReplicationSpec(sourceBucket, 
 
 	errorMap := make(map[string]error)
 
-	var sourceBucketUUID string
-
 	//validate the existence of source bucket
 	local_connStr, _ := service.xdcr_comp_topology_svc.MyConnectionStr()
 	if local_connStr == "" {
@@ -143,12 +142,13 @@ func (service *ReplicationSpecService) ValidateNewReplicationSpec(sourceBucket, 
 
 	var err_source error
 	start_time := time.Now()
-	sourceBucketUUID, err_source = utils.LocalBucketUUID(local_connStr, sourceBucket)
-	service.logger.Infof("Result from local bucket look up: sourceBucketUUID=%v, err_source=%v, time take=%v\n", sourceBucketUUID, err_source, time.Since(start_time))
+	sourceBucketObj, err_source := utils.LocalBucket(local_connStr, sourceBucket)
+	service.logger.Infof("Result from local bucket look up: err_source=%v, time taken=%v\n", err_source, time.Since(start_time))
+	service.validateBucket(sourceBucket, targetCluster, targetBucket, sourceBucketObj, err_source, errorMap, true)
 
-	if err_source == utils.NonExistentBucketError {
-		service.logger.Errorf("Spec [sourceBucket=%v, targetClusterUuid=%v, targetBucket=%v] refers to non-existent bucket\n", sourceBucket, targetCluster, targetBucket)
-		errorMap[base.FromBucket] = utils.BucketNotFoundError(sourceBucket)
+	sourceBucketUUID := ""
+	if sourceBucketObj != nil {
+		sourceBucketUUID = sourceBucketObj.UUID
 	}
 
 	// validate remote cluster ref
@@ -175,7 +175,7 @@ func (service *ReplicationSpecService) ValidateNewReplicationSpec(sourceBucket, 
 			errorMap[base.PlaceHolderFieldKey] = errors.New("Replication from a bucket to the same bucket is not allowed")
 			return "", "", nil, errorMap
 		}
-		service.logger.Infof("Validated that source bucket and target bucket are not the same. time take=%v\n", time.Since(start_time))
+		service.logger.Infof("Validated that source bucket and target bucket are not the same. time taken=%v\n", time.Since(start_time))
 	}
 
 	remote_connStr, err := targetClusterRef.MyConnectionStr()
@@ -191,12 +191,14 @@ func (service *ReplicationSpecService) ValidateNewReplicationSpec(sourceBucket, 
 
 	//validate target bucket
 	start_time = time.Now()
-	targetBucketUUID, err_target := utils.RemoteBucketUUID(remote_connStr, remote_userName, remote_password, targetBucket)
-	if err_target == utils.NonExistentBucketError {
-		service.logger.Errorf("Spec [sourceBucket=%v, targetClusterUuid=%v, targetBucket=%v] refers to non-existent target bucket\n", sourceBucket, targetCluster, targetBucket)
-		errorMap[base.ToBucket] = utils.BucketNotFoundError(targetBucket)
+	targetBucketObj, err_target := utils.RemoteBucket(remote_connStr, targetBucket, remote_userName, remote_password)
+	service.logger.Infof("Result from remote bucket look up: err_target=%v, time taken=%v\n", err_target, time.Since(start_time))
+	service.validateBucket(sourceBucket, targetCluster, targetBucket, targetBucketObj, err_target, errorMap, false)
+
+	targetBucketUUID := ""
+	if targetBucketObj != nil {
+		targetBucketUUID = targetBucketObj.UUID
 	}
-	service.logger.Infof("Result from remote bucket look up: targetBucketUUID=%v, err_target=%v, time take=%v\n", targetBucketUUID, err_target, time.Since(start_time))
 
 	repId := metadata.ReplicationId(sourceBucket, targetClusterRef.Uuid, targetBucket)
 	_, err = service.replicationSpec(repId)
@@ -222,6 +224,32 @@ func (service *ReplicationSpecService) ValidateNewReplicationSpec(sourceBucket, 
 	service.logger.Infof("Finished ValidateAddReplicationSpec. errorMap=%v\n", errorMap)
 
 	return sourceBucketUUID, targetBucketUUID, targetClusterRef, errorMap
+}
+
+func (service *ReplicationSpecService) validateBucket(sourceBucket, targetCluster, targetBucket string, bucket *couchbase.Bucket, err error, errorMap map[string]error, isSourceBucket bool) {
+	var qualifier, errKey, bucketName string
+	if isSourceBucket {
+		qualifier = "source"
+		errKey = base.FromBucket
+		bucketName = sourceBucket
+	} else {
+		qualifier = "target"
+		errKey = base.ToBucket
+		bucketName = targetBucket
+	}
+
+	if err == utils.NonExistentBucketError {
+		service.logger.Errorf("Spec [sourceBucket=%v, targetCluster=%v, targetBucket=%v] refers to non-existent %v bucket\n", sourceBucket, targetCluster, targetBucket, qualifier)
+		errorMap[errKey] = utils.BucketNotFoundError(bucketName)
+	} else if err != nil {
+		errMsg := fmt.Sprintf("Error validating %v bucket '%v'. err=%v", qualifier, bucketName, err)
+		service.logger.Error(errMsg)
+		errorMap[errKey] = fmt.Errorf(errMsg)
+	} else if bucket.Type != base.CouchbaseBucketType {
+		errMsg := fmt.Sprintf("Incompatible %v bucket '%v'", qualifier, bucketName)
+		service.logger.Error(errMsg)
+		errorMap[errKey] = fmt.Errorf(errMsg)
+	}
 }
 
 func (service *ReplicationSpecService) AddReplicationSpec(spec *metadata.ReplicationSpecification) error {

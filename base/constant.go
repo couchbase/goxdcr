@@ -259,3 +259,5 @@ const (
 	CheckpointStatsCollector = "CheckpointStatsCollector"
 	ThroughSeqnoTracker      = "ThroughSeqnoTracker"
 )
+
+var CouchbaseBucketType = "membase"
