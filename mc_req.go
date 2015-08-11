@@ -8,7 +8,8 @@ import (
 
 // The maximum reasonable body length to expect.
 // Anything larger than this will result in an error.
-var MaxBodyLen = int(1e6)
+// The current limit, 20MB, is the size limit supported by ep-engine.
+var MaxBodyLen = int(20 * 1024 * 1024)
 
 // MCRequest is memcached Request
 type MCRequest struct {
