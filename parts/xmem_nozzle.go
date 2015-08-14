@@ -957,7 +957,7 @@ func (xmem *XmemNozzle) processData_sendbatch(finch chan bool, waitGrp *sync.Wai
 			if err != nil {
 				xmem.Logger().Errorf("%v batchGetMeta failed. err=%v\n", xmem.Id(), err)
 			} else {
-				xmem.batch.bigDoc_noRep_map = bigDoc_noRep_map
+				batch.bigDoc_noRep_map = bigDoc_noRep_map
 			}
 
 			err = xmem.processBatch(batch)
