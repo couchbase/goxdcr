@@ -144,6 +144,16 @@ func (ckmgr *CheckpointManager) Attach(pipeline common.Pipeline) error {
 		dcp.RegisterComponentEventListener(common.StreamingStart, ckmgr)
 	}
 
+	//register pipeline supervisor as ckmgr's error handler
+	supervisor := ckmgr.pipeline.RuntimeContext().Service(base.PIPELINE_SUPERVISOR_SVC)
+	if supervisor == nil {
+		return errors.New("Pipeline supervisor has to exist")
+	}
+	err = ckmgr.RegisterComponentEventListener(common.ErrorEncountered, supervisor.(*PipelineSupervisor))
+	if err != nil {
+		return err
+	}
+
 	ckmgr.initialize()
 
 	return err
@@ -180,16 +190,6 @@ func (ckmgr *CheckpointManager) Start(settings map[string]interface{}) error {
 	ckmgr.logger.Infof("CheckpointManager starting with ckpt_interval=%v s\n", ckmgr.ckpt_interval.Seconds())
 
 	ckmgr.startRandomizedCheckpointingTicker()
-
-	//register itself with pipeline supervisor
-	supervisor := ckmgr.pipeline.RuntimeContext().Service(base.PIPELINE_SUPERVISOR_SVC)
-	if supervisor == nil {
-		return errors.New("Pipeline supervisor has to exist")
-	}
-	err := ckmgr.RegisterComponentEventListener(common.ErrorEncountered, supervisor.(*PipelineSupervisor))
-	if err != nil {
-		return err
-	}
 
 	//start checkpointing loop
 	ckmgr.wait_grp.Add(1)
@@ -299,6 +299,7 @@ func (ckmgr *CheckpointManager) SetVBTimestamps(topic string) error {
 	//refresh the remote bucket
 	err := ckmgr.remote_bucket.Refresh(ckmgr.remote_cluster_svc)
 	if err != nil {
+		ckmgr.logger.Errorf("Received error when trying to set VBTimestamps: %v\n", err)
 		ckmgr.RaiseEvent(common.NewEvent(common.ErrorEncountered, nil, ckmgr, nil, err))
 		return err
 	}
