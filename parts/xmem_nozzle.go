@@ -2184,7 +2184,7 @@ func (xmem *XmemNozzle) recycleDataObj(req *base.WrappedMCRequest) {
 }
 
 func (xmem *XmemNozzle) recordBatchSize(batchSize int) {
-	for i := 1; i < 10; i++ {
+	for i := 9; i > 0; i-- {
 		xmem.last_ten_batches_size[i] = xmem.last_ten_batches_size[i-1]
 	}
 	xmem.last_ten_batches_size[0] = batchSize
