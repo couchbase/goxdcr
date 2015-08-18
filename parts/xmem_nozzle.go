@@ -1206,6 +1206,8 @@ func (xmem *XmemNozzle) batchGetMeta(bigDoc_map map[string]*base.WrappedMCReques
 
 	err_list := []error{}
 	reqs_bytes_list := [][]byte{}
+	// stores the batch count for each reqs_bytes in reqs_bytes_list
+	batch_count_list := []int{}
 
 	var sequence uint16 = uint16(time.Now().UnixNano())
 	reqs_bytes := []byte{}
@@ -1230,6 +1232,7 @@ func (xmem *XmemNozzle) batchGetMeta(bigDoc_map map[string]*base.WrappedMCReques
 
 			if counter > 50 {
 				reqs_bytes_list = append(reqs_bytes_list, reqs_bytes)
+				batch_count_list = append(batch_count_list, counter)
 				counter = 0
 				reqs_bytes = []byte{}
 			}
@@ -1238,6 +1241,11 @@ func (xmem *XmemNozzle) batchGetMeta(bigDoc_map map[string]*base.WrappedMCReques
 
 	if counter > 0 {
 		reqs_bytes_list = append(reqs_bytes_list, reqs_bytes)
+		batch_count_list = append(batch_count_list, counter)
+	}
+
+	if len(reqs_bytes_list) != len(batch_count_list) {
+		panic("Length of reqs_bytes_list and batch_count_list do not match")
 	}
 
 	//launch the receiver
@@ -1279,6 +1287,7 @@ func (xmem *XmemNozzle) batchGetMeta(bigDoc_map map[string]*base.WrappedMCReques
 						err_list = append(err_list, err)
 					} else {
 						logger.Errorf("%v Expected %v response, timedout, got %v", xmem.Id(), count, len(respMap))
+						logger.Infof("Expected=%v, Received=%v\n", opaque_keySeqno_map, respMap)
 						return
 					}
 
@@ -1298,7 +1307,7 @@ func (xmem *XmemNozzle) batchGetMeta(bigDoc_map map[string]*base.WrappedMCReques
 							}
 							xmem.RaiseEvent(common.NewEvent(common.GetMetaReceived, nil, xmem, nil, additionalInfo))
 						} else {
-							panic("KeySeqno list is not formated as expected [string, uint64]")
+							panic("KeySeqno list is not formated as expected [string, uint64, time]")
 						}
 					}
 				}
@@ -1315,8 +1324,8 @@ func (xmem *XmemNozzle) batchGetMeta(bigDoc_map map[string]*base.WrappedMCReques
 	}(len(opaque_keySeqno_map), receiver_fin_ch, receiver_return_ch, opaque_keySeqno_map, respMap, err_list, xmem.Logger())
 
 	//send the requests
-	for _, packet := range reqs_bytes_list {
-		err, _ := xmem.writeToClient(xmem.client_for_getMeta, xmem.packageRequest(counter, packet), true)
+	for index, packet := range reqs_bytes_list {
+		err, _ := xmem.writeToClient(xmem.client_for_getMeta, xmem.packageRequest(batch_count_list[index], packet), true)
 		if err != nil {
 			//kill the receiver and return
 			close(receiver_fin_ch)
