@@ -39,6 +39,27 @@ var InvalidReplicationSpecError = errors.New("Invalid Replication spec")
 type ReplicationSpecVal struct {
 	spec       *metadata.ReplicationSpecification
 	derivedObj interface{}
+	cas        int64
+}
+
+func (rsv *ReplicationSpecVal) CAS(obj CacheableMetadataObj) bool {
+	if rsv == nil || obj == nil {
+		return true
+	} else if rsv2, ok := obj.(*ReplicationSpecVal); ok {
+		if rsv.cas == rsv2.cas {
+			if !rsv.spec.SameSpec(rsv2.spec) {
+				// increment cas only when the metadata portion of ReplicationSpecVal has been changed
+				// in other words, concurrent updates to the metadata portion is not allowed -- later write fails
+				// while concurrent updates to the runtime portion is allowed -- later write wins
+				rsv.cas++
+			}
+			return true
+		} else {
+			return false
+		}
+	} else {
+		return false
+	}
 }
 
 type ReplicationSpecService struct {
@@ -268,10 +289,11 @@ func (service *ReplicationSpecService) AddReplicationSpec(spec *metadata.Replica
 		return err
 	}
 
-	service.updateCache(spec.Id, spec)
-
-	service.writeUiLog(spec, "created", "")
-	return nil
+	err = service.updateCache(spec.Id, spec)
+	if err == nil {
+		service.writeUiLog(spec, "created", "")
+	}
+	return err
 }
 
 func (service *ReplicationSpecService) SetReplicationSpec(spec *metadata.ReplicationSpecification) error {
@@ -292,11 +314,13 @@ func (service *ReplicationSpecService) SetReplicationSpec(spec *metadata.Replica
 	}
 	spec.Revision = rev
 
-	service.updateCache(spec.Id, spec)
-
-	service.logger.Infof("replication spec %s is updated, rev=%v\n", spec.Id, rev)
-
-	return nil
+	err = service.updateCache(spec.Id, spec)
+	if err == nil {
+		service.logger.Infof("replication spec %s is updated, rev=%v\n", spec.Id, rev)
+		return nil
+	} else {
+		return err
+	}
 }
 
 func (service *ReplicationSpecService) DelReplicationSpec(replicationId string) (*metadata.ReplicationSpecification, error) {
@@ -316,11 +340,14 @@ func (service *ReplicationSpecService) delReplicationSpec_internal(replicationId
 		return nil, err
 	}
 
-	service.updateCache(replicationId, nil)
+	err = service.updateCache(replicationId, nil)
+	if err == nil {
+		service.writeUiLog(spec, "removed", "")
+		return spec, nil
+	} else {
+		return nil, err
+	}
 
-	service.writeUiLog(spec, "removed", "")
-
-	return spec, nil
 }
 
 func (service *ReplicationSpecService) AllReplicationSpecs() (map[string]*metadata.ReplicationSpecification, error) {
@@ -403,9 +430,7 @@ func (service *ReplicationSpecService) ReplicationSpecServiceCallback(path strin
 
 	specId := service.getReplicationIdFromKey(GetKeyFromPath(path))
 
-	service.updateCache(specId, newSpec)
-
-	return nil
+	return service.updateCache(specId, newSpec)
 
 }
 
@@ -432,9 +457,13 @@ func (service *ReplicationSpecService) updateCache(specId string, newSpec *metad
 
 		// no need to update cache if newSpec is the same as the one already in cache
 		if !newSpec.SameSpec(oldSpec) {
-			service.cacheSpec(service.getCache(), specId, newSpec)
-			specId = newSpec.Id
-			updated = true
+			err = service.cacheSpec(service.getCache(), specId, newSpec)
+			if err == nil {
+				specId = newSpec.Id
+				updated = true
+			} else {
+				return err
+			}
 		}
 
 	}
@@ -599,7 +628,7 @@ func (service *ReplicationSpecService) ConstructNewReplicationSpec(sourceBucketN
 	return spec, nil
 }
 
-func (service *ReplicationSpecService) cacheSpec(cache *MetadataCache, specId string, spec *metadata.ReplicationSpecification) {
+func (service *ReplicationSpecService) cacheSpec(cache *MetadataCache, specId string, spec *metadata.ReplicationSpecification) error {
 	var cachedObj *ReplicationSpecVal = nil
 	var ok1 bool
 	cachedVal, ok := cache.Get(specId)
@@ -613,7 +642,7 @@ func (service *ReplicationSpecService) cacheSpec(cache *MetadataCache, specId st
 		//never being cached before
 		cachedObj = &ReplicationSpecVal{spec: spec}
 	}
-	cache.Upsert(specId, cachedObj)
+	return cache.Upsert(specId, cachedObj)
 }
 
 func (service *ReplicationSpecService) SetDerivedObj(specId string, derivedObj interface{}) error {
@@ -634,7 +663,10 @@ func (service *ReplicationSpecService) SetDerivedObj(specId string, derivedObj i
 		service.logger.Infof("Remove spec %v from the cache\n", specId)
 		cache.Delete(specId)
 	} else {
-		cache.Upsert(specId, cachedObj)
+		err := cache.Upsert(specId, cachedObj)
+		if err != nil {
+			return err
+		}
 	}
 	return nil
 }
