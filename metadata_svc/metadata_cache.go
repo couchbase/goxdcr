@@ -1,12 +1,19 @@
 package metadata_svc
 
 import (
+	"errors"
 	"github.com/couchbase/goxdcr/log"
 	"sync"
 	"sync/atomic"
 )
 
+var CASMisMatchError = errors.New("CAS does not match")
+
 type CacheableMetadataObj interface {
+	// checks if the current object has the same CAS as that of the passed in object
+	// if CAS is the same, increment CAS of current object and return true
+	// otherwise, return false
+	CAS(obj CacheableMetadataObj) bool
 }
 
 type MetadataCache struct {
@@ -32,11 +39,18 @@ func (cache *MetadataCache) GetMap() map[string]CacheableMetadataObj {
 	return cache.cache.Load().(map[string]CacheableMetadataObj)
 }
 
-func (cache *MetadataCache) Upsert(key string, val CacheableMetadataObj) {
+func (cache *MetadataCache) Upsert(key string, val CacheableMetadataObj) error {
 	cache.cache_lock.Lock()
 	defer cache.cache_lock.Unlock()
 
 	current_val_map := cache.GetMap()
+	current_val := current_val_map[key]
+	// check CAS
+	if !val.CAS(current_val) {
+		cache.logger.Errorf("CAS mismatch. cur_val=%v, val=%v\n", current_val, val)
+		return CASMisMatchError
+	}
+
 	new_val_map := make(map[string]CacheableMetadataObj)
 	for k, v := range current_val_map {
 		new_val_map[k] = v
@@ -45,6 +59,7 @@ func (cache *MetadataCache) Upsert(key string, val CacheableMetadataObj) {
 	new_val_map[key] = val
 	cache.cache.Store(new_val_map)
 	cache.logger.Debugf("Done with upserting key=%v, val=%v, cache val=%v\n", key, val, cache.cache)
+	return nil
 }
 
 func (cache *MetadataCache) Delete(key string) {
