@@ -109,6 +109,18 @@ func (c *Client) Get(vb uint16, key string) (*gomemcached.MCResponse, error) {
 	})
 }
 
+// Get the value for a key, and update expiry
+func (c *Client) GetAndTouch(vb uint16, key string, exp int) (*gomemcached.MCResponse, error) {
+	extraBuf := make([]byte, 4)
+	binary.BigEndian.PutUint32(extraBuf[0:], uint32(exp))
+	return c.Send(&gomemcached.MCRequest{
+		Opcode:  gomemcached.GAT,
+		VBucket: vb,
+		Key:     []byte(key),
+		Extras:  extraBuf,
+	})
+}
+
 // Del deletes a key.
 func (c *Client) Del(vb uint16, key string) (*gomemcached.MCResponse, error) {
 	return c.Send(&gomemcached.MCRequest{
