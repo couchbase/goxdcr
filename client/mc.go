@@ -121,6 +121,15 @@ func (c *Client) GetAndTouch(vb uint16, key string, exp int) (*gomemcached.MCRes
 	})
 }
 
+// Get metadata for a key
+func (c *Client) GetMeta(vb uint16, key string) (*gomemcached.MCResponse, error) {
+	return c.Send(&gomemcached.MCRequest{
+		Opcode:  gomemcached.GET_META,
+		VBucket: vb,
+		Key:     []byte(key),
+	})
+}
+
 // Del deletes a key.
 func (c *Client) Del(vb uint16, key string) (*gomemcached.MCResponse, error) {
 	return c.Send(&gomemcached.MCRequest{

@@ -87,6 +87,9 @@ const (
 	SELECT_BUCKET = CommandCode(0x89) // Select bucket
 
 	OBSERVE = CommandCode(0x92)
+
+	GET_META = CommandCode(0xA0) // Get meta. returns with expiry, flags, cas etc
+
 )
 
 // Status field for memcached response.
