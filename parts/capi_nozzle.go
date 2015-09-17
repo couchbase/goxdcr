@@ -176,9 +176,11 @@ type CapiNozzle struct {
 	//queue for ready batches
 	batches_ready chan *capiBatch
 
+	batches_nonempty_ch chan bool
+
 	//batches to be accumulated, one for each vb
 	vb_batch_map       map[uint16]*capiBatch
-	vb_batch_move_lock map[uint16]*sync.Mutex
+	vb_batch_move_lock map[uint16]chan bool
 
 	childrenWaitGrp sync.WaitGroup
 
@@ -214,15 +216,16 @@ func NewCapiNozzle(id string,
 	part := NewAbstractPartWithLogger(id, server.Logger())
 
 	capi := &CapiNozzle{GenServer: server, /*gen_server.GenServer*/
-		AbstractPart:      part,                           /*part.AbstractPart*/
-		bOpen:             true,                           /*bOpen	bool*/
-		lock_bOpen:        sync.RWMutex{},                 /*lock_bOpen	sync.RWMutex*/
-		config:            newCapiConfig(server.Logger()), /*config	capiConfig*/
-		batches_ready:     nil,                            /*batches_ready chan *capiBatch*/
-		childrenWaitGrp:   sync.WaitGroup{},               /*childrenWaitGrp sync.WaitGroup*/
-		sender_finch:      make(chan bool, 1),
-		checker_finch:     make(chan bool, 1),
-		selfMonitor_finch: make(chan bool, 1),
+		AbstractPart:        part,                           /*part.AbstractPart*/
+		bOpen:               true,                           /*bOpen	bool*/
+		lock_bOpen:          sync.RWMutex{},                 /*lock_bOpen	sync.RWMutex*/
+		config:              newCapiConfig(server.Logger()), /*config	capiConfig*/
+		batches_ready:       nil,                            /*batches_ready chan *capiBatch*/
+		childrenWaitGrp:     sync.WaitGroup{},               /*childrenWaitGrp sync.WaitGroup*/
+		sender_finch:        make(chan bool, 1),
+		checker_finch:       make(chan bool, 1),
+		selfMonitor_finch:   make(chan bool, 1),
+		batches_nonempty_ch: make(chan bool, 1),
 		//		send_allow_ch:    make(chan bool, 1), /*send_allow_ch chan bool*/
 		counter_sent:     0,
 		handle_error:     true,
@@ -327,10 +330,7 @@ func (capi *CapiNozzle) IsOpen() bool {
 
 func (capi *CapiNozzle) batchReady(vbno uint16) error {
 	//move the batch to ready batches channel
-	capi.vb_batch_move_lock[vbno].Lock()
 	defer func() {
-		capi.vb_batch_move_lock[vbno].Unlock()
-
 		if r := recover(); r != nil {
 			if capi.validateRunningState() == nil {
 				// report error only when capi is still in running state
@@ -377,15 +377,32 @@ func (capi *CapiNozzle) Receive(data interface{}) error {
 	capi.bytes_in_dataChan += size
 
 	//accumulate the batchCount and batchSize
+	capi.accumuBatch(vbno, req)
+
+	capi.Logger().Debugf("%v received %v items, queue_size = %v, bytes_in_dataChan=%v\n", capi.Id(), capi.counter_received, capi.items_in_dataChan, capi.bytes_in_dataChan)
+
+	return nil
+}
+
+func (capi *CapiNozzle) accumuBatch(vbno uint16, request *base.WrappedMCRequest) {
+	capi.vb_batch_move_lock[vbno] <- true
+	defer func() { <-capi.vb_batch_move_lock[vbno] }()
+
 	batch := capi.vb_batch_map[vbno]
-	if batch.accumuBatch(req, capi.optimisticRep) {
+	isFirst, isFull := batch.accumuBatch(request, capi.optimisticRep)
+	if isFirst {
+		select {
+		case capi.batches_nonempty_ch <- true:
+		default:
+			// batches_nonempty_ch is already flagged.
+		}
+	}
+
+	if isFull {
 		capi.batchReady(vbno)
 	}
 
 	capi.Logger().Debugf("batch for vb %v: batch=%v, batch.count=%v, batch.start_time=%v\n", vbno, batch, batch.count(), batch.start_time)
-	capi.Logger().Debugf("%v received %v items, queue_size = %v, bytes_in_dataChan=%v\n", capi.Id(), capi.counter_received, capi.items_in_dataChan, capi.bytes_in_dataChan)
-
-	return nil
 }
 
 func (capi *CapiNozzle) processData_batch(finch chan bool, waitGrp *sync.WaitGroup) (err error) {
@@ -413,23 +430,51 @@ func (capi *CapiNozzle) processData_batch(finch chan bool, waitGrp *sync.WaitGro
 					}
 				}
 			}
-		default:
+		case <-capi.batches_nonempty_ch:
 			if capi.validateRunningState() != nil {
 				capi.Logger().Infof("capi %v has stopped.", capi.Id())
 				goto done
 			}
 
-			max_count := 0
-			var max_batch_vbno uint16 = 0
-			for vbno, batch := range capi.vb_batch_map {
-				if batch.count() > max_count {
-					max_count = batch.count()
-					max_batch_vbno = vbno
+			if len(capi.batches_ready) == 0 {
+				max_count := 0
+				var max_batch_vbno uint16 = 0
+				for vbno, batch := range capi.vb_batch_map {
+					if batch.count() > max_count {
+						max_count = batch.count()
+						max_batch_vbno = vbno
+					}
+				}
+
+				if max_count > 0 {
+					select {
+					case capi.vb_batch_move_lock[max_batch_vbno] <- true:
+						capi.batchReady(max_batch_vbno)
+						<-capi.vb_batch_move_lock[max_batch_vbno]
+					default:
+					}
 				}
 			}
 
-			if max_count > 0 {
-				capi.batchReady(max_batch_vbno)
+			nonEmptyBatchExists := false
+			// check if a token needs to be put back into batches_nonempty_ch,
+			// i.e., check if there is at least one non-empty batch remaining
+			for _, batch := range capi.vb_batch_map {
+				select {
+				case <-batch.batch_nonempty_ch:
+					nonEmptyBatchExists = true
+					break
+				default:
+					continue
+				}
+			}
+
+			if nonEmptyBatchExists {
+				select {
+				case capi.batches_nonempty_ch <- true:
+				default:
+					// batches_nonempty_ch is already flagged.
+				}
 			}
 		}
 	}
@@ -1031,9 +1076,9 @@ func (capi *CapiNozzle) initialize(settings map[string]interface{}) error {
 
 	//init new batches
 	capi.vb_batch_map = make(map[uint16]*capiBatch)
-	capi.vb_batch_move_lock = make(map[uint16]*sync.Mutex)
+	capi.vb_batch_move_lock = make(map[uint16]chan bool)
 	for vbno, _ := range capi.config.vbCouchApiBaseMap {
-		capi.vb_batch_move_lock[vbno] = &sync.Mutex{}
+		capi.vb_batch_move_lock[vbno] = make(chan bool, 1)
 		capi.initNewBatch(vbno)
 	}
 

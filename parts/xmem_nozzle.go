@@ -933,7 +933,9 @@ func (xmem *XmemNozzle) accumuBatch(request *base.WrappedMCRequest) {
 	if string(request.Req.Key) == "" {
 		panic(fmt.Sprintf("accumuBatch received request with Empty key, req.UniqueKey=%v\n", request.UniqueKey))
 	}
-	if xmem.batch.accumuBatch(request, xmem.optimisticRep) {
+
+	_, isFull := xmem.batch.accumuBatch(request, xmem.optimisticRep)
+	if isFull {
 		xmem.batchReady()
 	}
 }
