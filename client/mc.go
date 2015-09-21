@@ -224,6 +224,28 @@ func (c *Client) Incr(vb uint16, key string,
 	return binary.BigEndian.Uint64(resp.Body), nil
 }
 
+// Decr decrements the value at the given key.
+func (c *Client) Decr(vb uint16, key string,
+	amt, def uint64, exp int) (uint64, error) {
+
+	req := &gomemcached.MCRequest{
+		Opcode:  gomemcached.DECREMENT,
+		VBucket: vb,
+		Key:     []byte(key),
+		Extras:  make([]byte, 8+8+4),
+	}
+	binary.BigEndian.PutUint64(req.Extras[:8], amt)
+	binary.BigEndian.PutUint64(req.Extras[8:16], def)
+	binary.BigEndian.PutUint32(req.Extras[16:20], uint32(exp))
+
+	resp, err := c.Send(req)
+	if err != nil {
+		return 0, err
+	}
+
+	return binary.BigEndian.Uint64(resp.Body), nil
+}
+
 // Add a value for a key (store if not exists).
 func (c *Client) Add(vb uint16, key string, flags int, exp int,
 	body []byte) (*gomemcached.MCResponse, error) {
