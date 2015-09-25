@@ -20,7 +20,6 @@ import (
 	"github.com/couchbase/goxdcr/pipeline_manager"
 	"github.com/couchbase/goxdcr/pipeline_utils"
 	"github.com/couchbase/goxdcr/simple_utils"
-	"sort"
 	"sync"
 )
 
@@ -62,29 +61,29 @@ type ThroughSeqnoTrackerSvc struct {
 }
 
 type SortedSeqnoListWithLock struct {
-	seqno_list []int
+	seqno_list []uint64
 	lock       *sync.RWMutex
 }
 
 func newSortedSeqnoListWithLock() *SortedSeqnoListWithLock {
-	return &SortedSeqnoListWithLock{make([]int, 0), &sync.RWMutex{}}
+	return &SortedSeqnoListWithLock{make([]uint64, 0), &sync.RWMutex{}}
 }
 
 // when needToSort is true, sort the internal seqno_list before returning it
 // sorting is needed only when seqno_list is not already sorted, which is the case only for sent_seqno_list
 // in other words, needToSort should be set to true only when operating on sent_seqno_list
-func (list_obj *SortedSeqnoListWithLock) getSortedSeqnoList(needToSort bool) []int {
+func (list_obj *SortedSeqnoListWithLock) getSortedSeqnoList(needToSort bool) []uint64 {
 	if needToSort {
 		list_obj.lock.Lock()
 		defer list_obj.lock.Unlock()
 
-		sort.Ints(list_obj.seqno_list)
-		return simple_utils.DeepCopyIntArray(list_obj.seqno_list)
+		simple_utils.SortUint64List(list_obj.seqno_list)
+		return simple_utils.DeepCopyUint64Array(list_obj.seqno_list)
 	} else {
 		list_obj.lock.RLock()
 		defer list_obj.lock.RUnlock()
 
-		return simple_utils.DeepCopyIntArray(list_obj.seqno_list)
+		return simple_utils.DeepCopyUint64Array(list_obj.seqno_list)
 	}
 }
 
@@ -92,7 +91,7 @@ func (list_obj *SortedSeqnoListWithLock) getSortedSeqnoList(needToSort bool) []i
 func (list_obj *SortedSeqnoListWithLock) appendSeqno(seqno uint64, logger *log.CommonLogger) {
 	list_obj.lock.Lock()
 	defer list_obj.lock.Unlock()
-	list_obj.seqno_list = append(list_obj.seqno_list, int(seqno))
+	list_obj.seqno_list = append(list_obj.seqno_list, seqno)
 	logger.Tracef("after adding seqno %v, seqno_list is %v\n", seqno, list_obj.seqno_list)
 }
 
@@ -101,7 +100,7 @@ func (list_obj *SortedSeqnoListWithLock) truncateSeqnos(through_seqno uint64, va
 	list_obj.lock.Lock()
 	defer list_obj.lock.Unlock()
 	seqno_list := list_obj.seqno_list
-	index, found := search(seqno_list, through_seqno)
+	index, found := simple_utils.SearchUint64List(seqno_list, through_seqno)
 	if found {
 		if validateSeqnoNotInList {
 			// this applies to gap_seqno_list only
@@ -295,7 +294,7 @@ func (tsTracker *ThroughSeqnoTrackerSvc) GetThroughSeqno(vbno uint16) uint64 {
 	for {
 		iter_seqno = iter_seqno + 1
 		if iter_seqno <= max_sent_seqno {
-			sent_index, sent_found := search(sent_seqno_list, iter_seqno)
+			sent_index, sent_found := simple_utils.SearchUint64List(sent_seqno_list, iter_seqno)
 			if sent_found {
 				last_sent_index = sent_index
 				found_seqno_type = SeqnoTypeSent
@@ -304,7 +303,7 @@ func (tsTracker *ThroughSeqnoTrackerSvc) GetThroughSeqno(vbno uint16) uint64 {
 		}
 
 		if iter_seqno <= max_filtered_seqno {
-			filtered_index, filtered_found := search(filtered_seqno_list, iter_seqno)
+			filtered_index, filtered_found := simple_utils.SearchUint64List(filtered_seqno_list, iter_seqno)
 			if filtered_found {
 				last_filtered_index = filtered_index
 				found_seqno_type = SeqnoTypeFiltered
@@ -313,7 +312,7 @@ func (tsTracker *ThroughSeqnoTrackerSvc) GetThroughSeqno(vbno uint16) uint64 {
 		}
 
 		if iter_seqno <= max_failed_cr_seqno {
-			failed_cr_index, failed_cr_found := search(failed_cr_seqno_list, iter_seqno)
+			failed_cr_index, failed_cr_found := simple_utils.SearchUint64List(failed_cr_seqno_list, iter_seqno)
 			if failed_cr_found {
 				last_failed_cr_index = failed_cr_index
 				found_seqno_type = SeqnoTypeFailedCR
@@ -334,11 +333,11 @@ func (tsTracker *ThroughSeqnoTrackerSvc) GetThroughSeqno(vbno uint16) uint64 {
 
 	if last_sent_index >= 0 || last_filtered_index >= 0 || last_failed_cr_index >= 0 {
 		if found_seqno_type == SeqnoTypeSent {
-			through_seqno = uint64(sent_seqno_list[last_sent_index])
+			through_seqno = sent_seqno_list[last_sent_index]
 		} else if found_seqno_type == SeqnoTypeFiltered {
-			through_seqno = uint64(filtered_seqno_list[last_filtered_index])
+			through_seqno = filtered_seqno_list[last_filtered_index]
 		} else if found_seqno_type == SeqnoTypeFailedCR {
-			through_seqno = uint64(failed_cr_seqno_list[last_failed_cr_index])
+			through_seqno = failed_cr_seqno_list[last_failed_cr_index]
 		} else {
 			panic(fmt.Sprintf("unexpected found_seqno_type, %v", found_seqno_type))
 		}
@@ -353,11 +352,11 @@ func (tsTracker *ThroughSeqnoTrackerSvc) GetThroughSeqno(vbno uint16) uint64 {
 	return through_seqno
 }
 
-func isSeqnoGapSeqno(start_gap_seqno_list, end_gap_seqno_list []int, seqno uint64) bool {
+func isSeqnoGapSeqno(start_gap_seqno_list, end_gap_seqno_list []uint64, seqno uint64) bool {
 	if len(start_gap_seqno_list) == 0 {
 		return false
 	}
-	index, is_start_gap_seqno := search(start_gap_seqno_list, seqno)
+	index, is_start_gap_seqno := simple_utils.SearchUint64List(start_gap_seqno_list, seqno)
 	if is_start_gap_seqno {
 		return true
 	}
@@ -368,7 +367,7 @@ func isSeqnoGapSeqno(start_gap_seqno_list, end_gap_seqno_list []int, seqno uint6
 		return false
 	}
 
-	if uint64(end_gap_seqno_list[gap_range_index]) >= seqno {
+	if end_gap_seqno_list[gap_range_index] >= seqno {
 		// seqno is between start_gap_seqno_list[gap_range_index] and end_gap_seqno_list[gap_range_index]
 		// and hence is a gap seqno
 		return true
@@ -376,17 +375,6 @@ func isSeqnoGapSeqno(start_gap_seqno_list, end_gap_seqno_list []int, seqno uint6
 
 	return false
 
-}
-
-func search(seqno_list []int, seqno uint64) (int, bool) {
-	index := sort.Search(len(seqno_list), func(i int) bool {
-		return seqno_list[i] >= int(seqno)
-	})
-	if index < len(seqno_list) && seqno_list[index] == int(seqno) {
-		return index, true
-	} else {
-		return index, false
-	}
 }
 
 func (tsTracker *ThroughSeqnoTrackerSvc) GetThroughSeqnos() map[uint16]uint64 {
@@ -479,10 +467,10 @@ func (tsTracker *ThroughSeqnoTrackerSvc) isPipelineRunning() bool {
 	return false
 }
 
-func maxSeqno(seqno_list []int) uint64 {
+func maxSeqno(seqno_list []uint64) uint64 {
 	length := len(seqno_list)
 	if length > 0 {
-		return uint64(seqno_list[length-1])
+		return seqno_list[length-1]
 	} else {
 		return 0
 	}
