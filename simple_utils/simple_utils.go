@@ -97,6 +97,29 @@ func AreSortedUint16ListsTheSame(sorted_list_1, sorted_list_2 []uint16) bool {
 	return isSame
 }
 
+// type to facilitate the sorting of uint64 lists
+type Uint64List []uint64
+
+func (u Uint64List) Len() int           { return len(u) }
+func (u Uint64List) Swap(i, j int)      { u[i], u[j] = u[j], u[i] }
+func (u Uint64List) Less(i, j int) bool { return u[i] < u[j] }
+
+func SortUint64List(list []uint64) []uint64 {
+	sort.Sort(Uint64List(list))
+	return list
+}
+
+func SearchUint64List(seqno_list []uint64, seqno uint64) (int, bool) {
+	index := sort.Search(len(seqno_list), func(i int) bool {
+		return seqno_list[i] >= seqno
+	})
+	if index < len(seqno_list) && seqno_list[index] == seqno {
+		return index, true
+	} else {
+		return index, false
+	}
+}
+
 func IsVbInList(vbno uint16, vb_list []uint16) bool {
 	for _, vb_in_list := range vb_list {
 		if vb_in_list == vbno {
@@ -151,15 +174,13 @@ func InvalidPathInHttpRequestError(path string) error {
 	return errors.New(fmt.Sprintf("Invalid path, %v, in http request.", path))
 }
 
-func DeepCopyIntArray(in []int) []int {
+func DeepCopyUint64Array(in []uint64) []uint64 {
 	if in == nil {
 		return nil
 	}
 
-	out := make([]int, 0)
-	for _, element := range in {
-		out = append(out, element)
-	}
+	out := make([]uint64, 0)
+	out = append(out, in...)
 	return out
 }
 
