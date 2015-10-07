@@ -28,8 +28,10 @@ const (
 	DataSent ComponentEventType = iota
 	//data is filtered out by the component
 	DataFiltered ComponentEventType = iota
-	//error encountered by the component
+	//fetal error encountered by the component
 	ErrorEncountered ComponentEventType = iota
+	//error encountered in a particular vb by the component
+	VBErrorEncountered ComponentEventType = iota
 	//checkpointing suceeded for vb
 	CheckpointDoneForVB ComponentEventType = iota
 	//checkpointing succeed

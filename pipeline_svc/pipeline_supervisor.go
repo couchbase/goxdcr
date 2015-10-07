@@ -81,6 +81,7 @@ func (pipelineSupervisor *PipelineSupervisor) Attach(p common.Pipeline) error {
 
 		//register itself with all parts' ErrorEncountered event
 		part.RegisterComponentEventListener(common.ErrorEncountered, pipelineSupervisor)
+		part.RegisterComponentEventListener(common.VBErrorEncountered, pipelineSupervisor)
 		pipelineSupervisor.Logger().Debugf("Registering ErrorEncountered event on part %v\n", part.Id())
 	}
 
@@ -89,6 +90,7 @@ func (pipelineSupervisor *PipelineSupervisor) Attach(p common.Pipeline) error {
 
 	for _, connector := range connectorsMap {
 		connector.RegisterComponentEventListener(common.ErrorEncountered, pipelineSupervisor)
+		connector.RegisterComponentEventListener(common.VBErrorEncountered, pipelineSupervisor)
 		pipelineSupervisor.Logger().Debugf("Registering ErrorEncountered event on connector %v\n", connector.Id())
 	}
 
@@ -162,10 +164,21 @@ func (pipelineSupervisor *PipelineSupervisor) OnEvent(event *common.Event) {
 			}
 			pipelineSupervisor.declarePipelineBroken()
 		} else {
-			pipelineSupervisor.Logger().Infof("Received error report : %v, but error is ignored. pipeline_state=%v\n", pipelineSupervisor.errors_seen, pipelineSupervisor.pipeline.State())
+			pipelineSupervisor.Logger().Infof("%v Received error report : %v, but error is ignored. pipeline_state=%v\n", pipelineSupervisor.pipeline.Topic(), pipelineSupervisor.errors_seen, pipelineSupervisor.pipeline.State())
 
 		}
 
+	} else if event.EventType == common.VBErrorEncountered {
+		additionalInfo := event.OtherInfos.(*base.VBErrorEventAdditional)
+		vbno := additionalInfo.Vbno
+		err := additionalInfo.Error
+		pipelineSupervisor.Logger().Infof("%v Received error report on vb %v: %v\n", pipelineSupervisor.pipeline.Topic(), vbno, err)
+		settings := make(map[string]interface{})
+		settings[base.ProblematicVBs] = map[uint16]error{vbno: err}
+		// ignore vb errors and just mark the vbs as problematic for now.
+		// at the next topology check time, we will decide whether the problematic vbs are caused by topology
+		// changes and will restart pipeline if they are not
+		pipelineSupervisor.pipeline.UpdateSettings(settings)
 	} else {
 		pipelineSupervisor.Logger().Errorf("Pipeline supervisor didn't register to recieve event %v for component %v", event.EventType, event.Component.Id())
 	}

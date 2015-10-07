@@ -10,12 +10,16 @@ import (
 	"github.com/couchbase/goxdcr/parts"
 	"github.com/couchbase/goxdcr/pipeline_utils"
 	"github.com/couchbase/goxdcr/service_def"
+	"github.com/couchbase/goxdcr/simple_utils"
 	"sync"
 	"time"
 )
 
 var source_topology_changedErr = errors.New("Topology has changed on source cluster")
 var target_cluster_versionChangeErr = errors.New("Target cluster version has moved to 3.0 or above")
+
+// the maximum number of consecutive topology changes seen before pipeline is restarted
+var max_topology_changes_before_restart = 3
 
 type TopologyChangeDetectorSvc struct {
 	*comp.AbstractComponent
@@ -28,6 +32,10 @@ type TopologyChangeDetectorSvc struct {
 	pipeline           common.Pipeline
 	finish_ch          chan bool
 	wait_grp           *sync.WaitGroup
+	// the number of consecutive topology changes seen so far
+	num_topology_changes int
+	// list of vbs managed by the current node in the last topology change check time
+	vblist_supposed_last []uint16
 }
 
 func NewTopologyChangeDetectorSvc(cluster_info_svc service_def.ClusterInfoSvc,
@@ -36,13 +44,14 @@ func NewTopologyChangeDetectorSvc(cluster_info_svc service_def.ClusterInfoSvc,
 	logger_ctx *log.LoggerContext) *TopologyChangeDetectorSvc {
 	logger := log.NewLogger("ToplogyChangeDetector", logger_ctx)
 	return &TopologyChangeDetectorSvc{xdcr_topology_svc: xdcr_topology_svc,
-		cluster_info_svc:   cluster_info_svc,
-		remote_cluster_svc: remote_cluster_svc,
-		AbstractComponent:  comp.NewAbstractComponentWithLogger("ToplogyChangeDetector", logger),
-		pipeline:           nil,
-		finish_ch:          make(chan bool, 1),
-		wait_grp:           &sync.WaitGroup{},
-		logger:             logger}
+		cluster_info_svc:     cluster_info_svc,
+		remote_cluster_svc:   remote_cluster_svc,
+		AbstractComponent:    comp.NewAbstractComponentWithLogger("ToplogyChangeDetector", logger),
+		pipeline:             nil,
+		finish_ch:            make(chan bool, 1),
+		wait_grp:             &sync.WaitGroup{},
+		logger:               logger,
+		vblist_supposed_last: make([]uint16, 0)}
 }
 
 func (top_detect_svc *TopologyChangeDetectorSvc) Attach(pipeline common.Pipeline) error {
@@ -104,10 +113,14 @@ func (top_detect_svc *TopologyChangeDetectorSvc) watch(fin_ch chan bool, waitGrp
 }
 
 func (top_detect_svc *TopologyChangeDetectorSvc) validate(checkingTargetVersion bool) {
-	err := top_detect_svc.validateSourceTopology()
-	if err != nil && err == source_topology_changedErr {
-		top_detect_svc.RaiseEvent(common.NewEvent(common.ErrorEncountered, nil, top_detect_svc, nil, err))
+	vblist_now, vblist_supposed, err := top_detect_svc.validateSourceTopology()
+	if err == nil || err == source_topology_changedErr {
+		err = top_detect_svc.handleSourceToplogyChange(vblist_now, vblist_supposed, err)
+		if err != nil {
+			return
+		}
 	}
+	// ignore other errors
 
 	if checkingTargetVersion {
 		err := top_detect_svc.validateTargetVersion()
@@ -117,6 +130,53 @@ func (top_detect_svc *TopologyChangeDetectorSvc) validate(checkingTargetVersion 
 			top_detect_svc.logger.Infof("ToplogyChangeDetectorSvc for pipeline %v received error=%v when validating target version", top_detect_svc.pipeline.Topic(), err)
 		}
 	}
+}
+
+func (top_detect_svc *TopologyChangeDetectorSvc) handleSourceToplogyChange(vblist_now, vblist_supposed []uint16, err_in error) error {
+	vblist_removed, vblist_new := simple_utils.ComputeDeltaOfUint16Lists(vblist_now, vblist_supposed, false)
+	if len(vblist_removed) > 0 || len(vblist_new) > 0 {
+		top_detect_svc.logger.Infof("Source topology changed for pipeline %v: vblist_removed=%v, vblist_new=%v\n", top_detect_svc.pipeline.Topic(), vblist_removed, vblist_new)
+	}
+
+	// first check if all the problematic vbs in pipeline are due to source topology changes. If not, restart pipeline
+	settings := top_detect_svc.pipeline.Settings()
+	vb_err_map := settings[base.ProblematicVBs].(map[uint16]error)
+	var err error
+	for vbno, vb_err := range vb_err_map {
+		_, found := simple_utils.SearchVBInSortedList(vbno, vblist_removed)
+		if !found {
+			top_detect_svc.logger.Errorf("Error processing vb %v for pipeline %v. err=%v.", vbno, top_detect_svc.pipeline.Topic(), vb_err)
+			top_detect_svc.RaiseEvent(common.NewEvent(common.ErrorEncountered, nil, top_detect_svc, nil, vb_err))
+			return err
+		}
+	}
+
+	if err_in == source_topology_changedErr {
+		top_detect_svc.num_topology_changes++
+		top_detect_svc.logger.Infof("Number of consecutive topology changes seen by pipeline %v is %v\n", top_detect_svc.pipeline.Topic(), top_detect_svc.num_topology_changes)
+		// restart pipeline if consecutive topology changes reaches limit -- cannot wait any longer
+		if top_detect_svc.num_topology_changes >= max_topology_changes_before_restart {
+			err = fmt.Errorf("Timeout waiting for topology changes to complete for pipeline %v.", top_detect_svc.pipeline.Topic())
+			top_detect_svc.RaiseEvent(common.NewEvent(common.ErrorEncountered, nil, top_detect_svc, nil, err))
+			return err
+		}
+
+		// restart pipeline if
+		//	1. there has been topology changes
+		//  and 2. there has been no topology change between the last topology check time and now
+		//  assumbly topology change has completed and there is no need to wait further
+		if simple_utils.AreSortedUint16ListsTheSame(top_detect_svc.vblist_supposed_last, vblist_supposed) {
+			err = fmt.Errorf("Source topology change for pipeline %v seems to have completed.", top_detect_svc.pipeline.Topic())
+			top_detect_svc.RaiseEvent(common.NewEvent(common.ErrorEncountered, nil, top_detect_svc, nil, err))
+			return err
+		}
+
+		// otherwise, keep pipeline running for now.
+		top_detect_svc.vblist_supposed_last = vblist_supposed
+	}
+
+	return nil
+
 }
 
 func (top_detect_svc *TopologyChangeDetectorSvc) validateTargetVersion() (err error) {
@@ -157,42 +217,30 @@ func (top_detect_svc *TopologyChangeDetectorSvc) needCheckTarget() bool {
 	return false
 }
 
-func (top_detect_svc *TopologyChangeDetectorSvc) validateSourceTopology() error {
+func (top_detect_svc *TopologyChangeDetectorSvc) validateSourceTopology() ([]uint16, []uint16, error) {
 	top_detect_svc.logger.Infof("ToplogyChangeDetectorSvc for pipeline %v validateSourceTopology...", top_detect_svc.pipeline.Topic())
 	vblist_now := pipeline_utils.GetSourceVBListPerPipeline(top_detect_svc.pipeline)
 
 	vblist_supposed := []uint16{}
 	kv_vb_map, err := pipeline_utils.GetSourceVBMapForReplication(top_detect_svc.cluster_info_svc, top_detect_svc.xdcr_topology_svc, top_detect_svc.pipeline.Specification(), top_detect_svc.logger)
 	if err != nil {
-		return err
+		return nil, nil, err
 	}
 
 	for _, vblist := range kv_vb_map {
 		vblist_supposed = append(vblist_supposed, vblist...)
 	}
 
-	if len(vblist_now) != len(vblist_supposed) {
-		return source_topology_changedErr
-	} else {
-		for _, vbno := range vblist_supposed {
-			found := func(vbno uint16, vblist_now []uint16) bool {
-				for _, vb := range vblist_now {
-					if vb == vbno {
-						return true
-					}
-				}
+	simple_utils.SortUint16List(vblist_now)
+	simple_utils.SortUint16List(vblist_supposed)
 
-				return false
-			}(vbno, vblist_now)
-			if !found {
-				top_detect_svc.logger.Errorf("Source topology has changed for pipeline %v - vblist_supposed=%v, vblist_now=%v\n", top_detect_svc.pipeline.Topic(), vblist_supposed, vblist_now)
-				return source_topology_changedErr
-
-			}
-		}
+	if !simple_utils.AreSortedUint16ListsTheSame(vblist_now, vblist_supposed) {
+		top_detect_svc.logger.Infof("Source topology has changed for pipeline %v\n", top_detect_svc.pipeline.Topic())
+		top_detect_svc.logger.Debugf("Pipeline %v - vblist_supposed=%v, vblist_now=%v\n", top_detect_svc.pipeline.Topic(), vblist_supposed, vblist_now)
+		return vblist_now, vblist_supposed, source_topology_changedErr
 	}
 
-	return nil
+	return nil, nil, nil
 }
 
 func (top_detect_svc *TopologyChangeDetectorSvc) UpdateSettings(settings map[string]interface{}) error {

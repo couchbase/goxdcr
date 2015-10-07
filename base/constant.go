@@ -262,4 +262,9 @@ const (
 
 var CouchbaseBucketType = "membase"
 
-var VBTimestamps = "VBTimestamps"
+// keys used in pipeline.settings
+const(
+	ProblematicVBs = "ProblematicVBs"
+	VBTimestamps = "VBTimestamps"
+)
+

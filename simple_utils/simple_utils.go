@@ -97,6 +97,80 @@ func AreSortedUint16ListsTheSame(sorted_list_1, sorted_list_2 []uint16) bool {
 	return isSame
 }
 
+func IsVbInList(vbno uint16, vb_list []uint16) bool {
+	for _, vb_in_list := range vb_list {
+		if vb_in_list == vbno {
+			return true
+		}
+	}
+
+	return false
+}
+
+func SearchVBInSortedList(vbno uint16, vb_list []uint16) (int, bool) {
+	index := sort.Search(len(vb_list), func(i int) bool {
+		return vb_list[i] >= vbno
+	})
+	if index < len(vb_list) && vb_list[index] == vbno {
+		return index, true
+	} else {
+		return index, false
+	}
+}
+
+func AddVbToSortedList(vbno uint16, vb_list []uint16) []uint16 {
+	index, found := SearchVBInSortedList(vbno, vb_list)
+	if found {
+		return vb_list
+	} else {
+		new_vb_list := make([]uint16, 0)
+		new_vb_list = append(new_vb_list, vb_list[:index]...)
+		new_vb_list = append(new_vb_list, vbno)
+		new_vb_list = append(new_vb_list, vb_list[index:len(vb_list)]...)
+		return new_vb_list
+	}
+}
+
+// "sort" needs to be true if list_1 and list_2 are not sorted 	136
+func ComputeDeltaOfUint16Lists(list_1, list_2 []uint16, sort bool) ([]uint16, []uint16) {
+	if sort {
+		SortUint16List(list_1)
+		SortUint16List(list_2)
+	}
+
+	vblist_removed := make([]uint16, 0)
+	vblist_new := make([]uint16, 0)
+
+	i := 0
+	j := 0
+	for {
+		if i >= len(list_1) || j >= len(list_2) {
+			if j < len(list_2) {
+				vblist_new = append(vblist_new, list_2[j:]...)
+			} else if i < len(list_1) {
+				vblist_removed = append(vblist_removed, list_1[i:]...)
+			}
+			break
+		} else {
+			if list_1[i] == list_2[j] {
+				// vb not changed
+				i++
+				j++
+			} else if list_1[i] > list_2[j] {
+				// vb in list_2 is new
+				vblist_new = append(vblist_new, list_2[j])
+				j++
+			} else {
+				//  vb in list_1 has been removed
+				vblist_removed = append(vblist_removed, list_1[i])
+				i++
+			}
+		}
+	}
+
+	return vblist_removed, vblist_new
+}
+
 // type to facilitate the sorting of uint64 lists
 type Uint64List []uint64
 
@@ -118,16 +192,6 @@ func SearchUint64List(seqno_list []uint64, seqno uint64) (int, bool) {
 	} else {
 		return index, false
 	}
-}
-
-func IsVbInList(vbno uint16, vb_list []uint16) bool {
-	for _, vb_in_list := range vb_list {
-		if vb_in_list == vbno {
-			return true
-		}
-	}
-
-	return false
 }
 
 func MissingValueError(param string) error {

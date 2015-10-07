@@ -216,7 +216,8 @@ func ParseHighSeqnoStat(vbnos []uint16, stats_map map[string]string, highseqno_m
 		stats_key := fmt.Sprintf(base.VBUCKET_HIGH_SEQNO_STAT_KEY_FORMAT, vbno)
 		highseqnostr, ok := stats_map[stats_key]
 		if !ok {
-			return fmt.Errorf("Can't find high seqno for vbno=%v in stats map\n", vbno)
+			logger_utils.Infof("Can't find high seqno for vbno=%v in stats map. Source topology may have changed.\n", vbno)
+			continue
 		}
 		highseqno, err := strconv.ParseUint(highseqnostr, 10, 64)
 		if err != nil {
