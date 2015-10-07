@@ -261,3 +261,5 @@ const (
 )
 
 var CouchbaseBucketType = "membase"
+
+var VBTimestamps = "VBTimestamps"

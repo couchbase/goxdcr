@@ -32,7 +32,6 @@ const (
 	CheckpointMgrId   string = "CheckpointMgr"
 	TimeCommiting     string = "time_commiting"
 	Vbno              string = "vbno"
-	VBTimestamp       string = "VBTimestamps"
 )
 
 var CHECKPOINT_INTERVAL = "checkpoint_interval"
@@ -83,8 +82,6 @@ type CheckpointManager struct {
 	failoverlog_map  map[uint16]*failoverlogWithLock
 
 	logger *log.CommonLogger
-
-	vbts_update_lock *sync.Mutex
 }
 
 type checkpointRecordWithLock struct {
@@ -122,7 +119,6 @@ func NewCheckpointManager(checkpoints_svc service_def.CheckpointsService, capi_s
 		active_vbs:                active_vbs,
 		wait_grp:                  &sync.WaitGroup{},
 		failoverlog_map:           make(map[uint16]*failoverlogWithLock),
-		vbts_update_lock:          &sync.Mutex{},
 		vb_highseqno_map:          make(map[uint16]uint64)}, nil
 }
 
@@ -379,20 +375,12 @@ func (ckmgr *CheckpointManager) setTimestampForVB(vbno uint16, ts *base.VBTimest
 	ckmgr.through_seqno_tracker_svc.SetStartSeqno(vbno, ts.Seqno)
 	ckmgr.logger.Debugf("%v Set startSeqno to %v for vb=%v\n", ckmgr.pipeline.Topic(), ts.Seqno, vbno)
 
-	settings := ckmgr.pipeline.Settings()
-	ts_obj := utils.GetSettingFromSettings(settings, VBTimestamp)
-
-	if ts_obj != nil {
-		ts_map, _ := ts_obj.(map[uint16]*base.VBTimestamp)
-		ckmgr.vbts_update_lock.Lock()
-		defer ckmgr.vbts_update_lock.Unlock()
-		ts_map[vbno] = ts
-
-		//notify the settings change
-		ckmgr.pipeline.UpdateSettings(settings)
-	} else {
-		return errors.New("Setting 'VBTimestamp' is not in settings")
-	}
+	settings := make(map[string]interface{})
+	ts_map := make(map[uint16]*base.VBTimestamp)
+	ts_map[vbno] = ts
+	settings[base.VBTimestamps] = ts_map
+	//notify the settings change
+	ckmgr.pipeline.UpdateSettings(settings)
 
 	return nil
 }
@@ -866,7 +854,7 @@ func (ckmgr *CheckpointManager) UpdateVBTimestamps(vbno uint16, rollbackseqno ui
 func GetStartSeqnos(pipeline common.Pipeline, logger *log.CommonLogger) map[uint16]*base.VBTimestamp {
 	if pipeline != nil {
 		settings := pipeline.Settings()
-		startSeqnos_map, ok := settings["VBTimestamps"].(map[uint16]*base.VBTimestamp)
+		startSeqnos_map, ok := settings[base.VBTimestamps].(map[uint16]*base.VBTimestamp)
 		if ok {
 			//			logger.Infof("The current start seqno for %v is %v\n", pipeline.Topic(), startSeqnos_map)
 			return startSeqnos_map

@@ -87,8 +87,9 @@ type GenericPipeline struct {
 
 	logger *log.CommonLogger
 
-	spec     *metadata.ReplicationSpecification
-	settings map[string]interface{}
+	spec          *metadata.ReplicationSpecification
+	settings      map[string]interface{}
+	settings_lock *sync.RWMutex
 
 	state common.PipelineState
 
@@ -401,12 +402,13 @@ func NewGenericPipeline(t string,
 	spec *metadata.ReplicationSpecification,
 	uilog_svc service_def.UILogSvc) *GenericPipeline {
 	pipeline := &GenericPipeline{topic: t,
-		sources:     sources,
-		targets:     targets,
-		spec:        spec,
-		logger:      log.NewLogger("GenericPipeline", nil),
-		instance_id: time.Now().Nanosecond(),
-		state:       common.Pipeline_Initial}
+		sources:       sources,
+		targets:       targets,
+		spec:          spec,
+		logger:        log.NewLogger("GenericPipeline", nil),
+		instance_id:   time.Now().Nanosecond(),
+		state:         common.Pipeline_Initial,
+		settings_lock: &sync.RWMutex{}}
 	return pipeline
 }
 
@@ -429,9 +431,10 @@ func NewPipelineWithSettingConstructor(t string,
 		partUpdateSetting_constructor: partsUpdateSettingsConstructor,
 		startingSeqno_constructor:     startingSeqnoConstructor,
 		remoteClusterRef_retriever:    remoteClusterRefRetriever,
-		logger:      log.NewLogger("GenericPipeline", logger_context),
-		instance_id: time.Now().Nanosecond(),
-		state:       common.Pipeline_Initial}
+		logger:        log.NewLogger("GenericPipeline", logger_context),
+		instance_id:   time.Now().Nanosecond(),
+		state:         common.Pipeline_Initial,
+		settings_lock: &sync.RWMutex{}}
 	pipeline.logger.Debugf("Pipeline %s is initialized with a part setting constructor %v", t, partsSettingsConstructor)
 
 	return pipeline
@@ -539,6 +542,8 @@ func (genericPipeline *GenericPipeline) Specification() *metadata.ReplicationSpe
 }
 
 func (genericPipeline *GenericPipeline) Settings() map[string]interface{} {
+	genericPipeline.settings_lock.RLock()
+	defer genericPipeline.settings_lock.RUnlock()
 	return genericPipeline.settings
 }
 
@@ -623,6 +628,14 @@ func (genericPipeline *GenericPipeline) SetProgressRecorder(recorder common.Pipe
 }
 
 func (genericPipeline *GenericPipeline) UpdateSettings(settings map[string]interface{}) error {
+	if len(settings) == 0 {
+		return nil
+	}
+
+	// update settings in pipeline itself
+	genericPipeline.updatePipelineSettings(settings)
+
+	// update settings on parts and services in pipeline
 	if genericPipeline.partSetting_constructor != nil {
 		genericPipeline.logger.Debugf("Calling part update setting constructor with settings=%v\n", settings)
 		for _, part := range GetAllParts(genericPipeline) {
@@ -644,6 +657,20 @@ func (genericPipeline *GenericPipeline) UpdateSettings(settings map[string]inter
 
 	return nil
 
+}
+
+func (genericPipeline *GenericPipeline) updatePipelineSettings(settings map[string]interface{}) {
+	ts_obj := settings[base.VBTimestamps]
+	if ts_obj != nil {
+		genericPipeline.settings_lock.Lock()
+		defer genericPipeline.settings_lock.Unlock()
+
+		ts_map := ts_obj.(map[uint16]*base.VBTimestamp)
+		existing_ts_map := genericPipeline.settings[base.VBTimestamps].(map[uint16]*base.VBTimestamp)
+		for vbno, ts := range ts_map {
+			existing_ts_map[vbno] = ts
+		}
+	}
 }
 
 //enforcer for GenericPipeline to implement Pipeline
