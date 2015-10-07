@@ -377,9 +377,8 @@ func (dcp *DcpNozzle) processData() (err error) {
 			}
 			if m.Opcode == gomemcached.UPR_STREAMREQ {
 				if m.Status == gomemcached.NOT_MY_VBUCKET {
-					dcp.Logger().Errorf("Raise error condition %v\n", base.ErrorNotMyVbucket)
-					dcp.handleGeneralError(base.ErrorNotMyVbucket)
-					return base.ErrorNotMyVbucket
+					vb_err := fmt.Errorf("Received error %v on vb %v\n", base.ErrorNotMyVbucket, m.VBucket)
+					dcp.handleVBError(m.VBucket, vb_err)
 				} else if m.Status == gomemcached.ROLLBACK {
 					rollbackseq := binary.BigEndian.Uint64(m.Value[:8])
 					vbno := m.VBucket
@@ -417,8 +416,7 @@ func (dcp *DcpNozzle) processData() (err error) {
 				if err == nil && stream_status == Dcp_Stream_Active {
 					err_streamend := fmt.Errorf("dcp stream for vb=%v is closed by producer", m.VBucket)
 					dcp.Logger().Infof("%v: %v", dcp.Id(), err_streamend)
-					dcp.handleGeneralError(err_streamend)
-					goto done
+					dcp.handleVBError(vbno, err_streamend)
 				}
 
 			} else {
@@ -475,6 +473,11 @@ func (dcp *DcpNozzle) handleGeneralError(err error) {
 	} else {
 		dcp.Logger().Debugf("%v in shutdown process. err=%v is ignored\n", dcp.Id(), err)
 	}
+}
+
+func (dcp *DcpNozzle) handleVBError(vbno uint16, err error) {
+	additionalInfo := &base.VBErrorEventAdditional{vbno, err}
+	dcp.RaiseEvent(common.NewEvent(common.VBErrorEncountered, nil, dcp, nil, additionalInfo))
 }
 
 // start steam request will be sent when starting seqno is negotiated, it may take a few

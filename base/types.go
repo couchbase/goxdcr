@@ -85,7 +85,7 @@ type WrappedMCRequest struct {
 	Seqno      uint64
 	Req        *gomemcached.MCRequest
 	Start_time time.Time
-	Send_time time.Time
+	Send_time  time.Time
 	UniqueKey  string
 }
 
@@ -160,3 +160,8 @@ type MetadataServiceCallback func(path string, value []byte, rev interface{}) er
 type MetadataChangeHandlerCallback func(metadataId string, oldMetadata interface{}, newMetadata interface{}) error
 
 type DataObjRecycler func(topic string, dataObj *WrappedMCRequest)
+
+type VBErrorEventAdditional struct {
+	Vbno uint16
+	Error  error
+}

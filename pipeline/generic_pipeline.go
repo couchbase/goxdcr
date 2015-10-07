@@ -173,7 +173,8 @@ func (genericPipeline *GenericPipeline) Start(settings map[string]interface{}) e
 		return err
 	}
 
-	settings["VBTimestamps"] = make(map[uint16]*base.VBTimestamp)
+	settings[base.VBTimestamps] = make(map[uint16]*base.VBTimestamp)
+	settings[base.ProblematicVBs] = make(map[uint16]error)
 	genericPipeline.settings = settings
 
 	//get starting vb timestamp
@@ -660,15 +661,30 @@ func (genericPipeline *GenericPipeline) UpdateSettings(settings map[string]inter
 }
 
 func (genericPipeline *GenericPipeline) updatePipelineSettings(settings map[string]interface{}) {
+	genericPipeline.settings_lock.Lock()
+	defer genericPipeline.settings_lock.Unlock()
+	genericPipeline.updateTimestampsSetting(settings)
+	genericPipeline.updateProblematicVBsSetting(settings)
+}
+
+func (genericPipeline *GenericPipeline) updateTimestampsSetting(settings map[string]interface{}) {
 	ts_obj := settings[base.VBTimestamps]
 	if ts_obj != nil {
-		genericPipeline.settings_lock.Lock()
-		defer genericPipeline.settings_lock.Unlock()
-
 		ts_map := ts_obj.(map[uint16]*base.VBTimestamp)
 		existing_ts_map := genericPipeline.settings[base.VBTimestamps].(map[uint16]*base.VBTimestamp)
 		for vbno, ts := range ts_map {
 			existing_ts_map[vbno] = ts
+		}
+	}
+}
+
+func (genericPipeline *GenericPipeline) updateProblematicVBsSetting(settings map[string]interface{}) {
+	vb_err_map_obj := settings[base.ProblematicVBs]
+	if vb_err_map_obj != nil {
+		vb_err_map := vb_err_map_obj.(map[uint16]error)
+		existing_vb_err_map := genericPipeline.settings[base.ProblematicVBs].(map[uint16]error)
+		for vbno, err := range vb_err_map {
+			existing_vb_err_map[vbno] = err
 		}
 	}
 }
