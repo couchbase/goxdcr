@@ -33,6 +33,7 @@ const (
 	BatchSizeInternal = 512
 	BatchSizeDefault  = 1024
 	BatchSizePerRepl  = 3036
+	GoMaxProcs = 5
 )
 
 var options struct {
@@ -88,7 +89,11 @@ func main() {
 	fmt.Println("Start Testing adminport...")
 	argParse()
 	fmt.Println("Done with parsing the arguments")
-	startAdminport()
+	//startAdminport()
+	if err := testInternalSettings(); err != nil {
+		fmt.Println(err.Error())
+		return
+	}
 }
 
 func startAdminport() {
@@ -189,7 +194,9 @@ func testInternalSettings() error {
 	url := common.GetAdminportUrlPrefix(options.sourceKVHost, options.sourceKVAdminPort) + rm.InternalSettingsPath
 
 	params := make(map[string]interface{})
-	params[rm.ConvertRestKeyToRestInternalKey(rm.BatchSize)] = BatchSizeInternal
+	params[rm.ConvertRestKeyToRestInternalKey(rm.BatchSize)] = 1000
+	params[rm.ConvertRestKeyToRestInternalKey(rm.GoMaxProcs)] = 11
+
 
 	paramsBytes, _ := utils.EncodeMapIntoByteArray(params)
 
@@ -209,7 +216,10 @@ func testInternalSettings() error {
 		return err
 	}
 	newBatchSize := int(settingsMap[rm.ConvertRestKeyToRestInternalKey(rm.BatchSize)].(float64))
-	return common.ValidateFieldValue("internal BatchSize", BatchSizeInternal, newBatchSize)
+	newMaxProcs := int(settingsMap[rm.ConvertRestKeyToRestInternalKey(rm.GoMaxProcs)].(float64))
+	fmt.Println("MaxProcs Size Done", newMaxProcs)
+	common.ValidateFieldValue("MaxProcs", GoMaxProcs, newMaxProcs)
+	return common.ValidateFieldValue("internal BatchSize", BatchSizeInternal, newBatchSize) 
 }
 
 func testDefaultReplicationSettingsWithJustValidate() error {

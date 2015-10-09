@@ -68,7 +68,7 @@ func main() {
 	HideConsole(true)
 	defer HideConsole(false)
 
-	runtime.GOMAXPROCS(rm.GoMaxProcs())
+    runtime.GOMAXPROCS(rm.GoMaxProcs_env())
 
 	argParse()
 
@@ -97,6 +97,12 @@ func main() {
 	audit_svc, err := service_impl.NewAuditSvc(top_svc, nil)
 	if err != nil {
 		fmt.Printf("Error starting audit service. err=%v\n", err)
+		os.Exit(1)
+	}
+	
+	processSetting_svc := metadata_svc.NewGlobalSettingsSvc(metakv_svc, nil)
+	if err != nil {
+		fmt.Printf("Error starting GlobalSetting service. err=%v\n", err)
 		os.Exit(1)
 	}
 
@@ -148,7 +154,8 @@ func main() {
 			metadata_svc.NewCheckpointsService(metakv_svc, nil),
 			service_impl.NewCAPIService(cluster_info_svc, nil),
 			audit_svc,
-			uilog_svc)
+			uilog_svc,
+			processSetting_svc)
 
 		// keep main alive in normal mode
 		<-done
