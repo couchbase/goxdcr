@@ -81,6 +81,9 @@ type replicationManager struct {
 	//audit service handle
 	audit_svc service_def.AuditSvc
 
+	//process setting service
+	process_setting_svc service_def.GlobalSettingsSvc
+
 	once sync.Once
 
 	//finish channel for adminport
@@ -107,14 +110,15 @@ func StartReplicationManager(sourceKVHost string, xdcrRestPort uint16,
 	checkpoints_svc service_def.CheckpointsService,
 	capi_svc service_def.CAPIService,
 	audit_svc service_def.AuditSvc,
-	uilog_svc service_def.UILogSvc) {
+	uilog_svc service_def.UILogSvc,
+	process_setting_svc service_def.GlobalSettingsSvc) {
 
 	replication_mgr.once.Do(func() {
 		// ns_server shutdown protocol: poll stdin and exit upon reciept of EOF
 		go pollStdin()
 
 		// initializes replication manager
-		replication_mgr.init(repl_spec_svc, remote_cluster_svc, cluster_info_svc, xdcr_topology_svc, replication_settings_svc, checkpoints_svc, capi_svc, audit_svc, uilog_svc)
+		replication_mgr.init(repl_spec_svc, remote_cluster_svc, cluster_info_svc, xdcr_topology_svc, replication_settings_svc, checkpoints_svc, capi_svc, audit_svc, uilog_svc, process_setting_svc)
 
 		// start pipeline master supervisor
 		// TODO should we make heart beat settings configurable?
@@ -170,6 +174,16 @@ func (rm *replicationManager) initMetadataChangeMonitor() {
 	mcm.RegisterListener(remoteClusterChangeListener)
 	rm.remote_cluster_svc.SetMetadataChangeHandlerCallback(remoteClusterChangeListener.remoteClusterChangeHandlerCallback)
 
+	globalSettingChangeListener := NewGlobalSettingChangeListener(
+		rm.process_setting_svc,
+		rm.metadata_change_callback_cancel_ch,
+		rm.children_waitgrp,
+		log.DefaultLoggerContext)
+
+	mcm.RegisterListener(globalSettingChangeListener)
+	rm.process_setting_svc.SetMetadataChangeHandlerCallback(globalSettingChangeListener.globalSettingChangeHandlerCallback)
+	logger_rm.Info("globalSettingChangeListener successfully started")
+
 	mcm.Start()
 }
 
@@ -222,7 +236,8 @@ func (rm *replicationManager) init(
 	checkpoint_svc service_def.CheckpointsService,
 	capi_svc service_def.CAPIService,
 	audit_svc service_def.AuditSvc,
-	uilog_svc service_def.UILogSvc) {
+	uilog_svc service_def.UILogSvc,
+	process_setting_svc service_def.GlobalSettingsSvc) {
 
 	rm.GenericSupervisor = *supervisor.NewGenericSupervisor(base.ReplicationManagerSupervisorId, log.DefaultLoggerContext, rm, nil)
 	rm.pipelineMasterSupervisor = supervisor.NewGenericSupervisor(base.PipelineMasterSupervisorId, log.DefaultLoggerContext, rm, &rm.GenericSupervisor)
@@ -236,6 +251,7 @@ func (rm *replicationManager) init(
 	rm.audit_svc = audit_svc
 	rm.adminport_finch = make(chan bool, 1)
 	rm.children_waitgrp = &sync.WaitGroup{}
+	rm.process_setting_svc = process_setting_svc
 	fac := factory.NewXDCRFactory(repl_spec_svc, remote_cluster_svc, cluster_info_svc, xdcr_topology_svc, checkpoint_svc, capi_svc, uilog_svc, log.DefaultLoggerContext, log.DefaultLoggerContext, rm, rm.pipelineMasterSupervisor)
 
 	pipeline_manager.PipelineManager(fac, rm.repl_spec_svc, xdcr_topology_svc, log.DefaultLoggerContext)
@@ -265,13 +281,16 @@ func XDCRCompTopologyService() service_def.XDCRCompTopologySvc {
 func ReplicationSettingsService() service_def.ReplicationSettingsSvc {
 	return replication_mgr.replication_settings_svc
 }
-
 func CheckpointService() service_def.CheckpointsService {
 	return replication_mgr.checkpoint_svc
 }
 
 func AuditService() service_def.AuditSvc {
 	return replication_mgr.audit_svc
+}
+
+func GlobalSettingsService() service_def.GlobalSettingsSvc {
+	return replication_mgr.process_setting_svc
 }
 
 //CreateReplication create the replication specification in metadata store
@@ -333,6 +352,54 @@ func startPipelineWithRetry(topic string) error {
 
 func PipelineMasterSupervisor() *supervisor.GenericSupervisor {
 	return replication_mgr.pipelineMasterSupervisor
+}
+
+//update the  replication settings and XDCR process setting
+func UpdateDefaultSettings(settings map[string]interface{}, realUserId *base.RealUserId) (map[string]error, error) {
+
+	// Validate process setting keys
+	GlobalSettingsMap := metadata.ValidateGlobalSettingsKey(settings)
+	//First update XDCR Process specific setting
+	errorMap, err := UpdateGlobalSettings(GlobalSettingsMap, realUserId)
+	if len(errorMap) != 0 {
+		return errorMap, err
+	}
+
+	//validate replication settings
+	replicationSettingMap := metadata.ValidateSettingsKey(settings)
+	//Now update default replication setting
+	errorMapRep, err := UpdateDefaultReplicationSettings(replicationSettingMap, realUserId)
+	if len(errorMapRep) != 0 {
+		return errorMapRep, err
+	}
+	logger_rm.Infof("Updated replication settings\n")
+
+	return nil, nil
+}
+
+//update the process  settings
+func UpdateGlobalSettings(settings map[string]interface{}, realUserId *base.RealUserId) (map[string]error, error) {
+	defaultSettings, err := GlobalSettingsService().GetDefaultGlobalSettings()
+	if err != nil {
+		return nil, err
+	}
+
+	changedSettingsMap, errorMap := defaultSettings.UpdateSettingsFromMap(settings)
+	if len(errorMap) != 0 {
+		return errorMap, nil
+	}
+
+	if len(changedSettingsMap) != 0 {
+		err = GlobalSettingsService().SetDefaultGlobalSettings(defaultSettings)
+		if err != nil {
+			return nil, err
+		}
+		logger_rm.Infof("Default Process settings saved succesfully\n")
+	} else {
+		logger_rm.Infof("Did not update process  settings since there are no real changes")
+	}
+
+	return nil, nil
 }
 
 //update the default replication settings
@@ -806,7 +873,8 @@ func logAuditErrors(err error) {
 	}
 }
 
-func GoMaxProcs() int {
+//pull GoMaxProc from environment
+func GoMaxProcs_env() int {
 	max_procs_str := os.Getenv("GOXDCR_GOMAXPROCS")
 	var max_procs int
 	max_procs, err := strconv.Atoi(max_procs_str)

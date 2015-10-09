@@ -116,13 +116,15 @@ func invokeFactory() error {
 		return err
 	}
 
+	processSetting_svc := metadata_svc.NewGlobalSettingsSvc(msvc, nil)
+
 	checkpoints_svc := metadata_svc.NewCheckpointsService(msvc, nil)
 	capi_svc := service_impl.NewCAPIService(cluster_info_svc, nil)
 
 	replication_manager.StartReplicationManager(options.sourceKVHost, base.AdminportNumber,
 		repl_spec_svc,
 		remote_cluster_svc,
-		cluster_info_svc, top_svc, metadata_svc.NewReplicationSettingsSvc(msvc, nil), checkpoints_svc, capi_svc, audit_svc, uilog_svc)
+		cluster_info_svc, top_svc, metadata_svc.NewReplicationSettingsSvc(msvc, nil), checkpoints_svc, capi_svc, audit_svc, uilog_svc, processSetting_svc)
 
 	fac := factory.NewXDCRFactory(repl_spec_svc, remote_cluster_svc, cluster_info_svc, top_svc, checkpoints_svc, capi_svc, uilog_svc, log.DefaultLoggerContext, log.DefaultLoggerContext, nil, nil)
 

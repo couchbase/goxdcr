@@ -19,6 +19,7 @@ import (
 	"github.com/couchbase/goxdcr/metadata_svc"
 	"github.com/couchbase/goxdcr/pipeline_manager"
 	"github.com/couchbase/goxdcr/service_def"
+	"runtime"
 	"sync"
 )
 
@@ -395,4 +396,64 @@ func onDeleteReplication(topic string, logger *log.CommonLogger) error {
 	}
 	return nil
 
+}
+
+//Process setting listeners
+
+// listener for GOXDCR Process level setting changes.
+type GlobalSettingChangeListener struct {
+	*MetakvChangeListener
+}
+
+func NewGlobalSettingChangeListener(process_setting_svc service_def.GlobalSettingsSvc,
+	cancel_chan chan struct{},
+	children_waitgrp *sync.WaitGroup,
+	logger_ctx *log.LoggerContext) *GlobalSettingChangeListener {
+	pscl := &GlobalSettingChangeListener{
+		NewMetakvChangeListener(base.GlobalSettingChangeListener,
+			metadata_svc.GetCatalogPathFromCatalogKey(metadata_svc.GlobalSettingCatalogKey),
+			cancel_chan,
+			children_waitgrp,
+			process_setting_svc.GlobalSettingsServiceCallback,
+			logger_ctx,
+			"GlobalSettingChangeListener"),
+	}
+	return pscl
+}
+
+func (pscl *GlobalSettingChangeListener) validateGlobalSetting(settingObj interface{}) (*metadata.GlobalSettings, error) {
+	if settingObj == nil {
+		return nil, nil
+	}
+
+	psettings, ok := settingObj.(*metadata.GlobalSettings)
+	if !ok {
+		errMsg := fmt.Sprintf("Metadata, %v, is not of GlobalSetting  type\n", settingObj)
+		pscl.logger.Errorf(errMsg)
+		return nil, errors.New(errMsg)
+	}
+
+	return psettings, nil
+}
+
+// Handler callback for prcoess setting changed event
+// In case of globalsettings oldsetting object will be null as we dont cache the object.. so we dont have access to old value
+func (pscl *GlobalSettingChangeListener) globalSettingChangeHandlerCallback(settingId string, oldSettingObj interface{}, newSettingObj interface{}) error {
+
+	newSetting, err := pscl.validateGlobalSetting(newSettingObj)
+	if err != nil {
+		return err
+	}
+	pscl.logger.Infof("globalSettingChangeHandlerCallback called on id = %v\n", settingId)
+	if newSetting != nil {
+		pscl.logger.Infof("new Global settings=%v\n", newSetting.String())
+	}
+	if newSetting.GoMaxProcs > 0 {
+		currentValue := runtime.GOMAXPROCS(0)
+		if newSetting.GoMaxProcs != currentValue {
+			runtime.GOMAXPROCS(newSetting.GoMaxProcs)
+			pscl.logger.Infof("Successfully changed  Max Process setting from(old) %v to(New) %v\n", currentValue, newSetting.GoMaxProcs)
+		}
+	}
+	return nil
 }

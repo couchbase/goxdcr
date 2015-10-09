@@ -93,6 +93,7 @@ var SettingsConfigMap = map[string]*SettingsConfig{
 /***********************************
 /* struct ReplicationSettings
 *************************************/
+
 type ReplicationSettings struct {
 	//type - XMEM or CAPI
 	RepType string `json:"type"`
@@ -343,7 +344,6 @@ func (s *ReplicationSettings) UpdateSettingsFromMap(settingsMap map[string]inter
 			}
 		default:
 			errorMap[key] = errors.New(fmt.Sprintf("Invalid key in map, %v", key))
-
 		}
 	}
 
@@ -474,4 +474,29 @@ func IsSettingValueMutable(key string) bool {
 		}
 	}
 	return mutable
+}
+
+func ValidateSettingsKey(settingsMap map[string]interface{}) (returnedSettingsMap map[string]interface{}) {
+	returnedSettingsMap = make(map[string]interface{})
+
+	for key, val := range settingsMap {
+		switch key {
+
+		case ReplicationType, FilterExpression,
+			Active,
+			CheckpointInterval,
+			BatchCount,
+			BatchSize,
+			FailureRestartInterval,
+			OptimisticReplicationThreshold,
+			SourceNozzlePerNode,
+			TargetNozzlePerNode,
+			MaxExpectedReplicationLag,
+			TimeoutPercentageCap,
+			PipelineLogLevel,
+			PipelineStatsInterval:
+			returnedSettingsMap[key] = val
+		}
+	}
+	return
 }

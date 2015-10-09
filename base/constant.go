@@ -112,6 +112,7 @@ const (
 const (
 	ReplicationSpecChangeListener = "ReplicationSpecChangeListener"
 	RemoteClusterChangeListener   = "RemoteClusterChangeListener"
+	GlobalSettingChangeListener   = "GlobalSettingChangeListener"
 )
 
 // constants for integer parsing

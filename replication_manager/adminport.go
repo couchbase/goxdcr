@@ -415,12 +415,21 @@ func (adminport *Adminport) doDeleteReplicationRequest(request *http.Request) (*
 func (adminport *Adminport) doViewInternalSettingsRequest(request *http.Request) (*ap.Response, error) {
 	logger_ap.Infof("doViewInternalSettingsRequest\n")
 
+	// default replication setting
 	defaultSettings, err := ReplicationSettingsService().GetDefaultReplicationSettings()
+
 	if err != nil {
 		return nil, err
 	}
 
-	return NewInternalSettingsResponse(defaultSettings)
+	// default process settings
+	defaultProcessSetting, err := GlobalSettingsService().GetDefaultGlobalSettings()
+
+	if err != nil {
+		return nil, err
+	}
+
+	return NewInternalSettingsResponse(defaultSettings, defaultProcessSetting)
 }
 
 func (adminport *Adminport) doChangeInternalSettingsRequest(request *http.Request) (*ap.Response, error) {
@@ -434,7 +443,7 @@ func (adminport *Adminport) doChangeInternalSettingsRequest(request *http.Reques
 
 	logger_ap.Infof("Request params: inputSettings=%v\n", settingsMap)
 
-	errorsMap, err := UpdateDefaultReplicationSettings(settingsMap, getRealUserIdFromRequest(request))
+	errorsMap, err := UpdateDefaultSettings(settingsMap, getRealUserIdFromRequest(request))
 	if err != nil {
 		return nil, err
 	} else if len(errorsMap) > 0 {
@@ -452,8 +461,14 @@ func (adminport *Adminport) doViewDefaultReplicationSettingsRequest(request *htt
 	if err != nil {
 		return nil, err
 	}
+	// default process settings
+	defaultProcessSetting, err := GlobalSettingsService().GetDefaultGlobalSettings()
 
-	return NewDefaultReplicationSettingsResponse(defaultSettings)
+	if err != nil {
+		return nil, err
+	}
+
+	return NewDefaultReplicationSettingsResponse(defaultSettings, defaultProcessSetting)
 }
 
 func (adminport *Adminport) doChangeDefaultReplicationSettingsRequest(request *http.Request) (*ap.Response, error) {
@@ -468,7 +483,7 @@ func (adminport *Adminport) doChangeDefaultReplicationSettingsRequest(request *h
 	logger_ap.Infof("Request params: justValidate=%v, inputSettings=%v\n", justValidate, settingsMap)
 
 	if !justValidate {
-		errorsMap, err := UpdateDefaultReplicationSettings(settingsMap, getRealUserIdFromRequest(request))
+		errorsMap, err := UpdateDefaultSettings(settingsMap, getRealUserIdFromRequest(request))
 		if err != nil {
 			return nil, err
 		} else if len(errorsMap) > 0 {
@@ -483,7 +498,14 @@ func (adminport *Adminport) doChangeDefaultReplicationSettingsRequest(request *h
 		return nil, err
 	}
 
-	return NewDefaultReplicationSettingsResponse(defaultSettings)
+	// default process settings
+	defaultProcessSetting, err := GlobalSettingsService().GetDefaultGlobalSettings()
+
+	if err != nil {
+		return nil, err
+	}
+
+	return NewDefaultReplicationSettingsResponse(defaultSettings, defaultProcessSetting)
 }
 
 func (adminport *Adminport) doViewReplicationSettingsRequest(request *http.Request) (*ap.Response, error) {

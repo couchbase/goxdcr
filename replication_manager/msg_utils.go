@@ -72,8 +72,8 @@ const (
 	TimeoutPercentageCap           = "timeoutPercentageCap"
 	LogLevel                       = "logLevel"
 	StatsInterval                  = "statsInterval"
-
-	ReplicationTypeValue = "continuous"
+	ReplicationTypeValue           = "continuous"
+	GoMaxProcs                     = "goMaxProcs"
 )
 
 // constants for parsing create replication response
@@ -138,6 +138,7 @@ var RestKeyToSettingsKeyMap = map[string]string{
 	TimeoutPercentageCap:           metadata.TimeoutPercentageCap,*/
 	LogLevel:      metadata.PipelineLogLevel,
 	StatsInterval: metadata.PipelineStatsInterval,
+	GoMaxProcs:    metadata.GoMaxProcs,
 }
 
 // internal replication settings key -> replication settings key in rest api
@@ -156,6 +157,7 @@ var SettingsKeyToRestKeyMap = map[string]string{
 	metadata.TimeoutPercentageCap:           TimeoutPercentageCap,*/
 	metadata.PipelineLogLevel:      LogLevel,
 	metadata.PipelineStatsInterval: StatsInterval,
+	metadata.GoMaxProcs:            GoMaxProcs,
 }
 
 var logger_msgutil *log.CommonLogger = log.NewLogger("MessageUtils", log.DefaultLoggerContext)
@@ -546,19 +548,30 @@ func NewReplicationSettingsResponse(settings *metadata.ReplicationSettings) (*ap
 	}
 }
 
-func NewDefaultReplicationSettingsResponse(settings *metadata.ReplicationSettings) (*ap.Response, error) {
-	if settings == nil {
+func NewDefaultReplicationSettingsResponse(settings *metadata.ReplicationSettings, globalSettings *metadata.GlobalSettings) (*ap.Response, error) {
+	if settings == nil || globalSettings == nil {
 		return NewEmptyArrayResponse()
 	} else {
-		return EncodeObjectIntoResponse(convertSettingsToRestSettingsMap(settings, true))
+		globalSettingsMap := convertGlobalSettingsToRestSettingsMap(globalSettings)
+		replicationSettingMap := convertSettingsToRestSettingsMap(settings, true)
+		for key, value := range globalSettingsMap {
+			replicationSettingMap[key] = value
+		}
+
+		return EncodeObjectIntoResponse(replicationSettingMap)
 	}
 }
 
-func NewInternalSettingsResponse(settings *metadata.ReplicationSettings) (*ap.Response, error) {
-	if settings == nil {
+func NewInternalSettingsResponse(settings *metadata.ReplicationSettings, globalSettings *metadata.GlobalSettings) (*ap.Response, error) {
+	if settings == nil || globalSettings == nil {
 		return NewEmptyArrayResponse()
 	} else {
-		return EncodeObjectIntoResponse(convertSettingsToRestInternalSettingsMap(settings))
+		globalSettingsMap := convertGlobalSettingsToRestInternalSettingsMap(globalSettings)
+		replicationSettingMap := convertSettingsToRestInternalSettingsMap(settings)
+		for key, value := range globalSettingsMap {
+			replicationSettingMap[key] = value
+		}
+		return EncodeObjectIntoResponse(replicationSettingMap)
 	}
 }
 
@@ -597,6 +610,29 @@ func DecodeDynamicParamInURL(request *http.Request, pathPrefix string, paramName
 func verifyFilterExpression(filterExpression string) error {
 	_, err := regexp.Compile(filterExpression)
 	return err
+}
+
+func convertGlobalSettingsToRestSettingsMap(settings *metadata.GlobalSettings) map[string]interface{} {
+	restSettingsMap := make(map[string]interface{})
+	var settingsMap map[string]interface{}
+
+	settingsMap = settings.ToMap()
+	for key, value := range settingsMap {
+		restKey := SettingsKeyToRestKeyMap[key]
+		restSettingsMap[restKey] = value
+	}
+	return restSettingsMap
+}
+
+func convertGlobalSettingsToRestInternalSettingsMap(settings *metadata.GlobalSettings) map[string]interface{} {
+	internalSettingsMap := make(map[string]interface{})
+	settingsMap := settings.ToMap()
+	for key, value := range settingsMap {
+		restKey := SettingsKeyToRestKeyMap[key]
+		internalSettingsKey := ConvertRestKeyToRestInternalKey(restKey)
+		internalSettingsMap[internalSettingsKey] = value
+	}
+	return internalSettingsMap
 }
 
 func convertSettingsToRestSettingsMap(settings *metadata.ReplicationSettings, isDefaultSettings bool) map[string]interface{} {
@@ -817,11 +853,21 @@ func processKey(restKey string, valArr []string, settingsPtr *map[string]interfa
 		return errors.New("Setting value cannot be modified after replication is created.")
 	}
 
-	convertedValue, err := metadata.ValidateAndConvertSettingsValue(settingsKey, valArr[0], restKey)
+	convertedValue, err := validateAndConvertAllSettingValue(settingsKey, valArr[0], restKey)
 	if err == nil {
 		(*settingsPtr)[settingsKey] = convertedValue
 	}
 	return err
+}
+
+func validateAndConvertAllSettingValue(key, value, restKey string) (convertedValue interface{}, err error) {
+	//check if value is replication specific setting
+	convertedValue, err = metadata.ValidateAndConvertSettingsValue(key, value, restKey)
+	//if we find converted value is null  than check if value is global process specific setting
+	if convertedValue == nil {
+		convertedValue, err = metadata.ValidateAndConvertGlobalSettingsValue(key, value, restKey)
+	}
+	return
 }
 
 // check if encryption is enabled from the valArr of demandEncryption parameter in http request
