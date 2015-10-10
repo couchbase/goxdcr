@@ -342,6 +342,13 @@ func (rccl *RemoteClusterChangeListener) remoteClusterChangeHandlerCallback(remo
 		specs := pipeline_manager.AllReplicationSpecsForTargetCluster(oldRemoteClusterRef.Uuid)
 
 		for _, spec := range specs {
+			// if critical info in remote cluster reference, e.g., log info or certificate, is changed,
+			// the existing connection pools to the corresponding target cluster all need to be reset to
+			// take in the new changes. Mark these connection pools to be stale, so that they will be
+			// removed and re-created once the replications are started or resumed.
+			// Note that this needs to be done for paused replications as well.
+			base.ConnPoolMgr().SetStaleForPoolsWithNamePrefix(spec.Id)
+
 			if spec.Settings.Active {
 				rccl.logger.Infof("Restarting pipelines %v since the referenced remote cluster %v has been changed\n", spec.Id, oldRemoteClusterRef.Name)
 				pipeline_manager.Update(spec.Id, nil)
