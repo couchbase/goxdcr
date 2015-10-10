@@ -72,6 +72,8 @@ type ConnPool interface {
 	ConnType() ConnType
 	Hostname() string
 	Close()
+	Stale() bool
+	SetStale(stale bool)
 }
 
 type SSLConnPool interface {
@@ -91,7 +93,8 @@ type connPool struct {
 	logger      *log.CommonLogger
 	lock        *sync.RWMutex
 	cas         uint32
-	cas_lock    *sync.RWMutex
+	stale       bool
+	state_lock  *sync.RWMutex
 }
 
 type sslOverProxyConnPool struct {
@@ -204,6 +207,18 @@ func (p *connPool) NewConnFunc() NewConnFunc {
 
 func (p *connPool) ConnType() ConnType {
 	return MemConn
+}
+
+func (p *connPool) Stale() bool {
+	p.state_lock.RLock()
+	defer p.state_lock.RUnlock()
+	return p.stale
+}
+
+func (p *connPool) SetStale(stale bool) {
+	p.state_lock.Lock()
+	defer p.state_lock.Unlock()
+	p.stale = stale
 }
 
 func (p *sslOverProxyConnPool) init() {
@@ -365,20 +380,20 @@ func (p *connPool) Release(client *mcc.Client) {
 }
 
 func (p *connPool) GetCAS() uint32 {
-	p.cas_lock.RLock()
-	defer p.cas_lock.RUnlock()
+	p.state_lock.RLock()
+	defer p.state_lock.RUnlock()
 	return p.cas
 }
 
 func (p *connPool) incrementCAS() {
-	p.cas_lock.Lock()
-	defer p.cas_lock.Unlock()
+	p.state_lock.Lock()
+	defer p.state_lock.Unlock()
 	p.cas++
 }
 
 func (p *connPool) doesCASMatch(cas uint32) bool {
-	p.cas_lock.RLock()
-	defer p.cas_lock.RUnlock()
+	p.state_lock.RLock()
+	defer p.state_lock.RUnlock()
 	if p.cas == cas {
 		return true
 	}
@@ -442,7 +457,11 @@ func (connPoolMgr *connPoolMgr) GetOrCreatePool(poolNameToCreate string, hostnam
 	if ok {
 		_, ok = pool.(*connPool)
 		if ok {
-			return pool, nil
+			if !pool.Stale() {
+				return pool, nil
+			} else {
+				connPoolMgr.removePool(pool)
+			}
 		} else {
 			return nil, WrongConnTypeError
 		}
@@ -460,7 +479,7 @@ func (connPoolMgr *connPoolMgr) GetOrCreatePool(poolNameToCreate string, hostnam
 		bucketName: bucketname,
 		name:       poolNameToCreate,
 		lock:       &sync.RWMutex{},
-		cas_lock:   &sync.RWMutex{},
+		state_lock: &sync.RWMutex{},
 		logger:     log.NewLogger("ConnPool", connPoolMgr.logger.LoggerContext())}
 	connPoolMgr.conn_pools_map[poolNameToCreate] = pool
 
@@ -477,7 +496,11 @@ func (connPoolMgr *connPoolMgr) GetOrCreateSSLOverMemPool(poolNameToCreate strin
 	if ok {
 		_, ok = pool.(*sslOverMemConnPool)
 		if ok {
-			return pool, nil
+			if !pool.Stale() {
+				return pool, nil
+			} else {
+				connPoolMgr.removePool(pool)
+			}
 		} else {
 			connPoolMgr.logger.Errorf("Found existing pool with name=%v, connType=%v\n", pool.Name(), pool.ConnType())
 			return nil, WrongConnTypeError
@@ -497,7 +520,7 @@ func (connPoolMgr *connPoolMgr) GetOrCreateSSLOverMemPool(poolNameToCreate strin
 			bucketName: bucketname,
 			name:       poolNameToCreate,
 			lock:       &sync.RWMutex{},
-			cas_lock:   &sync.RWMutex{},
+			state_lock: &sync.RWMutex{},
 			logger:     log.NewLogger("sslConnPool", connPoolMgr.logger.LoggerContext())},
 		remote_memcached_port: remote_mem_port,
 		certificate:           cert}
@@ -519,7 +542,11 @@ func (connPoolMgr *connPoolMgr) GetOrCreateSSLOverProxyPool(poolNameToCreate str
 	if ok {
 		_, ok = pool.(*sslOverProxyConnPool)
 		if ok {
-			return pool, nil
+			if !pool.Stale() {
+				return pool, nil
+			} else {
+				connPoolMgr.removePool(pool)
+			}
 		} else {
 			return nil, errors.New("There is an existing non-ssl over proxy pool with the same name")
 		}
@@ -538,7 +565,7 @@ func (connPoolMgr *connPoolMgr) GetOrCreateSSLOverProxyPool(poolNameToCreate str
 			bucketName: bucketname,
 			name:       poolNameToCreate,
 			lock:       &sync.RWMutex{},
-			cas_lock:   &sync.RWMutex{},
+			state_lock: &sync.RWMutex{},
 			logger:     log.NewLogger("sslConnPool", connPoolMgr.logger.LoggerContext())},
 		remote_memcached_port: remote_mem_port,
 		local_proxy_port:      local_proxy_port,
@@ -574,13 +601,29 @@ func (connPoolMgr *connPoolMgr) FindPoolNamesByPrefix(poolNamePrefix string) []s
 	return poolNames
 }
 
+func (connPoolMgr *connPoolMgr) SetStaleForPoolsWithNamePrefix(poolNamePrefix string) {
+	connPoolMgr.map_lock.RLock()
+	defer connPoolMgr.map_lock.RUnlock()
+	for poolName, pool := range connPoolMgr.conn_pools_map {
+		if strings.HasPrefix(poolName, poolNamePrefix) {
+			pool.SetStale(true)
+			connPoolMgr.logger.Infof("Set pool %v as stale.", pool.Name())
+		}
+	}
+}
+
 func (connPoolMgr *connPoolMgr) RemovePool(poolName string) {
 	connPoolMgr.map_lock.Lock()
 	defer connPoolMgr.map_lock.Unlock()
-	pool := connPoolMgr.conn_pools_map[poolName]
-	pool.Close()
-	delete(connPoolMgr.conn_pools_map, poolName)
-	connPoolMgr.logger.Infof("Pool %v is removed, all connections are released", poolName)
+	connPoolMgr.removePool(connPoolMgr.conn_pools_map[poolName])
+}
+
+func (connPoolMgr *connPoolMgr) removePool(pool ConnPool) {
+	if pool != nil {
+		pool.Close()
+		delete(connPoolMgr.conn_pools_map, pool.Name())
+		connPoolMgr.logger.Infof("Pool %v is removed, all connections are released", pool.Name())
+	}
 }
 
 func (connPoolMgr *connPoolMgr) fillPool(p ConnPool, connectionSize int) error {
