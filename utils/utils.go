@@ -81,19 +81,19 @@ func RecoverPanic(err *error) {
 }
 
 func LocalPool(localConnectStr string) (couchbase.Pool, error) {
-	url := fmt.Sprintf("http://%s", localConnectStr)
-	client, err := couchbase.ConnectWithAuth(url, cbauth.NewAuthHandler(nil))
+	localURL := fmt.Sprintf("http://%s", localConnectStr)
+	client, err := couchbase.ConnectWithAuth(localURL, cbauth.NewAuthHandler(nil))
 	if err != nil {
-		return couchbase.Pool{}, NewEnhancedError(fmt.Sprintf("Error connecting to couchbase. url=%v", UrlForLog(url)), err)
+		return couchbase.Pool{}, NewEnhancedError(fmt.Sprintf("Error connecting to couchbase. url=%v", UrlForLog(localURL)), err)
 	}
 	return client.GetPool("default")
 }
 
 func RemotePool(remoteConnectStr string, remoteUsername string, remotePassword string) (couchbase.Pool, error) {
-	url := fmt.Sprintf("http://%s:%s@%s", remoteUsername, remotePassword, remoteConnectStr)
-	client, err := couchbase.Connect(url)
+	remoteURL := fmt.Sprintf("http://%s:%s@%s", url.QueryEscape(remoteUsername), url.QueryEscape(remotePassword), remoteConnectStr)
+	client, err := couchbase.Connect(remoteURL)
 	if err != nil {
-		return couchbase.Pool{}, NewEnhancedError(fmt.Sprintf("Error connecting to couchbase. url=%v", UrlForLog(url)), err)
+		return couchbase.Pool{}, NewEnhancedError(fmt.Sprintf("Error connecting to couchbase. url=%v", UrlForLog(remoteURL)), err)
 	}
 	return client.GetPool("default")
 }
@@ -119,16 +119,15 @@ func LocalBucket(localConnectStr, bucketName string) (*couchbase.Bucket, error) 
 func RemoteBucket(remoteConnectStr, bucketName, remoteUsername, remotePassword string) (*couchbase.Bucket, error) {
 	logger_utils.Debugf("Getting remote bucket name=%v connstr=%v\n", bucketName, remoteConnectStr)
 
-	var url string
 	if remoteUsername == "" || remotePassword == "" {
 		return nil, errors.New(fmt.Sprintf("Error retrieving remote bucket, %v, since remote username and/or password are missing.", bucketName))
 
 	}
 
-	url = fmt.Sprintf("http://%s:%s@%s", remoteUsername, remotePassword, remoteConnectStr)
-	bucketInfos, err := couchbase.GetBucketList(url)
+	remoteURL := fmt.Sprintf("http://%s:%s@%s", url.QueryEscape(remoteUsername), url.QueryEscape(remotePassword), remoteConnectStr)
+	bucketInfos, err := couchbase.GetBucketList(remoteURL)
 	if err != nil {
-		return nil, NewEnhancedError("Error getting bucketlist with url:"+UrlForLog(url), err)
+		return nil, NewEnhancedError("Error getting bucketlist with url:"+UrlForLog(remoteURL), err)
 	}
 
 	var password string
@@ -137,9 +136,9 @@ func RemoteBucket(remoteConnectStr, bucketName, remoteUsername, remotePassword s
 			password = bucketInfo.Password
 		}
 	}
-	couch, err := couchbase.Connect("http://" + remoteUsername + ":" + remotePassword + "@" + remoteConnectStr)
+	couch, err := couchbase.Connect("http://" + url.QueryEscape(remoteUsername) + ":" + url.QueryEscape(remotePassword) + "@" + remoteConnectStr)
 	if err != nil {
-		return nil, NewEnhancedError(fmt.Sprintf("Error connecting to couchbase. bucketName=%v; password=%v; remoteConnectStr=%v", bucketName, password, remoteConnectStr), err)
+		return nil, NewEnhancedError(fmt.Sprintf("Error connecting to couchbase. bucketName=%v; remoteConnectStr=%v", bucketName, remoteConnectStr), err)
 	}
 	pool, err := couch.GetPool("default")
 	if err != nil {

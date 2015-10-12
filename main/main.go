@@ -103,17 +103,22 @@ func main() {
 	if options.isConvert {
 		// disable uilogging during upgrade by specifying a nil uilog service
 		remote_cluster_svc, err := metadata_svc.NewRemoteClusterService(nil, metakv_svc, top_svc, cluster_info_svc, nil)
-		if err == nil {
-			replication_spec_svc, err := metadata_svc.NewReplicationSpecService(nil, remote_cluster_svc, metakv_svc, top_svc, cluster_info_svc, nil)
-			if err == nil {
-				migration_svc := service_impl.NewMigrationSvc(top_svc, remote_cluster_svc,
-					replication_spec_svc,
-					metadata_svc.NewReplicationSettingsSvc(metakv_svc, nil),
-					metadata_svc.NewCheckpointsService(metakv_svc, nil),
-					nil)
-				err = migration_svc.Migrate()
-			}
+		if err != nil {
+			fmt.Printf("Error starting remote cluster service. err=%v\n", err)
+			os.Exit(1)
 		}
+		replication_spec_svc, err := metadata_svc.NewReplicationSpecService(nil, remote_cluster_svc, metakv_svc, top_svc, cluster_info_svc, nil)
+		if err != nil {
+			fmt.Printf("Error starting replication spec service. err=%v\n", err)
+			os.Exit(1)
+		}
+
+		migration_svc := service_impl.NewMigrationSvc(top_svc, remote_cluster_svc,
+			replication_spec_svc,
+			metadata_svc.NewReplicationSettingsSvc(metakv_svc, nil),
+			metadata_svc.NewCheckpointsService(metakv_svc, nil),
+			nil)
+		err = migration_svc.Migrate()
 		if err == nil {
 			os.Exit(0)
 		} else {
@@ -122,28 +127,30 @@ func main() {
 	} else {
 		uilog_svc := service_impl.NewUILogSvc(top_svc, nil)
 		remote_cluster_svc, err := metadata_svc.NewRemoteClusterService(uilog_svc, metakv_svc, top_svc, cluster_info_svc, nil)
-		if err == nil {
-			replication_spec_svc, err := metadata_svc.NewReplicationSpecService(uilog_svc, remote_cluster_svc, metakv_svc, top_svc, cluster_info_svc, nil)
-			if err == nil {
-				// start replication manager in normal mode
-				rm.StartReplicationManager(host,
-					uint16(options.xdcrRestPort),
-					replication_spec_svc,
-					remote_cluster_svc,
-					cluster_info_svc,
-					top_svc,
-					metadata_svc.NewReplicationSettingsSvc(metakv_svc, nil),
-					metadata_svc.NewCheckpointsService(metakv_svc, nil),
-					service_impl.NewCAPIService(cluster_info_svc, nil),
-					audit_svc,
-					uilog_svc)
-
-				// keep main alive in normal mode
-				<-done
-			}
-		}
 		if err != nil {
+			fmt.Printf("Error starting remote cluster service. err=%v\n", err)
 			os.Exit(1)
 		}
+		replication_spec_svc, err := metadata_svc.NewReplicationSpecService(uilog_svc, remote_cluster_svc, metakv_svc, top_svc, cluster_info_svc, nil)
+		if err != nil {
+			fmt.Printf("Error starting replication spec service. err=%v\n", err)
+			os.Exit(1)
+		}
+
+		// start replication manager in normal mode
+		rm.StartReplicationManager(host,
+			uint16(options.xdcrRestPort),
+			replication_spec_svc,
+			remote_cluster_svc,
+			cluster_info_svc,
+			top_svc,
+			metadata_svc.NewReplicationSettingsSvc(metakv_svc, nil),
+			metadata_svc.NewCheckpointsService(metakv_svc, nil),
+			service_impl.NewCAPIService(cluster_info_svc, nil),
+			audit_svc,
+			uilog_svc)
+
+		// keep main alive in normal mode
+		<-done
 	}
 }
