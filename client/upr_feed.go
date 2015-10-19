@@ -20,6 +20,7 @@ const uprSnapshotExtraLen = 20
 const bufferAckThreshold = 0.2
 const opaqueOpen = 0xBEAF0001
 const opaqueFailover = 0xDEADBEEF
+const uprDefaultNoopInterval = 120
 
 // UprEvent memcached events for UPR streams.
 type UprEvent struct {
@@ -227,6 +228,21 @@ func (feed *UprFeed) UprOpen(name string, sequence uint32, bufSize uint32) error
 		feed.maxAckBytes = uint32(bufferAckThreshold * float32(bufSize))
 	}
 
+	// enable noop and set noop interval
+	rq := &gomemcached.MCRequest{
+		Opcode: gomemcached.UPR_CONTROL,
+		Key:    []byte("enable_noop"),
+		Body:   []byte("true"),
+	}
+	feed.transmitCh <- rq
+
+	rq = &gomemcached.MCRequest{
+		Opcode: gomemcached.UPR_CONTROL,
+		Key:    []byte("set_noop_interval"),
+		Body:   []byte(strconv.Itoa(int(uprDefaultNoopInterval))),
+	}
+	feed.transmitCh <- rq
+
 	return nil
 }
 
@@ -358,8 +374,8 @@ func handleStreamRequest(
 
 	switch {
 	case res.Status == gomemcached.ROLLBACK:
-		log.Printf("Rollback response. body=%v\n",res.Body)
-		
+		log.Printf("Rollback response. body=%v\n", res.Body)
+
 		rollback = binary.BigEndian.Uint64(res.Body)
 		log.Printf("Rollback %v for vb %v\n", rollback, res.Opaque)
 		return res.Status, rollback, nil, nil
@@ -435,7 +451,7 @@ loop:
 				if status == gomemcached.ROLLBACK {
 					event = makeUprEvent(pkt, stream)
 					event.Status = status
-					
+
 					// rollback stream
 					log.Printf("UPR_STREAMREQ with rollback %d for vb %d Failed: %v", rb, vb, err)
 					// delete the stream from the vbmap for the feed
@@ -448,7 +464,7 @@ loop:
 					event.Seqno = stream.StartSeq
 					event.FailoverLog = flog
 					event.Status = status
-					
+
 					stream.connected = true
 					log.Printf("UPR_STREAMREQ for vb %d successful", vb)
 
@@ -533,11 +549,14 @@ loop:
 
 			case gomemcached.UPR_NOOP:
 				// send a NOOP back
-				noop := &gomemcached.MCRequest{
+				noop := &gomemcached.MCResponse{
 					Opcode: gomemcached.UPR_NOOP,
+					Opaque: pkt.Opaque,
 				}
-				feed.transmitCh <- noop
 
+				if _, err := noop.Transmit(mc); err != nil {
+					log.Printf("Warning, failed to transmit command %s. Error %s", noop.Opcode.String(), err.Error())
+				}
 			default:
 				log.Printf("Recived an unknown response for vbucket %d", vb)
 			}
