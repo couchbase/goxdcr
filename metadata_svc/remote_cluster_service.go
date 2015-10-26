@@ -551,21 +551,35 @@ func (service *RemoteClusterService) cacheRef(ref *metadata.RemoteClusterReferen
 				nodes_connStrs = append(nodes_connStrs, node.Hostname)
 			}
 		}
-
-		ref_cache := &remoteClusterVal{key: ref.Id,
-			nodes_connectionstr: nodes_connStrs,
-			ref:                 ref,
-			cas:                 old_cas}
-
-		err = cache.Upsert(ref.Id, ref_cache)
-		if err == nil {
-			service.logger.Debugf("Remote cluster reference %v is cached\n", ref.Id)
-		}
 	} else {
-		service.logger.Infof("Remote cluster reference %v has a bad connectivity, didn't populate alternative connection strings. err=%v.", ref.Id, err)
+		service.logger.Infof("Remote cluster reference %v has a bad connectivity, didn't populate alternative connection strings. err=%v", ref.Id, err)
+
 		err = errors.New(InvalidConnectionStrErrorMessage)
+		//keep the old connection string if it is in cache
+		old_cache_obj, ok := cache.Get(ref.Id)
+		if ok && old_cache_obj != nil {
+			old_cache_val := old_cache_obj.(*remoteClusterVal)
+			old_ref := old_cache_val.ref
+			if ref.HostName == old_ref.HostName {
+				nodes_connStrs = old_cache_val.nodes_connectionstr
+			}
+		}
+
+		service.logger.Infof("nodes_connStrs=%v", nodes_connStrs)
 	}
 
+	ref_cache := &remoteClusterVal{key: ref.Id,
+		nodes_connectionstr: nodes_connStrs,
+		ref:                 ref,
+		cas:                 old_cas}
+
+	err1 := cache.Upsert(ref.Id, ref_cache)
+	if err1 != nil {
+		service.logger.Errorf("Error caching remote cluster reference %v. err=%v\n", ref.Id, err1)
+		return err1
+	}
+
+	service.logger.Debugf("Remote cluster reference %v is cached\n", ref.Id)
 	return err
 }
 
@@ -733,7 +747,6 @@ func (service *RemoteClusterService) updateCache(refId string, newRef *metadata.
 			if err == nil {
 				updated = true
 			} else {
-				service.logger.Errorf("Error caching ref %v. err=%v", newRef.Id, err)
 				return err
 			}
 		}
