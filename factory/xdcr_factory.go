@@ -375,7 +375,7 @@ func (xdcrf *XDCRFactory) constructOutgoingNozzles(spec *metadata.ReplicationSpe
 
 	bucketPwd := targetBucket.Password
 	maxTargetNozzlePerNode := spec.Settings.TargetNozzlePerNode
-	xdcrf.logger.Debugf("Target topology retrived. kvVBMap = %v\n", kvVBMap)
+	xdcrf.logger.Infof("Target topology retrieved. kvVBMap = %v\n", kvVBMap)
 
 	var vbCouchApiBaseMap map[uint16]string
 
