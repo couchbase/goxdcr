@@ -89,8 +89,8 @@ func (top_detect_svc *TopologyChangeDetectorSvc) Stop() error {
 func (top_detect_svc *TopologyChangeDetectorSvc) watch(fin_ch chan bool, waitGrp *sync.WaitGroup) {
 	defer waitGrp.Done()
 
-	checkingTargetVersion := top_detect_svc.needCheckTarget()
-	top_detect_svc.logger.Infof("checkingTargetVersion=%v in ToplogyChangeDetectorSvc for pipeline %v", checkingTargetVersion, top_detect_svc.pipeline.Topic())
+	checkingTargetVersion, needToReComputeCheckingTargetVersion := top_detect_svc.needCheckTarget()
+	top_detect_svc.logger.Infof("checkingTargetVersion=%v, needToReComputeCheckingTargetVersion=%v in ToplogyChangeDetectorSvc for pipeline %v", checkingTargetVersion, needToReComputeCheckingTargetVersion, top_detect_svc.pipeline.Topic())
 	//run it once right at the beginning
 	top_detect_svc.validate(checkingTargetVersion)
 	ticker := time.NewTicker(10 * time.Second)
@@ -106,6 +106,10 @@ func (top_detect_svc *TopologyChangeDetectorSvc) watch(fin_ch chan bool, waitGrp
 				//pipeline is no longer running, kill itself
 				top_detect_svc.logger.Infof("Pipeline %v is no longer running. ToplogyChangeDetectorSvc is exitting.", top_detect_svc.pipeline.Topic())
 				return
+			}
+			if needToReComputeCheckingTargetVersion {
+				checkingTargetVersion, needToReComputeCheckingTargetVersion = top_detect_svc.needCheckTarget()
+				top_detect_svc.logger.Infof("After re-computation, checkingTargetVersion=%v, needToReComputeCheckingTargetVersion=%v in ToplogyChangeDetectorSvc for pipeline %v", checkingTargetVersion, needToReComputeCheckingTargetVersion, top_detect_svc.pipeline.Topic())
 			}
 			top_detect_svc.validate(checkingTargetVersion)
 		}
@@ -123,11 +127,13 @@ func (top_detect_svc *TopologyChangeDetectorSvc) validate(checkingTargetVersion 
 	// ignore other errors
 
 	if checkingTargetVersion {
-		err := top_detect_svc.validateTargetVersion()
-		if err != nil && err == target_cluster_versionChangeErr {
-			top_detect_svc.RaiseEvent(common.NewEvent(common.ErrorEncountered, nil, top_detect_svc, nil, err))
-		} else {
-			top_detect_svc.logger.Infof("ToplogyChangeDetectorSvc for pipeline %v received error=%v when validating target version", top_detect_svc.pipeline.Topic(), err)
+		err = top_detect_svc.validateTargetVersion()
+		if err != nil {
+			if err == target_cluster_versionChangeErr {
+				top_detect_svc.RaiseEvent(common.NewEvent(common.ErrorEncountered, nil, top_detect_svc, nil, err))
+			} else {
+				top_detect_svc.logger.Infof("ToplogyChangeDetectorSvc for pipeline %v received error=%v when validating target version", top_detect_svc.pipeline.Topic(), err)
+			}
 		}
 	}
 }
@@ -179,11 +185,12 @@ func (top_detect_svc *TopologyChangeDetectorSvc) handleSourceToplogyChange(vblis
 
 }
 
-func (top_detect_svc *TopologyChangeDetectorSvc) validateTargetVersion() (err error) {
+func (top_detect_svc *TopologyChangeDetectorSvc) validateTargetVersion() error {
 	spec := top_detect_svc.pipeline.Specification()
 	targetClusterRef, err := top_detect_svc.remote_cluster_svc.RemoteClusterByUuid(spec.TargetClusterUUID, true)
 	if err == nil {
-		hasSSLOverMemSupport, err := pipeline_utils.HasSSLOverMemSupport(top_detect_svc.cluster_info_svc, targetClusterRef)
+		var hasSSLOverMemSupport bool
+		hasSSLOverMemSupport, err = pipeline_utils.HasSSLOverMemSupport(top_detect_svc.cluster_info_svc, targetClusterRef)
 		if err == nil && hasSSLOverMemSupport {
 			top_detect_svc.logger.Infof("ToplogyChangeDetectorSvc for pipeline %v detected that remote cluster %v has upgraded to 3.0 or above", top_detect_svc.pipeline.Topic(), targetClusterRef.HostName)
 			err = target_cluster_versionChangeErr
@@ -192,7 +199,10 @@ func (top_detect_svc *TopologyChangeDetectorSvc) validateTargetVersion() (err er
 	return err
 }
 
-func (top_detect_svc *TopologyChangeDetectorSvc) needCheckTarget() bool {
+// returns two bools
+// 1. First bool indicates whether target version needs to be checked
+// 2. second bool indicates whether the first bool needs to be recomputed at the next check
+func (top_detect_svc *TopologyChangeDetectorSvc) needCheckTarget() (bool, bool) {
 	spec := top_detect_svc.pipeline.Specification()
 	targetClusterRef, err := top_detect_svc.remote_cluster_svc.RemoteClusterByUuid(spec.TargetClusterUUID, true)
 	if err == nil && targetClusterRef.DemandEncryption {
@@ -203,18 +213,22 @@ func (top_detect_svc *TopologyChangeDetectorSvc) needCheckTarget() bool {
 			//the assumption is all target nozzle should have the same type
 			//- capi, xmem with MemConn, xmem with SSLOverMem or xmem with SSLOverProxy
 			if _, ok := target.(*parts.XmemNozzle); !ok {
-				return false
+				return false, false
 			}
-			connType := target.(*parts.XmemNozzle).ConnType()
-			if connType == base.SSLOverMem || connType == base.MemConn {
-				return false
-			} else {
-				return true
+			if target.State() == common.Part_Running {
+				connType := target.(*parts.XmemNozzle).ConnType()
+				if connType == base.SSLOverMem || connType == base.MemConn {
+					return false, false
+				} else {
+					return true, false
+				}
 			}
 		}
 
 	}
-	return false
+	// if we get here, we do not really know whether target version needs to be checked
+	// set needCheckTarget to false for now and specify that it needs to be re-computed later
+	return false, true
 }
 
 func (top_detect_svc *TopologyChangeDetectorSvc) validateSourceTopology() ([]uint16, []uint16, error) {
