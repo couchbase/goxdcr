@@ -87,6 +87,12 @@ func ValidateAndConvertGlobalSettingsValue(key, value, errorKey string) (convert
 		}
 		// convert it to int to make future processing easier
 		convertedValue = int(convertedValue.(int64))
+		maxprocs := convertedValue.(int)
+
+		if maxprocs <= 0 {
+			err = simple_utils.GenericInvalidValueError(errorKey)
+			return
+		}
 	default:
 		// a nil converted value indicates that the key is not a settings key
 		convertedValue = nil
