@@ -25,75 +25,77 @@ func GetMemcachedSSLPort(hostName, username, password, bucket string, logger *lo
 	ret := make(map[string]uint16)
 	bucketInfo := make(map[string]interface{})
 
-	pool, err := RemotePool(hostName, username, password)
+	logger.Infof("GetMemcachedSSLPort, hostName=%v\n", hostName)
+	url := base.BPath + base.UrlDelimiter + bucket
+	err, _ := QueryRestApiWithAuth(hostName, url, false, username, password, nil, base.MethodGet, "", nil, 0, &bucketInfo, nil, false, logger)
 	if err != nil {
 		return nil, err
 	}
-	nodes := pool.Nodes
 
-	if len(nodes) > 0 {
-
-		logger.Infof("GetMemcachedSSLPort, hostName=%v\n", hostName)
-		url := base.BPath + base.UrlDelimiter + bucket
-		err, _ = QueryRestApiWithAuth(hostName, url, false, username, password, nil, base.MethodGet, "", nil, 0, &bucketInfo, nil, false, logger)
-		if err != nil {
-			return nil, err
-		}
-
-		nodesExt, ok := bucketInfo[base.NodeExtKey]
-		if !ok {
-			return nil, bucketInfoParseError(bucketInfo, logger)
-		}
-
-		nodesExtArray, ok := nodesExt.([]interface{})
-		if !ok {
-			return nil, bucketInfoParseError(bucketInfo, logger)
-		}
-
-		for index, nodeExt := range nodesExtArray {
-			nodeExtMap, ok := nodeExt.(map[string]interface{})
-			if !ok {
-				return nil, bucketInfoParseError(bucketInfo, logger)
-			}
-
-			hostnameStr := GetHostName(nodes[index].Hostname)
-
-			service, ok := nodeExtMap[base.ServicesKey]
-			if !ok {
-				return nil, bucketInfoParseError(bucketInfo, logger)
-			}
-
-			services_map, ok := service.(map[string]interface{})
-			if !ok {
-				return nil, bucketInfoParseError(bucketInfo, logger)
-			}
-
-			kv_port, ok := services_map[base.KVPortKey]
-			if !ok {
-				// the node may not have kv services. skip the node
-				continue
-			}
-			kvPortFloat, ok := kv_port.(float64)
-			if !ok {
-				return nil, bucketInfoParseError(bucketInfo, logger)
-			}
-
-			hostAddr := GetHostAddr(hostnameStr, uint16(kvPortFloat))
-
-			kv_ssl_port, ok := services_map[base.KVSSLPortKey]
-			if !ok {
-				return nil, bucketInfoParseError(bucketInfo, logger)
-			}
-
-			kvSSLPortFloat, ok := kv_ssl_port.(float64)
-			if !ok {
-				return nil, bucketInfoParseError(bucketInfo, logger)
-			}
-
-			ret[hostAddr] = uint16(kvSSLPortFloat)
-		}
+	nodesExt, ok := bucketInfo[base.NodeExtKey]
+	if !ok {
+		return nil, bucketInfoParseError(bucketInfo, logger)
 	}
-	logger.Infof("ret=%v\n", ret)
+
+	nodesExtArray, ok := nodesExt.([]interface{})
+	if !ok {
+		return nil, bucketInfoParseError(bucketInfo, logger)
+	}
+
+	for _, nodeExt := range nodesExtArray {
+
+		nodeExtMap, ok := nodeExt.(map[string]interface{})
+		if !ok {
+			return nil, bucketInfoParseError(bucketInfo, logger)
+		}
+
+		hostname, ok := nodeExtMap[base.HostNameKey]
+		if !ok {
+			// hostname being nil indicates that hostname is localhost
+			// this is possible when running tests against local machine
+			logger.Infof("hostname is missing from nodeExtMap %v. using localhost\n", nodeExtMap)
+			hostname = base.LocalHostName
+		}
+		hostnameStr, ok := hostname.(string)
+		if !ok {
+			return nil, bucketInfoParseError(bucketInfo, logger)
+		}
+
+		service, ok := nodeExtMap[base.ServicesKey]
+		if !ok {
+			return nil, bucketInfoParseError(bucketInfo, logger)
+		}
+
+		services_map, ok := service.(map[string]interface{})
+		if !ok {
+			return nil, bucketInfoParseError(bucketInfo, logger)
+		}
+
+		kv_port, ok := services_map[base.KVPortKey]
+		if !ok {
+			// the node may not have kv services. skip the node
+			continue
+		}
+		kvPortFloat, ok := kv_port.(float64)
+		if !ok {
+			return nil, bucketInfoParseError(bucketInfo, logger)
+		}
+
+		hostAddr := GetHostAddr(hostnameStr, uint16(kvPortFloat))
+
+		kv_ssl_port, ok := services_map[base.KVSSLPortKey]
+		if !ok {
+			return nil, bucketInfoParseError(bucketInfo, logger)
+		}
+
+		kvSSLPortFloat, ok := kv_ssl_port.(float64)
+		if !ok {
+			return nil, bucketInfoParseError(bucketInfo, logger)
+		}
+
+		ret[hostAddr] = uint16(kvSSLPortFloat)
+	}
+	logger.Infof("memcached ssl port map=%v\n", ret)
 
 	return ret, nil
 }
