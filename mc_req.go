@@ -22,12 +22,12 @@ type MCRequest struct {
 	// The vbucket to which this command belongs
 	VBucket uint16
 	// Command extras, key, and body
-	Extras, Key, Body []byte
+	Extras, Key, Body, ExtMeta []byte
 }
 
 // Size gives the number of bytes this request requires.
 func (req *MCRequest) Size() int {
-	return HDR_LEN + len(req.Extras) + len(req.Key) + len(req.Body)
+	return HDR_LEN + len(req.Extras) + len(req.Key) + len(req.Body) + len(req.ExtMeta)
 }
 
 // A debugging string representation of this request
@@ -57,7 +57,7 @@ func (req *MCRequest) fillHeaderBytes(data []byte) int {
 
 	// 8
 	binary.BigEndian.PutUint32(data[pos:pos+4],
-		uint32(len(req.Body)+len(req.Key)+len(req.Extras)))
+		uint32(len(req.Body)+len(req.Key)+len(req.Extras)+len(req.ExtMeta)))
 	pos += 4
 
 	// 12
@@ -100,6 +100,10 @@ func (req *MCRequest) Bytes() []byte {
 
 	if len(req.Body) > 0 {
 		copy(data[pos:pos+len(req.Body)], req.Body)
+	}
+
+	if len(req.ExtMeta) > 0 {
+		copy(data[pos+len(req.Body):pos+len(req.Body)+len(req.ExtMeta)], req.ExtMeta)
 	}
 
 	return data
@@ -166,8 +170,16 @@ func (req *MCRequest) Receive(r io.Reader, hdrBytes []byte) (int, error) {
 		}
 		req.Extras = buf[0:elen]
 		req.Key = buf[elen : klen+elen]
-		req.Body = buf[klen+elen:]
-	}
 
+		// get the length of extended metadata
+		extMetaLen := 0
+		if elen > 29 {
+			extMetaLen = int(binary.BigEndian.Uint16(req.Extras[28:30]))
+		}
+
+		valueLen := bodyLen - extMetaLen
+		req.Body = buf[klen+elen : klen+elen+valueLen]
+		req.ExtMeta = buf[klen+elen+valueLen:]
+	}
 	return n, err
 }

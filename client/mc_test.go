@@ -127,6 +127,64 @@ func TestTransmitReq(t *testing.T) {
 	}
 }
 
+func TestTransmitReqWithExtMeta(t *testing.T) {
+	// test data for extended metadata
+	ExtMetaStr := "extmeta"
+
+	b := bytes.NewBuffer([]byte{})
+	buf := bufio.NewWriter(b)
+
+	req := gomemcached.MCRequest{
+		Opcode:  gomemcached.SET,
+		Cas:     938424885,
+		Opaque:  7242,
+		VBucket: 824,
+		Key:     []byte("somekey"),
+		Body:    []byte("somevalue"),
+		ExtMeta: []byte(ExtMetaStr),
+	}
+
+	// add length of extended metadata to the corresponding bytes in Extras
+	req.Extras = make([]byte, 30)
+	binary.BigEndian.PutUint32(req.Extras[28:30], len(ExtMetaStr))
+
+	// Verify nil transmit is OK
+	_, err := transmitRequest(nil, &req)
+	if err != errNoConn {
+		t.Errorf("Expected errNoConn with no conn, got %v", err)
+	}
+
+	_, err = transmitRequest(buf, &req)
+	if err != nil {
+		t.Fatalf("Error transmitting request: %v", err)
+	}
+
+	buf.Flush()
+
+	expected := []byte{
+		gomemcached.REQ_MAGIC, byte(gomemcached.SET),
+		0x0, 0x7, // length of key
+		0x1e,      // extra length = 30 = 0x1e
+		0x0,       // reserved
+		0x3, 0x38, // vbucket
+		0x0, 0x0, 0x0, 0x35, // Length of value = 7(key) + 9(value) + 30(extras) + 7(extmeta) = 53 = 0x35
+		0x0, 0x0, 0x1c, 0x4a, // opaque
+		0x0, 0x0, 0x0, 0x0, 0x37, 0xef, 0x3a, 0x35, // CAS
+		's', 'o', 'm', 'e', 'k', 'e', 'y',
+		's', 'o', 'm', 'e', 'v', 'a', 'l', 'u', 'e',
+		'e', 'x', 't', 'm', 'e', 't', 'a'}
+
+	if len(b.Bytes()) != req.Size() {
+		t.Fatalf("Expected %v bytes, got %v", req.Size(),
+			len(b.Bytes()))
+	}
+
+	if !reflect.DeepEqual(b.Bytes(), expected) {
+		t.Fatalf("Expected:\n%#v\n  -- got -- \n%#v",
+			expected, b.Bytes())
+	}
+}
+
 func BenchmarkTransmitReq(b *testing.B) {
 	bout := bytes.NewBuffer([]byte{})
 

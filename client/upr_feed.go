@@ -43,6 +43,7 @@ type UprEvent struct {
 	SnapshotType uint32                  // 0: disk 1: memory
 	FailoverLog  *FailoverLog            // Failover log containing vvuid and sequnce number
 	Error        error                   // Error value in case of a failure
+	ExtMeta      []byte
 }
 
 // UprStream is per stream data structure over an UPR Connection.
@@ -101,6 +102,7 @@ func makeUprEvent(rq gomemcached.MCRequest, stream *UprStream) *UprEvent {
 		Key:     rq.Key,
 		Value:   rq.Body,
 		Cas:     rq.Cas,
+		ExtMeta: rq.ExtMeta,
 	}
 	// 16 LSBits are used by client library to encode vbucket number.
 	// 16 MSBits are left for application to multiplex on opaque value.
@@ -211,6 +213,15 @@ func doUprOpen(mc *Client, name string, sequence uint32) error {
 // sequence: sequence number for the connection
 // bufsize: max size of the application
 func (feed *UprFeed) UprOpen(name string, sequence uint32, bufSize uint32) error {
+	return feed.uprOpen(name, sequence, bufSize, false /*enableExtMeta*/)
+}
+
+// UprOpen with extended metadata enabled.
+func (feed *UprFeed) UprOpenWithExtMeta(name string, sequence uint32, bufSize uint32) error {
+	return feed.uprOpen(name, sequence, bufSize, true /*enableExtMeta*/)
+}
+
+func (feed *UprFeed) uprOpen(name string, sequence uint32, bufSize uint32, enableExtMeta bool) error {
 	mc := feed.conn
 
 	if err := doUprOpen(mc, name, sequence); err != nil {
@@ -243,6 +254,15 @@ func (feed *UprFeed) UprOpen(name string, sequence uint32, bufSize uint32) error
 	}
 	feed.transmitCh <- rq
 
+	// send a UPR control message to set the enable_ext_metadata flag for the this connection
+	if enableExtMeta {
+		rq := &gomemcached.MCRequest{
+			Opcode: gomemcached.UPR_CONTROL,
+			Key:    []byte("enable_ext_metadata"),
+			Body:   []byte("true"),
+		}
+		feed.transmitCh <- rq
+	}
 	return nil
 }
 
@@ -375,7 +395,6 @@ func handleStreamRequest(
 	switch {
 	case res.Status == gomemcached.ROLLBACK:
 		log.Printf("Rollback response. body=%v\n", res.Body)
-
 		rollback = binary.BigEndian.Uint64(res.Body)
 		log.Printf("Rollback %v for vb %v\n", rollback, res.Opaque)
 		return res.Status, rollback, nil, nil
@@ -451,7 +470,6 @@ loop:
 				if status == gomemcached.ROLLBACK {
 					event = makeUprEvent(pkt, stream)
 					event.Status = status
-
 					// rollback stream
 					log.Printf("UPR_STREAMREQ with rollback %d for vb %d Failed: %v", rb, vb, err)
 					// delete the stream from the vbmap for the feed
@@ -464,7 +482,6 @@ loop:
 					event.Seqno = stream.StartSeq
 					event.FailoverLog = flog
 					event.Status = status
-
 					stream.connected = true
 					log.Printf("UPR_STREAMREQ for vb %d successful", vb)
 
