@@ -34,7 +34,7 @@ import (
 import _ "net/http/pprof"
 
 var StaticPaths = [10]string{base.RemoteClustersPath, CreateReplicationPath, InternalSettingsPath, SettingsReplicationsPath, AllReplicationsPath, AllReplicationInfosPath, RegexpValidationPrefix, MemStatsPath, BlockProfileStartPath, BlockProfileStopPath}
-var DynamicPathPrefixes = [5]string{base.RemoteClustersPath, DeleteReplicationPrefix, SettingsReplicationsPath, StatisticsPrefix, AllReplicationsPath}
+var DynamicPathPrefixes = [6]string{base.RemoteClustersPath, DeleteReplicationPrefix, SettingsReplicationsPath, StatisticsPrefix, AllReplicationsPath, BucketSettingsPrefix}
 
 var logger_ap *log.CommonLogger = log.NewLogger("AdminPort", log.DefaultLoggerContext)
 
@@ -215,6 +215,10 @@ func (adminport *Adminport) handleRequest(
 		response, err = adminport.doStartBlockProfile(request)
 	case BlockProfileStopPath + base.UrlDelimiter + base.MethodPost:
 		response, err = adminport.doStopBlockProfile(request)
+	case BucketSettingsPrefix + DynamicSuffix + base.UrlDelimiter + base.MethodGet:
+		response, err = adminport.doGetBucketSettingsRequest(request)
+	case BucketSettingsPrefix + DynamicSuffix + base.UrlDelimiter + base.MethodPost:
+		response, err = adminport.doBucketSettingsChangeRequest(request)
 	default:
 		err = ap.ErrorInvalidRequest
 	}
@@ -341,7 +345,7 @@ func (adminport *Adminport) doDeleteRemoteClusterRequest(request *http.Request) 
 
 	go writeRemoteClusterAuditEvent(base.DeleteRemoteClusterRefEventId, ref, getRealUserIdFromRequest(request))
 
-	return NewDeleteRemoteClusterResponse()
+	return NewOKResponse()
 }
 
 func (adminport *Adminport) doGetAllReplicationsRequest(request *http.Request) (*ap.Response, error) {
@@ -740,4 +744,58 @@ func (adminport *Adminport) doStopBlockProfile(request *http.Request) (*ap.Respo
 	runtime.SetBlockProfileRate(-1)
 	logger_ap.Info("doStopBlockProfile")
 	return NewEmptyArrayResponse()
+}
+
+func (adminport *Adminport) doGetBucketSettingsRequest(request *http.Request) (*ap.Response, error) {
+	logger_ap.Infof("doGetBucketSettingsRequest\n")
+	defer logger_ap.Infof("doGetBucketSettingsRequest completed\n")
+
+	bucketName, err := DecodeDynamicParamInURL(request, BucketSettingsPrefix, BucketName)
+	if err != nil {
+		return EncodeReplicationValidationErrorIntoResponse(err)
+	}
+
+	logger_ap.Infof("Request params: bucketName=%v\n", bucketName)
+
+	bucketSettingsMap, err := getBucketSettings(bucketName)
+	if err != nil {
+		// if bucket does not exist, it is a validation error and not an internal error
+		if err == utils.NonExistentBucketError {
+			err = fmt.Errorf("Bucket %v does not exist", bucketName)
+			return EncodeReplicationValidationErrorIntoResponse(err)
+		}
+		return nil, err
+	}
+
+	return EncodeObjectIntoResponse(bucketSettingsMap)
+}
+
+func (adminport *Adminport) doBucketSettingsChangeRequest(request *http.Request) (*ap.Response, error) {
+	logger_ap.Infof("doBucketSettingsChangeRequest\n")
+	defer logger_ap.Infof("doBucketSettingsChangeRequest completed\n")
+
+	bucketName, err := DecodeDynamicParamInURL(request, BucketSettingsPrefix, BucketName)
+	if err != nil {
+		return EncodeReplicationValidationErrorIntoResponse(err)
+	}
+
+	lwwEnabled, err := DecodeBucketSettingsChangeRequest(request)
+	if err != nil {
+		return EncodeErrorMessageIntoResponse(err, http.StatusBadRequest)
+	}
+
+	logger_ap.Infof("Request params: bucketName=%v, lwwEnabled=%v\n",
+		bucketName, lwwEnabled)
+
+	bucketSettingsMap, err := setBucketSettings(bucketName, lwwEnabled, getRealUserIdFromRequest(request))
+	if err != nil {
+		if err == utils.NonExistentBucketError {
+			// if bucket does not exist, it is a validation error and not an internal error
+			err = fmt.Errorf("Bucket %v does not exist", bucketName)
+			return EncodeReplicationValidationErrorIntoResponse(err)
+		}
+		return nil, err
+	}
+
+	return EncodeObjectIntoResponse(bucketSettingsMap)
 }

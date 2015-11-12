@@ -34,7 +34,7 @@ func (pool *MCRequestPool) Get() *WrappedMCRequest {
 
 func (pool *MCRequestPool) addOne() interface{} {
 	obj := &WrappedMCRequest{Seqno: 0,
-		Req: &gomemcached.MCRequest{Extras: make([]byte, 24)},
+		Req: &gomemcached.MCRequest{Extras: make([]byte, 26)},
 	}
 
 	return obj
@@ -66,7 +66,7 @@ func (pool *MCRequestPool) cleanMCReq(req *gomemcached.MCRequest) *gomemcached.M
 }
 
 func (pool *MCRequestPool) cleanExtras(req *gomemcached.MCRequest) {
-	for i := 0; i < 24; i++ {
+	for i := 0; i < len(req.Extras); i++ {
 		req.Extras[i] = 0
 	}
 }

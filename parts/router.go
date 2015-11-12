@@ -40,15 +40,17 @@ type Router struct {
 	filterRegexp *regexp.Regexp    // filter expression
 	routingMap   map[uint16]string // pvbno -> partId. This defines the loading balancing strategy of which vbnos would be routed to which part
 	//Debug only, need to be rolled into statistics and monitoring
-	counter     map[string]int
-	req_creator ReqCreator
-	topic       string
+	counter                map[string]int
+	req_creator            ReqCreator
+	topic                  string
+	ext_metadata_supported bool
 }
 
 func NewRouter(id string, topic string, filterExpression string,
 	downStreamParts map[string]common.Part,
 	routingMap map[uint16]string,
-	logger_context *log.LoggerContext, req_creator ReqCreator) (*Router, error) {
+	logger_context *log.LoggerContext, req_creator ReqCreator,
+	ext_metadata_supported bool) (*Router, error) {
 	// compile filter expression
 	var filterRegexp *regexp.Regexp
 	var err error
@@ -59,12 +61,13 @@ func NewRouter(id string, topic string, filterExpression string,
 		}
 	}
 	router := &Router{
-		id:           id,
-		filterRegexp: filterRegexp,
-		routingMap:   routingMap,
-		counter:      make(map[string]int),
-		topic:        topic,
-		req_creator:  req_creator}
+		id:                     id,
+		filterRegexp:           filterRegexp,
+		routingMap:             routingMap,
+		counter:                make(map[string]int),
+		topic:                  topic,
+		req_creator:            req_creator,
+		ext_metadata_supported: ext_metadata_supported}
 
 	var routingFunc connector.Routing_Callback_Func = router.route
 	router.Router = connector.NewRouter(id, downStreamParts, &routingFunc, logger_context, "XDCRRouter")
@@ -87,21 +90,40 @@ func (router *Router) ComposeMCRequest(event *mcc.UprEvent) *base.WrappedMCReque
 	req.VBucket = event.VBucket
 	req.Key = event.Key
 	req.Body = event.Value
-	if req.Extras == nil{
-		req.Extras = make([]byte, 24)
-	}
 	//opCode
 	req.Opcode = event.Opcode
 
 	//extra
 	if event.Opcode == mc.UPR_MUTATION || event.Opcode == mc.UPR_DELETION ||
 		event.Opcode == mc.UPR_EXPIRATION {
-		//    <<Flg:32, Exp:32, SeqNo:64, CASPart:64, 0:32>>.
-		binary.BigEndian.PutUint32(req.Extras[0:4], event.Flags)
-		binary.BigEndian.PutUint32(req.Extras[4:8], event.Expiry)
-		binary.BigEndian.PutUint64(req.Extras[8:16], event.RevSeqno)
-		binary.BigEndian.PutUint64(req.Extras[16:24], event.Cas)
+		if router.ext_metadata_supported {
+			// populate metadataSize and extended metadata field only when lww is enabled
+			// otherwise target cluster may throw error since these fields may not be supported there
+			if len(req.Extras) != 26 {
+				req.Extras = make([]byte, 26)
+			}
+			//    <<Flg:32, Exp:32, SeqNo:64, CASPart:64, 0:32>>.
+			binary.BigEndian.PutUint32(req.Extras[0:4], event.Flags)
+			binary.BigEndian.PutUint32(req.Extras[4:8], event.Expiry)
+			binary.BigEndian.PutUint64(req.Extras[8:16], event.RevSeqno)
+			binary.BigEndian.PutUint64(req.Extras[16:24], event.Cas)
+			binary.BigEndian.PutUint16(req.Extras[24:26], event.MetadataSize)
+			req.ExtMeta = event.ExtMeta
+		} else {
+			if len(req.Extras) != 24 {
+				req.Extras = make([]byte, 24)
+			}
+			//    <<Flg:32, Exp:32, SeqNo:64, CASPart:64, 0:32>>.
+			binary.BigEndian.PutUint32(req.Extras[0:4], event.Flags)
+			binary.BigEndian.PutUint32(req.Extras[4:8], event.Expiry)
+			binary.BigEndian.PutUint64(req.Extras[8:16], event.RevSeqno)
+			binary.BigEndian.PutUint64(req.Extras[16:24], event.Cas)
+		}
+
 	} else if event.Opcode == mc.UPR_SNAPSHOT {
+		if len(req.Extras) != 28 {
+			req.Extras = make([]byte, 28)
+		}
 		binary.BigEndian.PutUint64(req.Extras[0:8], event.Seqno)
 		binary.BigEndian.PutUint64(req.Extras[8:16], event.SnapstartSeq)
 		binary.BigEndian.PutUint64(req.Extras[16:24], event.SnapendSeq)
@@ -111,8 +133,45 @@ func (router *Router) ComposeMCRequest(event *mcc.UprEvent) *base.WrappedMCReque
 	wrapped_req.Seqno = event.Seqno
 	wrapped_req.Start_time = time.Now()
 	wrapped_req.ConstructUniqueKey()
+	if router.ext_metadata_supported {
+		wrapped_req.CRMode = decodeCRModeFromReq(req)
+	}
 
 	return wrapped_req
+}
+
+// decode crMode from extended metadata in request, which is of the following format:
+// | version | id_1 | len_1 | field_1 | ... | id_n | len_n | field_n |
+func decodeCRModeFromReq(req *mc.MCRequest) base.ConflictResolutionMode {
+	var crMode int
+
+	if len(req.ExtMeta) > 1 {
+		// do parsing only when version of extended metadata has expected value
+		if int(req.ExtMeta[0]) == base.ExtendedMetadataVersion {
+			// start from id_1
+			start_index := 1
+			for {
+				if start_index >= len(req.ExtMeta) {
+					break
+				}
+				metaLen := binary.BigEndian.Uint16(req.ExtMeta[start_index+1 : start_index+3])
+				if int(req.ExtMeta[start_index]) == base.ConflictResolutionModeId {
+					// found the id for crMode
+
+					// crMode has the fixed length of 1 byte
+					if metaLen != 1 {
+						panic(fmt.Sprintf("incorrect extended metadata format for conflict resolution mode. extMeta=%v", req.ExtMeta))
+					}
+					crMode = int(req.ExtMeta[start_index+3])
+					return base.GetConflictResolutionModeFromInt(crMode)
+				}
+				// advance to the next id
+				start_index += 2 + int(metaLen) + 1
+			}
+		}
+	}
+
+	return base.CRMode_RevId
 }
 
 // Implementation of the routing algorithm

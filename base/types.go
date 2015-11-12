@@ -82,8 +82,10 @@ type ErrorInfo struct {
 }
 
 type WrappedMCRequest struct {
-	Seqno      uint64
-	Req        *gomemcached.MCRequest
+	Seqno uint64
+	Req   *gomemcached.MCRequest
+	// conflict resolution mode of mutations
+	CRMode     ConflictResolutionMode
 	Start_time time.Time
 	Send_time  time.Time
 	UniqueKey  string
@@ -162,6 +164,23 @@ type MetadataChangeHandlerCallback func(metadataId string, oldMetadata interface
 type DataObjRecycler func(topic string, dataObj *WrappedMCRequest)
 
 type VBErrorEventAdditional struct {
-	Vbno uint16
-	Error  error
+	Vbno  uint16
+	Error error
+}
+
+type ConflictResolutionMode int
+
+const (
+	CRMode_RevId ConflictResolutionMode = iota
+	CRMode_LWW   ConflictResolutionMode = iota
+)
+
+func GetConflictResolutionModeFromInt(crMode int) ConflictResolutionMode {
+	if crMode == int(CRMode_RevId) {
+		return CRMode_RevId
+	} else if crMode == int(CRMode_LWW) {
+		return CRMode_LWW
+	}
+
+	panic(fmt.Sprintf("invalid conflict resolution mode = %v", crMode))
 }

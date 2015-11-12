@@ -13,7 +13,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"github.com/couchbase/gomemcached"
+	mc "github.com/couchbase/gomemcached"
 	mcc "github.com/couchbase/gomemcached/client"
 	base "github.com/couchbase/goxdcr/base"
 	common "github.com/couchbase/goxdcr/common"
@@ -116,12 +116,16 @@ type DcpNozzle struct {
 
 	stats_interval           time.Duration
 	stats_interval_change_ch chan bool
+
+	// whether extended metadata is supported
+	ext_metadata_supported bool
 }
 
 func NewDcpNozzle(id string,
 	bucketName, bucketPassword string,
 	vbnos []uint16,
 	xdcr_topology_svc service_def.XDCRCompTopologySvc,
+	ext_metadata_supported bool,
 	logger_context *log.LoggerContext) *DcpNozzle {
 
 	//callback functions from GenServer
@@ -147,6 +151,7 @@ func NewDcpNozzle(id string,
 		vb_stream_status_lock:    &sync.RWMutex{},
 		xdcr_topology_svc:        xdcr_topology_svc,
 		stats_interval_change_ch: make(chan bool, 1),
+		ext_metadata_supported:   ext_metadata_supported,
 	}
 
 	msg_callback_func = nil
@@ -174,13 +179,20 @@ func (dcp *DcpNozzle) initialize(settings map[string]interface{}) (err error) {
 	if err != nil {
 		return err
 	}
+
 	dcp.uprFeed, err = dcp.client.NewUprFeed()
 	if err != nil {
 		return err
 	}
-	dcp.uprFeed.UprOpen(DCP_Connection_Prefix+dcp.Id(), uint32(0), 1024*1024)
 
+	// request extended metadata from dcp only when it is supported
+	if dcp.ext_metadata_supported {
+		err = dcp.uprFeed.UprOpenWithExtMeta(DCP_Connection_Prefix+dcp.Id(), uint32(0), 1024*1024)
+	} else {
+		err = dcp.uprFeed.UprOpen(DCP_Connection_Prefix+dcp.Id(), uint32(0), 1024*1024)
+	}
 	if err != nil {
+		dcp.Logger().Errorf("%v upr open failed. err=%v.\n", dcp.Id(), err)
 		return err
 	}
 
@@ -375,11 +387,11 @@ func (dcp *DcpNozzle) processData() (err error) {
 				dcp.handleGeneralError(errors.New("DCP stream is closed."))
 				goto done
 			}
-			if m.Opcode == gomemcached.UPR_STREAMREQ {
-				if m.Status == gomemcached.NOT_MY_VBUCKET {
+			if m.Opcode == mc.UPR_STREAMREQ {
+				if m.Status == mc.NOT_MY_VBUCKET {
 					vb_err := fmt.Errorf("Received error %v on vb %v\n", base.ErrorNotMyVbucket, m.VBucket)
 					dcp.handleVBError(m.VBucket, vb_err)
-				} else if m.Status == gomemcached.ROLLBACK {
+				} else if m.Status == mc.ROLLBACK {
 					rollbackseq := binary.BigEndian.Uint64(m.Value[:8])
 					vbno := m.VBucket
 
@@ -399,7 +411,7 @@ func (dcp *DcpNozzle) processData() (err error) {
 					}
 					dcp.startUprStream(vbno, updated_ts)
 
-				} else if m.Status == gomemcached.SUCCESS {
+				} else if m.Status == mc.SUCCESS {
 					vbno := m.VBucket
 					_, ok := dcp.vb_stream_status[vbno]
 					if ok {
@@ -410,7 +422,7 @@ func (dcp *DcpNozzle) processData() (err error) {
 					}
 				}
 
-			} else if m.Opcode == gomemcached.UPR_STREAMEND {
+			} else if m.Opcode == mc.UPR_STREAMEND {
 				vbno := m.VBucket
 				stream_status, err := dcp.getStreamState(vbno)
 				if err == nil && stream_status == Dcp_Stream_Active {
@@ -422,7 +434,7 @@ func (dcp *DcpNozzle) processData() (err error) {
 			} else {
 				if dcp.IsOpen() {
 					switch m.Opcode {
-					case gomemcached.UPR_MUTATION, gomemcached.UPR_DELETION, gomemcached.UPR_EXPIRATION:
+					case mc.UPR_MUTATION, mc.UPR_DELETION, mc.UPR_EXPIRATION:
 						start_time := time.Now()
 						dcp.incCounterReceived()
 						dcp.RaiseEvent(common.NewEvent(common.DataReceived, m, dcp, nil /*derivedItems*/, nil /*otherInfos*/))

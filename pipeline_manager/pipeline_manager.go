@@ -279,14 +279,14 @@ func (pipelineMgr *pipelineManager) startPipeline(topic string) (common.Pipeline
 
 		p, err := pipelineMgr.pipeline_factory.NewPipeline(topic, rep_status.RecordProgress)
 		if err != nil {
-			pipelineMgr.logger.Errorf("Failed to construct a new pipeline: %s", err.Error())
+			pipelineMgr.logger.Errorf("Failed to construct a new pipeline with topic %v: %s", topic, err.Error())
 			return p, err
 		}
 
 		rep_status.RecordProgress("Pipeline is constructed")
 		rep_status.SetPipeline(p)
 
-		pipelineMgr.logger.Infof("Pipeline %v is constructed, start it", p.InstanceId())
+		pipelineMgr.logger.Infof("Pipeline %v is constructed. Starting it.", p.InstanceId())
 		p.SetProgressRecorder(rep_status.RecordProgress)
 		err = p.Start(rep_status.SettingsMap())
 		if err != nil {

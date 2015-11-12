@@ -14,12 +14,13 @@ import (
 	"encoding/binary"
 	"flag"
 	"fmt"
+	"github.com/couchbase/go-couchbase"
 	mc "github.com/couchbase/gomemcached"
 	mcc "github.com/couchbase/gomemcached/client"
+	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
 	parts "github.com/couchbase/goxdcr/parts"
 	utils "github.com/couchbase/goxdcr/utils"
-	"github.com/couchbase/go-couchbase"
 	"net/http"
 	"os"
 	"sync"
@@ -314,7 +315,7 @@ func startXmem(batch_count int) {
 	}
 	logger.Infof("target_connectStr=%s\n", target_connectStr)
 
-	xmem = parts.NewXmemNozzle("xmem", "abc", "abc", 10, target_connectStr, options.target_bucket, options.password, nil, logger.LoggerContext())
+	xmem = parts.NewXmemNozzle("xmem", "abc", "abc", 10, target_connectStr, options.target_bucket, options.password, nil, false, base.CRMode_RevId, logger.LoggerContext())
 	var configs map[string]interface{} = map[string]interface{}{parts.SETTING_BATCHCOUNT: batch_count,
 		parts.SETTING_RESP_TIMEOUT: time.Millisecond * 10,
 		parts.SETTING_NUMOFRETRY:   3}

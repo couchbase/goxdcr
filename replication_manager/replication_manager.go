@@ -80,9 +80,10 @@ type replicationManager struct {
 	capi_svc service_def.CAPIService
 	//audit service handle
 	audit_svc service_def.AuditSvc
-
-	//process setting service
-	process_setting_svc service_def.GlobalSettingsSvc
+	//global setting service
+	global_setting_svc service_def.GlobalSettingsSvc
+	//bucket settings service
+	bucket_settings_svc service_def.BucketSettingsSvc
 
 	once sync.Once
 
@@ -111,14 +112,15 @@ func StartReplicationManager(sourceKVHost string, xdcrRestPort uint16,
 	capi_svc service_def.CAPIService,
 	audit_svc service_def.AuditSvc,
 	uilog_svc service_def.UILogSvc,
-	process_setting_svc service_def.GlobalSettingsSvc) {
+	global_setting_svc service_def.GlobalSettingsSvc,
+	bucket_settings_svc service_def.BucketSettingsSvc) {
 
 	replication_mgr.once.Do(func() {
 		// ns_server shutdown protocol: poll stdin and exit upon reciept of EOF
 		go pollStdin()
 
 		// initializes replication manager
-		replication_mgr.init(repl_spec_svc, remote_cluster_svc, cluster_info_svc, xdcr_topology_svc, replication_settings_svc, checkpoints_svc, capi_svc, audit_svc, uilog_svc, process_setting_svc)
+		replication_mgr.init(repl_spec_svc, remote_cluster_svc, cluster_info_svc, xdcr_topology_svc, replication_settings_svc, checkpoints_svc, capi_svc, audit_svc, uilog_svc, global_setting_svc, bucket_settings_svc)
 
 		// start pipeline master supervisor
 		// TODO should we make heart beat settings configurable?
@@ -175,14 +177,25 @@ func (rm *replicationManager) initMetadataChangeMonitor() {
 	rm.remote_cluster_svc.SetMetadataChangeHandlerCallback(remoteClusterChangeListener.remoteClusterChangeHandlerCallback)
 
 	globalSettingChangeListener := NewGlobalSettingChangeListener(
-		rm.process_setting_svc,
+		rm.global_setting_svc,
 		rm.metadata_change_callback_cancel_ch,
 		rm.children_waitgrp,
 		log.DefaultLoggerContext)
 
 	mcm.RegisterListener(globalSettingChangeListener)
-	rm.process_setting_svc.SetMetadataChangeHandlerCallback(globalSettingChangeListener.globalSettingChangeHandlerCallback)
+	rm.global_setting_svc.SetMetadataChangeHandlerCallback(globalSettingChangeListener.globalSettingChangeHandlerCallback)
 	logger_rm.Info("globalSettingChangeListener successfully started")
+
+	bucketSettingsChangeListener := NewBucketSettingsChangeListener(
+		rm.bucket_settings_svc,
+		rm.xdcr_topology_svc,
+		rm.cluster_info_svc,
+		rm.metadata_change_callback_cancel_ch,
+		rm.children_waitgrp,
+		log.DefaultLoggerContext)
+
+	mcm.RegisterListener(bucketSettingsChangeListener)
+	rm.bucket_settings_svc.SetMetadataChangeHandlerCallback(bucketSettingsChangeListener.bucketSettingsChangeHandlerCallback)
 
 	mcm.Start()
 }
@@ -237,7 +250,8 @@ func (rm *replicationManager) init(
 	capi_svc service_def.CAPIService,
 	audit_svc service_def.AuditSvc,
 	uilog_svc service_def.UILogSvc,
-	process_setting_svc service_def.GlobalSettingsSvc) {
+	global_setting_svc service_def.GlobalSettingsSvc,
+	bucket_settings_svc service_def.BucketSettingsSvc) {
 
 	rm.GenericSupervisor = *supervisor.NewGenericSupervisor(base.ReplicationManagerSupervisorId, log.DefaultLoggerContext, rm, nil)
 	rm.pipelineMasterSupervisor = supervisor.NewGenericSupervisor(base.PipelineMasterSupervisorId, log.DefaultLoggerContext, rm, &rm.GenericSupervisor)
@@ -251,8 +265,9 @@ func (rm *replicationManager) init(
 	rm.audit_svc = audit_svc
 	rm.adminport_finch = make(chan bool, 1)
 	rm.children_waitgrp = &sync.WaitGroup{}
-	rm.process_setting_svc = process_setting_svc
-	fac := factory.NewXDCRFactory(repl_spec_svc, remote_cluster_svc, cluster_info_svc, xdcr_topology_svc, checkpoint_svc, capi_svc, uilog_svc, log.DefaultLoggerContext, log.DefaultLoggerContext, rm, rm.pipelineMasterSupervisor)
+	rm.global_setting_svc = global_setting_svc
+	rm.bucket_settings_svc = bucket_settings_svc
+	fac := factory.NewXDCRFactory(repl_spec_svc, remote_cluster_svc, cluster_info_svc, xdcr_topology_svc, checkpoint_svc, capi_svc, uilog_svc, bucket_settings_svc, log.DefaultLoggerContext, log.DefaultLoggerContext, rm, rm.pipelineMasterSupervisor)
 
 	pipeline_manager.PipelineManager(fac, rm.repl_spec_svc, xdcr_topology_svc, log.DefaultLoggerContext)
 
@@ -290,7 +305,11 @@ func AuditService() service_def.AuditSvc {
 }
 
 func GlobalSettingsService() service_def.GlobalSettingsSvc {
-	return replication_mgr.process_setting_svc
+	return replication_mgr.global_setting_svc
+}
+
+func BucketSettingsService() service_def.BucketSettingsSvc {
+	return replication_mgr.bucket_settings_svc
 }
 
 //CreateReplication create the replication specification in metadata store
@@ -807,6 +826,12 @@ func writeUpdateReplicationSettingsEvent(spec *metadata.ReplicationSpecification
 	logAuditErrors(err)
 }
 
+func writeUpdateBucketSettingsEvent(bucketName string, lwwEnabled bool, realUserId *base.RealUserId) {
+	updateBucketSettingsEvent := constructUpdateBucketSettingsEvent(bucketName, lwwEnabled, realUserId)
+	err := AuditService().Write(base.UpdateBucketSettingsEventId, updateBucketSettingsEvent)
+	logAuditErrors(err)
+}
+
 func constructGenericReplicationFields(realUserId *base.RealUserId) (*base.GenericReplicationFields, error) {
 	localClusterName, err := XDCRCompTopologyService().MyHostAddr()
 	if err != nil {
@@ -866,6 +891,19 @@ func constructUpdateDefaultReplicationSettingsEvent(changedSettingsMap *map[stri
 		UpdatedSettings:          convertedSettingsMap}, nil
 }
 
+func constructUpdateBucketSettingsEvent(bucketName string, lwwEnabled bool, realUserId *base.RealUserId) *base.UpdateBucketSettingsEvent {
+	logger_rm.Info("Start constructUpdateBucketSettingsEvent....")
+
+	settingsMap := make(map[string]interface{})
+	settingsMap[LWWEnabled] = lwwEnabled
+	logger_rm.Info("Done constructUpdateBucketSettingsEvent....")
+
+	return &base.UpdateBucketSettingsEvent{
+		GenericFields:   base.GenericFields{log.FormatTimeWithMilliSecondPrecision(time.Now()), *realUserId},
+		UpdatedSettings: settingsMap}
+
+}
+
 func logAuditErrors(err error) {
 	if err != nil {
 		err = utils.NewEnhancedError(base.ErrorWritingAudit, err)
@@ -887,4 +925,25 @@ func GoMaxProcs_env() int {
 	logger_rm.Infof("GOMAXPROCS=%v\n", max_procs)
 	return max_procs
 
+}
+
+func getBucketSettings(bucketName string) (map[string]interface{}, error) {
+	bucketSettings, err := BucketSettingsService().BucketSettings(bucketName)
+	if err != nil {
+		return nil, err
+	}
+	return bucketSettings.ToMap(), nil
+}
+
+func setBucketSettings(bucketName string, lwwEnabled bool, realUserId *base.RealUserId) (map[string]interface{}, error) {
+	bucketSettings := &metadata.BucketSettings{BucketName: bucketName, LWWEnabled: lwwEnabled}
+	err := BucketSettingsService().SetBucketSettings(bucketName, bucketSettings)
+	if err != nil {
+		return nil, err
+	}
+
+	writeUpdateBucketSettingsEvent(bucketName, lwwEnabled, realUserId)
+
+	// return new settings after set op
+	return getBucketSettings(bucketName)
 }

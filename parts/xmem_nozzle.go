@@ -80,11 +80,7 @@ var xmem_setting_defs base.SettingDefinitions = base.SettingDefinitions{SETTING_
 
 var UninitializedReseverationNumber = -1
 
-func (doc_meta documentMetadata) String() string {
-	return fmt.Sprintf("[key=%s; revSeq=%v;cas=%v;flags=%v;expiry=%v;deletion=%v]", doc_meta.key, doc_meta.revSeq, doc_meta.cas, doc_meta.flags, doc_meta.expiry, doc_meta.deletion)
-}
-
-type ConflictResolver func(doc_metadata_source documentMetadata, doc_metadata_target documentMetadata, logger *log.CommonLogger) bool
+type ConflictResolver func(doc_metadata_source documentMetadata, doc_metadata_target documentMetadata, source_cr_mode base.ConflictResolutionMode, logger *log.CommonLogger) bool
 
 /************************************
 /* struct bufferedMCRequest
@@ -657,7 +653,6 @@ func (client *xmemClient) repairCount() int {
 /* struct XmemNozzle
 *************************************/
 type XmemNozzle struct {
-
 	//parent inheritance
 	gen_server.GenServer
 	AbstractPart
@@ -719,6 +714,12 @@ type XmemNozzle struct {
 	last_ready_batch      int32
 	last_ten_batches_size []int
 	last_batch_id         int32
+
+	// whether extended metadata is supported
+	ext_metadata_supported bool
+
+	// whether lww conflict resolution mode has been enabled
+	source_cr_mode base.ConflictResolutionMode
 }
 
 func NewXmemNozzle(id string,
@@ -729,6 +730,8 @@ func NewXmemNozzle(id string,
 	bucketName string,
 	password string,
 	dataObj_recycler base.DataObjRecycler,
+	ext_metadata_supported bool,
+	source_cr_mode base.ConflictResolutionMode,
 	logger_context *log.LoggerContext) *XmemNozzle {
 
 	//callback functions from GenServer
@@ -764,8 +767,10 @@ func NewXmemNozzle(id string,
 		counter_batches:     0,
 		dataObj_recycler:    dataObj_recycler,
 		topic:               topic,
-		maxseqno_received_map: make(map[uint16]uint64),
-		last_ten_batches_size: []int{0, 0, 0, 0, 0, 0, 0, 0, 0, 0}}
+		maxseqno_received_map:  make(map[uint16]uint64),
+		last_ten_batches_size:  []int{0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+		ext_metadata_supported: ext_metadata_supported,
+		source_cr_mode:         source_cr_mode}
 
 	xmem.config.connectStr = connectString
 	xmem.config.bucketName = bucketName
@@ -823,7 +828,7 @@ func (xmem *XmemNozzle) Start(settings map[string]interface{}) error {
 	go xmem.processData_sendbatch(xmem.sender_finch, &xmem.childrenWaitGrp)
 
 	//set conflict resolver
-	xmem.conflict_resolver = resolveConflictByRevSeq
+	xmem.conflict_resolver = resolveConflict
 
 	xmem.start_time = time.Now()
 	err = xmem.Start_server()
@@ -1135,6 +1140,38 @@ func (xmem *XmemNozzle) batchSetMetaWithRetry(batch *dataBatch, numOfRetry int) 
 }
 
 //return true if doc_meta_source win; false otherwise
+func resolveConflict(doc_meta_source documentMetadata,
+	doc_meta_target documentMetadata, source_cr_mode base.ConflictResolutionMode, logger *log.CommonLogger) bool {
+	if source_cr_mode == base.CRMode_LWW && doc_meta_source.crMode == base.CRMode_LWW && doc_meta_target.crMode == base.CRMode_LWW {
+		return resolveConflictByCAS(doc_meta_source, doc_meta_target, logger)
+	} else {
+		return resolveConflictByRevSeq(doc_meta_source, doc_meta_target, logger)
+	}
+}
+
+func resolveConflictByCAS(doc_meta_source documentMetadata,
+	doc_meta_target documentMetadata, logger *log.CommonLogger) bool {
+	ret := true
+	if doc_meta_target.cas > doc_meta_source.cas {
+		ret = false
+	} else if doc_meta_target.cas == doc_meta_source.cas {
+		if doc_meta_target.revSeq > doc_meta_source.revSeq {
+			ret = false
+		} else if doc_meta_target.revSeq == doc_meta_source.revSeq {
+			//if the outgoing mutation is deletion and its revSeq and cas are the
+			//same as the target side document, it would lose the conflict resolution
+			if doc_meta_source.deletion || (doc_meta_target.expiry > doc_meta_source.expiry) {
+				ret = false
+			} else if doc_meta_target.expiry == doc_meta_source.expiry {
+				if doc_meta_target.flags >= doc_meta_source.flags {
+					ret = false
+				}
+			}
+		}
+	}
+	return ret
+}
+
 func resolveConflictByRevSeq(doc_meta_source documentMetadata,
 	doc_meta_target documentMetadata, logger *log.CommonLogger) bool {
 	ret := true
@@ -1223,7 +1260,10 @@ func (xmem *XmemNozzle) batchGetMeta(bigDoc_map map[string]*base.WrappedMCReques
 		}
 
 		if _, ok := sent_key_map[docKey]; !ok {
-			req := xmem.composeRequestForGetMeta(docKey, originalReq.Req.VBucket, opaque)
+			// request extended meta from target only when
+			// 1. extended meta is supported by replication
+			// and 2. conflict resolution mode of source document is lww
+			req := xmem.composeRequestForGetMeta(docKey, originalReq.Req.VBucket, opaque, xmem.ext_metadata_supported && originalReq.CRMode == base.CRMode_LWW)
 			reqs_bytes = append(reqs_bytes, req.Bytes()...)
 			opaque_keySeqno_map[opaque] = []interface{}{docKey, originalReq.Seqno, time.Now()}
 			opaque++
@@ -1346,12 +1386,12 @@ func (xmem *XmemNozzle) batchGetMeta(bigDoc_map map[string]*base.WrappedMCReques
 		resp, ok := respMap[key]
 		if ok && resp.Status == mc.SUCCESS {
 			doc_meta_target := xmem.decodeGetMetaResp([]byte(key), resp)
-			doc_meta_source := decodeSetMetaReq(wrappedReq.Req)
-			if !xmem.conflict_resolver(doc_meta_source, doc_meta_target, xmem.Logger()) {
-				xmem.Logger().Debugf("doc %v (%v)failed on conflict resolution to %v, no need to send\n", key, doc_meta_source, doc_meta_target)
+			doc_meta_source := decodeSetMetaReq(wrappedReq)
+			if !xmem.conflict_resolver(doc_meta_source, doc_meta_target, xmem.source_cr_mode, xmem.Logger()) {
+				xmem.Logger().Debugf("doc %v failed source side conflict resolution. source meta=%v, target meta=%v. no need to send\n", key, doc_meta_source, doc_meta_target)
 				bigDoc_noRep_map[wrappedReq.UniqueKey] = true
 			} else {
-				xmem.Logger().Debugf("doc %v (%v)succeeded on conflict resolution to %v, sending it to target\n", key, doc_meta_source, doc_meta_target)
+				xmem.Logger().Debugf("doc %v succeeded source side conflict resolution. source meta=%v, target meta=%v. sending it to target\n", key, doc_meta_source, doc_meta_target)
 			}
 		} else {
 			xmem.Logger().Debugf("batchGetMeta: doc %s is not found in target system, send it", key)
@@ -1372,15 +1412,26 @@ func (xmem *XmemNozzle) decodeGetMetaResp(key []byte, resp *mc.MCResponse) docum
 	ret.revSeq = binary.BigEndian.Uint64(extras[12:20])
 	ret.cas = resp.Cas
 
+	if len(extras) > 20 {
+		ret.crMode = base.GetConflictResolutionModeFromInt(int(extras[20]))
+	} else {
+		ret.crMode = base.CRMode_RevId
+	}
+
 	return ret
 
 }
 
-func (xmem *XmemNozzle) composeRequestForGetMeta(key string, vb uint16, opaque uint32) *mc.MCRequest {
-	return &mc.MCRequest{VBucket: vb,
+func (xmem *XmemNozzle) composeRequestForGetMeta(key string, vb uint16, opaque uint32, reqExtMeta bool) *mc.MCRequest {
+	req := &mc.MCRequest{VBucket: vb,
 		Key:    []byte(key),
 		Opaque: opaque,
 		Opcode: base.GET_WITH_META}
+	if reqExtMeta {
+		req.Extras = make([]byte, 1)
+		req.Extras[0] = 1
+	}
+	return req
 }
 
 func (xmem *XmemNozzle) sendSingleSetMeta(adjustRequest bool, item *base.WrappedMCRequest, index uint16, numOfRetry int) error {

@@ -12,6 +12,7 @@ package parts
 
 import (
 	"encoding/binary"
+	"fmt"
 	mc "github.com/couchbase/gomemcached"
 	base "github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
@@ -82,6 +83,11 @@ type documentMetadata struct {
 	flags    uint32 // Item flags
 	expiry   uint32 // Item expiration time
 	deletion bool
+	crMode   base.ConflictResolutionMode // conflict resolution mode
+}
+
+func (doc_meta documentMetadata) String() string {
+	return fmt.Sprintf("[key=%s; revSeq=%v;cas=%v;flags=%v;expiry=%v;deletion=%v;crMode=%v]", doc_meta.key, doc_meta.revSeq, doc_meta.cas, doc_meta.flags, doc_meta.expiry, doc_meta.deletion, doc_meta.crMode)
 }
 
 type GetMetaReceivedEventAdditional struct {
@@ -218,14 +224,17 @@ func needSend(req *base.WrappedMCRequest, batch *dataBatch, logger *log.CommonLo
 	}
 }
 
-func decodeSetMetaReq(req *mc.MCRequest) documentMetadata {
+func decodeSetMetaReq(wrapped_req *base.WrappedMCRequest) documentMetadata {
 	ret := documentMetadata{}
+	req := wrapped_req.Req
 	ret.key = req.Key
 	ret.flags = binary.BigEndian.Uint32(req.Extras[0:4])
 	ret.expiry = binary.BigEndian.Uint32(req.Extras[4:8])
 	ret.revSeq = binary.BigEndian.Uint64(req.Extras[8:16])
 	ret.cas = req.Cas
 	ret.deletion = (req.Opcode == base.DELETE_WITH_META)
+	ret.crMode = wrapped_req.CRMode
+
 	return ret
 }
 

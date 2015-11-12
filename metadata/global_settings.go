@@ -1,11 +1,11 @@
 package metadata
 
 import (
+	"fmt"
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/simple_utils"
 	"strconv"
-	"fmt"
 )
 
 var logger_ps *log.CommonLogger = log.NewLogger("GlobalSetting", log.DefaultLoggerContext)
@@ -52,7 +52,7 @@ func ValidateGlobalSettingsKey(settingsMap map[string]interface{}) (globalSettin
 	return
 }
 
-// returns a map of settings that ghave indeed been changed and their new values.
+// returns a map of settings that have indeed been changed and their new values.
 // returns a map of validation errors, which should normally be empty since the input settingsMap
 // is constructed internally and necessary checks should have been applied before
 // I am leaving the error checks just in case.
@@ -120,7 +120,5 @@ func (s *GlobalSettings) String() string {
 	if s == nil {
 		return "nil"
 	}
-	return fmt.Sprintf("GoMaxProcs:%v",s.GoMaxProcs)
+	return fmt.Sprintf("GoMaxProcs:%v", s.GoMaxProcs)
 }
-
-

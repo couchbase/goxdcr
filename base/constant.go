@@ -113,6 +113,7 @@ const (
 	ReplicationSpecChangeListener = "ReplicationSpecChangeListener"
 	RemoteClusterChangeListener   = "RemoteClusterChangeListener"
 	GlobalSettingChangeListener   = "GlobalSettingChangeListener"
+	BucketSettingsChangeListener  = "BucketSettingsChangeListener"
 )
 
 // constants for integer parsing
@@ -229,6 +230,7 @@ const (
 	GET_WITH_META    = mc.CommandCode(0xa0)
 	SET_WITH_META    = mc.CommandCode(0xa2)
 	DELETE_WITH_META = mc.CommandCode(0xa8)
+	SET_TIME_SYNC    = mc.CommandCode(0xc1)
 )
 
 const (
@@ -269,3 +271,9 @@ const (
 	ProblematicVBs = "ProblematicVBs"
 	VBTimestamps   = "VBTimestamps"
 )
+
+// version of extended metadata to look for
+var ExtendedMetadataVersion = 1
+
+// id of conflict resolution mode in extended metadata
+var ConflictResolutionModeId = 2

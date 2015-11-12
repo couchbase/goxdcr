@@ -134,6 +134,19 @@
 					 "updated_settings" : {}
  					},
                    "optional_fields" : {}
+                },
+		{  "id" : 16393,
+                   "name" : "bucket settings update",
+                   "description" : "updated bucket settings",
+                   "sync" : false,
+                   "enabled" : true,
+                   "mandatory_fields" : {
+                                         "timestamp" : "",
+                                         "real_userid" : {"source" : "", "user" : ""},
+                                         "bucket_name" : "",
+                                         "updated_settings" : {}
+                                        },
+                   "optional_fields" : {}
                 }
 		]
 }

@@ -9,23 +9,24 @@
 
 package base
 
-import (
-)
+import ()
 
 const (
-	CreateRemoteClusterRefEventId              uint32 = 16384
-	UpdateRemoteClusterRefEventId              uint32 = 16385
-	DeleteRemoteClusterRefEventId              uint32 = 16386
+	CreateRemoteClusterRefEventId           uint32 = 16384
+	UpdateRemoteClusterRefEventId           uint32 = 16385
+	DeleteRemoteClusterRefEventId           uint32 = 16386
 	CreateReplicationEventId                uint32 = 16387
 	PauseReplicationEventId                 uint32 = 16388
 	ResumeReplicationEventId                uint32 = 16389
 	CancelReplicationEventId                uint32 = 16390
 	UpdateDefaultReplicationSettingsEventId uint32 = 16391
 	UpdateReplicationSettingsEventId        uint32 = 16392
+	UpdateBucketSettingsEventId             uint32 = 16393
 )
 
 var ErrorWritingAudit = "Could not write audit logs."
-// used in the place where a remote cluster referenced by a replication can 
+
+// used in the place where a remote cluster referenced by a replication can
 // no longer be found, e.g., when the cluster has been deleted prior
 var UnknownRemoteClusterName = "Unknown"
 
@@ -51,6 +52,12 @@ type UpdateReplicationSettingsEvent struct {
 	UpdateDefaultReplicationSettingsEvent
 }
 
+type UpdateBucketSettingsEvent struct {
+	GenericFields
+	BucketName      string                 `json:"bucket_name"`
+	UpdatedSettings map[string]interface{} `json:"updated_settings"`
+}
+
 type GenericReplicationEvent struct {
 	GenericReplicationFields
 	ReplicationSpecificFields
@@ -58,14 +65,14 @@ type GenericReplicationEvent struct {
 
 // fields applicable to all events
 type GenericFields struct {
-	Timestamp  string  `json:"timestamp"`
+	Timestamp  string     `json:"timestamp"`
 	RealUserid RealUserId `json:"real_userid"`
 }
 
 // fields applicable to all replication related events
 type GenericReplicationFields struct {
 	GenericFields
-	LocalClusterName    string  `json:"local_cluster_name"`
+	LocalClusterName string `json:"local_cluster_name"`
 }
 
 // fields applicable to individual replications

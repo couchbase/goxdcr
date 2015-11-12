@@ -31,14 +31,11 @@ func GetSourceVBListPerPipeline(pipeline common.Pipeline) []uint16 {
 	return ret
 }
 
-func GetSourceVBMapForReplication(cluster_info_svc service_def.ClusterInfoSvc, xdcr_topology_svc service_def.XDCRCompTopologySvc,
-	spec *metadata.ReplicationSpecification, logger *log.CommonLogger) (map[string][]uint16, error) {
+func GetSourceVBMap(cluster_info_svc service_def.ClusterInfoSvc, xdcr_topology_svc service_def.XDCRCompTopologySvc,
+	sourceBucketName string, logger *log.CommonLogger) (map[string][]uint16, error) {
 	kv_vb_map := make(map[string][]uint16)
-	if spec == nil {
-		return kv_vb_map, nil
-	}
 
-	server_vbmap, err := cluster_info_svc.GetServerVBucketsMap(xdcr_topology_svc, spec.SourceBucketName)
+	server_vbmap, err := cluster_info_svc.GetServerVBucketsMap(xdcr_topology_svc, sourceBucketName)
 	if err != nil {
 		return nil, err
 	}
@@ -77,6 +74,11 @@ func HasSSLOverMemSupport(cluster_info_svc service_def.ClusterInfoSvc, targetClu
 	return cluster_info_svc.IsClusterCompatible(targetClusterRef, []int{3, 0})
 }
 
+// checks if target cluster supports extended metadata
+func HasExtMetadataSupport(cluster_info_svc service_def.ClusterInfoSvc, targetClusterRef *metadata.RemoteClusterReference) (bool, error) {
+	return cluster_info_svc.IsClusterCompatible(targetClusterRef, []int{4, 5})
+}
+
 func GetElementIdFromName(pipeline common.Pipeline, name string) string {
 	return pipeline.Topic() + "_" + name
 }
@@ -101,4 +103,13 @@ func RegisterAsyncComponentEventHandler(listenerMap map[string]common.AsyncCompo
 		}
 	}
 
+}
+
+func IsPipelineUsingCapi(pipeline common.Pipeline) bool {
+	isCapi := false
+	for _, target := range pipeline.Targets() {
+		_, isCapi = target.(*parts.CapiNozzle)
+		break
+	}
+	return isCapi
 }

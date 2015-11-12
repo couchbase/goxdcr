@@ -44,14 +44,14 @@ type XDCRFactory struct {
 	checkpoint_svc     service_def.CheckpointsService
 	capi_svc           service_def.CAPIService
 	uilog_svc          service_def.UILogSvc
+	//bucket settings service
+	bucket_settings_svc service_def.BucketSettingsSvc
 
 	default_logger_ctx         *log.LoggerContext
 	pipeline_failure_handler   common.SupervisorFailureHandler
 	logger                     *log.CommonLogger
 	pipeline_master_supervisor *supervisor.GenericSupervisor
 }
-
-//var xdcrf.logger *log.CommonLogger = log.NewLogger("XDCRFactory", log.LogLevelInfo)
 
 // set call back functions is done only once
 func NewXDCRFactory(repl_spec_svc service_def.ReplicationSpecSvc,
@@ -61,6 +61,7 @@ func NewXDCRFactory(repl_spec_svc service_def.ReplicationSpecSvc,
 	checkpoint_svc service_def.CheckpointsService,
 	capi_svc service_def.CAPIService,
 	uilog_svc service_def.UILogSvc,
+	bucket_settings_svc service_def.BucketSettingsSvc,
 	pipeline_default_logger_ctx *log.LoggerContext,
 	factory_logger_ctx *log.LoggerContext,
 	pipeline_failure_handler common.SupervisorFailureHandler,
@@ -72,6 +73,7 @@ func NewXDCRFactory(repl_spec_svc service_def.ReplicationSpecSvc,
 		checkpoint_svc:             checkpoint_svc,
 		capi_svc:                   capi_svc,
 		uilog_svc:                  uilog_svc,
+		bucket_settings_svc:         bucket_settings_svc,
 		default_logger_ctx:         pipeline_default_logger_ctx,
 		pipeline_failure_handler:   pipeline_failure_handler,
 		pipeline_master_supervisor: pipeline_master_supervisor,
@@ -80,18 +82,27 @@ func NewXDCRFactory(repl_spec_svc service_def.ReplicationSpecSvc,
 
 func (xdcrf *XDCRFactory) NewPipeline(topic string, progress_recorder common.PipelineProgressRecorder) (common.Pipeline, error) {
 	spec, err := xdcrf.repl_spec_svc.ReplicationSpec(topic)
-	xdcrf.logger.Debugf("replication specification = %v\n", spec)
 	if err != nil {
 		xdcrf.logger.Errorf("Failed to get replication specification for pipeline %v, err=%v\n", topic, err)
 		return nil, err
 	}
+	xdcrf.logger.Debugf("replication specification = %v\n", spec)
 
 	logger_ctx := log.CopyCtx(xdcrf.default_logger_ctx)
 	logger_ctx.Log_level = spec.Settings.LogLevel
-	//TODO should we change log level on xdcrf.logger?
+
+	extMetaSupported, err := xdcrf.isExtMetaSupported(spec)
+	if err != nil {
+		return nil, err
+	}
+	sourceCRMode, err := xdcrf.getSourceConflictResolutionMode(spec.SourceBucketName)
+	if err != nil {
+		return nil, err
+	}
+	xdcrf.logger.Infof("%v extMetaSupported=%v, sourceCRMode=%v\n", topic, extMetaSupported, sourceCRMode)
 
 	// popuplate pipeline using config
-	sourceNozzles, kv_vb_map, err := xdcrf.constructSourceNozzles(spec, topic, logger_ctx)
+	sourceNozzles, kv_vb_map, err := xdcrf.constructSourceNozzles(spec, topic, extMetaSupported, logger_ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -103,7 +114,7 @@ func (xdcrf *XDCRFactory) NewPipeline(topic string, progress_recorder common.Pip
 	progress_recorder(fmt.Sprintf("%v source nozzles have been constructed", len(sourceNozzles)))
 
 	xdcrf.logger.Infof("%v kv_vb_map=%v\n", topic, kv_vb_map)
-	outNozzles, vbNozzleMap, err := xdcrf.constructOutgoingNozzles(spec, kv_vb_map, logger_ctx)
+	outNozzles, vbNozzleMap, err := xdcrf.constructOutgoingNozzles(spec, kv_vb_map, extMetaSupported, sourceCRMode, logger_ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -128,7 +139,7 @@ func (xdcrf *XDCRFactory) NewPipeline(topic string, progress_recorder common.Pip
 			downStreamParts[targetNozzleId] = outNozzle
 		}
 
-		router, err := xdcrf.constructRouter(sourceNozzle.Id(), spec, downStreamParts, vbNozzleMap, logger_ctx)
+		router, err := xdcrf.constructRouter(sourceNozzle.Id(), spec, downStreamParts, vbNozzleMap, extMetaSupported, logger_ctx)
 		if err != nil {
 			return nil, err
 		}
@@ -158,6 +169,54 @@ func (xdcrf *XDCRFactory) NewPipeline(topic string, progress_recorder common.Pip
 
 	xdcrf.logger.Infof("XDCR pipeline %v constructed", topic)
 	return pipeline, nil
+}
+
+// extended metadata is supported by replication only if
+// 1. replication is not of CAPI type
+// and 2. extended metadata is supported by target cluster
+// there is no need to check if extended metadata is supported by source cluster since
+// source cluser is always post-sherlock
+// when ext metadata is not supported, replication would not request ext metadata from dcp
+// or add ext metadata to MCRequest
+func (xdcrf *XDCRFactory) isExtMetaSupported(spec *metadata.ReplicationSpecification) (bool, error) {
+	// first check if replication is of CAPI type, which does not support lww
+	targetClusterRef, err := xdcrf.remote_cluster_svc.RemoteClusterByUuid(spec.TargetClusterUUID, true)
+	if err != nil {
+		xdcrf.logger.Errorf("Error getting remote cluster with uuid=%v for pipeline %v, err=%v\n", spec.TargetClusterUUID, spec.Id, err)
+		return false, err
+	}
+
+	nozzleType, err := xdcrf.getOutNozzleType(targetClusterRef, spec)
+	if err != nil {
+		xdcrf.logger.Errorf("Failed to get the out nozzle type for pipeline %v, err=%v\n", spec.Id, err)
+		return false, err
+	}
+
+	if nozzleType == base.Capi {
+		return false, nil
+	}
+
+	// then check if target cluster supports extended metadata
+	extMetaSupportedByTarget, err := pipeline_utils.HasExtMetadataSupport(xdcrf.cluster_info_svc, targetClusterRef)
+	if err != nil {
+		xdcrf.logger.Errorf("Received error when checking whether target cluster supports extended metadata for pipeline %v, err=%v\n", spec.Id, err)
+		return false, err
+	}
+
+	return extMetaSupportedByTarget, nil
+
+}
+
+func (xdcrf *XDCRFactory) getSourceConflictResolutionMode(bucketName string) (base.ConflictResolutionMode, error) {
+	bucketSettings, err := xdcrf.bucket_settings_svc.BucketSettings(bucketName)
+	if err != nil {
+		return base.CRMode_RevId, err
+	}
+	if bucketSettings.LWWEnabled {
+		return base.CRMode_LWW, nil
+	} else {
+		return base.CRMode_RevId, nil
+	}
 }
 
 func min(num1 int, num2 int) int {
@@ -272,6 +331,7 @@ func (xdcrf *XDCRFactory) registerAsyncListenersOnTargets(pipeline common.Pipeli
 // construct source nozzles for the requested/current kv node
 func (xdcrf *XDCRFactory) constructSourceNozzles(spec *metadata.ReplicationSpecification,
 	topic string,
+	extMetaSupported bool,
 	logger_ctx *log.LoggerContext) (map[string]common.Nozzle, map[string][]uint16, error) {
 	sourceNozzles := make(map[string]common.Nozzle)
 
@@ -287,7 +347,7 @@ func (xdcrf *XDCRFactory) constructSourceNozzles(spec *metadata.ReplicationSpeci
 
 	maxNozzlesPerNode := spec.Settings.SourceNozzlePerNode
 
-	kv_vb_map, err := pipeline_utils.GetSourceVBMapForReplication(xdcrf.cluster_info_svc, xdcrf.xdcr_topology_svc, spec, xdcrf.logger)
+	kv_vb_map, err := pipeline_utils.GetSourceVBMap(xdcrf.cluster_info_svc, xdcrf.xdcr_topology_svc, spec.SourceBucketName, xdcrf.logger)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -316,7 +376,7 @@ func (xdcrf *XDCRFactory) constructSourceNozzles(spec *metadata.ReplicationSpeci
 			// partIds of the dcpNozzle nodes look like "dcpNozzle_$kvaddr_1"
 			id := xdcrf.partId(DCP_NOZZLE_NAME_PREFIX, spec.Id, kvaddr, i)
 			dcpNozzle := parts.NewDcpNozzle(id,
-				bucketName, bucketPassword, vbList, xdcrf.xdcr_topology_svc, logger_ctx)
+				bucketName, bucketPassword, vbList, xdcrf.xdcr_topology_svc, extMetaSupported, logger_ctx)
 			sourceNozzles[dcpNozzle.Id()] = dcpNozzle
 			xdcrf.logger.Debugf("Constructed source nozzle %v with vbList = %v \n", dcpNozzle.Id(), vbList)
 		}
@@ -347,16 +407,17 @@ func (xdcrf *XDCRFactory) filterVBList(targetkvVBList []uint16, kv_vb_map map[st
 }
 
 func (xdcrf *XDCRFactory) constructOutgoingNozzles(spec *metadata.ReplicationSpecification, kv_vb_map map[string][]uint16,
-	logger_ctx *log.LoggerContext) (map[string]common.Nozzle, map[uint16]string, error) {
+	extMetaSupported bool, sourceCRMode base.ConflictResolutionMode, logger_ctx *log.LoggerContext) (map[string]common.Nozzle, map[uint16]string, error) {
 	outNozzles := make(map[string]common.Nozzle)
 	vbNozzleMap := make(map[uint16]string)
 
 	targetBucketName := spec.TargetBucketName
 	targetClusterRef, err := xdcrf.remote_cluster_svc.RemoteClusterByUuid(spec.TargetClusterUUID, true)
 	if err != nil {
-		xdcrf.logger.Errorf("Error getting remote cluster with uuid=%v, err=%v\n", spec.TargetClusterUUID, err)
+		xdcrf.logger.Errorf("Error getting remote cluster with uuid=%v for pipeline %v, err=%v\n", spec.TargetClusterUUID, spec.Id, err)
 		return nil, nil, err
 	}
+
 	kvVBMap, err := xdcrf.cluster_info_svc.GetServerVBucketsMap(targetClusterRef, targetBucketName)
 	if err != nil {
 		xdcrf.logger.Errorf("Error getting server vbuckets map, err=%v\n", err)
@@ -379,7 +440,7 @@ func (xdcrf *XDCRFactory) constructOutgoingNozzles(spec *metadata.ReplicationSpe
 
 	var vbCouchApiBaseMap map[uint16]string
 
-	nozzleType, err := xdcrf.getNozzleType(targetClusterRef, spec)
+	nozzleType, err := xdcrf.getOutNozzleType(targetClusterRef, spec)
 	if err != nil {
 		xdcrf.logger.Errorf("Failed to get the nozzle type, err=%v\n", err)
 		return nil, nil, err
@@ -423,7 +484,7 @@ func (xdcrf *XDCRFactory) constructOutgoingNozzles(spec *metadata.ReplicationSpe
 				}
 			} else {
 				connSize := numOfOutNozzles * 2
-				outNozzle = xdcrf.constructXMEMNozzle(spec.Id, kvaddr, targetBucketName, bucketPwd, i, connSize, logger_ctx)
+				outNozzle = xdcrf.constructXMEMNozzle(spec.Id, kvaddr, targetBucketName, bucketPwd, i, connSize, extMetaSupported, sourceCRMode, logger_ctx)
 			}
 
 			outNozzles[outNozzle.Id()] = outNozzle
@@ -445,14 +506,15 @@ func (xdcrf *XDCRFactory) constructOutgoingNozzles(spec *metadata.ReplicationSpe
 func (xdcrf *XDCRFactory) constructRouter(id string, spec *metadata.ReplicationSpecification,
 	downStreamParts map[string]common.Part,
 	vbNozzleMap map[uint16]string,
+	extMetaSupported bool,
 	logger_ctx *log.LoggerContext) (*parts.Router, error) {
 	routerId := "Router" + PART_NAME_DELIMITER + id
-	router, err := parts.NewRouter(routerId, spec.Id, spec.Settings.FilterExpression, downStreamParts, vbNozzleMap, logger_ctx, pipeline_manager.NewMCRequestObj)
+	router, err := parts.NewRouter(routerId, spec.Id, spec.Settings.FilterExpression, downStreamParts, vbNozzleMap, logger_ctx, pipeline_manager.NewMCRequestObj, extMetaSupported)
 	xdcrf.logger.Infof("Constructed router")
 	return router, err
 }
 
-func (xdcrf *XDCRFactory) getNozzleType(targetClusterRef *metadata.RemoteClusterReference, spec *metadata.ReplicationSpecification) (base.XDCROutgoingNozzleType, error) {
+func (xdcrf *XDCRFactory) getOutNozzleType(targetClusterRef *metadata.RemoteClusterReference, spec *metadata.ReplicationSpecification) (base.XDCROutgoingNozzleType, error) {
 	switch spec.Settings.RepType {
 	case metadata.ReplicationTypeXmem:
 		xmemCompatible, err := xdcrf.cluster_info_svc.IsClusterCompatible(targetClusterRef, []int{2, 2})
@@ -478,10 +540,12 @@ func (xdcrf *XDCRFactory) constructXMEMNozzle(topic string, kvaddr string,
 	bucketPwd string,
 	nozzle_index int,
 	connPoolSize int,
+	extMetaSupported bool,
+	sourceCRMode base.ConflictResolutionMode,
 	logger_ctx *log.LoggerContext) common.Nozzle {
 	// partIds of the xmem nozzles look like "xmem_$topic_$kvaddr_1"
 	xmemNozzle_Id := xdcrf.partId(XMEM_NOZZLE_NAME_PREFIX, topic, kvaddr, nozzle_index)
-	nozzle := parts.NewXmemNozzle(xmemNozzle_Id, topic, topic, connPoolSize, kvaddr, bucketName, bucketPwd, pipeline_manager.RecycleMCRequestObj, logger_ctx)
+	nozzle := parts.NewXmemNozzle(xmemNozzle_Id, topic, topic, connPoolSize, kvaddr, bucketName, bucketPwd, pipeline_manager.RecycleMCRequestObj, extMetaSupported, sourceCRMode, logger_ctx)
 	return nozzle
 }
 
@@ -778,7 +842,7 @@ func (xdcrf *XDCRFactory) ConstructSSLPortMap(targetClusterRef *metadata.RemoteC
 	var ssl_port_map map[string]uint16
 	var hasSSLOverMemSupport bool
 
-	nozzleType, err := xdcrf.getNozzleType(targetClusterRef, spec)
+	nozzleType, err := xdcrf.getOutNozzleType(targetClusterRef, spec)
 	if err != nil {
 		return nil, false, err
 	}
