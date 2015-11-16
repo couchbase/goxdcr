@@ -138,6 +138,7 @@ const (
 	RemoteClusterValidateUri      = "validateURI"
 	RemoteClusterDeleted          = "deleted"
 	IsEnterprise                  = "isEnterprise"
+	Pools                         = "pools"
 )
 
 // constants used for create replication request
@@ -264,8 +265,7 @@ const (
 var CouchbaseBucketType = "membase"
 
 // keys used in pipeline.settings
-const(
+const (
 	ProblematicVBs = "ProblematicVBs"
-	VBTimestamps = "VBTimestamps"
+	VBTimestamps   = "VBTimestamps"
 )
-

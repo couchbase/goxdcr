@@ -37,7 +37,7 @@ var CAS_NEW_ENTRY int64 = -1
 var InvalidRemoteClusterOperationErrorMessage = "Invalid remote cluster operation. "
 var InvalidRemoteClusterErrorMessage = "Invalid remote cluster. "
 var UnknownRemoteClusterErrorMessage = "unknown remote cluster"
-var InvalidConnectionStrErrorMessage = "invalid connection string"
+var InvalidConnectionStrError = errors.New("invalid connection string")
 
 type remoteClusterVal struct {
 	key                 string
@@ -364,7 +364,7 @@ func (service *RemoteClusterService) ValidateAddRemoteCluster(ref *metadata.Remo
 	oldRef, _ := service.RemoteClusterByRefName(ref.Name, false)
 
 	if oldRef != nil {
-		return wrapAsInvalidRemoteClusterOperationError(errors.New("duplicate cluster names are not allowed"))
+		return wrapAsInvalidRemoteClusterOperationError("duplicate cluster names are not allowed")
 	}
 
 	bUpdateUuid := (ref.Uuid == "")
@@ -375,7 +375,7 @@ func (service *RemoteClusterService) ValidateAddRemoteCluster(ref *metadata.Remo
 
 	oldRef, err = service.RemoteClusterByUuid(ref.Uuid, false)
 	if oldRef != nil {
-		return wrapAsInvalidRemoteClusterOperationError(fmt.Errorf("Cluster reference to the same cluster already exists under the name `%v`", oldRef.Name))
+		return wrapAsInvalidRemoteClusterOperationError(fmt.Sprintf("Cluster reference to the same cluster already exists under the name `%v`", oldRef.Name))
 	}
 
 	return nil
@@ -393,7 +393,7 @@ func (service *RemoteClusterService) ValidateSetRemoteCluster(refName string, re
 	}
 
 	if oldRef.Uuid != ref.Uuid {
-		return wrapAsInvalidRemoteClusterOperationError(errors.New("The new hostname points to a different remote cluster, which is not allowed."))
+		return wrapAsInvalidRemoteClusterOperationError("The new hostname points to a different remote cluster, which is not allowed.")
 	}
 
 	return nil
@@ -406,13 +406,13 @@ func (service *RemoteClusterService) validateRemoteCluster(ref *metadata.RemoteC
 		return err
 	}
 	if ref.DemandEncryption && !isEnterprise {
-		return wrapAsInvalidRemoteClusterError(errors.New("encryption can only be used in enterprise edition when the entire cluster is running at least 2.5 version of Couchbase Server"))
+		return wrapAsInvalidRemoteClusterError("encryption can only be used in enterprise edition when the entire cluster is running at least 2.5 version of Couchbase Server")
 	}
 
 	hostName := utils.GetHostName(ref.HostName)
 	port, err := utils.GetPortNumber(ref.HostName)
 	if err != nil {
-		return wrapAsInvalidRemoteClusterError(errors.New(fmt.Sprintf("Failed to resolve address for \"%v\". The hostname may be incorrect or not resolvable.", ref.HostName)))
+		return wrapAsInvalidRemoteClusterError(fmt.Sprintf("Failed to resolve address for \"%v\". The hostname may be incorrect or not resolvable.", ref.HostName))
 	}
 
 	var hostAddr string
@@ -423,7 +423,7 @@ func (service *RemoteClusterService) validateRemoteCluster(ref *metadata.RemoteC
 			if isInternalError {
 				return err
 			} else {
-				return wrapAsInvalidRemoteClusterError(errors.New(fmt.Sprintf("Could not connect to \"%v\" on port %v. This could be due to an incorrect host/port combination or a firewall in place between the servers.", hostName, port)))
+				return wrapAsInvalidRemoteClusterError(fmt.Sprintf("Could not connect to \"%v\" on port %v. This could be due to an incorrect host/port combination or a firewall in place between the servers.", hostName, port))
 			}
 		}
 	} else {
@@ -442,10 +442,19 @@ func (service *RemoteClusterService) validateRemoteCluster(ref *metadata.RemoteC
 	service.logger.Infof("Result from validate remote cluster call: err=%v, statusCode=%v. time taken=%v\n", err, statusCode, time.Since(startTime))
 	if err != nil || statusCode != http.StatusOK {
 		if statusCode == http.StatusUnauthorized {
-			return wrapAsInvalidRemoteClusterError(errors.New(fmt.Sprintf("Authentication failed. Verify username and password. Got HTTP status %v from REST call get to %v%v. Body was: []", statusCode, hostAddr, base.PoolsPath)))
+			return wrapAsInvalidRemoteClusterError(fmt.Sprintf("Authentication failed. Verify username and password. Got HTTP status %v from REST call get to %v%v. Body was: []", statusCode, hostAddr, base.PoolsPath))
 		} else {
 			return service.formErrorFromValidatingRemotehost(ref, hostName, port, err)
 		}
+	}
+
+	// check if remote cluster has been initialized, i.e., has non-empty pools
+	pools, ok := poolsInfo[base.Pools].([]interface{})
+	if !ok {
+		return wrapAsInvalidRemoteClusterError("Could not get cluster info from remote cluster. Remote cluster may be invalid.")
+	}
+	if len(pools) == 0 {
+		return wrapAsInvalidRemoteClusterError("Remote node is not initialized.")
 	}
 
 	//get isEnterprise from the map
@@ -455,19 +464,20 @@ func (service *RemoteClusterService) validateRemoteCluster(ref *metadata.RemoteC
 	}
 
 	if ref.DemandEncryption && !isEnterprise_remote {
-		return wrapAsInvalidRemoteClusterError(fmt.Errorf("Remote cluster %v is not enterprise version, so no SSL support", hostAddr))
+		return wrapAsInvalidRemoteClusterError("Remote cluster is not enterprise version and does not support SSL.")
 	}
 	// get remote cluster uuid from the map
 	if updateUUid {
 		actualUuid, ok := poolsInfo[base.RemoteClusterUuid]
 		if !ok {
 			// should never get here
-			return errors.New("Could not get uuid of remote cluster.")
+			return wrapAsInvalidRemoteClusterError("Could not get uuid of remote cluster. Remote cluster may be invalid.")
 		}
 		actualUuidStr, ok := actualUuid.(string)
 		if !ok {
 			// should never get here
-			return errors.New(fmt.Sprintf("uuid of remote cluster is of wrong type. Expected type: string; Actual type: %s", reflect.TypeOf(actualUuid)))
+			service.logger.Errorf("Uuid of remote cluster is of wrong type. Expected type: string; Actual type: %s", reflect.TypeOf(actualUuid))
+			return wrapAsInvalidRemoteClusterError("Could not get uuid of remote cluster. Remote cluster may be invalid.")
 		}
 
 		// update uuid in ref to real value
@@ -479,11 +489,11 @@ func (service *RemoteClusterService) validateRemoteCluster(ref *metadata.RemoteC
 func (service *RemoteClusterService) formErrorFromValidatingRemotehost(ref *metadata.RemoteClusterReference, hostName string, port uint16, err error) error {
 	if !ref.DemandEncryption {
 		// if encryption is not on, most likely the error is caused by incorrect hostname or firewall.
-		return wrapAsInvalidRemoteClusterError(errors.New(fmt.Sprintf("Could not connect to \"%v\" on port %v. This could be due to an incorrect host/port combination or a firewall in place between the servers.", hostName, port)))
+		return wrapAsInvalidRemoteClusterError(fmt.Sprintf("Could not connect to \"%v\" on port %v. This could be due to an incorrect host/port combination or a firewall in place between the servers.", hostName, port))
 	} else {
 		// if encryption is on, several different errors could be returned here, e.g., invalid hostname, invalid certificate, certificate by unknown authority, etc.
 		// just return the err
-		return wrapAsInvalidRemoteClusterError(err)
+		return wrapAsInvalidRemoteClusterError(err.Error())
 	}
 }
 
@@ -554,7 +564,7 @@ func (service *RemoteClusterService) cacheRef(ref *metadata.RemoteClusterReferen
 	} else {
 		service.logger.Infof("Remote cluster reference %v has a bad connectivity, didn't populate alternative connection strings. err=%v", ref.Id, err)
 
-		err = errors.New(InvalidConnectionStrErrorMessage)
+		err = InvalidConnectionStrError
 		//keep the old connection string if it is in cache
 		old_cache_obj, ok := cache.Get(ref.Id)
 		if ok && old_cache_obj != nil {
@@ -591,7 +601,7 @@ func (service *RemoteClusterService) refresh(ref *metadata.RemoteClusterReferenc
 		return ref, nil
 	}
 
-	if err.Error() == CASMisMatchError.Error() {
+	if err == CASMisMatchError {
 		// cache has been updated by some other routines. stop refreshing and reload ref
 		ref_cache, _ := service.getCacheVal(ref.Id)
 		if ref_cache != nil {
@@ -599,11 +609,11 @@ func (service *RemoteClusterService) refresh(ref *metadata.RemoteClusterReferenc
 			return ref_cache.ref, nil
 		} else {
 			service.logger.Infof("Stop refreshing ref %v. Ref in cache has been deleted by others\n", ref.Id)
-			return nil, errors.New(UnknownRemoteClusterErrorMessage)
+			return nil, nil
 		}
 	}
 
-	if err.Error() != InvalidConnectionStrErrorMessage {
+	if err != InvalidConnectionStrError {
 		return nil, err
 	}
 
@@ -670,13 +680,13 @@ func (service *RemoteClusterService) GetRemoteClusterNameFromClusterUuid(uuid st
 }
 
 // wrap/mark an error as invalid remote cluster error - by adding "invalid remote cluster" message to the front
-func wrapAsInvalidRemoteClusterError(err error) error {
-	return errors.New(InvalidRemoteClusterErrorMessage + err.Error())
+func wrapAsInvalidRemoteClusterError(errMsg string) error {
+	return errors.New(InvalidRemoteClusterErrorMessage + errMsg)
 }
 
 // wrap/mark an error as invalid remote cluster operation error - by adding "invalid remote cluster operation" message to the front
-func wrapAsInvalidRemoteClusterOperationError(err error) error {
-	return errors.New(InvalidRemoteClusterOperationErrorMessage + err.Error())
+func wrapAsInvalidRemoteClusterOperationError(errMsg string) error {
+	return errors.New(InvalidRemoteClusterOperationErrorMessage + errMsg)
 }
 
 func (service *RemoteClusterService) CheckAndUnwrapRemoteClusterError(err error) (bool, error) {
@@ -713,6 +723,7 @@ func (service *RemoteClusterService) RemoteClusterServiceCallback(path string, v
 	refId := GetKeyFromPath(path)
 
 	return service.updateCache(refId, newRef)
+
 }
 
 func (service *RemoteClusterService) updateCache(refId string, newRef *metadata.RemoteClusterReference) error {
@@ -747,13 +758,19 @@ func (service *RemoteClusterService) updateCache(refId string, newRef *metadata.
 			if err == nil {
 				updated = true
 			} else {
-				return err
+				if err != InvalidConnectionStrError && err != CASMisMatchError {
+					return err
+				} else {
+					// ignore InvalidConnectionStrError and CASMisMatchError
+					// since cache is still in valid state in spite of them
+					return nil
+				}
 			}
 		}
 	}
 
 	if updated && service.metadata_change_callback != nil {
-		err := service.metadata_change_callback(refId, oldRef, newRef)
+		err = service.metadata_change_callback(refId, oldRef, newRef)
 		if err != nil {
 			service.logger.Error(err.Error())
 		}
