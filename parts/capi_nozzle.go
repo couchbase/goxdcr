@@ -651,8 +651,11 @@ func (capi *CapiNozzle) onExit() {
 	//cleanup
 	pool := base.TCPConnPoolMgr().GetPool(capi.getPoolName(capi.config))
 	if pool != nil {
-		capi.Logger().Infof("releasing capi client")
+		capi.Logger().Infof("releasing capi client to pool")
 		pool.Release(capi.client)
+	} else {
+		capi.Logger().Infof("releasing capi client")
+		capi.client.Close()
 	}
 
 }
