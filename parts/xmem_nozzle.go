@@ -641,7 +641,6 @@ func (client *xmemClient) close() {
 		pool := base.ConnPoolMgr().GetPool(client.poolName)
 		if pool != nil {
 			pool.Release(client.memClient)
-			return
 		}
 	}
 	client.memClient.Close()
