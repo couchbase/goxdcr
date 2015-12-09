@@ -82,7 +82,7 @@ func (xdcrf *XDCRFactory) NewPipeline(topic string, progress_recorder common.Pip
 	spec, err := xdcrf.repl_spec_svc.ReplicationSpec(topic)
 	xdcrf.logger.Debugf("replication specification = %v\n", spec)
 	if err != nil {
-		xdcrf.logger.Errorf("Failed to get replication specification, err=%v\n", err)
+		xdcrf.logger.Errorf("Failed to get replication specification for pipeline %v, err=%v\n", topic, err)
 		return nil, err
 	}
 
@@ -102,7 +102,7 @@ func (xdcrf *XDCRFactory) NewPipeline(topic string, progress_recorder common.Pip
 
 	progress_recorder(fmt.Sprintf("%v source nozzles have been constructed", len(sourceNozzles)))
 
-	xdcrf.logger.Infof("kv_vb_map=%v\n", kv_vb_map)
+	xdcrf.logger.Infof("%v kv_vb_map=%v\n", topic, kv_vb_map)
 	outNozzles, vbNozzleMap, err := xdcrf.constructOutgoingNozzles(spec, kv_vb_map, logger_ctx)
 	if err != nil {
 		return nil, err
@@ -118,12 +118,12 @@ func (xdcrf *XDCRFactory) NewPipeline(topic string, progress_recorder common.Pip
 		for _, vb := range vblist {
 			targetNozzleId, ok := vbNozzleMap[vb]
 			if !ok {
-				panic(fmt.Sprintf("There is no target nozzle for vb=%v", vb))
+				return nil, fmt.Errorf("Error constructing pipeline %v since there is no target nozzle for vb=%v", topic, vb)
 			}
 
 			outNozzle, ok := outNozzles[targetNozzleId]
 			if !ok {
-				panic(fmt.Sprintf("There is no corresponding target nozzel for vb=%v, targetNozzleId=%v", vb, targetNozzleId))
+				panic(fmt.Sprintf("%v There is no corresponding target nozzle for vb=%v, targetNozzleId=%v", topic, vb, targetNozzleId))
 			}
 			downStreamParts[targetNozzleId] = outNozzle
 		}
@@ -156,7 +156,7 @@ func (xdcrf *XDCRFactory) NewPipeline(topic string, progress_recorder common.Pip
 
 	progress_recorder("Pipeline is constructed")
 
-	xdcrf.logger.Infof("XDCR pipeline constructed")
+	xdcrf.logger.Infof("XDCR pipeline %v constructed", topic)
 	return pipeline, nil
 }
 

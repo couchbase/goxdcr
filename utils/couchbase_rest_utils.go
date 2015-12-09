@@ -214,7 +214,7 @@ func prepareForRestCall(baseURL string,
 
 func cleanupAfterRestCall(keep_client_alive bool, err error, client *http.Client, logger *log.CommonLogger) {
 	if !keep_client_alive || IsSeriousNetError(err) {
-		if client.Transport != nil {
+		if client != nil && client.Transport != nil {
 			transport, ok := client.Transport.(*http.Transport)
 			if ok {
 				if IsSeriousNetError(err) {
