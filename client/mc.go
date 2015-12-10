@@ -100,6 +100,25 @@ func (c *Client) Receive() (*gomemcached.MCResponse, error) {
 	return resp, err
 }
 
+func appendFeatureCode(bytes []byte) []byte {
+	bytes = append(bytes, 0, 0)
+	binary.BigEndian.PutUint16(bytes[len(bytes)-2:], uint16(0x04))
+	return bytes
+}
+
+//Send a hello command to enable MutationTokens
+func (c *Client) EnableMutationToken() (*gomemcached.MCResponse, error) {
+	var payload []byte
+	payload = appendFeatureCode(payload)
+
+	return c.Send(&gomemcached.MCRequest{
+		Opcode: gomemcached.HELLO,
+		Key:    []byte("GoMemcached"),
+		Body:   payload,
+	})
+
+}
+
 // Get the value for a key.
 func (c *Client) Get(vb uint16, key string) (*gomemcached.MCResponse, error) {
 	return c.Send(&gomemcached.MCRequest{
@@ -279,7 +298,7 @@ func (c *Client) Append(vb uint16, key string, data []byte) (*gomemcached.MCResp
 
 // GetBulk gets keys in bulk
 func (c *Client) GetBulk(vb uint16, keys []string) (map[string]*gomemcached.MCResponse, error) {
-	rv := map[string]*gomemcached.MCResponse{}
+	rv := make(map[string]*gomemcached.MCResponse, len(keys))
 
 	stopch := make(chan bool)
 	var wg sync.WaitGroup

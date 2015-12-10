@@ -42,6 +42,7 @@ const (
 	APPENDQ    = CommandCode(0x19)
 	PREPENDQ   = CommandCode(0x1a)
 	GAT        = CommandCode(0x1d)
+	HELLO      = CommandCode(0x1f)
 	RGET       = CommandCode(0x30)
 	RSET       = CommandCode(0x31)
 	RSETQ      = CommandCode(0x32)
