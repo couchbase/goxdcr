@@ -69,6 +69,7 @@ type ConnPool interface {
 	NewConnFunc() NewConnFunc
 	Name() string
 	Size() int
+	MaxConn() int
 	ConnType() ConnType
 	Hostname() string
 	Close()
@@ -177,6 +178,10 @@ func (p *connPool) Size() int {
 	} else {
 		return 0
 	}
+}
+
+func (p *connPool) MaxConn() int {
+	return p.maxConn
 }
 
 func (p *connPool) Get() (*mcc.Client, error) {
@@ -457,9 +462,11 @@ func (connPoolMgr *connPoolMgr) GetOrCreatePool(poolNameToCreate string, hostnam
 	if ok {
 		_, ok = pool.(*connPool)
 		if ok {
-			if !pool.Stale() {
+			// do not return pool if pool size does not match, e.g., when the numTargetNozzlePerNode setting has been changed.
+			if !pool.Stale() && pool.MaxConn() == connsize {
 				return pool, nil
 			} else {
+				ConnPoolMgr().logger.Infof("Removing pool %v. stale=%v, new size=%v, old size=%v", poolNameToCreate, pool.Stale(), connsize, pool.MaxConn())
 				connPoolMgr.removePool(pool)
 			}
 		} else {
@@ -472,11 +479,12 @@ func (connPoolMgr *connPoolMgr) GetOrCreatePool(poolNameToCreate string, hostnam
 	if size == 0 {
 		size = DefaultConnectionSize
 	}
-	pool = &connPool{clients: make(chan *mcc.Client, connsize),
+	pool = &connPool{clients: make(chan *mcc.Client, size),
 		hostName:   hostname,
 		userName:   username,
 		password:   password,
 		bucketName: bucketname,
+		maxConn:    size,
 		name:       poolNameToCreate,
 		lock:       &sync.RWMutex{},
 		state_lock: &sync.RWMutex{},
@@ -484,7 +492,7 @@ func (connPoolMgr *connPoolMgr) GetOrCreatePool(poolNameToCreate string, hostnam
 	connPoolMgr.conn_pools_map[poolNameToCreate] = pool
 
 	pool.(*connPool).init()
-	go connPoolMgr.fillPool(pool.(*connPool), connsize)
+	go connPoolMgr.fillPool(pool.(*connPool), size)
 	return pool, err
 }
 
@@ -496,9 +504,10 @@ func (connPoolMgr *connPoolMgr) GetOrCreateSSLOverMemPool(poolNameToCreate strin
 	if ok {
 		_, ok = pool.(*sslOverMemConnPool)
 		if ok {
-			if !pool.Stale() {
+			if !pool.Stale() && pool.MaxConn() == connsize {
 				return pool, nil
 			} else {
+				ConnPoolMgr().logger.Infof("Removing pool %v. stale=%v, new size=%v, old size=%v", poolNameToCreate, pool.Stale(), connsize, pool.MaxConn())
 				connPoolMgr.removePool(pool)
 			}
 		} else {
@@ -513,11 +522,12 @@ func (connPoolMgr *connPoolMgr) GetOrCreateSSLOverMemPool(poolNameToCreate strin
 		size = DefaultConnectionSize
 	}
 	p := &sslOverMemConnPool{
-		connPool: connPool{clients: make(chan *mcc.Client, connsize),
+		connPool: connPool{clients: make(chan *mcc.Client, size),
 			hostName:   hostname,
 			userName:   username,
 			password:   password,
 			bucketName: bucketname,
+			maxConn:    size,
 			name:       poolNameToCreate,
 			lock:       &sync.RWMutex{},
 			state_lock: &sync.RWMutex{},
@@ -528,7 +538,7 @@ func (connPoolMgr *connPoolMgr) GetOrCreateSSLOverMemPool(poolNameToCreate strin
 
 	connPoolMgr.conn_pools_map[poolNameToCreate] = p
 
-	go connPoolMgr.fillPool(p, connsize)
+	go connPoolMgr.fillPool(p, size)
 	return p, err
 
 }
@@ -542,9 +552,10 @@ func (connPoolMgr *connPoolMgr) GetOrCreateSSLOverProxyPool(poolNameToCreate str
 	if ok {
 		_, ok = pool.(*sslOverProxyConnPool)
 		if ok {
-			if !pool.Stale() {
+			if !pool.Stale() && pool.MaxConn() == connsize {
 				return pool, nil
 			} else {
+				ConnPoolMgr().logger.Infof("Removing pool %v. stale=%v, new size=%v, old size=%v", poolNameToCreate, pool.Stale(), connsize, pool.MaxConn())
 				connPoolMgr.removePool(pool)
 			}
 		} else {
@@ -558,11 +569,12 @@ func (connPoolMgr *connPoolMgr) GetOrCreateSSLOverProxyPool(poolNameToCreate str
 		size = DefaultConnectionSize
 	}
 	p := &sslOverProxyConnPool{
-		connPool: connPool{clients: make(chan *mcc.Client, connsize),
+		connPool: connPool{clients: make(chan *mcc.Client, size),
 			hostName:   hostname,
 			userName:   username,
 			password:   password,
 			bucketName: bucketname,
+			maxConn:    size,
 			name:       poolNameToCreate,
 			lock:       &sync.RWMutex{},
 			state_lock: &sync.RWMutex{},
@@ -575,7 +587,7 @@ func (connPoolMgr *connPoolMgr) GetOrCreateSSLOverProxyPool(poolNameToCreate str
 	p.init()
 	connPoolMgr.conn_pools_map[poolNameToCreate] = p
 
-	go connPoolMgr.fillPool(p, connsize)
+	go connPoolMgr.fillPool(p, size)
 	return p, err
 
 }
