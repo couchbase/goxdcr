@@ -51,10 +51,13 @@ func GetMemcachedSSLPort(hostName, username, password, bucket string, logger *lo
 
 		hostname, ok := nodeExtMap[base.HostNameKey]
 		if !ok {
-			// hostname being nil indicates that hostname is localhost
-			// this is possible when running tests against local machine
-			logger.Infof("hostname is missing from nodeExtMap %v. using localhost\n", nodeExtMap)
-			hostname = base.LocalHostName
+			if len(nodesExtArray) == 1 {
+				logger.Infof("hostname is missing from nodeExtMap %v. target cluster consists of a single node, %v. Just use that node.\n", nodeExtMap, hostName)
+				hostname = GetHostName(hostName)
+			} else {
+				logger.Infof("hostname is missing from nodeExtMap %v. target cluster has multiple nodes. This is possible only in local test env where hostname is set to localhost. Use localhost.\n", nodeExtMap)
+				hostname = base.LocalHostName
+			}
 		}
 		hostnameStr, ok := hostname.(string)
 		if !ok {
