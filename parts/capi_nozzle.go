@@ -25,6 +25,8 @@ import (
 	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/goxdcr/simple_utils"
 	"github.com/couchbase/goxdcr/utils"
+	"io"
+	"io/ioutil"
 	"net"
 	"net/http"
 	"reflect"
@@ -194,6 +196,9 @@ type CapiNozzle struct {
 	handle_error     bool
 	dataObj_recycler base.DataObjRecycler
 	topic            string
+
+	// buffer to hold http responses from target
+	res_buf []byte
 }
 
 func NewCapiNozzle(id string,
@@ -961,16 +966,15 @@ func (capi *CapiNozzle) tcpProxy(vbno uint16, part_ch chan []byte, resp_ch chan 
 				capi.Logger().Debugf("tcpProxy routine starting to receive response since all body parts have been sent\n", capi.Id())
 
 				// read response
-				res_buf := make([]byte, 300)
 				capi.client.SetReadDeadline(time.Now().Add(capi.config.readTimeout))
-				num_bytes, err := capi.client.Read(res_buf)
-				capi.Logger().Debugf("read result err=%v, num_bytes=%v, res_buf=%v\n", err, num_bytes, string(res_buf))
+				num_bytes, err := capi.client.Read(capi.res_buf)
+				capi.Logger().Debugf("read result err=%v, num_bytes=%v\n", err, num_bytes)
 				if err != nil {
 					err_ch <- err
 					return
 				}
 
-				if num_bytes == len(MalformedOK) && string(res_buf[:num_bytes]) == MalformedOK {
+				if num_bytes == len(MalformedOK) && string(capi.res_buf[:num_bytes]) == MalformedOK {
 					// oocasionally batchUpdateDocs receive MalformedOK {{ok:true}) instead of
 					// a well formed http response
 					// when this happens, reset the connection to ensure that subsequent writes have a clean start
@@ -984,14 +988,42 @@ func (capi *CapiNozzle) tcpProxy(vbno uint16, part_ch chan []byte, resp_ch chan 
 					return
 				}
 
-				buffer := bytes.NewBuffer(res_buf)
+				buffer := bytes.NewBuffer(capi.res_buf[:num_bytes])
 				response, err := http.ReadResponse(bufio.NewReader(buffer), nil)
 
 				if err != nil {
-					errMsg := MalformedResponseError + fmt.Sprintf(" vb=%v. err=%v, num_bytes=%v, res_buf={%v}\n", vbno, err, num_bytes, string(res_buf[:num_bytes]))
+					errMsg := MalformedResponseError + fmt.Sprintf(" vb=%v. err=%v, num_bytes=%v, res_buf={%v}\n", vbno, err, num_bytes, string(capi.res_buf[:num_bytes]))
 					capi.Logger().Error(errMsg)
 					err_ch <- errors.New(errMsg)
+
+					capi.resetConn()
 					return
+				}
+
+				// check if we get all the response body
+				defer response.Body.Close()
+				contents, err := ioutil.ReadAll(response.Body)
+
+				// if the response body is shorter than content length in response header, there is more to come from target
+				// use ReadFull API to ensure that we get all the response bytes
+				// we do not really need these bytes. just need to ensure that these bytes won't mess up the reading of the next response
+				if int64(len(contents)) < response.ContentLength {
+					len_remaining_bytes := response.ContentLength - int64(len(contents))
+					if len_remaining_bytes > int64(len(capi.res_buf)) {
+						// in the unlikely event that capi.res_buf is not big enough, re-allocate a bigger buffer
+						capi.Logger().Infof("%v allocating a new response buffer with size %v\n", capi.Id(), len_remaining_bytes)
+						capi.res_buf = make([]byte, len_remaining_bytes)
+					}
+
+					_, err = io.ReadFull(capi.client, capi.res_buf[:len_remaining_bytes])
+					if err != nil {
+						errMsg := MalformedResponseError + fmt.Sprintf(" vb=%v. err=%v\n", vbno, err)
+						capi.Logger().Error(errMsg)
+						err_ch <- errors.New(errMsg)
+
+						capi.resetConn()
+						return
+					}
 				}
 
 				capi.Logger().Debugf("http response =%v\n", response)
@@ -999,7 +1031,6 @@ func (capi *CapiNozzle) tcpProxy(vbno uint16, part_ch chan []byte, resp_ch chan 
 				if response.StatusCode != 201 {
 					err_ch <- errors.New(fmt.Sprintf("receieved unexpected status code, %v, from update docs request for vb %v\n", response.StatusCode, vbno))
 				} else {
-
 					// notify caller that write succeeded
 					resp_ch <- true
 				}
@@ -1081,6 +1112,10 @@ func (capi *CapiNozzle) initialize(settings map[string]interface{}) error {
 	}
 
 	capi.checker_finch = make(chan bool, 1)
+
+	// make the buffer big enough to hold responses.
+	// in the worse case, there is an entry (of roughly 60 bytes) for each mutation in the batch
+	capi.res_buf = make([]byte, capi.config.maxCount*70+300)
 
 	capi.Logger().Debug("About to start initializing connection")
 	if err == nil {
