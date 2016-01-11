@@ -455,6 +455,58 @@ func (result ObserveResult) CheckPersistence(cas uint64, deletion bool) (persist
 	return
 }
 
+// Sequence number based Observe Implementation
+type ObserveSeqResult struct {
+	Failover           uint8  // Set to 1 if a failover took place
+	VbId               uint16 // vbucket id
+	Vbuuid             uint64 // vucket uuid
+	LastPersistedSeqNo uint64 // last persisted sequence number
+	CurrentSeqNo       uint64 // current sequence number
+	OldVbuuid          uint64 // Old bucket vbuuid
+	LastSeqNo          uint64 // last sequence number received before failover
+}
+
+func (c *Client) ObserveSeq(vb uint16, vbuuid uint64) (result *ObserveSeqResult, err error) {
+	// http://www.couchbase.com/wiki/display/couchbase/Observe
+	body := make([]byte, 8)
+	binary.BigEndian.PutUint64(body[0:8], vbuuid)
+
+	res, err := c.Send(&gomemcached.MCRequest{
+		Opcode:  gomemcached.OBSERVE_SEQNO,
+		VBucket: vb,
+		Body:    body,
+		Opaque:  0x01,
+	})
+	if err != nil {
+		return
+	}
+
+	if res.Status != gomemcached.SUCCESS {
+		return nil, fmt.Errorf(" Observe returned error %v", res.Status)
+	}
+
+	// Parse the response data from the body:
+	if len(res.Body) < (1 + 2 + 8 + 8 + 8) {
+		err = io.ErrUnexpectedEOF
+		return
+	}
+
+	result = &ObserveSeqResult{}
+	result.Failover = res.Body[0]
+	result.VbId = binary.BigEndian.Uint16(res.Body[1:3])
+	result.Vbuuid = binary.BigEndian.Uint64(res.Body[3:11])
+	result.LastPersistedSeqNo = binary.BigEndian.Uint64(res.Body[11:19])
+	result.CurrentSeqNo = binary.BigEndian.Uint64(res.Body[19:27])
+
+	// in case of failover processing we can have old vbuuid and the last persisted seq number
+	if result.Failover == 1 && len(res.Body) >= (1+2+8+8+8+8+8) {
+		result.OldVbuuid = binary.BigEndian.Uint64(res.Body[27:35])
+		result.LastSeqNo = binary.BigEndian.Uint64(res.Body[35:43])
+	}
+
+	return
+}
+
 // CasOp is the type of operation to perform on this CAS loop.
 type CasOp uint8
 

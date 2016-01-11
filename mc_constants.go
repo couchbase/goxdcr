@@ -87,7 +87,8 @@ const (
 
 	SELECT_BUCKET = CommandCode(0x89) // Select bucket
 
-	OBSERVE = CommandCode(0x92)
+	OBSERVE_SEQNO = CommandCode(0x91) // Sequence Number based Observe
+	OBSERVE       = CommandCode(0x92)
 
 	GET_META = CommandCode(0xA0) // Get meta. returns with expiry, flags, cas etc
 
