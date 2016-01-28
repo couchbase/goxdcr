@@ -91,11 +91,48 @@ func LocalPool(localConnectStr string) (couchbase.Pool, error) {
 
 func RemotePool(remoteConnectStr string, remoteUsername string, remotePassword string) (couchbase.Pool, error) {
 	remoteURL := fmt.Sprintf("http://%s:%s@%s", url.QueryEscape(remoteUsername), url.QueryEscape(remotePassword), remoteConnectStr)
-	client, err := couchbase.Connect(remoteURL)
+	client, err := RemoteClient(remoteURL)
 	if err != nil {
 		return couchbase.Pool{}, NewEnhancedError(fmt.Sprintf("Error connecting to couchbase. url=%v", UrlForLog(remoteURL)), err)
 	}
 	return client.GetPool("default")
+}
+
+// call to remoteURL may never return, e.g., in case of network parition,
+// wrap it with timeout to ensure that it will not block forever
+func RemoteClient(remoteURL string) (couchbase.Client, error) {
+	clientObj, err := simple_utils.ExecWithTimeout2(remoteClient, remoteURL, base.DefaultHttpTimeout, logger_utils)
+	if clientObj != nil {
+		return clientObj.(couchbase.Client), err
+	} else {
+		var client couchbase.Client
+		return client, err
+	}
+}
+
+// an auxiliary function that conforms to simple_utils.action2 interface
+// so that it can be called by simple_utils.ExecWithTimeout2
+func remoteClient(remoteURLObj interface{}) (interface{}, error) {
+	remoteURL := remoteURLObj.(string)
+	return couchbase.Connect(remoteURL)
+}
+
+// call to remoteURL may never return, e.g., in case of network parition,
+// wrap it with timeout to ensure that it will not block forever
+func RemoteBucketList(remoteURL string) ([]couchbase.BucketInfo, error) {
+	bucketInfosObj, err := simple_utils.ExecWithTimeout2(remoteBucketList, remoteURL, base.DefaultHttpTimeout, logger_utils)
+	if bucketInfosObj != nil {
+		return bucketInfosObj.([]couchbase.BucketInfo), err
+	} else {
+		return nil, err
+	}
+}
+
+// an auxiliary function that conforms to simple_utils.action2 interface
+// so that it can be called by simple_utils.ExecWithTimeout2
+func remoteBucketList(remoteURLObj interface{}) (interface{}, error) {
+	remoteURL := remoteURLObj.(string)
+	return couchbase.GetBucketList(remoteURL)
 }
 
 // Get bucket in local cluster
@@ -125,7 +162,7 @@ func RemoteBucket(remoteConnectStr, bucketName, remoteUsername, remotePassword s
 	}
 
 	remoteURL := fmt.Sprintf("http://%s:%s@%s", url.QueryEscape(remoteUsername), url.QueryEscape(remotePassword), remoteConnectStr)
-	bucketInfos, err := couchbase.GetBucketList(remoteURL)
+	bucketInfos, err := RemoteBucketList(remoteURL)
 	if err != nil {
 		return nil, NewEnhancedError("Error getting bucketlist with url:"+UrlForLog(remoteURL), err)
 	}
@@ -136,11 +173,11 @@ func RemoteBucket(remoteConnectStr, bucketName, remoteUsername, remotePassword s
 			password = bucketInfo.Password
 		}
 	}
-	couch, err := couchbase.Connect("http://" + url.QueryEscape(remoteUsername) + ":" + url.QueryEscape(remotePassword) + "@" + remoteConnectStr)
+	client, err := RemoteClient("http://" + url.QueryEscape(remoteUsername) + ":" + url.QueryEscape(remotePassword) + "@" + remoteConnectStr)
 	if err != nil {
 		return nil, NewEnhancedError(fmt.Sprintf("Error connecting to couchbase. bucketName=%v; remoteConnectStr=%v", bucketName, remoteConnectStr), err)
 	}
-	pool, err := couch.GetPool("default")
+	pool, err := client.GetPool("default")
 	if err != nil {
 		return nil, NewEnhancedError("Error getting pool with name 'default'.", err)
 	}

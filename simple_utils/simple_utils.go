@@ -30,13 +30,13 @@ func (te *ExecutionTimeoutError) Error() string {
 var ErrorNoSourceKV = errors.New("Invalid configuration. No source kv node is found.")
 
 type Action func() error
+type Action2 func(input interface{}) (interface{}, error)
 
 func ExecWithTimeout(action Action, timeout_duration time.Duration, logger *log.CommonLogger) error {
 	ret := make(chan error, 1)
 	go func(finch chan error) {
-		logger.Info("About to call function")
 		err1 := action()
-		ret <- err1
+		finch <- err1
 	}(ret)
 
 	var retErr error
@@ -45,16 +45,46 @@ func ExecWithTimeout(action Action, timeout_duration time.Duration, logger *log.
 	for {
 		select {
 		case retErr = <-ret:
-			logger.Infof("Finish executing %v\n", action)
 			return retErr
 		case <-timeoutticker.C:
 			retErr = &ExecutionTimeoutError{}
-			logger.Infof("Executing %v timed out", action)
+			logger.Infof("Executing Action timed out")
 			logger.Info("****************************")
 			return retErr
 		}
 	}
 
+}
+
+func ExecWithTimeout2(action Action2, input interface{}, timeout_duration time.Duration, logger *log.CommonLogger) (interface{}, error) {
+	ret := make(chan interface{}, 1)
+	go func(finch chan interface{}) {
+		output, err := action(input)
+		outputs := []interface{}{output, err}
+		finch <- outputs
+	}(ret)
+
+	var output interface{}
+	var errObj interface{}
+	timeoutticker := time.NewTicker(timeout_duration)
+	defer timeoutticker.Stop()
+	for {
+		select {
+		case outputs := <-ret:
+			output = outputs.([]interface{})[0]
+			errObj = outputs.([]interface{})[1]
+			if errObj != nil {
+				return output, errObj.(error)
+			} else {
+				return output, nil
+			}
+		case <-timeoutticker.C:
+			err := &ExecutionTimeoutError{}
+			logger.Info("Executing Action2 timed out")
+			logger.Info("****************************")
+			return nil, err
+		}
+	}
 }
 
 func GetVbListFromKvVbMap(kv_vb_map map[string][]uint16) []uint16 {
