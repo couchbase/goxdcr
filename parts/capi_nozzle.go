@@ -489,7 +489,7 @@ func (capi *CapiNozzle) send_internal(batch *capiBatch) error {
 	if batch != nil {
 		count := batch.count()
 
-		capi.Logger().Infof("Send batch count=%d\n", count)
+		capi.Logger().Infof("Send batch count=%d for vb %v\n", count, batch.vbno)
 
 		capi.counter_sent = capi.counter_sent + count
 		capi.Logger().Debugf("So far, capi %v processed %d items", capi.Id(), capi.counter_sent)
@@ -1065,11 +1065,11 @@ func (capi *CapiNozzle) initialize(settings map[string]interface{}) error {
 
 	capi.vb_dataChan_map = make(map[uint16]chan *base.WrappedMCRequest)
 	for vbno, _ := range capi.config.vbCouchApiBaseMap {
-		capi.vb_dataChan_map[vbno] = make(chan *base.WrappedMCRequest, capi.config.maxCount*100)
+		capi.vb_dataChan_map[vbno] = make(chan *base.WrappedMCRequest, capi.config.maxCount*5)
 	}
 	capi.items_in_dataChan = 0
 	capi.bytes_in_dataChan = 0
-	capi.batches_ready = make(chan *capiBatch, 1024)
+	capi.batches_ready = make(chan *capiBatch, len(capi.config.vbCouchApiBaseMap)*10)
 
 	//enable send
 	//	capi.send_allow_ch <- true
