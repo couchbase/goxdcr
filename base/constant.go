@@ -85,6 +85,11 @@ var AdminportWriteTimeout = 180 * time.Second
 // default time out for outgoing http requests if it is not explicitly specified
 var DefaultHttpTimeout = 180 * time.Second
 
+// short timeout
+// when we need to make a rest call when processing a XDCR rest request, the time out of the second rest call needs
+// to be shorter than that of the first one, which is currently 30 seconds.
+var ShortHttpTimeout = 20 * time.Second
+
 //outgoing nozzle type
 type XDCROutgoingNozzleType int
 

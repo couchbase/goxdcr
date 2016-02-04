@@ -438,7 +438,7 @@ func (service *RemoteClusterService) validateRemoteCluster(ref *metadata.RemoteC
 	}
 
 	startTime := time.Now()
-	err, statusCode, _ := utils.InvokeRestWithRetryWithAuth(hostAddr, base.PoolsPath, false, ref.UserName, ref.Password, ref.Certificate, false, base.MethodGet, "", nil, 0, &poolsInfo, nil, false, service.logger, base.HTTP_RETRIES)
+	err, statusCode := utils.QueryRestApiWithAuth(hostAddr, base.PoolsPath, false, ref.UserName, ref.Password, ref.Certificate, base.MethodGet, "", nil, base.ShortHttpTimeout, &poolsInfo, nil, false, service.logger)
 	service.logger.Infof("Result from validate remote cluster call: err=%v, statusCode=%v. time taken=%v\n", err, statusCode, time.Since(startTime))
 	if err != nil || statusCode != http.StatusOK {
 		if statusCode == http.StatusUnauthorized {
