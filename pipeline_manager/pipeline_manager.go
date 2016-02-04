@@ -171,7 +171,9 @@ func LogStatusSummary() {
 func AllReplicationsForBucket(bucket string) []string {
 	var repIds []string
 	for _, key := range pipeline_mgr.topics() {
-		if metadata.IsReplicationIdForSourceBucket(key, bucket) {
+		// there should not be any errors since topics() should return valid replication ids
+		match, _ := metadata.IsReplicationIdForSourceBucket(key, bucket)
+		if match {
 			repIds = append(repIds, key)
 		}
 	}

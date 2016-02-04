@@ -155,24 +155,6 @@ func (adminport *Adminport) handleRequest(
 	}
 	logger_ap.Debugf("MessageKey=%v\n", key)
 
-	// authentication
-	//TODO: authAdminCreds sometimes take a long time to return
-	//for now, skip authentication for pools/default/replicationInfos because it is called a lot
-	if key != AllReplicationInfosPath+base.UrlDelimiter+base.MethodGet && key != MemStatsPath+base.UrlDelimiter+base.MethodGet {
-		if key != base.RemoteClustersPath+base.UrlDelimiter+base.MethodGet {
-			// most APIs require admin credentials
-			err = authAdminCreds(request, false)
-		} else {
-			// getRemoteClusters() requires only read only admin credential
-			err = authAdminCreds(request, true)
-		}
-	}
-
-	if err != nil {
-		return EncodeErrorMessageIntoResponse(err, http.StatusUnauthorized)
-	}
-	logger_ap.Debug("Authenticated....")
-
 	switch key {
 	case base.RemoteClustersPath + base.UrlDelimiter + base.MethodGet:
 		response, err = adminport.doGetRemoteClustersRequest(request)
@@ -228,6 +210,11 @@ func (adminport *Adminport) handleRequest(
 func (adminport *Adminport) doGetRemoteClustersRequest(request *http.Request) (*ap.Response, error) {
 	logger_ap.Debugf("doGetRemoteClustersRequest\n")
 
+	response, err := authWebCreds(request, base.PermissionRemoteClusterRead)
+	if response != nil || err != nil {
+		return response, err
+	}
+
 	remoteClusters, err := RemoteClusterService().RemoteClusters(false)
 	if err != nil {
 		return nil, err
@@ -239,6 +226,11 @@ func (adminport *Adminport) doGetRemoteClustersRequest(request *http.Request) (*
 func (adminport *Adminport) doCreateRemoteClusterRequest(request *http.Request) (*ap.Response, error) {
 	logger_ap.Infof("doCreateRemoteClusterRequest\n")
 	defer logger_ap.Infof("Finished doCreateRemoteClusterRequest\n")
+
+	response, err := authWebCreds(request, base.PermissionRemoteClusterWrite)
+	if response != nil || err != nil {
+		return response, err
+	}
 
 	remoteClusterService := RemoteClusterService()
 
@@ -271,6 +263,12 @@ func (adminport *Adminport) doCreateRemoteClusterRequest(request *http.Request) 
 func (adminport *Adminport) doChangeRemoteClusterRequest(request *http.Request) (*ap.Response, error) {
 	logger_ap.Infof("doChangeRemoteClusterRequest\n")
 	defer logger_ap.Infof("Finished doChangeRemoteClusterRequest\n")
+
+	response, err := authWebCreds(request, base.PermissionRemoteClusterWrite)
+	if response != nil || err != nil {
+		return response, err
+	}
+
 	remoteClusterName, err := DecodeDynamicParamInURL(request, base.RemoteClustersPath, "Remote Cluster Name")
 	if err != nil {
 		return EncodeRemoteClusterValidationErrorIntoResponse(err)
@@ -309,6 +307,12 @@ func (adminport *Adminport) doChangeRemoteClusterRequest(request *http.Request) 
 func (adminport *Adminport) doDeleteRemoteClusterRequest(request *http.Request) (*ap.Response, error) {
 	logger_ap.Infof("doDeleteRemoteClusterRequest\n")
 	defer logger_ap.Infof("Finished doDeleteRemoteClusterRequest\n")
+
+	response, err := authWebCreds(request, base.PermissionRemoteClusterWrite)
+	if response != nil || err != nil {
+		return response, err
+	}
+
 	remoteClusterName, err := DecodeDynamicParamInURL(request, base.RemoteClustersPath, "Remote Cluster Name")
 	if err != nil {
 		return EncodeRemoteClusterValidationErrorIntoResponse(err)
@@ -351,6 +355,11 @@ func (adminport *Adminport) doDeleteRemoteClusterRequest(request *http.Request) 
 func (adminport *Adminport) doGetAllReplicationsRequest(request *http.Request) (*ap.Response, error) {
 	logger_ap.Debugf("doGetAllReplicationsRequest\n")
 
+	response, err := authWebCreds(request, base.PermissionXDCRInternalRead)
+	if response != nil || err != nil {
+		return response, err
+	}
+
 	replIds := pipeline_manager.AllReplications()
 	replSpecs := make(map[string]*metadata.ReplicationSpecification)
 	for _, replId := range replIds {
@@ -362,6 +371,12 @@ func (adminport *Adminport) doGetAllReplicationsRequest(request *http.Request) (
 
 func (adminport *Adminport) doGetAllReplicationInfosRequest(request *http.Request) (*ap.Response, error) {
 	logger_ap.Debugf("doGetAllReplicationInfosRequest\n")
+
+	response, err := authWebCreds(request, base.PermissionXDCRInternalRead)
+	if response != nil || err != nil {
+		return response, err
+	}
+
 	replInfos, err := GetReplicationInfos()
 	if err != nil {
 		return nil, err
@@ -379,6 +394,11 @@ func (adminport *Adminport) doCreateReplicationRequest(request *http.Request) (*
 	} else if len(errorsMap) > 0 {
 		logger_ap.Errorf("Validation error in inputs. errorsMap=%v\n", errorsMap)
 		return EncodeErrorsMapIntoResponse(errorsMap, true)
+	}
+
+	response, err := authWebCreds(request, constructBucketPermission(fromBucket, base.PermissionBucketXDCRWriteSuffix))
+	if response != nil || err != nil {
+		return response, err
 	}
 
 	logger_ap.Infof("Request parameters: justValidate=%v, fromBucket=%v, toCluster=%v, toBucket=%v, settings=%v\n",
@@ -405,7 +425,12 @@ func (adminport *Adminport) doDeleteReplicationRequest(request *http.Request) (*
 		return EncodeReplicationValidationErrorIntoResponse(err)
 	}
 
-	logger_ap.Debugf("Request params: replicationId=%v\n", replicationId)
+	logger_ap.Infof("Request params: replicationId=%v\n", replicationId)
+
+	response, err := authWebCredsForReplication(request, replicationId, []string{base.PermissionBucketXDCRWriteSuffix})
+	if response != nil || err != nil {
+		return response, err
+	}
 
 	err = DeleteReplication(replicationId, getRealUserIdFromRequest(request))
 
@@ -418,6 +443,11 @@ func (adminport *Adminport) doDeleteReplicationRequest(request *http.Request) (*
 
 func (adminport *Adminport) doViewInternalSettingsRequest(request *http.Request) (*ap.Response, error) {
 	logger_ap.Infof("doViewInternalSettingsRequest\n")
+
+	response, err := authWebCreds(request, base.PermissionXDCRSettingsRead)
+	if response != nil || err != nil {
+		return response, err
+	}
 
 	// default replication setting
 	defaultSettings, err := ReplicationSettingsService().GetDefaultReplicationSettings()
@@ -439,6 +469,11 @@ func (adminport *Adminport) doViewInternalSettingsRequest(request *http.Request)
 func (adminport *Adminport) doChangeInternalSettingsRequest(request *http.Request) (*ap.Response, error) {
 	logger_ap.Infof("doChangeInternalSettingsRequest\n")
 
+	response, err := authWebCreds(request, base.PermissionXDCRSettingsWrite)
+	if response != nil || err != nil {
+		return response, err
+	}
+
 	settingsMap, errorsMap := DecodeSettingsFromInternalSettingsRequest(request)
 	if len(errorsMap) > 0 {
 		logger_ap.Errorf("Validation error in inputs. errorsMap=%v\n", errorsMap)
@@ -447,7 +482,7 @@ func (adminport *Adminport) doChangeInternalSettingsRequest(request *http.Reques
 
 	logger_ap.Infof("Request params: inputSettings=%v\n", settingsMap)
 
-	errorsMap, err := UpdateDefaultSettings(settingsMap, getRealUserIdFromRequest(request))
+	errorsMap, err = UpdateDefaultSettings(settingsMap, getRealUserIdFromRequest(request))
 	if err != nil {
 		return nil, err
 	} else if len(errorsMap) > 0 {
@@ -460,6 +495,11 @@ func (adminport *Adminport) doChangeInternalSettingsRequest(request *http.Reques
 
 func (adminport *Adminport) doViewDefaultReplicationSettingsRequest(request *http.Request) (*ap.Response, error) {
 	logger_ap.Infof("doViewDefaultReplicationSettingsRequest\n")
+
+	response, err := authWebCreds(request, base.PermissionXDCRSettingsRead)
+	if response != nil || err != nil {
+		return response, err
+	}
 
 	defaultSettings, err := ReplicationSettingsService().GetDefaultReplicationSettings()
 	if err != nil {
@@ -477,6 +517,11 @@ func (adminport *Adminport) doViewDefaultReplicationSettingsRequest(request *htt
 
 func (adminport *Adminport) doChangeDefaultReplicationSettingsRequest(request *http.Request) (*ap.Response, error) {
 	logger_ap.Infof("doChangeDefaultReplicationSettingsRequest\n")
+
+	response, err := authWebCreds(request, base.PermissionXDCRSettingsWrite)
+	if response != nil || err != nil {
+		return response, err
+	}
 
 	justValidate, settingsMap, errorsMap := DecodeChangeReplicationSettings(request, true)
 	if len(errorsMap) > 0 {
@@ -521,7 +566,12 @@ func (adminport *Adminport) doViewReplicationSettingsRequest(request *http.Reque
 		return EncodeReplicationValidationErrorIntoResponse(err)
 	}
 
-	logger_ap.Debugf("Request params: replicationId=%v", replicationId)
+	logger_ap.Infof("Request params: replicationId=%v", replicationId)
+
+	response, err := authWebCredsForReplication(request, replicationId, []string{base.PermissionBucketXDCRReadSuffix})
+	if response != nil || err != nil {
+		return response, err
+	}
 
 	// read replication spec with the specified replication id
 	replSpec, err := ReplicationSpecService().ReplicationSpec(replicationId)
@@ -551,6 +601,25 @@ func (adminport *Adminport) doChangeReplicationSettingsRequest(request *http.Req
 
 	logger_ap.Infof("Request params: justValidate=%v, inputSettings=%v\n", justValidate, settingsMap)
 
+	// "pauseRequested" setting is special - it requires execute permission
+	_, pauseRequestedSpecified := settingsMap[metadata.Active]
+	// all other settings require write permission
+	otherSettingsSpecified := (!pauseRequestedSpecified && len(settingsMap) > 0) || (pauseRequestedSpecified && len(settingsMap) > 1)
+	permissionSuffices := make([]string, 0)
+	if pauseRequestedSpecified {
+		permissionSuffices = append(permissionSuffices, base.PermissionBucketXDCRExecuteSuffix)
+	}
+	// the "!pauseRequestedSpecified" clause is to ensure that write permission is checked when no settings have been specified,
+	// just to be safe
+	if otherSettingsSpecified || !pauseRequestedSpecified {
+		permissionSuffices = append(permissionSuffices, base.PermissionBucketXDCRWriteSuffix)
+	}
+
+	response, err := authWebCredsForReplication(request, replicationId, permissionSuffices)
+	if response != nil || err != nil {
+		return response, err
+	}
+
 	if justValidate {
 		return NewEmptyArrayResponse()
 	}
@@ -576,6 +645,11 @@ func (adminport *Adminport) doChangeReplicationSettingsRequest(request *http.Req
 func (adminport *Adminport) doGetStatisticsRequest(request *http.Request) (*ap.Response, error) {
 	logger_ap.Debugf("doGetStatisticsRequest\n")
 
+	response, err := authWebCreds(request, base.PermissionXDCRInternalRead)
+	if response != nil || err != nil {
+		return response, err
+	}
+
 	//pass the request to get the bucket name
 	bucket, err := DecodeDynamicParamInURL(request, StatisticsPrefix, "Bucket Name")
 	if err != nil {
@@ -595,6 +669,12 @@ func (adminport *Adminport) doGetStatisticsRequest(request *http.Request) (*ap.R
 
 func (adminport *Adminport) doMemStatsRequest(request *http.Request) (*ap.Response, error) {
 	logger_ap.Debugf("doMemStatsRequest\n")
+
+	response, err := authWebCreds(request, base.PermissionXDCRInternalRead)
+	if response != nil || err != nil {
+		return response, err
+	}
+
 	stats := new(runtime.MemStats)
 	runtime.ReadMemStats(stats)
 	bytes, _ := json.Marshal(stats)
@@ -641,32 +721,98 @@ func (adminport *Adminport) GetMessageKeyFromRequest(r *http.Request) (string, e
 	}
 }
 
-// returns error if credentials in request are not admin/read only admin
-func authAdminCreds(request *http.Request, readOnly bool) error {
-	// authentication
+func authenticateRequest(request *http.Request) (cbauth.Creds, error) {
 	var err error
-	var isAdmin bool
 	creds, err := cbauth.AuthWebCreds(request)
 	if err != nil {
-		return err
-	}
-	logger_ap.Debugf("creds user = %v\n", creds.Name())
-
-	if readOnly {
-		isAdmin, err = creds.IsROAdmin()
-
-	} else {
-		isAdmin, err = creds.IsAdmin()
+		logger_ap.Errorf("Error authenticating request. request=%v\n err= %v\n", request, err)
+		return nil, err
 	}
 
-	logger_ap.Debugf("done with authentication")
+	logger_ap.Debugf("request url=%v, creds user = %v\n", request.URL, creds.Name())
+	return creds, nil
+}
+
+func authorizeRequest(creds cbauth.Creds, permission string) (bool, error) {
+	allowed, err := creds.IsAllowed(permission)
 	if err != nil {
-		return err
+		logger_ap.Errorf("Error occured when checking for permission %v for creds %v. err=%v\n", permission, creds.Name(), err)
 	}
-	if !isAdmin {
-		return errors.New("Unauthorized")
+
+	return allowed, err
+}
+
+// returns error if credentials in request do not have the specified permission
+func authWebCreds(request *http.Request, permission string) (*ap.Response, error) {
+	creds, err := authenticateRequest(request)
+
+	if err != nil {
+		if err == cbauth.ErrNoAuth {
+			return EncodeErrorMessageIntoResponse(err, http.StatusUnauthorized)
+		} else {
+			return nil, err
+		}
 	}
-	return nil
+
+	allowed, err := authorizeRequest(creds, permission)
+	if err != nil {
+		return nil, err
+	}
+	if !allowed {
+		return EncodeAuthorizationErrorMessageIntoResponse(permission)
+	}
+
+	return nil, nil
+}
+
+// returns error if credentials in request do not have all of the specified permissions
+func authWebCredsForReplication(request *http.Request, replicationId string, permissionSuffices []string) (*ap.Response, error) {
+	creds, err := authenticateRequest(request)
+
+	if err != nil {
+		if err == cbauth.ErrNoAuth {
+			return EncodeErrorMessageIntoResponse(err, http.StatusUnauthorized)
+		} else {
+			return nil, err
+		}
+	}
+
+	sourceBucket, err := metadata.GetSourceBucketNameFromReplicationId(replicationId)
+	if err != nil {
+		return EncodeReplicationValidationErrorIntoResponse(err)
+	}
+
+	permissions := make([]string, 0)
+	for _, permissionSuffix := range permissionSuffices {
+		permission := constructBucketPermission(sourceBucket, permissionSuffix)
+		permissions = append(permissions, permission)
+	}
+
+	allowed := true
+	for _, permission := range permissions {
+		allowed, err = authorizeRequest(creds, permission)
+		if err != nil {
+			return nil, err
+		}
+		if !allowed {
+			break
+		}
+	}
+
+	if !allowed {
+		if len(permissions) == 1 {
+			return EncodeAuthorizationErrorMessageIntoResponse(permissions[0])
+		} else {
+			return EncodeAuthorizationErrorMessageIntoResponse2(permissions)
+		}
+	}
+
+	// "nil, nil" is the only return value that would let caller proceed
+	return nil, nil
+}
+
+func constructBucketPermission(bucketName, suffix string) string {
+	return base.PermissionBucketPrefix + bucketName + suffix
 }
 
 func writeRemoteClusterAuditEvent(eventId uint32, remoteClusterRef *metadata.RemoteClusterReference, realUserId *base.RealUserId) {
@@ -698,6 +844,11 @@ func (adminport *Adminport) IsReadyForHeartBeat() bool {
 func (adminport *Adminport) doRegexpValidationRequest(request *http.Request) (*ap.Response, error) {
 	logger_ap.Infof("doRegexpValidationRequest\n")
 
+	response, err := authWebCreds(request, base.PermissionXDCRInternalRead)
+	if response != nil || err != nil {
+		return response, err
+	}
+
 	expression, keys, err := DecodeRegexpValidationRequest(request)
 	if err != nil {
 		return EncodeErrorMessageIntoResponse(err, http.StatusBadRequest)
@@ -716,7 +867,11 @@ func (adminport *Adminport) doRegexpValidationRequest(request *http.Request) (*a
 }
 
 func (adminport *Adminport) doStartBlockProfile(request *http.Request) (*ap.Response, error) {
-	var err error = nil
+	response, err := authWebCreds(request, base.PermissionXDCRInternalWrite)
+	if response != nil || err != nil {
+		return response, err
+	}
+
 	block_profile_rate := 1000
 	err = request.ParseForm()
 	if err != nil {
@@ -741,6 +896,11 @@ func (adminport *Adminport) doStartBlockProfile(request *http.Request) (*ap.Resp
 }
 
 func (adminport *Adminport) doStopBlockProfile(request *http.Request) (*ap.Response, error) {
+	response, err := authWebCreds(request, base.PermissionXDCRInternalWrite)
+	if response != nil || err != nil {
+		return response, err
+	}
+
 	runtime.SetBlockProfileRate(-1)
 	logger_ap.Info("doStopBlockProfile")
 	return NewEmptyArrayResponse()

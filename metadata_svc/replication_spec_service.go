@@ -382,7 +382,9 @@ func (service *ReplicationSpecService) AllReplicationSpecIdsForBucket(bucket str
 
 	if allRepIds != nil {
 		for _, repId := range allRepIds {
-			if metadata.IsReplicationIdForSourceBucket(repId, bucket) {
+			// there should not be any errors since allRepIds should contain valid replication ids
+			match, _ := metadata.IsReplicationIdForSourceBucket(repId, bucket)
+			if match {
 				repIds = append(repIds, repId)
 			}
 		}

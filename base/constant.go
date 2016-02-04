@@ -282,3 +282,17 @@ var ExtendedMetadataVersion = 1
 
 // id of conflict resolution mode in extended metadata
 var ConflictResolutionModeId = 2
+
+// permissions for RBAC
+const (
+	PermissionRemoteClusterRead       = "cluster.xdcr.remote_clusters!read"
+	PermissionRemoteClusterWrite      = "cluster.xdcr.remote_clusters!write"
+	PermissionXDCRSettingsRead        = "cluster.xdcr.settings!read"
+	PermissionXDCRSettingsWrite       = "cluster.xdcr.settings!write"
+	PermissionBucketPrefix            = "cluster.bucket["
+	PermissionBucketXDCRReadSuffix    = "].xdcr!read"
+	PermissionBucketXDCRWriteSuffix   = "].xdcr!write"
+	PermissionBucketXDCRExecuteSuffix = "].xdcr!execute"
+	PermissionXDCRInternalRead = "cluster.admin.internal.xdcr!read"
+	PermissionXDCRInternalWrite = "cluster.admin.internal.xdcr!write"
+)

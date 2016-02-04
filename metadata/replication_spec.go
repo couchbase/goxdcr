@@ -10,6 +10,7 @@
 package metadata
 
 import (
+	"fmt"
 	"github.com/couchbase/goxdcr/base"
 	"reflect"
 	"strings"
@@ -81,12 +82,20 @@ func ReplicationId(sourceBucketName string, targetClusterUUID string, targetBuck
 	return strings.Join(parts, base.KeyPartsDelimiter)
 }
 
-func IsReplicationIdForSourceBucket(replicationId string, sourceBucketName string) bool {
-	parts := strings.Split(replicationId, base.KeyPartsDelimiter)
-
-	if parts[1] == sourceBucketName {
-		return true
+func IsReplicationIdForSourceBucket(replicationId string, sourceBucketName string) (bool, error) {
+	replBucketName, err := GetSourceBucketNameFromReplicationId(replicationId)
+	if err != nil {
+		return false, err
 	} else {
-		return false
+		return replBucketName == sourceBucketName, nil
+	}
+}
+
+func GetSourceBucketNameFromReplicationId(replicationId string) (string, error) {
+	parts := strings.Split(replicationId, base.KeyPartsDelimiter)
+	if len(parts) == 3 {
+		return parts[1], nil
+	} else {
+		return "", fmt.Errorf("Invalid replication id: %v", replicationId)
 	}
 }

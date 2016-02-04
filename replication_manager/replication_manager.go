@@ -819,7 +819,8 @@ func writeUpdateDefaultReplicationSettingsEvent(changedSettingsMap *map[string]i
 func writeUpdateReplicationSettingsEvent(spec *metadata.ReplicationSpecification, changedSettingsMap *map[string]interface{}, realUserId *base.RealUserId) {
 	replicationSpecificFields, err := constructReplicationSpecificFieldsFromSpec(spec)
 	if err == nil {
-		updateDefaultReplicationSettingsEvent, err := constructUpdateDefaultReplicationSettingsEvent(changedSettingsMap, realUserId)
+		var updateDefaultReplicationSettingsEvent *base.UpdateDefaultReplicationSettingsEvent
+		updateDefaultReplicationSettingsEvent, err = constructUpdateDefaultReplicationSettingsEvent(changedSettingsMap, realUserId)
 		if err == nil {
 			updateReplicationSettingsEvent := &base.UpdateReplicationSettingsEvent{
 				ReplicationSpecificFields:             *replicationSpecificFields,

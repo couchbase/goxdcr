@@ -810,6 +810,21 @@ func EncodeObjectIntoResponseWithStatusCode(object interface{}, statusCode int) 
 	return EncodeByteArrayIntoResponseWithStatusCode(body, statusCode)
 }
 
+func EncodeAuthorizationErrorMessageIntoResponse(permission string) (*ap.Response, error) {
+	msgMap := make(map[string]interface{})
+	// use the same error message as that produced by ns_server
+	msgMap["message"] = "Forbidden. User needs one of the following permissions"
+	msgMap["permissions"] = []string{permission}
+	return EncodeObjectIntoResponseWithStatusCode(msgMap, http.StatusForbidden)
+}
+
+func EncodeAuthorizationErrorMessageIntoResponse2(permissions []string) (*ap.Response, error) {
+	msgMap := make(map[string]interface{})
+	msgMap["message"] = "Forbidden. User needs all of the following permissions"
+	msgMap["permissions"] = permissions
+	return EncodeObjectIntoResponseWithStatusCode(msgMap, http.StatusForbidden)
+}
+
 // Remote cluster related errors can be internal server error or less servere invalid/unknown remote cluster errors,
 // return different Response for them
 func EncodeRemoteClusterErrorIntoResponse(err error) (*ap.Response, error) {
