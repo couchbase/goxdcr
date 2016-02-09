@@ -803,7 +803,10 @@ func (capi *CapiNozzle) batchUpdateDocsWithRetry(vbno uint16, req_list *[]*base.
 				retriedMalformedResponse = true
 			}
 			// reset connection to ensure a clean start
-			capi.resetConn()
+			err = capi.resetConn()
+			if err != nil {
+				return err
+			}
 			num_of_retry++
 			time.Sleep(capi.config.retryInterval)
 			capi.Logger().Infof("Retrying update docs for vb %v for the %vth time\n", vbno, num_of_retry)
@@ -816,8 +819,6 @@ func (capi *CapiNozzle) batchUpdateDocsWithRetry(vbno uint16, req_list *[]*base.
 
 func (capi *CapiNozzle) batchUpdateDocs(vbno uint16, req_list *[]*base.WrappedMCRequest) (err error) {
 	capi.Logger().Debugf("batchUpdateDocs, vbno=%v, len(req_list)=%v\n", vbno, len(*req_list))
-
-	//capi.resetConn()
 
 	couchApiBaseHost, couchApiBasePath, err := capi.getCouchApiBaseHostAndPathForVB(vbno)
 	if err != nil {
@@ -980,7 +981,11 @@ func (capi *CapiNozzle) tcpProxy(vbno uint16, part_ch chan []byte, resp_ch chan 
 					// a well formed http response
 					// when this happens, reset the connection to ensure that subsequent writes have a clean start
 					// the previous update should have succeeded. there is no need to retry
-					capi.resetConn()
+					err = capi.resetConn()
+					if err != nil {
+						err_ch <- err
+						return
+					}
 					resp_ch <- true
 					return
 				}
@@ -1000,10 +1005,6 @@ func (capi *CapiNozzle) tcpProxy(vbno uint16, part_ch chan []byte, resp_ch chan 
 				if response.StatusCode != 201 {
 					err_ch <- errors.New(fmt.Sprintf("receieved unexpected status code, %v, from update docs request for vb %v\n", response.StatusCode, vbno))
 				} else {
-					// It should not be necessary to reset connections when request succeeds. However,
-					// "broken pipe" error was often received after a while when connections are shared
-					// between requests. Resetting the connection for now. May need to look for a better way.
-					//capi.resetConn()
 
 					// notify caller that write succeeded
 					resp_ch <- true
@@ -1174,7 +1175,7 @@ func (capi *CapiNozzle) resetConn() error {
 		capi.Logger().Debugf("%v - The connection for capi client is reset successfully\n", capi.Id())
 		return nil
 	} else {
-		capi.Logger().Errorf("%v - Connection reset failed\n", capi.Id())
+		capi.Logger().Errorf("%v - Connection reset failed. err=%v\n", capi.Id(), err)
 		capi.handleGeneralError(err)
 		return err
 	}
