@@ -157,6 +157,13 @@ func (c *Client) Del(vb uint16, key string) (*gomemcached.MCResponse, error) {
 		Key:     []byte(key)})
 }
 
+// Get a random document
+func (c *Client) GetRandomDoc() (*gomemcached.MCResponse, error) {
+	return c.Send(&gomemcached.MCRequest{
+        Opcode: 0xB6,
+	})
+}
+
 // AuthList lists SASL auth mechanisms.
 func (c *Client) AuthList() (*gomemcached.MCResponse, error) {
 	return c.Send(&gomemcached.MCRequest{
