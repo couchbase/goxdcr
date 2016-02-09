@@ -486,7 +486,6 @@ func (config *xmemConfig) initializeConfig(settings map[string]interface{}) erro
 /* struct xmemClient
 *************************************/
 var badConnectionError = errors.New("Connection is bad")
-var connectionTimeoutReachLimitError = errors.New("Retry limit has been reached for this connection")
 var connectionClosedError = errors.New("Connection is closed")
 var fatalError = errors.New("Fatal")
 
@@ -633,12 +632,6 @@ func (client *xmemClient) markConnUnhealthy() {
 }
 
 func (client *xmemClient) close() {
-	if client.isConnHealthy() {
-		pool := base.ConnPoolMgr().GetPool(client.poolName)
-		if pool != nil {
-			pool.Release(client.memClient)
-		}
-	}
 	client.memClient.Close()
 }
 
@@ -1319,7 +1312,7 @@ func (xmem *XmemNozzle) batchGetMeta(bigDoc_map map[string]*base.WrappedMCReques
 				if err != nil {
 					if err == PartStoppedError {
 						return
-					} else if err == badConnectionError || err == connectionTimeoutReachLimitError || err == connectionClosedError || err == fatalError {
+					} else if err == badConnectionError || err == connectionClosedError || err == fatalError {
 						xmem.repairConn(xmem.client_for_getMeta, err.Error(), rev)
 					}
 
