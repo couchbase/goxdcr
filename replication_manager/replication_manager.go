@@ -16,6 +16,7 @@ import (
 	"errors"
 	"expvar"
 	"fmt"
+	mcc "github.com/couchbase/gomemcached/client"
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/common"
 	"github.com/couchbase/goxdcr/factory"
@@ -215,6 +216,9 @@ func (rm *replicationManager) checkReplicationStatus(fin_chan chan bool) {
 	stats_update_ticker := time.NewTicker(StatsUpdateIntervalForPausedReplications)
 	defer stats_update_ticker.Stop()
 
+	kv_mem_clients := make(map[string]*mcc.Client)
+	kv_mem_client_error_count := make(map[string]int)
+
 	for {
 		select {
 		case <-fin_chan:
@@ -222,7 +226,7 @@ func (rm *replicationManager) checkReplicationStatus(fin_chan chan bool) {
 		case <-status_check_ticker.C:
 			pipeline_manager.CheckPipelines()
 		case <-stats_update_ticker.C:
-			pipeline_svc.UpdateStats(ClusterInfoService(), XDCRCompTopologyService(), CheckpointService(), logger_rm)
+			pipeline_svc.UpdateStats(ClusterInfoService(), XDCRCompTopologyService(), CheckpointService(), kv_mem_clients, kv_mem_client_error_count, logger_rm)
 		}
 	}
 }
