@@ -463,3 +463,22 @@ func GetSettingFromSettings(settings map[string]interface{}, settingName string)
 
 	return setting
 }
+
+func GetMemcachedClient(serverAddr, bucketName string, kv_mem_clients map[string]*mcc.Client, logger *log.CommonLogger) (*mcc.Client, error) {
+	client, ok := kv_mem_clients[serverAddr]
+	if ok {
+		return client, nil
+	} else {
+		if bucketName == "" {
+			panic("unexpected empty bucketName")
+		}
+
+		var client, err = GetMemcachedConnection(serverAddr, bucketName, logger)
+		if err == nil {
+			kv_mem_clients[serverAddr] = client
+			return client, nil
+		} else {
+			return nil, err
+		}
+	}
+}

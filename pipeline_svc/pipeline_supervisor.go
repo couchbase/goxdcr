@@ -12,6 +12,7 @@ package pipeline_svc
 import (
 	"errors"
 	"fmt"
+	mcc "github.com/couchbase/gomemcached/client"
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/common"
 	"github.com/couchbase/goxdcr/log"
@@ -36,8 +37,10 @@ const (
 )
 
 const (
-	default_health_check_interval = 10 * time.Second
-	default_max_dcp_miss_count    = 3
+	health_check_interval      = 120 * time.Second
+	default_max_dcp_miss_count = 3
+	// memcached client will be reset if it encounters consecutive errors
+	max_mem_client_error_count = 3
 )
 
 var pipeline_supervisor_setting_defs base.SettingDefinitions = base.SettingDefinitions{supervisor.HEARTBEAT_TIMEOUT: base.NewSettingDef(reflect.TypeOf((*time.Duration)(nil)), false),
@@ -51,6 +54,11 @@ type PipelineSupervisor struct {
 
 	cluster_info_svc  service_def.ClusterInfoSvc
 	xdcr_topology_svc service_def.XDCRCompTopologySvc
+
+	// memcached clients for dcp health check
+	kv_mem_clients map[string]*mcc.Client
+	// stores error count of memcached clients
+	kv_mem_client_error_count map[string]int
 }
 
 func NewPipelineSupervisor(id string, logger_ctx *log.LoggerContext, failure_handler common.SupervisorFailureHandler,
@@ -58,9 +66,11 @@ func NewPipelineSupervisor(id string, logger_ctx *log.LoggerContext, failure_han
 	xdcr_topology_svc service_def.XDCRCompTopologySvc) *PipelineSupervisor {
 	supervisor := supervisor.NewGenericSupervisor(id, logger_ctx, failure_handler, parentSupervisor)
 	pipelineSupervisor := &PipelineSupervisor{GenericSupervisor: supervisor,
-		errors_seen:       make(map[string]error),
-		cluster_info_svc:  cluster_info_svc,
-		xdcr_topology_svc: xdcr_topology_svc}
+		errors_seen:               make(map[string]error),
+		cluster_info_svc:          cluster_info_svc,
+		xdcr_topology_svc:         xdcr_topology_svc,
+		kv_mem_clients:            make(map[string]*mcc.Client),
+		kv_mem_client_error_count: make(map[string]int)}
 	return pipelineSupervisor
 }
 
@@ -102,7 +112,7 @@ func (pipelineSupervisor *PipelineSupervisor) Start(settings map[string]interfac
 	// before we declare the pipeline to be broken
 	var max_dcp_miss_count int
 	stats_update_interval := StatsUpdateInterval(settings)
-	number_of_waits_to_ensure_stats_update := int(stats_update_interval.Nanoseconds()/default_health_check_interval.Nanoseconds()) + 1
+	number_of_waits_to_ensure_stats_update := int(stats_update_interval.Nanoseconds()/health_check_interval.Nanoseconds()) + 1
 	if number_of_waits_to_ensure_stats_update < default_max_dcp_miss_count {
 		max_dcp_miss_count = default_max_dcp_miss_count
 	} else {
@@ -131,7 +141,7 @@ func (pipelineSupervisor *PipelineSupervisor) monitorPipelineHealth() error {
 
 	defer pipelineSupervisor.GenericSupervisor.ChidrenWaitGroup().Done()
 
-	health_check_ticker := time.NewTicker(default_health_check_interval)
+	health_check_ticker := time.NewTicker(health_check_interval)
 	defer health_check_ticker.Stop()
 
 	fin_ch := pipelineSupervisor.GenericSupervisor.FinishChannel()
@@ -253,7 +263,7 @@ func (pipelineSupervisor *PipelineSupervisor) checkPipelineHealth() error {
 	}
 
 	for _, dcp_nozzle := range pipelineSupervisor.pipeline.Sources() {
-		err = dcp_nozzle.(*parts.DcpNozzle).CheckDcpHealth(dcp_stats)
+		err = dcp_nozzle.(*parts.DcpNozzle).CheckStuckness(dcp_stats)
 		if err != nil {
 			//declare pipeline broken
 			pipelineSupervisor.errors_seen[dcp_nozzle.Id()] = err
@@ -266,12 +276,42 @@ func (pipelineSupervisor *PipelineSupervisor) checkPipelineHealth() error {
 }
 
 func (pipelineSupervisor *PipelineSupervisor) getDcpStats() (map[string]map[string]string, error) {
-	bucket_name := pipelineSupervisor.pipeline.Specification().SourceBucketName
-	bucket, err := pipelineSupervisor.cluster_info_svc.GetBucket(pipelineSupervisor.xdcr_topology_svc, bucket_name)
+	dcp_stats := make(map[string]map[string]string)
+
+	bucketName := pipelineSupervisor.pipeline.Specification().SourceBucketName
+	nodes, err := pipelineSupervisor.xdcr_topology_svc.MyKVNodes()
 	if err != nil {
+		pipelineSupervisor.Logger().Errorf("Error retrieving kv nodes for pipeline %v. Skipping dcp stats check. err=%v", pipelineSupervisor.pipeline.Topic(), err)
 		return nil, err
 	}
-	defer bucket.Close()
 
-	return bucket.GetStats(base.DCP_STAT_NAME), nil
+	for _, serverAddr := range nodes {
+		client, err := utils.GetMemcachedClient(serverAddr, bucketName, pipelineSupervisor.kv_mem_clients, pipelineSupervisor.Logger())
+		if err != nil {
+			return nil, err
+		}
+
+		stats_map, err := client.StatsMap(base.DCP_STAT_NAME)
+		if err != nil {
+			pipelineSupervisor.Logger().Infof("Error getting dcp stats for kv %v. err=%v", serverAddr, err)
+			// increment the error count of the client. retire the client if it has failed too many times
+			err_count, ok := pipelineSupervisor.kv_mem_client_error_count[serverAddr]
+			if !ok {
+				err_count = 1
+			} else {
+				err_count++
+			}
+			if err_count > max_mem_client_error_count {
+				delete(pipelineSupervisor.kv_mem_clients, serverAddr)
+				pipelineSupervisor.kv_mem_client_error_count[serverAddr] = 0
+			} else {
+				pipelineSupervisor.kv_mem_client_error_count[serverAddr] = err_count
+			}
+			return nil, err
+		} else {
+			dcp_stats[serverAddr] = stats_map
+		}
+	}
+
+	return dcp_stats, nil
 }

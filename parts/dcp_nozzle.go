@@ -20,6 +20,7 @@ import (
 	gen_server "github.com/couchbase/goxdcr/gen_server"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/service_def"
+	"github.com/couchbase/goxdcr/simple_utils"
 	"github.com/couchbase/goxdcr/utils"
 	"reflect"
 	"strconv"
@@ -45,6 +46,8 @@ const (
 	Dcp_Stream_Init    = iota
 	Dcp_Stream_Active  = iota
 )
+
+var dcp_inactive_stream_check_interval = 10 * time.Second
 
 var dcp_setting_defs base.SettingDefinitions = base.SettingDefinitions{DCP_VBTimestamp: base.NewSettingDef(reflect.TypeOf((*map[uint16]*base.VBTimestamp)(nil)), true)}
 
@@ -97,7 +100,7 @@ type DcpNozzle struct {
 	// the counter_received stats from last dcp check
 	counter_received_last uint32
 
-	// the number of health check intervals after which dcp still has inactive streams
+	// the number of check intervals after which dcp still has inactive streams
 	// inactive streams will be restarted after this count exceeds MaxCountStreamsInactive
 	counter_streams_inactive uint8
 
@@ -257,6 +260,7 @@ func (dcp *DcpNozzle) Start(settings map[string]interface{}) error {
 	}
 
 	//start datachan length stats collection
+	dcp.childrenWaitGrp.Add(1)
 	go dcp.collectDcpDataChanLen(settings)
 
 	dcp.uprFeed.StartFeedWithConfig(base.UprFeedDataChanLength)
@@ -266,7 +270,12 @@ func (dcp *DcpNozzle) Start(settings map[string]interface{}) error {
 	go dcp.processData()
 
 	// start vbstreams
+	dcp.childrenWaitGrp.Add(1)
 	go dcp.startUprStreams()
+
+	// check for inactive vbstreams
+	dcp.childrenWaitGrp.Add(1)
+	go dcp.checkInactiveUprStreams()
 
 	err = dcp.SetState(common.Part_Running)
 
@@ -469,7 +478,7 @@ func (dcp *DcpNozzle) onExit() {
 
 func (dcp *DcpNozzle) StatusSummary() string {
 	msg := fmt.Sprintf("Dcp %v received %v items, sent %v items.", dcp.Id(), dcp.counterReceived(), dcp.counterSent())
-	streams_inactive := dcp.inactiveDcpStreams()
+	streams_inactive := dcp.inactiveDcpStreamsWithState()
 	if len(streams_inactive) > 0 {
 		msg += fmt.Sprintf(" streams inactive: %v", streams_inactive)
 	}
@@ -494,6 +503,8 @@ func (dcp *DcpNozzle) handleVBError(vbno uint16, err error) {
 
 // start steam request will be sent when starting seqno is negotiated, it may take a few
 func (dcp *DcpNozzle) startUprStreams() error {
+	defer dcp.childrenWaitGrp.Done()
+
 	var err error = nil
 	dcp.Logger().Infof("%v: startUprStreams for %v...\n", dcp.Id(), dcp.GetVBList())
 
@@ -589,6 +600,18 @@ func (dcp *DcpNozzle) inactiveDcpStreams() []uint16 {
 	for vb, statusobj := range dcp.vb_stream_status {
 		if statusobj.state != Dcp_Stream_Active {
 			ret = append(ret, vb)
+		}
+	}
+	return ret
+}
+
+func (dcp *DcpNozzle) inactiveDcpStreamsWithState() map[uint16]DcpStreamState {
+	ret := make(map[uint16]DcpStreamState)
+	dcp.vb_stream_status_lock.RLock()
+	defer dcp.vb_stream_status_lock.RUnlock()
+	for vb, statusobj := range dcp.vb_stream_status {
+		if statusobj.state != Dcp_Stream_Active {
+			ret[vb] = statusobj.state
 		}
 	}
 	return ret
@@ -745,16 +768,31 @@ func (dcp *DcpNozzle) SetMaxMissCount(max_dcp_miss_count int) {
 	dcp.max_dcp_miss_count = max_dcp_miss_count
 }
 
-func (dcp *DcpNozzle) CheckDcpHealth(dcp_stats map[string]map[string]string) error {
-	err := dcp.checkInactiveStreams()
-	if err != nil {
-		return err
+func (dcp *DcpNozzle) checkInactiveUprStreams() {
+	defer dcp.childrenWaitGrp.Done()
+
+	fin_ch := dcp.finch
+
+	dcp_inactive_stream_check_ticker := time.NewTicker(dcp_inactive_stream_check_interval)
+	defer dcp_inactive_stream_check_ticker.Stop()
+
+	for {
+		select {
+		case <-fin_ch:
+			dcp.Logger().Infof("checkInactiveUprStreams routine is exiting because parent %v has been stopped\n", dcp.Id())
+			return
+		case <-dcp_inactive_stream_check_ticker.C:
+			err := simple_utils.ExecWithTimeout(dcp.checkInactiveUprStreams_once, 1000*time.Millisecond, dcp.Logger())
+			if err != nil {
+				// ignore error and continue
+				dcp.Logger().Infof("Received error when checking inactive steams for %v. err=%v\n", dcp.Id(), err)
+			}
+		}
 	}
-	return dcp.checkStuckness(dcp_stats)
 }
 
 // check if inactive streams need to be restarted
-func (dcp *DcpNozzle) checkInactiveStreams() error {
+func (dcp *DcpNozzle) checkInactiveUprStreams_once() error {
 	streams_inactive := dcp.initedButInactiveDcpStreams()
 	if len(streams_inactive) > 0 {
 		dcp.counter_streams_inactive++
@@ -763,7 +801,7 @@ func (dcp *DcpNozzle) checkInactiveStreams() error {
 			dcp.Logger().Infof("%v restarting inactive streams %v\n", dcp.Id(), streams_inactive)
 			opaque := newOpaque()
 			for _, vbno := range streams_inactive {
-				//ignore the error
+				//ignore any error
 				dcp.uprFeed.CloseStream(vbno, opaque)
 			}
 			err := dcp.startUprStreams_internal(streams_inactive)
@@ -777,7 +815,7 @@ func (dcp *DcpNozzle) checkInactiveStreams() error {
 }
 
 // check if dcp is stuck
-func (dcp *DcpNozzle) checkStuckness(dcp_stats map[string]map[string]string) error {
+func (dcp *DcpNozzle) CheckStuckness(dcp_stats map[string]map[string]string) error {
 	counter_received := dcp.counterReceived()
 	if counter_received > dcp.counter_received_last {
 		// dcp is ok if received more items from dcp
@@ -866,6 +904,7 @@ func (dcp *DcpNozzle) incCounterSent() {
 }
 
 func (dcp *DcpNozzle) collectDcpDataChanLen(settings map[string]interface{}) {
+	defer dcp.childrenWaitGrp.Done()
 	ticker := time.NewTicker(dcp.stats_interval)
 	defer ticker.Stop()
 	for {
