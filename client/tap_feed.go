@@ -5,10 +5,10 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
-	"log"
 	"math"
 
 	"github.com/couchbase/gomemcached"
+	"github.com/couchbase/goutils/logging"
 )
 
 // TAP protocol docs: <http://www.couchbase.com/wiki/display/couchbase/TAP+Protocol>
@@ -95,13 +95,13 @@ func makeTapEvent(req gomemcached.MCRequest) *TapEvent {
 		case gomemcached.TAP_OPAQUE_ENABLE_CHECKPOINT_SYNC:
 			return nil
 		default:
-			log.Printf("TapFeed: Ignoring TAP_OPAQUE/%d", op)
+			logging.Infof("TapFeed: Ignoring TAP_OPAQUE/%d", op)
 			return nil // unknown opaque event
 		}
 	case gomemcached.NOOP:
 		return nil // ignore
 	default:
-		log.Printf("TapFeed: Ignoring %s", req.Opcode)
+		logging.Infof("TapFeed: Ignoring %s", req.Opcode)
 		return nil // unknown event
 	}
 
@@ -279,7 +279,7 @@ loop:
 			break loop
 		}
 
-		//log.Printf("** TapFeed received %#v : %q", pkt, pkt.Body)
+		//logging.Infof("** TapFeed received %#v : %q", pkt, pkt.Body)
 
 		if pkt.Opcode == gomemcached.TAP_CONNECT {
 			// This is not an event from the server; it's
@@ -312,7 +312,7 @@ loop:
 		}
 	}
 	if err := mc.Close(); err != nil {
-		log.Printf("Error closing memcached client:  %v", err)
+		logging.Errorf("Error closing memcached client:  %v", err)
 	}
 }
 

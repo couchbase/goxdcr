@@ -4,11 +4,11 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"log"
 	"net"
 
 	"github.com/couchbase/gomemcached"
 	"github.com/couchbase/gomemcached/server"
+	"github.com/couchbase/goutils/logging"
 )
 
 var port = flag.Int("port", 11212, "Port on which to listen")
@@ -44,14 +44,14 @@ func waitForConnections(ls net.Listener) {
 	go RunServer(reqChannel)
 	handler := &reqHandler{reqChannel}
 
-	log.Printf("Listening on port %d", *port)
+	logging.Infof("Listening on port %d", *port)
 	for {
 		s, e := ls.Accept()
 		if e == nil {
-			log.Printf("Got a connection from %v", s.RemoteAddr())
+			logging.Infof("Got a connection from %v", s.RemoteAddr())
 			go connectionHandler(s, handler)
 		} else {
-			log.Printf("Error accepting from %s", ls)
+			logging.Errorf("Error accepting from %s", ls)
 		}
 	}
 }
@@ -60,7 +60,7 @@ func main() {
 	flag.Parse()
 	ls, e := net.Listen("tcp", fmt.Sprintf(":%d", *port))
 	if e != nil {
-		log.Fatalf("Got an error:  %s", e)
+		logging.Severef("Got an error:  %s", e)
 	}
 
 	waitForConnections(ls)

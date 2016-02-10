@@ -9,7 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/couchbase/gomemcached"
-	"log"
+	"github.com/couchbase/goutils/logging"
 	"strconv"
 	"sync"
 )
@@ -151,7 +151,7 @@ loop:
 		select {
 		case command := <-ch:
 			if err := mc.Transmit(command); err != nil {
-				log.Printf("Failed to transmit command %s. Error %s", command.Opcode.String(), err.Error())
+				logging.Errorf("Failed to transmit command %s. Error %s", command.Opcode.String(), err.Error())
 				break loop
 			}
 
@@ -326,7 +326,7 @@ func (feed *UprFeed) UprRequestStream(vbno, opaqueMSB uint16, flags uint32,
 	defer feed.mu.Unlock()
 
 	if err := feed.conn.Transmit(rq); err != nil {
-		log.Printf("Error in StreamRequest %s", err.Error())
+		logging.Errorf("Error in StreamRequest %s", err.Error())
 		return err
 	}
 
@@ -394,9 +394,9 @@ func handleStreamRequest(
 
 	switch {
 	case res.Status == gomemcached.ROLLBACK:
-		log.Printf("Rollback response. body=%v\n", res.Body)
+		logging.Infof("Rollback response. body=%v\n", res.Body)
 		rollback = binary.BigEndian.Uint64(res.Body)
-		log.Printf("Rollback %v for vb %v\n", rollback, res.Opaque)
+		logging.Infof("Rollback %v for vb %v\n", rollback, res.Opaque)
 		return res.Status, rollback, nil, nil
 
 	case res.Status != gomemcached.SUCCESS:
@@ -436,7 +436,7 @@ loop:
 		sendAck := false
 		bytes, err := pkt.Receive(mc, headerBuf[:])
 		if err != nil {
-			log.Printf("Error in receive %s", err.Error())
+			logging.Errorf("Error in receive %s", err.Error())
 			feed.Error = err
 			// send all the stream close messages to the client
 			feed.doStreamClose(ch)
@@ -463,7 +463,7 @@ loop:
 			switch pkt.Opcode {
 			case gomemcached.UPR_STREAMREQ:
 				if stream == nil {
-					log.Printf("Stream not found for vb %d: %#v", vb, pkt)
+					logging.Infof("Stream not found for vb %d: %#v", vb, pkt)
 					break loop
 				}
 				status, rb, flog, err := handleStreamRequest(res)
@@ -471,7 +471,7 @@ loop:
 					event = makeUprEvent(pkt, stream)
 					event.Status = status
 					// rollback stream
-					log.Printf("UPR_STREAMREQ with rollback %d for vb %d Failed: %v", rb, vb, err)
+					logging.Infof("UPR_STREAMREQ with rollback %d for vb %d Failed: %v", rb, vb, err)
 					// delete the stream from the vbmap for the feed
 					feed.mu.Lock()
 					delete(feed.vbstreams, vb)
@@ -483,10 +483,10 @@ loop:
 					event.FailoverLog = flog
 					event.Status = status
 					stream.connected = true
-					log.Printf("UPR_STREAMREQ for vb %d successful", vb)
+					logging.Infof("UPR_STREAMREQ for vb %d successful", vb)
 
 				} else if err != nil {
-					log.Printf("UPR_STREAMREQ for vbucket %d erro %s", vb, err.Error())
+					logging.Errorf("UPR_STREAMREQ for vbucket %d erro %s", vb, err.Error())
 					event = &UprEvent{
 						Opcode:  gomemcached.UPR_STREAMREQ,
 						Status:  status,
@@ -503,7 +503,7 @@ loop:
 				gomemcached.UPR_DELETION,
 				gomemcached.UPR_EXPIRATION:
 				if stream == nil {
-					log.Printf("Stream not found for vb %d: %#v", vb, pkt)
+					logging.Infof("Stream not found for vb %d: %#v", vb, pkt)
 					break loop
 				}
 				event = makeUprEvent(pkt, stream)
@@ -512,12 +512,12 @@ loop:
 
 			case gomemcached.UPR_STREAMEND:
 				if stream == nil {
-					log.Printf("Stream not found for vb %d: %#v", vb, pkt)
+					logging.Infof("Stream not found for vb %d: %#v", vb, pkt)
 					break loop
 				}
 				//stream has ended
 				event = makeUprEvent(pkt, stream)
-				log.Printf("Stream Ended for vb %d", vb)
+				logging.Infof("Stream Ended for vb %d", vb)
 				sendAck = true
 
 				feed.mu.Lock()
@@ -526,7 +526,7 @@ loop:
 
 			case gomemcached.UPR_SNAPSHOT:
 				if stream == nil {
-					log.Printf("Stream not found for vb %d: %#v", vb, pkt)
+					logging.Infof("Stream not found for vb %d: %#v", vb, pkt)
 					break loop
 				}
 				// snapshot marker
@@ -536,7 +536,7 @@ loop:
 
 			case gomemcached.UPR_FLUSH:
 				if stream == nil {
-					log.Printf("Stream not found for vb %d: %#v", vb, pkt)
+					logging.Infof("Stream not found for vb %d: %#v", vb, pkt)
 					break loop
 				}
 				// special processing for flush ?
@@ -544,12 +544,12 @@ loop:
 
 			case gomemcached.UPR_CLOSESTREAM:
 				if stream == nil {
-					log.Printf("Stream not found for vb %d: %#v", vb, pkt)
+					logging.Infof("Stream not found for vb %d: %#v", vb, pkt)
 					break loop
 				}
 				event = makeUprEvent(pkt, stream)
 				event.Opcode = gomemcached.UPR_STREAMEND // opcode re-write !!
-				log.Printf("Stream Closed for vb %d StreamEnd simulated", vb)
+				logging.Infof("Stream Closed for vb %d StreamEnd simulated", vb)
 				sendAck = true
 
 				feed.mu.Lock()
@@ -557,11 +557,11 @@ loop:
 				feed.mu.Unlock()
 
 			case gomemcached.UPR_ADDSTREAM:
-				log.Printf("Opcode %v not implemented", pkt.Opcode)
+				logging.Infof("Opcode %v not implemented", pkt.Opcode)
 
 			case gomemcached.UPR_CONTROL, gomemcached.UPR_BUFFERACK:
 				if res.Status != gomemcached.SUCCESS {
-					log.Printf("Opcode %v received status %d", pkt.Opcode.String(), res.Status)
+					logging.Infof("Opcode %v received status %d", pkt.Opcode.String(), res.Status)
 				}
 
 			case gomemcached.UPR_NOOP:
@@ -572,10 +572,10 @@ loop:
 				}
 
 				if _, err := noop.Transmit(mc); err != nil {
-					log.Printf("Warning, failed to transmit command %s. Error %s", noop.Opcode.String(), err.Error())
+					logging.Warnf("failed to transmit command %s. Error %s", noop.Opcode.String(), err.Error())
 				}
 			default:
-				log.Printf("Recived an unknown response for vbucket %d", vb)
+				logging.Infof("Recived an unknown response for vbucket %d", vb)
 			}
 		}
 
@@ -591,7 +591,7 @@ loop:
 			feed.mu.RUnlock()
 
 			if event.Opcode == gomemcached.UPR_CLOSESTREAM && l == 0 {
-				log.Printf("No more streams")
+				logging.Infof("No more streams")
 			}
 		}
 

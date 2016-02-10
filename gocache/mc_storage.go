@@ -3,7 +3,7 @@ package main
 import (
 	"encoding/binary"
 	"github.com/couchbase/gomemcached"
-	"log"
+	"github.com/couchbase/goutils/logging"
 )
 
 type storage struct {
@@ -26,7 +26,7 @@ func RunServer(input chan chanReq) {
 	s.data = make(map[string]gomemcached.MCItem)
 	for {
 		req := <-input
-		log.Printf("Got a request: %s", req.req)
+		logging.Infof("Got a request: %s", req.req)
 		req.res <- dispatch(req.req, &s)
 	}
 }
@@ -80,7 +80,7 @@ func handleFlush(req *gomemcached.MCRequest, s *storage) (ret *gomemcached.MCRes
 	ret = &gomemcached.MCResponse{}
 	delay := binary.BigEndian.Uint32(req.Extras)
 	if delay > 0 {
-		log.Printf("Delay not supported (got %d)", delay)
+		logging.Infof("Delay not supported (got %d)", delay)
 	}
 	s.data = make(map[string]gomemcached.MCItem)
 	return

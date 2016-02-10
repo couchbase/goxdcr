@@ -5,7 +5,6 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
-	"log"
 	"math"
 	"net"
 	"strings"
@@ -13,6 +12,7 @@ import (
 	"time"
 
 	"github.com/couchbase/gomemcached"
+	"github.com/couchbase/goutils/logging"
 )
 
 const bufsize = 1024
@@ -314,7 +314,7 @@ func (c *Client) GetBulk(vb uint16, keys []string) (map[string]*gomemcached.MCRe
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
-				log.Printf("Recovered in f %v", r)
+				logging.Infof("Recovered in f %v", r)
 			}
 			errch <- nil
 			wg.Done()
@@ -340,7 +340,7 @@ func (c *Client) GetBulk(vb uint16, keys []string) (map[string]*gomemcached.MCRe
 						// Every now and then we seem to be seeing an invalid opaque
 						// value returned from the server. When this happens log the error
 						// and the calling function will retry the bulkGet. MB-15140
-						log.Printf(" Invalid opaque Value. Debug info : Res.opaque : %v, Keys %v, Response received %v \n key list %v this key %v", res.Opaque, len(keys), res, keys, string(res.Body))
+						logging.Errorf(" Invalid opaque Value. Debug info : Res.opaque : %v, Keys %v, Response received %v \n key list %v this key %v", res.Opaque, len(keys), res, keys, string(res.Body))
 						errch <- fmt.Errorf("Out of Bounds error")
 						return
 					}
@@ -364,7 +364,7 @@ func (c *Client) GetBulk(vb uint16, keys []string) (map[string]*gomemcached.MCRe
 			Opaque:  uint32(i),
 		})
 		if err != nil {
-			log.Printf(" Transmit failed in GetBulk %v", err)
+			logging.Errorf(" Transmit failed in GetBulk %v", err)
 			return rv, err
 		}
 	}
@@ -375,7 +375,7 @@ func (c *Client) GetBulk(vb uint16, keys []string) (map[string]*gomemcached.MCRe
 	})
 
 	if err != nil {
-		log.Printf(" Transmit of NOOP failed  %v", err)
+		logging.Errorf(" Transmit of NOOP failed  %v", err)
 		return rv, err
 	}
 
