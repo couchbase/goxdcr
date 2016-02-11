@@ -1326,7 +1326,7 @@ func (xmem *XmemNozzle) batchGetMeta(bigDoc_map map[string]*base.WrappedMCReques
 					if !isNetTimeoutError(err) {
 						err_list = append(err_list, err)
 					} else {
-						logger.Errorf("%v Expected %v response, timedout, got %v", xmem.Id(), count, len(respMap))
+						logger.Errorf("%v Expected %v responses, timed out, got %v responses", xmem.Id(), count, len(respMap))
 						logger.Infof("Expected=%v, Received=%v\n", opaque_keySeqno_map, respMap)
 						return
 					}
