@@ -55,7 +55,7 @@ func CreateTestRemoteCluster(remote_cluster_service service_def.RemoteClusterSvc
 		return err
 	}
 
-	err = remote_cluster_service.AddRemoteCluster(remoteClusterRef)
+	err = remote_cluster_service.AddRemoteCluster(remoteClusterRef, false/*skipConnectivityValidation*/)
 	fmt.Printf("Added remote cluster reference with name=%v, remoteDemandEncryption=%v, err=%v\n", remoteName, remoteDemandEncryption != 0, err)
 	return err
 }

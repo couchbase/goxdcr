@@ -99,16 +99,23 @@ func NewMigrationSvc(xdcr_comp_topology_svc service_def.XDCRCompTopologySvc, rem
 func (service *MigrationSvc) Migrate() error {
 	data, err := service.readMetadataFromStdin()
 	if err != nil {
+		// this error is a fetal error and should have been logged prior
 		return err
 	}
 
-	errorList := service.migrate_internal(data)
-	if len(errorList) == 0 {
+	fetalErrorList, mildErrorList := service.migrate_internal(data)
+	if len(fetalErrorList) == 0 && len(mildErrorList) == 0 {
 		service.logger.Info("Metadata migration completed without errors")
 		return nil
+	} else if len(fetalErrorList) == 0 {
+		// print mild errors/warnings.
+		// Migration service will not be retried for these errors, since retrying most likely would not help
+		service.logger.Infof("Metadata migration completed with warnings. Some migrated metadata may be invalid. warnings = %v\n", mildErrorList)
+		return nil
 	} else {
-		service.logger.Errorf("Errors from migration: %v\n", errorList)
-		return errors.New("Error occured when migration metadata.")
+		// fetal errors will get migration service restarted
+		service.logger.Errorf("Metadata migration failed. fetalErrorList=%v, mildErrorList=%v\n", fetalErrorList, mildErrorList)
+		return fetalErrorList[0]
 	}
 }
 
@@ -122,7 +129,7 @@ func (service *MigrationSvc) readMetadataFromStdin() ([]byte, error) {
 	for {
 		line, err := reader.ReadBytes('\n')
 		if err != nil {
-			service.logger.Infof("Error reading metadata from stdin. err=%v\n", err)
+			service.logger.Errorf("Error reading metadata from stdin. err=%v\n", err)
 			return nil, err
 		}
 
@@ -135,30 +142,35 @@ func (service *MigrationSvc) readMetadataFromStdin() ([]byte, error) {
 	return dataBytes, nil
 }
 
-func (service *MigrationSvc) migrate_internal(data []byte) []error {
+func (service *MigrationSvc) migrate_internal(data []byte) ([]error, []error) {
 	service.logger.Info("Starting to migrate xdcr metadata")
 
-	errorList := make([]error, 0)
+	fetalErrorList := make([]error, 0)
+	mildErrorList := make([]error, 0)
 
 	if len(data) == 0 {
-		return errorList
+		return fetalErrorList, mildErrorList
 	}
 
 	dataObj := make(map[string]interface{})
 	err := json.Unmarshal(data, &dataObj)
 	if err != nil {
-		errorList = append(errorList, utils.NewEnhancedError(fmt.Sprintf("Error unmarshaling metadata"), err))
-		// fetal error. stop right away
-		return errorList
+		fetalErrorList = append(fetalErrorList, utils.NewEnhancedError(fmt.Sprintf("Error unmarshaling metadata"), err))
+		return fetalErrorList, mildErrorList
 	}
 
 	deletedRemoteClusterUuidList := make([]string, 0)
 	remoteClustersData, ok := dataObj[RemoteClustersKey]
 	if ok {
-		var indErrorList []error
-		deletedRemoteClusterUuidList, indErrorList = service.migrateRemoteClusters(remoteClustersData)
-		if len(indErrorList) != 0 {
-			errorList = append(errorList, indErrorList...)
+		var rcFetalErrorList []error
+		var rcMildErrorList []error
+		deletedRemoteClusterUuidList, rcFetalErrorList, rcMildErrorList = service.migrateRemoteClusters(remoteClustersData)
+		if len(rcMildErrorList) != 0 {
+			mildErrorList = append(mildErrorList, rcMildErrorList...)
+		}
+		if len(rcFetalErrorList) != 0 {
+			fetalErrorList = append(fetalErrorList, rcFetalErrorList...)
+			return fetalErrorList, mildErrorList
 		}
 	}
 
@@ -166,65 +178,80 @@ func (service *MigrationSvc) migrate_internal(data []byte) []error {
 	defaultMaxConcurrentReps := InvalidIntValue
 	replSettingsData, ok := dataObj[ReplicationSettingsKey]
 	if ok {
-		var indErrorList []error
-		defaultWorkerProcesses, defaultMaxConcurrentReps, indErrorList = service.migrateReplicationSettings(replSettingsData)
-		if len(indErrorList) != 0 {
-			errorList = append(errorList, indErrorList...)
-			// if any error has occured, the erlang default settings have not been saved
-			// do not proceed to migrate replications, since they may have incorrect settings
-			return errorList
+		var rsFetalErrorList []error
+		// The following errors may be returned from migrateReplicationSettings:
+		// 1. error reading a particular setting, e.g., because the value passed in from ns_server is of wrong data type
+		//    (1) it is highly unlikely. If it happens the data from ns_server is probably corrupted.
+		//    (2) it is not safe to migrate the setting in this case, e.g. by using some default value, since replications would
+		//    run "successfully" with wrong settings and customers may not know about it
+		// 2. error reading settings from or writing settings to metakv
+		// Treat all these errors as fetal
+		defaultWorkerProcesses, defaultMaxConcurrentReps, rsFetalErrorList = service.migrateReplicationSettings(replSettingsData)
+		if len(rsFetalErrorList) != 0 {
+			fetalErrorList = append(fetalErrorList, rsFetalErrorList...)
+			return fetalErrorList, mildErrorList
 		}
 	}
 
 	replDocsData, ok := dataObj[ReplicationDocsKey]
 	if ok {
-		indErrorList := service.migrateReplicationDocs(replDocsData, deletedRemoteClusterUuidList, defaultWorkerProcesses, defaultMaxConcurrentReps)
-		if len(indErrorList) != 0 {
-			errorList = append(errorList, indErrorList...)
+		rdFetalErrorList, rdMildErrorList := service.migrateReplicationDocs(replDocsData, deletedRemoteClusterUuidList, defaultWorkerProcesses, defaultMaxConcurrentReps)
+		if len(rdMildErrorList) != 0 {
+			mildErrorList = append(mildErrorList, rdMildErrorList...)
+		}
+		if len(rdFetalErrorList) != 0 {
+			fetalErrorList = append(fetalErrorList, rdFetalErrorList...)
+			return fetalErrorList, mildErrorList
 		}
 	}
 
-	return errorList
+	return fetalErrorList, mildErrorList
 }
 
-func (service *MigrationSvc) migrateRemoteClusters(remoteClustersData interface{}) ([]string, []error) {
+func (service *MigrationSvc) migrateRemoteClusters(remoteClustersData interface{}) ([]string, []error, []error) {
 	service.logger.Info("Starting to migrate remote clusters")
 
 	deletedRemoteClusterUuidList := make([]string, 0)
-	errorList := make([]error, 0)
+	fetalErrorList := make([]error, 0)
+	mildErrorList := make([]error, 0)
 
 	if remoteClustersData == nil {
-		return deletedRemoteClusterUuidList, errorList
+		return deletedRemoteClusterUuidList, fetalErrorList, mildErrorList
 	}
 
 	remoteClusterArr, ok := remoteClustersData.([]interface{})
 	if !ok {
 		err := incorrectMetadataValueTypeError(TypeRemoteCluster, remoteClustersData, "[]interface{}")
-		errorList = append(errorList, err)
-		return deletedRemoteClusterUuidList, errorList
+		fetalErrorList = append(fetalErrorList, err)
+		return deletedRemoteClusterUuidList, fetalErrorList, mildErrorList
 	}
 
 	for _, remoteClusterData := range remoteClusterArr {
-		var indErrorList []error
-		deletedRemoteClusterUuidList, indErrorList = service.migrateRemoteCluster(remoteClusterData, deletedRemoteClusterUuidList)
-		if len(indErrorList) != 0 {
-			errorList = append(errorList, indErrorList...)
+		var indFetalErrorList []error
+		var indMildErrorList []error
+		deletedRemoteClusterUuidList, indFetalErrorList, indMildErrorList = service.migrateRemoteCluster(remoteClusterData, deletedRemoteClusterUuidList)
+		if len(indMildErrorList) != 0 {
+			mildErrorList = append(mildErrorList, indMildErrorList...)
+		}
+		if len(indFetalErrorList) != 0 {
+			fetalErrorList = append(fetalErrorList, indFetalErrorList...)
+			return deletedRemoteClusterUuidList, fetalErrorList, mildErrorList
 		}
 	}
 
-	return deletedRemoteClusterUuidList, errorList
+	return deletedRemoteClusterUuidList, fetalErrorList, mildErrorList
 
 }
 
-func (service *MigrationSvc) migrateRemoteCluster(remoteClusterData interface{}, deletedRemoteClusterUuidList []string) ([]string, []error) {
-
-	errorList := make([]error, 0)
+func (service *MigrationSvc) migrateRemoteCluster(remoteClusterData interface{}, deletedRemoteClusterUuidList []string) ([]string, []error, []error) {
+	fetalErrorList := make([]error, 0)
+	mildErrorList := make([]error, 0)
 
 	remoteCluster, ok := remoteClusterData.(map[string]interface{})
 	if !ok {
 		err := incorrectMetadataValueTypeError(TypeRemoteCluster, remoteClusterData, "map[string]interface{}")
-		errorList = append(errorList, err)
-		return deletedRemoteClusterUuidList, errorList
+		fetalErrorList = append(fetalErrorList, err)
+		return deletedRemoteClusterUuidList, fetalErrorList, mildErrorList
 	}
 	service.logger.Info("Starting to migrate remote cluster")
 	service.logger.Infof("data=%v\n", sanitizeForLogging(remoteCluster))
@@ -240,20 +267,30 @@ func (service *MigrationSvc) migrateRemoteCluster(remoteClusterData interface{},
 
 	nameData, ok := remoteCluster[base.RemoteClusterName]
 	if ok {
-		name, errorList = getStringValue(base.RemoteClusterName, nameData, TypeRemoteCluster, errorList)
+		name, mildErrorList = getStringValue(base.RemoteClusterName, nameData, TypeRemoteCluster, mildErrorList)
 	} else {
-		errorList = append(errorList, missingRequiredFieldError(base.RemoteClusterName, TypeRemoteCluster, remoteCluster))
+		mildErrorList = append(mildErrorList, missingRequiredFieldError(base.RemoteClusterName, TypeRemoteCluster, sanitizeForLogging(remoteCluster)))
+	}
+
+	if name == "" {
+		// the "Name" attribute is especially critical since some remote cluster rest APIs do not work without it
+		// if we migrate the remote cluster reference, we will not be able to edit it or delete it
+		// in the unlikely event that Name is missing, skip the remote cluster reference
+		// in comparison, if other required fields are missing, we can still migrate the remote cluster reference
+		// and let users decide what to do with the migrated and invalid reference later
+		mildErrorList = append(mildErrorList, fmt.Errorf("Skipping migrating remote cluster %v since it does not have Name specified", sanitizeForLogging(remoteCluster)))
+		return deletedRemoteClusterUuidList, fetalErrorList, mildErrorList
 	}
 
 	uuidData, ok := remoteCluster[base.RemoteClusterUuid]
 	if ok {
-		uuid, errorList = getStringValue(base.RemoteClusterUuid, uuidData, TypeRemoteCluster, errorList)
+		uuid, mildErrorList = getStringValue(base.RemoteClusterUuid, uuidData, TypeRemoteCluster, mildErrorList)
 	} else {
-		errorList = append(errorList, missingRequiredFieldError(base.RemoteClusterUuid, TypeRemoteCluster, remoteCluster))
+		mildErrorList = append(mildErrorList, missingRequiredFieldError(base.RemoteClusterUuid, TypeRemoteCluster, sanitizeForLogging(remoteCluster)))
 	}
 
 	if deletedData, ok := remoteCluster[base.RemoteClusterDeleted]; ok {
-		deleted, errorList = getBoolValue(base.RemoteClusterDeleted, deletedData, TypeRemoteCluster, errorList)
+		deleted, mildErrorList = getBoolValue(base.RemoteClusterDeleted, deletedData, TypeRemoteCluster, mildErrorList)
 		if deleted {
 			// if the remote cluster has been deleted, do not save it and do not return any error
 			// instead, remember the cluster uuid, so that we can skip migrating the replications
@@ -262,29 +299,33 @@ func (service *MigrationSvc) migrateRemoteCluster(remoteClusterData interface{},
 			if uuid != "" {
 				deletedRemoteClusterUuidList = append(deletedRemoteClusterUuidList, uuid)
 			}
-			return deletedRemoteClusterUuidList, make([]error, 0)
+			// if skipping, return empty fetal error and mild error list
+			if len(mildErrorList) > 0 {
+				mildErrorList = make([]error, 0)
+			}
+			return deletedRemoteClusterUuidList, fetalErrorList, mildErrorList
 		}
 	}
 
 	hostnameData, ok := remoteCluster[base.RemoteClusterHostName]
 	if ok {
-		hostname, errorList = getStringValue(base.RemoteClusterHostName, hostnameData, TypeRemoteCluster, errorList)
+		hostname, mildErrorList = getStringValue(base.RemoteClusterHostName, hostnameData, TypeRemoteCluster, mildErrorList)
 	} else {
-		errorList = append(errorList, missingRequiredFieldError(base.RemoteClusterHostName, TypeRemoteCluster, remoteCluster))
+		mildErrorList = append(mildErrorList, missingRequiredFieldError(base.RemoteClusterHostName, TypeRemoteCluster, sanitizeForLogging(remoteCluster)))
 	}
 
 	usernameData, ok := remoteCluster[base.RemoteClusterUserName]
 	if ok {
-		username, errorList = getStringValue(base.RemoteClusterUserName, usernameData, TypeRemoteCluster, errorList)
+		username, mildErrorList = getStringValue(base.RemoteClusterUserName, usernameData, TypeRemoteCluster, mildErrorList)
 	} else {
-		errorList = append(errorList, missingRequiredFieldError(base.RemoteClusterUserName, TypeRemoteCluster, remoteCluster))
+		mildErrorList = append(mildErrorList, missingRequiredFieldError(base.RemoteClusterUserName, TypeRemoteCluster, sanitizeForLogging(remoteCluster)))
 	}
 
 	passwordData, ok := remoteCluster[base.RemoteClusterPassword]
 	if ok {
-		password, errorList = getStringValue(base.RemoteClusterPassword, passwordData, TypeRemoteCluster, errorList)
+		password, mildErrorList = getStringValue(base.RemoteClusterPassword, passwordData, TypeRemoteCluster, mildErrorList)
 	} else {
-		errorList = append(errorList, missingRequiredFieldError(base.RemoteClusterPassword, TypeRemoteCluster, remoteCluster))
+		mildErrorList = append(mildErrorList, missingRequiredFieldError(base.RemoteClusterPassword, TypeRemoteCluster, sanitizeForLogging(remoteCluster)))
 	}
 
 	if demandEncryptionData, ok := remoteCluster[base.RemoteClusterDemandEncryption]; ok {
@@ -292,23 +333,21 @@ func (service *MigrationSvc) migrateRemoteCluster(remoteClusterData interface{},
 	}
 	if certificateData, ok := remoteCluster[base.RemoteClusterCertificate]; ok {
 		var certificateStr string
-		certificateStr, errorList = getStringValue(base.RemoteClusterCertificate, certificateData, TypeRemoteCluster, errorList)
+		certificateStr, mildErrorList = getStringValue(base.RemoteClusterCertificate, certificateData, TypeRemoteCluster, mildErrorList)
 		certificate = []byte(certificateStr)
 	}
 
 	if demandEncryption && len(certificate) == 0 {
-		errorList = append(errorList, errors.New(fmt.Sprintf("Certificate of remote cluster is required when demandEncryption is enabled. data=%v", sanitizeForLogging(remoteCluster))))
+		mildErrorList = append(mildErrorList, errors.New(fmt.Sprintf("Certificate of remote cluster is required when demandEncryption is enabled. data=%v", sanitizeForLogging(remoteCluster))))
 	}
 
-	if len(errorList) != 0 {
-		return deletedRemoteClusterUuidList, errorList
-	}
-
-	// save remote cluster if there are no validation errors
+	// save remote cluster  - even if there are validation errors
 	ref, err := metadata.NewRemoteClusterReference(uuid, name, hostname, username, password, demandEncryption, certificate)
 	if err != nil {
-		errorList = append(errorList, err)
-		return deletedRemoteClusterUuidList, errorList
+		// err here comes from random number generation, which is promised to always be nil by golang
+		// handle it anyways
+		fetalErrorList = append(fetalErrorList, err)
+		return deletedRemoteClusterUuidList, fetalErrorList, mildErrorList
 	}
 
 	service.logger.Infof("Remote cluster constructed = %v\n", ref)
@@ -319,141 +358,156 @@ func (service *MigrationSvc) migrateRemoteCluster(remoteClusterData interface{},
 		service.logger.Infof("Deleted existing remote cluster with name=%v\n", name)
 	}
 
-	err = service.remote_cluster_svc.AddRemoteCluster(ref)
-	// may need to ignore keyAlreadyExist error here if migration is to be done in multiple nodes concurrently
+	// Since skipConnectivityValidation is set to true, errors are not returned in the following scenarios:
+	// 1. ref points to an invalid remote cluster  -- ref would still be migrated
+	// 2. ref has SSL specified and current cluster and remote cluster are not Enterprise -- ref would still
+	// be migrated and the error condition will be detected and handled at replication runtime
+	// The following errors can still be returned:
+	// 1. ref conflicts with other refs (e.g., having the same name, pointing to the same remote cluster).
+	//    this should not happen in practice since pre-4.x had the same validation to avoid these conflicts.
+	// 2. error writing to metakv service
+	// 3. error updating remote cluster service cache
+	// Let migration fail in these cases
+	err = service.remote_cluster_svc.AddRemoteCluster(ref, true /*skipConnectivityValidation*/)
 	if err != nil {
-		errorList = append(errorList, err)
+		fetalErrorList = append(fetalErrorList, err)
 	}
 
-	service.logger.Infof("Done with migrating remote cluster with name=%v. errorList=%v\n", name, errorList)
+	service.logger.Infof("Done with migrating remote cluster with name=%v. fetalErrorList=%v, mildErrorList=%v\n", name, fetalErrorList, mildErrorList)
 
-	return deletedRemoteClusterUuidList, errorList
+	return deletedRemoteClusterUuidList, fetalErrorList, mildErrorList
 }
 
 func (service *MigrationSvc) migrateReplicationSettings(replicationSettingsData interface{}) (int, int, []error) {
 	service.logger.Info("Starting to migrate default replication settings")
 	service.logger.Infof("data=%v\n", replicationSettingsData)
 
-	//var workerProcesses int
-	//var maxConcurrentReps int
-
-	errorList := make([]error, 0)
+	fetalErrorList := make([]error, 0)
 
 	if replicationSettingsData == nil {
-		return InvalidIntValue, InvalidIntValue, errorList
+		return SettingWorkerProcessesDefault, SettingMaxConcurrentRepsDefault, fetalErrorList
 	}
 
 	oldSettingsMap, ok := replicationSettingsData.(map[string]interface{})
 	if !ok {
 		err := incorrectMetadataValueTypeError(TypeReplicationSettings, replicationSettingsData, "map[string]interface{}")
-		errorList = append(errorList, err)
-		return InvalidIntValue, InvalidIntValue, errorList
+		fetalErrorList = append(fetalErrorList, err)
+		return InvalidIntValue, InvalidIntValue, fetalErrorList
 	}
 
-	settingsMap, errorList, workerProcesses, maxConcurrentReps := service.getGoxdcrSettingsMap(oldSettingsMap, errorList, SettingWorkerProcessesDefault, SettingMaxConcurrentRepsDefault)
+	settingsMap, fetalErrorList, workerProcesses, maxConcurrentReps := service.getGoxdcrSettingsMap(oldSettingsMap, fetalErrorList, SettingWorkerProcessesDefault, SettingMaxConcurrentRepsDefault)
 
-	if len(errorList) > 0 {
-		return InvalidIntValue, InvalidIntValue, errorList
+	if len(fetalErrorList) > 0 {
+		return InvalidIntValue, InvalidIntValue, fetalErrorList
 	}
 
 	defaultSettings, err := service.replication_settings_svc.GetDefaultReplicationSettings()
 	if err != nil {
-		errorList = append(errorList, err)
-		return InvalidIntValue, InvalidIntValue, errorList
+		fetalErrorList = append(fetalErrorList, err)
+		return InvalidIntValue, InvalidIntValue, fetalErrorList
 	}
 
 	changedSettingsMap, errorMap := defaultSettings.UpdateSettingsFromMap(settingsMap)
 
-	errorList = addErrorMapToErrorList(errorMap, errorList)
-	if len(errorList) > 0 {
-		return InvalidIntValue, InvalidIntValue, errorList
+	fetalErrorList = addErrorMapToErrorList(errorMap, fetalErrorList)
+	if len(fetalErrorList) > 0 {
+		return InvalidIntValue, InvalidIntValue, fetalErrorList
 	}
 
 	if len(changedSettingsMap) == 0 {
 		// no op if no real changes
-		return workerProcesses, maxConcurrentReps, errorList
+		return workerProcesses, maxConcurrentReps, fetalErrorList
 	}
 
 	err = service.replication_settings_svc.SetDefaultReplicationSettings(defaultSettings)
 	if err != nil {
-		errorList = append(errorList, err)
-		return InvalidIntValue, InvalidIntValue, errorList
+		fetalErrorList = append(fetalErrorList, err)
+		return InvalidIntValue, InvalidIntValue, fetalErrorList
 	}
 
-	service.logger.Infof("Done with migrating default replication settings. errorList=%v\n", errorList)
+	service.logger.Infof("Done with migrating default replication settings. fetalErrorList=%v\n", fetalErrorList)
 
-	return workerProcesses, maxConcurrentReps, errorList
+	return workerProcesses, maxConcurrentReps, fetalErrorList
 
 }
 
 func (service *MigrationSvc) migrateReplicationDocs(replicationDocsData interface{}, deletedRemoteClusterUuidList []string,
-	defaultWorkerProcesses, defaultMaxConcurrentReps int) []error {
+	defaultWorkerProcesses, defaultMaxConcurrentReps int) ([]error, []error) {
 	service.logger.Info("Starting to migrate replication docs")
 	service.logger.Infof("data=%v\n", replicationDocsData)
 
-	errorList := make([]error, 0)
+	fetalErrorList := make([]error, 0)
+	mildErrorList := make([]error, 0)
 
 	if replicationDocsData == nil {
-		return errorList
+		return fetalErrorList, mildErrorList
 	}
 
 	replicationDocArr, ok := replicationDocsData.([]interface{})
 	if !ok {
 		err := incorrectMetadataValueTypeError(TypeReplicationDoc, replicationDocsData, "[]interface{}")
-		errorList = append(errorList, err)
-		return errorList
+		fetalErrorList = append(fetalErrorList, err)
+		return fetalErrorList, mildErrorList
 	}
 
 	for _, replicationDocData := range replicationDocArr {
-		indErrorList := service.migrateReplicationDoc(replicationDocData, deletedRemoteClusterUuidList, defaultWorkerProcesses, defaultMaxConcurrentReps)
-		if len(indErrorList) != 0 {
-			errorList = append(errorList, indErrorList...)
+		indFetalErrorList, indMildErrorList := service.migrateReplicationDoc(replicationDocData, deletedRemoteClusterUuidList, defaultWorkerProcesses, defaultMaxConcurrentReps)
+		if len(indMildErrorList) != 0 {
+			mildErrorList = append(mildErrorList, indMildErrorList...)
+		}
+		if len(indFetalErrorList) != 0 {
+			fetalErrorList = append(fetalErrorList, indFetalErrorList...)
+			return fetalErrorList, mildErrorList
 		}
 	}
 
-	return errorList
+	return fetalErrorList, mildErrorList
 
 }
 
 func (service *MigrationSvc) migrateReplicationDoc(replicationDocData interface{}, deletedRemoteClusterUuidList []string,
-	defaultWorkerProcesses, defaultMaxConcurrentReps int) []error {
+	defaultWorkerProcesses, defaultMaxConcurrentReps int) ([]error, []error) {
 	service.logger.Info("Starting to migrate replication doc")
 	service.logger.Infof("data=%v\n", replicationDocData)
 
-	errorList := make([]error, 0)
+	fetalErrorList := make([]error, 0)
+	mildErrorList := make([]error, 0)
+	var err error
 
 	replicationDoc, ok := replicationDocData.(map[string]interface{})
 	if !ok {
-		err := incorrectMetadataValueTypeError(TypeRemoteCluster, replicationDocData, "map[string]interface{}")
-		errorList = append(errorList, err)
-		return errorList
+		err = incorrectMetadataValueTypeError(TypeRemoteCluster, replicationDocData, "map[string]interface{}")
+		fetalErrorList = append(fetalErrorList, err)
+		return fetalErrorList, mildErrorList
 	}
 
 	id := ""
 	sourceBucket := ""
+	sourceBucketUUID := ""
 	target := ""
-	targetClusterUuid := ""
 	targetBucket := ""
+	targetBucketUUID := ""
+	targetClusterUuid := ""
 
 	idData, ok := replicationDoc[base.ReplicationDocId]
 	if ok {
-		id, errorList = getStringValue(base.ReplicationDocId, idData, TypeReplicationDoc, errorList)
+		id, mildErrorList = getStringValue(base.ReplicationDocId, idData, TypeReplicationDoc, mildErrorList)
 	} else {
-		errorList = append(errorList, missingRequiredFieldError(base.ReplicationDocId, TypeReplicationDoc, replicationDoc))
+		mildErrorList = append(mildErrorList, missingRequiredFieldError(base.ReplicationDocId, TypeReplicationDoc, replicationDoc))
 	}
 
 	sourceData, ok := replicationDoc[base.ReplicationDocSource]
 	if ok {
-		sourceBucket, errorList = getStringValue(base.ReplicationDocSource, sourceData, TypeReplicationDoc, errorList)
+		sourceBucket, mildErrorList = getStringValue(base.ReplicationDocSource, sourceData, TypeReplicationDoc, mildErrorList)
 	} else {
-		errorList = append(errorList, missingRequiredFieldError(base.ReplicationDocSource, TypeReplicationDoc, replicationDoc))
+		mildErrorList = append(mildErrorList, missingRequiredFieldError(base.ReplicationDocSource, TypeReplicationDoc, replicationDoc))
 	}
 
 	targetData, ok := replicationDoc[base.ReplicationDocTarget]
 	if ok {
-		target, errorList = getStringValue(base.ReplicationDocTarget, targetData, TypeReplicationDoc, errorList)
+		target, mildErrorList = getStringValue(base.ReplicationDocTarget, targetData, TypeReplicationDoc, mildErrorList)
 	} else {
-		errorList = append(errorList, missingRequiredFieldError(base.ReplicationDocTarget, TypeReplicationDoc, replicationDoc))
+		mildErrorList = append(mildErrorList, missingRequiredFieldError(base.ReplicationDocTarget, TypeReplicationDoc, replicationDoc))
 	}
 
 	// get target cluster uuid and target bucket from targetStr
@@ -463,88 +517,81 @@ func (service *MigrationSvc) migrateReplicationDoc(replicationDocData interface{
 			targetClusterUuid = parts[2]
 			targetBucket = parts[4]
 		} else {
-			errorList = append(errorList, invalidFieldValueError(target, base.ReplicationDocTarget, TypeReplicationDoc))
+			mildErrorList = append(mildErrorList, invalidFieldValueError(target, base.ReplicationDocTarget, TypeReplicationDoc))
 		}
 	}
 
-	if sourceBucket != "" && targetBucket != "" && targetClusterUuid != "" {
-		// check if the remote cluster referenced exists
-		_, err := service.remote_cluster_svc.RemoteClusterByUuid(targetClusterUuid, true)
-		if err != nil {
-			clusterDeleted := false
-			for _, uuid := range deletedRemoteClusterUuidList {
-				if uuid == targetClusterUuid {
-					clusterDeleted = true
-					break
-				}
-			}
-			if clusterDeleted {
-				// if the referenced remote cluster has been deleted, do not migrate the current replication doc and do not return any errors
-				service.logger.Infof("Skipping migrating replication doc with id, %v, since the remote cluster referenced, %v, has already been deleted", id, targetClusterUuid)
-				return make([]error, 0)
-			} else {
-				// otherwise, this is an error that needs to be reported
-				errorList = append(errorList, errors.New(fmt.Sprintf("Error migrating replication doc with id, %v, since cannot find the referenced remote cluster with uuid, %v", id, targetClusterUuid)))
+	if sourceBucket == "" || targetBucket == "" || targetClusterUuid == "" {
+		// these three attributes are especially critical since replication spec cannot be saved without them
+		// in the unlikely event that any of them is missing, skip the replication spec
+		mildErrorList = append(mildErrorList, fmt.Errorf("Skipping migrating replication doc %v since some of the required fields, sourceBucket, targetBucket, and targetClusterUuid, are missing", replicationDoc))
+		return fetalErrorList, mildErrorList
+	}
+
+	// check if the remote cluster referenced exists
+	_, err = service.remote_cluster_svc.RemoteClusterByUuid(targetClusterUuid, true)
+	if err != nil {
+		clusterDeleted := false
+		for _, uuid := range deletedRemoteClusterUuidList {
+			if uuid == targetClusterUuid {
+				clusterDeleted = true
+				break
 			}
 		}
-	}
-
-	// get replication settings
-	settingsMap, errorList, _, _ := service.getGoxdcrSettingsMap(replicationDoc, errorList, defaultWorkerProcesses, defaultMaxConcurrentReps)
-
-	if len(errorList) > 0 {
-		return errorList
-	}
-
-	// save replication spec if there are no validation errors
-	sourceBucketUUID, err_source := service.sourceBucketUUID(sourceBucket)
-	targetBucketUUID, err_target := service.targetBucketUUID(targetClusterUuid, targetBucket)
-	if err_source != nil && err_source != utils.NonExistentBucketError &&
-		err_target != nil && err_target != utils.NonExistentBucketError {
-		if err_source != nil {
-			errorList = append(errorList, err_source)
-		}
-		if err_target != nil {
-			errorList = append(errorList, err_target)
-		}
-		return errorList
-	}
-
-	if err_source == utils.NonExistentBucketError || err_target == utils.NonExistentBucketError {
-		if err_source == utils.NonExistentBucketError && err_target == utils.NonExistentBucketError {
-			service.logger.Infof("replication doc with sourceBucket=%v, targetClusterUuid=%v, targetBucket=%v has non-existent source and target bucket, skip it.\n", sourceBucket, targetClusterUuid, targetBucket)
-		} else if err_source == utils.NonExistentBucketError {
-			service.logger.Infof("replication doc with sourceBucket=%v, targetClusterUuid=%v, targetBucket=%v has non-existent source bucket, skip it.\n", sourceBucket, targetClusterUuid, targetBucket)
+		if clusterDeleted {
+			// if the referenced remote cluster has been deleted, do not migrate the current replication doc
+			mildErrorList = append(mildErrorList, fmt.Errorf("Skipping migrating replication doc with id, %v, since the remote cluster referenced, %v, has already been deleted", id, targetClusterUuid))
+			return fetalErrorList, mildErrorList
 		} else {
-			service.logger.Infof("replication doc with sourceBucket=%v, targetClusterUuid=%v, targetBucket=%v has non-existent target bucket, skip it.\n", sourceBucket, targetClusterUuid, targetBucket)
+			// otherwise, log and ignore the error and continue with replication doc migration
+			mildErrorList = append(mildErrorList, fmt.Errorf("Cannot find referenced remote cluster with uuid, %v, for replication doc with id, %v", targetClusterUuid, id))
 		}
-	} else {
-		spec := metadata.NewReplicationSpecification(sourceBucket, sourceBucketUUID, targetClusterUuid, targetBucket, targetBucketUUID)
-		_, errorMap := spec.Settings.UpdateSettingsFromMap(settingsMap)
-
-		service.logger.Infof("Replication spec constructed = %v\n", spec)
-
-		errorList = addErrorMapToErrorList(errorMap, errorList)
-
-		if len(errorList) > 0 {
-			return errorList
-		}
-
-		// delete replication spec if it already exists
-		_, err := service.repl_spec_svc.DelReplicationSpec(spec.Id)
-		if err == nil {
-			service.logger.Infof("Deleted existing replication spec with id=%v\n", spec.Id)
-		}
-
-		err = service.repl_spec_svc.AddReplicationSpec(spec)
-		if err != nil {
-			errorList = append(errorList, err)
-		}
-
-		service.logger.Infof("Done with migrating replication doc with id=%v. errorList=%v\n", id, errorList)
-
 	}
-	return errorList
+
+	sourceBucketUUID, err = service.sourceBucketUUID(sourceBucket)
+	if err != nil {
+		err = fmt.Errorf("Error retrieving source bucket uuid for replication doc with sourceBucket=%v, targetClusterUuid=%v, targetBucket=%v. err=%v\n", sourceBucket, targetClusterUuid, targetBucket, err)
+		mildErrorList = append(mildErrorList, err)
+	}
+
+	targetBucketUUID, err = service.targetBucketUUID(targetClusterUuid, targetBucket)
+	if err != nil {
+		err = fmt.Errorf("Error retrieving target bucket uuid for replication doc with sourceBucket=%v, targetClusterUuid=%v, targetBucket=%v. err=%v\n", targetBucket, targetClusterUuid, targetBucket, err)
+		mildErrorList = append(mildErrorList, err)
+	}
+
+	// save replication spec
+	spec := metadata.NewReplicationSpecification(sourceBucket, sourceBucketUUID, targetClusterUuid, targetBucket, targetBucketUUID)
+
+	// again, treat all errors from settings processing as fetal
+	// 1. they are highly unlikely to occur, unless there are bugs
+	// 2. if they do occur, we do not want to migrate the replications since the wrong settings are hard to notice
+	settingsMap, fetalErrorList, _, _ := service.getGoxdcrSettingsMap(replicationDoc, fetalErrorList, defaultWorkerProcesses, defaultMaxConcurrentReps)
+	if len(fetalErrorList) > 0 {
+		return fetalErrorList, mildErrorList
+	}
+	_, errorMap := spec.Settings.UpdateSettingsFromMap(settingsMap)
+	fetalErrorList = addErrorMapToErrorList(errorMap, fetalErrorList)
+	if len(fetalErrorList) > 0 {
+		return fetalErrorList, mildErrorList
+	}
+
+	service.logger.Infof("Replication spec constructed = %v\n", spec)
+
+	// delete replication spec if it already exists
+	_, err = service.repl_spec_svc.DelReplicationSpec(spec.Id)
+	if err == nil {
+		service.logger.Infof("Deleted existing replication spec with id=%v\n", spec.Id)
+	}
+
+	err = service.repl_spec_svc.AddReplicationSpec(spec)
+	if err != nil {
+		fetalErrorList = append(fetalErrorList, err)
+	}
+
+	service.logger.Infof("Done with migrating replication doc with id=%v. fetalErrorList=%v, mildErrorList=%v\n", id, fetalErrorList, mildErrorList)
+
+	return fetalErrorList, mildErrorList
 
 }
 
@@ -647,7 +694,15 @@ func (service *MigrationSvc) getGoxdcrSettingsMap(oldSettingsMap map[string]inte
 		maxConcurrentReps = defaultMaxConcurrentReps
 	}
 
-	settingsMap[metadata.TargetNozzlePerNode] = workerProcesses * maxConcurrentReps
+	// make sure that targetNozzlePerNode stays within pre-defined bounds
+	targetNozzlePerNode := workerProcesses * maxConcurrentReps
+	if targetNozzlePerNode < metadata.TargetNozzlePerNodeConfig.MinValue {
+		targetNozzlePerNode = metadata.TargetNozzlePerNodeConfig.MinValue
+	}
+	if targetNozzlePerNode > metadata.TargetNozzlePerNodeConfig.MaxValue {
+		targetNozzlePerNode = metadata.TargetNozzlePerNodeConfig.MaxValue
+	}
+	settingsMap[metadata.TargetNozzlePerNode] = targetNozzlePerNode
 
 	service.logger.Infof("Done with converting replication settings to goxdcr settings. old settings=%v\n new settings=%v\n errorList=%v\n", oldSettingsMap, settingsMap, errorList)
 
