@@ -160,7 +160,7 @@ func (c *Client) Del(vb uint16, key string) (*gomemcached.MCResponse, error) {
 // Get a random document
 func (c *Client) GetRandomDoc() (*gomemcached.MCResponse, error) {
 	return c.Send(&gomemcached.MCRequest{
-        Opcode: 0xB6,
+		Opcode: 0xB6,
 	})
 }
 
@@ -303,8 +303,49 @@ func (c *Client) Append(vb uint16, key string, data []byte) (*gomemcached.MCResp
 	return c.Send(req)
 }
 
-// GetBulk gets keys in bulk
-func (c *Client) GetBulk(vb uint16, keys []string) (map[string]*gomemcached.MCResponse, error) {
+func (c *Client) getDistinctKeys(keys []string) ([]string, map[string]int) {
+	dkeys := make([]string, 0, len(keys))
+	mkeys := make(map[string]int, len(keys))
+	for _, key := range keys {
+		v, ok := mkeys[key]
+		if !ok {
+			dkeys = append(dkeys, key)
+			v = 0
+		}
+		mkeys[key] = v + 1
+	}
+	return dkeys, mkeys
+}
+
+// GetBulkDistinct gets keys in bulk
+// Returns one document for duplicate keys
+func (c *Client) GetBulkDistinct(vb uint16, keys []string) (map[string]*gomemcached.MCResponse, error) {
+	dkeys, _ := c.getDistinctKeys(keys)
+	rv, err := c.getBulkDistinct(vb, dkeys)
+	return rv, err
+}
+
+// GetBulkAll gets keys in bulk
+// Returns separate document for duplicate keys
+func (c *Client) GetBulkAll(vb uint16, keys []string) (map[string][]*gomemcached.MCResponse, error) {
+	rv := make(map[string][]*gomemcached.MCResponse, len(keys))
+	dkeys, mkeys := c.getDistinctKeys(keys)
+	m, err := c.getBulkDistinct(vb, dkeys)
+	if m != nil {
+		for k, v := range m {
+			rv[k] = make([]*gomemcached.MCResponse, 0, mkeys[k])
+			for i := 0; i < mkeys[k]; i++ {
+				rv[k] = append(rv[k], v)
+			}
+		}
+		return rv, err
+	}
+	return nil, err
+}
+
+// getBulkDistinct gets keys in bulk
+// Returns one document for duplicate keys
+func (c *Client) getBulkDistinct(vb uint16, keys []string) (map[string]*gomemcached.MCResponse, error) {
 	rv := make(map[string]*gomemcached.MCResponse, len(keys))
 
 	stopch := make(chan bool)
@@ -371,7 +412,7 @@ func (c *Client) GetBulk(vb uint16, keys []string) (map[string]*gomemcached.MCRe
 			Opaque:  uint32(i),
 		})
 		if err != nil {
-			logging.Errorf(" Transmit failed in GetBulk %v", err)
+			logging.Errorf(" Transmit failed in GetBulkAll %v", err)
 			return rv, err
 		}
 	}
