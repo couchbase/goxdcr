@@ -253,7 +253,7 @@ func (adminport *Adminport) doCreateRemoteClusterRequest(request *http.Request) 
 		err = remoteClusterService.ValidateAddRemoteCluster(remoteClusterRef)
 		return EncodeRemoteClusterErrorIntoResponse(err)
 	} else {
-		err = remoteClusterService.AddRemoteCluster(remoteClusterRef)
+		err = remoteClusterService.AddRemoteCluster(remoteClusterRef, false/*skipConnectivityValidation*/)
 		if err != nil {
 			return EncodeRemoteClusterErrorIntoResponse(err)
 		} else {

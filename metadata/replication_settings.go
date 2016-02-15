@@ -53,8 +53,8 @@ type SettingsConfig struct {
 }
 
 type Range struct {
-	minValue int
-	maxValue int
+	MinValue int
+	MaxValue int
 }
 
 // TODO change to "capi"?
@@ -437,8 +437,8 @@ func ValidateAndConvertSettingsValue(key, value, errorKey string) (convertedValu
 		settingsConfig, _ := SettingsConfigMap[key]
 		if settingsConfig.Range != nil {
 			intValue := convertedValue.(int)
-			if intValue < settingsConfig.Range.minValue || intValue > settingsConfig.Range.maxValue {
-				err = simple_utils.InvalidValueError("an integer", settingsConfig.Range.minValue, settingsConfig.Range.maxValue)
+			if intValue < settingsConfig.Range.MinValue || intValue > settingsConfig.Range.MaxValue {
+				err = simple_utils.InvalidValueError("an integer", settingsConfig.Range.MinValue, settingsConfig.Range.MaxValue)
 				return
 			}
 		}

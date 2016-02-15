@@ -19,7 +19,8 @@ type RemoteClusterSvc interface {
 	RemoteClusterByRefName(refName string, refresh bool) (*metadata.RemoteClusterReference, error)
 	RemoteClusterByUuid(uuid string, refresh bool) (*metadata.RemoteClusterReference, error)
 	ValidateAddRemoteCluster(ref *metadata.RemoteClusterReference) error
-	AddRemoteCluster(ref *metadata.RemoteClusterReference) error
+	// skipConnectivityValidation is true when called from migration service
+	AddRemoteCluster(ref *metadata.RemoteClusterReference, skipConnectivityValidation bool) error
 	ValidateSetRemoteCluster(refName string, ref *metadata.RemoteClusterReference) error
 	SetRemoteCluster(refName string, ref *metadata.RemoteClusterReference) error
 	DelRemoteCluster(refName string) (*metadata.RemoteClusterReference, error)

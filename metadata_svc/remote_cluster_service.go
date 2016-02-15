@@ -218,10 +218,10 @@ func (service *RemoteClusterService) RemoteClusterByUuid(uuid string, refresh bo
 	}
 }
 
-func (service *RemoteClusterService) AddRemoteCluster(ref *metadata.RemoteClusterReference) error {
+func (service *RemoteClusterService) AddRemoteCluster(ref *metadata.RemoteClusterReference, skipConnectivityValidation bool) error {
 	service.logger.Infof("Adding remote cluster with referenceId %v\n", ref.Id)
 
-	err := service.ValidateAddRemoteCluster(ref)
+	err := service.validateAddRemoteCluster(ref, skipConnectivityValidation)
 	if err != nil {
 		return err
 	}
@@ -361,21 +361,30 @@ func (service *RemoteClusterService) RemoteClusterMap() map[string]*remoteCluste
 
 // validate that the remote cluster ref itself is valid, and that it does not collide with any of the existing remote clusters.
 func (service *RemoteClusterService) ValidateAddRemoteCluster(ref *metadata.RemoteClusterReference) error {
+	return service.validateAddRemoteCluster(ref, false)
+}
+
+func (service *RemoteClusterService) validateAddRemoteCluster(ref *metadata.RemoteClusterReference, skipConnectivityValidation bool) error {
 	oldRef, _ := service.RemoteClusterByRefName(ref.Name, false)
 
 	if oldRef != nil {
 		return wrapAsInvalidRemoteClusterOperationError(errors.New("duplicate cluster names are not allowed"))
 	}
 
-	bUpdateUuid := (ref.Uuid == "")
-	err := service.validateRemoteCluster(ref, bUpdateUuid)
-	if err != nil {
-		return err
+	// skip connectivity validation if so specified, e.g., when called from migration service
+	if !skipConnectivityValidation {
+		bUpdateUuid := (ref.Uuid == "")
+		err := service.validateRemoteCluster(ref, bUpdateUuid)
+		if err != nil {
+			return err
+		}
 	}
 
-	oldRef, err = service.RemoteClusterByUuid(ref.Uuid, false)
-	if oldRef != nil {
-		return wrapAsInvalidRemoteClusterOperationError(fmt.Errorf("Cluster reference to the same cluster already exists under the name `%v`", oldRef.Name))
+	if ref.Uuid != "" {
+		oldRef, _ = service.RemoteClusterByUuid(ref.Uuid, false)
+		if oldRef != nil {
+			return wrapAsInvalidRemoteClusterOperationError(fmt.Errorf("Cluster reference to the same cluster already exists under the name `%v`", oldRef.Name))
+		}
 	}
 
 	return nil
@@ -511,7 +520,7 @@ func (service *RemoteClusterService) addRemoteCluster(ref *metadata.RemoteCluste
 		return err
 	}
 
-	service.logger.Infof("Remote cluster %v added to metadata store. value=%v\n", key, value)
+	service.logger.Infof("Remote cluster %v added to metadata store.\n", key)
 
 	return service.updateCache(ref.Id, ref)
 }
