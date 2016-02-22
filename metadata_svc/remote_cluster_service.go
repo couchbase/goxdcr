@@ -618,7 +618,7 @@ func (service *RemoteClusterService) refresh(ref *metadata.RemoteClusterReferenc
 			return ref_cache.ref, nil
 		} else {
 			service.logger.Infof("Stop refreshing ref %v. Ref in cache has been deleted by others\n", ref.Id)
-			return nil, nil
+			return nil, service_def.MetadataNotFoundErr
 		}
 	}
 
