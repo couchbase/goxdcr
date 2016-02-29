@@ -273,7 +273,7 @@ func (rm *replicationManager) init(
 	rm.bucket_settings_svc = bucket_settings_svc
 	fac := factory.NewXDCRFactory(repl_spec_svc, remote_cluster_svc, cluster_info_svc, xdcr_topology_svc, checkpoint_svc, capi_svc, uilog_svc, bucket_settings_svc, log.DefaultLoggerContext, log.DefaultLoggerContext, rm, rm.pipelineMasterSupervisor)
 
-	pipeline_manager.PipelineManager(fac, rm.repl_spec_svc, xdcr_topology_svc, log.DefaultLoggerContext)
+	pipeline_manager.PipelineManager(fac, repl_spec_svc, xdcr_topology_svc, remote_cluster_svc, log.DefaultLoggerContext)
 
 	rm.metadata_change_callback_cancel_ch = make(chan struct{}, 1)
 

@@ -408,14 +408,28 @@ func (service *RemoteClusterService) ValidateSetRemoteCluster(refName string, re
 	return nil
 }
 
-// validate remote cluster info and retrieve actual uuid
+// validate remote cluster info
+func (service *RemoteClusterService) ValidateRemoteCluster(ref *metadata.RemoteClusterReference) error {
+	return service.validateRemoteCluster(ref, false /*updateUuid*/)
+}
+
+// validate remote cluster info and update actual uuid
 func (service *RemoteClusterService) validateRemoteCluster(ref *metadata.RemoteClusterReference, updateUUid bool) error {
-	isEnterprise, err := service.xdcr_topology_svc.IsMyClusterEnterprise()
-	if err != nil {
-		return err
-	}
-	if ref.DemandEncryption && !isEnterprise {
-		return wrapAsInvalidRemoteClusterError("encryption can only be used in enterprise edition when the entire cluster is running at least 2.5 version of Couchbase Server")
+	if ref.DemandEncryption {
+		// check if source cluster supports SSL when SSL is specified
+		isEnterprise, err := service.xdcr_topology_svc.IsMyClusterEnterprise()
+		if err != nil {
+			return err
+		}
+
+		sourceSSLCompatible, err := service.cluster_info_svc.IsClusterCompatible(service.xdcr_topology_svc, []int{2, 5})
+		if err != nil {
+			return fmt.Errorf("Failed to get source cluster version information, err=%v\n", err)
+		}
+
+		if !isEnterprise || !sourceSSLCompatible {
+			return wrapAsInvalidRemoteClusterError("encryption can only be used in enterprise edition when the entire cluster is running at least 2.5 version of Couchbase Server")
+		}
 	}
 
 	hostName := utils.GetHostName(ref.HostName)
@@ -466,14 +480,27 @@ func (service *RemoteClusterService) validateRemoteCluster(ref *metadata.RemoteC
 		return wrapAsInvalidRemoteClusterError("Remote node is not initialized.")
 	}
 
-	//get isEnterprise from the map
-	isEnterprise_remote, ok := poolsInfo[base.IsEnterprise].(bool)
-	if !ok {
-		isEnterprise_remote = false
-	}
+	if ref.DemandEncryption {
+		// check if target cluster supports SSL when SSL is specified
 
-	if ref.DemandEncryption && !isEnterprise_remote {
-		return wrapAsInvalidRemoteClusterError("Remote cluster is not enterprise version and does not support SSL.")
+		//get isEnterprise from the map
+		isEnterprise_remote, ok := poolsInfo[base.IsEnterprise].(bool)
+		if !ok {
+			isEnterprise_remote = false
+		}
+
+		if !isEnterprise_remote {
+			return wrapAsInvalidRemoteClusterError("Remote cluster is not enterprise version and does not support SSL.")
+		}
+
+		remoteSSLCompatible, err := service.cluster_info_svc.IsClusterCompatible(ref, []int{2, 5})
+		if err != nil {
+			return wrapAsInvalidRemoteClusterError("Failed to get target cluster version information")
+		}
+
+		if !remoteSSLCompatible {
+			return wrapAsInvalidRemoteClusterError("Remote cluster has a version lower than 2.5 and does not support SSL.")
+		}
 	}
 	// get remote cluster uuid from the map
 	if updateUUid {

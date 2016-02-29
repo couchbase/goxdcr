@@ -292,15 +292,6 @@ func DecodeCreateRemoteClusterRequest(request *http.Request) (justValidate bool,
 		errorsMap[base.RemoteClusterPassword] = simple_utils.MissingParameterError("password")
 	}
 
-	// demandEncryption can be set only on enterprise editions
-	isEnterprise, err := XDCRCompTopologyService().IsMyClusterEnterprise()
-	if err != nil {
-		return
-	}
-	if demandEncryption && !isEnterprise {
-		errorsMap[base.RemoteClusterDemandEncryption] = errors.New("encryption can only be used in enterprise edition when the entire cluster is running at least 2.5 version of Couchbase Server")
-	}
-
 	// certificate is required if demandEncryption is set to true
 	if demandEncryption && len(certificate) == 0 {
 		errorsMap[base.RemoteClusterCertificate] = errors.New("certificate must be given if demand encryption is on")

@@ -23,6 +23,7 @@ type RemoteClusterSvc interface {
 	AddRemoteCluster(ref *metadata.RemoteClusterReference, skipConnectivityValidation bool) error
 	ValidateSetRemoteCluster(refName string, ref *metadata.RemoteClusterReference) error
 	SetRemoteCluster(refName string, ref *metadata.RemoteClusterReference) error
+	ValidateRemoteCluster(ref *metadata.RemoteClusterReference) error
 	DelRemoteCluster(refName string) (*metadata.RemoteClusterReference, error)
 	RemoteClusters(refresh bool) (map[string]*metadata.RemoteClusterReference, error)
 

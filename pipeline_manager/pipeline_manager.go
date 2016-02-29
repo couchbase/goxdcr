@@ -29,11 +29,12 @@ var ReplicationSpecNotFound error = errors.New("Replication specification not fo
 type func_report_fixed func(topic string)
 
 type pipelineManager struct {
-	pipeline_factory  common.PipelineFactory
-	repl_spec_svc     service_def.ReplicationSpecSvc
-	xdcr_topology_svc service_def.XDCRCompTopologySvc
-	once              sync.Once
-	logger            *log.CommonLogger
+	pipeline_factory   common.PipelineFactory
+	repl_spec_svc      service_def.ReplicationSpecSvc
+	xdcr_topology_svc  service_def.XDCRCompTopologySvc
+	remote_cluster_svc service_def.RemoteClusterSvc
+	once               sync.Once
+	logger             *log.CommonLogger
 	//lock to pipeline_pending_for_repair map
 	repair_map_lock *sync.RWMutex
 	//keep track of the pipeline in repair
@@ -43,11 +44,13 @@ type pipelineManager struct {
 
 var pipeline_mgr pipelineManager
 
-func PipelineManager(factory common.PipelineFactory, repl_spec_svc service_def.ReplicationSpecSvc, xdcr_topology_svc service_def.XDCRCompTopologySvc, logger_context *log.LoggerContext) {
+func PipelineManager(factory common.PipelineFactory, repl_spec_svc service_def.ReplicationSpecSvc, xdcr_topology_svc service_def.XDCRCompTopologySvc,
+	remote_cluster_svc service_def.RemoteClusterSvc, logger_context *log.LoggerContext) {
 	pipeline_mgr.once.Do(func() {
 		pipeline_mgr.pipeline_factory = factory
 		pipeline_mgr.repl_spec_svc = repl_spec_svc
 		pipeline_mgr.xdcr_topology_svc = xdcr_topology_svc
+		pipeline_mgr.remote_cluster_svc = remote_cluster_svc
 		pipeline_mgr.logger = log.NewLogger("PipelineManager", logger_context)
 		pipeline_mgr.logger.Info("Pipeline Manager is constucted")
 		pipeline_mgr.child_waitGrp = &sync.WaitGroup{}
@@ -267,8 +270,12 @@ func (pipelineMgr *pipelineManager) startPipeline(topic string) (common.Pipeline
 
 	rep_status := ReplicationStatus(topic)
 	if rep_status == nil || (rep_status != nil && rep_status.RuntimeStatus() != pipeline.Replicating) {
-		//	if rep_status, ok := pipelineMgr.pipelines_map[topic]; !ok || rep_status.RuntimeStatus() != pipeline.Replicating {
-		//
+		// validate the pipeline before starting it
+		err = pipelineMgr.validatePipeline(topic)
+		if err != nil {
+			return nil, err
+		}
+
 		if rep_status == nil {
 			rep_status = pipeline.NewReplicationStatus(topic, pipelineMgr.repl_spec_svc.ReplicationSpec, pipelineMgr.logger)
 			pipelineMgr.repl_spec_svc.SetDerivedObj(topic, rep_status)
@@ -303,6 +310,31 @@ func (pipelineMgr *pipelineManager) startPipeline(topic string) (common.Pipeline
 		return rep_status.Pipeline(), err
 	}
 	return nil, err
+}
+
+// validate that a pipeline has valid configuration and can be started before starting it
+func (pipelineMgr *pipelineManager) validatePipeline(topic string) error {
+	pipelineMgr.logger.Infof("Validating pipeline %v\n", topic)
+
+	spec, err := pipelineMgr.repl_spec_svc.ReplicationSpec(topic)
+	if err != nil {
+		pipelineMgr.logger.Errorf("Failed to get replication specification for pipeline %v, err=%v\n", topic, err)
+		return err
+	}
+
+	targetClusterRef, err := pipelineMgr.remote_cluster_svc.RemoteClusterByUuid(spec.TargetClusterUUID, true)
+	if err != nil {
+		pipelineMgr.logger.Errorf("Error getting remote cluster with uuid=%v for pipeline %v, err=%v\n", spec.TargetClusterUUID, topic, err)
+		return err
+	}
+
+	err = pipelineMgr.remote_cluster_svc.ValidateRemoteCluster(targetClusterRef)
+	if err != nil {
+		pipelineMgr.logger.Errorf("Error validating remote cluster with uuid %v for pipeline %v. err=%v\n", spec.TargetClusterUUID, topic, err)
+		return err
+	}
+
+	return nil
 }
 
 func (pipelineMgr *pipelineManager) getPipelineFromMap(topic string) common.Pipeline {
