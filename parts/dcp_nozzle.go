@@ -391,8 +391,8 @@ func (dcp *DcpNozzle) processData() (err error) {
 		case m, ok := <-mutch: // mutation from upstream
 			if !ok {
 				dcp.Logger().Infof("DCP mutation channel is closed.Stop dcp nozzle now.")
-				//set uprFeed to nil
-				dcp.uprFeed = nil
+				//close uprFeed
+				dcp.closeUprFeed()
 				dcp.handleGeneralError(errors.New("DCP stream is closed."))
 				goto done
 			}
@@ -562,6 +562,9 @@ func (dcp *DcpNozzle) startUprStream(vbno uint16, vbts *base.VBTimestamp) error 
 	flags := uint32(0)
 	seqEnd := uint64(0xFFFFFFFFFFFFFFFF)
 	dcp.Logger().Debugf("%v starting vb stream for vb=%v, opaque=%v\n", dcp.Id(), vbno, opaque)
+
+	dcp.lock_uprFeed.RLock()
+	defer dcp.lock_uprFeed.RUnlock()
 	if dcp.uprFeed != nil {
 		statusObj, ok := dcp.vb_stream_status[vbno]
 		if ok && statusObj != nil {
@@ -799,11 +802,7 @@ func (dcp *DcpNozzle) checkInactiveUprStreams_once() error {
 		dcp.Logger().Infof("%v incrementing counter for inactive streams %v\n", dcp.Id(), dcp.counter_streams_inactive)
 		if dcp.counter_streams_inactive > MaxCountStreamsInactive {
 			dcp.Logger().Infof("%v restarting inactive streams %v\n", dcp.Id(), streams_inactive)
-			opaque := newOpaque()
-			for _, vbno := range streams_inactive {
-				//ignore any error
-				dcp.uprFeed.CloseStream(vbno, opaque)
-			}
+			dcp.forceCloseUprStreams(streams_inactive)
 			err := dcp.startUprStreams_internal(streams_inactive)
 			if err != nil {
 				return err
@@ -812,6 +811,31 @@ func (dcp *DcpNozzle) checkInactiveUprStreams_once() error {
 		}
 	}
 	return nil
+}
+
+// try to close upr streams for the vbnos specified, even if the upr streams currently have inactive state.
+// startUprStream requests may have been sent out earlier. try to close to be safe. ignore any errors
+func (dcp *DcpNozzle) forceCloseUprStreams(vbnos []uint16) {
+	dcp.lock_uprFeed.Lock()
+	defer dcp.lock_uprFeed.Unlock()
+
+	if dcp.uprFeed != nil {
+		dcp.Logger().Infof("%v closing dcp streams for vbs=%v\n", dcp.Id(), vbnos)
+		opaque := newOpaque()
+		errMap := make(map[uint16]error)
+
+		for _, vbno := range vbnos {
+			err := dcp.uprFeed.CloseStream(vbno, opaque)
+			if err != nil {
+				errMap[vbno] = err
+			}
+		}
+
+		if len(errMap) > 0 {
+			dcp.Logger().Infof("%v Failed to close upr streams, err=%v\n", dcp.Id(), errMap)
+		}
+	}
+
 }
 
 // check if dcp is stuck
