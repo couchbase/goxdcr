@@ -816,8 +816,8 @@ func (dcp *DcpNozzle) checkInactiveUprStreams_once() error {
 // try to close upr streams for the vbnos specified, even if the upr streams currently have inactive state.
 // startUprStream requests may have been sent out earlier. try to close to be safe. ignore any errors
 func (dcp *DcpNozzle) forceCloseUprStreams(vbnos []uint16) {
-	dcp.lock_uprFeed.Lock()
-	defer dcp.lock_uprFeed.Unlock()
+	dcp.lock_uprFeed.RLock()
+	defer dcp.lock_uprFeed.RUnlock()
 
 	if dcp.uprFeed != nil {
 		dcp.Logger().Infof("%v closing dcp streams for vbs=%v\n", dcp.Id(), vbnos)
