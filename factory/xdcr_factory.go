@@ -73,7 +73,7 @@ func NewXDCRFactory(repl_spec_svc service_def.ReplicationSpecSvc,
 		checkpoint_svc:             checkpoint_svc,
 		capi_svc:                   capi_svc,
 		uilog_svc:                  uilog_svc,
-		bucket_settings_svc:         bucket_settings_svc,
+		bucket_settings_svc:        bucket_settings_svc,
 		default_logger_ctx:         pipeline_default_logger_ctx,
 		pipeline_failure_handler:   pipeline_failure_handler,
 		pipeline_master_supervisor: pipeline_master_supervisor,
@@ -208,15 +208,40 @@ func (xdcrf *XDCRFactory) isExtMetaSupported(spec *metadata.ReplicationSpecifica
 }
 
 func (xdcrf *XDCRFactory) getSourceConflictResolutionMode(bucketName string) (base.ConflictResolutionMode, error) {
-	bucketSettings, err := xdcrf.bucket_settings_svc.BucketSettings(bucketName)
+	hostAddr, err := xdcrf.xdcr_topology_svc.MyHostAddr()
 	if err != nil {
 		return base.CRMode_RevId, err
 	}
-	if bucketSettings.LWWEnabled {
+
+	var out interface{}
+	err, _ = utils.QueryRestApi(hostAddr, base.DefaultPoolBucketsPath+bucketName, true, base.MethodGet, "", nil, 0, &out, xdcrf.logger)
+	if err != nil {
+		return base.CRMode_RevId, utils.NewEnhancedError(fmt.Sprintf("Error retrieving bucket info for %v\n", bucketName), err)
+	}
+
+	infoMap, ok := out.(map[string]interface{})
+	if !ok {
+		xdcrf.logger.Errorf("Error parsing bucket info for %v. bucket info = %v", bucketName, out)
+		return base.CRMode_RevId, fmt.Errorf("Error parsing bucket info for %v\n", bucketName)
+	}
+
+	timeSynchronized := false
+	timeSynchronizationObj, ok := infoMap[base.TimeSynchronizationKey]
+	if ok {
+		timeSynchronizationStr, ok := timeSynchronizationObj.(string)
+		if !ok {
+			xdcrf.logger.Errorf("Error parsing time synchronization from bucket info for %v. timeSynchronization = %v, bucket info = %v", bucketName, timeSynchronizationObj, out)
+			return base.CRMode_RevId, fmt.Errorf("Error parsing time synchronization from bucket info for %v\n", bucketName)
+		}
+		timeSynchronized = (timeSynchronizationStr != base.TimeSynchronization_Disabled)
+	}
+
+	if timeSynchronized {
 		return base.CRMode_LWW, nil
 	} else {
 		return base.CRMode_RevId, nil
 	}
+
 }
 
 func min(num1 int, num2 int) int {

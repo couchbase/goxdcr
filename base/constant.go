@@ -27,6 +27,7 @@ var LocalHostName = "127.0.0.1"
 // URL Paths for retrieving cluster info
 var PoolsPath = "/pools"
 var DefaultPoolPath = "/pools/default"
+var DefaultPoolBucketsPath = "/pools/default/buckets/"
 var NodesPath = "/pools/nodes"
 var NodesSelfPath = "/nodes/self"
 var SSLPortsPath = "/nodes/self/xdcrSSLPorts"
@@ -295,4 +296,10 @@ const (
 	PermissionBucketXDCRExecuteSuffix = "].xdcr!execute"
 	PermissionXDCRInternalRead = "cluster.admin.internal.xdcr!read"
 	PermissionXDCRInternalWrite = "cluster.admin.internal.xdcr!write"
+)
+
+// constants for parsing time synchronization setting in bucket metadata
+const (
+	TimeSynchronizationKey = "timeSynchronization"
+	TimeSynchronization_Disabled = "disabled"
 )
