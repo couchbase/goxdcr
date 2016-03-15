@@ -95,14 +95,26 @@ func (xdcrf *XDCRFactory) NewPipeline(topic string, progress_recorder common.Pip
 	if err != nil {
 		return nil, err
 	}
-	sourceCRMode, err := xdcrf.getSourceConflictResolutionMode(spec.SourceBucketName)
+
+	// get source bucket to retrieve bucket password and time synchronization settings
+	bucket, err := xdcrf.cluster_info_svc.GetBucket(xdcrf.xdcr_topology_svc, spec.SourceBucketName)
 	if err != nil {
+		xdcrf.logger.Errorf("Error getting source bucket %v. err=%v\n", spec.SourceBucketName, err)
 		return nil, err
 	}
+	timeSynchronization := bucket.TimeSynchronization
+	bucketPassword := bucket.Password
+	bucket.Close()
+
+	sourceCRMode := base.CRMode_RevId
+	if timeSynchronization != "" && timeSynchronization != base.TimeSynchronization_Disabled {
+		sourceCRMode = base.CRMode_LWW
+	}
+
 	xdcrf.logger.Infof("%v extMetaSupported=%v, sourceCRMode=%v\n", topic, extMetaSupported, sourceCRMode)
 
 	// popuplate pipeline using config
-	sourceNozzles, kv_vb_map, err := xdcrf.constructSourceNozzles(spec, topic, extMetaSupported, logger_ctx)
+	sourceNozzles, kv_vb_map, err := xdcrf.constructSourceNozzles(spec, topic, extMetaSupported, bucketPassword, logger_ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -204,43 +216,6 @@ func (xdcrf *XDCRFactory) isExtMetaSupported(spec *metadata.ReplicationSpecifica
 	}
 
 	return extMetaSupportedByTarget, nil
-
-}
-
-func (xdcrf *XDCRFactory) getSourceConflictResolutionMode(bucketName string) (base.ConflictResolutionMode, error) {
-	hostAddr, err := xdcrf.xdcr_topology_svc.MyHostAddr()
-	if err != nil {
-		return base.CRMode_RevId, err
-	}
-
-	var out interface{}
-	err, _ = utils.QueryRestApi(hostAddr, base.DefaultPoolBucketsPath+bucketName, true, base.MethodGet, "", nil, 0, &out, xdcrf.logger)
-	if err != nil {
-		return base.CRMode_RevId, utils.NewEnhancedError(fmt.Sprintf("Error retrieving bucket info for %v\n", bucketName), err)
-	}
-
-	infoMap, ok := out.(map[string]interface{})
-	if !ok {
-		xdcrf.logger.Errorf("Error parsing bucket info for %v. bucket info = %v", bucketName, out)
-		return base.CRMode_RevId, fmt.Errorf("Error parsing bucket info for %v\n", bucketName)
-	}
-
-	timeSynchronized := false
-	timeSynchronizationObj, ok := infoMap[base.TimeSynchronizationKey]
-	if ok {
-		timeSynchronizationStr, ok := timeSynchronizationObj.(string)
-		if !ok {
-			xdcrf.logger.Errorf("Error parsing time synchronization from bucket info for %v. timeSynchronization = %v, bucket info = %v", bucketName, timeSynchronizationObj, out)
-			return base.CRMode_RevId, fmt.Errorf("Error parsing time synchronization from bucket info for %v\n", bucketName)
-		}
-		timeSynchronized = (timeSynchronizationStr != base.TimeSynchronization_Disabled)
-	}
-
-	if timeSynchronized {
-		return base.CRMode_LWW, nil
-	} else {
-		return base.CRMode_RevId, nil
-	}
 
 }
 
@@ -357,22 +332,15 @@ func (xdcrf *XDCRFactory) registerAsyncListenersOnTargets(pipeline common.Pipeli
 func (xdcrf *XDCRFactory) constructSourceNozzles(spec *metadata.ReplicationSpecification,
 	topic string,
 	extMetaSupported bool,
+	bucketPassword string,
 	logger_ctx *log.LoggerContext) (map[string]common.Nozzle, map[string][]uint16, error) {
 	sourceNozzles := make(map[string]common.Nozzle)
 
 	bucketName := spec.SourceBucketName
 
-	bucket, err := xdcrf.cluster_info_svc.GetBucket(xdcrf.xdcr_topology_svc, bucketName)
-	if err != nil {
-		xdcrf.logger.Errorf("Error getting bucket %v. err=%v\n", bucketName, err)
-		return nil, nil, err
-	}
-	bucketPassword := bucket.Password
-	bucket.Close()
-
 	maxNozzlesPerNode := spec.Settings.SourceNozzlePerNode
 
-	kv_vb_map, err := pipeline_utils.GetSourceVBMap(xdcrf.cluster_info_svc, xdcrf.xdcr_topology_svc, spec.SourceBucketName, xdcrf.logger)
+	kv_vb_map, err := pipeline_utils.GetSourceVBMap(xdcrf.cluster_info_svc, xdcrf.xdcr_topology_svc, bucketName, xdcrf.logger)
 	if err != nil {
 		return nil, nil, err
 	}
