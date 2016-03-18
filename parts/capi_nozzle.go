@@ -1118,9 +1118,7 @@ func (capi *CapiNozzle) initialize(settings map[string]interface{}) error {
 	capi.res_buf = make([]byte, capi.config.maxCount*70+300)
 
 	capi.Logger().Debug("About to start initializing connection")
-	if err == nil {
-		err = capi.resetConn()
-	}
+	err = capi.initializeConn()
 
 	capi.Logger().Debug("Initialization is done")
 
@@ -1180,7 +1178,15 @@ func (capi *CapiNozzle) getCouchApiBaseHostAndPathForVB(vbno uint16) (string, st
 	return couchApiBaseHost, couchApiBasePath, nil
 }
 
+func (capi *CapiNozzle) initializeConn() error {
+	return capi.initializeOrResetConn(true)
+}
+
 func (capi *CapiNozzle) resetConn() error {
+	return capi.initializeOrResetConn(false)
+}
+
+func (capi *CapiNozzle) initializeOrResetConn(initializing bool) error {
 	capi.Logger().Debugf("resetting capi connection for %v\n", capi.Id())
 
 	if capi.validateRunningState() != nil {
@@ -1192,9 +1198,21 @@ func (capi *CapiNozzle) resetConn() error {
 		capi.client.Close()
 	}
 
-	pool, err := base.TCPConnPoolMgr().GetOrCreatePool(capi.getPoolName(capi.config), capi.config.connectStr, base.DefaultCAPIConnectionSize)
-	if err == nil {
-		capi.client, err = pool.Get()
+	var pool *base.TCPConnPool
+	var err error
+
+	if initializing {
+		pool, err = base.TCPConnPoolMgr().GetOrCreatePool(capi.getPoolName(capi.config), capi.config.connectStr, base.DefaultCAPIConnectionSize)
+	} else {
+		pool = base.TCPConnPoolMgr().GetPool(capi.getPoolName(capi.config))
+		if pool == nil {
+			// make sure that err is not nil when pool is nil
+			err = fmt.Errorf("Error retrieving connection pool for %v", capi.Id())
+		}
+	}
+
+	if pool != nil {
+		capi.client, err = pool.GetNew()
 	}
 
 	if err == nil {

@@ -63,6 +63,7 @@ type NewConnFunc func() (*mcc.Client, error)
 
 type ConnPool interface {
 	Get() (*mcc.Client, error)
+	GetNew() (*mcc.Client, error)
 	GetCAS() uint32
 	Release(client *mcc.Client)
 	ReleaseConnections(cas uint32)
@@ -201,6 +202,10 @@ func (p *connPool) Get() (*mcc.Client, error) {
 		}
 	}
 	return nil, errors.New("connection pool is closed")
+}
+
+func (p *connPool) GetNew() (*mcc.Client, error) {
+	return p.newConnFunc()
 }
 
 func (p *connPool) newConn() (*mcc.Client, error) {
@@ -409,8 +414,8 @@ func (p *connPool) doesCASMatch(cas uint32) bool {
 // Release all connections in the connection pool.
 //
 func (p *connPool) ReleaseConnections(cas uint32) {
-	p.lock.Lock()
-	defer p.lock.Unlock()
+	p.lock.RLock()
+	defer p.lock.RUnlock()
 
 	if !p.doesCASMatch(cas) {
 		// no op if cas value does not match
@@ -463,7 +468,7 @@ func (connPoolMgr *connPoolMgr) GetOrCreatePool(poolNameToCreate string, hostnam
 		_, ok = pool.(*connPool)
 		if ok {
 			// do not return pool if pool size does not match, e.g., when the numTargetNozzlePerNode setting has been changed.
-			if !pool.Stale() && pool.MaxConn() == connsize {
+			if !pool.Stale() {
 				return pool, nil
 			} else {
 				ConnPoolMgr().logger.Infof("Removing pool %v. stale=%v, new size=%v, old size=%v", poolNameToCreate, pool.Stale(), connsize, pool.MaxConn())
@@ -492,7 +497,6 @@ func (connPoolMgr *connPoolMgr) GetOrCreatePool(poolNameToCreate string, hostnam
 	connPoolMgr.conn_pools_map[poolNameToCreate] = pool
 
 	pool.(*connPool).init()
-	go connPoolMgr.fillPool(pool.(*connPool), size)
 	return pool, err
 }
 
@@ -504,7 +508,7 @@ func (connPoolMgr *connPoolMgr) GetOrCreateSSLOverMemPool(poolNameToCreate strin
 	if ok {
 		_, ok = pool.(*sslOverMemConnPool)
 		if ok {
-			if !pool.Stale() && pool.MaxConn() == connsize {
+			if !pool.Stale() {
 				return pool, nil
 			} else {
 				ConnPoolMgr().logger.Infof("Removing pool %v. stale=%v, new size=%v, old size=%v", poolNameToCreate, pool.Stale(), connsize, pool.MaxConn())
@@ -537,8 +541,6 @@ func (connPoolMgr *connPoolMgr) GetOrCreateSSLOverMemPool(poolNameToCreate strin
 	p.init()
 
 	connPoolMgr.conn_pools_map[poolNameToCreate] = p
-
-	go connPoolMgr.fillPool(p, size)
 	return p, err
 
 }
@@ -552,7 +554,7 @@ func (connPoolMgr *connPoolMgr) GetOrCreateSSLOverProxyPool(poolNameToCreate str
 	if ok {
 		_, ok = pool.(*sslOverProxyConnPool)
 		if ok {
-			if !pool.Stale() && pool.MaxConn() == connsize {
+			if !pool.Stale() {
 				return pool, nil
 			} else {
 				ConnPoolMgr().logger.Infof("Removing pool %v. stale=%v, new size=%v, old size=%v", poolNameToCreate, pool.Stale(), connsize, pool.MaxConn())
@@ -586,8 +588,6 @@ func (connPoolMgr *connPoolMgr) GetOrCreateSSLOverProxyPool(poolNameToCreate str
 
 	p.init()
 	connPoolMgr.conn_pools_map[poolNameToCreate] = p
-
-	go connPoolMgr.fillPool(p, size)
 	return p, err
 
 }
@@ -596,6 +596,12 @@ func (connPoolMgr *connPoolMgr) GetPool(poolName string) ConnPool {
 	connPoolMgr.map_lock.RLock()
 	defer connPoolMgr.map_lock.RUnlock()
 	pool := connPoolMgr.conn_pools_map[poolName]
+
+	if pool != nil {
+		connPoolMgr.logger.Infof("Successfully retrieved connection pool with name %v", poolName)
+	} else {
+		connPoolMgr.logger.Errorf("Could not find connection pool with name %v", poolName)
+	}
 
 	return pool
 }
