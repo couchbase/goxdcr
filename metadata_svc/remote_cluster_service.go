@@ -244,7 +244,7 @@ func (service *RemoteClusterService) updateRemoteCluster(ref *metadata.RemoteClu
 	if err != nil {
 		return err
 	}
-	service.logger.Debugf("Remote cluster being changed: key=%v, value=%v\n", key, string(value))
+	service.logger.Debugf("Remote cluster is being updated: key=%v, value=%v\n", key, string(value))
 
 	err = service.metakv_svc.SetSensitive(key, value, revision)
 	if err != nil {
@@ -368,7 +368,7 @@ func (service *RemoteClusterService) validateAddRemoteCluster(ref *metadata.Remo
 	oldRef, _ := service.RemoteClusterByRefName(ref.Name, false)
 
 	if oldRef != nil {
-		return wrapAsInvalidRemoteClusterOperationError("duplicate cluster names are not allowed")
+		return wrapAsInvalidRemoteClusterOperationError("Duplicate cluster names are not allowed")
 	}
 
 	// skip connectivity validation if so specified, e.g., when called from migration service
@@ -428,7 +428,7 @@ func (service *RemoteClusterService) validateRemoteCluster(ref *metadata.RemoteC
 		}
 
 		if !isEnterprise || !sourceSSLCompatible {
-			return wrapAsInvalidRemoteClusterError("encryption can only be used in enterprise edition when the entire cluster is running at least 2.5 version of Couchbase Server")
+			return wrapAsInvalidRemoteClusterError("Encryption can only be used in enterprise edition when the entire cluster is running at least 2.5 version of Couchbase Server")
 		}
 	}
 
@@ -557,7 +557,7 @@ func (service *RemoteClusterService) addRemoteCluster(ref *metadata.RemoteCluste
 		return err
 	}
 
-	service.logger.Infof("Remote cluster %v added to metadata store.\n", key)
+	service.logger.Infof("Remote cluster %v has been added to metadata store.\n", key)
 
 	return service.updateCache(ref.Id, ref)
 }

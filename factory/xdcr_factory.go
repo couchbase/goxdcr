@@ -157,7 +157,7 @@ func (xdcrf *XDCRFactory) NewPipeline(topic string, progress_recorder common.Pip
 		}
 		sourceNozzle.SetConnector(router)
 	}
-	progress_recorder("Source nozzles are wired to target nozzles")
+	progress_recorder("Source nozzles have been wired to target nozzles")
 
 	// construct pipeline
 	pipeline := pp.NewPipelineWithSettingConstructor(topic, sourceNozzles, outNozzles, spec, xdcrf.ConstructSettingsForPart, xdcrf.ConstructSSLPortMap, xdcrf.ConstructUpdateSettingsForPart, xdcrf.SetStartSeqno, xdcrf.remote_cluster_svc.RemoteClusterByUuid, logger_ctx)
@@ -177,9 +177,9 @@ func (xdcrf *XDCRFactory) NewPipeline(topic string, progress_recorder common.Pip
 		}
 	}
 
-	progress_recorder("Pipeline is constructed")
+	progress_recorder("Pipeline has been constructed")
 
-	xdcrf.logger.Infof("XDCR pipeline %v constructed", topic)
+	xdcrf.logger.Infof("Pipeline %v has been constructed", topic)
 	return pipeline, nil
 }
 
@@ -503,7 +503,7 @@ func (xdcrf *XDCRFactory) constructRouter(id string, spec *metadata.ReplicationS
 	logger_ctx *log.LoggerContext) (*parts.Router, error) {
 	routerId := "Router" + PART_NAME_DELIMITER + id
 	router, err := parts.NewRouter(routerId, spec.Id, spec.Settings.FilterExpression, downStreamParts, vbNozzleMap, logger_ctx, pipeline_manager.NewMCRequestObj, extMetaSupported)
-	xdcrf.logger.Infof("Constructed router")
+	xdcrf.logger.Infof("Constructed router %v", routerId)
 	return router, err
 }
 
@@ -627,7 +627,7 @@ func (xdcrf *XDCRFactory) SetStartSeqno(pipeline common.Pipeline) error {
 	}
 	ckpt_mgr := pipeline.RuntimeContext().Service(base.CHECKPOINT_MGR_SVC)
 	if ckpt_mgr == nil {
-		return errors.New(fmt.Sprintf("CheckpoingManager is not attached to pipeline %v", pipeline.Topic()))
+		return errors.New(fmt.Sprintf("CheckpointingManager has not been attached to pipeline %v", pipeline.Topic()))
 	}
 	return ckpt_mgr.(*pipeline_svc.CheckpointManager).SetVBTimestamps(pipeline.Topic())
 }
@@ -712,7 +712,7 @@ func (xdcrf *XDCRFactory) constructSettingsForDcpNozzle(pipeline common.Pipeline
 
 	ckpt_svc := pipeline.RuntimeContext().Service(base.CHECKPOINT_MGR_SVC)
 	if ckpt_svc == nil {
-		return nil, errors.New("No checkpoint manager is registered with the pipeline")
+		return nil, fmt.Errorf("No checkpoint manager has been registered with the pipeline %v", pipeline.Topic())
 	}
 
 	vbList := part.GetVBList()
@@ -745,7 +745,7 @@ func (xdcrf *XDCRFactory) registerServices(pipeline common.Pipeline, logger_ctx 
 		xdcrf.remote_cluster_svc, xdcrf.repl_spec_svc, xdcrf.cluster_info_svc,
 		xdcrf.xdcr_topology_svc, through_seqno_tracker_svc, kv_vb_map, logger_ctx)
 	if err != nil {
-		xdcrf.logger.Errorf("Failed to construct CheckpointManager, err=%v ckpt_svc=%v, capi_svc=%v, remote_cluster_svc=%v, repl_spec_svc=%v\n", err, xdcrf.checkpoint_svc, xdcrf.capi_svc,
+		xdcrf.logger.Errorf("Failed to construct CheckpointManager for %v. err=%v ckpt_svc=%v, capi_svc=%v, remote_cluster_svc=%v, repl_spec_svc=%v\n", pipeline.Topic(), err, xdcrf.checkpoint_svc, xdcrf.capi_svc,
 			xdcrf.remote_cluster_svc, xdcrf.repl_spec_svc)
 		return err
 	}
@@ -805,7 +805,7 @@ func (xdcrf *XDCRFactory) constructSettingsForStatsManager(pipeline common.Pipel
 
 		//set the start vb sequence no map to statistics manager
 		if pipeline.RuntimeContext().Service(base.CHECKPOINT_MGR_SVC) == nil {
-			return nil, errors.New("No checkpoint manager is registered with the pipeline")
+			return nil, fmt.Errorf("No checkpoint manager has been registered with the pipeline %v", pipeline.Topic())
 		}
 
 		s[pipeline_svc.VB_START_TS] = ts

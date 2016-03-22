@@ -244,7 +244,7 @@ func (p *sslOverProxyConnPool) newConn() (*mcc.Client, error) {
 	ssl_con_str := LocalHostName + UrlPortNumberDelimiter + strconv.FormatInt(int64(p.local_proxy_port), ParseIntBase)
 	conn, err := DialTCPWithTimeout("tcp", ssl_con_str)
 	if err != nil {
-		ConnPoolMgr().logger.Errorf("Failed to establish ssl over proxy connection. err=%v\n", err)
+		ConnPoolMgr().logger.Errorf("Failed to establish ssl over proxy connection to %v. err=%v\n", ssl_con_str, err)
 		return nil, err
 	}
 
@@ -327,13 +327,13 @@ func (p *sslOverMemConnPool) Certificate() []byte {
 func (p *sslOverMemConnPool) newConn() (*mcc.Client, error) {
 
 	//connect to local proxy port
-	if len(p.certificate) == 0 {
-		return nil, errors.New("No certificate is provided, can't establish ssl connection")
-	}
-
 	ssl_con_str := p.hostName + UrlPortNumberDelimiter + strconv.FormatInt(int64(p.remote_memcached_port), ParseIntBase)
 
-	ConnPoolMgr().logger.Infof("Try to create a ssl over memcached connection on %v", ssl_con_str)
+	if len(p.certificate) == 0 {
+		return nil, fmt.Errorf("No certificate has been provided. Can't establish ssl connection to %v", ssl_con_str)
+	}
+
+	ConnPoolMgr().logger.Infof("Trying to create a ssl over memcached connection on %v", ssl_con_str)
 	conn, _, err := MakeTLSConn(ssl_con_str, p.certificate, p.logger)
 	if err != nil {
 		return nil, err
@@ -348,7 +348,7 @@ func (p *sslOverMemConnPool) newConn() (*mcc.Client, error) {
 
 	// authentic using user/pass
 	if p.bucketName != "" {
-		ConnPoolMgr().logger.Info("Authenticate...")
+		ConnPoolMgr().logger.Info("Authenticating...")
 		_, err = client.Auth(p.bucketName, p.password)
 		if err != nil {
 			ConnPoolMgr().logger.Errorf("err=%v\n", err)
@@ -357,7 +357,7 @@ func (p *sslOverMemConnPool) newConn() (*mcc.Client, error) {
 		}
 	}
 
-	ConnPoolMgr().logger.Info("memcached client on ssl connection is created")
+	ConnPoolMgr().logger.Infof("memcached client on ssl connection %v has been created successfully", ssl_con_str)
 	return client, nil
 }
 

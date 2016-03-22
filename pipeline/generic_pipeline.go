@@ -139,7 +139,7 @@ func (genericPipeline *GenericPipeline) startPart(part common.Part, settings map
 
 	partSettings := settings
 	if genericPipeline.partSetting_constructor != nil {
-		genericPipeline.logger.Debugf("Calling part setting constructor\n")
+		genericPipeline.logger.Debugf("%v calling part setting constructor\n", genericPipeline.InstanceId())
 		partSettings, err = genericPipeline.partSetting_constructor(genericPipeline, part, settings, ts, targetClusterRef, ssl_port_map, isSSLOverMem)
 		if err != nil {
 			err_ch <- partError{part.Id(), err}
@@ -164,6 +164,7 @@ func (genericPipeline *GenericPipeline) Start(settings map[string]interface{}) e
 
 	defer func(genericPipeline *GenericPipeline, err error) {
 		if err != nil {
+			genericPipeline.logger.Errorf("%v failed to start, err=%v", genericPipeline.InstanceId(), err)
 			genericPipeline.ReportProgress(fmt.Sprintf("Pipeline failed to start, err=%v", err))
 		}
 	}(genericPipeline, err)
@@ -182,7 +183,7 @@ func (genericPipeline *GenericPipeline) Start(settings map[string]interface{}) e
 
 	targetClusterRef, err := genericPipeline.remoteClusterRef_retriever(genericPipeline.spec.TargetClusterUUID, true)
 	if err != nil {
-		genericPipeline.logger.Errorf("Error getting remote cluster with uuid=%v, err=%v\n", genericPipeline.spec.TargetClusterUUID, err)
+		genericPipeline.logger.Errorf("%v error getting remote cluster with uuid=%v, err=%v\n", genericPipeline.InstanceId(), genericPipeline.spec.TargetClusterUUID, err)
 		return err
 	}
 
@@ -196,8 +197,8 @@ func (genericPipeline *GenericPipeline) Start(settings map[string]interface{}) e
 	if err != nil {
 		return err
 	}
-	genericPipeline.logger.Debug("The runtime context is started")
-	genericPipeline.ReportProgress("The runtime context is started")
+	genericPipeline.logger.Debugf("%v The runtime context has been started", genericPipeline.InstanceId())
+	genericPipeline.ReportProgress("The runtime context has been started")
 
 	var ssl_port_map map[string]uint16
 	var isSSLOverMem bool
@@ -221,7 +222,7 @@ func (genericPipeline *GenericPipeline) Start(settings map[string]interface{}) e
 
 			genericPipeline.startPart(source, settings, ts, targetClusterRef, ssl_port_map, isSSLOverMem, err_ch)
 			if len(err_ch) == 0 {
-				genericPipeline.logger.Infof("Incoming nozzle %s is started", source.Id())
+				genericPipeline.logger.Infof("%v Incoming nozzle %s has been started", genericPipeline.InstanceId(), source.Id())
 			}
 			return
 
@@ -233,18 +234,18 @@ func (genericPipeline *GenericPipeline) Start(settings map[string]interface{}) e
 			return fmt.Errorf("Pipeline %v failed to start, err=%v\n", genericPipeline.Topic(), errMsg)
 		}
 	}
-	genericPipeline.logger.Info("All parts has been started")
-	genericPipeline.ReportProgress("All parts has been started")
+	genericPipeline.logger.Infof("%v All parts have been started", genericPipeline.Topic())
+	genericPipeline.ReportProgress("All parts have been started")
 
 	//open targets
 	for _, target := range genericPipeline.targets {
 		err = target.Open()
 		if err != nil {
-			genericPipeline.logger.Errorf("Failed to open outgoing nozzle %s", target.Id())
+			genericPipeline.logger.Errorf("%v failed to open outgoing nozzle %s. err=%v", genericPipeline.InstanceId(), target.Id(), err)
 			return err
 		}
 	}
-	genericPipeline.logger.Debug("All outgoing nozzles have been opened")
+	genericPipeline.logger.Debugf("%v All outgoing nozzles have been opened", genericPipeline.Topic())
 	genericPipeline.ReportProgress("All outgoing nozzles have been opened")
 
 	//open source
@@ -252,16 +253,16 @@ func (genericPipeline *GenericPipeline) Start(settings map[string]interface{}) e
 
 		err = source.Open()
 		if err != nil {
-			genericPipeline.logger.Errorf("Failed to open incoming nozzle %s", source.Id())
+			genericPipeline.logger.Errorf("%v failed to open incoming nozzle %s. err=%v", genericPipeline.InstanceId(), source.Id(), err)
 			return err
 		}
 	}
-	genericPipeline.logger.Debug("All incoming nozzles have been opened")
-	genericPipeline.ReportProgress("All incoming nozzles have been openedL¬")
+	genericPipeline.logger.Debugf("%v All incoming nozzles have been opened", genericPipeline.Topic())
+	genericPipeline.ReportProgress("All incoming nozzles have been opened")
 
 	err = genericPipeline.SetState(common.Pipeline_Running)
 	if err == nil {
-		genericPipeline.logger.Infof("-----------Pipeline %s is started----------", genericPipeline.InstanceId())
+		genericPipeline.logger.Infof("-----------Pipeline %s has been started----------", genericPipeline.InstanceId())
 		genericPipeline.ReportProgress("Pipeline is running")
 
 	} else {
@@ -286,10 +287,10 @@ func formatErrMsg(err_ch chan partError) map[string]error {
 
 func (genericPipeline *GenericPipeline) stopPart(part common.Part) error {
 	var err error = nil
-	genericPipeline.logger.Infof("Trying to stop part %v for %v\n", part.Id(), genericPipeline.InstanceId())
+	genericPipeline.logger.Infof("%v trying to stop part %v\n", genericPipeline.InstanceId(), part.Id())
 	err = simple_utils.ExecWithTimeout(part.Stop, 1000*time.Millisecond, genericPipeline.logger)
 	if err == nil {
-		genericPipeline.logger.Infof("part %v is stopped\n", part.Id())
+		genericPipeline.logger.Infof("part %v has been stopped\n", part.Id())
 	} else {
 		genericPipeline.logger.Infof("Failed to stop part %v, err=%v, let it alone to die\n", part.Id(), err)
 	}
@@ -348,7 +349,7 @@ func (genericPipeline *GenericPipeline) Stop() error {
 	if err != nil {
 		return err
 	}
-	genericPipeline.ReportProgress("Runtime context is stopped")
+	genericPipeline.ReportProgress("Runtime context has been stopped")
 
 	//close the sources
 	for _, source := range genericPipeline.sources {
@@ -357,14 +358,14 @@ func (genericPipeline *GenericPipeline) Stop() error {
 			return err
 		}
 	}
-	genericPipeline.logger.Debug("Incoming nozzles are closed, preparing to stop.")
+	genericPipeline.logger.Debugf("%v Incoming nozzles have been closed, preparing to stop.", genericPipeline.InstanceId())
 
 	partsMap := GetAllParts(genericPipeline)
 	for _, part := range partsMap {
 		go func(part common.Part) {
 			err = genericPipeline.stopPart(part)
 			if err != nil {
-				genericPipeline.logger.Infof("Source nozzle %v failed to stop in time, left it alone to die.", part.Id())
+				genericPipeline.logger.Infof("%v Source nozzle %v failed to stop in time, left it alone to die.", genericPipeline.InstanceId(), part.Id())
 			}
 
 		}(part)
@@ -377,10 +378,10 @@ func (genericPipeline *GenericPipeline) Stop() error {
 		}(asyncEventListener)
 	}
 
-	genericPipeline.ReportProgress("Pipeline is stopped")
+	genericPipeline.ReportProgress("Pipeline has been stopped")
 
 	err = genericPipeline.SetState(common.Pipeline_Stopped)
-	genericPipeline.logger.Infof("Pipeline %v is stopped\n", genericPipeline.InstanceId())
+	genericPipeline.logger.Infof("Pipeline %v has been stopped\n", genericPipeline.InstanceId())
 	return err
 
 }
@@ -436,7 +437,7 @@ func NewPipelineWithSettingConstructor(t string,
 		instance_id:   time.Now().Nanosecond(),
 		state:         common.Pipeline_Initial,
 		settings_lock: &sync.RWMutex{}}
-	pipeline.logger.Debugf("Pipeline %s is initialized with a part setting constructor %v", t, partsSettingsConstructor)
+	pipeline.logger.Debugf("Pipeline %s has been initialized with a part setting constructor %v", t, partsSettingsConstructor)
 
 	return pipeline
 }
@@ -638,7 +639,7 @@ func (genericPipeline *GenericPipeline) UpdateSettings(settings map[string]inter
 
 	// update settings on parts and services in pipeline
 	if genericPipeline.partSetting_constructor != nil {
-		genericPipeline.logger.Debugf("Calling part update setting constructor with settings=%v\n", settings)
+		genericPipeline.logger.Debugf("%v calling part update setting constructor with settings=%v\n", genericPipeline.InstanceId(), settings)
 		for _, part := range GetAllParts(genericPipeline) {
 			partSettings, err := genericPipeline.partUpdateSetting_constructor(genericPipeline, part, settings)
 			if err != nil {
@@ -652,7 +653,7 @@ func (genericPipeline *GenericPipeline) UpdateSettings(settings map[string]inter
 	}
 
 	if genericPipeline.context != nil {
-		genericPipeline.logger.Debugf("Calling update setting constructor on runtime context with settings=%v\n", settings)
+		genericPipeline.logger.Debugf("%v calling update setting constructor on runtime context with settings=%v\n", genericPipeline.InstanceId(), settings)
 		return genericPipeline.context.UpdateSettings(settings)
 	}
 

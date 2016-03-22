@@ -59,7 +59,7 @@ func NewCAPIService(cluster_info_service *ClusterInfoSvc, logger_ctx *log.Logger
 //		  current_remoteVBUUID - new remote vb uuid might be retured if bMatch = false and there was a topology change on remote vb
 //		  err
 func (capi_svc *CAPIService) PreReplicate(remoteBucket *service_def.RemoteBucketInfo,
-	knownRemoteVBStatus *service_def.RemoteVBReplicationStatus, xdcrCheckpoingCapbility bool) (bMatch bool, current_remoteVBOpaque metadata.TargetVBOpaque, err error) {
+	knownRemoteVBStatus *service_def.RemoteVBReplicationStatus, xdcrCheckpointingCapbility bool) (bMatch bool, current_remoteVBOpaque metadata.TargetVBOpaque, err error) {
 	capi_svc.logger.Debug("Calling _pre_replicate")
 	api_base, err := capi_svc.composeAPIRequestBaseForVb(remoteBucket, knownRemoteVBStatus.VBNo)
 	if err != nil {
@@ -79,7 +79,7 @@ func (capi_svc *CAPIService) PreReplicate(remoteBucket *service_def.RemoteBucket
 		return false, nil, err
 	}
 
-	bMatch, current_remoteVBOpaque, err = capi_svc.parsePreReplicateResp(api_base.url, status_code, respMap, knownRemoteVBStatus.VBNo, xdcrCheckpoingCapbility)
+	bMatch, current_remoteVBOpaque, err = capi_svc.parsePreReplicateResp(api_base.url, status_code, respMap, knownRemoteVBStatus.VBNo, xdcrCheckpointingCapbility)
 
 	if err == nil {
 		capi_svc.logger.Debugf("_pre_replicate succeeded for vb=%v\n", knownRemoteVBStatus.VBNo)
@@ -335,7 +335,7 @@ func (capi_svc *CAPIService) parsePreReplicateResp(hostName string,
 	resp_status_code int,
 	respMap map[string]interface{},
 	vbno uint16,
-	xdcrCheckpoingCapbility bool) (bool, metadata.TargetVBOpaque, error) {
+	xdcrCheckpointingCapbility bool) (bool, metadata.TargetVBOpaque, error) {
 	if resp_status_code == 200 || resp_status_code == 400 {
 		bMatch := (resp_status_code == 200)
 
@@ -351,7 +351,7 @@ func (capi_svc *CAPIService) parsePreReplicateResp(hostName string,
 		var retError error = fmt.Errorf("unexpected status code, %v, in _pre_replicate response", resp_status_code)
 
 		//double check again disableCkptBackwardsCompat
-		if resp_status_code == 404 && xdcrCheckpoingCapbility == false {
+		if resp_status_code == 404 && xdcrCheckpointingCapbility == false {
 			//throw error
 			capi_svc.logger.Infof("_pre_replicate failed. Response: 404 , reason: Target node %v is an old node", hostName)
 			retError = service_def.NoSupportForXDCRCheckpointingError

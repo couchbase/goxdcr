@@ -237,7 +237,7 @@ func (ckmgr *CheckpointManager) checkCkptCapability() {
 		}
 	}
 	ckmgr.support_ckpt = support_ckpt
-	ckmgr.logger.Infof("Remote bucket %v supporting xdcrcheckpoing is %v\n", ckmgr.remote_bucket, ckmgr.support_ckpt)
+	ckmgr.logger.Infof("Remote bucket %v supporting xdcrcheckpointing is %v\n", ckmgr.remote_bucket, ckmgr.support_ckpt)
 }
 
 func (ckmgr *CheckpointManager) updateCurrentVBOpaque(vbno uint16, vbOpaque metadata.TargetVBOpaque) error {
@@ -310,7 +310,7 @@ func (ckmgr *CheckpointManager) SetVBTimestamps(topic string) error {
 		ckmgr.RaiseEvent(common.NewEvent(common.ErrorEncountered, nil, ckmgr, nil, err))
 		return err
 	}
-	ckmgr.logger.Infof("Found %v checkpoit document for replication %v\n", len(ckptDocs), topic)
+	ckmgr.logger.Infof("Found %v checkpoint documents for replication %v\n", len(ckptDocs), topic)
 
 	for vbno, _ := range ckptDocs {
 		if !simple_utils.IsVbInList(vbno, listOfVbs) {
@@ -725,7 +725,7 @@ func (ckmgr *CheckpointManager) do_checkpoint(vbno uint16) (err error) {
 		}
 
 		if ckpt_record.Target_vb_opaque == nil {
-			ckmgr.logger.Info("remote bucket is no an older node, no checkpointing should be done.")
+			ckmgr.logger.Info("remote bucket is an older node, no checkpointing should be done.")
 			return nil
 		}
 
@@ -901,7 +901,7 @@ func (ckmgr *CheckpointManager) massCheckVBOpaques(target_vb_vbuuid_map map[uint
 			target_vb_uuid := latest_ckpt_record.Target_vb_opaque
 			target_vb_vbuuid_map[vb] = target_vb_uuid
 		} else {
-			ckmgr.logger.Infof("remote bucket is no an older node, massCheckVBOpaque is not supported for vb=%v.", vb)
+			ckmgr.logger.Infof("remote bucket is an older node, massCheckVBOpaque is not supported for vb=%v.", vb)
 		}
 	}
 

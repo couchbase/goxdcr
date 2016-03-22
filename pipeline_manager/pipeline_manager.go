@@ -306,7 +306,7 @@ func (pipelineMgr *pipelineManager) startPipeline(topic string) (common.Pipeline
 		return p, nil
 	} else {
 		//the pipeline is already running
-		pipelineMgr.logger.Info("The pipeline asked to be started is already running")
+		pipelineMgr.logger.Infof("The pipeline asked to be started, %v, is already running", topic)
 		return rep_status.Pipeline(), err
 	}
 	return nil, err
@@ -354,7 +354,7 @@ func (pipelineMgr *pipelineManager) removePipelineFromReplicationStatus(p common
 		if rep_status != nil {
 			rep_status.SetPipeline(nil)
 		} else {
-			return fmt.Errorf("replication %v hasn't been registered with PipelineManager yet", p.Topic())
+			return fmt.Errorf("Replication %v hasn't been registered with PipelineManager yet", p.Topic())
 
 		}
 	}
@@ -367,7 +367,7 @@ func (pipelineMgr *pipelineManager) stopPipeline(rep_status *pipeline.Replicatio
 		return fmt.Errorf("Invalid parameter value rep_status=nil")
 	}
 
-	pipelineMgr.logger.Infof("Try to stop the pipeline %s", rep_status.RepId())
+	pipelineMgr.logger.Infof("Trying to stop the pipeline %s", rep_status.RepId())
 	var err error
 
 	if rep_status.Pipeline() != nil && (rep_status.Pipeline().State() == common.Pipeline_Running || rep_status.Pipeline().State() == common.Pipeline_Starting || rep_status.Pipeline().State() == common.Pipeline_Error) {
@@ -378,7 +378,7 @@ func (pipelineMgr *pipelineManager) stopPipeline(rep_status *pipeline.Replicatio
 			//pipeline failed to stopped gracefully in time. ignore the error.
 			//the parts of the pipeline will eventually commit suicide.
 		} else {
-			pipelineMgr.logger.Infof("Pipeline %v is stopped\n", rep_status.RepId())
+			pipelineMgr.logger.Infof("Pipeline %v has been stopped\n", rep_status.RepId())
 		}
 		pipelineMgr.removePipelineFromReplicationStatus(p)
 		pipelineMgr.logger.Infof("Replication Status=%v\n", rep_status)
@@ -504,7 +504,7 @@ func (pipelineMgr *pipelineManager) update(topic string, cur_err error) error {
 			rep_status.AddError(cur_err)
 			updater.refreshReplicationStatus(rep_status, false)
 		}
-		pipelineMgr.logger.Infof("There is already an updater launched for the replication, no-op")
+		pipelineMgr.logger.Infof("There is already an updater launched for the replication %v, no-op", topic)
 	}
 	return nil
 

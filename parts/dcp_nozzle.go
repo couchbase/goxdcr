@@ -250,7 +250,7 @@ func (dcp *DcpNozzle) Start(settings map[string]interface{}) error {
 	if err != nil {
 		return err
 	}
-	dcp.Logger().Infof("%v is initialized\n", dcp.Id())
+	dcp.Logger().Infof("%v has been initialized\n", dcp.Id())
 
 	// start gen_server
 	dcp.start_time = time.Now()
@@ -280,7 +280,9 @@ func (dcp *DcpNozzle) Start(settings map[string]interface{}) error {
 	err = dcp.SetState(common.Part_Running)
 
 	if err == nil {
-		dcp.Logger().Info("Dcp nozzle is started")
+		dcp.Logger().Infof("%v has been started", dcp.Id())
+	} else {
+		dcp.Logger().Errorf("%v failed to start. err=%v", dcp.Id(), err)
 	}
 
 	return err
@@ -300,14 +302,14 @@ func (dcp *DcpNozzle) Stop() error {
 
 	dcp.closeUprStreams()
 	dcp.closeUprFeed()
-	dcp.Logger().Debugf("DcpNozzle %v received %v items, sent %v items\n", dcp.Id(), dcp.counterReceived(), dcp.counterSent())
+	dcp.Logger().Debugf("%v received %v items, sent %v items\n", dcp.Id(), dcp.counterReceived(), dcp.counterSent())
 	err = dcp.Stop_server()
 
 	err = dcp.SetState(common.Part_Stopped)
 	if err != nil {
 		return err
 	}
-	dcp.Logger().Infof("%v is stopped\n", dcp.Id())
+	dcp.Logger().Infof("%v has been stopped\n", dcp.Id())
 	return err
 
 }
@@ -317,7 +319,7 @@ func (dcp *DcpNozzle) closeUprStreams() error {
 	defer dcp.lock_uprFeed.Unlock()
 
 	if dcp.uprFeed != nil {
-		dcp.Logger().Infof("Closing dcp streams for vb=%v\n", dcp.GetVBList())
+		dcp.Logger().Infof("%v Closing dcp streams for vb=%v\n", dcp.Id(), dcp.GetVBList())
 		opaque := newOpaque()
 		errMap := make(map[uint16]error)
 
@@ -332,17 +334,17 @@ func (dcp *DcpNozzle) closeUprStreams() error {
 					errMap[vbno] = err
 				}
 			} else {
-				dcp.Logger().Infof("There is no active stream for vb=%v\n", vbno)
+				dcp.Logger().Infof("%v There is no active stream for vb=%v\n", dcp.Id(), vbno)
 			}
 		}
 
 		if len(errMap) > 0 {
 			msg := fmt.Sprintf("Failed to close upr streams, err=%v\n", errMap)
-			dcp.Logger().Error(msg)
+			dcp.Logger().Errorf("%v %v", dcp.Id(), msg)
 			return errors.New(msg)
 		}
 	} else {
-		dcp.Logger().Info("uprfeed is already closed. No-op")
+		dcp.Logger().Infof("%v uprfeed is already closed. No-op", dcp.Id())
 	}
 	return nil
 }
@@ -353,7 +355,7 @@ func (dcp *DcpNozzle) closeUprFeed() bool {
 	dcp.lock_uprFeed.Lock()
 	defer dcp.lock_uprFeed.Unlock()
 	if dcp.uprFeed != nil {
-		dcp.Logger().Info("Ask uprfeed to close")
+		dcp.Logger().Infof("%v Ask uprfeed to close", dcp.Id())
 		//in the process of stopping, no need to report any error to replication manager anymore
 		dcp.handle_error = false
 
@@ -361,7 +363,7 @@ func (dcp *DcpNozzle) closeUprFeed() bool {
 		dcp.uprFeed = nil
 		actionTaken = true
 	} else {
-		dcp.Logger().Info("uprfeed is already closed. No-op")
+		dcp.Logger().Infof("%v uprfeed is already closed. No-op", dcp.Id())
 	}
 
 	return actionTaken
@@ -384,13 +386,12 @@ func (dcp *DcpNozzle) processData() (err error) {
 	finch := dcp.finch
 	mutch := dcp.uprFeed.C
 	for {
-		dcp.Logger().Debugf("%v processData ....\n", dcp.Id())
 		select {
 		case <-finch:
 			goto done
 		case m, ok := <-mutch: // mutation from upstream
 			if !ok {
-				dcp.Logger().Infof("DCP mutation channel is closed.Stop dcp nozzle now.")
+				dcp.Logger().Infof("%v DCP mutation channel is closed.Stop dcp nozzle now.", dcp.Id())
 				//close uprFeed
 				dcp.closeUprFeed()
 				dcp.handleGeneralError(errors.New("DCP stream is closed."))
@@ -399,6 +400,7 @@ func (dcp *DcpNozzle) processData() (err error) {
 			if m.Opcode == mc.UPR_STREAMREQ {
 				if m.Status == mc.NOT_MY_VBUCKET {
 					vb_err := fmt.Errorf("Received error %v on vb %v\n", base.ErrorNotMyVbucket, m.VBucket)
+					dcp.Logger().Errorf("%v %v", dcp.Id(), vb_err)
 					dcp.handleVBError(m.VBucket, vb_err)
 				} else if m.Status == mc.ROLLBACK {
 					rollbackseq := binary.BigEndian.Uint64(m.Value[:8])
@@ -407,13 +409,15 @@ func (dcp *DcpNozzle) processData() (err error) {
 					//need to request the uprstream for the vbucket again
 					updated_ts, err := dcp.vbtimestamp_updater(vbno, rollbackseq)
 					if err != nil {
-						dcp.Logger().Errorf("Failed to request dcp stream after receiving roll-back for vb=%v\n", vbno)
+						err = fmt.Errorf("Failed to request dcp stream after receiving roll-back for vb=%v. err=%v\n", vbno, err)
+						dcp.Logger().Errorf("%v %v", dcp.Id(), err)
 						dcp.handleGeneralError(err)
 						return err
 					}
 					err = dcp.setTS(vbno, updated_ts, true)
 					if err != nil {
-						dcp.Logger().Errorf("Failed to update start seqno for vb=%v\n", vbno)
+						err = fmt.Errorf("Failed to update start seqno for vb=%v. err=%v\n", vbno, err)
+						dcp.Logger().Errorf("%v %v", dcp.Id(), err)
 						dcp.handleGeneralError(err)
 						return err
 
@@ -460,7 +464,7 @@ func (dcp *DcpNozzle) processData() (err error) {
 						dispatch_time := time.Since(start_time)
 						dcp.RaiseEvent(common.NewEvent(common.DataProcessed, m, dcp, nil /*derivedItems*/, dispatch_time.Seconds()*1000000 /*otherInfos*/))
 					default:
-						dcp.Logger().Debugf("Uprevent OpCode=%v, is skipped\n", m.Opcode)
+						dcp.Logger().Debugf("%v Uprevent OpCode=%v, is skipped\n", dcp.Id(), m.Opcode)
 					}
 				}
 			}
@@ -477,7 +481,7 @@ func (dcp *DcpNozzle) onExit() {
 }
 
 func (dcp *DcpNozzle) StatusSummary() string {
-	msg := fmt.Sprintf("Dcp %v received %v items, sent %v items.", dcp.Id(), dcp.counterReceived(), dcp.counterSent())
+	msg := fmt.Sprintf("%v received %v items, sent %v items.", dcp.Id(), dcp.counterReceived(), dcp.counterSent())
 	streams_inactive := dcp.inactiveDcpStreamsWithState()
 	if len(streams_inactive) > 0 {
 		msg += fmt.Sprintf(" streams inactive: %v", streams_inactive)
@@ -490,7 +494,7 @@ func (dcp *DcpNozzle) handleGeneralError(err error) {
 	err1 := dcp.SetState(common.Part_Error)
 	if err1 == nil {
 		dcp.RaiseEvent(common.NewEvent(common.ErrorEncountered, nil, dcp, nil, err))
-		dcp.Logger().Errorf("Raise error condition %v\n", err)
+		dcp.Logger().Errorf("%v Raise error condition %v\n", dcp.Id(), err)
 	} else {
 		dcp.Logger().Debugf("%v in shutdown process. err=%v is ignored\n", dcp.Id(), err)
 	}
@@ -536,7 +540,7 @@ func (dcp *DcpNozzle) startUprStreams() error {
 		}
 	}
 done:
-	dcp.Logger().Infof("%v: all dcp stream are initialized.\n", dcp.Id())
+	dcp.Logger().Infof("%v: all dcp stream have been initialized.\n", dcp.Id())
 
 	return nil
 }
@@ -576,7 +580,7 @@ func (dcp *DcpNozzle) startUprStream(vbno uint16, vbts *base.VBTimestamp) error 
 			}
 			return err
 		} else {
-			panic(fmt.Sprintf("Try to startUprStream to invalid vbno=%v", vbno))
+			panic(fmt.Sprintf("%v Try to startUprStream for invalid vbno=%v", dcp.Id(), vbno))
 
 		}
 	}
@@ -870,11 +874,12 @@ func (dcp *DcpNozzle) CheckStuckness(dcp_stats map[string]map[string]string) err
 
 	// if we get here, there is probably something wrong with dcp
 	dcp.dcp_miss_count++
-	dcp.Logger().Infof("Incrementing dcp miss count for %v. Dcp miss count = %v\n", dcp.Id(), dcp.dcp_miss_count)
+	dcp.Logger().Infof("%v Incrementing dcp miss count. Dcp miss count = %v\n", dcp.Id(), dcp.dcp_miss_count)
 
 	if dcp.dcp_miss_count > dcp.max_dcp_miss_count {
 		//declare pipeline broken
-		return fmt.Errorf("Dcp is stuck for dcp nozzle %v", dcp.Id())
+		dcp.Logger().Errorf("%v is stuck", dcp.Id())
+		return errors.New("Dcp is stuck")
 	}
 
 	return nil

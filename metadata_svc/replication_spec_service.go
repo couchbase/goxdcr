@@ -113,19 +113,19 @@ func (service *ReplicationSpecService) initCache() error {
 	for _, entry := range entries {
 		spec, err := constructReplicationSpec(entry.Value, entry.Rev)
 		if err != nil || spec == nil {
-			service.logger.Errorf("failed to contruct replication spec, key=%v, err=%v\n", entry.Key, err)
+			service.logger.Errorf("Failed to contruct replication spec, key=%v, err=%v\n", entry.Key, err)
 			return err
 		}
 		service.cacheSpec(cache, spec.Id, spec)
 	}
 	service.cache = cache
-	service.logger.Info("Cache is initialized for ReplicationSpecService")
+	service.logger.Info("Cache has been initialized for ReplicationSpecService")
 	return nil
 }
 
 func (service *ReplicationSpecService) getCache() *MetadataCache {
 	if service.cache == nil {
-		panic("cache is not initialized for ReplicationSpecService")
+		panic("Cache has not been initialized for ReplicationSpecService")
 	}
 	return service.cache
 }
@@ -201,12 +201,12 @@ func (service *ReplicationSpecService) ValidateNewReplicationSpec(sourceBucket, 
 
 	remote_connStr, err := targetClusterRef.MyConnectionStr()
 	if err != nil {
-		errorMap[base.ToCluster] = utils.NewEnhancedError("invalid remote cluster, MyConnectionStr() failed.", err)
+		errorMap[base.ToCluster] = utils.NewEnhancedError("Invalid remote cluster. MyConnectionStr() failed.", err)
 		return "", "", nil, errorMap
 	}
 	remote_userName, remote_password, err := targetClusterRef.MyCredentials()
 	if err != nil {
-		errorMap[base.ToCluster] = utils.NewEnhancedError("invalid remote cluster, MyCredentials() failed.", err)
+		errorMap[base.ToCluster] = utils.NewEnhancedError("Invalid remote cluster. MyCredentials() failed.", err)
 		return "", "", nil, errorMap
 	}
 
@@ -316,7 +316,7 @@ func (service *ReplicationSpecService) SetReplicationSpec(spec *metadata.Replica
 
 	err = service.updateCache(spec.Id, spec)
 	if err == nil {
-		service.logger.Infof("replication spec %s is updated, rev=%v\n", spec.Id, rev)
+		service.logger.Infof("Replication spec %s has been updated, rev=%v\n", spec.Id, rev)
 		return nil
 	} else {
 		return err

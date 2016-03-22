@@ -158,10 +158,10 @@ func (tcpConnPoolMgr *tcpConnPoolMgr) CreatePool(poolName string, hostName strin
 	for i := 0; i < connectionSize; i++ {
 		mcClient, err := NewTCPConn(hostName)
 		if err == nil {
-			tcpConnPoolMgr.logger.Debug("A client connection is established")
+			tcpConnPoolMgr.logger.Debug("A client connection has been established")
 			p.clients <- mcClient
 		} else {
-			tcpConnPoolMgr.logger.Debugf("error establishing connection with hostname=%s - %s", hostName, err)
+			tcpConnPoolMgr.logger.Debugf("Error establishing connection to hostname=%s - %s", hostName, err)
 		}
 	}
 
@@ -169,7 +169,7 @@ func (tcpConnPoolMgr *tcpConnPoolMgr) CreatePool(poolName string, hostName strin
 	tcpConnPoolMgr.conn_pools_map[poolName] = p
 	tcpConnPoolMgr.token.Unlock()
 
-	tcpConnPoolMgr.logger.Infof("Connection pool %s is created with %d clients\n", poolName, len(p.clients))
+	tcpConnPoolMgr.logger.Infof("Connection pool %s has been created with %d clients\n", poolName, len(p.clients))
 	return p, nil
 }
 
@@ -209,7 +209,7 @@ func (tcpConnPoolMgr *tcpConnPoolMgr) Close() {
 	defer tcpConnPoolMgr.token.Unlock()
 
 	for key, pool := range tcpConnPoolMgr.conn_pools_map {
-		tcpConnPoolMgr.logger.Infof("close pool %s", key)
+		tcpConnPoolMgr.logger.Infof("Closing pool %s", key)
 		pool.ReleaseConnections()
 	}
 }

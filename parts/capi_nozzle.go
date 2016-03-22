@@ -269,7 +269,7 @@ func (capi *CapiNozzle) Close() error {
 }
 
 func (capi *CapiNozzle) Start(settings map[string]interface{}) error {
-	capi.Logger().Infof("Capi %v starting ....\n", capi.Id())
+	capi.Logger().Infof("%v starting ....\n", capi.Id())
 
 	err := capi.SetState(common.Part_Starting)
 	if err != nil {
@@ -277,7 +277,7 @@ func (capi *CapiNozzle) Start(settings map[string]interface{}) error {
 	}
 
 	err = capi.initialize(settings)
-	capi.Logger().Infof("Capi %v initialized\n", capi.Id())
+	capi.Logger().Infof("%v initialized\n", capi.Id())
 	if err == nil {
 		capi.childrenWaitGrp.Add(1)
 		go capi.selfMonitor(capi.selfMonitor_finch, &capi.childrenWaitGrp)
@@ -292,37 +292,39 @@ func (capi *CapiNozzle) Start(settings map[string]interface{}) error {
 	if err == nil {
 		err = capi.SetState(common.Part_Running)
 		if err == nil {
-			capi.Logger().Infof("Capi %v is started successfully\n", capi.Id())
+			capi.Logger().Infof("%v has been started successfully\n", capi.Id())
 		}
 	}
 	if err != nil {
-		capi.Logger().Errorf("Failed to start capi %v. err=%v\n", capi.Id(), err)
+		capi.Logger().Errorf("%v failed to start. err=%v\n", capi.Id(), err)
 	}
 	return err
 }
 
 func (capi *CapiNozzle) Stop() error {
-	capi.Logger().Infof("Stop CapiNozzle %v\n", capi.Id())
+	capi.Logger().Infof("%v stopping \n", capi.Id())
 
 	err := capi.SetState(common.Part_Stopping)
 	if err != nil {
 		return err
 	}
 
-	capi.Logger().Debugf("CapiNozzle %v processed %v items\n", capi.Id(), capi.counter_sent)
+	capi.Logger().Debugf("%v processed %v items\n", capi.Id(), capi.counter_sent)
 
 	//close data channels
 	for _, dataChan := range capi.vb_dataChan_map {
 		close(dataChan)
 	}
-	capi.Logger().Infof("closing batches ready for %v\n", capi.Id())
+	capi.Logger().Infof("%v closing batches ready\n", capi.Id())
 	close(capi.batches_ready)
 
 	err = capi.Stop_server()
 
 	err = capi.SetState(common.Part_Stopped)
 	if err == nil {
-		capi.Logger().Debugf("CapiNozzle %v is stopped\n", capi.Id())
+		capi.Logger().Infof("%v has been stopped\n", capi.Id())
+	} else {
+		capi.Logger().Errorf("%v failed to stop. err=%v\n", capi.Id(), err)
 	}
 
 	return err
@@ -351,7 +353,7 @@ func (capi *CapiNozzle) batchReady(vbno uint16) error {
 		capi.Logger().Debugf("%v move the batch (count=%d) for vb %v into ready queue\n", capi.Id(), batch.count(), vbno)
 		select {
 		case capi.batches_ready <- batch:
-			capi.Logger().Debugf("There are %d batches in ready queue\n", len(capi.batches_ready))
+			capi.Logger().Debugf("%v There are %d batches in ready queue\n", capi.Id(), len(capi.batches_ready))
 
 			capi.initNewBatch(vbno)
 		}
@@ -361,8 +363,8 @@ func (capi *CapiNozzle) batchReady(vbno uint16) error {
 }
 
 func (capi *CapiNozzle) Receive(data interface{}) error {
-	capi.Logger().Debugf("data key=%v seq=%v vb=%v is received", data.(*base.WrappedMCRequest).Req.Key, data.(*base.WrappedMCRequest).Seqno, data.(*base.WrappedMCRequest).Req.VBucket)
-	capi.Logger().Debugf("data channel len is %d\n", capi.items_in_dataChan)
+	capi.Logger().Debugf("%v data key=%v seq=%v vb=%v is received", capi.Id(), data.(*base.WrappedMCRequest).Req.Key, data.(*base.WrappedMCRequest).Seqno, data.(*base.WrappedMCRequest).Req.VBucket)
+	capi.Logger().Debugf("%v data channel len is %d\n", capi.Id(), capi.items_in_dataChan)
 
 	req := data.(*base.WrappedMCRequest)
 
@@ -371,7 +373,7 @@ func (capi *CapiNozzle) Receive(data interface{}) error {
 	dataChan, ok := capi.vb_dataChan_map[vbno]
 	if !ok {
 		capi.Logger().Errorf("%v received a request with unexpected vb %v\n", capi.Id(), vbno)
-		capi.Logger().Errorf("datachan map len=%v, map = %v \n", len(capi.vb_dataChan_map), capi.vb_dataChan_map)
+		capi.Logger().Errorf("%v datachan map len=%v, map = %v \n", capi.Id(), len(capi.vb_dataChan_map), capi.vb_dataChan_map)
 	}
 
 	dataChan <- req
@@ -407,14 +409,13 @@ func (capi *CapiNozzle) accumuBatch(vbno uint16, request *base.WrappedMCRequest)
 		capi.batchReady(vbno)
 	}
 
-	capi.Logger().Debugf("batch for vb %v: batch=%v, batch.count=%v, batch.start_time=%v\n", vbno, batch, batch.count(), batch.start_time)
+	capi.Logger().Debugf("%v batch for vb %v: batch=%v, batch.count=%v, batch.start_time=%v\n", capi.Id(), vbno, batch, batch.count(), batch.start_time)
 }
 
 func (capi *CapiNozzle) processData_batch(finch chan bool, waitGrp *sync.WaitGroup) (err error) {
 	capi.Logger().Infof("%v processData starts..........\n", capi.Id())
 	defer waitGrp.Done()
 	for {
-		capi.Logger().Debugf("%v processData ....\n", capi.Id())
 		select {
 		case <-finch:
 			goto done
@@ -424,7 +425,7 @@ func (capi *CapiNozzle) processData_batch(finch chan bool, waitGrp *sync.WaitGro
 				goto done
 			default:
 				if capi.validateRunningState() != nil {
-					capi.Logger().Infof("%v has stopped.", capi.Id())
+					capi.Logger().Infof("%v has stopped. Exiting.", capi.Id())
 					goto done
 				}
 				if capi.IsOpen() {
@@ -437,7 +438,7 @@ func (capi *CapiNozzle) processData_batch(finch chan bool, waitGrp *sync.WaitGro
 			}
 		case <-capi.batches_nonempty_ch:
 			if capi.validateRunningState() != nil {
-				capi.Logger().Infof("capi %v has stopped.", capi.Id())
+				capi.Logger().Infof("%v has stopped. Exiting", capi.Id())
 				goto done
 			}
 
@@ -494,14 +495,14 @@ func (capi *CapiNozzle) send_internal(batch *capiBatch) error {
 	if batch != nil {
 		count := batch.count()
 
-		capi.Logger().Infof("Send batch count=%d for vb %v\n", count, batch.vbno)
+		capi.Logger().Infof("%v send batch count=%d for vb %v\n", capi.Id(), count, batch.vbno)
 
 		capi.counter_sent = capi.counter_sent + count
 		capi.Logger().Debugf("So far, capi %v processed %d items", capi.Id(), capi.counter_sent)
 
 		bigDoc_noRep_map, err := capi.batchGetMeta(batch.vbno, batch.bigDoc_map)
 		if err != nil {
-			capi.Logger().Errorf("batchGetMeta failed. err=%v\n", err)
+			capi.Logger().Errorf("%v batchGetMeta failed. err=%v\n", capi.Id(), err)
 		} else {
 			batch.bigDoc_noRep_map = bigDoc_noRep_map
 		}
@@ -514,7 +515,7 @@ func (capi *CapiNozzle) send_internal(batch *capiBatch) error {
 
 //batch call for document size larger than the optimistic threshold
 func (capi *CapiNozzle) batchGetMeta(vbno uint16, bigDoc_map map[string]*base.WrappedMCRequest) (map[string]bool, error) {
-	capi.Logger().Debugf("batchGetMeta called for vb %v and bigDoc_map with len %v, map=%v\n", vbno, len(bigDoc_map), bigDoc_map)
+	capi.Logger().Debugf("%v batchGetMeta called for vb %v and bigDoc_map with len %v, map=%v\n", capi.Id(), vbno, len(bigDoc_map), bigDoc_map)
 
 	bigDoc_noRep_map := make(map[string]bool)
 
@@ -547,13 +548,13 @@ func (capi *CapiNozzle) batchGetMeta(vbno uint16, bigDoc_map map[string]*base.Wr
 	var out interface{}
 	err, statusCode := utils.QueryRestApiWithAuth(couchApiBaseHost, couchApiBasePath+base.RevsDiffPath, true, capi.config.username, capi.config.password, capi.config.certificate, base.MethodPost, base.JsonContentType,
 		body, capi.config.connectionTimeout, &out, nil, false, capi.Logger())
-	capi.Logger().Debugf("results of _revs_diff query for vb %v: err=%v, status=%v\n", vbno, err, statusCode)
+	capi.Logger().Debugf("%v results of _revs_diff query for vb %v: err=%v, status=%v\n", capi.Id(), vbno, err, statusCode)
 	if err != nil {
 		capi.Logger().Errorf("_revs_diff query for vb %v failed with err=%v\n", vbno, err)
 		return nil, err
 	} else if statusCode != 200 {
 		errMsg := fmt.Sprintf("Received unexpected status code %v from _revs_diff query for vbucket %v.\n", statusCode, vbno)
-		capi.Logger().Error(errMsg)
+		capi.Logger().Errorf("%v %v", capi.Id(), errMsg)
 		return nil, errors.New(errMsg)
 	}
 
@@ -565,7 +566,7 @@ func (capi *CapiNozzle) batchGetMeta(vbno uint16, bigDoc_map map[string]*base.Wr
 	}
 
 	bigDoc_rep_map, ok := out.(map[string]interface{})
-	capi.Logger().Debugf("bigDoc_rep_map=%v\n", bigDoc_rep_map)
+	capi.Logger().Debugf("%v bigDoc_rep_map=%v\n", capi.Id(), bigDoc_rep_map)
 	if !ok {
 		return nil, errors.New(fmt.Sprintf("Error parsing return value from _revs_diff query for vbucket %v", vbno))
 	}
@@ -580,7 +581,7 @@ func (capi *CapiNozzle) batchGetMeta(vbno uint16, bigDoc_map map[string]*base.Wr
 		}
 	}
 
-	capi.Logger().Debugf("Done with batchGetMeta,bigDoc_noRep_map=%v\n", bigDoc_noRep_map)
+	capi.Logger().Debugf("%v done with batchGetMeta,bigDoc_noRep_map=%v\n", capi.Id(), bigDoc_noRep_map)
 	return bigDoc_noRep_map, nil
 }
 
@@ -602,7 +603,7 @@ func (capi *CapiNozzle) batchSendWithRetry(batch *capiBatch) error {
 			capi.adjustRequest(item)
 			req_list = append(req_list, item)
 		} else {
-			capi.Logger().Debugf("did not send doc with key %v since it failed conflict resolution\n", string(item.Req.Key))
+			capi.Logger().Debugf("%v did not send doc with key %v since it failed conflict resolution\n", capi.Id(), string(item.Req.Key))
 			additionalInfo := DataFailedCRSourceEventAdditional{Seqno: item.Seqno,
 				Opcode:      encodeOpCode(item.Req.Opcode),
 				IsExpirySet: (binary.BigEndian.Uint32(item.Req.Extras[4:8]) != 0),
@@ -634,7 +635,7 @@ func (capi *CapiNozzle) batchSendWithRetry(batch *capiBatch) error {
 			capi.recycleDataObj(req)
 		}
 	} else {
-		capi.Logger().Errorf("Error updating docs on target. err=%v\n", err)
+		capi.Logger().Errorf("%v error updating docs on target. err=%v\n", capi.Id(), err)
 		if err != PartStoppedError {
 			capi.handleGeneralError(err)
 		}
@@ -654,7 +655,7 @@ func (capi *CapiNozzle) onExit() {
 	capi.childrenWaitGrp.Wait()
 
 	//cleanup
-	capi.Logger().Infof("releasing capi client")
+	capi.Logger().Infof("%v releasing capi client", capi.Id())
 	capi.client.Close()
 
 }
@@ -709,7 +710,7 @@ func (capi *CapiNozzle) selfMonitor(finch chan bool, waitGrp *sync.WaitGroup) {
 		}
 	}
 done:
-	capi.Logger().Infof("Capi %v selfMonitor routine exits", capi.Id())
+	capi.Logger().Infof("%v selfMonitor routine exits", capi.Id())
 
 }
 
@@ -808,7 +809,7 @@ func (capi *CapiNozzle) batchUpdateDocsWithRetry(vbno uint16, req_list *[]*base.
 			}
 			num_of_retry++
 			time.Sleep(capi.config.retryInterval)
-			capi.Logger().Infof("Retrying update docs for vb %v for the %vth time\n", vbno, num_of_retry)
+			capi.Logger().Infof("%v retrying update docs for vb %v for the %vth time\n", capi.Id(), vbno, num_of_retry)
 		} else {
 			// max retry reached
 			return errors.New(fmt.Sprintf("batch update docs failed for vb %v after %v retries", vbno, num_of_retry))
@@ -817,7 +818,7 @@ func (capi *CapiNozzle) batchUpdateDocsWithRetry(vbno uint16, req_list *[]*base.
 }
 
 func (capi *CapiNozzle) batchUpdateDocs(vbno uint16, req_list *[]*base.WrappedMCRequest) (err error) {
-	capi.Logger().Debugf("batchUpdateDocs, vbno=%v, len(req_list)=%v\n", vbno, len(*req_list))
+	capi.Logger().Debugf("%v batchUpdateDocs, vbno=%v, len(req_list)=%v\n", capi.Id(), vbno, len(*req_list))
 
 	couchApiBaseHost, couchApiBasePath, err := capi.getCouchApiBaseHostAndPathForVB(vbno)
 	if err != nil {
@@ -858,7 +859,7 @@ func (capi *CapiNozzle) batchUpdateDocs(vbno uint16, req_list *[]*base.WrappedMC
 	// enable delayed commit
 	http_req.Header.Set(CouchFullCommitKey, "false")
 
-	capi.Logger().Debugf("updateDocs request=%v\n", http_req)
+	capi.Logger().Debugf("%v updateDocs request=%v\n", capi.Id(), http_req)
 
 	// unfortunately request.Write() does not preserve Content-Length. have to encode the request ourselves
 	req_bytes, err := utils.EncodeHttpRequest(http_req)
@@ -866,7 +867,7 @@ func (capi *CapiNozzle) batchUpdateDocs(vbno uint16, req_list *[]*base.WrappedMC
 		return
 	}
 
-	capi.Logger().Debugf("updateDocs encoded request=%v\n string form=%v\n", req_bytes, string(req_bytes))
+	capi.Logger().Debugf("%v updateDocs encoded request=%v\n string form=%v\n", capi.Id(), req_bytes, string(req_bytes))
 
 	resp_ch := make(chan bool, 1)
 	err_ch := make(chan error, 2)
@@ -886,14 +887,14 @@ func (capi *CapiNozzle) batchUpdateDocs(vbno uint16, req_list *[]*base.WrappedMC
 		// capi is stopping.
 	case <-resp_ch:
 		// response received. everything is good
-		capi.Logger().Debugf("batchUpdateDocs for vb %v succesfully updated %v docs.\n", vbno, len(*req_list))
+		capi.Logger().Debugf("%v batchUpdateDocs for vb %v succesfully updated %v docs.\n", capi.Id(), vbno, len(*req_list))
 	case err = <-err_ch:
 		// error encountered
-		capi.Logger().Errorf("batchUpdateDocs for vb %v failed with err %v.\n", vbno, err)
+		capi.Logger().Errorf("%v batchUpdateDocs for vb %v failed with err %v.\n", capi.Id(), vbno, err)
 	case <-ticker:
 		// connection timed out
 		errMsg := fmt.Sprintf("Connection timeout when updating docs for vb %v", vbno)
-		capi.Logger().Error(errMsg)
+		capi.Logger().Errorf("%v %v", capi.Id(), errMsg)
 		err = errors.New(errMsg)
 	}
 
@@ -913,28 +914,28 @@ func (capi *CapiNozzle) writeDocs(vbno uint16, req_bytes []byte, doc_list [][]by
 	for {
 		select {
 		case <-fin_ch:
-			capi.Logger().Debugf("terminating writeDocs because of closure of finch\n")
+			capi.Logger().Debugf("%v terminating writeDocs because of closure of finch\n", capi.Id())
 			return
 		default:
 			// if no error, keep sending body parts
 			if partIndex == 0 {
 				// send initial request to tcp
-				capi.Logger().Debugf("req_bytes=%v\nreq_bytes_in_str=%v\n\n", req_bytes, string(req_bytes))
+				capi.Logger().Debugf("%v req_bytes=%v\nreq_bytes_in_str=%v\n\n", capi.Id(), req_bytes, string(req_bytes))
 				part_ch <- req_bytes
 			} else if partIndex == 1 {
 				// write body part prefix
-				capi.Logger().Debugf("writing first body part %v", BodyPartsPrefix)
+				capi.Logger().Debugf("%v writing first body part %v", capi.Id(), BodyPartsPrefix)
 				part_ch <- []byte(BodyPartsPrefix)
 			} else if partIndex < len(doc_list)+2 {
 				// write individual doc
-				capi.Logger().Debugf("writing %vth doc = %v, doc_in_str=%v\n", partIndex-2, doc_list[partIndex-2], string(doc_list[partIndex-2]))
+				capi.Logger().Debugf("%v writing %vth doc = %v, doc_in_str=%v\n", capi.Id(), partIndex-2, doc_list[partIndex-2], string(doc_list[partIndex-2]))
 				part_ch <- doc_list[partIndex-2]
 			} else {
 				// write body part suffix
-				capi.Logger().Debugf("writing last body part %v\n", BodyPartsSuffix)
+				capi.Logger().Debugf("%v writing last body part %v\n", capi.Id(), BodyPartsSuffix)
 				part_ch <- []byte(BodyPartsSuffix)
 				// all parts have been sent. terminate sendBodyPart rountine
-				capi.Logger().Debugf("closing part channel since all parts had been sent\n")
+				capi.Logger().Debugf("%v closing part channel since all parts had been sent\n", capi.Id())
 				close(part_ch)
 				return
 			}
@@ -945,17 +946,17 @@ func (capi *CapiNozzle) writeDocs(vbno uint16, req_bytes []byte, doc_list [][]by
 }
 
 func (capi *CapiNozzle) tcpProxy(vbno uint16, part_ch chan []byte, resp_ch chan bool, err_ch chan error, fin_ch chan bool) {
-	capi.Logger().Debugf("tcpProxy routine for vb %v is starting\n", vbno)
+	capi.Logger().Debugf("%v tcpProxy routine for vb %v is starting\n", capi.Id(), vbno)
 	for {
 		select {
 		case <-fin_ch:
-			capi.Logger().Debugf("tcpProxy routine is exiting because of closure of finch\n", capi.Id())
+			capi.Logger().Debugf("%v tcpProxy routine is exiting because of closure of finch\n", capi.Id())
 			return
 		case part, ok := <-part_ch:
 			if ok {
 				capi.client.SetWriteDeadline(time.Now().Add(capi.config.writeTimeout))
 				_, err := capi.client.Write(part)
-				capi.Logger().Debugf("Wrote body part. part=%v, err=%v\n", string(part), err)
+				capi.Logger().Debugf("%v wrote body part. part=%v, err=%v\n", capi.Id(), string(part), err)
 				if err != nil {
 					capi.Logger().Errorf("Received error when writing boby part. err=%v\n", err)
 					err_ch <- err
@@ -963,12 +964,12 @@ func (capi *CapiNozzle) tcpProxy(vbno uint16, part_ch chan []byte, resp_ch chan 
 				}
 			} else {
 				// the closing of part_ch signals that all body parts have been sent. start receiving responses
-				capi.Logger().Debugf("tcpProxy routine starting to receive response since all body parts have been sent\n", capi.Id())
+				capi.Logger().Debugf("%v tcpProxy routine starting to receive response since all body parts have been sent\n", capi.Id())
 
 				// read response
 				capi.client.SetReadDeadline(time.Now().Add(capi.config.readTimeout))
 				num_bytes, err := capi.client.Read(capi.res_buf)
-				capi.Logger().Debugf("read result err=%v, num_bytes=%v\n", err, num_bytes)
+				capi.Logger().Debugf("%v read result err=%v, num_bytes=%v\n", capi.Id(), err, num_bytes)
 				if err != nil {
 					err_ch <- err
 					return
@@ -993,7 +994,7 @@ func (capi *CapiNozzle) tcpProxy(vbno uint16, part_ch chan []byte, resp_ch chan 
 
 				if err != nil {
 					errMsg := MalformedResponseError + fmt.Sprintf(" vb=%v. err=%v, num_bytes=%v, res_buf={%v}\n", vbno, err, num_bytes, string(capi.res_buf[:num_bytes]))
-					capi.Logger().Error(errMsg)
+					capi.Logger().Errorf("%v %v", capi.Id(), errMsg)
 					err_ch <- errors.New(errMsg)
 
 					capi.resetConn()
@@ -1018,7 +1019,7 @@ func (capi *CapiNozzle) tcpProxy(vbno uint16, part_ch chan []byte, resp_ch chan 
 					_, err = io.ReadFull(capi.client, capi.res_buf[:len_remaining_bytes])
 					if err != nil {
 						errMsg := MalformedResponseError + fmt.Sprintf(" vb=%v. err=%v\n", vbno, err)
-						capi.Logger().Error(errMsg)
+						capi.Logger().Errorf("%v %v", capi.Id(), errMsg)
 						err_ch <- errors.New(errMsg)
 
 						capi.resetConn()
@@ -1026,7 +1027,7 @@ func (capi *CapiNozzle) tcpProxy(vbno uint16, part_ch chan []byte, resp_ch chan 
 					}
 				}
 
-				capi.Logger().Debugf("http response =%v\n", response)
+				capi.Logger().Debugf("%v http response =%v\n", capi.Id(), response)
 
 				if response.StatusCode != 201 {
 					err_ch <- errors.New(fmt.Sprintf("receieved unexpected status code, %v, from update docs request for vb %v\n", response.StatusCode, vbno))
@@ -1082,7 +1083,7 @@ func getSerializedRevision(req *mc.MCRequest) string {
 }
 
 func (capi *CapiNozzle) initNewBatch(vbno uint16) {
-	capi.Logger().Debugf("init a new batch for vb %v\n", vbno)
+	capi.Logger().Debugf("%v init a new batch for vb %v\n", capi.Id(), vbno)
 	capi.vb_batch_map[vbno] = &capiBatch{*newBatch(capi.config.maxCount, capi.config.maxSize, capi.Logger()), vbno}
 }
 
@@ -1117,10 +1118,13 @@ func (capi *CapiNozzle) initialize(settings map[string]interface{}) error {
 	// in the worse case, there is an entry (of roughly 60 bytes) for each mutation in the batch
 	capi.res_buf = make([]byte, capi.config.maxCount*70+300)
 
-	capi.Logger().Debug("About to start initializing connection")
+	capi.Logger().Debugf("%v about to start initializing connection", capi.Id())
 	err = capi.initializeConn()
-
-	capi.Logger().Debug("Initialization is done")
+	if err == nil {
+		capi.Logger().Infof("%v connection initialization completed.", capi.Id())
+	} else {
+		capi.Logger().Errorf("%v connection initialization failed with err=%v.", capi.Id(), err)
+	}
 
 	return err
 }
@@ -1139,12 +1143,12 @@ func (capi *CapiNozzle) timeoutDuration(numofRetry int) time.Duration {
 }*/
 
 func (capi *CapiNozzle) StatusSummary() string {
-	return fmt.Sprintf("Capi %v received %v items, sent %v items", capi.Id(), capi.counter_received, capi.counter_sent)
+	return fmt.Sprintf("%v received %v items, sent %v items", capi.Id(), capi.counter_received, capi.counter_sent)
 }
 
 func (capi *CapiNozzle) handleGeneralError(err error) {
 	if capi.handle_error {
-		capi.Logger().Errorf("Raise error condition %v\n", err)
+		capi.Logger().Errorf("%v raise error condition %v\n", capi.Id(), err)
 		capi.RaiseEvent(common.NewEvent(common.ErrorEncountered, nil, capi, nil, err))
 	} else {
 		capi.Logger().Debugf("%v in shutdown process, err=%v is ignored\n", capi.Id(), err)
@@ -1187,7 +1191,7 @@ func (capi *CapiNozzle) resetConn() error {
 }
 
 func (capi *CapiNozzle) initializeOrResetConn(initializing bool) error {
-	capi.Logger().Debugf("resetting capi connection for %v\n", capi.Id())
+	capi.Logger().Debugf("%v resetting capi connection\n", capi.Id())
 
 	if capi.validateRunningState() != nil {
 		capi.Logger().Infof("%v is not running, no need to resetConn", capi.Id())
@@ -1207,7 +1211,7 @@ func (capi *CapiNozzle) initializeOrResetConn(initializing bool) error {
 		pool = base.TCPConnPoolMgr().GetPool(capi.getPoolName(capi.config))
 		if pool == nil {
 			// make sure that err is not nil when pool is nil
-			err = fmt.Errorf("Error retrieving connection pool for %v", capi.Id())
+			err = errors.New("Error retrieving connection pool")
 		}
 	}
 

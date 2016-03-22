@@ -77,7 +77,7 @@ func NewRouter(id string, topic string, filterExpression string,
 		router.counter[partId] = 0
 	}
 
-	router.Logger().Infof("Router created with %d downstream parts \n", len(downStreamParts))
+	router.Logger().Infof("%v created with %d downstream parts \n", router.id, len(downStreamParts))
 	return router, nil
 }
 
@@ -195,14 +195,14 @@ func (router *Router) route(data interface{}) (map[string]interface{}, error) {
 		return nil, ErrorInvalidRoutingMapForRouter
 	}
 
-	router.Logger().Debugf("Data with key=%v, vbno=%d, opCode=%v is routed to downstream part %s", string(uprEvent.Key), uprEvent.VBucket, uprEvent.Opcode, partId)
+	router.Logger().Debugf("%v Data with key=%v, vbno=%d, opCode=%v is routed to downstream part %s", router.id, string(uprEvent.Key), uprEvent.VBucket, uprEvent.Opcode, partId)
 
 	// filter data if filter expession has been defined
 	if router.filterRegexp != nil {
 		if !utils.RegexpMatch(router.filterRegexp, uprEvent.Key) {
 			// if data does not match filter expression, drop it. return empty result
 			router.RaiseEvent(common.NewEvent(common.DataFiltered, uprEvent, router, nil, nil))
-			router.Logger().Debugf("Data with key=%v, vbno=%d, opCode=%v has been filtered out", string(uprEvent.Key), uprEvent.VBucket, uprEvent.Opcode)
+			router.Logger().Debugf("%v Data with key=%v, vbno=%d, opCode=%v has been filtered out", router.id, string(uprEvent.Key), uprEvent.VBucket, uprEvent.Opcode)
 			return result, nil
 		}
 	}
@@ -213,7 +213,7 @@ func (router *Router) route(data interface{}) (map[string]interface{}, error) {
 
 func (router *Router) SetRoutingMap(routingMap map[uint16]string) {
 	router.routingMap = routingMap
-	router.Logger().Debugf("Set vbMap %v in Router", routingMap)
+	router.Logger().Debugf("Set vbMap %v in Router %v", routingMap, router.id)
 }
 
 func (router *Router) RoutingMap() map[uint16]string {

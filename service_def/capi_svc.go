@@ -138,12 +138,12 @@ type CAPIService interface {
 	//PrePrelicate (_pre_replicate)
 	//Parameters: remoteBucket - the information about the remote bucket
 	//			  knownRemoteVBStatus - the current replication status of a vbucket
-	//			  xdcrCheckpoingCapbility
+	//			  xdcrCheckpointingCapbility
 	//returns:
 	//		  bMatch - true if the remote vbucket matches the current replication status
 	//		  current_remoteVBUUID - new remote vb uuid might be retured if bMatch = false and there was a topology change on remote vb
 	//		  err
-	PreReplicate(remoteBucket *RemoteBucketInfo, knownRemoteVBStatus *RemoteVBReplicationStatus, xdcrCheckpoingCapbility bool) (bVBMatch bool, current_remoteVBOpaque metadata.TargetVBOpaque, err error)
+	PreReplicate(remoteBucket *RemoteBucketInfo, knownRemoteVBStatus *RemoteVBReplicationStatus, xdcrCheckpointingCapbility bool) (bVBMatch bool, current_remoteVBOpaque metadata.TargetVBOpaque, err error)
 	//call to do disk commit on the remote cluster, which ensure that the mutations replicated are durable
 	//CommitForCheckpoint (_commit_for_checkpoint)
 	//Parameters: remoteBucket - the information about the remote bucket

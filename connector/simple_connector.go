@@ -34,7 +34,7 @@ func (con *SimpleConnector) Forward(data interface{}) error {
 	con.stateLock.RLock()
 	defer con.stateLock.RUnlock()
 	
-	con.Logger().Debugf("Try to forward to downstream part %s", con.downStreamPart.Id())
+	con.Logger().Debugf("%v forwarding to downstream part %s", con.Id(), con.downStreamPart.Id())
 	return con.downStreamPart.Receive(data)
 }
 
