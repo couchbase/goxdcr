@@ -737,14 +737,22 @@ func EncodeErrorsMapIntoResponse(errorsMap map[string]error, withErrorsWrapper b
 }
 
 func EncodeInternalSettingsErrorsMapIntoResponse(errorsMap map[string]error) (*ap.Response, error) {
-	errorMsgMap := make(map[string]string)
+	bytes := []byte{'{'}
 	for key, _ := range errorsMap {
+		// use the same format as other internal settings validation errors
+		// i.e., use "error" as the key and "xxx is invalid" as the value.
+		// e.g., {"error":"xdcrDocBatchSizeKb is invalid","error":"xdcrWorkerBatchSize is invalid"}
+		// can not use map (since the keys are all the same) and have to manually encode the byte array to be returned
 		internalSettingsKey := ConvertRestKeyToRestInternalKey(key)
-		// this is to be backward compatible with old xdcr
-		errorMsgMap[internalSettingsKey] = simple_utils.GenericInvalidValueError(internalSettingsKey).Error()
+		entry := "\"error\":\"" + simple_utils.GenericInvalidValueError(internalSettingsKey).Error() + "\","
+		bytes = append(bytes, []byte(entry)...)
 	}
 
-	return EncodeObjectIntoResponseWithStatusCode(errorMsgMap, http.StatusBadRequest)
+	// replace the last, redundant ',', with '}' to complete the encoding
+	// note that this works only when errorsMaps is not empty, which is always true
+	bytes[len(bytes)-1] = '}'
+
+	return EncodeByteArrayIntoResponseWithStatusCode(bytes, http.StatusBadRequest)
 }
 
 func EncodeReplicationValidationErrorIntoResponse(err error) (*ap.Response, error) {
