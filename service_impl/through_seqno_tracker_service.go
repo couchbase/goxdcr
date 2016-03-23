@@ -301,7 +301,7 @@ func (tsTracker *ThroughSeqnoTrackerSvc) GetThroughSeqno(vbno uint16) uint64 {
 	gap_seqno_list_1, gap_seqno_list_2 := tsTracker.vb_gap_seqno_list_map[vbno].getSortedSeqnoLists()
 	max_end_gap_seqno := maxSeqno(gap_seqno_list_2)
 
-	tsTracker.logger.Debugf("%v, vbno=%v, last_through_seqno=%v len(sent_seqno_list)=%v len(filtered_seqno_list)=%v len(failed_cr_seqno_list)=%v len(gap_seqno_list_1)=%v len(gap_seqno_list_2)=%v\n", tsTracker.id, vbno, last_through_seqno, len(sent_seqno_list), len(filtered_seqno_list), len(failed_cr_seqno_list), len(gap_seqno_list_1), len(gap_seqno_list_2))
+	tsTracker.logger.Tracef("%v, vbno=%v, last_through_seqno=%v len(sent_seqno_list)=%v len(filtered_seqno_list)=%v len(failed_cr_seqno_list)=%v len(gap_seqno_list_1)=%v len(gap_seqno_list_2)=%v\n", tsTracker.id, vbno, last_through_seqno, len(sent_seqno_list), len(filtered_seqno_list), len(failed_cr_seqno_list), len(gap_seqno_list_1), len(gap_seqno_list_2))
 	tsTracker.logger.Tracef("%v, vbno=%v, last_through_seqno=%v\n sent_seqno_list=%v\n filtered_seqno_list=%v\n failed_cr_seqno_list=%v\n gap_seqno_list_1=%v\n gap_seqno_list_2=%v\n", tsTracker.id, vbno, last_through_seqno, sent_seqno_list, filtered_seqno_list, failed_cr_seqno_list, gap_seqno_list_1, gap_seqno_list_2)
 
 	// Goal of algorithm:
@@ -384,7 +384,7 @@ func (tsTracker *ThroughSeqnoTrackerSvc) GetThroughSeqno(vbno uint16) uint64 {
 		go tsTracker.truncateSeqnoLists(vbno, through_seqno)
 	}
 
-	tsTracker.logger.Debugf("%v, vbno=%v, through_seqno=%v\n", tsTracker.id, vbno, through_seqno)
+	tsTracker.logger.Tracef("%v, vbno=%v, through_seqno=%v\n", tsTracker.id, vbno, through_seqno)
 	return through_seqno
 }
 
@@ -454,7 +454,7 @@ func (tsTracker *ThroughSeqnoTrackerSvc) getThroughSeqnos(executor_id int, listO
 	if result_map == nil {
 		panic("through_seqno_map is nil")
 	}
-	tsTracker.logger.Debugf("%v getThroughSeqnos executor %v is working on vbuckets %v", tsTracker.id, executor_id, listOfVbs)
+	tsTracker.logger.Tracef("%v getThroughSeqnos executor %v is working on vbuckets %v", tsTracker.id, executor_id, listOfVbs)
 	if wait_grp == nil {
 		panic("wait_grp can't be nil")
 	}
