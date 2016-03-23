@@ -11,10 +11,9 @@ package metadata
 
 import (
 	"bytes"
-	"crypto/rand"
-	"encoding/base64"
 	"fmt"
 	"github.com/couchbase/goxdcr/base"
+	"github.com/couchbase/goxdcr/simple_utils"
 	"reflect"
 	"strings"
 )
@@ -65,7 +64,7 @@ func NewRemoteClusterReference(uuid, name, hostName, userName, password string,
 }
 
 func RemoteClusterRefId() (string, error) {
-	refUuid, err := remoteClusterRefUuid()
+	refUuid, err := simple_utils.GenerateRandomId(SizeOfRemoteClusterRefId, MaxRetryForIdGeneration)
 	if err != nil {
 		return "", err
 	}
@@ -135,28 +134,4 @@ func (ref *RemoteClusterReference) Clone() *RemoteClusterReference {
 		DemandEncryption: ref.DemandEncryption,
 		Certificate:      ref.Certificate,
 	}
-}
-
-// generate a randomized string UUID which should be unique enough for all practical purposes
-func remoteClusterRefUuid() (string, error) {
-	numOfRetry := 0
-	var err error
-	for {
-		rb := make([]byte, SizeOfRemoteClusterRefId)
-		_, err := rand.Read(rb)
-
-		if err != nil {
-			if numOfRetry < MaxRetryForIdGeneration {
-				numOfRetry++
-			} else {
-				break
-			}
-		}
-
-		id := base64.URLEncoding.EncodeToString(rb)
-		return id, nil
-	}
-
-	return "", fmt.Errorf("Error generating Id for remote cluster. err=%v", err)
-
 }

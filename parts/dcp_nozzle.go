@@ -55,6 +55,9 @@ var ErrorEmptyVBList = errors.New("Invalid configuration for DCP nozzle. VB list
 
 var MaxCountStreamsInactive uint8 = 40
 
+var SizeOfUprFeedRandName = 16
+var MaxRetryForIdGeneration = 5
+
 type vbtsWithLock struct {
 	ts   *base.VBTimestamp
 	lock *sync.RWMutex
@@ -188,11 +191,18 @@ func (dcp *DcpNozzle) initialize(settings map[string]interface{}) (err error) {
 		return err
 	}
 
+	randName, err := simple_utils.GenerateRandomId(SizeOfUprFeedRandName, MaxRetryForIdGeneration)
+	if err != nil {
+		return err
+	}
+
+	uprFeedName := DCP_Connection_Prefix + dcp.Id() + ":" + randName
+
 	// request extended metadata from dcp only when it is supported
 	if dcp.ext_metadata_supported {
-		err = dcp.uprFeed.UprOpenWithExtMeta(DCP_Connection_Prefix+dcp.Id(), uint32(0), 1024*1024)
+		err = dcp.uprFeed.UprOpenWithExtMeta(uprFeedName, uint32(0), 1024*1024)
 	} else {
-		err = dcp.uprFeed.UprOpen(DCP_Connection_Prefix+dcp.Id(), uint32(0), 1024*1024)
+		err = dcp.uprFeed.UprOpen(uprFeedName, uint32(0), 1024*1024)
 	}
 	if err != nil {
 		dcp.Logger().Errorf("%v upr open failed. err=%v.\n", dcp.Id(), err)

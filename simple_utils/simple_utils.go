@@ -11,6 +11,8 @@
 package simple_utils
 
 import (
+	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -282,4 +284,27 @@ func IsJSON(in []byte) bool {
 	var out interface{}
 	err := json.Unmarshal(in, &out)
 	return err == nil
+}
+
+func GenerateRandomId(length, maxRetry int) (string, error) {
+	numOfRetry := 0
+	var err error
+	for {
+		rb := make([]byte, length)
+		_, err := rand.Read(rb)
+
+		if err != nil {
+			if numOfRetry < maxRetry {
+				numOfRetry++
+			} else {
+				break
+			}
+		} else {
+			id := base64.URLEncoding.EncodeToString(rb)
+			return id, nil
+		}
+	}
+
+	return "", fmt.Errorf("Error generating Id after %v retries. err=%v", numOfRetry, err)
+
 }
