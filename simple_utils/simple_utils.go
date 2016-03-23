@@ -16,6 +16,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
 	"reflect"
 	"sort"
@@ -307,4 +308,12 @@ func GenerateRandomId(length, maxRetry int) (string, error) {
 
 	return "", fmt.Errorf("Error generating Id after %v retries. err=%v", numOfRetry, err)
 
+}
+
+// translate time synchronization bucket metadata into base.ConflictResolutionMode
+func GetCRModeFromTimeSyncSetting(timeSynchronization string) base.ConflictResolutionMode {
+	if timeSynchronization != "" && timeSynchronization != base.TimeSynchronization_Disabled {
+		return base.CRMode_LWW
+	}
+	return base.CRMode_RevId
 }

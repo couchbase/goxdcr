@@ -3,6 +3,7 @@ package factory
 import (
 	"errors"
 	"fmt"
+	"github.com/couchbase/go-couchbase"
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/capi_utils"
 	"github.com/couchbase/goxdcr/common"
@@ -17,6 +18,7 @@ import (
 	"github.com/couchbase/goxdcr/pipeline_utils"
 	"github.com/couchbase/goxdcr/service_def"
 	"github.com/couchbase/goxdcr/service_impl"
+	"github.com/couchbase/goxdcr/simple_utils"
 	"github.com/couchbase/goxdcr/supervisor"
 	"github.com/couchbase/goxdcr/utils"
 	"math"
@@ -96,25 +98,37 @@ func (xdcrf *XDCRFactory) NewPipeline(topic string, progress_recorder common.Pip
 		return nil, err
 	}
 
-	// get source bucket to retrieve bucket password and time synchronization settings
-	bucket, err := xdcrf.cluster_info_svc.GetBucket(xdcrf.xdcr_topology_svc, spec.SourceBucketName)
+	// get source bucket to retrieve bucket password
+	sourceBucket, err := xdcrf.cluster_info_svc.GetBucket(xdcrf.xdcr_topology_svc, spec.SourceBucketName)
 	if err != nil {
 		xdcrf.logger.Errorf("Error getting source bucket %v. err=%v\n", spec.SourceBucketName, err)
 		return nil, err
 	}
-	timeSynchronization := bucket.TimeSynchronization
-	bucketPassword := bucket.Password
-	bucket.Close()
+	sourceBucketPassword := sourceBucket.Password
+	sourceBucket.Close()
 
-	sourceCRMode := base.CRMode_RevId
-	if timeSynchronization != "" && timeSynchronization != base.TimeSynchronization_Disabled {
-		sourceCRMode = base.CRMode_LWW
+	targetClusterRef, err := xdcrf.remote_cluster_svc.RemoteClusterByUuid(spec.TargetClusterUUID, true)
+	if err != nil {
+		xdcrf.logger.Errorf("Error getting remote cluster with uuid=%v for pipeline %v, err=%v\n", spec.TargetClusterUUID, spec.Id, err)
+		return nil, err
 	}
+
+	targetBucket, err := xdcrf.cluster_info_svc.GetBucket(targetClusterRef, spec.TargetBucketName)
+	if err != nil || targetBucket == nil {
+		xdcrf.logger.Errorf("Error getting target bucket %v, err=%v\n", spec.TargetBucketName, err)
+		return nil, err
+	}
+	defer targetBucket.Close()
+
+	// sourceCRMode is the conflict resolution mode to use when resolving conflicts for big documents at source side
+	// sourceCRMode is LWW if and only if target bucket is LWW enabled, so as to ensure that source side conflict
+	// resolution and target side conflict resolution yield consistent results
+	sourceCRMode := simple_utils.GetCRModeFromTimeSyncSetting(targetBucket.TimeSynchronization)
 
 	xdcrf.logger.Infof("%v extMetaSupported=%v, sourceCRMode=%v\n", topic, extMetaSupported, sourceCRMode)
 
 	// popuplate pipeline using config
-	sourceNozzles, kv_vb_map, err := xdcrf.constructSourceNozzles(spec, topic, extMetaSupported, bucketPassword, logger_ctx)
+	sourceNozzles, kv_vb_map, err := xdcrf.constructSourceNozzles(spec, topic, extMetaSupported, sourceBucketPassword, logger_ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -126,7 +140,7 @@ func (xdcrf *XDCRFactory) NewPipeline(topic string, progress_recorder common.Pip
 	progress_recorder(fmt.Sprintf("%v source nozzles have been constructed", len(sourceNozzles)))
 
 	xdcrf.logger.Infof("%v kv_vb_map=%v\n", topic, kv_vb_map)
-	outNozzles, vbNozzleMap, err := xdcrf.constructOutgoingNozzles(spec, kv_vb_map, extMetaSupported, sourceCRMode, logger_ctx)
+	outNozzles, vbNozzleMap, err := xdcrf.constructOutgoingNozzles(spec, kv_vb_map, extMetaSupported, sourceCRMode, targetBucket, targetClusterRef, logger_ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -400,17 +414,11 @@ func (xdcrf *XDCRFactory) filterVBList(targetkvVBList []uint16, kv_vb_map map[st
 }
 
 func (xdcrf *XDCRFactory) constructOutgoingNozzles(spec *metadata.ReplicationSpecification, kv_vb_map map[string][]uint16,
-	extMetaSupported bool, sourceCRMode base.ConflictResolutionMode, logger_ctx *log.LoggerContext) (map[string]common.Nozzle, map[uint16]string, error) {
+	extMetaSupported bool, sourceCRMode base.ConflictResolutionMode, targetBucket *couchbase.Bucket, targetClusterRef *metadata.RemoteClusterReference, logger_ctx *log.LoggerContext) (map[string]common.Nozzle, map[uint16]string, error) {
 	outNozzles := make(map[string]common.Nozzle)
 	vbNozzleMap := make(map[uint16]string)
 
 	targetBucketName := spec.TargetBucketName
-	targetClusterRef, err := xdcrf.remote_cluster_svc.RemoteClusterByUuid(spec.TargetClusterUUID, true)
-	if err != nil {
-		xdcrf.logger.Errorf("Error getting remote cluster with uuid=%v for pipeline %v, err=%v\n", spec.TargetClusterUUID, spec.Id, err)
-		return nil, nil, err
-	}
-
 	kvVBMap, err := xdcrf.cluster_info_svc.GetServerVBucketsMap(targetClusterRef, targetBucketName)
 	if err != nil {
 		xdcrf.logger.Errorf("Error getting server vbuckets map, err=%v\n", err)
@@ -419,13 +427,6 @@ func (xdcrf *XDCRFactory) constructOutgoingNozzles(spec *metadata.ReplicationSpe
 	if len(kvVBMap) == 0 {
 		return nil, nil, ErrorNoTargetNozzle
 	}
-
-	targetBucket, err := xdcrf.cluster_info_svc.GetBucket(targetClusterRef, targetBucketName)
-	if err != nil || targetBucket == nil {
-		xdcrf.logger.Errorf("Error getting bucket, err=%v\n", err)
-		return nil, nil, err
-	}
-	defer targetBucket.Close()
 
 	bucketPwd := targetBucket.Password
 	maxTargetNozzlePerNode := spec.Settings.TargetNozzlePerNode
