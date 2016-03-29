@@ -53,8 +53,9 @@ const (
 	default_demandEncryption    bool          = false
 	default_max_read_downtime   time.Duration = 60 * time.Second
 	//wait time between write is default_backoff_wait_time*backoff_factor
-	default_backoff_wait_time   time.Duration = 10 * time.Millisecond
-	default_getMeta_readTimeout time.Duration = time.Duration(1) * time.Second
+	default_backoff_wait_time    time.Duration = 10 * time.Millisecond
+	default_getMeta_readTimeout  time.Duration = time.Duration(1) * time.Second
+	default_newconn_backoff_time time.Duration = 1 * time.Second
 
 	//the maximum data (in byte) data channel can hold
 	max_datachannelSize = 10 * 1024 * 1024
@@ -2044,7 +2045,7 @@ func (xmem *XmemNozzle) readFromClient(client *xmemClient, resetReadTimeout bool
 				}
 				high_level_err := "Received error response from memcached in target cluster."
 				xmem.handleGeneralError(errors.New(high_level_err))
-				client.logger.Errorf("%v. err=%v", high_level_err, err)
+				client.logger.Errorf("%v %v. err=%v, response=%v", xmem.Id(), high_level_err, err, response)
 				return response, fatalError, rev
 			} else {
 				//response.Status != SUCCESSFUL, in this case, gomemcached return the response as err as well
@@ -2073,21 +2074,34 @@ func (xmem *XmemNozzle) repairConn(client *xmemClient, reason string, rev int) e
 		return err
 	}
 
-	memClient, err := pool.Get()
+	numOfRetry := 0
+	backoffTime := default_newconn_backoff_time
+	for {
+		memClient, err := pool.Get()
 
-	if err == nil {
-		repaired := client.repairConn(memClient, rev, xmem.Id())
-		if repaired && client == xmem.client_for_setMeta {
-			go xmem.onSetMetaConnRepaired()
+		if err == nil {
+			repaired := client.repairConn(memClient, rev, xmem.Id())
+			if repaired && client == xmem.client_for_setMeta {
+				go xmem.onSetMetaConnRepaired()
+			}
+
+			xmem.Logger().Infof("%v - The connection for %v has been repaired\n", xmem.Id(), client.name)
+			break
+
+		} else {
+			if numOfRetry < xmem.config.maxRetry {
+				numOfRetry++
+				// exponential backoff
+				xmem.Logger().Infof("%v Error setting up new connections. err=%v. Retrying for %vth time after %v.", xmem.Id(), err, numOfRetry, backoffTime)
+				time.Sleep(backoffTime)
+				backoffTime *= 2
+			} else {
+				high_level_err := fmt.Sprintf("Failed to repair connections to target cluster after %v retries.", numOfRetry)
+				xmem.handleGeneralError(errors.New(high_level_err))
+				xmem.Logger().Errorf("%v - Failed to repair connections for %v. err=%v\n", xmem.Id(), client.name, err)
+				return err
+			}
 		}
-
-		xmem.Logger().Infof("%v - The connection for %v is repaired\n", xmem.Id(), client.name)
-
-	} else {
-		high_level_err := "Failed to repair connections to target cluster."
-		xmem.handleGeneralError(errors.New(high_level_err))
-		xmem.Logger().Errorf("%v - Failed to repair connections for %v. err=%v\n", xmem.Id(), client.name, err)
-		return err
 	}
 	return nil
 }
