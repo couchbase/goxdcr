@@ -575,7 +575,7 @@ func (xdcrf *XDCRFactory) constructCAPINozzle(topic string,
 }
 
 func (xdcrf *XDCRFactory) ConstructSettingsForPart(pipeline common.Pipeline, part common.Part, settings map[string]interface{},
-	ts map[uint16]*base.VBTimestamp, targetClusterRef *metadata.RemoteClusterReference, ssl_port_map map[string]uint16,
+	targetClusterRef *metadata.RemoteClusterReference, ssl_port_map map[string]uint16,
 	isSSLOverMem bool) (map[string]interface{}, error) {
 
 	if _, ok := part.(*parts.XmemNozzle); ok {
@@ -583,7 +583,7 @@ func (xdcrf *XDCRFactory) ConstructSettingsForPart(pipeline common.Pipeline, par
 		return xdcrf.constructSettingsForXmemNozzle(pipeline, part, targetClusterRef, settings, ssl_port_map, isSSLOverMem)
 	} else if _, ok := part.(*parts.DcpNozzle); ok {
 		xdcrf.logger.Debugf("Construct settings for DcpNozzle %s", part.Id())
-		return xdcrf.constructSettingsForDcpNozzle(pipeline, part.(*parts.DcpNozzle), settings, ts)
+		return xdcrf.constructSettingsForDcpNozzle(pipeline, part.(*parts.DcpNozzle), settings)
 	} else if _, ok := part.(*parts.CapiNozzle); ok {
 		xdcrf.logger.Debugf("Construct settings for CapiNozzle %s", part.Id())
 		return xdcrf.constructSettingsForCapiNozzle(pipeline, settings)
@@ -712,7 +712,7 @@ func (xdcrf *XDCRFactory) getTargetTimeoutEstimate(topic string) time.Duration {
 	return 100 * time.Millisecond
 }
 
-func (xdcrf *XDCRFactory) constructSettingsForDcpNozzle(pipeline common.Pipeline, part *parts.DcpNozzle, settings map[string]interface{}, ts map[uint16]*base.VBTimestamp) (map[string]interface{}, error) {
+func (xdcrf *XDCRFactory) constructSettingsForDcpNozzle(pipeline common.Pipeline, part *parts.DcpNozzle, settings map[string]interface{}) (map[string]interface{}, error) {
 	xdcrf.logger.Debugf("Construct settings for DcpNozzle ....")
 	dcpNozzleSettings := make(map[string]interface{})
 	spec := pipeline.Specification()
@@ -723,13 +723,6 @@ func (xdcrf *XDCRFactory) constructSettingsForDcpNozzle(pipeline common.Pipeline
 		return nil, fmt.Errorf("No checkpoint manager has been registered with the pipeline %v", pipeline.Topic())
 	}
 
-	vbList := part.GetVBList()
-	partTs := make(map[uint16]*base.VBTimestamp)
-	for _, vb := range vbList {
-		partTs[vb] = ts[vb]
-	}
-	xdcrf.logger.Debugf("start timestamps is %v\n", ts)
-	dcpNozzleSettings[parts.DCP_VBTimestamp] = partTs
 	dcpNozzleSettings[parts.DCP_VBTimestampUpdator] = ckpt_svc.(*pipeline_svc.CheckpointManager).UpdateVBTimestamps
 	dcpNozzleSettings[parts.DCP_Stats_Interval] = getSettingFromSettingsMap(settings, metadata.PipelineStatsInterval, repSettings.StatsInterval)
 	return dcpNozzleSettings, nil
@@ -778,14 +771,14 @@ func (xdcrf *XDCRFactory) registerServices(pipeline common.Pipeline, logger_ctx 
 	return nil
 }
 
-func (xdcrf *XDCRFactory) ConstructSettingsForService(pipeline common.Pipeline, service common.PipelineService, settings map[string]interface{}, ts map[uint16]*base.VBTimestamp) (map[string]interface{}, error) {
+func (xdcrf *XDCRFactory) ConstructSettingsForService(pipeline common.Pipeline, service common.PipelineService, settings map[string]interface{}) (map[string]interface{}, error) {
 	switch service.(type) {
 	case *pipeline_svc.PipelineSupervisor:
 		xdcrf.logger.Debug("Construct settings for PipelineSupervisor")
 		return xdcrf.constructSettingsForSupervisor(pipeline, settings)
 	case *pipeline_svc.StatisticsManager:
 		xdcrf.logger.Debug("Construct settings for StatisticsManager")
-		return xdcrf.constructSettingsForStatsManager(pipeline, settings, ts)
+		return xdcrf.constructSettingsForStatsManager(pipeline, settings)
 	case *pipeline_svc.CheckpointManager:
 		xdcrf.logger.Debug("Construct update settings for CheckpointManager")
 		return xdcrf.constructSettingsForCheckpointManager(pipeline, settings)
@@ -804,21 +797,9 @@ func (xdcrf *XDCRFactory) constructSettingsForSupervisor(pipeline common.Pipelin
 	return s, nil
 }
 
-func (xdcrf *XDCRFactory) constructSettingsForStatsManager(pipeline common.Pipeline, settings map[string]interface{}, ts map[uint16]*base.VBTimestamp) (map[string]interface{}, error) {
+func (xdcrf *XDCRFactory) constructSettingsForStatsManager(pipeline common.Pipeline, settings map[string]interface{}) (map[string]interface{}, error) {
 	s := make(map[string]interface{})
 	s[pipeline_svc.PUBLISH_INTERVAL] = getSettingFromSettingsMap(settings, metadata.PipelineStatsInterval, pipeline.Specification().Settings.StatsInterval)
-
-	if ts != nil {
-		// this indicates that we are constructing start settings
-
-		//set the start vb sequence no map to statistics manager
-		if pipeline.RuntimeContext().Service(base.CHECKPOINT_MGR_SVC) == nil {
-			return nil, fmt.Errorf("No checkpoint manager has been registered with the pipeline %v", pipeline.Topic())
-		}
-
-		s[pipeline_svc.VB_START_TS] = ts
-	}
-
 	return s, nil
 }
 

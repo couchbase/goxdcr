@@ -27,7 +27,7 @@ var ErrorKey = "Error"
 
 //the function constructs start settings for parts of the pipeline
 type PartsSettingsConstructor func(pipeline common.Pipeline, part common.Part, pipeline_settings map[string]interface{},
-	ts map[uint16]*base.VBTimestamp, targetClusterref *metadata.RemoteClusterReference, ssl_port_map map[string]uint16,
+	targetClusterref *metadata.RemoteClusterReference, ssl_port_map map[string]uint16,
 	isSSLOverMem bool) (map[string]interface{}, error)
 
 //the function constructs start settings for parts of the pipeline
@@ -63,7 +63,7 @@ type GenericPipeline struct {
 	//	reqch chan []interface{}
 
 	//the lock to serialize the request to start\stop the pipeline
-	stateLock sync.Mutex
+	stateLock sync.RWMutex
 
 	partSetting_constructor       PartsSettingsConstructor
 	sslPortMapConstructor         SSLPortMapConstructor
@@ -111,7 +111,7 @@ func (genericPipeline *GenericPipeline) SetRuntimeContext(ctx common.PipelineRun
 	genericPipeline.context = ctx
 }
 
-func (genericPipeline *GenericPipeline) startPart(part common.Part, settings map[string]interface{}, ts map[uint16]*base.VBTimestamp,
+func (genericPipeline *GenericPipeline) startPart(part common.Part, settings map[string]interface{},
 	targetClusterRef *metadata.RemoteClusterReference, ssl_port_map map[string]uint16, isSSLOverMem bool, err_ch chan partError) {
 
 	var err error = nil
@@ -122,12 +122,12 @@ func (genericPipeline *GenericPipeline) startPart(part common.Part, settings map
 		waitGrp := &sync.WaitGroup{}
 		for _, p := range downstreamParts {
 			waitGrp.Add(1)
-			go func(waitGrp *sync.WaitGroup, err_ch chan partError, p common.Part, settings map[string]interface{}, ts map[uint16]*base.VBTimestamp) {
+			go func(waitGrp *sync.WaitGroup, err_ch chan partError, p common.Part, settings map[string]interface{}) {
 				defer waitGrp.Done()
 				if p.State() == common.Part_Initial {
-					genericPipeline.startPart(p, settings, ts, targetClusterRef, ssl_port_map, isSSLOverMem, err_ch)
+					genericPipeline.startPart(p, settings, targetClusterRef, ssl_port_map, isSSLOverMem, err_ch)
 				}
-			}(waitGrp, err_ch, p, settings, ts)
+			}(waitGrp, err_ch, p, settings)
 		}
 
 		waitGrp.Wait()
@@ -140,7 +140,7 @@ func (genericPipeline *GenericPipeline) startPart(part common.Part, settings map
 	partSettings := settings
 	if genericPipeline.partSetting_constructor != nil {
 		genericPipeline.logger.Debugf("%v calling part setting constructor\n", genericPipeline.InstanceId())
-		partSettings, err = genericPipeline.partSetting_constructor(genericPipeline, part, settings, ts, targetClusterRef, ssl_port_map, isSSLOverMem)
+		partSettings, err = genericPipeline.partSetting_constructor(genericPipeline, part, settings, targetClusterRef, ssl_port_map, isSSLOverMem)
 		if err != nil {
 			err_ch <- partError{part.Id(), err}
 			return
@@ -174,8 +174,8 @@ func (genericPipeline *GenericPipeline) Start(settings map[string]interface{}) e
 		return err
 	}
 
-	settings[base.VBTimestamps] = make(map[uint16]*base.VBTimestamp)
-	settings[base.ProblematicVBs] = make(map[uint16]error)
+	settings[base.VBTimestamps] = &base.ObjectWithLock{make(map[uint16]*base.VBTimestamp), &sync.RWMutex{}}
+	settings[base.ProblematicVBs] = &base.ObjectWithLock{make(map[uint16]error), &sync.RWMutex{}}
 	genericPipeline.settings = settings
 
 	//get starting vb timestamp
@@ -218,9 +218,7 @@ func (genericPipeline *GenericPipeline) Start(settings map[string]interface{}) e
 		waitGrp.Add(1)
 		go func(err_ch chan partError, source common.Nozzle, settings map[string]interface{}, waitGrp *sync.WaitGroup) {
 			defer waitGrp.Done()
-			ts := settings["VBTimestamps"].(map[uint16]*base.VBTimestamp)
-
-			genericPipeline.startPart(source, settings, ts, targetClusterRef, ssl_port_map, isSSLOverMem, err_ch)
+			genericPipeline.startPart(source, settings, targetClusterRef, ssl_port_map, isSSLOverMem, err_ch)
 			if len(err_ch) == 0 {
 				genericPipeline.logger.Infof("%v Incoming nozzle %s has been started", genericPipeline.InstanceId(), source.Id())
 			}
@@ -662,8 +660,8 @@ func (genericPipeline *GenericPipeline) UpdateSettings(settings map[string]inter
 }
 
 func (genericPipeline *GenericPipeline) updatePipelineSettings(settings map[string]interface{}) {
-	genericPipeline.settings_lock.Lock()
-	defer genericPipeline.settings_lock.Unlock()
+	genericPipeline.settings_lock.RLock()
+	defer genericPipeline.settings_lock.RUnlock()
 	genericPipeline.updateTimestampsSetting(settings)
 	genericPipeline.updateProblematicVBsSetting(settings)
 }
@@ -672,7 +670,10 @@ func (genericPipeline *GenericPipeline) updateTimestampsSetting(settings map[str
 	ts_obj := settings[base.VBTimestamps]
 	if ts_obj != nil {
 		ts_map := ts_obj.(map[uint16]*base.VBTimestamp)
-		existing_ts_map := genericPipeline.settings[base.VBTimestamps].(map[uint16]*base.VBTimestamp)
+		existing_ts_obj := genericPipeline.settings[base.VBTimestamps].(*base.ObjectWithLock)
+		existing_ts_obj.Lock.Lock()
+		defer existing_ts_obj.Lock.Unlock()
+		existing_ts_map := existing_ts_obj.Object.(map[uint16]*base.VBTimestamp)
 		for vbno, ts := range ts_map {
 			existing_ts_map[vbno] = ts
 		}
@@ -683,7 +684,10 @@ func (genericPipeline *GenericPipeline) updateProblematicVBsSetting(settings map
 	vb_err_map_obj := settings[base.ProblematicVBs]
 	if vb_err_map_obj != nil {
 		vb_err_map := vb_err_map_obj.(map[uint16]error)
-		existing_vb_err_map := genericPipeline.settings[base.ProblematicVBs].(map[uint16]error)
+		existing_vb_err_map_obj := genericPipeline.settings[base.ProblematicVBs].(*base.ObjectWithLock)
+		existing_vb_err_map_obj.Lock.Lock()
+		defer existing_vb_err_map_obj.Lock.Unlock()
+		existing_vb_err_map := existing_vb_err_map_obj.Object.(map[uint16]error)
 		for vbno, err := range vb_err_map {
 			existing_vb_err_map[vbno] = err
 		}

@@ -15,6 +15,7 @@ import (
 	utils "github.com/couchbase/goxdcr/utils"
 	"reflect"
 	"time"
+	"sync"
 )
 
 const (
@@ -32,19 +33,20 @@ type Msg_Callback_Func func(msg []interface{}) error
 type Exit_Callback_Func func()
 type Error_Handler_Func func(err error)
 
-type GenServer struct {	
+type GenServer struct {
 	//msg channel
 	msgChan chan []interface{}
 
 	//heartbeat channel
 	heartBeatChan chan []interface{}
 
-	msg_callback      *Msg_Callback_Func
-	exit_callback     *Exit_Callback_Func
-	error_handler     *Error_Handler_Func
+	msg_callback  *Msg_Callback_Func
+	exit_callback *Exit_Callback_Func
+	error_handler *Error_Handler_Func
 
-	isStarted bool
-	logger    *log.CommonLogger
+	isStarted      bool
+	isStarted_lock sync.RWMutex
+	logger         *log.CommonLogger
 }
 
 func NewGenServer(msg_callback *Msg_Callback_Func,
@@ -53,20 +55,20 @@ func NewGenServer(msg_callback *Msg_Callback_Func,
 	logger_context *log.LoggerContext,
 	module string) GenServer {
 	return GenServer{
-		msgChan: make(chan []interface{}, 1),
-		heartBeatChan:     make(chan []interface{}, 1),
-		msg_callback:      msg_callback,
-		exit_callback:     exit_callback,
-		error_handler:     error_handler,
-		isStarted:         false,
-		logger:            log.NewLogger(module, logger_context)}
+		msgChan:        make(chan []interface{}, 1),
+		heartBeatChan:  make(chan []interface{}, 1),
+		msg_callback:   msg_callback,
+		exit_callback:  exit_callback,
+		error_handler:  error_handler,
+		isStarted:      false,
+		isStarted_lock: sync.RWMutex{},
+		logger:         log.NewLogger(module, logger_context)}
 }
 
 func (s *GenServer) Start_server() (err error) {
 	defer utils.RecoverPanic(&err)
-
 	go s.run()
-	s.isStarted = true
+	s.SetStarted(true)
 	return err
 }
 
@@ -112,7 +114,7 @@ loop:
 	} else {
 		s.logger.Debugf("No exit_callback for %s\n", reflect.TypeOf(s).Name())
 	}
-	
+
 	if exitRespCh != nil {
 		exitRespCh <- []interface{}{true}
 	}
@@ -135,11 +137,19 @@ func (s *GenServer) decodeCmd(command int, msg []interface{}) (error, chan []int
 }
 
 func (s *GenServer) IsStarted() bool {
+	s.isStarted_lock.RLock()
+	defer s.isStarted_lock.RUnlock()
 	return s.isStarted
 }
 
+func (s *GenServer) SetStarted(isStart bool) {
+	s.isStarted_lock.Lock()
+	defer s.isStarted_lock.Unlock()
+	s.isStarted = isStart
+}
+
 func (s *GenServer) Stop_server() error {
-	if s.isStarted {
+	if s.IsStarted() {
 
 		respChan := make(chan []interface{})
 		s.msgChan <- []interface{}{cmdStop, respChan, time.Now()}
@@ -148,7 +158,8 @@ func (s *GenServer) Stop_server() error {
 		succeed := response[0].(bool)
 
 		if succeed {
-			s.isStarted = false
+			//s.isStarted = false
+			s.SetStarted(false)
 			s.logger.Debug("Stopped")
 			return nil
 		} else {

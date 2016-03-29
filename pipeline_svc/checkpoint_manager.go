@@ -811,7 +811,14 @@ func (ckmgr *CheckpointManager) getFailoverUUIDForSeqno(vbno uint16, seqno uint6
 
 func (ckmgr *CheckpointManager) UpdateVBTimestamps(vbno uint16, rollbackseqno uint64) (*base.VBTimestamp, error) {
 	ckmgr.logger.Infof("Received rollback from DCP stream vb=%v, rollbackseqno=%v\n", vbno, rollbackseqno)
-	pipeline_startSeqnos_map := GetStartSeqnos(ckmgr.pipeline, ckmgr.logger)
+	pipeline_startSeqnos_map, pipeline_startSeqnos_map_lock := GetStartSeqnos(ckmgr.pipeline, ckmgr.logger)
+
+	if pipeline_startSeqnos_map == nil {
+		return nil, fmt.Errorf("Error retrieving vb timestamp map for %v\n", ckmgr.pipeline.Topic())
+	}
+	pipeline_startSeqnos_map_lock.Lock()
+	defer pipeline_startSeqnos_map_lock.Unlock()
+
 	pipeline_start_seqno, ok := pipeline_startSeqnos_map[vbno]
 	if !ok {
 		return nil, fmt.Errorf("Invalid vbno=%v\n", vbno)
@@ -851,22 +858,21 @@ func (ckmgr *CheckpointManager) UpdateVBTimestamps(vbno uint16, rollbackseqno ui
 	return vbts, nil
 }
 
-func GetStartSeqnos(pipeline common.Pipeline, logger *log.CommonLogger) map[uint16]*base.VBTimestamp {
+// returns the vbts map and the associated lock on the map. 	861
+// caller needs to lock the lock appropriatedly before using the map 	862
+func GetStartSeqnos(pipeline common.Pipeline, logger *log.CommonLogger) (map[uint16]*base.VBTimestamp, *sync.RWMutex) {
 	if pipeline != nil {
 		settings := pipeline.Settings()
-		startSeqnos_map, ok := settings[base.VBTimestamps].(map[uint16]*base.VBTimestamp)
+		startSeqnos_obj_with_lock, ok := settings[base.VBTimestamps].(*base.ObjectWithLock)
 		if ok {
-			//			logger.Infof("The current start seqno for %v is %v\n", pipeline.Topic(), startSeqnos_map)
-			return startSeqnos_map
+			return startSeqnos_obj_with_lock.Object.(map[uint16]*base.VBTimestamp), startSeqnos_obj_with_lock.Lock
 		} else {
-			logger.Infof("Didn't find 'VBTimesstamps' in settings. settings=%v\n", settings)
+			logger.Errorf("Didn't find 'VBTimesstamps' in settings. settings=%v\n", settings)
 		}
 	} else {
 		logger.Infof("pipleine is nil")
 	}
-
-	//it is not in settings, return an empty map
-	return make(map[uint16]*base.VBTimestamp)
+	return nil, nil
 }
 
 func (ckmgr *CheckpointManager) massCheckVBOpaquesJob() {

@@ -12,12 +12,11 @@ package pipeline_ctx
 import (
 	"errors"
 	"fmt"
-	"github.com/couchbase/goxdcr/base"
 	common "github.com/couchbase/goxdcr/common"
 	"github.com/couchbase/goxdcr/log"
 )
 
-type ServiceSettingsConstructor func(pipeline common.Pipeline, service common.PipelineService, pipeline_settings map[string]interface{}, ts map[uint16]*base.VBTimestamp) (map[string]interface{}, error)
+type ServiceSettingsConstructor func(pipeline common.Pipeline, service common.PipelineService, pipeline_settings map[string]interface{}) (map[string]interface{}, error)
 type StartSeqnoConstructor func(pipeline common.Pipeline) error
 
 type PipelineRuntimeCtx struct {
@@ -54,12 +53,7 @@ func (ctx *PipelineRuntimeCtx) Start(params map[string]interface{}) error {
 	for name, svc := range ctx.runtime_svcs {
 		settings := params
 		if ctx.service_settings_constructor != nil {
-			ts, ok := params["VBTimestamps"]
-			if !ok {
-				ctx.logger.Errorf("VBTimestamps is missing. params=%v\n", params)
-				return errors.New("VBTimestamps is missing")
-			}
-			settings, err = ctx.service_settings_constructor(ctx.pipeline, svc, params, ts.(map[uint16]*base.VBTimestamp))
+			settings, err = ctx.service_settings_constructor(ctx.pipeline, svc, params)
 			if err != nil {
 				return err
 			}
@@ -159,7 +153,7 @@ func (ctx *PipelineRuntimeCtx) UpdateSettings(settings map[string]interface{}) e
 
 	for _, svc := range ctx.runtime_svcs {
 		if svc != nil {
-			service_settings, err := ctx.service_settings_constructor(ctx.pipeline, svc, settings, nil)
+			service_settings, err := ctx.service_settings_constructor(ctx.pipeline, svc, settings)
 			if err != nil {
 				return err
 

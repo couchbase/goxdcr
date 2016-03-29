@@ -164,7 +164,12 @@ func (top_detect_svc *TopologyChangeDetectorSvc) handleSourceToplogyChange(vblis
 
 	// first check if all the problematic vbs in pipeline are due to source topology changes. If not, restart pipeline
 	settings := top_detect_svc.pipeline.Settings()
-	vb_err_map := settings[base.ProblematicVBs].(map[uint16]error)
+
+	vb_err_map_obj := settings[base.ProblematicVBs].(*base.ObjectWithLock)
+	vb_err_map_obj.Lock.RLock()
+	defer vb_err_map_obj.Lock.RUnlock()
+	vb_err_map := vb_err_map_obj.Object.(map[uint16]error)
+
 	var err error
 	for vbno, vb_err := range vb_err_map {
 		_, found := simple_utils.SearchVBInSortedList(vbno, vblist_removed)

@@ -98,7 +98,6 @@ const (
 	SOURCE_NODE_PASSWORD = "source_host_password"
 	SAMPLE_SIZE          = "sample_size"
 	PUBLISH_INTERVAL     = "publish_interval"
-	VB_START_TS          = "v_start_ts"
 )
 
 const (
@@ -121,6 +120,17 @@ var StatsToInitializeForPausedReplications = [10]string{DOCS_WRITTEN_METRIC, DOC
 var StatsToClearForPausedReplications = [13]string{SIZE_REP_QUEUE_METRIC, DOCS_REP_QUEUE_METRIC, DOCS_LATENCY_METRIC, META_LATENCY_METRIC,
 	TIME_COMMITING_METRIC, NUM_FAILEDCKPTS_METRIC, RATE_DOC_CHECKS_METRIC, RATE_OPT_REPD_METRIC, RATE_RECEIVED_DCP_METRIC,
 	RATE_REPLICATED_METRIC, BANDWIDTH_USAGE_METRIC}
+
+// keys for metrics in overview 	125
+// note that DOCS_CHECKED_METRIC is not included since it needs special treatment 	126
+var OverviewMetricKeys = []string{DOCS_WRITTEN_METRIC, EXPIRY_DOCS_WRITTEN_METRIC, DELETION_DOCS_WRITTEN_METRIC,
+	SET_DOCS_WRITTEN_METRIC, DOCS_PROCESSED_METRIC, DOCS_FAILED_CR_SOURCE_METRIC, EXPIRY_FAILED_CR_SOURCE_METRIC,
+	DELETION_FAILED_CR_SOURCE_METRIC, SET_FAILED_CR_SOURCE_METRIC, DATA_REPLICATED_METRIC, DOCS_FILTERED_METRIC,
+	EXPIRY_FILTERED_METRIC, DELETION_FILTERED_METRIC, SET_FILTERED_METRIC, NUM_CHECKPOINTS_METRIC, NUM_FAILEDCKPTS_METRIC,
+	TIME_COMMITING_METRIC, DOCS_OPT_REPD_METRIC, DOCS_RECEIVED_DCP_METRIC, EXPIRY_RECEIVED_DCP_METRIC,
+	DELETION_RECEIVED_DCP_METRIC, SET_RECEIVED_DCP_METRIC, SIZE_REP_QUEUE_METRIC, DOCS_REP_QUEUE_METRIC, DOCS_LATENCY_METRIC,
+	RESP_WAIT_METRIC, META_LATENCY_METRIC, DCP_DISPATCH_TIME_METRIC, DCP_DATACH_LEN,
+}
 
 type SampleStats struct {
 	Count int64
@@ -157,7 +167,8 @@ type StatisticsManager struct {
 	meta_endtime_map_lock sync.RWMutex
 
 	//temporary map to keep checkpointed seqnos
-	checkpointed_seqnos map[uint16]*base.SeqnoWithLock
+	checkpointed_seqnos      map[uint16]*base.SeqnoWithLock
+	checkpointed_seqnos_lock sync.RWMutex
 
 	//chan for stats update tickers -- new tickers are added each time stats interval is changed
 	update_ticker_ch chan *time.Ticker
@@ -210,6 +221,7 @@ func NewStatisticsManager(through_seqno_tracker_svc service_def.ThroughSeqnoTrac
 		kv_mem_clients:            make(map[string]*mcc.Client),
 		kv_mem_client_error_count: make(map[string]int),
 		checkpointed_seqnos:       make(map[uint16]*base.SeqnoWithLock),
+		checkpointed_seqnos_lock:  sync.RWMutex{},
 		through_seqno_tracker_svc: through_seqno_tracker_svc,
 		cluster_info_svc:          cluster_info_svc,
 		xdcr_topology_svc:         xdcr_topology_svc}
@@ -550,16 +562,22 @@ func (stats_mgr *StatisticsManager) calculateDocsProcessed() int64 {
 
 func (stats_mgr *StatisticsManager) calculateDocsChecked() uint64 {
 	var docs_checked uint64 = 0
-	for vbno, vbts := range GetStartSeqnos(stats_mgr.pipeline, stats_mgr.logger) {
-		start_seqno := vbts.Seqno
-		var docs_checked_vb uint64 = 0
-		checkpointed_seqno := stats_mgr.checkpointed_seqnos[vbno].GetSeqno()
-		if checkpointed_seqno > start_seqno {
-			docs_checked_vb = checkpointed_seqno
-		} else {
-			docs_checked_vb = start_seqno
+	vbts_map, vbts_map_lock := GetStartSeqnos(stats_mgr.pipeline, stats_mgr.logger)
+	if vbts_map != nil {
+		vbts_map_lock.RLock()
+		defer vbts_map_lock.RUnlock()
+
+		for vbno, vbts := range vbts_map {
+			start_seqno := vbts.Seqno
+			var docs_checked_vb uint64 = 0
+			checkpointed_seqno := stats_mgr.checkpointed_seqnos[vbno].GetSeqno()
+			if checkpointed_seqno > start_seqno {
+				docs_checked_vb = checkpointed_seqno
+			} else {
+				docs_checked_vb = start_seqno
+			}
+			docs_checked = docs_checked + docs_checked_vb
 		}
-		docs_checked = docs_checked + docs_checked_vb
 	}
 	return docs_checked
 }
@@ -633,47 +651,24 @@ func (stats_mgr *StatisticsManager) Attach(pipeline common.Pipeline) error {
 }
 
 func (stats_mgr *StatisticsManager) initOverviewRegistry() {
-	// preserve old docs_checked if it exists. use a negative value to indicate that it does not exist
-	var old_docs_checked int = -1
-	old_overview := stats_mgr.registries[OVERVIEW_METRICS_KEY]
-	if old_overview != nil {
-		old_docs_checked = int(old_overview.Get(DOCS_CHECKED_METRIC).(metrics.Counter).Count())
+	if overview_registry, ok := stats_mgr.registries[OVERVIEW_METRICS_KEY]; ok {
+		// reset all counters except that for DOCS_CHECKED_METRIC to 0
+		// counter for DOCS_CHECKED_METRIC needs to be preserved for the computation of docs_checked_rate
+		for _, overview_metric_key := range OverviewMetricKeys {
+			overview_registry.Get(overview_metric_key).(metrics.Counter).Clear()
+		}
+	} else {
+		// create new overview_registry and initialize all counters except that for DOCS_CHECKED_METRIC to 0
+		overview_registry = metrics.NewRegistry()
+		stats_mgr.registries[OVERVIEW_METRICS_KEY] = overview_registry
+		for _, overview_metric_key := range OverviewMetricKeys {
+			overview_registry.Register(overview_metric_key, metrics.NewCounter())
+		}
+		// use a negative value to indicate that an old value does not exist
+		docs_checked_counter := metrics.NewCounter()
+		setCounter(docs_checked_counter, -1)
+		overview_registry.Register(DOCS_CHECKED_METRIC, docs_checked_counter)
 	}
-	docs_checked_counter := metrics.NewCounter()
-	setCounter(docs_checked_counter, old_docs_checked)
-
-	overview_registry := metrics.NewRegistry()
-	stats_mgr.registries[OVERVIEW_METRICS_KEY] = overview_registry
-	overview_registry.Register(DOCS_WRITTEN_METRIC, metrics.NewCounter())
-	overview_registry.Register(EXPIRY_DOCS_WRITTEN_METRIC, metrics.NewCounter())
-	overview_registry.Register(DELETION_DOCS_WRITTEN_METRIC, metrics.NewCounter())
-	overview_registry.Register(SET_DOCS_WRITTEN_METRIC, metrics.NewCounter())
-	overview_registry.Register(DOCS_PROCESSED_METRIC, metrics.NewCounter())
-	overview_registry.Register(DOCS_FAILED_CR_SOURCE_METRIC, metrics.NewCounter())
-	overview_registry.Register(EXPIRY_FAILED_CR_SOURCE_METRIC, metrics.NewCounter())
-	overview_registry.Register(DELETION_FAILED_CR_SOURCE_METRIC, metrics.NewCounter())
-	overview_registry.Register(SET_FAILED_CR_SOURCE_METRIC, metrics.NewCounter())
-	overview_registry.Register(DATA_REPLICATED_METRIC, metrics.NewCounter())
-	overview_registry.Register(DOCS_FILTERED_METRIC, metrics.NewCounter())
-	overview_registry.Register(EXPIRY_FILTERED_METRIC, metrics.NewCounter())
-	overview_registry.Register(DELETION_FILTERED_METRIC, metrics.NewCounter())
-	overview_registry.Register(SET_FILTERED_METRIC, metrics.NewCounter())
-	overview_registry.Register(NUM_CHECKPOINTS_METRIC, metrics.NewCounter())
-	overview_registry.Register(NUM_FAILEDCKPTS_METRIC, metrics.NewCounter())
-	overview_registry.Register(TIME_COMMITING_METRIC, metrics.NewCounter())
-	overview_registry.Register(DOCS_OPT_REPD_METRIC, metrics.NewCounter())
-	overview_registry.Register(DOCS_RECEIVED_DCP_METRIC, metrics.NewCounter())
-	overview_registry.Register(EXPIRY_RECEIVED_DCP_METRIC, metrics.NewCounter())
-	overview_registry.Register(DELETION_RECEIVED_DCP_METRIC, metrics.NewCounter())
-	overview_registry.Register(SET_RECEIVED_DCP_METRIC, metrics.NewCounter())
-	overview_registry.Register(SIZE_REP_QUEUE_METRIC, metrics.NewCounter())
-	overview_registry.Register(DOCS_REP_QUEUE_METRIC, metrics.NewCounter())
-	overview_registry.Register(DOCS_LATENCY_METRIC, metrics.NewCounter())
-	overview_registry.Register(RESP_WAIT_METRIC, metrics.NewCounter())
-	overview_registry.Register(META_LATENCY_METRIC, metrics.NewCounter())
-	overview_registry.Register(DOCS_CHECKED_METRIC, docs_checked_counter)
-	overview_registry.Register(DCP_DISPATCH_TIME_METRIC, metrics.NewCounter())
-	overview_registry.Register(DCP_DATACH_LEN, metrics.NewCounter())
 }
 
 func (stats_mgr *StatisticsManager) Start(settings map[string]interface{}) error {
@@ -1107,6 +1102,8 @@ func (ckpt_collector *checkpointMgrCollector) OnEvent(event *common.Event) {
 	} else if event.EventType == common.CheckpointDoneForVB {
 		vbno := event.OtherInfos.(uint16)
 		ckpt_record := event.Data.(metadata.CheckpointRecord)
+		ckpt_collector.stats_mgr.checkpointed_seqnos_lock.Lock()
+		defer ckpt_collector.stats_mgr.checkpointed_seqnos_lock.Unlock()
 		ckpt_collector.stats_mgr.checkpointed_seqnos[vbno].SetSeqno(ckpt_record.Seqno)
 
 	} else if event.EventType == common.CheckpointDone {

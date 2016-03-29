@@ -103,6 +103,11 @@ type MetadataChangeListener interface {
 	Start() error
 }
 
+type ObjectWithLock struct {
+     Object interface{}
+     Lock  *sync.RWMutex
+}
+
 type SeqnoWithLock struct {
 	seqno uint64
 	lock  *sync.RWMutex

@@ -49,7 +49,7 @@ const (
 
 var dcp_inactive_stream_check_interval = 10 * time.Second
 
-var dcp_setting_defs base.SettingDefinitions = base.SettingDefinitions{DCP_VBTimestamp: base.NewSettingDef(reflect.TypeOf((*map[uint16]*base.VBTimestamp)(nil)), true)}
+var dcp_setting_defs base.SettingDefinitions = base.SettingDefinitions{DCP_VBTimestamp: base.NewSettingDef(reflect.TypeOf((*map[uint16]*base.VBTimestamp)(nil)), false)}
 
 var ErrorEmptyVBList = errors.New("Invalid configuration for DCP nozzle. VB list cannot be empty.")
 
@@ -94,7 +94,8 @@ type DcpNozzle struct {
 
 	finch chan bool
 
-	bOpen bool
+	bOpen      bool
+	lock_bOpen sync.RWMutex
 
 	childrenWaitGrp sync.WaitGroup
 
@@ -147,9 +148,10 @@ func NewDcpNozzle(id string,
 		bucketName:               bucketName,
 		bucketPassword:           bucketPassword,
 		vbnos:                    vbnos,
-		GenServer:                server,           /*gen_server.GenServer*/
-		AbstractPart:             part,             /*AbstractPart*/
-		bOpen:                    true,             /*bOpen	bool*/
+		GenServer:                server, /*gen_server.GenServer*/
+		AbstractPart:             part,   /*AbstractPart*/
+		bOpen:                    true,   /*bOpen	bool*/
+		lock_bOpen:               sync.RWMutex{},
 		childrenWaitGrp:          sync.WaitGroup{}, /*childrenWaitGrp sync.WaitGroup*/
 		lock_uprFeed:             sync.RWMutex{},
 		cur_ts:                   make(map[uint16]*vbtsWithLock),
@@ -228,6 +230,8 @@ func (dcp *DcpNozzle) initialize(settings map[string]interface{}) (err error) {
 }
 
 func (dcp *DcpNozzle) Open() error {
+	dcp.lock_bOpen.Lock()
+	defer dcp.lock_bOpen.Unlock()
 	if !dcp.bOpen {
 		dcp.bOpen = true
 
@@ -236,6 +240,8 @@ func (dcp *DcpNozzle) Open() error {
 }
 
 func (dcp *DcpNozzle) Close() error {
+	dcp.lock_bOpen.Lock()
+	defer dcp.lock_bOpen.Unlock()
 	if dcp.bOpen {
 		dcp.bOpen = false
 	}
@@ -380,8 +386,9 @@ func (dcp *DcpNozzle) closeUprFeed() bool {
 }
 
 func (dcp *DcpNozzle) IsOpen() bool {
-	ret := dcp.bOpen
-	return ret
+	dcp.lock_bOpen.RLock()
+	defer dcp.lock_bOpen.RUnlock()
+	return dcp.bOpen
 }
 
 func (dcp *DcpNozzle) Receive(data interface{}) error {
