@@ -511,7 +511,6 @@ type xmemClient struct {
 	read_timeout                 time.Duration
 	write_timeout                time.Duration
 	logger                       *log.CommonLogger
-	poolName                     string
 	healthy                      bool
 	num_of_repairs               int
 	last_failure                 time.Time
@@ -519,14 +518,13 @@ type xmemClient struct {
 }
 
 func newXmemClient(name string, read_timeout, write_timeout time.Duration,
-	client *mcc.Client, poolName string, max_continuous_failure int, max_downtime time.Duration, logger *log.CommonLogger) *xmemClient {
+	client *mcc.Client, max_continuous_failure int, max_downtime time.Duration, logger *log.CommonLogger) *xmemClient {
 	logger.Infof("xmem client %v is created with read_timeout=%v, write_timeout=%v, retry_limit=%v", name, read_timeout, write_timeout, max_continuous_failure)
 	return &xmemClient{name: name,
 		memClient:                        client,
 		continuous_write_failure_counter: 0,
 		success_counter:                  0,
 		logger:                           logger,
-		poolName:                         poolName,
 		read_timeout:                     read_timeout,
 		write_timeout:                    write_timeout,
 		max_downtime:                     max_downtime,
@@ -638,12 +636,6 @@ func (client *xmemClient) markConnUnhealthy() {
 }
 
 func (client *xmemClient) close() {
-	if client.isConnHealthy() {
-		pool := base.ConnPoolMgr().GetPool(client.poolName)
-		if pool != nil {
-			pool.Release(client.memClient)
-		}
-	}
 	client.memClient.Close()
 }
 
@@ -1410,6 +1402,11 @@ func (xmem *XmemNozzle) sendSingleSetMeta(adjustRequest bool, item *base.Wrapped
 
 func (xmem *XmemNozzle) getConnPool() (pool base.ConnPool, err error) {
 	poolName := getPoolName(xmem.config)
+	return base.ConnPoolMgr().GetPool(poolName), nil
+}
+
+func (xmem *XmemNozzle) getOrCreateConnPool() (pool base.ConnPool, err error) {
+	poolName := getPoolName(xmem.config)
 	if !xmem.config.demandEncryption {
 		pool, err = base.ConnPoolMgr().GetOrCreatePool(poolName, xmem.config.connectStr, xmem.config.bucketName, xmem.config.bucketName, xmem.config.password, xmem.config.connPoolSize)
 		if err != nil {
@@ -1444,34 +1441,34 @@ func (xmem *XmemNozzle) getConnPool() (pool base.ConnPool, err error) {
 func (xmem *XmemNozzle) initializeConnection() (err error) {
 	xmem.Logger().Debugf("xmem.config= %v", xmem.config.connectStr)
 	xmem.Logger().Debugf("poolName=%v", getPoolName(xmem.config))
-	pool, err := xmem.getConnPool()
+	pool, err := xmem.getOrCreateConnPool()
 	if err != nil && err == base.WrongConnTypeError {
 		//there is a stale pool, the remote cluster settings are changed
 		base.ConnPoolMgr().RemovePool(getPoolName(xmem.config))
-		pool, err = xmem.getConnPool()
+		pool, err = xmem.getOrCreateConnPool()
 	}
 	if err != nil {
 		return
 	}
 	xmem.connType = pool.ConnType()
 
-	memClient_setMeta, err := pool.Get()
+	memClient_setMeta, err := pool.GetNew()
 
 	if err != nil {
 		return
 	}
 
-	memClient_getMeta, err := pool.Get()
+	memClient_getMeta, err := pool.GetNew()
 	if err != nil {
 		return
 	}
 
 	xmem.client_for_setMeta = newXmemClient("client_setMeta", xmem.config.readTimeout,
 		xmem.config.writeTimeout, memClient_setMeta,
-		getPoolName(xmem.config), xmem.config.maxRetry, xmem.config.max_read_downtime, xmem.Logger())
+		xmem.config.maxRetry, xmem.config.max_read_downtime, xmem.Logger())
 	xmem.client_for_getMeta = newXmemClient("client_getMeta", xmem.config.readTimeout,
 		xmem.config.writeTimeout, memClient_getMeta,
-		getPoolName(xmem.config), xmem.config.maxRetry, xmem.config.max_read_downtime, xmem.Logger())
+		xmem.config.maxRetry, xmem.config.max_read_downtime, xmem.Logger())
 
 	if err == nil {
 		xmem.Logger().Infof("%v done with initializeConnection.", xmem.Id())
@@ -1969,8 +1966,6 @@ func (xmem *XmemNozzle) writeToClient(client *xmemClient, bytes []byte, renewTim
 		xmem.Logger().Errorf("%v writeToClient error: %s\n", xmem.Id(), fmt.Sprint(err))
 
 		if utils.IsSeriousNetError(err) {
-			//in this case, it is likely the connections in this pool would suffer the same problem, release all the connections
-			xmem.releasePool()
 			xmem.repairConn(client, err.Error(), rev)
 
 		} else if isNetError(err) {
@@ -2012,8 +2007,6 @@ func (xmem *XmemNozzle) readFromClient(client *xmemClient, resetReadTimeout bool
 			if err == io.EOF {
 				return nil, connectionClosedError, rev
 			} else if utils.IsSeriousNetError(err) {
-				//in this case, it is likely the connections in this pool would suffer the same problem, release all the connections
-				xmem.releasePool()
 				xmem.repairConn(client, errMsg, rev)
 				return nil, badConnectionError, rev
 			} else if isNetError(err) {
@@ -2035,13 +2028,10 @@ func (xmem *XmemNozzle) readFromClient(client *xmemClient, resetReadTimeout bool
 
 				if response.Status == 0x08 {
 					//PROTOCOL_BINARY_RESPONSE_NO_BUCKET
-					//bucket must be recreated, drop the connection pool
-					xmem.releasePool()
-					client.logger.Error("Got PROTOCOL_BINARY_RESPONSE_NO_BUCKET, release the connections in the pool")
+					client.logger.Error("Got PROTOCOL_BINARY_RESPONSE_NO_BUCKET")
 				} else if response.Status == mc.NOT_MY_VBUCKET {
 					//the original error message is too long, which clogs the log
 					err = base.ErrorNotMyVbucket
-					xmem.releasePool()
 				}
 				high_level_err := "Received error response from memcached in target cluster."
 				xmem.handleGeneralError(errors.New(high_level_err))
@@ -2077,7 +2067,7 @@ func (xmem *XmemNozzle) repairConn(client *xmemClient, reason string, rev int) e
 	numOfRetry := 0
 	backoffTime := default_newconn_backoff_time
 	for {
-		memClient, err := pool.Get()
+		memClient, err := pool.GetNew()
 
 		if err == nil {
 			repaired := client.repairConn(memClient, rev, xmem.Id())
@@ -2137,14 +2127,6 @@ func (xmem *XmemNozzle) packageRequest(count int, reqs_bytes []byte) []byte {
 		return bytes
 	} else {
 		return reqs_bytes
-	}
-}
-
-func (xmem *XmemNozzle) releasePool() {
-	xmem.Logger().Infof("%v release pool %v\n", xmem.Id(), getPoolName(xmem.config))
-	pool := base.ConnPoolMgr().GetPool(getPoolName(xmem.config))
-	if pool != nil {
-		pool.ReleaseConnections(pool.GetCAS())
 	}
 }
 

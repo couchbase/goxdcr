@@ -48,6 +48,10 @@ func (p *TCPConnPool) IsClosed() bool {
 	return p.clients == nil
 }
 
+func (p *TCPConnPool) GetNew() (*net.TCPConn, error) {
+	return NewTCPConn(p.hostName)
+}
+
 func (p *TCPConnPool) Get() (*net.TCPConn, error) {
 	p.logger.Debugf("There are %d connections in the pool\n", len(p.clients))
 	select {
