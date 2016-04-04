@@ -564,7 +564,7 @@ func (stats_mgr *StatisticsManager) calculateDocsChecked() uint64 {
 	return docs_checked
 }
 func (stats_mgr *StatisticsManager) calculateChangesLeft(docs_processed int64) (int64, error) {
-	total_changes, err := calculateTotalChanges(stats_mgr.active_vbs, stats_mgr.kv_mem_clients, stats_mgr.kv_mem_client_error_count, "", stats_mgr.logger)
+	total_changes, err := calculateTotalChanges(stats_mgr.active_vbs, stats_mgr.kv_mem_clients, stats_mgr.kv_mem_client_error_count, stats_mgr.bucket_name, stats_mgr.logger)
 	if err != nil {
 		return 0, err
 	}
