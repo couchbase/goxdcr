@@ -221,7 +221,7 @@ func NewStatisticsManager(through_seqno_tracker_svc service_def.ThroughSeqnoTrac
 
 //Statistics of a pipeline which may or may not be running
 func GetStatisticsForPipeline(topic string) (*expvar.Map, error) {
-	repl_status := pipeline_manager.ReplicationStatus(topic)
+	repl_status, _ := pipeline_manager.ReplicationStatus(topic)
 	if repl_status == nil {
 		return nil, nil
 	}
@@ -1123,12 +1123,7 @@ func setCounter(counter metrics.Counter, count int) {
 
 func (stats_mgr *StatisticsManager) getReplicationStatus() (*pipeline_pkg.ReplicationStatus, error) {
 	topic := stats_mgr.pipeline.Topic()
-	rs := pipeline_manager.ReplicationStatus(topic)
-	if rs == nil {
-		return nil, utils.ReplicationStatusNotFoundError(topic)
-	} else {
-		return rs, nil
-	}
+	return pipeline_manager.ReplicationStatus(topic)
 }
 
 func UpdateStats(cluster_info_svc service_def.ClusterInfoSvc, xdcr_topology_svc service_def.XDCRCompTopologySvc,

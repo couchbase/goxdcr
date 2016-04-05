@@ -249,7 +249,7 @@ func (adminport *Adminport) doCreateRemoteClusterRequest(request *http.Request) 
 		err = remoteClusterService.ValidateAddRemoteCluster(remoteClusterRef)
 		return EncodeRemoteClusterErrorIntoResponse(err)
 	} else {
-		err = remoteClusterService.AddRemoteCluster(remoteClusterRef, false/*skipConnectivityValidation*/)
+		err = remoteClusterService.AddRemoteCluster(remoteClusterRef, false /*skipConnectivityValidation*/)
 		if err != nil {
 			return EncodeRemoteClusterErrorIntoResponse(err)
 		} else {
@@ -363,7 +363,10 @@ func (adminport *Adminport) doGetAllReplicationsRequest(request *http.Request) (
 	replIds := pipeline_manager.AllReplications()
 	replSpecs := make(map[string]*metadata.ReplicationSpecification)
 	for _, replId := range replIds {
-		replSpecs[replId] = pipeline_manager.ReplicationStatus(replId).Spec()
+		rep_status, _ := pipeline_manager.ReplicationStatus(replId)
+		if rep_status != nil {
+			replSpecs[replId] = rep_status.Spec()
+		}
 	}
 
 	return NewGetAllReplicationsResponse(replSpecs)
