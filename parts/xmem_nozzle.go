@@ -1272,7 +1272,21 @@ func (xmem *XmemNozzle) batchGetMeta(bigDoc_map map[string]*base.WrappedMCReques
 				if err != nil {
 					if err == PartStoppedError {
 						return
-					} else if err == badConnectionError || err == connectionTimeoutReachLimitError || err == connectionClosedError || err == fatalError {
+					} else if err == fatalError {
+						xmem.repairConn(xmem.client_for_getMeta, err.Error(), rev)
+
+						// if possible, log info about the request that caused fatal error to facilitate debugging
+						if response != nil {
+							keySeqno, ok := opaque_keySeqno_map[response.Opaque]
+							if ok {
+								key, ok1 := keySeqno[0].(string)
+								seqno, ok2 := keySeqno[1].(uint64)
+								if ok1 && ok2 {
+									xmem.Logger().Infof("%v received fatal error from getMeta client. key=%v, seqno=%v, response=%v\n", xmem.Id(), key, seqno, response)
+								}
+							}
+						}
+					} else if err == badConnectionError || err == connectionClosedError {
 						xmem.repairConn(xmem.client_for_getMeta, err.Error(), rev)
 					}
 
@@ -1535,7 +1549,20 @@ func (xmem *XmemNozzle) receiveResponse(finch chan bool, waitGrp *sync.WaitGroup
 
 			response, err, rev := xmem.readFromClient(xmem.client_for_setMeta, true)
 			if err != nil {
-				if err == PartStoppedError || err == fatalError {
+				if err == PartStoppedError {
+					goto done
+				} else if err == fatalError {
+					// if possible, log the request that caused fatal error to facilitate debugging
+					if response != nil {
+						pos := xmem.getPosFromOpaque(response.Opaque)
+						wrappedReq, err := xmem.buf.slot(pos)
+						if err == nil && wrappedReq != nil {
+							req := wrappedReq.Req
+							if req != nil && req.Opaque == response.Opaque {
+								xmem.Logger().Infof("%v received fatal error from setMeta client. req=%v, seqno=%v, response=%v\n", xmem.Id(), req, wrappedReq.Seqno, response)
+							}
+						}
+					}
 					goto done
 				} else if err == badConnectionError || err == connectionClosedError {
 					xmem.Logger().Error("The connection is ruined. Repair the connection and retry.")
