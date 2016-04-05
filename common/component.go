@@ -28,7 +28,7 @@ const (
 	DataSent ComponentEventType = iota
 	//data is filtered out by the component
 	DataFiltered ComponentEventType = iota
-	//fetal error encountered by the component
+	//fatal error encountered by the component
 	ErrorEncountered ComponentEventType = iota
 	//error encountered in a particular vb by the component
 	VBErrorEncountered ComponentEventType = iota
