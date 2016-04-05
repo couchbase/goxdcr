@@ -491,7 +491,7 @@ func (tsTracker *ThroughSeqnoTrackerSvc) Id() string {
 }
 
 func (tsTracker *ThroughSeqnoTrackerSvc) isPipelineRunning() bool {
-	rep_status := pipeline_manager.ReplicationStatus(tsTracker.rep_id)
+	rep_status, _ := pipeline_manager.ReplicationStatus(tsTracker.rep_id)
 	if rep_status != nil {
 		rep_status.Lock.RLock()
 		defer rep_status.Lock.RUnlock()

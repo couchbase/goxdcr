@@ -29,7 +29,7 @@ var ErrorNoDownStreamNodesForRouter = errors.New("No downstream nodes have been 
 var ErrorNoRoutingMapForRouter = errors.New("No routingMap has been defined for Router.")
 var ErrorInvalidRoutingMapForRouter = errors.New("routingMap in Router is invalid.")
 
-type ReqCreator func(id string) *base.WrappedMCRequest
+type ReqCreator func(id string) (*base.WrappedMCRequest, error)
 
 // XDCR Router does two things:
 // 1. converts UprEvent to MCRequest
@@ -78,8 +78,11 @@ func NewRouter(id string, topic string, filterExpression string,
 	return router, nil
 }
 
-func (router *Router) ComposeMCRequest(event *mcc.UprEvent) *base.WrappedMCRequest {
-	wrapped_req := router.newWrappedMCRequest()
+func (router *Router) ComposeMCRequest(event *mcc.UprEvent) (*base.WrappedMCRequest, error) {
+	wrapped_req, err := router.newWrappedMCRequest()
+	if err != nil {
+		return nil, err
+	}
 
 	req := wrapped_req.Req
 	req.Cas = event.Cas
@@ -112,7 +115,7 @@ func (router *Router) ComposeMCRequest(event *mcc.UprEvent) *base.WrappedMCReque
 	wrapped_req.Start_time = time.Now()
 	wrapped_req.ConstructUniqueKey()
 
-	return wrapped_req
+	return wrapped_req, nil
 }
 
 // Implementation of the routing algorithm
@@ -147,7 +150,11 @@ func (router *Router) route(data interface{}) (map[string]interface{}, error) {
 			return result, nil
 		}
 	}
-	result[partId] = router.ComposeMCRequest(uprEvent)
+	mcRequest, err := router.ComposeMCRequest(uprEvent)
+	if err != nil {
+		return nil, utils.NewEnhancedError("Error creating new memcached request.", err)
+	}
+	result[partId] = mcRequest
 	router.counter[partId] = router.counter[partId] + 1
 	return result, nil
 }
@@ -180,12 +187,12 @@ func (router *Router) StatusSummary() string {
 
 }
 
-func (router *Router) newWrappedMCRequest() *base.WrappedMCRequest {
+func (router *Router) newWrappedMCRequest() (*base.WrappedMCRequest, error) {
 	if router.req_creator != nil {
 		return router.req_creator(router.topic)
 	} else {
 		return &base.WrappedMCRequest{Seqno: 0,
 			Req: &mc.MCRequest{},
-		}
+		}, nil
 	}
 }

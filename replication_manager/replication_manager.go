@@ -198,8 +198,11 @@ func (rm *replicationManager) initPausedReplications() {
 
 		} else {
 			for _, spec := range specs {
-				if !spec.Settings.Active && pipeline_manager.ReplicationStatus(spec.Id) == nil {
-					pipeline_manager.InitReplicationStatusForReplication(spec.Id)
+				if !spec.Settings.Active {
+					rep_status, _ := pipeline_manager.ReplicationStatus(spec.Id)
+					if rep_status == nil {
+						pipeline_manager.InitReplicationStatusForReplication(spec.Id)
+					}
 				}
 			}
 			return
@@ -563,7 +566,7 @@ func GetReplicationInfos() ([]base.ReplicationInfo, error) {
 		replInfo.StatsMap = make(map[string]interface{})
 		replInfo.ErrorList = make([]base.ErrorInfo, 0)
 
-		rep_status := pipeline_manager.ReplicationStatus(replId)
+		rep_status, _ := pipeline_manager.ReplicationStatus(replId)
 		if rep_status != nil {
 			// set stats map
 			expvarMap, err := pipeline_svc.GetStatisticsForPipeline(replId)
@@ -662,7 +665,7 @@ func getPipelineFromPipelineSupevisor(s common.Supervisor) (common.Pipeline, err
 	supervisorId := s.Id()
 	if strings.HasPrefix(supervisorId, base.PipelineSupervisorIdPrefix) {
 		pipelineId := supervisorId[len(base.PipelineSupervisorIdPrefix):]
-		rep_status := pipeline_manager.ReplicationStatus(pipelineId)
+		rep_status, _ := pipeline_manager.ReplicationStatus(pipelineId)
 		if rep_status != nil {
 			pipeline := rep_status.Pipeline()
 			if pipeline != nil {
@@ -672,7 +675,7 @@ func getPipelineFromPipelineSupevisor(s common.Supervisor) (common.Pipeline, err
 				return nil, errors.New(fmt.Sprintf("Internal error. Pipeline, %v, is not found", pipelineId))
 			}
 		} else {
-			logger_rm.Errorf("Replication %v does no longer exist", pipelineId)
+			logger_rm.Errorf("Replication %v no longer exists", pipelineId)
 			return nil, errors.New(fmt.Sprintf("Internal error. Replication %v, is not found", pipelineId))
 		}
 	} else {

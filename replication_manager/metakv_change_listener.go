@@ -253,9 +253,9 @@ func (rscl *ReplicationSpecChangeListener) liveUpdatePipeline(topic string, oldS
 		oldSettings.StatsInterval != newSettings.StatsInterval ||
 		oldSettings.OptimisticReplicationThreshold != newSettings.OptimisticReplicationThreshold {
 
-		rs := pipeline_manager.ReplicationStatus(topic)
-		if rs == nil {
-			return fmt.Errorf("Cannot find replication status for pipeline %v", topic)
+		rs, err := pipeline_manager.ReplicationStatus(topic)
+		if err != nil {
+			return err
 		}
 
 		pipeline := rs.Pipeline()
