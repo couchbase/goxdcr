@@ -21,6 +21,7 @@ import (
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/utils"
 	"regexp"
+	"sync"
 	"time"
 )
 
@@ -41,6 +42,7 @@ type Router struct {
 	routingMap   map[uint16]string // pvbno -> partId. This defines the loading balancing strategy of which vbnos would be routed to which part
 	//Debug only, need to be rolled into statistics and monitoring
 	counter                map[string]int
+	counter_lock           sync.RWMutex
 	req_creator            ReqCreator
 	topic                  string
 	ext_metadata_supported bool
@@ -65,6 +67,7 @@ func NewRouter(id string, topic string, filterExpression string,
 		filterRegexp:           filterRegexp,
 		routingMap:             routingMap,
 		counter:                make(map[string]int),
+		counter_lock:           sync.RWMutex{},
 		topic:                  topic,
 		req_creator:            req_creator,
 		ext_metadata_supported: ext_metadata_supported}
@@ -214,6 +217,8 @@ func (router *Router) route(data interface{}) (map[string]interface{}, error) {
 		return nil, utils.NewEnhancedError("Error creating new memcached request.", err)
 	}
 	result[partId] = mcRequest
+	router.counter_lock.Lock()
+	defer router.counter_lock.Unlock()
 	router.counter[partId] = router.counter[partId] + 1
 	return result, nil
 }
@@ -242,6 +247,8 @@ func (router *Router) RoutingMapByDownstreams() map[string][]uint16 {
 	return ret
 }
 func (router *Router) StatusSummary() string {
+	router.counter_lock.RLock()
+	defer router.counter_lock.RUnlock()
 	return fmt.Sprintf("Rounter %v = %v", router.id, router.counter)
 
 }
