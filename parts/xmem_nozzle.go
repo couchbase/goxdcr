@@ -1321,12 +1321,8 @@ func (xmem *XmemNozzle) batchGetMeta(bigDoc_map map[string]*base.WrappedMCReques
 
 				response, err, rev := xmem.readFromClient(xmem.client_for_getMeta, true)
 				if err != nil {
-					if err == PartStoppedError {
-						return
-					} else if err == fatalError {
-						xmem.repairConn(xmem.client_for_getMeta, err.Error(), rev)
-
-						// if possible, log info about the request that caused fatal error to facilitate debugging
+					if err == fatalError {
+						// if possible, log info about the corresponding request to facilitate debugging
 						if response != nil {
 							keySeqno, ok := opaque_keySeqno_map[response.Opaque]
 							if ok {
@@ -1348,8 +1344,9 @@ func (xmem *XmemNozzle) batchGetMeta(bigDoc_map map[string]*base.WrappedMCReques
 					} else {
 						logger.Errorf("%v batchGetMeta timed out. Expected %v responses, got %v responses", xmem.Id(), count, len(respMap))
 						logger.Infof("%v Expected=%v, Received=%v\n", xmem.Id(), opaque_keySeqno_map, respMap)
-						return
 					}
+
+					return
 
 				} else {
 					keySeqno, ok := opaque_keySeqno_map[response.Opaque]
@@ -1366,10 +1363,23 @@ func (xmem *XmemNozzle) batchGetMeta(bigDoc_map map[string]*base.WrappedMCReques
 								Commit_time: time.Since(start_time),
 							}
 							xmem.RaiseEvent(common.NewEvent(common.GetMetaReceived, nil, xmem, nil, additionalInfo))
+
+							if response.Status != mc.SUCCESS && !isIgnorableMCError(response.Status) && !isTemporaryMCError(response.Status) {
+								// this response requires connection reset
+
+								// log the corresponding request to facilitate debugging
+								xmem.Logger().Infof("%v received error from getMeta client. key=%v, seqno=%v, response=%v\n", xmem.Id(), key, seqno, response)
+								err = fmt.Errorf("error response with status %v from memcached", response.Status)
+								xmem.repairConn(xmem.client_for_getMeta, err.Error(), rev)
+								// no need to wait further since connection has been reset
+								return
+							}
+
 						} else {
 							panic("KeySeqno list is not formated as expected [string, uint64, time]")
 						}
 					}
+
 				}
 
 				//*count == 0 means write is still in session, can't return
@@ -1377,7 +1387,6 @@ func (xmem *XmemNozzle) batchGetMeta(bigDoc_map map[string]*base.WrappedMCReques
 					logger.Debugf("%v Expected %v response, got all", xmem.Id(), count)
 					return
 				}
-
 			}
 		}
 
@@ -1409,7 +1418,11 @@ func (xmem *XmemNozzle) batchGetMeta(bigDoc_map map[string]*base.WrappedMCReques
 				xmem.Logger().Debugf("%v doc %v succeeded source side conflict resolution. source meta=%v, target meta=%v. sending it to target\n", xmem.Id(), key, doc_meta_source, doc_meta_target)
 			}
 		} else {
-			xmem.Logger().Debugf("%v batchGetMeta: doc %s is not found in target system, send it", xmem.Id(), key)
+			if !ok || resp == nil {
+				xmem.Logger().Debugf("%v batchGetMeta: doc %s is not found in target system, send it", xmem.Id(), key)
+			} else {
+				xmem.Logger().Infof("%v batchGetMeta: memcached response for doc %s has error status %v. Skip conflict resolution and send the doc", xmem.Id(), key, resp.Status)
+			}
 		}
 	}
 
@@ -1610,7 +1623,7 @@ func (xmem *XmemNozzle) receiveResponse(finch chan bool, waitGrp *sync.WaitGroup
 				if err == PartStoppedError {
 					goto done
 				} else if err == fatalError {
-					// if possible, log the request that caused fatal error to facilitate debugging
+					// if possible, log the corresponding request to facilitate debugging
 					if response != nil {
 						pos := xmem.getPosFromOpaque(response.Opaque)
 						wrappedReq, err := xmem.buf.slot(pos)
@@ -1626,25 +1639,21 @@ func (xmem *XmemNozzle) receiveResponse(finch chan bool, waitGrp *sync.WaitGroup
 					xmem.Logger().Errorf("%v The connection is ruined. Repair the connection and retry.", xmem.Id())
 					xmem.repairConn(xmem.client_for_setMeta, err.Error(), rev)
 				}
-
-				//read is unsuccessful, put the token back
 			} else if response == nil {
 				panic("readFromClient returned nil error and nil response")
 			} else if response.Status != mc.SUCCESS && !isIgnorableMCError(response.Status) {
-				if isRecoverableMCError(response.Status) {
+				if isTemporaryMCError(response.Status) {
 					// target may be overloaded. increase backoff factor to alleviate stress on target
 					xmem.client_for_setMeta.backoff_factor++
 
-					// err is recoverable. resend doc
+					// error is temporary. resend doc
 					pos := xmem.getPosFromOpaque(response.Opaque)
-					xmem.Logger().Errorf("%v Received recoverable error in response. Response status=%v, err = %v, response=%v\n", xmem.Id(), response.Status.String(), err, response.Bytes())
+					xmem.Logger().Errorf("%v Received temporary error in setMeta response. Response status=%v, err = %v, response=%v\n", xmem.Id(), response.Status.String(), err, response)
 					//resend and reset the retry=0 as retry is an indicator of network status,
 					//here we have received the response, so reset retry=0
 					_, err = xmem.buf.modSlot(pos, xmem.resendWithReset)
-
-					//read is unsuccessful, put the token back
 				} else {
-					// for non-recoverable errors, report failure
+					// for non-temporary errors, repair connections
 					var req *mc.MCRequest = nil
 					var seqno uint64
 					pos := xmem.getPosFromOpaque(response.Opaque)
@@ -1653,19 +1662,15 @@ func (xmem *XmemNozzle) receiveResponse(finch chan bool, waitGrp *sync.WaitGroup
 						req = wrappedReq.Req
 						seqno = wrappedReq.Seqno
 						if req != nil && req.Opaque == response.Opaque {
-							xmem.Logger().Errorf("%v received a response indicating non-recoverable error from xmem client. response status=%v, opcode=%v, seqno=%v, req.Key=%v, req.Cas=%v, req.Extras=%s\n", xmem.Id(), response.Status, response.Opcode, seqno, req.Key, req.Cas, req.Extras)
-							xmem.handleGeneralError(errors.New("Received severe error from memcached in target cluster"))
-							goto done
+							xmem.Logger().Errorf("%v received error response from setMeta client. Repairing connection. response status=%v, opcode=%v, seqno=%v, req.Key=%v, req.Cas=%v, req.Extras=%v\n", xmem.Id(), response.Status, response.Opcode, seqno, string(req.Key), req.Cas, req.Extras)
+							xmem.repairConn(xmem.client_for_setMeta, "error response from memcached", rev)
+						} else if req != nil {
+							xmem.Logger().Debugf("%v Got the response, response.Opaque=%v, req.Opaque=%v\n", xmem.Id(), response.Opaque, req.Opaque)
+						} else {
+							xmem.Logger().Debugf("%v Got the response, pos=%v, req in that pos is nil\n", xmem.Id(), pos)
 						}
 					}
-					if req != nil {
-						xmem.Logger().Debugf("%v Got the response, response.Opaque=%v, req.Opaque=%v\n", xmem.Id(), response.Opaque, req.Opaque)
-					} else {
-						xmem.Logger().Debugf("%v Got the response, pos=%v, req in that pos is nil\n", xmem.Id(), pos)
-					}
-
 				}
-
 			} else {
 				//raiseEvent
 				pos := xmem.getPosFromOpaque(response.Opaque)
@@ -1754,23 +1759,35 @@ func isNetTimeoutError(err error) bool {
 	return ok && netError.Timeout()
 }
 
-func isNetTemporaryError(err error) bool {
-	if err == nil {
-		return false
-	}
-	netError, ok := err.(*net.OpError)
-	return ok && netError.Temporary()
-}
-
-func isRecoverableMCError(resp_status mc.Status) bool {
+// check if memcached response status indicates fatal error, which usually requires pipeline restart
+func isFatalMCError(resp_status mc.Status) bool {
 	switch resp_status {
-	case mc.TMPFAIL:
+	case mc.NO_BUCKET:
+		fallthrough
+	case mc.NOT_MY_VBUCKET:
 		return true
 	default:
 		return false
 	}
 }
 
+// check if memcached response status indicates error of temporary nature, which requires retrying corresponding requests
+func isTemporaryMCError(resp_status mc.Status) bool {
+	switch resp_status {
+	case mc.TMPFAIL:
+		fallthrough
+	case mc.ENOMEM:
+		fallthrough
+	case mc.EBUSY:
+		fallthrough
+	case mc.NOT_INITIALIZED:
+		return true
+	default:
+		return false
+	}
+}
+
+// check if memcached response status indicates ignorable error, which requires no corrective action at all
 func isIgnorableMCError(resp_status mc.Status) bool {
 	switch resp_status {
 	case mc.KEY_EEXISTS:
@@ -2097,7 +2114,6 @@ func (xmem *XmemNozzle) readFromClient(client *xmemClient, resetReadTimeout bool
 			if err == io.EOF {
 				return nil, connectionClosedError, rev
 			} else if utils.IsSeriousNetError(err) {
-				xmem.repairConn(client, errMsg, rev)
 				return nil, badConnectionError, rev
 			} else if isNetError(err) {
 				client.reportOpFailure(true)
@@ -2106,20 +2122,13 @@ func (xmem *XmemNozzle) readFromClient(client *xmemClient, resetReadTimeout bool
 				//the connection to couchbase server is ruined. it is not supposed to return response with bad magic number
 				//now the only sensible thing to do is to repair the connection, then retry
 				client.logger.Infof("%v err=%v\n", xmem.Id(), err)
-				xmem.repairConn(client, errMsg, rev)
 				return nil, badConnectionError, rev
 			}
 		} else {
-			//need to be called before mc.IsFatal because mc.IsFatal would returns true for ENOMEM
-			if response.Status == mc.ENOMEM {
-				//this is recoverable, it can succeed when ep-engine evic items out to free up memory
-				return response, nil, rev
-			} else if mc.IsFatal(err) {
+			if isFatalMCError(response.Status) {
+				// restart pipeline for fatal mc errors
 
-				if response.Status == 0x08 {
-					//PROTOCOL_BINARY_RESPONSE_NO_BUCKET
-					client.logger.Error("Got PROTOCOL_BINARY_RESPONSE_NO_BUCKET")
-				} else if response.Status == mc.NOT_MY_VBUCKET {
+				if response.Status == mc.NOT_MY_VBUCKET {
 					//the original error message is too long, which clogs the log
 					err = base.ErrorNotMyVbucket
 				}
