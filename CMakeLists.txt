@@ -36,4 +36,5 @@ GoInstall (TARGET goxdcr PACKAGE github.com/couchbase/goxdcr/main
   ${_forestdb_dep}
   CGO_INCLUDE_DIRS "${FORESTDB_INCLUDE_DIR}"
   CGO_LIBRARY_DIRS "${FORESTDB_LIBRARY_DIR}"
-  INSTALL_PATH bin OUTPUT goxdcr)
+  INSTALL_PATH bin OUTPUT goxdcr
+  GOVERSION 1.6)
