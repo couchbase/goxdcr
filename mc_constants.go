@@ -106,11 +106,19 @@ const (
 	NOT_STORED      = Status(0x05)
 	DELTA_BADVAL    = Status(0x06)
 	NOT_MY_VBUCKET  = Status(0x07)
+	NO_BUCKET       = Status(0x08)
+	AUTH_STALE      = Status(0x1f)
+	AUTH_ERROR      = Status(0x20)
+	AUTH_CONTINUE   = Status(0x21)
 	ERANGE          = Status(0x22)
 	ROLLBACK        = Status(0x23)
+	EACCESS         = Status(0x24)
+	NOT_INITIALIZED = Status(0x25)
 	UNKNOWN_COMMAND = Status(0x81)
 	ENOMEM          = Status(0x82)
 	NOT_SUPPORTED   = Status(0x83)
+	EINTERNAL       = Status(0x84)
+	EBUSY           = Status(0x85)
 	TMPFAIL         = Status(0x86)
 )
 
@@ -210,10 +218,19 @@ func init() {
 	StatusNames[NOT_STORED] = "NOT_STORED"
 	StatusNames[DELTA_BADVAL] = "DELTA_BADVAL"
 	StatusNames[NOT_MY_VBUCKET] = "NOT_MY_VBUCKET"
-	StatusNames[UNKNOWN_COMMAND] = "UNKNOWN_COMMAND"
+	StatusNames[NO_BUCKET] = "NO_BUCKET"
+	StatusNames[AUTH_STALE] = "AUTH_STALE"
+	StatusNames[AUTH_ERROR] = "AUTH_ERROR"
+	StatusNames[AUTH_CONTINUE] = "AUTH_CONTINUE"
 	StatusNames[ERANGE] = "ERANGE"
 	StatusNames[ROLLBACK] = "ROLLBACK"
+	StatusNames[EACCESS] = "EACCESS"
+	StatusNames[NOT_INITIALIZED] = "NOT_INITIALIZED"
+	StatusNames[UNKNOWN_COMMAND] = "UNKNOWN_COMMAND"
 	StatusNames[ENOMEM] = "ENOMEM"
+	StatusNames[NOT_SUPPORTED] = "NOT_SUPPORTED"
+	StatusNames[EINTERNAL] = "EINTERNAL"
+	StatusNames[EBUSY] = "EBUSY"
 	StatusNames[TMPFAIL] = "TMPFAIL"
 
 }
