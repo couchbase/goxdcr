@@ -116,10 +116,11 @@ const (
 
 // metadata change listener related constants
 const (
-	ReplicationSpecChangeListener = "ReplicationSpecChangeListener"
-	RemoteClusterChangeListener   = "RemoteClusterChangeListener"
-	GlobalSettingChangeListener   = "GlobalSettingChangeListener"
-	BucketSettingsChangeListener  = "BucketSettingsChangeListener"
+	ReplicationSpecChangeListener  = "ReplicationSpecChangeListener"
+	RemoteClusterChangeListener    = "RemoteClusterChangeListener"
+	GlobalSettingChangeListener    = "GlobalSettingChangeListener"
+	BucketSettingsChangeListener   = "BucketSettingsChangeListener"
+	InternalSettingsChangeListener = "InternalSettingsChangeListener"
 )
 
 // constants for integer parsing
@@ -274,8 +275,9 @@ var CouchbaseBucketType = "membase"
 
 // keys used in pipeline.settings
 const (
-	ProblematicVBs = "ProblematicVBs"
-	VBTimestamps   = "VBTimestamps"
+	ProblematicVBSource = "ProblematicVBSource"
+	ProblematicVBTarget = "ProblematicVBTarget"
+	VBTimestamps        = "VBTimestamps"
 )
 
 // version of extended metadata to look for
@@ -294,12 +296,45 @@ const (
 	PermissionBucketXDCRReadSuffix    = "].xdcr!read"
 	PermissionBucketXDCRWriteSuffix   = "].xdcr!write"
 	PermissionBucketXDCRExecuteSuffix = "].xdcr!execute"
-	PermissionXDCRInternalRead = "cluster.admin.internal.xdcr!read"
-	PermissionXDCRInternalWrite = "cluster.admin.internal.xdcr!write"
+	PermissionXDCRInternalRead        = "cluster.admin.internal.xdcr!read"
+	PermissionXDCRInternalWrite       = "cluster.admin.internal.xdcr!write"
 )
 
 // constants for parsing time synchronization setting in bucket metadata
 const (
-	TimeSynchronizationKey = "timeSynchronization"
+	TimeSynchronizationKey       = "timeSynchronization"
 	TimeSynchronization_Disabled = "disabled"
 )
+
+// --------------- Constants that are configurable -----------------
+var TopologyChangeCheckInterval = 10 * time.Second
+
+// the maximum number of topology change checks to wait before pipeline is restarted
+// to elaborate:
+// 1. topology change has happened  - the current topology is not the same as the topology when pipeline was first started
+// 2. we have performed max_topology_change_count_before_restart topology change checks since the topology change was first seen
+// then we restart the pipeline.
+// this puts an upper bound on the delay on pipeline restart
+var MaxTopologyChangeCountBeforeRestart = 30
+
+// the maximum number of consecutive stable topology seen before pipeline is restarted
+// to elaborate:
+// 1. topology change has happened before  - the current topology is not the same as the topology when pipeline was first started
+// 2. there has been no topology change in the past max_topology_stable_count_before_restart topology change checks
+// then we assume that the topology change has completed, and restart the pipeline
+var MaxTopologyStableCountBeforeRestart = 30
+
+// the max number of concurrent workers for checkpointing
+var MaxWorkersForCheckpointing = 5
+
+// timeout for checkpointing attempt due to topology changes - to put an upper bound on the delay of pipeline restartx
+var TopologyChangeCheckpointTimeout = 10 * time.Minute
+
+func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeCountBeforeRestart,
+	maxTopologyStableCountBeforeRestart, maxWorkersForCheckpointing int, topologyChangeCheckpointTimeout time.Duration) {
+	TopologyChangeCheckInterval = topologyChangeCheckInterval
+	MaxTopologyChangeCountBeforeRestart = maxTopologyChangeCountBeforeRestart
+	MaxTopologyStableCountBeforeRestart = maxTopologyStableCountBeforeRestart
+	MaxWorkersForCheckpointing = maxWorkersForCheckpointing
+	TopologyChangeCheckpointTimeout = topologyChangeCheckpointTimeout
+}

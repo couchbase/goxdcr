@@ -49,6 +49,7 @@ const (
 	BlockProfileStartPath    = "profile/block/start"
 	BlockProfileStopPath     = "profile/block/stop"
 	BucketSettingsPrefix     = "controller/bucketSettings"
+	XDCRInternalSettingsPath = "xdcr/internalSettings"
 
 	// Some url paths are not static and have variable contents, e.g., settings/replications/$replication_id
 	// The message keys for such paths are constructed by appending the dynamic suffix below to the static portion of the path.
@@ -497,6 +498,32 @@ func DecodeSettingsFromInternalSettingsRequest(request *http.Request) (map[strin
 	return settings, nil
 }
 
+func DecodeSettingsFromXDCRInternalSettingsRequest(request *http.Request) (map[string]interface{}, map[string]error) {
+	settings := make(map[string]interface{})
+	errorsMap := make(map[string]error)
+
+	if err := request.ParseForm(); err != nil {
+		errorsMap[base.PlaceHolderFieldKey] = ErrorParsingForm
+		return nil, errorsMap
+	}
+
+	for key, valArr := range request.Form {
+		convertedValue, err := metadata.ValidateAndConvertXDCRInternalSettingsValue(key, valArr[0])
+		if err != nil {
+			errorsMap[key] = err
+		} else {
+			settings[key] = convertedValue
+		}
+	}
+
+	if len(errorsMap) > 0 {
+		return nil, errorsMap
+	}
+
+	logger_msgutil.Debugf("settings decoded from request: %v\n", settings)
+	return settings, nil
+}
+
 func DecodeRegexpValidationRequest(request *http.Request) (string, []string, error) {
 	var expression string
 	var keys []string
@@ -566,6 +593,14 @@ func NewInternalSettingsResponse(settings *metadata.ReplicationSettings, globalS
 			replicationSettingMap[key] = value
 		}
 		return EncodeObjectIntoResponse(replicationSettingMap)
+	}
+}
+
+func NewXDCRInternalSettingsResponse(settings *metadata.InternalSettings) (*ap.Response, error) {
+	if settings == nil {
+		return NewEmptyArrayResponse()
+	} else {
+		return EncodeObjectIntoResponse(settings.ToMap())
 	}
 }
 

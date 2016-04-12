@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
+	mrand "math/rand"
 	"reflect"
 	"sort"
 	"time"
@@ -162,6 +163,18 @@ func AddVbToSortedList(vbno uint16, vb_list []uint16) []uint16 {
 		new_vb_list = append(new_vb_list, vb_list[index:len(vb_list)]...)
 		return new_vb_list
 	}
+}
+
+// randomized ordering of elements in passed in list
+func RandomizeUint16List(list []uint16) {
+	length := len(list)
+	for i := 0; i < length; i++ {
+		j := mrand.Intn(length-i) + i
+		if j != i {
+			list[i], list[j] = list[j], list[i]
+		}
+	}
+
 }
 
 // "sort" needs to be true if list_1 and list_2 are not sorted 	136
@@ -316,4 +329,32 @@ func GetCRModeFromTimeSyncSetting(timeSynchronization string) base.ConflictResol
 		return base.CRMode_LWW
 	}
 	return base.CRMode_RevId
+}
+
+// get the subset of vbs in vbList that point to different servers in the two vb server maps
+func GetDiffVBList(vbList []uint16, vbServerMap1, vbServerMap2 map[uint16]string) []uint16 {
+	diffVBList := make([]uint16, 0)
+	for _, vb := range vbList {
+		if vbServerMap1[vb] != vbServerMap2[vb] {
+			diffVBList = append(diffVBList, vb)
+		}
+	}
+
+	SortUint16List(diffVBList)
+	return diffVBList
+}
+
+// check if two vb server maps are the same
+func AreVBServerMapsTheSame(vbServerMap1, vbServerMap2 map[uint16]string) bool {
+	if len(vbServerMap1) != len(vbServerMap2) {
+		return false
+	}
+
+	for vb, server := range vbServerMap1 {
+		if server != vbServerMap2[vb] {
+			return false
+		}
+	}
+
+	return true
 }

@@ -179,7 +179,7 @@ func (xdcrf *XDCRFactory) NewPipeline(topic string, progress_recorder common.Pip
 	xdcrf.registerAsyncListenersOnSources(pipeline, logger_ctx)
 	xdcrf.registerAsyncListenersOnTargets(pipeline, logger_ctx)
 
-	if pipelineContext, err := pctx.NewWithSettingConstructor(pipeline, xdcrf.ConstructSettingsForService, logger_ctx); err != nil {
+	if pipelineContext, err := pctx.NewWithSettingConstructor(pipeline, xdcrf.ConstructSettingsForService, xdcrf.ConstructUpdateSettingsForService, logger_ctx); err != nil {
 		return nil, err
 	} else {
 
@@ -780,8 +780,25 @@ func (xdcrf *XDCRFactory) ConstructSettingsForService(pipeline common.Pipeline, 
 		xdcrf.logger.Debug("Construct settings for StatisticsManager")
 		return xdcrf.constructSettingsForStatsManager(pipeline, settings)
 	case *pipeline_svc.CheckpointManager:
-		xdcrf.logger.Debug("Construct update settings for CheckpointManager")
+		xdcrf.logger.Debug("Construct settings for CheckpointManager")
 		return xdcrf.constructSettingsForCheckpointManager(pipeline, settings)
+	}
+	return settings, nil
+}
+
+// the major difference between ConstructSettingsForService and ConstructUpdateSettingsForService is that
+// when a parameter is not specified, the former sets default value and the latter does nothing
+func (xdcrf *XDCRFactory) ConstructUpdateSettingsForService(pipeline common.Pipeline, service common.PipelineService, settings map[string]interface{}) (map[string]interface{}, error) {
+	switch service.(type) {
+	case *pipeline_svc.PipelineSupervisor:
+		xdcrf.logger.Debug("Construct update settings for PipelineSupervisor")
+		return xdcrf.constructUpdateSettingsForSupervisor(pipeline, settings)
+	case *pipeline_svc.StatisticsManager:
+		xdcrf.logger.Debug("Construct update settings for StatisticsManager")
+		return xdcrf.constructUpdateSettingsForStatsManager(pipeline, settings)
+	case *pipeline_svc.CheckpointManager:
+		xdcrf.logger.Debug("Construct update settings for CheckpointManager")
+		return xdcrf.constructUpdateSettingsForCheckpointManager(pipeline, settings)
 	}
 	return settings, nil
 }
@@ -806,6 +823,38 @@ func (xdcrf *XDCRFactory) constructSettingsForStatsManager(pipeline common.Pipel
 func (xdcrf *XDCRFactory) constructSettingsForCheckpointManager(pipeline common.Pipeline, settings map[string]interface{}) (map[string]interface{}, error) {
 	s := make(map[string]interface{})
 	s[pipeline_svc.CHECKPOINT_INTERVAL] = getSettingFromSettingsMap(settings, metadata.CheckpointInterval, pipeline.Specification().Settings.CheckpointInterval)
+	return s, nil
+}
+
+func (xdcrf *XDCRFactory) constructUpdateSettingsForSupervisor(pipeline common.Pipeline, settings map[string]interface{}) (map[string]interface{}, error) {
+	s := make(map[string]interface{})
+	log_level_str := getSettingFromSettingsMap(settings, metadata.PipelineLogLevel, nil)
+	if log_level_str != nil {
+		log_level, err := log.LogLevelFromStr(log_level_str.(string))
+		if err != nil {
+			return nil, err
+		}
+		s[pipeline_svc.PIPELINE_LOG_LEVEL] = log_level
+	}
+	return s, nil
+}
+
+func (xdcrf *XDCRFactory) constructUpdateSettingsForStatsManager(pipeline common.Pipeline, settings map[string]interface{}) (map[string]interface{}, error) {
+	s := make(map[string]interface{})
+	publish_interval := getSettingFromSettingsMap(settings, metadata.PipelineStatsInterval, nil)
+	if publish_interval != nil {
+		s[pipeline_svc.PUBLISH_INTERVAL] = publish_interval
+	}
+	return s, nil
+}
+
+func (xdcrf *XDCRFactory) constructUpdateSettingsForCheckpointManager(pipeline common.Pipeline, settings map[string]interface{}) (map[string]interface{}, error) {
+	xdcrf.logger.Debugf("constructUpdateSettingsForCheckpointManager called with settings=%v\n", settings)
+	s := make(map[string]interface{})
+	checkpoint_interval := getSettingFromSettingsMap(settings, metadata.CheckpointInterval, nil)
+	if checkpoint_interval != nil {
+		s[pipeline_svc.CHECKPOINT_INTERVAL] = checkpoint_interval
+	}
 	return s, nil
 }
 

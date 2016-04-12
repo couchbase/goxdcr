@@ -157,12 +157,13 @@ func setup() error {
 
 	processSetting_svc := metadata_svc.NewGlobalSettingsSvc(metakv_svc, nil)
 	buckerSettings_svc := metadata_svc.NewBucketSettingsService(metakv_svc, top_svc, nil)
+	internalSettings_svc := metadata_svc.NewInternalSettingsSvc(metakv_svc, nil)
 
 	replication_manager.StartReplicationManager(options.source_kv_host, base.AdminportNumber,
 		repl_spec_svc, remote_cluster_svc,
 		cluster_info_svc, top_svc, metadata_svc.NewReplicationSettingsSvc(metakv_svc, nil),
 		metadata_svc.NewCheckpointsService(metakv_svc, nil), service_impl.NewCAPIService(cluster_info_svc, nil),
-		audit_svc, uilog_svc, processSetting_svc, buckerSettings_svc)
+		audit_svc, uilog_svc, processSetting_svc, buckerSettings_svc, internalSettings_svc)
 
 	logger.Info("Finish setup")
 	return nil
