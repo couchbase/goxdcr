@@ -485,7 +485,7 @@ func (dcp *DcpNozzle) handleGeneralError(err error) {
 }
 
 func (dcp *DcpNozzle) handleVBError(vbno uint16, err error) {
-	additionalInfo := &base.VBErrorEventAdditional{vbno, err}
+	additionalInfo := &base.VBErrorEventAdditional{vbno, err, base.VBErrorType_Source}
 	dcp.RaiseEvent(common.NewEvent(common.VBErrorEncountered, nil, dcp, nil, additionalInfo))
 }
 

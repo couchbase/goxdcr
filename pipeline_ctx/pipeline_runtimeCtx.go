@@ -18,6 +18,7 @@ import (
 )
 
 type ServiceSettingsConstructor func(pipeline common.Pipeline, service common.PipelineService, pipeline_settings map[string]interface{}, ts map[uint16]*base.VBTimestamp) (map[string]interface{}, error)
+type ServiceUpdateSettingsConstructor func(pipeline common.Pipeline, service common.PipelineService, pipeline_settings map[string]interface{}) (map[string]interface{}, error)
 type StartSeqnoConstructor func(pipeline common.Pipeline) error
 
 type PipelineRuntimeCtx struct {
@@ -27,24 +28,27 @@ type PipelineRuntimeCtx struct {
 	//pipeline
 	pipeline common.Pipeline
 
-	isRunning                    bool
-	logger                       *log.CommonLogger
-	service_settings_constructor ServiceSettingsConstructor
+	isRunning                           bool
+	logger                              *log.CommonLogger
+	service_settings_constructor        ServiceSettingsConstructor
+	service_update_settings_constructor ServiceUpdateSettingsConstructor
 }
 
-func NewWithSettingConstructor(p common.Pipeline, service_settings_constructor ServiceSettingsConstructor, logger_context *log.LoggerContext) (*PipelineRuntimeCtx, error) {
+func NewWithSettingConstructor(p common.Pipeline, service_settings_constructor ServiceSettingsConstructor,
+	service_update_settings_constructor ServiceUpdateSettingsConstructor, logger_context *log.LoggerContext) (*PipelineRuntimeCtx, error) {
 	ctx := &PipelineRuntimeCtx{
 		runtime_svcs: make(map[string]common.PipelineService),
 		pipeline:     p,
 		isRunning:    false,
 		logger:       log.NewLogger("PipelineRuntimeCtx", logger_context),
-		service_settings_constructor: service_settings_constructor}
+		service_settings_constructor:        service_settings_constructor,
+		service_update_settings_constructor: service_update_settings_constructor}
 
 	return ctx, nil
 }
 
 func New(p common.Pipeline) (*PipelineRuntimeCtx, error) {
-	return NewWithSettingConstructor(p, nil, log.DefaultLoggerContext)
+	return NewWithSettingConstructor(p, nil, nil, log.DefaultLoggerContext)
 }
 
 func (ctx *PipelineRuntimeCtx) Start(params map[string]interface{}) error {
@@ -157,15 +161,17 @@ func (ctx *PipelineRuntimeCtx) UpdateSettings(settings map[string]interface{}) e
 		return nil
 	}
 
-	for _, svc := range ctx.runtime_svcs {
+	for name, svc := range ctx.runtime_svcs {
 		if svc != nil {
-			service_settings, err := ctx.service_settings_constructor(ctx.pipeline, svc, settings, nil)
+			service_settings, err := ctx.service_update_settings_constructor(ctx.pipeline, svc, settings)
 			if err != nil {
+				ctx.logger.Errorf("Error constructing update settings for service %v. err=%v", name, err)
 				return err
 
 			}
 			err = svc.UpdateSettings(service_settings)
 			if err != nil {
+				ctx.logger.Errorf("Error updating settings for service %v. settings=%v, err=%v", name, service_settings, err)
 				return err
 			}
 		}

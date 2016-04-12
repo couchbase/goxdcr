@@ -1055,7 +1055,8 @@ func (xmem *XmemNozzle) batchSetMetaWithRetry(batch *dataBatch, numOfRetry int) 
 
 		if item != nil {
 			atomic.AddUint32(&xmem.counter_waittime, uint32(time.Since(item.Start_time).Seconds()*1000))
-			if needSend(item, batch, xmem.Logger()) {
+			needSend := needSend(item, batch, xmem.Logger())
+			if needSend == Send {
 
 				//blocking
 				err, index, reserv_num := xmem.buf.reserveSlot()
@@ -1095,14 +1096,16 @@ func (xmem *XmemNozzle) batchSetMetaWithRetry(batch *dataBatch, numOfRetry int) 
 					index_reservation_list = make([][]uint16, 51)
 				}
 			} else {
-				//lost on conflict resolution on source side
-				// this still counts as data sent
-				additionalInfo := DataFailedCRSourceEventAdditional{Seqno: item.Seqno,
-					Opcode:      encodeOpCode(item.Req.Opcode),
-					IsExpirySet: (binary.BigEndian.Uint32(item.Req.Extras[4:8]) != 0),
-					VBucket:     item.Req.VBucket,
+				if needSend == Not_Send_Failed_CR {
+					//lost on conflict resolution on source side
+					// this still counts as data sent
+					additionalInfo := DataFailedCRSourceEventAdditional{Seqno: item.Seqno,
+						Opcode:      encodeOpCode(item.Req.Opcode),
+						IsExpirySet: (binary.BigEndian.Uint32(item.Req.Extras[4:8]) != 0),
+						VBucket:     item.Req.VBucket,
+					}
+					xmem.RaiseEvent(common.NewEvent(common.DataFailedCRSource, nil, xmem, nil, additionalInfo))
 				}
-				xmem.RaiseEvent(common.NewEvent(common.DataFailedCRSource, nil, xmem, nil, additionalInfo))
 
 				xmem.recycleDataObj(item)
 			}
@@ -1217,7 +1220,7 @@ func (xmem *XmemNozzle) batchGetMeta(bigDoc_map map[string]*base.WrappedMCReques
 		if _, ok := sent_key_map[docKey]; !ok {
 			req := xmem.composeRequestForGetMeta(docKey, originalReq.Req.VBucket, opaque)
 			reqs_bytes = append(reqs_bytes, req.Bytes()...)
-			opaque_keySeqno_map[opaque] = []interface{}{docKey, originalReq.Seqno, time.Now()}
+			opaque_keySeqno_map[opaque] = []interface{}{docKey, originalReq.Seqno, originalReq.Req.VBucket, time.Now()}
 			opaque++
 			counter++
 			sent_key_map[docKey] = true
@@ -1280,8 +1283,9 @@ func (xmem *XmemNozzle) batchGetMeta(bigDoc_map map[string]*base.WrappedMCReques
 							if ok {
 								key, ok1 := keySeqno[0].(string)
 								seqno, ok2 := keySeqno[1].(uint64)
-								if ok1 && ok2 {
-									xmem.Logger().Infof("%v received fatal error from getMeta client. key=%v, seqno=%v, response=%v\n", xmem.Id(), key, seqno, response)
+								vbno, ok3 := keySeqno[2].(uint16)
+								if ok1 && ok2 && ok3 {
+									xmem.Logger().Infof("%v received fatal error from getMeta client. key=%v, seqno=%v, vb=%v, response=%v\n", xmem.Id(), key, seqno, vbno, response)
 								}
 							}
 						}
@@ -1305,7 +1309,8 @@ func (xmem *XmemNozzle) batchGetMeta(bigDoc_map map[string]*base.WrappedMCReques
 						//success
 						key, ok1 := keySeqno[0].(string)
 						seqno, ok2 := keySeqno[1].(uint64)
-						start_time, ok3 := keySeqno[2].(time.Time)
+						vbno, ok2 := keySeqno[2].(uint16)
+						start_time, ok3 := keySeqno[3].(time.Time)
 						if ok1 && ok2 && ok3 {
 							respMap[key] = response
 
@@ -1314,6 +1319,11 @@ func (xmem *XmemNozzle) batchGetMeta(bigDoc_map map[string]*base.WrappedMCReques
 								Commit_time: time.Since(start_time),
 							}
 							xmem.RaiseEvent(common.NewEvent(common.GetMetaReceived, nil, xmem, nil, additionalInfo))
+
+							if response.Status == mc.NOT_MY_VBUCKET {
+								vb_err := fmt.Errorf("Received error %v on vb %v\n", base.ErrorNotMyVbucket, vbno)
+								xmem.handleVBError(vbno, vb_err)
+							}
 						} else {
 							panic("KeySeqno list is not formated as expected [string, uint64, time]")
 						}
@@ -1356,6 +1366,8 @@ func (xmem *XmemNozzle) batchGetMeta(bigDoc_map map[string]*base.WrappedMCReques
 			} else {
 				xmem.Logger().Debugf("doc %v (%v)succeeded on conflict resolution to %v, sending it to target\n", key, doc_meta_source, doc_meta_target)
 			}
+		} else if ok && resp.Status == mc.NOT_MY_VBUCKET {
+			bigDoc_noRep_map[wrappedReq.UniqueKey] = false
 		} else {
 			xmem.Logger().Debugf("batchGetMeta: doc %s is not found in target system, send it", key)
 		}
@@ -1588,9 +1600,14 @@ func (xmem *XmemNozzle) receiveResponse(finch chan bool, waitGrp *sync.WaitGroup
 						req = wrappedReq.Req
 						seqno = wrappedReq.Seqno
 						if req != nil && req.Opaque == response.Opaque {
-							xmem.Logger().Errorf("%v received a response indicating non-recoverable error from xmem client. response status=%v, opcode=%v, seqno=%v, req.Key=%v, req.Cas=%v, req.Extras=%s\n", xmem.Id(), response.Status, response.Opcode, seqno, req.Key, req.Cas, req.Extras)
-							xmem.handleGeneralError(errors.New("Received severe error from memcached in target cluster"))
-							goto done
+							if response.Status == mc.NOT_MY_VBUCKET {
+								vb_err := fmt.Errorf("Received error %v on vb %v\n", base.ErrorNotMyVbucket, req.VBucket)
+								xmem.handleVBError(req.VBucket, vb_err)
+							} else {
+								xmem.Logger().Errorf("%v received a response indicating non-recoverable error from xmem client. response status=%v, opcode=%v, seqno=%v, req.Key=%v, req.Cas=%v, req.Extras=%s\n", xmem.Id(), response.Status, response.Opcode, seqno, req.Key, req.Cas, req.Extras)
+								xmem.handleGeneralError(errors.New("Received severe error from memcached in target cluster"))
+								goto done
+							}
 						}
 					}
 					if req != nil {
@@ -1659,6 +1676,11 @@ func (xmem *XmemNozzle) receiveResponse(finch chan bool, waitGrp *sync.WaitGroup
 
 done:
 	xmem.Logger().Infof("%v receiveResponse exits\n", xmem.Id())
+}
+
+func (xmem *XmemNozzle) handleVBError(vbno uint16, err error) {
+	additionalInfo := &base.VBErrorEventAdditional{vbno, err, base.VBErrorType_Target}
+	xmem.RaiseEvent(common.NewEvent(common.VBErrorEncountered, nil, xmem, nil, additionalInfo))
 }
 
 func (xmem *XmemNozzle) adjustRespTimeout(committing_time time.Duration) {
@@ -2047,14 +2069,11 @@ func (xmem *XmemNozzle) readFromClient(client *xmemClient, resetReadTimeout bool
 			if response.Status == mc.ENOMEM {
 				//this is recoverable, it can succeed when ep-engine evic items out to free up memory
 				return response, nil, rev
-			} else if mc.IsFatal(err) {
+			} else if mc.IsFatal(err) && response.Status != mc.NOT_MY_VBUCKET {
 
 				if response.Status == 0x08 {
 					//PROTOCOL_BINARY_RESPONSE_NO_BUCKET
 					client.logger.Error("Got PROTOCOL_BINARY_RESPONSE_NO_BUCKET")
-				} else if response.Status == mc.NOT_MY_VBUCKET {
-					//the original error message is too long, which clogs the log
-					err = base.ErrorNotMyVbucket
 				}
 				high_level_err := "Received error response from memcached in target cluster."
 				xmem.handleGeneralError(errors.New(high_level_err))

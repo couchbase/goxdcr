@@ -34,6 +34,8 @@ const (
 	Vbno              string = "vbno"
 )
 
+var mass_vb_check_interval = 60 * time.Second
+
 var CHECKPOINT_INTERVAL = "checkpoint_interval"
 
 type CheckpointManager struct {
@@ -146,6 +148,10 @@ func (ckmgr *CheckpointManager) Attach(pipeline common.Pipeline) error {
 		return errors.New("Pipeline supervisor has to exist")
 	}
 	err = ckmgr.RegisterComponentEventListener(common.ErrorEncountered, supervisor.(*PipelineSupervisor))
+	if err != nil {
+		return err
+	}
+	err = ckmgr.RegisterComponentEventListener(common.VBErrorEncountered, supervisor.(*PipelineSupervisor))
 	if err != nil {
 		return err
 	}
@@ -332,7 +338,7 @@ func (ckmgr *CheckpointManager) SetVBTimestamps(topic string) error {
 	start_index := 0
 
 	getter_wait_grp := &sync.WaitGroup{}
-	err_ch := make(chan error, len(listOfVbs))
+	err_ch := make(chan interface{}, len(listOfVbs))
 	getter_id := 0
 	for {
 		end_index := start_index + workload
@@ -352,10 +358,14 @@ func (ckmgr *CheckpointManager) SetVBTimestamps(topic string) error {
 
 	//wait for all the getter done, then gather result
 	getter_wait_grp.Wait()
+	close(err_ch)
 	if len(err_ch) > 0 {
-		err = errors.New(fmt.Sprintf("Failed to get starting seqno for pipeline %v", ckmgr.pipeline.InstanceId()))
-		ckmgr.RaiseEvent(common.NewEvent(common.ErrorEncountered, nil, ckmgr, nil, err))
-		return err
+		for err_info_obj := range err_ch {
+			err_info_arr := err_info_obj.([]interface{})
+			vbno := err_info_arr[0].(uint16)
+			err := err_info_arr[1].(error)
+			ckmgr.handleVBError(vbno, err)
+		}
 	}
 
 	ckmgr.logger.Infof("Done with setting starting seqno for pipeline %v\n", ckmgr.pipeline.InstanceId())
@@ -386,7 +396,7 @@ func (ckmgr *CheckpointManager) setTimestampForVB(vbno uint16, ts *base.VBTimest
 }
 
 func (ckmgr *CheckpointManager) startSeqnoGetter(getter_id int, listOfVbs []uint16, ckptDocs map[uint16]*metadata.CheckpointsDoc,
-	disableCkptBackwardsCompat bool, highseqnomap map[uint16]uint64, waitGrp *sync.WaitGroup, err_ch chan error) {
+	disableCkptBackwardsCompat bool, highseqnomap map[uint16]uint64, waitGrp *sync.WaitGroup, err_ch chan interface{}) {
 	ckmgr.logger.Infof("StartSeqnoGetter %v is started to do _pre_prelicate for vb %v\n", getter_id, listOfVbs)
 	defer waitGrp.Done()
 
@@ -432,7 +442,8 @@ func (ckmgr *CheckpointManager) startSeqnoGetter(getter_id int, listOfVbs []uint
 
 					} else {
 						ckmgr.logger.Errorf("Pre_replicate failed for %v. err=%v\n", vbno, err)
-						err_ch <- err
+						err_info := []interface{}{vbno, err}
+						err_ch <- err_info
 
 					}
 					goto POPULATE
@@ -447,7 +458,8 @@ func (ckmgr *CheckpointManager) startSeqnoGetter(getter_id int, listOfVbs []uint
 		vbts := ckmgr.populateVBTimestamp(ckptDoc, agreeedIndex, vbno, highseqno_vb)
 		err1 := ckmgr.setTimestampForVB(vbno, vbts)
 		if err1 != nil {
-			err_ch <- err1
+			err_info := []interface{}{vbno, err1}
+			err_ch <- err_info
 		}
 	}
 }
@@ -483,6 +495,7 @@ func (ckmgr *CheckpointManager) UpdateSettings(settings map[string]interface{}) 
 
 	// update checkpoint interval
 	ckmgr.ckpt_interval = time.Duration(checkpoint_interval) * time.Second
+	ckmgr.logger.Infof("Updated checkpoint interval to %v for pipeline %v.\n", checkpoint_interval, ckmgr.pipeline.Topic())
 	ckmgr.startRandomizedCheckpointingTicker()
 
 	return nil
@@ -615,7 +628,7 @@ func (ckmgr *CheckpointManager) checkpointing() {
 
 	ticker := <-ckmgr.checkpoint_ticker_ch
 
-	children_fin_ch := make(chan bool)
+	children_fin_ch := make(chan time.Time)
 	children_wait_grp := &sync.WaitGroup{}
 
 	first := true
@@ -628,7 +641,7 @@ func (ckmgr *CheckpointManager) checkpointing() {
 			// wait for existing, if any, performCkpt routine to finish before setting new ticker
 			close(children_fin_ch)
 			children_wait_grp.Wait()
-			children_fin_ch = make(chan bool)
+			children_fin_ch = make(chan time.Time)
 
 			ticker.Stop()
 			ticker = new_ticker
@@ -657,24 +670,34 @@ func (ckmgr *CheckpointManager) checkpointing() {
 
 }
 
-func (ckmgr *CheckpointManager) performCkpt(fin_ch chan bool, wait_grp *sync.WaitGroup) {
-	defer wait_grp.Done()
+// public API. performs one checkpoint operation on request
+func (ckmgr *CheckpointManager) PerformCkpt(fin_ch <-chan time.Time, time_to_wait time.Duration) {
+	ckmgr.performCkpt_internal(fin_ch, time_to_wait)
+}
 
-	interval_btwn_vb := time.Duration((ckmgr.ckpt_interval.Seconds()/float64(len(ckmgr.getMyVBs())))*1000) * time.Millisecond
+// local API. supports periodical checkpoint operations
+func (ckmgr *CheckpointManager) performCkpt(fin_ch <-chan time.Time, wait_grp *sync.WaitGroup) {
+	defer wait_grp.Done()
+	ckmgr.performCkpt_internal(fin_ch, ckmgr.ckpt_interval)
+}
+
+func (ckmgr *CheckpointManager) performCkpt_internal(fin_ch <-chan time.Time, time_to_wait time.Duration) {
+	interval_btwn_vb := time.Duration((time_to_wait.Seconds()/float64(len(ckmgr.getMyVBs())))*1000) * time.Millisecond
 	ckmgr.logger.Infof("Checkpointing for replication %v, interval_btwn_vb=%v sec\n", ckmgr.pipeline.Topic(), interval_btwn_vb.Seconds())
 	err_map := make(map[uint16]error)
 	var total_committing_time float64 = 0
 	listOfVBs := ckmgr.getMyVBs()
+	simple_utils.RandomizeUint16List(listOfVBs)
 
 	for index, vb := range listOfVBs {
 		select {
 		case <-fin_ch:
-			ckmgr.logger.Info("Aborting checkpointing routine since received finish signal for checkpointing")
+			ckmgr.logger.Infof("Aborting checkpointing routine for %v since received finish signal. index=%v\n", ckmgr.pipeline.Topic(), index)
 			return
 		default:
 			if ckmgr.pipeline.State() != common.Pipeline_Running {
 				//pipeline is no longer running, return
-				ckmgr.logger.Info("Pipeline is no longer running, exit do_checkpointing")
+				ckmgr.logger.Infof("Pipeline %v is no longer running, exit do_checkpointing. index=%v\n", ckmgr.pipeline.Topic(), index)
 				return
 			}
 
@@ -683,6 +706,7 @@ func (ckmgr *CheckpointManager) performCkpt(fin_ch chan bool, wait_grp *sync.Wai
 			committing_time_vb := time.Since(start_time_vb)
 			total_committing_time += committing_time_vb.Seconds()
 			if err != nil {
+				ckmgr.handleVBError(vb, err)
 				err_map[vb] = err
 			}
 
@@ -693,16 +717,11 @@ func (ckmgr *CheckpointManager) performCkpt(fin_ch chan bool, wait_grp *sync.Wai
 		}
 	}
 
+	ckmgr.logger.Infof("Done checkpointing for replication %v\n", ckmgr.pipeline.Topic())
 	if len(err_map) > 0 {
-		//error
-		ckmgr.logger.Errorf("Checkpointing failed for replication %v, err=%v\n", ckmgr.pipeline.Topic(), err_map)
-		err := errors.New("Checkpointing failed")
-		ckmgr.RaiseEvent(common.NewEvent(common.ErrorEncountered, nil, ckmgr, nil, err))
-	} else {
-		ckmgr.logger.Infof("Done checkpointing for replication %v\n", ckmgr.pipeline.Topic())
-		ckmgr.RaiseEvent(common.NewEvent(common.CheckpointDone, nil, ckmgr, nil, time.Duration(total_committing_time)*time.Second))
+		ckmgr.logger.Infof("Errors encountered in checkpointing for replication %v: %v\n", ckmgr.pipeline.Topic(), err_map)
 	}
-
+	ckmgr.RaiseEvent(common.NewEvent(common.CheckpointDone, nil, ckmgr, nil, time.Duration(total_committing_time)*time.Second))
 }
 
 func (ckmgr *CheckpointManager) do_checkpoint(vbno uint16) (err error) {
@@ -729,7 +748,9 @@ func (ckmgr *CheckpointManager) do_checkpoint(vbno uint16) (err error) {
 			return nil
 		}
 
-		remote_seqno, vbOpaque, err := ckmgr.capi_svc.CommitForCheckpoint(ckmgr.remote_bucket, ckpt_record.Target_vb_opaque, vbno)
+		var remote_seqno uint64
+		var vbOpaque metadata.TargetVBOpaque
+		remote_seqno, vbOpaque, err = ckmgr.capi_svc.CommitForCheckpoint(ckmgr.remote_bucket, ckpt_record.Target_vb_opaque, vbno)
 		if err == nil {
 			//succeed
 			ckpt_record.Target_Seqno = remote_seqno
@@ -874,8 +895,7 @@ func (ckmgr *CheckpointManager) massCheckVBOpaquesJob() {
 	defer ckmgr.wait_grp.Done()
 
 	target_vb_vbuuid_map := make(map[uint16]metadata.TargetVBOpaque)
-
-	ticker := time.NewTicker(60 * time.Second)
+	ticker := time.NewTicker(mass_vb_check_interval)
 	for {
 		select {
 		case <-ckmgr.finish_ch:
@@ -911,12 +931,16 @@ func (ckmgr *CheckpointManager) massCheckVBOpaques(target_vb_vbuuid_map map[uint
 			ckmgr.logger.Errorf("MassValidateVBUUID failed, err=%v", err1)
 			return err1
 		} else {
-			if len(matching) != len(target_vb_vbuuid_map) && (len(mismatching) > 0 || len(missing) > 0) {
+			if len(mismatching) > 0 {
 				//error
-				ckmgr.logger.Errorf("Target bucket for replication %v's topology has changed. mismatch=%v, missing=%v, mataching\n", ckmgr.pipeline.Topic(), mismatching, missing)
+				ckmgr.logger.Errorf("Target bucket for replication %v's topology has changed. mismatch=%v, missing=%v, matching=%v\n", ckmgr.pipeline.Topic(), mismatching, missing, matching)
 				err := errors.New("Target bucket's topology has changed")
 				ckmgr.RaiseEvent(common.NewEvent(common.ErrorEncountered, nil, ckmgr, nil, err))
-
+			} else if len(missing) > 0 {
+				// missing vbuckets indicate that rebalance or failover may be going on on the target side
+				for _, vbno := range missing {
+					ckmgr.handleVBError(vbno, errors.New("MassValidateVBUUID failed since vbucket cannot be found on target"))
+				}
 			} else {
 				ckmgr.logger.Infof("No target bucket topology change is detected for replication %v", ckmgr.pipeline.Topic())
 			}
@@ -924,6 +948,11 @@ func (ckmgr *CheckpointManager) massCheckVBOpaques(target_vb_vbuuid_map map[uint
 		}
 	}
 	return nil
+}
+
+func (ckmgr *CheckpointManager) handleVBError(vbno uint16, err error) {
+	additionalInfo := &base.VBErrorEventAdditional{vbno, err, base.VBErrorType_Target}
+	ckmgr.RaiseEvent(common.NewEvent(common.VBErrorEncountered, nil, ckmgr, nil, additionalInfo))
 }
 
 func (ckmgr *CheckpointManager) getCurrentCkpt(vbno uint16) *metadata.CheckpointRecord {

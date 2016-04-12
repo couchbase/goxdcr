@@ -598,17 +598,20 @@ func (capi *CapiNozzle) batchSendWithRetry(batch *capiBatch) error {
 		capi.items_in_dataChan--
 		capi.bytes_in_dataChan -= item.Req.Size()
 
-		if needSend(item, &batch.dataBatch, capi.Logger()) {
+		needSend := needSend(item, &batch.dataBatch, capi.Logger())
+		if needSend == Send {
 			capi.adjustRequest(item)
 			req_list = append(req_list, item)
 		} else {
-			capi.Logger().Debugf("did not send doc with key %v since it failed conflict resolution\n", string(item.Req.Key))
-			additionalInfo := DataFailedCRSourceEventAdditional{Seqno: item.Seqno,
-				Opcode:      encodeOpCode(item.Req.Opcode),
-				IsExpirySet: (binary.BigEndian.Uint32(item.Req.Extras[4:8]) != 0),
-				VBucket:     item.Req.VBucket,
+			if needSend == Not_Send_Failed_CR {
+				capi.Logger().Debugf("%v did not send doc with key %v since it failed conflict resolution\n", capi.Id(), string(item.Req.Key))
+				additionalInfo := DataFailedCRSourceEventAdditional{Seqno: item.Seqno,
+					Opcode:      encodeOpCode(item.Req.Opcode),
+					IsExpirySet: (binary.BigEndian.Uint32(item.Req.Extras[4:8]) != 0),
+					VBucket:     item.Req.VBucket,
+				}
+				capi.RaiseEvent(common.NewEvent(common.DataFailedCRSource, nil, capi, nil, additionalInfo))
 			}
-			capi.RaiseEvent(common.NewEvent(common.DataFailedCRSource, nil, capi, nil, additionalInfo))
 
 			capi.recycleDataObj(item)
 		}

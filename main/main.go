@@ -68,7 +68,7 @@ func main() {
 	HideConsole(true)
 	defer HideConsole(false)
 
-    runtime.GOMAXPROCS(rm.GoMaxProcs_env())
+	runtime.GOMAXPROCS(rm.GoMaxProcs_env())
 
 	argParse()
 
@@ -99,7 +99,7 @@ func main() {
 		fmt.Printf("Error starting audit service. err=%v\n", err)
 		os.Exit(1)
 	}
-	
+
 	processSetting_svc := metadata_svc.NewGlobalSettingsSvc(metakv_svc, nil)
 	if err != nil {
 		fmt.Printf("Error starting GlobalSetting service. err=%v\n", err)
@@ -143,6 +143,8 @@ func main() {
 			os.Exit(1)
 		}
 
+		internalSettings_svc := metadata_svc.NewInternalSettingsSvc(metakv_svc, nil)
+
 		// start replication manager in normal mode
 		rm.StartReplicationManager(host,
 			uint16(options.xdcrRestPort),
@@ -155,7 +157,8 @@ func main() {
 			service_impl.NewCAPIService(cluster_info_svc, nil),
 			audit_svc,
 			uilog_svc,
-			processSetting_svc)
+			processSetting_svc,
+			internalSettings_svc)
 
 		// keep main alive in normal mode
 		<-done

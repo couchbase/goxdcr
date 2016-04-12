@@ -45,6 +45,14 @@ const (
 	EVENT_ADDI_REQ_SIZE       = "req_size"
 )
 
+type NeedSendStatus int
+
+const (
+	Send               NeedSendStatus = iota
+	Not_Send_Failed_CR NeedSendStatus = iota
+	Not_Send_Other     NeedSendStatus = iota
+)
+
 /************************************
 /* struct baseConfig
 *************************************/
@@ -147,9 +155,11 @@ type dataBatch struct {
 	// the document whose size is larger than optimistic replication threshold
 	// key of the map is the document key
 	bigDoc_map map[string]*base.WrappedMCRequest
-	// the big docs that failed conflict resolution and do not need to be replicated
+	// tracks big docs that do not need to be replicated
 	// key of the map is the document key_revSeqno
-	// the bool value in the map does not matter - the presence of a key does
+	// value of the map has two possible values:
+	// 1. true - docs failed source side conflict resolution. in this case the docs will be counted in docs_failed_cr_source stats
+	// 2. false - docs that will get rejected by target for other reasons, e.g., since target no longer owns the vbucket involved. in this case the docs will not be counted in docs_failed_cr_source stats
 	bigDoc_noRep_map  map[string]bool
 	curCount          int
 	curSize           int
@@ -208,13 +218,22 @@ func (b *dataBatch) size() int {
 
 }
 
-func needSend(req *base.WrappedMCRequest, batch *dataBatch, logger *log.CommonLogger) bool {
+// returns three possible values
+// Send - doc needs to be sent to target
+// Not_Send_Failed_CR - doc does not need to be sent to target since it failed source side conflict resolution
+// Not_Send_Other - doc does not need to be sent to target for other reasons, e.g., since target no longer owns the vbucket involved
+func needSend(req *base.WrappedMCRequest, batch *dataBatch, logger *log.CommonLogger) NeedSendStatus {
 	if req == nil || req.Req == nil {
-		logger.Info("req is null, not need to send")
-		return false
+		panic("req is null")
+	}
+
+	failedCR, ok := batch.bigDoc_noRep_map[req.UniqueKey]
+	if !ok {
+		return Send
+	} else if failedCR {
+		return Not_Send_Failed_CR
 	} else {
-		_, ok := batch.bigDoc_noRep_map[req.UniqueKey]
-		return !ok
+		return Not_Send_Other
 	}
 }
 

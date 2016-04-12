@@ -174,7 +174,9 @@ func (genericPipeline *GenericPipeline) Start(settings map[string]interface{}) e
 	}
 
 	settings[base.VBTimestamps] = make(map[uint16]*base.VBTimestamp)
-	settings[base.ProblematicVBs] = make(map[uint16]error)
+	settings[base.ProblematicVBSource] = make(map[uint16]error)
+	settings[base.ProblematicVBTarget] = make(map[uint16]error)
+
 	genericPipeline.settings = settings
 
 	//get starting vb timestamp
@@ -629,6 +631,8 @@ func (genericPipeline *GenericPipeline) SetProgressRecorder(recorder common.Pipe
 }
 
 func (genericPipeline *GenericPipeline) UpdateSettings(settings map[string]interface{}) error {
+	genericPipeline.logger.Debugf("%v update settings called with settings=%v\n", genericPipeline.InstanceId(), settings)
+
 	if len(settings) == 0 {
 		return nil
 	}
@@ -664,7 +668,7 @@ func (genericPipeline *GenericPipeline) updatePipelineSettings(settings map[stri
 	genericPipeline.settings_lock.Lock()
 	defer genericPipeline.settings_lock.Unlock()
 	genericPipeline.updateTimestampsSetting(settings)
-	genericPipeline.updateProblematicVBsSetting(settings)
+	genericPipeline.updateProblematicVBSettings(settings)
 }
 
 func (genericPipeline *GenericPipeline) updateTimestampsSetting(settings map[string]interface{}) {
@@ -678,11 +682,16 @@ func (genericPipeline *GenericPipeline) updateTimestampsSetting(settings map[str
 	}
 }
 
-func (genericPipeline *GenericPipeline) updateProblematicVBsSetting(settings map[string]interface{}) {
-	vb_err_map_obj := settings[base.ProblematicVBs]
+func (genericPipeline *GenericPipeline) updateProblematicVBSettings(settings map[string]interface{}) {
+	genericPipeline.updateProblematicVBSetting(settings, base.ProblematicVBSource)
+	genericPipeline.updateProblematicVBSetting(settings, base.ProblematicVBTarget)
+}
+
+func (genericPipeline *GenericPipeline) updateProblematicVBSetting(settings map[string]interface{}, settings_key string) {
+	vb_err_map_obj := settings[settings_key]
 	if vb_err_map_obj != nil {
 		vb_err_map := vb_err_map_obj.(map[uint16]error)
-		existing_vb_err_map := genericPipeline.settings[base.ProblematicVBs].(map[uint16]error)
+		existing_vb_err_map := genericPipeline.settings[settings_key].(map[uint16]error)
 		for vbno, err := range vb_err_map {
 			existing_vb_err_map[vbno] = err
 		}

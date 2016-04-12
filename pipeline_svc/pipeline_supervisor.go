@@ -182,9 +182,15 @@ func (pipelineSupervisor *PipelineSupervisor) OnEvent(event *common.Event) {
 		additionalInfo := event.OtherInfos.(*base.VBErrorEventAdditional)
 		vbno := additionalInfo.Vbno
 		err := additionalInfo.Error
-		pipelineSupervisor.Logger().Infof("%v Received error report on vb %v: %v\n", pipelineSupervisor.pipeline.Topic(), vbno, err)
+		errType := additionalInfo.ErrorType
+		pipelineSupervisor.Logger().Debugf("%v Received error report on vb %v. err=%v, err type=%v\n", pipelineSupervisor.pipeline.Topic(), vbno, err, errType)
 		settings := make(map[string]interface{})
-		settings[base.ProblematicVBs] = map[uint16]error{vbno: err}
+		if errType == base.VBErrorType_Source {
+			settings[base.ProblematicVBSource] = map[uint16]error{vbno: err}
+		} else {
+			settings[base.ProblematicVBTarget] = map[uint16]error{vbno: err}
+		}
+
 		// ignore vb errors and just mark the vbs as problematic for now.
 		// at the next topology check time, we will decide whether the problematic vbs are caused by topology
 		// changes and will restart pipeline if they are not
@@ -215,7 +221,7 @@ func (pipelineSupervisor *PipelineSupervisor) UpdateSettings(settings map[string
 	pipelineSupervisor.Logger().Debugf("Updating settings on pipelineSupervisor %v. settings=%v\n", pipelineSupervisor.Id(), settings)
 	logLevelObj := utils.GetSettingFromSettings(settings, PIPELINE_LOG_LEVEL)
 
-	if logLevelObj == 0 {
+	if logLevelObj == nil {
 		// logLevel not specified. no op
 		return nil
 	}
