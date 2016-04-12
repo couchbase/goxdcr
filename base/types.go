@@ -168,9 +168,19 @@ type MetadataChangeHandlerCallback func(metadataId string, oldMetadata interface
 
 type DataObjRecycler func(topic string, dataObj *WrappedMCRequest)
 
+type VBErrorType int
+
+const (
+	// vb error caused by source topology change
+	VBErrorType_Source VBErrorType = iota
+	// vb error caused by target topology change
+	VBErrorType_Target VBErrorType = iota
+)
+
 type VBErrorEventAdditional struct {
 	Vbno  uint16
 	Error error
+	ErrorType VBErrorType
 }
 
 type ConflictResolutionMode int

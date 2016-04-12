@@ -175,7 +175,9 @@ func (genericPipeline *GenericPipeline) Start(settings map[string]interface{}) e
 	}
 
 	settings[base.VBTimestamps] = &base.ObjectWithLock{make(map[uint16]*base.VBTimestamp), &sync.RWMutex{}}
-	settings[base.ProblematicVBs] = &base.ObjectWithLock{make(map[uint16]error), &sync.RWMutex{}}
+	settings[base.ProblematicVBSource] = &base.ObjectWithLock{make(map[uint16]error), &sync.RWMutex{}}
+	settings[base.ProblematicVBTarget] = &base.ObjectWithLock{make(map[uint16]error), &sync.RWMutex{}}
+
 	genericPipeline.settings = settings
 
 	//get starting vb timestamp
@@ -628,6 +630,8 @@ func (genericPipeline *GenericPipeline) SetProgressRecorder(recorder common.Pipe
 }
 
 func (genericPipeline *GenericPipeline) UpdateSettings(settings map[string]interface{}) error {
+	genericPipeline.logger.Debugf("%v update settings called with settings=%v\n", genericPipeline.InstanceId(), settings)
+
 	if len(settings) == 0 {
 		return nil
 	}
@@ -663,7 +667,7 @@ func (genericPipeline *GenericPipeline) updatePipelineSettings(settings map[stri
 	genericPipeline.settings_lock.RLock()
 	defer genericPipeline.settings_lock.RUnlock()
 	genericPipeline.updateTimestampsSetting(settings)
-	genericPipeline.updateProblematicVBsSetting(settings)
+	genericPipeline.updateProblematicVBSettings(settings)
 }
 
 func (genericPipeline *GenericPipeline) updateTimestampsSetting(settings map[string]interface{}) {
@@ -680,18 +684,51 @@ func (genericPipeline *GenericPipeline) updateTimestampsSetting(settings map[str
 	}
 }
 
-func (genericPipeline *GenericPipeline) updateProblematicVBsSetting(settings map[string]interface{}) {
-	vb_err_map_obj := settings[base.ProblematicVBs]
+func (genericPipeline *GenericPipeline) updateProblematicVBSettings(settings map[string]interface{}) {
+	genericPipeline.updateProblematicVBSetting(settings, base.ProblematicVBSource)
+	genericPipeline.updateProblematicVBSetting(settings, base.ProblematicVBTarget)
+}
+
+func (genericPipeline *GenericPipeline) updateProblematicVBSetting(settings map[string]interface{}, settings_key string) {
+	vb_err_map_obj := settings[settings_key]
 	if vb_err_map_obj != nil {
 		vb_err_map := vb_err_map_obj.(map[uint16]error)
-		existing_vb_err_map_obj := genericPipeline.settings[base.ProblematicVBs].(*base.ObjectWithLock)
-		existing_vb_err_map_obj.Lock.Lock()
-		defer existing_vb_err_map_obj.Lock.Unlock()
-		existing_vb_err_map := existing_vb_err_map_obj.Object.(map[uint16]error)
-		for vbno, err := range vb_err_map {
-			existing_vb_err_map[vbno] = err
+		existing_vb_err_map_obj := genericPipeline.settings[settings_key].(*base.ObjectWithLock)
+		// when target topology changes, we delay the restart of pipeline to allow checkpointing
+		// to be done before restart. As a result, a large number of not_my_vbucket errors may be seen
+		// and reported by different xmem nozzles before pipeline is restarted. If each error requires
+		// write lock of existing_vb_err_map_obj, it will cause contention and delay.
+		// With the isUpdateNeeded check, we acquire write lock on and update existing_vb_err_map_obj
+		// only when the first not_my_vbucket error is received for a vb. Subsequent not_my_vbucket errors
+		// on the same vb require only read lock on existing_vb_err_map_obj. Processing of not_my_vbucket
+		// errors from different xmem nozzles will not block one another.
+		// the probem is less severe in source topology change case, since dcp streams on moved out vbuckets
+		// will be closed and no new mutations in the moved out vbuckets will pass through pipeline.
+		// the same mechanism won't hurt and can still be used there.
+		if isUpdateNeeded(existing_vb_err_map_obj, vb_err_map) {
+			existing_vb_err_map_obj.Lock.Lock()
+			defer existing_vb_err_map_obj.Lock.Unlock()
+			existing_vb_err_map := existing_vb_err_map_obj.Object.(map[uint16]error)
+			for vbno, err := range vb_err_map {
+				if _, ok := existing_vb_err_map[vbno]; !ok {
+					existing_vb_err_map[vbno] = err
+				}
+			}
 		}
 	}
+}
+
+// check if the vbs in vb_err_map already exists in existing_vb_err_map_obj
+func isUpdateNeeded(existing_vb_err_map_obj *base.ObjectWithLock, vb_err_map map[uint16]error) bool {
+	existing_vb_err_map_obj.Lock.RLock()
+	defer existing_vb_err_map_obj.Lock.RUnlock()
+	existing_vb_err_map := existing_vb_err_map_obj.Object.(map[uint16]error)
+	for vbno, _ := range vb_err_map {
+		if _, ok := existing_vb_err_map[vbno]; !ok {
+			return true
+		}
+	}
+	return false
 }
 
 //enforcer for GenericPipeline to implement Pipeline

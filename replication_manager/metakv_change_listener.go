@@ -470,6 +470,62 @@ func (pscl *GlobalSettingChangeListener) globalSettingChangeHandlerCallback(sett
 	return nil
 }
 
+// listener for GOXDCR internal setting changes.
+type InternalSettingsChangeListener struct {
+	*MetakvChangeListener
+}
+
+func NewInternalSettingsChangeListener(internal_setting_svc service_def.InternalSettingsSvc,
+	cancel_chan chan struct{},
+	children_waitgrp *sync.WaitGroup,
+	logger_ctx *log.LoggerContext) *InternalSettingsChangeListener {
+	iscl := &InternalSettingsChangeListener{
+		NewMetakvChangeListener(base.InternalSettingsChangeListener,
+			metadata_svc.GetCatalogPathFromCatalogKey(metadata_svc.InternalSettingsCatalogKey),
+			cancel_chan,
+			children_waitgrp,
+			internal_setting_svc.InternalSettingsServiceCallback,
+			logger_ctx,
+			"InternalSettingChangeListener"),
+	}
+	return iscl
+}
+
+func (iscl *InternalSettingsChangeListener) validateInternalSettings(settingsObj interface{}) (*metadata.InternalSettings, error) {
+	if settingsObj == nil {
+		return nil, nil
+	}
+
+	internal_settings, ok := settingsObj.(*metadata.InternalSettings)
+	if !ok {
+		errMsg := fmt.Sprintf("Metadata, %v, is not of InternalSettings  type\n", settingsObj)
+		iscl.logger.Errorf(errMsg)
+		return nil, errors.New(errMsg)
+	}
+
+	return internal_settings, nil
+}
+
+func (iscl *InternalSettingsChangeListener) internalSettingsChangeHandlerCallback(settingsId string, oldSettingsObj interface{}, newSettingsObj interface{}) error {
+
+	oldSettings, err := iscl.validateInternalSettings(oldSettingsObj)
+	if err != nil {
+		return err
+	}
+	newSettings, err := iscl.validateInternalSettings(newSettingsObj)
+	if err != nil {
+		return err
+	}
+	iscl.logger.Infof("internalSettingsChangedCallback called on id = %v, oldSettings=%v, newSettings=%v\n", settingsId, oldSettings, newSettings)
+
+	// Restart XDCR if internal settings have been changed
+	if !newSettings.Equals(oldSettings) {
+		iscl.logger.Infof("Restarting XDCR process since internal settings have been changed\n")
+		exitProcess(false)
+	}
+	return nil
+}
+
 //Bucket settings listeners
 
 type BucketSettingsChangeListener struct {

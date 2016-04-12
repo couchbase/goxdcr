@@ -85,6 +85,8 @@ type replicationManager struct {
 	global_setting_svc service_def.GlobalSettingsSvc
 	//bucket settings service
 	bucket_settings_svc service_def.BucketSettingsSvc
+	//internal settings service
+	internal_settings_svc service_def.InternalSettingsSvc
 
 	once sync.Once
 
@@ -115,14 +117,18 @@ func StartReplicationManager(sourceKVHost string, xdcrRestPort uint16,
 	audit_svc service_def.AuditSvc,
 	uilog_svc service_def.UILogSvc,
 	global_setting_svc service_def.GlobalSettingsSvc,
-	bucket_settings_svc service_def.BucketSettingsSvc) {
+	bucket_settings_svc service_def.BucketSettingsSvc,
+	internal_settings_svc service_def.InternalSettingsSvc) {
 
 	replication_mgr.once.Do(func() {
 		// ns_server shutdown protocol: poll stdin and exit upon reciept of EOF
 		go pollStdin()
 
+		// initialize internal settings using the value in internal settings service
+		initInternalSettings(internal_settings_svc)
+
 		// initializes replication manager
-		replication_mgr.init(repl_spec_svc, remote_cluster_svc, cluster_info_svc, xdcr_topology_svc, replication_settings_svc, checkpoints_svc, capi_svc, audit_svc, uilog_svc, global_setting_svc, bucket_settings_svc)
+		replication_mgr.init(repl_spec_svc, remote_cluster_svc, cluster_info_svc, xdcr_topology_svc, replication_settings_svc, checkpoints_svc, capi_svc, audit_svc, uilog_svc, global_setting_svc, bucket_settings_svc, internal_settings_svc)
 
 		// start pipeline master supervisor
 		// TODO should we make heart beat settings configurable?
@@ -158,6 +164,17 @@ func StartReplicationManager(sourceKVHost string, xdcrRestPort uint16,
 
 }
 
+// initialize internal settings using the value in internal settings service
+func initInternalSettings(internal_settings_svc service_def.InternalSettingsSvc) {
+	internal_settings := internal_settings_svc.GetInternalSettings()
+
+	logger_rm.Infof("XDCR internal settings: %v\n", internal_settings.ToMap())
+
+	base.InitConstants(time.Duration(internal_settings.TopologyChangeCheckInterval)*time.Second, internal_settings.MaxTopologyChangeCountBeforeRestart,
+		internal_settings.MaxTopologyStableCountBeforeRestart, internal_settings.MaxWorkersForCheckpointing,
+		time.Duration(internal_settings.TopologyChangeCheckpointTimeout)*time.Minute)
+}
+
 func (rm *replicationManager) initMetadataChangeMonitor() {
 	mcm := NewMetadataChangeMonitor()
 
@@ -188,6 +205,15 @@ func (rm *replicationManager) initMetadataChangeMonitor() {
 	mcm.RegisterListener(globalSettingChangeListener)
 	rm.global_setting_svc.SetMetadataChangeHandlerCallback(globalSettingChangeListener.globalSettingChangeHandlerCallback)
 	logger_rm.Info("globalSettingChangeListener successfully started")
+
+	internalSettingsChangeListener := NewInternalSettingsChangeListener(
+		rm.internal_settings_svc,
+		rm.metadata_change_callback_cancel_ch,
+		rm.children_waitgrp,
+		log.DefaultLoggerContext)
+
+	mcm.RegisterListener(internalSettingsChangeListener)
+	rm.internal_settings_svc.SetMetadataChangeHandlerCallback(internalSettingsChangeListener.internalSettingsChangeHandlerCallback)
 
 	bucketSettingsChangeListener := NewBucketSettingsChangeListener(
 		rm.bucket_settings_svc,
@@ -260,7 +286,8 @@ func (rm *replicationManager) init(
 	audit_svc service_def.AuditSvc,
 	uilog_svc service_def.UILogSvc,
 	global_setting_svc service_def.GlobalSettingsSvc,
-	bucket_settings_svc service_def.BucketSettingsSvc) {
+	bucket_settings_svc service_def.BucketSettingsSvc,
+	internal_settings_svc service_def.InternalSettingsSvc) {
 
 	rm.GenericSupervisor = *supervisor.NewGenericSupervisor(base.ReplicationManagerSupervisorId, log.DefaultLoggerContext, rm, nil)
 	rm.pipelineMasterSupervisor = supervisor.NewGenericSupervisor(base.PipelineMasterSupervisorId, log.DefaultLoggerContext, rm, &rm.GenericSupervisor)
@@ -276,6 +303,7 @@ func (rm *replicationManager) init(
 	rm.children_waitgrp = &sync.WaitGroup{}
 	rm.global_setting_svc = global_setting_svc
 	rm.bucket_settings_svc = bucket_settings_svc
+	rm.internal_settings_svc = internal_settings_svc
 	fac := factory.NewXDCRFactory(repl_spec_svc, remote_cluster_svc, cluster_info_svc, xdcr_topology_svc, checkpoint_svc, capi_svc, uilog_svc, bucket_settings_svc, log.DefaultLoggerContext, log.DefaultLoggerContext, rm, rm.pipelineMasterSupervisor)
 
 	pipeline_manager.PipelineManager(fac, repl_spec_svc, xdcr_topology_svc, remote_cluster_svc, log.DefaultLoggerContext)
@@ -319,6 +347,10 @@ func GlobalSettingsService() service_def.GlobalSettingsSvc {
 
 func BucketSettingsService() service_def.BucketSettingsSvc {
 	return replication_mgr.bucket_settings_svc
+}
+
+func InternalSettingsService() service_def.InternalSettingsSvc {
+	return replication_mgr.internal_settings_svc
 }
 
 //CreateReplication create the replication specification in metadata store

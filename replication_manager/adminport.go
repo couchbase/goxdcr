@@ -33,8 +33,8 @@ import (
 
 import _ "net/http/pprof"
 
-var StaticPaths = [10]string{base.RemoteClustersPath, CreateReplicationPath, InternalSettingsPath, SettingsReplicationsPath, AllReplicationsPath, AllReplicationInfosPath, RegexpValidationPrefix, MemStatsPath, BlockProfileStartPath, BlockProfileStopPath}
-var DynamicPathPrefixes = [6]string{base.RemoteClustersPath, DeleteReplicationPrefix, SettingsReplicationsPath, StatisticsPrefix, AllReplicationsPath, BucketSettingsPrefix}
+var StaticPaths = []string{base.RemoteClustersPath, CreateReplicationPath, InternalSettingsPath, SettingsReplicationsPath, AllReplicationsPath, AllReplicationInfosPath, RegexpValidationPrefix, MemStatsPath, BlockProfileStartPath, BlockProfileStopPath, XDCRInternalSettingsPath}
+var DynamicPathPrefixes = []string{base.RemoteClustersPath, DeleteReplicationPrefix, SettingsReplicationsPath, StatisticsPrefix, AllReplicationsPath, BucketSettingsPrefix}
 
 var logger_ap *log.CommonLogger = log.NewLogger("AdminPort", log.DefaultLoggerContext)
 
@@ -201,6 +201,10 @@ func (adminport *Adminport) handleRequest(
 		response, err = adminport.doGetBucketSettingsRequest(request)
 	case BucketSettingsPrefix + DynamicSuffix + base.UrlDelimiter + base.MethodPost:
 		response, err = adminport.doBucketSettingsChangeRequest(request)
+	case XDCRInternalSettingsPath + base.UrlDelimiter + base.MethodGet:
+		response, err = adminport.doViewXDCRInternalSettingsRequest(request)
+	case XDCRInternalSettingsPath + base.UrlDelimiter + base.MethodPost:
+		response, err = adminport.doChangeXDCRInternalSettingsRequest(request)
 	default:
 		err = ap.ErrorInvalidRequest
 	}
@@ -224,7 +228,7 @@ func (adminport *Adminport) doGetRemoteClustersRequest(request *http.Request) (*
 }
 
 func (adminport *Adminport) doCreateRemoteClusterRequest(request *http.Request) (*ap.Response, error) {
-	logger_ap.Infof("doCreateRemoteClusterRequest\n")
+	logger_ap.Infof("doCreateRemoteClusterRequest req=%v\n", request)
 	defer logger_ap.Infof("Finished doCreateRemoteClusterRequest\n")
 
 	response, err := authWebCreds(request, base.PermissionRemoteClusterWrite)
@@ -961,4 +965,37 @@ func (adminport *Adminport) doBucketSettingsChangeRequest(request *http.Request)
 	}
 
 	return EncodeObjectIntoResponse(bucketSettingsMap)
+}
+
+func (adminport *Adminport) doViewXDCRInternalSettingsRequest(request *http.Request) (*ap.Response, error) {
+	logger_ap.Infof("doViewXDCRInternalSettingsRequest\n")
+
+	internalSettings := InternalSettingsService().GetInternalSettings()
+
+	return NewXDCRInternalSettingsResponse(internalSettings)
+}
+
+func (adminport *Adminport) doChangeXDCRInternalSettingsRequest(request *http.Request) (*ap.Response, error) {
+	logger_ap.Infof("doChangeXDCRInternalSettingsRequest\n")
+
+	settingsMap, errorsMap := DecodeSettingsFromXDCRInternalSettingsRequest(request)
+	if len(errorsMap) > 0 {
+		logger_ap.Errorf("Validation error in inputs. errorsMap=%v\n", errorsMap)
+		return EncodeErrorsMapIntoResponse(errorsMap, false)
+	}
+
+	logger_ap.Infof("Request params: xdcrInternalSettings=%v\n", settingsMap)
+
+	internalSettings, errorsMap, err := InternalSettingsService().UpdateInternalSettings(settingsMap)
+	if len(errorsMap) > 0 {
+		logger_ap.Errorf("Validation error in inputs. errorsMap=%v\n", errorsMap)
+		return EncodeErrorsMapIntoResponse(errorsMap, false)
+	}
+
+	if err != nil {
+		logger_ap.Errorf("Error updating xdcr internal settings. err=%v\n", err)
+		return nil, err
+	}
+
+	return NewXDCRInternalSettingsResponse(internalSettings)
 }

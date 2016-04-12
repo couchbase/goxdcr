@@ -150,6 +150,8 @@ func main() {
 			os.Exit(1)
 		}
 
+		internalSettings_svc := metadata_svc.NewInternalSettingsSvc(metakv_svc, nil)
+
 		// start replication manager in normal mode
 		rm.StartReplicationManager(host,
 			uint16(options.xdcrRestPort),
@@ -163,7 +165,8 @@ func main() {
 			audit_svc,
 			uilog_svc,
 			processSetting_svc,
-			bucketSettings_svc)
+			bucketSettings_svc,
+			internalSettings_svc)
 
 		// keep main alive in normal mode
 		<-done
