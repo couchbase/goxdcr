@@ -591,7 +591,6 @@ func (r *pipelineUpdater) start() {
 
 	if r.current_error == nil {
 		//the update is not initiated from a failure case, so don't wait, update now
-		r.updateState(Updater_Running)
 		if r.update() {
 			return
 		}
@@ -628,8 +627,15 @@ func (r *pipelineUpdater) start() {
 func (r *pipelineUpdater) update() bool {
 	r.logger.Infof("Try to fix Pipeline %v. Current error=%v \n", r.pipeline_name, r.current_error)
 
+	err := r.updateState(Updater_Running)
+	if err != nil {
+		// the only scenario where err can be returned is when updater is already in "Done" state
+		r.logger.Infof("Skipping update since updater is already done")
+		return true
+	}
+
 	r.logger.Infof("Try to stop pipeline %v\n", r.pipeline_name)
-	err := pipeline_mgr.stopPipeline(r.rep_status)
+	err = pipeline_mgr.stopPipeline(r.rep_status)
 	if err != nil {
 		goto RE
 	}
@@ -722,7 +728,7 @@ func (r *pipelineUpdater) updateState(new_state pipelineUpdaterState) error {
 	case Updater_Initialized:
 		if new_state != Updater_Running {
 			r.logger.Infof("Updater %v can't move to %v from %v\n", r.pipeline_name, new_state, r.state)
-			return fmt.Errorf(updaterStateErrorStr, Updater_Initialized, Updater_Running)
+			return fmt.Errorf(updaterStateErrorStr, Updater_Initialized, new_state)
 		}
 	case Updater_Done:
 		r.logger.Infof("Updater %v can't move to %v from %v\n", r.pipeline_name, new_state, r.state)
