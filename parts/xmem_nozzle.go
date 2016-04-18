@@ -1236,7 +1236,6 @@ func (xmem *XmemNozzle) batchGetMeta(bigDoc_map map[string]*base.WrappedMCReques
 	receiver_fin_ch := make(chan bool, 1)
 	receiver_return_ch := make(chan bool, 1)
 
-	err_list := []error{}
 	reqs_bytes_list := [][]byte{}
 	// stores the batch count for each reqs_bytes in reqs_bytes_list
 	batch_count_list := []int{}
@@ -1284,17 +1283,17 @@ func (xmem *XmemNozzle) batchGetMeta(bigDoc_map map[string]*base.WrappedMCReques
 	}
 
 	//launch the receiver
-	go func(count int, finch chan bool, return_ch chan bool, opaque_keySeqno_map map[uint32][]interface{}, respMap map[string]*mc.MCResponse, err_list []error, logger *log.CommonLogger) {
+	go func(count int, finch chan bool, return_ch chan bool, opaque_keySeqno_map map[uint32][]interface{}, respMap map[string]*mc.MCResponse, logger *log.CommonLogger) {
 		defer func() {
 			//handle the panic gracefully.
 			if r := recover(); r != nil {
 				if xmem.validateRunningState() == nil {
+					errMsg := fmt.Sprintf("%v", r)
 					//add to the error list
-					panic_err := errors.New(fmt.Sprintf("%v", r))
-					err_list = append(err_list, panic_err)
+					xmem.Logger().Errorf("%v batchGetMeta receiver recovered from err = %v", xmem.Id(), errMsg)
 
 					//repair the connection
-					xmem.repairConn(xmem.client_for_getMeta, panic_err.Error(), xmem.client_for_getMeta.repairCount())
+					xmem.repairConn(xmem.client_for_getMeta, errMsg, xmem.client_for_getMeta.repairCount())
 				}
 			}
 			close(return_ch)
@@ -1333,9 +1332,11 @@ func (xmem *XmemNozzle) batchGetMeta(bigDoc_map map[string]*base.WrappedMCReques
 					}
 
 					if !isNetTimeoutError(err) {
-						err_list = append(err_list, err)
+						logger.Errorf("%v batchGetMeta received fatal error and had to abort. Expected %v responses, got %v responses. err=%v", xmem.Id(), count, len(respMap), err)
+						logger.Infof("%v Expected=%v, Received=%v\n", xmem.Id(), opaque_keySeqno_map, respMap)
+						return
 					} else {
-						logger.Errorf("%v Expected %v responses, timed out, got %v responses", xmem.Id(), count, len(respMap))
+						logger.Errorf("%v batchGetMeta timed out. Expected %v responses, got %v responses", xmem.Id(), count, len(respMap))
 						logger.Infof("%v Expected=%v, Received=%v\n", xmem.Id(), opaque_keySeqno_map, respMap)
 						return
 					}
@@ -1370,7 +1371,7 @@ func (xmem *XmemNozzle) batchGetMeta(bigDoc_map map[string]*base.WrappedMCReques
 			}
 		}
 
-	}(len(opaque_keySeqno_map), receiver_fin_ch, receiver_return_ch, opaque_keySeqno_map, respMap, err_list, xmem.Logger())
+	}(len(opaque_keySeqno_map), receiver_fin_ch, receiver_return_ch, opaque_keySeqno_map, respMap, xmem.Logger())
 
 	//send the requests
 	for index, packet := range reqs_bytes_list {
@@ -1384,11 +1385,6 @@ func (xmem *XmemNozzle) batchGetMeta(bigDoc_map map[string]*base.WrappedMCReques
 
 	//wait for receiver to finish
 	<-receiver_return_ch
-
-	//process the responses
-	if len(err_list) > 0 {
-		return nil, err_list[0]
-	}
 
 	for _, wrappedReq := range bigDoc_map {
 		key := string(wrappedReq.Req.Key)
