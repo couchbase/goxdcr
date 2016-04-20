@@ -1622,6 +1622,9 @@ func (xmem *XmemNozzle) receiveResponse(finch chan bool, waitGrp *sync.WaitGroup
 				panic("readFromClient returned nil error and nil response")
 			} else if response.Status != mc.SUCCESS && !isIgnorableMCError(response.Status) {
 				if isRecoverableMCError(response.Status) {
+					// target may be overloaded. increase backoff factor to alleviate stress on target
+					xmem.client_for_setMeta.backoff_factor++
+
 					// err is recoverable. resend doc
 					pos := xmem.getPosFromOpaque(response.Opaque)
 					xmem.Logger().Errorf("%v Received recoverable error in response. Response status=%v, err = %v, response=%v\n", xmem.Id(), response.Status.String(), err, response.Bytes())
@@ -2025,7 +2028,9 @@ func (xmem *XmemNozzle) validateRunningState() error {
 }
 
 func (xmem *XmemNozzle) writeToClient(client *xmemClient, bytes []byte, renewTimeout bool) (error, int) {
-	time.Sleep(time.Duration(client.backoff_factor) * default_backoff_wait_time)
+	if client.backoff_factor > 0 {
+		time.Sleep(time.Duration(client.backoff_factor) * default_backoff_wait_time)
+	}
 
 	conn, rev, err := xmem.getConn(client, false, renewTimeout)
 	if err != nil {
