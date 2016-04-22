@@ -445,7 +445,7 @@ func (dcp *DcpNozzle) processData() (err error) {
 					vbno := m.VBucket
 					_, ok := dcp.vb_stream_status[vbno]
 					if ok {
-						dcp.setStreamState(vbno, Dcp_Stream_Active, true)
+						dcp.setStreamState(vbno, Dcp_Stream_Active)
 						dcp.RaiseEvent(common.NewEvent(common.StreamingStart, m, dcp, nil, nil))
 					} else {
 						panic(fmt.Sprintf("Stream for vb=%v is not supposed to be opened\n", vbno))
@@ -589,11 +589,9 @@ func (dcp *DcpNozzle) startUprStream(vbno uint16, vbts *base.VBTimestamp) error 
 	if dcp.uprFeed != nil {
 		statusObj, ok := dcp.vb_stream_status[vbno]
 		if ok && statusObj != nil {
-			statusObj.lock.Lock()
-			defer statusObj.lock.Unlock()
 			err := dcp.uprFeed.UprRequestStream(vbno, opaque, flags, vbts.Vbuuid, vbts.Seqno, seqEnd, vbts.SnapshotStart, vbts.SnapshotEnd)
 			if err == nil {
-				dcp.setStreamState(vbno, Dcp_Stream_Init, false)
+				dcp.setStreamState(vbno, Dcp_Stream_Init)
 			}
 			return err
 		} else {
@@ -764,13 +762,11 @@ func (dcp *DcpNozzle) isTSSet(vbno uint16, need_lock bool) bool {
 	return true
 }
 
-func (dcp *DcpNozzle) setStreamState(vbno uint16, streamState DcpStreamState, need_lock bool) {
+func (dcp *DcpNozzle) setStreamState(vbno uint16, streamState DcpStreamState) {
 	statusObj, ok := dcp.vb_stream_status[vbno]
 	if ok && statusObj != nil {
-		if need_lock {
-			statusObj.lock.Lock()
-			defer statusObj.lock.Unlock()
-		}
+		statusObj.lock.Lock()
+		defer statusObj.lock.Unlock()
 		statusObj.state = streamState
 	} else {
 		panic(fmt.Sprintf("Try to set stream state to invalid vbno=%v", vbno))
