@@ -16,36 +16,47 @@ import (
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/goxdcr/utils"
-	"net/url"
 	"net/http"
+	"net/url"
 )
 
 var NoSupportForXDCRCheckpointingError = errors.New("No xdcrcheckpointing support on older node")
 
 type RemoteBucketInfo struct {
-	RemoteClusterRefName string
-	BucketName           string
+	RemoteClusterRefName     string
+	BucketName               string
 	RemoteClusterRef         *metadata.RemoteClusterReference
 	Capabilities             []string
 	UUID                     string
 	VBServerMap              map[string][]uint16
 	MemcachedAddrRestAddrMap map[string]string
-	RestAddrHttpClientMap	 map[string]*http.Client
+	RestAddrHttpClientMap    map[string]*http.Client
+	SANInCertificate         bool
 	logger                   *log.CommonLogger
 }
 
 func NewRemoteBucketInfo(remoteClusterRefName string, bucketName string, remote_cluster_ref *metadata.RemoteClusterReference,
-	remote_cluster_svc RemoteClusterSvc, logger *log.CommonLogger) (*RemoteBucketInfo, error) {
+	remote_cluster_svc RemoteClusterSvc, cluster_info_svc ClusterInfoSvc, logger *log.CommonLogger) (*RemoteBucketInfo, error) {
 	if remoteClusterRefName == "" || bucketName == "" {
 		return nil, errors.New("remoteClusterRefName and bucketName are required")
+	}
+
+	var hasSANInCertificateSupport bool
+	var err error
+	if len(remote_cluster_ref.Certificate) > 0 {
+		hasSANInCertificateSupport, err = cluster_info_svc.IsClusterCompatible(remote_cluster_ref, []int{4, 0})
+		if err != nil {
+			return nil, fmt.Errorf("Error checking if target cluster supports SANs in cerificates. err=%v", err)
+		}
 	}
 
 	remoteBucket := &RemoteBucketInfo{RemoteClusterRefName: remoteClusterRefName,
 		BucketName:       bucketName,
 		RemoteClusterRef: remote_cluster_ref,
+		SANInCertificate: hasSANInCertificateSupport,
 		logger:           logger}
 
-	err := remoteBucket.refresh_internal(remote_cluster_svc, false)
+	err = remoteBucket.refresh_internal(remote_cluster_svc, false)
 	return remoteBucket, err
 }
 
@@ -103,7 +114,7 @@ func (remoteBucket *RemoteBucketInfo) refresh_internal(remote_cluster_svc Remote
 			return err
 		}
 		remoteBucket.MemcachedAddrRestAddrMap[serverAddr] = u.Host
-		http_client, err := utils.GetHttpClient (remoteBucket.RemoteClusterRef.Certificate, u.Host, remoteBucket.logger)
+		http_client, err := utils.GetHttpClient(remoteBucket.RemoteClusterRef.Certificate, remoteBucket.SANInCertificate, u.Host, remoteBucket.logger)
 		if err != nil {
 			return err
 		}

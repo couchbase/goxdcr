@@ -17,6 +17,7 @@ import (
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
+	"github.com/couchbase/goxdcr/pipeline_utils"
 	"github.com/couchbase/goxdcr/service_def"
 	"github.com/couchbase/goxdcr/utils"
 	"net/http"
@@ -81,13 +82,14 @@ func (rcv *remoteClusterVal) CAS(obj CacheableMetadataObj) bool {
 }
 
 type RemoteClusterService struct {
-	metakv_svc               service_def.MetadataSvc
-	uilog_svc                service_def.UILogSvc
-	xdcr_topology_svc        service_def.XDCRCompTopologySvc
-	cluster_info_svc         service_def.ClusterInfoSvc
-	logger                   *log.CommonLogger
-	cache                    *MetadataCache
-	cache_lock               *sync.Mutex
+	metakv_svc        service_def.MetadataSvc
+	uilog_svc         service_def.UILogSvc
+	xdcr_topology_svc service_def.XDCRCompTopologySvc
+	cluster_info_svc  service_def.ClusterInfoSvc
+	logger            *log.CommonLogger
+	cache             *MetadataCache
+	cache_lock        *sync.Mutex
+
 	metadata_change_callback base.MetadataChangeHandlerCallback
 }
 
@@ -453,15 +455,20 @@ func (service *RemoteClusterService) validateRemoteCluster(ref *metadata.RemoteC
 		hostAddr = ref.HostName
 	}
 	var poolsInfo map[string]interface{}
-
+	var hasSANInCertificateSupport bool
 	if ref.DemandEncryption {
 		hostAddr = utils.EnforcePrefix("https://", hostAddr)
+
+		hasSANInCertificateSupport, err = pipeline_utils.HasSANInCertificateSupport(service.cluster_info_svc, ref)
+		if err != nil {
+			return wrapAsInvalidRemoteClusterError(fmt.Sprintf("Error checking if target cluster supports SANs in cerificates. err=%v", err))
+		}
 	} else {
 		hostAddr = utils.EnforcePrefix("http://", hostAddr)
 	}
 
 	startTime := time.Now()
-	err, statusCode := utils.QueryRestApiWithAuth(hostAddr, base.PoolsPath, false, ref.UserName, ref.Password, ref.Certificate, base.MethodGet, "", nil, base.ShortHttpTimeout, &poolsInfo, nil, false, service.logger)
+	err, statusCode := utils.QueryRestApiWithAuth(hostAddr, base.PoolsPath, false, ref.UserName, ref.Password, ref.Certificate, hasSANInCertificateSupport, base.MethodGet, "", nil, base.ShortHttpTimeout, &poolsInfo, nil, false, service.logger)
 	service.logger.Infof("Result from validate remote cluster call: err=%v, statusCode=%v. time taken=%v\n", err, statusCode, time.Since(startTime))
 	if err != nil || statusCode != http.StatusOK {
 		if statusCode == http.StatusUnauthorized {
@@ -533,15 +540,12 @@ func (service *RemoteClusterService) formErrorFromValidatingRemotehost(ref *meta
 	}
 }
 
-func (service *RemoteClusterService) httpsHostAddress(hostName, userName, password string) (string, error, bool) {
-	sslPort, err, isInternalError := utils.GetXDCRSSLPort(hostName, userName, password, service.logger)
+func (service *RemoteClusterService) httpsHostAddress(hostAddr, userName, password string) (string, error, bool) {
+	hostName, sslPort, err, isInternalError := utils.GetHostNameAndXDCRSSLPort(hostAddr, userName, password, service.logger)
 	if err != nil {
 		return "", err, isInternalError
 	}
-
-	hostNode := strings.Split(hostName, base.UrlPortNumberDelimiter)[0]
-	newHostName := utils.GetHostAddr(hostNode, sslPort)
-	return newHostName, nil, false
+	return utils.GetHostAddr(hostName, sslPort), nil, false
 }
 
 // this internal api differs from AddRemoteCluster in that it does not perform validation

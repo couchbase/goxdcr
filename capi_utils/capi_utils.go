@@ -66,7 +66,7 @@ func ConstructServerCouchApiBaseMap(targetBucket *couchbase.Bucket, remoteCluste
 
 	var out interface{}
 
-	err, _ := utils.QueryRestApiWithAuth(remoteClusterRef.HostName, targetBucket.URI, true, remoteClusterRef.UserName, remoteClusterRef.Password, []byte{}, base.MethodGet, "", nil, 0, &out, nil, false, logger_capi_utils)
+	err, _ := utils.QueryRestApiWithAuth(remoteClusterRef.HostName, targetBucket.URI, true, remoteClusterRef.UserName, remoteClusterRef.Password, []byte{}, false, base.MethodGet, "", nil, 0, &out, nil, false, logger_capi_utils)
 	if err != nil {
 		return nil, utils.NewEnhancedError(fmt.Sprintf("Error constructing vb couchApiBase map for bucket %v on remote cluster %v because of failure to retrieve bucket info\n", targetBucket.Name, remoteClusterRef.Name), err)
 	}

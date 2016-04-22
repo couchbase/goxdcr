@@ -38,6 +38,7 @@ const (
 	XMEM_SETTING_DEMAND_ENCRYPTION   = "demandEncryption"
 	XMEM_SETTING_CERTIFICATE         = "certificate"
 	XMEM_SETTING_INSECURESKIPVERIFY  = "insecureSkipVerify"
+	XMEM_SETTING_SAN_IN_CERITICATE   = "SANInCertificate"
 	XMEM_SETTING_REMOTE_PROXY_PORT   = "remote_proxy_port"
 	XMEM_SETTING_LOCAL_PROXY_PORT    = "local_proxy_port"
 	XMEM_SETTING_REMOTE_MEM_SSL_PORT = "remote_ssl_port"
@@ -73,6 +74,7 @@ var xmem_setting_defs base.SettingDefinitions = base.SettingDefinitions{SETTING_
 	SETTING_OPTI_REP_THRESHOLD:      base.NewSettingDef(reflect.TypeOf((*int)(nil)), true),
 	XMEM_SETTING_DEMAND_ENCRYPTION:  base.NewSettingDef(reflect.TypeOf((*bool)(nil)), false),
 	XMEM_SETTING_CERTIFICATE:        base.NewSettingDef(reflect.TypeOf((*[]byte)(nil)), false),
+	XMEM_SETTING_SAN_IN_CERITICATE:  base.NewSettingDef(reflect.TypeOf((*bool)(nil)), false),
 	XMEM_SETTING_INSECURESKIPVERIFY: base.NewSettingDef(reflect.TypeOf((*bool)(nil)), false),
 
 	//only used for xmem over ssl via ns_proxy for 2.5
@@ -417,6 +419,8 @@ type xmemConfig struct {
 	remote_proxy_port  uint16
 	local_proxy_port   uint16
 	memcached_ssl_port uint16
+	// in ssl over mem mode, whether target cluster supports SANs in certificates
+	san_in_certificate bool
 	respTimeout        time.Duration
 	max_read_downtime  time.Duration
 	logger             *log.CommonLogger
@@ -466,6 +470,12 @@ func (config *xmemConfig) initializeConfig(settings map[string]interface{}) erro
 
 			if val, ok := settings[XMEM_SETTING_REMOTE_MEM_SSL_PORT]; ok {
 				config.memcached_ssl_port = val.(uint16)
+
+				if val, ok := settings[XMEM_SETTING_SAN_IN_CERITICATE]; ok {
+					config.san_in_certificate = val.(bool)
+				} else {
+					return errors.New("SANInCertificate is not set in settings")
+				}
 			} else {
 				if val, ok := settings[XMEM_SETTING_REMOTE_PROXY_PORT]; ok {
 					config.remote_proxy_port = val.(uint16)
@@ -1487,7 +1497,7 @@ func (xmem *XmemNozzle) getOrCreateConnPool() (pool base.ConnPool, err error) {
 		if xmem.config.memcached_ssl_port != 0 {
 			xmem.Logger().Infof("%v Get or create ssl over memcached connection, memcached_ssl_port=%v\n", xmem.Id(), int(xmem.config.memcached_ssl_port))
 			pool, err = base.ConnPoolMgr().GetOrCreateSSLOverMemPool(poolName, hostName, xmem.config.bucketName, xmem.config.bucketName, xmem.config.password,
-				xmem.config.connPoolSize, int(xmem.config.memcached_ssl_port), xmem.config.certificate)
+				xmem.config.connPoolSize, int(xmem.config.memcached_ssl_port), xmem.config.certificate, xmem.config.san_in_certificate)
 
 		} else {
 			xmem.Logger().Infof("%v Get or create ssl over proxy connection", xmem.Id())

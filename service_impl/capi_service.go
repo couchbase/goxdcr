@@ -29,6 +29,7 @@ type apiRequest struct {
 	password           string
 	body               map[string]interface{}
 	certificate        []byte
+	SANInCertificate   bool
 	insecureSkipVerify bool
 }
 
@@ -286,6 +287,7 @@ func (capi_svc *CAPIService) composeAPIRequestBase(remoteBucket *service_def.Rem
 	api_base.body["bucket"] = remoteBucket.BucketName
 	api_base.body["bucketUUID"] = remoteBucket.UUID
 	api_base.certificate = remoteBucket.RemoteClusterRef.Certificate
+	api_base.SANInCertificate = remoteBucket.SANInCertificate
 	return api_base, nil
 }
 
@@ -327,7 +329,7 @@ func (capi_svc *CAPIService) send_post(restMethodName string, api_base *apiReque
 	if err != nil {
 		return 0, nil, nil, err
 	}
-	err, statusCode, ret_client := utils.InvokeRestWithRetryWithAuth(api_base.url, restMethodName, false, api_base.username, api_base.password, api_base.certificate, api_base.insecureSkipVerify, base.MethodPost, base.JsonContentType, body, 0, &ret_map, client, true, capi_svc.logger, num_retry)
+	err, statusCode, ret_client := utils.InvokeRestWithRetryWithAuth(api_base.url, restMethodName, false, api_base.username, api_base.password, api_base.certificate, api_base.SANInCertificate, api_base.insecureSkipVerify, base.MethodPost, base.JsonContentType, body, 0, &ret_map, client, true, capi_svc.logger, num_retry)
 	return statusCode, ret_map, ret_client, err
 }
 

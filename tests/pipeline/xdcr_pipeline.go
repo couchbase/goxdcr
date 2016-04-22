@@ -319,7 +319,7 @@ func getDocCounts(clusterAddress string, bucketName string, password string) int
 		false,
 		bucketName,
 		password,
-		nil,
+		nil, false,
 		"GET", "", nil,
 		0, output, nil, false, logger)
 	if err != nil {
@@ -339,7 +339,7 @@ func flushTargetBkt() {
 		false,
 		options.remoteUserName,
 		options.remotePassword,
-		nil,
+		nil, false,
 		"POST", "", nil,
 		0, nil, nil, false, logger)
 

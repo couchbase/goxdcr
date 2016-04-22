@@ -36,7 +36,7 @@ type SettingsError struct {
 func (se SettingsError) Error() string {
 	var buffer bytes.Buffer
 	for key, err := range se.err_map {
-		errStr := fmt.Sprintf("etting=%s; err=%s\n", key, err.Error())
+		errStr := fmt.Sprintf("setting=%s; err=%s\n", key, err.Error())
 		buffer.WriteString(errStr)
 	}
 	return buffer.String()

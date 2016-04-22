@@ -79,6 +79,11 @@ func HasExtMetadataSupport(cluster_info_svc service_def.ClusterInfoSvc, targetCl
 	return cluster_info_svc.IsClusterCompatible(targetClusterRef, []int{4, 5})
 }
 
+// checks if target cluster supports SANs in certificates
+func HasSANInCertificateSupport(cluster_info_svc service_def.ClusterInfoSvc, targetClusterRef *metadata.RemoteClusterReference) (bool, error) {
+	return cluster_info_svc.IsClusterCompatible(targetClusterRef, []int{4, 0})
+}
+
 func GetElementIdFromName(pipeline common.Pipeline, name string) string {
 	return pipeline.Topic() + "_" + name
 }

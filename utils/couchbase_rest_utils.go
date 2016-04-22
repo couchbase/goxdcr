@@ -5,7 +5,6 @@ import (
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"github.com/couchbase/cbauth"
 	"github.com/couchbase/go-couchbase"
@@ -27,7 +26,7 @@ func GetMemcachedSSLPort(hostName, username, password, bucket string, logger *lo
 
 	logger.Infof("GetMemcachedSSLPort, hostName=%v\n", hostName)
 	url := base.BPath + base.UrlDelimiter + bucket
-	err, _ := QueryRestApiWithAuth(hostName, url, false, username, password, nil, base.MethodGet, "", nil, 0, &bucketInfo, nil, false, logger)
+	err, _ := QueryRestApiWithAuth(hostName, url, false, username, password, nil, false, base.MethodGet, "", nil, 0, &bucketInfo, nil, false, logger)
 	if err != nil {
 		return nil, err
 	}
@@ -110,26 +109,58 @@ func bucketInfoParseError(bucketInfo map[string]interface{}, logger *log.CommonL
 	return fmt.Errorf(errMsg)
 }
 
-func GetXDCRSSLPort(hostName, userName, password string, logger *log.CommonLogger) (uint16, error, bool) {
-
-	portsInfo := make(map[string]interface{})
-	err, _ := QueryRestApiWithAuth(hostName, base.SSLPortsPath, false, userName, password, nil, base.MethodGet, "", nil, 0, &portsInfo, nil, false, logger)
-	if err != nil {
-		return 0, err, false
+func GetHostNameAndXDCRSSLPort(hostAddr, userName, password string, logger *log.CommonLogger) (string, uint16, error, bool) {
+	nodeInfo := make(map[string]interface{})
+	err, statusCode := QueryRestApiWithAuth(hostAddr, base.NodesSelfPath, false, userName, password, nil, false, base.MethodGet, "", nil, 0, &nodeInfo, nil, false, logger)
+	if err != nil || statusCode != http.StatusOK {
+		return "", 0, fmt.Errorf("Failed on calling %v, err=%v, statusCode=%v", base.NodesSelfPath, err, statusCode), false
 	}
-	// get ssl port from the map
-	sslPort, ok := portsInfo[base.SSLPortKey]
+
+	// get host name
+	actualHostAddr, ok := nodeInfo[base.HostNameKey]
 	if !ok {
 		// should never get here
-		return 0, fmt.Errorf("Error parsing ssl port of remote cluster. portInfo=%v", portsInfo), true
+		errMsg := "Failed to parse node info. hostname is missing."
+		logger.Errorf("%v. nodeInfo=%v", errMsg, nodeInfo)
+		return "", 0, fmt.Errorf(errMsg), true
+	}
+
+	actualHostAddrStr, ok := actualHostAddr.(string)
+	if !ok {
+		// should never get here
+		return "", 0, fmt.Errorf("host name is of wrong type. Expected type: string; Actual type: %s", reflect.TypeOf(actualHostAddr)), true
+	}
+
+	hostName := GetHostName(actualHostAddrStr)
+
+	// get ssl port
+	ports, ok := nodeInfo[base.PortsKey]
+	if !ok {
+		// should never get here
+		errMsg := "Failed to parse node info. ports is missing."
+		logger.Errorf("%v. nodeInfo=%v", errMsg, nodeInfo)
+		return "", 0, fmt.Errorf(errMsg), true
+
+	}
+
+	portsMap, ok := ports.(map[string]interface{})
+	if !ok {
+		return "", 0, fmt.Errorf("ports is of wrong type. Expected type: map[string]interface{}; Actual type: %s", reflect.TypeOf(ports)), true
+	}
+
+	sslPort, ok := portsMap[base.SSLPortKey]
+	if !ok {
+		errMsg := "Failed to parse node info. ssl port is missing."
+		logger.Errorf("%v. nodeInfo=%v", errMsg, nodeInfo)
+		return "", 0, fmt.Errorf(errMsg), true
 	}
 
 	sslPortFloat, ok := sslPort.(float64)
 	if !ok {
-		// should never get here
-		return 0, errors.New(fmt.Sprintf("ssl port of remote cluster is of wrong type. Expected type: float64; Actual type: %s", reflect.TypeOf(sslPort))), true
+		return "", 0, fmt.Errorf("ssl port is of wrong type. Expected type: float64; Actual type: %s", reflect.TypeOf(sslPort)), true
 	}
-	return uint16(sslPortFloat), nil, false
+
+	return hostName, uint16(sslPortFloat), nil, false
 }
 
 //convenient api for rest calls to local cluster
@@ -142,7 +173,7 @@ func QueryRestApi(baseURL string,
 	timeout time.Duration,
 	out interface{},
 	logger *log.CommonLogger) (error, int) {
-	return QueryRestApiWithAuth(baseURL, path, preservePathEncoding, "", "", nil, httpCommand, contentType, body, timeout, out, nil, false, logger)
+	return QueryRestApiWithAuth(baseURL, path, preservePathEncoding, "", "", nil, false, httpCommand, contentType, body, timeout, out, nil, false, logger)
 }
 
 func EnforcePrefix(prefix string, str string) string {
@@ -168,6 +199,7 @@ func QueryRestApiWithAuth(
 	username string,
 	password string,
 	certificate []byte,
+	san_in_certificate bool,
 	httpCommand string,
 	contentType string,
 	body []byte,
@@ -176,7 +208,7 @@ func QueryRestApiWithAuth(
 	client *http.Client,
 	keep_client_alive bool,
 	logger *log.CommonLogger) (error, int) {
-	http_client, req, err := prepareForRestCall(baseURL, path, preservePathEncoding, username, password, certificate, httpCommand, contentType, body, client, logger)
+	http_client, req, err := prepareForRestCall(baseURL, path, preservePathEncoding, username, password, certificate, san_in_certificate, httpCommand, contentType, body, client, logger)
 	if err != nil {
 		return err, 0
 	}
@@ -193,6 +225,7 @@ func prepareForRestCall(baseURL string,
 	username string,
 	password string,
 	certificate []byte,
+	san_in_certificate bool,
 	httpCommand string,
 	contentType string,
 	body []byte,
@@ -206,7 +239,7 @@ func prepareForRestCall(baseURL string,
 	}
 
 	if ret_client == nil {
-		ret_client, err = GetHttpClient(certificate, host, l)
+		ret_client, err = GetHttpClient(certificate, san_in_certificate, host, l)
 		if err != nil {
 			l.Errorf("Failed to get client for request, err=%v, req=%v\n", err, req)
 			return nil, nil, err
@@ -279,7 +312,7 @@ func InvokeRestWithRetry(baseURL string,
 	client *http.Client,
 	keep_client_alive bool,
 	logger *log.CommonLogger, num_retry int) (error, int, *http.Client) {
-	return InvokeRestWithRetryWithAuth(baseURL, path, preservePathEncoding, "", "", nil, true, httpCommand, contentType, body, timeout, out, client, keep_client_alive, logger, num_retry)
+	return InvokeRestWithRetryWithAuth(baseURL, path, preservePathEncoding, "", "", nil, false, true, httpCommand, contentType, body, timeout, out, client, keep_client_alive, logger, num_retry)
 }
 
 func InvokeRestWithRetryWithAuth(baseURL string,
@@ -288,6 +321,7 @@ func InvokeRestWithRetryWithAuth(baseURL string,
 	username string,
 	password string,
 	certificate []byte,
+	san_in_certificate bool,
 	insecureSkipVerify bool,
 	httpCommand string,
 	contentType string,
@@ -305,7 +339,7 @@ func InvokeRestWithRetryWithAuth(baseURL string,
 	backoff_time := 500 * time.Millisecond
 
 	for i := 0; i < num_retry; i++ {
-		http_client, req, ret_err = prepareForRestCall(baseURL, path, preservePathEncoding, username, password, certificate, httpCommand, contentType, body, client, logger)
+		http_client, req, ret_err = prepareForRestCall(baseURL, path, preservePathEncoding, username, password, certificate, san_in_certificate, httpCommand, contentType, body, client, logger)
 		if ret_err == nil {
 			ret_err, statusCode = doRestCall(req, timeout, out, http_client, logger)
 		}
@@ -328,7 +362,7 @@ func InvokeRestWithRetryWithAuth(baseURL string,
 
 }
 
-func GetHttpClient(certificate []byte, ssl_con_str string, logger *log.CommonLogger) (*http.Client, error) {
+func GetHttpClient(certificate []byte, san_in_certificate bool, ssl_con_str string, logger *log.CommonLogger) (*http.Client, error) {
 	var client *http.Client
 	if len(certificate) != 0 {
 		//https
@@ -340,7 +374,7 @@ func GetHttpClient(certificate []byte, ssl_con_str string, logger *log.CommonLog
 
 		//using a separate tls connection to verify certificate
 		//it can be changed in 1.4 when DialTLS is avaialbe in http.Transport
-		conn, tlsConfig, err := base.MakeTLSConn(ssl_con_str, certificate, logger)
+		conn, tlsConfig, err := base.MakeTLSConn(ssl_con_str, certificate, san_in_certificate, logger)
 		if err != nil {
 			return nil, err
 		}

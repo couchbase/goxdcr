@@ -111,6 +111,8 @@ type sslOverMemConnPool struct {
 	connPool
 	remote_memcached_port int
 	certificate           []byte
+	// whether target cluster supports SANs in certificates
+	san_in_certificate bool
 }
 
 type connPoolMgr struct {
@@ -334,7 +336,7 @@ func (p *sslOverMemConnPool) newConn() (*mcc.Client, error) {
 	}
 
 	ConnPoolMgr().logger.Infof("Trying to create a ssl over memcached connection on %v", ssl_con_str)
-	conn, _, err := MakeTLSConn(ssl_con_str, p.certificate, p.logger)
+	conn, _, err := MakeTLSConn(ssl_con_str, p.certificate, p.san_in_certificate, p.logger)
 	if err != nil {
 		return nil, err
 	}
@@ -500,7 +502,7 @@ func (connPoolMgr *connPoolMgr) GetOrCreatePool(poolNameToCreate string, hostnam
 	return pool, err
 }
 
-func (connPoolMgr *connPoolMgr) GetOrCreateSSLOverMemPool(poolNameToCreate string, hostname string, bucketname string, username string, password string, connsize int, remote_mem_port int, cert []byte) (ConnPool, error) {
+func (connPoolMgr *connPoolMgr) GetOrCreateSSLOverMemPool(poolNameToCreate string, hostname string, bucketname string, username string, password string, connsize int, remote_mem_port int, cert []byte, san_in_cert bool) (ConnPool, error) {
 	connPoolMgr.map_lock.Lock()
 	defer connPoolMgr.map_lock.Unlock()
 
@@ -537,7 +539,8 @@ func (connPoolMgr *connPoolMgr) GetOrCreateSSLOverMemPool(poolNameToCreate strin
 			state_lock: &sync.RWMutex{},
 			logger:     log.NewLogger("sslConnPool", connPoolMgr.logger.LoggerContext())},
 		remote_memcached_port: remote_mem_port,
-		certificate:           cert}
+		certificate:           cert,
+		san_in_certificate:    san_in_cert}
 	p.init()
 
 	connPoolMgr.conn_pools_map[poolNameToCreate] = p
@@ -751,7 +754,7 @@ func NewConn(hostName string, username string, password string) (conn *mcc.Clien
 	return conn, nil
 }
 
-func MakeTLSConn(ssl_con_str string, certificate []byte, logger *log.CommonLogger) (*tls.Conn, *tls.Config, error) {
+func MakeTLSConn(ssl_con_str string, certificate []byte, check_server_name bool, logger *log.CommonLogger) (*tls.Conn, *tls.Config, error) {
 	caPool := x509.NewCertPool()
 	ok := caPool.AppendCertsFromPEM(certificate)
 	if !ok {
@@ -797,11 +800,11 @@ func MakeTLSConn(ssl_con_str string, certificate []byte, logger *log.CommonLogge
 			Intermediates: x509.NewCertPool(),
 		}
 
-		if len(peer_certs[0].IPAddresses) > 0 {
-			// get server name to verify against from ssl_con_str
+		if check_server_name {
+			// need to check server name. get sever name from ssl_con_str
 			opts.DNSName = strings.Split(ssl_con_str, UrlPortNumberDelimiter)[0]
 		} else {
-			logger.Debug("remote peer has a certificate which doesn't have IP SANs, skip verifying ServerName")
+			logger.Debug("remote peer is old and its certificate doesn't have IP SANs, skip verifying ServerName")
 		}
 
 		for i, cert := range peer_certs {

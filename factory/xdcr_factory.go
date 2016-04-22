@@ -661,6 +661,13 @@ func (xdcrf *XDCRFactory) constructSettingsForXmemNozzle(pipeline common.Pipelin
 			xmemSettings[parts.XMEM_SETTING_REMOTE_MEM_SSL_PORT] = mem_ssl_port
 			xmemSettings[parts.XMEM_SETTING_CERTIFICATE] = certificate
 			xmemSettings[parts.XMEM_SETTING_DEMAND_ENCRYPTION] = demandEncryption
+
+			hasSANInCertificateSupport, err := pipeline_utils.HasSANInCertificateSupport(xdcrf.cluster_info_svc, targetClusterRef)
+			if err != nil {
+				return nil, fmt.Errorf("Error checking if target cluster supports SANs in cerificates. err=%v", err)
+			}
+			xmemSettings[parts.XMEM_SETTING_SAN_IN_CERITICATE] = hasSANInCertificateSupport
+
 			xdcrf.logger.Infof("xmemSettings=%v\n", xmemSettings)
 
 		} else {

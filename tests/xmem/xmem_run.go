@@ -84,7 +84,7 @@ func setup() (err error) {
 			false,
 			options.target_bucket,
 			options.password,
-			nil,
+			nil, false,
 			"POST", "", nil,
 			0, nil, nil, false, logger)
 	}
@@ -106,7 +106,7 @@ func verify(data_count int) bool {
 		false,
 		options.target_bucket,
 		options.password,
-		nil,
+		nil, false,
 		"GET", "", nil,
 		0, output, nil, false, logger)
 	if err != nil {
