@@ -93,18 +93,20 @@ func NewReplicationStatus(specId string, spec_getter ReplicationSpecGetter, logg
 		obj_pool:    base.NewMCRequestPool(specId, logger),
 		progress:    ""}
 
-	rep_status.Publish()
+	rep_status.Publish(false)
 	return rep_status
 }
 
 func (rs *ReplicationStatus) SetPipeline(pipeline common.Pipeline) {
+	rs.Lock.Lock()
+	defer rs.Lock.Unlock()
 	rs.pipeline = pipeline
 	if pipeline != nil {
 		rs.vb_list = pipeline_utils.GetSourceVBListPerPipeline(pipeline)
 		simple_utils.SortUint16List(rs.vb_list)
 	}
 
-	rs.Publish()
+	rs.Publish(false)
 }
 
 func (rs *ReplicationStatus) Spec() *metadata.ReplicationSpecification {
@@ -145,11 +147,16 @@ func (rs *ReplicationStatus) AddError(err error) {
 		rs.err_list[0] = PipelineError{Timestamp: time.Now(), ErrMsg: errStr}
 
 		rs.logger.Infof("err_list=%v\n", rs.err_list)
-		rs.Publish()
+		rs.Publish(false)
 	}
 }
 
-func (rs *ReplicationStatus) RuntimeStatus() ReplicationState {
+func (rs *ReplicationStatus) RuntimeStatus(lock bool) ReplicationState {
+	if lock {
+		rs.Lock.RLock()
+		defer rs.Lock.RUnlock()
+	}
+
 	spec := rs.Spec()
 	if rs.pipeline != nil && rs.pipeline.State() == common.Pipeline_Running {
 		return Replicating
@@ -216,7 +223,7 @@ func (rs *ReplicationStatus) CleanupBeforeExit(statsToClear []string) {
 		rs.SetOverviewStats(overviewStats)
 	}
 
-	rs.publishWithStatus(base.Pending)
+	rs.publishWithStatus(base.Pending, true)
 }
 
 func RootStorage() *expvar.Map {
@@ -232,13 +239,18 @@ func (rs *ReplicationStatus) ResetStorage() {
 	root_map.Set(rs.specId, nil)
 }
 
-func (rs *ReplicationStatus) Publish() {
-	rs.publishWithStatus(rs.RuntimeStatus().String())
+func (rs *ReplicationStatus) Publish(lock bool) {
+	rs.publishWithStatus(rs.RuntimeStatus(lock).String(), lock)
 }
 
 // there may be cases, e.g., when we are about to pause the replication, where we want to publish
 // a specified status instead of the one inferred from pipeline.State()
-func (rs *ReplicationStatus) publishWithStatus(status string) {
+func (rs *ReplicationStatus) publishWithStatus(status string, lock bool) {
+	if lock {
+		rs.Lock.RLock()
+		defer rs.Lock.RUnlock()
+	}
+
 	rep_map := rs.Storage()
 
 	//publish status
@@ -260,14 +272,20 @@ func (rs *ReplicationStatus) publishWithStatus(status string) {
 }
 
 func (rs *ReplicationStatus) Pipeline() common.Pipeline {
+	rs.Lock.RLock()
+	defer rs.Lock.RUnlock()
 	return rs.pipeline
 }
 
 func (rs *ReplicationStatus) VbList() []uint16 {
+	rs.Lock.RLock()
+	defer rs.Lock.RUnlock()
 	return rs.vb_list
 }
 
 func (rs *ReplicationStatus) SetVbList(vb_list []uint16) {
+	rs.Lock.Lock()
+	defer rs.Lock.Unlock()
 	rs.vb_list = vb_list
 }
 
@@ -291,27 +309,43 @@ func (rs *ReplicationStatus) Settings() *metadata.ReplicationSettings {
 }
 
 func (rs *ReplicationStatus) Errors() PipelineErrorArray {
+	rs.Lock.RLock()
+	defer rs.Lock.RUnlock()
 	return rs.err_list
 }
 
 func (rs *ReplicationStatus) ClearErrors() {
+	rs.Lock.Lock()
+	defer rs.Lock.Unlock()
 	rs.err_list = PipelineErrorArray{}
 }
 
 func (rs *ReplicationStatus) RecordProgress(progress string) {
+	rs.Lock.Lock()
+	defer rs.Lock.Unlock()
 	rs.progress = progress
-	rs.Publish()
+	rs.Publish(false)
+}
+
+func (rs *ReplicationStatus) GetProgress() string {
+	rs.Lock.RLock()
+	defer rs.Lock.RUnlock()
+	return rs.progress
 }
 
 func (rs *ReplicationStatus) String() string {
-	return fmt.Sprintf("name={%v}, status={%v}, errors={%v}, progress={%v}\n", rs.specId, rs.RuntimeStatus(), rs.Errors(), rs.progress)
+	return fmt.Sprintf("name={%v}, status={%v}, errors={%v}, progress={%v}\n", rs.specId, rs.RuntimeStatus(true), rs.Errors(), rs.progress)
 }
 
 func (rs *ReplicationStatus) Updater() interface{} {
+	rs.Lock.RLock()
+	defer rs.Lock.RUnlock()
 	return rs.pipeline_updater
 }
 
 func (rs *ReplicationStatus) SetUpdater(updater interface{}) error {
+	rs.Lock.Lock()
+	defer rs.Lock.Unlock()
 	if rs.pipeline_updater != nil && updater != nil {
 		return errors.New("There is already an updater in place, can't set the updater")
 	}

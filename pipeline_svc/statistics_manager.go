@@ -1153,7 +1153,7 @@ func UpdateStats(cluster_info_svc service_def.ClusterInfoSvc, xdcr_topology_svc 
 			}
 			repl_status.SetOverviewStats(overview_stats)
 		} else {
-			if repl_status.RuntimeStatus() != pipeline_pkg.Replicating {
+			if repl_status.RuntimeStatus(true) != pipeline_pkg.Replicating {
 				err := updateStatsForReplication(repl_status, cur_kv_vb_map, checkpoints_svc, kv_mem_clients, kv_mem_client_error_count, logger)
 				if err != nil {
 					logger.Errorf("Error updating stats for paused replication %v. err=%v", repl_id, err)

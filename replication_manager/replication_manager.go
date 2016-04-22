@@ -614,7 +614,7 @@ func GetReplicationInfos() ([]base.ReplicationInfo, error) {
 		}
 
 		// set maxVBReps stats to 0 when replication has never been run or has been paused to ensure that ns_server gets the correct replication status
-		if rep_status == nil || rep_status.RuntimeStatus() == pipeline.Paused {
+		if rep_status == nil || rep_status.RuntimeStatus(true) == pipeline.Paused {
 			replInfo.StatsMap[base.MaxVBReps] = 0
 		}
 
