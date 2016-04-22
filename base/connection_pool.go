@@ -798,7 +798,8 @@ func MakeTLSConn(ssl_con_str string, certificate []byte, logger *log.CommonLogge
 		}
 
 		if len(peer_certs[0].IPAddresses) > 0 {
-			opts.DNSName = connState.ServerName
+			// get server name to verify against from ssl_con_str
+			opts.DNSName = strings.Split(ssl_con_str, UrlPortNumberDelimiter)[0]
 		} else {
 			logger.Debug("remote peer has a certificate which doesn't have IP SANs, skip verifying ServerName")
 		}
@@ -810,7 +811,6 @@ func MakeTLSConn(ssl_con_str string, certificate []byte, logger *log.CommonLogge
 			opts.Intermediates.AddCert(cert)
 		}
 		_, err = peer_certs[0].Verify(opts)
-
 		if err != nil {
 			//close the conn
 			conn.Close()
