@@ -424,6 +424,7 @@ type xmemConfig struct {
 	respTimeout        time.Duration
 	max_read_downtime  time.Duration
 	logger             *log.CommonLogger
+	lock               sync.RWMutex
 }
 
 func newConfig(logger *log.CommonLogger) xmemConfig {
@@ -448,6 +449,7 @@ func newConfig(logger *log.CommonLogger) xmemConfig {
 		local_proxy_port:   0,
 		max_read_downtime:  default_max_read_downtime,
 		memcached_ssl_port: 0,
+		lock:               sync.RWMutex{},
 		logger:             logger,
 	}
 
@@ -543,6 +545,8 @@ func newXmemClient(name string, read_timeout, write_timeout time.Duration,
 }
 
 func (client *xmemClient) curWriteFailureCounter() int {
+	client.lock.RLock()
+	defer client.lock.RUnlock()
 	return client.continuous_write_failure_counter
 }
 
@@ -578,15 +582,20 @@ func (client *xmemClient) reportOpSuccess() {
 }
 
 func (client *xmemClient) isConnHealthy() bool {
+	client.lock.RLock()
+	defer client.lock.RUnlock()
 	return client.healthy
 }
 
 func (client *xmemClient) getConn(readTimeout bool, writeTimeout bool) (io.ReadWriteCloser, int, error) {
+	client.lock.RLock()
+	defer client.lock.RUnlock()
+
 	if client.memClient == nil {
 		return nil, client.num_of_repairs, errors.New("memcached client is not set")
 	}
 
-	if !client.isConnHealthy() {
+	if !client.healthy {
 		return nil, client.num_of_repairs, badConnectionError
 	}
 
@@ -641,6 +650,8 @@ func (client *xmemClient) markConnUnhealthy() {
 }
 
 func (client *xmemClient) close() {
+	client.lock.RLock()
+	defer client.lock.RUnlock()
 	client.memClient.Close()
 }
 
@@ -649,6 +660,20 @@ func (client *xmemClient) repairCount() int {
 	defer client.lock.RUnlock()
 
 	return client.num_of_repairs
+}
+
+func (client *xmemClient) getBackOffFactor() int {
+	client.lock.RLock()
+	defer client.lock.RUnlock()
+
+	return client.backoff_factor
+}
+
+func (client *xmemClient) incrementBackOffFactor() {
+	client.lock.Lock()
+	defer client.lock.Unlock()
+
+	client.backoff_factor++
 }
 
 /************************************
@@ -787,7 +812,17 @@ func NewXmemNozzle(id string,
 
 }
 
+func (xmem *XmemNozzle) IsOpen() bool {
+	xmem.lock_bOpen.RLock()
+	defer xmem.lock_bOpen.RUnlock()
+
+	return xmem.bOpen
+}
+
 func (xmem *XmemNozzle) Open() error {
+	xmem.lock_bOpen.Lock()
+	defer xmem.lock_bOpen.Unlock()
+
 	if !xmem.bOpen {
 		xmem.bOpen = true
 
@@ -796,6 +831,9 @@ func (xmem *XmemNozzle) Open() error {
 }
 
 func (xmem *XmemNozzle) Close() error {
+	xmem.lock_bOpen.Lock()
+	defer xmem.lock_bOpen.Unlock()
+
 	if xmem.bOpen {
 		xmem.bOpen = false
 	}
@@ -847,7 +885,7 @@ func (xmem *XmemNozzle) Stop() error {
 		return err
 	}
 
-	xmem.Logger().Debugf("%v processed %v items\n", xmem.Id(), xmem.counter_sent)
+	xmem.Logger().Debugf("%v processed %v items\n", xmem.Id(), atomic.LoadUint32(&xmem.counter_sent))
 
 	//close data channel
 	if xmem.dataChan != nil {
@@ -871,11 +909,6 @@ func (xmem *XmemNozzle) Stop() error {
 	}
 
 	return err
-}
-
-func (xmem *XmemNozzle) IsOpen() bool {
-	ret := xmem.bOpen
-	return ret
 }
 
 func (xmem *XmemNozzle) batchReady() error {
@@ -930,7 +963,7 @@ func (xmem *XmemNozzle) Receive(data interface{}) error {
 
 	xmem.accumuBatch(request)
 
-	xmem.Logger().Debugf("%v received %v items, queue_size = %v\n", xmem.Id(), xmem.counter_received, len(xmem.dataChan))
+	xmem.Logger().Debugf("%v received %v items, queue_size = %v\n", xmem.Id(), atomic.LoadUint32(&xmem.counter_received), len(xmem.dataChan))
 
 	return nil
 }
@@ -1218,7 +1251,7 @@ func (xmem *XmemNozzle) sendSetMeta_internal(batch *dataBatch) error {
 	if batch != nil {
 		count := batch.count()
 		xmem.Logger().Debugf("%v send batch count=%d\n", xmem.Id(), count)
-		xmem.Logger().Debugf("So far, %v processed %d items", xmem.Id(), xmem.counter_sent)
+		xmem.Logger().Debugf("So far, %v processed %d items", xmem.Id(), atomic.LoadUint32(&xmem.counter_sent))
 
 		//batch send
 		err = xmem.batchSetMetaWithRetry(batch, xmem.config.maxRetry)
@@ -1644,7 +1677,7 @@ func (xmem *XmemNozzle) receiveResponse(finch chan bool, waitGrp *sync.WaitGroup
 			} else if response.Status != mc.SUCCESS && !isIgnorableMCError(response.Status) {
 				if isTemporaryMCError(response.Status) {
 					// target may be overloaded. increase backoff factor to alleviate stress on target
-					xmem.client_for_setMeta.backoff_factor++
+					xmem.client_for_setMeta.incrementBackOffFactor()
 
 					// error is temporary. resend doc
 					pos := xmem.getPosFromOpaque(response.Opaque)
@@ -1732,9 +1765,10 @@ done:
 }
 
 func (xmem *XmemNozzle) adjustRespTimeout(committing_time time.Duration) {
+	xmem.config.lock.Lock()
+	defer xmem.config.lock.Unlock()
 	factor := committing_time.Seconds() / xmem.config.respTimeout.Seconds()
 	xmem.config.respTimeout = committing_time
-
 	xmem.adjustMaxIdleCount(factor)
 }
 
@@ -1799,7 +1833,7 @@ func isIgnorableMCError(resp_status mc.Status) bool {
 
 func (xmem *XmemNozzle) getMaxIdleCount() int {
 	max_idle_count := xmem.config.maxIdleCount
-	backoff_factor := math.Max(float64(xmem.client_for_getMeta.backoff_factor), float64(xmem.client_for_setMeta.backoff_factor))
+	backoff_factor := math.Max(float64(xmem.client_for_getMeta.getBackOffFactor()), float64(xmem.client_for_setMeta.getBackOffFactor()))
 	backoff_factor = math.Min(float64(10), backoff_factor)
 
 	//if client_for_getMeta.backoff_factor > 0 or client_for_setMeta.backoff_factor > 0, it means the target system is possibly under load, need to be more patient before
@@ -1816,6 +1850,7 @@ func (xmem *XmemNozzle) selfMonitor(finch chan bool, waitGrp *sync.WaitGroup) {
 	ticker := time.Tick(xmem.config.selfMonitorInterval)
 	statsTicker := time.Tick(xmem.config.statsInterval)
 	var sent_count uint32 = 0
+	var received_count uint32 = 0
 	var resp_waitingConfirm_count int = 0
 	var repairCount_setMeta = 0
 	var repairCount_getMeta = 0
@@ -1830,29 +1865,38 @@ func (xmem *XmemNozzle) selfMonitor(finch chan bool, waitGrp *sync.WaitGroup) {
 				xmem.Logger().Infof("%v has stopped. Exiting", xmem.Id())
 				goto done
 			}
-
+			received_count = atomic.LoadUint32(&xmem.counter_received)
+			buffer_count := xmem.buf.itemCountInBuffer()
+			xmem_id := xmem.Id()
+			isOpen := xmem.IsOpen()
+			buffer_size := xmem.buf.bufferSize()
+			empty_slots_pos := xmem.buf.empty_slots_pos
+			batches_ready_queue := xmem.batches_ready_queue
+			dataChan := xmem.dataChan
+			xmem_count_sent := atomic.LoadUint32(&xmem.counter_sent)
 			count++
-			if xmem.counter_sent == sent_count && int(xmem.buf.itemCountInBuffer()) == resp_waitingConfirm_count &&
-				(len(xmem.dataChan) > 0 || xmem.buf.itemCountInBuffer() != 0) &&
+
+			if xmem_count_sent == sent_count && int(buffer_count) == resp_waitingConfirm_count &&
+				(len(xmem.dataChan) > 0 || buffer_count != 0) &&
 				repairCount_setMeta == xmem.client_for_setMeta.repairCount() &&
 				repairCount_getMeta == xmem.client_for_getMeta.repairCount() {
 				freeze_counter++
 			} else {
 				freeze_counter = 0
 			}
-			sent_count = xmem.counter_sent
-			resp_waitingConfirm_count = int(xmem.buf.itemCountInBuffer())
+			sent_count = xmem_count_sent
+			resp_waitingConfirm_count = int(buffer_count)
 			repairCount_setMeta = xmem.client_for_setMeta.repairCount()
 			repairCount_getMeta = xmem.client_for_getMeta.repairCount()
 			if count == 10 {
-				xmem.Logger().Debugf("%v- freeze_counter=%v, xmem.counter_sent=%v, len(xmem.dataChan)=%v, receive_count-%v, cur_batch_count=%v\n", xmem.Id(), freeze_counter, xmem.counter_sent, len(xmem.dataChan), xmem.counter_received, xmem.batch.count())
-				xmem.Logger().Debugf("%v open=%v checking..., %v item unsent, received %v items, sent %v items, %v items waiting for response, %v batches ready\n", xmem.Id(), xmem.IsOpen(), len(xmem.dataChan), xmem.counter_received, xmem.counter_sent, int(xmem.buf.bufferSize())-len(xmem.buf.empty_slots_pos), len(xmem.batches_ready_queue))
+				xmem.Logger().Debugf("%v- freeze_counter=%v, xmem.counter_sent=%v, len(xmem.dataChan)=%v, receive_count-%v, cur_batch_count=%v\n", xmem_id, freeze_counter, xmem_count_sent, len(dataChan), received_count, xmem.batch.count())
+				xmem.Logger().Debugf("%v open=%v checking..., %v item unsent, %v items waiting for response, %v batches ready\n", xmem_id, isOpen, len(xmem.dataChan), int(buffer_size)-len(empty_slots_pos), len(batches_ready_queue))
 				count = 0
 			}
 			max_idle_count := xmem.getMaxIdleCount()
 			if freeze_counter > max_idle_count {
-				xmem.Logger().Errorf("%v hasn't sent any item out for %v ticks, %v data in queue, flowcontrol=%v, con_retry_limit=%v, backoff_factor for client_setMeta is %v, backoff_factor for client_getMeta is %v", xmem.Id(), max_idle_count, len(xmem.dataChan), xmem.buf.itemCountInBuffer() <= xmem.buf.notify_threshold, xmem.client_for_setMeta.continuous_write_failure_counter, xmem.client_for_setMeta.backoff_factor, xmem.client_for_getMeta.backoff_factor)
-				xmem.Logger().Infof("%v open=%v checking..., %v item unsent, received %v items, sent %v items, %v items waiting for response, %v batches ready\n", xmem.Id(), xmem.IsOpen(), len(xmem.dataChan), xmem.counter_received, xmem.counter_sent, int(xmem.buf.bufferSize())-len(xmem.buf.empty_slots_pos), len(xmem.batches_ready_queue))
+				xmem.Logger().Errorf("%v hasn't sent any item out for %v ticks, %v data in queue, flowcontrol=%v, con_retry_limit=%v, backoff_factor for client_setMeta is %v, backoff_factor for client_getMeta is %v", xmem_id, max_idle_count, len(dataChan), buffer_count <= xmem.buf.notify_threshold, xmem.client_for_setMeta.continuous_write_failure_counter, xmem.client_for_setMeta.getBackOffFactor(), xmem.client_for_getMeta.getBackOffFactor())
+				xmem.Logger().Infof("%v open=%v checking..., %v item unsent, received %v items, sent %v items, %v items waiting for response, %v batches ready\n", xmem_id, isOpen, len(dataChan), received_count, xmem_count_sent, int(buffer_size)-len(empty_slots_pos), len(batches_ready_queue))
 				//				utils.DumpStack(xmem.Logger())
 				//the connection might not be healthy, it should not go back to connection pool
 				xmem.client_for_setMeta.markConnUnhealthy()
@@ -1871,7 +1915,6 @@ done:
 
 func (xmem *XmemNozzle) check(finch chan bool, waitGrp *sync.WaitGroup) {
 	defer waitGrp.Done()
-
 	ticker := time.Tick(xmem.config.respTimeout)
 	for {
 		select {
@@ -2008,13 +2051,15 @@ func (xmem *XmemNozzle) ConnType() base.ConnType {
 }
 
 func (xmem *XmemNozzle) StatusSummary() string {
+
 	if xmem.State() == common.Part_Running {
 		connType := xmem.connType
 		var avg_wait_time float64 = 0
-		if xmem.counter_sent > 0 {
-			avg_wait_time = float64(xmem.counter_waittime) / float64(xmem.counter_sent)
+		counter_sent := atomic.LoadUint32(&xmem.counter_sent)
+		if counter_sent > 0 {
+			avg_wait_time = float64(atomic.LoadUint32(&xmem.counter_waittime)) / float64(counter_sent)
 		}
-		return fmt.Sprintf("%v state =%v connType=%v received %v items, sent %v items, %v items waiting to confirm, %v in queue, %v in current batch, avg wait time is %vms, size of last ten batches processed %v, len(batches_ready_queue)=%v\n", xmem.Id(), xmem.State(), connType, xmem.counter_received, xmem.counter_sent, xmem.buf.itemCountInBuffer(), len(xmem.dataChan), xmem.batch.count(), avg_wait_time, xmem.last_ten_batches_size, len(xmem.batches_ready_queue))
+		return fmt.Sprintf("%v state =%v connType=%v received %v items, sent %v items, %v items waiting to confirm, %v in queue, %v in current batch, avg wait time is %vms, size of last ten batches processed %v, len(batches_ready_queue)=%v\n", xmem.Id(), xmem.State(), connType, atomic.LoadUint32(&xmem.counter_received), atomic.LoadUint32(&xmem.counter_sent), xmem.buf.itemCountInBuffer(), len(xmem.dataChan), xmem.batch.count(), avg_wait_time, xmem.last_ten_batches_size, len(xmem.batches_ready_queue))
 	} else {
 		return fmt.Sprintf("%v state =%v ", xmem.Id(), xmem.State())
 	}
@@ -2055,8 +2100,9 @@ func (xmem *XmemNozzle) validateRunningState() error {
 }
 
 func (xmem *XmemNozzle) writeToClient(client *xmemClient, bytes []byte, renewTimeout bool) (error, int) {
-	if client.backoff_factor > 0 {
-		time.Sleep(time.Duration(client.backoff_factor) * default_backoff_wait_time)
+	backoffFactor := client.getBackOffFactor()
+	if backoffFactor > 0 {
+		time.Sleep(time.Duration(backoffFactor) * default_backoff_wait_time)
 	}
 
 	conn, rev, err := xmem.getConn(client, false, renewTimeout)
@@ -2230,6 +2276,8 @@ func (xmem *XmemNozzle) packageRequest(count int, reqs_bytes []byte) []byte {
 }
 
 func (xmem *XmemNozzle) UpdateSettings(settings map[string]interface{}) error {
+	xmem.config.lock.Lock()
+	defer xmem.config.lock.Unlock()
 	optimisticReplicationThreshold, err := utils.GetIntSettingFromSettings(settings, metadata.OptimisticReplicationThreshold)
 	if err != nil {
 		return err
@@ -2281,6 +2329,7 @@ func (xmem *XmemNozzle) recycleDataObj(req *base.WrappedMCRequest) {
 }
 
 func (xmem *XmemNozzle) recordBatchSize(batchSize int) {
+
 	for i := 9; i > 0; i-- {
 		xmem.last_ten_batches_size[i] = xmem.last_ten_batches_size[i-1]
 	}
