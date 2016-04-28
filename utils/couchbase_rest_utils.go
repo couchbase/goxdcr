@@ -270,7 +270,7 @@ func doRestCall(req *http.Request,
 	var l *log.CommonLogger = loggerForFunc(logger)
 	if timeout > 0 {
 		client.Timeout = timeout
-	} else {
+	} else if client.Timeout != base.DefaultHttpTimeout {
 		client.Timeout = base.DefaultHttpTimeout
 	}
 
@@ -381,10 +381,11 @@ func GetHttpClient(certificate []byte, san_in_certificate bool, ssl_con_str stri
 		conn.Close()
 
 		tr := &http.Transport{TLSClientConfig: tlsConfig, Dial: base.DialTCPWithTimeout}
-		client = &http.Client{Transport: tr}
+		client = &http.Client{Transport: tr,
+			Timeout: base.DefaultHttpTimeout}
 
 	} else {
-		client = http.DefaultClient
+		client = &http.Client{Timeout: base.DefaultHttpTimeout}
 	}
 	return client, nil
 }
