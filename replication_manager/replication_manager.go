@@ -93,7 +93,8 @@ type replicationManager struct {
 
 	metadata_change_callback_cancel_ch chan struct{}
 
-	running bool
+	running      bool
+	running_lock sync.RWMutex
 
 	children_waitgrp *sync.WaitGroup
 
@@ -139,6 +140,7 @@ func StartReplicationManager(sourceKVHost string, xdcrRestPort uint16,
 		logger_rm.Info("initPausedReplications succeeded")
 
 		replication_mgr.running = true
+		replication_mgr.running_lock = sync.RWMutex{}
 
 		replication_mgr.status_logger_finch = make(chan bool, 1)
 		go replication_mgr.checkReplicationStatus(replication_mgr.status_logger_finch)
@@ -767,9 +769,38 @@ func cleanup() {
 	}
 }
 
+func isReplicationManagerRunning() bool {
+	replication_mgr.running_lock.RLock()
+	defer replication_mgr.running_lock.RUnlock()
+	return replication_mgr.running
+}
+
+// CAS operation on running state. returns its old value before set
+func checkAndSetRunningState() bool {
+	replication_mgr.running_lock.Lock()
+	defer replication_mgr.running_lock.Unlock()
+
+	if replication_mgr.running {
+		replication_mgr.running = false
+		return true
+	} else {
+		return false
+	}
+}
+
 //crash
 func exitProcess(byForce bool) {
-	logger_rm.Info("Replication manager is exiting...")
+	wasRunning := checkAndSetRunningState()
+	if wasRunning {
+		logger_rm.Info("Replication manager is exiting...")
+		exitProcess_once(byForce)
+		os.Exit(0)
+		logger_rm.Info("Replication manager exited")
+	}
+}
+
+// this method is so named because it is called only once due to the CAS performed by the caller, exitProcess()
+func exitProcess_once(byForce bool) {
 	//clean up the connection pool
 	defer base.ConnPoolMgr().Close()
 
@@ -779,14 +810,6 @@ func exitProcess(byForce bool) {
 	if !byForce {
 		cleanup()
 	}
-
-	os.Exit(0)
-	logger_rm.Info("Replication manager exited")
-
-}
-
-func isReplicationManagerRunning() bool {
-	return replication_mgr.running
 }
 
 func writeGenericReplicationEvent(eventId uint32, spec *metadata.ReplicationSpecification, realUserId *base.RealUserId) {

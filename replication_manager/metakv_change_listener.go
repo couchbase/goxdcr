@@ -103,7 +103,7 @@ func (mcl *MetakvChangeListener) metakvCallback_async(path string, value []byte,
 func (mcl *MetakvChangeListener) failureCallback(err error) {
 	mcl.logger.Infof("metakv.RunObserveChildren failed, err=%v\n", err)
 	if err == nil && !isReplicationManagerRunning() {
-		//callback is cannceled and replication_mgr is exiting.
+		//callback is cancelled and replication_mgr is exiting.
 		//no-op
 		return
 	}
