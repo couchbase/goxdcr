@@ -354,8 +354,6 @@ func (stats_mgr *StatisticsManager) logStats() error {
 		}
 		dcp_parts := stats_mgr.pipeline.Sources()
 		for _, part := range dcp_parts {
-			conn := part.Connector()
-			stats_mgr.logger.Info(conn.(*parts.Router).StatusSummary())
 			stats_mgr.logger.Info(part.(*parts.DcpNozzle).StatusSummary())
 		}
 

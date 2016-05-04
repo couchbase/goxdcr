@@ -21,7 +21,6 @@ import (
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/utils"
 	"regexp"
-	"sync"
 	"time"
 )
 
@@ -38,11 +37,8 @@ type ReqCreator func(id string) (*base.WrappedMCRequest, error)
 type Router struct {
 	id string
 	*connector.Router
-	filterRegexp *regexp.Regexp    // filter expression
-	routingMap   map[uint16]string // pvbno -> partId. This defines the loading balancing strategy of which vbnos would be routed to which part
-	//Debug only, need to be rolled into statistics and monitoring
-	counter                map[string]int
-	counter_lock           sync.RWMutex
+	filterRegexp           *regexp.Regexp    // filter expression
+	routingMap             map[uint16]string // pvbno -> partId. This defines the loading balancing strategy of which vbnos would be routed to which part
 	req_creator            ReqCreator
 	topic                  string
 	ext_metadata_supported bool
@@ -66,19 +62,12 @@ func NewRouter(id string, topic string, filterExpression string,
 		id:                     id,
 		filterRegexp:           filterRegexp,
 		routingMap:             routingMap,
-		counter:                make(map[string]int),
-		counter_lock:           sync.RWMutex{},
 		topic:                  topic,
 		req_creator:            req_creator,
 		ext_metadata_supported: ext_metadata_supported}
 
 	var routingFunc connector.Routing_Callback_Func = router.route
 	router.Router = connector.NewRouter(id, downStreamParts, &routingFunc, logger_context, "XDCRRouter")
-
-	//initialize counter
-	for partId, _ := range downStreamParts {
-		router.counter[partId] = 0
-	}
 
 	router.Logger().Infof("%v created with %d downstream parts \n", router.id, len(downStreamParts))
 	return router, nil
@@ -217,9 +206,6 @@ func (router *Router) route(data interface{}) (map[string]interface{}, error) {
 		return nil, utils.NewEnhancedError("Error creating new memcached request.", err)
 	}
 	result[partId] = mcRequest
-	router.counter_lock.Lock()
-	defer router.counter_lock.Unlock()
-	router.counter[partId] = router.counter[partId] + 1
 	return result, nil
 }
 
@@ -245,12 +231,6 @@ func (router *Router) RoutingMapByDownstreams() map[string][]uint16 {
 		ret[partId] = vblist
 	}
 	return ret
-}
-func (router *Router) StatusSummary() string {
-	router.counter_lock.RLock()
-	defer router.counter_lock.RUnlock()
-	return fmt.Sprintf("Rounter %v = %v", router.id, router.counter)
-
 }
 
 func (router *Router) newWrappedMCRequest() (*base.WrappedMCRequest, error) {
