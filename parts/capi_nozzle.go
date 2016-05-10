@@ -31,6 +31,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -118,7 +119,6 @@ func newCapiConfig(logger *log.CommonLogger) capiConfig {
 			readTimeout:         default_readTimeout_capi,
 			maxRetryInterval:    default_maxRetryInterval_capi,
 			selfMonitorInterval: default_selfMonitorInterval_capi,
-			maxIdleCount:        default_maxIdleCount_capi,
 			connectStr:          "",
 			username:            "",
 			password:            "",
@@ -423,7 +423,11 @@ func (capi *CapiNozzle) processData_batch(finch chan bool, waitGrp *sync.WaitGro
 		select {
 		case <-finch:
 			goto done
-		case batch := <-capi.batches_ready:
+		case batch, ok := <-capi.batches_ready:
+			if !ok {
+				capi.Logger().Infof("%v batches_ready closed. Exiting processData.", capi.Id())
+				goto done
+			}
 			select {
 			case <-finch:
 				goto done
@@ -448,7 +452,7 @@ func (capi *CapiNozzle) processData_batch(finch chan bool, waitGrp *sync.WaitGro
 			}
 
 			if len(capi.batches_ready) == 0 {
-				max_count := 0
+				var max_count uint32 = 0
 				var max_batch_vbno uint16 = 0
 				for vbno, batch := range capi.vb_batch_map {
 					if batch.count() > max_count {
@@ -502,7 +506,7 @@ func (capi *CapiNozzle) send_internal(batch *capiBatch) error {
 
 		capi.Logger().Infof("%v send batch count=%d for vb %v\n", capi.Id(), count, batch.vbno)
 
-		capi.counter_sent = capi.counter_sent + count
+		capi.counter_sent = capi.counter_sent + int(count)
 		capi.Logger().Debugf("So far, capi %v processed %d items", capi.Id(), capi.counter_sent)
 
 		var bigDoc_noRep_map map[string]bool
@@ -599,7 +603,7 @@ func (capi *CapiNozzle) batchSendWithRetry(batch *capiBatch) error {
 
 	req_list := make([]*base.WrappedMCRequest, 0)
 
-	for i := 0; i < count; i++ {
+	for i := 0; i < int(count); i++ {
 		item := <-dataChan
 
 		capi.items_in_dataChan--
@@ -1066,7 +1070,7 @@ func getSerializedRevision(req *mc.MCRequest) string {
 
 func (capi *CapiNozzle) initNewBatch(vbno uint16) {
 	capi.Logger().Debugf("%v init a new batch for vb %v\n", capi.Id(), vbno)
-	capi.vb_batch_map[vbno] = &capiBatch{*newBatch(capi.config.maxCount, capi.config.maxSize, capi.Logger()), vbno}
+	capi.vb_batch_map[vbno] = &capiBatch{*newBatch(uint32(capi.config.maxCount), uint32(capi.config.maxSize), capi.Logger()), vbno}
 }
 
 func (capi *CapiNozzle) initialize(settings map[string]interface{}) error {
@@ -1135,9 +1139,13 @@ func (capi *CapiNozzle) handleGeneralError(err error) {
 
 func (capi *CapiNozzle) optimisticRep(req *mc.MCRequest) bool {
 	if req != nil {
-		return req.Size() < capi.config.optiRepThreshold
+		return uint32(req.Size()) < capi.getOptiRepThreshold()
 	}
 	return true
+}
+
+func (capi *CapiNozzle) getOptiRepThreshold() uint32 {
+	return atomic.LoadUint32(&(capi.config.optiRepThreshold))
 }
 
 func (capi *CapiNozzle) getPoolName(config capiConfig) string {
@@ -1220,7 +1228,7 @@ func (capi *CapiNozzle) UpdateSettings(settings map[string]interface{}) error {
 		return err
 	}
 
-	capi.config.optiRepThreshold = optimisticReplicationThreshold
+	atomic.StoreUint32(&capi.config.optiRepThreshold, uint32(optimisticReplicationThreshold))
 	return nil
 }
 

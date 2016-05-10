@@ -16,6 +16,7 @@ import (
 	mc "github.com/couchbase/gomemcached"
 	base "github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
+	"sync/atomic"
 	"time"
 )
 
@@ -60,7 +61,7 @@ const (
 type baseConfig struct {
 	maxCount         int
 	maxSize          int
-	optiRepThreshold int
+	optiRepThreshold uint32
 	maxRetryInterval time.Duration
 	//the write timeout for tcp connection
 	writeTimeout time.Duration
@@ -75,7 +76,7 @@ type baseConfig struct {
 	//the maximum number of idle round that xmem can have
 	//exceeding this number indicate the possibility of stuck
 	//due to network issues
-	maxIdleCount       int
+	maxIdleCount       uint32
 	connPoolNamePrefix string
 	connPoolSize       int
 	connectStr         string
@@ -149,7 +150,7 @@ func (config *baseConfig) initializeConfig(settings map[string]interface{}) {
 		config.maxRetryInterval = val.(time.Duration)
 	}
 	if val, ok := settings[SETTING_OPTI_REP_THRESHOLD]; ok {
-		config.optiRepThreshold = val.(int)
+		config.optiRepThreshold = uint32(val.(int))
 	}
 
 }
@@ -167,17 +168,17 @@ type dataBatch struct {
 	// 1. true - docs failed source side conflict resolution. in this case the docs will be counted in docs_failed_cr_source stats
 	// 2. false - docs that will get rejected by target for other reasons, e.g., since target no longer owns the vbucket involved. in this case the docs will not be counted in docs_failed_cr_source stats
 	bigDoc_noRep_map  map[string]bool
-	curCount          int
-	curSize           int
-	capacity_count    int
-	capacity_size     int
+	curCount          uint32
+	curSize           uint32
+	capacity_count    uint32
+	capacity_size     uint32
 	start_time        time.Time
 	logger            *log.CommonLogger
 	batch_nonempty_ch chan bool
 	nonempty_set      bool
 }
 
-func newBatch(cap_count int, cap_size int, logger *log.CommonLogger) *dataBatch {
+func newBatch(cap_count uint32, cap_size uint32, logger *log.CommonLogger) *dataBatch {
 	return &dataBatch{
 		curCount:          0,
 		curSize:           0,
@@ -197,7 +198,7 @@ func (b *dataBatch) accumuBatch(req *base.WrappedMCRequest, classifyFunc func(re
 	if req != nil && req.Req != nil {
 		size := req.Req.Size()
 
-		b.curCount++
+		curCount := b.incrementCount(1)
 		if !b.nonempty_set {
 			isFirst = true
 			b.start_time = time.Now()
@@ -207,21 +208,28 @@ func (b *dataBatch) accumuBatch(req *base.WrappedMCRequest, classifyFunc func(re
 		if !classifyFunc(req.Req) {
 			b.bigDoc_map[req.UniqueKey] = req
 		}
-		b.curSize += size
-		if b.curCount < b.capacity_count && b.curSize < b.capacity_size*1000 {
+		curSize := b.incrementSize(uint32(size))
+		if curCount < b.capacity_count && curSize < b.capacity_size*1000 {
 			ret = false
 		}
 	}
 	return isFirst, ret
 }
 
-func (b *dataBatch) count() int {
-	return b.curCount
+func (b *dataBatch) count() uint32 {
+	return atomic.LoadUint32(&b.curCount)
 }
 
-func (b *dataBatch) size() int {
-	return b.curSize
+func (b *dataBatch) size() uint32 {
+	return atomic.LoadUint32(&b.curSize)
+}
 
+func (b *dataBatch) incrementCount(delta uint32) uint32 {
+	return atomic.AddUint32(&b.curCount, delta)
+}
+
+func (b *dataBatch) incrementSize(delta uint32) uint32 {
+	return atomic.AddUint32(&b.curSize, delta)
 }
 
 // returns three possible values
