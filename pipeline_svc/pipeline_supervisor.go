@@ -23,6 +23,7 @@ import (
 	"github.com/couchbase/goxdcr/supervisor"
 	"github.com/couchbase/goxdcr/utils"
 	"reflect"
+	"sync"
 	"time"
 )
 
@@ -49,8 +50,9 @@ var pipeline_supervisor_setting_defs base.SettingDefinitions = base.SettingDefin
 
 type PipelineSupervisor struct {
 	*supervisor.GenericSupervisor
-	pipeline    common.Pipeline
-	errors_seen map[string]error
+	pipeline         common.Pipeline
+	errors_seen      map[string]error
+	errors_seen_lock *sync.RWMutex
 
 	cluster_info_svc  service_def.ClusterInfoSvc
 	xdcr_topology_svc service_def.XDCRCompTopologySvc
@@ -67,6 +69,7 @@ func NewPipelineSupervisor(id string, logger_ctx *log.LoggerContext, failure_han
 	supervisor := supervisor.NewGenericSupervisor(id, logger_ctx, failure_handler, parentSupervisor)
 	pipelineSupervisor := &PipelineSupervisor{GenericSupervisor: supervisor,
 		errors_seen:               make(map[string]error),
+		errors_seen_lock:          &sync.RWMutex{},
 		cluster_info_svc:          cluster_info_svc,
 		xdcr_topology_svc:         xdcr_topology_svc,
 		kv_mem_clients:            make(map[string]*mcc.Client),
@@ -170,10 +173,12 @@ func (pipelineSupervisor *PipelineSupervisor) OnEvent(event *common.Event) {
 	if event.EventType == common.ErrorEncountered {
 		if pipelineSupervisor.pipeline.State() != common.Pipeline_Error {
 			if event.OtherInfos != nil {
-				pipelineSupervisor.errors_seen[event.Component.Id()] = event.OtherInfos.(error)
+				pipelineSupervisor.setError(event.Component.Id(), event.OtherInfos.(error))
 			}
 			pipelineSupervisor.declarePipelineBroken()
 		} else {
+			pipelineSupervisor.errors_seen_lock.RLock()
+			defer pipelineSupervisor.errors_seen_lock.RUnlock()
 			pipelineSupervisor.Logger().Infof("%v Received error report : %v, but error is ignored. pipeline_state=%v\n", pipelineSupervisor.pipeline.Topic(), pipelineSupervisor.errors_seen, pipelineSupervisor.pipeline.State())
 
 		}
@@ -235,6 +240,8 @@ func (pipelineSupervisor *PipelineSupervisor) ReportFailure(errors map[string]er
 }
 
 func (pipelineSupervisor *PipelineSupervisor) declarePipelineBroken() {
+	pipelineSupervisor.errors_seen_lock.RLock()
+	defer pipelineSupervisor.errors_seen_lock.RUnlock()
 	err := pipelineSupervisor.pipeline.SetState(common.Pipeline_Error)
 	if err == nil {
 		pipelineSupervisor.Logger().Errorf("Received error report : %v", pipelineSupervisor.errors_seen)
@@ -266,7 +273,7 @@ func (pipelineSupervisor *PipelineSupervisor) checkPipelineHealth() error {
 		err = dcp_nozzle.(*parts.DcpNozzle).CheckStuckness(dcp_stats)
 		if err != nil {
 			//declare pipeline broken
-			pipelineSupervisor.errors_seen[dcp_nozzle.Id()] = err
+			pipelineSupervisor.setError(dcp_nozzle.Id(), err)
 			pipelineSupervisor.declarePipelineBroken()
 			return err
 		}
@@ -314,4 +321,10 @@ func (pipelineSupervisor *PipelineSupervisor) getDcpStats() (map[string]map[stri
 	}
 
 	return dcp_stats, nil
+}
+
+func (pipelineSupervisor *PipelineSupervisor) setError(partId string, err error) {
+	pipelineSupervisor.errors_seen_lock.Lock()
+	defer pipelineSupervisor.errors_seen_lock.Unlock()
+	pipelineSupervisor.errors_seen[partId] = err
 }
