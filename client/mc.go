@@ -13,14 +13,19 @@ import (
 
 	"github.com/couchbase/gomemcached"
 	"github.com/couchbase/goutils/logging"
+	"sync/atomic"
 )
 
 const bufsize = 1024
 
+var UnHealthy uint32 = 0
+var Healthy uint32 = 1
+
 // The Client itself.
 type Client struct {
-	conn    io.ReadWriteCloser
-	healthy bool
+	conn io.ReadWriteCloser
+	// use uint32 type so that it can be accessed through atomic APIs
+	healthy uint32
 
 	hdrBuf []byte
 }
@@ -49,11 +54,12 @@ func (c *Client) SetKeepAliveOptions(interval time.Duration) {
 
 // Wrap an existing transport.
 func Wrap(rwc io.ReadWriteCloser) (rv *Client, err error) {
-	return &Client{
-		conn:    rwc,
-		healthy: true,
-		hdrBuf:  make([]byte, gomemcached.HDR_LEN),
-	}, nil
+	client := &Client{
+		conn:   rwc,
+		hdrBuf: make([]byte, gomemcached.HDR_LEN),
+	}
+	client.setHealthy(true)
+	return client, nil
 }
 
 // Close the connection when you're done.
@@ -67,18 +73,19 @@ func (c *Client) Close() error {
 // This is useful for connection pools where we want to
 // non-destructively determine that a connection may be reused.
 func (c Client) IsHealthy() bool {
-	return c.healthy
+	healthyState := atomic.LoadUint32(&c.healthy)
+	return healthyState == Healthy
 }
 
 // Send a custom request and get the response.
 func (c *Client) Send(req *gomemcached.MCRequest) (rv *gomemcached.MCResponse, err error) {
 	_, err = transmitRequest(c.conn, req)
 	if err != nil {
-		c.healthy = false
+		c.setHealthy(false)
 		return
 	}
 	resp, _, err := getResponse(c.conn, c.hdrBuf)
-	c.healthy = !gomemcached.IsFatal(err)
+	c.setHealthy(!gomemcached.IsFatal(err))
 	return resp, err
 }
 
@@ -86,7 +93,7 @@ func (c *Client) Send(req *gomemcached.MCRequest) (rv *gomemcached.MCResponse, e
 func (c *Client) Transmit(req *gomemcached.MCRequest) error {
 	_, err := transmitRequest(c.conn, req)
 	if err != nil {
-		c.healthy = false
+		c.setHealthy(false)
 	}
 	return err
 }
@@ -95,7 +102,7 @@ func (c *Client) Transmit(req *gomemcached.MCRequest) error {
 func (c *Client) Receive() (*gomemcached.MCResponse, error) {
 	resp, _, err := getResponse(c.conn, c.hdrBuf)
 	if err != nil && resp.Status != gomemcached.KEY_ENOENT {
-		c.healthy = false
+		c.setHealthy(false)
 	}
 	return resp, err
 }
@@ -701,6 +708,14 @@ func (c *Client) StatsMap(key string) (map[string]string, error) {
 // have lost control over the connection and can't otherwise verify
 // things are in good shape for connection pools.
 func (c *Client) Hijack() io.ReadWriteCloser {
-	c.healthy = false
+	c.setHealthy(false)
 	return c.conn
+}
+
+func (c *Client) setHealthy(healthy bool) {
+	healthyState := UnHealthy
+	if healthy {
+		healthyState = Healthy
+	}
+	atomic.StoreUint32(&c.healthy, healthyState)
 }
