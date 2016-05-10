@@ -30,6 +30,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unsafe"
 )
 
 //configuration settings for XmemNozzle
@@ -49,7 +50,7 @@ const (
 	default_maxRetryInterval                  = 300 * time.Second
 	default_writeTimeOut        time.Duration = time.Duration(120) * time.Second
 	default_readTimeout         time.Duration = time.Duration(120) * time.Second
-	default_maxIdleCount        int           = 60
+	default_maxIdleCount        uint32        = 60
 	default_selfMonitorInterval time.Duration = default_resptimeout
 	default_demandEncryption    bool          = false
 	default_max_read_downtime   time.Duration = 60 * time.Second
@@ -184,26 +185,39 @@ func (buf *requestBuffer) initialize() error {
 	return nil
 }
 
-func (buf *requestBuffer) setNotifyCh() {
+func (buf *requestBuffer) getNotifyCh() chan bool {
+	buf.notifych_lock.RLock()
+	defer buf.notifych_lock.RUnlock()
+	return buf.notifych
+}
+
+func (buf *requestBuffer) setNotifyCh() chan bool {
 	buf.notifych_lock.Lock()
 	defer buf.notifych_lock.Unlock()
 	buf.notifych = make(chan bool, 1)
+	return buf.notifych
+}
+
+func (buf *requestBuffer) unsetNotifyCh() {
+	buf.notifych_lock.Lock()
+	defer buf.notifych_lock.Unlock()
+	buf.notifych = nil
 }
 
 //blocking until the occupied slots are below threshold
 func (buf *requestBuffer) flowControl() {
-	buf.setNotifyCh()
-
 	ret := buf.itemCountInBuffer() <= buf.notify_threshold
 	if ret {
 		return
 	}
+
+	notifych := buf.setNotifyCh()
 	select {
-	case <-buf.notifych:
-		buf.notifych = nil
+	case <-notifych:
+		buf.unsetNotifyCh()
 		return
 	case <-buf.fin_ch:
-		buf.notifych = nil
+		buf.unsetNotifyCh()
 		return
 	}
 }
@@ -290,13 +304,11 @@ func (buf *requestBuffer) evictSlot(pos uint16) error {
 			buf.sequences[pos] = buf.sequences[pos] + 1
 		}
 
-		buf.notifych_lock.RLock()
-		defer buf.notifych_lock.RUnlock()
-
 		if buf.itemCountInBuffer() <= buf.notify_threshold {
-			if buf.notifych != nil {
+			notifych := buf.getNotifyCh()
+			if notifych != nil {
 				select {
-				case buf.notifych <- true:
+				case notifych <- true:
 					buf.logger.Debugf("buffer's occupied slots is below threshold %v, notify", buf.notify_threshold)
 				default:
 				}
@@ -337,7 +349,6 @@ func (buf *requestBuffer) cancelReservation(index uint16, reservation_num int) e
 
 	err := buf.validatePos(index)
 	if err == nil {
-		buf.empty_slots_pos <- index
 
 		req := buf.slots[index]
 		var reservation_num int
@@ -350,17 +361,19 @@ func (buf *requestBuffer) cancelReservation(index uint16, reservation_num int) e
 
 			if req.reservation == reservation_num {
 				resetBufferedMCRequest(req)
+
+				//increase sequence
+				if buf.sequences[index]+1 > 65535 {
+					buf.sequences[index] = 0
+				} else {
+					buf.sequences[index] = buf.sequences[index] + 1
+				}
+
+				buf.empty_slots_pos <- index
 			} else {
 				err = errors.New("Cancel reservation failed, reservation number doesn't match")
 			}
 		}
-		//increase sequence
-		if buf.sequences[index]+1 > 65535 {
-			buf.sequences[index] = 0
-		} else {
-			buf.sequences[index] = buf.sequences[index] + 1
-		}
-
 	}
 	return err
 }
@@ -421,14 +434,13 @@ type xmemConfig struct {
 	memcached_ssl_port uint16
 	// in ssl over mem mode, whether target cluster supports SANs in certificates
 	san_in_certificate bool
-	respTimeout        time.Duration
+	respTimeout        unsafe.Pointer // *time.Duration
 	max_read_downtime  time.Duration
 	logger             *log.CommonLogger
-	lock               sync.RWMutex
 }
 
 func newConfig(logger *log.CommonLogger) xmemConfig {
-	return xmemConfig{
+	config := xmemConfig{
 		baseConfig: baseConfig{maxCount: -1,
 			maxSize:             -1,
 			writeTimeout:        default_writeTimeOut,
@@ -436,22 +448,25 @@ func newConfig(logger *log.CommonLogger) xmemConfig {
 			maxRetryInterval:    default_maxRetryInterval,
 			maxRetry:            default_numofretry,
 			selfMonitorInterval: default_selfMonitorInterval,
-			maxIdleCount:        default_maxIdleCount,
 			connectStr:          "",
 			username:            "",
 			password:            "",
 		},
 		bucketName:         "",
-		respTimeout:        default_resptimeout,
 		demandEncryption:   default_demandEncryption,
 		certificate:        []byte{},
 		remote_proxy_port:  0,
 		local_proxy_port:   0,
 		max_read_downtime:  default_max_read_downtime,
 		memcached_ssl_port: 0,
-		lock:               sync.RWMutex{},
 		logger:             logger,
 	}
+
+	atomic.StoreUint32(&config.maxIdleCount, default_maxIdleCount)
+	resptimeout := default_resptimeout
+	atomic.StorePointer(&config.respTimeout, unsafe.Pointer(&resptimeout))
+
+	return config
 
 }
 
@@ -735,7 +750,7 @@ type XmemNozzle struct {
 
 	topic                 string
 	last_ready_batch      int32
-	last_ten_batches_size []int
+	last_ten_batches_size unsafe.Pointer // *[]uint32
 	last_batch_id         int32
 
 	// whether extended metadata is supported
@@ -790,9 +805,11 @@ func NewXmemNozzle(id string,
 		counter_batches:     0,
 		dataObj_recycler:    dataObj_recycler,
 		topic:               topic,
-		last_ten_batches_size:  []int{0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
 		ext_metadata_supported: ext_metadata_supported,
 		source_cr_mode:         source_cr_mode}
+
+	initial_last_ten_batches_size := []uint32{0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
+	atomic.StorePointer(&xmem.last_ten_batches_size, unsafe.Pointer(&initial_last_ten_batches_size))
 
 	xmem.config.connectStr = connectString
 	xmem.config.bucketName = bucketName
@@ -986,7 +1003,12 @@ func (xmem *XmemNozzle) processData_sendbatch(finch chan bool, waitGrp *sync.Wai
 		select {
 		case <-finch:
 			goto done
-		case batch := <-xmem.batches_ready_queue:
+		case batch, ok := <-xmem.batches_ready_queue:
+			if !ok {
+				xmem.Logger().Infof("%v batches_ready_queue closed. Exiting processData_sendBatch.", xmem.Id())
+				goto done
+			}
+
 			if xmem.validateRunningState() != nil {
 				xmem.Logger().Infof("%v has stopped.", xmem.Id())
 				goto done
@@ -1085,7 +1107,7 @@ func (xmem *XmemNozzle) batchSetMetaWithRetry(batch *dataBatch, numOfRetry int) 
 	reqs_bytes := []byte{}
 	index_reservation_list := make([][]uint16, 51)
 
-	for i := 0; i < count; i++ {
+	for i := 0; i < int(count); i++ {
 		//check xmem's state, if it is already in stopping or stopped state, return
 		err = xmem.validateRunningState()
 		if err != nil {
@@ -1528,12 +1550,12 @@ func (xmem *XmemNozzle) sendSingleSetMeta(adjustRequest bool, item *base.Wrapped
 }
 
 func (xmem *XmemNozzle) getConnPool() (pool base.ConnPool, err error) {
-	poolName := getPoolName(xmem.config)
+	poolName := xmem.getPoolName()
 	return base.ConnPoolMgr().GetPool(poolName), nil
 }
 
 func (xmem *XmemNozzle) getOrCreateConnPool() (pool base.ConnPool, err error) {
-	poolName := getPoolName(xmem.config)
+	poolName := xmem.getPoolName()
 	if !xmem.config.demandEncryption {
 		pool, err = base.ConnPoolMgr().GetOrCreatePool(poolName, xmem.config.connectStr, xmem.config.bucketName, xmem.config.bucketName, xmem.config.password, xmem.config.connPoolSize)
 		if err != nil {
@@ -1541,7 +1563,7 @@ func (xmem *XmemNozzle) getOrCreateConnPool() (pool base.ConnPool, err error) {
 		}
 	} else {
 		//create a pool of SSL connection
-		poolName := getPoolName(xmem.config)
+		poolName := xmem.getPoolName()
 		hostName := utils.GetHostName(xmem.config.connectStr)
 		remote_mem_port, err := utils.GetPortNumber(xmem.config.connectStr)
 		if err != nil {
@@ -1566,12 +1588,13 @@ func (xmem *XmemNozzle) getOrCreateConnPool() (pool base.ConnPool, err error) {
 }
 
 func (xmem *XmemNozzle) initializeConnection() (err error) {
+	poolName := xmem.getPoolName()
 	xmem.Logger().Debugf("%v xmem.config= %v", xmem.Id(), xmem.config.connectStr)
-	xmem.Logger().Debugf("%v poolName=%v", xmem.Id(), getPoolName(xmem.config))
+	xmem.Logger().Debugf("%v poolName=%v", xmem.Id(), poolName)
 	pool, err := xmem.getOrCreateConnPool()
 	if err != nil && err == base.WrongConnTypeError {
 		//there is a stale pool, the remote cluster settings are changed
-		base.ConnPoolMgr().RemovePool(getPoolName(xmem.config))
+		base.ConnPoolMgr().RemovePool(poolName)
 		pool, err = xmem.getOrCreateConnPool()
 	}
 	if err != nil {
@@ -1601,13 +1624,13 @@ func (xmem *XmemNozzle) initializeConnection() (err error) {
 	return err
 }
 
-func getPoolName(config xmemConfig) string {
-	return config.connPoolNamePrefix + base.KeyPartsDelimiter + "Couch_Xmem_" + config.connectStr + base.KeyPartsDelimiter + config.bucketName
+func (xmem *XmemNozzle) getPoolName() string {
+	return xmem.config.connPoolNamePrefix + base.KeyPartsDelimiter + "Couch_Xmem_" + xmem.config.connectStr + base.KeyPartsDelimiter + xmem.config.bucketName
 }
 
 func (xmem *XmemNozzle) initNewBatch() {
 	xmem.Logger().Debugf("%v initializing a new batch", xmem.Id())
-	xmem.batch = newBatch(xmem.config.maxCount, xmem.config.maxSize, xmem.Logger())
+	xmem.batch = newBatch(uint32(xmem.config.maxCount), uint32(xmem.config.maxSize), xmem.Logger())
 }
 
 func (xmem *XmemNozzle) initialize(settings map[string]interface{}) error {
@@ -1797,16 +1820,17 @@ func (xmem *XmemNozzle) handleVBError(vbno uint16, err error) {
 }
 
 func (xmem *XmemNozzle) adjustRespTimeout(committing_time time.Duration) {
-	xmem.config.lock.Lock()
-	defer xmem.config.lock.Unlock()
-	factor := committing_time.Seconds() / xmem.config.respTimeout.Seconds()
-	xmem.config.respTimeout = committing_time
+	oldRespTimeout := xmem.getRespTimeout()
+	factor := committing_time.Seconds() / oldRespTimeout.Seconds()
+	atomic.StorePointer(&xmem.config.respTimeout, unsafe.Pointer(&committing_time))
 	xmem.adjustMaxIdleCount(factor)
 }
 
 func (xmem *XmemNozzle) adjustMaxIdleCount(factor float64) {
-	new_maxIdleCount := int(float64(xmem.config.maxIdleCount) * factor)
-	xmem.config.maxIdleCount = int(math.Max(float64(new_maxIdleCount), float64(xmem.config.maxIdleCount)))
+	old_maxIdleCount := xmem.getMaxIdleCount()
+	new_maxIdleCount := uint32(float64(old_maxIdleCount) * factor)
+	new_maxIdleCount = uint32(math.Max(float64(new_maxIdleCount), float64(old_maxIdleCount)))
+	atomic.StoreUint32(&xmem.config.maxIdleCount, new_maxIdleCount)
 }
 
 func isNetError(err error) bool {
@@ -1863,18 +1887,32 @@ func isIgnorableMCError(resp_status mc.Status) bool {
 	}
 }
 
-func (xmem *XmemNozzle) getMaxIdleCount() int {
-	max_idle_count := xmem.config.maxIdleCount
+// get max idle count adjusted by backoff_factor
+func (xmem *XmemNozzle) getMaxIdleCount() uint32 {
+	return atomic.LoadUint32(&(xmem.config.maxIdleCount))
+}
+
+// get max idle count adjusted by backoff_factor
+func (xmem *XmemNozzle) getAdjustedMaxIdleCount() uint32 {
+	max_idle_count := xmem.getMaxIdleCount()
 	backoff_factor := math.Max(float64(xmem.client_for_getMeta.getBackOffFactor()), float64(xmem.client_for_setMeta.getBackOffFactor()))
 	backoff_factor = math.Min(float64(10), backoff_factor)
 
 	//if client_for_getMeta.backoff_factor > 0 or client_for_setMeta.backoff_factor > 0, it means the target system is possibly under load, need to be more patient before
 	//declare the stuckness.
 	if int(backoff_factor) > 1 {
-		max_idle_count = xmem.config.maxIdleCount * int(backoff_factor)
+		max_idle_count = max_idle_count * uint32(backoff_factor)
 	}
 
 	return max_idle_count
+}
+
+func (xmem *XmemNozzle) getRespTimeout() time.Duration {
+	return *((*time.Duration)(atomic.LoadPointer(&(xmem.config.respTimeout))))
+}
+
+func (xmem *XmemNozzle) getOptiRepThreshold() uint32 {
+	return atomic.LoadUint32(&(xmem.config.optiRepThreshold))
 }
 
 func (xmem *XmemNozzle) selfMonitor(finch chan bool, waitGrp *sync.WaitGroup) {
@@ -1889,7 +1927,7 @@ func (xmem *XmemNozzle) selfMonitor(finch chan bool, waitGrp *sync.WaitGroup) {
 	var repairCount_setMeta = 0
 	var repairCount_getMeta = 0
 	var count uint64
-	freeze_counter := 0
+	var freeze_counter uint32 = 0
 	for {
 		select {
 		case <-finch:
@@ -1927,7 +1965,7 @@ func (xmem *XmemNozzle) selfMonitor(finch chan bool, waitGrp *sync.WaitGroup) {
 				xmem.Logger().Debugf("%v open=%v checking..., %v item unsent, %v items waiting for response, %v batches ready\n", xmem_id, isOpen, len(xmem.dataChan), int(buffer_size)-len(empty_slots_pos), len(batches_ready_queue))
 				count = 0
 			}
-			max_idle_count := xmem.getMaxIdleCount()
+			max_idle_count := xmem.getAdjustedMaxIdleCount()
 			if freeze_counter > max_idle_count {
 				xmem.Logger().Errorf("%v hasn't sent any item out for %v ticks, %v data in queue, flowcontrol=%v, con_retry_limit=%v, backoff_factor for client_setMeta is %v, backoff_factor for client_getMeta is %v", xmem_id, max_idle_count, len(dataChan), buffer_count <= xmem.buf.notify_threshold, xmem.client_for_setMeta.continuous_write_failure_counter, xmem.client_for_setMeta.getBackOffFactor(), xmem.client_for_getMeta.getBackOffFactor())
 				xmem.Logger().Infof("%v open=%v checking..., %v item unsent, received %v items, sent %v items, %v items waiting for response, %v batches ready\n", xmem_id, isOpen, len(dataChan), received_count, xmem_count_sent, int(buffer_size)-len(empty_slots_pos), len(batches_ready_queue))
@@ -1949,7 +1987,7 @@ done:
 
 func (xmem *XmemNozzle) check(finch chan bool, waitGrp *sync.WaitGroup) {
 	defer waitGrp.Done()
-	ticker := time.NewTicker(xmem.config.respTimeout)
+	ticker := time.NewTicker(xmem.getRespTimeout())
 	defer ticker.Stop()
 	for {
 		select {
@@ -2000,7 +2038,7 @@ func (xmem *XmemNozzle) checkTimeout(req *bufferedMCRequest, pos uint16) (bool, 
 }
 
 func (xmem *XmemNozzle) timeoutDuration(numofRetry int) time.Duration {
-	duration := xmem.config.respTimeout
+	duration := xmem.getRespTimeout()
 	for i := 1; i <= numofRetry; i++ {
 		duration *= 2
 		if duration > xmem.config.maxRetryInterval {
@@ -2094,7 +2132,7 @@ func (xmem *XmemNozzle) StatusSummary() string {
 		if counter_sent > 0 {
 			avg_wait_time = float64(atomic.LoadUint32(&xmem.counter_waittime)) / float64(counter_sent)
 		}
-		return fmt.Sprintf("%v state =%v connType=%v received %v items, sent %v items, %v items waiting to confirm, %v in queue, %v in current batch, avg wait time is %vms, size of last ten batches processed %v, len(batches_ready_queue)=%v\n", xmem.Id(), xmem.State(), connType, atomic.LoadUint32(&xmem.counter_received), atomic.LoadUint32(&xmem.counter_sent), xmem.buf.itemCountInBuffer(), len(xmem.dataChan), xmem.batch.count(), avg_wait_time, xmem.last_ten_batches_size, len(xmem.batches_ready_queue))
+		return fmt.Sprintf("%v state =%v connType=%v received %v items, sent %v items, %v items waiting to confirm, %v in queue, %v in current batch, avg wait time is %vms, size of last ten batches processed %v, len(batches_ready_queue)=%v\n", xmem.Id(), xmem.State(), connType, atomic.LoadUint32(&xmem.counter_received), atomic.LoadUint32(&xmem.counter_sent), xmem.buf.itemCountInBuffer(), len(xmem.dataChan), xmem.batch.count(), avg_wait_time, xmem.getLastTenBatchSize(), len(xmem.batches_ready_queue))
 	} else {
 		return fmt.Sprintf("%v state =%v ", xmem.Id(), xmem.State())
 	}
@@ -2112,7 +2150,7 @@ func (xmem *XmemNozzle) handleGeneralError(err error) {
 
 func (xmem *XmemNozzle) optimisticRep(req *mc.MCRequest) bool {
 	if req != nil {
-		return req.Size() < xmem.config.optiRepThreshold
+		return uint32(req.Size()) < xmem.getOptiRepThreshold()
 	}
 	return true
 }
@@ -2306,13 +2344,11 @@ func (xmem *XmemNozzle) packageRequest(count int, reqs_bytes []byte) []byte {
 }
 
 func (xmem *XmemNozzle) UpdateSettings(settings map[string]interface{}) error {
-	xmem.config.lock.Lock()
-	defer xmem.config.lock.Unlock()
 	optimisticReplicationThreshold, err := utils.GetIntSettingFromSettings(settings, metadata.OptimisticReplicationThreshold)
 	if err != nil {
 		return err
 	}
-	xmem.config.optiRepThreshold = optimisticReplicationThreshold
+	atomic.StoreUint32(&xmem.config.optiRepThreshold, uint32(optimisticReplicationThreshold))
 	return nil
 }
 
@@ -2358,10 +2394,15 @@ func (xmem *XmemNozzle) recycleDataObj(req *base.WrappedMCRequest) {
 	}
 }
 
-func (xmem *XmemNozzle) recordBatchSize(batchSize int) {
+func (xmem *XmemNozzle) getLastTenBatchSize() []uint32 {
+	return *((*[]uint32)(atomic.LoadPointer(&xmem.last_ten_batches_size)))
+}
 
+func (xmem *XmemNozzle) recordBatchSize(batchSize uint32) {
+	last_ten_batches_size := xmem.getLastTenBatchSize()
 	for i := 9; i > 0; i-- {
-		xmem.last_ten_batches_size[i] = xmem.last_ten_batches_size[i-1]
+		last_ten_batches_size[i] = last_ten_batches_size[i-1]
 	}
-	xmem.last_ten_batches_size[0] = batchSize
+	last_ten_batches_size[0] = batchSize
+	atomic.StorePointer(&xmem.last_ten_batches_size, unsafe.Pointer(&last_ten_batches_size))
 }
