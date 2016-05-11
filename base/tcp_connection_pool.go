@@ -26,7 +26,7 @@ type TCPConnPool struct {
 
 type tcpConnPoolMgr struct {
 	conn_pools_map map[string]*TCPConnPool
-	token          sync.Mutex
+	token          sync.RWMutex
 	once           sync.Once
 	logger         *log.CommonLogger
 }
@@ -132,8 +132,8 @@ func (tcpConnPoolMgr *tcpConnPoolMgr) GetOrCreatePool(poolNameToCreate string, h
 }
 
 func (tcpConnPoolMgr *tcpConnPoolMgr) GetPool(poolName string) *TCPConnPool {
-	tcpConnPoolMgr.token.Lock()
-	defer tcpConnPoolMgr.token.Unlock()
+	tcpConnPoolMgr.token.RLock()
+	defer tcpConnPoolMgr.token.RUnlock()
 	pool := tcpConnPoolMgr.conn_pools_map[poolName]
 
 	return pool
@@ -165,9 +165,7 @@ func (tcpConnPoolMgr *tcpConnPoolMgr) CreatePool(poolName string, hostName strin
 		}
 	}
 
-	tcpConnPoolMgr.token.Lock()
-	tcpConnPoolMgr.conn_pools_map[poolName] = p
-	tcpConnPoolMgr.token.Unlock()
+	tcpConnPoolMgr.setPool(poolName, p)
 
 	tcpConnPoolMgr.logger.Infof("Connection pool %s has been created with %d clients\n", poolName, len(p.clients))
 	return p, nil
@@ -212,4 +210,12 @@ func (tcpConnPoolMgr *tcpConnPoolMgr) Close() {
 		tcpConnPoolMgr.logger.Infof("Closing pool %s", key)
 		pool.ReleaseConnections()
 	}
+
+	tcpConnPoolMgr.conn_pools_map = make(map[string]*TCPConnPool)
+}
+
+func (tcpConnPoolMgr *tcpConnPoolMgr) setPool(poolName string, p *TCPConnPool) {
+	tcpConnPoolMgr.token.Lock()
+	tcpConnPoolMgr.conn_pools_map[poolName] = p
+	tcpConnPoolMgr.token.Unlock()
 }

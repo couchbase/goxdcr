@@ -14,6 +14,7 @@ import (
 	"fmt"
 	common "github.com/couchbase/goxdcr/common"
 	"github.com/couchbase/goxdcr/log"
+	"sync"
 )
 
 type ServiceSettingsConstructor func(pipeline common.Pipeline, service common.PipelineService, pipeline_settings map[string]interface{}) (map[string]interface{}, error)
@@ -22,7 +23,8 @@ type StartSeqnoConstructor func(pipeline common.Pipeline) error
 
 type PipelineRuntimeCtx struct {
 	//registered runtime pipeline service
-	runtime_svcs map[string]common.PipelineService
+	runtime_svcs      map[string]common.PipelineService
+	runtime_svcs_lock *sync.RWMutex
 
 	//pipeline
 	pipeline common.Pipeline
@@ -41,6 +43,7 @@ func NewWithSettingConstructor(p common.Pipeline, service_settings_constructor S
 		isRunning:    false,
 		logger:       log.NewLogger("PipelineRuntimeCtx", logger_context),
 		service_settings_constructor:        service_settings_constructor,
+		runtime_svcs_lock:                   &sync.RWMutex{},
 		service_update_settings_constructor: service_update_settings_constructor}
 
 	return ctx, nil
@@ -51,6 +54,8 @@ func New(p common.Pipeline) (*PipelineRuntimeCtx, error) {
 }
 
 func (ctx *PipelineRuntimeCtx) Start(params map[string]interface{}) error {
+	ctx.runtime_svcs_lock.RLock()
+	defer ctx.runtime_svcs_lock.RUnlock()
 
 	var err error = nil
 	//start all registered services
@@ -74,7 +79,7 @@ func (ctx *PipelineRuntimeCtx) Start(params map[string]interface{}) error {
 		ctx.isRunning = true
 	} else {
 		//clean up
-		err2 := ctx.Stop()
+		err2 := ctx.stop(false)
 		if err2 != nil {
 			//failed to clean up
 			panic("Pipeline runtime context failed to start up, try to clean up, failed again")
@@ -84,25 +89,26 @@ func (ctx *PipelineRuntimeCtx) Start(params map[string]interface{}) error {
 }
 
 func (ctx *PipelineRuntimeCtx) Stop() error {
+	return ctx.stop(true)
+}
+
+func (ctx *PipelineRuntimeCtx) stop(lock bool) error {
+	if lock {
+		ctx.runtime_svcs_lock.RLock()
+		defer ctx.runtime_svcs_lock.RUnlock()
+	}
+
 	ctx.logger.Infof("Pipeline context is stopping...")
 	var err error = nil
 	errMap := make(map[string]error)
 
-	services_stopped := []string{}
 	//stop all registered services
-	for name, _ := range ctx.runtime_svcs {
-		err1 := ctx.UnregisterService(name)
+	for name, service := range ctx.runtime_svcs {
+		err1 := service.Stop()
 		if err1 != nil {
 			errMap[name] = err1
 			ctx.logger.Errorf("Failed to stop service %v - %v", name, err1)
-		} else {
-			services_stopped = append(services_stopped, name)
 		}
-
-	}
-
-	for _, service_stopped_name := range services_stopped {
-		delete(ctx.runtime_svcs, service_stopped_name)
 	}
 
 	if len(errMap) == 0 {
@@ -119,23 +125,32 @@ func (ctx *PipelineRuntimeCtx) Pipeline() common.Pipeline {
 }
 
 func (ctx *PipelineRuntimeCtx) Service(svc_name string) common.PipelineService {
+	ctx.runtime_svcs_lock.RLock()
+	defer ctx.runtime_svcs_lock.RUnlock()
 	return ctx.runtime_svcs[svc_name]
 }
 
 func (ctx *PipelineRuntimeCtx) RegisterService(svc_name string, svc common.PipelineService) error {
-
 	if ctx.isRunning {
 		return errors.New("Can't register service when PipelineRuntimeContext is already running")
 	}
 
 	ctx.logger.Infof("Try to attach %v to pipeline %v\n", svc_name, ctx.pipeline.InstanceId())
-	ctx.runtime_svcs[svc_name] = svc
-
+	ctx.addService(svc_name, svc)
 	return svc.Attach(ctx.pipeline)
 
 }
 
+func (ctx *PipelineRuntimeCtx) addService(svc_name string, svc common.PipelineService) {
+	ctx.runtime_svcs_lock.Lock()
+	defer ctx.runtime_svcs_lock.Unlock()
+	ctx.runtime_svcs[svc_name] = svc
+}
+
 func (ctx *PipelineRuntimeCtx) UnregisterService(srv_name string) error {
+	ctx.runtime_svcs_lock.Lock()
+	defer ctx.runtime_svcs_lock.Unlock()
+
 	var err error
 	svc := ctx.runtime_svcs[srv_name]
 
@@ -147,10 +162,15 @@ func (ctx *PipelineRuntimeCtx) UnregisterService(srv_name string) error {
 		}
 	}
 
+	delete(ctx.runtime_svcs, srv_name)
+
 	return err
 }
 
 func (ctx *PipelineRuntimeCtx) UpdateSettings(settings map[string]interface{}) error {
+	ctx.runtime_svcs_lock.RLock()
+	defer ctx.runtime_svcs_lock.RUnlock()
+
 	if ctx.service_settings_constructor == nil {
 		return nil
 	}

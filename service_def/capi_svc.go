@@ -50,10 +50,6 @@ func NewRemoteBucketInfo(remoteClusterRefName string, bucketName string, remote_
 	return remoteBucket, err
 }
 
-func (remoteBucket *RemoteBucketInfo) Refresh(remote_cluster_svc RemoteClusterSvc) error {
-	return remoteBucket.refresh_internal(remote_cluster_svc, true)
-}
-
 func (remoteBucket *RemoteBucketInfo) refresh_internal(remote_cluster_svc RemoteClusterSvc, full bool) error {
 	if remoteBucket.RemoteClusterRef == nil && !full {
 		remoteClusterRef, err := remote_cluster_svc.RemoteClusterByRefName(remoteBucket.RemoteClusterRefName, true)

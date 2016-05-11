@@ -411,6 +411,7 @@ func NewGenericPipeline(t string,
 		instance_id:   time.Now().Nanosecond(),
 		state:         common.Pipeline_Initial,
 		settings_lock: &sync.RWMutex{}}
+	pipeline.initialize()
 	return pipeline
 }
 
@@ -437,20 +438,29 @@ func NewPipelineWithSettingConstructor(t string,
 		instance_id:   time.Now().Nanosecond(),
 		state:         common.Pipeline_Initial,
 		settings_lock: &sync.RWMutex{}}
+	pipeline.initialize()
 	pipeline.logger.Debugf("Pipeline %s has been initialized with a part setting constructor %v", t, partsSettingsConstructor)
 
 	return pipeline
 }
 
-func GetAllParts(p common.Pipeline) map[string]common.Part {
-	if p.(*GenericPipeline).partsMap == nil {
-		p.(*GenericPipeline).partsMap = make(map[string]common.Part)
-		sources := p.Sources()
-		for _, source := range sources {
-			addPartToMap(source, p.(*GenericPipeline).partsMap)
+// intialize all maps
+// the maps will not be modified at pipeline runtime, hence there is no chance of concurrent read and write to the maps
+func (genericPipeline *GenericPipeline) initialize() {
+	sources := genericPipeline.Sources()
+
+	genericPipeline.partsMap = make(map[string]common.Part)
+	for _, source := range sources {
+		addPartToMap(source, genericPipeline.partsMap)
+	}
+
+	genericPipeline.connectorsMap = make(map[string]common.Connector)
+	for _, source := range sources {
+		connector := source.Connector()
+		if connector != nil {
+			addConnectorToMap(connector, genericPipeline.connectorsMap)
 		}
 	}
-	return p.(*GenericPipeline).partsMap
 }
 
 func addPartToMap(part common.Part, partsMap map[string]common.Part) {
@@ -469,6 +479,24 @@ func addPartToMap(part common.Part, partsMap map[string]common.Part) {
 	}
 }
 
+func addConnectorToMap(connector common.Connector, connectorsMap map[string]common.Connector) {
+	if _, ok := connectorsMap[connector.Id()]; !ok {
+		// process the connector if it has not been processed yet to avoid infinite loop
+		connectorsMap[connector.Id()] = connector
+
+		for _, downStreamPart := range connector.DownStreams() {
+			downStreamConnector := downStreamPart.Connector()
+			if downStreamConnector != nil {
+				addConnectorToMap(downStreamConnector, connectorsMap)
+			}
+		}
+	}
+}
+
+// there is no lock on genericPipeline.asyncEventListenerMap and care must be taken to avoid concurrency issues
+// As of now, this method is called by xdcr_factory right after pipeline is constructed and async listeners are registered on parts
+// This is the only time when genericPipeline.asyncEventListenerMap is initialized/modified, when concurrent access is not possible.
+// Hence there are no real concurrency issues.
 func GetAllAsyncComponentEventListeners(p common.Pipeline) map[string]common.AsyncComponentEventListener {
 	genericPipeline := p.(*GenericPipeline)
 	if genericPipeline.asyncEventListenerMap == nil {
@@ -479,7 +507,6 @@ func GetAllAsyncComponentEventListeners(p common.Pipeline) map[string]common.Asy
 			addAsyncListenersToMap(source, genericPipeline.asyncEventListenerMap, partsMap)
 		}
 	}
-
 	return genericPipeline.asyncEventListenerMap
 }
 
@@ -511,32 +538,12 @@ func mergeListenersMap(listenersMap map[string]common.AsyncComponentEventListene
 	}
 }
 
-func GetAllConnectors(p common.Pipeline) map[string]common.Connector {
-	if p.(*GenericPipeline).connectorsMap == nil {
-		p.(*GenericPipeline).connectorsMap = make(map[string]common.Connector)
-		sources := p.Sources()
-		for _, source := range sources {
-			connector := source.Connector()
-			if connector != nil {
-				addConnectorToMap(connector, p.(*GenericPipeline).connectorsMap)
-			}
-		}
-	}
-	return p.(*GenericPipeline).connectorsMap
+func GetAllParts(p common.Pipeline) map[string]common.Part {
+	return p.(*GenericPipeline).partsMap
 }
 
-func addConnectorToMap(connector common.Connector, connectorsMap map[string]common.Connector) {
-	if _, ok := connectorsMap[connector.Id()]; !ok {
-		// process the connector if it has not been processed yet to avoid infinite loop
-		connectorsMap[connector.Id()] = connector
-
-		for _, downStreamPart := range connector.DownStreams() {
-			downStreamConnector := downStreamPart.Connector()
-			if downStreamConnector != nil {
-				addConnectorToMap(downStreamConnector, connectorsMap)
-			}
-		}
-	}
+func GetAllConnectors(p common.Pipeline) map[string]common.Connector {
+	return p.(*GenericPipeline).connectorsMap
 }
 
 func (genericPipeline *GenericPipeline) Specification() *metadata.ReplicationSpecification {

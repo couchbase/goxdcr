@@ -194,10 +194,13 @@ func (xdcrf *XDCRFactory) NewPipeline(topic string, progress_recorder common.Pip
 	xdcrf.registerAsyncListenersOnSources(pipeline, logger_ctx)
 	xdcrf.registerAsyncListenersOnTargets(pipeline, logger_ctx)
 
+	// initialize component event listener map in pipeline
+	pp.GetAllAsyncComponentEventListeners(pipeline)
+
 	if pipelineContext, err := pctx.NewWithSettingConstructor(pipeline, xdcrf.ConstructSettingsForService, xdcrf.ConstructUpdateSettingsForService, logger_ctx); err != nil {
+
 		return nil, err
 	} else {
-
 		//register services
 		pipeline.SetRuntimeContext(pipelineContext)
 		err = xdcrf.registerServices(pipeline, logger_ctx, kv_vb_map)

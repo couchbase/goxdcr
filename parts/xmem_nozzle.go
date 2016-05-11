@@ -727,10 +727,6 @@ type XmemNozzle struct {
 	counter_batches  int32
 	start_time       time.Time
 
-	//the big seqno that is confirmed to be received on the vbucket
-	//it is still possible that smaller seqno hasn't been received
-	maxseqno_received_map map[uint16]uint64
-
 	receive_token_ch chan int
 
 	connType base.ConnType
@@ -794,7 +790,6 @@ func NewXmemNozzle(id string,
 		counter_batches:     0,
 		dataObj_recycler:    dataObj_recycler,
 		topic:               topic,
-		maxseqno_received_map:  make(map[uint16]uint64),
 		last_ten_batches_size:  []int{0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
 		ext_metadata_supported: ext_metadata_supported,
 		source_cr_mode:         source_cr_mode}

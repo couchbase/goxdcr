@@ -112,13 +112,20 @@ func (supervisor *GenericSupervisor) AddChild(child common.Supervisable) error {
 	supervisor.children_lock.Lock()
 	defer supervisor.children_lock.Unlock()
 	supervisor.children[child.Id()] = child
+	supervisor.childrenBeatMissedMap[child.Id()] = 0
 	return nil
 }
 
 func (supervisor *GenericSupervisor) RemoveChild(childId string) error {
+	return supervisor.removeChild_internal(childId, true)
+}
+
+func (supervisor *GenericSupervisor) removeChild_internal(childId string, lock bool) error {
 	supervisor.Logger().Infof("Removing child %v from supervisor %v\n", childId, supervisor.Id())
-	supervisor.children_lock.Lock()
-	defer supervisor.children_lock.Unlock()
+	if lock {
+		supervisor.children_lock.Lock()
+		defer supervisor.children_lock.Unlock()
+	}
 	// TODO should we return error when childId does not exist?
 	delete(supervisor.children, childId)
 	delete(supervisor.childrenBeatMissedMap, childId)
@@ -303,6 +310,10 @@ REPORT:
 func (supervisor *GenericSupervisor) processReport(heartbeat_report map[string]heartbeatRespStatus) {
 	supervisor.Logger().Debugf("***********ProcessReport for supervisor %v*************\n", supervisor.Id())
 	supervisor.Logger().Debugf("len(heartbeat_report)=%v\n", len(heartbeat_report))
+
+	supervisor.children_lock.Lock()
+	defer supervisor.children_lock.Unlock()
+
 	brokenChildren := make(map[string]error)
 	for childId, status := range heartbeat_report {
 		supervisor.Logger().Debugf("childId=%v, status=%v\n", childId, status)
@@ -317,7 +328,7 @@ func (supervisor *GenericSupervisor) processReport(heartbeat_report map[string]h
 			if missedCount > supervisor.missed_heartbeat_threshold {
 				// report the child as broken if it exceeded the beat_missed_threshold
 				brokenChildren[childId] = errors.New("Not responding")
-				supervisor.RemoveChild(childId)
+				supervisor.removeChild_internal(childId, false)
 			}
 		} else {
 			// reset missed count to 0 when child responds

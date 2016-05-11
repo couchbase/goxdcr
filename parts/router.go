@@ -209,11 +209,6 @@ func (router *Router) route(data interface{}) (map[string]interface{}, error) {
 	return result, nil
 }
 
-func (router *Router) SetRoutingMap(routingMap map[uint16]string) {
-	router.routingMap = routingMap
-	router.Logger().Debugf("Set vbMap %v in Router %v", routingMap, router.id)
-}
-
 func (router *Router) RoutingMap() map[uint16]string {
 	return router.routingMap
 }
