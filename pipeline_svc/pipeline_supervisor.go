@@ -18,6 +18,7 @@ import (
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/parts"
 	"github.com/couchbase/goxdcr/pipeline"
+	"github.com/couchbase/goxdcr/pipeline_utils"
 	"github.com/couchbase/goxdcr/service_def"
 	"github.com/couchbase/goxdcr/simple_utils"
 	"github.com/couchbase/goxdcr/supervisor"
@@ -256,7 +257,7 @@ func (pipelineSupervisor *PipelineSupervisor) declarePipelineBroken() {
 
 // check if any runtime stats indicates that pipeline is broken
 func (pipelineSupervisor *PipelineSupervisor) checkPipelineHealth() error {
-	if pipelineSupervisor.pipeline.State() != common.Pipeline_Running && pipelineSupervisor.pipeline.State() != common.Pipeline_Starting {
+	if !pipeline_utils.IsPipelineRunning(pipelineSupervisor.pipeline.State()) {
 		//the pipeline is no longer running, kill myself
 		message := "Pipeline is no longer running, exit."
 		pipelineSupervisor.Logger().Info(message)

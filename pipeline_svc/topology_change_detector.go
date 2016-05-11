@@ -105,7 +105,7 @@ func (top_detect_svc *TopologyChangeDetectorSvc) watch(fin_ch chan bool, waitGrp
 			top_detect_svc.logger.Infof("ToplogyChangeDetectorSvc for pipeline %v received finish signal and is exitting", top_detect_svc.pipeline.Topic())
 			return
 		case <-ticker.C:
-			if top_detect_svc.pipeline.State() != common.Pipeline_Running {
+			if !pipeline_utils.IsPipelineRunning(top_detect_svc.pipeline.State()) {
 				//pipeline is no longer running, kill itself
 				top_detect_svc.logger.Infof("Pipeline %v is no longer running. ToplogyChangeDetectorSvc is exitting.", top_detect_svc.pipeline.Topic())
 				return

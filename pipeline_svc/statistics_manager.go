@@ -318,7 +318,7 @@ func (stats_mgr *StatisticsManager) updateStats() error {
 }
 
 func (stats_mgr *StatisticsManager) updateStatsOnce() error {
-	if stats_mgr.pipeline.State() != common.Pipeline_Running && stats_mgr.pipeline.State() != common.Pipeline_Starting {
+	if !pipeline_utils.IsPipelineRunning(stats_mgr.pipeline.State()) {
 		//the pipeline is no longer running, kill myself
 		message := "Pipeline is no longer running, exit."
 		stats_mgr.logger.Info(message)

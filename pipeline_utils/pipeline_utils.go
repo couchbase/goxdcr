@@ -118,3 +118,9 @@ func IsPipelineUsingCapi(pipeline common.Pipeline) bool {
 	}
 	return isCapi
 }
+
+// check if the specified state indicates that the pipeline is still running
+// many components, e.g., topology change detector, use this to decide if they need to abort operation
+func IsPipelineRunning(state common.PipelineState) bool {
+	return state == common.Pipeline_Initial || state == common.Pipeline_Starting || state == common.Pipeline_Running
+}

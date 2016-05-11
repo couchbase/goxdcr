@@ -494,7 +494,7 @@ func (tsTracker *ThroughSeqnoTrackerSvc) isPipelineRunning() bool {
 	rep_status, _ := pipeline_manager.ReplicationStatus(tsTracker.rep_id)
 	if rep_status != nil {
 		pipeline := rep_status.Pipeline()
-		if pipeline != nil && pipeline.State() == common.Pipeline_Running {
+		if pipeline != nil && pipeline_utils.IsPipelineRunning(pipeline.State()) {
 			return true
 		}
 	}

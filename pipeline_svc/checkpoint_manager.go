@@ -19,6 +19,7 @@ import (
 	component "github.com/couchbase/goxdcr/component"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
+	"github.com/couchbase/goxdcr/pipeline_utils"
 	"github.com/couchbase/goxdcr/service_def"
 	"github.com/couchbase/goxdcr/simple_utils"
 	"github.com/couchbase/goxdcr/utils"
@@ -637,7 +638,7 @@ func (ckmgr *CheckpointManager) checkpointing() {
 			ckmgr.logger.Info("Received finish signal")
 			return
 		case <-ticker.C:
-			if ckmgr.pipeline.State() != common.Pipeline_Running {
+			if !pipeline_utils.IsPipelineRunning(ckmgr.pipeline.State()) {
 				//pipeline is no longer running, kill itself
 				ckmgr.logger.Info("Pipeline is no longer running, exit.")
 				return
@@ -672,7 +673,7 @@ func (ckmgr *CheckpointManager) performCkpt(fin_ch chan bool, wait_grp *sync.Wai
 			ckmgr.logger.Info("Aborting checkpointing routine since received finish signal for checkpointing")
 			return
 		default:
-			if ckmgr.pipeline.State() != common.Pipeline_Running {
+			if !pipeline_utils.IsPipelineRunning(ckmgr.pipeline.State()) {
 				//pipeline is no longer running, return
 				ckmgr.logger.Info("Pipeline is no longer running, exit do_checkpointing")
 				return
@@ -886,7 +887,7 @@ func (ckmgr *CheckpointManager) massCheckVBOpaquesJob() {
 			ckmgr.logger.Info("Received finish signal")
 			return
 		case <-ticker.C:
-			if ckmgr.pipeline.State() != common.Pipeline_Running {
+			if !pipeline_utils.IsPipelineRunning(ckmgr.pipeline.State()) {
 				//pipeline is no longer running, kill itself
 				ckmgr.logger.Info("Pipeline is no longer running, exit.")
 				return
