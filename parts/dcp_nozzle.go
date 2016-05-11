@@ -81,8 +81,7 @@ type DcpNozzle struct {
 	// this allows multiple  dcp nozzles to be created for a kv node
 	vbnos []uint16
 
-	vb_stream_status      map[uint16]*streamStatusWithLock
-	vb_stream_status_lock *sync.RWMutex
+	vb_stream_status map[uint16]*streamStatusWithLock
 
 	// immutable fields
 	bucketName     string
@@ -156,7 +155,6 @@ func NewDcpNozzle(id string,
 		lock_uprFeed:             sync.RWMutex{},
 		cur_ts:                   make(map[uint16]*vbtsWithLock),
 		vb_stream_status:         make(map[uint16]*streamStatusWithLock),
-		vb_stream_status_lock:    &sync.RWMutex{},
 		xdcr_topology_svc:        xdcr_topology_svc,
 		stats_interval_change_ch: make(chan bool, 1),
 		ext_metadata_supported:   ext_metadata_supported,
@@ -168,6 +166,7 @@ func NewDcpNozzle(id string,
 
 	for _, vbno := range vbnos {
 		dcp.cur_ts[vbno] = &vbtsWithLock{lock: &sync.RWMutex{}, ts: nil}
+		dcp.vb_stream_status[vbno] = &streamStatusWithLock{lock: &sync.RWMutex{}, state: Dcp_Stream_NonInit}
 	}
 
 	dcp.Logger().Debugf("Constructed Dcp nozzle %v with vblist %v\n", dcp.Id(), vbnos)
@@ -220,12 +219,6 @@ func (dcp *DcpNozzle) initialize(settings map[string]interface{}) (err error) {
 		return errors.New("setting 'stats_interval' is missing")
 	}
 
-	//initialize vb_stream_status
-	dcp.vb_stream_status_lock.Lock()
-	defer dcp.vb_stream_status_lock.Unlock()
-	for _, vb := range dcp.vbnos {
-		dcp.vb_stream_status[vb] = &streamStatusWithLock{lock: &sync.RWMutex{}, state: Dcp_Stream_NonInit}
-	}
 	return
 }
 
@@ -629,53 +622,52 @@ func (dcp *DcpNozzle) GetVBList() []uint16 {
 	return dcp.vbnos
 }
 
-func (dcp *DcpNozzle) inactiveDcpStreams() []uint16 {
+type stateCheckFunc func(state DcpStreamState) bool
+
+func (dcp *DcpNozzle) getDcpStreams(stateCheck stateCheckFunc) []uint16 {
 	ret := []uint16{}
-	dcp.vb_stream_status_lock.RLock()
-	defer dcp.vb_stream_status_lock.RUnlock()
-	for vb, statusobj := range dcp.vb_stream_status {
-		if statusobj.state != Dcp_Stream_Active {
+	for _, vb := range dcp.GetVBList() {
+		state, _ := dcp.getStreamState(vb)
+		if stateCheck(state) {
 			ret = append(ret, vb)
 		}
 	}
 	return ret
+}
+
+func (dcp *DcpNozzle) inactiveDcpStreams() []uint16 {
+	return dcp.getDcpStreams(inactiveStateCheck)
+}
+
+func inactiveStateCheck(state DcpStreamState) bool {
+	return state != Dcp_Stream_Active
+}
+
+func (dcp *DcpNozzle) initedButInactiveDcpStreams() []uint16 {
+	return dcp.getDcpStreams(initedButInactiveStateCheck)
+}
+
+func initedButInactiveStateCheck(state DcpStreamState) bool {
+	return state == Dcp_Stream_Init
+}
+
+func (dcp *DcpNozzle) nonInitDcpStreams() []uint16 {
+	return dcp.getDcpStreams(nonInitStateCheck)
+}
+
+func nonInitStateCheck(state DcpStreamState) bool {
+	return state == Dcp_Stream_NonInit
 }
 
 func (dcp *DcpNozzle) inactiveDcpStreamsWithState() map[uint16]DcpStreamState {
 	ret := make(map[uint16]DcpStreamState)
-	dcp.vb_stream_status_lock.RLock()
-	defer dcp.vb_stream_status_lock.RUnlock()
-	for vb, statusobj := range dcp.vb_stream_status {
-		if statusobj.state != Dcp_Stream_Active {
-			ret[vb] = statusobj.state
+	for _, vb := range dcp.GetVBList() {
+		state, _ := dcp.getStreamState(vb)
+		if state != Dcp_Stream_Active {
+			ret[vb] = state
 		}
 	}
 	return ret
-}
-
-func (dcp *DcpNozzle) initedButInactiveDcpStreams() []uint16 {
-	ret := []uint16{}
-	dcp.vb_stream_status_lock.RLock()
-	defer dcp.vb_stream_status_lock.RUnlock()
-	for vb, statusobj := range dcp.vb_stream_status {
-		if statusobj.state == Dcp_Stream_Init {
-			ret = append(ret, vb)
-		}
-	}
-	return ret
-}
-
-func (dcp *DcpNozzle) nonInitDcpStreams() []uint16 {
-	ret := []uint16{}
-	dcp.vb_stream_status_lock.RLock()
-	defer dcp.vb_stream_status_lock.RUnlock()
-	for vb, statusobj := range dcp.vb_stream_status {
-		if statusobj.state == Dcp_Stream_NonInit {
-			ret = append(ret, vb)
-		}
-	}
-	return ret
-
 }
 
 // generate a new 16 bit opaque value set as MSB.

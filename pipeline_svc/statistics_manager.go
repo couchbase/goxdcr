@@ -149,26 +149,8 @@ type StatisticsManager struct {
 	//the entry with key="Overview" will be reported to ns_server
 	registries map[string]metrics.Registry
 
-	//temporary map to keep all the collected start time for getMeta requests
-	//during this collection interval.
-	//At the end of the collection interval, collected starttime and endtime will be correlated
-	//to calculate the latencies for getMeta. The calculated latencies will be kept in "Overall"
-	//entry in registries.
-	//This map will be emptied after the latencies are calculated to get ready for
-	//next collection period
-	meta_starttime_map      map[string]interface{}
-	meta_starttime_map_lock sync.RWMutex
-
-	//temporary map to keep all the collected end time for getMeta requests during this collection
-	//interval.
-	//This map will be emptied after the latencies are calculated to get ready for
-	//next collection period
-	meta_endtime_map      map[string]interface{}
-	meta_endtime_map_lock sync.RWMutex
-
 	//temporary map to keep checkpointed seqnos
-	checkpointed_seqnos      map[uint16]*base.SeqnoWithLock
-	checkpointed_seqnos_lock sync.RWMutex
+	checkpointed_seqnos map[uint16]*base.SeqnoWithLock
 
 	//chan for stats update tickers -- new tickers are added each time stats interval is changed
 	update_ticker_ch chan *time.Ticker
@@ -194,6 +176,7 @@ type StatisticsManager struct {
 	kv_mem_clients map[string]*mcc.Client
 	// stores error count of memcached clients
 	kv_mem_client_error_count map[string]int
+	kv_mem_clients_lock       *sync.RWMutex
 
 	through_seqno_tracker_svc service_def.ThroughSeqnoTrackerSvc
 	cluster_info_svc          service_def.ClusterInfoSvc
@@ -207,10 +190,6 @@ func NewStatisticsManager(through_seqno_tracker_svc service_def.ThroughSeqnoTrac
 		registries:                make(map[string]metrics.Registry),
 		logger:                    log.NewLogger("StatisticsManager", logger_ctx),
 		bucket_name:               bucket_name,
-		meta_starttime_map:        make(map[string]interface{}),
-		meta_endtime_map:          make(map[string]interface{}),
-		meta_starttime_map_lock:   sync.RWMutex{},
-		meta_endtime_map_lock:     sync.RWMutex{},
 		finish_ch:                 make(chan bool, 1),
 		done_ch:                   make(chan bool, 1),
 		update_ticker_ch:          make(chan *time.Ticker, 1000),
@@ -220,8 +199,8 @@ func NewStatisticsManager(through_seqno_tracker_svc service_def.ThroughSeqnoTrac
 		wait_grp:                  &sync.WaitGroup{},
 		kv_mem_clients:            make(map[string]*mcc.Client),
 		kv_mem_client_error_count: make(map[string]int),
+		kv_mem_clients_lock:       &sync.RWMutex{},
 		checkpointed_seqnos:       make(map[uint16]*base.SeqnoWithLock),
-		checkpointed_seqnos_lock:  sync.RWMutex{},
 		through_seqno_tracker_svc: through_seqno_tracker_svc,
 		cluster_info_svc:          cluster_info_svc,
 		xdcr_topology_svc:         xdcr_topology_svc}
@@ -585,6 +564,9 @@ func (stats_mgr *StatisticsManager) calculateDocsChecked() uint64 {
 	return docs_checked
 }
 func (stats_mgr *StatisticsManager) calculateChangesLeft(docs_processed int64) (int64, error) {
+	stats_mgr.kv_mem_clients_lock.Lock()
+	defer stats_mgr.kv_mem_clients_lock.Unlock()
+
 	total_changes, err := calculateTotalChanges(stats_mgr.active_vbs, stats_mgr.kv_mem_clients, stats_mgr.kv_mem_client_error_count, stats_mgr.bucket_name, stats_mgr.logger)
 	if err != nil {
 		return 0, err
@@ -703,14 +685,21 @@ func (stats_mgr *StatisticsManager) Stop() error {
 	stats_mgr.finish_ch <- true
 
 	//close the connections
-	for _, client := range stats_mgr.kv_mem_clients {
-		client.Close()
-	}
+	stats_mgr.closeConnections()
 
 	stats_mgr.wait_grp.Wait()
 	stats_mgr.logger.Infof("StatisticsManager Stopped")
 
 	return nil
+}
+
+func (stats_mgr *StatisticsManager) closeConnections() {
+	stats_mgr.kv_mem_clients_lock.Lock()
+	defer stats_mgr.kv_mem_clients_lock.Unlock()
+	for _, client := range stats_mgr.kv_mem_clients {
+		client.Close()
+	}
+	stats_mgr.kv_mem_clients = make(map[string]*mcc.Client)
 }
 
 func (stats_mgr *StatisticsManager) initConnections() error {
@@ -719,7 +708,7 @@ func (stats_mgr *StatisticsManager) initConnections() error {
 		if err != nil {
 			return err
 		}
-
+		// no need to lock since this is done during initialization
 		stats_mgr.kv_mem_clients[serverAddr] = conn
 	}
 
@@ -1105,8 +1094,6 @@ func (ckpt_collector *checkpointMgrCollector) OnEvent(event *common.Event) {
 	} else if event.EventType == common.CheckpointDoneForVB {
 		vbno := event.OtherInfos.(uint16)
 		ckpt_record := event.Data.(metadata.CheckpointRecord)
-		ckpt_collector.stats_mgr.checkpointed_seqnos_lock.Lock()
-		defer ckpt_collector.stats_mgr.checkpointed_seqnos_lock.Unlock()
 		ckpt_collector.stats_mgr.checkpointed_seqnos[vbno].SetSeqno(ckpt_record.Seqno)
 
 	} else if event.EventType == common.CheckpointDone {

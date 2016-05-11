@@ -79,10 +79,9 @@ type CheckpointManager struct {
 
 	support_ckpt bool
 
-	cur_ckpts        map[uint16]*checkpointRecordWithLock
-	active_vbs       map[string][]uint16
-	vb_highseqno_map map[uint16]uint64
-	failoverlog_map  map[uint16]*failoverlogWithLock
+	cur_ckpts       map[uint16]*checkpointRecordWithLock
+	active_vbs      map[string][]uint16
+	failoverlog_map map[uint16]*failoverlogWithLock
 
 	logger *log.CommonLogger
 }
@@ -121,8 +120,7 @@ func NewCheckpointManager(checkpoints_svc service_def.CheckpointsService, capi_s
 		cur_ckpts:                 make(map[uint16]*checkpointRecordWithLock),
 		active_vbs:                active_vbs,
 		wait_grp:                  &sync.WaitGroup{},
-		failoverlog_map:           make(map[uint16]*failoverlogWithLock),
-		vb_highseqno_map:          make(map[uint16]uint64)}, nil
+		failoverlog_map:           make(map[uint16]*failoverlogWithLock)}, nil
 }
 
 func (ckmgr *CheckpointManager) Attach(pipeline common.Pipeline) error {
@@ -298,14 +296,6 @@ func getDocsProcessedForReplication(topic string, vb_list []uint16, checkpoints_
 func (ckmgr *CheckpointManager) SetVBTimestamps(topic string) error {
 	defer ckmgr.logger.Info("Done with SetVBTimestamps")
 	ckmgr.logger.Infof("Set start seqnos for pipeline %v...", ckmgr.pipeline.InstanceId())
-
-	//refresh the remote bucket
-	err := ckmgr.remote_bucket.Refresh(ckmgr.remote_cluster_svc)
-	if err != nil {
-		ckmgr.logger.Errorf("Received error when trying to set VBTimestamps: %v\n", err)
-		ckmgr.RaiseEvent(common.NewEvent(common.ErrorEncountered, nil, ckmgr, nil, err))
-		return err
-	}
 
 	support_ckpt := ckmgr.support_ckpt
 

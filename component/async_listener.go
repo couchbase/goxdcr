@@ -113,6 +113,7 @@ func (l *AsyncComponentEventListenerImpl) StatusSummary() string {
 
 func (l *AsyncComponentEventListenerImpl) RegisterComponentEventHandler(handler common.AsyncComponentEventHandler) {
 	if handler != nil {
+		// no need to lock since this is done during pipeline construction, which is way before any event can be generated and handlers accessed
 		l.handlers[handler.Id()] = handler
 		l.logger.Debugf("Registering handler %v on listener %v\n", handler.Id(), l.id)
 	}

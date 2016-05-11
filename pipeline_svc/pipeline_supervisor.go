@@ -62,6 +62,7 @@ type PipelineSupervisor struct {
 	kv_mem_clients map[string]*mcc.Client
 	// stores error count of memcached clients
 	kv_mem_client_error_count map[string]int
+	kv_mem_clients_lock       *sync.Mutex
 }
 
 func NewPipelineSupervisor(id string, logger_ctx *log.LoggerContext, failure_handler common.SupervisorFailureHandler,
@@ -74,7 +75,8 @@ func NewPipelineSupervisor(id string, logger_ctx *log.LoggerContext, failure_han
 		cluster_info_svc:          cluster_info_svc,
 		xdcr_topology_svc:         xdcr_topology_svc,
 		kv_mem_clients:            make(map[string]*mcc.Client),
-		kv_mem_client_error_count: make(map[string]int)}
+		kv_mem_client_error_count: make(map[string]int),
+		kv_mem_clients_lock:       &sync.Mutex{}}
 	return pipelineSupervisor
 }
 
@@ -290,6 +292,10 @@ func (pipelineSupervisor *PipelineSupervisor) checkPipelineHealth() error {
 }
 
 func (pipelineSupervisor *PipelineSupervisor) getDcpStats() (map[string]map[string]string, error) {
+	// need to lock since it is possible, even though unlikely, that getDcpStats() may be called multiple times at the same time
+	pipelineSupervisor.kv_mem_clients_lock.Lock()
+	defer pipelineSupervisor.kv_mem_clients_lock.Unlock()
+
 	dcp_stats := make(map[string]map[string]string)
 
 	bucketName := pipelineSupervisor.pipeline.Specification().SourceBucketName

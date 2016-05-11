@@ -35,11 +35,7 @@ type pipelineManager struct {
 	remote_cluster_svc service_def.RemoteClusterSvc
 	once               sync.Once
 	logger             *log.CommonLogger
-	//lock to pipeline_pending_for_repair map
-	repair_map_lock *sync.RWMutex
-	//keep track of the pipeline in repair
-	pipeline_pending_for_update map[string]*pipelineUpdater
-	child_waitGrp               *sync.WaitGroup
+	child_waitGrp      *sync.WaitGroup
 }
 
 var pipeline_mgr pipelineManager
@@ -54,8 +50,6 @@ func PipelineManager(factory common.PipelineFactory, repl_spec_svc service_def.R
 		pipeline_mgr.logger = log.NewLogger("PipelineManager", logger_context)
 		pipeline_mgr.logger.Info("Pipeline Manager is constucted")
 		pipeline_mgr.child_waitGrp = &sync.WaitGroup{}
-		pipeline_mgr.pipeline_pending_for_update = make(map[string]*pipelineUpdater)
-		pipeline_mgr.repair_map_lock = &sync.RWMutex{}
 
 		//initialize the expvar storage for replication status
 		pipeline.RootStorage()
