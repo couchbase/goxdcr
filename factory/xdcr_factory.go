@@ -90,7 +90,7 @@ func (xdcrf *XDCRFactory) NewPipeline(topic string, progress_recorder common.Pip
 	xdcrf.logger.Debugf("replication specification = %v\n", spec)
 
 	logger_ctx := log.CopyCtx(xdcrf.default_logger_ctx)
-	logger_ctx.Log_level = spec.Settings.LogLevel
+	logger_ctx.SetLogLevel(spec.Settings.LogLevel)
 
 	extMetaSupported, err := xdcrf.isExtMetaSupported(spec)
 	if err != nil {

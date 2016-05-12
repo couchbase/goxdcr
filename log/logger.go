@@ -54,6 +54,13 @@ type LoggerContext struct {
 	Log_level   LogLevel
 }
 
+func (lc *LoggerContext) SetLogLevel(logLevel LogLevel) {
+	if lc.Log_level != logLevel {
+		// update log level only when necessary, e.g., when explicitly requested by user
+		lc.Log_level = logLevel
+	}
+}
+
 type LogWriter struct {
 	writer io.Writer
 }

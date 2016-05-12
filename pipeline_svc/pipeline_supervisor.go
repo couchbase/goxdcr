@@ -219,7 +219,7 @@ func (pipelineSupervisor *PipelineSupervisor) init(settings map[string]interface
 	pipelineSupervisor.Init(settings)
 
 	if val, ok := settings[PIPELINE_LOG_LEVEL]; ok {
-		pipelineSupervisor.LoggerContext().Log_level = val.(log.LogLevel)
+		pipelineSupervisor.LoggerContext().SetLogLevel(val.(log.LogLevel))
 	}
 
 	return nil
@@ -238,7 +238,7 @@ func (pipelineSupervisor *PipelineSupervisor) UpdateSettings(settings map[string
 	if !ok {
 		return fmt.Errorf("Log level %v is of wrong type", logLevelObj)
 	}
-	pipelineSupervisor.LoggerContext().Log_level = logLevel
+	pipelineSupervisor.LoggerContext().SetLogLevel(logLevel)
 	return nil
 }
 
