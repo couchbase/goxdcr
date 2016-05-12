@@ -664,6 +664,7 @@ func (service *ReplicationSpecService) ConstructNewReplicationSpec(sourceBucketN
 
 func (service *ReplicationSpecService) cacheSpec(cache *MetadataCache, specId string, spec *metadata.ReplicationSpecification) error {
 	var cachedObj *ReplicationSpecVal = nil
+	var updatedCachedObj *ReplicationSpecVal = nil
 	var ok1 bool
 	cachedVal, ok := cache.Get(specId)
 	if ok && cachedVal != nil {
@@ -671,12 +672,15 @@ func (service *ReplicationSpecService) cacheSpec(cache *MetadataCache, specId st
 		if !ok1 || cachedObj == nil {
 			panic("Object in ReplicationSpecServcie cache is not of type *replciationSpecVal")
 		}
-		cachedObj.spec = spec
+		updatedCachedObj = &ReplicationSpecVal{
+			spec:       spec,
+			derivedObj: cachedObj.derivedObj,
+			cas:        cachedObj.cas}
 	} else {
 		//never being cached before
-		cachedObj = &ReplicationSpecVal{spec: spec}
+		updatedCachedObj = &ReplicationSpecVal{spec: spec}
 	}
-	return cache.Upsert(specId, cachedObj)
+	return cache.Upsert(specId, updatedCachedObj)
 }
 
 func (service *ReplicationSpecService) SetDerivedObj(specId string, derivedObj interface{}) error {
@@ -690,14 +694,17 @@ func (service *ReplicationSpecService) SetDerivedObj(specId string, derivedObj i
 	if !ok {
 		panic("Object in ReplicationSpecServcie cache is not of type *replciationSpecVal")
 	}
-	cachedObj.derivedObj = derivedObj
 
-	if cachedObj.spec == nil && cachedObj.derivedObj == nil {
+	if cachedObj.spec == nil && derivedObj == nil {
 		//remove it from the cache
 		service.logger.Infof("Remove spec %v from the cache\n", specId)
 		cache.Delete(specId)
 	} else {
-		err := cache.Upsert(specId, cachedObj)
+		updatedCachedObj := &ReplicationSpecVal{
+			spec:       cachedObj.spec,
+			derivedObj: derivedObj,
+			cas:        cachedObj.cas}
+		err := cache.Upsert(specId, updatedCachedObj)
 		if err != nil {
 			return err
 		}
