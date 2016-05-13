@@ -523,6 +523,12 @@ func (stats_mgr *StatisticsManager) processCalculatedStats(oldSample metrics.Reg
 	bandwidth_usage_var.Set(bandwidth_usage)
 	overview_expvar_map.Set(BANDWIDTH_USAGE_METRIC, bandwidth_usage_var)
 
+	docs_checked_old_var := oldSample.Get(DOCS_CHECKED_METRIC)
+	var docs_checked_old int64 = 0
+	if docs_checked_old_var != nil {
+		docs_checked_old = docs_checked_old_var.(metrics.Counter).Count()
+	}
+
 	//calculate docs_checked
 	docs_checked := stats_mgr.calculateDocsChecked()
 	docs_checked_var := new(expvar.Int)
@@ -532,11 +538,6 @@ func (stats_mgr *StatisticsManager) processCalculatedStats(oldSample metrics.Reg
 
 	//calculate rate_doc_checks
 	var rate_doc_checks float64
-	docs_checked_old_var := oldSample.Get(DOCS_CHECKED_METRIC)
-	var docs_checked_old int64 = 0
-	if docs_checked_old_var != nil {
-		docs_checked_old = docs_checked_old_var.(metrics.Counter).Count()
-	}
 	if docs_checked_old < 0 {
 		// a negative value indicates that this is the first stats run and there is no old value yet
 		rate_doc_checks = 0
