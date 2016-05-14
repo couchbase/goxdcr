@@ -935,8 +935,10 @@ func (xmem *XmemNozzle) batchReady() error {
 	}()
 
 	//move the batch to ready batches channel
-	if xmem.batch.count() > 0 {
-		xmem.Logger().Debugf("%v move the batch (count=%d) ready queue\n", xmem.Id(), xmem.batch.count())
+	// no need to lock batch since batch is always locked before entering batchReady()
+	count := xmem.batch.count()
+	if count > 0 {
+		xmem.Logger().Debugf("%v move the batch (count=%d) ready queue\n", xmem.Id(), count)
 		select {
 		case xmem.batches_ready_queue <- xmem.batch:
 			xmem.Logger().Debugf("%v There are %d batches in ready queue\n", xmem.Id(), len(xmem.batches_ready_queue))
@@ -996,6 +998,36 @@ func (xmem *XmemNozzle) accumuBatch(request *base.WrappedMCRequest) {
 	}
 }
 
+func (xmem *XmemNozzle) getBatch() *dataBatch {
+	xmem.batch_lock <- true
+	defer func() { <-xmem.batch_lock }()
+	return xmem.batch
+}
+
+// note that this method is specifically designed so that it never blocks
+// if this method blocks when batch_lock is locked, dead lock could happen in the following scenario:
+// 1. accumuBatch acquires batch_lock and tries to move xmem.batch into batches_ready_queue,
+//    which gets blocked because batches_ready_queue is full
+// 2. getBatchNonEmptyCh() is called within processData_sendbatch, which gets blocked since it
+//    cannot acquire batch_lock
+// 3. Once getBatchNonEmptyCh() is blocked, processData_sendbatch can never move to the next iteration and
+//    take batches off batches_ready_queue so as to unblock accumuBatch.
+//
+// if it failes to acquire batch_lock, it still proceeds and returns a closed chan
+// the caller, processData_sendbatch, will be able to proceed since reading from a closed channel does not block
+func (xmem *XmemNozzle) getBatchNonEmptyCh() chan bool {
+	select {
+	case xmem.batch_lock <- true:
+		defer func() { <-xmem.batch_lock }()
+		return xmem.batch.batch_nonempty_ch
+	default:
+		// create and return a closed channel so that caller can proceed
+		closed_ch := make(chan bool)
+		close(closed_ch)
+		return closed_ch
+	}
+}
+
 func (xmem *XmemNozzle) processData_sendbatch(finch chan bool, waitGrp *sync.WaitGroup) (err error) {
 	xmem.Logger().Infof("%v processData_sendbatch starts..........\n", xmem.Id())
 	defer waitGrp.Done()
@@ -1031,7 +1063,7 @@ func (xmem *XmemNozzle) processData_sendbatch(finch chan bool, waitGrp *sync.Wai
 				xmem.handleGeneralError(err)
 			}
 			xmem.recordBatchSize(batch.count())
-		case <-xmem.batch.batch_nonempty_ch:
+		case <-xmem.getBatchNonEmptyCh():
 			if xmem.validateRunningState() != nil {
 				xmem.Logger().Infof("%v has stopped.", xmem.Id())
 				goto done
@@ -1961,7 +1993,7 @@ func (xmem *XmemNozzle) selfMonitor(finch chan bool, waitGrp *sync.WaitGroup) {
 			repairCount_setMeta = xmem.client_for_setMeta.repairCount()
 			repairCount_getMeta = xmem.client_for_getMeta.repairCount()
 			if count == 10 {
-				xmem.Logger().Debugf("%v- freeze_counter=%v, xmem.counter_sent=%v, len(xmem.dataChan)=%v, receive_count-%v, cur_batch_count=%v\n", xmem_id, freeze_counter, xmem_count_sent, len(dataChan), received_count, xmem.batch.count())
+				xmem.Logger().Debugf("%v- freeze_counter=%v, xmem.counter_sent=%v, len(xmem.dataChan)=%v, receive_count-%v, cur_batch_count=%v\n", xmem_id, freeze_counter, xmem_count_sent, len(dataChan), received_count, xmem.getBatch().count())
 				xmem.Logger().Debugf("%v open=%v checking..., %v item unsent, %v items waiting for response, %v batches ready\n", xmem_id, isOpen, len(xmem.dataChan), int(buffer_size)-len(empty_slots_pos), len(batches_ready_queue))
 				count = 0
 			}
@@ -2132,7 +2164,7 @@ func (xmem *XmemNozzle) StatusSummary() string {
 		if counter_sent > 0 {
 			avg_wait_time = float64(atomic.LoadUint32(&xmem.counter_waittime)) / float64(counter_sent)
 		}
-		return fmt.Sprintf("%v state =%v connType=%v received %v items, sent %v items, %v items waiting to confirm, %v in queue, %v in current batch, avg wait time is %vms, size of last ten batches processed %v, len(batches_ready_queue)=%v\n", xmem.Id(), xmem.State(), connType, atomic.LoadUint32(&xmem.counter_received), atomic.LoadUint32(&xmem.counter_sent), xmem.buf.itemCountInBuffer(), len(xmem.dataChan), xmem.batch.count(), avg_wait_time, xmem.getLastTenBatchSize(), len(xmem.batches_ready_queue))
+		return fmt.Sprintf("%v state =%v connType=%v received %v items, sent %v items, %v items waiting to confirm, %v in queue, %v in current batch, avg wait time is %vms, size of last ten batches processed %v, len(batches_ready_queue)=%v\n", xmem.Id(), xmem.State(), connType, atomic.LoadUint32(&xmem.counter_received), atomic.LoadUint32(&xmem.counter_sent), xmem.buf.itemCountInBuffer(), len(xmem.dataChan), xmem.getBatch().count(), avg_wait_time, xmem.getLastTenBatchSize(), len(xmem.batches_ready_queue))
 	} else {
 		return fmt.Sprintf("%v state =%v ", xmem.Id(), xmem.State())
 	}
