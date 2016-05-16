@@ -1397,7 +1397,7 @@ func (xmem *XmemNozzle) batchGetMeta(bigDoc_map map[string]*base.WrappedMCReques
 							}
 							xmem.RaiseEvent(common.NewEvent(common.GetMetaReceived, nil, xmem, nil, additionalInfo))
 
-							if response.Status != mc.SUCCESS && !isIgnorableMCError(response.Status) && !isTemporaryMCError(response.Status) {
+							if response.Status != mc.SUCCESS && !isIgnorableMCError(response.Status) && !isTemporaryMCError(response.Status) && response.Status != mc.KEY_ENOENT {
 								// this response requires connection reset
 
 								// log the corresponding request to facilitate debugging
@@ -1453,6 +1453,8 @@ func (xmem *XmemNozzle) batchGetMeta(bigDoc_map map[string]*base.WrappedMCReques
 		} else {
 			if !ok || resp == nil {
 				xmem.Logger().Debugf("%v batchGetMeta: doc %s is not found in target system, send it", xmem.Id(), key)
+			} else if resp.Status == mc.KEY_ENOENT {
+				xmem.Logger().Errorf("%v batchGetMeta: doc %s does not exist on target. Skip conflict resolution and send the doc", xmem.Id(), key)
 			} else {
 				xmem.Logger().Infof("%v batchGetMeta: memcached response for doc %s has error status %v. Skip conflict resolution and send the doc", xmem.Id(), key, resp.Status)
 			}
@@ -1686,7 +1688,6 @@ func (xmem *XmemNozzle) receiveResponse(finch chan bool, waitGrp *sync.WaitGroup
 					//here we have received the response, so reset retry=0
 					_, err = xmem.buf.modSlot(pos, xmem.resendWithReset)
 				} else {
-					// for non-temporary errors, repair connections
 					var req *mc.MCRequest = nil
 					var seqno uint64
 					pos := xmem.getPosFromOpaque(response.Opaque)
@@ -1695,8 +1696,24 @@ func (xmem *XmemNozzle) receiveResponse(finch chan bool, waitGrp *sync.WaitGroup
 						req = wrappedReq.Req
 						seqno = wrappedReq.Seqno
 						if req != nil && req.Opaque == response.Opaque {
-							xmem.Logger().Errorf("%v received error response from setMeta client. Repairing connection. response status=%v, opcode=%v, seqno=%v, req.Key=%v, req.Cas=%v, req.Extras=%v\n", xmem.Id(), response.Status, response.Opcode, seqno, string(req.Key), req.Cas, req.Extras)
-							xmem.repairConn(xmem.client_for_setMeta, "error response from memcached", rev)
+							if response.Status == mc.KEY_ENOENT {
+								// KEY_ENOENT response is returned when a SetMeta request is on an existing document,
+								// i.e., doc with non-0 CAS, and the target cannot find the document.
+								// This is unlikely, but possible in the following scenario:
+								// 1. a document is created on source
+								// 2. the Document is replicated to target
+								// 3. the document is deleted on target and tombstone is removed.
+								// 4. the document is updated on source. this produces a SetWithMeta request with
+								//    non-0 CAS and will get ENOENT response from target
+								// this is an extremely rare scenario considering the fact that tombstones are kept for 7 days.
+								// make GOXDCR exhibit the same behavior as that of 3.x XDCR -> log the error and resend the doc
+								xmem.Logger().Errorf("%v received KEY_ENOENT error from setMeta client. response status=%v, opcode=%v, seqno=%v, req.Key=%v, req.Cas=%v, req.Extras=%v\n", xmem.Id(), response.Status, response.Opcode, seqno, string(req.Key), req.Cas, req.Extras)
+								_, err = xmem.buf.modSlot(pos, xmem.resendWithReset)
+							} else {
+								// for other non-temporary errors, repair connections
+								xmem.Logger().Errorf("%v received error response from setMeta client. Repairing connection. response status=%v, opcode=%v, seqno=%v, req.Key=%v, req.Cas=%v, req.Extras=%v\n", xmem.Id(), response.Status, response.Opcode, seqno, string(req.Key), req.Cas, req.Extras)
+								xmem.repairConn(xmem.client_for_setMeta, "error response from memcached", rev)
+							}
 						} else if req != nil {
 							xmem.Logger().Debugf("%v Got the response, response.Opaque=%v, req.Opaque=%v\n", xmem.Id(), response.Opaque, req.Opaque)
 						} else {
