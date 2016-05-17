@@ -1454,7 +1454,7 @@ func (xmem *XmemNozzle) batchGetMeta(bigDoc_map map[string]*base.WrappedMCReques
 			if !ok || resp == nil {
 				xmem.Logger().Debugf("%v batchGetMeta: doc %s is not found in target system, send it", xmem.Id(), key)
 			} else if resp.Status == mc.KEY_ENOENT {
-				xmem.Logger().Errorf("%v batchGetMeta: doc %s does not exist on target. Skip conflict resolution and send the doc", xmem.Id(), key)
+				xmem.Logger().Debugf("%v batchGetMeta: doc %s does not exist on target. Skip conflict resolution and send the doc", xmem.Id(), key)
 			} else {
 				xmem.Logger().Infof("%v batchGetMeta: memcached response for doc %s has error status %v. Skip conflict resolution and send the doc", xmem.Id(), key, resp.Status)
 			}
