@@ -76,6 +76,7 @@ const (
 	StatsInterval                  = "statsInterval"
 	ReplicationTypeValue           = "continuous"
 	GoMaxProcs                     = "goMaxProcs"
+	GoGC                           = "goGC"
 )
 
 // constants for parsing create replication response
@@ -143,6 +144,7 @@ var RestKeyToSettingsKeyMap = map[string]string{
 	LogLevel:      metadata.PipelineLogLevel,
 	StatsInterval: metadata.PipelineStatsInterval,
 	GoMaxProcs:    metadata.GoMaxProcs,
+	GoGC:          metadata.GoGC,
 }
 
 // internal replication settings key -> replication settings key in rest api
@@ -162,6 +164,7 @@ var SettingsKeyToRestKeyMap = map[string]string{
 	metadata.PipelineLogLevel:      LogLevel,
 	metadata.PipelineStatsInterval: StatsInterval,
 	metadata.GoMaxProcs:            GoMaxProcs,
+	metadata.GoGC:                  GoGC,
 }
 
 var logger_msgutil *log.CommonLogger = log.NewLogger("MessageUtils", log.DefaultLoggerContext)

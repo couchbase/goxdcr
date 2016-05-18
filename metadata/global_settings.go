@@ -17,27 +17,37 @@ var logger_ps *log.CommonLogger = log.NewLogger("GlobalSetting", log.DefaultLogg
 
 const (
 	GoMaxProcs = "gomaxprocs"
+	GoGC       = "gogc"
 	//setting that would be applied at the GOXDCR Process level that would affect all replications
 	DefaultGlobalSettingsKey = "GlobalSettings"
 	GlobalConfigurationKey   = "GlobalConfiguration"
 )
 
-var GoMaxProcsConfig = &SettingsConfig{4, nil}
+var GoMaxProcsConfig = &SettingsConfig{4, &Range{1, 10000}}
+
+// -1 indicates that GC is disabled completely
+var GoGCConfig = &SettingsConfig{100, &Range{-1, 10000}}
 
 var GlobalSettingsConfigMap = map[string]*SettingsConfig{
 	GoMaxProcs: GoMaxProcsConfig,
+	GoGC:       GoGCConfig,
 }
 
 type GlobalSettings struct {
 
 	//maxprocs setting for golang to use number of core in the system
 	GoMaxProcs int `json:"goMaxProcs"`
+	//gogc setting sets the initial garbage collection target percentage.
+	//a collection is triggered when the ratio of freshly allocated data to
+	//live data remaining after the previous collection reaches this percentage.
+	GoGC int `json:"goGC"`
 	// revision number to be used by metadata service. not included in json
 	Revision interface{}
 }
 
 func DefaultGlobalSettings() *GlobalSettings {
-	return &GlobalSettings{GoMaxProcs: GoMaxProcsConfig.defaultValue.(int)}
+	return &GlobalSettings{GoMaxProcs: GoMaxProcsConfig.defaultValue.(int),
+		GoGC: GoGCConfig.defaultValue.(int)}
 }
 
 func ValidateGlobalSettingsKey(settingsMap map[string]interface{}) (globalSettingsMap map[string]interface{}) {
@@ -46,6 +56,8 @@ func ValidateGlobalSettingsKey(settingsMap map[string]interface{}) (globalSettin
 	for key, val := range settingsMap {
 		switch key {
 		case GoMaxProcs:
+			fallthrough
+		case GoGC:
 			globalSettingsMap[key] = val
 		}
 	}
@@ -72,6 +84,16 @@ func (s *GlobalSettings) UpdateSettingsFromMap(settingsMap map[string]interface{
 				s.GoMaxProcs = maxprocs
 				changedSettingsMap[key] = maxprocs
 			}
+		case GoGC:
+			gogc, ok := val.(int)
+			if !ok {
+				errorMap[key] = simple_utils.IncorrectValueTypeInMapError(key, val, "int")
+				continue
+			}
+			if s.GoGC != gogc {
+				s.GoGC = gogc
+				changedSettingsMap[key] = gogc
+			}
 		}
 	}
 	return
@@ -80,6 +102,8 @@ func (s *GlobalSettings) UpdateSettingsFromMap(settingsMap map[string]interface{
 func ValidateAndConvertGlobalSettingsValue(key, value, errorKey string) (convertedValue interface{}, err error) {
 	switch key {
 	case GoMaxProcs:
+		fallthrough
+	case GoGC:
 		convertedValue, err = strconv.ParseInt(value, base.ParseIntBase, base.ParseIntBitSize)
 		if err != nil {
 			err = simple_utils.IncorrectValueTypeError("an integer")
@@ -87,12 +111,9 @@ func ValidateAndConvertGlobalSettingsValue(key, value, errorKey string) (convert
 		}
 		// convert it to int to make future processing easier
 		convertedValue = int(convertedValue.(int64))
-		maxprocs := convertedValue.(int)
 
-		if maxprocs <= 0 {
-			err = simple_utils.GenericInvalidValueError(errorKey)
-			return
-		}
+		// range check for int parameters
+		err = RangeCheck(convertedValue.(int), GlobalSettingsConfigMap[key])
 	default:
 		// a nil converted value indicates that the key is not a settings key
 		convertedValue = nil
@@ -103,6 +124,7 @@ func ValidateAndConvertGlobalSettingsValue(key, value, errorKey string) (convert
 func (s *GlobalSettings) ToMap() map[string]interface{} {
 	settings_map := make(map[string]interface{})
 	settings_map[GoMaxProcs] = s.GoMaxProcs
+	settings_map[GoGC] = s.GoGC
 	return settings_map
 }
 
@@ -120,5 +142,5 @@ func (s *GlobalSettings) String() string {
 	if s == nil {
 		return "nil"
 	}
-	return fmt.Sprintf("GoMaxProcs:%v", s.GoMaxProcs)
+	return fmt.Sprintf("GoMaxProcs:%v, GoGC:%v", s.GoMaxProcs, s.GoGC)
 }
