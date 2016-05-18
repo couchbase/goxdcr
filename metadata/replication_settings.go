@@ -434,14 +434,7 @@ func ValidateAndConvertSettingsValue(key, value, errorKey string) (convertedValu
 		convertedValue = int(convertedValue.(int64))
 
 		// range check for int parameters
-		settingsConfig, _ := SettingsConfigMap[key]
-		if settingsConfig.Range != nil {
-			intValue := convertedValue.(int)
-			if intValue < settingsConfig.Range.MinValue || intValue > settingsConfig.Range.MaxValue {
-				err = simple_utils.InvalidValueError("an integer", settingsConfig.Range.MinValue, settingsConfig.Range.MaxValue)
-				return
-			}
-		}
+		err = RangeCheck(convertedValue.(int), SettingsConfigMap[key])
 	default:
 		// a nil converted value indicates that the key is not a settings key
 		convertedValue = nil
@@ -499,4 +492,14 @@ func ValidateSettingsKey(settingsMap map[string]interface{}) (returnedSettingsMa
 		}
 	}
 	return
+}
+
+// range check for int parameters
+func RangeCheck(intValue int, settingsConfig *SettingsConfig) error {
+	if settingsConfig.Range != nil {
+		if intValue < settingsConfig.Range.MinValue || intValue > settingsConfig.Range.MaxValue {
+			return simple_utils.InvalidValueError("an integer", settingsConfig.Range.MinValue, settingsConfig.Range.MaxValue)
+		}
+	}
+	return nil
 }

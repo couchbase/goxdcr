@@ -24,6 +24,7 @@ import (
 	"github.com/couchbase/goxdcr/service_def"
 	"github.com/couchbase/goxdcr/utils"
 	"runtime"
+	"runtime/debug"
 	"sync"
 	"time"
 )
@@ -463,6 +464,11 @@ func (pscl *GlobalSettingChangeListener) globalSettingChangeHandlerCallback(sett
 			pscl.logger.Infof("Successfully changed  Max Process setting from(old) %v to(New) %v\n", currentValue, newSetting.GoMaxProcs)
 		}
 	}
+
+	// always sets gogc value since there is no way to check the current gogc value beforehand
+	oldGoGCValue := debug.SetGCPercent(newSetting.GoGC)
+	pscl.logger.Infof("Successfully changed  GOGC setting from(old) %v to(New) %v\n", oldGoGCValue, newSetting.GoGC)
+
 	return nil
 }
 
