@@ -315,8 +315,11 @@ func (capi *CapiNozzle) Stop() error {
 	for _, dataChan := range capi.vb_dataChan_map {
 		close(dataChan)
 	}
-	capi.Logger().Infof("%v closing batches ready\n", capi.Id())
-	close(capi.batches_ready)
+
+	if capi.batches_ready != nil {
+		capi.Logger().Infof("%v closing batches ready\n", capi.Id())
+		close(capi.batches_ready)
+	}
 
 	err = capi.Stop_server()
 
