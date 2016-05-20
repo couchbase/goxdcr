@@ -449,18 +449,21 @@ func (pipelineMgr *pipelineManager) launchUpdater(topic string, cur_err error, r
 
 	updater, err := newPipelineUpdater(topic, retry_interval, pipelineMgr.child_waitGrp, cur_err, rep_status, pipelineMgr.logger)
 	if err != nil {
+		pipelineMgr.logger.Error(err.Error())
 		return err
 	}
 	rep_status.Lock.Lock()
 	defer rep_status.Lock.Unlock()
 
-	pipelineMgr.child_waitGrp.Add(1)
-	go updater.start()
+	//SetUpdater could fail if another go routine has already started an updater. do not run updater in this case
 	err = rep_status.SetUpdater(updater)
 	if err != nil {
+		pipelineMgr.logger.Error(err.Error())
 		return err
 	}
 
+	pipelineMgr.child_waitGrp.Add(1)
+	go updater.start()
 	pipelineMgr.logger.Infof("Pipeline updater %v is lauched with retry_interval=%v\n", topic, retry_interval)
 	return nil
 }
