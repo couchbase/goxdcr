@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
+	"sync"
 )
 
 // MCResponse is memcached response
@@ -187,4 +188,72 @@ func (res *MCResponse) Receive(r io.Reader, hdrBytes []byte) (n int, err error) 
 	}
 
 	return n + m, err
+}
+
+type MCResponsePool struct {
+	pool *sync.Pool
+}
+
+func NewMCResponsePool() *MCResponsePool {
+	rv := &MCResponsePool{
+		pool: &sync.Pool{
+			New: func() interface{} {
+				return &MCResponse{}
+			},
+		},
+	}
+
+	return rv
+}
+
+func (this *MCResponsePool) Get() *MCResponse {
+	return this.pool.Get().(*MCResponse)
+}
+
+func (this *MCResponsePool) Put(r *MCResponse) {
+	if r == nil {
+		return
+	}
+
+	r.Extras = nil
+	r.Key = nil
+	r.Body = nil
+	r.Fatal = false
+
+	this.pool.Put(r)
+}
+
+type StringMCResponsePool struct {
+	pool *sync.Pool
+	size int
+}
+
+func NewStringMCResponsePool(size int) *StringMCResponsePool {
+	rv := &StringMCResponsePool{
+		pool: &sync.Pool{
+			New: func() interface{} {
+				return make(map[string]*MCResponse, size)
+			},
+		},
+		size: size,
+	}
+
+	return rv
+}
+
+func (this *StringMCResponsePool) Get() map[string]*MCResponse {
+	return this.pool.Get().(map[string]*MCResponse)
+}
+
+func (this *StringMCResponsePool) Put(m map[string]*MCResponse) {
+	if m == nil || len(m) > 2*this.size {
+		return
+	}
+
+	for k := range m {
+		m[k] = nil
+		delete(m, k)
+	}
+
+	this.pool.Put(m)
 }
