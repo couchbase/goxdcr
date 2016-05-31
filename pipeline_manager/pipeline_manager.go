@@ -126,14 +126,11 @@ func RemoveReplicationStatus(topic string) error {
 	rs.ResetStorage()
 	rs.SetUpdater(nil)
 
-	// stop replication if it is running
-	pipelineRunning := IsPipelineRunning(topic)
-	if pipelineRunning {
-		pipeline_mgr.logger.Infof("Stopping pipeline %v since the replication spec has been deleted\n", topic)
-		err := pipeline_mgr.stopPipeline(rs)
-		if err != nil {
-			pipeline_mgr.logger.Infof("Stopping pipeline %v failed with err = %v\n", topic, err)
-		}
+	// stop replication
+	pipeline_mgr.logger.Infof("Stopping pipeline %v since the replication spec has been deleted\n", topic)
+	err = pipeline_mgr.stopPipeline(rs)
+	if err != nil {
+		pipeline_mgr.logger.Infof("Stopping pipeline %v failed with err = %v\n", topic, err)
 	}
 
 	pipeline_mgr.repl_spec_svc.SetDerivedObj(topic, nil)
