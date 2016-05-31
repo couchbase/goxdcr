@@ -147,16 +147,12 @@ func (req *MCRequest) Receive(r io.Reader, hdrBytes []byte) (int, error) {
 	req.Opcode = CommandCode(hdrBytes[1])
 	// Vbucket at 6:7
 	req.VBucket = binary.BigEndian.Uint16(hdrBytes[6:])
-	bodyLen := int(binary.BigEndian.Uint32(hdrBytes[8:]) -
-		uint32(klen) - uint32(elen))
-	if bodyLen > MaxBodyLen {
-		return n, fmt.Errorf("%d is too big (max %d)",
-			bodyLen, MaxBodyLen)
-	}
+	totalBodyLen := int(binary.BigEndian.Uint32(hdrBytes[8:]))
+
 	req.Opaque = binary.BigEndian.Uint32(hdrBytes[12:])
 	req.Cas = binary.BigEndian.Uint64(hdrBytes[16:])
 
-	buf := make([]byte, klen+elen+bodyLen)
+	buf := make([]byte, totalBodyLen)
 	m, err := io.ReadFull(r, buf)
 	n += m
 	if err == nil {
@@ -168,6 +164,7 @@ func (req *MCRequest) Receive(r io.Reader, hdrBytes []byte) (int, error) {
 			// bytes of extra data give its length.
 			elen += int(binary.BigEndian.Uint16(buf))
 		}
+
 		req.Extras = buf[0:elen]
 		req.Key = buf[elen : klen+elen]
 
@@ -177,9 +174,14 @@ func (req *MCRequest) Receive(r io.Reader, hdrBytes []byte) (int, error) {
 			extMetaLen = int(binary.BigEndian.Uint16(req.Extras[28:30]))
 		}
 
-		valueLen := bodyLen - extMetaLen
-		req.Body = buf[klen+elen : klen+elen+valueLen]
-		req.ExtMeta = buf[klen+elen+valueLen:]
+		bodyLen := totalBodyLen - klen - elen - extMetaLen
+		if bodyLen > MaxBodyLen {
+			return n, fmt.Errorf("%d is too big (max %d)",
+				bodyLen, MaxBodyLen)
+		}
+
+		req.Body = buf[klen+elen : klen+elen+bodyLen]
+		req.ExtMeta = buf[klen+elen+bodyLen:]
 	}
 	return n, err
 }
