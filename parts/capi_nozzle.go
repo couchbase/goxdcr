@@ -169,7 +169,8 @@ type CapiNozzle struct {
 	//the total size of data (in bytes) queued in all data channels
 	bytes_in_dataChan int
 
-	client *net.TCPConn
+	client      *net.TCPConn
+	lock_client sync.RWMutex
 
 	//configurable parameter
 	config capiConfig
@@ -180,8 +181,8 @@ type CapiNozzle struct {
 	batches_nonempty_ch chan bool
 
 	//batches to be accumulated, one for each vb
-	vb_batch_map       map[uint16]*capiBatch
-	vb_batch_move_lock map[uint16]chan bool
+	vb_batch_map      map[uint16]*capiBatch
+	vb_batch_map_lock chan bool
 
 	childrenWaitGrp sync.WaitGroup
 
@@ -189,12 +190,13 @@ type CapiNozzle struct {
 	checker_finch     chan bool
 	selfMonitor_finch chan bool
 
-	counter_sent     int
-	counter_received int
-	start_time       time.Time
-	handle_error     bool
-	dataObj_recycler base.DataObjRecycler
-	topic            string
+	counter_sent      int
+	counter_received  int
+	start_time        time.Time
+	handle_error      bool
+	lock_handle_error sync.RWMutex
+	dataObj_recycler  base.DataObjRecycler
+	topic             string
 }
 
 func NewCapiNozzle(id string,
@@ -228,11 +230,12 @@ func NewCapiNozzle(id string,
 		selfMonitor_finch:   make(chan bool, 1),
 		batches_nonempty_ch: make(chan bool, 1),
 		//		send_allow_ch:    make(chan bool, 1), /*send_allow_ch chan bool*/
-		counter_sent:     0,
-		handle_error:     true,
-		counter_received: 0,
-		dataObj_recycler: dataObj_recycler,
-		topic:            topic,
+		counter_sent:      0,
+		handle_error:      true,
+		lock_handle_error: sync.RWMutex{},
+		counter_received:  0,
+		dataObj_recycler:  dataObj_recycler,
+		topic:             topic,
 	}
 
 	capi.config.connectStr = connectString
@@ -249,7 +252,15 @@ func NewCapiNozzle(id string,
 
 }
 
+func (capi *CapiNozzle) IsOpen() bool {
+	capi.lock_bOpen.RLock()
+	defer capi.lock_bOpen.RUnlock()
+	return capi.bOpen
+}
+
 func (capi *CapiNozzle) Open() error {
+	capi.lock_bOpen.Lock()
+	defer capi.lock_bOpen.Unlock()
 	if !capi.bOpen {
 		capi.bOpen = true
 
@@ -258,10 +269,39 @@ func (capi *CapiNozzle) Open() error {
 }
 
 func (capi *CapiNozzle) Close() error {
+	capi.lock_bOpen.Lock()
+	defer capi.lock_bOpen.Unlock()
 	if capi.bOpen {
 		capi.bOpen = false
 	}
 	return nil
+}
+
+func (capi *CapiNozzle) handleError() bool {
+	capi.lock_handle_error.RLock()
+	defer capi.lock_handle_error.RUnlock()
+	return capi.handle_error
+}
+
+func (capi *CapiNozzle) disableHandleError() {
+	capi.lock_handle_error.Lock()
+	defer capi.lock_handle_error.Unlock()
+	capi.handle_error = false
+}
+
+func (capi *CapiNozzle) getClient() *net.TCPConn {
+	capi.lock_client.RLock()
+	defer capi.lock_client.RUnlock()
+	return capi.client
+}
+
+func (capi *CapiNozzle) setClient(client *net.TCPConn) {
+	capi.lock_client.Lock()
+	defer capi.lock_client.Unlock()
+	if capi.client != nil {
+		capi.client.Close()
+	}
+	capi.client = client
 }
 
 func (capi *CapiNozzle) Start(settings map[string]interface{}) error {
@@ -329,11 +369,6 @@ func (capi *CapiNozzle) Stop() error {
 	return err
 }
 
-func (capi *CapiNozzle) IsOpen() bool {
-	ret := capi.bOpen
-	return ret
-}
-
 func (capi *CapiNozzle) batchReady(vbno uint16) error {
 	//move the batch to ready batches channel
 	defer func() {
@@ -362,6 +397,17 @@ func (capi *CapiNozzle) batchReady(vbno uint16) error {
 }
 
 func (capi *CapiNozzle) Receive(data interface{}) error {
+	// the attempt to write to dataChan may panic if dataChan has been closed
+	defer func() {
+		if r := recover(); r != nil {
+			capi.Logger().Errorf("%v recovered from %v", capi.Id(), r)
+			if capi.validateRunningState() == nil {
+				// report error only when capi is still in running state
+				capi.handleGeneralError(errors.New(fmt.Sprintf("%v", r)))
+			}
+		}
+	}()
+
 	capi.Logger().Debugf("%v data key=%v seq=%v vb=%v is received", capi.Id(), data.(*base.WrappedMCRequest).Req.Key, data.(*base.WrappedMCRequest).Seqno, data.(*base.WrappedMCRequest).Req.VBucket)
 	capi.Logger().Debugf("%v data channel len is %d\n", capi.Id(), capi.items_in_dataChan)
 
@@ -397,8 +443,8 @@ func (capi *CapiNozzle) Receive(data interface{}) error {
 }
 
 func (capi *CapiNozzle) accumuBatch(vbno uint16, request *base.WrappedMCRequest) {
-	capi.vb_batch_move_lock[vbno] <- true
-	defer func() { <-capi.vb_batch_move_lock[vbno] }()
+	capi.vb_batch_map_lock <- true
+	defer func() { <-capi.vb_batch_map_lock }()
 
 	batch := capi.vb_batch_map[vbno]
 	isFirst, isFull := batch.accumuBatch(request, capi.optimisticRep)
@@ -453,39 +499,23 @@ func (capi *CapiNozzle) processData_batch(finch chan bool, waitGrp *sync.WaitGro
 			}
 
 			if len(capi.batches_ready) == 0 {
-				var max_count uint32 = 0
-				var max_batch_vbno uint16 = 0
-				for vbno, batch := range capi.vb_batch_map {
-					if batch.count() > max_count {
-						max_count = batch.count()
-						max_batch_vbno = vbno
-					}
-				}
 
+				max_count, max_batch_vbno := capi.getBatchWithMaxCount()
 				if max_count > 0 {
 					select {
-					case capi.vb_batch_move_lock[max_batch_vbno] <- true:
+					case capi.vb_batch_map_lock <- true:
 						capi.batchReady(max_batch_vbno)
-						<-capi.vb_batch_move_lock[max_batch_vbno]
+						<-capi.vb_batch_map_lock
 					default:
 					}
 				}
 			}
 
-			nonEmptyBatchExists := false
 			// check if a token needs to be put back into batches_nonempty_ch,
 			// i.e., check if there is at least one non-empty batch remaining
-			for _, batch := range capi.vb_batch_map {
-				select {
-				case <-batch.batch_nonempty_ch:
-					nonEmptyBatchExists = true
-					break
-				default:
-					continue
-				}
-			}
+			nonEmptyBatchExist := capi.checkIfNonEmptyBatchExist()
 
-			if nonEmptyBatchExists {
+			if nonEmptyBatchExist {
 				select {
 				case capi.batches_nonempty_ch <- true:
 				default:
@@ -498,6 +528,51 @@ func (capi *CapiNozzle) processData_batch(finch chan bool, waitGrp *sync.WaitGro
 done:
 	capi.Logger().Infof("%v processData_batch exits\n", capi.Id())
 	return
+}
+
+func (capi *CapiNozzle) getBatchWithMaxCount() (max_count uint32, max_batch_vbno uint16) {
+	max_count = 0
+	max_batch_vbno = 0
+
+	select {
+	case capi.vb_batch_map_lock <- true:
+		for vbno, batch := range capi.vb_batch_map {
+			if batch.count() > max_count {
+				max_count = batch.count()
+				max_batch_vbno = vbno
+			}
+		}
+		<-capi.vb_batch_map_lock
+	default:
+		// if cannot acquire lock on batch_map, return right away
+	}
+
+	return
+}
+
+func (capi *CapiNozzle) checkIfNonEmptyBatchExist() bool {
+	nonEmptyBatchExist := false
+
+	select {
+	case capi.vb_batch_map_lock <- true:
+	outer:
+		for _, batch := range capi.vb_batch_map {
+			select {
+			case <-batch.batch_nonempty_ch:
+				nonEmptyBatchExist = true
+				break outer
+			default:
+				continue
+			}
+		}
+		<-capi.vb_batch_map_lock
+	default:
+		// if cannot acquire lock on batch_map, return right away
+		// return true to ensure that we will be checking for nonempty channels in the next iteration
+		nonEmptyBatchExist = true
+	}
+
+	return nonEmptyBatchExist
 }
 
 func (capi *CapiNozzle) send_internal(batch *capiBatch) error {
@@ -664,7 +739,7 @@ func (capi *CapiNozzle) batchSendWithRetry(batch *capiBatch) error {
 
 func (capi *CapiNozzle) onExit() {
 	//in the process of stopping, no need to report any error to replication manager anymore
-	capi.handle_error = false
+	capi.disableHandleError()
 
 	//notify the data processing routine
 	close(capi.sender_finch)
@@ -674,7 +749,10 @@ func (capi *CapiNozzle) onExit() {
 
 	//cleanup
 	capi.Logger().Infof("%v releasing capi client", capi.Id())
-	capi.client.Close()
+	client := capi.getClient()
+	if client != nil {
+		client.Close()
+	}
 
 }
 
@@ -898,9 +976,11 @@ func (capi *CapiNozzle) tcpProxy(vbno uint16, part_ch chan []byte, resp_ch chan 
 			capi.Logger().Debugf("%v tcpProxy routine is exiting because of closure of finch\n", capi.Id())
 			return
 		case part, ok := <-part_ch:
+
 			if ok {
-				capi.client.SetWriteDeadline(time.Now().Add(capi.config.writeTimeout))
-				_, err := capi.client.Write(part)
+				client := capi.getClient()
+				client.SetWriteDeadline(time.Now().Add(capi.config.writeTimeout))
+				_, err := client.Write(part)
 				capi.Logger().Debugf("%v wrote body part. part=%v, err=%v\n", capi.Id(), string(part), err)
 				if err != nil {
 					capi.Logger().Errorf("Received error when writing boby part. err=%v\n", err)
@@ -912,7 +992,9 @@ func (capi *CapiNozzle) tcpProxy(vbno uint16, part_ch chan []byte, resp_ch chan 
 				capi.Logger().Debugf("%v tcpProxy routine starting to receive response since all body parts have been sent\n", capi.Id())
 
 				// read response
-				capi.client.SetReadDeadline(time.Now().Add(capi.config.readTimeout))
+				client := capi.getClient()
+				client.SetReadDeadline(time.Now().Add(capi.config.readTimeout))
+				
 				response, err := http.ReadResponse(bufio.NewReader(capi.client), nil)
 				if err != nil || response == nil {
 					errMsg := fmt.Sprintf("Error reading response. vb=%v, err=%v\n", vbno, trimErrorMessage(err))
@@ -1035,9 +1117,8 @@ func (capi *CapiNozzle) initialize(settings map[string]interface{}) error {
 
 	//init new batches
 	capi.vb_batch_map = make(map[uint16]*capiBatch)
-	capi.vb_batch_move_lock = make(map[uint16]chan bool)
+	capi.vb_batch_map_lock = make(chan bool, 1)
 	for vbno, _ := range capi.config.vbCouchApiBaseMap {
-		capi.vb_batch_move_lock[vbno] = make(chan bool, 1)
 		capi.initNewBatch(vbno)
 	}
 
@@ -1059,7 +1140,7 @@ func (capi *CapiNozzle) StatusSummary() string {
 }
 
 func (capi *CapiNozzle) handleGeneralError(err error) {
-	if capi.handle_error {
+	if capi.handleError() {
 		capi.Logger().Errorf("%v raise error condition %v\n", capi.Id(), err)
 		capi.RaiseEvent(common.NewEvent(common.ErrorEncountered, nil, capi, nil, err))
 	} else {
@@ -1114,10 +1195,6 @@ func (capi *CapiNozzle) initializeOrResetConn(initializing bool) error {
 		return nil
 	}
 
-	if capi.client != nil {
-		capi.client.Close()
-	}
-
 	var pool *base.TCPConnPool
 	var err error
 
@@ -1132,24 +1209,22 @@ func (capi *CapiNozzle) initializeOrResetConn(initializing bool) error {
 	}
 
 	if pool != nil {
-		var client *net.TCPConn
-		client, err = pool.GetNew()
-		if err == nil && client != nil {
-			capi.client = client
+		var newClient *net.TCPConn
+		newClient, err = pool.GetNew()
+		if err == nil && newClient != nil {
+			// same settings as erlang xdcr
+			newClient.SetKeepAlive(true)
+			newClient.SetNoDelay(false)
+			capi.setClient(newClient)
 		}
 	}
 
-	if err == nil {
-		// same settings as erlang xdcr
-		capi.client.SetKeepAlive(true)
-		capi.client.SetNoDelay(false)
-		capi.Logger().Debugf("%v - The connection for capi client is reset successfully\n", capi.Id())
-		return nil
-	} else {
+	if err != nil {
 		capi.Logger().Errorf("%v - Connection reset failed. err=%v\n", capi.Id(), err)
 		capi.handleGeneralError(err)
-		return err
 	}
+
+	return err
 }
 
 func (capi *CapiNozzle) UpdateSettings(settings map[string]interface{}) error {
