@@ -383,7 +383,18 @@ func (stats_mgr *StatisticsManager) processRawStats() error {
 		return err
 	}
 
+	// save existing values in overview registry for rate stats calculation
 	oldSample := stats_mgr.getOverviewRegistry()
+	docs_written_old := oldSample.Get(DOCS_WRITTEN_METRIC).(metrics.Counter).Count()
+	docs_received_dcp_old := oldSample.Get(DOCS_RECEIVED_DCP_METRIC).(metrics.Counter).Count()
+	docs_opt_repd_old := oldSample.Get(DOCS_OPT_REPD_METRIC).(metrics.Counter).Count()
+	data_replicated_old := oldSample.Get(DATA_REPLICATED_METRIC).(metrics.Counter).Count()
+	docs_checked_old_var := oldSample.Get(DOCS_CHECKED_METRIC)
+	var docs_checked_old int64 = 0
+	if docs_checked_old_var != nil {
+		docs_checked_old = docs_checked_old_var.(metrics.Counter).Count()
+	}
+
 	stats_mgr.initOverviewRegistry()
 
 	sample_stats_list_map := make(map[string][]*SampleStats)
@@ -461,7 +472,8 @@ func (stats_mgr *StatisticsManager) processRawStats() error {
 	})
 
 	//calculate additional metrics
-	err = stats_mgr.processCalculatedStats(oldSample, map_for_overview)
+	err = stats_mgr.processCalculatedStats(map_for_overview, docs_written_old, docs_received_dcp_old,
+		docs_opt_repd_old, data_replicated_old, docs_checked_old)
 	if err != nil {
 		return err
 	}
@@ -471,7 +483,8 @@ func (stats_mgr *StatisticsManager) processRawStats() error {
 	return nil
 }
 
-func (stats_mgr *StatisticsManager) processCalculatedStats(oldSample metrics.Registry, overview_expvar_map *expvar.Map) error {
+func (stats_mgr *StatisticsManager) processCalculatedStats(overview_expvar_map *expvar.Map, docs_written_old,
+	docs_received_dcp_old, docs_opt_repd_old, data_replicated_old, docs_checked_old int64) error {
 
 	//calculate docs_processed
 	docs_processed := stats_mgr.calculateDocsProcessed()
@@ -492,7 +505,6 @@ func (stats_mgr *StatisticsManager) processCalculatedStats(oldSample metrics.Reg
 
 	//calculate rate_replication
 	docs_written := stats_mgr.getOverviewRegistry().Get(DOCS_WRITTEN_METRIC).(metrics.Counter).Count()
-	docs_written_old := oldSample.Get(DOCS_WRITTEN_METRIC).(metrics.Counter).Count()
 	interval_in_sec := stats_mgr.update_interval.Seconds()
 	rate_replicated := float64(docs_written-docs_written_old) / interval_in_sec
 	rate_replicated_var := new(expvar.Float)
@@ -501,14 +513,12 @@ func (stats_mgr *StatisticsManager) processCalculatedStats(oldSample metrics.Reg
 
 	//calculate rate_received_from_dcp
 	docs_received_dcp := stats_mgr.getOverviewRegistry().Get(DOCS_RECEIVED_DCP_METRIC).(metrics.Counter).Count()
-	docs_received_dcp_old := oldSample.Get(DOCS_RECEIVED_DCP_METRIC).(metrics.Counter).Count()
 	rate_received_dcp := float64(docs_received_dcp-docs_received_dcp_old) / interval_in_sec
 	rate_received_dcp_var := new(expvar.Float)
 	rate_received_dcp_var.Set(rate_received_dcp)
 	overview_expvar_map.Set(RATE_RECEIVED_DCP_METRIC, rate_received_dcp_var)
 
 	//calculate rate_doc_opt_repd
-	docs_opt_repd_old := oldSample.Get(DOCS_OPT_REPD_METRIC).(metrics.Counter).Count()
 	docs_opt_repd := stats_mgr.getOverviewRegistry().Get(DOCS_OPT_REPD_METRIC).(metrics.Counter).Count()
 	rate_opt_repd := float64(docs_opt_repd-docs_opt_repd_old) / interval_in_sec
 	rate_opt_repd_var := new(expvar.Float)
@@ -516,18 +526,11 @@ func (stats_mgr *StatisticsManager) processCalculatedStats(oldSample metrics.Reg
 	overview_expvar_map.Set(RATE_OPT_REPD_METRIC, rate_opt_repd_var)
 
 	//calculate bandwidth_usage
-	data_replicated_old := oldSample.Get(DATA_REPLICATED_METRIC).(metrics.Counter).Count()
 	data_replicated := stats_mgr.getOverviewRegistry().Get(DATA_REPLICATED_METRIC).(metrics.Counter).Count()
 	bandwidth_usage := float64(data_replicated-data_replicated_old) / interval_in_sec
 	bandwidth_usage_var := new(expvar.Float)
 	bandwidth_usage_var.Set(bandwidth_usage)
 	overview_expvar_map.Set(BANDWIDTH_USAGE_METRIC, bandwidth_usage_var)
-
-	docs_checked_old_var := oldSample.Get(DOCS_CHECKED_METRIC)
-	var docs_checked_old int64 = 0
-	if docs_checked_old_var != nil {
-		docs_checked_old = docs_checked_old_var.(metrics.Counter).Count()
-	}
 
 	//calculate docs_checked
 	docs_checked := stats_mgr.calculateDocsChecked()
