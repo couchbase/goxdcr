@@ -208,11 +208,8 @@ func (rs *ReplicationStatus) SetOverviewStats(stats *expvar.Map) {
 }
 
 func (rs *ReplicationStatus) CleanupBeforeExit(statsToClear []string) {
-	errList := rs.Errors()
 	overviewStats := rs.GetOverviewStats()
 	rs.ResetStorage()
-	// preserve error list
-	rs.err_list = errList
 	// clear a subset of stats and preserve the rest
 	if overviewStats != nil {
 		zero_var := new(expvar.Int)
@@ -334,7 +331,9 @@ func (rs *ReplicationStatus) GetProgress() string {
 }
 
 func (rs *ReplicationStatus) String() string {
-	return fmt.Sprintf("name={%v}, status={%v}, errors={%v}, progress={%v}\n", rs.specId, rs.RuntimeStatus(true), rs.Errors(), rs.progress)
+	rs.Lock.RLock()
+	defer rs.Lock.RUnlock()
+	return fmt.Sprintf("name={%v}, status={%v}, errors={%v}, progress={%v}\n", rs.specId, rs.RuntimeStatus(false), rs.err_list, rs.progress)
 }
 
 func (rs *ReplicationStatus) Updater() interface{} {
