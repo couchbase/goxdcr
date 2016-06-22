@@ -583,7 +583,6 @@ func (c *Client) CASNext(vb uint16, k string, exp int, state *CASState) bool {
 				req.Body = state.Value
 
 				flags := 0
-				exp := 0 // ??? Should we use initialexp here instead?
 				binary.BigEndian.PutUint64(req.Extras, uint64(flags)<<32|uint64(exp))
 			}
 			state.resp, state.Err = c.Send(req)
