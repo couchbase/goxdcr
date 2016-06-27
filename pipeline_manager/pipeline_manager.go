@@ -612,7 +612,11 @@ func (r *pipelineUpdater) start() {
 
 //update the pipeline
 func (r *pipelineUpdater) update() bool {
-	r.logger.Infof("Try to fix Pipeline %v. Current error=%v \n", r.pipeline_name, r.current_error)
+	if r.current_error == nil {
+		r.logger.Infof("Try to start Pipeline %v. \n", r.pipeline_name)
+	} else {
+		r.logger.Infof("Try to fix Pipeline %v. Current error=%v \n", r.pipeline_name, r.current_error)
+	}
 
 	err := r.updateState(Updater_Running)
 	if err != nil {
