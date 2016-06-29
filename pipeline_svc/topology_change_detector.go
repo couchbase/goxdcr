@@ -455,12 +455,28 @@ func (top_detect_svc *TopologyChangeDetectorSvc) restartPipeline(err error) {
 
 func (top_detect_svc *TopologyChangeDetectorSvc) performCheckpoint() {
 	top_detect_svc.logger.Infof("ToplogyChangeDetectorSvc for pipeline %v starting checkpoint", top_detect_svc.pipeline.Topic())
-	defer top_detect_svc.logger.Infof("ToplogyChangeDetectorSvc for pipeline %v completed checkpoint", top_detect_svc.pipeline.Topic())
-
 	ckmgr := top_detect_svc.pipeline.RuntimeContext().Service(base.CHECKPOINT_MGR_SVC).(*CheckpointManager)
 
 	timeout_ticker := time.NewTicker(base.TopologyChangeCheckpointTimeout)
 	defer timeout_ticker.Stop()
 
-	ckmgr.PerformCkpt(timeout_ticker.C, 0)
+	ret := make(chan bool, 1)
+	close_ch := make(chan bool, 1)
+
+	go func(finch chan bool) {
+		ckmgr.PerformCkpt(close_ch, base.TopologyChangeCheckpointTimeout)
+		finch <- true
+	}(ret)
+
+	for {
+		select {
+		case <-ret:
+			top_detect_svc.logger.Infof("ToplogyChangeDetectorSvc for pipeline %v completed checkpoint", top_detect_svc.pipeline.Topic())
+			return
+		case <-timeout_ticker.C:
+			close(close_ch)
+			top_detect_svc.logger.Infof("ToplogyChangeDetectorSvc for pipeline %v timed out after %v", top_detect_svc.pipeline.Topic(), base.TopologyChangeCheckpointTimeout)
+			return
+		}
+	}
 }
