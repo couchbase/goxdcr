@@ -628,7 +628,7 @@ func (ckmgr *CheckpointManager) checkpointing() {
 
 	ticker := <-ckmgr.checkpoint_ticker_ch
 
-	children_fin_ch := make(chan time.Time)
+	children_fin_ch := make(chan bool)
 	children_wait_grp := &sync.WaitGroup{}
 
 	first := true
@@ -641,7 +641,7 @@ func (ckmgr *CheckpointManager) checkpointing() {
 			// wait for existing, if any, performCkpt routine to finish before setting new ticker
 			close(children_fin_ch)
 			children_wait_grp.Wait()
-			children_fin_ch = make(chan time.Time)
+			children_fin_ch = make(chan bool)
 
 			ticker.Stop()
 			ticker = new_ticker
@@ -671,33 +671,64 @@ func (ckmgr *CheckpointManager) checkpointing() {
 }
 
 // public API. performs one checkpoint operation on request
-func (ckmgr *CheckpointManager) PerformCkpt(fin_ch <-chan time.Time, time_to_wait time.Duration) {
-	ckmgr.performCkpt_internal(fin_ch, time_to_wait)
+func (ckmgr *CheckpointManager) PerformCkpt(fin_ch <-chan bool, time_to_wait time.Duration) {
+	ckmgr.logger.Infof("Start one time checkpointing for replication %v with %v workers\n", ckmgr.pipeline.Topic(), base.MaxWorkersForCheckpointing)
+	defer ckmgr.logger.Infof("Done one time checkpointing for replication %v\n", ckmgr.pipeline.Topic())
+
+	//divide the workload to several getter and run the getter parallelly
+	vb_list := ckmgr.getMyVBs()
+	simple_utils.RandomizeUint16List(vb_list)
+	number_of_vbs := len(vb_list)
+
+	number_of_workers := base.MaxWorkersForCheckpointing
+	if number_of_workers > number_of_vbs {
+		number_of_workers = number_of_vbs
+	}
+	load_distribution := simple_utils.BalanceLoad(number_of_workers, number_of_vbs)
+
+	worker_wait_grp := &sync.WaitGroup{}
+	for i := 0; i < number_of_workers; i++ {
+		vb_list_worker := make([]uint16, 0)
+		for index := load_distribution[i][0]; index < load_distribution[i][1]; index++ {
+			vb_list_worker = append(vb_list_worker, vb_list[index])
+		}
+
+		worker_wait_grp.Add(1)
+		// do not wait between vbuckets
+		go ckmgr.performCkpt_internal(vb_list_worker, fin_ch, worker_wait_grp, 0)
+	}
+
+	//wait for all the getter done, then gather result
+	worker_wait_grp.Wait()
 }
 
 // local API. supports periodical checkpoint operations
-func (ckmgr *CheckpointManager) performCkpt(fin_ch <-chan time.Time, wait_grp *sync.WaitGroup) {
-	defer wait_grp.Done()
-	ckmgr.performCkpt_internal(fin_ch, ckmgr.ckpt_interval)
+func (ckmgr *CheckpointManager) performCkpt(fin_ch <-chan bool, wait_grp *sync.WaitGroup) {
+	ckmgr.logger.Infof("Start checkpointing for replication %v\n", ckmgr.pipeline.Topic())
+	defer ckmgr.logger.Infof("Done checkpointing for replication %v\n", ckmgr.pipeline.Topic())
+	ckmgr.performCkpt_internal(ckmgr.getMyVBs(), fin_ch, wait_grp, ckmgr.ckpt_interval)
 }
 
-func (ckmgr *CheckpointManager) performCkpt_internal(fin_ch <-chan time.Time, time_to_wait time.Duration) {
-	interval_btwn_vb := time.Duration((time_to_wait.Seconds()/float64(len(ckmgr.getMyVBs())))*1000) * time.Millisecond
-	ckmgr.logger.Infof("Checkpointing for replication %v, interval_btwn_vb=%v sec\n", ckmgr.pipeline.Topic(), interval_btwn_vb.Seconds())
+func (ckmgr *CheckpointManager) performCkpt_internal(vb_list []uint16, fin_ch <-chan bool, wait_grp *sync.WaitGroup, time_to_wait time.Duration) {
+	defer wait_grp.Done()
+
+	var interval_btwn_vb time.Duration
+	if time_to_wait != 0 {
+		interval_btwn_vb = time.Duration((time_to_wait.Seconds()/float64(len(vb_list)))*1000) * time.Millisecond
+	}
+	ckmgr.logger.Infof("Checkpointing for replication %v, vb_list=%v, time_to_wait=%v, interval_btwn_vb=%v sec\n", ckmgr.pipeline.Topic(), vb_list, time_to_wait, interval_btwn_vb.Seconds())
 	err_map := make(map[uint16]error)
 	var total_committing_time float64 = 0
-	listOfVBs := ckmgr.getMyVBs()
-	simple_utils.RandomizeUint16List(listOfVBs)
 
-	for index, vb := range listOfVBs {
+	for index, vb := range vb_list {
 		select {
 		case <-fin_ch:
-			ckmgr.logger.Infof("Aborting checkpointing routine for %v since received finish signal. index=%v\n", ckmgr.pipeline.Topic(), index)
+			ckmgr.logger.Infof("Aborting checkpointing routine for %v with vb list %v since received finish signal. index=%v\n", ckmgr.pipeline.Topic(), vb_list, index)
 			return
 		default:
 			if ckmgr.pipeline.State() != common.Pipeline_Running {
 				//pipeline is no longer running, return
-				ckmgr.logger.Infof("Pipeline %v is no longer running, exit do_checkpointing. index=%v\n", ckmgr.pipeline.Topic(), index)
+				ckmgr.logger.Infof("Pipeline %v is no longer running, exit do_checkpointing for vb list %v. index=%v\n", ckmgr.pipeline.Topic(), vb_list, index)
 				return
 			}
 
@@ -710,14 +741,14 @@ func (ckmgr *CheckpointManager) performCkpt_internal(fin_ch <-chan time.Time, ti
 				err_map[vb] = err
 			}
 
-			if index < len(listOfVBs)-1 {
+			if interval_btwn_vb != 0 && index < len(vb_list)-1 {
 				time.Sleep(interval_btwn_vb)
 			}
 
 		}
 	}
 
-	ckmgr.logger.Infof("Done checkpointing for replication %v\n", ckmgr.pipeline.Topic())
+	ckmgr.logger.Infof("Done checkpointing for replication %v with vb list %v\n", ckmgr.pipeline.Topic(), vb_list)
 	if len(err_map) > 0 {
 		ckmgr.logger.Infof("Errors encountered in checkpointing for replication %v: %v\n", ckmgr.pipeline.Topic(), err_map)
 	}

@@ -17,6 +17,7 @@ import (
 	"github.com/couchbase/goxdcr/pipeline_utils"
 	"github.com/couchbase/goxdcr/service_def"
 	"github.com/couchbase/goxdcr/service_impl"
+	"github.com/couchbase/goxdcr/simple_utils"
 	"github.com/couchbase/goxdcr/supervisor"
 	"github.com/couchbase/goxdcr/utils"
 	"math"
@@ -164,42 +165,6 @@ func min(num1 int, num2 int) int {
 	return int(math.Min(float64(num1), float64(num2)))
 }
 
-// evenly distribute load across workers
-// assumes that num_of_worker <= num_of_load
-// returns load_distribution [][]int, where
-//     load_distribution[i][0] is the start index, inclusive, of load for ith worker
-//     load_distribution[i][1] is the end index, exclusive, of load for ith worker
-// note that load is zero indexed, i.e., indexed as 0, 1, .. N-1 for N loads
-func balanceLoad(num_of_worker int, num_of_load int) [][]int {
-	load_distribution := make([][]int, 0)
-
-	max_load_per_worker := int(math.Ceil(float64(num_of_load) / float64(num_of_worker)))
-	num_of_worker_with_max_load := num_of_load - (max_load_per_worker-1)*num_of_worker
-
-	index := 0
-	var num_of_load_per_worker int
-	for i := 0; i < num_of_worker; i++ {
-		if i < num_of_worker_with_max_load {
-			num_of_load_per_worker = max_load_per_worker
-		} else {
-			num_of_load_per_worker = max_load_per_worker - 1
-		}
-
-		load_for_worker := make([]int, 2)
-		load_for_worker[0] = index
-		index += num_of_load_per_worker
-		load_for_worker[1] = index
-
-		load_distribution = append(load_distribution, load_for_worker)
-	}
-
-	if index != num_of_load {
-		panic(fmt.Sprintf("number of load processed %v does not match total number of load %v", index, num_of_load))
-	}
-
-	return load_distribution
-}
-
 // get nozzle list from nozzle map
 func getNozzleList(nozzle_map map[string]common.Nozzle) []common.Nozzle {
 	nozzle_list := make([]common.Nozzle, 0)
@@ -215,7 +180,7 @@ func (xdcrf *XDCRFactory) registerAsyncListenersOnSources(pipeline common.Pipeli
 
 	num_of_sources := len(sources)
 	num_of_listeners := min(num_of_sources, base.MaxNumberOfAsyncListeners)
-	load_distribution := balanceLoad(num_of_listeners, num_of_sources)
+	load_distribution := simple_utils.BalanceLoad(num_of_listeners, num_of_sources)
 	xdcrf.logger.Infof("topic=%v, num_of_sources=%v, num_of_listeners=%v, load_distribution=%v\n", pipeline.Topic(), num_of_sources, num_of_listeners, load_distribution)
 
 	for i := 0; i < num_of_listeners; i++ {
@@ -246,7 +211,7 @@ func (xdcrf *XDCRFactory) registerAsyncListenersOnTargets(pipeline common.Pipeli
 	targets := getNozzleList(pipeline.Targets())
 	num_of_targets := len(targets)
 	num_of_listeners := min(num_of_targets, base.MaxNumberOfAsyncListeners)
-	load_distribution := balanceLoad(num_of_listeners, num_of_targets)
+	load_distribution := simple_utils.BalanceLoad(num_of_listeners, num_of_targets)
 	xdcrf.logger.Infof("topic=%v, num_of_targets=%v, num_of_listeners=%v, load_distribution=%v\n", pipeline.Topic(), num_of_targets, num_of_listeners, load_distribution)
 
 	for i := 0; i < num_of_listeners; i++ {
@@ -301,7 +266,7 @@ func (xdcrf *XDCRFactory) constructSourceNozzles(spec *metadata.ReplicationSpeci
 
 		// the number of dcpNozzle nodes to construct is the smaller of vbucket list size and source connection size
 		numOfDcpNozzles := min(numOfVbs, maxNozzlesPerNode)
-		load_distribution := balanceLoad(numOfDcpNozzles, numOfVbs)
+		load_distribution := simple_utils.BalanceLoad(numOfDcpNozzles, numOfVbs)
 		xdcrf.logger.Infof("topic=%v, numOfDcpNozzles=%v, numOfVbs=%v, load_distribution=%v\n", spec.Id, numOfDcpNozzles, numOfVbs, load_distribution)
 
 		for i := 0; i < numOfDcpNozzles; i++ {
@@ -403,7 +368,7 @@ func (xdcrf *XDCRFactory) constructOutgoingNozzles(spec *metadata.ReplicationSpe
 		numOfVbs := len(relevantVBs)
 		// the number of xmem nozzles to construct is the smaller of vbucket list size and target connection size
 		numOfOutNozzles := min(numOfVbs, maxTargetNozzlePerNode)
-		load_distribution := balanceLoad(numOfOutNozzles, numOfVbs)
+		load_distribution := simple_utils.BalanceLoad(numOfOutNozzles, numOfVbs)
 		xdcrf.logger.Infof("topic=%v, numOfOutNozzles=%v, numOfVbs=%v, load_distribution=%v\n", spec.Id, numOfOutNozzles, numOfVbs, load_distribution)
 
 		for i := 0; i < numOfOutNozzles; i++ {
