@@ -30,9 +30,8 @@ import (
 )
 
 const (
-	MAX_PAYLOAD_SIZE    uint32        = 1000
-	DialTimeoutDuration time.Duration = 3 * time.Second
-	ReadWriteDeadline   time.Duration = 1 * time.Second
+	MAX_PAYLOAD_SIZE  uint32        = 1000
+	ReadWriteDeadline time.Duration = 1 * time.Second
 )
 
 type ConnType int
@@ -44,7 +43,7 @@ const (
 )
 
 var (
-	dialer *net.Dialer = &net.Dialer{Timeout: DialTimeoutDuration}
+	dialer *net.Dialer = &net.Dialer{Timeout: ShortHttpTimeout}
 )
 
 func (connType ConnType) String() string {
@@ -127,7 +126,7 @@ var _connPoolMgr connPoolMgr
 // ensure that _connPoolMgr is initialized
 func init() {
 	ConnPoolMgr()
-	mcc.DefaultDialTimeout = DialTimeoutDuration
+	mcc.DefaultDialTimeout = ShortHttpTimeout
 }
 
 var WrongConnTypeError = errors.New("There is an exiting pool with the same name but with different connection type")
