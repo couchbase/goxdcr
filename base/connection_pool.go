@@ -72,6 +72,7 @@ type ConnPool interface {
 	MaxConn() int
 	ConnType() ConnType
 	Hostname() string
+	Password() string
 	Close()
 	Stale() bool
 	SetStale(stale bool)
@@ -170,6 +171,10 @@ func (p *connPool) Name() string {
 
 func (p *connPool) Hostname() string {
 	return p.hostName
+}
+
+func (p *connPool) Password() string {
+	return p.password
 }
 
 func (p *connPool) Size() int {
@@ -468,8 +473,7 @@ func (connPoolMgr *connPoolMgr) GetOrCreatePool(poolNameToCreate string, hostnam
 	if ok {
 		_, ok = pool.(*connPool)
 		if ok {
-			// do not return pool if pool size does not match, e.g., when the numTargetNozzlePerNode setting has been changed.
-			if !pool.Stale() {
+			if !pool.Stale() && pool.Password() == password {
 				return pool, nil
 			} else {
 				ConnPoolMgr().logger.Infof("Removing pool %v. stale=%v, new size=%v, old size=%v", poolNameToCreate, pool.Stale(), connsize, pool.MaxConn())
@@ -509,7 +513,7 @@ func (connPoolMgr *connPoolMgr) GetOrCreateSSLOverMemPool(poolNameToCreate strin
 	if ok {
 		_, ok = pool.(*sslOverMemConnPool)
 		if ok {
-			if !pool.Stale() {
+			if !pool.Stale() && pool.Password() == password {
 				return pool, nil
 			} else {
 				ConnPoolMgr().logger.Infof("Removing pool %v. stale=%v, new size=%v, old size=%v", poolNameToCreate, pool.Stale(), connsize, pool.MaxConn())
@@ -556,7 +560,7 @@ func (connPoolMgr *connPoolMgr) GetOrCreateSSLOverProxyPool(poolNameToCreate str
 	if ok {
 		_, ok = pool.(*sslOverProxyConnPool)
 		if ok {
-			if !pool.Stale() {
+			if !pool.Stale() && pool.Password() == password {
 				return pool, nil
 			} else {
 				ConnPoolMgr().logger.Infof("Removing pool %v. stale=%v, new size=%v, old size=%v", poolNameToCreate, pool.Stale(), connsize, pool.MaxConn())
