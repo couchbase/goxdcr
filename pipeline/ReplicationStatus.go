@@ -145,8 +145,6 @@ func (rs *ReplicationStatus) AddError(err error) {
 		errStr := err.Error()
 
 		rs.err_list[0] = PipelineError{Timestamp: time.Now(), ErrMsg: errStr}
-
-		rs.logger.Infof("err_list=%v\n", rs.err_list)
 		rs.Publish(false)
 	}
 }

@@ -25,6 +25,11 @@ import (
 
 var ErrorKey = "Error"
 
+// In certain scenarios, e.g., incorrect bucket password, a large number of parts
+// may return error when starting. limit the number of errors we track and log
+// to avoid overly long log entries
+var MaxNumberOfErrorsToTrack = 15
+
 //the function constructs start settings for parts of the pipeline
 type PartsSettingsConstructor func(pipeline common.Pipeline, part common.Part, pipeline_settings map[string]interface{},
 	targetClusterref *metadata.RemoteClusterReference, ssl_port_map map[string]uint16,
@@ -278,6 +283,9 @@ func formatErrMsg(err_ch chan partError) map[string]error {
 		select {
 		case part_err := <-err_ch:
 			errMap[part_err.partId] = part_err.err
+			if len(errMap) >= MaxNumberOfErrorsToTrack {
+				return errMap
+			}
 		default:
 			return errMap
 		}
