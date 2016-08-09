@@ -91,30 +91,30 @@ func LocalPool(localConnectStr string) (couchbase.Pool, error) {
 
 func RemotePool(remoteConnectStr string, remoteUsername string, remotePassword string) (couchbase.Pool, error) {
 	remoteURL := fmt.Sprintf("http://%s:%s@%s", url.QueryEscape(remoteUsername), url.QueryEscape(remotePassword), remoteConnectStr)
-	client, err := RemoteClient(remoteURL)
-	if err != nil {
-		return couchbase.Pool{}, NewEnhancedError(fmt.Sprintf("Error connecting to couchbase. url=%v", UrlForLog(remoteURL)), err)
-	}
-	return client.GetPool("default")
+	return RemotePoolWithTimeout(remoteURL)
 }
 
 // call to remoteURL may never return, e.g., in case of network parition,
 // wrap it with timeout to ensure that it will not block forever
-func RemoteClient(remoteURL string) (couchbase.Client, error) {
-	clientObj, err := simple_utils.ExecWithTimeout2(remoteClient, remoteURL, base.DefaultHttpTimeout, logger_utils)
-	if clientObj != nil {
-		return clientObj.(couchbase.Client), err
+func RemotePoolWithTimeout(remoteURL string) (couchbase.Pool, error) {
+	poolObj, err := simple_utils.ExecWithTimeout2(remotePool, remoteURL, base.DefaultHttpTimeout, logger_utils)
+	if poolObj != nil {
+		return poolObj.(couchbase.Pool), err
 	} else {
-		var client couchbase.Client
-		return client, err
+		var pool couchbase.Pool
+		return pool, err
 	}
 }
 
 // an auxiliary function that conforms to simple_utils.action2 interface
 // so that it can be called by simple_utils.ExecWithTimeout2
-func remoteClient(remoteURLObj interface{}) (interface{}, error) {
+func remotePool(remoteURLObj interface{}) (interface{}, error) {
 	remoteURL := remoteURLObj.(string)
-	return couchbase.Connect(remoteURL)
+	client, err := couchbase.Connect(remoteURL)
+	if err != nil {
+		return couchbase.Pool{}, NewEnhancedError(fmt.Sprintf("Error connecting to couchbase. url=%v", UrlForLog(remoteURL)), err)
+	}
+	return client.GetPool("default")
 }
 
 // call to remoteURL may never return, e.g., in case of network parition,
@@ -173,7 +173,7 @@ func RemoteBucket(remoteConnectStr, bucketName, remoteUsername, remotePassword s
 			password = bucketInfo.Password
 		}
 	}
-	client, err := RemoteClient("http://" + url.QueryEscape(remoteUsername) + ":" + url.QueryEscape(remotePassword) + "@" + remoteConnectStr)
+	client, err := couchbase.Connect("http://" + url.QueryEscape(remoteUsername) + ":" + url.QueryEscape(remotePassword) + "@" + remoteConnectStr)
 	if err != nil {
 		return nil, NewEnhancedError(fmt.Sprintf("Error connecting to couchbase. bucketName=%v; remoteConnectStr=%v", bucketName, remoteConnectStr), err)
 	}
