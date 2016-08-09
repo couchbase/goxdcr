@@ -190,6 +190,8 @@ func (top_detect_svc *TopologyChangeDetectorSvc) validate(checkTargetVersionForS
 }
 
 func (top_detect_svc *TopologyChangeDetectorSvc) handleSourceToplogyChange(vblist_supposed []uint16, err_in error) error {
+	defer top_detect_svc.logger.Infof("ToplogyChangeDetectorSvc for pipeline %v handleSourceToplogyChange completed", top_detect_svc.pipeline.Topic())
+
 	vblist_removed, vblist_new := simple_utils.ComputeDeltaOfUint16Lists(top_detect_svc.vblist_original, vblist_supposed, false)
 	if len(vblist_removed) > 0 || len(vblist_new) > 0 {
 		top_detect_svc.logger.Infof("Source topology changed for pipeline %v: vblist_removed=%v, vblist_new=%v\n", top_detect_svc.pipeline.Topic(), vblist_removed, vblist_new)
@@ -233,6 +235,8 @@ func (top_detect_svc *TopologyChangeDetectorSvc) handleSourceToplogyChange(vblis
 }
 
 func (top_detect_svc *TopologyChangeDetectorSvc) handleTargetToplogyChange(diff_vb_list []uint16, target_vb_server_map map[uint16]string, err_in error) error {
+	defer top_detect_svc.logger.Infof("ToplogyChangeDetectorSvc for pipeline %v handleTargetToplogyChange completed", top_detect_svc.pipeline.Topic())
+
 	// first check if relevant problematic vbs in pipeline are due to target topology changes.
 	err := top_detect_svc.validateVbErrors(diff_vb_list, false /*source*/)
 	if err != nil {
@@ -298,6 +302,8 @@ func (top_detect_svc *TopologyChangeDetectorSvc) validateVbErrors(diff_vb_list [
 }
 
 func (top_detect_svc *TopologyChangeDetectorSvc) validateTargetVersionForSSL() error {
+	defer top_detect_svc.logger.Infof("ToplogyChangeDetectorSvc for pipeline %v validateTargetVersionForSSL completed", top_detect_svc.pipeline.Topic())
+
 	spec := top_detect_svc.pipeline.Specification()
 	targetClusterRef, err := top_detect_svc.remote_cluster_svc.RemoteClusterByUuid(spec.TargetClusterUUID, true)
 	if err == nil {
@@ -312,6 +318,8 @@ func (top_detect_svc *TopologyChangeDetectorSvc) validateTargetVersionForSSL() e
 }
 
 func (top_detect_svc *TopologyChangeDetectorSvc) validateTargetVersionForExtMeta() error {
+	defer top_detect_svc.logger.Infof("ToplogyChangeDetectorSvc for pipeline %v validateTargetVersionForExtMeta completed", top_detect_svc.pipeline.Topic())
+
 	var err error
 	spec := top_detect_svc.pipeline.Specification()
 	targetClusterRef, err := top_detect_svc.remote_cluster_svc.RemoteClusterByUuid(spec.TargetClusterUUID, true)
@@ -332,7 +340,10 @@ func (top_detect_svc *TopologyChangeDetectorSvc) validateTargetVersionForExtMeta
 func (top_detect_svc *TopologyChangeDetectorSvc) needCheckTargetForSSL() (bool, bool) {
 	spec := top_detect_svc.pipeline.Specification()
 	targetClusterRef, err := top_detect_svc.remote_cluster_svc.RemoteClusterByUuid(spec.TargetClusterUUID, true)
-	if err == nil && targetClusterRef.DemandEncryption {
+	if err == nil {
+		if !targetClusterRef.DemandEncryption {
+			return false, false
+		}
 		pipeline := top_detect_svc.pipeline
 		targets := pipeline.Targets()
 		for _, target := range targets {
@@ -380,7 +391,7 @@ func (top_detect_svc *TopologyChangeDetectorSvc) needCheckTargetForExtMeta() (bo
 }
 
 func (top_detect_svc *TopologyChangeDetectorSvc) validateSourceTopology() ([]uint16, error) {
-	top_detect_svc.logger.Infof("ToplogyChangeDetectorSvc for pipeline %v validateSourceTopology...", top_detect_svc.pipeline.Topic())
+	defer top_detect_svc.logger.Infof("ToplogyChangeDetectorSvc for pipeline %v validateSourceTopology completed", top_detect_svc.pipeline.Topic())
 
 	vblist_supposed := []uint16{}
 	kv_vb_map, err := pipeline_utils.GetSourceVBMap(top_detect_svc.cluster_info_svc, top_detect_svc.xdcr_topology_svc, top_detect_svc.pipeline.Specification().SourceBucketName, top_detect_svc.logger)
@@ -404,7 +415,7 @@ func (top_detect_svc *TopologyChangeDetectorSvc) validateSourceTopology() ([]uin
 }
 
 func (top_detect_svc *TopologyChangeDetectorSvc) validateTargetTopology() ([]uint16, map[uint16]string, error) {
-	top_detect_svc.logger.Infof("ToplogyChangeDetectorSvc for pipeline %v validateTargetTopology...", top_detect_svc.pipeline.Topic())
+	defer top_detect_svc.logger.Infof("ToplogyChangeDetectorSvc for pipeline %v validateTargetTopology completed", top_detect_svc.pipeline.Topic())
 
 	target_vb_server_map, err := top_detect_svc.getTargetVBServerMap()
 	if err != nil {
