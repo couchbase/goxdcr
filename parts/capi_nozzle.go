@@ -668,7 +668,8 @@ func (capi *CapiNozzle) onExit() {
 
 func (capi *CapiNozzle) selfMonitor(finch chan bool, waitGrp *sync.WaitGroup) {
 	defer waitGrp.Done()
-	statsTicker := time.Tick(capi.config.statsInterval)
+	statsTicker := time.NewTicker(capi.config.statsInterval)
+	defer statsTicker.Stop()
 	// commenting these out till they are tested
 	/*ticker := time.Tick(capi.config.selfMonitorInterval)
 	var sent_count int = 0
@@ -711,7 +712,7 @@ func (capi *CapiNozzle) selfMonitor(finch chan bool, waitGrp *sync.WaitGroup) {
 			goto done
 		}*/
 
-		case <-statsTicker:
+		case <-statsTicker.C:
 			capi.RaiseEvent(common.NewEvent(common.StatsUpdate, nil, capi, nil, []int{capi.items_in_dataChan, capi.bytes_in_dataChan}))
 		}
 	}
@@ -887,7 +888,8 @@ func (capi *CapiNozzle) batchUpdateDocs(vbno uint16, req_list *[]*base.WrappedMC
 	// start go rountine that write body parts to tcpProxy()
 	go capi.writeDocs(vbno, req_bytes, doc_list, part_ch, err_ch, fin_ch)
 
-	ticker := time.Tick(capi.config.connectionTimeout)
+	ticker := time.NewTicker(capi.config.connectionTimeout)
+	defer ticker.Stop()
 	select {
 	case <-capi.sender_finch:
 		// capi is stopping.
@@ -897,7 +899,7 @@ func (capi *CapiNozzle) batchUpdateDocs(vbno uint16, req_list *[]*base.WrappedMC
 	case err = <-err_ch:
 		// error encountered
 		capi.Logger().Errorf("%v batchUpdateDocs for vb %v failed with err %v.\n", capi.Id(), vbno, err)
-	case <-ticker:
+	case <-ticker.C:
 		// connection timed out
 		errMsg := fmt.Sprintf("Connection timeout when updating docs for vb %v", vbno)
 		capi.Logger().Errorf("%v %v", capi.Id(), errMsg)

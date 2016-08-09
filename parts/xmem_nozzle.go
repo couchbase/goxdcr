@@ -1884,8 +1884,10 @@ func (xmem *XmemNozzle) getMaxIdleCount() int {
 
 func (xmem *XmemNozzle) selfMonitor(finch chan bool, waitGrp *sync.WaitGroup) {
 	defer waitGrp.Done()
-	ticker := time.Tick(xmem.config.selfMonitorInterval)
-	statsTicker := time.Tick(xmem.config.statsInterval)
+	ticker := time.NewTicker(xmem.config.selfMonitorInterval)
+	defer ticker.Stop()
+	statsTicker := time.NewTicker(xmem.config.statsInterval)
+	defer statsTicker.Stop()
 	var sent_count uint32 = 0
 	var received_count uint32 = 0
 	var resp_waitingConfirm_count int = 0
@@ -1897,7 +1899,7 @@ func (xmem *XmemNozzle) selfMonitor(finch chan bool, waitGrp *sync.WaitGroup) {
 		select {
 		case <-finch:
 			goto done
-		case <-ticker:
+		case <-ticker.C:
 			if xmem.validateRunningState() != nil {
 				xmem.Logger().Infof("%v has stopped. Exiting", xmem.Id())
 				goto done
@@ -1941,7 +1943,7 @@ func (xmem *XmemNozzle) selfMonitor(finch chan bool, waitGrp *sync.WaitGroup) {
 				xmem.handleGeneralError(errors.New("Xmem is stuck"))
 				goto done
 			}
-		case <-statsTicker:
+		case <-statsTicker.C:
 			xmem.RaiseEvent(common.NewEvent(common.StatsUpdate, nil, xmem, nil, []int{len(xmem.dataChan), xmem.bytesInDataChan()}))
 		}
 	}
@@ -1952,12 +1954,13 @@ done:
 
 func (xmem *XmemNozzle) check(finch chan bool, waitGrp *sync.WaitGroup) {
 	defer waitGrp.Done()
-	ticker := time.Tick(xmem.config.respTimeout)
+	ticker := time.NewTicker(xmem.config.respTimeout)
+	defer ticker.Stop()
 	for {
 		select {
 		case <-finch:
 			goto done
-		case <-ticker:
+		case <-ticker.C:
 			if xmem.validateRunningState() != nil {
 				goto done
 			}

@@ -628,6 +628,7 @@ func (ckmgr *CheckpointManager) checkpointing() {
 	defer ckmgr.wait_grp.Done()
 
 	ticker := <-ckmgr.checkpoint_ticker_ch
+	defer ticker.Stop()
 
 	children_fin_ch := make(chan bool)
 	children_wait_grp := &sync.WaitGroup{}
@@ -933,6 +934,7 @@ func (ckmgr *CheckpointManager) massCheckVBOpaquesJob() {
 	defer ckmgr.wait_grp.Done()
 
 	ticker := time.NewTicker(mass_vb_check_interval)
+	defer ticker.Stop()
 	for {
 		select {
 		case <-ckmgr.finish_ch:

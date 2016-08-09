@@ -282,6 +282,7 @@ func (stats_mgr *StatisticsManager) updateStats() error {
 	defer close(stats_mgr.done_ch)
 
 	ticker := <-stats_mgr.update_ticker_ch
+	defer ticker.Stop()
 	logStats_ticker := time.NewTicker(default_log_stats_interval)
 	defer logStats_ticker.Stop()
 
