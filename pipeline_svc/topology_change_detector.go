@@ -305,7 +305,7 @@ func (top_detect_svc *TopologyChangeDetectorSvc) validateTargetVersionForSSL() e
 	defer top_detect_svc.logger.Infof("ToplogyChangeDetectorSvc for pipeline %v validateTargetVersionForSSL completed", top_detect_svc.pipeline.Topic())
 
 	spec := top_detect_svc.pipeline.Specification()
-	targetClusterRef, err := top_detect_svc.remote_cluster_svc.RemoteClusterByUuid(spec.TargetClusterUUID, true)
+	targetClusterRef, err := top_detect_svc.remote_cluster_svc.RemoteClusterByUuid(spec.TargetClusterUUID, false)
 	if err == nil {
 		var hasSSLOverMemSupport bool
 		hasSSLOverMemSupport, err = pipeline_utils.HasSSLOverMemSupport(top_detect_svc.cluster_info_svc, targetClusterRef)
@@ -322,7 +322,7 @@ func (top_detect_svc *TopologyChangeDetectorSvc) validateTargetVersionForExtMeta
 
 	var err error
 	spec := top_detect_svc.pipeline.Specification()
-	targetClusterRef, err := top_detect_svc.remote_cluster_svc.RemoteClusterByUuid(spec.TargetClusterUUID, true)
+	targetClusterRef, err := top_detect_svc.remote_cluster_svc.RemoteClusterByUuid(spec.TargetClusterUUID, false)
 	if err == nil {
 		var extMetaSupportedByTarget bool
 		extMetaSupportedByTarget, err = pipeline_utils.HasExtMetadataSupport(top_detect_svc.cluster_info_svc, targetClusterRef)
@@ -339,7 +339,7 @@ func (top_detect_svc *TopologyChangeDetectorSvc) validateTargetVersionForExtMeta
 // 2. second bool indicates whether the first bool needs to be recomputed at the next check
 func (top_detect_svc *TopologyChangeDetectorSvc) needCheckTargetForSSL() (bool, bool) {
 	spec := top_detect_svc.pipeline.Specification()
-	targetClusterRef, err := top_detect_svc.remote_cluster_svc.RemoteClusterByUuid(spec.TargetClusterUUID, true)
+	targetClusterRef, err := top_detect_svc.remote_cluster_svc.RemoteClusterByUuid(spec.TargetClusterUUID, false)
 	if err == nil {
 		if !targetClusterRef.DemandEncryption {
 			return false, false
@@ -376,7 +376,7 @@ func (top_detect_svc *TopologyChangeDetectorSvc) needCheckTargetForExtMeta() (bo
 	}
 	var err error
 	spec := top_detect_svc.pipeline.Specification()
-	targetClusterRef, err := top_detect_svc.remote_cluster_svc.RemoteClusterByUuid(spec.TargetClusterUUID, true)
+	targetClusterRef, err := top_detect_svc.remote_cluster_svc.RemoteClusterByUuid(spec.TargetClusterUUID, false)
 	if err == nil {
 		var extMetaSupportedByTarget bool
 		extMetaSupportedByTarget, err = pipeline_utils.HasExtMetadataSupport(top_detect_svc.cluster_info_svc, targetClusterRef)
@@ -433,7 +433,7 @@ func (top_detect_svc *TopologyChangeDetectorSvc) validateTargetTopology() ([]uin
 
 func (top_detect_svc *TopologyChangeDetectorSvc) getTargetVBServerMap() (map[uint16]string, error) {
 	spec := top_detect_svc.pipeline.Specification()
-	targetClusterRef, err := top_detect_svc.remote_cluster_svc.RemoteClusterByUuid(spec.TargetClusterUUID, true)
+	targetClusterRef, err := top_detect_svc.remote_cluster_svc.RemoteClusterByUuid(spec.TargetClusterUUID, false)
 	if err != nil {
 		return nil, err
 	}
