@@ -279,7 +279,10 @@ func (dcp *DcpNozzle) Start(settings map[string]interface{}) error {
 	dcp.childrenWaitGrp.Add(1)
 	go dcp.collectDcpDataChanLen(settings)
 
-	dcp.uprFeed.StartFeedWithConfig(base.UprFeedDataChanLength)
+	uprFeed := dcp.getUprFeed()
+	if uprFeed != nil {
+		uprFeed.StartFeedWithConfig(base.UprFeedDataChanLength)
+	}
 
 	// start data processing routine
 	dcp.childrenWaitGrp.Add(1)
@@ -401,17 +404,22 @@ func (dcp *DcpNozzle) processData() (err error) {
 	defer dcp.childrenWaitGrp.Done()
 
 	finch := dcp.finch
-	mutch := dcp.uprFeed.C
+	uprFeed := dcp.getUprFeed()
+	if uprFeed == nil {
+		dcp.Logger().Infof("%v DCP feed has been closed. processData exits\n", dcp.Id())
+		return
+	}
+	mutch := uprFeed.C
 	for {
 		select {
 		case <-finch:
 			goto done
 		case m, ok := <-mutch: // mutation from upstream
 			if !ok {
-				dcp.Logger().Infof("%v DCP mutation channel is closed.Stop dcp nozzle now.", dcp.Id())
+				dcp.Logger().Infof("%v DCP mutation channel has been closed.Stop dcp nozzle now.", dcp.Id())
 				//close uprFeed
 				dcp.closeUprFeed()
-				dcp.handleGeneralError(errors.New("DCP stream is closed."))
+				dcp.handleGeneralError(errors.New("DCP stream has been closed."))
 				goto done
 			}
 			if m.Opcode == mc.UPR_STREAMREQ {
@@ -600,6 +608,12 @@ func (dcp *DcpNozzle) startUprStream(vbno uint16, vbts *base.VBTimestamp) error 
 		}
 	}
 	return nil
+}
+
+func (dcp *DcpNozzle) getUprFeed() *mcc.UprFeed {
+	dcp.lock_uprFeed.RLock()
+	defer dcp.lock_uprFeed.RUnlock()
+	return dcp.uprFeed
 }
 
 // Set vb list in dcp nozzle
