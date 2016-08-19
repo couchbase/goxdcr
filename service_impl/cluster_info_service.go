@@ -13,9 +13,8 @@ import (
 	"fmt"
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
-	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/goxdcr/utils"
-	"github.com/couchbase/go-couchbase"
+	"reflect"
 )
 
 type ClusterInfoSvc struct {
@@ -28,70 +27,56 @@ func NewClusterInfoSvc(logger_ctx *log.LoggerContext) *ClusterInfoSvc {
 	}
 }
 
-func (ci_svc *ClusterInfoSvc) GetMyActiveVBuckets(clusterConnInfoProvider base.ClusterConnectionInfoProvider, bucketName, NodeId string) ([]uint16, error) {
-	bucket, err := ci_svc.GetBucket(clusterConnInfoProvider, bucketName)
-	if err != nil {
-		return nil, err
-	}
-	defer bucket.Close()
-
-	// in test env, there should be only one kv in bucket server list
-	kvaddr := bucket.VBServerMap().ServerList[0]
-
-	m, err := bucket.GetVBmap([]string{kvaddr})
-	if err != nil {
-		return nil, err
-	}
-
-	vbList := m[kvaddr]
-
-	return vbList, nil
-}
-
-func (ci_svc *ClusterInfoSvc) GetServerList(clusterConnInfoProvider base.ClusterConnectionInfoProvider, bucketName string) ([]string, error) {
-	bucket, err := ci_svc.GetBucket(clusterConnInfoProvider, bucketName)
-	if err != nil {
-		return nil, err
-	}
-	defer bucket.Close()
-
-	// in test env, there should be only one kv in bucket server list
-	serverlist := bucket.VBServerMap().ServerList
-
-	return serverlist, nil
-}
-
 func (ci_svc *ClusterInfoSvc) GetServerVBucketsMap(clusterConnInfoProvider base.ClusterConnectionInfoProvider, bucketName string) (map[string][]uint16, error) {
-	bucket, err := ci_svc.GetBucket(clusterConnInfoProvider, bucketName)
+	connStr, err := clusterConnInfoProvider.MyConnectionStr()
 	if err != nil {
 		return nil, err
-	} else if bucket == nil {
-		return nil, fmt.Errorf("Failed to get bucket %v", bucketName)
+	}
+	userName, password, certificate, sanInCertificate, err := clusterConnInfoProvider.MyCredentials()
+	if err != nil {
+		return nil, err
 	}
 
-	defer func() {
-		if bucket != nil {
-			bucket.Close()
-		}
-	}()
+	bucketInfo, err := utils.GetBucketInfo(connStr, bucketName, userName, password, certificate, sanInCertificate, ci_svc.logger)
+	if err != nil {
+		return nil, err
+	}
 
-	serverVBMap, err := bucket.GetVBmap(bucket.VBServerMap().ServerList)
+	return utils.GetServerVBucketsMap(connStr, bucketName, bucketInfo)
 
-	return serverVBMap, err
 }
 
 func (ci_svc *ClusterInfoSvc) IsClusterCompatible(clusterConnInfoProvider base.ClusterConnectionInfoProvider, version []int) (bool, error) {
-	nodes, err := ci_svc.GetNodes(clusterConnInfoProvider)
-	if err == nil && len(nodes) > 0 {
-		clusterCompatibility := nodes[0].ClusterCompatibility
-		effectiveVersion := ci_svc.encodeVersionToEffectiveVersion (version)
-		compatible := ci_svc.isVersionCompatible(clusterCompatibility, effectiveVersion)
-		return compatible, nil
+	connStr, err := clusterConnInfoProvider.MyConnectionStr()
+	if err != nil {
+		return false, err
+	}
+	username, password, certificate, sanInCertificate, err := clusterConnInfoProvider.MyCredentials()
+	if err != nil {
+		return false, err
+	}
 
+	nodeList, err := utils.GetNodeList(connStr, username, password, certificate, sanInCertificate, ci_svc.logger)
+	if err == nil && len(nodeList) > 0 {
+		firstNode, ok := nodeList[0].(map[string]interface{})
+		if !ok {
+			return false, fmt.Errorf("node info is of wrong type for cluster %v. node info=%v", connStr, nodeList[0])
+		}
+		clusterCompatibility, ok := firstNode[base.ClusterCompatibilityKey]
+		if !ok {
+			return false, fmt.Errorf("Can't get cluster compatibility info for cluster %v", connStr)
+		}
+		clusterCompatibilityFloat, ok := clusterCompatibility.(float64)
+		if !ok {
+			return false, fmt.Errorf("cluster compatibility for cluster %v is not of int type. type=%v", connStr, reflect.TypeOf(clusterCompatibility))
+		}
+
+		effectiveVersion := ci_svc.encodeVersionToEffectiveVersion(version)
+		compatible := ci_svc.isVersionCompatible(int(clusterCompatibilityFloat), effectiveVersion)
+		return compatible, nil
 	} else {
 		//should not ever get here
-		constr, _ := clusterConnInfoProvider.MyConnectionStr()
-		return false, fmt.Errorf("Can't get nodes information for cluster %v, err=%v", constr, err)
+		return false, fmt.Errorf("Can't get nodes information for cluster %v, err=%v", connStr, err)
 	}
 }
 
@@ -114,50 +99,3 @@ func (ci_svc *ClusterInfoSvc) encodeVersionToEffectiveVersion(version []int) int
 func (ci_svc *ClusterInfoSvc) isVersionCompatible(clusterCompatibleVersion int, version int) bool {
 	return clusterCompatibleVersion >= version
 }
-
-func (ci_svc *ClusterInfoSvc) GetBucket(clusterConnInfoProvider base.ClusterConnectionInfoProvider, bucketName string) (*couchbase.Bucket, error) {
-	connStr, err := clusterConnInfoProvider.MyConnectionStr()
-	if err != nil {
-		return nil, err
-	}
-	var bucket *couchbase.Bucket = nil
-
-	switch clusterConnInfoProvider.(type) {
-	case *metadata.RemoteClusterReference:
-		username, password, err1 := clusterConnInfoProvider.MyCredentials()
-		if err1 != nil {
-			return nil, err1
-		}
-		bucket, err = utils.RemoteBucket(connStr, bucketName, username, password)
-	default:
-		bucket, err = utils.LocalBucket(connStr, bucketName)
-	}
-	return bucket, err
-}
-
-func (ci_svc *ClusterInfoSvc) GetNodes(clusterConnInfoProvider base.ClusterConnectionInfoProvider) ([]couchbase.Node, error) {
-	connStr, err := clusterConnInfoProvider.MyConnectionStr()
-	if err != nil {
-		return nil, err
-	}
-
-	var pool couchbase.Pool
-	switch clusterConnInfoProvider.(type) {
-	case *metadata.RemoteClusterReference:
-		username, password, err := clusterConnInfoProvider.MyCredentials()
-		if err != nil {
-			return nil, err
-		}
-		pool, err = utils.RemotePool(connStr, username, password)
-	default:
-		pool, err = utils.LocalPool(connStr)
-	}
-
-	if err != nil {
-		return nil, err
-	}
-
-	return pool.Nodes, nil
-
-}
-

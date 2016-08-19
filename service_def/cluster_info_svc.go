@@ -10,15 +10,10 @@
 package service_def
 
 import (
-	"github.com/couchbase/go-couchbase"
 	"github.com/couchbase/goxdcr/base"
 )
 
 type ClusterInfoSvc interface {
-	GetMyActiveVBuckets(clusterConnInfoProvider base.ClusterConnectionInfoProvider, Bucket, NodeId string) ([]uint16, error)
-	GetServerList(clusterConnInfoProvider base.ClusterConnectionInfoProvider, Bucket string) ([]string, error)
-	GetNodes(clusterConnInfoProvider base.ClusterConnectionInfoProvider) ([]couchbase.Node, error)
 	GetServerVBucketsMap(clusterConnInfoProvider base.ClusterConnectionInfoProvider, Bucket string) (map[string][]uint16, error)
 	IsClusterCompatible(clusterConnInfoProvider base.ClusterConnectionInfoProvider, version []int) (bool, error)
-	GetBucket(clusterConnInfoProvider base.ClusterConnectionInfoProvider, bucketName string) (*couchbase.Bucket, error)
 }

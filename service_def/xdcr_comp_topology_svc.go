@@ -46,10 +46,6 @@ type XDCRCompTopologySvc interface {
 	//is the cluster XDCR is serving of enterprise edition
 	IsMyClusterEnterprise() (bool, error)
 
-	//return a map with the key to be the host name that a xdcr comp is
-	//running on and the value to be the admin port number on that host
-	XDCRTopology() (map[string]uint16, error)
-
 	//return a map with the key to be the host name that a xdcr comp is running on
 	// and the value to be an array of kv node address which the xdcr component would
 	//be responsible for
@@ -57,6 +53,6 @@ type XDCRCompTopologySvc interface {
 
 	// implements base.ClusterConnectionInfoProvider
 	MyConnectionStr() (string, error)
-	MyCredentials() (string, string, error)
+	MyCredentials() (string, string, []byte, bool, error)
 	IsKVNode() (bool, error)
 }

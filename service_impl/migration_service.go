@@ -612,12 +612,12 @@ func (service *MigrationSvc) targetBucketUUID(targetClusterUUID, bucketName stri
 	if err_target != nil {
 		return "", err_target
 	}
-	remote_userName, remote_password, err_target := ref.MyCredentials()
+	remote_userName, remote_password, certificate, sanInCertificate, err_target := ref.MyCredentials()
 	if err_target != nil {
 		return "", err_target
 	}
 
-	return utils.RemoteBucketUUID(remote_connStr, remote_userName, remote_password, bucketName)
+	return utils.RemoteBucketUUID(remote_connStr, bucketName, remote_userName, remote_password, certificate, sanInCertificate, service.logger)
 }
 
 func addErrorMapToErrorList(errorMap map[string]error, errorList []error) []error {

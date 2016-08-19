@@ -41,6 +41,9 @@ type RemoteClusterReference struct {
 
 	DemandEncryption bool   `json:"demandEncryption"`
 	Certificate      []byte `json:"certificate"`
+	// hostname to use when making https connection
+	HttpsHostName    string `json:"httpsHostName"`
+	SANInCertificate bool   `json:"SANInCertificate"`
 
 	// revision number to be used by metadata service. not included in json
 	Revision interface{}
@@ -74,11 +77,15 @@ func RemoteClusterRefId() (string, error) {
 
 // implements base.ClusterConnectionInfoProvider
 func (ref *RemoteClusterReference) MyConnectionStr() (string, error) {
-	return ref.HostName, nil
+	if ref.DemandEncryption {
+		return ref.HttpsHostName, nil
+	} else {
+		return ref.HostName, nil
+	}
 }
 
-func (ref *RemoteClusterReference) MyCredentials() (string, string, error) {
-	return ref.UserName, ref.Password, nil
+func (ref *RemoteClusterReference) MyCredentials() (string, string, []byte, bool, error) {
+	return ref.UserName, ref.Password, ref.Certificate, ref.SANInCertificate, nil
 }
 
 // convert to a map for output
@@ -133,5 +140,7 @@ func (ref *RemoteClusterReference) Clone() *RemoteClusterReference {
 		Password:         ref.Password,
 		DemandEncryption: ref.DemandEncryption,
 		Certificate:      ref.Certificate,
+		HttpsHostName:    ref.HttpsHostName,
+		SANInCertificate: ref.SANInCertificate,
 	}
 }

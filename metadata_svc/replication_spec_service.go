@@ -14,7 +14,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/couchbase/go-couchbase"
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
@@ -165,7 +164,7 @@ func (service *ReplicationSpecService) ValidateNewReplicationSpec(sourceBucket, 
 	start_time := time.Now()
 	sourceBucketObj, err_source := utils.LocalBucket(local_connStr, sourceBucket)
 	service.logger.Infof("Result from local bucket look up: err_source=%v, time taken=%v\n", err_source, time.Since(start_time))
-	service.validateBucket(sourceBucket, targetCluster, targetBucket, sourceBucketObj, err_source, errorMap, true)
+	service.validateBucket(sourceBucket, targetCluster, targetBucket, sourceBucketObj.Type, err_source, errorMap, true)
 
 	sourceBucketUUID := ""
 	if sourceBucketObj != nil {
@@ -204,7 +203,7 @@ func (service *ReplicationSpecService) ValidateNewReplicationSpec(sourceBucket, 
 		errorMap[base.ToCluster] = utils.NewEnhancedError("Invalid remote cluster. MyConnectionStr() failed.", err)
 		return "", "", nil, errorMap
 	}
-	remote_userName, remote_password, err := targetClusterRef.MyCredentials()
+	remote_userName, remote_password, certificate, sanInCertificate, err := targetClusterRef.MyCredentials()
 	if err != nil {
 		errorMap[base.ToCluster] = utils.NewEnhancedError("Invalid remote cluster. MyCredentials() failed.", err)
 		return "", "", nil, errorMap
@@ -212,13 +211,31 @@ func (service *ReplicationSpecService) ValidateNewReplicationSpec(sourceBucket, 
 
 	//validate target bucket
 	start_time = time.Now()
-	targetBucketObj, err_target := utils.RemoteBucket(remote_connStr, targetBucket, remote_userName, remote_password)
+	//get uuid and type from bucket info
+	targetBucketInfo, err_target := utils.GetBucketInfo(remote_connStr, targetBucket, remote_userName, remote_password, certificate, sanInCertificate, service.logger)
+
+	targetBucketType := ""
+	if err_target == nil && targetBucketInfo != nil {
+		targetBucketTypeObj, ok := targetBucketInfo[base.BucketTypeKey]
+		if !ok {
+			err_target = fmt.Errorf("Error looking up bucket type of target bucket %v", targetBucket)
+		} else {
+			targetBucketType, ok = targetBucketTypeObj.(string)
+			if !ok {
+				err_target = fmt.Errorf("Bucket type of target bucket %v is of wrong type", targetBucket)
+			}
+		}
+	}
+
 	service.logger.Infof("Result from remote bucket look up: err_target=%v, time taken=%v\n", err_target, time.Since(start_time))
-	service.validateBucket(sourceBucket, targetCluster, targetBucket, targetBucketObj, err_target, errorMap, false)
+	service.validateBucket(sourceBucket, targetCluster, targetBucket, targetBucketType, err_target, errorMap, false)
 
 	targetBucketUUID := ""
-	if targetBucketObj != nil {
-		targetBucketUUID = targetBucketObj.UUID
+	if targetBucketInfo != nil {
+		targetBucketUUID, err = utils.GetBucketUuidFromBucketInfo(targetBucket, targetBucketInfo, service.logger)
+		if err != nil {
+			errorMap[base.PlaceHolderFieldKey] = err
+		}
 	}
 
 	repId := metadata.ReplicationId(sourceBucket, targetClusterRef.Uuid, targetBucket)
@@ -247,7 +264,7 @@ func (service *ReplicationSpecService) ValidateNewReplicationSpec(sourceBucket, 
 	return sourceBucketUUID, targetBucketUUID, targetClusterRef, errorMap
 }
 
-func (service *ReplicationSpecService) validateBucket(sourceBucket, targetCluster, targetBucket string, bucket *couchbase.Bucket, err error, errorMap map[string]error, isSourceBucket bool) {
+func (service *ReplicationSpecService) validateBucket(sourceBucket, targetCluster, targetBucket, bucketType string, err error, errorMap map[string]error, isSourceBucket bool) {
 	var qualifier, errKey, bucketName string
 	if isSourceBucket {
 		qualifier = "source"
@@ -266,7 +283,7 @@ func (service *ReplicationSpecService) validateBucket(sourceBucket, targetCluste
 		errMsg := fmt.Sprintf("Error validating %v bucket '%v'. err=%v", qualifier, bucketName, err)
 		service.logger.Error(errMsg)
 		errorMap[errKey] = fmt.Errorf(errMsg)
-	} else if bucket.Type != base.CouchbaseBucketType {
+	} else if bucketType != base.CouchbaseBucketType {
 		errMsg := fmt.Sprintf("Incompatible %v bucket '%v'", qualifier, bucketName)
 		service.logger.Error(errMsg)
 		errorMap[errKey] = fmt.Errorf(errMsg)
@@ -552,7 +569,7 @@ func (service *ReplicationSpecService) ValidateExistingReplicationSpec(spec *met
 		service.logger.Errorf(errMsg)
 		return InvalidReplicationSpecError, errors.New(errMsg)
 	}
-	remote_userName, remote_password, err := targetClusterRef.MyCredentials()
+	remote_userName, remote_password, certificate, sanInCertificate, err := targetClusterRef.MyCredentials()
 	if err != nil {
 		errMsg := fmt.Sprintf("spec %v refers to an invalid remote cluster reference \"%v\", as RemoteClusterRef.MyCredentials() returns err=%v\n", spec.Id, spec.TargetClusterUUID, err)
 		service.logger.Errorf(errMsg)
@@ -560,7 +577,9 @@ func (service *ReplicationSpecService) ValidateExistingReplicationSpec(spec *met
 	}
 
 	//validate target bucket
-	targetBucketUuid, err_target := utils.RemoteBucketUUID(remote_connStr, remote_userName, remote_password, spec.TargetBucketName)
+	targetBucketUUID, err_target := utils.RemoteBucketUUID(remote_connStr, spec.TargetBucketName, remote_userName, remote_password, certificate, sanInCertificate, service.logger)
+	service.logger.Infof("result of remote bucket call:  remote_connStr=%v, targetBucketUUID=%v, err_target=%v\n", remote_connStr, targetBucketUUID, err_target)
+
 	if err_target == utils.NonExistentBucketError {
 		errMsg := fmt.Sprintf("spec %v refers to non-existent target bucket \"%v\"\n", spec.Id, spec.TargetBucketName)
 		service.logger.Errorf(errMsg)
@@ -570,12 +589,13 @@ func (service *ReplicationSpecService) ValidateExistingReplicationSpec(spec *met
 			err_target, spec.TargetBucketName, spec.Id, remote_connStr, remote_userName)
 	}
 
-	if spec.TargetBucketUUID != "" && spec.TargetBucketUUID != targetBucketUuid {
+	if spec.TargetBucketUUID != "" && spec.TargetBucketUUID != targetBucketUUID {
 		//spec is referring to a deleted bucket
 		errMsg := fmt.Sprintf("spec %v refers to bucket %v which was deleted and recreated\n", spec.Id, spec.TargetBucketName)
 		service.logger.Errorf(errMsg)
 		return InvalidReplicationSpecError, errors.New(errMsg)
 	}
+
 	return nil, nil
 }
 
@@ -607,14 +627,15 @@ func (service *ReplicationSpecService) targetBucketUUID(targetClusterUUID, bucke
 	if err_target != nil {
 		return "", err_target
 	}
-	remote_userName, remote_password, err_target := ref.MyCredentials()
+	remote_userName, remote_password, certificate, sanInCertificate, err_target := ref.MyCredentials()
 	if err_target != nil {
 		return "", err_target
 	}
 
-	return utils.RemoteBucketUUID(remote_connStr, remote_userName, remote_password, bucketName)
+	return utils.RemoteBucketUUID(remote_connStr, bucketName, remote_userName, remote_password, certificate, sanInCertificate, service.logger)
 }
 
+// used by unit test only. does not use https and is not of production quality
 func (service *ReplicationSpecService) ConstructNewReplicationSpec(sourceBucketName, targetClusterUUID, targetBucketName string) (*metadata.ReplicationSpecification, error) {
 	sourceBucketUUID, err := service.sourceBucketUUID(sourceBucketName)
 	if err != nil {

@@ -5,6 +5,7 @@ import (
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"github.com/couchbase/cbauth"
 	"github.com/couchbase/go-couchbase"
@@ -20,13 +21,11 @@ import (
 	"time"
 )
 
-func GetMemcachedSSLPort(hostName, username, password, bucket string, logger *log.CommonLogger) (map[string]uint16, error) {
+func GetMemcachedSSLPortMap(hostName, username, password string, certificate []byte, sanInCertificate bool, bucket string, logger *log.CommonLogger) (map[string]uint16, error) {
 	ret := make(map[string]uint16)
-	bucketInfo := make(map[string]interface{})
 
 	logger.Infof("GetMemcachedSSLPort, hostName=%v\n", hostName)
-	url := base.BPath + base.UrlDelimiter + bucket
-	err, _ := QueryRestApiWithAuth(hostName, url, false, username, password, nil, false, base.MethodGet, "", nil, 0, &bucketInfo, nil, false, logger)
+	bucketInfo, err := GetClusterInfo(hostName, base.BPath+bucket, username, password, certificate, sanInCertificate, logger)
 	if err != nil {
 		return nil, err
 	}
@@ -48,19 +47,9 @@ func GetMemcachedSSLPort(hostName, username, password, bucket string, logger *lo
 			return nil, bucketInfoParseError(bucketInfo, logger)
 		}
 
-		hostname, ok := nodeExtMap[base.HostNameKey]
-		if !ok {
-			if len(nodesExtArray) == 1 {
-				logger.Infof("hostname is missing from nodeExtMap %v. target cluster consists of a single node, %v. Just use that node.\n", nodeExtMap, hostName)
-				hostname = GetHostName(hostName)
-			} else {
-				logger.Infof("hostname is missing from nodeExtMap %v. target cluster has multiple nodes. This is possible only in local test env where hostname is set to localhost. Use localhost.\n", nodeExtMap)
-				hostname = base.LocalHostName
-			}
-		}
-		hostnameStr, ok := hostname.(string)
-		if !ok {
-			return nil, bucketInfoParseError(bucketInfo, logger)
+		hostname, err := GetHostNameFromNodeInfo(hostName, nodeExtMap, logger)
+		if err != nil {
+			return nil, err
 		}
 
 		service, ok := nodeExtMap[base.ServicesKey]
@@ -83,7 +72,7 @@ func GetMemcachedSSLPort(hostName, username, password, bucket string, logger *lo
 			return nil, bucketInfoParseError(bucketInfo, logger)
 		}
 
-		hostAddr := GetHostAddr(hostnameStr, uint16(kvPortFloat))
+		hostAddr := GetHostAddr(hostname, uint16(kvPortFloat))
 
 		kv_ssl_port, ok := services_map[base.KVSSLPortKey]
 		if !ok {
@@ -109,58 +98,182 @@ func bucketInfoParseError(bucketInfo map[string]interface{}, logger *log.CommonL
 	return fmt.Errorf(errMsg)
 }
 
-func GetHostNameAndXDCRSSLPort(hostAddr, userName, password string, logger *log.CommonLogger) (string, uint16, error, bool) {
-	nodeInfo := make(map[string]interface{})
-	err, statusCode := QueryRestApiWithAuth(hostAddr, base.NodesSelfPath, false, userName, password, nil, false, base.MethodGet, "", nil, 0, &nodeInfo, nil, false, logger)
+func GetSSLPort(hostAddr string, logger *log.CommonLogger) (uint16, error, bool) {
+	portInfo := make(map[string]interface{})
+	err, statusCode := QueryRestApiWithAuth(hostAddr, base.SSLPortsPath, false, "", "", nil, false, base.MethodGet, "", nil, 0, &portInfo, nil, false, logger)
 	if err != nil || statusCode != http.StatusOK {
-		return "", 0, fmt.Errorf("Failed on calling %v, err=%v, statusCode=%v", base.NodesSelfPath, err, statusCode), false
+		return 0, fmt.Errorf("Failed on calling %v, err=%v, statusCode=%v", base.SSLPortsPath, err, statusCode), false
 	}
-
-	// get host name
-	actualHostAddr, ok := nodeInfo[base.HostNameKey]
+	sslPort, ok := portInfo[base.SSLPortKey]
 	if !ok {
-		// should never get here
-		errMsg := "Failed to parse node info. hostname is missing."
-		logger.Errorf("%v. nodeInfo=%v", errMsg, nodeInfo)
-		return "", 0, fmt.Errorf(errMsg), true
-	}
-
-	actualHostAddrStr, ok := actualHostAddr.(string)
-	if !ok {
-		// should never get here
-		return "", 0, fmt.Errorf("host name is of wrong type. Expected type: string; Actual type: %s", reflect.TypeOf(actualHostAddr)), true
-	}
-
-	hostName := GetHostName(actualHostAddrStr)
-
-	// get ssl port
-	ports, ok := nodeInfo[base.PortsKey]
-	if !ok {
-		// should never get here
-		errMsg := "Failed to parse node info. ports is missing."
-		logger.Errorf("%v. nodeInfo=%v", errMsg, nodeInfo)
-		return "", 0, fmt.Errorf(errMsg), true
-
-	}
-
-	portsMap, ok := ports.(map[string]interface{})
-	if !ok {
-		return "", 0, fmt.Errorf("ports is of wrong type. Expected type: map[string]interface{}; Actual type: %s", reflect.TypeOf(ports)), true
-	}
-
-	sslPort, ok := portsMap[base.SSLPortKey]
-	if !ok {
-		errMsg := "Failed to parse node info. ssl port is missing."
-		logger.Errorf("%v. nodeInfo=%v", errMsg, nodeInfo)
-		return "", 0, fmt.Errorf(errMsg), true
+		errMsg := "Failed to parse port info. ssl port is missing."
+		logger.Errorf("%v. portInfo=%v", errMsg, portInfo)
+		return 0, fmt.Errorf(errMsg), true
 	}
 
 	sslPortFloat, ok := sslPort.(float64)
 	if !ok {
-		return "", 0, fmt.Errorf("ssl port is of wrong type. Expected type: float64; Actual type: %s", reflect.TypeOf(sslPort)), true
+		return 0, fmt.Errorf("ssl port is of wrong type. Expected type: float64; Actual type: %s", reflect.TypeOf(sslPort)), true
 	}
 
-	return hostName, uint16(sslPortFloat), nil, false
+	return uint16(sslPortFloat), nil, false
+}
+
+func GetClusterInfo(hostAddr, path, username, password string, certificate []byte, sanInCertificate bool, logger *log.CommonLogger) (map[string]interface{}, error) {
+	clusterInfo := make(map[string]interface{})
+	err, statusCode := QueryRestApiWithAuth(hostAddr, path, false, username, password, certificate, sanInCertificate, base.MethodGet, "", nil, 0, &clusterInfo, nil, false, logger)
+	if err != nil || statusCode != http.StatusOK {
+		return nil, fmt.Errorf("Failed on calling host=%v, path=%v, err=%v, statusCode=%v", hostAddr, path, err, statusCode)
+	}
+	return clusterInfo, nil
+}
+
+// get a list of node infos
+// a specialized case of GetClusterInfo
+func GetNodeList(hostAddr, username, password string, certificate []byte, sanInCertificate bool, logger *log.CommonLogger) ([]interface{}, error) {
+	clusterInfo, err := GetClusterInfo(hostAddr, base.NodesPath, username, password, certificate, sanInCertificate, logger)
+	if err != nil {
+		return nil, err
+	}
+
+	return GetNodeListFromClusterInfo(clusterInfo, logger)
+
+}
+
+// get bucket info
+// a specialized case of GetClusterInfo
+func GetBucketInfo(hostAddr, bucketName, username, password string, certificate []byte, sanInCertificate bool, logger *log.CommonLogger) (map[string]interface{}, error) {
+	bucketInfo := make(map[string]interface{})
+	err, statusCode := QueryRestApiWithAuth(hostAddr, base.DefaultPoolBucketsPath+bucketName, false, username, password, certificate, sanInCertificate, base.MethodGet, "", nil, 0, &bucketInfo, nil, false, logger)
+	if err == nil && statusCode == http.StatusOK {
+		return bucketInfo, nil
+	}
+	if statusCode == http.StatusNotFound {
+		return nil, NonExistentBucketError
+	} else {
+		logger.Errorf("Failed to get bucket info for bucket '%v'. host=%v, err=%v, statusCode=%v", bucketName, hostAddr, err, statusCode)
+		return nil, fmt.Errorf("Failed to get bucket info.")
+	}
+}
+
+// get bucket uuid
+// use base.BPath to get less info than the regular base.DefaultPoolBucketsPath
+func RemoteBucketUUID(hostAddr, bucketName, username, password string, certificate []byte, sanInCertificate bool, logger *log.CommonLogger) (string, error) {
+	bucketInfo, err := GetClusterInfo(hostAddr, base.BPath+bucketName, username, password, certificate, sanInCertificate, logger)
+	if err != nil {
+		return "", err
+	}
+
+	return GetBucketUuidFromBucketInfo(bucketName, bucketInfo, logger)
+}
+
+func GetBucketUuidFromBucketInfo(bucketName string, bucketInfo map[string]interface{}, logger *log.CommonLogger) (string, error) {
+	bucketUUID := ""
+	bucketUUIDObj, ok := bucketInfo[base.BucketUUIDKey]
+	if !ok {
+		return "", fmt.Errorf("Error looking up uuid of target bucket %v", bucketName)
+	} else {
+		bucketUUID, ok = bucketUUIDObj.(string)
+		if !ok {
+			return "", fmt.Errorf("Uuid of target bucket %v is of wrong type", bucketName)
+		}
+	}
+	return bucketUUID, nil
+}
+
+func GetNodeListFromClusterInfo(clusterInfo map[string]interface{}, logger *log.CommonLogger) ([]interface{}, error) {
+	// get node list from the map
+	nodes, ok := clusterInfo[base.NodesKey]
+	if !ok {
+		// should never get here
+		errMsg := fmt.Sprintf("cluster info contains no nodes. cluster info=%v", clusterInfo)
+		logger.Error(errMsg)
+		return nil, errors.New(errMsg)
+	}
+
+	nodeList, ok := nodes.([]interface{})
+	if !ok {
+		// should never get here
+		errMsg := fmt.Sprintf("nodes is not of list type. type of nodes=%v", reflect.TypeOf(nodes))
+		logger.Error(errMsg)
+		return nil, errors.New(errMsg)
+	}
+
+	return nodeList, nil
+}
+
+func GetSSLProxyPortMap(hostAddr, username, password string, certificate []byte, sanInCertificate bool, logger *log.CommonLogger) (map[string]uint16, error) {
+	nodeList, err := GetNodeList(hostAddr, username, password, certificate, sanInCertificate, logger)
+	if err != nil {
+		return nil, err
+	}
+
+	ssl_port_map := make(map[string]uint16)
+	for _, node := range nodeList {
+		nodeMap, ok := node.(map[string]interface{})
+		if !ok {
+			return nil, fmt.Errorf("Error constructing ssl port map for target cluster %v. Node info is of wrong type. node info=%v\n", hostAddr, node)
+		}
+
+		hostname, err := GetHostNameFromNodeInfo(hostAddr, nodeMap, logger)
+		if err != nil {
+			return nil, err
+		}
+
+		portsObj, ok := nodeMap[base.PortsKey]
+		if !ok {
+			return nil, fmt.Errorf("Error constructing ssl port map for target cluster %v. Cannot find ports in node info =%v\n", hostAddr, node)
+		}
+		portsMap, ok := portsObj.(map[string]interface{})
+		if !ok {
+			return nil, fmt.Errorf("Error constructing ssl port map for target cluster %v. Ports info, %v, is of wrong type.\n", hostAddr, portsObj)
+		}
+		memcachedPortObj, ok := portsMap[base.DirectPortKey]
+		if !ok {
+			return nil, fmt.Errorf("Error constructing ssl port map for target cluster %v. Cannot find memcached port in ports info =%v\n", hostAddr, portsMap)
+		}
+		memcachedPort, ok := memcachedPortObj.(float64)
+		if !ok {
+			return nil, fmt.Errorf("Error constructing ssl port map for target cluster %v. Memcached port, %v, is of wrong type\n", hostAddr, memcachedPortObj)
+		}
+		sslProxyPortObj, ok := portsMap[base.SSLProxyPortKey]
+		if !ok {
+			return nil, fmt.Errorf("Error constructing ssl port map for target cluster %v. Cannot find ssl proxy port in ports info =%v\n", hostAddr, portsMap)
+		}
+		sslProxyPort, ok := sslProxyPortObj.(float64)
+		if !ok {
+			return nil, fmt.Errorf("Error constructing ssl port map for target cluster %v. Ssl proxy port, %v, is of wrong type\n", hostAddr, sslProxyPortObj)
+		}
+		hostAddr := GetHostAddr(hostname, uint16(memcachedPort))
+		ssl_port_map[hostAddr] = uint16(sslProxyPort)
+	}
+
+	return ssl_port_map, nil
+}
+
+func GetHostAddrFromNodeInfo(adminHostAddr string, nodeInfo map[string]interface{}, logger *log.CommonLogger) (string, error) {
+	var hostAddr string
+	var ok bool
+	hostAddrObj, ok := nodeInfo[base.HostNameKey]
+	if !ok {
+		logger.Infof("hostname is missing from node info %v. This could happen in local test env where target cluster consists of a single node, %v. Just use that node.\n", nodeInfo, adminHostAddr)
+		hostAddr = adminHostAddr
+	} else {
+		hostAddr, ok = hostAddrObj.(string)
+		if !ok {
+			return "", fmt.Errorf("Error constructing ssl port map for target cluster %v. host name, %v, is of wrong type\n", hostAddr, hostAddrObj)
+		}
+	}
+
+	return hostAddr, nil
+}
+
+func GetHostNameFromNodeInfo(adminHostAddr string, nodeInfo map[string]interface{}, logger *log.CommonLogger) (string, error) {
+	hostAddr, err := GetHostAddrFromNodeInfo(adminHostAddr, nodeInfo, logger)
+	if err != nil {
+		return "", err
+	}
+	return GetHostName(hostAddr), nil
 }
 
 //convenient api for rest calls to local cluster
@@ -463,8 +576,9 @@ func ConstructHttpRequest(
 	}
 	req.Header.Set(base.ContentType, contentType)
 
-	//if username is nil, assume it is local rest call
-	if username == "" {
+	// username is nil when calling /nodes/self/xdcrSSLPorts on target
+	// other username can be nil only in local rest calls
+	if username == "" && path != base.SSLPortsPath {
 		err := cbauth.SetRequestAuth(req)
 		if err != nil {
 			l.Errorf("Failed to set authentication to request, req=%v\n", req)
