@@ -22,6 +22,7 @@ import (
 	"github.com/couchbase/goxdcr/utils"
 	"net/http"
 	"reflect"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -441,34 +442,37 @@ func (service *RemoteClusterService) validateRemoteCluster(ref *metadata.RemoteC
 	}
 
 	var hostAddr string
-	var isInternalError bool
 	if ref.DemandEncryption {
-		hostAddr, err, isInternalError = service.httpsHostAddress(ref.HostName, ref.UserName, ref.Password)
-		if err != nil {
-			if isInternalError {
-				return err
-			} else {
-				return wrapAsInvalidRemoteClusterError(fmt.Sprintf("Could not connect to \"%v\" on port %v. This could be due to an incorrect host/port combination or a firewall in place between the servers.", hostName, port))
+		if ref.HttpsHostName == "" {
+			httpsHostAddr, err, isInternalError := service.httpsHostAddr(ref.HostName)
+			if err != nil {
+				if isInternalError {
+					return err
+				} else {
+					return wrapAsInvalidRemoteClusterError(fmt.Sprintf("Could not connect to \"%v\" on port %v. This could be due to an incorrect host/port combination or a firewall in place between the servers.", hostName, port))
+				}
 			}
+			// store https host name in ref for later re-use
+			ref.HttpsHostName = httpsHostAddr
+
+			// check if target cluster supports SAN certificate and store the info in remote cluster reference
+			// note that this check itelf requires a https connection to target, which uses "false" as the value
+			// of hasSANInCertificateSupport. After the check hasSANInCertificateSupport will be updated with
+			// the correct value and all subsequent https calls will use the correct value
+			hasSANInCertificateSupport, err := pipeline_utils.HasSANInCertificateSupport(service.cluster_info_svc, ref)
+			if err != nil {
+				return wrapAsInvalidRemoteClusterError(fmt.Sprintf("Error checking if target cluster supports SANs in cerificates. err=%v", err))
+			}
+			ref.SANInCertificate = hasSANInCertificateSupport
 		}
+		hostAddr = ref.HttpsHostName
 	} else {
 		hostAddr = ref.HostName
 	}
+
 	var poolsInfo map[string]interface{}
-	var hasSANInCertificateSupport bool
-	if ref.DemandEncryption {
-		hostAddr = utils.EnforcePrefix("https://", hostAddr)
-
-		hasSANInCertificateSupport, err = pipeline_utils.HasSANInCertificateSupport(service.cluster_info_svc, ref)
-		if err != nil {
-			return wrapAsInvalidRemoteClusterError(fmt.Sprintf("Error checking if target cluster supports SANs in cerificates. err=%v", err))
-		}
-	} else {
-		hostAddr = utils.EnforcePrefix("http://", hostAddr)
-	}
-
 	startTime := time.Now()
-	err, statusCode := utils.QueryRestApiWithAuth(hostAddr, base.PoolsPath, false, ref.UserName, ref.Password, ref.Certificate, hasSANInCertificateSupport, base.MethodGet, "", nil, base.ShortHttpTimeout, &poolsInfo, nil, false, service.logger)
+	err, statusCode := utils.QueryRestApiWithAuth(hostAddr, base.PoolsPath, false, ref.UserName, ref.Password, ref.Certificate, ref.SANInCertificate, base.MethodGet, "", nil, base.ShortHttpTimeout, &poolsInfo, nil, false, service.logger)
 	service.logger.Infof("Result from validate remote cluster call: err=%v, statusCode=%v. time taken=%v\n", err, statusCode, time.Since(startTime))
 	if err != nil || statusCode != http.StatusOK {
 		if statusCode == http.StatusUnauthorized {
@@ -526,6 +530,7 @@ func (service *RemoteClusterService) validateRemoteCluster(ref *metadata.RemoteC
 		// update uuid in ref to real value
 		ref.Uuid = actualUuidStr
 	}
+
 	return nil
 }
 
@@ -540,8 +545,9 @@ func (service *RemoteClusterService) formErrorFromValidatingRemotehost(ref *meta
 	}
 }
 
-func (service *RemoteClusterService) httpsHostAddress(hostAddr, userName, password string) (string, error, bool) {
-	hostName, sslPort, err, isInternalError := utils.GetHostNameAndXDCRSSLPort(hostAddr, userName, password, service.logger)
+func (service *RemoteClusterService) httpsHostAddr(hostAddr string) (string, error, bool) {
+	hostName := utils.GetHostName(hostAddr)
+	sslPort, err, isInternalError := utils.GetSSLPort(hostAddr, service.logger)
 	if err != nil {
 		return "", err, isInternalError
 	}
@@ -583,7 +589,7 @@ func (service *RemoteClusterService) cacheRef(ref *metadata.RemoteClusterReferen
 
 	cache := service.getCache()
 
-	username, password, err := ref.MyCredentials()
+	username, password, certificate, sanInCertificate, err := ref.MyCredentials()
 	if err != nil {
 		return err
 	}
@@ -592,15 +598,22 @@ func (service *RemoteClusterService) cacheRef(ref *metadata.RemoteClusterReferen
 		return err
 	}
 
-	pool, err := utils.RemotePool(connStr, username, password)
+	nodeList, err := utils.GetNodeList(connStr, username, password, certificate, sanInCertificate, service.logger)
 	if err == nil {
-		service.logger.Debugf("Pool.Nodes=%v\n", pool.Nodes)
+		service.logger.Debugf("connStr=%v, nodeList=%v\n", connStr, nodeList)
 
-		for _, node := range pool.Nodes {
-			if node.Hostname != connStr {
-				nodes_connStrs = append(nodes_connStrs, node.Hostname)
+		nodeNameList, err := service.getNodeNameList(nodeList, connStr)
+		if err != nil {
+			service.logger.Errorf("Error getting nodes from target cluster. skipping alternative node computation. ref=%v\n", ref.HostName)
+		} else {
+			for _, nodeName := range nodeNameList {
+				if nodeName != ref.HostName {
+					nodes_connStrs = append(nodes_connStrs, nodeName)
+				}
 			}
 		}
+		service.logger.Debugf("nodes_connStrs after refresh =%v", nodes_connStrs)
+
 	} else {
 		service.logger.Infof("Remote cluster reference %v has a bad connectivity, didn't populate alternative connection strings. err=%v", ref.Id, err)
 
@@ -614,8 +627,7 @@ func (service *RemoteClusterService) cacheRef(ref *metadata.RemoteClusterReferen
 				nodes_connStrs = old_cache_val.nodes_connectionstr
 			}
 		}
-
-		service.logger.Infof("nodes_connStrs=%v", nodes_connStrs)
+		service.logger.Infof("nodes_connStrs from old cache =%v", nodes_connStrs)
 	}
 
 	ref_cache := &remoteClusterVal{key: ref.Id,
@@ -631,6 +643,29 @@ func (service *RemoteClusterService) cacheRef(ref *metadata.RemoteClusterReferen
 
 	service.logger.Debugf("Remote cluster reference %v is cached\n", ref.Id)
 	return err
+}
+
+func (service *RemoteClusterService) getNodeNameList(nodeList []interface{}, connStr string) ([]string, error) {
+	nodeNameList := make([]string, 0)
+
+	for _, node := range nodeList {
+		nodeInfoMap, ok := node.(map[string]interface{})
+		if !ok {
+			errMsg := fmt.Sprintf("node info is not of map type. type of node info=%v", reflect.TypeOf(node))
+			service.logger.Error(errMsg)
+			return nil, errors.New(errMsg)
+		}
+
+		hostAddr, err := utils.GetHostAddrFromNodeInfo(connStr, nodeInfoMap, service.logger)
+		if err != nil {
+			errMsg := fmt.Sprintf("cannot get hostname from node info %v", nodeInfoMap)
+			service.logger.Error(errMsg)
+			return nil, errors.New(errMsg)
+		}
+
+		nodeNameList = append(nodeNameList, hostAddr)
+	}
+	return nodeNameList, nil
 }
 
 func (service *RemoteClusterService) refresh(ref *metadata.RemoteClusterReference, old_cas int64) (*metadata.RemoteClusterReference, error) {
@@ -662,7 +697,7 @@ func (service *RemoteClusterService) refresh(ref *metadata.RemoteClusterReferenc
 		return nil, err
 	}
 
-	username, password, err := ref.MyCredentials()
+	username, password, certificate, sanInCertificate, err := ref.MyCredentials()
 	if err != nil {
 		return nil, err
 	}
@@ -680,17 +715,50 @@ func (service *RemoteClusterService) refresh(ref *metadata.RemoteClusterReferenc
 
 	var working_conn_str string = ""
 	for _, alt_conn_str := range ref_cache.nodes_connectionstr {
-		_, err = utils.RemotePool(alt_conn_str, username, password)
-		if err == nil {
-			working_conn_str = alt_conn_str
-			break
+		if ref.DemandEncryption {
+			kvPort, err := utils.GetPortNumber(alt_conn_str)
+			if err != nil {
+				continue
+			}
+			sslPort, err, _ := utils.GetSSLPort(alt_conn_str, service.logger)
+			if err != nil {
+				continue
+			}
+
+			alt_https_conn_str := utils.GetHostAddr(utils.GetHostName(alt_conn_str), sslPort)
+			// even if we could get sslport from the cluster with alt_conn_str, it does not mean that the cluster
+			// has been initialized. make another call to /pools/default to make sure
+			_, err = utils.GetClusterInfo(alt_https_conn_str, base.DefaultPoolPath, username, password, certificate, sanInCertificate, service.logger)
+			if err == nil {
+				// for ssl enabled ref, we need both kvport and sslport, we contantenate them
+				// in the form of hostname:sslport:kvport
+				working_conn_str = utils.GetHostAddr(alt_https_conn_str, kvPort)
+				break
+			}
+		} else {
+			_, err := utils.GetClusterInfo(alt_conn_str, base.DefaultPoolPath, username, password, certificate, sanInCertificate, service.logger)
+			if err == nil {
+				working_conn_str = alt_conn_str
+				break
+			}
 		}
 	}
 
 	if working_conn_str != "" {
 		service.logger.Infof("Found a working alternative connStr %v", working_conn_str)
 		//update the ref in cache
-		ref.HostName = working_conn_str
+		if ref.DemandEncryption {
+			hostname, sslPort, kvPort, err := parseWorkingConnStr(working_conn_str)
+			if err != nil {
+				return nil, err
+			}
+			oldHostName := ref.HostName
+			ref.HostName = utils.GetHostAddr(hostname, kvPort)
+			ref.HttpsHostName = utils.GetHostAddr(hostname, sslPort)
+			service.logger.Infof("After refresh, old host name=%v, new host name = %v, new https host name = %v\n", oldHostName, ref.HostName, ref.HttpsHostName)
+		} else {
+			ref.HostName = working_conn_str
+		}
 		//persist
 		err = service.updateRemoteCluster(ref, ref.Revision)
 		if err != nil {
@@ -701,6 +769,29 @@ func (service *RemoteClusterService) refresh(ref *metadata.RemoteClusterReferenc
 
 	return nil, errors.New(fmt.Sprintf("Failed to connect to cluster reference %v\n", ref.Id))
 
+}
+
+// for ssl enabled ref, working_conn_str is in the form of hostname:sslport:kvport.
+// parse out the three components
+func parseWorkingConnStr(working_conn_str string) (string, uint16, uint16, error) {
+	parts := strings.Split(working_conn_str, base.UrlPortNumberDelimiter)
+	if len(parts) != 3 {
+		return "", 0, 0, fmt.Errorf("alternative connStr %v is of wrong format", working_conn_str)
+	}
+
+	hostname := parts[0]
+
+	sslPort, err := strconv.ParseUint(parts[1], 10, 16)
+	if err != nil {
+		return "", 0, 0, fmt.Errorf("alternative connStr %v is of wrong format", working_conn_str)
+	}
+
+	kvPort, err := strconv.ParseUint(parts[2], 10, 16)
+	if err != nil {
+		return "", 0, 0, fmt.Errorf("alternative connStr %v is of wrong format", working_conn_str)
+	}
+
+	return hostname, uint16(sslPort), uint16(kvPort), nil
 }
 
 //get remote cluster name from remote cluster uuid. Return unknown if remote cluster cannot be found

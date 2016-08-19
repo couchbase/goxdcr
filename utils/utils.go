@@ -89,52 +89,6 @@ func LocalPool(localConnectStr string) (couchbase.Pool, error) {
 	return client.GetPool("default")
 }
 
-func RemotePool(remoteConnectStr string, remoteUsername string, remotePassword string) (couchbase.Pool, error) {
-	remoteURL := fmt.Sprintf("http://%s:%s@%s", url.QueryEscape(remoteUsername), url.QueryEscape(remotePassword), remoteConnectStr)
-	return RemotePoolWithTimeout(remoteURL)
-}
-
-// call to remoteURL may never return, e.g., in case of network parition,
-// wrap it with timeout to ensure that it will not block forever
-func RemotePoolWithTimeout(remoteURL string) (couchbase.Pool, error) {
-	poolObj, err := simple_utils.ExecWithTimeout2(remotePool, remoteURL, base.DefaultHttpTimeout, logger_utils)
-	if poolObj != nil {
-		return poolObj.(couchbase.Pool), err
-	} else {
-		var pool couchbase.Pool
-		return pool, err
-	}
-}
-
-// an auxiliary function that conforms to simple_utils.action2 interface
-// so that it can be called by simple_utils.ExecWithTimeout2
-func remotePool(remoteURLObj interface{}) (interface{}, error) {
-	remoteURL := remoteURLObj.(string)
-	client, err := couchbase.Connect(remoteURL)
-	if err != nil {
-		return couchbase.Pool{}, NewEnhancedError(fmt.Sprintf("Error connecting to couchbase. url=%v", UrlForLog(remoteURL)), err)
-	}
-	return client.GetPool("default")
-}
-
-// call to remoteURL may never return, e.g., in case of network parition,
-// wrap it with timeout to ensure that it will not block forever
-func RemoteBucketList(remoteURL string) ([]couchbase.BucketInfo, error) {
-	bucketInfosObj, err := simple_utils.ExecWithTimeout2(remoteBucketList, remoteURL, base.DefaultHttpTimeout, logger_utils)
-	if bucketInfosObj != nil {
-		return bucketInfosObj.([]couchbase.BucketInfo), err
-	} else {
-		return nil, err
-	}
-}
-
-// an auxiliary function that conforms to simple_utils.action2 interface
-// so that it can be called by simple_utils.ExecWithTimeout2
-func remoteBucketList(remoteURLObj interface{}) (interface{}, error) {
-	remoteURL := remoteURLObj.(string)
-	return couchbase.GetBucketList(remoteURL)
-}
-
 // Get bucket in local cluster
 func LocalBucket(localConnectStr, bucketName string) (*couchbase.Bucket, error) {
 	logger_utils.Debugf("Getting local bucket name=%v\n", bucketName)
@@ -150,43 +104,6 @@ func LocalBucket(localConnectStr, bucketName string) (*couchbase.Bucket, error) 
 	}
 
 	logger_utils.Debugf("Got local bucket successfully name=%v\n", bucket.Name)
-	return bucket, err
-}
-
-func RemoteBucket(remoteConnectStr, bucketName, remoteUsername, remotePassword string) (*couchbase.Bucket, error) {
-	logger_utils.Debugf("Getting remote bucket name=%v connstr=%v\n", bucketName, remoteConnectStr)
-
-	if remoteUsername == "" || remotePassword == "" {
-		return nil, errors.New(fmt.Sprintf("Error retrieving remote bucket, %v, since remote username and/or password are missing.", bucketName))
-
-	}
-
-	remoteURL := fmt.Sprintf("http://%s:%s@%s", url.QueryEscape(remoteUsername), url.QueryEscape(remotePassword), remoteConnectStr)
-	bucketInfos, err := RemoteBucketList(remoteURL)
-	if err != nil {
-		return nil, NewEnhancedError("Error getting bucketlist with url:"+UrlForLog(remoteURL), err)
-	}
-
-	var password string
-	for _, bucketInfo := range bucketInfos {
-		if bucketInfo.Name == bucketName {
-			password = bucketInfo.Password
-		}
-	}
-	client, err := couchbase.Connect("http://" + url.QueryEscape(remoteUsername) + ":" + url.QueryEscape(remotePassword) + "@" + remoteConnectStr)
-	if err != nil {
-		return nil, NewEnhancedError(fmt.Sprintf("Error connecting to couchbase. bucketName=%v; remoteConnectStr=%v", bucketName, remoteConnectStr), err)
-	}
-	pool, err := client.GetPool("default")
-	if err != nil {
-		return nil, NewEnhancedError("Error getting pool with name 'default'.", err)
-	}
-	bucket, err := pool.GetBucketWithAuth(bucketName, bucketName, password)
-	if err != nil {
-		return nil, NewEnhancedError(fmt.Sprintf("Error getting bucket, %v, from pool.", bucketName), err)
-	}
-
-	logger_utils.Debugf("Got remote bucket successfully name=%v\n", bucket.Name)
 	return bucket, err
 }
 
@@ -415,19 +332,6 @@ func LocalBucketUUID(local_connStr string, bucketName string) (string, error) {
 	return bucket.UUID, nil
 }
 
-func RemoteBucketUUID(remote_connStr, remote_userName, remote_password, bucketName string) (string, error) {
-	remote_default_pool, err := RemotePool(remote_connStr, remote_userName, remote_password)
-	if err != nil {
-		return "", err
-	}
-	bucket, ok := remote_default_pool.BucketMap[bucketName]
-	if !ok {
-		return "", NonExistentBucketError
-	}
-	return bucket.UUID, nil
-
-}
-
 func ReplicationStatusNotFoundError(topic string) error {
 	return fmt.Errorf("Cannot find replication status for topic %v", topic)
 }
@@ -518,4 +422,74 @@ func GetMemcachedClient(serverAddr, bucketName string, kv_mem_clients map[string
 			return nil, err
 		}
 	}
+}
+
+func GetServerVBucketsMap(connStr, bucketName string, bucketInfo map[string]interface{}) (map[string][]uint16, error) {
+	vbucketServerMapObj, ok := bucketInfo[base.VBucketServerMapKey]
+	if !ok {
+		return nil, fmt.Errorf("Error getting vbucket server map from bucket info. connStr=%v, bucketName=%v, bucketInfo=%v\n", connStr, bucketName, bucketInfo)
+	}
+	vbucketServerMap, ok := vbucketServerMapObj.(map[string]interface{})
+	if !ok {
+		return nil, fmt.Errorf("Vbucket server map is of wrong type. connStr=%v, bucketName=%v, vbucketServerMap=%v\n", connStr, bucketName, vbucketServerMapObj)
+	}
+
+	// get server list
+	serverListObj, ok := vbucketServerMap[base.ServerListKey]
+	if !ok {
+		return nil, fmt.Errorf("Error getting server list from vbucket server map. connStr=%v, bucketName=%v, vbucketServerMap=%v\n", connStr, bucketName, vbucketServerMap)
+	}
+	serverList, ok := serverListObj.([]interface{})
+	if !ok {
+		return nil, fmt.Errorf("Server list is of wrong type. connStr=%v, bucketName=%v, serverList=%v\n", connStr, bucketName, serverListObj)
+	}
+
+	servers := make([]string, len(serverList))
+	for index, serverName := range serverList {
+		serverNameStr, ok := serverName.(string)
+		if !ok {
+			return nil, fmt.Errorf("Server name is of wrong type. connStr=%v, bucketName=%v, serverName=%v\n", connStr, bucketName, serverName)
+		}
+		servers[index] = serverNameStr
+	}
+
+	// get vbucket "map"
+	vbucketMapObj, ok := vbucketServerMap[base.VBucketMapKey]
+	if !ok {
+		return nil, fmt.Errorf("Error getting vbucket map from vbucket server map. connStr=%v, bucketName=%v, vbucketServerMap=%v\n", connStr, bucketName, vbucketServerMap)
+	}
+	vbucketMap, ok := vbucketMapObj.([]interface{})
+	if !ok {
+		return nil, fmt.Errorf("Vbucket map is of wrong type. connStr=%v, bucketName=%v, vbucketMap=%v\n", connStr, bucketName, vbucketMapObj)
+	}
+
+	serverVBMap := make(map[string][]uint16)
+
+	for vbno, indexListObj := range vbucketMap {
+		indexList, ok := indexListObj.([]interface{})
+		if !ok {
+			return nil, fmt.Errorf("Index list is of wrong type. connStr=%v, bucketName=%v, indexList=%v\n", connStr, bucketName, indexListObj)
+		}
+		if len(indexList) == 0 {
+			return nil, fmt.Errorf("Index list is empty. connStr=%v, bucketName=%v, vbno=%v\n", connStr, bucketName, vbno)
+		}
+		indexFloat, ok := indexList[0].(float64)
+		if !ok {
+			return nil, fmt.Errorf("Master index is of wrong type. connStr=%v, bucketName=%v, index=%v\n", connStr, bucketName, indexList[0])
+		}
+		indexInt := int(indexFloat)
+		if indexInt < 0 || indexInt >= len(servers) {
+			return nil, fmt.Errorf("Master index is out of range. connStr=%v, bucketName=%v, index=%v\n", connStr, bucketName, indexInt)
+		}
+
+		server := servers[indexInt]
+		var vbList []uint16
+		vbList, ok = serverVBMap[server]
+		if !ok {
+			vbList = make([]uint16, 0)
+		}
+		vbList = append(vbList, uint16(vbno))
+		serverVBMap[server] = vbList
+	}
+	return serverVBMap, nil
 }

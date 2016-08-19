@@ -539,12 +539,16 @@ func (ckmgr *CheckpointManager) getFailoverLog(bucket *couchbase.Bucket, listOfV
 }
 
 func (ckmgr *CheckpointManager) getSourceBucket() (*couchbase.Bucket, error) {
-	bucket_name := ckmgr.pipeline.Specification().SourceBucketName
-	bucket, err := ckmgr.cluster_info_svc.GetBucket(ckmgr.xdcr_topology_svc, bucket_name)
+	bucketName := ckmgr.pipeline.Specification().SourceBucketName
+	localConnStr, err := ckmgr.xdcr_topology_svc.MyConnectionStr()
 	if err != nil {
 		return nil, err
 	}
-	ckmgr.logger.Infof("Got the bucket %v for ckmgr\n", bucket_name)
+	bucket, err := utils.LocalBucket(localConnStr, bucketName)
+	if err != nil {
+		return nil, err
+	}
+	ckmgr.logger.Infof("Got the bucket %v for ckmgr\n", bucketName)
 	return bucket, nil
 }
 

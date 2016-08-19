@@ -3,7 +3,6 @@ package factory
 import (
 	"errors"
 	"fmt"
-	"github.com/couchbase/go-couchbase"
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/capi_utils"
 	"github.com/couchbase/goxdcr/common"
@@ -99,7 +98,11 @@ func (xdcrf *XDCRFactory) NewPipeline(topic string, progress_recorder common.Pip
 	}
 
 	// get source bucket to retrieve bucket password
-	sourceBucket, err := xdcrf.cluster_info_svc.GetBucket(xdcrf.xdcr_topology_svc, spec.SourceBucketName)
+	localConnStr, err := xdcrf.xdcr_topology_svc.MyConnectionStr()
+	if err != nil {
+		return nil, err
+	}
+	sourceBucket, err := utils.LocalBucket(localConnStr, spec.SourceBucketName)
 	if err != nil {
 		xdcrf.logger.Errorf("Error getting source bucket %v. err=%v\n", spec.SourceBucketName, err)
 		return nil, err
@@ -113,17 +116,35 @@ func (xdcrf *XDCRFactory) NewPipeline(topic string, progress_recorder common.Pip
 		return nil, err
 	}
 
-	targetBucket, err := xdcrf.cluster_info_svc.GetBucket(targetClusterRef, spec.TargetBucketName)
-	if err != nil || targetBucket == nil {
-		xdcrf.logger.Errorf("Error getting target bucket %v, err=%v\n", spec.TargetBucketName, err)
+	username, password, certificate, sanInCertificate, err := targetClusterRef.MyCredentials()
+	if err != nil {
 		return nil, err
 	}
-	defer targetBucket.Close()
+	connStr, err := targetClusterRef.MyConnectionStr()
+	if err != nil {
+		return nil, err
+	}
+
+	targetBucketInfo, err := utils.GetBucketInfo(connStr, spec.TargetBucketName, username, password, certificate, sanInCertificate, xdcrf.logger)
+	if err != nil {
+		return nil, err
+	}
+
+	// get timeSynchronization setting on target bucket
+	// default timeSynchronization to disabled if not found
+	timeSynchronization := base.TimeSynchronization_Disabled
+	timeSynchronizationObj, ok := targetBucketInfo[base.TimeSynchronizationKey]
+	if ok {
+		timeSynchronization, ok = timeSynchronizationObj.(string)
+		if !ok {
+			return nil, fmt.Errorf("%v timeSynchronization on target bucket is of wrong type.", topic)
+		}
+	}
 
 	// sourceCRMode is the conflict resolution mode to use when resolving conflicts for big documents at source side
 	// sourceCRMode is LWW if and only if target bucket is LWW enabled, so as to ensure that source side conflict
 	// resolution and target side conflict resolution yield consistent results
-	sourceCRMode := simple_utils.GetCRModeFromTimeSyncSetting(targetBucket.TimeSynchronization)
+	sourceCRMode := simple_utils.GetCRModeFromTimeSyncSetting(timeSynchronization)
 
 	xdcrf.logger.Infof("%v extMetaSupported=%v, sourceCRMode=%v\n", topic, extMetaSupported, sourceCRMode)
 
@@ -140,7 +161,7 @@ func (xdcrf *XDCRFactory) NewPipeline(topic string, progress_recorder common.Pip
 	progress_recorder(fmt.Sprintf("%v source nozzles have been constructed", len(sourceNozzles)))
 
 	xdcrf.logger.Infof("%v kv_vb_map=%v\n", topic, kv_vb_map)
-	outNozzles, vbNozzleMap, err := xdcrf.constructOutgoingNozzles(spec, kv_vb_map, extMetaSupported, sourceCRMode, targetBucket, targetClusterRef, logger_ctx)
+	outNozzles, vbNozzleMap, err := xdcrf.constructOutgoingNozzles(spec, kv_vb_map, extMetaSupported, sourceCRMode, targetBucketInfo, targetClusterRef, logger_ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -378,12 +399,13 @@ func (xdcrf *XDCRFactory) filterVBList(targetkvVBList []uint16, kv_vb_map map[st
 }
 
 func (xdcrf *XDCRFactory) constructOutgoingNozzles(spec *metadata.ReplicationSpecification, kv_vb_map map[string][]uint16,
-	extMetaSupported bool, sourceCRMode base.ConflictResolutionMode, targetBucket *couchbase.Bucket, targetClusterRef *metadata.RemoteClusterReference, logger_ctx *log.LoggerContext) (map[string]common.Nozzle, map[uint16]string, error) {
+	extMetaSupported bool, sourceCRMode base.ConflictResolutionMode, targetBucketInfo map[string]interface{},
+	targetClusterRef *metadata.RemoteClusterReference, logger_ctx *log.LoggerContext) (map[string]common.Nozzle, map[uint16]string, error) {
 	outNozzles := make(map[string]common.Nozzle)
 	vbNozzleMap := make(map[uint16]string)
 
 	targetBucketName := spec.TargetBucketName
-	kvVBMap, err := xdcrf.cluster_info_svc.GetServerVBucketsMap(targetClusterRef, targetBucketName)
+	kvVBMap, err := utils.GetServerVBucketsMap(targetClusterRef.HostName, targetBucketName, targetBucketInfo)
 	if err != nil {
 		xdcrf.logger.Errorf("Error getting server vbuckets map, err=%v\n", err)
 		return nil, nil, err
@@ -392,7 +414,16 @@ func (xdcrf *XDCRFactory) constructOutgoingNozzles(spec *metadata.ReplicationSpe
 		return nil, nil, ErrorNoTargetNozzle
 	}
 
-	bucketPwd := targetBucket.Password
+	// get target bucket password
+	bucketPwdObj, ok := targetBucketInfo[base.SASLPasswordKey]
+	if !ok {
+		return nil, nil, fmt.Errorf("%v cannot get sasl password from target bucket, %v.", spec.Id, targetBucketInfo)
+	}
+	bucketPwd, ok := bucketPwdObj.(string)
+	if !ok {
+		return nil, nil, fmt.Errorf("%v sasl password on target bucket is of wrong type.", spec.Id, bucketPwdObj)
+	}
+
 	maxTargetNozzlePerNode := spec.Settings.TargetNozzlePerNode
 	xdcrf.logger.Infof("Target topology retrieved. kvVBMap = %v\n", kvVBMap)
 
@@ -408,7 +439,7 @@ func (xdcrf *XDCRFactory) constructOutgoingNozzles(spec *metadata.ReplicationSpe
 		isCapiNozzle := (nozzleType == base.Capi)
 		if isCapiNozzle && len(vbCouchApiBaseMap) == 0 {
 			// construct vbCouchApiBaseMap only when nessary and only once
-			vbCouchApiBaseMap, err = capi_utils.ConstructVBCouchApiBaseMap(targetBucket, targetClusterRef)
+			vbCouchApiBaseMap, err = capi_utils.ConstructVBCouchApiBaseMap(targetBucketName, targetBucketInfo, targetClusterRef)
 			if err != nil {
 				xdcrf.logger.Errorf("Failed to construct vbCouchApiBase map, err=%v\n", err)
 				return nil, nil, err
@@ -625,12 +656,7 @@ func (xdcrf *XDCRFactory) constructSettingsForXmemNozzle(pipeline common.Pipelin
 			xmemSettings[parts.XMEM_SETTING_REMOTE_MEM_SSL_PORT] = mem_ssl_port
 			xmemSettings[parts.XMEM_SETTING_CERTIFICATE] = certificate
 			xmemSettings[parts.XMEM_SETTING_DEMAND_ENCRYPTION] = demandEncryption
-
-			hasSANInCertificateSupport, err := pipeline_utils.HasSANInCertificateSupport(xdcrf.cluster_info_svc, targetClusterRef)
-			if err != nil {
-				return nil, fmt.Errorf("Error checking if target cluster supports SANs in cerificates. err=%v", err)
-			}
-			xmemSettings[parts.XMEM_SETTING_SAN_IN_CERITICATE] = hasSANInCertificateSupport
+			xmemSettings[parts.XMEM_SETTING_SAN_IN_CERITICATE] = targetClusterRef.SANInCertificate
 
 			xdcrf.logger.Infof("xmemSettings=%v\n", xmemSettings)
 
@@ -851,27 +877,26 @@ func (xdcrf *XDCRFactory) ConstructSSLPortMap(targetClusterRef *metadata.RemoteC
 		}
 		xdcrf.logger.Infof("hasSSLOverMemSupport=%v\n", hasSSLOverMemSupport)
 
+		username, password, certificate, sanInCertificate, err := targetClusterRef.MyCredentials()
+		if err != nil {
+			return nil, false, err
+		}
+		connStr, err := targetClusterRef.MyConnectionStr()
+		if err != nil {
+			return nil, false, err
+		}
+
 		if hasSSLOverMemSupport {
-			ssl_port_map, err = utils.GetMemcachedSSLPort(targetClusterRef.HostName, targetClusterRef.UserName, targetClusterRef.Password, spec.TargetBucketName, xdcrf.logger)
+			ssl_port_map, err = utils.GetMemcachedSSLPortMap(connStr, username, password, certificate, sanInCertificate, spec.TargetBucketName, xdcrf.logger)
 			if err != nil {
 				xdcrf.logger.Errorf("Failed to get memcached ssl port, err=%v\n", err)
 				return nil, false, err
 			}
 		} else {
-			targetBucket, err := xdcrf.cluster_info_svc.GetBucket(targetClusterRef, spec.TargetBucketName)
+			ssl_port_map, err = utils.GetSSLProxyPortMap(connStr, username, password, certificate, sanInCertificate, xdcrf.logger)
 			if err != nil {
-				xdcrf.logger.Errorf("Error getting bucket. err=%v\n", err)
+				xdcrf.logger.Errorf("Failed to get ssl proxy port, err=%v\n", err)
 				return nil, false, err
-			}
-			defer targetBucket.Close()
-
-			ssl_port_map = make(map[string]uint16)
-			for _, node := range targetBucket.Nodes() {
-				hostname := utils.GetHostName(node.Hostname)
-				memcachedPort := uint16(node.Ports[base.DirectPortKey])
-				hostAddr := utils.GetHostAddr(hostname, memcachedPort)
-				proxyPort := uint16(node.Ports[base.SSLProxyPortKey])
-				ssl_port_map[hostAddr] = proxyPort
 			}
 		}
 

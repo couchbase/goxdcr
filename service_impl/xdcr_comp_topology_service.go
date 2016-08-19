@@ -84,19 +84,6 @@ func (top_svc *XDCRTopologySvc) MyKVNodes() ([]string, error) {
 	return nodes, nil
 }
 
-func (top_svc *XDCRTopologySvc) XDCRTopology() (map[string]uint16, error) {
-	retmap := make(map[string]uint16)
-	serverList, err := top_svc.cluster_info_svc.GetServerList(top_svc, "default")
-	if err != nil {
-		return nil, err
-	}
-	for _, server := range serverList {
-		serverName := utils.GetHostName(server)
-		retmap[serverName] = top_svc.xdcrRestPort
-	}
-	return retmap, nil
-}
-
 func (top_svc *XDCRTopologySvc) IsMyClusterEnterprise() (bool, error) {
 	return top_svc.isEnterprise, nil
 }
@@ -220,15 +207,17 @@ func (top_svc *XDCRTopologySvc) MyConnectionStr() (string, error) {
 	return utils.GetHostAddr(host, top_svc.adminport), nil
 }
 
-func (top_svc *XDCRTopologySvc) MyCredentials() (string, string, error) {
+func (top_svc *XDCRTopologySvc) MyCredentials() (string, string, []byte, bool, error) {
 	connStr, err := top_svc.MyConnectionStr()
 	if err != nil {
-		return "", "", err
+		return "", "", nil, false, err
 	}
 	if connStr == "" {
 		panic("connStr == ")
 	}
-	return cbauth.GetHTTPServiceAuth(connStr)
+
+	username, password, err := cbauth.GetHTTPServiceAuth(connStr)
+	return username, password, nil, false, err
 }
 
 func (top_svc *XDCRTopologySvc) MyProxyPort() (uint16, error) {

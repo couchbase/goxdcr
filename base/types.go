@@ -65,8 +65,8 @@ func (vbts *VBTimestamp) String() string {
 
 type ClusterConnectionInfoProvider interface {
 	MyConnectionStr() (string, error)
-	// returns username and password
-	MyCredentials() (string, string, error)
+	// returns username, password, certificate, and whether certificate contains SAN
+	MyCredentials() (string, string, []byte, bool, error)
 }
 
 type ReplicationInfo struct {

@@ -272,7 +272,7 @@ func (capi_svc *CAPIService) composeAPIRequestBase(remoteBucket *service_def.Rem
 		return nil, errors.New("Remote Bucket information is not fully populated")
 	}
 
-	username, password, err := remoteBucket.RemoteClusterRef.MyCredentials()
+	username, password, certificate, sanInCertificate, err := remoteBucket.RemoteClusterRef.MyCredentials()
 	if err != nil {
 		return nil, err
 	}
@@ -286,8 +286,8 @@ func (capi_svc *CAPIService) composeAPIRequestBase(remoteBucket *service_def.Rem
 	api_base.body = make(map[string]interface{})
 	api_base.body["bucket"] = remoteBucket.BucketName
 	api_base.body["bucketUUID"] = remoteBucket.UUID
-	api_base.certificate = remoteBucket.RemoteClusterRef.Certificate
-	api_base.SANInCertificate = remoteBucket.SANInCertificate
+	api_base.certificate = certificate
+	api_base.SANInCertificate = sanInCertificate
 	return api_base, nil
 }
 
