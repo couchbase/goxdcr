@@ -13,6 +13,7 @@ package replication_manager
 
 import (
 	"bufio"
+	"encoding/json"
 	"errors"
 	"expvar"
 	"fmt"
@@ -42,6 +43,7 @@ import (
 var logger_rm *log.CommonLogger = log.NewLogger("ReplicationManager", log.DefaultLoggerContext)
 var StatsUpdateIntervalForPausedReplications = 60 * time.Second
 var StatusCheckInterval = 15 * time.Second
+var MemStatsLogInterval = 2 * time.Minute
 
 var GoXDCROptions struct {
 	SourceKVAdminPort    uint64 //source kv admin port
@@ -101,6 +103,8 @@ type replicationManager struct {
 	children_waitgrp *sync.WaitGroup
 
 	status_logger_finch chan bool
+
+	mem_stats_logger_finch chan bool
 }
 
 //singleton
@@ -150,6 +154,10 @@ func StartReplicationManager(sourceKVHost string, xdcrRestPort uint16,
 
 		replication_mgr.status_logger_finch = make(chan bool, 1)
 		go replication_mgr.checkReplicationStatus(replication_mgr.status_logger_finch)
+
+		// periodically log mem stats to facilitate debugging of memory issues
+		replication_mgr.mem_stats_logger_finch = make(chan bool, 1)
+		go logMemStats(replication_mgr.mem_stats_logger_finch)
 
 		// start adminport
 		adminport := NewAdminport(sourceKVHost, xdcrRestPort, replication_mgr.adminport_finch)
@@ -772,6 +780,26 @@ func pollStdin() {
 	}
 }
 
+// periodically log mem stats to facilitate debugging of memory issues
+func logMemStats(fin_chan chan bool) {
+	mem_stats_ticker := time.NewTicker(MemStatsLogInterval)
+	defer mem_stats_ticker.Stop()
+
+	stats := new(runtime.MemStats)
+	var bytes []byte
+
+	for {
+		select {
+		case <-fin_chan:
+			return
+		case <-mem_stats_ticker.C:
+			runtime.ReadMemStats(stats)
+			bytes, _ = json.Marshal(stats)
+			logger_rm.Infof("Mem stats = %v\n", string(bytes))
+		}
+	}
+}
+
 //gracefull stop
 func cleanup() {
 	if replication_mgr.running {
@@ -794,6 +822,7 @@ func cleanup() {
 		simple_utils.ExecWithTimeout(pipeline_manager.OnExit, 1*time.Second, logger_rm)
 
 		close(replication_mgr.status_logger_finch)
+		close(replication_mgr.mem_stats_logger_finch)
 
 		logger_rm.Infof("Replication manager exists")
 	} else {
