@@ -379,6 +379,12 @@ func (capi *CapiNozzle) Receive(data interface{}) error {
 		capi.Logger().Errorf("%v datachan map len=%v, map = %v \n", capi.Id(), len(capi.vb_dataChan_map), capi.vb_dataChan_map)
 	}
 
+	err := capi.validateRunningState()
+	if err != nil {
+		capi.Logger().Infof("%v is in %v state, Recieve did no-op", capi.Id(), capi.State())
+		return err
+	}
+
 	dataChan <- req
 
 	capi.counter_received++
@@ -794,7 +800,12 @@ func (capi *CapiNozzle) batchUpdateDocsWithRetry(vbno uint16, req_list *[]*base.
 	num_of_retry := 0
 	retriedMalformedResponse := false
 	for {
-		err := capi.batchUpdateDocs(vbno, req_list)
+		err := capi.validateRunningState()
+		if err != nil {
+			return err
+		}
+
+		err = capi.batchUpdateDocs(vbno, req_list)
 		if err == nil {
 			// success. no need to retry further
 			return nil
