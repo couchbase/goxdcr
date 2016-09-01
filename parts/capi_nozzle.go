@@ -84,8 +84,8 @@ var SizePartDelimiter = "\r\n"
 
 var CouchFullCommitKey = "X-Couch-Full-Commit"
 
-var MalformedOK = "{\"ok\":true}\n"
 var MalformedResponseError = "Received malformed response from tcp connection"
+var MaxErrorMessageLength = 400
 
 /************************************
 /* struct capiBatch
@@ -680,7 +680,11 @@ func (capi *CapiNozzle) batchSendWithRetry(batch *capiBatch) error {
 	req_list := make([]*base.WrappedMCRequest, 0)
 
 	for i := 0; i < int(count); i++ {
-		item := <-dataChan
+		item, ok := <-dataChan
+		if !ok {
+			capi.Logger().Debugf("%v exiting batchSendWithRetry since data channel has been closed\n", capi.Id())
+			return nil
+		}
 
 		atomic.AddInt32(&capi.items_in_dataChan, -1)
 		atomic.AddInt32(&capi.bytes_in_dataChan, int32(0-item.Req.Size()))
@@ -756,48 +760,10 @@ func (capi *CapiNozzle) selfMonitor(finch chan bool, waitGrp *sync.WaitGroup) {
 	defer waitGrp.Done()
 	statsTicker := time.NewTicker(capi.config.statsInterval)
 	defer statsTicker.Stop()
-	// commenting these out till they are tested
-	/*ticker := time.Tick(capi.config.selfMonitorInterval)
-	var sent_count int = 0
-	var count uint64
-	freeze_counter := 0
-	idle_counter := 0*/
 	for {
 		select {
 		case <-finch:
 			goto done
-		/*case <-ticker:
-		if capi.validateRunningState() != nil {
-			capi.Logger().Infof("capi %v has stopped.", capi.Id())
-			goto done
-		}
-
-		count++
-		if capi.counter_sent == sent_count {
-			if capi.items_in_dataChan > 0 {
-				freeze_counter++
-				idle_counter = 0
-			} else {
-				freeze_counter = 0
-				idle_counter++
-			}
-		} else {
-			freeze_counter = 0
-			idle_counter = 0
-		}
-		sent_count = capi.counter_sent
-		if count == 10 {
-			capi.Logger().Debugf("%v- freeze_counter=%v, capi.counter_sent=%v, capi.items_in_dataChan=%v, receive_count-%v\n", capi.Id(), freeze_counter, capi.counter_sent, capi.items_in_dataChan, capi.counter_received)
-			capi.Logger().Debugf("%v open=%v checking..., %v item unsent, received %v items, sent %v items, %v batches ready\n", capi.Id(), capi.IsOpen(), capi.items_in_dataChan, capi.counter_received, capi.counter_sent, len(capi.batches_ready))
-			count = 0
-		}
-		if freeze_counter > capi.config.maxIdleCount {
-			capi.Logger().Errorf("Capi hasn't sent any item out for %v ticks, %v data in queue", capi.config.maxIdleCount, capi.items_in_dataChan)
-			capi.Logger().Infof("%v open=%v checking..., %v item unsent, received %v items, sent %v items, %v batches ready\n", capi.Id(), capi.IsOpen(), capi.items_in_dataChan, capi.counter_received, capi.counter_sent, len(capi.batches_ready))
-			capi.handleGeneralError(errors.New("Capi is stuck"))
-			goto done
-		}*/
-
 		case <-statsTicker.C:
 			capi.RaiseEvent(common.NewEvent(common.StatsUpdate, nil, capi, nil, []int{int(atomic.LoadInt32(&capi.items_in_dataChan)), int(atomic.LoadInt32(&capi.bytes_in_dataChan))}))
 		}
@@ -820,56 +786,6 @@ func (capi *CapiNozzle) adjustRequest(req *base.WrappedMCRequest) {
 	mc_req.Opcode = encodeOpCode(mc_req.Opcode)
 	mc_req.Cas = 0
 }
-
-// test func that uses http to update docs. may be helpful in debugging for isolating issues
-
-/*func (capi *CapiNozzle) batchUpdateDocsWithRetry(req_list *[]*mc.MCRequest) error {
-	var vbno uint16
-	for _, req := range req_list {
-		vbno = req.VBucket
-		break
-	}
-
-	couchApiBaseHost, couchApiBasePath, err := capi.getCouchApiBaseHostAndPathForVB(vbno)
-	if err != nil {
-		return err
-	}
-
-	capi.Logger().Debugf(" req_list=%v len=%v\n", *req_list, len(*req_list))
-
-	update_doc_map := make(map[string]interface{})
-	update_doc_list := make([]map[string]interface{}, 0)
-	update_doc_map[NewEditsKey] = false
-
-	for _, req := range *req_list {
-	capi.Logger().Debugf("appending to update_doc")
-		update_doc_list = append(update_doc_list, getDocMap(req))
-	}
-
-	update_doc_map[DocsKey] = update_doc_list
-
-	capi.Logger().Debugf(" update_doc_list=%v len=%v\n", update_doc_list, len(update_doc_list))
-
-	capi.Logger().Debugf("update_doc_map=%v\n", update_doc_map)
-
-	body, err := json.Marshal(update_doc_map)
-	capi.Logger().Debugf("update_doc_map after marshalling: body=%v, err=%v\n", body, err)
-	if err != nil {
-		return err
-	}
-
-	var out interface{}
-	err, statusCode := utils.QueryRestApiWithAuth(couchApiBaseHost, couchApiBasePath+base.BulkDocsPath, true, capi.config.username, capi.config.password, base.MethodPost, base.JsonContentType,
-		body, &out, capi.Logger(), capi.config.certificate)
-	capi.Logger().Debugf("result of _bulk_docs call for vb=%v: err=%v, status=%v\n", vbno, err, statusCode)
-	if err != nil {
-		return err
-	} else if statusCode != 201 {
-		return errors.New(fmt.Sprintf("Received unexpected status code %v from _bulk_docs call for vb=%v.\n", statusCode, vbno))
-	}
-
-	return nil
-}*/
 
 //batch call to update docs on target
 func (capi *CapiNozzle) batchUpdateDocsWithRetry(vbno uint16, req_list *[]*base.WrappedMCRequest) error {
@@ -902,7 +818,7 @@ func (capi *CapiNozzle) batchUpdateDocsWithRetry(vbno uint16, req_list *[]*base.
 			backoffTime *= 2
 			capi.Logger().Infof("%v retrying update docs for vb %v for the %vth time\n", capi.Id(), vbno, num_of_retry)
 		} else {
-			// max retry reached
+			// max retry reached. no need to call resetConn() since pipeline will get restarted
 			return errors.New(fmt.Sprintf("batch update docs failed for vb %v after %v retries", vbno, num_of_retry))
 		}
 	}
@@ -992,8 +908,6 @@ func (capi *CapiNozzle) batchUpdateDocs(vbno uint16, req_list *[]*base.WrappedMC
 
 	// get all send routines to stop
 	close(fin_ch)
-
-	// Question: do we need to wait for send routines to stop? I guess not
 
 	return err
 
@@ -1091,7 +1005,7 @@ func (capi *CapiNozzle) tcpProxy(vbno uint16, part_ch chan []byte, resp_ch chan 
 
 				response, err := http.ReadResponse(bufio.NewReader(client), nil)
 				if err != nil || response == nil {
-					errMsg := fmt.Sprintf("Error reading response. vb=%v, err=%v\n", vbno, err)
+					errMsg := fmt.Sprintf("Error reading response. vb=%v, err=%v\n", vbno, trimErrorMessage(err))
 					capi.Logger().Errorf("%v %v", capi.Id(), errMsg)
 					err_ch <- errors.New(errMsg)
 					return
@@ -1114,7 +1028,7 @@ func (capi *CapiNozzle) tcpProxy(vbno uint16, part_ch chan []byte, resp_ch chan 
 					// we need to reset connection to give subsequent requests a clean start
 					// there is no need to return error, though, since the current batch has already
 					// succeeded (as signaled by the 201 response status)
-					errMsg := MalformedResponseError + fmt.Sprintf(" vb=%v, err=%v\n", vbno, err)
+					errMsg := MalformedResponseError + fmt.Sprintf(" vb=%v, err=%v\n", vbno, trimErrorMessage(err))
 					capi.Logger().Errorf("%v %v", capi.Id(), errMsg)
 					capi.resetConn()
 				}
@@ -1127,6 +1041,16 @@ func (capi *CapiNozzle) tcpProxy(vbno uint16, part_ch chan []byte, resp_ch chan 
 		}
 	}
 
+}
+
+// malformed http response error may print the entire response buffer, which can be arbitrarily long
+// trim the error message to at most 400 chars to avoid flooding the log file
+func trimErrorMessage(err error) string {
+	errMsg := err.Error()
+	if len(errMsg) > MaxErrorMessageLength {
+		errMsg = errMsg[:MaxErrorMessageLength]
+	}
+	return errMsg
 }
 
 // produce a serialized document from mc request
@@ -1210,19 +1134,6 @@ func (capi *CapiNozzle) initialize(settings map[string]interface{}) error {
 	return err
 }
 
-/* capi does not increase retry interval for each retry since capi's wait is blocking wait
-func (capi *CapiNozzle) timeoutDuration(numofRetry int) time.Duration {
-	duration := capi.config.retryInterval
-	for i := 1; i < numofRetry; i++ {
-		duration *= 2
-		if duration > capi.config.maxRetryInterval {
-			duration = capi.config.maxRetryInterval
-			break
-		}
-	}
-	return duration
-}*/
-
 func (capi *CapiNozzle) StatusSummary() string {
 	return fmt.Sprintf("%v received %v items, sent %v items", capi.Id(), atomic.LoadUint32(&capi.counter_received), atomic.LoadUint32(&capi.counter_sent))
 }
@@ -1276,7 +1187,7 @@ func (capi *CapiNozzle) resetConn() error {
 }
 
 func (capi *CapiNozzle) initializeOrResetConn(initializing bool) error {
-	capi.Logger().Debugf("%v resetting capi connection\n", capi.Id())
+	capi.Logger().Infof("%v resetting capi connection. initializing=%v\n", capi.Id(), initializing)
 
 	if capi.validateRunningState() != nil {
 		capi.Logger().Infof("%v is not running, no need to resetConn", capi.Id())
