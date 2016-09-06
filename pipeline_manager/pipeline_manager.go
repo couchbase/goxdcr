@@ -370,24 +370,26 @@ func (pipelineMgr *pipelineManager) stopPipeline(rep_status *pipeline.Replicatio
 	pipelineMgr.logger.Infof("Trying to stop the pipeline %s", rep_status.RepId())
 	var err error
 
-	if rep_status.Pipeline() != nil && (rep_status.Pipeline().State() == common.Pipeline_Running || rep_status.Pipeline().State() == common.Pipeline_Starting || rep_status.Pipeline().State() == common.Pipeline_Error) {
-		p := rep_status.Pipeline()
-		err = p.Stop()
-		if err != nil {
-			pipelineMgr.logger.Errorf("Received error when stopping pipeline %v - %v\n", rep_status.RepId(), err)
-			//pipeline failed to stopped gracefully in time. ignore the error.
-			//the parts of the pipeline will eventually commit suicide.
+	p := rep_status.Pipeline()
+
+	if p != nil {
+		state := p.State()
+		if state == common.Pipeline_Running || state == common.Pipeline_Starting || state == common.Pipeline_Error {
+			err = p.Stop()
+			if err != nil {
+				pipelineMgr.logger.Errorf("Received error when stopping pipeline %v - %v\n", rep_status.RepId(), err)
+				//pipeline failed to stopped gracefully in time. ignore the error.
+				//the parts of the pipeline will eventually commit suicide.
+			} else {
+				pipelineMgr.logger.Infof("Pipeline %v has been stopped\n", rep_status.RepId())
+			}
+			pipelineMgr.removePipelineFromReplicationStatus(p)
+			pipelineMgr.logger.Infof("Replication Status=%v\n", rep_status)
 		} else {
-			pipelineMgr.logger.Infof("Pipeline %v has been stopped\n", rep_status.RepId())
+			pipelineMgr.logger.Infof("Pipeline %v is not in the right state to be stopped. state=%v\n", rep_status.RepId(), state)
 		}
-		pipelineMgr.removePipelineFromReplicationStatus(p)
-		pipelineMgr.logger.Infof("Replication Status=%v\n", rep_status)
 	} else {
-		if rep_status.Pipeline() == nil {
-			pipelineMgr.logger.Infof("Pipeline %v is not running\n", rep_status.RepId())
-		} else {
-			pipelineMgr.logger.Infof("Pipeline %v is not in the right state to be stopped. state=%v\n", rep_status.RepId(), rep_status.Pipeline().State())
-		}
+		pipelineMgr.logger.Infof("Pipeline %v is not running\n", rep_status.RepId())
 	}
 	return err
 }
