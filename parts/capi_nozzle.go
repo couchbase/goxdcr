@@ -441,6 +441,7 @@ func (capi *CapiNozzle) processData_batch(finch chan bool, waitGrp *sync.WaitGro
 					err = capi.send_internal(batch)
 					if err != nil {
 						capi.handleGeneralError(err)
+						goto done
 					}
 				}
 			}
@@ -1231,7 +1232,11 @@ func (capi *CapiNozzle) initializeOrResetConn(initializing bool) error {
 	}
 
 	if pool != nil {
-		capi.client, err = pool.GetNew()
+		var client *net.TCPConn
+		client, err = pool.GetNew()
+		if err == nil && client != nil {
+			capi.client = client
+		}
 	}
 
 	if err == nil {
