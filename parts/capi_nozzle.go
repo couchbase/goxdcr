@@ -315,8 +315,11 @@ func (capi *CapiNozzle) Stop() error {
 	for _, dataChan := range capi.vb_dataChan_map {
 		close(dataChan)
 	}
-	capi.Logger().Infof("closing batches ready for %v\n", capi.Id())
-	close(capi.batches_ready)
+
+	if capi.batches_ready != nil {
+		capi.Logger().Infof("%v closing batches ready\n", capi.Id())
+		close(capi.batches_ready)
+	}
 
 	err = capi.Stop_server()
 
@@ -372,6 +375,12 @@ func (capi *CapiNozzle) Receive(data interface{}) error {
 	if !ok {
 		capi.Logger().Errorf("%v received a request with unexpected vb %v\n", capi.Id(), vbno)
 		capi.Logger().Errorf("datachan map len=%v, map = %v \n", len(capi.vb_dataChan_map), capi.vb_dataChan_map)
+	}
+
+	err := capi.validateRunningState()
+	if err != nil {
+		capi.Logger().Infof("%v is in %v state, Recieve did no-op", capi.Id(), capi.State())
+		return err
 	}
 
 	dataChan <- req
@@ -657,17 +666,15 @@ func (capi *CapiNozzle) onExit() {
 	capi.childrenWaitGrp.Wait()
 
 	//cleanup
-	pool := base.TCPConnPoolMgr().GetPool(capi.getPoolName(capi.config))
-	if pool != nil {
-		capi.Logger().Infof("releasing capi client")
-		pool.Release(capi.client)
-	}
+	capi.Logger().Infof("releasing capi client")
+	capi.client.Close()
 
 }
 
 func (capi *CapiNozzle) selfMonitor(finch chan bool, waitGrp *sync.WaitGroup) {
 	defer waitGrp.Done()
-	statsTicker := time.Tick(capi.config.statsInterval)
+	statsTicker := time.NewTicker(capi.config.statsInterval)
+	defer statsTicker.Stop()
 	// commenting these out till they are tested
 	/*ticker := time.Tick(capi.config.selfMonitorInterval)
 	var sent_count int = 0
@@ -710,7 +717,7 @@ func (capi *CapiNozzle) selfMonitor(finch chan bool, waitGrp *sync.WaitGroup) {
 			goto done
 		}*/
 
-		case <-statsTicker:
+		case <-statsTicker.C:
 			capi.RaiseEvent(common.NewEvent(common.StatsUpdate, nil, capi, nil, []int{capi.items_in_dataChan, capi.bytes_in_dataChan}))
 		}
 	}
@@ -792,7 +799,12 @@ func (capi *CapiNozzle) batchUpdateDocsWithRetry(vbno uint16, req_list *[]*base.
 	num_of_retry := 0
 	retriedMalformedResponse := false
 	for {
-		err := capi.batchUpdateDocs(vbno, req_list)
+		err := capi.validateRunningState()
+		if err != nil {
+			return err
+		}
+
+		err = capi.batchUpdateDocs(vbno, req_list)
 		if err == nil {
 			// success. no need to retry further
 			return nil
@@ -808,7 +820,10 @@ func (capi *CapiNozzle) batchUpdateDocsWithRetry(vbno uint16, req_list *[]*base.
 				retriedMalformedResponse = true
 			}
 			// reset connection to ensure a clean start
-			capi.resetConn()
+			err = capi.resetConn()
+			if err != nil {
+				return err
+			}
 			num_of_retry++
 			time.Sleep(capi.config.retryInterval)
 			capi.Logger().Infof("Retrying update docs for vb %v for the %vth time\n", vbno, num_of_retry)
@@ -821,8 +836,6 @@ func (capi *CapiNozzle) batchUpdateDocsWithRetry(vbno uint16, req_list *[]*base.
 
 func (capi *CapiNozzle) batchUpdateDocs(vbno uint16, req_list *[]*base.WrappedMCRequest) (err error) {
 	capi.Logger().Debugf("batchUpdateDocs, vbno=%v, len(req_list)=%v\n", vbno, len(*req_list))
-
-	//capi.resetConn()
 
 	couchApiBaseHost, couchApiBasePath, err := capi.getCouchApiBaseHostAndPathForVB(vbno)
 	if err != nil {
@@ -885,7 +898,8 @@ func (capi *CapiNozzle) batchUpdateDocs(vbno uint16, req_list *[]*base.WrappedMC
 	// start go rountine that write body parts to tcpProxy()
 	go capi.writeDocs(vbno, req_bytes, doc_list, part_ch, err_ch, fin_ch)
 
-	ticker := time.Tick(capi.config.connectionTimeout)
+	ticker := time.NewTicker(capi.config.connectionTimeout)
+	defer ticker.Stop()
 	select {
 	case <-capi.sender_finch:
 		// capi is stopping.
@@ -895,7 +909,7 @@ func (capi *CapiNozzle) batchUpdateDocs(vbno uint16, req_list *[]*base.WrappedMC
 	case err = <-err_ch:
 		// error encountered
 		capi.Logger().Errorf("batchUpdateDocs for vb %v failed with err %v.\n", vbno, err)
-	case <-ticker:
+	case <-ticker.C:
 		// connection timed out
 		errMsg := fmt.Sprintf("Connection timeout when updating docs for vb %v", vbno)
 		capi.Logger().Error(errMsg)
@@ -984,7 +998,11 @@ func (capi *CapiNozzle) tcpProxy(vbno uint16, part_ch chan []byte, resp_ch chan 
 					// a well formed http response
 					// when this happens, reset the connection to ensure that subsequent writes have a clean start
 					// the previous update should have succeeded. there is no need to retry
-					capi.resetConn()
+					err = capi.resetConn()
+					if err != nil {
+						err_ch <- err
+						return
+					}
 					resp_ch <- true
 					return
 				}
@@ -1223,7 +1241,7 @@ func (capi *CapiNozzle) initializeOrResetConn(initializing bool) error {
 		capi.Logger().Debugf("%v - The connection for capi client is reset successfully\n", capi.Id())
 		return nil
 	} else {
-		capi.Logger().Errorf("%v - Connection reset failed\n", capi.Id())
+		capi.Logger().Errorf("%v - Connection reset failed. err=%v\n", capi.Id(), err)
 		capi.handleGeneralError(err)
 		return err
 	}
