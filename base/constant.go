@@ -306,6 +306,8 @@ const (
 	TimeSynchronization_Disabled = "disabled"
 )
 
+var UnexpectedEOF = "unexpected EOF"
+
 // --------------- Constants that are configurable -----------------
 var TopologyChangeCheckInterval = 10 * time.Second
 

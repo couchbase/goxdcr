@@ -510,7 +510,8 @@ func (capi *CapiNozzle) send_internal(batch *capiBatch) error {
 		capi.counter_sent = capi.counter_sent + count
 		capi.Logger().Debugf("So far, capi %v processed %d items", capi.Id(), capi.counter_sent)
 
-		bigDoc_noRep_map, err := capi.batchGetMeta(batch.vbno, batch.bigDoc_map)
+		var bigDoc_noRep_map map[string]bool
+		bigDoc_noRep_map, err = capi.batchGetMeta(batch.vbno, batch.bigDoc_map)
 		if err != nil {
 			capi.Logger().Errorf("%v batchGetMeta failed. err=%v\n", capi.Id(), err)
 		} else {
@@ -734,7 +735,7 @@ func (capi *CapiNozzle) batchUpdateDocsWithRetry(vbno uint16, req_list *[]*base.
 		// will succeed, before we declare the update to have failed, which likely will lead to pipeline failure.
 		if (isMalformedResponseError && (!retriedMalformedResponse || num_of_retry < capi.config.maxRetry)) ||
 			(!isMalformedResponseError && num_of_retry < capi.config.maxRetry) {
-			if err.Error() == MalformedResponseError {
+			if isMalformedResponseError {
 				retriedMalformedResponse = true
 			}
 			// reset connection to ensure a clean start
@@ -948,7 +949,7 @@ func (capi *CapiNozzle) tcpProxy(vbno uint16, part_ch chan []byte, resp_ch chan 
 
 				body_length, err := capi.getResponseBodyLength(response)
 				if err != nil {
-					errMsg := fmt.Sprintf("Error getting length of response body from update docs request for vb %v. err=%v\n", vbno, err)
+					errMsg := fmt.Sprintf("Error getting length of response body from update docs request for vb %v. body_length=%v, err=%v\n", vbno, body_length, err)
 					capi.Logger().Errorf("%v %v", capi.Id(), errMsg)
 					err_ch <- errors.New(errMsg)
 					return
@@ -987,7 +988,7 @@ func (capi *CapiNozzle) tcpProxy(vbno uint16, part_ch chan []byte, resp_ch chan 
 
 func (capi *CapiNozzle) getResponseBodyLength(response *http.Response) (int, error) {
 	contents, err := ioutil.ReadAll(response.Body)
-	if err == io.ErrUnexpectedEOF {
+	if err != nil && (err == io.ErrUnexpectedEOF || strings.Contains(err.Error(), base.UnexpectedEOF)) {
 		// unexpected EOF is expected when response.Body does not contain all response bytes, which happens often
 		err = nil
 	}
