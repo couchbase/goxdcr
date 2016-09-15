@@ -11,7 +11,6 @@ package parts
 
 import (
 	"bufio"
-	"bytes"
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
@@ -25,7 +24,6 @@ import (
 	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/goxdcr/simple_utils"
 	"github.com/couchbase/goxdcr/utils"
-	"io"
 	"io/ioutil"
 	"net"
 	"net/http"
@@ -196,9 +194,6 @@ type CapiNozzle struct {
 	handle_error     bool
 	dataObj_recycler base.DataObjRecycler
 	topic            string
-
-	// buffer to hold http responses from target
-	res_buf []byte
 }
 
 func NewCapiNozzle(id string,
@@ -510,7 +505,8 @@ func (capi *CapiNozzle) send_internal(batch *capiBatch) error {
 		capi.counter_sent = capi.counter_sent + count
 		capi.Logger().Debugf("So far, capi %v processed %d items", capi.Id(), capi.counter_sent)
 
-		bigDoc_noRep_map, err := capi.batchGetMeta(batch.vbno, batch.bigDoc_map)
+		var bigDoc_noRep_map map[string]bool
+		bigDoc_noRep_map, err = capi.batchGetMeta(batch.vbno, batch.bigDoc_map)
 		if err != nil {
 			capi.Logger().Errorf("%v batchGetMeta failed. err=%v\n", capi.Id(), err)
 		} else {
@@ -988,73 +984,39 @@ func (capi *CapiNozzle) tcpProxy(vbno uint16, part_ch chan []byte, resp_ch chan 
 
 				// read response
 				capi.client.SetReadDeadline(time.Now().Add(capi.config.readTimeout))
-				num_bytes, err := capi.client.Read(capi.res_buf)
-				capi.Logger().Debugf("%v read result err=%v, num_bytes=%v\n", capi.Id(), err, num_bytes)
-				if err != nil {
-					err_ch <- err
+
+				response, err := http.ReadResponse(bufio.NewReader(capi.client), nil)
+				if err != nil || response == nil {
+					errMsg := fmt.Sprintf("Error reading response. vb=%v, err=%v\n", vbno, err)
+					capi.Logger().Errorf("%v %v", capi.Id(), errMsg)
+					err_ch <- errors.New(errMsg)
 					return
 				}
 
-				if num_bytes == len(MalformedOK) && string(capi.res_buf[:num_bytes]) == MalformedOK {
-					// oocasionally batchUpdateDocs receive MalformedOK {{ok:true}) instead of
-					// a well formed http response
-					// when this happens, reset the connection to ensure that subsequent writes have a clean start
-					// the previous update should have succeeded. there is no need to retry
-					err = capi.resetConn()
-					if err != nil {
-						err_ch <- err
-						return
-					}
-					resp_ch <- true
-					return
-				}
+				defer response.Body.Close()
 
-				buffer := bytes.NewBuffer(capi.res_buf[:num_bytes])
-				response, err := http.ReadResponse(bufio.NewReader(buffer), nil)
-
-				if err != nil {
-					errMsg := MalformedResponseError + fmt.Sprintf(" vb=%v. err=%v, num_bytes=%v, res_buf={%v}\n", vbno, err, num_bytes, string(capi.res_buf[:num_bytes]))
+				if response.StatusCode != 201 {
+					errMsg := fmt.Sprintf("Received unexpected status code, %v, from update docs request for vb %v\n", response.StatusCode, vbno)
 					capi.Logger().Errorf("%v %v", capi.Id(), errMsg)
 					err_ch <- errors.New(errMsg)
 
-					capi.resetConn()
+					// no need to read leftover bytes, if any, since connection will get reset soon
 					return
 				}
 
-				// check if we get all the response body
-				defer response.Body.Close()
-				contents, err := ioutil.ReadAll(response.Body)
-
-				// if the response body is shorter than content length in response header, there is more to come from target
-				// use ReadFull API to ensure that we get all the response bytes
-				// we do not really need these bytes. just need to ensure that these bytes won't mess up the reading of the next response
-				if int64(len(contents)) < response.ContentLength {
-					len_remaining_bytes := response.ContentLength - int64(len(contents))
-					if len_remaining_bytes > int64(len(capi.res_buf)) {
-						// in the unlikely event that capi.res_buf is not big enough, re-allocate a bigger buffer
-						capi.Logger().Infof("%v allocating a new response buffer with size %v\n", capi.Id(), len_remaining_bytes)
-						capi.res_buf = make([]byte, len_remaining_bytes)
-					}
-
-					_, err = io.ReadFull(capi.client, capi.res_buf[:len_remaining_bytes])
-					if err != nil {
-						errMsg := MalformedResponseError + fmt.Sprintf(" vb=%v. err=%v\n", vbno, err)
-						capi.Logger().Errorf("%v %v", capi.Id(), errMsg)
-						err_ch <- errors.New(errMsg)
-
-						capi.resetConn()
-						return
-					}
+				_, err = ioutil.ReadAll(response.Body)
+				if err != nil {
+					// if we get an error reading the entirety of response body, e.g., because of timeout
+					// we need to reset connection to give subsequent requests a clean start
+					// there is no need to return error, though, since the current batch has already
+					// succeeded (as signaled by the 201 response status)
+					errMsg := MalformedResponseError + fmt.Sprintf(" vb=%v, err=%v\n", vbno, err)
+					capi.Logger().Errorf("%v %v", capi.Id(), errMsg)
+					capi.resetConn()
 				}
 
-				capi.Logger().Debugf("%v http response =%v\n", capi.Id(), response)
-
-				if response.StatusCode != 201 {
-					err_ch <- errors.New(fmt.Sprintf("receieved unexpected status code, %v, from update docs request for vb %v\n", response.StatusCode, vbno))
-				} else {
-					// notify caller that write succeeded
-					resp_ch <- true
-				}
+				// notify caller that write succeeded
+				resp_ch <- true
 
 				return
 			}
@@ -1133,10 +1095,6 @@ func (capi *CapiNozzle) initialize(settings map[string]interface{}) error {
 	}
 
 	capi.checker_finch = make(chan bool, 1)
-
-	// make the buffer big enough to hold responses.
-	// in the worse case, there is an entry (of roughly 60 bytes) for each mutation in the batch
-	capi.res_buf = make([]byte, capi.config.maxCount*70+300)
 
 	capi.Logger().Debugf("%v about to start initializing connection", capi.Id())
 	err = capi.initializeConn()
