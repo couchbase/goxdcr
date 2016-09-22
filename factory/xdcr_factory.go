@@ -130,15 +130,9 @@ func (xdcrf *XDCRFactory) NewPipeline(topic string, progress_recorder common.Pip
 		return nil, err
 	}
 
-	// get timeSynchronization setting on target bucket
-	// default timeSynchronization to disabled if not found
-	timeSynchronization := base.TimeSynchronization_Disabled
-	timeSynchronizationObj, ok := targetBucketInfo[base.TimeSynchronizationKey]
-	if ok {
-		timeSynchronization, ok = timeSynchronizationObj.(string)
-		if !ok {
-			return nil, fmt.Errorf("%v timeSynchronization on target bucket is of wrong type.", topic)
-		}
+	timeSynchronization, err := utils.GetTimeSynchronizationFromBucketInfo(spec.TargetBucketName, targetBucketInfo)
+	if err != nil {
+		return nil, err
 	}
 
 	// sourceCRMode is the conflict resolution mode to use when resolving conflicts for big documents at source side
