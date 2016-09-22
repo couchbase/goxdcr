@@ -230,6 +230,17 @@ func (service *ReplicationSpecService) ValidateNewReplicationSpec(sourceBucket, 
 	service.logger.Infof("Result from remote bucket look up: err_target=%v, time taken=%v\n", err_target, time.Since(start_time))
 	service.validateBucket(sourceBucket, targetCluster, targetBucket, targetBucketType, err_target, errorMap, false)
 
+	// validate that source and target bucket have the same timeSynchronization metadata
+	targetTimeSynchronization, err := utils.GetTimeSynchronizationFromBucketInfo(targetBucket, targetBucketInfo)
+	if err != nil {
+		errorMap[base.PlaceHolderFieldKey] = errors.New("Error retrieving TimeSynchronization setting on target bucket")
+		return "", "", nil, errorMap
+	}
+	if sourceBucketObj.TimeSynchronization != targetTimeSynchronization {
+		errorMap[base.PlaceHolderFieldKey] = errors.New("Replication between buckets with different TimeSynchronization setting is not allowed")
+		return "", "", nil, errorMap
+	}
+
 	targetBucketUUID := ""
 	if targetBucketInfo != nil {
 		targetBucketUUID, err = utils.GetBucketUuidFromBucketInfo(targetBucket, targetBucketInfo, service.logger)

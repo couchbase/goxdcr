@@ -493,3 +493,17 @@ func GetServerVBucketsMap(connStr, bucketName string, bucketInfo map[string]inte
 	}
 	return serverVBMap, nil
 }
+
+// get timeSynchronization setting from bucket info
+// default timeSynchronization to disabled if not found
+func GetTimeSynchronizationFromBucketInfo(bucketName string, bucketInfo map[string]interface{}) (string, error) {
+	timeSynchronization := base.TimeSynchronization_Disabled
+	timeSynchronizationObj, ok := bucketInfo[base.TimeSynchronizationKey]
+	if ok {
+		timeSynchronization, ok = timeSynchronizationObj.(string)
+		if !ok {
+			return "", fmt.Errorf("TimeSynchronization on bucket %v is of wrong type.", bucketName)
+		}
+	}
+	return timeSynchronization, nil
+}
