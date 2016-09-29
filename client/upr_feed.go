@@ -669,3 +669,15 @@ func (feed *UprFeed) Close() {
 	default:
 	}
 }
+
+// check if the UprFeed has been closed
+func (feed *UprFeed) Closed() bool {
+	select {
+	case <-feed.closer:
+		// put the closed token back to closer channel
+		feed.Close()
+		return true
+	default:
+		return false
+	}
+}
