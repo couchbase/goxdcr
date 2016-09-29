@@ -412,7 +412,7 @@ func (dcp *DcpNozzle) processData() (err error) {
 				dcp.Logger().Infof("%v DCP mutation channel has been closed.Stop dcp nozzle now.", dcp.Id())
 				//close uprFeed
 				dcp.closeUprFeed()
-				dcp.handleGeneralError(errors.New("DCP stream has been closed."))
+				dcp.handleGeneralError(errors.New("DCP upr feed has been closed."))
 				goto done
 			}
 			if m.Opcode == mc.UPR_STREAMREQ {
@@ -805,9 +805,15 @@ func (dcp *DcpNozzle) checkInactiveUprStreams() {
 	for {
 		select {
 		case <-fin_ch:
-			dcp.Logger().Infof("checkInactiveUprStreams routine is exiting because parent %v has been stopped\n", dcp.Id())
+			dcp.Logger().Infof("%v checkInactiveUprStreams routine is exiting because dcp nozzle has been stopped\n", dcp.Id())
 			return
 		case <-dcp_inactive_stream_check_ticker.C:
+			if dcp.isFeedClosed() {
+				dcp.Logger().Infof("%v checkInactiveUprStreams routine is exiting because upr feed has been closed\n", dcp.Id())
+				dcp.closeUprFeed()
+				dcp.handleGeneralError(errors.New("DCP upr feed has been closed."))
+				return
+			}
 			err := simple_utils.ExecWithTimeout(dcp.checkInactiveUprStreams_once, 1000*time.Millisecond, dcp.Logger())
 			if err != nil {
 				// ignore error and continue
@@ -815,6 +821,16 @@ func (dcp *DcpNozzle) checkInactiveUprStreams() {
 			}
 		}
 	}
+}
+
+// check if feed has been closed
+func (dcp *DcpNozzle) isFeedClosed() bool {
+	dcp.lock_uprFeed.RLock()
+	defer dcp.lock_uprFeed.RUnlock()
+	if dcp.uprFeed != nil {
+		return dcp.uprFeed.Closed()
+	}
+	return true
 }
 
 // check if inactive streams need to be restarted
