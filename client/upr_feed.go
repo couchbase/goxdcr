@@ -446,6 +446,8 @@ loop:
 		select {
 		case <-feed.closer:
 			logging.Infof("Feed has been closed. Exiting.")
+			// put the closed token back to closer channel
+			feed.Close()
 			break loop
 		default:
 			sendAck := false
@@ -599,6 +601,8 @@ loop:
 				case ch <- event:
 				case <-feed.closer:
 					logging.Infof("Feed has been closed. Skip sending events. Exiting.")
+					// put the closed token back to closer channel
+					feed.Close()
 					break loop
 				}
 
