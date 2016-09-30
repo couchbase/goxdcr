@@ -26,6 +26,8 @@ import (
 var ReplicationSpecNotActive error = errors.New("Replication specification not found or no longer active")
 var ReplicationSpecNotFound error = errors.New("Replication specification not found")
 
+var default_failure_restart_interval = 10
+
 type func_report_fixed func(topic string)
 
 type pipelineManager struct {
@@ -458,7 +460,9 @@ func (pipelineMgr *pipelineManager) launchUpdater(topic string, cur_err error, r
 	}
 	settingsMap := rep_status.SettingsMap()
 	retry_interval_obj := settingsMap[metadata.FailureRestartInterval]
-	var retry_interval int = 0
+	// retry_interval_obj may be null in abnormal scenarios, e.g., when replication spec has been deleted
+	// default retry_interval to 10 seconds in such cases
+	retry_interval := default_failure_restart_interval
 	if retry_interval_obj != nil {
 		retry_interval = settingsMap[metadata.FailureRestartInterval].(int)
 	}
@@ -546,7 +550,7 @@ type pipelineUpdater struct {
 }
 
 func newPipelineUpdater(pipeline_name string, retry_interval int, waitGrp *sync.WaitGroup, cur_err error, rep_status *pipeline.ReplicationStatus, logger *log.CommonLogger) (*pipelineUpdater, error) {
-	if retry_interval < 0 {
+	if retry_interval <= 0 {
 		return nil, fmt.Errorf("Invalid retry interval %v", retry_interval)
 	}
 
@@ -591,16 +595,20 @@ func (r *pipelineUpdater) start() {
 			return
 		case <-r.update_now_ch:
 			r.logger.Infof("Replication %v's status is changed, update now\n", r.pipeline_name)
+			ticker.Stop()
 			if r.update() {
 				return
 			} else {
 				r.num_of_retries++
+				ticker = time.NewTicker(r.retry_interval)
 			}
 		case <-ticker.C:
+			ticker.Stop()
 			if r.update() {
 				return
 			} else {
 				r.num_of_retries++
+				ticker = time.NewTicker(r.retry_interval)
 			}
 		}
 	}
