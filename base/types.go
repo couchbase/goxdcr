@@ -84,8 +84,6 @@ type ErrorInfo struct {
 type WrappedMCRequest struct {
 	Seqno uint64
 	Req   *gomemcached.MCRequest
-	// conflict resolution mode of mutations
-	CRMode     ConflictResolutionMode
 	Start_time time.Time
 	Send_time  time.Time
 	UniqueKey  string

@@ -92,11 +92,6 @@ func (xdcrf *XDCRFactory) NewPipeline(topic string, progress_recorder common.Pip
 	logger_ctx := log.CopyCtx(xdcrf.default_logger_ctx)
 	logger_ctx.SetLogLevel(spec.Settings.LogLevel)
 
-	extMetaSupported, err := xdcrf.isExtMetaSupported(spec)
-	if err != nil {
-		return nil, err
-	}
-
 	// get source bucket to retrieve bucket password
 	localConnStr, err := xdcrf.xdcr_topology_svc.MyConnectionStr()
 	if err != nil {
@@ -140,10 +135,10 @@ func (xdcrf *XDCRFactory) NewPipeline(topic string, progress_recorder common.Pip
 	// resolution and target side conflict resolution yield consistent results
 	sourceCRMode := simple_utils.GetCRModeFromTimeSyncSetting(timeSynchronization)
 
-	xdcrf.logger.Infof("%v extMetaSupported=%v, sourceCRMode=%v\n", topic, extMetaSupported, sourceCRMode)
+	xdcrf.logger.Infof("%v sourceCRMode=%v\n", topic, sourceCRMode)
 
 	// popuplate pipeline using config
-	sourceNozzles, kv_vb_map, err := xdcrf.constructSourceNozzles(spec, topic, extMetaSupported, sourceBucketPassword, logger_ctx)
+	sourceNozzles, kv_vb_map, err := xdcrf.constructSourceNozzles(spec, topic, sourceBucketPassword, logger_ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -155,7 +150,7 @@ func (xdcrf *XDCRFactory) NewPipeline(topic string, progress_recorder common.Pip
 	progress_recorder(fmt.Sprintf("%v source nozzles have been constructed", len(sourceNozzles)))
 
 	xdcrf.logger.Infof("%v kv_vb_map=%v\n", topic, kv_vb_map)
-	outNozzles, vbNozzleMap, err := xdcrf.constructOutgoingNozzles(spec, kv_vb_map, extMetaSupported, sourceCRMode, targetBucketInfo, targetClusterRef, logger_ctx)
+	outNozzles, vbNozzleMap, err := xdcrf.constructOutgoingNozzles(spec, kv_vb_map, sourceCRMode, targetBucketInfo, targetClusterRef, logger_ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -180,7 +175,7 @@ func (xdcrf *XDCRFactory) NewPipeline(topic string, progress_recorder common.Pip
 			downStreamParts[targetNozzleId] = outNozzle
 		}
 
-		router, err := xdcrf.constructRouter(sourceNozzle.Id(), spec, downStreamParts, vbNozzleMap, extMetaSupported, logger_ctx)
+		router, err := xdcrf.constructRouter(sourceNozzle.Id(), spec, downStreamParts, vbNozzleMap, logger_ctx)
 		if err != nil {
 			return nil, err
 		}
@@ -213,42 +208,6 @@ func (xdcrf *XDCRFactory) NewPipeline(topic string, progress_recorder common.Pip
 
 	xdcrf.logger.Infof("Pipeline %v has been constructed", topic)
 	return pipeline, nil
-}
-
-// extended metadata is supported by replication only if
-// 1. replication is not of CAPI type
-// and 2. extended metadata is supported by target cluster
-// there is no need to check if extended metadata is supported by source cluster since
-// source cluser is always post-sherlock
-// when ext metadata is not supported, replication would not request ext metadata from dcp
-// or add ext metadata to MCRequest
-func (xdcrf *XDCRFactory) isExtMetaSupported(spec *metadata.ReplicationSpecification) (bool, error) {
-	// first check if replication is of CAPI type, which does not support lww
-	targetClusterRef, err := xdcrf.remote_cluster_svc.RemoteClusterByUuid(spec.TargetClusterUUID, true)
-	if err != nil {
-		xdcrf.logger.Errorf("Error getting remote cluster with uuid=%v for pipeline %v, err=%v\n", spec.TargetClusterUUID, spec.Id, err)
-		return false, err
-	}
-
-	nozzleType, err := xdcrf.getOutNozzleType(targetClusterRef, spec)
-	if err != nil {
-		xdcrf.logger.Errorf("Failed to get the out nozzle type for pipeline %v, err=%v\n", spec.Id, err)
-		return false, err
-	}
-
-	if nozzleType == base.Capi {
-		return false, nil
-	}
-
-	// then check if target cluster supports extended metadata
-	extMetaSupportedByTarget, err := pipeline_utils.HasExtMetadataSupport(xdcrf.cluster_info_svc, targetClusterRef)
-	if err != nil {
-		xdcrf.logger.Errorf("Received error when checking whether target cluster supports extended metadata for pipeline %v, err=%v\n", spec.Id, err)
-		return false, err
-	}
-
-	return extMetaSupportedByTarget, nil
-
 }
 
 func min(num1 int, num2 int) int {
@@ -327,7 +286,6 @@ func (xdcrf *XDCRFactory) registerAsyncListenersOnTargets(pipeline common.Pipeli
 // construct source nozzles for the requested/current kv node
 func (xdcrf *XDCRFactory) constructSourceNozzles(spec *metadata.ReplicationSpecification,
 	topic string,
-	extMetaSupported bool,
 	bucketPassword string,
 	logger_ctx *log.LoggerContext) (map[string]common.Nozzle, map[string][]uint16, error) {
 	sourceNozzles := make(map[string]common.Nozzle)
@@ -365,7 +323,7 @@ func (xdcrf *XDCRFactory) constructSourceNozzles(spec *metadata.ReplicationSpeci
 			// partIds of the dcpNozzle nodes look like "dcpNozzle_$kvaddr_1"
 			id := xdcrf.partId(DCP_NOZZLE_NAME_PREFIX, spec.Id, kvaddr, i)
 			dcpNozzle := parts.NewDcpNozzle(id,
-				bucketName, bucketPassword, vbList, xdcrf.xdcr_topology_svc, extMetaSupported, logger_ctx)
+				bucketName, bucketPassword, vbList, xdcrf.xdcr_topology_svc, logger_ctx)
 			sourceNozzles[dcpNozzle.Id()] = dcpNozzle
 			xdcrf.logger.Debugf("Constructed source nozzle %v with vbList = %v \n", dcpNozzle.Id(), vbList)
 		}
@@ -396,7 +354,7 @@ func (xdcrf *XDCRFactory) filterVBList(targetkvVBList []uint16, kv_vb_map map[st
 }
 
 func (xdcrf *XDCRFactory) constructOutgoingNozzles(spec *metadata.ReplicationSpecification, kv_vb_map map[string][]uint16,
-	extMetaSupported bool, sourceCRMode base.ConflictResolutionMode, targetBucketInfo map[string]interface{},
+	sourceCRMode base.ConflictResolutionMode, targetBucketInfo map[string]interface{},
 	targetClusterRef *metadata.RemoteClusterReference, logger_ctx *log.LoggerContext) (map[string]common.Nozzle, map[uint16]string, error) {
 	outNozzles := make(map[string]common.Nozzle)
 	vbNozzleMap := make(map[uint16]string)
@@ -470,7 +428,7 @@ func (xdcrf *XDCRFactory) constructOutgoingNozzles(spec *metadata.ReplicationSpe
 				}
 			} else {
 				connSize := numOfOutNozzles * 2
-				outNozzle = xdcrf.constructXMEMNozzle(spec.Id, kvaddr, targetBucketName, bucketPwd, i, connSize, extMetaSupported, sourceCRMode, logger_ctx)
+				outNozzle = xdcrf.constructXMEMNozzle(spec.Id, kvaddr, targetBucketName, bucketPwd, i, connSize, sourceCRMode, logger_ctx)
 			}
 
 			outNozzles[outNozzle.Id()] = outNozzle
@@ -492,10 +450,9 @@ func (xdcrf *XDCRFactory) constructOutgoingNozzles(spec *metadata.ReplicationSpe
 func (xdcrf *XDCRFactory) constructRouter(id string, spec *metadata.ReplicationSpecification,
 	downStreamParts map[string]common.Part,
 	vbNozzleMap map[uint16]string,
-	extMetaSupported bool,
 	logger_ctx *log.LoggerContext) (*parts.Router, error) {
 	routerId := "Router" + PART_NAME_DELIMITER + id
-	router, err := parts.NewRouter(routerId, spec.Id, spec.Settings.FilterExpression, downStreamParts, vbNozzleMap, logger_ctx, pipeline_manager.NewMCRequestObj, extMetaSupported)
+	router, err := parts.NewRouter(routerId, spec.Id, spec.Settings.FilterExpression, downStreamParts, vbNozzleMap, logger_ctx, pipeline_manager.NewMCRequestObj)
 	xdcrf.logger.Infof("Constructed router %v", routerId)
 	return router, err
 }
@@ -526,12 +483,11 @@ func (xdcrf *XDCRFactory) constructXMEMNozzle(topic string, kvaddr string,
 	bucketPwd string,
 	nozzle_index int,
 	connPoolSize int,
-	extMetaSupported bool,
 	sourceCRMode base.ConflictResolutionMode,
 	logger_ctx *log.LoggerContext) common.Nozzle {
 	// partIds of the xmem nozzles look like "xmem_$topic_$kvaddr_1"
 	xmemNozzle_Id := xdcrf.partId(XMEM_NOZZLE_NAME_PREFIX, topic, kvaddr, nozzle_index)
-	nozzle := parts.NewXmemNozzle(xmemNozzle_Id, topic, topic, connPoolSize, kvaddr, bucketName, bucketPwd, pipeline_manager.RecycleMCRequestObj, extMetaSupported, sourceCRMode, logger_ctx)
+	nozzle := parts.NewXmemNozzle(xmemNozzle_Id, topic, topic, connPoolSize, kvaddr, bucketName, bucketPwd, pipeline_manager.RecycleMCRequestObj, sourceCRMode, logger_ctx)
 	return nozzle
 }
 
