@@ -122,16 +122,12 @@ type DcpNozzle struct {
 
 	stats_interval           time.Duration
 	stats_interval_change_ch chan bool
-
-	// whether extended metadata is supported
-	ext_metadata_supported bool
 }
 
 func NewDcpNozzle(id string,
 	bucketName, bucketPassword string,
 	vbnos []uint16,
 	xdcr_topology_svc service_def.XDCRCompTopologySvc,
-	ext_metadata_supported bool,
 	logger_context *log.LoggerContext) *DcpNozzle {
 
 	//callback functions from GenServer
@@ -157,7 +153,6 @@ func NewDcpNozzle(id string,
 		vb_stream_status:         make(map[uint16]*streamStatusWithLock),
 		xdcr_topology_svc:        xdcr_topology_svc,
 		stats_interval_change_ch: make(chan bool, 1),
-		ext_metadata_supported:   ext_metadata_supported,
 	}
 
 	msg_callback_func = nil
@@ -199,12 +194,7 @@ func (dcp *DcpNozzle) initialize(settings map[string]interface{}) (err error) {
 
 	uprFeedName := DCP_Connection_Prefix + dcp.Id() + ":" + randName
 
-	// request extended metadata from dcp only when it is supported
-	if dcp.ext_metadata_supported {
-		err = dcp.uprFeed.UprOpenWithExtMeta(uprFeedName, uint32(0), 1024*1024)
-	} else {
-		err = dcp.uprFeed.UprOpen(uprFeedName, uint32(0), 1024*1024)
-	}
+	err = dcp.uprFeed.UprOpen(uprFeedName, uint32(0), 1024*1024)
 	if err != nil {
 		dcp.Logger().Errorf("%v upr open failed. err=%v.\n", dcp.Id(), err)
 		return err

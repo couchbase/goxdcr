@@ -92,11 +92,10 @@ type documentMetadata struct {
 	flags    uint32 // Item flags
 	expiry   uint32 // Item expiration time
 	deletion bool
-	crMode   base.ConflictResolutionMode // conflict resolution mode
 }
 
 func (doc_meta documentMetadata) String() string {
-	return fmt.Sprintf("[key=%s; revSeq=%v;cas=%v;flags=%v;expiry=%v;deletion=%v;crMode=%v]", doc_meta.key, doc_meta.revSeq, doc_meta.cas, doc_meta.flags, doc_meta.expiry, doc_meta.deletion, doc_meta.crMode)
+	return fmt.Sprintf("[key=%s; revSeq=%v;cas=%v;flags=%v;expiry=%v;deletion=%v]", doc_meta.key, doc_meta.revSeq, doc_meta.cas, doc_meta.flags, doc_meta.expiry, doc_meta.deletion)
 }
 
 type GetMetaReceivedEventAdditional struct {
@@ -261,7 +260,6 @@ func decodeSetMetaReq(wrapped_req *base.WrappedMCRequest) documentMetadata {
 	ret.revSeq = binary.BigEndian.Uint64(req.Extras[8:16])
 	ret.cas = req.Cas
 	ret.deletion = (req.Opcode == base.DELETE_WITH_META)
-	ret.crMode = wrapped_req.CRMode
 
 	return ret
 }

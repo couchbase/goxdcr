@@ -755,9 +755,6 @@ type XmemNozzle struct {
 	last_ten_batches_size unsafe.Pointer // *[]uint32
 	last_batch_id         int32
 
-	// whether extended metadata is supported
-	ext_metadata_supported bool
-
 	// whether lww conflict resolution mode has been enabled
 	source_cr_mode base.ConflictResolutionMode
 }
@@ -770,7 +767,6 @@ func NewXmemNozzle(id string,
 	bucketName string,
 	password string,
 	dataObj_recycler base.DataObjRecycler,
-	ext_metadata_supported bool,
 	source_cr_mode base.ConflictResolutionMode,
 	logger_context *log.LoggerContext) *XmemNozzle {
 
@@ -807,8 +803,7 @@ func NewXmemNozzle(id string,
 		counter_batches:     0,
 		dataObj_recycler:    dataObj_recycler,
 		topic:               topic,
-		ext_metadata_supported: ext_metadata_supported,
-		source_cr_mode:         source_cr_mode}
+		source_cr_mode:      source_cr_mode}
 
 	initial_last_ten_batches_size := []uint32{0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
 	atomic.StorePointer(&xmem.last_ten_batches_size, unsafe.Pointer(&initial_last_ten_batches_size))
@@ -1238,7 +1233,7 @@ func (xmem *XmemNozzle) batchSetMetaWithRetry(batch *dataBatch, numOfRetry int) 
 //return true if doc_meta_source win; false otherwise
 func resolveConflict(doc_meta_source documentMetadata,
 	doc_meta_target documentMetadata, source_cr_mode base.ConflictResolutionMode, logger *log.CommonLogger) bool {
-	if source_cr_mode == base.CRMode_LWW && doc_meta_source.crMode == base.CRMode_LWW && doc_meta_target.crMode == base.CRMode_LWW {
+	if source_cr_mode == base.CRMode_LWW {
 		return resolveConflictByCAS(doc_meta_source, doc_meta_target, logger)
 	} else {
 		return resolveConflictByRevSeq(doc_meta_source, doc_meta_target, logger)
@@ -1358,7 +1353,7 @@ func (xmem *XmemNozzle) batchGetMeta(bigDoc_map map[string]*base.WrappedMCReques
 			// request extended meta from target only when
 			// 1. extended meta is supported by replication
 			// and 2. conflict resolution mode of source document is lww
-			req := xmem.composeRequestForGetMeta(docKey, originalReq.Req.VBucket, opaque, xmem.ext_metadata_supported && originalReq.CRMode == base.CRMode_LWW)
+			req := xmem.composeRequestForGetMeta(docKey, originalReq.Req.VBucket, opaque)
 			reqs_bytes = append(reqs_bytes, req.Bytes()...)
 			opaque_keySeqno_map[opaque] = []interface{}{docKey, originalReq.Seqno, originalReq.Req.VBucket, time.Now()}
 			opaque++
@@ -1541,26 +1536,15 @@ func (xmem *XmemNozzle) decodeGetMetaResp(key []byte, resp *mc.MCResponse) docum
 	ret.revSeq = binary.BigEndian.Uint64(extras[12:20])
 	ret.cas = resp.Cas
 
-	if len(extras) > 20 {
-		ret.crMode = base.GetConflictResolutionModeFromInt(int(extras[20]))
-	} else {
-		ret.crMode = base.CRMode_RevId
-	}
-
 	return ret
 
 }
 
-func (xmem *XmemNozzle) composeRequestForGetMeta(key string, vb uint16, opaque uint32, reqExtMeta bool) *mc.MCRequest {
-	req := &mc.MCRequest{VBucket: vb,
+func (xmem *XmemNozzle) composeRequestForGetMeta(key string, vb uint16, opaque uint32) *mc.MCRequest {
+	return &mc.MCRequest{VBucket: vb,
 		Key:    []byte(key),
 		Opaque: opaque,
 		Opcode: base.GET_WITH_META}
-	if reqExtMeta {
-		req.Extras = make([]byte, 1)
-		req.Extras[0] = 1
-	}
-	return req
 }
 
 func (xmem *XmemNozzle) sendSingleSetMeta(adjustRequest bool, item *base.WrappedMCRequest, index uint16, numOfRetry int) error {
