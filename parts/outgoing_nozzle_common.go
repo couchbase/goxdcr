@@ -191,14 +191,15 @@ func newBatch(cap_count uint32, cap_size uint32, logger *log.CommonLogger) *data
 		logger:            logger}
 }
 
-func (b *dataBatch) accumuBatch(req *base.WrappedMCRequest, classifyFunc func(req *mc.MCRequest) bool) (bool, bool) {
+func (b *dataBatch) accumuBatch(req *base.WrappedMCRequest, classifyFunc func(req *mc.MCRequest) bool) (uint32, bool, bool) {
+	var curCount uint32
 	var isFirst bool = false
 	var ret bool = true
 
 	if req != nil && req.Req != nil {
 		size := req.Req.Size()
 
-		curCount := b.incrementCount(1)
+		curCount = b.incrementCount(1)
 		if !b.nonempty_set {
 			isFirst = true
 			b.start_time = time.Now()
@@ -213,7 +214,7 @@ func (b *dataBatch) accumuBatch(req *base.WrappedMCRequest, classifyFunc func(re
 			ret = false
 		}
 	}
-	return isFirst, ret
+	return curCount, isFirst, ret
 }
 
 func (b *dataBatch) count() uint32 {

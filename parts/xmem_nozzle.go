@@ -723,6 +723,11 @@ type XmemNozzle struct {
 	// lock for adding requests to batch and for moving batches to batch ready queue
 	batch_lock chan bool
 
+	// count of mutations in the current batch
+	// the same info is available through xmem.getBatch().count(), which could block, though
+	// use this extra storage to avoid blocking
+	cur_batch_count uint32
+
 	childrenWaitGrp sync.WaitGroup
 
 	//buffer for the sent, but not yet confirmed data
@@ -983,16 +988,20 @@ func (xmem *XmemNozzle) Receive(data interface{}) error {
 }
 
 func (xmem *XmemNozzle) accumuBatch(request *base.WrappedMCRequest) {
-	xmem.batch_lock <- true
-	defer func() { <-xmem.batch_lock }()
-
 	xmem.writeToDataChan(request)
 	atomic.AddUint32(&xmem.counter_received, 1)
+
 	if string(request.Req.Key) == "" {
 		panic(fmt.Sprintf("%v accumuBatch received request with Empty key, req.UniqueKey=%v\n", xmem.Id(), request.UniqueKey))
 	}
 
-	_, isFull := xmem.batch.accumuBatch(request, xmem.optimisticRep)
+	xmem.batch_lock <- true
+	defer func() { <-xmem.batch_lock }()
+
+	curCount, _, isFull := xmem.batch.accumuBatch(request, xmem.optimisticRep)
+	if curCount > 0 {
+		atomic.StoreUint32(&xmem.cur_batch_count, curCount)
+	}
 	if isFull {
 		xmem.batchReady()
 	}
@@ -1663,6 +1672,7 @@ func (xmem *XmemNozzle) getPoolName() string {
 func (xmem *XmemNozzle) initNewBatch() {
 	xmem.Logger().Debugf("%v initializing a new batch", xmem.Id())
 	xmem.batch = newBatch(uint32(xmem.config.maxCount), uint32(xmem.config.maxSize), xmem.Logger())
+	atomic.StoreUint32(&xmem.cur_batch_count, 0)
 }
 
 func (xmem *XmemNozzle) initialize(settings map[string]interface{}) error {
@@ -1993,7 +2003,7 @@ func (xmem *XmemNozzle) selfMonitor(finch chan bool, waitGrp *sync.WaitGroup) {
 			repairCount_setMeta = xmem.client_for_setMeta.repairCount()
 			repairCount_getMeta = xmem.client_for_getMeta.repairCount()
 			if count == 10 {
-				xmem.Logger().Debugf("%v- freeze_counter=%v, xmem.counter_sent=%v, len(xmem.dataChan)=%v, receive_count-%v, cur_batch_count=%v\n", xmem_id, freeze_counter, xmem_count_sent, len(dataChan), received_count, xmem.getBatch().count())
+				xmem.Logger().Debugf("%v- freeze_counter=%v, xmem.counter_sent=%v, len(xmem.dataChan)=%v, receive_count-%v, cur_batch_count=%v\n", xmem_id, freeze_counter, xmem_count_sent, len(dataChan), received_count, atomic.LoadUint32(&xmem.cur_batch_count))
 				xmem.Logger().Debugf("%v open=%v checking..., %v item unsent, %v items waiting for response, %v batches ready\n", xmem_id, isOpen, len(xmem.dataChan), int(buffer_size)-len(empty_slots_pos), len(batches_ready_queue))
 				count = 0
 			}
@@ -2164,7 +2174,7 @@ func (xmem *XmemNozzle) StatusSummary() string {
 		if counter_sent > 0 {
 			avg_wait_time = float64(atomic.LoadUint32(&xmem.counter_waittime)) / float64(counter_sent)
 		}
-		return fmt.Sprintf("%v state =%v connType=%v received %v items, sent %v items, %v items waiting to confirm, %v in queue, %v in current batch, avg wait time is %vms, size of last ten batches processed %v, len(batches_ready_queue)=%v\n", xmem.Id(), xmem.State(), connType, atomic.LoadUint32(&xmem.counter_received), atomic.LoadUint32(&xmem.counter_sent), xmem.buf.itemCountInBuffer(), len(xmem.dataChan), xmem.getBatch().count(), avg_wait_time, xmem.getLastTenBatchSize(), len(xmem.batches_ready_queue))
+		return fmt.Sprintf("%v state =%v connType=%v received %v items, sent %v items, %v items waiting to confirm, %v in queue, %v in current batch, avg wait time is %vms, size of last ten batches processed %v, len(batches_ready_queue)=%v\n", xmem.Id(), xmem.State(), connType, atomic.LoadUint32(&xmem.counter_received), atomic.LoadUint32(&xmem.counter_sent), xmem.buf.itemCountInBuffer(), len(xmem.dataChan), atomic.LoadUint32(&xmem.cur_batch_count), avg_wait_time, xmem.getLastTenBatchSize(), len(xmem.batches_ready_queue))
 	} else {
 		return fmt.Sprintf("%v state =%v ", xmem.Id(), xmem.State())
 	}
