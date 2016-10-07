@@ -195,7 +195,8 @@ func (dcp *DcpNozzle) initialize(settings map[string]interface{}) (err error) {
 		return err
 	}
 
-	dcp.uprFeed, err = dcp.client.NewUprFeed()
+	// xdcr will send ack to upr feed
+	dcp.uprFeed, err = dcp.client.NewUprFeedWithConfig(true /*ackByClient*/)
 	if err != nil {
 		return err
 	}
@@ -209,13 +210,14 @@ func (dcp *DcpNozzle) initialize(settings map[string]interface{}) (err error) {
 
 	if dcp.is_capi {
 		// no need to enable xattr for capi replication
-		err = dcp.uprFeed.UprOpen(uprFeedName, uint32(0), 1024*1024)
+		err = dcp.uprFeed.UprOpen(uprFeedName, uint32(0), base.UprFeedBufferSize)
 	} else {
 		// always enable xattr for xmem replication
 		// even if target cluster does not support xattr, we still need to get xattr data type from dcp
 		// for source side conflict resolution
-		err = dcp.uprFeed.UprOpenWithXATTR(uprFeedName, uint32(0), 1024*1024)
+		err = dcp.uprFeed.UprOpenWithXATTR(uprFeedName, uint32(0), base.UprFeedBufferSize)
 	}
+
 	if err != nil {
 		dcp.Logger().Errorf("%v upr open failed. err=%v.\n", dcp.Id(), err)
 		return err
@@ -426,6 +428,10 @@ func (dcp *DcpNozzle) processData() (err error) {
 				dcp.handleGeneralError(errors.New("DCP upr feed has been closed."))
 				goto done
 			}
+
+			// increment ack bytes in uprfeed, which is necessary for uprfeed flow control to work
+			uprFeed.IncrementAckBytes(m.AckSize)
+
 			if m.Opcode == mc.UPR_STREAMREQ {
 				if m.Status == mc.NOT_MY_VBUCKET {
 					vb_err := fmt.Errorf("Received error %v on vb %v\n", base.ErrorNotMyVbucket, m.VBucket)

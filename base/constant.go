@@ -262,7 +262,23 @@ const (
 	HTTP_RETRIES                int = 5
 )
 
-var UprFeedDataChanLength = 1000
+// In order for dcp flow control to work correctly, the number of mutations in dcp buffer
+// should be no larger than the size of the dcp data channel.
+// This way we can ensure that gomemcached is never blocked on writing to data channel,
+// and thus can always respond to dcp commands such as NOOP
+// As of now, mutations that can fit into data chan have collective size of
+// size > MinimumMutationSize * UprFeedDataChanLength = 60*20000 = 1.2M > UprFeedBufferSize
+// This gives us the aforementioned assurance
+
+// minimum size of a SetMeta/DelMeta mutation, which affects DCP buffer size to allocate
+// a DCP mutation has size 54 + key + body. 60 should be a safe value to use
+var MinimumMutationSize = 60
+
+// length of data channel between dcp nozzle and gomemcached
+var UprFeedDataChanLength = 20000
+
+// dcp flow control buffer size
+var UprFeedBufferSize uint32 = 1024 * 1024
 
 var EventChanSize = 10000
 
@@ -277,7 +293,7 @@ const (
 	DataSentEventListener        = "DataSentEventListener"
 	DataFailedCREventListener    = "DataFailedCREventListener"
 	GetMetaReceivedEventListener = "GetMetaReceivedEventListener"
-	DataThrottledEventListener    = "DataThrottledEventListener"
+	DataThrottledEventListener   = "DataThrottledEventListener"
 )
 
 const (
