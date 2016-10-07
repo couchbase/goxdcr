@@ -447,7 +447,7 @@ func (capi *CapiNozzle) accumuBatch(vbno uint16, request *base.WrappedMCRequest)
 	defer func() { <-capi.vb_batch_map_lock }()
 
 	batch := capi.vb_batch_map[vbno]
-	isFirst, isFull := batch.accumuBatch(request, capi.optimisticRep)
+	_, isFirst, isFull := batch.accumuBatch(request, capi.optimisticRep)
 	if isFirst {
 		select {
 		case capi.batches_nonempty_ch <- true:
