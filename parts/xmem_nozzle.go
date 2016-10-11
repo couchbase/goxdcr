@@ -185,12 +185,6 @@ func (buf *requestBuffer) initialize() error {
 	return nil
 }
 
-func (buf *requestBuffer) getNotifyCh() chan bool {
-	buf.notifych_lock.RLock()
-	defer buf.notifych_lock.RUnlock()
-	return buf.notifych
-}
-
 func (buf *requestBuffer) setNotifyCh() chan bool {
 	buf.notifych_lock.Lock()
 	defer buf.notifych_lock.Unlock()
@@ -206,12 +200,13 @@ func (buf *requestBuffer) unsetNotifyCh() {
 
 //blocking until the occupied slots are below threshold
 func (buf *requestBuffer) flowControl() {
+	notifych := buf.setNotifyCh()
+
 	ret := buf.itemCountInBuffer() <= buf.notify_threshold
 	if ret {
 		return
 	}
 
-	notifych := buf.setNotifyCh()
 	select {
 	case <-notifych:
 		buf.unsetNotifyCh()
@@ -304,11 +299,13 @@ func (buf *requestBuffer) evictSlot(pos uint16) error {
 			buf.sequences[pos] = buf.sequences[pos] + 1
 		}
 
+		buf.notifych_lock.RLock()
+		defer buf.notifych_lock.RUnlock()
+
 		if buf.itemCountInBuffer() <= buf.notify_threshold {
-			notifych := buf.getNotifyCh()
-			if notifych != nil {
+			if buf.notifych != nil {
 				select {
-				case notifych <- true:
+				case buf.notifych <- true:
 					buf.logger.Debugf("buffer's occupied slots is below threshold %v, notify", buf.notify_threshold)
 				default:
 				}
