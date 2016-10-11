@@ -41,8 +41,8 @@ const (
 	SETTING_RETRY_INTERVAL     = "retry_interval"
 
 	//default configuration
-	default_numofretry_capi          int           = 3
-	default_retry_interval_capi      time.Duration = 10 * time.Millisecond
+	default_numofretry_capi          int           = 6
+	default_retry_interval_capi      time.Duration = 30 * time.Millisecond
 	default_maxRetryInterval_capi                  = 30 * time.Second
 	default_writeTimeout_capi        time.Duration = time.Duration(1) * time.Second
 	default_readTimeout_capi         time.Duration = time.Duration(10) * time.Second
@@ -877,7 +877,7 @@ func (capi *CapiNozzle) batchUpdateDocsWithRetry(vbno uint16, req_list *[]*base.
 	}
 
 	num_of_retry := 0
-	retriedMalformedResponse := false
+	backoffTime := capi.config.retryInterval
 	for {
 		err := capi.validateRunningState()
 		if err != nil {
@@ -889,23 +889,16 @@ func (capi *CapiNozzle) batchUpdateDocsWithRetry(vbno uint16, req_list *[]*base.
 			// success. no need to retry further
 			return nil
 		}
-		isMalformedResponseError := strings.HasPrefix(err.Error(), MalformedResponseError)
-		// The idea here is that if batchUpdateDocs failed with malformedResponse error, it will be retried at least once,
-		// even when maxRetry has been reached. This is because a malformedResponse often signals that the update
-		// has already been done successfully on the target side. We want to give it another shot, which very likely
-		// will succeed, before we declare the update to have failed, which likely will lead to pipeline failure.
-		if (isMalformedResponseError && (!retriedMalformedResponse || num_of_retry < capi.config.maxRetry)) ||
-			(!isMalformedResponseError && num_of_retry < capi.config.maxRetry) {
-			if err.Error() == MalformedResponseError {
-				retriedMalformedResponse = true
-			}
+
+		if num_of_retry < capi.config.maxRetry {
 			// reset connection to ensure a clean start
 			err = capi.resetConn()
 			if err != nil {
 				return err
 			}
 			num_of_retry++
-			time.Sleep(capi.config.retryInterval)
+			time.Sleep(backoffTime)
+			backoffTime *= 2
 			capi.Logger().Infof("%v retrying update docs for vb %v for the %vth time\n", capi.Id(), vbno, num_of_retry)
 		} else {
 			// max retry reached
