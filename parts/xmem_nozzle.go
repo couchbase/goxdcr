@@ -318,30 +318,6 @@ func (buf *requestBuffer) evictSlot(pos uint16) error {
 
 }
 
-//availableSlotIndex returns a position number of an empty slot
-func (buf *requestBuffer) reserveSlot() (error, uint16, int) {
-	buf.logger.Debugf("slots chan length=%d\n", len(buf.empty_slots_pos))
-	index := <-buf.empty_slots_pos
-
-	var reservation_num int
-
-	//non blocking
-	//generate a random number
-	reservation_num = rand.Int()
-
-	req := buf.slots[index]
-	req.lock.Lock()
-	defer req.lock.Unlock()
-
-	if req.req != nil || req.reservation != UninitializedReseverationNumber {
-		panic(fmt.Sprintf("reserveSlot called on non-empty slot. req=%v, reseveration=%v\n", req.req, req.reservation))
-	}
-
-	req.reservation = reservation_num
-
-	return nil, uint16(index), reservation_num
-}
-
 func (buf *requestBuffer) cancelReservation(index uint16, reservation_num int) error {
 
 	err := buf.validatePos(index)
@@ -375,34 +351,49 @@ func (buf *requestBuffer) cancelReservation(index uint16, reservation_num int) e
 	return err
 }
 
-func (buf *requestBuffer) enSlot(pos uint16, req *base.WrappedMCRequest, reservationNum int) error {
-	err := buf.validatePos(pos)
-	if err != nil {
-		return err
+func (buf *requestBuffer) enSlot(mcreq *base.WrappedMCRequest) (uint16, int) {
+	buf.logger.Debugf("slots chan length=%d\n", len(buf.empty_slots_pos))
+
+	index := <-buf.empty_slots_pos
+
+	//non blocking
+	//generate a random number
+	reservation_num := rand.Int()
+
+	req := buf.slots[index]
+	req.lock.Lock()
+	defer req.lock.Unlock()
+
+	if req.req != nil || req.reservation != UninitializedReseverationNumber {
+		panic(fmt.Sprintf("reserveSlot called on non-empty slot. req=%v, reseveration=%v\n", req.req, req.reservation))
 	}
-	r := buf.slots[pos]
 
-	r.lock.Lock()
-	defer r.lock.Unlock()
+	req.reservation = reservation_num
+	req.req = mcreq
+	buf.adjustRequest(mcreq, index)
+	now := time.Now()
+	req.sent_time = &now
+	mcreq.Send_time = now
+	buf.token_ch <- 1
 
-	if r.reservation == UninitializedReseverationNumber {
-		return errors.New("Slot is not initialized, must be reserved first.")
-	} else {
-		if r.reservation != reservationNum {
-			buf.logger.Errorf("Can't enSlot %d, doesn't have the reservation, %v", pos, r)
-			return errors.New(fmt.Sprintf("Can't enSlot %d, doesn't have the reservation", pos))
-		}
-		r.req = req
-		now := time.Now()
-		r.sent_time = &now
-		buf.token_ch <- 1
+	//increase the occupied_count
+	atomic.AddInt32(&buf.occupied_count, 1)
 
-		//increase the occupied_count
-		atomic.AddInt32(&buf.occupied_count, 1)
+	buf.logger.Debugf("slot %d is occupied\n", index)
+	return index, reservation_num
+}
 
-	}
-	buf.logger.Debugf("slot %d is occupied\n", pos)
-	return nil
+// always called with lock on buf.slots[index]. no need for separate lock on buf.sequences[index]
+func (buf *requestBuffer) adjustRequest(req *base.WrappedMCRequest, index uint16) {
+	mc_req := req.Req
+	mc_req.Opcode = encodeOpCode(mc_req.Opcode)
+	mc_req.Cas = 0
+	mc_req.Opaque = getOpaque(index, buf.sequences[int(index)])
+}
+
+func getOpaque(index, sequence uint16) uint32 {
+	result := uint32(sequence)<<16 + uint32(index)
+	return result
 }
 
 func (buf *requestBuffer) bufferSize() uint16 {
@@ -1165,19 +1156,11 @@ func (xmem *XmemNozzle) batchSetMetaWithRetry(batch *dataBatch, numOfRetry int) 
 			if needSend == Send {
 
 				//blocking
-				err, index, reserv_num := xmem.buf.reserveSlot()
-				if err != nil {
-					return err
-				}
-				xmem.adjustRequest(item, index)
-
-				//set Sendtime
-				item.Send_time = time.Now()
+				index, reserv_num := xmem.buf.enSlot(item)
 
 				item_byte := item.Req.Bytes()
-
 				reqs_bytes = append(reqs_bytes, item_byte...)
-				err = xmem.buf.enSlot(index, item, reserv_num)
+
 				reserv_num_pair := make([]uint16, 2)
 				reserv_num_pair[0] = index
 				reserv_num_pair[1] = uint16(reserv_num)
@@ -1345,7 +1328,7 @@ func (xmem *XmemNozzle) batchGetMeta(bigDoc_map map[string]*base.WrappedMCReques
 	var sequence uint16 = uint16(time.Now().UnixNano())
 	reqs_bytes := []byte{}
 	counter := 0
-	opaque := xmem.getOpaque(0, sequence)
+	opaque := getOpaque(0, sequence)
 	sent_key_map := make(map[string]bool, len(bigDoc_map))
 
 	//de-dupe and prepare the packages
@@ -1557,7 +1540,7 @@ func (xmem *XmemNozzle) sendSingleSetMeta(adjustRequest bool, item *base.Wrapped
 	var err error
 	if xmem.client_for_setMeta != nil {
 		if adjustRequest {
-			xmem.adjustRequest(item, index)
+			xmem.buf.adjustRequest(item, index)
 			xmem.Logger().Debugf("key=%v\n", item.Req.Key)
 			xmem.Logger().Debugf("opcode=%v\n", item.Req.Opcode)
 		}
@@ -2119,18 +2102,6 @@ func (xmem *XmemNozzle) resendForNewConn(req *bufferedMCRequest, pos uint16) (bo
 	}
 	req.num_of_retry = 0
 	return true, err
-}
-
-func (xmem *XmemNozzle) adjustRequest(req *base.WrappedMCRequest, index uint16) {
-	mc_req := req.Req
-	mc_req.Opcode = encodeOpCode(mc_req.Opcode)
-	mc_req.Cas = 0
-	mc_req.Opaque = xmem.getOpaque(index, xmem.buf.sequences[int(index)])
-}
-
-func (xmem *XmemNozzle) getOpaque(index, sequence uint16) uint32 {
-	result := uint32(sequence)<<16 + uint32(index)
-	return result
 }
 
 func (xmem *XmemNozzle) getPosFromOpaque(opaque uint32) uint16 {
