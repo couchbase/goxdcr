@@ -599,6 +599,12 @@ func (client *xmemClient) isConnHealthy() bool {
 	return client.healthy
 }
 
+func (client *xmemClient) getMemClient() *mcc.Client {
+	client.lock.RLock()
+	defer client.lock.RUnlock()
+	return client.memClient
+}
+
 func (client *xmemClient) getConn(readTimeout bool, writeTimeout bool) (io.ReadWriteCloser, int, error) {
 	client.lock.RLock()
 	defer client.lock.RUnlock()
@@ -808,6 +814,9 @@ func NewXmemNozzle(id string,
 	initial_last_ten_batches_size := []uint32{0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
 	atomic.StorePointer(&xmem.last_ten_batches_size, unsafe.Pointer(&initial_last_ten_batches_size))
 
+	//set conflict resolver
+	xmem.conflict_resolver = resolveConflict
+
 	xmem.config.connectStr = connectString
 	xmem.config.bucketName = bucketName
 	xmem.config.password = password
@@ -875,9 +884,6 @@ func (xmem *XmemNozzle) Start(settings map[string]interface{}) error {
 
 	xmem.childrenWaitGrp.Add(1)
 	go xmem.processData_sendbatch(xmem.sender_finch, &xmem.childrenWaitGrp)
-
-	//set conflict resolver
-	xmem.conflict_resolver = resolveConflict
 
 	xmem.start_time = time.Now()
 	err = xmem.Start_server()
@@ -2230,9 +2236,6 @@ func (xmem *XmemNozzle) writeToClient(client *xmemClient, bytes []byte, renewTim
 }
 
 func (xmem *XmemNozzle) readFromClient(client *xmemClient, resetReadTimeout bool) (*mc.MCResponse, error, int) {
-	if client.memClient == nil {
-		return nil, errors.New("memcached client is not set"), client.repairCount()
-	}
 
 	//set the read timeout for the underlying connection
 	_, rev, err := xmem.getConn(client, resetReadTimeout, false)
@@ -2241,7 +2244,12 @@ func (xmem *XmemNozzle) readFromClient(client *xmemClient, resetReadTimeout bool
 		return nil, err, rev
 	}
 
-	response, err := client.memClient.Receive()
+	memClient := client.getMemClient()
+	if memClient == nil {
+		return nil, errors.New("memcached client is not set"), client.repairCount()
+	}
+	response, err := memClient.Receive()
+
 	if err != nil {
 		xmem.Logger().Debugf("%v readFromClient: %v\n", xmem.Id(), err)
 		isAppErr := false
