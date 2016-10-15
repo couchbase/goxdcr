@@ -159,7 +159,7 @@ func (service *AuditSvc) init() error {
 func (service *AuditSvc) getClient() (*mcc.Client, error) {
 	pool := base.ConnPoolMgr().GetPool(base.AuditServicePoolName)
 
-	client, err := pool.Get()
+	client, err := pool.GetNew()
 	if err != nil {
 		return nil, err
 	}
@@ -170,7 +170,9 @@ func (service *AuditSvc) getClient() (*mcc.Client, error) {
 }
 
 func (service *AuditSvc) releaseClient(client *mcc.Client) error {
-	pool := base.ConnPoolMgr().GetPool(base.AuditServicePoolName)
-	pool.Release(client)
+	err := client.Close()
+	if err != nil {
+		service.logger.Infof("Audit service failed to close connection. err=%v\n", err)
+	}
 	return nil
 }

@@ -142,6 +142,31 @@ func (pipelineSupervisor *PipelineSupervisor) Start(settings map[string]interfac
 	return err
 }
 
+func (pipelineSupervisor *PipelineSupervisor) Stop() error {
+	// do the generic supervisor stop stuff
+	err := pipelineSupervisor.GenericSupervisor.Stop()
+	if err != nil {
+		return err
+	}
+
+	//close the connections
+	pipelineSupervisor.closeConnections()
+
+	return nil
+}
+
+func (pipelineSupervisor *PipelineSupervisor) closeConnections() {
+	pipelineSupervisor.kv_mem_clients_lock.Lock()
+	defer pipelineSupervisor.kv_mem_clients_lock.Unlock()
+	for serverAddr, client := range pipelineSupervisor.kv_mem_clients {
+		err := client.Close()
+		if err != nil {
+			pipelineSupervisor.Logger().Infof("error from closing connection for %v is %v\n", serverAddr, err)
+		}
+	}
+	pipelineSupervisor.kv_mem_clients = make(map[string]*mcc.Client)
+}
+
 func (pipelineSupervisor *PipelineSupervisor) monitorPipelineHealth() error {
 	pipelineSupervisor.Logger().Info("monitorPipelineHealth started")
 
@@ -322,6 +347,10 @@ func (pipelineSupervisor *PipelineSupervisor) getDcpStats() (map[string]map[stri
 				err_count++
 			}
 			if err_count > max_mem_client_error_count {
+				err = client.Close()
+				if err != nil {
+					pipelineSupervisor.Logger().Infof("error from closing connection for %v is %v\n", serverAddr, err)
+				}
 				delete(pipelineSupervisor.kv_mem_clients, serverAddr)
 				pipelineSupervisor.kv_mem_client_error_count[serverAddr] = 0
 			} else {
