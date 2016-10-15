@@ -696,8 +696,11 @@ func (stats_mgr *StatisticsManager) Stop() error {
 func (stats_mgr *StatisticsManager) closeConnections() {
 	stats_mgr.kv_mem_clients_lock.Lock()
 	defer stats_mgr.kv_mem_clients_lock.Unlock()
-	for _, client := range stats_mgr.kv_mem_clients {
-		client.Close()
+	for server_addr, client := range stats_mgr.kv_mem_clients {
+		err := client.Close()
+		if err != nil {
+			stats_mgr.logger.Infof("error from closing connection for %v is %v\n", server_addr, err)
+		}
 	}
 	stats_mgr.kv_mem_clients = make(map[string]*mcc.Client)
 }
@@ -1200,6 +1203,10 @@ func calculateTotalChanges(kv_vb_map map[string][]uint16, kv_mem_clients map[str
 				err_count++
 			}
 			if err_count > MaxMemClientErrorCount {
+				err = client.Close()
+				if err != nil {
+					logger.Infof("error from closing connection for %v is %v\n", serverAddr, err)
+				}
 				delete(kv_mem_clients, serverAddr)
 				kv_mem_client_error_count[serverAddr] = 0
 			} else {

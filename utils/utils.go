@@ -341,7 +341,7 @@ func BucketNotFoundError(bucketName string) error {
 }
 
 func GetMemcachedConnection(serverAddr, bucketName string, logger *log.CommonLogger) (*mcc.Client, error) {
-
+	logger.Infof("GetMemcachedConnection serverAddr=%v, bucketName=%v\n", serverAddr, bucketName)
 	if serverAddr == "" {
 		panic("serverAddr is empty")
 	}
