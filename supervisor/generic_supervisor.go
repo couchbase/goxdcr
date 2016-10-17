@@ -172,7 +172,9 @@ func (supervisor *GenericSupervisor) Stop() error {
 	// stop gen_server
 	err := supervisor.Stop_server()
 
-	supervisor.heartbeat_ticker.Stop()
+	if supervisor.heartbeat_ticker != nil {
+		supervisor.heartbeat_ticker.Stop()
+	}
 
 	supervisor.Logger().Debug("Wait for children goroutines to exit")
 	supervisor.childrenWaitGrp.Wait()
