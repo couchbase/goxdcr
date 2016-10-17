@@ -494,16 +494,16 @@ func GetServerVBucketsMap(connStr, bucketName string, bucketInfo map[string]inte
 	return serverVBMap, nil
 }
 
-// get timeSynchronization setting from bucket info
-// default timeSynchronization to disabled if not found
-func GetTimeSynchronizationFromBucketInfo(bucketName string, bucketInfo map[string]interface{}) (string, error) {
-	timeSynchronization := base.TimeSynchronization_Disabled
-	timeSynchronizationObj, ok := bucketInfo[base.TimeSynchronizationKey]
+// get conflict resolution type setting from bucket info
+// default to seqno if not found
+func GetConflictResolutionTypeFromBucketInfo(bucketName string, bucketInfo map[string]interface{}) (string, error) {
+	conflictResolutionType := base.ConflictResolutionType_Seqno
+	conflictResolutionTypeObj, ok := bucketInfo[base.ConflictResolutionTypeKey]
 	if ok {
-		timeSynchronization, ok = timeSynchronizationObj.(string)
+		conflictResolutionType, ok = conflictResolutionTypeObj.(string)
 		if !ok {
-			return "", fmt.Errorf("TimeSynchronization on bucket %v is of wrong type.", bucketName)
+			return "", fmt.Errorf("ConflictResolutionType on bucket %v is of wrong type.", bucketName)
 		}
 	}
-	return timeSynchronization, nil
+	return conflictResolutionType, nil
 }
