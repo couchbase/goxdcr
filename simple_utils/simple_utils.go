@@ -324,9 +324,9 @@ func GenerateRandomId(length, maxRetry int) (string, error) {
 
 }
 
-// translate time synchronization bucket metadata into base.ConflictResolutionMode
-func GetCRModeFromTimeSyncSetting(timeSynchronization string) base.ConflictResolutionMode {
-	if timeSynchronization != "" && timeSynchronization != base.TimeSynchronization_Disabled {
+// translate conflict resolution type bucket metadata into base.ConflictResolutionMode
+func GetCRModeFromConflictResolutionTypeSetting(conflictResolutionType string) base.ConflictResolutionMode {
+	if conflictResolutionType == base.ConflictResolutionType_Lww {
 		return base.CRMode_LWW
 	}
 	return base.CRMode_RevId

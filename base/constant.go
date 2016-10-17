@@ -309,10 +309,11 @@ const (
 	PermissionXDCRInternalWrite       = "cluster.admin.internal.xdcr!write"
 )
 
-// constants for parsing time synchronization setting in bucket metadata
+// constants for parsing conflict resolution type setting in bucket metadata
 const (
-	TimeSynchronizationKey       = "timeSynchronization"
-	TimeSynchronization_Disabled = "disabled"
+	ConflictResolutionTypeKey    = "conflictResolutionType"
+	ConflictResolutionType_Seqno = "seqno"
+	ConflictResolutionType_Lww   = "lww"
 )
 
 // --------------- Constants that are configurable -----------------

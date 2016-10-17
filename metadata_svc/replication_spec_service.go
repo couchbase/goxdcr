@@ -230,14 +230,14 @@ func (service *ReplicationSpecService) ValidateNewReplicationSpec(sourceBucket, 
 	service.logger.Infof("Result from remote bucket look up: err_target=%v, time taken=%v\n", err_target, time.Since(start_time))
 	service.validateBucket(sourceBucket, targetCluster, targetBucket, targetBucketType, err_target, errorMap, false)
 
-	// validate that source and target bucket have the same timeSynchronization metadata
-	targetTimeSynchronization, err := utils.GetTimeSynchronizationFromBucketInfo(targetBucket, targetBucketInfo)
+	// validate that source and target bucket have the same conflict resolution type metadata
+	targetConflictResolutionType, err := utils.GetConflictResolutionTypeFromBucketInfo(targetBucket, targetBucketInfo)
 	if err != nil {
-		errorMap[base.PlaceHolderFieldKey] = errors.New("Error retrieving TimeSynchronization setting on target bucket")
+		errorMap[base.PlaceHolderFieldKey] = errors.New("Error retrieving ConflictResolutionType setting on target bucket")
 		return "", "", nil, errorMap
 	}
-	if sourceBucketObj.TimeSynchronization != targetTimeSynchronization {
-		errorMap[base.PlaceHolderFieldKey] = errors.New("Replication between buckets with different TimeSynchronization setting is not allowed")
+	if sourceBucketObj.ConflictResolutionType != targetConflictResolutionType {
+		errorMap[base.PlaceHolderFieldKey] = errors.New("Replication between buckets with different ConflictResolutionType setting is not allowed")
 		return "", "", nil, errorMap
 	}
 
