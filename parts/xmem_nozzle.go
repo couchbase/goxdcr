@@ -977,8 +977,6 @@ func (xmem *XmemNozzle) Receive(data interface{}) error {
 }
 
 func (xmem *XmemNozzle) accumuBatch(request *base.WrappedMCRequest) {
-	xmem.writeToDataChan(request)
-	atomic.AddUint32(&xmem.counter_received, 1)
 
 	if string(request.Req.Key) == "" {
 		panic(fmt.Sprintf("%v accumuBatch received request with Empty key, req.UniqueKey=%v\n", xmem.Id(), request.UniqueKey))
@@ -986,6 +984,9 @@ func (xmem *XmemNozzle) accumuBatch(request *base.WrappedMCRequest) {
 
 	xmem.batch_lock <- true
 	defer func() { <-xmem.batch_lock }()
+
+	xmem.writeToDataChan(request)
+	atomic.AddUint32(&xmem.counter_received, 1)
 
 	curCount, _, isFull := xmem.batch.accumuBatch(request, xmem.optimisticRep)
 	if curCount > 0 {
@@ -996,6 +997,10 @@ func (xmem *XmemNozzle) accumuBatch(request *base.WrappedMCRequest) {
 	}
 }
 
+// caller of this method needs to be very careful to avoid deadlock
+// for example, this method cannot be called from the code path
+// that takes data off the data channel, since accumuBatch()
+// may be holding the batch lock and waiting for data channel to become not full
 func (xmem *XmemNozzle) getBatch() *dataBatch {
 	xmem.batch_lock <- true
 	defer func() { <-xmem.batch_lock }()
