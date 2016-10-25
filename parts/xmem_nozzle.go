@@ -351,7 +351,7 @@ func (buf *requestBuffer) cancelReservation(index uint16, reservation_num int) e
 	return err
 }
 
-func (buf *requestBuffer) enSlot(mcreq *base.WrappedMCRequest) (uint16, int) {
+func (buf *requestBuffer) enSlot(mcreq *base.WrappedMCRequest) (uint16, int, []byte) {
 	buf.logger.Debugf("slots chan length=%d\n", len(buf.empty_slots_pos))
 
 	index := <-buf.empty_slots_pos
@@ -371,6 +371,7 @@ func (buf *requestBuffer) enSlot(mcreq *base.WrappedMCRequest) (uint16, int) {
 	req.reservation = reservation_num
 	req.req = mcreq
 	buf.adjustRequest(mcreq, index)
+	item_bytes := mcreq.Req.Bytes()
 	now := time.Now()
 	req.sent_time = &now
 	mcreq.Send_time = now
@@ -380,7 +381,7 @@ func (buf *requestBuffer) enSlot(mcreq *base.WrappedMCRequest) (uint16, int) {
 	atomic.AddInt32(&buf.occupied_count, 1)
 
 	buf.logger.Debugf("slot %d is occupied\n", index)
-	return index, reservation_num
+	return index, reservation_num, item_bytes
 }
 
 // always called with lock on buf.slots[index]. no need for separate lock on buf.sequences[index]
@@ -1161,10 +1162,9 @@ func (xmem *XmemNozzle) batchSetMetaWithRetry(batch *dataBatch, numOfRetry int) 
 			if needSend == Send {
 
 				//blocking
-				index, reserv_num := xmem.buf.enSlot(item)
+				index, reserv_num, item_bytes := xmem.buf.enSlot(item)
 
-				item_byte := item.Req.Bytes()
-				reqs_bytes = append(reqs_bytes, item_byte...)
+				reqs_bytes = append(reqs_bytes, item_bytes...)
 
 				reserv_num_pair := make([]uint16, 2)
 				reserv_num_pair[0] = index
