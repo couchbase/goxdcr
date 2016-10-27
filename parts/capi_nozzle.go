@@ -164,9 +164,9 @@ type CapiNozzle struct {
 	//data channels to accept the incoming data, one for each vb
 	vb_dataChan_map map[uint16]chan *base.WrappedMCRequest
 	//the total number of items queued in all data channels
-	items_in_dataChan int
+	items_in_dataChan int32
 	//the total size of data (in bytes) queued in all data channels
-	bytes_in_dataChan int
+	bytes_in_dataChan int32
 
 	client      *net.TCPConn
 	lock_client sync.RWMutex
@@ -189,8 +189,8 @@ type CapiNozzle struct {
 	checker_finch     chan bool
 	selfMonitor_finch chan bool
 
-	counter_sent      int
-	counter_received  int
+	counter_sent      uint32
+	counter_received  uint32
 	start_time        time.Time
 	handle_error      bool
 	lock_handle_error sync.RWMutex
@@ -344,7 +344,7 @@ func (capi *CapiNozzle) Stop() error {
 		return err
 	}
 
-	capi.Logger().Debugf("%v processed %v items\n", capi.Id(), capi.counter_sent)
+	capi.Logger().Debugf("%v processed %v items\n", capi.Id(), atomic.LoadUint32(&capi.counter_sent))
 
 	//close data channels
 	for _, dataChan := range capi.vb_dataChan_map {
@@ -408,7 +408,7 @@ func (capi *CapiNozzle) Receive(data interface{}) error {
 	}()
 
 	capi.Logger().Debugf("%v data key=%v seq=%v vb=%v is received", capi.Id(), data.(*base.WrappedMCRequest).Req.Key, data.(*base.WrappedMCRequest).Seqno, data.(*base.WrappedMCRequest).Req.VBucket)
-	capi.Logger().Debugf("%v data channel len is %d\n", capi.Id(), capi.items_in_dataChan)
+	capi.Logger().Debugf("%v data channel len is %d\n", capi.Id(), atomic.LoadInt32(&capi.items_in_dataChan))
 
 	req := data.(*base.WrappedMCRequest)
 
@@ -428,15 +428,15 @@ func (capi *CapiNozzle) Receive(data interface{}) error {
 
 	dataChan <- req
 
-	capi.counter_received++
+	new_counter_received := atomic.AddUint32(&capi.counter_received, 1)
 	size := req.Req.Size()
-	capi.items_in_dataChan++
-	capi.bytes_in_dataChan += size
+	new_items_in_dataChan := atomic.AddInt32(&capi.items_in_dataChan, 1)
+	new_bytes_in_dataChan := atomic.AddInt32(&capi.bytes_in_dataChan, int32(size))
 
 	//accumulate the batchCount and batchSize
 	capi.accumuBatch(vbno, req)
 
-	capi.Logger().Debugf("%v received %v items, queue_size = %v, bytes_in_dataChan=%v\n", capi.Id(), capi.counter_received, capi.items_in_dataChan, capi.bytes_in_dataChan)
+	capi.Logger().Debugf("%v received %v items, queue_size = %v, bytes_in_dataChan=%v\n", capi.Id(), new_counter_received, new_items_in_dataChan, new_bytes_in_dataChan)
 
 	return nil
 }
@@ -483,7 +483,7 @@ func (capi *CapiNozzle) processData_batch(finch chan bool, waitGrp *sync.WaitGro
 					goto done
 				}
 				if capi.IsOpen() {
-					capi.Logger().Debugf("%v Batch Send..., %v batches ready, %v items in queue, count_recieved=%v, count_sent=%v\n", capi.Id(), len(capi.batches_ready), capi.items_in_dataChan, capi.counter_received, capi.counter_sent)
+					capi.Logger().Debugf("%v Batch Send..., %v batches ready, %v items in queue, count_recieved=%v, count_sent=%v\n", capi.Id(), len(capi.batches_ready), atomic.LoadInt32(&capi.items_in_dataChan), atomic.LoadUint32(&capi.counter_received), atomic.LoadUint32(&capi.counter_sent))
 					err = capi.send_internal(batch)
 					if err != nil {
 						capi.handleGeneralError(err)
@@ -581,8 +581,8 @@ func (capi *CapiNozzle) send_internal(batch *capiBatch) error {
 
 		capi.Logger().Infof("%v send batch count=%d for vb %v\n", capi.Id(), count, batch.vbno)
 
-		capi.counter_sent = capi.counter_sent + int(count)
-		capi.Logger().Debugf("So far, capi %v processed %d items", capi.Id(), capi.counter_sent)
+		new_counter_sent := atomic.AddUint32(&capi.counter_sent, count)
+		capi.Logger().Debugf("So far, capi %v processed %d items", capi.Id(), new_counter_sent)
 
 		var bigDoc_noRep_map map[string]bool
 		bigDoc_noRep_map, err = capi.batchGetMeta(batch.vbno, batch.bigDoc_map)
@@ -681,8 +681,8 @@ func (capi *CapiNozzle) batchSendWithRetry(batch *capiBatch) error {
 	for i := 0; i < int(count); i++ {
 		item := <-dataChan
 
-		capi.items_in_dataChan--
-		capi.bytes_in_dataChan -= item.Req.Size()
+		atomic.AddInt32(&capi.items_in_dataChan, -1)
+		atomic.AddInt32(&capi.bytes_in_dataChan, int32(0-item.Req.Size()))
 
 		needSend := needSend(item, &batch.dataBatch, capi.Logger())
 		if needSend == Send {
@@ -798,7 +798,7 @@ func (capi *CapiNozzle) selfMonitor(finch chan bool, waitGrp *sync.WaitGroup) {
 		}*/
 
 		case <-statsTicker.C:
-			capi.RaiseEvent(common.NewEvent(common.StatsUpdate, nil, capi, nil, []int{capi.items_in_dataChan, capi.bytes_in_dataChan}))
+			capi.RaiseEvent(common.NewEvent(common.StatsUpdate, nil, capi, nil, []int{int(atomic.LoadInt32(&capi.items_in_dataChan)), int(atomic.LoadInt32(&capi.bytes_in_dataChan))}))
 		}
 	}
 done:
@@ -1063,7 +1063,7 @@ func (capi *CapiNozzle) tcpProxy(vbno uint16, part_ch chan []byte, resp_ch chan 
 				client := capi.getClient()
 				client.SetReadDeadline(time.Now().Add(capi.config.readTimeout))
 
-				response, err := http.ReadResponse(bufio.NewReader(capi.client), nil)
+				response, err := http.ReadResponse(bufio.NewReader(client), nil)
 				if err != nil || response == nil {
 					errMsg := fmt.Sprintf("Error reading response. vb=%v, err=%v\n", vbno, err)
 					capi.Logger().Errorf("%v %v", capi.Id(), errMsg)
@@ -1198,7 +1198,7 @@ func (capi *CapiNozzle) timeoutDuration(numofRetry int) time.Duration {
 }*/
 
 func (capi *CapiNozzle) StatusSummary() string {
-	return fmt.Sprintf("%v received %v items, sent %v items", capi.Id(), capi.counter_received, capi.counter_sent)
+	return fmt.Sprintf("%v received %v items, sent %v items", capi.Id(), atomic.LoadUint32(&capi.counter_received), atomic.LoadUint32(&capi.counter_sent))
 }
 
 func (capi *CapiNozzle) handleGeneralError(err error) {
