@@ -38,7 +38,7 @@ func getResponse(s io.Reader, hdrBytes []byte) (rv *gomemcached.MCResponse, n in
 		ReceiveHook(rv, n, err)
 	}
 
-	if err == nil && rv.Status != gomemcached.SUCCESS {
+	if err == nil && (rv.Status != gomemcached.SUCCESS && rv.Status != gomemcached.AUTH_CONTINUE) {
 		err = rv
 	}
 	return rv, n, err

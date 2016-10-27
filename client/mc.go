@@ -2,24 +2,45 @@
 package memcached
 
 import (
+	"crypto/hmac"
+	"crypto/rand"
+	"crypto/sha1"
+	"crypto/sha256"
+	"crypto/sha512"
+	"encoding/base64"
 	"encoding/binary"
+	"errors"
 	"fmt"
+	"github.com/couchbase/gomemcached"
+	"github.com/couchbase/goutils/logging"
+	"golang.org/x/crypto/pbkdf2"
+	"hash"
 	"io"
 	"math"
 	"net"
+	"strconv"
 	"strings"
 	"sync"
-	"time"
-
-	"github.com/couchbase/gomemcached"
-	"github.com/couchbase/goutils/logging"
 	"sync/atomic"
+	"time"
+)
+
+// authentication mechanisms
+const (
+	AuthMech_SHA512 = "SCRAM-SHA512"
+	AuthMech_SHA256 = "SCRAM-SHA256"
+	AuthMech_SHA1   = "SCRAM-SHA1"
+	AuthMech_PLAIN  = "PLAIN"
 )
 
 const bufsize = 1024
 
 var UnHealthy uint32 = 0
 var Healthy uint32 = 1
+
+var InvalidResponseError = errors.New("the server response is not according to the spec")
+var InvalidStartResponseError = errors.New("the server initial response is not according to the spec")
+var InvalidStepResponseError = errors.New("the server final response is not according to the spec")
 
 // The Client itself.
 type Client struct {
@@ -186,13 +207,276 @@ func (c *Client) Auth(user, pass string) (*gomemcached.MCResponse, error) {
 	}
 
 	authMech := string(res.Body)
-	if strings.Index(authMech, "PLAIN") != -1 {
-		return c.Send(&gomemcached.MCRequest{
-			Opcode: gomemcached.SASL_AUTH,
-			Key:    []byte("PLAIN"),
-			Body:   []byte(fmt.Sprintf("\x00%s\x00%s", user, pass))})
+	if strings.Index(authMech, AuthMech_PLAIN) != -1 {
+		return c.AuthPlain(user, pass)
 	}
-	return res, fmt.Errorf("auth mechanism PLAIN not supported")
+	return nil, fmt.Errorf("auth mechanism PLAIN not supported")
+}
+
+// uses SCRAM-SHA authentication. returns error if SCRAM-SHA is not supported
+func (c *Client) AuthScramSha(user, pass string) (*gomemcached.MCResponse, error) {
+	res, err := c.AuthList()
+
+	if err != nil {
+		return res, err
+	}
+
+	authMech := string(res.Body)
+	if strings.Index(authMech, AuthMech_SHA512) != -1 {
+		return c.AuthSHA512(user, pass)
+	} else if strings.Index(authMech, AuthMech_SHA256) != -1 {
+		return c.AuthSHA256(user, pass)
+	} else if strings.Index(authMech, AuthMech_SHA1) != -1 {
+		return c.AuthSHA1(user, pass)
+	} else {
+		return nil, fmt.Errorf("auth mechanism SCRAM-SHA not supported")
+	}
+}
+
+// uses SCRAM-SHA authentication if supported. uses plain authentication otherwise
+func (c *Client) AuthAdvanced(user, pass string) (*gomemcached.MCResponse, error) {
+	res, err := c.AuthList()
+
+	if err != nil {
+		return res, err
+	}
+
+	authMech := string(res.Body)
+	if strings.Index(authMech, AuthMech_SHA512) != -1 {
+		return c.AuthSHA512(user, pass)
+	} else if strings.Index(authMech, AuthMech_SHA256) != -1 {
+		return c.AuthSHA256(user, pass)
+	} else if strings.Index(authMech, AuthMech_SHA1) != -1 {
+		return c.AuthSHA1(user, pass)
+	} else if strings.Index(authMech, AuthMech_PLAIN) != -1 {
+		return c.AuthPlain(user, pass)
+	}
+
+	return nil, fmt.Errorf("auth mechanism not found")
+}
+
+func (c *Client) AuthPlain(user, pass string) (*gomemcached.MCResponse, error) {
+	logging.Infof("Using plain authentication for user %v", user)
+	return c.Send(&gomemcached.MCRequest{
+		Opcode: gomemcached.SASL_AUTH,
+		Key:    []byte("PLAIN"),
+		Body:   []byte(fmt.Sprintf("\x00%s\x00%s", user, pass))})
+}
+
+func (c *Client) AuthSHA512(user, pass string) (*gomemcached.MCResponse, error) {
+	logging.Infof("Using scram-sha512 authentication for user %v", user)
+	return c.AuthSHA(user, pass, AuthMech_SHA512, sha512.New, 64)
+}
+
+func (c *Client) AuthSHA256(user, pass string) (*gomemcached.MCResponse, error) {
+	logging.Infof("Using scram-sha256 authentication for user %v", user)
+	return c.AuthSHA(user, pass, AuthMech_SHA256, sha256.New, 32)
+}
+
+func (c *Client) AuthSHA1(user, pass string) (*gomemcached.MCResponse, error) {
+	logging.Infof("Using scram-sha1 authentication for user %v", user)
+	return c.AuthSHA(user, pass, AuthMech_SHA1, sha1.New, 20)
+}
+
+func (c *Client) AuthSHA(user, pass string, mech string, hashFunc func() hash.Hash, hashSize int) (*gomemcached.MCResponse, error) {
+	serverNonce, authMessage, salt, i, err := c.sendStartRequest(user, pass, mech, hashFunc, hashSize)
+	if err != nil {
+		return nil, err
+	}
+	return c.sendStepRequest(pass, mech, serverNonce, authMessage, salt, i, hashFunc, hashSize)
+}
+
+func (c *Client) sendStartRequest(user, pass string, mech string, hashFunc func() hash.Hash, hashSize int) (serverNonce, authMessage string, salt []byte, i int, err error) {
+	var clientNonce string
+	clientNonce, err = generateClientNonce(24)
+	if err != nil {
+		return
+	}
+
+	initialMessage := fmt.Sprintf("n,,n=%s,r=%s", user, clientNonce)
+	startRequest := &gomemcached.MCRequest{
+		Opcode: 0x21,
+		Key:    []byte(mech),
+		Body:   []byte(initialMessage)}
+
+	// send start request
+	var startResponse *gomemcached.MCResponse
+	startResponse, err = c.Send(startRequest)
+	if err != nil {
+		return
+	}
+
+	// validate start response
+	var encodedSalt string
+	serverNonce, encodedSalt, i, err = parseStartResponse(startResponse.Body)
+	if err != nil {
+		return
+	}
+	if !strings.HasPrefix(serverNonce, clientNonce) {
+		err = errors.New("server nonce is not correct")
+		return
+	}
+
+	salt, err = base64.StdEncoding.DecodeString(encodedSalt)
+	if err != nil {
+		return
+	}
+
+	authMessage = initialMessage[3:] + "," + string(startResponse.Body) + ",c=biws,r=" + serverNonce
+	return
+}
+
+func (c *Client) sendStepRequest(pass, mech, serverNonce, authMessage string, salt []byte, i int, hashFunc func() hash.Hash, hashSize int) (*gomemcached.MCResponse, error) {
+	saltedPassword, clientFinalMessage := c.prepareStepRequest(pass, serverNonce, authMessage, salt, i, hashFunc, hashSize)
+
+	// send step request
+	stepRequest := &gomemcached.MCRequest{
+		Opcode: 0x22,
+		Key:    []byte(mech),
+		Body:   []byte(clientFinalMessage)}
+	stepResponse, err := c.Send(stepRequest)
+	if err != nil {
+		return nil, err
+	}
+
+	// validate step response
+	serverFinalMessage, err := parseStepResponse(stepResponse.Body)
+	if err != nil {
+		return nil, err
+	}
+	err = validateServerFinalMessage(serverFinalMessage, saltedPassword, authMessage, hashFunc)
+	if err != nil {
+		return nil, err
+	}
+
+	return stepResponse, nil
+}
+
+func (c *Client) prepareStepRequest(pass, serverNonce, authMessage string, salt []byte, i int, hashFunc func() hash.Hash, hashSize int) (saltedPassword []byte, clientFinalMessage string) {
+	// prepare step request
+	clientFinalMessageBare := "c=biws,r=" + serverNonce
+	saltedPassword = pbkdf2.Key([]byte(pass), salt, i, hashSize, hashFunc)
+	clientKey := HMACHash([]byte("Client Key"), saltedPassword, hashFunc)
+	storedKey := SHAHash(clientKey, hashFunc)
+	clientSignature := HMACHash([]byte(authMessage), storedKey, hashFunc)
+	clientProof := make([]byte, len(clientSignature))
+	for i := 0; i < len(clientSignature); i++ {
+		clientProof[i] = clientKey[i] ^ clientSignature[i]
+	}
+	clientFinalMessage = clientFinalMessageBare + ",p=" + base64.StdEncoding.EncodeToString(clientProof)
+	return
+}
+
+func generateClientNonce(size int) (string, error) {
+	randomBytes := make([]byte, size)
+	_, err := rand.Read(randomBytes)
+	if err != nil {
+		return "", err
+	}
+	return base64.StdEncoding.EncodeToString(randomBytes), nil
+}
+
+func parseAuthResponse(body []byte) (map[string]string, error) {
+	attributes := make(map[string]string)
+	parts := strings.Split(string(body), ",")
+	for _, part := range parts {
+		// find the index of the FIRST "="
+		index := strings.Index(part, "=")
+		if index <= 0 {
+			return nil, InvalidResponseError
+		}
+		attributes[part[:index]] = part[index+1:]
+	}
+	return attributes, nil
+}
+
+func parseStartResponse(body []byte) (serverNonce string, encodedSalt string, i int, err error) {
+	var attributes map[string]string
+	attributes, err = parseAuthResponse(body)
+	if err != nil {
+		err = InvalidStartResponseError
+		return
+	}
+
+	i = -1
+
+	for key, value := range attributes {
+		switch key {
+		case "r":
+			serverNonce = value
+		case "s":
+			encodedSalt = value
+		case "i":
+			i, err = strconv.Atoi(value)
+			if err != nil {
+				err = InvalidStartResponseError
+				return
+			}
+		default:
+			err = InvalidStartResponseError
+			return
+		}
+	}
+
+	if len(serverNonce) == 0 || len(encodedSalt) == 0 || i < 0 {
+		err = InvalidStartResponseError
+		return
+	}
+
+	return
+
+}
+
+func parseStepResponse(body []byte) (serverFinalMessage string, err error) {
+	var attributes map[string]string
+	attributes, err = parseAuthResponse(body)
+	if err != nil {
+		err = InvalidStepResponseError
+		return
+	}
+
+	for key, value := range attributes {
+		switch key {
+		case "v":
+			serverFinalMessage = value
+		default:
+			err = InvalidStepResponseError
+			return
+		}
+	}
+
+	if len(serverFinalMessage) == 0 {
+		err = InvalidStepResponseError
+		return
+	}
+
+	return
+
+}
+
+func HMACHash(message []byte, secret []byte, hashFunc func() hash.Hash) []byte {
+	h := hmac.New(hashFunc, secret)
+	h.Write(message)
+	return h.Sum(nil)
+}
+
+func SHAHash(message []byte, hashFunc func() hash.Hash) []byte {
+	h := hashFunc()
+	h.Write(message)
+	return h.Sum(nil)
+}
+
+func validateServerFinalMessage(serverFinalMessage string, saltedPassword []byte, authMessage string, hashFunc func() hash.Hash) error {
+	decodedMessage, err := base64.StdEncoding.DecodeString(serverFinalMessage)
+	if err != nil {
+		return err
+	}
+	serverKey := HMACHash([]byte("Server Key"), saltedPassword, hashFunc)
+	serverSignature := HMACHash([]byte(authMessage), serverKey, hashFunc)
+	if string(decodedMessage) != string(serverSignature) {
+		return errors.New("server signature is not correct")
+	}
+	return nil
 }
 
 // select bucket
