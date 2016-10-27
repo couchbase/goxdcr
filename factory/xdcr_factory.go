@@ -196,7 +196,7 @@ func (xdcrf *XDCRFactory) NewPipeline(topic string, progress_recorder common.Pip
 	} else {
 		//register services
 		pipeline.SetRuntimeContext(pipelineContext)
-		err = xdcrf.registerServices(pipeline, logger_ctx, kv_vb_map, target_bucket_password, target_kv_vb_map)
+		err = xdcrf.registerServices(pipeline, logger_ctx, kv_vb_map, target_bucket_password, target_kv_vb_map, targetClusterRef)
 		if err != nil {
 			return nil, err
 		}
@@ -608,9 +608,10 @@ func (xdcrf *XDCRFactory) constructSettingsForXmemNozzle(pipeline common.Pipelin
 	xmemSettings[parts.SETTING_OPTI_REP_THRESHOLD] = getSettingFromSettingsMap(settings, metadata.OptimisticReplicationThreshold, repSettings.OptimisticReplicationThreshold)
 	xmemSettings[parts.SETTING_STATS_INTERVAL] = getSettingFromSettingsMap(settings, metadata.PipelineStatsInterval, repSettings.StatsInterval)
 
-	demandEncryption := targetClusterRef.DemandEncryption
-	certificate := targetClusterRef.Certificate
-	if demandEncryption {
+	xmemSettings[parts.XMEM_SETTING_DEMAND_ENCRYPTION] = targetClusterRef.DemandEncryption
+	xmemSettings[parts.XMEM_SETTING_CERTIFICATE] = targetClusterRef.Certificate
+	xmemSettings[parts.XMEM_SETTING_ENCRYPTION_TYPE] = targetClusterRef.EncryptionType
+	if targetClusterRef.IsFullEncryption() {
 		if isSSLOverMem {
 			mem_ssl_port, ok := ssl_port_map[xmemConnStr]
 			if !ok {
@@ -619,8 +620,6 @@ func (xdcrf *XDCRFactory) constructSettingsForXmemNozzle(pipeline common.Pipelin
 			xdcrf.logger.Infof("mem_ssl_port=%v\n", mem_ssl_port)
 
 			xmemSettings[parts.XMEM_SETTING_REMOTE_MEM_SSL_PORT] = mem_ssl_port
-			xmemSettings[parts.XMEM_SETTING_CERTIFICATE] = certificate
-			xmemSettings[parts.XMEM_SETTING_DEMAND_ENCRYPTION] = demandEncryption
 			xmemSettings[parts.XMEM_SETTING_SAN_IN_CERITICATE] = targetClusterRef.SANInCertificate
 
 			xdcrf.logger.Infof("xmemSettings=%v\n", xmemSettings)
@@ -637,8 +636,6 @@ func (xdcrf *XDCRFactory) constructSettingsForXmemNozzle(pipeline common.Pipelin
 				return nil, errors.New(fmt.Sprintf("Can't find remote proxy port for remote bucket %v", spec.TargetBucketName))
 			}
 
-			xmemSettings[parts.XMEM_SETTING_DEMAND_ENCRYPTION] = demandEncryption
-			xmemSettings[parts.XMEM_SETTING_CERTIFICATE] = certificate
 			xmemSettings[parts.XMEM_SETTING_REMOTE_PROXY_PORT] = remote_proxy_port
 			xmemSettings[parts.XMEM_SETTING_LOCAL_PROXY_PORT] = local_proxy_port
 		}
@@ -683,7 +680,7 @@ func (xdcrf *XDCRFactory) constructSettingsForDcpNozzle(pipeline common.Pipeline
 	return dcpNozzleSettings, nil
 }
 
-func (xdcrf *XDCRFactory) registerServices(pipeline common.Pipeline, logger_ctx *log.LoggerContext, kv_vb_map map[string][]uint16, target_bucket_password string, target_kv_vb_map map[string][]uint16) error {
+func (xdcrf *XDCRFactory) registerServices(pipeline common.Pipeline, logger_ctx *log.LoggerContext, kv_vb_map map[string][]uint16, target_bucket_password string, target_kv_vb_map map[string][]uint16, targetClusterRef *metadata.RemoteClusterReference) error {
 	through_seqno_tracker_svc := service_impl.NewThroughSeqnoTrackerSvc(logger_ctx)
 	through_seqno_tracker_svc.Attach(pipeline)
 
@@ -699,7 +696,8 @@ func (xdcrf *XDCRFactory) registerServices(pipeline common.Pipeline, logger_ctx 
 	//register pipeline checkpoint manager
 	ckptMgr, err := pipeline_svc.NewCheckpointManager(xdcrf.checkpoint_svc, xdcrf.capi_svc,
 		xdcrf.remote_cluster_svc, xdcrf.repl_spec_svc, xdcrf.cluster_info_svc,
-		xdcrf.xdcr_topology_svc, through_seqno_tracker_svc, kv_vb_map, pipeline.Specification().TargetBucketName, target_bucket_password, target_kv_vb_map, logger_ctx)
+		xdcrf.xdcr_topology_svc, through_seqno_tracker_svc, kv_vb_map, pipeline.Specification().TargetBucketName,
+		target_bucket_password, target_kv_vb_map, targetClusterRef, logger_ctx)
 	if err != nil {
 		xdcrf.logger.Errorf("Failed to construct CheckpointManager for %v. err=%v ckpt_svc=%v, capi_svc=%v, remote_cluster_svc=%v, repl_spec_svc=%v\n", pipeline.Topic(), err, xdcrf.checkpoint_svc, xdcrf.capi_svc,
 			xdcrf.remote_cluster_svc, xdcrf.repl_spec_svc)
@@ -835,7 +833,7 @@ func (xdcrf *XDCRFactory) ConstructSSLPortMap(targetClusterRef *metadata.RemoteC
 	// if both xmem nozzles and ssl are involved, populate ssl_port_map
 	// if target cluster is post-3.0, the ssl ports in the map are memcached ssl ports
 	// otherwise, the ssl ports in the map are proxy ssl ports
-	if targetClusterRef.DemandEncryption && nozzleType == base.Xmem {
+	if targetClusterRef.IsFullEncryption() && nozzleType == base.Xmem {
 		hasSSLOverMemSupport, err = pipeline_utils.HasSSLOverMemSupport(xdcrf.cluster_info_svc, targetClusterRef)
 		if err != nil {
 			return nil, false, err

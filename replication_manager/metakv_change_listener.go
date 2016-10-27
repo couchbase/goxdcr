@@ -342,6 +342,7 @@ func (rccl *RemoteClusterChangeListener) remoteClusterChangeHandlerCallback(remo
 	}
 
 	if oldRemoteClusterRef.DemandEncryption != newRemoteClusterRef.DemandEncryption ||
+		oldRemoteClusterRef.EncryptionType != newRemoteClusterRef.EncryptionType ||
 		// TODO there may be less disruptive ways to handle the following updates without restarting the pipelines
 		// restarting the pipelines seems to be acceptable considering the low frequency of such updates.
 		string(oldRemoteClusterRef.Certificate) != string(newRemoteClusterRef.Certificate) ||
@@ -682,8 +683,8 @@ func (bscl *BucketSettingsChangeListener) setTimeSyncOnBucket(bucketName string,
 		return err
 	}
 
-	// TODO set more accurate user agent
-	client, err := utils.GetMemcachedConnection(hostAddr, bucketName, "Goxdcr bucketSetting listener", bscl.logger)
+	// local connection to memcached uses plain authentication
+	client, err := utils.GetMemcachedConnection(hostAddr, bucketName, "Goxdcr bucketSetting listener", true /*plainAuth*/, bscl.logger)
 	if err != nil {
 		return err
 	}

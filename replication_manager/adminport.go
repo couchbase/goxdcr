@@ -827,7 +827,8 @@ func writeRemoteClusterAuditEvent(eventId uint32, remoteClusterRef *metadata.Rem
 		GenericFields:         base.GenericFields{log.FormatTimeWithMilliSecondPrecision(time.Now()), *realUserId},
 		RemoteClusterName:     remoteClusterRef.Name,
 		RemoteClusterHostname: remoteClusterRef.HostName,
-		IsEncrypted:           remoteClusterRef.DemandEncryption}
+		IsEncrypted:           remoteClusterRef.DemandEncryption,
+		EncryptionType:        remoteClusterRef.EncryptionType}
 
 	err := AuditService().Write(eventId, event)
 	logAuditErrors(err)

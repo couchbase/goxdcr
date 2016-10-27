@@ -18,6 +18,7 @@ import (
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/goxdcr/service_def"
+	"github.com/couchbase/goxdcr/simple_utils"
 	"github.com/couchbase/goxdcr/utils"
 	"strings"
 	"sync"
@@ -163,7 +164,7 @@ func (service *ReplicationSpecService) ValidateNewReplicationSpec(sourceBucket, 
 	var err_source error
 	start_time := time.Now()
 
-	sourceBucketType, sourceBucketUUID, sourceConflictResolutionType, err_source := utils.BucketValidationInfo(local_connStr, sourceBucket, "", "", nil, false, service.logger)
+	sourceBucketType, sourceBucketUUID, sourceConflictResolutionType, _, _, err_source := utils.BucketValidationInfo(local_connStr, sourceBucket, "", "", nil, false, service.logger)
 	service.logger.Infof("Result from local bucket look up: bucketName=%v, err_source=%v, time taken=%v\n", sourceBucket, err_source, time.Since(start_time))
 	service.validateBucket(sourceBucket, targetCluster, targetBucket, sourceBucketType, err_source, errorMap, true)
 
@@ -211,7 +212,7 @@ func (service *ReplicationSpecService) ValidateNewReplicationSpec(sourceBucket, 
 
 	//validate target bucket
 	start_time = time.Now()
-	targetBucketType, targetBucketUUID, targetConflictResolutionType, err_target := utils.BucketValidationInfo(remote_connStr, targetBucket, remote_userName, remote_password, certificate, sanInCertificate, service.logger)
+	targetBucketType, targetBucketUUID, targetConflictResolutionType, targetBucketPassword, targetKVVBMap, err_target := utils.BucketValidationInfo(remote_connStr, targetBucket, remote_userName, remote_password, certificate, sanInCertificate, service.logger)
 	service.logger.Infof("Result from remote bucket look up: connStr=%v, bucketName=%v, err_target=%v, time taken=%v\n", remote_connStr, targetBucket, err_target, time.Since(start_time))
 	service.validateBucket(sourceBucket, targetCluster, targetBucket, targetBucketType, err_target, errorMap, false)
 
@@ -229,6 +230,7 @@ func (service *ReplicationSpecService) ValidateNewReplicationSpec(sourceBucket, 
 	_, err = service.replicationSpec(repId)
 	if err == nil {
 		errorMap[base.PlaceHolderFieldKey] = errors.New(ReplicationSpecAlreadyExistErrorMessage)
+		return "", "", nil, errorMap
 	}
 
 	// if replication type is set to xmem, validate that the target cluster is xmem compatible
@@ -239,10 +241,34 @@ func (service *ReplicationSpecService) ValidateNewReplicationSpec(sourceBucket, 
 			errMsg := fmt.Sprintf("Failed to get cluster version information, err=%v\n", err)
 			service.logger.Error(errMsg)
 			errorMap[base.ToCluster] = errors.New(errMsg)
+			return "", "", nil, errorMap
 		} else {
 			if !xmemCompatible {
 				errorMap[base.ToCluster] = errors.New("Version 2 replication is disallowed. Cluster has nodes with versions less than 2.2.")
+				return "", "", nil, errorMap
 			}
+		}
+	}
+
+	if targetClusterRef.IsEncryptionEnabled() && !targetClusterRef.IsFullEncryption() {
+		// for half-ssl ref, validate that target memcached supports SCRAM-SHA authentication
+		if len(targetKVVBMap) == 0 {
+			errorMap[base.ToCluster] = errors.New("kv vb map is empty")
+			return "", "", nil, errorMap
+		}
+		// pick the first kv in kvVBMap to use
+		var kvConnStr string
+		for kvaddr, _ := range targetKVVBMap {
+			kvConnStr = kvaddr
+			break
+		}
+
+		_, err = utils.GetRemoteMemcachedConnection(kvConnStr, targetBucket, targetBucketPassword,
+			simple_utils.ComposeUserAgentWithBucketNames("Goxdcr ReplSpecSvc", sourceBucket, targetBucket),
+			false /*plainAuth*/, service.logger)
+		if err != nil {
+			errorMap[base.ToCluster] = fmt.Errorf("Cluster does not support SCRAM-SHA authentication. err=%v", err)
+			return "", "", nil, errorMap
 		}
 	}
 

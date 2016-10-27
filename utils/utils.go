@@ -369,7 +369,7 @@ func BucketNotFoundError(bucketName string) error {
 	return fmt.Errorf("Bucket `%v` not found.", bucketName)
 }
 
-func GetMemcachedConnection(serverAddr, bucketName string, userAgent string, logger *log.CommonLogger) (*mcc.Client, error) {
+func GetMemcachedConnection(serverAddr, bucketName string, userAgent string, plainAuth bool, logger *log.CommonLogger) (*mcc.Client, error) {
 	logger.Infof("GetMemcachedConnection serverAddr=%v, bucketName=%v\n", serverAddr, bucketName)
 	if serverAddr == "" {
 		panic("serverAddr is empty")
@@ -380,7 +380,7 @@ func GetMemcachedConnection(serverAddr, bucketName string, userAgent string, log
 		return nil, err
 	}
 
-	conn, err := base.NewConn(serverAddr, username, password)
+	conn, err := base.NewConn(serverAddr, username, password, plainAuth)
 	if err != nil {
 		return nil, err
 	}
@@ -395,8 +395,8 @@ func GetMemcachedConnection(serverAddr, bucketName string, userAgent string, log
 	return conn, nil
 }
 
-func GetRemoteMemcachedConnection(serverAddr, username string, password string, userAgent string, logger *log.CommonLogger) (*mcc.Client, error) {
-	conn, err := base.NewConn(serverAddr, username, password)
+func GetRemoteMemcachedConnection(serverAddr, username string, password string, userAgent string, plainAuth bool, logger *log.CommonLogger) (*mcc.Client, error) {
+	conn, err := base.NewConn(serverAddr, username, password, plainAuth)
 	if err != nil {
 		return nil, err
 	}
@@ -482,7 +482,7 @@ func GetSettingFromSettings(settings map[string]interface{}, settingName string)
 	return setting
 }
 
-func GetMemcachedClient(serverAddr, bucketName string, kv_mem_clients map[string]*mcc.Client, userAgent string, logger *log.CommonLogger) (*mcc.Client, error) {
+func GetMemcachedClient(serverAddr, bucketName string, kv_mem_clients map[string]*mcc.Client, userAgent string, plainAuth bool, logger *log.CommonLogger) (*mcc.Client, error) {
 	client, ok := kv_mem_clients[serverAddr]
 	if ok {
 		return client, nil
@@ -491,7 +491,7 @@ func GetMemcachedClient(serverAddr, bucketName string, kv_mem_clients map[string
 			panic("unexpected empty bucketName")
 		}
 
-		var client, err = GetMemcachedConnection(serverAddr, bucketName, userAgent, logger)
+		var client, err = GetMemcachedConnection(serverAddr, bucketName, userAgent, plainAuth, logger)
 		if err == nil {
 			kv_mem_clients[serverAddr] = client
 			return client, nil

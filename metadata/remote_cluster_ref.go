@@ -28,6 +28,11 @@ const (
 var SizeOfRemoteClusterRefId = 32
 var MaxRetryForIdGeneration = 5
 
+const (
+	EncryptionType_Full string = "full"
+	EncryptionType_Half string = "half"
+)
+
 /************************************
 /* struct RemoteClusterReference
 *************************************/
@@ -40,6 +45,7 @@ type RemoteClusterReference struct {
 	Password string `json:"password"`
 
 	DemandEncryption bool   `json:"demandEncryption"`
+	EncryptionType   string `json:"encryptionType"`
 	Certificate      []byte `json:"certificate"`
 	// hostname to use when making https connection
 	HttpsHostName    string `json:"httpsHostName"`
@@ -57,11 +63,12 @@ type RemoteClusterReference struct {
 }
 
 func NewRemoteClusterReference(uuid, name, hostName, userName, password string,
-	demandEncryption bool, certificate []byte) (*RemoteClusterReference, error) {
+	demandEncryption bool, encryptionType string, certificate []byte) (*RemoteClusterReference, error) {
 	refId, err := RemoteClusterRefId()
 	if err != nil {
 		return nil, err
 	}
+
 	return &RemoteClusterReference{Id: refId,
 		Uuid:             uuid,
 		Name:             name,
@@ -69,6 +76,7 @@ func NewRemoteClusterReference(uuid, name, hostName, userName, password string,
 		UserName:         userName,
 		Password:         password,
 		DemandEncryption: demandEncryption,
+		EncryptionType:   encryptionType,
 		Certificate:      certificate,
 	}, nil
 }
@@ -84,7 +92,7 @@ func RemoteClusterRefId() (string, error) {
 
 // implements base.ClusterConnectionInfoProvider
 func (ref *RemoteClusterReference) MyConnectionStr() (string, error) {
-	if ref.DemandEncryption {
+	if ref.IsEncryptionEnabled() {
 		if len(ref.ActiveHttpsHostName) > 0 {
 			return ref.ActiveHttpsHostName, nil
 		} else {
@@ -115,8 +123,9 @@ func (ref *RemoteClusterReference) ToMap() map[string]interface{} {
 	outputMap[base.RemoteClusterHostName] = ref.HostName
 	outputMap[base.RemoteClusterUserName] = ref.UserName
 	outputMap[base.RemoteClusterDeleted] = false
-	if ref.DemandEncryption {
+	if ref.IsEncryptionEnabled() {
 		outputMap[base.RemoteClusterDemandEncryption] = ref.DemandEncryption
+		outputMap[base.RemoteClusterEncryptionType] = ref.EncryptionType
 		outputMap[base.RemoteClusterCertificate] = string(ref.Certificate)
 	}
 	return outputMap
@@ -133,14 +142,15 @@ func (ref *RemoteClusterReference) SameRef(ref2 *RemoteClusterReference) bool {
 	return ref.Id == ref2.Id && ref.Uuid == ref2.Uuid && ref.Name == ref2.Name &&
 		ref.HostName == ref2.HostName && ref.UserName == ref2.UserName &&
 		ref.Password == ref2.Password && reflect.DeepEqual(ref.Revision, ref2.Revision) &&
-		ref.DemandEncryption == ref2.DemandEncryption && bytes.Equal(ref.Certificate, ref2.Certificate)
+		ref.DemandEncryption == ref2.DemandEncryption && ref.EncryptionType == ref2.EncryptionType &&
+		bytes.Equal(ref.Certificate, ref2.Certificate)
 }
 
 func (ref *RemoteClusterReference) String() string {
 	if ref == nil {
 		return "nil"
 	}
-	return fmt.Sprintf("id:%v; uuid:%v; name:%v; hostName:%v; userName:%v; password:xxxx; demandEncryption:%v;certificate:%v;revision:%v", ref.Id, ref.Uuid, ref.Name, ref.HostName, ref.UserName, ref.DemandEncryption, ref.Certificate, ref.Revision)
+	return fmt.Sprintf("id:%v; uuid:%v; name:%v; hostName:%v; userName:%v; password:xxxx; demandEncryption:%v: encryptionType:%v; certificate:%v; revision:%v", ref.Id, ref.Uuid, ref.Name, ref.HostName, ref.UserName, ref.DemandEncryption, ref.EncryptionType, ref.Certificate, ref.Revision)
 }
 
 func (ref *RemoteClusterReference) Clone() *RemoteClusterReference {
@@ -158,6 +168,16 @@ func (ref *RemoteClusterReference) Clone() *RemoteClusterReference {
 		HttpsHostName:       ref.HttpsHostName,
 		ActiveHostName:      ref.ActiveHostName,
 		ActiveHttpsHostName: ref.ActiveHttpsHostName,
+		EncryptionType:      ref.EncryptionType,
 		SANInCertificate:    ref.SANInCertificate,
 	}
+}
+
+func (ref *RemoteClusterReference) IsEncryptionEnabled() bool {
+	return ref.DemandEncryption
+}
+
+func (ref *RemoteClusterReference) IsFullEncryption() bool {
+	// ref.EncryptionType may be empty for unupgraded remote cluster refs. treat it as "full" in this case
+	return ref.DemandEncryption && (len(ref.EncryptionType) == 0 || ref.EncryptionType == EncryptionType_Full)
 }

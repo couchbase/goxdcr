@@ -152,6 +152,7 @@ const (
 	RemoteClusterUserName         = "username"
 	RemoteClusterPassword         = "password"
 	RemoteClusterDemandEncryption = "demandEncryption"
+	RemoteClusterEncryptionType = "encryptionType"
 	RemoteClusterCertificate      = "certificate"
 	RemoteClusterUri              = "uri"
 	RemoteClusterValidateUri      = "validateURI"
@@ -334,6 +335,8 @@ var MaxMemClientErrorCount = 3
 // minimum versions where various features are supported
 var VersionForSSLOverMemSupport = []int{3, 0}
 var VersionForSANInCertificateSupport = []int{4, 0}
+var VersionForRBACSupport = []int{5, 0}
+
 
 var GoxdcrUserAgentPrefix = "couchbase-goxdcr"
 var GoxdcrUserAgent = ""

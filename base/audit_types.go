@@ -35,6 +35,7 @@ type RemoteClusterRefEvent struct {
 	RemoteClusterName     string `json:"cluster_name"`
 	RemoteClusterHostname string `json:"cluster_hostname"`
 	IsEncrypted           bool   `json:"is_encrypted"`
+	EncryptionType        string `json:"encryption_type"`
 }
 
 type CreateReplicationEvent struct {

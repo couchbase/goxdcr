@@ -408,7 +408,7 @@ func (service *RemoteClusterService) ValidateRemoteCluster(ref *metadata.RemoteC
 
 // validate remote cluster info and update actual uuid
 func (service *RemoteClusterService) validateRemoteCluster(ref *metadata.RemoteClusterReference, updateUUid bool) error {
-	if ref.DemandEncryption {
+	if ref.IsEncryptionEnabled() {
 		// check if source cluster supports SSL when SSL is specified
 		isEnterprise, err := service.xdcr_topology_svc.IsMyClusterEnterprise()
 		if err != nil {
@@ -432,7 +432,7 @@ func (service *RemoteClusterService) validateRemoteCluster(ref *metadata.RemoteC
 	}
 
 	var hostAddr string
-	if ref.DemandEncryption {
+	if ref.IsEncryptionEnabled() {
 		if ref.HttpsHostName == "" {
 			httpsHostAddr, err, isInternalError := utils.HttpsHostAddr(ref.HostName, service.logger)
 			if err != nil {
@@ -484,7 +484,7 @@ func (service *RemoteClusterService) validateRemoteCluster(ref *metadata.RemoteC
 		return wrapAsInvalidRemoteClusterError("Remote node is not initialized.")
 	}
 
-	if ref.DemandEncryption {
+	if ref.IsEncryptionEnabled() {
 		// check if target cluster supports SSL when SSL is specified
 
 		//get isEnterprise from the map
@@ -504,6 +504,17 @@ func (service *RemoteClusterService) validateRemoteCluster(ref *metadata.RemoteC
 
 		if !remoteSSLCompatible {
 			return wrapAsInvalidRemoteClusterError("Remote cluster has a version lower than 2.5 and does not support SSL.")
+		}
+
+		// if ref is half-ssl, validate that target clusters is spock and up
+		if !ref.IsFullEncryption() {
+			rbacCompatible, err := service.cluster_info_svc.IsClusterCompatible(ref, base.VersionForRBACSupport)
+			if err != nil {
+				return wrapAsInvalidRemoteClusterError("Failed to get target cluster version information")
+			}
+			if !rbacCompatible {
+				return wrapAsInvalidRemoteClusterError("Remote cluster has a version lower than 5.0 and does not support half-SSL type remote cluster references.")
+			}
 		}
 	}
 	// get remote cluster uuid from the map
@@ -528,7 +539,7 @@ func (service *RemoteClusterService) validateRemoteCluster(ref *metadata.RemoteC
 }
 
 func (service *RemoteClusterService) formErrorFromValidatingRemotehost(ref *metadata.RemoteClusterReference, hostName string, port uint16, err error) error {
-	if !ref.DemandEncryption {
+	if !ref.IsEncryptionEnabled() {
 		// if encryption is not on, most likely the error is caused by incorrect hostname or firewall.
 		return wrapAsInvalidRemoteClusterError(fmt.Sprintf("Could not connect to \"%v\" on port %v. This could be due to an incorrect host/port combination or a firewall in place between the servers.", hostName, port))
 	} else {
@@ -679,7 +690,7 @@ func (service *RemoteClusterService) refresh(ref *metadata.RemoteClusterReferenc
 
 		hostName = ref_cache.nodes_connectionstr[index]
 		connStr = hostName
-		if ref.DemandEncryption {
+		if ref.IsEncryptionEnabled() {
 			httpsHostName, err = service.getHttpsAddrFromMap(hostName)
 			if err != nil {
 				service.logger.Warnf("When refreshing remote cluster reference %v, skipping node %v since received error getting https address. err=%v\n", ref.Id, hostName, err)

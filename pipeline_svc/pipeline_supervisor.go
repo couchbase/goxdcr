@@ -10,7 +10,6 @@
 package pipeline_svc
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
 	mcc "github.com/couchbase/gomemcached/client"
@@ -321,12 +320,8 @@ func (pipelineSupervisor *PipelineSupervisor) checkPipelineHealth() error {
 
 // compose user agent string for HELO command
 func (pipelineSupervisor *PipelineSupervisor) composeUserAgent() {
-	var buffer bytes.Buffer
-	buffer.WriteString("Goxdcr PipelineSupervisor ")
 	spec := pipelineSupervisor.pipeline.Specification()
-	buffer.WriteString(" SourceBucket:" + spec.SourceBucketName)
-	buffer.WriteString(" TargetBucket:" + spec.TargetBucketName)
-	pipelineSupervisor.user_agent = buffer.String()
+	pipelineSupervisor.user_agent = simple_utils.ComposeUserAgentWithBucketNames("Goxdcr PipelineSupervisor", spec.SourceBucketName, spec.TargetBucketName)
 }
 
 func (pipelineSupervisor *PipelineSupervisor) getDcpStats() (map[string]map[string]string, error) {
@@ -344,7 +339,7 @@ func (pipelineSupervisor *PipelineSupervisor) getDcpStats() (map[string]map[stri
 	}
 
 	for _, serverAddr := range nodes {
-		client, err := utils.GetMemcachedClient(serverAddr, bucketName, pipelineSupervisor.kv_mem_clients, pipelineSupervisor.user_agent, pipelineSupervisor.Logger())
+		client, err := utils.GetMemcachedClient(serverAddr, bucketName, pipelineSupervisor.kv_mem_clients, pipelineSupervisor.user_agent, true /*plainAuth*/, pipelineSupervisor.Logger())
 		if err != nil {
 			return nil, err
 		}

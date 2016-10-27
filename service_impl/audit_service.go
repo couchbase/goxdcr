@@ -148,7 +148,8 @@ func (service *AuditSvc) init() error {
 			return err
 		}
 
-		_, err = base.ConnPoolMgr().GetOrCreatePool(base.AuditServicePoolName, service.kvaddr, "", service.username, service.password, base.DefaultConnectionSize)
+		// audit service uses local connection to memcached and uses plain authentication
+		_, err = base.ConnPoolMgr().GetOrCreatePool(base.AuditServicePoolName, service.kvaddr, "", service.username, service.password, base.DefaultConnectionSize, true /*plainAuth*/)
 		if err == nil {
 			service.initialized = true
 		}

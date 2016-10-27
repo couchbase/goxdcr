@@ -309,7 +309,7 @@ func (top_detect_svc *TopologyChangeDetectorSvc) needCheckTargetForSSL() (bool, 
 	}
 	targetClusterRef, err := top_detect_svc.remote_cluster_svc.RemoteClusterByUuid(spec.TargetClusterUUID, false)
 	if err == nil {
-		if !targetClusterRef.DemandEncryption {
+		if !targetClusterRef.IsFullEncryption() {
 			return false, false
 		}
 		pipeline := top_detect_svc.pipeline

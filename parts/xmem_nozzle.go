@@ -38,6 +38,7 @@ import (
 const (
 	SETTING_RESP_TIMEOUT             = "resp_timeout"
 	XMEM_SETTING_DEMAND_ENCRYPTION   = "demandEncryption"
+	XMEM_SETTING_ENCRYPTION_TYPE     = "encryptionType"
 	XMEM_SETTING_CERTIFICATE         = "certificate"
 	XMEM_SETTING_INSECURESKIPVERIFY  = "insecureSkipVerify"
 	XMEM_SETTING_SAN_IN_CERITICATE   = "SANInCertificate"
@@ -78,6 +79,7 @@ var xmem_setting_defs base.SettingDefinitions = base.SettingDefinitions{SETTING_
 	SETTING_BATCH_EXPIRATION_TIME:   base.NewSettingDef(reflect.TypeOf((*time.Duration)(nil)), false),
 	SETTING_OPTI_REP_THRESHOLD:      base.NewSettingDef(reflect.TypeOf((*int)(nil)), true),
 	XMEM_SETTING_DEMAND_ENCRYPTION:  base.NewSettingDef(reflect.TypeOf((*bool)(nil)), false),
+	XMEM_SETTING_ENCRYPTION_TYPE:    base.NewSettingDef(reflect.TypeOf((*string)(nil)), false),
 	XMEM_SETTING_CERTIFICATE:        base.NewSettingDef(reflect.TypeOf((*[]byte)(nil)), false),
 	XMEM_SETTING_SAN_IN_CERITICATE:  base.NewSettingDef(reflect.TypeOf((*bool)(nil)), false),
 	XMEM_SETTING_INSECURESKIPVERIFY: base.NewSettingDef(reflect.TypeOf((*bool)(nil)), false),
@@ -432,6 +434,7 @@ type xmemConfig struct {
 	//the duration to wait for the batch-sending to finish
 	certificate        []byte
 	demandEncryption   bool
+	encryptionType     string
 	remote_proxy_port  uint16
 	local_proxy_port   uint16
 	memcached_ssl_port uint16
@@ -488,6 +491,12 @@ func (config *xmemConfig) initializeConfig(settings map[string]interface{}) erro
 				return errors.New("demandEncryption=true, but certificate is not set in settings")
 			}
 
+			if val, ok := settings[XMEM_SETTING_ENCRYPTION_TYPE]; ok {
+				config.encryptionType = val.(string)
+			} else {
+				return errors.New("demandEncryption=true, but encryptionType is not set in settings")
+			}
+
 			if val, ok := settings[XMEM_SETTING_REMOTE_MEM_SSL_PORT]; ok {
 				config.memcached_ssl_port = val.(uint16)
 
@@ -500,12 +509,16 @@ func (config *xmemConfig) initializeConfig(settings map[string]interface{}) erro
 				if val, ok := settings[XMEM_SETTING_REMOTE_PROXY_PORT]; ok {
 					config.remote_proxy_port = val.(uint16)
 				} else {
-					return errors.New("demandEncryption=true, but neither remote_proxy_port nor remote_ssl_port is set in settings")
+					if config.demandEncryption && config.encryptionType == metadata.EncryptionType_Full {
+						return errors.New("demandEncryption=true and encryptionType=full, but neither remote_proxy_port nor remote_ssl_port is set in settings")
+					}
 				}
 				if val, ok := settings[XMEM_SETTING_LOCAL_PROXY_PORT]; ok {
 					config.local_proxy_port = val.(uint16)
 				} else {
-					return errors.New("demandEncryption=true, but neither local_proxy_port nor remote_ssl_port is set in settings")
+					if config.demandEncryption && config.encryptionType == metadata.EncryptionType_Full {
+						return errors.New("demandEncryption=true and encryptionType=full, but neither local_proxy_port nor remote_ssl_port is set in settings")
+					}
 				}
 			}
 		}
@@ -1577,7 +1590,12 @@ func (xmem *XmemNozzle) getConnPool() (pool base.ConnPool, err error) {
 func (xmem *XmemNozzle) getOrCreateConnPool() (pool base.ConnPool, err error) {
 	poolName := xmem.getPoolName()
 	if !xmem.config.demandEncryption {
-		pool, err = base.ConnPoolMgr().GetOrCreatePool(poolName, xmem.config.connectStr, xmem.config.bucketName, xmem.config.bucketName, xmem.config.password, xmem.config.connPoolSize)
+		pool, err = base.ConnPoolMgr().GetOrCreatePool(poolName, xmem.config.connectStr, xmem.config.bucketName, xmem.config.bucketName, xmem.config.password, xmem.config.connPoolSize, true /*plainAuth*/)
+		if err != nil {
+			return nil, err
+		}
+	} else if xmem.config.encryptionType == metadata.EncryptionType_Half {
+		pool, err = base.ConnPoolMgr().GetOrCreatePool(poolName, xmem.config.connectStr, xmem.config.bucketName, xmem.config.bucketName, xmem.config.password, xmem.config.connPoolSize, false /*plainAuth*/)
 		if err != nil {
 			return nil, err
 		}

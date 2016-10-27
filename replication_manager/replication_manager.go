@@ -145,8 +145,6 @@ func StartReplicationManager(sourceKVHost string, xdcrRestPort uint16,
 		// TODO should we make heart beat settings configurable?
 		replication_mgr.GenericSupervisor.Start(nil)
 
-		replication_mgr.initMetadataChangeMonitor()
-
 		// set ReplicationStatus for paused replications
 		replication_mgr.initPausedReplications()
 		logger_rm.Info("initPausedReplications succeeded")
@@ -164,6 +162,12 @@ func StartReplicationManager(sourceKVHost string, xdcrRestPort uint16,
 		// periodically refresh remote cluster reference
 		replication_mgr.refresh_remote_cluster_ref_finch = make(chan bool, 1)
 		go refreshRemoteClusterRef(replication_mgr.refresh_remote_cluster_ref_finch)
+
+		// upgrade remote cluster refs before initializing metadata change monitor
+		// and starting adminport to reduce interference
+		replication_mgr.upgradeRemoteClusterRefs()
+
+		replication_mgr.initMetadataChangeMonitor()
 
 		// start adminport
 		adminport := NewAdminport(sourceKVHost, xdcrRestPort, replication_mgr.adminport_finch)
@@ -818,12 +822,14 @@ func refreshRemoteClusterRef(fin_chan chan bool) {
 	ticker := time.NewTicker(base.RefreshRemoteClusterRefInterval)
 	defer ticker.Stop()
 
+	remoteClusterSvc := RemoteClusterService()
+
 	for {
 		select {
 		case <-fin_chan:
 			return
 		case <-ticker.C:
-			_, err := RemoteClusterService().RemoteClusters(true /*refresh*/)
+			_, err := remoteClusterSvc.RemoteClusters(true /*refresh*/)
 			if err != nil {
 				logger_rm.Warnf("Error refreshing remote cluster refs = %v\n", err)
 			}
@@ -1070,4 +1076,30 @@ func setBucketSettings(bucketName string, lwwEnabled bool, realUserId *base.Real
 
 	// return new settings after set op
 	return getBucketSettings(bucketName)
+}
+
+// when cluster is upgrade to 5.0, existing remote cluster refs do not have encryptionType field populated
+// set encryptionType field for such refs
+func (rm *replicationManager) upgradeRemoteClusterRefs() {
+	logger_rm.Infof("upgradeRemoteClusterRefs started.")
+	defer logger_rm.Infof("upgradeRemoteClusterRefs exited")
+
+	remoteClusterSvc := rm.remote_cluster_svc
+	remoteClusterRefs, err := remoteClusterSvc.RemoteClusters(false /*refresh*/)
+	if err != nil {
+		logger_rm.Warnf("Skipping upgradeRemoteClusterRefs because of err =%v", err)
+		return
+	}
+	for _, remoteClusterRef := range remoteClusterRefs {
+		if remoteClusterRef.IsEncryptionEnabled() && len(remoteClusterRef.EncryptionType) == 0 {
+			remoteClusterRef.EncryptionType = metadata.EncryptionType_Full
+			err = remoteClusterSvc.SetRemoteCluster(remoteClusterRef.Name, remoteClusterRef)
+			if err != nil {
+				logger_rm.Warnf("Skipping upgrading remote cluster ref %v because of err =%v", remoteClusterRef.Name, err)
+				continue
+			} else {
+				logger_rm.Infof("Successfully upgraded remote cluster ref %v", remoteClusterRef.Name)
+			}
+		}
+	}
 }

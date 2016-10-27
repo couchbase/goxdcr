@@ -341,8 +341,13 @@ func (service *MigrationSvc) migrateRemoteCluster(remoteClusterData interface{},
 		mildErrorList = append(mildErrorList, errors.New(fmt.Sprintf("Certificate of remote cluster is required when demandEncryption is enabled. data=%v", sanitizeForLogging(remoteCluster))))
 	}
 
+	encryptionType := ""
+	if demandEncryption {
+		encryptionType = metadata.EncryptionType_Full
+	}
+
 	// save remote cluster  - even if there are validation errors
-	ref, err := metadata.NewRemoteClusterReference(uuid, name, hostname, username, password, demandEncryption, certificate)
+	ref, err := metadata.NewRemoteClusterReference(uuid, name, hostname, username, password, demandEncryption, encryptionType, certificate)
 	if err != nil {
 		// err here comes from random number generation, which is promised to always be nil by golang
 		// handle it anyways
@@ -759,7 +764,7 @@ func getUint64Value(fieldName string, fieldValue interface{}, metadataType strin
 func getDemandEncryptionValue(fieldValue interface{}) bool {
 	floatValue, ok := fieldValue.(float64)
 	if !ok {
-		return true
+		return false
 	}
 	if int(floatValue) == 0 {
 		// only an int value of 0 indicates that encryption is not enabled

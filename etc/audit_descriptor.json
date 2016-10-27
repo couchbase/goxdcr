@@ -12,7 +12,8 @@
                                          "real_userid" : {"source" : "", "user" : ""},
 					 "cluster_name" : "",
 					 "cluster_hostname" : "",
-					 "is_encrypted" : true
+					 "is_encrypted" : true,
+					 "encryption_type" : ""
                                         },
 		   "optional_fields" : {}
                 },
@@ -26,7 +27,8 @@
                                          "real_userid" : {"source" : "", "user" : ""},
 					 "cluster_name" : "",
                                          "cluster_hostname" : "",
-                                         "is_encrypted" : true                                        
+                                         "is_encrypted" : true,
+                                         "encryption_type" : ""
 					},
                    "optional_fields" : {}
                 },
@@ -40,7 +42,8 @@
                                          "real_userid" : {"source" : "", "user" : ""},
                                          "cluster_name" : "",
                                          "cluster_hostname" : "",
-                                         "is_encrypted" : true  
+                                         "is_encrypted" : true,
+                                         "encryption_type" : ""
                                         },
                    "optional_fields" : {}
                 },

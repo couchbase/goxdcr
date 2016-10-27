@@ -10,7 +10,6 @@
 package pipeline_svc
 
 import (
-	"bytes"
 	"errors"
 	"expvar"
 	"fmt"
@@ -643,12 +642,8 @@ func (stats_mgr *StatisticsManager) Attach(pipeline common.Pipeline) error {
 
 // compose user agent string for HELO command
 func (stats_mgr *StatisticsManager) composeUserAgent() {
-	var buffer bytes.Buffer
-	buffer.WriteString("Goxdcr StatsMgr ")
 	spec := stats_mgr.pipeline.Specification()
-	buffer.WriteString(" SourceBucket:" + spec.SourceBucketName)
-	buffer.WriteString(" TargetBucket:" + spec.TargetBucketName)
-	stats_mgr.user_agent = buffer.String()
+	stats_mgr.user_agent = simple_utils.ComposeUserAgentWithBucketNames("Goxdcr StatsMgr", spec.SourceBucketName, spec.TargetBucketName)
 }
 
 func (stats_mgr *StatisticsManager) initOverviewRegistry() {
@@ -723,7 +718,8 @@ func (stats_mgr *StatisticsManager) closeConnections() {
 
 func (stats_mgr *StatisticsManager) initConnections() error {
 	for serverAddr, _ := range stats_mgr.active_vbs {
-		conn, err := utils.GetMemcachedConnection(serverAddr, stats_mgr.bucket_name, stats_mgr.user_agent, stats_mgr.logger)
+		// as of now active_vbs contains only the current node and the connection is always local. use plain authentication
+		conn, err := utils.GetMemcachedConnection(serverAddr, stats_mgr.bucket_name, stats_mgr.user_agent, true /*plainAuth*/, stats_mgr.logger)
 		if err != nil {
 			return err
 		}
@@ -1205,7 +1201,8 @@ func calculateTotalChanges(kv_vb_map map[string][]uint16, kv_mem_clients map[str
 	kv_mem_client_error_count map[string]int, sourceBucketName string, user_agent string, logger *log.CommonLogger) (int64, error) {
 	var total_changes uint64 = 0
 	for serverAddr, vbnos := range kv_vb_map {
-		client, err := utils.GetMemcachedClient(serverAddr, sourceBucketName, kv_mem_clients, user_agent, logger)
+		// as of now kv_vb_map contains only the current node and the connection is always local. use plain authentication
+		client, err := utils.GetMemcachedClient(serverAddr, sourceBucketName, kv_mem_clients, user_agent, true /*plainAuth*/, logger)
 		if err != nil {
 			return 0, err
 		}

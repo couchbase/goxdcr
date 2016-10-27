@@ -245,24 +245,24 @@ func DecodeJustValidateFromRequest(request *http.Request) (bool, error) {
 // decode parameters from create remote cluster request
 func DecodeCreateRemoteClusterRequest(request *http.Request) (justValidate bool, remoteClusterRef *metadata.RemoteClusterReference, errorsMap map[string]error, err error) {
 	errorsMap = make(map[string]error)
-	var name, hostName, userName, password string
+	var err1 error
+	var name, hostName, userName, password, encryptionType string
 	var certificate []byte
+
+	if err1 = request.ParseForm(); err1 != nil {
+		errorsMap[base.PlaceHolderFieldKey] = ErrorParsingForm
+		return
+	}
 
 	// default to false if not passed in
 	demandEncryption := false
 
-	if err = request.ParseForm(); err != nil {
-		errorsMap[base.PlaceHolderFieldKey] = ErrorParsingForm
-		err = nil
-		return
-	}
-
 	for key, valArr := range request.Form {
 		switch key {
 		case base.JustValidate:
-			justValidate, err = getBoolFromValArr(valArr, false)
-			if err != nil {
-				errorsMap[base.JustValidate] = err
+			justValidate, err1 = getBoolFromValArr(valArr, false)
+			if err1 != nil {
+				errorsMap[base.JustValidate] = err1
 			}
 		case base.RemoteClusterName:
 			name = getStringFromValArr(valArr)
@@ -274,6 +274,8 @@ func DecodeCreateRemoteClusterRequest(request *http.Request) (justValidate bool,
 			password = getStringFromValArr(valArr)
 		case base.RemoteClusterDemandEncryption:
 			demandEncryption = getDemandEncryptionFromValArr(valArr)
+		case base.RemoteClusterEncryptionType:
+			encryptionType = getStringFromValArr(valArr)
 		case base.RemoteClusterCertificate:
 			certificateStr := getStringFromValArr(valArr)
 			certificate = []byte(certificateStr)
@@ -301,12 +303,29 @@ func DecodeCreateRemoteClusterRequest(request *http.Request) (justValidate bool,
 		errorsMap[base.RemoteClusterCertificate] = errors.New("certificate must be given if demand encryption is on")
 	}
 
+	if !demandEncryption && len(certificate) > 0 {
+		errorsMap[base.RemoteClusterCertificate] = errors.New("certificate cannot be given if demand encryption is not on")
+	}
+
+	if len(encryptionType) > 0 {
+		if encryptionType != metadata.EncryptionType_Full && encryptionType != metadata.EncryptionType_Half {
+			errorsMap[base.RemoteClusterEncryptionType] = errors.New("invalid value")
+		} else if !demandEncryption {
+			errorsMap[base.RemoteClusterEncryptionType] = errors.New("encryptionType cannot be given if demand encryption is not on")
+		}
+	}
+
+	if demandEncryption && len(encryptionType) == 0 {
+		// default encryptionType to "full" if not specified
+		encryptionType = metadata.EncryptionType_Full
+	}
+
 	//validate the format of hostName, if it doesn't contain port number, append default port number 8091
 	if !strings.Contains(hostName, base.UrlPortNumberDelimiter) {
 		hostName = hostName + base.UrlPortNumberDelimiter + DefaultAdminPort
 	}
 	if len(errorsMap) == 0 {
-		remoteClusterRef, err = metadata.NewRemoteClusterReference("", name, hostName, userName, password, demandEncryption, certificate)
+		remoteClusterRef, err = metadata.NewRemoteClusterReference("", name, hostName, userName, password, demandEncryption, encryptionType, certificate)
 	}
 
 	return

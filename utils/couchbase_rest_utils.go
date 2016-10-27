@@ -250,26 +250,36 @@ func BucketPassword(hostAddr, bucketName, username, password string, certificate
 // 1. bucket type
 // 2. bucket uuid
 // 3. bucket conflict resolution type
-func BucketValidationInfo(hostAddr, bucketName, username, password string, certificate []byte, sanInCertificate bool, logger *log.CommonLogger) (string, string, string, error) {
+// 4. bucket password
+// 5. bucket server vb map
+func BucketValidationInfo(hostAddr, bucketName, username, password string, certificate []byte, sanInCertificate bool, logger *log.CommonLogger) (string, string, string, string, map[string][]uint16, error) {
 	bucketInfo, err := GetBucketInfo(hostAddr, bucketName, username, password, certificate, sanInCertificate, logger)
 	if err != nil {
-		return "", "", "", err
+		return "", "", "", "", nil, err
 	}
 
 	bucketType, err := GetBucketTypeFromBucketInfo(bucketName, bucketInfo)
 	if err != nil {
-		return "", "", "", fmt.Errorf("Error retrieving BucketType setting on bucket %v", bucketName)
+		return "", "", "", "", nil, fmt.Errorf("Error retrieving BucketType setting on bucket %v", bucketName)
 	}
 	bucketUUID, err := GetBucketUuidFromBucketInfo(bucketName, bucketInfo, logger)
 	if err != nil {
-		return "", "", "", fmt.Errorf("Error retrieving UUID setting on bucket %v", bucketName)
+		return "", "", "", "", nil, fmt.Errorf("Error retrieving UUID setting on bucket %v", bucketName)
 	}
 	bucketConflictResolutionType, err := GetConflictResolutionTypeFromBucketInfo(bucketName, bucketInfo)
 	if err != nil {
-		return "", "", "", fmt.Errorf("Error retrieving ConflictResolutionType setting on bucket %v", bucketName)
+		return "", "", "", "", nil, fmt.Errorf("Error retrieving ConflictResolutionType setting on bucket %v", bucketName)
+	}
+	bucketPassword, err := GetBucketPasswordFromBucketInfo(bucketName, bucketInfo, logger)
+	if err != nil {
+		return "", "", "", "", nil, fmt.Errorf("Error retrieving password setting on bucket %v", bucketName)
+	}
+	bucketKVVBMap, err := GetServerVBucketsMap(hostAddr, bucketName, bucketInfo)
+	if err != nil {
+		return "", "", "", "", nil, fmt.Errorf("Error retrieving server vb map on bucket %v", bucketName)
 	}
 
-	return bucketType, bucketUUID, bucketConflictResolutionType, nil
+	return bucketType, bucketUUID, bucketConflictResolutionType, bucketPassword, bucketKVVBMap, nil
 }
 
 func GetBucketUuidFromBucketInfo(bucketName string, bucketInfo map[string]interface{}, logger *log.CommonLogger) (string, error) {

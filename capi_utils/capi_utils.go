@@ -56,7 +56,7 @@ func ConstructServerCouchApiBaseMap(targetBucketName string, targetBucketInfo ma
 
 		// get couchApiBase
 		var couchApiBaseObj interface{}
-		if remoteClusterRef.DemandEncryption {
+		if remoteClusterRef.IsEncryptionEnabled() {
 			couchApiBaseObj, ok = nodeMap[base.CouchApiBaseHttps]
 		} else {
 			couchApiBaseObj, ok = nodeMap[base.CouchApiBase]

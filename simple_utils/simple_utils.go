@@ -11,6 +11,7 @@
 package simple_utils
 
 import (
+	"bytes"
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
@@ -414,4 +415,14 @@ func EncodeVersionToEffectiveVersion(version []int) int {
 
 	effectiveVersion := majorVersion*0x10000 + minorVersion
 	return effectiveVersion
+}
+
+func ComposeUserAgentWithBucketNames(prefix, sourceBucketName, targetBucketName string) string {
+	var buffer bytes.Buffer
+	buffer.WriteString(prefix)
+	buffer.WriteString(" SourceBucket:")
+	buffer.WriteString(sourceBucketName)
+	buffer.WriteString(" TargetBucket:")
+	buffer.WriteString(targetBucketName)
+	return buffer.String()
 }
