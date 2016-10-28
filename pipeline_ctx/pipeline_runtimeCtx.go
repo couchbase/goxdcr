@@ -77,26 +77,14 @@ func (ctx *PipelineRuntimeCtx) Start(params map[string]interface{}) error {
 
 	if err == nil {
 		ctx.isRunning = true
-	} else {
-		//clean up
-		err2 := ctx.stop(false)
-		if err2 != nil {
-			//failed to clean up
-			panic("Pipeline runtime context failed to start up, try to clean up, failed again")
-		}
 	}
+
 	return err
 }
 
 func (ctx *PipelineRuntimeCtx) Stop() error {
-	return ctx.stop(true)
-}
-
-func (ctx *PipelineRuntimeCtx) stop(lock bool) error {
-	if lock {
-		ctx.runtime_svcs_lock.RLock()
-		defer ctx.runtime_svcs_lock.RUnlock()
-	}
+	ctx.runtime_svcs_lock.RLock()
+	defer ctx.runtime_svcs_lock.RUnlock()
 
 	ctx.logger.Infof("Pipeline context is stopping...")
 	var err error = nil
