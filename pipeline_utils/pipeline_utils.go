@@ -124,3 +124,7 @@ func IsPipelineUsingCapi(pipeline common.Pipeline) bool {
 func IsPipelineRunning(state common.PipelineState) bool {
 	return state == common.Pipeline_Initial || state == common.Pipeline_Starting || state == common.Pipeline_Running
 }
+
+func IsPipelineStopping(state common.PipelineState) bool {
+	return state == common.Pipeline_Stopping || state == common.Pipeline_Stopped
+}

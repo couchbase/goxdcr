@@ -221,6 +221,33 @@ func (ckmgr *CheckpointManager) Stop() error {
 	return nil
 }
 
+func (ckmgr *CheckpointManager) CheckpointBeforeStop() {
+	ckmgr.logger.Infof("Starting checkpointing for pipeline %v before stopping", ckmgr.pipeline.InstanceId())
+
+	timeout_ticker := time.NewTicker(base.TimeoutCheckpointBeforeStop)
+	defer timeout_ticker.Stop()
+
+	ret := make(chan bool, 1)
+	close_ch := make(chan bool, 1)
+
+	go func(finch chan bool) {
+		ckmgr.PerformCkpt(close_ch)
+		finch <- true
+	}(ret)
+
+	for {
+		select {
+		case <-ret:
+			ckmgr.logger.Infof("Checkpointing for pipeline %v completed", ckmgr.pipeline.InstanceId())
+			return
+		case <-timeout_ticker.C:
+			close(close_ch)
+			ckmgr.logger.Infof("Checkpointing for pipeline %v timed out after %v", ckmgr.pipeline.InstanceId(), base.TimeoutCheckpointBeforeStop)
+			return
+		}
+	}
+}
+
 //get the lis of source vbuckets that this pipleline instance responsible.
 //In current deployment - ReplicationManager coexist with source node, it means
 //the list of buckets on that source node
@@ -561,6 +588,7 @@ func (ckmgr *CheckpointManager) getHighSeqno() (map[uint16]uint64, error) {
 		}
 		utils.ParseHighSeqnoStat(vbnos, statsMapForServer, vb_highseqno_map)
 	}
+
 	return vb_highseqno_map, nil
 }
 
@@ -667,7 +695,7 @@ func (ckmgr *CheckpointManager) checkpointing() {
 }
 
 // public API. performs one checkpoint operation on request
-func (ckmgr *CheckpointManager) PerformCkpt(fin_ch <-chan bool, time_to_wait time.Duration) {
+func (ckmgr *CheckpointManager) PerformCkpt(fin_ch <-chan bool) {
 	ckmgr.logger.Infof("Start one time checkpointing for replication %v\n", ckmgr.pipeline.Topic())
 	defer ckmgr.logger.Infof("Done one time checkpointing for replication %v\n", ckmgr.pipeline.Topic())
 
@@ -722,9 +750,8 @@ func (ckmgr *CheckpointManager) performCkpt_internal(vb_list []uint16, fin_ch <-
 			ckmgr.logger.Infof("Aborting checkpointing routine for %v with vb list %v since received finish signal. index=%v\n", ckmgr.pipeline.Topic(), vb_list, index)
 			return
 		default:
-			if !pipeline_utils.IsPipelineRunning(ckmgr.pipeline.State()) {
-				//pipeline is no longer running, return
-				ckmgr.logger.Infof("Pipeline %v is no longer running, exit do_checkpointing for vb list %v. index=%v\n", ckmgr.pipeline.Topic(), vb_list, index)
+			if pipeline_utils.IsPipelineStopping(ckmgr.pipeline.State()) {
+				ckmgr.logger.Infof("Pipeline %v is already stopping/stopped, exit do_checkpointing for vb list %v. index=%v\n", ckmgr.pipeline.Topic(), vb_list, index)
 				return
 			}
 

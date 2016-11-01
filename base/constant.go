@@ -317,6 +317,10 @@ const (
 )
 
 // --------------- Constants that are configurable -----------------
+
+// timeout for checkpointing attempt before pipeline is stopped - to put an upper bound on the delay of pipeline stop/restart
+var TimeoutCheckpointBeforeStop = 180 * time.Second
+
 var TopologyChangeCheckInterval = 10 * time.Second
 
 // the maximum number of topology change checks to wait before pipeline is restarted
@@ -337,14 +341,11 @@ var MaxTopologyStableCountBeforeRestart = 30
 // the max number of concurrent workers for checkpointing
 var MaxWorkersForCheckpointing = 5
 
-// timeout for checkpointing attempt due to topology changes - to put an upper bound on the delay of pipeline restartx
-var TopologyChangeCheckpointTimeout = 10 * time.Minute
-
 func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeCountBeforeRestart,
-	maxTopologyStableCountBeforeRestart, maxWorkersForCheckpointing int, topologyChangeCheckpointTimeout time.Duration) {
+	maxTopologyStableCountBeforeRestart, maxWorkersForCheckpointing int, timeoutCheckpointBeforeStop time.Duration) {
 	TopologyChangeCheckInterval = topologyChangeCheckInterval
 	MaxTopologyChangeCountBeforeRestart = maxTopologyChangeCountBeforeRestart
 	MaxTopologyStableCountBeforeRestart = maxTopologyStableCountBeforeRestart
 	MaxWorkersForCheckpointing = maxWorkersForCheckpointing
-	TopologyChangeCheckpointTimeout = topologyChangeCheckpointTimeout
+	TimeoutCheckpointBeforeStop = timeoutCheckpointBeforeStop
 }

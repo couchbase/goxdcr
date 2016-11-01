@@ -40,6 +40,8 @@ type StartingSeqnoConstructor func(pipeline common.Pipeline) error
 
 type RemoteClsuterRefRetriever func(remoteClusterUUID string, refresh bool) (*metadata.RemoteClusterReference, error)
 
+type CheckpointFunc func(pipeline common.Pipeline) error
+
 //GenericPipeline is the generic implementation of a data processing pipeline
 //
 //The assumption here is all the processing steps are self-connected, so
@@ -72,6 +74,8 @@ type GenericPipeline struct {
 	startingSeqno_constructor StartingSeqnoConstructor
 
 	remoteClusterRef_retriever RemoteClsuterRefRetriever
+
+	checkpoint_func CheckpointFunc
 
 	//the map that contains the references to all parts used in the pipeline
 	//it only populated when GetAllParts called the first time
@@ -339,6 +343,9 @@ func (genericPipeline *GenericPipeline) Stop() error {
 	genericPipeline.logger.Infof("Stopping pipeline %v\n", genericPipeline.InstanceId())
 	var err error
 
+	// perform checkpoint first before stopping
+	genericPipeline.checkpoint_func(genericPipeline)
+
 	err = genericPipeline.SetState(common.Pipeline_Stopping)
 	if err != nil {
 		return err
@@ -424,6 +431,7 @@ func NewPipelineWithSettingConstructor(t string,
 	partsUpdateSettingsConstructor PartsUpdateSettingsConstructor,
 	startingSeqnoConstructor StartingSeqnoConstructor,
 	remoteClusterRefRetriever RemoteClsuterRefRetriever,
+	checkpoint_func CheckpointFunc,
 	logger_context *log.LoggerContext) *GenericPipeline {
 	pipeline := &GenericPipeline{topic: t,
 		sources: sources,
@@ -434,10 +442,11 @@ func NewPipelineWithSettingConstructor(t string,
 		partUpdateSetting_constructor: partsUpdateSettingsConstructor,
 		startingSeqno_constructor:     startingSeqnoConstructor,
 		remoteClusterRef_retriever:    remoteClusterRefRetriever,
-		logger:        log.NewLogger("GenericPipeline", logger_context),
-		instance_id:   time.Now().Nanosecond(),
-		state:         common.Pipeline_Initial,
-		settings_lock: &sync.RWMutex{}}
+		checkpoint_func:               checkpoint_func,
+		logger:                        log.NewLogger("GenericPipeline", logger_context),
+		instance_id:                   time.Now().Nanosecond(),
+		state:                         common.Pipeline_Initial,
+		settings_lock:                 &sync.RWMutex{}}
 	pipeline.initialize()
 	pipeline.logger.Debugf("Pipeline %s has been initialized with a part setting constructor %v", t, partsSettingsConstructor)
 
