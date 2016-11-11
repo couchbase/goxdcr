@@ -361,6 +361,17 @@ func (capi *CapiNozzle) batchReady(vbno uint16) error {
 }
 
 func (capi *CapiNozzle) Receive(data interface{}) error {
+	// the attempt to write to dataChan may panic if dataChan has been closed
+	defer func() {
+		if r := recover(); r != nil {
+			capi.Logger().Errorf("%v recovered from %v", capi.Id(), r)
+			if capi.validateRunningState() == nil {
+				// report error only when capi is still in running state
+				capi.handleGeneralError(errors.New(fmt.Sprintf("%v", r)))
+			}
+		}
+	}()
+
 	capi.Logger().Debugf("%v data key=%v seq=%v vb=%v is received", capi.Id(), data.(*base.WrappedMCRequest).Req.Key, data.(*base.WrappedMCRequest).Seqno, data.(*base.WrappedMCRequest).Req.VBucket)
 	capi.Logger().Debugf("%v data channel len is %d\n", capi.Id(), capi.items_in_dataChan)
 
