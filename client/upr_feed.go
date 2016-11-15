@@ -45,6 +45,7 @@ type UprEvent struct {
 	FailoverLog  *FailoverLog            // Failover log containing vvuid and sequnce number
 	Error        error                   // Error value in case of a failure
 	ExtMeta      []byte
+	AckSize      uint32 // The number of bytes that can be Acked to DCP
 }
 
 // UprStream is per stream data structure over an UPR Connection.
@@ -72,6 +73,11 @@ type UprFeed struct {
 	transmitCh  chan *gomemcached.MCRequest // transmit command channel
 	transmitCl  chan bool                   //  closer channel for transmit go-routine
 	closed      bool                        // flag indicating whether the feed has been closed
+	// flag indicating whether client of upr feed will send ack to upr feed
+	// if flag is true, upr feed will use ack from client to determine whether/when to send ack to DCP
+	// if flag is false, upr feed will track how many bytes it has sent to client
+	// and use that to determine whether/when to send ack to DCP
+	ackByClient bool
 }
 
 type UprStats struct {
@@ -106,6 +112,7 @@ func makeUprEvent(rq gomemcached.MCRequest, stream *UprStream) *UprEvent {
 		Cas:      rq.Cas,
 		ExtMeta:  rq.ExtMeta,
 		DataType: rq.DataType,
+		AckSize:  uint32(rq.Size()),
 	}
 	// 16 LSBits are used by client library to encode vbucket number.
 	// 16 MSBits are left for application to multiplex on opaque value.
@@ -176,13 +183,18 @@ loop:
 // NewUprFeed creates a new UPR Feed.
 // TODO: Describe side-effects on bucket instance and its connection pool.
 func (mc *Client) NewUprFeed() (*UprFeed, error) {
+	return mc.NewUprFeedWithConfig(false /*ackByClient*/)
+}
+
+func (mc *Client) NewUprFeedWithConfig(ackByClient bool) (*UprFeed, error) {
 
 	feed := &UprFeed{
-		conn:       mc,
-		closer:     make(chan bool, 1),
-		vbstreams:  make(map[uint16]*UprStream),
-		transmitCh: make(chan *gomemcached.MCRequest),
-		transmitCl: make(chan bool),
+		conn:        mc,
+		closer:      make(chan bool, 1),
+		vbstreams:   make(map[uint16]*UprStream),
+		transmitCh:  make(chan *gomemcached.MCRequest),
+		transmitCl:  make(chan bool),
+		ackByClient: ackByClient,
 	}
 
 	go feed.sendCommands(mc)
@@ -647,15 +659,9 @@ loop:
 				}
 			}
 
-			needToSend, sendSize := feed.SendBufferAck(sendAck, uint32(bytes))
-			if needToSend {
-				bufferAck := &gomemcached.MCRequest{
-					Opcode: gomemcached.UPR_BUFFERACK,
-				}
-				bufferAck.Extras = make([]byte, 4)
-				binary.BigEndian.PutUint32(bufferAck.Extras[:4], uint32(sendSize))
-				feed.writeToTransmitCh(bufferAck)
-				uprStats.TotalBufferAckSent++
+			if !feed.ackByClient {
+				// if client does not ack, use the size of data sent to client to determine if ack to dcp is needed
+				feed.sendBufferAckIfNeeded(sendAck, uint32(bytes))
 			}
 		}
 	}
@@ -667,17 +673,40 @@ loop:
 	logging.Infof("runFeed exiting")
 }
 
-// Send buffer ack
-func (feed *UprFeed) SendBufferAck(sendAck bool, bytes uint32) (bool, uint32) {
+// Client, after setting ackByClient flag to true in NewUprFeedWithConfig() call,
+// can call this API to notify gomemcached that the client has completed processing
+// of a number of bytes
+// This API is not thread safe. Caller should NOT have more than one go rountine calling this API
+func (feed *UprFeed) IncrementAckBytes(bytes uint32) error {
+	if !feed.ackByClient {
+		return errors.New("Upr feed does not have ackByclient flag set")
+	}
+	feed.sendBufferAckIfNeeded(true, bytes)
+	return nil
+}
+
+// send buffer ack if enough ack bytes have been accumulated
+func (feed *UprFeed) sendBufferAckIfNeeded(sendAck bool, bytes uint32) {
 	if sendAck {
 		totalBytes := feed.toAckBytes + bytes
 		if totalBytes > feed.maxAckBytes {
 			feed.toAckBytes = 0
-			return true, totalBytes
+			feed.sendBufferAck(totalBytes)
+		} else {
+			feed.toAckBytes = totalBytes
 		}
-		feed.toAckBytes += bytes
 	}
-	return false, 0
+}
+
+// send buffer ack to dcp
+func (feed *UprFeed) sendBufferAck(sendSize uint32) {
+	bufferAck := &gomemcached.MCRequest{
+		Opcode: gomemcached.UPR_BUFFERACK,
+	}
+	bufferAck.Extras = make([]byte, 4)
+	binary.BigEndian.PutUint32(bufferAck.Extras[:4], uint32(sendSize))
+	feed.writeToTransmitCh(bufferAck)
+	feed.stats.TotalBufferAckSent++
 }
 
 func (feed *UprFeed) GetUprStats() *UprStats {
