@@ -168,7 +168,8 @@ type CapiNozzle struct {
 	//the total size of data (in bytes) queued in all data channels
 	bytes_in_dataChan int
 
-	client *net.TCPConn
+	client      *net.TCPConn
+	lock_client sync.RWMutex
 
 	//configurable parameter
 	config capiConfig
@@ -261,6 +262,21 @@ func (capi *CapiNozzle) Close() error {
 		capi.bOpen = false
 	}
 	return nil
+}
+
+func (capi *CapiNozzle) getClient() *net.TCPConn {
+	capi.lock_client.RLock()
+	defer capi.lock_client.RUnlock()
+	return capi.client
+}
+
+func (capi *CapiNozzle) setClient(client *net.TCPConn) {
+	capi.lock_client.Lock()
+	defer capi.lock_client.Unlock()
+	if capi.client != nil {
+		capi.client.Close()
+	}
+	capi.client = client
 }
 
 func (capi *CapiNozzle) Start(settings map[string]interface{}) error {
@@ -611,7 +627,11 @@ func (capi *CapiNozzle) batchSendWithRetry(batch *capiBatch) error {
 	req_list := make([]*base.WrappedMCRequest, 0)
 
 	for i := 0; i < count; i++ {
-		item := <-dataChan
+		item, ok := <-dataChan
+		if !ok {
+			capi.Logger().Debugf("%v exiting batchSendWithRetry since data channel has been closed\n", capi.Id())
+			return nil
+		}
 
 		capi.items_in_dataChan--
 		capi.bytes_in_dataChan -= item.Req.Size()
@@ -676,7 +696,10 @@ func (capi *CapiNozzle) onExit() {
 
 	//cleanup
 	capi.Logger().Infof("%v releasing capi client", capi.Id())
-	capi.client.Close()
+	client := capi.getClient()
+	if client != nil {
+		client.Close()
+	}
 
 }
 
@@ -974,8 +997,9 @@ func (capi *CapiNozzle) tcpProxy(vbno uint16, part_ch chan []byte, resp_ch chan 
 			return
 		case part, ok := <-part_ch:
 			if ok {
-				capi.client.SetWriteDeadline(time.Now().Add(capi.config.writeTimeout))
-				_, err := capi.client.Write(part)
+				client := capi.getClient()
+				client.SetWriteDeadline(time.Now().Add(capi.config.writeTimeout))
+				_, err := client.Write(part)
 				capi.Logger().Debugf("%v wrote body part. part=%v, err=%v\n", capi.Id(), string(part), err)
 				if err != nil {
 					capi.Logger().Errorf("Received error when writing boby part. err=%v\n", err)
@@ -987,9 +1011,10 @@ func (capi *CapiNozzle) tcpProxy(vbno uint16, part_ch chan []byte, resp_ch chan 
 				capi.Logger().Debugf("%v tcpProxy routine starting to receive response since all body parts have been sent\n", capi.Id())
 
 				// read response
-				capi.client.SetReadDeadline(time.Now().Add(capi.config.readTimeout))
+				client := capi.getClient()
+				client.SetReadDeadline(time.Now().Add(capi.config.readTimeout))
 
-				response, err := http.ReadResponse(bufio.NewReader(capi.client), nil)
+				response, err := http.ReadResponse(bufio.NewReader(client), nil)
 				if err != nil || response == nil {
 					errMsg := fmt.Sprintf("Error reading response. vb=%v, err=%v\n", vbno, err)
 					capi.Logger().Errorf("%v %v", capi.Id(), errMsg)
@@ -1180,10 +1205,6 @@ func (capi *CapiNozzle) initializeOrResetConn(initializing bool) error {
 		return nil
 	}
 
-	if capi.client != nil {
-		capi.client.Close()
-	}
-
 	var pool *base.TCPConnPool
 	var err error
 
@@ -1198,24 +1219,22 @@ func (capi *CapiNozzle) initializeOrResetConn(initializing bool) error {
 	}
 
 	if pool != nil {
-		var client *net.TCPConn
-		client, err = pool.GetNew()
-		if err == nil && client != nil {
-			capi.client = client
+		var newClient *net.TCPConn
+		newClient, err = pool.GetNew()
+		if err == nil && newClient != nil {
+			// same settings as erlang xdcr
+			newClient.SetKeepAlive(true)
+			newClient.SetNoDelay(false)
+			capi.setClient(newClient)
+			capi.Logger().Debugf("%v - The connection for capi client is reset successfully\n", capi.Id())
 		}
 	}
 
-	if err == nil {
-		// same settings as erlang xdcr
-		capi.client.SetKeepAlive(true)
-		capi.client.SetNoDelay(false)
-		capi.Logger().Debugf("%v - The connection for capi client is reset successfully\n", capi.Id())
-		return nil
-	} else {
+	if err != nil {
 		capi.Logger().Errorf("%v - Connection reset failed. err=%v\n", capi.Id(), err)
 		capi.handleGeneralError(err)
-		return err
 	}
+	return err
 }
 
 func (capi *CapiNozzle) UpdateSettings(settings map[string]interface{}) error {
