@@ -351,11 +351,19 @@ func (genericPipeline *GenericPipeline) Stop() error {
 		return err
 	}
 
+	// stop async event listeners so that RaiseEvent() would not block
+	for _, asyncEventListener := range GetAllAsyncComponentEventListeners(genericPipeline) {
+		asyncEventListener.Stop()
+	}
+	genericPipeline.logger.Infof("%v Async listeners have been stopped", genericPipeline.InstanceId())
+	genericPipeline.ReportProgress("Async listeners have been stopped")
+
 	// stop services before stopping parts to avoid spurious errors from services
 	err = genericPipeline.context.Stop()
 	if err != nil {
 		return err
 	}
+	genericPipeline.logger.Infof("%v Runtime context has been stopped", genericPipeline.InstanceId())
 	genericPipeline.ReportProgress("Runtime context has been stopped")
 
 	//close the sources
@@ -376,13 +384,6 @@ func (genericPipeline *GenericPipeline) Stop() error {
 			}
 
 		}(part)
-	}
-
-	// stop async event listeners
-	for _, asyncEventListener := range GetAllAsyncComponentEventListeners(genericPipeline) {
-		go func(asyncEventListener common.AsyncComponentEventListener) {
-			asyncEventListener.Stop()
-		}(asyncEventListener)
 	}
 
 	genericPipeline.ReportProgress("Pipeline has been stopped")
