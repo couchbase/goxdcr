@@ -51,6 +51,7 @@ const (
 	default_connection_timeout                     = 180 * time.Second // erlang xdcr value
 	default_selfMonitorInterval_capi time.Duration = 300 * time.Millisecond
 	default_maxIdleCount_capi        int           = 30
+	default_write_to_part_ch_timeout time.Duration = 10 * time.Second
 )
 
 var capi_setting_defs base.SettingDefinitions = base.SettingDefinitions{SETTING_BATCHCOUNT: base.NewSettingDef(reflect.TypeOf((*int)(nil)), true),
@@ -936,19 +937,27 @@ func (capi *CapiNozzle) writeDocs(vbno uint16, req_bytes []byte, doc_list [][]by
 			if partIndex == 0 {
 				// send initial request to tcp
 				capi.Logger().Debugf("%v req_bytes=%v\nreq_bytes_in_str=%v\n\n", capi.Id(), req_bytes, string(req_bytes))
-				part_ch <- req_bytes
+				if !capi.writeToPartCh(part_ch, req_bytes) {
+					return
+				}
 			} else if partIndex == 1 {
 				// write body part prefix
 				capi.Logger().Debugf("%v writing first body part %v", capi.Id(), BodyPartsPrefix)
-				part_ch <- []byte(BodyPartsPrefix)
+				if !capi.writeToPartCh(part_ch, []byte(BodyPartsPrefix)) {
+					return
+				}
 			} else if partIndex < len(doc_list)+2 {
 				// write individual doc
 				capi.Logger().Debugf("%v writing %vth doc = %v, doc_in_str=%v\n", capi.Id(), partIndex-2, doc_list[partIndex-2], string(doc_list[partIndex-2]))
-				part_ch <- doc_list[partIndex-2]
+				if !capi.writeToPartCh(part_ch, doc_list[partIndex-2]) {
+					return
+				}
 			} else {
 				// write body part suffix
 				capi.Logger().Debugf("%v writing last body part %v\n", capi.Id(), BodyPartsSuffix)
-				part_ch <- []byte(BodyPartsSuffix)
+				if !capi.writeToPartCh(part_ch, []byte(BodyPartsSuffix)) {
+					return
+				}
 				// all parts have been sent. terminate sendBodyPart rountine
 				capi.Logger().Debugf("%v closing part channel since all parts had been sent\n", capi.Id())
 				close(part_ch)
@@ -960,9 +969,26 @@ func (capi *CapiNozzle) writeDocs(vbno uint16, req_bytes []byte, doc_list [][]by
 	}
 }
 
+// use timeout to give it a chance to detect nozzle stop event and abort
+func (capi *CapiNozzle) writeToPartCh(part_ch chan []byte, data []byte) bool {
+	timeoutticker := time.NewTicker(default_write_to_part_ch_timeout)
+	defer timeoutticker.Stop()
+	for {
+		select {
+		case part_ch <- data:
+			return true
+		case <-timeoutticker.C:
+			if capi.validateRunningState() != nil {
+				capi.Logger().Infof("%v is no longer running, aborting writing to part ch", capi.Id())
+				return false
+			}
+		}
+	}
+}
+
 func (capi *CapiNozzle) tcpProxy(vbno uint16, part_ch chan []byte, resp_ch chan bool, err_ch chan error, fin_ch chan bool, waitGrp *sync.WaitGroup) {
-	defer waitGrp.Done()
-	capi.Logger().Debugf("%v tcpProxy routine for vb %v is starting\n", capi.Id(), vbno)
+        defer waitGrp.Done()
+        capi.Logger().Debugf("%v tcpProxy routine for vb %v is starting\n", capi.Id(), vbno)
 	for {
 		select {
 		case <-fin_ch:

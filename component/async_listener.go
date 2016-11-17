@@ -49,7 +49,10 @@ func NewDefaultAsyncComponentEventListenerImpl(id, topic string,
 }
 
 func (l *AsyncComponentEventListenerImpl) OnEvent(event *common.Event) {
-	l.event_chan <- event
+	select {
+	case l.event_chan <- event:
+	case <-l.fin_ch:
+	}
 }
 
 func (l *AsyncComponentEventListenerImpl) Start() error {
