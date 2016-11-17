@@ -42,10 +42,10 @@ const (
 
 	//default configuration
 	default_numofretry_capi          int           = 6
-	default_retry_interval_capi      time.Duration = 30 * time.Millisecond
+	default_retry_interval_capi      time.Duration = 500 * time.Millisecond
 	default_maxRetryInterval_capi                  = 30 * time.Second
-	default_writeTimeout_capi        time.Duration = time.Duration(1) * time.Second
-	default_readTimeout_capi         time.Duration = time.Duration(10) * time.Second
+	default_writeTimeout_capi        time.Duration = time.Duration(10) * time.Second
+	default_readTimeout_capi         time.Duration = time.Duration(60) * time.Second
 	default_upload_window_size       int           = 3                 // erlang xdcr value
 	default_connection_timeout                     = 180 * time.Second // erlang xdcr value
 	default_selfMonitorInterval_capi time.Duration = 300 * time.Millisecond
