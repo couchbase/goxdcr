@@ -128,10 +128,24 @@ func GetClusterInfo(hostAddr, path, username, password string, certificate []byt
 	return clusterInfo, nil
 }
 
-// get a list of node infos
-// a specialized case of GetClusterInfo
-func GetNodeList(hostAddr, username, password string, certificate []byte, sanInCertificate bool, logger *log.CommonLogger) ([]interface{}, error) {
+// get a list of node infos with full info
+// this api calls xxx/pools/nodes, which returns full node info including clustercompatibility, etc.
+// the catch is that this xxx/pools/nodes is not supported by elastic search cluster
+func GetNodeListWithFullInfo(hostAddr, username, password string, certificate []byte, sanInCertificate bool, logger *log.CommonLogger) ([]interface{}, error) {
 	clusterInfo, err := GetClusterInfo(hostAddr, base.NodesPath, username, password, certificate, sanInCertificate, logger)
+	if err != nil {
+		return nil, err
+	}
+
+	return GetNodeListFromClusterInfo(clusterInfo, logger)
+
+}
+
+// get a list of node infos with minimum info
+// this api calls xxx/pools/default, which returns a subset of node info such as hostname
+// this api can/needs to be used when connecting to elastic search cluster, which supports xxx/pools/default
+func GetNodeListWithMinInfo(hostAddr, username, password string, certificate []byte, sanInCertificate bool, logger *log.CommonLogger) ([]interface{}, error) {
+	clusterInfo, err := GetClusterInfo(hostAddr, base.DefaultPoolPath, username, password, certificate, sanInCertificate, logger)
 	if err != nil {
 		return nil, err
 	}
@@ -203,7 +217,7 @@ func GetNodeListFromClusterInfo(clusterInfo map[string]interface{}, logger *log.
 }
 
 func GetSSLProxyPortMap(hostAddr, username, password string, certificate []byte, sanInCertificate bool, logger *log.CommonLogger) (map[string]uint16, error) {
-	nodeList, err := GetNodeList(hostAddr, username, password, certificate, sanInCertificate, logger)
+	nodeList, err := GetNodeListWithFullInfo(hostAddr, username, password, certificate, sanInCertificate, logger)
 	if err != nil {
 		return nil, err
 	}
