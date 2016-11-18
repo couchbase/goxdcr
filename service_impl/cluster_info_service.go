@@ -47,16 +47,21 @@ func (ci_svc *ClusterInfoSvc) GetServerVBucketsMap(clusterConnInfoProvider base.
 }
 
 func (ci_svc *ClusterInfoSvc) IsClusterCompatible(clusterConnInfoProvider base.ClusterConnectionInfoProvider, version []int) (bool, error) {
+
 	connStr, err := clusterConnInfoProvider.MyConnectionStr()
 	if err != nil {
 		return false, err
 	}
+
 	username, password, certificate, sanInCertificate, err := clusterConnInfoProvider.MyCredentials()
 	if err != nil {
 		return false, err
 	}
 
-	nodeList, err := utils.GetNodeList(connStr, username, password, certificate, sanInCertificate, ci_svc.logger)
+	// so far IsClusterCompatible is called only when the remote cluster reference is ssl enabled
+	// which indicates that the target cluster is not an elastic search cluster
+	// it should be safe to call GetNodeListWithFullInfo() to retrive full node info
+	nodeList, err := utils.GetNodeListWithFullInfo(connStr, username, password, certificate, sanInCertificate, ci_svc.logger)
 	if err == nil && len(nodeList) > 0 {
 		firstNode, ok := nodeList[0].(map[string]interface{})
 		if !ok {

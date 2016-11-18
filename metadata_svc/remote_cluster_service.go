@@ -598,7 +598,8 @@ func (service *RemoteClusterService) cacheRef(ref *metadata.RemoteClusterReferen
 		return err
 	}
 
-	nodeList, err := utils.GetNodeList(connStr, username, password, certificate, sanInCertificate, service.logger)
+	// use GetNodeListWithMinInfo API to ensure that it is supported by target cluster, which could be an elastic search cluster
+	nodeList, err := utils.GetNodeListWithMinInfo(connStr, username, password, certificate, sanInCertificate, service.logger)
 	if err == nil {
 		service.logger.Debugf("connStr=%v, nodeList=%v\n", connStr, nodeList)
 
