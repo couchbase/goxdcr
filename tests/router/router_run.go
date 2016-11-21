@@ -11,31 +11,32 @@
 package main
 
 import (
+	"errors"
 	"flag"
 	"fmt"
+	"github.com/couchbase/go-couchbase"
+	mc "github.com/couchbase/gomemcached"
+	"github.com/couchbase/goxdcr/base"
 	pc "github.com/couchbase/goxdcr/common"
+	couchlog "github.com/couchbase/goxdcr/log"
 	parts "github.com/couchbase/goxdcr/parts"
 	utils "github.com/couchbase/goxdcr/utils"
-	mc "github.com/couchbase/gomemcached"
-	"github.com/couchbase/go-couchbase"
 	"log"
-	couchlog "github.com/couchbase/goxdcr/log"
 	"math"
 	"os"
+	"regexp"
 	"strconv"
 	"sync"
-	"regexp"
-	"errors"
 )
 
 var options struct {
-	source_bucket string // source bucket
-	target_bucket string //target bucket
-	connectStr    string //connect string
-	username      string //username
-	password      string //password
-	maxVbno       int    // maximum number of vbuckets
-	filter_expression    string  //filter expression
+	source_bucket     string // source bucket
+	target_bucket     string //target bucket
+	connectStr        string //connect string
+	username          string //username
+	password          string //password
+	maxVbno           int    // maximum number of vbuckets
+	filter_expression string //filter expression
 }
 
 var done = make(chan bool, 16)
@@ -80,7 +81,7 @@ func main() {
 	argParse()
 	fmt.Printf("connectStr=%s\n", options.connectStr)
 	fmt.Println("Done with parsing the arguments")
-	
+
 	// compile filter expression if needed
 	var err error
 	if len(options.filter_expression) > 0 {
@@ -90,7 +91,7 @@ func main() {
 			os.Exit(1)
 		}
 	}
-	
+
 	startRouter()
 	fmt.Println("Router is started")
 	waitGrp := &sync.WaitGroup{}
@@ -135,7 +136,7 @@ func startUpr(cluster, bucketn string, waitGrp *sync.WaitGroup) {
 		}
 
 	}
-	
+
 	fmt.Printf("Number of upr event routed is %d\n", routedCount)
 
 	//close the upr stream
@@ -181,7 +182,7 @@ func startRouter() {
 		partMap[partId] = NewTestPart(partId)
 	}
 
-	router, _ = parts.NewRouter("router1", "router1", options.filter_expression, partMap, buildVbMap(partMap), couchlog.DefaultLoggerContext, nil)
+	router, _ = parts.NewRouter("router1", "router1", options.filter_expression, partMap, buildVbMap(partMap), base.CRMode_RevId, couchlog.DefaultLoggerContext, nil)
 }
 
 func buildVbMap(downStreamParts map[string]pc.Part) map[uint16]string {
@@ -229,9 +230,9 @@ func (tp *TestPart) Stop() error {
 
 func (tp *TestPart) Receive(data interface{}) error {
 	request := data.(*mc.MCRequest)
-	routedCount ++
+	routedCount++
 	fmt.Printf("Part %v received data with vbno=%v, key=%v\n", tp.Id(), request.VBucket, string(request.Key))
-	if filterRegExp != nil  && !filterRegExp.Match(request.Key) {
+	if filterRegExp != nil && !filterRegExp.Match(request.Key) {
 		return errors.New("Data with key=" + string(request.Key) + " has not been filtered out as expected by filter expression=" + options.filter_expression)
 	}
 
