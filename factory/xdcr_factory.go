@@ -175,7 +175,7 @@ func (xdcrf *XDCRFactory) NewPipeline(topic string, progress_recorder common.Pip
 			downStreamParts[targetNozzleId] = outNozzle
 		}
 
-		router, err := xdcrf.constructRouter(sourceNozzle.Id(), spec, downStreamParts, vbNozzleMap, logger_ctx)
+		router, err := xdcrf.constructRouter(sourceNozzle.Id(), spec, downStreamParts, vbNozzleMap, sourceCRMode, logger_ctx)
 		if err != nil {
 			return nil, err
 		}
@@ -450,9 +450,10 @@ func (xdcrf *XDCRFactory) constructOutgoingNozzles(spec *metadata.ReplicationSpe
 func (xdcrf *XDCRFactory) constructRouter(id string, spec *metadata.ReplicationSpecification,
 	downStreamParts map[string]common.Part,
 	vbNozzleMap map[uint16]string,
+	sourceCRMode base.ConflictResolutionMode,
 	logger_ctx *log.LoggerContext) (*parts.Router, error) {
 	routerId := "Router" + PART_NAME_DELIMITER + id
-	router, err := parts.NewRouter(routerId, spec.Id, spec.Settings.FilterExpression, downStreamParts, vbNozzleMap, logger_ctx, pipeline_manager.NewMCRequestObj)
+	router, err := parts.NewRouter(routerId, spec.Id, spec.Settings.FilterExpression, downStreamParts, vbNozzleMap, sourceCRMode, logger_ctx, pipeline_manager.NewMCRequestObj)
 	xdcrf.logger.Infof("Constructed router %v", routerId)
 	return router, err
 }

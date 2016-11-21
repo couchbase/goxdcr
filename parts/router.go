@@ -40,11 +40,14 @@ type Router struct {
 	routingMap   map[uint16]string // pvbno -> partId. This defines the loading balancing strategy of which vbnos would be routed to which part
 	req_creator  ReqCreator
 	topic        string
+	// whether lww conflict resolution mode has been enabled
+	sourceCRMode base.ConflictResolutionMode
 }
 
 func NewRouter(id string, topic string, filterExpression string,
 	downStreamParts map[string]common.Part,
 	routingMap map[uint16]string,
+	sourceCRMode base.ConflictResolutionMode,
 	logger_context *log.LoggerContext, req_creator ReqCreator) (*Router, error) {
 	// compile filter expression
 	var filterRegexp *regexp.Regexp
@@ -60,6 +63,7 @@ func NewRouter(id string, topic string, filterExpression string,
 		filterRegexp: filterRegexp,
 		routingMap:   routingMap,
 		topic:        topic,
+		sourceCRMode: sourceCRMode,
 		req_creator:  req_creator}
 
 	var routingFunc connector.Routing_Callback_Func = router.route
@@ -87,14 +91,25 @@ func (router *Router) ComposeMCRequest(event *mcc.UprEvent) (*base.WrappedMCRequ
 	//extra
 	if event.Opcode == mc.UPR_MUTATION || event.Opcode == mc.UPR_DELETION ||
 		event.Opcode == mc.UPR_EXPIRATION {
-		if len(req.Extras) != 24 {
-			req.Extras = make([]byte, 24)
+
+		extrasSize := 24
+		if router.sourceCRMode == base.CRMode_LWW {
+			extrasSize = 28
 		}
-		//    <<Flg:32, Exp:32, SeqNo:64, CASPart:64, 0:32>>.
+		if len(req.Extras) != extrasSize {
+			req.Extras = make([]byte, extrasSize)
+		}
+
+		//    <<Flg:32, Exp:32, SeqNo:64, CASPart:64, Options:32>>.
 		binary.BigEndian.PutUint32(req.Extras[0:4], event.Flags)
 		binary.BigEndian.PutUint32(req.Extras[4:8], event.Expiry)
 		binary.BigEndian.PutUint64(req.Extras[8:16], event.RevSeqno)
 		binary.BigEndian.PutUint64(req.Extras[16:24], event.Cas)
+
+		if router.sourceCRMode == base.CRMode_LWW {
+			// if source bucket is of lww type, add FORCE_ACCEPT_WITH_META_OPS options for memcached
+			binary.BigEndian.PutUint32(req.Extras[24:28], base.FORCE_ACCEPT_WITH_META_OPS)
+		}
 
 	} else if event.Opcode == mc.UPR_SNAPSHOT {
 		if len(req.Extras) != 28 {
