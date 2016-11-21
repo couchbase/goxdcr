@@ -316,6 +316,9 @@ const (
 	ConflictResolutionType_Lww   = "lww"
 )
 
+// flag for memcached to enable lww to lww bucket replication
+var FORCE_ACCEPT_WITH_META_OPS uint32 = 0x02
+
 // --------------- Constants that are configurable -----------------
 
 // timeout for checkpointing attempt before pipeline is stopped - to put an upper bound on the delay of pipeline stop/restart
