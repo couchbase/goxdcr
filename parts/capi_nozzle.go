@@ -1181,7 +1181,7 @@ func (capi *CapiNozzle) initialize(settings map[string]interface{}) error {
 
 	capi.vb_dataChan_map = make(map[uint16]chan *base.WrappedMCRequest)
 	for vbno, _ := range capi.config.vbCouchApiBaseMap {
-		capi.vb_dataChan_map[vbno] = make(chan *base.WrappedMCRequest, capi.config.maxCount*5)
+		capi.vb_dataChan_map[vbno] = make(chan *base.WrappedMCRequest, capi.config.maxCount*base.CapiDataChanSizeMultiplier)
 	}
 	capi.items_in_dataChan = 0
 	capi.bytes_in_dataChan = 0

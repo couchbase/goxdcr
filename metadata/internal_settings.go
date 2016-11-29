@@ -17,7 +17,8 @@ const (
 	MaxTopologyChangeCountBeforeRestartKey = "MaxTopologyChangeCountBeforeRestart"
 	MaxTopologyStableCountBeforeRestartKey = "MaxTopologyStableCountBeforeRestart"
 	MaxWorkersForCheckpointingKey          = "MaxWorkersForCheckpointing"
-	TimeoutCheckpointBeforeStopKey     = "TimeoutCheckpointBeforeStop"
+	TimeoutCheckpointBeforeStopKey         = "TimeoutCheckpointBeforeStop"
+	CapiDataChanSizeMultiplierKey          = "CapiDataChanSizeMultiplier"
 )
 
 var TopologyChangeCheckIntervalConfig = &SettingsConfig{10, &Range{1, 100}}
@@ -25,13 +26,15 @@ var MaxTopologyChangeCountBeforeRestartConfig = &SettingsConfig{30, &Range{1, 30
 var MaxTopologyStableCountBeforeRestartConfig = &SettingsConfig{30, &Range{1, 300}}
 var MaxWorkersForCheckpointingConfig = &SettingsConfig{5, &Range{1, 1000}}
 var TimeoutCheckpointBeforeStopConfig = &SettingsConfig{180, &Range{10, 1800}}
+var CapiDataChanSizeMultiplierConfig = &SettingsConfig{1, &Range{1, 100}}
 
 var XDCRInternalSettingsConfigMap = map[string]*SettingsConfig{
 	TopologyChangeCheckIntervalKey:         TopologyChangeCheckIntervalConfig,
 	MaxTopologyChangeCountBeforeRestartKey: MaxTopologyChangeCountBeforeRestartConfig,
 	MaxTopologyStableCountBeforeRestartKey: MaxTopologyStableCountBeforeRestartConfig,
 	MaxWorkersForCheckpointingKey:          MaxWorkersForCheckpointingConfig,
-	TimeoutCheckpointBeforeStopKey:     TimeoutCheckpointBeforeStopConfig,
+	TimeoutCheckpointBeforeStopKey:         TimeoutCheckpointBeforeStopConfig,
+	CapiDataChanSizeMultiplierKey:          CapiDataChanSizeMultiplierConfig,
 }
 
 type InternalSettings struct {
@@ -48,6 +51,9 @@ type InternalSettings struct {
 	// timeout for checkpointing attempt before pipeline is stopped (in seconds) - to put an upper bound on the delay of pipeline stop/restart
 	TimeoutCheckpointBeforeStop int
 
+	// capi nozzle data chan size is defined as batchCount*CapiDataChanSizeMultiplier
+	CapiDataChanSizeMultiplier int
+
 	// revision number to be used by metadata service. not included in json
 	Revision interface{}
 }
@@ -58,7 +64,8 @@ func DefaultInternalSettings() *InternalSettings {
 		MaxTopologyChangeCountBeforeRestart: MaxTopologyChangeCountBeforeRestartConfig.defaultValue.(int),
 		MaxTopologyStableCountBeforeRestart: MaxTopologyStableCountBeforeRestartConfig.defaultValue.(int),
 		MaxWorkersForCheckpointing:          MaxWorkersForCheckpointingConfig.defaultValue.(int),
-		TimeoutCheckpointBeforeStop:     TimeoutCheckpointBeforeStopConfig.defaultValue.(int)}
+		TimeoutCheckpointBeforeStop:         TimeoutCheckpointBeforeStopConfig.defaultValue.(int),
+		CapiDataChanSizeMultiplier:          CapiDataChanSizeMultiplierConfig.defaultValue.(int)}
 }
 
 func (s *InternalSettings) Equals(s2 *InternalSettings) bool {
@@ -74,7 +81,8 @@ func (s *InternalSettings) Equals(s2 *InternalSettings) bool {
 		s.MaxTopologyChangeCountBeforeRestart == s2.MaxTopologyChangeCountBeforeRestart &&
 		s.MaxTopologyStableCountBeforeRestart == s2.MaxTopologyStableCountBeforeRestart &&
 		s.MaxWorkersForCheckpointing == s2.MaxWorkersForCheckpointing &&
-		s.TimeoutCheckpointBeforeStop == s2.TimeoutCheckpointBeforeStop
+		s.TimeoutCheckpointBeforeStop == s2.TimeoutCheckpointBeforeStop &&
+		s.CapiDataChanSizeMultiplier == s2.CapiDataChanSizeMultiplier
 }
 
 func (s *InternalSettings) UpdateSettingsFromMap(settingsMap map[string]interface{}) (changed bool, errorMap map[string]error) {
@@ -133,6 +141,16 @@ func (s *InternalSettings) UpdateSettingsFromMap(settingsMap map[string]interfac
 				s.TimeoutCheckpointBeforeStop = timeout
 				changed = true
 			}
+		case CapiDataChanSizeMultiplierKey:
+			mutiplier, ok := val.(int)
+			if !ok {
+				errorMap[key] = simple_utils.IncorrectValueTypeInMapError(key, val, "int")
+				continue
+			}
+			if s.CapiDataChanSizeMultiplier != mutiplier {
+				s.CapiDataChanSizeMultiplier = mutiplier
+				changed = true
+			}
 		default:
 			errorMap[key] = fmt.Errorf("Invalid key in map, %v", key)
 		}
@@ -144,7 +162,7 @@ func (s *InternalSettings) UpdateSettingsFromMap(settingsMap map[string]interfac
 func ValidateAndConvertXDCRInternalSettingsValue(key, value string) (convertedValue interface{}, err error) {
 	switch key {
 	case TopologyChangeCheckIntervalKey, MaxTopologyChangeCountBeforeRestartKey, MaxTopologyStableCountBeforeRestartKey,
-		MaxWorkersForCheckpointingKey, TimeoutCheckpointBeforeStopKey:
+		MaxWorkersForCheckpointingKey, TimeoutCheckpointBeforeStopKey, CapiDataChanSizeMultiplierKey:
 		convertedValue, err = strconv.ParseInt(value, base.ParseIntBase, base.ParseIntBitSize)
 		if err != nil {
 			err = simple_utils.IncorrectValueTypeError("an integer")
@@ -170,5 +188,6 @@ func (s *InternalSettings) ToMap() map[string]interface{} {
 	settings_map[MaxTopologyStableCountBeforeRestartKey] = s.MaxTopologyStableCountBeforeRestart
 	settings_map[MaxWorkersForCheckpointingKey] = s.MaxWorkersForCheckpointing
 	settings_map[TimeoutCheckpointBeforeStopKey] = s.TimeoutCheckpointBeforeStop
+	settings_map[CapiDataChanSizeMultiplierKey] = s.CapiDataChanSizeMultiplier
 	return settings_map
 }
