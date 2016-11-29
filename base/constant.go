@@ -346,11 +346,16 @@ var MaxTopologyStableCountBeforeRestart = 30
 // the max number of concurrent workers for checkpointing
 var MaxWorkersForCheckpointing = 5
 
+// capi nozzle data chan size is defined as batchCount*CapiDataChanSizeMultiplier
+var CapiDataChanSizeMultiplier = 1
+
 func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeCountBeforeRestart,
-	maxTopologyStableCountBeforeRestart, maxWorkersForCheckpointing int, timeoutCheckpointBeforeStop time.Duration) {
+	maxTopologyStableCountBeforeRestart, maxWorkersForCheckpointing int,
+	timeoutCheckpointBeforeStop time.Duration, capiDataChanSizeMultiplier int) {
 	TopologyChangeCheckInterval = topologyChangeCheckInterval
 	MaxTopologyChangeCountBeforeRestart = maxTopologyChangeCountBeforeRestart
 	MaxTopologyStableCountBeforeRestart = maxTopologyStableCountBeforeRestart
 	MaxWorkersForCheckpointing = maxWorkersForCheckpointing
 	TimeoutCheckpointBeforeStop = timeoutCheckpointBeforeStop
+	CapiDataChanSizeMultiplier = capiDataChanSizeMultiplier
 }
