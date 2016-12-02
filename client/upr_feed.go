@@ -70,6 +70,7 @@ type UprFeed struct {
 	stats       UprStats                    // Stats for upr client
 	transmitCh  chan *gomemcached.MCRequest // transmit command channel
 	transmitCl  chan bool                   //  closer channel for transmit go-routine
+	closed      bool                        // flag indicating whether the feed has been closed
 }
 
 type UprStats struct {
@@ -168,6 +169,11 @@ loop:
 			break loop
 		}
 	}
+	// After sendCommands exits, write to transmitCh needs to be avoided.
+	// Closing transmitCh to make such prolematic write attempts more evident.
+	// Care has been taken to ensure that internal APIs do not write to transmitCh after sendCommands exits.
+	// Public APIs that write to transmitCh, e.g., CloseStream(), need to check feed closure before they do the write.
+	close(transmitCh)
 	logging.Infof("sendCommands exiting")
 }
 
@@ -355,6 +361,11 @@ func (feed *UprFeed) CloseStream(vbno, opaqueMSB uint16) error {
 	feed.mu.Lock()
 	defer feed.mu.Unlock()
 
+	if feed.closed {
+		logging.Infof("Skipping closing stream request for %v since feed has been closed\n", vbno)
+		return nil
+	}
+
 	if feed.vbstreams[vbno] == nil {
 		return fmt.Errorf("Stream for vb %d has not been requested", vbno)
 	}
@@ -446,8 +457,6 @@ loop:
 		select {
 		case <-feed.closer:
 			logging.Infof("Feed has been closed. Exiting.")
-			// put the closed token back to closer channel
-			feed.Close()
 			break loop
 		default:
 			sendAck := false
@@ -601,8 +610,6 @@ loop:
 				case ch <- event:
 				case <-feed.closer:
 					logging.Infof("Feed has been closed. Skip sending events. Exiting.")
-					// put the closed token back to closer channel
-					feed.Close()
 					break loop
 				}
 
@@ -663,21 +670,17 @@ func vbOpaque(opq32 uint32) uint16 {
 
 // Close this UprFeed.
 func (feed *UprFeed) Close() {
-	// use select to accomodate the case where Close() is called multiple times concurrently
-	select {
-	case feed.closer <- true:
-	default:
+	feed.mu.Lock()
+	defer feed.mu.Unlock()
+	if !feed.closed {
+		close(feed.closer)
+		feed.closed = true
 	}
 }
 
 // check if the UprFeed has been closed
 func (feed *UprFeed) Closed() bool {
-	select {
-	case <-feed.closer:
-		// put the closed token back to closer channel
-		feed.Close()
-		return true
-	default:
-		return false
-	}
+	feed.mu.RLock()
+	defer feed.mu.RUnlock()
+	return feed.closed
 }
