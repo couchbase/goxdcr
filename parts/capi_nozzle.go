@@ -168,7 +168,7 @@ type CapiNozzle struct {
 	//the total number of items queued in all data channels
 	items_in_dataChan int32
 	//the total size of data (in bytes) queued in all data channels
-	bytes_in_dataChan int32
+	bytes_in_dataChan int64
 
 	client      *net.TCPConn
 	lock_client sync.RWMutex
@@ -428,12 +428,12 @@ func (capi *CapiNozzle) Receive(data interface{}) error {
 		return err
 	}
 
-	dataChan <- req
-
 	new_counter_received := atomic.AddUint32(&capi.counter_received, 1)
 	size := req.Req.Size()
 	new_items_in_dataChan := atomic.AddInt32(&capi.items_in_dataChan, 1)
-	new_bytes_in_dataChan := atomic.AddInt32(&capi.bytes_in_dataChan, int32(size))
+	new_bytes_in_dataChan := atomic.AddInt64(&capi.bytes_in_dataChan, int64(size))
+
+	dataChan <- req
 
 	//accumulate the batchCount and batchSize
 	capi.accumuBatch(vbno, req)
@@ -688,7 +688,7 @@ func (capi *CapiNozzle) batchSendWithRetry(batch *capiBatch) error {
 		}
 
 		atomic.AddInt32(&capi.items_in_dataChan, -1)
-		atomic.AddInt32(&capi.bytes_in_dataChan, int32(0-item.Req.Size()))
+		atomic.AddInt64(&capi.bytes_in_dataChan, int64(0-item.Req.Size()))
 
 		needSend := needSend(item, &batch.dataBatch, capi.Logger())
 		if needSend == Send {
@@ -766,7 +766,7 @@ func (capi *CapiNozzle) selfMonitor(finch chan bool, waitGrp *sync.WaitGroup) {
 		case <-finch:
 			goto done
 		case <-statsTicker.C:
-			capi.RaiseEvent(common.NewEvent(common.StatsUpdate, nil, capi, nil, []int{int(atomic.LoadInt32(&capi.items_in_dataChan)), int(atomic.LoadInt32(&capi.bytes_in_dataChan))}))
+			capi.RaiseEvent(common.NewEvent(common.StatsUpdate, nil, capi, nil, []int{int(atomic.LoadInt32(&capi.items_in_dataChan)), int(atomic.LoadInt64(&capi.bytes_in_dataChan))}))
 		}
 	}
 done:
