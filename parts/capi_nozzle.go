@@ -836,8 +836,12 @@ func (capi *CapiNozzle) batchUpdateDocs(vbno uint16, req_list *[]*base.WrappedMC
 	// construct docs to send
 	doc_list := make([][]byte, 0)
 	doc_length := 0
+	doc_map := make(map[string]interface{})
+	meta_map := make(map[string]interface{})
+	doc_map[MetaKey] = meta_map
+
 	for _, req := range *req_list {
-		doc_map := getDocMap(req.Req)
+		getDocMap(req.Req, doc_map)
 		var doc_bytes []byte
 		doc_bytes, err = json.Marshal(doc_map)
 		if err != nil {
@@ -1074,11 +1078,9 @@ func trimErrorMessage(err error) string {
 }
 
 // produce a serialized document from mc request
-func getDocMap(req *mc.MCRequest) map[string]interface{} {
-	doc_map := make(map[string]interface{})
-	meta_map := make(map[string]interface{})
-	doc_map[MetaKey] = meta_map
+func getDocMap(req *mc.MCRequest, doc_map map[string]interface{}) {
 	doc_map[BodyKey] = req.Body
+	meta_map := doc_map[MetaKey].(map[string]interface{})
 
 	//TODO need to handle Key being non-UTF8?
 	meta_map[IdKey] = string(req.Key)
@@ -1087,13 +1089,15 @@ func getDocMap(req *mc.MCRequest) map[string]interface{} {
 	meta_map[FlagsKey] = binary.BigEndian.Uint32(req.Extras[0:4])
 	if req.Opcode == base.DELETE_WITH_META {
 		meta_map[DeletedKey] = true
+	} else {
+		delete(meta_map, DeletedKey)
 	}
 
 	if !simple_utils.IsJSON(req.Body) {
 		meta_map[AttReasonKey] = InvalidJson
+	} else {
+		delete(meta_map, AttReasonKey)
 	}
-
-	return doc_map
 }
 
 // produce serialized revision info in the form of revSeq-Cas+Expiration+Flags
