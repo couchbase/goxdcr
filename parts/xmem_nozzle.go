@@ -244,6 +244,22 @@ func (buf *requestBuffer) slot(pos uint16) (*base.WrappedMCRequest, error) {
 	return req.req, nil
 }
 
+func (buf *requestBuffer) slotWithSentTime(pos uint16) (*base.WrappedMCRequest, *time.Time, error) {
+	buf.logger.Debugf("Getting the content and sent time in slot %d\n", pos)
+
+	err := buf.validatePos(pos)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	req := buf.slots[pos]
+
+	req.lock.RLock()
+	defer req.lock.RUnlock()
+
+	return req.req, req.sent_time, nil
+}
+
 //modSlot allow caller to do book-keeping on the slot, like updating num_of_retry, err
 //@pos - the position of the slot
 //@modFunc - the callback function which is going to update the slot
@@ -374,7 +390,6 @@ func (buf *requestBuffer) enSlot(mcreq *base.WrappedMCRequest) (uint16, int, []b
 	item_bytes := mcreq.Req.Bytes()
 	now := time.Now()
 	req.sent_time = &now
-	mcreq.Send_time = now
 	buf.token_ch <- 1
 
 	//increase the occupied_count
@@ -1774,7 +1789,7 @@ func (xmem *XmemNozzle) receiveResponse(finch chan bool, waitGrp *sync.WaitGroup
 			} else {
 				//raiseEvent
 				pos := xmem.getPosFromOpaque(response.Opaque)
-				wrappedReq, err := xmem.buf.slot(pos)
+				wrappedReq, sent_time, err := xmem.buf.slotWithSentTime(pos)
 				if err != nil {
 					xmem.Logger().Errorf("%v xmem buffer is in invalid state", xmem.Id())
 					xmem.handleGeneralError(errors.New("xmem buffer is in invalid state"))
@@ -1788,7 +1803,7 @@ func (xmem *XmemNozzle) receiveResponse(finch chan bool, waitGrp *sync.WaitGroup
 					req = wrappedReq.Req
 					seqno = wrappedReq.Seqno
 					committing_time = time.Since(wrappedReq.Start_time)
-					resp_wait_time = time.Since(wrappedReq.Send_time)
+					resp_wait_time = time.Since(*sent_time)
 				}
 
 				if req != nil && req.Opaque == response.Opaque {

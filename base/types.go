@@ -82,10 +82,9 @@ type ErrorInfo struct {
 }
 
 type WrappedMCRequest struct {
-	Seqno uint64
-	Req   *gomemcached.MCRequest
+	Seqno      uint64
+	Req        *gomemcached.MCRequest
 	Start_time time.Time
-	Send_time  time.Time
 	UniqueKey  string
 }
 
@@ -102,8 +101,8 @@ type MetadataChangeListener interface {
 }
 
 type ObjectWithLock struct {
-     Object interface{}
-     Lock  *sync.RWMutex
+	Object interface{}
+	Lock   *sync.RWMutex
 }
 
 type SeqnoWithLock struct {
@@ -176,8 +175,8 @@ const (
 )
 
 type VBErrorEventAdditional struct {
-	Vbno  uint16
-	Error error
+	Vbno      uint16
+	Error     error
 	ErrorType VBErrorType
 }
 
