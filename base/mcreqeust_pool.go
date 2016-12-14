@@ -9,13 +9,13 @@ import (
 type MCRequestPool struct {
 	name     string
 	obj_pool *sync.Pool
-	logger *log.CommonLogger
+	logger   *log.CommonLogger
 }
 
 func NewMCRequestPool(name string, logger *log.CommonLogger) *MCRequestPool {
 	pool := &MCRequestPool{name: name,
 		obj_pool: &sync.Pool{},
-		logger: logger,
+		logger:   logger,
 	}
 	pool.obj_pool.New = pool.addOne
 	return pool
@@ -34,7 +34,7 @@ func (pool *MCRequestPool) Get() *WrappedMCRequest {
 
 func (pool *MCRequestPool) addOne() interface{} {
 	obj := &WrappedMCRequest{Seqno: 0,
-		Req: &gomemcached.MCRequest{Extras: make([]byte, 26)},
+		Req: &gomemcached.MCRequest{},
 	}
 
 	return obj
