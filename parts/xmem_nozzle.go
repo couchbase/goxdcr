@@ -2074,6 +2074,8 @@ func (xmem *XmemNozzle) resend(req *bufferedMCRequest, pos uint16) (bool, error)
 		req.err = err
 
 	} else {
+		now := time.Now()
+		req.sent_time = &now
 		req.num_of_retry = req.num_of_retry + 1
 	}
 
