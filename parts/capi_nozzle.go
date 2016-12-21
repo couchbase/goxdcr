@@ -78,8 +78,8 @@ var DeletedKey = "deleted"
 var AttReasonKey = "att_reason"
 var InvalidJson = "invalid_json"
 
-var BodyPartsPrefix = "{\"new_edits\":false,\"docs\":["
-var BodyPartsSuffix = "]}"
+var BodyPartsPrefix = []byte("{\"new_edits\":false,\"docs\":[")
+var BodyPartsSuffix = []byte("]}")
 var BodyPartsDelimiter = ","
 var SizePartDelimiter = "\r\n"
 
@@ -409,9 +409,6 @@ func (capi *CapiNozzle) Receive(data interface{}) error {
 		}
 	}()
 
-	capi.Logger().Debugf("%v data key=%v seq=%v vb=%v is received", capi.Id(), data.(*base.WrappedMCRequest).Req.Key, data.(*base.WrappedMCRequest).Seqno, data.(*base.WrappedMCRequest).Req.VBucket)
-	capi.Logger().Debugf("%v data channel len is %d\n", capi.Id(), atomic.LoadInt32(&capi.items_in_dataChan))
-
 	req := data.(*base.WrappedMCRequest)
 
 	vbno := req.Req.VBucket
@@ -428,17 +425,15 @@ func (capi *CapiNozzle) Receive(data interface{}) error {
 		return err
 	}
 
-	new_counter_received := atomic.AddUint32(&capi.counter_received, 1)
+	atomic.AddUint32(&capi.counter_received, 1)
 	size := req.Req.Size()
-	new_items_in_dataChan := atomic.AddInt32(&capi.items_in_dataChan, 1)
-	new_bytes_in_dataChan := atomic.AddInt64(&capi.bytes_in_dataChan, int64(size))
+	atomic.AddInt32(&capi.items_in_dataChan, 1)
+	atomic.AddInt64(&capi.bytes_in_dataChan, int64(size))
 
 	dataChan <- req
 
 	//accumulate the batchCount and batchSize
 	capi.accumuBatch(vbno, req)
-
-	capi.Logger().Debugf("%v received %v items, queue_size = %v, bytes_in_dataChan=%v\n", capi.Id(), new_counter_received, new_items_in_dataChan, new_bytes_in_dataChan)
 
 	return nil
 }
@@ -460,8 +455,6 @@ func (capi *CapiNozzle) accumuBatch(vbno uint16, request *base.WrappedMCRequest)
 	if isFull {
 		capi.batchReady(vbno)
 	}
-
-	capi.Logger().Debugf("%v batch for vb %v: batch=%v, batch.count=%v, batch.start_time=%v\n", capi.Id(), vbno, batch, batch.count(), batch.start_time)
 }
 
 func (capi *CapiNozzle) processData_batch(finch chan bool, waitGrp *sync.WaitGroup) (err error) {
@@ -696,7 +689,9 @@ func (capi *CapiNozzle) batchSendWithRetry(batch *capiBatch) error {
 			req_list = append(req_list, item)
 		} else {
 			if needSend == Not_Send_Failed_CR {
-				capi.Logger().Debugf("%v did not send doc with key %v since it failed conflict resolution\n", capi.Id(), string(item.Req.Key))
+				if capi.Logger().GetLogLevel() >= log.LogLevelDebug {
+					capi.Logger().Debugf("%v did not send doc with key %v since it failed conflict resolution\n", capi.Id(), string(item.Req.Key))
+				}
 				additionalInfo := DataFailedCRSourceEventAdditional{Seqno: item.Seqno,
 					Opcode:      encodeOpCode(item.Req.Opcode),
 					IsExpirySet: (binary.BigEndian.Uint32(item.Req.Extras[4:8]) != 0),
@@ -871,15 +866,11 @@ func (capi *CapiNozzle) batchUpdateDocs(vbno uint16, req_list *[]*base.WrappedMC
 	// enable delayed commit
 	http_req.Header.Set(CouchFullCommitKey, "false")
 
-	capi.Logger().Debugf("%v updateDocs request=%v\n", capi.Id(), http_req)
-
 	// unfortunately request.Write() does not preserve Content-Length. have to encode the request ourselves
 	req_bytes, err := utils.EncodeHttpRequest(http_req)
 	if err != nil {
 		return
 	}
-
-	capi.Logger().Debugf("%v updateDocs encoded request=%v\n string form=%v\n", capi.Id(), req_bytes, string(req_bytes))
 
 	resp_ch := make(chan bool, 1)
 	err_ch := make(chan error, 2)
@@ -940,30 +931,25 @@ func (capi *CapiNozzle) writeDocs(vbno uint16, req_bytes []byte, doc_list [][]by
 			// if no error, keep sending body parts
 			if partIndex == 0 {
 				// send initial request to tcp
-				capi.Logger().Debugf("%v req_bytes=%v\nreq_bytes_in_str=%v\n\n", capi.Id(), req_bytes, string(req_bytes))
 				if !capi.writeToPartCh(part_ch, req_bytes) {
 					return
 				}
 			} else if partIndex == 1 {
 				// write body part prefix
-				capi.Logger().Debugf("%v writing first body part %v", capi.Id(), BodyPartsPrefix)
-				if !capi.writeToPartCh(part_ch, []byte(BodyPartsPrefix)) {
+				if !capi.writeToPartCh(part_ch, BodyPartsPrefix) {
 					return
 				}
 			} else if partIndex < len(doc_list)+2 {
 				// write individual doc
-				capi.Logger().Debugf("%v writing %vth doc = %v, doc_in_str=%v\n", capi.Id(), partIndex-2, doc_list[partIndex-2], string(doc_list[partIndex-2]))
 				if !capi.writeToPartCh(part_ch, doc_list[partIndex-2]) {
 					return
 				}
 			} else {
 				// write body part suffix
-				capi.Logger().Debugf("%v writing last body part %v\n", capi.Id(), BodyPartsSuffix)
-				if !capi.writeToPartCh(part_ch, []byte(BodyPartsSuffix)) {
+				if !capi.writeToPartCh(part_ch, BodyPartsSuffix) {
 					return
 				}
 				// all parts have been sent. terminate sendBodyPart rountine
-				capi.Logger().Debugf("%v closing part channel since all parts had been sent\n", capi.Id())
 				close(part_ch)
 				return
 			}
@@ -991,8 +977,8 @@ func (capi *CapiNozzle) writeToPartCh(part_ch chan []byte, data []byte) bool {
 }
 
 func (capi *CapiNozzle) tcpProxy(vbno uint16, part_ch chan []byte, resp_ch chan bool, err_ch chan error, fin_ch chan bool, waitGrp *sync.WaitGroup) {
-        defer waitGrp.Done()
-        capi.Logger().Debugf("%v tcpProxy routine for vb %v is starting\n", capi.Id(), vbno)
+	defer waitGrp.Done()
+	capi.Logger().Debugf("%v tcpProxy routine for vb %v is starting\n", capi.Id(), vbno)
 	for {
 		select {
 		case <-fin_ch:
@@ -1004,7 +990,6 @@ func (capi *CapiNozzle) tcpProxy(vbno uint16, part_ch chan []byte, resp_ch chan 
 				client := capi.getClient()
 				client.SetWriteDeadline(time.Now().Add(capi.config.writeTimeout))
 				_, err := client.Write(part)
-				capi.Logger().Debugf("%v wrote body part. part=%v, err=%v\n", capi.Id(), string(part), err)
 				if err != nil {
 					capi.Logger().Errorf("Received error when writing boby part. err=%v\n", err)
 					err_ch <- err
@@ -1012,7 +997,6 @@ func (capi *CapiNozzle) tcpProxy(vbno uint16, part_ch chan []byte, resp_ch chan 
 				}
 			} else {
 				// the closing of part_ch signals that all body parts have been sent. start receiving responses
-				capi.Logger().Debugf("%v tcpProxy routine starting to receive response since all body parts have been sent\n", capi.Id())
 
 				// read response
 				client := capi.getClient()

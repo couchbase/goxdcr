@@ -149,14 +149,11 @@ func (router *Router) route(data interface{}) (map[string]interface{}, error) {
 		return nil, ErrorInvalidRoutingMapForRouter
 	}
 
-	router.Logger().Debugf("%v Data with key=%v, vbno=%d, opCode=%v is routed to downstream part %s", router.id, string(uprEvent.Key), uprEvent.VBucket, uprEvent.Opcode, partId)
-
 	// filter data if filter expession has been defined
 	if router.filterRegexp != nil {
 		if !utils.RegexpMatch(router.filterRegexp, uprEvent.Key) {
 			// if data does not match filter expression, drop it. return empty result
 			router.RaiseEvent(common.NewEvent(common.DataFiltered, uprEvent, router, nil, nil))
-			router.Logger().Debugf("%v Data with key=%v, vbno=%d, opCode=%v has been filtered out", router.id, string(uprEvent.Key), uprEvent.VBucket, uprEvent.Opcode)
 			return result, nil
 		}
 	}

@@ -229,8 +229,6 @@ func (buf *requestBuffer) validatePos(pos uint16) (err error) {
 //slot allow caller to get hold of the content in the slot without locking the slot
 //@pos - the position of the slot
 func (buf *requestBuffer) slot(pos uint16) (*base.WrappedMCRequest, error) {
-	buf.logger.Debugf("Getting the content in slot %d\n", pos)
-
 	err := buf.validatePos(pos)
 	if err != nil {
 		return nil, err
@@ -245,8 +243,6 @@ func (buf *requestBuffer) slot(pos uint16) (*base.WrappedMCRequest, error) {
 }
 
 func (buf *requestBuffer) slotWithSentTime(pos uint16) (*base.WrappedMCRequest, *time.Time, error) {
-	buf.logger.Debugf("Getting the content and sent time in slot %d\n", pos)
-
 	err := buf.validatePos(pos)
 	if err != nil {
 		return nil, nil, err
@@ -322,7 +318,6 @@ func (buf *requestBuffer) evictSlot(pos uint16) error {
 			if buf.notifych != nil {
 				select {
 				case buf.notifych <- true:
-					buf.logger.Debugf("buffer's occupied slots is below threshold %v, notify", buf.notify_threshold)
 				default:
 				}
 			} else {
@@ -368,8 +363,6 @@ func (buf *requestBuffer) cancelReservation(index uint16, reservation_num int) e
 }
 
 func (buf *requestBuffer) enSlot(mcreq *base.WrappedMCRequest) (uint16, int, []byte) {
-	buf.logger.Debugf("slots chan length=%d\n", len(buf.empty_slots_pos))
-
 	index := <-buf.empty_slots_pos
 
 	//non blocking
@@ -395,7 +388,6 @@ func (buf *requestBuffer) enSlot(mcreq *base.WrappedMCRequest) (uint16, int, []b
 	//increase the occupied_count
 	atomic.AddInt32(&buf.occupied_count, 1)
 
-	buf.logger.Debugf("slot %d is occupied\n", index)
 	return index, reservation_num, item_bytes
 }
 
@@ -982,12 +974,7 @@ func (xmem *XmemNozzle) Receive(data interface{}) error {
 
 	}
 
-	xmem.Logger().Debugf("%v data key=%v seq=%v is received", xmem.Id(), request.Req.Key, data.(*base.WrappedMCRequest).Seqno)
-	xmem.Logger().Debugf("%v data channel len is %d\n", xmem.Id(), len(xmem.dataChan))
-
 	xmem.accumuBatch(request)
-
-	xmem.Logger().Debugf("%v received %v items, queue_size = %v\n", xmem.Id(), atomic.LoadUint32(&xmem.counter_received), len(xmem.dataChan))
 
 	return nil
 }
@@ -1510,9 +1497,11 @@ func (xmem *XmemNozzle) batchGetMeta(bigDoc_map map[string]*base.WrappedMCReques
 			doc_meta_target := xmem.decodeGetMetaResp([]byte(key), resp)
 			doc_meta_source := decodeSetMetaReq(wrappedReq)
 			if !xmem.conflict_resolver(doc_meta_source, doc_meta_target, xmem.source_cr_mode, xmem.Logger()) {
-				xmem.Logger().Debugf("%v doc %v failed source side conflict resolution. source meta=%v, target meta=%v. no need to send\n", xmem.Id(), key, doc_meta_source, doc_meta_target)
+				if xmem.Logger().GetLogLevel() >= log.LogLevelDebug {
+					xmem.Logger().Debugf("%v doc %v failed source side conflict resolution. source meta=%v, target meta=%v. no need to send\n", xmem.Id(), key, doc_meta_source, doc_meta_target)
+				}
 				bigDoc_noRep_map[wrappedReq.UniqueKey] = true
-			} else {
+			} else if xmem.Logger().GetLogLevel() >= log.LogLevelDebug {
 				xmem.Logger().Debugf("%v doc %v succeeded source side conflict resolution. source meta=%v, target meta=%v. sending it to target\n", xmem.Id(), key, doc_meta_source, doc_meta_target)
 			}
 		} else if ok && resp.Status == mc.NOT_MY_VBUCKET {
@@ -1558,8 +1547,6 @@ func (xmem *XmemNozzle) sendSingleSetMeta(adjustRequest bool, item *base.Wrapped
 	if xmem.client_for_setMeta != nil {
 		if adjustRequest {
 			xmem.buf.adjustRequest(item, index)
-			xmem.Logger().Debugf("key=%v\n", item.Req.Key)
-			xmem.Logger().Debugf("opcode=%v\n", item.Req.Opcode)
 		}
 		bytes := item.Req.Bytes()
 
@@ -1804,8 +1791,6 @@ func (xmem *XmemNozzle) receiveResponse(finch chan bool, waitGrp *sync.WaitGroup
 				}
 
 				if req != nil && req.Opaque == response.Opaque {
-					xmem.Logger().Debugf("%v Got the response, key=%s, status=%v\n", xmem.Id(), req.Key, response.Status)
-
 					additionalInfo := DataSentEventAdditional{Seqno: seqno,
 						IsOptRepd:      xmem.optimisticRep(req),
 						Opcode:         req.Opcode,
@@ -2079,7 +2064,6 @@ func (xmem *XmemNozzle) timeoutDuration(numofRetry int) time.Duration {
 }
 
 func (xmem *XmemNozzle) resend(req *bufferedMCRequest, pos uint16) (bool, error) {
-	xmem.Logger().Debugf("%v Retry sending %s, retry=%v", xmem.Id(), req.req.Req.Key, req.num_of_retry)
 	err := xmem.sendSingleSetMeta(false, req.req, pos, xmem.config.maxRetry)
 
 	if err != nil {
@@ -2095,7 +2079,6 @@ func (xmem *XmemNozzle) resend(req *bufferedMCRequest, pos uint16) (bool, error)
 }
 
 func (xmem *XmemNozzle) resendWithReset(req *bufferedMCRequest, pos uint16) (bool, error) {
-	xmem.Logger().Debugf("%v Retry sending %s, retry=%v, and reset retry=0 on successful send", xmem.Id(), req.req.Req.Key, req.num_of_retry)
 	err := xmem.sendSingleSetMeta(false, req.req, pos, xmem.config.maxRetry)
 
 	if err != nil {
@@ -2111,7 +2094,6 @@ func (xmem *XmemNozzle) resendWithReset(req *bufferedMCRequest, pos uint16) (boo
 }
 
 func (xmem *XmemNozzle) resendForNewConn(req *bufferedMCRequest, pos uint16) (bool, error) {
-	xmem.Logger().Debugf("%v Retry sending %s, retry=%v", xmem.Id(), req.req.Req.Key, req.num_of_retry)
 	err := xmem.sendSingleSetMeta(false, req.req, pos, xmem.config.maxRetry)
 	if err != nil {
 		req.err = err
@@ -2125,7 +2107,6 @@ func (xmem *XmemNozzle) resendForNewConn(req *bufferedMCRequest, pos uint16) (bo
 
 func (xmem *XmemNozzle) getPosFromOpaque(opaque uint32) uint16 {
 	result := uint16(0x0000FFFF & opaque)
-	xmem.Logger().Debugf("opaque=%x, index=%v\n", opaque, result)
 	return result
 }
 
@@ -2241,7 +2222,6 @@ func (xmem *XmemNozzle) readFromClient(client *xmemClient, resetReadTimeout bool
 	response, err := memClient.Receive()
 
 	if err != nil {
-		xmem.Logger().Debugf("%v readFromClient: %v\n", xmem.Id(), err)
 		isAppErr := false
 		var errMsg string = ""
 		if err == response {
@@ -2356,7 +2336,6 @@ func (xmem *XmemNozzle) packageRequest(count int, reqs_bytes []byte) []byte {
 		bytes := make([]byte, 8+len(reqs_bytes))
 		binary.BigEndian.PutUint32(bytes[0:4], uint32(len(reqs_bytes)))
 		binary.BigEndian.PutUint32(bytes[4:8], uint32(count))
-		xmem.Logger().Debugf("batch_size =%v, batch_count=%v\n", len(reqs_bytes), count)
 		copy(bytes[8:8+len(reqs_bytes)], reqs_bytes)
 		return bytes
 	} else {

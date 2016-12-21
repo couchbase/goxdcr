@@ -459,8 +459,6 @@ func (dcp *DcpNozzle) processData() (err error) {
 						start_time := time.Now()
 						dcp.incCounterReceived()
 						dcp.RaiseEvent(common.NewEvent(common.DataReceived, m, dcp, nil /*derivedItems*/, nil /*otherInfos*/))
-						dcp.Logger().Tracef("%v, Mutation %v:%v:%v <%v>, counter=%v, ops_per_sec=%v\n",
-							dcp.Id(), m.VBucket, m.Seqno, m.Opcode, m.Key, dcp.counterReceived(), float64(dcp.counterReceived())/time.Since(dcp.start_time).Seconds())
 
 						// forward mutation downstream through connector
 						if err := dcp.Connector().Forward(m); err != nil {
