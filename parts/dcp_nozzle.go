@@ -471,6 +471,8 @@ func (dcp *DcpNozzle) processData() (err error) {
 						// raise event for statistics collection
 						dispatch_time := time.Since(start_time)
 						dcp.RaiseEvent(common.NewEvent(common.DataProcessed, m, dcp, nil /*derivedItems*/, dispatch_time.Seconds()*1000000 /*otherInfos*/))
+					case mc.UPR_SNAPSHOT:
+						dcp.RaiseEvent(common.NewEvent(common.SnapshotMarkerReceived, m, dcp, nil /*derivedItems*/, nil /*otherInfos*/))
 					default:
 						dcp.Logger().Debugf("%v Uprevent OpCode=%v, is skipped\n", dcp.Id(), m.Opcode)
 					}

@@ -42,6 +42,8 @@ const (
 	DataFailedCRSource ComponentEventType = iota
 	// generic stats update event for the component
 	StatsUpdate ComponentEventType = iota
+	//received snapshot marker from dcp
+	SnapshotMarkerReceived ComponentEventType = iota
 )
 
 type Event struct {
