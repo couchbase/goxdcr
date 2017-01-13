@@ -630,7 +630,7 @@ func (capi *CapiNozzle) batchGetMeta(vbno uint16, bigDoc_map map[string]*base.Wr
 		body, capi.config.connectionTimeout, &out, nil, false, capi.Logger())
 	capi.Logger().Debugf("%v results of _revs_diff query for vb %v: err=%v, status=%v\n", capi.Id(), vbno, err, statusCode)
 	if err != nil {
-		capi.Logger().Errorf("_revs_diff query for vb %v failed with err=%v\n", vbno, err)
+		capi.Logger().Errorf("%v _revs_diff query for vb %v failed with err=%v\n", capi.Id(), vbno, err)
 		return nil, err
 	} else if statusCode != 200 {
 		errMsg := fmt.Sprintf("Received unexpected status code %v from _revs_diff query for vbucket %v.\n", statusCode, vbno)
@@ -991,7 +991,7 @@ func (capi *CapiNozzle) tcpProxy(vbno uint16, part_ch chan []byte, resp_ch chan 
 				client.SetWriteDeadline(time.Now().Add(capi.config.writeTimeout))
 				_, err := client.Write(part)
 				if err != nil {
-					capi.Logger().Errorf("Received error when writing boby part. err=%v\n", err)
+					capi.Logger().Errorf("%v Received error when writing boby part. err=%v\n", capi.Id(), err)
 					err_ch <- err
 					return
 				}

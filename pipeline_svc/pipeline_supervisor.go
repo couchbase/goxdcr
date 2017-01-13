@@ -161,14 +161,14 @@ func (pipelineSupervisor *PipelineSupervisor) closeConnections() {
 	for serverAddr, client := range pipelineSupervisor.kv_mem_clients {
 		err := client.Close()
 		if err != nil {
-			pipelineSupervisor.Logger().Infof("error from closing connection for %v is %v\n", serverAddr, err)
+			pipelineSupervisor.Logger().Infof("%v error from closing connection for %v is %v\n", pipelineSupervisor.Id(), serverAddr, err)
 		}
 	}
 	pipelineSupervisor.kv_mem_clients = make(map[string]*mcc.Client)
 }
 
 func (pipelineSupervisor *PipelineSupervisor) monitorPipelineHealth() error {
-	pipelineSupervisor.Logger().Info("monitorPipelineHealth started")
+	pipelineSupervisor.Logger().Infof("%v monitorPipelineHealth started", pipelineSupervisor.Id())
 
 	defer pipelineSupervisor.GenericSupervisor.ChidrenWaitGroup().Done()
 
@@ -229,7 +229,7 @@ func (pipelineSupervisor *PipelineSupervisor) OnEvent(event *common.Event) {
 		// changes and will restart pipeline if they are not
 		pipelineSupervisor.pipeline.UpdateSettings(settings)
 	} else {
-		pipelineSupervisor.Logger().Errorf("Pipeline supervisor didn't register to recieve event %v for component %v", event.EventType, event.Component.Id())
+		pipelineSupervisor.Logger().Errorf("%v Pipeline supervisor didn't register to recieve event %v for component %v", pipelineSupervisor.Id(), event.EventType, event.Component.Id())
 	}
 }
 
@@ -278,12 +278,12 @@ func (pipelineSupervisor *PipelineSupervisor) declarePipelineBroken() {
 	defer pipelineSupervisor.errors_seen_lock.RUnlock()
 	err := pipelineSupervisor.pipeline.SetState(common.Pipeline_Error)
 	if err == nil {
-		pipelineSupervisor.Logger().Errorf("Received error report : %v", pipelineSupervisor.errors_seen)
+		pipelineSupervisor.Logger().Errorf("%v Received error report : %v", pipelineSupervisor.Id(), pipelineSupervisor.errors_seen)
 		pipelineSupervisor.ReportFailure(pipelineSupervisor.errors_seen)
 		pipelineSupervisor.pipeline.ReportProgress(fmt.Sprintf("Received error report : %v", pipelineSupervisor.errors_seen))
 
 	} else {
-		pipelineSupervisor.Logger().Infof("Received error report : %v, but error is ignored. pipeline_state=%v\n", pipelineSupervisor.errors_seen, pipelineSupervisor.pipeline.State())
+		pipelineSupervisor.Logger().Infof("%v Received error report : %v, but error is ignored. pipeline_state=%v\n", pipelineSupervisor.Id(), pipelineSupervisor.errors_seen, pipelineSupervisor.pipeline.State())
 
 	}
 }
@@ -293,13 +293,13 @@ func (pipelineSupervisor *PipelineSupervisor) checkPipelineHealth() error {
 	if !pipeline_utils.IsPipelineRunning(pipelineSupervisor.pipeline.State()) {
 		//the pipeline is no longer running, kill myself
 		message := "Pipeline is no longer running, exit."
-		pipelineSupervisor.Logger().Info(message)
+		pipelineSupervisor.Logger().Infof("%v message", pipelineSupervisor.Id())
 		return errors.New(message)
 	}
 
 	dcp_stats, err := pipelineSupervisor.getDcpStats()
 	if err != nil {
-		pipelineSupervisor.Logger().Error("Failed to get dcp stats. Skipping dcp health check.")
+		pipelineSupervisor.Logger().Errorf("%v Failed to get dcp stats. Skipping dcp health check.", pipelineSupervisor.Id())
 		return nil
 	}
 
@@ -338,7 +338,7 @@ func (pipelineSupervisor *PipelineSupervisor) getDcpStats() (map[string]map[stri
 
 		stats_map, err := client.StatsMap(base.DCP_STAT_NAME)
 		if err != nil {
-			pipelineSupervisor.Logger().Infof("Error getting dcp stats for kv %v. err=%v", serverAddr, err)
+			pipelineSupervisor.Logger().Infof("%v Error getting dcp stats for kv %v. err=%v", pipelineSupervisor.Id(), serverAddr, err)
 			// increment the error count of the client. retire the client if it has failed too many times
 			err_count, ok := pipelineSupervisor.kv_mem_client_error_count[serverAddr]
 			if !ok {
@@ -349,7 +349,7 @@ func (pipelineSupervisor *PipelineSupervisor) getDcpStats() (map[string]map[stri
 			if err_count > max_mem_client_error_count {
 				err = client.Close()
 				if err != nil {
-					pipelineSupervisor.Logger().Infof("error from closing connection for %v is %v\n", serverAddr, err)
+					pipelineSupervisor.Logger().Infof("%v error from closing connection for %v is %v\n", pipelineSupervisor.Id(), serverAddr, err)
 				}
 				delete(pipelineSupervisor.kv_mem_clients, serverAddr)
 				pipelineSupervisor.kv_mem_client_error_count[serverAddr] = 0

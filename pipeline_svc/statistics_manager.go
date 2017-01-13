@@ -270,7 +270,7 @@ func (stats_mgr *StatisticsManager) updateStats() error {
 	for {
 		select {
 		case new_ticker := <-stats_mgr.update_ticker_ch:
-			stats_mgr.logger.Info("Received new ticker due to changes to stats interval setting")
+			stats_mgr.logger.Infof("%v Received new ticker due to changes to stats interval setting", stats_mgr.pipeline.InstanceId())
 			ticker.Stop()
 			ticker = new_ticker
 		case <-stats_mgr.finish_ch:
@@ -290,7 +290,7 @@ func (stats_mgr *StatisticsManager) updateStats() error {
 		case <-logStats_ticker.C:
 			err := stats_mgr.logStats()
 			if err != nil {
-				stats_mgr.logger.Infof("Failed to log statistics. err=%v\n", err)
+				stats_mgr.logger.Infof("%v Failed to log statistics. err=%v\n", stats_mgr.pipeline.InstanceId(), err)
 			}
 		}
 	}
@@ -301,7 +301,7 @@ func (stats_mgr *StatisticsManager) updateStatsOnce() error {
 	if !pipeline_utils.IsPipelineRunning(stats_mgr.pipeline.State()) {
 		//the pipeline is no longer running, kill myself
 		message := "Pipeline is no longer running, exit."
-		stats_mgr.logger.Info(message)
+		stats_mgr.logger.Infof("%v message", stats_mgr.pipeline.InstanceId())
 		stats_mgr.cleanupBeforeExit()
 		return errors.New(message)
 	}
@@ -310,7 +310,7 @@ func (stats_mgr *StatisticsManager) updateStatsOnce() error {
 	err := stats_mgr.processRawStats()
 
 	if err != nil {
-		stats_mgr.logger.Info("Failed to calculate the statistics for this round. Move on")
+		stats_mgr.logger.Infof("%v Failed to calculate the statistics for this round. Move on", stats_mgr.pipeline.InstanceId())
 	}
 	return nil
 }
@@ -391,7 +391,7 @@ func (stats_mgr *StatisticsManager) processRawStats() error {
 					if orig_registry != nil {
 						orig_val, _ := strconv.ParseInt(orig_registry.Get(name).String(), 10, 64)
 						if m.Count() < orig_val {
-							stats_mgr.logger.Infof("counter %v goes backward, maybe due to the pipeline is restarted\n", name)
+							stats_mgr.logger.Infof("%v counter %v goes backward, maybe due to the pipeline is restarted\n", stats_mgr.pipeline.InstanceId(), name)
 						}
 					}
 					metric_overview := stats_mgr.getOverviewRegistry().Get(name)
@@ -478,7 +478,7 @@ func (stats_mgr *StatisticsManager) processCalculatedStats(overview_expvar_map *
 	if err == nil {
 		changes_left_var.Set(changes_left_val)
 	} else {
-		stats_mgr.logger.Errorf("Failed to calculate changes_left - %v\n", err)
+		stats_mgr.logger.Errorf("%v Failed to calculate changes_left - %v\n", stats_mgr.pipeline.InstanceId(), err)
 		changes_left_var.Set(-1)
 	}
 	overview_expvar_map.Set(CHANGES_LEFT_METRIC, changes_left_var)
@@ -657,7 +657,7 @@ func (stats_mgr *StatisticsManager) initOverviewRegistry() {
 }
 
 func (stats_mgr *StatisticsManager) Start(settings map[string]interface{}) error {
-	stats_mgr.logger.Infof("StatisticsManager Starting...")
+	stats_mgr.logger.Infof("%v StatisticsManager Starting...", stats_mgr.pipeline.InstanceId())
 
 	//initialize connection
 	err := stats_mgr.initConnections()
@@ -668,10 +668,10 @@ func (stats_mgr *StatisticsManager) Start(settings map[string]interface{}) error
 	if _, ok := settings[PUBLISH_INTERVAL]; ok {
 		stats_mgr.update_interval = time.Duration(settings[PUBLISH_INTERVAL].(int)) * time.Millisecond
 	} else {
-		stats_mgr.logger.Infof("There is no update_interval in settings map. settings=%v\n", settings)
+		stats_mgr.logger.Infof("%v There is no update_interval in settings map. settings=%v\n", stats_mgr.pipeline.InstanceId(), settings)
 	}
 
-	stats_mgr.logger.Debugf("StatisticsManager Starts: update_interval=%v, settings=%v\n", stats_mgr.update_interval, settings)
+	stats_mgr.logger.Debugf("%v StatisticsManager Starts: update_interval=%v, settings=%v\n", stats_mgr.pipeline.InstanceId(), stats_mgr.update_interval, settings)
 	stats_mgr.update_ticker_ch <- time.NewTicker(stats_mgr.update_interval)
 
 	stats_mgr.wait_grp.Add(1)
@@ -681,14 +681,14 @@ func (stats_mgr *StatisticsManager) Start(settings map[string]interface{}) error
 }
 
 func (stats_mgr *StatisticsManager) Stop() error {
-	stats_mgr.logger.Infof("StatisticsManager Stopping...")
+	stats_mgr.logger.Infof("%v StatisticsManager Stopping...", stats_mgr.pipeline.InstanceId())
 	stats_mgr.finish_ch <- true
 
 	//close the connections
 	stats_mgr.closeConnections()
 
 	stats_mgr.wait_grp.Wait()
-	stats_mgr.logger.Infof("StatisticsManager Stopped")
+	stats_mgr.logger.Infof("%v StatisticsManager Stopped", stats_mgr.pipeline.InstanceId())
 
 	return nil
 }
@@ -699,7 +699,7 @@ func (stats_mgr *StatisticsManager) closeConnections() {
 	for server_addr, client := range stats_mgr.kv_mem_clients {
 		err := client.Close()
 		if err != nil {
-			stats_mgr.logger.Infof("error from closing connection for %v is %v\n", server_addr, err)
+			stats_mgr.logger.Infof("%v error from closing connection for %v is %v\n", stats_mgr.pipeline.InstanceId(), server_addr, err)
 		}
 	}
 	stats_mgr.kv_mem_clients = make(map[string]*mcc.Client)
@@ -719,7 +719,7 @@ func (stats_mgr *StatisticsManager) initConnections() error {
 }
 
 func (stats_mgr *StatisticsManager) UpdateSettings(settings map[string]interface{}) error {
-	stats_mgr.logger.Debugf("Updating settings on stats manager. settings=%v\n", settings)
+	stats_mgr.logger.Debugf("%v Updating settings on stats manager. settings=%v\n", stats_mgr.pipeline.InstanceId(), settings)
 
 	stats_interval, err := utils.GetIntSettingFromSettings(settings, PUBLISH_INTERVAL)
 	if err != nil {
@@ -837,13 +837,13 @@ func (outNozzle_collector *outNozzleCollector) OnEvent(event *common.Event) {
 func (outNozzle_collector *outNozzleCollector) ProcessEvent(event *common.Event) error {
 	metric_map := outNozzle_collector.component_map[event.Component.Id()]
 	if event.EventType == common.StatsUpdate {
-		outNozzle_collector.stats_mgr.logger.Debugf("Received a StatsUpdate event from %v", reflect.TypeOf(event.Component))
+		outNozzle_collector.stats_mgr.logger.Debugf("%v Received a StatsUpdate event from %v", outNozzle_collector.Id(), reflect.TypeOf(event.Component))
 		queue_size := event.OtherInfos.([]int)[0]
 		queue_size_bytes := event.OtherInfos.([]int)[1]
 		setCounter(metric_map[DOCS_REP_QUEUE_METRIC].(metrics.Counter), queue_size)
 		setCounter(metric_map[SIZE_REP_QUEUE_METRIC].(metrics.Counter), queue_size_bytes)
 	} else if event.EventType == common.DataSent {
-		outNozzle_collector.stats_mgr.logger.Debugf("Received a DataSent event from %v", reflect.TypeOf(event.Component))
+		outNozzle_collector.stats_mgr.logger.Debugf("%v Received a DataSent event from %v", outNozzle_collector.Id(), reflect.TypeOf(event.Component))
 		event_otherInfo := event.OtherInfos.(parts.DataSentEventAdditional)
 		req_size := event_otherInfo.Req_size
 		opti_replicated := event_otherInfo.IsOptRepd
@@ -872,7 +872,7 @@ func (outNozzle_collector *outNozzleCollector) ProcessEvent(event *common.Event)
 		metric_map[DOCS_LATENCY_METRIC].(metrics.Histogram).Sample().Update(commit_time.Nanoseconds() / 1000000)
 		metric_map[RESP_WAIT_METRIC].(metrics.Histogram).Sample().Update(resp_wait_time.Nanoseconds() / 1000000)
 	} else if event.EventType == common.DataFailedCRSource {
-		outNozzle_collector.stats_mgr.logger.Debugf("Received a DataFailedCRSource event from %v", reflect.TypeOf(event.Component))
+		outNozzle_collector.stats_mgr.logger.Debugf("%v Received a DataFailedCRSource event from %v", outNozzle_collector.Id(), reflect.TypeOf(event.Component))
 		metric_map[DOCS_FAILED_CR_SOURCE_METRIC].(metrics.Counter).Inc(1)
 		event_otherInfos := event.OtherInfos.(parts.DataFailedCRSourceEventAdditional)
 		expiry_set := event_otherInfos.IsExpirySet
@@ -889,7 +889,7 @@ func (outNozzle_collector *outNozzleCollector) ProcessEvent(event *common.Event)
 			panic(fmt.Sprintf("Invalid opcode, %v, in DataFailedCRSource event from %v.", req_opcode, event.Component.Id()))
 		}
 	} else if event.EventType == common.GetMetaReceived {
-		outNozzle_collector.stats_mgr.logger.Debugf("Received a GetMetaReceived event from %v", reflect.TypeOf(event.Component))
+		outNozzle_collector.stats_mgr.logger.Debugf("%v Received a GetMetaReceived event from %v", outNozzle_collector.Id(), reflect.TypeOf(event.Component))
 		event_otherInfos := event.OtherInfos.(parts.GetMetaReceivedEventAdditional)
 		commit_time := event_otherInfos.Commit_time
 		metric_map[META_LATENCY_METRIC].(metrics.Histogram).Sample().Update(commit_time.Nanoseconds() / 1000000)
@@ -962,7 +962,7 @@ func (dcp_collector *dcpCollector) OnEvent(event *common.Event) {
 func (dcp_collector *dcpCollector) ProcessEvent(event *common.Event) error {
 	metric_map := dcp_collector.component_map[event.Component.Id()]
 	if event.EventType == common.DataReceived {
-		dcp_collector.stats_mgr.logger.Debugf("Received a DataReceived event from %v", reflect.TypeOf(event.Component))
+		dcp_collector.stats_mgr.logger.Debugf("%v Received a DataReceived event from %v", dcp_collector.Id(), reflect.TypeOf(event.Component))
 		uprEvent := event.Data.(*mcc.UprEvent)
 		metric_map[DOCS_RECEIVED_DCP_METRIC].(metrics.Counter).Inc(1)
 
@@ -1034,7 +1034,7 @@ func (r_collector *routerCollector) ProcessEvent(event *common.Event) error {
 	if event.EventType == common.DataFiltered {
 		uprEvent := event.Data.(*mcc.UprEvent)
 		seqno := uprEvent.Seqno
-		r_collector.stats_mgr.logger.Debugf("Received a DataFiltered event for %v", seqno)
+		r_collector.stats_mgr.logger.Debugf("%v Received a DataFiltered event for %v", r_collector.Id(), seqno)
 		metric_map[DOCS_FILTERED_METRIC].(metrics.Counter).Inc(1)
 
 		if uprEvent.Expiry != 0 {
@@ -1255,7 +1255,7 @@ func updateStatsForReplication(repl_status *pipeline_pkg.ReplicationStatus, cur_
 		}
 
 	} else {
-		logger.Infof("Source topology changed. Re-compute docs_processed. old_vb_list=%v, cur_vb_list=%v\n", old_vb_list, cur_vb_list)
+		logger.Infof("%v Source topology changed. Re-compute docs_processed. old_vb_list=%v, cur_vb_list=%v\n", repl_status.RepId(), old_vb_list, cur_vb_list)
 		docs_processed_uint64, err = getDocsProcessedForReplication(spec.Id, cur_vb_list, checkpoints_svc, logger)
 		if err != nil {
 			return err

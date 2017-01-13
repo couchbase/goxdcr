@@ -926,7 +926,7 @@ func (dcp *DcpNozzle) dcpHasRemainingItemsForXdcr(dcp_stats map[string]map[strin
 			if items_remaining_stats_str, ok := per_node_stats_map[xdcr_items_remaining_key]; ok {
 				items_remaining_stats_int, err := strconv.ParseInt(items_remaining_stats_str, base.ParseIntBase, base.ParseIntBitSize)
 				if err != nil {
-					dcp.Logger().Errorf("Items remaining stats, %v, is not of integer type.", items_remaining_stats_str)
+					dcp.Logger().Errorf("%v Items remaining stats, %v, is not of integer type.", dcp.Id(), items_remaining_stats_str)
 					continue
 				}
 				if items_remaining_stats_int > 0 {
@@ -934,7 +934,7 @@ func (dcp *DcpNozzle) dcpHasRemainingItemsForXdcr(dcp_stats map[string]map[strin
 				}
 			}
 		} else {
-			dcp.Logger().Errorf("Failed to find dcp stats in statsMap returned for server=%v", kv_node)
+			dcp.Logger().Errorf("%v Failed to find dcp stats in statsMap returned for server=%v", dcp.Id(), kv_node)
 		}
 	}
 
