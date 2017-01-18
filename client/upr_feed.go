@@ -635,6 +635,10 @@ loop:
 		}
 	}
 
+	// make sure that feed is closed before we signal transmitCl and exit runFeed
+	// otherwise transmitch may be closed before feed is closed and cause panic
+	feed.Close()
+
 	feed.transmitCl <- true
 	logging.Infof("runFeed exiting")
 }
