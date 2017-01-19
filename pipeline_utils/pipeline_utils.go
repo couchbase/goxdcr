@@ -74,11 +74,6 @@ func HasSSLOverMemSupport(cluster_info_svc service_def.ClusterInfoSvc, targetClu
 	return cluster_info_svc.IsClusterCompatible(targetClusterRef, []int{3, 0})
 }
 
-// checks if target cluster supports extended metadata
-func HasExtMetadataSupport(cluster_info_svc service_def.ClusterInfoSvc, targetClusterRef *metadata.RemoteClusterReference) (bool, error) {
-	return cluster_info_svc.IsClusterCompatible(targetClusterRef, []int{4, 5})
-}
-
 // checks if target cluster supports SANs in certificates
 func HasSANInCertificateSupport(cluster_info_svc service_def.ClusterInfoSvc, targetClusterRef *metadata.RemoteClusterReference) (bool, error) {
 	return cluster_info_svc.IsClusterCompatible(targetClusterRef, []int{4, 0})

@@ -1359,9 +1359,6 @@ func (xmem *XmemNozzle) batchGetMeta(bigDoc_map map[string]*base.WrappedMCReques
 		}
 
 		if _, ok := sent_key_map[docKey]; !ok {
-			// request extended meta from target only when
-			// 1. extended meta is supported by replication
-			// and 2. conflict resolution mode of source document is lww
 			req := xmem.composeRequestForGetMeta(docKey, originalReq.Req.VBucket, opaque)
 			reqs_bytes = append(reqs_bytes, req.Bytes()...)
 			opaque_keySeqno_map[opaque] = []interface{}{docKey, originalReq.Seqno, originalReq.Req.VBucket, time.Now()}

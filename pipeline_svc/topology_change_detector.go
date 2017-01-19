@@ -18,7 +18,6 @@ import (
 var source_topology_changedErr = errors.New("Topology has changed on source cluster")
 var target_topology_changedErr = errors.New("Topology has changed on target cluster")
 var target_cluster_version_changed_for_ssl_err = errors.New("Target cluster version has moved to 3.0 or above and started to support ssl over mem.")
-var target_cluster_version_changed_for_extmeta_err = errors.New("Target cluster version has moved to 4.0 or above and started to support extended metadata.")
 
 type TopologyChangeDetectorSvc struct {
 	*comp.AbstractComponent
@@ -116,10 +115,8 @@ func (top_detect_svc *TopologyChangeDetectorSvc) watch(fin_ch chan bool, waitGrp
 
 	checkTargetVersionForSSL, needToReComputeCheckTargetVersionForSSL := top_detect_svc.needCheckTargetForSSL()
 	top_detect_svc.logger.Infof("checkTargetVersionForSSL=%v, needToReComputeCheckTargetVersionForSSL=%v in ToplogyChangeDetectorSvc for pipeline %v", checkTargetVersionForSSL, needToReComputeCheckTargetVersionForSSL, top_detect_svc.pipeline.Topic())
-	checkTargetVersionForExtMeta, needToReComputeCheckTargetVersionForExtMeta := top_detect_svc.needCheckTargetForExtMeta()
-	top_detect_svc.logger.Infof("checkTargetVersionForExtMeta=%v, needToReComputeCheckTargetVersionForExtMeta=%v in ToplogyChangeDetectorSvc for pipeline %v", checkTargetVersionForExtMeta, needToReComputeCheckTargetVersionForExtMeta, top_detect_svc.pipeline.Topic())
 	//run it once right at the beginning
-	top_detect_svc.validate(checkTargetVersionForSSL, checkTargetVersionForExtMeta)
+	top_detect_svc.validate(checkTargetVersionForSSL)
 	ticker := time.NewTicker(base.TopologyChangeCheckInterval)
 	defer ticker.Stop()
 
@@ -138,16 +135,12 @@ func (top_detect_svc *TopologyChangeDetectorSvc) watch(fin_ch chan bool, waitGrp
 				checkTargetVersionForSSL, needToReComputeCheckTargetVersionForSSL := top_detect_svc.needCheckTargetForSSL()
 				top_detect_svc.logger.Infof("After re-computation, checkTargetVersionForSSL=%v, needToReComputeCheckTargetVersionForSSL=%v in ToplogyChangeDetectorSvc for pipeline %v", checkTargetVersionForSSL, needToReComputeCheckTargetVersionForSSL, top_detect_svc.pipeline.Topic())
 			}
-			if needToReComputeCheckTargetVersionForExtMeta {
-				checkTargetVersionForExtMeta, needToReComputeCheckTargetVersionForExtMeta := top_detect_svc.needCheckTargetForExtMeta()
-				top_detect_svc.logger.Infof("After re-computation, checkTargetVersionForExtMeta=%v, needToReComputeCheckTargetVersionForExtMeta=%v in ToplogyChangeDetectorSvc for pipeline %v", checkTargetVersionForExtMeta, needToReComputeCheckTargetVersionForExtMeta, top_detect_svc.pipeline.Topic())
-			}
-			top_detect_svc.validate(checkTargetVersionForSSL, checkTargetVersionForExtMeta)
+			top_detect_svc.validate(checkTargetVersionForSSL)
 		}
 	}
 }
 
-func (top_detect_svc *TopologyChangeDetectorSvc) validate(checkTargetVersionForSSL bool, checkTargetVersionForExtMeta bool) {
+func (top_detect_svc *TopologyChangeDetectorSvc) validate(checkTargetVersionForSSL bool) {
 	vblist_supposed, err := top_detect_svc.validateSourceTopology()
 	if err == nil || err == source_topology_changedErr {
 		err = top_detect_svc.handleSourceToplogyChange(vblist_supposed, err)
@@ -173,17 +166,6 @@ func (top_detect_svc *TopologyChangeDetectorSvc) validate(checkTargetVersionForS
 				top_detect_svc.RaiseEvent(common.NewEvent(common.ErrorEncountered, nil, top_detect_svc, nil, err))
 			} else {
 				top_detect_svc.logger.Infof("ToplogyChangeDetectorSvc for pipeline %v received error=%v when validating target version for ssl", top_detect_svc.pipeline.Topic(), err)
-			}
-		}
-	}
-
-	if checkTargetVersionForExtMeta {
-		err = top_detect_svc.validateTargetVersionForExtMeta()
-		if err != nil {
-			if err == target_cluster_version_changed_for_extmeta_err {
-				top_detect_svc.RaiseEvent(common.NewEvent(common.ErrorEncountered, nil, top_detect_svc, nil, err))
-			} else {
-				top_detect_svc.logger.Infof("ToplogyChangeDetectorSvc for pipeline %v received error=%v when validating target version for extended metadata", top_detect_svc.pipeline.Topic(), err)
 			}
 		}
 	}
@@ -317,23 +299,6 @@ func (top_detect_svc *TopologyChangeDetectorSvc) validateTargetVersionForSSL() e
 	return err
 }
 
-func (top_detect_svc *TopologyChangeDetectorSvc) validateTargetVersionForExtMeta() error {
-	defer top_detect_svc.logger.Infof("ToplogyChangeDetectorSvc for pipeline %v validateTargetVersionForExtMeta completed", top_detect_svc.pipeline.Topic())
-
-	var err error
-	spec := top_detect_svc.pipeline.Specification()
-	targetClusterRef, err := top_detect_svc.remote_cluster_svc.RemoteClusterByUuid(spec.TargetClusterUUID, false)
-	if err == nil {
-		var extMetaSupportedByTarget bool
-		extMetaSupportedByTarget, err = pipeline_utils.HasExtMetadataSupport(top_detect_svc.cluster_info_svc, targetClusterRef)
-		if err == nil && extMetaSupportedByTarget {
-			top_detect_svc.logger.Infof("ToplogyChangeDetectorSvc for pipeline %v detected that remote cluster %v has been upgraded to 4.0 or above and is now supporting extended metadata", top_detect_svc.pipeline.Topic(), targetClusterRef.HostName)
-			err = target_cluster_version_changed_for_extmeta_err
-		}
-	}
-	return err
-}
-
 // returns two bools
 // 1. First bool indicates whether target version needs to be checked
 // 2. second bool indicates whether the first bool needs to be recomputed at the next check
@@ -364,27 +329,6 @@ func (top_detect_svc *TopologyChangeDetectorSvc) needCheckTargetForSSL() (bool, 
 		}
 
 	}
-	// if we get here, we do not really know whether target version needs to be checked
-	// set needCheckTarget to false for now and specify that it needs to be re-computed later
-	return false, true
-}
-
-func (top_detect_svc *TopologyChangeDetectorSvc) needCheckTargetForExtMeta() (bool, bool) {
-	if pipeline_utils.IsPipelineUsingCapi(top_detect_svc.pipeline) {
-		// ext metadata is never needed in capi mode
-		return false, false
-	}
-	var err error
-	spec := top_detect_svc.pipeline.Specification()
-	targetClusterRef, err := top_detect_svc.remote_cluster_svc.RemoteClusterByUuid(spec.TargetClusterUUID, false)
-	if err == nil {
-		var extMetaSupportedByTarget bool
-		extMetaSupportedByTarget, err = pipeline_utils.HasExtMetadataSupport(top_detect_svc.cluster_info_svc, targetClusterRef)
-		if err == nil {
-			return !extMetaSupportedByTarget, false
-		}
-	}
-
 	// if we get here, we do not really know whether target version needs to be checked
 	// set needCheckTarget to false for now and specify that it needs to be re-computed later
 	return false, true
