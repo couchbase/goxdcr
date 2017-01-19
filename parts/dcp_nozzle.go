@@ -124,12 +124,15 @@ type DcpNozzle struct {
 	stats_interval_change_ch chan bool
 
 	user_agent string
+
+	is_capi bool
 }
 
 func NewDcpNozzle(id string,
 	sourceBucketName, targetBucketName string,
 	vbnos []uint16,
 	xdcr_topology_svc service_def.XDCRCompTopologySvc,
+	is_capi bool,
 	logger_context *log.LoggerContext) *DcpNozzle {
 
 	//callback functions from GenServer
@@ -155,6 +158,7 @@ func NewDcpNozzle(id string,
 		vb_stream_status:         make(map[uint16]*streamStatusWithLock),
 		xdcr_topology_svc:        xdcr_topology_svc,
 		stats_interval_change_ch: make(chan bool, 1),
+		is_capi:                  is_capi,
 	}
 
 	msg_callback_func = nil
@@ -203,7 +207,15 @@ func (dcp *DcpNozzle) initialize(settings map[string]interface{}) (err error) {
 
 	uprFeedName := DCP_Connection_Prefix + dcp.Id() + ":" + randName
 
-	err = dcp.uprFeed.UprOpen(uprFeedName, uint32(0), 1024*1024)
+	if dcp.is_capi {
+		// no need to enable xattr for capi replication
+		err = dcp.uprFeed.UprOpen(uprFeedName, uint32(0), 1024*1024)
+	} else {
+		// always enable xattr for xmem replication
+		// even if target cluster does not support xattr, we still need to get xattr data type from dcp
+		// for source side conflict resolution
+		err = dcp.uprFeed.UprOpenWithXATTR(uprFeedName, uint32(0), 1024*1024)
+	}
 	if err != nil {
 		dcp.Logger().Errorf("%v upr open failed. err=%v.\n", dcp.Id(), err)
 		return err

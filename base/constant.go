@@ -299,6 +299,9 @@ const (
 	VBTimestamps        = "VBTimestamps"
 )
 
+// flag for requesting datatype in GetMeta request
+var ReqExtMetaDataType = 0x02
+
 // version of extended metadata to look for
 var ExtendedMetadataVersion = 1
 
@@ -339,11 +342,21 @@ var VersionForXmemSupport = []int{2, 2}
 var VersionForSSLOverMemSupport = []int{3, 0}
 var VersionForSANInCertificateSupport = []int{4, 0}
 var VersionForRBACSupport = []int{5, 0}
+var VersionForXATTRSupport = []int{5, 0}
 
 var GoxdcrUserAgentPrefix = "couchbase-goxdcr"
 var GoxdcrUserAgent = ""
 
 var RetryIntervalForPipelineUpdaterRefresh = 100 * time.Millisecond
+
+// value representing tcp no delay feature in helo request/response
+var HELO_FEATURE_TCP_NO_DELAY uint16 = 0x03
+
+// value representing xattr feature in helo request/response
+var HELO_FEATURE_XATTR uint16 = 0x06
+
+// new XATTR bit in data type field in dcp mutations
+var PROTOCOL_BINARY_DATATYPE_XATTR uint8 = 0x04
 
 // --------------- Constants that are configurable -----------------
 

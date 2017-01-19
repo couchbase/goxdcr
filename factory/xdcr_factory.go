@@ -130,10 +130,10 @@ func (xdcrf *XDCRFactory) NewPipeline(topic string, progress_recorder common.Pip
 	// resolution and target side conflict resolution yield consistent results
 	sourceCRMode := simple_utils.GetCRModeFromConflictResolutionTypeSetting(conflictResolutionType)
 
-	xdcrf.logger.Infof("%v sourceCRMode=%v\n", topic, sourceCRMode)
+	xdcrf.logger.Infof("%v sourceCRMode=%v isCapiReplication=%v\n", topic, sourceCRMode, isCapiReplication)
 
 	// popuplate pipeline using config
-	sourceNozzles, kv_vb_map, err := xdcrf.constructSourceNozzles(spec, topic, logger_ctx)
+	sourceNozzles, kv_vb_map, err := xdcrf.constructSourceNozzles(spec, topic, isCapiReplication, logger_ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -145,7 +145,8 @@ func (xdcrf *XDCRFactory) NewPipeline(topic string, progress_recorder common.Pip
 	progress_recorder(fmt.Sprintf("%v source nozzles have been constructed", len(sourceNozzles)))
 
 	xdcrf.logger.Infof("%v kv_vb_map=%v\n", topic, kv_vb_map)
-	outNozzles, vbNozzleMap, target_kv_vb_map, targetUserName, targetPassword, targetHasRBACSupport, err := xdcrf.constructOutgoingNozzles(spec, kv_vb_map, sourceCRMode, targetBucketInfo, targetClusterRef, logger_ctx)
+	outNozzles, vbNozzleMap, target_kv_vb_map, targetUserName, targetPassword, targetHasRBACSupport, err :=
+		xdcrf.constructOutgoingNozzles(spec, kv_vb_map, sourceCRMode, targetBucketInfo, targetClusterRef, isCapiReplication, logger_ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -281,6 +282,7 @@ func (xdcrf *XDCRFactory) registerAsyncListenersOnTargets(pipeline common.Pipeli
 // construct source nozzles for the requested/current kv node
 func (xdcrf *XDCRFactory) constructSourceNozzles(spec *metadata.ReplicationSpecification,
 	topic string,
+	isCapiReplication bool,
 	logger_ctx *log.LoggerContext) (map[string]common.Nozzle, map[string][]uint16, error) {
 	sourceNozzles := make(map[string]common.Nozzle)
 
@@ -315,7 +317,7 @@ func (xdcrf *XDCRFactory) constructSourceNozzles(spec *metadata.ReplicationSpeci
 			// partIds of the dcpNozzle nodes look like "dcpNozzle_$kvaddr_1"
 			id := xdcrf.partId(DCP_NOZZLE_NAME_PREFIX, spec.Id, kvaddr, i)
 			dcpNozzle := parts.NewDcpNozzle(id,
-				spec.SourceBucketName, spec.TargetBucketName, vbList, xdcrf.xdcr_topology_svc, logger_ctx)
+				spec.SourceBucketName, spec.TargetBucketName, vbList, xdcrf.xdcr_topology_svc, isCapiReplication, logger_ctx)
 			sourceNozzles[dcpNozzle.Id()] = dcpNozzle
 			xdcrf.logger.Debugf("Constructed source nozzle %v with vbList = %v \n", dcpNozzle.Id(), vbList)
 		}
@@ -347,17 +349,10 @@ func (xdcrf *XDCRFactory) filterVBList(targetkvVBList []uint16, kv_vb_map map[st
 
 func (xdcrf *XDCRFactory) constructOutgoingNozzles(spec *metadata.ReplicationSpecification, kv_vb_map map[string][]uint16,
 	sourceCRMode base.ConflictResolutionMode, targetBucketInfo map[string]interface{},
-	targetClusterRef *metadata.RemoteClusterReference, logger_ctx *log.LoggerContext) (outNozzles map[string]common.Nozzle,
+	targetClusterRef *metadata.RemoteClusterReference, isCapiReplication bool, logger_ctx *log.LoggerContext) (outNozzles map[string]common.Nozzle,
 	vbNozzleMap map[uint16]string, kvVBMap map[string][]uint16, targetUserName string, targetPassword string, targetHasRBACSupport bool, err error) {
 	outNozzles = make(map[string]common.Nozzle)
 	vbNozzleMap = make(map[uint16]string)
-
-	nozzleType, err := xdcrf.getOutNozzleType(targetClusterRef, spec)
-	if err != nil {
-		xdcrf.logger.Errorf("Failed to get the nozzle type, err=%v\n", err)
-		return
-	}
-	isCapiNozzle := (nozzleType == base.Capi)
 
 	kvVBMap, err = utils.GetServerVBucketsMap(targetClusterRef.HostName, spec.TargetBucketName, targetBucketInfo)
 	if err != nil {
@@ -369,7 +364,7 @@ func (xdcrf *XDCRFactory) constructOutgoingNozzles(spec *metadata.ReplicationSpe
 		return
 	}
 
-	if isCapiNozzle {
+	if isCapiReplication {
 		targetUserName = targetClusterRef.UserName
 		targetPassword = targetClusterRef.Password
 		// set targetHasRBACSupport to true so that topology change detector will not listen to target version change regard to RBAC
@@ -411,7 +406,7 @@ func (xdcrf *XDCRFactory) constructOutgoingNozzles(spec *metadata.ReplicationSpe
 	var vbCouchApiBaseMap map[uint16]string
 
 	for kvaddr, kvVBList := range kvVBMap {
-		if isCapiNozzle && len(vbCouchApiBaseMap) == 0 {
+		if isCapiReplication && len(vbCouchApiBaseMap) == 0 {
 			// construct vbCouchApiBaseMap only when nessary and only once
 			vbCouchApiBaseMap, err = capi_utils.ConstructVBCouchApiBaseMap(spec.TargetBucketName, targetBucketInfo, targetClusterRef)
 			if err != nil {
@@ -440,7 +435,7 @@ func (xdcrf *XDCRFactory) constructOutgoingNozzles(spec *metadata.ReplicationSpe
 
 			// construct outgoing nozzle
 			var outNozzle common.Nozzle
-			if isCapiNozzle {
+			if isCapiReplication {
 				outNozzle, err = xdcrf.constructCAPINozzle(spec.Id, targetUserName, targetPassword, targetClusterRef.Certificate, vbList, vbCouchApiBaseMap, i, logger_ctx)
 				if err != nil {
 					return

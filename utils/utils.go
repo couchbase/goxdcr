@@ -412,39 +412,99 @@ func GetRemoteMemcachedConnection(serverAddr, username string, password string, 
 }
 
 // send helo with specified user agent string to memcached
-func SendHELO(client *mcc.Client, userAgent string, readTimeout, writeTimeout time.Duration, logger *log.CommonLogger) error {
-	helo := ComposeHELORequest(userAgent)
+// the helo is purely informational, for the identification of the client
+// unsuccessful response is not treated as errors
+func SendHELO(client *mcc.Client, userAgent string, readTimeout, writeTimeout time.Duration,
+	logger *log.CommonLogger) (err error) {
+	heloReq := ComposeHELORequest(userAgent, false /*enableDataType*/)
+
+	var response *mc.MCResponse
+	response, err = sendHELORequest(client, heloReq, userAgent, readTimeout, writeTimeout, logger)
+	if err != nil {
+		logger.Errorf("Received error response from HELO command. userAgent=%v, err=%v.", userAgent, err)
+	} else if response.Status != mc.SUCCESS {
+		logger.Warnf("Received unexpected response from HELO command. userAgent=%v, response status=%v.", userAgent, response.Status)
+	} else {
+		logger.Infof("Successfully sent HELO command with userAgent=%v", userAgent)
+	}
+	return
+}
+
+// send helo to memcached with data type (including xattr) feature enabled
+// used exclusively by xmem nozzle
+// we need to know whether data type is indeed enabled from helo response
+// unsuccessful response is treated as errors
+func SendHELOWithXattrFeature(client *mcc.Client, userAgent string, readTimeout, writeTimeout time.Duration,
+	logger *log.CommonLogger) (xattrEnabled bool, err error) {
+	heloReq := ComposeHELORequest(userAgent, true /*enableXattr*/)
+
+	var response *mc.MCResponse
+	response, err = sendHELORequest(client, heloReq, userAgent, readTimeout, writeTimeout, logger)
+	if err != nil {
+		logger.Errorf("Received error response from HELO command. userAgent=%v, err=%v.", userAgent, err)
+	} else if response.Status != mc.SUCCESS {
+		errMsg := fmt.Sprintf("Received unexpected response from HELO command. userAgent=%v, response status=%v.", userAgent, response.Status)
+		logger.Error(errMsg)
+		err = errors.New(errMsg)
+	} else {
+		// helo succeeded. parse response body for features enabled
+		bodyLen := len(response.Body)
+		if (bodyLen & 1) != 0 {
+			// body has to have even number of bytes
+			errMsg := fmt.Sprintf("Received response body with odd number of bytes from HELO command. userAgent=%v, response body=%v.", userAgent, response.Body)
+			logger.Error(errMsg)
+			err = errors.New(errMsg)
+			return
+		}
+		pos := 0
+		for {
+			if pos >= bodyLen {
+				break
+			}
+			feature := binary.BigEndian.Uint16(response.Body[pos : pos+2])
+			if feature == base.HELO_FEATURE_XATTR {
+				xattrEnabled = true
+				break
+			}
+			pos += 2
+		}
+		logger.Infof("Successfully sent HELO command with userAgent=%v. xattrEnabled=%v", userAgent, xattrEnabled)
+	}
+	return
+}
+
+func sendHELORequest(client *mcc.Client, heloReq *mc.MCRequest, userAgent string, readTimeout, writeTimeout time.Duration,
+	logger *log.CommonLogger) (response *mc.MCResponse, err error) {
 
 	conn := client.Hijack()
 	conn.(net.Conn).SetWriteDeadline(time.Now().Add(writeTimeout))
-	_, err := conn.Write(helo.Bytes())
+	_, err = conn.Write(heloReq.Bytes())
 	conn.(net.Conn).SetWriteDeadline(time.Time{})
 	if err != nil {
 		logger.Warnf("Error sending HELO command. userAgent=%v, err=%v.", userAgent, err)
-		return err
+		return
 	}
 
 	conn.(net.Conn).SetReadDeadline(time.Now().Add(readTimeout))
-	response, err := client.Receive()
+	response, err = client.Receive()
 	conn.(net.Conn).SetReadDeadline(time.Time{})
-	if err != nil {
-		logger.Warnf("Received error response from HELO command. userAgent=%v, err=%v.", userAgent, err)
-		return err
-	} else {
-		if response.Status != mc.SUCCESS {
-			logger.Warnf("Received unexpected response from HELO command. userAgent=%v, response status=%v.", userAgent, response.Status)
-		} else {
-			logger.Infof("Successfully sent HELO command with userAgent=%v", userAgent)
-		}
-	}
-	return nil
+	return
 }
 
-// compose a HELO command with specified user agent string
-func ComposeHELORequest(userAgent string) *mc.MCRequest {
-	value := make([]byte, 2)
-	// tcp nodelay
-	binary.BigEndian.PutUint16(value[0:2], 0x03)
+// compose a HELO command
+func ComposeHELORequest(userAgent string, enableXattr bool) *mc.MCRequest {
+	var value []byte
+	if enableXattr {
+		value = make([]byte, 4)
+		// tcp nodelay
+		binary.BigEndian.PutUint16(value[0:2], base.HELO_FEATURE_TCP_NO_DELAY)
+		// Xattr
+		binary.BigEndian.PutUint16(value[2:4], base.HELO_FEATURE_XATTR)
+	} else {
+		value = make([]byte, 2)
+		// tcp nodelay
+		binary.BigEndian.PutUint16(value[0:2], base.HELO_FEATURE_TCP_NO_DELAY)
+	}
 	return &mc.MCRequest{
 		Key:    []byte(userAgent),
 		Opcode: mc.HELLO,

@@ -436,3 +436,8 @@ func WaitForTimeoutOrFinishSignal(wait_time time.Duration, finish_ch chan bool) 
 	case <-ticker.C:
 	}
 }
+
+// check if a specified data type contains xattr
+func HasXattr(dataType uint8) bool {
+	return dataType&base.PROTOCOL_BINARY_DATATYPE_XATTR > 0
+}

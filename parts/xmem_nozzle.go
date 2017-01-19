@@ -91,7 +91,7 @@ var xmem_setting_defs base.SettingDefinitions = base.SettingDefinitions{SETTING_
 
 var UninitializedReseverationNumber = -1
 
-type ConflictResolver func(doc_metadata_source documentMetadata, doc_metadata_target documentMetadata, source_cr_mode base.ConflictResolutionMode, logger *log.CommonLogger) bool
+type ConflictResolver func(doc_metadata_source documentMetadata, doc_metadata_target documentMetadata, source_cr_mode base.ConflictResolutionMode, xattrEnabled bool, logger *log.CommonLogger) bool
 
 var GetMetaClientName = "client_getMeta"
 var SetMetaClientName = "client_setMeta"
@@ -781,6 +781,9 @@ type XmemNozzle struct {
 	// whether lww conflict resolution mode has been enabled
 	source_cr_mode base.ConflictResolutionMode
 
+	// whether xattr has been enabled in the memcached connection to target
+	xattrEnabled bool
+
 	sourceBucketName string
 
 	getMetaUserAgent string
@@ -831,7 +834,8 @@ func NewXmemNozzle(id string,
 		dataObj_recycler:    dataObj_recycler,
 		topic:               topic,
 		source_cr_mode:      source_cr_mode,
-		sourceBucketName:    sourceBucketName}
+		sourceBucketName:    sourceBucketName,
+	}
 
 	initial_last_ten_batches_size := []uint32{0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
 	atomic.StorePointer(&xmem.last_ten_batches_size, unsafe.Pointer(&initial_last_ten_batches_size))
@@ -1184,6 +1188,11 @@ func (xmem *XmemNozzle) batchSetMetaWithRetry(batch *dataBatch, numOfRetry int) 
 			needSend := needSend(item, batch, xmem.Logger())
 			if needSend == Send {
 
+				err = xmem.preprocessMCRequest(item)
+				if err != nil {
+					return err
+				}
+
 				//blocking
 				index, reserv_num, item_bytes := xmem.buf.enSlot(item)
 
@@ -1247,18 +1256,46 @@ func (xmem *XmemNozzle) batchSetMetaWithRetry(batch *dataBatch, numOfRetry int) 
 	return err
 }
 
+func (xmem *XmemNozzle) preprocessMCRequest(req *base.WrappedMCRequest) error {
+	mc_req := req.Req
+
+	contains_xattr := simple_utils.HasXattr(mc_req.DataType)
+	if contains_xattr && !xmem.xattrEnabled {
+		// if request contains xattr and xattr is not enabled in the memcached connection, strip xattr off the request
+
+		// strip the xattr bit off data type
+		mc_req.DataType = mc_req.DataType & ^(base.PROTOCOL_BINARY_DATATYPE_XATTR)
+		// strip xattr off the mutation body
+		if len(mc_req.Body) < 4 {
+			return fmt.Errorf("%v mutation body is too short to store xattr. key=%v, body=%v", xmem.Id(), string(mc_req.Key), mc_req.Body)
+		}
+		// the first four bytes in body stored the length of the xattr fields
+		xattr_length := binary.BigEndian.Uint32(mc_req.Body[0:4])
+		mc_req.Body = mc_req.Body[xattr_length+4:]
+	}
+
+	contains_datatype := (mc_req.DataType != 0)
+	if contains_datatype {
+		// since data type is never enabled in the memcached connection, if request contains data type
+		// unset all data type bits except xattr bit
+		mc_req.DataType = mc_req.DataType & base.PROTOCOL_BINARY_DATATYPE_XATTR
+	}
+
+	return nil
+}
+
 //return true if doc_meta_source win; false otherwise
-func resolveConflict(doc_meta_source documentMetadata,
-	doc_meta_target documentMetadata, source_cr_mode base.ConflictResolutionMode, logger *log.CommonLogger) bool {
+func resolveConflict(doc_meta_source documentMetadata, doc_meta_target documentMetadata,
+	source_cr_mode base.ConflictResolutionMode, xattrEnabled bool, logger *log.CommonLogger) bool {
 	if source_cr_mode == base.CRMode_LWW {
-		return resolveConflictByCAS(doc_meta_source, doc_meta_target, logger)
+		return resolveConflictByCAS(doc_meta_source, doc_meta_target, xattrEnabled, logger)
 	} else {
-		return resolveConflictByRevSeq(doc_meta_source, doc_meta_target, logger)
+		return resolveConflictByRevSeq(doc_meta_source, doc_meta_target, xattrEnabled, logger)
 	}
 }
 
 func resolveConflictByCAS(doc_meta_source documentMetadata,
-	doc_meta_target documentMetadata, logger *log.CommonLogger) bool {
+	doc_meta_target documentMetadata, xattrEnabled bool, logger *log.CommonLogger) bool {
 	ret := true
 	if doc_meta_target.cas > doc_meta_source.cas {
 		ret = false
@@ -1271,8 +1308,10 @@ func resolveConflictByCAS(doc_meta_source documentMetadata,
 			if doc_meta_source.deletion || (doc_meta_target.expiry > doc_meta_source.expiry) {
 				ret = false
 			} else if doc_meta_target.expiry == doc_meta_source.expiry {
-				if doc_meta_target.flags >= doc_meta_source.flags {
+				if doc_meta_target.flags > doc_meta_source.flags {
 					ret = false
+				} else if doc_meta_target.flags == doc_meta_source.flags {
+					ret = resolveConflictByXattr(doc_meta_source, doc_meta_target, xattrEnabled)
 				}
 			}
 		}
@@ -1281,7 +1320,7 @@ func resolveConflictByCAS(doc_meta_source documentMetadata,
 }
 
 func resolveConflictByRevSeq(doc_meta_source documentMetadata,
-	doc_meta_target documentMetadata, logger *log.CommonLogger) bool {
+	doc_meta_target documentMetadata, xattrEnabled bool, logger *log.CommonLogger) bool {
 	ret := true
 	if doc_meta_target.revSeq > doc_meta_source.revSeq {
 		ret = false
@@ -1294,13 +1333,32 @@ func resolveConflictByRevSeq(doc_meta_source documentMetadata,
 			if doc_meta_source.deletion || (doc_meta_target.expiry > doc_meta_source.expiry) {
 				ret = false
 			} else if doc_meta_target.expiry == doc_meta_source.expiry {
-				if doc_meta_target.flags >= doc_meta_source.flags {
+				if doc_meta_target.flags > doc_meta_source.flags {
 					ret = false
+				} else if doc_meta_target.flags == doc_meta_source.flags {
+					ret = resolveConflictByXattr(doc_meta_source, doc_meta_target, xattrEnabled)
 				}
 			}
 		}
 	}
 	return ret
+}
+
+// if all other metadata fields are equal, use xattr field to decide whether source mutations should win
+func resolveConflictByXattr(doc_meta_source documentMetadata,
+	doc_meta_target documentMetadata, xattrEnabled bool) bool {
+	if xattrEnabled {
+		// if target is xattr enabled, source mutation has xattr, and target mutation does not have xattr
+		// let source mutation win
+		source_has_xattr := simple_utils.HasXattr(doc_meta_source.dataType)
+		target_has_xattr := simple_utils.HasXattr(doc_meta_target.dataType)
+		return source_has_xattr && !target_has_xattr
+	} else {
+		// if target is not xattr enabled, target mutation always does not have xattr
+		// do not have let source mutation win even if source mutation has xattr,
+		// otherwise source mutations need to be repeatly re-sent in backfill mode
+		return false
+	}
 }
 
 func (xmem *XmemNozzle) sendWithRetry(client *xmemClient, numOfRetry int, item_byte []byte) error {
@@ -1515,9 +1573,13 @@ func (xmem *XmemNozzle) batchGetMeta(bigDoc_map map[string]*base.WrappedMCReques
 		key := string(wrappedReq.Req.Key)
 		resp, ok := respMap[key]
 		if ok && resp.Status == mc.SUCCESS {
-			doc_meta_target := xmem.decodeGetMetaResp([]byte(key), resp)
+			doc_meta_target, err := xmem.decodeGetMetaResp([]byte(key), resp)
+			if err != nil {
+				xmem.Logger().Warnf("%v batchGetMeta: Error decoding getMeta response for doc %v. err=%v. Skip conflict resolution and send the doc", xmem.Id(), key, err)
+				continue
+			}
 			doc_meta_source := decodeSetMetaReq(wrappedReq)
-			if !xmem.conflict_resolver(doc_meta_source, doc_meta_target, xmem.source_cr_mode, xmem.Logger()) {
+			if !xmem.conflict_resolver(doc_meta_source, doc_meta_target, xmem.source_cr_mode, xmem.xattrEnabled, xmem.Logger()) {
 				if xmem.Logger().GetLogLevel() >= log.LogLevelDebug {
 					xmem.Logger().Debugf("%v doc %v failed source side conflict resolution. source meta=%v, target meta=%v. no need to send\n", xmem.Id(), key, doc_meta_source, doc_meta_target)
 				}
@@ -1542,7 +1604,7 @@ func (xmem *XmemNozzle) batchGetMeta(bigDoc_map map[string]*base.WrappedMCReques
 	return bigDoc_noRep_map, nil
 }
 
-func (xmem *XmemNozzle) decodeGetMetaResp(key []byte, resp *mc.MCResponse) documentMetadata {
+func (xmem *XmemNozzle) decodeGetMetaResp(key []byte, resp *mc.MCResponse) (documentMetadata, error) {
 	ret := documentMetadata{}
 	ret.key = key
 	extras := resp.Extras
@@ -1551,16 +1613,30 @@ func (xmem *XmemNozzle) decodeGetMetaResp(key []byte, resp *mc.MCResponse) docum
 	ret.expiry = binary.BigEndian.Uint32(extras[8:12])
 	ret.revSeq = binary.BigEndian.Uint64(extras[12:20])
 	ret.cas = resp.Cas
-
-	return ret
+	if xmem.xattrEnabled {
+		if len(extras) < 20 {
+			return ret, fmt.Errorf("%v received unexpected getMeta response, which does not include data type in extras. extras=%v", xmem.Id(), extras)
+		}
+		ret.dataType = extras[20]
+	} else {
+		ret.dataType = resp.DataType
+	}
+	return ret, nil
 
 }
 
 func (xmem *XmemNozzle) composeRequestForGetMeta(key string, vb uint16, opaque uint32) *mc.MCRequest {
-	return &mc.MCRequest{VBucket: vb,
+	req := &mc.MCRequest{VBucket: vb,
 		Key:    []byte(key),
 		Opaque: opaque,
 		Opcode: base.GET_WITH_META}
+
+	// if xattr is enabled, request that data type be included in getMeta response
+	if xmem.xattrEnabled {
+		req.Extras = make([]byte, 1)
+		req.Extras[0] = byte(base.ReqExtMetaDataType)
+	}
+	return req
 }
 
 func (xmem *XmemNozzle) sendSingleSetMeta(adjustRequest bool, item *base.WrappedMCRequest, index uint16, numOfRetry int) error {
@@ -1585,14 +1661,9 @@ func (xmem *XmemNozzle) sendSingleSetMeta(adjustRequest bool, item *base.Wrapped
 	return nil
 }
 
-func (xmem *XmemNozzle) getConnPool() (base.ConnPool, error) {
+func (xmem *XmemNozzle) getConnPool() (pool base.ConnPool, err error) {
 	poolName := xmem.getPoolName()
-	pool := base.ConnPoolMgr().GetPool(poolName)
-	if pool != nil {
-		return pool, nil
-	} else {
-		return nil, fmt.Errorf("%v cannot find connection pool with name %v", xmem.Id(), poolName)
-	}
+	return base.ConnPoolMgr().GetPool(poolName), nil
 }
 
 func (xmem *XmemNozzle) getOrCreateConnPool() (pool base.ConnPool, err error) {
@@ -1671,13 +1742,17 @@ func (xmem *XmemNozzle) initializeConnection() (err error) {
 		xmem.config.maxRetry, xmem.config.max_read_downtime, xmem.Logger())
 
 	// send helo command to setMeta and getMeta clients
-	err = xmem.sendHELO(true /*setMeta*/)
+	xattrEnabled, err := xmem.sendHELO(true /*setMeta*/)
 	if err != nil {
-		return
+		return err
+	} else {
+		// initialize these xmem members only once here
+		xmem.xattrEnabled = xattrEnabled
 	}
-	err = xmem.sendHELO(false /*setMeta */)
+
+	_, err = xmem.sendHELO(false /*setMeta */)
 	if err != nil {
-		return
+		return err
 	}
 
 	xmem.Logger().Infof("%v done with initializeConnection.", xmem.Id())
@@ -2198,12 +2273,11 @@ func (xmem *XmemNozzle) optimisticRep(req *mc.MCRequest) bool {
 	return true
 }
 
-// ignore errors around HELO command since they are not critical to replication
-func (xmem *XmemNozzle) sendHELO(setMeta bool) error {
+func (xmem *XmemNozzle) sendHELO(setMeta bool) (bool, error) {
 	if setMeta {
-		return utils.SendHELO(xmem.client_for_setMeta.getMemClient(), xmem.setMetaUserAgent, xmem.config.readTimeout, xmem.config.writeTimeout, xmem.Logger())
+		return utils.SendHELOWithXattrFeature(xmem.client_for_setMeta.getMemClient(), xmem.setMetaUserAgent, xmem.config.readTimeout, xmem.config.writeTimeout, xmem.Logger())
 	} else {
-		return utils.SendHELO(xmem.client_for_getMeta.getMemClient(), xmem.getMetaUserAgent, xmem.config.readTimeout, xmem.config.writeTimeout, xmem.Logger())
+		return utils.SendHELOWithXattrFeature(xmem.client_for_getMeta.getMemClient(), xmem.getMetaUserAgent, xmem.config.readTimeout, xmem.config.writeTimeout, xmem.Logger())
 	}
 }
 
@@ -2342,6 +2416,7 @@ func (xmem *XmemNozzle) repairConn(client *xmemClient, reason string, rev int) e
 	xmem.Logger().Errorf("%v connection %v is broken due to %v, try to repair...\n", xmem.Id(), client.name, reason)
 	pool, err := xmem.getConnPool()
 	if err != nil {
+		xmem.handleGeneralError(err)
 		return err
 	}
 
@@ -2355,7 +2430,7 @@ func (xmem *XmemNozzle) repairConn(client *xmemClient, reason string, rev int) e
 	repaired := client.repairConn(memClient, rev, xmem.Id(), xmem.finish_ch)
 	if repaired {
 		if client == xmem.client_for_setMeta {
-			err = xmem.sendHELO(true /*setMeta*/)
+			_, err = xmem.sendHELO(true /*setMeta*/)
 			if err != nil {
 				xmem.handleGeneralError(err)
 				xmem.Logger().Errorf("%v - Failed to repair connections for %v. err=%v\n", xmem.Id(), client.name, err)
@@ -2363,7 +2438,7 @@ func (xmem *XmemNozzle) repairConn(client *xmemClient, reason string, rev int) e
 			}
 			go xmem.onSetMetaConnRepaired()
 		} else {
-			err = xmem.sendHELO(false /*setMeta*/)
+			_, err = xmem.sendHELO(false /*setMeta*/)
 			if err != nil {
 				xmem.handleGeneralError(err)
 				xmem.Logger().Errorf("%v - Failed to repair connections for %v. err=%v\n", xmem.Id(), client.name, err)

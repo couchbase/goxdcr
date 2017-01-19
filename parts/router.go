@@ -87,6 +87,7 @@ func (router *Router) ComposeMCRequest(event *mcc.UprEvent) (*base.WrappedMCRequ
 	req.Body = event.Value
 	//opCode
 	req.Opcode = event.Opcode
+	req.DataType = event.DataType
 
 	//extra
 	if event.Opcode == mc.UPR_MUTATION || event.Opcode == mc.UPR_DELETION ||
