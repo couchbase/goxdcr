@@ -224,17 +224,6 @@ func (rm *replicationManager) initMetadataChangeMonitor() {
 	mcm.RegisterListener(internalSettingsChangeListener)
 	rm.internal_settings_svc.SetMetadataChangeHandlerCallback(internalSettingsChangeListener.internalSettingsChangeHandlerCallback)
 
-	bucketSettingsChangeListener := NewBucketSettingsChangeListener(
-		rm.bucket_settings_svc,
-		rm.xdcr_topology_svc,
-		rm.cluster_info_svc,
-		rm.metadata_change_callback_cancel_ch,
-		rm.children_waitgrp,
-		log.DefaultLoggerContext)
-
-	mcm.RegisterListener(bucketSettingsChangeListener)
-	rm.bucket_settings_svc.SetMetadataChangeHandlerCallback(bucketSettingsChangeListener.bucketSettingsChangeHandlerCallback)
-
 	mcm.Start()
 }
 
