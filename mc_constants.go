@@ -122,6 +122,12 @@ const (
 	TMPFAIL         = Status(0x86)
 )
 
+// the producer/consumer bit in dcp flags
+var DCP_PRODUCER uint32 = 0x01
+
+// the include XATTRS bit in dcp flags
+var DCP_OPEN_INCLUDE_XATTRS uint32 = 0x04
+
 // MCItem is an internal representation of an item.
 type MCItem struct {
 	Cas               uint64

@@ -27,6 +27,7 @@ type UprEvent struct {
 	Opcode       gomemcached.CommandCode // Type of event
 	Status       gomemcached.Status      // Response status
 	VBucket      uint16                  // VBucket this event applies to
+	DataType     uint8                   // data type
 	Opaque       uint16                  // 16 MSB of opaque
 	VBuuid       uint64                  // This field is set by downstream
 	Flags        uint32                  // Item flags
@@ -97,13 +98,14 @@ func (flogp *FailoverLog) Latest() (vbuuid, seqno uint64, err error) {
 
 func makeUprEvent(rq gomemcached.MCRequest, stream *UprStream) *UprEvent {
 	event := &UprEvent{
-		Opcode:  rq.Opcode,
-		VBucket: stream.Vbucket,
-		VBuuid:  stream.Vbuuid,
-		Key:     rq.Key,
-		Value:   rq.Body,
-		Cas:     rq.Cas,
-		ExtMeta: rq.ExtMeta,
+		Opcode:   rq.Opcode,
+		VBucket:  stream.Vbucket,
+		VBuuid:   stream.Vbuuid,
+		Key:      rq.Key,
+		Value:    rq.Body,
+		Cas:      rq.Cas,
+		ExtMeta:  rq.ExtMeta,
+		DataType: rq.DataType,
 	}
 	// 16 LSBits are used by client library to encode vbucket number.
 	// 16 MSBits are left for application to multiplex on opaque value.
@@ -187,7 +189,7 @@ func (mc *Client) NewUprFeed() (*UprFeed, error) {
 	return feed, nil
 }
 
-func doUprOpen(mc *Client, name string, sequence uint32) error {
+func doUprOpen(mc *Client, name string, sequence uint32, enableXATTR bool) error {
 
 	rq := &gomemcached.MCRequest{
 		Opcode: gomemcached.UPR_OPEN,
@@ -198,8 +200,13 @@ func doUprOpen(mc *Client, name string, sequence uint32) error {
 	rq.Extras = make([]byte, 8)
 	binary.BigEndian.PutUint32(rq.Extras[:4], sequence)
 
-	// flags = 0 for consumer
-	binary.BigEndian.PutUint32(rq.Extras[4:], 1)
+	// opens a producer type connection
+	flags := gomemcached.DCP_PRODUCER
+	if enableXATTR {
+		// set DCP_OPEN_INCLUDE_XATTRS bit in flags
+		flags = flags | gomemcached.DCP_OPEN_INCLUDE_XATTRS
+	}
+	binary.BigEndian.PutUint32(rq.Extras[4:], flags)
 
 	if err := mc.Transmit(rq); err != nil {
 		return err
@@ -223,19 +230,19 @@ func doUprOpen(mc *Client, name string, sequence uint32) error {
 // sequence: sequence number for the connection
 // bufsize: max size of the application
 func (feed *UprFeed) UprOpen(name string, sequence uint32, bufSize uint32) error {
-	return feed.uprOpen(name, sequence, bufSize, false /*enableExtMeta*/)
+	return feed.uprOpen(name, sequence, bufSize, false /*enableXATTR*/)
 }
 
-// UprOpen with extended metadata enabled.
-func (feed *UprFeed) UprOpenWithExtMeta(name string, sequence uint32, bufSize uint32) error {
-	return feed.uprOpen(name, sequence, bufSize, true /*enableExtMeta*/)
+// UprOpen with XATTR enabled.
+func (feed *UprFeed) UprOpenWithXATTR(name string, sequence uint32, bufSize uint32) error {
+	return feed.uprOpen(name, sequence, bufSize, true /*enableXATTR*/)
 }
 
-func (feed *UprFeed) uprOpen(name string, sequence uint32, bufSize uint32, enableExtMeta bool) error {
+func (feed *UprFeed) uprOpen(name string, sequence uint32, bufSize uint32, enableXATTR bool) error {
 	mc := feed.conn
 
 	var err error
-	if err = doUprOpen(mc, name, sequence); err != nil {
+	if err = doUprOpen(mc, name, sequence, enableXATTR); err != nil {
 		return err
 	}
 
@@ -274,18 +281,6 @@ func (feed *UprFeed) uprOpen(name string, sequence uint32, bufSize uint32, enabl
 		return err
 	}
 
-	// send a UPR control message to set the enable_ext_metadata flag for the this connection
-	if enableExtMeta {
-		rq := &gomemcached.MCRequest{
-			Opcode: gomemcached.UPR_CONTROL,
-			Key:    []byte("enable_ext_metadata"),
-			Body:   []byte("true"),
-		}
-		err = feed.writeToTransmitCh(rq)
-		if err != nil {
-			return err
-		}
-	}
 	return nil
 }
 
@@ -298,7 +293,7 @@ func (mc *Client) UprGetFailoverLog(
 		Opaque: opaqueFailover,
 	}
 
-	if err := doUprOpen(mc, "FailoverLog", 0); err != nil {
+	if err := doUprOpen(mc, "FailoverLog", 0, false); err != nil {
 		return nil, fmt.Errorf("UPR_OPEN Failed %s", err.Error())
 	}
 
