@@ -76,7 +76,7 @@ type ReplicationSpecService struct {
 func NewReplicationSpecService(uilog_svc service_def.UILogSvc, remote_cluster_svc service_def.RemoteClusterSvc,
 	metadata_svc service_def.MetadataSvc, xdcr_comp_topology_svc service_def.XDCRCompTopologySvc, cluster_info_svc service_def.ClusterInfoSvc,
 	logger_ctx *log.LoggerContext) (*ReplicationSpecService, error) {
-	logger := log.NewLogger("ReplicationSpecService", logger_ctx)
+	logger := log.NewLogger("ReplSpecSvc", logger_ctx)
 	svc := &ReplicationSpecService{
 		metadata_svc:           metadata_svc,
 		uilog_svc:              uilog_svc,

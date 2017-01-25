@@ -25,7 +25,7 @@ type InternalSettingsSvc struct {
 func NewInternalSettingsSvc(metadata_svc service_def.MetadataSvc, logger_ctx *log.LoggerContext) *InternalSettingsSvc {
 	service := &InternalSettingsSvc{
 		metadata_svc: metadata_svc,
-		logger:       log.NewLogger("InternalSettingsService", logger_ctx),
+		logger:       log.NewLogger("IntSettSvc", logger_ctx),
 	}
 
 	// tracks the "initial" internal_settings object, which can be used to determine if any change has been made to it later

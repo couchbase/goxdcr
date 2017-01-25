@@ -25,7 +25,7 @@ type UILogSvc struct {
 func NewUILogSvc(top_svc service_def.XDCRCompTopologySvc, loggerCtx *log.LoggerContext) *UILogSvc {
 	service := &UILogSvc{
 		top_svc: top_svc,
-		logger:  log.NewLogger("UILogService", loggerCtx),
+		logger:  log.NewLogger("UILogSvc", loggerCtx),
 	}
 
 	service.logger.Infof("Created ui log service.\n")

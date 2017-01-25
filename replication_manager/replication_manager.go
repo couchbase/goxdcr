@@ -40,7 +40,7 @@ import (
 	"time"
 )
 
-var logger_rm *log.CommonLogger = log.NewLogger("ReplicationManager", log.DefaultLoggerContext)
+var logger_rm *log.CommonLogger = log.NewLogger("ReplMgr", log.DefaultLoggerContext)
 var StatsUpdateIntervalForPausedReplications = 60 * time.Second
 var StatusCheckInterval = 15 * time.Second
 var MemStatsLogInterval = 2 * time.Minute

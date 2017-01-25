@@ -22,7 +22,7 @@ type GlobalSettingsSvc struct {
 func NewGlobalSettingsSvc(metadata_svc service_def.MetadataSvc, logger_ctx *log.LoggerContext) *GlobalSettingsSvc {
 	return &GlobalSettingsSvc{
 		metadata_svc: metadata_svc,
-		logger:       log.NewLogger("GlobalSettingsService", logger_ctx),
+		logger:       log.NewLogger("GlobalSettSvc", logger_ctx),
 	}
 }
 

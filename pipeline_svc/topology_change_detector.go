@@ -56,11 +56,11 @@ func NewTopologyChangeDetectorSvc(cluster_info_svc service_def.ClusterInfoSvc,
 	xdcr_topology_svc service_def.XDCRCompTopologySvc,
 	remote_cluster_svc service_def.RemoteClusterSvc,
 	logger_ctx *log.LoggerContext) *TopologyChangeDetectorSvc {
-	logger := log.NewLogger("ToplogyChangeDetector", logger_ctx)
+	logger := log.NewLogger("TopoChangeDet", logger_ctx)
 	return &TopologyChangeDetectorSvc{xdcr_topology_svc: xdcr_topology_svc,
 		cluster_info_svc:   cluster_info_svc,
 		remote_cluster_svc: remote_cluster_svc,
-		AbstractComponent:  comp.NewAbstractComponentWithLogger("ToplogyChangeDetector", logger),
+		AbstractComponent:  comp.NewAbstractComponentWithLogger("TopoChangeDet", logger),
 		pipeline:           nil,
 		finish_ch:          make(chan bool, 1),
 		wait_grp:           &sync.WaitGroup{},

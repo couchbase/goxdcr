@@ -49,7 +49,7 @@ func PipelineManager(factory common.PipelineFactory, repl_spec_svc service_def.R
 		pipeline_mgr.repl_spec_svc = repl_spec_svc
 		pipeline_mgr.xdcr_topology_svc = xdcr_topology_svc
 		pipeline_mgr.remote_cluster_svc = remote_cluster_svc
-		pipeline_mgr.logger = log.NewLogger("PipelineManager", logger_context)
+		pipeline_mgr.logger = log.NewLogger("PipelineMgr", logger_context)
 		pipeline_mgr.logger.Info("Pipeline Manager is constucted")
 		pipeline_mgr.child_waitGrp = &sync.WaitGroup{}
 

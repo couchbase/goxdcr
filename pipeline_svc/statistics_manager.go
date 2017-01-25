@@ -188,7 +188,7 @@ func NewStatisticsManager(through_seqno_tracker_svc service_def.ThroughSeqnoTrac
 	logger_ctx *log.LoggerContext, active_vbs map[string][]uint16, bucket_name string) *StatisticsManager {
 	stats_mgr := &StatisticsManager{
 		registries:                make(map[string]metrics.Registry),
-		logger:                    log.NewLogger("StatisticsManager", logger_ctx),
+		logger:                    log.NewLogger("StatsMgr", logger_ctx),
 		bucket_name:               bucket_name,
 		finish_ch:                 make(chan bool, 1),
 		done_ch:                   make(chan bool, 1),

@@ -159,7 +159,7 @@ func truncateGapSeqnoList(through_seqno uint64, seqno_list []uint64) []uint64 {
 }
 
 func NewThroughSeqnoTrackerSvc(logger_ctx *log.LoggerContext) *ThroughSeqnoTrackerSvc {
-	logger := log.NewLogger("ThroughSeqnoTrackerSvc", logger_ctx)
+	logger := log.NewLogger("ThrSeqTrackSvc", logger_ctx)
 	tsTracker := &ThroughSeqnoTrackerSvc{
 		logger:                      logger,
 		vb_map:                      make(map[uint16]bool),

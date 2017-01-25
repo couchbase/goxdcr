@@ -41,7 +41,7 @@ func NewWithSettingConstructor(p common.Pipeline, service_settings_constructor S
 		runtime_svcs: make(map[string]common.PipelineService),
 		pipeline:     p,
 		isRunning:    false,
-		logger:       log.NewLogger("PipelineRuntimeCtx", logger_context),
+		logger:       log.NewLogger("RuntimeCtx", logger_context),
 		service_settings_constructor:        service_settings_constructor,
 		runtime_svcs_lock:                   &sync.RWMutex{},
 		service_update_settings_constructor: service_update_settings_constructor}

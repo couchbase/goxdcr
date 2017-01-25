@@ -10,6 +10,7 @@
 package log
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -21,21 +22,24 @@ import (
 
 type LogLevel int
 
+var GOXDCR_COMPONENT_CODE = "GOXDCR."
+
 const (
-	LogLevelError LogLevel = iota
-	// LogLevelInfo log messages for info
+	LogLevelFatal LogLevel = iota
+	LogLevelError
+	LogLevelWarn
 	LogLevelInfo
-	// LogLevelDebug log messages for info and debug
 	LogLevelDebug
-	// LogLevelTrace log messages info, debug and trace
 	LogLevelTrace
 )
 
 const (
-	LOG_LEVEL_ERROR_STR string = "Error"
-	LOG_LEVEL_INFO_STR  string = "Info"
-	LOG_LEVEL_DEBUG_STR string = "Debug"
-	LOG_LEVEL_TRACE_STR string = "Trace"
+	LOG_LEVEL_FATAL_STR string = "FATA"
+	LOG_LEVEL_ERROR_STR string = "ERRO"
+	LOG_LEVEL_WARN_STR  string = "WARN"
+	LOG_LEVEL_INFO_STR  string = "INFO"
+	LOG_LEVEL_DEBUG_STR string = "DEBU"
+	LOG_LEVEL_TRACE_STR string = "TRAC"
 )
 
 const (
@@ -44,8 +48,14 @@ const (
 	XdcrErrorLogFileName = "xdcr_errors.log"
 )
 
+// keep module separate from log.Logger so that we can control its formating
+type XdcrLogger struct {
+	logger *log.Logger
+	module string
+}
+
 type CommonLogger struct {
-	loggers map[LogLevel]*log.Logger
+	loggers map[LogLevel]*XdcrLogger
 	context *LoggerContext
 }
 
@@ -81,10 +91,12 @@ var DefaultLoggerContext *LoggerContext
 func init() {
 	logWriters := make(map[LogLevel]*LogWriter)
 	logWriter := &LogWriter{os.Stdout}
+	logWriters[LogLevelFatal] = logWriter
+	logWriters[LogLevelError] = logWriter
+	logWriters[LogLevelWarn] = logWriter
 	logWriters[LogLevelInfo] = logWriter
 	logWriters[LogLevelDebug] = logWriter
 	logWriters[LogLevelTrace] = logWriter
-	logWriters[LogLevelError] = logWriter
 
 	DefaultLoggerContext = &LoggerContext{
 		Log_writers: logWriters,
@@ -132,55 +144,71 @@ func NewLogger(module string, logger_context *LoggerContext) *CommonLogger {
 	if logger_context != nil {
 		context = logger_context
 	}
-	loggers := make(map[LogLevel]*log.Logger)
+	loggers := make(map[LogLevel]*XdcrLogger)
 	for logLevel, logWriter := range context.Log_writers {
-		loggers[logLevel] = log.New(logWriter, module, 0)
+		loggers[logLevel] = &XdcrLogger{log.New(logWriter, "", 0), module}
 	}
 	return &CommonLogger{loggers, context}
 }
 
-func (l *CommonLogger) logMsgf(level LogLevel, prefix string, format string, v ...interface{}) {
+func (l *CommonLogger) logMsgf(level LogLevel, format string, v ...interface{}) {
 	if l.context.Log_level >= level {
-		l.loggers[level].Printf(addTimestampToPrefix(prefix)+format, v...)
+		l.loggers[level].logger.Printf(l.processCommonFields(level)+format, v...)
 	}
 }
 
-func (l *CommonLogger) logMsg(level LogLevel, prefix string, msg string) {
+func (l *CommonLogger) logMsg(level LogLevel, msg string) {
 	if l.context.Log_level >= level {
-		l.loggers[level].Println(addTimestampToPrefix(prefix) + msg)
+		l.loggers[level].logger.Println(l.processCommonFields(level) + msg)
 	}
 }
 
-func (l *CommonLogger) Infof(format string, v ...interface{}) {
-	l.logMsgf(LogLevelInfo, "[INFO] ", format, v...)
-}
-
-func (l *CommonLogger) Debugf(format string, v ...interface{}) {
-	l.logMsgf(LogLevelDebug, "[DEBUG] ", format, v...)
-}
-
-func (l *CommonLogger) Tracef(format string, v ...interface{}) {
-	l.logMsgf(LogLevelTrace, "[TRACE] ", format, v...)
+func (l *CommonLogger) Fatalf(format string, v ...interface{}) {
+	l.logMsgf(LogLevelFatal, format, v...)
 }
 
 func (l *CommonLogger) Errorf(format string, v ...interface{}) {
-	l.logMsgf(LogLevelError, "[ERROR] ", format, v...)
+	l.logMsgf(LogLevelError, format, v...)
 }
 
-func (l *CommonLogger) Info(msg string) {
-	l.logMsg(LogLevelInfo, "[INFO] ", msg)
+func (l *CommonLogger) Warnf(format string, v ...interface{}) {
+	l.logMsgf(LogLevelWarn, format, v...)
 }
 
-func (l *CommonLogger) Debug(msg string) {
-	l.logMsg(LogLevelDebug, "[DEBUG] ", msg)
+func (l *CommonLogger) Infof(format string, v ...interface{}) {
+	l.logMsgf(LogLevelInfo, format, v...)
 }
 
-func (l *CommonLogger) Trace(msg string) {
-	l.logMsgf(LogLevelTrace, "[TRACE] ", msg)
+func (l *CommonLogger) Debugf(format string, v ...interface{}) {
+	l.logMsgf(LogLevelDebug, format, v...)
+}
+
+func (l *CommonLogger) Tracef(format string, v ...interface{}) {
+	l.logMsgf(LogLevelTrace, format, v...)
+}
+
+func (l *CommonLogger) Fatal(msg string) {
+	l.logMsg(LogLevelFatal, msg)
 }
 
 func (l *CommonLogger) Error(msg string) {
-	l.logMsg(LogLevelError, "[ERROR] ", msg)
+	l.logMsg(LogLevelError, msg)
+}
+
+func (l *CommonLogger) Warn(msg string) {
+	l.logMsg(LogLevelWarn, msg)
+}
+
+func (l *CommonLogger) Info(msg string) {
+	l.logMsg(LogLevelInfo, msg)
+}
+
+func (l *CommonLogger) Debug(msg string) {
+	l.logMsg(LogLevelDebug, msg)
+}
+
+func (l *CommonLogger) Trace(msg string) {
+	l.logMsgf(LogLevelTrace, msg)
 }
 
 func (l *CommonLogger) LoggerContext() *LoggerContext {
@@ -210,8 +238,12 @@ func LogLevelFromStr(levelStr string) (LogLevel, error) {
 
 func (level LogLevel) String() string {
 	switch level {
+	case LogLevelFatal:
+		return LOG_LEVEL_FATAL_STR
 	case LogLevelError:
 		return LOG_LEVEL_ERROR_STR
+	case LogLevelWarn:
+		return LOG_LEVEL_WARN_STR
 	case LogLevelInfo:
 		return LOG_LEVEL_INFO_STR
 	case LogLevelDebug:
@@ -222,10 +254,19 @@ func (level LogLevel) String() string {
 	return ""
 }
 
+// compose fields that are common to all log messages
 // example log entry:
-// PipelineManager 2015-03-27T11:56:02.221-07:00 [INFO] Pipeline Manager is constucted
-func addTimestampToPrefix(prefix string) string {
-	return " " + FormatTimeWithMilliSecondPrecision(time.Now()) + " " + prefix
+// 2017-01-26T14:21:22.523-08:00 INFO GOXDCR.HttpServer: [xdcr:127.0.0.1:13000] starting ...
+func (l *CommonLogger) processCommonFields(level LogLevel) string {
+	var buffer bytes.Buffer
+	buffer.WriteString(FormatTimeWithMilliSecondPrecision(time.Now()))
+	buffer.WriteString(" ")
+	buffer.WriteString(level.String())
+	buffer.WriteString(" ")
+	buffer.WriteString(GOXDCR_COMPONENT_CODE)
+	buffer.WriteString(l.loggers[level].module)
+	buffer.WriteString(": ")
+	return buffer.String()
 }
 
 // example format: 2015-03-17T10:15:06.717-07:00

@@ -32,7 +32,7 @@ func NewAbstractComponentWithLogger(id string, logger *log.CommonLogger) *Abstra
 }
 
 func NewAbstractComponent(id string) *AbstractComponent {
-	return NewAbstractComponentWithLogger(id, log.NewLogger("AbstractComponent", log.DefaultLoggerContext))
+	return NewAbstractComponentWithLogger(id, log.NewLogger("AbstractComp", log.DefaultLoggerContext))
 }
 
 func (c *AbstractComponent) Id() string {

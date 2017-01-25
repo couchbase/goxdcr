@@ -120,7 +120,7 @@ func NewCheckpointManager(checkpoints_svc service_def.CheckpointsService, capi_s
 	if checkpoints_svc == nil || capi_svc == nil || remote_cluster_svc == nil || rep_spec_svc == nil || cluster_info_svc == nil || xdcr_topology_svc == nil {
 		return nil, errors.New("checkpoints_svc, capi_svc, remote_cluster_svc, rep_spec_svc, cluster_info_svc and xdcr_topology_svc can't be nil")
 	}
-	logger := log.NewLogger("CheckpointManager", logger_ctx)
+	logger := log.NewLogger("CheckpointMgr", logger_ctx)
 	return &CheckpointManager{
 		AbstractComponent:         component.NewAbstractComponentWithLogger(CheckpointMgrId, logger),
 		pipeline:                  nil,

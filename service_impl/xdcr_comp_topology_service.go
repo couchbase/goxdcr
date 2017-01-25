@@ -41,7 +41,7 @@ func NewXDCRTopologySvc(adminport, xdcrRestPort, localProxyPort uint16,
 		local_proxy_port: localProxyPort,
 		isEnterprise:     isEnterprise,
 		cluster_info_svc: cluster_info_svc,
-		logger:           log.NewLogger("XDCRTopologyService", logger_ctx),
+		logger:           log.NewLogger("TopoSvc", logger_ctx),
 	}
 	return top_svc, nil
 }

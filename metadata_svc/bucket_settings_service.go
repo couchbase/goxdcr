@@ -36,7 +36,7 @@ func NewBucketSettingsService(metadata_svc service_def.MetadataSvc,
 	return &BucketSettingsService{
 		metadata_svc:           metadata_svc,
 		xdcr_comp_topology_svc: xdcr_comp_topology_svc,
-		logger:                 log.NewLogger("BucketSettingsService", logger_ctx),
+		logger:                 log.NewLogger("BucketSettSvc", logger_ctx),
 	}
 }
 

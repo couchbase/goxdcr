@@ -89,7 +89,7 @@ func NewMigrationSvc(xdcr_comp_topology_svc service_def.XDCRCompTopologySvc, rem
 		repl_spec_svc:            repl_spec_svc,
 		replication_settings_svc: replication_settings_svc,
 		checkpoints_svc:          checkpoints_svc,
-		logger:                   log.NewLogger("MigrationService", loggerCtx),
+		logger:                   log.NewLogger("MigrationSvc", loggerCtx),
 	}
 
 	service.logger.Infof("Created Migration service.\n")

@@ -47,7 +47,7 @@ type CAPIService struct {
 func NewCAPIService(cluster_info_service *ClusterInfoSvc, logger_ctx *log.LoggerContext) *CAPIService {
 	return &CAPIService{
 		cluster_info_service: cluster_info_service,
-		logger:               log.NewLogger("CAPIService", logger_ctx),
+		logger:               log.NewLogger("CapiSvc", logger_ctx),
 	}
 }
 

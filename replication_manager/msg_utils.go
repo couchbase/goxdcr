@@ -167,7 +167,7 @@ var SettingsKeyToRestKeyMap = map[string]string{
 	metadata.GoGC:                  GoGC,
 }
 
-var logger_msgutil *log.CommonLogger = log.NewLogger("MessageUtils", log.DefaultLoggerContext)
+var logger_msgutil *log.CommonLogger = log.NewLogger("MsgUtils", log.DefaultLoggerContext)
 
 func NewGetRemoteClustersResponse(remoteClusters map[string]*metadata.RemoteClusterReference) (*ap.Response, error) {
 	remoteClusterArr := make([]map[string]interface{}, 0)

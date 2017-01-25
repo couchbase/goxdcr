@@ -97,7 +97,7 @@ type RemoteClusterService struct {
 func NewRemoteClusterService(uilog_svc service_def.UILogSvc, metakv_svc service_def.MetadataSvc,
 	xdcr_topology_svc service_def.XDCRCompTopologySvc, cluster_info_svc service_def.ClusterInfoSvc,
 	logger_ctx *log.LoggerContext) (*RemoteClusterService, error) {
-	logger := log.NewLogger("RemoteClusterService", logger_ctx)
+	logger := log.NewLogger("RemClusterSvc", logger_ctx)
 	svc := &RemoteClusterService{
 		metakv_svc:        metakv_svc,
 		uilog_svc:         uilog_svc,

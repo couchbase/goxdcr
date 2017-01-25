@@ -25,7 +25,7 @@ type CheckpointsService struct {
 
 func NewCheckpointsService(metadata_svc service_def.MetadataSvc, logger_ctx *log.LoggerContext) service_def.CheckpointsService {
 	return &CheckpointsService{metadata_svc: metadata_svc,
-		logger: log.NewLogger("CheckpointService", logger_ctx)}
+		logger: log.NewLogger("CheckpointSvc", logger_ctx)}
 }
 
 func (ckpt_svc *CheckpointsService) CheckpointsDoc(replicationId string, vbno uint16) (*metadata.CheckpointsDoc, error) {

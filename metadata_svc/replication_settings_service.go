@@ -26,7 +26,7 @@ type ReplicationSettingsSvc struct {
 func NewReplicationSettingsSvc(metadata_svc service_def.MetadataSvc, logger_ctx *log.LoggerContext) *ReplicationSettingsSvc {
 	return &ReplicationSettingsSvc{
 		metadata_svc: metadata_svc,
-		logger:       log.NewLogger("ReplicationSettingsService", logger_ctx),
+		logger:       log.NewLogger("ReplSettSvc", logger_ctx),
 	}
 }
 

@@ -11,29 +11,28 @@ package connector
 
 import (
 	//	"errors"
-	"sync"
 	common "github.com/couchbase/goxdcr/common"
 	component "github.com/couchbase/goxdcr/component"
 	"github.com/couchbase/goxdcr/log"
+	"sync"
 )
-
 
 //SimpleConnector connects one source to one downstream
 type SimpleConnector struct {
 	*component.AbstractComponent
 	downStreamPart common.Part
-	stateLock sync.RWMutex
+	stateLock      sync.RWMutex
 }
 
-func NewSimpleConnector (id string, downstreamPart common.Part, logger_context *log.LoggerContext) *SimpleConnector {
-	logger := log.NewLogger("SimpleConnector", logger_context)
+func NewSimpleConnector(id string, downstreamPart common.Part, logger_context *log.LoggerContext) *SimpleConnector {
+	logger := log.NewLogger("SimpleConn", logger_context)
 	return &SimpleConnector{component.NewAbstractComponentWithLogger(id, logger), downstreamPart, sync.RWMutex{}}
 }
 
 func (con *SimpleConnector) Forward(data interface{}) error {
 	con.stateLock.RLock()
 	defer con.stateLock.RUnlock()
-	
+
 	con.Logger().Debugf("%v forwarding to downstream part %s", con.Id(), con.downStreamPart.Id())
 	return con.downStreamPart.Receive(data)
 }
@@ -41,7 +40,7 @@ func (con *SimpleConnector) Forward(data interface{}) error {
 func (con *SimpleConnector) DownStreams() map[string]common.Part {
 	con.stateLock.RLock()
 	defer con.stateLock.RUnlock()
-	
+
 	downStreams := make(map[string]common.Part)
 	downStreams[con.downStreamPart.Id()] = con.downStreamPart
 	return downStreams
@@ -51,7 +50,7 @@ func (con *SimpleConnector) DownStreams() map[string]common.Part {
 func (con *SimpleConnector) AddDownStream(partId string, part common.Part) error {
 	con.stateLock.Lock()
 	defer con.stateLock.Unlock()
-	
+
 	if con.downStreamPart == nil {
 		con.downStreamPart = part
 	} else {

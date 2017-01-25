@@ -48,7 +48,7 @@ type AuditSvc struct {
 func NewAuditSvc(top_svc service_def.XDCRCompTopologySvc, loggerCtx *log.LoggerContext) (*AuditSvc, error) {
 	service := &AuditSvc{
 		top_svc:     top_svc,
-		logger:      log.NewLogger("AuditService", loggerCtx),
+		logger:      log.NewLogger("AuditSvc", loggerCtx),
 		initialized: false,
 	}
 

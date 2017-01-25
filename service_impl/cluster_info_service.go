@@ -23,7 +23,7 @@ type ClusterInfoSvc struct {
 
 func NewClusterInfoSvc(logger_ctx *log.LoggerContext) *ClusterInfoSvc {
 	return &ClusterInfoSvc{
-		logger: log.NewLogger("ClusterInfoService", logger_ctx),
+		logger: log.NewLogger("ClusterInfoSvc", logger_ctx),
 	}
 }
 

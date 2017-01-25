@@ -26,7 +26,7 @@ type MetaKVMetadataSvc struct {
 
 func NewMetaKVMetadataSvc(logger_ctx *log.LoggerContext) (*MetaKVMetadataSvc, error) {
 	return &MetaKVMetadataSvc{
-		logger: log.NewLogger("MetadataService", logger_ctx),
+		logger: log.NewLogger("MetadataSvc", logger_ctx),
 	}, nil
 }
 
