@@ -1,20 +1,24 @@
 package utils
 
 import (
+	"encoding/binary"
 	"errors"
 	"expvar"
 	"fmt"
 	"github.com/couchbase/cbauth"
 	"github.com/couchbase/go-couchbase"
+	mc "github.com/couchbase/gomemcached"
 	mcc "github.com/couchbase/gomemcached/client"
 	base "github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/simple_utils"
+	"net"
 	"net/url"
 	"reflect"
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 	"unicode/utf8"
 )
 
@@ -340,7 +344,7 @@ func BucketNotFoundError(bucketName string) error {
 	return fmt.Errorf("Bucket `%v` not found.", bucketName)
 }
 
-func GetMemcachedConnection(serverAddr, bucketName string, logger *log.CommonLogger) (*mcc.Client, error) {
+func GetMemcachedConnection(serverAddr, bucketName string, userAgent string, logger *log.CommonLogger) (*mcc.Client, error) {
 	logger.Infof("GetMemcachedConnection serverAddr=%v, bucketName=%v\n", serverAddr, bucketName)
 	if serverAddr == "" {
 		panic("serverAddr is empty")
@@ -361,7 +365,44 @@ func GetMemcachedConnection(serverAddr, bucketName string, logger *log.CommonLog
 		return nil, err
 	}
 
+	SendHELO(conn, userAgent, base.HELOTimeout, base.HELOTimeout, logger)
+
 	return conn, nil
+}
+
+// send helo with specified user agent string to memcached
+func SendHELO(client *mcc.Client, userAgent string, readTimeout, writeTimeout time.Duration, logger *log.CommonLogger) {
+	helo := ComposeHELORequest(userAgent)
+
+	conn := client.Hijack()
+	conn.(net.Conn).SetWriteDeadline(time.Now().Add(writeTimeout))
+	_, err := conn.Write(helo.Bytes())
+	if err != nil {
+		logger.Warnf("Error sending HELO command. userAgent=%v, err=%v.", userAgent, err)
+		return
+	}
+
+	conn.(net.Conn).SetReadDeadline(time.Now().Add(readTimeout))
+	response, err := client.Receive()
+	if err != nil {
+		logger.Warnf("Received error response from HELO command. userAgent=%v, err=%v.", userAgent, err)
+	} else if response.Status != mc.SUCCESS {
+		logger.Warnf("Received unexpected response from HELO command. userAgent=%v, response status=%v.", userAgent, response.Status)
+	} else {
+		logger.Infof("Successfully sent HELO command with userAgent=%v", userAgent)
+	}
+}
+
+// compose a HELO command with specified user agent string
+func ComposeHELORequest(userAgent string) *mc.MCRequest {
+	value := make([]byte, 2)
+	// tcp nodelay
+	binary.BigEndian.PutUint16(value[0:2], 0x03)
+	return &mc.MCRequest{
+		Key:    []byte(userAgent),
+		Opcode: mc.HELLO,
+		Body:   value,
+	}
 }
 
 func GetIntSettingFromSettings(settings map[string]interface{}, settingName string) (int, error) {
@@ -405,7 +446,7 @@ func GetSettingFromSettings(settings map[string]interface{}, settingName string)
 	return setting
 }
 
-func GetMemcachedClient(serverAddr, bucketName string, kv_mem_clients map[string]*mcc.Client, logger *log.CommonLogger) (*mcc.Client, error) {
+func GetMemcachedClient(serverAddr, bucketName string, kv_mem_clients map[string]*mcc.Client, userAgent string, logger *log.CommonLogger) (*mcc.Client, error) {
 	client, ok := kv_mem_clients[serverAddr]
 	if ok {
 		return client, nil
@@ -414,7 +455,7 @@ func GetMemcachedClient(serverAddr, bucketName string, kv_mem_clients map[string
 			panic("unexpected empty bucketName")
 		}
 
-		var client, err = GetMemcachedConnection(serverAddr, bucketName, logger)
+		var client, err = GetMemcachedConnection(serverAddr, bucketName, userAgent, logger)
 		if err == nil {
 			kv_mem_clients[serverAddr] = client
 			return client, nil

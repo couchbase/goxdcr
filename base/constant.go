@@ -321,6 +321,9 @@ var UnexpectedEOF = "unexpected EOF"
 // flag for memcached to enable lww to lww bucket replication
 var FORCE_ACCEPT_WITH_META_OPS uint32 = 0x02
 
+// read/write timeout for helo command to memcached
+var HELOTimeout time.Duration = time.Duration(120) * time.Second
+
 // --------------- Constants that are configurable -----------------
 
 // timeout for checkpointing attempt before pipeline is stopped - to put an upper bound on the delay of pipeline stop/restart
