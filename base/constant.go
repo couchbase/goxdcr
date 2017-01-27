@@ -61,7 +61,7 @@ var VBucketServerMapKey = "vBucketServerMap"
 var VBucketMapKey = "vBucketMap"
 var URIKey = "uri"
 var SASLPasswordKey = "saslPassword"
-var BucketUUIDKey = "uuid"
+var UUIDKey = "uuid"
 var BucketCapabilitiesKey = "bucketCapabilities"
 var BucketTypeKey = "bucketType"
 var BucketsKey = "buckets"
@@ -323,6 +323,13 @@ var FORCE_ACCEPT_WITH_META_OPS uint32 = 0x02
 // read/write timeout for helo command to memcached
 var HELOTimeout time.Duration = time.Duration(120) * time.Second
 
+// memcached client will be reset if it encounters the following number of consecutive errors
+var MaxMemClientErrorCount = 3
+
+// minimum versions where various features are supported
+var VersionForSSLOverMemSupport = []int{3, 0}
+var VersionForSANInCertificateSupport = []int{4, 0}
+
 // --------------- Constants that are configurable -----------------
 
 // timeout for checkpointing attempt before pipeline is stopped - to put an upper bound on the delay of pipeline stop/restart
@@ -343,7 +350,7 @@ var MaxTopologyChangeCountBeforeRestart = 30
 // 1. topology change has happened before  - the current topology is not the same as the topology when pipeline was first started
 // 2. there has been no topology change in the past max_topology_stable_count_before_restart topology change checks
 // then we assume that the topology change has completed, and restart the pipeline
-var MaxTopologyStableCountBeforeRestart = 30
+var MaxTopologyStableCountBeforeRestart = 20
 
 // the max number of concurrent workers for checkpointing
 var MaxWorkersForCheckpointing = 5

@@ -39,7 +39,7 @@ func ConstructVBCouchApiBaseMap(targetBucketName string, targetBucketInfo map[st
 
 func ConstructServerCouchApiBaseMap(targetBucketName string, targetBucketInfo map[string]interface{}, remoteClusterRef *metadata.RemoteClusterReference) (map[string]string, error) {
 	serverCouchApiBaseMap := make(map[string]string)
-	nodeList, err := utils.GetNodeListFromClusterInfo(targetBucketInfo, logger_capi_utils)
+	nodeList, err := utils.GetNodeListFromInfoMap(targetBucketInfo, logger_capi_utils)
 	if err != nil {
 		return nil, err
 	}

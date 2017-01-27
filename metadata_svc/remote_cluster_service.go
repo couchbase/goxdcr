@@ -171,21 +171,19 @@ func (service *RemoteClusterService) RemoteClusterByRefId(refId string, refresh 
 
 	ref := val.ref.Clone()
 	if refresh {
-		ref, err = service.refresh(ref, val.cas)
+		service.refresh(ref)
 	}
 
-	return ref, err
+	return ref, nil
 }
 
 func (service *RemoteClusterService) RemoteClusterByRefName(refName string, refresh bool) (*metadata.RemoteClusterReference, error) {
 	var ref *metadata.RemoteClusterReference
-	var old_cas int64
 
 	ref_map := service.RemoteClusterMap()
 	for _, ref_val := range ref_map {
 		if ref_val.ref.Name == refName {
 			ref = ref_val.ref.Clone()
-			old_cas = ref_val.cas
 			break
 		}
 	}
@@ -193,23 +191,20 @@ func (service *RemoteClusterService) RemoteClusterByRefName(refName string, refr
 	if ref == nil {
 		return nil, errors.New(UnknownRemoteClusterErrorMessage)
 	} else {
-		var err error
 		if refresh {
-			ref, err = service.refresh(ref, old_cas)
+			service.refresh(ref)
 		}
-		return ref, err
+		return ref, nil
 	}
 }
 
 func (service *RemoteClusterService) RemoteClusterByUuid(uuid string, refresh bool) (*metadata.RemoteClusterReference, error) {
 	var ref *metadata.RemoteClusterReference
-	var old_cas int64
 
 	remote_cluster_map := service.RemoteClusterMap()
 	for _, ref_val := range remote_cluster_map {
 		if ref_val.ref.Uuid == uuid {
 			ref = ref_val.ref.Clone()
-			old_cas = ref_val.cas
 			break
 		}
 	}
@@ -217,11 +212,10 @@ func (service *RemoteClusterService) RemoteClusterByUuid(uuid string, refresh bo
 	if ref == nil {
 		return nil, errors.New(UnknownRemoteClusterErrorMessage)
 	} else {
-		var err error
 		if refresh {
-			ref, err = service.refresh(ref, old_cas)
+			service.refresh(ref)
 		}
-		return ref, err
+		return ref, nil
 	}
 }
 
@@ -336,21 +330,13 @@ func (service *RemoteClusterService) RemoteClusters(refresh bool) (map[string]*m
 	remote_cluster_map := service.RemoteClusterMap()
 
 	remote_cluster_map_out := make(map[string]*metadata.RemoteClusterReference)
-	cas_map := make(map[string]int64)
 	for key, ref_val := range remote_cluster_map {
 		remote_cluster_map_out[key] = ref_val.ref.Clone()
-		cas_map[key] = ref_val.cas
 	}
 
 	if refresh {
-		for key, ref := range remote_cluster_map_out {
-			new_ref, err := service.refresh(ref, cas_map[key])
-			if err != nil {
-				// log the error
-				service.logger.Errorf("could not refresh remote cluster reference %v. err=%v\n", ref.Name, err)
-			} else {
-				remote_cluster_map_out[key] = new_ref
-			}
+		for _, ref := range remote_cluster_map_out {
+			service.refresh(ref)
 		}
 	}
 
@@ -448,7 +434,7 @@ func (service *RemoteClusterService) validateRemoteCluster(ref *metadata.RemoteC
 	var hostAddr string
 	if ref.DemandEncryption {
 		if ref.HttpsHostName == "" {
-			httpsHostAddr, err, isInternalError := service.httpsHostAddr(ref.HostName)
+			httpsHostAddr, err, isInternalError := utils.HttpsHostAddr(ref.HostName, service.logger)
 			if err != nil {
 				if isInternalError {
 					return err
@@ -552,15 +538,6 @@ func (service *RemoteClusterService) formErrorFromValidatingRemotehost(ref *meta
 	}
 }
 
-func (service *RemoteClusterService) httpsHostAddr(hostAddr string) (string, error, bool) {
-	hostName := utils.GetHostName(hostAddr)
-	sslPort, err, isInternalError := utils.GetSSLPort(hostAddr, service.logger)
-	if err != nil {
-		return "", err, isInternalError
-	}
-	return utils.GetHostAddr(hostName, sslPort), nil, false
-}
-
 // this internal api differs from AddRemoteCluster in that it does not perform validation
 func (service *RemoteClusterService) addRemoteCluster(ref *metadata.RemoteClusterReference) error {
 	key := ref.Id
@@ -610,7 +587,7 @@ func (service *RemoteClusterService) cacheRef(ref *metadata.RemoteClusterReferen
 	if err == nil {
 		service.logger.Debugf("connStr=%v, nodeList=%v\n", connStr, nodeList)
 
-		nodeNameList, err := service.getNodeNameList(nodeList, connStr)
+		nodeNameList, err := utils.GetNodeNameListFromNodeList(nodeList, connStr, service.logger)
 		if err != nil {
 			service.logger.Errorf("Error getting nodes from target cluster. skipping alternative node computation. ref=%v\n", ref.HostName)
 		} else {
@@ -651,41 +628,18 @@ func (service *RemoteClusterService) cacheRef(ref *metadata.RemoteClusterReferen
 	return err
 }
 
-func (service *RemoteClusterService) getNodeNameList(nodeList []interface{}, connStr string) ([]string, error) {
-	nodeNameList := make([]string, 0)
-
-	for _, node := range nodeList {
-		nodeInfoMap, ok := node.(map[string]interface{})
-		if !ok {
-			errMsg := fmt.Sprintf("node info is not of map type. type of node info=%v", reflect.TypeOf(node))
-			service.logger.Error(errMsg)
-			return nil, errors.New(errMsg)
-		}
-
-		hostAddr, err := utils.GetHostAddrFromNodeInfo(connStr, nodeInfoMap, service.logger)
-		if err != nil {
-			errMsg := fmt.Sprintf("cannot get hostname from node info %v", nodeInfoMap)
-			service.logger.Error(errMsg)
-			return nil, errors.New(errMsg)
-		}
-
-		nodeNameList = append(nodeNameList, hostAddr)
-	}
-	return nodeNameList, nil
-}
-
-func (service *RemoteClusterService) refresh(ref *metadata.RemoteClusterReference, old_cas int64) (*metadata.RemoteClusterReference, error) {
+func (service *RemoteClusterService) refresh(ref *metadata.RemoteClusterReference) error {
 	service.logger.Debugf("Refresh remote cluster reference %v\n", ref.Id)
 
 	ref_cache, _ := service.getCacheVal(ref.Id)
 	if ref_cache == nil {
 		service.logger.Infof("Stop refreshing ref %v. Ref in cache has been deleted by others\n", ref.Id)
-		return nil, service_def.MetadataNotFoundErr
+		return service_def.MetadataNotFoundErr
 	}
 
 	username, password, certificate, sanInCertificate, err := ref.MyCredentials()
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	var connStr, hostName, httpsHostName string
@@ -717,7 +671,7 @@ func (service *RemoteClusterService) refresh(ref *metadata.RemoteClusterReferenc
 				// we have exhausted the entire node list. return error
 				errMsg := fmt.Sprintf("Failed to refresh remote cluster reference %v since none of the nodes in target node list is accessible. node list = %v\n", ref.Id, ref_cache.nodes_connectionstr)
 				service.logger.Error(errMsg)
-				return nil, errors.New(errMsg)
+				return errors.New(errMsg)
 			}
 		}
 
@@ -759,7 +713,7 @@ func (service *RemoteClusterService) refresh(ref *metadata.RemoteClusterReferenc
 				}
 				// since we modified ref_cache, it may not be safe to continue processing the old ref_cache.
 				// return error to abort the current refresh operation
-				return nil, fmt.Errorf("Skipping refreshing remote cluster reference %v since target node %v has been moved to a different cluster\n", ref.Id, connStr)
+				return fmt.Errorf("Skipping refreshing remote cluster reference %v since target node %v has been moved to a different cluster\n", ref.Id, connStr)
 			}
 
 			if ref.ActiveHostName != hostName {
@@ -769,7 +723,7 @@ func (service *RemoteClusterService) refresh(ref *metadata.RemoteClusterReferenc
 				service.logger.Infof("Replaced ActiveHostName in ref %v with %v and ActiveHttpsHostName with %v\n", ref.Id, hostName, httpsHostName)
 			}
 
-			nodeNameList, err := service.getNodeNameList(nodeList, connStr)
+			nodeNameList, err := utils.GetNodeNameListFromNodeList(nodeList, connStr, service.logger)
 			if err != nil {
 				service.logger.Infof("Error getting node name list for remote cluster reference %v using connection string %v. err=%v\n", ref.Id, connStr, err)
 				continue
@@ -795,7 +749,7 @@ func (service *RemoteClusterService) refresh(ref *metadata.RemoteClusterReferenc
 					service.logger.Infof("Error updating hostname in remote cluster reference %v. err=%v\n", ref.Id, err)
 				} else {
 					// if SetRemoteCluster() succeeds, the cache has been updated, return ok
-					return ref, nil
+					return nil
 				}
 			}
 
@@ -813,9 +767,9 @@ func (service *RemoteClusterService) refresh(ref *metadata.RemoteClusterReferenc
 				// if we receive error updating cache, the remote cluster ref in cache may have been updated by another go-routine
 				// it most likely won't be helpful iterating through remaining nodes since the same update cache error would be returned
 				// abort the current refresh operation
-				return nil, errors.New(errMsg)
+				return errors.New(errMsg)
 			} else {
-				return ref, nil
+				return nil
 			}
 		}
 
@@ -970,7 +924,7 @@ func (service *RemoteClusterService) getHttpsAddrFromMap(hostName string) (strin
 	var err error
 	httpsHostName, ok = service.httpsAddrMap[hostName]
 	if !ok {
-		httpsHostName, err, _ = service.httpsHostAddr(hostName)
+		httpsHostName, err, _ = utils.HttpsHostAddr(hostName, service.logger)
 		if err != nil {
 			return "", err
 		}

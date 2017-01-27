@@ -395,3 +395,23 @@ func BalanceLoad(num_of_worker int, num_of_load int) [][]int {
 
 	return load_distribution
 }
+
+// check if a cluster (with specified clusterCompatibility) is compatible with version
+func IsClusterCompatible(clusterCompatibility int, version []int) bool {
+	return clusterCompatibility >= EncodeVersionToEffectiveVersion(version)
+}
+
+// encode version into an integer
+func EncodeVersionToEffectiveVersion(version []int) int {
+	majorVersion := 0
+	minorVersion := 0
+	if len(version) > 0 {
+		majorVersion = version[0]
+	}
+	if len(version) > 1 {
+		minorVersion = version[1]
+	}
+
+	effectiveVersion := majorVersion*0x10000 + minorVersion
+	return effectiveVersion
+}

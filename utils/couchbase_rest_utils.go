@@ -98,6 +98,15 @@ func bucketInfoParseError(bucketInfo map[string]interface{}, logger *log.CommonL
 	return fmt.Errorf(errMsg)
 }
 
+func HttpsHostAddr(hostAddr string, logger *log.CommonLogger) (string, error, bool) {
+	hostName := GetHostName(hostAddr)
+	sslPort, err, isInternalError := GetSSLPort(hostAddr, logger)
+	if err != nil {
+		return "", err, isInternalError
+	}
+	return GetHostAddr(hostName, sslPort), nil, false
+}
+
 func GetSSLPort(hostAddr string, logger *log.CommonLogger) (uint16, error, bool) {
 	portInfo := make(map[string]interface{})
 	err, statusCode := QueryRestApiWithAuth(hostAddr, base.SSLPortsPath, false, "", "", nil, false, base.MethodGet, "", nil, 0, &portInfo, nil, false, logger)
@@ -128,6 +137,36 @@ func GetClusterInfo(hostAddr, path, username, password string, certificate []byt
 	return clusterInfo, nil
 }
 
+func GetClusterUUID(clusterConnInfoProvider base.ClusterConnectionInfoProvider, logger *log.CommonLogger) (string, error) {
+	hostAddr, err := clusterConnInfoProvider.MyConnectionStr()
+	if err != nil {
+		return "", err
+	}
+	username, password, certificate, sanInCertificate, err := clusterConnInfoProvider.MyCredentials()
+	if err != nil {
+		return "", err
+	}
+	clusterInfo, err := GetClusterInfo(hostAddr, base.PoolsPath, username, password, certificate, sanInCertificate, logger)
+	if err != nil {
+		return "", err
+	}
+	clusterUUIDObj, ok := clusterInfo[base.UUIDKey]
+	if !ok {
+		return "", fmt.Errorf("Cannot find uuid key in cluster info. hostAddr=%v, clusterInfo=%v\n", hostAddr, clusterInfo)
+	}
+	clusterUUID, ok := clusterUUIDObj.(string)
+	if !ok {
+		// cluster uuid is "[]" for unintialized cluster
+		_, ok = clusterUUIDObj.([]interface{})
+		if ok {
+			return "", fmt.Errorf("cluster %v is not initialized. clusterUUIDObj=%v\n", hostAddr, clusterUUIDObj)
+		} else {
+			return "", fmt.Errorf("uuid key in cluster info is not of string type. hostAddr=%v, clusterUUIDObj=%v\n", hostAddr, clusterUUIDObj)
+		}
+	}
+	return clusterUUID, nil
+}
+
 // get a list of node infos with full info
 // this api calls xxx/pools/nodes, which returns full node info including clustercompatibility, etc.
 // the catch is that this xxx/pools/nodes is not supported by elastic search cluster
@@ -137,7 +176,7 @@ func GetNodeListWithFullInfo(hostAddr, username, password string, certificate []
 		return nil, err
 	}
 
-	return GetNodeListFromClusterInfo(clusterInfo, logger)
+	return GetNodeListFromInfoMap(clusterInfo, logger)
 
 }
 
@@ -150,7 +189,7 @@ func GetNodeListWithMinInfo(hostAddr, username, password string, certificate []b
 		return nil, err
 	}
 
-	return GetNodeListFromClusterInfo(clusterInfo, logger)
+	return GetNodeListFromInfoMap(clusterInfo, logger)
 
 }
 
@@ -165,7 +204,7 @@ func GetClusterUUIDAndNodeListWithMinInfo(hostAddr, username, password string, c
 		return "", nil, err
 	}
 
-	nodeList, err := GetNodeListFromClusterInfo(defaultPoolInfo, logger)
+	nodeList, err := GetNodeListFromInfoMap(defaultPoolInfo, logger)
 
 	return clusterUUID, nodeList, err
 
@@ -199,7 +238,7 @@ func RemoteBucketUUID(hostAddr, bucketName, username, password string, certifica
 
 func GetBucketUuidFromBucketInfo(bucketName string, bucketInfo map[string]interface{}, logger *log.CommonLogger) (string, error) {
 	bucketUUID := ""
-	bucketUUIDObj, ok := bucketInfo[base.BucketUUIDKey]
+	bucketUUIDObj, ok := bucketInfo[base.UUIDKey]
 	if !ok {
 		return "", fmt.Errorf("Error looking up uuid of target bucket %v", bucketName)
 	} else {
@@ -242,7 +281,7 @@ func GetClusterUUIDFromDefaultPoolInfo(defaultPoolInfo map[string]interface{}, l
 
 func GetClusterUUIDFromURI(uri string) (string, error) {
 	// uri is in the form of /pools/default/buckets?uuid=d5dea23aa7ee3771becb3fcdb46ff956
-	searchKey := base.BucketUUIDKey + "="
+	searchKey := base.UUIDKey + "="
 	index := strings.LastIndex(uri, searchKey)
 	if index < 0 {
 		return "", fmt.Errorf("uri does not contain uuid. uri=%v", uri)
@@ -250,12 +289,27 @@ func GetClusterUUIDFromURI(uri string) (string, error) {
 	return uri[index+len(searchKey):], nil
 }
 
-func GetNodeListFromClusterInfo(clusterInfo map[string]interface{}, logger *log.CommonLogger) ([]interface{}, error) {
+func GetClusterCompatibilityFromBucketInfo(bucketName string, bucketInfo map[string]interface{}, logger *log.CommonLogger) (int, error) {
+	nodeList, err := GetNodeListFromInfoMap(bucketInfo, logger)
+	if err != nil {
+		return 0, err
+	}
+
+	clusterCompatibility, err := GetClusterCompatibilityFromNodeList(nodeList)
+	if err != nil {
+		logger.Error(err.Error())
+		return 0, err
+	}
+
+	return clusterCompatibility, nil
+}
+
+func GetNodeListFromInfoMap(infoMap map[string]interface{}, logger *log.CommonLogger) ([]interface{}, error) {
 	// get node list from the map
-	nodes, ok := clusterInfo[base.NodesKey]
+	nodes, ok := infoMap[base.NodesKey]
 	if !ok {
 		// should never get here
-		errMsg := fmt.Sprintf("cluster info contains no nodes. cluster info=%v", clusterInfo)
+		errMsg := fmt.Sprintf("info map contains no nodes. info map=%v", infoMap)
 		logger.Error(errMsg)
 		return nil, errors.New(errMsg)
 	}
@@ -269,6 +323,49 @@ func GetNodeListFromClusterInfo(clusterInfo map[string]interface{}, logger *log.
 	}
 
 	return nodeList, nil
+}
+
+func GetClusterCompatibilityFromNodeList(nodeList []interface{}) (int, error) {
+	if len(nodeList) > 0 {
+		firstNode, ok := nodeList[0].(map[string]interface{})
+		if !ok {
+			return 0, fmt.Errorf("node info is of wrong type. node info=%v", nodeList[0])
+		}
+		clusterCompatibility, ok := firstNode[base.ClusterCompatibilityKey]
+		if !ok {
+			return 0, fmt.Errorf("Can't get cluster compatibility info. node info=%v", nodeList[0])
+		}
+		clusterCompatibilityFloat, ok := clusterCompatibility.(float64)
+		if !ok {
+			return 0, fmt.Errorf("cluster compatibility is not of int type. type=%v", reflect.TypeOf(clusterCompatibility))
+		}
+		return int(clusterCompatibilityFloat), nil
+	}
+
+	return 0, fmt.Errorf("node list is empty")
+}
+
+func GetNodeNameListFromNodeList(nodeList []interface{}, connStr string, logger *log.CommonLogger) ([]string, error) {
+	nodeNameList := make([]string, 0)
+
+	for _, node := range nodeList {
+		nodeInfoMap, ok := node.(map[string]interface{})
+		if !ok {
+			errMsg := fmt.Sprintf("node info is not of map type. type of node info=%v", reflect.TypeOf(node))
+			logger.Error(errMsg)
+			return nil, errors.New(errMsg)
+		}
+
+		hostAddr, err := GetHostAddrFromNodeInfo(connStr, nodeInfoMap, logger)
+		if err != nil {
+			errMsg := fmt.Sprintf("cannot get hostname from node info %v", nodeInfoMap)
+			logger.Error(errMsg)
+			return nil, errors.New(errMsg)
+		}
+
+		nodeNameList = append(nodeNameList, hostAddr)
+	}
+	return nodeNameList, nil
 }
 
 func GetSSLProxyPortMap(hostAddr, username, password string, certificate []byte, sanInCertificate bool, logger *log.CommonLogger) (map[string]uint16, error) {
