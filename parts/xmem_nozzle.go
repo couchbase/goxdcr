@@ -10,6 +10,7 @@
 package parts
 
 import (
+	"bytes"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -755,6 +756,8 @@ type XmemNozzle struct {
 
 	// whether lww conflict resolution mode has been enabled
 	source_cr_mode base.ConflictResolutionMode
+
+	sourceBucketName string
 }
 
 func NewXmemNozzle(id string,
@@ -762,7 +765,8 @@ func NewXmemNozzle(id string,
 	connPoolNamePrefix string,
 	connPoolConnSize int,
 	connectString string,
-	bucketName string,
+	sourceBucketName string,
+	targetBucketName string,
 	password string,
 	dataObj_recycler base.DataObjRecycler,
 	source_cr_mode base.ConflictResolutionMode,
@@ -801,7 +805,8 @@ func NewXmemNozzle(id string,
 		counter_batches:     0,
 		dataObj_recycler:    dataObj_recycler,
 		topic:               topic,
-		source_cr_mode:      source_cr_mode}
+		source_cr_mode:      source_cr_mode,
+		sourceBucketName:    sourceBucketName}
 
 	initial_last_ten_batches_size := []uint32{0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
 	atomic.StorePointer(&xmem.last_ten_batches_size, unsafe.Pointer(&initial_last_ten_batches_size))
@@ -810,7 +815,7 @@ func NewXmemNozzle(id string,
 	xmem.conflict_resolver = resolveConflict
 
 	xmem.config.connectStr = connectString
-	xmem.config.bucketName = bucketName
+	xmem.config.bucketName = targetBucketName
 	xmem.config.password = password
 	xmem.config.connPoolNamePrefix = connPoolNamePrefix
 	xmem.config.connPoolSize = connPoolConnSize
@@ -1636,6 +1641,10 @@ func (xmem *XmemNozzle) initializeConnection() (err error) {
 		xmem.config.writeTimeout, memClient_getMeta,
 		xmem.config.maxRetry, xmem.config.max_read_downtime, xmem.Logger())
 
+	// send helo command
+	xmem.sendHELO(xmem.client_for_setMeta)
+	xmem.sendHELO(xmem.client_for_getMeta)
+
 	xmem.Logger().Infof("%v done with initializeConnection.", xmem.Id())
 	return err
 }
@@ -2158,6 +2167,23 @@ func (xmem *XmemNozzle) optimisticRep(req *mc.MCRequest) bool {
 		return uint32(req.Size()) < xmem.getOptiRepThreshold()
 	}
 	return true
+}
+
+// ignore errors around HELO command since they are not critical to replication
+func (xmem *XmemNozzle) sendHELO(client *xmemClient) {
+	userAgent := xmem.composeUserAgent(client)
+	utils.SendHELO(client.getMemClient(), userAgent, xmem.config.readTimeout, xmem.config.writeTimeout, xmem.Logger())
+}
+
+// compose user agent string for HELO command
+func (xmem *XmemNozzle) composeUserAgent(client *xmemClient) string {
+	var buffer bytes.Buffer
+	buffer.WriteString("Goxdcr Xmem ")
+	buffer.WriteString(client.name)
+	buffer.WriteString(" SourceBucket:" + xmem.sourceBucketName)
+	buffer.WriteString(" TargetBucket:" + xmem.config.bucketName)
+	buffer.WriteString(" ConnType:" + xmem.connType.String())
+	return buffer.String()
 }
 
 func (xmem *XmemNozzle) getConn(client *xmemClient, readTimeout bool, writeTimeout bool) (io.ReadWriteCloser, int, error) {

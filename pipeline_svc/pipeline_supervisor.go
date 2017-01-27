@@ -10,6 +10,7 @@
 package pipeline_svc
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	mcc "github.com/couchbase/gomemcached/client"
@@ -63,6 +64,8 @@ type PipelineSupervisor struct {
 	// stores error count of memcached clients
 	kv_mem_client_error_count map[string]int
 	kv_mem_clients_lock       *sync.Mutex
+
+	user_agent string
 }
 
 func NewPipelineSupervisor(id string, logger_ctx *log.LoggerContext, failure_handler common.SupervisorFailureHandler,
@@ -88,6 +91,8 @@ func (pipelineSupervisor *PipelineSupervisor) Attach(p common.Pipeline) error {
 	pipelineSupervisor.Logger().Infof("Attaching pipeline %v to supervior service %v\n", p.InstanceId(), pipelineSupervisor.Id())
 
 	pipelineSupervisor.pipeline = p
+
+	pipelineSupervisor.composeUserAgent()
 
 	partsMap := pipeline.GetAllParts(p)
 
@@ -316,6 +321,16 @@ func (pipelineSupervisor *PipelineSupervisor) checkPipelineHealth() error {
 	return nil
 }
 
+// compose user agent string for HELO command
+func (pipelineSupervisor *PipelineSupervisor) composeUserAgent() {
+	var buffer bytes.Buffer
+	buffer.WriteString("Goxdcr PipelineSupervisor ")
+	spec := pipelineSupervisor.pipeline.Specification()
+	buffer.WriteString(" SourceBucket:" + spec.SourceBucketName)
+	buffer.WriteString(" TargetBucket:" + spec.TargetBucketName)
+	pipelineSupervisor.user_agent = buffer.String()
+}
+
 func (pipelineSupervisor *PipelineSupervisor) getDcpStats() (map[string]map[string]string, error) {
 	// need to lock since it is possible, even though unlikely, that getDcpStats() may be called multiple times at the same time
 	pipelineSupervisor.kv_mem_clients_lock.Lock()
@@ -331,7 +346,7 @@ func (pipelineSupervisor *PipelineSupervisor) getDcpStats() (map[string]map[stri
 	}
 
 	for _, serverAddr := range nodes {
-		client, err := utils.GetMemcachedClient(serverAddr, bucketName, pipelineSupervisor.kv_mem_clients, pipelineSupervisor.Logger())
+		client, err := utils.GetMemcachedClient(serverAddr, bucketName, pipelineSupervisor.kv_mem_clients, pipelineSupervisor.user_agent, pipelineSupervisor.Logger())
 		if err != nil {
 			return nil, err
 		}

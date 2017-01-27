@@ -682,7 +682,8 @@ func (bscl *BucketSettingsChangeListener) setTimeSyncOnBucket(bucketName string,
 		return err
 	}
 
-	client, err := utils.GetMemcachedConnection(hostAddr, bucketName, bscl.logger)
+	// TODO set more accurate user agent
+	client, err := utils.GetMemcachedConnection(hostAddr, bucketName, "Goxdcr bucketSetting listener", bscl.logger)
 	if err != nil {
 		return err
 	}

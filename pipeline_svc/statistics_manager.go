@@ -10,6 +10,7 @@
 package pipeline_svc
 
 import (
+	"bytes"
 	"errors"
 	"expvar"
 	"fmt"
@@ -132,6 +133,11 @@ var OverviewMetricKeys = []string{DOCS_WRITTEN_METRIC, EXPIRY_DOCS_WRITTEN_METRI
 	RESP_WAIT_METRIC, META_LATENCY_METRIC, DCP_DISPATCH_TIME_METRIC, DCP_DATACH_LEN,
 }
 
+// the fixed user agent string for connections to collect stats for paused replications
+// it is possible to construct the user agent string dynamically by adding source and target bucket info to it
+// it would cause too many string re-allocations, though
+var UserAgentPausedReplication = "Goxdcr client for paused replication"
+
 type SampleStats struct {
 	Count int64
 	Mean  float64
@@ -181,6 +187,8 @@ type StatisticsManager struct {
 	through_seqno_tracker_svc service_def.ThroughSeqnoTrackerSvc
 	cluster_info_svc          service_def.ClusterInfoSvc
 	xdcr_topology_svc         service_def.XDCRCompTopologySvc
+
+	user_agent string
 }
 
 func NewStatisticsManager(through_seqno_tracker_svc service_def.ThroughSeqnoTrackerSvc,
@@ -567,7 +575,7 @@ func (stats_mgr *StatisticsManager) calculateChangesLeft(docs_processed int64) (
 	stats_mgr.kv_mem_clients_lock.Lock()
 	defer stats_mgr.kv_mem_clients_lock.Unlock()
 
-	total_changes, err := calculateTotalChanges(stats_mgr.active_vbs, stats_mgr.kv_mem_clients, stats_mgr.kv_mem_client_error_count, stats_mgr.bucket_name, stats_mgr.logger)
+	total_changes, err := calculateTotalChanges(stats_mgr.active_vbs, stats_mgr.kv_mem_clients, stats_mgr.kv_mem_client_error_count, stats_mgr.bucket_name, stats_mgr.user_agent, stats_mgr.logger)
 	if err != nil {
 		return 0, err
 	}
@@ -622,6 +630,7 @@ func (stats_mgr *StatisticsManager) getOrCreateRegistry(name string) metrics.Reg
 
 func (stats_mgr *StatisticsManager) Attach(pipeline common.Pipeline) error {
 	stats_mgr.pipeline = pipeline
+	stats_mgr.composeUserAgent()
 
 	//mount collectors with pipeline
 	for _, collector := range stats_mgr.collectors {
@@ -633,6 +642,16 @@ func (stats_mgr *StatisticsManager) Attach(pipeline common.Pipeline) error {
 	stats_mgr.logger.Infof("StatisticsManager is started for pipeline %v", stats_mgr.pipeline.Topic)
 
 	return nil
+}
+
+// compose user agent string for HELO command
+func (stats_mgr *StatisticsManager) composeUserAgent() {
+	var buffer bytes.Buffer
+	buffer.WriteString("Goxdcr StatsMgr ")
+	spec := stats_mgr.pipeline.Specification()
+	buffer.WriteString(" SourceBucket:" + spec.SourceBucketName)
+	buffer.WriteString(" TargetBucket:" + spec.TargetBucketName)
+	stats_mgr.user_agent = buffer.String()
 }
 
 func (stats_mgr *StatisticsManager) initOverviewRegistry() {
@@ -707,7 +726,7 @@ func (stats_mgr *StatisticsManager) closeConnections() {
 
 func (stats_mgr *StatisticsManager) initConnections() error {
 	for serverAddr, _ := range stats_mgr.active_vbs {
-		conn, err := utils.GetMemcachedConnection(serverAddr, stats_mgr.bucket_name, stats_mgr.logger)
+		conn, err := utils.GetMemcachedConnection(serverAddr, stats_mgr.bucket_name, stats_mgr.user_agent, stats_mgr.logger)
 		if err != nil {
 			return err
 		}
@@ -1167,7 +1186,7 @@ func constructStatsForReplication(spec *metadata.ReplicationSpecification, cur_k
 		return nil, err
 	}
 
-	total_changes, err := calculateTotalChanges(cur_kv_vb_map, kv_mem_clients, kv_mem_client_error_count, spec.SourceBucketName, logger)
+	total_changes, err := calculateTotalChanges(cur_kv_vb_map, kv_mem_clients, kv_mem_client_error_count, spec.SourceBucketName, UserAgentPausedReplication, logger)
 	if err != nil {
 		return nil, err
 	}
@@ -1186,10 +1205,10 @@ func constructStatsForReplication(spec *metadata.ReplicationSpecification, cur_k
 }
 
 func calculateTotalChanges(kv_vb_map map[string][]uint16, kv_mem_clients map[string]*mcc.Client,
-	kv_mem_client_error_count map[string]int, sourceBucketName string, logger *log.CommonLogger) (int64, error) {
+	kv_mem_client_error_count map[string]int, sourceBucketName string, user_agent string, logger *log.CommonLogger) (int64, error) {
 	var total_changes uint64 = 0
 	for serverAddr, vbnos := range kv_vb_map {
-		client, err := utils.GetMemcachedClient(serverAddr, sourceBucketName, kv_mem_clients, logger)
+		client, err := utils.GetMemcachedClient(serverAddr, sourceBucketName, kv_mem_clients, user_agent, logger)
 		if err != nil {
 			return 0, err
 		}
@@ -1264,7 +1283,7 @@ func updateStatsForReplication(repl_status *pipeline_pkg.ReplicationStatus, cur_
 		repl_status.SetVbList(cur_vb_list)
 	}
 
-	total_changes, err := calculateTotalChanges(cur_kv_vb_map, kv_mem_clients, kv_mem_client_error_count, spec.SourceBucketName, logger)
+	total_changes, err := calculateTotalChanges(cur_kv_vb_map, kv_mem_clients, kv_mem_client_error_count, spec.SourceBucketName, UserAgentPausedReplication, logger)
 	if err != nil {
 		return err
 	}
