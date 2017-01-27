@@ -20,6 +20,7 @@ type ReplicationSpecSvc interface {
 	ValidateNewReplicationSpec(sourceBucket, targetCluster, targetBucket string, settings map[string]interface{}) (string, string, *metadata.RemoteClusterReference, map[string]error)
 	SetReplicationSpec(spec *metadata.ReplicationSpecification) error
 	DelReplicationSpec(replicationId string) (*metadata.ReplicationSpecification, error)
+	DelReplicationSpecWithReason(replicationId string, reason string) (*metadata.ReplicationSpecification, error)
 	AllReplicationSpecs() (map[string]*metadata.ReplicationSpecification, error)
 	AllReplicationSpecIds() ([]string, error)
 	AllReplicationSpecIdsForBucket(bucket string) ([]string, error)

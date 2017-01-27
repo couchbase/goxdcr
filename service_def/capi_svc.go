@@ -75,7 +75,7 @@ func (remoteBucket *RemoteBucketInfo) refresh_internal(remote_cluster_svc Remote
 		return err
 	}
 
-	uuidObj, ok := targetBucketInfo[base.BucketUUIDKey]
+	uuidObj, ok := targetBucketInfo[base.UUIDKey]
 	if !ok {
 		return fmt.Errorf("Failed to get uuid for remote bucket %v", remoteBucket.BucketName)
 	}
