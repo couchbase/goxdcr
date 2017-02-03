@@ -965,7 +965,7 @@ func (xmem *XmemNozzle) Receive(data interface{}) error {
 
 	err := xmem.validateRunningState()
 	if err != nil {
-		xmem.Logger().Infof("%v is in %v state, Recieve did no-op", xmem.Id(), xmem.State())
+		xmem.Logger().Warnf("%v is in %v state, Recieve did no-op", xmem.Id(), xmem.State())
 		return err
 	}
 
@@ -1414,7 +1414,7 @@ func (xmem *XmemNozzle) batchGetMeta(bigDoc_map map[string]*base.WrappedMCReques
 								seqno, ok2 := keySeqno[1].(uint64)
 								vbno, ok3 := keySeqno[2].(uint16)
 								if ok1 && ok2 && ok3 {
-									xmem.Logger().Infof("%v received fatal error from getMeta client. key=%v, seqno=%v, vb=%v, response=%v\n", xmem.Id(), key, seqno, vbno, response)
+									xmem.Logger().Warnf("%v received fatal error from getMeta client. key=%v, seqno=%v, vb=%v, response=%v\n", xmem.Id(), key, seqno, vbno, response)
 								}
 							}
 						}
@@ -1458,7 +1458,7 @@ func (xmem *XmemNozzle) batchGetMeta(bigDoc_map map[string]*base.WrappedMCReques
 									// this response requires connection reset
 
 									// log the corresponding request to facilitate debugging
-									xmem.Logger().Infof("%v received error from getMeta client. key=%v, seqno=%v, response=%v\n", xmem.Id(), key, seqno, response)
+									xmem.Logger().Warnf("%v received error from getMeta client. key=%v, seqno=%v, response=%v\n", xmem.Id(), key, seqno, response)
 									err = fmt.Errorf("error response with status %v from memcached", response.Status)
 									xmem.repairConn(xmem.client_for_getMeta, err.Error(), rev)
 									// no need to wait further since connection has been reset
@@ -1517,7 +1517,7 @@ func (xmem *XmemNozzle) batchGetMeta(bigDoc_map map[string]*base.WrappedMCReques
 			} else if resp.Status == mc.KEY_ENOENT {
 				xmem.Logger().Debugf("%v batchGetMeta: doc %s does not exist on target. Skip conflict resolution and send the doc", xmem.Id(), key)
 			} else {
-				xmem.Logger().Infof("%v batchGetMeta: memcached response for doc %s has error status %v. Skip conflict resolution and send the doc", xmem.Id(), key, resp.Status)
+				xmem.Logger().Warnf("%v batchGetMeta: memcached response for doc %s has error status %v. Skip conflict resolution and send the doc", xmem.Id(), key, resp.Status)
 			}
 		}
 	}
@@ -2267,7 +2267,7 @@ func (xmem *XmemNozzle) readFromClient(client *xmemClient, resetReadTimeout bool
 			} else if strings.HasPrefix(errMsg, "bad magic") {
 				//the connection to couchbase server is ruined. it is not supposed to return response with bad magic number
 				//now the only sensible thing to do is to repair the connection, then retry
-				client.logger.Infof("%v err=%v\n", xmem.Id(), err)
+				client.logger.Warnf("%v err=%v\n", xmem.Id(), err)
 				return nil, badConnectionError, rev
 			}
 		} else {
@@ -2322,7 +2322,7 @@ func (xmem *XmemNozzle) repairConn(client *xmemClient, reason string, rev int) e
 			if numOfRetry < xmem.config.maxRetry {
 				numOfRetry++
 				// exponential backoff
-				xmem.Logger().Infof("%v Error setting up new connections. err=%v. Retrying for %vth time after %v.", xmem.Id(), err, numOfRetry, backoffTime)
+				xmem.Logger().Warnf("%v Error setting up new connections. err=%v. Retrying for %vth time after %v.", xmem.Id(), err, numOfRetry, backoffTime)
 				time.Sleep(backoffTime)
 				backoffTime *= 2
 			} else {
