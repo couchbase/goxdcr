@@ -198,6 +198,7 @@ const (
 	//Bucket sequence number statistics
 	VBUCKET_SEQNO_STAT_NAME            = "vbucket-seqno"
 	VBUCKET_HIGH_SEQNO_STAT_KEY_FORMAT = "vb_%v:high_seqno"
+	VBUCKET_UUID_STAT_KEY_FORMAT       = "vb_%v:uuid"
 	DCP_STAT_NAME                      = "dcp"
 	DCP_XDCR_STATS_PREFIX              = "eq_dcpq:xdcr:"
 	DCP_XDCR_ITEMS_REMAINING_SUFFIX    = ":items_remaining"
@@ -323,6 +324,9 @@ var FORCE_ACCEPT_WITH_META_OPS uint32 = 0x02
 
 // read/write timeout for helo command to memcached
 var HELOTimeout time.Duration = time.Duration(120) * time.Second
+
+// memcached client will be reset if it encounters the following number of consecutive errors
+var MaxMemClientErrorCount = 3
 
 // --------------- Constants that are configurable -----------------
 

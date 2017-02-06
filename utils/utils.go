@@ -167,23 +167,52 @@ func GetMapFromExpvarMap(expvarMap *expvar.Map) map[string]interface{} {
 }
 
 //convert the format returned by go-memcached StatMap - map[string]string to map[uint16]uint64
-func ParseHighSeqnoStat(vbnos []uint16, stats_map map[string]string, highseqno_map map[uint16]uint64) error {
-
+func ParseHighSeqnoStat(vbnos []uint16, stats_map map[string]string, highseqno_map map[uint16]uint64) {
 	for _, vbno := range vbnos {
 		stats_key := fmt.Sprintf(base.VBUCKET_HIGH_SEQNO_STAT_KEY_FORMAT, vbno)
 		highseqnostr, ok := stats_map[stats_key]
 		if !ok {
-			logger_utils.Infof("Can't find high seqno for vbno=%v in stats map. Source topology may have changed.\n", vbno)
+			logger_utils.Warnf("Can't find high seqno for vbno=%v in stats map. Source topology may have changed.\n", vbno)
 			continue
 		}
 		highseqno, err := strconv.ParseUint(highseqnostr, 10, 64)
 		if err != nil {
-			return err
+			logger_utils.Warnf("high seqno for vbno=%v in stats map is not a valid uint64. high seqno = %v\n", vbno, highseqnostr)
+			continue
 		}
 		highseqno_map[vbno] = highseqno
 	}
+}
 
-	return nil
+//convert the format returned by go-memcached StatMap - map[string]string to map[uint16][]uint64
+func ParseHighSeqnoAndVBUuidFromStats(vbnos []uint16, stats_map map[string]string, high_seqno_and_vbuuid_map map[uint16][]uint64) {
+	for _, vbno := range vbnos {
+		high_seqno_stats_key := fmt.Sprintf(base.VBUCKET_HIGH_SEQNO_STAT_KEY_FORMAT, vbno)
+		highseqnostr, ok := stats_map[high_seqno_stats_key]
+		if !ok {
+			logger_utils.Warnf("Can't find high seqno for vbno=%v in stats map. Source topology may have changed.\n", vbno)
+			continue
+		}
+		high_seqno, err := strconv.ParseUint(highseqnostr, 10, 64)
+		if err != nil {
+			logger_utils.Warnf("high seqno for vbno=%v in stats map is not a valid uint64. high seqno = %v\n", vbno, highseqnostr)
+			continue
+		}
+
+		vbuuid_stats_key := fmt.Sprintf(base.VBUCKET_UUID_STAT_KEY_FORMAT, vbno)
+		vbuuidstr, ok := stats_map[vbuuid_stats_key]
+		if !ok {
+			logger_utils.Warnf("Can't find vbuuid for vbno=%v in stats map. Source topology may have changed.\n", vbno)
+			continue
+		}
+		vbuuid, err := strconv.ParseUint(vbuuidstr, 10, 64)
+		if err != nil {
+			logger_utils.Warnf("vbuuid for vbno=%v in stats map is not a valid uint64. vbuuid = %v\n", vbno, vbuuidstr)
+			continue
+		}
+
+		high_seqno_and_vbuuid_map[vbno] = []uint64{high_seqno, vbuuid}
+	}
 }
 
 // encode data in a map into a byte array, which can then be used as
@@ -361,6 +390,17 @@ func GetMemcachedConnection(serverAddr, bucketName string, userAgent string, log
 	}
 
 	_, err = conn.SelectBucket(bucketName)
+	if err != nil {
+		return nil, err
+	}
+
+	SendHELO(conn, userAgent, base.HELOTimeout, base.HELOTimeout, logger)
+
+	return conn, nil
+}
+
+func GetRemoteMemcachedConnection(serverAddr, username string, password string, userAgent string, logger *log.CommonLogger) (*mcc.Client, error) {
+	conn, err := base.NewConn(serverAddr, username, password)
 	if err != nil {
 		return nil, err
 	}

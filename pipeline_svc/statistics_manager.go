@@ -107,9 +107,6 @@ const (
 	default_log_stats_interval = 10000 * time.Millisecond
 )
 
-// memcached client will be reset if it encounters consecutive errors
-var MaxMemClientErrorCount = 3
-
 // stats to initialize for paused replications that have never been run -- mostly the stats visible from UI
 var StatsToInitializeForPausedReplications = [10]string{DOCS_WRITTEN_METRIC, DOCS_FAILED_CR_SOURCE_METRIC, DOCS_FILTERED_METRIC,
 	RATE_DOC_CHECKS_METRIC, RATE_OPT_REPD_METRIC, RATE_RECEIVED_DCP_METRIC, RATE_REPLICATED_METRIC,
@@ -255,7 +252,7 @@ func getHighSeqNos(serverAddr string, vbnos []uint16, conn *mcc.Client) (map[uin
 		return nil, err
 	}
 
-	err = utils.ParseHighSeqnoStat(vbnos, stats_map, highseqno_map)
+	utils.ParseHighSeqnoStat(vbnos, stats_map, highseqno_map)
 	return highseqno_map, err
 }
 
@@ -1221,7 +1218,7 @@ func calculateTotalChanges(kv_vb_map map[string][]uint16, kv_mem_clients map[str
 			} else {
 				err_count++
 			}
-			if err_count > MaxMemClientErrorCount {
+			if err_count > base.MaxMemClientErrorCount {
 				err = client.Close()
 				if err != nil {
 					logger.Infof("error from closing connection for %v is %v\n", serverAddr, err)

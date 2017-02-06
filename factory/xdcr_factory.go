@@ -150,7 +150,7 @@ func (xdcrf *XDCRFactory) NewPipeline(topic string, progress_recorder common.Pip
 	progress_recorder(fmt.Sprintf("%v source nozzles have been constructed", len(sourceNozzles)))
 
 	xdcrf.logger.Infof("%v kv_vb_map=%v\n", topic, kv_vb_map)
-	outNozzles, vbNozzleMap, err := xdcrf.constructOutgoingNozzles(spec, kv_vb_map, sourceCRMode, targetBucketInfo, targetClusterRef, logger_ctx)
+	outNozzles, vbNozzleMap, target_kv_vb_map, target_bucket_password, err := xdcrf.constructOutgoingNozzles(spec, kv_vb_map, sourceCRMode, targetBucketInfo, targetClusterRef, logger_ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -198,7 +198,7 @@ func (xdcrf *XDCRFactory) NewPipeline(topic string, progress_recorder common.Pip
 	} else {
 		//register services
 		pipeline.SetRuntimeContext(pipelineContext)
-		err = xdcrf.registerServices(pipeline, logger_ctx, kv_vb_map)
+		err = xdcrf.registerServices(pipeline, logger_ctx, kv_vb_map, target_bucket_password, target_kv_vb_map)
 		if err != nil {
 			return nil, err
 		}
@@ -355,7 +355,7 @@ func (xdcrf *XDCRFactory) filterVBList(targetkvVBList []uint16, kv_vb_map map[st
 
 func (xdcrf *XDCRFactory) constructOutgoingNozzles(spec *metadata.ReplicationSpecification, kv_vb_map map[string][]uint16,
 	sourceCRMode base.ConflictResolutionMode, targetBucketInfo map[string]interface{},
-	targetClusterRef *metadata.RemoteClusterReference, logger_ctx *log.LoggerContext) (map[string]common.Nozzle, map[uint16]string, error) {
+	targetClusterRef *metadata.RemoteClusterReference, logger_ctx *log.LoggerContext) (map[string]common.Nozzle, map[uint16]string, map[string][]uint16, string, error) {
 	outNozzles := make(map[string]common.Nozzle)
 	vbNozzleMap := make(map[uint16]string)
 
@@ -363,20 +363,20 @@ func (xdcrf *XDCRFactory) constructOutgoingNozzles(spec *metadata.ReplicationSpe
 	kvVBMap, err := utils.GetServerVBucketsMap(targetClusterRef.HostName, targetBucketName, targetBucketInfo)
 	if err != nil {
 		xdcrf.logger.Errorf("Error getting server vbuckets map, err=%v\n", err)
-		return nil, nil, err
+		return nil, nil, nil, "", err
 	}
 	if len(kvVBMap) == 0 {
-		return nil, nil, ErrorNoTargetNozzle
+		return nil, nil, nil, "", ErrorNoTargetNozzle
 	}
 
 	// get target bucket password
 	bucketPwdObj, ok := targetBucketInfo[base.SASLPasswordKey]
 	if !ok {
-		return nil, nil, fmt.Errorf("%v cannot get sasl password from target bucket, %v.", spec.Id, targetBucketInfo)
+		return nil, nil, nil, "", fmt.Errorf("%v cannot get sasl password from target bucket, %v.", spec.Id, targetBucketInfo)
 	}
 	bucketPwd, ok := bucketPwdObj.(string)
 	if !ok {
-		return nil, nil, fmt.Errorf("%v sasl password on target bucket is of wrong type.", spec.Id, bucketPwdObj)
+		return nil, nil, nil, "", fmt.Errorf("%v sasl password on target bucket is of wrong type.", spec.Id, bucketPwdObj)
 	}
 
 	maxTargetNozzlePerNode := spec.Settings.TargetNozzlePerNode
@@ -387,7 +387,7 @@ func (xdcrf *XDCRFactory) constructOutgoingNozzles(spec *metadata.ReplicationSpe
 	nozzleType, err := xdcrf.getOutNozzleType(targetClusterRef, spec)
 	if err != nil {
 		xdcrf.logger.Errorf("Failed to get the nozzle type, err=%v\n", err)
-		return nil, nil, err
+		return nil, nil, nil, "", err
 	}
 
 	for kvaddr, kvVBList := range kvVBMap {
@@ -397,7 +397,7 @@ func (xdcrf *XDCRFactory) constructOutgoingNozzles(spec *metadata.ReplicationSpe
 			vbCouchApiBaseMap, err = capi_utils.ConstructVBCouchApiBaseMap(targetBucketName, targetBucketInfo, targetClusterRef)
 			if err != nil {
 				xdcrf.logger.Errorf("Failed to construct vbCouchApiBase map, err=%v\n", err)
-				return nil, nil, err
+				return nil, nil, nil, "", err
 			}
 		}
 
@@ -424,7 +424,7 @@ func (xdcrf *XDCRFactory) constructOutgoingNozzles(spec *metadata.ReplicationSpe
 			if isCapiNozzle {
 				outNozzle, err = xdcrf.constructCAPINozzle(spec.Id, targetClusterRef.UserName, targetClusterRef.Password, targetClusterRef.Certificate, vbList, vbCouchApiBaseMap, i, logger_ctx)
 				if err != nil {
-					return nil, nil, err
+					return nil, nil, nil, "", err
 				}
 			} else {
 				connSize := numOfOutNozzles * 2
@@ -444,7 +444,7 @@ func (xdcrf *XDCRFactory) constructOutgoingNozzles(spec *metadata.ReplicationSpe
 
 	xdcrf.logger.Infof("Constructed %v outgoing nozzles\n", len(outNozzles))
 	xdcrf.logger.Debugf("vbNozzleMap = %v\n", vbNozzleMap)
-	return outNozzles, vbNozzleMap, nil
+	return outNozzles, vbNozzleMap, kvVBMap, bucketPwd, nil
 }
 
 func (xdcrf *XDCRFactory) constructRouter(id string, spec *metadata.ReplicationSpecification,
@@ -685,7 +685,7 @@ func (xdcrf *XDCRFactory) constructSettingsForDcpNozzle(pipeline common.Pipeline
 	return dcpNozzleSettings, nil
 }
 
-func (xdcrf *XDCRFactory) registerServices(pipeline common.Pipeline, logger_ctx *log.LoggerContext, kv_vb_map map[string][]uint16) error {
+func (xdcrf *XDCRFactory) registerServices(pipeline common.Pipeline, logger_ctx *log.LoggerContext, kv_vb_map map[string][]uint16, target_bucket_password string, target_kv_vb_map map[string][]uint16) error {
 	through_seqno_tracker_svc := service_impl.NewThroughSeqnoTrackerSvc(logger_ctx)
 	through_seqno_tracker_svc.Attach(pipeline)
 
@@ -701,7 +701,7 @@ func (xdcrf *XDCRFactory) registerServices(pipeline common.Pipeline, logger_ctx 
 	//register pipeline checkpoint manager
 	ckptMgr, err := pipeline_svc.NewCheckpointManager(xdcrf.checkpoint_svc, xdcrf.capi_svc,
 		xdcrf.remote_cluster_svc, xdcrf.repl_spec_svc, xdcrf.cluster_info_svc,
-		xdcrf.xdcr_topology_svc, through_seqno_tracker_svc, kv_vb_map, logger_ctx)
+		xdcrf.xdcr_topology_svc, through_seqno_tracker_svc, kv_vb_map, pipeline.Specification().TargetBucketName, target_bucket_password, target_kv_vb_map, logger_ctx)
 	if err != nil {
 		xdcrf.logger.Errorf("Failed to construct CheckpointManager for %v. err=%v ckpt_svc=%v, capi_svc=%v, remote_cluster_svc=%v, repl_spec_svc=%v\n", pipeline.Topic(), err, xdcrf.checkpoint_svc, xdcrf.capi_svc,
 			xdcrf.remote_cluster_svc, xdcrf.repl_spec_svc)
