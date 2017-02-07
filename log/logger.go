@@ -33,13 +33,24 @@ const (
 	LogLevelTrace
 )
 
+// log level on UI and rest api
 const (
-	LOG_LEVEL_FATAL_STR string = "FATA"
-	LOG_LEVEL_ERROR_STR string = "ERRO"
-	LOG_LEVEL_WARN_STR  string = "WARN"
-	LOG_LEVEL_INFO_STR  string = "INFO"
-	LOG_LEVEL_DEBUG_STR string = "DEBU"
-	LOG_LEVEL_TRACE_STR string = "TRAC"
+	LOG_LEVEL_FATAL_STR string = "Fatal"
+	LOG_LEVEL_ERROR_STR string = "Error"
+	LOG_LEVEL_WARN_STR  string = "Warn"
+	LOG_LEVEL_INFO_STR  string = "Info"
+	LOG_LEVEL_DEBUG_STR string = "Debug"
+	LOG_LEVEL_TRACE_STR string = "Trace"
+)
+
+// log level in log files
+const (
+	LOG_LEVEL_FATAL_LOG_STR string = "FATA"
+	LOG_LEVEL_ERROR_LOG_STR string = "ERRO"
+	LOG_LEVEL_WARN_LOG_STR  string = "WARN"
+	LOG_LEVEL_INFO_LOG_STR  string = "INFO"
+	LOG_LEVEL_DEBUG_LOG_STR string = "DEBU"
+	LOG_LEVEL_TRACE_LOG_STR string = "TRAC"
 )
 
 const (
@@ -254,6 +265,24 @@ func (level LogLevel) String() string {
 	return ""
 }
 
+func (level LogLevel) LogString() string {
+	switch level {
+	case LogLevelFatal:
+		return LOG_LEVEL_FATAL_LOG_STR
+	case LogLevelError:
+		return LOG_LEVEL_ERROR_LOG_STR
+	case LogLevelWarn:
+		return LOG_LEVEL_WARN_LOG_STR
+	case LogLevelInfo:
+		return LOG_LEVEL_INFO_LOG_STR
+	case LogLevelDebug:
+		return LOG_LEVEL_DEBUG_LOG_STR
+	case LogLevelTrace:
+		return LOG_LEVEL_TRACE_LOG_STR
+	}
+	return ""
+}
+
 // compose fields that are common to all log messages
 // example log entry:
 // 2017-01-26T14:21:22.523-08:00 INFO GOXDCR.HttpServer: [xdcr:127.0.0.1:13000] starting ...
@@ -261,7 +290,7 @@ func (l *CommonLogger) processCommonFields(level LogLevel) string {
 	var buffer bytes.Buffer
 	buffer.WriteString(FormatTimeWithMilliSecondPrecision(time.Now()))
 	buffer.WriteString(" ")
-	buffer.WriteString(level.String())
+	buffer.WriteString(level.LogString())
 	buffer.WriteString(" ")
 	buffer.WriteString(GOXDCR_COMPONENT_CODE)
 	buffer.WriteString(l.loggers[level].module)
