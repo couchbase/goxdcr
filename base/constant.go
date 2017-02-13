@@ -66,6 +66,7 @@ var UUIDKey = "uuid"
 var BucketCapabilitiesKey = "bucketCapabilities"
 var BucketTypeKey = "bucketType"
 var BucketsKey = "buckets"
+var EvictionPolicyKey = "evictionPolicy"
 
 // URL related constants
 var UrlDelimiter = "/"
@@ -286,6 +287,10 @@ const (
 )
 
 var CouchbaseBucketType = "membase"
+var EphemeralBucketType = "ephemeral"
+
+// NRU eviction policy for ephemeral bucket
+var EvictionPolicyNRU = "nruEviction"
 
 // keys used in pipeline.settings
 const (

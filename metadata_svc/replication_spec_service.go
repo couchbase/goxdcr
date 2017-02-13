@@ -164,9 +164,9 @@ func (service *ReplicationSpecService) ValidateNewReplicationSpec(sourceBucket, 
 	var err_source error
 	start_time := time.Now()
 
-	sourceBucketType, sourceBucketUUID, sourceConflictResolutionType, _, _, err_source := utils.BucketValidationInfo(local_connStr, sourceBucket, "", "", nil, false, service.logger)
+	sourceBucketType, sourceBucketUUID, sourceConflictResolutionType, sourceEvictionPolicy, _, _, err_source := utils.BucketValidationInfo(local_connStr, sourceBucket, "", "", nil, false, service.logger)
 	service.logger.Infof("Result from local bucket look up: bucketName=%v, err_source=%v, time taken=%v\n", sourceBucket, err_source, time.Since(start_time))
-	service.validateBucket(sourceBucket, targetCluster, targetBucket, sourceBucketType, err_source, errorMap, true)
+	service.validateBucket(sourceBucket, targetCluster, targetBucket, sourceBucketType, sourceEvictionPolicy, err_source, errorMap, true)
 
 	if len(errorMap) > 0 {
 		return "", "", nil, errorMap
@@ -212,9 +212,9 @@ func (service *ReplicationSpecService) ValidateNewReplicationSpec(sourceBucket, 
 
 	//validate target bucket
 	start_time = time.Now()
-	targetBucketType, targetBucketUUID, targetConflictResolutionType, targetBucketPassword, targetKVVBMap, err_target := utils.BucketValidationInfo(remote_connStr, targetBucket, remote_userName, remote_password, certificate, sanInCertificate, service.logger)
+	targetBucketType, targetBucketUUID, targetConflictResolutionType, _, targetBucketPassword, targetKVVBMap, err_target := utils.BucketValidationInfo(remote_connStr, targetBucket, remote_userName, remote_password, certificate, sanInCertificate, service.logger)
 	service.logger.Infof("Result from remote bucket look up: connStr=%v, bucketName=%v, err_target=%v, time taken=%v\n", remote_connStr, targetBucket, err_target, time.Since(start_time))
-	service.validateBucket(sourceBucket, targetCluster, targetBucket, targetBucketType, err_target, errorMap, false)
+	service.validateBucket(sourceBucket, targetCluster, targetBucket, targetBucketType, "", err_target, errorMap, false)
 
 	if len(errorMap) > 0 {
 		return "", "", nil, errorMap
@@ -277,7 +277,7 @@ func (service *ReplicationSpecService) ValidateNewReplicationSpec(sourceBucket, 
 	return sourceBucketUUID, targetBucketUUID, targetClusterRef, errorMap
 }
 
-func (service *ReplicationSpecService) validateBucket(sourceBucket, targetCluster, targetBucket, bucketType string, err error, errorMap map[string]error, isSourceBucket bool) {
+func (service *ReplicationSpecService) validateBucket(sourceBucket, targetCluster, targetBucket, bucketType string, evictionPolicy string, err error, errorMap map[string]error, isSourceBucket bool) {
 	var qualifier, errKey, bucketName string
 	if isSourceBucket {
 		qualifier = "source"
@@ -296,8 +296,13 @@ func (service *ReplicationSpecService) validateBucket(sourceBucket, targetCluste
 		errMsg := fmt.Sprintf("Error validating %v bucket '%v'. err=%v", qualifier, bucketName, err)
 		service.logger.Error(errMsg)
 		errorMap[errKey] = fmt.Errorf(errMsg)
-	} else if bucketType != base.CouchbaseBucketType {
+	} else if bucketType != base.CouchbaseBucketType && bucketType != base.EphemeralBucketType {
 		errMsg := fmt.Sprintf("Incompatible %v bucket '%v'", qualifier, bucketName)
+		service.logger.Error(errMsg)
+		errorMap[errKey] = fmt.Errorf(errMsg)
+	} else if isSourceBucket && bucketType == base.EphemeralBucketType && evictionPolicy == base.EvictionPolicyNRU {
+		// source bucket cannot be ephemeral bucket with eviction
+		errMsg := fmt.Sprintf("XDCR replication for ephemeral bucket with eviction '%v' is not allowed", bucketName)
 		service.logger.Error(errMsg)
 		errorMap[errKey] = fmt.Errorf(errMsg)
 	}

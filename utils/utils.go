@@ -599,7 +599,6 @@ func GetBucketTypeFromBucketInfo(bucketName string, bucketInfo map[string]interf
 }
 
 // get conflict resolution type setting from bucket info
-// default to seqno if not found
 func GetConflictResolutionTypeFromBucketInfo(bucketName string, bucketInfo map[string]interface{}) (string, error) {
 	conflictResolutionType := base.ConflictResolutionType_Seqno
 	conflictResolutionTypeObj, ok := bucketInfo[base.ConflictResolutionTypeKey]
@@ -610,4 +609,17 @@ func GetConflictResolutionTypeFromBucketInfo(bucketName string, bucketInfo map[s
 		}
 	}
 	return conflictResolutionType, nil
+}
+
+// get EvictionPolicy setting from bucket info
+func GetEvictionPolicyFromBucketInfo(bucketName string, bucketInfo map[string]interface{}) (string, error) {
+	evictionPolicy := ""
+	evictionPolicyObj, ok := bucketInfo[base.EvictionPolicyKey]
+	if ok {
+		evictionPolicy, ok = evictionPolicyObj.(string)
+		if !ok {
+			return "", fmt.Errorf("EvictionPolicy on bucket %v is of wrong type.", bucketName)
+		}
+	}
+	return evictionPolicy, nil
 }
