@@ -45,6 +45,13 @@ type RemoteClusterReference struct {
 	HttpsHostName    string `json:"httpsHostName"`
 	SANInCertificate bool   `json:"SANInCertificate"`
 
+	// these are hostname actually used to connect to target
+	// they are rotated among nodes in target cluster to achieve load balancing on target
+	// they are used to update HostName/HttpsHostName when HostName has been removed from the target cluster
+	// they are not exposed to users, e.g., through UI or rest api
+	ActiveHostName      string `json:"activeHostName"`
+	ActiveHttpsHostName string `json:"activeHttpsHostName"`
+
 	// revision number to be used by metadata service. not included in json
 	Revision interface{}
 }
@@ -78,9 +85,17 @@ func RemoteClusterRefId() (string, error) {
 // implements base.ClusterConnectionInfoProvider
 func (ref *RemoteClusterReference) MyConnectionStr() (string, error) {
 	if ref.DemandEncryption {
-		return ref.HttpsHostName, nil
+		if len(ref.ActiveHttpsHostName) > 0 {
+			return ref.ActiveHttpsHostName, nil
+		} else {
+			return ref.HttpsHostName, nil
+		}
 	} else {
-		return ref.HostName, nil
+		if len(ref.ActiveHostName) > 0 {
+			return ref.ActiveHostName, nil
+		} else {
+			return ref.HostName, nil
+		}
 	}
 }
 
@@ -133,14 +148,16 @@ func (ref *RemoteClusterReference) Clone() *RemoteClusterReference {
 		return nil
 	}
 	return &RemoteClusterReference{Id: ref.Id,
-		Uuid:             ref.Uuid,
-		Name:             ref.Name,
-		HostName:         ref.HostName,
-		UserName:         ref.UserName,
-		Password:         ref.Password,
-		DemandEncryption: ref.DemandEncryption,
-		Certificate:      ref.Certificate,
-		HttpsHostName:    ref.HttpsHostName,
-		SANInCertificate: ref.SANInCertificate,
+		Uuid:                ref.Uuid,
+		Name:                ref.Name,
+		HostName:            ref.HostName,
+		UserName:            ref.UserName,
+		Password:            ref.Password,
+		DemandEncryption:    ref.DemandEncryption,
+		Certificate:         ref.Certificate,
+		HttpsHostName:       ref.HttpsHostName,
+		ActiveHostName:      ref.ActiveHostName,
+		ActiveHttpsHostName: ref.ActiveHttpsHostName,
+		SANInCertificate:    ref.SANInCertificate,
 	}
 }

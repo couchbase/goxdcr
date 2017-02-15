@@ -320,7 +320,7 @@ func (pipelineMgr *pipelineManager) validatePipeline(topic string) error {
 		return err
 	}
 
-	targetClusterRef, err := pipelineMgr.remote_cluster_svc.RemoteClusterByUuid(spec.TargetClusterUUID, true)
+	targetClusterRef, err := pipelineMgr.remote_cluster_svc.RemoteClusterByUuid(spec.TargetClusterUUID, false)
 	if err != nil {
 		pipelineMgr.logger.Errorf("Error getting remote cluster with uuid=%v for pipeline %v, err=%v\n", spec.TargetClusterUUID, topic, err)
 		return err

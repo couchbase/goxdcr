@@ -20,6 +20,7 @@ import (
 	"github.com/couchbase/goxdcr/pipeline_utils"
 	"github.com/couchbase/goxdcr/service_def"
 	"github.com/couchbase/goxdcr/utils"
+	"math/rand"
 	"net/http"
 	"reflect"
 	"strconv"
@@ -89,7 +90,10 @@ type RemoteClusterService struct {
 	cluster_info_svc  service_def.ClusterInfoSvc
 	logger            *log.CommonLogger
 	cache             *MetadataCache
-	cache_lock        *sync.Mutex
+	cache_lock        sync.Mutex
+	// key = hostname; value = https address of hostname
+	httpsAddrMap      map[string]string
+	httpsAddrMap_lock sync.Mutex
 
 	metadata_change_callback base.MetadataChangeHandlerCallback
 }
@@ -104,8 +108,8 @@ func NewRemoteClusterService(uilog_svc service_def.UILogSvc, metakv_svc service_
 		xdcr_topology_svc: xdcr_topology_svc,
 		cluster_info_svc:  cluster_info_svc,
 		cache:             nil,
-		cache_lock:        &sync.Mutex{},
 		logger:            logger,
+		httpsAddrMap:      make(map[string]string),
 	}
 
 	err := svc.initCache()
@@ -340,12 +344,12 @@ func (service *RemoteClusterService) RemoteClusters(refresh bool) (map[string]*m
 
 	if refresh {
 		for key, ref := range remote_cluster_map_out {
-			ref, err := service.refresh(ref, cas_map[key])
+			new_ref, err := service.refresh(ref, cas_map[key])
 			if err != nil {
 				// log the error
 				service.logger.Errorf("could not refresh remote cluster reference %v. err=%v\n", ref.Name, err)
 			} else {
-				remote_cluster_map_out[key] = ref
+				remote_cluster_map_out[key] = new_ref
 			}
 		}
 	}
@@ -469,6 +473,9 @@ func (service *RemoteClusterService) validateRemoteCluster(ref *metadata.RemoteC
 	} else {
 		hostAddr = ref.HostName
 	}
+
+	ref.ActiveHostName = ref.HostName
+	ref.ActiveHttpsHostName = ref.HttpsHostName
 
 	var poolsInfo map[string]interface{}
 	startTime := time.Now()
@@ -608,9 +615,7 @@ func (service *RemoteClusterService) cacheRef(ref *metadata.RemoteClusterReferen
 			service.logger.Errorf("Error getting nodes from target cluster. skipping alternative node computation. ref=%v\n", ref.HostName)
 		} else {
 			for _, nodeName := range nodeNameList {
-				if nodeName != ref.HostName {
-					nodes_connStrs = append(nodes_connStrs, nodeName)
-				}
+				nodes_connStrs = append(nodes_connStrs, nodeName)
 			}
 		}
 		service.logger.Debugf("nodes_connStrs after refresh =%v", nodes_connStrs)
@@ -672,30 +677,10 @@ func (service *RemoteClusterService) getNodeNameList(nodeList []interface{}, con
 func (service *RemoteClusterService) refresh(ref *metadata.RemoteClusterReference, old_cas int64) (*metadata.RemoteClusterReference, error) {
 	service.logger.Debugf("Refresh remote cluster reference %v\n", ref.Id)
 
-	err := service.cacheRef(ref, old_cas)
-	if err == nil {
-		return ref, nil
-	}
-
-	if err == CASMisMatchError {
-		// cache has been updated by some other routines. stop refreshing and reload ref
-		ref_cache, _ := service.getCacheVal(ref.Id)
-		if ref_cache != nil {
-			service.logger.Infof("Stop refreshing ref %v. Ref in cache has been updated by others\n", ref.Id)
-			return ref_cache.ref, nil
-		} else {
-			service.logger.Infof("Stop refreshing ref %v. Ref in cache has been deleted by others\n", ref.Id)
-			return nil, service_def.MetadataNotFoundErr
-		}
-	}
-
-	if err != InvalidConnectionStrError {
-		return nil, err
-	}
-
-	connStr, err := ref.MyConnectionStr()
-	if err != nil {
-		return nil, err
+	ref_cache, _ := service.getCacheVal(ref.Id)
+	if ref_cache == nil {
+		service.logger.Infof("Stop refreshing ref %v. Ref in cache has been deleted by others\n", ref.Id)
+		return nil, service_def.MetadataNotFoundErr
 	}
 
 	username, password, certificate, sanInCertificate, err := ref.MyCredentials()
@@ -703,73 +688,138 @@ func (service *RemoteClusterService) refresh(ref *metadata.RemoteClusterReferenc
 		return nil, err
 	}
 
-	service.logger.Infof("Connstr %v in remote cluster reference failed to connect. Try to use alternative connStr", connStr)
-
-	ref_cache, err := service.getCacheVal(ref.Id)
-	if err != nil {
-		service.logger.Errorf("Failed to connect to cluster reference %v - %v doesn't work, no alternative connStr\n", ref.Id, connStr)
-		return nil, errors.New(fmt.Sprintf("Failed to connect to cluster reference %v\n", ref.Id))
-
+	var connStr, hostName, httpsHostName string
+	numberOfNodes := len(ref_cache.nodes_connectionstr)
+	if numberOfNodes == 0 {
+		// target node list may be empty if goxdcr process has been restarted. populate it with ActiveHostName or HostName
+		activeHostName := ref.ActiveHostName
+		if len(activeHostName) == 0 {
+			activeHostName = ref.HostName
+		}
+		ref_cache.nodes_connectionstr = append(ref_cache.nodes_connectionstr, activeHostName)
+		numberOfNodes = 1
 	}
 
-	service.logger.Debugf("ref_cache=%v\n", ref_cache)
+	// randomly pick one node from ref_cache.nodes_connectionstr as the starting point
+	// iterate through ref_cache.nodes_connectionstr till we find one connection string that works
+	startingIndex := rand.Intn(numberOfNodes)
+	index := startingIndex
+	first := true
 
-	var working_conn_str string = ""
-	for _, alt_conn_str := range ref_cache.nodes_connectionstr {
-		if ref.DemandEncryption {
-			kvPort, err := utils.GetPortNumber(alt_conn_str)
-			if err != nil {
-				continue
+	for {
+		if !first {
+			// increment index
+			index++
+			if index >= numberOfNodes {
+				index = 0
 			}
-			sslPort, err, _ := utils.GetSSLPort(alt_conn_str, service.logger)
-			if err != nil {
-				continue
-			}
-
-			alt_https_conn_str := utils.GetHostAddr(utils.GetHostName(alt_conn_str), sslPort)
-			// even if we could get sslport from the cluster with alt_conn_str, it does not mean that the cluster
-			// has been initialized. make another call to /pools/default to make sure
-			_, err = utils.GetClusterInfo(alt_https_conn_str, base.DefaultPoolPath, username, password, certificate, sanInCertificate, service.logger)
-			if err == nil {
-				// for ssl enabled ref, we need both kvport and sslport, we contantenate them
-				// in the form of hostname:sslport:kvport
-				working_conn_str = utils.GetHostAddr(alt_https_conn_str, kvPort)
-				break
-			}
-		} else {
-			_, err := utils.GetClusterInfo(alt_conn_str, base.DefaultPoolPath, username, password, certificate, sanInCertificate, service.logger)
-			if err == nil {
-				working_conn_str = alt_conn_str
-				break
+			if index == startingIndex {
+				// we have exhausted the entire node list. return error
+				errMsg := fmt.Sprintf("Failed to refresh remote cluster reference %v since none of the nodes in target node list is accessible. node list = %v\n", ref.Id, ref_cache.nodes_connectionstr)
+				service.logger.Error(errMsg)
+				return nil, errors.New(errMsg)
 			}
 		}
-	}
 
-	if working_conn_str != "" {
-		service.logger.Infof("Found a working alternative connStr %v", working_conn_str)
-		//update the ref in cache
+		first = false
+
+		hostName = ref_cache.nodes_connectionstr[index]
+		connStr = hostName
 		if ref.DemandEncryption {
-			hostname, sslPort, kvPort, err := parseWorkingConnStr(working_conn_str)
+			httpsHostName, err = service.getHttpsAddrFromMap(hostName)
 			if err != nil {
-				return nil, err
+				service.logger.Warnf("When refreshing remote cluster reference %v, skipping node %v since received error getting https address. err=%v\n", ref.Id, hostName, err)
+				continue
 			}
-			oldHostName := ref.HostName
-			ref.HostName = utils.GetHostAddr(hostname, kvPort)
-			ref.HttpsHostName = utils.GetHostAddr(hostname, sslPort)
-			service.logger.Infof("After refresh, old host name=%v, new host name = %v, new https host name = %v\n", oldHostName, ref.HostName, ref.HttpsHostName)
-		} else {
-			ref.HostName = working_conn_str
+			connStr = httpsHostName
 		}
-		//persist
-		err = service.updateRemoteCluster(ref, ref.Revision)
+
+		service.logger.Debugf("Selected node %v to refresh remote cluster reference %v\n", connStr, ref.Id)
+
+		// connect to selected node to retrieve nodes info
+		clusterUUID, nodeList, err := utils.GetClusterUUIDAndNodeListWithMinInfo(connStr, username, password, certificate, sanInCertificate, service.logger)
 		if err != nil {
-			return nil, err
+			service.logger.Warnf("When refreshing remote cluster reference %v, skipping node %v since it is not accessible. err=%v\n", ref.Id, connStr, err)
+			continue
+		} else {
+			// selected node is accessible
+			if clusterUUID != ref.Uuid {
+				// if selected node is no longer in target cluster, remove selected node from ref_cache.nodes_connectionstr and update cache
+				service.logger.Warnf("Node %v is in a different cluster %v now. Removing it from node list in cache. ref=%v, ref cluster=%v\n", connStr, clusterUUID, ref.Id, ref.Uuid)
+
+				new_nodes_connectionstr := append(ref_cache.nodes_connectionstr[:index], ref_cache.nodes_connectionstr[index+1:]...)
+				new_ref_cache := &remoteClusterVal{key: ref.Id,
+					nodes_connectionstr: new_nodes_connectionstr,
+					ref:                 ref,
+					cas:                 ref_cache.cas}
+
+				err = service.getCache().Upsert(ref.Id, new_ref_cache)
+				if err != nil {
+					service.logger.Warnf("Error removing node %v from node list in cache for remote cluster reference %v. err=%v\n", connStr, ref.Id, err)
+				}
+				// since we modified ref_cache, it may not be safe to continue processing the old ref_cache.
+				// return error to abort the current refresh operation
+				return nil, fmt.Errorf("Skipping refreshing remote cluster reference %v since target node %v has been moved to a different cluster\n", ref.Id, connStr)
+			}
+
+			if ref.ActiveHostName != hostName {
+				// update ActiveHostName to the new selected node if needed
+				ref.ActiveHostName = hostName
+				ref.ActiveHttpsHostName = httpsHostName
+				service.logger.Infof("Replaced ActiveHostName in ref %v with %v and ActiveHttpsHostName with %v\n", ref.Id, hostName, httpsHostName)
+			}
+
+			nodeNameList, err := service.getNodeNameList(nodeList, connStr)
+			if err != nil {
+				service.logger.Warnf("Error getting node name list for remote cluster reference %v using connection string %v. err=%v\n", ref.Id, connStr, err)
+				continue
+			}
+
+			// check if ref.HostName is still in target node list
+			hostNameStillInTarget := false
+			for _, nodeName := range nodeNameList {
+				if nodeName == ref.HostName {
+					hostNameStillInTarget = true
+					break
+				}
+			}
+			if !hostNameStillInTarget {
+				// if ref.HostName is no longer in target node list, replace it with ActiveHostName
+				service.logger.Warnf("HostName, %v, in remote cluster reference, %v, is no longer in target cluster. Replacing it with %v\n", ref.HostName, ref.Id, ref.ActiveHostName)
+
+				ref.HostName = ref.ActiveHostName
+				ref.HttpsHostName = ref.ActiveHttpsHostName
+				// changes to ref.HostName needs to be saved to metakv, so that it can be propagated to other nodes
+				err = service.SetRemoteCluster(ref.Name, ref)
+				if err != nil {
+					service.logger.Warnf("Error updating hostname in remote cluster reference %v. err=%v\n", ref.Id, err)
+				} else {
+					// if SetRemoteCluster() succeeds, the cache has been updated, return ok
+					return ref, nil
+				}
+			}
+
+			// if we get here, either hostNameStillInTarget is true, or SetRemoteCluster() returned error
+			// either way we need to update cache
+			new_ref_cache := &remoteClusterVal{key: ref.Id,
+				nodes_connectionstr: nodeNameList,
+				ref:                 ref,
+				cas:                 ref_cache.cas}
+
+			err = service.getCache().Upsert(ref.Id, new_ref_cache)
+			if err != nil {
+				errMsg := fmt.Sprintf("Skipping refreshing remote cluster reference %v since received error updating cache. err=%v\n", ref.Id, err)
+				service.logger.Warn(errMsg)
+				// if we receive error updating cache, the remote cluster ref in cache may have been updated by another go-routine
+				// it most likely won't be helpful iterating through remaining nodes since the same update cache error would be returned
+				// abort the current refresh operation
+				return nil, errors.New(errMsg)
+			} else {
+				return ref, nil
+			}
 		}
-		return ref, nil
+
 	}
-
-	return nil, errors.New(fmt.Sprintf("Failed to connect to cluster reference %v\n", ref.Id))
-
 }
 
 // for ssl enabled ref, working_conn_str is in the form of hostname:sslport:kvport.
@@ -909,4 +959,22 @@ func (service *RemoteClusterService) updateCache(refId string, newRef *metadata.
 	}
 
 	return nil
+}
+
+func (service *RemoteClusterService) getHttpsAddrFromMap(hostName string) (string, error) {
+	service.httpsAddrMap_lock.Lock()
+	defer service.httpsAddrMap_lock.Unlock()
+
+	var httpsHostName string
+	var ok bool
+	var err error
+	httpsHostName, ok = service.httpsAddrMap[hostName]
+	if !ok {
+		httpsHostName, err, _ = service.httpsHostAddr(hostName)
+		if err != nil {
+			return "", err
+		}
+		service.httpsAddrMap[hostName] = httpsHostName
+	}
+	return httpsHostName, nil
 }

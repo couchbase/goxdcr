@@ -19,6 +19,7 @@ const (
 	MaxWorkersForCheckpointingKey          = "MaxWorkersForCheckpointing"
 	TimeoutCheckpointBeforeStopKey         = "TimeoutCheckpointBeforeStop"
 	CapiDataChanSizeMultiplierKey          = "CapiDataChanSizeMultiplier"
+	RefreshRemoteClusterRefIntervalKey     = "RefreshRemoteClusterRefInterval"
 )
 
 var TopologyChangeCheckIntervalConfig = &SettingsConfig{10, &Range{1, 100}}
@@ -27,6 +28,7 @@ var MaxTopologyStableCountBeforeRestartConfig = &SettingsConfig{30, &Range{1, 30
 var MaxWorkersForCheckpointingConfig = &SettingsConfig{5, &Range{1, 1000}}
 var TimeoutCheckpointBeforeStopConfig = &SettingsConfig{180, &Range{10, 1800}}
 var CapiDataChanSizeMultiplierConfig = &SettingsConfig{1, &Range{1, 100}}
+var RefreshRemoteClusterRefIntervalConfig = &SettingsConfig{15, &Range{1, 3600}}
 
 var XDCRInternalSettingsConfigMap = map[string]*SettingsConfig{
 	TopologyChangeCheckIntervalKey:         TopologyChangeCheckIntervalConfig,
@@ -35,6 +37,7 @@ var XDCRInternalSettingsConfigMap = map[string]*SettingsConfig{
 	MaxWorkersForCheckpointingKey:          MaxWorkersForCheckpointingConfig,
 	TimeoutCheckpointBeforeStopKey:         TimeoutCheckpointBeforeStopConfig,
 	CapiDataChanSizeMultiplierKey:          CapiDataChanSizeMultiplierConfig,
+	RefreshRemoteClusterRefIntervalKey:     RefreshRemoteClusterRefIntervalConfig,
 }
 
 type InternalSettings struct {
@@ -54,6 +57,9 @@ type InternalSettings struct {
 	// capi nozzle data chan size is defined as batchCount*CapiDataChanSizeMultiplier
 	CapiDataChanSizeMultiplier int
 
+	// interval for refreshing remote cluster references
+	RefreshRemoteClusterRefInterval int
+
 	// revision number to be used by metadata service. not included in json
 	Revision interface{}
 }
@@ -65,7 +71,8 @@ func DefaultInternalSettings() *InternalSettings {
 		MaxTopologyStableCountBeforeRestart: MaxTopologyStableCountBeforeRestartConfig.defaultValue.(int),
 		MaxWorkersForCheckpointing:          MaxWorkersForCheckpointingConfig.defaultValue.(int),
 		TimeoutCheckpointBeforeStop:         TimeoutCheckpointBeforeStopConfig.defaultValue.(int),
-		CapiDataChanSizeMultiplier:          CapiDataChanSizeMultiplierConfig.defaultValue.(int)}
+		CapiDataChanSizeMultiplier:          CapiDataChanSizeMultiplierConfig.defaultValue.(int),
+		RefreshRemoteClusterRefInterval:     RefreshRemoteClusterRefIntervalConfig.defaultValue.(int)}
 }
 
 func (s *InternalSettings) Equals(s2 *InternalSettings) bool {
@@ -82,7 +89,8 @@ func (s *InternalSettings) Equals(s2 *InternalSettings) bool {
 		s.MaxTopologyStableCountBeforeRestart == s2.MaxTopologyStableCountBeforeRestart &&
 		s.MaxWorkersForCheckpointing == s2.MaxWorkersForCheckpointing &&
 		s.TimeoutCheckpointBeforeStop == s2.TimeoutCheckpointBeforeStop &&
-		s.CapiDataChanSizeMultiplier == s2.CapiDataChanSizeMultiplier
+		s.CapiDataChanSizeMultiplier == s2.CapiDataChanSizeMultiplier &&
+		s.RefreshRemoteClusterRefInterval == s2.RefreshRemoteClusterRefInterval
 }
 
 func (s *InternalSettings) UpdateSettingsFromMap(settingsMap map[string]interface{}) (changed bool, errorMap map[string]error) {
@@ -151,6 +159,16 @@ func (s *InternalSettings) UpdateSettingsFromMap(settingsMap map[string]interfac
 				s.CapiDataChanSizeMultiplier = mutiplier
 				changed = true
 			}
+		case RefreshRemoteClusterRefIntervalKey:
+			refreshInterval, ok := val.(int)
+			if !ok {
+				errorMap[key] = simple_utils.IncorrectValueTypeInMapError(key, val, "int")
+				continue
+			}
+			if s.RefreshRemoteClusterRefInterval != refreshInterval {
+				s.RefreshRemoteClusterRefInterval = refreshInterval
+				changed = true
+			}
 		default:
 			errorMap[key] = fmt.Errorf("Invalid key in map, %v", key)
 		}
@@ -162,7 +180,8 @@ func (s *InternalSettings) UpdateSettingsFromMap(settingsMap map[string]interfac
 func ValidateAndConvertXDCRInternalSettingsValue(key, value string) (convertedValue interface{}, err error) {
 	switch key {
 	case TopologyChangeCheckIntervalKey, MaxTopologyChangeCountBeforeRestartKey, MaxTopologyStableCountBeforeRestartKey,
-		MaxWorkersForCheckpointingKey, TimeoutCheckpointBeforeStopKey, CapiDataChanSizeMultiplierKey:
+		MaxWorkersForCheckpointingKey, TimeoutCheckpointBeforeStopKey, CapiDataChanSizeMultiplierKey,
+		RefreshRemoteClusterRefIntervalKey:
 		convertedValue, err = strconv.ParseInt(value, base.ParseIntBase, base.ParseIntBitSize)
 		if err != nil {
 			err = simple_utils.IncorrectValueTypeError("an integer")
@@ -189,5 +208,6 @@ func (s *InternalSettings) ToMap() map[string]interface{} {
 	settings_map[MaxWorkersForCheckpointingKey] = s.MaxWorkersForCheckpointing
 	settings_map[TimeoutCheckpointBeforeStopKey] = s.TimeoutCheckpointBeforeStop
 	settings_map[CapiDataChanSizeMultiplierKey] = s.CapiDataChanSizeMultiplier
+	settings_map[RefreshRemoteClusterRefIntervalKey] = s.RefreshRemoteClusterRefInterval
 	return settings_map
 }
