@@ -154,6 +154,23 @@ func GetNodeListWithMinInfo(hostAddr, username, password string, certificate []b
 
 }
 
+func GetClusterUUIDAndNodeListWithMinInfo(hostAddr, username, password string, certificate []byte, sanInCertificate bool, logger *log.CommonLogger) (string, []interface{}, error) {
+	defaultPoolInfo, err := GetClusterInfo(hostAddr, base.DefaultPoolPath, username, password, certificate, sanInCertificate, logger)
+	if err != nil {
+		return "", nil, err
+	}
+
+	clusterUUID, err := GetClusterUUIDFromDefaultPoolInfo(defaultPoolInfo, logger)
+	if err != nil {
+		return "", nil, err
+	}
+
+	nodeList, err := GetNodeListFromClusterInfo(defaultPoolInfo, logger)
+
+	return clusterUUID, nodeList, err
+
+}
+
 // get bucket info
 // a specialized case of GetClusterInfo
 func GetBucketInfo(hostAddr, bucketName, username, password string, certificate []byte, sanInCertificate bool, logger *log.CommonLogger) (map[string]interface{}, error) {
@@ -192,6 +209,45 @@ func GetBucketUuidFromBucketInfo(bucketName string, bucketInfo map[string]interf
 		}
 	}
 	return bucketUUID, nil
+}
+
+func GetClusterUUIDFromDefaultPoolInfo(defaultPoolInfo map[string]interface{}, logger *log.CommonLogger) (string, error) {
+	bucketsObj, ok := defaultPoolInfo[base.BucketsKey]
+	if !ok {
+		errMsg := fmt.Sprintf("Cannot find buckets key in default pool info. defaultPoolInfo=%v\n", defaultPoolInfo)
+		logger.Error(errMsg)
+		return "", errors.New(errMsg)
+	}
+	bucketsInfo, ok := bucketsObj.(map[string]interface{})
+	if !ok {
+		errMsg := fmt.Sprintf("buckets in default pool info is not of map type. buckets=%v\n", bucketsObj)
+		logger.Error(errMsg)
+		return "", errors.New(errMsg)
+	}
+	uriObj, ok := bucketsInfo[base.URIKey]
+	if !ok {
+		errMsg := fmt.Sprintf("Cannot find uri key in buckets info. bucketsInfo=%v\n", bucketsInfo)
+		logger.Error(errMsg)
+		return "", errors.New(errMsg)
+	}
+	uri, ok := uriObj.(string)
+	if !ok {
+		errMsg := fmt.Sprintf("uri in buckets info is not of string type. uri=%v\n", uriObj)
+		logger.Error(errMsg)
+		return "", errors.New(errMsg)
+	}
+
+	return GetClusterUUIDFromURI(uri)
+}
+
+func GetClusterUUIDFromURI(uri string) (string, error) {
+	// uri is in the form of /pools/default/buckets?uuid=d5dea23aa7ee3771becb3fcdb46ff956
+	searchKey := base.BucketUUIDKey + "="
+	index := strings.LastIndex(uri, searchKey)
+	if index < 0 {
+		return "", fmt.Errorf("uri does not contain uuid. uri=%v", uri)
+	}
+	return uri[index+len(searchKey):], nil
 }
 
 func GetNodeListFromClusterInfo(clusterInfo map[string]interface{}, logger *log.CommonLogger) ([]interface{}, error) {

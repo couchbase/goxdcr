@@ -64,6 +64,7 @@ var SASLPasswordKey = "saslPassword"
 var BucketUUIDKey = "uuid"
 var BucketCapabilitiesKey = "bucketCapabilities"
 var BucketTypeKey = "bucketType"
+var BucketsKey = "buckets"
 
 // URL related constants
 var UrlDelimiter = "/"
@@ -356,13 +357,18 @@ var MaxWorkersForCheckpointing = 5
 // capi nozzle data chan size is defined as batchCount*CapiDataChanSizeMultiplier
 var CapiDataChanSizeMultiplier = 1
 
+// interval for refreshing remote cluster references
+var RefreshRemoteClusterRefInterval = 15 * time.Second
+
 func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeCountBeforeRestart,
 	maxTopologyStableCountBeforeRestart, maxWorkersForCheckpointing int,
-	timeoutCheckpointBeforeStop time.Duration, capiDataChanSizeMultiplier int) {
+	timeoutCheckpointBeforeStop time.Duration, capiDataChanSizeMultiplier int,
+	refreshRemoteClusterRefInterval time.Duration) {
 	TopologyChangeCheckInterval = topologyChangeCheckInterval
 	MaxTopologyChangeCountBeforeRestart = maxTopologyChangeCountBeforeRestart
 	MaxTopologyStableCountBeforeRestart = maxTopologyStableCountBeforeRestart
 	MaxWorkersForCheckpointing = maxWorkersForCheckpointing
 	TimeoutCheckpointBeforeStop = timeoutCheckpointBeforeStop
 	CapiDataChanSizeMultiplier = capiDataChanSizeMultiplier
+	RefreshRemoteClusterRefInterval = refreshRemoteClusterRefInterval
 }

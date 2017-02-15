@@ -211,7 +211,7 @@ func (ckmgr *CheckpointManager) populateRemoteBucketInfo(pipeline common.Pipelin
 	if err != nil {
 		return err
 	}
-	remoteClusterRef, err := ckmgr.remote_cluster_svc.RemoteClusterByUuid(spec.TargetClusterUUID, true)
+	remoteClusterRef, err := ckmgr.remote_cluster_svc.RemoteClusterByUuid(spec.TargetClusterUUID, false)
 	if err != nil {
 		return err
 	}

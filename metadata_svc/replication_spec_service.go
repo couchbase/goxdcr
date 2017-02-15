@@ -564,7 +564,7 @@ func (service *ReplicationSpecService) ValidateExistingReplicationSpec(spec *met
 	}
 
 	//validate target cluster
-	targetClusterRef, err := service.remote_cluster_svc.RemoteClusterByUuid(spec.TargetClusterUUID, true)
+	targetClusterRef, err := service.remote_cluster_svc.RemoteClusterByUuid(spec.TargetClusterUUID, false)
 	if err == service_def.MetadataNotFoundErr {
 		//remote cluster is no longer valid
 		errMsg := fmt.Sprintf("spec %v refers to non-existent remote cluster reference \"%v\"", spec.Id, spec.TargetClusterUUID)

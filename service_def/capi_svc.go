@@ -52,7 +52,7 @@ func NewRemoteBucketInfo(remoteClusterRefName string, bucketName string, remote_
 
 func (remoteBucket *RemoteBucketInfo) refresh_internal(remote_cluster_svc RemoteClusterSvc, full bool) error {
 	if remoteBucket.RemoteClusterRef == nil && !full {
-		remoteClusterRef, err := remote_cluster_svc.RemoteClusterByRefName(remoteBucket.RemoteClusterRefName, true)
+		remoteClusterRef, err := remote_cluster_svc.RemoteClusterByRefName(remoteBucket.RemoteClusterRefName, false)
 		if err != nil {
 			remoteBucket.logger.Errorf("Failed to get remote cluster reference with refName=%v, err=%v\n", remoteBucket.RemoteClusterRefName, err)
 			return err
