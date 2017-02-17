@@ -87,6 +87,9 @@ var UninitializedReseverationNumber = -1
 
 type ConflictResolver func(doc_metadata_source documentMetadata, doc_metadata_target documentMetadata, source_cr_mode base.ConflictResolutionMode, logger *log.CommonLogger) bool
 
+var GetMetaClientName = "client_getMeta"
+var SetMetaClientName = "client_setMeta"
+
 /************************************
 /* struct bufferedMCRequest
 *************************************/
@@ -758,6 +761,9 @@ type XmemNozzle struct {
 	source_cr_mode base.ConflictResolutionMode
 
 	sourceBucketName string
+
+	getMetaUserAgent string
+	setMetaUserAgent string
 }
 
 func NewXmemNozzle(id string,
@@ -1623,6 +1629,9 @@ func (xmem *XmemNozzle) initializeConnection() (err error) {
 	}
 	xmem.connType = pool.ConnType()
 
+	// this needs to be done after xmem.connType is set
+	xmem.composeUserAgent()
+
 	memClient_setMeta, err := pool.GetNew()
 
 	if err != nil {
@@ -1634,16 +1643,16 @@ func (xmem *XmemNozzle) initializeConnection() (err error) {
 		return
 	}
 
-	xmem.client_for_setMeta = newXmemClient("client_setMeta", xmem.config.readTimeout,
+	xmem.client_for_setMeta = newXmemClient(SetMetaClientName, xmem.config.readTimeout,
 		xmem.config.writeTimeout, memClient_setMeta,
 		xmem.config.maxRetry, xmem.config.max_read_downtime, xmem.Logger())
-	xmem.client_for_getMeta = newXmemClient("client_getMeta", xmem.config.readTimeout,
+	xmem.client_for_getMeta = newXmemClient(GetMetaClientName, xmem.config.readTimeout,
 		xmem.config.writeTimeout, memClient_getMeta,
 		xmem.config.maxRetry, xmem.config.max_read_downtime, xmem.Logger())
 
-	// send helo command
-	xmem.sendHELO(xmem.client_for_setMeta)
-	xmem.sendHELO(xmem.client_for_getMeta)
+	// send helo command to setMeta and getMeta clients
+	xmem.sendHELO(true /*setMeta*/)
+	xmem.sendHELO(false /*setMeta */)
 
 	xmem.Logger().Infof("%v done with initializeConnection.", xmem.Id())
 	return err
@@ -2170,20 +2179,36 @@ func (xmem *XmemNozzle) optimisticRep(req *mc.MCRequest) bool {
 }
 
 // ignore errors around HELO command since they are not critical to replication
-func (xmem *XmemNozzle) sendHELO(client *xmemClient) {
-	userAgent := xmem.composeUserAgent(client)
-	utils.SendHELO(client.getMemClient(), userAgent, xmem.config.readTimeout, xmem.config.writeTimeout, xmem.Logger())
+func (xmem *XmemNozzle) sendHELO(setMeta bool) {
+	if setMeta {
+		utils.SendHELO(xmem.client_for_setMeta.getMemClient(), xmem.setMetaUserAgent, xmem.config.readTimeout, xmem.config.writeTimeout, xmem.Logger())
+	} else {
+		utils.SendHELO(xmem.client_for_getMeta.getMemClient(), xmem.getMetaUserAgent, xmem.config.readTimeout, xmem.config.writeTimeout, xmem.Logger())
+	}
 }
 
 // compose user agent string for HELO command
-func (xmem *XmemNozzle) composeUserAgent(client *xmemClient) string {
+func (xmem *XmemNozzle) composeUserAgent() {
+	xmem.composeUserAgentForClient(true)
+	xmem.composeUserAgentForClient(false)
+}
+
+func (xmem *XmemNozzle) composeUserAgentForClient(setMeta bool) {
 	var buffer bytes.Buffer
 	buffer.WriteString("Goxdcr Xmem ")
-	buffer.WriteString(client.name)
+	if setMeta {
+		buffer.WriteString(SetMetaClientName)
+	} else {
+		buffer.WriteString(GetMetaClientName)
+	}
 	buffer.WriteString(" SourceBucket:" + xmem.sourceBucketName)
 	buffer.WriteString(" TargetBucket:" + xmem.config.bucketName)
 	buffer.WriteString(" ConnType:" + xmem.connType.String())
-	return buffer.String()
+	if setMeta {
+		xmem.setMetaUserAgent = buffer.String()
+	} else {
+		xmem.getMetaUserAgent = buffer.String()
+	}
 }
 
 func (xmem *XmemNozzle) getConn(client *xmemClient, readTimeout bool, writeTimeout bool) (io.ReadWriteCloser, int, error) {
@@ -2317,8 +2342,13 @@ func (xmem *XmemNozzle) repairConn(client *xmemClient, reason string, rev int) e
 
 		if err == nil {
 			repaired := client.repairConn(memClient, rev, xmem.Id())
-			if repaired && client == xmem.client_for_setMeta {
-				go xmem.onSetMetaConnRepaired()
+			if repaired {
+				if client == xmem.client_for_setMeta {
+					xmem.sendHELO(true /*setMeta*/)
+					go xmem.onSetMetaConnRepaired()
+				} else {
+					xmem.sendHELO(false /*setMeta*/)
+				}
 			}
 
 			xmem.Logger().Infof("%v - The connection for %v has been repaired\n", xmem.Id(), client.name)
