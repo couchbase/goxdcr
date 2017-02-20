@@ -17,6 +17,7 @@ import (
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/goxdcr/pipeline"
+	"github.com/couchbase/goxdcr/pipeline_utils"
 	"github.com/couchbase/goxdcr/service_def"
 	"github.com/couchbase/goxdcr/utils"
 	"sync"
@@ -35,6 +36,8 @@ type pipelineManager struct {
 	repl_spec_svc      service_def.ReplicationSpecSvc
 	xdcr_topology_svc  service_def.XDCRCompTopologySvc
 	remote_cluster_svc service_def.RemoteClusterSvc
+	cluster_info_svc   service_def.ClusterInfoSvc
+	uilog_svc          service_def.UILogSvc
 	once               sync.Once
 	logger             *log.CommonLogger
 	child_waitGrp      *sync.WaitGroup
@@ -43,12 +46,15 @@ type pipelineManager struct {
 var pipeline_mgr pipelineManager
 
 func PipelineManager(factory common.PipelineFactory, repl_spec_svc service_def.ReplicationSpecSvc, xdcr_topology_svc service_def.XDCRCompTopologySvc,
-	remote_cluster_svc service_def.RemoteClusterSvc, logger_context *log.LoggerContext) {
+	remote_cluster_svc service_def.RemoteClusterSvc, cluster_info_svc service_def.ClusterInfoSvc,
+	uilog_svc service_def.UILogSvc, logger_context *log.LoggerContext) {
 	pipeline_mgr.once.Do(func() {
 		pipeline_mgr.pipeline_factory = factory
 		pipeline_mgr.repl_spec_svc = repl_spec_svc
 		pipeline_mgr.xdcr_topology_svc = xdcr_topology_svc
 		pipeline_mgr.remote_cluster_svc = remote_cluster_svc
+		pipeline_mgr.cluster_info_svc = cluster_info_svc
+		pipeline_mgr.uilog_svc = uilog_svc
 		pipeline_mgr.logger = log.NewLogger("PipelineMgr", logger_context)
 		pipeline_mgr.logger.Info("Pipeline Manager is constucted")
 		pipeline_mgr.child_waitGrp = &sync.WaitGroup{}
@@ -632,6 +638,8 @@ func (r *pipelineUpdater) update() bool {
 		r.logger.Infof("Try to fix Pipeline %v. Current error=%v \n", r.pipeline_name, r.current_error)
 	}
 
+	var p common.Pipeline
+
 	err := r.updateState(Updater_Running)
 	if err != nil {
 		// the only scenario where err can be returned is when updater is already in "Done" state
@@ -650,7 +658,7 @@ func (r *pipelineUpdater) update() bool {
 		goto RE
 	}
 
-	_, err = pipeline_mgr.startPipeline(r.pipeline_name)
+	p, err = pipeline_mgr.startPipeline(r.pipeline_name)
 RE:
 	if err == nil {
 		r.logger.Infof("Replication %v has been updated. Back to business\n", r.pipeline_name)
@@ -664,6 +672,9 @@ RE:
 
 	if err == nil || err == ReplicationSpecNotActive || err == service_def.MetadataNotFoundErr {
 		r.logger.Infof("Pipeline %v has been updated successfully\n", r.pipeline_name)
+		if err == nil {
+			r.raiseXattrWarningIfNeeded(p)
+		}
 		if err1 := pipeline_mgr.reportFixed(r.pipeline_name, r); err1 == nil {
 			r.rep_status.ClearErrors()
 			r.current_error = nil
@@ -683,6 +694,60 @@ RE:
 
 func (r *pipelineUpdater) reportStatus() {
 	r.rep_status.AddError(r.current_error)
+}
+
+// raise warning on UI console when
+// 1. replication is not of capi type
+// 2. replication is not recovering from error
+// 3. target cluster does not support xattr
+// 4. current node is the master for vbucket 0 - this is needed to ensure that warning is shown on UI only once, instead of once per source node
+func (r *pipelineUpdater) raiseXattrWarningIfNeeded(p common.Pipeline) {
+	if r.current_error == nil {
+		if p == nil {
+			r.logger.Warnf("Skipping xattr warning check since pipeline %v has not been started\n", r.pipeline_name)
+			return
+		}
+
+		spec := p.Specification()
+		if spec == nil {
+			r.logger.Warnf("Skipping xattr warning check since cannot find replication spec for pipeline %v\n", r.pipeline_name)
+			return
+		}
+
+		if spec.Settings.RepType == metadata.ReplicationTypeCapi {
+			return
+		}
+
+		targetClusterRef, err := pipeline_mgr.remote_cluster_svc.RemoteClusterByUuid(spec.TargetClusterUUID, false)
+		if err != nil {
+			r.logger.Warnf("Skipping xattr warning check since received error getting remote cluster with uuid=%v for pipeline %v, err=%v\n", spec.TargetClusterUUID, spec.Id, err)
+			return
+		}
+
+		hasXATTRSupport, err := pipeline_mgr.cluster_info_svc.IsClusterCompatible(targetClusterRef, base.VersionForXATTRSupport)
+		if err != nil {
+			r.logger.Warnf("Skipping xattr warning check since received error checking target cluster version. target cluster=%v, pipeline=%v, err=%v\n", spec.TargetClusterUUID, spec.Id, err)
+			return
+		}
+		if !hasXATTRSupport {
+			errMsg := fmt.Sprintf("Replication from source bucket '%v' to target bucket '%v' on cluster '%v' has been started. Note - Target cluster is older than 5.0.0, hence some of the new feature enhancements such as \"Extended Attributes (XATTR)\" are not supported, which might result in loss of XATTR data. If this is not acceptable, please pause the replication, upgrade cluster '%v' to 5.0.0, and restart replication.", spec.SourceBucketName, spec.TargetBucketName, targetClusterRef.Name, targetClusterRef.Name)
+			r.logger.Warn(errMsg)
+
+			sourceVbList := pipeline_utils.GetSourceVBListPerPipeline(p)
+			containsVb0 := false
+			for _, vbno := range sourceVbList {
+				if vbno == 0 {
+					containsVb0 = true
+					break
+				}
+			}
+
+			if containsVb0 {
+				// write warning to UI
+				pipeline_mgr.uilog_svc.Write(errMsg)
+			}
+		}
+	}
 }
 
 func (r *pipelineUpdater) checkReplicationActiveness() (err error) {
