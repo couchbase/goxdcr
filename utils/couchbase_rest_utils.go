@@ -171,9 +171,8 @@ func GetBucketInfo(hostAddr, bucketName, username, password string, certificate 
 }
 
 // get bucket uuid
-// use base.BPath to get less info than the regular base.DefaultPoolBucketsPath
 func RemoteBucketUUID(hostAddr, bucketName, username, password string, certificate []byte, sanInCertificate bool, logger *log.CommonLogger) (string, error) {
-	bucketInfo, err := GetClusterInfo(hostAddr, base.BPath+bucketName, username, password, certificate, sanInCertificate, logger)
+	bucketInfo, err := GetClusterInfo(hostAddr, base.DefaultPoolBucketsPath+bucketName, username, password, certificate, sanInCertificate, logger)
 	if err != nil {
 		return "", err
 	}
