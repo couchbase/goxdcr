@@ -157,23 +157,17 @@ loop:
 				logging.Errorf("Failed to transmit command %s. Error %s", command.Opcode.String(), err.Error())
 				// get feed to close and runFeed routine to exit
 				feed.Close()
-
-				// cannot exit just yet, otherwise runFeed may get blocked trying to write to "transmitCh" and never get the exit signal
-				// the correct exit sequence is:
-				// 1. runFeed gets the exit signal
-				// 2. runFeed sends a signal to "transmitCl" channel, and then exits
-				// 3. sendCommands gets the exit signal from the "transmitCl" channel and exits
+				break loop
 			}
 
 		case <-transmitCl:
 			break loop
 		}
 	}
-	// After sendCommands exits, write to transmitCh needs to be avoided.
-	// Closing transmitCh to make such prolematic write attempts more evident.
-	// Care has been taken to ensure that internal APIs do not write to transmitCh after sendCommands exits.
-	// Public APIs that write to transmitCh, e.g., CloseStream(), need to check feed closure before they do the write.
-	close(transmitCh)
+
+	// After sendCommands exits, write to transmitCh will block forever
+	// when we write to transmitCh, e.g., at CloseStream(), we need to check feed closure to have an exit route
+
 	logging.Infof("sendCommands exiting")
 }
 
@@ -240,7 +234,8 @@ func (feed *UprFeed) UprOpenWithExtMeta(name string, sequence uint32, bufSize ui
 func (feed *UprFeed) uprOpen(name string, sequence uint32, bufSize uint32, enableExtMeta bool) error {
 	mc := feed.conn
 
-	if err := doUprOpen(mc, name, sequence); err != nil {
+	var err error
+	if err = doUprOpen(mc, name, sequence); err != nil {
 		return err
 	}
 
@@ -251,7 +246,10 @@ func (feed *UprFeed) uprOpen(name string, sequence uint32, bufSize uint32, enabl
 			Key:    []byte("connection_buffer_size"),
 			Body:   []byte(strconv.Itoa(int(bufSize))),
 		}
-		feed.transmitCh <- rq
+		err = feed.writeToTransmitCh(rq)
+		if err != nil {
+			return err
+		}
 		feed.maxAckBytes = uint32(bufferAckThreshold * float32(bufSize))
 	}
 
@@ -261,14 +259,20 @@ func (feed *UprFeed) uprOpen(name string, sequence uint32, bufSize uint32, enabl
 		Key:    []byte("enable_noop"),
 		Body:   []byte("true"),
 	}
-	feed.transmitCh <- rq
+	err = feed.writeToTransmitCh(rq)
+	if err != nil {
+		return err
+	}
 
 	rq = &gomemcached.MCRequest{
 		Opcode: gomemcached.UPR_CONTROL,
 		Key:    []byte("set_noop_interval"),
 		Body:   []byte(strconv.Itoa(int(uprDefaultNoopInterval))),
 	}
-	feed.transmitCh <- rq
+	err = feed.writeToTransmitCh(rq)
+	if err != nil {
+		return err
+	}
 
 	// send a UPR control message to set the enable_ext_metadata flag for the this connection
 	if enableExtMeta {
@@ -277,7 +281,10 @@ func (feed *UprFeed) uprOpen(name string, sequence uint32, bufSize uint32, enabl
 			Key:    []byte("enable_ext_metadata"),
 			Body:   []byte("true"),
 		}
-		feed.transmitCh <- rq
+		err = feed.writeToTransmitCh(rq)
+		if err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -358,23 +365,45 @@ func (feed *UprFeed) UprRequestStream(vbno, opaqueMSB uint16, flags uint32,
 
 // CloseStream for specified vbucket.
 func (feed *UprFeed) CloseStream(vbno, opaqueMSB uint16) error {
-	feed.mu.Lock()
-	defer feed.mu.Unlock()
 
-	if feed.closed {
-		logging.Infof("Skipping closing stream request for %v since feed has been closed\n", vbno)
-		return nil
+	err := feed.validateCloseStream(vbno)
+	if err != nil {
+		logging.Infof("CloseStream for %v has been skipped because of error %v", vbno, err)
+		return err
 	}
 
-	if feed.vbstreams[vbno] == nil {
-		return fmt.Errorf("Stream for vb %d has not been requested", vbno)
-	}
 	closeStream := &gomemcached.MCRequest{
 		Opcode:  gomemcached.UPR_CLOSESTREAM,
 		VBucket: vbno,
 		Opaque:  composeOpaque(vbno, opaqueMSB),
 	}
-	feed.transmitCh <- closeStream
+
+	feed.writeToTransmitCh(closeStream)
+
+	return nil
+}
+
+func (feed *UprFeed) validateCloseStream(vbno uint16) error {
+	feed.mu.RLock()
+	defer feed.mu.RUnlock()
+
+	if feed.vbstreams[vbno] == nil {
+		return fmt.Errorf("Stream for vb %d has not been requested", vbno)
+	}
+
+	return nil
+}
+
+func (feed *UprFeed) writeToTransmitCh(rq *gomemcached.MCRequest) error {
+	// write to transmitCh may block forever if sendCommands has exited
+	// check for feed closure to have an exit route in this case
+	select {
+	case <-feed.closer:
+		errMsg := fmt.Sprintf("Abort sending request to transmitCh because feed has been closed. request=%v", rq)
+		logging.Infof(errMsg)
+		return errors.New(errMsg)
+	case feed.transmitCh <- rq:
+	}
 	return nil
 }
 
@@ -629,14 +658,13 @@ loop:
 				}
 				bufferAck.Extras = make([]byte, 4)
 				binary.BigEndian.PutUint32(bufferAck.Extras[:4], uint32(sendSize))
-				feed.transmitCh <- bufferAck
+				feed.writeToTransmitCh(bufferAck)
 				uprStats.TotalBufferAckSent++
 			}
 		}
 	}
 
 	// make sure that feed is closed before we signal transmitCl and exit runFeed
-	// otherwise transmitch may be closed before feed is closed and cause panic
 	feed.Close()
 
 	feed.transmitCl <- true
