@@ -846,6 +846,15 @@ func (ckmgr *CheckpointManager) PerformCkpt(fin_ch <-chan bool) {
 	ckmgr.logger.Infof("Start one time checkpointing for replication %v\n", ckmgr.pipeline.Topic())
 	defer ckmgr.logger.Infof("Done one time checkpointing for replication %v\n", ckmgr.pipeline.Topic())
 
+	var through_seqno_map map[uint16]uint64
+	var high_seqno_and_vbuuid_map map[uint16][]uint64
+	if !ckmgr.capi {
+		// get through seqnos for all vbuckets in the pipeline
+		through_seqno_map = ckmgr.through_seqno_tracker_svc.GetThroughSeqnos()
+		// get high seqno and vbuuid for all vbuckets in the pipeline
+		high_seqno_and_vbuuid_map = ckmgr.getHighSeqnoAndVBUuidFromTarget()
+	}
+
 	//divide the workload to several getter and run the getter parallelly
 	vb_list := ckmgr.getMyVBs()
 	simple_utils.RandomizeUint16List(vb_list)
@@ -866,7 +875,7 @@ func (ckmgr *CheckpointManager) PerformCkpt(fin_ch <-chan bool) {
 
 		worker_wait_grp.Add(1)
 		// do not wait between vbuckets
-		go ckmgr.performCkpt_internal(vb_list_worker, fin_ch, worker_wait_grp, 0)
+		go ckmgr.performCkpt_internal(vb_list_worker, fin_ch, worker_wait_grp, 0, through_seqno_map, high_seqno_and_vbuuid_map)
 	}
 
 	//wait for all the getter done, then gather result
@@ -877,10 +886,19 @@ func (ckmgr *CheckpointManager) PerformCkpt(fin_ch <-chan bool) {
 func (ckmgr *CheckpointManager) performCkpt(fin_ch <-chan bool, wait_grp *sync.WaitGroup) {
 	ckmgr.logger.Infof("Start checkpointing for replication %v\n", ckmgr.pipeline.Topic())
 	defer ckmgr.logger.Infof("Done checkpointing for replication %v\n", ckmgr.pipeline.Topic())
-	ckmgr.performCkpt_internal(ckmgr.getMyVBs(), fin_ch, wait_grp, ckmgr.ckpt_interval)
+	var through_seqno_map map[uint16]uint64
+	var high_seqno_and_vbuuid_map map[uint16][]uint64
+	if !ckmgr.capi {
+		// get through seqnos for all vbuckets in the pipeline
+		through_seqno_map = ckmgr.through_seqno_tracker_svc.GetThroughSeqnos()
+		// get high seqno and vbuuid for all vbuckets in the pipeline
+		high_seqno_and_vbuuid_map = ckmgr.getHighSeqnoAndVBUuidFromTarget()
+	}
+	ckmgr.performCkpt_internal(ckmgr.getMyVBs(), fin_ch, wait_grp, ckmgr.ckpt_interval, through_seqno_map, high_seqno_and_vbuuid_map)
 }
 
-func (ckmgr *CheckpointManager) performCkpt_internal(vb_list []uint16, fin_ch <-chan bool, wait_grp *sync.WaitGroup, time_to_wait time.Duration) {
+func (ckmgr *CheckpointManager) performCkpt_internal(vb_list []uint16, fin_ch <-chan bool, wait_grp *sync.WaitGroup, time_to_wait time.Duration,
+	through_seqno_map map[uint16]uint64, high_seqno_and_vbuuid_map map[uint16][]uint64) {
 
 	defer wait_grp.Done()
 
@@ -891,15 +909,6 @@ func (ckmgr *CheckpointManager) performCkpt_internal(vb_list []uint16, fin_ch <-
 	ckmgr.logger.Infof("Checkpointing for replication %v, vb_list=%v, time_to_wait=%v, interval_btwn_vb=%v sec\n", ckmgr.pipeline.Topic(), vb_list, time_to_wait, interval_btwn_vb.Seconds())
 	err_map := make(map[uint16]error)
 	var total_committing_time float64 = 0
-
-	var through_seqno_map map[uint16]uint64
-	var high_seqno_and_vbuuid_map map[uint16][]uint64
-	if !ckmgr.capi {
-		// get through seqnos for all vbuckets in the pipeline
-		through_seqno_map = ckmgr.through_seqno_tracker_svc.GetThroughSeqnos()
-		// get high seqno and vbuuid for all vbuckets in the pipeline
-		high_seqno_and_vbuuid_map = ckmgr.getHighSeqnoAndVBUuidFromTarget()
-	}
 
 	for index, vb := range vb_list {
 		select {
