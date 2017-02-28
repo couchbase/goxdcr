@@ -46,6 +46,7 @@ type ReplicationSpecification struct {
 func NewReplicationSpecification(sourceBucketName string, sourceBucketUUID string, targetClusterUUID string, targetBucketName string, targetBucketUUID string) *ReplicationSpecification {
 	return &ReplicationSpecification{Id: ReplicationId(sourceBucketName, targetClusterUUID, targetBucketName),
 		SourceBucketName:  sourceBucketName,
+		SourceBucketUUID:  sourceBucketUUID,
 		TargetClusterUUID: targetClusterUUID,
 		TargetBucketName:  targetBucketName,
 		TargetBucketUUID:  targetBucketUUID,
@@ -63,6 +64,7 @@ func (spec *ReplicationSpecification) SameSpec(spec2 *ReplicationSpecification) 
 	}
 	// note that settings in spec are not compared. The assumption is that if settings are different, Revision will have to be different
 	return spec.Id == spec2.Id && spec.SourceBucketName == spec2.SourceBucketName &&
+		spec.SourceBucketUUID == spec2.SourceBucketUUID &&
 		spec.TargetClusterUUID == spec2.TargetClusterUUID && spec.TargetBucketName == spec2.TargetBucketName &&
 		spec.TargetBucketUUID == spec2.TargetBucketUUID && reflect.DeepEqual(spec.Revision, spec2.Revision)
 }
@@ -73,6 +75,7 @@ func (spec *ReplicationSpecification) Clone() *ReplicationSpecification {
 	}
 	return &ReplicationSpecification{Id: spec.Id,
 		SourceBucketName:  spec.SourceBucketName,
+		SourceBucketUUID:  spec.SourceBucketUUID,
 		TargetClusterUUID: spec.TargetClusterUUID,
 		TargetBucketName:  spec.TargetBucketName,
 		TargetBucketUUID:  spec.TargetBucketUUID,

@@ -621,7 +621,7 @@ func (bscl *BucketSettingsChangeListener) processBucketSettingsChange(settingsCh
 		return err
 	}
 
-	curBucketUUID, err := utils.LocalBucketUUID(connStr, bucketName)
+	curBucketUUID, err := utils.LocalBucketUUID(connStr, bucketName, bscl.logger)
 	if err != nil {
 		bscl.logger.Infof("bucketSettingsChangeHandlerCallback on bucket = %v has been skipped since the bucket cannot be retrieved. The bucket may have been deleted. err=%v\n", bucketName, err)
 		return err

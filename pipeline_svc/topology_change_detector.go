@@ -303,7 +303,10 @@ func (top_detect_svc *TopologyChangeDetectorSvc) validateVbErrors(diff_vb_list [
 // 1. First bool indicates whether target version needs to be checked
 // 2. second bool indicates whether the first bool needs to be recomputed at the next check
 func (top_detect_svc *TopologyChangeDetectorSvc) needCheckTargetForSSL() (bool, bool) {
-	spec := top_detect_svc.pipeline.Specification()
+	spec, _ := top_detect_svc.repl_spec_svc.ReplicationSpec(top_detect_svc.pipeline.Topic())
+	if spec == nil {
+		return false, true
+	}
 	targetClusterRef, err := top_detect_svc.remote_cluster_svc.RemoteClusterByUuid(spec.TargetClusterUUID, false)
 	if err == nil {
 		if !targetClusterRef.DemandEncryption {
@@ -394,7 +397,7 @@ func (top_detect_svc *TopologyChangeDetectorSvc) validateTargetTopology(checkTar
 }
 
 func (top_detect_svc *TopologyChangeDetectorSvc) getTargetBucketInfo() (int, map[string][]uint16, error) {
-	spec := top_detect_svc.pipeline.Specification()
+	spec, _ := top_detect_svc.repl_spec_svc.ReplicationSpec(top_detect_svc.pipeline.Topic())
 	if spec == nil {
 		return 0, nil, fmt.Errorf("Cannot find replication spec for %v", top_detect_svc.pipeline.Topic())
 	}
