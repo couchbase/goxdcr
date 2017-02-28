@@ -600,7 +600,7 @@ func (service *MigrationSvc) sourceBucketUUID(bucketName string) (string, error)
 	if local_connStr == "" {
 		panic("XDCRTopologySvc.MyConnectionStr() should not return empty string")
 	}
-	return utils.LocalBucketUUID(local_connStr, bucketName)
+	return utils.LocalBucketUUID(local_connStr, bucketName, service.logger)
 }
 
 func (service *MigrationSvc) targetBucketUUID(targetClusterUUID, bucketName string) (string, error) {
@@ -617,7 +617,7 @@ func (service *MigrationSvc) targetBucketUUID(targetClusterUUID, bucketName stri
 		return "", err_target
 	}
 
-	return utils.RemoteBucketUUID(remote_connStr, bucketName, remote_userName, remote_password, certificate, sanInCertificate, service.logger)
+	return utils.BucketUUID(remote_connStr, bucketName, remote_userName, remote_password, certificate, sanInCertificate, service.logger)
 }
 
 func addErrorMapToErrorList(errorMap map[string]error, errorList []error) []error {

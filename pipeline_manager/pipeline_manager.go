@@ -222,8 +222,10 @@ func CheckPipelines() {
 	rep_status_map := ReplicationStatusMap()
 	for specId, rep_status := range rep_status_map {
 		//validate replication spec
-		if rep_status.Spec() != nil {
-			pipeline_mgr.repl_spec_svc.ValidateAndGC(rep_status.Spec())
+		spec := rep_status.Spec()
+		if spec != nil {
+		pipeline_mgr.logger.Infof("checkpipeline spec=%v, uuid=%v", spec, spec.SourceBucketUUID)
+			pipeline_mgr.repl_spec_svc.ValidateAndGC(spec)
 		}
 		if rep_status.RuntimeStatus(true) == pipeline.Pending {
 			if rep_status.Updater() == nil {

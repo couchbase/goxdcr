@@ -97,13 +97,11 @@ func (xdcrf *XDCRFactory) NewPipeline(topic string, progress_recorder common.Pip
 	if err != nil {
 		return nil, err
 	}
-	sourceBucket, err := utils.LocalBucket(localConnStr, spec.SourceBucketName)
+	sourceBucketPassword, err := utils.LocalBucketPassword(localConnStr, spec.SourceBucketName, xdcrf.logger)
 	if err != nil {
-		xdcrf.logger.Errorf("Error getting source bucket %v. err=%v\n", spec.SourceBucketName, err)
+		xdcrf.logger.Errorf("Error getting password of source bucket %v. err=%v\n", spec.SourceBucketName, err)
 		return nil, err
 	}
-	sourceBucketPassword := sourceBucket.Password
-	sourceBucket.Close()
 
 	targetClusterRef, err := xdcrf.remote_cluster_svc.RemoteClusterByUuid(spec.TargetClusterUUID, true)
 	if err != nil {

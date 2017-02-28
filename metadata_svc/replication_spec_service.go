@@ -162,13 +162,13 @@ func (service *ReplicationSpecService) ValidateNewReplicationSpec(sourceBucket, 
 
 	var err_source error
 	start_time := time.Now()
-	sourceBucketObj, err_source := utils.LocalBucket(local_connStr, sourceBucket)
-	service.logger.Infof("Result from local bucket look up: err_source=%v, time taken=%v\n", err_source, time.Since(start_time))
-	service.validateBucket(sourceBucket, targetCluster, targetBucket, sourceBucketObj.Type, err_source, errorMap, true)
 
-	sourceBucketUUID := ""
-	if sourceBucketObj != nil {
-		sourceBucketUUID = sourceBucketObj.UUID
+	sourceBucketType, sourceBucketUUID, sourceConflictResolutionType, err_source := utils.BucketValidationInfo(local_connStr, sourceBucket, "", "", nil, false, service.logger)
+	service.logger.Infof("Result from local bucket look up: bucketName=%v, err_source=%v, time taken=%v\n", sourceBucket, err_source, time.Since(start_time))
+	service.validateBucket(sourceBucket, targetCluster, targetBucket, sourceBucketType, err_source, errorMap, true)
+
+	if len(errorMap) > 0 {
+		return "", "", nil, errorMap
 	}
 
 	// validate remote cluster ref
@@ -178,7 +178,7 @@ func (service *ReplicationSpecService) ValidateNewReplicationSpec(sourceBucket, 
 		errorMap[base.ToCluster] = utils.NewEnhancedError("cannot find remote cluster", err)
 		return "", "", nil, errorMap
 	}
-	service.logger.Infof("Successfully retrieved target cluster reference. time take=%v\n", time.Since(start_time))
+	service.logger.Infof("Successfully retrieved target cluster reference %v. time take=%v\n", targetClusterRef.Name, time.Since(start_time))
 
 	// validate that the source bucket and target bucket are not the same bucket
 	// i.e., validate that the following are not both true:
@@ -211,42 +211,18 @@ func (service *ReplicationSpecService) ValidateNewReplicationSpec(sourceBucket, 
 
 	//validate target bucket
 	start_time = time.Now()
-	//get uuid and type from bucket info
-	targetBucketInfo, err_target := utils.GetBucketInfo(remote_connStr, targetBucket, remote_userName, remote_password, certificate, sanInCertificate, service.logger)
-
-	targetBucketType := ""
-	if err_target == nil && targetBucketInfo != nil {
-		targetBucketTypeObj, ok := targetBucketInfo[base.BucketTypeKey]
-		if !ok {
-			err_target = fmt.Errorf("Error looking up bucket type of target bucket %v", targetBucket)
-		} else {
-			targetBucketType, ok = targetBucketTypeObj.(string)
-			if !ok {
-				err_target = fmt.Errorf("Bucket type of target bucket %v is of wrong type", targetBucket)
-			}
-		}
-	}
-
-	service.logger.Infof("Result from remote bucket look up: err_target=%v, time taken=%v\n", err_target, time.Since(start_time))
+	targetBucketType, targetBucketUUID, targetConflictResolutionType, err_target := utils.BucketValidationInfo(remote_connStr, targetBucket, remote_userName, remote_password, certificate, sanInCertificate, service.logger)
+	service.logger.Infof("Result from remote bucket look up: connStr=%v, bucketName=%v, err_target=%v, time taken=%v\n", remote_connStr, targetBucket, err_target, time.Since(start_time))
 	service.validateBucket(sourceBucket, targetCluster, targetBucket, targetBucketType, err_target, errorMap, false)
 
-	// validate that source and target bucket have the same conflict resolution type metadata
-	targetConflictResolutionType, err := utils.GetConflictResolutionTypeFromBucketInfo(targetBucket, targetBucketInfo)
-	if err != nil {
-		errorMap[base.PlaceHolderFieldKey] = errors.New("Error retrieving ConflictResolutionType setting on target bucket")
-		return "", "", nil, errorMap
-	}
-	if sourceBucketObj.ConflictResolutionType != targetConflictResolutionType {
-		errorMap[base.PlaceHolderFieldKey] = errors.New("Replication between buckets with different ConflictResolutionType setting is not allowed")
+	if len(errorMap) > 0 {
 		return "", "", nil, errorMap
 	}
 
-	targetBucketUUID := ""
-	if targetBucketInfo != nil {
-		targetBucketUUID, err = utils.GetBucketUuidFromBucketInfo(targetBucket, targetBucketInfo, service.logger)
-		if err != nil {
-			errorMap[base.PlaceHolderFieldKey] = err
-		}
+	// validate that source and target bucket have the same conflict resolution type metadata
+	if sourceConflictResolutionType != targetConflictResolutionType {
+		errorMap[base.PlaceHolderFieldKey] = errors.New("Replication between buckets with different ConflictResolutionType setting is not allowed")
+		return "", "", nil, errorMap
 	}
 
 	repId := metadata.ReplicationId(sourceBucket, targetClusterRef.Uuid, targetBucket)
@@ -550,12 +526,28 @@ func (service *ReplicationSpecService) validateExistingReplicationSpec(spec *met
 	if local_connStr == "" {
 		panic("XDCRTopologySvc.MyConnectionStr() should not return empty string")
 	}
-	sourceBucketUuid, err_source := utils.LocalBucketUUID(local_connStr, spec.SourceBucketName)
+	sourceBucketUuid, err_source := utils.LocalBucketUUID(local_connStr, spec.SourceBucketName, service.logger)
 
 	if err_source == utils.NonExistentBucketError {
-		errMsg := fmt.Sprintf("spec %v refers to non-existent source bucket \"%v\"", spec.Id, spec.SourceBucketName)
-		service.logger.Error(errMsg)
-		return InvalidReplicationSpecError, errors.New(errMsg)
+		/* When we get NonExistentBucketError, there are two possibilities:
+		1. the source bucket has been deleted. in this case we need to delete repl spec
+		2. the source node is not accessible. in this case we skip source bucket check for the current round
+		   hopefully things will get better in the next source bucket check
+
+		We need to make an additional call to retrieve source cluster uuid to differentiate between these two cases
+		A. if the call returns successfully, it is case #1
+		B. if the call returns an error, it is case #2 */
+		_, err := utils.GetClusterUUID(service.xdcr_comp_topology_svc, service.logger)
+		if err == nil {
+			errMsg := fmt.Sprintf("spec %v refers to non-existent source bucket \"%v\"", spec.Id, spec.SourceBucketName)
+			service.logger.Error(errMsg)
+			return InvalidReplicationSpecError, errors.New(errMsg)
+		} else {
+			errMsg := fmt.Sprintf("Skipping source bucket check for spec %v since source node %v is not accessible", spec.Id, local_connStr)
+			service.logger.Info(errMsg)
+			err = errors.New(errMsg)
+			return err, err
+		}
 	}
 
 	if spec.SourceBucketUUID != "" && spec.SourceBucketUUID != sourceBucketUuid {
@@ -584,7 +576,7 @@ func (service *ReplicationSpecService) sourceBucketUUID(bucketName string) (stri
 	if local_connStr == "" {
 		panic("XDCRTopologySvc.MyConnectionStr() should not return empty string")
 	}
-	return utils.LocalBucketUUID(local_connStr, bucketName)
+	return utils.LocalBucketUUID(local_connStr, bucketName, service.logger)
 }
 
 func (service *ReplicationSpecService) targetBucketUUID(targetClusterUUID, bucketName string) (string, error) {
@@ -601,7 +593,7 @@ func (service *ReplicationSpecService) targetBucketUUID(targetClusterUUID, bucke
 		return "", err_target
 	}
 
-	return utils.RemoteBucketUUID(remote_connStr, bucketName, remote_userName, remote_password, certificate, sanInCertificate, service.logger)
+	return utils.BucketUUID(remote_connStr, bucketName, remote_userName, remote_password, certificate, sanInCertificate, service.logger)
 }
 
 // used by unit test only. does not use https and is not of production quality

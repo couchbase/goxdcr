@@ -227,8 +227,8 @@ func GetBucketInfo(hostAddr, bucketName, username, password string, certificate 
 }
 
 // get bucket uuid
-func RemoteBucketUUID(hostAddr, bucketName, username, password string, certificate []byte, sanInCertificate bool, logger *log.CommonLogger) (string, error) {
-	bucketInfo, err := GetClusterInfo(hostAddr, base.DefaultPoolBucketsPath+bucketName, username, password, certificate, sanInCertificate, logger)
+func BucketUUID(hostAddr, bucketName, username, password string, certificate []byte, sanInCertificate bool, logger *log.CommonLogger) (string, error) {
+	bucketInfo, err := GetBucketInfo(hostAddr, bucketName, username, password, certificate, sanInCertificate, logger)
 	if err != nil {
 		return "", err
 	}
@@ -236,15 +236,51 @@ func RemoteBucketUUID(hostAddr, bucketName, username, password string, certifica
 	return GetBucketUuidFromBucketInfo(bucketName, bucketInfo, logger)
 }
 
+// get bucket password
+func BucketPassword(hostAddr, bucketName, username, password string, certificate []byte, sanInCertificate bool, logger *log.CommonLogger) (string, error) {
+	bucketInfo, err := GetBucketInfo(hostAddr, bucketName, username, password, certificate, sanInCertificate, logger)
+	if err != nil {
+		return "", err
+	}
+
+	return GetBucketPasswordFromBucketInfo(bucketName, bucketInfo, logger)
+}
+
+// get a number of fields in bucket for validation purpose
+// 1. bucket type
+// 2. bucket uuid
+// 3. bucket conflict resolution type
+func BucketValidationInfo(hostAddr, bucketName, username, password string, certificate []byte, sanInCertificate bool, logger *log.CommonLogger) (string, string, string, error) {
+	bucketInfo, err := GetBucketInfo(hostAddr, bucketName, username, password, certificate, sanInCertificate, logger)
+	if err != nil {
+		return "", "", "", err
+	}
+
+	bucketType, err := GetBucketTypeFromBucketInfo(bucketName, bucketInfo)
+	if err != nil {
+		return "", "", "", fmt.Errorf("Error retrieving BucketType setting on bucket %v", bucketName)
+	}
+	bucketUUID, err := GetBucketUuidFromBucketInfo(bucketName, bucketInfo, logger)
+	if err != nil {
+		return "", "", "", fmt.Errorf("Error retrieving UUID setting on bucket %v", bucketName)
+	}
+	bucketConflictResolutionType, err := GetConflictResolutionTypeFromBucketInfo(bucketName, bucketInfo)
+	if err != nil {
+		return "", "", "", fmt.Errorf("Error retrieving ConflictResolutionType setting on bucket %v", bucketName)
+	}
+
+	return bucketType, bucketUUID, bucketConflictResolutionType, nil
+}
+
 func GetBucketUuidFromBucketInfo(bucketName string, bucketInfo map[string]interface{}, logger *log.CommonLogger) (string, error) {
 	bucketUUID := ""
 	bucketUUIDObj, ok := bucketInfo[base.UUIDKey]
 	if !ok {
-		return "", fmt.Errorf("Error looking up uuid of target bucket %v", bucketName)
+		return "", fmt.Errorf("Error looking up uuid of bucket %v", bucketName)
 	} else {
 		bucketUUID, ok = bucketUUIDObj.(string)
 		if !ok {
-			return "", fmt.Errorf("Uuid of target bucket %v is of wrong type", bucketName)
+			return "", fmt.Errorf("Uuid of bucket %v is of wrong type", bucketName)
 		}
 	}
 	return bucketUUID, nil
@@ -302,6 +338,20 @@ func GetClusterCompatibilityFromBucketInfo(bucketName string, bucketInfo map[str
 	}
 
 	return clusterCompatibility, nil
+}
+
+func GetBucketPasswordFromBucketInfo(bucketName string, bucketInfo map[string]interface{}, logger *log.CommonLogger) (string, error) {
+	bucketPassword := ""
+	bucketPasswordObj, ok := bucketInfo[base.SASLPasswordKey]
+	if !ok {
+		return "", fmt.Errorf("Error looking up password of bucket %v", bucketName)
+	} else {
+		bucketPassword, ok = bucketPasswordObj.(string)
+		if !ok {
+			return "", fmt.Errorf("Password of bucket %v is of wrong type", bucketName)
+		}
+	}
+	return bucketPassword, nil
 }
 
 func GetNodeListFromInfoMap(infoMap map[string]interface{}, logger *log.CommonLogger) ([]interface{}, error) {

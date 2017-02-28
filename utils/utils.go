@@ -324,16 +324,12 @@ func InvalidRuneIndexErrorMessage(key string, index int) string {
 	return fmt.Sprintf("byte index, %v, in match for key, %v, is not a starting index for a rune", index, key)
 }
 
-func LocalBucketUUID(local_connStr string, bucketName string) (string, error) {
-	local_default_pool, err := LocalPool(local_connStr)
-	if err != nil {
-		return "", err
-	}
-	bucket, ok := local_default_pool.BucketMap[bucketName]
-	if !ok {
-		return "", NonExistentBucketError
-	}
-	return bucket.UUID, nil
+func LocalBucketUUID(local_connStr string, bucketName string, logger *log.CommonLogger) (string, error) {
+	return BucketUUID(local_connStr, bucketName, "", "", nil, false, logger)
+}
+
+func LocalBucketPassword(local_connStr string, bucketName string, logger *log.CommonLogger) (string, error) {
+	return BucketPassword(local_connStr, bucketName, "", "", nil, false, logger)
 }
 
 func ReplicationStatusNotFoundError(topic string) error {
@@ -533,6 +529,21 @@ func GetServerVBucketsMap(connStr, bucketName string, bucketInfo map[string]inte
 		serverVBMap[server] = vbList
 	}
 	return serverVBMap, nil
+}
+
+// get bucket type setting from bucket info
+func GetBucketTypeFromBucketInfo(bucketName string, bucketInfo map[string]interface{}) (string, error) {
+	bucketType := ""
+	bucketTypeObj, ok := bucketInfo[base.BucketTypeKey]
+	if !ok {
+		return "", fmt.Errorf("Error looking up bucket type of bucket %v", bucketName)
+	} else {
+		bucketType, ok = bucketTypeObj.(string)
+		if !ok {
+			return "", fmt.Errorf("bucketType on bucket %v is of wrong type.", bucketName)
+		}
+	}
+	return bucketType, nil
 }
 
 // get conflict resolution type setting from bucket info

@@ -150,5 +150,5 @@ func (service *BucketSettingsService) getBucketUUID(bucketName string) (string, 
 		return "", err
 	}
 
-	return utils.LocalBucketUUID(connStr, bucketName)
+	return utils.LocalBucketUUID(connStr, bucketName, service.logger)
 }
