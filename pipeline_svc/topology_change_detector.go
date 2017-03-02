@@ -7,6 +7,7 @@ import (
 	"github.com/couchbase/goxdcr/common"
 	comp "github.com/couchbase/goxdcr/component"
 	"github.com/couchbase/goxdcr/log"
+	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/goxdcr/parts"
 	"github.com/couchbase/goxdcr/pipeline_utils"
 	"github.com/couchbase/goxdcr/service_def"
@@ -55,6 +56,9 @@ type TopologyChangeDetectorSvc struct {
 
 	// key = hostname; value = https address of hostname
 	httpsAddrMap map[string]string
+
+	// whether replication is of capi type
+	capi bool
 }
 
 func NewTopologyChangeDetectorSvc(cluster_info_svc service_def.ClusterInfoSvc,
@@ -78,6 +82,7 @@ func NewTopologyChangeDetectorSvc(cluster_info_svc service_def.ClusterInfoSvc,
 
 func (top_detect_svc *TopologyChangeDetectorSvc) Attach(pipeline common.Pipeline) error {
 	top_detect_svc.pipeline = pipeline
+	top_detect_svc.capi = pipeline.Specification().Settings.RepType == metadata.ReplicationTypeCapi
 	return nil
 }
 
@@ -404,7 +409,28 @@ func (top_detect_svc *TopologyChangeDetectorSvc) getTargetBucketInfo() (int, map
 		return 0, nil, err
 	}
 
-	targetBucketUUID, targetClusterCompatibility, targetServerVBMap, err := top_detect_svc.cluster_info_svc.GetBucketInfo(targetClusterRef, spec.TargetBucketName)
+	username, password, certificate, sanInCertificate, err := targetClusterRef.MyCredentials()
+	if err != nil {
+		return 0, nil, err
+	}
+
+	bucketName := spec.TargetBucketName
+	var targetBucketUUID string
+	var targetClusterCompatibility int
+	var targetServerVBMap map[string][]uint16
+
+	targetBucketInfo, err := utils.GetBucketInfo(connStr, bucketName, username, password, certificate, sanInCertificate, top_detect_svc.logger)
+
+	if err == nil {
+		targetBucketUUID, err = utils.GetBucketUuidFromBucketInfo(bucketName, targetBucketInfo, top_detect_svc.logger)
+		if err == nil {
+			targetServerVBMap, err = utils.GetServerVBucketsMap(connStr, bucketName, targetBucketInfo)
+			// do not try to retrieve cluster compatibility in capi mode, since target cluster may be elastic search cluster
+			if err == nil && !top_detect_svc.capi {
+				targetClusterCompatibility, err = utils.GetClusterCompatibilityFromBucketInfo(bucketName, targetBucketInfo, top_detect_svc.logger)
+			}
+		}
+	}
 
 	if err == utils.NonExistentBucketError ||
 		(err == nil && spec.TargetBucketUUID != "" && spec.TargetBucketUUID != targetBucketUUID) {

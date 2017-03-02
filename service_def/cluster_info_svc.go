@@ -15,10 +15,5 @@ import (
 
 type ClusterInfoSvc interface {
 	GetServerVBucketsMap(clusterConnInfoProvider base.ClusterConnectionInfoProvider, Bucket string) (map[string][]uint16, error)
-	// retrieves three pieces of bucket info
-	// 1. bucket uuid
-	// 2. cluster compatibility
-	// 3. server vbucket map
-	GetBucketInfo(clusterConnInfoProvider base.ClusterConnectionInfoProvider, Bucket string) (string, int, map[string][]uint16, error)
 	IsClusterCompatible(clusterConnInfoProvider base.ClusterConnectionInfoProvider, version []int) (bool, error)
 }
