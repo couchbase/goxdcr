@@ -51,28 +51,6 @@ func (ci_svc *ClusterInfoSvc) GetServerVBucketsMap(clusterConnInfoProvider base.
 
 }
 
-func (ci_svc *ClusterInfoSvc) GetBucketInfo(clusterConnInfoProvider base.ClusterConnectionInfoProvider, bucketName string) (string, int, map[string][]uint16, error) {
-	connStr, bucketInfo, err := ci_svc.getBucketInfo(clusterConnInfoProvider, bucketName)
-	if err != nil {
-		return "", 0, nil, err
-	}
-
-	bucketUUID, err := utils.GetBucketUuidFromBucketInfo(bucketName, bucketInfo, ci_svc.logger)
-	if err != nil {
-		return "", 0, nil, err
-	}
-
-	clusterCompatibility, err := utils.GetClusterCompatibilityFromBucketInfo(bucketName, bucketInfo, ci_svc.logger)
-	if err != nil {
-		return "", 0, nil, err
-	}
-
-	serverVbMap, err := utils.GetServerVBucketsMap(connStr, bucketName, bucketInfo)
-
-	return bucketUUID, clusterCompatibility, serverVbMap, err
-
-}
-
 func (ci_svc *ClusterInfoSvc) IsClusterCompatible(clusterConnInfoProvider base.ClusterConnectionInfoProvider, version []int) (bool, error) {
 
 	connStr, err := clusterConnInfoProvider.MyConnectionStr()
