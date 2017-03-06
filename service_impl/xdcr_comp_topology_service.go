@@ -18,6 +18,7 @@ import (
 	"github.com/couchbase/goxdcr/service_def"
 	"github.com/couchbase/goxdcr/utils"
 	"reflect"
+	"strings"
 )
 
 var ErrorParsingHostInfo = errors.New("Could not parse current host info from the result.server returned")
@@ -241,6 +242,32 @@ func (top_svc *XDCRTopologySvc) MyClusterUuid() (string, error) {
 	}
 
 	return uuid, nil
+}
+
+func (top_svc *XDCRTopologySvc) MyClusterVersion() (string, error) {
+	var poolsInfo map[string]interface{}
+	err, statusCode := utils.QueryRestApi(top_svc.staticHostAddr(), base.PoolsPath, false, base.MethodGet, "", nil, 0, &poolsInfo, top_svc.logger)
+	if err != nil || statusCode != 200 {
+		return "", errors.New(fmt.Sprintf("Failed on calling %v, err=%v, statusCode=%v", base.PoolsPath, err, statusCode))
+	}
+
+	implVersionObj, ok := poolsInfo[base.ImplementationVersionKey]
+	if !ok {
+		return "", errors.New("Could not get implementation version of local cluster.")
+	}
+	implVersion, ok := implVersionObj.(string)
+	if !ok {
+		return "", errors.New(fmt.Sprintf("implementation version of local cluster is of wrong type. Expected type: string; Actual type: %s", reflect.TypeOf(implVersion)))
+	}
+
+	// implVersion is of format [version]-[buildNumber]-xxx, e.g., 2.5.1-1114-rel-enterprise
+	// we need only the version portion
+	implVersionParts := strings.Split(implVersion, "-")
+	if len(implVersionParts) < 2 {
+		return "", fmt.Errorf("implementation version of local cluster, %v, is of wrong format.", implVersion)
+	}
+
+	return implVersionParts[0], nil
 }
 
 func (top_svc *XDCRTopologySvc) staticHostAddr() string {

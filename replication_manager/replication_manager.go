@@ -130,8 +130,8 @@ func StartReplicationManager(sourceKVHost string, xdcrRestPort uint16,
 		// ns_server shutdown protocol: poll stdin and exit upon reciept of EOF
 		go pollStdin()
 
-		// initialize internal settings using the value in internal settings service
-		initInternalSettings(internal_settings_svc)
+		// initialize constants
+		initConstants(xdcr_topology_svc, internal_settings_svc)
 
 		// initializes replication manager
 		replication_mgr.init(repl_spec_svc, remote_cluster_svc, cluster_info_svc, xdcr_topology_svc, replication_settings_svc, checkpoints_svc, capi_svc, audit_svc, uilog_svc, global_setting_svc, bucket_settings_svc, internal_settings_svc)
@@ -178,8 +178,14 @@ func StartReplicationManager(sourceKVHost string, xdcrRestPort uint16,
 
 }
 
-// initialize internal settings using the value in internal settings service
-func initInternalSettings(internal_settings_svc service_def.InternalSettingsSvc) {
+func initConstants(xdcr_topology_svc service_def.XDCRCompTopologySvc, internal_settings_svc service_def.InternalSettingsSvc) {
+	// get cluster version
+	version, err := xdcr_topology_svc.MyClusterVersion()
+	if err != nil {
+		logger_rm.Errorf("Failed to get local cluster version. err=%v", err)
+		// in the unlikely event of error, an empty version will be used
+	}
+
 	internal_settings := internal_settings_svc.GetInternalSettings()
 
 	logger_rm.Infof("XDCR internal settings: %v\n", internal_settings.ToMap())
@@ -188,7 +194,8 @@ func initInternalSettings(internal_settings_svc service_def.InternalSettingsSvc)
 		internal_settings.MaxTopologyStableCountBeforeRestart, internal_settings.MaxWorkersForCheckpointing,
 		time.Duration(internal_settings.TimeoutCheckpointBeforeStop)*time.Second,
 		internal_settings.CapiDataChanSizeMultiplier,
-		time.Duration(internal_settings.RefreshRemoteClusterRefInterval)*time.Second)
+		time.Duration(internal_settings.RefreshRemoteClusterRefInterval)*time.Second,
+		version)
 }
 
 func (rm *replicationManager) initMetadataChangeMonitor() {

@@ -43,6 +43,9 @@ type XDCRCompTopologySvc interface {
 	// the uuid of the cluster that this xdcr comp is running on
 	MyClusterUuid() (string, error)
 
+	// the version of the cluster that this xdcr comp is running on
+	MyClusterVersion() (string, error)
+
 	//is the cluster XDCR is serving of enterprise edition
 	IsMyClusterEnterprise() (bool, error)
 

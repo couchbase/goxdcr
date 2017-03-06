@@ -792,6 +792,8 @@ func ConstructHttpRequest(
 	}
 	req.Header.Set(base.ContentType, contentType)
 
+	req.Header.Set(base.UserAgent, base.GoxdcrUserAgent)
+
 	// username is nil when calling /nodes/self/xdcrSSLPorts on target
 	// other username can be nil only in local rest calls
 	if username == "" && path != base.SSLPortsPath {
