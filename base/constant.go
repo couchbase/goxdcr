@@ -56,6 +56,7 @@ var KVPortKey = "kv"
 var KVSSLPortKey = "kvSSL"
 var ServicesKey = "services"
 var ClusterCompatibilityKey = "clusterCompatibility"
+var ImplementationVersionKey = "implementationVersion"
 var ServerListKey = "serverList"
 var VBucketServerMapKey = "vBucketServerMap"
 var VBucketMapKey = "vBucketMap"
@@ -186,6 +187,7 @@ const (
 	DefaultContentType = "application/x-www-form-urlencoded"
 	JsonContentType    = "application/json"
 	ContentLength      = "Content-Length"
+	UserAgent          = "User-Agent"
 )
 
 //constant for replication tasklist status
@@ -330,6 +332,9 @@ var MaxMemClientErrorCount = 3
 var VersionForSSLOverMemSupport = []int{3, 0}
 var VersionForSANInCertificateSupport = []int{4, 0}
 
+var GoxdcrUserAgentPrefix = "couchbase-goxdcr"
+var GoxdcrUserAgent = ""
+
 // --------------- Constants that are configurable -----------------
 
 // timeout for checkpointing attempt before pipeline is stopped - to put an upper bound on the delay of pipeline stop/restart
@@ -364,7 +369,7 @@ var RefreshRemoteClusterRefInterval = 15 * time.Second
 func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeCountBeforeRestart,
 	maxTopologyStableCountBeforeRestart, maxWorkersForCheckpointing int,
 	timeoutCheckpointBeforeStop time.Duration, capiDataChanSizeMultiplier int,
-	refreshRemoteClusterRefInterval time.Duration) {
+	refreshRemoteClusterRefInterval time.Duration, clusterVersion string) {
 	TopologyChangeCheckInterval = topologyChangeCheckInterval
 	MaxTopologyChangeCountBeforeRestart = maxTopologyChangeCountBeforeRestart
 	MaxTopologyStableCountBeforeRestart = maxTopologyStableCountBeforeRestart
@@ -372,4 +377,9 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	TimeoutCheckpointBeforeStop = timeoutCheckpointBeforeStop
 	CapiDataChanSizeMultiplier = capiDataChanSizeMultiplier
 	RefreshRemoteClusterRefInterval = refreshRemoteClusterRefInterval
+	if len(clusterVersion) > 0 {
+		GoxdcrUserAgent = GoxdcrUserAgentPrefix + KeyPartsDelimiter + clusterVersion
+	} else {
+		GoxdcrUserAgent = GoxdcrUserAgentPrefix
+	}
 }
