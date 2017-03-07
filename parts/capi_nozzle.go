@@ -21,7 +21,6 @@ import (
 	common "github.com/couchbase/goxdcr/common"
 	gen_server "github.com/couchbase/goxdcr/gen_server"
 	"github.com/couchbase/goxdcr/log"
-	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/goxdcr/simple_utils"
 	"github.com/couchbase/goxdcr/utils"
 	"io"
@@ -1221,12 +1220,13 @@ func (capi *CapiNozzle) initializeOrResetConn(initializing bool) error {
 }
 
 func (capi *CapiNozzle) UpdateSettings(settings map[string]interface{}) error {
-	optimisticReplicationThreshold, err := utils.GetIntSettingFromSettings(settings, metadata.OptimisticReplicationThreshold)
-	if err != nil {
-		return err
+	optimisticReplicationThreshold, ok := settings[SETTING_OPTI_REP_THRESHOLD]
+	if ok {
+		optimisticReplicationThresholdInt := optimisticReplicationThreshold.(int)
+		atomic.StoreUint32(&capi.config.optiRepThreshold, uint32(optimisticReplicationThresholdInt))
+		capi.Logger().Infof("%v updated optimistic replication threshold to %v\n", capi.Id(), optimisticReplicationThresholdInt)
 	}
 
-	atomic.StoreUint32(&capi.config.optiRepThreshold, uint32(optimisticReplicationThreshold))
 	return nil
 }
 

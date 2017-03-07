@@ -196,3 +196,15 @@ func GetConflictResolutionModeFromInt(crMode int) ConflictResolutionMode {
 
 	panic(fmt.Sprintf("invalid conflict resolution mode = %v", crMode))
 }
+
+// stack implementation
+type Stack []interface{}
+
+func (s *Stack) Empty() bool        { return len(*s) == 0 }
+func (s *Stack) Peek() interface{}  { return (*s)[len(*s)-1] }
+func (s *Stack) Push(i interface{}) { (*s) = append((*s), i) }
+func (s *Stack) Pop() interface{} {
+	d := (*s)[len(*s)-1]
+	(*s) = (*s)[:len(*s)-1]
+	return d
+}

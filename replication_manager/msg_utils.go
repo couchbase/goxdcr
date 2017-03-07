@@ -74,6 +74,7 @@ const (
 	TimeoutPercentageCap           = "timeoutPercentageCap"
 	LogLevel                       = "logLevel"
 	StatsInterval                  = "statsInterval"
+	BandwidthLimit                 = "networkUsageLimit"
 	ReplicationTypeValue           = "continuous"
 	GoMaxProcs                     = "goMaxProcs"
 	GoGC                           = "goGC"
@@ -141,10 +142,11 @@ var RestKeyToSettingsKeyMap = map[string]string{
 	TargetNozzlePerNode:            metadata.TargetNozzlePerNode,
 	/*MaxExpectedReplicationLag:      metadata.MaxExpectedReplicationLag,
 	TimeoutPercentageCap:           metadata.TimeoutPercentageCap,*/
-	LogLevel:      metadata.PipelineLogLevel,
-	StatsInterval: metadata.PipelineStatsInterval,
-	GoMaxProcs:    metadata.GoMaxProcs,
-	GoGC:          metadata.GoGC,
+	LogLevel:       metadata.PipelineLogLevel,
+	StatsInterval:  metadata.PipelineStatsInterval,
+	BandwidthLimit: metadata.BandwidthLimit,
+	GoMaxProcs:     metadata.GoMaxProcs,
+	GoGC:           metadata.GoGC,
 }
 
 // internal replication settings key -> replication settings key in rest api
@@ -163,6 +165,7 @@ var SettingsKeyToRestKeyMap = map[string]string{
 	metadata.TimeoutPercentageCap:           TimeoutPercentageCap,*/
 	metadata.PipelineLogLevel:      LogLevel,
 	metadata.PipelineStatsInterval: StatsInterval,
+	metadata.BandwidthLimit:        BandwidthLimit,
 	metadata.GoMaxProcs:            GoMaxProcs,
 	metadata.GoGC:                  GoGC,
 }

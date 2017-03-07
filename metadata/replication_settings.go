@@ -34,6 +34,7 @@ const (
 	TimeoutPercentageCap           = "timeout_percentage_cap"
 	PipelineLogLevel               = "log_level"
 	PipelineStatsInterval          = "stats_interval"
+	BandwidthLimit                 = "bandwidth_limit"
 )
 
 // settings whose default values cannot be viewed or changed through rest apis
@@ -72,6 +73,7 @@ var MaxExpectedReplicationLagConfig = &SettingsConfig{1000, &Range{100, 60000}}
 var TimeoutPercentageCapConfig = &SettingsConfig{50, &Range{0, 100}}
 var PipelineLogLevelConfig = &SettingsConfig{log.LogLevelInfo, nil}
 var PipelineStatsIntervalConfig = &SettingsConfig{1000, &Range{200, 600000}}
+var BandwidthLimitConfig = &SettingsConfig{0, &Range{0, 1000000}}
 
 var SettingsConfigMap = map[string]*SettingsConfig{
 	ReplicationType:                ReplicationTypeConfig,
@@ -88,6 +90,7 @@ var SettingsConfigMap = map[string]*SettingsConfig{
 	TimeoutPercentageCap:           TimeoutPercentageCapConfig,
 	PipelineLogLevel:               PipelineLogLevelConfig,
 	PipelineStatsInterval:          PipelineStatsIntervalConfig,
+	BandwidthLimit:                 BandwidthLimitConfig,
 }
 
 /***********************************
@@ -160,6 +163,9 @@ type ReplicationSettings struct {
 	//default:5 second
 	StatsInterval int `json:"stats_interval"`
 
+	// bandwidth usage limit in MB/sec
+	BandwidthLimit int `json:"bandwidth_limit"`
+
 	// revision number to be used by metadata service. not included in json
 	Revision interface{}
 }
@@ -180,6 +186,7 @@ func DefaultSettings() *ReplicationSettings {
 		TimeoutPercentageCap:           TimeoutPercentageCapConfig.defaultValue.(int),
 		LogLevel:                       PipelineLogLevelConfig.defaultValue.(log.LogLevel),
 		StatsInterval:                  PipelineStatsIntervalConfig.defaultValue.(int),
+		BandwidthLimit:                 BandwidthLimitConfig.defaultValue.(int),
 	}
 }
 
@@ -342,6 +349,16 @@ func (s *ReplicationSettings) UpdateSettingsFromMap(settingsMap map[string]inter
 				s.StatsInterval = interval
 				changedSettingsMap[key] = interval
 			}
+		case BandwidthLimit:
+			bandwidthLimit, ok := val.(int)
+			if !ok {
+				errorMap[key] = simple_utils.IncorrectValueTypeInMapError(key, val, "int")
+				continue
+			}
+			if s.BandwidthLimit != bandwidthLimit {
+				s.BandwidthLimit = bandwidthLimit
+				changedSettingsMap[key] = bandwidthLimit
+			}
 		default:
 			errorMap[key] = errors.New(fmt.Sprintf("Invalid key in map, %v", key))
 		}
@@ -387,6 +404,7 @@ func (s *ReplicationSettings) toMap(isDefaultSettings bool) map[string]interface
 	settings_map[TimeoutPercentageCap] = s.TimeoutPercentageCap*/
 	settings_map[PipelineLogLevel] = s.LogLevel.String()
 	settings_map[PipelineStatsInterval] = s.StatsInterval
+	settings_map[BandwidthLimit] = s.BandwidthLimit
 	return settings_map
 }
 
@@ -423,7 +441,7 @@ func ValidateAndConvertSettingsValue(key, value, errorKey string) (convertedValu
 	case CheckpointInterval, BatchCount, BatchSize, FailureRestartInterval,
 		OptimisticReplicationThreshold, SourceNozzlePerNode,
 		TargetNozzlePerNode, MaxExpectedReplicationLag, TimeoutPercentageCap,
-		PipelineStatsInterval:
+		PipelineStatsInterval, BandwidthLimit:
 		convertedValue, err = strconv.ParseInt(value, base.ParseIntBase, base.ParseIntBitSize)
 		if err != nil {
 			err = simple_utils.IncorrectValueTypeError("an integer")
@@ -487,7 +505,8 @@ func ValidateSettingsKey(settingsMap map[string]interface{}) (returnedSettingsMa
 			MaxExpectedReplicationLag,
 			TimeoutPercentageCap,
 			PipelineLogLevel,
-			PipelineStatsInterval:
+			PipelineStatsInterval,
+			BandwidthLimit:
 			returnedSettingsMap[key] = val
 		}
 	}

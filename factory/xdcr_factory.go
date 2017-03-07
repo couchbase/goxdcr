@@ -147,6 +147,7 @@ func (xdcrf *XDCRFactory) NewPipeline(topic string, progress_recorder common.Pip
 	xdcrf.logger.Infof("%v kv_vb_map=%v\n", topic, kv_vb_map)
 	outNozzles, vbNozzleMap, target_kv_vb_map, targetUserName, targetPassword, targetHasRBACSupport, err :=
 		xdcrf.constructOutgoingNozzles(spec, kv_vb_map, sourceCRMode, targetBucketInfo, targetClusterRef, isCapiReplication, logger_ctx)
+
 	if err != nil {
 		return nil, err
 	}
@@ -194,7 +195,7 @@ func (xdcrf *XDCRFactory) NewPipeline(topic string, progress_recorder common.Pip
 	} else {
 		//register services
 		pipeline.SetRuntimeContext(pipelineContext)
-		err = xdcrf.registerServices(pipeline, logger_ctx, kv_vb_map, targetUserName, targetPassword, spec.TargetBucketName, target_kv_vb_map, targetClusterRef, targetHasRBACSupport)
+		err = xdcrf.registerServices(pipeline, logger_ctx, kv_vb_map, targetUserName, targetPassword, spec.TargetBucketName, target_kv_vb_map, targetClusterRef, targetHasRBACSupport, isCapiReplication)
 		if err != nil {
 			return nil, err
 		}
@@ -269,12 +270,16 @@ func (xdcrf *XDCRFactory) registerAsyncListenersOnTargets(pipeline common.Pipeli
 		get_meta_received_event_listener := component.NewDefaultAsyncComponentEventListenerImpl(
 			pipeline_utils.GetElementIdFromNameAndIndex(pipeline, base.GetMetaReceivedEventListener, i),
 			pipeline.Topic(), logger_ctx)
+		data_throttled_event_listener := component.NewDefaultAsyncComponentEventListenerImpl(
+			pipeline_utils.GetElementIdFromNameAndIndex(pipeline, base.DataThrottledEventListener, i),
+			pipeline.Topic(), logger_ctx)
 
 		for index := load_distribution[i][0]; index < load_distribution[i][1]; index++ {
 			out_nozzle := targets[index]
 			out_nozzle.RegisterComponentEventListener(common.DataSent, data_sent_event_listener)
 			out_nozzle.RegisterComponentEventListener(common.DataFailedCRSource, data_failed_cr_event_listener)
 			out_nozzle.RegisterComponentEventListener(common.GetMetaReceived, get_meta_received_event_listener)
+			out_nozzle.RegisterComponentEventListener(common.DataThrottled, data_throttled_event_listener)
 		}
 	}
 }
@@ -288,7 +293,7 @@ func (xdcrf *XDCRFactory) constructSourceNozzles(spec *metadata.ReplicationSpeci
 
 	maxNozzlesPerNode := spec.Settings.SourceNozzlePerNode
 
-	kv_vb_map, err := pipeline_utils.GetSourceVBMap(xdcrf.cluster_info_svc, xdcrf.xdcr_topology_svc, spec.SourceBucketName, xdcrf.logger)
+	kv_vb_map, _, err := pipeline_utils.GetSourceVBMap(xdcrf.cluster_info_svc, xdcrf.xdcr_topology_svc, spec.SourceBucketName, xdcrf.logger)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -353,7 +358,6 @@ func (xdcrf *XDCRFactory) constructOutgoingNozzles(spec *metadata.ReplicationSpe
 	vbNozzleMap map[uint16]string, kvVBMap map[string][]uint16, targetUserName string, targetPassword string, targetHasRBACSupport bool, err error) {
 	outNozzles = make(map[string]common.Nozzle)
 	vbNozzleMap = make(map[uint16]string)
-
 	kvVBMap, err = utils.GetServerVBucketsMap(targetClusterRef.HostName, spec.TargetBucketName, targetBucketInfo)
 	if err != nil {
 		xdcrf.logger.Errorf("Error getting server vbuckets map, err=%v\n", err)
@@ -435,6 +439,7 @@ func (xdcrf *XDCRFactory) constructOutgoingNozzles(spec *metadata.ReplicationSpe
 
 			// construct outgoing nozzle
 			var outNozzle common.Nozzle
+
 			if isCapiReplication {
 				outNozzle, err = xdcrf.constructCAPINozzle(spec.Id, targetUserName, targetPassword, targetClusterRef.Certificate, vbList, vbCouchApiBaseMap, i, logger_ctx)
 				if err != nil {
@@ -573,18 +578,24 @@ func (xdcrf *XDCRFactory) ConstructUpdateSettingsForPart(pipeline common.Pipelin
 
 func (xdcrf *XDCRFactory) constructUpdateSettingsForXmemNozzle(pipeline common.Pipeline, settings map[string]interface{}) map[string]interface{} {
 	xmemSettings := make(map[string]interface{})
-	repSettings := pipeline.Specification().Settings
 
-	xmemSettings[parts.SETTING_OPTI_REP_THRESHOLD] = getSettingFromSettingsMap(settings, metadata.OptimisticReplicationThreshold, repSettings.OptimisticReplicationThreshold)
+	optiRepThreshold, ok := settings[metadata.OptimisticReplicationThreshold]
+	if ok {
+		xmemSettings[parts.SETTING_OPTI_REP_THRESHOLD] = optiRepThreshold
+	}
+
 	return xmemSettings
 
 }
 
 func (xdcrf *XDCRFactory) constructUpdateSettingsForCapiNozzle(pipeline common.Pipeline, settings map[string]interface{}) map[string]interface{} {
 	capiSettings := make(map[string]interface{})
-	repSettings := pipeline.Specification().Settings
 
-	capiSettings[parts.SETTING_OPTI_REP_THRESHOLD] = getSettingFromSettingsMap(settings, metadata.OptimisticReplicationThreshold, repSettings.OptimisticReplicationThreshold)
+	optiRepThreshold, ok := settings[metadata.OptimisticReplicationThreshold]
+	if ok {
+		capiSettings[parts.SETTING_OPTI_REP_THRESHOLD] = optiRepThreshold
+	}
+
 	return capiSettings
 }
 
@@ -701,7 +712,8 @@ func (xdcrf *XDCRFactory) constructSettingsForDcpNozzle(pipeline common.Pipeline
 func (xdcrf *XDCRFactory) registerServices(pipeline common.Pipeline, logger_ctx *log.LoggerContext,
 	kv_vb_map map[string][]uint16, targetUserName, targetPassword string,
 	targetBucketName string, target_kv_vb_map map[string][]uint16,
-	targetClusterRef *metadata.RemoteClusterReference, targetHasRBACSupport bool) error {
+	targetClusterRef *metadata.RemoteClusterReference, targetHasRBACSupport bool,
+	isCapi bool) error {
 	through_seqno_tracker_svc := service_impl.NewThroughSeqnoTrackerSvc(logger_ctx)
 	through_seqno_tracker_svc.Attach(pipeline)
 
@@ -742,6 +754,19 @@ func (xdcrf *XDCRFactory) registerServices(pipeline common.Pipeline, logger_ctx 
 	if err != nil {
 		return err
 	}
+
+	if !isCapi {
+		//register bandwidth throttler service
+		bw_throttler_svc := pipeline_svc.NewBandwidthThrottlerSvc(xdcrf.xdcr_topology_svc, logger_ctx)
+		err = ctx.RegisterService(base.BANDWIDTH_THROTTLER_SVC, bw_throttler_svc)
+		if err != nil {
+			return err
+		}
+		for _, target := range pipeline.Targets() {
+			target.(*parts.XmemNozzle).SetBandwidthThrottler(bw_throttler_svc)
+		}
+	}
+
 	return nil
 }
 
@@ -773,6 +798,9 @@ func (xdcrf *XDCRFactory) ConstructUpdateSettingsForService(pipeline common.Pipe
 	case *pipeline_svc.CheckpointManager:
 		xdcrf.logger.Debug("Construct update settings for CheckpointManager")
 		return xdcrf.constructUpdateSettingsForCheckpointManager(pipeline, settings)
+	case *pipeline_svc.BandwidthThrottler:
+		xdcrf.logger.Debug("Construct update settings for BandwidthThrottler")
+		return xdcrf.constructUpdateSettingsForBandwidthThrottler(pipeline, settings)
 	}
 	return settings, nil
 }
@@ -828,6 +856,20 @@ func (xdcrf *XDCRFactory) constructUpdateSettingsForCheckpointManager(pipeline c
 	checkpoint_interval := getSettingFromSettingsMap(settings, metadata.CheckpointInterval, nil)
 	if checkpoint_interval != nil {
 		s[pipeline_svc.CHECKPOINT_INTERVAL] = checkpoint_interval
+	}
+	return s, nil
+}
+
+func (xdcrf *XDCRFactory) constructUpdateSettingsForBandwidthThrottler(pipeline common.Pipeline, settings map[string]interface{}) (map[string]interface{}, error) {
+	xdcrf.logger.Debugf("constructUpdateSettingsForBandwidthThrottler called with settings=%v\n", settings)
+	s := make(map[string]interface{})
+	overall_bandwidth_limit := settings[metadata.BandwidthLimit]
+	if overall_bandwidth_limit != nil {
+		s[pipeline_svc.OVERALL_BANDWIDTH_LIMIT] = overall_bandwidth_limit
+	}
+	number_of_source_nodes := settings[pipeline_svc.NUMBER_OF_SOURCE_NODES]
+	if number_of_source_nodes != nil {
+		s[pipeline_svc.NUMBER_OF_SOURCE_NODES] = number_of_source_nodes
 	}
 	return s, nil
 }

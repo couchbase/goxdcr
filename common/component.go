@@ -23,8 +23,7 @@ const (
 	//data is processed by the component
 	//and passed down to the downstream
 	DataProcessed ComponentEventType = iota
-	//data is fully passed through the
-	//pipeline to the target system
+	//data sent to and acknowledged by the target system
 	DataSent ComponentEventType = iota
 	//data is filtered out by the component
 	DataFiltered ComponentEventType = iota
@@ -44,6 +43,8 @@ const (
 	StatsUpdate ComponentEventType = iota
 	//received snapshot marker from dcp
 	SnapshotMarkerReceived ComponentEventType = iota
+	//data sending is throttled due to bandwidth usage limit being reached
+	DataThrottled ComponentEventType = iota
 )
 
 type Event struct {

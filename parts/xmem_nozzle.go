@@ -21,6 +21,7 @@ import (
 	gen_server "github.com/couchbase/goxdcr/gen_server"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
+	"github.com/couchbase/goxdcr/service_def"
 	"github.com/couchbase/goxdcr/simple_utils"
 	"github.com/couchbase/goxdcr/utils"
 	"io"
@@ -788,6 +789,8 @@ type XmemNozzle struct {
 
 	getMetaUserAgent string
 	setMetaUserAgent string
+
+	bandwidthThrottler service_def.BandwidthThrottlerSvc
 }
 
 func NewXmemNozzle(id string,
@@ -857,6 +860,10 @@ func NewXmemNozzle(id string,
 
 }
 
+func (xmem *XmemNozzle) SetBandwidthThrottler(bandwidthThrottler service_def.BandwidthThrottlerSvc) {
+	xmem.bandwidthThrottler = bandwidthThrottler
+}
+
 func (xmem *XmemNozzle) IsOpen() bool {
 	xmem.lock_bOpen.RLock()
 	defer xmem.lock_bOpen.RUnlock()
@@ -899,6 +906,7 @@ func (xmem *XmemNozzle) Start(settings map[string]interface{}) error {
 	if err != nil {
 		return err
 	}
+
 	xmem.Logger().Infof("%v finished initializing.", xmem.Id())
 	xmem.childrenWaitGrp.Add(1)
 	go xmem.selfMonitor(xmem.finish_ch, &xmem.childrenWaitGrp)
@@ -1167,7 +1175,7 @@ func (xmem *XmemNozzle) batchSetMetaWithRetry(batch *dataBatch, numOfRetry int) 
 	var err error
 	count := batch.count()
 	batch_replicated_count := 0
-	reqs_bytes := []byte{}
+	reqs_bytes := [][]byte{}
 	index_reservation_list := make([][]uint16, 51)
 
 	for i := 0; i < int(count); i++ {
@@ -1196,7 +1204,7 @@ func (xmem *XmemNozzle) batchSetMetaWithRetry(batch *dataBatch, numOfRetry int) 
 				//blocking
 				index, reserv_num, item_bytes := xmem.buf.enSlot(item)
 
-				reqs_bytes = append(reqs_bytes, item_bytes...)
+				reqs_bytes = append(reqs_bytes, item_bytes)
 
 				reserv_num_pair := make([]uint16, 2)
 				reserv_num_pair[0] = index
@@ -1207,7 +1215,7 @@ func (xmem *XmemNozzle) batchSetMetaWithRetry(batch *dataBatch, numOfRetry int) 
 				//ns_ssl_proxy choke if the batch size is too big
 				if batch_replicated_count > 50 {
 					//send it
-					err = xmem.sendWithRetry(xmem.client_for_setMeta, numOfRetry, xmem.packageRequest(batch_replicated_count, reqs_bytes))
+					err = xmem.sendWithRetry(xmem.client_for_setMeta, numOfRetry, reqs_bytes)
 
 					if err != nil {
 						xmem.Logger().Errorf("%v Failed to send. err=%v\n", xmem.Id(), err)
@@ -1218,7 +1226,7 @@ func (xmem *XmemNozzle) batchSetMetaWithRetry(batch *dataBatch, numOfRetry int) 
 					}
 
 					batch_replicated_count = 0
-					reqs_bytes = []byte{}
+					reqs_bytes = [][]byte{}
 					index_reservation_list = make([][]uint16, 51)
 				}
 			} else {
@@ -1241,7 +1249,7 @@ func (xmem *XmemNozzle) batchSetMetaWithRetry(batch *dataBatch, numOfRetry int) 
 
 	//send the batch in one shot
 	if batch_replicated_count > 0 {
-		err = xmem.sendWithRetry(xmem.client_for_setMeta, numOfRetry, xmem.packageRequest(batch_replicated_count, reqs_bytes))
+		err = xmem.sendWithRetry(xmem.client_for_setMeta, numOfRetry, reqs_bytes)
 
 		if err != nil {
 			xmem.Logger().Errorf("%v Failed to send. err=%v\n", xmem.Id(), err)
@@ -1361,7 +1369,8 @@ func resolveConflictByXattr(doc_meta_source documentMetadata,
 	}
 }
 
-func (xmem *XmemNozzle) sendWithRetry(client *xmemClient, numOfRetry int, item_byte []byte) error {
+func (xmem *XmemNozzle) sendWithRetry(client *xmemClient, numOfRetry int, item_byte [][]byte) error {
+
 	var err error
 	for j := 0; j < numOfRetry; j++ {
 		err, rev := xmem.writeToClient(client, item_byte, true)
@@ -1407,12 +1416,12 @@ func (xmem *XmemNozzle) batchGetMeta(bigDoc_map map[string]*base.WrappedMCReques
 	receiver_fin_ch := make(chan bool, 1)
 	receiver_return_ch := make(chan bool, 1)
 
-	reqs_bytes_list := [][]byte{}
+	reqs_bytes_list := [][][]byte{}
 	// stores the batch count for each reqs_bytes in reqs_bytes_list
 	batch_count_list := []int{}
 
 	var sequence uint16 = uint16(time.Now().UnixNano())
-	reqs_bytes := []byte{}
+	reqs_bytes := [][]byte{}
 	counter := 0
 	opaque := getOpaque(0, sequence)
 	sent_key_map := make(map[string]bool, len(bigDoc_map))
@@ -1426,7 +1435,7 @@ func (xmem *XmemNozzle) batchGetMeta(bigDoc_map map[string]*base.WrappedMCReques
 
 		if _, ok := sent_key_map[docKey]; !ok {
 			req := xmem.composeRequestForGetMeta(docKey, originalReq.Req.VBucket, opaque)
-			reqs_bytes = append(reqs_bytes, req.Bytes()...)
+			reqs_bytes = append(reqs_bytes, req.Bytes())
 			opaque_keySeqno_map[opaque] = []interface{}{docKey, originalReq.Seqno, originalReq.Req.VBucket, time.Now()}
 			opaque++
 			counter++
@@ -1436,7 +1445,7 @@ func (xmem *XmemNozzle) batchGetMeta(bigDoc_map map[string]*base.WrappedMCReques
 				reqs_bytes_list = append(reqs_bytes_list, reqs_bytes)
 				batch_count_list = append(batch_count_list, counter)
 				counter = 0
-				reqs_bytes = []byte{}
+				reqs_bytes = [][]byte{}
 			}
 		}
 	}
@@ -1557,8 +1566,8 @@ func (xmem *XmemNozzle) batchGetMeta(bigDoc_map map[string]*base.WrappedMCReques
 	}(len(opaque_keySeqno_map), receiver_fin_ch, receiver_return_ch, opaque_keySeqno_map, respMap, xmem.Logger())
 
 	//send the requests
-	for index, packet := range reqs_bytes_list {
-		err, _ := xmem.writeToClient(xmem.client_for_getMeta, xmem.packageRequest(batch_count_list[index], packet), true)
+	for _, packet := range reqs_bytes_list {
+		err, _ := xmem.writeToClient(xmem.client_for_getMeta, packet, true)
 		if err != nil {
 			//kill the receiver and return
 			close(receiver_fin_ch)
@@ -1646,9 +1655,11 @@ func (xmem *XmemNozzle) sendSingleSetMeta(adjustRequest bool, item *base.Wrapped
 			xmem.buf.adjustRequest(item, index)
 		}
 		bytes := item.Req.Bytes()
+		bytesList := make([][]byte, 1)
+		bytesList[0] = bytes
 
 		for j := 0; j < numOfRetry; j++ {
-			err, rev := xmem.writeToClient(xmem.client_for_setMeta, xmem.packageRequest(1, bytes), true)
+			err, rev := xmem.writeToClient(xmem.client_for_setMeta, bytesList, true)
 			if err == nil {
 				return nil
 			} else if err == badConnectionError {
@@ -2322,7 +2333,126 @@ func (xmem *XmemNozzle) validateRunningState() error {
 	return nil
 }
 
-func (xmem *XmemNozzle) writeToClient(client *xmemClient, bytes []byte, renewTimeout bool) (error, int) {
+func (xmem *XmemNozzle) writeToClient(client *xmemClient, bytesList [][]byte, renewTimeout bool) (err error, rev int) {
+	if len(bytesList) == 0 {
+		// should not happen. just to be safe
+		return nil, 0
+	}
+
+	stack := &base.Stack{}
+	stack.Push(bytesList)
+
+	for {
+		// provide an exit route when xmem stops
+		if xmem.validateRunningState() != nil {
+			return nil, 0
+		}
+
+		if stack.Empty() {
+			break
+		}
+
+		curBytesList := stack.Pop().([][]byte)
+		numberOfBytes, minNumberOfBytes, minIndex := computeNumberOfBytes(curBytesList)
+		bytesCanSend, bytesAllowed := xmem.bandwidthThrottler.Throttle(numberOfBytes, minNumberOfBytes)
+
+		if bytesCanSend == numberOfBytes {
+			// if all the bytes can be sent, send them
+			flattenedBytes := simple_utils.FlattenBytesList(bytesList, numberOfBytes)
+			err, rev = xmem.writeToClientWithoutThrottling(client, flattenedBytes, renewTimeout)
+			if err != nil {
+				return
+			}
+		} else {
+			if bytesCanSend == minNumberOfBytes {
+				// send minNumberOfBytes if it can be sent
+				flattenedBytes := simple_utils.FlattenBytesList(bytesList[:minIndex+1], minNumberOfBytes)
+				err, rev = xmem.writeToClientWithoutThrottling(client, flattenedBytes, renewTimeout)
+				if err != nil {
+					return
+				}
+
+				curBytesList = curBytesList[minIndex+1:]
+			}
+
+			// construct a subset of the bytes that fit in bytesAllowed
+			splitIndex := computeNumberOfBytesUsingBytesAllowed(curBytesList, bytesAllowed)
+			if splitIndex < 0 {
+				// cannot even send a single item
+				// push curBytesList back to the stack to be retried at a later time
+				stack.Push(curBytesList)
+				start_time := time.Now()
+				xmem.bandwidthThrottler.Wait()
+				xmem.RaiseEvent(common.NewEvent(common.DataThrottled, nil, xmem, nil, time.Since(start_time)))
+			} else {
+				// split the input into two pieces
+				if splitIndex < len(curBytesList)-1 {
+					// push second part of input first so that it will be processed AFTER the first part
+					stack.Push(curBytesList[splitIndex+1:])
+				}
+				stack.Push(curBytesList[:splitIndex+1])
+			}
+		}
+	}
+
+	return
+}
+
+func computeNumberOfBytes(bytesList [][]byte) (numberOfBytes int, minNumberOfBytes int, minIndex int) {
+	for _, bytes := range bytesList {
+		numberOfBytes += len(bytes)
+	}
+
+	if len(bytesList) == 1 {
+		// if there is only one item, set minNumberOfBytes = numberOfBytes
+		minNumberOfBytes = numberOfBytes
+		minIndex = 0
+		return
+	}
+
+	fractionNumberOfBytes := int(float32(numberOfBytes) * base.FractionOfNumberOfBytesToSendAsMin)
+	curNumberOfBytes := 0
+	minIndex = -1
+	for index, bytes := range bytesList {
+		curLen := len(bytes)
+		if curNumberOfBytes+curLen <= fractionNumberOfBytes {
+			curNumberOfBytes += curLen
+			minIndex = index
+		} else {
+			// time to stop
+			break
+		}
+	}
+
+	if minIndex >= 0 {
+		minNumberOfBytes = curNumberOfBytes
+	} else {
+		// this can happen if the first item has a size that is bigger than fractionNumberOfBytes
+		// include the first item in minNumberOfBytes
+		minNumberOfBytes = len(bytesList[0])
+		minIndex = 0
+	}
+
+	return
+}
+
+func computeNumberOfBytesUsingBytesAllowed(bytesList [][]byte, bytesAllowed int64) (splitIndex int) {
+	splitIndex = -1
+	splitBytes := 0
+	for index, bytes := range bytesList {
+		curLen := len(bytes)
+		if int64(splitBytes+curLen) <= bytesAllowed {
+			splitIndex = index
+			splitBytes += curLen
+			continue
+		} else {
+			break
+		}
+	}
+	return
+}
+
+func (xmem *XmemNozzle) writeToClientWithoutThrottling(client *xmemClient, bytes []byte, renewTimeout bool) (error, int) {
 	backoffFactor := client.getBackOffFactor()
 	if backoffFactor > 0 {
 		time.Sleep(time.Duration(backoffFactor) * default_backoff_wait_time)
@@ -2471,24 +2601,13 @@ func (xmem *XmemNozzle) ConnStr() string {
 	return xmem.config.connectStr
 }
 
-func (xmem *XmemNozzle) packageRequest(count int, reqs_bytes []byte) []byte {
-	if xmem.ConnType() == base.SSLOverProxy {
-		bytes := make([]byte, 8+len(reqs_bytes))
-		binary.BigEndian.PutUint32(bytes[0:4], uint32(len(reqs_bytes)))
-		binary.BigEndian.PutUint32(bytes[4:8], uint32(count))
-		copy(bytes[8:8+len(reqs_bytes)], reqs_bytes)
-		return bytes
-	} else {
-		return reqs_bytes
-	}
-}
-
 func (xmem *XmemNozzle) UpdateSettings(settings map[string]interface{}) error {
-	optimisticReplicationThreshold, err := utils.GetIntSettingFromSettings(settings, metadata.OptimisticReplicationThreshold)
-	if err != nil {
-		return err
+	optimisticReplicationThreshold, ok := settings[SETTING_OPTI_REP_THRESHOLD]
+	if ok {
+		optimisticReplicationThresholdInt := optimisticReplicationThreshold.(int)
+		atomic.StoreUint32(&xmem.config.optiRepThreshold, uint32(optimisticReplicationThresholdInt))
+		xmem.Logger().Infof("%v updated optimistic replication threshold to %v\n", xmem.Id(), optimisticReplicationThresholdInt)
 	}
-	atomic.StoreUint32(&xmem.config.optiRepThreshold, uint32(optimisticReplicationThreshold))
 	return nil
 }
 

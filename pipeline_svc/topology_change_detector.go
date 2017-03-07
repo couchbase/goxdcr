@@ -54,6 +54,8 @@ type TopologyChangeDetectorSvc struct {
 	// vb server map of target bucket in the last topology change check time
 	// used for target topology change detection
 	target_vb_server_map_last map[uint16]string
+	// number of nodes in source cluster
+	number_of_source_nodes int
 
 	// key = hostname; value = https address of hostname
 	httpsAddrMap map[string]string
@@ -119,6 +121,11 @@ func (top_detect_svc *TopologyChangeDetectorSvc) Start(map[string]interface{}) e
 		}
 	}
 
+	top_detect_svc.number_of_source_nodes, err = top_detect_svc.xdcr_topology_svc.NumberOfKVNodes()
+	if err != nil {
+		return err
+	}
+
 	top_detect_svc.wait_grp.Add(1)
 
 	go top_detect_svc.watch(top_detect_svc.finish_ch, top_detect_svc.wait_grp)
@@ -166,9 +173,9 @@ func (top_detect_svc *TopologyChangeDetectorSvc) watch(fin_ch chan bool, waitGrp
 }
 
 func (top_detect_svc *TopologyChangeDetectorSvc) validate(checkTargetVersionForSSL bool) {
-	vblist_supposed, err := top_detect_svc.validateSourceTopology()
+	vblist_supposed, number_of_source_nodes, err := top_detect_svc.validateSourceTopology()
 	if err == nil || err == source_topology_changedErr {
-		err = top_detect_svc.handleSourceToplogyChange(vblist_supposed, err)
+		err = top_detect_svc.handleSourceToplogyChange(vblist_supposed, number_of_source_nodes, err)
 	}
 
 	if err != nil {
@@ -187,7 +194,7 @@ func (top_detect_svc *TopologyChangeDetectorSvc) validate(checkTargetVersionForS
 	}
 }
 
-func (top_detect_svc *TopologyChangeDetectorSvc) handleSourceToplogyChange(vblist_supposed []uint16, err_in error) error {
+func (top_detect_svc *TopologyChangeDetectorSvc) handleSourceToplogyChange(vblist_supposed []uint16, number_of_source_nodes int, err_in error) error {
 	defer top_detect_svc.logger.Infof("ToplogyChangeDetectorSvc for pipeline %v handleSourceToplogyChange completed", top_detect_svc.pipeline.Topic())
 
 	vblist_removed, vblist_new := simple_utils.ComputeDeltaOfUint16Lists(top_detect_svc.vblist_original, vblist_supposed, false)
@@ -226,6 +233,19 @@ func (top_detect_svc *TopologyChangeDetectorSvc) handleSourceToplogyChange(vblis
 
 		// otherwise, keep pipeline running for now.
 		top_detect_svc.vblist_last = vblist_supposed
+
+		// if number of source nodes has changed since last topology change check,
+		// the bandwith limit assigned to the current node needs to be changed as well
+		// update pipeline settings to get bandwith throttler updated
+		if number_of_source_nodes != top_detect_svc.number_of_source_nodes {
+			top_detect_svc.logger.Infof("Number of source nodes for pipeline %v has changed from %v to %v. Updating bandwidth throttler setting.",
+				top_detect_svc.pipeline.Topic(), top_detect_svc.number_of_source_nodes, number_of_source_nodes)
+			settings := make(map[string]interface{})
+			settings[NUMBER_OF_SOURCE_NODES] = number_of_source_nodes
+			top_detect_svc.pipeline.UpdateSettings(settings)
+
+			top_detect_svc.number_of_source_nodes = number_of_source_nodes
+		}
 	}
 
 	return nil
@@ -343,13 +363,13 @@ func (top_detect_svc *TopologyChangeDetectorSvc) needCheckTargetForSSL() (bool, 
 	return false, true
 }
 
-func (top_detect_svc *TopologyChangeDetectorSvc) validateSourceTopology() ([]uint16, error) {
+func (top_detect_svc *TopologyChangeDetectorSvc) validateSourceTopology() ([]uint16, int, error) {
 	defer top_detect_svc.logger.Infof("ToplogyChangeDetectorSvc for pipeline %v validateSourceTopology completed", top_detect_svc.pipeline.Topic())
 
 	vblist_supposed := []uint16{}
-	kv_vb_map, err := pipeline_utils.GetSourceVBMap(top_detect_svc.cluster_info_svc, top_detect_svc.xdcr_topology_svc, top_detect_svc.pipeline.Specification().SourceBucketName, top_detect_svc.logger)
+	kv_vb_map, number_of_nodes, err := pipeline_utils.GetSourceVBMap(top_detect_svc.cluster_info_svc, top_detect_svc.xdcr_topology_svc, top_detect_svc.pipeline.Specification().SourceBucketName, top_detect_svc.logger)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 
 	for _, vblist := range kv_vb_map {
@@ -361,10 +381,10 @@ func (top_detect_svc *TopologyChangeDetectorSvc) validateSourceTopology() ([]uin
 	if !simple_utils.AreSortedUint16ListsTheSame(top_detect_svc.vblist_original, vblist_supposed) {
 		top_detect_svc.logger.Infof("Source topology has changed for pipeline %v\n", top_detect_svc.pipeline.Topic())
 		top_detect_svc.logger.Debugf("Pipeline %v - vblist_supposed=%v, vblist_now=%v\n", top_detect_svc.pipeline.Topic(), vblist_supposed, top_detect_svc.vblist_original)
-		return vblist_supposed, source_topology_changedErr
+		return vblist_supposed, number_of_nodes, source_topology_changedErr
 	}
 
-	return vblist_supposed, nil
+	return vblist_supposed, number_of_nodes, nil
 }
 
 func (top_detect_svc *TopologyChangeDetectorSvc) validateTargetTopology(checkTargetVersionForSSL bool) ([]uint16, map[uint16]string, error) {

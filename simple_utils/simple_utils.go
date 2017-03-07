@@ -441,3 +441,12 @@ func WaitForTimeoutOrFinishSignal(wait_time time.Duration, finish_ch chan bool) 
 func HasXattr(dataType uint8) bool {
 	return dataType&base.PROTOCOL_BINARY_DATATYPE_XATTR > 0
 }
+
+// flatten an array of byte array into a byte array
+func FlattenBytesList(bytesList [][]byte, size int) []byte {
+	flattenedBytes := make([]byte, 0, size)
+	for _, bytes := range bytesList {
+		flattenedBytes = append(flattenedBytes, bytes...)
+	}
+	return flattenedBytes
+}

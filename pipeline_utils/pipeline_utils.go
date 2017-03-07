@@ -33,23 +33,26 @@ func GetSourceVBListPerPipeline(pipeline common.Pipeline) []uint16 {
 }
 
 func GetSourceVBMap(cluster_info_svc service_def.ClusterInfoSvc, xdcr_topology_svc service_def.XDCRCompTopologySvc,
-	sourceBucketName string, logger *log.CommonLogger) (map[string][]uint16, error) {
-	kv_vb_map := make(map[string][]uint16)
+	sourceBucketName string, logger *log.CommonLogger) (kv_vb_map map[string][]uint16, number_of_source_nodes int, err error) {
+	kv_vb_map = make(map[string][]uint16)
 
 	server_vbmap, err := cluster_info_svc.GetLocalServerVBucketsMap(xdcr_topology_svc, sourceBucketName)
 	if err != nil {
-		return nil, err
+		return
 	}
+
+	number_of_source_nodes = len(server_vbmap)
 
 	logger.Debugf("server_vbmap=%v\n", server_vbmap)
 	nodes, err := xdcr_topology_svc.MyKVNodes()
 	if err != nil {
 		logger.Errorf("Failed to get my KV nodes, err=%v\n", err)
-		return nil, err
+		return
 	}
 
 	if len(nodes) == 0 {
-		return nil, ErrorNoSourceKV
+		err = ErrorNoSourceKV
+		return
 	}
 
 	for _, node := range nodes {
@@ -67,7 +70,7 @@ func GetSourceVBMap(cluster_info_svc service_def.ClusterInfoSvc, xdcr_topology_s
 			kv_vb_map[kvaddr] = vbnos
 		}
 	}
-	return kv_vb_map, nil
+	return
 }
 
 // checks if target cluster supports ssl over memcached

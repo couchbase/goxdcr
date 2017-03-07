@@ -253,12 +253,13 @@ func needToReconstructPipeline(oldSettings *metadata.ReplicationSettings, newSet
 }
 
 func (rscl *ReplicationSpecChangeListener) liveUpdatePipeline(topic string, oldSettings *metadata.ReplicationSettings, newSettings *metadata.ReplicationSettings) error {
-	rscl.logger.Infof("Performing live update on pipeline %v \n", topic)
-
 	// perform live update on pipeline if qualifying settings have been changed
 	if oldSettings.LogLevel != newSettings.LogLevel || oldSettings.CheckpointInterval != newSettings.CheckpointInterval ||
 		oldSettings.StatsInterval != newSettings.StatsInterval ||
-		oldSettings.OptimisticReplicationThreshold != newSettings.OptimisticReplicationThreshold {
+		oldSettings.OptimisticReplicationThreshold != newSettings.OptimisticReplicationThreshold ||
+		oldSettings.BandwidthLimit != newSettings.BandwidthLimit {
+
+		rscl.logger.Infof("Updating pipeline %v with new settings=%v\n old settings=%v\n", topic, newSettings, oldSettings)
 
 		rs, err := pipeline_manager.ReplicationStatus(topic)
 		if err != nil {
@@ -678,7 +679,7 @@ func (bscl *BucketSettingsChangeListener) setTimeSyncOnBucket(bucketName string,
 		return err
 	}
 
-	vbMap, err := pipeline_utils.GetSourceVBMap(bscl.cluster_info_svc, bscl.xdcr_topology_svc, bucketName, bscl.logger)
+	vbMap, _, err := pipeline_utils.GetSourceVBMap(bscl.cluster_info_svc, bscl.xdcr_topology_svc, bucketName, bscl.logger)
 	if err != nil {
 		return err
 	}

@@ -85,6 +85,14 @@ func (top_svc *XDCRTopologySvc) MyKVNodes() ([]string, error) {
 	return nodes, nil
 }
 
+func (top_svc *XDCRTopologySvc) NumberOfKVNodes() (int, error) {
+	nodeList, err := top_svc.getNodeList()
+	if err != nil {
+		return 0, err
+	}
+	return len(nodeList), nil
+}
+
 func (top_svc *XDCRTopologySvc) IsMyClusterEnterprise() (bool, error) {
 	return top_svc.isEnterprise, nil
 }
@@ -97,23 +105,9 @@ func (top_svc *XDCRTopologySvc) XDCRCompToKVNodeMap() (map[string][]string, erro
 
 // get information about current node from nodeService at /pools/nodes
 func (top_svc *XDCRTopologySvc) getHostInfo() (map[string]interface{}, error) {
-	var nodesInfo map[string]interface{}
-	err, statusCode := utils.QueryRestApi(top_svc.staticHostAddr(), base.NodesPath, false, base.MethodGet, "", nil, 0, &nodesInfo, top_svc.logger)
-	if err != nil || statusCode != 200 {
-		return nil, errors.New(fmt.Sprintf("Failed on calling %v, err=%v, statusCode=%v", base.NodesPath, err, statusCode))
-	}
-	// get node list from the map
-	nodes, ok := nodesInfo[base.NodesKey]
-	if !ok {
-		// should never get here
-		top_svc.logger.Errorf("no nodes")
-		return nil, ErrorParsingHostInfo
-	}
-
-	nodeList, ok := nodes.([]interface{})
-	if !ok {
-		// should never get here
-		return nil, ErrorParsingHostInfo
+	nodeList, err := top_svc.getNodeList()
+	if err != nil {
+		return nil, err
 	}
 
 	for _, node := range nodeList {
@@ -305,4 +299,26 @@ func (top_svc *XDCRTopologySvc) IsKVNode() (bool, error) {
 		}
 	}
 	return false, nil
+}
+
+func (top_svc *XDCRTopologySvc) getNodeList() ([]interface{}, error) {
+	var nodesInfo map[string]interface{}
+	err, statusCode := utils.QueryRestApi(top_svc.staticHostAddr(), base.NodesPath, false, base.MethodGet, "", nil, 0, &nodesInfo, top_svc.logger)
+	if err != nil || statusCode != 200 {
+		return nil, errors.New(fmt.Sprintf("Failed on calling %v, err=%v, statusCode=%v", base.NodesPath, err, statusCode))
+	}
+	// get node list from the map
+	nodes, ok := nodesInfo[base.NodesKey]
+	if !ok {
+		// should never get here
+		top_svc.logger.Errorf("no nodes")
+		return nil, ErrorParsingHostInfo
+	}
+
+	nodeList, ok := nodes.([]interface{})
+	if !ok {
+		// should never get here
+		return nil, ErrorParsingHostInfo
+	}
+	return nodeList, nil
 }

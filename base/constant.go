@@ -116,6 +116,7 @@ const (
 	CHECKPOINT_MGR_SVC         string = "CheckpointManager"
 	STATISTICS_MGR_SVC         string = "StatisticsManager"
 	TOPOLOGY_CHANGE_DETECT_SVC string = "TopologyChangeDetectSvc"
+	BANDWIDTH_THROTTLER_SVC    string = "BandwidthThrottlerSvc"
 )
 
 // supervisor related constants
@@ -276,6 +277,7 @@ const (
 	DataSentEventListener        = "DataSentEventListener"
 	DataFailedCREventListener    = "DataFailedCREventListener"
 	GetMetaReceivedEventListener = "GetMetaReceivedEventListener"
+	DataThrottledEventListener    = "DataThrottledEventListener"
 )
 
 const (
@@ -357,6 +359,12 @@ var HELO_FEATURE_XATTR uint16 = 0x06
 
 // new XATTR bit in data type field in dcp mutations
 var PROTOCOL_BINARY_DATATYPE_XATTR uint8 = 0x04
+
+// number of time slots [in one second] to track for bandwidth throttling computation
+var NumberOfSlotsForBandwidthThrottling = 10
+
+// When doing bandwith throttling in xmem, set minNumberOfBytes = NumberOfBytes * FractionOfNumberOfBytesToSendAsMin
+var FractionOfNumberOfBytesToSendAsMin float32 = 0.30
 
 // --------------- Constants that are configurable -----------------
 

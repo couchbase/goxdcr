@@ -83,6 +83,9 @@ const (
 	DCP_DISPATCH_TIME_METRIC = "dcp_dispatch_time"
 	DCP_DATACH_LEN           = "dcp_datach_length"
 
+	// latency caused by bandwidth throttling
+	THROTTLE_LATENCY_METRIC = "throttle_latency"
+
 	//	TIME_COMMITTING_METRIC = "time_committing"
 	//rate
 	RATE_REPLICATED_METRIC = "rate_replicated"
@@ -116,7 +119,7 @@ var StatsToInitializeForPausedReplications = [10]string{DOCS_WRITTEN_METRIC, DOC
 // 2. internal stats that are not visible on UI
 var StatsToClearForPausedReplications = [13]string{SIZE_REP_QUEUE_METRIC, DOCS_REP_QUEUE_METRIC, DOCS_LATENCY_METRIC, META_LATENCY_METRIC,
 	TIME_COMMITING_METRIC, NUM_FAILEDCKPTS_METRIC, RATE_DOC_CHECKS_METRIC, RATE_OPT_REPD_METRIC, RATE_RECEIVED_DCP_METRIC,
-	RATE_REPLICATED_METRIC, BANDWIDTH_USAGE_METRIC}
+	RATE_REPLICATED_METRIC, BANDWIDTH_USAGE_METRIC, THROTTLE_LATENCY_METRIC}
 
 // keys for metrics in overview 	125
 // note that DOCS_CHECKED_METRIC is not included since it needs special treatment 	126
@@ -126,7 +129,7 @@ var OverviewMetricKeys = []string{DOCS_WRITTEN_METRIC, EXPIRY_DOCS_WRITTEN_METRI
 	EXPIRY_FILTERED_METRIC, DELETION_FILTERED_METRIC, SET_FILTERED_METRIC, NUM_CHECKPOINTS_METRIC, NUM_FAILEDCKPTS_METRIC,
 	TIME_COMMITING_METRIC, DOCS_OPT_REPD_METRIC, DOCS_RECEIVED_DCP_METRIC, EXPIRY_RECEIVED_DCP_METRIC,
 	DELETION_RECEIVED_DCP_METRIC, SET_RECEIVED_DCP_METRIC, SIZE_REP_QUEUE_METRIC, DOCS_REP_QUEUE_METRIC, DOCS_LATENCY_METRIC,
-	RESP_WAIT_METRIC, META_LATENCY_METRIC, DCP_DISPATCH_TIME_METRIC, DCP_DATACH_LEN,
+	RESP_WAIT_METRIC, META_LATENCY_METRIC, DCP_DISPATCH_TIME_METRIC, DCP_DATACH_LEN, THROTTLE_LATENCY_METRIC,
 }
 
 // the fixed user agent string for connections to collect stats for paused replications
@@ -343,6 +346,12 @@ func (stats_mgr *StatisticsManager) logStats() error {
 		for _, async_listener := range async_listener_map {
 			stats_mgr.logger.Info(async_listener.(*component.AsyncComponentEventListenerImpl).StatusSummary())
 		}
+
+		// log throttler service summary
+		throttler := stats_mgr.pipeline.RuntimeContext().Service(base.BANDWIDTH_THROTTLER_SVC)
+		if throttler != nil {
+			stats_mgr.logger.Info(throttler.(*BandwidthThrottler).StatusSummary())
+		}
 	}
 	return nil
 }
@@ -508,7 +517,8 @@ func (stats_mgr *StatisticsManager) processCalculatedStats(overview_expvar_map *
 
 	//calculate bandwidth_usage
 	data_replicated := stats_mgr.getOverviewRegistry().Get(DATA_REPLICATED_METRIC).(metrics.Counter).Count()
-	bandwidth_usage := float64(data_replicated-data_replicated_old) / interval_in_sec
+	// bandwidth_usage is in the unit of MB/second, where 1 MB = 1024*1024 bytes instead of 1000*1000 bytes
+	bandwidth_usage := float64(data_replicated-data_replicated_old) / (interval_in_sec * 1.024 * 1.024)
 	bandwidth_usage_var := new(expvar.Float)
 	bandwidth_usage_var.Set(bandwidth_usage)
 	overview_expvar_map.Set(BANDWIDTH_USAGE_METRIC, bandwidth_usage_var)
@@ -803,6 +813,8 @@ func (outNozzle_collector *outNozzleCollector) Mount(pipeline common.Pipeline, s
 		registry.Register(RESP_WAIT_METRIC, resp_wait)
 		meta_latency := metrics.NewHistogram(metrics.NewUniformSample(stats_mgr.sample_size))
 		registry.Register(META_LATENCY_METRIC, meta_latency)
+		throttle_latency := metrics.NewHistogram(metrics.NewUniformSample(stats_mgr.sample_size))
+		registry.Register(THROTTLE_LATENCY_METRIC, throttle_latency)
 
 		metric_map := make(map[string]interface{})
 		metric_map[SIZE_REP_QUEUE_METRIC] = size_rep_queue
@@ -820,6 +832,7 @@ func (outNozzle_collector *outNozzleCollector) Mount(pipeline common.Pipeline, s
 		metric_map[DOCS_LATENCY_METRIC] = docs_latency
 		metric_map[RESP_WAIT_METRIC] = resp_wait
 		metric_map[META_LATENCY_METRIC] = meta_latency
+		metric_map[THROTTLE_LATENCY_METRIC] = throttle_latency
 		outNozzle_collector.component_map[part.Id()] = metric_map
 
 		// register outNozzle_collector as the sync event listener/handler for StatsUpdate event
@@ -831,6 +844,7 @@ func (outNozzle_collector *outNozzleCollector) Mount(pipeline common.Pipeline, s
 	pipeline_utils.RegisterAsyncComponentEventHandler(async_listener_map, base.DataSentEventListener, outNozzle_collector)
 	pipeline_utils.RegisterAsyncComponentEventHandler(async_listener_map, base.DataFailedCREventListener, outNozzle_collector)
 	pipeline_utils.RegisterAsyncComponentEventHandler(async_listener_map, base.GetMetaReceivedEventListener, outNozzle_collector)
+	pipeline_utils.RegisterAsyncComponentEventHandler(async_listener_map, base.DataThrottledEventListener, outNozzle_collector)
 
 	return nil
 }
@@ -902,6 +916,10 @@ func (outNozzle_collector *outNozzleCollector) ProcessEvent(event *common.Event)
 		event_otherInfos := event.OtherInfos.(parts.GetMetaReceivedEventAdditional)
 		commit_time := event_otherInfos.Commit_time
 		metric_map[META_LATENCY_METRIC].(metrics.Histogram).Sample().Update(commit_time.Nanoseconds() / 1000000)
+	} else if event.EventType == common.DataThrottled {
+		outNozzle_collector.stats_mgr.logger.Debugf("%v Received a DataThrottled event from %v", outNozzle_collector.Id(), reflect.TypeOf(event.Component))
+		throttle_latency := event.OtherInfos.(time.Duration)
+		metric_map[THROTTLE_LATENCY_METRIC].(metrics.Histogram).Sample().Update(throttle_latency.Nanoseconds() / 1000000)
 	}
 
 	return nil
@@ -1138,7 +1156,7 @@ func UpdateStats(cluster_info_svc service_def.ClusterInfoSvc, xdcr_topology_svc 
 			continue
 		}
 
-		cur_kv_vb_map, err := pipeline_utils.GetSourceVBMap(cluster_info_svc, xdcr_topology_svc, spec.SourceBucketName, logger)
+		cur_kv_vb_map, _, err := pipeline_utils.GetSourceVBMap(cluster_info_svc, xdcr_topology_svc, spec.SourceBucketName, logger)
 		if err != nil {
 			logger.Errorf("Error retrieving kv_vb_map for paused replication %v. err=%v", repl_id, err)
 			continue
