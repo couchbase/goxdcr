@@ -684,7 +684,7 @@ func (bscl *BucketSettingsChangeListener) setTimeSyncOnBucket(bucketName string,
 	}
 
 	// local connection to memcached uses plain authentication
-	client, err := utils.GetMemcachedConnection(hostAddr, bucketName, "Goxdcr bucketSetting listener", true /*plainAuth*/, bscl.logger)
+	client, err := utils.GetMemcachedConnection(hostAddr, bucketName, "Goxdcr bucketSetting listener", bscl.logger)
 	if err != nil {
 		return err
 	}

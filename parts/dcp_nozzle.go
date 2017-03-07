@@ -84,10 +84,10 @@ type DcpNozzle struct {
 	vb_stream_status map[uint16]*streamStatusWithLock
 
 	// immutable fields
-	bucketName     string
-	bucketPassword string
-	client         *mcc.Client
-	uprFeed        *mcc.UprFeed
+	sourceBucketName string
+	targetBucketName string
+	client           *mcc.Client
+	uprFeed          *mcc.UprFeed
 	// lock on uprFeed to avoid race condition
 	lock_uprFeed sync.RWMutex
 
@@ -122,10 +122,12 @@ type DcpNozzle struct {
 
 	stats_interval           time.Duration
 	stats_interval_change_ch chan bool
+
+	user_agent string
 }
 
 func NewDcpNozzle(id string,
-	bucketName, bucketPassword string,
+	sourceBucketName, targetBucketName string,
 	vbnos []uint16,
 	xdcr_topology_svc service_def.XDCRCompTopologySvc,
 	logger_context *log.LoggerContext) *DcpNozzle {
@@ -140,8 +142,8 @@ func NewDcpNozzle(id string,
 	part := NewAbstractPartWithLogger(id, server.Logger())
 
 	dcp := &DcpNozzle{
-		bucketName:               bucketName,
-		bucketPassword:           bucketPassword,
+		sourceBucketName:         sourceBucketName,
+		targetBucketName:         targetBucketName,
 		vbnos:                    vbnos,
 		GenServer:                server, /*gen_server.GenServer*/
 		AbstractPart:             part,   /*AbstractPart*/
@@ -164,10 +166,16 @@ func NewDcpNozzle(id string,
 		dcp.vb_stream_status[vbno] = &streamStatusWithLock{lock: &sync.RWMutex{}, state: Dcp_Stream_NonInit}
 	}
 
+	dcp.composeUserAgent()
+
 	dcp.Logger().Debugf("Constructed Dcp nozzle %v with vblist %v\n", dcp.Id(), vbnos)
 
 	return dcp
 
+}
+
+func (dcp *DcpNozzle) composeUserAgent() {
+	dcp.user_agent = simple_utils.ComposeUserAgentWithBucketNames("Goxdcr Dcp ", dcp.sourceBucketName, dcp.targetBucketName)
 }
 
 func (dcp *DcpNozzle) initialize(settings map[string]interface{}) (err error) {
@@ -177,7 +185,8 @@ func (dcp *DcpNozzle) initialize(settings map[string]interface{}) (err error) {
 	if err != nil {
 		return err
 	}
-	dcp.client, err = base.NewConn(addr, dcp.bucketName, dcp.bucketPassword, true /*plainAuth*/)
+
+	dcp.client, err = utils.GetMemcachedConnection(addr, dcp.sourceBucketName, dcp.user_agent, dcp.Logger())
 	if err != nil {
 		return err
 	}

@@ -20,6 +20,7 @@ import (
 var source_topology_changedErr = errors.New("Topology has changed on source cluster")
 var target_topology_changedErr = errors.New("Topology has changed on target cluster")
 var target_cluster_version_changed_for_ssl_err = errors.New("Target cluster version has moved to 3.0 or above and started to support ssl over mem.")
+var target_cluster_version_changed_for_rbac_err = errors.New("Target cluster version has moved to 5.0 or above and started to support rbac.")
 
 type TopologyChangeDetectorSvc struct {
 	*comp.AbstractComponent
@@ -59,25 +60,30 @@ type TopologyChangeDetectorSvc struct {
 
 	// whether replication is of capi type
 	capi bool
+
+	// whether needs to check target version for RBAC support
+	check_target_version_for_rbac bool
 }
 
 func NewTopologyChangeDetectorSvc(cluster_info_svc service_def.ClusterInfoSvc,
 	xdcr_topology_svc service_def.XDCRCompTopologySvc,
 	remote_cluster_svc service_def.RemoteClusterSvc,
 	repl_spec_svc service_def.ReplicationSpecSvc,
+	target_has_rbac_support bool,
 	logger_ctx *log.LoggerContext) *TopologyChangeDetectorSvc {
 	logger := log.NewLogger("TopoChangeDet", logger_ctx)
 	return &TopologyChangeDetectorSvc{xdcr_topology_svc: xdcr_topology_svc,
-		cluster_info_svc:   cluster_info_svc,
-		remote_cluster_svc: remote_cluster_svc,
-		repl_spec_svc:      repl_spec_svc,
-		AbstractComponent:  comp.NewAbstractComponentWithLogger("TopoChangeDet", logger),
-		pipeline:           nil,
-		finish_ch:          make(chan bool, 1),
-		wait_grp:           &sync.WaitGroup{},
-		logger:             logger,
-		vblist_last:        make([]uint16, 0),
-		httpsAddrMap:       make(map[string]string)}
+		cluster_info_svc:              cluster_info_svc,
+		remote_cluster_svc:            remote_cluster_svc,
+		repl_spec_svc:                 repl_spec_svc,
+		AbstractComponent:             comp.NewAbstractComponentWithLogger("TopoChangeDet", logger),
+		pipeline:                      nil,
+		finish_ch:                     make(chan bool, 1),
+		wait_grp:                      &sync.WaitGroup{},
+		logger:                        logger,
+		vblist_last:                   make([]uint16, 0),
+		httpsAddrMap:                  make(map[string]string),
+		check_target_version_for_rbac: !target_has_rbac_support}
 }
 
 func (top_detect_svc *TopologyChangeDetectorSvc) Attach(pipeline common.Pipeline) error {
@@ -151,7 +157,7 @@ func (top_detect_svc *TopologyChangeDetectorSvc) watch(fin_ch chan bool, waitGrp
 				return
 			}
 			if needToReComputeCheckTargetVersionForSSL {
-				checkTargetVersionForSSL, needToReComputeCheckTargetVersionForSSL := top_detect_svc.needCheckTargetForSSL()
+				checkTargetVersionForSSL, needToReComputeCheckTargetVersionForSSL = top_detect_svc.needCheckTargetForSSL()
 				top_detect_svc.logger.Infof("After re-computation, checkTargetVersionForSSL=%v, needToReComputeCheckTargetVersionForSSL=%v in ToplogyChangeDetectorSvc for pipeline %v", checkTargetVersionForSSL, needToReComputeCheckTargetVersionForSSL, top_detect_svc.pipeline.Topic())
 			}
 			top_detect_svc.validate(checkTargetVersionForSSL)
@@ -376,6 +382,12 @@ func (top_detect_svc *TopologyChangeDetectorSvc) validateTargetTopology(checkTar
 		if simple_utils.IsClusterCompatible(targetClusterCompatibility, base.VersionForSSLOverMemSupport) {
 			top_detect_svc.logger.Infof("ToplogyChangeDetectorSvc for pipeline %v detected that target cluster has been upgraded to 3.0 or above and is now supporting ssl over memcached", top_detect_svc.pipeline.Topic())
 			return nil, nil, target_cluster_version_changed_for_ssl_err
+		}
+	}
+	if top_detect_svc.check_target_version_for_rbac {
+		if simple_utils.IsClusterCompatible(targetClusterCompatibility, base.VersionForRBACSupport) {
+			top_detect_svc.logger.Infof("ToplogyChangeDetectorSvc for pipeline %v detected that target cluster has been upgraded to 5.0 or above and is now supporting RBAC", top_detect_svc.pipeline.Topic())
+			return nil, nil, target_cluster_version_changed_for_rbac_err
 		}
 	}
 

@@ -99,8 +99,9 @@ type CheckpointManager struct {
 
 	logger *log.CommonLogger
 
-	target_bucket_name     string
-	target_bucket_password string
+	target_username    string
+	target_password    string
+	target_bucket_name string
 
 	target_cluster_ref *metadata.RemoteClusterReference
 
@@ -143,8 +144,9 @@ type snapshotHistoryWithLock struct {
 func NewCheckpointManager(checkpoints_svc service_def.CheckpointsService, capi_svc service_def.CAPIService,
 	remote_cluster_svc service_def.RemoteClusterSvc, rep_spec_svc service_def.ReplicationSpecSvc, cluster_info_svc service_def.ClusterInfoSvc,
 	xdcr_topology_svc service_def.XDCRCompTopologySvc, through_seqno_tracker_svc service_def.ThroughSeqnoTrackerSvc,
-	active_vbs map[string][]uint16, target_bucket_name, target_bucket_password string, target_kv_vb_map map[string][]uint16,
-	target_cluster_ref *metadata.RemoteClusterReference, logger_ctx *log.LoggerContext) (*CheckpointManager, error) {
+	active_vbs map[string][]uint16, target_username, target_password string, target_bucket_name string,
+	target_kv_vb_map map[string][]uint16, target_cluster_ref *metadata.RemoteClusterReference,
+	logger_ctx *log.LoggerContext) (*CheckpointManager, error) {
 	if checkpoints_svc == nil || capi_svc == nil || remote_cluster_svc == nil || rep_spec_svc == nil || cluster_info_svc == nil || xdcr_topology_svc == nil {
 		return nil, errors.New("checkpoints_svc, capi_svc, remote_cluster_svc, rep_spec_svc, cluster_info_svc and xdcr_topology_svc can't be nil")
 	}
@@ -165,8 +167,9 @@ func NewCheckpointManager(checkpoints_svc service_def.CheckpointsService, capi_s
 		logger:                    logger,
 		cur_ckpts:                 make(map[uint16]*checkpointRecordWithLock),
 		active_vbs:                active_vbs,
+		target_username:           target_username,
+		target_password:           target_password,
 		target_bucket_name:        target_bucket_name,
-		target_bucket_password:    target_bucket_password,
 		target_kv_vb_map:          target_kv_vb_map,
 		wait_grp:                  &sync.WaitGroup{},
 		failoverlog_map:           make(map[uint16]*failoverlogWithLock),
@@ -360,9 +363,9 @@ func (ckmgr *CheckpointManager) getNewMemcachedClient(server_addr string) (*mcc.
 			return nil, err
 		}
 		ssl_con_str := ckmgr.ssl_con_str_map[server_addr]
-		return base.NewTLSConn(ssl_con_str, ckmgr.target_bucket_name, ckmgr.target_bucket_password, certificate, sanInCertificate, ckmgr.logger)
+		return base.NewTLSConn(ssl_con_str, ckmgr.target_username, ckmgr.target_password, certificate, sanInCertificate, ckmgr.target_bucket_name, ckmgr.logger)
 	} else {
-		return utils.GetRemoteMemcachedConnection(server_addr, ckmgr.target_bucket_name, ckmgr.target_bucket_password, ckmgr.user_agent, !ckmgr.target_cluster_ref.IsEncryptionEnabled() /*plain_auth*/, ckmgr.logger)
+		return utils.GetRemoteMemcachedConnection(server_addr, ckmgr.target_username, ckmgr.target_password, ckmgr.target_bucket_name, ckmgr.user_agent, !ckmgr.target_cluster_ref.IsEncryptionEnabled() /*plain_auth*/, ckmgr.logger)
 	}
 }
 

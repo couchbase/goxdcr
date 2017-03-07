@@ -336,7 +336,7 @@ func (pipelineSupervisor *PipelineSupervisor) getDcpStats() (map[string]map[stri
 	}
 
 	for _, serverAddr := range nodes {
-		client, err := utils.GetMemcachedClient(serverAddr, bucketName, pipelineSupervisor.kv_mem_clients, pipelineSupervisor.user_agent, true /*plainAuth*/, pipelineSupervisor.Logger())
+		client, err := utils.GetMemcachedClient(serverAddr, bucketName, pipelineSupervisor.kv_mem_clients, pipelineSupervisor.user_agent, pipelineSupervisor.Logger())
 		if err != nil {
 			return nil, err
 		}

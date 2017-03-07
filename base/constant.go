@@ -335,10 +335,10 @@ var FORCE_ACCEPT_WITH_META_OPS uint32 = 0x02
 var HELOTimeout time.Duration = time.Duration(120) * time.Second
 
 // minimum versions where various features are supported
+var VersionForXmemSupport = []int{2, 2}
 var VersionForSSLOverMemSupport = []int{3, 0}
 var VersionForSANInCertificateSupport = []int{4, 0}
 var VersionForRBACSupport = []int{5, 0}
-
 
 var GoxdcrUserAgentPrefix = "couchbase-goxdcr"
 var GoxdcrUserAgent = ""

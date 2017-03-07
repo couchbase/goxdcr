@@ -716,7 +716,7 @@ func (stats_mgr *StatisticsManager) closeConnections() {
 func (stats_mgr *StatisticsManager) initConnections() error {
 	for serverAddr, _ := range stats_mgr.active_vbs {
 		// as of now active_vbs contains only the current node and the connection is always local. use plain authentication
-		conn, err := utils.GetMemcachedConnection(serverAddr, stats_mgr.bucket_name, stats_mgr.user_agent, true /*plainAuth*/, stats_mgr.logger)
+		conn, err := utils.GetMemcachedConnection(serverAddr, stats_mgr.bucket_name, stats_mgr.user_agent, stats_mgr.logger)
 		if err != nil {
 			return err
 		}
@@ -1199,7 +1199,7 @@ func calculateTotalChanges(kv_vb_map map[string][]uint16, kv_mem_clients map[str
 	var total_changes uint64 = 0
 	for serverAddr, vbnos := range kv_vb_map {
 		// as of now kv_vb_map contains only the current node and the connection is always local. use plain authentication
-		client, err := utils.GetMemcachedClient(serverAddr, sourceBucketName, kv_mem_clients, user_agent, true /*plainAuth*/, logger)
+		client, err := utils.GetMemcachedClient(serverAddr, sourceBucketName, kv_mem_clients, user_agent, logger)
 		if err != nil {
 			return 0, err
 		}

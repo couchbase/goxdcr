@@ -84,12 +84,13 @@ type SSLConnPool interface {
 }
 
 type connPool struct {
-	name        string
-	clients     chan *mcc.Client
-	hostName    string
-	userName    string
+	name     string
+	clients  chan *mcc.Client
+	hostName string
+	// username and password used in setting up target connection
+	userName string
+	password string
 	bucketName  string
-	password    string
 	maxConn     int
 	newConnFunc NewConnFunc
 	logger      *log.CommonLogger
@@ -216,7 +217,7 @@ func (p *connPool) GetNew() (*mcc.Client, error) {
 }
 
 func (p *connPool) newConn() (*mcc.Client, error) {
-	return NewConn(p.hostName, p.userName, p.password, p.plainAuth)
+	return NewConn(p.hostName, p.userName, p.password, p.bucketName, p.plainAuth, p.logger)
 }
 func (p *connPool) NewConnFunc() NewConnFunc {
 	return p.newConnFunc
@@ -236,6 +237,38 @@ func (p *connPool) SetStale(stale bool) {
 	p.state_lock.Lock()
 	defer p.state_lock.Unlock()
 	p.stale = stale
+}
+
+func authClient(client *mcc.Client, userName, password, bucketName string, plainAuth bool, logger *log.CommonLogger) error {
+	var err error
+	// authenticate using user/pass
+	if userName != "" {
+		if plainAuth {
+			// use PLAIN authentication
+			_, err = client.Auth(userName, password)
+		} else {
+			// use SCRAM-SHA authentication mechanisms
+			_, err = client.AuthScramSha(userName, password)
+		}
+
+		if err != nil {
+			logger.Errorf("err from authentication for user %v = %v\n", userName, err)
+			client.Close()
+			return err
+		}
+	}
+
+	// if bucketName is different from userName, need to do selectBucket
+	if bucketName != "" && bucketName != userName {
+		_, err = client.SelectBucket(bucketName)
+		if err != nil {
+			logger.Errorf("err from select bucket for %v = %v\n", bucketName, err)
+			client.Close()
+			return err
+		}
+	}
+
+	return nil
 }
 
 func (p *sslOverProxyConnPool) init() {
@@ -339,7 +372,7 @@ func (p *sslOverMemConnPool) Certificate() []byte {
 
 func (p *sslOverMemConnPool) newConn() (*mcc.Client, error) {
 	ssl_con_str := p.hostName + UrlPortNumberDelimiter + strconv.FormatInt(int64(p.remote_memcached_port), ParseIntBase)
-	return NewTLSConn(ssl_con_str, p.bucketName, p.password, p.certificate, p.san_in_certificate, p.logger)
+	return NewTLSConn(ssl_con_str, p.userName, p.password, p.certificate, p.san_in_certificate, p.bucketName, p.logger)
 }
 
 func (p *sslOverMemConnPool) ConnType() ConnType {
@@ -713,7 +746,7 @@ func (connPoolMgr *connPoolMgr) Close() {
 // plainAuth is set to false only when
 // 1. we are connecting to target memcached
 // 2. the remote cluster reference is of half-ssl enabled type
-func NewConn(hostName string, username string, password string, plainAuth bool) (conn *mcc.Client, err error) {
+func NewConn(hostName string, userName string, password string, bucketName string, plainAuth bool, logger *log.CommonLogger) (conn *mcc.Client, err error) {
 	// connect to host
 	start_time := time.Now()
 	conn, err = mcc.Connect("tcp", hostName)
@@ -721,29 +754,18 @@ func NewConn(hostName string, username string, password string, plainAuth bool) 
 		return nil, err
 	}
 
-	ConnPoolMgr().logger.Debugf("%vs spent on establish a connection to %v", time.Since(start_time).Seconds(), hostName)
+	logger.Debugf("%vs spent on establish a connection to %v", time.Since(start_time).Seconds(), hostName)
 
-	// authentic using user/pass
-	if username != "" {
-		if plainAuth {
-			// use PLAIN authentication
-			_, err = conn.Auth(username, password)
-		} else {
-			// use SCRAM-SHA authentication mechanisms
-			_, err = conn.AuthScramSha(username, password)
-		}
-		if err != nil {
-			ConnPoolMgr().logger.Errorf("err=%v\n", err)
-			conn.Close()
-			return nil, err
-		}
+	err = authClient(conn, userName, password, bucketName, plainAuth, logger)
+	if err != nil {
+		return nil, err
 	}
 
-	ConnPoolMgr().logger.Debugf("%vs spent on authenticate to %v", time.Since(start_time).Seconds(), hostName)
+	logger.Debugf("%vs spent on authenticate to %v", time.Since(start_time).Seconds(), hostName)
 	return conn, nil
 }
 
-func NewTLSConn(ssl_con_str string, username string, password string, certificate []byte, san_in_certificate bool, logger *log.CommonLogger) (*mcc.Client, error) {
+func NewTLSConn(ssl_con_str string, username string, password string, certificate []byte, san_in_certificate bool, bucketName string, logger *log.CommonLogger) (*mcc.Client, error) {
 	if len(certificate) == 0 {
 		return nil, fmt.Errorf("No certificate has been provided. Can't establish ssl connection to %v", ssl_con_str)
 	}
@@ -761,14 +783,9 @@ func NewTLSConn(ssl_con_str string, username string, password string, certificat
 		return nil, err
 	}
 
-	// authenticate using user/pass
-	if username != "" {
-		_, err = client.Auth(username, password)
-		if err != nil {
-			logger.Errorf("Authentication err=%v\n", err)
-			conn.Close()
-			return nil, err
-		}
+	err = authClient(client, username, password, bucketName, true /*plainAuth*/, logger)
+	if err != nil {
+		return nil, err
 	}
 
 	logger.Infof("memcached client on ssl connection %v has been created successfully", ssl_con_str)

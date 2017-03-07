@@ -253,38 +253,53 @@ func BucketPassword(hostAddr, bucketName, username, password string, certificate
 // 4. bucket eviction policy
 // 5. bucket password
 // 6. bucket server vb map
-func BucketValidationInfo(hostAddr, bucketName, username, password string, certificate []byte, sanInCertificate bool, logger *log.CommonLogger) (string, string, string, string, string, map[string][]uint16, error) {
+// 7. cluster compatibility
+func BucketValidationInfo(hostAddr, bucketName, username, password string, certificate []byte, sanInCertificate bool,
+	logger *log.CommonLogger) (bucketType string, bucketUUID string, bucketConflictResolutionType string,
+	bucketEvictionPolicy string, bucketPassword string, bucketKVVBMap map[string][]uint16,
+	clusterCompatibility int, err error) {
 	bucketInfo, err := GetBucketInfo(hostAddr, bucketName, username, password, certificate, sanInCertificate, logger)
 	if err != nil {
-		return "", "", "", "", "", nil, err
+		return
 	}
 
-	bucketType, err := GetBucketTypeFromBucketInfo(bucketName, bucketInfo)
+	bucketType, err = GetBucketTypeFromBucketInfo(bucketName, bucketInfo)
 	if err != nil {
-		return "", "", "", "", "", nil, fmt.Errorf("Error retrieving BucketType setting on bucket %v", bucketName)
+		err = fmt.Errorf("Error retrieving BucketType setting on bucket %v. err=%v", bucketName, err)
+		return
 	}
-	bucketUUID, err := GetBucketUuidFromBucketInfo(bucketName, bucketInfo, logger)
+	bucketUUID, err = GetBucketUuidFromBucketInfo(bucketName, bucketInfo, logger)
 	if err != nil {
-		return "", "", "", "", "", nil, fmt.Errorf("Error retrieving UUID setting on bucket %v", bucketName)
+		err = fmt.Errorf("Error retrieving UUID setting on bucket %v. err=%v", bucketName, err)
+		return
 	}
-	bucketConflictResolutionType, err := GetConflictResolutionTypeFromBucketInfo(bucketName, bucketInfo)
+	bucketConflictResolutionType, err = GetConflictResolutionTypeFromBucketInfo(bucketName, bucketInfo)
 	if err != nil {
-		return "", "", "", "", "", nil, fmt.Errorf("Error retrieving ConflictResolutionType setting on bucket %v", bucketName)
+		err = fmt.Errorf("Error retrieving ConflictResolutionType setting on bucket %v. err=%v", bucketName, err)
+		return
 	}
-	bucketEvictionPolicy, err := GetEvictionPolicyFromBucketInfo(bucketName, bucketInfo)
+	bucketEvictionPolicy, err = GetEvictionPolicyFromBucketInfo(bucketName, bucketInfo)
 	if err != nil {
-		return "", "", "", "", "", nil, fmt.Errorf("Error retrieving EvictionPolicy setting on bucket %v", bucketName)
+		err = fmt.Errorf("Error retrieving EvictionPolicy setting on bucket %v. err=%v", bucketName, err)
+		return
 	}
-	bucketPassword, err := GetBucketPasswordFromBucketInfo(bucketName, bucketInfo, logger)
+	bucketPassword, err = GetBucketPasswordFromBucketInfo(bucketName, bucketInfo, logger)
 	if err != nil {
-		return "", "", "", "", "", nil, fmt.Errorf("Error retrieving password setting on bucket %v", bucketName)
+		err = fmt.Errorf("Error retrieving password setting on bucket %v. err=%v", bucketName, err)
+		return
 	}
-	bucketKVVBMap, err := GetServerVBucketsMap(hostAddr, bucketName, bucketInfo)
+	bucketKVVBMap, err = GetServerVBucketsMap(hostAddr, bucketName, bucketInfo)
 	if err != nil {
-		return "", "", "", "", "", nil, fmt.Errorf("Error retrieving server vb map on bucket %v", bucketName)
+		err = fmt.Errorf("Error retrieving server vb map on bucket %v. err=%v", bucketName, err)
+		return
+	}
+	clusterCompatibility, err = GetClusterCompatibilityFromBucketInfo(bucketName, bucketInfo, logger)
+	if err != nil {
+		err = fmt.Errorf("Error retrieving cluster compatibility on bucket %v. err=%v", bucketName, err)
+		return
 	}
 
-	return bucketType, bucketUUID, bucketConflictResolutionType, bucketEvictionPolicy, bucketPassword, bucketKVVBMap, nil
+	return
 }
 
 func GetBucketUuidFromBucketInfo(bucketName string, bucketInfo map[string]interface{}, logger *log.CommonLogger) (string, error) {

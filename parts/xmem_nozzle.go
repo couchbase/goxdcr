@@ -794,6 +794,7 @@ func NewXmemNozzle(id string,
 	connectString string,
 	sourceBucketName string,
 	targetBucketName string,
+	username string,
 	password string,
 	dataObj_recycler base.DataObjRecycler,
 	source_cr_mode base.ConflictResolutionMode,
@@ -840,6 +841,7 @@ func NewXmemNozzle(id string,
 
 	xmem.config.connectStr = connectString
 	xmem.config.bucketName = targetBucketName
+	xmem.config.username = username
 	xmem.config.password = password
 	xmem.config.connPoolNamePrefix = connPoolNamePrefix
 	xmem.config.connPoolSize = connPoolConnSize
@@ -1590,13 +1592,14 @@ func (xmem *XmemNozzle) getConnPool() (pool base.ConnPool, err error) {
 
 func (xmem *XmemNozzle) getOrCreateConnPool() (pool base.ConnPool, err error) {
 	poolName := xmem.getPoolName()
+
 	if !xmem.config.demandEncryption {
-		pool, err = base.ConnPoolMgr().GetOrCreatePool(poolName, xmem.config.connectStr, xmem.config.bucketName, xmem.config.bucketName, xmem.config.password, xmem.config.connPoolSize, true /*plainAuth*/)
+		pool, err = base.ConnPoolMgr().GetOrCreatePool(poolName, xmem.config.connectStr, xmem.config.bucketName, xmem.config.username, xmem.config.password, xmem.config.connPoolSize, true /*plainAuth*/)
 		if err != nil {
 			return nil, err
 		}
 	} else if xmem.config.encryptionType == metadata.EncryptionType_Half {
-		pool, err = base.ConnPoolMgr().GetOrCreatePool(poolName, xmem.config.connectStr, xmem.config.bucketName, xmem.config.bucketName, xmem.config.password, xmem.config.connPoolSize, false /*plainAuth*/)
+		pool, err = base.ConnPoolMgr().GetOrCreatePool(poolName, xmem.config.connectStr, xmem.config.bucketName, xmem.config.username, xmem.config.password, xmem.config.connPoolSize, false /*plainAuth*/)
 		if err != nil {
 			return nil, err
 		}
@@ -1611,12 +1614,12 @@ func (xmem *XmemNozzle) getOrCreateConnPool() (pool base.ConnPool, err error) {
 
 		if xmem.config.memcached_ssl_port != 0 {
 			xmem.Logger().Infof("%v Get or create ssl over memcached connection, memcached_ssl_port=%v\n", xmem.Id(), int(xmem.config.memcached_ssl_port))
-			pool, err = base.ConnPoolMgr().GetOrCreateSSLOverMemPool(poolName, hostName, xmem.config.bucketName, xmem.config.bucketName, xmem.config.password,
+			pool, err = base.ConnPoolMgr().GetOrCreateSSLOverMemPool(poolName, hostName, xmem.config.bucketName, xmem.config.username, xmem.config.password,
 				xmem.config.connPoolSize, int(xmem.config.memcached_ssl_port), xmem.config.certificate, xmem.config.san_in_certificate)
 
 		} else {
 			xmem.Logger().Infof("%v Get or create ssl over proxy connection", xmem.Id())
-			pool, err = base.ConnPoolMgr().GetOrCreateSSLOverProxyPool(poolName, hostName, xmem.config.bucketName, xmem.config.bucketName, xmem.config.password,
+			pool, err = base.ConnPoolMgr().GetOrCreateSSLOverProxyPool(poolName, hostName, xmem.config.bucketName, xmem.config.username, xmem.config.password,
 				xmem.config.connPoolSize, int(remote_mem_port), int(xmem.config.local_proxy_port), int(xmem.config.remote_proxy_port), xmem.config.certificate)
 		}
 		if err != nil {
