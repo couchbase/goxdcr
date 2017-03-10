@@ -46,15 +46,18 @@ const (
 	XMEM_SETTING_REMOTE_MEM_SSL_PORT = "remote_ssl_port"
 
 	//default configuration
-	default_numofretry          int           = 5
-	default_resptimeout         time.Duration = 6000 * time.Millisecond
-	default_maxRetryInterval                  = 300 * time.Second
-	default_writeTimeOut        time.Duration = time.Duration(120) * time.Second
-	default_readTimeout         time.Duration = time.Duration(120) * time.Second
-	default_maxIdleCount        uint32        = 60
-	default_selfMonitorInterval time.Duration = default_resptimeout
-	default_demandEncryption    bool          = false
-	default_max_read_downtime   time.Duration = 60 * time.Second
+	default_numofretry int = 5
+	// number of retries for setting up connections to target.
+	// this is set to a large number to avoid overly frequent pipeline restart in rebalance scenario
+	default_numofretry_setup_conn int           = 10
+	default_resptimeout           time.Duration = 6000 * time.Millisecond
+	default_maxRetryInterval                    = 300 * time.Second
+	default_writeTimeOut          time.Duration = time.Duration(120) * time.Second
+	default_readTimeout           time.Duration = time.Duration(120) * time.Second
+	default_maxIdleCount          uint32        = 60
+	default_selfMonitorInterval   time.Duration = default_resptimeout
+	default_demandEncryption      bool          = false
+	default_max_read_downtime     time.Duration = 60 * time.Second
 	//wait time between write is default_backoff_wait_time*backoff_factor
 	default_backoff_wait_time    time.Duration = 10 * time.Millisecond
 	default_getMeta_readTimeout  time.Duration = time.Duration(1) * time.Second
@@ -641,7 +644,7 @@ func (client *xmemClient) setWriteTimeout(write_timeout_duration time.Duration) 
 	conn.(net.Conn).SetWriteDeadline(time.Now().Add(write_timeout_duration))
 }
 
-func (client *xmemClient) repairConn(memClient *mcc.Client, repair_count_at_error int, xmem_id string) bool {
+func (client *xmemClient) repairConn(memClient *mcc.Client, repair_count_at_error int, xmem_id string, finish_ch chan bool) bool {
 	client.lock.Lock()
 	defer client.lock.Unlock()
 
@@ -742,10 +745,7 @@ type XmemNozzle struct {
 	//conflict resolover
 	conflict_resolver ConflictResolver
 
-	sender_finch      chan bool
-	receiver_finch    chan bool
-	checker_finch     chan bool
-	selfMonitor_finch chan bool
+	finish_ch chan bool
 
 	counter_sent     uint32
 	counter_received uint32
@@ -808,10 +808,7 @@ func NewXmemNozzle(id string,
 		batch_lock:          make(chan bool, 1),
 		childrenWaitGrp:     sync.WaitGroup{},
 		buf:                 nil,
-		receiver_finch:      make(chan bool, 1),
-		checker_finch:       make(chan bool, 1),
-		sender_finch:        make(chan bool, 1),
-		selfMonitor_finch:   make(chan bool, 1),
+		finish_ch:           make(chan bool, 1),
 		counter_sent:        0,
 		counter_received:    0,
 		counter_waittime:    0,
@@ -884,16 +881,16 @@ func (xmem *XmemNozzle) Start(settings map[string]interface{}) error {
 	}
 	xmem.Logger().Infof("%v finished initializing.", xmem.Id())
 	xmem.childrenWaitGrp.Add(1)
-	go xmem.selfMonitor(xmem.selfMonitor_finch, &xmem.childrenWaitGrp)
+	go xmem.selfMonitor(xmem.finish_ch, &xmem.childrenWaitGrp)
 
 	xmem.childrenWaitGrp.Add(1)
-	go xmem.receiveResponse(xmem.receiver_finch, &xmem.childrenWaitGrp)
+	go xmem.receiveResponse(xmem.finish_ch, &xmem.childrenWaitGrp)
 
 	xmem.childrenWaitGrp.Add(1)
-	go xmem.check(xmem.checker_finch, &xmem.childrenWaitGrp)
+	go xmem.check(xmem.finish_ch, &xmem.childrenWaitGrp)
 
 	xmem.childrenWaitGrp.Add(1)
-	go xmem.processData_sendbatch(xmem.sender_finch, &xmem.childrenWaitGrp)
+	go xmem.processData_sendbatch(xmem.finish_ch, &xmem.childrenWaitGrp)
 
 	xmem.start_time = time.Now()
 	err = xmem.Start_server()
@@ -1115,10 +1112,7 @@ func (xmem *XmemNozzle) onExit() {
 	xmem.buf.close()
 
 	//notify the data processing routine
-	close(xmem.sender_finch)
-	close(xmem.receiver_finch)
-	close(xmem.checker_finch)
-	close(xmem.selfMonitor_finch)
+	close(xmem.finish_ch)
 
 	go xmem.finalCleanup()
 }
@@ -1457,7 +1451,7 @@ func (xmem *XmemNozzle) batchGetMeta(bigDoc_map map[string]*base.WrappedMCReques
 							xmem.RaiseEvent(common.NewEvent(common.GetMetaReceived, nil, xmem, nil, additionalInfo))
 
 							if response.Status != mc.SUCCESS && !isIgnorableMCError(response.Status) && !isTemporaryMCError(response.Status) && response.Status != mc.KEY_ENOENT {
-								if response.Status == mc.NOT_MY_VBUCKET {
+								if isTopologyChangeMCError(response.Status) {
 									vb_err := fmt.Errorf("Received error %v on vb %v\n", base.ErrorNotMyVbucket, vbno)
 									xmem.handleVBError(vbno, vb_err)
 								} else {
@@ -1515,7 +1509,7 @@ func (xmem *XmemNozzle) batchGetMeta(bigDoc_map map[string]*base.WrappedMCReques
 			} else if xmem.Logger().GetLogLevel() >= log.LogLevelDebug {
 				xmem.Logger().Debugf("%v doc %v succeeded source side conflict resolution. source meta=%v, target meta=%v. sending it to target\n", xmem.Id(), key, doc_meta_source, doc_meta_target)
 			}
-		} else if ok && resp.Status == mc.NOT_MY_VBUCKET {
+		} else if ok && isTopologyChangeMCError(resp.Status) {
 			bigDoc_noRep_map[wrappedReq.UniqueKey] = false
 		} else {
 			if !ok || resp == nil {
@@ -1631,13 +1625,13 @@ func (xmem *XmemNozzle) initializeConnection() (err error) {
 	// this needs to be done after xmem.connType is set
 	xmem.composeUserAgent()
 
-	memClient_setMeta, err := pool.GetNew()
+	memClient_setMeta, err := getClientWithRetry(xmem.Id(), pool, xmem.finish_ch, xmem.Logger())
 
 	if err != nil {
 		return
 	}
 
-	memClient_getMeta, err := pool.GetNew()
+	memClient_getMeta, err := getClientWithRetry(xmem.Id(), pool, xmem.finish_ch, xmem.Logger())
 	if err != nil {
 		return
 	}
@@ -1687,9 +1681,6 @@ func (xmem *XmemNozzle) initialize(settings map[string]interface{}) error {
 
 	xmem.receive_token_ch = make(chan int, xmem.config.maxCount*2)
 	xmem.buf = newReqBuffer(uint16(xmem.config.maxCount*2), uint16(float64(xmem.config.maxCount)*0.2), xmem.receive_token_ch, xmem.Logger())
-
-	xmem.receiver_finch = make(chan bool, 1)
-	xmem.checker_finch = make(chan bool, 1)
 
 	xmem.Logger().Infof("%v About to start initializing connection", xmem.Id())
 	err = xmem.initializeConnection()
@@ -1760,7 +1751,7 @@ func (xmem *XmemNozzle) receiveResponse(finch chan bool, waitGrp *sync.WaitGroup
 						seqno = wrappedReq.Seqno
 						if req != nil && req.Opaque == response.Opaque {
 							// found matching request
-							if response.Status == mc.NOT_MY_VBUCKET {
+							if isTopologyChangeMCError(response.Status) {
 								vb_err := fmt.Errorf("Received error %v on vb %v\n", base.ErrorNotMyVbucket, req.VBucket)
 								xmem.handleVBError(req.VBucket, vb_err)
 							} else if response.Status == mc.KEY_ENOENT {
@@ -1881,8 +1872,9 @@ func isNetTimeoutError(err error) bool {
 	return ok && netError.Timeout()
 }
 
-// check if memcached response status indicates fatal error, which usually requires pipeline restart
-func isFatalMCError(resp_status mc.Status) bool {
+// check if memcached response status indicates topology change,
+// in which case we defer pipeline restart to topology change detector
+func isTopologyChangeMCError(resp_status mc.Status) bool {
 	switch resp_status {
 	case mc.NO_BUCKET:
 		fallthrough
@@ -2250,7 +2242,6 @@ func (xmem *XmemNozzle) writeToClient(client *xmemClient, bytes []byte, renewTim
 			wait_time := time.Duration(math.Pow(2, float64(client.curWriteFailureCounter()))*float64(rand.Intn(10)/10)) * xmem.config.writeTimeout
 			xmem.Logger().Errorf("%v batchSend Failed, retry after %v\n", xmem.Id(), wait_time)
 			time.Sleep(wait_time)
-
 		}
 
 		return err, rev
@@ -2296,18 +2287,10 @@ func (xmem *XmemNozzle) readFromClient(client *xmemClient, resetReadTimeout bool
 				return nil, badConnectionError, rev
 			}
 		} else {
-			if isFatalMCError(response.Status) && response.Status != mc.NOT_MY_VBUCKET {
-				// restart pipeline for fatal mc errors
-				high_level_err := "Received error response from memcached in target cluster."
-				xmem.handleGeneralError(errors.New(high_level_err))
-				client.logger.Errorf("%v %v. err=%v, response=%v", xmem.Id(), high_level_err, err, response)
-				return response, fatalError, rev
-			} else {
-				//response.Status != SUCCESSFUL, in this case, gomemcached return the response as err as well
-				//return the err as nil so that caller can differentiate the application error from transport
-				//error
-				return response, nil, rev
-			}
+			//response.Status != SUCCESSFUL, in this case, gomemcached return the response as err as well
+			//return the err as nil so that caller can differentiate the application error from transport
+			//error
+			return response, nil, rev
 		}
 	} else {
 		//if no error, reset the client retry counter
@@ -2329,39 +2312,22 @@ func (xmem *XmemNozzle) repairConn(client *xmemClient, reason string, rev int) e
 		return err
 	}
 
-	numOfRetry := 0
-	backoffTime := default_newconn_backoff_time
-	for {
-		memClient, err := pool.GetNew()
+	memClient, err := getClientWithRetry(xmem.Id(), pool, xmem.finish_ch, xmem.Logger())
+	if err != nil {
+		xmem.handleGeneralError(err)
+		xmem.Logger().Errorf("%v - Failed to repair connections for %v. err=%v\n", xmem.Id(), client.name, err)
+		return err
+	}
 
-		if err == nil {
-			repaired := client.repairConn(memClient, rev, xmem.Id())
-			if repaired {
-				if client == xmem.client_for_setMeta {
-					xmem.sendHELO(true /*setMeta*/)
-					go xmem.onSetMetaConnRepaired()
-				} else {
-					xmem.sendHELO(false /*setMeta*/)
-				}
-			}
-
-			xmem.Logger().Infof("%v - The connection for %v has been repaired\n", xmem.Id(), client.name)
-			break
-
+	repaired := client.repairConn(memClient, rev, xmem.Id(), xmem.finish_ch)
+	if repaired {
+		if client == xmem.client_for_setMeta {
+			xmem.sendHELO(true /*setMeta*/)
+			go xmem.onSetMetaConnRepaired()
 		} else {
-			if numOfRetry < xmem.config.maxRetry {
-				numOfRetry++
-				// exponential backoff
-				xmem.Logger().Warnf("%v Error setting up new connections. err=%v. Retrying for %vth time after %v.", xmem.Id(), err, numOfRetry, backoffTime)
-				time.Sleep(backoffTime)
-				backoffTime *= 2
-			} else {
-				high_level_err := fmt.Sprintf("Failed to repair connections to target cluster after %v retries.", numOfRetry)
-				xmem.handleGeneralError(errors.New(high_level_err))
-				xmem.Logger().Errorf("%v - Failed to repair connections for %v. err=%v\n", xmem.Id(), client.name, err)
-				return err
-			}
+			xmem.sendHELO(false /*setMeta*/)
 		}
+		xmem.Logger().Infof("%v - The connection for %v has been repaired\n", xmem.Id(), client.name)
 	}
 	return nil
 }
@@ -2461,4 +2427,39 @@ func (xmem *XmemNozzle) recordBatchSize(batchSize uint32) {
 	}
 	last_ten_batches_size[0] = batchSize
 	atomic.StorePointer(&xmem.last_ten_batches_size, unsafe.Pointer(&last_ten_batches_size))
+}
+
+func getClientWithRetry(xmem_id string, pool base.ConnPool, finish_ch chan bool, logger *log.CommonLogger) (*mcc.Client, error) {
+	numOfRetry := 0
+	backoffTime := default_newconn_backoff_time
+	for {
+		memClient, err := pool.GetNew()
+
+		if err == nil {
+			return memClient, nil
+		} else {
+			logger.Warnf("%v Error setting up new connections. err=%v", xmem_id, err)
+			if numOfRetry < default_numofretry_setup_conn {
+				numOfRetry++
+				// exponential backoff
+				logger.Warnf("%v Retrying for %vth time after %v.", xmem_id, numOfRetry, backoffTime)
+				waitWithFinishCh(finish_ch, backoffTime)
+				backoffTime *= 2
+			} else {
+				high_level_err := fmt.Sprintf("Failed to set up connections to target cluster after %v retries.", numOfRetry)
+				logger.Errorf("%v %v", xmem_id, high_level_err)
+				return nil, errors.New(high_level_err)
+			}
+		}
+	}
+}
+
+// wait till the specified time or till finish_ch is closed
+func waitWithFinishCh(finish_ch chan bool, wait_time time.Duration) {
+	ticker := time.NewTicker(wait_time)
+	defer ticker.Stop()
+	select {
+	case <-finish_ch:
+	case <-ticker.C:
+	}
 }
