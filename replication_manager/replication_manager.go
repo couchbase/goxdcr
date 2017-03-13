@@ -199,7 +199,11 @@ func initConstants(xdcr_topology_svc service_def.XDCRCompTopologySvc, internal_s
 		time.Duration(internal_settings.TimeoutCheckpointBeforeStop)*time.Second,
 		internal_settings.CapiDataChanSizeMultiplier,
 		time.Duration(internal_settings.RefreshRemoteClusterRefInterval)*time.Second,
-		version)
+		version,
+		internal_settings.CapiMaxRetryBatchUpdateDocs,
+		time.Duration(internal_settings.CapiBatchTimeout)*time.Second,
+		time.Duration(internal_settings.CapiWriteTimeout)*time.Second,
+		time.Duration(internal_settings.CapiReadTimeout)*time.Second)
 }
 
 func (rm *replicationManager) initMetadataChangeMonitor() {

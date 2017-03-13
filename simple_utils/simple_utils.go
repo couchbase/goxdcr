@@ -426,3 +426,13 @@ func ComposeUserAgentWithBucketNames(prefix, sourceBucketName, targetBucketName 
 	buffer.WriteString(targetBucketName)
 	return buffer.String()
 }
+
+// wait till the specified time or till finish_ch is closed
+func WaitForTimeoutOrFinishSignal(wait_time time.Duration, finish_ch chan bool) {
+	ticker := time.NewTicker(wait_time)
+	defer ticker.Stop()
+	select {
+	case <-finish_ch:
+	case <-ticker.C:
+	}
+}

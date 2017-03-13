@@ -369,10 +369,26 @@ var CapiDataChanSizeMultiplier = 1
 // interval for refreshing remote cluster references
 var RefreshRemoteClusterRefInterval = 15 * time.Second
 
+// max retry for capi batchUpdateDocs operation
+var CapiMaxRetryBatchUpdateDocs = 6
+
+// timeout for batch processing in capi
+// 1. http timeout in revs_diff, i.e., batchGetMeta, call to target
+// 2. overall timeout for batchUpdateDocs operation
+var CapiBatchTimeout = 180 * time.Second
+
+// timeout for tcp write operation in capi
+var CapiWriteTimeout = 10 * time.Second
+
+// timeout for tcp read operation in capi
+var CapiReadTimeout = 60 * time.Second
+
 func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeCountBeforeRestart,
 	maxTopologyStableCountBeforeRestart, maxWorkersForCheckpointing int,
 	timeoutCheckpointBeforeStop time.Duration, capiDataChanSizeMultiplier int,
-	refreshRemoteClusterRefInterval time.Duration, clusterVersion string) {
+	refreshRemoteClusterRefInterval time.Duration, clusterVersion string,
+	capiMaxRetryBatchUpdateDocs int, capiBatchTimeout time.Duration,
+	capiWriteTimeout time.Duration, capiReadTimeout time.Duration) {
 	TopologyChangeCheckInterval = topologyChangeCheckInterval
 	MaxTopologyChangeCountBeforeRestart = maxTopologyChangeCountBeforeRestart
 	MaxTopologyStableCountBeforeRestart = maxTopologyStableCountBeforeRestart
@@ -385,4 +401,8 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	} else {
 		GoxdcrUserAgent = GoxdcrUserAgentPrefix
 	}
+	CapiMaxRetryBatchUpdateDocs = capiMaxRetryBatchUpdateDocs
+	CapiBatchTimeout = capiBatchTimeout
+	CapiWriteTimeout = capiWriteTimeout
+	CapiReadTimeout = capiReadTimeout
 }

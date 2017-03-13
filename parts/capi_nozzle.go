@@ -42,13 +42,9 @@ const (
 	SETTING_RETRY_INTERVAL     = "retry_interval"
 
 	//default configuration
-	default_numofretry_capi          int           = 6
 	default_retry_interval_capi      time.Duration = 500 * time.Millisecond
 	default_maxRetryInterval_capi                  = 30 * time.Second
-	default_writeTimeout_capi        time.Duration = time.Duration(10) * time.Second
-	default_readTimeout_capi         time.Duration = time.Duration(60) * time.Second
-	default_upload_window_size       int           = 3                 // erlang xdcr value
-	default_connection_timeout                     = 180 * time.Second // erlang xdcr value
+	default_upload_window_size       int           = 3 // erlang xdcr value
 	default_selfMonitorInterval_capi time.Duration = 300 * time.Millisecond
 	default_maxIdleCount_capi        int           = 30
 	default_write_to_part_ch_timeout time.Duration = 10 * time.Second
@@ -116,9 +112,9 @@ func newCapiConfig(logger *log.CommonLogger) capiConfig {
 	return capiConfig{
 		baseConfig: baseConfig{maxCount: -1,
 			maxSize:             -1,
-			maxRetry:            default_numofretry_capi,
-			writeTimeout:        default_writeTimeout_capi,
-			readTimeout:         default_readTimeout_capi,
+			maxRetry:            base.CapiMaxRetryBatchUpdateDocs,
+			writeTimeout:        base.CapiWriteTimeout,
+			readTimeout:         base.CapiReadTimeout,
 			maxRetryInterval:    default_maxRetryInterval_capi,
 			selfMonitorInterval: default_selfMonitorInterval_capi,
 			connectStr:          "",
@@ -126,10 +122,9 @@ func newCapiConfig(logger *log.CommonLogger) capiConfig {
 			password:            "",
 		},
 		uploadWindowSize:  default_upload_window_size,
-		connectionTimeout: default_connection_timeout,
+		connectionTimeout: base.CapiBatchTimeout,
 		retryInterval:     default_retry_interval_capi,
 	}
-
 }
 
 func (config *capiConfig) initializeConfig(settings map[string]interface{}) error {
@@ -187,9 +182,7 @@ type CapiNozzle struct {
 
 	childrenWaitGrp sync.WaitGroup
 
-	sender_finch      chan bool
-	checker_finch     chan bool
-	selfMonitor_finch chan bool
+	finish_ch chan bool
 
 	counter_sent      uint32
 	counter_received  uint32
@@ -226,9 +219,7 @@ func NewCapiNozzle(id string,
 		config:              newCapiConfig(server.Logger()), /*config	capiConfig*/
 		batches_ready:       nil,                            /*batches_ready chan *capiBatch*/
 		childrenWaitGrp:     sync.WaitGroup{},               /*childrenWaitGrp sync.WaitGroup*/
-		sender_finch:        make(chan bool, 1),
-		checker_finch:       make(chan bool, 1),
-		selfMonitor_finch:   make(chan bool, 1),
+		finish_ch:           make(chan bool, 1),
 		batches_nonempty_ch: make(chan bool, 1),
 		//		send_allow_ch:    make(chan bool, 1), /*send_allow_ch chan bool*/
 		counter_sent:      0,
@@ -317,10 +308,10 @@ func (capi *CapiNozzle) Start(settings map[string]interface{}) error {
 	capi.Logger().Infof("%v initialized\n", capi.Id())
 	if err == nil {
 		capi.childrenWaitGrp.Add(1)
-		go capi.selfMonitor(capi.selfMonitor_finch, &capi.childrenWaitGrp)
+		go capi.selfMonitor(capi.finish_ch, &capi.childrenWaitGrp)
 
 		capi.childrenWaitGrp.Add(1)
-		go capi.processData_batch(capi.sender_finch, &capi.childrenWaitGrp)
+		go capi.processData_batch(capi.finish_ch, &capi.childrenWaitGrp)
 
 		capi.start_time = time.Now()
 		err = capi.Start_server()
@@ -738,9 +729,7 @@ func (capi *CapiNozzle) onExit() {
 	capi.disableHandleError()
 
 	//notify the data processing routine
-	close(capi.sender_finch)
-	close(capi.checker_finch)
-	close(capi.selfMonitor_finch)
+	close(capi.finish_ch)
 	capi.childrenWaitGrp.Wait()
 
 	//cleanup
@@ -810,7 +799,7 @@ func (capi *CapiNozzle) batchUpdateDocsWithRetry(vbno uint16, req_list *[]*base.
 				return err
 			}
 			num_of_retry++
-			time.Sleep(backoffTime)
+			simple_utils.WaitForTimeoutOrFinishSignal(backoffTime, capi.finish_ch)
 			backoffTime *= 2
 			capi.Logger().Infof("%v retrying update docs for vb %v for the %vth time\n", capi.Id(), vbno, num_of_retry)
 		} else {
@@ -890,7 +879,7 @@ func (capi *CapiNozzle) batchUpdateDocs(vbno uint16, req_list *[]*base.WrappedMC
 	ticker := time.NewTicker(capi.config.connectionTimeout)
 	defer ticker.Stop()
 	select {
-	case <-capi.sender_finch:
+	case <-capi.finish_ch:
 		// capi is stopping.
 	case <-resp_ch:
 		// response received. everything is good
@@ -1128,8 +1117,6 @@ func (capi *CapiNozzle) initialize(settings map[string]interface{}) error {
 	for vbno, _ := range capi.config.vbCouchApiBaseMap {
 		capi.initNewBatch(vbno)
 	}
-
-	capi.checker_finch = make(chan bool, 1)
 
 	capi.Logger().Debugf("%v about to start initializing connection", capi.Id())
 	err = capi.initializeConn()
