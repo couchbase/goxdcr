@@ -181,7 +181,11 @@ func initInternalSettings(internal_settings_svc service_def.InternalSettingsSvc)
 	base.InitConstants(time.Duration(internal_settings.TopologyChangeCheckInterval)*time.Second, internal_settings.MaxTopologyChangeCountBeforeRestart,
 		internal_settings.MaxTopologyStableCountBeforeRestart, internal_settings.MaxWorkersForCheckpointing,
 		time.Duration(internal_settings.TimeoutCheckpointBeforeStop)*time.Second,
-		internal_settings.CapiDataChanSizeMultiplier)
+		internal_settings.CapiDataChanSizeMultiplier,
+		internal_settings.CapiMaxRetryBatchUpdateDocs,
+		time.Duration(internal_settings.CapiBatchTimeout)*time.Second,
+		time.Duration(internal_settings.CapiWriteTimeout)*time.Second,
+		time.Duration(internal_settings.CapiReadTimeout)*time.Second)
 }
 
 func (rm *replicationManager) initMetadataChangeMonitor() {

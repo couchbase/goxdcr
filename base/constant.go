@@ -347,13 +347,33 @@ var MaxWorkersForCheckpointing = 5
 // capi nozzle data chan size is defined as batchCount*CapiDataChanSizeMultiplier
 var CapiDataChanSizeMultiplier = 1
 
+// max retry for capi batchUpdateDocs operation
+var CapiMaxRetryBatchUpdateDocs = 6
+
+// timeout for batch processing in capi
+// 1. http timeout in revs_diff, i.e., batchGetMeta, call to target
+// 2. overall timeout for batchUpdateDocs operation
+var CapiBatchTimeout = 180 * time.Second
+
+// timeout for tcp write operation in capi
+var CapiWriteTimeout = 10 * time.Second
+
+// timeout for tcp read operation in capi
+var CapiReadTimeout = 60 * time.Second
+
 func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeCountBeforeRestart,
 	maxTopologyStableCountBeforeRestart, maxWorkersForCheckpointing int,
-	timeoutCheckpointBeforeStop time.Duration, capiDataChanSizeMultiplier int) {
+	timeoutCheckpointBeforeStop time.Duration, capiDataChanSizeMultiplier int,
+	capiMaxRetryBatchUpdateDocs int, capiBatchTimeout time.Duration,
+	capiWriteTimeout time.Duration, capiReadTimeout time.Duration) {
 	TopologyChangeCheckInterval = topologyChangeCheckInterval
 	MaxTopologyChangeCountBeforeRestart = maxTopologyChangeCountBeforeRestart
 	MaxTopologyStableCountBeforeRestart = maxTopologyStableCountBeforeRestart
 	MaxWorkersForCheckpointing = maxWorkersForCheckpointing
 	TimeoutCheckpointBeforeStop = timeoutCheckpointBeforeStop
 	CapiDataChanSizeMultiplier = capiDataChanSizeMultiplier
+	CapiMaxRetryBatchUpdateDocs = capiMaxRetryBatchUpdateDocs
+	CapiBatchTimeout = capiBatchTimeout
+	CapiWriteTimeout = capiWriteTimeout
+	CapiReadTimeout = capiReadTimeout
 }

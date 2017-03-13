@@ -395,3 +395,13 @@ func BalanceLoad(num_of_worker int, num_of_load int) [][]int {
 
 	return load_distribution
 }
+
+// wait till the specified time or till finish_ch is closed
+func WaitForTimeoutOrFinishSignal(wait_time time.Duration, finish_ch chan bool) {
+	ticker := time.NewTicker(wait_time)
+	defer ticker.Stop()
+	select {
+	case <-finish_ch:
+	case <-ticker.C:
+	}
+}
