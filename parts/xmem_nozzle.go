@@ -21,6 +21,7 @@ import (
 	gen_server "github.com/couchbase/goxdcr/gen_server"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
+	"github.com/couchbase/goxdcr/simple_utils"
 	"github.com/couchbase/goxdcr/utils"
 	"io"
 	"math"
@@ -2450,7 +2451,7 @@ func getClientWithRetry(xmem_id string, pool base.ConnPool, finish_ch chan bool,
 				numOfRetry++
 				// exponential backoff
 				logger.Infof("%v Retrying for %vth time after %v.", xmem_id, numOfRetry, backoffTime)
-				waitWithFinishCh(finish_ch, backoffTime)
+				simple_utils.WaitForTimeoutOrFinishSignal(backoffTime, finish_ch)
 				backoffTime *= 2
 			} else {
 				high_level_err := fmt.Sprintf("Failed to set up connections to target cluster after %v retries.", numOfRetry)
@@ -2458,15 +2459,5 @@ func getClientWithRetry(xmem_id string, pool base.ConnPool, finish_ch chan bool,
 				return nil, errors.New(high_level_err)
 			}
 		}
-	}
-}
-
-// wait till the specified time or till finish_ch is closed
-func waitWithFinishCh(finish_ch chan bool, wait_time time.Duration) {
-	ticker := time.NewTicker(wait_time)
-	defer ticker.Stop()
-	select {
-	case <-finish_ch:
-	case <-ticker.C:
 	}
 }

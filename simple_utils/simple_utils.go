@@ -415,3 +415,13 @@ func EncodeVersionToEffectiveVersion(version []int) int {
 	effectiveVersion := majorVersion*0x10000 + minorVersion
 	return effectiveVersion
 }
+
+// wait till the specified time or till finish_ch is closed
+func WaitForTimeoutOrFinishSignal(wait_time time.Duration, finish_ch chan bool) {
+	ticker := time.NewTicker(wait_time)
+	defer ticker.Stop()
+	select {
+	case <-finish_ch:
+	case <-ticker.C:
+	}
+}
