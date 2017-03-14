@@ -728,7 +728,7 @@ func (service *RemoteClusterService) refresh(ref *metadata.RemoteClusterReferenc
 		if ref.DemandEncryption {
 			httpsHostName, err = service.getHttpsAddrFromMap(hostName)
 			if err != nil {
-				service.logger.Warnf("When refreshing remote cluster reference %v, skipping node %v since received error getting https address. err=%v\n", ref.Id, hostName, err)
+				service.logger.Infof("When refreshing remote cluster reference %v, skipping node %v since received error getting https address. err=%v\n", ref.Id, hostName, err)
 				continue
 			}
 			connStr = httpsHostName
@@ -739,13 +739,13 @@ func (service *RemoteClusterService) refresh(ref *metadata.RemoteClusterReferenc
 		// connect to selected node to retrieve nodes info
 		clusterUUID, nodeList, err := utils.GetClusterUUIDAndNodeListWithMinInfo(connStr, username, password, certificate, sanInCertificate, service.logger)
 		if err != nil {
-			service.logger.Warnf("When refreshing remote cluster reference %v, skipping node %v since it is not accessible. err=%v\n", ref.Id, connStr, err)
+			service.logger.Infof("When refreshing remote cluster reference %v, skipping node %v since it is not accessible. err=%v\n", ref.Id, connStr, err)
 			continue
 		} else {
 			// selected node is accessible
 			if clusterUUID != ref.Uuid {
 				// if selected node is no longer in target cluster, remove selected node from ref_cache.nodes_connectionstr and update cache
-				service.logger.Warnf("Node %v is in a different cluster %v now. Removing it from node list in cache. ref=%v, ref cluster=%v\n", connStr, clusterUUID, ref.Id, ref.Uuid)
+				service.logger.Infof("Node %v is in a different cluster %v now. Removing it from node list in cache. ref=%v, ref cluster=%v\n", connStr, clusterUUID, ref.Id, ref.Uuid)
 
 				new_nodes_connectionstr := append(ref_cache.nodes_connectionstr[:index], ref_cache.nodes_connectionstr[index+1:]...)
 				new_ref_cache := &remoteClusterVal{key: ref.Id,
@@ -755,7 +755,7 @@ func (service *RemoteClusterService) refresh(ref *metadata.RemoteClusterReferenc
 
 				err = service.getCache().Upsert(ref.Id, new_ref_cache)
 				if err != nil {
-					service.logger.Warnf("Error removing node %v from node list in cache for remote cluster reference %v. err=%v\n", connStr, ref.Id, err)
+					service.logger.Infof("Error removing node %v from node list in cache for remote cluster reference %v. err=%v\n", connStr, ref.Id, err)
 				}
 				// since we modified ref_cache, it may not be safe to continue processing the old ref_cache.
 				// return error to abort the current refresh operation
@@ -771,7 +771,7 @@ func (service *RemoteClusterService) refresh(ref *metadata.RemoteClusterReferenc
 
 			nodeNameList, err := service.getNodeNameList(nodeList, connStr)
 			if err != nil {
-				service.logger.Warnf("Error getting node name list for remote cluster reference %v using connection string %v. err=%v\n", ref.Id, connStr, err)
+				service.logger.Infof("Error getting node name list for remote cluster reference %v using connection string %v. err=%v\n", ref.Id, connStr, err)
 				continue
 			}
 
@@ -785,14 +785,14 @@ func (service *RemoteClusterService) refresh(ref *metadata.RemoteClusterReferenc
 			}
 			if !hostNameStillInTarget {
 				// if ref.HostName is no longer in target node list, replace it with ActiveHostName
-				service.logger.Warnf("HostName, %v, in remote cluster reference, %v, is no longer in target cluster. Replacing it with %v\n", ref.HostName, ref.Id, ref.ActiveHostName)
+				service.logger.Infof("HostName, %v, in remote cluster reference, %v, is no longer in target cluster. Replacing it with %v\n", ref.HostName, ref.Id, ref.ActiveHostName)
 
 				ref.HostName = ref.ActiveHostName
 				ref.HttpsHostName = ref.ActiveHttpsHostName
 				// changes to ref.HostName needs to be saved to metakv, so that it can be propagated to other nodes
 				err = service.SetRemoteCluster(ref.Name, ref)
 				if err != nil {
-					service.logger.Warnf("Error updating hostname in remote cluster reference %v. err=%v\n", ref.Id, err)
+					service.logger.Infof("Error updating hostname in remote cluster reference %v. err=%v\n", ref.Id, err)
 				} else {
 					// if SetRemoteCluster() succeeds, the cache has been updated, return ok
 					return ref, nil
@@ -809,7 +809,7 @@ func (service *RemoteClusterService) refresh(ref *metadata.RemoteClusterReferenc
 			err = service.getCache().Upsert(ref.Id, new_ref_cache)
 			if err != nil {
 				errMsg := fmt.Sprintf("Skipping refreshing remote cluster reference %v since received error updating cache. err=%v\n", ref.Id, err)
-				service.logger.Warn(errMsg)
+				service.logger.Info(errMsg)
 				// if we receive error updating cache, the remote cluster ref in cache may have been updated by another go-routine
 				// it most likely won't be helpful iterating through remaining nodes since the same update cache error would be returned
 				// abort the current refresh operation

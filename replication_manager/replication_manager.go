@@ -829,7 +829,7 @@ func refreshRemoteClusterRef(fin_chan chan bool) {
 		case <-ticker.C:
 			_, err := RemoteClusterService().RemoteClusters(true /*refresh*/)
 			if err != nil {
-				logger_rm.Warnf("Error refreshing remote cluster refs = %v\n", err)
+				logger_rm.Infof("Error refreshing remote cluster refs = %v\n", err)
 			}
 		}
 	}
