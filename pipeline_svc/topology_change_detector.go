@@ -20,7 +20,7 @@ import (
 var source_topology_changedErr = errors.New("Topology has changed on source cluster")
 var target_topology_changedErr = errors.New("Topology has changed on target cluster")
 var target_cluster_version_changed_for_ssl_err = errors.New("Target cluster version has moved to 3.0 or above and started to support ssl over mem.")
-var target_cluster_version_changed_for_rbac_err = errors.New("Target cluster version has moved to 5.0 or above and started to support rbac.")
+var target_cluster_version_changed_for_rbac_and_xattr_err = errors.New("Target cluster version has moved to 5.0 or above and started to support rbac and xattr.")
 
 type TopologyChangeDetectorSvc struct {
 	*comp.AbstractComponent
@@ -63,29 +63,29 @@ type TopologyChangeDetectorSvc struct {
 	// whether replication is of capi type
 	capi bool
 
-	// whether needs to check target version for RBAC support
-	check_target_version_for_rbac bool
+	// whether needs to check target version for RBAC and Xattr support
+	check_target_version_for_rbac_and_xattr bool
 }
 
 func NewTopologyChangeDetectorSvc(cluster_info_svc service_def.ClusterInfoSvc,
 	xdcr_topology_svc service_def.XDCRCompTopologySvc,
 	remote_cluster_svc service_def.RemoteClusterSvc,
 	repl_spec_svc service_def.ReplicationSpecSvc,
-	target_has_rbac_support bool,
+	target_has_rbac_and_xattr_support bool,
 	logger_ctx *log.LoggerContext) *TopologyChangeDetectorSvc {
 	logger := log.NewLogger("TopoChangeDet", logger_ctx)
 	return &TopologyChangeDetectorSvc{xdcr_topology_svc: xdcr_topology_svc,
-		cluster_info_svc:              cluster_info_svc,
-		remote_cluster_svc:            remote_cluster_svc,
-		repl_spec_svc:                 repl_spec_svc,
-		AbstractComponent:             comp.NewAbstractComponentWithLogger("TopoChangeDet", logger),
-		pipeline:                      nil,
-		finish_ch:                     make(chan bool, 1),
-		wait_grp:                      &sync.WaitGroup{},
-		logger:                        logger,
-		vblist_last:                   make([]uint16, 0),
-		httpsAddrMap:                  make(map[string]string),
-		check_target_version_for_rbac: !target_has_rbac_support}
+		cluster_info_svc:                        cluster_info_svc,
+		remote_cluster_svc:                      remote_cluster_svc,
+		repl_spec_svc:                           repl_spec_svc,
+		AbstractComponent:                       comp.NewAbstractComponentWithLogger("TopoChangeDet", logger),
+		pipeline:                                nil,
+		finish_ch:                               make(chan bool, 1),
+		wait_grp:                                &sync.WaitGroup{},
+		logger:                                  logger,
+		vblist_last:                             make([]uint16, 0),
+		httpsAddrMap:                            make(map[string]string),
+		check_target_version_for_rbac_and_xattr: !target_has_rbac_and_xattr_support}
 }
 
 func (top_detect_svc *TopologyChangeDetectorSvc) Attach(pipeline common.Pipeline) error {
@@ -183,8 +183,8 @@ func (top_detect_svc *TopologyChangeDetectorSvc) validate(checkTargetVersionForS
 	}
 
 	diff_vb_list, target_vb_server_map, err := top_detect_svc.validateTargetTopology(checkTargetVersionForSSL)
-	if err == target_cluster_version_changed_for_ssl_err {
-		// restart pipeline if target begins to support ssl
+	if err == target_cluster_version_changed_for_ssl_err || err == target_cluster_version_changed_for_rbac_and_xattr_err {
+		// restart pipeline if target begins to support ssl or rbac or xattr
 		top_detect_svc.RaiseEvent(common.NewEvent(common.ErrorEncountered, nil, top_detect_svc, nil, err))
 	} else {
 		if err != nil {
@@ -404,10 +404,10 @@ func (top_detect_svc *TopologyChangeDetectorSvc) validateTargetTopology(checkTar
 			return nil, nil, target_cluster_version_changed_for_ssl_err
 		}
 	}
-	if top_detect_svc.check_target_version_for_rbac {
-		if simple_utils.IsClusterCompatible(targetClusterCompatibility, base.VersionForRBACSupport) {
-			top_detect_svc.logger.Infof("ToplogyChangeDetectorSvc for pipeline %v detected that target cluster has been upgraded to 5.0 or above and is now supporting RBAC", top_detect_svc.pipeline.Topic())
-			return nil, nil, target_cluster_version_changed_for_rbac_err
+	if top_detect_svc.check_target_version_for_rbac_and_xattr {
+		if simple_utils.IsClusterCompatible(targetClusterCompatibility, base.VersionForRBACAndXattrSupport) {
+			top_detect_svc.logger.Infof("ToplogyChangeDetectorSvc for pipeline %v detected that target cluster has been upgraded to 5.0 or above and is now supporting RBAC and xattr", top_detect_svc.pipeline.Topic())
+			return nil, nil, target_cluster_version_changed_for_rbac_and_xattr_err
 		}
 	}
 

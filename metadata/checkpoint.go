@@ -255,6 +255,13 @@ type CheckpointsDoc struct {
 	//keep 100 checkpoint record
 	Checkpoint_records []*CheckpointRecord `json:"checkpoints"`
 
+	// senqo of the first mutation with xattr in the corresponding vbucket
+	XattrSeqno uint64 `json:"xattrSeqno"`
+
+	// track the latest target cluster version
+	// it can be used to detect the event that target cluster has been upgraded to support xattr
+	TargetClusterVersion int `json:"targetClusterVersion"`
+
 	//revision number
 	Revision interface{}
 }

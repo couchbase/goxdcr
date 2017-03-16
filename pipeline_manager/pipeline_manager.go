@@ -44,29 +44,29 @@ type PipelineManager struct {
 }
 
 type pipeline_mgr_iface interface {
-	OnExit()												error
+	OnExit() error
 	stopAllUpdaters()
-	validatePipeline(topic string)							error
-	removePipelineFromReplicationStatus(p common.Pipeline)	error
-	StopPipeline(rep_status *pipeline.ReplicationStatus)	error
-	runtimeCtx(topic string)								common.PipelineRuntimeContext
-	pipeline(topic string)									common.Pipeline
-// The following two lines cannot compile. Why?
-//	getPipelineFromMap(topic string) 						common.PipeLine
-//	startPipeline(topic string)								(common.PipeLine, error)
-	liveTopics()											[]string
-	topics()												[]string
-	livePipelines()											map[string]common.Pipeline
-	ReportFixed(topic string, r *PipelineUpdater)			error
+	validatePipeline(topic string) error
+	removePipelineFromReplicationStatus(p common.Pipeline) error
+	StopPipeline(rep_status *pipeline.ReplicationStatus) error
+	runtimeCtx(topic string) common.PipelineRuntimeContext
+	pipeline(topic string) common.Pipeline
+	// The following two lines cannot compile. Why?
+	//	getPipelineFromMap(topic string) 						common.PipeLine
+	//	startPipeline(topic string)								(common.PipeLine, error)
+	liveTopics() []string
+	topics() []string
+	livePipelines() map[string]common.Pipeline
+	ReportFixed(topic string, r *PipelineUpdater) error
 	launchUpdater(topic string, cur_err error, rep_status *pipeline.ReplicationStatus) error
-	Update(topic string, cur_err error)						error
-	ReplicationStatusMap()									map[string]*pipeline.ReplicationStatus
-	ReplicationStatus(topic string)							(*pipeline.ReplicationStatus, error)
-	InitReplicationStatusForReplication(specId string)		*pipeline.ReplicationStatus
-	AllReplicationsForBucket(bucket string)					[]string
-	AllReplications()										[]string
+	Update(topic string, cur_err error) error
+	ReplicationStatusMap() map[string]*pipeline.ReplicationStatus
+	ReplicationStatus(topic string) (*pipeline.ReplicationStatus, error)
+	InitReplicationStatusForReplication(specId string) *pipeline.ReplicationStatus
+	AllReplicationsForBucket(bucket string) []string
+	AllReplications() []string
 	AllReplicationsForTargetCluster(targetClusterUuid string) []string
-	RemoveReplicationStatus(topic string)					error
+	RemoveReplicationStatus(topic string) error
 	AllReplicationSpecsForTargetCluster(targetClusterUuid string) map[string]*metadata.ReplicationSpecification
 }
 
@@ -74,16 +74,16 @@ type pipeline_mgr_iface interface {
 var pipeline_mgr *PipelineManager
 
 func NewPipelineManager(factory common.PipelineFactory, repl_spec_svc service_def.ReplicationSpecSvc, xdcr_topology_svc service_def.XDCRCompTopologySvc,
-	remote_cluster_svc service_def.RemoteClusterSvc, cluster_info_svc service_def.ClusterInfoSvc, uilog_svc service_def.UILogSvc, logger_context *log.LoggerContext) (* PipelineManager) {
+	remote_cluster_svc service_def.RemoteClusterSvc, cluster_info_svc service_def.ClusterInfoSvc, uilog_svc service_def.UILogSvc, logger_context *log.LoggerContext) *PipelineManager {
 	pipelineMgrRetVar := &PipelineManager{
-		pipeline_factory: factory,
-		repl_spec_svc: repl_spec_svc,
-		xdcr_topology_svc: xdcr_topology_svc,
+		pipeline_factory:   factory,
+		repl_spec_svc:      repl_spec_svc,
+		xdcr_topology_svc:  xdcr_topology_svc,
 		remote_cluster_svc: remote_cluster_svc,
-		logger: log.NewLogger("PipelineMgr", logger_context),
-		cluster_info_svc: cluster_info_svc,
-		uilog_svc: uilog_svc,
-		child_waitGrp: &sync.WaitGroup{}}
+		logger:             log.NewLogger("PipelineMgr", logger_context),
+		cluster_info_svc:   cluster_info_svc,
+		uilog_svc:          uilog_svc,
+		child_waitGrp:      &sync.WaitGroup{}}
 	pipelineMgrRetVar.logger.Info("Pipeline Manager is constucted")
 
 	//initialize the expvar storage for replication status
@@ -631,7 +631,7 @@ func newPipelineUpdater(pipeline_name string, retry_interval int, waitGrp *sync.
 		rep_status:     rep_status_in,
 		logger:         logger,
 		state:          Updater_Initialized,
-		pipelineMgr:	pipelineMgr_in,
+		pipelineMgr:    pipelineMgr_in,
 		current_error:  cur_err}
 
 	return repairer, nil
@@ -775,12 +775,12 @@ func (r *PipelineUpdater) raiseXattrWarningIfNeeded(p common.Pipeline) {
 			return
 		}
 
-		hasXATTRSupport, err := r.pipelineMgr.cluster_info_svc.IsClusterCompatible(targetClusterRef, base.VersionForXATTRSupport)
+		hasXattrSupport, err := r.pipelineMgr.cluster_info_svc.IsClusterCompatible(targetClusterRef, base.VersionForRBACAndXattrSupport)
 		if err != nil {
 			r.logger.Warnf("Skipping xattr warning check since received error checking target cluster version. target cluster=%v, pipeline=%v, err=%v\n", spec.TargetClusterUUID, spec.Id, err)
 			return
 		}
-		if !hasXATTRSupport {
+		if !hasXattrSupport {
 			errMsg := fmt.Sprintf("Replication from source bucket '%v' to target bucket '%v' on cluster '%v' has been started. Note - Target cluster is older than 5.0.0, hence some of the new feature enhancements such as \"Extended Attributes (XATTR)\" are not supported, which might result in loss of XATTR data. If this is not acceptable, please pause the replication, upgrade cluster '%v' to 5.0.0, and restart replication.", spec.SourceBucketName, spec.TargetBucketName, targetClusterRef.Name, targetClusterRef.Name)
 			r.logger.Warn(errMsg)
 

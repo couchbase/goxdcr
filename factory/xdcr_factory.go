@@ -210,7 +210,7 @@ func (xdcrf *XDCRFactory) NewPipeline(topic string, progress_recorder common.Pip
 	progress_recorder(fmt.Sprintf("%v source nozzles have been constructed", len(sourceNozzles)))
 
 	xdcrf.logger.Infof("%v kv_vb_map=%v\n", topic, kv_vb_map)
-	outNozzles, vbNozzleMap, target_kv_vb_map, targetUserName, targetPassword, targetHasRBACSupport, err :=
+	outNozzles, vbNozzleMap, target_kv_vb_map, targetUserName, targetPassword, targetClusterVersion, err :=
 		xdcrf.constructOutgoingNozzles(spec, kv_vb_map, sourceCRMode, targetBucketInfo, targetClusterRef, isCapiReplication, logger_ctx)
 
 	if err != nil {
@@ -260,7 +260,7 @@ func (xdcrf *XDCRFactory) NewPipeline(topic string, progress_recorder common.Pip
 	} else {
 		//register services
 		pipeline.SetRuntimeContext(pipelineContext)
-		err = xdcrf.registerServices(pipeline, logger_ctx, kv_vb_map, targetUserName, targetPassword, spec.TargetBucketName, target_kv_vb_map, targetClusterRef, targetHasRBACSupport, isCapiReplication)
+		err = xdcrf.registerServices(pipeline, logger_ctx, kv_vb_map, targetUserName, targetPassword, spec.TargetBucketName, target_kv_vb_map, targetClusterRef, targetClusterVersion, isCapiReplication)
 		if err != nil {
 			return nil, err
 		}
@@ -420,7 +420,7 @@ func (xdcrf *XDCRFactory) filterVBList(targetkvVBList []uint16, kv_vb_map map[st
 func (xdcrf *XDCRFactory) constructOutgoingNozzles(spec *metadata.ReplicationSpecification, kv_vb_map map[string][]uint16,
 	sourceCRMode base.ConflictResolutionMode, targetBucketInfo map[string]interface{},
 	targetClusterRef *metadata.RemoteClusterReference, isCapiReplication bool, logger_ctx *log.LoggerContext) (outNozzles map[string]common.Nozzle,
-	vbNozzleMap map[uint16]string, kvVBMap map[string][]uint16, targetUserName string, targetPassword string, targetHasRBACSupport bool, err error) {
+	vbNozzleMap map[uint16]string, kvVBMap map[string][]uint16, targetUserName string, targetPassword string, targetClusterVersion int, err error) {
 	outNozzles = make(map[string]common.Nozzle)
 	vbNozzleMap = make(map[uint16]string)
 	kvVBMap, err = utils.GetServerVBucketsMap(targetClusterRef.HostName, spec.TargetBucketName, targetBucketInfo)
@@ -436,15 +436,14 @@ func (xdcrf *XDCRFactory) constructOutgoingNozzles(spec *metadata.ReplicationSpe
 	if isCapiReplication {
 		targetUserName = targetClusterRef.UserName
 		targetPassword = targetClusterRef.Password
-		// set targetHasRBACSupport to true so that topology change detector will not listen to target version change regard to RBAC
-		targetHasRBACSupport = true
+		// set target cluster version to 0 so that topology change detector will not listen to target version change
+		targetClusterVersion = 0
 	} else {
-		var clusterCompatibility int
-		clusterCompatibility, err = utils.GetClusterCompatibilityFromBucketInfo(spec.TargetBucketName, targetBucketInfo, xdcrf.logger)
+		targetClusterVersion, err = utils.GetClusterCompatibilityFromBucketInfo(spec.TargetBucketName, targetBucketInfo, xdcrf.logger)
 		if err != nil {
 			return
 		}
-		targetHasRBACSupport = simple_utils.IsClusterCompatible(clusterCompatibility, base.VersionForRBACSupport)
+		targetHasRBACSupport := simple_utils.IsClusterCompatible(targetClusterVersion, base.VersionForRBACAndXattrSupport)
 		if targetHasRBACSupport {
 			// if target is spock and up, simply use the username and password in remote cluster ref
 			targetUserName = targetClusterRef.UserName
@@ -777,7 +776,7 @@ func (xdcrf *XDCRFactory) constructSettingsForDcpNozzle(pipeline common.Pipeline
 func (xdcrf *XDCRFactory) registerServices(pipeline common.Pipeline, logger_ctx *log.LoggerContext,
 	kv_vb_map map[string][]uint16, targetUserName, targetPassword string,
 	targetBucketName string, target_kv_vb_map map[string][]uint16,
-	targetClusterRef *metadata.RemoteClusterReference, targetHasRBACSupport bool,
+	targetClusterRef *metadata.RemoteClusterReference, targetClusterVersion int,
 	isCapi bool) error {
 	through_seqno_tracker_svc := service_impl.NewThroughSeqnoTrackerSvc(logger_ctx)
 	through_seqno_tracker_svc.Attach(pipeline)
@@ -795,7 +794,8 @@ func (xdcrf *XDCRFactory) registerServices(pipeline common.Pipeline, logger_ctx 
 	ckptMgr, err := pipeline_svc.NewCheckpointManager(xdcrf.checkpoint_svc, xdcrf.capi_svc,
 		xdcrf.remote_cluster_svc, xdcrf.repl_spec_svc, xdcrf.cluster_info_svc,
 		xdcrf.xdcr_topology_svc, through_seqno_tracker_svc, kv_vb_map, targetUserName,
-		targetPassword, targetBucketName, target_kv_vb_map, targetClusterRef, logger_ctx)
+		targetPassword, targetBucketName, target_kv_vb_map, targetClusterRef,
+		targetClusterVersion, logger_ctx)
 	if err != nil {
 		xdcrf.logger.Errorf("Failed to construct CheckpointManager for %v. err=%v ckpt_svc=%v, capi_svc=%v, remote_cluster_svc=%v, repl_spec_svc=%v\n", pipeline.Topic(), err, xdcrf.checkpoint_svc, xdcrf.capi_svc,
 			xdcrf.remote_cluster_svc, xdcrf.repl_spec_svc)
@@ -814,7 +814,8 @@ func (xdcrf *XDCRFactory) registerServices(pipeline common.Pipeline, logger_ctx 
 	}
 
 	//register topology change detect service
-	top_detect_svc := pipeline_svc.NewTopologyChangeDetectorSvc(xdcrf.cluster_info_svc, xdcrf.xdcr_topology_svc, xdcrf.remote_cluster_svc, xdcrf.repl_spec_svc, targetHasRBACSupport, logger_ctx)
+	targetHasRBACAndXattrSupport := simple_utils.IsClusterCompatible(targetClusterVersion, base.VersionForRBACAndXattrSupport)
+	top_detect_svc := pipeline_svc.NewTopologyChangeDetectorSvc(xdcrf.cluster_info_svc, xdcrf.xdcr_topology_svc, xdcrf.remote_cluster_svc, xdcrf.repl_spec_svc, targetHasRBACAndXattrSupport, logger_ctx)
 	err = ctx.RegisterService(base.TOPOLOGY_CHANGE_DETECT_SVC, top_detect_svc)
 	if err != nil {
 		return err

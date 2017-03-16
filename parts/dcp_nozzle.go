@@ -81,6 +81,10 @@ type DcpNozzle struct {
 	// this allows multiple  dcp nozzles to be created for a kv node
 	vbnos []uint16
 
+	// key - vb#
+	// value - first seqno seen with xattr
+	vb_xattr_seqno_map map[uint16]*uint64
+
 	vb_stream_status map[uint16]*streamStatusWithLock
 
 	// immutable fields
@@ -148,6 +152,7 @@ func NewDcpNozzle(id string,
 		sourceBucketName:         sourceBucketName,
 		targetBucketName:         targetBucketName,
 		vbnos:                    vbnos,
+		vb_xattr_seqno_map:       make(map[uint16]*uint64),
 		GenServer:                server, /*gen_server.GenServer*/
 		AbstractPart:             part,   /*AbstractPart*/
 		bOpen:                    true,   /*bOpen	bool*/
@@ -168,6 +173,10 @@ func NewDcpNozzle(id string,
 	for _, vbno := range vbnos {
 		dcp.cur_ts[vbno] = &vbtsWithLock{lock: &sync.RWMutex{}, ts: nil}
 		dcp.vb_stream_status[vbno] = &streamStatusWithLock{lock: &sync.RWMutex{}, state: Dcp_Stream_NonInit}
+		if !dcp.is_capi {
+			var xattr_seqno uint64 = 0
+			dcp.vb_xattr_seqno_map[vbno] = &xattr_seqno
+		}
 	}
 
 	dcp.composeUserAgent()
@@ -486,6 +495,9 @@ func (dcp *DcpNozzle) processData() (err error) {
 						start_time := time.Now()
 						dcp.incCounterReceived()
 						dcp.RaiseEvent(common.NewEvent(common.DataReceived, m, dcp, nil /*derivedItems*/, nil /*otherInfos*/))
+						if !dcp.is_capi {
+							dcp.handleXattr(m)
+						}
 
 						// forward mutation downstream through connector
 						if err := dcp.Connector().Forward(m); err != nil {
@@ -508,6 +520,28 @@ func (dcp *DcpNozzle) processData() (err error) {
 done:
 	dcp.Logger().Infof("%v processData exits\n", dcp.Id())
 	return
+}
+
+func (dcp *DcpNozzle) handleXattr(upr_event *mcc.UprEvent) {
+	event_has_xattr := simple_utils.HasXattr(upr_event.DataType)
+	if event_has_xattr {
+		xattr_seqno_obj, ok := dcp.vb_xattr_seqno_map[upr_event.VBucket]
+		if ok {
+			xattr_seqno := atomic.LoadUint64(xattr_seqno_obj)
+			if xattr_seqno == 0 {
+				// set xattr_seqno only if it has never been set before
+				atomic.StoreUint64(xattr_seqno_obj, upr_event.Seqno)
+			}
+		}
+	}
+}
+
+func (dcp *DcpNozzle) GetXattrSeqnos() map[uint16]uint64 {
+	xattr_seqnos := make(map[uint16]uint64)
+	for vbno, xattr_seqno_obj := range dcp.vb_xattr_seqno_map {
+		xattr_seqnos[vbno] = atomic.LoadUint64(xattr_seqno_obj)
+	}
+	return xattr_seqnos
 }
 
 func (dcp *DcpNozzle) onExit() {

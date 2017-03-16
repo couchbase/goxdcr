@@ -11,6 +11,7 @@ package pipeline_utils
 
 import (
 	"errors"
+	"fmt"
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/common"
 	"github.com/couchbase/goxdcr/log"
@@ -126,4 +127,35 @@ func IsPipelineRunning(state common.PipelineState) bool {
 
 func IsPipelineStopping(state common.PipelineState) bool {
 	return state == common.Pipeline_Stopping || state == common.Pipeline_Stopped
+}
+
+func DelCheckpointsDocWithRetry(checkpoints_svc service_def.CheckpointsService, replicationId string, vbno uint16, maxRetry int, logger *log.CommonLogger) error {
+	logger.Infof("DelCheckpointsDoc for replication %v and vbno %v with maxRetry=%v...", replicationId, vbno, maxRetry)
+	numRetry := 0
+	for {
+		err := checkpoints_svc.DelCheckpointsDoc(replicationId, vbno)
+		if err == nil {
+			return nil
+		}
+		if numRetry >= maxRetry {
+			errMsg := fmt.Sprintf("Error deleting checkpoint doc for replication %v and vb %v after %v retries", replicationId, vbno, numRetry)
+			logger.Warn(errMsg)
+			return errors.New(errMsg)
+		}
+		numRetry++
+	}
+	return nil
+}
+
+// get first seen xattr seqno for each vbucket in pipeline
+func GetXattrSeqnos(pipeline common.Pipeline) map[uint16]uint64 {
+	ret := make(map[uint16]uint64)
+	sourceNozzles := pipeline.Sources()
+	for _, sourceNozzle := range sourceNozzles {
+		xattr_seqnos := sourceNozzle.(*parts.DcpNozzle).GetXattrSeqnos()
+		for vbno, xattr_seqno := range xattr_seqnos {
+			ret[vbno] = xattr_seqno
+		}
+	}
+	return ret
 }

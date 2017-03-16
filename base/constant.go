@@ -359,8 +359,7 @@ var HELOTimeout time.Duration = time.Duration(120) * time.Second
 var VersionForXmemSupport = []int{2, 2}
 var VersionForSSLOverMemSupport = []int{3, 0}
 var VersionForSANInCertificateSupport = []int{4, 0}
-var VersionForRBACSupport = []int{5, 0}
-var VersionForXATTRSupport = []int{5, 0}
+var VersionForRBACAndXattrSupport = []int{5, 0}
 
 var GoxdcrUserAgentPrefix = "couchbase-goxdcr"
 var GoxdcrUserAgent = ""
@@ -381,6 +380,9 @@ var NumberOfSlotsForBandwidthThrottling = 10
 
 // When doing bandwith throttling in xmem, set minNumberOfBytes = NumberOfBytes * FractionOfNumberOfBytesToSendAsMin
 var FractionOfNumberOfBytesToSendAsMin float32 = 0.30
+
+// max retry for metakv related operations
+var MaxRetryMetakvOps = 5
 
 // --------------- Constants that are configurable -----------------
 

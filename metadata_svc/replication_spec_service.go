@@ -261,7 +261,7 @@ func (service *ReplicationSpecService) ValidateNewReplicationSpec(sourceBucket, 
 				break
 			}
 
-			hasRBACSupport := simple_utils.IsClusterCompatible(targetClusterCompatibility, base.VersionForRBACSupport)
+			hasRBACSupport := simple_utils.IsClusterCompatible(targetClusterCompatibility, base.VersionForRBACAndXattrSupport)
 
 			var username, password string
 			if hasRBACSupport {

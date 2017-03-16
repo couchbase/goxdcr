@@ -509,7 +509,7 @@ func (service *RemoteClusterService) validateRemoteCluster(ref *metadata.RemoteC
 
 		// if ref is half-ssl, validate that target clusters is spock and up
 		if !ref.IsFullEncryption() {
-			rbacCompatible, err := service.cluster_info_svc.IsClusterCompatible(ref, base.VersionForRBACSupport)
+			rbacCompatible, err := service.cluster_info_svc.IsClusterCompatible(ref, base.VersionForRBACAndXattrSupport)
 			if err != nil {
 				return wrapAsInvalidRemoteClusterError("Failed to get target cluster version information")
 			}
