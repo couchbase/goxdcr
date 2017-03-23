@@ -280,7 +280,6 @@ func (rm *replicationManager) checkReplicationStatus(fin_chan chan bool) {
 	defer stats_update_ticker.Stop()
 
 	kv_mem_clients := make(map[string]*mcc.Client)
-	kv_mem_client_error_count := make(map[string]int)
 
 	for {
 		select {
@@ -289,7 +288,7 @@ func (rm *replicationManager) checkReplicationStatus(fin_chan chan bool) {
 		case <-status_check_ticker.C:
 			pipeline_manager.CheckPipelines()
 		case <-stats_update_ticker.C:
-			pipeline_svc.UpdateStats(ClusterInfoService(), XDCRCompTopologyService(), CheckpointService(), kv_mem_clients, kv_mem_client_error_count, logger_rm)
+			pipeline_svc.UpdateStats(ClusterInfoService(), XDCRCompTopologyService(), CheckpointService(), kv_mem_clients, logger_rm)
 		}
 	}
 }

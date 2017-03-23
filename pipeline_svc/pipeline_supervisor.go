@@ -57,10 +57,8 @@ type PipelineSupervisor struct {
 	xdcr_topology_svc service_def.XDCRCompTopologySvc
 
 	// memcached clients for dcp health check
-	kv_mem_clients map[string]*mcc.Client
-	// stores error count of memcached clients
-	kv_mem_client_error_count map[string]int
-	kv_mem_clients_lock       *sync.Mutex
+	kv_mem_clients      map[string]*mcc.Client
+	kv_mem_clients_lock *sync.Mutex
 
 	user_agent string
 }
@@ -70,13 +68,12 @@ func NewPipelineSupervisor(id string, logger_ctx *log.LoggerContext, failure_han
 	xdcr_topology_svc service_def.XDCRCompTopologySvc) *PipelineSupervisor {
 	supervisor := supervisor.NewGenericSupervisor(id, logger_ctx, failure_handler, parentSupervisor)
 	pipelineSupervisor := &PipelineSupervisor{GenericSupervisor: supervisor,
-		errors_seen:               make(map[string]error),
-		errors_seen_lock:          &sync.RWMutex{},
-		cluster_info_svc:          cluster_info_svc,
-		xdcr_topology_svc:         xdcr_topology_svc,
-		kv_mem_clients:            make(map[string]*mcc.Client),
-		kv_mem_client_error_count: make(map[string]int),
-		kv_mem_clients_lock:       &sync.Mutex{}}
+		errors_seen:         make(map[string]error),
+		errors_seen_lock:    &sync.RWMutex{},
+		cluster_info_svc:    cluster_info_svc,
+		xdcr_topology_svc:   xdcr_topology_svc,
+		kv_mem_clients:      make(map[string]*mcc.Client),
+		kv_mem_clients_lock: &sync.Mutex{}}
 	return pipelineSupervisor
 }
 
@@ -346,24 +343,12 @@ func (pipelineSupervisor *PipelineSupervisor) getDcpStats() (map[string]map[stri
 
 		stats_map, err := client.StatsMap(base.DCP_STAT_NAME)
 		if err != nil {
-			pipelineSupervisor.Logger().Infof("%v Error getting dcp stats for kv %v. err=%v", pipelineSupervisor.Id(), serverAddr, err)
-			// increment the error count of the client. retire the client if it has failed too many times
-			err_count, ok := pipelineSupervisor.kv_mem_client_error_count[serverAddr]
-			if !ok {
-				err_count = 1
-			} else {
-				err_count++
+			pipelineSupervisor.Logger().Warnf("%v Error getting dcp stats for kv %v. err=%v", pipelineSupervisor.Id(), serverAddr, err)
+			err1 := client.Close()
+			if err1 != nil {
+				pipelineSupervisor.Logger().Warnf("%v error from closing connection for %v is %v\n", pipelineSupervisor.Id(), serverAddr, err1)
 			}
-			if err_count > base.MaxMemClientErrorCount {
-				err = client.Close()
-				if err != nil {
-					pipelineSupervisor.Logger().Infof("%v error from closing connection for %v is %v\n", pipelineSupervisor.Id(), serverAddr, err)
-				}
-				delete(pipelineSupervisor.kv_mem_clients, serverAddr)
-				pipelineSupervisor.kv_mem_client_error_count[serverAddr] = 0
-			} else {
-				pipelineSupervisor.kv_mem_client_error_count[serverAddr] = err_count
-			}
+			delete(pipelineSupervisor.kv_mem_clients, serverAddr)
 			return nil, err
 		} else {
 			dcp_stats[serverAddr] = stats_map

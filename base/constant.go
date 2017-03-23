@@ -329,9 +329,6 @@ var FORCE_ACCEPT_WITH_META_OPS uint32 = 0x02
 // read/write timeout for helo command to memcached
 var HELOTimeout time.Duration = time.Duration(120) * time.Second
 
-// memcached client will be reset if it encounters the following number of consecutive errors
-var MaxMemClientErrorCount = 3
-
 // minimum versions where various features are supported
 var VersionForSSLOverMemSupport = []int{3, 0}
 var VersionForSANInCertificateSupport = []int{4, 0}

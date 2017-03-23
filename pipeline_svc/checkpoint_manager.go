@@ -391,53 +391,50 @@ func (ckmgr *CheckpointManager) getHighSeqnoAndVBUuidFromTarget() map[uint16][]u
 }
 
 // checkpointing cannot be done without high seqno and vbuuid from target
-// if retrival of such stats fails, retry
+// if retrieval of such stats fails, retry
 func (ckmgr *CheckpointManager) getHighSeqnoAndVBUuidForServerWithRetry(serverAddr string, vbnos []uint16, high_seqno_and_vbuuid_map map[uint16][]uint64) {
 	retry := 0
-	err_count := 0
 	// base wait time
 	wait_time := WaitBetweenRetryTargetStats
 
+	var stats_map map[string]string
+	var err error
+
 	for {
-		client := ckmgr.kv_mem_clients[serverAddr]
-		if client != nil {
-			stats_map, err := client.StatsMap(base.VBUCKET_SEQNO_STAT_NAME)
-			if err == nil {
-				utils.ParseHighSeqnoAndVBUuidFromStats(vbnos, stats_map, high_seqno_and_vbuuid_map)
-				break
-			} else {
-				ckmgr.logger.Warnf("%v Error getting vbucket-seqno stats for serverAddr=%v. vbnos=%v, err=%v", ckmgr.pipeline.Topic(), serverAddr, vbnos, err)
-
-				err_count++
-				if err_count >= base.MaxMemClientErrorCount {
-					err = client.Close()
-					if err != nil {
-						ckmgr.logger.Warnf("%v error from closing connection for %v is %v\n", ckmgr.pipeline.Topic(), serverAddr, err)
-					}
-
-					new_client, err := ckmgr.getNewMemcachedClient(serverAddr)
-					if err == nil {
-						ckmgr.kv_mem_clients[serverAddr] = new_client
-						err_count = 0
-					}
-				}
-
-				if retry >= MaxRetryTargetStats {
-					ckmgr.logger.Warnf("%v Retrieval of high seqno and vbuuid stats failed after %v retries. serverAddr=%v, vbnos=%v\n", ckmgr.pipeline.Topic(), retry, serverAddr, vbnos)
-					break
-				}
-
-				retry++
-
-				time.Sleep(wait_time)
-				// exponential backoff
-				wait_time *= 2
+		client, ok := ckmgr.kv_mem_clients[serverAddr]
+		if !ok {
+			// memcached connection may have been closed in previous retries. create a new one
+			client, err = ckmgr.getNewMemcachedClient(serverAddr)
+			if err != nil {
+				ckmgr.logger.Warnf("%v failed to construct memcached client for %v, err=%v\n", ckmgr.pipeline.Topic(), serverAddr, err)
+				goto Retry
 			}
+			ckmgr.kv_mem_clients[serverAddr] = client
+		}
+		stats_map, err = client.StatsMap(base.VBUCKET_SEQNO_STAT_NAME)
+		if err == nil {
+			utils.ParseHighSeqnoAndVBUuidFromStats(vbnos, stats_map, high_seqno_and_vbuuid_map)
+			break
 		} else {
-			// just in case that client connections have been closed and released prior
-			ckmgr.logger.Warnf("%v cannot find memcached client for %v", ckmgr.pipeline.Topic(), serverAddr)
+			ckmgr.logger.Warnf("%v Error getting vbucket-seqno stats for serverAddr=%v. vbnos=%v, err=%v", ckmgr.pipeline.Topic(), serverAddr, vbnos, err)
+			err = client.Close()
+			if err != nil {
+				ckmgr.logger.Warnf("%v error from closing connection for %v is %v\n", ckmgr.pipeline.Topic(), serverAddr, err)
+			}
+			delete(ckmgr.kv_mem_clients, serverAddr)
+		}
+
+	Retry:
+		if retry >= MaxRetryTargetStats {
+			ckmgr.logger.Warnf("%v Retrieval of high seqno and vbuuid stats failed after %v retries. serverAddr=%v, vbnos=%v\n", ckmgr.pipeline.Topic(), retry, serverAddr, vbnos)
 			break
 		}
+
+		retry++
+
+		time.Sleep(wait_time)
+		// exponential backoff
+		wait_time *= 2
 	}
 }
 
