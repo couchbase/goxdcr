@@ -23,6 +23,8 @@ type MCRequest struct {
 	VBucket uint16
 	// Command extras, key, and body
 	Extras, Key, Body, ExtMeta []byte
+	// Datatype identifier
+	DataType uint8
 }
 
 // Size gives the number of bytes this request requires.
@@ -50,7 +52,10 @@ func (req *MCRequest) fillHeaderBytes(data []byte) int {
 	// 4
 	data[pos] = byte(len(req.Extras))
 	pos++
-	// data[pos] = 0
+	// Data type
+	if req.DataType != 0 {
+		data[pos] = byte(req.DataType)
+	}
 	pos++
 	binary.BigEndian.PutUint16(data[pos:pos+2], req.VBucket)
 	pos += 2
@@ -79,6 +84,7 @@ func (req *MCRequest) fillHeaderBytes(data []byte) int {
 		copy(data[pos:pos+len(req.Key)], req.Key)
 		pos += len(req.Key)
 	}
+
 	return pos
 }
 
@@ -143,6 +149,8 @@ func (req *MCRequest) Receive(r io.Reader, hdrBytes []byte) (int, error) {
 
 	klen := int(binary.BigEndian.Uint16(hdrBytes[2:]))
 	elen := int(hdrBytes[4])
+	// Data type at 5
+	req.DataType = uint8(hdrBytes[5])
 
 	req.Opcode = CommandCode(hdrBytes[1])
 	// Vbucket at 6:7

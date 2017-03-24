@@ -21,6 +21,8 @@ type MCResponse struct {
 	Extras, Key, Body []byte
 	// If true, this represents a fatal condition and we should hang up
 	Fatal bool
+	// Datatype identifier
+	DataType uint8
 }
 
 // A debugging string representation of this response
@@ -78,7 +80,12 @@ func (res *MCResponse) fillHeaderBytes(data []byte) int {
 	// 4
 	data[pos] = byte(len(res.Extras))
 	pos++
-	data[pos] = 0
+	// Data type
+	if res.DataType != 0 {
+		data[pos] = byte(res.DataType)
+	} else {
+		data[pos] = 0
+	}
 	pos++
 	binary.BigEndian.PutUint16(data[pos:pos+2], uint16(res.Status))
 	pos += 2
@@ -165,6 +172,7 @@ func (res *MCResponse) Receive(r io.Reader, hdrBytes []byte) (n int, err error) 
 	elen := int(hdrBytes[4])
 
 	res.Opcode = CommandCode(hdrBytes[1])
+	res.DataType = uint8(hdrBytes[5])
 	res.Status = Status(binary.BigEndian.Uint16(hdrBytes[6:8]))
 	res.Opaque = binary.BigEndian.Uint32(hdrBytes[12:16])
 	res.Cas = binary.BigEndian.Uint64(hdrBytes[16:24])
