@@ -47,7 +47,6 @@ const (
 	default_upload_window_size       int           = 3 // erlang xdcr value
 	default_selfMonitorInterval_capi time.Duration = 300 * time.Millisecond
 	default_maxIdleCount_capi        int           = 30
-	default_write_to_part_ch_timeout time.Duration = 10 * time.Second
 )
 
 var capi_setting_defs base.SettingDefinitions = base.SettingDefinitions{SETTING_BATCHCOUNT: base.NewSettingDef(reflect.TypeOf((*int)(nil)), true),
@@ -639,7 +638,7 @@ func (capi *CapiNozzle) batchGetMeta(vbno uint16, bigDoc_map map[string]*base.Wr
 	bigDoc_rep_map, ok := out.(map[string]interface{})
 	capi.Logger().Debugf("%v bigDoc_rep_map=%v\n", capi.Id(), bigDoc_rep_map)
 	if !ok {
-		return nil, errors.New(fmt.Sprintf("Error parsing return value from _revs_diff query for vbucket %v", vbno))
+		return nil, errors.New(fmt.Sprintf("Error parsing return value from _revs_diff query for vbucket %v. bigDoc_rep_map=%v", vbno, bigDoc_rep_map))
 	}
 
 	// bigDoc_noRep_map = doc_map - bigDoc_rep_map
@@ -950,7 +949,7 @@ func (capi *CapiNozzle) writeDocs(vbno uint16, req_bytes []byte, doc_list [][]by
 
 // use timeout to give it a chance to detect nozzle stop event and abort
 func (capi *CapiNozzle) writeToPartCh(part_ch chan []byte, data []byte) bool {
-	timeoutticker := time.NewTicker(default_write_to_part_ch_timeout)
+	timeoutticker := time.NewTicker(capi.config.writeTimeout)
 	defer timeoutticker.Stop()
 	for {
 		select {
