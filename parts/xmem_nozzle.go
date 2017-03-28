@@ -1663,8 +1663,14 @@ func (xmem *XmemNozzle) initializeConnection() (err error) {
 		xmem.config.maxRetry, xmem.config.max_read_downtime, xmem.Logger())
 
 	// send helo command to setMeta and getMeta clients
-	xmem.sendHELO(true /*setMeta*/)
-	xmem.sendHELO(false /*setMeta */)
+	err = xmem.sendHELO(true /*setMeta*/)
+	if err != nil {
+		return
+	}
+	err = xmem.sendHELO(false /*setMeta */)
+	if err != nil {
+		return
+	}
 
 	xmem.Logger().Infof("%v done with initializeConnection.", xmem.Id())
 	return err
@@ -2185,11 +2191,11 @@ func (xmem *XmemNozzle) optimisticRep(req *mc.MCRequest) bool {
 }
 
 // ignore errors around HELO command since they are not critical to replication
-func (xmem *XmemNozzle) sendHELO(setMeta bool) {
+func (xmem *XmemNozzle) sendHELO(setMeta bool) error {
 	if setMeta {
-		utils.SendHELO(xmem.client_for_setMeta.getMemClient(), xmem.setMetaUserAgent, xmem.config.readTimeout, xmem.config.writeTimeout, xmem.Logger())
+		return utils.SendHELO(xmem.client_for_setMeta.getMemClient(), xmem.setMetaUserAgent, xmem.config.readTimeout, xmem.config.writeTimeout, xmem.Logger())
 	} else {
-		utils.SendHELO(xmem.client_for_getMeta.getMemClient(), xmem.getMetaUserAgent, xmem.config.readTimeout, xmem.config.writeTimeout, xmem.Logger())
+		return utils.SendHELO(xmem.client_for_getMeta.getMemClient(), xmem.getMetaUserAgent, xmem.config.readTimeout, xmem.config.writeTimeout, xmem.Logger())
 	}
 }
 
@@ -2341,10 +2347,20 @@ func (xmem *XmemNozzle) repairConn(client *xmemClient, reason string, rev int) e
 	repaired := client.repairConn(memClient, rev, xmem.Id(), xmem.finish_ch)
 	if repaired {
 		if client == xmem.client_for_setMeta {
-			xmem.sendHELO(true /*setMeta*/)
+			err = xmem.sendHELO(true /*setMeta*/)
+			if err != nil {
+				xmem.handleGeneralError(err)
+				xmem.Logger().Errorf("%v - Failed to repair connections for %v. err=%v\n", xmem.Id(), client.name, err)
+				return err
+			}
 			go xmem.onSetMetaConnRepaired()
 		} else {
-			xmem.sendHELO(false /*setMeta*/)
+			err = xmem.sendHELO(false /*setMeta*/)
+			if err != nil {
+				xmem.handleGeneralError(err)
+				xmem.Logger().Errorf("%v - Failed to repair connections for %v. err=%v\n", xmem.Id(), client.name, err)
+				return err
+			}
 		}
 		xmem.Logger().Infof("%v - The connection for %v has been repaired\n", xmem.Id(), client.name)
 	}
