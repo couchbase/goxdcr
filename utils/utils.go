@@ -361,32 +361,41 @@ func GetMemcachedConnection(serverAddr, bucketName string, userAgent string, log
 		return nil, err
 	}
 
-	SendHELO(conn, userAgent, base.HELOTimeout, base.HELOTimeout, logger)
+	err = SendHELO(conn, userAgent, base.HELOTimeout, base.HELOTimeout, logger)
+	if err != nil {
+		return nil, err
+	}
 
 	return conn, nil
 }
 
 // send helo with specified user agent string to memcached
-func SendHELO(client *mcc.Client, userAgent string, readTimeout, writeTimeout time.Duration, logger *log.CommonLogger) {
+func SendHELO(client *mcc.Client, userAgent string, readTimeout, writeTimeout time.Duration, logger *log.CommonLogger) error {
 	helo := ComposeHELORequest(userAgent)
 
 	conn := client.Hijack()
 	conn.(net.Conn).SetWriteDeadline(time.Now().Add(writeTimeout))
 	_, err := conn.Write(helo.Bytes())
+	conn.(net.Conn).SetWriteDeadline(time.Time{})
 	if err != nil {
 		logger.Errorf("Error sending HELO command. userAgent=%v, err=%v.", userAgent, err)
-		return
+		return err
 	}
 
 	conn.(net.Conn).SetReadDeadline(time.Now().Add(readTimeout))
 	response, err := client.Receive()
+	conn.(net.Conn).SetReadDeadline(time.Time{})
 	if err != nil {
 		logger.Errorf("Received error response from HELO command. userAgent=%v, err=%v.", userAgent, err)
-	} else if response.Status != mc.SUCCESS {
-		logger.Errorf("Received unexpected response from HELO command. userAgent=%v, response status=%v.", userAgent, response.Status)
+		return err
 	} else {
-		logger.Infof("Successfully sent HELO command with userAgent=%v", userAgent)
+		if response.Status != mc.SUCCESS {
+			logger.Infof("Received unexpected response from HELO command. userAgent=%v, response status=%v.", userAgent, response.Status)
+		} else {
+			logger.Infof("Successfully sent HELO command with userAgent=%v", userAgent)
+		}
 	}
+	return nil
 }
 
 // compose a HELO command with specified user agent string
