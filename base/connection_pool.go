@@ -266,6 +266,7 @@ func (p *sslOverProxyConnPool) newConn() (*mcc.Client, error) {
 	//encode json
 	msg, err := json.Marshal(handshake_msg)
 	if err != nil {
+		conn.Close()
 		return nil, err
 	}
 	msgBytes := encodeSSLHandShakeMsg(msg)
@@ -281,10 +282,12 @@ func (p *sslOverProxyConnPool) newConn() (*mcc.Client, error) {
 	_, err = io.ReadFull(conn, sizeBytes)
 	if err != nil {
 		ConnPoolMgr().logger.Errorf("Failed to read response to handshake message. err=%v\n", err)
+		conn.Close()
 		return nil, err
 	}
 	size := binary.BigEndian.Uint32(sizeBytes)
 	if size > MAX_PAYLOAD_SIZE {
+		conn.Close()
 		return nil, errors.New("Failed to establish ssl connection - reply is invalid")
 	}
 	ConnPoolMgr().logger.Infof("payload size = %v\n", size)
@@ -292,12 +295,14 @@ func (p *sslOverProxyConnPool) newConn() (*mcc.Client, error) {
 	_, err = io.ReadFull(conn, ackBytes)
 	if err != nil {
 		ConnPoolMgr().logger.Errorf("Failed to read ack. err=%v\n", err)
+		conn.Close()
 		return nil, err
 	}
 
 	ack_map := make(map[string]interface{})
 	err = json.Unmarshal(ackBytes, &ack_map)
 	if err != nil {
+		conn.Close()
 		return nil, err
 	}
 
@@ -305,6 +310,7 @@ func (p *sslOverProxyConnPool) newConn() (*mcc.Client, error) {
 
 	type_str, ok := ack_map["type"].(string)
 	if !ok || type_str != "ok" {
+		conn.Close()
 		return nil, errors.New("Failed to establish ssl connection")
 	}
 
@@ -791,6 +797,7 @@ func MakeTLSConn(ssl_con_str string, certificate []byte, check_server_name bool,
 
 	if err != nil {
 		logger.Errorf("TLS handshake failed when connecting to %v, err=%v\n", ssl_con_str, err)
+		conn.Close()
 		return nil, nil, err
 	}
 
