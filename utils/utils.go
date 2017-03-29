@@ -387,11 +387,13 @@ func GetMemcachedConnection(serverAddr, bucketName string, userAgent string, pla
 
 	_, err = conn.SelectBucket(bucketName)
 	if err != nil {
+		conn.Close()
 		return nil, err
 	}
 
 	err = SendHELO(conn, userAgent, base.HELOTimeout, base.HELOTimeout, logger)
 	if err != nil {
+		conn.Close()
 		return nil, err
 	}
 
@@ -406,6 +408,7 @@ func GetRemoteMemcachedConnection(serverAddr, username string, password string, 
 
 	err = SendHELO(conn, userAgent, base.HELOTimeout, base.HELOTimeout, logger)
 	if err != nil {
+		conn.Close()
 		return nil, err
 	}
 

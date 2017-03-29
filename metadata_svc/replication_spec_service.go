@@ -263,9 +263,12 @@ func (service *ReplicationSpecService) ValidateNewReplicationSpec(sourceBucket, 
 			break
 		}
 
-		_, err = utils.GetRemoteMemcachedConnection(kvConnStr, targetBucket, targetBucketPassword,
+		client, err := utils.GetRemoteMemcachedConnection(kvConnStr, targetBucket, targetBucketPassword,
 			simple_utils.ComposeUserAgentWithBucketNames("Goxdcr ReplSpecSvc", sourceBucket, targetBucket),
 			false /*plainAuth*/, service.logger)
+		if client != nil {
+			client.Close()
+		}
 		if err != nil {
 			errorMap[base.ToCluster] = fmt.Errorf("Cluster does not support SCRAM-SHA authentication. err=%v", err)
 			return "", "", nil, errorMap
