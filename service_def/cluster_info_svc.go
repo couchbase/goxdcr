@@ -14,6 +14,7 @@ import (
 )
 
 type ClusterInfoSvc interface {
-	GetServerVBucketsMap(clusterConnInfoProvider base.ClusterConnectionInfoProvider, Bucket string) (map[string][]uint16, error)
+	// This API should be called on source cluster only
+	GetLocalServerVBucketsMap(clusterConnInfoProvider base.ClusterConnectionInfoProvider, Bucket string) (map[string][]uint16, error)
 	IsClusterCompatible(clusterConnInfoProvider base.ClusterConnectionInfoProvider, version []int) (bool, error)
 }
