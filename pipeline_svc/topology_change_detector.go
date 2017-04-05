@@ -419,7 +419,7 @@ func (top_detect_svc *TopologyChangeDetectorSvc) getTargetBucketInfo() (int, map
 		return 0, nil, err
 	}
 
-	connStr, err := targetClusterRef.MyConnectionStr()
+	connStr, err := top_detect_svc.remote_cluster_svc.GetConnectionStringForRemoteCluster(targetClusterRef, top_detect_svc.capi)
 	if err != nil {
 		return 0, nil, err
 	}

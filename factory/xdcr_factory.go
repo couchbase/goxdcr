@@ -98,11 +98,19 @@ func (xdcrf *XDCRFactory) NewPipeline(topic string, progress_recorder common.Pip
 		return nil, err
 	}
 
-	username, password, certificate, sanInCertificate, err := targetClusterRef.MyCredentials()
+	nozzleType, err := xdcrf.getOutNozzleType(targetClusterRef, spec)
+	if err != nil {
+		xdcrf.logger.Errorf("Failed to get the nozzle type for %v, err=%v\n", spec.Id, err)
+		return nil, err
+	}
+	isCapiReplication := (nozzleType == base.Capi)
+
+	connStr, err := xdcrf.remote_cluster_svc.GetConnectionStringForRemoteCluster(targetClusterRef, isCapiReplication)
 	if err != nil {
 		return nil, err
 	}
-	connStr, err := targetClusterRef.MyConnectionStr()
+
+	username, password, certificate, sanInCertificate, err := targetClusterRef.MyCredentials()
 	if err != nil {
 		return nil, err
 	}

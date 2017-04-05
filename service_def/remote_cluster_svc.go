@@ -27,6 +27,14 @@ type RemoteClusterSvc interface {
 	DelRemoteCluster(refName string) (*metadata.RemoteClusterReference, error)
 	RemoteClusters(refresh bool) (map[string]*metadata.RemoteClusterReference, error)
 
+	// get connection string for specified remote cluster
+	// when isCapiReplication is false, return ref.activeHostName, which is rotated among target nodes for load balancing
+	// when isCapiReplication is true, return the lexicographically smallest hostname in hostname list of ref,
+	// so as to ensure that the same hostname is returned consistently
+	// this is critical when the connection string returned will be used to retrieve target server vb map
+	// otherwise different server vb maps may be returned by target due to an issue in elastic search plugin
+	GetConnectionStringForRemoteCluster(ref *metadata.RemoteClusterReference, isCapiReplication bool) (string, error)
+
 	// used by auditing and ui logging
 	GetRemoteClusterNameFromClusterUuid(uuid string) string
 

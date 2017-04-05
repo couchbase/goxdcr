@@ -36,7 +36,7 @@ func GetSourceVBMap(cluster_info_svc service_def.ClusterInfoSvc, xdcr_topology_s
 	sourceBucketName string, logger *log.CommonLogger) (map[string][]uint16, error) {
 	kv_vb_map := make(map[string][]uint16)
 
-	server_vbmap, err := cluster_info_svc.GetServerVBucketsMap(xdcr_topology_svc, sourceBucketName)
+	server_vbmap, err := cluster_info_svc.GetLocalServerVBucketsMap(xdcr_topology_svc, sourceBucketName)
 	if err != nil {
 		return nil, err
 	}

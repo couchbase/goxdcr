@@ -41,7 +41,7 @@ func (ci_svc *ClusterInfoSvc) getBucketInfo(clusterConnInfoProvider base.Cluster
 	return connStr, bucketInfo, err
 }
 
-func (ci_svc *ClusterInfoSvc) GetServerVBucketsMap(clusterConnInfoProvider base.ClusterConnectionInfoProvider, bucketName string) (map[string][]uint16, error) {
+func (ci_svc *ClusterInfoSvc) GetLocalServerVBucketsMap(clusterConnInfoProvider base.ClusterConnectionInfoProvider, bucketName string) (map[string][]uint16, error) {
 	connStr, bucketInfo, err := ci_svc.getBucketInfo(clusterConnInfoProvider, bucketName)
 	if err != nil {
 		return nil, err

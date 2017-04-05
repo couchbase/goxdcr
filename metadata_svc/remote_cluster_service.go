@@ -23,6 +23,7 @@ import (
 	"math/rand"
 	"net/http"
 	"reflect"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -942,4 +943,30 @@ func (service *RemoteClusterService) getHttpsAddrFromMap(hostName string) (strin
 		service.httpsAddrMap[hostName] = httpsHostName
 	}
 	return httpsHostName, nil
+}
+
+func (service *RemoteClusterService) GetConnectionStringForRemoteCluster(ref *metadata.RemoteClusterReference, isCapiReplication bool) (string, error) {
+	if !isCapiReplication {
+		// for xmem replication, return ref.activeHostName, which is rotated among target nodes for load balancing
+		return ref.MyConnectionStr()
+	} else {
+		// for capi replication, return the lexicographically smallest hostname in hostname list of ref
+		// this ensures that the same hostname is returned consistently (in lieu of hostname changes, which is very rare,
+		// and target topology changes, which require replication restart anyway)
+		// otherwise target may return different server vb maps due to an issue in elastic search plugin
+		// and cause unnecessary replication restart
+		ref_cache, _ := service.getCacheVal(ref.Id)
+		if ref_cache == nil {
+			service.logger.Warnf("Error retrieving ref %v from cache. It may have been deleted by others\n", ref.Id)
+			return "", service_def.MetadataNotFoundErr
+		}
+		if len(ref_cache.nodes_connectionstr) == 0 {
+			// if host name list is empty, which could be the case when goxdcr process is first started
+			// fall back to using ref.activeHostName
+			return ref.MyConnectionStr()
+		}
+		sort.Strings(ref_cache.nodes_connectionstr)
+		// capi replication is always non-ssl type, there is no need to construct https addr
+		return ref_cache.nodes_connectionstr[0], nil
+	}
 }
