@@ -1571,9 +1571,14 @@ func (xmem *XmemNozzle) sendSingleSetMeta(adjustRequest bool, item *base.Wrapped
 	return nil
 }
 
-func (xmem *XmemNozzle) getConnPool() (pool base.ConnPool, err error) {
+func (xmem *XmemNozzle) getConnPool() (base.ConnPool, error) {
 	poolName := xmem.getPoolName()
-	return base.ConnPoolMgr().GetPool(poolName), nil
+	pool := base.ConnPoolMgr().GetPool(poolName)
+	if pool != nil {
+		return pool, nil
+	} else {
+		return nil, fmt.Errorf("%v cannot find connection pool with name %v", xmem.Id(), poolName)
+	}
 }
 
 func (xmem *XmemNozzle) getOrCreateConnPool() (pool base.ConnPool, err error) {
