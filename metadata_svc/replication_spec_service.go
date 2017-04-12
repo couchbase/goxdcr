@@ -164,7 +164,7 @@ func (service *ReplicationSpecService) ValidateNewReplicationSpec(sourceBucket, 
 	var err_source error
 	start_time := time.Now()
 
-	sourceBucketType, sourceBucketUUID, sourceConflictResolutionType, sourceEvictionPolicy, _, _, _, err_source := utils.BucketValidationInfo(local_connStr, sourceBucket, "", "", nil, false, service.logger)
+	_, sourceBucketType, sourceBucketUUID, sourceConflictResolutionType, sourceEvictionPolicy, _, _, err_source := utils.BucketValidationInfo(local_connStr, sourceBucket, "", "", nil, false, service.logger)
 	service.logger.Infof("Result from local bucket look up: bucketName=%v, err_source=%v, time taken=%v\n", sourceBucket, err_source, time.Since(start_time))
 	service.validateBucket(sourceBucket, targetCluster, targetBucket, sourceBucketType, sourceEvictionPolicy, err_source, errorMap, true)
 
@@ -212,7 +212,7 @@ func (service *ReplicationSpecService) ValidateNewReplicationSpec(sourceBucket, 
 
 	//validate target bucket
 	start_time = time.Now()
-	targetBucketType, targetBucketUUID, targetConflictResolutionType, _, targetBucketPassword, targetKVVBMap, targetClusterCompatibility, err_target := utils.BucketValidationInfo(remote_connStr, targetBucket, remote_userName, remote_password, certificate, sanInCertificate, service.logger)
+	targetBucketInfo, targetBucketType, targetBucketUUID, targetConflictResolutionType, _, targetBucketPassword, targetKVVBMap, err_target := utils.BucketValidationInfo(remote_connStr, targetBucket, remote_userName, remote_password, certificate, sanInCertificate, service.logger)
 	service.logger.Infof("Result from remote bucket look up: connStr=%v, bucketName=%v, err_target=%v, time taken=%v\n", remote_connStr, targetBucket, err_target, time.Since(start_time))
 	service.validateBucket(sourceBucket, targetCluster, targetBucket, targetBucketType, "", err_target, errorMap, false)
 
@@ -233,49 +233,55 @@ func (service *ReplicationSpecService) ValidateNewReplicationSpec(sourceBucket, 
 		return "", "", nil, errorMap
 	}
 
-	// if replication type is set to xmem, validate that the target cluster is xmem compatible
 	repl_type, ok := settings[metadata.ReplicationType]
 	if !ok || repl_type == metadata.ReplicationTypeXmem {
+		targetClusterCompatibility, err := utils.GetClusterCompatibilityFromBucketInfo(targetBucket, targetBucketInfo, service.logger)
+		if err != nil {
+			errorMap[base.ToCluster] = fmt.Errorf("Error retrieving cluster compatibility on bucket %v. err=%v", targetBucket, err)
+			return "", "", nil, errorMap
+		}
+
+		// validate that the target cluster is xmem compatible
 		xmemCompatible := simple_utils.IsClusterCompatible(targetClusterCompatibility, base.VersionForXmemSupport)
 		if !xmemCompatible {
 			errorMap[base.ToCluster] = errors.New("Version 2 replication is disallowed. Cluster has nodes with versions less than 2.2.")
 			return "", "", nil, errorMap
 		}
-	}
 
-	if targetClusterRef.IsEncryptionEnabled() && !targetClusterRef.IsFullEncryption() {
-		// for half-ssl ref, validate that target memcached supports SCRAM-SHA authentication
-		if len(targetKVVBMap) == 0 {
-			errorMap[base.ToCluster] = errors.New("kv vb map is empty")
-			return "", "", nil, errorMap
-		}
-		// pick the first kv in kvVBMap to use
-		var kvConnStr string
-		for kvaddr, _ := range targetKVVBMap {
-			kvConnStr = kvaddr
-			break
-		}
+		if targetClusterRef.IsEncryptionEnabled() && !targetClusterRef.IsFullEncryption() {
+			// for half-ssl ref, validate that target memcached supports SCRAM-SHA authentication
+			if len(targetKVVBMap) == 0 {
+				errorMap[base.ToCluster] = errors.New("kv vb map is empty")
+				return "", "", nil, errorMap
+			}
+			// pick the first kv in kvVBMap to use
+			var kvConnStr string
+			for kvaddr, _ := range targetKVVBMap {
+				kvConnStr = kvaddr
+				break
+			}
 
-		hasRBACSupport := simple_utils.IsClusterCompatible(targetClusterCompatibility, base.VersionForRBACSupport)
+			hasRBACSupport := simple_utils.IsClusterCompatible(targetClusterCompatibility, base.VersionForRBACSupport)
 
-		var username, password string
-		if hasRBACSupport {
-			username = targetClusterRef.UserName
-			password = targetClusterRef.Password
-		} else {
-			username = targetBucket
-			password = targetBucketPassword
-		}
+			var username, password string
+			if hasRBACSupport {
+				username = targetClusterRef.UserName
+				password = targetClusterRef.Password
+			} else {
+				username = targetBucket
+				password = targetBucketPassword
+			}
 
-		client, err := utils.GetRemoteMemcachedConnection(kvConnStr, username, password, targetBucket,
-			simple_utils.ComposeUserAgentWithBucketNames("Goxdcr ReplSpecSvc", sourceBucket, targetBucket),
-			false /*plainAuth*/, service.logger)
-		if client != nil {
-			client.Close()
-		}
-		if err != nil {
-			errorMap[base.ToCluster] = fmt.Errorf("Error verifying SCRAM-SHA authentication support. err=%v", err)
-			return "", "", nil, errorMap
+			client, err := utils.GetRemoteMemcachedConnection(kvConnStr, username, password, targetBucket,
+				simple_utils.ComposeUserAgentWithBucketNames("Goxdcr ReplSpecSvc", sourceBucket, targetBucket),
+				false /*plainAuth*/, service.logger)
+			if client != nil {
+				client.Close()
+			}
+			if err != nil {
+				errorMap[base.ToCluster] = fmt.Errorf("Error verifying SCRAM-SHA authentication support. err=%v", err)
+				return "", "", nil, errorMap
+			}
 		}
 	}
 

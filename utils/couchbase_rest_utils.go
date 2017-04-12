@@ -253,12 +253,10 @@ func BucketPassword(hostAddr, bucketName, username, password string, certificate
 // 4. bucket eviction policy
 // 5. bucket password
 // 6. bucket server vb map
-// 7. cluster compatibility
 func BucketValidationInfo(hostAddr, bucketName, username, password string, certificate []byte, sanInCertificate bool,
-	logger *log.CommonLogger) (bucketType string, bucketUUID string, bucketConflictResolutionType string,
-	bucketEvictionPolicy string, bucketPassword string, bucketKVVBMap map[string][]uint16,
-	clusterCompatibility int, err error) {
-	bucketInfo, err := GetBucketInfo(hostAddr, bucketName, username, password, certificate, sanInCertificate, logger)
+	logger *log.CommonLogger) (bucketInfo map[string]interface{}, bucketType string, bucketUUID string, bucketConflictResolutionType string,
+	bucketEvictionPolicy string, bucketPassword string, bucketKVVBMap map[string][]uint16, err error) {
+	bucketInfo, err = GetBucketInfo(hostAddr, bucketName, username, password, certificate, sanInCertificate, logger)
 	if err != nil {
 		return
 	}
@@ -293,12 +291,6 @@ func BucketValidationInfo(hostAddr, bucketName, username, password string, certi
 		err = fmt.Errorf("Error retrieving server vb map on bucket %v. err=%v", bucketName, err)
 		return
 	}
-	clusterCompatibility, err = GetClusterCompatibilityFromBucketInfo(bucketName, bucketInfo, logger)
-	if err != nil {
-		err = fmt.Errorf("Error retrieving cluster compatibility on bucket %v. err=%v", bucketName, err)
-		return
-	}
-
 	return
 }
 
