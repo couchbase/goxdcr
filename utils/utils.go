@@ -384,7 +384,6 @@ func GetMemcachedConnection(serverAddr, bucketName string, userAgent string, log
 
 	conn, err := base.NewConn(serverAddr, username, password, bucketName, true /*plainAuth*/, logger)
 	if err != nil {
-		conn.Close()
 		return nil, err
 	}
 
