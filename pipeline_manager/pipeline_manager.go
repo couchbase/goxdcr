@@ -117,18 +117,14 @@ func RemoveReplicationStatus(topic string) error {
 		return err
 	}
 
-	//ask the updater on this topic if any to stop
-	stopUpdater(topic)
-	rs.ResetStorage()
-	rs.SetUpdater(nil)
-
-	// stop replication
+	// run update to ensure that stopPipeline() is called and pipeline is stopped
 	pipeline_mgr.logger.Infof("Stopping pipeline %v since the replication spec has been deleted\n", topic)
-	err = pipeline_mgr.stopPipeline(rs)
+	err = pipeline_mgr.update(topic, errors.New("Replication spec has been deleted"))
 	if err != nil {
-		pipeline_mgr.logger.Infof("Stopping pipeline %v failed with err = %v\n", topic, err)
+		pipeline_mgr.logger.Warnf("The attempt to stop pipeline %v failed with err = %v\n", topic, err)
 	}
 
+	rs.ResetStorage()
 	pipeline_mgr.repl_spec_svc.SetDerivedObj(topic, nil)
 
 	return nil
@@ -224,7 +220,7 @@ func CheckPipelines() {
 		//validate replication spec
 		spec := rep_status.Spec()
 		if spec != nil {
-		pipeline_mgr.logger.Infof("checkpipeline spec=%v, uuid=%v", spec, spec.SourceBucketUUID)
+			pipeline_mgr.logger.Infof("checkpipeline spec=%v, uuid=%v", spec, spec.SourceBucketUUID)
 			pipeline_mgr.repl_spec_svc.ValidateAndGC(spec)
 		}
 		if rep_status.RuntimeStatus(true) == pipeline.Pending {
@@ -495,20 +491,32 @@ func (pipelineMgr *pipelineManager) update(topic string, cur_err error) error {
 		pipelineMgr.repl_spec_svc.SetDerivedObj(topic, rep_status)
 		pipelineMgr.logger.Infof("ReplicationStatus is created and set with %v\n", topic)
 	}
-	updaterObj := rep_status.Updater()
-	if updaterObj == nil {
-		return pipelineMgr.launchUpdater(topic, cur_err, rep_status)
-	} else {
-		updater := updaterObj.(*pipelineUpdater)
-		if cur_err == nil {
-			//update is not initiated by error, update the replication status
-			//trigger updater to update immediately, not to wait for the retry interval
-			updater.refreshReplicationStatus(rep_status, true)
+	for {
+		updaterObj := rep_status.Updater()
+		if updaterObj == nil {
+			return pipelineMgr.launchUpdater(topic, cur_err, rep_status)
 		} else {
-			rep_status.AddError(cur_err)
-			updater.refreshReplicationStatus(rep_status, false)
+			pipelineMgr.logger.Infof("There is already an updater launched for the replication %v, no-op", topic)
+			updater := updaterObj.(*pipelineUpdater)
+
+			// if update is not initiated by error, set updateNow to true so as to
+			// trigger updater to update immediately, not to wait for the retry interval
+			updateNow := (cur_err == nil)
+
+			if cur_err != nil {
+				rep_status.AddError(cur_err)
+			}
+
+			refreshed := updater.refreshReplicationStatus(rep_status, updateNow)
+			if refreshed {
+				break
+			} else {
+				// if refreshReplicationStatus failed to refreshing updater, updater is already completed
+				// and the new update() request has not been carried out
+				// loop back to ensure that update() is actually performed
+				time.Sleep(base.RetryIntervalForPipelineUpdaterRefresh)
+			}
 		}
-		pipelineMgr.logger.Infof("There is already an updater launched for the replication %v, no-op", topic)
 	}
 	return nil
 
@@ -701,9 +709,14 @@ func (r *pipelineUpdater) stop() {
 	<-r.done_ch
 }
 
-func (r *pipelineUpdater) refreshReplicationStatus(rep_status *pipeline.ReplicationStatus, updateNow bool) {
+func (r *pipelineUpdater) refreshReplicationStatus(rep_status *pipeline.ReplicationStatus, updateNow bool) bool {
 	r.state_lock.Lock()
 	defer r.state_lock.Unlock()
+
+	if r.state == Updater_Done {
+		r.logger.Infof("Cannot refresh status for updater for %v since it is already done\n", r.pipeline_name)
+		return false
+	}
 
 	r.rep_status = rep_status
 	r.state = Updater_Initialized
@@ -715,6 +728,7 @@ func (r *pipelineUpdater) refreshReplicationStatus(rep_status *pipeline.Replicat
 		}
 	}
 	r.logger.Infof("Replication status is updated, current status=%v\n", rep_status)
+	return true
 }
 
 func (r *pipelineUpdater) updateState(new_state pipelineUpdaterState) error {

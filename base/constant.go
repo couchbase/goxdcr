@@ -153,7 +153,7 @@ const (
 	RemoteClusterUserName         = "username"
 	RemoteClusterPassword         = "password"
 	RemoteClusterDemandEncryption = "demandEncryption"
-	RemoteClusterEncryptionType = "encryptionType"
+	RemoteClusterEncryptionType   = "encryptionType"
 	RemoteClusterCertificate      = "certificate"
 	RemoteClusterUri              = "uri"
 	RemoteClusterValidateUri      = "validateURI"
@@ -342,6 +342,8 @@ var VersionForRBACSupport = []int{5, 0}
 
 var GoxdcrUserAgentPrefix = "couchbase-goxdcr"
 var GoxdcrUserAgent = ""
+
+var RetryIntervalForPipelineUpdaterRefresh = 100 * time.Millisecond
 
 // --------------- Constants that are configurable -----------------
 
