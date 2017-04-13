@@ -251,11 +251,10 @@ func BucketPassword(hostAddr, bucketName, username, password string, certificate
 // 2. bucket uuid
 // 3. bucket conflict resolution type
 // 4. bucket eviction policy
-// 5. bucket password
 // 6. bucket server vb map
 func BucketValidationInfo(hostAddr, bucketName, username, password string, certificate []byte, sanInCertificate bool,
 	logger *log.CommonLogger) (bucketInfo map[string]interface{}, bucketType string, bucketUUID string, bucketConflictResolutionType string,
-	bucketEvictionPolicy string, bucketPassword string, bucketKVVBMap map[string][]uint16, err error) {
+	bucketEvictionPolicy string, bucketKVVBMap map[string][]uint16, err error) {
 	bucketInfo, err = GetBucketInfo(hostAddr, bucketName, username, password, certificate, sanInCertificate, logger)
 	if err != nil {
 		return
@@ -279,11 +278,6 @@ func BucketValidationInfo(hostAddr, bucketName, username, password string, certi
 	bucketEvictionPolicy, err = GetEvictionPolicyFromBucketInfo(bucketName, bucketInfo)
 	if err != nil {
 		err = fmt.Errorf("Error retrieving EvictionPolicy setting on bucket %v. err=%v", bucketName, err)
-		return
-	}
-	bucketPassword, err = GetBucketPasswordFromBucketInfo(bucketName, bucketInfo, logger)
-	if err != nil {
-		err = fmt.Errorf("Error retrieving password setting on bucket %v. err=%v", bucketName, err)
 		return
 	}
 	bucketKVVBMap, err = GetServerVBucketsMap(hostAddr, bucketName, bucketInfo)
@@ -630,13 +624,13 @@ func doRestCall(req *http.Request,
 		defer res.Body.Close()
 		bod, e := ioutil.ReadAll(io.LimitReader(res.Body, res.ContentLength))
 		if e != nil {
-			l.Errorf("Failed to read response body, err=%v\n", e)
+			l.Infof("Failed to read response body, err=%v\n req=%v\n", e, req)
 			return e, res.StatusCode
 		}
 		if out != nil {
 			err_marshal := json.Unmarshal(bod, out)
 			if err_marshal != nil {
-				l.Debugf("Failed to unmarshal the response as json, err=%v\n", err)
+				l.Infof("Failed to unmarshal the response as json, err=%v, bod=%v\n req=%v\n", err_marshal, bod, req)
 				out = bod
 			} else {
 				l.Debugf("out=%v\n", out)
