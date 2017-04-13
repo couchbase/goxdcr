@@ -177,7 +177,7 @@ func ParseHighSeqnoStat(vbnos []uint16, stats_map map[string]string, highseqno_m
 		}
 		highseqno, err := strconv.ParseUint(highseqnostr, 10, 64)
 		if err != nil {
-			logger_utils.Warnf("high seqno for vbno=%v in stats map is not a valid uint64. high seqno = %v\n", vbno, highseqnostr)
+			logger_utils.Warnf("high seqno for vbno=%v in stats map is not a valid uint64. high seqno=%v\n", vbno, highseqnostr)
 			continue
 		}
 		highseqno_map[vbno] = highseqno
@@ -195,7 +195,7 @@ func ParseHighSeqnoAndVBUuidFromStats(vbnos []uint16, stats_map map[string]strin
 		}
 		high_seqno, err := strconv.ParseUint(highseqnostr, 10, 64)
 		if err != nil {
-			logger_utils.Warnf("high seqno for vbno=%v in stats map is not a valid uint64. high seqno = %v\n", vbno, highseqnostr)
+			logger_utils.Warnf("high seqno for vbno=%v in stats map is not a valid uint64. high seqno=%v\n", vbno, highseqnostr)
 			continue
 		}
 
@@ -207,7 +207,7 @@ func ParseHighSeqnoAndVBUuidFromStats(vbnos []uint16, stats_map map[string]strin
 		}
 		vbuuid, err := strconv.ParseUint(vbuuidstr, 10, 64)
 		if err != nil {
-			logger_utils.Warnf("vbuuid for vbno=%v in stats map is not a valid uint64. vbuuid = %v\n", vbno, vbuuidstr)
+			logger_utils.Warnf("vbuuid for vbno=%v in stats map is not a valid uint64. vbuuid=%v\n", vbno, vbuuidstr)
 			continue
 		}
 
