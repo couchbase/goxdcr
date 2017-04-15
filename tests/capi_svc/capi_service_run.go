@@ -16,9 +16,9 @@ import (
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
+	"github.com/couchbase/goxdcr/metadata_svc"
 	rm "github.com/couchbase/goxdcr/replication_manager"
 	"github.com/couchbase/goxdcr/service_def"
-	"github.com/couchbase/goxdcr/metadata_svc"
 	"github.com/couchbase/goxdcr/service_impl"
 	"github.com/couchbase/goxdcr/tests/common"
 	"github.com/couchbase/goxdcr/utils"
@@ -30,10 +30,10 @@ import (
 var logger *log.CommonLogger = log.NewLogger("capi_service", log.DefaultLoggerContext)
 
 var options struct {
-	sourceKVHost string //source kv host name
-	sourceKVPort uint64 //source kv admin port
+	sourceKVHost         string //source kv host name
+	sourceKVPort         uint64 //source kv admin port
 	sslProxyUpstreamPort uint64
-	xdcrRestPort uint64
+	xdcrRestPort         uint64
 
 	username string //username
 	password string //password
@@ -45,8 +45,7 @@ var options struct {
 	remotePassword         string //remote cluster password
 	remoteDemandEncryption bool   // whether encryption is needed
 	remoteCertificateFile  string // file containing certificate for encryption
-	isEnterprise	bool
-
+	isEnterprise           bool
 }
 
 func argParse() {
@@ -126,9 +125,9 @@ func run_testcase() error {
 	if err != nil {
 		return err
 	}
-	
+
 	cluster_info_svc := service_impl.NewClusterInfoSvc(nil)
-	top_svc, err := service_impl.NewXDCRTopologySvc(uint16(options.sourceKVPort), uint16(options.xdcrRestPort), uint16(options.sslProxyUpstreamPort), options.isEnterprise, cluster_info_svc, nil)
+	top_svc, err := service_impl.NewXDCRTopologySvc(uint16(options.sourceKVPort), uint16(options.xdcrRestPort), options.isEnterprise, cluster_info_svc, nil)
 	if err != nil {
 		return err
 	}
@@ -164,7 +163,7 @@ func run_testcase() error {
 	logger.Infof("vb=%v, remote_seqno=%v, vb_uuid=%v\n", vbno, remote_seqno, vbuuid)
 
 	remoteVBUUIDs := make(map[uint16]metadata.TargetVBOpaque)
-	remoteVBUUIDs[0] =  vbuuid
+	remoteVBUUIDs[0] = vbuuid
 	err = testMassValidateVBUUIDs(capi_svc, remoteBucket, remoteVBUUIDs)
 	if err != nil {
 		return errors.New(fmt.Sprintf("testMassValidateVBUUIDs failed - err=%v", err))
@@ -274,7 +273,7 @@ func deleteRemoteCluster() error {
 		[]byte{},
 		base.MethodDelete,
 		"",
-		nil, 
+		nil,
 		2*time.Second,
 		nil,
 		nil,

@@ -27,19 +27,17 @@ var ErrorParsingServicesInfo = errors.New("Could not parse services from the res
 type XDCRTopologySvc struct {
 	adminport        uint16
 	xdcrRestPort     uint16
-	local_proxy_port uint16
 	isEnterprise     bool
 	cluster_info_svc service_def.ClusterInfoSvc
 	logger           *log.CommonLogger
 }
 
-func NewXDCRTopologySvc(adminport, xdcrRestPort, localProxyPort uint16,
+func NewXDCRTopologySvc(adminport, xdcrRestPort uint16,
 	isEnterprise bool, cluster_info_svc service_def.ClusterInfoSvc,
 	logger_ctx *log.LoggerContext) (*XDCRTopologySvc, error) {
 	top_svc := &XDCRTopologySvc{
 		adminport:        adminport,
 		xdcrRestPort:     xdcrRestPort,
-		local_proxy_port: localProxyPort,
 		isEnterprise:     isEnterprise,
 		cluster_info_svc: cluster_info_svc,
 		logger:           log.NewLogger("TopoSvc", logger_ctx),
@@ -213,10 +211,6 @@ func (top_svc *XDCRTopologySvc) MyCredentials() (string, string, []byte, bool, e
 
 	username, password, err := cbauth.GetHTTPServiceAuth(connStr)
 	return username, password, nil, false, err
-}
-
-func (top_svc *XDCRTopologySvc) MyProxyPort() (uint16, error) {
-	return top_svc.local_proxy_port, nil
 }
 
 func (top_svc *XDCRTopologySvc) MyClusterUuid() (string, error) {

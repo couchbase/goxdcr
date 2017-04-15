@@ -208,19 +208,6 @@ func (service *ReplicationSpecService) ValidateNewReplicationSpec(sourceBucket, 
 
 	repl_type, ok := settings[metadata.ReplicationType]
 	if !ok || repl_type == metadata.ReplicationTypeXmem {
-		targetClusterCompatibility, err := utils.GetClusterCompatibilityFromBucketInfo(targetBucket, targetBucketInfo, service.logger)
-		if err != nil {
-			errorMap[base.ToCluster] = fmt.Errorf("Error retrieving cluster compatibility on bucket %v. err=%v", targetBucket, err)
-			return "", "", nil, errorMap
-		}
-
-		// validate that the target cluster is xmem compatible
-		xmemCompatible := simple_utils.IsClusterCompatible(targetClusterCompatibility, base.VersionForXmemSupport)
-		if !xmemCompatible {
-			errorMap[base.ToCluster] = errors.New("Version 2 replication is disallowed. Cluster has nodes with versions less than 2.2.")
-			return "", "", nil, errorMap
-		}
-
 		if targetClusterRef.IsEncryptionEnabled() && !targetClusterRef.IsFullEncryption() {
 			// for half-ssl ref, validate that target memcached supports SCRAM-SHA authentication
 			if len(targetKVVBMap) == 0 {
@@ -232,6 +219,12 @@ func (service *ReplicationSpecService) ValidateNewReplicationSpec(sourceBucket, 
 			for kvaddr, _ := range targetKVVBMap {
 				kvConnStr = kvaddr
 				break
+			}
+
+			targetClusterCompatibility, err := utils.GetClusterCompatibilityFromBucketInfo(targetBucket, targetBucketInfo, service.logger)
+			if err != nil {
+				errorMap[base.ToCluster] = fmt.Errorf("Error retrieving cluster compatibility on bucket %v. err=%v", targetBucket, err)
+				return "", "", nil, errorMap
 			}
 
 			hasRBACSupport := simple_utils.IsClusterCompatible(targetClusterCompatibility, base.VersionForRBACAndXattrSupport)

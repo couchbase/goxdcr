@@ -44,8 +44,6 @@ const (
 	XMEM_SETTING_CERTIFICATE         = "certificate"
 	XMEM_SETTING_INSECURESKIPVERIFY  = "insecureSkipVerify"
 	XMEM_SETTING_SAN_IN_CERITICATE   = "SANInCertificate"
-	XMEM_SETTING_REMOTE_PROXY_PORT   = "remote_proxy_port"
-	XMEM_SETTING_LOCAL_PROXY_PORT    = "local_proxy_port"
 	XMEM_SETTING_REMOTE_MEM_SSL_PORT = "remote_ssl_port"
 
 	//default configuration
@@ -85,10 +83,7 @@ var xmem_setting_defs base.SettingDefinitions = base.SettingDefinitions{SETTING_
 	XMEM_SETTING_CERTIFICATE:        base.NewSettingDef(reflect.TypeOf((*[]byte)(nil)), false),
 	XMEM_SETTING_SAN_IN_CERITICATE:  base.NewSettingDef(reflect.TypeOf((*bool)(nil)), false),
 	XMEM_SETTING_INSECURESKIPVERIFY: base.NewSettingDef(reflect.TypeOf((*bool)(nil)), false),
-
-	//only used for xmem over ssl via ns_proxy for 2.5
-	XMEM_SETTING_REMOTE_PROXY_PORT: base.NewSettingDef(reflect.TypeOf((*uint16)(nil)), false),
-	XMEM_SETTING_LOCAL_PROXY_PORT:  base.NewSettingDef(reflect.TypeOf((*uint16)(nil)), false)}
+}
 
 var UninitializedReseverationNumber = -1
 
@@ -437,8 +432,6 @@ type xmemConfig struct {
 	certificate        []byte
 	demandEncryption   bool
 	encryptionType     string
-	remote_proxy_port  uint16
-	local_proxy_port   uint16
 	memcached_ssl_port uint16
 	// in ssl over mem mode, whether target cluster supports SANs in certificates
 	san_in_certificate bool
@@ -463,8 +456,6 @@ func newConfig(logger *log.CommonLogger) xmemConfig {
 		bucketName:         "",
 		demandEncryption:   default_demandEncryption,
 		certificate:        []byte{},
-		remote_proxy_port:  0,
-		local_proxy_port:   0,
 		max_read_downtime:  default_max_read_downtime,
 		memcached_ssl_port: 0,
 		logger:             logger,
@@ -508,19 +499,8 @@ func (config *xmemConfig) initializeConfig(settings map[string]interface{}) erro
 					return errors.New("SANInCertificate is not set in settings")
 				}
 			} else {
-				if val, ok := settings[XMEM_SETTING_REMOTE_PROXY_PORT]; ok {
-					config.remote_proxy_port = val.(uint16)
-				} else {
-					if config.demandEncryption && config.encryptionType == metadata.EncryptionType_Full {
-						return errors.New("demandEncryption=true and encryptionType=full, but neither remote_proxy_port nor remote_ssl_port is set in settings")
-					}
-				}
-				if val, ok := settings[XMEM_SETTING_LOCAL_PROXY_PORT]; ok {
-					config.local_proxy_port = val.(uint16)
-				} else {
-					if config.demandEncryption && config.encryptionType == metadata.EncryptionType_Full {
-						return errors.New("demandEncryption=true and encryptionType=full, but neither local_proxy_port nor remote_ssl_port is set in settings")
-					}
+				if config.demandEncryption && config.encryptionType == metadata.EncryptionType_Full {
+					return errors.New("demandEncryption=true and encryptionType=full, but remote_ssl_port is set in settings")
 				}
 			}
 		}
@@ -1417,8 +1397,6 @@ func (xmem *XmemNozzle) batchGetMeta(bigDoc_map map[string]*base.WrappedMCReques
 	receiver_return_ch := make(chan bool, 1)
 
 	reqs_bytes_list := [][][]byte{}
-	// stores the batch count for each reqs_bytes in reqs_bytes_list
-	batch_count_list := []int{}
 
 	var sequence uint16 = uint16(time.Now().UnixNano())
 	reqs_bytes := [][]byte{}
@@ -1443,7 +1421,6 @@ func (xmem *XmemNozzle) batchGetMeta(bigDoc_map map[string]*base.WrappedMCReques
 
 			if counter > 50 {
 				reqs_bytes_list = append(reqs_bytes_list, reqs_bytes)
-				batch_count_list = append(batch_count_list, counter)
 				counter = 0
 				reqs_bytes = [][]byte{}
 			}
@@ -1452,11 +1429,6 @@ func (xmem *XmemNozzle) batchGetMeta(bigDoc_map map[string]*base.WrappedMCReques
 
 	if counter > 0 {
 		reqs_bytes_list = append(reqs_bytes_list, reqs_bytes)
-		batch_count_list = append(batch_count_list, counter)
-	}
-
-	if len(reqs_bytes_list) != len(batch_count_list) {
-		panic("Length of reqs_bytes_list and batch_count_list do not match")
 	}
 
 	//launch the receiver
@@ -1694,10 +1666,6 @@ func (xmem *XmemNozzle) getOrCreateConnPool() (pool base.ConnPool, err error) {
 		//create a pool of SSL connection
 		poolName := xmem.getPoolName()
 		hostName := utils.GetHostName(xmem.config.connectStr)
-		remote_mem_port, err := utils.GetPortNumber(xmem.config.connectStr)
-		if err != nil {
-			return nil, err
-		}
 
 		if xmem.config.memcached_ssl_port != 0 {
 			xmem.Logger().Infof("%v Get or create ssl over memcached connection, memcached_ssl_port=%v\n", xmem.Id(), int(xmem.config.memcached_ssl_port))
@@ -1705,9 +1673,7 @@ func (xmem *XmemNozzle) getOrCreateConnPool() (pool base.ConnPool, err error) {
 				xmem.config.connPoolSize, int(xmem.config.memcached_ssl_port), xmem.config.certificate, xmem.config.san_in_certificate)
 
 		} else {
-			xmem.Logger().Infof("%v Get or create ssl over proxy connection", xmem.Id())
-			pool, err = base.ConnPoolMgr().GetOrCreateSSLOverProxyPool(poolName, hostName, xmem.config.bucketName, xmem.config.username, xmem.config.password,
-				xmem.config.connPoolSize, int(remote_mem_port), int(xmem.config.local_proxy_port), int(xmem.config.remote_proxy_port), xmem.config.certificate)
+			return nil, fmt.Errorf("%v cannot find memcached ssl port", xmem.Id())
 		}
 		if err != nil {
 			return nil, err

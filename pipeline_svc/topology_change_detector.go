@@ -8,7 +8,6 @@ import (
 	comp "github.com/couchbase/goxdcr/component"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
-	"github.com/couchbase/goxdcr/parts"
 	"github.com/couchbase/goxdcr/pipeline_utils"
 	"github.com/couchbase/goxdcr/service_def"
 	"github.com/couchbase/goxdcr/simple_utils"
@@ -19,7 +18,6 @@ import (
 
 var source_topology_changedErr = errors.New("Topology has changed on source cluster")
 var target_topology_changedErr = errors.New("Topology has changed on target cluster")
-var target_cluster_version_changed_for_ssl_err = errors.New("Target cluster version has moved to 3.0 or above and started to support ssl over mem.")
 var target_cluster_version_changed_for_rbac_and_xattr_err = errors.New("Target cluster version has moved to 5.0 or above and started to support rbac and xattr.")
 
 type TopologyChangeDetectorSvc struct {
@@ -145,10 +143,8 @@ func (top_detect_svc *TopologyChangeDetectorSvc) Stop() error {
 func (top_detect_svc *TopologyChangeDetectorSvc) watch(fin_ch chan bool, waitGrp *sync.WaitGroup) {
 	defer waitGrp.Done()
 
-	checkTargetVersionForSSL, needToReComputeCheckTargetVersionForSSL := top_detect_svc.needCheckTargetForSSL()
-	top_detect_svc.logger.Infof("checkTargetVersionForSSL=%v, needToReComputeCheckTargetVersionForSSL=%v in ToplogyChangeDetectorSvc for pipeline %v", checkTargetVersionForSSL, needToReComputeCheckTargetVersionForSSL, top_detect_svc.pipeline.Topic())
 	//run it once right at the beginning
-	top_detect_svc.validate(checkTargetVersionForSSL)
+	top_detect_svc.validate()
 	ticker := time.NewTicker(base.TopologyChangeCheckInterval)
 	defer ticker.Stop()
 
@@ -163,16 +159,12 @@ func (top_detect_svc *TopologyChangeDetectorSvc) watch(fin_ch chan bool, waitGrp
 				top_detect_svc.logger.Infof("Pipeline %v is no longer running. ToplogyChangeDetectorSvc is exitting.", top_detect_svc.pipeline.Topic())
 				return
 			}
-			if needToReComputeCheckTargetVersionForSSL {
-				checkTargetVersionForSSL, needToReComputeCheckTargetVersionForSSL = top_detect_svc.needCheckTargetForSSL()
-				top_detect_svc.logger.Infof("After re-computation, checkTargetVersionForSSL=%v, needToReComputeCheckTargetVersionForSSL=%v in ToplogyChangeDetectorSvc for pipeline %v", checkTargetVersionForSSL, needToReComputeCheckTargetVersionForSSL, top_detect_svc.pipeline.Topic())
-			}
-			top_detect_svc.validate(checkTargetVersionForSSL)
+			top_detect_svc.validate()
 		}
 	}
 }
 
-func (top_detect_svc *TopologyChangeDetectorSvc) validate(checkTargetVersionForSSL bool) {
+func (top_detect_svc *TopologyChangeDetectorSvc) validate() {
 	vblist_supposed, number_of_source_nodes, err := top_detect_svc.validateSourceTopology()
 	if err == nil || err == source_topology_changedErr {
 		err = top_detect_svc.handleSourceToplogyChange(vblist_supposed, number_of_source_nodes, err)
@@ -182,8 +174,8 @@ func (top_detect_svc *TopologyChangeDetectorSvc) validate(checkTargetVersionForS
 		top_detect_svc.logger.Warnf("ToplogyChangeDetectorSvc for pipeline %v received error when validating or handling source topology change. err=%v", top_detect_svc.pipeline.Topic(), err)
 	}
 
-	diff_vb_list, target_vb_server_map, err := top_detect_svc.validateTargetTopology(checkTargetVersionForSSL)
-	if err == target_cluster_version_changed_for_ssl_err || err == target_cluster_version_changed_for_rbac_and_xattr_err {
+	diff_vb_list, target_vb_server_map, err := top_detect_svc.validateTargetTopology()
+	if err == target_cluster_version_changed_for_rbac_and_xattr_err {
 		// restart pipeline if target begins to support ssl or rbac or xattr
 		top_detect_svc.RaiseEvent(common.NewEvent(common.ErrorEncountered, nil, top_detect_svc, nil, err))
 	} else {
@@ -325,44 +317,6 @@ func (top_detect_svc *TopologyChangeDetectorSvc) validateVbErrors(diff_vb_list [
 	return nil
 }
 
-// returns two bools
-// 1. First bool indicates whether target version needs to be checked
-// 2. second bool indicates whether the first bool needs to be recomputed at the next check
-func (top_detect_svc *TopologyChangeDetectorSvc) needCheckTargetForSSL() (bool, bool) {
-	spec, _ := top_detect_svc.repl_spec_svc.ReplicationSpec(top_detect_svc.pipeline.Topic())
-	if spec == nil {
-		return false, true
-	}
-	targetClusterRef, err := top_detect_svc.remote_cluster_svc.RemoteClusterByUuid(spec.TargetClusterUUID, false)
-	if err == nil {
-		if !targetClusterRef.IsFullEncryption() {
-			return false, false
-		}
-		pipeline := top_detect_svc.pipeline
-		targets := pipeline.Targets()
-		for _, target := range targets {
-			//only check the first target nozzle, then return
-			//the assumption is all target nozzle should have the same type
-			//- capi, xmem with MemConn, xmem with SSLOverMem or xmem with SSLOverProxy
-			if _, ok := target.(*parts.XmemNozzle); !ok {
-				return false, false
-			}
-			if target.State() == common.Part_Running {
-				connType := target.(*parts.XmemNozzle).ConnType()
-				if connType == base.SSLOverMem || connType == base.MemConn {
-					return false, false
-				} else {
-					return true, false
-				}
-			}
-		}
-
-	}
-	// if we get here, we do not really know whether target version needs to be checked
-	// set needCheckTarget to false for now and specify that it needs to be re-computed later
-	return false, true
-}
-
 func (top_detect_svc *TopologyChangeDetectorSvc) validateSourceTopology() ([]uint16, int, error) {
 	defer top_detect_svc.logger.Infof("ToplogyChangeDetectorSvc for pipeline %v validateSourceTopology completed", top_detect_svc.pipeline.Topic())
 
@@ -387,7 +341,7 @@ func (top_detect_svc *TopologyChangeDetectorSvc) validateSourceTopology() ([]uin
 	return vblist_supposed, number_of_nodes, nil
 }
 
-func (top_detect_svc *TopologyChangeDetectorSvc) validateTargetTopology(checkTargetVersionForSSL bool) ([]uint16, map[uint16]string, error) {
+func (top_detect_svc *TopologyChangeDetectorSvc) validateTargetTopology() ([]uint16, map[uint16]string, error) {
 	defer top_detect_svc.logger.Infof("ToplogyChangeDetectorSvc for pipeline %v validateTargetTopology completed", top_detect_svc.pipeline.Topic())
 
 	targetClusterCompatibility, targetServerVBMap, err := top_detect_svc.getTargetBucketInfo()
@@ -397,13 +351,6 @@ func (top_detect_svc *TopologyChangeDetectorSvc) validateTargetTopology(checkTar
 		return nil, nil, err
 	}
 
-	// check target version if needed
-	if checkTargetVersionForSSL {
-		if simple_utils.IsClusterCompatible(targetClusterCompatibility, base.VersionForSSLOverMemSupport) {
-			top_detect_svc.logger.Infof("ToplogyChangeDetectorSvc for pipeline %v detected that target cluster has been upgraded to 3.0 or above and is now supporting ssl over memcached", top_detect_svc.pipeline.Topic())
-			return nil, nil, target_cluster_version_changed_for_ssl_err
-		}
-	}
 	if top_detect_svc.check_target_version_for_rbac_and_xattr {
 		if simple_utils.IsClusterCompatible(targetClusterCompatibility, base.VersionForRBACAndXattrSupport) {
 			top_detect_svc.logger.Infof("ToplogyChangeDetectorSvc for pipeline %v detected that target cluster has been upgraded to 5.0 or above and is now supporting RBAC and xattr", top_detect_svc.pipeline.Topic())

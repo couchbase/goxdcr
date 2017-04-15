@@ -77,11 +77,6 @@ func GetSourceVBMap(cluster_info_svc service_def.ClusterInfoSvc, xdcr_topology_s
 	return
 }
 
-// checks if target cluster supports ssl over memcached
-func HasSSLOverMemSupport(cluster_info_svc service_def.ClusterInfoSvc, targetClusterRef *metadata.RemoteClusterReference) (bool, error) {
-	return cluster_info_svc.IsClusterCompatible(targetClusterRef, base.VersionForSSLOverMemSupport)
-}
-
 // checks if target cluster supports SANs in certificates
 func HasSANInCertificateSupport(cluster_info_svc service_def.ClusterInfoSvc, targetClusterRef *metadata.RemoteClusterReference) (bool, error) {
 	return cluster_info_svc.IsClusterCompatible(targetClusterRef, base.VersionForSANInCertificateSupport)

@@ -663,12 +663,11 @@ func (xdcrf *XDCRFactory) constructCAPINozzle(topic string,
 }
 
 func (xdcrf *XDCRFactory) ConstructSettingsForPart(pipeline common.Pipeline, part common.Part, settings map[string]interface{},
-	targetClusterRef *metadata.RemoteClusterReference, ssl_port_map map[string]uint16,
-	isSSLOverMem bool) (map[string]interface{}, error) {
+	targetClusterRef *metadata.RemoteClusterReference, ssl_port_map map[string]uint16) (map[string]interface{}, error) {
 
 	if _, ok := part.(*parts.XmemNozzle); ok {
 		xdcrf.logger.Debugf("Construct settings for XmemNozzle %s", part.Id())
-		return xdcrf.constructSettingsForXmemNozzle(pipeline, part, targetClusterRef, settings, ssl_port_map, isSSLOverMem)
+		return xdcrf.constructSettingsForXmemNozzle(pipeline, part, targetClusterRef, settings, ssl_port_map)
 	} else if _, ok := part.(*parts.DcpNozzle); ok {
 		xdcrf.logger.Debugf("Construct settings for DcpNozzle %s", part.Id())
 		return xdcrf.constructSettingsForDcpNozzle(pipeline, part.(*parts.DcpNozzle), settings)
@@ -741,7 +740,7 @@ func (xdcrf *XDCRFactory) CheckpointBeforeStop(pipeline common.Pipeline) error {
 
 func (xdcrf *XDCRFactory) constructSettingsForXmemNozzle(pipeline common.Pipeline, part common.Part,
 	targetClusterRef *metadata.RemoteClusterReference, settings map[string]interface{},
-	ssl_port_map map[string]uint16, isSSLOverMem bool) (map[string]interface{}, error) {
+	ssl_port_map map[string]uint16) (map[string]interface{}, error) {
 	xmemSettings := make(map[string]interface{})
 	spec := pipeline.Specification()
 	repSettings := spec.Settings
@@ -758,33 +757,16 @@ func (xdcrf *XDCRFactory) constructSettingsForXmemNozzle(pipeline common.Pipelin
 	xmemSettings[parts.XMEM_SETTING_CERTIFICATE] = targetClusterRef.Certificate
 	xmemSettings[parts.XMEM_SETTING_ENCRYPTION_TYPE] = targetClusterRef.EncryptionType
 	if targetClusterRef.IsFullEncryption() {
-		if isSSLOverMem {
-			mem_ssl_port, ok := ssl_port_map[xmemConnStr]
-			if !ok {
-				return nil, fmt.Errorf("Can't get remote memcached ssl port for %v", xmemConnStr)
-			}
-			xdcrf.logger.Infof("mem_ssl_port=%v\n", mem_ssl_port)
-
-			xmemSettings[parts.XMEM_SETTING_REMOTE_MEM_SSL_PORT] = mem_ssl_port
-			xmemSettings[parts.XMEM_SETTING_SAN_IN_CERITICATE] = targetClusterRef.SANInCertificate
-
-			xdcrf.logger.Infof("xmemSettings=%v\n", xmemSettings)
-
-		} else {
-			local_proxy_port, err := xdcrf.xdcr_topology_svc.MyProxyPort()
-
-			if err != nil {
-				return nil, err
-			}
-
-			remote_proxy_port, ok := ssl_port_map[xmemConnStr]
-			if !ok {
-				return nil, errors.New(fmt.Sprintf("Can't find remote proxy port for remote bucket %v", spec.TargetBucketName))
-			}
-
-			xmemSettings[parts.XMEM_SETTING_REMOTE_PROXY_PORT] = remote_proxy_port
-			xmemSettings[parts.XMEM_SETTING_LOCAL_PROXY_PORT] = local_proxy_port
+		mem_ssl_port, ok := ssl_port_map[xmemConnStr]
+		if !ok {
+			return nil, fmt.Errorf("Can't get remote memcached ssl port for %v", xmemConnStr)
 		}
+		xdcrf.logger.Infof("mem_ssl_port=%v\n", mem_ssl_port)
+
+		xmemSettings[parts.XMEM_SETTING_REMOTE_MEM_SSL_PORT] = mem_ssl_port
+		xmemSettings[parts.XMEM_SETTING_SAN_IN_CERITICATE] = targetClusterRef.SANInCertificate
+
+		xdcrf.logger.Infof("xmemSettings=%v\n", xmemSettings)
 	}
 	return xmemSettings, nil
 
@@ -1003,50 +985,35 @@ func getSettingFromSettingsMap(settings map[string]interface{}, setting_name str
 	return default_value
 }
 
-func (xdcrf *XDCRFactory) ConstructSSLPortMap(targetClusterRef *metadata.RemoteClusterReference, spec *metadata.ReplicationSpecification) (map[string]uint16, bool, error) {
+func (xdcrf *XDCRFactory) ConstructSSLPortMap(targetClusterRef *metadata.RemoteClusterReference, spec *metadata.ReplicationSpecification) (map[string]uint16, error) {
 
 	var ssl_port_map map[string]uint16
-	var hasSSLOverMemSupport bool
-
 	nozzleType, err := xdcrf.getOutNozzleType(targetClusterRef, spec)
 	if err != nil {
-		return nil, false, err
+		return nil, err
 	}
 	// if both xmem nozzles and ssl are involved, populate ssl_port_map
 	// if target cluster is post-3.0, the ssl ports in the map are memcached ssl ports
 	// otherwise, the ssl ports in the map are proxy ssl ports
 	if targetClusterRef.IsFullEncryption() && nozzleType == base.Xmem {
-		hasSSLOverMemSupport, err = pipeline_utils.HasSSLOverMemSupport(xdcrf.cluster_info_svc, targetClusterRef)
-		if err != nil {
-			return nil, false, err
-		}
-		xdcrf.logger.Infof("hasSSLOverMemSupport=%v\n", hasSSLOverMemSupport)
 
 		username, password, certificate, sanInCertificate, err := targetClusterRef.MyCredentials()
 		if err != nil {
-			return nil, false, err
+			return nil, err
 		}
 		connStr, err := targetClusterRef.MyConnectionStr()
 		if err != nil {
-			return nil, false, err
+			return nil, err
 		}
 
-		if hasSSLOverMemSupport {
-			ssl_port_map, err = utils.GetMemcachedSSLPortMap(connStr, username, password, certificate, sanInCertificate, spec.TargetBucketName, xdcrf.logger)
-			if err != nil {
-				xdcrf.logger.Errorf("Failed to get memcached ssl port, err=%v\n", err)
-				return nil, false, err
-			}
-		} else {
-			ssl_port_map, err = utils.GetSSLProxyPortMap(connStr, username, password, certificate, sanInCertificate, xdcrf.logger)
-			if err != nil {
-				xdcrf.logger.Errorf("Failed to get ssl proxy port, err=%v\n", err)
-				return nil, false, err
-			}
+		ssl_port_map, err = utils.GetMemcachedSSLPortMap(connStr, username, password, certificate, sanInCertificate, spec.TargetBucketName, xdcrf.logger)
+		if err != nil {
+			xdcrf.logger.Errorf("Failed to get memcached ssl port, err=%v\n", err)
+			return nil, err
 		}
 
 		xdcrf.logger.Debugf("ssl_port_map=%v\n", ssl_port_map)
 	}
 
-	return ssl_port_map, hasSSLOverMemSupport, nil
+	return ssl_port_map, nil
 }

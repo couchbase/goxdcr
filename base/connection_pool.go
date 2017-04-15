@@ -13,13 +13,11 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/binary"
-	"encoding/json"
 	"encoding/pem"
 	"errors"
 	"fmt"
 	mcc "github.com/couchbase/gomemcached/client"
 	"github.com/couchbase/goxdcr/log"
-	"io"
 	"math"
 	"net"
 	"net/url"
@@ -38,7 +36,6 @@ type ConnType int
 
 const (
 	MemConn      ConnType = iota
-	SSLOverProxy ConnType = iota
 	SSLOverMem   ConnType = iota
 )
 
@@ -49,8 +46,6 @@ var (
 func (connType ConnType) String() string {
 	if connType == MemConn {
 		return "MemConn"
-	} else if connType == SSLOverProxy {
-		return "SSLOverProxy"
 	} else if connType == SSLOverMem {
 		return "SSLOverMem"
 	} else {
@@ -99,14 +94,6 @@ type connPool struct {
 	plainAuth   bool
 	stale       bool
 	state_lock  *sync.RWMutex
-}
-
-type sslOverProxyConnPool struct {
-	connPool
-	local_proxy_port      int
-	remote_proxy_port     int
-	remote_memcached_port int
-	certificate           []byte
 }
 
 type sslOverMemConnPool struct {
@@ -269,97 +256,6 @@ func authClient(client *mcc.Client, userName, password, bucketName string, plain
 	}
 
 	return nil
-}
-
-func (p *sslOverProxyConnPool) init() {
-	p.newConnFunc = p.newConn
-}
-
-func (p *sslOverProxyConnPool) Certificate() []byte {
-	return p.certificate
-}
-
-func (p *sslOverProxyConnPool) newConn() (*mcc.Client, error) {
-	//connect to local proxy port
-	ssl_con_str := LocalHostName + UrlPortNumberDelimiter + strconv.FormatInt(int64(p.local_proxy_port), ParseIntBase)
-	conn, err := DialTCPWithTimeout("tcp", ssl_con_str)
-	if err != nil {
-		ConnPoolMgr().logger.Errorf("Failed to establish ssl over proxy connection to %v. err=%v\n", ssl_con_str, err)
-		return nil, err
-	}
-
-	//establish ssl proxy connection
-	handshake_msg := make(map[string]interface{})
-	handshake_msg["proxyHost"] = p.hostName
-	handshake_msg["proxyPort"] = p.remote_proxy_port
-	handshake_msg["port"] = p.remote_memcached_port
-	handshake_msg["bucket"] = p.bucketName
-	handshake_msg["password"] = p.password
-
-	//encode json
-	msg, err := json.Marshal(handshake_msg)
-	if err != nil {
-		conn.Close()
-		return nil, err
-	}
-	msgBytes := encodeSSLHandShakeMsg(msg)
-
-	cert := encodeSSLHandShakeMsg(p.certificate)
-	//send certificate
-	conn.SetWriteDeadline(time.Now().Add(200 * time.Millisecond))
-	conn.Write(msgBytes)
-	conn.Write(cert)
-
-	//receive response
-	sizeBytes := make([]byte, 4)
-	_, err = io.ReadFull(conn, sizeBytes)
-	if err != nil {
-		ConnPoolMgr().logger.Errorf("Failed to read response to handshake message. err=%v\n", err)
-		conn.Close()
-		return nil, err
-	}
-	size := binary.BigEndian.Uint32(sizeBytes)
-	if size > MAX_PAYLOAD_SIZE {
-		conn.Close()
-		return nil, errors.New("Failed to establish ssl connection - reply is invalid")
-	}
-	ConnPoolMgr().logger.Infof("payload size = %v\n", size)
-	ackBytes := make([]byte, size)
-	_, err = io.ReadFull(conn, ackBytes)
-	if err != nil {
-		ConnPoolMgr().logger.Errorf("Failed to read ack. err=%v\n", err)
-		conn.Close()
-		return nil, err
-	}
-
-	ack_map := make(map[string]interface{})
-	err = json.Unmarshal(ackBytes, &ack_map)
-	if err != nil {
-		conn.Close()
-		return nil, err
-	}
-
-	ConnPoolMgr().logger.Infof("ack = %v\n", ack_map)
-
-	type_str, ok := ack_map["type"].(string)
-	if !ok || type_str != "ok" {
-		conn.Close()
-		return nil, errors.New("Failed to establish ssl connection")
-	}
-
-	client, err := mcc.Wrap(conn)
-	if err != nil {
-		ConnPoolMgr().logger.Errorf("err=%v\n", err)
-		conn.Close()
-		return nil, err
-	}
-
-	ConnPoolMgr().logger.Info("memcached client on ssl connection is created")
-	return client, nil
-}
-
-func (p *sslOverProxyConnPool) ConnType() ConnType {
-	return SSLOverProxy
 }
 
 func (p *sslOverMemConnPool) init() {
@@ -556,54 +452,6 @@ func (connPoolMgr *connPoolMgr) GetOrCreateSSLOverMemPool(poolNameToCreate strin
 		san_in_certificate:    san_in_cert}
 	p.init()
 
-	connPoolMgr.conn_pools_map[poolNameToCreate] = p
-	return p, err
-
-}
-
-func (connPoolMgr *connPoolMgr) GetOrCreateSSLOverProxyPool(poolNameToCreate string, hostname string, bucketname string, username string, password string, connsize int,
-	remote_mem_port int, local_proxy_port int, remote_proxy_port int, cert []byte) (ConnPool, error) {
-	connPoolMgr.map_lock.Lock()
-	defer connPoolMgr.map_lock.Unlock()
-
-	pool, ok := connPoolMgr.conn_pools_map[poolNameToCreate]
-	if ok {
-		_, ok = pool.(*sslOverProxyConnPool)
-		if ok {
-			if !pool.Stale() && pool.Password() == password {
-				return pool, nil
-			} else {
-				ConnPoolMgr().logger.Infof("Removing pool %v. stale=%v, new size=%v, old size=%v", poolNameToCreate, pool.Stale(), connsize, pool.MaxConn())
-				connPoolMgr.removePool(pool)
-			}
-		} else {
-			return nil, errors.New("There is an existing non-ssl over proxy pool with the same name")
-		}
-	}
-
-	var err error
-	size := connsize
-	if size == 0 {
-		size = DefaultConnectionSize
-	}
-	p := &sslOverProxyConnPool{
-		connPool: connPool{clients: make(chan *mcc.Client, size),
-			hostName:   hostname,
-			userName:   username,
-			password:   password,
-			bucketName: bucketname,
-			maxConn:    size,
-			name:       poolNameToCreate,
-			plainAuth:  true,
-			lock:       &sync.RWMutex{},
-			state_lock: &sync.RWMutex{},
-			logger:     log.NewLogger("sslConnPool", connPoolMgr.logger.LoggerContext())},
-		remote_memcached_port: remote_mem_port,
-		local_proxy_port:      local_proxy_port,
-		remote_proxy_port:     remote_proxy_port,
-		certificate:           cert}
-
-	p.init()
 	connPoolMgr.conn_pools_map[poolNameToCreate] = p
 	return p, err
 

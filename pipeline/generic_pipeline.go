@@ -32,11 +32,10 @@ var MaxNumberOfErrorsToTrack = 15
 
 //the function constructs start settings for parts of the pipeline
 type PartsSettingsConstructor func(pipeline common.Pipeline, part common.Part, pipeline_settings map[string]interface{},
-	targetClusterref *metadata.RemoteClusterReference, ssl_port_map map[string]uint16,
-	isSSLOverMem bool) (map[string]interface{}, error)
+	targetClusterref *metadata.RemoteClusterReference, ssl_port_map map[string]uint16) (map[string]interface{}, error)
 
 //the function constructs start settings for parts of the pipeline
-type SSLPortMapConstructor func(targetClusterRef *metadata.RemoteClusterReference, spec *metadata.ReplicationSpecification) (map[string]uint16, bool, error)
+type SSLPortMapConstructor func(targetClusterRef *metadata.RemoteClusterReference, spec *metadata.ReplicationSpecification) (map[string]uint16, error)
 
 //the function constructs update settings for parts of the pipeline
 type PartsUpdateSettingsConstructor func(pipeline common.Pipeline, part common.Part, pipeline_settings map[string]interface{}) (map[string]interface{}, error)
@@ -125,7 +124,7 @@ func (genericPipeline *GenericPipeline) SetRuntimeContext(ctx common.PipelineRun
 // Starts the downstream parts recursively, and eventually the part itself
 // In a more specific use case, for now, it starts the nozzles and routers (out-going nozzles first, then source nozzles)
 func (genericPipeline *GenericPipeline) startPart(part common.Part, settings map[string]interface{},
-	targetClusterRef *metadata.RemoteClusterReference, ssl_port_map map[string]uint16, isSSLOverMem bool, err_ch chan partError) {
+	targetClusterRef *metadata.RemoteClusterReference, ssl_port_map map[string]uint16, err_ch chan partError) {
 
 	var err error = nil
 
@@ -138,7 +137,7 @@ func (genericPipeline *GenericPipeline) startPart(part common.Part, settings map
 			go func(waitGrp *sync.WaitGroup, err_ch chan partError, p common.Part, settings map[string]interface{}) {
 				defer waitGrp.Done()
 				if p.State() == common.Part_Initial {
-					genericPipeline.startPart(p, settings, targetClusterRef, ssl_port_map, isSSLOverMem, err_ch)
+					genericPipeline.startPart(p, settings, targetClusterRef, ssl_port_map, err_ch)
 				}
 			}(waitGrp, err_ch, p, settings)
 		}
@@ -153,8 +152,9 @@ func (genericPipeline *GenericPipeline) startPart(part common.Part, settings map
 	partSettings := settings
 	if genericPipeline.partSetting_constructor != nil {
 		genericPipeline.logger.Debugf("%v calling part setting constructor\n", genericPipeline.InstanceId())
+
 		// partSetting_contructor currently is only: xdcrf.ConstructUpdateSettingsForPart
-		partSettings, err = genericPipeline.partSetting_constructor(genericPipeline, part, settings, targetClusterRef, ssl_port_map, isSSLOverMem)
+		partSettings, err = genericPipeline.partSetting_constructor(genericPipeline, part, settings, targetClusterRef, ssl_port_map)
 		if err != nil {
 			err_ch <- partError{part.Id(), err}
 			return
@@ -216,9 +216,8 @@ func (genericPipeline *GenericPipeline) Start(settings map[string]interface{}) e
 	genericPipeline.ReportProgress("The runtime context has been started")
 
 	var ssl_port_map map[string]uint16
-	var isSSLOverMem bool
 	if genericPipeline.sslPortMapConstructor != nil {
-		ssl_port_map, isSSLOverMem, err = genericPipeline.sslPortMapConstructor(targetClusterRef, genericPipeline.spec)
+		ssl_port_map, err = genericPipeline.sslPortMapConstructor(targetClusterRef, genericPipeline.spec)
 		if err != nil {
 			return err
 		}
@@ -232,7 +231,7 @@ func (genericPipeline *GenericPipeline) Start(settings map[string]interface{}) e
 		waitGrp.Add(1)
 		go func(err_ch chan partError, source common.Nozzle, settings map[string]interface{}, waitGrp *sync.WaitGroup) {
 			defer waitGrp.Done()
-			genericPipeline.startPart(source, settings, targetClusterRef, ssl_port_map, isSSLOverMem, err_ch)
+			genericPipeline.startPart(source, settings, targetClusterRef, ssl_port_map, err_ch)
 			if len(err_ch) == 0 {
 				genericPipeline.logger.Infof("%v Incoming nozzle %s has been started", genericPipeline.InstanceId(), source.Id())
 			}

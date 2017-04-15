@@ -489,55 +489,6 @@ func GetNodeNameListFromNodeList(nodeList []interface{}, connStr string, logger 
 	return nodeNameList, nil
 }
 
-func GetSSLProxyPortMap(hostAddr, username, password string, certificate []byte, sanInCertificate bool, logger *log.CommonLogger) (map[string]uint16, error) {
-	nodeList, err := GetNodeListWithFullInfo(hostAddr, username, password, certificate, sanInCertificate, logger)
-	if err != nil {
-		return nil, err
-	}
-
-	ssl_port_map := make(map[string]uint16)
-	for _, node := range nodeList {
-		nodeMap, ok := node.(map[string]interface{})
-		if !ok {
-			return nil, fmt.Errorf("Error constructing ssl port map for target cluster %v. Node info is of wrong type. node info=%v\n", hostAddr, node)
-		}
-
-		hostname, err := GetHostNameFromNodeInfo(hostAddr, nodeMap, logger)
-		if err != nil {
-			return nil, err
-		}
-
-		portsObj, ok := nodeMap[base.PortsKey]
-		if !ok {
-			return nil, fmt.Errorf("Error constructing ssl port map for target cluster %v. Cannot find ports in node info =%v\n", hostAddr, node)
-		}
-		portsMap, ok := portsObj.(map[string]interface{})
-		if !ok {
-			return nil, fmt.Errorf("Error constructing ssl port map for target cluster %v. Ports info, %v, is of wrong type.\n", hostAddr, portsObj)
-		}
-		memcachedPortObj, ok := portsMap[base.DirectPortKey]
-		if !ok {
-			return nil, fmt.Errorf("Error constructing ssl port map for target cluster %v. Cannot find memcached port in ports info =%v\n", hostAddr, portsMap)
-		}
-		memcachedPort, ok := memcachedPortObj.(float64)
-		if !ok {
-			return nil, fmt.Errorf("Error constructing ssl port map for target cluster %v. Memcached port, %v, is of wrong type\n", hostAddr, memcachedPortObj)
-		}
-		sslProxyPortObj, ok := portsMap[base.SSLProxyPortKey]
-		if !ok {
-			return nil, fmt.Errorf("Error constructing ssl port map for target cluster %v. Cannot find ssl proxy port in ports info =%v\n", hostAddr, portsMap)
-		}
-		sslProxyPort, ok := sslProxyPortObj.(float64)
-		if !ok {
-			return nil, fmt.Errorf("Error constructing ssl port map for target cluster %v. Ssl proxy port, %v, is of wrong type\n", hostAddr, sslProxyPortObj)
-		}
-		hostAddr := GetHostAddr(hostname, uint16(memcachedPort))
-		ssl_port_map[hostAddr] = uint16(sslProxyPort)
-	}
-
-	return ssl_port_map, nil
-}
-
 func GetHostAddrFromNodeInfo(adminHostAddr string, nodeInfo map[string]interface{}, logger *log.CommonLogger) (string, error) {
 	var hostAddr string
 	var ok bool
