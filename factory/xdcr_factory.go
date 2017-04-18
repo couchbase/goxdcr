@@ -36,6 +36,71 @@ const (
 var ErrorNoSourceNozzle = errors.New("Invalid configuration. No source nozzle can be constructed since the source kv nodes are not the master for any vbuckets.")
 var ErrorNoTargetNozzle = errors.New("Invalid configuration. No target nozzle can be constructed.")
 
+// interface so we can autogenerate mock and do unit test
+type XDCRFactoryIface interface {
+	NewPipeline(topic string, progress_recorder common.PipelineProgressRecorder) (common.Pipeline, error)
+	registerAsyncListenersOnSources(pipeline common.Pipeline, logger_ctx *log.LoggerContext)
+	registerAsyncListenersOnTargets(pipeline common.Pipeline, logger_ctx *log.LoggerContext)
+	constructSourceNozzles(spec *metadata.ReplicationSpecification, topic string, logger_ctx *log.LoggerContext) (map[string]common.Nozzle, map[string][]uint16, error)
+	partId(prefix string, topic string, kvaddr string, index int) string
+	filterVBList(targetkvVBList []uint16, kv_vb_map map[string][]uint16) []uint16
+	constructOutgoingNozzles(spec *metadata.ReplicationSpecification, kv_vb_map map[string][]uint16,
+		sourceCRMode base.ConflictResolutionMode, targetBucketInfo map[string]interface{},
+		targetClusterRef *metadata.RemoteClusterReference, logger_ctx *log.LoggerContext) (outNozzles map[string]common.Nozzle,
+		vbNozzleMap map[uint16]string, kvVBMap map[string][]uint16, targetUserName string, targetPassword string, targetHasRBACSupport bool, err error)
+	constructRouter(id string, spec *metadata.ReplicationSpecification,
+		downStreamParts map[string]common.Part,
+		vbNozzleMap map[uint16]string,
+		sourceCRMode base.ConflictResolutionMode,
+		logger_ctx *log.LoggerContext) (*parts.Router, error)
+	getOutNozzleType(targetClusterRef *metadata.RemoteClusterReference, spec *metadata.ReplicationSpecification) (base.XDCROutgoingNozzleType, error)
+	constructXMEMNozzle(topic string, kvaddr string,
+		sourceBucketName string,
+		targetBucketName string,
+		username string,
+		password string,
+		nozzle_index int,
+		connPoolSize int,
+		sourceCRMode base.ConflictResolutionMode,
+		targetBucketInfo map[string]interface{},
+		logger_ctx *log.LoggerContext) common.Nozzle
+	constructCAPINozzle(topic string,
+		username string,
+		password string,
+		certificate []byte,
+		vbList []uint16,
+		vbCouchApiBaseMap map[uint16]string,
+		nozzle_index int,
+		logger_ctx *log.LoggerContext) (common.Nozzle, error)
+	ConstructSettingsForPart(pipeline common.Pipeline, part common.Part, settings map[string]interface{},
+		targetClusterRef *metadata.RemoteClusterReference, ssl_port_map map[string]uint16,
+		isSSLOverMem bool) (map[string]interface{}, error)
+	ConstructUpdateSettingsForPart(pipeline common.Pipeline, part common.Part, settings map[string]interface{}) (map[string]interface{}, error)
+	constructUpdateSettingsForXmemNozzle(pipeline common.Pipeline, settings map[string]interface{}) map[string]interface{}
+	constructUpdateSettingsForCapiNozzle(pipeline common.Pipeline, settings map[string]interface{}) map[string]interface{}
+	SetStartSeqno(pipeline common.Pipeline) error
+	CheckpointBeforeStop(pipeline common.Pipeline) error
+	constructSettingsForXmemNozzle(pipeline common.Pipeline, part common.Part,
+		targetClusterRef *metadata.RemoteClusterReference, settings map[string]interface{},
+		ssl_port_map map[string]uint16, isSSLOverMem bool) (map[string]interface{}, error)
+	constructSettingsForCapiNozzle(pipeline common.Pipeline, settings map[string]interface{}) (map[string]interface{}, error)
+	getTargetTimeoutEstimate(topic string) time.Duration
+	constructSettingsForDcpNozzle(pipeline common.Pipeline, part *parts.DcpNozzle, settings map[string]interface{}) (map[string]interface{}, error)
+	registerServices(pipeline common.Pipeline, logger_ctx *log.LoggerContext,
+		kv_vb_map map[string][]uint16, targetUserName, targetPassword string,
+		targetBucketName string, target_kv_vb_map map[string][]uint16,
+		targetClusterRef *metadata.RemoteClusterReference, targetHasRBACSupport bool) error
+	ConstructSettingsForService(pipeline common.Pipeline, service common.PipelineService, settings map[string]interface{}) (map[string]interface{}, error)
+	ConstructUpdateSettingsForService(pipeline common.Pipeline, service common.PipelineService, settings map[string]interface{}) (map[string]interface{}, error)
+	constructSettingsForSupervisor(pipeline common.Pipeline, settings map[string]interface{}) (map[string]interface{}, error)
+	constructSettingsForStatsManager(pipeline common.Pipeline, settings map[string]interface{}) (map[string]interface{}, error)
+	constructSettingsForCheckpointManager(pipeline common.Pipeline, settings map[string]interface{}) (map[string]interface{}, error)
+	constructUpdateSettingsForSupervisor(pipeline common.Pipeline, settings map[string]interface{}) (map[string]interface{}, error)
+	constructUpdateSettingsForStatsManager(pipeline common.Pipeline, settings map[string]interface{}) (map[string]interface{}, error)
+	constructUpdateSettingsForCheckpointManager(pipeline common.Pipeline, settings map[string]interface{}) (map[string]interface{}, error)
+	ConstructSSLPortMap(targetClusterRef *metadata.RemoteClusterReference, spec *metadata.ReplicationSpecification) (map[string]uint16, bool, error)
+}
+
 // Factory for XDCR pipelines
 type XDCRFactory struct {
 	repl_spec_svc      service_def.ReplicationSpecSvc

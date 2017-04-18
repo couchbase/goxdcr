@@ -67,15 +67,45 @@ func (errArray PipelineErrorArray) String() string {
 	return string(bytes)
 }
 
+type ReplicationStatusIface interface {
+	SetPipeline(pipeline common.Pipeline)
+	Spec() *metadata.ReplicationSpecification
+	RepId() string
+	AddError(err error)
+	RuntimeStatus(lock bool) ReplicationState
+	Storage() *expvar.Map
+	GetStats(registryName string) *expvar.Map
+	GetOverviewStats() *expvar.Map
+	SetStats(registryName string, stats *expvar.Map)
+	SetOverviewStats(stats *expvar.Map)
+	CleanupBeforeExit(statsToClear []string)
+	ResetStorage()
+	Publish(lock bool)
+	publishWithStatus(status string, lock bool)
+	Pipeline() common.Pipeline
+	VbList() []uint16
+	SetVbList(vb_list []uint16)
+	SettingsMap() map[string]interface{}
+	Settings() *metadata.ReplicationSettings
+	Errors() PipelineErrorArray
+	ClearErrors()
+	RecordProgress(progress string)
+	GetProgress() string
+	String() string
+	Updater() interface{}
+	SetUpdater(updater interface{}) error
+	ObjectPool() *base.MCRequestPool
+}
+
 type ReplicationStatus struct {
-	pipeline         common.Pipeline
+	Pipeline_        common.Pipeline
 	err_list         PipelineErrorArray
 	progress         string
-	logger           *log.CommonLogger
-	specId           string
-	spec_getter      ReplicationSpecGetter
+	Logger           *log.CommonLogger
+	SpecId           string
+	Spec_getter      ReplicationSpecGetter
 	pipeline_updater interface{}
-	obj_pool         *base.MCRequestPool
+	Obj_pool         *base.MCRequestPool
 	Lock             *sync.RWMutex
 	// tracks the list of vbs managed by the replication.
 	// useful when replication is paused, when it can be compared with the current vb_list to determine
@@ -83,14 +113,14 @@ type ReplicationStatus struct {
 	vb_list []uint16
 }
 
-func NewReplicationStatus(specId string, spec_getter ReplicationSpecGetter, logger *log.CommonLogger) *ReplicationStatus {
-	rep_status := &ReplicationStatus{specId: specId,
-		pipeline:    nil,
-		logger:      logger,
+func NewReplicationStatus(specId string, Spec_getter ReplicationSpecGetter, logger *log.CommonLogger) *ReplicationStatus {
+	rep_status := &ReplicationStatus{SpecId: specId,
+		Pipeline_:    nil,
+		Logger:      logger,
 		err_list:    PipelineErrorArray{},
-		spec_getter: spec_getter,
+		Spec_getter: Spec_getter,
 		Lock:        &sync.RWMutex{},
-		obj_pool:    base.NewMCRequestPool(specId, logger),
+		Obj_pool:    base.NewMCRequestPool(specId, logger),
 		progress:    ""}
 
 	rep_status.Publish(false)
@@ -100,7 +130,7 @@ func NewReplicationStatus(specId string, spec_getter ReplicationSpecGetter, logg
 func (rs *ReplicationStatus) SetPipeline(pipeline common.Pipeline) {
 	rs.Lock.Lock()
 	defer rs.Lock.Unlock()
-	rs.pipeline = pipeline
+	rs.Pipeline_ = pipeline
 	if pipeline != nil {
 		rs.vb_list = pipeline_utils.GetSourceVBListPerPipeline(pipeline)
 		simple_utils.SortUint16List(rs.vb_list)
@@ -110,22 +140,22 @@ func (rs *ReplicationStatus) SetPipeline(pipeline common.Pipeline) {
 }
 
 func (rs *ReplicationStatus) Spec() *metadata.ReplicationSpecification {
-	spec, err := rs.spec_getter(rs.specId)
+	spec, err := rs.Spec_getter(rs.SpecId)
 	if err != nil {
-		rs.logger.Errorf("Invalid replication status %v, failed to retrieve spec. err=%v", rs.specId, err)
+		rs.Logger.Errorf("Invalid replication status %v, failed to retrieve spec. err=%v", rs.SpecId, err)
 
 	} else if spec == nil {
 		//it is possible that spec is nil. When replication specification is deleted,
 		//ReplicationSpecVal.spec is set to nil, but it is not removed from cached to keep
 		//replication status there so that we have a place to retrieve pipeline and proper action
 		//can be taken, like stop the pipline etc.
-		rs.logger.Infof("Spec=nil for replication status %v, which means replication specification has been deleted.", rs.specId)
+		rs.Logger.Infof("Spec=nil for replication status %v, which means replication specification has been deleted.", rs.SpecId)
 	}
 	return spec
 }
 
 func (rs *ReplicationStatus) RepId() string {
-	return rs.specId
+	return rs.SpecId
 }
 
 func (rs *ReplicationStatus) AddError(err error) {
@@ -156,7 +186,7 @@ func (rs *ReplicationStatus) RuntimeStatus(lock bool) ReplicationState {
 	}
 
 	spec := rs.Spec()
-	if rs.pipeline != nil && rs.pipeline.State() == common.Pipeline_Running {
+	if rs.Pipeline_ != nil && rs.Pipeline_.State() == common.Pipeline_Running {
 		return Replicating
 	} else if spec != nil && !spec.Settings.Active {
 		return Paused
@@ -169,10 +199,10 @@ func (rs *ReplicationStatus) RuntimeStatus(lock bool) ReplicationState {
 func (rs *ReplicationStatus) Storage() *expvar.Map {
 	var rep_map *expvar.Map
 	root_map := RootStorage()
-	rep_map_var := root_map.Get(rs.specId)
+	rep_map_var := root_map.Get(rs.SpecId)
 	if rep_map_var == nil {
 		rep_map = new(expvar.Map).Init()
-		root_map.Set(rs.specId, rep_map)
+		root_map.Set(rs.SpecId, rep_map)
 	} else {
 		rep_map = rep_map_var.(*expvar.Map)
 	}
@@ -231,7 +261,7 @@ func RootStorage() *expvar.Map {
 
 func (rs *ReplicationStatus) ResetStorage() {
 	root_map := RootStorage()
-	root_map.Set(rs.specId, nil)
+	root_map.Set(rs.SpecId, nil)
 }
 
 func (rs *ReplicationStatus) Publish(lock bool) {
@@ -269,7 +299,7 @@ func (rs *ReplicationStatus) publishWithStatus(status string, lock bool) {
 func (rs *ReplicationStatus) Pipeline() common.Pipeline {
 	rs.Lock.RLock()
 	defer rs.Lock.RUnlock()
-	return rs.pipeline
+	return rs.Pipeline_
 }
 
 func (rs *ReplicationStatus) VbList() []uint16 {
@@ -331,7 +361,7 @@ func (rs *ReplicationStatus) GetProgress() string {
 func (rs *ReplicationStatus) String() string {
 	rs.Lock.RLock()
 	defer rs.Lock.RUnlock()
-	return fmt.Sprintf("name={%v}, status={%v}, errors={%v}, progress={%v}\n", rs.specId, rs.RuntimeStatus(false), rs.err_list, rs.progress)
+	return fmt.Sprintf("name={%v}, status={%v}, errors={%v}, progress={%v}\n", rs.SpecId, rs.RuntimeStatus(false), rs.err_list, rs.progress)
 }
 
 func (rs *ReplicationStatus) Updater() interface{} {
@@ -351,5 +381,5 @@ func (rs *ReplicationStatus) SetUpdater(updater interface{}) error {
 }
 
 func (rs *ReplicationStatus) ObjectPool() *base.MCRequestPool {
-	return rs.obj_pool
+	return rs.Obj_pool
 }

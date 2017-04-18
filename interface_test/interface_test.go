@@ -11,19 +11,18 @@ package interface_test
 
 import (
 	common "github.com/couchbase/goxdcr/common"
-	pipeline_manager "github.com/couchbase/goxdcr/pipeline_manager"
 	xdcrlog "github.com/couchbase/goxdcr/log"
-	"testing"
-	"time"	
+	pipeline_manager "github.com/couchbase/goxdcr/pipeline_manager"
 	"log"
+	"testing"
+	"time"
 )
-
 
 func TestPipeline(t *testing.T) {
 	settings := make(map[string]interface{})
 	settings["start_int"] = 0
 	settings["increase_amount"] = 2
-	pipeline_manager.PipelineManager(&testPipelineFactory{}, xdcrlog.DefaultLoggerContext)
+	pipelineMgr := pipeline_manager.PipelineManager(&testPipelineFactory{}, xdcrlog.DefaultLoggerContext)
 
 	ticker := time.NewTicker(600 * time.Millisecond)
 	tickCount := 0
@@ -32,7 +31,7 @@ func TestPipeline(t *testing.T) {
 		var svc common.PipelineService = nil
 		for {
 			if svc == nil {
-				pipeline := pipeline_manager.Pipeline("ABC")
+				pipeline := pipelineMgr.Pipeline("ABC")
 				if pipeline != nil {
 					log.Println("TIKER -- Pipeline is running")
 					ctx := pipeline.RuntimeContext()
@@ -51,7 +50,7 @@ func TestPipeline(t *testing.T) {
 					count := svc.(*testMetricsCollector).MetricsValue()
 					log.Printf("TICKER---%s -- %d data is processed\n", now.String(), count)
 					tickCount++
-//					log.Printf("TICKER---tickCount is %d\n", tickCount)
+					//					log.Printf("TICKER---tickCount is %d\n", tickCount)
 
 				}
 				break
@@ -60,7 +59,7 @@ func TestPipeline(t *testing.T) {
 		}
 	}()
 
-	_, err := pipeline_manager.StartPipeline("ABC", settings)
+	_, err := pipelineMgr.startPipeline("ABC", settings)
 
 	if err != nil {
 		t.Error("Failed to start pipeline ABC")
@@ -74,7 +73,7 @@ func TestPipeline(t *testing.T) {
 		time.Sleep(time.Second * 3)
 
 		log.Println("About to stop ABC")
-		pipeline_manager.StopPipeline("ABC")
+		pipelineMgr.stopPipeline("ABC")
 		ticker.Stop()
 		finchan <- true
 	}(finchan)

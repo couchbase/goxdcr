@@ -710,7 +710,7 @@ func (service *ReplicationSpecService) SetDerivedObj(specId string, derivedObj i
 	return nil
 }
 
-func (service *ReplicationSpecService) GetDerviedObj(specId string) (interface{}, error) {
+func (service *ReplicationSpecService) GetDerivedObj(specId string) (interface{}, error) {
 	cachedVal, ok := service.getCache().Get(specId)
 	if !ok || cachedVal == nil {
 		return nil, fmt.Errorf(ReplicationSpecNotFoundErrorMessage)

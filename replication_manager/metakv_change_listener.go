@@ -19,7 +19,6 @@ import (
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/goxdcr/metadata_svc"
-	"github.com/couchbase/goxdcr/pipeline_manager"
 	"github.com/couchbase/goxdcr/pipeline_utils"
 	"github.com/couchbase/goxdcr/service_def"
 	"github.com/couchbase/goxdcr/utils"
@@ -212,7 +211,7 @@ func (rscl *ReplicationSpecChangeListener) replicationSpecChangeHandlerCallback(
 }
 
 func (rscl *ReplicationSpecChangeListener) launchPipelineUpdate(topic string) {
-	err := pipeline_manager.Update(topic, nil)
+	err := replication_mgr.pipelineMgr.Update(topic, nil)
 	if err != nil {
 		rscl.logger.Error(err.Error())
 	}
@@ -261,7 +260,7 @@ func (rscl *ReplicationSpecChangeListener) liveUpdatePipeline(topic string, oldS
 
 		rscl.logger.Infof("Updating pipeline %v with new settings=%v\n old settings=%v\n", topic, newSettings, oldSettings)
 
-		rs, err := pipeline_manager.ReplicationStatus(topic)
+		rs, err := replication_mgr.pipelineMgr.ReplicationStatus(topic)
 		if err != nil {
 			return err
 		}
@@ -327,7 +326,7 @@ func (rccl *RemoteClusterChangeListener) remoteClusterChangeHandlerCallback(remo
 
 		// if there are existing replications referencing the old cluster ref, there must have been a racing condition
 		// between the replication creation and the cluster ref deletion. Delete the now orphaned replications to ensure consistency
-		topics := pipeline_manager.AllReplicationsForTargetCluster(oldRemoteClusterRef.Uuid)
+		topics := replication_mgr.pipelineMgr.AllReplicationsForTargetCluster(oldRemoteClusterRef.Uuid)
 		if len(topics) > 0 {
 			rccl.logger.Infof("Deleting replications, %v, since the referenced remote cluster, %v, has been deleted\n", topics, oldRemoteClusterRef.Name)
 			for _, topic := range topics {
@@ -349,7 +348,7 @@ func (rccl *RemoteClusterChangeListener) remoteClusterChangeHandlerCallback(remo
 		string(oldRemoteClusterRef.Certificate) != string(newRemoteClusterRef.Certificate) ||
 		oldRemoteClusterRef.UserName != newRemoteClusterRef.UserName ||
 		oldRemoteClusterRef.Password != newRemoteClusterRef.Password {
-		specs := pipeline_manager.AllReplicationSpecsForTargetCluster(oldRemoteClusterRef.Uuid)
+		specs := replication_mgr.pipelineMgr.AllReplicationSpecsForTargetCluster(oldRemoteClusterRef.Uuid)
 
 		for _, spec := range specs {
 			// if critical info in remote cluster reference, e.g., log info or certificate, is changed,
@@ -361,7 +360,7 @@ func (rccl *RemoteClusterChangeListener) remoteClusterChangeHandlerCallback(remo
 
 			if spec.Settings.Active {
 				rccl.logger.Infof("Restarting pipelines %v since the referenced remote cluster %v has been changed\n", spec.Id, oldRemoteClusterRef.Name)
-				pipeline_manager.Update(spec.Id, nil)
+				replication_mgr.pipelineMgr.Update(spec.Id, nil)
 			}
 		}
 	}
@@ -386,7 +385,7 @@ func (rccl *RemoteClusterChangeListener) validateRemoteClusterRef(remoteClusterR
 }
 
 func onDeleteReplication(topic string, logger *log.CommonLogger) error {
-	err := pipeline_manager.RemoveReplicationStatus(topic)
+	err := replication_mgr.pipelineMgr.RemoveReplicationStatus(topic)
 	if err != nil {
 		logger.Errorf("Error removing replication status for replication %v", topic)
 		return err

@@ -21,7 +21,6 @@ import (
 	"github.com/couchbase/goxdcr/gen_server"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
-	"github.com/couchbase/goxdcr/pipeline_manager"
 	"github.com/couchbase/goxdcr/simple_utils"
 	"github.com/couchbase/goxdcr/utils"
 	"net/http"
@@ -364,10 +363,10 @@ func (adminport *Adminport) doGetAllReplicationsRequest(request *http.Request) (
 		return response, err
 	}
 
-	replIds := pipeline_manager.AllReplications()
+	replIds := replication_mgr.pipelineMgr.AllReplications()
 	replSpecs := make(map[string]*metadata.ReplicationSpecification)
 	for _, replId := range replIds {
-		rep_status, _ := pipeline_manager.ReplicationStatus(replId)
+		rep_status, _ := replication_mgr.pipelineMgr.ReplicationStatus(replId)
 		if rep_status != nil {
 			replSpecs[replId] = rep_status.Spec()
 		}

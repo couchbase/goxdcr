@@ -40,7 +40,7 @@ type ReplicationSpecSvc interface {
 
 	//get the derived object (i.e. ReplicationStatus) for the specification
 	//this is used to keep the derived object and replication spec in the same cache
-	GetDerviedObj(specId string) (interface{}, error)
+	GetDerivedObj(specId string) (interface{}, error)
 
 	//set the derived object (i.e ReplicationStatus) for the specification
 	SetDerivedObj(specId string, derivedObj interface{}) error

@@ -61,11 +61,38 @@ var GoXDCROptions struct {
 /************************************
 /* struct ReplicationManager
 *************************************/
+type ReplicationManagerIf interface {
+	initMetadataChangeMonitor()
+	initPausedReplications()
+	checkReplicationStatus(fin_chan chan bool)
+	init(repl_spec_svc service_def.ReplicationSpecSvc,
+		remote_cluster_svc service_def.RemoteClusterSvc,
+		cluster_info_svc service_def.ClusterInfoSvc,
+		xdcr_topology_svc service_def.XDCRCompTopologySvc,
+		replication_settings_svc service_def.ReplicationSettingsSvc,
+		checkpoint_svc service_def.CheckpointsService,
+		capi_svc service_def.CAPIService,
+		audit_svc service_def.AuditSvc,
+		uilog_svc service_def.UILogSvc,
+		global_setting_svc service_def.GlobalSettingsSvc,
+		bucket_settings_svc service_def.BucketSettingsSvc,
+		internal_settings_svc service_def.InternalSettingsSvc)
+	createAndPersistReplicationSpec(justValidate bool, sourceBucket, targetCluster, targetBucket string, settings map[string]interface{}) (*metadata.ReplicationSpecification, map[string]error, error)
+	OnError(s common.Supervisor, errMap map[string]error)
+	upgradeRemoteClusterRefs()
+	getPipelineFromPipelineSupevisor(s common.Supervisor) (common.Pipeline, error)
+}
+
+/************************************
+/* struct ReplicationManager
+*************************************/
 type replicationManager struct {
 	// supervises the livesness of adminport and pipelineMasterSupervisor
 	supervisor.GenericSupervisor
 	// supervises the liveness of all pipeline supervisors
 	pipelineMasterSupervisor *supervisor.GenericSupervisor
+	// Single instance of pipeline_mgr here instead of using a global
+	pipelineMgr	*pipeline_manager.PipelineManager
 
 	//replication specification service handle
 	repl_spec_svc service_def.ReplicationSpecSvc
@@ -260,9 +287,9 @@ func (rm *replicationManager) initPausedReplications() {
 		} else {
 			for _, spec := range specs {
 				if !spec.Settings.Active {
-					rep_status, _ := pipeline_manager.ReplicationStatus(spec.Id)
+					rep_status, _ := rm.pipelineMgr.ReplicationStatus(spec.Id)
 					if rep_status == nil {
-						pipeline_manager.InitReplicationStatusForReplication(spec.Id)
+						rm.pipelineMgr.InitReplicationStatusForReplication(spec.Id)
 					}
 				}
 			}
@@ -290,7 +317,7 @@ func (rm *replicationManager) checkReplicationStatus(fin_chan chan bool) {
 		case <-fin_chan:
 			return
 		case <-status_check_ticker.C:
-			pipeline_manager.CheckPipelines()
+			rm.pipelineMgr.CheckPipelines()
 		case <-stats_update_ticker.C:
 			pipeline_svc.UpdateStats(ClusterInfoService(), XDCRCompTopologyService(), CheckpointService(), kv_mem_clients, logger_rm)
 		}
@@ -328,7 +355,7 @@ func (rm *replicationManager) init(
 	rm.internal_settings_svc = internal_settings_svc
 	fac := factory.NewXDCRFactory(repl_spec_svc, remote_cluster_svc, cluster_info_svc, xdcr_topology_svc, checkpoint_svc, capi_svc, uilog_svc, bucket_settings_svc, log.DefaultLoggerContext, log.DefaultLoggerContext, rm, rm.pipelineMasterSupervisor)
 
-	pipeline_manager.PipelineManager(fac, repl_spec_svc, xdcr_topology_svc, remote_cluster_svc, cluster_info_svc, uilog_svc, log.DefaultLoggerContext)
+	rm.pipelineMgr = pipeline_manager.NewPipelineManager(fac, repl_spec_svc, xdcr_topology_svc, remote_cluster_svc, cluster_info_svc, uilog_svc, log.DefaultLoggerContext)
 
 	rm.metadata_change_callback_cancel_ch = make(chan struct{}, 1)
 
@@ -420,16 +447,6 @@ func DeleteReplication(topic string, realUserId *base.RealUserId) error {
 	logger_rm.Infof("Pipeline %s is deleted\n", topic)
 
 	return nil
-}
-
-//start the replication for the given replicationId
-func startPipelineWithRetry(topic string) error {
-	_, err := pipeline_manager.StartPipeline(topic)
-	if err != nil {
-
-		err = pipeline_manager.Update(topic, err)
-	}
-	return err
 }
 
 func PipelineMasterSupervisor() *supervisor.GenericSupervisor {
@@ -576,7 +593,7 @@ func UpdateReplicationSettings(topic string, settings map[string]interface{}, re
 //%    ]
 //% }
 func GetStatistics(bucket string) (*expvar.Map, error) {
-	repIds := pipeline_manager.AllReplicationsForBucket(bucket)
+	repIds := replication_mgr.pipelineMgr.AllReplicationsForBucket(bucket)
 	logger_rm.Debugf("repIds=%v\n", repIds)
 
 	stats := new(expvar.Map).Init()
@@ -633,7 +650,7 @@ func (rm *replicationManager) createAndPersistReplicationSpec(justValidate bool,
 func GetReplicationInfos() ([]base.ReplicationInfo, error) {
 	replInfos := make([]base.ReplicationInfo, 0)
 
-	replIds := pipeline_manager.AllReplications()
+	replIds := replication_mgr.pipelineMgr.AllReplications()
 
 	for _, replId := range replIds {
 		replInfo := base.ReplicationInfo{}
@@ -641,7 +658,7 @@ func GetReplicationInfos() ([]base.ReplicationInfo, error) {
 		replInfo.StatsMap = make(map[string]interface{})
 		replInfo.ErrorList = make([]base.ErrorInfo, 0)
 
-		rep_status, _ := pipeline_manager.ReplicationStatus(replId)
+		rep_status, _ := replication_mgr.pipelineMgr.ReplicationStatus(replId)
 		if rep_status != nil {
 			// set stats map
 			expvarMap, err := pipeline_svc.GetStatisticsForPipeline(replId)
@@ -701,10 +718,10 @@ func (rm *replicationManager) OnError(s common.Supervisor, errMap map[string]err
 			child, _ := s.Child(childId)
 			// child could be null if the pipeline has been stopped so far. //TODO should we restart it here?
 			if child != nil {
-				pipeline, err := getPipelineFromPipelineSupevisor(child.(common.Supervisor))
+				pipeline, err := rm.getPipelineFromPipelineSupevisor(child.(common.Supervisor))
 				if err == nil {
 					// try to fix the pipeline
-					pipeline_manager.Update(pipeline.Topic(), err1)
+					rm.pipelineMgr.Update(pipeline.Topic(), err1)
 				}
 			}
 		}
@@ -714,7 +731,7 @@ func (rm *replicationManager) OnError(s common.Supervisor, errMap map[string]err
 		if len(errMap) == 0 {
 			panic("errMap is empty")
 		}
-		pipeline, err := getPipelineFromPipelineSupevisor(s)
+		pipeline, err := rm.getPipelineFromPipelineSupevisor(s)
 		if err == nil {
 			// try to fix the pipeline
 
@@ -728,7 +745,7 @@ func (rm *replicationManager) OnError(s common.Supervisor, errMap map[string]err
 					break
 				}
 			}
-			pipeline_manager.Update(pipeline.Topic(), errors.New(errMsg))
+			rm.pipelineMgr.Update(pipeline.Topic(), errors.New(errMsg))
 		}
 	}
 }
@@ -736,11 +753,11 @@ func (rm *replicationManager) OnError(s common.Supervisor, errMap map[string]err
 //lauch the repairer for a pipeline
 //in asynchronous fashion
 
-func getPipelineFromPipelineSupevisor(s common.Supervisor) (common.Pipeline, error) {
+func (rm *replicationManager) getPipelineFromPipelineSupevisor(s common.Supervisor) (common.Pipeline, error) {
 	supervisorId := s.Id()
 	if strings.HasPrefix(supervisorId, base.PipelineSupervisorIdPrefix) {
 		pipelineId := supervisorId[len(base.PipelineSupervisorIdPrefix):]
-		rep_status, _ := pipeline_manager.ReplicationStatus(pipelineId)
+		rep_status, _ := rm.pipelineMgr.ReplicationStatus(pipelineId)
 		if rep_status != nil {
 			pipeline := rep_status.Pipeline()
 			if pipeline != nil {
@@ -859,7 +876,7 @@ func cleanup() {
 		// kill adminport to stop receiving new requests
 		close(replication_mgr.adminport_finch)
 
-		simple_utils.ExecWithTimeout(pipeline_manager.OnExit, 1*time.Second, logger_rm)
+		simple_utils.ExecWithTimeout(replication_mgr.pipelineMgr.OnExit, 1*time.Second, logger_rm)
 
 		close(replication_mgr.status_logger_finch)
 		close(replication_mgr.mem_stats_logger_finch)
