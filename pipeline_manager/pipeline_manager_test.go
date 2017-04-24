@@ -11,6 +11,7 @@ import (
 	replicationStatus "github.com/couchbase/goxdcr/pipeline"
 	PipelineMgrMock "github.com/couchbase/goxdcr/pipeline_manager/mocks"
 	service_def "github.com/couchbase/goxdcr/service_def/mocks"
+	utilities "github.com/couchbase/goxdcr/utils"
 	"github.com/stretchr/testify/assert"
 	mock "github.com/stretchr/testify/mock"
 	//	http "net/http"
@@ -28,13 +29,16 @@ func TestStopAllUpdaters(t *testing.T) {
 	xdcrTopologyMock := &service_def.XDCRCompTopologySvc{}
 	remoteClusterMock := &service_def.RemoteClusterSvc{}
 	waitGrp := &sync.WaitGroup{}
+	utilsNew := utilities.NewUtilities()
 
 	pipelineMgr := PipelineManager{
 		pipeline_factory:   pipelineMock,
 		repl_spec_svc:      replSpecSvcMock,
 		xdcr_topology_svc:  xdcrTopologyMock,
 		remote_cluster_svc: remoteClusterMock,
-		child_waitGrp:      waitGrp}
+		child_waitGrp:      waitGrp,
+		utils:              utilsNew,
+	}
 	// end boiler plate
 
 	replSpecSvcMock.On("AllReplicationSpecIds").Return(nil, errors.New("Injected empty error"))
@@ -62,6 +66,7 @@ func setupBoilerPlate() (*log.CommonLogger,
 	xdcrTopologyMock := &service_def.XDCRCompTopologySvc{}
 	remoteClusterMock := &service_def.RemoteClusterSvc{}
 	waitGrp := &sync.WaitGroup{}
+	utilsNew := utilities.NewUtilities()
 
 	pipelineMgr := &PipelineManager{
 		pipeline_factory:   pipelineMock,
@@ -69,7 +74,9 @@ func setupBoilerPlate() (*log.CommonLogger,
 		xdcr_topology_svc:  xdcrTopologyMock,
 		remote_cluster_svc: remoteClusterMock,
 		logger:             testLogger,
-		child_waitGrp:      waitGrp}
+		child_waitGrp:      waitGrp,
+		utils:              utilsNew,
+	}
 
 	// Some things needed for pipelinemgr
 	testTopic := "testTopic"

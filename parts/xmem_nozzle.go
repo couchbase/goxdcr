@@ -23,7 +23,7 @@ import (
 	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/goxdcr/service_def"
 	"github.com/couchbase/goxdcr/simple_utils"
-	"github.com/couchbase/goxdcr/utils"
+	utilities "github.com/couchbase/goxdcr/utils"
 	"io"
 	"math"
 	"math/rand"
@@ -473,7 +473,7 @@ func newConfig(logger *log.CommonLogger) xmemConfig {
 
 }
 
-func (config *xmemConfig) initializeConfig(settings map[string]interface{}) error {
+func (config *xmemConfig) initializeConfig(settings map[string]interface{}, utils utilities.UtilsIface) error {
 	err := utils.ValidateSettings(xmem_setting_defs, settings, config.logger)
 
 	if err == nil {
@@ -779,6 +779,8 @@ type XmemNozzle struct {
 	setMetaUserAgent string
 
 	bandwidthThrottler service_def.BandwidthThrottlerSvc
+
+	utils utilities.UtilsIface
 }
 
 func NewXmemNozzle(id string,
@@ -792,7 +794,8 @@ func NewXmemNozzle(id string,
 	password string,
 	dataObj_recycler base.DataObjRecycler,
 	source_cr_mode base.ConflictResolutionMode,
-	logger_context *log.LoggerContext) *XmemNozzle {
+	logger_context *log.LoggerContext,
+	utilsIn utilities.UtilsIface) *XmemNozzle {
 
 	//callback functions from GenServer
 	var msg_callback_func gen_server.Msg_Callback_Func
@@ -800,7 +803,7 @@ func NewXmemNozzle(id string,
 	var error_handler_func gen_server.Error_Handler_Func
 
 	server := gen_server.NewGenServer(&msg_callback_func,
-		&exit_callback_func, &error_handler_func, logger_context, "XmemNozzle")
+		&exit_callback_func, &error_handler_func, logger_context, "XmemNozzle", utilsIn)
 	part := NewAbstractPartWithLogger(id, server.Logger())
 
 	xmem := &XmemNozzle{GenServer: server,
@@ -826,6 +829,7 @@ func NewXmemNozzle(id string,
 		topic:               topic,
 		source_cr_mode:      source_cr_mode,
 		sourceBucketName:    sourceBucketName,
+		utils:               utilsIn,
 	}
 
 	initial_last_ten_batches_size := []uint32{0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
@@ -1691,7 +1695,7 @@ func (xmem *XmemNozzle) getOrCreateConnPool() (pool base.ConnPool, err error) {
 	} else {
 		//create a pool of SSL connection
 		poolName := xmem.getPoolName()
-		hostName := utils.GetHostName(xmem.config.connectStr)
+		hostName := xmem.utils.GetHostName(xmem.config.connectStr)
 
 		if xmem.config.memcached_ssl_port != 0 {
 			xmem.Logger().Infof("%v Get or create ssl over memcached connection, memcached_ssl_port=%v\n", xmem.Id(), int(xmem.config.memcached_ssl_port))
@@ -1773,7 +1777,7 @@ func (xmem *XmemNozzle) initNewBatch() {
 }
 
 func (xmem *XmemNozzle) initialize(settings map[string]interface{}) error {
-	err := xmem.config.initializeConfig(settings)
+	err := xmem.config.initializeConfig(settings, xmem.utils)
 	if err != nil {
 		return err
 	}
@@ -2294,9 +2298,9 @@ func (xmem *XmemNozzle) optimisticRep(req *mc.MCRequest) bool {
 
 func (xmem *XmemNozzle) sendHELO(setMeta bool) (bool, error) {
 	if setMeta {
-		return utils.SendHELOWithXattrFeature(xmem.client_for_setMeta.getMemClient(), xmem.setMetaUserAgent, xmem.config.readTimeout, xmem.config.writeTimeout, xmem.Logger())
+		return xmem.utils.SendHELOWithXattrFeature(xmem.client_for_setMeta.getMemClient(), xmem.setMetaUserAgent, xmem.config.readTimeout, xmem.config.writeTimeout, xmem.Logger())
 	} else {
-		return utils.SendHELOWithXattrFeature(xmem.client_for_getMeta.getMemClient(), xmem.getMetaUserAgent, xmem.config.readTimeout, xmem.config.writeTimeout, xmem.Logger())
+		return xmem.utils.SendHELOWithXattrFeature(xmem.client_for_getMeta.getMemClient(), xmem.getMetaUserAgent, xmem.config.readTimeout, xmem.config.writeTimeout, xmem.Logger())
 	}
 }
 
@@ -2484,7 +2488,7 @@ func (xmem *XmemNozzle) writeToClientWithoutThrottling(client *xmemClient, bytes
 	} else {
 		xmem.Logger().Errorf("%v writeToClient error: %s\n", xmem.Id(), fmt.Sprint(err))
 
-		if utils.IsSeriousNetError(err) {
+		if xmem.utils.IsSeriousNetError(err) {
 			xmem.repairConn(client, err.Error(), rev)
 
 		} else if isNetError(err) {
@@ -2525,7 +2529,7 @@ func (xmem *XmemNozzle) readFromClient(client *xmemClient, resetReadTimeout bool
 		if !isAppErr {
 			if err == io.EOF {
 				return nil, connectionClosedError, rev
-			} else if utils.IsSeriousNetError(err) {
+			} else if xmem.utils.IsSeriousNetError(err) {
 				return nil, badConnectionError, rev
 			} else if isNetError(err) {
 				client.reportOpFailure(true)

@@ -176,13 +176,14 @@ func mf(err error, msg string) {
 
 func startRouter() {
 
+	utils := utils.NewUtilities()
 	partMap := make(map[string]pc.Part)
 	for i := 0; i < NumParts; i++ {
 		partId := PartIdPrefix + strconv.FormatInt(int64(i), 10)
 		partMap[partId] = NewTestPart(partId)
 	}
 
-	router, _ = parts.NewRouter("router1", "router1", options.filter_expression, partMap, buildVbMap(partMap), base.CRMode_RevId, couchlog.DefaultLoggerContext, nil)
+	router, _ = parts.NewRouter("router1", "router1", options.filter_expression, partMap, buildVbMap(partMap), base.CRMode_RevId, couchlog.DefaultLoggerContext, nil, utils)
 }
 
 func buildVbMap(downStreamParts map[string]pc.Part) map[uint16]string {

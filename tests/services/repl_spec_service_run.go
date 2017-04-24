@@ -14,8 +14,9 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"github.com/couchbase/goxdcr/service_impl"
 	"github.com/couchbase/goxdcr/metadata_svc"
+	"github.com/couchbase/goxdcr/service_impl"
+	utilities "github.com/couchbase/goxdcr/utils"
 	"os"
 )
 
@@ -48,6 +49,7 @@ func main() {
 }
 
 func startReplicationSpecService() error {
+	utils := utilities.NewUtilities()
 	metadataSvc, err := metadata_svc.NewMetaKVMetadataSvc(nil)
 	if err != nil {
 		return errors.New(fmt.Sprintf("Error starting metadata service. err=%v\n", err.Error()))
@@ -59,7 +61,7 @@ func startReplicationSpecService() error {
 		return err
 	}
 
-	remote_cluster_svc, err := metadata_svc.NewRemoteClusterService(nil, metadataSvc, top_svc, cluster_info_svc, nil)
+	remote_cluster_svc, err := metadata_svc.NewRemoteClusterService(nil, metadataSvc, top_svc, cluster_info_svc, nil, utils)
 	if err != nil {
 		fmt.Println(err.Error())
 		return err
@@ -71,7 +73,7 @@ func startReplicationSpecService() error {
 	}
 
 	// create a test replication spec
-	spec, err := service.ConstructNewReplicationSpec (sourceBucketName, targetClusterUUID, targetBucketName)
+	spec, err := service.ConstructNewReplicationSpec(sourceBucketName, targetClusterUUID, targetBucketName)
 	if err != nil {
 		return err
 	}

@@ -18,6 +18,7 @@ import (
 	rm "github.com/couchbase/goxdcr/replication_manager"
 	"github.com/couchbase/goxdcr/service_def"
 	"github.com/couchbase/goxdcr/service_impl"
+	utilities "github.com/couchbase/goxdcr/utils"
 	"os"
 	"runtime"
 	"time"
@@ -82,9 +83,11 @@ func main() {
 		log.Init(options.logFileDir, options.maxLogFileSize, options.maxNumberOfLogFiles)
 	}
 
-	cluster_info_svc := service_impl.NewClusterInfoSvc(nil)
+	// Initializes official utility object to be used throughout
+	utils := utilities.NewUtilities()
 
-	top_svc, err := service_impl.NewXDCRTopologySvc(uint16(options.sourceKVAdminPort), uint16(options.xdcrRestPort), options.isEnterprise, cluster_info_svc, nil)
+	cluster_info_svc := service_impl.NewClusterInfoSvc(nil, utils)
+	top_svc, err := service_impl.NewXDCRTopologySvc(uint16(options.sourceKVAdminPort), uint16(options.xdcrRestPort), options.isEnterprise, cluster_info_svc, nil, utils)
 	if err != nil {
 		fmt.Printf("Error starting xdcr topology service. err=%v\n", err)
 		os.Exit(1)
@@ -104,23 +107,23 @@ func main() {
 		os.Exit(1)
 	}
 
-	audit_svc, err := service_impl.NewAuditSvc(top_svc, nil)
+	audit_svc, err := service_impl.NewAuditSvc(top_svc, nil, utils)
 	if err != nil {
 		fmt.Printf("Error starting audit service. err=%v\n", err)
 		os.Exit(1)
 	}
 
 	processSetting_svc := metadata_svc.NewGlobalSettingsSvc(metakv_svc, nil)
-	bucketSettings_svc := metadata_svc.NewBucketSettingsService(metakv_svc, top_svc, nil)
+	bucketSettings_svc := metadata_svc.NewBucketSettingsService(metakv_svc, top_svc, nil, utils)
 
 	if options.isConvert {
 		// disable uilogging during upgrade by specifying a nil uilog service
-		remote_cluster_svc, err := metadata_svc.NewRemoteClusterService(nil, metakv_svc, top_svc, cluster_info_svc, nil)
+		remote_cluster_svc, err := metadata_svc.NewRemoteClusterService(nil, metakv_svc, top_svc, cluster_info_svc, nil, utils)
 		if err != nil {
 			fmt.Printf("Error starting remote cluster service. err=%v\n", err)
 			os.Exit(1)
 		}
-		replication_spec_svc, err := metadata_svc.NewReplicationSpecService(nil, remote_cluster_svc, metakv_svc, top_svc, cluster_info_svc, nil)
+		replication_spec_svc, err := metadata_svc.NewReplicationSpecService(nil, remote_cluster_svc, metakv_svc, top_svc, cluster_info_svc, nil, utils)
 		if err != nil {
 			fmt.Printf("Error starting replication spec service. err=%v\n", err)
 			os.Exit(1)
@@ -130,7 +133,7 @@ func main() {
 			replication_spec_svc,
 			metadata_svc.NewReplicationSettingsSvc(metakv_svc, nil),
 			metadata_svc.NewCheckpointsService(metakv_svc, nil),
-			nil)
+			nil, utils)
 		err = migration_svc.Migrate()
 		if err == nil {
 			os.Exit(0)
@@ -138,13 +141,13 @@ func main() {
 			os.Exit(1)
 		}
 	} else {
-		uilog_svc := service_impl.NewUILogSvc(top_svc, nil)
-		remote_cluster_svc, err := metadata_svc.NewRemoteClusterService(uilog_svc, metakv_svc, top_svc, cluster_info_svc, nil)
+		uilog_svc := service_impl.NewUILogSvc(top_svc, nil, utils)
+		remote_cluster_svc, err := metadata_svc.NewRemoteClusterService(uilog_svc, metakv_svc, top_svc, cluster_info_svc, nil, utils)
 		if err != nil {
 			fmt.Printf("Error starting remote cluster service. err=%v\n", err)
 			os.Exit(1)
 		}
-		replication_spec_svc, err := metadata_svc.NewReplicationSpecService(uilog_svc, remote_cluster_svc, metakv_svc, top_svc, cluster_info_svc, nil)
+		replication_spec_svc, err := metadata_svc.NewReplicationSpecService(uilog_svc, remote_cluster_svc, metakv_svc, top_svc, cluster_info_svc, nil, utils)
 		if err != nil {
 			fmt.Printf("Error starting replication spec service. err=%v\n", err)
 			os.Exit(1)
@@ -161,12 +164,13 @@ func main() {
 			top_svc,
 			metadata_svc.NewReplicationSettingsSvc(metakv_svc, nil),
 			metadata_svc.NewCheckpointsService(metakv_svc, nil),
-			service_impl.NewCAPIService(cluster_info_svc, nil),
+			service_impl.NewCAPIService(cluster_info_svc, nil, utils),
 			audit_svc,
 			uilog_svc,
 			processSetting_svc,
 			bucketSettings_svc,
-			internalSettings_svc)
+			internalSettings_svc,
+			utils)
 
 		// keep main alive in normal mode
 		<-done
@@ -183,7 +187,7 @@ func waitForMetadataService(metakv_svc service_def.MetadataSvc) error {
 		}
 		num_retry++
 		if num_retry > max_retry_wait_for_metadata_service {
-			return fmt.Errorf("Metadata service not available after %v retries. \n", num_retry - 1)
+			return fmt.Errorf("Metadata service not available after %v retries. \n", num_retry-1)
 		} else {
 			fmt.Printf("Metadata service not available. Retrying after %v. \n", retry_interval_wait_for_metadata_service)
 			time.Sleep(retry_interval_wait_for_metadata_service)

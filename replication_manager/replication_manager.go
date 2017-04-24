@@ -29,7 +29,7 @@ import (
 	"github.com/couchbase/goxdcr/service_def"
 	"github.com/couchbase/goxdcr/simple_utils"
 	"github.com/couchbase/goxdcr/supervisor"
-	"github.com/couchbase/goxdcr/utils"
+	utilities "github.com/couchbase/goxdcr/utils"
 	"io"
 	"os"
 	"reflect"
@@ -116,6 +116,8 @@ type replicationManager struct {
 	bucket_settings_svc service_def.BucketSettingsSvc
 	//internal settings service
 	internal_settings_svc service_def.InternalSettingsSvc
+	// Mockable utils object
+	utils utilities.UtilsIface
 
 	once sync.Once
 
@@ -151,7 +153,8 @@ func StartReplicationManager(sourceKVHost string, xdcrRestPort uint16,
 	uilog_svc service_def.UILogSvc,
 	global_setting_svc service_def.GlobalSettingsSvc,
 	bucket_settings_svc service_def.BucketSettingsSvc,
-	internal_settings_svc service_def.InternalSettingsSvc) {
+	internal_settings_svc service_def.InternalSettingsSvc,
+	utilitiesIn utilities.UtilsIface) {
 
 	replication_mgr.once.Do(func() {
 		// ns_server shutdown protocol: poll stdin and exit upon reciept of EOF
@@ -159,6 +162,9 @@ func StartReplicationManager(sourceKVHost string, xdcrRestPort uint16,
 
 		// initialize constants
 		initConstants(xdcr_topology_svc, internal_settings_svc)
+
+		// Take in utilities
+		replication_mgr.utils = utilitiesIn
 
 		// initializes replication manager
 		replication_mgr.init(repl_spec_svc, remote_cluster_svc, cluster_info_svc, xdcr_topology_svc, replication_settings_svc, checkpoint_svc, capi_svc, audit_svc, uilog_svc, global_setting_svc, bucket_settings_svc, internal_settings_svc)
@@ -197,7 +203,7 @@ func StartReplicationManager(sourceKVHost string, xdcrRestPort uint16,
 		replication_mgr.initMetadataChangeMonitor()
 
 		// start adminport
-		adminport := NewAdminport(sourceKVHost, xdcrRestPort, replication_mgr.adminport_finch)
+		adminport := NewAdminport(sourceKVHost, xdcrRestPort, replication_mgr.adminport_finch, replication_mgr.utils)
 		go adminport.Start()
 		logger_rm.Info("Admin port has been launched")
 		// add adminport as children of replication manager supervisor
@@ -247,7 +253,8 @@ func (rm *replicationManager) initMetadataChangeMonitor() {
 		rm.global_setting_svc,
 		rm.metadata_change_callback_cancel_ch,
 		rm.children_waitgrp,
-		log.DefaultLoggerContext)
+		log.DefaultLoggerContext,
+		rm.utils)
 
 	mcm.RegisterListener(globalSettingChangeListener)
 	rm.global_setting_svc.SetMetadataChangeHandlerCallback(globalSettingChangeListener.globalSettingChangeHandlerCallback)
@@ -256,7 +263,8 @@ func (rm *replicationManager) initMetadataChangeMonitor() {
 		rm.internal_settings_svc,
 		rm.metadata_change_callback_cancel_ch,
 		rm.children_waitgrp,
-		log.DefaultLoggerContext)
+		log.DefaultLoggerContext,
+		rm.utils)
 
 	mcm.RegisterListener(internalSettingsChangeListener)
 	rm.internal_settings_svc.SetMetadataChangeHandlerCallback(internalSettingsChangeListener.internalSettingsChangeHandlerCallback)
@@ -266,7 +274,8 @@ func (rm *replicationManager) initMetadataChangeMonitor() {
 		rm.repl_spec_svc,
 		rm.metadata_change_callback_cancel_ch,
 		rm.children_waitgrp,
-		log.DefaultLoggerContext)
+		log.DefaultLoggerContext,
+		rm.utils)
 
 	mcm.RegisterListener(remoteClusterChangeListener)
 	rm.remote_cluster_svc.SetMetadataChangeHandlerCallback(remoteClusterChangeListener.remoteClusterChangeHandlerCallback)
@@ -275,7 +284,8 @@ func (rm *replicationManager) initMetadataChangeMonitor() {
 		rm.repl_spec_svc,
 		rm.metadata_change_callback_cancel_ch,
 		rm.children_waitgrp,
-		log.DefaultLoggerContext)
+		log.DefaultLoggerContext,
+		rm.utils)
 	mcm.RegisterListener(replicationSpecChangeListener)
 	rm.repl_spec_svc.SetMetadataChangeHandlerCallback(replicationSpecChangeListener.replicationSpecChangeHandlerCallback)
 
@@ -322,7 +332,7 @@ func (rm *replicationManager) checkReplicationStatus(fin_chan chan bool) {
 		case <-status_check_ticker.C:
 			rm.pipelineMgr.CheckPipelines()
 		case <-stats_update_ticker.C:
-			pipeline_svc.UpdateStats(ClusterInfoService(), XDCRCompTopologyService(), CheckpointService(), kv_mem_clients, logger_rm)
+			pipeline_svc.UpdateStats(ClusterInfoService(), XDCRCompTopologyService(), CheckpointService(), kv_mem_clients, logger_rm, rm.utils)
 		}
 	}
 }
@@ -341,8 +351,8 @@ func (rm *replicationManager) init(
 	bucket_settings_svc service_def.BucketSettingsSvc,
 	internal_settings_svc service_def.InternalSettingsSvc) {
 
-	rm.GenericSupervisor = *supervisor.NewGenericSupervisor(base.ReplicationManagerSupervisorId, log.DefaultLoggerContext, rm, nil)
-	rm.pipelineMasterSupervisor = supervisor.NewGenericSupervisor(base.PipelineMasterSupervisorId, log.DefaultLoggerContext, rm, &rm.GenericSupervisor)
+	rm.GenericSupervisor = *supervisor.NewGenericSupervisor(base.ReplicationManagerSupervisorId, log.DefaultLoggerContext, rm, nil, rm.utils)
+	rm.pipelineMasterSupervisor = supervisor.NewGenericSupervisor(base.PipelineMasterSupervisorId, log.DefaultLoggerContext, rm, &rm.GenericSupervisor, rm.utils)
 	rm.repl_spec_svc = repl_spec_svc
 	rm.remote_cluster_svc = remote_cluster_svc
 	rm.cluster_info_svc = cluster_info_svc
@@ -356,9 +366,9 @@ func (rm *replicationManager) init(
 	rm.global_setting_svc = global_setting_svc
 	rm.bucket_settings_svc = bucket_settings_svc
 	rm.internal_settings_svc = internal_settings_svc
-	fac := factory.NewXDCRFactory(repl_spec_svc, remote_cluster_svc, cluster_info_svc, xdcr_topology_svc, checkpoint_svc, capi_svc, uilog_svc, bucket_settings_svc, log.DefaultLoggerContext, log.DefaultLoggerContext, rm, rm.pipelineMasterSupervisor)
+	fac := factory.NewXDCRFactory(repl_spec_svc, remote_cluster_svc, cluster_info_svc, xdcr_topology_svc, checkpoint_svc, capi_svc, uilog_svc, bucket_settings_svc, log.DefaultLoggerContext, log.DefaultLoggerContext, rm, rm.pipelineMasterSupervisor, rm.utils)
 
-	rm.pipelineMgr = pipeline_manager.NewPipelineManager(fac, repl_spec_svc, xdcr_topology_svc, remote_cluster_svc, cluster_info_svc, checkpoint_svc, uilog_svc, log.DefaultLoggerContext)
+	rm.pipelineMgr = pipeline_manager.NewPipelineManager(fac, repl_spec_svc, xdcr_topology_svc, remote_cluster_svc, cluster_info_svc, checkpoint_svc, uilog_svc, log.DefaultLoggerContext, rm.utils)
 
 	rm.metadata_change_callback_cancel_ch = make(chan struct{}, 1)
 
@@ -695,7 +705,7 @@ func GetReplicationInfos() ([]base.ReplicationInfo, error) {
 			// set stats map
 			expvarMap, err := pipeline_svc.GetStatisticsForPipeline(replId)
 			if err == nil && expvarMap != nil {
-				replInfo.StatsMap = utils.GetMapFromExpvarMap(expvarMap)
+				replInfo.StatsMap = replication_mgr.utils.GetMapFromExpvarMap(expvarMap)
 				validateStatsMap(replInfo.StatsMap)
 			}
 
@@ -1090,7 +1100,7 @@ func constructUpdateBucketSettingsEvent(bucketName string, lwwEnabled bool, real
 
 func logAuditErrors(err error) {
 	if err != nil {
-		err = utils.NewEnhancedError(base.ErrorWritingAudit, err)
+		err = replication_mgr.utils.NewEnhancedError(base.ErrorWritingAudit, err)
 		logger_rm.Errorf(err.Error())
 	}
 }

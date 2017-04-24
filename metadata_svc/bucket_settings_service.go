@@ -15,7 +15,7 @@ import (
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/goxdcr/service_def"
-	"github.com/couchbase/goxdcr/utils"
+	utilities "github.com/couchbase/goxdcr/utils"
 )
 
 const (
@@ -28,15 +28,18 @@ type BucketSettingsService struct {
 	xdcr_comp_topology_svc   service_def.XDCRCompTopologySvc
 	logger                   *log.CommonLogger
 	metadata_change_callback base.MetadataChangeHandlerCallback
+	utils                    utilities.UtilsIface
 }
 
 func NewBucketSettingsService(metadata_svc service_def.MetadataSvc,
 	xdcr_comp_topology_svc service_def.XDCRCompTopologySvc,
-	logger_ctx *log.LoggerContext) *BucketSettingsService {
+	logger_ctx *log.LoggerContext,
+	utilsIn utilities.UtilsIface) *BucketSettingsService {
 	return &BucketSettingsService{
 		metadata_svc:           metadata_svc,
 		xdcr_comp_topology_svc: xdcr_comp_topology_svc,
 		logger:                 log.NewLogger("BucketSettSvc", logger_ctx),
+		utils:                  utilsIn,
 	}
 }
 
@@ -150,5 +153,5 @@ func (service *BucketSettingsService) getBucketUUID(bucketName string) (string, 
 		return "", err
 	}
 
-	return utils.LocalBucketUUID(connStr, bucketName, service.logger)
+	return service.utils.LocalBucketUUID(connStr, bucketName, service.logger)
 }

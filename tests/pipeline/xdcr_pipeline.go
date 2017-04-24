@@ -23,7 +23,7 @@ import (
 	"github.com/couchbase/goxdcr/replication_manager"
 	"github.com/couchbase/goxdcr/service_impl"
 	testcommon "github.com/couchbase/goxdcr/tests/common"
-	"github.com/couchbase/goxdcr/utils"
+	utilities "github.com/couchbase/goxdcr/utils"
 	"net/http"
 	"os"
 	"time"
@@ -117,7 +117,8 @@ func main() {
 func setup() error {
 	logger.Info("setup....")
 	cluster_info_svc := service_impl.NewClusterInfoSvc(nil)
-	top_svc, err := service_impl.NewXDCRTopologySvc(uint16(options.source_kv_port), base.AdminportNumber, 11997, true, cluster_info_svc, nil)
+	utils := utilities.NewUtilities()
+	top_svc, err := service_impl.NewXDCRTopologySvc(uint16(options.source_kv_port), base.AdminportNumber, 11997, true, cluster_info_svc, nil, utils)
 	if err != nil {
 		logger.Errorf("Error starting xdcr topology service. err=%v\n", err)
 		os.Exit(1)
@@ -137,14 +138,14 @@ func setup() error {
 		os.Exit(1)
 	}
 
-	audit_svc, err := service_impl.NewAuditSvc(top_svc, nil)
+	audit_svc, err := service_impl.NewAuditSvc(top_svc, nil, utils)
 	if err != nil {
 		fmt.Printf("Error starting audit service. err=%v\n", err)
 		os.Exit(1)
 	}
 
-	uilog_svc := service_impl.NewUILogSvc(top_svc, nil)
-	remote_cluster_svc, err := metadata_svc.NewRemoteClusterService(uilog_svc, metakv_svc, top_svc, cluster_info_svc, nil)
+	uilog_svc := service_impl.NewUILogSvc(top_svc, nil, utils)
+	remote_cluster_svc, err := metadata_svc.NewRemoteClusterService(uilog_svc, metakv_svc, top_svc, cluster_info_svc, nil, utils)
 	if err != nil {
 		fmt.Println(err.Error())
 		return err
@@ -162,7 +163,7 @@ func setup() error {
 	replication_manager.StartReplicationManager(options.source_kv_host, base.AdminportNumber,
 		repl_spec_svc, remote_cluster_svc,
 		cluster_info_svc, top_svc, metadata_svc.NewReplicationSettingsSvc(metakv_svc, nil),
-		metadata_svc.NewCheckpointsService(metakv_svc, nil), service_impl.NewCAPIService(cluster_info_svc, nil),
+		metadata_svc.NewCheckpointsService(metakv_svc, nil), service_impl.NewCAPIService(cluster_info_svc, nil, utils),
 		audit_svc, uilog_svc, processSetting_svc, buckerSettings_svc, internalSettings_svc)
 
 	logger.Info("Finish setup")

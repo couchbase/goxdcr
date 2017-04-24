@@ -12,6 +12,7 @@ import (
 	"github.com/couchbase/goxdcr/parts"
 	"github.com/couchbase/goxdcr/replication_manager"
 	"github.com/couchbase/goxdcr/service_impl"
+	utilities "github.com/couchbase/goxdcr/utils"
 	"github.com/couchbase/goxdcr/tests/common"
 	"os"
 )
@@ -79,7 +80,8 @@ func main() {
 func invokeFactory() error {
 	cluster_info_svc := service_impl.NewClusterInfoSvc(nil)
 
-	top_svc, err := service_impl.NewXDCRTopologySvc(uint16(options.sourceKVAdminPort), base.AdminportNumber, 12001, true, cluster_info_svc, nil)
+	utils := utilities.NewUtilities()
+	top_svc, err := service_impl.NewXDCRTopologySvc(uint16(options.sourceKVAdminPort), base.AdminportNumber, 12001, true, cluster_info_svc, nil, utils)
 	if err != nil {
 		fmt.Printf("Error starting xdcr topology service. err=%v\n", err)
 		os.Exit(1)
@@ -97,14 +99,14 @@ func invokeFactory() error {
 		os.Exit(1)
 	}
 
-	audit_svc, err := service_impl.NewAuditSvc(top_svc, nil)
+	audit_svc, err := service_impl.NewAuditSvc(top_svc, nil, utils)
 	if err != nil {
 		fmt.Printf("Error starting audit service. err=%v\n", err)
 		os.Exit(1)
 	}
 
-	uilog_svc := service_impl.NewUILogSvc(top_svc, nil)
-	remote_cluster_svc, err := metadata_svc.NewRemoteClusterService(uilog_svc, msvc, top_svc, cluster_info_svc, nil)
+	uilog_svc := service_impl.NewUILogSvc(top_svc, nil, utils)
+	remote_cluster_svc, err := metadata_svc.NewRemoteClusterService(uilog_svc, msvc, top_svc, cluster_info_svc, nil, utils)
 	if err != nil {
 		fmt.Println(err.Error())
 		return err
@@ -121,7 +123,7 @@ func invokeFactory() error {
 	internalSettings_svc := metadata_svc.NewInternalSettingsSvc(msvc, nil)
 
 	checkpoints_svc := metadata_svc.NewCheckpointsService(msvc, nil)
-	capi_svc := service_impl.NewCAPIService(cluster_info_svc, nil)
+	capi_svc := service_impl.NewCAPIService(cluster_info_svc, nil, utils)
 
 	replication_manager.StartReplicationManager(options.sourceKVHost, base.AdminportNumber,
 		repl_spec_svc,

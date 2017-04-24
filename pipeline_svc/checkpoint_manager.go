@@ -22,7 +22,7 @@ import (
 	"github.com/couchbase/goxdcr/pipeline_utils"
 	"github.com/couchbase/goxdcr/service_def"
 	"github.com/couchbase/goxdcr/simple_utils"
-	"github.com/couchbase/goxdcr/utils"
+	utilities "github.com/couchbase/goxdcr/utils"
 	"math"
 	"math/rand"
 	"strconv"
@@ -124,6 +124,7 @@ type CheckpointManager struct {
 	kv_mem_clients_lock sync.RWMutex
 
 	target_cluster_version int
+	utils                  utilities.UtilsIface
 }
 
 // Checkpoint Manager keeps track of one checkpointRecord per vbucket
@@ -155,7 +156,7 @@ func NewCheckpointManager(checkpoints_svc service_def.CheckpointsService, capi_s
 	xdcr_topology_svc service_def.XDCRCompTopologySvc, through_seqno_tracker_svc service_def.ThroughSeqnoTrackerSvc,
 	active_vbs map[string][]uint16, target_username, target_password string, target_bucket_name string,
 	target_kv_vb_map map[string][]uint16, target_cluster_ref *metadata.RemoteClusterReference,
-	target_cluster_version int, logger_ctx *log.LoggerContext) (*CheckpointManager, error) {
+	target_cluster_version int, logger_ctx *log.LoggerContext, utilsIn utilities.UtilsIface) (*CheckpointManager, error) {
 	if checkpoints_svc == nil || capi_svc == nil || remote_cluster_svc == nil || rep_spec_svc == nil || cluster_info_svc == nil || xdcr_topology_svc == nil {
 		return nil, errors.New("checkpoints_svc, capi_svc, remote_cluster_svc, rep_spec_svc, cluster_info_svc and xdcr_topology_svc can't be nil")
 	}
@@ -186,6 +187,7 @@ func NewCheckpointManager(checkpoints_svc service_def.CheckpointsService, capi_s
 		kv_mem_clients:            make(map[string]*mcc.Client),
 		target_cluster_ref:        target_cluster_ref,
 		target_cluster_version:    target_cluster_version,
+		utils: utilsIn,
 	}, nil
 }
 
@@ -248,7 +250,7 @@ func (ckmgr *CheckpointManager) populateRemoteBucketInfo(pipeline common.Pipelin
 	if err != nil {
 		return err
 	}
-	remote_bucket, err := service_def.NewRemoteBucketInfo(ckmgr.target_cluster_ref.Name, spec.TargetBucketName, ckmgr.target_cluster_ref, ckmgr.remote_cluster_svc, ckmgr.cluster_info_svc, ckmgr.logger)
+	remote_bucket, err := service_def.NewRemoteBucketInfo(ckmgr.target_cluster_ref.Name, spec.TargetBucketName, ckmgr.target_cluster_ref, ckmgr.remote_cluster_svc, ckmgr.cluster_info_svc, ckmgr.logger, ckmgr.utils)
 	if err != nil {
 		return err
 	}
@@ -347,7 +349,7 @@ func (ckmgr *CheckpointManager) initSSLConStrMap() error {
 		return err
 	}
 
-	ssl_port_map, err := utils.GetMemcachedSSLPortMap(connStr, username, password, certificate, sanInCertificate, ckmgr.target_bucket_name, ckmgr.logger)
+	ssl_port_map, err := ckmgr.utils.GetMemcachedSSLPortMap(connStr, username, password, certificate, sanInCertificate, ckmgr.target_bucket_name, ckmgr.logger)
 	if err != nil {
 		return err
 	}
@@ -358,8 +360,8 @@ func (ckmgr *CheckpointManager) initSSLConStrMap() error {
 		if !ok {
 			return fmt.Errorf("Can't get remote memcached ssl port for %v", server_addr)
 		}
-		host_name := utils.GetHostName(server_addr)
-		ssl_con_str := utils.GetHostAddr(host_name, uint16(ssl_port))
+		host_name := ckmgr.utils.GetHostName(server_addr)
+		ssl_con_str := ckmgr.utils.GetHostAddr(host_name, uint16(ssl_port))
 		ckmgr.ssl_con_str_map[server_addr] = ssl_con_str
 	}
 
@@ -375,7 +377,7 @@ func (ckmgr *CheckpointManager) getNewMemcachedClient(server_addr string) (*mcc.
 		ssl_con_str := ckmgr.ssl_con_str_map[server_addr]
 		return base.NewTLSConn(ssl_con_str, ckmgr.target_username, ckmgr.target_password, certificate, sanInCertificate, ckmgr.target_bucket_name, ckmgr.logger)
 	} else {
-		return utils.GetRemoteMemcachedConnection(server_addr, ckmgr.target_username, ckmgr.target_password, ckmgr.target_bucket_name, ckmgr.user_agent, !ckmgr.target_cluster_ref.IsEncryptionEnabled() /*plain_auth*/, ckmgr.logger)
+		return ckmgr.utils.GetRemoteMemcachedConnection(server_addr, ckmgr.target_username, ckmgr.target_password, ckmgr.target_bucket_name, ckmgr.user_agent, !ckmgr.target_cluster_ref.IsEncryptionEnabled() /*plain_auth*/, ckmgr.logger)
 	}
 }
 
@@ -427,7 +429,7 @@ func (ckmgr *CheckpointManager) getHighSeqnoAndVBUuidForServerWithRetry(serverAd
 		}
 		stats_map, err = client.StatsMap(base.VBUCKET_SEQNO_STAT_NAME)
 		if err == nil {
-			utils.ParseHighSeqnoAndVBUuidFromStats(vbnos, stats_map, high_seqno_and_vbuuid_map)
+			ckmgr.utils.ParseHighSeqnoAndVBUuidFromStats(vbnos, stats_map, high_seqno_and_vbuuid_map)
 			break
 		} else {
 			ckmgr.logger.Warnf("%v Error getting vbucket-seqno stats for serverAddr=%v. vbnos=%v, err=%v", ckmgr.pipeline.Topic(), serverAddr, vbnos, err)
@@ -814,7 +816,7 @@ func (ckmgr *CheckpointManager) ckptRecordsWLock(ckptDoc *metadata.CheckpointsDo
 
 func (ckmgr *CheckpointManager) UpdateSettings(settings map[string]interface{}) error {
 	ckmgr.logger.Debugf("Updating settings on checkpoint manager for pipeline %v. settings=%v\n", ckmgr.pipeline.Topic(), settings)
-	checkpoint_interval, err := utils.GetIntSettingFromSettings(settings, CHECKPOINT_INTERVAL)
+	checkpoint_interval, err := ckmgr.utils.GetIntSettingFromSettings(settings, CHECKPOINT_INTERVAL)
 	if err != nil {
 		return err
 	}
@@ -866,6 +868,7 @@ func (ckmgr *CheckpointManager) getFailoverLog(bucket *couchbase.Bucket, listOfV
 	//Get failover log can hang, timeout the executation if it takes too long.
 	failoverLogRetriever := newFailoverLogRetriever(listOfVbs, bucket, ckmgr.logger)
 	err := simple_utils.ExecWithTimeout(failoverLogRetriever.getFailiverLog, 20*time.Second, ckmgr.logger)
+
 	if err != nil {
 		return nil, errors.New("Failed to get failover log in 1 minute")
 	}
@@ -879,7 +882,7 @@ func (ckmgr *CheckpointManager) getSourceBucket() (*couchbase.Bucket, error) {
 	if err != nil {
 		return nil, err
 	}
-	bucket, err := utils.LocalBucket(localConnStr, bucketName)
+	bucket, err := ckmgr.utils.LocalBucket(localConnStr, bucketName)
 	if err != nil {
 		return nil, err
 	}
@@ -904,7 +907,7 @@ func (ckmgr *CheckpointManager) getHighSeqno() (map[uint16]uint64, error) {
 		if !ok {
 			return nil, errors.New(fmt.Sprintf("Failed to find highseqno stats in statsMap returned for server=%v", serverAddr))
 		}
-		utils.ParseHighSeqnoStat(vbnos, statsMapForServer, vb_highseqno_map)
+		ckmgr.utils.ParseHighSeqnoStat(vbnos, statsMapForServer, vb_highseqno_map)
 	}
 
 	return vb_highseqno_map, nil

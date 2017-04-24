@@ -16,7 +16,7 @@ import (
 	"github.com/couchbase/goxdcr/common"
 	"github.com/couchbase/goxdcr/gen_server"
 	"github.com/couchbase/goxdcr/log"
-	"github.com/couchbase/goxdcr/utils"
+	utilities "github.com/couchbase/goxdcr/utils"
 	"reflect"
 	"sync"
 	"time"
@@ -72,11 +72,12 @@ type GenericSupervisor struct {
 	childrenWaitGrp       sync.WaitGroup
 	err_ch                chan bool
 	parent_supervisor     *GenericSupervisor
+	utils                 utilities.UtilsIface
 }
 
-func NewGenericSupervisor(id string, logger_ctx *log.LoggerContext, failure_handler common.SupervisorFailureHandler, parent_supervisor *GenericSupervisor) *GenericSupervisor {
+func NewGenericSupervisor(id string, logger_ctx *log.LoggerContext, failure_handler common.SupervisorFailureHandler, parent_supervisor *GenericSupervisor, utilsIn utilities.UtilsIface) *GenericSupervisor {
 	server := gen_server.NewGenServer(nil,
-		nil, nil, logger_ctx, "GenericSupervisor")
+		nil, nil, logger_ctx, "GenericSupervisor", utilsIn)
 	supervisor := &GenericSupervisor{id: id,
 		GenServer:                     server,
 		children:                      make(map[string]common.Supervisable, 0),
@@ -90,7 +91,9 @@ func NewGenericSupervisor(id string, logger_ctx *log.LoggerContext, failure_hand
 		finch:                         make(chan bool, 1),
 		childrenWaitGrp:               sync.WaitGroup{},
 		err_ch:                        make(chan bool, 1),
-		parent_supervisor:             parent_supervisor}
+		parent_supervisor:             parent_supervisor,
+		utils:                         utilsIn,
+	}
 
 	if parent_supervisor != nil {
 		parent_supervisor.AddChild(supervisor)
@@ -246,7 +249,7 @@ func (supervisor *GenericSupervisor) sendHeartBeats(waitGrp *sync.WaitGroup) {
 
 func (supervisor *GenericSupervisor) Init(settings map[string]interface{}) error {
 	//initialize settings
-	err := utils.ValidateSettings(supervisor_setting_defs, settings, supervisor.Logger())
+	err := supervisor.utils.ValidateSettings(supervisor_setting_defs, settings, supervisor.Logger())
 	if err != nil {
 		supervisor.Logger().Errorf("The setting for supervisor %v is not valid. err=%v", supervisor.Id(), err)
 		return err

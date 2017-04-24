@@ -8,7 +8,7 @@ import (
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/goxdcr/service_def"
-	"github.com/couchbase/goxdcr/utils"
+	utilities "github.com/couchbase/goxdcr/utils"
 	"net/http"
 )
 
@@ -41,12 +41,14 @@ type apiRequest struct {
 type CAPIService struct {
 	cluster_info_service *ClusterInfoSvc
 	logger               *log.CommonLogger
+	utils                utilities.UtilsIface
 }
 
-func NewCAPIService(cluster_info_service *ClusterInfoSvc, logger_ctx *log.LoggerContext) *CAPIService {
+func NewCAPIService(cluster_info_service *ClusterInfoSvc, logger_ctx *log.LoggerContext, utilsIn utilities.UtilsIface) *CAPIService {
 	return &CAPIService{
 		cluster_info_service: cluster_info_service,
 		logger:               log.NewLogger("CapiSvc", logger_ctx),
+		utils:                utilsIn,
 	}
 }
 
@@ -329,7 +331,7 @@ func (capi_svc *CAPIService) send_post(restMethodName string, api_base *apiReque
 	if err != nil {
 		return 0, nil, nil, err
 	}
-	err, statusCode, ret_client := utils.InvokeRestWithRetryWithAuth(api_base.url, restMethodName, false, api_base.username, api_base.password, api_base.certificate, api_base.SANInCertificate, api_base.insecureSkipVerify, base.MethodPost, base.JsonContentType, body, 0, &ret_map, client, true, capi_svc.logger, num_retry)
+	err, statusCode, ret_client := capi_svc.utils.InvokeRestWithRetryWithAuth(api_base.url, restMethodName, false, api_base.username, api_base.password, api_base.certificate, api_base.SANInCertificate, api_base.insecureSkipVerify, base.MethodPost, base.JsonContentType, body, 0, &ret_map, client, true, capi_svc.logger, num_retry)
 	return statusCode, ret_map, ret_client, err
 }
 

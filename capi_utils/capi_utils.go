@@ -6,15 +6,15 @@ import (
 	base "github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
-	"github.com/couchbase/goxdcr/utils"
+	utilities "github.com/couchbase/goxdcr/utils"
 	"strconv"
 	"strings"
 )
 
 var logger_capi_utils *log.CommonLogger = log.NewLogger("CapiUtils", log.DefaultLoggerContext)
 
-func ConstructVBCouchApiBaseMap(targetBucketName string, targetBucketInfo map[string]interface{}, remoteClusterRef *metadata.RemoteClusterReference) (map[uint16]string, error) {
-	serverCouchApiBaseMap, err := ConstructServerCouchApiBaseMap(targetBucketName, targetBucketInfo, remoteClusterRef)
+func ConstructVBCouchApiBaseMap(targetBucketName string, targetBucketInfo map[string]interface{}, remoteClusterRef *metadata.RemoteClusterReference, utils utilities.UtilsIface) (map[uint16]string, error) {
+	serverCouchApiBaseMap, err := ConstructServerCouchApiBaseMap(targetBucketName, targetBucketInfo, remoteClusterRef, utils)
 	if err != nil {
 		return nil, err
 	}
@@ -37,7 +37,7 @@ func ConstructVBCouchApiBaseMap(targetBucketName string, targetBucketInfo map[st
 	return vbCouchApiBaseMap, nil
 }
 
-func ConstructServerCouchApiBaseMap(targetBucketName string, targetBucketInfo map[string]interface{}, remoteClusterRef *metadata.RemoteClusterReference) (map[string]string, error) {
+func ConstructServerCouchApiBaseMap(targetBucketName string, targetBucketInfo map[string]interface{}, remoteClusterRef *metadata.RemoteClusterReference, utils utilities.UtilsIface) (map[string]string, error) {
 	serverCouchApiBaseMap := make(map[string]string)
 	nodeList, err := utils.GetNodeListFromInfoMap(targetBucketInfo, logger_capi_utils)
 	if err != nil {

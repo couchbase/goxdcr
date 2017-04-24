@@ -19,7 +19,7 @@ import (
 	"github.com/couchbase/goxdcr/service_impl"
 	"github.com/couchbase/goxdcr/simple_utils"
 	"github.com/couchbase/goxdcr/supervisor"
-	"github.com/couchbase/goxdcr/utils"
+	utilities "github.com/couchbase/goxdcr/utils"
 	"math"
 	"strconv"
 	"time"
@@ -113,6 +113,7 @@ type XDCRFactory struct {
 	pipeline_failure_handler   common.SupervisorFailureHandler
 	logger                     *log.CommonLogger
 	pipeline_master_supervisor *supervisor.GenericSupervisor
+	utils                      utilities.UtilsIface
 }
 
 // set call back functions is done only once
@@ -127,7 +128,8 @@ func NewXDCRFactory(repl_spec_svc service_def.ReplicationSpecSvc,
 	pipeline_default_logger_ctx *log.LoggerContext,
 	factory_logger_ctx *log.LoggerContext,
 	pipeline_failure_handler common.SupervisorFailureHandler,
-	pipeline_master_supervisor *supervisor.GenericSupervisor) *XDCRFactory {
+	pipeline_master_supervisor *supervisor.GenericSupervisor,
+	utilsIn utilities.UtilsIface) *XDCRFactory {
 	return &XDCRFactory{repl_spec_svc: repl_spec_svc,
 		remote_cluster_svc:         remote_cluster_svc,
 		cluster_info_svc:           cluster_info_svc,
@@ -139,7 +141,8 @@ func NewXDCRFactory(repl_spec_svc service_def.ReplicationSpecSvc,
 		default_logger_ctx:         pipeline_default_logger_ctx,
 		pipeline_failure_handler:   pipeline_failure_handler,
 		pipeline_master_supervisor: pipeline_master_supervisor,
-		logger: log.NewLogger("XDCRFactory", factory_logger_ctx)}
+		logger: log.NewLogger("XDCRFactory", factory_logger_ctx),
+		utils:  utilsIn}
 }
 
 /**
@@ -180,12 +183,12 @@ func (xdcrf *XDCRFactory) NewPipeline(topic string, progress_recorder common.Pip
 		return nil, err
 	}
 
-	targetBucketInfo, err := utils.GetBucketInfo(connStr, spec.TargetBucketName, username, password, certificate, sanInCertificate, xdcrf.logger)
+	targetBucketInfo, err := xdcrf.utils.GetBucketInfo(connStr, spec.TargetBucketName, username, password, certificate, sanInCertificate, xdcrf.logger)
 	if err != nil {
 		return nil, err
 	}
 
-	conflictResolutionType, err := utils.GetConflictResolutionTypeFromBucketInfo(spec.TargetBucketName, targetBucketInfo)
+	conflictResolutionType, err := xdcrf.utils.GetConflictResolutionTypeFromBucketInfo(spec.TargetBucketName, targetBucketInfo)
 	if err != nil {
 		return nil, err
 	}
@@ -417,7 +420,7 @@ func (xdcrf *XDCRFactory) constructSourceNozzles(spec *metadata.ReplicationSpeci
 			// partIds of the dcpNozzle nodes look like "dcpNozzle_$kvaddr_1"
 			id := xdcrf.partId(DCP_NOZZLE_NAME_PREFIX, spec.Id, kvaddr, i)
 			dcpNozzle := parts.NewDcpNozzle(id,
-				spec.SourceBucketName, spec.TargetBucketName, vbList, xdcrf.xdcr_topology_svc, isCapiReplication, logger_ctx)
+				spec.SourceBucketName, spec.TargetBucketName, vbList, xdcrf.xdcr_topology_svc, isCapiReplication, logger_ctx, xdcrf.utils)
 			sourceNozzles[dcpNozzle.Id()] = dcpNozzle
 			xdcrf.logger.Debugf("Constructed source nozzle %v with vbList = %v \n", dcpNozzle.Id(), vbList)
 		}
@@ -470,7 +473,7 @@ func (xdcrf *XDCRFactory) constructOutgoingNozzles(spec *metadata.ReplicationSpe
 	outNozzles = make(map[string]common.Nozzle)
 	vbNozzleMap = make(map[uint16]string)
 	// Get a Map of Remote kvNode -> vBucket#s it's responsible for
-	kvVBMap, err = utils.GetServerVBucketsMap(targetClusterRef.HostName, spec.TargetBucketName, targetBucketInfo)
+	kvVBMap, err = xdcrf.utils.GetServerVBucketsMap(targetClusterRef.HostName, spec.TargetBucketName, targetBucketInfo)
 	if err != nil {
 		xdcrf.logger.Errorf("Error getting server vbuckets map, err=%v\n", err)
 		return
@@ -486,7 +489,7 @@ func (xdcrf *XDCRFactory) constructOutgoingNozzles(spec *metadata.ReplicationSpe
 		// set target cluster version to 0 so that topology change detector will not listen to target version change
 		targetClusterVersion = 0
 	} else {
-		targetClusterVersion, err = utils.GetClusterCompatibilityFromBucketInfo(spec.TargetBucketName, targetBucketInfo, xdcrf.logger)
+		targetClusterVersion, err = xdcrf.utils.GetClusterCompatibilityFromBucketInfo(spec.TargetBucketName, targetBucketInfo, xdcrf.logger)
 		if err != nil {
 			return
 		}
@@ -524,7 +527,7 @@ func (xdcrf *XDCRFactory) constructOutgoingNozzles(spec *metadata.ReplicationSpe
 	for kvaddr, kvVBList := range kvVBMap {
 		if isCapiReplication && len(vbCouchApiBaseMap) == 0 {
 			// construct vbCouchApiBaseMap only when nessary and only once
-			vbCouchApiBaseMap, err = capi_utils.ConstructVBCouchApiBaseMap(spec.TargetBucketName, targetBucketInfo, targetClusterRef)
+			vbCouchApiBaseMap, err = capi_utils.ConstructVBCouchApiBaseMap(spec.TargetBucketName, targetBucketInfo, targetClusterRef, xdcrf.utils)
 			if err != nil {
 				xdcrf.logger.Errorf("Failed to construct vbCouchApiBase map, err=%v\n", err)
 				return
@@ -590,7 +593,7 @@ func (xdcrf *XDCRFactory) constructRouter(id string, spec *metadata.ReplicationS
 	sourceCRMode base.ConflictResolutionMode,
 	logger_ctx *log.LoggerContext) (*parts.Router, error) {
 	routerId := "Router" + PART_NAME_DELIMITER + id
-	router, err := parts.NewRouter(routerId, spec.Id, spec.Settings.FilterExpression, downStreamParts, vbNozzleMap, sourceCRMode, logger_ctx, pipeline_manager.NewMCRequestObj)
+	router, err := parts.NewRouter(routerId, spec.Id, spec.Settings.FilterExpression, downStreamParts, vbNozzleMap, sourceCRMode, logger_ctx, pipeline_manager.NewMCRequestObj, xdcrf.utils)
 	xdcrf.logger.Infof("Constructed router %v", routerId)
 	return router, err
 }
@@ -628,7 +631,8 @@ func (xdcrf *XDCRFactory) constructXMEMNozzle(topic string, kvaddr string,
 	logger_ctx *log.LoggerContext) common.Nozzle {
 	// partIds of the xmem nozzles look like "xmem_$topic_$kvaddr_1"
 	xmemNozzle_Id := xdcrf.partId(XMEM_NOZZLE_NAME_PREFIX, topic, kvaddr, nozzle_index)
-	nozzle := parts.NewXmemNozzle(xmemNozzle_Id, topic, topic, connPoolSize, kvaddr, sourceBucketName, targetBucketName, username, password, pipeline_manager.RecycleMCRequestObj, sourceCRMode, logger_ctx)
+	nozzle := parts.NewXmemNozzle(xmemNozzle_Id, topic, topic, connPoolSize, kvaddr, sourceBucketName, targetBucketName,
+		username, password, pipeline_manager.RecycleMCRequestObj, sourceCRMode, logger_ctx, xdcrf.utils)
 	return nozzle
 }
 
@@ -659,7 +663,7 @@ func (xdcrf *XDCRFactory) constructCAPINozzle(topic string,
 	xdcrf.logger.Debugf("Construct CapiNozzle: topic=%s, kvaddr=%s", topic, capiConnectionStr)
 	// partIds of the capi nozzles look like "capi_$topic_$kvaddr_1"
 	capiNozzle_Id := xdcrf.partId(CAPI_NOZZLE_NAME_PREFIX, topic, capiConnectionStr, nozzle_index)
-	nozzle := parts.NewCapiNozzle(capiNozzle_Id, topic, capiConnectionStr, username, password, certificate, subVBCouchApiBaseMap, pipeline_manager.RecycleMCRequestObj, logger_ctx)
+	nozzle := parts.NewCapiNozzle(capiNozzle_Id, topic, capiConnectionStr, username, password, certificate, subVBCouchApiBaseMap, pipeline_manager.RecycleMCRequestObj, logger_ctx, xdcrf.utils)
 	return nozzle, nil
 }
 
@@ -821,7 +825,7 @@ func (xdcrf *XDCRFactory) registerServices(pipeline common.Pipeline, logger_ctx 
 
 	//register pipeline supervisor
 	supervisor := pipeline_svc.NewPipelineSupervisor(base.PipelineSupervisorIdPrefix+pipeline.Topic(), logger_ctx,
-		xdcrf.pipeline_failure_handler, xdcrf.pipeline_master_supervisor, xdcrf.cluster_info_svc, xdcrf.xdcr_topology_svc)
+		xdcrf.pipeline_failure_handler, xdcrf.pipeline_master_supervisor, xdcrf.cluster_info_svc, xdcrf.xdcr_topology_svc, xdcrf.utils)
 	err := ctx.RegisterService(base.PIPELINE_SUPERVISOR_SVC, supervisor)
 	if err != nil {
 		return err
@@ -831,7 +835,7 @@ func (xdcrf *XDCRFactory) registerServices(pipeline common.Pipeline, logger_ctx 
 		xdcrf.remote_cluster_svc, xdcrf.repl_spec_svc, xdcrf.cluster_info_svc,
 		xdcrf.xdcr_topology_svc, through_seqno_tracker_svc, kv_vb_map, targetUserName,
 		targetPassword, targetBucketName, target_kv_vb_map, targetClusterRef,
-		targetClusterVersion, logger_ctx)
+		targetClusterVersion, logger_ctx, xdcrf.utils)
 	if err != nil {
 		xdcrf.logger.Errorf("Failed to construct CheckpointManager for %v. err=%v ckpt_svc=%v, capi_svc=%v, remote_cluster_svc=%v, repl_spec_svc=%v\n", pipeline.Topic(), err, xdcrf.checkpoint_svc, xdcrf.capi_svc,
 			xdcrf.remote_cluster_svc, xdcrf.repl_spec_svc)
@@ -844,14 +848,14 @@ func (xdcrf *XDCRFactory) registerServices(pipeline common.Pipeline, logger_ctx 
 	//register pipeline statistics manager
 	bucket_name := pipeline.Specification().SourceBucketName
 	err = ctx.RegisterService(base.STATISTICS_MGR_SVC, pipeline_svc.NewStatisticsManager(through_seqno_tracker_svc, xdcrf.cluster_info_svc,
-		xdcrf.xdcr_topology_svc, logger_ctx, kv_vb_map, bucket_name))
+		xdcrf.xdcr_topology_svc, logger_ctx, kv_vb_map, bucket_name, xdcrf.utils))
 	if err != nil {
 		return err
 	}
 
 	//register topology change detect service
 	targetHasRBACAndXattrSupport := simple_utils.IsClusterCompatible(targetClusterVersion, base.VersionForRBACAndXattrSupport)
-	top_detect_svc := pipeline_svc.NewTopologyChangeDetectorSvc(xdcrf.cluster_info_svc, xdcrf.xdcr_topology_svc, xdcrf.remote_cluster_svc, xdcrf.repl_spec_svc, targetHasRBACAndXattrSupport, logger_ctx)
+	top_detect_svc := pipeline_svc.NewTopologyChangeDetectorSvc(xdcrf.cluster_info_svc, xdcrf.xdcr_topology_svc, xdcrf.remote_cluster_svc, xdcrf.repl_spec_svc, targetHasRBACAndXattrSupport, logger_ctx, xdcrf.utils)
 	err = ctx.RegisterService(base.TOPOLOGY_CHANGE_DETECT_SVC, top_detect_svc)
 	if err != nil {
 		return err
@@ -1007,7 +1011,7 @@ func (xdcrf *XDCRFactory) ConstructSSLPortMap(targetClusterRef *metadata.RemoteC
 			return nil, err
 		}
 
-		ssl_port_map, err = utils.GetMemcachedSSLPortMap(connStr, username, password, certificate, sanInCertificate, spec.TargetBucketName, xdcrf.logger)
+		ssl_port_map, err = xdcrf.utils.GetMemcachedSSLPortMap(connStr, username, password, certificate, sanInCertificate, spec.TargetBucketName, xdcrf.logger)
 		if err != nil {
 			xdcrf.logger.Errorf("Failed to get memcached ssl port, err=%v\n", err)
 			return nil, err

@@ -21,7 +21,7 @@ import (
 	"github.com/couchbase/goxdcr/service_def"
 	"github.com/couchbase/goxdcr/service_impl"
 	"github.com/couchbase/goxdcr/tests/common"
-	"github.com/couchbase/goxdcr/utils"
+	utilities "github.com/couchbase/goxdcr/utils"
 	"io/ioutil"
 	"os"
 	"time"
@@ -127,22 +127,23 @@ func run_testcase() error {
 	}
 
 	cluster_info_svc := service_impl.NewClusterInfoSvc(nil)
-	top_svc, err := service_impl.NewXDCRTopologySvc(uint16(options.sourceKVPort), uint16(options.xdcrRestPort), options.isEnterprise, cluster_info_svc, nil)
+	utils := utilities.NewUtilities()
+	top_svc, err := service_impl.NewXDCRTopologySvc(uint16(options.sourceKVPort), uint16(options.xdcrRestPort), options.isEnterprise, cluster_info_svc, nil, utils)
 	if err != nil {
 		return err
 	}
 
-	remote_cluster_svc, err := metadata_svc.NewRemoteClusterService(nil, metadatakv_svc, top_svc, cluster_info_svc, log.DefaultLoggerContext)
+	remote_cluster_svc, err := metadata_svc.NewRemoteClusterService(nil, metadatakv_svc, top_svc, cluster_info_svc, log.DefaultLoggerContext, utils)
 	if err != nil {
 		return err
 	}
 
-	capi_svc := service_impl.NewCAPIService(cluster_info_svc, log.DefaultLoggerContext)
+	capi_svc := service_impl.NewCAPIService(cluster_info_svc, log.DefaultLoggerContext, utils)
 	if err != nil {
 		return err
 	}
 
-	remoteBucket, err := service_def.NewRemoteBucketInfo(options.remoteName, "default", nil, remote_cluster_svc, logger)
+	remoteBucket, err := service_def.NewRemoteBucketInfo(options.remoteName, "default", nil, remote_cluster_svc, logger, utils)
 	if err != nil {
 		return err
 	}

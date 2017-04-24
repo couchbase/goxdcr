@@ -22,7 +22,7 @@ import (
 	"github.com/couchbase/goxdcr/service_def"
 	"github.com/couchbase/goxdcr/simple_utils"
 	"github.com/couchbase/goxdcr/supervisor"
-	"github.com/couchbase/goxdcr/utils"
+	utilities "github.com/couchbase/goxdcr/utils"
 	"reflect"
 	"sync"
 	"time"
@@ -61,19 +61,23 @@ type PipelineSupervisor struct {
 	kv_mem_clients_lock *sync.Mutex
 
 	user_agent string
+
+	utils utilities.UtilsIface
 }
 
 func NewPipelineSupervisor(id string, logger_ctx *log.LoggerContext, failure_handler common.SupervisorFailureHandler,
 	parentSupervisor *supervisor.GenericSupervisor, cluster_info_svc service_def.ClusterInfoSvc,
-	xdcr_topology_svc service_def.XDCRCompTopologySvc) *PipelineSupervisor {
-	supervisor := supervisor.NewGenericSupervisor(id, logger_ctx, failure_handler, parentSupervisor)
+	xdcr_topology_svc service_def.XDCRCompTopologySvc, utilsIn utilities.UtilsIface) *PipelineSupervisor {
+	supervisor := supervisor.NewGenericSupervisor(id, logger_ctx, failure_handler, parentSupervisor, utilsIn)
 	pipelineSupervisor := &PipelineSupervisor{GenericSupervisor: supervisor,
 		errors_seen:         make(map[string]error),
 		errors_seen_lock:    &sync.RWMutex{},
 		cluster_info_svc:    cluster_info_svc,
 		xdcr_topology_svc:   xdcr_topology_svc,
 		kv_mem_clients:      make(map[string]*mcc.Client),
-		kv_mem_clients_lock: &sync.Mutex{}}
+		kv_mem_clients_lock: &sync.Mutex{},
+		utils:               utilsIn,
+	}
 	return pipelineSupervisor
 }
 
@@ -234,7 +238,7 @@ func (pipelineSupervisor *PipelineSupervisor) OnEvent(event *common.Event) {
 
 func (pipelineSupervisor *PipelineSupervisor) init(settings map[string]interface{}) error {
 	//initialize settings
-	err := utils.ValidateSettings(pipeline_supervisor_setting_defs, settings, pipelineSupervisor.Logger())
+	err := pipelineSupervisor.utils.ValidateSettings(pipeline_supervisor_setting_defs, settings, pipelineSupervisor.Logger())
 	if err != nil {
 		pipelineSupervisor.Logger().Errorf("The setting for Pipeline supervisor %v is not valid. err=%v", pipelineSupervisor.Id(), err)
 		return err
@@ -251,7 +255,7 @@ func (pipelineSupervisor *PipelineSupervisor) init(settings map[string]interface
 
 func (pipelineSupervisor *PipelineSupervisor) UpdateSettings(settings map[string]interface{}) error {
 	pipelineSupervisor.Logger().Debugf("Updating settings on pipelineSupervisor %v. settings=%v\n", pipelineSupervisor.Id(), settings)
-	logLevelObj := utils.GetSettingFromSettings(settings, PIPELINE_LOG_LEVEL)
+	logLevelObj := pipelineSupervisor.utils.GetSettingFromSettings(settings, PIPELINE_LOG_LEVEL)
 
 	if logLevelObj == nil {
 		// logLevel not specified. no op
@@ -336,7 +340,7 @@ func (pipelineSupervisor *PipelineSupervisor) getDcpStats() (map[string]map[stri
 	}
 
 	for _, serverAddr := range nodes {
-		client, err := utils.GetMemcachedClient(serverAddr, bucketName, pipelineSupervisor.kv_mem_clients, pipelineSupervisor.user_agent, pipelineSupervisor.Logger())
+		client, err := pipelineSupervisor.utils.GetMemcachedClient(serverAddr, bucketName, pipelineSupervisor.kv_mem_clients, pipelineSupervisor.user_agent, pipelineSupervisor.Logger())
 		if err != nil {
 			return nil, err
 		}

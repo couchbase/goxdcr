@@ -16,7 +16,7 @@ import (
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/service_def"
-	"github.com/couchbase/goxdcr/utils"
+	utilities "github.com/couchbase/goxdcr/utils"
 	"reflect"
 	"strings"
 )
@@ -30,17 +30,19 @@ type XDCRTopologySvc struct {
 	isEnterprise     bool
 	cluster_info_svc service_def.ClusterInfoSvc
 	logger           *log.CommonLogger
+	utils            utilities.UtilsIface
 }
 
 func NewXDCRTopologySvc(adminport, xdcrRestPort uint16,
 	isEnterprise bool, cluster_info_svc service_def.ClusterInfoSvc,
-	logger_ctx *log.LoggerContext) (*XDCRTopologySvc, error) {
+	logger_ctx *log.LoggerContext, utilsIn utilities.UtilsIface) (*XDCRTopologySvc, error) {
 	top_svc := &XDCRTopologySvc{
 		adminport:        adminport,
 		xdcrRestPort:     xdcrRestPort,
 		isEnterprise:     isEnterprise,
 		cluster_info_svc: cluster_info_svc,
 		logger:           log.NewLogger("TopoSvc", logger_ctx),
+		utils:            utilsIn,
 	}
 	return top_svc, nil
 }
@@ -64,7 +66,7 @@ func (top_svc *XDCRTopologySvc) MyMemcachedAddr() (string, error) {
 		return "", err
 	}
 
-	return utils.GetHostAddr(hostName, port), nil
+	return top_svc.utils.GetHostAddr(hostName, port), nil
 }
 
 func (top_svc *XDCRTopologySvc) MyAdminPort() (uint16, error) {
@@ -158,7 +160,7 @@ func (top_svc *XDCRTopologySvc) getHostName() (string, error) {
 	if err != nil {
 		return "", nil
 	}
-	hostname := utils.GetHostName(hostAddrStr)
+	hostname := top_svc.utils.GetHostName(hostAddrStr)
 	return hostname, nil
 }
 
@@ -197,7 +199,7 @@ func (top_svc *XDCRTopologySvc) getHostMemcachedPort() (uint16, error) {
 // implements base.ClusterConnectionInfoProvider
 func (top_svc *XDCRTopologySvc) MyConnectionStr() (string, error) {
 	host := base.LocalHostName
-	return utils.GetHostAddr(host, top_svc.adminport), nil
+	return top_svc.utils.GetHostAddr(host, top_svc.adminport), nil
 }
 
 func (top_svc *XDCRTopologySvc) MyCredentials() (string, string, []byte, bool, error) {
@@ -215,7 +217,7 @@ func (top_svc *XDCRTopologySvc) MyCredentials() (string, string, []byte, bool, e
 
 func (top_svc *XDCRTopologySvc) MyClusterUuid() (string, error) {
 	var poolsInfo map[string]interface{}
-	err, statusCode := utils.QueryRestApi(top_svc.staticHostAddr(), base.PoolsPath, false, base.MethodGet, "", nil, 0, &poolsInfo, top_svc.logger)
+	err, statusCode := top_svc.utils.QueryRestApi(top_svc.staticHostAddr(), base.PoolsPath, false, base.MethodGet, "", nil, 0, &poolsInfo, top_svc.logger)
 	if err != nil || statusCode != 200 {
 		return "", errors.New(fmt.Sprintf("Failed on calling %v, err=%v, statusCode=%v", base.PoolsPath, err, statusCode))
 	}
@@ -234,7 +236,7 @@ func (top_svc *XDCRTopologySvc) MyClusterUuid() (string, error) {
 
 func (top_svc *XDCRTopologySvc) MyClusterVersion() (string, error) {
 	var poolsInfo map[string]interface{}
-	err, statusCode := utils.QueryRestApi(top_svc.staticHostAddr(), base.PoolsPath, false, base.MethodGet, "", nil, 0, &poolsInfo, top_svc.logger)
+	err, statusCode := top_svc.utils.QueryRestApi(top_svc.staticHostAddr(), base.PoolsPath, false, base.MethodGet, "", nil, 0, &poolsInfo, top_svc.logger)
 	if err != nil || statusCode != 200 {
 		return "", errors.New(fmt.Sprintf("Failed on calling %v, err=%v, statusCode=%v", base.PoolsPath, err, statusCode))
 	}
@@ -259,7 +261,7 @@ func (top_svc *XDCRTopologySvc) MyClusterVersion() (string, error) {
 }
 
 func (top_svc *XDCRTopologySvc) staticHostAddr() string {
-	hostAddr := "http://" + utils.GetHostAddr(base.LocalHostName, top_svc.adminport)
+	hostAddr := "http://" + top_svc.utils.GetHostAddr(base.LocalHostName, top_svc.adminport)
 	if hostAddr == "" {
 		panic("hostAddr can't be empty")
 	}
@@ -297,7 +299,7 @@ func (top_svc *XDCRTopologySvc) IsKVNode() (bool, error) {
 
 func (top_svc *XDCRTopologySvc) getNodeList() ([]interface{}, error) {
 	var nodesInfo map[string]interface{}
-	err, statusCode := utils.QueryRestApi(top_svc.staticHostAddr(), base.NodesPath, false, base.MethodGet, "", nil, 0, &nodesInfo, top_svc.logger)
+	err, statusCode := top_svc.utils.QueryRestApi(top_svc.staticHostAddr(), base.NodesPath, false, base.MethodGet, "", nil, 0, &nodesInfo, top_svc.logger)
 	if err != nil || statusCode != 200 {
 		return nil, errors.New(fmt.Sprintf("Failed on calling %v, err=%v, statusCode=%v", base.NodesPath, err, statusCode))
 	}

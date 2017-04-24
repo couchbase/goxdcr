@@ -14,16 +14,18 @@ import (
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/simple_utils"
-	"github.com/couchbase/goxdcr/utils"
+	utilities "github.com/couchbase/goxdcr/utils"
 )
 
 type ClusterInfoSvc struct {
 	logger *log.CommonLogger
+	utils  utilities.UtilsIface
 }
 
-func NewClusterInfoSvc(logger_ctx *log.LoggerContext) *ClusterInfoSvc {
+func NewClusterInfoSvc(logger_ctx *log.LoggerContext, utilsIn utilities.UtilsIface) *ClusterInfoSvc {
 	return &ClusterInfoSvc{
 		logger: log.NewLogger("ClusterInfoSvc", logger_ctx),
+		utils:  utilsIn,
 	}
 }
 
@@ -36,7 +38,7 @@ func (ci_svc *ClusterInfoSvc) getBucketInfo(clusterConnInfoProvider base.Cluster
 	if err != nil {
 		return "", nil, err
 	}
-	bucketInfo, err := utils.GetBucketInfo(connStr, bucketName, userName, password, certificate, sanInCertificate, ci_svc.logger)
+	bucketInfo, err := ci_svc.utils.GetBucketInfo(connStr, bucketName, userName, password, certificate, sanInCertificate, ci_svc.logger)
 
 	return connStr, bucketInfo, err
 }
@@ -47,7 +49,7 @@ func (ci_svc *ClusterInfoSvc) GetLocalServerVBucketsMap(clusterConnInfoProvider 
 		return nil, err
 	}
 
-	return utils.GetServerVBucketsMap(connStr, bucketName, bucketInfo)
+	return ci_svc.utils.GetServerVBucketsMap(connStr, bucketName, bucketInfo)
 
 }
 
@@ -66,9 +68,9 @@ func (ci_svc *ClusterInfoSvc) IsClusterCompatible(clusterConnInfoProvider base.C
 	// so far IsClusterCompatible is called only when the remote cluster reference is ssl enabled
 	// which indicates that the target cluster is not an elastic search cluster
 	// it should be safe to call GetNodeListWithFullInfo() to retrive full node info
-	nodeList, err := utils.GetNodeListWithFullInfo(connStr, username, password, certificate, sanInCertificate, ci_svc.logger)
+	nodeList, err := ci_svc.utils.GetNodeListWithFullInfo(connStr, username, password, certificate, sanInCertificate, ci_svc.logger)
 	if err == nil && len(nodeList) > 0 {
-		clusterCompatibility, err := utils.GetClusterCompatibilityFromNodeList(nodeList)
+		clusterCompatibility, err := ci_svc.utils.GetClusterCompatibilityFromNodeList(nodeList)
 		if err != nil {
 			return false, err
 		}

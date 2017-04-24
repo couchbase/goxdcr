@@ -21,7 +21,7 @@ import (
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/service_def"
 	"github.com/couchbase/goxdcr/simple_utils"
-	"github.com/couchbase/goxdcr/utils"
+	utilities "github.com/couchbase/goxdcr/utils"
 	"reflect"
 	"strconv"
 	"sync"
@@ -127,6 +127,8 @@ type DcpNozzle struct {
 	user_agent string
 
 	is_capi bool
+
+	utils utilities.UtilsIface
 }
 
 func NewDcpNozzle(id string,
@@ -134,7 +136,8 @@ func NewDcpNozzle(id string,
 	vbnos []uint16,
 	xdcr_topology_svc service_def.XDCRCompTopologySvc,
 	is_capi bool,
-	logger_context *log.LoggerContext) *DcpNozzle {
+	logger_context *log.LoggerContext,
+	utilsIn utilities.UtilsIface) *DcpNozzle {
 
 	//callback functions from GenServer
 	var msg_callback_func gen_server.Msg_Callback_Func
@@ -142,7 +145,7 @@ func NewDcpNozzle(id string,
 	var error_handler_func gen_server.Error_Handler_Func
 
 	server := gen_server.NewGenServer(&msg_callback_func,
-		&exit_callback_func, &error_handler_func, logger_context, "DcpNozzle")
+		&exit_callback_func, &error_handler_func, logger_context, "DcpNozzle", utilsIn)
 	part := NewAbstractPartWithLogger(id, server.Logger())
 
 	dcp := &DcpNozzle{
@@ -161,6 +164,7 @@ func NewDcpNozzle(id string,
 		xdcr_topology_svc:        xdcr_topology_svc,
 		stats_interval_change_ch: make(chan bool, 1),
 		is_capi:                  is_capi,
+		utils:                    utilsIn,
 	}
 
 	msg_callback_func = nil
@@ -196,7 +200,7 @@ func (dcp *DcpNozzle) initialize(settings map[string]interface{}) (err error) {
 		return err
 	}
 
-	dcp.client, err = utils.GetMemcachedConnection(addr, dcp.sourceBucketName, dcp.user_agent, dcp.Logger())
+	dcp.client, err = dcp.utils.GetMemcachedConnection(addr, dcp.sourceBucketName, dcp.user_agent, dcp.Logger())
 	if err != nil {
 		return err
 	}
@@ -272,7 +276,7 @@ func (dcp *DcpNozzle) Start(settings map[string]interface{}) error {
 		return err
 	}
 
-	err = utils.ValidateSettings(dcp_setting_defs, settings, dcp.Logger())
+	err = dcp.utils.ValidateSettings(dcp_setting_defs, settings, dcp.Logger())
 	if err != nil {
 		return err
 	}
@@ -763,7 +767,7 @@ func newOpaque() uint16 {
 }
 
 func (dcp *DcpNozzle) UpdateSettings(settings map[string]interface{}) error {
-	ts_obj := utils.GetSettingFromSettings(settings, DCP_VBTimestamp)
+	ts_obj := dcp.utils.GetSettingFromSettings(settings, DCP_VBTimestamp)
 	if ts_obj != nil {
 		new_ts, ok := settings[DCP_VBTimestamp].(map[uint16]*base.VBTimestamp)
 		if !ok || new_ts == nil {

@@ -21,7 +21,7 @@ import (
 	"github.com/couchbase/goxdcr/metadata_svc"
 	"github.com/couchbase/goxdcr/pipeline_utils"
 	"github.com/couchbase/goxdcr/service_def"
-	"github.com/couchbase/goxdcr/utils"
+	utilities "github.com/couchbase/goxdcr/utils"
 	"runtime"
 	"runtime/debug"
 	"sync"
@@ -42,13 +42,15 @@ type MetakvChangeListener struct {
 	children_waitgrp           *sync.WaitGroup
 	metadata_service_call_back base.MetadataServiceCallback
 	logger                     *log.CommonLogger
+	utils                      utilities.UtilsIface
 }
 
 func NewMetakvChangeListener(id, dirpath string, cancel_chan chan struct{},
 	children_waitgrp *sync.WaitGroup,
 	metadata_service_call_back base.MetadataServiceCallback,
 	logger_ctx *log.LoggerContext,
-	logger_name string) *MetakvChangeListener {
+	logger_name string,
+	utilsIn utilities.UtilsIface) *MetakvChangeListener {
 	return &MetakvChangeListener{
 		id:                         id,
 		dirpath:                    dirpath,
@@ -56,6 +58,7 @@ func NewMetakvChangeListener(id, dirpath string, cancel_chan chan struct{},
 		children_waitgrp:           children_waitgrp,
 		metadata_service_call_back: metadata_service_call_back,
 		logger: log.NewLogger(logger_name, logger_ctx),
+		utils:  utilsIn,
 	}
 }
 
@@ -132,7 +135,8 @@ type ReplicationSpecChangeListener struct {
 func NewReplicationSpecChangeListener(repl_spec_svc service_def.ReplicationSpecSvc,
 	cancel_chan chan struct{},
 	children_waitgrp *sync.WaitGroup,
-	logger_ctx *log.LoggerContext) *ReplicationSpecChangeListener {
+	logger_ctx *log.LoggerContext,
+	utilsIn utilities.UtilsIface) *ReplicationSpecChangeListener {
 	rscl := &ReplicationSpecChangeListener{
 		NewMetakvChangeListener(base.ReplicationSpecChangeListener,
 			metadata_svc.GetCatalogPathFromCatalogKey(metadata_svc.ReplicationSpecsCatalogKey),
@@ -140,7 +144,8 @@ func NewReplicationSpecChangeListener(repl_spec_svc service_def.ReplicationSpecS
 			children_waitgrp,
 			repl_spec_svc.ReplicationSpecServiceCallback,
 			logger_ctx,
-			"ReplicationSpecChangeListener"),
+			"ReplicationSpecChangeListener",
+			utilsIn),
 	}
 	return rscl
 }
@@ -325,7 +330,8 @@ func NewRemoteClusterChangeListener(remote_cluster_svc service_def.RemoteCluster
 	repl_spec_svc service_def.ReplicationSpecSvc,
 	cancel_chan chan struct{},
 	children_waitgrp *sync.WaitGroup,
-	logger_ctx *log.LoggerContext) *RemoteClusterChangeListener {
+	logger_ctx *log.LoggerContext,
+	utilsIn utilities.UtilsIface) *RemoteClusterChangeListener {
 	rccl := &RemoteClusterChangeListener{
 		NewMetakvChangeListener(base.RemoteClusterChangeListener,
 			metadata_svc.GetCatalogPathFromCatalogKey(metadata_svc.RemoteClustersCatalogKey),
@@ -333,7 +339,8 @@ func NewRemoteClusterChangeListener(remote_cluster_svc service_def.RemoteCluster
 			children_waitgrp,
 			remote_cluster_svc.RemoteClusterServiceCallback,
 			logger_ctx,
-			"RemoteClusterChangeListener"),
+			"RemoteClusterChangeListener",
+			utilsIn),
 		repl_spec_svc,
 		remote_cluster_svc,
 	}
@@ -442,7 +449,8 @@ type GlobalSettingChangeListener struct {
 func NewGlobalSettingChangeListener(process_setting_svc service_def.GlobalSettingsSvc,
 	cancel_chan chan struct{},
 	children_waitgrp *sync.WaitGroup,
-	logger_ctx *log.LoggerContext) *GlobalSettingChangeListener {
+	logger_ctx *log.LoggerContext,
+	utilsIn utilities.UtilsIface) *GlobalSettingChangeListener {
 	pscl := &GlobalSettingChangeListener{
 		NewMetakvChangeListener(base.GlobalSettingChangeListener,
 			metadata_svc.GetCatalogPathFromCatalogKey(metadata_svc.GlobalSettingCatalogKey),
@@ -450,7 +458,8 @@ func NewGlobalSettingChangeListener(process_setting_svc service_def.GlobalSettin
 			children_waitgrp,
 			process_setting_svc.GlobalSettingsServiceCallback,
 			logger_ctx,
-			"GlobalSettingChangeListener"),
+			"GlobalSettingChangeListener",
+			utilsIn),
 	}
 	return pscl
 }
@@ -512,7 +521,8 @@ type InternalSettingsChangeListener struct {
 func NewInternalSettingsChangeListener(internal_setting_svc service_def.InternalSettingsSvc,
 	cancel_chan chan struct{},
 	children_waitgrp *sync.WaitGroup,
-	logger_ctx *log.LoggerContext) *InternalSettingsChangeListener {
+	logger_ctx *log.LoggerContext,
+	utilsIn utilities.UtilsIface) *InternalSettingsChangeListener {
 	iscl := &InternalSettingsChangeListener{
 		NewMetakvChangeListener(base.InternalSettingsChangeListener,
 			metadata_svc.GetCatalogPathFromCatalogKey(metadata_svc.InternalSettingsCatalogKey),
@@ -520,7 +530,8 @@ func NewInternalSettingsChangeListener(internal_setting_svc service_def.Internal
 			children_waitgrp,
 			internal_setting_svc.InternalSettingsServiceCallback,
 			logger_ctx,
-			"InternalSettingChangeListener"),
+			"InternalSettingChangeListener",
+			utilsIn),
 	}
 	return iscl
 }
@@ -579,7 +590,8 @@ func NewBucketSettingsChangeListener(bucket_settings_svc service_def.BucketSetti
 	cluster_info_svc service_def.ClusterInfoSvc,
 	cancel_chan chan struct{},
 	children_waitgrp *sync.WaitGroup,
-	logger_ctx *log.LoggerContext) *BucketSettingsChangeListener {
+	logger_ctx *log.LoggerContext,
+	utilsIn utilities.UtilsIface) *BucketSettingsChangeListener {
 	return &BucketSettingsChangeListener{
 		MetakvChangeListener: NewMetakvChangeListener(base.BucketSettingsChangeListener,
 			metadata_svc.GetCatalogPathFromCatalogKey(metadata_svc.BucketSettingsCatalogKey),
@@ -587,7 +599,8 @@ func NewBucketSettingsChangeListener(bucket_settings_svc service_def.BucketSetti
 			children_waitgrp,
 			bucket_settings_svc.BucketSettingsServiceCallback,
 			logger_ctx,
-			"BucketSettingsChangeListener"),
+			"BucketSettingsChangeListener",
+			utilsIn),
 		xdcr_topology_svc: xdcr_topology_svc,
 		cluster_info_svc:  cluster_info_svc,
 		changes_chan:      make(chan *BucketSettingsChange, BucketSettingsChanSize),
@@ -655,7 +668,7 @@ func (bscl *BucketSettingsChangeListener) processBucketSettingsChange(settingsCh
 		return err
 	}
 
-	curBucketUUID, err := utils.LocalBucketUUID(connStr, bucketName, bscl.logger)
+	curBucketUUID, err := bscl.utils.LocalBucketUUID(connStr, bucketName, bscl.logger)
 	if err != nil {
 		bscl.logger.Infof("bucketSettingsChangeHandlerCallback on bucket = %v has been skipped since the bucket cannot be retrieved. The bucket may have been deleted. err=%v\n", bucketName, err)
 		return err
@@ -717,7 +730,7 @@ func (bscl *BucketSettingsChangeListener) setTimeSyncOnBucket(bucketName string,
 	}
 
 	// local connection to memcached uses plain authentication
-	client, err := utils.GetMemcachedConnection(hostAddr, bucketName, "Goxdcr bucketSetting listener", bscl.logger)
+	client, err := bscl.utils.GetMemcachedConnection(hostAddr, bucketName, "Goxdcr bucketSetting listener", bscl.logger)
 	if err != nil {
 		return err
 	}

@@ -12,10 +12,10 @@ package gen_server
 import (
 	"errors"
 	"github.com/couchbase/goxdcr/log"
-	utils "github.com/couchbase/goxdcr/utils"
+	utilities "github.com/couchbase/goxdcr/utils"
 	"reflect"
-	"time"
 	"sync"
+	"time"
 )
 
 const (
@@ -47,13 +47,15 @@ type GenServer struct {
 	isStarted      bool
 	isStarted_lock sync.RWMutex
 	logger         *log.CommonLogger
+	utils          utilities.UtilsIface
 }
 
 func NewGenServer(msg_callback *Msg_Callback_Func,
 	exit_callback *Exit_Callback_Func,
 	error_handler *Error_Handler_Func,
 	logger_context *log.LoggerContext,
-	module string) GenServer {
+	module string,
+	utilsIn utilities.UtilsIface) GenServer {
 	return GenServer{
 		msgChan:        make(chan []interface{}, 1),
 		heartBeatChan:  make(chan []interface{}, 1),
@@ -62,11 +64,13 @@ func NewGenServer(msg_callback *Msg_Callback_Func,
 		error_handler:  error_handler,
 		isStarted:      false,
 		isStarted_lock: sync.RWMutex{},
-		logger:         log.NewLogger(module, logger_context)}
+		logger:         log.NewLogger(module, logger_context),
+		utils: utilsIn,
+	}
 }
 
 func (s *GenServer) Start_server() (err error) {
-	defer utils.RecoverPanic(&err)
+	defer s.utils.RecoverPanic(&err)
 	go s.run()
 	s.SetStarted(true)
 	return err

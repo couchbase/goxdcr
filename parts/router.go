@@ -18,7 +18,7 @@ import (
 	common "github.com/couchbase/goxdcr/common"
 	connector "github.com/couchbase/goxdcr/connector"
 	"github.com/couchbase/goxdcr/log"
-	"github.com/couchbase/goxdcr/utils"
+	utilities "github.com/couchbase/goxdcr/utils"
 	"regexp"
 	"time"
 )
@@ -42,6 +42,7 @@ type Router struct {
 	topic        string
 	// whether lww conflict resolution mode has been enabled
 	sourceCRMode base.ConflictResolutionMode
+	utils        utilities.UtilsIface
 }
 
 /**
@@ -57,7 +58,8 @@ func NewRouter(id string, topic string, filterExpression string,
 	downStreamParts map[string]common.Part,
 	routingMap map[uint16]string,
 	sourceCRMode base.ConflictResolutionMode,
-	logger_context *log.LoggerContext, req_creator ReqCreator) (*Router, error) {
+	logger_context *log.LoggerContext, req_creator ReqCreator,
+	utilsIn utilities.UtilsIface) (*Router, error) {
 	// compile filter expression
 	var filterRegexp *regexp.Regexp
 	var err error
@@ -73,7 +75,9 @@ func NewRouter(id string, topic string, filterExpression string,
 		routingMap:   routingMap,
 		topic:        topic,
 		sourceCRMode: sourceCRMode,
-		req_creator:  req_creator}
+		req_creator:  req_creator,
+		utils:        utilsIn,
+	}
 
 	// routingFunc is the main intelligence of the router's functionality
 	var routingFunc connector.Routing_Callback_Func = router.route
@@ -162,7 +166,7 @@ func (router *Router) route(data interface{}) (map[string]interface{}, error) {
 
 	// filter data if filter expession has been defined
 	if router.filterRegexp != nil {
-		if !utils.RegexpMatch(router.filterRegexp, uprEvent.Key) {
+		if !router.utils.RegexpMatch(router.filterRegexp, uprEvent.Key) {
 			// if data does not match filter expression, drop it. return empty result
 			router.RaiseEvent(common.NewEvent(common.DataFiltered, uprEvent, router, nil, nil))
 			return result, nil
@@ -170,7 +174,7 @@ func (router *Router) route(data interface{}) (map[string]interface{}, error) {
 	}
 	mcRequest, err := router.ComposeMCRequest(uprEvent)
 	if err != nil {
-		return nil, utils.NewEnhancedError("Error creating new memcached request.", err)
+		return nil, router.utils.NewEnhancedError("Error creating new memcached request.", err)
 	}
 	result[partId] = mcRequest
 	return result, nil

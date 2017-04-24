@@ -18,7 +18,7 @@ import (
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/goxdcr/service_def"
-	"github.com/couchbase/goxdcr/utils"
+	utilities "github.com/couchbase/goxdcr/utils"
 	"os"
 	"reflect"
 	"strconv"
@@ -78,11 +78,12 @@ type MigrationSvc struct {
 	replication_settings_svc service_def.ReplicationSettingsSvc
 	checkpoints_svc          service_def.CheckpointsService
 	logger                   *log.CommonLogger
+	utils                    utilities.UtilsIface
 }
 
 func NewMigrationSvc(xdcr_comp_topology_svc service_def.XDCRCompTopologySvc, remote_cluster_svc service_def.RemoteClusterSvc, repl_spec_svc service_def.ReplicationSpecSvc,
 	replication_settings_svc service_def.ReplicationSettingsSvc, checkpoints_svc service_def.CheckpointsService,
-	loggerCtx *log.LoggerContext) *MigrationSvc {
+	loggerCtx *log.LoggerContext, utilsIn utilities.UtilsIface) *MigrationSvc {
 	service := &MigrationSvc{
 		xdcr_comp_topology_svc:   xdcr_comp_topology_svc,
 		remote_cluster_svc:       remote_cluster_svc,
@@ -90,6 +91,7 @@ func NewMigrationSvc(xdcr_comp_topology_svc service_def.XDCRCompTopologySvc, rem
 		replication_settings_svc: replication_settings_svc,
 		checkpoints_svc:          checkpoints_svc,
 		logger:                   log.NewLogger("MigrationSvc", loggerCtx),
+		utils:                    utilsIn,
 	}
 
 	service.logger.Infof("Created Migration service.\n")
@@ -155,7 +157,7 @@ func (service *MigrationSvc) migrate_internal(data []byte) ([]error, []error) {
 	dataObj := make(map[string]interface{})
 	err := json.Unmarshal(data, &dataObj)
 	if err != nil {
-		fatalErrorList = append(fatalErrorList, utils.NewEnhancedError(fmt.Sprintf("Error unmarshaling metadata"), err))
+		fatalErrorList = append(fatalErrorList, service.utils.NewEnhancedError(fmt.Sprintf("Error unmarshaling metadata"), err))
 		return fatalErrorList, mildErrorList
 	}
 
@@ -619,7 +621,7 @@ func (service *MigrationSvc) sourceBucketUUID(bucketName string) (string, error)
 	if local_connStr == "" {
 		panic("XDCRTopologySvc.MyConnectionStr() should not return empty string")
 	}
-	return utils.LocalBucketUUID(local_connStr, bucketName, service.logger)
+	return service.utils.LocalBucketUUID(local_connStr, bucketName, service.logger)
 }
 
 func (service *MigrationSvc) targetBucketUUID(targetClusterUUID, bucketName string) (string, error) {
@@ -636,7 +638,7 @@ func (service *MigrationSvc) targetBucketUUID(targetClusterUUID, bucketName stri
 		return "", err_target
 	}
 
-	return utils.BucketUUID(remote_connStr, bucketName, remote_userName, remote_password, certificate, sanInCertificate, service.logger)
+	return service.utils.BucketUUID(remote_connStr, bucketName, remote_userName, remote_password, certificate, sanInCertificate, service.logger)
 }
 
 func addErrorMapToErrorList(errorMap map[string]error, errorList []error) []error {

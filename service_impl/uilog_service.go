@@ -13,19 +13,21 @@ import (
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/service_def"
-	"github.com/couchbase/goxdcr/utils"
+	utilities "github.com/couchbase/goxdcr/utils"
 	"time"
 )
 
 type UILogSvc struct {
 	top_svc service_def.XDCRCompTopologySvc
 	logger  *log.CommonLogger
+	utils   utilities.UtilsIface
 }
 
-func NewUILogSvc(top_svc service_def.XDCRCompTopologySvc, loggerCtx *log.LoggerContext) *UILogSvc {
+func NewUILogSvc(top_svc service_def.XDCRCompTopologySvc, loggerCtx *log.LoggerContext, utilsIn utilities.UtilsIface) *UILogSvc {
 	service := &UILogSvc{
 		top_svc: top_svc,
 		logger:  log.NewLogger("UILogSvc", loggerCtx),
+		utils:   utilsIn,
 	}
 
 	service.logger.Infof("Created ui log service.\n")
@@ -53,9 +55,9 @@ func (service *UILogSvc) writeUILog_async(message string) {
 	paramMap[base.UILogComponentKey] = base.UILogXDCRComponent
 	paramMap[base.UILogLogLevelKey] = base.UILogXDCRLogLevel
 	paramMap[base.UILogMessageKey] = message
-	body, _ := utils.EncodeMapIntoByteArray(paramMap)
+	body, _ := service.utils.EncodeMapIntoByteArray(paramMap)
 
-	err, statusCode, _ := utils.InvokeRestWithRetry(hostname, base.UILogPath, false, base.MethodPost, "", body, 0, nil, nil, false, service.logger, base.UILogRetry)
+	err, statusCode, _ := service.utils.InvokeRestWithRetry(hostname, base.UILogPath, false, base.MethodPost, "", body, 0, nil, nil, false, service.logger, base.UILogRetry)
 	if err != nil {
 		service.logger.Errorf("Error writing UI log. err = %v\n", err.Error())
 	} else {

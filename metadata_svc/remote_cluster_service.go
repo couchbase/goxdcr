@@ -20,7 +20,7 @@ import (
 	"github.com/couchbase/goxdcr/pipeline_utils"
 	"github.com/couchbase/goxdcr/service_def"
 	"github.com/couchbase/goxdcr/simple_utils"
-	"github.com/couchbase/goxdcr/utils"
+	utilities "github.com/couchbase/goxdcr/utils"
 	"math/rand"
 	"net/http"
 	"reflect"
@@ -95,15 +95,15 @@ type RemoteClusterService struct {
 	cache             *MetadataCache
 	cache_lock        sync.Mutex
 	// key = hostname; value = https address of hostname
-	httpsAddrMap      map[string]string
-	httpsAddrMap_lock sync.Mutex
-
+	httpsAddrMap             map[string]string
+	httpsAddrMap_lock        sync.Mutex
 	metadata_change_callback base.MetadataChangeHandlerCallback
+	utils                    utilities.UtilsIface
 }
 
 func NewRemoteClusterService(uilog_svc service_def.UILogSvc, metakv_svc service_def.MetadataSvc,
 	xdcr_topology_svc service_def.XDCRCompTopologySvc, cluster_info_svc service_def.ClusterInfoSvc,
-	logger_ctx *log.LoggerContext) (*RemoteClusterService, error) {
+	logger_ctx *log.LoggerContext, utilsIn utilities.UtilsIface) (*RemoteClusterService, error) {
 	logger := log.NewLogger("RemClusterSvc", logger_ctx)
 	svc := &RemoteClusterService{
 		metakv_svc:        metakv_svc,
@@ -113,6 +113,7 @@ func NewRemoteClusterService(uilog_svc service_def.UILogSvc, metakv_svc service_
 		cache:             nil,
 		logger:            logger,
 		httpsAddrMap:      make(map[string]string),
+		utils:             utilsIn,
 	}
 
 	svc.initCache()
@@ -430,8 +431,8 @@ func (service *RemoteClusterService) validateRemoteCluster(ref *metadata.RemoteC
 		}
 	}
 
-	hostName := utils.GetHostName(ref.HostName)
-	port, err := utils.GetPortNumber(ref.HostName)
+	hostName := service.utils.GetHostName(ref.HostName)
+	port, err := service.utils.GetPortNumber(ref.HostName)
 	if err != nil {
 		return wrapAsInvalidRemoteClusterError(fmt.Sprintf("Failed to resolve address for \"%v\". The hostname may be incorrect or not resolvable.", ref.HostName))
 	}
@@ -439,7 +440,7 @@ func (service *RemoteClusterService) validateRemoteCluster(ref *metadata.RemoteC
 	var hostAddr string
 	if ref.IsEncryptionEnabled() {
 		if ref.HttpsHostName == "" {
-			httpsHostAddr, err, isInternalError := utils.HttpsHostAddr(ref.HostName, service.logger)
+			httpsHostAddr, err, isInternalError := service.utils.HttpsHostAddr(ref.HostName, service.logger)
 			if err != nil {
 				if isInternalError {
 					return err
@@ -470,7 +471,7 @@ func (service *RemoteClusterService) validateRemoteCluster(ref *metadata.RemoteC
 
 	var poolsInfo map[string]interface{}
 	startTime := time.Now()
-	err, statusCode := utils.QueryRestApiWithAuth(hostAddr, base.PoolsPath, false, ref.UserName, ref.Password, ref.Certificate, ref.SANInCertificate, base.MethodGet, "", nil, base.ShortHttpTimeout, &poolsInfo, nil, false, service.logger)
+	err, statusCode := service.utils.QueryRestApiWithAuth(hostAddr, base.PoolsPath, false, ref.UserName, ref.Password, ref.Certificate, ref.SANInCertificate, base.MethodGet, "", nil, base.ShortHttpTimeout, &poolsInfo, nil, false, service.logger)
 	service.logger.Infof("Result from validate remote cluster call: err=%v, statusCode=%v. time taken=%v\n", err, statusCode, time.Since(startTime))
 	if err != nil || statusCode != http.StatusOK {
 		if statusCode == http.StatusUnauthorized {
@@ -602,11 +603,11 @@ func (service *RemoteClusterService) cacheRef(ref *metadata.RemoteClusterReferen
 	}
 
 	// use GetNodeListWithMinInfo API to ensure that it is supported by target cluster, which could be an elastic search cluster
-	nodeList, err := utils.GetNodeListWithMinInfo(connStr, username, password, certificate, sanInCertificate, service.logger)
+	nodeList, err := service.utils.GetNodeListWithMinInfo(connStr, username, password, certificate, sanInCertificate, service.logger)
 	if err == nil {
 		service.logger.Debugf("connStr=%v, nodeList=%v\n", connStr, nodeList)
 
-		nodeNameList, err := utils.GetNodeNameListFromNodeList(nodeList, connStr, service.logger)
+		nodeNameList, err := service.utils.GetNodeNameListFromNodeList(nodeList, connStr, service.logger)
 		if err != nil {
 			service.logger.Errorf("Error getting nodes from target cluster. skipping alternative node computation. ref=%v\n", ref.HostName)
 		} else {
@@ -711,7 +712,7 @@ func (service *RemoteClusterService) refresh(ref *metadata.RemoteClusterReferenc
 		service.logger.Debugf("Selected node %v to refresh remote cluster reference %v\n", connStr, ref.Id)
 
 		// connect to selected node to retrieve nodes info
-		clusterUUID, nodeList, err := utils.GetClusterUUIDAndNodeListWithMinInfo(connStr, username, password, certificate, sanInCertificate, service.logger)
+		clusterUUID, nodeList, err := service.utils.GetClusterUUIDAndNodeListWithMinInfo(connStr, username, password, certificate, sanInCertificate, service.logger)
 		if err != nil {
 			service.logger.Warnf("When refreshing remote cluster reference %v, skipping node %v since it is not accessible. err=%v\n", ref.Id, connStr, err)
 			continue
@@ -743,7 +744,7 @@ func (service *RemoteClusterService) refresh(ref *metadata.RemoteClusterReferenc
 				service.logger.Infof("Replaced ActiveHostName in ref %v with %v and ActiveHttpsHostName with %v\n", ref.Id, hostName, httpsHostName)
 			}
 
-			nodeNameList, err = utils.GetNodeNameListFromNodeList(nodeList, connStr, service.logger)
+			nodeNameList, err = service.utils.GetNodeNameListFromNodeList(nodeList, connStr, service.logger)
 			if err != nil {
 				service.logger.Warnf("Error getting node name list for remote cluster reference %v using connection string %v. err=%v\n", ref.Id, connStr, err)
 				continue
@@ -835,7 +836,7 @@ func (service *RemoteClusterService) replaceRefHostName(refId string) error {
 		service.logger.Debugf("Selected node %v to refresh remote cluster reference %v\n", connStr, ref.Id)
 
 		// connect to selected node to retrieve nodes info
-		clusterUUID, _, err := utils.GetClusterUUIDAndNodeListWithMinInfo(connStr, username, password, certificate, sanInCertificate, service.logger)
+		clusterUUID, _, err := service.utils.GetClusterUUIDAndNodeListWithMinInfo(connStr, username, password, certificate, sanInCertificate, service.logger)
 		if err != nil {
 			service.logger.Warnf("When replacing hostname in remote cluster reference %v, skipping node %v since it is not accessible. err=%v\n", ref.Id, connStr, err)
 			continue
@@ -1020,7 +1021,7 @@ func (service *RemoteClusterService) getHttpsAddrFromMap(hostName string) (strin
 	var err error
 	httpsHostName, ok = service.httpsAddrMap[hostName]
 	if !ok {
-		httpsHostName, err, _ = utils.HttpsHostAddr(hostName, service.logger)
+		httpsHostName, err, _ = service.utils.HttpsHostAddr(hostName, service.logger)
 		if err != nil {
 			return "", err
 		}

@@ -11,7 +11,7 @@ import (
 	"github.com/couchbase/goxdcr/pipeline_utils"
 	"github.com/couchbase/goxdcr/service_def"
 	"github.com/couchbase/goxdcr/simple_utils"
-	"github.com/couchbase/goxdcr/utils"
+	utilities "github.com/couchbase/goxdcr/utils"
 	"sync"
 	"time"
 )
@@ -63,6 +63,8 @@ type TopologyChangeDetectorSvc struct {
 
 	// whether needs to check target version for RBAC and Xattr support
 	check_target_version_for_rbac_and_xattr bool
+
+	utils utilities.UtilsIface
 }
 
 func NewTopologyChangeDetectorSvc(cluster_info_svc service_def.ClusterInfoSvc,
@@ -70,7 +72,8 @@ func NewTopologyChangeDetectorSvc(cluster_info_svc service_def.ClusterInfoSvc,
 	remote_cluster_svc service_def.RemoteClusterSvc,
 	repl_spec_svc service_def.ReplicationSpecSvc,
 	target_has_rbac_and_xattr_support bool,
-	logger_ctx *log.LoggerContext) *TopologyChangeDetectorSvc {
+	logger_ctx *log.LoggerContext,
+	utilsIn utilities.UtilsIface) *TopologyChangeDetectorSvc {
 	logger := log.NewLogger("TopoChangeDet", logger_ctx)
 	return &TopologyChangeDetectorSvc{xdcr_topology_svc: xdcr_topology_svc,
 		cluster_info_svc:                        cluster_info_svc,
@@ -83,7 +86,9 @@ func NewTopologyChangeDetectorSvc(cluster_info_svc service_def.ClusterInfoSvc,
 		logger:                                  logger,
 		vblist_last:                             make([]uint16, 0),
 		httpsAddrMap:                            make(map[string]string),
-		check_target_version_for_rbac_and_xattr: !target_has_rbac_and_xattr_support}
+		check_target_version_for_rbac_and_xattr: !target_has_rbac_and_xattr_support,
+		utils: utilsIn,
+	}
 }
 
 func (top_detect_svc *TopologyChangeDetectorSvc) Attach(pipeline common.Pipeline) error {
@@ -402,15 +407,15 @@ func (top_detect_svc *TopologyChangeDetectorSvc) getTargetBucketInfo() (int, map
 	var targetServerVBMap map[string][]uint16
 	allFieldsFound := false
 
-	targetBucketInfo, err := utils.GetBucketInfo(connStr, bucketName, username, password, certificate, sanInCertificate, top_detect_svc.logger)
+	targetBucketInfo, err := top_detect_svc.utils.GetBucketInfo(connStr, bucketName, username, password, certificate, sanInCertificate, top_detect_svc.logger)
 
 	if err == nil {
-		targetBucketUUID, err = utils.GetBucketUuidFromBucketInfo(bucketName, targetBucketInfo, top_detect_svc.logger)
+		targetBucketUUID, err = top_detect_svc.utils.GetBucketUuidFromBucketInfo(bucketName, targetBucketInfo, top_detect_svc.logger)
 		if err == nil {
-			targetServerVBMap, err = utils.GetServerVBucketsMap(connStr, bucketName, targetBucketInfo)
+			targetServerVBMap, err = top_detect_svc.utils.GetServerVBucketsMap(connStr, bucketName, targetBucketInfo)
 			if err == nil {
 				if !top_detect_svc.capi {
-					targetClusterCompatibility, err = utils.GetClusterCompatibilityFromBucketInfo(bucketName, targetBucketInfo, top_detect_svc.logger)
+					targetClusterCompatibility, err = top_detect_svc.utils.GetClusterCompatibilityFromBucketInfo(bucketName, targetBucketInfo, top_detect_svc.logger)
 					if err == nil {
 						allFieldsFound = true
 					}
@@ -422,7 +427,7 @@ func (top_detect_svc *TopologyChangeDetectorSvc) getTargetBucketInfo() (int, map
 		}
 	}
 
-	if err != nil && err != utils.NonExistentBucketError {
+	if err != nil && err != top_detect_svc.utils.GetNonExistentBucketError() {
 		errMsg := fmt.Sprintf("Skipping target bucket check for spec %v since failed to get bucket infor for %v. err=%v", top_detect_svc.pipeline.Topic(), bucketName, err)
 		top_detect_svc.logger.Warn(errMsg)
 		return 0, nil, errors.New(errMsg)
@@ -430,7 +435,7 @@ func (top_detect_svc *TopologyChangeDetectorSvc) getTargetBucketInfo() (int, map
 
 	targetClusterUUIDChecked := false
 
-	if err == utils.NonExistentBucketError {
+	if err == top_detect_svc.utils.GetNonExistentBucketError() {
 		/* When we get NonExistentBucketError, there are three possibilities:
 		1. the target node is not accessible, either because it has been removed from target cluster,
 		   or because of temporary network issues. in this case we skip target check for the current round
@@ -449,7 +454,7 @@ func (top_detect_svc *TopologyChangeDetectorSvc) getTargetBucketInfo() (int, map
 			C.2 if the call returns a bucket list that does not contain target bucket, it is case #3. the repl spec needs to be deleted
 			C.3 if the call returns a bucket list that contains target bucket, continue with target bucket validation
 		*/
-		curTargetClusterUUID, err := utils.GetClusterUUID(connStr, username, password, certificate, sanInCertificate, top_detect_svc.logger)
+		curTargetClusterUUID, err := top_detect_svc.utils.GetClusterUUID(connStr, username, password, certificate, sanInCertificate, top_detect_svc.logger)
 		if err != nil {
 			// case 1, target node not accessible, skip target check
 			logMessage := fmt.Sprintf("%v skipping target bucket check since %v is not accessible. err=%v\n", spec.Id, connStr, err)
@@ -467,7 +472,7 @@ func (top_detect_svc *TopologyChangeDetectorSvc) getTargetBucketInfo() (int, map
 			targetClusterUUIDChecked = true
 
 			//	additional check is needed
-			buckets, err := utils.GetBuckets(connStr, username, password, certificate, sanInCertificate, top_detect_svc.logger)
+			buckets, err := top_detect_svc.utils.GetBuckets(connStr, username, password, certificate, sanInCertificate, top_detect_svc.logger)
 			if err != nil {
 				// case 1, target node not accessible, skip target check
 				errMsg := fmt.Sprintf("Skipping target bucket check for spec %v since target node %v is not accessible. err=%v", spec.Id, connStr, err)
@@ -511,7 +516,7 @@ func (top_detect_svc *TopologyChangeDetectorSvc) getTargetBucketInfo() (int, map
 		}
 
 		//
-		curTargetClusterUUID, err := utils.GetClusterUUID(connStr, username, password, certificate, sanInCertificate, top_detect_svc.logger)
+		curTargetClusterUUID, err := top_detect_svc.utils.GetClusterUUID(connStr, username, password, certificate, sanInCertificate, top_detect_svc.logger)
 		if err != nil {
 			// target node not accessible, skip target check
 			logMessage := fmt.Sprintf("%v skipping target bucket check since %v is not accessible. err=%v\n", spec.Id, connStr, err)

@@ -22,7 +22,7 @@ import (
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/goxdcr/simple_utils"
-	"github.com/couchbase/goxdcr/utils"
+	utilities "github.com/couchbase/goxdcr/utils"
 	"net/http"
 	"runtime"
 	"strconv"
@@ -45,9 +45,10 @@ type Adminport struct {
 	xdcrRestPort uint16
 	gen_server.GenServer
 	finch chan bool
+	utils utilities.UtilsIface
 }
 
-func NewAdminport(laddr string, xdcrRestPort uint16, finch chan bool) *Adminport {
+func NewAdminport(laddr string, xdcrRestPort uint16, finch chan bool, utilsIn utilities.UtilsIface) *Adminport {
 
 	//callback functions from GenServer
 	var msg_callback_func gen_server.Msg_Callback_Func
@@ -55,13 +56,14 @@ func NewAdminport(laddr string, xdcrRestPort uint16, finch chan bool) *Adminport
 	var error_handler_func gen_server.Error_Handler_Func
 
 	server := gen_server.NewGenServer(&msg_callback_func,
-		&exit_callback_func, &error_handler_func, log.DefaultLoggerContext, "Adminport")
+		&exit_callback_func, &error_handler_func, log.DefaultLoggerContext, "Adminport", utilsIn)
 
 	adminport := &Adminport{
 		sourceKVHost: laddr,
 		xdcrRestPort: xdcrRestPort,
 		GenServer:    server, /*gen_server.GenServer*/
 		finch:        finch,
+		utils:        utilsIn,
 	}
 
 	msg_callback_func = adminport.processRequest
@@ -86,7 +88,7 @@ func (adminport *Adminport) Start() {
 
 	// start http server
 	reqch := make(chan ap.Request)
-	hostAddr := utils.GetHostAddr(adminport.sourceKVHost, adminport.xdcrRestPort)
+	hostAddr := adminport.utils.GetHostAddr(adminport.sourceKVHost, adminport.xdcrRestPort)
 	server := ap.NewHTTPServer("xdcr", hostAddr, base.AdminportUrlPrefix, reqch, new(ap.Handler))
 	finch := adminport.finch
 
@@ -800,7 +802,7 @@ func (adminport *Adminport) doRegexpValidationRequest(request *http.Request) (*a
 		return response, err
 	}
 
-	expression, keys, err := DecodeRegexpValidationRequest(request)
+	expression, keys, err := DecodeRegexpValidationRequest(request, adminport.utils)
 	if err != nil {
 		return EncodeErrorMessageIntoResponse(err, http.StatusBadRequest)
 	}
@@ -808,7 +810,7 @@ func (adminport *Adminport) doRegexpValidationRequest(request *http.Request) (*a
 	logger_ap.Infof("Request params: expression=%v, keys=%v\n",
 		expression, keys)
 
-	matchesMap, err := utils.GetMatchedKeys(expression, keys)
+	matchesMap, err := adminport.utils.GetMatchedKeys(expression, keys)
 	if err != nil {
 		return EncodeErrorMessageIntoResponse(err, http.StatusBadRequest)
 	}
@@ -871,7 +873,7 @@ func (adminport *Adminport) doGetBucketSettingsRequest(request *http.Request) (*
 	bucketSettingsMap, err := getBucketSettings(bucketName)
 	if err != nil {
 		// if bucket does not exist, it is a validation error and not an internal error
-		if err == utils.NonExistentBucketError {
+		if err == adminport.utils.GetNonExistentBucketError() {
 			err = fmt.Errorf("Bucket %v does not exist", bucketName)
 			return EncodeReplicationValidationErrorIntoResponse(err)
 		}
@@ -900,7 +902,7 @@ func (adminport *Adminport) doBucketSettingsChangeRequest(request *http.Request)
 
 	bucketSettingsMap, err := setBucketSettings(bucketName, lwwEnabled, getRealUserIdFromRequest(request))
 	if err != nil {
-		if err == utils.NonExistentBucketError {
+		if err == adminport.utils.GetNonExistentBucketError() {
 			// if bucket does not exist, it is a validation error and not an internal error
 			err = fmt.Errorf("Bucket %v does not exist", bucketName)
 			return EncodeReplicationValidationErrorIntoResponse(err)

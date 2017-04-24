@@ -18,7 +18,7 @@ import (
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/goxdcr/simple_utils"
-	"github.com/couchbase/goxdcr/utils"
+	utilities "github.com/couchbase/goxdcr/utils"
 	"io/ioutil"
 	"net/http"
 	"regexp"
@@ -548,7 +548,7 @@ func DecodeSettingsFromXDCRInternalSettingsRequest(request *http.Request) (map[s
 	return settings, nil
 }
 
-func DecodeRegexpValidationRequest(request *http.Request) (string, []string, error) {
+func DecodeRegexpValidationRequest(request *http.Request, utils utilities.UtilsIface) (string, []string, error) {
 	var expression string
 	var keys []string
 

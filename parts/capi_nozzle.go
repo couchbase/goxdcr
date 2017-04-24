@@ -22,7 +22,7 @@ import (
 	gen_server "github.com/couchbase/goxdcr/gen_server"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/simple_utils"
-	"github.com/couchbase/goxdcr/utils"
+	utilities "github.com/couchbase/goxdcr/utils"
 	"io"
 	"io/ioutil"
 	"net"
@@ -126,7 +126,7 @@ func newCapiConfig(logger *log.CommonLogger) capiConfig {
 	}
 }
 
-func (config *capiConfig) initializeConfig(settings map[string]interface{}) error {
+func (config *capiConfig) initializeConfig(settings map[string]interface{}, utils utilities.UtilsIface) error {
 	err := utils.ValidateSettings(capi_setting_defs, settings, config.logger)
 
 	if err == nil {
@@ -190,6 +190,8 @@ type CapiNozzle struct {
 	lock_handle_error sync.RWMutex
 	dataObj_recycler  base.DataObjRecycler
 	topic             string
+
+	utils utilities.UtilsIface
 }
 
 func NewCapiNozzle(id string,
@@ -200,7 +202,8 @@ func NewCapiNozzle(id string,
 	certificate []byte,
 	vbCouchApiBaseMap map[uint16]string,
 	dataObj_recycler base.DataObjRecycler,
-	logger_context *log.LoggerContext) *CapiNozzle {
+	logger_context *log.LoggerContext,
+	utilsIn utilities.UtilsIface) *CapiNozzle {
 
 	//callback functions from GenServer
 	var msg_callback_func gen_server.Msg_Callback_Func
@@ -208,7 +211,7 @@ func NewCapiNozzle(id string,
 	var error_handler_func gen_server.Error_Handler_Func
 
 	server := gen_server.NewGenServer(&msg_callback_func,
-		&exit_callback_func, &error_handler_func, logger_context, "CapiNozzle")
+		&exit_callback_func, &error_handler_func, logger_context, "CapiNozzle", utilsIn)
 	part := NewAbstractPartWithLogger(id, server.Logger())
 
 	capi := &CapiNozzle{GenServer: server, /*gen_server.GenServer*/
@@ -227,6 +230,7 @@ func NewCapiNozzle(id string,
 		counter_received:  0,
 		dataObj_recycler:  dataObj_recycler,
 		topic:             topic,
+		utils:             utilsIn,
 	}
 
 	capi.config.connectStr = connectString
@@ -630,7 +634,7 @@ func (capi *CapiNozzle) batchGetMeta(vbno uint16, bigDoc_map map[string]*base.Wr
 
 	// Query the Target by feeding it the current key -> revisions
 	var out interface{}
-	err, statusCode := utils.QueryRestApiWithAuth(couchApiBaseHost, couchApiBasePath+base.RevsDiffPath, true, capi.config.username, capi.config.password, capi.config.certificate, false, base.MethodPost, base.JsonContentType,
+	err, statusCode := capi.utils.QueryRestApiWithAuth(couchApiBaseHost, couchApiBasePath+base.RevsDiffPath, true, capi.config.username, capi.config.password, capi.config.certificate, false, base.MethodPost, base.JsonContentType,
 		keysAndRevisions, capi.config.connectionTimeout, &out, nil, false, capi.Logger())
 	capi.Logger().Debugf("%v results of _revs_diff query for vb %v: err=%v, status=%v\n", capi.Id(), vbno, err, statusCode)
 	if err != nil {
@@ -866,7 +870,7 @@ func (capi *CapiNozzle) batchUpdateDocs(vbno uint16, req_list *[]*base.WrappedMC
 
 	total_length := len(BodyPartsPrefix) + doc_length + len(BodyPartsSuffix)
 
-	http_req, _, err := utils.ConstructHttpRequest(couchApiBaseHost, couchApiBasePath+base.BulkDocsPath, true, capi.config.username, capi.config.password, capi.config.certificate, base.MethodPost, base.JsonContentType,
+	http_req, _, err := capi.utils.ConstructHttpRequest(couchApiBaseHost, couchApiBasePath+base.BulkDocsPath, true, capi.config.username, capi.config.password, capi.config.certificate, base.MethodPost, base.JsonContentType,
 		nil, capi.Logger())
 	if err != nil {
 		return
@@ -879,7 +883,7 @@ func (capi *CapiNozzle) batchUpdateDocs(vbno uint16, req_list *[]*base.WrappedMC
 	http_req.Header.Set(CouchFullCommitKey, "false")
 
 	// unfortunately request.Write() does not preserve Content-Length. have to encode the request ourselves
-	req_bytes, err := utils.EncodeHttpRequest(http_req)
+	req_bytes, err := capi.utils.EncodeHttpRequest(http_req)
 	if err != nil {
 		return
 	}
@@ -1118,7 +1122,7 @@ func (capi *CapiNozzle) initNewBatch(vbno uint16) {
 }
 
 func (capi *CapiNozzle) initialize(settings map[string]interface{}) error {
-	err := capi.config.initializeConfig(settings)
+	err := capi.config.initializeConfig(settings, capi.utils)
 	if err != nil {
 		return err
 	}

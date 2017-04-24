@@ -19,7 +19,7 @@ import (
 	"github.com/couchbase/goxdcr/pipeline"
 	"github.com/couchbase/goxdcr/pipeline_utils"
 	"github.com/couchbase/goxdcr/service_def"
-	"github.com/couchbase/goxdcr/utils"
+	utilities "github.com/couchbase/goxdcr/utils"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -45,6 +45,7 @@ type PipelineManager struct {
 	child_waitGrp      *sync.WaitGroup
 	// used for making sure there's only one ReplicationStatus creation at one time
 	repStatusCrLock sync.RWMutex
+	utils           utilities.UtilsIface
 }
 
 type Pipeline_mgr_iface interface {
@@ -99,7 +100,8 @@ var pipeline_mgr *PipelineManager
 
 func NewPipelineManager(factory common.PipelineFactory, repl_spec_svc service_def.ReplicationSpecSvc, xdcr_topology_svc service_def.XDCRCompTopologySvc,
 	remote_cluster_svc service_def.RemoteClusterSvc, cluster_info_svc service_def.ClusterInfoSvc, checkpoint_svc service_def.CheckpointsService,
-	uilog_svc service_def.UILogSvc, logger_context *log.LoggerContext) *PipelineManager {
+	uilog_svc service_def.UILogSvc, logger_context *log.LoggerContext, utilsIn utilities.UtilsIface) *PipelineManager {
+
 	pipelineMgrRetVar := &PipelineManager{
 		pipeline_factory:   factory,
 		repl_spec_svc:      repl_spec_svc,
@@ -109,7 +111,9 @@ func NewPipelineManager(factory common.PipelineFactory, repl_spec_svc service_de
 		logger:             log.NewLogger("PipelineMgr", logger_context),
 		cluster_info_svc:   cluster_info_svc,
 		uilog_svc:          uilog_svc,
-		child_waitGrp:      &sync.WaitGroup{}}
+		child_waitGrp:      &sync.WaitGroup{},
+		utils:              utilsIn,
+	}
 	pipelineMgrRetVar.logger.Info("Pipeline Manager is constucted")
 
 	//initialize the expvar storage for replication status
@@ -134,7 +138,7 @@ func (pipelineMgr *PipelineManager) ReplicationStatus(topic string) (*pipeline.R
 		return nil, err
 	}
 	if obj == nil {
-		return nil, utils.ReplicationStatusNotFoundError(topic)
+		return nil, pipelineMgr.utils.ReplicationStatusNotFoundError(topic)
 	}
 	return obj.(*pipeline.ReplicationStatus), nil
 }

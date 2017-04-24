@@ -20,7 +20,7 @@ import (
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/service_def"
-	"github.com/couchbase/goxdcr/utils"
+	utilities "github.com/couchbase/goxdcr/utils"
 	"net"
 	"time"
 )
@@ -43,13 +43,15 @@ type AuditSvc struct {
 	password    string
 	logger      *log.CommonLogger
 	initialized bool
+	utils       utilities.UtilsIface
 }
 
-func NewAuditSvc(top_svc service_def.XDCRCompTopologySvc, loggerCtx *log.LoggerContext) (*AuditSvc, error) {
+func NewAuditSvc(top_svc service_def.XDCRCompTopologySvc, loggerCtx *log.LoggerContext, utilsIn utilities.UtilsIface) (*AuditSvc, error) {
 	service := &AuditSvc{
 		top_svc:     top_svc,
 		logger:      log.NewLogger("AuditSvc", loggerCtx),
 		initialized: false,
+		utils:       utilsIn,
 	}
 
 	service.logger.Infof("Created audit service.\n")
@@ -72,7 +74,7 @@ func (service *AuditSvc) Write(eventId uint32, event interface{}) error {
 	err = service.write_internal(client, eventId, event)
 	// ignore errors when writing audit logs. simply log them
 	if err != nil {
-		err = utils.NewEnhancedError(base.ErrorWritingAudit, err)
+		err = service.utils.NewEnhancedError(base.ErrorWritingAudit, err)
 		service.logger.Error(err.Error())
 	}
 	return nil
@@ -134,17 +136,17 @@ func (service *AuditSvc) init() error {
 	if !service.initialized {
 		service.kvaddr, err = service.top_svc.MyMemcachedAddr()
 		if err != nil {
-			return utils.NewEnhancedError(ErrorInitializingAuditService+" Error getting memcached address of current host.", err)
+			return service.utils.NewEnhancedError(ErrorInitializingAuditService+" Error getting memcached address of current host.", err)
 		}
 
 		clusterAddr, err := service.top_svc.MyConnectionStr()
 		if err != nil {
-			return utils.NewEnhancedError(ErrorInitializingAuditService+" Error getting address of current cluster.", err)
+			return service.utils.NewEnhancedError(ErrorInitializingAuditService+" Error getting address of current cluster.", err)
 		}
 
 		service.username, service.password, err = cbauth.GetMemcachedServiceAuth(clusterAddr)
 		if err != nil {
-			err = utils.NewEnhancedError(fmt.Sprintf(ErrorInitializingAuditService+" Error getting memcached credentials for cluster %v\n.", clusterAddr), err)
+			err = service.utils.NewEnhancedError(fmt.Sprintf(ErrorInitializingAuditService+" Error getting memcached credentials for cluster %v\n.", clusterAddr), err)
 			return err
 		}
 
