@@ -162,6 +162,7 @@ func (rscl *ReplicationSpecChangeListener) replicationSpecChangeHandlerCallback(
 	}
 
 	if newSpec == nil {
+		// Replication Spec is deleted.
 		go onDeleteReplication(topic, rscl.logger)
 		return nil
 	}

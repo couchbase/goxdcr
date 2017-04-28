@@ -386,8 +386,8 @@ func (genericPipeline *GenericPipeline) Stop() error {
 	partsMap := GetAllParts(genericPipeline)
 	for _, part := range partsMap {
 		go func(part common.Part) {
-			err = genericPipeline.stopPart(part)
-			if err != nil {
+			oneErr := genericPipeline.stopPart(part)
+			if oneErr != nil {
 				genericPipeline.logger.Infof("%v Source nozzle %v failed to stop in time, left it alone to die.", genericPipeline.InstanceId(), part.Id())
 			}
 
@@ -576,7 +576,7 @@ func (genericPipeline *GenericPipeline) Settings() map[string]interface{} {
 
 func (genericPipeline *GenericPipeline) State() common.PipelineState {
 	if genericPipeline != nil {
-		return genericPipeline.state
+		return genericPipeline.GetState()
 	} else {
 		return common.Pipeline_Stopped
 	}
@@ -609,12 +609,19 @@ func (genericPipeline *GenericPipeline) Layout() string {
 	return fmt.Sprintf("%s\n%s\n%s\n", header, content, footer)
 }
 
+func (genericPipeline *GenericPipeline) GetState() common.PipelineState {
+	genericPipeline.stateLock.RLock()
+	defer genericPipeline.stateLock.RUnlock()
+
+	return genericPipeline.state
+}
+
 func (genericPipeline *GenericPipeline) SetState(state common.PipelineState) error {
 	genericPipeline.stateLock.Lock()
 	defer genericPipeline.stateLock.Unlock()
 
 	//validate the state transition
-	switch genericPipeline.State() {
+	switch genericPipeline.state {
 	case common.Pipeline_Initial:
 		if state != common.Pipeline_Starting && state != common.Pipeline_Stopping {
 			return errors.New(fmt.Sprintf(base.InvalidStateTransitionErrMsg, state, genericPipeline.InstanceId(), "Initial", "Starting, Stopping"))

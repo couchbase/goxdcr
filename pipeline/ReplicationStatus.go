@@ -104,7 +104,7 @@ type ReplicationStatus struct {
 	Logger           *log.CommonLogger
 	SpecId           string
 	Spec_getter      ReplicationSpecGetter
-	pipeline_updater interface{}
+	Pipeline_updater interface{}
 	Obj_pool         *base.MCRequestPool
 	Lock             *sync.RWMutex
 	// tracks the list of vbs managed by the replication.
@@ -115,7 +115,7 @@ type ReplicationStatus struct {
 
 func NewReplicationStatus(specId string, Spec_getter ReplicationSpecGetter, logger *log.CommonLogger) *ReplicationStatus {
 	rep_status := &ReplicationStatus{SpecId: specId,
-		Pipeline_:    nil,
+		Pipeline_:   nil,
 		Logger:      logger,
 		err_list:    PipelineErrorArray{},
 		Spec_getter: Spec_getter,
@@ -364,19 +364,20 @@ func (rs *ReplicationStatus) String() string {
 	return fmt.Sprintf("name={%v}, status={%v}, errors={%v}, progress={%v}\n", rs.SpecId, rs.RuntimeStatus(false), rs.err_list, rs.progress)
 }
 
+// The caller should check if return value is null, if the creation process is ongoing
 func (rs *ReplicationStatus) Updater() interface{} {
 	rs.Lock.RLock()
 	defer rs.Lock.RUnlock()
-	return rs.pipeline_updater
+	return rs.Pipeline_updater
 }
 
 func (rs *ReplicationStatus) SetUpdater(updater interface{}) error {
 	rs.Lock.Lock()
 	defer rs.Lock.Unlock()
-	if rs.pipeline_updater != nil && updater != nil {
-		return errors.New("There is already an updater in place, can't set the updater")
+	if updater == nil {
+		return errors.New("We should not allow updater to be cleared")
 	}
-	rs.pipeline_updater = updater
+	rs.Pipeline_updater = updater
 	return nil
 }
 

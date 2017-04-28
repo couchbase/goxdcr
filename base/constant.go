@@ -364,8 +364,6 @@ var VersionForRBACAndXattrSupport = []int{5, 0}
 var GoxdcrUserAgentPrefix = "couchbase-goxdcr"
 var GoxdcrUserAgent = ""
 
-var RetryIntervalForPipelineUpdaterRefresh = 100 * time.Millisecond
-
 // value representing tcp no delay feature in helo request/response
 var HELO_FEATURE_TCP_NO_DELAY uint16 = 0x03
 
