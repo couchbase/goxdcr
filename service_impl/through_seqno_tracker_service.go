@@ -328,7 +328,7 @@ func (tsTracker *ThroughSeqnoTrackerSvc) GetThroughSeqno(vbno uint16) uint64 {
 	)
 
 	for {
-		iter_seqno = iter_seqno + 1
+		iter_seqno++
 		if iter_seqno <= max_sent_seqno {
 			sent_index, sent_found := simple_utils.SearchUint64List(sent_seqno_list, iter_seqno)
 			if sent_found {
@@ -357,8 +357,10 @@ func (tsTracker *ThroughSeqnoTrackerSvc) GetThroughSeqno(vbno uint16) uint64 {
 		}
 
 		if iter_seqno <= max_end_gap_seqno {
-			gap_found := isSeqnoGapSeqno(gap_seqno_list_1, gap_seqno_list_2, iter_seqno)
+			gap_found, end_gap_seqno := isSeqnoGapSeqno(gap_seqno_list_1, gap_seqno_list_2, iter_seqno)
 			if gap_found {
+				// if iter_seqno is in a gap range, skip to the end of the gap range
+				iter_seqno = end_gap_seqno
 				continue
 			}
 		}
@@ -388,28 +390,30 @@ func (tsTracker *ThroughSeqnoTrackerSvc) GetThroughSeqno(vbno uint16) uint64 {
 	return through_seqno
 }
 
-func isSeqnoGapSeqno(gap_seqno_list_1, gap_seqno_list_2 []uint64, seqno uint64) bool {
+// if seqno is a gap seqno, return (true, seqno of end of gap range)
+// otherwise, return (false, 0)
+func isSeqnoGapSeqno(gap_seqno_list_1, gap_seqno_list_2 []uint64, seqno uint64) (bool, uint64) {
 	if len(gap_seqno_list_1) == 0 {
-		return false
+		return false, 0
 	}
 	index, is_start_gap_seqno := simple_utils.SearchUint64List(gap_seqno_list_1, seqno)
 	if is_start_gap_seqno {
-		return true
+		return true, gap_seqno_list_2[index]
 	}
 
 	// gap_range_index is the index of the largest start_gap_seqno that is smaller than seqno
 	gap_range_index := index - 1
 	if gap_range_index < 0 {
-		return false
+		return false, 0
 	}
 
 	if gap_seqno_list_2[gap_range_index] >= seqno {
 		// seqno is between gap_seqno_list_1[gap_range_index] and gap_seqno_list_2[gap_range_index]
 		// and hence is a gap seqno
-		return true
+		return true, gap_seqno_list_2[gap_range_index]
 	}
 
-	return false
+	return false, 0
 
 }
 
