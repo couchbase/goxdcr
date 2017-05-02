@@ -198,7 +198,7 @@ func (s *ReplicationSettings) SetLogLevel(log_level string) error {
 	return err
 }
 
-// returns a map of settings that ghave indeed been changed and their new values.
+// returns a map of settings that have indeed been changed and their new values.
 // returns a map of validation errors, which should normally be empty since the input settingsMap
 // is constructed internally and necessary checks should have been applied before
 // I am leaving the error checks just in case.
@@ -408,7 +408,7 @@ func (s *ReplicationSettings) toMap(isDefaultSettings bool) map[string]interface
 	return settings_map
 }
 
-func ValidateAndConvertSettingsValue(key, value, errorKey string) (convertedValue interface{}, err error) {
+func ValidateAndConvertSettingsValue(key, value, errorKey string, isEnterprise bool) (convertedValue interface{}, err error) {
 	switch key {
 	case ReplicationType:
 		if value != ReplicationTypeXmem && value != ReplicationTypeCapi {
@@ -451,8 +451,15 @@ func ValidateAndConvertSettingsValue(key, value, errorKey string) (convertedValu
 		// convert it to int to make future processing easier
 		convertedValue = int(convertedValue.(int64))
 
+		// network usage limit is supported only in EE
+		if key == BandwidthLimit && convertedValue.(int) != 0 && !isEnterprise {
+			err = errors.New("The value can be specified only in enterprise edition")
+			return
+		}
+
 		// range check for int parameters
 		err = RangeCheck(convertedValue.(int), SettingsConfigMap[key])
+
 	default:
 		// a nil converted value indicates that the key is not a settings key
 		convertedValue = nil

@@ -477,8 +477,14 @@ func DecodeSettingsFromRequest(request *http.Request, isDefaultSettings bool, is
 		return nil, errorsMap
 	}
 
+	isEnterprise, err := XDCRCompTopologyService().IsMyClusterEnterprise()
+	if err != nil {
+		errorsMap[base.PlaceHolderFieldKey] = err
+		return nil, errorsMap
+	}
+
 	for key, valArr := range request.Form {
-		err := processKey(key, valArr, &settings, isDefaultSettings, isUpdate)
+		err := processKey(key, valArr, &settings, isDefaultSettings, isUpdate, isEnterprise)
 		if err != nil {
 			errorsMap[key] = err
 		}
@@ -502,6 +508,12 @@ func DecodeSettingsFromInternalSettingsRequest(request *http.Request) (map[strin
 		return nil, errorsMap
 	}
 
+	isEnterprise, err := XDCRCompTopologyService().IsMyClusterEnterprise()
+	if err != nil {
+		errorsMap[base.PlaceHolderFieldKey] = err
+		return nil, errorsMap
+	}
+
 	for key, valArr := range request.Form {
 		restKey, err := ConvertRestInternalKeyToRestKey(key)
 		if err != nil {
@@ -509,7 +521,7 @@ func DecodeSettingsFromInternalSettingsRequest(request *http.Request) (map[strin
 			continue
 		}
 
-		err = processKey(restKey, valArr, &settings, true /*isDefaultSettings*/, false /*isUpdate*/)
+		err = processKey(restKey, valArr, &settings, true /*isDefaultSettings*/, false /*isUpdate*/, isEnterprise)
 		if err != nil {
 			errorsMap[restKey] = err
 		}
@@ -914,7 +926,7 @@ func EncodeReplicationSpecErrorIntoResponse(err error) (*ap.Response, error) {
 
 }
 
-func processKey(restKey string, valArr []string, settingsPtr *map[string]interface{}, isDefaultSettings bool, isUpdate bool) error {
+func processKey(restKey string, valArr []string, settingsPtr *map[string]interface{}, isDefaultSettings bool, isUpdate bool, isEnterprise bool) error {
 	settingsKey, ok := RestKeyToSettingsKeyMap[restKey]
 	if !ok {
 		// ignore non-settings key
@@ -930,16 +942,16 @@ func processKey(restKey string, valArr []string, settingsPtr *map[string]interfa
 		return errors.New("Setting value cannot be modified after replication is created.")
 	}
 
-	convertedValue, err := validateAndConvertAllSettingValue(settingsKey, valArr[0], restKey)
+	convertedValue, err := validateAndConvertAllSettingValue(settingsKey, valArr[0], restKey, isEnterprise)
 	if err == nil {
 		(*settingsPtr)[settingsKey] = convertedValue
 	}
 	return err
 }
 
-func validateAndConvertAllSettingValue(key, value, restKey string) (convertedValue interface{}, err error) {
+func validateAndConvertAllSettingValue(key, value, restKey string, isEnterprise bool) (convertedValue interface{}, err error) {
 	//check if value is replication specific setting
-	convertedValue, err = metadata.ValidateAndConvertSettingsValue(key, value, restKey)
+	convertedValue, err = metadata.ValidateAndConvertSettingsValue(key, value, restKey, isEnterprise)
 	//if we find converted value is null  than check if value is global process specific setting
 	if convertedValue == nil {
 		convertedValue, err = metadata.ValidateAndConvertGlobalSettingsValue(key, value, restKey)
