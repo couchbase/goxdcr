@@ -257,17 +257,15 @@ func getHighSeqNos(serverAddr string, vbnos []uint16, conn *mcc.Client) (map[uin
 
 //updateStats runs until it get finish signal
 //It processes the raw stats and publish the overview stats along with the raw stats to expvar
-//It also log the stats to log
 func (stats_mgr *StatisticsManager) updateStats() error {
-	stats_mgr.logger.Info("updateStats started")
+	stats_mgr.logger.Infof("%v updateStats started", stats_mgr.pipeline.InstanceId())
+	defer stats_mgr.logger.Infof("%v updateStats exited", stats_mgr.pipeline.InstanceId())
 
 	defer stats_mgr.wait_grp.Done()
 	defer close(stats_mgr.done_ch)
 
 	ticker := <-stats_mgr.update_ticker_ch
 	defer ticker.Stop()
-	logStats_ticker := time.NewTicker(default_log_stats_interval)
-	defer logStats_ticker.Stop()
 
 	init_ch := make(chan bool, 1)
 	init_ch <- true
@@ -291,8 +289,27 @@ func (stats_mgr *StatisticsManager) updateStats() error {
 			if err != nil {
 				return nil
 			}
+		}
+	}
+	return nil
+}
+
+//periodically prints stats to log
+func (stats_mgr *StatisticsManager) logStats() error {
+	stats_mgr.logger.Infof("%v logStats started", stats_mgr.pipeline.InstanceId())
+	defer stats_mgr.logger.Infof("%v logStats exited", stats_mgr.pipeline.InstanceId())
+
+	defer stats_mgr.wait_grp.Done()
+
+	logStats_ticker := time.NewTicker(default_log_stats_interval)
+	defer logStats_ticker.Stop()
+
+	for {
+		select {
+		case <-stats_mgr.finish_ch:
+			return nil
 		case <-logStats_ticker.C:
-			err := stats_mgr.logStats()
+			err := stats_mgr.logStatsOnce()
 			if err != nil {
 				stats_mgr.logger.Infof("%v Failed to log statistics. err=%v\n", stats_mgr.pipeline.InstanceId(), err)
 			}
@@ -319,7 +336,7 @@ func (stats_mgr *StatisticsManager) updateStatsOnce() error {
 	return nil
 }
 
-func (stats_mgr *StatisticsManager) logStats() error {
+func (stats_mgr *StatisticsManager) logStatsOnce() error {
 	if stats_mgr.logger.GetLogLevel() >= log.LogLevelInfo {
 		statsLog, err := stats_mgr.formatStatsForLog()
 		if err != nil {
@@ -352,6 +369,9 @@ func (stats_mgr *StatisticsManager) logStats() error {
 		if throttler != nil {
 			stats_mgr.logger.Info(throttler.(*BandwidthThrottler).StatusSummary())
 		}
+
+		// log through seqno service summary
+		stats_mgr.logger.Info(stats_mgr.through_seqno_tracker_svc.StatusSummary())
 	}
 	return nil
 }
@@ -694,6 +714,9 @@ func (stats_mgr *StatisticsManager) Start(settings map[string]interface{}) error
 
 	stats_mgr.wait_grp.Add(1)
 	go stats_mgr.updateStats()
+
+	stats_mgr.wait_grp.Add(1)
+	go stats_mgr.logStats()
 
 	return nil
 }

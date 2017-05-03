@@ -21,6 +21,7 @@ import (
 	"github.com/couchbase/goxdcr/pipeline_utils"
 	"github.com/couchbase/goxdcr/simple_utils"
 	"sync"
+	"time"
 )
 
 type ThroughSeqnoTrackerSvc struct {
@@ -86,12 +87,18 @@ func (list_obj *SortedSeqnoListWithLock) getSortedSeqnoList(needToSort bool) []u
 	}
 }
 
+func (list_obj *SortedSeqnoListWithLock) getLengthOfSeqnoList() int {
+	list_obj.lock.RLock()
+	defer list_obj.lock.RUnlock()
+
+	return len(list_obj.seqno_list)
+}
+
 // append seqno to the end of seqno_list
 func (list_obj *SortedSeqnoListWithLock) appendSeqno(seqno uint64, logger *log.CommonLogger) {
 	list_obj.lock.Lock()
 	defer list_obj.lock.Unlock()
 	list_obj.seqno_list = append(list_obj.seqno_list, seqno)
-	logger.Tracef("after adding seqno %v, seqno_list is %v\n", seqno, list_obj.seqno_list)
 }
 
 // truncate all seqnos that are no larger than passed in through_seqno
@@ -129,13 +136,19 @@ func (list_obj *DualSortedSeqnoListWithLock) getSortedSeqnoLists() ([]uint64, []
 	return simple_utils.DeepCopyUint64Array(list_obj.seqno_list_1), simple_utils.DeepCopyUint64Array(list_obj.seqno_list_2)
 }
 
+func (list_obj *DualSortedSeqnoListWithLock) getLengthOfSeqnoLists() int {
+	list_obj.lock.RLock()
+	defer list_obj.lock.RUnlock()
+
+	return len(list_obj.seqno_list_1)
+}
+
 // append seqnos to the end of seqno_lists
 func (list_obj *DualSortedSeqnoListWithLock) appendSeqnos(seqno_1 uint64, seqno_2 uint64, logger *log.CommonLogger) {
 	list_obj.lock.Lock()
 	defer list_obj.lock.Unlock()
 	list_obj.seqno_list_1 = append(list_obj.seqno_list_1, seqno_1)
 	list_obj.seqno_list_2 = append(list_obj.seqno_list_2, seqno_2)
-	logger.Tracef("after adding seqno_1 %v, seqno_2 %v, seqno_list_1 is %v, seqno_list_2 is %v\n", seqno_1, seqno_2, list_obj.seqno_list_1, list_obj.seqno_list_2)
 }
 
 // truncate all seqnos that are no larger than passed in through_seqno
@@ -236,20 +249,17 @@ func (tsTracker *ThroughSeqnoTrackerSvc) ProcessEvent(event *common.Event) error
 
 func (tsTracker *ThroughSeqnoTrackerSvc) addSentSeqno(vbno uint16, sent_seqno uint64) {
 	tsTracker.validateVbno(vbno, "addSentSeqno")
-	tsTracker.logger.Tracef("%v adding sent seqno %v for vb %v.\n", tsTracker.id, sent_seqno, vbno)
 	tsTracker.vb_sent_seqno_list_map[vbno].appendSeqno(sent_seqno, tsTracker.logger)
 }
 
 func (tsTracker *ThroughSeqnoTrackerSvc) addFilteredSeqno(vbno uint16, filtered_seqno uint64) {
 	tsTracker.validateVbno(vbno, "addFilteredSeqno")
-	tsTracker.logger.Tracef("%v adding filtered seqno %v for vb %v.", tsTracker.id, filtered_seqno, vbno)
 	tsTracker.vb_filtered_seqno_list_map[vbno].appendSeqno(filtered_seqno, tsTracker.logger)
 }
 
 func (tsTracker *ThroughSeqnoTrackerSvc) addFailedCRSeqno(vbno uint16, failed_cr_seqno uint64) {
 	tsTracker.validateVbno(vbno, "addFailedCRSeqno")
 
-	tsTracker.logger.Tracef("%v adding failed cr seqno %v for vb %v.", tsTracker.id, failed_cr_seqno, vbno)
 	tsTracker.vb_failed_cr_seqno_list_map[vbno].appendSeqno(failed_cr_seqno, tsTracker.logger)
 }
 
@@ -266,8 +276,6 @@ func (tsTracker *ThroughSeqnoTrackerSvc) processGapSeqnos(vbno uint16, current_s
 		last_seen_seqno = tsTracker.through_seqno_map[vbno].GetSeqno()
 	}
 	last_seen_seqno_obj.SetSeqnoWithoutLock(current_seqno)
-
-	tsTracker.logger.Tracef("%v processing gap seqnos for seqno %v for vbno %v. last_seen_seqno=%v\n", tsTracker.id, current_seqno, vbno, last_seen_seqno)
 
 	if last_seen_seqno < current_seqno-1 {
 		tsTracker.vb_gap_seqno_list_map[vbno].appendSeqnos(last_seen_seqno+1, current_seqno-1, tsTracker.logger)
@@ -300,9 +308,6 @@ func (tsTracker *ThroughSeqnoTrackerSvc) GetThroughSeqno(vbno uint16) uint64 {
 	max_failed_cr_seqno := maxSeqno(failed_cr_seqno_list)
 	gap_seqno_list_1, gap_seqno_list_2 := tsTracker.vb_gap_seqno_list_map[vbno].getSortedSeqnoLists()
 	max_end_gap_seqno := maxSeqno(gap_seqno_list_2)
-
-	tsTracker.logger.Tracef("%v, vbno=%v, last_through_seqno=%v len(sent_seqno_list)=%v len(filtered_seqno_list)=%v len(failed_cr_seqno_list)=%v len(gap_seqno_list_1)=%v len(gap_seqno_list_2)=%v\n", tsTracker.id, vbno, last_through_seqno, len(sent_seqno_list), len(filtered_seqno_list), len(failed_cr_seqno_list), len(gap_seqno_list_1), len(gap_seqno_list_2))
-	tsTracker.logger.Tracef("%v, vbno=%v, last_through_seqno=%v\n sent_seqno_list=%v\n filtered_seqno_list=%v\n failed_cr_seqno_list=%v\n gap_seqno_list_1=%v\n gap_seqno_list_2=%v\n", tsTracker.id, vbno, last_through_seqno, sent_seqno_list, filtered_seqno_list, failed_cr_seqno_list, gap_seqno_list_1, gap_seqno_list_2)
 
 	// Goal of algorithm:
 	// Find the right through_seqno for stats and checkpointing, with the constraint that through_seqno cannot be
@@ -385,8 +390,6 @@ func (tsTracker *ThroughSeqnoTrackerSvc) GetThroughSeqno(vbno uint16) uint64 {
 		// truncate no longer needed entries from seqno lists to reduce memory/cpu overhead for future computations
 		go tsTracker.truncateSeqnoLists(vbno, through_seqno)
 	}
-
-	tsTracker.logger.Tracef("%v, vbno=%v, through_seqno=%v\n", tsTracker.id, vbno, through_seqno)
 	return through_seqno
 }
 
@@ -418,6 +421,9 @@ func isSeqnoGapSeqno(gap_seqno_list_1, gap_seqno_list_2 []uint64, seqno uint64) 
 }
 
 func (tsTracker *ThroughSeqnoTrackerSvc) GetThroughSeqnos() map[uint16]uint64 {
+	start_time := time.Now()
+	defer tsTracker.logger.Infof("%v GetThroughSeqnos completed after %v\n", tsTracker.id, time.Since(start_time))
+
 	result_map := make(map[uint16]uint64)
 
 	listOfVbs := tsTracker.getVbList()
@@ -512,4 +518,37 @@ func maxSeqno(seqno_list []uint64) uint64 {
 	} else {
 		return 0
 	}
+}
+
+func (tsTracker *ThroughSeqnoTrackerSvc) StatusSummary() string {
+	start_time := time.Now()
+	var count, sum_sent, max_sent, sum_filtered, max_filtered, sum_failed_cr, max_failed_cr, sum_gap, max_gap int
+	for _, vbno := range tsTracker.getVbList() {
+		length_sent_seqno_list := tsTracker.vb_sent_seqno_list_map[vbno].getLengthOfSeqnoList()
+		length_filtered_seqno_list := tsTracker.vb_filtered_seqno_list_map[vbno].getLengthOfSeqnoList()
+		length_failed_cr_seqno_list := tsTracker.vb_failed_cr_seqno_list_map[vbno].getLengthOfSeqnoList()
+		length_gap_seqno_list := tsTracker.vb_gap_seqno_list_map[vbno].getLengthOfSeqnoLists()
+
+		count++
+		sum_sent += length_sent_seqno_list
+		if max_sent < length_sent_seqno_list {
+			max_sent = length_sent_seqno_list
+		}
+		sum_filtered += length_filtered_seqno_list
+		if max_filtered < length_filtered_seqno_list {
+			max_filtered = length_filtered_seqno_list
+		}
+		sum_failed_cr += length_failed_cr_seqno_list
+		if max_failed_cr < length_failed_cr_seqno_list {
+			max_failed_cr = length_failed_cr_seqno_list
+		}
+		sum_gap += length_gap_seqno_list
+		if max_gap < length_gap_seqno_list {
+			max_gap = length_gap_seqno_list
+		}
+	}
+
+	return fmt.Sprintf("%v time_spent=%v num_vb=%v max_sent=%v avg_sent=%v max_filtered=%v avg_filtered=%v max_failed_cr=%v avg_failed_cr=%v max_gap=%v avg_gap=%v\n",
+		tsTracker.id, time.Since(start_time), count, max_sent, sum_sent/count, max_filtered, sum_filtered/count, max_failed_cr, sum_failed_cr/count,
+		max_gap, sum_gap/count)
 }

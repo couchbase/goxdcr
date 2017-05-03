@@ -20,4 +20,5 @@ type ThroughSeqnoTrackerSvc interface {
 	// get through seqnos for all vbs managed by the pipeline
 	GetThroughSeqnos() map[uint16]uint64
 	SetStartSeqno(vbno uint16, seqno uint64)
+	StatusSummary() string
 }
