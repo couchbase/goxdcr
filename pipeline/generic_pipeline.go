@@ -84,10 +84,12 @@ type GenericPipeline struct {
 
 	//the map that contains the references to all parts used in the pipeline
 	//it only populated when GetAllParts called the first time
+	// PartsMap for now is a map of sources
 	partsMap map[string]common.Part
 
 	//the map that contains the references to all connectors used in the pipeline
 	//it only populated when GetAllConnectors called the first time
+	// ConnectorsMap for now is a map of routers
 	connectorsMap map[string]common.Connector
 
 	//the map that contains the references to all async event listeners used in the pipeline
@@ -120,12 +122,14 @@ func (genericPipeline *GenericPipeline) SetRuntimeContext(ctx common.PipelineRun
 	genericPipeline.context = ctx
 }
 
+// Starts the downstream parts recursively, and eventually the part itself
+// In a more specific use case, for now, it starts the nozzles and routers (out-going nozzles first, then source nozzles)
 func (genericPipeline *GenericPipeline) startPart(part common.Part, settings map[string]interface{},
 	targetClusterRef *metadata.RemoteClusterReference, ssl_port_map map[string]uint16, isSSLOverMem bool, err_ch chan partError) {
 
 	var err error = nil
 
-	//start downstreams
+	// start downstreams, such as CAPI or XMEM nozzles, before we start the actual part (i.e. DCP nozzle)
 	if part.Connector() != nil {
 		downstreamParts := part.Connector().DownStreams()
 		waitGrp := &sync.WaitGroup{}
@@ -149,12 +153,12 @@ func (genericPipeline *GenericPipeline) startPart(part common.Part, settings map
 	partSettings := settings
 	if genericPipeline.partSetting_constructor != nil {
 		genericPipeline.logger.Debugf("%v calling part setting constructor\n", genericPipeline.InstanceId())
+		// partSetting_contructor currently is only: xdcrf.ConstructUpdateSettingsForPart
 		partSettings, err = genericPipeline.partSetting_constructor(genericPipeline, part, settings, targetClusterRef, ssl_port_map, isSSLOverMem)
 		if err != nil {
 			err_ch <- partError{part.Id(), err}
 			return
 		}
-
 	}
 
 	err = part.Start(partSettings)
@@ -221,8 +225,7 @@ func (genericPipeline *GenericPipeline) Start(settings map[string]interface{}) e
 	}
 
 	//start all the processing steps of the Pipeline
-	//start the incoming nozzle which would start the downstream steps
-	//subsequently
+	//start the incoming nozzle which would start the downstream steps subsequently
 	err_ch := make(chan partError, 1000)
 	for _, source := range genericPipeline.sources {
 		waitGrp := &sync.WaitGroup{}
@@ -414,6 +417,7 @@ func (genericPipeline *GenericPipeline) Topic() string {
 	return genericPipeline.topic
 }
 
+// Used for testing only
 func NewGenericPipeline(t string,
 	sources map[string]common.Nozzle,
 	targets map[string]common.Nozzle,
@@ -456,6 +460,7 @@ func NewPipelineWithSettingConstructor(t string,
 		instance_id:                   time.Now().Nanosecond(),
 		state:                         common.Pipeline_Initial,
 		settings_lock:                 &sync.RWMutex{}}
+	// NOTE: Calling initialize here as part of constructor
 	pipeline.initialize()
 	pipeline.logger.Debugf("Pipeline %s has been initialized with a part setting constructor %v", t, partsSettingsConstructor)
 
@@ -528,6 +533,7 @@ func GetAllAsyncComponentEventListeners(p common.Pipeline) map[string]common.Asy
 	return genericPipeline.asyncEventListenerMap
 }
 
+// Modifies and adds to "listenersMap"
 func addAsyncListenersToMap(part common.Part, listenersMap map[string]common.AsyncComponentEventListener, partsMap map[string]common.Part) {
 	if part != nil {
 		// use partsMap to check if the part has been processed before to avoid infinite loop

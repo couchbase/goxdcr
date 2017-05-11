@@ -88,6 +88,7 @@ type DcpNozzle struct {
 	sourceBucketName string
 	targetBucketName string
 	client           *mcc.Client
+	// UPR feed is created by using the client above, once the client is initialized
 	uprFeed          *mcc.UprFeed
 	// lock on uprFeed to avoid race condition
 	lock_uprFeed sync.RWMutex
@@ -411,6 +412,7 @@ func (dcp *DcpNozzle) Receive(data interface{}) error {
 	return nil
 }
 
+// Handles any UPR event coming in from the UPR feed channel
 func (dcp *DcpNozzle) processData() (err error) {
 	dcp.Logger().Infof("%v processData starts..........\n", dcp.Id())
 	defer dcp.childrenWaitGrp.Done()
@@ -421,6 +423,8 @@ func (dcp *DcpNozzle) processData() (err error) {
 		dcp.Logger().Infof("%v DCP feed has been closed. processData exits\n", dcp.Id())
 		return
 	}
+	// uprFeed.C is the channel supplied that sends in uprEvents
+	// mutch is of type UprEvent, located in gomemcached/client/upr_feed.go
 	mutch := uprFeed.C
 	for {
 		select {
@@ -439,6 +443,8 @@ func (dcp *DcpNozzle) processData() (err error) {
 			uprFeed.IncrementAckBytes(m.AckSize)
 
 			if m.Opcode == mc.UPR_STREAMREQ {
+				// This is a reply coming back from dcp.uprFeed.UprRequestStream(), which triggers UPR_STREAMREQ to the producer
+				// See: https://github.com/couchbaselabs/dcp-documentation/blob/master/documentation/commands/stream-request.md
 				if m.Status == mc.NOT_MY_VBUCKET {
 					vb_err := fmt.Errorf("Received error %v on vb %v\n", base.ErrorNotMyVbucket, m.VBucket)
 					dcp.Logger().Errorf("%v %v", dcp.Id(), vb_err)
@@ -477,6 +483,8 @@ func (dcp *DcpNozzle) processData() (err error) {
 				}
 
 			} else if m.Opcode == mc.UPR_STREAMEND {
+				// Sent to the consumer to indicate that the producer has no more messages to stream for the specified vbucket.
+				// https://github.com/couchbaselabs/dcp-documentation/blob/master/documentation/commands/stream-end.md
 				vbno := m.VBucket
 				stream_status, err := dcp.getStreamState(vbno)
 				if err == nil && stream_status == Dcp_Stream_Active {
@@ -486,9 +494,13 @@ func (dcp *DcpNozzle) processData() (err error) {
 				}
 
 			} else {
+				// Regular mutations coming in from DCP stream
 				if dcp.IsOpen() {
 					switch m.Opcode {
 					case mc.UPR_MUTATION, mc.UPR_DELETION, mc.UPR_EXPIRATION:
+						// https://github.com/couchbaselabs/dcp-documentation/blob/master/documentation/commands/mutation.md
+						// https://github.com/couchbaselabs/dcp-documentation/blob/master/documentation/commands/deletion.md
+						// https://github.com/couchbaselabs/dcp-documentation/blob/master/documentation/commands/expiration.md
 						start_time := time.Now()
 						dcp.incCounterReceived()
 						dcp.RaiseEvent(common.NewEvent(common.DataReceived, m, dcp, nil /*derivedItems*/, nil /*otherInfos*/))

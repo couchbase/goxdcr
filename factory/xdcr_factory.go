@@ -146,6 +146,10 @@ func NewXDCRFactory(repl_spec_svc service_def.ReplicationSpecSvc,
 		logger: log.NewLogger("XDCRFactory", factory_logger_ctx)}
 }
 
+/**
+ * This is the method where the majority of the pipeline and its required components are constructed.
+ * PipelineManager is currently the only user of this method.
+ */
 func (xdcrf *XDCRFactory) NewPipeline(topic string, progress_recorder common.PipelineProgressRecorder) (common.Pipeline, error) {
 	spec, err := xdcrf.repl_spec_svc.ReplicationSpec(topic)
 	if err != nil {
@@ -197,7 +201,11 @@ func (xdcrf *XDCRFactory) NewPipeline(topic string, progress_recorder common.Pip
 
 	xdcrf.logger.Infof("%v sourceCRMode=%v isCapiReplication=%v\n", topic, sourceCRMode, isCapiReplication)
 
-	// popuplate pipeline using config
+	/**
+	 * Construct the Source nozzles
+	 * sourceNozzles - a map of DCPNozzleID -> DCPNozzle
+	 * kv_vb_map - Map of SourceKVNode -> list of vbucket#'s that it's responsible for
+	 */
 	sourceNozzles, kv_vb_map, err := xdcrf.constructSourceNozzles(spec, topic, isCapiReplication, logger_ctx)
 	if err != nil {
 		return nil, err
@@ -210,6 +218,12 @@ func (xdcrf *XDCRFactory) NewPipeline(topic string, progress_recorder common.Pip
 	progress_recorder(fmt.Sprintf("%v source nozzles have been constructed", len(sourceNozzles)))
 
 	xdcrf.logger.Infof("%v kv_vb_map=%v\n", topic, kv_vb_map)
+	/**
+	 * Construct the outgoing (Destination) nozzles
+	 * 1. outNozzles - map of ID -> actual nozzle
+	 * 2. vbNozzleMap - map of VBucket# -> nozzle to be used (to be used by router)
+	 * 3. kvVBMap - map of remote KVNodes -> vbucket# responsible for per node
+	 */
 	outNozzles, vbNozzleMap, target_kv_vb_map, targetUserName, targetPassword, targetClusterVersion, err :=
 		xdcrf.constructOutgoingNozzles(spec, kv_vb_map, sourceCRMode, targetBucketInfo, targetClusterRef, isCapiReplication, logger_ctx)
 
@@ -220,7 +234,7 @@ func (xdcrf *XDCRFactory) NewPipeline(topic string, progress_recorder common.Pip
 
 	// TODO construct queue parts. This will affect vbMap in router. may need an additional outNozzle -> downStreamPart/queue map in constructRouter
 
-	// connect parts
+	// construct routers to be able to connect the nozzles
 	for _, sourceNozzle := range sourceNozzles {
 		vblist := sourceNozzle.(*parts.DcpNozzle).GetVBList()
 		downStreamParts := make(map[string]common.Part)
@@ -237,6 +251,7 @@ func (xdcrf *XDCRFactory) NewPipeline(topic string, progress_recorder common.Pip
 			downStreamParts[targetNozzleId] = outNozzle
 		}
 
+		// Construct a router - each Source nozzle has a router.
 		router, err := xdcrf.constructRouter(sourceNozzle.Id(), spec, downStreamParts, vbNozzleMap, sourceCRMode, logger_ctx)
 		if err != nil {
 			return nil, err
@@ -245,15 +260,19 @@ func (xdcrf *XDCRFactory) NewPipeline(topic string, progress_recorder common.Pip
 	}
 	progress_recorder("Source nozzles have been wired to target nozzles")
 
-	// construct pipeline
-	pipeline := pp.NewPipelineWithSettingConstructor(topic, sourceNozzles, outNozzles, spec, xdcrf.ConstructSettingsForPart, xdcrf.ConstructSSLPortMap, xdcrf.ConstructUpdateSettingsForPart, xdcrf.SetStartSeqno, xdcrf.remote_cluster_svc.RemoteClusterByUuid, xdcrf.CheckpointBeforeStop, logger_ctx)
+	// construct and initializes the pipeline
+	pipeline := pp.NewPipelineWithSettingConstructor(topic, sourceNozzles, outNozzles, spec, xdcrf.ConstructSettingsForPart,
+		xdcrf.ConstructSSLPortMap, xdcrf.ConstructUpdateSettingsForPart, xdcrf.SetStartSeqno, xdcrf.remote_cluster_svc.RemoteClusterByUuid,
+		xdcrf.CheckpointBeforeStop, logger_ctx)
 
+	// These listeners are the driving factors of the pipeline
 	xdcrf.registerAsyncListenersOnSources(pipeline, logger_ctx)
 	xdcrf.registerAsyncListenersOnTargets(pipeline, logger_ctx)
 
 	// initialize component event listener map in pipeline
 	pp.GetAllAsyncComponentEventListeners(pipeline)
 
+	// Create PipelineContext
 	if pipelineContext, err := pctx.NewWithSettingConstructor(pipeline, xdcrf.ConstructSettingsForService, xdcrf.ConstructUpdateSettingsForService, logger_ctx); err != nil {
 
 		return nil, err
@@ -306,11 +325,13 @@ func (xdcrf *XDCRFactory) registerAsyncListenersOnSources(pipeline common.Pipeli
 			pipeline.Topic(), logger_ctx)
 
 		for index := load_distribution[i][0]; index < load_distribution[i][1]; index++ {
+			// Get the source DCP nozzle
 			dcp_part := sources[index]
 
 			dcp_part.RegisterComponentEventListener(common.DataReceived, data_received_event_listener)
 			dcp_part.RegisterComponentEventListener(common.DataProcessed, data_processed_event_listener)
 
+			// For filtering event, register the event ON the router itself to let the router take care of it
 			conn := dcp_part.Connector()
 			conn.RegisterComponentEventListener(common.DataFiltered, data_filtered_event_listener)
 		}
@@ -349,7 +370,13 @@ func (xdcrf *XDCRFactory) registerAsyncListenersOnTargets(pipeline common.Pipeli
 	}
 }
 
-// construct source nozzles for the requested/current kv node
+/**
+ * Construct source nozzles for the requested/current kv node
+ * Returns:
+ * 1. a map of DCPNozzleID -> DCPNozzle
+ * 2. Map of SourceKVNode -> list of vbucket#'s that it's responsible for
+ * Currently since XDCR is run on a per node, it should only have 1 source KV node in the map
+ */
 func (xdcrf *XDCRFactory) constructSourceNozzles(spec *metadata.ReplicationSpecification,
 	topic string,
 	isCapiReplication bool,
@@ -358,6 +385,7 @@ func (xdcrf *XDCRFactory) constructSourceNozzles(spec *metadata.ReplicationSpeci
 
 	maxNozzlesPerNode := spec.Settings.SourceNozzlePerNode
 
+	// Get a map of kvNode -> vBuckets responsibile for
 	kv_vb_map, _, err := pipeline_utils.GetSourceVBMap(xdcrf.cluster_info_svc, xdcrf.xdcr_topology_svc, spec.SourceBucketName, xdcrf.logger)
 	if err != nil {
 		return nil, nil, err
@@ -372,6 +400,7 @@ func (xdcrf *XDCRFactory) constructSourceNozzles(spec *metadata.ReplicationSpeci
 
 		// the number of dcpNozzle nodes to construct is the smaller of vbucket list size and source connection size
 		numOfDcpNozzles := min(numOfVbs, maxNozzlesPerNode)
+		// load_distribution is used to ensure that every nozzle gets as close # of vbuckets as possible, with a max delta between them of 1
 		load_distribution := simple_utils.BalanceLoad(numOfDcpNozzles, numOfVbs)
 		xdcrf.logger.Infof("topic=%v, numOfDcpNozzles=%v, numOfVbs=%v, load_distribution=%v\n", spec.Id, numOfDcpNozzles, numOfVbs, load_distribution)
 
@@ -402,6 +431,12 @@ func (xdcrf *XDCRFactory) partId(prefix string, topic string, kvaddr string, ind
 	return prefix + PART_NAME_DELIMITER + topic + PART_NAME_DELIMITER + kvaddr + PART_NAME_DELIMITER + strconv.Itoa(index)
 }
 
+/**
+ * Given a list of target VBlist for a node, and a map of all sourceNode->VBucket lists
+ * Filter so that the vbucket number of the target matches the vbucket number of the source,
+ * meaning that this pipeline is actually responsible for replication of it.
+ * Returns: slice of vbuckets
+ */
 func (xdcrf *XDCRFactory) filterVBList(targetkvVBList []uint16, kv_vb_map map[string][]uint16) []uint16 {
 	ret := []uint16{}
 	for _, vb := range targetkvVBList {
@@ -417,12 +452,23 @@ func (xdcrf *XDCRFactory) filterVBList(targetkvVBList []uint16, kv_vb_map map[st
 	return ret
 }
 
+/**
+ * Constructs the outgoing nozzles
+ * Returns:
+ * 1. outNozzles - map of ID -> actual nozzle
+ * 2. vbNozzleMap - map of VBucket# -> nozzle to be used (to be used by router)
+ * 3. kvVBMap - map of remote KVNodes -> vbucket# responsible for per node
+ * 4. targetUserName
+ * 5. targetPassword
+ * 6. targetVersion - target Cluster Version
+ */
 func (xdcrf *XDCRFactory) constructOutgoingNozzles(spec *metadata.ReplicationSpecification, kv_vb_map map[string][]uint16,
 	sourceCRMode base.ConflictResolutionMode, targetBucketInfo map[string]interface{},
 	targetClusterRef *metadata.RemoteClusterReference, isCapiReplication bool, logger_ctx *log.LoggerContext) (outNozzles map[string]common.Nozzle,
 	vbNozzleMap map[uint16]string, kvVBMap map[string][]uint16, targetUserName string, targetPassword string, targetClusterVersion int, err error) {
 	outNozzles = make(map[string]common.Nozzle)
 	vbNozzleMap = make(map[uint16]string)
+	// Get a Map of Remote kvNode -> vBucket#s it's responsible for
 	kvVBMap, err = utils.GetServerVBucketsMap(targetClusterRef.HostName, spec.TargetBucketName, targetBucketInfo)
 	if err != nil {
 		xdcrf.logger.Errorf("Error getting server vbuckets map, err=%v\n", err)
@@ -473,6 +519,7 @@ func (xdcrf *XDCRFactory) constructOutgoingNozzles(spec *metadata.ReplicationSpe
 
 	var vbCouchApiBaseMap map[uint16]string
 
+	// For each destination host (kvaddr) and its vbucvket list that it has (kvVBList)
 	for kvaddr, kvVBList := range kvVBMap {
 		if isCapiReplication && len(vbCouchApiBaseMap) == 0 {
 			// construct vbCouchApiBaseMap only when nessary and only once
@@ -483,7 +530,9 @@ func (xdcrf *XDCRFactory) constructOutgoingNozzles(spec *metadata.ReplicationSpe
 			}
 		}
 
-		relevantVBs := xdcrf.filterVBList(kvVBList, kv_vb_map)
+		// Given current Destination node's list of VBucketList and the map of all source nodes -> vbLists
+		// Match the needed vbuckets
+		relevantVBs := xdcrf.filterVBList(kvVBList /* Dest */, kv_vb_map /* source */)
 
 		xdcrf.logger.Debugf("kvaddr = %v; kvVbList=%v, relevantVBs=-%v\n", kvaddr, kvVBList, relevantVBs)
 
@@ -514,10 +563,14 @@ func (xdcrf *XDCRFactory) constructOutgoingNozzles(spec *metadata.ReplicationSpe
 				outNozzle = xdcrf.constructXMEMNozzle(spec.Id, kvaddr, spec.SourceBucketName, spec.TargetBucketName, targetUserName, targetPassword, i, connSize, sourceCRMode, targetBucketInfo, logger_ctx)
 			}
 
+			// Add the created nozzle to the collective map of outNozzles to be returned
 			outNozzles[outNozzle.Id()] = outNozzle
 
 			// construct vbNozzleMap for the out nozzle, which is needed by the router
+			// All vbuckets that are relevant are covered at the end of the double for loop
 			for _, vbno := range vbList {
+				// Each vb that is relevant and filtered through load_distrbution gets assigned to this nozzle
+				// This will be used by the router
 				vbNozzleMap[vbno] = outNozzle.Id()
 			}
 

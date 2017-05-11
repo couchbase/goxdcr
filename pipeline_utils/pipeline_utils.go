@@ -33,6 +33,9 @@ func GetSourceVBListPerPipeline(pipeline common.Pipeline) []uint16 {
 	return ret
 }
 
+/**
+ * Returns a map of: kvServerNode -> vBuckets that it is responsible for
+ */
 func GetSourceVBMap(cluster_info_svc service_def.ClusterInfoSvc, xdcr_topology_svc service_def.XDCRCompTopologySvc,
 	sourceBucketName string, logger *log.CommonLogger) (kv_vb_map map[string][]uint16, number_of_source_nodes int, err error) {
 	kv_vb_map = make(map[string][]uint16)

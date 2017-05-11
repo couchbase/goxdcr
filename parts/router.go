@@ -31,7 +31,7 @@ var ErrorInvalidRoutingMapForRouter = errors.New("routingMap in Router is invali
 type ReqCreator func(id string) (*base.WrappedMCRequest, error)
 
 // XDCR Router does two things:
-// 1. converts UprEvent to MCRequest
+// 1. converts UprEvent(DCP) to MCRequest (MemCached)
 // 2. routes MCRequest to downstream parts
 type Router struct {
 	id string
@@ -44,6 +44,15 @@ type Router struct {
 	sourceCRMode base.ConflictResolutionMode
 }
 
+/**
+ * Note
+ * A router (for now) is created per source nozzle.
+ * Input:
+ * 1. downStreamParts - a map of <targetNozzleID> -> <TargetNozzle>.
+ * 		The map only includes the targets that this source (router) is responsible for replicating.
+ * 2. routingMap == vbNozzleMap, which is a map of <vbucketID> -> <targetNozzleID>
+ * 3+ Rest should be relatively obv
+ */
 func NewRouter(id string, topic string, filterExpression string,
 	downStreamParts map[string]common.Part,
 	routingMap map[uint16]string,
@@ -66,6 +75,7 @@ func NewRouter(id string, topic string, filterExpression string,
 		sourceCRMode: sourceCRMode,
 		req_creator:  req_creator}
 
+	// routingFunc is the main intelligence of the router's functionality
 	var routingFunc connector.Routing_Callback_Func = router.route
 	router.Router = connector.NewRouter(id, downStreamParts, &routingFunc, logger_context, "XDCRRouter")
 

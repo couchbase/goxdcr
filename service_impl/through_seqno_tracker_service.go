@@ -339,6 +339,7 @@ func (tsTracker *ThroughSeqnoTrackerSvc) GetThroughSeqno(vbno uint16) uint64 {
 			if sent_found {
 				last_sent_index = sent_index
 				found_seqno_type = SeqnoTypeSent
+				// A sequence number, if exists in one of the list, will not be duplicated in the other lists
 				continue
 			}
 		}
@@ -348,6 +349,7 @@ func (tsTracker *ThroughSeqnoTrackerSvc) GetThroughSeqno(vbno uint16) uint64 {
 			if filtered_found {
 				last_filtered_index = filtered_index
 				found_seqno_type = SeqnoTypeFiltered
+				// A sequence number, if exists in one of the list, will not be duplicated in the other lists
 				continue
 			}
 		}
@@ -357,6 +359,7 @@ func (tsTracker *ThroughSeqnoTrackerSvc) GetThroughSeqno(vbno uint16) uint64 {
 			if failed_cr_found {
 				last_failed_cr_index = failed_cr_index
 				found_seqno_type = SeqnoTypeFailedCR
+				// A sequence number, if exists in one of the list, will not be duplicated in the other lists
 				continue
 			}
 		}

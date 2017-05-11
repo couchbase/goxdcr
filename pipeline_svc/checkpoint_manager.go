@@ -92,8 +92,10 @@ type CheckpointManager struct {
 
 	support_ckpt bool
 
-	cur_ckpts            map[uint16]*checkpointRecordWithLock
-	active_vbs           map[string][]uint16
+	// A map of vbucket# -> CheckPointRecord
+	cur_ckpts  map[uint16]*checkpointRecordWithLock
+	active_vbs map[string][]uint16
+	// A map of vbucket# -> FailoverLog
 	failoverlog_map      map[uint16]*failoverlogWithLock
 	snapshot_history_map map[uint16]*snapshotHistoryWithLock
 
@@ -122,6 +124,7 @@ type CheckpointManager struct {
 	target_cluster_version int
 }
 
+// Checkpoint Manager keeps track of one checkpointRecord per vbucket
 type checkpointRecordWithLock struct {
 	ckpt *metadata.CheckpointRecord
 	lock *sync.RWMutex
@@ -388,6 +391,7 @@ func (ckmgr *CheckpointManager) getHighSeqnoAndVBUuidFromTarget() map[uint16][]u
 	ckmgr.kv_mem_clients_lock.Lock()
 	defer ckmgr.kv_mem_clients_lock.Unlock()
 
+	// A map of vbucketID -> slice of 2 elements of 1)HighSeqNo and 2)VbUuid in that order
 	high_seqno_and_vbuuid_map := make(map[uint16][]uint64)
 	for serverAddr, vbnos := range ckmgr.target_kv_vb_map {
 		ckmgr.getHighSeqnoAndVBUuidForServerWithRetry(serverAddr, vbnos, high_seqno_and_vbuuid_map)
@@ -1006,7 +1010,9 @@ func (ckmgr *CheckpointManager) PerformCkpt(fin_ch <-chan bool) {
 func (ckmgr *CheckpointManager) performCkpt(fin_ch <-chan bool, wait_grp *sync.WaitGroup) {
 	ckmgr.logger.Infof("Start checkpointing for replication %v\n", ckmgr.pipeline.Topic())
 	defer ckmgr.logger.Infof("Done checkpointing for replication %v\n", ckmgr.pipeline.Topic())
+	// vbucketID -> ThroughSeqNumber
 	var through_seqno_map map[uint16]uint64
+	// vBucketID -> slice of 2 elements of 1)HighSeqNo and 2)VbUuid
 	var high_seqno_and_vbuuid_map map[uint16][]uint64
 	var xattr_seqno_map map[uint16]uint64
 	if !ckmgr.capi {

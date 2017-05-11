@@ -27,6 +27,9 @@ var ErrorInvalidRoutingResult = errors.New("Invalid results from routing algorit
 // @Return - a map of partId to data to the routed to that part
 type Routing_Callback_Func func(data interface{}) (map[string]interface{}, error)
 
+/**
+ * This is an inner router struct that XDCR router (parts/router) will inherit
+ */
 type Router struct {
 	*component.AbstractComponent
 	downStreamParts  map[string]common.Part // partId -> Part
@@ -89,6 +92,7 @@ func (router *Router) AddDownStream(partId string, part common.Part) error {
 
 // set or replace routing call back function.
 // this may be allowed when router is still running
+// Not used
 func (router *Router) SetRoutingCallBackFunc(routing_callback *Routing_Callback_Func) {
 	router.stateLock.Lock()
 	defer router.stateLock.Unlock()
