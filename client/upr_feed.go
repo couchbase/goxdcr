@@ -432,6 +432,7 @@ func parseFailoverLog(body []byte) (*FailoverLog, error) {
 
 func handleStreamRequest(
 	res *gomemcached.MCResponse,
+	headerBuf []byte,
 ) (gomemcached.Status, uint64, *FailoverLog, error) {
 
 	var rollback uint64
@@ -439,7 +440,7 @@ func handleStreamRequest(
 
 	switch {
 	case res.Status == gomemcached.ROLLBACK:
-		logging.Infof("Rollback response. body=%v\n", res.Body)
+		logging.Infof("Rollback response. body=%v, headerBuf=%v\n", res.Body, headerBuf)
 		rollback = binary.BigEndian.Uint64(res.Body)
 		logging.Infof("Rollback %v for vb %v\n", rollback, res.Opaque)
 		return res.Status, rollback, nil, nil
@@ -516,7 +517,7 @@ loop:
 						logging.Infof("Stream not found for vb %d: %#v", vb, pkt)
 						break loop
 					}
-					status, rb, flog, err := handleStreamRequest(res)
+					status, rb, flog, err := handleStreamRequest(res, headerBuf[:])
 					if status == gomemcached.ROLLBACK {
 						event = makeUprEvent(pkt, stream)
 						event.Status = status
