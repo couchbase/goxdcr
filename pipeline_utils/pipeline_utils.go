@@ -159,3 +159,61 @@ func GetXattrSeqnos(pipeline common.Pipeline) map[uint16]uint64 {
 	}
 	return ret
 }
+
+// get vbnos of checkpoint docs for specified replicationId
+func GetVbnosFromCheckpointDocsWithRetry(checkpoints_svc service_def.CheckpointsService, replicationId string, maxRetry int, logger *log.CommonLogger) ([]uint16, error) {
+	var vbnos []uint16
+	var err error
+	numRetry := 0
+	for {
+		vbnos, err = checkpoints_svc.GetVbnosFromCheckpointDocs(replicationId)
+		if err == nil {
+			break
+		}
+		if numRetry >= maxRetry {
+			errMsg := fmt.Sprintf("Error getting vbucket numbers for %v after %v retries. err=%v", replicationId, numRetry, err)
+			logger.Warn(errMsg)
+			return nil, errors.New(errMsg)
+		}
+		numRetry++
+	}
+	return vbnos, nil
+}
+
+// set replication spec deleted flag in checkpoint docs
+func DelCheckpointsDocsWithRetry(checkpoints_svc service_def.CheckpointsService, replicationId string, maxRetry int, logger *log.CommonLogger) error {
+	logger.Infof("DelCheckpointsDocs for replication %v with maxRety=%v", replicationId, maxRetry)
+
+	vbnos, err := GetVbnosFromCheckpointDocsWithRetry(checkpoints_svc, replicationId, maxRetry, logger)
+	if err != nil {
+		return err
+	}
+
+	logger.Infof("DelCheckpointsDocs for replication %v with vbs=%v", replicationId, vbnos)
+
+	numRetry := 0
+	for {
+		failed_vbnos := make([]uint16, 0)
+		for _, vbno := range vbnos {
+			err = checkpoints_svc.DelCheckpointsDoc(replicationId, vbno)
+			if err != nil {
+				failed_vbnos = append(failed_vbnos, vbno)
+			}
+		}
+		if len(failed_vbnos) == 0 {
+			// no failed vbs, return success
+			logger.Infof("DelCheckpointsDocs for replication %v succeeded.", replicationId)
+			return nil
+		}
+		if numRetry >= maxRetry {
+			errMsg := fmt.Sprintf("DelCheckpointsDocs for replication %v failed after %v retries. failed vbs=%v", replicationId, numRetry, failed_vbnos)
+			logger.Warn(errMsg)
+			return errors.New(errMsg)
+		}
+		numRetry++
+		// retry failed vbnos only
+		vbnos = failed_vbnos
+	}
+
+	return nil
+}

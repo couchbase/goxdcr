@@ -37,6 +37,7 @@ type PipelineManager struct {
 	xdcr_topology_svc  service_def.XDCRCompTopologySvc
 	remote_cluster_svc service_def.RemoteClusterSvc
 	cluster_info_svc   service_def.ClusterInfoSvc
+	checkpoint_svc     service_def.CheckpointsService
 	uilog_svc          service_def.UILogSvc
 	once               sync.Once
 	logger             *log.CommonLogger
@@ -74,12 +75,14 @@ type pipeline_mgr_iface interface {
 var pipeline_mgr *PipelineManager
 
 func NewPipelineManager(factory common.PipelineFactory, repl_spec_svc service_def.ReplicationSpecSvc, xdcr_topology_svc service_def.XDCRCompTopologySvc,
-	remote_cluster_svc service_def.RemoteClusterSvc, cluster_info_svc service_def.ClusterInfoSvc, uilog_svc service_def.UILogSvc, logger_context *log.LoggerContext) *PipelineManager {
+	remote_cluster_svc service_def.RemoteClusterSvc, cluster_info_svc service_def.ClusterInfoSvc, checkpoint_svc service_def.CheckpointsService,
+	uilog_svc service_def.UILogSvc, logger_context *log.LoggerContext) *PipelineManager {
 	pipelineMgrRetVar := &PipelineManager{
 		pipeline_factory:   factory,
 		repl_spec_svc:      repl_spec_svc,
 		xdcr_topology_svc:  xdcr_topology_svc,
 		remote_cluster_svc: remote_cluster_svc,
+		checkpoint_svc:     checkpoint_svc,
 		logger:             log.NewLogger("PipelineMgr", logger_context),
 		cluster_info_svc:   cluster_info_svc,
 		uilog_svc:          uilog_svc,
@@ -145,20 +148,12 @@ func Update(topic string, cur_err error) error {
 }
 
 func (pipelineMgr *PipelineManager) RemoveReplicationStatus(topic string) error {
-	rs, err := pipelineMgr.ReplicationStatus(topic)
-	if err != nil {
-		return err
-	}
-
 	// run update to ensure that StopPipeline() is called and pipeline is stopped
 	pipelineMgr.logger.Infof("Stopping pipeline %v since the replication spec has been deleted\n", topic)
-	err = pipelineMgr.Update(topic, errors.New("Replication spec has been deleted"))
+	err := pipelineMgr.Update(topic, errors.New("Replication spec has been deleted"))
 	if err != nil {
 		pipelineMgr.logger.Warnf("The attempt to stop pipeline %v failed with err = %v\n", topic, err)
 	}
-
-	rs.ResetStorage()
-	pipelineMgr.repl_spec_svc.SetDerivedObj(topic, nil)
 
 	return nil
 }
@@ -413,7 +408,9 @@ func (pipelineMgr *PipelineManager) StopPipelineInner(rep_status *pipeline.Repli
 		return fmt.Errorf("Invalid parameter value rep_status=nil")
 	}
 
-	pipelineMgr.logger.Infof("Trying to stop the pipeline %s", rep_status.RepId())
+	replId := rep_status.RepId()
+
+	pipelineMgr.logger.Infof("Trying to stop the pipeline %s", replId)
 	var err error
 
 	p := rep_status.Pipeline()
@@ -421,21 +418,41 @@ func (pipelineMgr *PipelineManager) StopPipelineInner(rep_status *pipeline.Repli
 	if p != nil {
 		state := p.State()
 		if state == common.Pipeline_Running || state == common.Pipeline_Starting || state == common.Pipeline_Error {
+			specInternalId := p.Specification().InternalId
 			err = p.Stop()
 			if err != nil {
-				pipelineMgr.logger.Errorf("Received error when stopping pipeline %v - %v\n", rep_status.RepId(), err)
+				pipelineMgr.logger.Errorf("Received error when stopping pipeline %v - %v\n", replId, err)
 				//pipeline failed to stopped gracefully in time. ignore the error.
 				//the parts of the pipeline will eventually commit suicide.
 			} else {
-				pipelineMgr.logger.Infof("Pipeline %v has been stopped\n", rep_status.RepId())
+				pipelineMgr.logger.Infof("Pipeline %v has been stopped\n", replId)
 			}
+
+			// if replication spec has been deleted
+			// or deleted and recreated, which is signaled by change in spec internal id
+			// perform clean up
+			spec, _ := pipelineMgr.repl_spec_svc.ReplicationSpec(replId)
+			if spec == nil || spec.InternalId != specInternalId {
+				pipelineMgr.logger.Infof("%v Deleting checkpoint docs since repl spec has been deleted. spec=%v\n", replId, spec)
+				pipeline_utils.DelCheckpointsDocsWithRetry(pipelineMgr.checkpoint_svc, replId, base.MaxRetryMetakvOps, pipelineMgr.logger)
+
+				rep_status.ResetStorage()
+				pipelineMgr.repl_spec_svc.SetDerivedObj(replId, nil)
+
+				//close the connection pool for the replication
+				pools := base.ConnPoolMgr().FindPoolNamesByPrefix(replId)
+				for _, poolName := range pools {
+					base.ConnPoolMgr().RemovePool(poolName)
+				}
+			}
+
 			pipelineMgr.removePipelineFromReplicationStatus(p)
 			pipelineMgr.logger.Infof("Replication Status=%v\n", rep_status)
 		} else {
-			pipelineMgr.logger.Infof("Pipeline %v is not in the right state to be stopped. state=%v\n", rep_status.RepId(), state)
+			pipelineMgr.logger.Infof("Pipeline %v is not in the right state to be stopped. state=%v\n", replId, state)
 		}
 	} else {
-		pipelineMgr.logger.Infof("Pipeline %v is not running\n", rep_status.RepId())
+		pipelineMgr.logger.Infof("Pipeline %v is not running\n", replId)
 	}
 	return err
 }

@@ -656,8 +656,7 @@ func (service *ReplicationSpecService) ConstructNewReplicationSpec(sourceBucketN
 		return nil, err
 	}
 
-	spec := metadata.NewReplicationSpecification(sourceBucketName, sourceBucketUUID, targetClusterUUID, targetBucketName, targetBucketUUID)
-	return spec, nil
+	return metadata.NewReplicationSpecification(sourceBucketName, sourceBucketUUID, targetClusterUUID, targetBucketName, targetBucketUUID)
 }
 
 func (service *ReplicationSpecService) cacheSpec(cache *MetadataCache, specId string, spec *metadata.ReplicationSpecification) error {

@@ -17,7 +17,8 @@ type CheckpointsService interface {
 	CheckpointsDoc(replicationId string, vbno uint16) (*metadata.CheckpointsDoc, error)
 	DelCheckpointsDoc(replicationId string, vbno uint16) error
 	DelCheckpointsDocs(replicationId string) error
-	UpsertCheckpoints(replicationId string, vbno uint16, ckpt_record *metadata.CheckpointRecord,
+	UpsertCheckpoints(replicationId string, specInternalId string, vbno uint16, ckpt_record *metadata.CheckpointRecord,
 		xattr_seqno uint64, targetClusterVersion int) error
 	CheckpointsDocs(replicationId string) (map[uint16]*metadata.CheckpointsDoc, error)
+	GetVbnosFromCheckpointDocs(replicationId string) ([]uint16, error)
 }

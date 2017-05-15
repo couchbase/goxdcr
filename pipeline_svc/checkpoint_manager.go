@@ -458,10 +458,17 @@ func (ckmgr *CheckpointManager) Stop() error {
 }
 
 func (ckmgr *CheckpointManager) CheckpointBeforeStop() {
+	spec, _ := ckmgr.rep_spec_svc.ReplicationSpec(ckmgr.pipeline.Topic())
+	if spec == nil {
+		// do not perform checkpoint if spec has been deleted
+		ckmgr.logger.Infof("Skipping checkpointing for pipeline %v before stopping since replication spec has been deleted", ckmgr.pipeline.Topic())
+		return
+	}
+
 	ckmgr.logger.Infof("Starting checkpointing for pipeline %v before stopping", ckmgr.pipeline.Topic())
 
-	timeout_ticker := time.NewTicker(base.TimeoutCheckpointBeforeStop)
-	defer timeout_ticker.Stop()
+	timeout_timer := time.NewTimer(base.TimeoutCheckpointBeforeStop)
+	defer timeout_timer.Stop()
 
 	ret := make(chan bool, 1)
 	close_ch := make(chan bool, 1)
@@ -476,10 +483,9 @@ func (ckmgr *CheckpointManager) CheckpointBeforeStop() {
 		case <-ret:
 			ckmgr.logger.Infof("Checkpointing for pipeline %v completed", ckmgr.pipeline.Topic())
 			return
-		case <-timeout_ticker.C:
+		case <-timeout_timer.C:
 			close(close_ch)
-			ckmgr.logger.Infof("Checkpointing for pipeline %v timed out after %v", ckmgr.pipeline.Topic(), base.TimeoutCheckpointBeforeStop)
-			return
+			ckmgr.logger.Infof("Checkpointing for pipeline %v timed out after %v.", ckmgr.pipeline.Topic(), base.TimeoutCheckpointBeforeStop)
 		}
 	}
 }
@@ -572,6 +578,8 @@ func (ckmgr *CheckpointManager) SetVBTimestamps(topic string) error {
 
 	deleted_vbnos := make([]uint16, 0)
 	target_support_xattr_now := simple_utils.IsClusterCompatible(ckmgr.target_cluster_version, base.VersionForRBACAndXattrSupport)
+	specInternalId := ckmgr.pipeline.Specification().InternalId
+
 	for vbno, ckptDoc := range ckptDocs {
 		if !simple_utils.IsVbInList(vbno, listOfVbs) {
 			// if the vbno is no longer managed by the current checkpoint manager/pipeline,
@@ -586,6 +594,19 @@ func (ckmgr *CheckpointManager) SetVBTimestamps(topic string) error {
 				// and target supports xattr now when pipeline is being restarted,
 				// and the corresponding vbucket has seen xattr enabled mutations
 				// we need to rollback to 0 for vbuckets that have seen xattr enabled mutations
+				err = pipeline_utils.DelCheckpointsDocWithRetry(ckmgr.checkpoints_svc, topic, vbno, base.MaxRetryMetakvOps, ckmgr.logger)
+				if err != nil {
+					ckmgr.RaiseEvent(common.NewEvent(common.ErrorEncountered, nil, ckmgr, nil, err))
+					return err
+				}
+				deleted_vbnos = append(deleted_vbnos, vbno)
+			}
+		} else {
+			if ckptDoc.SpecInternalId != specInternalId {
+				// if specInternalId does not match, replication spec has been deleted and recreated
+				// the checkpoint doc is for the old replication spec and needs to be deleted
+				// unlike the IsVbInList check above, it is critial for the checkpoint doc deletion to succeed here
+				// restart pipeline if it fails
 				err = pipeline_utils.DelCheckpointsDocWithRetry(ckmgr.checkpoints_svc, topic, vbno, base.MaxRetryMetakvOps, ckmgr.logger)
 				if err != nil {
 					ckmgr.RaiseEvent(common.NewEvent(common.ErrorEncountered, nil, ckmgr, nil, err))
@@ -912,6 +933,9 @@ func (ckmgr *CheckpointManager) checkpointing() {
 			first = true
 		case <-ckmgr.finish_ch:
 			ckmgr.logger.Infof("%v Received finish signal", ckmgr.pipeline.Topic())
+			// wait for existing, if any, performCkpt routine to finish
+			close(children_fin_ch)
+			children_wait_grp.Wait()
 			return
 		case <-ticker.C:
 			if !pipeline_utils.IsPipelineRunning(ckmgr.pipeline.State()) {
@@ -1171,8 +1195,8 @@ func (ckmgr *CheckpointManager) raiseSuccessCkptForVbEvent(ckpt_record metadata.
 }
 
 func (ckmgr *CheckpointManager) persistCkptRecord(vbno uint16, ckpt_record *metadata.CheckpointRecord, xattr_seqno uint64) error {
-	ckmgr.logger.Debugf("Persist vb=%v ckpt_record=%v xattr_seqno=%v for %v\n", vbno, ckpt_record, xattr_seqno, ckmgr.pipeline.Topic())
-	return ckmgr.checkpoints_svc.UpsertCheckpoints(ckmgr.pipeline.Topic(), vbno, ckpt_record, xattr_seqno, ckmgr.target_cluster_version)
+	ckmgr.logger.Debugf("Persist vb=%v ckpt_record=%v for %v\n", vbno, ckpt_record, ckmgr.pipeline.Topic())
+	return ckmgr.checkpoints_svc.UpsertCheckpoints(ckmgr.pipeline.Topic(), ckmgr.pipeline.Specification().InternalId, vbno, ckpt_record, xattr_seqno, ckmgr.target_cluster_version)
 }
 
 func (ckmgr *CheckpointManager) OnEvent(event *common.Event) {

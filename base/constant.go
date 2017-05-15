@@ -384,6 +384,12 @@ var FractionOfNumberOfBytesToSendAsMin float32 = 0.30
 // max retry for metakv related operations
 var MaxRetryMetakvOps = 5
 
+// length of random id
+var LengthOfRandomId = 16
+
+// max retry for random id generation
+var MaxRetryForRandomIdGeneration = 5
+
 // --------------- Constants that are configurable -----------------
 
 // timeout for checkpointing attempt before pipeline is stopped - to put an upper bound on the delay of pipeline stop/restart

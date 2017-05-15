@@ -69,7 +69,7 @@ func (ckpt_svc *CheckpointsService) DelCheckpointsDocs(replicationId string) err
 }
 
 func (ckpt_svc *CheckpointsService) DelCheckpointsDoc(replicationId string, vbno uint16) error {
-	ckpt_svc.logger.Infof("DelCheckpointsDoc for replication %v and vbno %v...", replicationId, vbno)
+	ckpt_svc.logger.Debugf("DelCheckpointsDoc for replication %v and vbno %v...", replicationId, vbno)
 	key := ckpt_svc.getCheckpointDocKey(replicationId, vbno)
 	_, rev, err := ckpt_svc.metadata_svc.Get(key)
 	if err != nil {
@@ -80,7 +80,7 @@ func (ckpt_svc *CheckpointsService) DelCheckpointsDoc(replicationId string, vbno
 	if err != nil {
 		ckpt_svc.logger.Errorf("Failed to delete checkpoints doc for replication %v and vbno %v\n", replicationId, vbno)
 	} else {
-		ckpt_svc.logger.Infof("DelCheckpointsDocs is done for replication %v and vbno %v\n", replicationId, vbno)
+		ckpt_svc.logger.Debugf("DelCheckpointsDoc is done for replication %v and vbno %v\n", replicationId, vbno)
 	}
 	return err
 }
@@ -88,7 +88,7 @@ func (ckpt_svc *CheckpointsService) DelCheckpointsDoc(replicationId string, vbno
 // in addition to upserting checkpoint record, this method may also update xattr seqno
 // and target cluster version in checkpoint doc
 // these operations are done in the same metakv operation to ensure that they succeed and fail together
-func (ckpt_svc *CheckpointsService) UpsertCheckpoints(replicationId string, vbno uint16,
+func (ckpt_svc *CheckpointsService) UpsertCheckpoints(replicationId string, specInternalId string, vbno uint16,
 	ckpt_record *metadata.CheckpointRecord, xattr_seqno uint64, targetClusterVersion int) error {
 	ckpt_svc.logger.Debugf("Persisting checkpoint record=%v xattr_seqno=%v for vbno=%v replication=%v\n", ckpt_record, xattr_seqno, vbno, replicationId)
 
@@ -101,7 +101,7 @@ func (ckpt_svc *CheckpointsService) UpsertCheckpoints(replicationId string, vbno
 		return err
 	}
 	if err == service_def.MetadataNotFoundErr {
-		ckpt_doc = metadata.NewCheckpointsDoc()
+		ckpt_doc = metadata.NewCheckpointsDoc(specInternalId)
 		err = nil
 	}
 
@@ -175,4 +175,25 @@ func (ckpt_svc *CheckpointsService) constructCheckpointDoc(content []byte, rev i
 		ckpt_doc.Revision = rev
 	}
 	return ckpt_doc, nil
+}
+
+// get vbnos of checkpoint docs for specified replicationId
+func (ckpt_svc *CheckpointsService) GetVbnosFromCheckpointDocs(replicationId string) ([]uint16, error) {
+	vbnos := make([]uint16, 0)
+	catalogKey := ckpt_svc.getCheckpointCatalogKey(replicationId)
+	ckpt_entries, err := ckpt_svc.metadata_svc.GetAllMetadataFromCatalog(catalogKey)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, ckpt_entry := range ckpt_entries {
+		if ckpt_entry != nil {
+			vbno, err := ckpt_svc.decodeVbnoFromCkptDocKey(ckpt_entry.Key)
+			if err != nil {
+				return nil, err
+			}
+			vbnos = append(vbnos, vbno)
+		}
+	}
+	return vbnos, nil
 }

@@ -390,18 +390,6 @@ func onDeleteReplication(topic string, logger *log.CommonLogger) error {
 		logger.Errorf("Error removing replication status for replication %v", topic)
 		return err
 	}
-
-	//delete all checkpoint docs in an async fashion
-	err = replication_mgr.checkpoint_svc.DelCheckpointsDocs(topic)
-	if err != nil {
-		logger.Errorf("Error deleting checkpoint docs for replication %v", topic)
-	}
-
-	//close the connection pool for the replication
-	pools := base.ConnPoolMgr().FindPoolNamesByPrefix(topic)
-	for _, poolName := range pools {
-		base.ConnPoolMgr().RemovePool(poolName)
-	}
 	return nil
 
 }

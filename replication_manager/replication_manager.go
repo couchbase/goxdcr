@@ -92,7 +92,7 @@ type replicationManager struct {
 	// supervises the liveness of all pipeline supervisors
 	pipelineMasterSupervisor *supervisor.GenericSupervisor
 	// Single instance of pipeline_mgr here instead of using a global
-	pipelineMgr	*pipeline_manager.PipelineManager
+	pipelineMgr *pipeline_manager.PipelineManager
 
 	//replication specification service handle
 	repl_spec_svc service_def.ReplicationSpecSvc
@@ -145,7 +145,7 @@ func StartReplicationManager(sourceKVHost string, xdcrRestPort uint16,
 	cluster_info_svc service_def.ClusterInfoSvc,
 	xdcr_topology_svc service_def.XDCRCompTopologySvc,
 	replication_settings_svc service_def.ReplicationSettingsSvc,
-	checkpoints_svc service_def.CheckpointsService,
+	checkpoint_svc service_def.CheckpointsService,
 	capi_svc service_def.CAPIService,
 	audit_svc service_def.AuditSvc,
 	uilog_svc service_def.UILogSvc,
@@ -161,7 +161,7 @@ func StartReplicationManager(sourceKVHost string, xdcrRestPort uint16,
 		initConstants(xdcr_topology_svc, internal_settings_svc)
 
 		// initializes replication manager
-		replication_mgr.init(repl_spec_svc, remote_cluster_svc, cluster_info_svc, xdcr_topology_svc, replication_settings_svc, checkpoints_svc, capi_svc, audit_svc, uilog_svc, global_setting_svc, bucket_settings_svc, internal_settings_svc)
+		replication_mgr.init(repl_spec_svc, remote_cluster_svc, cluster_info_svc, xdcr_topology_svc, replication_settings_svc, checkpoint_svc, capi_svc, audit_svc, uilog_svc, global_setting_svc, bucket_settings_svc, internal_settings_svc)
 
 		// start pipeline master supervisor
 		// TODO should we make heart beat settings configurable?
@@ -355,7 +355,7 @@ func (rm *replicationManager) init(
 	rm.internal_settings_svc = internal_settings_svc
 	fac := factory.NewXDCRFactory(repl_spec_svc, remote_cluster_svc, cluster_info_svc, xdcr_topology_svc, checkpoint_svc, capi_svc, uilog_svc, bucket_settings_svc, log.DefaultLoggerContext, log.DefaultLoggerContext, rm, rm.pipelineMasterSupervisor)
 
-	rm.pipelineMgr = pipeline_manager.NewPipelineManager(fac, repl_spec_svc, xdcr_topology_svc, remote_cluster_svc, cluster_info_svc, uilog_svc, log.DefaultLoggerContext)
+	rm.pipelineMgr = pipeline_manager.NewPipelineManager(fac, repl_spec_svc, xdcr_topology_svc, remote_cluster_svc, cluster_info_svc, checkpoint_svc, uilog_svc, log.DefaultLoggerContext)
 
 	rm.metadata_change_callback_cancel_ch = make(chan struct{}, 1)
 
@@ -619,7 +619,10 @@ func (rm *replicationManager) createAndPersistReplicationSpec(justValidate bool,
 		return nil, errorMap, nil
 	}
 
-	spec := metadata.NewReplicationSpecification(sourceBucket, sourceBucketUUID, targetClusterRef.Uuid, targetBucket, targetBucketUUID)
+	spec, err := metadata.NewReplicationSpecification(sourceBucket, sourceBucketUUID, targetClusterRef.Uuid, targetBucket, targetBucketUUID)
+	if err != nil {
+		return nil, nil, err
+	}
 
 	replSettings, err := ReplicationSettingsService().GetDefaultReplicationSettings()
 	if err != nil {

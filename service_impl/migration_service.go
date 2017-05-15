@@ -566,7 +566,11 @@ func (service *MigrationSvc) migrateReplicationDoc(replicationDocData interface{
 	}
 
 	// save replication spec
-	spec := metadata.NewReplicationSpecification(sourceBucket, sourceBucketUUID, targetClusterUuid, targetBucket, targetBucketUUID)
+	spec, err := metadata.NewReplicationSpecification(sourceBucket, sourceBucketUUID, targetClusterUuid, targetBucket, targetBucketUUID)
+	if err != nil {
+		fatalErrorList = append(fatalErrorList, err)
+		return fatalErrorList, mildErrorList
+	}
 
 	// again, treat all errors from settings processing as fatal
 	// 1. they are highly unlikely to occur, unless there are bugs

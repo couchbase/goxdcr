@@ -55,9 +55,6 @@ var ErrorEmptyVBList = errors.New("Invalid configuration for DCP nozzle. VB list
 
 var MaxCountStreamsInactive uint8 = 40
 
-var SizeOfUprFeedRandName = 16
-var MaxRetryForIdGeneration = 5
-
 type vbtsWithLock struct {
 	ts   *base.VBTimestamp
 	lock *sync.RWMutex
@@ -210,7 +207,7 @@ func (dcp *DcpNozzle) initialize(settings map[string]interface{}) (err error) {
 		return err
 	}
 
-	randName, err := simple_utils.GenerateRandomId(SizeOfUprFeedRandName, MaxRetryForIdGeneration)
+	randName, err := simple_utils.GenerateRandomId(base.LengthOfRandomId, base.MaxRetryForRandomIdGeneration)
 	if err != nil {
 		return err
 	}

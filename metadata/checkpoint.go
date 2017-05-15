@@ -262,6 +262,9 @@ type CheckpointsDoc struct {
 	// it can be used to detect the event that target cluster has been upgraded to support xattr
 	TargetClusterVersion int `json:"targetClusterVersion"`
 
+	// internal id of repl spec - for detection of repl spec deletion and recreation event
+	SpecInternalId string `json:"specInternalId"`
+
 	//revision number
 	Revision interface{}
 }
@@ -277,9 +280,10 @@ func (ckpt *CheckpointRecord) ToMap() map[string]interface{} {
 	return ckpt_record_map
 }
 
-func NewCheckpointsDoc() *CheckpointsDoc {
+func NewCheckpointsDoc(specInternalId string) *CheckpointsDoc {
 	ckpt_doc := &CheckpointsDoc{Checkpoint_records: []*CheckpointRecord{},
-		Revision: nil}
+		SpecInternalId: specInternalId,
+		Revision:       nil}
 
 	for i := 0; i < MaxCheckpointsKept; i++ {
 		ckpt_doc.Checkpoint_records = append(ckpt_doc.Checkpoint_records, nil)

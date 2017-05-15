@@ -12,6 +12,7 @@ package metadata
 import (
 	"fmt"
 	"github.com/couchbase/goxdcr/base"
+	"github.com/couchbase/goxdcr/simple_utils"
 	"reflect"
 	"strings"
 )
@@ -22,6 +23,9 @@ import (
 type ReplicationSpecification struct {
 	//id of the replication
 	Id string `json:"id"`
+
+	// internal id, used to detect the case when replication spec has been deleted and recreated
+	InternalId string `json:"internalId"`
 
 	// Source Bucket Name
 	SourceBucketName string `json:"sourceBucketName"`
@@ -43,14 +47,19 @@ type ReplicationSpecification struct {
 	Revision interface{}
 }
 
-func NewReplicationSpecification(sourceBucketName string, sourceBucketUUID string, targetClusterUUID string, targetBucketName string, targetBucketUUID string) *ReplicationSpecification {
+func NewReplicationSpecification(sourceBucketName string, sourceBucketUUID string, targetClusterUUID string, targetBucketName string, targetBucketUUID string) (*ReplicationSpecification, error) {
+	randId, err := simple_utils.GenerateRandomId(base.LengthOfRandomId, base.MaxRetryForRandomIdGeneration)
+	if err != nil {
+		return nil, err
+	}
 	return &ReplicationSpecification{Id: ReplicationId(sourceBucketName, targetClusterUUID, targetBucketName),
+		InternalId:        randId,
 		SourceBucketName:  sourceBucketName,
 		SourceBucketUUID:  sourceBucketUUID,
 		TargetClusterUUID: targetClusterUUID,
 		TargetBucketName:  targetBucketName,
 		TargetBucketUUID:  targetBucketUUID,
-		Settings:          DefaultSettings()}
+		Settings:          DefaultSettings()}, nil
 }
 
 // checks if the passed in spec is the same as the current spec
@@ -63,7 +72,8 @@ func (spec *ReplicationSpecification) SameSpec(spec2 *ReplicationSpecification) 
 		return false
 	}
 	// note that settings in spec are not compared. The assumption is that if settings are different, Revision will have to be different
-	return spec.Id == spec2.Id && spec.SourceBucketName == spec2.SourceBucketName &&
+	return spec.Id == spec2.Id && spec.InternalId == spec2.InternalId &&
+		spec.SourceBucketName == spec2.SourceBucketName &&
 		spec.SourceBucketUUID == spec2.SourceBucketUUID &&
 		spec.TargetClusterUUID == spec2.TargetClusterUUID && spec.TargetBucketName == spec2.TargetBucketName &&
 		spec.TargetBucketUUID == spec2.TargetBucketUUID && reflect.DeepEqual(spec.Revision, spec2.Revision)
@@ -74,6 +84,7 @@ func (spec *ReplicationSpecification) Clone() *ReplicationSpecification {
 		return nil
 	}
 	return &ReplicationSpecification{Id: spec.Id,
+		InternalId:        spec.InternalId,
 		SourceBucketName:  spec.SourceBucketName,
 		SourceBucketUUID:  spec.SourceBucketUUID,
 		TargetClusterUUID: spec.TargetClusterUUID,
