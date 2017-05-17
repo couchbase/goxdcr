@@ -73,6 +73,10 @@ func (c *Client) SetKeepAliveOptions(interval time.Duration) {
 	c.conn.(*net.TCPConn).SetKeepAlivePeriod(interval)
 }
 
+func (c *Client) SetReadDeadline(t time.Time) {
+	c.conn.(*net.TCPConn).SetReadDeadline(t)
+}
+
 // Wrap an existing transport.
 func Wrap(rwc io.ReadWriteCloser) (rv *Client, err error) {
 	client := &Client{
@@ -623,7 +627,6 @@ func (c *Client) GetBulk(vb uint16, keys []string, rv map[string]*gomemcached.MC
 			case <-stopch:
 				return
 			default:
-
 				res, err := c.Receive()
 				if err != nil {
 					if res.Status != gomemcached.KEY_ENOENT {
