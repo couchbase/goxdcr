@@ -969,7 +969,6 @@ func (c *Client) Stats(key string) ([]StatValue, error) {
 			Val: string(res.Body),
 		})
 	}
-
 	return rv, nil
 }
 
@@ -979,14 +978,68 @@ func (c *Client) Stats(key string) ([]StatValue, error) {
 // Use "" as the stat key for toplevel stats.
 func (c *Client) StatsMap(key string) (map[string]string, error) {
 	rv := make(map[string]string)
-	st, err := c.Stats(key)
+
+	req := &gomemcached.MCRequest{
+		Opcode: gomemcached.STAT,
+		Key:    []byte(key),
+		Opaque: 918494,
+	}
+
+	_, err := transmitRequest(c.conn, req)
 	if err != nil {
 		return rv, err
 	}
-	for _, sv := range st {
-		rv[sv.Key] = sv.Val
+
+	for {
+		res, _, err := getResponse(c.conn, c.hdrBuf)
+		if err != nil {
+			return rv, err
+		}
+		k := string(res.Key)
+		if k == "" {
+			break
+		}
+		rv[k] = string(res.Body)
 	}
+
 	return rv, nil
+}
+
+// instead of returning a new statsMap, simply populate passed in statsMap, which contains all the keys
+// for which stats needs to be retrieved
+func (c *Client) StatsMapForSpecifiedStats(key string, statsMap map[string]string) error {
+
+	// clear statsMap
+	for key, _ := range statsMap {
+		statsMap[key] = ""
+	}
+
+	req := &gomemcached.MCRequest{
+		Opcode: gomemcached.STAT,
+		Key:    []byte(key),
+		Opaque: 918494,
+	}
+
+	_, err := transmitRequest(c.conn, req)
+	if err != nil {
+		return err
+	}
+
+	for {
+		res, _, err := getResponse(c.conn, c.hdrBuf)
+		if err != nil {
+			return err
+		}
+		k := string(res.Key)
+		if k == "" {
+			break
+		}
+		if _, ok := statsMap[k]; ok {
+			statsMap[k] = string(res.Body)
+		}
+	}
+
+	return nil
 }
 
 // Hijack exposes the underlying connection from this client.
