@@ -185,6 +185,8 @@ type StatisticsManager struct {
 	cluster_info_svc          service_def.ClusterInfoSvc
 	xdcr_topology_svc         service_def.XDCRCompTopologySvc
 
+	stats_map map[string]string
+
 	user_agent string
 }
 
@@ -205,6 +207,7 @@ func NewStatisticsManager(through_seqno_tracker_svc service_def.ThroughSeqnoTrac
 		kv_mem_clients:            make(map[string]*mcc.Client),
 		kv_mem_clients_lock:       &sync.RWMutex{},
 		checkpointed_seqnos:       make(map[uint16]*base.SeqnoWithLock),
+		stats_map:                 make(map[string]string),
 		through_seqno_tracker_svc: through_seqno_tracker_svc,
 		cluster_info_svc:          cluster_info_svc,
 		xdcr_topology_svc:         xdcr_topology_svc}
@@ -228,6 +231,7 @@ func (stats_mgr *StatisticsManager) initialize() {
 	for _, vb_list := range stats_mgr.active_vbs {
 		for _, vb := range vb_list {
 			stats_mgr.checkpointed_seqnos[vb] = base.NewSeqnoWithLock()
+			stats_mgr.stats_map[fmt.Sprintf(base.VBUCKET_HIGH_SEQNO_STAT_KEY_FORMAT, vb)] = ""
 		}
 	}
 }
@@ -243,10 +247,17 @@ func (stats_mgr *StatisticsManager) cleanupBeforeExit() error {
 	return nil
 }
 
-func getHighSeqNos(serverAddr string, vbnos []uint16, conn *mcc.Client) (map[uint16]uint64, error) {
+func getHighSeqNos(serverAddr string, vbnos []uint16, conn *mcc.Client, stats_map map[string]string) (map[uint16]uint64, error) {
 	highseqno_map := make(map[uint16]uint64)
 
-	stats_map, err := conn.StatsMap(base.VBUCKET_SEQNO_STAT_NAME)
+	var err error
+	if stats_map != nil {
+		// stats_map is not nill when getHighSeqNos is called from per-replication stats manager, reuse stats_map to avoid memory over-allocation and re-allocation
+		err = conn.StatsMapForSpecifiedStats(base.VBUCKET_SEQNO_STAT_NAME, stats_map)
+	} else {
+		// stats_map is nill when getHighSeqNos is called on paused replications. do not reuse stats_map
+		stats_map, err = conn.StatsMap(base.VBUCKET_SEQNO_STAT_NAME)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -598,7 +609,7 @@ func (stats_mgr *StatisticsManager) calculateChangesLeft(docs_processed int64) (
 	stats_mgr.kv_mem_clients_lock.Lock()
 	defer stats_mgr.kv_mem_clients_lock.Unlock()
 
-	total_changes, err := calculateTotalChanges(stats_mgr.active_vbs, stats_mgr.kv_mem_clients, stats_mgr.bucket_name, stats_mgr.user_agent, stats_mgr.logger)
+	total_changes, err := calculateTotalChanges(stats_mgr.active_vbs, stats_mgr.kv_mem_clients, stats_mgr.bucket_name, stats_mgr.user_agent, stats_mgr.stats_map, stats_mgr.logger)
 	if err != nil {
 		return 0, err
 	}
@@ -1217,7 +1228,7 @@ func constructStatsForReplication(spec *metadata.ReplicationSpecification, cur_k
 		return nil, err
 	}
 
-	total_changes, err := calculateTotalChanges(cur_kv_vb_map, kv_mem_clients, spec.SourceBucketName, UserAgentPausedReplication, logger)
+	total_changes, err := calculateTotalChanges(cur_kv_vb_map, kv_mem_clients, spec.SourceBucketName, UserAgentPausedReplication, nil, logger)
 	if err != nil {
 		return nil, err
 	}
@@ -1236,7 +1247,7 @@ func constructStatsForReplication(spec *metadata.ReplicationSpecification, cur_k
 }
 
 func calculateTotalChanges(kv_vb_map map[string][]uint16, kv_mem_clients map[string]*mcc.Client,
-	sourceBucketName string, user_agent string, logger *log.CommonLogger) (int64, error) {
+	sourceBucketName string, user_agent string, stats_map map[string]string, logger *log.CommonLogger) (int64, error) {
 	var total_changes uint64 = 0
 	for serverAddr, vbnos := range kv_vb_map {
 		// as of now kv_vb_map contains only the current node and the connection is always local. use plain authentication
@@ -1244,7 +1255,7 @@ func calculateTotalChanges(kv_vb_map map[string][]uint16, kv_mem_clients map[str
 		if err != nil {
 			return 0, err
 		}
-		highseqno_map, err := getHighSeqNos(serverAddr, vbnos, client)
+		highseqno_map, err := getHighSeqNos(serverAddr, vbnos, client, stats_map)
 		if err != nil {
 			logger.Warnf("error from getting high seqno for %v is %v\n", serverAddr, err)
 			err1 := client.Close()
@@ -1304,7 +1315,7 @@ func updateStatsForReplication(repl_status *pipeline_pkg.ReplicationStatus, cur_
 		repl_status.SetVbList(cur_vb_list)
 	}
 
-	total_changes, err := calculateTotalChanges(cur_kv_vb_map, kv_mem_clients, spec.SourceBucketName, UserAgentPausedReplication, logger)
+	total_changes, err := calculateTotalChanges(cur_kv_vb_map, kv_mem_clients, spec.SourceBucketName, UserAgentPausedReplication, nil, logger)
 	if err != nil {
 		return err
 	}
