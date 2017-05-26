@@ -30,6 +30,8 @@ import (
 
 var SetTimeSyncRetryInterval = 10 * time.Second
 var BucketSettingsChanSize = 100
+var MaxRetryForLiveUpdatePipeline = 5
+var WaitTimeForLiveUpdatePipeline = 2 * time.Second
 
 // generic listener for metadata stored in metakv
 type MetakvChangeListener struct {
@@ -181,7 +183,7 @@ func (rscl *ReplicationSpecChangeListener) replicationSpecChangeHandlerCallback(
 			return nil
 		} else {
 			// otherwise, perform live update to pipeline
-			err := rscl.liveUpdatePipeline(topic, oldSettings, newSpec.Settings)
+			err := rscl.liveUpdatePipeline(topic, oldSettings, newSpec.Settings, newSpec.InternalId)
 			if err != nil {
 				rscl.logger.Errorf("Failed to perform live update on pipeline %v, err=%v\n", topic, err)
 				return err
@@ -251,7 +253,7 @@ func needToReconstructPipeline(oldSettings *metadata.ReplicationSettings, newSet
 		batchCountChanged || batchSizeChanged
 }
 
-func (rscl *ReplicationSpecChangeListener) liveUpdatePipeline(topic string, oldSettings *metadata.ReplicationSettings, newSettings *metadata.ReplicationSettings) error {
+func (rscl *ReplicationSpecChangeListener) liveUpdatePipeline(topic string, oldSettings *metadata.ReplicationSettings, newSettings *metadata.ReplicationSettings, newSpecInternalId string) error {
 	// perform live update on pipeline if qualifying settings have been changed
 	if oldSettings.LogLevel != newSettings.LogLevel || oldSettings.CheckpointInterval != newSettings.CheckpointInterval ||
 		oldSettings.StatsInterval != newSettings.StatsInterval ||
@@ -260,20 +262,50 @@ func (rscl *ReplicationSpecChangeListener) liveUpdatePipeline(topic string, oldS
 
 		rscl.logger.Infof("Updating pipeline %v with new settings=%v\n old settings=%v\n", topic, newSettings, oldSettings)
 
-		rs, err := replication_mgr.pipelineMgr.ReplicationStatus(topic)
-		if err != nil {
-			return err
-		}
+		go rscl.liveUpdatePipelineWithRetry(topic, newSettings, newSpecInternalId)
 
-		pipeline := rs.Pipeline()
-		if pipeline == nil {
-			return fmt.Errorf("Cannot find pipeline with topic %v", topic)
-		}
-
-		return pipeline.UpdateSettings(newSettings.ToMap())
+		return nil
 	}
 
 	return nil
+}
+
+func (rscl *ReplicationSpecChangeListener) liveUpdatePipelineWithRetry(topic string, newSettings *metadata.ReplicationSettings, specInternalId string) {
+	numOfRetry := 0
+	backoffTime := WaitTimeForLiveUpdatePipeline
+	for {
+		rs, err := replication_mgr.pipelineMgr.ReplicationStatus(topic)
+		if err == nil {
+			pipeline := rs.Pipeline()
+			if pipeline != nil {
+				// check if the pipeline is associated with the correct repl spec to which the new settings belongs
+				curSpecInternalId := rs.Spec().InternalId
+				if curSpecInternalId == specInternalId {
+					err = pipeline.UpdateSettings(newSettings.ToMap())
+					if err != nil {
+						rscl.logger.Errorf("Live update on pipeline %v returned err = %v", topic, err)
+					}
+				} else {
+					rscl.logger.Warnf("Abort live update on pipeline %v since replication spec has been recreated. oldSpecId=%v, newSpecId=%v", topic, specInternalId, curSpecInternalId)
+				}
+				return
+			} else {
+				err = fmt.Errorf("Cannot find pipeline with topic %v", topic)
+			}
+		}
+
+		rscl.logger.Warnf("Error live updating pipeline %v. err=%v", topic, err)
+		if numOfRetry < MaxRetryForLiveUpdatePipeline {
+			numOfRetry++
+			// exponential backoff
+			rscl.logger.Warnf("Retrying live update on pipeline %v for %vth time after %v.", topic, numOfRetry, backoffTime)
+			time.Sleep(backoffTime)
+			backoffTime *= 2
+		} else {
+			rscl.logger.Errorf("Failed to perform live update on pipeline %v after %v retries.", topic, numOfRetry)
+			return
+		}
+	}
 }
 
 // listener for remote clusters
