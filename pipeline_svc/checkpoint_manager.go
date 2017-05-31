@@ -300,7 +300,7 @@ func (ckmgr *CheckpointManager) initialize() {
 
 	ckmgr.composeUserAgent()
 
-	ckmgr.capi = (ckmgr.pipeline.Specification().Settings.RepType == metadata.ReplicationTypeCapi)
+	ckmgr.capi = ckmgr.pipeline.Specification().Settings.IsCapi()
 }
 
 // compose user agent string for HELO command

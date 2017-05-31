@@ -854,7 +854,7 @@ func (r *PipelineUpdater) raiseXattrWarningIfNeeded(p common.Pipeline) {
 			return
 		}
 
-		if spec.Settings.RepType == metadata.ReplicationTypeCapi {
+		if spec.Settings.IsCapi() {
 			return
 		}
 

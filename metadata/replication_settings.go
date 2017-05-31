@@ -408,7 +408,7 @@ func (s *ReplicationSettings) toMap(isDefaultSettings bool) map[string]interface
 	return settings_map
 }
 
-func ValidateAndConvertSettingsValue(key, value, errorKey string, isEnterprise bool) (convertedValue interface{}, err error) {
+func ValidateAndConvertSettingsValue(key, value, errorKey string, isEnterprise bool, isCapi bool) (convertedValue interface{}, err error) {
 	switch key {
 	case ReplicationType:
 		if value != ReplicationTypeXmem && value != ReplicationTypeCapi {
@@ -452,9 +452,14 @@ func ValidateAndConvertSettingsValue(key, value, errorKey string, isEnterprise b
 		convertedValue = int(convertedValue.(int64))
 
 		// network usage limit is supported only in EE
-		if key == BandwidthLimit && convertedValue.(int) != 0 && !isEnterprise {
-			err = errors.New("The value can be specified only in enterprise edition")
-			return
+		if key == BandwidthLimit && convertedValue.(int) != 0 {
+			if !isEnterprise {
+				err = errors.New("The value can be specified only in enterprise edition")
+				return
+			} else if isCapi {
+				err = errors.New("The value can not be specified for CAPI replication")
+				return
+			}
 		}
 
 		// range check for int parameters
@@ -528,4 +533,8 @@ func RangeCheck(intValue int, settingsConfig *SettingsConfig) error {
 		}
 	}
 	return nil
+}
+
+func (s *ReplicationSettings) IsCapi() bool {
+	return s.RepType == ReplicationTypeCapi
 }

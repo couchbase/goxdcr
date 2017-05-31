@@ -529,7 +529,7 @@ func (adminport *Adminport) doChangeDefaultReplicationSettingsRequest(request *h
 		return response, err
 	}
 
-	justValidate, settingsMap, errorsMap := DecodeChangeReplicationSettings(request, true)
+	justValidate, settingsMap, errorsMap := DecodeChangeReplicationSettings(request, "")
 	if len(errorsMap) > 0 {
 		logger_ap.Errorf("Validation error in inputs. errorsMap=%v\n", errorsMap)
 		return EncodeErrorsMapIntoResponse(errorsMap, false)
@@ -599,7 +599,7 @@ func (adminport *Adminport) doChangeReplicationSettingsRequest(request *http.Req
 	}
 	logger_ap.Infof("Request params: replicationId=%v\n", replicationId)
 
-	justValidate, settingsMap, errorsMap := DecodeChangeReplicationSettings(request, false)
+	justValidate, settingsMap, errorsMap := DecodeChangeReplicationSettings(request, replicationId)
 	if len(errorsMap) > 0 {
 		logger_ap.Errorf("Validation error in inputs. errorsMap=%v\n", errorsMap)
 		return EncodeErrorsMapIntoResponse(errorsMap, false)

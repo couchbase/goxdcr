@@ -90,7 +90,7 @@ func NewTopologyChangeDetectorSvc(cluster_info_svc service_def.ClusterInfoSvc,
 
 func (top_detect_svc *TopologyChangeDetectorSvc) Attach(pipeline common.Pipeline) error {
 	top_detect_svc.pipeline = pipeline
-	top_detect_svc.capi = pipeline.Specification().Settings.RepType == metadata.ReplicationTypeCapi
+	top_detect_svc.capi = pipeline.Specification().Settings.IsCapi()
 	return nil
 }
 

@@ -359,6 +359,9 @@ func DecodeCreateReplicationRequest(request *http.Request) (justValidate bool, f
 		return
 	}
 
+	// default isCapi to false if replication type is not explicitly specified in request
+	isCapi := false
+
 	for key, valArr := range request.Form {
 		switch key {
 		case ReplicationType:
@@ -377,6 +380,9 @@ func DecodeCreateReplicationRequest(request *http.Request) (justValidate bool, f
 			if err != nil {
 				errorsMap[base.JustValidate] = err
 			}
+		case Type:
+			replType := getStringFromValArr(valArr)
+			isCapi = (replType == metadata.ReplicationTypeCapi)
 		default:
 			// ignore other parameters
 		}
@@ -396,7 +402,7 @@ func DecodeCreateReplicationRequest(request *http.Request) (justValidate bool, f
 		errorsMap[base.ToBucket] = simple_utils.MissingValueError("target bucket")
 	}
 
-	settings, settingsErrorsMap := DecodeSettingsFromRequest(request, false, false)
+	settings, settingsErrorsMap := DecodeSettingsFromRequest(request, false, false, isCapi)
 	for key, value := range settingsErrorsMap {
 		errorsMap[key] = value
 	}
@@ -416,7 +422,7 @@ func DecodeCreateReplicationRequest(request *http.Request) (justValidate bool, f
 	return
 }
 
-func DecodeChangeReplicationSettings(request *http.Request, isDefaultSettings bool) (justValidate bool, settings map[string]interface{}, errorsMap map[string]error) {
+func DecodeChangeReplicationSettings(request *http.Request, replicationId string) (justValidate bool, settings map[string]interface{}, errorsMap map[string]error) {
 	errorsMap = make(map[string]error)
 
 	if err := request.ParseForm(); err != nil {
@@ -429,7 +435,26 @@ func DecodeChangeReplicationSettings(request *http.Request, isDefaultSettings bo
 		errorsMap[base.JustValidate] = err
 	}
 
-	settings, settingsErrorsMap := DecodeSettingsFromRequest(request, isDefaultSettings, true)
+	var isDefaultSettings bool
+	var isCapi bool
+	if len(replicationId) == 0 {
+		// empty replicationId indicates that we are handling default settings that are not replication specific
+		isDefaultSettings = true
+		// no need for isCapi check in this case
+		isCapi = false
+	} else {
+		isDefaultSettings = false
+		spec, err := ReplicationSpecService().ReplicationSpec(replicationId)
+		if err != nil {
+			// if err is not nil, replicationId is likely invalid
+			// simply return. validation error will be raised downstream
+			logger_msgutil.Warnf("Error retrieving spec for %v. err=%v\n", replicationId, err)
+			return
+		}
+		isCapi = spec.Settings.IsCapi()
+	}
+
+	settings, settingsErrorsMap := DecodeSettingsFromRequest(request, isDefaultSettings, true, isCapi)
 	for key, value := range settingsErrorsMap {
 		errorsMap[key] = value
 	}
@@ -468,7 +493,7 @@ func DecodeCreateReplicationResponse(response *http.Response) (string, error) {
 }
 
 // decode replication settings related parameters from http request
-func DecodeSettingsFromRequest(request *http.Request, isDefaultSettings bool, isUpdate bool) (map[string]interface{}, map[string]error) {
+func DecodeSettingsFromRequest(request *http.Request, isDefaultSettings bool, isUpdate bool, isCapi bool) (map[string]interface{}, map[string]error) {
 	settings := make(map[string]interface{})
 	errorsMap := make(map[string]error)
 
@@ -484,7 +509,7 @@ func DecodeSettingsFromRequest(request *http.Request, isDefaultSettings bool, is
 	}
 
 	for key, valArr := range request.Form {
-		err := processKey(key, valArr, &settings, isDefaultSettings, isUpdate, isEnterprise)
+		err := processKey(key, valArr, &settings, isDefaultSettings, isUpdate, isEnterprise, isCapi)
 		if err != nil {
 			errorsMap[key] = err
 		}
@@ -521,7 +546,7 @@ func DecodeSettingsFromInternalSettingsRequest(request *http.Request) (map[strin
 			continue
 		}
 
-		err = processKey(restKey, valArr, &settings, true /*isDefaultSettings*/, false /*isUpdate*/, isEnterprise)
+		err = processKey(restKey, valArr, &settings, true /*isDefaultSettings*/, false /*isUpdate*/, isEnterprise, false /*isCapi*/)
 		if err != nil {
 			errorsMap[restKey] = err
 		}
@@ -926,7 +951,7 @@ func EncodeReplicationSpecErrorIntoResponse(err error) (*ap.Response, error) {
 
 }
 
-func processKey(restKey string, valArr []string, settingsPtr *map[string]interface{}, isDefaultSettings bool, isUpdate bool, isEnterprise bool) error {
+func processKey(restKey string, valArr []string, settingsPtr *map[string]interface{}, isDefaultSettings bool, isUpdate bool, isEnterprise bool, isCapi bool) error {
 	settingsKey, ok := RestKeyToSettingsKeyMap[restKey]
 	if !ok {
 		// ignore non-settings key
@@ -942,16 +967,16 @@ func processKey(restKey string, valArr []string, settingsPtr *map[string]interfa
 		return errors.New("Setting value cannot be modified after replication is created.")
 	}
 
-	convertedValue, err := validateAndConvertAllSettingValue(settingsKey, valArr[0], restKey, isEnterprise)
+	convertedValue, err := validateAndConvertAllSettingValue(settingsKey, valArr[0], restKey, isEnterprise, isCapi)
 	if err == nil {
 		(*settingsPtr)[settingsKey] = convertedValue
 	}
 	return err
 }
 
-func validateAndConvertAllSettingValue(key, value, restKey string, isEnterprise bool) (convertedValue interface{}, err error) {
+func validateAndConvertAllSettingValue(key, value, restKey string, isEnterprise bool, isCapi bool) (convertedValue interface{}, err error) {
 	//check if value is replication specific setting
-	convertedValue, err = metadata.ValidateAndConvertSettingsValue(key, value, restKey, isEnterprise)
+	convertedValue, err = metadata.ValidateAndConvertSettingsValue(key, value, restKey, isEnterprise, isCapi)
 	//if we find converted value is null  than check if value is global process specific setting
 	if convertedValue == nil {
 		convertedValue, err = metadata.ValidateAndConvertGlobalSettingsValue(key, value, restKey)

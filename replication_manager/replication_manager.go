@@ -629,6 +629,21 @@ func (rm *replicationManager) createAndPersistReplicationSpec(justValidate bool,
 	if err != nil {
 		return nil, nil, err
 	}
+
+	// default isCapi to false if replication type is not explicitly specified in settings
+	isCapi := false
+	for key, value := range settings {
+		if key == metadata.ReplicationType {
+			isCapi = (value == metadata.ReplicationTypeCapi)
+			break
+		}
+	}
+
+	if isCapi {
+		// for capi replication, ensure that bandwith limit is 0 regardless of the default setting
+		replSettings.BandwidthLimit = 0
+	}
+
 	_, errorMap = replSettings.UpdateSettingsFromMap(settings)
 	if len(errorMap) != 0 {
 		return nil, errorMap, nil
