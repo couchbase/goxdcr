@@ -219,12 +219,6 @@ func (service *ReplicationSpecService) ValidateNewReplicationSpec(sourceBucket, 
 		return "", "", nil, errorMap
 	}
 
-	// validate that source and target bucket have the same conflict resolution type metadata
-	if sourceConflictResolutionType != targetConflictResolutionType {
-		errorMap[base.PlaceHolderFieldKey] = errors.New("Replication between buckets with different ConflictResolutionType setting is not allowed")
-		return "", "", nil, errorMap
-	}
-
 	repId := metadata.ReplicationId(sourceBucket, targetClusterRef.Uuid, targetBucket)
 	_, err = service.replicationSpec(repId)
 	if err == nil {
@@ -244,6 +238,13 @@ func (service *ReplicationSpecService) ValidateNewReplicationSpec(sourceBucket, 
 				errorMap[base.ToCluster] = errors.New("Version 2 replication is disallowed. Cluster has nodes with versions less than 2.2.")
 			}
 		}
+	}
+
+	// validate that source and target bucket have the same conflict resolution type metadata
+	// But if it's CAPI, assume the target node is elasticSearch, and let it pass through
+	if (repl_type != metadata.ReplicationTypeCapi) && (sourceConflictResolutionType != targetConflictResolutionType) {
+		errorMap[base.PlaceHolderFieldKey] = errors.New("Replication between buckets with different ConflictResolutionType setting is not allowed")
+		return "", "", nil, errorMap
 	}
 
 	service.logger.Infof("Finished ValidateAddReplicationSpec. errorMap=%v\n", errorMap)
