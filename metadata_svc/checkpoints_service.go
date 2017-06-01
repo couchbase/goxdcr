@@ -167,6 +167,7 @@ func (ckpt_svc *CheckpointsService) CheckpointsDocs(replicationId string) (map[u
 
 func (ckpt_svc *CheckpointsService) constructCheckpointDoc(content []byte, rev interface{}) (*metadata.CheckpointsDoc, error) {
 	var ckpt_doc *metadata.CheckpointsDoc = nil
+	// The only time content is empty is when this is a fresh XDCR system and no checkpoints has been registered yet
 	if len(content) > 0 {
 		ckpt_doc = &metadata.CheckpointsDoc{}
 		err := json.Unmarshal(content, ckpt_doc)
