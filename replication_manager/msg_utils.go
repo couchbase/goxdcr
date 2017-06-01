@@ -40,7 +40,6 @@ const (
 	CreateReplicationPath    = "controller/createReplication"
 	StatisticsPrefix         = "stats/buckets"
 	RegexpValidationPrefix   = "controller/regexpValidation"
-	InternalSettingsPath     = "internalSettings"
 	AllReplicationsPath      = "pools/default/replications"
 	AllReplicationInfosPath  = "pools/default/replicationInfos"
 	DeleteReplicationPrefix  = "controller/cancelXDCR"
@@ -523,43 +522,6 @@ func DecodeSettingsFromRequest(request *http.Request, isDefaultSettings bool, is
 	return settings, nil
 }
 
-// decode replication settings related parameters from /internalSettings http request
-func DecodeSettingsFromInternalSettingsRequest(request *http.Request) (map[string]interface{}, map[string]error) {
-	settings := make(map[string]interface{})
-	errorsMap := make(map[string]error)
-
-	if err := request.ParseForm(); err != nil {
-		errorsMap[base.PlaceHolderFieldKey] = ErrorParsingForm
-		return nil, errorsMap
-	}
-
-	isEnterprise, err := XDCRCompTopologyService().IsMyClusterEnterprise()
-	if err != nil {
-		errorsMap[base.PlaceHolderFieldKey] = err
-		return nil, errorsMap
-	}
-
-	for key, valArr := range request.Form {
-		restKey, err := ConvertRestInternalKeyToRestKey(key)
-		if err != nil {
-			// ignore non-internal settings key
-			continue
-		}
-
-		err = processKey(restKey, valArr, &settings, true /*isDefaultSettings*/, false /*isUpdate*/, isEnterprise, false /*isCapi*/)
-		if err != nil {
-			errorsMap[restKey] = err
-		}
-	}
-
-	if len(errorsMap) > 0 {
-		return nil, errorsMap
-	}
-
-	logger_msgutil.Debugf("settings decoded from request: %v\n", settings)
-	return settings, nil
-}
-
 func DecodeSettingsFromXDCRInternalSettingsRequest(request *http.Request) (map[string]interface{}, map[string]error) {
 	settings := make(map[string]interface{})
 	errorsMap := make(map[string]error)
@@ -645,19 +607,6 @@ func NewDefaultReplicationSettingsResponse(settings *metadata.ReplicationSetting
 	}
 }
 
-func NewInternalSettingsResponse(settings *metadata.ReplicationSettings, globalSettings *metadata.GlobalSettings) (*ap.Response, error) {
-	if settings == nil || globalSettings == nil {
-		return NewEmptyArrayResponse()
-	} else {
-		globalSettingsMap := convertGlobalSettingsToRestInternalSettingsMap(globalSettings)
-		replicationSettingMap := convertSettingsToRestInternalSettingsMap(settings)
-		for key, value := range globalSettingsMap {
-			replicationSettingMap[key] = value
-		}
-		return EncodeObjectIntoResponse(replicationSettingMap)
-	}
-}
-
 func NewXDCRInternalSettingsResponse(settings *metadata.InternalSettings) (*ap.Response, error) {
 	if settings == nil {
 		return NewEmptyArrayResponse()
@@ -715,17 +664,6 @@ func convertGlobalSettingsToRestSettingsMap(settings *metadata.GlobalSettings) m
 	return restSettingsMap
 }
 
-func convertGlobalSettingsToRestInternalSettingsMap(settings *metadata.GlobalSettings) map[string]interface{} {
-	internalSettingsMap := make(map[string]interface{})
-	settingsMap := settings.ToMap()
-	for key, value := range settingsMap {
-		restKey := SettingsKeyToRestKeyMap[key]
-		internalSettingsKey := ConvertRestKeyToRestInternalKey(restKey)
-		internalSettingsMap[internalSettingsKey] = value
-	}
-	return internalSettingsMap
-}
-
 func convertSettingsToRestSettingsMap(settings *metadata.ReplicationSettings, isDefaultSettings bool) map[string]interface{} {
 	restSettingsMap := make(map[string]interface{})
 	var settingsMap map[string]interface{}
@@ -746,45 +684,6 @@ func convertSettingsToRestSettingsMap(settings *metadata.ReplicationSettings, is
 		}
 	}
 	return restSettingsMap
-}
-
-func convertSettingsToRestInternalSettingsMap(settings *metadata.ReplicationSettings) map[string]interface{} {
-	internalSettingsMap := make(map[string]interface{})
-	settingsMap := settings.ToDefaultSettingsMap()
-	for key, value := range settingsMap {
-		restKey := SettingsKeyToRestKeyMap[key]
-		internalSettingsKey := ConvertRestKeyToRestInternalKey(restKey)
-		internalSettingsMap[internalSettingsKey] = value
-	}
-	return internalSettingsMap
-}
-
-// turns the first char in key to upper case and prefix with "xdcr"
-// e.g., turns "checkpointInterval" into "xdcrCheckpointInterval"
-func ConvertRestKeyToRestInternalKey(key string) string {
-	if key == "" {
-		return XDCRPrefix
-	}
-	return XDCRPrefix + strings.ToUpper(key[0:1]) + key[1:]
-}
-
-func convertInternalSettingsMapToSettingsMap(internalSettingsMap map[string]interface{}) map[string]interface{} {
-	settingsMap := make(map[string]interface{})
-	for key, value := range internalSettingsMap {
-		settingsMap[ConvertRestKeyToRestInternalKey(key)] = value
-	}
-	return internalSettingsMap
-}
-
-// strip the "xdcr" prefix and then turns the first char to lower case
-// e.g., turns "xdcrCheckpointInterval" into "checkpointInterval"
-func ConvertRestInternalKeyToRestKey(key string) (string, error) {
-	prefixLen := len(XDCRPrefix)
-	if len(key) > prefixLen && strings.HasPrefix(key, XDCRPrefix) {
-		return strings.ToLower(key[prefixLen:prefixLen+1]) + key[prefixLen+1:], nil
-	} else {
-		return "", errors.New("Not a valid internal settings key")
-	}
 }
 
 func getStringFromValArr(valArr []string) string {
@@ -831,25 +730,6 @@ func EncodeErrorsMapIntoResponse(errorsMap map[string]error, withErrorsWrapper b
 
 	// validation errors cause StatusBadRequest to be returned to client
 	return EncodeObjectIntoResponseWithStatusCode(result, http.StatusBadRequest)
-}
-
-func EncodeInternalSettingsErrorsMapIntoResponse(errorsMap map[string]error) (*ap.Response, error) {
-	bytes := []byte{'{'}
-	for key, _ := range errorsMap {
-		// use the same format as other internal settings validation errors
-		// i.e., use "error" as the key and "xxx is invalid" as the value.
-		// e.g., {"error":"xdcrDocBatchSizeKb is invalid","error":"xdcrWorkerBatchSize is invalid"}
-		// can not use map (since the keys are all the same) and have to manually encode the byte array to be returned
-		internalSettingsKey := ConvertRestKeyToRestInternalKey(key)
-		entry := "\"error\":\"" + simple_utils.GenericInvalidValueError(internalSettingsKey).Error() + "\","
-		bytes = append(bytes, []byte(entry)...)
-	}
-
-	// replace the last, redundant ',', with '}' to complete the encoding
-	// note that this works only when errorsMaps is not empty, which is always true
-	bytes[len(bytes)-1] = '}'
-
-	return EncodeByteArrayIntoResponseWithStatusCode(bytes, http.StatusBadRequest)
 }
 
 func EncodeReplicationValidationErrorIntoResponse(err error) (*ap.Response, error) {

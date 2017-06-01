@@ -32,7 +32,7 @@ import (
 
 import _ "net/http/pprof"
 
-var StaticPaths = []string{base.RemoteClustersPath, CreateReplicationPath, InternalSettingsPath, SettingsReplicationsPath, AllReplicationsPath, AllReplicationInfosPath, RegexpValidationPrefix, MemStatsPath, BlockProfileStartPath, BlockProfileStopPath, XDCRInternalSettingsPath}
+var StaticPaths = []string{base.RemoteClustersPath, CreateReplicationPath, SettingsReplicationsPath, AllReplicationsPath, AllReplicationInfosPath, RegexpValidationPrefix, MemStatsPath, BlockProfileStartPath, BlockProfileStopPath, XDCRInternalSettingsPath}
 var DynamicPathPrefixes = []string{base.RemoteClustersPath, DeleteReplicationPrefix, SettingsReplicationsPath, StatisticsPrefix, AllReplicationsPath, BucketSettingsPrefix}
 
 var logger_ap *log.CommonLogger = log.NewLogger("AdminPort", log.DefaultLoggerContext)
@@ -174,10 +174,6 @@ func (adminport *Adminport) handleRequest(
 	// historically, deleteReplication could use Post method
 	case DeleteReplicationPrefix + DynamicSuffix + base.UrlDelimiter + base.MethodPost:
 		response, err = adminport.doDeleteReplicationRequest(request)
-	case InternalSettingsPath + base.UrlDelimiter + base.MethodGet:
-		response, err = adminport.doViewInternalSettingsRequest(request)
-	case InternalSettingsPath + base.UrlDelimiter + base.MethodPost:
-		response, err = adminport.doChangeInternalSettingsRequest(request)
 	case SettingsReplicationsPath + base.UrlDelimiter + base.MethodGet:
 		response, err = adminport.doViewDefaultReplicationSettingsRequest(request)
 	case SettingsReplicationsPath + base.UrlDelimiter + base.MethodPost:
@@ -442,58 +438,6 @@ func (adminport *Adminport) doDeleteReplicationRequest(request *http.Request) (*
 
 	if err != nil {
 		return EncodeReplicationSpecErrorIntoResponse(err)
-	} else {
-		return NewEmptyArrayResponse()
-	}
-}
-
-func (adminport *Adminport) doViewInternalSettingsRequest(request *http.Request) (*ap.Response, error) {
-	logger_ap.Infof("doViewInternalSettingsRequest\n")
-
-	response, err := authWebCreds(request, base.PermissionXDCRSettingsRead)
-	if response != nil || err != nil {
-		return response, err
-	}
-
-	// default replication setting
-	defaultSettings, err := ReplicationSettingsService().GetDefaultReplicationSettings()
-
-	if err != nil {
-		return nil, err
-	}
-
-	// default process settings
-	defaultProcessSetting, err := GlobalSettingsService().GetDefaultGlobalSettings()
-
-	if err != nil {
-		return nil, err
-	}
-
-	return NewInternalSettingsResponse(defaultSettings, defaultProcessSetting)
-}
-
-func (adminport *Adminport) doChangeInternalSettingsRequest(request *http.Request) (*ap.Response, error) {
-	logger_ap.Infof("doChangeInternalSettingsRequest\n")
-
-	response, err := authWebCreds(request, base.PermissionXDCRSettingsWrite)
-	if response != nil || err != nil {
-		return response, err
-	}
-
-	settingsMap, errorsMap := DecodeSettingsFromInternalSettingsRequest(request)
-	if len(errorsMap) > 0 {
-		logger_ap.Errorf("Validation error in inputs. errorsMap=%v\n", errorsMap)
-		return EncodeInternalSettingsErrorsMapIntoResponse(errorsMap)
-	}
-
-	logger_ap.Infof("Request params: inputSettings=%v\n", settingsMap)
-
-	errorsMap, err = UpdateDefaultSettings(settingsMap, getRealUserIdFromRequest(request))
-	if err != nil {
-		return nil, err
-	} else if len(errorsMap) > 0 {
-		logger_ap.Errorf("Validation error in inputs. errorsMap=%v\n", errorsMap)
-		return EncodeInternalSettingsErrorsMapIntoResponse(errorsMap)
 	} else {
 		return NewEmptyArrayResponse()
 	}
