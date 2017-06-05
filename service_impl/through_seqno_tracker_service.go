@@ -29,6 +29,10 @@ type ThroughSeqnoTrackerSvc struct {
 	vb_map map[uint16]bool
 
 	// through_seqno seen by outnozzles based on the docs that are actually sent to target
+	// This is a map that is considered the "baseline" of sequence numbers. Whenever a batch operation
+	// that figures out timestamps, it updates this map. And whenever a caller asks this service for
+	// the "highest" seqno that is considered synchronized between source and target, the tracker service
+	// starts with the number listed in this map and builds on top. (See GetThroughSeqnos)
 	through_seqno_map map[uint16]*base.SeqnoWithLock
 
 	// stores for each vb a sorted list of the seqnos that have been sent to and confirmed by target
@@ -238,6 +242,7 @@ func (tsTracker *ThroughSeqnoTrackerSvc) ProcessEvent(event *common.Event) error
 		upr_event := event.Data.(*mcc.UprEvent)
 		seqno := upr_event.Seqno
 		vbno := upr_event.VBucket
+		// Sets last sequence number, and should the sequence number skip due to gap, this will take care of it
 		tsTracker.processGapSeqnos(vbno, seqno)
 	} else {
 		panic(fmt.Sprintf("Incorrect event type, %v, received by %v", event.EventType, tsTracker.id))
@@ -278,6 +283,7 @@ func (tsTracker *ThroughSeqnoTrackerSvc) processGapSeqnos(vbno uint16, current_s
 	last_seen_seqno_obj.SetSeqnoWithoutLock(current_seqno)
 
 	if last_seen_seqno < current_seqno-1 {
+		// If the current sequence number is not consecutive, then this means we have hit a gap. Store it in gap list.
 		tsTracker.vb_gap_seqno_list_map[vbno].appendSeqnos(last_seen_seqno+1, current_seqno-1, tsTracker.logger)
 	}
 }
@@ -289,6 +295,22 @@ func (tsTracker *ThroughSeqnoTrackerSvc) truncateSeqnoLists(vbno uint16, through
 	tsTracker.vb_gap_seqno_list_map[vbno].truncateSeqnos(through_seqno)
 }
 
+/**
+ * It's possible that even though the last sequence number actually sent is N, the next few numbers
+ * are actually handled and decided not to be sent. For example, N+1 may have been decided to be filtered
+ * out, and N+2 has failed CR, and N+3 to N+5 has been deduplicated as part of the DCP snapshot and has
+ * been accounted for in the gap seq number dual-list. In this example, the through seqno would be N+5.
+ *
+ * As a service, its job is to determine the "highest" number, and it could be either
+ * actually sent, or filtered, or some other "evented", such that any transaction below this number is
+ * considered "synchronized" between the source and destination.
+ *
+ * This method, given a vbucket number, returns that number.
+ *
+ * Note that the method is called "GetThroughSeqno" but also note that a through seqno may not necessarily
+ * mean that a mutation is physically sent over to the target. Do not confuse this with through_seqno_map,
+ * which only keeps track of physically sent numbers.
+ */
 func (tsTracker *ThroughSeqnoTrackerSvc) GetThroughSeqno(vbno uint16) uint64 {
 	tsTracker.validateVbno(vbno, "GetThroughSeqno")
 

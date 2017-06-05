@@ -566,6 +566,8 @@ func getDocsProcessedForReplication(topic string, vb_list []uint16, checkpoints_
 
 }
 
+// As part of starting the pipeline, a go routine is launched with this as the entrypoint to figure out the
+// VB timestamp, (see types.go's VBTimestamp struct) for each of the vbucket that this node is responsible for.
 func (ckmgr *CheckpointManager) SetVBTimestamps(topic string) error {
 	defer ckmgr.logger.Infof("%v Done with SetVBTimestamps", ckmgr.pipeline.Topic())
 	ckmgr.logger.Infof("Set start seqnos for pipeline %v...", ckmgr.pipeline.Topic())
@@ -724,7 +726,7 @@ func (ckmgr *CheckpointManager) getVBTimestampForVB(vbno uint16, ckptDoc *metada
 			bMatch := false
 			bMatch, current_remoteVBOpaque, err := ckmgr.capi_svc.PreReplicate(ckmgr.remote_bucket, remote_vb_status, ckmgr.support_ckpt)
 			//remote vb topology changed
-			//udpate the vb_uuid and try again
+			//udpate the vb_uuid
 			if err == nil {
 				ckmgr.updateCurrentVBOpaque(vbno, current_remoteVBOpaque)
 				ckmgr.logger.Debugf("%v Remote vbucket %v has a new opaque %v, update\n", ckmgr.pipeline.Topic(), current_remoteVBOpaque, vbno)
@@ -1014,6 +1016,7 @@ func (ckmgr *CheckpointManager) performCkpt(fin_ch <-chan bool, wait_grp *sync.W
 	var through_seqno_map map[uint16]uint64
 	// vBucketID -> slice of 2 elements of 1)HighSeqNo and 2)VbUuid
 	var high_seqno_and_vbuuid_map map[uint16][]uint64
+	// map of vbucketID -> the seqno that corresponds to the first occurrence of xattribute
 	var xattr_seqno_map map[uint16]uint64
 	if !ckmgr.capi {
 		// get through seqnos for all vbuckets in the pipeline
@@ -1073,6 +1076,15 @@ func (ckmgr *CheckpointManager) performCkpt_internal(vb_list []uint16, fin_ch <-
 	ckmgr.RaiseEvent(common.NewEvent(common.CheckpointDone, nil, ckmgr, nil, time.Duration(total_committing_time)*time.Second))
 }
 
+/**
+ * Given the current information, we want to establish a single checkpoint entry and persist it. We need to populate the followings:
+ * 1. The Source vbucket through sequence number
+ * 2. Failover UUID of source side (i.e. VBucket UUID)
+ * 3. Target Vbucket high sequence number
+ * 4. Target VB Opaque (i.e. VBUuid in recent releases)
+ * 5. Snapshot start sequence number (correlating to item 1)
+ * 6. Snapshot end sequence number (correlating to item 1)
+ */
 func (ckmgr *CheckpointManager) do_checkpoint(vbno uint16, through_seqno_map map[uint16]uint64,
 	high_seqno_and_vbuuid_map map[uint16][]uint64, xattr_seqno_map map[uint16]uint64) (err error) {
 	//locking the current ckpt record and notsent_seqno list for this vb, no update is allowed during the checkpointing
@@ -1100,6 +1112,10 @@ func (ckmgr *CheckpointManager) do_checkpoint(vbno uint16, through_seqno_map map
 			through_seqno = ckmgr.through_seqno_tracker_svc.GetThroughSeqno(vbno)
 		}
 
+		// Item 1:
+		// Update the one and only check point record that checkpoint_manager keeps track of in its "cur_ckpts" with the through_seq_no
+		// that was found from "GetThroughSeqno", which has already done the work to single out the number to represent the latest state
+		// from the source side perspective
 		ckpt_record.Seqno = through_seqno
 		ckmgr.logger.Debugf("%v Seqno number used for checkpointing for vb %v is %v\n", ckmgr.pipeline.Topic(), vbno, ckpt_record.Seqno)
 
@@ -1119,6 +1135,7 @@ func (ckmgr *CheckpointManager) do_checkpoint(vbno uint16, through_seqno_map map
 		}
 
 		// get remote_seqno and vbuuid from target
+		// Items: 3 and 4
 		var remote_seqno uint64
 		var targetVBOpaque metadata.TargetVBOpaque
 		if !ckmgr.capi {
@@ -1140,6 +1157,8 @@ func (ckmgr *CheckpointManager) do_checkpoint(vbno uint16, through_seqno_map map
 		// targetVBOpaque may be nil when connecting to elastic search, skip target vb uuid check in this case
 		if targetVBOpaque == nil || ckpt_record.Target_vb_opaque.IsSame(targetVBOpaque) {
 			ckpt_record.Target_Seqno = remote_seqno
+			// Item 2:
+			// Get the failover_UUID here
 			ckpt_record.Failover_uuid, err = ckmgr.getFailoverUUIDForSeqno(vbno, ckpt_record.Seqno)
 			if err != nil {
 				// if we cannot find uuid for the checkpoint seqno, the checkpoint seqno is unusable
@@ -1149,10 +1168,14 @@ func (ckmgr *CheckpointManager) do_checkpoint(vbno uint16, through_seqno_map map
 				return nil
 			}
 
+			// Go through the local snapshot records repository and figure out which snapshot contains this latest sequence number
+			// Item: 5 and 6
 			ckpt_record.Dcp_snapshot_seqno, ckpt_record.Dcp_snapshot_end_seqno, err = ckmgr.getSnapshotForSeqno(vbno, ckpt_record.Seqno)
 			if err != nil {
 				// if we cannot find snapshot for the checkpoint seqno, the checkpoint seqno is still usable in normal cases,
 				// just that we may have to rollback to 0 when rollback is needed
+				// In rare cases, snapshot start/end seqno is needed only when DCP cannot simply use checkpoint seqno as the start seqno.
+				// The logic is in ep-engine/src/failover-table.cc
 				// log the problem and proceed
 				ckmgr.logger.Warnf("%v\n", err.Error())
 			}
@@ -1167,6 +1190,8 @@ func (ckmgr *CheckpointManager) do_checkpoint(vbno uint16, through_seqno_map map
 					if xattr_seqno != 0 && xattr_seqno > through_seqno {
 						// if xattr_seqno is larger than through_seqno, rollback is not needed
 						// set xattr_seqno to 0 to avoid triggering unnecessary rollback
+						// This case is possible if the mutation related to this sequence number has been sent to the target, and stored in the map
+						// but the target has not yet responded, so that the through_seq_number service hasn't been able to process it yet.
 						xattr_seqno = 0
 					}
 				}

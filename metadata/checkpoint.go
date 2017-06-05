@@ -252,7 +252,7 @@ func (ckpt_record *CheckpointRecord) String() string {
 }
 
 type CheckpointsDoc struct {
-	//keep 100 checkpoint record
+	//keep "MaxCheckpointsKept" checkpoint record - ordered by new to old, with 0th element being the newest
 	Checkpoint_records []*CheckpointRecord `json:"checkpoints"`
 
 	// senqo of the first mutation with xattr in the corresponding vbucket

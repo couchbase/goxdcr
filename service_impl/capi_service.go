@@ -59,6 +59,7 @@ func NewCAPIService(cluster_info_service *ClusterInfoSvc, logger_ctx *log.Logger
 //		  bMatch - true if the remote vbucket matches the current replication status
 //		  current_remoteVBUUID - new remote vb uuid might be retured if bMatch = false and there was a topology change on remote vb
 //		  err
+// Refer to ns_server/deps/ns_couchdb/src/capi_replication.erl for server side source code
 func (capi_svc *CAPIService) PreReplicate(remoteBucket *service_def.RemoteBucketInfo,
 	knownRemoteVBStatus *service_def.RemoteVBReplicationStatus, xdcrCheckpointingCapbility bool) (bMatch bool, current_remoteVBOpaque metadata.TargetVBOpaque, err error) {
 	capi_svc.logger.Debug("Calling _pre_replicate")

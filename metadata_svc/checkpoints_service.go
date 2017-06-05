@@ -42,6 +42,7 @@ func (ckpt_svc *CheckpointsService) getCheckpointCatalogKey(replicationId string
 	return CheckpointsCatalogKeyPrefix + base.KeyPartsDelimiter + replicationId
 }
 
+// Get a unique key to access metakv for checkpoints
 func (ckpt_svc *CheckpointsService) getCheckpointDocKey(replicationId string, vbno uint16) string {
 	return fmt.Sprintf("%v%v", CheckpointsKeyPrefix+base.KeyPartsDelimiter+replicationId+base.KeyPartsDelimiter, vbno)
 }
