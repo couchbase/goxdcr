@@ -388,6 +388,8 @@ var LengthOfRandomId = 16
 // max retry for random id generation
 var MaxRetryForRandomIdGeneration = 5
 
+var WaitTimeBetweenMetadataChangeListeners = 1 * time.Second
+
 // --------------- Constants that are configurable -----------------
 
 // timeout for checkpointing attempt before pipeline is stopped - to put an upper bound on the delay of pipeline stop/restart

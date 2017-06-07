@@ -10,31 +10,40 @@
 package replication_manager
 
 import (
-	"errors"
+	"fmt"
 	"github.com/couchbase/goxdcr/base"
+	"time"
 )
 
 type MetadataChangeMonitor struct {
-	//registered runtime pipeline service
-	listeners map[string]base.MetadataChangeListener
+	// order of listeners matters
+	// it is the order that listeners are added to the monitor
+	// listeners are started in the same order
+	// hence if listener A needs to be started after listener B
+	// all we need to do is to register listener A after listener B
+	listeners []base.MetadataChangeListener
 }
 
 func NewMetadataChangeMonitor() *MetadataChangeMonitor {
 	return &MetadataChangeMonitor{
-		listeners: make(map[string]base.MetadataChangeListener),
+		listeners: make([]base.MetadataChangeListener, 0),
 	}
 }
 
 func (mcm *MetadataChangeMonitor) Start() {
 	for _, listener := range mcm.listeners {
 		listener.Start()
+		time.Sleep(base.WaitTimeBetweenMetadataChangeListeners)
 	}
 }
 
 func (mcm *MetadataChangeMonitor) RegisterListener(listener base.MetadataChangeListener) error {
-	if _, ok := mcm.listeners[listener.Id()]; ok {
-		return errors.New("listener with the same Id already exists")
+	for _, existing_listener := range mcm.listeners {
+		if existing_listener.Id() == listener.Id() {
+			return fmt.Errorf("listener with the same Id, %v, already exists", listener.Id())
+		}
 	}
-	mcm.listeners[listener.Id()] = listener
+
+	mcm.listeners = append(mcm.listeners, listener)
 	return nil
 }

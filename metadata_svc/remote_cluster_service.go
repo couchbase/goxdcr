@@ -113,10 +113,7 @@ func NewRemoteClusterService(uilog_svc service_def.UILogSvc, metakv_svc service_
 		httpsAddrMap:      make(map[string]string),
 	}
 
-	err := svc.initCache()
-	if err != nil {
-		return nil, err
-	}
+	svc.initCache()
 	return svc, nil
 }
 
@@ -125,26 +122,8 @@ func (service *RemoteClusterService) SetMetadataChangeHandlerCallback(call_back 
 }
 
 //fill the cache the first time
-func (service *RemoteClusterService) initCache() error {
+func (service *RemoteClusterService) initCache() {
 	service.cache = NewMetadataCache(service.logger)
-
-	entries, err := service.metakv_svc.GetAllMetadataFromCatalog(RemoteClustersCatalogKey)
-	if err != nil {
-		service.logger.Errorf("Failed to get all entries, err=%v\n", err)
-		service.cache = nil
-		return err
-	}
-
-	for _, entry := range entries {
-		ref, err := service.constructRemoteClusterReference(entry.Value, entry.Rev)
-		if err != nil {
-			service.cache = nil
-			return err
-		}
-		service.cacheRef(ref, CAS_NEW_ENTRY)
-	}
-	return nil
-
 }
 
 func (service *RemoteClusterService) getCache() *MetadataCache {

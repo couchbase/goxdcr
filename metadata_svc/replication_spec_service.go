@@ -89,10 +89,7 @@ func NewReplicationSpecService(uilog_svc service_def.UILogSvc, remote_cluster_sv
 		logger:                 logger,
 	}
 
-	err := svc.initCache()
-	if err != nil {
-		return nil, err
-	}
+	svc.initCache()
 	return svc, nil
 }
 
@@ -100,27 +97,9 @@ func (service *ReplicationSpecService) SetMetadataChangeHandlerCallback(call_bac
 	service.metadata_change_callback = call_back
 }
 
-func (service *ReplicationSpecService) initCache() error {
-	service.logger.Info("Init cache for ReplicationSpecService...")
-	cache := NewMetadataCache(service.logger)
-
-	entries, err := service.metadata_svc.GetAllMetadataFromCatalog(ReplicationSpecsCatalogKey)
-	if err != nil {
-		service.logger.Errorf("Failed to get all entries, err=%v\n", err)
-		return err
-	}
-
-	for _, entry := range entries {
-		spec, err := constructReplicationSpec(entry.Value, entry.Rev)
-		if err != nil || spec == nil {
-			service.logger.Errorf("Failed to contruct replication spec, key=%v, err=%v\n", entry.Key, err)
-			return err
-		}
-		service.cacheSpec(cache, spec.Id, spec)
-	}
-	service.cache = cache
+func (service *ReplicationSpecService) initCache() {
+	service.cache = NewMetadataCache(service.logger)
 	service.logger.Info("Cache has been initialized for ReplicationSpecService")
-	return nil
 }
 
 func (service *ReplicationSpecService) getCache() *MetadataCache {

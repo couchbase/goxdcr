@@ -236,13 +236,28 @@ func initConstants(xdcr_topology_svc service_def.XDCRCompTopologySvc, internal_s
 func (rm *replicationManager) initMetadataChangeMonitor() {
 	mcm := NewMetadataChangeMonitor()
 
-	replicationSpecChangeListener := NewReplicationSpecChangeListener(
-		rm.repl_spec_svc,
+	// the sequence of the listener registration matters
+	// for example, replicationSpecChangeListener will get all active replications started
+	// this requires replication settings and remote cluster reference to be initialized
+	// that is why it needs to be registered and started after the other listeners
+
+	globalSettingChangeListener := NewGlobalSettingChangeListener(
+		rm.global_setting_svc,
 		rm.metadata_change_callback_cancel_ch,
 		rm.children_waitgrp,
 		log.DefaultLoggerContext)
-	mcm.RegisterListener(replicationSpecChangeListener)
-	rm.repl_spec_svc.SetMetadataChangeHandlerCallback(replicationSpecChangeListener.replicationSpecChangeHandlerCallback)
+
+	mcm.RegisterListener(globalSettingChangeListener)
+	rm.global_setting_svc.SetMetadataChangeHandlerCallback(globalSettingChangeListener.globalSettingChangeHandlerCallback)
+
+	internalSettingsChangeListener := NewInternalSettingsChangeListener(
+		rm.internal_settings_svc,
+		rm.metadata_change_callback_cancel_ch,
+		rm.children_waitgrp,
+		log.DefaultLoggerContext)
+
+	mcm.RegisterListener(internalSettingsChangeListener)
+	rm.internal_settings_svc.SetMetadataChangeHandlerCallback(internalSettingsChangeListener.internalSettingsChangeHandlerCallback)
 
 	remoteClusterChangeListener := NewRemoteClusterChangeListener(
 		rm.remote_cluster_svc,
@@ -254,24 +269,13 @@ func (rm *replicationManager) initMetadataChangeMonitor() {
 	mcm.RegisterListener(remoteClusterChangeListener)
 	rm.remote_cluster_svc.SetMetadataChangeHandlerCallback(remoteClusterChangeListener.remoteClusterChangeHandlerCallback)
 
-	globalSettingChangeListener := NewGlobalSettingChangeListener(
-		rm.global_setting_svc,
+	replicationSpecChangeListener := NewReplicationSpecChangeListener(
+		rm.repl_spec_svc,
 		rm.metadata_change_callback_cancel_ch,
 		rm.children_waitgrp,
 		log.DefaultLoggerContext)
-
-	mcm.RegisterListener(globalSettingChangeListener)
-	rm.global_setting_svc.SetMetadataChangeHandlerCallback(globalSettingChangeListener.globalSettingChangeHandlerCallback)
-	logger_rm.Info("globalSettingChangeListener successfully started")
-
-	internalSettingsChangeListener := NewInternalSettingsChangeListener(
-		rm.internal_settings_svc,
-		rm.metadata_change_callback_cancel_ch,
-		rm.children_waitgrp,
-		log.DefaultLoggerContext)
-
-	mcm.RegisterListener(internalSettingsChangeListener)
-	rm.internal_settings_svc.SetMetadataChangeHandlerCallback(internalSettingsChangeListener.internalSettingsChangeHandlerCallback)
+	mcm.RegisterListener(replicationSpecChangeListener)
+	rm.repl_spec_svc.SetMetadataChangeHandlerCallback(replicationSpecChangeListener.replicationSpecChangeHandlerCallback)
 
 	mcm.Start()
 }
