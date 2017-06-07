@@ -88,8 +88,8 @@ type connPool struct {
 	clients  chan *mcc.Client
 	hostName string
 	// username and password used in setting up target connection
-	userName string
-	password string
+	userName    string
+	password    string
 	bucketName  string
 	maxConn     int
 	newConnFunc NewConnFunc
@@ -811,6 +811,10 @@ func MakeTLSConn(ssl_con_str string, certificate []byte, check_server_name bool,
 	tlsConfig := &tls.Config{RootCAs: caPool}
 	tlsConfig.BuildNameToCertificate()
 	tlsConfig.InsecureSkipVerify = true
+
+	// golang 1.8 added a new curve, X25519, which is not supported by ns_server pre-spock
+	// explicitly define curve preferences to get this new curve excluded
+	tlsConfig.CurvePreferences = []tls.CurveID{tls.CurveP256, tls.CurveP384, tls.CurveP521}
 
 	// Connect to tls
 	conn, err := tls.DialWithDialer(dialer, "tcp", ssl_con_str, tlsConfig)
