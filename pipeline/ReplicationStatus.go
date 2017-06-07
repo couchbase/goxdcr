@@ -74,6 +74,7 @@ type ReplicationStatusIface interface {
 	AddError(err error)
 	RuntimeStatus(lock bool) ReplicationState
 	Storage() *expvar.Map
+	// Called by UI every second
 	GetStats(registryName string) *expvar.Map
 	GetOverviewStats() *expvar.Map
 	SetStats(registryName string, stats *expvar.Map)
@@ -212,6 +213,7 @@ func (rs *ReplicationStatus) Storage() *expvar.Map {
 	return rep_map
 }
 
+// Called by UI every second
 func (rs *ReplicationStatus) GetStats(registryName string) *expvar.Map {
 	expvar_var := rs.Storage()
 	stats := expvar_var.Get(registryName)

@@ -44,6 +44,7 @@ var InvalidRemoteClusterErrorMessage = "Invalid remote cluster. "
 var UnknownRemoteClusterErrorMessage = "unknown remote cluster"
 var InvalidConnectionStrError = errors.New("invalid connection string")
 
+// This is used for caching and the cas is used only for the updateCache comparison
 type remoteClusterVal struct {
 	key                 string
 	nodes_connectionstr []string

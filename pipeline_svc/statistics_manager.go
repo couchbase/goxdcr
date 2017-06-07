@@ -121,8 +121,8 @@ var StatsToClearForPausedReplications = [13]string{SIZE_REP_QUEUE_METRIC, DOCS_R
 	TIME_COMMITING_METRIC, NUM_FAILEDCKPTS_METRIC, RATE_DOC_CHECKS_METRIC, RATE_OPT_REPD_METRIC, RATE_RECEIVED_DCP_METRIC,
 	RATE_REPLICATED_METRIC, BANDWIDTH_USAGE_METRIC, THROTTLE_LATENCY_METRIC}
 
-// keys for metrics in overview 	125
-// note that DOCS_CHECKED_METRIC is not included since it needs special treatment 	126
+// keys for metrics in overview
+// note that DOCS_CHECKED_METRIC is not included since it needs special treatment
 var OverviewMetricKeys = []string{DOCS_WRITTEN_METRIC, EXPIRY_DOCS_WRITTEN_METRIC, DELETION_DOCS_WRITTEN_METRIC,
 	SET_DOCS_WRITTEN_METRIC, DOCS_PROCESSED_METRIC, DOCS_FAILED_CR_SOURCE_METRIC, EXPIRY_FAILED_CR_SOURCE_METRIC,
 	DELETION_FAILED_CR_SOURCE_METRIC, SET_FAILED_CR_SOURCE_METRIC, DATA_REPLICATED_METRIC, DOCS_FILTERED_METRIC,
@@ -176,8 +176,10 @@ type StatisticsManager struct {
 
 	collectors []MetricsCollector
 
-	active_vbs          map[string][]uint16
-	bucket_name         string
+	active_vbs  map[string][]uint16
+	bucket_name string
+
+	// Keeps track of all the serverAddr -> MCC client required
 	kv_mem_clients      map[string]*mcc.Client
 	kv_mem_clients_lock *sync.RWMutex
 
@@ -687,12 +689,13 @@ func (stats_mgr *StatisticsManager) composeUserAgent() {
 func (stats_mgr *StatisticsManager) initOverviewRegistry() {
 	if overview_registry, ok := stats_mgr.registries[OVERVIEW_METRICS_KEY]; ok {
 		// reset all counters except that for DOCS_CHECKED_METRIC to 0
-		// counter for DOCS_CHECKED_METRIC needs to be preserved for the computation of docs_checked_rate
+		// counter for DOCS_CHECKED_METRIC needs to be preserved for the computation of docs_checked_rate,
+		// which is not included in OverviewMetricKeys
 		for _, overview_metric_key := range OverviewMetricKeys {
 			overview_registry.Get(overview_metric_key).(metrics.Counter).Clear()
 		}
 	} else {
-		// create new overview_registry and initialize all counters except that for DOCS_CHECKED_METRIC to 0
+		// create new overview_registry and initialize all counters to 0 except for DOCS_CHECKED_METRIC
 		overview_registry = metrics.NewRegistry()
 		stats_mgr.registries[OVERVIEW_METRICS_KEY] = overview_registry
 		for _, overview_metric_key := range OverviewMetricKeys {

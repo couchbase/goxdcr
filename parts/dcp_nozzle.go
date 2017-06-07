@@ -88,7 +88,6 @@ type DcpNozzle struct {
 	sourceBucketName string
 	targetBucketName string
 	client           *mcc.Client
-	// UPR feed is created by using the client above, once the client is initialized
 	uprFeed          *mcc.UprFeed
 	// lock on uprFeed to avoid race condition
 	lock_uprFeed sync.RWMutex
@@ -261,6 +260,10 @@ func (dcp *DcpNozzle) Close() error {
 	return nil
 }
 
+/**
+ * Start routine initializes the DCP client, gen server, and launches go routines on various
+ * monitors.
+ */
 func (dcp *DcpNozzle) Start(settings map[string]interface{}) error {
 	dcp.Logger().Infof("Dcp nozzle %v starting ....\n", dcp.Id())
 
@@ -623,6 +626,17 @@ done:
 	return nil
 }
 
+/**
+ * Once the stream is ready to be started (once seqno is populated from ckptmgr)
+ * Do the actual stream start.
+ * NOTE: Checkpoint manager's SetVBTimestamps() gets called at a pipeline's start, which goes off
+ * and sets the sequence number per vbucket.
+ * When the timestamps have been set, the pipeline's settings are updated (See ckmgr.setTimestampForVB())
+ * Once the pipeline's settings are updated, this DCP nozzle object's UpdateSettings is called,
+ * since it's associated to the pipeline, and its internal data structures are updated as a result.
+ * The startUprStreams_internal call here depends on those data
+ * structured being updated indirectly from checkpoint manager.
+ */
 func (dcp *DcpNozzle) startUprStreams_internal(streams_to_start []uint16) error {
 	for _, vbno := range streams_to_start {
 		vbts, err := dcp.getTS(vbno, true)
@@ -639,6 +653,7 @@ func (dcp *DcpNozzle) startUprStreams_internal(streams_to_start []uint16) error 
 	return nil
 }
 
+// For a given stream (by vb#), send UPR_STREAMREQ via the uprFeed client method
 func (dcp *DcpNozzle) startUprStream(vbno uint16, vbts *base.VBTimestamp) error {
 	opaque := newOpaque()
 	flags := uint32(0)
@@ -1055,6 +1070,7 @@ func (dcp *DcpNozzle) getDcpDataChanLen() {
 	} else {
 		dcp_dispatch_len = len(dcp.uprFeed.C)
 	}
+	// Raise event to keep track of how full DCP is and whether or not DCP is going to be a bottleneck
 	dcp.RaiseEvent(common.NewEvent(common.StatsUpdate, nil, dcp, nil, dcp_dispatch_len))
 
 }

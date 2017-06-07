@@ -84,6 +84,7 @@ var MaxErrorMessageLength = 400
 
 /************************************
 /* struct capiBatch
+ * NOTE: see dataBatch comments for more info
 *************************************/
 type capiBatch struct {
 	dataBatch
@@ -386,6 +387,7 @@ func (capi *CapiNozzle) batchReady(vbno uint16) error {
 
 }
 
+// Coming from Router's Forward
 func (capi *CapiNozzle) Receive(data interface{}) error {
 	// the attempt to write to dataChan may panic if dataChan has been closed
 	defer func() {
@@ -453,6 +455,7 @@ func (capi *CapiNozzle) processData_batch(finch chan bool, waitGrp *sync.WaitGro
 		select {
 		case <-finch:
 			goto done
+		// Take batch and process it
 		case batch, ok := <-capi.batches_ready:
 			if !ok {
 				capi.Logger().Infof("%v batches_ready closed. Exiting processData.", capi.Id())
@@ -475,6 +478,7 @@ func (capi *CapiNozzle) processData_batch(finch chan bool, waitGrp *sync.WaitGro
 					}
 				}
 			}
+		// Get the not full batch and start processing it
 		case <-capi.batches_nonempty_ch:
 			if capi.validateRunningState() != nil {
 				capi.Logger().Infof("%v has stopped. Exiting", capi.Id())
@@ -482,7 +486,7 @@ func (capi *CapiNozzle) processData_batch(finch chan bool, waitGrp *sync.WaitGro
 			}
 
 			if len(capi.batches_ready) == 0 {
-
+				// There's currently no batch in place, otherwise, piggy back off the batches_ready above
 				max_count, max_batch_vbno := capi.getBatchWithMaxCount()
 				if max_count > 0 {
 					select {
@@ -568,11 +572,14 @@ func (capi *CapiNozzle) send_internal(batch *capiBatch) error {
 		new_counter_sent := atomic.AddUint32(&capi.counter_sent, count)
 		capi.Logger().Debugf("So far, capi %v processed %d items", capi.Id(), new_counter_sent)
 
+		// A map of documents that should not be replicated
 		var bigDoc_noRep_map map[string]bool
+		// Populate no replication map to optimize data bandwidth before actually sending
 		bigDoc_noRep_map, err = capi.batchGetMeta(batch.vbno, batch.bigDoc_map)
 		if err != nil {
 			capi.Logger().Errorf("%v batchGetMeta failed. err=%v\n", capi.Id(), err)
 		} else {
+			// Attach the map to the batch before actually sending
 			batch.bigDoc_noRep_map = bigDoc_noRep_map
 		}
 
@@ -582,7 +589,11 @@ func (capi *CapiNozzle) send_internal(batch *capiBatch) error {
 	return err
 }
 
-//batch call for document size larger than the optimistic threshold
+/**
+ * batch call for document size larger than the optimistic threshold
+ * Returns a map of all the keys that are fed in bigDoc_map, with a boolean value
+ * The boolean value == true meaning that the document referred by key should *not* be replicated
+ */
 func (capi *CapiNozzle) batchGetMeta(vbno uint16, bigDoc_map map[string]*base.WrappedMCRequest) (map[string]bool, error) {
 	capi.Logger().Debugf("%v batchGetMeta called for vb %v and bigDoc_map with len %v, map=%v\n", capi.Id(), vbno, len(bigDoc_map), bigDoc_map)
 
@@ -597,9 +608,12 @@ func (capi *CapiNozzle) batchGetMeta(vbno uint16, bigDoc_map map[string]*base.Wr
 		return nil, err
 	}
 
+	// Used for sending to target
 	key_rev_map := make(map[string]string)
+	// Used for stats updating
 	key_seqnostarttime_map := make(map[string][]interface{})
 	sent_id_map := make(map[string]bool)
+	// Populate necessary data maps above from the passed in bigDoc_map to be able to query the target
 	for id, req := range bigDoc_map {
 		key := string(req.Req.Key)
 		if _, ok := key_rev_map[key]; !ok {
@@ -609,14 +623,15 @@ func (capi *CapiNozzle) batchGetMeta(vbno uint16, bigDoc_map map[string]*base.Wr
 		}
 	}
 
-	body, err := json.Marshal(key_rev_map)
+	keysAndRevisions, err := json.Marshal(key_rev_map)
 	if err != nil {
 		return nil, err
 	}
 
+	// Query the Target by feeding it the current key -> revisions
 	var out interface{}
 	err, statusCode := utils.QueryRestApiWithAuth(couchApiBaseHost, couchApiBasePath+base.RevsDiffPath, true, capi.config.username, capi.config.password, capi.config.certificate, false, base.MethodPost, base.JsonContentType,
-		body, capi.config.connectionTimeout, &out, nil, false, capi.Logger())
+		keysAndRevisions, capi.config.connectionTimeout, &out, nil, false, capi.Logger())
 	capi.Logger().Debugf("%v results of _revs_diff query for vb %v: err=%v, status=%v\n", capi.Id(), vbno, err, statusCode)
 	if err != nil {
 		capi.Logger().Errorf("%v _revs_diff query for vb %v failed with err=%v\n", capi.Id(), vbno, err)
@@ -627,6 +642,7 @@ func (capi *CapiNozzle) batchGetMeta(vbno uint16, bigDoc_map map[string]*base.Wr
 		return nil, errors.New(errMsg)
 	}
 
+	// Update stats
 	for key, seqnostarttime := range key_seqnostarttime_map {
 		additionalInfo := GetMetaReceivedEventAdditional{Key: key,
 			Seqno:       seqnostarttime[0].(uint64),
@@ -634,17 +650,19 @@ func (capi *CapiNozzle) batchGetMeta(vbno uint16, bigDoc_map map[string]*base.Wr
 		capi.RaiseEvent(common.NewEvent(common.GetMetaReceived, nil, capi, nil, additionalInfo))
 	}
 
+	// Convert the result from sending key_rev to target into a map, which if a key exists, means "send me this document"
 	bigDoc_rep_map, ok := out.(map[string]interface{})
 	capi.Logger().Debugf("%v bigDoc_rep_map=%v\n", capi.Id(), bigDoc_rep_map)
 	if !ok {
 		return nil, errors.New(fmt.Sprintf("Error parsing return value from _revs_diff query for vbucket %v. bigDoc_rep_map=%v", vbno, bigDoc_rep_map))
 	}
 
-	// bigDoc_noRep_map = doc_map - bigDoc_rep_map
+	// bigDoc_noRep_map = bigDoc_map - bigDoc_rep_map
 	for id, req := range bigDoc_map {
 		if _, found := sent_id_map[id]; found {
 			docKey := string(req.Req.Key)
 			if _, ok = bigDoc_rep_map[docKey]; !ok {
+				// True == failed CR, else other reasons
 				bigDoc_noRep_map[id] = true
 			}
 		}
@@ -660,8 +678,10 @@ func (capi *CapiNozzle) batchSendWithRetry(batch *capiBatch) error {
 	count := batch.count()
 	dataChan := capi.vb_dataChan_map[vbno]
 
+	// List to be sent
 	req_list := make([]*base.WrappedMCRequest, 0)
 
+	// Make sure only the items that are supposed to be sent are to be sent
 	for i := 0; i < int(count); i++ {
 		item, ok := <-dataChan
 		if !ok {
@@ -672,12 +692,12 @@ func (capi *CapiNozzle) batchSendWithRetry(batch *capiBatch) error {
 		atomic.AddInt32(&capi.items_in_dataChan, -1)
 		atomic.AddInt64(&capi.bytes_in_dataChan, int64(0-item.Req.Size()))
 
-		needSend := needSend(item, &batch.dataBatch, capi.Logger())
-		if needSend == Send {
+		needSendStatus := needSend(item, &batch.dataBatch, capi.Logger())
+		if needSendStatus == Send {
 			capi.adjustRequest(item)
 			req_list = append(req_list, item)
 		} else {
-			if needSend == Not_Send_Failed_CR {
+			if needSendStatus == Not_Send_Failed_CR {
 				if capi.Logger().GetLogLevel() >= log.LogLevelDebug {
 					capi.Logger().Debugf("%v did not send doc with key %v since it failed conflict resolution\n", capi.Id(), string(item.Req.Key))
 				}
@@ -689,6 +709,7 @@ func (capi *CapiNozzle) batchSendWithRetry(batch *capiBatch) error {
 				capi.RaiseEvent(common.NewEvent(common.DataFailedCRSource, nil, capi, nil, additionalInfo))
 			}
 
+			// recycle data obj so we don't have to keep allocating/deallocating MCRequests
 			capi.recycleDataObj(item)
 		}
 
@@ -815,7 +836,10 @@ func (capi *CapiNozzle) batchUpdateDocs(vbno uint16, req_list *[]*base.WrappedMC
 		return
 	}
 
-	// construct docs to send
+	/**
+	 * construct docs to send
+	 * doc_list contains slices of documents represented by serialized buffers
+	 */
 	doc_list := make([][]byte, 0)
 	doc_length := 0
 	doc_map := make(map[string]interface{})
@@ -823,6 +847,7 @@ func (capi *CapiNozzle) batchUpdateDocs(vbno uint16, req_list *[]*base.WrappedMC
 	doc_map[MetaKey] = meta_map
 
 	for _, req := range *req_list {
+		// Populate doc_map with the information of request
 		getDocMap(req.Req, doc_map)
 		var doc_bytes []byte
 		doc_bytes, err = json.Marshal(doc_map)

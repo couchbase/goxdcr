@@ -99,6 +99,7 @@ func (doc_meta documentMetadata) String() string {
 	return fmt.Sprintf("[key=%s; revSeq=%v;cas=%v;flags=%v;expiry=%v;deletion=%v:datatype=%v]", doc_meta.key, doc_meta.revSeq, doc_meta.cas, doc_meta.flags, doc_meta.expiry, doc_meta.deletion, doc_meta.dataType)
 }
 
+// We determine the "commit" time as the time we hear back from the target, for statistics purposes
 type GetMetaReceivedEventAdditional struct {
 	Key         string
 	Seqno       uint64
@@ -155,9 +156,14 @@ func (config *baseConfig) initializeConfig(settings map[string]interface{}) {
 
 }
 
-/************************************
-/* struct dataBatch
-*************************************/
+/**
+ * struct dataBatch
+ * NOTE the decoupling between the dataBatch "metadata" and the actual data within a batch to be sent.
+ * The dataBatch is considered the "metadata" of a batch that is to be sent.
+ * Each individual WrappedMCRequest data is actually put into a data channel in each respective out nozzle.
+ * Each individual nozzle is supposed to read from its own data channel, and match the request (using the request's
+ * unique ID) to a specific member's element within the dataBatch (i.e. bigDoc_noRep_map)
+ */
 type dataBatch struct {
 	// the document whose size is larger than optimistic replication threshold
 	// key of the map is the document key
@@ -194,7 +200,7 @@ func newBatch(cap_count uint32, cap_size uint32, logger *log.CommonLogger) *data
 func (b *dataBatch) accumuBatch(req *base.WrappedMCRequest, classifyFunc func(req *mc.MCRequest) bool) (uint32, bool, bool) {
 	var curCount uint32
 	var isFirst bool = false
-	var ret bool = true
+	var isFull bool = true
 
 	if req != nil && req.Req != nil {
 		size := req.Req.Size()
@@ -207,14 +213,15 @@ func (b *dataBatch) accumuBatch(req *base.WrappedMCRequest, classifyFunc func(re
 			close(b.batch_nonempty_ch)
 		}
 		if !classifyFunc(req.Req) {
+			// If it fails the classifyFunc, then we're going to do bigDoc processing on it
 			b.bigDoc_map[req.UniqueKey] = req
 		}
 		curSize := b.incrementSize(uint32(size))
 		if curCount < b.capacity_count && curSize < b.capacity_size*1000 {
-			ret = false
+			isFull = false
 		}
 	}
-	return curCount, isFirst, ret
+	return curCount, isFirst, isFull
 }
 
 func (b *dataBatch) count() uint32 {
@@ -233,6 +240,7 @@ func (b *dataBatch) incrementSize(delta uint32) uint32 {
 	return atomic.AddUint32(&b.curSize, delta)
 }
 
+// Given a request to be sent and the batch of requests metadata that has been pre-processed
 // returns three possible values
 // Send - doc needs to be sent to target
 // Not_Send_Failed_CR - doc does not need to be sent to target since it failed source side conflict resolution

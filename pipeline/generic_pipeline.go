@@ -485,6 +485,10 @@ func (genericPipeline *GenericPipeline) initialize() {
 	}
 }
 
+/**
+ * Given a hiearchical structure of parts and its downstream parts, recursively flatten
+ * all the parts in the heiarchy into a flat partsMap
+ */
 func addPartToMap(part common.Part, partsMap map[string]common.Part) {
 	if part != nil && partsMap != nil {
 		if _, ok := partsMap[part.Id()]; !ok {
@@ -501,6 +505,10 @@ func addPartToMap(part common.Part, partsMap map[string]common.Part) {
 	}
 }
 
+/**
+ * Given a hiearchical structure of connectors, recursively flatten all the connectors
+ * into a flat connectormap
+ */
 func addConnectorToMap(connector common.Connector, connectorsMap map[string]common.Connector) {
 	if _, ok := connectorsMap[connector.Id()]; !ok {
 		// process the connector if it has not been processed yet to avoid infinite loop

@@ -66,6 +66,9 @@ const (
 
 	//the maximum data (in byte) data channel can hold
 	max_datachannelSize = 10 * 1024 * 1024
+
+	// XMEM batch size
+	xmemMaxBatchSize = 50
 )
 
 var xmem_setting_defs base.SettingDefinitions = base.SettingDefinitions{SETTING_BATCHCOUNT: base.NewSettingDef(reflect.TypeOf((*int)(nil)), true),
@@ -380,7 +383,7 @@ func (buf *requestBuffer) enSlot(mcreq *base.WrappedMCRequest) (uint16, int, []b
 	defer req.lock.Unlock()
 
 	if req.req != nil || req.reservation != UninitializedReseverationNumber {
-		panic(fmt.Sprintf("reserveSlot called on non-empty slot. req=%v, reseveration=%v\n", req.req, req.reservation))
+		panic(fmt.Sprintf("reserveSlot called on non-empty slot. req=%v, reservation=%v\n", req.req, req.reservation))
 	}
 
 	req.reservation = reservation_num
@@ -405,6 +408,7 @@ func (buf *requestBuffer) adjustRequest(req *base.WrappedMCRequest, index uint16
 	mc_req.Opaque = getOpaque(index, buf.sequences[int(index)])
 }
 
+// Given the index of the buffer (xmem.buf), and a buffer sequence number, return a unique ID number for this instance of the buffer
 func getOpaque(index, sequence uint16) uint32 {
 	result := uint32(sequence)<<16 + uint32(index)
 	return result
@@ -606,6 +610,10 @@ func (client *xmemClient) getMemClient() *mcc.Client {
 	return client.memClient
 }
 
+/**
+ * Gets the raw io ReadWriteCloser from the memClient, so that xmemClient has complete control,
+ * and also sets whether or not the xmemClient will have read/write timeout as part of returning the connection
+ */
 func (client *xmemClient) getConn(readTimeout bool, writeTimeout bool) (io.ReadWriteCloser, int, error) {
 	client.lock.RLock()
 	defer client.lock.RUnlock()
@@ -895,7 +903,7 @@ func (xmem *XmemNozzle) Start(settings map[string]interface{}) error {
 	go xmem.receiveResponse(xmem.finish_ch, &xmem.childrenWaitGrp)
 
 	xmem.childrenWaitGrp.Add(1)
-	go xmem.check(xmem.finish_ch, &xmem.childrenWaitGrp)
+	go xmem.checkAndRepairBufferMonitor(xmem.finish_ch, &xmem.childrenWaitGrp)
 
 	xmem.childrenWaitGrp.Add(1)
 	go xmem.processData_sendbatch(xmem.finish_ch, &xmem.childrenWaitGrp)
@@ -1068,7 +1076,7 @@ func (xmem *XmemNozzle) processData_sendbatch(finch chan bool, waitGrp *sync.Wai
 				goto done
 			}
 
-			//batch get meta to find what need to be sent
+			//batch get meta to find what needs to be not sent via the noRep map
 			bigDoc_noRep_map, err := xmem.batchGetMeta(batch.bigDoc_map)
 			if err != nil {
 				xmem.Logger().Errorf("%v batchGetMeta failed. err=%v\n", xmem.Id(), err)
@@ -1156,7 +1164,8 @@ func (xmem *XmemNozzle) batchSetMetaWithRetry(batch *dataBatch, numOfRetry int) 
 	count := batch.count()
 	batch_replicated_count := 0
 	reqs_bytes := [][]byte{}
-	index_reservation_list := make([][]uint16, 51)
+	// A list of reservations for each request in the batch
+	index_reservation_list := make([][]uint16, xmemMaxBatchSize+1)
 
 	for i := 0; i < int(count); i++ {
 		//check xmem's state, if it is already in stopping or stopped state, return
@@ -1165,6 +1174,7 @@ func (xmem *XmemNozzle) batchSetMetaWithRetry(batch *dataBatch, numOfRetry int) 
 			return err
 		}
 
+		// Get a MCRequest from the data channel, which is a part of the batch
 		item, err := xmem.readFromDataChan()
 		if err != nil {
 			return err
@@ -1173,8 +1183,8 @@ func (xmem *XmemNozzle) batchSetMetaWithRetry(batch *dataBatch, numOfRetry int) 
 
 		if item != nil {
 			atomic.AddUint32(&xmem.counter_waittime, uint32(time.Since(item.Start_time).Seconds()*1000))
-			needSend := needSend(item, batch, xmem.Logger())
-			if needSend == Send {
+			needSendStatus := needSend(item, batch, xmem.Logger())
+			if needSendStatus == Send {
 
 				err = xmem.preprocessMCRequest(item)
 				if err != nil {
@@ -1193,7 +1203,7 @@ func (xmem *XmemNozzle) batchSetMetaWithRetry(batch *dataBatch, numOfRetry int) 
 				batch_replicated_count++
 
 				//ns_ssl_proxy choke if the batch size is too big
-				if batch_replicated_count > 50 {
+				if batch_replicated_count > xmemMaxBatchSize {
 					//send it
 					err = xmem.sendWithRetry(xmem.client_for_setMeta, numOfRetry, reqs_bytes)
 
@@ -1207,10 +1217,10 @@ func (xmem *XmemNozzle) batchSetMetaWithRetry(batch *dataBatch, numOfRetry int) 
 
 					batch_replicated_count = 0
 					reqs_bytes = [][]byte{}
-					index_reservation_list = make([][]uint16, 51)
+					index_reservation_list = make([][]uint16, xmemMaxBatchSize+1)
 				}
 			} else {
-				if needSend == Not_Send_Failed_CR {
+				if needSendStatus == Not_Send_Failed_CR {
 					//lost on conflict resolution on source side
 					// this still counts as data sent
 					additionalInfo := DataFailedCRSourceEventAdditional{Seqno: item.Seqno,
@@ -1227,7 +1237,7 @@ func (xmem *XmemNozzle) batchSetMetaWithRetry(batch *dataBatch, numOfRetry int) 
 
 	}
 
-	//send the batch in one shot
+	//send the batch in one shot - in case the batch didn't hit the max limit
 	if batch_replicated_count > 0 {
 		err = xmem.sendWithRetry(xmem.client_for_setMeta, numOfRetry, reqs_bytes)
 
@@ -1240,7 +1250,6 @@ func (xmem *XmemNozzle) batchSetMetaWithRetry(batch *dataBatch, numOfRetry int) 
 		}
 	}
 
-	//log the data
 	return err
 }
 
@@ -1381,7 +1390,117 @@ func (xmem *XmemNozzle) sendSetMeta_internal(batch *dataBatch) error {
 	return err
 }
 
-//batch call to memcached GetMeta command for document size larger than the optimistic threshold
+// Launched as a part of the batchGetMeta, which will fire off the requests and this is the handler to decrypt the info coming back
+func (xmem *XmemNozzle) batchGetMetaHandler(count int, finch chan bool, return_ch chan bool,
+	opaque_keySeqno_map map[uint32][]interface{}, respMap map[string]*mc.MCResponse, logger *log.CommonLogger) {
+	defer func() {
+		//handle the panic gracefully.
+		if r := recover(); r != nil {
+			if xmem.validateRunningState() == nil {
+				errMsg := fmt.Sprintf("%v", r)
+				//add to the error list
+				xmem.Logger().Errorf("%v batchGetMeta receiver recovered from err = %v", xmem.Id(), errMsg)
+
+				//repair the connection
+				xmem.repairConn(xmem.client_for_getMeta, errMsg, xmem.client_for_getMeta.repairCount())
+			}
+		}
+		close(return_ch)
+	}()
+
+	for {
+		select {
+		case <-finch:
+			return
+		default:
+			if xmem.validateRunningState() != nil {
+				xmem.Logger().Infof("%v has stopped, exit from getMeta receiver", xmem.Id())
+				return
+			}
+
+			response, err, rev := xmem.readFromClient(xmem.client_for_getMeta, true)
+			if err != nil {
+				if err == fatalError {
+					// if possible, log info about the corresponding request to facilitate debugging
+					if response != nil {
+						keySeqno, ok := opaque_keySeqno_map[response.Opaque]
+						if ok {
+							key, ok1 := keySeqno[0].(string)
+							seqno, ok2 := keySeqno[1].(uint64)
+							vbno, ok3 := keySeqno[2].(uint16)
+							if ok1 && ok2 && ok3 {
+								xmem.Logger().Warnf("%v received fatal error from getMeta client. key=%v, seqno=%v, vb=%v, response=%v\n", xmem.Id(), key, seqno, vbno, response)
+							}
+						}
+					}
+				} else if err == badConnectionError || err == connectionClosedError {
+					xmem.repairConn(xmem.client_for_getMeta, err.Error(), rev)
+				}
+
+				if !isNetTimeoutError(err) {
+					logger.Errorf("%v batchGetMeta received fatal error and had to abort. Expected %v responses, got %v responses. err=%v", xmem.Id(), count, len(respMap), err)
+					logger.Infof("%v Expected=%v, Received=%v\n", xmem.Id(), opaque_keySeqno_map, respMap)
+					return
+				} else {
+					logger.Errorf("%v batchGetMeta timed out. Expected %v responses, got %v responses", xmem.Id(), count, len(respMap))
+					logger.Infof("%v Expected=%v, Received=%v\n", xmem.Id(), opaque_keySeqno_map, respMap)
+				}
+
+				return
+
+			} else {
+				keySeqno, ok := opaque_keySeqno_map[response.Opaque]
+				if ok {
+					//success
+					key, ok1 := keySeqno[0].(string)
+					seqno, ok2 := keySeqno[1].(uint64)
+					vbno, ok2 := keySeqno[2].(uint16)
+					start_time, ok3 := keySeqno[3].(time.Time)
+					if ok1 && ok2 && ok3 {
+						respMap[key] = response
+
+						additionalInfo := GetMetaReceivedEventAdditional{Key: key,
+							Seqno:       seqno,
+							Commit_time: time.Since(start_time),
+						}
+						xmem.RaiseEvent(common.NewEvent(common.GetMetaReceived, nil, xmem, nil, additionalInfo))
+
+						if response.Status != mc.SUCCESS && !isIgnorableMCError(response.Status) && !isTemporaryMCError(response.Status) && response.Status != mc.KEY_ENOENT {
+							if isTopologyChangeMCError(response.Status) {
+								vb_err := fmt.Errorf("Received error %v on vb %v\n", base.ErrorNotMyVbucket, vbno)
+								xmem.handleVBError(vbno, vb_err)
+							} else {
+								// this response requires connection reset
+
+								// log the corresponding request to facilitate debugging
+								xmem.Logger().Warnf("%v received error from getMeta client. key=%v, seqno=%v, response=%v\n", xmem.Id(), key, seqno, response)
+								err = fmt.Errorf("error response with status %v from memcached", response.Status)
+								xmem.repairConn(xmem.client_for_getMeta, err.Error(), rev)
+								// no need to wait further since connection has been reset
+								return
+							}
+						}
+					} else {
+						panic("KeySeqno list is not formated as expected [string, uint64, time]")
+					}
+				}
+
+			}
+
+			//*count == 0 means write is still in session, can't return
+			if len(respMap) >= count {
+				logger.Debugf("%v Expected %v response, got all", xmem.Id(), count)
+				return
+			}
+		}
+	}
+}
+
+/**
+ * batch call to memcached GetMeta command for document size larger than the optimistic threshold
+ * Returns a map of all the keys that are fed in bigDoc_map, with a boolean value
+ * The boolean value == true meaning that the document referred by key should *not* be replicated
+ */
 func (xmem *XmemNozzle) batchGetMeta(bigDoc_map map[string]*base.WrappedMCRequest) (map[string]bool, error) {
 	bigDoc_noRep_map := make(map[string]bool)
 
@@ -1396,11 +1515,16 @@ func (xmem *XmemNozzle) batchGetMeta(bigDoc_map map[string]*base.WrappedMCReques
 	receiver_fin_ch := make(chan bool, 1)
 	receiver_return_ch := make(chan bool, 1)
 
+	// A list (slice) of req_bytes
 	reqs_bytes_list := [][][]byte{}
 
 	var sequence uint16 = uint16(time.Now().UnixNano())
+	// Slice of requests that have been converted to serialized bytes
 	reqs_bytes := [][]byte{}
-	counter := 0
+	// Counts the number of requests that will fit into each req_bytes slice
+	numOfReqsInReqBytesBatch := 0
+
+	// establish a opaque based on the current time - and since getting meta doesn't utilize buffer buckets, feed it 0
 	opaque := getOpaque(0, sequence)
 	sent_key_map := make(map[string]bool, len(bigDoc_map))
 
@@ -1413,129 +1537,30 @@ func (xmem *XmemNozzle) batchGetMeta(bigDoc_map map[string]*base.WrappedMCReques
 
 		if _, ok := sent_key_map[docKey]; !ok {
 			req := xmem.composeRequestForGetMeta(docKey, originalReq.Req.VBucket, opaque)
+			// .Bytes() returns data ready to be fed over the wire
 			reqs_bytes = append(reqs_bytes, req.Bytes())
+			// a Map of array of items and map key is the opaque currently based on time (passed to the target and back)
 			opaque_keySeqno_map[opaque] = []interface{}{docKey, originalReq.Seqno, originalReq.Req.VBucket, time.Now()}
 			opaque++
-			counter++
+			numOfReqsInReqBytesBatch++
 			sent_key_map[docKey] = true
 
-			if counter > 50 {
+			if numOfReqsInReqBytesBatch > xmemMaxBatchSize {
+				// Consider this a batch of requests and put it in as an element in reqs_bytes_list
 				reqs_bytes_list = append(reqs_bytes_list, reqs_bytes)
-				counter = 0
+				numOfReqsInReqBytesBatch = 0
 				reqs_bytes = [][]byte{}
 			}
 		}
 	}
 
-	if counter > 0 {
+	// In case there are tail ends of the batch that did not fill xmemMaxBatchSize, append them to the end
+	if numOfReqsInReqBytesBatch > 0 {
 		reqs_bytes_list = append(reqs_bytes_list, reqs_bytes)
 	}
 
-	//launch the receiver
-	go func(count int, finch chan bool, return_ch chan bool, opaque_keySeqno_map map[uint32][]interface{}, respMap map[string]*mc.MCResponse, logger *log.CommonLogger) {
-		defer func() {
-			//handle the panic gracefully.
-			if r := recover(); r != nil {
-				if xmem.validateRunningState() == nil {
-					errMsg := fmt.Sprintf("%v", r)
-					//add to the error list
-					xmem.Logger().Errorf("%v batchGetMeta receiver recovered from err = %v", xmem.Id(), errMsg)
-
-					//repair the connection
-					xmem.repairConn(xmem.client_for_getMeta, errMsg, xmem.client_for_getMeta.repairCount())
-				}
-			}
-			close(return_ch)
-		}()
-
-		for {
-			select {
-			case <-finch:
-				return
-			default:
-				if xmem.validateRunningState() != nil {
-					xmem.Logger().Infof("%v has stopped, exit from getMeta receiver", xmem.Id())
-					return
-				}
-
-				response, err, rev := xmem.readFromClient(xmem.client_for_getMeta, true)
-				if err != nil {
-					if err == fatalError {
-						// if possible, log info about the corresponding request to facilitate debugging
-						if response != nil {
-							keySeqno, ok := opaque_keySeqno_map[response.Opaque]
-							if ok {
-								key, ok1 := keySeqno[0].(string)
-								seqno, ok2 := keySeqno[1].(uint64)
-								vbno, ok3 := keySeqno[2].(uint16)
-								if ok1 && ok2 && ok3 {
-									xmem.Logger().Warnf("%v received fatal error from getMeta client. key=%v, seqno=%v, vb=%v, response=%v\n", xmem.Id(), key, seqno, vbno, response)
-								}
-							}
-						}
-					} else if err == badConnectionError || err == connectionClosedError {
-						xmem.repairConn(xmem.client_for_getMeta, err.Error(), rev)
-					}
-
-					if !isNetTimeoutError(err) {
-						logger.Errorf("%v batchGetMeta received fatal error and had to abort. Expected %v responses, got %v responses. err=%v", xmem.Id(), count, len(respMap), err)
-						logger.Infof("%v Expected=%v, Received=%v\n", xmem.Id(), opaque_keySeqno_map, respMap)
-						return
-					} else {
-						logger.Errorf("%v batchGetMeta timed out. Expected %v responses, got %v responses", xmem.Id(), count, len(respMap))
-						logger.Infof("%v Expected=%v, Received=%v\n", xmem.Id(), opaque_keySeqno_map, respMap)
-					}
-
-					return
-
-				} else {
-					keySeqno, ok := opaque_keySeqno_map[response.Opaque]
-					if ok {
-						//success
-						key, ok1 := keySeqno[0].(string)
-						seqno, ok2 := keySeqno[1].(uint64)
-						vbno, ok2 := keySeqno[2].(uint16)
-						start_time, ok3 := keySeqno[3].(time.Time)
-						if ok1 && ok2 && ok3 {
-							respMap[key] = response
-
-							additionalInfo := GetMetaReceivedEventAdditional{Key: key,
-								Seqno:       seqno,
-								Commit_time: time.Since(start_time),
-							}
-							xmem.RaiseEvent(common.NewEvent(common.GetMetaReceived, nil, xmem, nil, additionalInfo))
-
-							if response.Status != mc.SUCCESS && !isIgnorableMCError(response.Status) && !isTemporaryMCError(response.Status) && response.Status != mc.KEY_ENOENT {
-								if isTopologyChangeMCError(response.Status) {
-									vb_err := fmt.Errorf("Received error %v on vb %v\n", base.ErrorNotMyVbucket, vbno)
-									xmem.handleVBError(vbno, vb_err)
-								} else {
-									// this response requires connection reset
-
-									// log the corresponding request to facilitate debugging
-									xmem.Logger().Warnf("%v received error from getMeta client. key=%v, seqno=%v, response=%v\n", xmem.Id(), key, seqno, response)
-									err = fmt.Errorf("error response with status %v from memcached", response.Status)
-									xmem.repairConn(xmem.client_for_getMeta, err.Error(), rev)
-									// no need to wait further since connection has been reset
-									return
-								}
-							}
-						} else {
-							panic("KeySeqno list is not formated as expected [string, uint64, time]")
-						}
-					}
-
-				}
-
-				//*count == 0 means write is still in session, can't return
-				if len(respMap) >= count {
-					logger.Debugf("%v Expected %v response, got all", xmem.Id(), count)
-					return
-				}
-			}
-		}
-
-	}(len(opaque_keySeqno_map), receiver_fin_ch, receiver_return_ch, opaque_keySeqno_map, respMap, xmem.Logger())
+	// launch the receiver - passing channel and maps in are fine since they are "reference types"
+	go xmem.batchGetMetaHandler(len(opaque_keySeqno_map), receiver_fin_ch, receiver_return_ch, opaque_keySeqno_map, respMap, xmem.Logger())
 
 	//send the requests
 	for _, packet := range reqs_bytes_list {
@@ -1550,6 +1575,7 @@ func (xmem *XmemNozzle) batchGetMeta(bigDoc_map map[string]*base.WrappedMCReques
 	//wait for receiver to finish
 	<-receiver_return_ch
 
+	// Parse the result once the handler has finished populating the respMap
 	for _, wrappedReq := range bigDoc_map {
 		key := string(wrappedReq.Req.Key)
 		resp, ok := respMap[key]
@@ -1754,6 +1780,7 @@ func (xmem *XmemNozzle) initialize(settings map[string]interface{}) error {
 	xmem.dataChan = make(chan *base.WrappedMCRequest, xmem.config.maxCount*10)
 	xmem.bytes_in_dataChan = 0
 	xmem.dataChan_control = make(chan bool, 1)
+	// put a true here so the first writeToDataChan() can go through
 	xmem.dataChan_control <- true
 
 	xmem.batches_ready_queue = make(chan *dataBatch, 100)
@@ -2024,6 +2051,11 @@ func (xmem *XmemNozzle) getOptiRepThreshold() uint32 {
 	return atomic.LoadUint32(&(xmem.config.optiRepThreshold))
 }
 
+/**
+ * The self monitor's job is to observe the statistics going on the xmem nozzle.
+ * Should there be any outstanding I/Os queued up after a certain amount of cycles,
+ * the monitor will throw an error back to the pipeline to initiate a pipeline restart.
+ */
 func (xmem *XmemNozzle) selfMonitor(finch chan bool, waitGrp *sync.WaitGroup) {
 	defer waitGrp.Done()
 	ticker := time.NewTicker(xmem.config.selfMonitorInterval)
@@ -2036,6 +2068,7 @@ func (xmem *XmemNozzle) selfMonitor(finch chan bool, waitGrp *sync.WaitGroup) {
 	var repairCount_setMeta = 0
 	var repairCount_getMeta = 0
 	var count uint64
+	// freeze_counter is used to count the number of check iterations that data has been stuck
 	var freeze_counter uint32 = 0
 	for {
 		select {
@@ -2061,10 +2094,13 @@ func (xmem *XmemNozzle) selfMonitor(finch chan bool, waitGrp *sync.WaitGroup) {
 				(len(xmem.dataChan) > 0 || buffer_count != 0) &&
 				repairCount_setMeta == xmem.client_for_setMeta.repairCount() &&
 				repairCount_getMeta == xmem.client_for_getMeta.repairCount() {
+				// Increment freeze_counter if there is data waiting and the count hasn't increased since last time we checked
 				freeze_counter++
 			} else {
+				// Any type of data movement resets the data freeze counter
 				freeze_counter = 0
 			}
+
 			sent_count = xmem_count_sent
 			resp_waitingConfirm_count = int(buffer_count)
 			repairCount_setMeta = xmem.client_for_setMeta.repairCount()
@@ -2094,7 +2130,13 @@ done:
 
 }
 
-func (xmem *XmemNozzle) check(finch chan bool, waitGrp *sync.WaitGroup) {
+/**
+ * Each check iteration, go through all the buffer slots to resend those that have not heard
+ * back after timeout.
+ * If after a certain number of resend, we still don't hear back from the target, then proceed
+ * to repair the connection.
+ */
+func (xmem *XmemNozzle) checkAndRepairBufferMonitor(finch chan bool, waitGrp *sync.WaitGroup) {
 	defer waitGrp.Done()
 	ticker := time.NewTicker(xmem.getRespTimeout())
 	defer ticker.Stop()
@@ -2282,13 +2324,17 @@ func (xmem *XmemNozzle) composeUserAgentForClient(setMeta bool) {
 	}
 }
 
+/**
+ * Gets the raw ioConnection (io.go ReadWriteCloser) and the number of repairs done on this connection (revisions)
+ * Also sets the read/write timeout for the xmemClient (client)
+ */
 func (xmem *XmemNozzle) getConn(client *xmemClient, readTimeout bool, writeTimeout bool) (io.ReadWriteCloser, int, error) {
 	err := xmem.validateRunningState()
 	if err != nil {
 		return nil, client.repairCount(), err
 	}
-	ret, rev, err := client.getConn(readTimeout, writeTimeout)
-	return ret, rev, err
+	ioConn, rev, err := client.getConn(readTimeout, writeTimeout)
+	return ioConn, rev, err
 }
 
 func (xmem *XmemNozzle) validateRunningState() error {
@@ -2318,6 +2364,7 @@ func (xmem *XmemNozzle) writeToClient(client *xmemClient, bytesList [][]byte, re
 			break
 		}
 
+		// Bandwidth throttler
 		curBytesList := stack.Pop().([][]byte)
 		numberOfBytes, minNumberOfBytes, minIndex := computeNumberOfBytes(curBytesList)
 		bytesCanSend, bytesAllowed := xmem.bandwidthThrottler.Throttle(numberOfBytes, minNumberOfBytes)
@@ -2453,7 +2500,7 @@ func (xmem *XmemNozzle) writeToClientWithoutThrottling(client *xmemClient, bytes
 
 func (xmem *XmemNozzle) readFromClient(client *xmemClient, resetReadTimeout bool) (*mc.MCResponse, error, int) {
 
-	//set the read timeout for the underlying connection
+	// Gets a connection and also set whether or not to reset the readTimeOut
 	_, rev, err := xmem.getConn(client, resetReadTimeout, false)
 	if err != nil {
 		client.logger.Errorf("%v Can't read from client %v, failed to get connection, err=%v", xmem.Id(), client.name, err)
@@ -2596,6 +2643,9 @@ func (xmem *XmemNozzle) writeToDataChan(item *base.WrappedMCRequest) {
 	}
 }
 
+/**
+ * Gets a MC request from the data channel, and tickles data channel controller
+ */
 func (xmem *XmemNozzle) readFromDataChan() (*base.WrappedMCRequest, error) {
 	item, ok := <-xmem.dataChan
 

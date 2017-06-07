@@ -203,7 +203,7 @@ func (xdcrf *XDCRFactory) NewPipeline(topic string, progress_recorder common.Pip
 
 	/**
 	 * Construct the Source nozzles
-	 * sourceNozzles - a map of DCPNozzleID -> DCPNozzle
+	 * sourceNozzles - a map of DCPNozzleID -> *DCPNozzle
 	 * kv_vb_map - Map of SourceKVNode -> list of vbucket#'s that it's responsible for
 	 */
 	sourceNozzles, kv_vb_map, err := xdcrf.constructSourceNozzles(spec, topic, isCapiReplication, logger_ctx)
@@ -277,7 +277,7 @@ func (xdcrf *XDCRFactory) NewPipeline(topic string, progress_recorder common.Pip
 
 		return nil, err
 	} else {
-		//register services
+		//register services to the pipeline context, so when pipeline context starts as part of the pipeline starting, these services will start as well
 		pipeline.SetRuntimeContext(pipelineContext)
 		err = xdcrf.registerServices(pipeline, logger_ctx, kv_vb_map, targetUserName, targetPassword, spec.TargetBucketName, target_kv_vb_map, targetClusterRef, targetClusterVersion, isCapiReplication)
 		if err != nil {
@@ -328,6 +328,7 @@ func (xdcrf *XDCRFactory) registerAsyncListenersOnSources(pipeline common.Pipeli
 			// Get the source DCP nozzle
 			dcp_part := sources[index]
 
+			// Stats manager will handle the data received and processed events
 			dcp_part.RegisterComponentEventListener(common.DataReceived, data_received_event_listener)
 			dcp_part.RegisterComponentEventListener(common.DataProcessed, data_processed_event_listener)
 
@@ -373,7 +374,7 @@ func (xdcrf *XDCRFactory) registerAsyncListenersOnTargets(pipeline common.Pipeli
 /**
  * Construct source nozzles for the requested/current kv node
  * Returns:
- * 1. a map of DCPNozzleID -> DCPNozzle
+ * 1. a map of DCPNozzleID -> DCPNozzle (references/ptr, so only a single copy from here on out)
  * 2. Map of SourceKVNode -> list of vbucket#'s that it's responsible for
  * Currently since XDCR is run on a per node, it should only have 1 source KV node in the map
  */

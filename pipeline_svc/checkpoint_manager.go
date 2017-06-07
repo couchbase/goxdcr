@@ -585,6 +585,7 @@ func (ckmgr *CheckpointManager) SetVBTimestamps(topic string) error {
 
 	listOfVbs := ckmgr.getMyVBs()
 
+	// Get persisted checkpoints from metakv - each valid vbucket has a *metadata.CheckpointsDoc
 	ckmgr.logger.Infof("Getting checkpoint for %v\n", topic)
 	ckptDocs, err := ckmgr.checkpoints_svc.CheckpointsDocs(topic)
 	if err != nil {
@@ -597,6 +598,7 @@ func (ckmgr *CheckpointManager) SetVBTimestamps(topic string) error {
 	target_support_xattr_now := simple_utils.IsClusterCompatible(ckmgr.target_cluster_version, base.VersionForRBACAndXattrSupport)
 	specInternalId := ckmgr.pipeline.Specification().InternalId
 
+	// Figure out if certain checkpoints need to be removed to force a complete resync due to external factors
 	for vbno, ckptDoc := range ckptDocs {
 		if !simple_utils.IsVbInList(vbno, listOfVbs) {
 			// if the vbno is no longer managed by the current checkpoint manager/pipeline,
@@ -661,7 +663,7 @@ func (ckmgr *CheckpointManager) SetVBTimestamps(topic string) error {
 		getter_id++
 	}
 
-	//wait for all the getter done, then gather result
+	//wait for all the getter to be done, then gather result
 	getter_wait_grp.Wait()
 	close(err_ch)
 	if len(err_ch) > 0 {
