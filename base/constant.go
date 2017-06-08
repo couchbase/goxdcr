@@ -67,6 +67,7 @@ var BucketCapabilitiesKey = "bucketCapabilities"
 var BucketTypeKey = "bucketType"
 var BucketsKey = "buckets"
 var EvictionPolicyKey = "evictionPolicy"
+var BucketNameKey = "name"
 
 // URL related constants
 var UrlDelimiter = "/"

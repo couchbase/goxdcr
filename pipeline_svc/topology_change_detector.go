@@ -465,10 +465,17 @@ func (top_detect_svc *TopologyChangeDetectorSvc) getTargetBucketInfo() (int, map
 				targetClusterCompatibility, err = utils.GetClusterCompatibilityFromBucketInfo(bucketName, targetBucketInfo, top_detect_svc.logger)
 			}
 		}
+	} else {
+		if err != utils.NonExistentBucketError {
+			errMsg := fmt.Sprintf("Skipping target bucket check for spec %v since failed to get bucket infor for %v. err=%v", top_detect_svc.pipeline.Topic(), bucketName, err)
+			top_detect_svc.logger.Warn(errMsg)
+			return 0, nil, errors.New(errMsg)
+		}
 	}
 
-	if err == utils.NonExistentBucketError ||
-		(err == nil && spec.TargetBucketUUID != "" && spec.TargetBucketUUID != targetBucketUUID) {
+	targetClusterUUIDChecked := false
+
+	if err == utils.NonExistentBucketError {
 		/* When we get NonExistentBucketError, there are three possibilities:
 		1. the target node is not accessible, either because it has been removed from target cluster,
 		   or because of temporary network issues. in this case we skip target check for the current round
@@ -477,51 +484,112 @@ func (top_detect_svc *TopologyChangeDetectorSvc) getTargetBucketInfo() (int, map
 		2. the target node has been moved to a different cluster, which does not have bucket with the same name.
 		   in this case we skip target check for the current round
 		3. the target bucket has been deleted. in this case we need to delete repl spec
-		We need to make an additional call to retrieve target cluster uuid to differentiate between these three cases
+
+		In order to differetiate between these cases, we first make a call to retrieve target cluster uuid
 		A. if the call returns error, it is case #1
-		B. if the call returns the same cluster uuid as that in repl spec, it is case #2
-		C. if the call returns a different cluster uuid as that in repl spec, it is case #3
+		B. if the call returns a different cluster uuid as that in repl spec, it is case #2
+		C. if the call returns the same cluster uuid as that in repl spec, we need to make another call to retrieve
+			bucket list from target
+			C.1 if the call returns error, skip current target bucket check
+			C.2 if the call returns a bucket list that does not contain target bucket, it is case #3. the repl spec needs to be deleted
+			C.3 if the call returns a bucket list that contains target bucket, continue with target bucket validation
+		*/
+		curTargetClusterUUID, err1 := utils.GetClusterUUID(targetClusterRef, top_detect_svc.logger)
+		if err1 != nil {
+			// case 1, target node not accessible, skip target check
+			logMessage := fmt.Sprintf("%v skipping target bucket check since %v is not accessible. err=%v\n", spec.Id, connStr, err1)
+			top_detect_svc.logger.Warn(logMessage)
+			return 0, nil, errors.New(logMessage)
+		} else {
+			if curTargetClusterUUID != spec.TargetClusterUUID {
+				// case 2, target node has been moved to a different cluster. skip target check
+				logMessage := fmt.Sprintf("%v skipping target bucket check since %v has been moved to a different cluster %v.\n", spec.Id, connStr, curTargetClusterUUID)
+				top_detect_svc.logger.Warn(logMessage)
+				return 0, nil, errors.New(logMessage)
+			}
 
-		Similarly, when target bucket uuid does not match, there are two possibilities:
-		4. target bucket has been deleted and re-created. in this case we need to delete repl spec
-		5. target node has been moved to a different cluster, which happens to have bucket with the same name
-		We also need to make an additional call to retrieve target cluster uuid to differentiate between these two cases
-		A. if the call returns the same cluster uuid as that in repl spec, it is case #4
-		B. if the call returns a different cluster uuid as that in repl spec, it is case #5  */
+			// set the flag to avoid unnecessary re-work in target bucket uuid validation
+			targetClusterUUIDChecked = true
 
+			//	additional check is needed
+			buckets, err := utils.GetBuckets(connStr, username, password, certificate, sanInCertificate, top_detect_svc.logger)
+			if err != nil {
+				// case 1, target node not accessible, skip target check
+				errMsg := fmt.Sprintf("Skipping target bucket check for spec %v since target node %v is not accessible. err=%v", spec.Id, connStr, err)
+				top_detect_svc.logger.Warn(errMsg)
+				return 0, nil, errors.New(errMsg)
+			}
+			foundTargetBucket := false
+			for bucketName, bucketUUID := range buckets {
+				if bucketName == spec.TargetBucketName {
+					foundTargetBucket = true
+					targetBucketUUID = bucketUUID
+					break
+				}
+			}
+			if !foundTargetBucket {
+				// case 3, delete repl spec
+				reason := fmt.Sprintf("the target bucket \"%v\" has been deleted", spec.TargetBucketName)
+				err := top_detect_svc.DelReplicationSpec(spec, reason)
+				return 0, nil, err
+			}
+			// if target bucket is found, we have already populated targetBucketUUID accordingly
+			// continue with target bucket validation
+		}
+	}
+
+	// validate target bucket uuid
+	if spec.TargetBucketUUID != "" && targetBucketUUID != "" && spec.TargetBucketUUID != targetBucketUUID {
+
+		/*When target bucket uuid does not match, there are two possibilities:
+		4. target node has been moved to a different cluster, which happens to have bucket with the same name
+		5. target bucket has been deleted and re-created. in this case we need to delete repl spec
+		We need to make an additional call to retrieve target cluster uuid, if it has not been done before, to differentiate between these two cases
+		D. if the call returns a different cluster uuid as that in repl spec, it is case #4
+		E. if the call returns the same cluster uuid as that in repl spec, it is case #5
+		F. if the call returns error, we have to play safe and skip the current target bucket check */
+
+		if targetClusterUUIDChecked {
+			// if we have already verified that target cluster uuid has not changed, it has to be case 5
+			reason := fmt.Sprintf("the target bucket \"%v\" has been deleted and recreated", spec.TargetBucketName)
+			err := top_detect_svc.DelReplicationSpec(spec, reason)
+			return 0, nil, err
+		}
+
+		//
 		curTargetClusterUUID, err1 := utils.GetClusterUUID(targetClusterRef, top_detect_svc.logger)
 		if err1 != nil {
 			// target node not accessible, skip target check
 			logMessage := fmt.Sprintf("%v skipping target bucket check since %v is not accessible. err=%v\n", spec.Id, connStr, err1)
 			top_detect_svc.logger.Warn(logMessage)
 			return 0, nil, errors.New(logMessage)
-		} else {
-			if curTargetClusterUUID == spec.TargetClusterUUID {
-				// target bucket has been deleted, or deleted and recreated
-				var reason string
-				if err == utils.NonExistentBucketError {
-					reason = fmt.Sprintf("the target bucket \"%v\" has been deleted", spec.TargetBucketName)
-				} else {
-					reason = fmt.Sprintf("the target bucket \"%v\" has been deleted and recreated", spec.TargetBucketName)
-				}
-				logMessage := fmt.Sprintf("Deleting replication spec %v since %v.\n", spec.Id, spec.TargetBucketName, reason)
-				top_detect_svc.logger.Info(logMessage)
-				// provide the reason for replication spec deletion, which will be shown on UI
-				_, err1 := top_detect_svc.repl_spec_svc.DelReplicationSpecWithReason(spec.Id, reason)
-				if err1 != nil {
-					top_detect_svc.logger.Errorf("Error deleting replication spec %v. err=%v\n", spec.Id, err1)
-				}
-				return 0, nil, errors.New(logMessage)
-			} else {
-				// target node has been moved to a different cluster. skip target check
-				logMessage := fmt.Sprintf("%v skipping target bucket check since %v has been moved to a different cluster %v.\n", spec.Id, connStr, curTargetClusterUUID)
-				top_detect_svc.logger.Warn(logMessage)
-				return 0, nil, errors.New(logMessage)
-			}
 		}
+		if curTargetClusterUUID != spec.TargetClusterUUID {
+			// case 4, target node has been moved to a different cluster. skip target check
+			logMessage := fmt.Sprintf("%v skipping target bucket check since %v has been moved to a different cluster %v.\n", spec.Id, connStr, curTargetClusterUUID)
+			top_detect_svc.logger.Warn(logMessage)
+			return 0, nil, errors.New(logMessage)
+		}
+
+		// if we get here, it is case 5, delete repl spec
+		reason := fmt.Sprintf("the target bucket \"%v\" has been deleted and recreated", spec.TargetBucketName)
+		err := top_detect_svc.DelReplicationSpec(spec, reason)
+		return 0, nil, err
 	}
 
-	return targetClusterCompatibility, targetServerVBMap, err
+	// if we get here, things are ok, return nil error code
+	return targetClusterCompatibility, targetServerVBMap, nil
+}
+
+func (top_detect_svc *TopologyChangeDetectorSvc) DelReplicationSpec(spec *metadata.ReplicationSpecification, reason string) error {
+	logMessage := fmt.Sprintf("Deleting replication spec %v since %v.\n", spec.Id, reason)
+	top_detect_svc.logger.Info(logMessage)
+	// provide the reason for replication spec deletion, which will be shown on UI
+	_, err1 := top_detect_svc.repl_spec_svc.DelReplicationSpecWithReason(spec.Id, reason)
+	if err1 != nil {
+		top_detect_svc.logger.Errorf("Error deleting replication spec %v. err=%v\n", spec.Id, err1)
+	}
+	return fmt.Errorf(logMessage)
 }
 
 func (top_detect_svc *TopologyChangeDetectorSvc) UpdateSettings(settings map[string]interface{}) error {

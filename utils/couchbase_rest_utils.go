@@ -246,6 +246,61 @@ func BucketPassword(hostAddr, bucketName, username, password string, certificate
 	return GetBucketPasswordFromBucketInfo(bucketName, bucketInfo, logger)
 }
 
+func GetLocalBuckets(hostAddr string, logger *log.CommonLogger) (map[string]string, error) {
+	return GetBuckets(hostAddr, "", "", nil, false, logger)
+}
+
+// return a map of buckets
+// key = bucketName, value = bucketUUID
+func GetBuckets(hostAddr, username, password string, certificate []byte, sanInCertificate bool, logger *log.CommonLogger) (map[string]string, error) {
+	bucketListInfo := make([]interface{}, 0)
+	err, statusCode := QueryRestApiWithAuth(hostAddr, base.DefaultPoolBucketsPath, false, username, password, certificate, sanInCertificate, base.MethodGet, "", nil, 0, &bucketListInfo, nil, false, logger)
+	if err != nil || statusCode != http.StatusOK {
+		return nil, fmt.Errorf("Failed on calling host=%v, path=%v, err=%v, statusCode=%v", hostAddr, base.DefaultPoolBucketsPath, err, statusCode)
+	}
+
+	return GetBucketsFromInfoMap(bucketListInfo, logger)
+}
+
+func GetBucketsFromInfoMap(bucketListInfo []interface{}, logger *log.CommonLogger) (map[string]string, error) {
+	buckets := make(map[string]string)
+	for _, bucketInfo := range bucketListInfo {
+		bucketInfoMap, ok := bucketInfo.(map[string]interface{})
+		if !ok {
+			errMsg := fmt.Sprintf("bucket info is not of map type.  bucket info=%v", bucketInfo)
+			logger.Error(errMsg)
+			return nil, errors.New(errMsg)
+		}
+		bucketNameInfo, ok := bucketInfoMap[base.BucketNameKey]
+		if !ok {
+			errMsg := fmt.Sprintf("bucket info does not contain bucket name.  bucket info=%v", bucketInfoMap)
+			logger.Error(errMsg)
+			return nil, errors.New(errMsg)
+		}
+		bucketName, ok := bucketNameInfo.(string)
+		if !ok {
+			errMsg := fmt.Sprintf("bucket name is not of string type.  bucket name=%v", bucketNameInfo)
+			logger.Error(errMsg)
+			return nil, errors.New(errMsg)
+		}
+		bucketUUIDInfo, ok := bucketInfoMap[base.UUIDKey]
+		if !ok {
+			errMsg := fmt.Sprintf("bucket info does not contain bucket uuid.  bucket info=%v", bucketInfoMap)
+			logger.Error(errMsg)
+			return nil, errors.New(errMsg)
+		}
+		bucketUUID, ok := bucketUUIDInfo.(string)
+		if !ok {
+			errMsg := fmt.Sprintf("bucket uuid is not of string type.  bucket uuid=%v", bucketUUIDInfo)
+			logger.Error(errMsg)
+			return nil, errors.New(errMsg)
+		}
+		buckets[bucketName] = bucketUUID
+	}
+
+	return buckets, nil
+}
+
 // get a number of fields in bucket for validation purpose
 // 1. bucket type
 // 2. bucket uuid
