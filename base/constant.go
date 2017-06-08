@@ -66,6 +66,7 @@ var UUIDKey = "uuid"
 var BucketCapabilitiesKey = "bucketCapabilities"
 var BucketTypeKey = "bucketType"
 var BucketsKey = "buckets"
+var BucketNameKey = "name"
 
 // URL related constants
 var UrlDelimiter = "/"

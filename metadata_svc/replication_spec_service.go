@@ -528,30 +528,52 @@ func (service *ReplicationSpecService) validateExistingReplicationSpec(spec *met
 	}
 	sourceBucketUuid, err_source := utils.LocalBucketUUID(local_connStr, spec.SourceBucketName, service.logger)
 
-	if err_source == utils.NonExistentBucketError {
-		/* When we get NonExistentBucketError, there are two possibilities:
-		1. the source bucket has been deleted. in this case we need to delete repl spec
-		2. the source node is not accessible. in this case we skip source bucket check for the current round
-		   hopefully things will get better in the next source bucket check
+	if err_source != nil {
+		if err_source == utils.NonExistentBucketError {
+			/* When we get NonExistentBucketError, there are two possibilities:
+			1. the source bucket has been deleted.
+			2. the source node is not accessible.
 
-		We need to make an additional call to retrieve source cluster uuid to differentiate between these two cases
-		A. if the call returns successfully, it is case #1
-		B. if the call returns an error, it is case #2 */
-		_, err := utils.GetClusterUUID(service.xdcr_comp_topology_svc, service.logger)
-		if err == nil {
-			errMsg := fmt.Sprintf("spec %v refers to non-existent source bucket \"%v\"", spec.Id, spec.SourceBucketName)
-			service.logger.Error(errMsg)
-			return InvalidReplicationSpecError, errors.New(errMsg)
+			We need to make an additional call to retrieve a list of buckets from source cluster
+			A. if the call returns successfully and shows that the source bucket is no longer in bucket list, it is case #1
+			It is safe to delete replication spec in this case.
+			B. if the call returns successfully and shows that the source bucket is still in bucket list, we can use the new info
+			retrieved to continue source bucket validation
+			C. if the call does not return sucessfully, we have to play safe and skip the current round of source bucket check */
+			buckets, err := utils.GetLocalBuckets(local_connStr, service.logger)
+			if err == nil {
+				foundSourceBucket := false
+				for bucketName, bucketUuid := range buckets {
+					if bucketName == spec.SourceBucketName {
+						foundSourceBucket = true
+						sourceBucketUuid = bucketUuid
+						break
+					}
+				}
+				if !foundSourceBucket {
+					// case 1, delete repl spec
+					errMsg := fmt.Sprintf("spec %v refers to non-existent source bucket \"%v\"", spec.Id, spec.SourceBucketName)
+					service.logger.Info(errMsg)
+					return InvalidReplicationSpecError, errors.New(errMsg)
+				}
+				// if source bucket is found, we have already populated sourceBucketUuid accordingly
+				// continue with source bucket validation
+			} else {
+				// case 2, source node inaccessible. skip source bucket check
+				errMsg := fmt.Sprintf("Skipping source bucket check for spec %v since source node %v is not accessible. err=%v", spec.Id, local_connStr, err)
+				service.logger.Info(errMsg)
+				err = errors.New(errMsg)
+				return err, err
+			}
 		} else {
-			errMsg := fmt.Sprintf("Skipping source bucket check for spec %v since source node %v is not accessible", spec.Id, local_connStr)
+			errMsg := fmt.Sprintf("Skipping source bucket check for spec %v since failed to get bucket infor for %v. err=%v", spec.Id, spec.SourceBucketName, err_source)
 			service.logger.Info(errMsg)
-			err = errors.New(errMsg)
+			err := errors.New(errMsg)
 			return err, err
 		}
 	}
 
-	if spec.SourceBucketUUID != "" && spec.SourceBucketUUID != sourceBucketUuid {
-		//spec is referring to a deleted bucket
+	if spec.SourceBucketUUID != "" && sourceBucketUuid != "" && spec.SourceBucketUUID != sourceBucketUuid {
 		errMsg := fmt.Sprintf("spec %v refers to bucket %v which was deleted and recreated", spec.Id, spec.SourceBucketName)
 		service.logger.Error(errMsg)
 		return InvalidReplicationSpecError, errors.New(errMsg)
