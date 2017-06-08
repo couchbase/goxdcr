@@ -69,6 +69,20 @@ func (_m *PipelineUpdaterIface) getLastResult() bool {
 	return r0
 }
 
+// isScheduledTimerNil provides a mock function with given fields:
+func (_m *PipelineUpdaterIface) isScheduledTimerNil() bool {
+	ret := _m.Called()
+
+	var r0 bool
+	if rf, ok := ret.Get(0).(func() bool); ok {
+		r0 = rf()
+	} else {
+		r0 = ret.Get(0).(bool)
+	}
+
+	return r0
+}
+
 // raiseXattrWarningIfNeeded provides a mock function with given fields: p
 func (_m *PipelineUpdaterIface) raiseXattrWarningIfNeeded(p common.Pipeline) {
 	_m.Called(p)

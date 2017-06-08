@@ -33,18 +33,17 @@ var default_failure_restart_interval = 10
 type func_report_fixed func(topic string)
 
 type PipelineManager struct {
-	pipeline_factory   common.PipelineFactory
-	repl_spec_svc      service_def.ReplicationSpecSvc
-	xdcr_topology_svc  service_def.XDCRCompTopologySvc
-	remote_cluster_svc service_def.RemoteClusterSvc
-	cluster_info_svc   service_def.ClusterInfoSvc
-	checkpoint_svc     service_def.CheckpointsService
-	uilog_svc          service_def.UILogSvc
-	once               sync.Once
-	logger             *log.CommonLogger
-	child_waitGrp      *sync.WaitGroup
-	// used for making sure there's only one ReplicationStatus creation at one time
-	repStatusCrLock sync.RWMutex
+	pipeline_factory    common.PipelineFactory
+	repl_spec_svc       service_def.ReplicationSpecSvc
+	xdcr_topology_svc   service_def.XDCRCompTopologySvc
+	remote_cluster_svc  service_def.RemoteClusterSvc
+	cluster_info_svc    service_def.ClusterInfoSvc
+	checkpoint_svc      service_def.CheckpointsService
+	uilog_svc           service_def.UILogSvc
+	once                sync.Once
+	logger              *log.CommonLogger
+	child_waitGrp       *sync.WaitGroup
+	repStatusAccessLock sync.RWMutex
 }
 
 type Pipeline_mgr_iface interface {
@@ -56,7 +55,6 @@ type Pipeline_mgr_iface interface {
 	Update(topic string, cur_err error) error
 	ReplicationStatusMap() map[string]*pipeline.ReplicationStatus
 	ReplicationStatus(topic string) (*pipeline.ReplicationStatus, error)
-	InitReplicationStatusForReplication(specId string) *pipeline.ReplicationStatus
 	AllReplicationsForBucket(bucket string) []string
 	AllReplications() []string
 	AllReplicationsForTargetCluster(targetClusterUuid string) []string
@@ -130,6 +128,14 @@ func ReplicationStatus(topic string) (*pipeline.ReplicationStatus, error) {
 
 // Use this one - able to be mocked
 func (pipelineMgr *PipelineManager) ReplicationStatus(topic string) (*pipeline.ReplicationStatus, error) {
+	return pipelineMgr.replicationStatusInternal(topic, true)
+}
+
+func (pipelineMgr *PipelineManager) replicationStatusInternal(topic string, lock bool) (*pipeline.ReplicationStatus, error) {
+	if lock {
+		pipelineMgr.repStatusAccessLock.RLock()
+		defer pipelineMgr.repStatusAccessLock.RUnlock()
+	}
 	obj, err := pipelineMgr.repl_spec_svc.GetDerivedObj(topic)
 	if err != nil {
 		return nil, err
@@ -155,27 +161,15 @@ func RecycleMCRequestObj(topic string, obj *base.WrappedMCRequest) {
 	}
 }
 
-// To be deprecated
-func InitReplicationStatusForReplication(specId string) *pipeline.ReplicationStatus {
-	return pipeline_mgr.InitReplicationStatusForReplication(specId)
-}
-
-// OOP model call
-func (pipelineMgr *PipelineManager) InitReplicationStatusForReplication(specId string) *pipeline.ReplicationStatus {
-	rs := pipeline.NewReplicationStatus(specId, pipelineMgr.repl_spec_svc.ReplicationSpec, pipelineMgr.logger)
-	pipelineMgr.repl_spec_svc.SetDerivedObj(specId, rs)
-	return rs
-}
-
 func Update(topic string, cur_err error) error {
 	return pipeline_mgr.Update(topic, cur_err)
 }
 
 func (pipelineMgr *PipelineManager) RemoveReplicationStatus(topic string) error {
-	pipelineMgr.repStatusCrLock.Lock()
-	defer pipelineMgr.repStatusCrLock.Unlock()
+	pipelineMgr.repStatusAccessLock.Lock()
+	defer pipelineMgr.repStatusAccessLock.Unlock()
 
-	rs, err := pipelineMgr.ReplicationStatus(topic)
+	rs, err := pipelineMgr.replicationStatusInternal(topic, false)
 	if err != nil {
 		return err
 	}
@@ -207,12 +201,7 @@ func (pipelineMgr *PipelineManager) ReplicationStatusMap() map[string]*pipeline.
 	specId_list, err := pipelineMgr.repl_spec_svc.AllReplicationSpecIds()
 	if err == nil {
 		for _, specId := range specId_list {
-			rep_status, _ := pipelineMgr.ReplicationStatus(specId)
-			if rep_status == nil {
-				//create the replication status
-				pipelineMgr.logger.Infof("rep_status for topic %v is nil. Initialize it\n", specId)
-				rep_status = InitReplicationStatusForReplication(specId)
-			}
+			rep_status, _ := pipelineMgr.GetOrCreateReplicationStatus(specId, nil)
 			ret[specId] = rep_status
 		}
 	}
@@ -551,18 +540,16 @@ func (pipelineMgr *PipelineManager) GetOrCreateReplicationStatus(topic string, c
 	 * it needs to wait in line for creation, checking each time to make sure that no other go routines
 	 * before it has not created the topic of what it's trying to create.
 	 */
-	pipelineMgr.repStatusCrLock.RLock()
-	repStatus, _ = pipelineMgr.ReplicationStatus(topic)
-	pipelineMgr.repStatusCrLock.RUnlock()
+	repStatus, _ = pipelineMgr.replicationStatusInternal(topic, true)
 	if repStatus != nil {
 		return repStatus, nil
 	} else {
 		var retErr error
 		//	actual portion of creating replicationStatus and updater
-		pipelineMgr.repStatusCrLock.Lock()
-		defer pipelineMgr.repStatusCrLock.Unlock()
+		pipelineMgr.repStatusAccessLock.Lock()
+		defer pipelineMgr.repStatusAccessLock.Unlock()
 		// Potentially, another go routine could have jumped ahead of us
-		repStatus, retErr = pipelineMgr.ReplicationStatus(topic)
+		repStatus, retErr = pipelineMgr.replicationStatusInternal(topic, false)
 		if repStatus == nil {
 			// actual portion of creating replicationStatus and updater - we really don't have anything
 			repStatus = pipeline.NewReplicationStatus(topic, pipelineMgr.repl_spec_svc.ReplicationSpec, pipelineMgr.logger)
@@ -724,13 +711,6 @@ func (r *PipelineUpdater) run() {
 	defer close(r.done_ch)
 
 	var retErr error
-
-	// When we start the updater, it is when the replicationStatus is first created.
-	retErr = r.update()
-	if !r.allowableErrorCodes(retErr) {
-		r.logger.Errorf("First time running %v update() failed. Will schedule a future update\n", r.pipeline_name)
-		r.scheduleFutureRefresh()
-	}
 
 	for {
 		select {

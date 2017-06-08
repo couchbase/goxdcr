@@ -291,10 +291,7 @@ func (rm *replicationManager) initPausedReplications() {
 		} else {
 			for _, spec := range specs {
 				if !spec.Settings.Active {
-					rep_status, _ := rm.pipelineMgr.ReplicationStatus(spec.Id)
-					if rep_status == nil {
-						rm.pipelineMgr.InitReplicationStatusForReplication(spec.Id)
-					}
+					rm.pipelineMgr.GetOrCreateReplicationStatus(spec.Id, nil)
 				}
 			}
 			return

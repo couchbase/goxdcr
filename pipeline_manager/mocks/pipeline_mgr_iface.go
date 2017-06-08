@@ -192,22 +192,6 @@ func (_m *Pipeline_mgr_iface) GetXDCRTopologySvc() service_def.XDCRCompTopologyS
 	return r0
 }
 
-// InitReplicationStatusForReplication provides a mock function with given fields: specId
-func (_m *Pipeline_mgr_iface) InitReplicationStatusForReplication(specId string) *pipeline.ReplicationStatus {
-	ret := _m.Called(specId)
-
-	var r0 *pipeline.ReplicationStatus
-	if rf, ok := ret.Get(0).(func(string) *pipeline.ReplicationStatus); ok {
-		r0 = rf(specId)
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*pipeline.ReplicationStatus)
-		}
-	}
-
-	return r0
-}
-
 // OnExit provides a mock function with given fields:
 func (_m *Pipeline_mgr_iface) OnExit() error {
 	ret := _m.Called()

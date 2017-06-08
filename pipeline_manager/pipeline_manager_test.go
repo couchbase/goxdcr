@@ -226,7 +226,7 @@ func TestUpdateSerially(t *testing.T) {
 	assert.Nil(pipelineMgr.Update(testTopic, nil))
 	// sleep to make sure the request is honored and executed
 	time.Sleep(time.Duration(1) * time.Second)
-	assert.Equal(uint64(2), atomic.LoadUint64(&testRepairer.runCounter))
+	assert.Equal(uint64(1), atomic.LoadUint64(&testRepairer.runCounter))
 	assert.True(pipelineMgr.GetLastUpdateResult(testTopic))
 
 	fmt.Println("========== Launching second update and third update serially ==========")
@@ -236,7 +236,7 @@ func TestUpdateSerially(t *testing.T) {
 
 	// sleep to make sure the requests are honored and executed
 	time.Sleep(time.Duration(1) * time.Second)
-	assert.Equal(uint64(4), atomic.LoadUint64(&testRepairer.runCounter))
+	assert.Equal(uint64(3), atomic.LoadUint64(&testRepairer.runCounter))
 	assert.True(pipelineMgr.GetLastUpdateResult(testTopic))
 
 	fmt.Println("============== Test case end: TestUpdateSerially =================")
@@ -260,14 +260,14 @@ func TestUpdateErrorInjection(t *testing.T) {
 		testReplicationSettings, testReplicationSpec, testRemoteClusterRef, testPipeline)
 
 	setupLaunchUpdater(testRepairer, true)
-	assert.Equal(uint64(1), atomic.LoadUint64(&testRepairer.runCounter))
+	assert.Equal(uint64(0), atomic.LoadUint64(&testRepairer.runCounter))
 
 	// Once we launch the go routine, immediately launch a manual run... it should register
 	fmt.Println("========== Launching first update ==========")
 	assert.Nil(pipelineMgr.Update(testTopic, nil))
 	// sleep to make sure the request is honored and executed
 	time.Sleep(time.Duration(1) * time.Second)
-	assert.Equal(uint64(2), atomic.LoadUint64(&testRepairer.runCounter))
+	assert.Equal(uint64(1), atomic.LoadUint64(&testRepairer.runCounter))
 	assert.True(pipelineMgr.GetLastUpdateResult(testTopic))
 
 	fmt.Println("========== Launching second update with injected error ==========")
@@ -278,14 +278,14 @@ func TestUpdateErrorInjection(t *testing.T) {
 	// clear the error and check
 	atomic.StoreInt32(&testRepairer.testInjectionError, pipelineUpdaterErrInjNil)
 	// we shouldn't have re-executed
-	assert.Equal(uint64(2), atomic.LoadUint64(&testRepairer.runCounter))
+	assert.Equal(uint64(1), atomic.LoadUint64(&testRepairer.runCounter))
 	// A timer should have been scheduled
 	assert.False(testRepairer.isScheduledTimerNil())
 
 	time.Sleep(time.Duration(2) * time.Second)
 	// Timer would have fired by now
 	assert.True(testRepairer.isScheduledTimerNil())
-	assert.Equal(uint64(3), atomic.LoadUint64(&testRepairer.runCounter))
+	assert.Equal(uint64(2), atomic.LoadUint64(&testRepairer.runCounter))
 
 	fmt.Println("============== Test case end: TestUpdateErrorInjection =================")
 }
@@ -310,14 +310,14 @@ func TestUpdateErrorInjection2(t *testing.T) {
 		testReplicationSettings, testReplicationSpec, testRemoteClusterRef, testPipeline)
 
 	setupLaunchUpdater(testRepairer, true)
-	assert.Equal(uint64(1), atomic.LoadUint64(&testRepairer.runCounter))
+	assert.Equal(uint64(0), atomic.LoadUint64(&testRepairer.runCounter))
 
 	// Once we launch the go routine, immediately launch a manual run... it should register
 	fmt.Println("========== Launching first update ==========")
 	assert.Nil(pipelineMgr.Update(testTopic, nil))
 	// sleep to make sure the request is honored and executed
 	time.Sleep(time.Duration(1) * time.Second)
-	assert.Equal(uint64(2), atomic.LoadUint64(&testRepairer.runCounter))
+	assert.Equal(uint64(1), atomic.LoadUint64(&testRepairer.runCounter))
 	assert.True(pipelineMgr.GetLastUpdateResult(testTopic))
 
 	fmt.Println("========== Launching second update with injected error ==========")
@@ -328,7 +328,7 @@ func TestUpdateErrorInjection2(t *testing.T) {
 	// clear the error and check
 	atomic.StoreInt32(&testRepairer.testInjectionError, pipelineUpdaterErrInjNil)
 	// we shouldn't have re-executed
-	assert.Equal(uint64(2), atomic.LoadUint64(&testRepairer.runCounter))
+	assert.Equal(uint64(1), atomic.LoadUint64(&testRepairer.runCounter))
 	// A timer should have been scheduled
 	assert.False(testRepairer.isScheduledTimerNil())
 
@@ -341,7 +341,7 @@ func TestUpdateErrorInjection2(t *testing.T) {
 	assert.True(testRepairer.isScheduledTimerNil())
 	// We should have a total of 3 runs -> 1 initialization run + 1 first update + 1 update reschedule
 	// The random error injection should be counted towards the single 1 update reschedule
-	assert.Equal(uint64(3), atomic.LoadUint64(&testRepairer.runCounter))
+	assert.Equal(uint64(2), atomic.LoadUint64(&testRepairer.runCounter))
 
 	fmt.Println("============== Test case end: TestUpdateErrorInjection2 =================")
 }
@@ -361,7 +361,7 @@ func TestUpdateThriceParallely(t *testing.T) {
 		testReplicationSettings, testReplicationSpec, testRemoteClusterRef, testPipeline)
 
 	setupLaunchUpdater(testRepairer, true)
-	assert.Equal(uint64(1), atomic.LoadUint64(&testRepairer.runCounter))
+	assert.Equal(uint64(0), atomic.LoadUint64(&testRepairer.runCounter))
 
 	fmt.Println("========== Launching first and second and third updates parallely ==========")
 	// As of second update, we already have a updater created, so return a valid testReplicationStatus
@@ -376,7 +376,7 @@ func TestUpdateThriceParallely(t *testing.T) {
 	time.Sleep(time.Duration(3) * time.Second)
 	// 1 init run, and 2 more manual runs (3rd go statement gets rejected)
 	// TODO - this seems racey and fails about 5% of the time
-	assert.Equal(uint64(3), atomic.LoadUint64(&testRepairer.runCounter))
+	assert.Equal(uint64(2), atomic.LoadUint64(&testRepairer.runCounter))
 
 	fmt.Println("============== Test case end: TestUpdateThriceParallely =================")
 }
@@ -396,20 +396,20 @@ func TestUpdateDoubleError(t *testing.T) {
 		testReplicationSettings, testReplicationSpec, testRemoteClusterRef, testPipeline)
 
 	setupLaunchUpdater(testRepairer, true)
-	assert.Equal(uint64(1), atomic.LoadUint64(&testRepairer.runCounter))
+	assert.Equal(uint64(0), atomic.LoadUint64(&testRepairer.runCounter))
 
 	fmt.Println("========== Launching first update with an error ==========")
 	pipelineMgr.Update(testTopic, errors.New("TestError"))
 	assert.True(testRepairer.isScheduledTimerNil())
 	time.Sleep(time.Duration(1) * time.Second)
-	assert.Equal(uint64(2), atomic.LoadUint64(&testRepairer.runCounter))
+	assert.Equal(uint64(1), atomic.LoadUint64(&testRepairer.runCounter))
 
 	fmt.Println("========== Launching second update with an error ==========")
 	// Since last error was "fixed", this one should execute right away
 	pipelineMgr.Update(testTopic, errors.New("TestError"))
 	assert.True(testRepairer.isScheduledTimerNil())
 	time.Sleep(time.Duration(1) * time.Second)
-	assert.Equal(uint64(3), atomic.LoadUint64(&testRepairer.runCounter))
+	assert.Equal(uint64(2), atomic.LoadUint64(&testRepairer.runCounter))
 
 	fmt.Println("============== Test case end: TestUpdateDoubleError =================")
 }
@@ -469,7 +469,7 @@ func TestUpdaterRun(t *testing.T) {
 
 	fmt.Printf("Trying to run actual startPipeline... may have %v seconds delay\n", testRepairer.testCustomScheduleTime)
 	setupLaunchUpdater(testRepairer, true)
-	assert.Equal(uint64(1), atomic.LoadUint64(&testRepairer.runCounter))
+	assert.Equal(uint64(0), atomic.LoadUint64(&testRepairer.runCounter))
 
 	testRepairer.stop()
 	assert.Equal(uint64(0), atomic.LoadUint64(&testRepairer.runCounter))
@@ -493,7 +493,7 @@ func TestUpdaterSendErrDuringCooldown(t *testing.T) {
 
 	fmt.Printf("Trying to run actual startPipeline... may have %v seconds delay\n", testRepairer.testCustomScheduleTime)
 	setupLaunchUpdater(testRepairer, true)
-	assert.Equal(uint64(1), atomic.LoadUint64(&testRepairer.runCounter))
+	assert.Equal(uint64(0), atomic.LoadUint64(&testRepairer.runCounter))
 
 	fmt.Println("Firing off 2 errors concurrently - one should be soaked up")
 	// Inject an error to introduce cooldown
@@ -507,13 +507,13 @@ func TestUpdaterSendErrDuringCooldown(t *testing.T) {
 	atomic.StoreInt32(&testRepairer.testInjectionError, pipelineUpdaterErrInjNil)
 
 	time.Sleep(testRepairer.testCustomScheduleTime + time.Duration(1)*time.Second)
-	assert.Equal(uint64(2), atomic.LoadUint64(&testRepairer.runCounter))
+	assert.Equal(uint64(1), atomic.LoadUint64(&testRepairer.runCounter))
 
 	fmt.Println("Firing off 1 error - should execute asap")
 	// Afterwards, we should no longer soak
 	go testRepairer.refreshPipelineDueToErr(errors.New("TestError"))
 	time.Sleep(testRepairer.testCustomScheduleTime + time.Duration(1)*time.Second)
-	assert.Equal(uint64(3), atomic.LoadUint64(&testRepairer.runCounter))
+	assert.Equal(uint64(2), atomic.LoadUint64(&testRepairer.runCounter))
 
 	fmt.Println("============== Test case end: TestUpdaterSendErrDuringCooldown =================")
 }
@@ -554,7 +554,7 @@ func TestPipelineMgrRemoveReplicationStatus(t *testing.T) {
 	pipelineMgr.GetOrCreateReplicationStatus("testTopic", nil)
 
 	setupLaunchUpdater(testRepairer, true)
-	assert.Equal(uint64(1), atomic.LoadUint64(&testRepairer.runCounter))
+	assert.Equal(uint64(0), atomic.LoadUint64(&testRepairer.runCounter))
 
 	pipelineMgr.RemoveReplicationStatus("testTopic")
 
