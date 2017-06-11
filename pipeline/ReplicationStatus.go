@@ -103,6 +103,7 @@ type ReplicationStatus struct {
 	progress         string
 	Logger           *log.CommonLogger
 	SpecId           string
+	SpecInternalId   string
 	Spec_getter      ReplicationSpecGetter
 	Pipeline_updater interface{}
 	Obj_pool         *base.MCRequestPool
@@ -134,6 +135,7 @@ func (rs *ReplicationStatus) SetPipeline(pipeline common.Pipeline) {
 	if pipeline != nil {
 		rs.vb_list = pipeline_utils.GetSourceVBListPerPipeline(pipeline)
 		simple_utils.SortUint16List(rs.vb_list)
+		rs.SpecInternalId = pipeline.Specification().InternalId
 	}
 
 	rs.Publish(false)

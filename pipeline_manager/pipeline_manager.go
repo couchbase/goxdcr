@@ -414,7 +414,6 @@ func (pipelineMgr *PipelineManager) StopPipelineInner(rep_status *pipeline.Repli
 	if p != nil {
 		state := p.State()
 		if state == common.Pipeline_Running || state == common.Pipeline_Starting || state == common.Pipeline_Error {
-			specInternalId := p.Specification().InternalId
 			err = p.Stop()
 			if err != nil {
 				pipelineMgr.logger.Errorf("Received error when stopping pipeline %v - %v\n", replId, err)
@@ -423,25 +422,6 @@ func (pipelineMgr *PipelineManager) StopPipelineInner(rep_status *pipeline.Repli
 			} else {
 				pipelineMgr.logger.Infof("Pipeline %v has been stopped\n", replId)
 			}
-
-			// if replication spec has been deleted
-			// or deleted and recreated, which is signaled by change in spec internal id
-			// perform clean up
-			spec, _ := pipelineMgr.repl_spec_svc.ReplicationSpec(replId)
-			if spec == nil || spec.InternalId != specInternalId {
-				pipelineMgr.logger.Infof("%v Deleting checkpoint docs since repl spec has been deleted. spec=%v\n", replId, spec)
-				pipeline_utils.DelCheckpointsDocsWithRetry(pipelineMgr.checkpoint_svc, replId, base.MaxRetryMetakvOps, pipelineMgr.logger)
-
-				rep_status.ResetStorage()
-				pipelineMgr.repl_spec_svc.SetDerivedObj(replId, nil)
-
-				//close the connection pool for the replication
-				pools := base.ConnPoolMgr().FindPoolNamesByPrefix(replId)
-				for _, poolName := range pools {
-					base.ConnPoolMgr().RemovePool(poolName)
-				}
-			}
-
 			pipelineMgr.removePipelineFromReplicationStatus(p)
 			pipelineMgr.logger.Infof("Replication Status=%v\n", rep_status)
 		} else {
@@ -450,6 +430,30 @@ func (pipelineMgr *PipelineManager) StopPipelineInner(rep_status *pipeline.Repli
 	} else {
 		pipelineMgr.logger.Infof("Pipeline %v is not running\n", replId)
 	}
+
+	// if replication spec has been deleted
+	// or deleted and recreated, which is signaled by change in spec internal id
+	// perform clean up
+	spec, _ := pipelineMgr.repl_spec_svc.ReplicationSpec(replId)
+	if spec == nil || (rep_status.SpecInternalId != "" && rep_status.SpecInternalId != spec.InternalId) {
+		if spec == nil {
+			pipelineMgr.logger.Infof("%v Cleaning up replication status since repl spec has been deleted.\n", replId)
+		} else {
+			pipelineMgr.logger.Infof("%v Cleaning up replication status since repl spec has been deleted and recreated. oldSpecInternalId=%v, newSpecInternalId=%v\n", replId, rep_status.SpecInternalId, spec.InternalId)
+		}
+
+		pipeline_utils.DelCheckpointsDocsWithRetry(pipelineMgr.checkpoint_svc, replId, base.MaxRetryMetakvOps, pipelineMgr.logger)
+
+		rep_status.ResetStorage()
+		pipelineMgr.repl_spec_svc.SetDerivedObj(replId, nil)
+
+		//close the connection pool for the replication
+		pools := base.ConnPoolMgr().FindPoolNamesByPrefix(replId)
+		for _, poolName := range pools {
+			base.ConnPoolMgr().RemovePool(poolName)
+		}
+	}
+
 	return err
 }
 
