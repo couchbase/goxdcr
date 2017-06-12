@@ -47,6 +47,7 @@ type Client struct {
 	conn io.ReadWriteCloser
 	// use uint32 type so that it can be accessed through atomic APIs
 	healthy uint32
+	opaque  uint32
 
 	hdrBuf []byte
 }
@@ -82,6 +83,7 @@ func Wrap(rwc io.ReadWriteCloser) (rv *Client, err error) {
 	client := &Client{
 		conn:   rwc,
 		hdrBuf: make([]byte, gomemcached.HDR_LEN),
+		opaque: uint32(1),
 	}
 	client.setHealthy(true)
 	return client, nil
@@ -608,6 +610,12 @@ func (c *Client) GetBulk(vb uint16, keys []string, rv map[string]*gomemcached.MC
 		wg.Wait()
 	}()
 
+	if (math.MaxInt32 - c.opaque) < (uint32(len(keys)) + 1) {
+		c.opaque = uint32(1)
+	}
+
+	opStart := c.opaque
+
 	errch := make(chan error, 2)
 
 	wg.Add(1)
@@ -635,16 +643,17 @@ func (c *Client) GetBulk(vb uint16, keys []string, rv map[string]*gomemcached.MC
 					}
 					// continue receiving in case of KEY_ENOENT
 				} else if res.Opcode == gomemcached.GET {
-					if res.Opaque >= uint32(len(keys)) {
+					opaque := res.Opaque - opStart
+					if opaque < 0 || opaque >= uint32(len(keys)) {
 						// Every now and then we seem to be seeing an invalid opaque
 						// value returned from the server. When this happens log the error
 						// and the calling function will retry the bulkGet. MB-15140
-						logging.Errorf(" Invalid opaque Value. Debug info : Res.opaque : %v, Keys %v, Response received %v \n key list %v this key %v", res.Opaque, len(keys), res, keys, string(res.Body))
+						logging.Errorf(" Invalid opaque Value. Debug info : Res.opaque : %v(%v), Keys %v, Response received %v \n key list %v this key %v", res.Opaque, opaque, len(keys), res, keys, string(res.Body))
 						errch <- fmt.Errorf("Out of Bounds error")
 						return
 					}
 
-					rv[keys[res.Opaque]] = res
+					rv[keys[opaque]] = res
 				}
 
 				if res.Opcode == gomemcached.NOOP {
@@ -655,28 +664,32 @@ func (c *Client) GetBulk(vb uint16, keys []string, rv map[string]*gomemcached.MC
 		}
 	}()
 
-	for i, k := range keys {
+	for _, k := range keys {
 		err := c.Transmit(&gomemcached.MCRequest{
 			Opcode:  gomemcached.GET,
 			VBucket: vb,
 			Key:     []byte(k),
-			Opaque:  uint32(i),
+			Opaque:  c.opaque,
 		})
 		if err != nil {
 			logging.Errorf(" Transmit failed in GetBulkAll %v", err)
 			return err
 		}
+		c.opaque++
 	}
 
 	// finally transmit a NOOP
 	err := c.Transmit(&gomemcached.MCRequest{
-		Opcode: gomemcached.NOOP,
+		Opcode:  gomemcached.NOOP,
+		VBucket: vb,
+		Opaque:  c.opaque,
 	})
 
 	if err != nil {
 		logging.Errorf(" Transmit of NOOP failed  %v", err)
 		return err
 	}
+	c.opaque++
 
 	return <-errch
 }
