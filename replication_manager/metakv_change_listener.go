@@ -110,11 +110,16 @@ func (mcl *MetakvChangeListener) failureCallback(err error) {
 		return
 	}
 	if mcl.number_of_retry < service_def.MaxNumOfRetries {
-		//restart listener
+		// Incremental backoff to wait for metakv server to be ready - and restart listener
+		var timeToSleep = time.Duration(mcl.number_of_retry+1) * service_def.RetryDelaySec
+		// Once we've calculated the timeToSleep correctly, then increment the number_of_retry
 		mcl.number_of_retry++
+		mcl.logger.Infof("metakv.RunObserveChildren (%v) will retry in %v ...\n", mcl.Id(), timeToSleep)
+		time.Sleep(timeToSleep)
 		mcl.Start()
 	} else {
 		// exit process if max retry reached
+		mcl.logger.Infof("metakv.RunObserveChildren (%v) failed after max retry %v\n", mcl.Id(), service_def.MaxNumOfRetries)
 		exitProcess(false)
 	}
 }

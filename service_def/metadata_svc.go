@@ -13,9 +13,11 @@ package service_def
 import (
 	"errors"
 	"fmt"
+	"time"
 )
 
-var MaxNumOfRetries = 5
+var MaxNumOfRetries = 7
+var RetryDelaySec = 1 * time.Second
 
 var MetadataNotFoundErr error = errors.New("key not found")
 var ErrorKeyAlreadyExist = errors.New("key being added already exists")
