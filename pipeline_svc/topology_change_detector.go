@@ -501,10 +501,16 @@ func (top_detect_svc *TopologyChangeDetectorSvc) getTargetBucketInfo() (int, map
 		targetBucketUUID, err = utils.GetBucketUuidFromBucketInfo(bucketName, targetBucketInfo, top_detect_svc.logger)
 		if err == nil {
 			targetServerVBMap, err = utils.GetServerVBucketsMap(connStr, bucketName, targetBucketInfo)
-			// do not try to retrieve cluster compatibility in capi mode, since target cluster may be elastic search cluster
-			if err == nil && !top_detect_svc.capi {
-				targetClusterCompatibility, err = utils.GetClusterCompatibilityFromBucketInfo(bucketName, targetBucketInfo, top_detect_svc.logger)
-				allFieldsFound = true
+			if err == nil {
+				if !top_detect_svc.capi {
+					targetClusterCompatibility, err = utils.GetClusterCompatibilityFromBucketInfo(bucketName, targetBucketInfo, top_detect_svc.logger)
+					if err == nil {
+						allFieldsFound = true
+					}
+				} else {
+					// do not try to retrieve cluster compatibility in capi mode, since target cluster may be elastic search cluster
+					allFieldsFound = true
+				}
 			}
 		}
 	}
