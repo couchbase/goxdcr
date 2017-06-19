@@ -724,7 +724,6 @@ func (ckmgr *CheckpointManager) getVBTimestampForVB(vbno uint16, ckptDoc *metada
 				VBNo:    vbno}
 
 			bMatch := false
-			// Talk to the destination side via capi_svc to see if we can agree on this checkpoint record, if so, this would be the agreedIndex
 			bMatch, current_remoteVBOpaque, err := ckmgr.capi_svc.PreReplicate(ckmgr.remote_bucket, remote_vb_status, ckmgr.support_ckpt)
 			//remote vb topology changed
 			//udpate the vb_uuid
@@ -762,7 +761,10 @@ func (ckmgr *CheckpointManager) ckptRecords(ckptDoc *metadata.CheckpointsDoc, vb
 		ckmgr.logger.Infof("%v Found checkpoint doc for vb=%v\n", ckmgr.pipeline.Topic(), vbno)
 		return ckptDoc.Checkpoint_records
 	} else {
-		return []*metadata.CheckpointRecord{}
+		ret := []*metadata.CheckpointRecord{}
+
+		ret = append(ret, ckmgr.getCurrentCkpt(vbno))
+		return ret
 	}
 }
 
@@ -871,7 +873,6 @@ func (ckmgr *CheckpointManager) retrieveCkptDoc(vbno uint16) (*metadata.Checkpoi
 
 func (ckmgr *CheckpointManager) populateVBTimestamp(ckptDoc *metadata.CheckpointsDoc, agreedIndex int, vbno uint16) *base.VBTimestamp {
 	vbts := &base.VBTimestamp{Vbno: vbno}
-
 	if agreedIndex > -1 && ckptDoc != nil {
 		ckpt_record := ckptDoc.Checkpoint_records[agreedIndex]
 		vbts.Vbuuid = ckpt_record.Failover_uuid
