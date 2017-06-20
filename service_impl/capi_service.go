@@ -143,7 +143,7 @@ func (capi_svc *CAPIService) CommitForCheckpoint(remoteBucket *service_def.Remot
 
 	} else {
 		//error case
-		msg := fmt.Sprintf("_commit_for_checkpoint failed for vb=%v, err=%v, status_code=%v\n", vbno, err, status_code)
+		msg := fmt.Sprintf("_commit_for_checkpoint failed for vb=%v, err=%v, status_code=%v, respMap=%v\n", vbno, err, status_code, respMap)
 		capi_svc.logger.Error(msg)
 		err = errors.New(msg)
 		return 0, nil, err
@@ -351,7 +351,7 @@ func (capi_svc *CAPIService) parsePreReplicateResp(hostName string,
 		capi_svc.logger.Debugf("_pre_replicate returned %v status", bMatch)
 		return bMatch, vbOpaque, nil
 	} else {
-		var retError error = fmt.Errorf("unexpected status code, %v, in _pre_replicate response", resp_status_code)
+		var retError error = fmt.Errorf("unexpected status code, %v, in _pre_replicate response. respMap=%v\n", resp_status_code, respMap)
 
 		//double check again disableCkptBackwardsCompat
 		if resp_status_code == 404 && xdcrCheckpointingCapbility == false {
