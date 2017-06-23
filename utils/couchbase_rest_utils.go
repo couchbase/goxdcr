@@ -413,7 +413,6 @@ func GetNodeListFromInfoMap(infoMap map[string]interface{}, logger *log.CommonLo
 	// get node list from the map
 	nodes, ok := infoMap[base.NodesKey]
 	if !ok {
-		// should never get here
 		errMsg := fmt.Sprintf("info map contains no nodes. info map=%v", infoMap)
 		logger.Error(errMsg)
 		return nil, errors.New(errMsg)
@@ -421,13 +420,43 @@ func GetNodeListFromInfoMap(infoMap map[string]interface{}, logger *log.CommonLo
 
 	nodeList, ok := nodes.([]interface{})
 	if !ok {
-		// should never get here
 		errMsg := fmt.Sprintf("nodes is not of list type. type of nodes=%v", reflect.TypeOf(nodes))
 		logger.Error(errMsg)
 		return nil, errors.New(errMsg)
 	}
 
-	return nodeList, nil
+	// only return the nodes that are active
+	activeNodeList := make([]interface{}, 0)
+	for _, node := range nodeList {
+		nodeInfoMap, ok := node.(map[string]interface{})
+		if !ok {
+			errMsg := fmt.Sprintf("node info is not of map type. type=%v", reflect.TypeOf(node))
+			logger.Error(errMsg)
+			return nil, errors.New(errMsg)
+		}
+		clusterMembershipObj, ok := nodeInfoMap[base.ClusterMembershipKey]
+		if !ok {
+			// this could happen when target is elastic search cluster (or maybe very old couchbase cluster?)
+			// consider the node to be "active" to be safe
+			errMsg := fmt.Sprintf("node info map does not contain cluster membership. node info map=%v ", nodeInfoMap)
+			logger.Debug(errMsg)
+			activeNodeList = append(activeNodeList, node)
+			continue
+		}
+		clusterMembership, ok := clusterMembershipObj.(string)
+		if !ok {
+			// play safe and return the node as active
+			errMsg := fmt.Sprintf("cluster membership is not string type. type=%v ", reflect.TypeOf(clusterMembershipObj))
+			logger.Info(errMsg)
+			activeNodeList = append(activeNodeList, node)
+			continue
+		}
+		if clusterMembership == "" || clusterMembership == base.ClusterMembership_Active {
+			activeNodeList = append(activeNodeList, node)
+		}
+	}
+
+	return activeNodeList, nil
 }
 
 func GetClusterCompatibilityFromNodeList(nodeList []interface{}) (int, error) {
