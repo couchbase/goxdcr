@@ -187,7 +187,7 @@ func (genericPipeline *GenericPipeline) Start(settings map[string]interface{}) e
 	//get starting vb timestamp
 	go genericPipeline.startingSeqno_constructor(genericPipeline)
 
-	targetClusterRef, err := genericPipeline.remoteClusterRef_retriever(genericPipeline.spec.TargetClusterUUID, true)
+	targetClusterRef, err := genericPipeline.remoteClusterRef_retriever(genericPipeline.spec.TargetClusterUUID, false)
 	if err != nil {
 		genericPipeline.logger.Errorf("%v error getting remote cluster with uuid=%v, err=%v\n", genericPipeline.InstanceId(), genericPipeline.spec.TargetClusterUUID, err)
 		return err

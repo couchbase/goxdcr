@@ -295,6 +295,16 @@ func DeepCopyUint64Array(in []uint64) []uint64 {
 	return out
 }
 
+func DeepCopyStringArray(in []string) []string {
+	if in == nil {
+		return nil
+	}
+
+	out := make([]string, len(in))
+	copy(out, in)
+	return out
+}
+
 func IsJSON(in []byte) bool {
 	var out interface{}
 	err := json.Unmarshal(in, &out)

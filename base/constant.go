@@ -67,10 +67,13 @@ var BucketCapabilitiesKey = "bucketCapabilities"
 var BucketTypeKey = "bucketType"
 var BucketsKey = "buckets"
 var BucketNameKey = "name"
+var ClusterMembershipKey = "clusterMembership"
 
 // URL related constants
 var UrlDelimiter = "/"
 var UrlPortNumberDelimiter = ":"
+
+var ClusterMembership_Active = "active"
 
 // http request method types
 const (

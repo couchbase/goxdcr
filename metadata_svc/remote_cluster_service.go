@@ -19,6 +19,7 @@ import (
 	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/goxdcr/pipeline_utils"
 	"github.com/couchbase/goxdcr/service_def"
+	"github.com/couchbase/goxdcr/simple_utils"
 	"github.com/couchbase/goxdcr/utils"
 	"math/rand"
 	"net/http"
@@ -240,48 +241,71 @@ func (service *RemoteClusterService) AddRemoteCluster(ref *metadata.RemoteCluste
 	return nil
 }
 
-func (service *RemoteClusterService) updateRemoteCluster(ref *metadata.RemoteClusterReference, revision interface{}) error {
+func (service *RemoteClusterService) updateRemoteCluster(ref *metadata.RemoteClusterReference) error {
+
+	revision := ref.Revision
+	// unset all internal fields before saving to metakv
+	ref_clone := ref.CloneForMetakvUpdate()
+
 	key := ref.Id
-	value, err := json.Marshal(ref)
+	value, err := json.Marshal(ref_clone)
 	if err != nil {
 		return err
 	}
-	service.logger.Debugf("Remote cluster is being updated: key=%v, value=%v\n", key, string(value))
 
 	err = service.metakv_svc.SetSensitive(key, value, revision)
 	if err != nil {
 		return err
 	}
 
-	service.logger.Infof("Remote cluster %v in metadata store updated. value=%v, revision=%v\n", key, value, revision)
+	service.logger.Infof("Remote cluster %v in metadata store updated. value=%v, revision before update=%v\n", key, ref_clone, revision)
 
-	// update ref.Revision
-	_, rev, err := service.metakv_svc.Get(key)
+	return service.updateCacheForRefId(ref.Id)
+}
+
+func (service *RemoteClusterService) updateCacheForRefId(refId string) error {
+	value, rev, err := service.metakv_svc.Get(refId)
 	if err != nil {
 		return err
 	}
-	ref.Revision = rev
+	refInMetakv, err := service.constructRemoteClusterReference(value, rev)
+	if err != nil {
+		return err
+	}
 
-	return service.updateCache(ref.Id, ref)
+	service.logger.Infof("Updating remote cluster %v in cache after metadata store update. revision after update=%v\n", refId, refInMetakv.Revision)
+
+	return service.updateCache(refId, refInMetakv)
 }
 
 func (service *RemoteClusterService) SetRemoteCluster(refName string, ref *metadata.RemoteClusterReference) error {
-	service.logger.Infof("Setting remote cluster with refName %v\n", refName)
-
-	err := service.ValidateSetRemoteCluster(refName, ref)
+	oldRef, err := service.RemoteClusterByRefName(refName, false)
 	if err != nil {
 		return err
 	}
+
+	// when SetRemoteCluster is called, ref is a newly constructed ref object with its own id and revision
+	// in order for metakv update to succeed, the id and revision needs to be updated to those of the ref in cache
+	ref.Id = oldRef.Id
+	ref.Revision = oldRef.Revision
+
+	return service.setRemoteCluster(refName, ref)
+}
+
+func (service *RemoteClusterService) setRemoteCluster(refName string, ref *metadata.RemoteClusterReference) error {
+	service.logger.Infof("Setting remote cluster with refName %v. ref=%v\n", refName, ref)
 
 	oldRef, err := service.RemoteClusterByRefName(refName, false)
 	if err != nil {
 		return err
 	}
 
-	// these are critical to ensure a successful update operation on oldRef
-	ref.Id = oldRef.Id
+	err = service.ValidateSetRemoteCluster(refName, ref)
+	if err != nil {
+		return err
+	}
 
-	err = service.updateRemoteCluster(ref, oldRef.Revision)
+	err = service.updateRemoteCluster(ref)
 	if err != nil {
 		return err
 	}
@@ -541,8 +565,11 @@ func (service *RemoteClusterService) formErrorFromValidatingRemotehost(ref *meta
 
 // this internal api differs from AddRemoteCluster in that it does not perform validation
 func (service *RemoteClusterService) addRemoteCluster(ref *metadata.RemoteClusterReference) error {
+	// unset all internal fields before saving to metakv
+	ref_clone := ref.CloneForMetakvUpdate()
+
 	key := ref.Id
-	value, err := json.Marshal(ref)
+	value, err := json.Marshal(ref_clone)
 	if err != nil {
 		return err
 	}
@@ -552,9 +579,9 @@ func (service *RemoteClusterService) addRemoteCluster(ref *metadata.RemoteCluste
 		return err
 	}
 
-	service.logger.Infof("Remote cluster %v has been added to metadata store.\n", key)
+	service.logger.Infof("Remote cluster %v has been added to metadata store. value=%v\n", key, ref_clone)
 
-	return service.updateCache(ref.Id, ref)
+	return service.updateCacheForRefId(ref.Id)
 }
 
 func (service *RemoteClusterService) constructRemoteClusterReference(value []byte, rev interface{}) (*metadata.RemoteClusterReference, error) {
@@ -660,6 +687,7 @@ func (service *RemoteClusterService) refresh(ref *metadata.RemoteClusterReferenc
 	startingIndex := rand.Intn(numberOfNodes)
 	index := startingIndex
 	first := true
+	var nodeNameList []string
 
 	for {
 		if !first {
@@ -724,38 +752,12 @@ func (service *RemoteClusterService) refresh(ref *metadata.RemoteClusterReferenc
 				service.logger.Infof("Replaced ActiveHostName in ref %v with %v and ActiveHttpsHostName with %v\n", ref.Id, hostName, httpsHostName)
 			}
 
-			nodeNameList, err := utils.GetNodeNameListFromNodeList(nodeList, connStr, service.logger)
+			nodeNameList, err = utils.GetNodeNameListFromNodeList(nodeList, connStr, service.logger)
 			if err != nil {
 				service.logger.Infof("Error getting node name list for remote cluster reference %v using connection string %v. err=%v\n", ref.Id, connStr, err)
 				continue
 			}
 
-			// check if ref.HostName is still in target node list
-			hostNameStillInTarget := false
-			for _, nodeName := range nodeNameList {
-				if nodeName == ref.HostName {
-					hostNameStillInTarget = true
-					break
-				}
-			}
-			if !hostNameStillInTarget {
-				// if ref.HostName is no longer in target node list, replace it with ActiveHostName
-				service.logger.Infof("HostName, %v, in remote cluster reference, %v, is no longer in target cluster. Replacing it with %v\n", ref.HostName, ref.Id, ref.ActiveHostName)
-
-				ref.HostName = ref.ActiveHostName
-				ref.HttpsHostName = ref.ActiveHttpsHostName
-				// changes to ref.HostName needs to be saved to metakv, so that it can be propagated to other nodes
-				err = service.SetRemoteCluster(ref.Name, ref)
-				if err != nil {
-					service.logger.Infof("Error updating hostname in remote cluster reference %v. err=%v\n", ref.Id, err)
-				} else {
-					// if SetRemoteCluster() succeeds, the cache has been updated, return ok
-					return nil
-				}
-			}
-
-			// if we get here, either hostNameStillInTarget is true, or SetRemoteCluster() returned error
-			// either way we need to update cache
 			new_ref_cache := &remoteClusterVal{key: ref.Id,
 				nodes_connectionstr: nodeNameList,
 				ref:                 ref,
@@ -766,15 +768,117 @@ func (service *RemoteClusterService) refresh(ref *metadata.RemoteClusterReferenc
 				errMsg := fmt.Sprintf("Skipping refreshing remote cluster reference %v since received error updating cache. err=%v\n", ref.Id, err)
 				service.logger.Info(errMsg)
 				// if we receive error updating cache, the remote cluster ref in cache may have been updated by another go-routine
-				// it most likely won't be helpful iterating through remaining nodes since the same update cache error would be returned
-				// abort the current refresh operation
+				// additional ref operation is likely not effective or safe. abort the current refresh operation
 				return errors.New(errMsg)
-			} else {
-				return nil
+			}
+
+			// if cache update succeeds, stop iteration
+			break
+		}
+	}
+
+	// after we are done with cache update, if we have a valid nodeNameList, check if ref.HostName is still in target node list
+	if len(nodeNameList) > 0 {
+		hostNameStillInTarget := false
+		for _, nodeName := range nodeNameList {
+			if nodeName == ref.HostName {
+				hostNameStillInTarget = true
+				break
 			}
 		}
 
+		if !hostNameStillInTarget {
+			err = service.replaceRefHostName(ref.Id)
+			if err != nil {
+				service.logger.Infof(err.Error())
+			}
+		}
 	}
+
+	return nil
+}
+
+// this method is called when ref.HostName is no longer in target cluster and needs to be replaced
+// by an alternative working node in target cluster
+func (service *RemoteClusterService) replaceRefHostName(refId string) error {
+	service.logger.Infof("Replacing HostName in remote cluster reference %v\n", refId)
+
+	ref_cache, _ := service.getCacheVal(refId)
+	if ref_cache == nil {
+		service.logger.Infof("Stop replacing HostName in remote cluster reference %v. Ref in cache has been deleted by others\n", refId)
+		return service_def.MetadataNotFoundErr
+	}
+
+	ref, err := service.RemoteClusterByRefId(refId, false)
+	if err != nil {
+		return err
+	}
+
+	username, password, certificate, sanInCertificate, err := ref.MyCredentials()
+	if err != nil {
+		return err
+	}
+
+	hostNames := simple_utils.DeepCopyStringArray(ref_cache.nodes_connectionstr)
+	// sort the node list, so that the selection of the replacement node will be deterministic
+	// in other words, if two source nodes performs the selection at the same time,
+	// they will get the same replacement node. this way less strain is put on metakv
+	sort.Strings(hostNames)
+
+	for _, hostName := range hostNames {
+		if hostName == ref.HostName {
+			// skip ref.HostName since we would not have come here if it was usable
+			continue
+		}
+		connStr := hostName
+		httpsHostName := ""
+		if ref.DemandEncryption {
+			httpsHostName, err = service.getHttpsAddrFromMap(hostName)
+			if err != nil {
+				service.logger.Infof("When replacing hostname in remote cluster reference %v, skipping node %v since received error getting https address. err=%v\n", ref.Id, hostName, err)
+				continue
+			}
+			connStr = httpsHostName
+		}
+
+		service.logger.Debugf("Selected node %v to refresh remote cluster reference %v\n", connStr, ref.Id)
+
+		// connect to selected node to retrieve nodes info
+		clusterUUID, _, err := utils.GetClusterUUIDAndNodeListWithMinInfo(connStr, username, password, certificate, sanInCertificate, service.logger)
+		if err != nil {
+			service.logger.Infof("When replacing hostname in remote cluster reference %v, skipping node %v since it is not accessible. err=%v\n", ref.Id, connStr, err)
+			continue
+		} else {
+			// selected node is accessible
+			if clusterUUID != ref.Uuid {
+				// if the node is not in the target cluster, skip it
+				service.logger.Infof("When replacing hostname in remote cluster reference %v, skipping node %v since it is not in target cluster.\n", ref.Id, connStr)
+				continue
+			} else {
+				// this node can be used as the replacement node
+				oldHostName := ref.HostName
+				ref.HostName = hostName
+				ref.HttpsHostName = httpsHostName
+				// changes to ref.HostName needs to be saved to metakv, so that it can be propagated to other nodes
+				// call setRemoteCluster() instead of SetRemoteCluster(), so that ref.Revision is preserved
+				// if reference in metakv has been updated (e.g., due to update to reference from other source nodes)
+				// after ref is retrieved from cache, setRemoteCluster() will fail due to mismatching revision
+				// this way we can avoid unnecessary update to metakv
+				err = service.setRemoteCluster(ref.Name, ref)
+				if err != nil {
+					service.logger.Infof("Error updating hostname in remote cluster reference %v. err=%v\n", ref.Id, err)
+				} else {
+					service.logger.Infof("Updated hostname in remote cluster reference %v from %v to %v.\n", ref.Id, oldHostName, hostName)
+				}
+				//  do not continue iteration even if setRemoteCluster fails, since reference in metakv may have been updated.
+				return err
+			}
+		}
+	}
+
+	// if we get here, we did not find a usable replacement node and we did not update remote cluster ref
+	return fmt.Errorf("Could not find usable node for %v\n", ref.Id)
+
 }
 
 // for ssl enabled ref, working_conn_str is in the form of hostname:sslport:kvport.
