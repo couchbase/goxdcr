@@ -140,7 +140,7 @@ func (ref *RemoteClusterReference) SameRef(ref2 *RemoteClusterReference) bool {
 		return false
 	}
 	return ref.Id == ref2.Id && ref.Uuid == ref2.Uuid && ref.Name == ref2.Name &&
-		ref.HostName == ref2.HostName && ref.UserName == ref2.UserName &&
+		ref.HostName == ref2.HostName && ref.HttpsHostName == ref2.HttpsHostName && ref.UserName == ref2.UserName &&
 		ref.Password == ref2.Password && reflect.DeepEqual(ref.Revision, ref2.Revision) &&
 		ref.DemandEncryption == ref2.DemandEncryption && ref.EncryptionType == ref2.EncryptionType &&
 		bytes.Equal(ref.Certificate, ref2.Certificate)
@@ -170,6 +170,28 @@ func (ref *RemoteClusterReference) Clone() *RemoteClusterReference {
 		ActiveHttpsHostName: ref.ActiveHttpsHostName,
 		EncryptionType:      ref.EncryptionType,
 		SANInCertificate:    ref.SANInCertificate,
+		// !!! shallow copy of revision.
+		// ref.Revision should only be passed along and should never be modified
+		Revision: ref.Revision,
+	}
+}
+
+// clone for metakv update, i.e., clone without any internal fields
+func (ref *RemoteClusterReference) CloneForMetakvUpdate() *RemoteClusterReference {
+	if ref == nil {
+		return nil
+	}
+	return &RemoteClusterReference{Id: ref.Id,
+		Uuid:             ref.Uuid,
+		Name:             ref.Name,
+		HostName:         ref.HostName,
+		HttpsHostName:    ref.HttpsHostName,
+		UserName:         ref.UserName,
+		Password:         ref.Password,
+		DemandEncryption: ref.DemandEncryption,
+		Certificate:      ref.Certificate,
+		EncryptionType:   ref.EncryptionType,
+		SANInCertificate: ref.SANInCertificate,
 	}
 }
 
