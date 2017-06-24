@@ -1231,6 +1231,11 @@ func (ckmgr *CheckpointManager) doCheckpoint(vbno uint16, through_seqno_map map[
 		} else {
 			// capi mode, get high_seqno and vbuuid on target by calling commitForCheckpoint
 			remote_seqno, targetVBOpaque, err = ckmgr.capi_svc.CommitForCheckpoint(ckmgr.remote_bucket, curCkptTargetVBOpaque, vbno)
+			if err != nil {
+				// We should not continue checkpointing if we had issues communicating with capi service
+				ckmgr.logger.Warnf("Error contacting capi service when calling CommitForCheckpoint: %v. Skip persisting checkpoint for vb %v.\n", err.Error(), vbno)
+				return
+			}
 		}
 
 		// targetVBOpaque may be nil when connecting to elastic search, skip target vb uuid check in this case
