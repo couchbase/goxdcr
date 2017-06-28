@@ -137,15 +137,7 @@ func GetClusterInfo(hostAddr, path, username, password string, certificate []byt
 	return clusterInfo, nil
 }
 
-func GetClusterUUID(clusterConnInfoProvider base.ClusterConnectionInfoProvider, logger *log.CommonLogger) (string, error) {
-	hostAddr, err := clusterConnInfoProvider.MyConnectionStr()
-	if err != nil {
-		return "", err
-	}
-	username, password, certificate, sanInCertificate, err := clusterConnInfoProvider.MyCredentials()
-	if err != nil {
-		return "", err
-	}
+func GetClusterUUID(hostAddr, username, password string, certificate []byte, sanInCertificate bool, logger *log.CommonLogger) (string, error) {
 	clusterInfo, err := GetClusterInfo(hostAddr, base.PoolsPath, username, password, certificate, sanInCertificate, logger)
 	if err != nil {
 		return "", err
