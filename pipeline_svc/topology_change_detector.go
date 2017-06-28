@@ -449,7 +449,7 @@ func (top_detect_svc *TopologyChangeDetectorSvc) getTargetBucketInfo() (int, map
 			C.2 if the call returns a bucket list that does not contain target bucket, it is case #3. the repl spec needs to be deleted
 			C.3 if the call returns a bucket list that contains target bucket, continue with target bucket validation
 		*/
-		curTargetClusterUUID, err := utils.GetClusterUUID(targetClusterRef, top_detect_svc.logger)
+		curTargetClusterUUID, err := utils.GetClusterUUID(connStr, username, password, certificate, sanInCertificate, top_detect_svc.logger)
 		if err != nil {
 			// case 1, target node not accessible, skip target check
 			logMessage := fmt.Sprintf("%v skipping target bucket check since %v is not accessible. err=%v\n", spec.Id, connStr, err)
@@ -511,7 +511,7 @@ func (top_detect_svc *TopologyChangeDetectorSvc) getTargetBucketInfo() (int, map
 		}
 
 		//
-		curTargetClusterUUID, err := utils.GetClusterUUID(targetClusterRef, top_detect_svc.logger)
+		curTargetClusterUUID, err := utils.GetClusterUUID(connStr, username, password, certificate, sanInCertificate, top_detect_svc.logger)
 		if err != nil {
 			// target node not accessible, skip target check
 			logMessage := fmt.Sprintf("%v skipping target bucket check since %v is not accessible. err=%v\n", spec.Id, connStr, err)
