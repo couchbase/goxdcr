@@ -1243,7 +1243,7 @@ func (ckmgr *CheckpointManager) doCheckpoint(vbno uint16, through_seqno_map map[
 				// if we cannot find uuid for the checkpoint seqno, the checkpoint seqno is unusable
 				// skip checkpointing of this vb
 				// return nil so that we can continue to checkpoint the next vb
-				ckmgr.logger.Warnf("%v\n", err.Error())
+				ckmgr.logger.Warnf("%v\n", failoverUuidErr.Error())
 				return nil
 			}
 
