@@ -1219,6 +1219,7 @@ func (ckmgr *CheckpointManager) doCheckpoint(vbno uint16, through_seqno_map map[
 		// get remote_seqno and vbuuid from target
 		// Items: 3 and 4
 		var remote_seqno uint64
+		var commitForCheckpointErr error
 		if !ckmgr.capi {
 			// non-capi mode, high_seqno and vbuuid on target have been retrieved through vbucket-seqno stats
 			high_seqno_and_vbuuid, ok := high_seqno_and_vbuuid_map[vbno]
@@ -1232,16 +1233,20 @@ func (ckmgr *CheckpointManager) doCheckpoint(vbno uint16, through_seqno_map map[
 			targetVBOpaque = &metadata.TargetVBUuid{vbuuid}
 		} else {
 			// capi mode, get high_seqno and vbuuid on target by calling commitForCheckpoint
-			remote_seqno, targetVBOpaque, err = ckmgr.capi_svc.CommitForCheckpoint(ckmgr.remote_bucket, curCkptTargetVBOpaque, vbno)
-			if err != nil {
-				// We should not continue checkpointing if we had issues communicating with capi service
-				ckmgr.logger.Warnf("Error contacting capi service when calling CommitForCheckpoint: %v. Skip persisting checkpoint for vb %v.\n", err.Error(), vbno)
-				return
+			remote_seqno, targetVBOpaque, commitForCheckpointErr = ckmgr.capi_svc.CommitForCheckpoint(ckmgr.remote_bucket, curCkptTargetVBOpaque, vbno)
+			if commitForCheckpointErr != nil && commitForCheckpointErr != service_def.VB_OPAQUE_MISMATCH_ERR {
+				// We should not continue checkpointing this vb if we had issues communicating with capi service
+				ckmgr.logger.Warnf("Error contacting capi service when calling CommitForCheckpoint: %v. Skip persisting checkpoint for vb %v.\n", commitForCheckpointErr.Error(), vbno)
+				return nil
 			}
 		}
 
-		// targetVBOpaque may be nil when connecting to elastic search, skip target vb uuid check in this case
-		if targetVBOpaque == nil || curCkptTargetVBOpaque.IsSame(targetVBOpaque) {
+		// 1. in capi mode, we can rely on commitForCheckpoint() for target vb opaque check
+		///   - a VB_OPAQUE_MISMATCH_ERR would be returned if target vb opaque has changed
+		// 2. in non-capi mode, we need to do the target vb opaque check ourselves
+		if (ckmgr.capi && commitForCheckpointErr == nil) ||
+			(!ckmgr.capi && curCkptTargetVBOpaque.IsSame(targetVBOpaque)) {
+			// if target vb opaque has not changed, persist checkpoint record
 			ckptRecordTargetSeqno := remote_seqno
 			// Item 2:
 			// Get the failover_UUID here
@@ -1292,7 +1297,6 @@ func (ckmgr *CheckpointManager) doCheckpoint(vbno uint16, through_seqno_map map[
 				// since someone jumped ahead of us
 				ckmgr.logger.Warnf("%v skipping checkpointing for vb=%v version %v since a more recent checkpoint has been completed",
 					ckmgr.pipeline.Topic(), vbno, currRecordVersion)
-				err = nil
 			}
 		} else {
 			// vb uuid on target has changed. rollback may be needed. return error to get pipeline restarted
@@ -1303,7 +1307,9 @@ func (ckmgr *CheckpointManager) doCheckpoint(vbno uint16, through_seqno_map map[
 	} else {
 		panic(fmt.Sprintf("%v Trying to doCheckpoint on vb=%v which is not in MyVBList", ckmgr.pipeline.Topic(), vbno))
 	}
-	return
+	// no error fall through. return nil here to keep checkpointing/replication going.
+	// if there is a need to stop checkpointing/replication, it needs to be done in a separate return statement
+	return nil
 }
 
 func (ckmgr *CheckpointManager) raiseSuccessCkptForVbEvent(ckpt_record metadata.CheckpointRecord, vbno uint16) {

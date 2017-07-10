@@ -22,6 +22,7 @@ import (
 )
 
 var NoSupportForXDCRCheckpointingError = errors.New("No xdcrcheckpointing support on older node")
+var VB_OPAQUE_MISMATCH_ERR error = errors.New("The remote vb opaque doesn't match with the one provided")
 
 type RemoteBucketInfo struct {
 	RemoteClusterRefName     string

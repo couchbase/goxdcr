@@ -19,7 +19,6 @@ const (
 )
 
 //errors
-var VB_OPAQUE_MISMATCH_ERR error = errors.New("The remote vb opaque doesn't match with the one provided")
 var NO_VB_OPAQUE_IN_RESP_ERR error = errors.New("No vb opaque in the response")
 
 //apiRequest is a structure for http request used for CAPI
@@ -114,7 +113,7 @@ func (capi_svc *CAPIService) CommitForCheckpoint(remoteBucket *service_def.Remot
 			return 0, nil, err
 		}
 
-		return 0, vbOpaque, VB_OPAQUE_MISMATCH_ERR
+		return 0, vbOpaque, service_def.VB_OPAQUE_MISMATCH_ERR
 	} else if err == nil && status_code == 200 {
 		commitOpaque, ok := respMap["commitopaque"]
 		if !ok {
