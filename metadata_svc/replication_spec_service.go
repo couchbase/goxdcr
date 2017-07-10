@@ -129,7 +129,7 @@ func (service *ReplicationSpecService) replicationSpec(replicationId string) (*m
 	return val.(*ReplicationSpecVal).spec, nil
 }
 
-func (service *ReplicationSpecService) ValidateNewReplicationSpec(sourceBucket, targetCluster, targetBucket string, settings map[string]interface{}) (string, string, *metadata.RemoteClusterReference, map[string]error) {
+func (service *ReplicationSpecService) ValidateNewReplicationSpec(sourceBucket, targetCluster, targetBucket string, settings map[string]interface{}) (string, string, *metadata.RemoteClusterReference, map[string]error, string) {
 	service.logger.Infof("Start ValidateAddReplicationSpec, sourceBucket=%v, targetCluster=%v, targetBucket=%v\n", sourceBucket, targetCluster, targetBucket)
 
 	errorMap := make(map[string]error)
@@ -148,7 +148,7 @@ func (service *ReplicationSpecService) ValidateNewReplicationSpec(sourceBucket, 
 	service.validateBucket(sourceBucket, targetCluster, targetBucket, sourceBucketType, sourceEvictionPolicy, err_source, errorMap, true)
 
 	if len(errorMap) > 0 {
-		return "", "", nil, errorMap
+		return "", "", nil, errorMap, ""
 	}
 
 	// validate remote cluster ref
@@ -156,7 +156,7 @@ func (service *ReplicationSpecService) ValidateNewReplicationSpec(sourceBucket, 
 	targetClusterRef, err := service.remote_cluster_svc.RemoteClusterByRefName(targetCluster, true)
 	if err != nil {
 		errorMap[base.ToCluster] = utils.NewEnhancedError("cannot find remote cluster", err)
-		return "", "", nil, errorMap
+		return "", "", nil, errorMap, ""
 	}
 	service.logger.Infof("Successfully retrieved target cluster reference %v. time take=%v\n", targetClusterRef.Name, time.Since(start_time))
 
@@ -173,7 +173,7 @@ func (service *ReplicationSpecService) ValidateNewReplicationSpec(sourceBucket, 
 
 		if sourceClusterUuid == targetClusterRef.Uuid {
 			errorMap[base.PlaceHolderFieldKey] = errors.New("Replication from a bucket to the same bucket is not allowed")
-			return "", "", nil, errorMap
+			return "", "", nil, errorMap, ""
 		}
 		service.logger.Infof("Validated that source bucket and target bucket are not the same. time taken=%v\n", time.Since(start_time))
 	}
@@ -181,12 +181,12 @@ func (service *ReplicationSpecService) ValidateNewReplicationSpec(sourceBucket, 
 	remote_connStr, err := targetClusterRef.MyConnectionStr()
 	if err != nil {
 		errorMap[base.ToCluster] = utils.NewEnhancedError("Invalid remote cluster. MyConnectionStr() failed.", err)
-		return "", "", nil, errorMap
+		return "", "", nil, errorMap, ""
 	}
 	remote_userName, remote_password, certificate, sanInCertificate, err := targetClusterRef.MyCredentials()
 	if err != nil {
 		errorMap[base.ToCluster] = utils.NewEnhancedError("Invalid remote cluster. MyCredentials() failed.", err)
-		return "", "", nil, errorMap
+		return "", "", nil, errorMap, ""
 	}
 
 	//validate target bucket
@@ -196,14 +196,14 @@ func (service *ReplicationSpecService) ValidateNewReplicationSpec(sourceBucket, 
 	service.validateBucket(sourceBucket, targetCluster, targetBucket, targetBucketType, "", err_target, errorMap, false)
 
 	if len(errorMap) > 0 {
-		return "", "", nil, errorMap
+		return "", "", nil, errorMap, ""
 	}
 
 	repId := metadata.ReplicationId(sourceBucket, targetClusterRef.Uuid, targetBucket)
 	_, err = service.replicationSpec(repId)
 	if err == nil {
 		errorMap[base.PlaceHolderFieldKey] = errors.New(ReplicationSpecAlreadyExistErrorMessage)
-		return "", "", nil, errorMap
+		return "", "", nil, errorMap, ""
 	}
 
 	repl_type, ok := settings[metadata.ReplicationType]
@@ -212,7 +212,7 @@ func (service *ReplicationSpecService) ValidateNewReplicationSpec(sourceBucket, 
 			// for half-ssl ref, validate that target memcached supports SCRAM-SHA authentication
 			if len(targetKVVBMap) == 0 {
 				errorMap[base.ToCluster] = errors.New("kv vb map is empty")
-				return "", "", nil, errorMap
+				return "", "", nil, errorMap, ""
 			}
 			// pick the first kv in kvVBMap to use
 			var kvConnStr string
@@ -224,7 +224,7 @@ func (service *ReplicationSpecService) ValidateNewReplicationSpec(sourceBucket, 
 			targetClusterCompatibility, err := utils.GetClusterCompatibilityFromBucketInfo(targetBucket, targetBucketInfo, service.logger)
 			if err != nil {
 				errorMap[base.ToCluster] = fmt.Errorf("Error retrieving cluster compatibility on bucket %v. err=%v", targetBucket, err)
-				return "", "", nil, errorMap
+				return "", "", nil, errorMap, ""
 			}
 
 			hasRBACSupport := simple_utils.IsClusterCompatible(targetClusterCompatibility, base.VersionForRBACAndXattrSupport)
@@ -238,7 +238,7 @@ func (service *ReplicationSpecService) ValidateNewReplicationSpec(sourceBucket, 
 				password, err = utils.GetBucketPasswordFromBucketInfo(targetBucket, targetBucketInfo, service.logger)
 				if err != nil {
 					errorMap[base.ToCluster] = fmt.Errorf("Error retrieving password on bucket %v. err=%v", targetBucket, err)
-					return "", "", nil, errorMap
+					return "", "", nil, errorMap, ""
 				}
 			}
 
@@ -250,21 +250,30 @@ func (service *ReplicationSpecService) ValidateNewReplicationSpec(sourceBucket, 
 			}
 			if err != nil {
 				errorMap[base.ToCluster] = fmt.Errorf("Error verifying SCRAM-SHA authentication support. err=%v", err)
-				return "", "", nil, errorMap
+				return "", "", nil, errorMap, ""
 			}
 		}
 	}
 
-	// validate that source and target bucket have the same conflict resolution type metadata
-	// But if it's CAPI, assume the target node is elasticSearch, and let it pass through
-	if (repl_type != metadata.ReplicationTypeCapi) && (sourceConflictResolutionType != targetConflictResolutionType) {
-		errorMap[base.PlaceHolderFieldKey] = errors.New("Replication between buckets with different ConflictResolutionType setting is not allowed")
-		return "", "", nil, errorMap
+	var warning string
+	if repl_type != metadata.ReplicationTypeCapi {
+		// for xmem replication, validate that source and target bucket have the same conflict resolution type metadata
+		if sourceConflictResolutionType != targetConflictResolutionType {
+			errorMap[base.PlaceHolderFieldKey] = errors.New("Replication between buckets with different ConflictResolutionType setting is not allowed")
+			return "", "", nil, errorMap, ""
+		}
+	} else {
+		//for capi replication, if source bucket has timestamp conflict resolution enabled,
+		// compose a warning to be displayed in the replication creation ui log
+		if sourceConflictResolutionType == base.ConflictResolutionType_Lww {
+			warning = fmt.Sprintf("\nReplication to an Elasticsearch target cluster uses XDCR Version 1 (CAPI protocol), which does not support Timestamp Based Conflict Resolution. Even though the replication source bucket has Timestamp Based Conflict Resolution enabled, the replication will use Sequence Number Based Conflict Resolution instead.")
+			service.logger.Warn(warning)
+		}
 	}
 
 	service.logger.Infof("Finished ValidateAddReplicationSpec. errorMap=%v\n", errorMap)
 
-	return sourceBucketUUID, targetBucketUUID, targetClusterRef, errorMap
+	return sourceBucketUUID, targetBucketUUID, targetClusterRef, errorMap, warning
 }
 
 func (service *ReplicationSpecService) validateBucket(sourceBucket, targetCluster, targetBucket, bucketType string, evictionPolicy string, err error, errorMap map[string]error, isSourceBucket bool) {
@@ -298,8 +307,8 @@ func (service *ReplicationSpecService) validateBucket(sourceBucket, targetCluste
 	}
 }
 
-func (service *ReplicationSpecService) AddReplicationSpec(spec *metadata.ReplicationSpecification) error {
-	service.logger.Infof("Start AddReplicationSpec, spec=%v\n", spec)
+func (service *ReplicationSpecService) AddReplicationSpec(spec *metadata.ReplicationSpecification, additionalInfo string) error {
+	service.logger.Infof("Start AddReplicationSpec, spec=%v, additionalInfo=%v\n", spec, additionalInfo)
 
 	value, err := json.Marshal(spec)
 	if err != nil {
@@ -316,7 +325,7 @@ func (service *ReplicationSpecService) AddReplicationSpec(spec *metadata.Replica
 
 	err = service.updateCache(spec.Id, spec)
 	if err == nil {
-		service.writeUiLog(spec, "created", "")
+		service.writeUiLogWithAdditionalInfo(spec, "created", additionalInfo)
 	}
 	return err
 }
@@ -515,6 +524,17 @@ func (service *ReplicationSpecService) writeUiLog(spec *metadata.ReplicationSpec
 			uiLogMsg = fmt.Sprintf("Replication from bucket \"%s\" to bucket \"%s\" on cluster \"%s\" %s, since %s", spec.SourceBucketName, spec.TargetBucketName, remoteClusterName, action, reason)
 		} else {
 			uiLogMsg = fmt.Sprintf("Replication from bucket \"%s\" to bucket \"%s\" on cluster \"%s\" %s.", spec.SourceBucketName, spec.TargetBucketName, remoteClusterName, action)
+		}
+		service.uilog_svc.Write(uiLogMsg)
+	}
+}
+
+func (service *ReplicationSpecService) writeUiLogWithAdditionalInfo(spec *metadata.ReplicationSpecification, action, additionalInfo string) {
+	if service.uilog_svc != nil {
+		remoteClusterName := service.remote_cluster_svc.GetRemoteClusterNameFromClusterUuid(spec.TargetClusterUUID)
+		uiLogMsg := fmt.Sprintf("Replication from bucket \"%s\" to bucket \"%s\" on cluster \"%s\" %s.", spec.SourceBucketName, spec.TargetBucketName, remoteClusterName, action)
+		if additionalInfo != "" {
+			uiLogMsg += fmt.Sprintf(" %s", additionalInfo)
 		}
 		service.uilog_svc.Write(uiLogMsg)
 	}

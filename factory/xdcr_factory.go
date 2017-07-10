@@ -191,9 +191,13 @@ func (xdcrf *XDCRFactory) NewPipeline(topic string, progress_recorder common.Pip
 	}
 
 	// sourceCRMode is the conflict resolution mode to use when resolving conflicts for big documents at source side
-	// sourceCRMode is LWW if and only if target bucket is LWW enabled, so as to ensure that source side conflict
-	// resolution and target side conflict resolution yield consistent results
-	sourceCRMode := simple_utils.GetCRModeFromConflictResolutionTypeSetting(conflictResolutionType)
+	// capi replication always uses rev id based conflict resolution
+	sourceCRMode := base.CRMode_RevId
+	if !isCapiReplication {
+		// for xmem replication, sourceCRMode is LWW if and only if target bucket is LWW enabled, so as to ensure that source side conflict
+		// resolution and target side conflict resolution yield consistent results
+		sourceCRMode = simple_utils.GetCRModeFromConflictResolutionTypeSetting(conflictResolutionType)
+	}
 
 	xdcrf.logger.Infof("%v sourceCRMode=%v isCapiReplication=%v\n", topic, sourceCRMode, isCapiReplication)
 

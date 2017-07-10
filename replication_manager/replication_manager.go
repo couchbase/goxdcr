@@ -615,7 +615,7 @@ func (rm *replicationManager) createAndPersistReplicationSpec(justValidate bool,
 		justValidate, sourceBucket, targetCluster, targetBucket, settings)
 
 	// validate that everything is alright with the replication configuration before actually creating it
-	sourceBucketUUID, targetBucketUUID, targetClusterRef, errorMap := replication_mgr.repl_spec_svc.ValidateNewReplicationSpec(sourceBucket, targetCluster, targetBucket, settings)
+	sourceBucketUUID, targetBucketUUID, targetClusterRef, errorMap, warning := replication_mgr.repl_spec_svc.ValidateNewReplicationSpec(sourceBucket, targetCluster, targetBucket, settings)
 	if len(errorMap) > 0 {
 		return nil, errorMap, nil
 	}
@@ -655,7 +655,7 @@ func (rm *replicationManager) createAndPersistReplicationSpec(justValidate bool,
 	}
 
 	//persist it
-	err = replication_mgr.repl_spec_svc.AddReplicationSpec(spec)
+	err = replication_mgr.repl_spec_svc.AddReplicationSpec(spec, warning)
 	if err == nil {
 		logger_rm.Infof("Success adding replication specification %s\n", spec.Id)
 		return spec, nil, nil
