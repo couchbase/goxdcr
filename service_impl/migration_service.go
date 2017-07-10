@@ -584,7 +584,9 @@ func (service *MigrationSvc) migrateReplicationDoc(replicationDocData interface{
 		service.logger.Infof("Deleted existing replication spec with id=%v\n", spec.Id)
 	}
 
-	err = service.repl_spec_svc.AddReplicationSpec(spec)
+	// TODO we should add non-empty additionalInfo here to differentiate the repl spec created by migration
+	// from repl spec created by user
+	err = service.repl_spec_svc.AddReplicationSpec(spec, ""/*addtionalInfo*/)
 	if err != nil {
 		fatalErrorList = append(fatalErrorList, err)
 	}
