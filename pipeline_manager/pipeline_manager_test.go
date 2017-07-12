@@ -143,6 +143,7 @@ func setupDetailedMocking(testLogger *log.CommonLogger,
 	testRemoteClusterRef *metadata.RemoteClusterReference,
 	testPipeline *common.Pipeline) {
 
+	testReplicationStatus.Pipeline_updater = testRepairer
 	replSpecSvcMock.On("GetDerivedObj", testTopic).Return(testReplicationStatus, nil)
 	replSpecSvcMock.On("ReplicationSpec", testTopic).Return(testReplicationSpec, nil)
 	replSpecSvcMock.On("SetDerivedObj", testTopic, mock.Anything).Return(nil)
@@ -426,6 +427,26 @@ func setupMockPipelineMgr(replSpecSvcMock *service_def.ReplicationSpecSvc,
 
 	pmMock.On("StopPipelineInner", mock.Anything).Return(nil)
 	pmMock.On("StartPipeline", testTopic).Return(nil)
+	pmMock.On("GetReplSpecSvc").Return(replSpecSvcMock)
+	pmMock.On("GetXDCRTopologySvc").Return(xdcrTopologyMock)
+	testReplicationSettings.Active = true
+
+	return pmMock
+}
+
+// Used for testing if Start Pipeline returns an error code
+func setupMockPipelineMgrWithErrorCode(replSpecSvcMock *service_def.ReplicationSpecSvc,
+	testReplicationSettings *metadata.ReplicationSettings,
+	testTopic string,
+	testRepairer *PipelineUpdater,
+	xdcrTopologyMock *service_def.XDCRCompTopologySvc,
+	retError error) *PipelineMgrMock.Pipeline_mgr_iface {
+
+	pmMock := &PipelineMgrMock.Pipeline_mgr_iface{}
+	testRepairer.pipelineMgr = pmMock
+
+	pmMock.On("StopPipelineInner", mock.Anything).Return(nil)
+	pmMock.On("StartPipeline", testTopic).Return(retError)
 	pmMock.On("GetReplSpecSvc").Return(replSpecSvcMock)
 	pmMock.On("GetXDCRTopologySvc").Return(xdcrTopologyMock)
 	testReplicationSettings.Active = true

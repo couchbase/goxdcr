@@ -32,10 +32,6 @@ const (
 	CAPI_NOZZLE_NAME_PREFIX = "capi"
 )
 
-// errors
-var ErrorNoSourceNozzle = errors.New("Invalid configuration. No source nozzle can be constructed since the source kv nodes are not the master for any vbuckets.")
-var ErrorNoTargetNozzle = errors.New("Invalid configuration. No target nozzle can be constructed.")
-
 // interface so we can autogenerate mock and do unit test
 type XDCRFactoryIface interface {
 	NewPipeline(topic string, progress_recorder common.PipelineProgressRecorder) (common.Pipeline, error)
@@ -212,7 +208,7 @@ func (xdcrf *XDCRFactory) NewPipeline(topic string, progress_recorder common.Pip
 	}
 	if len(sourceNozzles) == 0 {
 		// no pipeline is constructed if there is no source nozzle
-		return nil, ErrorNoSourceNozzle
+		return nil, base.ErrorNoSourceNozzle
 	}
 
 	progress_recorder(fmt.Sprintf("%v source nozzles have been constructed", len(sourceNozzles)))
@@ -476,7 +472,7 @@ func (xdcrf *XDCRFactory) constructOutgoingNozzles(spec *metadata.ReplicationSpe
 		return
 	}
 	if len(kvVBMap) == 0 {
-		err = ErrorNoTargetNozzle
+		err = base.ErrorNoTargetNozzle
 		return
 	}
 

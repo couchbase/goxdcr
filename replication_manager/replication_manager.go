@@ -665,7 +665,18 @@ func (rm *replicationManager) createAndPersistReplicationSpec(justValidate bool,
 	}
 }
 
-// get info of all running replications
+/**
+ * Certain errors are still considered errors but should not be raised to the UI level.
+ * Returns true if the error is to be hidden from the web GUI.
+ */
+func bypassUIErrorCodes(errStr string) bool {
+	if errStr == base.ErrorNoSourceNozzle.Error() {
+		return true
+	}
+	return false
+}
+
+// get info of all running replications - serves back to consumers who call the REST end point, i.e. UI
 func GetReplicationInfos() ([]base.ReplicationInfo, error) {
 	replInfos := make([]base.ReplicationInfo, 0)
 
@@ -695,10 +706,12 @@ func GetReplicationInfos() ([]base.ReplicationInfo, error) {
 				}
 
 				for _, pipeline_error := range errs {
-					//prepend current node name to the error message to make it more helpful
-					err_msg := cur_node + ":" + pipeline_error.ErrMsg
-					errInfo := base.ErrorInfo{pipeline_error.Timestamp.UnixNano(), err_msg}
-					replInfo.ErrorList = append(replInfo.ErrorList, errInfo)
+					if !bypassUIErrorCodes(pipeline_error.ErrMsg) {
+						//prepend current node name to the error message to make it more helpful
+						err_msg := cur_node + ":" + pipeline_error.ErrMsg
+						errInfo := base.ErrorInfo{pipeline_error.Timestamp.UnixNano(), err_msg}
+						replInfo.ErrorList = append(replInfo.ErrorList, errInfo)
+					}
 				}
 			}
 		}

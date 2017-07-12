@@ -142,9 +142,12 @@ const (
 var ParseIntBase = 10
 var ParseIntBitSize = 64
 
+// Various error messages
 var ErrorNotMyVbucket = errors.New("NOT_MY_VBUCKET")
-
 var InvalidStateTransitionErrMsg = "Can't move to state %v - %v's current state is %v, can only move to state [%v]"
+var InvalidCerfiticateError = errors.New("certificate must be a single, PEM-encoded x509 certificate and nothing more (failed to parse given certificate)")
+var ErrorNoSourceNozzle = errors.New("Invalid configuration. No source nozzle can be constructed since the source kv nodes are not the master for any vbuckets.")
+var ErrorNoTargetNozzle = errors.New("Invalid configuration. No target nozzle can be constructed.")
 
 // constants used for remote cluster references
 const (
@@ -248,8 +251,6 @@ const (
 
 // constant used in replication info to ensure compatibility with erlang xdcr
 var MaxVBReps = "max_vbreps"
-
-var InvalidCerfiticateError = errors.New("certificate must be a single, PEM-encoded x509 certificate and nothing more (failed to parse given certificate)")
 
 const (
 	GET_WITH_META    = mc.CommandCode(0xa0)

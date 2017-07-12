@@ -9,11 +9,8 @@
 
 package common
 
-import (
-
-)
+import ()
 
 type PipelineFactory interface {
-	NewPipeline (topic string, progressRecorder PipelineProgressRecorder) (Pipeline, error)
+	NewPipeline(topic string, progressRecorder PipelineProgressRecorder) (Pipeline, error)
 }
-
