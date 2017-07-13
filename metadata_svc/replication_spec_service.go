@@ -256,7 +256,14 @@ func (service *ReplicationSpecService) ValidateNewReplicationSpec(sourceBucket, 
 	}
 
 	var warning string
+	isTargetES := utils.CheckWhetherClusterIsESBasedOnBucketInfo(targetBucketInfo)
 	if repl_type != metadata.ReplicationTypeCapi {
+		// for xmem replication, validate that target is not an elasticsearch cluster
+		if isTargetES {
+			errorMap[base.PlaceHolderFieldKey] = errors.New("Replication to an Elasticsearch target cluster using XDCR Version 2 (XMEM protocol) is not supported. Use XDCR Version 1 (CAPI protocol) instead.")
+			return "", "", nil, errorMap, ""
+		}
+
 		// for xmem replication, validate that source and target bucket have the same conflict resolution type metadata
 		if sourceConflictResolutionType != targetConflictResolutionType {
 			errorMap[base.PlaceHolderFieldKey] = errors.New("Replication between buckets with different ConflictResolutionType setting is not allowed")
@@ -264,7 +271,6 @@ func (service *ReplicationSpecService) ValidateNewReplicationSpec(sourceBucket, 
 		}
 	} else {
 		//for capi replication, if target is not elastic search cluster, compose a warning to be displayed in the replication creation ui log
-		isTargetES := utils.CheckWhetherClusterIsESBasedOnBucketInfo(targetBucketInfo)
 		if !isTargetES {
 			warning = fmt.Sprintf("\nXDCR Version 1 (CAPI protocol) replication has been deprecated and should be used only for an Elasticsearch target cluster. Since the current target cluster is a Couchbase Server cluster, use XDCR Version 2 (XMEM protocol) instead.")
 		}
