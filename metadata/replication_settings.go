@@ -62,7 +62,7 @@ type Range struct {
 var ReplicationTypeConfig = &SettingsConfig{ReplicationTypeXmem, nil}
 var FilterExpressionConfig = &SettingsConfig{"", nil}
 var ActiveConfig = &SettingsConfig{true, nil}
-var CheckpointIntervalConfig = &SettingsConfig{1800, &Range{60, 14400}}
+var CheckpointIntervalConfig = &SettingsConfig{600, &Range{60, 14400}}
 var BatchCountConfig = &SettingsConfig{500, &Range{10, 10000}}
 var BatchSizeConfig = &SettingsConfig{2048, &Range{10, 10000}}
 var FailureRestartIntervalConfig = &SettingsConfig{10, &Range{1, 300}}
@@ -109,7 +109,7 @@ type ReplicationSettings struct {
 	Active bool `json:"active"`
 
 	//the interval between two checkpoint
-	//default: 1800 s
+	//default: 600 s
 	//range: 60-14400s
 	CheckpointInterval int `json:"checkpoint_interval"`
 
