@@ -67,6 +67,7 @@ var BucketsKey = "buckets"
 var EvictionPolicyKey = "evictionPolicy"
 var BucketNameKey = "name"
 var ClusterMembershipKey = "clusterMembership"
+var AuthTypeKey = "authType"
 
 // URL related constants
 var UrlDelimiter = "/"

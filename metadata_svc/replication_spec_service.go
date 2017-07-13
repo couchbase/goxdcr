@@ -263,12 +263,20 @@ func (service *ReplicationSpecService) ValidateNewReplicationSpec(sourceBucket, 
 			return "", "", nil, errorMap, ""
 		}
 	} else {
-		//for capi replication, if source bucket has timestamp conflict resolution enabled,
+		//for capi replication, if target is not elastic search cluster, compose a warning to be displayed in the replication creation ui log
+		isTargetES := utils.CheckWhetherClusterIsESBasedOnBucketInfo(targetBucketInfo)
+		if !isTargetES {
+			warning = fmt.Sprintf("\nXDCR Version 1 (CAPI protocol) replication has been deprecated and should be used only for an Elasticsearch target cluster. Since the current target cluster is a Couchbase Server cluster, use XDCR Version 2 (XMEM protocol) instead.")
+		}
+		// also for capi replication,  if source bucket has timestamp conflict resolution enabled,
 		// compose a warning to be displayed in the replication creation ui log
 		if sourceConflictResolutionType == base.ConflictResolutionType_Lww {
-			warning = fmt.Sprintf("\nReplication to an Elasticsearch target cluster uses XDCR Version 1 (CAPI protocol), which does not support Timestamp Based Conflict Resolution. Even though the replication source bucket has Timestamp Based Conflict Resolution enabled, the replication will use Sequence Number Based Conflict Resolution instead.")
-			service.logger.Warn(warning)
+			warning += fmt.Sprintf("\nReplication to an Elasticsearch target cluster uses XDCR Version 1 (CAPI protocol), which does not support Timestamp Based Conflict Resolution. Even though the replication source bucket has Timestamp Based Conflict Resolution enabled, the replication will use Sequence Number Based Conflict Resolution instead.")
 		}
+	}
+
+	if warning != "" {
+		service.logger.Warn(warning)
 	}
 
 	service.logger.Infof("Finished ValidateAddReplicationSpec. errorMap=%v\n", errorMap)

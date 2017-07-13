@@ -657,6 +657,13 @@ func GetBucketTypeFromBucketInfo(bucketName string, bucketInfo map[string]interf
 	return bucketType, nil
 }
 
+// check if a bucket belongs to an elastic search (es) cluster by looking for "authType" field in bucket info.
+// if not found, cluster is es
+func CheckWhetherClusterIsESBasedOnBucketInfo(bucketInfo map[string]interface{}) bool {
+	_, ok := bucketInfo[base.AuthTypeKey]
+	return !ok
+}
+
 // get conflict resolution type setting from bucket info
 func GetConflictResolutionTypeFromBucketInfo(bucketName string, bucketInfo map[string]interface{}) (string, error) {
 	conflictResolutionType := base.ConflictResolutionType_Seqno
