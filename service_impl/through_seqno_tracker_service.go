@@ -447,7 +447,12 @@ func isSeqnoGapSeqno(gap_seqno_list_1, gap_seqno_list_2 []uint64, seqno uint64) 
 
 func (tsTracker *ThroughSeqnoTrackerSvc) GetThroughSeqnos() map[uint16]uint64 {
 	start_time := time.Now()
-	defer tsTracker.logger.Infof("%v GetThroughSeqnos completed after %v\n", tsTracker.id, time.Since(start_time))
+	defer func() {
+		time_taken := time.Since(start_time)
+		if time_taken > base.ThresholdForThroughSeqnoComputation {
+			tsTracker.logger.Warnf("%v GetThroughSeqnos completed after %v\n", tsTracker.id, time_taken)
+		}
+	}()
 
 	result_map := make(map[uint16]uint64)
 
@@ -545,7 +550,7 @@ func maxSeqno(seqno_list []uint64) uint64 {
 	}
 }
 
-func (tsTracker *ThroughSeqnoTrackerSvc) StatusSummary() string {
+func (tsTracker *ThroughSeqnoTrackerSvc) PrintStatusSummary() {
 	start_time := time.Now()
 	var count, sum_sent, max_sent, sum_filtered, max_filtered, sum_failed_cr, max_failed_cr, sum_gap, max_gap int
 	for _, vbno := range tsTracker.getVbList() {
@@ -573,7 +578,7 @@ func (tsTracker *ThroughSeqnoTrackerSvc) StatusSummary() string {
 		}
 	}
 
-	return fmt.Sprintf("%v time_spent=%v num_vb=%v max_sent=%v avg_sent=%v max_filtered=%v avg_filtered=%v max_failed_cr=%v avg_failed_cr=%v max_gap=%v avg_gap=%v\n",
+	tsTracker.logger.Infof("%v time_spent=%v num_vb=%v max_sent=%v avg_sent=%v max_filtered=%v avg_filtered=%v max_failed_cr=%v avg_failed_cr=%v max_gap=%v avg_gap=%v\n",
 		tsTracker.id, time.Since(start_time), count, max_sent, sum_sent/count, max_filtered, sum_filtered/count, max_failed_cr, sum_failed_cr/count,
 		max_gap, sum_gap/count)
 }

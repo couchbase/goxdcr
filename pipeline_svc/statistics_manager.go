@@ -104,9 +104,8 @@ const (
 )
 
 const (
-	default_sample_size        = 1000
-	default_update_interval    = 100 * time.Millisecond
-	default_log_stats_interval = 10000 * time.Millisecond
+	default_sample_size     = 1000
+	default_update_interval = 1000 * time.Millisecond
 )
 
 // stats to initialize for paused replications that have never been run -- mostly the stats visible from UI
@@ -314,7 +313,7 @@ func (stats_mgr *StatisticsManager) logStats() error {
 
 	defer stats_mgr.wait_grp.Done()
 
-	logStats_ticker := time.NewTicker(default_log_stats_interval)
+	logStats_ticker := time.NewTicker(base.StatsLogInterval)
 	defer logStats_ticker.Stop()
 
 	for {
@@ -361,30 +360,30 @@ func (stats_mgr *StatisticsManager) logStatsOnce() error {
 		outNozzle_parts := stats_mgr.pipeline.Targets()
 		for _, part := range outNozzle_parts {
 			if stats_mgr.pipeline.Specification().Settings.RepType == metadata.ReplicationTypeXmem {
-				stats_mgr.logger.Info(part.(*parts.XmemNozzle).StatusSummary())
+				part.(*parts.XmemNozzle).PrintStatusSummary()
 			} else {
-				stats_mgr.logger.Info(part.(*parts.CapiNozzle).StatusSummary())
+				part.(*parts.CapiNozzle).PrintStatusSummary()
 			}
 		}
 		dcp_parts := stats_mgr.pipeline.Sources()
 		for _, part := range dcp_parts {
-			stats_mgr.logger.Info(part.(*parts.DcpNozzle).StatusSummary())
+			part.(*parts.DcpNozzle).PrintStatusSummary()
 		}
 
 		// log listener summary
 		async_listener_map := pipeline_pkg.GetAllAsyncComponentEventListeners(stats_mgr.pipeline)
 		for _, async_listener := range async_listener_map {
-			stats_mgr.logger.Info(async_listener.(*component.AsyncComponentEventListenerImpl).StatusSummary())
+			async_listener.(*component.AsyncComponentEventListenerImpl).PrintStatusSummary()
 		}
 
 		// log throttler service summary
 		throttler := stats_mgr.pipeline.RuntimeContext().Service(base.BANDWIDTH_THROTTLER_SVC)
 		if throttler != nil {
-			stats_mgr.logger.Info(throttler.(*BandwidthThrottler).StatusSummary())
+			throttler.(*BandwidthThrottler).PrintStatusSummary()
 		}
 
 		// log through seqno service summary
-		stats_mgr.logger.Info(stats_mgr.through_seqno_tracker_svc.StatusSummary())
+		stats_mgr.through_seqno_tracker_svc.PrintStatusSummary()
 	}
 	return nil
 }

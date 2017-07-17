@@ -11,6 +11,7 @@ package parts
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
@@ -81,6 +82,9 @@ var CouchFullCommitKey = "X-Couch-Full-Commit"
 
 var MalformedResponseError = "Received malformed response from tcp connection"
 var MaxErrorMessageLength = 400
+
+// nnumber of last sent batch to remember and log
+var BatchHistorySize = 20
 
 /************************************
 /* struct capiBatch
@@ -190,6 +194,15 @@ type CapiNozzle struct {
 	lock_handle_error sync.RWMutex
 	dataObj_recycler  base.DataObjRecycler
 	topic             string
+
+	// stores a list of last sent batches in the form of []*BatchInfo
+	last_sent_batches      []*BatchInfo
+	last_sent_batches_lock sync.RWMutex
+}
+
+type BatchInfo struct {
+	vbno uint16
+	size uint32
 }
 
 func NewCapiNozzle(id string,
@@ -227,6 +240,11 @@ func NewCapiNozzle(id string,
 		counter_received:  0,
 		dataObj_recycler:  dataObj_recycler,
 		topic:             topic,
+	}
+
+	capi.last_sent_batches = make([]*BatchInfo, BatchHistorySize)
+	for i := 0; i < BatchHistorySize; i++ {
+		capi.last_sent_batches[i] = &BatchInfo{}
 	}
 
 	capi.config.connectStr = connectString
@@ -567,8 +585,6 @@ func (capi *CapiNozzle) send_internal(batch *capiBatch) error {
 	if batch != nil {
 		count := batch.count()
 
-		capi.Logger().Infof("%v send batch count=%d for vb %v\n", capi.Id(), count, batch.vbno)
-
 		new_counter_sent := atomic.AddUint32(&capi.counter_sent, count)
 		capi.Logger().Debugf("So far, capi %v processed %d items", capi.Id(), new_counter_sent)
 
@@ -585,6 +601,9 @@ func (capi *CapiNozzle) send_internal(batch *capiBatch) error {
 
 		//batch send
 		err = capi.batchSendWithRetry(batch)
+		if err == nil {
+			capi.recordLastSentBatch(batch.vbno, count)
+		}
 	}
 	return err
 }
@@ -1152,8 +1171,8 @@ func (capi *CapiNozzle) initialize(settings map[string]interface{}) error {
 	return err
 }
 
-func (capi *CapiNozzle) StatusSummary() string {
-	return fmt.Sprintf("%v received %v items, sent %v items", capi.Id(), atomic.LoadUint32(&capi.counter_received), atomic.LoadUint32(&capi.counter_sent))
+func (capi *CapiNozzle) PrintStatusSummary() {
+	capi.Logger().Infof("%v received %v items, sent %v items, last sent batches = %v", capi.Id(), atomic.LoadUint32(&capi.counter_received), atomic.LoadUint32(&capi.counter_sent), capi.getLastSentBatches())
 }
 
 func (capi *CapiNozzle) handleGeneralError(err error) {
@@ -1256,4 +1275,37 @@ func (capi *CapiNozzle) recycleDataObj(req *base.WrappedMCRequest) {
 	if capi.dataObj_recycler != nil {
 		capi.dataObj_recycler(capi.topic, req)
 	}
+}
+
+func (capi *CapiNozzle) recordLastSentBatch(vbno uint16, batchSize uint32) {
+	capi.last_sent_batches_lock.Lock()
+	defer capi.last_sent_batches_lock.Unlock()
+
+	// oldestBatchInfo will be rotated out of the array
+	// reuse it to hold info about the last sent batch
+	oldestBatchInfo := capi.last_sent_batches[BatchHistorySize-1]
+	oldestBatchInfo.vbno = vbno
+	oldestBatchInfo.size = batchSize
+	for i := BatchHistorySize - 1; i > 0; i-- {
+		capi.last_sent_batches[i] = capi.last_sent_batches[i-1]
+	}
+	capi.last_sent_batches[0] = oldestBatchInfo
+}
+
+func (capi *CapiNozzle) getLastSentBatches() string {
+	capi.last_sent_batches_lock.RLock()
+	defer capi.last_sent_batches_lock.RUnlock()
+	var buffer bytes.Buffer
+	buffer.WriteByte('[')
+	first := true
+	for _, last_sent_batch := range capi.last_sent_batches {
+		if !first {
+			buffer.WriteByte(',')
+		} else {
+			first = false
+		}
+		buffer.WriteString(fmt.Sprintf("%v", *last_sent_batch))
+	}
+	buffer.WriteByte(']')
+	return buffer.String()
 }

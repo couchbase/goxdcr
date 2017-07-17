@@ -285,7 +285,11 @@ var UprFeedDataChanLength = 20000
 // dcp flow control buffer size
 var UprFeedBufferSize uint32 = 1024 * 1024
 
+// size of data chan for async event listeners
 var EventChanSize = 10000
+
+// actual size of data chan is logged when it exceeds ThresholdForEventChanSizeLogging
+var ThresholdForEventChanSizeLogging = EventChanSize * 9 / 10
 
 // number of async listeners [for an event type]
 var MaxNumberOfAsyncListeners = 4
@@ -396,6 +400,12 @@ var WaitTimeBetweenMetadataChangeListeners = 1 * time.Second
 var KeepAlivePeriod = 30 * time.Second
 
 var ExecutionTimeoutError = errors.New("Execution timed out")
+
+// if through seqno computation takes longer than the threshold, it will be logged
+var ThresholdForThroughSeqnoComputation = 100 * time.Millisecond
+
+// interval for printing replication runtime stats to log file
+var StatsLogInterval = 30 * time.Second
 
 // --------------- Constants that are configurable -----------------
 

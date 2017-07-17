@@ -75,21 +75,21 @@ type InternalSettings struct {
 	// capi nozzle data chan size is defined as batchCount*CapiDataChanSizeMultiplier
 	CapiDataChanSizeMultiplier int
 
-	// interval for refreshing remote cluster references
+	// interval for refreshing remote cluster references (in seconds)
 	RefreshRemoteClusterRefInterval int
 
 	// max retry for capi batchUpdateDocs operation
 	CapiMaxRetryBatchUpdateDocs int
 
-	// timeout for batch processing in capi
+	// timeout for batch processing in capi (in seconds)
 	// 1. http timeout in revs_diff, i.e., batchGetMeta, call to target
 	// 2. overall timeout for batchUpdateDocs operation
 	CapiBatchTimeout int
 
-	// timeout for tcp write operation in capi
+	// timeout for tcp write operation in capi (in seconds)
 	CapiWriteTimeout int
 
-	// timeout for tcp read operation in capi
+	// timeout for tcp read operation in capi (in seconds)
 	CapiReadTimeout int
 
 	// the maximum number of checkpoint records to write/keep in the checkpoint doc
@@ -292,7 +292,8 @@ func ValidateAndConvertXDCRInternalSettingsValue(key, value string) (convertedVa
 	case TopologyChangeCheckIntervalKey, MaxTopologyChangeCountBeforeRestartKey, MaxTopologyStableCountBeforeRestartKey,
 		MaxWorkersForCheckpointingKey, TimeoutCheckpointBeforeStopKey, CapiDataChanSizeMultiplierKey,
 		RefreshRemoteClusterRefIntervalKey, CapiMaxRetryBatchUpdateDocsKey, CapiBatchTimeoutKey,
-		CapiWriteTimeoutKey, CapiReadTimeoutKey, MaxCheckpointRecordsToKeepKey, MaxCheckpointRecordsToReadKey:
+		CapiWriteTimeoutKey, CapiReadTimeoutKey, MaxCheckpointRecordsToKeepKey,
+		MaxCheckpointRecordsToReadKey:
 		convertedValue, err = strconv.ParseInt(value, base.ParseIntBase, base.ParseIntBitSize)
 		if err != nil {
 			err = simple_utils.IncorrectValueTypeError("an integer")

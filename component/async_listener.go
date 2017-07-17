@@ -11,7 +11,6 @@
 package Component
 
 import (
-	"fmt"
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/common"
 	"github.com/couchbase/goxdcr/log"
@@ -110,8 +109,11 @@ func (l *AsyncComponentEventListenerImpl) Id() string {
 	return l.id
 }
 
-func (l *AsyncComponentEventListenerImpl) StatusSummary() string {
-	return fmt.Sprintf("%v chan size =%v ", l.id, len(l.event_chan))
+func (l *AsyncComponentEventListenerImpl) PrintStatusSummary() {
+	event_chan_size := len(l.event_chan)
+	if event_chan_size > base.ThresholdForEventChanSizeLogging {
+		l.logger.Infof("%v chan size =%v ", l.id, event_chan_size)
+	}
 }
 
 func (l *AsyncComponentEventListenerImpl) RegisterComponentEventHandler(handler common.AsyncComponentEventHandler) {
