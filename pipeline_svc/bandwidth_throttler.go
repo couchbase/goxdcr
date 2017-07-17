@@ -10,7 +10,6 @@
 package pipeline_svc
 
 import (
-	"fmt"
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/common"
 	"github.com/couchbase/goxdcr/log"
@@ -252,11 +251,14 @@ func (throttler *BandwidthThrottler) setBandwidthLimit() {
 	throttler.logger.Infof("%v updated bandwidth limit to %v\n", throttler.id, bandwidth_limit)
 }
 
-func (throttler *BandwidthThrottler) StatusSummary() string {
+func (throttler *BandwidthThrottler) PrintStatusSummary() {
 	bandwidth_limit := atomic.LoadInt64(&throttler.bandwidth_limit)
+	if bandwidth_limit == 0 {
+		return
+	}
 	bandwidth_usage := atomic.LoadInt64(&throttler.bandwidth_usage)
 	if bandwidth_usage > bandwidth_limit {
 		throttler.logger.Errorf("%v went over the limit. bandwidth_limit=%v, bandwidth_usage=%v", throttler.id, bandwidth_limit, bandwidth_usage)
 	}
-	return fmt.Sprintf("%v bandwidth_limit=%v, bandwidth_usage=%v", throttler.id, bandwidth_limit, bandwidth_usage)
+	throttler.logger.Infof("%v bandwidth_limit=%v, bandwidth_usage=%v", throttler.id, bandwidth_limit, bandwidth_usage)
 }

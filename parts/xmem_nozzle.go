@@ -2264,7 +2264,7 @@ func (xmem *XmemNozzle) ConnType() base.ConnType {
 	return xmem.connType
 }
 
-func (xmem *XmemNozzle) StatusSummary() string {
+func (xmem *XmemNozzle) PrintStatusSummary() {
 
 	if xmem.State() == common.Part_Running {
 		connType := xmem.connType
@@ -2273,9 +2273,9 @@ func (xmem *XmemNozzle) StatusSummary() string {
 		if counter_sent > 0 {
 			avg_wait_time = float64(atomic.LoadUint32(&xmem.counter_waittime)) / float64(counter_sent)
 		}
-		return fmt.Sprintf("%v state =%v connType=%v received %v items, sent %v items, %v items waiting to confirm, %v in queue, %v in current batch, avg wait time is %vms, size of last ten batches processed %v, len(batches_ready_queue)=%v\n", xmem.Id(), xmem.State(), connType, atomic.LoadUint32(&xmem.counter_received), atomic.LoadUint32(&xmem.counter_sent), xmem.buf.itemCountInBuffer(), len(xmem.dataChan), atomic.LoadUint32(&xmem.cur_batch_count), avg_wait_time, xmem.getLastTenBatchSize(), len(xmem.batches_ready_queue))
+		xmem.Logger().Infof("%v state =%v connType=%v received %v items, sent %v items, %v items waiting to confirm, %v in queue, %v in current batch, avg wait time is %vms, size of last ten batches processed %v, len(batches_ready_queue)=%v\n", xmem.Id(), xmem.State(), connType, atomic.LoadUint32(&xmem.counter_received), atomic.LoadUint32(&xmem.counter_sent), xmem.buf.itemCountInBuffer(), len(xmem.dataChan), atomic.LoadUint32(&xmem.cur_batch_count), avg_wait_time, xmem.getLastTenBatchSize(), len(xmem.batches_ready_queue))
 	} else {
-		return fmt.Sprintf("%v state =%v ", xmem.Id(), xmem.State())
+		xmem.Logger().Infof("%v state =%v ", xmem.Id(), xmem.State())
 	}
 }
 

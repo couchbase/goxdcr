@@ -231,7 +231,7 @@ type DcpNozzleIface interface {
 	SetMaxMissCount(max_dcp_miss_count int)
 	Start(settings map[string]interface{}) error
 	Stop() error
-	StatusSummary() string
+	PrintStatusSummary()
 	SetVBList(vbnos []uint16) error
 	UpdateSettings(settings map[string]interface{}) error
 
@@ -782,13 +782,13 @@ func (dcp *DcpNozzle) onExit() {
 
 }
 
-func (dcp *DcpNozzle) StatusSummary() string {
+func (dcp *DcpNozzle) PrintStatusSummary() {
 	msg := fmt.Sprintf("%v received %v items, sent %v items.", dcp.Id(), dcp.counterReceived(), dcp.counterSent())
 	streams_inactive := dcp.inactiveDcpStreamsWithState()
 	if len(streams_inactive) > 0 {
 		msg += fmt.Sprintf(" streams inactive: %v", streams_inactive)
 	}
-	return msg
+	dcp.Logger().Info(msg)
 }
 
 func (dcp *DcpNozzle) handleGeneralError(err error) {
