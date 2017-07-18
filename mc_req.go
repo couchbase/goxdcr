@@ -160,36 +160,38 @@ func (req *MCRequest) Receive(r io.Reader, hdrBytes []byte) (int, error) {
 	req.Opaque = binary.BigEndian.Uint32(hdrBytes[12:])
 	req.Cas = binary.BigEndian.Uint64(hdrBytes[16:])
 
-	buf := make([]byte, totalBodyLen)
-	m, err := io.ReadFull(r, buf)
-	n += m
-	if err == nil {
-		if req.Opcode >= TAP_MUTATION &&
-			req.Opcode <= TAP_CHECKPOINT_END &&
-			len(buf) > 1 {
-			// In these commands there is "engine private"
-			// data at the end of the extras.  The first 2
-			// bytes of extra data give its length.
-			elen += int(binary.BigEndian.Uint16(buf))
+	if totalBodyLen > 0 {
+		buf := make([]byte, totalBodyLen)
+		m, err := io.ReadFull(r, buf)
+		n += m
+		if err == nil {
+			if req.Opcode >= TAP_MUTATION &&
+				req.Opcode <= TAP_CHECKPOINT_END &&
+				len(buf) > 1 {
+				// In these commands there is "engine private"
+				// data at the end of the extras.  The first 2
+				// bytes of extra data give its length.
+				elen += int(binary.BigEndian.Uint16(buf))
+			}
+
+			req.Extras = buf[0:elen]
+			req.Key = buf[elen : klen+elen]
+
+			// get the length of extended metadata
+			extMetaLen := 0
+			if elen > 29 {
+				extMetaLen = int(binary.BigEndian.Uint16(req.Extras[28:30]))
+			}
+
+			bodyLen := totalBodyLen - klen - elen - extMetaLen
+			if bodyLen > MaxBodyLen {
+				return n, fmt.Errorf("%d is too big (max %d)",
+					bodyLen, MaxBodyLen)
+			}
+
+			req.Body = buf[klen+elen : klen+elen+bodyLen]
+			req.ExtMeta = buf[klen+elen+bodyLen:]
 		}
-
-		req.Extras = buf[0:elen]
-		req.Key = buf[elen : klen+elen]
-
-		// get the length of extended metadata
-		extMetaLen := 0
-		if elen > 29 {
-			extMetaLen = int(binary.BigEndian.Uint16(req.Extras[28:30]))
-		}
-
-		bodyLen := totalBodyLen - klen - elen - extMetaLen
-		if bodyLen > MaxBodyLen {
-			return n, fmt.Errorf("%d is too big (max %d)",
-				bodyLen, MaxBodyLen)
-		}
-
-		req.Body = buf[klen+elen : klen+elen+bodyLen]
-		req.ExtMeta = buf[klen+elen+bodyLen:]
 	}
 	return n, err
 }
