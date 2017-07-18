@@ -3,6 +3,7 @@ package memcached
 import (
 	"bufio"
 	"bytes"
+	"encoding/binary"
 	"io"
 	"io/ioutil"
 	"net"
@@ -146,7 +147,7 @@ func TestTransmitReqWithExtMeta(t *testing.T) {
 
 	// add length of extended metadata to the corresponding bytes in Extras
 	req.Extras = make([]byte, 30)
-	binary.BigEndian.PutUint32(req.Extras[28:30], len(ExtMetaStr))
+	binary.BigEndian.PutUint16(req.Extras[28:30], uint16(len(ExtMetaStr)))
 
 	// Verify nil transmit is OK
 	_, err := transmitRequest(nil, &req)
@@ -170,6 +171,9 @@ func TestTransmitReqWithExtMeta(t *testing.T) {
 		0x0, 0x0, 0x0, 0x35, // Length of value = 7(key) + 9(value) + 30(extras) + 7(extmeta) = 53 = 0x35
 		0x0, 0x0, 0x1c, 0x4a, // opaque
 		0x0, 0x0, 0x0, 0x0, 0x37, 0xef, 0x3a, 0x35, // CAS
+		0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, //
+		0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, // --> Extras (with 28:30 carrying ExtMetaLen)
+		0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x7, //
 		's', 'o', 'm', 'e', 'k', 'e', 'y',
 		's', 'o', 'm', 'e', 'v', 'a', 'l', 'u', 'e',
 		'e', 'x', 't', 'm', 'e', 't', 'a'}

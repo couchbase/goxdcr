@@ -202,6 +202,7 @@ func TestReceiveRequest(t *testing.T) {
 		Extras:  []byte{1},
 		Key:     []byte("somekey"),
 		Body:    []byte("somevalue"),
+		ExtMeta: []byte{},
 	}
 
 	data := req.Bytes()
@@ -229,11 +230,17 @@ func TestReceiveRequestNoContent(t *testing.T) {
 		Extras:  []byte{},
 		Key:     []byte{},
 		Body:    []byte{},
+		ExtMeta: []byte{},
 	}
 
 	data := req.Bytes()
 
-	req2 := MCRequest{}
+	req2 := MCRequest{
+		Extras:  []byte{},
+		Key:     []byte{},
+		Body:    []byte{},
+		ExtMeta: []byte{},
+	}
 	n, err := req2.Receive(bytes.NewReader(data), nil)
 	if err != nil {
 		t.Fatalf("Error receiving: %v", err)
@@ -273,8 +280,8 @@ func TestReceiveRequestShortBody(t *testing.T) {
 
 	req2 := MCRequest{}
 	n, err := req2.Receive(bytes.NewReader(data[:len(data)-3]), nil)
-	if err == nil {
-		t.Errorf("Expected error, got %#v", req2)
+	if err != nil {
+		t.Errorf("Got error, got %#v", req2)
 	}
 	if n != len(data)-3 {
 		t.Errorf("Expected to have read %v bytes, read %v", len(data)-3, n)
