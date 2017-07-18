@@ -3,6 +3,7 @@ package gomemcached
 import (
 	"bytes"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"reflect"
 	"testing"
@@ -413,5 +414,40 @@ func TestReceivingTapRequest(t *testing.T) {
 	exp := `{MCRequest opcode=TAP_MUTATION, bodylen=9, key='somekey'}`
 	if req.String() != exp {
 		t.Errorf("Expected string=%q, got %q", exp, req.String())
+	}
+}
+
+func TestReceivingUPRNoop(t *testing.T) {
+	content := []byte{
+		REQ_MAGIC, byte(UPR_NOOP),
+		0x0, 0x0, // length of ley
+		0x0,      // extra length
+		0x0,      // reserved
+		0x0, 0x0, // vbucket
+		0x0, 0x0, 0x0, 0x0, // length of value
+		0x0, 0x0, 0x1c, 0x4a, // opaque
+		0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, // CAS
+	}
+
+	req := MCRequest{}
+
+	conn := bytes.NewReader(content)
+	n, err := req.Receive(conn, nil)
+	if err != nil {
+		t.Errorf("Failed to parse response, err: %v", err)
+	}
+
+	if n != len(content) {
+		t.Errorf("Expected to read %v bytes, read %v", len(content), n)
+	}
+
+	exp := `{MCRequest opcode=UPR_NOOP, bodylen=0, key=''}`
+	if req.String() != exp {
+		t.Errorf("Expected string=%q, got %q", exp, req.String())
+	}
+
+	n, err = req.Receive(conn, nil)
+	if err != io.EOF {
+		t.Errorf("Expected EOF!")
 	}
 }
