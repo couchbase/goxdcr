@@ -125,6 +125,15 @@ func (c *Client) Transmit(req *gomemcached.MCRequest) error {
 	return err
 }
 
+// TransmitResponse send a response, does not wait.
+func (c *Client) TransmitResponse(res *gomemcached.MCResponse) error {
+	_, err := transmitResponse(c.conn, res)
+	if err != nil {
+		c.setHealthy(false)
+	}
+	return err
+}
+
 // Receive a response
 func (c *Client) Receive() (*gomemcached.MCResponse, error) {
 	resp, _, err := getResponse(c.conn, c.hdrBuf)
