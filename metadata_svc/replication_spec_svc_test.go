@@ -65,6 +65,7 @@ func setupMocks(srcResolutionType string,
 	utilitiesMock.On("GetHostAddr", "localhost", port).Return(hostAddr)
 	myConnectionStr := utilitiesMock.GetHostAddr("localhost", port)
 	xdcrTopologyMock.On("MyConnectionStr").Return(myConnectionStr, nil)
+	xdcrTopologyMock.On("IsMyClusterEnterprise").Return(true, nil)
 
 	var bucketInfo map[string]interface{}
 	bucketType := base.CouchbaseBucketType

@@ -1004,7 +1004,7 @@ func (u *Utilities) GetBucketsFromInfoMap(bucketListInfo []interface{}, logger *
 // 2. bucket uuid
 // 3. bucket conflict resolution type
 // 4. bucket eviction policy
-// 6. bucket server vb map
+// 5. bucket server vb map
 func (u *Utilities) BucketValidationInfo(hostAddr, bucketName, username, password string, certificate []byte, sanInCertificate bool,
 	logger *log.CommonLogger) (bucketInfo map[string]interface{}, bucketType string, bucketUUID string, bucketConflictResolutionType string,
 	bucketEvictionPolicy string, bucketKVVBMap map[string][]uint16, err error) {

@@ -75,6 +75,8 @@ type ReplicationSpecService struct {
 	utils                    utilities.UtilsIface
 }
 
+type ErrorMap map[string]error
+
 func NewReplicationSpecService(uilog_svc service_def.UILogSvc, remote_cluster_svc service_def.RemoteClusterSvc,
 	metadata_svc service_def.MetadataSvc, xdcr_comp_topology_svc service_def.XDCRCompTopologySvc, cluster_info_svc service_def.ClusterInfoSvc,
 	logger_ctx *log.LoggerContext, utilities_in utilities.UtilsIface) (*ReplicationSpecService, error) {
@@ -131,43 +133,29 @@ func (service *ReplicationSpecService) replicationSpec(replicationId string) (*m
 	return val.(*ReplicationSpecVal).spec, nil
 }
 
-func (service *ReplicationSpecService) ValidateNewReplicationSpec(sourceBucket, targetCluster, targetBucket string, settings map[string]interface{}) (string, string, *metadata.RemoteClusterReference, map[string]error, string) {
-	service.logger.Infof("Start ValidateAddReplicationSpec, sourceBucket=%v, targetCluster=%v, targetBucket=%v\n", sourceBucket, targetCluster, targetBucket)
-
-	errorMap := make(map[string]error)
-
-	//validate the existence of source bucket
+//validate the existence of source bucket
+func (service *ReplicationSpecService) validateSourceBucket(errorMap ErrorMap, sourceBucket, targetCluster, targetBucket string) (srcBucketUUID string, srcCRType string) {
+	var err_source error
+	start_time := time.Now()
 	local_connStr, _ := service.xdcr_comp_topology_svc.MyConnectionStr()
 	if local_connStr == "" {
 		panic("XDCRTopologySvc.MyConnectionStr() should not return empty string")
 	}
 
-	var err_source error
-	start_time := time.Now()
-
 	_, sourceBucketType, sourceBucketUUID, sourceConflictResolutionType, sourceEvictionPolicy, _, err_source := service.utils.BucketValidationInfo(local_connStr, sourceBucket, "", "", nil, false, service.logger)
 	service.logger.Infof("Result from local bucket look up: bucketName=%v, err_source=%v, time taken=%v\n", sourceBucket, err_source, time.Since(start_time))
 	service.validateBucket(sourceBucket, targetCluster, targetBucket, sourceBucketType, sourceEvictionPolicy, err_source, errorMap, true)
 
-	if len(errorMap) > 0 {
-		return "", "", nil, errorMap, ""
-	}
+	return sourceBucketUUID, sourceConflictResolutionType
+}
 
-	// validate remote cluster ref
-	start_time = time.Now()
-	targetClusterRef, err := service.remote_cluster_svc.RemoteClusterByRefName(targetCluster, true)
-	if err != nil {
-		errorMap[base.ToCluster] = service.utils.NewEnhancedError("cannot find remote cluster", err)
-		return "", "", nil, errorMap, ""
-	}
-	service.logger.Infof("Successfully retrieved target cluster reference %v. time take=%v\n", targetClusterRef.Name, time.Since(start_time))
-
-	// validate that the source bucket and target bucket are not the same bucket
-	// i.e., validate that the following are not both true:
-	// 1. sourceBucketName == targetBucketName
-	// 2. sourceClusterUuid == targetClusterUuid
+// validate that the source bucket and target bucket are not the same bucket
+// i.e., validate that the following are not both true:
+// 1. sourceBucketName == targetBucketName
+// 2. sourceClusterUuid == targetClusterUuid
+func (service *ReplicationSpecService) validateSrcTargetNonIdenticalBucket(errorMap ErrorMap, sourceBucket, targetBucket string, targetClusterRef *metadata.RemoteClusterReference) {
 	if sourceBucket == targetBucket {
-		start_time = time.Now()
+		start_time := time.Now()
 		sourceClusterUuid, err := service.xdcr_comp_topology_svc.MyClusterUuid()
 		if err != nil {
 			panic("cannot get local cluster uuid")
@@ -175,101 +163,110 @@ func (service *ReplicationSpecService) ValidateNewReplicationSpec(sourceBucket, 
 
 		if sourceClusterUuid == targetClusterRef.Uuid {
 			errorMap[base.PlaceHolderFieldKey] = errors.New("Replication from a bucket to the same bucket is not allowed")
-			return "", "", nil, errorMap, ""
+		} else {
+			service.logger.Infof("Validated that source bucket and target bucket are not the same. time taken=%v\n", time.Since(start_time))
 		}
-		service.logger.Infof("Validated that source bucket and target bucket are not the same. time taken=%v\n", time.Since(start_time))
 	}
+}
 
-	remote_connStr, err := targetClusterRef.MyConnectionStr()
+// validate remote cluster ref
+func (service *ReplicationSpecService) getRemoteReference(errorMap ErrorMap, targetCluster string) (*metadata.RemoteClusterReference, string, string, string, []byte, bool) {
+	var remote_userName, remote_password string
+	var certificate []byte
+	var sanInCertificate bool
+	var err error
+	var remote_connStr string
+	start_time := time.Now()
+	targetClusterRef, err := service.remote_cluster_svc.RemoteClusterByRefName(targetCluster, true)
 	if err != nil {
-		errorMap[base.ToCluster] = service.utils.NewEnhancedError("Invalid remote cluster. MyConnectionStr() failed.", err)
-		return "", "", nil, errorMap, ""
-	}
-	remote_userName, remote_password, certificate, sanInCertificate, err := targetClusterRef.MyCredentials()
-	if err != nil {
-		errorMap[base.ToCluster] = service.utils.NewEnhancedError("Invalid remote cluster. MyCredentials() failed.", err)
-		return "", "", nil, errorMap, ""
-	}
-
-	//validate target bucket
-	start_time = time.Now()
-	targetBucketInfo, targetBucketType, targetBucketUUID, targetConflictResolutionType, _, targetKVVBMap, err_target := service.utils.BucketValidationInfo(remote_connStr, targetBucket, remote_userName, remote_password, certificate, sanInCertificate, service.logger)
-	service.logger.Infof("Result from remote bucket look up: connStr=%v, bucketName=%v, targetBucketType=%v, err_target=%v, time taken=%v\n", remote_connStr, targetBucket, targetBucketType, err_target, time.Since(start_time))
-	service.validateBucket(sourceBucket, targetCluster, targetBucket, targetBucketType, "", err_target, errorMap, false)
-
-	if len(errorMap) > 0 {
-		return "", "", nil, errorMap, ""
+		errorMap[base.ToCluster] = service.utils.NewEnhancedError("cannot find remote cluster", err)
+	} else {
+		service.logger.Infof("Successfully retrieved target cluster reference %v. time taken=%v\n", targetClusterRef.Name, time.Since(start_time))
+		remote_connStr, err = targetClusterRef.MyConnectionStr()
+		if err != nil {
+			errorMap[base.ToCluster] = service.utils.NewEnhancedError("Invalid remote cluster. MyConnectionStr() failed.", err)
+			return nil, "", remote_userName, remote_password, certificate, sanInCertificate
+		}
+		remote_userName, remote_password, certificate, sanInCertificate, err = targetClusterRef.MyCredentials()
+		if err != nil {
+			errorMap[base.ToCluster] = service.utils.NewEnhancedError("Invalid remote cluster. MyCredentials() failed.", err)
+			return nil, "", remote_userName, remote_password, certificate, sanInCertificate
+		}
 	}
 
+	return targetClusterRef, remote_connStr, remote_userName, remote_password, certificate, sanInCertificate
+}
+
+func (service *ReplicationSpecService) validateReplicationSpecDoesNotAlreadyExist(errorMap ErrorMap, sourceBucket string, targetClusterRef *metadata.RemoteClusterReference, targetBucket string) {
 	repId := metadata.ReplicationId(sourceBucket, targetClusterRef.Uuid, targetBucket)
-	_, err = service.replicationSpec(repId)
+	_, err := service.replicationSpec(repId)
 	if err == nil {
 		errorMap[base.PlaceHolderFieldKey] = errors.New(ReplicationSpecAlreadyExistErrorMessage)
-		return "", "", nil, errorMap, ""
 	}
+}
 
-	repl_type, ok := settings[metadata.ReplicationType]
-	if !ok || repl_type == metadata.ReplicationTypeXmem {
-		if targetClusterRef.IsEncryptionEnabled() && !targetClusterRef.IsFullEncryption() {
-			// for half-ssl ref, validate that target memcached supports SCRAM-SHA authentication
-			if len(targetKVVBMap) == 0 {
-				errorMap[base.ToCluster] = errors.New("kv vb map is empty")
-				return "", "", nil, errorMap, ""
-			}
-			// pick the first kv in kvVBMap to use
-			var kvConnStr string
-			for kvaddr, _ := range targetKVVBMap {
-				kvConnStr = kvaddr
-				break
-			}
+func (service *ReplicationSpecService) validateXmemSettings(errorMap ErrorMap, targetClusterRef *metadata.RemoteClusterReference, targetKVVBMap map[string][]uint16, sourceBucket, targetBucket string, targetBucketInfo map[string]interface{}) {
+	if targetClusterRef.IsEncryptionEnabled() && !targetClusterRef.IsFullEncryption() {
+		// for half-ssl ref, validate that target memcached supports SCRAM-SHA authentication
+		if len(targetKVVBMap) == 0 {
+			errorMap[base.ToCluster] = errors.New("kv vb map is empty")
+			return
+		}
+		// pick the first kv in kvVBMap to use
+		var kvConnStr string
+		for kvaddr, _ := range targetKVVBMap {
+			kvConnStr = kvaddr
+			break
+		}
 
-			targetClusterCompatibility, err := service.utils.GetClusterCompatibilityFromBucketInfo(targetBucket, targetBucketInfo, service.logger)
+		targetClusterCompatibility, err := service.utils.GetClusterCompatibilityFromBucketInfo(targetBucket, targetBucketInfo, service.logger)
+		if err != nil {
+			errorMap[base.ToCluster] = fmt.Errorf("Error retrieving cluster compatibility on bucket %v. err=%v", targetBucket, err)
+			return
+		}
+
+		hasRBACSupport := simple_utils.IsClusterCompatible(targetClusterCompatibility, base.VersionForRBACAndXattrSupport)
+
+		var username, password string
+		if hasRBACSupport {
+			username = targetClusterRef.UserName
+			password = targetClusterRef.Password
+		} else {
+			username = targetBucket
+			password, err = service.utils.GetBucketPasswordFromBucketInfo(targetBucket, targetBucketInfo, service.logger)
 			if err != nil {
-				errorMap[base.ToCluster] = fmt.Errorf("Error retrieving cluster compatibility on bucket %v. err=%v", targetBucket, err)
-				return "", "", nil, errorMap, ""
-			}
-
-			hasRBACSupport := simple_utils.IsClusterCompatible(targetClusterCompatibility, base.VersionForRBACAndXattrSupport)
-
-			var username, password string
-			if hasRBACSupport {
-				username = targetClusterRef.UserName
-				password = targetClusterRef.Password
-			} else {
-				username = targetBucket
-				password, err = service.utils.GetBucketPasswordFromBucketInfo(targetBucket, targetBucketInfo, service.logger)
-				if err != nil {
-					errorMap[base.ToCluster] = fmt.Errorf("Error retrieving password on bucket %v. err=%v", targetBucket, err)
-					return "", "", nil, errorMap, ""
-				}
-			}
-
-			client, err := service.utils.GetRemoteMemcachedConnection(kvConnStr, username, password, targetBucket,
-				simple_utils.ComposeUserAgentWithBucketNames("Goxdcr ReplSpecSvc", sourceBucket, targetBucket),
-				false /*plainAuth*/, 0 /*keepAlivePeriod*/, service.logger)
-			if client != nil {
-				client.Close()
-			}
-			if err != nil {
-				errorMap[base.ToCluster] = fmt.Errorf("Error verifying SCRAM-SHA authentication support. err=%v", err)
-				return "", "", nil, errorMap, ""
+				errorMap[base.ToCluster] = fmt.Errorf("Error retrieving password on bucket %v. err=%v", targetBucket, err)
+				return
 			}
 		}
-	}
 
+		client, err := service.utils.GetRemoteMemcachedConnection(kvConnStr, username, password, targetBucket,
+			simple_utils.ComposeUserAgentWithBucketNames("Goxdcr ReplSpecSvc", sourceBucket, targetBucket),
+			false /*plainAuth*/, 0 /*keepAlivePeriod*/, service.logger)
+		if client != nil {
+			client.Close()
+		}
+		if err != nil {
+			errorMap[base.ToCluster] = fmt.Errorf("Error verifying SCRAM-SHA authentication support. err=%v", err)
+			return
+		}
+	}
+}
+
+func (service *ReplicationSpecService) validateES(errorMap ErrorMap, targetBucketInfo map[string]interface{}, repl_type interface{}, sourceConflictResolutionType, targetConflictResolutionType string) string {
 	var warning string
 	isTargetES := service.utils.CheckWhetherClusterIsESBasedOnBucketInfo(targetBucketInfo)
 	if repl_type != metadata.ReplicationTypeCapi {
 		// for xmem replication, validate that target is not an elasticsearch cluster
 		if isTargetES {
 			errorMap[base.PlaceHolderFieldKey] = errors.New("Replication to an Elasticsearch target cluster using XDCR Version 2 (XMEM protocol) is not supported. Use XDCR Version 1 (CAPI protocol) instead.")
-			return "", "", nil, errorMap, ""
+			return warning
 		}
 
 		// for xmem replication, validate that source and target bucket have the same conflict resolution type metadata
 		if sourceConflictResolutionType != targetConflictResolutionType {
 			errorMap[base.PlaceHolderFieldKey] = errors.New("Replication between buckets with different ConflictResolutionType setting is not allowed")
-			return "", "", nil, errorMap, ""
+			return warning
 		}
 	} else {
 		//for capi replication, if target is not elastic search cluster, compose a warning to be displayed in the replication creation ui log
@@ -282,14 +279,73 @@ func (service *ReplicationSpecService) ValidateNewReplicationSpec(sourceBucket, 
 			warning += fmt.Sprintf("\nReplication to an Elasticsearch target cluster uses XDCR Version 1 (CAPI protocol), which does not support Timestamp Based Conflict Resolution. Even though the replication source bucket has Timestamp Based Conflict Resolution enabled, the replication will use Sequence Number Based Conflict Resolution instead.")
 		}
 	}
+	return warning
+}
+
+/**
+ * Main Validation routine, supplemented by multiple helper sub-routines.
+ * Each sub-routine may be daisy chained by variables that would be helpful for further subroutines.
+ */
+func (service *ReplicationSpecService) ValidateNewReplicationSpec(sourceBucket, targetCluster, targetBucket string, settings map[string]interface{}) (string, string, *metadata.RemoteClusterReference, map[string]error, string) {
+	errorMap := make(ErrorMap)
+	service.logger.Infof("Start ValidateAddReplicationSpec, sourceBucket=%v, targetCluster=%v, targetBucket=%v\n", sourceBucket, targetCluster, targetBucket)
+	defer service.logger.Infof("Finished ValidateAddReplicationSpec, sourceBucket=%v, targetCluster=%v, targetBucket=%v, errorMap=%v\n", sourceBucket, targetCluster, targetBucket, errorMap)
+
+	sourceBucketUUID, sourceConflictResolutionType := service.validateSourceBucket(errorMap, sourceBucket, targetCluster, targetBucket)
+	if len(errorMap) > 0 {
+		return "", "", nil, errorMap, ""
+	}
+
+	targetClusterRef, remote_connStr, remote_userName, remote_password, certificate, sanInCertificate := service.getRemoteReference(errorMap, targetCluster)
+	if len(errorMap) > 0 {
+		return "", "", nil, errorMap, ""
+	}
+
+	service.validateSrcTargetNonIdenticalBucket(errorMap, sourceBucket, targetBucket, targetClusterRef)
+	if len(errorMap) > 0 {
+		return "", "", nil, errorMap, ""
+	}
+
+	targetBucketInfo, targetBucketUUID, targetConflictResolutionType, targetKVVBMap := service.validateTargetBucket(errorMap, remote_connStr, targetBucket, remote_userName, remote_password, certificate, sanInCertificate, sourceBucket, targetCluster)
+	if len(errorMap) > 0 {
+		return "", "", nil, errorMap, ""
+	}
+
+	service.validateReplicationSpecDoesNotAlreadyExist(errorMap, sourceBucket, targetClusterRef, targetBucket)
+	if len(errorMap) > 0 {
+		return "", "", nil, errorMap, ""
+	}
+
+	repl_type, ok := settings[metadata.ReplicationType]
+	if !ok || repl_type == metadata.ReplicationTypeXmem {
+		service.validateXmemSettings(errorMap, targetClusterRef, targetKVVBMap, sourceBucket, targetBucket, targetBucketInfo)
+		if len(errorMap) > 0 {
+			return "", "", nil, errorMap, ""
+		}
+	}
+
+	warning := service.validateES(errorMap, targetBucketInfo, repl_type, sourceConflictResolutionType, targetConflictResolutionType)
+	if len(errorMap) > 0 {
+		return "", "", nil, errorMap, ""
+	}
 
 	if warning != "" {
 		service.logger.Warn(warning)
 	}
 
-	service.logger.Infof("Finished ValidateAddReplicationSpec. errorMap=%v\n", errorMap)
-
 	return sourceBucketUUID, targetBucketUUID, targetClusterRef, errorMap, warning
+}
+
+//validate target bucket
+func (service *ReplicationSpecService) validateTargetBucket(errorMap ErrorMap, remote_connStr, targetBucket, remote_userName, remote_password string, certificate []byte, sanInCertificate bool, sourceBucket string,
+	targetCluster string) (targetBucketInfo map[string]interface{}, targetBucketUUID, targetConflictResolutionType string, targetKVVBMap map[string][]uint16) {
+	start_time := time.Now()
+	targetBucketInfo, targetBucketType, targetBucketUUID, targetConflictResolutionType, _, targetKVVBMap, err_target := service.utils.BucketValidationInfo(remote_connStr, targetBucket, remote_userName, remote_password, certificate, sanInCertificate, service.logger)
+	service.logger.Infof("Result from remote bucket look up: connStr=%v, bucketName=%v, targetBucketType=%v, err_target=%v, time taken=%v\n", remote_connStr, targetBucket, targetBucketType, err_target, time.Since(start_time))
+
+	service.validateBucket(sourceBucket, targetCluster, targetBucket, targetBucketType, "", err_target, errorMap, false)
+
+	return targetBucketInfo, targetBucketUUID, targetConflictResolutionType, targetKVVBMap
 }
 
 func (service *ReplicationSpecService) validateBucket(sourceBucket, targetCluster, targetBucket, bucketType string, evictionPolicy string, err error, errorMap map[string]error, isSourceBucket bool) {
