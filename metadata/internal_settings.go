@@ -24,6 +24,8 @@ const (
 	CapiBatchTimeoutKey                    = "CapiBatchTimeout"
 	CapiWriteTimeoutKey                    = "CapiWriteTimeout"
 	CapiReadTimeoutKey                     = "CapiReadTimeout"
+	MaxCheckpointRecordsToKeepKey          = "MaxCheckpointRecordsToKeep"
+	MaxCheckpointRecordsToReadKey          = "MaxCheckpointRecordsToRead"
 )
 
 var TopologyChangeCheckIntervalConfig = &SettingsConfig{10, &Range{1, 100}}
@@ -37,6 +39,8 @@ var CapiMaxRetryBatchUpdateDocsConfig = &SettingsConfig{6, &Range{0, 100}}
 var CapiBatchTimeoutConfig = &SettingsConfig{180, &Range{10, 3600}}
 var CapiWriteTimeoutConfig = &SettingsConfig{10, &Range{1, 3600}}
 var CapiReadTimeoutConfig = &SettingsConfig{60, &Range{10, 3600}}
+var MaxCheckpointRecordsToKeepConfig = &SettingsConfig{5, &Range{1, 100}}
+var MaxCheckpointRecordsToReadConfig = &SettingsConfig{5, &Range{1, 100}}
 
 var XDCRInternalSettingsConfigMap = map[string]*SettingsConfig{
 	TopologyChangeCheckIntervalKey:         TopologyChangeCheckIntervalConfig,
@@ -50,6 +54,8 @@ var XDCRInternalSettingsConfigMap = map[string]*SettingsConfig{
 	CapiBatchTimeoutKey:                    CapiBatchTimeoutConfig,
 	CapiWriteTimeoutKey:                    CapiWriteTimeoutConfig,
 	CapiReadTimeoutKey:                     CapiReadTimeoutConfig,
+	MaxCheckpointRecordsToKeepKey:          MaxCheckpointRecordsToKeepConfig,
+	MaxCheckpointRecordsToReadKey:          MaxCheckpointRecordsToReadConfig,
 }
 
 type InternalSettings struct {
@@ -86,6 +92,12 @@ type InternalSettings struct {
 	// timeout for tcp read operation in capi
 	CapiReadTimeout int
 
+	// the maximum number of checkpoint records to write/keep in the checkpoint doc
+	MaxCheckpointRecordsToKeep int
+
+	// the maximum number of checkpoint records to read from the checkpoint doc
+	MaxCheckpointRecordsToRead int
+
 	// revision number to be used by metadata service. not included in json
 	Revision interface{}
 }
@@ -102,7 +114,9 @@ func DefaultInternalSettings() *InternalSettings {
 		CapiMaxRetryBatchUpdateDocs:         CapiMaxRetryBatchUpdateDocsConfig.defaultValue.(int),
 		CapiBatchTimeout:                    CapiBatchTimeoutConfig.defaultValue.(int),
 		CapiWriteTimeout:                    CapiWriteTimeoutConfig.defaultValue.(int),
-		CapiReadTimeout:                     CapiReadTimeoutConfig.defaultValue.(int)}
+		CapiReadTimeout:                     CapiReadTimeoutConfig.defaultValue.(int),
+		MaxCheckpointRecordsToKeep:          MaxCheckpointRecordsToKeepConfig.defaultValue.(int),
+		MaxCheckpointRecordsToRead:          MaxCheckpointRecordsToReadConfig.defaultValue.(int)}
 }
 
 func (s *InternalSettings) Equals(s2 *InternalSettings) bool {
@@ -124,7 +138,9 @@ func (s *InternalSettings) Equals(s2 *InternalSettings) bool {
 		s.CapiMaxRetryBatchUpdateDocs == s2.CapiMaxRetryBatchUpdateDocs &&
 		s.CapiBatchTimeout == s2.CapiBatchTimeout &&
 		s.CapiWriteTimeout == s2.CapiWriteTimeout &&
-		s.CapiReadTimeout == s2.CapiReadTimeout
+		s.CapiReadTimeout == s2.CapiReadTimeout &&
+		s.MaxCheckpointRecordsToKeep == s2.MaxCheckpointRecordsToKeep &&
+		s.MaxCheckpointRecordsToRead == s2.MaxCheckpointRecordsToRead
 }
 
 func (s *InternalSettings) UpdateSettingsFromMap(settingsMap map[string]interface{}) (changed bool, errorMap map[string]error) {
@@ -243,6 +259,26 @@ func (s *InternalSettings) UpdateSettingsFromMap(settingsMap map[string]interfac
 				s.CapiReadTimeout = readTimeout
 				changed = true
 			}
+		case MaxCheckpointRecordsToKeepKey:
+			maxRecordsToKeep, ok := val.(int)
+			if !ok {
+				errorMap[key] = simple_utils.IncorrectValueTypeInMapError(key, val, "int")
+				continue
+			}
+			if s.MaxCheckpointRecordsToKeep != maxRecordsToKeep {
+				s.MaxCheckpointRecordsToKeep = maxRecordsToKeep
+				changed = true
+			}
+		case MaxCheckpointRecordsToReadKey:
+			maxRecordsToRead, ok := val.(int)
+			if !ok {
+				errorMap[key] = simple_utils.IncorrectValueTypeInMapError(key, val, "int")
+				continue
+			}
+			if s.MaxCheckpointRecordsToRead != maxRecordsToRead {
+				s.MaxCheckpointRecordsToRead = maxRecordsToRead
+				changed = true
+			}
 		default:
 			errorMap[key] = fmt.Errorf("Invalid key in map, %v", key)
 		}
@@ -256,7 +292,7 @@ func ValidateAndConvertXDCRInternalSettingsValue(key, value string) (convertedVa
 	case TopologyChangeCheckIntervalKey, MaxTopologyChangeCountBeforeRestartKey, MaxTopologyStableCountBeforeRestartKey,
 		MaxWorkersForCheckpointingKey, TimeoutCheckpointBeforeStopKey, CapiDataChanSizeMultiplierKey,
 		RefreshRemoteClusterRefIntervalKey, CapiMaxRetryBatchUpdateDocsKey, CapiBatchTimeoutKey,
-		CapiWriteTimeoutKey, CapiReadTimeoutKey:
+		CapiWriteTimeoutKey, CapiReadTimeoutKey, MaxCheckpointRecordsToKeepKey, MaxCheckpointRecordsToReadKey:
 		convertedValue, err = strconv.ParseInt(value, base.ParseIntBase, base.ParseIntBitSize)
 		if err != nil {
 			err = simple_utils.IncorrectValueTypeError("an integer")
@@ -288,5 +324,7 @@ func (s *InternalSettings) ToMap() map[string]interface{} {
 	settings_map[CapiBatchTimeoutKey] = s.CapiBatchTimeout
 	settings_map[CapiWriteTimeoutKey] = s.CapiWriteTimeout
 	settings_map[CapiReadTimeoutKey] = s.CapiReadTimeout
+	settings_map[MaxCheckpointRecordsToKeepKey] = s.MaxCheckpointRecordsToKeep
+	settings_map[MaxCheckpointRecordsToReadKey] = s.MaxCheckpointRecordsToRead
 	return settings_map
 }

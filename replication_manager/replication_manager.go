@@ -230,7 +230,9 @@ func initConstants(xdcr_topology_svc service_def.XDCRCompTopologySvc, internal_s
 		internal_settings.CapiMaxRetryBatchUpdateDocs,
 		time.Duration(internal_settings.CapiBatchTimeout)*time.Second,
 		time.Duration(internal_settings.CapiWriteTimeout)*time.Second,
-		time.Duration(internal_settings.CapiReadTimeout)*time.Second)
+		time.Duration(internal_settings.CapiReadTimeout)*time.Second,
+		internal_settings.MaxCheckpointRecordsToKeep,
+		internal_settings.MaxCheckpointRecordsToRead)
 }
 
 func (rm *replicationManager) initMetadataChangeMonitor() {

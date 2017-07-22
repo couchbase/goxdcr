@@ -3,12 +3,10 @@ package metadata
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/couchbase/goxdcr/base"
 )
 
 const (
-	//the maximum number of checkpoints ketp in the file
-	MaxCheckpointsKept int = 100
-
 	FailOverUUID        string = "failover_uuid"
 	Seqno               string = "seqno"
 	DcpSnapshotSeqno    string = "dcp_snapshot_seqno"
@@ -285,21 +283,27 @@ func NewCheckpointsDoc(specInternalId string) *CheckpointsDoc {
 		SpecInternalId: specInternalId,
 		Revision:       nil}
 
-	for i := 0; i < MaxCheckpointsKept; i++ {
+	for i := 0; i < base.MaxCheckpointRecordsToKeep; i++ {
 		ckpt_doc.Checkpoint_records = append(ckpt_doc.Checkpoint_records, nil)
 	}
 
 	return ckpt_doc
 }
 
-//Not currentcy safe. It should be used by one goroutine only
+//Not concurrency safe. It should be used by one goroutine only
 func (ckptsDoc *CheckpointsDoc) AddRecord(record *CheckpointRecord) bool {
-	if len(ckptsDoc.Checkpoint_records) > 0 {
+	length := len(ckptsDoc.Checkpoint_records)
+	if length > 0 {
 		if !ckptsDoc.Checkpoint_records[0].IsSame(record) {
-			for i := len(ckptsDoc.Checkpoint_records) - 1; i >= 0; i-- {
-				if i+1 < MaxCheckpointsKept {
-					ckptsDoc.Checkpoint_records[i+1] = ckptsDoc.Checkpoint_records[i]
+			if length > base.MaxCheckpointRecordsToKeep {
+				ckptsDoc.Checkpoint_records = ckptsDoc.Checkpoint_records[:base.MaxCheckpointRecordsToKeep]
+			} else if length < base.MaxCheckpointRecordsToKeep {
+				for i := length; i < base.MaxCheckpointRecordsToKeep; i++ {
+					ckptsDoc.Checkpoint_records = append(ckptsDoc.Checkpoint_records, nil)
 				}
+			}
+			for i := len(ckptsDoc.Checkpoint_records) - 2; i >= 0; i-- {
+				ckptsDoc.Checkpoint_records[i+1] = ckptsDoc.Checkpoint_records[i]
 			}
 			ckptsDoc.Checkpoint_records[0] = record
 			return true
@@ -309,5 +313,16 @@ func (ckptsDoc *CheckpointsDoc) AddRecord(record *CheckpointRecord) bool {
 	} else {
 		ckptsDoc.Checkpoint_records = append(ckptsDoc.Checkpoint_records, record)
 		return true
+	}
+}
+
+// all access to ckptsDoc.Checkpoint_records should go through this method
+// too bad that we cannot hide ckptsDoc.Checkpoint_records by renaming it to ckptsDoc.checkpoint_records
+// since it would have disabled json marshaling
+func (ckptsDoc *CheckpointsDoc) GetCheckpointRecords() []*CheckpointRecord {
+	if len(ckptsDoc.Checkpoint_records) <= base.MaxCheckpointRecordsToRead {
+		return ckptsDoc.Checkpoint_records
+	} else {
+		return ckptsDoc.Checkpoint_records[:base.MaxCheckpointRecordsToRead]
 	}
 }
