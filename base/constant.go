@@ -384,12 +384,19 @@ var CapiWriteTimeout = 10 * time.Second
 // timeout for tcp read operation in capi
 var CapiReadTimeout = 60 * time.Second
 
+// the maximum number of checkpoint records to keep in the checkpoint doc
+var MaxCheckpointRecordsToKeep int = 5
+
+// the maximum number of checkpoint records to read from the checkpoint doc
+var MaxCheckpointRecordsToRead int = 5
+
 func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeCountBeforeRestart,
 	maxTopologyStableCountBeforeRestart, maxWorkersForCheckpointing int,
 	timeoutCheckpointBeforeStop time.Duration, capiDataChanSizeMultiplier int,
 	refreshRemoteClusterRefInterval time.Duration, clusterVersion string,
 	capiMaxRetryBatchUpdateDocs int, capiBatchTimeout time.Duration,
-	capiWriteTimeout time.Duration, capiReadTimeout time.Duration) {
+	capiWriteTimeout time.Duration, capiReadTimeout time.Duration,
+	maxCheckpointRecordsToKeep int, maxCheckpointRecordsToRead int) {
 	TopologyChangeCheckInterval = topologyChangeCheckInterval
 	MaxTopologyChangeCountBeforeRestart = maxTopologyChangeCountBeforeRestart
 	MaxTopologyStableCountBeforeRestart = maxTopologyStableCountBeforeRestart
@@ -406,4 +413,6 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	CapiBatchTimeout = capiBatchTimeout
 	CapiWriteTimeout = capiWriteTimeout
 	CapiReadTimeout = capiReadTimeout
+	MaxCheckpointRecordsToKeep = maxCheckpointRecordsToKeep
+	MaxCheckpointRecordsToRead = maxCheckpointRecordsToRead
 }

@@ -327,8 +327,11 @@ func getDocsProcessedForReplication(topic string, vb_list []uint16, checkpoints_
 			// if vbno is in vb_list, include its senqo in docs_processed computation
 
 			// if checkpoint records exist, use the seqno in the first checkpoint record, which is the highest in all checkpoint records
-			if ckptDoc != nil && ckptDoc.Checkpoint_records != nil && ckptDoc.Checkpoint_records[0] != nil {
-				docsProcessed += ckptDoc.Checkpoint_records[0].Seqno
+			if ckptDoc != nil {
+				ckptRecords := ckptDoc.GetCheckpointRecords()
+				if ckptRecords != nil && len(ckptRecords) > 0 && ckptRecords[0] != nil {
+					docsProcessed += ckptRecords[0].Seqno
+				}
 			}
 		} else {
 			// otherwise, delete the checkpoint doc since it is no longer valid
@@ -497,7 +500,7 @@ POPULATE:
 func (ckmgr *CheckpointManager) ckptRecords(ckptDoc *metadata.CheckpointsDoc, vbno uint16) []*metadata.CheckpointRecord {
 	if ckptDoc != nil {
 		ckmgr.logger.Infof("Found checkpoint doc for vb=%v\n", vbno)
-		return ckptDoc.Checkpoint_records
+		return ckptDoc.GetCheckpointRecords()
 	} else {
 		ret := []*metadata.CheckpointRecord{}
 
@@ -612,19 +615,25 @@ func (ckmgr *CheckpointManager) retrieveCkptDoc(vbno uint16) (*metadata.Checkpoi
 func (ckmgr *CheckpointManager) populateVBTimestamp(ckptDoc *metadata.CheckpointsDoc, agreedIndex int, vbno uint16) *base.VBTimestamp {
 	vbts := &base.VBTimestamp{Vbno: vbno}
 	if agreedIndex > -1 && ckptDoc != nil {
-		ckpt_record := ckptDoc.Checkpoint_records[agreedIndex]
-		vbts.Vbuuid = ckpt_record.Failover_uuid
-		vbts.Seqno = ckpt_record.Seqno
-		vbts.SnapshotStart = ckpt_record.Dcp_snapshot_seqno
-		vbts.SnapshotEnd = ckpt_record.Dcp_snapshot_end_seqno
+		ckpt_records := ckptDoc.GetCheckpointRecords()
+		if len(ckpt_records) < agreedIndex+1 {
+			// should never happen
+			ckmgr.logger.Infof("%v could not find checkpoint record with agreedIndex=%v", ckmgr.pipeline.Topic(), agreedIndex)
+		} else {
+			ckpt_record := ckpt_records[agreedIndex]
+			vbts.Vbuuid = ckpt_record.Failover_uuid
+			vbts.Seqno = ckpt_record.Seqno
+			vbts.SnapshotStart = ckpt_record.Dcp_snapshot_seqno
+			vbts.SnapshotEnd = ckpt_record.Dcp_snapshot_end_seqno
 
-		//For all stream requests the snapshot start seqno must be less than or equal
-		//to the start seqno and the start seqno must be less than or equal to the snapshot end seqno.
-		if vbts.SnapshotStart > vbts.Seqno {
-			vbts.SnapshotStart = vbts.Seqno
-		}
-		if vbts.Seqno > vbts.SnapshotEnd {
-			vbts.SnapshotEnd = vbts.Seqno
+			//For all stream requests the snapshot start seqno must be less than or equal
+			//to the start seqno and the start seqno must be less than or equal to the snapshot end seqno.
+			if vbts.SnapshotStart > vbts.Seqno {
+				vbts.SnapshotStart = vbts.Seqno
+			}
+			if vbts.Seqno > vbts.SnapshotEnd {
+				vbts.SnapshotEnd = vbts.Seqno
+			}
 		}
 
 	}
