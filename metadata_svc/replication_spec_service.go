@@ -292,6 +292,10 @@ func (service *ReplicationSpecService) ValidateNewReplicationSpec(sourceBucket, 
 
 func (service *ReplicationSpecService) validateBucket(sourceBucket, targetCluster, targetBucket, bucketType string, evictionPolicy string, err error, errorMap map[string]error, isSourceBucket bool) {
 	var qualifier, errKey, bucketName string
+
+	// should always return nil for second argument (error)
+	isEnterprise, _ := service.xdcr_comp_topology_svc.IsMyClusterEnterprise()
+
 	if isSourceBucket {
 		qualifier = "source"
 		errKey = base.FromBucket
@@ -316,6 +320,10 @@ func (service *ReplicationSpecService) validateBucket(sourceBucket, targetCluste
 	} else if isSourceBucket && bucketType == base.EphemeralBucketType && evictionPolicy == base.EvictionPolicyNRU {
 		// source bucket cannot be ephemeral bucket with eviction
 		errMsg := fmt.Sprintf("XDCR replication for ephemeral bucket with eviction '%v' is not allowed", bucketName)
+		service.logger.Error(errMsg)
+		errorMap[errKey] = fmt.Errorf(errMsg)
+	} else if bucketType == base.EphemeralBucketType && !isEnterprise {
+		errMsg := fmt.Sprintf("XDCR replication for ephemeral bucket '%v' on Community Edition is not allowed", bucketName)
 		service.logger.Error(errMsg)
 		errorMap[errKey] = fmt.Errorf(errMsg)
 	}
