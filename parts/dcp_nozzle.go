@@ -47,13 +47,13 @@ const (
 	Dcp_Stream_Active  = iota
 )
 
-var dcp_inactive_stream_check_interval = 10 * time.Second
+var dcp_inactive_stream_check_interval = 30 * time.Second
 
 var dcp_setting_defs base.SettingDefinitions = base.SettingDefinitions{DCP_VBTimestamp: base.NewSettingDef(reflect.TypeOf((*map[uint16]*base.VBTimestamp)(nil)), false)}
 
 var ErrorEmptyVBList = errors.New("Invalid configuration for DCP nozzle. VB list cannot be empty.")
 
-var MaxCountStreamsInactive uint8 = 40
+var MaxCountStreamsInactive uint32 = 40
 
 var SizeOfUprFeedRandName = 16
 var MaxRetryForIdGeneration = 5
@@ -105,12 +105,12 @@ type DcpNozzle struct {
 
 	// the number of check intervals after which dcp still has inactive streams
 	// inactive streams will be restarted after this count exceeds MaxCountStreamsInactive
-	counter_streams_inactive uint8
+	counter_streams_inactive uint32
 
 	start_time          time.Time
 	handle_error        bool
 	cur_ts              map[uint16]*vbtsWithLock
-	vbtimestamp_updater func(uint16, uint64) (*base.VBTimestamp, error)
+	vbtimestamp_updater func(uint16, uint64, uint16) (*base.VBTimestamp, error, bool)
 
 	// the number of times that the dcp nozzle did not receive anything from dcp when there are
 	// items remaining in dcp
@@ -201,7 +201,7 @@ func (dcp *DcpNozzle) initialize(settings map[string]interface{}) (err error) {
 	}
 
 	// fetch start timestamp from settings
-	dcp.vbtimestamp_updater = settings[DCP_VBTimestampUpdator].(func(uint16, uint64) (*base.VBTimestamp, error))
+	dcp.vbtimestamp_updater = settings[DCP_VBTimestampUpdator].(func(uint16, uint64, uint16) (*base.VBTimestamp, error, bool))
 
 	if val, ok := settings[DCP_Stats_Interval]; ok {
 		dcp.stats_interval = time.Duration(val.(int)) * time.Millisecond
@@ -386,12 +386,15 @@ func (dcp *DcpNozzle) processData() (err error) {
 	dcp.Logger().Infof("%v processData starts..........\n", dcp.Id())
 	defer dcp.childrenWaitGrp.Done()
 
+	rollbackCheckCountMap := make(map[uint16]uint16)
+
 	finch := dcp.finch
 	uprFeed := dcp.getUprFeed()
 	if uprFeed == nil {
 		dcp.Logger().Infof("%v DCP feed has been closed. processData exits\n", dcp.Id())
 		return
 	}
+
 	mutch := uprFeed.C
 	for {
 		select {
@@ -414,13 +417,20 @@ func (dcp *DcpNozzle) processData() (err error) {
 					rollbackseq := binary.BigEndian.Uint64(m.Value[:8])
 					vbno := m.VBucket
 
+					// as soon as we hear back from UPR feed, reset the counter to avoid monitor restart
+					atomic.StoreUint32(&dcp.counter_streams_inactive, 0)
+
 					//need to request the uprstream for the vbucket again
-					updated_ts, err := dcp.vbtimestamp_updater(vbno, rollbackseq)
+					updated_ts, err, rollbackMark := dcp.vbtimestamp_updater(vbno, rollbackseq, rollbackCheckCountMap[vbno])
 					if err != nil {
 						err = fmt.Errorf("Failed to request dcp stream after receiving roll-back for vb=%v. err=%v\n", vbno, err)
 						dcp.Logger().Errorf("%v %v", dcp.Id(), err)
 						dcp.handleGeneralError(err)
 						return err
+					}
+					if rollbackMark {
+						// Checkpoint mgr states that UPR has asked to rollback to a <= seqno than what it is on
+						rollbackCheckCountMap[vbno]++
 					}
 					err = dcp.setTS(vbno, updated_ts, true)
 					if err != nil {
@@ -434,6 +444,7 @@ func (dcp *DcpNozzle) processData() (err error) {
 
 				} else if m.Status == mc.SUCCESS {
 					vbno := m.VBucket
+					rollbackCheckCountMap[vbno] = 0
 					_, ok := dcp.vb_stream_status[vbno]
 					if ok {
 						dcp.setStreamState(vbno, Dcp_Stream_Active)
@@ -829,16 +840,16 @@ func (dcp *DcpNozzle) isFeedClosed() bool {
 func (dcp *DcpNozzle) checkInactiveUprStreams_once() error {
 	streams_inactive := dcp.initedButInactiveDcpStreams()
 	if len(streams_inactive) > 0 {
-		dcp.counter_streams_inactive++
-		dcp.Logger().Infof("%v incrementing counter for inactive streams %v\n", dcp.Id(), dcp.counter_streams_inactive)
-		if dcp.counter_streams_inactive > MaxCountStreamsInactive {
+		atomic.AddUint32(&dcp.counter_streams_inactive, 1)
+		dcp.Logger().Infof("%v incrementing counter for inactive streams %v\n", dcp.Id(), atomic.LoadUint32(&dcp.counter_streams_inactive))
+		if atomic.LoadUint32(&dcp.counter_streams_inactive) > MaxCountStreamsInactive {
 			dcp.Logger().Infof("%v restarting inactive streams %v\n", dcp.Id(), streams_inactive)
 			dcp.forceCloseUprStreams(streams_inactive)
 			err := dcp.startUprStreams_internal(streams_inactive)
 			if err != nil {
 				return err
 			}
-			dcp.counter_streams_inactive = 0
+			atomic.StoreUint32(&dcp.counter_streams_inactive, 0)
 		}
 	}
 	return nil

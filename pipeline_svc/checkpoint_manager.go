@@ -962,27 +962,33 @@ func (ckmgr *CheckpointManager) getSnapshotForSeqno(vbno uint16, seqno uint64) (
 	return 0, 0, fmt.Errorf("%v Failed to find snapshot for vb=%v, seqno=%v\n", ckmgr.pipeline.Topic(), vbno, seqno)
 }
 
-func (ckmgr *CheckpointManager) UpdateVBTimestamps(vbno uint16, rollbackseqno uint64) (*base.VBTimestamp, error) {
+var maxRollbackSeqBe4Restart uint16 = 10
+
+func (ckmgr *CheckpointManager) UpdateVBTimestamps(vbno uint16, rollbackseqno uint64, count uint16) (*base.VBTimestamp, error, bool) {
 	ckmgr.logger.Infof("Received rollback from DCP stream vb=%v, rollbackseqno=%v\n", vbno, rollbackseqno)
+	var rollBackMarkCheck bool = false
 	pipeline_startSeqnos_map, pipeline_startSeqnos_map_lock := GetStartSeqnos(ckmgr.pipeline, ckmgr.logger)
 
 	if pipeline_startSeqnos_map == nil {
-		return nil, fmt.Errorf("Error retrieving vb timestamp map for %v\n", ckmgr.pipeline.Topic())
+		return nil, fmt.Errorf("Error retrieving vb timestamp map for %v\n", ckmgr.pipeline.Topic()), rollBackMarkCheck
 	}
 	pipeline_startSeqnos_map_lock.Lock()
 	defer pipeline_startSeqnos_map_lock.Unlock()
 
 	pipeline_start_seqno, ok := pipeline_startSeqnos_map[vbno]
 	if !ok {
-		return nil, fmt.Errorf("Invalid vbno=%v\n", vbno)
+		return nil, fmt.Errorf("Invalid vbno=%v\n", vbno), rollBackMarkCheck
 	}
 	if rollbackseqno >= pipeline_start_seqno.Seqno {
-		panic(fmt.Sprintf("rollbackseqno=%v, current_start_seqno=%v", rollbackseqno, pipeline_start_seqno.Seqno))
+		rollBackMarkCheck = true
+		if count > maxRollbackSeqBe4Restart {
+			panic(fmt.Sprintf("rollbackseqno=%v, current_start_seqno=%v", rollbackseqno, pipeline_start_seqno.Seqno))
+		}
 	}
 
 	checkpointDoc, err := ckmgr.retrieveCkptDoc(vbno)
 	if err != nil {
-		return nil, err
+		return nil, err, rollBackMarkCheck
 	}
 
 	// when we re-compute vbtimestamp, we try earlier checkpoint records with seqno <= rollbackseqno
@@ -1003,7 +1009,7 @@ func (ckmgr *CheckpointManager) UpdateVBTimestamps(vbno uint16, rollbackseqno ui
 
 	vbts, err := ckmgr.getVBTimestampForVB(vbno, checkpointDoc, max_seqno)
 	if err != nil {
-		return nil, err
+		return nil, err, rollBackMarkCheck
 	}
 
 	pipeline_startSeqnos_map[vbno] = vbts
@@ -1014,7 +1020,7 @@ func (ckmgr *CheckpointManager) UpdateVBTimestamps(vbno uint16, rollbackseqno ui
 
 	ckmgr.logger.Infof("Retry vbts=%v\n", vbts)
 
-	return vbts, nil
+	return vbts, nil, rollBackMarkCheck
 }
 
 // returns the vbts map and the associated lock on the map. 	861
