@@ -180,7 +180,7 @@ type StatisticsManager struct {
 	bucket_name string
 
 	// Keeps track of all the serverAddr -> MCC client required
-	kv_mem_clients      map[string]*mcc.Client
+	kv_mem_clients      map[string]mcc.ClientIface
 	kv_mem_clients_lock *sync.RWMutex
 
 	through_seqno_tracker_svc service_def.ThroughSeqnoTrackerSvc
@@ -209,7 +209,7 @@ func NewStatisticsManager(through_seqno_tracker_svc service_def.ThroughSeqnoTrac
 		update_interval:           default_update_interval,
 		active_vbs:                active_vbs,
 		wait_grp:                  &sync.WaitGroup{},
-		kv_mem_clients:            make(map[string]*mcc.Client),
+		kv_mem_clients:            make(map[string]mcc.ClientIface),
 		kv_mem_clients_lock:       &sync.RWMutex{},
 		checkpointed_seqnos:       make(map[uint16]*base.SeqnoWithLock),
 		stats_map:                 make(map[string]string),
@@ -254,7 +254,7 @@ func (stats_mgr *StatisticsManager) cleanupBeforeExit() error {
 	return nil
 }
 
-func getHighSeqNos(serverAddr string, vbnos []uint16, conn *mcc.Client, stats_map map[string]string, utils utilities.UtilsIface) (map[uint16]uint64, error) {
+func getHighSeqNos(serverAddr string, vbnos []uint16, conn mcc.ClientIface, stats_map map[string]string, utils utilities.UtilsIface) (map[uint16]uint64, error) {
 	highseqno_map := make(map[uint16]uint64)
 
 	var err error
@@ -762,7 +762,7 @@ func (stats_mgr *StatisticsManager) closeConnections() {
 			stats_mgr.logger.Infof("%v error from closing connection for %v is %v\n", stats_mgr.pipeline.InstanceId(), server_addr, err)
 		}
 	}
-	stats_mgr.kv_mem_clients = make(map[string]*mcc.Client)
+	stats_mgr.kv_mem_clients = make(map[string]mcc.ClientIface)
 }
 
 func (stats_mgr *StatisticsManager) initConnections() error {
@@ -1186,7 +1186,7 @@ func (stats_mgr *StatisticsManager) getReplicationStatus() (*pipeline_pkg.Replic
 }
 
 func UpdateStats(cluster_info_svc service_def.ClusterInfoSvc, xdcr_topology_svc service_def.XDCRCompTopologySvc,
-	checkpoints_svc service_def.CheckpointsService, kv_mem_clients map[string]*mcc.Client,
+	checkpoints_svc service_def.CheckpointsService, kv_mem_clients map[string]mcc.ClientIface,
 	logger *log.CommonLogger, utils utilities.UtilsIface) {
 	logger.Debug("updateStats for paused replications")
 
@@ -1228,7 +1228,7 @@ func UpdateStats(cluster_info_svc service_def.ClusterInfoSvc, xdcr_topology_svc 
 
 // compute and set changes_left and docs_processed stats. set other stats to 0
 func constructStatsForReplication(spec *metadata.ReplicationSpecification, cur_kv_vb_map map[string][]uint16,
-	checkpoints_svc service_def.CheckpointsService, kv_mem_clients map[string]*mcc.Client,
+	checkpoints_svc service_def.CheckpointsService, kv_mem_clients map[string]mcc.ClientIface,
 	logger *log.CommonLogger, utils utilities.UtilsIface) (*expvar.Map, error) {
 	cur_vb_list := simple_utils.GetVbListFromKvVbMap(cur_kv_vb_map)
 	docs_processed, err := getDocsProcessedForReplication(spec.Id, cur_vb_list, checkpoints_svc, logger)
@@ -1254,7 +1254,7 @@ func constructStatsForReplication(spec *metadata.ReplicationSpecification, cur_k
 	return overview_map, nil
 }
 
-func calculateTotalChanges(kv_vb_map map[string][]uint16, kv_mem_clients map[string]*mcc.Client,
+func calculateTotalChanges(kv_vb_map map[string][]uint16, kv_mem_clients map[string]mcc.ClientIface,
 	sourceBucketName string, user_agent string, stats_map map[string]string, logger *log.CommonLogger, utils utilities.UtilsIface) (int64, error) {
 	var total_changes uint64 = 0
 	for serverAddr, vbnos := range kv_vb_map {
@@ -1282,7 +1282,7 @@ func calculateTotalChanges(kv_vb_map map[string][]uint16, kv_mem_clients map[str
 }
 
 func updateStatsForReplication(repl_status *pipeline_pkg.ReplicationStatus, cur_kv_vb_map map[string][]uint16,
-	checkpoints_svc service_def.CheckpointsService, kv_mem_clients map[string]*mcc.Client,
+	checkpoints_svc service_def.CheckpointsService, kv_mem_clients map[string]mcc.ClientIface,
 	logger *log.CommonLogger, utils utilities.UtilsIface) error {
 
 	// if pipeline is not running, update docs_processed and changes_left stats, which are not being

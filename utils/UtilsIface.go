@@ -36,14 +36,14 @@ type UtilsIface interface {
 	LocalBucketPassword(local_connStr string, bucketName string, logger *log.CommonLogger) (string, error)
 	ReplicationStatusNotFoundError(topic string) error
 	BucketNotFoundError(bucketName string) error
-	GetMemcachedConnection(serverAddr, bucketName string, userAgent string, logger *log.CommonLogger) (*mcc.Client, error)
-	GetRemoteMemcachedConnection(serverAddr, username string, password string, bucketName string, userAgent string, plainAuth bool, logger *log.CommonLogger) (*mcc.Client, error)
-	SendHELO(client *mcc.Client, userAgent string, readTimeout, writeTimeout time.Duration, logger *log.CommonLogger) error
+	GetMemcachedConnection(serverAddr, bucketName string, userAgent string, logger *log.CommonLogger) (mcc.ClientIface, error)
+	GetRemoteMemcachedConnection(serverAddr, username string, password string, bucketName string, userAgent string, plainAuth bool, logger *log.CommonLogger) (mcc.ClientIface, error)
+	SendHELO(client mcc.ClientIface, userAgent string, readTimeout, writeTimeout time.Duration, logger *log.CommonLogger) error
 	ComposeHELORequest(userAgent string, enableXattr bool) *mc.MCRequest
 	GetIntSettingFromSettings(settings map[string]interface{}, settingName string) (int, error)
 	GetStringSettingFromSettings(settings map[string]interface{}, settingName string) (string, error)
 	GetSettingFromSettings(settings map[string]interface{}, settingName string) interface{}
-	GetMemcachedClient(serverAddr, bucketName string, kv_mem_clients map[string]*mcc.Client, userAgent string, logger *log.CommonLogger) (*mcc.Client, error)
+	GetMemcachedClient(serverAddr, bucketName string, kv_mem_clients map[string]mcc.ClientIface, userAgent string, logger *log.CommonLogger) (mcc.ClientIface, error)
 	GetServerVBucketsMap(connStr, bucketName string, bucketInfo map[string]interface{}) (map[string][]uint16, error)
 	GetBucketTypeFromBucketInfo(bucketName string, bucketInfo map[string]interface{}) (string, error)
 	GetConflictResolutionTypeFromBucketInfo(bucketName string, bucketInfo map[string]interface{}) (string, error)
@@ -96,6 +96,6 @@ type UtilsIface interface {
 	GetNonExistentBucketError() error
 	//	GetLoggerUtils (*log.CommonLogger)
 	ValidateSettings(defs base.SettingDefinitions, settings map[string]interface{}, logger *log.CommonLogger) error
-	SendHELOWithXattrFeature(client *mcc.Client, userAgent string, readTimeout, writeTimeout time.Duration, logger *log.CommonLogger) (xattrEnabled bool, err error)
+	SendHELOWithXattrFeature(client mcc.ClientIface, userAgent string, readTimeout, writeTimeout time.Duration, logger *log.CommonLogger) (xattrEnabled bool, err error)
 	CheckWhetherClusterIsESBasedOnBucketInfo(bucketInfo map[string]interface{}) bool
 }

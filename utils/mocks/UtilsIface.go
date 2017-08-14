@@ -768,20 +768,20 @@ func (_m *UtilsIface) GetMatchedKeys(expression string, keys []string) (map[stri
 }
 
 // GetMemcachedClient provides a mock function with given fields: serverAddr, bucketName, kv_mem_clients, userAgent, logger
-func (_m *UtilsIface) GetMemcachedClient(serverAddr string, bucketName string, kv_mem_clients map[string]*memcached.Client, userAgent string, logger *log.CommonLogger) (*memcached.Client, error) {
+func (_m *UtilsIface) GetMemcachedClient(serverAddr string, bucketName string, kv_mem_clients map[string]memcached.ClientIface, userAgent string, logger *log.CommonLogger) (memcached.ClientIface, error) {
 	ret := _m.Called(serverAddr, bucketName, kv_mem_clients, userAgent, logger)
 
-	var r0 *memcached.Client
-	if rf, ok := ret.Get(0).(func(string, string, map[string]*memcached.Client, string, *log.CommonLogger) *memcached.Client); ok {
+	var r0 memcached.ClientIface
+	if rf, ok := ret.Get(0).(func(string, string, map[string]memcached.ClientIface, string, *log.CommonLogger) memcached.ClientIface); ok {
 		r0 = rf(serverAddr, bucketName, kv_mem_clients, userAgent, logger)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*memcached.Client)
+			r0 = ret.Get(0).(memcached.ClientIface)
 		}
 	}
 
 	var r1 error
-	if rf, ok := ret.Get(1).(func(string, string, map[string]*memcached.Client, string, *log.CommonLogger) error); ok {
+	if rf, ok := ret.Get(1).(func(string, string, map[string]memcached.ClientIface, string, *log.CommonLogger) error); ok {
 		r1 = rf(serverAddr, bucketName, kv_mem_clients, userAgent, logger)
 	} else {
 		r1 = ret.Error(1)
@@ -791,15 +791,15 @@ func (_m *UtilsIface) GetMemcachedClient(serverAddr string, bucketName string, k
 }
 
 // GetMemcachedConnection provides a mock function with given fields: serverAddr, bucketName, userAgent, logger
-func (_m *UtilsIface) GetMemcachedConnection(serverAddr string, bucketName string, userAgent string, logger *log.CommonLogger) (*memcached.Client, error) {
+func (_m *UtilsIface) GetMemcachedConnection(serverAddr string, bucketName string, userAgent string, logger *log.CommonLogger) (memcached.ClientIface, error) {
 	ret := _m.Called(serverAddr, bucketName, userAgent, logger)
 
-	var r0 *memcached.Client
-	if rf, ok := ret.Get(0).(func(string, string, string, *log.CommonLogger) *memcached.Client); ok {
+	var r0 memcached.ClientIface
+	if rf, ok := ret.Get(0).(func(string, string, string, *log.CommonLogger) memcached.ClientIface); ok {
 		r0 = rf(serverAddr, bucketName, userAgent, logger)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*memcached.Client)
+			r0 = ret.Get(0).(memcached.ClientIface)
 		}
 	}
 
@@ -964,15 +964,15 @@ func (_m *UtilsIface) GetPortNumber(hostAddr string) (uint16, error) {
 }
 
 // GetRemoteMemcachedConnection provides a mock function with given fields: serverAddr, username, password, bucketName, userAgent, plainAuth, logger
-func (_m *UtilsIface) GetRemoteMemcachedConnection(serverAddr string, username string, password string, bucketName string, userAgent string, plainAuth bool, logger *log.CommonLogger) (*memcached.Client, error) {
+func (_m *UtilsIface) GetRemoteMemcachedConnection(serverAddr string, username string, password string, bucketName string, userAgent string, plainAuth bool, logger *log.CommonLogger) (memcached.ClientIface, error) {
 	ret := _m.Called(serverAddr, username, password, bucketName, userAgent, plainAuth, logger)
 
-	var r0 *memcached.Client
-	if rf, ok := ret.Get(0).(func(string, string, string, string, string, bool, *log.CommonLogger) *memcached.Client); ok {
+	var r0 memcached.ClientIface
+	if rf, ok := ret.Get(0).(func(string, string, string, string, string, bool, *log.CommonLogger) memcached.ClientIface); ok {
 		r0 = rf(serverAddr, username, password, bucketName, userAgent, plainAuth, logger)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*memcached.Client)
+			r0 = ret.Get(0).(memcached.ClientIface)
 		}
 	}
 
@@ -1390,11 +1390,11 @@ func (_m *UtilsIface) ReplicationStatusNotFoundError(topic string) error {
 }
 
 // SendHELO provides a mock function with given fields: client, userAgent, readTimeout, writeTimeout, logger
-func (_m *UtilsIface) SendHELO(client *memcached.Client, userAgent string, readTimeout time.Duration, writeTimeout time.Duration, logger *log.CommonLogger) error {
+func (_m *UtilsIface) SendHELO(client memcached.ClientIface, userAgent string, readTimeout time.Duration, writeTimeout time.Duration, logger *log.CommonLogger) error {
 	ret := _m.Called(client, userAgent, readTimeout, writeTimeout, logger)
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(*memcached.Client, string, time.Duration, time.Duration, *log.CommonLogger) error); ok {
+	if rf, ok := ret.Get(0).(func(memcached.ClientIface, string, time.Duration, time.Duration, *log.CommonLogger) error); ok {
 		r0 = rf(client, userAgent, readTimeout, writeTimeout, logger)
 	} else {
 		r0 = ret.Error(0)
@@ -1404,18 +1404,18 @@ func (_m *UtilsIface) SendHELO(client *memcached.Client, userAgent string, readT
 }
 
 // SendHELOWithXattrFeature provides a mock function with given fields: client, userAgent, readTimeout, writeTimeout, logger
-func (_m *UtilsIface) SendHELOWithXattrFeature(client *memcached.Client, userAgent string, readTimeout time.Duration, writeTimeout time.Duration, logger *log.CommonLogger) (bool, error) {
+func (_m *UtilsIface) SendHELOWithXattrFeature(client memcached.ClientIface, userAgent string, readTimeout time.Duration, writeTimeout time.Duration, logger *log.CommonLogger) (bool, error) {
 	ret := _m.Called(client, userAgent, readTimeout, writeTimeout, logger)
 
 	var r0 bool
-	if rf, ok := ret.Get(0).(func(*memcached.Client, string, time.Duration, time.Duration, *log.CommonLogger) bool); ok {
+	if rf, ok := ret.Get(0).(func(memcached.ClientIface, string, time.Duration, time.Duration, *log.CommonLogger) bool); ok {
 		r0 = rf(client, userAgent, readTimeout, writeTimeout, logger)
 	} else {
 		r0 = ret.Get(0).(bool)
 	}
 
 	var r1 error
-	if rf, ok := ret.Get(1).(func(*memcached.Client, string, time.Duration, time.Duration, *log.CommonLogger) error); ok {
+	if rf, ok := ret.Get(1).(func(memcached.ClientIface, string, time.Duration, time.Duration, *log.CommonLogger) error); ok {
 		r1 = rf(client, userAgent, readTimeout, writeTimeout, logger)
 	} else {
 		r1 = ret.Error(1)

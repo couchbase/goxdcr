@@ -406,7 +406,7 @@ func (u *Utilities) BucketNotFoundError(bucketName string) error {
 
 // creates a local memcached connection.
 // always use plain auth
-func (u *Utilities) GetMemcachedConnection(serverAddr, bucketName string, userAgent string, logger *log.CommonLogger) (*mcc.Client, error) {
+func (u *Utilities) GetMemcachedConnection(serverAddr, bucketName string, userAgent string, logger *log.CommonLogger) (mcc.ClientIface, error) {
 	logger.Infof("GetMemcachedConnection serverAddr=%v, bucketName=%v\n", serverAddr, bucketName)
 	if serverAddr == "" {
 		panic("serverAddr is empty")
@@ -431,7 +431,7 @@ func (u *Utilities) GetMemcachedConnection(serverAddr, bucketName string, userAg
 	return conn, nil
 }
 
-func (u *Utilities) GetRemoteMemcachedConnection(serverAddr, username string, password string, bucketName string, userAgent string, plainAuth bool, logger *log.CommonLogger) (*mcc.Client, error) {
+func (u *Utilities) GetRemoteMemcachedConnection(serverAddr, username string, password string, bucketName string, userAgent string, plainAuth bool, logger *log.CommonLogger) (mcc.ClientIface, error) {
 	conn, err := base.NewConn(serverAddr, username, password, bucketName, plainAuth, logger)
 	if err != nil {
 		return nil, err
@@ -449,7 +449,7 @@ func (u *Utilities) GetRemoteMemcachedConnection(serverAddr, username string, pa
 // send helo with specified user agent string to memcached
 // the helo is purely informational, for the identification of the client
 // unsuccessful response is not treated as errors
-func (u *Utilities) SendHELO(client *mcc.Client, userAgent string, readTimeout, writeTimeout time.Duration,
+func (u *Utilities) SendHELO(client mcc.ClientIface, userAgent string, readTimeout, writeTimeout time.Duration,
 	logger *log.CommonLogger) (err error) {
 	heloReq := u.ComposeHELORequest(userAgent, false /*enableDataType*/)
 
@@ -469,7 +469,7 @@ func (u *Utilities) SendHELO(client *mcc.Client, userAgent string, readTimeout, 
 // used exclusively by xmem nozzle
 // we need to know whether data type is indeed enabled from helo response
 // unsuccessful response is treated as errors
-func (u *Utilities) SendHELOWithXattrFeature(client *mcc.Client, userAgent string, readTimeout, writeTimeout time.Duration,
+func (u *Utilities) SendHELOWithXattrFeature(client mcc.ClientIface, userAgent string, readTimeout, writeTimeout time.Duration,
 	logger *log.CommonLogger) (xattrEnabled bool, err error) {
 	heloReq := u.ComposeHELORequest(userAgent, true /*enableXattr*/)
 
@@ -508,7 +508,7 @@ func (u *Utilities) SendHELOWithXattrFeature(client *mcc.Client, userAgent strin
 	return
 }
 
-func (u *Utilities) sendHELORequest(client *mcc.Client, heloReq *mc.MCRequest, userAgent string, readTimeout, writeTimeout time.Duration,
+func (u *Utilities) sendHELORequest(client mcc.ClientIface, heloReq *mc.MCRequest, userAgent string, readTimeout, writeTimeout time.Duration,
 	logger *log.CommonLogger) (response *mc.MCResponse, err error) {
 
 	conn := client.Hijack()
@@ -588,7 +588,7 @@ func (u *Utilities) GetSettingFromSettings(settings map[string]interface{}, sett
 	return setting
 }
 
-func (u *Utilities) GetMemcachedClient(serverAddr, bucketName string, kv_mem_clients map[string]*mcc.Client, userAgent string, logger *log.CommonLogger) (*mcc.Client, error) {
+func (u *Utilities) GetMemcachedClient(serverAddr, bucketName string, kv_mem_clients map[string]mcc.ClientIface, userAgent string, logger *log.CommonLogger) (mcc.ClientIface, error) {
 	client, ok := kv_mem_clients[serverAddr]
 	if ok {
 		return client, nil

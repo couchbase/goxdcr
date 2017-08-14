@@ -323,7 +323,7 @@ func (rm *replicationManager) checkReplicationStatus(fin_chan chan bool) {
 	stats_update_ticker := time.NewTicker(StatsUpdateIntervalForPausedReplications)
 	defer stats_update_ticker.Stop()
 
-	kv_mem_clients := make(map[string]*mcc.Client)
+	kv_mem_clients := make(map[string]mcc.ClientIface)
 
 	for {
 		select {

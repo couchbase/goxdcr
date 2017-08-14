@@ -57,7 +57,7 @@ type PipelineSupervisor struct {
 	xdcr_topology_svc service_def.XDCRCompTopologySvc
 
 	// memcached clients for dcp health check
-	kv_mem_clients      map[string]*mcc.Client
+	kv_mem_clients      map[string]mcc.ClientIface
 	kv_mem_clients_lock *sync.Mutex
 
 	user_agent string
@@ -74,7 +74,7 @@ func NewPipelineSupervisor(id string, logger_ctx *log.LoggerContext, failure_han
 		errors_seen_lock:    &sync.RWMutex{},
 		cluster_info_svc:    cluster_info_svc,
 		xdcr_topology_svc:   xdcr_topology_svc,
-		kv_mem_clients:      make(map[string]*mcc.Client),
+		kv_mem_clients:      make(map[string]mcc.ClientIface),
 		kv_mem_clients_lock: &sync.Mutex{},
 		utils:               utilsIn,
 	}
@@ -167,7 +167,7 @@ func (pipelineSupervisor *PipelineSupervisor) closeConnections() {
 			pipelineSupervisor.Logger().Infof("%v error from closing connection for %v is %v\n", pipelineSupervisor.Id(), serverAddr, err)
 		}
 	}
-	pipelineSupervisor.kv_mem_clients = make(map[string]*mcc.Client)
+	pipelineSupervisor.kv_mem_clients = make(map[string]mcc.ClientIface)
 }
 
 func (pipelineSupervisor *PipelineSupervisor) monitorPipelineHealth() error {

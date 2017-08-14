@@ -48,6 +48,29 @@ func (_m *ReplicationManagerIf) createAndPersistReplicationSpec(justValidate boo
 	return r0, r1, r2
 }
 
+// getPipelineFromPipelineSupevisor provides a mock function with given fields: s
+func (_m *ReplicationManagerIf) getPipelineFromPipelineSupevisor(s common.Supervisor) (common.Pipeline, error) {
+	ret := _m.Called(s)
+
+	var r0 common.Pipeline
+	if rf, ok := ret.Get(0).(func(common.Supervisor) common.Pipeline); ok {
+		r0 = rf(s)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(common.Pipeline)
+		}
+	}
+
+	var r1 error
+	if rf, ok := ret.Get(1).(func(common.Supervisor) error); ok {
+		r1 = rf(s)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
 // init provides a mock function with given fields: repl_spec_svc, remote_cluster_svc, cluster_info_svc, xdcr_topology_svc, replication_settings_svc, checkpoint_svc, capi_svc, audit_svc, uilog_svc, global_setting_svc, bucket_settings_svc, internal_settings_svc
 func (_m *ReplicationManagerIf) init(repl_spec_svc service_def.ReplicationSpecSvc, remote_cluster_svc service_def.RemoteClusterSvc, cluster_info_svc service_def.ClusterInfoSvc, xdcr_topology_svc service_def.XDCRCompTopologySvc, replication_settings_svc service_def.ReplicationSettingsSvc, checkpoint_svc service_def.CheckpointsService, capi_svc service_def.CAPIService, audit_svc service_def.AuditSvc, uilog_svc service_def.UILogSvc, global_setting_svc service_def.GlobalSettingsSvc, bucket_settings_svc service_def.BucketSettingsSvc, internal_settings_svc service_def.InternalSettingsSvc) {
 	_m.Called(repl_spec_svc, remote_cluster_svc, cluster_info_svc, xdcr_topology_svc, replication_settings_svc, checkpoint_svc, capi_svc, audit_svc, uilog_svc, global_setting_svc, bucket_settings_svc, internal_settings_svc)

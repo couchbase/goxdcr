@@ -120,7 +120,7 @@ type CheckpointManager struct {
 
 	// these fields are used for xmem replication only
 	// memcached clients for retrieval of target bucket stats
-	kv_mem_clients      map[string]*mcc.Client
+	kv_mem_clients      map[string]mcc.ClientIface
 	kv_mem_clients_lock sync.RWMutex
 
 	target_cluster_version int
@@ -184,7 +184,7 @@ func NewCheckpointManager(checkpoints_svc service_def.CheckpointsService, capi_s
 		wait_grp:                  &sync.WaitGroup{},
 		failoverlog_map:           make(map[uint16]*failoverlogWithLock),
 		snapshot_history_map:      make(map[uint16]*snapshotHistoryWithLock),
-		kv_mem_clients:            make(map[string]*mcc.Client),
+		kv_mem_clients:            make(map[string]mcc.ClientIface),
 		target_cluster_ref:        target_cluster_ref,
 		target_cluster_version:    target_cluster_version,
 		utils: utilsIn,
@@ -368,7 +368,7 @@ func (ckmgr *CheckpointManager) initSSLConStrMap() error {
 	return nil
 }
 
-func (ckmgr *CheckpointManager) getNewMemcachedClient(server_addr string) (*mcc.Client, error) {
+func (ckmgr *CheckpointManager) getNewMemcachedClient(server_addr string) (mcc.ClientIface, error) {
 	if ckmgr.target_cluster_ref.IsFullEncryption() {
 		_, _, certificate, sanInCertificate, err := ckmgr.target_cluster_ref.MyCredentials()
 		if err != nil {
@@ -390,7 +390,7 @@ func (ckmgr *CheckpointManager) closeConnections() {
 			ckmgr.logger.Warnf("%v error from closing connection for %v is %v\n", ckmgr.pipeline.Topic(), server_addr, err)
 		}
 	}
-	ckmgr.kv_mem_clients = make(map[string]*mcc.Client)
+	ckmgr.kv_mem_clients = make(map[string]mcc.ClientIface)
 }
 
 func (ckmgr *CheckpointManager) getHighSeqnoAndVBUuidFromTarget() map[uint16][]uint64 {
@@ -1423,33 +1423,24 @@ func (ckmgr *CheckpointManager) getSnapshotForSeqno(vbno uint16, seqno uint64) (
 	return 0, 0, fmt.Errorf("%v Failed to find snapshot for vb=%v, seqno=%v\n", ckmgr.pipeline.Topic(), vbno, seqno)
 }
 
-var maxRollbackSeqBe4Restart uint16 = 10
-
-func (ckmgr *CheckpointManager) UpdateVBTimestamps(vbno uint16, rollbackseqno uint64, count uint16) (*base.VBTimestamp, error, bool) {
+func (ckmgr *CheckpointManager) UpdateVBTimestamps(vbno uint16, rollbackseqno uint64) (*base.VBTimestamp, error) {
 	ckmgr.logger.Infof("%v Received rollback from DCP stream vb=%v, rollbackseqno=%v\n", ckmgr.pipeline.Topic(), vbno, rollbackseqno)
-	var rollBackMarkCheck bool = false
 	pipeline_startSeqnos_map, pipeline_startSeqnos_map_lock := GetStartSeqnos(ckmgr.pipeline, ckmgr.logger)
 
 	if pipeline_startSeqnos_map == nil {
-		return nil, fmt.Errorf("Error retrieving vb timestamp map for %v\n", ckmgr.pipeline.Topic()), rollBackMarkCheck
+		return nil, fmt.Errorf("Error retrieving vb timestamp map for %v\n", ckmgr.pipeline.Topic())
 	}
 	pipeline_startSeqnos_map_lock.Lock()
 	defer pipeline_startSeqnos_map_lock.Unlock()
 
 	pipeline_start_seqno, ok := pipeline_startSeqnos_map[vbno]
 	if !ok {
-		return nil, fmt.Errorf("%v Invalid vbno=%v\n", ckmgr.pipeline.Topic(), vbno), rollBackMarkCheck
-	}
-	if rollbackseqno >= pipeline_start_seqno.Seqno {
-		rollBackMarkCheck = true
-		if count > maxRollbackSeqBe4Restart {
-			panic(fmt.Sprintf("%v rollbackseqno=%v, current_start_seqno=%v", ckmgr.pipeline.Topic(), rollbackseqno, pipeline_start_seqno.Seqno))
-		}
+		return nil, fmt.Errorf("%v Invalid vbno=%v\n", ckmgr.pipeline.Topic(), vbno)
 	}
 
 	checkpointDoc, err := ckmgr.retrieveCkptDoc(vbno)
 	if err != nil {
-		return nil, err, rollBackMarkCheck
+		return nil, err
 	}
 
 	// when we re-compute vbtimestamp, we try earlier checkpoint records with seqno <= rollbackseqno
@@ -1470,7 +1461,7 @@ func (ckmgr *CheckpointManager) UpdateVBTimestamps(vbno uint16, rollbackseqno ui
 
 	vbts, err := ckmgr.getVBTimestampForVB(vbno, checkpointDoc, max_seqno)
 	if err != nil {
-		return nil, err, rollBackMarkCheck
+		return nil, err
 	}
 
 	pipeline_startSeqnos_map[vbno] = vbts
@@ -1481,11 +1472,11 @@ func (ckmgr *CheckpointManager) UpdateVBTimestamps(vbno uint16, rollbackseqno ui
 
 	ckmgr.logger.Infof("%v Retry vbts=%v\n", ckmgr.pipeline.Topic(), vbts)
 
-	return vbts, nil, rollBackMarkCheck
+	return vbts, nil
 }
 
-// returns the vbts map and the associated lock on the map. 	861
-// caller needs to lock the lock appropriatedly before using the map 	862
+// returns the vbts map and the associated lock on the map
+// caller needs to lock the lock appropriatedly before using the map
 func GetStartSeqnos(pipeline common.Pipeline, logger *log.CommonLogger) (map[uint16]*base.VBTimestamp, *sync.RWMutex) {
 	if pipeline != nil {
 		settings := pipeline.Settings()

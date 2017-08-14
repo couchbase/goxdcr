@@ -808,7 +808,7 @@ func (xdcrf *XDCRFactory) constructSettingsForDcpNozzle(pipeline common.Pipeline
 		return nil, fmt.Errorf("No checkpoint manager has been registered with the pipeline %v", pipeline.Topic())
 	}
 
-	dcpNozzleSettings[parts.DCP_VBTimestampUpdator] = ckpt_svc.(*pipeline_svc.CheckpointManager).UpdateVBTimestamps
+	dcpNozzleSettings[parts.DCP_VBTimestampUpdater] = ckpt_svc.(*pipeline_svc.CheckpointManager).UpdateVBTimestamps
 	dcpNozzleSettings[parts.DCP_Stats_Interval] = getSettingFromSettingsMap(settings, metadata.PipelineStatsInterval, repSettings.StatsInterval)
 	return dcpNozzleSettings, nil
 }

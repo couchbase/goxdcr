@@ -35,8 +35,8 @@ const (
 type ConnType int
 
 const (
-	MemConn      ConnType = iota
-	SSLOverMem   ConnType = iota
+	MemConn    ConnType = iota
+	SSLOverMem ConnType = iota
 )
 
 var (
