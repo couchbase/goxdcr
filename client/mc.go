@@ -25,6 +25,54 @@ import (
 	"time"
 )
 
+type ClientIface interface {
+	Add(vb uint16, key string, flags int, exp int, body []byte) (*gomemcached.MCResponse, error)
+	Append(vb uint16, key string, data []byte) (*gomemcached.MCResponse, error)
+	Auth(user, pass string) (*gomemcached.MCResponse, error)
+	AuthAdvanced(user, pass string) (*gomemcached.MCResponse, error)
+	AuthList() (*gomemcached.MCResponse, error)
+	AuthPlain(user, pass string) (*gomemcached.MCResponse, error)
+	AuthScramSha(user, pass string) (*gomemcached.MCResponse, error)
+	AuthSHA(user, pass string, mech string, hashFunc func() hash.Hash, hashSize int) (*gomemcached.MCResponse, error)
+	AuthSHA1(user, pass string) (*gomemcached.MCResponse, error)
+	AuthSHA256(user, pass string) (*gomemcached.MCResponse, error)
+	AuthSHA512(user, pass string) (*gomemcached.MCResponse, error)
+	CASNext(vb uint16, k string, exp int, state *CASState) bool
+	CAS(vb uint16, k string, f CasFunc, initexp int) (*gomemcached.MCResponse, error)
+	Close() error
+	Decr(vb uint16, key string, amt, def uint64, exp int) (uint64, error)
+	Del(vb uint16, key string) (*gomemcached.MCResponse, error)
+	EnableMutationToken() (*gomemcached.MCResponse, error)
+	Get(vb uint16, key string) (*gomemcached.MCResponse, error)
+	GetAndTouch(vb uint16, key string, exp int) (*gomemcached.MCResponse, error)
+	GetBulk(vb uint16, keys []string, rv map[string]*gomemcached.MCResponse) error
+	GetMeta(vb uint16, key string) (*gomemcached.MCResponse, error)
+	GetRandomDoc() (*gomemcached.MCResponse, error)
+	Hijack() io.ReadWriteCloser
+	Incr(vb uint16, key string, amt, def uint64, exp int) (uint64, error)
+	Observe(vb uint16, key string) (result ObserveResult, err error)
+	ObserveSeq(vb uint16, vbuuid uint64) (result *ObserveSeqResult, err error)
+	Receive() (*gomemcached.MCResponse, error)
+	Send(req *gomemcached.MCRequest) (rv *gomemcached.MCResponse, err error)
+	Set(vb uint16, key string, flags int, exp int, body []byte) (*gomemcached.MCResponse, error)
+	SetKeepAliveOptions(interval time.Duration)
+	SetReadDeadline(t time.Time)
+	SelectBucket(bucket string) (*gomemcached.MCResponse, error)
+	SetCas(vb uint16, key string, flags int, exp int, cas uint64, body []byte) (*gomemcached.MCResponse, error)
+	Stats(key string) ([]StatValue, error)
+	StatsMap(key string) (map[string]string, error)
+	StatsMapForSpecifiedStats(key string, statsMap map[string]string) error
+	Transmit(req *gomemcached.MCRequest) error
+	TransmitResponse(res *gomemcached.MCResponse) error
+
+	// UprFeed Related
+	NewUprFeed() (*UprFeed, error)
+	NewUprFeedIface() (UprFeedIface, error)
+	NewUprFeedWithConfig(ackByClient bool) (*UprFeed, error)
+	NewUprFeedWithConfigIface(ackByClient bool) (UprFeedIface, error)
+	UprGetFailoverLog(vb []uint16) (map[uint16]*FailoverLog, error)
+}
+
 // authentication mechanisms
 const (
 	AuthMech_SHA512 = "SCRAM-SHA512"

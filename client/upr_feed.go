@@ -80,6 +80,22 @@ type UprFeed struct {
 	ackByClient bool
 }
 
+// Exported interface - to allow for mocking
+type UprFeedIface interface {
+	Close()
+	Closed() bool
+	CloseStream(vbno, opaqueMSB uint16) error
+	GetError() error
+	GetUprStats() *UprStats
+	IncrementAckBytes(bytes uint32) error
+	GetUprEventCh() <-chan *UprEvent
+	StartFeed() error
+	StartFeedWithConfig(datachan_len int) error
+	UprOpen(name string, sequence uint32, bufSize uint32) error
+	UprOpenWithXATTR(name string, sequence uint32, bufSize uint32) error
+	UprRequestStream(vbno, opaqueMSB uint16, flags uint32, vuuid, startSequence, endSequence, snapStart, snapEnd uint64) error
+}
+
 type UprStats struct {
 	TotalBytes         uint64
 	TotalMutation      uint64
@@ -199,6 +215,14 @@ func (mc *Client) NewUprFeedWithConfig(ackByClient bool) (*UprFeed, error) {
 
 	go feed.sendCommands(mc)
 	return feed, nil
+}
+
+func (mc *Client) NewUprFeedIface() (UprFeedIface, error) {
+	return mc.NewUprFeed()
+}
+
+func (mc *Client) NewUprFeedWithConfigIface(ackByClient bool) (UprFeedIface, error) {
+	return mc.NewUprFeedWithConfig(ackByClient)
 }
 
 func doUprOpen(mc *Client, name string, sequence uint32, enableXATTR bool) error {
@@ -388,6 +412,14 @@ func (feed *UprFeed) CloseStream(vbno, opaqueMSB uint16) error {
 	feed.writeToTransmitCh(closeStream)
 
 	return nil
+}
+
+func (feed *UprFeed) GetUprEventCh() <-chan *UprEvent {
+	return feed.C
+}
+
+func (feed *UprFeed) GetError() error {
+	return feed.Error
 }
 
 func (feed *UprFeed) validateCloseStream(vbno uint16) error {
