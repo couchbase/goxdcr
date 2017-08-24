@@ -264,6 +264,7 @@ func (service *MigrationSvc) migrateRemoteCluster(remoteClusterData interface{},
 	password := ""
 	demandEncryption := false
 	var certificate []byte
+	var err error
 
 	nameData, ok := remoteCluster[base.RemoteClusterName]
 	if ok {
@@ -329,7 +330,10 @@ func (service *MigrationSvc) migrateRemoteCluster(remoteClusterData interface{},
 	}
 
 	if demandEncryptionData, ok := remoteCluster[base.RemoteClusterDemandEncryption]; ok {
-		demandEncryption = getDemandEncryptionValue(demandEncryptionData)
+		demandEncryption, err = getDemandEncryptionValue(demandEncryptionData, name)
+		if err != nil {
+			mildErrorList = append(mildErrorList, err)
+		}
 	}
 	if certificateData, ok := remoteCluster[base.RemoteClusterCertificate]; ok {
 		var certificateStr string
@@ -339,6 +343,10 @@ func (service *MigrationSvc) migrateRemoteCluster(remoteClusterData interface{},
 
 	if demandEncryption && len(certificate) == 0 {
 		mildErrorList = append(mildErrorList, errors.New(fmt.Sprintf("Certificate of remote cluster is required when demandEncryption is enabled. data=%v", sanitizeForLogging(remoteCluster))))
+	}
+
+	if !demandEncryption && len(certificate) > 0 {
+		mildErrorList = append(mildErrorList, errors.New(fmt.Sprintf("Certificate of remote cluster has been specified when demandEncryption is not enabled. data=%v", sanitizeForLogging(remoteCluster))))
 	}
 
 	encryptionType := ""
@@ -595,7 +603,7 @@ func (service *MigrationSvc) migrateReplicationDoc(replicationDocData interface{
 
 	// TODO we should add non-empty additionalInfo here to differentiate the repl spec created by migration
 	// from repl spec created by user
-	err = service.repl_spec_svc.AddReplicationSpec(spec, ""/*addtionalInfo*/)
+	err = service.repl_spec_svc.AddReplicationSpec(spec, "" /*addtionalInfo*/)
 	if err != nil {
 		fatalErrorList = append(fatalErrorList, err)
 	}
@@ -767,17 +775,14 @@ func getUint64Value(fieldName string, fieldValue interface{}, metadataType strin
 }
 
 // demandEncryption needs special handling
-func getDemandEncryptionValue(fieldValue interface{}) bool {
-	floatValue, ok := fieldValue.(float64)
+func getDemandEncryptionValue(fieldValue interface{}, name string) (bool, error) {
+	boolValue, ok := fieldValue.(bool)
 	if !ok {
-		return false
+		// the presence of some value for demandEncryption indicates that demandEncryption has been enabled
+		// in the weird case that the value is not of bool type, return true and a warning
+		return true, fmt.Errorf("DemandEncryption in remote cluster reference %v is not of boolean type. Defaulting it to true. value=%v", name, fieldValue)
 	}
-	if int(floatValue) == 0 {
-		// only an int value of 0 indicates that encryption is not enabled
-		return false
-	} else {
-		return true
-	}
+	return boolValue, nil
 }
 
 func incorrectMetadataValueTypeError(metadataType string, data interface{}, expectedType string) error {
