@@ -8,6 +8,7 @@ import (
 	"strconv"
 )
 
+var GoGCDefaultValue = 100
 var logger_ps *log.CommonLogger = log.NewLogger("GlobalSetting", log.DefaultLoggerContext)
 
 /*
@@ -26,7 +27,7 @@ const (
 var GoMaxProcsConfig = &SettingsConfig{4, &Range{1, 10000}}
 
 // -1 indicates that GC is disabled completely
-var GoGCConfig = &SettingsConfig{100, &Range{-1, 10000}}
+var GoGCConfig = &SettingsConfig{GoGCDefaultValue, &Range{-1, 10000}}
 
 var GlobalSettingsConfigMap = map[string]*SettingsConfig{
 	GoMaxProcs: GoMaxProcsConfig,

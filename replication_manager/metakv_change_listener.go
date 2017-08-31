@@ -463,6 +463,13 @@ func (pscl *GlobalSettingChangeListener) globalSettingChangeHandlerCallback(sett
 		}
 	}
 
+	if newSetting.GoGC == 0 {
+		// this is possible only when we just upgraded from 4.1/4.5 to 4.6 and up, where GOGC did not exist in older version
+		// use the pre-default value for GOGC in this case
+		newSetting.GoGC = metadata.GoGCDefaultValue
+		pscl.logger.Infof("GOGC in new global setting is 0, which is not a valid value and can only have come from upgrade. Changed it to %v instead.", metadata.GoGCDefaultValue)
+	}
+
 	// always sets gogc value since there is no way to check the current gogc value beforehand
 	oldGoGCValue := debug.SetGCPercent(newSetting.GoGC)
 	pscl.logger.Infof("Successfully changed  GOGC setting from(old) %v to(New) %v\n", oldGoGCValue, newSetting.GoGC)
