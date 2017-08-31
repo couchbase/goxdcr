@@ -27,7 +27,8 @@ const (
 var GoMaxProcsConfig = &SettingsConfig{4, &Range{1, 10000}}
 
 // -1 indicates that GC is disabled completely
-var GoGCConfig = &SettingsConfig{GoGCDefaultValue, &Range{-1, 10000}}
+// note, 0 is not a valid value for GOGC, which will be checked separately from the range check
+var GoGCConfig = &SettingsConfig{100, &Range{-1, 10000}}
 
 var GlobalSettingsConfigMap = map[string]*SettingsConfig{
 	GoMaxProcs: GoMaxProcsConfig,
@@ -103,8 +104,6 @@ func (s *GlobalSettings) UpdateSettingsFromMap(settingsMap map[string]interface{
 func ValidateAndConvertGlobalSettingsValue(key, value, errorKey string) (convertedValue interface{}, err error) {
 	switch key {
 	case GoMaxProcs:
-		fallthrough
-	case GoGC:
 		convertedValue, err = strconv.ParseInt(value, base.ParseIntBase, base.ParseIntBitSize)
 		if err != nil {
 			err = simple_utils.IncorrectValueTypeError("an integer")
@@ -115,6 +114,21 @@ func ValidateAndConvertGlobalSettingsValue(key, value, errorKey string) (convert
 
 		// range check for int parameters
 		err = RangeCheck(convertedValue.(int), GlobalSettingsConfigMap[key])
+	case GoGC:
+		convertedValue, err = strconv.ParseInt(value, base.ParseIntBase, base.ParseIntBitSize)
+		if err != nil {
+			err = simple_utils.IncorrectValueTypeError("an integer")
+			return
+		}
+		// convert it to int to make future processing easier
+		convertedValue = int(convertedValue.(int64))
+
+		if convertedValue == 0 {
+			err = fmt.Errorf("0 is not a valid value for GOGC")
+		} else {
+			// range check for int parameters
+			err = RangeCheck(convertedValue.(int), GlobalSettingsConfigMap[key])
+		}
 	default:
 		// a nil converted value indicates that the key is not a settings key
 		convertedValue = nil
@@ -125,7 +139,12 @@ func ValidateAndConvertGlobalSettingsValue(key, value, errorKey string) (convert
 func (s *GlobalSettings) ToMap() map[string]interface{} {
 	settings_map := make(map[string]interface{})
 	settings_map[GoMaxProcs] = s.GoMaxProcs
-	settings_map[GoGC] = s.GoGC
+	// 0 value for GOGC can only have come from upgrade.
+	// It is not used at runtime and should not be visible to users
+	// do not add GoGC field and value to map if it has the value of 0
+	if s.GoGC != 0 {
+		settings_map[GoGC] = s.GoGC
+	}
 	return settings_map
 }
 
