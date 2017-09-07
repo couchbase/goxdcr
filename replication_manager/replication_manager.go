@@ -42,8 +42,6 @@ import (
 
 var logger_rm *log.CommonLogger = log.NewLogger("ReplMgr", log.DefaultLoggerContext)
 var StatsUpdateIntervalForPausedReplications = 60 * time.Second
-var StatusCheckInterval = 15 * time.Second
-var MemStatsLogInterval = 2 * time.Minute
 
 var GoXDCROptions struct {
 	SourceKVAdminPort    uint64 //source kv admin port
@@ -240,7 +238,46 @@ func initConstants(xdcr_topology_svc service_def.XDCRCompTopologySvc, internal_s
 		time.Duration(internal_settings.Values[metadata.CapiWriteTimeoutKey].(int))*time.Second,
 		time.Duration(internal_settings.Values[metadata.CapiReadTimeoutKey].(int))*time.Second,
 		internal_settings.Values[metadata.MaxCheckpointRecordsToKeepKey].(int),
-		internal_settings.Values[metadata.MaxCheckpointRecordsToReadKey].(int))
+		internal_settings.Values[metadata.MaxCheckpointRecordsToReadKey].(int),
+		time.Duration(internal_settings.Values[metadata.DefaultHttpTimeoutKey].(int))*time.Second,
+		time.Duration(internal_settings.Values[metadata.ShortHttpTimeoutKey].(int))*time.Second,
+		internal_settings.Values[metadata.MaxRetryForLiveUpdatePipelineKey].(int),
+		time.Duration(internal_settings.Values[metadata.WaitTimeForLiveUpdatePipelineKey].(int))*time.Millisecond,
+		time.Duration(internal_settings.Values[metadata.ReplSpecCheckIntervalKey].(int))*time.Second,
+		time.Duration(internal_settings.Values[metadata.MemStatsLogIntervalKey].(int))*time.Second,
+		internal_settings.Values[metadata.MaxNumOfMetakvRetriesKey].(int),
+		time.Duration(internal_settings.Values[metadata.RetryIntervalMetakvKey].(int))*time.Millisecond,
+		internal_settings.Values[metadata.UprFeedDataChanLengthKey].(int),
+		internal_settings.Values[metadata.UprFeedBufferSizeKey].(int),
+		internal_settings.Values[metadata.XmemMaxRetryKey].(int),
+		time.Duration(internal_settings.Values[metadata.XmemWriteTimeoutKey].(int))*time.Second,
+		time.Duration(internal_settings.Values[metadata.XmemReadTimeoutKey].(int))*time.Second,
+		time.Duration(internal_settings.Values[metadata.XmemMaxReadDownTimeKey].(int))*time.Second,
+		time.Duration(internal_settings.Values[metadata.XmemBackoffWaitTimeKey].(int))*time.Millisecond,
+		internal_settings.Values[metadata.XmemMaxRetryNewConnKey].(int),
+		time.Duration(internal_settings.Values[metadata.XmemBackoffTimeNewConnKey].(int))*time.Millisecond,
+		time.Duration(internal_settings.Values[metadata.XmemSelfMonitorIntervalKey].(int))*time.Millisecond,
+		internal_settings.Values[metadata.XmemMaxIdleCountKey].(int),
+		internal_settings.Values[metadata.XmemMaxDataChanSizeKey].(int),
+		internal_settings.Values[metadata.XmemMaxBatchSizeKey].(int),
+		time.Duration(internal_settings.Values[metadata.CapiRetryIntervalKey].(int))*time.Millisecond,
+		internal_settings.Values[metadata.MaxLengthSnapshotHistoryKey].(int),
+		internal_settings.Values[metadata.MaxRetryTargetStatsKey].(int),
+		time.Duration(internal_settings.Values[metadata.RetryIntervalTargetStatsKey].(int))*time.Millisecond,
+		internal_settings.Values[metadata.NumberOfSlotsForBandwidthThrottlingKey].(int),
+		internal_settings.Values[metadata.PercentageOfBytesToSendAsMinKey].(int),
+		time.Duration(internal_settings.Values[metadata.AuditWriteTimeoutKey].(int))*time.Second,
+		time.Duration(internal_settings.Values[metadata.AuditReadTimeoutKey].(int))*time.Second,
+		internal_settings.Values[metadata.MaxRetryCapiServiceKey].(int),
+		internal_settings.Values[metadata.MaxNumberOfAsyncListenersKey].(int),
+		time.Duration(internal_settings.Values[metadata.XmemMaxRetryIntervalKey].(int))*time.Second,
+		time.Duration(internal_settings.Values[metadata.HELOTimeoutKey].(int))*time.Second,
+		time.Duration(internal_settings.Values[metadata.WaitTimeBetweenMetadataChangeListenersKey].(int))*time.Millisecond,
+		time.Duration(internal_settings.Values[metadata.KeepAlivePeriodKey].(int))*time.Second,
+		internal_settings.Values[metadata.ThresholdPercentageForEventChanSizeLoggingKey].(int),
+		time.Duration(internal_settings.Values[metadata.ThresholdForThroughSeqnoComputationKey].(int))*time.Millisecond,
+		time.Duration(internal_settings.Values[metadata.StatsLogIntervalKey].(int))*time.Second,
+	)
 }
 
 func (rm *replicationManager) initMetadataChangeMonitor() {
@@ -295,7 +332,7 @@ func (rm *replicationManager) initMetadataChangeMonitor() {
 }
 
 func (rm *replicationManager) initPausedReplications() {
-	for i := 0; i < service_def.MaxNumOfRetries; i++ {
+	for i := 0; i < base.MaxNumOfMetakvRetries; i++ {
 		// set ReplicationStatus for paused replications so that they will show up in task list
 		specs, err := rm.repl_spec_svc.AllReplicationSpecs()
 		if err != nil {
@@ -312,7 +349,7 @@ func (rm *replicationManager) initPausedReplications() {
 		}
 	}
 
-	logger_rm.Errorf("Failed to initPausedReplications after %v retries.", service_def.MaxNumOfRetries)
+	logger_rm.Errorf("Failed to initPausedReplications after %v retries.", base.MaxNumOfMetakvRetries)
 	exitProcess(false)
 }
 
@@ -320,7 +357,7 @@ func (rm *replicationManager) checkReplicationStatus(fin_chan chan bool) {
 	logger_rm.Infof("checkReplicationStatus started.")
 	defer logger_rm.Infof("checkReplicationStatus exited")
 
-	status_check_ticker := time.NewTicker(StatusCheckInterval)
+	status_check_ticker := time.NewTicker(base.ReplSpecCheckInterval)
 	defer status_check_ticker.Stop()
 	stats_update_ticker := time.NewTicker(StatsUpdateIntervalForPausedReplications)
 	defer stats_update_ticker.Stop()
@@ -864,7 +901,7 @@ func logMemStats(fin_chan chan bool) {
 	logger_rm.Infof("logMemStats started.")
 	defer logger_rm.Infof("logMemStats exited")
 
-	mem_stats_ticker := time.NewTicker(MemStatsLogInterval)
+	mem_stats_ticker := time.NewTicker(base.MemStatsLogInterval)
 	defer mem_stats_ticker.Stop()
 
 	stats := new(runtime.MemStats)

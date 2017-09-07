@@ -38,7 +38,7 @@ func (meta_svc *MetaKVMetadataSvc) Get(key string) ([]byte, interface{}, error) 
 	var i int = 0
 	defer meta_svc.logger.Debugf("Took %vs to get %v to metakv, retried =%v\n", time.Since(start_time).Seconds(), key, i)
 
-	for i = 0; i < service_def.MaxNumOfRetries; i++ {
+	for i = 0; i < base.MaxNumOfMetakvRetries; i++ {
 		value, rev, err := metakv.Get(getPathFromKey(key))
 		if value == nil && rev == nil && err == nil {
 			meta_svc.logger.Debugf("Can't find key=%v", key)
@@ -69,7 +69,7 @@ func (meta_svc *MetaKVMetadataSvc) add(key string, value []byte, sensitive bool)
 	var i int = 0
 	defer meta_svc.logger.Debugf("Took %vs to add %v to metakv, retried=%v\n", time.Since(start_time).Seconds(), key, i)
 
-	for i = 0; i < service_def.MaxNumOfRetries; i++ {
+	for i = 0; i < base.MaxNumOfMetakvRetries; i++ {
 		var err error
 		if sensitive {
 			err = metakv.AddSensitive(getPathFromKey(key), value)
@@ -113,7 +113,7 @@ func (meta_svc *MetaKVMetadataSvc) set(key string, value []byte, rev interface{}
 	var i int = 0
 	defer meta_svc.logger.Debugf("Took %vs to set %v to metakv, retried=%v\n", time.Since(start_time).Seconds(), key, i)
 
-	for i = 0; i < service_def.MaxNumOfRetries; i++ {
+	for i = 0; i < base.MaxNumOfMetakvRetries; i++ {
 		var err error
 		if sensitive {
 			err = metakv.SetSensitive(getPathFromKey(key), value, rev)
@@ -139,7 +139,7 @@ func (meta_svc *MetaKVMetadataSvc) Del(key string, rev interface{}) error {
 	var i int = 0
 	defer meta_svc.logger.Debugf("Took %vs to delete %v from metakv, retried=%v\n", time.Since(start_time).Seconds(), key, i)
 
-	for i = 0; i < service_def.MaxNumOfRetries; i++ {
+	for i = 0; i < base.MaxNumOfMetakvRetries; i++ {
 		err := metakv.Delete(getPathFromKey(key), rev)
 		if err == metakv.ErrRevMismatch {
 			return service_def.ErrorRevisionMismatch
@@ -164,7 +164,7 @@ func (meta_svc *MetaKVMetadataSvc) DelAllFromCatalog(catalogKey string) error {
 	var i int = 0
 	defer meta_svc.logger.Debugf("Took %vs to RecursiveDelete for catalogKey=%v to metakv, retried =%v\n", time.Since(start_time).Seconds(), catalogKey, i)
 
-	for i = 0; i < service_def.MaxNumOfRetries; i++ {
+	for i = 0; i < base.MaxNumOfMetakvRetries; i++ {
 		err := metakv.RecursiveDelete(GetCatalogPathFromCatalogKey(catalogKey))
 		if err == nil {
 			return nil
@@ -184,7 +184,7 @@ func (meta_svc *MetaKVMetadataSvc) GetAllMetadataFromCatalog(catalogKey string) 
 	defer meta_svc.logger.Debugf("Took %vs to ListAllChildren for catalogKey=%v to metakv, retried =%v\n", time.Since(start_time).Seconds(), catalogKey, i)
 	var entries = make([]*service_def.MetadataEntry, 0)
 
-	for i = 0; i < service_def.MaxNumOfRetries; i++ {
+	for i = 0; i < base.MaxNumOfMetakvRetries; i++ {
 		kvEntries, err := metakv.ListAllChildren(GetCatalogPathFromCatalogKey(catalogKey))
 		if err != nil {
 			meta_svc.logger.Errorf("metakv.ListAllChildren failed. path=%v, err=%v, num_of_retry=%v\n", GetCatalogPathFromCatalogKey(catalogKey), err, i)

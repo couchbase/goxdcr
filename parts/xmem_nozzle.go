@@ -46,29 +46,8 @@ const (
 	XMEM_SETTING_SAN_IN_CERITICATE   = "SANInCertificate"
 	XMEM_SETTING_REMOTE_MEM_SSL_PORT = "remote_ssl_port"
 
-	//default configuration
-	default_numofretry int = 5
-	// number of retries for setting up connections to target.
-	// this is set to a large number to avoid overly frequent pipeline restart in rebalance scenario
-	default_numofretry_setup_conn int           = 10
-	default_resptimeout           time.Duration = 6000 * time.Millisecond
-	default_maxRetryInterval                    = 300 * time.Second
-	default_writeTimeOut          time.Duration = time.Duration(120) * time.Second
-	default_readTimeout           time.Duration = time.Duration(120) * time.Second
-	default_maxIdleCount          uint32        = 60
-	default_selfMonitorInterval   time.Duration = default_resptimeout
-	default_demandEncryption      bool          = false
-	default_max_read_downtime     time.Duration = 60 * time.Second
-	//wait time between write is default_backoff_wait_time*backoff_factor
-	default_backoff_wait_time    time.Duration = 10 * time.Millisecond
-	default_getMeta_readTimeout  time.Duration = time.Duration(1) * time.Second
-	default_newconn_backoff_time time.Duration = 1 * time.Second
-
-	//the maximum data (in byte) data channel can hold
-	max_datachannelSize = 10 * 1024 * 1024
-
-	// XMEM batch size
-	xmemMaxBatchSize = 50
+	default_resptimeout      time.Duration = 6000 * time.Millisecond
+	default_demandEncryption bool          = false
 )
 
 var xmem_setting_defs base.SettingDefinitions = base.SettingDefinitions{SETTING_BATCHCOUNT: base.NewSettingDef(reflect.TypeOf((*int)(nil)), true),
@@ -435,11 +414,11 @@ func newConfig(logger *log.CommonLogger) xmemConfig {
 	config := xmemConfig{
 		baseConfig: baseConfig{maxCount: -1,
 			maxSize:             -1,
-			writeTimeout:        default_writeTimeOut,
-			readTimeout:         default_readTimeout,
-			maxRetryInterval:    default_maxRetryInterval,
-			maxRetry:            default_numofretry,
-			selfMonitorInterval: default_selfMonitorInterval,
+			writeTimeout:        base.XmemWriteTimeout,
+			readTimeout:         base.XmemReadTimeout,
+			maxRetryInterval:    base.XmemMaxRetryInterval,
+			maxRetry:            base.XmemMaxRetry,
+			selfMonitorInterval: base.XmemSelfMonitorInterval,
 			connectStr:          "",
 			username:            "",
 			password:            "",
@@ -447,12 +426,12 @@ func newConfig(logger *log.CommonLogger) xmemConfig {
 		bucketName:         "",
 		demandEncryption:   default_demandEncryption,
 		certificate:        []byte{},
-		max_read_downtime:  default_max_read_downtime,
+		max_read_downtime:  base.XmemMaxReadDownTime,
 		memcached_ssl_port: 0,
 		logger:             logger,
 	}
 
-	atomic.StoreUint32(&config.maxIdleCount, default_maxIdleCount)
+	atomic.StoreUint32(&config.maxIdleCount, base.XmemMaxIdleCount)
 	resptimeout := default_resptimeout
 	atomic.StorePointer(&config.respTimeout, unsafe.Pointer(&resptimeout))
 
@@ -1162,7 +1141,7 @@ func (xmem *XmemNozzle) batchSetMetaWithRetry(batch *dataBatch, numOfRetry int) 
 	batch_replicated_count := 0
 	reqs_bytes := [][]byte{}
 	// A list of reservations for each request in the batch
-	index_reservation_list := make([][]uint16, xmemMaxBatchSize+1)
+	index_reservation_list := make([][]uint16, base.XmemMaxBatchSize+1)
 
 	for i := 0; i < int(count); i++ {
 		//check xmem's state, if it is already in stopping or stopped state, return
@@ -1200,7 +1179,7 @@ func (xmem *XmemNozzle) batchSetMetaWithRetry(batch *dataBatch, numOfRetry int) 
 				batch_replicated_count++
 
 				//ns_ssl_proxy choke if the batch size is too big
-				if batch_replicated_count > xmemMaxBatchSize {
+				if batch_replicated_count > base.XmemMaxBatchSize {
 					//send it
 					err = xmem.sendWithRetry(xmem.client_for_setMeta, numOfRetry, reqs_bytes)
 
@@ -1214,7 +1193,7 @@ func (xmem *XmemNozzle) batchSetMetaWithRetry(batch *dataBatch, numOfRetry int) 
 
 					batch_replicated_count = 0
 					reqs_bytes = [][]byte{}
-					index_reservation_list = make([][]uint16, xmemMaxBatchSize+1)
+					index_reservation_list = make([][]uint16, base.XmemMaxBatchSize+1)
 				}
 			} else {
 				if needSendStatus == Not_Send_Failed_CR {
@@ -1542,7 +1521,7 @@ func (xmem *XmemNozzle) batchGetMeta(bigDoc_map map[string]*base.WrappedMCReques
 			numOfReqsInReqBytesBatch++
 			sent_key_map[docKey] = true
 
-			if numOfReqsInReqBytesBatch > xmemMaxBatchSize {
+			if numOfReqsInReqBytesBatch > base.XmemMaxBatchSize {
 				// Consider this a batch of requests and put it in as an element in reqs_bytes_list
 				reqs_bytes_list = append(reqs_bytes_list, reqs_bytes)
 				numOfReqsInReqBytesBatch = 0
@@ -1551,7 +1530,7 @@ func (xmem *XmemNozzle) batchGetMeta(bigDoc_map map[string]*base.WrappedMCReques
 		}
 	}
 
-	// In case there are tail ends of the batch that did not fill xmemMaxBatchSize, append them to the end
+	// In case there are tail ends of the batch that did not fill base.XmemMaxBatchSize, append them to the end
 	if numOfReqsInReqBytesBatch > 0 {
 		reqs_bytes_list = append(reqs_bytes_list, reqs_bytes)
 	}
@@ -2458,12 +2437,12 @@ func computeNumberOfBytes(bytesList [][]byte) (numberOfBytes int, minNumberOfByt
 		return
 	}
 
-	fractionNumberOfBytes := int(float32(numberOfBytes) * base.FractionOfNumberOfBytesToSendAsMin)
+	targetMinNumberOfBytes := numberOfBytes * base.PercentageOfBytesToSendAsMin / 100
 	curNumberOfBytes := 0
 	minIndex = -1
 	for index, bytes := range bytesList {
 		curLen := len(bytes)
-		if curNumberOfBytes+curLen <= fractionNumberOfBytes {
+		if curNumberOfBytes+curLen <= targetMinNumberOfBytes {
 			curNumberOfBytes += curLen
 			minIndex = index
 		} else {
@@ -2475,7 +2454,7 @@ func computeNumberOfBytes(bytesList [][]byte) (numberOfBytes int, minNumberOfByt
 	if minIndex >= 0 {
 		minNumberOfBytes = curNumberOfBytes
 	} else {
-		// this can happen if the first item has a size that is bigger than fractionNumberOfBytes
+		// this can happen if the first item has a size that is bigger than targetMinNumberOfBytes
 		// include the first item in minNumberOfBytes
 		minNumberOfBytes = len(bytesList[0])
 		minIndex = 0
@@ -2503,7 +2482,7 @@ func computeNumberOfBytesUsingBytesAllowed(bytesList [][]byte, bytesAllowed int6
 func (xmem *XmemNozzle) writeToClientWithoutThrottling(client *xmemClient, bytes []byte, renewTimeout bool) (error, int) {
 	backoffFactor := client.getBackOffFactor()
 	if backoffFactor > 0 {
-		time.Sleep(time.Duration(backoffFactor) * default_backoff_wait_time)
+		time.Sleep(time.Duration(backoffFactor) * base.XmemBackoffWaitTime)
 	}
 
 	conn, rev, err := xmem.getConn(client, false, renewTimeout)
@@ -2657,7 +2636,7 @@ func (xmem *XmemNozzle) UpdateSettings(settings map[string]interface{}) error {
 }
 
 func (xmem *XmemNozzle) dataChanControl() {
-	if xmem.bytesInDataChan() < max_datachannelSize {
+	if xmem.bytesInDataChan() < base.XmemMaxDataChanSize {
 		select {
 		case xmem.dataChan_control <- true:
 		default:
@@ -2737,7 +2716,7 @@ func (xmem *XmemNozzle) recordBatchSize(batchSize uint32) {
 
 func getClientWithRetry(xmem_id string, pool base.ConnPool, finish_ch chan bool, logger *log.CommonLogger) (*mcc.Client, error) {
 	numOfRetry := 0
-	backoffTime := default_newconn_backoff_time
+	backoffTime := base.XmemBackoffTimeNewConn
 	for {
 		memClient, err := pool.GetNew()
 
@@ -2745,7 +2724,7 @@ func getClientWithRetry(xmem_id string, pool base.ConnPool, finish_ch chan bool,
 			return memClient, nil
 		} else {
 			logger.Warnf("%v Error setting up new connections. err=%v", xmem_id, err)
-			if numOfRetry < default_numofretry_setup_conn {
+			if numOfRetry < base.XmemMaxRetryNewConn {
 				numOfRetry++
 				// exponential backoff
 				logger.Warnf("%v Retrying for %vth time after %v.", xmem_id, numOfRetry, backoffTime)

@@ -43,6 +43,8 @@ var ImmutableDefaultSettings = [3]string{ReplicationType, FilterExpression, Acti
 // settings whose values cannot be changed after replication is created
 var ImmutableSettings = [1]string{FilterExpression}
 
+var MaxBatchCount = 10000
+
 const (
 	ReplicationTypeXmem = "xmem"
 	ReplicationTypeCapi = "capi"
@@ -63,7 +65,7 @@ var ReplicationTypeConfig = &SettingsConfig{ReplicationTypeXmem, nil}
 var FilterExpressionConfig = &SettingsConfig{"", nil}
 var ActiveConfig = &SettingsConfig{true, nil}
 var CheckpointIntervalConfig = &SettingsConfig{600, &Range{60, 14400}}
-var BatchCountConfig = &SettingsConfig{500, &Range{10, 10000}}
+var BatchCountConfig = &SettingsConfig{500, &Range{10, MaxBatchCount}}
 var BatchSizeConfig = &SettingsConfig{2048, &Range{10, 10000}}
 var FailureRestartIntervalConfig = &SettingsConfig{10, &Range{1, 300}}
 var OptimisticReplicationThresholdConfig = &SettingsConfig{256, &Range{0, 20 * 1024 * 1024}}

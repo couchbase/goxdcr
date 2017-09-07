@@ -6,6 +6,7 @@ import (
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/simple_utils"
+	"math"
 	"reflect"
 	"strconv"
 )
@@ -46,6 +47,98 @@ const (
 	MaxCheckpointRecordsToKeepKey = "MaxCheckpointRecordsToKeep"
 	// the maximum number of checkpoint records to read from the checkpoint doc
 	MaxCheckpointRecordsToReadKey = "MaxCheckpointRecordsToRead"
+	// default time out for outgoing http requests if it is not explicitly specified (seconds)
+	DefaultHttpTimeoutKey = "DefaultHttpTimeout"
+	// when we need to make a rest call when processing a XDCR rest request, the time out of the second rest call needs
+	// to be shorter than that of the first one, which is currently 30 seconds. (seconds)
+	ShortHttpTimeoutKey = "ShortHttpTimeout"
+	// max retry for live updating of pipelines
+	MaxRetryForLiveUpdatePipelineKey = "MaxRetryForLiveUpdatePipeline"
+	// wait time between retries for live updating of pipelines (milliseconds)
+	WaitTimeForLiveUpdatePipelineKey = "WaitTimeForLiveUpdatePipeline"
+	// interval for replication spec validity check (seconds)
+	ReplSpecCheckIntervalKey = "ReplSpecCheckInterval"
+	// interval for mem stats logging (seconds)
+	MemStatsLogIntervalKey = "MemStatsLogInterval"
+	// max number of retries for metakv ops
+	MaxNumOfMetakvRetriesKey = "MaxNumOfMetakvRetries"
+	// interval between metakv retries
+	RetryIntervalMetakvKey = "RetryIntervalMetakv"
+
+	// In order for dcp flow control to work correctly, the number of mutations in dcp buffer
+	// should be no larger than the size of the dcp data channel.
+	// This way we can ensure that gomemcached is never blocked on writing to data channel,
+	// and thus can always respond to dcp commands such as NOOP
+	// In other words, the following three parameters should be selected such that
+	// MinimumMutationSize * UprFeedDataChanLength >= UprFeedBufferSize
+	// where MinimumMutationSize is the minimum size of a SetMeta/DelMeta mutation,
+	// a DCP mutation has size 54 + key + body. 60 should be a safe value to use
+
+	// length of data channel between dcp nozzle and gomemcached
+	UprFeedDataChanLengthKey = "UprFeedDataChanLength"
+	// dcp flow control buffer size (number of bytes)
+	UprFeedBufferSizeKey = "UprFeedBufferSize"
+
+	// max retry for xmem operations like batch send, resend, etc.
+	XmemMaxRetryKey = "XmemMaxRetry"
+	// xmem write time out for writing to network connection (seconds)
+	XmemWriteTimeoutKey = "XmemWriteTimeout"
+	// xmem read time out when reading from network connection (seconds)
+	XmemReadTimeoutKey = "XmemReadTimeout"
+	// network connection will be repaired if its down time (the time that it receives
+	// continuous network error responses from read or write) exceeds max down time (seconds)
+	XmemMaxReadDownTimeKey = "XmemMaxReadDownTime"
+	//wait time between write is backoff_factor*XmemBackoffWaitTime (milliseconds)
+	XmemBackoffWaitTimeKey = "XmemBackoffWaitTime"
+	// max retry for new xmem connection
+	XmemMaxRetryNewConnKey = "XmemMaxRetryNewConn"
+	// initial backoff time between retries for new xmem connection (milliseconds)
+	XmemBackoffTimeNewConnKey = "XmemBackoffTimeNewConn"
+	// interval for xmem self monitoring (seconds)
+	XmemSelfMonitorIntervalKey = "XmemSelfMonitorInterval"
+	// initial max idle count;
+	// it is dynamically adjusted at runtime by factor = actual response wait time / previous response wait time
+	// if xmem idle count exceeds this max, it will be declared to be stuck
+	XmemMaxIdleCountKey = "XmemMaxIdleCount"
+	//the maximum amount of data (in bytes) xmem data channel can hold
+	XmemMaxDataChanSizeKey = "XmemMaxDataChanSize"
+	// max batch size that can be sent in one writeToClient() op
+	XmemMaxBatchSizeKey = "XmemMaxBatchSize"
+	// interval between retries on batchUpdateDocs
+	CapiRetryIntervalKey = "CapiRetryInterval"
+	// maximum number of snapshot markers to store for each vb
+	// once the maximum is reached, the oldest snapshot marker is dropped to make room for the new one
+	MaxLengthSnapshotHistoryKey = "MaxLengthSnapshotHistory"
+	// max retry for target stats retrieval.
+	MaxRetryTargetStatsKey = "MaxRetryTargetStats"
+	// base wait time between retries for target stats retrieval (milliseconds)
+	RetryIntervalTargetStatsKey = "RetryIntervalTargetStats"
+	// number of time slots [in one second] to track for bandwidth throttling computation
+	NumberOfSlotsForBandwidthThrottlingKey = "NumberOfSlotsForBandwidthThrottling"
+	// When doing bandwith throttling in xmem, set minNumberOfBytes = TotalNumberOfBytes * PercentageOfBytesToSendAsMin / 100
+	PercentageOfBytesToSendAsMinKey = "PercentageOfBytesToSendAsMin"
+	// write time out for audit service (seconds)
+	AuditWriteTimeoutKey = "AuditWriteTimeout"
+	// read time out for audit service (seconds)
+	AuditReadTimeoutKey = "AuditReadTimeout"
+	// number of retries for CAPI calls, e.g., pre_replicate and commit_for_checkpoint
+	MaxRetryCapiServiceKey = "MaxRetryCapiService"
+	// max number of async listeners [for an event type]
+	MaxNumberOfAsyncListenersKey = "MaxNumberOfAsyncListeners"
+	//max interval between retries when resending docs  (seconds)
+	XmemMaxRetryIntervalKey = "XmemMaxRetryInterval"
+	// read/write timeout for helo command to memcached (seconds)
+	HELOTimeoutKey = "HELOTimeout"
+	// wait time between metadata change listeners (milliseconds)
+	WaitTimeBetweenMetadataChangeListenersKey = "WaitTimeBetweenMetadataChangeListeners"
+	// Keep alive period for tcp connections (seconds)
+	KeepAlivePeriodKey = "KeepAlivePeriod"
+	// actual size of data chan is logged when it exceeds ThresholdPercentageForEventChanSizeLogging * EventChanSize
+	ThresholdPercentageForEventChanSizeLoggingKey = "ThresholdPercentageForEventChanSizeLogging"
+	// if through seqno computation takes longer than the threshold, it will be logged (milliseconds)
+	ThresholdForThroughSeqnoComputationKey = "ThresholdForThroughSeqnoComputation"
+	// interval for printing replication runtime stats to log file (seconds)
+	StatsLogIntervalKey = "StatsLogInterval"
 )
 
 var TopologyChangeCheckIntervalConfig = &SettingsConfig{10, &Range{1, 100}}
@@ -61,21 +154,97 @@ var CapiWriteTimeoutConfig = &SettingsConfig{10, &Range{1, 3600}}
 var CapiReadTimeoutConfig = &SettingsConfig{60, &Range{10, 3600}}
 var MaxCheckpointRecordsToKeepConfig = &SettingsConfig{5, &Range{1, 100}}
 var MaxCheckpointRecordsToReadConfig = &SettingsConfig{5, &Range{1, 100}}
+var DefaultHttpTimeoutConfig = &SettingsConfig{180, &Range{10, 3600}}
+var ShortHttpTimeoutConfig = &SettingsConfig{20, &Range{1, 3600}}
+var MaxRetryForLiveUpdatePipelineConfig = &SettingsConfig{5, &Range{1, 100}}
+var WaitTimeForLiveUpdatePipelineConfig = &SettingsConfig{2000, &Range{10, 60000}}
+var ReplSpecCheckIntervalConfig = &SettingsConfig{15, &Range{1, 3600}}
+var MemStatsLogIntervalConfig = &SettingsConfig{120, &Range{1, 3600}}
+var MaxNumOfMetakvRetriesConfig = &SettingsConfig{7, &Range{0, 100}}
+var RetryIntervalMetakvConfig = &SettingsConfig{1000, &Range{1, 60000}}
+var UprFeedDataChanLengthConfig = &SettingsConfig{20000, &Range{1, math.MaxInt32}}
+var UprFeedBufferSizeConfig = &SettingsConfig{1024 * 1024, &Range{1, math.MaxInt32}}
+var XmemMaxRetryConfig = &SettingsConfig{5, &Range{0, 1000}}
+var XmemWriteTimeoutConfig = &SettingsConfig{120, &Range{1, 3600}}
+var XmemReadTimeoutConfig = &SettingsConfig{120, &Range{1, 3600}}
+var XmemMaxReadDownTimeConfig = &SettingsConfig{60, &Range{1, 3600}}
+var XmemBackoffWaitTimeConfig = &SettingsConfig{10, &Range{1, 1000}}
+var XmemMaxRetryNewConnConfig = &SettingsConfig{10, &Range{0, 1000}}
+var XmemBackoffTimeNewConnConfig = &SettingsConfig{1000, &Range{1, 60000}}
+var XmemSelfMonitorIntervalConfig = &SettingsConfig{6, &Range{1, math.MaxInt32}}
+var XmemMaxIdleCountConfig = &SettingsConfig{60, &Range{1, 3600}}
+var XmemMaxDataChanSizeConfig = &SettingsConfig{10 * 1024 * 1024, &Range{1, math.MaxInt32}}
+var XmemMaxBatchSizeConfig = &SettingsConfig{50, &Range{1, MaxBatchCount}}
+var CapiRetryIntervalConfig = &SettingsConfig{500, &Range{1, 60000}}
+var MaxLengthSnapshotHistoryConfig = &SettingsConfig{200, &Range{1, 100000}}
+var MaxRetryTargetStatsConfig = &SettingsConfig{6, &Range{0, 100}}
+var RetryIntervalTargetStatsConfig = &SettingsConfig{1000, &Range{1, 60000}}
+var NumberOfSlotsForBandwidthThrottlingConfig = &SettingsConfig{10, &Range{1, 1000}}
+var PercentageOfBytesToSendAsMinConfig = &SettingsConfig{30, &Range{1, 100}}
+var AuditWriteTimeoutConfig = &SettingsConfig{1, &Range{1, 3600}}
+var AuditReadTimeoutConfig = &SettingsConfig{1, &Range{1, 3600}}
+var MaxRetryCapiServiceConfig = &SettingsConfig{5, &Range{0, 100}}
+var MaxNumberOfAsyncListenersConfig = &SettingsConfig{4, &Range{1, 100}}
+var XmemMaxRetryIntervalConfig = &SettingsConfig{300, &Range{1, 3600}}
+var HELOTimeoutConfig = &SettingsConfig{120, &Range{1, 3600}}
+var WaitTimeBetweenMetadataChangeListenersConfig = &SettingsConfig{1000, &Range{10, 60000}}
+var KeepAlivePeriodConfig = &SettingsConfig{30, &Range{1, 3600}}
+var ThresholdPercentageForEventChanSizeLoggingConfig = &SettingsConfig{90, &Range{1, 100}}
+var ThresholdForThroughSeqnoComputationConfig = &SettingsConfig{100, &Range{1, 60000}}
+var StatsLogIntervalConfig = &SettingsConfig{30, &Range{1, 36000}}
 
 var XDCRInternalSettingsConfigMap = map[string]*SettingsConfig{
-	TopologyChangeCheckIntervalKey:         TopologyChangeCheckIntervalConfig,
-	MaxTopologyChangeCountBeforeRestartKey: MaxTopologyChangeCountBeforeRestartConfig,
-	MaxTopologyStableCountBeforeRestartKey: MaxTopologyStableCountBeforeRestartConfig,
-	MaxWorkersForCheckpointingKey:          MaxWorkersForCheckpointingConfig,
-	TimeoutCheckpointBeforeStopKey:         TimeoutCheckpointBeforeStopConfig,
-	CapiDataChanSizeMultiplierKey:          CapiDataChanSizeMultiplierConfig,
-	RefreshRemoteClusterRefIntervalKey:     RefreshRemoteClusterRefIntervalConfig,
-	CapiMaxRetryBatchUpdateDocsKey:         CapiMaxRetryBatchUpdateDocsConfig,
-	CapiBatchTimeoutKey:                    CapiBatchTimeoutConfig,
-	CapiWriteTimeoutKey:                    CapiWriteTimeoutConfig,
-	CapiReadTimeoutKey:                     CapiReadTimeoutConfig,
-	MaxCheckpointRecordsToKeepKey:          MaxCheckpointRecordsToKeepConfig,
-	MaxCheckpointRecordsToReadKey:          MaxCheckpointRecordsToReadConfig,
+	TopologyChangeCheckIntervalKey:                TopologyChangeCheckIntervalConfig,
+	MaxTopologyChangeCountBeforeRestartKey:        MaxTopologyChangeCountBeforeRestartConfig,
+	MaxTopologyStableCountBeforeRestartKey:        MaxTopologyStableCountBeforeRestartConfig,
+	MaxWorkersForCheckpointingKey:                 MaxWorkersForCheckpointingConfig,
+	TimeoutCheckpointBeforeStopKey:                TimeoutCheckpointBeforeStopConfig,
+	CapiDataChanSizeMultiplierKey:                 CapiDataChanSizeMultiplierConfig,
+	RefreshRemoteClusterRefIntervalKey:            RefreshRemoteClusterRefIntervalConfig,
+	CapiMaxRetryBatchUpdateDocsKey:                CapiMaxRetryBatchUpdateDocsConfig,
+	CapiBatchTimeoutKey:                           CapiBatchTimeoutConfig,
+	CapiWriteTimeoutKey:                           CapiWriteTimeoutConfig,
+	CapiReadTimeoutKey:                            CapiReadTimeoutConfig,
+	MaxCheckpointRecordsToKeepKey:                 MaxCheckpointRecordsToKeepConfig,
+	MaxCheckpointRecordsToReadKey:                 MaxCheckpointRecordsToReadConfig,
+	DefaultHttpTimeoutKey:                         DefaultHttpTimeoutConfig,
+	ShortHttpTimeoutKey:                           ShortHttpTimeoutConfig,
+	MaxRetryForLiveUpdatePipelineKey:              MaxRetryForLiveUpdatePipelineConfig,
+	WaitTimeForLiveUpdatePipelineKey:              WaitTimeForLiveUpdatePipelineConfig,
+	ReplSpecCheckIntervalKey:                      ReplSpecCheckIntervalConfig,
+	MemStatsLogIntervalKey:                        MemStatsLogIntervalConfig,
+	MaxNumOfMetakvRetriesKey:                      MaxNumOfMetakvRetriesConfig,
+	RetryIntervalMetakvKey:                        RetryIntervalMetakvConfig,
+	UprFeedDataChanLengthKey:                      UprFeedDataChanLengthConfig,
+	UprFeedBufferSizeKey:                          UprFeedBufferSizeConfig,
+	XmemMaxRetryKey:                               XmemMaxRetryConfig,
+	XmemWriteTimeoutKey:                           XmemWriteTimeoutConfig,
+	XmemReadTimeoutKey:                            XmemReadTimeoutConfig,
+	XmemMaxReadDownTimeKey:                        XmemMaxReadDownTimeConfig,
+	XmemBackoffWaitTimeKey:                        XmemBackoffWaitTimeConfig,
+	XmemMaxRetryNewConnKey:                        XmemMaxRetryNewConnConfig,
+	XmemBackoffTimeNewConnKey:                     XmemBackoffTimeNewConnConfig,
+	XmemSelfMonitorIntervalKey:                    XmemSelfMonitorIntervalConfig,
+	XmemMaxIdleCountKey:                           XmemMaxIdleCountConfig,
+	XmemMaxDataChanSizeKey:                        XmemMaxDataChanSizeConfig,
+	XmemMaxBatchSizeKey:                           XmemMaxBatchSizeConfig,
+	CapiRetryIntervalKey:                          CapiRetryIntervalConfig,
+	MaxLengthSnapshotHistoryKey:                   MaxLengthSnapshotHistoryConfig,
+	MaxRetryTargetStatsKey:                        MaxRetryTargetStatsConfig,
+	RetryIntervalTargetStatsKey:                   RetryIntervalTargetStatsConfig,
+	NumberOfSlotsForBandwidthThrottlingKey:        NumberOfSlotsForBandwidthThrottlingConfig,
+	PercentageOfBytesToSendAsMinKey:               PercentageOfBytesToSendAsMinConfig,
+	AuditWriteTimeoutKey:                          AuditWriteTimeoutConfig,
+	AuditReadTimeoutKey:                           AuditReadTimeoutConfig,
+	MaxRetryCapiServiceKey:                        MaxRetryCapiServiceConfig,
+	MaxNumberOfAsyncListenersKey:                  MaxNumberOfAsyncListenersConfig,
+	XmemMaxRetryIntervalKey:                       XmemMaxRetryIntervalConfig,
+	HELOTimeoutKey:                                HELOTimeoutConfig,
+	WaitTimeBetweenMetadataChangeListenersKey:     WaitTimeBetweenMetadataChangeListenersConfig,
+	KeepAlivePeriodKey:                            KeepAlivePeriodConfig,
+	ThresholdPercentageForEventChanSizeLoggingKey: ThresholdPercentageForEventChanSizeLoggingConfig,
+	ThresholdForThroughSeqnoComputationKey:        ThresholdForThroughSeqnoComputationConfig,
+	StatsLogIntervalKey:                           StatsLogIntervalConfig,
 }
 
 type InternalSettings struct {
@@ -383,7 +552,6 @@ func (os V1InternalSettings) HandleUpgrade() {
 	if os.CapiReadTimeout == 0 {
 		os.CapiReadTimeout = CapiReadTimeoutConfig.defaultValue.(int)
 	}
-
 	if os.MaxCheckpointRecordsToKeep == 0 {
 		os.MaxCheckpointRecordsToKeep = MaxCheckpointRecordsToKeepConfig.defaultValue.(int)
 	}

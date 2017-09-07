@@ -75,7 +75,7 @@ func (capi_svc *CAPIService) PreReplicate(remoteBucket *service_def.RemoteBucket
 
 	capi_svc.logger.Debugf("request to _pre_replicate = %v\n", api_base)
 	http_client := remoteBucket.RestAddrHttpClientMap[api_base.url]
-	status_code, respMap, _, err := capi_svc.send_post(PRE_REPLICATE_CMD, api_base, http_client, base.HTTP_RETRIES)
+	status_code, respMap, _, err := capi_svc.send_post(PRE_REPLICATE_CMD, api_base, http_client, base.MaxRetryCapiService)
 	capi_svc.logger.Debugf("response from _pre_replicate is status_code=%v respMap=%v for %v\n", status_code, respMap, knownRemoteVBStatus)
 	if err != nil {
 		capi_svc.logger.Errorf("Calling _pre_replicate on %v failed for vb=%v, err=%v\n", api_base.url, knownRemoteVBStatus.VBNo, err)
@@ -107,7 +107,7 @@ func (capi_svc *CAPIService) CommitForCheckpoint(remoteBucket *service_def.Remot
 	api_base.body["vb"] = vbno
 	api_base.body["vbopaque"] = remoteVBOpaque.Value()
 	http_client := remoteBucket.RestAddrHttpClientMap[api_base.url]
-	status_code, respMap, _, err := capi_svc.send_post(COMMIT_FOR_CKPT_CMD, api_base, http_client, base.HTTP_RETRIES)
+	status_code, respMap, _, err := capi_svc.send_post(COMMIT_FOR_CKPT_CMD, api_base, http_client, base.MaxRetryCapiService)
 
 	if err == nil && status_code == 400 {
 		vbOpaque, err := getVBOpaqueFromRespMap(status_code, respMap, vbno)
@@ -200,7 +200,7 @@ func (capi_svc *CAPIService) massValidateVBUUIDsForServer(remoteBucket *service_
 
 	api_base.body["vbopaques"] = vbopaques
 	http_client := remoteBucket.RestAddrHttpClientMap[api_base.url]
-	status_code, respMap, _, err := capi_svc.send_post(MASS_VBOPAQUE_CHECK_CMD, api_base, http_client, base.HTTP_RETRIES)
+	status_code, respMap, _, err := capi_svc.send_post(MASS_VBOPAQUE_CHECK_CMD, api_base, http_client, base.MaxRetryCapiService)
 
 	capi_svc.logger.Debugf("vbopaques=%v\n", vbopaques)
 	if err != nil {

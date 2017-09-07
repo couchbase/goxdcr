@@ -42,7 +42,6 @@ const (
 	SETTING_RETRY_INTERVAL     = "retry_interval"
 
 	//default configuration
-	default_retry_interval_capi      time.Duration = 500 * time.Millisecond
 	default_maxRetryInterval_capi                  = 30 * time.Second
 	default_upload_window_size       int           = 3 // erlang xdcr value
 	default_selfMonitorInterval_capi time.Duration = 300 * time.Millisecond
@@ -126,7 +125,7 @@ func newCapiConfig(logger *log.CommonLogger) capiConfig {
 		},
 		uploadWindowSize:  default_upload_window_size,
 		connectionTimeout: base.CapiBatchTimeout,
-		retryInterval:     default_retry_interval_capi,
+		retryInterval:     base.CapiRetryInterval,
 	}
 }
 

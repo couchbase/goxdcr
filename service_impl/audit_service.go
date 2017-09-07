@@ -30,12 +30,6 @@ var AuditServiceUserAgent = "Goxdcr Audit"
 // opcode for memcached audit command
 var AuditPutCommandCode = mc.CommandCode(0x27)
 
-// write timeout
-var WriteTimeout = 1000 * time.Millisecond
-
-// read timeout
-var ReadTimeout = 1000 * time.Millisecond
-
 type AuditSvc struct {
 	top_svc     service_def.XDCRCompTopologySvc
 	kvaddr      string
@@ -86,7 +80,7 @@ func (service *AuditSvc) write_internal(client mcc.ClientIface, eventId uint32, 
 	service.logger.Debugf("audit request=%v\n", req)
 
 	conn := client.Hijack()
-	conn.(*net.TCPConn).SetWriteDeadline(time.Now().Add(WriteTimeout))
+	conn.(*net.TCPConn).SetWriteDeadline(time.Now().Add(base.AuditWriteTimeout))
 
 	if err := client.Transmit(req); err != nil {
 		return err
@@ -94,7 +88,7 @@ func (service *AuditSvc) write_internal(client mcc.ClientIface, eventId uint32, 
 
 	service.logger.Debugf("audit request transmitted\n")
 
-	conn.(*net.TCPConn).SetReadDeadline(time.Now().Add(ReadTimeout))
+	conn.(*net.TCPConn).SetReadDeadline(time.Now().Add(base.AuditReadTimeout))
 	res, err := client.Receive()
 	service.logger.Debugf("audit response=%v, opcode=%v, opaque=%v, status=%v, err=%v\n", res, res.Opcode, res.Opaque, res.Status, err)
 

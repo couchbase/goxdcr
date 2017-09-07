@@ -43,17 +43,6 @@ var CHECKPOINT_INTERVAL = "checkpoint_interval"
 
 var ckptRecordMismatch error = errors.New("Checkpoint Records internal version mismatch")
 
-// maximum number of snapshot markers to store for each vb
-// once the maximum is reached, the oldest snapshot marker is dropped to make room for the new one
-var MAX_SNAPSHOT_HISTORY_LENGTH = 200
-
-// max retry for collection of target high seqno and vbuuid stats
-var MaxRetryTargetStats = 6
-
-// base wait time between retrys for target stats retrieval.
-// it will become exponentially longer with each retry
-var WaitBetweenRetryTargetStats = time.Second
-
 type CheckpointManager struct {
 	*component.AbstractComponent
 
@@ -300,7 +289,7 @@ func (ckmgr *CheckpointManager) initialize() {
 		ckmgr.cur_ckpts[vbno] = &checkpointRecordWithLock{ckpt: &metadata.CheckpointRecord{}, lock: &sync.RWMutex{}}
 		ckmgr.failoverlog_map[vbno] = &failoverlogWithLock{failoverlog: nil, lock: &sync.RWMutex{}}
 		ckmgr.snapshot_history_map[vbno] = &snapshotHistoryWithLock{
-			snapshot_history: make([]*snapshot, 0, MAX_SNAPSHOT_HISTORY_LENGTH),
+			snapshot_history: make([]*snapshot, 0, base.MaxLengthSnapshotHistory),
 		}
 	}
 
@@ -413,7 +402,7 @@ func (ckmgr *CheckpointManager) getHighSeqnoAndVBUuidFromTarget() map[uint16][]u
 func (ckmgr *CheckpointManager) getHighSeqnoAndVBUuidForServerWithRetry(serverAddr string, vbnos []uint16, high_seqno_and_vbuuid_map map[uint16][]uint64) {
 	retry := 0
 	// base wait time
-	wait_time := WaitBetweenRetryTargetStats
+	wait_time := base.RetryIntervalTargetStats
 
 	var stats_map map[string]string
 	var err error
@@ -443,7 +432,7 @@ func (ckmgr *CheckpointManager) getHighSeqnoAndVBUuidForServerWithRetry(serverAd
 		}
 
 	Retry:
-		if retry >= MaxRetryTargetStats {
+		if retry >= base.MaxRetryTargetStats {
 			ckmgr.logger.Warnf("%v Retrieval of high seqno and vbuuid stats failed after %v retries. serverAddr=%v, vbnos=%v\n", ckmgr.pipeline.Topic(), retry, serverAddr, vbnos)
 			break
 		}
@@ -1344,14 +1333,14 @@ func (ckmgr *CheckpointManager) OnEvent(event *common.Event) {
 				snapshot_history_obj.lock.Lock()
 				defer snapshot_history_obj.lock.Unlock()
 				cur_snapshot := &snapshot{start_seqno: upr_event.SnapstartSeq, end_seqno: upr_event.SnapendSeq}
-				if len(snapshot_history_obj.snapshot_history) < MAX_SNAPSHOT_HISTORY_LENGTH {
+				if len(snapshot_history_obj.snapshot_history) < base.MaxLengthSnapshotHistory {
 					snapshot_history_obj.snapshot_history = append(snapshot_history_obj.snapshot_history, cur_snapshot)
 				} else {
 					// rotation is needed
-					for i := 0; i < MAX_SNAPSHOT_HISTORY_LENGTH-1; i++ {
+					for i := 0; i < base.MaxLengthSnapshotHistory-1; i++ {
 						snapshot_history_obj.snapshot_history[i] = snapshot_history_obj.snapshot_history[i+1]
 					}
-					snapshot_history_obj.snapshot_history[MAX_SNAPSHOT_HISTORY_LENGTH-1] = cur_snapshot
+					snapshot_history_obj.snapshot_history[base.MaxLengthSnapshotHistory-1] = cur_snapshot
 				}
 			} else {
 				panic(fmt.Sprintf("%v, Received snapshot marker on an unknown vb=%v\n", ckmgr.pipeline.Topic(), vbno))

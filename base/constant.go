@@ -98,14 +98,6 @@ var AdminportReadTimeout = 1 * time.Second
 // write timeout for golib's http server.
 var AdminportWriteTimeout = 180 * time.Second
 
-// default time out for outgoing http requests if it is not explicitly specified
-var DefaultHttpTimeout = 180 * time.Second
-
-// short timeout
-// when we need to make a rest call when processing a XDCR rest request, the time out of the second rest call needs
-// to be shorter than that of the first one, which is currently 30 seconds.
-var ShortHttpTimeout = 20 * time.Second
-
 //outgoing nozzle type
 type XDCROutgoingNozzleType int
 
@@ -262,37 +254,11 @@ const (
 )
 
 const (
-	PipelineSetting_RequestPool     = "RequestPool"
-	DefaultRequestPoolSize          = 10000
-	HTTP_RETRIES                int = 5
+	PipelineSetting_RequestPool = "RequestPool"
+	DefaultRequestPoolSize      = 10000
 )
 
-// In order for dcp flow control to work correctly, the number of mutations in dcp buffer
-// should be no larger than the size of the dcp data channel.
-// This way we can ensure that gomemcached is never blocked on writing to data channel,
-// and thus can always respond to dcp commands such as NOOP
-// As of now, mutations that can fit into data chan have collective size of
-// size > MinimumMutationSize * UprFeedDataChanLength = 60*20000 = 1.2M > UprFeedBufferSize
-// This gives us the aforementioned assurance
-
-// minimum size of a SetMeta/DelMeta mutation, which affects DCP buffer size to allocate
-// a DCP mutation has size 54 + key + body. 60 should be a safe value to use
-var MinimumMutationSize = 60
-
-// length of data channel between dcp nozzle and gomemcached
-var UprFeedDataChanLength = 20000
-
-// dcp flow control buffer size
-var UprFeedBufferSize uint32 = 1024 * 1024
-
-// size of data chan for async event listeners
 var EventChanSize = 10000
-
-// actual size of data chan is logged when it exceeds ThresholdForEventChanSizeLogging
-var ThresholdForEventChanSizeLogging = EventChanSize * 9 / 10
-
-// number of async listeners [for an event type]
-var MaxNumberOfAsyncListeners = 4
 
 // names of async component event listeners
 const (
@@ -361,9 +327,6 @@ var UnexpectedEOF = "unexpected EOF"
 // flag for memcached to enable lww to lww bucket replication
 var FORCE_ACCEPT_WITH_META_OPS uint32 = 0x02
 
-// read/write timeout for helo command to memcached
-var HELOTimeout time.Duration = time.Duration(120) * time.Second
-
 // minimum versions where various features are supported
 var VersionForSANInCertificateSupport = []int{4, 0}
 var VersionForRBACAndXattrSupport = []int{5, 0}
@@ -380,12 +343,6 @@ var HELO_FEATURE_XATTR uint16 = 0x06
 // new XATTR bit in data type field in dcp mutations
 var PROTOCOL_BINARY_DATATYPE_XATTR uint8 = 0x04
 
-// number of time slots [in one second] to track for bandwidth throttling computation
-var NumberOfSlotsForBandwidthThrottling = 10
-
-// When doing bandwith throttling in xmem, set minNumberOfBytes = NumberOfBytes * FractionOfNumberOfBytesToSendAsMin
-var FractionOfNumberOfBytesToSendAsMin float32 = 0.30
-
 // max retry for metakv related operations
 var MaxRetryMetakvOps = 5
 
@@ -395,17 +352,7 @@ var LengthOfRandomId = 16
 // max retry for random id generation
 var MaxRetryForRandomIdGeneration = 5
 
-var WaitTimeBetweenMetadataChangeListeners = 1 * time.Second
-
-var KeepAlivePeriod = 30 * time.Second
-
 var ExecutionTimeoutError = errors.New("Execution timed out")
-
-// if through seqno computation takes longer than the threshold, it will be logged
-var ThresholdForThroughSeqnoComputation = 100 * time.Millisecond
-
-// interval for printing replication runtime stats to log file
-var StatsLogInterval = 30 * time.Second
 
 var TimeoutRuntimeContextStop = 5 * time.Second
 var TimeoutPartsStop = 10 * time.Second
@@ -462,13 +409,159 @@ var MaxCheckpointRecordsToKeep int = 5
 // the maximum number of checkpoint records to read from the checkpoint doc
 var MaxCheckpointRecordsToRead int = 5
 
+// default time out for outgoing http requests if it is not explicitly specified (seconds)
+var DefaultHttpTimeout = 180 * time.Second
+
+// when we need to make a rest call when processing a XDCR rest request, the time out of the second rest call needs
+// to be shorter than that of the first one, which is currently 30 seconds. (seconds)
+var ShortHttpTimeout = 20 * time.Second
+
+// max retry for live updating of pipelines
+var MaxRetryForLiveUpdatePipeline = 5
+
+// wait time between retries for live updating of pipelines (milliseconds)
+var WaitTimeForLiveUpdatePipeline = 2000 * time.Millisecond
+
+// interval for replication spec validity check (seconds)
+var ReplSpecCheckInterval = 15 * time.Second
+
+// interval for mem stats logging (seconds)
+var MemStatsLogInterval = 120 * time.Second
+
+// max number of retries for metakv ops
+var MaxNumOfMetakvRetries = 7
+
+// interval between metakv retries
+var RetryIntervalMetakv = 1000 * time.Millisecond
+
+// In order for dcp flow control to work correctly, the number of mutations in dcp buffer
+// should be no larger than the size of the dcp data channel.
+// This way we can ensure that gomemcached is never blocked on writing to data channel,
+// and thus can always respond to dcp commands such as NOOP
+// In other words, the following three parameters should be selected such that
+// MinimumMutationSize * UprFeedDataChanLength >= UprFeedBufferSize
+// where MinimumMutationSize is the minimum size of a SetMeta/DelMeta mutation,
+// a DCP mutation has size 54 + key + body. 60 should be a safe value to use
+
+// length of data channel between dcp nozzle and gomemcached
+var UprFeedDataChanLength = 20000
+
+// dcp flow control buffer size (number of bytes)
+var UprFeedBufferSize uint32 = 1024 * 1024
+
+// max retry for xmem operations like batch send, resend, etc.
+var XmemMaxRetry = 5
+
+// xmem write time out for writing to network connection (seconds)
+var XmemWriteTimeout = 120 * time.Second
+
+// xmem read time out when reading from network connection (seconds)
+var XmemReadTimeout = 120 * time.Second
+
+// network connection will be repaired if its down time (the time that it receives
+// continuous network error responses from read or write) exceeds max down time (seconds)
+var XmemMaxReadDownTime = 60 * time.Second
+
+//wait time between write is backoff_factor*XmemBackoffWaitTime (milliseconds)
+var XmemBackoffWaitTime = 10 * time.Millisecond
+
+// max retry for new xmem connection
+var XmemMaxRetryNewConn = 10
+
+// initial backoff time between retries for new xmem connection (milliseconds)
+var XmemBackoffTimeNewConn = 1000 * time.Millisecond
+
+// interval for xmem self monitoring (seconds)
+var XmemSelfMonitorInterval = 6 * time.Second
+
+// initial max idle count;
+// it is dynamically adjusted at runtime by factor = actual response wait time / previous response wait time
+// if xmem idle count exceeds this max, it will be declared to be stuck
+var XmemMaxIdleCount uint32 = 60
+
+// //the maximum amount of data (in bytes) xmem data channel can hold
+var XmemMaxDataChanSize = 10 * 1024 * 1024
+
+// max batch size that can be sent in one writeToClient() op
+var XmemMaxBatchSize = 50
+
+// interval between retries on batchUpdateDocs
+var CapiRetryInterval = 500 * time.Millisecond
+
+// maximum number of snapshot markers to store for each vb
+// once the maximum is reached, the oldest snapshot marker is dropped to make room for the new one
+var MaxLengthSnapshotHistory = 200
+
+// max retry for target stats retrieval.
+var MaxRetryTargetStats = 6
+
+// base wait time between retries for target stats retrieval (milliseconds)
+var RetryIntervalTargetStats = 1000 * time.Millisecond
+
+// number of time slots [in one second] to track for bandwidth throttling computation
+var NumberOfSlotsForBandwidthThrottling = 10
+
+// When doing bandwith throttling in xmem, set minNumberOfBytes = TotalNumberOfBytes * PercentageOfBytesToSendAsMin / 100
+var PercentageOfBytesToSendAsMin = 30
+
+// write time out for audit service (seconds)
+var AuditWriteTimeout = 1 * time.Second
+
+// read time out for audit service (seconds)
+var AuditReadTimeout = 1 * time.Second
+
+// number of retries for CAPI calls, e.g., pre_replicate and commit_for_checkpoint
+var MaxRetryCapiService = 5
+
+// max number of async listeners [for an event type]
+var MaxNumberOfAsyncListeners = 4
+
+//max interval between retries when resending docs  (seconds)
+var XmemMaxRetryInterval = 300 * time.Second
+
+// read/write timeout for helo command to memcached
+var HELOTimeout time.Duration = time.Duration(120) * time.Second
+
+var WaitTimeBetweenMetadataChangeListeners = 1 * time.Second
+
+// Keep alive period for tcp connections
+var KeepAlivePeriod = 30 * time.Second
+
+// actual size of data chan is logged when it exceeds ThresholdForEventChanSizeLogging
+var ThresholdForEventChanSizeLogging = EventChanSize * 9 / 10
+
+// if through seqno computation takes longer than the threshold, it will be logged
+var ThresholdForThroughSeqnoComputation = 100 * time.Millisecond
+
+// interval for printing replication runtime stats to log file
+var StatsLogInterval = 30 * time.Second
+
 func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeCountBeforeRestart,
 	maxTopologyStableCountBeforeRestart, maxWorkersForCheckpointing int,
 	timeoutCheckpointBeforeStop time.Duration, capiDataChanSizeMultiplier int,
 	refreshRemoteClusterRefInterval time.Duration, clusterVersion string,
 	capiMaxRetryBatchUpdateDocs int, capiBatchTimeout time.Duration,
 	capiWriteTimeout time.Duration, capiReadTimeout time.Duration,
-	maxCheckpointRecordsToKeep int, maxCheckpointRecordsToRead int) {
+	maxCheckpointRecordsToKeep int, maxCheckpointRecordsToRead int,
+	defaultHttpTimeout time.Duration, shortHttpTimeout time.Duration,
+	maxRetryForLiveUpdatePipeline int, waitTimeForLiveUpdatePipeline time.Duration,
+	replSpecCheckInterval time.Duration, memStatsLogInterval time.Duration,
+	maxNumOfMetakvRetries int, retryIntervalMetakv time.Duration,
+	uprFeedDataChanLength int, uprFeedBufferSize int,
+	xmemMaxRetry int, xmemWriteTimeout time.Duration,
+	xmemReadTimeout time.Duration, xmemMaxReadDownTime time.Duration,
+	xmemBackoffWaitTime time.Duration, xmemMaxRetryNewConn int,
+	xmemBackoffTimeNewConn time.Duration, xmemSelfMonitorInterval time.Duration,
+	xmemMaxIdleCount int, xmemMaxDataChanSize int, xmemMaxBatchSize int,
+	capiRetryInterval time.Duration, maxLengthSnapshotHistory int,
+	maxRetryTargetStats int, retryIntervalTargetStats time.Duration,
+	numberOfSlotsForBandwidthThrottling int, percentageOfBytesToSendAsMin int,
+	auditWriteTimeout time.Duration, auditReadTimeout time.Duration,
+	maxRetryCapiService int, maxNumberOfAsyncListeners int,
+	xmemMaxRetryInterval time.Duration, heloTimeout time.Duration,
+	waitTimeBetweenMetadataChangeListeners time.Duration, keepAlivePeriod time.Duration,
+	thresholdPercentageForEventChanSizeLogging int, thresholdForThroughSeqnoComputation time.Duration,
+	statsLogInterval time.Duration) {
 	TopologyChangeCheckInterval = topologyChangeCheckInterval
 	MaxTopologyChangeCountBeforeRestart = maxTopologyChangeCountBeforeRestart
 	MaxTopologyStableCountBeforeRestart = maxTopologyStableCountBeforeRestart
@@ -487,4 +580,42 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	CapiReadTimeout = capiReadTimeout
 	MaxCheckpointRecordsToKeep = maxCheckpointRecordsToKeep
 	MaxCheckpointRecordsToRead = maxCheckpointRecordsToRead
+	DefaultHttpTimeout = defaultHttpTimeout
+	ShortHttpTimeout = shortHttpTimeout
+	MaxRetryForLiveUpdatePipeline = maxRetryForLiveUpdatePipeline
+	WaitTimeForLiveUpdatePipeline = waitTimeForLiveUpdatePipeline
+	ReplSpecCheckInterval = replSpecCheckInterval
+	MemStatsLogInterval = memStatsLogInterval
+	MaxNumOfMetakvRetries = maxNumOfMetakvRetries
+	RetryIntervalMetakv = retryIntervalMetakv
+	UprFeedDataChanLength = uprFeedDataChanLength
+	UprFeedBufferSize = uint32(uprFeedBufferSize)
+	XmemMaxRetry = xmemMaxRetry
+	XmemWriteTimeout = xmemWriteTimeout
+	XmemReadTimeout = xmemReadTimeout
+	XmemMaxReadDownTime = xmemMaxReadDownTime
+	XmemBackoffWaitTime = xmemBackoffWaitTime
+	XmemMaxRetryNewConn = xmemMaxRetryNewConn
+	XmemBackoffTimeNewConn = xmemBackoffTimeNewConn
+	XmemSelfMonitorInterval = xmemSelfMonitorInterval
+	XmemMaxIdleCount = uint32(xmemMaxIdleCount)
+	XmemMaxDataChanSize = xmemMaxDataChanSize
+	XmemMaxBatchSize = xmemMaxBatchSize
+	CapiRetryInterval = capiRetryInterval
+	MaxLengthSnapshotHistory = maxLengthSnapshotHistory
+	MaxRetryTargetStats = maxRetryTargetStats
+	RetryIntervalTargetStats = retryIntervalTargetStats
+	NumberOfSlotsForBandwidthThrottling = numberOfSlotsForBandwidthThrottling
+	PercentageOfBytesToSendAsMin = percentageOfBytesToSendAsMin
+	AuditWriteTimeout = auditWriteTimeout
+	AuditReadTimeout = auditReadTimeout
+	MaxRetryCapiService = maxRetryCapiService
+	MaxNumberOfAsyncListeners = maxNumberOfAsyncListeners
+	XmemMaxRetryInterval = xmemMaxRetryInterval
+	HELOTimeout = heloTimeout
+	WaitTimeBetweenMetadataChangeListeners = waitTimeBetweenMetadataChangeListeners
+	KeepAlivePeriod = keepAlivePeriod
+	ThresholdForEventChanSizeLogging = EventChanSize * thresholdPercentageForEventChanSizeLogging / 100
+	ThresholdForThroughSeqnoComputation = thresholdForThroughSeqnoComputation
+	StatsLogInterval = statsLogInterval
 }

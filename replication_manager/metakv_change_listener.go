@@ -30,8 +30,6 @@ import (
 
 var SetTimeSyncRetryInterval = 10 * time.Second
 var BucketSettingsChanSize = 100
-var MaxRetryForLiveUpdatePipeline = 5
-var WaitTimeForLiveUpdatePipeline = 2 * time.Second
 
 // generic listener for metadata stored in metakv
 type MetakvChangeListener struct {
@@ -112,9 +110,9 @@ func (mcl *MetakvChangeListener) failureCallback(err error) {
 		//no-op
 		return
 	}
-	if mcl.number_of_retry < service_def.MaxNumOfRetries {
+	if mcl.number_of_retry < base.MaxNumOfMetakvRetries {
 		// Incremental backoff to wait for metakv server to be ready - and restart listener
-		var timeToSleep = time.Duration(mcl.number_of_retry+1) * service_def.RetryDelaySec
+		var timeToSleep = time.Duration(mcl.number_of_retry+1) * base.RetryIntervalMetakv
 		// Once we've calculated the timeToSleep correctly, then increment the number_of_retry
 		mcl.number_of_retry++
 		mcl.logger.Infof("metakv.RunObserveChildren (%v) will retry in %v ...\n", mcl.Id(), timeToSleep)
@@ -122,7 +120,7 @@ func (mcl *MetakvChangeListener) failureCallback(err error) {
 		mcl.Start()
 	} else {
 		// exit process if max retry reached
-		mcl.logger.Infof("metakv.RunObserveChildren (%v) failed after max retry %v\n", mcl.Id(), service_def.MaxNumOfRetries)
+		mcl.logger.Infof("metakv.RunObserveChildren (%v) failed after max retry %v\n", mcl.Id(), base.MaxNumOfMetakvRetries)
 		exitProcess(false)
 	}
 }
@@ -283,7 +281,7 @@ func (rscl *ReplicationSpecChangeListener) liveUpdatePipeline(topic string, oldS
 
 func (rscl *ReplicationSpecChangeListener) liveUpdatePipelineWithRetry(topic string, newSettings *metadata.ReplicationSettings, specInternalId string) {
 	numOfRetry := 0
-	backoffTime := WaitTimeForLiveUpdatePipeline
+	backoffTime := base.WaitTimeForLiveUpdatePipeline
 	for {
 		rs, err := replication_mgr.pipelineMgr.ReplicationStatus(topic)
 		if err == nil {
@@ -306,7 +304,7 @@ func (rscl *ReplicationSpecChangeListener) liveUpdatePipelineWithRetry(topic str
 		}
 
 		rscl.logger.Warnf("Error live updating pipeline %v. err=%v", topic, err)
-		if numOfRetry < MaxRetryForLiveUpdatePipeline {
+		if numOfRetry < base.MaxRetryForLiveUpdatePipeline {
 			numOfRetry++
 			// exponential backoff
 			rscl.logger.Warnf("Retrying live update on pipeline %v for %vth time after %v.", topic, numOfRetry, backoffTime)

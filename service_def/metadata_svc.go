@@ -13,16 +13,13 @@ package service_def
 import (
 	"errors"
 	"fmt"
-	"time"
+	"github.com/couchbase/goxdcr/base"
 )
-
-var MaxNumOfRetries = 7
-var RetryDelaySec = 1 * time.Second
 
 var MetadataNotFoundErr error = errors.New("key not found")
 var ErrorKeyAlreadyExist = errors.New("key being added already exists")
 var ErrorRevisionMismatch = errors.New("revision number does not match")
-var MetaKVFailedAfterMaxTries error = fmt.Errorf("metakv failed for max number of retries = %v", MaxNumOfRetries)
+var MetaKVFailedAfterMaxTries error = fmt.Errorf("metakv failed for max number of retries = %v", base.MaxNumOfMetakvRetries)
 
 // struct for general metadata entry maintained by metadata service
 type MetadataEntry struct {
