@@ -304,6 +304,12 @@ func (dcp *DcpNozzle) Stop() error {
 
 	dcp.closeUprStreams()
 	dcp.closeUprFeed()
+
+	err = dcp.client.Close()
+	if err != nil {
+		dcp.Logger().Infof("%v Error closing dcp client. err=%v\n", dcp.Id(), err)
+	}
+
 	dcp.Logger().Debugf("%v received %v items, sent %v items\n", dcp.Id(), dcp.counterReceived(), dcp.counterSent())
 	err = dcp.Stop_server()
 
