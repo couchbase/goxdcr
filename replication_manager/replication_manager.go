@@ -227,18 +227,20 @@ func initConstants(xdcr_topology_svc service_def.XDCRCompTopologySvc, internal_s
 
 	logger_rm.Infof("XDCR internal settings: %v\n", internal_settings.ToMap())
 
-	base.InitConstants(time.Duration(internal_settings.TopologyChangeCheckInterval)*time.Second, internal_settings.MaxTopologyChangeCountBeforeRestart,
-		internal_settings.MaxTopologyStableCountBeforeRestart, internal_settings.MaxWorkersForCheckpointing,
-		time.Duration(internal_settings.TimeoutCheckpointBeforeStop)*time.Second,
-		internal_settings.CapiDataChanSizeMultiplier,
-		time.Duration(internal_settings.RefreshRemoteClusterRefInterval)*time.Second,
+	base.InitConstants(time.Duration(internal_settings.Values[metadata.TopologyChangeCheckIntervalKey].(int))*time.Second,
+		internal_settings.Values[metadata.MaxTopologyChangeCountBeforeRestartKey].(int),
+		internal_settings.Values[metadata.MaxTopologyStableCountBeforeRestartKey].(int),
+		internal_settings.Values[metadata.MaxWorkersForCheckpointingKey].(int),
+		time.Duration(internal_settings.Values[metadata.TimeoutCheckpointBeforeStopKey].(int))*time.Second,
+		internal_settings.Values[metadata.CapiDataChanSizeMultiplierKey].(int),
+		time.Duration(internal_settings.Values[metadata.RefreshRemoteClusterRefIntervalKey].(int))*time.Second,
 		version,
-		internal_settings.CapiMaxRetryBatchUpdateDocs,
-		time.Duration(internal_settings.CapiBatchTimeout)*time.Second,
-		time.Duration(internal_settings.CapiWriteTimeout)*time.Second,
-		time.Duration(internal_settings.CapiReadTimeout)*time.Second,
-		internal_settings.MaxCheckpointRecordsToKeep,
-		internal_settings.MaxCheckpointRecordsToRead)
+		internal_settings.Values[metadata.CapiMaxRetryBatchUpdateDocsKey].(int),
+		time.Duration(internal_settings.Values[metadata.CapiBatchTimeoutKey].(int))*time.Second,
+		time.Duration(internal_settings.Values[metadata.CapiWriteTimeoutKey].(int))*time.Second,
+		time.Duration(internal_settings.Values[metadata.CapiReadTimeoutKey].(int))*time.Second,
+		internal_settings.Values[metadata.MaxCheckpointRecordsToKeepKey].(int),
+		internal_settings.Values[metadata.MaxCheckpointRecordsToReadKey].(int))
 }
 
 func (rm *replicationManager) initMetadataChangeMonitor() {

@@ -9,16 +9,21 @@ import (
 )
 
 const (
-	InternalSettingsCatalogKey = "InternalSettings"
+	// catalog key for v1 internal settings with individual setting fields
+	// have to use the same key as before so that we can load v1 settings before upgrade
+	V1InternalSettingsCatalogKey = "InternalSettings"
+	// catalog key for v2 internal settings with map
+	V2InternalSettingsCatalogKey = "V2InternalSettings"
 )
 
-var InternalSettingsMetakvKey = InternalSettingsCatalogKey + base.KeyPartsDelimiter + metadata.InternalSettingsKey
+var V1InternalSettingsMetakvKey = V1InternalSettingsCatalogKey + base.KeyPartsDelimiter + metadata.InternalSettingsKey
+var V2InternalSettingsMetakvKey = V2InternalSettingsCatalogKey + base.KeyPartsDelimiter + metadata.InternalSettingsKey
 
 type InternalSettingsSvc struct {
 	metadata_svc             service_def.MetadataSvc
 	metadata_change_callback base.MetadataChangeHandlerCallback
 	logger                   *log.CommonLogger
-	// keeps a single copy of internal settings and keeps it up to date
+	// keeps a single copy of internal settings
 	internal_settings *metadata.InternalSettings
 }
 
@@ -28,30 +33,70 @@ func NewInternalSettingsSvc(metadata_svc service_def.MetadataSvc, logger_ctx *lo
 		logger:       log.NewLogger("IntSettSvc", logger_ctx),
 	}
 
-	// tracks the "initial" internal_settings object, which can be used to determine if any change has been made to it later
-	service.internal_settings = service.GetInternalSettings()
-	service.logger.Infof("Internal settings for the current XCR process: %v", service.internal_settings)
+	// initializes the cached internal_settings object, which can be used to determine if any change has been made to it later
+	service.internal_settings = service.getInternalSettingsFromMetakv()
 	return service
 }
 
-func (service *InternalSettingsSvc) GetInternalSettings() *metadata.InternalSettings {
-	var internal_settings *metadata.InternalSettings
-	bytes, rev, err := service.metadata_svc.Get(InternalSettingsMetakvKey)
-	if err != nil {
-		if err == service_def.MetadataNotFoundErr {
-			service.logger.Info("Internal settings spec not found. Using default values")
-		} else {
-			service.logger.Errorf("Error retrieving internal settings spec. err = %v. Using default values", err)
-		}
-		internal_settings = metadata.DefaultInternalSettings()
+func (service *InternalSettingsSvc) getInternalSettingsFromMetakv() *metadata.InternalSettings {
+	// first try to read new internal settings from metakv
+	internal_settings, err := service.getV2InternalSettings()
+	if err == nil {
+		return internal_settings
+	} else if err != service_def.MetadataNotFoundErr {
+		service.logger.Warnf("Error retrieving internal settings. err = %v. Using default values", err)
+		return metadata.DefaultInternalSettings()
+	}
+
+	// err == service_def.MetadataNotFoundErr
+	// this could happen when customer has not updated internal settings in upgraded build
+	// check if there are old internal settings prior to upgrade
+	internal_settings, err = service.getV2InternalSettingsFromV1()
+	if err == nil {
+		return internal_settings
 	} else {
-		internal_settings, err = service.constructInternalSettingsObject(bytes, rev)
+		if err == service_def.MetadataNotFoundErr {
+			service.logger.Info("Internal settings not found. Using default values")
+		} else {
+			service.logger.Warnf("Error retrieving V1 internal settings. err = %v. Using default values", err)
+		}
+		return metadata.DefaultInternalSettings()
+	}
+}
+
+func (service *InternalSettingsSvc) GetInternalSettings() *metadata.InternalSettings {
+	// simply return a copy of the cached value
+	// if value in metakv is changed, goxdcr processed will get restarted
+	// and the cached value will get updated after restart
+	return service.internal_settings.Clone()
+}
+
+func (service *InternalSettingsSvc) getV2InternalSettings() (*metadata.InternalSettings, error) {
+	var internal_settings *metadata.InternalSettings
+	bytes, rev, err := service.metadata_svc.Get(V2InternalSettingsMetakvKey)
+	if err != nil {
+		return nil, err
+	} else {
+		internal_settings, err = service.constructV2InternalSettingsObject(bytes, rev)
 		if err != nil {
-			service.logger.Errorf("Error unmarshaling internal settings spec. err = %v. Using default values", err)
-			internal_settings = metadata.DefaultInternalSettings()
+			return nil, err
 		}
 	}
-	return internal_settings
+	return internal_settings, nil
+}
+
+func (service *InternalSettingsSvc) getV2InternalSettingsFromV1() (*metadata.InternalSettings, error) {
+	var internal_settings *metadata.InternalSettings
+	bytes, rev, err := service.metadata_svc.Get(V1InternalSettingsMetakvKey)
+	if err != nil {
+		return nil, err
+	} else {
+		internal_settings, err = service.constructV2InternalSettingsObjectFromV1(bytes, rev)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return internal_settings, nil
 }
 
 func (service *InternalSettingsSvc) UpdateInternalSettings(settingsMap map[string]interface{}) (*metadata.InternalSettings, map[string]error, error) {
@@ -62,25 +107,14 @@ func (service *InternalSettingsSvc) UpdateInternalSettings(settingsMap map[strin
 	}
 
 	if changed {
-		bytes, err := json.Marshal(internal_settings)
+		err := service.setV2InternalSettings(internal_settings)
 		if err != nil {
 			return nil, nil, err
 		}
-
-		if internal_settings.Revision != nil {
-			err = service.metadata_svc.Set(InternalSettingsMetakvKey, bytes, internal_settings.Revision)
-		} else {
-			err = service.metadata_svc.Add(InternalSettingsMetakvKey, bytes)
-		}
-
-		if err != nil {
-			return nil, nil, err
-		}
-
-		service.logger.Infof("Successfully updated internal settings to %v", internal_settings)
-
-		// note that service.internal_settings is not updated.
-		// GOXDCR process needs to be restarted for the new value to become effective
+		// note, the cached internal_settings is not updated here,
+		// since the actual internal settings in use are not changed yet
+		// we will receive metakv callback with the updated values shortly
+		// and we will restart goxdcr process and update the cached internal settings after restart
 	} else {
 		service.logger.Infof("Skipped update to internal settings since there have been no real changes.")
 	}
@@ -88,16 +122,63 @@ func (service *InternalSettingsSvc) UpdateInternalSettings(settingsMap map[strin
 	return internal_settings, nil, nil
 }
 
-func (service *InternalSettingsSvc) constructInternalSettingsObject(value []byte, rev interface{}) (*metadata.InternalSettings, error) {
-	settings := &metadata.InternalSettings{}
-	err := json.Unmarshal(value, settings)
+func (service *InternalSettingsSvc) setV2InternalSettings(internal_settings *metadata.InternalSettings) error {
+	bytes, err := json.Marshal(internal_settings)
+	if err != nil {
+		return err
+	}
+
+	if internal_settings.Revision != nil {
+		err = service.metadata_svc.Set(V2InternalSettingsMetakvKey, bytes, internal_settings.Revision)
+	} else {
+		err = service.metadata_svc.Add(V2InternalSettingsMetakvKey, bytes)
+	}
+
+	if err != nil {
+		return err
+	}
+
+	service.logger.Infof("Successfully updated internal settings to %v", internal_settings)
+
+	return nil
+}
+
+// construct new internal settings object (with map)
+func (service *InternalSettingsSvc) constructV2InternalSettingsObject(value []byte, rev interface{}) (*metadata.InternalSettings, error) {
+	v2_settings := &metadata.InternalSettings{}
+	err := json.Unmarshal(value, v2_settings)
 	if err != nil {
 		return nil, err
 	}
-	settings.HandleUpgrade()
-	settings.Revision = rev
 
-	return settings, nil
+	v2_settings.Revision = rev
+
+	// handle data type change caused by marshalling and unmarshalling
+	v2_settings.HandleDataTypeConversionAfterUnmarshalling()
+
+	// handle v2 settings added after the v2 settings type is introduced
+	v2_settings.HandleUpgrade()
+
+	return v2_settings, nil
+}
+
+// construct internal settings object base on old object in metakv (with individual setting fields)
+func (service *InternalSettingsSvc) constructV2InternalSettingsObjectFromV1(value []byte, rev interface{}) (*metadata.InternalSettings, error) {
+	v1_settings := &metadata.V1InternalSettings{}
+	err := json.Unmarshal(value, v1_settings)
+	if err != nil {
+		return nil, err
+	}
+	v1_settings.HandleUpgrade()
+
+	v2_settings := &metadata.InternalSettings{Values: make(map[string]interface{})}
+	// convert old internal settings into internal settings
+	v2_settings.ConvertFromV1InternalSettings(v1_settings)
+	service.logger.Infof("Converted v1 internal settings to v2 internal settings. v1=%v\n v2=%v\n", v1_settings, v2_settings)
+
+	// handle v2 settings added after the v2 settings type is introduced
+	v2_settings.HandleUpgrade()
+	return v2_settings, nil
 }
 
 func (service *InternalSettingsSvc) SetMetadataChangeHandlerCallback(call_back base.MetadataChangeHandlerCallback) {
@@ -111,7 +192,7 @@ func (service *InternalSettingsSvc) InternalSettingsServiceCallback(path string,
 	var internal_settings *metadata.InternalSettings
 	var err error
 	if len(value) != 0 {
-		internal_settings, err = service.constructInternalSettingsObject(value, rev)
+		internal_settings, err = service.constructV2InternalSettingsObject(value, rev)
 		if err != nil {
 			service.logger.Errorf("Error marshaling Internal Settings Object. value=%v, err=%v\n", string(value), err)
 			return nil
@@ -120,7 +201,7 @@ func (service *InternalSettingsSvc) InternalSettingsServiceCallback(path string,
 
 	if service.metadata_change_callback != nil {
 		// use the cached service.internal_settings object as the old settings
-		err := service.metadata_change_callback(path, service.internal_settings, internal_settings)
+		err := service.metadata_change_callback(path, service.internal_settings.Clone(), internal_settings)
 		if err != nil {
 			service.logger.Error(err.Error())
 		}

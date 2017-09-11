@@ -524,7 +524,7 @@ func NewInternalSettingsChangeListener(internal_setting_svc service_def.Internal
 	utilsIn utilities.UtilsIface) *InternalSettingsChangeListener {
 	iscl := &InternalSettingsChangeListener{
 		NewMetakvChangeListener(base.InternalSettingsChangeListener,
-			metadata_svc.GetCatalogPathFromCatalogKey(metadata_svc.InternalSettingsCatalogKey),
+			metadata_svc.GetCatalogPathFromCatalogKey(metadata_svc.V2InternalSettingsCatalogKey),
 			cancel_chan,
 			children_waitgrp,
 			internal_setting_svc.InternalSettingsServiceCallback,
