@@ -35,7 +35,7 @@ func NewInternalSettingsSvc(metadata_svc service_def.MetadataSvc, logger_ctx *lo
 }
 
 func (service *InternalSettingsSvc) GetInternalSettings() *metadata.InternalSettings {
-	var internal_settings metadata.InternalSettings
+	var internal_settings *metadata.InternalSettings
 	bytes, rev, err := service.metadata_svc.Get(InternalSettingsMetakvKey)
 	if err != nil {
 		if err == service_def.MetadataNotFoundErr {
@@ -43,16 +43,15 @@ func (service *InternalSettingsSvc) GetInternalSettings() *metadata.InternalSett
 		} else {
 			service.logger.Errorf("Error retrieving internal settings spec. err = %v. Using default values", err)
 		}
-		internal_settings = *(metadata.DefaultInternalSettings())
+		internal_settings = metadata.DefaultInternalSettings()
 	} else {
-		err = json.Unmarshal(bytes, &internal_settings)
+		internal_settings, err = service.constructInternalSettingsObject(bytes, rev)
 		if err != nil {
 			service.logger.Errorf("Error unmarshaling internal settings spec. err = %v. Using default values", err)
-			internal_settings = *(metadata.DefaultInternalSettings())
+			internal_settings = metadata.DefaultInternalSettings()
 		}
-		internal_settings.Revision = rev
 	}
-	return &internal_settings
+	return internal_settings
 }
 
 func (service *InternalSettingsSvc) UpdateInternalSettings(settingsMap map[string]interface{}) (*metadata.InternalSettings, map[string]error, error) {
@@ -95,9 +94,10 @@ func (service *InternalSettingsSvc) constructInternalSettingsObject(value []byte
 	if err != nil {
 		return nil, err
 	}
+	settings.HandleUpgrade()
 	settings.Revision = rev
 
-	return settings, err
+	return settings, nil
 }
 
 func (service *InternalSettingsSvc) SetMetadataChangeHandlerCallback(call_back base.MetadataChangeHandlerCallback) {
