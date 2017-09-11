@@ -35,7 +35,7 @@ var MaxWorkersForCheckpointingConfig = &SettingsConfig{5, &Range{1, 1000}}
 var TimeoutCheckpointBeforeStopConfig = &SettingsConfig{180, &Range{10, 1800}}
 var CapiDataChanSizeMultiplierConfig = &SettingsConfig{1, &Range{1, 100}}
 var RefreshRemoteClusterRefIntervalConfig = &SettingsConfig{15, &Range{1, 3600}}
-var CapiMaxRetryBatchUpdateDocsConfig = &SettingsConfig{6, &Range{0, 100}}
+var CapiMaxRetryBatchUpdateDocsConfig = &SettingsConfig{6, &Range{1, 100}}
 var CapiBatchTimeoutConfig = &SettingsConfig{180, &Range{10, 3600}}
 var CapiWriteTimeoutConfig = &SettingsConfig{10, &Range{1, 3600}}
 var CapiReadTimeoutConfig = &SettingsConfig{60, &Range{10, 3600}}
@@ -327,4 +327,49 @@ func (s *InternalSettings) ToMap() map[string]interface{} {
 	settings_map[MaxCheckpointRecordsToKeepKey] = s.MaxCheckpointRecordsToKeep
 	settings_map[MaxCheckpointRecordsToReadKey] = s.MaxCheckpointRecordsToRead
 	return settings_map
+}
+
+// after upgrade, internal settings that did not exist in before-upgrade version will take 0 value
+// these 0 values need to be replaced by defaule values
+func (s *InternalSettings) HandleUpgrade() {
+	if s.TopologyChangeCheckInterval == 0 {
+		s.TopologyChangeCheckInterval = TopologyChangeCheckIntervalConfig.defaultValue.(int)
+	}
+	if s.MaxTopologyChangeCountBeforeRestart == 0 {
+		s.MaxTopologyChangeCountBeforeRestart = MaxTopologyChangeCountBeforeRestartConfig.defaultValue.(int)
+	}
+	if s.MaxTopologyStableCountBeforeRestart == 0 {
+		s.MaxTopologyStableCountBeforeRestart = MaxTopologyStableCountBeforeRestartConfig.defaultValue.(int)
+	}
+	if s.MaxWorkersForCheckpointing == 0 {
+		s.MaxWorkersForCheckpointing = MaxWorkersForCheckpointingConfig.defaultValue.(int)
+	}
+	if s.TimeoutCheckpointBeforeStop == 0 {
+		s.TimeoutCheckpointBeforeStop = TimeoutCheckpointBeforeStopConfig.defaultValue.(int)
+	}
+	if s.CapiDataChanSizeMultiplier == 0 {
+		s.CapiDataChanSizeMultiplier = CapiDataChanSizeMultiplierConfig.defaultValue.(int)
+	}
+	if s.RefreshRemoteClusterRefInterval == 0 {
+		s.RefreshRemoteClusterRefInterval = RefreshRemoteClusterRefIntervalConfig.defaultValue.(int)
+	}
+	if s.CapiMaxRetryBatchUpdateDocs == 0 {
+		s.CapiMaxRetryBatchUpdateDocs = CapiMaxRetryBatchUpdateDocsConfig.defaultValue.(int)
+	}
+	if s.CapiBatchTimeout == 0 {
+		s.CapiBatchTimeout = CapiBatchTimeoutConfig.defaultValue.(int)
+	}
+	if s.CapiWriteTimeout == 0 {
+		s.CapiWriteTimeout = CapiWriteTimeoutConfig.defaultValue.(int)
+	}
+	if s.CapiReadTimeout == 0 {
+		s.CapiReadTimeout = CapiReadTimeoutConfig.defaultValue.(int)
+	}
+
+	if s.MaxCheckpointRecordsToKeep == 0 {
+		s.MaxCheckpointRecordsToKeep = MaxCheckpointRecordsToKeepConfig.defaultValue.(int)
+	}
+	if s.MaxCheckpointRecordsToRead == 0 {
+		s.MaxCheckpointRecordsToRead = MaxCheckpointRecordsToReadConfig.defaultValue.(int)
+	}
 }
