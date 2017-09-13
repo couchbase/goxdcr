@@ -56,3 +56,17 @@ func (_m *ThroughSeqnoTrackerSvc) GetThroughSeqnos() map[uint16]uint64 {
 func (_m *ThroughSeqnoTrackerSvc) SetStartSeqno(vbno uint16, seqno uint64) {
 	_m.Called(vbno, seqno)
 }
+
+// StatusSummary provides a mock function with given fields:
+func (_m *ThroughSeqnoTrackerSvc) StatusSummary() string {
+	ret := _m.Called()
+
+	var r0 string
+	if rf, ok := ret.Get(0).(func() string); ok {
+		r0 = rf()
+	} else {
+		r0 = ret.Get(0).(string)
+	}
+
+	return r0
+}

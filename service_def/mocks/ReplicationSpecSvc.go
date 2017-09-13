@@ -9,13 +9,13 @@ type ReplicationSpecSvc struct {
 	mock.Mock
 }
 
-// AddReplicationSpec provides a mock function with given fields: spec
-func (_m *ReplicationSpecSvc) AddReplicationSpec(spec *metadata.ReplicationSpecification) error {
-	ret := _m.Called(spec)
+// AddReplicationSpec provides a mock function with given fields: spec, additionalInfo
+func (_m *ReplicationSpecSvc) AddReplicationSpec(spec *metadata.ReplicationSpecification, additionalInfo string) error {
+	ret := _m.Called(spec, additionalInfo)
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(*metadata.ReplicationSpecification) error); ok {
-		r0 = rf(spec)
+	if rf, ok := ret.Get(0).(func(*metadata.ReplicationSpecification, string) error); ok {
+		r0 = rf(spec, additionalInfo)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -274,7 +274,7 @@ func (_m *ReplicationSpecSvc) ValidateAndGC(spec *metadata.ReplicationSpecificat
 }
 
 // ValidateNewReplicationSpec provides a mock function with given fields: sourceBucket, targetCluster, targetBucket, settings
-func (_m *ReplicationSpecSvc) ValidateNewReplicationSpec(sourceBucket string, targetCluster string, targetBucket string, settings map[string]interface{}) (string, string, *metadata.RemoteClusterReference, map[string]error) {
+func (_m *ReplicationSpecSvc) ValidateNewReplicationSpec(sourceBucket string, targetCluster string, targetBucket string, settings map[string]interface{}) (string, string, *metadata.RemoteClusterReference, map[string]error, string) {
 	ret := _m.Called(sourceBucket, targetCluster, targetBucket, settings)
 
 	var r0 string
@@ -309,5 +309,12 @@ func (_m *ReplicationSpecSvc) ValidateNewReplicationSpec(sourceBucket string, ta
 		}
 	}
 
-	return r0, r1, r2, r3
+	var r4 string
+	if rf, ok := ret.Get(4).(func(string, string, string, map[string]interface{}) string); ok {
+		r4 = rf(sourceBucket, targetCluster, targetBucket, settings)
+	} else {
+		r4 = ret.Get(4).(string)
+	}
+
+	return r0, r1, r2, r3, r4
 }

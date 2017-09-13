@@ -31,6 +31,16 @@ IF (DEFINED FORESTDB_TARGET)
   SET (_forestdb_dep DEPENDS ${FORESTDB_TARGET})
 ENDIF (DEFINED FORESTDB_TARGET)
 
+# IF wanted to run unit test during build, uncomment below
+#add_custom_command(
+#  OUTPUT goxdcr_unit_tests
+#  COMMAND ${PROJECT_SOURCE_DIR}/run_unit_tests.sh ${PROJECT_SOURCE_DIR} > goxdcr_unit_tests.log
+#)
+
+#add_custom_target(run ALL
+#  DEPENDS goxdcr_unit_tests
+#)
+
 GoInstall (TARGET goxdcr PACKAGE github.com/couchbase/goxdcr/main
   GOPATH "${PROJECT_SOURCE_DIR}/../../../.." "${GODEPSDIR}"
   ${_forestdb_dep}

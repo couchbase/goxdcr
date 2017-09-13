@@ -74,6 +74,7 @@ func feedEventToReceiver(eventCh chan *mcReal.UprEvent, event *mcReal.UprEvent) 
 // Use a UPR feed wrapper so that we can return a "Read-Only" channel from a bidirectional chan
 func uprFeedChanWrapper(uprFeed *mcMock.UprFeedIface, eventCh <-chan *mcReal.UprEvent) {
 	uprFeed.On("GetUprEventCh").Return(eventCh)
+	uprFeed.On("Close").Return(nil)
 }
 
 func setupMocksWithTs(xdcrTopology *service_def.XDCRCompTopologySvc,
@@ -102,11 +103,12 @@ func setupMocks(xdcrTopology *service_def.XDCRCompTopologySvc,
 
 	// utils mock
 	utils.On("ValidateSettings", mock.Anything, mock.Anything, mock.Anything).Return(nil)
-	utils.On("GetMemcachedConnection", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(mcClient, nil)
+	utils.On("GetMemcachedConnection", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(mcClient, nil)
 	utils.On("RecoverPanic", mock.Anything).Return(nil)
 
 	// client mock
 	mcClient.On("NewUprFeedWithConfigIface", mock.Anything, mock.Anything).Return(uprFeed, nil)
+	mcClient.On("Close").Return(nil)
 }
 
 func generateUprEvent(opcode mc.CommandCode, status mc.Status, vbno uint16, opaque uint16) *mcReal.UprEvent {

@@ -73,6 +73,9 @@ func setupMocks(srcResolutionType string,
 	var bucketKVVBMap map[string][]uint16
 	var err error
 
+	// XDCR Topology Mock
+	xdcrTopologyMock.On("IsMyClusterEnterprise").Return(true, nil)
+
 	// LOCAL mock
 	utilitiesMock.On("BucketValidationInfo", hostAddr,
 		mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(bucketInfo,
@@ -92,6 +95,7 @@ func setupMocks(srcResolutionType string,
 
 	// Xmem mock
 	utilitiesMock.On("CheckWhetherClusterIsESBasedOnBucketInfo", mock.Anything).Return(false)
+
 }
 
 /**

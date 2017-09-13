@@ -82,13 +82,36 @@ func (_m *CheckpointsService) DelCheckpointsDocs(replicationId string) error {
 	return r0
 }
 
-// UpsertCheckpoints provides a mock function with given fields: replicationId, vbno, ckpt_record
-func (_m *CheckpointsService) UpsertCheckpoints(replicationId string, vbno uint16, ckpt_record *metadata.CheckpointRecord) error {
-	ret := _m.Called(replicationId, vbno, ckpt_record)
+// GetVbnosFromCheckpointDocs provides a mock function with given fields: replicationId
+func (_m *CheckpointsService) GetVbnosFromCheckpointDocs(replicationId string) ([]uint16, error) {
+	ret := _m.Called(replicationId)
+
+	var r0 []uint16
+	if rf, ok := ret.Get(0).(func(string) []uint16); ok {
+		r0 = rf(replicationId)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]uint16)
+		}
+	}
+
+	var r1 error
+	if rf, ok := ret.Get(1).(func(string) error); ok {
+		r1 = rf(replicationId)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// UpsertCheckpoints provides a mock function with given fields: replicationId, specInternalId, vbno, ckpt_record, xattr_seqno, targetClusterVersion
+func (_m *CheckpointsService) UpsertCheckpoints(replicationId string, specInternalId string, vbno uint16, ckpt_record *metadata.CheckpointRecord, xattr_seqno uint64, targetClusterVersion int) error {
+	ret := _m.Called(replicationId, specInternalId, vbno, ckpt_record, xattr_seqno, targetClusterVersion)
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(string, uint16, *metadata.CheckpointRecord) error); ok {
-		r0 = rf(replicationId, vbno, ckpt_record)
+	if rf, ok := ret.Get(0).(func(string, string, uint16, *metadata.CheckpointRecord, uint64, int) error); ok {
+		r0 = rf(replicationId, specInternalId, vbno, ckpt_record, xattr_seqno, targetClusterVersion)
 	} else {
 		r0 = ret.Error(0)
 	}
