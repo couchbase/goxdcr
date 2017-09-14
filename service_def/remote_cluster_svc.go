@@ -25,7 +25,8 @@ type RemoteClusterSvc interface {
 	SetRemoteCluster(refName string, ref *metadata.RemoteClusterReference) error
 	ValidateRemoteCluster(ref *metadata.RemoteClusterReference) error
 	DelRemoteCluster(refName string) (*metadata.RemoteClusterReference, error)
-	RemoteClusters(refresh bool) (map[string]*metadata.RemoteClusterReference, error)
+	// Gets a map of cloned remote cluster references, with unique ID being the key
+	RemoteClusters() (map[string]*metadata.RemoteClusterReference, error)
 
 	// get connection string for specified remote cluster
 	// when isCapiReplication is false, return ref.activeHostName, which is rotated among target nodes for load balancing

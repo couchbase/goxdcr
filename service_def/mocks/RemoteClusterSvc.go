@@ -186,13 +186,13 @@ func (_m *RemoteClusterSvc) RemoteClusterServiceCallback(path string, value []by
 	return r0
 }
 
-// RemoteClusters provides a mock function with given fields: refresh
-func (_m *RemoteClusterSvc) RemoteClusters(refresh bool) (map[string]*metadata.RemoteClusterReference, error) {
-	ret := _m.Called(refresh)
+// RemoteClusters provides a mock function with given fields:
+func (_m *RemoteClusterSvc) RemoteClusters() (map[string]*metadata.RemoteClusterReference, error) {
+	ret := _m.Called()
 
 	var r0 map[string]*metadata.RemoteClusterReference
-	if rf, ok := ret.Get(0).(func(bool) map[string]*metadata.RemoteClusterReference); ok {
-		r0 = rf(refresh)
+	if rf, ok := ret.Get(0).(func() map[string]*metadata.RemoteClusterReference); ok {
+		r0 = rf()
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(map[string]*metadata.RemoteClusterReference)
@@ -200,8 +200,8 @@ func (_m *RemoteClusterSvc) RemoteClusters(refresh bool) (map[string]*metadata.R
 	}
 
 	var r1 error
-	if rf, ok := ret.Get(1).(func(bool) error); ok {
-		r1 = rf(refresh)
+	if rf, ok := ret.Get(1).(func() error); ok {
+		r1 = rf()
 	} else {
 		r1 = ret.Error(1)
 	}

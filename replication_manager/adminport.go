@@ -215,7 +215,7 @@ func (adminport *Adminport) doGetRemoteClustersRequest(request *http.Request) (*
 		return response, err
 	}
 
-	remoteClusters, err := RemoteClusterService().RemoteClusters(false)
+	remoteClusters, err := RemoteClusterService().RemoteClusters()
 	if err != nil {
 		return nil, err
 	}

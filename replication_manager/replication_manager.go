@@ -131,8 +131,6 @@ type replicationManager struct {
 	status_logger_finch chan bool
 
 	mem_stats_logger_finch chan bool
-
-	refresh_remote_cluster_ref_finch chan bool
 }
 
 //singleton
@@ -188,10 +186,6 @@ func StartReplicationManager(sourceKVHost string, xdcrRestPort uint16,
 		// periodically log mem stats to facilitate debugging of memory issues
 		replication_mgr.mem_stats_logger_finch = make(chan bool, 1)
 		go logMemStats(replication_mgr.mem_stats_logger_finch)
-
-		// periodically refresh remote cluster reference
-		replication_mgr.refresh_remote_cluster_ref_finch = make(chan bool, 1)
-		go refreshRemoteClusterRef(replication_mgr.refresh_remote_cluster_ref_finch)
 
 		// upgrade remote cluster refs before initializing metadata change monitor
 		// and starting adminport to reduce interference
@@ -934,29 +928,6 @@ func logMemStats(fin_chan chan bool) {
 	}
 }
 
-// periodically refresh remote cluster refs
-func refreshRemoteClusterRef(fin_chan chan bool) {
-	logger_rm.Infof("refreshRemoteClusterRef started.")
-	defer logger_rm.Infof("refreshRemoteClusterRef exited")
-
-	ticker := time.NewTicker(base.RefreshRemoteClusterRefInterval)
-	defer ticker.Stop()
-
-	remoteClusterSvc := RemoteClusterService()
-
-	for {
-		select {
-		case <-fin_chan:
-			return
-		case <-ticker.C:
-			_, err := remoteClusterSvc.RemoteClusters(true /*refresh*/)
-			if err != nil {
-				logger_rm.Warnf("Error refreshing remote cluster refs = %v\n", err)
-			}
-		}
-	}
-}
-
 //gracefull stop
 func cleanup() {
 	if replication_mgr.running {
@@ -980,7 +951,6 @@ func cleanup() {
 
 		close(replication_mgr.status_logger_finch)
 		close(replication_mgr.mem_stats_logger_finch)
-		close(replication_mgr.refresh_remote_cluster_ref_finch)
 
 		logger_rm.Infof("Replication manager exists")
 	} else {
@@ -1202,7 +1172,7 @@ func (rm *replicationManager) upgradeRemoteClusterRefs() {
 	defer logger_rm.Infof("upgradeRemoteClusterRefs exited")
 
 	remoteClusterSvc := rm.remote_cluster_svc
-	remoteClusterRefs, err := remoteClusterSvc.RemoteClusters(false /*refresh*/)
+	remoteClusterRefs, err := remoteClusterSvc.RemoteClusters()
 	if err != nil {
 		logger_rm.Warnf("Skipping upgradeRemoteClusterRefs because of err =%v", err)
 		return

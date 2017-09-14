@@ -472,6 +472,36 @@ func (_m *UtilsIface) GetClusterInfo(hostAddr string, path string, username stri
 	return r0, r1
 }
 
+// GetClusterInfoWStatusCode provides a mock function with given fields: hostAddr, path, username, password, certificate, sanInCertificate, logger
+func (_m *UtilsIface) GetClusterInfoWStatusCode(hostAddr string, path string, username string, password string, certificate []byte, sanInCertificate bool, logger *log.CommonLogger) (map[string]interface{}, error, int) {
+	ret := _m.Called(hostAddr, path, username, password, certificate, sanInCertificate, logger)
+
+	var r0 map[string]interface{}
+	if rf, ok := ret.Get(0).(func(string, string, string, string, []byte, bool, *log.CommonLogger) map[string]interface{}); ok {
+		r0 = rf(hostAddr, path, username, password, certificate, sanInCertificate, logger)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(map[string]interface{})
+		}
+	}
+
+	var r1 error
+	if rf, ok := ret.Get(1).(func(string, string, string, string, []byte, bool, *log.CommonLogger) error); ok {
+		r1 = rf(hostAddr, path, username, password, certificate, sanInCertificate, logger)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	var r2 int
+	if rf, ok := ret.Get(2).(func(string, string, string, string, []byte, bool, *log.CommonLogger) int); ok {
+		r2 = rf(hostAddr, path, username, password, certificate, sanInCertificate, logger)
+	} else {
+		r2 = ret.Get(2).(int)
+	}
+
+	return r0, r1, r2
+}
+
 // GetClusterUUID provides a mock function with given fields: hostAddr, username, password, certificate, sanInCertificate, logger
 func (_m *UtilsIface) GetClusterUUID(hostAddr string, username string, password string, certificate []byte, sanInCertificate bool, logger *log.CommonLogger) (string, error) {
 	ret := _m.Called(hostAddr, username, password, certificate, sanInCertificate, logger)

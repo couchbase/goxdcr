@@ -34,6 +34,7 @@ const (
 
 /************************************
 /* struct RemoteClusterReference
+ * NOTE - if adding/removing new members, need to also modify LoadFrom(), etc.
 *************************************/
 type RemoteClusterReference struct {
 	Id       string `json:"id"`
@@ -58,6 +59,7 @@ type RemoteClusterReference struct {
 	ActiveHttpsHostName string `json:"activeHttpsHostName"`
 
 	// revision number to be used by metadata service. not included in json
+	// Revision should only be passed along and should never be modified
 	Revision interface{}
 }
 
@@ -131,7 +133,24 @@ func (ref *RemoteClusterReference) ToMap() map[string]interface{} {
 }
 
 // checks if the passed in ref is the same as the current ref
-func (ref *RemoteClusterReference) SameRef(ref2 *RemoteClusterReference) bool {
+func (ref *RemoteClusterReference) IsSame(ref2 *RemoteClusterReference) bool {
+	if ref == nil {
+		return ref2 == nil
+	}
+	if ref2 == nil {
+		return false
+	}
+	essentiallySame := ref.IsEssentiallySame(ref2)
+	if !essentiallySame {
+		return false
+	} else {
+		return reflect.DeepEqual(ref.Revision, ref2.Revision) && ref.HttpsHostName == ref2.HttpsHostName &&
+			ref.ActiveHostName == ref2.ActiveHostName && ref.ActiveHttpsHostName == ref2.ActiveHttpsHostName
+	}
+}
+
+// checks if they are the same minus changable fields
+func (ref *RemoteClusterReference) IsEssentiallySame(ref2 *RemoteClusterReference) bool {
 	if ref == nil {
 		return ref2 == nil
 	}
@@ -139,10 +158,9 @@ func (ref *RemoteClusterReference) SameRef(ref2 *RemoteClusterReference) bool {
 		return false
 	}
 	return ref.Id == ref2.Id && ref.Uuid == ref2.Uuid && ref.Name == ref2.Name &&
-		ref.HostName == ref2.HostName && ref.HttpsHostName == ref2.HttpsHostName && ref.UserName == ref2.UserName &&
-		ref.Password == ref2.Password && reflect.DeepEqual(ref.Revision, ref2.Revision) &&
-		ref.DemandEncryption == ref2.DemandEncryption && ref.EncryptionType == ref2.EncryptionType &&
-		bytes.Equal(ref.Certificate, ref2.Certificate)
+		ref.HostName == ref2.HostName && ref.UserName == ref2.UserName &&
+		ref.Password == ref2.Password && ref.DemandEncryption == ref2.DemandEncryption &&
+		ref.EncryptionType == ref2.EncryptionType && bytes.Equal(ref.Certificate, ref2.Certificate)
 }
 
 func (ref *RemoteClusterReference) String() string {
@@ -150,6 +168,35 @@ func (ref *RemoteClusterReference) String() string {
 		return "nil"
 	}
 	return fmt.Sprintf("id:%v; uuid:%v; name:%v; hostName:%v; userName:%v; password:xxxx; demandEncryption:%v: encryptionType:%v; certificate:%v; revision:%v", ref.Id, ref.Uuid, ref.Name, ref.HostName, ref.UserName, ref.DemandEncryption, ref.EncryptionType, ref.Certificate, ref.Revision)
+}
+
+func (ref *RemoteClusterReference) LoadFrom(inRef *RemoteClusterReference) {
+	if ref == nil {
+		return
+	}
+	ref.LoadNonActivesFrom(inRef)
+	ref.ActiveHostName = inRef.ActiveHostName
+	ref.ActiveHttpsHostName = inRef.ActiveHttpsHostName
+}
+
+func (ref *RemoteClusterReference) LoadNonActivesFrom(inRef *RemoteClusterReference) {
+	if ref == nil {
+		return
+	}
+	ref.Id = inRef.Id
+	ref.Uuid = inRef.Uuid
+	ref.Name = inRef.Name
+	ref.HostName = inRef.HostName
+	ref.UserName = inRef.UserName
+	ref.Password = inRef.Password
+	ref.DemandEncryption = inRef.DemandEncryption
+	ref.Certificate = base.DeepCopyByteArray(inRef.Certificate)
+	ref.HttpsHostName = inRef.HttpsHostName
+	ref.EncryptionType = inRef.EncryptionType
+	ref.SANInCertificate = inRef.SANInCertificate
+	// !!! shallow copy of revision.
+	// ref.Revision should only be passed along and should never be modified
+	ref.Revision = inRef.Revision
 }
 
 func (ref *RemoteClusterReference) Clone() *RemoteClusterReference {
@@ -163,7 +210,7 @@ func (ref *RemoteClusterReference) Clone() *RemoteClusterReference {
 		UserName:            ref.UserName,
 		Password:            ref.Password,
 		DemandEncryption:    ref.DemandEncryption,
-		Certificate:         ref.Certificate,
+		Certificate:         base.DeepCopyByteArray(ref.Certificate),
 		HttpsHostName:       ref.HttpsHostName,
 		ActiveHostName:      ref.ActiveHostName,
 		ActiveHttpsHostName: ref.ActiveHttpsHostName,
@@ -188,7 +235,7 @@ func (ref *RemoteClusterReference) CloneForMetakvUpdate() *RemoteClusterReferenc
 		UserName:         ref.UserName,
 		Password:         ref.Password,
 		DemandEncryption: ref.DemandEncryption,
-		Certificate:      ref.Certificate,
+		Certificate:      base.DeepCopyByteArray(ref.Certificate),
 		EncryptionType:   ref.EncryptionType,
 		SANInCertificate: ref.SANInCertificate,
 	}
@@ -198,7 +245,17 @@ func (ref *RemoteClusterReference) IsEncryptionEnabled() bool {
 	return ref.DemandEncryption
 }
 
+var remoteClusterReferenceSampleEmptyRef *RemoteClusterReference = &RemoteClusterReference{}
+
+func (ref *RemoteClusterReference) IsEmpty() bool {
+	return ref.IsSame(remoteClusterReferenceSampleEmptyRef)
+}
+
 func (ref *RemoteClusterReference) IsFullEncryption() bool {
 	// ref.EncryptionType may be empty for unupgraded remote cluster refs. treat it as "full" in this case
 	return ref.DemandEncryption && (len(ref.EncryptionType) == 0 || ref.EncryptionType == EncryptionType_Full)
+}
+
+func (ref *RemoteClusterReference) Clear() {
+	ref.LoadFrom(remoteClusterReferenceSampleEmptyRef)
 }

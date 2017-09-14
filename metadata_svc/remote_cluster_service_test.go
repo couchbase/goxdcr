@@ -1,0 +1,741 @@
+package metadata_svc
+
+import (
+	"encoding/json"
+	"errors"
+	"fmt"
+	"github.com/couchbase/goxdcr/base"
+	"github.com/couchbase/goxdcr/log"
+	"github.com/couchbase/goxdcr/metadata"
+	service_def "github.com/couchbase/goxdcr/service_def/mocks"
+	//	"github.com/couchbase/goxdcr/simple_utils"
+	utilsMock "github.com/couchbase/goxdcr/utils/mocks"
+	"github.com/stretchr/testify/assert"
+	mock "github.com/stretchr/testify/mock"
+	"net/http"
+	"testing"
+)
+
+var uuidField string = "dummyUUID"
+var uuidField2 string = "dummyUUID2"
+var hostname string = "dummyHostName1:9999"
+var hostname2 string = "dummyHostName2:9999"
+var hostname3 string = "dummyHostName3:9999"
+var hostname4 string = "dummyHostName4:9999"
+var dummyHostNameList = []string{hostname, hostname2, hostname3}
+var dummyHostNameList2 = []string{hostname, hostname2, hostname3, hostname4}
+var localhost string = "localhost"
+
+var callBackCount int
+
+func testCallbackIncrementCount(string, interface{}, interface{}) error {
+	callBackCount++
+	return nil
+}
+
+func setupBoilerPlateRCS() (*service_def.UILogSvc,
+	*service_def.MetadataSvc,
+	*service_def.XDCRCompTopologySvc,
+	*service_def.ClusterInfoSvc,
+	*utilsMock.UtilsIface,
+	*RemoteClusterService) {
+
+	uiLogSvcMock := &service_def.UILogSvc{}
+	metadataSvcMock := &service_def.MetadataSvc{}
+	xdcrTopologyMock := &service_def.XDCRCompTopologySvc{}
+	clusterInfoSvcMock := &service_def.ClusterInfoSvc{}
+	utilitiesMock := &utilsMock.UtilsIface{}
+
+	remoteClusterSvc, _ := NewRemoteClusterService(uiLogSvcMock, metadataSvcMock, xdcrTopologyMock,
+		clusterInfoSvcMock, log.DefaultLoggerContext, utilitiesMock)
+
+	callBackCount = 0
+
+	return uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock, utilitiesMock, remoteClusterSvc
+}
+
+func jsonMarshalWrapper(ref *metadata.RemoteClusterReference) (key string, value []byte) {
+	jsonKey := ref.Id
+	jsonBytes, _ := json.Marshal(ref)
+	return jsonKey, jsonBytes
+}
+
+func setupMocksRCS(uiLogSvcMock *service_def.UILogSvc,
+	metadataSvcMock *service_def.MetadataSvc,
+	xdcrTopologyMock *service_def.XDCRCompTopologySvc,
+	clusterInfoSvcMock *service_def.ClusterInfoSvc,
+	utilitiesMock *utilsMock.UtilsIface,
+	remoteClusterSvc *RemoteClusterService,
+	remoteClusterRef *metadata.RemoteClusterReference) {
+
+	// metakv mock
+	setupMetaSvcMockGeneric(metadataSvcMock, remoteClusterRef)
+
+	// utils mock
+	setupUtilsMockGeneric(utilitiesMock)
+
+	clusterInfo := make(map[string]interface{})
+	dummyPools := make([]interface{}, 5, 5)
+	clusterInfo[base.IsEnterprise] = true
+	clusterInfo[base.Pools] = dummyPools
+	clusterInfo[base.RemoteClusterUuid] = uuidField
+	utilitiesMock.On("GetClusterInfoWStatusCode", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(clusterInfo, nil, http.StatusOK)
+
+	// UI svc
+	uiLogSvcMock.On("Write", mock.Anything).Return(nil)
+
+}
+
+func setupMetaSvcMockGeneric(metadataSvcMock *service_def.MetadataSvc, remoteClusterRef *metadata.RemoteClusterReference) {
+	// Get json marshal and unmarshal for mocking
+	jsonKey, jsonMarshalBytes := jsonMarshalWrapper(remoteClusterRef)
+	revision := 1
+
+	// metadatasvc mock
+	metadataSvcMock.On("AddSensitiveWithCatalog", mock.Anything, mock.Anything, mock.Anything).Return(nil)
+	metadataSvcMock.On("Get", jsonKey).Return(jsonMarshalBytes, revision, nil)
+	metadataSvcMock.On("DelWithCatalog", mock.Anything, mock.Anything, mock.Anything).Return(nil)
+	metadataSvcMock.On("SetSensitive", mock.Anything, mock.Anything, mock.Anything).Return(nil)
+}
+
+func setupUtilsMockGeneric(utilitiesMock *utilsMock.UtilsIface) {
+	emptyList := make([]interface{}, 5)
+	hostnameList := append(emptyList, localhost)
+	utilitiesMock.On("GetNodeListWithMinInfo", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(emptyList, nil)
+	utilitiesMock.On("GetNodeNameListFromNodeList", mock.Anything, mock.Anything, mock.Anything).Return(dummyHostNameList, nil)
+	utilitiesMock.On("GetHostName", mock.Anything).Return(localhost)
+	utilitiesMock.On("GetPortNumber", mock.Anything).Return(uint16(9999), nil)
+	utilitiesMock.On("GetClusterUUIDAndNodeListWithMinInfo", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(uuidField, hostnameList, nil)
+}
+
+func setupUtilsMockPre1Good3Bad(utilitiesMock *utilsMock.UtilsIface) {
+	emptyList := make([]interface{}, 5)
+	hostnameList := append(emptyList, localhost)
+	utilitiesMock.On("GetNodeListWithMinInfo", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(emptyList, nil)
+	utilitiesMock.On("GetNodeNameListFromNodeList", mock.Anything, mock.Anything, mock.Anything).Return(dummyHostNameList2, nil)
+	utilitiesMock.On("GetHostName", mock.Anything).Return(localhost)
+	utilitiesMock.On("GetPortNumber", mock.Anything).Return(uint16(9999), nil)
+	utilitiesMock.On("GetClusterUUIDAndNodeListWithMinInfo", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(uuidField, hostnameList, nil)
+}
+
+func setupUtilsOneNode(utilitiesMock *utilsMock.UtilsIface) {
+	emptyList := make([]interface{}, 5)
+	singleList := []string{hostname}
+	hostnameList := append(emptyList, localhost)
+	utilitiesMock.On("GetNodeListWithMinInfo", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(emptyList, nil)
+	utilitiesMock.On("GetNodeNameListFromNodeList", mock.Anything, mock.Anything, mock.Anything).Return(singleList, nil)
+	utilitiesMock.On("GetHostName", mock.Anything).Return(localhost)
+	utilitiesMock.On("GetPortNumber", mock.Anything).Return(uint16(9999), nil)
+	utilitiesMock.On("GetClusterUUIDAndNodeListWithMinInfo", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(uuidField, hostnameList, nil)
+}
+
+// emulates where node1 and 2 and 3 becomes cluster splitNames2 and rebalanced
+// original cluster is now only consists of splitnames1 (hostname3)
+func setupUtilsMock1Good3Bad(utilitiesMock *utilsMock.UtilsIface) []string {
+	emptyList := make([]interface{}, 5)
+	hostnameList := append(emptyList, localhost)
+	// the good one
+	splitNames1 := []string{hostname4}
+	// the bad ones
+	splitNames2 := []string{hostname, hostname2, hostname3}
+	utilitiesMock.On("GetNodeListWithMinInfo", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(emptyList, nil)
+	utilitiesMock.On("GetHostName", mock.Anything).Return(localhost)
+	utilitiesMock.On("GetPortNumber", mock.Anything).Return(uint16(9999), nil)
+	utilitiesMock.On("GetClusterUUIDAndNodeListWithMinInfo", hostname, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(uuidField2, hostnameList, nil)
+	utilitiesMock.On("GetClusterUUIDAndNodeListWithMinInfo", hostname2, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(uuidField2, hostnameList, nil)
+	utilitiesMock.On("GetClusterUUIDAndNodeListWithMinInfo", hostname3, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(uuidField2, hostnameList, nil)
+	utilitiesMock.On("GetClusterUUIDAndNodeListWithMinInfo", hostname4, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(uuidField, hostnameList, nil)
+
+	// diff from generic above
+	utilitiesMock.On("GetNodeNameListFromNodeList", mock.Anything, hostname, mock.Anything).Return(splitNames2, nil)
+	utilitiesMock.On("GetNodeNameListFromNodeList", mock.Anything, hostname2, mock.Anything).Return(splitNames2, nil)
+	utilitiesMock.On("GetNodeNameListFromNodeList", mock.Anything, hostname3, mock.Anything).Return(splitNames2, nil)
+	utilitiesMock.On("GetNodeNameListFromNodeList", mock.Anything, hostname4, mock.Anything).Return(splitNames1, nil)
+	return splitNames1
+}
+
+// emulates where node1 and 2 becomes cluster splitNames2 and rebalanced
+// original cluster is now only consists of splitnames1 (hostname3)
+func setupUtilsMockListNode2Bad(utilitiesMock *utilsMock.UtilsIface) []string {
+	emptyList := make([]interface{}, 5)
+	hostnameList := append(emptyList, localhost)
+	// good one
+	splitNames1 := []string{hostname3}
+	// bad ones
+	splitNames2 := []string{hostname, hostname2}
+	utilitiesMock.On("GetNodeListWithMinInfo", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(emptyList, nil)
+	utilitiesMock.On("GetHostName", mock.Anything).Return(localhost)
+	utilitiesMock.On("GetPortNumber", mock.Anything).Return(uint16(9999), nil)
+	utilitiesMock.On("GetClusterUUIDAndNodeListWithMinInfo", hostname3, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(uuidField, hostnameList, nil)
+	utilitiesMock.On("GetClusterUUIDAndNodeListWithMinInfo", hostname, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(uuidField2, hostnameList, nil)
+	utilitiesMock.On("GetClusterUUIDAndNodeListWithMinInfo", hostname2, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(uuidField2, hostnameList, nil)
+
+	// diff from generic above
+	utilitiesMock.On("GetNodeNameListFromNodeList", mock.Anything, hostname, mock.Anything).Return(splitNames2, nil)
+	utilitiesMock.On("GetNodeNameListFromNodeList", mock.Anything, hostname2, mock.Anything).Return(splitNames2, nil)
+	utilitiesMock.On("GetNodeNameListFromNodeList", mock.Anything, hostname3, mock.Anything).Return(splitNames1, nil)
+	return splitNames1
+}
+
+// Emulates where first node is moved out and the rest of the nodes do not respond
+func setupUtilsMockFirstNodeBad(utilitiesMock *utilsMock.UtilsIface) {
+	emptyList := make([]interface{}, 5)
+	var emptyStrList []string
+	dummyErr := errors.New("Dummy error")
+	hostnameList := append(emptyList, localhost)
+	// the bad ones
+	splitNames2 := []string{hostname, hostname2, hostname3}
+	utilitiesMock.On("GetNodeListWithMinInfo", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(emptyList, nil)
+	utilitiesMock.On("GetHostName", mock.Anything).Return(localhost)
+	utilitiesMock.On("GetPortNumber", mock.Anything).Return(uint16(9999), nil)
+	utilitiesMock.On("GetClusterUUIDAndNodeListWithMinInfo", hostname, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(uuidField2, hostnameList, nil)
+	utilitiesMock.On("GetClusterUUIDAndNodeListWithMinInfo", hostname2, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return("", emptyList, dummyErr)
+	utilitiesMock.On("GetClusterUUIDAndNodeListWithMinInfo", hostname3, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return("", emptyList, dummyErr)
+	utilitiesMock.On("GetClusterUUIDAndNodeListWithMinInfo", hostname4, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return("", emptyList, dummyErr)
+
+	// diff from generic above
+	utilitiesMock.On("GetNodeNameListFromNodeList", mock.Anything, hostname, mock.Anything).Return(splitNames2, nil)
+	utilitiesMock.On("GetNodeNameListFromNodeList", mock.Anything, hostname2, mock.Anything).Return(emptyStrList, dummyErr)
+	utilitiesMock.On("GetNodeNameListFromNodeList", mock.Anything, hostname3, mock.Anything).Return(emptyStrList, dummyErr)
+	utilitiesMock.On("GetNodeNameListFromNodeList", mock.Anything, hostname4, mock.Anything).Return(emptyStrList, dummyErr)
+}
+
+func createRemoteClusterReference(id string) *metadata.RemoteClusterReference {
+	// Use name the same as ID for ease
+	aRef := &metadata.RemoteClusterReference{Id: id,
+		Name:     id,
+		Uuid:     uuidField,
+		HostName: hostname,
+	}
+	return aRef
+}
+
+func TestAddDelRemoteClusterRef(t *testing.T) {
+	assert := assert.New(t)
+	fmt.Println("============== Test case start: TestAddRDelRemoteClusterRef =================")
+	uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
+		utilitiesMock, remoteClusterSvc := setupBoilerPlateRCS()
+
+	idAndName := "test"
+	ref := createRemoteClusterReference(idAndName)
+
+	setupMocksRCS(uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
+		utilitiesMock, remoteClusterSvc, ref)
+
+	assert.Equal(0, remoteClusterSvc.getNumberOfAgents())
+	assert.Nil(remoteClusterSvc.AddRemoteCluster(ref, true))
+	assert.Equal(1, remoteClusterSvc.getNumberOfAgents())
+	assert.NotNil(remoteClusterSvc.AddRemoteCluster(ref, true))
+	assert.True(remoteClusterSvc.agentCacheMapsAreSynced())
+	remoteClusterSvc.agentMutex.RLock()
+	assert.NotEqual(0, len(remoteClusterSvc.agentMap[idAndName].refNodesList))
+	remoteClusterSvc.agentMutex.RUnlock()
+
+	referencesMap, _ := remoteClusterSvc.RemoteClusters()
+	assert.Equal(1, len(referencesMap))
+
+	remoteClusterSvc.DelRemoteCluster(idAndName)
+	assert.Equal(0, remoteClusterSvc.getNumberOfAgents())
+	assert.True(remoteClusterSvc.agentCacheMapsAreSynced())
+
+	fmt.Println("============== Test case end: TestAddDelRemoteClusterRef =================")
+}
+
+// Add cluster via callback
+func TestAddSecondaryClusterRef(t *testing.T) {
+	assert := assert.New(t)
+	fmt.Println("============== Test case start: TestAddSecondaryClusterRef =================")
+	uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
+		utilitiesMock, remoteClusterSvc := setupBoilerPlateRCS()
+
+	idAndName := "test"
+	ref := createRemoteClusterReference(idAndName)
+
+	_, jsonMarshalBytes := jsonMarshalWrapper(ref)
+	revision := 1
+
+	setupMocksRCS(uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
+		utilitiesMock, remoteClusterSvc, ref)
+
+	assert.Equal(0, remoteClusterSvc.getNumberOfAgents())
+	assert.Nil(remoteClusterSvc.RemoteClusterServiceCallback("", jsonMarshalBytes, revision))
+	assert.Equal(1, remoteClusterSvc.getNumberOfAgents())
+	assert.NotNil(remoteClusterSvc.AddRemoteCluster(ref, true))
+	assert.True(remoteClusterSvc.agentCacheMapsAreSynced())
+
+	remoteClusterSvc.DelRemoteCluster(idAndName)
+	assert.Equal(0, remoteClusterSvc.getNumberOfAgents())
+	assert.True(remoteClusterSvc.agentCacheMapsAreSynced())
+
+	fmt.Println("============== Test case end: TestAddSecondaryClusterRef =================")
+}
+
+func TestGetRefFromCachedMapNoRefresh(t *testing.T) {
+	assert := assert.New(t)
+	fmt.Println("============== Test case start: TestGetRefFromCachedMapNoRefresh =================")
+	uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
+		utilitiesMock, remoteClusterSvc := setupBoilerPlateRCS()
+
+	idAndName := "test"
+	ref := createRemoteClusterReference(idAndName)
+
+	setupMocksRCS(uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
+		utilitiesMock, remoteClusterSvc, ref)
+
+	assert.Equal(0, remoteClusterSvc.getNumberOfAgents())
+	assert.Nil(remoteClusterSvc.AddRemoteCluster(ref, true))
+	assert.Equal(1, remoteClusterSvc.getNumberOfAgents())
+	assert.NotNil(remoteClusterSvc.AddRemoteCluster(ref, true))
+
+	refClone, err := remoteClusterSvc.RemoteClusterByRefId(idAndName, false)
+	assert.Nil(err)
+	assert.NotNil(refClone)
+	assert.True(refClone.IsEssentiallySame(ref))
+
+	refClone, err = remoteClusterSvc.RemoteClusterByRefName(idAndName, false)
+	assert.Nil(err)
+	assert.NotNil(refClone)
+	assert.True(refClone.IsEssentiallySame(ref))
+
+	refClone, err = remoteClusterSvc.RemoteClusterByUuid(uuidField, false)
+	assert.Nil(err)
+	assert.NotNil(refClone)
+	assert.True(refClone.IsEssentiallySame(ref))
+	fmt.Println("============== Test case end: TestGetRefFromCachedMapNoRefresh =================")
+}
+
+func TestAddThenSetRemoteClusterRef(t *testing.T) {
+	assert := assert.New(t)
+	fmt.Println("============== Test case start: TestAddThenSetRemoteClusterRef =================")
+	uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
+		utilitiesMock, remoteClusterSvc := setupBoilerPlateRCS()
+
+	idAndName := "test"
+	ref := createRemoteClusterReference(idAndName)
+	ref.UserName = "oldUserName"
+
+	setupMocksRCS(uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
+		utilitiesMock, remoteClusterSvc, ref)
+
+	// First set the callback before creating agents
+	remoteClusterSvc.SetMetadataChangeHandlerCallback(testCallbackIncrementCount)
+
+	assert.Equal(0, remoteClusterSvc.getNumberOfAgents())
+	assert.Nil(remoteClusterSvc.AddRemoteCluster(ref, true))
+	// An add should call the callback
+	assert.Equal(1, callBackCount)
+
+	assert.Equal(1, remoteClusterSvc.getNumberOfAgents())
+	assert.NotNil(remoteClusterSvc.AddRemoteCluster(ref, true))
+	assert.True(remoteClusterSvc.agentCacheMapsAreSynced())
+	assert.Equal(1, callBackCount)
+
+	// check before update
+	agent, exists, _ := remoteClusterSvc.getOrStartNewAgent(ref, false, false)
+	assert.Equal("oldUserName", agent.reference.UserName)
+
+	// Update the remoteClusterSvc and agents with a new mock svc to return the actual reference
+	newRef := ref.Clone()
+	idAndName2 := "newName"
+	newRef.Name = idAndName2
+	newRef.UserName = "newUserName"
+	_, jsonMarshalBytes := jsonMarshalWrapper(newRef)
+	revision := 2
+	metadataSvcMock2 := &service_def.MetadataSvc{}
+	metadataSvcMock2.On("Get", mock.Anything).Return(jsonMarshalBytes, revision, nil)
+	metadataSvcMock2.On("SetSensitive", mock.Anything, mock.Anything, mock.Anything).Return(nil)
+	metadataSvcMock2.On("DelWithCatalog", mock.Anything, mock.Anything, mock.Anything).Return(nil)
+	remoteClusterSvc.metakv_svc = metadataSvcMock2
+	remoteClusterSvc.agentMutex.Lock()
+	remoteClusterSvc.agentMap[idAndName].metakvSvc = metadataSvcMock2
+	remoteClusterSvc.agentMutex.Unlock()
+
+	assert.Nil(remoteClusterSvc.SetRemoteCluster(idAndName, newRef))
+	remoteClusterSvc.agentMutex.RLock()
+	assert.Nil(remoteClusterSvc.agentCacheRefNameMap[idAndName])
+	assert.NotNil(remoteClusterSvc.agentCacheRefNameMap[idAndName2])
+	assert.NotEqual(0, len(remoteClusterSvc.agentMap[idAndName].refNodesList))
+	remoteClusterSvc.agentMutex.RUnlock()
+
+	// A set should call the callback
+	assert.Equal(2, callBackCount)
+
+	assert.True(remoteClusterSvc.agentCacheMapsAreSynced())
+	agent, exists, _ = remoteClusterSvc.getOrStartNewAgent(newRef, false, false)
+	assert.True(exists)
+	assert.Equal("newUserName", agent.reference.UserName)
+
+	remoteClusterSvc.DelRemoteCluster(idAndName2)
+	assert.Equal(0, remoteClusterSvc.getNumberOfAgents())
+	assert.True(remoteClusterSvc.agentCacheMapsAreSynced())
+
+	fmt.Println("============== Test case end: TestAddThenSetRemoteClusterRef =================")
+}
+func TestAddThenSetCallback(t *testing.T) {
+	assert := assert.New(t)
+	fmt.Println("============== Test case start: TestAddThenSetCallback =================")
+	uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
+		utilitiesMock, remoteClusterSvc := setupBoilerPlateRCS()
+
+	idAndName := "test"
+	ref := createRemoteClusterReference(idAndName)
+
+	setupMocksRCS(uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
+		utilitiesMock, remoteClusterSvc, ref)
+
+	// First set the callback before creating agents
+	remoteClusterSvc.SetMetadataChangeHandlerCallback(testCallbackReturnsNil)
+
+	assert.Equal(0, remoteClusterSvc.getNumberOfAgents())
+	assert.Nil(remoteClusterSvc.AddRemoteCluster(ref, true))
+	assert.Equal(1, remoteClusterSvc.getNumberOfAgents())
+	assert.NotNil(remoteClusterSvc.AddRemoteCluster(ref, true))
+	assert.True(remoteClusterSvc.agentCacheMapsAreSynced())
+	assert.NotEqual(0, len(remoteClusterSvc.agentMap[idAndName].refNodesList))
+
+	remoteClusterSvc.agentMutex.RLock()
+	assert.Nil(remoteClusterSvc.agentMap[idAndName].metadataChangeCallback("", nil, nil))
+	remoteClusterSvc.agentMutex.RUnlock()
+
+	// After creating agent, update the remoteClusterSvc callback
+	remoteClusterSvc.SetMetadataChangeHandlerCallback(testCallbackReturnsError)
+
+	// Should point to the second callback
+	remoteClusterSvc.agentMutex.RLock()
+	assert.NotNil(remoteClusterSvc.agentMap[idAndName].metadataChangeCallback("", nil, nil))
+	remoteClusterSvc.agentMutex.RUnlock()
+
+	remoteClusterSvc.DelRemoteCluster(idAndName)
+	assert.Equal(0, remoteClusterSvc.getNumberOfAgents())
+	assert.True(remoteClusterSvc.agentCacheMapsAreSynced())
+
+	fmt.Println("============== Test case end: TestAddThenSetCallback =================")
+}
+
+func testCallbackReturnsNil(string, interface{}, interface{}) error {
+	return nil
+}
+
+func testCallbackReturnsError(string, interface{}, interface{}) error {
+	return errors.New("Error")
+}
+
+func TestAddThenRemoveSecondaryViaCallback(t *testing.T) {
+	assert := assert.New(t)
+	fmt.Println("============== Test case start: TestAddThenRemoveSecondaryViaCallback =================")
+	uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
+		utilitiesMock, remoteClusterSvc := setupBoilerPlateRCS()
+
+	idAndName := "test"
+	ref := createRemoteClusterReference(idAndName)
+
+	setupMocksRCS(uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
+		utilitiesMock, remoteClusterSvc, ref)
+
+	// First set the callback before creating agents
+	remoteClusterSvc.SetMetadataChangeHandlerCallback(testCallbackReturnsNil)
+
+	assert.Equal(0, remoteClusterSvc.getNumberOfAgents())
+	assert.Nil(remoteClusterSvc.AddRemoteCluster(ref, true))
+	assert.Equal(1, remoteClusterSvc.getNumberOfAgents())
+	assert.NotNil(remoteClusterSvc.AddRemoteCluster(ref, true))
+	assert.True(remoteClusterSvc.agentCacheMapsAreSynced())
+	assert.NotEqual(0, len(remoteClusterSvc.agentMap[idAndName].refNodesList))
+
+	remoteClusterSvc.agentMutex.RLock()
+	assert.Nil(remoteClusterSvc.agentMap[idAndName].metadataChangeCallback("", nil, nil))
+	remoteClusterSvc.agentMutex.RUnlock()
+
+	// After creating agent, update the remoteClusterSvc callback
+	remoteClusterSvc.SetMetadataChangeHandlerCallback(testCallbackReturnsError)
+
+	// Should point to the second callback
+	remoteClusterSvc.agentMutex.RLock()
+	assert.NotNil(remoteClusterSvc.agentMap[idAndName].metadataChangeCallback("", nil, nil))
+	remoteClusterSvc.agentMutex.RUnlock()
+
+	remoteClusterSvc.DelRemoteCluster(idAndName)
+	assert.Equal(0, remoteClusterSvc.getNumberOfAgents())
+	assert.True(remoteClusterSvc.agentCacheMapsAreSynced())
+
+	fmt.Println("============== Test case end: TestAddThenRemoveSecondaryViaCallback =================")
+}
+
+func TestAddThenSetThenDelClusterViaCallback(t *testing.T) {
+	assert := assert.New(t)
+	fmt.Println("============== Test case start: TestAddThenSetThenDelClusterViaCallback =================")
+	uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
+		utilitiesMock, remoteClusterSvc := setupBoilerPlateRCS()
+
+	idAndName := "test"
+	ref := createRemoteClusterReference(idAndName)
+	ref2 := ref.Clone()
+
+	_, jsonMarshalBytes := jsonMarshalWrapper(ref)
+	revision := 1
+
+	// First set the callback before creating agents
+	remoteClusterSvc.SetMetadataChangeHandlerCallback(testCallbackIncrementCount)
+
+	setupMocksRCS(uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
+		utilitiesMock, remoteClusterSvc, ref)
+
+	assert.Equal(0, remoteClusterSvc.getNumberOfAgents())
+	assert.Nil(remoteClusterSvc.RemoteClusterServiceCallback("/test", jsonMarshalBytes, revision))
+	assert.Equal(1, remoteClusterSvc.getNumberOfAgents())
+	assert.NotNil(remoteClusterSvc.AddRemoteCluster(ref, true))
+	assert.True(remoteClusterSvc.agentCacheMapsAreSynced())
+
+	// Adding a cluster via metakv callback should call the metakv update
+	assert.Equal(1, callBackCount)
+
+	// Set op via callback
+	ref2.HostName = "newHostName"
+	_, jsonMarshalBytes = jsonMarshalWrapper(ref2)
+	revision = 2
+
+	// Update the remoteClusterSvc and agents with a new mock svc to return the actual reference
+	metadataSvcMock2 := &service_def.MetadataSvc{}
+	metadataSvcMock2.On("Get", mock.Anything).Return(jsonMarshalBytes, revision, nil)
+	metadataSvcMock2.On("SetSensitive", mock.Anything, mock.Anything, mock.Anything).Return(nil)
+	remoteClusterSvc.metakv_svc = metadataSvcMock2
+	remoteClusterSvc.agentMutex.Lock()
+	remoteClusterSvc.agentMap[idAndName].metakvSvc = metadataSvcMock2
+	remoteClusterSvc.agentMutex.Unlock()
+
+	assert.Nil(remoteClusterSvc.RemoteClusterServiceCallback("/test", jsonMarshalBytes, revision))
+	assert.Equal(1, remoteClusterSvc.getNumberOfAgents())
+	// A set should call the callback
+	assert.Equal(2, callBackCount)
+	remoteClusterSvc.agentMutex.RLock()
+	assert.NotNil(remoteClusterSvc.agentMap[idAndName])
+	assert.Equal(ref2.HostName, remoteClusterSvc.agentMap[idAndName].reference.HostName)
+	remoteClusterSvc.agentMutex.RUnlock()
+
+	// Delete op via callback
+	assert.Nil(remoteClusterSvc.RemoteClusterServiceCallback("/test", nil, nil))
+	assert.Equal(0, remoteClusterSvc.getNumberOfAgents())
+	assert.True(remoteClusterSvc.agentCacheMapsAreSynced())
+	// A delete should call the callback
+	assert.Equal(3, callBackCount)
+
+	// For completeness sake
+	assert.NotNil(remoteClusterSvc.RemoteClusterServiceCallback("/test", nil, nil))
+
+	fmt.Println("============== Test case end: TestAddThenSetThenDelClusterViaCallback =================")
+}
+
+func TestGetConnectionStringForRemoteCluster(t *testing.T) {
+	assert := assert.New(t)
+	fmt.Println("============== Test case start: TestGetConnectionStringForRemoteCluster =================")
+	uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
+		utilitiesMock, remoteClusterSvc := setupBoilerPlateRCS()
+
+	idAndName := "test"
+	ref := createRemoteClusterReference(idAndName)
+
+	setupMocksRCS(uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
+		utilitiesMock, remoteClusterSvc, ref)
+
+	assert.Equal(0, remoteClusterSvc.getNumberOfAgents())
+	assert.Nil(remoteClusterSvc.AddRemoteCluster(ref, true))
+	assert.Equal(1, remoteClusterSvc.getNumberOfAgents())
+	assert.NotNil(remoteClusterSvc.AddRemoteCluster(ref, true))
+	assert.True(remoteClusterSvc.agentCacheMapsAreSynced())
+	remoteClusterSvc.agentMutex.RLock()
+	assert.NotEqual(0, len(remoteClusterSvc.agentMap[idAndName].refNodesList))
+	remoteClusterSvc.agentMutex.RUnlock()
+
+	// Not Capi should return connectionStr
+	hostStr, err := remoteClusterSvc.GetConnectionStringForRemoteCluster(ref, false)
+	assert.Nil(err)
+	actualConnStr, _ := ref.MyConnectionStr()
+	assert.Equal(actualConnStr, hostStr)
+
+	// No host in the list - but UpdateReferenceFrom would have pulled one
+	hostStr, err = remoteClusterSvc.GetConnectionStringForRemoteCluster(ref, true)
+	remoteClusterSvc.agentMutex.RLock()
+	remoteClusterSvc.agentMap[idAndName].refMtx.RLock()
+	assert.Equal(3, len(remoteClusterSvc.agentMap[idAndName].refNodesList))
+	remoteClusterSvc.agentMap[idAndName].refMtx.RUnlock()
+	remoteClusterSvc.agentMutex.RUnlock()
+	assert.Nil(err)
+	assert.Equal(hostname, hostStr)
+
+	// Have a host in the list, should return sorted top one
+	remoteClusterSvc.agentMutex.RLock()
+	remoteClusterSvc.agentMap[idAndName].refMtx.Lock()
+	remoteClusterSvc.agentMap[idAndName].refNodesList = append(remoteClusterSvc.agentMap[idAndName].refNodesList, "dummyNewHost")
+	topHostName := "aaaaaHost"
+	remoteClusterSvc.agentMap[idAndName].refNodesList = append(remoteClusterSvc.agentMap[idAndName].refNodesList, topHostName)
+	remoteClusterSvc.agentMap[idAndName].refMtx.Unlock()
+	remoteClusterSvc.agentMutex.RUnlock()
+	hostStr, _ = remoteClusterSvc.GetConnectionStringForRemoteCluster(ref, true)
+	assert.Equal(topHostName, hostStr)
+
+	remoteClusterSvc.DelRemoteCluster(idAndName)
+	assert.Equal(0, remoteClusterSvc.getNumberOfAgents())
+	assert.True(remoteClusterSvc.agentCacheMapsAreSynced())
+
+	fmt.Println("============== Test case end: TestGetConnectionStringForRemoteCluster =================")
+}
+
+func refreshCheckActiveHostNameHelper(agent *RemoteClusterAgent, nodeList []string) bool {
+	// find that it should be in here
+	var findCheck bool
+	for _, name := range nodeList {
+		if agent.reference.ActiveHostName == name {
+			findCheck = true
+			break
+		}
+	}
+	return findCheck
+}
+
+func TestPositiveRefresh(t *testing.T) {
+	assert := assert.New(t)
+	fmt.Println("============== Test case start: TestPositiveRefresh =================")
+	uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
+		utilitiesMock, remoteClusterSvc := setupBoilerPlateRCS()
+
+	idAndName := "test"
+	ref := createRemoteClusterReference(idAndName)
+
+	setupMocksRCS(uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
+		utilitiesMock, remoteClusterSvc, ref)
+
+	assert.Equal(0, remoteClusterSvc.getNumberOfAgents())
+	assert.Nil(remoteClusterSvc.AddRemoteCluster(ref, true))
+
+	agent, _, _ := remoteClusterSvc.getOrStartNewAgent(ref, false, false)
+	agent.Refresh()
+	assert.Equal(hostname, agent.reference.HostName)
+	assert.True(refreshCheckActiveHostNameHelper(agent, dummyHostNameList))
+
+	fmt.Println("============== Test case end: TestPositiveRefresh =================")
+}
+
+func TestRefresh3Nodes2GoesBad(t *testing.T) {
+	assert := assert.New(t)
+	fmt.Println("============== Test case start: TestRefresh3Nodes2GoesBad =================")
+	uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
+		utilitiesMock, remoteClusterSvc := setupBoilerPlateRCS()
+
+	idAndName := "test"
+	ref := createRemoteClusterReference(idAndName)
+
+	setupMocksRCS(uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
+		utilitiesMock, remoteClusterSvc, ref)
+
+	assert.Equal(0, remoteClusterSvc.getNumberOfAgents())
+	assert.Nil(remoteClusterSvc.AddRemoteCluster(ref, true))
+
+	// First make sure positive case is good - we have "dummyHostName" as the beginning
+	agent, _, _ := remoteClusterSvc.getOrStartNewAgent(ref, false, false)
+	agent.Refresh()
+	assert.Equal(hostname, agent.reference.HostName)
+	assert.True(refreshCheckActiveHostNameHelper(agent, dummyHostNameList))
+
+	// After second refresh, the remoteClusteReference should not have "dummyHostName" as the actual hostname
+	ref2 := createRemoteClusterReference(idAndName)
+	ref2.HostName = hostname3
+
+	// hostName 1 and 3 have been moved
+	// set things up for second refresh
+	metadataSvc2 := &service_def.MetadataSvc{}
+	setupMetaSvcMockGeneric(metadataSvc2, ref2)
+
+	utilitiesMock2 := &utilsMock.UtilsIface{}
+	newNodeList := setupUtilsMockListNode2Bad(utilitiesMock2)
+
+	remoteClusterSvc.updateUtilities(utilitiesMock2)
+	remoteClusterSvc.updateMetaSvc(metadataSvc2)
+
+	// Second refresh
+	agent.Refresh()
+	assert.NotEqual(hostname, agent.reference.HostName)
+	assert.True(refreshCheckActiveHostNameHelper(agent, newNodeList))
+
+	fmt.Println("============== Test case end: TestRefresh3Nodes2GoesBad =================")
+}
+
+func TestRefresh4Nodes3GoesBad(t *testing.T) {
+	assert := assert.New(t)
+	fmt.Println("============== Test case start: TestRefresh4Nodes3GoesBad =================")
+	uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
+		utilitiesMock, remoteClusterSvc := setupBoilerPlateRCS()
+
+	idAndName := "test"
+	ref := createRemoteClusterReference(idAndName)
+
+	setupMocksRCS(uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
+		utilitiesMock, remoteClusterSvc, ref)
+
+	utilitiesPreMock := &utilsMock.UtilsIface{}
+	setupUtilsMockPre1Good3Bad(utilitiesPreMock)
+	remoteClusterSvc.updateUtilities(utilitiesPreMock)
+
+	assert.Equal(0, remoteClusterSvc.getNumberOfAgents())
+	assert.Nil(remoteClusterSvc.AddRemoteCluster(ref, true))
+
+	// First make sure positive case is good - we have "dummyHostName" as the beginning
+	agent, _, _ := remoteClusterSvc.getOrStartNewAgent(ref, false, false)
+	agent.Refresh()
+	assert.Equal(hostname, agent.reference.HostName)
+	assert.True(refreshCheckActiveHostNameHelper(agent, dummyHostNameList2))
+
+	// After second refresh, the remoteClusteReference should not have "dummyHostName" as the actual hostname
+	ref2 := createRemoteClusterReference(idAndName)
+	ref2.HostName = hostname4
+
+	// hostName 1 and 2 and 3 have been moved
+	// set things up for second refresh
+	metadataSvc2 := &service_def.MetadataSvc{}
+	setupMetaSvcMockGeneric(metadataSvc2, ref2)
+
+	utilitiesMock2 := &utilsMock.UtilsIface{}
+	newNodeList := setupUtilsMock1Good3Bad(utilitiesMock2)
+
+	remoteClusterSvc.updateUtilities(utilitiesMock2)
+	remoteClusterSvc.updateMetaSvc(metadataSvc2)
+
+	// Second refresh
+	agent.Refresh()
+	assert.NotEqual(hostname, agent.reference.HostName)
+	assert.True(refreshCheckActiveHostNameHelper(agent, newNodeList))
+	fmt.Println("============== Test case end: TestRefresh4Nodes3GoesBad =================")
+}
+
+func TestRefreshFirstNodeIsBad(t *testing.T) {
+	assert := assert.New(t)
+	fmt.Println("============== Test case start: TestRefreshFirstNodeIsBad =================")
+	uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
+		utilitiesMock, remoteClusterSvc := setupBoilerPlateRCS()
+
+	idAndName := "test"
+	ref := createRemoteClusterReference(idAndName)
+
+	setupMocksRCS(uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
+		utilitiesMock, remoteClusterSvc, ref)
+
+	// First make sure positive case is good - we have "dummyHostName" as the beginning
+	agent, _, _ := remoteClusterSvc.getOrStartNewAgent(ref, false, false)
+	agent.Refresh()
+	assert.Equal(hostname, agent.reference.HostName)
+	assert.True(refreshCheckActiveHostNameHelper(agent, dummyHostNameList))
+
+	// hostName 1 and 2 and 3 have been moved
+	// set things up for second refresh
+	//	metadataSvc2 := &service_def.MetadataSvc{}
+	//	setupMetaSvcMockGeneric(metadataSvc2, ref2)
+
+	utilitiesMock2 := &utilsMock.UtilsIface{}
+	setupUtilsMockFirstNodeBad(utilitiesMock2)
+
+	remoteClusterSvc.updateUtilities(utilitiesMock2)
+	//	remoteClusterSvc.updateMetaSvc(metadataSvc2)
+
+	// Second refresh - we should fail
+	assert.NotNil(agent.Refresh())
+	fmt.Println("============== Test case end: TestRefreshFirstNodeIsBad =================")
+}

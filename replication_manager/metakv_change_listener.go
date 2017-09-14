@@ -346,14 +346,25 @@ func NewRemoteClusterChangeListener(remote_cluster_svc service_def.RemoteCluster
 }
 
 // Handler callback for remote cluster changed event
+// Note - RemoteClusterService is calling this function with synchronization primatives. Rule of thumb is this fx should *not* call back into RCS to avoid deadlock.
 func (rccl *RemoteClusterChangeListener) remoteClusterChangeHandlerCallback(remoteClusterRefId string, oldRemoteClusterRefObj interface{}, newRemoteClusterRefObj interface{}) error {
-	oldRemoteClusterRef, err := rccl.validateRemoteClusterRef(oldRemoteClusterRefObj)
-	if err != nil {
-		return err
+	// Default to nil
+	var oldRemoteClusterRef *metadata.RemoteClusterReference
+	var newRemoteClusterRef *metadata.RemoteClusterReference
+	var err error
+
+	// If emptyRef is passed in, it is essentially the same as nil
+	if oldRemoteClusterRefObj != nil && !oldRemoteClusterRefObj.(*metadata.RemoteClusterReference).IsEmpty() {
+		oldRemoteClusterRef, err = rccl.validateRemoteClusterRef(oldRemoteClusterRefObj)
+		if err != nil {
+			return err
+		}
 	}
-	newRemoteClusterRef, err := rccl.validateRemoteClusterRef(newRemoteClusterRefObj)
-	if err != nil {
-		return err
+	if newRemoteClusterRefObj != nil && !newRemoteClusterRefObj.(*metadata.RemoteClusterReference).IsEmpty() {
+		newRemoteClusterRef, err = rccl.validateRemoteClusterRef(newRemoteClusterRefObj)
+		if err != nil {
+			return err
+		}
 	}
 
 	rccl.logger.Infof("remoteClusterChangedCallback called on id = %v, oldRef=%v, newRef=%v\n", remoteClusterRefId, oldRemoteClusterRef.String(), newRemoteClusterRef.String())

@@ -288,6 +288,15 @@ func DeepCopyUint64Array(in []uint64) []uint64 {
 	return out
 }
 
+func DeepCopyByteArray(in []byte) []byte {
+	if in == nil {
+		return nil
+	}
+	out := make([]byte, len(in))
+	copy(out, in)
+	return out
+}
+
 func DeepCopyStringArray(in []string) []string {
 	if in == nil {
 		return nil
@@ -488,4 +497,58 @@ func GetPortNumber(hostAddr string) (uint16, error) {
 		// return error to indicate that there is no valid port number
 		return 0, err
 	}
+}
+
+func ShuffleStringsList(list []string) {
+	r := mrand.New(mrand.NewSource(time.Now().Unix()))
+	// Start at the end of the slice, go backwards and scramble
+	for i := len(list); i > 1; i-- {
+		randIndex := r.Intn(i)
+		// Swap values and continue until we're done
+		if (i - 1) != randIndex {
+			list[i-1], list[randIndex] = list[randIndex], list[i-1]
+		}
+	}
+}
+
+func StringListContains(list []string, checkStr string) bool {
+	for _, str := range list {
+		if str == checkStr {
+			return true
+		}
+	}
+	return false
+}
+
+// Linearly combine two lists into one and also deduplicates duplicated entries, returns the result
+func StringListsDedupAndCombine(list1 []string, list2 []string) []string {
+	combineMap := make(map[string]bool)
+	var combineSlice []string
+	for _, element := range list1 {
+		combineMap[element] = true
+	}
+	for _, element := range list2 {
+		if _, ok := combineMap[element]; !ok {
+			combineMap[element] = true
+		}
+	}
+	for element, _ := range combineMap {
+		combineSlice = append(combineSlice, element)
+	}
+	return combineSlice
+}
+
+// Given two lists, return a slice that contains elements from list1 that are not found in list2
+func StringListsFindMissingFromFirst(list1 []string, list2 []string) []string {
+	list2Map := make(map[string]bool)
+	var missingSlice []string
+	for _, element := range list2 {
+		list2Map[element] = true
+	}
+	for _, element := range list1 {
+		if _, ok := list2Map[element]; !ok {
+			missingSlice = append(missingSlice, element)
+		}
+	}
+	return missingSlice
 }

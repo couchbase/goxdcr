@@ -819,13 +819,18 @@ func (u *Utilities) GetSSLPort(hostAddr string, logger *log.CommonLogger) (uint1
 	return uint16(sslPortFloat), nil, false
 }
 
-func (u *Utilities) GetClusterInfo(hostAddr, path, username, password string, certificate []byte, sanInCertificate bool, logger *log.CommonLogger) (map[string]interface{}, error) {
+func (u *Utilities) GetClusterInfoWStatusCode(hostAddr, path, username, password string, certificate []byte, sanInCertificate bool, logger *log.CommonLogger) (map[string]interface{}, error, int) {
 	clusterInfo := make(map[string]interface{})
 	err, statusCode := u.QueryRestApiWithAuth(hostAddr, path, false, username, password, certificate, sanInCertificate, base.MethodGet, "", nil, 0, &clusterInfo, nil, false, logger)
 	if err != nil || statusCode != http.StatusOK {
-		return nil, fmt.Errorf("Failed on calling host=%v, path=%v, err=%v, statusCode=%v", hostAddr, path, err, statusCode)
+		return nil, fmt.Errorf("Failed on calling host=%v, path=%v, err=%v, statusCode=%v", hostAddr, path, err, statusCode), statusCode
 	}
-	return clusterInfo, nil
+	return clusterInfo, nil, statusCode
+}
+
+func (u *Utilities) GetClusterInfo(hostAddr, path, username, password string, certificate []byte, sanInCertificate bool, logger *log.CommonLogger) (map[string]interface{}, error) {
+	clusterInfo, err, _ := u.GetClusterInfoWStatusCode(hostAddr, path, username, password, certificate, sanInCertificate, logger)
+	return clusterInfo, err
 }
 
 func (u *Utilities) GetClusterUUID(hostAddr, username, password string, certificate []byte, sanInCertificate bool, logger *log.CommonLogger) (string, error) {

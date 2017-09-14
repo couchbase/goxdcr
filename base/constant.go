@@ -149,6 +149,8 @@ var ErrorNoSourceNozzle = errors.New("Invalid configuration. No source nozzle ca
 var ErrorNoTargetNozzle = errors.New("Invalid configuration. No target nozzle can be constructed.")
 var ErrorMasterNegativeIndex = errors.New("Master index is negative. ")
 var ErrorFailedAfterRetry = errors.New("Operation failed after max retries. ")
+var ErrorResourceDoesNotExist = errors.New("Specified resource does not exist.")
+var ErrorResourceDoesNotMatch = errors.New("Specified resource does not match the item to which is being compared.")
 
 // constants used for remote cluster references
 const (
@@ -545,6 +547,12 @@ var StatsLogInterval = 30 * time.Second
 
 // default resp timeout, which is used as the interval for checkAndRepairBufferMonitor
 var XmemDefaultRespTimeout time.Duration = 1000 * time.Millisecond
+
+// Number of retries for RemoteClusterService to do any metaKV operations
+var MaxRCSMetaKVOpsRetry int = 5
+
+// Time to wait between metakv get ops
+var TimeBetweenMetaKVGetOps = time.Duration(500) * time.Millisecond
 
 func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeCountBeforeRestart,
 	maxTopologyStableCountBeforeRestart, maxWorkersForCheckpointing int,
