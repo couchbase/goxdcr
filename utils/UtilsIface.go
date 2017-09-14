@@ -24,7 +24,7 @@ type UtilsIface interface {
 	GetHostName(hostAddr string) string
 	GetPortNumber(hostAddr string) (uint16, error)
 	GetMapFromExpvarMap(expvarMap *expvar.Map) map[string]interface{}
-	ParseHighSeqnoStat(vbnos []uint16, stats_map map[string]string, highseqno_map map[uint16]uint64)
+	ParseHighSeqnoStat(vbnos []uint16, stats_map map[string]string, highseqno_map map[uint16]uint64) error
 	ParseHighSeqnoAndVBUuidFromStats(vbnos []uint16, stats_map map[string]string, high_seqno_and_vbuuid_map map[uint16][]uint64)
 	EncodeMapIntoByteArray(data map[string]interface{}) ([]byte, error)
 	UrlForLog(urlStr string) string

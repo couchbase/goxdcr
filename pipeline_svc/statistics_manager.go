@@ -122,8 +122,7 @@ var StatsToClearForPausedReplications = [13]string{SIZE_REP_QUEUE_METRIC, DOCS_R
 	RATE_REPLICATED_METRIC, BANDWIDTH_USAGE_METRIC, THROTTLE_LATENCY_METRIC}
 
 // keys for metrics in overview
-// note that DOCS_CHECKED_METRIC is not included since it needs special treatment
-var OverviewMetricKeys = []string{DOCS_WRITTEN_METRIC, EXPIRY_DOCS_WRITTEN_METRIC, DELETION_DOCS_WRITTEN_METRIC,
+var OverviewMetricKeys = []string{CHANGES_LEFT_METRIC, DOCS_CHECKED_METRIC, DOCS_WRITTEN_METRIC, EXPIRY_DOCS_WRITTEN_METRIC, DELETION_DOCS_WRITTEN_METRIC,
 	SET_DOCS_WRITTEN_METRIC, DOCS_PROCESSED_METRIC, DOCS_FAILED_CR_SOURCE_METRIC, EXPIRY_FAILED_CR_SOURCE_METRIC,
 	DELETION_FAILED_CR_SOURCE_METRIC, SET_FAILED_CR_SOURCE_METRIC, DATA_REPLICATED_METRIC, DOCS_FILTERED_METRIC,
 	EXPIRY_FILTERED_METRIC, DELETION_FILTERED_METRIC, SET_FILTERED_METRIC, NUM_CHECKPOINTS_METRIC, NUM_FAILEDCKPTS_METRIC,
@@ -269,8 +268,12 @@ func getHighSeqNos(serverAddr string, vbnos []uint16, conn mcc.ClientIface, stat
 		return nil, err
 	}
 
-	utils.ParseHighSeqnoStat(vbnos, stats_map, highseqno_map)
-	return highseqno_map, err
+	err = utils.ParseHighSeqnoStat(vbnos, stats_map, highseqno_map)
+	if err != nil {
+		return nil, err
+	} else {
+		return highseqno_map, nil
+	}
 }
 
 //updateStats runs until it get finish signal
@@ -422,6 +425,11 @@ func (stats_mgr *StatisticsManager) processRawStats() error {
 	if docs_checked_old_var != nil {
 		docs_checked_old = docs_checked_old_var.(metrics.Counter).Count()
 	}
+	changes_left_old_var := oldSample.Get(CHANGES_LEFT_METRIC)
+	var changes_left_old int64 = 0
+	if changes_left_old_var != nil {
+		changes_left_old = changes_left_old_var.(metrics.Counter).Count()
+	}
 
 	stats_mgr.initOverviewRegistry()
 
@@ -500,7 +508,7 @@ func (stats_mgr *StatisticsManager) processRawStats() error {
 	})
 
 	//calculate additional metrics
-	err = stats_mgr.processCalculatedStats(map_for_overview, docs_written_old, docs_received_dcp_old,
+	err = stats_mgr.processCalculatedStats(map_for_overview, changes_left_old, docs_written_old, docs_received_dcp_old,
 		docs_opt_repd_old, data_replicated_old, docs_checked_old)
 	if err != nil {
 		return err
@@ -511,8 +519,8 @@ func (stats_mgr *StatisticsManager) processRawStats() error {
 	return nil
 }
 
-func (stats_mgr *StatisticsManager) processCalculatedStats(overview_expvar_map *expvar.Map, docs_written_old,
-	docs_received_dcp_old, docs_opt_repd_old, data_replicated_old, docs_checked_old int64) error {
+func (stats_mgr *StatisticsManager) processCalculatedStats(overview_expvar_map *expvar.Map, changes_left_old,
+	docs_written_old, docs_received_dcp_old, docs_opt_repd_old, data_replicated_old, docs_checked_old int64) error {
 
 	//calculate docs_processed
 	docs_processed := stats_mgr.calculateDocsProcessed()
@@ -522,14 +530,15 @@ func (stats_mgr *StatisticsManager) processCalculatedStats(overview_expvar_map *
 
 	//calculate changes_left
 	changes_left_val, err := stats_mgr.calculateChangesLeft(docs_processed)
-	changes_left_var := new(expvar.Int)
-	if err == nil {
-		changes_left_var.Set(changes_left_val)
-	} else {
-		stats_mgr.logger.Errorf("%v Failed to calculate changes_left - %v\n", stats_mgr.pipeline.InstanceId(), err)
-		changes_left_var.Set(-1)
+	if err != nil {
+		stats_mgr.logger.Warnf("%v Failed to calculate changes_left. Use old changes_left. err=%v\n", stats_mgr.pipeline.InstanceId(), err)
+		changes_left_val = changes_left_old
 	}
+	changes_left_var := new(expvar.Int)
+	changes_left_var.Set(changes_left_val)
 	overview_expvar_map.Set(CHANGES_LEFT_METRIC, changes_left_var)
+	// also update the value in overview registry since we need it at the next stats computation time
+	setCounter(stats_mgr.getOverviewRegistry().Get(CHANGES_LEFT_METRIC).(metrics.Counter), int(changes_left_val))
 
 	//calculate rate_replication
 	docs_written := stats_mgr.getOverviewRegistry().Get(DOCS_WRITTEN_METRIC).(metrics.Counter).Count()
@@ -693,9 +702,7 @@ func (stats_mgr *StatisticsManager) composeUserAgent() {
 
 func (stats_mgr *StatisticsManager) initOverviewRegistry() {
 	if overview_registry, ok := stats_mgr.registries[OVERVIEW_METRICS_KEY]; ok {
-		// reset all counters except that for DOCS_CHECKED_METRIC to 0
-		// counter for DOCS_CHECKED_METRIC needs to be preserved for the computation of docs_checked_rate,
-		// which is not included in OverviewMetricKeys
+		// reset all counters to 0
 		for _, overview_metric_key := range OverviewMetricKeys {
 			overview_registry.Get(overview_metric_key).(metrics.Counter).Clear()
 		}
@@ -704,12 +711,15 @@ func (stats_mgr *StatisticsManager) initOverviewRegistry() {
 		overview_registry = metrics.NewRegistry()
 		stats_mgr.registries[OVERVIEW_METRICS_KEY] = overview_registry
 		for _, overview_metric_key := range OverviewMetricKeys {
-			overview_registry.Register(overview_metric_key, metrics.NewCounter())
+			if overview_metric_key == DOCS_CHECKED_METRIC {
+				// use a negative value to indicate that an old value of docs_checked does not exist
+				docs_checked_counter := metrics.NewCounter()
+				setCounter(docs_checked_counter, -1)
+				overview_registry.Register(DOCS_CHECKED_METRIC, docs_checked_counter)
+			} else {
+				overview_registry.Register(overview_metric_key, metrics.NewCounter())
+			}
 		}
-		// use a negative value to indicate that an old value does not exist
-		docs_checked_counter := metrics.NewCounter()
-		setCounter(docs_checked_counter, -1)
-		overview_registry.Register(DOCS_CHECKED_METRIC, docs_checked_counter)
 	}
 }
 
@@ -1320,6 +1330,10 @@ func updateStatsForReplication(repl_status *pipeline_pkg.ReplicationStatus, cur_
 			return err
 		}
 		docs_processed = int64(docs_processed_uint64)
+		docs_processed_var := new(expvar.Int)
+		docs_processed_var.Set(docs_processed)
+		overview_stats.Set(DOCS_PROCESSED_METRIC, docs_processed_var)
+
 		repl_status.SetVbList(cur_vb_list)
 	}
 

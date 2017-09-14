@@ -890,29 +890,6 @@ func (ckmgr *CheckpointManager) getSourceBucket() (*couchbase.Bucket, error) {
 	return bucket, nil
 }
 
-func (ckmgr *CheckpointManager) getHighSeqno() (map[uint16]uint64, error) {
-
-	bucket, err := ckmgr.getSourceBucket()
-	if err != nil {
-		return nil, err
-	}
-	defer bucket.Close()
-
-	//GetStats(which string) map[string]map[string]string
-	statsMap := bucket.GetStats(base.VBUCKET_SEQNO_STAT_NAME)
-
-	vb_highseqno_map := make(map[uint16]uint64)
-	for serverAddr, vbnos := range ckmgr.active_vbs {
-		statsMapForServer, ok := statsMap[serverAddr]
-		if !ok {
-			return nil, errors.New(fmt.Sprintf("Failed to find highseqno stats in statsMap returned for server=%v", serverAddr))
-		}
-		ckmgr.utils.ParseHighSeqnoStat(vbnos, statsMapForServer, vb_highseqno_map)
-	}
-
-	return vb_highseqno_map, nil
-}
-
 func (ckmgr *CheckpointManager) retrieveCkptDoc(vbno uint16) (*metadata.CheckpointsDoc, error) {
 	ckmgr.logger.Infof("%v retrieve chkpt doc for vb=%v\n", ckmgr.pipeline.Topic(), vbno)
 	return ckmgr.checkpoints_svc.CheckpointsDoc(ckmgr.pipeline.Topic(), vbno)

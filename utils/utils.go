@@ -202,21 +202,24 @@ func (u *Utilities) GetMapFromExpvarMap(expvarMap *expvar.Map) map[string]interf
 }
 
 //convert the format returned by go-memcached StatMap - map[string]string to map[uint16]uint64
-func (u *Utilities) ParseHighSeqnoStat(vbnos []uint16, stats_map map[string]string, highseqno_map map[uint16]uint64) {
+func (u *Utilities) ParseHighSeqnoStat(vbnos []uint16, stats_map map[string]string, highseqno_map map[uint16]uint64) error {
+	var err error
 	for _, vbno := range vbnos {
 		stats_key := fmt.Sprintf(base.VBUCKET_HIGH_SEQNO_STAT_KEY_FORMAT, vbno)
 		highseqnostr, ok := stats_map[stats_key]
 		if !ok || highseqnostr == "" {
-			u.logger_utils.Warnf("Can't find high seqno for vbno=%v in stats map. Source topology may have changed.\n", vbno)
-			continue
+			err = fmt.Errorf("Can't find high seqno for vbno=%v in stats map. Source topology may have changed.\n", vbno)
+			return err
 		}
 		highseqno, err := strconv.ParseUint(highseqnostr, 10, 64)
 		if err != nil {
 			u.logger_utils.Warnf("high seqno for vbno=%v in stats map is not a valid uint64. high seqno=%v\n", vbno, highseqnostr)
-			continue
+			err = fmt.Errorf("high seqno for vbno=%v in stats map is not a valid uint64. high seqno=%v\n", vbno, highseqnostr)
+			return err
 		}
 		highseqno_map[vbno] = highseqno
 	}
+	return nil
 }
 
 //convert the format returned by go-memcached StatMap - map[string]string to map[uint16][]uint64

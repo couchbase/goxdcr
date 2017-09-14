@@ -1296,8 +1296,8 @@ func (_m *UtilsIface) ParseHighSeqnoAndVBUuidFromStats(vbnos []uint16, stats_map
 }
 
 // ParseHighSeqnoStat provides a mock function with given fields: vbnos, stats_map, highseqno_map
-func (_m *UtilsIface) ParseHighSeqnoStat(vbnos []uint16, stats_map map[string]string, highseqno_map map[uint16]uint64) {
-	_m.Called(vbnos, stats_map, highseqno_map)
+func (_m *UtilsIface) ParseHighSeqnoStat(vbnos []uint16, stats_map map[string]string, highseqno_map map[uint16]uint64) error {
+	return _m.Called(vbnos, stats_map, highseqno_map)
 }
 
 // QueryRestApi provides a mock function with given fields: baseURL, path, preservePathEncoding, httpCommand, contentType, body, timeout, out, logger
