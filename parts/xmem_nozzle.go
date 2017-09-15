@@ -762,10 +762,11 @@ type XmemNozzle struct {
 
 	dataObj_recycler base.DataObjRecycler
 
-	topic                 string
-	last_ready_batch      int32
-	last_ten_batches_size unsafe.Pointer // *[]uint32
-	last_batch_id         int32
+	topic                      string
+	last_ready_batch           int32
+	last_ten_batches_size      []uint32
+	last_ten_batches_size_lock sync.RWMutex
+	last_batch_id              int32
 
 	// whether lww conflict resolution mode has been enabled
 	source_cr_mode base.ConflictResolutionMode
@@ -832,8 +833,7 @@ func NewXmemNozzle(id string,
 		utils:               utilsIn,
 	}
 
-	initial_last_ten_batches_size := []uint32{0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
-	atomic.StorePointer(&xmem.last_ten_batches_size, unsafe.Pointer(&initial_last_ten_batches_size))
+	xmem.last_ten_batches_size = []uint32{0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
 
 	//set conflict resolver
 	xmem.conflict_resolver = resolveConflict
@@ -2673,17 +2673,32 @@ func (xmem *XmemNozzle) recycleDataObj(req *base.WrappedMCRequest) {
 	}
 }
 
-func (xmem *XmemNozzle) getLastTenBatchSize() []uint32 {
-	return *((*[]uint32)(atomic.LoadPointer(&xmem.last_ten_batches_size)))
+func (xmem *XmemNozzle) getLastTenBatchSize() string {
+	xmem.last_ten_batches_size_lock.RLock()
+	defer xmem.last_ten_batches_size_lock.RUnlock()
+	var buffer bytes.Buffer
+	buffer.WriteByte('[')
+	first := true
+	for _, batch_size := range xmem.last_ten_batches_size {
+		if !first {
+			buffer.WriteByte(',')
+		} else {
+			first = false
+		}
+		buffer.WriteString(fmt.Sprintf("%v", batch_size))
+	}
+	buffer.WriteByte(']')
+	return buffer.String()
 }
 
 func (xmem *XmemNozzle) recordBatchSize(batchSize uint32) {
-	last_ten_batches_size := xmem.getLastTenBatchSize()
+	xmem.last_ten_batches_size_lock.Lock()
+	defer xmem.last_ten_batches_size_lock.Unlock()
+
 	for i := 9; i > 0; i-- {
-		last_ten_batches_size[i] = last_ten_batches_size[i-1]
+		xmem.last_ten_batches_size[i] = xmem.last_ten_batches_size[i-1]
 	}
-	last_ten_batches_size[0] = batchSize
-	atomic.StorePointer(&xmem.last_ten_batches_size, unsafe.Pointer(&last_ten_batches_size))
+	xmem.last_ten_batches_size[0] = batchSize
 }
 
 func getClientWithRetry(xmem_id string, pool base.ConnPool, finish_ch chan bool, logger *log.CommonLogger) (*mcc.Client, error) {
