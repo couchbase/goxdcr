@@ -925,15 +925,6 @@ func (xmem *XmemNozzle) Stop() error {
 
 	xmem.Logger().Debugf("%v processed %v items\n", xmem.Id(), atomic.LoadUint32(&xmem.counter_sent))
 
-	//close data channel
-	if xmem.dataChan != nil {
-		close(xmem.dataChan)
-	}
-
-	if xmem.batches_ready_queue != nil {
-		close(xmem.batches_ready_queue)
-	}
-
 	err = xmem.Stop_server()
 	if err != nil {
 		return err
@@ -952,6 +943,7 @@ func (xmem *XmemNozzle) Stop() error {
 func (xmem *XmemNozzle) batchReady() error {
 	defer func() {
 		if r := recover(); r != nil {
+			xmem.Logger().Errorf("%v recovered from panic in batchReady. arg=%v\n", xmem.Id(), r)
 			if xmem.validateRunningState() == nil {
 				// report error only when xmem is still in running state
 				xmem.handleGeneralError(errors.New(fmt.Sprintf("%v", r)))
@@ -969,6 +961,9 @@ func (xmem *XmemNozzle) batchReady() error {
 		case xmem.batches_ready_queue <- xmem.batch:
 			xmem.Logger().Debugf("%v There are %d batches in ready queue\n", xmem.Id(), len(xmem.batches_ready_queue))
 			xmem.initNewBatch()
+		// provides an alterntive exit path when xmem stops
+		case <-xmem.finish_ch:
+			return PartStoppedError
 		}
 	}
 	return nil
@@ -977,7 +972,7 @@ func (xmem *XmemNozzle) batchReady() error {
 func (xmem *XmemNozzle) Receive(data interface{}) error {
 	defer func() {
 		if r := recover(); r != nil {
-			xmem.Logger().Errorf("%v recovered from %v", xmem.Id(), r)
+			xmem.Logger().Errorf("%v recovered from panic in Receive. arg=%v", xmem.Id(), r)
 			xmem.handleGeneralError(errors.New(fmt.Sprintf("%v", r)))
 		}
 	}()
@@ -998,21 +993,26 @@ func (xmem *XmemNozzle) Receive(data interface{}) error {
 
 	}
 
-	xmem.accumuBatch(request)
-
-	return nil
+	return xmem.accumuBatch(request)
 }
 
-func (xmem *XmemNozzle) accumuBatch(request *base.WrappedMCRequest) {
+func (xmem *XmemNozzle) accumuBatch(request *base.WrappedMCRequest) error {
 
 	if string(request.Req.Key) == "" {
-		panic(fmt.Sprintf("%v accumuBatch received request with Empty key, req.UniqueKey=%v\n", xmem.Id(), request.UniqueKey))
+		err := fmt.Errorf("%v accumuBatch received request with Empty key, req.UniqueKey=%v\n", xmem.Id(), request.UniqueKey)
+		xmem.Logger().Errorf("%v %v", xmem.Id(), err)
+		xmem.handleGeneralError(errors.New(fmt.Sprintf("%v", err)))
+		return err
 	}
 
 	xmem.batch_lock <- true
 	defer func() { <-xmem.batch_lock }()
 
-	xmem.writeToDataChan(request)
+	err := xmem.writeToDataChan(request)
+	if err != nil {
+		return err
+	}
+
 	atomic.AddUint32(&xmem.counter_received, 1)
 
 	curCount, _, isFull := xmem.batch.accumuBatch(request, xmem.optimisticRep)
@@ -1020,8 +1020,12 @@ func (xmem *XmemNozzle) accumuBatch(request *base.WrappedMCRequest) {
 		atomic.StoreUint32(&xmem.cur_batch_count, curCount)
 	}
 	if isFull {
-		xmem.batchReady()
+		err = xmem.batchReady()
+		if err != nil {
+			return err
+		}
 	}
+	return nil
 }
 
 // caller of this method needs to be very careful to avoid deadlock
@@ -1065,12 +1069,7 @@ func (xmem *XmemNozzle) processData_sendbatch(finch chan bool, waitGrp *sync.Wai
 		select {
 		case <-finch:
 			goto done
-		case batch, ok := <-xmem.batches_ready_queue:
-			if !ok {
-				xmem.Logger().Infof("%v batches_ready_queue closed. Exiting processData_sendBatch.", xmem.Id())
-				goto done
-			}
-
+		case batch := <-xmem.batches_ready_queue:
 			if xmem.validateRunningState() != nil {
 				xmem.Logger().Infof("%v has stopped.", xmem.Id())
 				goto done
@@ -1102,8 +1101,15 @@ func (xmem *XmemNozzle) processData_sendbatch(finch chan bool, waitGrp *sync.Wai
 			if len(xmem.batches_ready_queue) == 0 {
 				select {
 				case xmem.batch_lock <- true:
-					xmem.batchReady()
+					err = xmem.batchReady()
 					<-xmem.batch_lock
+					if err != nil {
+						if err == PartStoppedError {
+							goto done
+						} else {
+							xmem.handleGeneralError(err)
+						}
+					}
 				default:
 				}
 			}
@@ -2634,12 +2640,20 @@ func (xmem *XmemNozzle) dataChanControl() {
 	}
 }
 
-func (xmem *XmemNozzle) writeToDataChan(item *base.WrappedMCRequest) {
+func (xmem *XmemNozzle) writeToDataChan(item *base.WrappedMCRequest) error {
 	select {
 	case <-xmem.dataChan_control:
-		xmem.dataChan <- item
-		atomic.AddInt32(&xmem.bytes_in_dataChan, int32(item.Req.Size()))
-		xmem.dataChanControl()
+		select {
+		case xmem.dataChan <- item:
+			atomic.AddInt32(&xmem.bytes_in_dataChan, int32(item.Req.Size()))
+			xmem.dataChanControl()
+			return nil
+		// provides an alternative exit path when xmem stops
+		case <-xmem.finish_ch:
+			return PartStoppedError
+		}
+	case <-xmem.finish_ch:
+		return PartStoppedError
 	}
 }
 
@@ -2647,16 +2661,14 @@ func (xmem *XmemNozzle) writeToDataChan(item *base.WrappedMCRequest) {
  * Gets a MC request from the data channel, and tickles data channel controller
  */
 func (xmem *XmemNozzle) readFromDataChan() (*base.WrappedMCRequest, error) {
-	item, ok := <-xmem.dataChan
-
-	if !ok {
-		//data channel has been closed, part must have been stopped
+	select {
+	case item := <-xmem.dataChan:
+		atomic.AddInt32(&xmem.bytes_in_dataChan, int32(0-item.Req.Size()))
+		xmem.dataChanControl()
+		return item, nil
+	case <-xmem.finish_ch:
 		return nil, PartStoppedError
 	}
-
-	atomic.AddInt32(&xmem.bytes_in_dataChan, int32(0-item.Req.Size()))
-	xmem.dataChanControl()
-	return item, nil
 }
 
 func (xmem *XmemNozzle) bytesInDataChan() int {
