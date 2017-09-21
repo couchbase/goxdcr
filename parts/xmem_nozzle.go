@@ -103,7 +103,6 @@ type bufferedMCRequest struct {
 	req          *base.WrappedMCRequest
 	sent_time    *time.Time
 	num_of_retry int
-	err          error
 	timedout     bool
 	reservation  int
 	lock         sync.RWMutex
@@ -113,7 +112,6 @@ func newBufferedMCRequest() *bufferedMCRequest {
 	return &bufferedMCRequest{req: nil,
 		sent_time:    nil,
 		num_of_retry: 0,
-		err:          nil,
 		timedout:     false,
 		reservation:  UninitializedReseverationNumber,
 		lock:         sync.RWMutex{}}
@@ -265,7 +263,7 @@ func (buf *requestBuffer) slotWithSentTime(pos uint16) (*base.WrappedMCRequest, 
 	return req.req, req.sent_time, nil
 }
 
-//modSlot allow caller to do book-keeping on the slot, like updating num_of_retry, err
+//modSlot allow caller to do book-keeping on the slot, like updating num_of_retry
 //@pos - the position of the slot
 //@modFunc - the callback function which is going to update the slot
 func (buf *requestBuffer) modSlot(pos uint16, modFunc func(req *bufferedMCRequest, p uint16) (bool, error)) (bool, error) {
@@ -276,18 +274,7 @@ func (buf *requestBuffer) modSlot(pos uint16, modFunc func(req *bufferedMCReques
 	}
 
 	req := buf.slots[pos]
-
-	req.lock.Lock()
-	defer req.lock.Unlock()
-
-	var modified bool
-
-	if req.req != nil {
-		modified, err = modFunc(req, pos)
-	} else {
-		modified = false
-	}
-	return modified, err
+	return modFunc(req, pos)
 }
 
 //evictSlot allow caller to empty the slot
@@ -1656,16 +1643,9 @@ func (xmem *XmemNozzle) composeRequestForGetMeta(key string, vb uint16, opaque u
 	return req
 }
 
-func (xmem *XmemNozzle) sendSingleSetMeta(adjustRequest bool, item *base.WrappedMCRequest, index uint16, numOfRetry int) error {
+func (xmem *XmemNozzle) sendSingleSetMeta(bytesList [][]byte, numOfRetry int) error {
 	var err error
 	if xmem.client_for_setMeta != nil {
-		if adjustRequest {
-			xmem.buf.adjustRequest(item, index)
-		}
-		bytes := item.Req.Bytes()
-		bytesList := make([][]byte, 1)
-		bytesList[0] = bytes
-
 		for j := 0; j < numOfRetry; j++ {
 			err, rev := xmem.writeToClient(xmem.client_for_setMeta, bytesList, true)
 			if err == nil {
@@ -1677,6 +1657,7 @@ func (xmem *XmemNozzle) sendSingleSetMeta(adjustRequest bool, item *base.Wrapped
 		return err
 
 	}
+
 	return nil
 }
 
@@ -2159,7 +2140,7 @@ func (xmem *XmemNozzle) checkAndRepairBufferMonitor(finch chan bool, waitGrp *sy
 				goto done
 			}
 			size := xmem.buf.bufferSize()
-			timeoutCheckFunc := xmem.checkTimeout
+			timeoutCheckFunc := xmem.resendIfTimeout
 			for i := 0; i < int(size); i++ {
 				_, err := xmem.buf.modSlot(uint16(i), timeoutCheckFunc)
 				if err != nil {
@@ -2174,28 +2155,70 @@ done:
 	xmem.Logger().Infof("%v checking routine exits", xmem.Id())
 }
 
-func (xmem *XmemNozzle) checkTimeout(req *bufferedMCRequest, pos uint16) (bool, error) {
-	if req.timedout {
-		return false, nil
+func (xmem *XmemNozzle) resendIfTimeout(req *bufferedMCRequest, pos uint16) (bool, error) {
+	req.lock.Lock()
+
+	var modified bool
+	var err error
+	// perform op on req only when
+	// 1. there is a valid WrappedMCRequest associated with req
+	// and 2. req has not timed out, i.e., has not reached max retry limit
+	if req.req != nil && !req.timedout {
+		if req.num_of_retry > xmem.config.maxRetry {
+			req.timedout = true
+			err = errors.New(fmt.Sprintf("%v Failed to resend document %s, has tried to resend it %v, maximum retry %v reached",
+				xmem.Id(), req.req.Req.Key, req.num_of_retry, xmem.config.maxRetry))
+			xmem.Logger().Error(err.Error())
+
+			// release lock before the expensive repairConn call
+			req.lock.Unlock()
+
+			xmem.repairConn(xmem.client_for_setMeta, err.Error(), xmem.client_for_setMeta.repairCount())
+			return true, err
+		}
+
+		respWaitTime := time.Since(*req.sent_time)
+		if respWaitTime > xmem.timeoutDuration(req.num_of_retry) {
+			// resend the mutation
+
+			bytesList := getBytesListFromReq(req)
+			old_sequence := xmem.buf.sequences[pos]
+
+			// release the lock on req before calling sendSingleSetMeta, which may block
+			req.lock.Unlock()
+
+			err = xmem.sendSingleSetMeta(bytesList, xmem.config.maxRetry)
+
+			if err == nil {
+				// lock req again since it needs to be accessed and possibly modified
+				req.lock.Lock()
+				// update req only if it contains the same WrappedMCRequest as before the sendSingleSetMeta op
+				// i.e., when the corresponding sequence number of the slot has not changed
+				// i.e., when evictSlot and cancelReservation have not been called on the slot
+				if req.req != nil && xmem.buf.sequences[pos] == old_sequence {
+					now := time.Now()
+					req.sent_time = &now
+					req.num_of_retry += 1
+					modified = true
+				}
+				req.lock.Unlock()
+			}
+			return modified, err
+		}
 	}
 
-	if req.num_of_retry > xmem.config.maxRetry {
-		req.timedout = true
-		err := errors.New(fmt.Sprintf("%v Failed to resend document %s, has tried to resend it %v, maximum retry %v reached",
-			xmem.Id(), req.req.Req.Key, req.num_of_retry, xmem.config.maxRetry))
-		xmem.Logger().Error(err.Error())
-
-		xmem.repairConn(xmem.client_for_setMeta, err.Error(), xmem.client_for_setMeta.repairCount())
-		return false, err
-	}
-
-	respWaitTime := time.Since(*req.sent_time)
-	if respWaitTime > xmem.timeoutDuration(req.num_of_retry) {
-		modified, err := xmem.resend(req, pos)
-
-		return modified, err
-	}
+	req.lock.Unlock()
 	return false, nil
+}
+
+func getBytesListFromReq(req *bufferedMCRequest) [][]byte {
+	if req.req == nil || req.req.Req == nil {
+		// should not happen. just in case
+		return nil
+	}
+	bytesList := make([][]byte, 1)
+	bytesList[0] = req.req.Req.Bytes()
+	return bytesList
 }
 
 func (xmem *XmemNozzle) timeoutDuration(numofRetry int) time.Duration {
@@ -2210,46 +2233,48 @@ func (xmem *XmemNozzle) timeoutDuration(numofRetry int) time.Duration {
 	return duration
 }
 
-func (xmem *XmemNozzle) resend(req *bufferedMCRequest, pos uint16) (bool, error) {
-	err := xmem.sendSingleSetMeta(false, req.req, pos, xmem.config.maxRetry)
-
-	if err != nil {
-		req.err = err
-
-	} else {
-		now := time.Now()
-		req.sent_time = &now
-		req.num_of_retry = req.num_of_retry + 1
-	}
-
-	return true, err
-}
-
 func (xmem *XmemNozzle) resendWithReset(req *bufferedMCRequest, pos uint16) (bool, error) {
-	err := xmem.sendSingleSetMeta(false, req.req, pos, xmem.config.maxRetry)
+	req.lock.Lock()
 
-	if err != nil {
-		req.err = err
+	var modified bool
+	var err error
+	// check that there is a valid WrappedMCRequest associated with req
+	if req.req != nil {
+		bytesList := getBytesListFromReq(req)
+		old_sequence := xmem.buf.sequences[pos]
+		old_num_of_retry := req.num_of_retry
 
-	} else {
-		//reset to 0
+		// always reset num_of_retry to 0
 		req.num_of_retry = 0
+		if old_num_of_retry != 0 {
+			modified = true
+		}
+
+		// release the lock on req before calling sendSingleSetMeta, which may block
+		req.lock.Unlock()
+
+		err = xmem.sendSingleSetMeta(bytesList, xmem.config.maxRetry)
+
+		if err == nil {
+			// lock req again since it needs to be accessed and possibly modified
+			req.lock.Lock()
+			// update req only if it contains the same WrappedMCRequest as before the sendSingleSetMeta op
+			// i.e., when the corresponding sequence number of the slot has not changed
+			// i.e., when evictSlot and cancelReservation have not been called on the slot
+			if req.req != nil && xmem.buf.sequences[pos] == old_sequence {
+				now := time.Now()
+				req.sent_time = &now
+				modified = true
+				// keep req.num_of_retry as 0 since the sendSingleSetMeta op counts as the first send
+				// and not as a retry
+			}
+			req.lock.Unlock()
+		}
+		return modified, err
+	} else {
+		req.lock.Unlock()
+		return false, nil
 	}
-
-	return true, err
-
-}
-
-func (xmem *XmemNozzle) resendForNewConn(req *bufferedMCRequest, pos uint16) (bool, error) {
-	err := xmem.sendSingleSetMeta(false, req.req, pos, xmem.config.maxRetry)
-	if err != nil {
-		req.err = err
-		//report error
-		xmem.handleGeneralError(err)
-		return false, err
-	}
-	req.num_of_retry = 0
-	return true, err
 }
 
 func (xmem *XmemNozzle) getPosFromOpaque(opaque uint32) uint16 {
@@ -2607,7 +2632,7 @@ func (xmem *XmemNozzle) onSetMetaConnRepaired() error {
 	size := xmem.buf.bufferSize()
 	count := 0
 	for i := 0; i < int(size); i++ {
-		sent, err := xmem.buf.modSlot(uint16(i), xmem.resendForNewConn)
+		sent, err := xmem.buf.modSlot(uint16(i), xmem.resendWithReset)
 		if err != nil {
 			return err
 		}
