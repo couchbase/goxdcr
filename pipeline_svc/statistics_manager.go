@@ -1217,12 +1217,11 @@ func UpdateStats(cluster_info_svc service_def.ClusterInfoSvc, xdcr_topology_svc 
 			// overview stats may be nil the first time GetStats is called on a paused replication that has never been run in the current goxdcr session
 			// or it may be nil when the underying replication is not paused but has not completed startup process
 			// construct it
-			overview_stats, err := constructStatsForReplication(spec, cur_kv_vb_map, checkpoints_svc, kv_mem_clients, logger, utils)
+			err := constructStatsForReplication(repl_status, spec, cur_kv_vb_map, checkpoints_svc, kv_mem_clients, logger, utils)
 			if err != nil {
 				logger.Errorf("Error constructing stats for paused replication %v. err=%v", repl_id, err)
 				continue
 			}
-			repl_status.SetOverviewStats(overview_stats)
 		} else {
 			if repl_status.RuntimeStatus(true) != pipeline_pkg.Replicating {
 				err := updateStatsForReplication(repl_status, cur_kv_vb_map, checkpoints_svc, kv_mem_clients, logger, utils)
@@ -1236,31 +1235,38 @@ func UpdateStats(cluster_info_svc service_def.ClusterInfoSvc, xdcr_topology_svc 
 }
 
 // compute and set changes_left and docs_processed stats. set other stats to 0
-func constructStatsForReplication(spec *metadata.ReplicationSpecification, cur_kv_vb_map map[string][]uint16,
+func constructStatsForReplication(repl_status *pipeline_pkg.ReplicationStatus, spec *metadata.ReplicationSpecification, cur_kv_vb_map map[string][]uint16,
 	checkpoints_svc service_def.CheckpointsService, kv_mem_clients map[string]mcc.ClientIface,
-	logger *log.CommonLogger, utils utilities.UtilsIface) (*expvar.Map, error) {
+	logger *log.CommonLogger, utils utilities.UtilsIface) error {
 	cur_vb_list := simple_utils.GetVbListFromKvVbMap(cur_kv_vb_map)
 	docs_processed, err := getDocsProcessedForReplication(spec.Id, cur_vb_list, checkpoints_svc, logger)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	total_changes, err := calculateTotalChanges(cur_kv_vb_map, kv_mem_clients, spec.SourceBucketName, UserAgentPausedReplication, nil, logger, utils)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	changes_left := total_changes - int64(docs_processed)
 
 	logger.Infof("Calculating stats for never run replication %v. kv_vb_map=%v, total_docs=%v, docs_processed=%v, changes_left=%v\n", spec.Id, cur_kv_vb_map, total_changes, docs_processed, changes_left)
 
-	overview_map := new(expvar.Map).Init()
-	overview_map.Add(DOCS_PROCESSED_METRIC, int64(docs_processed))
-	overview_map.Add(CHANGES_LEFT_METRIC, changes_left)
+	overview_stats := new(expvar.Map).Init()
+	overview_stats.Add(DOCS_PROCESSED_METRIC, int64(docs_processed))
+	overview_stats.Add(CHANGES_LEFT_METRIC, changes_left)
 	for _, statsToInitialize := range StatsToInitializeForPausedReplications {
-		overview_map.Add(statsToInitialize, 0)
+		overview_stats.Add(statsToInitialize, 0)
 	}
-	return overview_map, nil
+
+	repl_status.SetOverviewStats(overview_stats)
+
+	// set vb list to establish the base for future stats update,
+	// so that we can avoid re-computation when vb list does not change
+	repl_status.SetVbList(cur_vb_list)
+
+	return nil
 }
 
 func calculateTotalChanges(kv_vb_map map[string][]uint16, kv_mem_clients map[string]mcc.ClientIface,
