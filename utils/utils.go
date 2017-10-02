@@ -626,8 +626,11 @@ func GetServerVBucketsMap(connStr, bucketName string, bucketInfo map[string]inte
 			return nil, fmt.Errorf("Master index is of wrong type. connStr=%v, bucketName=%v, index=%v\n", connStr, bucketName, indexList[0])
 		}
 		indexInt := int(indexFloat)
-		if indexInt < 0 || indexInt >= len(servers) {
+		if indexInt >= len(servers) {
 			return nil, fmt.Errorf("Master index is out of range. connStr=%v, bucketName=%v, index=%v\n", connStr, bucketName, indexInt)
+		} else if indexInt < 0 {
+			// During rebalancing or topology changes, it's possible ns_server may return a -1 for index. Callers should treat it as an transient error.
+			return nil, fmt.Errorf(fmt.Sprintf("%v connStr=%v, bucketName=%v, index=%v\n", base.ErrorMasterNegativeIndex, connStr, bucketName, indexInt))
 		}
 
 		server := servers[indexInt]

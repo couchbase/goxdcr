@@ -149,6 +149,7 @@ var InvalidStateTransitionErrMsg = "Can't move to state %v - %v's current state 
 var InvalidCerfiticateError = errors.New("certificate must be a single, PEM-encoded x509 certificate and nothing more (failed to parse given certificate)")
 var ErrorNoSourceNozzle = errors.New("Invalid configuration. No source nozzle can be constructed since the source kv nodes are not the master for any vbuckets.")
 var ErrorNoTargetNozzle = errors.New("Invalid configuration. No target nozzle can be constructed.")
+var ErrorMasterNegativeIndex = errors.New("Master index is negative. ")
 
 // constants used for remote cluster references
 const (

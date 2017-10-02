@@ -674,6 +674,8 @@ func (rm *replicationManager) createAndPersistReplicationSpec(justValidate bool,
 func bypassUIErrorCodes(errStr string) bool {
 	if errStr == base.ErrorNoSourceNozzle.Error() {
 		return true
+	} else if strings.Contains(errStr, base.ErrorMasterNegativeIndex.Error()) {
+		return true
 	}
 	return false
 }
