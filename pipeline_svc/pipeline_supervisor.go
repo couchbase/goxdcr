@@ -190,7 +190,7 @@ func (pipelineSupervisor *PipelineSupervisor) monitorPipelineHealth() error {
 		case <-health_check_ticker.C:
 			err := simple_utils.ExecWithTimeout(pipelineSupervisor.checkPipelineHealth, 1000*time.Millisecond, pipelineSupervisor.Logger())
 			if err != nil {
-				if _, ok := err.(*simple_utils.ExecutionTimeoutError); ok {
+				if err == base.ExecutionTimeoutError {
 					// ignore timeout error and continue
 					pipelineSupervisor.Logger().Infof("Received timeout error when checking pipeline health. topic=%v\n", pipelineSupervisor.pipeline.Topic())
 				} else {
@@ -346,7 +346,7 @@ func (pipelineSupervisor *PipelineSupervisor) getDcpStats() (map[string]map[stri
 	}
 
 	for _, serverAddr := range nodes {
-		client, err := utils.GetMemcachedClient(serverAddr, bucketName, pipelineSupervisor.kv_mem_clients, pipelineSupervisor.user_agent, pipelineSupervisor.Logger())
+		client, err := utils.GetMemcachedClient(serverAddr, bucketName, pipelineSupervisor.kv_mem_clients, pipelineSupervisor.user_agent, base.KeepAlivePeriod, pipelineSupervisor.Logger())
 		if err != nil {
 			return nil, err
 		}

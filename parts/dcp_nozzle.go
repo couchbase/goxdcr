@@ -177,7 +177,7 @@ func (dcp *DcpNozzle) initialize(settings map[string]interface{}) (err error) {
 	if err != nil {
 		return err
 	}
-	dcp.client, err = base.NewConn(addr, dcp.bucketName, dcp.bucketPassword)
+	dcp.client, err = base.NewConn(addr, dcp.bucketName, dcp.bucketPassword, base.KeepAlivePeriod)
 	if err != nil {
 		return err
 	}

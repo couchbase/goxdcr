@@ -248,6 +248,7 @@ const (
 var MaxVBReps = "max_vbreps"
 
 var InvalidCerfiticateError = errors.New("certificate must be a single, PEM-encoded x509 certificate and nothing more (failed to parse given certificate)")
+var ExecutionTimeoutError = errors.New("Execution timed out")
 
 const (
 	GET_WITH_META    = mc.CommandCode(0xa0)
@@ -338,6 +339,8 @@ var VersionForSANInCertificateSupport = []int{4, 0}
 
 var GoxdcrUserAgentPrefix = "couchbase-goxdcr"
 var GoxdcrUserAgent = ""
+
+var KeepAlivePeriod = 30 * time.Second
 
 // --------------- Constants that are configurable -----------------
 

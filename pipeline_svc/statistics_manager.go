@@ -726,7 +726,7 @@ func (stats_mgr *StatisticsManager) closeConnections() {
 
 func (stats_mgr *StatisticsManager) initConnections() error {
 	for serverAddr, _ := range stats_mgr.active_vbs {
-		conn, err := utils.GetMemcachedConnection(serverAddr, stats_mgr.bucket_name, stats_mgr.user_agent, stats_mgr.logger)
+		conn, err := utils.GetMemcachedConnection(serverAddr, stats_mgr.bucket_name, stats_mgr.user_agent, base.KeepAlivePeriod, stats_mgr.logger)
 		if err != nil {
 			return err
 		}
@@ -1208,7 +1208,7 @@ func calculateTotalChanges(kv_vb_map map[string][]uint16, kv_mem_clients map[str
 	kv_mem_client_error_count map[string]int, sourceBucketName string, user_agent string, logger *log.CommonLogger) (int64, error) {
 	var total_changes uint64 = 0
 	for serverAddr, vbnos := range kv_vb_map {
-		client, err := utils.GetMemcachedClient(serverAddr, sourceBucketName, kv_mem_clients, user_agent, logger)
+		client, err := utils.GetMemcachedClient(serverAddr, sourceBucketName, kv_mem_clients, user_agent, base.KeepAlivePeriod, logger)
 		if err != nil {
 			return 0, err
 		}

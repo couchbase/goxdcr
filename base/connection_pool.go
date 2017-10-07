@@ -216,7 +216,7 @@ func (p *connPool) GetNew() (*mcc.Client, error) {
 }
 
 func (p *connPool) newConn() (*mcc.Client, error) {
-	return NewConn(p.hostName, p.userName, p.password)
+	return NewConn(p.hostName, p.userName, p.password, KeepAlivePeriod)
 }
 func (p *connPool) NewConnFunc() NewConnFunc {
 	return p.newConnFunc
@@ -739,7 +739,7 @@ func (connPoolMgr *connPoolMgr) Close() {
 	connPoolMgr.conn_pools_map = make(map[string]ConnPool)
 }
 
-func NewConn(hostName string, username string, password string) (conn *mcc.Client, err error) {
+func NewConn(hostName string, username string, password string, keepAlivePeriod time.Duration) (conn *mcc.Client, err error) {
 	// connect to host
 	start_time := time.Now()
 	conn, err = mcc.Connect("tcp", hostName)
@@ -761,10 +761,21 @@ func NewConn(hostName string, username string, password string) (conn *mcc.Clien
 	}
 
 	ConnPoolMgr().logger.Debugf("%vs spent on authenticate to %v", time.Since(start_time).Seconds(), hostName)
+
+	if keepAlivePeriod > 0 {
+		conn.SetKeepAliveOptions(keepAlivePeriod)
+	}
+
 	return conn, nil
 }
 
 func MakeTLSConn(ssl_con_str string, certificate []byte, check_server_name bool, logger *log.CommonLogger) (*tls.Conn, *tls.Config, error) {
+	// enforce timeout
+	errChannel := make(chan error, 2)
+	time.AfterFunc(dialer.Timeout, func() {
+		errChannel <- ExecutionTimeoutError
+	})
+
 	caPool := x509.NewCertPool()
 	ok := caPool.AppendCertsFromPEM(certificate)
 	if !ok {
@@ -783,26 +794,55 @@ func MakeTLSConn(ssl_con_str string, certificate []byte, check_server_name bool,
 	tlsConfig := &tls.Config{RootCAs: caPool}
 	tlsConfig.BuildNameToCertificate()
 	tlsConfig.InsecureSkipVerify = true
+	//get host name from ssl_con_str
+	hostname := strings.Split(ssl_con_str, UrlPortNumberDelimiter)[0]
+	tlsConfig.ServerName = hostname
 
-	// Connect to tls
-	conn, err := tls.DialWithDialer(dialer, "tcp", ssl_con_str, tlsConfig)
+	// get tcp connection
+	rawConn, err := dialer.Dial("tcp", ssl_con_str)
 
 	if err != nil {
 		logger.Errorf("Failed to connect to %v, err=%v\n", ssl_con_str, err)
 		return nil, nil, err
 	}
 
-	// Handshake with TLS to get cert
-	err = conn.Handshake()
+	tcpConn, ok := rawConn.(*net.TCPConn)
+	if !ok {
+		// should never get here
+		rawConn.Close()
+		logger.Errorf("Failed to get tcp connection when connecting to %v\n", ssl_con_str)
+		return nil, nil, err
+	}
+
+	// always set keep alive
+	err = tcpConn.SetKeepAlive(true)
+	if err == nil {
+		err = tcpConn.SetKeepAlivePeriod(KeepAlivePeriod)
+	}
+	if err != nil {
+		tcpConn.Close()
+		logger.Errorf("Failed to set keep alive options when connecting to %v. err=%v\n", ssl_con_str, err)
+		return nil, nil, err
+	}
+
+	// wrap as tls connection
+	tlsConn := tls.Client(tcpConn, tlsConfig)
+
+	// spawn new routine to enforce timeout
+	go func() {
+		errChannel <- tlsConn.Handshake()
+	}()
+
+	err = <-errChannel
 
 	if err != nil {
+		tlsConn.Close()
 		logger.Errorf("TLS handshake failed when connecting to %v, err=%v\n", ssl_con_str, err)
-		conn.Close()
 		return nil, nil, err
 	}
 
 	if cert_remote.IsCA {
-		connState := conn.ConnectionState()
+		connState := tlsConn.ConnectionState()
 		peer_certs := connState.PeerCertificates
 
 		opts := x509.VerifyOptions{
@@ -812,8 +852,8 @@ func MakeTLSConn(ssl_con_str string, certificate []byte, check_server_name bool,
 		}
 
 		if check_server_name {
-			// need to check server name. get sever name from ssl_con_str
-			opts.DNSName = strings.Split(ssl_con_str, UrlPortNumberDelimiter)[0]
+			// need to check server name.
+			opts.DNSName = hostname
 		} else {
 			logger.Debug("remote peer is old and its certificate doesn't have IP SANs, skip verifying ServerName")
 		}
@@ -827,11 +867,12 @@ func MakeTLSConn(ssl_con_str string, certificate []byte, check_server_name bool,
 		_, err = peer_certs[0].Verify(opts)
 		if err != nil {
 			//close the conn
-			conn.Close()
+			tlsConn.Close()
+			logger.Errorf("TLS Verify failed when connecting to %v, err=%v\n", ssl_con_str, err)
 			return nil, nil, err
 		}
 	}
-	return conn, tlsConfig, nil
+	return tlsConn, tlsConfig, nil
 
 }
 

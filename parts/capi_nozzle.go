@@ -1197,9 +1197,6 @@ func (capi *CapiNozzle) initializeOrResetConn(initializing bool) error {
 		var newClient *net.TCPConn
 		newClient, err = pool.GetNew()
 		if err == nil && newClient != nil {
-			// same settings as erlang xdcr
-			newClient.SetKeepAlive(true)
-			newClient.SetNoDelay(false)
 			capi.setClient(newClient)
 		}
 	}
