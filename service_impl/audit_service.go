@@ -14,7 +14,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/couchbase/cbauth"
 	mc "github.com/couchbase/gomemcached"
 	mcc "github.com/couchbase/gomemcached/client"
 	"github.com/couchbase/goxdcr/base"
@@ -26,6 +25,7 @@ import (
 )
 
 var ErrorInitializingAuditService = "Error initializing audit service."
+var AuditServiceUserAgent = "Goxdcr Audit"
 
 // opcode for memcached audit command
 var AuditPutCommandCode = mc.CommandCode(0x27)
@@ -39,8 +39,6 @@ var ReadTimeout = 1000 * time.Millisecond
 type AuditSvc struct {
 	top_svc     service_def.XDCRCompTopologySvc
 	kvaddr      string
-	username    string
-	password    string
 	logger      *log.CommonLogger
 	initialized bool
 	utils       utilities.UtilsIface
@@ -80,7 +78,7 @@ func (service *AuditSvc) Write(eventId uint32, event interface{}) error {
 	return nil
 }
 
-func (service *AuditSvc) write_internal(client *mcc.Client, eventId uint32, event interface{}) error {
+func (service *AuditSvc) write_internal(client mcc.ClientIface, eventId uint32, event interface{}) error {
 	req, err := composeAuditRequest(eventId, event)
 	if err != nil {
 		return err
@@ -137,32 +135,18 @@ func (service *AuditSvc) init() error {
 		service.kvaddr, err = service.top_svc.MyMemcachedAddr()
 		if err != nil {
 			return service.utils.NewEnhancedError(ErrorInitializingAuditService+" Error getting memcached address of current host.", err)
-		}
-
-		clusterAddr, err := service.top_svc.MyConnectionStr()
-		if err != nil {
-			return service.utils.NewEnhancedError(ErrorInitializingAuditService+" Error getting address of current cluster.", err)
-		}
-
-		service.username, service.password, err = cbauth.GetMemcachedServiceAuth(clusterAddr)
-		if err != nil {
-			err = service.utils.NewEnhancedError(fmt.Sprintf(ErrorInitializingAuditService+" Error getting memcached credentials for cluster %v\n.", clusterAddr), err)
-			return err
-		}
-
-		// audit service uses local connection to memcached and uses plain authentication
-		_, err = base.ConnPoolMgr().GetOrCreatePool(base.AuditServicePoolName, service.kvaddr, "", service.username, service.password, base.DefaultConnectionSize, true /*plainAuth*/)
-		if err == nil {
+		} else {
 			service.initialized = true
 		}
 	}
 	return err
 }
 
-func (service *AuditSvc) getClient() (*mcc.Client, error) {
-	pool := base.ConnPoolMgr().GetPool(base.AuditServicePoolName)
+func (service *AuditSvc) getClient() (mcc.ClientIface, error) {
+	// audit connection is not kept alive
+	client, err := service.utils.GetMemcachedConnection(service.kvaddr, "" /*bucketName*/, AuditServiceUserAgent,
+		0 /*keepAlivePeriod*/, service.logger)
 
-	client, err := pool.GetNew()
 	if err != nil {
 		return nil, err
 	}
@@ -172,7 +156,7 @@ func (service *AuditSvc) getClient() (*mcc.Client, error) {
 	return client, nil
 }
 
-func (service *AuditSvc) releaseClient(client *mcc.Client) error {
+func (service *AuditSvc) releaseClient(client mcc.ClientIface) error {
 	err := client.Close()
 	if err != nil {
 		service.logger.Infof("Audit service failed to close connection. err=%v\n", err)

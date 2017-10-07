@@ -377,7 +377,9 @@ func (ckmgr *CheckpointManager) getNewMemcachedClient(server_addr string) (mcc.C
 		ssl_con_str := ckmgr.ssl_con_str_map[server_addr]
 		return base.NewTLSConn(ssl_con_str, ckmgr.target_username, ckmgr.target_password, certificate, sanInCertificate, ckmgr.target_bucket_name, ckmgr.logger)
 	} else {
-		return ckmgr.utils.GetRemoteMemcachedConnection(server_addr, ckmgr.target_username, ckmgr.target_password, ckmgr.target_bucket_name, ckmgr.user_agent, !ckmgr.target_cluster_ref.IsEncryptionEnabled() /*plain_auth*/, ckmgr.logger)
+		return ckmgr.utils.GetRemoteMemcachedConnection(server_addr, ckmgr.target_username, ckmgr.target_password,
+			ckmgr.target_bucket_name, ckmgr.user_agent, !ckmgr.target_cluster_ref.IsEncryptionEnabled(), /*plain_auth*/
+			base.KeepAlivePeriod, ckmgr.logger)
 	}
 }
 

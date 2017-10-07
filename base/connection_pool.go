@@ -204,7 +204,7 @@ func (p *connPool) GetNew() (*mcc.Client, error) {
 }
 
 func (p *connPool) newConn() (*mcc.Client, error) {
-	return NewConn(p.hostName, p.userName, p.password, p.bucketName, p.plainAuth, p.logger)
+	return NewConn(p.hostName, p.userName, p.password, p.bucketName, p.plainAuth, KeepAlivePeriod, p.logger)
 }
 func (p *connPool) NewConnFunc() NewConnFunc {
 	return p.newConnFunc
@@ -594,7 +594,7 @@ func (connPoolMgr *connPoolMgr) Close() {
 // plainAuth is set to false only when
 // 1. we are connecting to target memcached
 // 2. the remote cluster reference is of half-ssl enabled type
-func NewConn(hostName string, userName string, password string, bucketName string, plainAuth bool, logger *log.CommonLogger) (conn *mcc.Client, err error) {
+func NewConn(hostName string, userName string, password string, bucketName string, plainAuth bool, keepAlivePeriod time.Duration, logger *log.CommonLogger) (conn *mcc.Client, err error) {
 	// connect to host
 	start_time := time.Now()
 	conn, err = mcc.Connect("tcp", hostName)
@@ -607,6 +607,10 @@ func NewConn(hostName string, userName string, password string, bucketName strin
 	err = authClient(conn, userName, password, bucketName, plainAuth, logger)
 	if err != nil {
 		return nil, err
+	}
+
+	if keepAlivePeriod > 0 {
+		conn.SetKeepAliveOptions(keepAlivePeriod)
 	}
 
 	logger.Debugf("%vs spent on authenticate to %v", time.Since(start_time).Seconds(), hostName)
@@ -641,6 +645,12 @@ func NewTLSConn(ssl_con_str string, username string, password string, certificat
 }
 
 func MakeTLSConn(ssl_con_str string, certificate []byte, check_server_name bool, logger *log.CommonLogger) (*tls.Conn, *tls.Config, error) {
+	// enforce timeout
+	errChannel := make(chan error, 2)
+	time.AfterFunc(dialer.Timeout, func() {
+		errChannel <- ExecutionTimeoutError
+	})
+
 	caPool := x509.NewCertPool()
 	ok := caPool.AppendCertsFromPEM(certificate)
 	if !ok {
@@ -659,30 +669,58 @@ func MakeTLSConn(ssl_con_str string, certificate []byte, check_server_name bool,
 	tlsConfig := &tls.Config{RootCAs: caPool}
 	tlsConfig.BuildNameToCertificate()
 	tlsConfig.InsecureSkipVerify = true
+	hostname := strings.Split(ssl_con_str, UrlPortNumberDelimiter)[0]
+	tlsConfig.ServerName = hostname
 
 	// golang 1.8 added a new curve, X25519, which is not supported by ns_server pre-spock
 	// explicitly define curve preferences to get this new curve excluded
 	tlsConfig.CurvePreferences = []tls.CurveID{tls.CurveP256, tls.CurveP384, tls.CurveP521}
 
-	// Connect to tls
-	conn, err := tls.DialWithDialer(dialer, "tcp", ssl_con_str, tlsConfig)
+	// get tcp connection
+	rawConn, err := dialer.Dial("tcp", ssl_con_str)
 
 	if err != nil {
 		logger.Errorf("Failed to connect to %v, err=%v\n", ssl_con_str, err)
 		return nil, nil, err
 	}
 
-	// Handshake with TLS to get cert
-	err = conn.Handshake()
+	tcpConn, ok := rawConn.(*net.TCPConn)
+	if !ok {
+		// should never get here
+		rawConn.Close()
+		logger.Errorf("Failed to get tcp connection when connecting to %v\n", ssl_con_str)
+		return nil, nil, err
+	}
+
+	// always set keep alive
+	err = tcpConn.SetKeepAlive(true)
+	if err == nil {
+		err = tcpConn.SetKeepAlivePeriod(KeepAlivePeriod)
+	}
+	if err != nil {
+		tcpConn.Close()
+		logger.Errorf("Failed to set keep alive options when connecting to %v. err=%v\n", ssl_con_str, err)
+		return nil, nil, err
+	}
+
+	// wrap as tls connection
+	tlsConn := tls.Client(tcpConn, tlsConfig)
+
+	// spawn new routine to enforce timeout
+	go func() {
+		errChannel <- tlsConn.Handshake()
+	}()
+
+	err = <-errChannel
 
 	if err != nil {
+		tlsConn.Close()
 		logger.Errorf("TLS handshake failed when connecting to %v, err=%v\n", ssl_con_str, err)
-		conn.Close()
 		return nil, nil, err
 	}
 
 	if cert_remote.IsCA {
-		connState := conn.ConnectionState()
+		connState := tlsConn.ConnectionState()
 		peer_certs := connState.PeerCertificates
 
 		opts := x509.VerifyOptions{
@@ -693,7 +731,7 @@ func MakeTLSConn(ssl_con_str string, certificate []byte, check_server_name bool,
 
 		if check_server_name {
 			// need to check server name. get sever name from ssl_con_str
-			opts.DNSName = strings.Split(ssl_con_str, UrlPortNumberDelimiter)[0]
+			opts.DNSName = hostname
 		} else {
 			logger.Debug("remote peer is old and its certificate doesn't have IP SANs, skip verifying ServerName")
 		}
@@ -707,11 +745,12 @@ func MakeTLSConn(ssl_con_str string, certificate []byte, check_server_name bool,
 		_, err = peer_certs[0].Verify(opts)
 		if err != nil {
 			//close the conn
-			conn.Close()
+			tlsConn.Close()
+			logger.Errorf("TLS Verify failed when connecting to %v, err=%v\n", ssl_con_str, err)
 			return nil, nil, err
 		}
 	}
-	return conn, tlsConfig, nil
+	return tlsConn, tlsConfig, nil
 
 }
 

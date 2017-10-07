@@ -409,7 +409,8 @@ func (u *Utilities) BucketNotFoundError(bucketName string) error {
 
 // creates a local memcached connection.
 // always use plain auth
-func (u *Utilities) GetMemcachedConnection(serverAddr, bucketName string, userAgent string, logger *log.CommonLogger) (mcc.ClientIface, error) {
+func (u *Utilities) GetMemcachedConnection(serverAddr, bucketName, userAgent string,
+	keepAlivePeriod time.Duration, logger *log.CommonLogger) (mcc.ClientIface, error) {
 	logger.Infof("GetMemcachedConnection serverAddr=%v, bucketName=%v\n", serverAddr, bucketName)
 	if serverAddr == "" {
 		panic("serverAddr is empty")
@@ -420,22 +421,13 @@ func (u *Utilities) GetMemcachedConnection(serverAddr, bucketName string, userAg
 		return nil, err
 	}
 
-	conn, err := base.NewConn(serverAddr, username, password, bucketName, true /*plainAuth*/, logger)
-	if err != nil {
-		return nil, err
-	}
-
-	err = u.SendHELO(conn, userAgent, base.HELOTimeout, base.HELOTimeout, logger)
-	if err != nil {
-		conn.Close()
-		return nil, err
-	}
-
-	return conn, nil
+	return u.GetRemoteMemcachedConnection(serverAddr, username, password, bucketName, userAgent,
+		true /*plainAuth*/, keepAlivePeriod, logger)
 }
 
-func (u *Utilities) GetRemoteMemcachedConnection(serverAddr, username string, password string, bucketName string, userAgent string, plainAuth bool, logger *log.CommonLogger) (mcc.ClientIface, error) {
-	conn, err := base.NewConn(serverAddr, username, password, bucketName, plainAuth, logger)
+func (u *Utilities) GetRemoteMemcachedConnection(serverAddr, username, password, bucketName, userAgent string,
+	plainAuth bool, keepAlivePeriod time.Duration, logger *log.CommonLogger) (mcc.ClientIface, error) {
+	conn, err := base.NewConn(serverAddr, username, password, bucketName, plainAuth, keepAlivePeriod, logger)
 	if err != nil {
 		return nil, err
 	}
@@ -591,7 +583,8 @@ func (u *Utilities) GetSettingFromSettings(settings map[string]interface{}, sett
 	return setting
 }
 
-func (u *Utilities) GetMemcachedClient(serverAddr, bucketName string, kv_mem_clients map[string]mcc.ClientIface, userAgent string, logger *log.CommonLogger) (mcc.ClientIface, error) {
+func (u *Utilities) GetMemcachedClient(serverAddr, bucketName string, kv_mem_clients map[string]mcc.ClientIface,
+	userAgent string, keepAlivePeriod time.Duration, logger *log.CommonLogger) (mcc.ClientIface, error) {
 	client, ok := kv_mem_clients[serverAddr]
 	if ok {
 		return client, nil
@@ -600,7 +593,7 @@ func (u *Utilities) GetMemcachedClient(serverAddr, bucketName string, kv_mem_cli
 			panic("unexpected empty bucketName")
 		}
 
-		var client, err = u.GetMemcachedConnection(serverAddr, bucketName, userAgent, logger)
+		var client, err = u.GetMemcachedConnection(serverAddr, bucketName, userAgent, keepAlivePeriod, logger)
 		if err == nil {
 			kv_mem_clients[serverAddr] = client
 			return client, nil

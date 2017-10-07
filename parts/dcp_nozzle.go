@@ -382,7 +382,7 @@ func (dcp *DcpNozzle) initialize(settings map[string]interface{}) (err error) {
 		return err
 	}
 
-	dcp.client, err = dcp.utils.GetMemcachedConnection(addr, dcp.sourceBucketName, dcp.user_agent, dcp.Logger())
+	dcp.client, err = dcp.utils.GetMemcachedConnection(addr, dcp.sourceBucketName, dcp.user_agent, base.KeepAlivePeriod, dcp.Logger())
 	if err != nil {
 		return err
 	}
