@@ -244,7 +244,7 @@ func (service *ReplicationSpecService) ValidateNewReplicationSpec(sourceBucket, 
 
 			client, err := utils.GetRemoteMemcachedConnection(kvConnStr, username, password, targetBucket,
 				simple_utils.ComposeUserAgentWithBucketNames("Goxdcr ReplSpecSvc", sourceBucket, targetBucket),
-				false /*plainAuth*/, service.logger)
+				false /*plainAuth*/, 0 /*keepAlivePeriod*/, service.logger)
 			if client != nil {
 				client.Close()
 			}

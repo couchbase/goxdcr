@@ -393,6 +393,10 @@ var MaxRetryForRandomIdGeneration = 5
 
 var WaitTimeBetweenMetadataChangeListeners = 1 * time.Second
 
+var KeepAlivePeriod = 30 * time.Second
+
+var ExecutionTimeoutError = errors.New("Execution timed out")
+
 // --------------- Constants that are configurable -----------------
 
 // timeout for checkpointing attempt before pipeline is stopped - to put an upper bound on the delay of pipeline stop/restart

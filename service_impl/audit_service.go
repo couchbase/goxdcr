@@ -14,7 +14,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/couchbase/cbauth"
 	mc "github.com/couchbase/gomemcached"
 	mcc "github.com/couchbase/gomemcached/client"
 	"github.com/couchbase/goxdcr/base"
@@ -26,6 +25,7 @@ import (
 )
 
 var ErrorInitializingAuditService = "Error initializing audit service."
+var AuditServiceUserAgent = "Goxdcr Audit"
 
 // opcode for memcached audit command
 var AuditPutCommandCode = mc.CommandCode(0x27)
@@ -39,8 +39,6 @@ var ReadTimeout = 1000 * time.Millisecond
 type AuditSvc struct {
 	top_svc     service_def.XDCRCompTopologySvc
 	kvaddr      string
-	username    string
-	password    string
 	logger      *log.CommonLogger
 	initialized bool
 }
@@ -135,22 +133,7 @@ func (service *AuditSvc) init() error {
 		service.kvaddr, err = service.top_svc.MyMemcachedAddr()
 		if err != nil {
 			return utils.NewEnhancedError(ErrorInitializingAuditService+" Error getting memcached address of current host.", err)
-		}
-
-		clusterAddr, err := service.top_svc.MyConnectionStr()
-		if err != nil {
-			return utils.NewEnhancedError(ErrorInitializingAuditService+" Error getting address of current cluster.", err)
-		}
-
-		service.username, service.password, err = cbauth.GetMemcachedServiceAuth(clusterAddr)
-		if err != nil {
-			err = utils.NewEnhancedError(fmt.Sprintf(ErrorInitializingAuditService+" Error getting memcached credentials for cluster %v\n.", clusterAddr), err)
-			return err
-		}
-
-		// audit service uses local connection to memcached and uses plain authentication
-		_, err = base.ConnPoolMgr().GetOrCreatePool(base.AuditServicePoolName, service.kvaddr, "", service.username, service.password, base.DefaultConnectionSize, true /*plainAuth*/)
-		if err == nil {
+		} else {
 			service.initialized = true
 		}
 	}
@@ -158,9 +141,10 @@ func (service *AuditSvc) init() error {
 }
 
 func (service *AuditSvc) getClient() (*mcc.Client, error) {
-	pool := base.ConnPoolMgr().GetPool(base.AuditServicePoolName)
+	// audit connection is not kept alive
+	client, err := utils.GetMemcachedConnection(service.kvaddr, "" /*bucketName*/, AuditServiceUserAgent,
+		0 /*keepAlivePeriod*/, service.logger)
 
-	client, err := pool.GetNew()
 	if err != nil {
 		return nil, err
 	}

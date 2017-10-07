@@ -174,16 +174,34 @@ func (tcpConnPoolMgr *tcpConnPoolMgr) CreatePool(poolName string, hostName strin
 //
 // This function creates a single connection to the vbucket master node.
 //
-func NewTCPConn(hostName string) (conn *net.TCPConn, err error) {
-	con, err := DialTCPWithTimeout(NetTCP, hostName)
+func NewTCPConn(hostName string) (*net.TCPConn, error) {
+	conn, err := DialTCPWithTimeout(NetTCP, hostName)
 	if err != nil {
 		return nil, err
 	}
-	conn, ok := con.(*net.TCPConn)
+
+	tcpConn, ok := conn.(*net.TCPConn)
 	if !ok {
+		// should never get here
+		conn.Close()
 		return nil, fmt.Errorf("The connection to %v returned is not TCP type", hostName)
 	}
-	return conn, nil
+
+	// same settings as erlang xdcr
+	err = tcpConn.SetKeepAlive(true)
+	if err == nil {
+		err = tcpConn.SetKeepAlivePeriod(KeepAlivePeriod)
+	}
+	if err == nil {
+		err = tcpConn.SetNoDelay(false)
+	}
+
+	if err != nil {
+		tcpConn.Close()
+		return nil, fmt.Errorf("Error setting options on the connection to %v. err=%v", hostName, err)
+	}
+
+	return tcpConn, nil
 }
 
 //return the singleton TCPConnPoolMgr
