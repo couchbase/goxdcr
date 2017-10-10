@@ -640,9 +640,9 @@ func (stats_mgr *StatisticsManager) getOverviewRegistry() metrics.Registry {
 func (stats_mgr *StatisticsManager) publishMetricToMap(expvar_map *expvar.Map, name string, i interface{}, includeDetails bool) {
 	switch m := i.(type) {
 	case metrics.Counter:
-		expvar_map.Set(name, expvar.Func(func() interface{} {
-			return m.Count()
-		}))
+		expvar_val := new(expvar.Int)
+		expvar_val.Set(m.Count())
+		expvar_map.Set(name, expvar_val)
 	case metrics.Histogram:
 		if includeDetails {
 			metrics_map := new(expvar.Map).Init()
