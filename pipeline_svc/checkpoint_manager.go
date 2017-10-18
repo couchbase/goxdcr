@@ -1423,6 +1423,11 @@ func (ckmgr *CheckpointManager) UpdateVBTimestamps(vbno uint16, rollbackseqno ui
 	}
 
 	checkpointDoc, err := ckmgr.retrieveCkptDoc(vbno)
+	if err == service_def.MetadataNotFoundErr {
+		ckmgr.logger.Errorf("Unable to construct ckpt doc from metakv given pipeline topic: %v vbno: %v",
+			ckmgr.pipeline.Topic(), vbno)
+		err = nil
+	}
 	if err != nil {
 		return nil, err
 	}

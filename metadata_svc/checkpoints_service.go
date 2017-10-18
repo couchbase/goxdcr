@@ -35,6 +35,10 @@ func (ckpt_svc *CheckpointsService) CheckpointsDoc(replicationId string, vbno ui
 		return nil, err
 	}
 	ckpt_doc, err := ckpt_svc.constructCheckpointDoc(result, rev)
+	if err == service_def.MetadataNotFoundErr {
+		ckpt_svc.logger.Errorf("Unable to construct ckpt doc from metakv given replication: %v vbno: %v key: %v",
+			replicationId, vbno, key)
+	}
 	return ckpt_doc, err
 }
 
@@ -98,12 +102,12 @@ func (ckpt_svc *CheckpointsService) UpsertCheckpoints(replicationId string, spec
 	}
 	key := ckpt_svc.getCheckpointDocKey(replicationId, vbno)
 	ckpt_doc, err := ckpt_svc.CheckpointsDoc(replicationId, vbno)
-	if err != nil && err != service_def.MetadataNotFoundErr {
-		return err
-	}
 	if err == service_def.MetadataNotFoundErr {
 		ckpt_doc = metadata.NewCheckpointsDoc(specInternalId)
 		err = nil
+	}
+	if err != nil {
+		return err
 	}
 
 	// check if xattr seqno in checkpoint doc needs to be updated
@@ -157,26 +161,35 @@ func (ckpt_svc *CheckpointsService) CheckpointsDocs(replicationId string) (map[u
 
 			ckpt_doc, err := ckpt_svc.constructCheckpointDoc(ckpt_entry.Value, ckpt_entry.Rev)
 			if err != nil {
-				return nil, err
+				if err == service_def.MetadataNotFoundErr {
+					ckpt_svc.logger.Errorf("Unable to construct ckpt doc from metakv given replicationId: %v vbno: %v and key: %v",
+						replicationId, vbno, ckpt_entry.Key)
+					continue
+				} else {
+					return nil, err
+				}
+			} else {
+				checkpointsDocs[vbno] = ckpt_doc
 			}
-			checkpointsDocs[vbno] = ckpt_doc
 		}
 	}
 	return checkpointsDocs, nil
 }
 
 func (ckpt_svc *CheckpointsService) constructCheckpointDoc(content []byte, rev interface{}) (*metadata.CheckpointsDoc, error) {
-	var ckpt_doc *metadata.CheckpointsDoc = nil
 	// The only time content is empty is when this is a fresh XDCR system and no checkpoints has been registered yet
 	if len(content) > 0 {
-		ckpt_doc = &metadata.CheckpointsDoc{}
+		ckpt_doc := &metadata.CheckpointsDoc{}
 		err := json.Unmarshal(content, ckpt_doc)
 		if err != nil {
 			return nil, err
 		}
 		ckpt_doc.Revision = rev
+		return ckpt_doc, nil
+	} else {
+		ckpt_svc.logger.Errorf("Unable to construct valid checkpoint due to empty checkpoint data")
+		return nil, service_def.MetadataNotFoundErr
 	}
-	return ckpt_doc, nil
 }
 
 // get vbnos of checkpoint docs for specified replicationId
