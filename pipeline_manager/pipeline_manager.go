@@ -738,6 +738,7 @@ func (r *PipelineUpdater) run() {
 			if r.getLastResult() {
 				r.logger.Infof("Replication %v's status experienced changes or errors (%v), updating now\n", r.pipeline_name, retErr)
 				// Last time update succeeded, so this error then triggers an immediate update
+				r.current_error = retErr
 				if r.update() != nil {
 					updateAgain = true
 				}
