@@ -460,15 +460,32 @@ func GetHostAddr(hostName string, port uint16) string {
 
 // extract host name from hostAddr, which is in the form of hostName:port
 func GetHostName(hostAddr string) string {
-	return strings.Split(hostAddr, UrlPortNumberDelimiter)[0]
+	index := strings.LastIndex(hostAddr, UrlPortNumberDelimiter)
+	if index < 0 {
+		// host addr does not contain ":". treat host addr as host name
+		return hostAddr
+	}
+	return hostAddr[0:index]
 }
 
 func GetPortNumber(hostAddr string) (uint16, error) {
-	port_str := strings.Split(hostAddr, UrlPortNumberDelimiter)[1]
+	index := strings.LastIndex(hostAddr, UrlPortNumberDelimiter)
+	if index < 0 {
+		// host addr does not contain ":".
+		// this could happen only in remote cluster ref creation scenario,
+		// where hostAddr is specified by user and user may choose not to provide a port number
+		err := fmt.Errorf("hostAddr, %v, does not contain port number delimiter\n", hostAddr)
+		return 0, err
+	}
+
+	port_str := hostAddr[index+1:]
 	port, err := strconv.ParseUint(port_str, 10, 16)
 	if err == nil {
 		return uint16(port), nil
 	} else {
+		// this could happen in remote cluster ref creation scenario, where hostAddr may be an ipv6 address
+		// without port number, e.g., [FC00::11].
+		// return error to indicate that there is no valid port number
 		return 0, err
 	}
 }

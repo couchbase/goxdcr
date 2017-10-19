@@ -23,16 +23,11 @@ import (
 	"regexp"
 	"sort"
 	"strconv"
-	"strings"
 )
 
 // xdcr prefix for internal settings keys
 var XDCRPrefix = "xdcr"
 var ErrorsKey = "errors"
-
-const (
-	DefaultAdminPort = "8091"
-)
 
 // constants used for parsing url path
 const (
@@ -321,9 +316,11 @@ func DecodeCreateRemoteClusterRequest(request *http.Request) (justValidate bool,
 		encryptionType = metadata.EncryptionType_Full
 	}
 
-	//validate the format of hostName, if it doesn't contain port number, append default port number 8091
-	if !strings.Contains(hostName, base.UrlPortNumberDelimiter) {
-		hostName = hostName + base.UrlPortNumberDelimiter + DefaultAdminPort
+	// if hostName provided by user doesn't contain port number, append default port number 8091
+	_, err1 = base.GetPortNumber(hostName)
+	if err1 != nil {
+		hostName = base.GetHostAddr(hostName, base.DefaultAdminPort)
+		logger_msgutil.Infof("Appended default admin port to hostName in ref %v. Afterward, hostName=%v\n", name, hostName)
 	}
 	if len(errorsMap) == 0 {
 		remoteClusterRef, err = metadata.NewRemoteClusterReference("", name, hostName, userName, password, demandEncryption, encryptionType, certificate)

@@ -28,18 +28,20 @@ type XDCRTopologySvc struct {
 	adminport        uint16
 	xdcrRestPort     uint16
 	isEnterprise     bool
+	isIpv6           bool
 	cluster_info_svc service_def.ClusterInfoSvc
 	logger           *log.CommonLogger
 	utils            utilities.UtilsIface
 }
 
 func NewXDCRTopologySvc(adminport, xdcrRestPort uint16,
-	isEnterprise bool, cluster_info_svc service_def.ClusterInfoSvc,
+	isEnterprise bool, isIpv6 bool, cluster_info_svc service_def.ClusterInfoSvc,
 	logger_ctx *log.LoggerContext, utilsIn utilities.UtilsIface) (*XDCRTopologySvc, error) {
 	top_svc := &XDCRTopologySvc{
 		adminport:        adminport,
 		xdcrRestPort:     xdcrRestPort,
 		isEnterprise:     isEnterprise,
+		isIpv6:           isIpv6,
 		cluster_info_svc: cluster_info_svc,
 		logger:           log.NewLogger("TopoSvc", logger_ctx),
 		utils:            utilsIn,
@@ -102,6 +104,18 @@ func (top_svc *XDCRTopologySvc) NumberOfKVNodes() (int, error) {
 
 func (top_svc *XDCRTopologySvc) IsMyClusterEnterprise() (bool, error) {
 	return top_svc.isEnterprise, nil
+}
+
+func (top_svc *XDCRTopologySvc) IsMyClusterIpv6() bool {
+	return top_svc.isIpv6
+}
+
+func (top_svc *XDCRTopologySvc) GetLocalHostName() string {
+	if top_svc.isIpv6 {
+		return base.LocalHostNameIpv6
+	} else {
+		return base.LocalHostName
+	}
 }
 
 // currently not used and not implemented
@@ -205,7 +219,7 @@ func (top_svc *XDCRTopologySvc) getHostMemcachedPortFromHostInfo(nodeInfoMap map
 
 // implements base.ClusterConnectionInfoProvider
 func (top_svc *XDCRTopologySvc) MyConnectionStr() (string, error) {
-	host := base.LocalHostName
+	host := top_svc.GetLocalHostName()
 	return base.GetHostAddr(host, top_svc.adminport), nil
 }
 
@@ -268,7 +282,7 @@ func (top_svc *XDCRTopologySvc) MyClusterVersion() (string, error) {
 }
 
 func (top_svc *XDCRTopologySvc) staticHostAddr() string {
-	return "http://" + base.GetHostAddr(base.LocalHostName, top_svc.adminport)
+	return "http://" + base.GetHostAddr(top_svc.GetLocalHostName(), top_svc.adminport)
 }
 
 func (top_svc *XDCRTopologySvc) IsKVNode() (bool, error) {

@@ -32,6 +32,7 @@ var options struct {
 
 	sslProxyUpstreamPort uint64 // gometa request port
 	isEnterprise         bool   // whether couchbase is of enterprise edition
+	isIpv6               bool   // whether couchbase supports ipv6
 	isConvert            bool   // whether xdcr is running in conversion/upgrade mode
 
 	// logging related parameters
@@ -52,6 +53,8 @@ func argParse() {
 		"port number for ssl proxy upstream port")
 	flag.BoolVar(&options.isEnterprise, "isEnterprise", true,
 		"whether couchbase is of enterprise edition")
+	flag.BoolVar(&options.isIpv6, "ipv6", false,
+		"whether couchbase supports ipv6")
 	flag.BoolVar(&options.isConvert, "isConvert", false,
 		"whether xdcr is running in convertion/upgrade mode")
 
@@ -87,13 +90,13 @@ func main() {
 	utils := utilities.NewUtilities()
 
 	cluster_info_svc := service_impl.NewClusterInfoSvc(nil, utils)
-	top_svc, err := service_impl.NewXDCRTopologySvc(uint16(options.sourceKVAdminPort), uint16(options.xdcrRestPort), options.isEnterprise, cluster_info_svc, nil, utils)
+	top_svc, err := service_impl.NewXDCRTopologySvc(uint16(options.sourceKVAdminPort), uint16(options.xdcrRestPort), options.isEnterprise, options.isIpv6, cluster_info_svc, nil, utils)
 	if err != nil {
 		fmt.Printf("Error starting xdcr topology service. err=%v\n", err)
 		os.Exit(1)
 	}
 
-	host := base.LocalHostName
+	host :=top_svc.GetLocalHostName()
 
 	metakv_svc, err := metadata_svc.NewMetaKVMetadataSvc(nil)
 	if err != nil {

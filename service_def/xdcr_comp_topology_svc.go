@@ -49,6 +49,12 @@ type XDCRCompTopologySvc interface {
 	//is the cluster XDCR is serving of enterprise edition
 	IsMyClusterEnterprise() (bool, error)
 
+	//is the cluster XDCR is serving ipv6 enabled
+	IsMyClusterIpv6() bool
+
+	// get local host name
+	GetLocalHostName() string
+
 	//return a map with the key to be the host name that a xdcr comp is running on
 	// and the value to be an array of kv node address which the xdcr component would
 	//be responsible for

@@ -23,6 +23,9 @@ var DefaultPoolName = "default"
 var AuditServicePoolName = "auditService"
 
 var LocalHostName = "127.0.0.1"
+var LocalHostNameIpv6 = "[::1]"
+
+var DefaultAdminPort uint16 = 8091
 
 // URL Paths for retrieving cluster info
 var PoolsPath = "/pools"
