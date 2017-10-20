@@ -6,6 +6,7 @@ import (
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/goxdcr/service_def"
+	"sync"
 )
 
 const (
@@ -24,7 +25,8 @@ type InternalSettingsSvc struct {
 	metadata_change_callback base.MetadataChangeHandlerCallback
 	logger                   *log.CommonLogger
 	// keeps a single copy of internal settings
-	internal_settings *metadata.InternalSettings
+	internal_settings   *metadata.InternalSettings
+	internalSettingsMtx sync.RWMutex
 }
 
 func NewInternalSettingsSvc(metadata_svc service_def.MetadataSvc, logger_ctx *log.LoggerContext) *InternalSettingsSvc {
@@ -33,6 +35,8 @@ func NewInternalSettingsSvc(metadata_svc service_def.MetadataSvc, logger_ctx *lo
 		logger:       log.NewLogger("IntSettSvc", logger_ctx),
 	}
 
+	service.internalSettingsMtx.Lock()
+	defer service.internalSettingsMtx.Unlock()
 	// initializes the cached internal_settings object, which can be used to determine if any change has been made to it later
 	service.internal_settings, _ = service.getInternalSettingsFromMetakv(true /*useDefaultSettingsAtError*/)
 	return service
@@ -82,6 +86,8 @@ func (service *InternalSettingsSvc) getInternalSettingsFromMetakv(useDefaultSett
 }
 
 func (service *InternalSettingsSvc) GetInternalSettings() *metadata.InternalSettings {
+	service.internalSettingsMtx.RLock()
+	defer service.internalSettingsMtx.RUnlock()
 	// simply return a copy of the cached value
 	// if value in metakv is changed, goxdcr processed will get restarted
 	// and the cached value will get updated after restart
@@ -117,6 +123,8 @@ func (service *InternalSettingsSvc) getV2InternalSettingsFromV1() (*metadata.Int
 }
 
 func (service *InternalSettingsSvc) UpdateInternalSettings(settingsMap map[string]interface{}) (*metadata.InternalSettings, map[string]error, error) {
+	service.internalSettingsMtx.Lock()
+	defer service.internalSettingsMtx.Unlock()
 	// cannot use service.internal_settings as the base since it could have been default internal settings
 	// retrieve from metakv to be sure that the base is correct
 	internal_settings, err := service.getInternalSettingsFromMetakv(false /*useDefaultSettingsAtError*/)

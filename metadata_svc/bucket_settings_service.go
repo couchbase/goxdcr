@@ -16,6 +16,7 @@ import (
 	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/goxdcr/service_def"
 	utilities "github.com/couchbase/goxdcr/utils"
+	"sync"
 )
 
 const (
@@ -29,6 +30,7 @@ type BucketSettingsService struct {
 	logger                   *log.CommonLogger
 	metadata_change_callback base.MetadataChangeHandlerCallback
 	utils                    utilities.UtilsIface
+	bucketSettingsMtx        sync.RWMutex
 }
 
 func NewBucketSettingsService(metadata_svc service_def.MetadataSvc,
@@ -52,6 +54,8 @@ func (service *BucketSettingsService) SetMetadataChangeHandlerCallback(call_back
 // TODO: The same will happen if an invalid/non-existent bucketName is passed in. Should we validate the bucket name with buckets in the cluster?
 func (service *BucketSettingsService) BucketSettings(bucketName string) (*metadata.BucketSettings, error) {
 	var bucketSettings *metadata.BucketSettings
+	service.bucketSettingsMtx.RLock()
+	defer service.bucketSettingsMtx.RUnlock()
 
 	bucketUUID, err := service.getBucketUUID(bucketName)
 	if err != nil {
@@ -75,6 +79,8 @@ func (service *BucketSettingsService) BucketSettings(bucketName string) (*metada
 
 // existing bucket settings may or may not be present when this method is called
 func (service *BucketSettingsService) SetBucketSettings(bucketName string, bucketSettings *metadata.BucketSettings) error {
+	service.bucketSettingsMtx.Lock()
+	defer service.bucketSettingsMtx.Unlock()
 	bucketUUID, err := service.getBucketUUID(bucketName)
 	if err != nil {
 		return err

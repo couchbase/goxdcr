@@ -14,13 +14,15 @@ import (
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/goxdcr/service_def"
+	"sync"
 )
 
 var DefaultReplicationSettingsKey = "DefaultReplicationSettings"
 
 type ReplicationSettingsSvc struct {
-	metadata_svc service_def.MetadataSvc
-	logger       *log.CommonLogger
+	metadata_svc           service_def.MetadataSvc
+	logger                 *log.CommonLogger
+	replicationSettingsMtx sync.Mutex
 }
 
 func NewReplicationSettingsSvc(metadata_svc service_def.MetadataSvc, logger_ctx *log.LoggerContext) *ReplicationSettingsSvc {
@@ -32,6 +34,9 @@ func NewReplicationSettingsSvc(metadata_svc service_def.MetadataSvc, logger_ctx 
 
 func (repl_settings_svc *ReplicationSettingsSvc) GetDefaultReplicationSettings() (*metadata.ReplicationSettings, error) {
 	var defaultSettings metadata.ReplicationSettings
+	repl_settings_svc.replicationSettingsMtx.Lock()
+	defer repl_settings_svc.replicationSettingsMtx.Unlock()
+
 	bytes, rev, err := repl_settings_svc.metadata_svc.Get(DefaultReplicationSettingsKey)
 	if err != nil && err != service_def.MetadataNotFoundErr {
 		return nil, err
@@ -51,6 +56,8 @@ func (repl_settings_svc *ReplicationSettingsSvc) GetDefaultReplicationSettings()
 }
 
 func (repl_settings_svc *ReplicationSettingsSvc) SetDefaultReplicationSettings(settings *metadata.ReplicationSettings) error {
+	repl_settings_svc.replicationSettingsMtx.Lock()
+	defer repl_settings_svc.replicationSettingsMtx.Unlock()
 	bytes, err := json.Marshal(settings)
 	if err != nil {
 		return err

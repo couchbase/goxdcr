@@ -6,6 +6,7 @@ import (
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/goxdcr/service_def"
+	"sync"
 )
 
 const (
@@ -17,6 +18,7 @@ type GlobalSettingsSvc struct {
 	metadata_svc             service_def.MetadataSvc
 	metadata_change_callback base.MetadataChangeHandlerCallback
 	logger                   *log.CommonLogger
+	globalSettingsMtx        sync.Mutex
 }
 
 func NewGlobalSettingsSvc(metadata_svc service_def.MetadataSvc, logger_ctx *log.LoggerContext) *GlobalSettingsSvc {
@@ -71,6 +73,8 @@ func getGlobalSettingKey() string {
 // This method will pull  process setting setting
 func (service *GlobalSettingsSvc) GetDefaultGlobalSettings() (*metadata.GlobalSettings, error) {
 	var defaultGlobalSettings metadata.GlobalSettings
+	service.globalSettingsMtx.Lock()
+	defer service.globalSettingsMtx.Unlock()
 
 	pKey := getGlobalSettingKey()
 
@@ -82,7 +86,6 @@ func (service *GlobalSettingsSvc) GetDefaultGlobalSettings() (*metadata.GlobalSe
 		if err == service_def.MetadataNotFoundErr {
 			// initialize default process settings if it does not exist
 			defaultGlobalSettings = *metadata.DefaultGlobalSettings()
-
 		} else {
 			return nil, err
 		}
@@ -98,6 +101,8 @@ func (service *GlobalSettingsSvc) GetDefaultGlobalSettings() (*metadata.GlobalSe
 }
 
 func (service *GlobalSettingsSvc) SetDefaultGlobalSettings(settings *metadata.GlobalSettings) error {
+	service.globalSettingsMtx.Lock()
+	defer service.globalSettingsMtx.Unlock()
 	bytes, err := json.Marshal(settings)
 	if err != nil {
 		return err
