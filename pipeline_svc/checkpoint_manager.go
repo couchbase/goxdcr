@@ -396,48 +396,42 @@ func (ckmgr *CheckpointManager) getHighSeqnoAndVBUuidFromTarget() map[uint16][]u
 // checkpointing cannot be done without high seqno and vbuuid from target
 // if retrieval of such stats fails, retry
 func (ckmgr *CheckpointManager) getHighSeqnoAndVBUuidForServerWithRetry(serverAddr string, vbnos []uint16, high_seqno_and_vbuuid_map map[uint16][]uint64) {
-	retry := 0
-	// base wait time
-	wait_time := base.RetryIntervalTargetStats
-
 	var stats_map map[string]string
-	var err error
 
-	for {
+	statMapOp := func() error {
+		var err error
 		client, ok := ckmgr.kv_mem_clients[serverAddr]
 		if !ok {
 			// memcached connection may have been closed in previous retries. create a new one
 			client, err = ckmgr.getNewMemcachedClient(serverAddr)
 			if err != nil {
-				ckmgr.logger.Warnf("%v failed to construct memcached client for %v, err=%v\n", ckmgr.pipeline.Topic(), serverAddr, err)
-				goto Retry
+				ckmgr.logger.Warnf("%v Retrieval of high seqno and vbuuid stats failed. serverAddr=%v, vbnos=%v\n", ckmgr.pipeline.Topic(), serverAddr, vbnos)
+				return err
+			} else {
+				ckmgr.kv_mem_clients[serverAddr] = client
 			}
-			ckmgr.kv_mem_clients[serverAddr] = client
 		}
+
 		stats_map, err = client.StatsMap(base.VBUCKET_SEQNO_STAT_NAME)
-		if err == nil {
-			ckmgr.utils.ParseHighSeqnoAndVBUuidFromStats(vbnos, stats_map, high_seqno_and_vbuuid_map)
-			break
-		} else {
+		if err != nil {
 			ckmgr.logger.Warnf("%v Error getting vbucket-seqno stats for serverAddr=%v. vbnos=%v, err=%v", ckmgr.pipeline.Topic(), serverAddr, vbnos, err)
-			err = client.Close()
-			if err != nil {
+			clientCloseErr := client.Close()
+			if clientCloseErr != nil {
 				ckmgr.logger.Warnf("%v error from closing connection for %v is %v\n", ckmgr.pipeline.Topic(), serverAddr, err)
 			}
 			delete(ckmgr.kv_mem_clients, serverAddr)
 		}
+		return err
+	}
 
-	Retry:
-		if retry >= base.MaxRetryTargetStats {
-			ckmgr.logger.Warnf("%v Retrieval of high seqno and vbuuid stats failed after %v retries. serverAddr=%v, vbnos=%v\n", ckmgr.pipeline.Topic(), retry, serverAddr, vbnos)
-			break
-		}
+	opErr := ckmgr.utils.ExponentialBackoffExecutor("StatsMapOnVBToSeqno", base.RemoteMcRetryWaitTime, base.MaxRemoteMcRetry,
+		base.RemoteMcRetryFactor, statMapOp)
 
-		retry++
-
-		time.Sleep(wait_time)
-		// exponential backoff
-		wait_time *= 2
+	if opErr != nil {
+		ckmgr.logger.Errorf("%v Retrieval of high seqno and vbuuid stats failed after %v retries. serverAddr=%v, vbnos=%v\n",
+			ckmgr.pipeline.Topic(), base.MaxRemoteMcRetry, serverAddr, vbnos)
+	} else {
+		ckmgr.utils.ParseHighSeqnoAndVBUuidFromStats(vbnos, stats_map, high_seqno_and_vbuuid_map)
 	}
 }
 

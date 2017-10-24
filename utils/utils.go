@@ -410,18 +410,35 @@ func (u *Utilities) GetMemcachedConnection(serverAddr, bucketName, userAgent str
 
 func (u *Utilities) GetRemoteMemcachedConnection(serverAddr, username, password, bucketName, userAgent string,
 	plainAuth bool, keepAlivePeriod time.Duration, logger *log.CommonLogger) (mcc.ClientIface, error) {
-	conn, err := base.NewConn(serverAddr, username, password, bucketName, plainAuth, keepAlivePeriod, logger)
-	if err != nil {
+	var err error
+	var conn mcc.ClientIface
+
+	getRemoteMcConnOp := func() error {
+		conn, err = base.NewConn(serverAddr, username, password, bucketName, plainAuth, keepAlivePeriod, logger)
+		if err != nil {
+			logger.Warnf("Failed to construct memcached client for %v, err=%v\n", serverAddr, err)
+			return err
+		}
+
+		err = u.SendHELO(conn, userAgent, base.HELOTimeout, base.HELOTimeout, logger)
+
+		if err != nil {
+			conn.Close()
+			logger.Warnf("Failed to send HELO for %v, err=%v\n", conn, err)
+			return err
+		}
+		return nil
+	}
+
+	opErr := u.ExponentialBackoffExecutor("GetRemoteMemcachedConnection", base.RemoteMcRetryWaitTime, base.MaxRemoteMcRetry,
+		base.RemoteMcRetryFactor, getRemoteMcConnOp)
+
+	if opErr != nil {
+		logger.Errorf(opErr.Error())
 		return nil, err
 	}
 
-	err = u.SendHELO(conn, userAgent, base.HELOTimeout, base.HELOTimeout, logger)
-	if err != nil {
-		conn.Close()
-		return nil, err
-	}
-
-	return conn, nil
+	return conn, err
 }
 
 // send helo with specified user agent string to memcached

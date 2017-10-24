@@ -343,6 +343,14 @@ var UnexpectedEOF = "unexpected EOF"
 // flag for memcached to enable lww to lww bucket replication
 var FORCE_ACCEPT_WITH_META_OPS uint32 = 0x02
 
+// read/write timeout for helo command to memcached
+var HELOTimeout time.Duration = time.Duration(120) * time.Second
+
+// For utilities to try to get a working remote connection
+var MaxRemoteMcRetry = 5
+var RemoteMcRetryWaitTime = 200 * time.Millisecond
+var RemoteMcRetryFactor = 2
+
 // minimum versions where various features are supported
 var VersionForSANInCertificateSupport = []int{4, 0}
 var VersionForRBACAndXattrSupport = []int{5, 0}
@@ -534,9 +542,6 @@ var MaxNumberOfAsyncListeners = 4
 
 //max interval between retries when resending docs  (seconds)
 var XmemMaxRetryInterval = 300 * time.Second
-
-// read/write timeout for helo command to memcached
-var HELOTimeout time.Duration = time.Duration(120) * time.Second
 
 var WaitTimeBetweenMetadataChangeListeners = 1 * time.Second
 
