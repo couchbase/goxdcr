@@ -616,7 +616,7 @@ func (ckmgr *CheckpointManager) SetVBTimestamps(topic string) error {
 				// and target supports xattr now when pipeline is being restarted,
 				// and the corresponding vbucket has seen xattr enabled mutations
 				// we need to rollback to 0 for vbuckets that have seen xattr enabled mutations
-				err = pipeline_utils.DelCheckpointsDocWithRetry(ckmgr.checkpoints_svc, topic, vbno, base.MaxRetryMetakvOps, ckmgr.logger)
+				err = ckmgr.checkpoints_svc.DelCheckpointsDoc(topic, vbno)
 				if err != nil {
 					ckmgr.RaiseEvent(common.NewEvent(common.ErrorEncountered, nil, ckmgr, nil, err))
 					return err
@@ -629,7 +629,7 @@ func (ckmgr *CheckpointManager) SetVBTimestamps(topic string) error {
 				// the checkpoint doc is for the old replication spec and needs to be deleted
 				// unlike the IsVbInList check above, it is critial for the checkpoint doc deletion to succeed here
 				// restart pipeline if it fails
-				err = pipeline_utils.DelCheckpointsDocWithRetry(ckmgr.checkpoints_svc, topic, vbno, base.MaxRetryMetakvOps, ckmgr.logger)
+				err = ckmgr.checkpoints_svc.DelCheckpointsDoc(topic, vbno)
 				if err != nil {
 					ckmgr.RaiseEvent(common.NewEvent(common.ErrorEncountered, nil, ckmgr, nil, err))
 					return err

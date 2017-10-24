@@ -332,25 +332,30 @@ func (rm *replicationManager) initMetadataChangeMonitor() {
 }
 
 func (rm *replicationManager) initPausedReplications() {
-	for i := 0; i < base.MaxNumOfMetakvRetries; i++ {
-		// set ReplicationStatus for paused replications so that they will show up in task list
-		specs, err := rm.repl_spec_svc.AllReplicationSpecs()
-		if err != nil {
-			logger_rm.Errorf("Failed to get all replication specs, err=%v, num_of_retry=%v\n", err, i)
-			continue
+	var specs map[string]*metadata.ReplicationSpecification
+	var err error
 
-		} else {
-			for _, spec := range specs {
-				if !spec.Settings.Active {
-					rm.pipelineMgr.GetOrCreateReplicationStatus(spec.Id, nil)
-				}
-			}
-			return
+	getSpecsOpFunc := func() error {
+		specs, err = rm.repl_spec_svc.AllReplicationSpecs()
+		if err != nil {
+			logger_rm.Warnf("Failed to get all replication specs, err=%v\n", err)
 		}
+		return err
 	}
 
-	logger_rm.Errorf("Failed to initPausedReplications after %v retries.", base.MaxNumOfMetakvRetries)
-	exitProcess(false)
+	getSpecsErr := rm.utils.ExponentialBackoffExecutor("InitPausedReplications", base.RetryIntervalMetakv,
+		base.MaxNumOfMetakvRetries, base.MetaKvBackoffFactor, getSpecsOpFunc)
+
+	if getSpecsErr == nil {
+		for _, spec := range specs {
+			if !spec.Settings.Active {
+				rm.pipelineMgr.GetOrCreateReplicationStatus(spec.Id, nil)
+			}
+		}
+	} else {
+		logger_rm.Errorf("Failed to initPausedReplications after %v retries.", base.MaxNumOfMetakvRetries)
+		exitProcess(false)
+	}
 }
 
 func (rm *replicationManager) checkReplicationStatus(fin_chan chan bool) {

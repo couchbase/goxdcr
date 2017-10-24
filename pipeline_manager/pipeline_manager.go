@@ -446,7 +446,7 @@ func (pipelineMgr *PipelineManager) StopPipelineInner(rep_status *pipeline.Repli
 			pipelineMgr.logger.Infof("%v Cleaning up replication status since repl spec has been deleted and recreated. oldSpecInternalId=%v, newSpecInternalId=%v\n", replId, rep_status.SpecInternalId, spec.InternalId)
 		}
 
-		pipeline_utils.DelCheckpointsDocsWithRetry(pipelineMgr.checkpoint_svc, replId, base.MaxRetryMetakvOps, pipelineMgr.logger)
+		pipelineMgr.checkpoint_svc.DelCheckpointsDocs(replId)
 
 		rep_status.ResetStorage()
 		pipelineMgr.repl_spec_svc.SetDerivedObj(replId, nil)

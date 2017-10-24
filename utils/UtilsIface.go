@@ -13,6 +13,8 @@ import (
 	"time"
 )
 
+type ExponentialOpFunc func() error
+
 type UtilsIface interface {
 	//	loggerForFunc(logger *log.CommonLogger) *log.CommonLogger
 	//	ValidateSettings(defs base.SettingDefinition, settings map[string]interface{}, logger *log.CommonLogger) error
@@ -97,4 +99,5 @@ type UtilsIface interface {
 	SendHELOWithXattrFeature(client mcc.ClientIface, userAgent string, readTimeout, writeTimeout time.Duration, logger *log.CommonLogger) (xattrEnabled bool, err error)
 	CheckWhetherClusterIsESBasedOnBucketInfo(bucketInfo map[string]interface{}) bool
 	NewTCPConn(hostName string) (*net.TCPConn, error)
+	ExponentialBackoffExecutor(name string, initialWait time.Duration, maxRetries int, factor int, op ExponentialOpFunc) error
 }

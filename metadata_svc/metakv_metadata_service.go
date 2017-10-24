@@ -1,4 +1,4 @@
-// Copyright (c) 2013 Couchbase, Inc.
+// Copyright (c) 2013-2017 Couchbase, Inc.
 // Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file
 // except in compliance with the License. You may obtain a copy of the License at
 //   http://www.apache.org/licenses/LICENSE-2.0
@@ -16,41 +16,57 @@ import (
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/service_def"
+	utilities "github.com/couchbase/goxdcr/utils"
 	"strings"
 	"time"
 )
 
 type MetaKVMetadataSvc struct {
 	logger *log.CommonLogger
+	utils  utilities.UtilsIface
 }
 
-func NewMetaKVMetadataSvc(logger_ctx *log.LoggerContext) (*MetaKVMetadataSvc, error) {
+func NewMetaKVMetadataSvc(logger_ctx *log.LoggerContext, utilsIn utilities.UtilsIface) (*MetaKVMetadataSvc, error) {
 	return &MetaKVMetadataSvc{
 		logger: log.NewLogger("MetadataSvc", logger_ctx),
+		utils:  utilsIn,
 	}, nil
 }
 
 //Wrap metakv.Get with retries
 //if the key is not found in metakv, return nil, nil, service_def.MetadataNotFoundErr
-//if metakv operation failed after max number of retries, return nil, nil, service_def.MetaKVFailedAfterMaxTries
+//if metakv operation failed after max number of retries, return nil, nil, ErrorFailedAfterRetry
 func (meta_svc *MetaKVMetadataSvc) Get(key string) ([]byte, interface{}, error) {
+	var value []byte
+	var rev interface{}
+	var err error
 	start_time := time.Now()
-	var i int = 0
-	defer meta_svc.logger.Debugf("Took %vs to get %v to metakv, retried =%v\n", time.Since(start_time).Seconds(), key, i)
+	defer meta_svc.logger.Debugf("Took %vs to get %v to metakv\n", time.Since(start_time).Seconds(), key)
 
-	for i = 0; i < base.MaxNumOfMetakvRetries; i++ {
-		value, rev, err := metakv.Get(getPathFromKey(key))
+	metakvOpGetFunc := func() error {
+		value, rev, err = metakv.Get(getPathFromKey(key))
 		if value == nil && rev == nil && err == nil {
 			meta_svc.logger.Debugf("Can't find key=%v", key)
-			return nil, nil, service_def.MetadataNotFoundErr
+			err = service_def.MetadataNotFoundErr
+			return nil
 		} else if err == nil {
-			return value, rev, nil
+			return nil
 		} else {
-			meta_svc.logger.Errorf("metakv.Get failed. path=%v, err=%v, num_of_retry=%v", getPathFromKey(key), err, i)
+			meta_svc.logger.Warnf("metakv.Get failed. path=%v, err=%v", getPathFromKey(key), err)
+			return err
 		}
 	}
 
-	return nil, nil, service_def.MetaKVFailedAfterMaxTries
+	expOpErr := meta_svc.utils.ExponentialBackoffExecutor("metakv_svc_getOp", base.RetryIntervalMetakv, base.MaxNumOfMetakvRetries,
+		base.MetaKvBackoffFactor, metakvOpGetFunc)
+
+	if expOpErr != nil {
+		// Executor will return error only if it timed out with ErrorFailedAfterRetry. Log it and override the ret err
+		meta_svc.logger.Errorf("metakv.Get failed after max retry. path=%v, err=%v", getPathFromKey(key), err)
+		err = expOpErr
+	}
+
+	return value, rev, err
 }
 
 func (meta_svc *MetaKVMetadataSvc) Add(key string, value []byte) error {
@@ -63,28 +79,39 @@ func (meta_svc *MetaKVMetadataSvc) AddSensitive(key string, value []byte) error 
 
 //Wrap metakv.Add with retries
 //if the key is already exist in metakv, return service_def.ErrorKeyAlreadyExist
-//if metakv operation failed after max number of retries, return service_def.MetaKVFailedAfterMaxTries
+//if metakv operation failed after max number of retries, return ErrorFailedAfterRetry
 func (meta_svc *MetaKVMetadataSvc) add(key string, value []byte, sensitive bool) error {
+	var err error
 	start_time := time.Now()
-	var i int = 0
-	defer meta_svc.logger.Debugf("Took %vs to add %v to metakv, retried=%v\n", time.Since(start_time).Seconds(), key, i)
+	defer meta_svc.logger.Debugf("Took %vs to add %v to metakv\n", time.Since(start_time).Seconds(), key)
 
-	for i = 0; i < base.MaxNumOfMetakvRetries; i++ {
-		var err error
+	metakvOpAddFunc := func() error {
 		if sensitive {
 			err = metakv.AddSensitive(getPathFromKey(key), value)
 		} else {
 			err = metakv.Add(getPathFromKey(key), value)
 		}
 		if err == metakv.ErrRevMismatch {
-			return service_def.ErrorKeyAlreadyExist
+			err = service_def.ErrorKeyAlreadyExist
+			return nil
 		} else if err == nil {
 			return nil
 		} else {
-			meta_svc.logger.Errorf("metakv.Add failed. key=%v, value=%v, err=%v, num_of_retry=%v\n", key, value, err, i)
+			meta_svc.logger.Warnf("metakv.Add failed. key=%v, value=%v, err=%v\n", key, value, err)
+			return err
 		}
 	}
-	return service_def.MetaKVFailedAfterMaxTries
+
+	expOpErr := meta_svc.utils.ExponentialBackoffExecutor("metakv_svc_addOp", base.RetryIntervalMetakv, base.MaxNumOfMetakvRetries,
+		base.MetaKvBackoffFactor, metakvOpAddFunc)
+
+	if expOpErr != nil {
+		// Executor will return error only if it timed out with ErrorFailedAfterRetry. Log it and override the ret err
+		meta_svc.logger.Errorf("metakv.Add failed after max retry. key=%v, value=%v, err=%v\n", key, value, err)
+		err = expOpErr
+	}
+
+	return err
 }
 
 func (meta_svc *MetaKVMetadataSvc) AddWithCatalog(catalogKey, key string, value []byte) error {
@@ -107,49 +134,70 @@ func (meta_svc *MetaKVMetadataSvc) SetSensitive(key string, value []byte, rev in
 
 //Wrap metakv.Set with retries
 //if the rev provided doesn't match with the rev metakv has, return service_def.ErrorRevisionMismatch
-//if metakv operation failed after max number of retries, return service_def.MetaKVFailedAfterMaxTries
+//if metakv operation failed after max number of retries, return ErrorFailedAfterRetry
 func (meta_svc *MetaKVMetadataSvc) set(key string, value []byte, rev interface{}, sensitive bool) error {
+	var err error
 	start_time := time.Now()
-	var i int = 0
-	defer meta_svc.logger.Debugf("Took %vs to set %v to metakv, retried=%v\n", time.Since(start_time).Seconds(), key, i)
+	defer meta_svc.logger.Debugf("Took %vs to set %v to metakv\n", time.Since(start_time).Seconds(), key)
 
-	for i = 0; i < base.MaxNumOfMetakvRetries; i++ {
-		var err error
+	metakvOpSetFunc := func() error {
 		if sensitive {
 			err = metakv.SetSensitive(getPathFromKey(key), value, rev)
 		} else {
 			err = metakv.Set(getPathFromKey(key), value, rev)
 		}
 		if err == metakv.ErrRevMismatch {
-			return service_def.ErrorRevisionMismatch
+			err = service_def.ErrorRevisionMismatch
+			return nil
 		} else if err == nil {
 			return nil
 		} else {
-			meta_svc.logger.Errorf("metakv.Set failed. key=%v, value=%v, err=%v, num_of_retry=%v\n", key, value, err, i)
+			meta_svc.logger.Warnf("metakv.Set failed. key=%v, value=%v, err=%v\n", key, value, err)
+			return err
 		}
 	}
-	return service_def.MetaKVFailedAfterMaxTries
+
+	expOpErr := meta_svc.utils.ExponentialBackoffExecutor("metakv_svc_setOp", base.RetryIntervalMetakv, base.MaxNumOfMetakvRetries,
+		base.MetaKvBackoffFactor, metakvOpSetFunc)
+
+	if expOpErr != nil {
+		// Executor will return error only if it timed out with ErrorFailedAfterRetry. Log it and override the ret err
+		meta_svc.logger.Errorf("metakv.Set failed after max retry. key=%v, value=%v, err=%v\n", key, value, err)
+		err = expOpErr
+	}
+	return err
 }
 
 //Wrap metakv.Del with retries
 //if the rev provided doesn't match with the rev metakv has, return service_def.ErrorRevisionMismatch
-//if metakv operation failed after max number of retries, return service_def.MetaKVFailedAfterMaxTries
+//if metakv operation failed after max number of retries, return ErrorFailedAfterRetry
 func (meta_svc *MetaKVMetadataSvc) Del(key string, rev interface{}) error {
+	var err error
 	start_time := time.Now()
-	var i int = 0
-	defer meta_svc.logger.Debugf("Took %vs to delete %v from metakv, retried=%v\n", time.Since(start_time).Seconds(), key, i)
+	defer meta_svc.logger.Debugf("Took %vs to delete %v from metakv\n", time.Since(start_time).Seconds(), key)
 
-	for i = 0; i < base.MaxNumOfMetakvRetries; i++ {
-		err := metakv.Delete(getPathFromKey(key), rev)
+	metakvOpDelFunc := func() error {
+		err = metakv.Delete(getPathFromKey(key), rev)
 		if err == metakv.ErrRevMismatch {
-			return service_def.ErrorRevisionMismatch
+			err = service_def.ErrorRevisionMismatch
+			return nil
 		} else if err == nil {
 			return nil
 		} else {
-			meta_svc.logger.Errorf("metakv.Delete failed. key=%v, rev=%v, err=%v, num_of_retry=%v\n", key, rev, err, i)
+			meta_svc.logger.Warnf("metakv.Delete failed. key=%v, rev=%v, err=%v\n", key, rev, err)
+			return err
 		}
 	}
-	return service_def.MetaKVFailedAfterMaxTries
+
+	expOpErr := meta_svc.utils.ExponentialBackoffExecutor("metakv_svc_delOp", base.RetryIntervalMetakv, base.MaxNumOfMetakvRetries,
+		base.MetaKvBackoffFactor, metakvOpDelFunc)
+
+	if expOpErr != nil {
+		// Executor will return error only if it timed out with ErrorFailedAfterRetry. Log it and override the ret err
+		meta_svc.logger.Errorf("metakv.Delete failed. key=%v, rev=%v, err=%v\n", key, rev, err)
+		err = expOpErr
+	}
+	return err
 }
 
 func (meta_svc *MetaKVMetadataSvc) DelWithCatalog(catalogKey, key string, rev interface{}) error {
@@ -158,44 +206,59 @@ func (meta_svc *MetaKVMetadataSvc) DelWithCatalog(catalogKey, key string, rev in
 }
 
 //Wrap metakv.RecursiveDelete with retries
-//if metakv operation failed after max number of retries, return service_def.MetaKVFailedAfterMaxTries
+//if metakv operation failed after max number of retries, return ErrorFailedAfterRetry
 func (meta_svc *MetaKVMetadataSvc) DelAllFromCatalog(catalogKey string) error {
 	start_time := time.Now()
-	var i int = 0
-	defer meta_svc.logger.Debugf("Took %vs to RecursiveDelete for catalogKey=%v to metakv, retried =%v\n", time.Since(start_time).Seconds(), catalogKey, i)
+	defer meta_svc.logger.Debugf("Took %vs to RecursiveDelete for catalogKey=%v to metakv\n", time.Since(start_time).Seconds(), catalogKey)
 
-	for i = 0; i < base.MaxNumOfMetakvRetries; i++ {
+	metakvOpDelRFunc := func() error {
 		err := metakv.RecursiveDelete(GetCatalogPathFromCatalogKey(catalogKey))
 		if err == nil {
-			return nil
+			return err
 		} else {
-			meta_svc.logger.Errorf("metakv.RecursiveDelete failed. catalogKey=%v, err=%v, num_of_retry=%v\n", catalogKey, err, i)
-
+			meta_svc.logger.Warnf("metakv.RecursiveDelete failed. catalogKey=%v, err=%v\n", catalogKey, err)
+			return err
 		}
 	}
-	return service_def.MetaKVFailedAfterMaxTries
+
+	expOpErr := meta_svc.utils.ExponentialBackoffExecutor("metakv_svc_delROp", base.RetryIntervalMetakv, base.MaxNumOfMetakvRetries,
+		base.MetaKvBackoffFactor, metakvOpDelRFunc)
+
+	if expOpErr != nil {
+		// Executor will return error only if it timed out with ErrorFailedAfterRetry. Log it and override the ret err
+		meta_svc.logger.Errorf("metakv.RecursiveDelete failed after max retry. catalogKey=%v\n", catalogKey)
+	}
+	return expOpErr
 }
 
 //Wrap metakv.ListAllChildren with retries
-//if metakv operation failed after max number of retries, return service_def.MetaKVFailedAfterMaxTries
+//if metakv operation failed after max number of retries, return ErrorFailedAfterRetry
 func (meta_svc *MetaKVMetadataSvc) GetAllMetadataFromCatalog(catalogKey string) ([]*service_def.MetadataEntry, error) {
-	start_time := time.Now()
-	var i int = 0
-	defer meta_svc.logger.Debugf("Took %vs to ListAllChildren for catalogKey=%v to metakv, retried =%v\n", time.Since(start_time).Seconds(), catalogKey, i)
 	var entries = make([]*service_def.MetadataEntry, 0)
+	start_time := time.Now()
+	defer meta_svc.logger.Debugf("Took %vs to ListAllChildren for catalogKey=%v to metakv\n", time.Since(start_time).Seconds(), catalogKey)
 
-	for i = 0; i < base.MaxNumOfMetakvRetries; i++ {
+	metakvOpGetAllMetadataFunc := func() error {
 		kvEntries, err := metakv.ListAllChildren(GetCatalogPathFromCatalogKey(catalogKey))
-		if err != nil {
-			meta_svc.logger.Errorf("metakv.ListAllChildren failed. path=%v, err=%v, num_of_retry=%v\n", GetCatalogPathFromCatalogKey(catalogKey), err, i)
-		} else {
+		if err == nil {
 			for _, kvEntry := range kvEntries {
 				entries = append(entries, &service_def.MetadataEntry{GetKeyFromPath(kvEntry.Path), kvEntry.Value, kvEntry.Rev})
 			}
-			return entries, nil
+			return err
+		} else {
+			meta_svc.logger.Warnf("metakv.ListAllChildren failed. path=%v, err=%v\n", GetCatalogPathFromCatalogKey(catalogKey), err)
+			return err
 		}
 	}
-	return entries, service_def.MetaKVFailedAfterMaxTries
+
+	expOpErr := meta_svc.utils.ExponentialBackoffExecutor("metakv_svc_getAllMetaOp", base.RetryIntervalMetakv, base.MaxNumOfMetakvRetries,
+		base.MetaKvBackoffFactor, metakvOpGetAllMetadataFunc)
+
+	if expOpErr != nil {
+		// Executor will return error only if it timed out with ErrorFailedAfterRetry. Log it and override the ret err
+		meta_svc.logger.Errorf("metakv.ListAllChildren failed after max retry. path=%v\n", GetCatalogPathFromCatalogKey(catalogKey))
+	}
+	return entries, expOpErr
 }
 
 // get all keys from a catalog

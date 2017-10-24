@@ -27,6 +27,9 @@ var LocalHostNameIpv6 = "[::1]"
 
 var DefaultAdminPort uint16 = 8091
 
+// Exponential backoff factor
+var MetaKvBackoffFactor = 2
+
 // URL Paths for retrieving cluster info
 var PoolsPath = "/pools"
 var DefaultPoolPath = "/pools/default"
@@ -145,6 +148,7 @@ var InvalidCerfiticateError = errors.New("certificate must be a single, PEM-enco
 var ErrorNoSourceNozzle = errors.New("Invalid configuration. No source nozzle can be constructed since the source kv nodes are not the master for any vbuckets.")
 var ErrorNoTargetNozzle = errors.New("Invalid configuration. No target nozzle can be constructed.")
 var ErrorMasterNegativeIndex = errors.New("Master index is negative. ")
+var ErrorFailedAfterRetry = errors.New("Operation failed after max retries. ")
 
 // constants used for remote cluster references
 const (
@@ -346,9 +350,6 @@ var HELO_FEATURE_XATTR uint16 = 0x06
 // new XATTR bit in data type field in dcp mutations
 var PROTOCOL_BINARY_DATATYPE_XATTR uint8 = 0x04
 
-// max retry for metakv related operations
-var MaxRetryMetakvOps = 5
-
 // length of random id
 var LengthOfRandomId = 16
 
@@ -435,10 +436,10 @@ var ReplSpecCheckInterval = 15 * time.Second
 var MemStatsLogInterval = 120 * time.Second
 
 // max number of retries for metakv ops
-var MaxNumOfMetakvRetries = 7
+var MaxNumOfMetakvRetries = 5
 
 // interval between metakv retries
-var RetryIntervalMetakv = 1000 * time.Millisecond
+var RetryIntervalMetakv = 500 * time.Millisecond
 
 // In order for dcp flow control to work correctly, the number of mutations in dcp buffer
 // should be no larger than the size of the dcp data channel.

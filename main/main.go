@@ -98,7 +98,7 @@ func main() {
 
 	host :=top_svc.GetLocalHostName()
 
-	metakv_svc, err := metadata_svc.NewMetaKVMetadataSvc(nil)
+	metakv_svc, err := metadata_svc.NewMetaKVMetadataSvc(nil, utils)
 	if err != nil {
 		fmt.Printf("Error starting metadata service. err=%v\n", err)
 		os.Exit(1)
