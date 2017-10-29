@@ -523,8 +523,14 @@ func (feed *UprFeed) doStreamClose(ch chan *UprEvent) {
 	// release the lock before sending uprEvents to ch, which may block
 	feed.mu.RUnlock()
 
+loop:
 	for _, uprEvent := range uprEvents {
-		ch <- uprEvent
+		select {
+		case ch <- uprEvent:
+		case <-feed.closer:
+			logging.Infof("Feed has been closed. Aborting doStreamClose.")
+			break loop
+		}
 	}
 }
 
