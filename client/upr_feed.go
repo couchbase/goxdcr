@@ -376,11 +376,6 @@ func (feed *UprFeed) UprRequestStream(vbno, opaqueMSB uint16, flags uint32,
 	binary.BigEndian.PutUint64(rq.Extras[32:40], snapStart)
 	binary.BigEndian.PutUint64(rq.Extras[40:48], snapEnd)
 
-	if err := feed.conn.Transmit(rq); err != nil {
-		logging.Errorf("Error in StreamRequest %s", err.Error())
-		return err
-	}
-
 	stream := &UprStream{
 		Vbucket:  vbno,
 		Vbuuid:   vuuid,
@@ -389,8 +384,18 @@ func (feed *UprFeed) UprRequestStream(vbno, opaqueMSB uint16, flags uint32,
 	}
 
 	feed.mu.Lock()
-	defer feed.mu.Unlock()
 	feed.vbstreams[vbno] = stream
+	feed.mu.Unlock()
+
+	if err := feed.conn.Transmit(rq); err != nil {
+		logging.Errorf("Error in StreamRequest %s", err.Error())
+		// If an error occurs during transmit, then the UPRFeed will keep the stream
+		// in the vbstreams map. This is to prevent nil lookup from any previously
+		// sent stream requests.
+		// Any client that has ever started via this call, regardless of return code,
+		// should expect a potential UPR_CLOSESTREAM message.
+		return err
+	}
 
 	return nil
 }
