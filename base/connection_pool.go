@@ -28,8 +28,7 @@ import (
 )
 
 const (
-	MAX_PAYLOAD_SIZE  uint32        = 1000
-	ReadWriteDeadline time.Duration = 1 * time.Second
+	DcpWriteTimeout time.Duration = 120 * time.Second
 )
 
 type ConnType int
@@ -117,6 +116,7 @@ var _connPoolMgr connPoolMgr
 func init() {
 	ConnPoolMgr()
 	mcc.DefaultDialTimeout = ShortHttpTimeout
+	mcc.DefaultWriteTimeout = DcpWriteTimeout
 }
 
 var WrongConnTypeError = errors.New("There is an exiting pool with the same name but with different connection type")
