@@ -384,6 +384,8 @@ func (feed *UprFeed) UprRequestStream(vbno, opaqueMSB uint16, flags uint32,
 	}
 
 	feed.mu.Lock()
+	// Any client that has ever called this method, regardless of return code,
+	// should expect a potential UPR_CLOSESTREAM message due to this new map entry prior to Transmit.
 	feed.vbstreams[vbno] = stream
 	feed.mu.Unlock()
 
@@ -392,8 +394,6 @@ func (feed *UprFeed) UprRequestStream(vbno, opaqueMSB uint16, flags uint32,
 		// If an error occurs during transmit, then the UPRFeed will keep the stream
 		// in the vbstreams map. This is to prevent nil lookup from any previously
 		// sent stream requests.
-		// Any client that has ever started via this call, regardless of return code,
-		// should expect a potential UPR_CLOSESTREAM message.
 		return err
 	}
 
