@@ -712,12 +712,13 @@ func (dcp *DcpNozzle) processData() (err error) {
 				// https://github.com/couchbaselabs/dcp-documentation/blob/master/documentation/commands/stream-end.md
 				vbno := m.VBucket
 				stream_status, err := dcp.GetStreamState(vbno)
+				// It is possible for DCP to receive a UPR_STREAMEND even if the original StreamRequest sent was not
+				// successful. In that case, make sure it is a no-op, by checking the status, which should not be active.
 				if err == nil && stream_status == Dcp_Stream_Active {
 					err_streamend := fmt.Errorf("dcp stream for vb=%v is closed by producer", m.VBucket)
 					dcp.Logger().Infof("%v: %v", dcp.Id(), err_streamend)
 					dcp.handleVBError(vbno, err_streamend)
 				}
-
 			} else {
 				// Regular mutations coming in from DCP stream
 				if dcp.IsOpen() {
