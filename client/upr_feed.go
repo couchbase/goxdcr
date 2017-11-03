@@ -60,7 +60,10 @@ type UprStream struct {
 // UprFeed represents an UPR feed. A feed contains a connection to a single
 // host and multiple vBuckets
 type UprFeed struct {
-	mu          sync.RWMutex
+	// lock for feed.vbstreams
+	muVbstreams sync.RWMutex
+	// lock for feed.closed
+	muClosed   sync.RWMutex
 	C           <-chan *UprEvent            // Exported channel for receiving UPR events
 	vbstreams   map[uint16]*UprStream       // vb->stream mapping
 	closer      chan bool                   // closer
@@ -383,11 +386,11 @@ func (feed *UprFeed) UprRequestStream(vbno, opaqueMSB uint16, flags uint32,
 		EndSeq:   endSequence,
 	}
 
-	feed.mu.Lock()
+	feed.muVbstreams.Lock()
 	// Any client that has ever called this method, regardless of return code,
 	// should expect a potential UPR_CLOSESTREAM message due to this new map entry prior to Transmit.
 	feed.vbstreams[vbno] = stream
-	feed.mu.Unlock()
+	feed.muVbstreams.Unlock()
 
 	if err := feed.conn.Transmit(rq); err != nil {
 		logging.Errorf("Error in StreamRequest %s", err.Error())
@@ -429,8 +432,8 @@ func (feed *UprFeed) GetError() error {
 }
 
 func (feed *UprFeed) validateCloseStream(vbno uint16) error {
-	feed.mu.RLock()
-	defer feed.mu.RUnlock()
+	feed.muVbstreams.RLock()
+	defer feed.muVbstreams.RUnlock()
 
 	if feed.vbstreams[vbno] == nil {
 		return fmt.Errorf("Stream for vb %d has not been requested", vbno)
@@ -506,7 +509,7 @@ func handleStreamRequest(
 
 // generate stream end responses for all active vb streams
 func (feed *UprFeed) doStreamClose(ch chan *UprEvent) {
-	feed.mu.RLock()
+	feed.muVbstreams.RLock()
 
 	uprEvents := make([]*UprEvent, len(feed.vbstreams))
 	index := 0
@@ -521,7 +524,7 @@ func (feed *UprFeed) doStreamClose(ch chan *UprEvent) {
 	}
 
 	// release the lock before sending uprEvents to ch, which may block
-	feed.mu.RUnlock()
+	feed.muVbstreams.RUnlock()
 
 loop:
 	for _, uprEvent := range uprEvents {
@@ -573,9 +576,9 @@ loop:
 				vb := vbOpaque(pkt.Opaque)
 				uprStats.TotalBytes = uint64(bytes)
 
-				feed.mu.RLock()
+				feed.muVbstreams.RLock()
 				stream := feed.vbstreams[vb]
-				feed.mu.RUnlock()
+				feed.muVbstreams.RUnlock()
 
 				switch pkt.Opcode {
 				case gomemcached.UPR_STREAMREQ:
@@ -590,9 +593,9 @@ loop:
 						// rollback stream
 						logging.Infof("UPR_STREAMREQ with rollback %d for vb %d Failed: %v", rb, vb, err)
 						// delete the stream from the vbmap for the feed
-						feed.mu.Lock()
+						feed.muVbstreams.Lock()
 						delete(feed.vbstreams, vb)
-						feed.mu.Unlock()
+						feed.muVbstreams.Unlock()
 
 					} else if status == gomemcached.SUCCESS {
 						event = makeUprEvent(pkt, stream)
@@ -611,9 +614,9 @@ loop:
 							Error:   err,
 						}
 						// delete the stream
-						feed.mu.Lock()
+						feed.muVbstreams.Lock()
 						delete(feed.vbstreams, vb)
-						feed.mu.Unlock()
+						feed.muVbstreams.Unlock()
 					}
 
 				case gomemcached.UPR_MUTATION,
@@ -637,9 +640,9 @@ loop:
 					logging.Infof("Stream Ended for vb %d", vb)
 					sendAck = true
 
-					feed.mu.Lock()
+					feed.muVbstreams.Lock()
 					delete(feed.vbstreams, vb)
-					feed.mu.Unlock()
+					feed.muVbstreams.Unlock()
 
 				case gomemcached.UPR_SNAPSHOT:
 					if stream == nil {
@@ -669,9 +672,9 @@ loop:
 					logging.Infof("Stream Closed for vb %d StreamEnd simulated", vb)
 					sendAck = true
 
-					feed.mu.Lock()
+					feed.muVbstreams.Lock()
 					delete(feed.vbstreams, vb)
-					feed.mu.Unlock()
+					feed.muVbstreams.Unlock()
 
 				case gomemcached.UPR_ADDSTREAM:
 					logging.Infof("Opcode %v not implemented", pkt.Opcode)
@@ -704,9 +707,9 @@ loop:
 					break loop
 				}
 
-				feed.mu.RLock()
+				feed.muVbstreams.RLock()
 				l := len(feed.vbstreams)
-				feed.mu.RUnlock()
+				feed.muVbstreams.RUnlock()
 
 				if event.Opcode == gomemcached.UPR_CLOSESTREAM && l == 0 {
 					logging.Infof("No more streams")
@@ -781,8 +784,8 @@ func vbOpaque(opq32 uint32) uint16 {
 
 // Close this UprFeed.
 func (feed *UprFeed) Close() {
-	feed.mu.Lock()
-	defer feed.mu.Unlock()
+	feed.muClosed.Lock()
+	defer feed.muClosed.Unlock()
 	if !feed.closed {
 		close(feed.closer)
 		feed.closed = true
@@ -791,7 +794,7 @@ func (feed *UprFeed) Close() {
 
 // check if the UprFeed has been closed
 func (feed *UprFeed) Closed() bool {
-	feed.mu.RLock()
-	defer feed.mu.RUnlock()
+	feed.muClosed.RLock()
+	defer feed.muClosed.RUnlock()
 	return feed.closed
 }
