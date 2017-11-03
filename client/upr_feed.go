@@ -688,7 +688,7 @@ loop:
 						Opaque: pkt.Opaque,
 					}
 
-					if _, err := noop.Transmit(mc); err != nil {
+					if err := feed.conn.TransmitResponse(noop); err != nil {
 						logging.Warnf("failed to transmit command %s. Error %s", noop.Opcode.String(), err.Error())
 					}
 				default:
