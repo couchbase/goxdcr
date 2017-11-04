@@ -12,8 +12,10 @@ package pipeline_ctx
 import (
 	"errors"
 	"fmt"
+	"github.com/couchbase/goxdcr/base"
 	common "github.com/couchbase/goxdcr/common"
 	"github.com/couchbase/goxdcr/log"
+	"github.com/couchbase/goxdcr/simple_utils"
 	"sync"
 )
 
@@ -83,29 +85,56 @@ func (ctx *PipelineRuntimeCtx) Start(params map[string]interface{}) error {
 }
 
 func (ctx *PipelineRuntimeCtx) Stop() error {
+	topic := ""
+	if ctx.pipeline != nil {
+		topic = ctx.pipeline.Topic()
+	}
+
+	ctx.logger.Infof("%v Pipeline context is stopping...", topic)
+
+	// put a timeout around service stopping to avoid being stuck
+	err := simple_utils.ExecWithTimeout(ctx.stopServices, base.TimeoutRuntimeContextStop, ctx.logger)
+	if err != nil {
+		ctx.logger.Warnf("%v error stopping pipeline context. err=%v", topic, err)
+	} else {
+		ctx.logger.Infof("%v pipeline context has stopped successfully", topic)
+	}
+	return err
+}
+
+// stopServices() never returns non-nil error
+// it has error in sigurature just to meet the requirement of ExecWithTimeout.
+func (ctx *PipelineRuntimeCtx) stopServices() error {
 	ctx.runtime_svcs_lock.RLock()
 	defer ctx.runtime_svcs_lock.RUnlock()
 
-	ctx.logger.Infof("Pipeline context is stopping...")
-	var err error = nil
-	errMap := make(map[string]error)
+	wait_grp := &sync.WaitGroup{}
 
 	//stop all registered services
 	for name, service := range ctx.runtime_svcs {
-		err1 := service.Stop()
-		if err1 != nil {
-			errMap[name] = err1
-			ctx.logger.Errorf("Failed to stop service %v - %v", name, err1)
-		}
+		// stop services in parallel to ensure that all services get their turns
+		wait_grp.Add(1)
+		go ctx.stopService(name, service, wait_grp)
 	}
 
-	if len(errMap) == 0 {
-		ctx.isRunning = false
-		ctx.logger.Infof("Pipeline context for %v has been stopped", ctx.pipeline.InstanceId())
-	} else {
-		err = errors.New(fmt.Sprintf("Pipeline runtime context failed to stop, err = %v\n", errMap))
+	wait_grp.Wait()
+	return nil
+}
+
+func (ctx *PipelineRuntimeCtx) stopService(name string, service common.PipelineService, wait_grp *sync.WaitGroup) {
+	defer wait_grp.Done()
+
+	topic := ""
+	if ctx.pipeline != nil {
+		topic = ctx.pipeline.Topic()
 	}
-	return err
+
+	err := service.Stop()
+	if err != nil {
+		ctx.logger.Warnf("%v failed to stop service %s. err=%v", topic, name, err)
+	} else {
+		ctx.logger.Infof("%v successfully stopped service %s.", topic, name)
+	}
 }
 
 func (ctx *PipelineRuntimeCtx) Pipeline() common.Pipeline {
