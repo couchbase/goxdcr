@@ -299,16 +299,39 @@ func formatErrMsg(err_ch chan partError) map[string]error {
 	return errMap
 }
 
-func (genericPipeline *GenericPipeline) stopPart(part common.Part) error {
-	var err error = nil
-	genericPipeline.logger.Infof("%v trying to stop part %v\n", genericPipeline.InstanceId(), part.Id())
-	err = simple_utils.ExecWithTimeout(part.Stop, 1000*time.Millisecond, genericPipeline.logger)
-	if err == nil {
-		genericPipeline.logger.Infof("part %v has been stopped\n", part.Id())
+func (genericPipeline *GenericPipeline) stopPartsWithTimeout() error {
+	// put a timeout around part stopping to avoid being stuck
+	err := simple_utils.ExecWithTimeout(genericPipeline.stopParts, base.TimeoutPartsStop, genericPipeline.logger)
+	if err != nil {
+		genericPipeline.logger.Warnf("%v error stopping pipeline parts. err=%v", genericPipeline.InstanceId(), err)
 	} else {
-		genericPipeline.logger.Infof("Failed to stop part %v, err=%v, let it alone to die\n", part.Id(), err)
+		genericPipeline.logger.Infof("%v pipeline parts have stopped successfully", genericPipeline.InstanceId())
 	}
 	return err
+}
+
+// stopParts() never returns non-nil error
+// it has error in sigurature just to meet the requirement of ExecWithTimeout.
+func (genericPipeline *GenericPipeline) stopParts() error {
+	partsMap := GetAllParts(genericPipeline)
+	wait_grp := &sync.WaitGroup{}
+	for _, part := range partsMap {
+		wait_grp.Add(1)
+		// stop parts in parallel to ensure that all parts get their turns
+		go genericPipeline.stopPart(part, wait_grp)
+	}
+
+	wait_grp.Wait()
+	return nil
+}
+
+func (genericPipeline *GenericPipeline) stopPart(part common.Part, wait_grp *sync.WaitGroup) {
+	defer wait_grp.Done()
+	genericPipeline.logger.Infof("%v trying to stop part %v\n", genericPipeline.InstanceId(), part.Id())
+	err := part.Stop()
+	if err != nil {
+		genericPipeline.logger.Warnf("%v failed to stop part %v, err=%v, let it alone to die\n", genericPipeline.InstanceId(), part.Id(), err)
+	}
 }
 
 func (genericPipeline *GenericPipeline) searchUpStreamsWithStartingPoint(target_part common.Part, starting_part common.Part) []common.Part {
@@ -369,33 +392,20 @@ func (genericPipeline *GenericPipeline) Stop() error {
 	genericPipeline.ReportProgress("Async listeners have been stopped")
 
 	// stop services before stopping parts to avoid spurious errors from services
-	err = genericPipeline.context.Stop()
-	if err != nil {
-		return err
-	}
-	genericPipeline.logger.Infof("%v Runtime context has been stopped", genericPipeline.InstanceId())
+	genericPipeline.context.Stop()
 	genericPipeline.ReportProgress("Runtime context has been stopped")
 
 	//close the sources
 	for _, source := range genericPipeline.sources {
 		err = source.Close()
 		if err != nil {
-			return err
+			genericPipeline.logger.Warnf("%v failed to close source %v. err=%v", genericPipeline.InstanceId(), source.Id(), err)
 		}
 	}
-	genericPipeline.logger.Debugf("%v Incoming nozzles have been closed, preparing to stop.", genericPipeline.InstanceId())
+	genericPipeline.logger.Infof("%v source nozzles have been closed", genericPipeline.InstanceId())
+	genericPipeline.ReportProgress("Source nozzles have been closed")
 
-	partsMap := GetAllParts(genericPipeline)
-	for _, part := range partsMap {
-		go func(part common.Part) {
-			oneErr := genericPipeline.stopPart(part)
-			if oneErr != nil {
-				genericPipeline.logger.Infof("%v Source nozzle %v failed to stop in time, left it alone to die.", genericPipeline.InstanceId(), part.Id())
-			}
-
-		}(part)
-	}
-
+	genericPipeline.stopPartsWithTimeout()
 	genericPipeline.ReportProgress("Pipeline has been stopped")
 
 	err = genericPipeline.SetState(common.Pipeline_Stopped)

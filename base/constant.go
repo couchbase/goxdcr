@@ -407,6 +407,9 @@ var ThresholdForThroughSeqnoComputation = 100 * time.Millisecond
 // interval for printing replication runtime stats to log file
 var StatsLogInterval = 30 * time.Second
 
+var TimeoutRuntimeContextStop = 5 * time.Second
+var TimeoutPartsStop = 10 * time.Second
+
 // --------------- Constants that are configurable -----------------
 
 // timeout for checkpointing attempt before pipeline is stopped - to put an upper bound on the delay of pipeline stop/restart
