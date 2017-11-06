@@ -338,9 +338,15 @@ func (dcp *DcpNozzle) Stop() error {
 	dcp.closeUprStreams()
 	dcp.closeUprFeed()
 
-	err = dcp.client.Close()
-	if err != nil {
-		dcp.Logger().Warnf("%v Error closing dcp client. err=%v\n", dcp.Id(), err)
+	// there is no need to lock dcp.client since it is accessed only in two places, Start() and Stop(),
+	// which cannot be called concurrently due to the pipeline updater setup
+	if dcp.client != nil {
+		err = dcp.client.Close()
+		if err != nil {
+			dcp.Logger().Warnf("%v Error closing dcp client. err=%v\n", dcp.Id(), err)
+		}
+	} else {
+		dcp.Logger().Infof("%v skipping closing client since it is nil.", dcp.Id())
 	}
 
 	dcp.Logger().Debugf("%v received %v items, sent %v items\n", dcp.Id(), dcp.counterReceived(), dcp.counterSent())
