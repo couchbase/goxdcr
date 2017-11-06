@@ -40,7 +40,7 @@ const (
 
 const (
 	health_check_interval      = 120 * time.Second
-	default_max_dcp_miss_count = 3
+	default_max_dcp_miss_count = 10
 )
 
 var pipeline_supervisor_setting_defs base.SettingDefinitions = base.SettingDefinitions{supervisor.HEARTBEAT_TIMEOUT: base.NewSettingDef(reflect.TypeOf((*time.Duration)(nil)), false),

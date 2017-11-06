@@ -985,19 +985,6 @@ func (dcp *DcpNozzle) CheckStuckness(dcp_stats map[string]map[string]string) err
 		return nil
 	}
 
-	if counter_received > dcp.counterSent() {
-		// if dcp nozzle is holding an item that has not been processed by downstream parts,
-		// cannot declare dcp broken regardless of what other stats say
-		dcp.dcp_miss_count = 0
-		return nil
-	}
-
-	// skip checking if dcp still has inactive streams
-	if len(dcp.inactiveDcpStreams()) > 0 {
-		dcp.dcp_miss_count = 0
-		return nil
-	}
-
 	// check if there are items remaining in dcp
 	dcp_has_items := dcp.dcpHasRemainingItemsForXdcr(dcp_stats)
 	if !dcp_has_items {
