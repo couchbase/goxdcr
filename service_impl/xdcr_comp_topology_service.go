@@ -56,15 +56,22 @@ func (top_svc *XDCRTopologySvc) MyHostAddr() (string, error) {
 }
 
 func (top_svc *XDCRTopologySvc) MyMemcachedAddr() (string, error) {
-	port, err := top_svc.getHostMemcachedPort()
+	nodeInfoMap, err := top_svc.getHostInfo()
 	if err != nil {
 		return "", err
 	}
 
-	hostName, err := top_svc.getHostName()
+	port, err := top_svc.getHostMemcachedPortFromHostInfo(nodeInfoMap)
 	if err != nil {
 		return "", err
 	}
+
+	hostAddr, err := top_svc.getHostAddrFromHostInfo(nodeInfoMap)
+	if err != nil {
+		return "", err
+	}
+
+	hostName := top_svc.utils.GetHostName(hostAddr)
 
 	return top_svc.utils.GetHostAddr(hostName, port), nil
 }
@@ -141,6 +148,11 @@ func (top_svc *XDCRTopologySvc) getHostAddr() (string, error) {
 		return "", err
 	}
 
+	return top_svc.getHostAddrFromHostInfo(nodeInfoMap)
+}
+
+// get address of current node
+func (top_svc *XDCRTopologySvc) getHostAddrFromHostInfo(nodeInfoMap map[string]interface{}) (string, error) {
 	hostAddr, ok := nodeInfoMap[base.HostNameKey]
 	if !ok {
 		// should never get here
@@ -165,12 +177,7 @@ func (top_svc *XDCRTopologySvc) getHostName() (string, error) {
 }
 
 // get memcached port of current node
-func (top_svc *XDCRTopologySvc) getHostMemcachedPort() (uint16, error) {
-	nodeInfoMap, err := top_svc.getHostInfo()
-	if err != nil {
-		return 0, err
-	}
-
+func (top_svc *XDCRTopologySvc) getHostMemcachedPortFromHostInfo(nodeInfoMap map[string]interface{}) (uint16, error) {
 	ports, ok := nodeInfoMap[base.PortsKey]
 	if !ok {
 		// should never get here
