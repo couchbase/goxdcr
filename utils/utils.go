@@ -30,6 +30,8 @@ import (
 	"unicode/utf8"
 )
 
+var NonExistentBucketError error = errors.New("Bucket doesn't exist")
+
 type Utilities struct {
 	logger_utils *log.CommonLogger
 }
@@ -65,7 +67,7 @@ type CouchBucket struct {
 }
 
 func (u *Utilities) GetNonExistentBucketError() error {
-	return errors.New("Bucket doesn't exist")
+	return NonExistentBucketError
 }
 
 //func (u *Utilities) GetLoggerUtils (*log.CommonLogger) {
