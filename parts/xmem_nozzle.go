@@ -2524,9 +2524,6 @@ func (xmem *XmemNozzle) writeToClientWithoutThrottling(client *xmemClient, bytes
 
 		} else if isNetError(err) {
 			client.reportOpFailure(false)
-			wait_time := time.Duration(math.Pow(2, float64(client.curWriteFailureCounter()))*float64(rand.Intn(10)/10)) * xmem.config.writeTimeout
-			xmem.Logger().Errorf("%v batchSend Failed, retry after %v\n", xmem.Id(), wait_time)
-			time.Sleep(wait_time)
 		}
 
 		return err, rev
