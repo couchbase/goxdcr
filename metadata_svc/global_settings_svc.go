@@ -83,15 +83,6 @@ func (service *GlobalSettingsSvc) GetDefaultGlobalSettings() (*metadata.GlobalSe
 			// initialize default process settings if it does not exist
 			defaultGlobalSettings = *metadata.DefaultGlobalSettings()
 
-			service.SetDefaultGlobalSettings(&defaultGlobalSettings)
-
-			// reload default settings to get its revision field set correctly
-			_, rev, err := service.metadata_svc.Get(pKey)
-			if err != nil {
-				return nil, err
-			}
-			// set rev number
-			defaultGlobalSettings.Revision = rev
 		} else {
 			return nil, err
 		}
