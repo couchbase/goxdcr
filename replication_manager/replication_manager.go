@@ -971,9 +971,6 @@ func exitProcess_once(byForce bool) {
 	//clean up the connection pool
 	defer base.ConnPoolMgr().Close()
 
-	//clean up the tcp connection pool
-	defer base.TCPConnPoolMgr().Close()
-
 	if !byForce {
 		cleanup()
 	}

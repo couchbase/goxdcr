@@ -1165,7 +1165,8 @@ func (capi *CapiNozzle) initialize(settings map[string]interface{}) error {
 	}
 
 	capi.Logger().Debugf("%v about to start initializing connection", capi.Id())
-	err = capi.initializeConn()
+	// resetConn() initializes the connection when called for the first time
+	err = capi.resetConn()
 	if err == nil {
 		capi.Logger().Infof("%v connection initialization completed.", capi.Id())
 	} else {
@@ -1219,44 +1220,20 @@ func (capi *CapiNozzle) getCouchApiBaseHostAndPathForVB(vbno uint16) (string, st
 	return couchApiBaseHost, couchApiBasePath, nil
 }
 
-func (capi *CapiNozzle) initializeConn() error {
-	return capi.initializeOrResetConn(true)
-}
-
+// resetConn() initializes the connection when called for the first time
 func (capi *CapiNozzle) resetConn() error {
-	return capi.initializeOrResetConn(false)
-}
-
-func (capi *CapiNozzle) initializeOrResetConn(initializing bool) error {
-	capi.Logger().Infof("%v resetting capi connection. initializing=%v\n", capi.Id(), initializing)
+	capi.Logger().Infof("%v resetting capi connection. \n", capi.Id())
 
 	if capi.validateRunningState() != nil {
 		capi.Logger().Infof("%v is not running, no need to resetConn", capi.Id())
 		return nil
 	}
 
-	var pool *base.TCPConnPool
-	var err error
-
-	if initializing {
-		pool, err = base.TCPConnPoolMgr().GetOrCreatePool(capi.getPoolName(capi.config), capi.config.connectStr, base.DefaultCAPIConnectionSize)
+	newClient, err := capi.utils.NewTCPConn(capi.config.connectStr)
+	if err == nil {
+		capi.setClient(newClient)
+		capi.Logger().Infof("%v Connection reset succeeded", capi.Id())
 	} else {
-		pool = base.TCPConnPoolMgr().GetPool(capi.getPoolName(capi.config))
-		if pool == nil {
-			// make sure that err is not nil when pool is nil
-			err = errors.New("Error retrieving connection pool")
-		}
-	}
-
-	if pool != nil {
-		var newClient *net.TCPConn
-		newClient, err = pool.GetNew()
-		if err == nil && newClient != nil {
-			capi.setClient(newClient)
-		}
-	}
-
-	if err != nil {
 		capi.Logger().Errorf("%v - Connection reset failed. err=%v\n", capi.Id(), err)
 		capi.handleGeneralError(err)
 	}

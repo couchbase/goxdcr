@@ -7,6 +7,7 @@ import (
 	mcc "github.com/couchbase/gomemcached/client"
 	base "github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
+	"net"
 	"net/http"
 	"regexp"
 	"time"
@@ -98,4 +99,5 @@ type UtilsIface interface {
 	ValidateSettings(defs base.SettingDefinitions, settings map[string]interface{}, logger *log.CommonLogger) error
 	SendHELOWithXattrFeature(client mcc.ClientIface, userAgent string, readTimeout, writeTimeout time.Duration, logger *log.CommonLogger) (xattrEnabled bool, err error)
 	CheckWhetherClusterIsESBasedOnBucketInfo(bucketInfo map[string]interface{}) bool
+	NewTCPConn(hostName string) (*net.TCPConn, error)
 }

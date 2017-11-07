@@ -9,6 +9,7 @@ import http "net/http"
 import log "github.com/couchbase/goxdcr/log"
 import memcached "github.com/couchbase/gomemcached/client"
 import mock "github.com/stretchr/testify/mock"
+import net "net"
 import regexp "regexp"
 import time "time"
 
@@ -1289,6 +1290,29 @@ func (_m *UtilsIface) NewEnhancedError(msg string, err error) error {
 	}
 
 	return r0
+}
+
+// NewTCPConn provides a mock function with given fields: hostName
+func (_m *UtilsIface) NewTCPConn(hostName string) (*net.TCPConn, error) {
+	ret := _m.Called(hostName)
+
+	var r0 *net.TCPConn
+	if rf, ok := ret.Get(0).(func(string) *net.TCPConn); ok {
+		r0 = rf(hostName)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*net.TCPConn)
+		}
+	}
+
+	var r1 error
+	if rf, ok := ret.Get(1).(func(string) error); ok {
+		r1 = rf(hostName)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
 }
 
 // ParseHighSeqnoAndVBUuidFromStats provides a mock function with given fields: vbnos, stats_map, high_seqno_and_vbuuid_map

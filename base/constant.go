@@ -409,6 +409,7 @@ var StatsLogInterval = 30 * time.Second
 
 var TimeoutRuntimeContextStop = 5 * time.Second
 var TimeoutPartsStop = 10 * time.Second
+var NetTCP = "tcp"
 
 // --------------- Constants that are configurable -----------------
 

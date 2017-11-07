@@ -1627,3 +1627,35 @@ func (u *Utilities) IsSeriousNetError(err error) bool {
 		strings.Contains(errStr, "http: can't write HTTP request on broken connection") ||
 		(ok && (!netError.Temporary() && !netError.Timeout()))
 }
+
+func (u *Utilities) NewTCPConn(hostName string) (*net.TCPConn, error) {
+	conn, err := base.DialTCPWithTimeout(base.NetTCP, hostName)
+	if err != nil {
+		return nil, err
+	}
+	if conn == nil {
+		return nil, fmt.Errorf("Failed to set up connection to %v", hostName)
+	}
+	tcpConn, ok := conn.(*net.TCPConn)
+	if !ok {
+		// should never get here
+		conn.Close()
+		return nil, fmt.Errorf("The connection to %v returned is not TCP type", hostName)
+	}
+
+	// same settings as erlang xdcr
+	err = tcpConn.SetKeepAlive(true)
+	if err == nil {
+		err = tcpConn.SetKeepAlivePeriod(base.KeepAlivePeriod)
+	}
+	if err == nil {
+		err = tcpConn.SetNoDelay(false)
+	}
+
+	if err != nil {
+		tcpConn.Close()
+		return nil, fmt.Errorf("Error setting options on the connection to %v. err=%v", hostName, err)
+	}
+
+	return tcpConn, nil
+}
