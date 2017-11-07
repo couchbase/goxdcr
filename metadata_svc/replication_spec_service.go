@@ -471,7 +471,7 @@ func (service *ReplicationSpecService) AllReplicationSpecs() (map[string]*metada
 	values_map := service.getCache().GetMap()
 	for key, val := range values_map {
 		if val.(*ReplicationSpecVal).spec != nil {
-			specs[key] = val.(*ReplicationSpecVal).spec
+			specs[key] = val.(*ReplicationSpecVal).spec.Clone()
 		}
 	}
 	return specs, nil
@@ -479,12 +479,11 @@ func (service *ReplicationSpecService) AllReplicationSpecs() (map[string]*metada
 
 func (service *ReplicationSpecService) AllReplicationSpecIds() ([]string, error) {
 	repIds := []string{}
-	rep_map, err := service.AllReplicationSpecs()
-	if err != nil {
-		return nil, err
-	}
-	for key, _ := range rep_map {
-		repIds = append(repIds, key)
+	values_map := service.getCache().GetMap()
+	for key, val := range values_map {
+		if val.(*ReplicationSpecVal).spec != nil {
+			repIds = append(repIds, key)
+		}
 	}
 	return repIds, nil
 }
