@@ -39,15 +39,6 @@ func (repl_settings_svc *ReplicationSettingsSvc) GetDefaultReplicationSettings()
 	if err == service_def.MetadataNotFoundErr {
 		// initialize default settings if it does not exist
 		defaultSettings = *metadata.DefaultSettings()
-		repl_settings_svc.SetDefaultReplicationSettings(&defaultSettings)
-
-		// reload default settings to get its revision field set correctly
-		_, rev, err := repl_settings_svc.metadata_svc.Get(DefaultReplicationSettingsKey)
-		if err != nil {
-			return nil, err
-		}
-		// set rev number
-		defaultSettings.Revision = rev
 	} else {
 		err = json.Unmarshal(bytes, &defaultSettings)
 		if err != nil {
