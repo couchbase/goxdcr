@@ -10,6 +10,7 @@
 package pipeline_svc
 
 import (
+	"errors"
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/common"
 	"github.com/couchbase/goxdcr/log"
@@ -23,6 +24,7 @@ import (
 // factors affecting bandwidth limit of the current node, which could be updated through UpdateSettings() call
 var OVERALL_BANDWIDTH_LIMIT = "overall_bandwidth_limit"
 var NUMBER_OF_SOURCE_NODES = "number_of_source_nodes"
+var errorZeroSrcNode = errors.New("Error: Bandwidth Throttler's number of source nodes cannot be 0")
 
 //BandwidthThrottler limits bandwidth usage of replication
 type BandwidthThrottler struct {
@@ -64,12 +66,18 @@ func (throttler *BandwidthThrottler) Attach(pipeline common.Pipeline) error {
 	number_of_source_nodes, err := throttler.xdcr_topology_svc.NumberOfKVNodes()
 	if err != nil {
 		return err
+	} else if number_of_source_nodes == 0 {
+		return errorZeroSrcNode
 	}
+
 	throttler.number_of_source_nodes = uint32(number_of_source_nodes)
 	throttler.overall_bandwidth_limit = int64(pipeline.Specification().Settings.BandwidthLimit)
 	throttler.logger.Infof("%v set overall bandwidth limit to %v and number of source nodes to %v\n", throttler.id, throttler.overall_bandwidth_limit, throttler.number_of_source_nodes)
 
-	throttler.setBandwidthLimit()
+	err = throttler.setBandwidthLimit()
+	if err != nil {
+		return err
+	}
 
 	throttler.initBandwidthUsageHistory()
 
@@ -232,23 +240,35 @@ func (throttler *BandwidthThrottler) UpdateSettings(settings map[string]interfac
 	}
 	number_of_source_nodes := settings[NUMBER_OF_SOURCE_NODES]
 	if number_of_source_nodes != nil {
-		atomic.StoreUint32(&throttler.number_of_source_nodes, uint32(number_of_source_nodes.(int)))
-		throttler.logger.Infof("%v updated number of source node to %v\n", throttler.id, number_of_source_nodes)
+		if uint32(number_of_source_nodes.(int)) > 0 {
+			atomic.StoreUint32(&throttler.number_of_source_nodes, uint32(number_of_source_nodes.(int)))
+			throttler.logger.Infof("%v updated number of source node to %v\n", throttler.id, number_of_source_nodes)
+		} else {
+			return errorZeroSrcNode
+		}
 	}
 
 	if overall_bandwidth_limit != nil || number_of_source_nodes != nil {
-		throttler.setBandwidthLimit()
+		err := throttler.setBandwidthLimit()
+		if err != nil {
+			throttler.logger.Errorf(err.Error())
+			return err
+		}
 	}
 
 	return nil
 }
 
-func (throttler *BandwidthThrottler) setBandwidthLimit() {
+func (throttler *BandwidthThrottler) setBandwidthLimit() error {
 	number_of_source_nodes := atomic.LoadUint32(&throttler.number_of_source_nodes)
+	if number_of_source_nodes == 0 {
+		return errorZeroSrcNode
+	}
 	overall_bandwidth_limit := atomic.LoadInt64(&throttler.overall_bandwidth_limit)
 	bandwidth_limit := overall_bandwidth_limit * 1024 * 1024 / int64(number_of_source_nodes)
 	atomic.StoreInt64(&throttler.bandwidth_limit, bandwidth_limit)
 	throttler.logger.Infof("%v updated bandwidth limit to %v\n", throttler.id, bandwidth_limit)
+	return nil
 }
 
 func (throttler *BandwidthThrottler) PrintStatusSummary() {
