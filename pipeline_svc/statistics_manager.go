@@ -130,6 +130,12 @@ var OverviewMetricKeys = []string{CHANGES_LEFT_METRIC, DOCS_CHECKED_METRIC, DOCS
 	RESP_WAIT_METRIC, META_LATENCY_METRIC, DCP_DISPATCH_TIME_METRIC, DCP_DATACH_LEN, THROTTLE_LATENCY_METRIC,
 }
 
+// keys for metrics that do not monotonically increase during replication, to which the "going backward" check should not be applied
+var NonIncreasingMetricKeyMap = map[string]bool{
+	SIZE_REP_QUEUE_METRIC: true,
+	DOCS_REP_QUEUE_METRIC: true,
+	DCP_DATACH_LEN:        true}
+
 // the fixed user agent string for connections to collect stats for paused replications
 // it is possible to construct the user agent string dynamically by adding source and target bucket info to it
 // it would cause too many string re-allocations, though
@@ -443,10 +449,13 @@ func (stats_mgr *StatisticsManager) processRawStats() error {
 				stats_mgr.publishMetricToMap(map_for_registry, name, i, true)
 				switch m := i.(type) {
 				case metrics.Counter:
-					if orig_registry != nil {
-						orig_val, _ := strconv.ParseInt(orig_registry.Get(name).String(), 10, 64)
-						if m.Count() < orig_val {
-							stats_mgr.logger.Infof("%v counter %v goes backward, maybe due to the pipeline is restarted\n", stats_mgr.pipeline.InstanceId(), name)
+					// skip "going backward" check on stats that do not monotonically increase
+					if _, ok := NonIncreasingMetricKeyMap[name]; !ok {
+						if orig_registry != nil {
+							orig_val, _ := strconv.ParseInt(orig_registry.Get(name).String(), 10, 64)
+							if m.Count() < orig_val {
+								stats_mgr.logger.Infof("%v counter %v goes backward, maybe due to the pipeline is restarted\n", stats_mgr.pipeline.InstanceId(), name)
+							}
 						}
 					}
 					metric_overview := stats_mgr.getOverviewRegistry().Get(name)
