@@ -90,7 +90,10 @@ func (spec *ReplicationSpecification) Clone() *ReplicationSpecification {
 		TargetClusterUUID: spec.TargetClusterUUID,
 		TargetBucketName:  spec.TargetBucketName,
 		TargetBucketUUID:  spec.TargetBucketUUID,
-		Settings:          spec.Settings.Clone()}
+		Settings:          spec.Settings.Clone(),
+		// !!! shallow copy of revision.
+		// spec.Revision should only be passed along and should never be modified
+		Revision: spec.Revision}
 }
 
 func ReplicationId(sourceBucketName string, targetClusterUUID string, targetBucketName string) string {
