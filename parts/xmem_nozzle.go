@@ -46,7 +46,6 @@ const (
 	XMEM_SETTING_SAN_IN_CERITICATE   = "SANInCertificate"
 	XMEM_SETTING_REMOTE_MEM_SSL_PORT = "remote_ssl_port"
 
-	default_resptimeout      time.Duration = 6000 * time.Millisecond
 	default_demandEncryption bool          = false
 )
 
@@ -432,7 +431,7 @@ func newConfig(logger *log.CommonLogger) xmemConfig {
 	}
 
 	atomic.StoreUint32(&config.maxIdleCount, base.XmemMaxIdleCount)
-	resptimeout := default_resptimeout
+	resptimeout := base.XmemDefaultRespTimeout
 	atomic.StorePointer(&config.respTimeout, unsafe.Pointer(&resptimeout))
 
 	return config
@@ -2108,7 +2107,7 @@ done:
  */
 func (xmem *XmemNozzle) checkAndRepairBufferMonitor(finch chan bool, waitGrp *sync.WaitGroup) {
 	defer waitGrp.Done()
-	ticker := time.NewTicker(xmem.getRespTimeout())
+	ticker := time.NewTicker(base.XmemDefaultRespTimeout)
 	defer ticker.Stop()
 	for {
 		select {

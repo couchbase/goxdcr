@@ -536,6 +536,9 @@ var ThresholdForThroughSeqnoComputation = 100 * time.Millisecond
 // interval for printing replication runtime stats to log file
 var StatsLogInterval = 30 * time.Second
 
+// default resp timeout, which is used as the interval for checkAndRepairBufferMonitor
+var XmemDefaultRespTimeout time.Duration = 1000 * time.Millisecond
+
 func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeCountBeforeRestart,
 	maxTopologyStableCountBeforeRestart, maxWorkersForCheckpointing int,
 	timeoutCheckpointBeforeStop time.Duration, capiDataChanSizeMultiplier int,
@@ -561,7 +564,7 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	xmemMaxRetryInterval time.Duration, heloTimeout time.Duration,
 	waitTimeBetweenMetadataChangeListeners time.Duration, keepAlivePeriod time.Duration,
 	thresholdPercentageForEventChanSizeLogging int, thresholdForThroughSeqnoComputation time.Duration,
-	statsLogInterval time.Duration) {
+	statsLogInterval time.Duration, xmemDefaultRespTimeout time.Duration) {
 	TopologyChangeCheckInterval = topologyChangeCheckInterval
 	MaxTopologyChangeCountBeforeRestart = maxTopologyChangeCountBeforeRestart
 	MaxTopologyStableCountBeforeRestart = maxTopologyStableCountBeforeRestart
@@ -618,4 +621,5 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	ThresholdForEventChanSizeLogging = EventChanSize * thresholdPercentageForEventChanSizeLogging / 100
 	ThresholdForThroughSeqnoComputation = thresholdForThroughSeqnoComputation
 	StatsLogInterval = statsLogInterval
+	XmemDefaultRespTimeout = xmemDefaultRespTimeout
 }
