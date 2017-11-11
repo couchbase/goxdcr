@@ -335,8 +335,8 @@ func (dcp *DcpNozzle) Stop() error {
 		close(dcp.finch)
 	}
 
-	dcp.closeUprStreams()
-	dcp.closeUprFeed()
+	dcp.closeUprStreamsWithTimeout()
+	dcp.closeUprFeedWithTimeout()
 
 	// there is no need to lock dcp.client since it is accessed only in two places, Start() and Stop(),
 	// which cannot be called concurrently due to the pipeline updater setup
@@ -344,6 +344,8 @@ func (dcp *DcpNozzle) Stop() error {
 		err = dcp.client.Close()
 		if err != nil {
 			dcp.Logger().Warnf("%v Error closing dcp client. err=%v\n", dcp.Id(), err)
+		} else {
+			dcp.Logger().Infof("%v closed client successfully.", dcp.Id())
 		}
 	} else {
 		dcp.Logger().Infof("%v skipping closing client since it is nil.", dcp.Id())
@@ -361,44 +363,67 @@ func (dcp *DcpNozzle) Stop() error {
 
 }
 
+func (dcp *DcpNozzle) closeUprStreamsWithTimeout() {
+	dcp.childrenWaitGrp.Add(1)
+
+	err := simple_utils.ExecWithTimeout(dcp.closeUprStreams, base.TimeoutDcpCloseUprStreams, dcp.Logger())
+	if err != nil {
+		dcp.Logger().Warnf("%v error closing upr streams. err=%v", dcp.Id(), err)
+	} else {
+		dcp.Logger().Infof("%v closed upr streams successfully", dcp.Id())
+	}
+}
+
 func (dcp *DcpNozzle) closeUprStreams() error {
-	dcp.lock_uprFeed.Lock()
-	defer dcp.lock_uprFeed.Unlock()
+	defer dcp.childrenWaitGrp.Done()
 
-	if dcp.uprFeed != nil {
-		dcp.Logger().Infof("%v Closing dcp streams for vb=%v\n", dcp.Id(), dcp.GetVBList())
-		opaque := newOpaque()
-		errMap := make(map[uint16]error)
+	dcp.Logger().Infof("%v Closing dcp streams for vb=%v\n", dcp.Id(), dcp.GetVBList())
+	opaque := newOpaque()
+	errMap := make(map[uint16]error)
 
-		for _, vbno := range dcp.GetVBList() {
-			stream_state, err := dcp.getStreamState(vbno)
-			if err != nil {
-				return err
-			}
-			if stream_state == Dcp_Stream_Active {
-				err := dcp.uprFeed.CloseStream(vbno, opaque)
+	for _, vbno := range dcp.GetVBList() {
+		stream_state, err := dcp.getStreamState(vbno)
+		if err != nil {
+			return err
+		}
+		if stream_state == Dcp_Stream_Active {
+			uprFeed := dcp.getUprFeed()
+			if uprFeed != nil {
+				err := uprFeed.CloseStream(vbno, opaque)
 				if err != nil {
 					errMap[vbno] = err
 				}
 			} else {
-				dcp.Logger().Infof("%v There is no active stream for vb=%v\n", dcp.Id(), vbno)
+				// uprFeed could be nil if closeUprFeed() has been called prior,
+				// which is possible if closeUprStreamsWithTimeout() timed out
+				// abort remaining operations
+				dcp.Logger().Infof("%v Aborting closeUprStreams since upr feed has been closed\n", dcp.Id())
+				break
 			}
+		} else {
+			dcp.Logger().Infof("%v There is no active stream for vb=%v\n", dcp.Id(), vbno)
 		}
-
-		if len(errMap) > 0 {
-			msg := fmt.Sprintf("Failed to close upr streams, err=%v\n", errMap)
-			dcp.Logger().Errorf("%v %v", dcp.Id(), msg)
-			return errors.New(msg)
-		}
-	} else {
-		dcp.Logger().Infof("%v uprfeed is already closed. No-op", dcp.Id())
 	}
+
+	if len(errMap) > 0 {
+		msg := fmt.Sprintf("Failed to close upr streams, err=%v\n", errMap)
+		dcp.Logger().Errorf("%v %v", dcp.Id(), msg)
+		return errors.New(msg)
+	}
+
 	return nil
 }
 
-func (dcp *DcpNozzle) closeUprFeed() bool {
-	var actionTaken = false
+func (dcp *DcpNozzle) closeUprFeedWithTimeout() {
+	err := simple_utils.ExecWithTimeout(dcp.closeUprFeed, base.TimeoutDcpCloseUprFeed, dcp.Logger())
+	if err != nil {
+		dcp.Logger().Warnf("%v error closing upr feed. err=%v", dcp.Id(), err)
+	} else {
+		dcp.Logger().Infof("%v closed upr feed successfully", dcp.Id())
+	}
+}
 
+func (dcp *DcpNozzle) closeUprFeed() error {
 	dcp.lock_uprFeed.Lock()
 	defer dcp.lock_uprFeed.Unlock()
 	if dcp.uprFeed != nil {
@@ -408,12 +433,11 @@ func (dcp *DcpNozzle) closeUprFeed() bool {
 
 		dcp.uprFeed.Close()
 		dcp.uprFeed = nil
-		actionTaken = true
 	} else {
 		dcp.Logger().Infof("%v uprfeed is already closed. No-op", dcp.Id())
 	}
 
-	return actionTaken
+	return nil
 }
 
 func (dcp *DcpNozzle) IsOpen() bool {
@@ -451,8 +475,6 @@ func (dcp *DcpNozzle) processData() (err error) {
 		case m, ok := <-mutch: // mutation from upstream
 			if !ok {
 				dcp.Logger().Infof("%v DCP mutation channel has been closed.Stop dcp nozzle now.", dcp.Id())
-				//close uprFeed
-				dcp.closeUprFeed()
 				dcp.handleGeneralError(errors.New("DCP upr feed has been closed."))
 				goto done
 			}
@@ -908,7 +930,6 @@ func (dcp *DcpNozzle) checkInactiveUprStreams() {
 		case <-dcp_inactive_stream_check_ticker.C:
 			if dcp.isFeedClosed() {
 				dcp.Logger().Infof("%v checkInactiveUprStreams routine is exiting because upr feed has been closed\n", dcp.Id())
-				dcp.closeUprFeed()
 				dcp.handleGeneralError(errors.New("DCP upr feed has been closed."))
 				return
 			}
