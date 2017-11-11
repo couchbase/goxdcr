@@ -356,6 +356,9 @@ var ExecutionTimeoutError = errors.New("Execution timed out")
 
 var TimeoutRuntimeContextStop = 5 * time.Second
 var TimeoutPartsStop = 10 * time.Second
+var TimeoutDcpCloseUprStreams = 3 * time.Second
+var TimeoutDcpCloseUprFeed = 3 * time.Second
+
 var NetTCP = "tcp"
 
 // --------------- Constants that are configurable -----------------
