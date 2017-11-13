@@ -187,16 +187,6 @@ const (
 	CRMode_LWW   ConflictResolutionMode = iota
 )
 
-func GetConflictResolutionModeFromInt(crMode int) ConflictResolutionMode {
-	if crMode == int(CRMode_RevId) {
-		return CRMode_RevId
-	} else if crMode == int(CRMode_LWW) {
-		return CRMode_LWW
-	}
-
-	panic(fmt.Sprintf("invalid conflict resolution mode = %v", crMode))
-}
-
 // stack implementation
 type Stack []interface{}
 

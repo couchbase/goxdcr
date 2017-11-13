@@ -524,8 +524,17 @@ func (ckmgr *CheckpointManager) updateCurrentVBOpaque(vbno uint16, vbOpaque meta
 		record.Target_vb_opaque = vbOpaque
 		return nil
 	} else {
-		panic(fmt.Sprintf("Trying to update vbopaque on vb=%v which is not in MyVBList", vbno))
+		err := fmt.Errorf("%v Trying to update vbopaque on vb=%v which is not in MyVBList", ckmgr.pipeline.Topic(), vbno)
+		ckmgr.handleGeneralError(err)
+		return err
 	}
+
+}
+
+// handle fatal error, raise error event to pipeline supervisor
+func (ckmgr *CheckpointManager) handleGeneralError(err error) {
+	ckmgr.logger.Error(err.Error())
+	ckmgr.RaiseEvent(common.NewEvent(common.ErrorEncountered, nil, ckmgr, nil, err))
 }
 
 func getDocsProcessedForReplication(topic string, vb_list []uint16, checkpoints_svc service_def.CheckpointsService,
@@ -772,7 +781,7 @@ func (ckmgr *CheckpointManager) getVBTimestampForVB(vbno uint16, ckptDoc *metada
 		} // end if remote_vb_status
 	}
 POPULATE:
-	return ckmgr.populateVBTimestamp(ckptDoc, agreeedIndex, vbno), nil
+	return ckmgr.populateVBTimestamp(ckptDoc, agreeedIndex, vbno)
 }
 
 /**
@@ -886,7 +895,7 @@ func (ckmgr *CheckpointManager) retrieveCkptDoc(vbno uint16) (*metadata.Checkpoi
 	return ckmgr.checkpoints_svc.CheckpointsDoc(ckmgr.pipeline.Topic(), vbno)
 }
 
-func (ckmgr *CheckpointManager) populateVBTimestamp(ckptDoc *metadata.CheckpointsDoc, agreedIndex int, vbno uint16) *base.VBTimestamp {
+func (ckmgr *CheckpointManager) populateVBTimestamp(ckptDoc *metadata.CheckpointsDoc, agreedIndex int, vbno uint16) (*base.VBTimestamp, error) {
 	vbts := &base.VBTimestamp{Vbno: vbno}
 	if agreedIndex > -1 && ckptDoc != nil {
 		ckpt_records := ckptDoc.GetCheckpointRecords()
@@ -925,9 +934,11 @@ func (ckmgr *CheckpointManager) populateVBTimestamp(ckptDoc *metadata.Checkpoint
 			obj.ckpt.Seqno = vbts.Seqno
 		}
 	} else {
-		panic(fmt.Sprintf("Calling populateVBTimestamp on vb=%v which is not in MyVBList", vbno))
+		err := fmt.Errorf("%v Calling populateVBTimestamp on vb=%v which is not in MyVBList", ckmgr.pipeline.Topic(), vbno)
+		ckmgr.handleGeneralError(err)
+		return nil, err
 	}
-	return vbts
+	return vbts, nil
 }
 
 func (ckmgr *CheckpointManager) checkpointing() {
@@ -1285,7 +1296,9 @@ func (ckmgr *CheckpointManager) doCheckpoint(vbno uint16, through_seqno_map map[
 			return errors.New(errMsg)
 		}
 	} else {
-		panic(fmt.Sprintf("%v Trying to doCheckpoint on vb=%v which is not in MyVBList", ckmgr.pipeline.Topic(), vbno))
+		err := fmt.Errorf("%v Trying to doCheckpoint on vb=%v which is not in MyVBList", ckmgr.pipeline.Topic(), vbno)
+		ckmgr.handleGeneralError(err)
+		return err
 	}
 	// no error fall through. return nil here to keep checkpointing/replication going.
 	// if there is a need to stop checkpointing/replication, it needs to be done in a separate return statement
@@ -1318,7 +1331,8 @@ func (ckmgr *CheckpointManager) OnEvent(event *common.Event) {
 
 				ckmgr.logger.Debugf("%v Got failover log for vb=%v\n", ckmgr.pipeline.Topic(), vbno)
 			} else {
-				panic(fmt.Sprintf("%v Received failoverlog on an unknown vb=%v\n", ckmgr.pipeline.Topic(), vbno))
+				err := fmt.Errorf("%v Received failoverlog on an unknown vb=%v\n", ckmgr.pipeline.Topic(), vbno)
+				ckmgr.handleGeneralError(err)
 			}
 		}
 	} else if event.EventType == common.SnapshotMarkerReceived {
@@ -1343,7 +1357,8 @@ func (ckmgr *CheckpointManager) OnEvent(event *common.Event) {
 					snapshot_history_obj.snapshot_history[base.MaxLengthSnapshotHistory-1] = cur_snapshot
 				}
 			} else {
-				panic(fmt.Sprintf("%v, Received snapshot marker on an unknown vb=%v\n", ckmgr.pipeline.Topic(), vbno))
+				err := fmt.Errorf("%v  Received snapshot marker on an unknown vb=%v\n", ckmgr.pipeline.Topic(), vbno)
+				ckmgr.handleGeneralError(err)
 			}
 		}
 	}
@@ -1367,8 +1382,9 @@ func (ckmgr *CheckpointManager) getFailoverUUIDForSeqno(vbno uint16, seqno uint6
 			}
 		}
 	} else {
-		panic(fmt.Sprintf("%v Calling getFailoverUUIDForSeqno on an unknown vb=%v\n", ckmgr.pipeline.Topic(), vbno))
-
+		err := fmt.Errorf("%v Calling getFailoverUUIDForSeqno on an unknown vb=%v\n", ckmgr.pipeline.Topic(), vbno)
+		ckmgr.handleGeneralError(err)
+		return 0, err
 	}
 	return 0, fmt.Errorf("%v Failed to find vbuuid for vb=%v, seqno=%v\n", ckmgr.pipeline.Topic(), vbno, seqno)
 }
@@ -1386,7 +1402,9 @@ func (ckmgr *CheckpointManager) getSnapshotForSeqno(vbno uint16, seqno uint64) (
 			}
 		}
 	} else {
-		panic(fmt.Sprintf("%v Calling getFailoverUUIDForSeqno on an unknown vb=%v\n", ckmgr.pipeline.Topic(), vbno))
+		err := fmt.Errorf("%v Calling getSnapshotForSeqno on an unknown vb=%v\n", ckmgr.pipeline.Topic(), vbno)
+		ckmgr.handleGeneralError(err)
+		return 0, 0, err
 	}
 	return 0, 0, fmt.Errorf("%v Failed to find snapshot for vb=%v, seqno=%v\n", ckmgr.pipeline.Topic(), vbno, seqno)
 }

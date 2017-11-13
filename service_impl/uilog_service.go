@@ -47,8 +47,9 @@ func (service *UILogSvc) writeUILog_async(message string) {
 	defer service.logger.Infof("It took %vs to call writeUILog_async\n", time.Since(start_time).Seconds())
 	hostname, err := service.top_svc.MyConnectionStr()
 	if err != nil {
-		// should never get here
-		panic(err.Error())
+		// should never get here. in case we do, log error and abort
+		service.logger.Warnf("Failed to write ui log. err=%v, message=%v", err, message)
+		return
 	}
 
 	paramMap := make(map[string]interface{})

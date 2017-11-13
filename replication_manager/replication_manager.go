@@ -667,9 +667,9 @@ func (rm *replicationManager) createAndPersistReplicationSpec(justValidate bool,
 		justValidate, sourceBucket, targetCluster, targetBucket, settings)
 
 	// validate that everything is alright with the replication configuration before actually creating it
-	sourceBucketUUID, targetBucketUUID, targetClusterRef, errorMap, warning := replication_mgr.repl_spec_svc.ValidateNewReplicationSpec(sourceBucket, targetCluster, targetBucket, settings)
-	if len(errorMap) > 0 {
-		return nil, errorMap, nil
+	sourceBucketUUID, targetBucketUUID, targetClusterRef, errorMap, err, warning := replication_mgr.repl_spec_svc.ValidateNewReplicationSpec(sourceBucket, targetCluster, targetBucket, settings)
+	if err != nil || len(errorMap) > 0 {
+		return nil, errorMap, err
 	}
 
 	spec, err := metadata.NewReplicationSpecification(sourceBucket, sourceBucketUUID, targetClusterRef.Uuid, targetBucket, targetBucketUUID)
@@ -756,13 +756,18 @@ func GetReplicationInfos() ([]base.ReplicationInfo, error) {
 			if len(errs) > 0 {
 				cur_node, err := XDCRCompTopologyService().MyHost()
 				if err != nil {
-					panic("cannot find current host")
+					cur_node = ""
 				}
 
 				for _, pipeline_error := range errs {
 					if !bypassUIErrorCodes(pipeline_error.ErrMsg) {
-						//prepend current node name to the error message to make it more helpful
-						err_msg := cur_node + ":" + pipeline_error.ErrMsg
+						//prepend current node name, if not empty, to the error message to make it more helpful
+						var err_msg string
+						if len(cur_node) > 0 {
+							err_msg = cur_node + ":" + pipeline_error.ErrMsg
+						} else {
+							err_msg = pipeline_error.ErrMsg
+						}
 						errInfo := base.ErrorInfo{pipeline_error.Timestamp.UnixNano(), err_msg}
 						replInfo.ErrorList = append(replInfo.ErrorList, errInfo)
 					}
@@ -799,6 +804,11 @@ func (rm *replicationManager) OnError(s common.Supervisor, errMap map[string]err
 		// there is nothing we can do except to abort xdcr. ns_server will restart xdcr while later
 		exitProcess(false)
 	} else if s.Id() == base.PipelineMasterSupervisorId {
+		if len(errMap) == 0 {
+			logger_rm.Warnf("Pipeline master supervisor reported empty error map. Ignoring it. Supervisor id=%v, type=%v\n", s.Id(), reflect.TypeOf(s))
+			return
+		}
+
 		// the errors came from the pipeline master supervisor because some pipeline supervisors are not longer alive.
 		for childId, err1 := range errMap {
 			child, _ := s.Child(childId)
@@ -813,10 +823,6 @@ func (rm *replicationManager) OnError(s common.Supervisor, errMap map[string]err
 		}
 	} else {
 		// the errors came from a pipeline supervisor because some parts are not longer alive.
-
-		if len(errMap) == 0 {
-			panic("errMap is empty")
-		}
 		pipeline, err := rm.getPipelineFromPipelineSupevisor(s)
 		if err == nil {
 			// try to fix the pipeline
@@ -824,12 +830,16 @@ func (rm *replicationManager) OnError(s common.Supervisor, errMap map[string]err
 			var errMsg string
 			if len(errMap) > 1 {
 				errMsg = fmt.Sprintf("%v", errMap)
-			} else {
+			} else if len(errMap) == 1 {
 				// strip the "map[]" wapper when there is only one error in errMap
 				for partId, partMsg := range errMap {
 					errMsg = partId + ":" + partMsg.Error()
 					break
 				}
+			} else {
+				// errMap is empty, which should not have happened. use predefined error message
+				logger_rm.Warnf("Supervisor %v of type %v reported empty error map\n", s.Id(), reflect.TypeOf(s))
+				errMsg = "pipeline failed"
 			}
 			rm.pipelineMgr.Update(pipeline.Topic(), errors.New(errMsg))
 		}

@@ -731,11 +731,16 @@ func (dcp *DcpNozzle) processData() (err error) {
 					vbno := m.VBucket
 					_, ok := dcp.vb_stream_status[vbno]
 					if ok {
-						dcp.setStreamState(vbno, Dcp_Stream_Active)
+						err = dcp.setStreamState(vbno, Dcp_Stream_Active)
+						if err != nil {
+							return err
+						}
 						dcp.RaiseEvent(common.NewEvent(common.StreamingStart, m, dcp, nil, nil))
 						dcp.vbHandshakeMap[vbno].processSuccessResponse(m.Opaque)
 					} else {
-						panic(fmt.Sprintf("Stream for vb=%v is not supposed to be opened\n", vbno))
+						err = fmt.Errorf("%v Stream for vb=%v is not supposed to be opened\n", dcp.Id(), vbno)
+						dcp.handleGeneralError(err)
+						return err
 					}
 				}
 
@@ -925,12 +930,14 @@ func (dcp *DcpNozzle) startUprStreamInner(vbno uint16, vbts *base.VBTimestamp, v
 				// version passed in == opaque, which will be passed back to us
 				err = dcp.uprFeed.UprRequestStream(vbno, version, flags, vbts.Vbuuid, vbts.Seqno, seqEnd, vbts.SnapshotStart, vbts.SnapshotEnd)
 				if err == nil {
-					dcp.setStreamState(vbno, Dcp_Stream_Init)
+					err = dcp.setStreamState(vbno, Dcp_Stream_Init)
 				}
 			}
 			return
 		} else {
-			panic(fmt.Sprintf("%v Try to startUprStream for invalid vbno=%v", dcp.Id(), vbno))
+			err = fmt.Errorf("%v Try to startUprStream for invalid vbno=%v", dcp.Id(), vbno)
+			dcp.handleGeneralError(err)
+			return
 		}
 	}
 	return
@@ -966,8 +973,8 @@ type stateCheckFunc func(state DcpStreamState) bool
 func (dcp *DcpNozzle) getDcpStreams(stateCheck stateCheckFunc) []uint16 {
 	ret := []uint16{}
 	for _, vb := range dcp.GetVBList() {
-		state, _ := dcp.GetStreamState(vb)
-		if stateCheck(state) {
+		state, err := dcp.GetStreamState(vb)
+		if err == nil && stateCheck(state) {
 			ret = append(ret, vb)
 		}
 	}
@@ -1001,8 +1008,8 @@ func nonInitStateCheck(state DcpStreamState) bool {
 func (dcp *DcpNozzle) inactiveDcpStreamsWithState() map[uint16]DcpStreamState {
 	ret := make(map[uint16]DcpStreamState)
 	for _, vb := range dcp.GetVBList() {
-		state, _ := dcp.GetStreamState(vb)
-		if state != Dcp_Stream_Active {
+		state, err := dcp.GetStreamState(vb)
+		if err == nil && state != Dcp_Stream_Active {
 			ret[vb] = state
 		}
 	}
@@ -1053,21 +1060,6 @@ func (dcp *DcpNozzle) onUpdateStartingSeqno(new_startingSeqnos map[uint16]*base.
 	return nil
 }
 
-func (dcp *DcpNozzle) populateVBTS(vbts_map map[uint16]*base.VBTimestamp) error {
-	if vbts_map != nil {
-		for _, vbno := range dcp.vbnos {
-			ts := vbts_map[vbno]
-			if ts != nil {
-				err := dcp.setTS(vbno, ts, true)
-				if err != nil {
-					return err
-				}
-			}
-		}
-	}
-	return nil
-}
-
 func (dcp *DcpNozzle) setTS(vbno uint16, ts *base.VBTimestamp, need_lock bool) error {
 	ts_entry := dcp.cur_ts[vbno]
 	if ts_entry != nil {
@@ -1078,7 +1070,9 @@ func (dcp *DcpNozzle) setTS(vbno uint16, ts *base.VBTimestamp, need_lock bool) e
 		ts_entry.ts = ts
 		return nil
 	} else {
-		return fmt.Errorf("setTS failed: vbno=%v is not tracked in cur_ts map", vbno)
+		err := fmt.Errorf("setTS failed: vbno=%v is not tracked in cur_ts map", vbno)
+		dcp.handleGeneralError(err)
+		return err
 	}
 }
 
@@ -1091,7 +1085,9 @@ func (dcp *DcpNozzle) getTS(vbno uint16, need_lock bool) (*base.VBTimestamp, err
 		}
 		return ts_entry.ts, nil
 	} else {
-		return nil, fmt.Errorf("getTS failed: vbno=%v is not tracked in cur_ts map", vbno)
+		err := fmt.Errorf("getTS failed: vbno=%v is not tracked in cur_ts map", vbno)
+		dcp.handleGeneralError(err)
+		return nil, err
 	}
 }
 
@@ -1104,18 +1100,24 @@ func (dcp *DcpNozzle) isTSSet(vbno uint16, need_lock bool) bool {
 			defer ts_entry.lock.RUnlock()
 		}
 		return ts_entry.ts != nil
+	} else {
+		err := fmt.Errorf("isTSSet failed: vbno=%v is not tracked in cur_ts map", vbno)
+		dcp.handleGeneralError(err)
 	}
 	return true
 }
 
-func (dcp *DcpNozzle) setStreamState(vbno uint16, streamState DcpStreamState) {
+func (dcp *DcpNozzle) setStreamState(vbno uint16, streamState DcpStreamState) error {
 	statusObj, ok := dcp.vb_stream_status[vbno]
 	if ok && statusObj != nil {
 		statusObj.lock.Lock()
 		defer statusObj.lock.Unlock()
 		statusObj.state = streamState
+		return nil
 	} else {
-		panic(fmt.Sprintf("Try to set stream state to invalid vbno=%v", vbno))
+		err := fmt.Errorf("%v Trying to set stream state to invalid vbno=%v", dcp.Id(), vbno)
+		dcp.handleGeneralError(err)
+		return err
 	}
 }
 
@@ -1126,7 +1128,9 @@ func (dcp *DcpNozzle) GetStreamState(vbno uint16) (DcpStreamState, error) {
 		defer statusObj.lock.RUnlock()
 		return statusObj.state, nil
 	} else {
-		return 0, fmt.Errorf("Try to get stream state to invalid vbno=%v", vbno)
+		err := fmt.Errorf("Try to get stream state to invalid vbno=%v", vbno)
+		dcp.handleGeneralError(err)
+		return 0, err
 	}
 }
 
@@ -1237,7 +1241,9 @@ func (dcp *DcpNozzle) dcpHasRemainingItemsForXdcr(dcp_stats map[string]map[strin
 
 	kv_nodes, err := dcp.xdcr_topology_svc.MyKVNodes()
 	if err != nil {
-		panic("Cannot get kv nodes")
+		dcp.Logger().Warnf("%v skipping dcp remaining item check because of failure to get my kv nodes. err=%v", dcp.Id(), err)
+		// return false to avoid false negative in dcp health issue check
+		return false
 	}
 
 	for _, kv_node := range kv_nodes {

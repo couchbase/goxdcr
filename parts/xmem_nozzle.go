@@ -1507,7 +1507,7 @@ func (xmem *XmemNozzle) batchGetMeta(bigDoc_map map[string]*base.WrappedMCReques
 	for key, originalReq := range bigDoc_map {
 		docKey := string(originalReq.Req.Key)
 		if docKey == "" {
-			panic(fmt.Sprintf("%v unique-key= %v, Empty docKey, req=%v, bigDoc_map=%v", xmem.Id(), key, originalReq.Req, bigDoc_map))
+			return nil, fmt.Errorf("%v received empty docKey. unique-key= %v, req=%v, bigDoc_map=%v", xmem.Id(), key, originalReq.Req, bigDoc_map)
 		}
 
 		if _, ok := sent_key_map[docKey]; !ok {
@@ -1810,7 +1810,8 @@ func (xmem *XmemNozzle) receiveResponse(finch chan bool, waitGrp *sync.WaitGroup
 					xmem.repairConn(xmem.client_for_setMeta, err.Error(), rev)
 				}
 			} else if response == nil {
-				panic("readFromClient returned nil error and nil response")
+				errMsg := fmt.Sprintf("%v readFromClient returned nil error and nil response. Ignoring it", xmem.Id())
+				xmem.Logger().Warn(errMsg)
 			} else if response.Status != mc.SUCCESS && !isIgnorableMCError(response.Status) {
 				if isTemporaryMCError(response.Status) {
 					// target may be overloaded. increase backoff factor to alleviate stress on target

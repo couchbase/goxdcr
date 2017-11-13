@@ -134,31 +134,31 @@ func (service *ReplicationSpecService) replicationSpec(replicationId string) (*m
 }
 
 //validate the existence of source bucket
-func (service *ReplicationSpecService) validateSourceBucket(errorMap ErrorMap, sourceBucket, targetCluster, targetBucket string) (srcBucketUUID string, srcCRType string) {
+func (service *ReplicationSpecService) validateSourceBucket(errorMap ErrorMap, sourceBucket, targetCluster, targetBucket string) (string, string, error) {
 	var err_source error
 	start_time := time.Now()
 	local_connStr, _ := service.xdcr_comp_topology_svc.MyConnectionStr()
 	if local_connStr == "" {
-		panic("XDCRTopologySvc.MyConnectionStr() should not return empty string")
+		return "", "", errors.New("XDCRTopologySvc.MyConnectionStr() returned empty string")
 	}
 
 	_, sourceBucketType, sourceBucketUUID, sourceConflictResolutionType, sourceEvictionPolicy, _, err_source := service.utils.BucketValidationInfo(local_connStr, sourceBucket, "", "", nil, false, service.logger)
 	service.logger.Infof("Result from local bucket look up: bucketName=%v, err_source=%v, time taken=%v\n", sourceBucket, err_source, time.Since(start_time))
 	service.validateBucket(sourceBucket, targetCluster, targetBucket, sourceBucketType, sourceEvictionPolicy, err_source, errorMap, true)
 
-	return sourceBucketUUID, sourceConflictResolutionType
+	return sourceBucketUUID, sourceConflictResolutionType, nil
 }
 
 // validate that the source bucket and target bucket are not the same bucket
 // i.e., validate that the following are not both true:
 // 1. sourceBucketName == targetBucketName
 // 2. sourceClusterUuid == targetClusterUuid
-func (service *ReplicationSpecService) validateSrcTargetNonIdenticalBucket(errorMap ErrorMap, sourceBucket, targetBucket string, targetClusterRef *metadata.RemoteClusterReference) {
+func (service *ReplicationSpecService) validateSrcTargetNonIdenticalBucket(errorMap ErrorMap, sourceBucket, targetBucket string, targetClusterRef *metadata.RemoteClusterReference) error {
 	if sourceBucket == targetBucket {
 		start_time := time.Now()
 		sourceClusterUuid, err := service.xdcr_comp_topology_svc.MyClusterUuid()
 		if err != nil {
-			panic("cannot get local cluster uuid")
+			return errors.New("cannot get local cluster uuid")
 		}
 
 		if sourceClusterUuid == targetClusterRef.Uuid {
@@ -167,6 +167,7 @@ func (service *ReplicationSpecService) validateSrcTargetNonIdenticalBucket(error
 			service.logger.Infof("Validated that source bucket and target bucket are not the same. time taken=%v\n", time.Since(start_time))
 		}
 	}
+	return nil
 }
 
 // validate remote cluster ref
@@ -286,54 +287,54 @@ func (service *ReplicationSpecService) validateES(errorMap ErrorMap, targetBucke
  * Main Validation routine, supplemented by multiple helper sub-routines.
  * Each sub-routine may be daisy chained by variables that would be helpful for further subroutines.
  */
-func (service *ReplicationSpecService) ValidateNewReplicationSpec(sourceBucket, targetCluster, targetBucket string, settings map[string]interface{}) (string, string, *metadata.RemoteClusterReference, map[string]error, string) {
+func (service *ReplicationSpecService) ValidateNewReplicationSpec(sourceBucket, targetCluster, targetBucket string, settings map[string]interface{}) (string, string, *metadata.RemoteClusterReference, map[string]error, error, string) {
 	errorMap := make(ErrorMap)
 	service.logger.Infof("Start ValidateAddReplicationSpec, sourceBucket=%v, targetCluster=%v, targetBucket=%v\n", sourceBucket, targetCluster, targetBucket)
 	defer service.logger.Infof("Finished ValidateAddReplicationSpec, sourceBucket=%v, targetCluster=%v, targetBucket=%v, errorMap=%v\n", sourceBucket, targetCluster, targetBucket, errorMap)
 
-	sourceBucketUUID, sourceConflictResolutionType := service.validateSourceBucket(errorMap, sourceBucket, targetCluster, targetBucket)
-	if len(errorMap) > 0 {
-		return "", "", nil, errorMap, ""
+	sourceBucketUUID, sourceConflictResolutionType, err := service.validateSourceBucket(errorMap, sourceBucket, targetCluster, targetBucket)
+	if len(errorMap) > 0 || err != nil {
+		return "", "", nil, errorMap, err, ""
 	}
 
 	targetClusterRef, remote_connStr, remote_userName, remote_password, certificate, sanInCertificate := service.getRemoteReference(errorMap, targetCluster)
 	if len(errorMap) > 0 {
-		return "", "", nil, errorMap, ""
+		return "", "", nil, errorMap, nil, ""
 	}
 
-	service.validateSrcTargetNonIdenticalBucket(errorMap, sourceBucket, targetBucket, targetClusterRef)
-	if len(errorMap) > 0 {
-		return "", "", nil, errorMap, ""
+	err = service.validateSrcTargetNonIdenticalBucket(errorMap, sourceBucket, targetBucket, targetClusterRef)
+	if len(errorMap) > 0 || err != nil {
+		return "", "", nil, errorMap, err, ""
 	}
 
 	targetBucketInfo, targetBucketUUID, targetConflictResolutionType, targetKVVBMap := service.validateTargetBucket(errorMap, remote_connStr, targetBucket, remote_userName, remote_password, certificate, sanInCertificate, sourceBucket, targetCluster)
 	if len(errorMap) > 0 {
-		return "", "", nil, errorMap, ""
+		return "", "", nil, errorMap, nil, ""
 	}
 
 	service.validateReplicationSpecDoesNotAlreadyExist(errorMap, sourceBucket, targetClusterRef, targetBucket)
 	if len(errorMap) > 0 {
-		return "", "", nil, errorMap, ""
+		return "", "", nil, errorMap, nil, ""
 	}
 
 	repl_type, ok := settings[metadata.ReplicationType]
 	if !ok || repl_type == metadata.ReplicationTypeXmem {
 		service.validateXmemSettings(errorMap, targetClusterRef, targetKVVBMap, sourceBucket, targetBucket, targetBucketInfo)
 		if len(errorMap) > 0 {
-			return "", "", nil, errorMap, ""
+			return "", "", nil, errorMap, nil, ""
 		}
 	}
 
 	warning := service.validateES(errorMap, targetBucketInfo, repl_type, sourceConflictResolutionType, targetConflictResolutionType)
 	if len(errorMap) > 0 {
-		return "", "", nil, errorMap, ""
+		return "", "", nil, errorMap, nil, ""
 	}
 
 	if warning != "" {
 		service.logger.Warn(warning)
 	}
 
-	return sourceBucketUUID, targetBucketUUID, targetClusterRef, errorMap, warning
+	return sourceBucketUUID, targetBucketUUID, targetClusterRef, errorMap, nil, warning
 }
 
 //validate target bucket
@@ -644,7 +645,8 @@ func (service *ReplicationSpecService) validateExistingReplicationSpec(spec *met
 	//validate the existence of source bucket
 	local_connStr, _ := service.xdcr_comp_topology_svc.MyConnectionStr()
 	if local_connStr == "" {
-		panic("XDCRTopologySvc.MyConnectionStr() should not return empty string")
+		err := fmt.Errorf("XDCRTopologySvc.MyConnectionStr() returned empty string when validating spec %v", spec.Id)
+		return err, err
 	}
 	sourceBucketUuid, err_source := service.utils.LocalBucketUUID(local_connStr, spec.SourceBucketName, service.logger)
 
@@ -716,7 +718,7 @@ func (service *ReplicationSpecService) ValidateAndGC(spec *metadata.ReplicationS
 func (service *ReplicationSpecService) sourceBucketUUID(bucketName string) (string, error) {
 	local_connStr, _ := service.xdcr_comp_topology_svc.MyConnectionStr()
 	if local_connStr == "" {
-		panic("XDCRTopologySvc.MyConnectionStr() should not return empty string")
+		return "", errors.New("XDCRTopologySvc.MyConnectionStr() returned empty string")
 	}
 	return service.utils.LocalBucketUUID(local_connStr, bucketName, service.logger)
 }

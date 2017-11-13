@@ -415,7 +415,9 @@ func (u *Utilities) GetMemcachedConnection(serverAddr, bucketName, userAgent str
 	keepAlivePeriod time.Duration, logger *log.CommonLogger) (mcc.ClientIface, error) {
 	logger.Infof("GetMemcachedConnection serverAddr=%v, bucketName=%v\n", serverAddr, bucketName)
 	if serverAddr == "" {
-		panic("serverAddr is empty")
+		err := fmt.Errorf("Failed to get memcached connection because serverAddr is empty. bucketName=%v, userAgent=%v", bucketName, userAgent)
+		logger.Warnf(err.Error())
+		return nil, err
 	}
 	username, password, err := cbauth.GetMemcachedServiceAuth(serverAddr)
 	logger.Debugf("memcached auth: username=%v, password=%v, err=%v\n", username, password, err)
@@ -592,7 +594,9 @@ func (u *Utilities) GetMemcachedClient(serverAddr, bucketName string, kv_mem_cli
 		return client, nil
 	} else {
 		if bucketName == "" {
-			panic("unexpected empty bucketName")
+			err := fmt.Errorf("Failed to get memcached client because of unexpected empty bucketName. serverAddr=%v, userAgent=%v", serverAddr, userAgent)
+			logger.Warnf(err.Error())
+			return nil, err
 		}
 
 		var client, err = u.GetMemcachedConnection(serverAddr, bucketName, userAgent, keepAlivePeriod, logger)

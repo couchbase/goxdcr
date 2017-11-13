@@ -10,14 +10,17 @@
 package service_impl
 
 import (
+	"errors"
 	"fmt"
 	mcc "github.com/couchbase/gomemcached/client"
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/common"
+	component "github.com/couchbase/goxdcr/component"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/parts"
 	pipeline_pkg "github.com/couchbase/goxdcr/pipeline"
 	"github.com/couchbase/goxdcr/pipeline_manager"
+	"github.com/couchbase/goxdcr/pipeline_svc"
 	"github.com/couchbase/goxdcr/pipeline_utils"
 	"github.com/couchbase/goxdcr/simple_utils"
 	"sync"
@@ -25,6 +28,8 @@ import (
 )
 
 type ThroughSeqnoTrackerSvc struct {
+	*component.AbstractComponent
+
 	// map of vbs that the tracker tracks.
 	vb_map map[uint16]bool
 
@@ -217,6 +222,17 @@ func (tsTracker *ThroughSeqnoTrackerSvc) Attach(pipeline common.Pipeline) error 
 	pipeline_utils.RegisterAsyncComponentEventHandler(asyncListenerMap, base.DataFailedCREventListener, tsTracker)
 	pipeline_utils.RegisterAsyncComponentEventHandler(asyncListenerMap, base.DataFilteredEventListener, tsTracker)
 	pipeline_utils.RegisterAsyncComponentEventHandler(asyncListenerMap, base.DataReceivedEventListener, tsTracker)
+
+	//register pipeline supervisor as through seqno service's error handler
+	supervisor := pipeline.RuntimeContext().Service(base.PIPELINE_SUPERVISOR_SVC)
+	if supervisor == nil {
+		return errors.New("Pipeline supervisor has to exist")
+	}
+	err := tsTracker.RegisterComponentEventListener(common.ErrorEncountered, supervisor.(*pipeline_svc.PipelineSupervisor))
+	if err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -245,7 +261,7 @@ func (tsTracker *ThroughSeqnoTrackerSvc) ProcessEvent(event *common.Event) error
 		// Sets last sequence number, and should the sequence number skip due to gap, this will take care of it
 		tsTracker.processGapSeqnos(vbno, seqno)
 	} else {
-		panic(fmt.Sprintf("Incorrect event type, %v, received by %v", event.EventType, tsTracker.id))
+		tsTracker.logger.Warnf("Incorrect event type, %v, received by %v", event.EventType, tsTracker.id)
 	}
 
 	return nil
@@ -491,13 +507,7 @@ func (tsTracker *ThroughSeqnoTrackerSvc) GetThroughSeqnos() map[uint16]uint64 {
 }
 
 func (tsTracker *ThroughSeqnoTrackerSvc) getThroughSeqnos(executor_id int, listOfVbs []uint16, result_map map[uint16]uint64, wait_grp *sync.WaitGroup) {
-	if result_map == nil {
-		panic("through_seqno_map is nil")
-	}
 	tsTracker.logger.Tracef("%v getThroughSeqnos executor %v is working on vbuckets %v", tsTracker.id, executor_id, listOfVbs)
-	if wait_grp == nil {
-		panic("wait_grp can't be nil")
-	}
 	defer wait_grp.Done()
 
 	for _, vbno := range listOfVbs {
@@ -513,9 +523,16 @@ func (tsTracker *ThroughSeqnoTrackerSvc) SetStartSeqno(vbno uint16, seqno uint64
 
 func (tsTracker *ThroughSeqnoTrackerSvc) validateVbno(vbno uint16, caller string) {
 	if _, ok := tsTracker.vb_map[vbno]; !ok {
-		panic(fmt.Sprintf("method %v in tracker service for pipeline %v received invalid vbno. vbno=%v; valid vbnos=%v",
-			caller, tsTracker.id, vbno, tsTracker.vb_map))
+		err := fmt.Errorf("method %v in tracker service for pipeline %v received invalid vbno. vbno=%v; valid vbnos=%v",
+			caller, tsTracker.id, vbno, tsTracker.vb_map)
+		tsTracker.handleGeneralError(err)
 	}
+}
+
+// handle fatal error, raise error event to pipeline supervisor
+func (tsTracker *ThroughSeqnoTrackerSvc) handleGeneralError(err error) {
+	tsTracker.logger.Error(err.Error())
+	tsTracker.RaiseEvent(common.NewEvent(common.ErrorEncountered, nil, tsTracker, nil, err))
 }
 
 func (tsTracker *ThroughSeqnoTrackerSvc) getVbList() []uint16 {

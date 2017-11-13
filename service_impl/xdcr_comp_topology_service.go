@@ -215,7 +215,7 @@ func (top_svc *XDCRTopologySvc) MyCredentials() (string, string, []byte, bool, e
 		return "", "", nil, false, err
 	}
 	if connStr == "" {
-		panic("connStr == ")
+		return "", "", nil, false, errors.New("XDCRTopologySvc.MyConnectionStr() returned empty string")
 	}
 
 	username, password, err := cbauth.GetHTTPServiceAuth(connStr)
@@ -268,11 +268,7 @@ func (top_svc *XDCRTopologySvc) MyClusterVersion() (string, error) {
 }
 
 func (top_svc *XDCRTopologySvc) staticHostAddr() string {
-	hostAddr := "http://" + top_svc.utils.GetHostAddr(base.LocalHostName, top_svc.adminport)
-	if hostAddr == "" {
-		panic("hostAddr can't be empty")
-	}
-	return hostAddr
+	return "http://" + top_svc.utils.GetHostAddr(base.LocalHostName, top_svc.adminport)
 }
 
 func (top_svc *XDCRTopologySvc) IsKVNode() (bool, error) {

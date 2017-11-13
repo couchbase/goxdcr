@@ -949,7 +949,7 @@ func (outNozzle_collector *outNozzleCollector) ProcessEvent(event *common.Event)
 		} else if req_opcode == base.SET_WITH_META {
 			metric_map[SET_DOCS_WRITTEN_METRIC].(metrics.Counter).Inc(1)
 		} else {
-			panic(fmt.Sprintf("Invalid opcode, %v, in DataSent event from %v.", req_opcode, event.Component.Id()))
+			outNozzle_collector.stats_mgr.logger.Warnf("Invalid opcode, %v, in DataSent event from %v.", req_opcode, event.Component.Id())
 		}
 
 		metric_map[DOCS_LATENCY_METRIC].(metrics.Histogram).Sample().Update(commit_time.Nanoseconds() / 1000000)
@@ -969,7 +969,7 @@ func (outNozzle_collector *outNozzleCollector) ProcessEvent(event *common.Event)
 		} else if req_opcode == base.SET_WITH_META {
 			metric_map[SET_FAILED_CR_SOURCE_METRIC].(metrics.Counter).Inc(1)
 		} else {
-			panic(fmt.Sprintf("Invalid opcode, %v, in DataFailedCRSource event from %v.", req_opcode, event.Component.Id()))
+			outNozzle_collector.stats_mgr.logger.Warnf("Invalid opcode, %v, in DataFailedCRSource event from %v.", req_opcode, event.Component.Id())
 		}
 	} else if event.EventType == common.GetMetaReceived {
 		outNozzle_collector.stats_mgr.logger.Debugf("%v Received a GetMetaReceived event from %v", outNozzle_collector.Id(), reflect.TypeOf(event.Component))
@@ -1061,7 +1061,7 @@ func (dcp_collector *dcpCollector) ProcessEvent(event *common.Event) error {
 		} else if uprEvent.Opcode == mc.UPR_MUTATION {
 			metric_map[SET_RECEIVED_DCP_METRIC].(metrics.Counter).Inc(1)
 		} else {
-			panic(fmt.Sprintf("Invalid opcode, %v, in DataReceived event from %v.", uprEvent.Opcode, event.Component.Id()))
+			dcp_collector.stats_mgr.logger.Warnf("Invalid opcode, %v, in DataReceived event from %v.", uprEvent.Opcode, event.Component.Id())
 		}
 	} else if event.EventType == common.DataProcessed {
 		dcp_dispatch_time := event.OtherInfos.(float64)
@@ -1132,7 +1132,7 @@ func (r_collector *routerCollector) ProcessEvent(event *common.Event) error {
 		} else if uprEvent.Opcode == mc.UPR_MUTATION {
 			metric_map[SET_FILTERED_METRIC].(metrics.Counter).Inc(1)
 		} else {
-			panic(fmt.Sprintf("Invalid opcode, %v, in DataFiltered event from %v.", uprEvent.Opcode, event.Component.Id()))
+			r_collector.stats_mgr.logger.Warnf("Invalid opcode, %v, in DataFiltered event from %v.", uprEvent.Opcode, event.Component.Id())
 		}
 	}
 

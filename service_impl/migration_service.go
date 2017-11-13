@@ -619,7 +619,7 @@ func (service *MigrationSvc) migrateReplicationDoc(replicationDocData interface{
 func (service *MigrationSvc) sourceBucketUUID(bucketName string) (string, error) {
 	local_connStr, _ := service.xdcr_comp_topology_svc.MyConnectionStr()
 	if local_connStr == "" {
-		panic("XDCRTopologySvc.MyConnectionStr() should not return empty string")
+		return "", errors.New("XDCRTopologySvc.MyConnectionStr() returned empty string")
 	}
 	return service.utils.LocalBucketUUID(local_connStr, bucketName, service.logger)
 }

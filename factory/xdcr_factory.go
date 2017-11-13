@@ -249,7 +249,7 @@ func (xdcrf *XDCRFactory) NewPipeline(topic string, progress_recorder common.Pip
 
 			outNozzle, ok := outNozzles[targetNozzleId]
 			if !ok {
-				panic(fmt.Sprintf("%v There is no corresponding target nozzle for vb=%v, targetNozzleId=%v", topic, vb, targetNozzleId))
+				return nil, fmt.Errorf("%v There is no corresponding target nozzle for vb=%v, targetNozzleId=%v", topic, vb, targetNozzleId)
 			}
 			downStreamParts[targetNozzleId] = outNozzle
 		}
