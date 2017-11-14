@@ -1227,16 +1227,31 @@ func (capi *CapiNozzle) resetConn() error {
 		return nil
 	}
 
-	newClient, err := capi.utils.NewTCPConn(capi.config.connectStr)
-	if err == nil {
-		capi.setClient(newClient)
-		capi.Logger().Infof("%v Connection reset succeeded", capi.Id())
-	} else {
-		capi.Logger().Errorf("%v - Connection reset failed. err=%v\n", capi.Id(), err)
-		capi.handleGeneralError(err)
+	// the sole purpose of getClientOpFunc is to match the func signature required by ExponentialBackoffExecutorWithFinishSignal
+	getClientOpFunc := func(param interface{}) (interface{}, error) {
+		return capi.utils.NewTCPConn(param.(string))
 	}
 
-	return err
+	result, err := capi.utils.ExponentialBackoffExecutorWithFinishSignal("capi.resetConn", base.XmemBackoffTimeNewConn, base.XmemMaxRetryNewConn,
+		base.MetaKvBackoffFactor, getClientOpFunc, capi.config.connectStr, capi.finish_ch)
+	if err != nil {
+		capi.Logger().Errorf("%v - Connection reset failed. err=%v\n", capi.Id(), err)
+		capi.handleGeneralError(err)
+		return err
+	}
+	newClient, ok := result.(*net.TCPConn)
+	if !ok {
+		// should never get here
+		err = fmt.Errorf("%v resetConn returned wrong type of client", capi.Id())
+		capi.Logger().Error(err.Error())
+		capi.handleGeneralError(err)
+		return err
+	}
+
+	capi.setClient(newClient)
+	capi.Logger().Infof("%v Connection reset succeeded", capi.Id())
+
+	return nil
 }
 
 func (capi *CapiNozzle) UpdateSettings(settings map[string]interface{}) error {

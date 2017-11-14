@@ -1669,3 +1669,29 @@ func (u *Utilities) ExponentialBackoffExecutor(name string, initialWait time.Dur
 	}
 	return base.ErrorFailedAfterRetry
 }
+
+/*
+ * This method has an additional parameter, finCh, than ExponentialBackoffExecutor. When finCh is closed,
+ * this method can abort earlier.
+ */
+func (u *Utilities) ExponentialBackoffExecutorWithFinishSignal(name string, initialWait time.Duration, maxRetries int, factor int, op ExponentialOpFunc2, param interface{}, finCh chan bool) (interface{}, error) {
+	waitTime := initialWait
+	for i := 0; i <= maxRetries; i++ {
+		select {
+		case <-finCh:
+			u.logger_utils.Warnf("ExponentialBackoffExecutorWithFinishSignal for %v aborting because of finch closure\n", name)
+			break
+		default:
+			result, err := op(param)
+			if err == nil {
+				return result, nil
+			} else if i != maxRetries {
+				u.logger_utils.Warnf("ExponentialBackoffExecutorWithFinishSignal for %v encountered error. Sleeping %v\n",
+					name, waitTime)
+				base.WaitForTimeoutOrFinishSignal(waitTime, finCh)
+				waitTime *= time.Duration(factor)
+			}
+		}
+	}
+	return nil, base.ErrorFailedAfterRetry
+}

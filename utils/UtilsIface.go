@@ -14,6 +14,7 @@ import (
 )
 
 type ExponentialOpFunc func() error
+type ExponentialOpFunc2 func(interface{}) (interface{}, error)
 
 type UtilsIface interface {
 	//	loggerForFunc(logger *log.CommonLogger) *log.CommonLogger
@@ -101,4 +102,5 @@ type UtilsIface interface {
 	CheckWhetherClusterIsESBasedOnBucketInfo(bucketInfo map[string]interface{}) bool
 	NewTCPConn(hostName string) (*net.TCPConn, error)
 	ExponentialBackoffExecutor(name string, initialWait time.Duration, maxRetries int, factor int, op ExponentialOpFunc) error
+	ExponentialBackoffExecutorWithFinishSignal(name string, initialWait time.Duration, maxRetries int, factor int, op ExponentialOpFunc2, param interface{}, finCh chan bool) (interface{}, error)
 }

@@ -45,7 +45,7 @@ const (
 	XMEM_SETTING_SAN_IN_CERITICATE   = "SANInCertificate"
 	XMEM_SETTING_REMOTE_MEM_SSL_PORT = "remote_ssl_port"
 
-	default_demandEncryption bool          = false
+	default_demandEncryption bool = false
 )
 
 var xmem_setting_defs base.SettingDefinitions = base.SettingDefinitions{SETTING_BATCHCOUNT: base.NewSettingDef(reflect.TypeOf((*int)(nil)), true),
@@ -1694,13 +1694,13 @@ func (xmem *XmemNozzle) initializeConnection() (err error) {
 	// this needs to be done after xmem.connType is set
 	xmem.composeUserAgent()
 
-	memClient_setMeta, err := getClientWithRetry(xmem.Id(), pool, xmem.finish_ch, xmem.Logger())
+	memClient_setMeta, err := xmem.getClientWithRetry(xmem.Id(), pool, xmem.finish_ch, xmem.Logger())
 
 	if err != nil {
 		return
 	}
 
-	memClient_getMeta, err := getClientWithRetry(xmem.Id(), pool, xmem.finish_ch, xmem.Logger())
+	memClient_getMeta, err := xmem.getClientWithRetry(xmem.Id(), pool, xmem.finish_ch, xmem.Logger())
 	if err != nil {
 		return
 	}
@@ -2573,7 +2573,7 @@ func (xmem *XmemNozzle) repairConn(client *xmemClient, reason string, rev int) e
 		return err
 	}
 
-	memClient, err := getClientWithRetry(xmem.Id(), pool, xmem.finish_ch, xmem.Logger())
+	memClient, err := xmem.getClientWithRetry(xmem.Id(), pool, xmem.finish_ch, xmem.Logger())
 	if err != nil {
 		xmem.handleGeneralError(err)
 		xmem.Logger().Errorf("%v - Failed to repair connections for %v. err=%v\n", xmem.Id(), client.name, err)
@@ -2713,27 +2713,24 @@ func (xmem *XmemNozzle) recordBatchSize(batchSize uint32) {
 	xmem.last_ten_batches_size[0] = batchSize
 }
 
-func getClientWithRetry(xmem_id string, pool base.ConnPool, finish_ch chan bool, logger *log.CommonLogger) (*mcc.Client, error) {
-	numOfRetry := 0
-	backoffTime := base.XmemBackoffTimeNewConn
-	for {
-		memClient, err := pool.GetNew()
-
-		if err == nil {
-			return memClient, nil
-		} else {
-			logger.Warnf("%v Error setting up new connections. err=%v", xmem_id, err)
-			if numOfRetry < base.XmemMaxRetryNewConn {
-				numOfRetry++
-				// exponential backoff
-				logger.Warnf("%v Retrying for %vth time after %v.", xmem_id, numOfRetry, backoffTime)
-				base.WaitForTimeoutOrFinishSignal(backoffTime, finish_ch)
-				backoffTime *= 2
-			} else {
-				high_level_err := fmt.Sprintf("Failed to set up connections to target cluster after %v retries.", numOfRetry)
-				logger.Errorf("%v %v", xmem_id, high_level_err)
-				return nil, errors.New(high_level_err)
-			}
-		}
+func (xmem *XmemNozzle) getClientWithRetry(xmem_id string, pool base.ConnPool, finish_ch chan bool, logger *log.CommonLogger) (*mcc.Client, error) {
+	// the sole purpose of getClientOpFunc is to match the func signature required by ExponentialBackoffExecutorWithFinishSignal
+	// input "param" is immaterial and is ignored
+	getClientOpFunc := func(param interface{}) (interface{}, error) {
+		return pool.GetNew()
 	}
+
+	result, err := xmem.utils.ExponentialBackoffExecutorWithFinishSignal("xmem.getClientWithRetry", base.XmemBackoffTimeNewConn, base.XmemMaxRetryNewConn,
+		base.MetaKvBackoffFactor, getClientOpFunc, nil /*param*/, finish_ch)
+	if err != nil {
+		high_level_err := fmt.Sprintf("Failed to set up connections to target cluster after %v retries.", base.XmemMaxRetryNewConn)
+		logger.Errorf("%v %v", xmem_id, high_level_err)
+		return nil, errors.New(high_level_err)
+	}
+	client, ok := result.(*mcc.Client)
+	if !ok {
+		// should never get here
+		return nil, fmt.Errorf("%v getClientWithRetry returned wrong type of client", xmem_id)
+	}
+	return client, nil
 }

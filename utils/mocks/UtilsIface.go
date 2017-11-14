@@ -298,6 +298,29 @@ func (_m *UtilsIface) ExponentialBackoffExecutor(name string, initialWait time.D
 	return r0
 }
 
+// ExponentialBackoffExecutorWithFinishSignal provides a mock function with given fields: name, initialWait, maxRetries, factor, op, param, finCh
+func (_m *UtilsIface) ExponentialBackoffExecutorWithFinishSignal(name string, initialWait time.Duration, maxRetries int, factor int, op utils.ExponentialOpFunc2, param interface{}, finCh chan bool) (interface{}, error) {
+	ret := _m.Called(name, initialWait, maxRetries, factor, op, param, finCh)
+
+	var r0 interface{}
+	if rf, ok := ret.Get(0).(func(string, time.Duration, int, int, utils.ExponentialOpFunc2, interface{}, chan bool) interface{}); ok {
+		r0 = rf(name, initialWait, maxRetries, factor, op, param, finCh)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(interface{})
+		}
+	}
+
+	var r1 error
+	if rf, ok := ret.Get(1).(func(string, time.Duration, int, int, utils.ExponentialOpFunc2, interface{}, chan bool) error); ok {
+		r1 = rf(name, initialWait, maxRetries, factor, op, param, finCh)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
 // GetBucketInfo provides a mock function with given fields: hostAddr, bucketName, username, password, certificate, sanInCertificate, logger
 func (_m *UtilsIface) GetBucketInfo(hostAddr string, bucketName string, username string, password string, certificate []byte, sanInCertificate bool, logger *log.CommonLogger) (map[string]interface{}, error) {
 	ret := _m.Called(hostAddr, bucketName, username, password, certificate, sanInCertificate, logger)
