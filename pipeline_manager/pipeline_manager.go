@@ -731,7 +731,7 @@ func (r *PipelineUpdater) run() {
 			r.cancelFutureRefresh()
 			if retErr != nil {
 				r.logger.Infof("Replication %v update experienced an error: %v. Scheduling a redo.\n", r.pipeline_name, retErr)
-				r.update_err_ch <- retErr
+				r.sendUpdateErr(retErr)
 			}
 		case retErr = <-r.update_err_ch:
 			var updateAgain bool
