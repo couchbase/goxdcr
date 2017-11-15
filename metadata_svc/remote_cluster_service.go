@@ -24,7 +24,6 @@ import (
 	"net/http"
 	"reflect"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -430,8 +429,8 @@ func (service *RemoteClusterService) validateRemoteCluster(ref *metadata.RemoteC
 		}
 	}
 
-	hostName := service.utils.GetHostName(ref.HostName)
-	port, err := service.utils.GetPortNumber(ref.HostName)
+	hostName := base.GetHostName(ref.HostName)
+	port, err := base.GetPortNumber(ref.HostName)
 	if err != nil {
 		return wrapAsInvalidRemoteClusterError(fmt.Sprintf("Failed to resolve address for \"%v\". The hostname may be incorrect or not resolvable.", ref.HostName))
 	}
@@ -870,29 +869,6 @@ func (service *RemoteClusterService) replaceRefHostName(refId string) error {
 	// if we get here, we did not find a usable replacement node and we did not update remote cluster ref
 	return fmt.Errorf("Could not find usable node for %v\n", ref.Id)
 
-}
-
-// for ssl enabled ref, working_conn_str is in the form of hostname:sslport:kvport.
-// parse out the three components
-func parseWorkingConnStr(working_conn_str string) (string, uint16, uint16, error) {
-	parts := strings.Split(working_conn_str, base.UrlPortNumberDelimiter)
-	if len(parts) != 3 {
-		return "", 0, 0, fmt.Errorf("alternative connStr %v is of wrong format", working_conn_str)
-	}
-
-	hostname := parts[0]
-
-	sslPort, err := strconv.ParseUint(parts[1], 10, 16)
-	if err != nil {
-		return "", 0, 0, fmt.Errorf("alternative connStr %v is of wrong format", working_conn_str)
-	}
-
-	kvPort, err := strconv.ParseUint(parts[2], 10, 16)
-	if err != nil {
-		return "", 0, 0, fmt.Errorf("alternative connStr %v is of wrong format", working_conn_str)
-	}
-
-	return hostname, uint16(sslPort), uint16(kvPort), nil
 }
 
 //get remote cluster name from remote cluster uuid. Return unknown if remote cluster cannot be found

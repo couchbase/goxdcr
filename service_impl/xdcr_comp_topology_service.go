@@ -71,9 +71,9 @@ func (top_svc *XDCRTopologySvc) MyMemcachedAddr() (string, error) {
 		return "", err
 	}
 
-	hostName := top_svc.utils.GetHostName(hostAddr)
+	hostName := base.GetHostName(hostAddr)
 
-	return top_svc.utils.GetHostAddr(hostName, port), nil
+	return base.GetHostAddr(hostName, port), nil
 }
 
 func (top_svc *XDCRTopologySvc) MyAdminPort() (uint16, error) {
@@ -172,7 +172,7 @@ func (top_svc *XDCRTopologySvc) getHostName() (string, error) {
 	if err != nil {
 		return "", nil
 	}
-	hostname := top_svc.utils.GetHostName(hostAddrStr)
+	hostname := base.GetHostName(hostAddrStr)
 	return hostname, nil
 }
 
@@ -206,7 +206,7 @@ func (top_svc *XDCRTopologySvc) getHostMemcachedPortFromHostInfo(nodeInfoMap map
 // implements base.ClusterConnectionInfoProvider
 func (top_svc *XDCRTopologySvc) MyConnectionStr() (string, error) {
 	host := base.LocalHostName
-	return top_svc.utils.GetHostAddr(host, top_svc.adminport), nil
+	return base.GetHostAddr(host, top_svc.adminport), nil
 }
 
 func (top_svc *XDCRTopologySvc) MyCredentials() (string, string, []byte, bool, error) {
@@ -268,7 +268,7 @@ func (top_svc *XDCRTopologySvc) MyClusterVersion() (string, error) {
 }
 
 func (top_svc *XDCRTopologySvc) staticHostAddr() string {
-	return "http://" + top_svc.utils.GetHostAddr(base.LocalHostName, top_svc.adminport)
+	return "http://" + base.GetHostAddr(base.LocalHostName, top_svc.adminport)
 }
 
 func (top_svc *XDCRTopologySvc) IsKVNode() (bool, error) {

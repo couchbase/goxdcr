@@ -21,7 +21,6 @@ import (
 	"math"
 	"net"
 	"net/url"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -267,7 +266,7 @@ func (p *sslOverMemConnPool) Certificate() []byte {
 }
 
 func (p *sslOverMemConnPool) newConn() (*mcc.Client, error) {
-	ssl_con_str := p.hostName + UrlPortNumberDelimiter + strconv.FormatInt(int64(p.remote_memcached_port), ParseIntBase)
+	ssl_con_str := GetHostAddr(p.hostName, uint16(p.remote_memcached_port))
 	return NewTLSConn(ssl_con_str, p.userName, p.password, p.certificate, p.san_in_certificate, p.bucketName, p.logger)
 }
 
@@ -669,7 +668,7 @@ func MakeTLSConn(ssl_con_str string, certificate []byte, check_server_name bool,
 	tlsConfig := &tls.Config{RootCAs: caPool}
 	tlsConfig.BuildNameToCertificate()
 	tlsConfig.InsecureSkipVerify = true
-	hostname := strings.Split(ssl_con_str, UrlPortNumberDelimiter)[0]
+	hostname := GetHostName(ssl_con_str)
 	tlsConfig.ServerName = hostname
 
 	// golang 1.8 added a new curve, X25519, which is not supported by ns_server pre-spock

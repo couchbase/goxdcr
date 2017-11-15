@@ -91,7 +91,7 @@ func ConstructServerCouchApiBaseMap(targetBucketName string, targetBucketInfo ma
 		}
 
 		// server addr = host:directPort
-		serverAddr := utils.GetHostAddr(hostname, uint16(directPortFloat))
+		serverAddr := base.GetHostAddr(hostname, uint16(directPortFloat))
 
 		serverCouchApiBaseMap[serverAddr] = couchApiBase
 	}

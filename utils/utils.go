@@ -159,26 +159,6 @@ func (u *Utilities) NewEnhancedError(msg string, err error) error {
 	return errors.New(msg + "\n err = " + err.Error())
 }
 
-// return host address in the form of hostName:port
-func (u *Utilities) GetHostAddr(hostName string, port uint16) string {
-	return hostName + base.UrlPortNumberDelimiter + strconv.FormatInt(int64(port), base.ParseIntBase)
-}
-
-// extract host name from hostAddr, which is in the form of hostName:port
-func (u *Utilities) GetHostName(hostAddr string) string {
-	return strings.Split(hostAddr, base.UrlPortNumberDelimiter)[0]
-}
-
-func (u *Utilities) GetPortNumber(hostAddr string) (uint16, error) {
-	port_str := strings.Split(hostAddr, base.UrlPortNumberDelimiter)[1]
-	port, err := strconv.ParseUint(port_str, 10, 16)
-	if err == nil {
-		return uint16(port), nil
-	} else {
-		return 0, err
-	}
-}
-
 func (u *Utilities) GetMapFromExpvarMap(expvarMap *expvar.Map) map[string]interface{} {
 	regMap := make(map[string]interface{})
 
@@ -783,7 +763,7 @@ func (u *Utilities) GetMemcachedSSLPortMap(hostName, username, password string, 
 			return nil, u.BucketInfoParseError(bucketInfo, logger)
 		}
 
-		hostAddr := u.GetHostAddr(hostname, uint16(kvPortFloat))
+		hostAddr := base.GetHostAddr(hostname, uint16(kvPortFloat))
 
 		kv_ssl_port, ok := services_map[base.KVSSLPortKey]
 		if !ok {
@@ -810,12 +790,12 @@ func (u *Utilities) BucketInfoParseError(bucketInfo map[string]interface{}, logg
 }
 
 func (u *Utilities) HttpsHostAddr(hostAddr string, logger *log.CommonLogger) (string, error, bool) {
-	hostName := u.GetHostName(hostAddr)
+	hostName := base.GetHostName(hostAddr)
 	sslPort, err, isInternalError := u.GetSSLPort(hostAddr, logger)
 	if err != nil {
 		return "", err, isInternalError
 	}
-	return u.GetHostAddr(hostName, sslPort), nil, false
+	return base.GetHostAddr(hostName, sslPort), nil, false
 }
 
 func (u *Utilities) GetSSLPort(hostAddr string, logger *log.CommonLogger) (uint16, error, bool) {
@@ -1243,7 +1223,7 @@ func (u *Utilities) GetHostNameFromNodeInfo(adminHostAddr string, nodeInfo map[s
 	if err != nil {
 		return "", err
 	}
-	return u.GetHostName(hostAddr), nil
+	return base.GetHostName(hostAddr), nil
 }
 
 //convenient api for rest calls to local cluster

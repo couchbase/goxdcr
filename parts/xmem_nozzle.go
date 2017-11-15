@@ -1659,7 +1659,7 @@ func (xmem *XmemNozzle) getOrCreateConnPool() (pool base.ConnPool, err error) {
 	} else {
 		//create a pool of SSL connection
 		poolName := xmem.getPoolName()
-		hostName := xmem.utils.GetHostName(xmem.config.connectStr)
+		hostName := base.GetHostName(xmem.config.connectStr)
 
 		if xmem.config.memcached_ssl_port != 0 {
 			xmem.Logger().Infof("%v Get or create ssl over memcached connection, memcached_ssl_port=%v\n", xmem.Id(), int(xmem.config.memcached_ssl_port))

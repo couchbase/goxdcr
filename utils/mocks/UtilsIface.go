@@ -593,20 +593,6 @@ func (_m *UtilsIface) GetEvictionPolicyFromBucketInfo(bucketName string, bucketI
 	return r0, r1
 }
 
-// GetHostAddr provides a mock function with given fields: hostName, port
-func (_m *UtilsIface) GetHostAddr(hostName string, port uint16) string {
-	ret := _m.Called(hostName, port)
-
-	var r0 string
-	if rf, ok := ret.Get(0).(func(string, uint16) string); ok {
-		r0 = rf(hostName, port)
-	} else {
-		r0 = ret.Get(0).(string)
-	}
-
-	return r0
-}
-
 // GetHostAddrFromNodeInfo provides a mock function with given fields: adminHostAddr, nodeInfo, logger
 func (_m *UtilsIface) GetHostAddrFromNodeInfo(adminHostAddr string, nodeInfo map[string]interface{}, logger *log.CommonLogger) (string, error) {
 	ret := _m.Called(adminHostAddr, nodeInfo, logger)
@@ -626,20 +612,6 @@ func (_m *UtilsIface) GetHostAddrFromNodeInfo(adminHostAddr string, nodeInfo map
 	}
 
 	return r0, r1
-}
-
-// GetHostName provides a mock function with given fields: hostAddr
-func (_m *UtilsIface) GetHostName(hostAddr string) string {
-	ret := _m.Called(hostAddr)
-
-	var r0 string
-	if rf, ok := ret.Get(0).(func(string) string); ok {
-		r0 = rf(hostAddr)
-	} else {
-		r0 = ret.Get(0).(string)
-	}
-
-	return r0
 }
 
 // GetHostNameFromNodeInfo provides a mock function with given fields: adminHostAddr, nodeInfo, logger
@@ -942,27 +914,6 @@ func (_m *UtilsIface) GetNonExistentBucketError() error {
 	}
 
 	return r0
-}
-
-// GetPortNumber provides a mock function with given fields: hostAddr
-func (_m *UtilsIface) GetPortNumber(hostAddr string) (uint16, error) {
-	ret := _m.Called(hostAddr)
-
-	var r0 uint16
-	if rf, ok := ret.Get(0).(func(string) uint16); ok {
-		r0 = rf(hostAddr)
-	} else {
-		r0 = ret.Get(0).(uint16)
-	}
-
-	var r1 error
-	if rf, ok := ret.Get(1).(func(string) error); ok {
-		r1 = rf(hostAddr)
-	} else {
-		r1 = ret.Error(1)
-	}
-
-	return r0, r1
 }
 
 // GetRemoteMemcachedConnection provides a mock function with given fields: serverAddr, username, password, bucketName, userAgent, plainAuth, keepAlivePeriod, logger

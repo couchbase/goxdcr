@@ -130,7 +130,7 @@ func setup() error {
 		os.Exit(1)
 	}
 
-	options.source_cluster_addr = utils.GetHostAddr(options.source_kv_host, uint16(options.source_kv_port))
+	options.source_cluster_addr = base.GetHostAddr(options.source_kv_host, uint16(options.source_kv_port))
 
 	metakv_svc, err := metadata_svc.NewMetaKVMetadataSvc(nil)
 	if err != nil {

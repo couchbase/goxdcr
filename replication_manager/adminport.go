@@ -87,7 +87,7 @@ func (adminport *Adminport) Start() {
 
 	// start http server
 	reqch := make(chan ap.Request)
-	hostAddr := adminport.utils.GetHostAddr(adminport.sourceKVHost, adminport.xdcrRestPort)
+	hostAddr := base.GetHostAddr(adminport.sourceKVHost, adminport.xdcrRestPort)
 	server := ap.NewHTTPServer("xdcr", hostAddr, base.AdminportUrlPrefix, reqch, new(ap.Handler))
 	finch := adminport.finch
 

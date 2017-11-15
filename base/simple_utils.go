@@ -22,6 +22,8 @@ import (
 	mrand "math/rand"
 	"reflect"
 	"sort"
+	"strconv"
+	"strings"
 	"time"
 )
 
@@ -449,4 +451,24 @@ func FlattenBytesList(bytesList [][]byte, size int) []byte {
 		flattenedBytes = append(flattenedBytes, bytes...)
 	}
 	return flattenedBytes
+}
+
+// return host address in the form of hostName:port
+func GetHostAddr(hostName string, port uint16) string {
+	return hostName + UrlPortNumberDelimiter + strconv.FormatInt(int64(port), ParseIntBase)
+}
+
+// extract host name from hostAddr, which is in the form of hostName:port
+func GetHostName(hostAddr string) string {
+	return strings.Split(hostAddr, UrlPortNumberDelimiter)[0]
+}
+
+func GetPortNumber(hostAddr string) (uint16, error) {
+	port_str := strings.Split(hostAddr, UrlPortNumberDelimiter)[1]
+	port, err := strconv.ParseUint(port_str, 10, 16)
+	if err == nil {
+		return uint16(port), nil
+	} else {
+		return 0, err
+	}
 }

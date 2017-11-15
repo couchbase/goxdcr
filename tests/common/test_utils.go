@@ -14,7 +14,7 @@ import (
 )
 
 func GetAdminportUrlPrefix(hostName string, adminportNumber uint64) string {
-	return "http://" + utils.GetHostAddr(hostName, uint16(adminportNumber)) + base.AdminportUrlPrefix
+	return "http://" + base.GetHostAddr(hostName, uint16(adminportNumber)) + base.AdminportUrlPrefix
 }
 
 func ValidateResponse(testName string, response *http.Response, err error) error {

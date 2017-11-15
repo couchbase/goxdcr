@@ -24,7 +24,6 @@ import (
 	utilities "github.com/couchbase/goxdcr/utils"
 	"math"
 	"math/rand"
-	"strconv"
 	"sync"
 	"time"
 )
@@ -187,7 +186,7 @@ func getSSLConStrMap(target_kv_vb_map map[string][]uint16, ssl_port_map map[stri
 		if !ok {
 			return nil, fmt.Errorf("Can't get remote memcached ssl port for %v", server_addr)
 		}
-		ssl_con_str := server_addr + base.UrlPortNumberDelimiter + strconv.FormatInt(int64(ssl_port), base.ParseIntBase)
+		ssl_con_str := base.GetHostAddr(server_addr, ssl_port)
 		ssl_con_str_map[server_addr] = ssl_con_str
 	}
 
@@ -348,8 +347,8 @@ func (ckmgr *CheckpointManager) initSSLConStrMap() error {
 		if !ok {
 			return fmt.Errorf("Can't get remote memcached ssl port for %v", server_addr)
 		}
-		host_name := ckmgr.utils.GetHostName(server_addr)
-		ssl_con_str := ckmgr.utils.GetHostAddr(host_name, uint16(ssl_port))
+		host_name := base.GetHostName(server_addr)
+		ssl_con_str := base.GetHostAddr(host_name, uint16(ssl_port))
 		ckmgr.ssl_con_str_map[server_addr] = ssl_con_str
 	}
 

@@ -21,9 +21,6 @@ type UtilsIface interface {
 	LocalBucket(localConnectStr, bucketName string) (*couchbase.Bucket, error)
 	UnwrapError(infos map[string]interface{}) (err error)
 	NewEnhancedError(msg string, err error) error
-	GetHostAddr(hostName string, port uint16) string
-	GetHostName(hostAddr string) string
-	GetPortNumber(hostAddr string) (uint16, error)
 	GetMapFromExpvarMap(expvarMap *expvar.Map) map[string]interface{}
 	ParseHighSeqnoStat(vbnos []uint16, stats_map map[string]string, highseqno_map map[uint16]uint64) error
 	ParseHighSeqnoAndVBUuidFromStats(vbnos []uint16, stats_map map[string]string, high_seqno_and_vbuuid_map map[uint16][]uint64)
