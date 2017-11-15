@@ -8,7 +8,7 @@
 // and limitations under the License.
 
 // simple utility functions with minimum dependencies on other goxdcr packages
-package simple_utils
+package base
 
 import (
 	"bytes"
@@ -17,7 +17,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
 	"math"
 	mrand "math/rand"
@@ -48,7 +47,7 @@ func ExecWithTimeout(action Action, timeout_duration time.Duration, logger *log.
 		case <-timeoutticker.C:
 			logger.Infof("Executing Action timed out")
 			logger.Info("****************************")
-			return base.ExecutionTimeoutError
+			return ExecutionTimeoutError
 		}
 	}
 
@@ -79,7 +78,7 @@ func ExecWithTimeout2(action Action2, input interface{}, timeout_duration time.D
 		case <-timeoutticker.C:
 			logger.Info("Executing Action2 timed out")
 			logger.Info("****************************")
-			return nil, base.ExecutionTimeoutError
+			return nil, ExecutionTimeoutError
 		}
 	}
 }
@@ -326,12 +325,12 @@ func GenerateRandomId(length, maxRetry int) (string, error) {
 
 }
 
-// translate conflict resolution type bucket metadata into base.ConflictResolutionMode
-func GetCRModeFromConflictResolutionTypeSetting(conflictResolutionType string) base.ConflictResolutionMode {
-	if conflictResolutionType == base.ConflictResolutionType_Lww {
-		return base.CRMode_LWW
+// translate conflict resolution type bucket metadata into ConflictResolutionMode
+func GetCRModeFromConflictResolutionTypeSetting(conflictResolutionType string) ConflictResolutionMode {
+	if conflictResolutionType == ConflictResolutionType_Lww {
+		return CRMode_LWW
 	}
-	return base.CRMode_RevId
+	return CRMode_RevId
 }
 
 // get the subset of vbs in vbList that point to different servers in the two vb server maps
@@ -440,7 +439,7 @@ func WaitForTimeoutOrFinishSignal(wait_time time.Duration, finish_ch chan bool) 
 
 // check if a specified data type contains xattr
 func HasXattr(dataType uint8) bool {
-	return dataType&base.PROTOCOL_BINARY_DATATYPE_XATTR > 0
+	return dataType&PROTOCOL_BINARY_DATATYPE_XATTR > 0
 }
 
 // flatten an array of byte array into a byte array

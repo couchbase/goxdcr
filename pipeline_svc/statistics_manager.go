@@ -25,7 +25,6 @@ import (
 	"github.com/couchbase/goxdcr/pipeline_manager"
 	"github.com/couchbase/goxdcr/pipeline_utils"
 	"github.com/couchbase/goxdcr/service_def"
-	"github.com/couchbase/goxdcr/simple_utils"
 	utilities "github.com/couchbase/goxdcr/utils"
 	"github.com/rcrowley/go-metrics"
 	"reflect"
@@ -705,7 +704,7 @@ func (stats_mgr *StatisticsManager) Attach(pipeline common.Pipeline) error {
 // compose user agent string for HELO command
 func (stats_mgr *StatisticsManager) composeUserAgent() {
 	spec := stats_mgr.pipeline.Specification()
-	stats_mgr.user_agent = simple_utils.ComposeUserAgentWithBucketNames("Goxdcr StatsMgr", spec.SourceBucketName, spec.TargetBucketName)
+	stats_mgr.user_agent = base.ComposeUserAgentWithBucketNames("Goxdcr StatsMgr", spec.SourceBucketName, spec.TargetBucketName)
 }
 
 func (stats_mgr *StatisticsManager) initOverviewRegistry() {
@@ -1247,7 +1246,7 @@ func UpdateStats(cluster_info_svc service_def.ClusterInfoSvc, xdcr_topology_svc 
 func constructStatsForReplication(repl_status *pipeline_pkg.ReplicationStatus, spec *metadata.ReplicationSpecification, cur_kv_vb_map map[string][]uint16,
 	checkpoints_svc service_def.CheckpointsService, kv_mem_clients map[string]mcc.ClientIface,
 	logger *log.CommonLogger, utils utilities.UtilsIface) error {
-	cur_vb_list := simple_utils.GetVbListFromKvVbMap(cur_kv_vb_map)
+	cur_vb_list := base.GetVbListFromKvVbMap(cur_kv_vb_map)
 	docs_processed, err := getDocsProcessedForReplication(spec.Id, cur_vb_list, checkpoints_svc, logger)
 	if err != nil {
 		return err
@@ -1328,9 +1327,9 @@ func updateStatsForReplication(repl_status *pipeline_pkg.ReplicationStatus, cur_
 		return nil
 	}
 
-	cur_vb_list := simple_utils.GetVbListFromKvVbMap(cur_kv_vb_map)
-	simple_utils.SortUint16List(cur_vb_list)
-	sameList := simple_utils.AreSortedUint16ListsTheSame(old_vb_list, cur_vb_list)
+	cur_vb_list := base.GetVbListFromKvVbMap(cur_kv_vb_map)
+	base.SortUint16List(cur_vb_list)
+	sameList := base.AreSortedUint16ListsTheSame(old_vb_list, cur_vb_list)
 	if sameList {
 		docs_processed, err = strconv.ParseInt(overview_stats.Get(DOCS_PROCESSED_METRIC).String(), base.ParseIntBase, base.ParseIntBitSize)
 		if err != nil {

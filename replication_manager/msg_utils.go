@@ -17,7 +17,6 @@ import (
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
-	"github.com/couchbase/goxdcr/simple_utils"
 	utilities "github.com/couchbase/goxdcr/utils"
 	"io/ioutil"
 	"net/http"
@@ -288,16 +287,16 @@ func DecodeCreateRemoteClusterRequest(request *http.Request) (justValidate bool,
 
 	// check required parameters
 	if len(name) == 0 {
-		errorsMap[base.RemoteClusterName] = simple_utils.MissingParameterError("cluster name")
+		errorsMap[base.RemoteClusterName] = base.MissingParameterError("cluster name")
 	}
 	if len(hostName) == 0 {
-		errorsMap[base.RemoteClusterHostName] = simple_utils.MissingParameterError("hostname (ip)")
+		errorsMap[base.RemoteClusterHostName] = base.MissingParameterError("hostname (ip)")
 	}
 	if len(userName) == 0 {
-		errorsMap[base.RemoteClusterUserName] = simple_utils.MissingParameterError("username")
+		errorsMap[base.RemoteClusterUserName] = base.MissingParameterError("username")
 	}
 	if len(password) == 0 {
-		errorsMap[base.RemoteClusterPassword] = simple_utils.MissingParameterError("password")
+		errorsMap[base.RemoteClusterPassword] = base.MissingParameterError("password")
 	}
 
 	// certificate is required if demandEncryption is set to true
@@ -366,7 +365,7 @@ func DecodeCreateReplicationRequest(request *http.Request) (justValidate bool, f
 		case ReplicationType:
 			replicationType = getStringFromValArr(valArr)
 			if replicationType != ReplicationTypeValue {
-				errorsMap[ReplicationType] = simple_utils.GenericInvalidValueError(ReplicationType)
+				errorsMap[ReplicationType] = base.GenericInvalidValueError(ReplicationType)
 			}
 		case base.FromBucket:
 			fromBucket = getStringFromValArr(valArr)
@@ -388,17 +387,17 @@ func DecodeCreateReplicationRequest(request *http.Request) (justValidate bool, f
 	}
 
 	if len(replicationType) == 0 {
-		errorsMap[ReplicationType] = simple_utils.MissingValueError("replication type")
+		errorsMap[ReplicationType] = base.MissingValueError("replication type")
 	}
 
 	if len(fromBucket) == 0 {
-		errorsMap[base.FromBucket] = simple_utils.MissingValueError("source bucket")
+		errorsMap[base.FromBucket] = base.MissingValueError("source bucket")
 	}
 	if len(toCluster) == 0 {
-		errorsMap[base.ToCluster] = simple_utils.MissingValueError("target cluster")
+		errorsMap[base.ToCluster] = base.MissingValueError("target cluster")
 	}
 	if len(toBucket) == 0 {
-		errorsMap[base.ToBucket] = simple_utils.MissingValueError("target bucket")
+		errorsMap[base.ToBucket] = base.MissingValueError("target bucket")
 	}
 
 	settings, settingsErrorsMap := DecodeSettingsFromRequest(request, false, false, isCapi)
@@ -479,12 +478,12 @@ func DecodeCreateReplicationResponse(response *http.Response) (string, error) {
 	replicationId, ok := paramsMap[ReplicationId]
 
 	if !ok {
-		return "", simple_utils.MissingParameterInHttpResponseError(ReplicationId)
+		return "", base.MissingParameterInHttpResponseError(ReplicationId)
 	}
 
 	replicationIdStr, ok := replicationId.(string)
 	if !ok {
-		return "", simple_utils.IncorrectValueTypeInHttpResponseError(ReplicationId, replicationId, "string")
+		return "", base.IncorrectValueTypeInHttpResponseError(ReplicationId, replicationId, "string")
 	}
 
 	return replicationIdStr, nil
@@ -572,7 +571,7 @@ func DecodeRegexpValidationRequest(request *http.Request, utils utilities.UtilsI
 	}
 
 	if len(expression) == 0 {
-		return "", nil, simple_utils.MissingParameterError("expression")
+		return "", nil, base.MissingParameterError("expression")
 	}
 
 	return expression, keys, nil
@@ -638,7 +637,7 @@ func DecodeDynamicParamInURL(request *http.Request, pathPrefix string, paramName
 	prefixLength := len(base.AdminportUrlPrefix) + len(pathPrefix) + len(base.UrlDelimiter)
 
 	if len(request.URL.Path) <= prefixLength {
-		return "", simple_utils.MissingParameterInHttpRequestUrlError(paramName, request.URL.Path)
+		return "", base.MissingParameterInHttpRequestUrlError(paramName, request.URL.Path)
 	}
 
 	paramValue := request.URL.Path[prefixLength:]
@@ -699,7 +698,7 @@ func getBoolFromValArr(valArr []string, defaultValue bool) (bool, error) {
 	if boolStr != "" {
 		result, err := strconv.ParseBool(boolStr)
 		if err != nil {
-			return defaultValue, simple_utils.IncorrectValueTypeError("a boolean")
+			return defaultValue, base.IncorrectValueTypeError("a boolean")
 		}
 		return result, nil
 	}
@@ -901,7 +900,7 @@ func DecodeBucketSettingsChangeRequest(request *http.Request) (bool, error) {
 	}
 
 	if !lwwEnabledFound {
-		return false, simple_utils.MissingParameterError(LWWEnabled)
+		return false, base.MissingParameterError(LWWEnabled)
 	}
 	return lwwEnabled, nil
 }

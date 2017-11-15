@@ -19,7 +19,6 @@ import (
 	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/goxdcr/pipeline_utils"
 	"github.com/couchbase/goxdcr/service_def"
-	"github.com/couchbase/goxdcr/simple_utils"
 	utilities "github.com/couchbase/goxdcr/utils"
 	"math/rand"
 	"net/http"
@@ -811,7 +810,7 @@ func (service *RemoteClusterService) replaceRefHostName(refId string) error {
 		return err
 	}
 
-	hostNames := simple_utils.DeepCopyStringArray(ref_cache.nodes_connectionstr)
+	hostNames := base.DeepCopyStringArray(ref_cache.nodes_connectionstr)
 	// sort the node list, so that the selection of the replacement node will be deterministic
 	// in other words, if two source nodes performs the selection at the same time,
 	// they will get the same replacement node. this way less strain is put on metakv

@@ -19,7 +19,6 @@ import (
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/goxdcr/pipeline_utils"
-	"github.com/couchbase/goxdcr/simple_utils"
 	"sync"
 	"time"
 )
@@ -135,7 +134,7 @@ func (rs *ReplicationStatus) SetPipeline(pipeline common.Pipeline) {
 	rs.Pipeline_ = pipeline
 	if pipeline != nil {
 		rs.vb_list = pipeline_utils.GetSourceVBListPerPipeline(pipeline)
-		simple_utils.SortUint16List(rs.vb_list)
+		base.SortUint16List(rs.vb_list)
 		rs.SpecInternalId = pipeline.Specification().InternalId
 	}
 

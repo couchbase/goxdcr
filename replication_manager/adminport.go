@@ -21,7 +21,6 @@ import (
 	"github.com/couchbase/goxdcr/gen_server"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
-	"github.com/couchbase/goxdcr/simple_utils"
 	utilities "github.com/couchbase/goxdcr/utils"
 	"net/http"
 	"runtime"
@@ -662,7 +661,7 @@ func (adminport *Adminport) GetMessageKeyFromRequest(r *http.Request) (string, e
 	}
 
 	if len(key) == 0 {
-		return "", simple_utils.InvalidPathInHttpRequestError(r.URL.Path)
+		return "", base.InvalidPathInHttpRequestError(r.URL.Path)
 	} else {
 		// add http method suffix to name to ensure uniqueness
 		key += base.UrlDelimiter + strings.ToUpper(r.Method)

@@ -15,7 +15,6 @@ import (
 	"github.com/couchbase/goxdcr/base"
 	common "github.com/couchbase/goxdcr/common"
 	"github.com/couchbase/goxdcr/log"
-	"github.com/couchbase/goxdcr/simple_utils"
 	"sync"
 )
 
@@ -93,7 +92,7 @@ func (ctx *PipelineRuntimeCtx) Stop() error {
 	ctx.logger.Infof("%v Pipeline context is stopping...", topic)
 
 	// put a timeout around service stopping to avoid being stuck
-	err := simple_utils.ExecWithTimeout(ctx.stopServices, base.TimeoutRuntimeContextStop, ctx.logger)
+	err := base.ExecWithTimeout(ctx.stopServices, base.TimeoutRuntimeContextStop, ctx.logger)
 	if err != nil {
 		ctx.logger.Warnf("%v error stopping pipeline context. err=%v", topic, err)
 	} else {

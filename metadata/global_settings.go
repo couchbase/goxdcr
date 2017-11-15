@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
-	"github.com/couchbase/goxdcr/simple_utils"
 	"strconv"
 )
 
@@ -79,7 +78,7 @@ func (s *GlobalSettings) UpdateSettingsFromMap(settingsMap map[string]interface{
 		case GoMaxProcs:
 			maxprocs, ok := val.(int)
 			if !ok {
-				errorMap[key] = simple_utils.IncorrectValueTypeInMapError(key, val, "int")
+				errorMap[key] = base.IncorrectValueTypeInMapError(key, val, "int")
 				continue
 			}
 			if s.GoMaxProcs != maxprocs {
@@ -89,7 +88,7 @@ func (s *GlobalSettings) UpdateSettingsFromMap(settingsMap map[string]interface{
 		case GoGC:
 			gogc, ok := val.(int)
 			if !ok {
-				errorMap[key] = simple_utils.IncorrectValueTypeInMapError(key, val, "int")
+				errorMap[key] = base.IncorrectValueTypeInMapError(key, val, "int")
 				continue
 			}
 			if s.GoGC != gogc {
@@ -106,7 +105,7 @@ func ValidateAndConvertGlobalSettingsValue(key, value, errorKey string) (convert
 	case GoMaxProcs:
 		convertedValue, err = strconv.ParseInt(value, base.ParseIntBase, base.ParseIntBitSize)
 		if err != nil {
-			err = simple_utils.IncorrectValueTypeError("an integer")
+			err = base.IncorrectValueTypeError("an integer")
 			return
 		}
 		// convert it to int to make future processing easier
@@ -117,7 +116,7 @@ func ValidateAndConvertGlobalSettingsValue(key, value, errorKey string) (convert
 	case GoGC:
 		convertedValue, err = strconv.ParseInt(value, base.ParseIntBase, base.ParseIntBitSize)
 		if err != nil {
-			err = simple_utils.IncorrectValueTypeError("an integer")
+			err = base.IncorrectValueTypeError("an integer")
 			return
 		}
 		// convert it to int to make future processing easier

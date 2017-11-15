@@ -15,7 +15,6 @@ import (
 	mcc "github.com/couchbase/gomemcached/client"
 	base "github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
-	"github.com/couchbase/goxdcr/simple_utils"
 	"io"
 	"io/ioutil"
 	"net"
@@ -279,7 +278,7 @@ func (u *Utilities) EncodeMapIntoByteArray(data map[string]interface{}) ([]byte,
 		case []byte:
 			strVal = string(val.([]byte))
 		default:
-			return nil, simple_utils.IncorrectValueTypeInMapError(key, val, "string/int/bool/LogLevel/[]byte")
+			return nil, base.IncorrectValueTypeInMapError(key, val, "string/int/bool/LogLevel/[]byte")
 		}
 		params.Add(key, strVal)
 	}

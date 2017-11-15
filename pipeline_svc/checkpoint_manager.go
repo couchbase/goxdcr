@@ -21,7 +21,6 @@ import (
 	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/goxdcr/pipeline_utils"
 	"github.com/couchbase/goxdcr/service_def"
-	"github.com/couchbase/goxdcr/simple_utils"
 	utilities "github.com/couchbase/goxdcr/utils"
 	"math"
 	"math/rand"
@@ -301,7 +300,7 @@ func (ckmgr *CheckpointManager) initialize() {
 // compose user agent string for HELO command
 func (ckmgr *CheckpointManager) composeUserAgent() {
 	spec := ckmgr.pipeline.Specification()
-	ckmgr.user_agent = simple_utils.ComposeUserAgentWithBucketNames("Goxdcr CkptMgr", spec.SourceBucketName, spec.TargetBucketName)
+	ckmgr.user_agent = base.ComposeUserAgentWithBucketNames("Goxdcr CkptMgr", spec.SourceBucketName, spec.TargetBucketName)
 }
 
 func (ckmgr *CheckpointManager) initConnections() error {
@@ -553,7 +552,7 @@ func getDocsProcessedForReplication(topic string, vb_list []uint16, checkpoints_
 
 	for vbno, ckptDoc := range ckptDocs {
 
-		if simple_utils.IsVbInList(vbno, vb_list) {
+		if base.IsVbInList(vbno, vb_list) {
 			// if vbno is in vb_list, include its senqo in docs_processed computation
 
 			// if checkpoint records exist, use the seqno in the first checkpoint record, which is the highest in all checkpoint records
@@ -600,19 +599,19 @@ func (ckmgr *CheckpointManager) SetVBTimestamps(topic string) error {
 	ckmgr.logger.Infof("Found %v checkpoint documents for replication %v\n", len(ckptDocs), topic)
 
 	deleted_vbnos := make([]uint16, 0)
-	target_support_xattr_now := simple_utils.IsClusterCompatible(ckmgr.target_cluster_version, base.VersionForRBACAndXattrSupport)
+	target_support_xattr_now := base.IsClusterCompatible(ckmgr.target_cluster_version, base.VersionForRBACAndXattrSupport)
 	specInternalId := ckmgr.pipeline.Specification().InternalId
 
 	// Figure out if certain checkpoints need to be removed to force a complete resync due to external factors
 	for vbno, ckptDoc := range ckptDocs {
-		if !simple_utils.IsVbInList(vbno, listOfVbs) {
+		if !base.IsVbInList(vbno, listOfVbs) {
 			// if the vbno is no longer managed by the current checkpoint manager/pipeline,
 			// the checkpoint doc is no longer valid and needs to be deleted
 			// ignore errors, which should have been logged
 			ckmgr.checkpoints_svc.DelCheckpointsDoc(topic, vbno)
 			deleted_vbnos = append(deleted_vbnos, vbno)
 		} else if target_support_xattr_now {
-			target_support_xattr_in_ckpt_doc := simple_utils.IsClusterCompatible(ckptDoc.TargetClusterVersion, base.VersionForRBACAndXattrSupport)
+			target_support_xattr_in_ckpt_doc := base.IsClusterCompatible(ckptDoc.TargetClusterVersion, base.VersionForRBACAndXattrSupport)
 			if !target_support_xattr_in_ckpt_doc && ckptDoc.XattrSeqno > 0 {
 				// if target did not support xattr when checkpoint records were created,
 				// and target supports xattr now when pipeline is being restarted,
@@ -867,7 +866,7 @@ func (retriever *failoverLogRetriever) getFailiverLog() (err error) {
 func (ckmgr *CheckpointManager) getFailoverLog(bucket *couchbase.Bucket, listOfVbs []uint16) (couchbase.FailoverLog, error) {
 	//Get failover log can hang, timeout the executation if it takes too long.
 	failoverLogRetriever := newFailoverLogRetriever(listOfVbs, bucket, ckmgr.logger)
-	err := simple_utils.ExecWithTimeout(failoverLogRetriever.getFailiverLog, 20*time.Second, ckmgr.logger)
+	err := base.ExecWithTimeout(failoverLogRetriever.getFailiverLog, 20*time.Second, ckmgr.logger)
 
 	if err != nil {
 		return nil, errors.New("Failed to get failover log in 1 minute")
@@ -1014,14 +1013,14 @@ func (ckmgr *CheckpointManager) PerformCkpt(fin_ch <-chan bool) {
 
 	//divide the workload to several getter and run the getter parallelly
 	vb_list := ckmgr.getMyVBs()
-	simple_utils.RandomizeUint16List(vb_list)
+	base.RandomizeUint16List(vb_list)
 	number_of_vbs := len(vb_list)
 
 	number_of_workers := 5
 	if number_of_workers > number_of_vbs {
 		number_of_workers = number_of_vbs
 	}
-	load_distribution := simple_utils.BalanceLoad(number_of_workers, number_of_vbs)
+	load_distribution := base.BalanceLoad(number_of_workers, number_of_vbs)
 
 	worker_wait_grp := &sync.WaitGroup{}
 	for i := 0; i < number_of_workers; i++ {

@@ -14,7 +14,6 @@ import (
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/common"
 	"github.com/couchbase/goxdcr/log"
-	"github.com/couchbase/goxdcr/simple_utils"
 	"time"
 )
 
@@ -84,7 +83,7 @@ func (l *AsyncComponentEventListenerImpl) start() {
 
 func (l *AsyncComponentEventListenerImpl) Stop() error {
 	l.logger.Infof("%v stopping processing events\n", l.id)
-	err := simple_utils.ExecWithTimeout(l.stop, 500*time.Millisecond, l.logger)
+	err := base.ExecWithTimeout(l.stop, 500*time.Millisecond, l.logger)
 	if err == nil {
 		l.logger.Infof("%v stopped processing events\n", l.id)
 	} else {

@@ -20,7 +20,6 @@ import (
 	"github.com/couchbase/goxdcr/pipeline"
 	"github.com/couchbase/goxdcr/pipeline_utils"
 	"github.com/couchbase/goxdcr/service_def"
-	"github.com/couchbase/goxdcr/simple_utils"
 	"github.com/couchbase/goxdcr/supervisor"
 	utilities "github.com/couchbase/goxdcr/utils"
 	"reflect"
@@ -186,7 +185,7 @@ func (pipelineSupervisor *PipelineSupervisor) monitorPipelineHealth() error {
 			pipelineSupervisor.Logger().Infof("monitorPipelineHealth routine is exiting because parent supervisor %v has been stopped\n", pipelineSupervisor.Id())
 			return nil
 		case <-health_check_ticker.C:
-			err := simple_utils.ExecWithTimeout(pipelineSupervisor.checkPipelineHealth, 1000*time.Millisecond, pipelineSupervisor.Logger())
+			err := base.ExecWithTimeout(pipelineSupervisor.checkPipelineHealth, 1000*time.Millisecond, pipelineSupervisor.Logger())
 			if err != nil {
 				if err == base.ExecutionTimeoutError {
 					// ignore timeout error and continue
@@ -322,7 +321,7 @@ func (pipelineSupervisor *PipelineSupervisor) checkPipelineHealth() error {
 // compose user agent string for HELO command
 func (pipelineSupervisor *PipelineSupervisor) composeUserAgent() {
 	spec := pipelineSupervisor.pipeline.Specification()
-	pipelineSupervisor.user_agent = simple_utils.ComposeUserAgentWithBucketNames("Goxdcr PipelineSupervisor", spec.SourceBucketName, spec.TargetBucketName)
+	pipelineSupervisor.user_agent = base.ComposeUserAgentWithBucketNames("Goxdcr PipelineSupervisor", spec.SourceBucketName, spec.TargetBucketName)
 }
 
 func (pipelineSupervisor *PipelineSupervisor) getDcpStats() (map[string]map[string]string, error) {

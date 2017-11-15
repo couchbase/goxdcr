@@ -20,7 +20,6 @@ import (
 	gen_server "github.com/couchbase/goxdcr/gen_server"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/service_def"
-	"github.com/couchbase/goxdcr/simple_utils"
 	utilities "github.com/couchbase/goxdcr/utils"
 	"math"
 	"reflect"
@@ -369,7 +368,7 @@ func NewDcpNozzle(id string,
 }
 
 func (dcp *DcpNozzle) composeUserAgent() {
-	dcp.user_agent = simple_utils.ComposeUserAgentWithBucketNames("Goxdcr Dcp ", dcp.sourceBucketName, dcp.targetBucketName)
+	dcp.user_agent = base.ComposeUserAgentWithBucketNames("Goxdcr Dcp ", dcp.sourceBucketName, dcp.targetBucketName)
 }
 
 func (dcp *DcpNozzle) initialize(settings map[string]interface{}) (err error) {
@@ -393,7 +392,7 @@ func (dcp *DcpNozzle) initialize(settings map[string]interface{}) (err error) {
 		return err
 	}
 
-	randName, err := simple_utils.GenerateRandomId(base.LengthOfRandomId, base.MaxRetryForRandomIdGeneration)
+	randName, err := base.GenerateRandomId(base.LengthOfRandomId, base.MaxRetryForRandomIdGeneration)
 	if err != nil {
 		return err
 	}
@@ -576,7 +575,7 @@ func (dcp *DcpNozzle) closeUprStreamsWithTimeout() {
 	// otherwise closeUprStreams(), which accesses dcp.vbHandshakeMap, could panic
 	dcp.childrenWaitGrp.Add(1)
 
-	err := simple_utils.ExecWithTimeout(dcp.closeUprStreams, base.TimeoutDcpCloseUprStreams, dcp.Logger())
+	err := base.ExecWithTimeout(dcp.closeUprStreams, base.TimeoutDcpCloseUprStreams, dcp.Logger())
 	if err != nil {
 		dcp.Logger().Warnf("%v error closing upr streams. err=%v", dcp.Id(), err)
 	} else {
@@ -625,7 +624,7 @@ func (dcp *DcpNozzle) closeUprStreams() error {
 }
 
 func (dcp *DcpNozzle) closeUprFeedWithTimeout() {
-	err := simple_utils.ExecWithTimeout(dcp.closeUprFeed, base.TimeoutDcpCloseUprFeed, dcp.Logger())
+	err := base.ExecWithTimeout(dcp.closeUprFeed, base.TimeoutDcpCloseUprFeed, dcp.Logger())
 	if err != nil {
 		dcp.Logger().Warnf("%v error closing upr feed. err=%v", dcp.Id(), err)
 	} else {
@@ -794,7 +793,7 @@ done:
 }
 
 func (dcp *DcpNozzle) handleXattr(upr_event *mcc.UprEvent) {
-	event_has_xattr := simple_utils.HasXattr(upr_event.DataType)
+	event_has_xattr := base.HasXattr(upr_event.DataType)
 	if event_has_xattr {
 		xattr_seqno_obj, ok := dcp.vb_xattr_seqno_map[upr_event.VBucket]
 		if ok {
@@ -1157,7 +1156,7 @@ func (dcp *DcpNozzle) checkInactiveUprStreams() {
 				dcp.handleGeneralError(errors.New("DCP upr feed has been closed."))
 				return
 			}
-			err := simple_utils.ExecWithTimeout(dcp.checkInactiveUprStreams_once, 1000*time.Millisecond, dcp.Logger())
+			err := base.ExecWithTimeout(dcp.checkInactiveUprStreams_once, 1000*time.Millisecond, dcp.Logger())
 			if err != nil {
 				// ignore error and continue
 				dcp.Logger().Infof("Received error when checking inactive steams for %v. err=%v\n", dcp.Id(), err)

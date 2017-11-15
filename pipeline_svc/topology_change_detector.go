@@ -10,7 +10,6 @@ import (
 	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/goxdcr/pipeline_utils"
 	"github.com/couchbase/goxdcr/service_def"
-	"github.com/couchbase/goxdcr/simple_utils"
 	utilities "github.com/couchbase/goxdcr/utils"
 	"sync"
 	"time"
@@ -110,7 +109,7 @@ func (top_detect_svc *TopologyChangeDetectorSvc) Start(map[string]interface{}) e
 
 	//initialize source vb list to set up a baseline for source topology change detection
 	top_detect_svc.vblist_original = pipeline_utils.GetSourceVBListPerPipeline(top_detect_svc.pipeline)
-	simple_utils.SortUint16List(top_detect_svc.vblist_original)
+	base.SortUint16List(top_detect_svc.vblist_original)
 
 	//initialize target vb server map to set up a baseline for target topology change detection
 	_, target_server_vb_map, err := top_detect_svc.getTargetBucketInfo()
@@ -194,7 +193,7 @@ func (top_detect_svc *TopologyChangeDetectorSvc) validate() {
 func (top_detect_svc *TopologyChangeDetectorSvc) handleSourceToplogyChange(vblist_supposed []uint16, number_of_source_nodes int, err_in error) error {
 	defer top_detect_svc.logger.Infof("ToplogyChangeDetectorSvc for pipeline %v handleSourceToplogyChange completed", top_detect_svc.pipeline.Topic())
 
-	vblist_removed, vblist_new := simple_utils.ComputeDeltaOfUint16Lists(top_detect_svc.vblist_original, vblist_supposed, false)
+	vblist_removed, vblist_new := base.ComputeDeltaOfUint16Lists(top_detect_svc.vblist_original, vblist_supposed, false)
 	if len(vblist_removed) > 0 || len(vblist_new) > 0 {
 		top_detect_svc.logger.Infof("Source topology changed for pipeline %v: vblist_removed=%v, vblist_new=%v\n", top_detect_svc.pipeline.Topic(), vblist_removed, vblist_new)
 	}
@@ -215,7 +214,7 @@ func (top_detect_svc *TopologyChangeDetectorSvc) handleSourceToplogyChange(vblis
 			return err
 		}
 
-		if simple_utils.AreSortedUint16ListsTheSame(top_detect_svc.vblist_last, vblist_supposed) {
+		if base.AreSortedUint16ListsTheSame(top_detect_svc.vblist_last, vblist_supposed) {
 			top_detect_svc.source_topology_stable_count++
 			top_detect_svc.logger.Infof("Number of consecutive stable source topology seen by pipeline %v is %v\n", top_detect_svc.pipeline.Topic(), top_detect_svc.source_topology_stable_count)
 			if top_detect_svc.source_topology_stable_count >= base.MaxTopologyStableCountBeforeRestart {
@@ -273,7 +272,7 @@ func (top_detect_svc *TopologyChangeDetectorSvc) handleTargetToplogyChange(diff_
 		}
 
 		if target_vb_server_map != nil {
-			if simple_utils.AreVBServerMapsTheSame(top_detect_svc.target_vb_server_map_last, target_vb_server_map) {
+			if base.AreVBServerMapsTheSame(top_detect_svc.target_vb_server_map_last, target_vb_server_map) {
 				top_detect_svc.target_topology_stable_count++
 				top_detect_svc.logger.Infof("Number of stable target topology seen by pipeline %v is %v\n", top_detect_svc.pipeline.Topic(), top_detect_svc.target_topology_stable_count)
 				if top_detect_svc.target_topology_stable_count >= base.MaxTopologyStableCountBeforeRestart {
@@ -311,7 +310,7 @@ func (top_detect_svc *TopologyChangeDetectorSvc) validateVbErrors(diff_vb_list [
 	vb_err_map := vb_err_map_obj.Object.(map[uint16]error)
 
 	for vbno, vb_err := range vb_err_map {
-		_, found := simple_utils.SearchVBInSortedList(vbno, diff_vb_list)
+		_, found := base.SearchVBInSortedList(vbno, diff_vb_list)
 		if !found {
 			top_detect_svc.logger.Errorf("Vbucket %v for pipeline %v saw an error, %v, that had not been caused by topology changes. diff_vb_list=%v", vbno, top_detect_svc.pipeline.Topic(), vb_err, diff_vb_list)
 			top_detect_svc.RaiseEvent(common.NewEvent(common.ErrorEncountered, nil, top_detect_svc, nil, vb_err))
@@ -335,9 +334,9 @@ func (top_detect_svc *TopologyChangeDetectorSvc) validateSourceTopology() ([]uin
 		vblist_supposed = append(vblist_supposed, vblist...)
 	}
 
-	simple_utils.SortUint16List(vblist_supposed)
+	base.SortUint16List(vblist_supposed)
 
-	if !simple_utils.AreSortedUint16ListsTheSame(top_detect_svc.vblist_original, vblist_supposed) {
+	if !base.AreSortedUint16ListsTheSame(top_detect_svc.vblist_original, vblist_supposed) {
 		top_detect_svc.logger.Infof("Source topology has changed for pipeline %v\n", top_detect_svc.pipeline.Topic())
 		top_detect_svc.logger.Debugf("Pipeline %v - vblist_supposed=%v, vblist_now=%v\n", top_detect_svc.pipeline.Topic(), vblist_supposed, top_detect_svc.vblist_original)
 		return vblist_supposed, number_of_nodes, source_topology_changedErr
@@ -357,7 +356,7 @@ func (top_detect_svc *TopologyChangeDetectorSvc) validateTargetTopology() ([]uin
 	}
 
 	if top_detect_svc.check_target_version_for_rbac_and_xattr {
-		if simple_utils.IsClusterCompatible(targetClusterCompatibility, base.VersionForRBACAndXattrSupport) {
+		if base.IsClusterCompatible(targetClusterCompatibility, base.VersionForRBACAndXattrSupport) {
 			top_detect_svc.logger.Infof("ToplogyChangeDetectorSvc for pipeline %v detected that target cluster has been upgraded to 5.0 or above and is now supporting RBAC and xattr", top_detect_svc.pipeline.Topic())
 			return nil, nil, target_cluster_version_changed_for_rbac_and_xattr_err
 		}
@@ -371,7 +370,7 @@ func (top_detect_svc *TopologyChangeDetectorSvc) validateTargetTopology() ([]uin
 		}
 	}
 
-	diff_vb_list := simple_utils.GetDiffVBList(top_detect_svc.vblist_original, top_detect_svc.target_vb_server_map_original, target_vb_server_map)
+	diff_vb_list := base.GetDiffVBList(top_detect_svc.vblist_original, top_detect_svc.target_vb_server_map_original, target_vb_server_map)
 
 	if len(diff_vb_list) > 0 {
 		return diff_vb_list, target_vb_server_map, target_topology_changedErr

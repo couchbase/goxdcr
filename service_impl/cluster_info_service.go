@@ -13,7 +13,6 @@ import (
 	"fmt"
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
-	"github.com/couchbase/goxdcr/simple_utils"
 	utilities "github.com/couchbase/goxdcr/utils"
 )
 
@@ -74,7 +73,7 @@ func (ci_svc *ClusterInfoSvc) IsClusterCompatible(clusterConnInfoProvider base.C
 		if err != nil {
 			return false, err
 		}
-		return simple_utils.IsClusterCompatible(clusterCompatibility, version), nil
+		return base.IsClusterCompatible(clusterCompatibility, version), nil
 	} else {
 		//should not ever get here
 		return false, fmt.Errorf("Can't get nodes information for cluster %v, err=%v", connStr, err)

@@ -17,7 +17,6 @@ import (
 	"github.com/couchbase/goxdcr/pipeline_utils"
 	"github.com/couchbase/goxdcr/service_def"
 	"github.com/couchbase/goxdcr/service_impl"
-	"github.com/couchbase/goxdcr/simple_utils"
 	"github.com/couchbase/goxdcr/supervisor"
 	utilities "github.com/couchbase/goxdcr/utils"
 	"math"
@@ -199,7 +198,7 @@ func (xdcrf *XDCRFactory) NewPipeline(topic string, progress_recorder common.Pip
 	if !isCapiReplication {
 		// for xmem replication, sourceCRMode is LWW if and only if target bucket is LWW enabled, so as to ensure that source side conflict
 		// resolution and target side conflict resolution yield consistent results
-		sourceCRMode = simple_utils.GetCRModeFromConflictResolutionTypeSetting(conflictResolutionType)
+		sourceCRMode = base.GetCRModeFromConflictResolutionTypeSetting(conflictResolutionType)
 	}
 
 	xdcrf.logger.Infof("%v sourceCRMode=%v isCapiReplication=%v\n", topic, sourceCRMode, isCapiReplication)
@@ -313,7 +312,7 @@ func (xdcrf *XDCRFactory) registerAsyncListenersOnSources(pipeline common.Pipeli
 
 	num_of_sources := len(sources)
 	num_of_listeners := min(num_of_sources, base.MaxNumberOfAsyncListeners)
-	load_distribution := simple_utils.BalanceLoad(num_of_listeners, num_of_sources)
+	load_distribution := base.BalanceLoad(num_of_listeners, num_of_sources)
 	xdcrf.logger.Infof("topic=%v, num_of_sources=%v, num_of_listeners=%v, load_distribution=%v\n", pipeline.Topic(), num_of_sources, num_of_listeners, load_distribution)
 
 	for i := 0; i < num_of_listeners; i++ {
@@ -347,7 +346,7 @@ func (xdcrf *XDCRFactory) registerAsyncListenersOnTargets(pipeline common.Pipeli
 	targets := getNozzleList(pipeline.Targets())
 	num_of_targets := len(targets)
 	num_of_listeners := min(num_of_targets, base.MaxNumberOfAsyncListeners)
-	load_distribution := simple_utils.BalanceLoad(num_of_listeners, num_of_targets)
+	load_distribution := base.BalanceLoad(num_of_listeners, num_of_targets)
 	xdcrf.logger.Infof("topic=%v, num_of_targets=%v, num_of_listeners=%v, load_distribution=%v\n", pipeline.Topic(), num_of_targets, num_of_listeners, load_distribution)
 
 	for i := 0; i < num_of_listeners; i++ {
@@ -405,7 +404,7 @@ func (xdcrf *XDCRFactory) constructSourceNozzles(spec *metadata.ReplicationSpeci
 		// the number of dcpNozzle nodes to construct is the smaller of vbucket list size and source connection size
 		numOfDcpNozzles := min(numOfVbs, maxNozzlesPerNode)
 		// load_distribution is used to ensure that every nozzle gets as close # of vbuckets as possible, with a max delta between them of 1
-		load_distribution := simple_utils.BalanceLoad(numOfDcpNozzles, numOfVbs)
+		load_distribution := base.BalanceLoad(numOfDcpNozzles, numOfVbs)
 		xdcrf.logger.Infof("topic=%v, numOfDcpNozzles=%v, numOfVbs=%v, load_distribution=%v\n", spec.Id, numOfDcpNozzles, numOfVbs, load_distribution)
 
 		for i := 0; i < numOfDcpNozzles; i++ {
@@ -493,7 +492,7 @@ func (xdcrf *XDCRFactory) constructOutgoingNozzles(spec *metadata.ReplicationSpe
 		if err != nil {
 			return
 		}
-		targetHasRBACSupport := simple_utils.IsClusterCompatible(targetClusterVersion, base.VersionForRBACAndXattrSupport)
+		targetHasRBACSupport := base.IsClusterCompatible(targetClusterVersion, base.VersionForRBACAndXattrSupport)
 		if targetHasRBACSupport {
 			// if target is spock and up, simply use the username and password in remote cluster ref
 			targetUserName = targetClusterRef.UserName
@@ -543,7 +542,7 @@ func (xdcrf *XDCRFactory) constructOutgoingNozzles(spec *metadata.ReplicationSpe
 		numOfVbs := len(relevantVBs)
 		// the number of xmem nozzles to construct is the smaller of vbucket list size and target connection size
 		numOfOutNozzles := min(numOfVbs, maxTargetNozzlePerNode)
-		load_distribution := simple_utils.BalanceLoad(numOfOutNozzles, numOfVbs)
+		load_distribution := base.BalanceLoad(numOfOutNozzles, numOfVbs)
 		xdcrf.logger.Infof("topic=%v, numOfOutNozzles=%v, numOfVbs=%v, load_distribution=%v\n", spec.Id, numOfOutNozzles, numOfVbs, load_distribution)
 
 		for i := 0; i < numOfOutNozzles; i++ {
@@ -854,7 +853,7 @@ func (xdcrf *XDCRFactory) registerServices(pipeline common.Pipeline, logger_ctx 
 	}
 
 	//register topology change detect service
-	targetHasRBACAndXattrSupport := simple_utils.IsClusterCompatible(targetClusterVersion, base.VersionForRBACAndXattrSupport)
+	targetHasRBACAndXattrSupport := base.IsClusterCompatible(targetClusterVersion, base.VersionForRBACAndXattrSupport)
 	top_detect_svc := pipeline_svc.NewTopologyChangeDetectorSvc(xdcrf.cluster_info_svc, xdcrf.xdcr_topology_svc, xdcrf.remote_cluster_svc, xdcrf.repl_spec_svc, targetHasRBACAndXattrSupport, logger_ctx, xdcrf.utils)
 	err = ctx.RegisterService(base.TOPOLOGY_CHANGE_DETECT_SVC, top_detect_svc)
 	if err != nil {

@@ -22,7 +22,6 @@ import (
 	common "github.com/couchbase/goxdcr/common"
 	gen_server "github.com/couchbase/goxdcr/gen_server"
 	"github.com/couchbase/goxdcr/log"
-	"github.com/couchbase/goxdcr/simple_utils"
 	utilities "github.com/couchbase/goxdcr/utils"
 	"io"
 	"io/ioutil"
@@ -840,7 +839,7 @@ func (capi *CapiNozzle) batchUpdateDocsWithRetry(vbno uint16, req_list *[]*base.
 				return err
 			}
 			num_of_retry++
-			simple_utils.WaitForTimeoutOrFinishSignal(backoffTime, capi.finish_ch)
+			base.WaitForTimeoutOrFinishSignal(backoffTime, capi.finish_ch)
 			backoffTime *= 2
 			capi.Logger().Infof("%v retrying update docs for vb %v for the %vth time\n", capi.Id(), vbno, num_of_retry)
 		} else {
@@ -1111,7 +1110,7 @@ func getDocMap(req *mc.MCRequest, doc_map map[string]interface{}) {
 		delete(meta_map, DeletedKey)
 	}
 
-	if !simple_utils.IsJSON(req.Body) {
+	if !base.IsJSON(req.Body) {
 		meta_map[AttReasonKey] = InvalidJson
 	} else {
 		delete(meta_map, AttReasonKey)

@@ -18,7 +18,6 @@ import (
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/goxdcr/service_def"
-	"github.com/couchbase/goxdcr/simple_utils"
 	utilities "github.com/couchbase/goxdcr/utils"
 	"strings"
 	"sync"
@@ -226,7 +225,7 @@ func (service *ReplicationSpecService) validateXmemSettings(errorMap ErrorMap, t
 			return
 		}
 
-		hasRBACSupport := simple_utils.IsClusterCompatible(targetClusterCompatibility, base.VersionForRBACAndXattrSupport)
+		hasRBACSupport := base.IsClusterCompatible(targetClusterCompatibility, base.VersionForRBACAndXattrSupport)
 
 		var username, password string
 		if hasRBACSupport {
@@ -242,7 +241,7 @@ func (service *ReplicationSpecService) validateXmemSettings(errorMap ErrorMap, t
 		}
 
 		client, err := service.utils.GetRemoteMemcachedConnection(kvConnStr, username, password, targetBucket,
-			simple_utils.ComposeUserAgentWithBucketNames("Goxdcr ReplSpecSvc", sourceBucket, targetBucket),
+			base.ComposeUserAgentWithBucketNames("Goxdcr ReplSpecSvc", sourceBucket, targetBucket),
 			false /*plainAuth*/, 0 /*keepAlivePeriod*/, service.logger)
 		if client != nil {
 			client.Close()

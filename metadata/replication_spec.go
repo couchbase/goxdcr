@@ -12,7 +12,6 @@ package metadata
 import (
 	"fmt"
 	"github.com/couchbase/goxdcr/base"
-	"github.com/couchbase/goxdcr/simple_utils"
 	"reflect"
 	"strings"
 )
@@ -48,7 +47,7 @@ type ReplicationSpecification struct {
 }
 
 func NewReplicationSpecification(sourceBucketName string, sourceBucketUUID string, targetClusterUUID string, targetBucketName string, targetBucketUUID string) (*ReplicationSpecification, error) {
-	randId, err := simple_utils.GenerateRandomId(base.LengthOfRandomId, base.MaxRetryForRandomIdGeneration)
+	randId, err := base.GenerateRandomId(base.LengthOfRandomId, base.MaxRetryForRandomIdGeneration)
 	if err != nil {
 		return nil, err
 	}

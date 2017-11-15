@@ -27,7 +27,6 @@ import (
 	"github.com/couchbase/goxdcr/pipeline_manager"
 	"github.com/couchbase/goxdcr/pipeline_svc"
 	"github.com/couchbase/goxdcr/service_def"
-	"github.com/couchbase/goxdcr/simple_utils"
 	"github.com/couchbase/goxdcr/supervisor"
 	utilities "github.com/couchbase/goxdcr/utils"
 	"io"
@@ -972,7 +971,7 @@ func cleanup() {
 		// kill adminport to stop receiving new requests
 		close(replication_mgr.adminport_finch)
 
-		simple_utils.ExecWithTimeout(replication_mgr.pipelineMgr.OnExit, 1*time.Second, logger_rm)
+		base.ExecWithTimeout(replication_mgr.pipelineMgr.OnExit, 1*time.Second, logger_rm)
 
 		close(replication_mgr.status_logger_finch)
 		close(replication_mgr.mem_stats_logger_finch)

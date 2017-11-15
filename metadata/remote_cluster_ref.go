@@ -13,7 +13,6 @@ import (
 	"bytes"
 	"fmt"
 	"github.com/couchbase/goxdcr/base"
-	"github.com/couchbase/goxdcr/simple_utils"
 	"reflect"
 	"strings"
 )
@@ -82,7 +81,7 @@ func NewRemoteClusterReference(uuid, name, hostName, userName, password string,
 }
 
 func RemoteClusterRefId() (string, error) {
-	refUuid, err := simple_utils.GenerateRandomId(SizeOfRemoteClusterRefId, MaxRetryForIdGeneration)
+	refUuid, err := base.GenerateRandomId(SizeOfRemoteClusterRefId, MaxRetryForIdGeneration)
 	if err != nil {
 		return "", err
 	}

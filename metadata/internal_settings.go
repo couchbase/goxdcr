@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
-	"github.com/couchbase/goxdcr/simple_utils"
 	"math"
 	"reflect"
 	"strconv"
@@ -353,7 +352,7 @@ func ValidateAndConvertXDCRInternalSettingsValue(key, value string) (interface{}
 func validateAndConvertIntValue(value string, settingConfig *SettingsConfig) (convertedValue interface{}, err error) {
 	convertedValue, err = strconv.ParseInt(value, base.ParseIntBase, base.ParseIntBitSize)
 	if err != nil {
-		err = simple_utils.IncorrectValueTypeError("an integer")
+		err = base.IncorrectValueTypeError("an integer")
 		return
 	}
 
@@ -365,7 +364,7 @@ func validateAndConvertIntValue(value string, settingConfig *SettingsConfig) (co
 func validateAndConvertBoolValue(value string, settingConfig *SettingsConfig) (convertedValue interface{}, err error) {
 	convertedValue, err = strconv.ParseBool(value)
 	if err != nil {
-		err = simple_utils.IncorrectValueTypeError("a boolean")
+		err = base.IncorrectValueTypeError("a boolean")
 		return
 	}
 	return

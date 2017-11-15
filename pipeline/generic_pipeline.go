@@ -18,7 +18,6 @@ import (
 	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/goxdcr/parts"
 	"github.com/couchbase/goxdcr/service_def"
-	"github.com/couchbase/goxdcr/simple_utils"
 	"sync"
 	"time"
 )
@@ -301,7 +300,7 @@ func formatErrMsg(err_ch chan partError) map[string]error {
 
 func (genericPipeline *GenericPipeline) stopPartsWithTimeout() error {
 	// put a timeout around part stopping to avoid being stuck
-	err := simple_utils.ExecWithTimeout(genericPipeline.stopParts, base.TimeoutPartsStop, genericPipeline.logger)
+	err := base.ExecWithTimeout(genericPipeline.stopParts, base.TimeoutPartsStop, genericPipeline.logger)
 	if err != nil {
 		genericPipeline.logger.Warnf("%v error stopping pipeline parts. err=%v", genericPipeline.InstanceId(), err)
 	} else {

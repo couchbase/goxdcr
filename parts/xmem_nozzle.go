@@ -22,7 +22,6 @@ import (
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/goxdcr/service_def"
-	"github.com/couchbase/goxdcr/simple_utils"
 	utilities "github.com/couchbase/goxdcr/utils"
 	"io"
 	"math"
@@ -1231,7 +1230,7 @@ func (xmem *XmemNozzle) batchSetMetaWithRetry(batch *dataBatch, numOfRetry int) 
 func (xmem *XmemNozzle) preprocessMCRequest(req *base.WrappedMCRequest) error {
 	mc_req := req.Req
 
-	contains_xattr := simple_utils.HasXattr(mc_req.DataType)
+	contains_xattr := base.HasXattr(mc_req.DataType)
 	if contains_xattr && !xmem.xattrEnabled {
 		// if request contains xattr and xattr is not enabled in the memcached connection, strip xattr off the request
 
@@ -1322,8 +1321,8 @@ func resolveConflictByXattr(doc_meta_source documentMetadata,
 	if xattrEnabled {
 		// if target is xattr enabled, source mutation has xattr, and target mutation does not have xattr
 		// let source mutation win
-		source_has_xattr := simple_utils.HasXattr(doc_meta_source.dataType)
-		target_has_xattr := simple_utils.HasXattr(doc_meta_target.dataType)
+		source_has_xattr := base.HasXattr(doc_meta_source.dataType)
+		target_has_xattr := base.HasXattr(doc_meta_target.dataType)
 		return source_has_xattr && !target_has_xattr
 	} else {
 		// if target is not xattr enabled, target mutation always does not have xattr
@@ -2385,7 +2384,7 @@ func (xmem *XmemNozzle) writeToClient(client *xmemClient, bytesList [][]byte, re
 
 		if bytesCanSend == numberOfBytes {
 			// if all the bytes can be sent, send them
-			flattenedBytes := simple_utils.FlattenBytesList(bytesList, numberOfBytes)
+			flattenedBytes := base.FlattenBytesList(bytesList, numberOfBytes)
 			err, rev = xmem.writeToClientWithoutThrottling(client, flattenedBytes, renewTimeout)
 			if err != nil {
 				return
@@ -2393,7 +2392,7 @@ func (xmem *XmemNozzle) writeToClient(client *xmemClient, bytesList [][]byte, re
 		} else {
 			if bytesCanSend == minNumberOfBytes {
 				// send minNumberOfBytes if it can be sent
-				flattenedBytes := simple_utils.FlattenBytesList(bytesList[:minIndex+1], minNumberOfBytes)
+				flattenedBytes := base.FlattenBytesList(bytesList[:minIndex+1], minNumberOfBytes)
 				err, rev = xmem.writeToClientWithoutThrottling(client, flattenedBytes, renewTimeout)
 				if err != nil {
 					return
@@ -2728,7 +2727,7 @@ func getClientWithRetry(xmem_id string, pool base.ConnPool, finish_ch chan bool,
 				numOfRetry++
 				// exponential backoff
 				logger.Warnf("%v Retrying for %vth time after %v.", xmem_id, numOfRetry, backoffTime)
-				simple_utils.WaitForTimeoutOrFinishSignal(backoffTime, finish_ch)
+				base.WaitForTimeoutOrFinishSignal(backoffTime, finish_ch)
 				backoffTime *= 2
 			} else {
 				high_level_err := fmt.Sprintf("Failed to set up connections to target cluster after %v retries.", numOfRetry)

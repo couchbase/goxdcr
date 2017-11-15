@@ -14,7 +14,6 @@ import (
 	"fmt"
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
-	"github.com/couchbase/goxdcr/simple_utils"
 	"regexp"
 	"strconv"
 )
@@ -213,7 +212,7 @@ func (s *ReplicationSettings) UpdateSettingsFromMap(settingsMap map[string]inter
 		case ReplicationType:
 			repType, ok := val.(string)
 			if !ok {
-				errorMap[key] = simple_utils.IncorrectValueTypeInMapError(key, val, "string")
+				errorMap[key] = base.IncorrectValueTypeInMapError(key, val, "string")
 				continue
 			}
 			if s.RepType != repType {
@@ -223,7 +222,7 @@ func (s *ReplicationSettings) UpdateSettingsFromMap(settingsMap map[string]inter
 		case FilterExpression:
 			filterExpression, ok := val.(string)
 			if !ok {
-				errorMap[key] = simple_utils.IncorrectValueTypeInMapError(key, val, "string")
+				errorMap[key] = base.IncorrectValueTypeInMapError(key, val, "string")
 				continue
 			}
 			if s.FilterExpression != filterExpression {
@@ -233,7 +232,7 @@ func (s *ReplicationSettings) UpdateSettingsFromMap(settingsMap map[string]inter
 		case Active:
 			active, ok := val.(bool)
 			if !ok {
-				errorMap[key] = simple_utils.IncorrectValueTypeInMapError(key, val, "bool")
+				errorMap[key] = base.IncorrectValueTypeInMapError(key, val, "bool")
 				continue
 			}
 			if s.Active != active {
@@ -243,7 +242,7 @@ func (s *ReplicationSettings) UpdateSettingsFromMap(settingsMap map[string]inter
 		case CheckpointInterval:
 			checkpointInterval, ok := val.(int)
 			if !ok {
-				errorMap[key] = simple_utils.IncorrectValueTypeInMapError(key, val, "int")
+				errorMap[key] = base.IncorrectValueTypeInMapError(key, val, "int")
 				continue
 			}
 			if s.CheckpointInterval != checkpointInterval {
@@ -254,7 +253,7 @@ func (s *ReplicationSettings) UpdateSettingsFromMap(settingsMap map[string]inter
 		case BatchCount:
 			batchCount, ok := val.(int)
 			if !ok {
-				errorMap[key] = simple_utils.IncorrectValueTypeInMapError(key, val, "int")
+				errorMap[key] = base.IncorrectValueTypeInMapError(key, val, "int")
 				continue
 			}
 			if s.BatchCount != batchCount {
@@ -264,7 +263,7 @@ func (s *ReplicationSettings) UpdateSettingsFromMap(settingsMap map[string]inter
 		case BatchSize:
 			batchSize, ok := val.(int)
 			if !ok {
-				errorMap[key] = simple_utils.IncorrectValueTypeInMapError(key, val, "int")
+				errorMap[key] = base.IncorrectValueTypeInMapError(key, val, "int")
 				continue
 			}
 			if s.BatchSize != batchSize {
@@ -274,7 +273,7 @@ func (s *ReplicationSettings) UpdateSettingsFromMap(settingsMap map[string]inter
 		case FailureRestartInterval:
 			failureRestartInterval, ok := val.(int)
 			if !ok {
-				errorMap[key] = simple_utils.IncorrectValueTypeInMapError(key, val, "int")
+				errorMap[key] = base.IncorrectValueTypeInMapError(key, val, "int")
 				continue
 			}
 			if s.FailureRestartInterval != failureRestartInterval {
@@ -284,7 +283,7 @@ func (s *ReplicationSettings) UpdateSettingsFromMap(settingsMap map[string]inter
 		case OptimisticReplicationThreshold:
 			optimisticReplicationThreshold, ok := val.(int)
 			if !ok {
-				errorMap[key] = simple_utils.IncorrectValueTypeInMapError(key, val, "int")
+				errorMap[key] = base.IncorrectValueTypeInMapError(key, val, "int")
 				continue
 			}
 			if s.OptimisticReplicationThreshold != optimisticReplicationThreshold {
@@ -294,7 +293,7 @@ func (s *ReplicationSettings) UpdateSettingsFromMap(settingsMap map[string]inter
 		case SourceNozzlePerNode:
 			sourceNozzlePerNode, ok := val.(int)
 			if !ok {
-				errorMap[key] = simple_utils.IncorrectValueTypeInMapError(key, val, "int")
+				errorMap[key] = base.IncorrectValueTypeInMapError(key, val, "int")
 				continue
 			}
 			if s.SourceNozzlePerNode != sourceNozzlePerNode {
@@ -304,7 +303,7 @@ func (s *ReplicationSettings) UpdateSettingsFromMap(settingsMap map[string]inter
 		case TargetNozzlePerNode:
 			targetNozzlePerNode, ok := val.(int)
 			if !ok {
-				errorMap[key] = simple_utils.IncorrectValueTypeInMapError(key, val, "int")
+				errorMap[key] = base.IncorrectValueTypeInMapError(key, val, "int")
 				continue
 			}
 			if s.TargetNozzlePerNode != targetNozzlePerNode {
@@ -314,7 +313,7 @@ func (s *ReplicationSettings) UpdateSettingsFromMap(settingsMap map[string]inter
 		case MaxExpectedReplicationLag:
 			maxExpectedReplicationLag, ok := val.(int)
 			if !ok {
-				errorMap[key] = simple_utils.IncorrectValueTypeInMapError(key, val, "int")
+				errorMap[key] = base.IncorrectValueTypeInMapError(key, val, "int")
 				continue
 			}
 			if s.MaxExpectedReplicationLag != maxExpectedReplicationLag {
@@ -324,7 +323,7 @@ func (s *ReplicationSettings) UpdateSettingsFromMap(settingsMap map[string]inter
 		case TimeoutPercentageCap:
 			timeoutPercentageCap, ok := val.(int)
 			if !ok {
-				errorMap[key] = simple_utils.IncorrectValueTypeInMapError(key, val, "int")
+				errorMap[key] = base.IncorrectValueTypeInMapError(key, val, "int")
 				continue
 			}
 			if s.TimeoutPercentageCap != timeoutPercentageCap {
@@ -334,7 +333,7 @@ func (s *ReplicationSettings) UpdateSettingsFromMap(settingsMap map[string]inter
 		case PipelineLogLevel:
 			l, ok := val.(string)
 			if !ok {
-				errorMap[key] = simple_utils.IncorrectValueTypeInMapError(key, val, "string")
+				errorMap[key] = base.IncorrectValueTypeInMapError(key, val, "string")
 				continue
 			}
 			if s.LogLevel.String() != l {
@@ -344,7 +343,7 @@ func (s *ReplicationSettings) UpdateSettingsFromMap(settingsMap map[string]inter
 		case PipelineStatsInterval:
 			interval, ok := val.(int)
 			if !ok {
-				errorMap[key] = simple_utils.IncorrectValueTypeInMapError(key, val, "int")
+				errorMap[key] = base.IncorrectValueTypeInMapError(key, val, "int")
 				continue
 			}
 			if s.StatsInterval != interval {
@@ -354,7 +353,7 @@ func (s *ReplicationSettings) UpdateSettingsFromMap(settingsMap map[string]inter
 		case BandwidthLimit:
 			bandwidthLimit, ok := val.(int)
 			if !ok {
-				errorMap[key] = simple_utils.IncorrectValueTypeInMapError(key, val, "int")
+				errorMap[key] = base.IncorrectValueTypeInMapError(key, val, "int")
 				continue
 			}
 			if s.BandwidthLimit != bandwidthLimit {
@@ -414,13 +413,13 @@ func ValidateAndConvertSettingsValue(key, value, errorKey string, isEnterprise b
 	switch key {
 	case ReplicationType:
 		if value != ReplicationTypeXmem && value != ReplicationTypeCapi {
-			err = simple_utils.GenericInvalidValueError(errorKey)
+			err = base.GenericInvalidValueError(errorKey)
 		} else {
 			convertedValue = value
 		}
 	case PipelineLogLevel:
 		if _, err = log.LogLevelFromStr(value); err != nil {
-			err = simple_utils.GenericInvalidValueError(errorKey)
+			err = base.GenericInvalidValueError(errorKey)
 		} else {
 			convertedValue = value
 		}
@@ -435,7 +434,7 @@ func ValidateAndConvertSettingsValue(key, value, errorKey string, isEnterprise b
 		var paused bool
 		paused, err = strconv.ParseBool(value)
 		if err != nil {
-			err = simple_utils.IncorrectValueTypeError("a boolean")
+			err = base.IncorrectValueTypeError("a boolean")
 			return
 		}
 		convertedValue = !paused
@@ -446,7 +445,7 @@ func ValidateAndConvertSettingsValue(key, value, errorKey string, isEnterprise b
 		PipelineStatsInterval, BandwidthLimit:
 		convertedValue, err = strconv.ParseInt(value, base.ParseIntBase, base.ParseIntBitSize)
 		if err != nil {
-			err = simple_utils.IncorrectValueTypeError("an integer")
+			err = base.IncorrectValueTypeError("an integer")
 			return
 		}
 
@@ -531,7 +530,7 @@ func ValidateSettingsKey(settingsMap map[string]interface{}) (returnedSettingsMa
 func RangeCheck(intValue int, settingsConfig *SettingsConfig) error {
 	if settingsConfig.Range != nil {
 		if intValue < settingsConfig.Range.MinValue || intValue > settingsConfig.Range.MaxValue {
-			return simple_utils.InvalidValueError("an integer", settingsConfig.Range.MinValue, settingsConfig.Range.MaxValue)
+			return base.InvalidValueError("an integer", settingsConfig.Range.MinValue, settingsConfig.Range.MaxValue)
 		}
 	}
 	return nil
