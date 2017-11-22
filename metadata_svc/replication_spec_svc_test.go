@@ -63,7 +63,7 @@ func setupMocks(srcResolutionType string,
 	var port uint16 = 9000
 	hostAddr := "localhost:9000"
 	utilitiesMock.On("GetHostAddr", "localhost", port).Return(hostAddr)
-	myConnectionStr := utilitiesMock.GetHostAddr("localhost", port)
+	myConnectionStr := base.GetHostAddr("localhost", port)
 	xdcrTopologyMock.On("MyConnectionStr").Return(myConnectionStr, nil)
 	xdcrTopologyMock.On("IsMyClusterEnterprise").Return(true, nil)
 
@@ -123,7 +123,7 @@ func TestValidateNewReplicationSpec(t *testing.T) {
 	// Assume XMEM replication type
 	settings[metadata.ReplicationType] = metadata.ReplicationTypeXmem
 
-	_, _, _, errMap, _ := replSpecSvc.ValidateNewReplicationSpec(sourceBucket, targetCluster, targetBucket, settings)
+	_, _, _, errMap, _, _ := replSpecSvc.ValidateNewReplicationSpec(sourceBucket, targetCluster, targetBucket, settings)
 	assert.Equal(len(errMap), 0)
 	fmt.Println("============== Test case end: TestValidateNewReplicationSpec =================")
 }
@@ -152,7 +152,7 @@ func TestNegativeConflictResolutionType(t *testing.T) {
 	// Assume XMEM replication type
 	settings[metadata.ReplicationType] = metadata.ReplicationTypeXmem
 
-	_, _, _, errMap, _ := replSpecSvc.ValidateNewReplicationSpec(sourceBucket, targetCluster, targetBucket, settings)
+	_, _, _, errMap, _, _ := replSpecSvc.ValidateNewReplicationSpec(sourceBucket, targetCluster, targetBucket, settings)
 	// Should have only one error
 	assert.Equal(len(errMap), 1)
 	fmt.Println("============== Test case end: TestNegativeConflictResolutionType =================")
@@ -183,7 +183,7 @@ func TestDifferentConflictResolutionTypeOnCapi(t *testing.T) {
 	// Assume CAPI (elasticsearch) replication type
 	settings[metadata.ReplicationType] = metadata.ReplicationTypeCapi
 
-	_, _, _, errMap, _ := replSpecSvc.ValidateNewReplicationSpec(sourceBucket, targetCluster, targetBucket, settings)
+	_, _, _, errMap, _, _ := replSpecSvc.ValidateNewReplicationSpec(sourceBucket, targetCluster, targetBucket, settings)
 	// Should pass
 	assert.Equal(len(errMap), 0)
 	fmt.Println("============== Test case end: TestDifferentConflictResolutionTypeOnCapi =================")
