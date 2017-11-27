@@ -35,8 +35,6 @@ const (
 	Vbno              string = "vbno"
 )
 
-var mass_vb_check_interval = 60 * time.Second
-
 var CHECKPOINT_INTERVAL = "checkpoint_interval"
 
 var ckptRecordMismatch error = errors.New("Checkpoint Records internal version mismatch")
@@ -679,10 +677,6 @@ func (ckmgr *CheckpointManager) SetVBTimestamps(topic string) error {
 	}
 
 	ckmgr.logger.Infof("Done with setting starting seqno for pipeline %v\n", ckmgr.pipeline.Topic())
-
-	ckmgr.wait_grp.Add(1)
-	// Do a periodical verification from the local information with target cluster to ensure they agree
-	go ckmgr.massCheckVBOpaquesJob()
 
 	return nil
 }
@@ -1479,70 +1473,6 @@ func GetStartSeqnos(pipeline common.Pipeline, logger *log.CommonLogger) (map[uin
 		logger.Info("pipleine is nil")
 	}
 	return nil, nil
-}
-
-func (ckmgr *CheckpointManager) massCheckVBOpaquesJob() {
-	defer ckmgr.logger.Infof("%v Exits massCheckVBOpaquesJob routine.", ckmgr.pipeline.Topic())
-	defer ckmgr.wait_grp.Done()
-
-	ticker := time.NewTicker(mass_vb_check_interval)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ckmgr.finish_ch:
-			ckmgr.logger.Infof("%v Received finish signal", ckmgr.pipeline.Topic())
-			return
-		case <-ticker.C:
-			if !pipeline_utils.IsPipelineRunning(ckmgr.pipeline.State()) {
-				//pipeline is no longer running, kill itself
-				ckmgr.logger.Infof("%v Pipeline is no longer running, exit.", ckmgr.pipeline.Topic())
-				return
-			}
-			go ckmgr.massCheckVBOpaques()
-		}
-	}
-
-}
-
-func (ckmgr *CheckpointManager) massCheckVBOpaques() error {
-	target_vb_vbuuid_map := make(map[uint16]metadata.TargetVBOpaque)
-	//validate target bucket's vbucket uuid
-	for vb, _ := range ckmgr.cur_ckpts {
-		latestCkpt := ckmgr.getCurrentCkptWLock(vb)
-		latestCkpt.lock.RLock()
-		latest_ckpt_record := latestCkpt.ckpt
-		if latest_ckpt_record.Target_vb_opaque != nil {
-			target_vb_uuid := latest_ckpt_record.Target_vb_opaque
-			target_vb_vbuuid_map[vb] = target_vb_uuid
-		} else {
-			ckmgr.logger.Infof("%v remote bucket is an older node, massCheckVBOpaque is not supported for vb=%v.", ckmgr.pipeline.Topic(), vb)
-		}
-		latestCkpt.lock.RUnlock()
-	}
-
-	if len(target_vb_vbuuid_map) > 0 {
-		matching, mismatching, missing, err1 := ckmgr.capi_svc.MassValidateVBUUIDs(ckmgr.remote_bucket, target_vb_vbuuid_map)
-		if err1 != nil {
-			ckmgr.logger.Errorf("%v MassValidateVBUUID failed, err=%v", ckmgr.pipeline.Topic(), err1)
-			return err1
-		} else {
-			if len(mismatching) > 0 {
-				//error
-				ckmgr.logger.Errorf("Target bucket for replication %v's topology has changed. mismatch=%v, missing=%v, matching=%v\n", ckmgr.pipeline.Topic(), mismatching, missing, matching)
-				err := errors.New("Target bucket's topology has changed")
-				ckmgr.RaiseEvent(common.NewEvent(common.ErrorEncountered, nil, ckmgr, nil, err))
-			} else if len(missing) > 0 {
-				// missing vbuckets indicate that rebalance or failover may be going on on the target side
-				for _, vbno := range missing {
-					ckmgr.handleVBError(vbno, errors.New("MassValidateVBUUID failed since vbucket cannot be found on target"))
-				}
-			} else {
-				ckmgr.logger.Infof("No target bucket topology change is detected for replication %v", ckmgr.pipeline.Topic())
-			}
-			return nil
-		}
-	}
-	return nil
 }
 
 func (ckmgr *CheckpointManager) handleVBError(vbno uint16, err error) {
