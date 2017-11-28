@@ -332,7 +332,7 @@ func (supervisor *GenericSupervisor) processReport(heartbeat_report map[string]h
 			supervisor.childrenBeatMissedMap[childId] = missedCount
 			if missedCount > supervisor.missed_heartbeat_threshold {
 				// report the child as broken if it exceeded the beat_missed_threshold
-				brokenChildren[childId] = errors.New("Not responding")
+				brokenChildren[childId] = base.ErrorNotResponding
 				supervisor.removeChild_internal(childId, false)
 			}
 		} else {

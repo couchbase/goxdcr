@@ -245,7 +245,7 @@ type DcpNozzleIface interface {
 *************************************/
 type DcpNozzle struct {
 
-	//parent inheritance
+	//parent composition
 	gen_server.GenServer
 	AbstractPart
 
@@ -274,10 +274,11 @@ type DcpNozzle struct {
 
 	childrenWaitGrp sync.WaitGroup
 
-	counter_received uint32
-	counter_sent     uint32
+	counter_compressed_received uint64
+	counter_received            uint64
+	counter_sent                uint64
 	// the counter_received stats from last dcp check
-	counter_received_last uint32
+	counter_received_last uint64
 
 	// the number of check intervals after which dcp still has inactive streams
 	// inactive streams will be restarted after this count exceeds MaxCountStreamsInactive
@@ -297,16 +298,13 @@ type DcpNozzle struct {
 	// Each vb stream has its own helper to help with DCP handshaking
 	vbHandshakeMap map[uint16]*dcpStreamReqHelper
 
-	xdcr_topology_svc service_def.XDCRCompTopologySvc
-
+	xdcr_topology_svc        service_def.XDCRCompTopologySvc
 	stats_interval           time.Duration
 	stats_interval_change_ch chan bool
-
-	user_agent string
-
-	is_capi bool
-
-	utils utilities.UtilsIface
+	user_agent               string
+	is_capi                  bool
+	utils                    utilities.UtilsIface
+	compressionSetting       base.CompressionType
 }
 
 func NewDcpNozzle(id string,
@@ -371,20 +369,57 @@ func (dcp *DcpNozzle) composeUserAgent() {
 	dcp.user_agent = base.ComposeUserAgentWithBucketNames("Goxdcr Dcp ", dcp.sourceBucketName, dcp.targetBucketName)
 }
 
-func (dcp *DcpNozzle) initialize(settings map[string]interface{}) (err error) {
-	dcp.finch = make(chan bool)
+// Given the list of features, if a specific user requested feature is not essential to pipeline uptime
+// and may be a cause of the error, respond it back as high-priority so Pipeline can restart without it
+func (dcp *DcpNozzle) prioritizeReturnErrorByFeatures(requested mcc.UprFeatures, responded mcc.UprFeatures) error {
+	if responded.CompressionType != base.CompressionTypeEndMarker && requested.CompressionType != responded.CompressionType {
+		if requested.CompressionType == base.CompressionTypeNone && responded.CompressionType == base.CompressionTypeSnappy {
+			dcp.Logger().Warnf(fmt.Sprintf("%v did not request compression, but DCP responded with compression type %v\n",
+				dcp.Id(), base.CompressionTypeStrings[responded.CompressionType]))
+			/**
+			 * The contract with KV team is that in order for DCP to have compression turned on, the underlying Memcached
+			 * connection must also have compression enabled. Because XDCR did not request compression, it means that the underlying
+			 * memcached connection is *not* compression enabled. By the contract, this DCP connection should be invalidated and not
+			 * used, to avoid situations where KV may send compressed data over but not set the SNAPPY data type flag
+			 */
+			return base.ErrorCompressionDcpInvalidHandshake
 
-	dcp.initializeUprHandshakeHelpers()
+		} else if requested.CompressionType == base.CompressionTypeSnappy && responded.CompressionType == base.CompressionTypeNone {
+			dcp.Logger().Warnf(fmt.Sprintf("%v requested compression type %v, but DCP responded with compression type %v\n",
+				dcp.Id, base.CompressionTypeStrings[requested.CompressionType], base.CompressionTypeStrings[responded.CompressionType]))
+			return base.ErrorCompressionNotSupported
+		}
+	}
+	return nil
+}
 
-	addr, err := dcp.xdcr_topology_svc.MyMemcachedAddr()
+func (dcp *DcpNozzle) initializeMemcachedClient(settings map[string]interface{}) error {
+	var dcpMcReqFeatures utilities.HELOFeatures
+	var respondedFeatures utilities.HELOFeatures
+	var err error
+	var addr string
+
+	addr, err = dcp.xdcr_topology_svc.MyMemcachedAddr()
 	if err != nil {
 		return err
 	}
 
-	dcp.client, err = dcp.utils.GetMemcachedConnection(addr, dcp.sourceBucketName, dcp.user_agent, base.KeepAlivePeriod, dcp.Logger())
-	if err != nil {
-		return err
+	dcpMcReqFeatures.CompressionType = dcp.compressionSetting
+
+	dcp.client, respondedFeatures, err = dcp.utils.GetMemcachedConnectionWFeatures(addr, dcp.sourceBucketName, dcp.user_agent, base.KeepAlivePeriod, dcpMcReqFeatures, dcp.Logger())
+
+	if err == nil && (dcp.compressionSetting != base.CompressionTypeNone) && (respondedFeatures.CompressionType != dcp.compressionSetting) {
+		dcp.Logger().Errorf("%v Attempting to send HELO with compression type: %v, but received response with %v",
+			dcp.Id(), dcp.compressionSetting, respondedFeatures.CompressionType)
+		// Let dcp.Stop() take care of client.Close()
+		return base.ErrorCompressionNotSupported
 	}
+
+	return err
+}
+
+func (dcp *DcpNozzle) initializeUprFeed() error {
+	var err error
 
 	// xdcr will send ack to upr feed
 	dcp.uprFeed, err = dcp.client.NewUprFeedWithConfigIface(true /*ackByClient*/)
@@ -403,14 +438,51 @@ func (dcp *DcpNozzle) initialize(settings map[string]interface{}) (err error) {
 		// no need to enable xattr for capi replication
 		err = dcp.uprFeed.UprOpen(uprFeedName, uint32(0), base.UprFeedBufferSize)
 	} else {
+		var uprFeatures mcc.UprFeatures
 		// always enable xattr for xmem replication
 		// even if target cluster does not support xattr, we still need to get xattr data type from dcp
 		// for source side conflict resolution
-		err = dcp.uprFeed.UprOpenWithXATTR(uprFeedName, uint32(0), base.UprFeedBufferSize)
+		uprFeatures.Xattribute = true
+		uprFeatures.CompressionType = (int)(dcp.compressionSetting)
+		featuresErr, activatedFeatures := dcp.uprFeed.UprOpenWithFeatures(uprFeedName, uint32(0) /*seqno*/, base.UprFeedBufferSize, uprFeatures)
+		if featuresErr != nil {
+			err = featuresErr
+			dcp.Logger().Errorf("Trying to activate UPRFeatures received error code: %v", err.Error())
+			// We do not know what error code UprOpen() returned. But in the case where compression is not activated,
+			// it is something that XDCR can control. So at least override the error so that we can restart without
+			// compression enabled, and see if there is still anything else that could have caused errors
+			prioritizedErr := dcp.prioritizeReturnErrorByFeatures(uprFeatures, activatedFeatures)
+			if prioritizedErr != nil {
+				dcp.Logger().Errorf("An enabled feature may have caused the error. Overriding error to: %v", prioritizedErr)
+				err = prioritizedErr
+			}
+		}
 	}
 
 	if err != nil {
 		dcp.Logger().Errorf("%v upr open failed. err=%v.\n", dcp.Id(), err)
+	}
+
+	return err
+}
+
+func (dcp *DcpNozzle) initialize(settings map[string]interface{}) (err error) {
+	dcp.finch = make(chan bool)
+
+	val, ok := settings[SETTING_COMPRESSION_TYPE]
+	if ok && (val.(int) != (int)(dcp.compressionSetting)) {
+		dcp.compressionSetting = (base.CompressionType)(val.(int))
+	}
+
+	dcp.initializeUprHandshakeHelpers()
+
+	err = dcp.initializeMemcachedClient(settings)
+	if err != nil {
+		return err
+	}
+
+	err = dcp.initializeUprFeed()
+	if err != nil {
 		return err
 	}
 
@@ -765,11 +837,13 @@ func (dcp *DcpNozzle) processData() (err error) {
 						// https://github.com/couchbaselabs/dcp-documentation/blob/master/documentation/commands/expiration.md
 						start_time := time.Now()
 						dcp.incCounterReceived()
+						if m.IsSnappyDataType() {
+							dcp.incCompressedCounterReceived()
+						}
 						dcp.RaiseEvent(common.NewEvent(common.DataReceived, m, dcp, nil /*derivedItems*/, nil /*otherInfos*/))
 						if !dcp.is_capi {
 							dcp.handleXattr(m)
 						}
-
 						// forward mutation downstream through connector
 						if err := dcp.Connector().Forward(m); err != nil {
 							dcp.handleGeneralError(err)
@@ -820,7 +894,8 @@ func (dcp *DcpNozzle) onExit() {
 }
 
 func (dcp *DcpNozzle) PrintStatusSummary() {
-	msg := fmt.Sprintf("%v received %v items, sent %v items.", dcp.Id(), dcp.counterReceived(), dcp.counterSent())
+	var msg string
+	msg = fmt.Sprintf("%v received %v items (%v compressed), sent %v items.", dcp.Id(), dcp.counterReceived(), dcp.counterCompressedReceived(), dcp.counterSent())
 	streams_inactive := dcp.inactiveDcpStreamsWithState()
 	if len(streams_inactive) > 0 {
 		msg += fmt.Sprintf(" streams inactive: %v", streams_inactive)
@@ -1266,20 +1341,28 @@ func (dcp *DcpNozzle) dcpHasRemainingItemsForXdcr(dcp_stats map[string]map[strin
 	return false
 }
 
-func (dcp *DcpNozzle) counterReceived() uint32 {
-	return atomic.LoadUint32(&dcp.counter_received)
+func (dcp *DcpNozzle) counterReceived() uint64 {
+	return atomic.LoadUint64(&dcp.counter_received)
+}
+
+func (dcp *DcpNozzle) counterCompressedReceived() uint64 {
+	return atomic.LoadUint64(&dcp.counter_compressed_received)
 }
 
 func (dcp *DcpNozzle) incCounterReceived() {
-	atomic.AddUint32(&dcp.counter_received, 1)
+	atomic.AddUint64(&dcp.counter_received, 1)
 }
 
-func (dcp *DcpNozzle) counterSent() uint32 {
-	return atomic.LoadUint32(&dcp.counter_sent)
+func (dcp *DcpNozzle) incCompressedCounterReceived() {
+	atomic.AddUint64(&dcp.counter_compressed_received, 1)
+}
+
+func (dcp *DcpNozzle) counterSent() uint64 {
+	return atomic.LoadUint64(&dcp.counter_sent)
 }
 
 func (dcp *DcpNozzle) incCounterSent() {
-	atomic.AddUint32(&dcp.counter_sent, 1)
+	atomic.AddUint64(&dcp.counter_sent, 1)
 }
 
 func (dcp *DcpNozzle) collectDcpDataChanLen(settings map[string]interface{}) {

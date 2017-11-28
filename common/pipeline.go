@@ -10,6 +10,7 @@
 package common
 
 import (
+	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/metadata"
 )
 
@@ -39,9 +40,9 @@ type Pipeline interface {
 	SetRuntimeContext(ctx PipelineRuntimeContext)
 
 	//start the data exchange
-	Start(settings map[string]interface{}) error
+	Start(settings map[string]interface{}) base.ErrorMap
 	//stop the data exchange
-	Stop() error
+	Stop() base.ErrorMap
 
 	Specification() *metadata.ReplicationSpecification
 	Settings() map[string]interface{}

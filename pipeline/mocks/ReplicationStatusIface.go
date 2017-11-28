@@ -12,19 +12,24 @@ type ReplicationStatusIface struct {
 	mock.Mock
 }
 
-// publishWithStatus provides a mock function with given fields: status, lock
-func (_m *ReplicationStatusIface) publishWithStatus(status string, lock bool) {
-	_m.Called(status, lock)
-}
-
 // AddError provides a mock function with given fields: err
 func (_m *ReplicationStatusIface) AddError(err error) {
 	_m.Called(err)
 }
 
+// AddErrorsFromMap provides a mock function with given fields: errMap
+func (_m *ReplicationStatusIface) AddErrorsFromMap(errMap base.ErrorMap) {
+	_m.Called(errMap)
+}
+
 // CleanupBeforeExit provides a mock function with given fields: statsToClear
 func (_m *ReplicationStatusIface) CleanupBeforeExit(statsToClear []string) {
 	_m.Called(statsToClear)
+}
+
+// ClearCustomSettings provides a mock function with given fields:
+func (_m *ReplicationStatusIface) ClearCustomSettings() {
+	_m.Called()
 }
 
 // ClearErrors provides a mock function with given fields:
@@ -66,6 +71,20 @@ func (_m *ReplicationStatusIface) GetOverviewStats() *expvar.Map {
 
 // GetProgress provides a mock function with given fields:
 func (_m *ReplicationStatusIface) GetProgress() string {
+	ret := _m.Called()
+
+	var r0 string
+	if rf, ok := ret.Get(0).(func() string); ok {
+		r0 = rf()
+	} else {
+		r0 = ret.Get(0).(string)
+	}
+
+	return r0
+}
+
+// GetSpecInternalId provides a mock function with given fields:
+func (_m *ReplicationStatusIface) GetSpecInternalId() string {
 	ret := _m.Called()
 
 	var r0 string
@@ -131,6 +150,11 @@ func (_m *ReplicationStatusIface) Publish(lock bool) {
 	_m.Called(lock)
 }
 
+// PublishWithStatus provides a mock function with given fields: status, lock
+func (_m *ReplicationStatusIface) PublishWithStatus(status string, lock bool) {
+	_m.Called(status, lock)
+}
+
 // RecordProgress provides a mock function with given fields: progress
 func (_m *ReplicationStatusIface) RecordProgress(progress string) {
 	_m.Called(progress)
@@ -167,6 +191,11 @@ func (_m *ReplicationStatusIface) RuntimeStatus(lock bool) pipeline.ReplicationS
 	}
 
 	return r0
+}
+
+// SetCustomSettings provides a mock function with given fields: customSettings
+func (_m *ReplicationStatusIface) SetCustomSettings(customSettings *metadata.ReplicationSettings) {
+	_m.Called(customSettings)
 }
 
 // SetOverviewStats provides a mock function with given fields: stats

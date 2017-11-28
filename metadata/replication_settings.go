@@ -34,6 +34,7 @@ const (
 	PipelineLogLevel               = "log_level"
 	PipelineStatsInterval          = "stats_interval"
 	BandwidthLimit                 = "bandwidth_limit"
+	CompressionType                = base.CompressionTypeKey
 )
 
 // settings whose default values cannot be viewed or changed through rest apis
@@ -75,6 +76,7 @@ var TimeoutPercentageCapConfig = &SettingsConfig{50, &Range{0, 100}}
 var PipelineLogLevelConfig = &SettingsConfig{log.LogLevelInfo, nil}
 var PipelineStatsIntervalConfig = &SettingsConfig{1000, &Range{200, 600000}}
 var BandwidthLimitConfig = &SettingsConfig{0, &Range{0, 1000000}}
+var CompressionTypeConfig = &SettingsConfig{base.CompressionTypeNone, &Range{base.CompressionTypeNone, base.CompressionTypeEndMarker - 1}}
 
 var SettingsConfigMap = map[string]*SettingsConfig{
 	ReplicationType:                ReplicationTypeConfig,
@@ -92,6 +94,7 @@ var SettingsConfigMap = map[string]*SettingsConfig{
 	PipelineLogLevel:               PipelineLogLevelConfig,
 	PipelineStatsInterval:          PipelineStatsIntervalConfig,
 	BandwidthLimit:                 BandwidthLimitConfig,
+	CompressionType:                CompressionTypeConfig,
 }
 
 /***********************************
@@ -167,7 +170,10 @@ type ReplicationSettings struct {
 	// bandwidth usage limit in MB/sec
 	BandwidthLimit int `json:"bandwidth_limit"`
 
-	// revision number to be used by metadata service. not included in json
+	// Compression type - 0: None, 1: Snappy - REST will be inputting with string coming in
+	CompressionType int `json:"compression_type"`
+
+	// revision number to be used by metadata service. not included in json - not currently being used/set
 	Revision interface{}
 }
 
@@ -188,7 +194,28 @@ func DefaultSettings() *ReplicationSettings {
 		LogLevel:                       PipelineLogLevelConfig.defaultValue.(log.LogLevel),
 		StatsInterval:                  PipelineStatsIntervalConfig.defaultValue.(int),
 		BandwidthLimit:                 BandwidthLimitConfig.defaultValue.(int),
+		CompressionType:                CompressionTypeConfig.defaultValue.(int),
 	}
+}
+
+// If a feature is enabled, and it only works with Enterprise, return an error
+func enterpriseOnlyFeature(convertedValue, defaultValue interface{}, isEnterprise bool) error {
+	if convertedValue != defaultValue {
+		if !isEnterprise {
+			return errors.New("The value can be specified only in enterprise edition")
+		}
+	}
+	return nil
+}
+
+// If a feature is enabled, and it only works with non-CAPI, return an error
+func nonCAPIOnlyFeature(convertedValue, defaultValue interface{}, isCapi bool) error {
+	if convertedValue != defaultValue {
+		if isCapi {
+			return errors.New("The value can not be specified for CAPI replication")
+		}
+	}
+	return nil
 }
 
 func (s *ReplicationSettings) SetLogLevel(log_level string) error {
@@ -360,6 +387,16 @@ func (s *ReplicationSettings) UpdateSettingsFromMap(settingsMap map[string]inter
 				s.BandwidthLimit = bandwidthLimit
 				changedSettingsMap[key] = bandwidthLimit
 			}
+		case CompressionType:
+			compressionType, ok := val.(int)
+			if !ok {
+				errorMap[key] = base.IncorrectValueTypeInMapError(key, val, "int")
+				continue
+			}
+			if s.CompressionType != compressionType {
+				s.CompressionType = compressionType
+				changedSettingsMap[key] = compressionType
+			}
 		default:
 			errorMap[key] = errors.New(fmt.Sprintf("Invalid key in map, %v", key))
 		}
@@ -406,6 +443,7 @@ func (s *ReplicationSettings) toMap(isDefaultSettings bool) map[string]interface
 	settings_map[PipelineLogLevel] = s.LogLevel.String()
 	settings_map[PipelineStatsInterval] = s.StatsInterval
 	settings_map[BandwidthLimit] = s.BandwidthLimit
+	settings_map[CompressionType] = s.CompressionType
 	return settings_map
 }
 
@@ -452,13 +490,12 @@ func ValidateAndConvertSettingsValue(key, value, errorKey string, isEnterprise b
 		// convert it to int to make future processing easier
 		convertedValue = int(convertedValue.(int64))
 
-		// network usage limit is supported only in EE
-		if key == BandwidthLimit && convertedValue.(int) != 0 {
-			if !isEnterprise {
-				err = errors.New("The value can be specified only in enterprise edition")
+		// network usage limit and compression are supported only in EE
+		if key == BandwidthLimit {
+			if err = enterpriseOnlyFeature(convertedValue.(int), 0, isEnterprise); err != nil {
 				return
-			} else if isCapi {
-				err = errors.New("The value can not be specified for CAPI replication")
+			}
+			if err = nonCAPIOnlyFeature(convertedValue.(int), 0, isCapi); err != nil {
 				return
 			}
 		}
@@ -466,6 +503,16 @@ func ValidateAndConvertSettingsValue(key, value, errorKey string, isEnterprise b
 		// range check for int parameters
 		err = RangeCheck(convertedValue.(int), SettingsConfigMap[key])
 
+	case CompressionType:
+		if convertedValue, err = base.CompressionStringToConversionTypeConverter(value); err != nil {
+			return
+		}
+		if err = enterpriseOnlyFeature(convertedValue, base.CompressionTypeNone, isEnterprise); err != nil {
+			return
+		}
+		if err = nonCAPIOnlyFeature(convertedValue, base.CompressionTypeNone, isCapi); err != nil {
+			return
+		}
 	default:
 		// a nil converted value indicates that the key is not a settings key
 		convertedValue = nil
@@ -519,7 +566,8 @@ func ValidateSettingsKey(settingsMap map[string]interface{}) (returnedSettingsMa
 			TimeoutPercentageCap,
 			PipelineLogLevel,
 			PipelineStatsInterval,
-			BandwidthLimit:
+			BandwidthLimit,
+			CompressionType:
 			returnedSettingsMap[key] = val
 		}
 	}

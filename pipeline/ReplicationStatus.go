@@ -52,7 +52,7 @@ type PipelineError struct {
 
 type PipelineErrorArray []PipelineError
 
-var PipelineErrorArray_Max_Size int = 20
+const PipelineErrorMaxEntries = 20
 
 type ReplicationSpecGetter func(specId string) (*metadata.ReplicationSpecification, error)
 
@@ -71,17 +71,19 @@ type ReplicationStatusIface interface {
 	Spec() *metadata.ReplicationSpecification
 	RepId() string
 	AddError(err error)
+	AddErrorsFromMap(errMap base.ErrorMap)
 	RuntimeStatus(lock bool) ReplicationState
 	Storage() *expvar.Map
 	// Called by UI every second
 	GetStats(registryName string) *expvar.Map
+	GetSpecInternalId() string
 	GetOverviewStats() *expvar.Map
 	SetStats(registryName string, stats *expvar.Map)
 	SetOverviewStats(stats *expvar.Map)
 	CleanupBeforeExit(statsToClear []string)
 	ResetStorage()
 	Publish(lock bool)
-	publishWithStatus(status string, lock bool)
+	PublishWithStatus(status string, lock bool)
 	Pipeline() common.Pipeline
 	VbList() []uint16
 	SetVbList(vb_list []uint16)
@@ -95,33 +97,36 @@ type ReplicationStatusIface interface {
 	Updater() interface{}
 	SetUpdater(updater interface{}) error
 	ObjectPool() *base.MCRequestPool
+	SetCustomSettings(customSettings *metadata.ReplicationSettings)
+	ClearCustomSettings()
 }
 
 type ReplicationStatus struct {
-	Pipeline_        common.Pipeline
+	pipeline_        common.Pipeline
 	err_list         PipelineErrorArray
 	progress         string
-	Logger           *log.CommonLogger
-	SpecId           string
-	SpecInternalId   string
-	Spec_getter      ReplicationSpecGetter
-	Pipeline_updater interface{}
-	Obj_pool         *base.MCRequestPool
-	Lock             *sync.RWMutex
+	logger           *log.CommonLogger
+	specId           string
+	specInternalId   string
+	spec_getter      ReplicationSpecGetter
+	pipeline_updater interface{}
+	obj_pool         *base.MCRequestPool
+	lock             *sync.RWMutex
+	customSettings   *metadata.ReplicationSettings
 	// tracks the list of vbs managed by the replication.
 	// useful when replication is paused, when it can be compared with the current vb_list to determine
 	// whether topology change has occured on source
 	vb_list []uint16
 }
 
-func NewReplicationStatus(specId string, Spec_getter ReplicationSpecGetter, logger *log.CommonLogger) *ReplicationStatus {
-	rep_status := &ReplicationStatus{SpecId: specId,
-		Pipeline_:   nil,
-		Logger:      logger,
+func NewReplicationStatus(specId string, spec_getter ReplicationSpecGetter, logger *log.CommonLogger) *ReplicationStatus {
+	rep_status := &ReplicationStatus{specId: specId,
+		pipeline_:   nil,
+		logger:      logger,
 		err_list:    PipelineErrorArray{},
-		Spec_getter: Spec_getter,
-		Lock:        &sync.RWMutex{},
-		Obj_pool:    base.NewMCRequestPool(specId, logger),
+		spec_getter: spec_getter,
+		lock:        &sync.RWMutex{},
+		obj_pool:    base.NewMCRequestPool(specId, logger),
 		progress:    ""}
 
 	rep_status.Publish(false)
@@ -129,46 +134,64 @@ func NewReplicationStatus(specId string, Spec_getter ReplicationSpecGetter, logg
 }
 
 func (rs *ReplicationStatus) SetPipeline(pipeline common.Pipeline) {
-	rs.Lock.Lock()
-	defer rs.Lock.Unlock()
-	rs.Pipeline_ = pipeline
+	rs.lock.Lock()
+	defer rs.lock.Unlock()
+	rs.pipeline_ = pipeline
 	if pipeline != nil {
 		rs.vb_list = pipeline_utils.GetSourceVBListPerPipeline(pipeline)
 		base.SortUint16List(rs.vb_list)
-		rs.SpecInternalId = pipeline.Specification().InternalId
+		rs.specInternalId = pipeline.Specification().InternalId
 	}
 
 	rs.Publish(false)
 }
 
+func (rs *ReplicationStatus) SetCustomSettings(customSettings *metadata.ReplicationSettings) {
+	rs.lock.Lock()
+	defer rs.lock.Unlock()
+
+	rs.customSettings = customSettings
+}
+
+func (rs *ReplicationStatus) ClearCustomSettings() {
+	rs.lock.Lock()
+	defer rs.lock.Unlock()
+
+	rs.customSettings = nil
+}
+
 func (rs *ReplicationStatus) Spec() *metadata.ReplicationSpecification {
-	spec, err := rs.Spec_getter(rs.SpecId)
+	spec, err := rs.spec_getter(rs.specId)
 	if err != nil {
-		rs.Logger.Errorf("Invalid replication status %v, failed to retrieve spec. err=%v", rs.SpecId, err)
+		rs.logger.Errorf("Invalid replication status %v, failed to retrieve spec. err=%v", rs.specId, err)
 
 	} else if spec == nil {
 		//it is possible that spec is nil. When replication specification is deleted,
 		//ReplicationSpecVal.spec is set to nil, but it is not removed from cached to keep
 		//replication status there so that we have a place to retrieve pipeline and proper action
 		//can be taken, like stop the pipline etc.
-		rs.Logger.Infof("Spec=nil for replication status %v, which means replication specification has been deleted.", rs.SpecId)
+		rs.logger.Infof("Spec=nil for replication status %v, which means replication specification has been deleted.", rs.specId)
 	}
 	return spec
 }
 
 func (rs *ReplicationStatus) RepId() string {
-	return rs.SpecId
+	return rs.specId
 }
 
 func (rs *ReplicationStatus) AddError(err error) {
 	// need to lock because this method could be called concurrently from pipeline_manager and updater
-	rs.Lock.Lock()
-	defer rs.Lock.Unlock()
+	rs.lock.Lock()
+	defer rs.lock.Unlock()
 
+	rs.addErrorNoLock(err)
+}
+
+func (rs *ReplicationStatus) addErrorNoLock(err error) {
 	if err != nil {
 		end := len(rs.err_list)
-		if end > PipelineErrorArray_Max_Size-1 {
-			end = PipelineErrorArray_Max_Size - 1
+		if end > PipelineErrorMaxEntries-1 {
+			end = PipelineErrorMaxEntries - 1
 		}
 		rs.err_list = append(rs.err_list[:end], PipelineError{})
 		for i := len(rs.err_list) - 1; i > 0; i-- {
@@ -181,14 +204,22 @@ func (rs *ReplicationStatus) AddError(err error) {
 	}
 }
 
+func (rs *ReplicationStatus) AddErrorsFromMap(errMap base.ErrorMap) {
+	rs.lock.Lock()
+	defer rs.lock.Unlock()
+	for _, v := range errMap {
+		rs.addErrorNoLock(v)
+	}
+}
+
 func (rs *ReplicationStatus) RuntimeStatus(lock bool) ReplicationState {
 	if lock {
-		rs.Lock.RLock()
-		defer rs.Lock.RUnlock()
+		rs.lock.RLock()
+		defer rs.lock.RUnlock()
 	}
 
 	spec := rs.Spec()
-	if rs.Pipeline_ != nil && rs.Pipeline_.State() == common.Pipeline_Running {
+	if rs.pipeline_ != nil && rs.pipeline_.State() == common.Pipeline_Running {
 		return Replicating
 	} else if spec != nil && !spec.Settings.Active {
 		return Paused
@@ -201,10 +232,10 @@ func (rs *ReplicationStatus) RuntimeStatus(lock bool) ReplicationState {
 func (rs *ReplicationStatus) Storage() *expvar.Map {
 	var rep_map *expvar.Map
 	root_map := RootStorage()
-	rep_map_var := root_map.Get(rs.SpecId)
+	rep_map_var := root_map.Get(rs.specId)
 	if rep_map_var == nil {
 		rep_map = new(expvar.Map).Init()
-		root_map.Set(rs.SpecId, rep_map)
+		root_map.Set(rs.specId, rep_map)
 	} else {
 		rep_map = rep_map_var.(*expvar.Map)
 	}
@@ -251,7 +282,7 @@ func (rs *ReplicationStatus) CleanupBeforeExit(statsToClear []string) {
 		rs.SetOverviewStats(overviewStats)
 	}
 
-	rs.publishWithStatus(base.Pending, true)
+	rs.PublishWithStatus(base.Pending, true)
 }
 
 func RootStorage() *expvar.Map {
@@ -264,19 +295,19 @@ func RootStorage() *expvar.Map {
 
 func (rs *ReplicationStatus) ResetStorage() {
 	root_map := RootStorage()
-	root_map.Set(rs.SpecId, nil)
+	root_map.Set(rs.specId, nil)
 }
 
 func (rs *ReplicationStatus) Publish(lock bool) {
-	rs.publishWithStatus(rs.RuntimeStatus(lock).String(), lock)
+	rs.PublishWithStatus(rs.RuntimeStatus(lock).String(), lock)
 }
 
 // there may be cases, e.g., when we are about to pause the replication, where we want to publish
 // a specified status instead of the one inferred from pipeline.State()
-func (rs *ReplicationStatus) publishWithStatus(status string, lock bool) {
+func (rs *ReplicationStatus) PublishWithStatus(status string, lock bool) {
 	if lock {
-		rs.Lock.RLock()
-		defer rs.Lock.RUnlock()
+		rs.lock.RLock()
+		defer rs.lock.RUnlock()
 	}
 
 	rep_map := rs.Storage()
@@ -300,25 +331,25 @@ func (rs *ReplicationStatus) publishWithStatus(status string, lock bool) {
 }
 
 func (rs *ReplicationStatus) Pipeline() common.Pipeline {
-	rs.Lock.RLock()
-	defer rs.Lock.RUnlock()
-	return rs.Pipeline_
+	rs.lock.RLock()
+	defer rs.lock.RUnlock()
+	return rs.pipeline_
 }
 
 func (rs *ReplicationStatus) VbList() []uint16 {
-	rs.Lock.RLock()
-	defer rs.Lock.RUnlock()
+	rs.lock.RLock()
+	defer rs.lock.RUnlock()
 	return rs.vb_list
 }
 
 func (rs *ReplicationStatus) SetVbList(vb_list []uint16) {
-	rs.Lock.Lock()
-	defer rs.Lock.Unlock()
+	rs.lock.Lock()
+	defer rs.lock.Unlock()
 	rs.vb_list = vb_list
 }
 
 func (rs *ReplicationStatus) SettingsMap() map[string]interface{} {
-	settings := rs.Settings()
+	settings := rs.settingsInternal(false /*clone*/)
 	if settings != nil {
 		return settings.ToMap()
 	} else {
@@ -327,63 +358,89 @@ func (rs *ReplicationStatus) SettingsMap() map[string]interface{} {
 	}
 }
 
+// Pipeline manager uses this method to get the ReplicationSettings to pass down to start the parts
+// customSettings is used by PipelineManager when it needs some ways to override certain start parameters
 func (rs *ReplicationStatus) Settings() *metadata.ReplicationSettings {
-	spec := rs.Spec()
-	if spec != nil {
-		return spec.Settings
+	return rs.settingsInternal(true /*clone*/)
+}
+
+func (rs *ReplicationStatus) settingsInternal(clone bool) *metadata.ReplicationSettings {
+	rs.lock.RLock()
+	defer rs.lock.RUnlock()
+	if rs.customSettings != nil {
+		if clone {
+			return rs.customSettings.Clone()
+		} else {
+			return rs.customSettings
+		}
 	} else {
-		return nil
+		spec := rs.Spec()
+		if spec != nil {
+			if clone {
+				return spec.Settings.Clone()
+			} else {
+				return spec.Settings
+			}
+		} else {
+			return nil
+		}
 	}
 }
 
 func (rs *ReplicationStatus) Errors() PipelineErrorArray {
-	rs.Lock.RLock()
-	defer rs.Lock.RUnlock()
+	rs.lock.RLock()
+	defer rs.lock.RUnlock()
 	return rs.err_list
 }
 
 func (rs *ReplicationStatus) ClearErrors() {
-	rs.Lock.Lock()
-	defer rs.Lock.Unlock()
+	rs.lock.Lock()
+	defer rs.lock.Unlock()
 	rs.err_list = PipelineErrorArray{}
 }
 
 func (rs *ReplicationStatus) RecordProgress(progress string) {
-	rs.Lock.Lock()
-	defer rs.Lock.Unlock()
+	rs.lock.Lock()
+	defer rs.lock.Unlock()
 	rs.progress = progress
 	rs.Publish(false)
 }
 
 func (rs *ReplicationStatus) GetProgress() string {
-	rs.Lock.RLock()
-	defer rs.Lock.RUnlock()
+	rs.lock.RLock()
+	defer rs.lock.RUnlock()
 	return rs.progress
 }
 
 func (rs *ReplicationStatus) String() string {
-	rs.Lock.RLock()
-	defer rs.Lock.RUnlock()
-	return fmt.Sprintf("name={%v}, status={%v}, errors={%v}, progress={%v}\n", rs.SpecId, rs.RuntimeStatus(false), rs.err_list, rs.progress)
+	rs.lock.RLock()
+	defer rs.lock.RUnlock()
+	return fmt.Sprintf("name={%v}, status={%v}, errors={%v}, progress={%v}\n", rs.specId, rs.RuntimeStatus(false), rs.err_list, rs.progress)
 }
 
 // The caller should check if return value is null, if the creation process is ongoing
 func (rs *ReplicationStatus) Updater() interface{} {
-	rs.Lock.RLock()
-	defer rs.Lock.RUnlock()
-	return rs.Pipeline_updater
+	rs.lock.RLock()
+	defer rs.lock.RUnlock()
+	return rs.pipeline_updater
 }
 
 func (rs *ReplicationStatus) SetUpdater(updater interface{}) error {
-	rs.Lock.Lock()
-	defer rs.Lock.Unlock()
+	rs.lock.Lock()
+	defer rs.lock.Unlock()
 	if updater == nil {
 		return errors.New("We should not allow updater to be cleared")
 	}
-	rs.Pipeline_updater = updater
+	rs.pipeline_updater = updater
 	return nil
 }
 
 func (rs *ReplicationStatus) ObjectPool() *base.MCRequestPool {
-	return rs.Obj_pool
+	return rs.obj_pool
+}
+
+func (rs *ReplicationStatus) GetSpecInternalId() string {
+	rs.lock.RLock()
+	defer rs.lock.RUnlock()
+	return rs.specInternalId
 }

@@ -584,10 +584,26 @@ func UpdateReplicationSettings(topic string, settings map[string]interface{}, re
 		return nil, err
 	}
 
+	// Validate the spec once more with the new settings
+	replSpecificFields, replSpecificErr := constructReplicationSpecificFieldsFromSpec(replSpec)
+	if replSpecificErr != nil {
+		return nil, err
+	}
 	oldFilterExpression := replSpec.Settings.FilterExpression
 
 	// update replication spec with input settings
 	changedSettingsMap, errorMap := replSpec.Settings.UpdateSettingsFromMap(settings)
+
+	// Only Re-evaluate Compression pre-requisites if it is turned on to catch any cluster-wide compression changes
+	if compressionType, ok := changedSettingsMap[metadata.CompressionType]; ok && (compressionType.(base.CompressionType) != base.CompressionTypeNone) {
+		validateRoutineErrorMap, validateErr := ReplicationSpecService().ValidateReplicationSettings(replSpecificFields.SourceBucketName,
+			replSpecificFields.RemoteClusterName, replSpecificFields.TargetBucketName, settings)
+		if len(validateRoutineErrorMap) > 0 {
+			return validateRoutineErrorMap, nil
+		} else if validateErr != nil {
+			return nil, validateErr
+		}
+	}
 
 	// enforce that filter expression cannot be changed
 	newFilterExpression, ok := settings[FilterExpression]
@@ -658,7 +674,6 @@ func GetStatistics(bucket string) (*expvar.Map, error) {
 func (rm *replicationManager) createAndPersistReplicationSpec(justValidate bool, sourceBucket, targetCluster, targetBucket string, settings map[string]interface{}) (*metadata.ReplicationSpecification, map[string]error, error, []string) {
 	logger_rm.Infof("Creating replication spec - justValidate=%v, sourceBucket=%s, targetCluster=%s, targetBucket=%s, settings=%v\n",
 		justValidate, sourceBucket, targetCluster, targetBucket, settings)
-
 	// validate that everything is alright with the replication configuration before actually creating it
 	sourceBucketUUID, targetBucketUUID, targetClusterRef, errorMap, err, warnings := replication_mgr.repl_spec_svc.ValidateNewReplicationSpec(sourceBucket, targetCluster, targetBucket, settings)
 	if err != nil || len(errorMap) > 0 {

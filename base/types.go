@@ -29,8 +29,11 @@ func NewSettingDef(data_type reflect.Type, bReq bool) *SettingDef {
 
 type SettingDefinitions map[string]*SettingDef
 
+type ErrorMap map[string]error
+type SSLPortMap map[string]uint16
+
 type SettingsError struct {
-	err_map map[string]error
+	err_map ErrorMap
 }
 
 func (se SettingsError) Error() string {
@@ -43,7 +46,7 @@ func (se SettingsError) Error() string {
 }
 
 func NewSettingsError() *SettingsError {
-	return &SettingsError{make(map[string]error)}
+	return &SettingsError{make(ErrorMap)}
 }
 
 func (se SettingsError) Add(key string, err error) {

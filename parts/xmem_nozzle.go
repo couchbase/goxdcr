@@ -485,7 +485,7 @@ var fatalError = errors.New("Fatal")
 
 type xmemClient struct {
 	name      string
-	memClient *mcc.Client
+	memClient mcc.ClientIface
 	//the count of continuous read\write failure on this client
 	continuous_write_failure_counter int
 	//the count of continuous successful read\write
@@ -506,7 +506,7 @@ type xmemClient struct {
 }
 
 func newXmemClient(name string, read_timeout, write_timeout time.Duration,
-	client *mcc.Client, max_continuous_failure int, max_downtime time.Duration, logger *log.CommonLogger) *xmemClient {
+	client mcc.ClientIface, max_continuous_failure int, max_downtime time.Duration, logger *log.CommonLogger) *xmemClient {
 	logger.Infof("xmem client %v is created with read_timeout=%v, write_timeout=%v, retry_limit=%v", name, read_timeout, write_timeout, max_continuous_failure)
 	return &xmemClient{name: name,
 		memClient:                        client,
@@ -568,7 +568,7 @@ func (client *xmemClient) isConnHealthy() bool {
 	return client.healthy
 }
 
-func (client *xmemClient) getMemClient() *mcc.Client {
+func (client *xmemClient) getMemClient() mcc.ClientIface {
 	client.lock.RLock()
 	defer client.lock.RUnlock()
 	return client.memClient
@@ -611,7 +611,7 @@ func (client *xmemClient) setWriteTimeout(write_timeout_duration time.Duration) 
 	conn.(net.Conn).SetWriteDeadline(time.Now().Add(write_timeout_duration))
 }
 
-func (client *xmemClient) repairConn(memClient *mcc.Client, repair_count_at_error int, xmem_id string, finish_ch chan bool) bool {
+func (client *xmemClient) repairConn(memClient mcc.ClientIface, repair_count_at_error int, xmem_id string, finish_ch chan bool) bool {
 	client.lock.Lock()
 	defer client.lock.Unlock()
 
@@ -714,11 +714,13 @@ type XmemNozzle struct {
 
 	finish_ch chan bool
 
-	counter_sent     uint32
-	counter_received uint32
-	counter_waittime uint32
-	counter_batches  int32
-	start_time       time.Time
+	counter_sent                uint64
+	counter_received            uint64
+	counter_compressed_received uint64
+	counter_compressed_sent     uint64
+	counter_waittime            uint64
+	counter_batches             int64
+	start_time                  time.Time
 
 	receive_token_ch chan int
 
@@ -744,8 +746,8 @@ type XmemNozzle struct {
 	setMetaUserAgent string
 
 	bandwidthThrottler service_def.BandwidthThrottlerSvc
-
-	utils utilities.UtilsIface
+	compressionSetting base.CompressionType
+	utils              utilities.UtilsIface
 }
 
 func NewXmemNozzle(id string,
@@ -891,7 +893,7 @@ func (xmem *XmemNozzle) Stop() error {
 		return err
 	}
 
-	xmem.Logger().Debugf("%v processed %v items\n", xmem.Id(), atomic.LoadUint32(&xmem.counter_sent))
+	xmem.Logger().Debugf("%v processed %v items\n", xmem.Id(), atomic.LoadUint64(&xmem.counter_sent))
 
 	err = xmem.Stop_server()
 	if err != nil {
@@ -981,7 +983,7 @@ func (xmem *XmemNozzle) accumuBatch(request *base.WrappedMCRequest) error {
 		return err
 	}
 
-	atomic.AddUint32(&xmem.counter_received, 1)
+	xmem.checkAndUpdateReceivedStats(request)
 
 	curCount, _, isFull := xmem.batch.accumuBatch(request, xmem.optimisticRep)
 	if curCount > 0 {
@@ -994,6 +996,24 @@ func (xmem *XmemNozzle) accumuBatch(request *base.WrappedMCRequest) error {
 		}
 	}
 	return nil
+}
+
+func (xmem *XmemNozzle) checkAndUpdateReceivedStats(request *base.WrappedMCRequest) {
+	atomic.AddUint64(&xmem.counter_received, 1)
+	if checkBool, err := base.IsRequestCompressedType(request, base.SnappyDataType); checkBool && err == nil {
+		atomic.AddUint64(&xmem.counter_compressed_received, 1)
+	} else if err != nil {
+		xmem.Logger().Warnf("Error %v received while checking for data type %v", err, base.SnappyDataType)
+	}
+}
+
+func (xmem *XmemNozzle) checkAndUpdateSentStats(request *base.WrappedMCRequest) {
+	atomic.AddUint64(&xmem.counter_sent, 1)
+	if checkBool, err := base.IsRequestCompressedType(request, base.SnappyDataType); checkBool && err == nil {
+		atomic.AddUint64(&xmem.counter_compressed_sent, 1)
+	} else if err != nil {
+		xmem.Logger().Warnf("Error %v received while checking for data type %v", err, base.SnappyDataType)
+	}
 }
 
 // caller of this method needs to be very careful to avoid deadlock
@@ -1153,10 +1173,10 @@ func (xmem *XmemNozzle) batchSetMetaWithRetry(batch *dataBatch, numOfRetry int) 
 		if err != nil {
 			return err
 		}
-		atomic.AddUint32(&xmem.counter_sent, 1)
+		xmem.checkAndUpdateSentStats(item)
 
 		if item != nil {
-			atomic.AddUint32(&xmem.counter_waittime, uint32(time.Since(item.Start_time).Seconds()*1000))
+			atomic.AddUint64(&xmem.counter_waittime, uint64(time.Since(item.Start_time).Seconds()*1000))
 			needSendStatus := needSend(item, batch, xmem.Logger())
 			if needSendStatus == Send {
 
@@ -1351,7 +1371,7 @@ func (xmem *XmemNozzle) sendSetMeta_internal(batch *dataBatch) error {
 	if batch != nil {
 		count := batch.count()
 		xmem.Logger().Debugf("%v send batch count=%d\n", xmem.Id(), count)
-		xmem.Logger().Debugf("So far, %v processed %d items", xmem.Id(), atomic.LoadUint32(&xmem.counter_sent))
+		xmem.Logger().Debugf("So far, %v processed %d items", xmem.Id(), atomic.LoadUint64(&xmem.counter_sent))
 
 		//batch send
 		err = xmem.batchSetMetaWithRetry(batch, xmem.config.maxRetry)
@@ -1694,13 +1714,13 @@ func (xmem *XmemNozzle) initializeConnection() (err error) {
 	// this needs to be done after xmem.connType is set
 	xmem.composeUserAgent()
 
-	memClient_setMeta, err := xmem.getClientWithRetry(xmem.Id(), pool, xmem.finish_ch, xmem.Logger())
+	memClient_setMeta, err := xmem.utils.GetClientFromPoolWithRetry(xmem.Id(), pool, xmem.finish_ch, base.XmemBackoffTimeNewConn, base.XmemMaxRetryNewConn, base.MetaKvBackoffFactor, xmem.Logger())
 
 	if err != nil {
 		return
 	}
 
-	memClient_getMeta, err := xmem.getClientWithRetry(xmem.Id(), pool, xmem.finish_ch, xmem.Logger())
+	memClient_getMeta, err := xmem.utils.GetClientFromPoolWithRetry(xmem.Id(), pool, xmem.finish_ch, base.XmemBackoffTimeNewConn, base.XmemMaxRetryNewConn, base.MetaKvBackoffFactor, xmem.Logger())
 	if err != nil {
 		return
 	}
@@ -1713,14 +1733,19 @@ func (xmem *XmemNozzle) initializeConnection() (err error) {
 		xmem.config.maxRetry, xmem.config.max_read_downtime, xmem.Logger())
 
 	// send helo command to setMeta and getMeta clients
-	xattrEnabled, err := xmem.sendHELO(true /*setMeta*/)
+	features, err := xmem.sendHELO(true /*setMeta*/)
 	if err != nil {
 		return err
 	} else {
 		// initialize these xmem members only once here
-		xmem.xattrEnabled = xattrEnabled
+		xmem.xattrEnabled = features.Xattribute
+		err = xmem.validateFeatures(features)
+		if err != nil {
+			return err
+		}
 	}
 
+	// No need to check features for bare boned getMeta client
 	_, err = xmem.sendHELO(false /*setMeta */)
 	if err != nil {
 		return err
@@ -1728,6 +1753,15 @@ func (xmem *XmemNozzle) initializeConnection() (err error) {
 
 	xmem.Logger().Infof("%v done with initializeConnection.", xmem.Id())
 	return err
+}
+
+func (xmem *XmemNozzle) validateFeatures(features utilities.HELOFeatures) error {
+	if (xmem.compressionSetting != base.CompressionTypeNone) && (xmem.compressionSetting != features.CompressionType) {
+		xmem.Logger().Errorf("Attempted to send HELO with compression type: %v, but received response with %v",
+			xmem.compressionSetting, features.CompressionType)
+		return base.ErrorCompressionNotSupported
+	}
+	return nil
 }
 
 func (xmem *XmemNozzle) getPoolName() string {
@@ -1745,6 +1779,12 @@ func (xmem *XmemNozzle) initialize(settings map[string]interface{}) error {
 	if err != nil {
 		return err
 	}
+
+	compressionVal, ok := settings[SETTING_COMPRESSION_TYPE]
+	if ok && (compressionVal.(int) != (int)(xmem.compressionSetting)) {
+		xmem.compressionSetting = (base.CompressionType)(compressionVal.(int))
+	}
+
 	xmem.dataChan = make(chan *base.WrappedMCRequest, xmem.config.maxCount*10)
 	xmem.bytes_in_dataChan = 0
 	xmem.dataChan_control = make(chan bool, 1)
@@ -2031,8 +2071,8 @@ func (xmem *XmemNozzle) selfMonitor(finch chan bool, waitGrp *sync.WaitGroup) {
 	defer ticker.Stop()
 	statsTicker := time.NewTicker(xmem.config.statsInterval)
 	defer statsTicker.Stop()
-	var sent_count uint32 = 0
-	var received_count uint32 = 0
+	var sent_count uint64 = 0
+	var received_count uint64 = 0
 	var resp_waitingConfirm_count int = 0
 	var repairCount_setMeta = 0
 	var repairCount_getMeta = 0
@@ -2048,7 +2088,7 @@ func (xmem *XmemNozzle) selfMonitor(finch chan bool, waitGrp *sync.WaitGroup) {
 				xmem.Logger().Infof("%v has stopped. Exiting", xmem.Id())
 				goto done
 			}
-			received_count = atomic.LoadUint32(&xmem.counter_received)
+			received_count = atomic.LoadUint64(&xmem.counter_received)
 			buffer_count := xmem.buf.itemCountInBuffer()
 			xmem_id := xmem.Id()
 			isOpen := xmem.IsOpen()
@@ -2056,7 +2096,7 @@ func (xmem *XmemNozzle) selfMonitor(finch chan bool, waitGrp *sync.WaitGroup) {
 			empty_slots_pos := xmem.buf.empty_slots_pos
 			batches_ready_queue := xmem.batches_ready_queue
 			dataChan := xmem.dataChan
-			xmem_count_sent := atomic.LoadUint32(&xmem.counter_sent)
+			xmem_count_sent := atomic.LoadUint64(&xmem.counter_sent)
 			count++
 
 			if xmem_count_sent == sent_count && int(buffer_count) == resp_waitingConfirm_count &&
@@ -2278,11 +2318,12 @@ func (xmem *XmemNozzle) PrintStatusSummary() {
 	if xmem.State() == common.Part_Running {
 		connType := xmem.connType
 		var avg_wait_time float64 = 0
-		counter_sent := atomic.LoadUint32(&xmem.counter_sent)
+		counter_sent := atomic.LoadUint64(&xmem.counter_sent)
 		if counter_sent > 0 {
-			avg_wait_time = float64(atomic.LoadUint32(&xmem.counter_waittime)) / float64(counter_sent)
+			avg_wait_time = float64(atomic.LoadUint64(&xmem.counter_waittime)) / float64(counter_sent)
 		}
-		xmem.Logger().Infof("%v state =%v connType=%v received %v items, sent %v items, %v items waiting to confirm, %v in queue, %v in current batch, avg wait time is %vms, size of last ten batches processed %v, len(batches_ready_queue)=%v\n", xmem.Id(), xmem.State(), connType, atomic.LoadUint32(&xmem.counter_received), atomic.LoadUint32(&xmem.counter_sent), xmem.buf.itemCountInBuffer(), len(xmem.dataChan), atomic.LoadUint32(&xmem.cur_batch_count), avg_wait_time, xmem.getLastTenBatchSize(), len(xmem.batches_ready_queue))
+		xmem.Logger().Infof("%v state =%v connType=%v received %v items (%v compressed), sent %v items (%v compressed), %v items waiting to confirm, %v in queue, %v in current batch, avg wait time is %vms, size of last ten batches processed %v, len(batches_ready_queue)=%v\n",
+			xmem.Id(), xmem.State(), connType, atomic.LoadUint64(&xmem.counter_received), atomic.LoadUint64(&xmem.counter_compressed_received), atomic.LoadUint64(&xmem.counter_sent), atomic.LoadUint64(&xmem.counter_compressed_sent), xmem.buf.itemCountInBuffer(), len(xmem.dataChan), atomic.LoadUint32(&xmem.cur_batch_count), avg_wait_time, xmem.getLastTenBatchSize(), len(xmem.batches_ready_queue))
 	} else {
 		xmem.Logger().Infof("%v state =%v ", xmem.Id(), xmem.State())
 	}
@@ -2305,11 +2346,16 @@ func (xmem *XmemNozzle) optimisticRep(req *mc.MCRequest) bool {
 	return true
 }
 
-func (xmem *XmemNozzle) sendHELO(setMeta bool) (bool, error) {
+func (xmem *XmemNozzle) sendHELO(setMeta bool) (utilities.HELOFeatures, error) {
+	var features utilities.HELOFeatures
+	features.Xattribute = true
 	if setMeta {
-		return xmem.utils.SendHELOWithXattrFeature(xmem.client_for_setMeta.getMemClient(), xmem.setMetaUserAgent, xmem.config.readTimeout, xmem.config.writeTimeout, xmem.Logger())
+		// For setMeta, negotiate compression, if it is set
+		features.CompressionType = xmem.compressionSetting
+		return xmem.utils.SendHELOWithFeatures(xmem.client_for_setMeta.getMemClient(), xmem.setMetaUserAgent, xmem.config.readTimeout, xmem.config.writeTimeout, features, xmem.Logger())
 	} else {
-		return xmem.utils.SendHELOWithXattrFeature(xmem.client_for_getMeta.getMemClient(), xmem.getMetaUserAgent, xmem.config.readTimeout, xmem.config.writeTimeout, xmem.Logger())
+		// Since compression is value only, getMeta does not benefit from it. Use a non-compressed connection
+		return xmem.utils.SendHELOWithFeatures(xmem.client_for_getMeta.getMemClient(), xmem.getMetaUserAgent, xmem.config.readTimeout, xmem.config.writeTimeout, features, xmem.Logger())
 	}
 }
 
@@ -2573,7 +2619,7 @@ func (xmem *XmemNozzle) repairConn(client *xmemClient, reason string, rev int) e
 		return err
 	}
 
-	memClient, err := xmem.getClientWithRetry(xmem.Id(), pool, xmem.finish_ch, xmem.Logger())
+	memClient, err := xmem.utils.GetClientFromPoolWithRetry(xmem.Id(), pool, xmem.finish_ch, base.XmemBackoffTimeNewConn, base.XmemMaxRetryNewConn, base.MetaKvBackoffFactor, xmem.Logger())
 	if err != nil {
 		xmem.handleGeneralError(err)
 		xmem.Logger().Errorf("%v - Failed to repair connections for %v. err=%v\n", xmem.Id(), client.name, err)
@@ -2582,15 +2628,21 @@ func (xmem *XmemNozzle) repairConn(client *xmemClient, reason string, rev int) e
 
 	repaired := client.repairConn(memClient, rev, xmem.Id(), xmem.finish_ch)
 	if repaired {
+		var features utilities.HELOFeatures
 		if client == xmem.client_for_setMeta {
-			_, err = xmem.sendHELO(true /*setMeta*/)
+			features, err = xmem.sendHELO(true /*setMeta*/)
 			if err != nil {
 				xmem.handleGeneralError(err)
 				xmem.Logger().Errorf("%v - Failed to repair connections for %v. err=%v\n", xmem.Id(), client.name, err)
 				return err
 			}
+			err = xmem.validateFeatures(features)
+			if err != nil {
+				return err
+			}
 			go xmem.onSetMetaConnRepaired()
 		} else {
+			// No need to check features for bare-bone getMeta client
 			_, err = xmem.sendHELO(false /*setMeta*/)
 			if err != nil {
 				xmem.handleGeneralError(err)
@@ -2711,26 +2763,4 @@ func (xmem *XmemNozzle) recordBatchSize(batchSize uint32) {
 		xmem.last_ten_batches_size[i] = xmem.last_ten_batches_size[i-1]
 	}
 	xmem.last_ten_batches_size[0] = batchSize
-}
-
-func (xmem *XmemNozzle) getClientWithRetry(xmem_id string, pool base.ConnPool, finish_ch chan bool, logger *log.CommonLogger) (*mcc.Client, error) {
-	// the sole purpose of getClientOpFunc is to match the func signature required by ExponentialBackoffExecutorWithFinishSignal
-	// input "param" is immaterial and is ignored
-	getClientOpFunc := func(param interface{}) (interface{}, error) {
-		return pool.GetNew()
-	}
-
-	result, err := xmem.utils.ExponentialBackoffExecutorWithFinishSignal("xmem.getClientWithRetry", base.XmemBackoffTimeNewConn, base.XmemMaxRetryNewConn,
-		base.MetaKvBackoffFactor, getClientOpFunc, nil /*param*/, finish_ch)
-	if err != nil {
-		high_level_err := fmt.Sprintf("Failed to set up connections to target cluster after %v retries.", base.XmemMaxRetryNewConn)
-		logger.Errorf("%v %v", xmem_id, high_level_err)
-		return nil, errors.New(high_level_err)
-	}
-	client, ok := result.(*mcc.Client)
-	if !ok {
-		// should never get here
-		return nil, fmt.Errorf("%v getClientWithRetry returned wrong type of client", xmem_id)
-	}
-	return client, nil
 }

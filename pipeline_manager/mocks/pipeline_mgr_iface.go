@@ -1,5 +1,6 @@
 package mocks
 
+import base "github.com/couchbase/goxdcr/base"
 import metadata "github.com/couchbase/goxdcr/metadata"
 import mock "github.com/stretchr/testify/mock"
 import pipeline "github.com/couchbase/goxdcr/pipeline"
@@ -288,14 +289,16 @@ func (_m *Pipeline_mgr_iface) ReplicationStatusMap() map[string]*pipeline.Replic
 }
 
 // StartPipeline provides a mock function with given fields: topic
-func (_m *Pipeline_mgr_iface) StartPipeline(topic string) error {
+func (_m *Pipeline_mgr_iface) StartPipeline(topic string) base.ErrorMap {
 	ret := _m.Called(topic)
 
-	var r0 error
-	if rf, ok := ret.Get(0).(func(string) error); ok {
+	var r0 base.ErrorMap
+	if rf, ok := ret.Get(0).(func(string) base.ErrorMap); ok {
 		r0 = rf(topic)
 	} else {
-		r0 = ret.Error(0)
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(base.ErrorMap)
+		}
 	}
 
 	return r0
@@ -307,14 +310,16 @@ func (_m *Pipeline_mgr_iface) StopAllUpdaters() {
 }
 
 // StopPipeline provides a mock function with given fields: rep_status
-func (_m *Pipeline_mgr_iface) StopPipeline(rep_status *pipeline.ReplicationStatus) error {
+func (_m *Pipeline_mgr_iface) StopPipeline(rep_status pipeline.ReplicationStatusIface) base.ErrorMap {
 	ret := _m.Called(rep_status)
 
-	var r0 error
-	if rf, ok := ret.Get(0).(func(*pipeline.ReplicationStatus) error); ok {
+	var r0 base.ErrorMap
+	if rf, ok := ret.Get(0).(func(pipeline.ReplicationStatusIface) base.ErrorMap); ok {
 		r0 = rf(rep_status)
 	} else {
-		r0 = ret.Error(0)
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(base.ErrorMap)
+		}
 	}
 
 	return r0

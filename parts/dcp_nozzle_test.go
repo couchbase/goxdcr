@@ -1,6 +1,7 @@
 package parts
 
 import (
+	"errors"
 	"fmt"
 	mc "github.com/couchbase/gomemcached"
 	mcReal "github.com/couchbase/gomemcached/client"
@@ -9,6 +10,7 @@ import (
 	common "github.com/couchbase/goxdcr/common"
 	"github.com/couchbase/goxdcr/log"
 	service_def "github.com/couchbase/goxdcr/service_def/mocks"
+	utilsReal "github.com/couchbase/goxdcr/utils"
 	utilsMock "github.com/couchbase/goxdcr/utils/mocks"
 	"github.com/stretchr/testify/assert"
 	mock "github.com/stretchr/testify/mock"
@@ -43,22 +45,39 @@ func setupBoilerPlate() (*service_def.XDCRCompTopologySvc,
 
 	// settings map
 	settingsMap := make(map[string]interface{})
-
 	settingsMap[DCP_VBTimestampUpdater] = vbReturner
 
 	// statsInterval needs to be fed something
 	settingsMap[DCP_Stats_Interval] = 88888888
 
+	// Enable compression by default
+	settingsMap[SETTING_COMPRESSION_TYPE] = (int)(base.CompressionTypeSnappy)
+
 	return xdcrTopologyMock, utilitiesMock, nozzle, settingsMap, clientIface, uprfeedIface, vbTimestamp
 }
 
-func setupUprFeedMock(uprFeed *mcMock.UprFeedIface) {
-	uprFeed.On("UprOpenWithXATTR", mock.Anything, mock.Anything, mock.Anything).Return(nil)
+func setupUprFeedGeneric(uprFeed *mcMock.UprFeedIface) {
 	uprFeed.On("StartFeedWithConfig", mock.Anything).Return(nil)
 	uprFeed.On("IncrementAckBytes", mock.Anything).Return(nil)
 	uprFeed.On("UprRequestStream", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything,
 		mock.Anything, mock.Anything, mock.Anything).Return(nil)
 	uprFeed.On("Close").Return(nil)
+}
+
+func setupUprFeedMock(uprFeed *mcMock.UprFeedIface) {
+	var allFeaturesActivated mcReal.UprFeatures
+	allFeaturesActivated.Xattribute = true
+	allFeaturesActivated.CompressionType = 1
+	uprFeed.On("UprOpenWithXATTR", mock.Anything, mock.Anything, mock.Anything).Return(nil)
+	uprFeed.On("UprOpenWithFeatures", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil, allFeaturesActivated)
+	setupUprFeedGeneric(uprFeed)
+}
+
+func setupUprFeedMockFeatureNeg(uprFeed *mcMock.UprFeedIface, returnedFeatures mcReal.UprFeatures) {
+	var dummyErr error = errors.New("Dummy")
+
+	uprFeed.On("UprOpenWithFeatures", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(dummyErr, returnedFeatures)
+	setupUprFeedGeneric(uprFeed)
 }
 
 func setupUprFeedMockData(uprFeed *mcMock.UprFeedIface) chan *mcReal.UprEvent {
@@ -98,12 +117,27 @@ func setupMocks(xdcrTopology *service_def.XDCRCompTopologySvc,
 	mcClient *mcMock.ClientIface,
 	uprFeed *mcMock.UprFeedIface) {
 
+	// Turn compression on
+	var features utilsReal.HELOFeatures
+	features.CompressionType = base.CompressionTypeSnappy
+
+	setupMocksInternal(xdcrTopology, utils, nozzle, settings, mcClient, uprFeed, features)
+}
+
+func setupMocksInternal(xdcrTopology *service_def.XDCRCompTopologySvc,
+	utils *utilsMock.UtilsIface,
+	nozzle *DcpNozzle,
+	settings map[string]interface{},
+	mcClient *mcMock.ClientIface,
+	uprFeed *mcMock.UprFeedIface,
+	featureSet utilsReal.HELOFeatures) {
+
 	// xdcr topology mock
 	xdcrTopology.On("MyMemcachedAddr").Return("localhost", nil)
 
 	// utils mock
 	utils.On("ValidateSettings", mock.Anything, mock.Anything, mock.Anything).Return(nil)
-	utils.On("GetMemcachedConnection", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(mcClient, nil)
+	utils.On("GetMemcachedConnectionWFeatures", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(mcClient, featureSet, nil)
 	utils.On("RecoverPanic", mock.Anything).Return(nil)
 
 	// client mock
@@ -318,4 +352,59 @@ func TestSendAndReceiveUnhandledError(t *testing.T) {
 	assert.Equal(nozzle.vbHandshakeMap[vbno].getNumberOfOutstandingReqs(), 1)
 
 	fmt.Println("============== Test case end: TestSendAndReceiveUnhandledError =================")
+}
+
+func TestFeatureInitializationError(t *testing.T) {
+	assert := assert.New(t)
+	var noFeaturesActivated mcReal.UprFeatures
+	fmt.Println("============== Test case start: TestFeatureInitializationError =================")
+	xdcrTopology, utils, nozzle, settings, mcc, upr, _ := setupBoilerPlate()
+	setupMocks(xdcrTopology, utils, nozzle, settings, mcc, upr)
+	setupUprFeedMockFeatureNeg(upr, noFeaturesActivated)
+
+	assert.Equal(base.ErrorCompressionNotSupported, nozzle.initialize(settings))
+
+	fmt.Println("============== Test case end: TestFeatureInitializationError =================")
+}
+
+func TestNonFeatureInitializationError(t *testing.T) {
+	assert := assert.New(t)
+	var allFeaturesActivated mcReal.UprFeatures
+	allFeaturesActivated.Xattribute = true
+	allFeaturesActivated.CompressionType = base.CompressionTypeSnappy
+	fmt.Println("============== Test case start: TestNonFeatureInitializationError =================")
+	xdcrTopology, utils, nozzle, settings, mcc, upr, _ := setupBoilerPlate()
+	setupMocks(xdcrTopology, utils, nozzle, settings, mcc, upr)
+	setupUprFeedMockFeatureNeg(upr, allFeaturesActivated)
+
+	assert.NotEqual(base.ErrorCompressionNotSupported, nozzle.initialize(settings))
+
+	fmt.Println("============== Test case end: TestNonFeatureInitializationError =================")
+}
+
+func TestMcCompressionError(t *testing.T) {
+	assert := assert.New(t)
+	fmt.Println("============== Test case start: TestMcCompressionError =================")
+	var noFeatures utilsReal.HELOFeatures
+	xdcrTopology, utils, nozzle, settings, mcc, upr, _ := setupBoilerPlate()
+	setupMocksInternal(xdcrTopology, utils, nozzle, settings, mcc, upr, noFeatures)
+
+	assert.Equal(base.ErrorCompressionNotSupported, nozzle.initialize(settings))
+	fmt.Println("============== Test case end: TestMcCompressionError =================")
+}
+
+func TestNonFeatureInitializationErrorCompressedWhenNotRequested(t *testing.T) {
+	assert := assert.New(t)
+	var allFeaturesActivated mcReal.UprFeatures
+	allFeaturesActivated.Xattribute = true
+	allFeaturesActivated.CompressionType = base.CompressionTypeSnappy
+	fmt.Println("============== Test case start: TestNonFeatureInitializationErrorCompressedWhenNotRequested =================")
+	xdcrTopology, utils, nozzle, settings, mcc, upr, _ := setupBoilerPlate()
+	setupMocks(xdcrTopology, utils, nozzle, settings, mcc, upr)
+	setupUprFeedMockFeatureNeg(upr, allFeaturesActivated)
+
+	settings[SETTING_COMPRESSION_TYPE] = (int)(base.CompressionTypeNone)
+	assert.Equal(base.ErrorCompressionDcpInvalidHandshake, nozzle.initialize(settings))
+
+	fmt.Println("============== Test case end: TestNonFeatureInitializationErrorCompressedWhenNotRequested =================")
 }

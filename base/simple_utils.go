@@ -307,6 +307,14 @@ func DeepCopyStringArray(in []string) []string {
 	return out
 }
 
+func DeepCopyErrorMap(inMap ErrorMap) ErrorMap {
+	newMap := make(ErrorMap)
+	for k, v := range inMap {
+		newMap[k] = v
+	}
+	return newMap
+}
+
 func IsJSON(in []byte) bool {
 	var out interface{}
 	err := json.Unmarshal(in, &out)
@@ -597,4 +605,106 @@ func FlattenStringArray(input []string) string {
 		output = buffer.String()
 	}
 	return output
+}
+
+// Returns true iff the specific MCRequest is of a compression type that is being checked (Note: None is also a type)
+func IsRequestCompressedType(req *WrappedMCRequest, checkType CompressionType) (retVal bool, err error) {
+	if req == nil || req.Req == nil {
+		retVal = false
+		err = ErrorInvalidInput
+		return
+	}
+	switch checkType {
+	case CompressionTypeNone:
+		if req.Req.DataType&SnappyDataType == 0 {
+			retVal = true
+		}
+	case CompressionTypeSnappy:
+		if req.Req.DataType&SnappyDataType > 0 {
+			retVal = true
+		}
+	default:
+		retVal = false
+		err = ErrorInvalidType
+	}
+	return
+}
+
+// Merge two maps into one - not go-routine/thread safe
+func MergeErrorMaps(dest ErrorMap, src ErrorMap, overwrite bool) {
+	for sk, sv := range src {
+		if !overwrite {
+			if _, ok := dest[sk]; ok {
+				continue
+			}
+		}
+		dest[sk] = sv
+	}
+}
+
+// Efficiently concatenate and flatten errmap into a presentable single error string
+// Note map coming in should be read-protected
+func FlattenErrorMap(errMap ErrorMap) string {
+	var buffer bytes.Buffer
+	var first bool = true
+	for k, v := range errMap {
+		if !first {
+			buffer.WriteString("\n")
+		} else {
+			first = false
+		}
+		buffer.WriteString(k)
+		buffer.WriteString(" : ")
+		buffer.WriteString(v.Error())
+	}
+	return buffer.String()
+}
+
+// Map should be protected for read
+func CheckErrorMapForError(errMap ErrorMap, toCheck error, exactMatch bool) bool {
+	for _, v := range errMap {
+		if exactMatch {
+			if v == toCheck {
+				return true
+			}
+		} else {
+			if strings.Contains(v.Error(), toCheck.Error()) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func CompressionStringToConversionTypeConverter(userInput string) (int, error) {
+	// Last element of the CompressionTypeStrings is not to be used
+	for i := 0; i < len(CompressionTypeStrings)-1; i++ {
+		if CompressionTypeStrings[i] == userInput || strings.ToLower(CompressionTypeStrings[i]) == strings.ToLower(userInput) {
+			return i, nil
+		}
+	}
+	return (int)(CompressionTypeNone), ErrorCompressionUnableToConvert
+}
+
+// Given two maps, find the total number of elements in an union should these maps be combined
+func GetUnionOfErrorMapsSize(map1, map2 ErrorMap) (counter int) {
+	var mapToBeWalked ErrorMap
+	var mapToBeChecked ErrorMap
+
+	if len(map1) > len(map2) {
+		counter = len(map1)
+		mapToBeWalked = map2
+		mapToBeChecked = map1
+	} else {
+		counter = len(map2)
+		mapToBeWalked = map1
+		mapToBeChecked = map2
+	}
+
+	for k, _ := range mapToBeWalked {
+		if _, ok := mapToBeChecked[k]; !ok {
+			counter++
+		}
+	}
+	return
 }

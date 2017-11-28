@@ -32,6 +32,7 @@ const (
 	SETTING_MAX_RETRY_INTERVAL    = "max_retry_interval"
 	SETTING_SELF_MONITOR_INTERVAL = "self_monitor_interval"
 	SETTING_STATS_INTERVAL        = "stats_interval"
+	SETTING_COMPRESSION_TYPE      = base.CompressionTypeKey
 
 	STATS_QUEUE_SIZE               = "queue_size"
 	STATS_QUEUE_SIZE_BYTES         = "queue_size_bytes"

@@ -162,13 +162,13 @@ func (_m *UtilsIface) CheckWhetherClusterIsESBasedOnBucketInfo(bucketInfo map[st
 	return r0
 }
 
-// ComposeHELORequest provides a mock function with given fields: userAgent, enableXattr
-func (_m *UtilsIface) ComposeHELORequest(userAgent string, enableXattr bool) *gomemcached.MCRequest {
-	ret := _m.Called(userAgent, enableXattr)
+// ComposeHELORequest provides a mock function with given fields: userAgent, features
+func (_m *UtilsIface) ComposeHELORequest(userAgent string, features utils.HELOFeatures) *gomemcached.MCRequest {
+	ret := _m.Called(userAgent, features)
 
 	var r0 *gomemcached.MCRequest
-	if rf, ok := ret.Get(0).(func(string, bool) *gomemcached.MCRequest); ok {
-		r0 = rf(userAgent, enableXattr)
+	if rf, ok := ret.Get(0).(func(string, utils.HELOFeatures) *gomemcached.MCRequest); ok {
+		r0 = rf(userAgent, features)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*gomemcached.MCRequest)
@@ -423,6 +423,29 @@ func (_m *UtilsIface) GetBuckets(hostAddr string, username string, password stri
 	var r1 error
 	if rf, ok := ret.Get(1).(func(string, string, string, []byte, bool, *log.CommonLogger) error); ok {
 		r1 = rf(hostAddr, username, password, certificate, sanInCertificate, logger)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// GetClientFromPoolWithRetry provides a mock function with given fields: componentName, pool, finish_ch, initialWait, maxRetries, factor, logger
+func (_m *UtilsIface) GetClientFromPoolWithRetry(componentName string, pool base.ConnPool, finish_ch chan bool, initialWait time.Duration, maxRetries int, factor int, logger *log.CommonLogger) (memcached.ClientIface, error) {
+	ret := _m.Called(componentName, pool, finish_ch, initialWait, maxRetries, factor, logger)
+
+	var r0 memcached.ClientIface
+	if rf, ok := ret.Get(0).(func(string, base.ConnPool, chan bool, time.Duration, int, int, *log.CommonLogger) memcached.ClientIface); ok {
+		r0 = rf(componentName, pool, finish_ch, initialWait, maxRetries, factor, logger)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(memcached.ClientIface)
+		}
+	}
+
+	var r1 error
+	if rf, ok := ret.Get(1).(func(string, base.ConnPool, chan bool, time.Duration, int, int, *log.CommonLogger) error); ok {
+		r1 = rf(componentName, pool, finish_ch, initialWait, maxRetries, factor, logger)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -854,16 +877,69 @@ func (_m *UtilsIface) GetMemcachedConnection(serverAddr string, bucketName strin
 	return r0, r1
 }
 
+// GetMemcachedConnectionWFeatures provides a mock function with given fields: serverAddr, bucketName, userAgent, keepAlivePeriod, features, logger
+func (_m *UtilsIface) GetMemcachedConnectionWFeatures(serverAddr string, bucketName string, userAgent string, keepAlivePeriod time.Duration, features utils.HELOFeatures, logger *log.CommonLogger) (memcached.ClientIface, utils.HELOFeatures, error) {
+	ret := _m.Called(serverAddr, bucketName, userAgent, keepAlivePeriod, features, logger)
+
+	var r0 memcached.ClientIface
+	if rf, ok := ret.Get(0).(func(string, string, string, time.Duration, utils.HELOFeatures, *log.CommonLogger) memcached.ClientIface); ok {
+		r0 = rf(serverAddr, bucketName, userAgent, keepAlivePeriod, features, logger)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(memcached.ClientIface)
+		}
+	}
+
+	var r1 utils.HELOFeatures
+	if rf, ok := ret.Get(1).(func(string, string, string, time.Duration, utils.HELOFeatures, *log.CommonLogger) utils.HELOFeatures); ok {
+		r1 = rf(serverAddr, bucketName, userAgent, keepAlivePeriod, features, logger)
+	} else {
+		r1 = ret.Get(1).(utils.HELOFeatures)
+	}
+
+	var r2 error
+	if rf, ok := ret.Get(2).(func(string, string, string, time.Duration, utils.HELOFeatures, *log.CommonLogger) error); ok {
+		r2 = rf(serverAddr, bucketName, userAgent, keepAlivePeriod, features, logger)
+	} else {
+		r2 = ret.Error(2)
+	}
+
+	return r0, r1, r2
+}
+
+// GetMemcachedRawConn provides a mock function with given fields: serverAddr, username, password, bucketName, plainAuth, keepAlivePeriod, logger
+func (_m *UtilsIface) GetMemcachedRawConn(serverAddr string, username string, password string, bucketName string, plainAuth bool, keepAlivePeriod time.Duration, logger *log.CommonLogger) (memcached.ClientIface, error) {
+	ret := _m.Called(serverAddr, username, password, bucketName, plainAuth, keepAlivePeriod, logger)
+
+	var r0 memcached.ClientIface
+	if rf, ok := ret.Get(0).(func(string, string, string, string, bool, time.Duration, *log.CommonLogger) memcached.ClientIface); ok {
+		r0 = rf(serverAddr, username, password, bucketName, plainAuth, keepAlivePeriod, logger)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(memcached.ClientIface)
+		}
+	}
+
+	var r1 error
+	if rf, ok := ret.Get(1).(func(string, string, string, string, bool, time.Duration, *log.CommonLogger) error); ok {
+		r1 = rf(serverAddr, username, password, bucketName, plainAuth, keepAlivePeriod, logger)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
 // GetMemcachedSSLPortMap provides a mock function with given fields: hostName, username, password, certificate, sanInCertificate, bucket, logger
-func (_m *UtilsIface) GetMemcachedSSLPortMap(hostName string, username string, password string, certificate []byte, sanInCertificate bool, bucket string, logger *log.CommonLogger) (map[string]uint16, error) {
+func (_m *UtilsIface) GetMemcachedSSLPortMap(hostName string, username string, password string, certificate []byte, sanInCertificate bool, bucket string, logger *log.CommonLogger) (base.SSLPortMap, error) {
 	ret := _m.Called(hostName, username, password, certificate, sanInCertificate, bucket, logger)
 
-	var r0 map[string]uint16
-	if rf, ok := ret.Get(0).(func(string, string, string, []byte, bool, string, *log.CommonLogger) map[string]uint16); ok {
+	var r0 base.SSLPortMap
+	if rf, ok := ret.Get(0).(func(string, string, string, []byte, bool, string, *log.CommonLogger) base.SSLPortMap); ok {
 		r0 = rf(hostName, username, password, certificate, sanInCertificate, bucket, logger)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(map[string]uint16)
+			r0 = ret.Get(0).(base.SSLPortMap)
 		}
 	}
 
@@ -1004,6 +1080,36 @@ func (_m *UtilsIface) GetRemoteMemcachedConnection(serverAddr string, username s
 	}
 
 	return r0, r1
+}
+
+// GetRemoteMemcachedConnectionWFeatures provides a mock function with given fields: serverAddr, username, password, bucketName, userAgent, plainAuth, keepAlivePeriod, features, logger
+func (_m *UtilsIface) GetRemoteMemcachedConnectionWFeatures(serverAddr string, username string, password string, bucketName string, userAgent string, plainAuth bool, keepAlivePeriod time.Duration, features utils.HELOFeatures, logger *log.CommonLogger) (memcached.ClientIface, utils.HELOFeatures, error) {
+	ret := _m.Called(serverAddr, username, password, bucketName, userAgent, plainAuth, keepAlivePeriod, features, logger)
+
+	var r0 memcached.ClientIface
+	if rf, ok := ret.Get(0).(func(string, string, string, string, string, bool, time.Duration, utils.HELOFeatures, *log.CommonLogger) memcached.ClientIface); ok {
+		r0 = rf(serverAddr, username, password, bucketName, userAgent, plainAuth, keepAlivePeriod, features, logger)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(memcached.ClientIface)
+		}
+	}
+
+	var r1 utils.HELOFeatures
+	if rf, ok := ret.Get(1).(func(string, string, string, string, string, bool, time.Duration, utils.HELOFeatures, *log.CommonLogger) utils.HELOFeatures); ok {
+		r1 = rf(serverAddr, username, password, bucketName, userAgent, plainAuth, keepAlivePeriod, features, logger)
+	} else {
+		r1 = ret.Get(1).(utils.HELOFeatures)
+	}
+
+	var r2 error
+	if rf, ok := ret.Get(2).(func(string, string, string, string, string, bool, time.Duration, utils.HELOFeatures, *log.CommonLogger) error); ok {
+		r2 = rf(serverAddr, username, password, bucketName, userAgent, plainAuth, keepAlivePeriod, features, logger)
+	} else {
+		r2 = ret.Error(2)
+	}
+
+	return r0, r1, r2
 }
 
 // GetSSLPort provides a mock function with given fields: hostAddr, logger
@@ -1455,20 +1561,20 @@ func (_m *UtilsIface) SendHELO(client memcached.ClientIface, userAgent string, r
 	return r0
 }
 
-// SendHELOWithXattrFeature provides a mock function with given fields: client, userAgent, readTimeout, writeTimeout, logger
-func (_m *UtilsIface) SendHELOWithXattrFeature(client memcached.ClientIface, userAgent string, readTimeout time.Duration, writeTimeout time.Duration, logger *log.CommonLogger) (bool, error) {
-	ret := _m.Called(client, userAgent, readTimeout, writeTimeout, logger)
+// SendHELOWithFeatures provides a mock function with given fields: client, userAgent, readTimeout, writeTimeout, requestedFeatures, logger
+func (_m *UtilsIface) SendHELOWithFeatures(client memcached.ClientIface, userAgent string, readTimeout time.Duration, writeTimeout time.Duration, requestedFeatures utils.HELOFeatures, logger *log.CommonLogger) (utils.HELOFeatures, error) {
+	ret := _m.Called(client, userAgent, readTimeout, writeTimeout, requestedFeatures, logger)
 
-	var r0 bool
-	if rf, ok := ret.Get(0).(func(memcached.ClientIface, string, time.Duration, time.Duration, *log.CommonLogger) bool); ok {
-		r0 = rf(client, userAgent, readTimeout, writeTimeout, logger)
+	var r0 utils.HELOFeatures
+	if rf, ok := ret.Get(0).(func(memcached.ClientIface, string, time.Duration, time.Duration, utils.HELOFeatures, *log.CommonLogger) utils.HELOFeatures); ok {
+		r0 = rf(client, userAgent, readTimeout, writeTimeout, requestedFeatures, logger)
 	} else {
-		r0 = ret.Get(0).(bool)
+		r0 = ret.Get(0).(utils.HELOFeatures)
 	}
 
 	var r1 error
-	if rf, ok := ret.Get(1).(func(memcached.ClientIface, string, time.Duration, time.Duration, *log.CommonLogger) error); ok {
-		r1 = rf(client, userAgent, readTimeout, writeTimeout, logger)
+	if rf, ok := ret.Get(1).(func(memcached.ClientIface, string, time.Duration, time.Duration, utils.HELOFeatures, *log.CommonLogger) error); ok {
+		r1 = rf(client, userAgent, readTimeout, writeTimeout, requestedFeatures, logger)
 	} else {
 		r1 = ret.Error(1)
 	}

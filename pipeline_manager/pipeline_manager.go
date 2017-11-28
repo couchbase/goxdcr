@@ -20,6 +20,7 @@ import (
 	"github.com/couchbase/goxdcr/pipeline_utils"
 	"github.com/couchbase/goxdcr/service_def"
 	utilities "github.com/couchbase/goxdcr/utils"
+	"reflect"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -29,6 +30,9 @@ var ReplicationSpecNotActive error = errors.New("Replication specification not f
 var ReplicationStatusNotFound error = errors.New("Replication Status not found")
 
 var default_failure_restart_interval = 10
+
+// Maximum entries in an error map or array
+const MaxErrorDataEntries = 50
 
 type func_report_fixed func(topic string)
 
@@ -56,8 +60,8 @@ type Pipeline_mgr_iface interface {
 	// Internal APIs
 	OnExit() error
 	StopAllUpdaters()
-	StopPipeline(rep_status *pipeline.ReplicationStatus) error
-	StartPipeline(topic string) error
+	StopPipeline(rep_status pipeline.ReplicationStatusIface) base.ErrorMap
+	StartPipeline(topic string) base.ErrorMap
 	Update(topic string, cur_err error) error
 	ReplicationStatusMap() map[string]*pipeline.ReplicationStatus
 	ReplicationStatus(topic string) (*pipeline.ReplicationStatus, error)
@@ -73,27 +77,6 @@ type Pipeline_mgr_iface interface {
 	GetLogSvc() service_def.UILogSvc
 	GetReplSpecSvc() service_def.ReplicationSpecSvc
 	GetXDCRTopologySvc() service_def.XDCRCompTopologySvc
-}
-
-type PipelineUpdaterIface interface {
-	run()
-	update() bool
-	reportStatus()
-	raiseXattrWarningIfNeeded(p common.Pipeline)
-	checkReplicationActiveness() (err error)
-	stop()
-	clearError()
-	allowableErrorCodes(err error) bool // returns true if the error code is not considered a failure for update
-	refreshPipelineManually()
-	refreshPipelineDueToErr(err error)
-	scheduleFutureRefresh()
-	cancelFutureRefresh() bool // returns true if timer was cancelled successfully, false if fired
-	sendUpdateNow()
-	sendUpdateErr(err error)
-	setLastUpdateSuccess()
-	setLastUpdateFailure(err error)
-	getLastResult() bool // whether or not the last update was successful
-	isScheduledTimerNil() bool
 }
 
 // Global ptr, should slowly get rid of refences to this global
@@ -327,8 +310,9 @@ func (pipelineMgr *PipelineManager) StopSerializer() {
 	}
 }
 
-func (pipelineMgr *PipelineManager) StartPipeline(topic string) error {
+func (pipelineMgr *PipelineManager) StartPipeline(topic string) base.ErrorMap {
 	var err error
+	errMap := make(base.ErrorMap)
 	pipelineMgr.logger.Infof("Starting the pipeline %s\n", topic)
 
 	rep_status, _ := pipelineMgr.ReplicationStatus(topic)
@@ -336,21 +320,23 @@ func (pipelineMgr *PipelineManager) StartPipeline(topic string) error {
 		// validate the pipeline before starting it
 		err = pipelineMgr.validatePipeline(topic)
 		if err != nil {
-			return err
+			errMap[fmt.Sprintf("pipelineMgr.validatePipeline(%v)", topic)] = err
+			return errMap
 		}
 
 		if rep_status == nil {
 			// This should not be nil as updater should be the only one calling this and
 			// it would have created a rep_status way before here
-			return errors.New("Error: Replication Status is missing when starting pipeline.")
+			errMap[fmt.Sprintf("pipelineMgr.ReplicationStatus(%v)", topic)] = errors.New("Error: Replication Status is missing when starting pipeline.")
+			return errMap
 		}
 
 		rep_status.RecordProgress("Start pipeline construction")
 
 		p, err := pipelineMgr.pipeline_factory.NewPipeline(topic, rep_status.RecordProgress)
 		if err != nil {
-			pipelineMgr.logger.Errorf("Failed to construct a new pipeline with topic %v: %s", topic, err.Error())
-			return err
+			errMap[fmt.Sprintf("pipelineMgr.pipeline_factory.NewPipeline(%v)", topic)] = err
+			return errMap
 		}
 
 		rep_status.RecordProgress("Pipeline is constructed")
@@ -358,19 +344,17 @@ func (pipelineMgr *PipelineManager) StartPipeline(topic string) error {
 
 		pipelineMgr.logger.Infof("Pipeline %v is constructed. Starting it.", p.InstanceId())
 		p.SetProgressRecorder(rep_status.RecordProgress)
-		err = p.Start(rep_status.SettingsMap())
-		if err != nil {
+		errMap = p.Start(rep_status.SettingsMap())
+		if len(errMap) > 0 {
 			pipelineMgr.logger.Error("Failed to start the pipeline")
-			return err
 		}
-
-		return nil
+		return errMap
 	} else {
 		//the pipeline is already running
 		pipelineMgr.logger.Infof("The pipeline asked to be started, %v, is already running", topic)
-		return err
+		return errMap
 	}
-	return err
+	return errMap
 }
 
 // validate that a pipeline has valid configuration and can be started before starting it
@@ -422,24 +406,26 @@ func (pipelineMgr *PipelineManager) removePipelineFromReplicationStatus(p common
 }
 
 // Called internally from updater only
-func (pipelineMgr *PipelineManager) StopPipeline(rep_status *pipeline.ReplicationStatus) error {
+func (pipelineMgr *PipelineManager) StopPipeline(rep_status pipeline.ReplicationStatusIface) base.ErrorMap {
+	var errMap base.ErrorMap = make(base.ErrorMap)
+
 	if rep_status == nil {
-		return fmt.Errorf("Invalid parameter value rep_status=nil")
+		errMap["pipelineMgr.StopPipeline"] = errors.New("Invalid parameter value rep_status=nil")
+		return errMap
 	}
 
 	replId := rep_status.RepId()
 
 	pipelineMgr.logger.Infof("Trying to stop the pipeline %s", replId)
-	var err error
 
 	p := rep_status.Pipeline()
 
 	if p != nil {
 		state := p.State()
 		if state == common.Pipeline_Running || state == common.Pipeline_Starting || state == common.Pipeline_Error {
-			err = p.Stop()
-			if err != nil {
-				pipelineMgr.logger.Errorf("Received error when stopping pipeline %v - %v\n", replId, err)
+			errMap = p.Stop()
+			if len(errMap) > 0 {
+				pipelineMgr.logger.Errorf("Received error(s) when stopping pipeline %v - %v\n", replId, base.FlattenErrorMap(errMap))
 				//pipeline failed to stopped gracefully in time. ignore the error.
 				//the parts of the pipeline will eventually commit suicide.
 			} else {
@@ -458,11 +444,11 @@ func (pipelineMgr *PipelineManager) StopPipeline(rep_status *pipeline.Replicatio
 	// or deleted and recreated, which is signaled by change in spec internal id
 	// perform clean up
 	spec, _ := pipelineMgr.repl_spec_svc.ReplicationSpec(replId)
-	if spec == nil || (rep_status.SpecInternalId != "" && rep_status.SpecInternalId != spec.InternalId) {
+	if spec == nil || (rep_status.GetSpecInternalId() != "" && rep_status.GetSpecInternalId() != spec.InternalId) {
 		if spec == nil {
 			pipelineMgr.logger.Infof("%v Cleaning up replication status since repl spec has been deleted.\n", replId)
 		} else {
-			pipelineMgr.logger.Infof("%v Cleaning up replication status since repl spec has been deleted and recreated. oldSpecInternalId=%v, newSpecInternalId=%v\n", replId, rep_status.SpecInternalId, spec.InternalId)
+			pipelineMgr.logger.Infof("%v Cleaning up replication status since repl spec has been deleted and recreated. oldSpecInternalId=%v, newSpecInternalId=%v\n", replId, rep_status.GetSpecInternalId(), spec.InternalId)
 		}
 
 		pipelineMgr.checkpoint_svc.DelCheckpointsDocs(replId)
@@ -477,7 +463,7 @@ func (pipelineMgr *PipelineManager) StopPipeline(rep_status *pipeline.Replicatio
 		}
 	}
 
-	return err
+	return errMap
 }
 
 func (pipelineMgr *PipelineManager) runtimeCtx(topic string) common.PipelineRuntimeContext {
@@ -618,6 +604,7 @@ func (pipelineMgr *PipelineManager) GetLastUpdateResult(topic string) bool {
 	}
 }
 
+// Bunch of getters
 func (pipelineMgr *PipelineManager) GetRemoteClusterSvc() service_def.RemoteClusterSvc {
 	return pipelineMgr.remote_cluster_svc
 }
@@ -640,10 +627,55 @@ func (pipelineMgr *PipelineManager) GetXDCRTopologySvc() service_def.XDCRCompTop
 
 var updaterStateErrorStr = "Can't move update state from %v to %v"
 
+// unit test injection flags
 const (
 	pipelineUpdaterErrInjNil         int32 = iota
 	pipelineUpdaterErrInjOfflineFail int32 = iota
 )
+
+// Masks for the disabledFeatures Flag
+const (
+	disabledCompression uint8 = 1
+)
+
+// This context records the last replication setting's revision. If it has changed from the last recorded time,
+// it means that the replication setting has been updated and the disabled Features should be discarded
+// Since only the updater (which is a singleton per replication) calls is in a single routine, no need for synchronization
+type replSettingsRevContext struct {
+	rep_status          pipeline.ReplicationStatusIface
+	recordedRevision    interface{}
+	recordedRevIsActive bool
+}
+
+func (h *replSettingsRevContext) Clear() {
+	h.recordedRevIsActive = false
+	h.recordedRevision = nil
+}
+
+func (h *replSettingsRevContext) GetCurrentSettingsRevision() interface{} {
+	if h.rep_status != nil {
+		spec := h.rep_status.Spec()
+		if spec != nil {
+			return spec.Settings.Revision
+		}
+	}
+	return nil
+}
+
+// Sets the revision copy and also turns on a flag
+func (h *replSettingsRevContext) Record() {
+	h.recordedRevision = h.GetCurrentSettingsRevision()
+	h.recordedRevIsActive = true
+}
+
+// Returns true if a recorded revision is active and the replSettings has changed since the last recorded revision
+func (h *replSettingsRevContext) HasChanged() bool {
+	if h.recordedRevIsActive {
+		revToCheck := h.GetCurrentSettingsRevision()
+		return !(reflect.DeepEqual(revToCheck, h.recordedRevision))
+	}
+	return false
+}
 
 //pipelineRepairer is responsible to repair a failing pipeline
 //it will retry after the retry_interval
@@ -656,12 +688,15 @@ type PipelineUpdater struct {
 	fin_ch chan bool
 	//update-now channel
 	update_now_ch chan bool
-	// update-error channel
-	update_err_ch chan error
+	// update-error-map channel
+	update_err_map_ch chan base.ErrorMap
 	// channel indicating whether updater is really done
 	done_ch chan bool
-	//the current error
-	current_error error
+	//the current errors
+	currentErrors *pmErrMapType
+	// temporary map to catch any other errors while currentErrors are being processed
+	// Note - lock ordering not to be violated: 1. overflowErrors 2. currentErrors
+	overflowErrors *pmErrMapType
 
 	// passed in from and managed by pipeline_manager
 	waitGrp *sync.WaitGroup
@@ -677,35 +712,115 @@ type PipelineUpdater struct {
 	// boolean to store whether or not the last update was successful
 	lastSuccessful bool
 
-	rep_status          *pipeline.ReplicationStatus
+	rep_status          pipeline.ReplicationStatusIface
 	logger              *log.CommonLogger
 	pipelineUpdaterLock sync.RWMutex
 
 	// A counter for keeping track how many times this updater has executed with allowable error codes
 	runCounter uint64
 
+	// Disabled Features - with a monitor context to go along with it
+	disabledFeatures       uint8
+	replSpecSettingsHelper *replSettingsRevContext
+
 	// Unit test only - should be in milliseconds
 	testCustomScheduleTime time.Duration
 	testInjectionError     int32
 }
 
-func newPipelineUpdater(pipeline_name string, retry_interval int, waitGrp *sync.WaitGroup, cur_err error, rep_status_in *pipeline.ReplicationStatus, logger *log.CommonLogger, pipelineMgr_in *PipelineManager) *PipelineUpdater {
+type pmErrMapType struct {
+	errMap    base.ErrorMap
+	curErrMtx sync.RWMutex
+	logger    *log.CommonLogger
+}
+
+func (em *pmErrMapType) IsEmpty() bool {
+	em.curErrMtx.RLock()
+	defer em.curErrMtx.RUnlock()
+	return len(em.errMap) == 0
+}
+
+func (em *pmErrMapType) Size() int {
+	em.curErrMtx.RLock()
+	defer em.curErrMtx.RUnlock()
+	return len(em.errMap)
+}
+
+func (em *pmErrMapType) Clear() {
+	em.curErrMtx.Lock()
+	defer em.curErrMtx.Unlock()
+	em.errMap = make(base.ErrorMap)
+}
+
+func (em *pmErrMapType) String() string {
+	em.curErrMtx.RLock()
+	defer em.curErrMtx.RUnlock()
+	return base.FlattenErrorMap(em.errMap)
+}
+
+func (em *pmErrMapType) LoadErrMap(newMap base.ErrorMap) {
+	em.curErrMtx.Lock()
+	defer em.curErrMtx.Unlock()
+	em.errMap = base.DeepCopyErrorMap(newMap)
+}
+
+func (em *pmErrMapType) ConcatenateErrors(incomingMap base.ErrorMap) (err error) {
+	em.curErrMtx.Lock()
+	defer em.curErrMtx.Unlock()
+	// Traditionally, Pipeline Manager give priority to existing / first errors coming in
+	if base.GetUnionOfErrorMapsSize(em.errMap, incomingMap) <= MaxErrorDataEntries {
+		base.MergeErrorMaps(em.errMap, incomingMap, false /*overwrite*/)
+	} else {
+		em.logger.Warnf("Unable to record the errors as maximum entries of %v has been reached in the current error map. The errors lost are: %v\n",
+			MaxErrorDataEntries, incomingMap)
+		err = base.ErrorMaxReached
+	}
+	return
+}
+
+// The behavior is to not overwrite keys - since traditionally Pipeline Manager's error handling
+// is to register the first type of error and ignore the subsequent onces
+func (em *pmErrMapType) AddError(source string, err error) error {
+	if len(source) == 0 {
+		return errors.New("Empty string")
+	}
+	em.curErrMtx.Lock()
+	defer em.curErrMtx.Unlock()
+	if _, ok := em.errMap[source]; !ok {
+		em.errMap[source] = err
+	}
+	return nil
+}
+
+func (em *pmErrMapType) ContainsError(checkErr error, exactMatch bool) bool {
+	em.curErrMtx.RLock()
+	defer em.curErrMtx.RUnlock()
+	return base.CheckErrorMapForError(em.errMap, checkErr, exactMatch)
+}
+
+func newPipelineUpdater(pipeline_name string, retry_interval int, waitGrp *sync.WaitGroup, cur_err error, rep_status_in pipeline.ReplicationStatusIface, logger *log.CommonLogger, pipelineMgr_in *PipelineManager) *PipelineUpdater {
 	if rep_status_in == nil {
 		panic("nil ReplicationStatus")
 	}
 	repairer := &PipelineUpdater{pipeline_name: pipeline_name,
-		retry_interval: time.Duration(retry_interval) * time.Second,
-		fin_ch:         make(chan bool, 1),
-		done_ch:        make(chan bool, 1),
-		update_now_ch:  make(chan bool, 1),
-		update_err_ch:  make(chan error, 1),
-		waitGrp:        waitGrp,
-		rep_status:     rep_status_in,
-		logger:         logger,
-		pipelineMgr:    pipelineMgr_in,
-		lastSuccessful: true,
-		current_error:  cur_err}
+		retry_interval:         time.Duration(retry_interval) * time.Second,
+		fin_ch:                 make(chan bool, 1),
+		done_ch:                make(chan bool, 1),
+		update_now_ch:          make(chan bool, 1),
+		update_err_map_ch:      make(chan base.ErrorMap, 1),
+		waitGrp:                waitGrp,
+		rep_status:             rep_status_in,
+		logger:                 logger,
+		pipelineMgr:            pipelineMgr_in,
+		lastSuccessful:         true,
+		currentErrors:          &pmErrMapType{errMap: make(base.ErrorMap), logger: logger},
+		overflowErrors:         &pmErrMapType{errMap: make(base.ErrorMap), logger: logger},
+		replSpecSettingsHelper: &replSettingsRevContext{rep_status: rep_status_in},
+	}
 
+	if cur_err != nil {
+		repairer.currentErrors.AddError("newPipelineUpdater", cur_err)
+	}
 	return repairer
 }
 
@@ -721,6 +836,7 @@ func (r *PipelineUpdater) run() {
 	defer close(r.done_ch)
 
 	var retErr error
+	var retErrMap base.ErrorMap
 
 	for {
 		select {
@@ -733,19 +849,19 @@ func (r *PipelineUpdater) run() {
 			return
 		case <-r.update_now_ch:
 			r.logger.Infof("Replication %v's status is changed, update now\n", r.pipeline_name)
-			retErr = r.update()
+			retErrMap = r.update()
 			r.cancelFutureRefresh()
-			if retErr != nil {
-				r.logger.Infof("Replication %v update experienced an error: %v. Scheduling a redo.\n", r.pipeline_name, retErr)
-				r.sendUpdateErr(retErr)
+			if len(retErrMap) > 0 {
+				r.logger.Infof("Replication %v update experienced error(s): %v. Scheduling a redo.\n", r.pipeline_name, base.FlattenErrorMap(retErrMap))
+				r.sendUpdateErrMap(retErrMap)
 			}
-		case retErr = <-r.update_err_ch:
+		case retErrMap = <-r.update_err_map_ch:
 			var updateAgain bool
+			r.currentErrors.ConcatenateErrors(retErrMap)
 			if r.getLastResult() {
-				r.logger.Infof("Replication %v's status experienced changes or errors (%v), updating now\n", r.pipeline_name, retErr)
 				// Last time update succeeded, so this error then triggers an immediate update
-				r.current_error = retErr
-				if r.update() != nil {
+				r.logger.Infof("Replication %v's status experienced changes or errors (%v), updating now\n", r.pipeline_name, base.FlattenErrorMap(retErrMap))
+				if retErrMap = r.update(); len(retErrMap) > 0 {
 					updateAgain = true
 				}
 			} else {
@@ -760,7 +876,16 @@ func (r *PipelineUpdater) run() {
 	}
 }
 
-func (r *PipelineUpdater) allowableErrorCodes(err error) bool {
+func allErrorsAreAllowed(errMap base.ErrorMap) bool {
+	for _, v := range errMap {
+		if !allowableErrorCodes(v) {
+			return false
+		}
+	}
+	return true
+}
+
+func allowableErrorCodes(err error) bool {
 	if err == nil ||
 		err == ReplicationSpecNotActive ||
 		err == service_def.MetadataNotFoundErr {
@@ -769,31 +894,81 @@ func (r *PipelineUpdater) allowableErrorCodes(err error) bool {
 	return false
 }
 
-//update the pipeline
-func (r *PipelineUpdater) update() error {
-	// Used externally
-	var retVal error
-	// Used internally
-	var err error
-	var p common.Pipeline
+// If supported, one by one disable the features that are allowed to be disabled so that
+// the pipeline can eventually start. These temporary changes are cleared when clearErrors() is called later
+func (r *PipelineUpdater) checkAndDisableProblematicFeatures() {
+	// First make sure that no one has changed replicationSettings from underneath us
+	if r.replSpecSettingsHelper.HasChanged() {
+		// If the real specs have been changed, disregard customSettings so we'll read the most up to date changes
+		r.rep_status.ClearCustomSettings()
+		r.replSpecSettingsHelper.Clear()
+	} else {
+		if r.currentErrors.ContainsError(base.ErrorCompressionNotSupported, true /*exactMatch*/) {
+			r.disableCompression()
+		}
+	}
+}
 
-	if r.current_error == nil {
+func (r *PipelineUpdater) disableCompression() {
+	if r.rep_status == nil {
+		r.logger.Errorf(fmt.Sprintf("Unable to disable compression for pipeline %v - rep_status is nil", r.pipeline_name))
+		return
+	}
+	settings := r.rep_status.Settings()
+	r.disabledFeatures |= disabledCompression
+
+	r.logger.Infof("Temporarily disabling compression for pipeline: %v", r.pipeline_name)
+	settings.CompressionType = (int)(base.CompressionTypeNone)
+
+	r.rep_status.SetCustomSettings(settings)
+}
+
+func (r *PipelineUpdater) resetDisabledFeatures() {
+	if r.disabledFeatures > 0 {
+		r.logger.Infof("Restoring compression for pipeline: %v the next time it restarts", r.pipeline_name)
+		r.rep_status.ClearCustomSettings()
+		r.disabledFeatures = 0
+	}
+}
+
+//update the pipeline
+func (r *PipelineUpdater) update() base.ErrorMap {
+	var err error
+	var errMap base.ErrorMap
+	var p common.Pipeline
+	var checkReplicationActivenessKey string = "r.CheckReplicationActiveness"
+
+	// Before executing, pick up any errors that were not captured by the channel
+	r.overflowErrors.curErrMtx.RLock()
+	// If current errors map is too full, then these overflow errors may be missed
+	r.currentErrors.ConcatenateErrors(r.overflowErrors.errMap)
+	r.overflowErrors.curErrMtx.RUnlock()
+
+	if r.currentErrors.IsEmpty() {
 		r.logger.Infof("Try to start/restart Pipeline %v. \n", r.pipeline_name)
 	} else {
-		r.logger.Infof("Try to fix Pipeline %v. Current error=%v \n", r.pipeline_name, r.current_error)
+		r.logger.Infof("Try to fix Pipeline %v. Current error(s)=%v \n", r.pipeline_name, r.currentErrors.String())
+		r.checkAndDisableProblematicFeatures()
 	}
 
+	// Store the current revision of the actual replicationSpec's setting. If things changed from underneath,
+	// before we kick-start another update, we'll know at the start of our next update
+	r.replSpecSettingsHelper.Record()
+
 	r.logger.Infof("Try to stop pipeline %v\n", r.pipeline_name)
-	err = r.pipelineMgr.StopPipeline(r.rep_status)
+	errMap = r.pipelineMgr.StopPipeline(r.rep_status)
 
 	// unit test error injection
 	if atomic.LoadInt32(&r.testInjectionError) == pipelineUpdaterErrInjOfflineFail {
 		r.logger.Infof("Error injected... this should only happen during unit test")
-		err = errors.New("Injected Offline failure")
+		// make a new map so we don't modify the mock PM's errMap reference above
+		injectedErrMap := make(base.ErrorMap)
+		injectedErrMap["InjectedError"] = errors.New("Injected Offline failure")
+		errMap = injectedErrMap
 	}
 	// end unit test error injection
 
-	if err != nil {
+	if len(errMap) > 0 {
 		// If pipeline fails to stop, everything within it should "commit suicide" eventually
 		goto RE
 	}
@@ -803,48 +978,56 @@ func (r *PipelineUpdater) update() error {
 
 	err = r.checkReplicationActiveness()
 	if err != nil {
+		errMap[checkReplicationActivenessKey] = err
 		goto RE
 	}
 
-	err = r.pipelineMgr.StartPipeline(r.pipeline_name)
+	errMap = r.pipelineMgr.StartPipeline(r.pipeline_name)
 
 RE:
-	if err == nil {
+	if len(errMap) == 0 {
 		r.logger.Infof("Replication %v has been updated. Back to business\n", r.pipeline_name)
-	} else if err == ReplicationSpecNotActive {
+	} else if base.CheckErrorMapForError(errMap, ReplicationSpecNotActive, true /*exactMatch*/) {
 		r.logger.Infof("Replication %v has been paused. no need to update\n", r.pipeline_name)
-	} else if err == service_def.MetadataNotFoundErr {
+	} else if base.CheckErrorMapForError(errMap, service_def.MetadataNotFoundErr, true /*exactMatch */) {
 		r.logger.Infof("Replication %v has been deleted. no need to update\n", r.pipeline_name)
 	} else {
-		r.logger.Errorf("Failed to update pipeline %v, err=%v\n", r.pipeline_name, err)
+		r.logger.Errorf("Failed to update pipeline %v, err=%v\n", r.pipeline_name, base.FlattenErrorMap(errMap))
 	}
 
-	if r.allowableErrorCodes(err) {
+	if allErrorsAreAllowed(errMap) {
 		r.logger.Infof("Pipeline %v has been updated successfully\n", r.pipeline_name)
 		r.setLastUpdateSuccess()
-		if err == nil {
-			r.raiseXattrWarningIfNeeded(p)
+		if len(errMap) == 0 {
+			r.raiseWarningsIfNeeded(p)
 		}
 		if r.rep_status != nil {
 			r.rep_status.ClearErrors()
 		}
-		r.clearError()
-		retVal = nil
+		r.clearErrors()
+		errMap = make(base.ErrorMap) // clear errMap
 		atomic.AddUint64(&r.runCounter, 1)
+		r.resetDisabledFeatures() // also clears custom settings
 	} else {
-		r.setLastUpdateFailure(err)
-		r.logger.Errorf("Update of pipeline %v failed with error=%v\n", r.pipeline_name, err)
-		retVal = err
+		r.setLastUpdateFailure(errMap)
+		r.logger.Errorf("Update of pipeline %v failed with errors=%v\n", r.pipeline_name, base.FlattenErrorMap(errMap))
 	}
 	r.reportStatus()
 
-	return retVal
+	return errMap
 }
 
 func (r *PipelineUpdater) reportStatus() {
 	if r.rep_status != nil {
-		r.rep_status.AddError(r.current_error)
+		r.currentErrors.curErrMtx.RLock()
+		defer r.currentErrors.curErrMtx.RUnlock()
+		r.rep_status.AddErrorsFromMap(r.currentErrors.errMap)
 	}
+}
+
+func (r *PipelineUpdater) raiseWarningsIfNeeded(p common.Pipeline) {
+	r.raiseXattrWarningIfNeeded(p)
+	r.raiseCompressionWarningIfNeeded()
 }
 
 // raise warning on UI console when
@@ -853,28 +1036,24 @@ func (r *PipelineUpdater) reportStatus() {
 // 3. target cluster does not support xattr
 // 4. current node is the master for vbucket 0 - this is needed to ensure that warning is shown on UI only once, instead of once per source node
 func (r *PipelineUpdater) raiseXattrWarningIfNeeded(p common.Pipeline) {
-	if r.current_error == nil {
+	if r.currentErrors.IsEmpty() {
 		if p == nil {
 			r.logger.Warnf("Skipping xattr warning check since pipeline %v has not been started\n", r.pipeline_name)
 			return
 		}
-
 		spec := p.Specification()
 		if spec == nil {
 			r.logger.Warnf("Skipping xattr warning check since cannot find replication spec for pipeline %v\n", r.pipeline_name)
 			return
 		}
-
 		if spec.Settings.IsCapi() {
 			return
 		}
-
 		targetClusterRef, err := r.pipelineMgr.GetRemoteClusterSvc().RemoteClusterByUuid(spec.TargetClusterUUID, false)
 		if err != nil {
 			r.logger.Warnf("Skipping xattr warning check since received error getting remote cluster with uuid=%v for pipeline %v, err=%v\n", spec.TargetClusterUUID, spec.Id, err)
 			return
 		}
-
 		hasXattrSupport, err := r.pipelineMgr.GetClusterInfoSvc().IsClusterCompatible(targetClusterRef, base.VersionForRBACAndXattrSupport)
 		if err != nil {
 			r.logger.Warnf("Skipping xattr warning check since received error checking target cluster version. target cluster=%v, pipeline=%v, err=%v\n", spec.TargetClusterUUID, spec.Id, err)
@@ -898,6 +1077,16 @@ func (r *PipelineUpdater) raiseXattrWarningIfNeeded(p common.Pipeline) {
 				r.pipelineMgr.GetLogSvc().Write(errMsg)
 			}
 		}
+	}
+}
+
+func (r *PipelineUpdater) raiseCompressionWarningIfNeeded() {
+	if r.disabledFeatures > 0 && (r.disabledFeatures&disabledCompression > 0) {
+		spec := r.rep_status.Spec()
+		errMsg := fmt.Sprintf("Replication from source bucket '%v' to target bucket '%v' has been started without compression enabled due to errors that occurred during clusters handshaking. This may result in more data bandwidth usage. Please ensure that both the source and target clusters are at or above version %v.%v, and that both clusters are individually configured correctly to enable compression.",
+			spec.SourceBucketName, spec.TargetBucketName, base.VersionForCompressionSupport[0], base.VersionForCompressionSupport[1])
+		r.logger.Warn(errMsg)
+		r.pipelineMgr.GetLogSvc().Write(errMsg)
 	}
 }
 
@@ -945,12 +1134,22 @@ func (r *PipelineUpdater) sendUpdateNow() {
 }
 
 func (r *PipelineUpdater) sendUpdateErr(err error) {
+	oneErrorInMap := make(base.ErrorMap)
+	oneErrorInMap["r.update_err_ch"] = err
+	r.sendUpdateErrMap(oneErrorInMap)
+}
+
+func (r *PipelineUpdater) sendUpdateErrMap(errMap base.ErrorMap) {
 	select {
-	case r.update_err_ch <- err:
+	case r.update_err_map_ch <- errMap:
 	default:
-		r.logger.Infof("Update-err message is already delivered for %v\n", r.pipeline_name)
+		if concatErr := r.overflowErrors.ConcatenateErrors(errMap); concatErr != nil {
+			r.logger.Infof("Updater is currently running. Errors are captured in overflow map, and may be picked up if the current pipeline restart fails")
+		} else {
+			r.logger.Infof("Updater is currently running. Errors are not captured in overflow map due to overflow map overflowing...")
+		}
 	}
-	r.logger.Infof("Replication status is updated with error %v, current status=%v\n", err, r.rep_status)
+	r.logger.Infof("Replication status is updated with error(s) %v, current status=%v\n", base.FlattenErrorMap(errMap), r.rep_status)
 }
 
 func (r *PipelineUpdater) isScheduledTimerNil() bool {
@@ -984,11 +1183,11 @@ func (r *PipelineUpdater) setLastUpdateSuccess() {
 	r.lastSuccessful = true
 }
 
-func (r *PipelineUpdater) setLastUpdateFailure(err error) {
+func (r *PipelineUpdater) setLastUpdateFailure(errs base.ErrorMap) {
 	r.pipelineUpdaterLock.Lock()
 	defer r.pipelineUpdaterLock.Unlock()
 	r.lastSuccessful = false
-	r.current_error = err
+	r.currentErrors.LoadErrMap(errs)
 }
 
 // Stopped == true means that we stopped it in time
@@ -1007,11 +1206,13 @@ func (r *PipelineUpdater) cancelFutureRefresh() bool {
 	return stopped
 }
 
-func (r *PipelineUpdater) clearError() {
+func (r *PipelineUpdater) clearErrors() {
 	r.pipelineUpdaterLock.Lock()
 	defer r.pipelineUpdaterLock.Unlock()
 
-	r.current_error = nil
+	r.currentErrors.Clear()
+	r.replSpecSettingsHelper.Clear()
+	r.overflowErrors.Clear()
 }
 
 func getRequestPoolSize(rep_status *pipeline.ReplicationStatus, numOfTargetNozzles int) int {

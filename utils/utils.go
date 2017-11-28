@@ -31,6 +31,17 @@ import (
 
 var NonExistentBucketError error = errors.New("Bucket doesn't exist")
 
+func (f *HELOFeatures) NumberOfActivatedFeatures() int {
+	var result int
+	if f.Xattribute {
+		result++
+	}
+	if f.CompressionType != base.CompressionTypeNone {
+		result++
+	}
+	return result
+}
+
 type Utilities struct {
 	logger_utils *log.CommonLogger
 }
@@ -390,37 +401,55 @@ func (u *Utilities) BucketNotFoundError(bucketName string) error {
 
 // creates a local memcached connection.
 // always use plain auth
-func (u *Utilities) GetMemcachedConnection(serverAddr, bucketName, userAgent string,
-	keepAlivePeriod time.Duration, logger *log.CommonLogger) (mcc.ClientIface, error) {
+func (u *Utilities) GetMemcachedConnectionWFeatures(serverAddr, bucketName, userAgent string,
+	keepAlivePeriod time.Duration, features HELOFeatures, logger *log.CommonLogger) (mcc.ClientIface, HELOFeatures, error) {
+	var respondedFeatures HELOFeatures
+
 	logger.Infof("GetMemcachedConnection serverAddr=%v, bucketName=%v\n", serverAddr, bucketName)
 	if serverAddr == "" {
 		err := fmt.Errorf("Failed to get memcached connection because serverAddr is empty. bucketName=%v, userAgent=%v", bucketName, userAgent)
 		logger.Warnf(err.Error())
-		return nil, err
+		return nil, respondedFeatures, err
 	}
 	username, password, err := cbauth.GetMemcachedServiceAuth(serverAddr)
 	logger.Debugf("memcached auth: username=%v, password=%v, err=%v\n", username, password, err)
 	if err != nil {
-		return nil, err
+		return nil, respondedFeatures, err
 	}
 
-	return u.GetRemoteMemcachedConnection(serverAddr, username, password, bucketName, userAgent,
-		true /*plainAuth*/, keepAlivePeriod, logger)
+	return u.GetRemoteMemcachedConnectionWFeatures(serverAddr, username, password, bucketName, userAgent, true /*plainAuth*/, keepAlivePeriod, features, logger)
 }
 
-func (u *Utilities) GetRemoteMemcachedConnection(serverAddr, username, password, bucketName, userAgent string,
-	plainAuth bool, keepAlivePeriod time.Duration, logger *log.CommonLogger) (mcc.ClientIface, error) {
+func (u *Utilities) GetMemcachedConnection(serverAddr, bucketName, userAgent string,
+	keepAlivePeriod time.Duration, logger *log.CommonLogger) (mcc.ClientIface, error) {
+	var noFeatures HELOFeatures
+	clientIface, _, err := u.GetMemcachedConnectionWFeatures(serverAddr, bucketName, userAgent, keepAlivePeriod, noFeatures, logger)
+	return clientIface, err
+}
+
+func (u *Utilities) GetMemcachedRawConn(serverAddr, username, password, bucketName string, plainAuth bool,
+	keepAlivePeriod time.Duration, logger *log.CommonLogger) (mcc.ClientIface, error) {
+	conn, err := base.NewConn(serverAddr, username, password, bucketName, plainAuth, keepAlivePeriod, logger)
+	if err != nil {
+		return nil, err
+	}
+	return conn, err
+}
+
+func (u *Utilities) GetRemoteMemcachedConnectionWFeatures(serverAddr, username, password, bucketName, userAgent string,
+	plainAuth bool, keepAlivePeriod time.Duration, features HELOFeatures, logger *log.CommonLogger) (mcc.ClientIface, HELOFeatures, error) {
 	var err error
 	var conn mcc.ClientIface
+	var respondedFeatures HELOFeatures
 
 	getRemoteMcConnOp := func() error {
-		conn, err = base.NewConn(serverAddr, username, password, bucketName, plainAuth, keepAlivePeriod, logger)
+		conn, err = u.GetMemcachedRawConn(serverAddr, username, password, bucketName, plainAuth, keepAlivePeriod, logger)
 		if err != nil {
 			logger.Warnf("Failed to construct memcached client for %v, err=%v\n", serverAddr, err)
 			return err
 		}
 
-		err = u.SendHELO(conn, userAgent, base.HELOTimeout, base.HELOTimeout, logger)
+		respondedFeatures, err = u.SendHELOWithFeatures(conn, userAgent, base.HELOTimeout, base.HELOTimeout, features, logger)
 
 		if err != nil {
 			conn.Close()
@@ -435,9 +464,17 @@ func (u *Utilities) GetRemoteMemcachedConnection(serverAddr, username, password,
 
 	if opErr != nil {
 		logger.Errorf(opErr.Error())
-		return nil, err
+		return nil, respondedFeatures, err
 	}
 
+	return conn, respondedFeatures, err
+}
+
+func (u *Utilities) GetRemoteMemcachedConnection(serverAddr, username, password, bucketName, userAgent string,
+	plainAuth bool, keepAlivePeriod time.Duration, logger *log.CommonLogger) (mcc.ClientIface, error) {
+	var noFeatureEnabled HELOFeatures
+	conn, _, err := u.GetRemoteMemcachedConnectionWFeatures(serverAddr, username, password, bucketName, userAgent, plainAuth, keepAlivePeriod,
+		noFeatureEnabled, logger)
 	return conn, err
 }
 
@@ -446,7 +483,8 @@ func (u *Utilities) GetRemoteMemcachedConnection(serverAddr, username, password,
 // unsuccessful response is not treated as errors
 func (u *Utilities) SendHELO(client mcc.ClientIface, userAgent string, readTimeout, writeTimeout time.Duration,
 	logger *log.CommonLogger) (err error) {
-	heloReq := u.ComposeHELORequest(userAgent, false /*enableDataType*/)
+	var allFeaturesDisabled HELOFeatures
+	heloReq := u.ComposeHELORequest(userAgent, allFeaturesDisabled)
 
 	var response *mc.MCResponse
 	response, err = u.sendHELORequest(client, heloReq, userAgent, readTimeout, writeTimeout, logger)
@@ -464,9 +502,8 @@ func (u *Utilities) SendHELO(client mcc.ClientIface, userAgent string, readTimeo
 // used exclusively by xmem nozzle
 // we need to know whether data type is indeed enabled from helo response
 // unsuccessful response is treated as errors
-func (u *Utilities) SendHELOWithXattrFeature(client mcc.ClientIface, userAgent string, readTimeout, writeTimeout time.Duration,
-	logger *log.CommonLogger) (xattrEnabled bool, err error) {
-	heloReq := u.ComposeHELORequest(userAgent, true /*enableXattr*/)
+func (u *Utilities) SendHELOWithFeatures(client mcc.ClientIface, userAgent string, readTimeout, writeTimeout time.Duration, requestedFeatures HELOFeatures, logger *log.CommonLogger) (respondedFeatures HELOFeatures, err error) {
+	heloReq := u.ComposeHELORequest(userAgent, requestedFeatures)
 
 	var response *mc.MCResponse
 	response, err = u.sendHELORequest(client, heloReq, userAgent, readTimeout, writeTimeout, logger)
@@ -493,12 +530,14 @@ func (u *Utilities) SendHELOWithXattrFeature(client mcc.ClientIface, userAgent s
 			}
 			feature := binary.BigEndian.Uint16(response.Body[pos : pos+2])
 			if feature == base.HELO_FEATURE_XATTR {
-				xattrEnabled = true
-				break
+				respondedFeatures.Xattribute = true
+			}
+			if feature == base.HELO_FEATURE_SNAPPY {
+				respondedFeatures.CompressionType = base.CompressionTypeSnappy
 			}
 			pos += 2
 		}
-		logger.Infof("Successfully sent HELO command with userAgent=%v. xattrEnabled=%v", userAgent, xattrEnabled)
+		logger.Infof("Successfully sent HELO command with userAgent=%v. attributes=%v", userAgent, respondedFeatures)
 	}
 	return
 }
@@ -522,19 +561,29 @@ func (u *Utilities) sendHELORequest(client mcc.ClientIface, heloReq *mc.MCReques
 }
 
 // compose a HELO command
-func (u *Utilities) ComposeHELORequest(userAgent string, enableXattr bool) *mc.MCRequest {
+func (u *Utilities) ComposeHELORequest(userAgent string, features HELOFeatures) *mc.MCRequest {
 	var value []byte
-	if enableXattr {
-		value = make([]byte, 4)
-		// tcp nodelay
-		binary.BigEndian.PutUint16(value[0:2], base.HELO_FEATURE_TCP_NO_DELAY)
-		// Xattr
-		binary.BigEndian.PutUint16(value[2:4], base.HELO_FEATURE_XATTR)
-	} else {
-		value = make([]byte, 2)
-		// tcp nodelay
-		binary.BigEndian.PutUint16(value[0:2], base.HELO_FEATURE_TCP_NO_DELAY)
+	var numOfFeatures = features.NumberOfActivatedFeatures()
+	var sliceIndex int
+	bytesToAllocate := base.HELO_BYTES_PER_FEATURE * (numOfFeatures + 1) // TCP_NO_DELAY is included by default
+	value = make([]byte, bytesToAllocate)
+
+	// tcp no delay - [0:2]
+	binary.BigEndian.PutUint16(value[sliceIndex:sliceIndex+base.HELO_BYTES_PER_FEATURE], base.HELO_FEATURE_TCP_NO_DELAY)
+	sliceIndex += base.HELO_BYTES_PER_FEATURE
+
+	// Xattribute
+	if features.Xattribute {
+		binary.BigEndian.PutUint16(value[sliceIndex:sliceIndex+base.HELO_BYTES_PER_FEATURE], base.HELO_FEATURE_XATTR)
+		sliceIndex += base.HELO_BYTES_PER_FEATURE
 	}
+
+	// Compression
+	if features.CompressionType == base.CompressionTypeSnappy {
+		binary.BigEndian.PutUint16(value[sliceIndex:sliceIndex+base.HELO_BYTES_PER_FEATURE], base.HELO_FEATURE_SNAPPY)
+		sliceIndex += base.HELO_BYTES_PER_FEATURE
+	}
+
 	return &mc.MCRequest{
 		Key:    []byte(userAgent),
 		Opcode: mc.HELLO,
@@ -729,8 +778,8 @@ func (u *Utilities) GetEvictionPolicyFromBucketInfo(bucketName string, bucketInf
 /**
  * The second section is couchbase REST related utility functions
  */
-func (u *Utilities) GetMemcachedSSLPortMap(hostName, username, password string, certificate []byte, sanInCertificate bool, bucket string, logger *log.CommonLogger) (map[string]uint16, error) {
-	ret := make(map[string]uint16)
+func (u *Utilities) GetMemcachedSSLPortMap(hostName, username, password string, certificate []byte, sanInCertificate bool, bucket string, logger *log.CommonLogger) (base.SSLPortMap, error) {
+	ret := make(base.SSLPortMap)
 
 	logger.Infof("GetMemcachedSSLPort, hostName=%v\n", hostName)
 	bucketInfo, err := u.GetClusterInfo(hostName, base.BPath+bucket, username, password, certificate, sanInCertificate, logger)
@@ -1717,4 +1766,26 @@ func (u *Utilities) ExponentialBackoffExecutorWithFinishSignal(name string, init
 		}
 	}
 	return nil, base.ErrorFailedAfterRetry
+}
+
+func (u *Utilities) GetClientFromPoolWithRetry(componentName string, pool base.ConnPool, finish_ch chan bool, initialWait time.Duration, maxRetries, factor int, logger *log.CommonLogger) (mcc.ClientIface, error) {
+	// the sole purpose of getClientOpFunc is to match the func signature required by ExponentialBackoffExecutorWithFinishSignal
+	// input "param" is immaterial and is ignored
+	getClientOpFunc := func(param interface{}) (interface{}, error) {
+		return pool.GetNew()
+	}
+
+	result, err := u.ExponentialBackoffExecutorWithFinishSignal(fmt.Sprintf("%v.GetClientFromPoolWithRetry", componentName), initialWait, maxRetries,
+		factor, getClientOpFunc, nil /*param*/, finish_ch)
+	if err != nil {
+		high_level_err := fmt.Sprintf("Failed to set up connections after %v retries.", maxRetries)
+		logger.Errorf("%v %v", componentName, high_level_err)
+		return nil, errors.New(high_level_err)
+	}
+	client, ok := result.(mcc.ClientIface)
+	if !ok {
+		// should never get here
+		return nil, fmt.Errorf("%v.GetClientFromPoolWithRetry returned wrong type of client", componentName)
+	}
+	return client, nil
 }

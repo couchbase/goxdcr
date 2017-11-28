@@ -134,13 +134,14 @@ var RestKeyToSettingsKeyMap = map[string]string{
 	OptimisticReplicationThreshold: metadata.OptimisticReplicationThreshold,
 	SourceNozzlePerNode:            metadata.SourceNozzlePerNode,
 	TargetNozzlePerNode:            metadata.TargetNozzlePerNode,
+	LogLevel:                       metadata.PipelineLogLevel,
+	StatsInterval:                  metadata.PipelineStatsInterval,
+	BandwidthLimit:                 metadata.BandwidthLimit,
+	GoMaxProcs:                     metadata.GoMaxProcs,
+	GoGC:                           metadata.GoGC,
+	base.CompressionTypeREST: metadata.CompressionType,
 	/*MaxExpectedReplicationLag:      metadata.MaxExpectedReplicationLag,
 	TimeoutPercentageCap:           metadata.TimeoutPercentageCap,*/
-	LogLevel:       metadata.PipelineLogLevel,
-	StatsInterval:  metadata.PipelineStatsInterval,
-	BandwidthLimit: metadata.BandwidthLimit,
-	GoMaxProcs:     metadata.GoMaxProcs,
-	GoGC:           metadata.GoGC,
 }
 
 // internal replication settings key -> replication settings key in rest api
@@ -155,13 +156,14 @@ var SettingsKeyToRestKeyMap = map[string]string{
 	metadata.OptimisticReplicationThreshold: OptimisticReplicationThreshold,
 	metadata.SourceNozzlePerNode:            SourceNozzlePerNode,
 	metadata.TargetNozzlePerNode:            TargetNozzlePerNode,
+	metadata.PipelineLogLevel:               LogLevel,
+	metadata.PipelineStatsInterval:          StatsInterval,
+	metadata.BandwidthLimit:                 BandwidthLimit,
+	metadata.GoMaxProcs:                     GoMaxProcs,
+	metadata.GoGC:                           GoGC,
+	metadata.CompressionType:                base.CompressionTypeREST,
 	/*metadata.MaxExpectedReplicationLag:      MaxExpectedReplicationLag,
 	metadata.TimeoutPercentageCap:           TimeoutPercentageCap,*/
-	metadata.PipelineLogLevel:      LogLevel,
-	metadata.PipelineStatsInterval: StatsInterval,
-	metadata.BandwidthLimit:        BandwidthLimit,
-	metadata.GoMaxProcs:            GoMaxProcs,
-	metadata.GoGC:                  GoGC,
 }
 
 var logger_msgutil *log.CommonLogger = log.NewLogger("MsgUtils", log.DefaultLoggerContext)

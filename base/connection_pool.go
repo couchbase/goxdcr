@@ -51,13 +51,13 @@ func (connType ConnType) String() string {
 	}
 }
 
-type NewConnFunc func() (*mcc.Client, error)
+type NewConnFunc func() (mcc.ClientIface, error)
 
 type ConnPool interface {
-	Get() (*mcc.Client, error)
-	GetNew() (*mcc.Client, error)
+	Get() (mcc.ClientIface, error)
+	GetNew() (mcc.ClientIface, error)
 	GetCAS() uint32
-	Release(client *mcc.Client)
+	Release(client mcc.ClientIface)
 	ReleaseConnections(cas uint32)
 	NewConnFunc() NewConnFunc
 	Name() string
@@ -78,7 +78,7 @@ type SSLConnPool interface {
 
 type connPool struct {
 	name     string
-	clients  chan *mcc.Client
+	clients  chan mcc.ClientIface
 	hostName string
 	// username and password used in setting up target connection
 	userName    string
@@ -179,7 +179,7 @@ func (p *connPool) MaxConn() int {
 	return p.maxConn
 }
 
-func (p *connPool) Get() (*mcc.Client, error) {
+func (p *connPool) Get() (mcc.ClientIface, error) {
 	p.lock.RLock()
 	defer p.lock.RUnlock()
 	if p.clients != nil {
@@ -198,11 +198,11 @@ func (p *connPool) Get() (*mcc.Client, error) {
 	return nil, errors.New("connection pool is closed")
 }
 
-func (p *connPool) GetNew() (*mcc.Client, error) {
+func (p *connPool) GetNew() (mcc.ClientIface, error) {
 	return p.newConnFunc()
 }
 
-func (p *connPool) newConn() (*mcc.Client, error) {
+func (p *connPool) newConn() (mcc.ClientIface, error) {
 	return NewConn(p.hostName, p.userName, p.password, p.bucketName, p.plainAuth, KeepAlivePeriod, p.logger)
 }
 func (p *connPool) NewConnFunc() NewConnFunc {
@@ -265,7 +265,7 @@ func (p *sslOverMemConnPool) Certificate() []byte {
 	return p.certificate
 }
 
-func (p *sslOverMemConnPool) newConn() (*mcc.Client, error) {
+func (p *sslOverMemConnPool) newConn() (mcc.ClientIface, error) {
 	ssl_con_str := GetHostAddr(p.hostName, uint16(p.remote_memcached_port))
 	return NewTLSConn(ssl_con_str, p.userName, p.password, p.certificate, p.san_in_certificate, p.bucketName, p.logger)
 }
@@ -277,7 +277,7 @@ func (p *sslOverMemConnPool) ConnType() ConnType {
 //
 // Release connection back to the pool
 //
-func (p *connPool) Release(client *mcc.Client) {
+func (p *connPool) Release(client mcc.ClientIface) {
 	//reset connection deadlines
 	conn := client.Hijack()
 
@@ -392,7 +392,7 @@ func (connPoolMgr *connPoolMgr) GetOrCreatePool(poolNameToCreate string, hostnam
 	if size == 0 {
 		size = DefaultConnectionSize
 	}
-	pool = &connPool{clients: make(chan *mcc.Client, size),
+	pool = &connPool{clients: make(chan mcc.ClientIface, size),
 		hostName:   hostname,
 		userName:   username,
 		password:   password,
@@ -435,7 +435,7 @@ func (connPoolMgr *connPoolMgr) GetOrCreateSSLOverMemPool(poolNameToCreate strin
 		size = DefaultConnectionSize
 	}
 	p := &sslOverMemConnPool{
-		connPool: connPool{clients: make(chan *mcc.Client, size),
+		connPool: connPool{clients: make(chan mcc.ClientIface, size),
 			hostName:   hostname,
 			userName:   username,
 			password:   password,
@@ -616,7 +616,7 @@ func NewConn(hostName string, userName string, password string, bucketName strin
 	return conn, nil
 }
 
-func NewTLSConn(ssl_con_str string, username string, password string, certificate []byte, san_in_certificate bool, bucketName string, logger *log.CommonLogger) (*mcc.Client, error) {
+func NewTLSConn(ssl_con_str string, username string, password string, certificate []byte, san_in_certificate bool, bucketName string, logger *log.CommonLogger) (mcc.ClientIface, error) {
 	if len(certificate) == 0 {
 		return nil, fmt.Errorf("No certificate has been provided. Can't establish ssl connection to %v", ssl_con_str)
 	}

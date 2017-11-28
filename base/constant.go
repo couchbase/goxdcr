@@ -117,6 +117,30 @@ const (
 	Capi XDCROutgoingNozzleType = iota
 )
 
+// Compression Section
+type CompressionType int
+
+// Last element is invalid and is there to keep consistency with the EndMarker
+var CompressionTypeStrings = [...]string{"None", "Snappy", "Invalid"}
+
+const (
+	CompressionTypeNone      = iota
+	CompressionTypeSnappy    = iota
+	CompressionTypeEndMarker = iota
+)
+
+const CompressionTypeREST = "compressionType"
+
+const CompressionTypeKey = "compression_type"
+
+// DataType fields of MCRequest
+// kv_engine/include/mcbp/protocol/datatype.h
+const (
+	JSONDataType   = 1
+	SnappyDataType = 2
+	XattrDataType  = 4
+)
+
 const (
 	PIPELINE_SUPERVISOR_SVC    string = "PipelineSupervisor"
 	CHECKPOINT_MGR_SVC         string = "CheckpointManager"
@@ -147,6 +171,7 @@ var ParseIntBase = 10
 var ParseIntBitSize = 64
 
 // Various error messages
+var ErrorNotResponding = errors.New("Not responding")
 var ErrorNotMyVbucket = errors.New("NOT_MY_VBUCKET")
 var InvalidStateTransitionErrMsg = "Can't move to state %v - %v's current state is %v, can only move to state [%v]"
 var InvalidCerfiticateError = errors.New("certificate must be a single, PEM-encoded x509 certificate and nothing more (failed to parse given certificate)")
@@ -156,9 +181,15 @@ var ErrorMasterNegativeIndex = errors.New("Master index is negative. ")
 var ErrorFailedAfterRetry = errors.New("Operation failed after max retries. ")
 var ErrorResourceDoesNotExist = errors.New("Specified resource does not exist.")
 var ErrorResourceDoesNotMatch = errors.New("Specified resource does not match the item to which is being compared.")
+var ErrorInvalidType = errors.New("Specified type is invalid")
+var ErrorInvalidInput = errors.New("Invalid input given")
 var ErrorNoPortNumber = errors.New("No port number")
 var ErrorInvalidPortNumber = errors.New("Port number is not a valid integer")
 var ErrorUnauthorized = errors.New("unauthorized")
+var ErrorCompressionNotSupported = errors.New("Specified compression type is not supported.")
+var ErrorCompressionUnableToConvert = errors.New("Unable to translate user input to internal compression Type")
+var ErrorCompressionDcpInvalidHandshake = errors.New("DCP connection is established as compressed even though compression is not requested.")
+var ErrorMaxReached = errors.New("Maximum entries has been reached")
 
 // constants used for remote cluster references
 const (
@@ -355,15 +386,22 @@ var RemoteMcRetryFactor = 2
 // minimum versions where various features are supported
 var VersionForSANInCertificateSupport = []int{4, 0}
 var VersionForRBACAndXattrSupport = []int{5, 0}
+var VersionForCompressionSupport = []int{5, 5}
 
 var GoxdcrUserAgentPrefix = "couchbase-goxdcr"
 var GoxdcrUserAgent = ""
+
+// Used to calculate the number of bytes to allocate for sending the HELO messages
+var HELO_BYTES_PER_FEATURE int = 2
 
 // value representing tcp no delay feature in helo request/response
 var HELO_FEATURE_TCP_NO_DELAY uint16 = 0x03
 
 // value representing xattr feature in helo request/response
 var HELO_FEATURE_XATTR uint16 = 0x06
+
+// value representing snappy compression
+var HELO_FEATURE_SNAPPY uint16 = 0x0a
 
 // new XATTR bit in data type field in dcp mutations
 var PROTOCOL_BINARY_DATATYPE_XATTR uint8 = 0x04

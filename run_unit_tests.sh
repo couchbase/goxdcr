@@ -9,8 +9,10 @@ fi
 declare -a DIRS_WITH_UT
 
 DIRS_WITH_UT=(
+base
 pipeline_manager
 parts
+metadata
 metadata_svc
 )
 
