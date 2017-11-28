@@ -79,6 +79,11 @@ var AuthTypeKey = "authType"
 var UrlDelimiter = "/"
 var UrlPortNumberDelimiter = ":"
 
+// constants for ipv6 addresses
+var Ipv6AddressSeparator = ":"
+var LeftBracket = "["
+var RightBracket = "]"
+
 var ClusterMembership_Active = "active"
 
 // http request method types
@@ -151,6 +156,8 @@ var ErrorMasterNegativeIndex = errors.New("Master index is negative. ")
 var ErrorFailedAfterRetry = errors.New("Operation failed after max retries. ")
 var ErrorResourceDoesNotExist = errors.New("Specified resource does not exist.")
 var ErrorResourceDoesNotMatch = errors.New("Specified resource does not match the item to which is being compared.")
+var ErrorNoPortNumber = errors.New("No port number")
+var ErrorInvalidPortNumber = errors.New("Port number is not a valid integer")
 
 // constants used for remote cluster references
 const (

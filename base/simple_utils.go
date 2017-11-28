@@ -483,8 +483,7 @@ func GetPortNumber(hostAddr string) (uint16, error) {
 		// host addr does not contain ":".
 		// this could happen only in remote cluster ref creation scenario,
 		// where hostAddr is specified by user and user may choose not to provide a port number
-		err := fmt.Errorf("hostAddr, %v, does not contain port number delimiter\n", hostAddr)
-		return 0, err
+		return 0, ErrorNoPortNumber
 	}
 
 	port_str := hostAddr[index+1:]
@@ -492,11 +491,42 @@ func GetPortNumber(hostAddr string) (uint16, error) {
 	if err == nil {
 		return uint16(port), nil
 	} else {
-		// this could happen in remote cluster ref creation scenario, where hostAddr may be an ipv6 address
-		// without port number, e.g., [FC00::11].
-		// return error to indicate that there is no valid port number
-		return 0, err
+		// check for the special case when hostAddr is an ipv6 address without port number, e.g., [FC00::11]
+		// in this case the last ":" found before was not really a port number delimiter
+		// and we need to return ErrorNoPortNumber instead of ErrorInvalidPortNumber
+		if strings.HasPrefix(hostAddr, LeftBracket) && strings.HasSuffix(hostAddr, RightBracket) {
+			return 0, ErrorNoPortNumber
+		} else {
+			return 0, ErrorInvalidPortNumber
+		}
 	}
+}
+
+// validate host address [provided by user at remote cluster reference creation time]
+func ValidateHostAddr(hostAddr string) (string, error) {
+	// validate port number
+	_, err := GetPortNumber(hostAddr)
+	if err != nil {
+		if err == ErrorNoPortNumber {
+			// this could happen if host address provided by user doesn't contain port number
+			// append default port number 8091
+			hostAddr = GetHostAddr(hostAddr, DefaultAdminPort)
+		} else {
+			return "", err
+		}
+	}
+
+	// get the host name portion of the host address
+	hostName := GetHostName(hostAddr)
+	if strings.Contains(hostName, Ipv6AddressSeparator) {
+		// host name contains ":" and has to be an ipv6 address. validate that it is enclosed in "[]"
+		if !strings.HasPrefix(hostName, LeftBracket) || !strings.HasSuffix(hostName, RightBracket) {
+			return "", errors.New("ipv6 address needs to be enclosed in square brackets")
+		}
+	}
+
+	return hostAddr, nil
+
 }
 
 func ShuffleStringsList(list []string) {
