@@ -624,7 +624,6 @@ func (agent *RemoteClusterAgent) updateReferenceFromNoLock(newRef *metadata.Remo
 	if err == nil {
 		agent.commitStagedChangesNoLock()
 		agent.callMetadataChangeCbNoLock()
-		agent.logNewHostnameChange()
 	}
 	return err
 }
@@ -882,6 +881,15 @@ func (service *RemoteClusterService) setRemoteCluster(refName string, newRef *me
 
 		if err == nil {
 			service.checkAndUpdateAgentMapsNoLock(oldRef, newRef, agent)
+
+			if service.uilog_svc != nil {
+				var hostnameChangeMsg string
+				if oldRef.HostName != newRef.HostName {
+					hostnameChangeMsg = fmt.Sprintf(" New contact point is %s.", newRef.HostName)
+				}
+				uiLogMsg := fmt.Sprintf("Remote cluster reference \"%s\" updated.%s", oldRef.Name, hostnameChangeMsg)
+				service.uilog_svc.Write(uiLogMsg)
+			}
 		}
 		return err
 	}
@@ -1394,17 +1402,6 @@ func (service *RemoteClusterService) deleteAgentFromMapsNoLock(clonedCopy *metad
 	delete(service.agentMap, clonedCopy.Id)
 	delete(service.agentCacheRefNameMap, clonedCopy.Name)
 	delete(service.agentCacheUuidMap, clonedCopy.Uuid)
-}
-
-func (agent *RemoteClusterAgent) logNewHostnameChange() {
-	if agent.uiLogSvc != nil && !agent.reference.IsEmpty() && agent.oldRef != nil {
-		var hostnameChangeMsg string
-		if agent.reference.HostName != agent.oldRef.HostName {
-			hostnameChangeMsg = fmt.Sprintf(" New contact point is %s.", agent.reference.HostName)
-		}
-		uiLogMsg := fmt.Sprintf("Remote cluster reference \"%s\" updated.%s", agent.oldRef.Name, hostnameChangeMsg)
-		agent.uiLogSvc.Write(uiLogMsg)
-	}
 }
 
 // If agentMaps are updated, return true
