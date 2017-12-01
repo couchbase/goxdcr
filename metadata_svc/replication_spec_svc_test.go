@@ -32,6 +32,8 @@ func setupBoilerPlate() (*service_def.XDCRCompTopologySvc,
 	emptyCacheEntries := []*service_def_real.MetadataEntry{}
 	replicationSpecsCatalogKey := "replicationSpec"
 	metadataSvcMock.On("GetAllMetadataFromCatalog", replicationSpecsCatalogKey).Return(emptyCacheEntries, nil)
+	utilitiesMock.On("ExponentialBackoffExecutor", "GetAllMetadataFromCatalogReplicationSpec", mock.Anything, mock.Anything,
+		mock.Anything, mock.Anything).Return(nil)
 
 	replSpecSvc, _ := NewReplicationSpecService(uiLogSvcMock,
 		remoteClusterMock,
@@ -64,8 +66,6 @@ func setupMocks(srcResolutionType string,
 	hostAddr := "localhost:9000"
 	utilitiesMock.On("GetHostAddr", "localhost", port).Return(hostAddr)
 	myConnectionStr := base.GetHostAddr("localhost", port)
-	xdcrTopologyMock.On("MyConnectionStr").Return(myConnectionStr, nil)
-	xdcrTopologyMock.On("IsMyClusterEnterprise").Return(true, nil)
 
 	var bucketInfo map[string]interface{}
 	bucketType := base.CouchbaseBucketType
@@ -74,7 +74,18 @@ func setupMocks(srcResolutionType string,
 	var bucketKVVBMap map[string][]uint16
 	var err error
 
+	// MetaKV mock
+	metadataSvcMock.On("AddWithCatalog", mock.Anything, mock.Anything, mock.Anything).Return(nil)
+	metadataSvcMock.On("DelWithCatalog", mock.Anything, mock.Anything, mock.Anything).Return(nil)
+
+	// RemoteClusterSvc mock
+	remoteClusterMock.On("GetRemoteClusterNameFromClusterUuid", mock.Anything).Return("TestRemoteCluster")
+
+	// UI Log mock service
+	uiLogSvcMock.On("Write", mock.Anything).Return(nil)
+
 	// XDCR Topology Mock
+	xdcrTopologyMock.On("MyConnectionStr").Return(myConnectionStr, nil)
 	xdcrTopologyMock.On("IsMyClusterEnterprise").Return(true, nil)
 
 	// LOCAL mock
@@ -187,4 +198,29 @@ func TestDifferentConflictResolutionTypeOnCapi(t *testing.T) {
 	// Should pass
 	assert.Equal(len(errMap), 0)
 	fmt.Println("============== Test case end: TestDifferentConflictResolutionTypeOnCapi =================")
+}
+
+func TestAddReplicationSpec(t *testing.T) {
+	assert := assert.New(t)
+
+	fmt.Println("============== Test case start: TestAddReplicationSpecAndVerifyFunc =================")
+	xdcrTopologyMock, metadataSvcMock, uiLogSvcMock, remoteClusterMock,
+		clusterInfoSvcMock, utilitiesMock, replSpecSvc := setupBoilerPlate()
+
+	// Begin mocks
+	setupMocks(base.ConflictResolutionType_Seqno, base.ConflictResolutionType_Lww,
+		xdcrTopologyMock, metadataSvcMock, uiLogSvcMock, remoteClusterMock,
+		clusterInfoSvcMock, utilitiesMock, replSpecSvc)
+
+	spec := &metadata.ReplicationSpecification{
+		Id:               "test",
+		InternalId:       "internalTest",
+		SourceBucketName: "testSrc",
+		TargetBucketName: "testTgt",
+	}
+
+	assert.Nil(replSpecSvc.AddReplicationSpec(spec, ""))
+	_, delErr := replSpecSvc.DelReplicationSpec(spec.Id)
+	assert.Nil(delErr)
+	fmt.Println("============== Test case end: TestAddReplicationSpecAndVerifyFunc =================")
 }

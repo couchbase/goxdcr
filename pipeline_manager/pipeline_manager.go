@@ -43,16 +43,20 @@ type PipelineManager struct {
 	once               sync.Once
 	logger             *log.CommonLogger
 	child_waitGrp      *sync.WaitGroup
-	// used for making sure there's only one ReplicationStatus creation at one time
-	repStatusCrLock sync.RWMutex
-	utils           utilities.UtilsIface
+	serializer         *PipelineOpSerializer
+	utils              utilities.UtilsIface
 }
 
 type Pipeline_mgr_iface interface {
+	// External APIs
+	InitiateRepStatus(pipelineName string) error
+	UpdatePipeline(pipelineName string, cur_err error) error
+	DeletePipeline(pipelineName string) error
+
+	// Internal APIs
 	OnExit() error
 	StopAllUpdaters()
-	StopPipeline(topic string) error
-	StopPipelineInner(rep_status *pipeline.ReplicationStatus) error
+	StopPipeline(rep_status *pipeline.ReplicationStatus) error
 	StartPipeline(topic string) error
 	Update(topic string, cur_err error) error
 	ReplicationStatusMap() map[string]*pipeline.ReplicationStatus
@@ -62,9 +66,6 @@ type Pipeline_mgr_iface interface {
 	AllReplicationsForTargetCluster(targetClusterUuid string) []string
 	RemoveReplicationStatus(topic string) error
 	AllReplicationSpecsForTargetCluster(targetClusterUuid string) map[string]*metadata.ReplicationSpecification
-	// get a replicationStatus for the given topic
-	// returns: ptr to the replicationStatus
-	// Will return nil if the replicationStatus does not exist, and a new one will be created
 	GetOrCreateReplicationStatus(topic string, cur_err error) (*pipeline.ReplicationStatus, error)
 	GetLastUpdateResult(topic string) bool // whether or not the last update was successful
 	GetRemoteClusterSvc() service_def.RemoteClusterSvc
@@ -119,6 +120,9 @@ func NewPipelineManager(factory common.PipelineFactory, repl_spec_svc service_de
 	//initialize the expvar storage for replication status
 	pipeline.RootStorage()
 
+	// initialize serializer - this is the front-end of all user requests
+	pipelineMgrRetVar.serializer = NewPipelineOpSerializer(pipelineMgrRetVar, pipelineMgrRetVar.logger)
+
 	if pipeline_mgr == nil {
 		pipeline_mgr = pipelineMgrRetVar
 	}
@@ -159,12 +163,12 @@ func RecycleMCRequestObj(topic string, obj *base.WrappedMCRequest) {
 }
 
 func Update(topic string, cur_err error) error {
-	return pipeline_mgr.Update(topic, cur_err)
+	pipeline_mgr.serializer.Update(topic, cur_err)
+	return nil
 }
 
+// Should be called only from serializer to prevent race
 func (pipelineMgr *PipelineManager) RemoveReplicationStatus(topic string) error {
-	// TODO - we should really cleanUp all the other non-user places that call GetOrCreateReplication
-	// After that is done, we should lock repStatusCrLock here so removal/creation are serialized
 	rs, err := pipelineMgr.ReplicationStatus(topic)
 	if err != nil {
 		return err
@@ -185,11 +189,24 @@ func (pipelineMgr *PipelineManager) RemoveReplicationStatus(topic string) error 
 	return nil
 }
 
+// External APIs
 //This doesn't include the replication status of just deleted replication spec in the map
 // TODO - This should be deprecated. We should really move towards a object-oriented method
 // of calling ReplicationStatusMap
 func ReplicationStatusMap() map[string]*pipeline.ReplicationStatus {
 	return pipeline_mgr.ReplicationStatusMap()
+}
+
+func (pipelineMgr *PipelineManager) UpdatePipeline(topic string, cur_err error) error {
+	return pipelineMgr.serializer.Update(topic, cur_err)
+}
+
+func (pipelineMgr *PipelineManager) DeletePipeline(pipelineName string) error {
+	return pipelineMgr.serializer.Delete(pipelineName)
+}
+
+func (pipelineMgr *PipelineManager) InitiateRepStatus(pipelineName string) error {
+	return pipelineMgr.serializer.Init(pipelineName)
 }
 
 // This should really be the method to be used. This is considered part of the interface
@@ -199,8 +216,10 @@ func (pipelineMgr *PipelineManager) ReplicationStatusMap() map[string]*pipeline.
 	specId_list, err := pipelineMgr.repl_spec_svc.AllReplicationSpecIds()
 	if err == nil {
 		for _, specId := range specId_list {
-			rep_status, _ := pipelineMgr.GetOrCreateReplicationStatus(specId, nil)
-			ret[specId] = rep_status
+			repStatus, _ := pipelineMgr.ReplicationStatus(specId)
+			if repStatus != nil {
+				ret[specId] = repStatus
+			}
 		}
 	}
 	return ret
@@ -279,6 +298,7 @@ func RuntimeCtx(topic string) common.PipelineRuntimeContext {
 
 func (pipelineMgr *PipelineManager) OnExit() error {
 	//send finish signal to all updater to stop the pipelines and exit
+	pipelineMgr.StopSerializer()
 	pipelineMgr.StopAllUpdaters()
 
 	pipelineMgr.logger.Infof("Sent finish signal to all running repairer")
@@ -298,6 +318,12 @@ func (pipelineMgr *PipelineManager) StopAllUpdaters() {
 		if updater != nil {
 			updater.(*PipelineUpdater).stop()
 		}
+	}
+}
+
+func (pipelineMgr *PipelineManager) StopSerializer() {
+	if pipelineMgr.serializer != nil {
+		pipelineMgr.serializer.Stop()
 	}
 }
 
@@ -395,15 +421,8 @@ func (pipelineMgr *PipelineManager) removePipelineFromReplicationStatus(p common
 
 }
 
-func (pipelineMgr *PipelineManager) StopPipeline(topic string) error {
-	rep_status, err := pipelineMgr.ReplicationStatus(topic)
-	if err != nil {
-		return err
-	}
-	return pipelineMgr.StopPipelineInner(rep_status)
-}
-
-func (pipelineMgr *PipelineManager) StopPipelineInner(rep_status *pipeline.ReplicationStatus) error {
+// Called internally from updater only
+func (pipelineMgr *PipelineManager) StopPipeline(rep_status *pipeline.ReplicationStatus) error {
 	if rep_status == nil {
 		return fmt.Errorf("Invalid parameter value rep_status=nil")
 	}
@@ -534,42 +553,29 @@ func (pipelineMgr *PipelineManager) launchUpdater(topic string, cur_err error, r
 	return nil
 }
 
+// Should be used internally from serializer only, or only from an internal update op
 func (pipelineMgr *PipelineManager) GetOrCreateReplicationStatus(topic string, cur_err error) (*pipeline.ReplicationStatus, error) {
 	var repStatus *pipeline.ReplicationStatus
-	/**
-	 * The repl_spec_svc holds a map of topics, but it's possible that there's a race during
-	 * creation. As a result, if a go routine is unable to find a specific ReplicationStatus, then
-	 * it needs to wait in line for creation, checking each time to make sure that no other go routines
-	 * before it has not created the topic of what it's trying to create.
-	 */
-	pipelineMgr.repStatusCrLock.RLock()
 	repStatus, _ = pipelineMgr.ReplicationStatus(topic)
-	pipelineMgr.repStatusCrLock.RUnlock()
 	if repStatus != nil {
 		return repStatus, nil
 	} else {
 		var retErr error
-		//	actual portion of creating replicationStatus and updater
-		pipelineMgr.repStatusCrLock.Lock()
-		defer pipelineMgr.repStatusCrLock.Unlock()
-		// Potentially, another go routine could have jumped ahead of us
-		repStatus, retErr = pipelineMgr.ReplicationStatus(topic)
-		if repStatus == nil {
-			// actual portion of creating replicationStatus and updater - we really don't have anything
-			repStatus = pipeline.NewReplicationStatus(topic, pipelineMgr.repl_spec_svc.ReplicationSpec, pipelineMgr.logger)
-			pipelineMgr.repl_spec_svc.SetDerivedObj(topic, repStatus)
-			pipelineMgr.logger.Infof("ReplicationStatus is created and set with %v\n", topic)
-			if repStatus.Updater() != nil {
-				panic("non-nill updater with a new rep_status")
-			}
-			retErr = pipelineMgr.launchUpdater(topic, cur_err, repStatus)
+		repStatus = pipeline.NewReplicationStatus(topic, pipelineMgr.repl_spec_svc.ReplicationSpec, pipelineMgr.logger)
+		pipelineMgr.repl_spec_svc.SetDerivedObj(topic, repStatus)
+		pipelineMgr.logger.Infof("ReplicationStatus is created and set with %v\n", topic)
+		if repStatus.Updater() != nil {
+			panic("non-nill updater with a new rep_status")
 		}
+		retErr = pipelineMgr.launchUpdater(topic, cur_err, repStatus)
 		return repStatus, retErr
 	}
 }
 
+// Should be called internally from serializer's Update()
 func (pipelineMgr *PipelineManager) Update(topic string, cur_err error) error {
-
+	// Since this Update call should be serialized, and no one else should with this pipeline name
+	// should be calling GetOrCreate, it's ok to call GetOrCreate directly
 	rep_status, retErr := pipelineMgr.GetOrCreateReplicationStatus(topic, cur_err)
 	if rep_status == nil {
 		combinedRetErr := errors.New(ReplicationStatusNotFound.Error() + " Cause: " + retErr.Error())
@@ -721,7 +727,7 @@ func (r *PipelineUpdater) run() {
 		case <-r.fin_ch:
 			r.logger.Infof("Quit updating pipeline %v after updating a total of %v times\n", r.pipeline_name, atomic.LoadUint64(&r.runCounter))
 			r.logger.Infof("Replication %v's status is to be closed, shutting down\n", r.pipeline_name)
-			r.pipelineMgr.StopPipelineInner(r.rep_status)
+			r.pipelineMgr.StopPipeline(r.rep_status)
 			// Reset runCounter to 0 for unit test
 			atomic.StoreUint64(&r.runCounter, 0)
 			return
@@ -778,7 +784,7 @@ func (r *PipelineUpdater) update() error {
 	}
 
 	r.logger.Infof("Try to stop pipeline %v\n", r.pipeline_name)
-	err = r.pipelineMgr.StopPipelineInner(r.rep_status)
+	err = r.pipelineMgr.StopPipeline(r.rep_status)
 
 	// unit test error injection
 	if atomic.LoadInt32(&r.testInjectionError) == pipelineUpdaterErrInjOfflineFail {

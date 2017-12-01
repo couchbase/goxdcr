@@ -60,7 +60,7 @@ var GoXDCROptions struct {
 *************************************/
 type ReplicationManagerIf interface {
 	initMetadataChangeMonitor()
-	initPausedReplications()
+	initReplications()
 	checkReplicationStatus(fin_chan chan bool)
 	init(repl_spec_svc service_def.ReplicationSpecSvc,
 		remote_cluster_svc service_def.RemoteClusterSvc,
@@ -173,9 +173,9 @@ func StartReplicationManager(sourceKVHost string, xdcrRestPort uint16,
 		// TODO should we make heart beat settings configurable?
 		replication_mgr.GenericSupervisor.Start(nil)
 
-		// set ReplicationStatus for paused replications
-		replication_mgr.initPausedReplications()
-		logger_rm.Info("initPausedReplications succeeded")
+		// set ReplicationStatus for both paused and active replications
+		replication_mgr.initReplications()
+		logger_rm.Info("initReplications succeeded")
 
 		replication_mgr.running = true
 		replication_mgr.running_lock = sync.RWMutex{}
@@ -325,29 +325,24 @@ func (rm *replicationManager) initMetadataChangeMonitor() {
 	mcm.Start()
 }
 
-func (rm *replicationManager) initPausedReplications() {
+func (rm *replicationManager) initReplications() {
 	var specs map[string]*metadata.ReplicationSpecification
 	var err error
 
-	getSpecsOpFunc := func() error {
-		specs, err = rm.repl_spec_svc.AllReplicationSpecs()
-		if err != nil {
-			logger_rm.Warnf("Failed to get all replication specs, err=%v\n", err)
-		}
-		return err
-	}
+	specs, err = rm.repl_spec_svc.AllReplicationSpecs()
 
-	getSpecsErr := rm.utils.ExponentialBackoffExecutor("InitPausedReplications", base.RetryIntervalMetakv,
-		base.MaxNumOfMetakvRetries, base.MetaKvBackoffFactor, getSpecsOpFunc)
-
-	if getSpecsErr == nil {
+	if err == nil {
 		for _, spec := range specs {
-			if !spec.Settings.Active {
-				rm.pipelineMgr.GetOrCreateReplicationStatus(spec.Id, nil)
+			if spec.Settings.Active {
+				logger_rm.Infof("Initializing active replication %v", spec.Id)
+				rm.pipelineMgr.UpdatePipeline(spec.Id, nil)
+			} else {
+				logger_rm.Infof("Initializing paused replication %v", spec.Id)
+				rm.pipelineMgr.InitiateRepStatus(spec.Id)
 			}
 		}
 	} else {
-		logger_rm.Errorf("Failed to initPausedReplications after %v retries.", base.MaxNumOfMetakvRetries)
+		logger_rm.Errorf("Failed to initReplications - unable to retrieve specs from service cache.")
 		exitProcess(false)
 	}
 }
@@ -815,7 +810,7 @@ func (rm *replicationManager) OnError(s common.Supervisor, errMap map[string]err
 				pipeline, err := rm.getPipelineFromPipelineSupevisor(child.(common.Supervisor))
 				if err == nil {
 					// try to fix the pipeline
-					rm.pipelineMgr.Update(pipeline.Topic(), err1)
+					rm.pipelineMgr.UpdatePipeline(pipeline.Topic(), err1)
 				}
 			}
 		}
@@ -839,7 +834,7 @@ func (rm *replicationManager) OnError(s common.Supervisor, errMap map[string]err
 				logger_rm.Warnf("Supervisor %v of type %v reported empty error map\n", s.Id(), reflect.TypeOf(s))
 				errMsg = "pipeline failed"
 			}
-			rm.pipelineMgr.Update(pipeline.Topic(), errors.New(errMsg))
+			rm.pipelineMgr.UpdatePipeline(pipeline.Topic(), errors.New(errMsg))
 		}
 	}
 }

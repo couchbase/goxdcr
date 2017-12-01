@@ -92,8 +92,7 @@ func NewReplicationSpecService(uilog_svc service_def.UILogSvc, remote_cluster_sv
 		utils:                  utilities_in,
 	}
 
-	svc.initCache()
-	return svc, nil
+	return svc, svc.initCacheFromMetaKV()
 }
 
 func (service *ReplicationSpecService) SetMetadataChangeHandlerCallback(call_back base.MetadataChangeHandlerCallback) {
@@ -466,6 +465,46 @@ func (service *ReplicationSpecService) DelReplicationSpecWithReason(replicationI
 
 }
 
+// NOTE - this is an expensive operation that will force a clean resync of the cache from metaKV
+func (service *ReplicationSpecService) initCacheFromMetaKV() (err error) {
+	service.cache_lock.Lock()
+	defer service.cache_lock.Unlock()
+	var KVsFromMetaKV []*service_def.MetadataEntry
+	var KVsFromMetaKVErr error
+
+	// Clears all from cache before reloading
+	service.initCache()
+
+	//	GetAllMetadataFromCatalog(catalogKey string) ([]*MetadataEntry, error)
+	getAllKVsOpFunc := func() error {
+		KVsFromMetaKV, KVsFromMetaKVErr = service.metadata_svc.GetAllMetadataFromCatalog(ReplicationSpecsCatalogKey)
+		return KVsFromMetaKVErr
+	}
+	err = service.utils.ExponentialBackoffExecutor("GetAllMetadataFromCatalogReplicationSpec", base.RetryIntervalMetakv,
+		base.MaxNumOfMetakvRetries, base.MetaKvBackoffFactor, getAllKVsOpFunc)
+	if err != nil {
+		service.logger.Errorf("Unable to get all the KVs from metakv: %v", err)
+		return
+	}
+
+	// One by one update the specs
+	for _, KVentry := range KVsFromMetaKV {
+		key := KVentry.Key
+		marshalledSpec := KVentry.Value
+		rev := KVentry.Rev
+
+		replicationId := service.getReplicationIdFromKey(key)
+		replSpec, err := constructReplicationSpec(marshalledSpec, rev)
+		if err != nil {
+			service.logger.Errorf("Unable to construct spec %v from metaKV's data. err: %v", key, err)
+			continue
+		}
+		service.updateCacheInternalNoLock(replicationId, replSpec)
+	}
+	return
+
+}
+
 func (service *ReplicationSpecService) AllReplicationSpecs() (map[string]*metadata.ReplicationSpecification, error) {
 	specs := make(map[string]*metadata.ReplicationSpecification, 0)
 	values_map := service.getCache().GetMap()
@@ -551,12 +590,7 @@ func (service *ReplicationSpecService) ReplicationSpecServiceCallback(path strin
 
 }
 
-func (service *ReplicationSpecService) updateCache(specId string, newSpec *metadata.ReplicationSpecification) error {
-	//this ensures that all accesses to the cache in this method are a single atomic operation,
-	// this is needed because this method can be called concurrently
-	service.cache_lock.Lock()
-	defer service.cache_lock.Unlock()
-
+func (service *ReplicationSpecService) updateCacheInternalNoLock(specId string, newSpec *metadata.ReplicationSpecification) (*metadata.ReplicationSpecification, bool, error) {
 	oldSpec, err := service.replicationSpec(specId)
 	if err != nil {
 		oldSpec = nil
@@ -579,16 +613,28 @@ func (service *ReplicationSpecService) updateCache(specId string, newSpec *metad
 				specId = newSpec.Id
 				updated = true
 			} else {
-				return err
+				return oldSpec, updated, err
 			}
 		}
 
 	}
 
+	return oldSpec, updated, err
+}
+
+func (service *ReplicationSpecService) updateCache(specId string, newSpec *metadata.ReplicationSpecification) error {
+	//this ensures that all accesses to the cache in this method are a single atomic operation,
+	// this is needed because this method can be called concurrently
+	service.cache_lock.Lock()
+	defer service.cache_lock.Unlock()
+
+	oldSpec, updated, err := service.updateCacheInternalNoLock(specId, newSpec)
+
 	if updated && service.metadata_change_callback != nil {
-		err := service.metadata_change_callback(specId, oldSpec, newSpec)
+		err = service.metadata_change_callback(specId, oldSpec, newSpec)
 		if err != nil {
 			service.logger.Error(err.Error())
+			return err
 		}
 	}
 
@@ -705,6 +751,7 @@ func (service *ReplicationSpecService) validateExistingReplicationSpec(spec *met
 
 func (service *ReplicationSpecService) ValidateAndGC(spec *metadata.ReplicationSpecification) {
 	err, detail_err := service.validateExistingReplicationSpec(spec)
+
 	if err == InvalidReplicationSpecError {
 		service.logger.Errorf("Replication specification %v is no longer valid, garbage collect it. error=%v\n", spec.Id, detail_err)
 		_, err1 := service.DelReplicationSpecWithReason(spec.Id, detail_err.Error())
