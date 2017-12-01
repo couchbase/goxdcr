@@ -268,6 +268,20 @@ func (_m *ReplicationSpecSvc) SetReplicationSpec(spec *metadata.ReplicationSpeci
 	return r0
 }
 
+// InitCacheFromMetaKV provides a mock function with given fields:
+func (_m *ReplicationSpecSvc) InitCacheFromMetaKV() error {
+	ret := _m.Called()
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func() error); ok {
+		r0 = rf()
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
 // ValidateAndGC provides a mock function with given fields: spec
 func (_m *ReplicationSpecSvc) ValidateAndGC(spec *metadata.ReplicationSpecification) {
 	_m.Called(spec)

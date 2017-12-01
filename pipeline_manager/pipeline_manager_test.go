@@ -425,7 +425,7 @@ func setupMockPipelineMgr(replSpecSvcMock *service_def.ReplicationSpecSvc,
 	pmMock := &PipelineMgrMock.Pipeline_mgr_iface{}
 	testRepairer.pipelineMgr = pmMock
 
-	pmMock.On("StopPipelineInner", mock.Anything).Return(nil)
+	pmMock.On("StopPipeline", mock.Anything).Return(nil)
 	pmMock.On("StartPipeline", testTopic).Return(nil)
 	pmMock.On("GetReplSpecSvc").Return(replSpecSvcMock)
 	pmMock.On("GetXDCRTopologySvc").Return(xdcrTopologyMock)
@@ -445,7 +445,7 @@ func setupMockPipelineMgrWithErrorCode(replSpecSvcMock *service_def.ReplicationS
 	pmMock := &PipelineMgrMock.Pipeline_mgr_iface{}
 	testRepairer.pipelineMgr = pmMock
 
-	pmMock.On("StopPipelineInner", mock.Anything).Return(nil)
+	pmMock.On("StopPipeline", mock.Anything).Return(nil)
 	pmMock.On("StartPipeline", testTopic).Return(retError)
 	pmMock.On("GetReplSpecSvc").Return(replSpecSvcMock)
 	pmMock.On("GetXDCRTopologySvc").Return(xdcrTopologyMock)

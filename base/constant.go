@@ -150,6 +150,7 @@ var InvalidCerfiticateError = errors.New("certificate must be a single, PEM-enco
 var ErrorNoSourceNozzle = errors.New("Invalid configuration. No source nozzle can be constructed since the source kv nodes are not the master for any vbuckets.")
 var ErrorNoTargetNozzle = errors.New("Invalid configuration. No target nozzle can be constructed.")
 var ErrorMasterNegativeIndex = errors.New("Master index is negative. ")
+var ErrorFailedAfterRetry = errors.New("Operation failed after max retries. ")
 
 // constants used for remote cluster references
 const (
@@ -266,6 +267,15 @@ const (
 	DefaultRequestPoolSize          = 10000
 	HTTP_RETRIES                int = 5
 )
+
+// max number of retries for metakv ops
+var MaxNumOfMetakvRetries = 5
+
+// interval between metakv retries
+var RetryIntervalMetakv = 500 * time.Millisecond
+
+// Exponential backoff factor
+var MetaKvBackoffFactor = 2
 
 // In order for dcp flow control to work correctly, the number of mutations in dcp buffer
 // should be no larger than the size of the dcp data channel.

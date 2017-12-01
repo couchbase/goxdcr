@@ -75,6 +75,20 @@ func (_m *Pipeline_mgr_iface) AllReplicationsForTargetCluster(targetClusterUuid 
 	return r0
 }
 
+// DeletePipeline provides a mock function with given fields: pipelineName
+func (_m *Pipeline_mgr_iface) DeletePipeline(pipelineName string) error {
+	ret := _m.Called(pipelineName)
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(string) error); ok {
+		r0 = rf(pipelineName)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
 // GetClusterInfoSvc provides a mock function with given fields:
 func (_m *Pipeline_mgr_iface) GetClusterInfoSvc() service_def.ClusterInfoSvc {
 	ret := _m.Called()
@@ -192,6 +206,20 @@ func (_m *Pipeline_mgr_iface) GetXDCRTopologySvc() service_def.XDCRCompTopologyS
 	return r0
 }
 
+// InitiateRepStatus provides a mock function with given fields: pipelineName
+func (_m *Pipeline_mgr_iface) InitiateRepStatus(pipelineName string) error {
+	ret := _m.Called(pipelineName)
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(string) error); ok {
+		r0 = rf(pipelineName)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
 // OnExit provides a mock function with given fields:
 func (_m *Pipeline_mgr_iface) OnExit() error {
 	ret := _m.Called()
@@ -278,22 +306,8 @@ func (_m *Pipeline_mgr_iface) StopAllUpdaters() {
 	_m.Called()
 }
 
-// StopPipeline provides a mock function with given fields: topic
-func (_m *Pipeline_mgr_iface) StopPipeline(topic string) error {
-	ret := _m.Called(topic)
-
-	var r0 error
-	if rf, ok := ret.Get(0).(func(string) error); ok {
-		r0 = rf(topic)
-	} else {
-		r0 = ret.Error(0)
-	}
-
-	return r0
-}
-
-// StopPipelineInner provides a mock function with given fields: rep_status
-func (_m *Pipeline_mgr_iface) StopPipelineInner(rep_status *pipeline.ReplicationStatus) error {
+// StopPipeline provides a mock function with given fields: rep_status
+func (_m *Pipeline_mgr_iface) StopPipeline(rep_status *pipeline.ReplicationStatus) error {
 	ret := _m.Called(rep_status)
 
 	var r0 error
@@ -313,6 +327,20 @@ func (_m *Pipeline_mgr_iface) Update(topic string, cur_err error) error {
 	var r0 error
 	if rf, ok := ret.Get(0).(func(string, error) error); ok {
 		r0 = rf(topic, cur_err)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// UpdatePipeline provides a mock function with given fields: pipelineName, cur_err
+func (_m *Pipeline_mgr_iface) UpdatePipeline(pipelineName string, cur_err error) error {
+	ret := _m.Called(pipelineName, cur_err)
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(string, error) error); ok {
+		r0 = rf(pipelineName, cur_err)
 	} else {
 		r0 = ret.Error(0)
 	}
