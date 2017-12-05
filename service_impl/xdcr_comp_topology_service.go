@@ -223,17 +223,17 @@ func (top_svc *XDCRTopologySvc) MyConnectionStr() (string, error) {
 	return base.GetHostAddr(host, top_svc.adminport), nil
 }
 
-func (top_svc *XDCRTopologySvc) MyCredentials() (string, string, []byte, bool, error) {
+func (top_svc *XDCRTopologySvc) MyCredentials() (string, string, []byte, bool, []byte, []byte, base.ClientCertAuth, error) {
 	connStr, err := top_svc.MyConnectionStr()
 	if err != nil {
-		return "", "", nil, false, err
+		return "", "", nil, false, nil, nil, base.ClientCertAuthDisable, err
 	}
 	if connStr == "" {
-		return "", "", nil, false, errors.New("XDCRTopologySvc.MyConnectionStr() returned empty string")
+		return "", "", nil, false, nil, nil, base.ClientCertAuthDisable, errors.New("XDCRTopologySvc.MyConnectionStr() returned empty string")
 	}
 
 	username, password, err := cbauth.GetHTTPServiceAuth(connStr)
-	return username, password, nil, false, err
+	return username, password, nil, false, nil, nil, base.ClientCertAuthDisable, err
 }
 
 func (top_svc *XDCRTopologySvc) MyClusterUuid() (string, error) {

@@ -398,7 +398,7 @@ func (service *MigrationSvc) migrateRemoteCluster(remoteClusterData interface{},
 	}
 
 	// save remote cluster  - even if there are validation errors
-	ref, err := metadata.NewRemoteClusterReference(uuid, name, hostname, username, password, demandEncryption, encryptionType, certificate)
+	ref, err := metadata.NewRemoteClusterReference(uuid, name, hostname, username, password, demandEncryption, encryptionType, certificate, nil, nil)
 	if err != nil {
 		// err here comes from random number generation, which is promised to always be nil by golang
 		// handle it anyways
@@ -674,12 +674,12 @@ func (service *MigrationSvc) targetBucketUUID(targetClusterUUID, bucketName stri
 	if err_target != nil {
 		return "", err_target
 	}
-	remote_userName, remote_password, certificate, sanInCertificate, err_target := ref.MyCredentials()
+	remote_userName, remote_password, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, err_target := ref.MyCredentials()
 	if err_target != nil {
 		return "", err_target
 	}
 
-	return service.utils.BucketUUID(remote_connStr, bucketName, remote_userName, remote_password, certificate, sanInCertificate, service.logger)
+	return service.utils.BucketUUID(remote_connStr, bucketName, remote_userName, remote_password, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, service.logger)
 }
 
 func addErrorMapToErrorList(errorMap map[string]error, errorList []error) []error {

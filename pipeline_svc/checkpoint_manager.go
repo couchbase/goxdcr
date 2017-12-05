@@ -311,7 +311,7 @@ func (ckmgr *CheckpointManager) initConnections() error {
 	}
 
 	for server_addr, _ := range ckmgr.target_kv_vb_map {
-		client, err := ckmgr.getNewMemcachedClient(server_addr)
+		client, err := ckmgr.getNewMemcachedClient(server_addr, true /*initializing*/)
 		if err != nil {
 			ckmgr.logger.Errorf("%v failed to construct memcached client for %v, err=%v\n", ckmgr.pipeline.Topic(), server_addr, err)
 			return err
@@ -329,12 +329,12 @@ func (ckmgr *CheckpointManager) initSSLConStrMap() error {
 		return err
 	}
 
-	username, password, certificate, sanInCertificate, err := ckmgr.target_cluster_ref.MyCredentials()
+	username, password, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, err := ckmgr.target_cluster_ref.MyCredentials()
 	if err != nil {
 		return err
 	}
 
-	ssl_port_map, err := ckmgr.utils.GetMemcachedSSLPortMap(connStr, username, password, certificate, sanInCertificate, ckmgr.target_bucket_name, ckmgr.logger)
+	ssl_port_map, err := ckmgr.utils.GetMemcachedSSLPortMap(connStr, username, password, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, ckmgr.target_bucket_name, ckmgr.logger)
 	if err != nil {
 		return err
 	}
@@ -353,14 +353,22 @@ func (ckmgr *CheckpointManager) initSSLConStrMap() error {
 	return nil
 }
 
-func (ckmgr *CheckpointManager) getNewMemcachedClient(server_addr string) (mcc.ClientIface, error) {
+func (ckmgr *CheckpointManager) getNewMemcachedClient(server_addr string, initializing bool) (mcc.ClientIface, error) {
 	if ckmgr.target_cluster_ref.IsFullEncryption() {
-		_, _, certificate, sanInCertificate, err := ckmgr.target_cluster_ref.MyCredentials()
+		_, _, certificate, san_in_certificate, client_certificate, client_key, clientCertAuthSetting, err := ckmgr.target_cluster_ref.MyCredentials()
 		if err != nil {
 			return nil, err
 		}
 		ssl_con_str := ckmgr.ssl_con_str_map[server_addr]
-		return base.NewTLSConn(ssl_con_str, ckmgr.target_username, ckmgr.target_password, certificate, sanInCertificate, ckmgr.target_bucket_name, ckmgr.logger)
+
+		if !initializing && len(certificate) > 0 {
+			// if not initializing at replication startup time, retrieve up to date security settings
+			san_in_certificate, clientCertAuthSetting, _, err = ckmgr.utils.GetDefaultPoolInfoWithSecuritySettings(ssl_con_str, ckmgr.target_username, ckmgr.target_password, certificate, client_certificate, client_key, ckmgr.logger)
+			if err != nil {
+				return nil, err
+			}
+		}
+		return base.NewTLSConn(ssl_con_str, ckmgr.target_username, ckmgr.target_password, certificate, san_in_certificate, client_certificate, client_key, clientCertAuthSetting, ckmgr.target_bucket_name, ckmgr.logger)
 	} else {
 		return ckmgr.utils.GetRemoteMemcachedConnection(server_addr, ckmgr.target_username, ckmgr.target_password,
 			ckmgr.target_bucket_name, ckmgr.user_agent, !ckmgr.target_cluster_ref.IsEncryptionEnabled(), /*plain_auth*/
@@ -403,7 +411,7 @@ func (ckmgr *CheckpointManager) getHighSeqnoAndVBUuidForServerWithRetry(serverAd
 		client, ok := ckmgr.kv_mem_clients[serverAddr]
 		if !ok {
 			// memcached connection may have been closed in previous retries. create a new one
-			client, err = ckmgr.getNewMemcachedClient(serverAddr)
+			client, err = ckmgr.getNewMemcachedClient(serverAddr, false /*initializing*/)
 			if err != nil {
 				ckmgr.logger.Warnf("%v Retrieval of high seqno and vbuuid stats failed. serverAddr=%v, vbnos=%v\n", ckmgr.pipeline.Topic(), serverAddr, vbnos)
 				return err

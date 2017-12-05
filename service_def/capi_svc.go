@@ -65,7 +65,7 @@ func (remoteBucket *RemoteBucketInfo) refresh_internal(remote_cluster_svc Remote
 		remoteBucket.RemoteClusterRef = remoteClusterRef
 	}
 
-	username, password, certificate, sanInCertificate, err := remoteBucket.RemoteClusterRef.MyCredentials()
+	username, password, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, err := remoteBucket.RemoteClusterRef.MyCredentials()
 	if err != nil {
 		return err
 	}
@@ -74,7 +74,7 @@ func (remoteBucket *RemoteBucketInfo) refresh_internal(remote_cluster_svc Remote
 		return err
 	}
 
-	targetBucketInfo, err := remoteBucket.utils.GetBucketInfo(connStr, remoteBucket.BucketName, username, password, certificate, sanInCertificate, remoteBucket.logger)
+	targetBucketInfo, err := remoteBucket.utils.GetBucketInfo(connStr, remoteBucket.BucketName, username, password, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, remoteBucket.logger)
 	if err != nil {
 		return err
 	}
@@ -129,7 +129,7 @@ func (remoteBucket *RemoteBucketInfo) refresh_internal(remote_cluster_svc Remote
 			return err
 		}
 		remoteBucket.MemcachedAddrRestAddrMap[serverAddr] = u.Host
-		http_client, err := remoteBucket.utils.GetHttpClient(certificate, sanInCertificate, u.Host, remoteBucket.logger)
+		http_client, err := remoteBucket.utils.GetHttpClient(username, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, u.Host, remoteBucket.logger)
 		if err != nil {
 			return err
 		}

@@ -68,8 +68,8 @@ func (vbts *VBTimestamp) String() string {
 
 type ClusterConnectionInfoProvider interface {
 	MyConnectionStr() (string, error)
-	// returns username, password, certificate, and whether certificate contains SAN
-	MyCredentials() (string, string, []byte, bool, error)
+	// returns username, password, certificate, whether certificate contains SAN, client certificate, client key, client cert auth setting on remote cluster
+	MyCredentials() (string, string, []byte, bool, []byte, []byte, ClientCertAuth, error)
 }
 
 type ReplicationInfo struct {
@@ -192,6 +192,14 @@ type ConflictResolutionMode int
 const (
 	CRMode_RevId ConflictResolutionMode = iota
 	CRMode_LWW   ConflictResolutionMode = iota
+)
+
+type ClientCertAuth int
+
+const (
+	ClientCertAuthDisable   ClientCertAuth = iota
+	ClientCertAuthEnable    ClientCertAuth = iota
+	ClientCertAuthMandatory ClientCertAuth = iota
 )
 
 // stack implementation

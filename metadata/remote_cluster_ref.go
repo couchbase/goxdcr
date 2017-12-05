@@ -51,6 +51,11 @@ type RemoteClusterReference struct {
 	HttpsHostName    string `json:"httpsHostName"`
 	SANInCertificate bool   `json:"SANInCertificate"`
 
+	ClientCertificate []byte `json:"clientCertificate"`
+	ClientKey         []byte `json:"clientKey"`
+	// client cert auth setting on target
+	ClientCertAuthSetting base.ClientCertAuth `json:"clientCertAuthSetting"`
+
 	// these are hostname actually used to connect to target
 	// they are rotated among nodes in target cluster to achieve load balancing on target
 	// they are used to update HostName/HttpsHostName when HostName has been removed from the target cluster
@@ -64,21 +69,23 @@ type RemoteClusterReference struct {
 }
 
 func NewRemoteClusterReference(uuid, name, hostName, userName, password string,
-	demandEncryption bool, encryptionType string, certificate []byte) (*RemoteClusterReference, error) {
+	demandEncryption bool, encryptionType string, certificate, clientCertificate, clientKey []byte) (*RemoteClusterReference, error) {
 	refId, err := RemoteClusterRefId()
 	if err != nil {
 		return nil, err
 	}
 
 	return &RemoteClusterReference{Id: refId,
-		Uuid:             uuid,
-		Name:             name,
-		HostName:         hostName,
-		UserName:         userName,
-		Password:         password,
-		DemandEncryption: demandEncryption,
-		EncryptionType:   encryptionType,
-		Certificate:      certificate,
+		Uuid:              uuid,
+		Name:              name,
+		HostName:          hostName,
+		UserName:          userName,
+		Password:          password,
+		DemandEncryption:  demandEncryption,
+		EncryptionType:    encryptionType,
+		Certificate:       certificate,
+		ClientCertificate: clientCertificate,
+		ClientKey:         clientKey,
 	}, nil
 }
 
@@ -119,22 +126,27 @@ func (ref *RemoteClusterReference) Redact() *RemoteClusterReference {
 		if len(ref.Certificate) > 0 {
 			ref.Certificate = base.TagUDBytes(ref.Certificate)
 		}
+		if len(ref.ClientCertificate) > 0 {
+			ref.ClientCertificate = base.TagUDBytes(ref.ClientCertificate)
+		}
+		// no need to redact ClientKey since it is always nil in this ref for redact
 	}
 	return ref
 }
 
 func (ref *RemoteClusterReference) CloneAndRedact() *RemoteClusterReference {
 	if ref != nil {
-		return ref.Clone().Redact()
+		return ref.CloneForRedact().Redact()
 	}
 	return ref
 }
 
-func (ref *RemoteClusterReference) MyCredentials() (string, string, []byte, bool, error) {
-	return ref.UserName, ref.Password, ref.Certificate, ref.SANInCertificate, nil
+func (ref *RemoteClusterReference) MyCredentials() (string, string, []byte, bool, []byte, []byte, base.ClientCertAuth, error) {
+	return ref.UserName, ref.Password, ref.Certificate, ref.SANInCertificate, ref.ClientCertificate, ref.ClientKey, ref.ClientCertAuthSetting, nil
 }
 
 // convert to a map for output
+// do not include password or client private key
 func (ref *RemoteClusterReference) ToMap() map[string]interface{} {
 	uri := base.UrlDelimiter + base.RemoteClustersPath + base.UrlDelimiter + ref.Name
 	validateUri := uri + base.JustValidatePostfix
@@ -150,6 +162,9 @@ func (ref *RemoteClusterReference) ToMap() map[string]interface{} {
 		outputMap[base.RemoteClusterDemandEncryption] = ref.DemandEncryption
 		outputMap[base.RemoteClusterEncryptionType] = ref.EncryptionType
 		outputMap[base.RemoteClusterCertificate] = string(ref.Certificate)
+		if len(ref.ClientCertificate) > 0 {
+			outputMap[base.RemoteClusterClientCertificate] = string(ref.ClientCertificate)
+		}
 	}
 	return outputMap
 }
@@ -178,7 +193,18 @@ func (ref *RemoteClusterReference) AreUserSecurityCredentialsTheSame(ref2 *Remot
 		return false
 	}
 	return ref.UserName == ref2.UserName && ref.Password == ref2.Password && ref.DemandEncryption == ref2.DemandEncryption &&
-		ref.EncryptionType == ref2.EncryptionType && bytes.Equal(ref.Certificate, ref2.Certificate) && ref.SANInCertificate == ref2.SANInCertificate
+		ref.EncryptionType == ref2.EncryptionType && bytes.Equal(ref.Certificate, ref2.Certificate) &&
+		bytes.Equal(ref.ClientCertificate, ref2.ClientCertificate) && bytes.Equal(ref.ClientKey, ref2.ClientKey)
+}
+
+func (ref *RemoteClusterReference) AreSecuritySettingsTheSame(ref2 *RemoteClusterReference) bool {
+	if ref == nil {
+		return ref2 == nil
+	}
+	if ref2 == nil {
+		return false
+	}
+	return ref.SANInCertificate == ref2.SANInCertificate && ref.ClientCertAuthSetting == ref2.ClientCertAuthSetting
 }
 
 // checks if they are the same minus changable fields
@@ -189,7 +215,7 @@ func (ref *RemoteClusterReference) IsEssentiallySame(ref2 *RemoteClusterReferenc
 	if ref2 == nil {
 		return false
 	}
-	if !ref.AreUserSecurityCredentialsTheSame(ref2) {
+	if !ref.AreUserSecurityCredentialsTheSame(ref2) || !ref.AreSecuritySettingsTheSame(ref2) {
 		return false
 	} else {
 		return ref.Id == ref2.Id && ref.Uuid == ref2.Uuid && ref.Name == ref2.Name && ref.HostName == ref2.HostName
@@ -201,7 +227,21 @@ func (ref *RemoteClusterReference) String() string {
 	if ref == nil {
 		return "nil"
 	}
-	return fmt.Sprintf("id:%v; uuid:%v; name:%v; hostName:%v; userName:%v; password:xxxx; demandEncryption:%v: encryptionType:%v; certificate:%v; revision:%v", ref.Id, ref.Uuid, ref.Name, ref.HostName, ref.UserName, ref.DemandEncryption, ref.EncryptionType, ref.Certificate, ref.Revision)
+
+	// redact password and client private key
+	var password string
+	if len(ref.Password) > 0 {
+		password = "xxxx"
+	}
+	var clientKey string
+	// cannot do "if len(ref.ClientKey) > 0" since ClientKey may have been changed to nil due to redaction.
+	// check ClientCertificate instead
+	if len(ref.ClientCertificate) > 0 {
+		clientKey = "xxxx"
+	}
+
+	return fmt.Sprintf("id:%v; uuid:%v; name:%v; hostName:%v; userName:%v; password:%v; demandEncryption:%v: encryptionType:%v; certificate:%v; clientCertificate:%v; clientKey:%v; ClientCertAuthSetting:%v; revision:%v",
+		ref.Id, ref.Uuid, ref.Name, ref.HostName, ref.UserName, password, ref.DemandEncryption, ref.EncryptionType, ref.Certificate, ref.ClientCertificate, clientKey, ref.ClientCertAuthSetting, ref.Revision)
 }
 
 func (ref *RemoteClusterReference) LoadFrom(inRef *RemoteClusterReference) {
@@ -225,9 +265,12 @@ func (ref *RemoteClusterReference) LoadNonActivesFrom(inRef *RemoteClusterRefere
 	ref.Password = inRef.Password
 	ref.DemandEncryption = inRef.DemandEncryption
 	ref.Certificate = base.DeepCopyByteArray(inRef.Certificate)
+	ref.ClientCertificate = base.DeepCopyByteArray(inRef.ClientCertificate)
+	ref.ClientKey = base.DeepCopyByteArray(inRef.ClientKey)
 	ref.HttpsHostName = inRef.HttpsHostName
 	ref.EncryptionType = inRef.EncryptionType
 	ref.SANInCertificate = inRef.SANInCertificate
+	ref.ClientCertAuthSetting = inRef.ClientCertAuthSetting
 	// !!! shallow copy of revision.
 	// ref.Revision should only be passed along and should never be modified
 	ref.Revision = inRef.Revision
@@ -237,23 +280,20 @@ func (ref *RemoteClusterReference) Clone() *RemoteClusterReference {
 	if ref == nil {
 		return nil
 	}
-	return &RemoteClusterReference{Id: ref.Id,
-		Uuid:                ref.Uuid,
-		Name:                ref.Name,
-		HostName:            ref.HostName,
-		UserName:            ref.UserName,
-		Password:            ref.Password,
-		DemandEncryption:    ref.DemandEncryption,
-		Certificate:         base.DeepCopyByteArray(ref.Certificate),
-		HttpsHostName:       ref.HttpsHostName,
-		ActiveHostName:      ref.ActiveHostName,
-		ActiveHttpsHostName: ref.ActiveHttpsHostName,
-		EncryptionType:      ref.EncryptionType,
-		SANInCertificate:    ref.SANInCertificate,
-		// !!! shallow copy of revision.
-		// ref.Revision should only be passed along and should never be modified
-		Revision: ref.Revision,
+
+	cloneRef := ref.CloneForRedact()
+	cloneRef.ClientKey = base.DeepCopyByteArray(ref.ClientKey)
+	return cloneRef
+}
+
+func (ref *RemoteClusterReference) CloneForRedact() *RemoteClusterReference {
+	if ref == nil {
+		return nil
 	}
+	cloneRef := ref.cloneCommonFields()
+	cloneRef.ActiveHostName = ref.ActiveHostName
+	cloneRef.ActiveHttpsHostName = ref.ActiveHttpsHostName
+	return cloneRef
 }
 
 // clone for metakv update, i.e., clone without any internal fields
@@ -261,17 +301,36 @@ func (ref *RemoteClusterReference) CloneForMetakvUpdate() *RemoteClusterReferenc
 	if ref == nil {
 		return nil
 	}
+
+	cloneRef := ref.cloneCommonFields()
+	cloneRef.ClientKey = base.DeepCopyByteArray(ref.ClientKey)
+	// no need for Revision in metakv.
+	// cloneRef.Revision is a shallow copy, hence it is not a big waste to copy and then set it to nil
+	cloneRef.Revision = nil
+	return cloneRef
+}
+
+// clone of common fields needed by all Clonexxx() APIs
+func (ref *RemoteClusterReference) cloneCommonFields() *RemoteClusterReference {
+	if ref == nil {
+		return nil
+	}
 	return &RemoteClusterReference{Id: ref.Id,
-		Uuid:             ref.Uuid,
-		Name:             ref.Name,
-		HostName:         ref.HostName,
-		HttpsHostName:    ref.HttpsHostName,
-		UserName:         ref.UserName,
-		Password:         ref.Password,
-		DemandEncryption: ref.DemandEncryption,
-		Certificate:      base.DeepCopyByteArray(ref.Certificate),
-		EncryptionType:   ref.EncryptionType,
-		SANInCertificate: ref.SANInCertificate,
+		Uuid:                  ref.Uuid,
+		Name:                  ref.Name,
+		HostName:              ref.HostName,
+		HttpsHostName:         ref.HttpsHostName,
+		UserName:              ref.UserName,
+		Password:              ref.Password,
+		DemandEncryption:      ref.DemandEncryption,
+		Certificate:           base.DeepCopyByteArray(ref.Certificate),
+		ClientCertificate:     base.DeepCopyByteArray(ref.ClientCertificate),
+		EncryptionType:        ref.EncryptionType,
+		SANInCertificate:      ref.SANInCertificate,
+		ClientCertAuthSetting: ref.ClientCertAuthSetting,
+		// !!! shallow copy of revision.
+		// ref.Revision should only be passed along and should never be modified
+		Revision: ref.Revision,
 	}
 }
 

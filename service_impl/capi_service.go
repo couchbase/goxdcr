@@ -23,13 +23,16 @@ var NO_VB_OPAQUE_IN_RESP_ERR error = errors.New("No vb opaque in the response")
 
 //apiRequest is a structure for http request used for CAPI
 type apiRequest struct {
-	url                string
-	username           string
-	password           string
-	body               base.InterfaceMap
-	certificate        []byte
-	SANInCertificate   bool
-	insecureSkipVerify bool
+	url                   string
+	username              string
+	password              string
+	body                  base.InterfaceMap
+	certificate           []byte
+	SANInCertificate      bool
+	insecureSkipVerify    bool
+	clientCertificate     []byte
+	clientKey             []byte
+	clientCertAuthSetting base.ClientCertAuth
 }
 
 // Shallow copy bare bones information for redaction
@@ -305,7 +308,7 @@ func (capi_svc *CAPIService) composeAPIRequestBase(remoteBucket *service_def.Rem
 		return nil, errors.New("Remote Bucket information is not fully populated")
 	}
 
-	username, password, certificate, sanInCertificate, err := remoteBucket.RemoteClusterRef.MyCredentials()
+	username, password, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, err := remoteBucket.RemoteClusterRef.MyCredentials()
 	if err != nil {
 		return nil, err
 	}
@@ -321,6 +324,9 @@ func (capi_svc *CAPIService) composeAPIRequestBase(remoteBucket *service_def.Rem
 	api_base.body["bucketUUID"] = remoteBucket.UUID
 	api_base.certificate = certificate
 	api_base.SANInCertificate = sanInCertificate
+	api_base.clientCertificate = clientCertificate
+	api_base.clientKey = clientKey
+	api_base.clientCertAuthSetting = clientCertAuthSetting
 	return api_base, nil
 }
 
@@ -362,7 +368,7 @@ func (capi_svc *CAPIService) send_post(restMethodName string, api_base *apiReque
 	if err != nil {
 		return 0, nil, nil, err
 	}
-	err, statusCode, ret_client := capi_svc.utils.InvokeRestWithRetryWithAuth(api_base.url, restMethodName, false, api_base.username, api_base.password, api_base.certificate, api_base.SANInCertificate, api_base.insecureSkipVerify, base.MethodPost, base.JsonContentType, body, 0, &ret_map, client, true, capi_svc.logger, num_retry)
+	err, statusCode, ret_client := capi_svc.utils.InvokeRestWithRetryWithAuth(api_base.url, restMethodName, false, api_base.username, api_base.password, api_base.certificate, api_base.SANInCertificate, api_base.clientCertificate, api_base.clientKey, api_base.clientCertAuthSetting, api_base.insecureSkipVerify, base.MethodPost, base.JsonContentType, body, 0, &ret_map, client, true, capi_svc.logger, num_retry)
 	return statusCode, ret_map, ret_client, err
 }
 

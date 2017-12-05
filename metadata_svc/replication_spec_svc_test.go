@@ -119,12 +119,12 @@ func setupMocks(srcResolutionType string,
 
 	// LOCAL mock
 	utilitiesMock.On("BucketValidationInfo", hostAddr,
-		mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(bucketInfo,
+		mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(bucketInfo,
 		bucketType, bucketUUID, srcResolutionType, bucketEvictionPolicy, bucketKVVBMap, err)
 
 	// TARGET mock - emptyString since we're feeding a dummy target
 	utilitiesMock.On("BucketValidationInfo", "",
-		mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(bucketInfo,
+		mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(bucketInfo,
 		bucketType, bucketUUID, destResolutionType, bucketEvictionPolicy, bucketKVVBMap, err)
 
 	nonExistentBucketError := errors.New("NonExistentBucketError")
@@ -145,6 +145,8 @@ func setupMocks(srcResolutionType string,
 
 	utilitiesMock.On("GetMemcachedConnectionWFeatures", mock.Anything, mock.Anything, mock.Anything,
 		mock.Anything, mock.Anything, mock.Anything).Return(clientMock, respondFeatures, nil)
+	utilitiesMock.On("GetDefaultPoolInfoWithSecuritySettings", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(false, base.ClientCertAuthDisable, nil, nil)
+
 }
 
 /**

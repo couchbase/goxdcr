@@ -165,7 +165,7 @@ func (service *ReplicationSpecService) validateSourceBucket(errorMap base.ErrorM
 		return "", "", errors.New("XDCRTopologySvc.MyConnectionStr() returned empty string")
 	}
 
-	_, sourceBucketType, sourceBucketUUID, sourceConflictResolutionType, sourceEvictionPolicy, _, err_source := service.utils.BucketValidationInfo(local_connStr, sourceBucket, "", "", nil, false, service.logger)
+	_, sourceBucketType, sourceBucketUUID, sourceConflictResolutionType, sourceEvictionPolicy, _, err_source := service.utils.BucketValidationInfo(local_connStr, sourceBucket, "", "", nil, false, nil, nil, base.ClientCertAuthDisable, service.logger)
 	service.logger.Infof("Result from local bucket look up: bucketName=%v, err_source=%v, time taken=%v\n", sourceBucket, err_source, time.Since(start_time))
 	service.validateBucket(sourceBucket, targetCluster, targetBucket, sourceBucketType, sourceEvictionPolicy, err_source, errorMap, true)
 
@@ -194,13 +194,17 @@ func (service *ReplicationSpecService) validateSrcTargetNonIdenticalBucket(error
 }
 
 // validate remote cluster ref
-func (service *ReplicationSpecService) getRemoteReference(errorMap base.ErrorMap, targetCluster string) (*metadata.RemoteClusterReference, string, string, string, []byte, bool) {
+func (service *ReplicationSpecService) getRemoteReference(errorMap base.ErrorMap, targetCluster string) (*metadata.RemoteClusterReference, string, string, string, []byte, bool, []byte, []byte, base.ClientCertAuth) {
 	var remote_userName, remote_password string
 	var certificate []byte
 	var sanInCertificate bool
+	var clientCertificate []byte
+	var clientKey []byte
+	var clientCertAuthSetting base.ClientCertAuth
 	var err error
 	var remote_connStr string
 	start_time := time.Now()
+	// refresh remote cluster reference to ensure that it is up to date
 	targetClusterRef, err := service.remote_cluster_svc.RemoteClusterByRefName(targetCluster, true)
 	if err != nil {
 		errorMap[base.ToCluster] = service.utils.NewEnhancedError("cannot find remote cluster", err)
@@ -209,16 +213,16 @@ func (service *ReplicationSpecService) getRemoteReference(errorMap base.ErrorMap
 		remote_connStr, err = targetClusterRef.MyConnectionStr()
 		if err != nil {
 			errorMap[base.ToCluster] = service.utils.NewEnhancedError("Invalid remote cluster. MyConnectionStr() failed.", err)
-			return nil, "", remote_userName, remote_password, certificate, sanInCertificate
+			return nil, "", remote_userName, remote_password, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting
 		}
-		remote_userName, remote_password, certificate, sanInCertificate, err = targetClusterRef.MyCredentials()
+		remote_userName, remote_password, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, err = targetClusterRef.MyCredentials()
 		if err != nil {
 			errorMap[base.ToCluster] = service.utils.NewEnhancedError("Invalid remote cluster. MyCredentials() failed.", err)
-			return nil, "", remote_userName, remote_password, certificate, sanInCertificate
+			return nil, "", remote_userName, remote_password, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting
 		}
 	}
 
-	return targetClusterRef, remote_connStr, remote_userName, remote_password, certificate, sanInCertificate
+	return targetClusterRef, remote_connStr, remote_userName, remote_password, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting
 }
 
 func (service *ReplicationSpecService) validateReplicationSpecDoesNotAlreadyExist(errorMap base.ErrorMap, sourceBucket string, targetClusterRef *metadata.RemoteClusterReference, targetBucket string) {
@@ -333,7 +337,7 @@ func (service *ReplicationSpecService) ValidateNewReplicationSpec(sourceBucket, 
 		return "", "", nil, errorMap, err, nil
 	}
 
-	targetClusterRef, remote_connStr, remote_userName, remote_password, certificate, sanInCertificate := service.getRemoteReference(errorMap, targetCluster)
+	targetClusterRef, remote_connStr, remote_userName, remote_password, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting := service.getRemoteReference(errorMap, targetCluster)
 	if len(errorMap) > 0 {
 		return "", "", nil, errorMap, nil, nil
 	}
@@ -348,14 +352,14 @@ func (service *ReplicationSpecService) ValidateNewReplicationSpec(sourceBucket, 
 		return "", "", nil, errorMap, err, nil
 	}
 
-	targetBucketInfo, targetBucketUUID, targetConflictResolutionType, targetKVVBMap := service.validateTargetBucket(errorMap, remote_connStr, targetBucket, remote_userName, remote_password, certificate, sanInCertificate, sourceBucket, targetCluster)
+	targetBucketInfo, targetBucketUUID, targetConflictResolutionType, targetKVVBMap := service.validateTargetBucket(errorMap, remote_connStr, targetBucket, remote_userName, remote_password, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, sourceBucket, targetCluster)
 	if len(errorMap) > 0 {
 		return "", "", nil, errorMap, nil, nil
 	}
 
 	errorMap, err = service.validateReplicationSettingsInternal(sourceBucket, targetCluster, targetBucket, settings,
 		targetClusterRef, remote_connStr, remote_userName, remote_password, certificate, sanInCertificate,
-		targetKVVBMap, targetBucketInfo)
+		clientCertificate, clientKey, clientCertAuthSetting, targetKVVBMap, targetBucketInfo)
 	if len(errorMap) > 0 {
 		return "", "", nil, errorMap, nil, nil
 	}
@@ -380,22 +384,22 @@ func (service *ReplicationSpecService) ValidateNewReplicationSpec(sourceBucket, 
 func (service *ReplicationSpecService) ValidateReplicationSettings(sourceBucket, targetCluster, targetBucket string, settings metadata.ReplicationSettingsMap) (base.ErrorMap, error) {
 	var errorMap base.ErrorMap = make(base.ErrorMap)
 
-	targetClusterRef, remote_connStr, remote_userName, remote_password, certificate, sanInCertificate := service.getRemoteReference(errorMap, targetCluster)
+	targetClusterRef, remote_connStr, remote_userName, remote_password, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting := service.getRemoteReference(errorMap, targetCluster)
 	if len(errorMap) > 0 {
 		return errorMap, nil
 	}
 
-	targetBucketInfo, _, _, _, _, targetKVVBMap, err := service.utils.BucketValidationInfo(remote_connStr, targetBucket, remote_userName, remote_password, certificate, sanInCertificate, service.logger)
+	targetBucketInfo, _, _, _, _, targetKVVBMap, err := service.utils.BucketValidationInfo(remote_connStr, targetBucket, remote_userName, remote_password, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, service.logger)
 	if err != nil {
 		return nil, err
 	}
 
-	return service.validateReplicationSettingsInternal(sourceBucket, targetCluster, targetBucket, settings, targetClusterRef, remote_connStr, remote_userName, remote_password, certificate, sanInCertificate, targetKVVBMap, targetBucketInfo)
+	return service.validateReplicationSettingsInternal(sourceBucket, targetCluster, targetBucket, settings, targetClusterRef, remote_connStr, remote_userName, remote_password, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, targetKVVBMap, targetBucketInfo)
 }
 
 func (service *ReplicationSpecService) validateReplicationSettingsInternal(sourceBucket, targetCluster, targetBucket string, settings metadata.ReplicationSettingsMap,
 	targetClusterRef *metadata.RemoteClusterReference, remote_connStr, remote_userName, remote_password string, certificate []byte, sanInCertificate bool,
-	targetKVVBMap map[string][]uint16, targetBucketInfo map[string]interface{}) (base.ErrorMap, error) {
+	clientCertificate, clientKey []byte, clientCertAuthSetting base.ClientCertAuth, targetKVVBMap map[string][]uint16, targetBucketInfo map[string]interface{}) (base.ErrorMap, error) {
 	errorMap := make(base.ErrorMap)
 
 	var populateErr error
@@ -415,7 +419,7 @@ func (service *ReplicationSpecService) validateReplicationSettingsInternal(sourc
 
 		// Compression is only allowed in XMEM mode
 		if compressionOk && compressionType != base.CompressionTypeNone {
-			errorMap, err = service.validateCompression(sourceBucket, targetClusterRef, targetKVVBMap, targetBucket, targetBucketInfo, compressionType.(int), allKvConnStrs, username, password, certificate, sanInCertificate)
+			errorMap, err = service.validateCompression(sourceBucket, targetClusterRef, targetKVVBMap, targetBucket, targetBucketInfo, compressionType.(int), allKvConnStrs, username, password, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting)
 			if len(errorMap) > 0 || err != nil {
 				return errorMap, err
 			}
@@ -429,7 +433,7 @@ func (service *ReplicationSpecService) validateReplicationSettingsInternal(sourc
 
 // validate compression - should only be called if compression setting dictates that there is compression
 func (service *ReplicationSpecService) validateCompression(sourceBucket string, targetClusterRef *metadata.RemoteClusterReference, targetKVVBMap map[string][]uint16, targetBucket string, targetBucketInfo map[string]interface{}, compressionType int, allKvConnStrs []string, username, password string,
-	certificate []byte, SANInCertificate bool) (base.ErrorMap, error) {
+	certificate []byte, SANInCertificate bool, clientCertificate, clientKey []byte, clientCertAuthSetting base.ClientCertAuth) (base.ErrorMap, error) {
 	var requestedFeaturesSet utilities.HELOFeatures
 	var err error
 	errorMap := make(base.ErrorMap)
@@ -454,7 +458,7 @@ func (service *ReplicationSpecService) validateCompression(sourceBucket string, 
 	// Need to validate each node of the target to make sure all of them can support compression
 	for i := 0; i < len(allKvConnStrs); i++ {
 		errorMap, err = service.validateCompressionTarget(sourceBucket, targetClusterRef, targetBucket, allKvConnStrs[i], username, password,
-			certificate, SANInCertificate, errKey, requestedFeaturesSet)
+			certificate, SANInCertificate, clientCertificate, clientKey, clientCertAuthSetting, errKey, requestedFeaturesSet)
 		if len(errorMap) > 0 || err != nil {
 			return errorMap, err
 		}
@@ -518,7 +522,7 @@ func (service *ReplicationSpecService) validateCompressionLocal(sourceBucket str
 }
 
 func (service *ReplicationSpecService) validateCompressionTarget(sourceBucket string, targetClusterRef *metadata.RemoteClusterReference, targetBucket string, kvConnStr, username, password string,
-	certificate []byte, SANInCertificate bool, errKey string, requestedFeaturesSet utilities.HELOFeatures) (base.ErrorMap, error) {
+	certificate []byte, SANInCertificate bool, clientCertificate, clientKey []byte, clientCertAuthSetting base.ClientCertAuth, errKey string, requestedFeaturesSet utilities.HELOFeatures) (base.ErrorMap, error) {
 	var conn mcc.ClientIface
 	errorMap := make(base.ErrorMap)
 	sslPortMap := make(base.SSLPortMap)
@@ -531,7 +535,7 @@ func (service *ReplicationSpecService) validateCompressionTarget(sourceBucket st
 		if err != nil {
 			return errorMap, err
 		}
-		sslPortMap, err = service.utils.GetMemcachedSSLPortMap(connStr, username, password, certificate, SANInCertificate, targetBucket, service.logger)
+		sslPortMap, err = service.utils.GetMemcachedSSLPortMap(connStr, username, password, certificate, SANInCertificate, clientCertificate, clientKey, clientCertAuthSetting, targetBucket, service.logger)
 		if err != nil {
 			return errorMap, err
 		}
@@ -542,7 +546,7 @@ func (service *ReplicationSpecService) validateCompressionTarget(sourceBucket st
 		}
 		hostName := base.GetHostName(kvConnStr)
 		sslConStr := base.GetHostAddr(hostName, sslPort)
-		conn, err = base.NewTLSConn(sslConStr, username, password, certificate, SANInCertificate, targetBucket, service.logger)
+		conn, err = base.NewTLSConn(sslConStr, username, password, certificate, SANInCertificate, clientCertificate, clientKey, clientCertAuthSetting, targetBucket, service.logger)
 	} else {
 		// Half-Encryption should have already been verified via SCRAM-SHA check in validateXmem...
 		// Unencrypted is also fine here with RawConn
@@ -572,10 +576,10 @@ func (service *ReplicationSpecService) validateCompressionTarget(sourceBucket st
 }
 
 //validate target bucket
-func (service *ReplicationSpecService) validateTargetBucket(errorMap base.ErrorMap, remote_connStr, targetBucket, remote_userName, remote_password string, certificate []byte, sanInCertificate bool, sourceBucket string,
-	targetCluster string) (targetBucketInfo map[string]interface{}, targetBucketUUID, targetConflictResolutionType string, targetKVVBMap map[string][]uint16) {
+func (service *ReplicationSpecService) validateTargetBucket(errorMap base.ErrorMap, remote_connStr, targetBucket, remote_userName, remote_password string, certificate []byte, sanInCertificate bool, clientCertificate, clientKey []byte,
+	clientCertAuthSetting base.ClientCertAuth, sourceBucket string, targetCluster string) (targetBucketInfo map[string]interface{}, targetBucketUUID, targetConflictResolutionType string, targetKVVBMap map[string][]uint16) {
 	start_time := time.Now()
-	targetBucketInfo, targetBucketType, targetBucketUUID, targetConflictResolutionType, _, targetKVVBMap, err_target := service.utils.BucketValidationInfo(remote_connStr, targetBucket, remote_userName, remote_password, certificate, sanInCertificate, service.logger)
+	targetBucketInfo, targetBucketType, targetBucketUUID, targetConflictResolutionType, _, targetKVVBMap, err_target := service.utils.BucketValidationInfo(remote_connStr, targetBucket, remote_userName, remote_password, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, service.logger)
 	service.logger.Infof("Result from remote bucket look up: connStr=%v, bucketName=%v, targetBucketType=%v, err_target=%v, time taken=%v\n", remote_connStr, targetBucket, targetBucketType, err_target, time.Since(start_time))
 
 	service.validateBucket(sourceBucket, targetCluster, targetBucket, targetBucketType, "", err_target, errorMap, false)
@@ -1024,6 +1028,7 @@ func (service *ReplicationSpecService) sourceBucketUUID(bucketName string) (stri
 	return service.utils.LocalBucketUUID(local_connStr, bucketName, service.logger)
 }
 
+// this method is currently used for testing only. it is not kept up to date and should not be used in production
 func (service *ReplicationSpecService) targetBucketUUID(targetClusterUUID, bucketName string) (string, error) {
 	ref, err_target := service.remote_cluster_svc.RemoteClusterByUuid(targetClusterUUID, false)
 	if err_target != nil {
@@ -1033,12 +1038,12 @@ func (service *ReplicationSpecService) targetBucketUUID(targetClusterUUID, bucke
 	if err_target != nil {
 		return "", err_target
 	}
-	remote_userName, remote_password, certificate, sanInCertificate, err_target := ref.MyCredentials()
+	remote_userName, remote_password, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, err_target := ref.MyCredentials()
 	if err_target != nil {
 		return "", err_target
 	}
 
-	return service.utils.BucketUUID(remote_connStr, bucketName, remote_userName, remote_password, certificate, sanInCertificate, service.logger)
+	return service.utils.BucketUUID(remote_connStr, bucketName, remote_userName, remote_password, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, service.logger)
 }
 
 // used by unit test only. does not use https and is not of production quality

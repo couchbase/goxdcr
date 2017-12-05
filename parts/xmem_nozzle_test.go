@@ -2,6 +2,7 @@ package parts
 
 import (
 	"fmt"
+	mcMock "github.com/couchbase/gomemcached/client/mocks"
 	base "github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
 	utilsReal "github.com/couchbase/goxdcr/utils"
@@ -35,7 +36,7 @@ func setupBoilerPlateXmem() (*utilsMock.UtilsIface,
 
 func setupMocksCommon(utils *utilsMock.UtilsIface) {
 	utils.On("ValidateSettings", mock.Anything, mock.Anything, mock.Anything).Return(nil)
-	utils.On("GetClientFromPoolWithRetry", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil, nil)
+	utils.On("ExponentialBackoffExecutorWithFinishSignal", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&mcMock.ClientIface{}, nil)
 }
 
 func setupMocksCompressNeg(utils *utilsMock.UtilsIface) {

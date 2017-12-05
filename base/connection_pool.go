@@ -55,7 +55,9 @@ type NewConnFunc func() (mcc.ClientIface, error)
 
 type ConnPool interface {
 	Get() (mcc.ClientIface, error)
-	GetNew() (mcc.ClientIface, error)
+	// clientCertAuthSetting needs to be passed in since it is difficult to
+	// compute it in this package - we cannot call utils methods from here
+	GetNew(clientCertAuthSetting ClientCertAuth) (mcc.ClientIface, error)
 	GetCAS() uint32
 	Release(client mcc.ClientIface)
 	ReleaseConnections(cas uint32)
@@ -100,6 +102,8 @@ type sslOverMemConnPool struct {
 	certificate           []byte
 	// whether target cluster supports SANs in certificates
 	san_in_certificate bool
+	clientCertificate  []byte
+	clientKey          []byte
 }
 
 type connPoolMgr struct {
@@ -198,7 +202,8 @@ func (p *connPool) Get() (mcc.ClientIface, error) {
 	return nil, errors.New("connection pool is closed")
 }
 
-func (p *connPool) GetNew() (mcc.ClientIface, error) {
+// clientCertAuthSetting does not matter in non-ssl mode
+func (p *connPool) GetNew(clientCertAuthSetting ClientCertAuth) (mcc.ClientIface, error) {
 	return p.newConnFunc()
 }
 
@@ -265,9 +270,9 @@ func (p *sslOverMemConnPool) Certificate() []byte {
 	return p.certificate
 }
 
-func (p *sslOverMemConnPool) newConn() (mcc.ClientIface, error) {
+func (p *sslOverMemConnPool) GetNew(clientCertAuthSetting ClientCertAuth) (mcc.ClientIface, error) {
 	ssl_con_str := GetHostAddr(p.hostName, uint16(p.remote_memcached_port))
-	return NewTLSConn(ssl_con_str, p.userName, p.password, p.certificate, p.san_in_certificate, p.bucketName, p.logger)
+	return NewTLSConn(ssl_con_str, p.userName, p.password, p.certificate, p.san_in_certificate, p.clientCertificate, p.clientKey, clientCertAuthSetting, p.bucketName, p.logger)
 }
 
 func (p *sslOverMemConnPool) ConnType() ConnType {
@@ -409,7 +414,9 @@ func (connPoolMgr *connPoolMgr) GetOrCreatePool(poolNameToCreate string, hostnam
 	return pool, err
 }
 
-func (connPoolMgr *connPoolMgr) GetOrCreateSSLOverMemPool(poolNameToCreate string, hostname string, bucketname string, username string, password string, connsize int, remote_mem_port int, cert []byte, san_in_cert bool) (ConnPool, error) {
+func (connPoolMgr *connPoolMgr) GetOrCreateSSLOverMemPool(poolNameToCreate string, hostname string,
+	bucketname string, username string, password string, connsize int, remote_mem_port int,
+	cert []byte, san_in_cert bool, clientCert, clientKey []byte) (ConnPool, error) {
 	connPoolMgr.map_lock.Lock()
 	defer connPoolMgr.map_lock.Unlock()
 
@@ -448,7 +455,9 @@ func (connPoolMgr *connPoolMgr) GetOrCreateSSLOverMemPool(poolNameToCreate strin
 			logger:     log.NewLogger("sslConnPool", connPoolMgr.logger.LoggerContext())},
 		remote_memcached_port: remote_mem_port,
 		certificate:           cert,
-		san_in_certificate:    san_in_cert}
+		san_in_certificate:    san_in_cert,
+		clientCertificate:     clientCert,
+		clientKey:             clientKey}
 	p.init()
 
 	connPoolMgr.conn_pools_map[poolNameToCreate] = p
@@ -616,13 +625,14 @@ func NewConn(hostName string, userName string, password string, bucketName strin
 	return conn, nil
 }
 
-func NewTLSConn(ssl_con_str string, username string, password string, certificate []byte, san_in_certificate bool, bucketName string, logger *log.CommonLogger) (mcc.ClientIface, error) {
+func NewTLSConn(ssl_con_str string, username string, password string, certificate []byte, san_in_certificate bool, clientCertificate, clientKey []byte, clientCertAuthSetting ClientCertAuth, bucketName string, logger *log.CommonLogger) (mcc.ClientIface, error) {
 	if len(certificate) == 0 {
 		return nil, fmt.Errorf("No certificate has been provided. Can't establish ssl connection to %v", ssl_con_str)
 	}
 
 	logger.Infof("Trying to create a ssl over memcached connection on %v", ssl_con_str)
-	conn, _, err := MakeTLSConn(ssl_con_str, certificate, san_in_certificate, logger)
+
+	conn, _, useClientCert, err := MakeTLSConn(ssl_con_str, username, certificate, san_in_certificate, clientCertificate, clientKey, clientCertAuthSetting, logger)
 	if err != nil {
 		return nil, err
 	}
@@ -634,16 +644,38 @@ func NewTLSConn(ssl_con_str string, username string, password string, certificat
 		return nil, err
 	}
 
-	err = authClient(client, username, password, bucketName, true /*plainAuth*/, logger)
-	if err != nil {
-		return nil, err
+	if useClientCert {
+		// if client cert has been used in handshake, there is no need to further authenticate client,
+		// just select bucket
+		if bucketName != "" {
+			_, err = client.SelectBucket(bucketName)
+			if err != nil {
+				logger.Errorf("err from select bucket for %v = %v\n", bucketName, err)
+				client.Close()
+				return nil, err
+			}
+		}
+	} else {
+		err = authClient(client, username, password, bucketName, true /*plainAuth*/, logger)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	logger.Infof("memcached client on ssl connection %v has been created successfully", ssl_con_str)
 	return client, nil
 }
 
-func MakeTLSConn(ssl_con_str string, certificate []byte, check_server_name bool, logger *log.CommonLogger) (*tls.Conn, *tls.Config, error) {
+func MakeTLSConn(ssl_con_str, username string, certificate []byte, check_server_name bool, clientCertificate, clientKey []byte, clientCertAuthSetting ClientCertAuth, logger *log.CommonLogger) (*tls.Conn, *tls.Config, bool, error) {
+	if len(certificate) == 0 {
+		return nil, nil, false, fmt.Errorf("No certificate has been provided. Can't establish ssl connection to %v", ssl_con_str)
+	}
+
+	useClientCert, err := ValidateTlsParameters(ssl_con_str, username, clientCertificate, clientKey, clientCertAuthSetting)
+	if err != nil {
+		return nil, nil, false, err
+	}
+
 	// enforce timeout
 	errChannel := make(chan error, 2)
 	time.AfterFunc(dialer.Timeout, func() {
@@ -653,19 +685,28 @@ func MakeTLSConn(ssl_con_str string, certificate []byte, check_server_name bool,
 	caPool := x509.NewCertPool()
 	ok := caPool.AppendCertsFromPEM(certificate)
 	if !ok {
-		return nil, nil, InvalidCerfiticateError
+		return nil, nil, false, InvalidCerfiticateError
 	}
 
 	block, _ := pem.Decode([]byte(certificate))
 	if block == nil {
-		return nil, nil, InvalidCerfiticateError
+		return nil, nil, false, InvalidCerfiticateError
 	}
 	cert_remote, err := x509.ParseCertificate(block.Bytes)
 	if err != nil {
-		return nil, nil, InvalidCerfiticateError
+		return nil, nil, false, InvalidCerfiticateError
 	}
 
 	tlsConfig := &tls.Config{RootCAs: caPool}
+
+	if useClientCert {
+		clientCert, err := tls.X509KeyPair(clientCertificate, clientKey)
+		if err != nil {
+			return nil, nil, false, fmt.Errorf("Failed to parse client certificate and client key. err=%v", err)
+		}
+		tlsConfig.Certificates = []tls.Certificate{clientCert}
+	}
+
 	tlsConfig.BuildNameToCertificate()
 	tlsConfig.InsecureSkipVerify = true
 	hostname := GetHostName(ssl_con_str)
@@ -680,7 +721,7 @@ func MakeTLSConn(ssl_con_str string, certificate []byte, check_server_name bool,
 
 	if err != nil {
 		logger.Errorf("Failed to connect to %v, err=%v\n", ssl_con_str, err)
-		return nil, nil, err
+		return nil, nil, false, err
 	}
 
 	tcpConn, ok := rawConn.(*net.TCPConn)
@@ -688,7 +729,7 @@ func MakeTLSConn(ssl_con_str string, certificate []byte, check_server_name bool,
 		// should never get here
 		rawConn.Close()
 		logger.Errorf("Failed to get tcp connection when connecting to %v\n", ssl_con_str)
-		return nil, nil, err
+		return nil, nil, false, err
 	}
 
 	// always set keep alive
@@ -699,7 +740,7 @@ func MakeTLSConn(ssl_con_str string, certificate []byte, check_server_name bool,
 	if err != nil {
 		tcpConn.Close()
 		logger.Errorf("Failed to set keep alive options when connecting to %v. err=%v\n", ssl_con_str, err)
-		return nil, nil, err
+		return nil, nil, false, err
 	}
 
 	// wrap as tls connection
@@ -715,7 +756,7 @@ func MakeTLSConn(ssl_con_str string, certificate []byte, check_server_name bool,
 	if err != nil {
 		tlsConn.Close()
 		logger.Errorf("TLS handshake failed when connecting to %v, err=%v\n", ssl_con_str, err)
-		return nil, nil, err
+		return nil, nil, false, err
 	}
 
 	if cert_remote.IsCA {
@@ -746,13 +787,45 @@ func MakeTLSConn(ssl_con_str string, certificate []byte, check_server_name bool,
 			//close the conn
 			tlsConn.Close()
 			logger.Errorf("TLS Verify failed when connecting to %v, err=%v\n", ssl_con_str, err)
-			return nil, nil, err
+			return nil, nil, false, err
 		}
 	}
-	return tlsConn, tlsConfig, nil
+	return tlsConn, tlsConfig, useClientCert, nil
 
 }
 
 func DialTCPWithTimeout(network, address string) (net.Conn, error) {
 	return dialer.Dial(network, address)
+}
+
+// validates input parameters and determines which to use for tls/https connections
+// returns:
+// 1. [true, nil] when client cert should be used
+// 2. [false, nil] when username and password should be used
+// 3. [false, error] when connections cannot be set up because of issues with input parameters
+func ValidateTlsParameters(hostAddr, username string, clientCertificate, clientKey []byte, clientCertAuthSetting ClientCertAuth) (bool, error) {
+	switch clientCertAuthSetting {
+	case ClientCertAuthDisable:
+		if len(username) == 0 {
+			return false, fmt.Errorf("Failed to set up secure connection to %v because username and password have not been specified and client cert is not supported by target.", hostAddr)
+		} else {
+			return false, nil
+		}
+	case ClientCertAuthEnable:
+		if len(clientCertificate) != 0 {
+			// use client cert if it has been specified
+			return true, nil
+		} else {
+			// use username if client cert has not been specified
+			return false, nil
+		}
+	case ClientCertAuthMandatory:
+		if len(clientCertificate) == 0 {
+			return false, fmt.Errorf("Failed to set up secure connection to %v because client cert, which is required by target, has not been specified.", hostAddr)
+		} else {
+			return true, nil
+		}
+	}
+
+	return false, fmt.Errorf("Failed to set up secure connection to %v due to unexpected client cert auth setting, %v.", hostAddr, clientCertAuthSetting)
 }

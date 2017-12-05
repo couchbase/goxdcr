@@ -11,6 +11,7 @@
 package metadata_svc
 
 import (
+	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
 	"encoding/pem"
@@ -19,7 +20,6 @@ import (
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
-	"github.com/couchbase/goxdcr/pipeline_utils"
 	"github.com/couchbase/goxdcr/service_def"
 	utilities "github.com/couchbase/goxdcr/utils"
 	"net/http"
@@ -138,11 +138,10 @@ func (agent *RemoteClusterAgent) initializeNewRefreshContext() (*refreshContext,
 // This is used as a helper context during each refresh operation
 type refreshContext struct {
 	// For comparison and editing
-	refOrig                 *metadata.RemoteClusterReference
-	refCache                *metadata.RemoteClusterReference
-	origRefNodesList        []string
-	cachedRefNodesList      []string
-	needToUpdateMetaKVAndCb bool
+	refOrig            *metadata.RemoteClusterReference
+	refCache           *metadata.RemoteClusterReference
+	origRefNodesList   []string
+	cachedRefNodesList []string
 
 	// connection related
 	connStr       string
@@ -232,8 +231,18 @@ func (rctx *refreshContext) checkAndUpdateAgentReference() error {
 			return populateRefreshDataInconsistentError(rctx.refOrig.CloneAndRedact(), rctx.agent.reference.CloneAndRedact(), rctx.origRefNodesList, sortedAgentList)
 		}
 
+		// 1. when refOrig.IsSame(refCache) is true, i.e., when there have been no changes to refCache,
+		//    updateReferenceFromNoLock is not called
+		// 2. when refOrig.IsSame(refCache) is false, and refOrig.IsEssentiallySame(refCache) is true,
+		//    i.e., when there have been changes to transient fields like ActiveHostName in refCache,
+		//    updateReferenceFromNoLock is called to get the transient fields updated.
+		//    there are no metakv update or metadata change callback, though
+		// 3. when refOrig.IsEssentiallySame(refCache) is false,
+		//    i.e., when there have been changes to essential fields in refCache,
+		//    updateReferenceFromNoLock is called with metakv update and metadata change callback
 		if !rctx.refOrig.IsSame(rctx.refCache) {
-			updateErr := rctx.agent.updateReferenceFromNoLock(rctx.refCache, rctx.needToUpdateMetaKVAndCb, rctx.needToUpdateMetaKVAndCb)
+			isEssentiallySame := rctx.refOrig.IsEssentiallySame(rctx.refCache)
+			updateErr := rctx.agent.updateReferenceFromNoLock(rctx.refCache, !isEssentiallySame /*updateMetaKv*/, !isEssentiallySame /*shouldCallCb*/)
 			if updateErr != nil {
 				rctx.agent.logger.Warnf(updateErr.Error())
 				return updateErr
@@ -255,21 +264,51 @@ func (rctx *refreshContext) finalizeRefCacheListFrom(listToBeUsed []string) {
 	}
 }
 
-func (rctx *refreshContext) verifyNodeAndGetList(connStr string) ([]interface{}, error) {
-	// connect to selected node to retrieve nodes info
-	username, password, certificate, sanInCertificate, err := rctx.refOrig.MyCredentials()
-	clusterUUID, nodeList, err := rctx.agent.utils.GetClusterUUIDAndNodeListWithMinInfo(connStr, username, password, certificate, sanInCertificate, rctx.agent.logger)
+func (rctx *refreshContext) verifyNodeAndGetList(connStr string, updateSecuritySettings bool) ([]interface{}, error) {
+	username, password, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, err := rctx.refCache.MyCredentials()
 	if err != nil {
-		rctx.agent.logger.Warnf("When refreshing remote cluster reference %v, skipping node %v since it is not accessible. err=%v\n", rctx.refCache.Id, connStr, err)
+		rctx.agent.logger.Warnf("When refreshing remote cluster reference %v, skipping node %v because of error retrieving user credentials from reference. err=%v\n", rctx.refCache.Id, connStr, err)
 		return nil, err
-	} else {
-		// selected node is accessible
-		if clusterUUID != rctx.refCache.Uuid {
-			rctx.agent.logger.Warnf("Cluster UUID: %v and refCache UUID: %v", clusterUUID, rctx.refCache.Uuid)
-			return nil, UUIDMismatchError
-		} else {
-			return nodeList, nil
+	}
+
+	var defaultPoolInfo map[string]interface{}
+	if updateSecuritySettings && len(certificate) > 0 {
+		// if updateSecuritySettings is true and ssl is enabled, get up to date sanInCertificate and clientCertAuthSetting from target
+		sanInCertificate, clientCertAuthSetting, defaultPoolInfo, err = rctx.agent.utils.GetDefaultPoolInfoWithSecuritySettings(connStr, username, password, certificate, clientCertificate, clientKey, rctx.agent.logger)
+		if err != nil {
+			rctx.agent.logger.Warnf("When refreshing remote cluster reference %v, skipping node %v because of error retrieving security settings from target. err=%v\n", rctx.refCache.Id, connStr, err)
+			return nil, err
 		}
+	} else {
+		defaultPoolInfo, err = rctx.agent.utils.GetClusterInfo(connStr, base.DefaultPoolPath, username, password, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, rctx.agent.logger)
+		if err != nil {
+			rctx.agent.logger.Warnf("When refreshing remote cluster reference %v, skipping node %v because of error retrieving default pool info from target. err=%v\n", rctx.refCache.Id, connStr, err)
+			return nil, err
+		}
+	}
+
+	clusterUUID, nodeList, err := rctx.agent.utils.GetClusterUUIDAndNodeListWithMinInfoFromDefaultPoolInfo(defaultPoolInfo, rctx.agent.logger)
+	if err != nil {
+		rctx.agent.logger.Warnf("When refreshing remote cluster reference %v, skipping node %v because of error parsing default pool info. err=%v\n", rctx.refCache.Id, connStr, err)
+		return nil, err
+	}
+	// selected node is accessible
+	if clusterUUID != rctx.refCache.Uuid {
+		rctx.agent.logger.Warnf("Cluster UUID: %v and refCache UUID: %v", clusterUUID, rctx.refCache.Uuid)
+		return nil, UUIDMismatchError
+	} else {
+		// update security settings only if the target node is still in the same target cluster
+		if updateSecuritySettings && len(certificate) > 0 {
+			if rctx.refCache.SANInCertificate != sanInCertificate {
+				rctx.agent.logger.Infof("Updating sanInCertificate in remote cluster reference %v to %v\n", rctx.refCache.Id, sanInCertificate)
+				rctx.refCache.SANInCertificate = sanInCertificate
+			}
+			if rctx.refCache.ClientCertAuthSetting != clientCertAuthSetting {
+				rctx.agent.logger.Infof("Updating client cert auth in remote cluster reference %v from %v to %v\n", rctx.refCache.Id, rctx.refCache.ClientCertAuthSetting, clientCertAuthSetting)
+				rctx.refCache.ClientCertAuthSetting = clientCertAuthSetting
+			}
+		}
+		return nodeList, nil
 	}
 }
 
@@ -280,6 +319,7 @@ func (agent *RemoteClusterAgent) Refresh() error {
 	}
 
 	var nodeNameList []string
+
 	for rctx.index = 0; rctx.index < len(rctx.cachedRefNodesList); rctx.index++ {
 		rctx.hostName = rctx.cachedRefNodesList[rctx.index]
 		rctx.connStr, err = rctx.getConnStrAndSetHttps(rctx.hostName)
@@ -287,8 +327,7 @@ func (agent *RemoteClusterAgent) Refresh() error {
 			continue
 		}
 
-		nodeList, err := rctx.verifyNodeAndGetList(rctx.connStr)
-
+		nodeList, err := rctx.verifyNodeAndGetList(rctx.connStr, true /*updateSecuritySettings*/)
 		if err != nil {
 			if err == UUIDMismatchError {
 				if rctx.hostName == rctx.refOrig.HostName && len(rctx.cachedRefNodesList) == 1 {
@@ -345,7 +384,9 @@ func (rctx *refreshContext) replaceHostNameUsingList(nodeList []string) {
 		if err != nil {
 			continue
 		}
-		_, err = rctx.verifyNodeAndGetList(replaceConnStr)
+
+		// updateSecuritySettings is set to false since security settings should have been updated shortly before in Refresh()
+		_, err = rctx.verifyNodeAndGetList(replaceConnStr, false /*updateSecuritySettings*/)
 
 		if err == nil {
 			// this is the node to set
@@ -353,7 +394,6 @@ func (rctx *refreshContext) replaceHostNameUsingList(nodeList []string) {
 			rctx.refCache.HostName = sortedList[i]
 			rctx.refCache.HttpsHostName = rctx.httpsHostName
 			rctx.agent.logger.Infof("Pending update hostname in remote cluster reference %v from %v to %v.\n", rctx.refCache.Id, oldHostName, rctx.refCache.HostName)
-			rctx.needToUpdateMetaKVAndCb = true
 			return
 		}
 	}
@@ -440,7 +480,7 @@ func (agent *RemoteClusterAgent) DeleteReference(delFromMetaKv bool) (*metadata.
  * Write lock needs to be held
  */
 func (agent *RemoteClusterAgent) syncInternalsFromStagedReferenceNoLock() error {
-	username, password, certificate, sanInCertificate, err := agent.pendingRef.MyCredentials()
+	username, password, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, err := agent.pendingRef.MyCredentials()
 	if err != nil {
 		return err
 	}
@@ -450,7 +490,7 @@ func (agent *RemoteClusterAgent) syncInternalsFromStagedReferenceNoLock() error 
 	}
 
 	// use GetNodeListWithMinInfo API to ensure that it is supported by target cluster, which could be an elastic search cluster
-	nodeList, err := agent.utils.GetNodeListWithMinInfo(connStr, username, password, certificate, sanInCertificate, agent.logger)
+	nodeList, err := agent.utils.GetNodeListWithMinInfo(connStr, username, password, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, agent.logger)
 	if err == nil {
 		agent.logger.Debugf("connStr=%v, nodeList=%v\n", connStr, nodeList)
 
@@ -959,8 +999,7 @@ func (service *RemoteClusterService) validateAddRemoteCluster(ref *metadata.Remo
 
 	// skip connectivity validation if so specified, e.g., when called from migration service
 	if !skipConnectivityValidation {
-		bUpdateUuid := (ref.Uuid == "")
-		err := service.validateRemoteCluster(ref, bUpdateUuid)
+		err := service.validateRemoteCluster(ref, true)
 		if err != nil {
 			return err
 		}
@@ -996,11 +1035,14 @@ func (service *RemoteClusterService) ValidateSetRemoteCluster(refName string, re
 
 // validate remote cluster info
 func (service *RemoteClusterService) ValidateRemoteCluster(ref *metadata.RemoteClusterReference) error {
-	return service.validateRemoteCluster(ref, false /*updateUuid*/)
+	// do not update ref when we are merely validating existing remote cluster ref
+	return service.validateRemoteCluster(ref, false /*updateRef*/)
 }
 
-// validate remote cluster info and update actual uuid
-func (service *RemoteClusterService) validateRemoteCluster(ref *metadata.RemoteClusterReference, updateUUid bool) error {
+// validate remote cluster info
+// when updateRef is true, update internal fields in ref such as ActiveHostName and ClientCertAuthSetting
+// this is the case when ref is being created or updated by user
+func (service *RemoteClusterService) validateRemoteCluster(ref *metadata.RemoteClusterReference, updateRef bool) error {
 	if ref.IsEncryptionEnabled() {
 		// check if source cluster supports SSL when SSL is specified
 		isEnterprise, err := service.xdcr_topology_svc.IsMyClusterEnterprise()
@@ -1008,29 +1050,13 @@ func (service *RemoteClusterService) validateRemoteCluster(ref *metadata.RemoteC
 			return err
 		}
 
-		sourceSSLCompatible, err := service.cluster_info_svc.IsClusterCompatible(service.xdcr_topology_svc, []int{2, 5})
-		if err != nil {
-			return fmt.Errorf("Failed to get source cluster version information, err=%v\n", err)
-		}
-
-		if !isEnterprise || !sourceSSLCompatible {
+		if !isEnterprise {
 			return wrapAsInvalidRemoteClusterError("Encryption can only be used in enterprise edition when the entire cluster is running at least 2.5 version of Couchbase Server")
 		}
 
-		// check validity of certificate
-		block, _ := pem.Decode(ref.Certificate)
-		if block == nil {
-			return wrapAsInvalidRemoteClusterError(base.InvalidCerfiticateError.Error())
-		}
-		certificate, err := x509.ParseCertificate(block.Bytes)
+		err = service.validateCertificates(ref)
 		if err != nil {
-			return wrapAsInvalidRemoteClusterError(fmt.Sprintf("Failed to parse certificate. err=%v", err))
-		}
-
-		// check the signature of certificate
-		err = certificate.CheckSignature(certificate.SignatureAlgorithm, certificate.RawTBSCertificate, certificate.Signature)
-		if err != nil {
-			return wrapAsInvalidRemoteClusterError(fmt.Sprintf("Error validating the signature of certificate. err=%v", err))
+			return wrapAsInvalidRemoteClusterError(err.Error())
 		}
 	}
 
@@ -1040,44 +1066,53 @@ func (service *RemoteClusterService) validateRemoteCluster(ref *metadata.RemoteC
 		return wrapAsInvalidRemoteClusterError(fmt.Sprintf("Failed to resolve address for \"%v\". The hostname may be incorrect or not resolvable.", ref.HostName))
 	}
 
-	var hostAddr string
-	if ref.IsEncryptionEnabled() {
-		if ref.HttpsHostName == "" {
-			httpsHostAddr, err, isInternalError := service.utils.HttpsHostAddr(ref.HostName, service.logger)
-			if err != nil {
-				if isInternalError {
-					return err
-				} else {
-					if err.Error() == base.ErrorUnauthorized.Error() {
-						return wrapAsInvalidRemoteClusterError(fmt.Sprintf("Could not get ssl port for %v. Remote cluster could be an Elasticsearch cluster that does not support ssl encryption. Please double check remote cluster configuration or turn off ssl encryption.", hostName))
+	if updateRef {
+		ref.ActiveHostName = ref.HostName
+		ref.ClientCertAuthSetting = base.ClientCertAuthDisable
+
+		if ref.IsEncryptionEnabled() {
+			if ref.HttpsHostName == "" {
+				httpsHostAddr, err, isInternalError := service.utils.HttpsHostAddr(ref.HostName, service.logger)
+				if err != nil {
+					if isInternalError {
+						return err
 					} else {
-						return wrapAsInvalidRemoteClusterError(fmt.Sprintf("Could not get ssl port for %v. err=%v", hostName, err))
+						if err.Error() == base.ErrorUnauthorized.Error() {
+							return wrapAsInvalidRemoteClusterError(fmt.Sprintf("Could not get ssl port for %v. Remote cluster could be an Elasticsearch cluster that does not support ssl encryption. Please double check remote cluster configuration or turn off ssl encryption.", hostName))
+						} else {
+							return wrapAsInvalidRemoteClusterError(fmt.Sprintf("Could not get ssl port for %v. err=%v", hostName, err))
+						}
 					}
 				}
+				// store https host name in ref for later re-use
+				ref.HttpsHostName = httpsHostAddr
 			}
-			// store https host name in ref for later re-use
-			ref.HttpsHostName = httpsHostAddr
+			ref.ActiveHttpsHostName = ref.HttpsHostName
 
-			// check if target cluster supports SAN certificate and store the info in remote cluster reference
-			// note that this check itelf requires a https connection to target, which uses "false" as the value
-			// of hasSANInCertificateSupport. After the check hasSANInCertificateSupport will be updated with
-			// the correct value and all subsequent https calls will use the correct value
-			hasSANInCertificateSupport, err := pipeline_utils.HasSANInCertificateSupport(service.cluster_info_svc, ref)
+			// this is called here since ref.HttpsHostName needs to be populated prior
+			ref.SANInCertificate, ref.ClientCertAuthSetting, _, err = service.utils.GetDefaultPoolInfoWithSecuritySettings(ref.HttpsHostName, ref.UserName, ref.Password, ref.Certificate, ref.ClientCertificate, ref.ClientKey, service.logger)
 			if err != nil {
-				return wrapAsInvalidRemoteClusterError(fmt.Sprintf("Error checking if target cluster supports SANs in cerificates. err=%v", err))
+				return wrapAsInvalidRemoteClusterError(fmt.Sprintf("Error checking security settings on target cluster. err=%v", err))
 			}
-			ref.SANInCertificate = hasSANInCertificateSupport
+			service.logger.Infof("Set SANInCertificate=%v, ClientCertAuthSetting=%v for remote cluster reference %v\n", ref.SANInCertificate, ref.ClientCertAuthSetting, ref.Name)
 		}
-		hostAddr = ref.HttpsHostName
-	} else {
-		hostAddr = ref.HostName
 	}
 
-	ref.ActiveHostName = ref.HostName
-	ref.ActiveHttpsHostName = ref.HttpsHostName
+	if ref.ClientCertAuthSetting == base.ClientCertAuthMandatory && len(ref.ClientCertificate) == 0 {
+		return wrapAsInvalidRemoteClusterError("Target cluster requires client certificate. Client certificate and client key must be provided")
+	}
+
+	if ref.ClientCertAuthSetting == base.ClientCertAuthDisable && len(ref.UserName) == 0 {
+		return wrapAsInvalidRemoteClusterError("Target cluster does not support client certificate. Username and password must be provided")
+	}
 
 	startTime := time.Now()
-	clusterInfo, err, statusCode := service.utils.GetClusterInfoWStatusCode(hostAddr, base.PoolsPath, ref.UserName, ref.Password, ref.Certificate, ref.SANInCertificate, service.logger)
+
+	hostAddr, err := ref.MyConnectionStr()
+	if err != nil {
+		return err
+	}
+	clusterInfo, err, statusCode := service.utils.GetClusterInfoWStatusCode(hostAddr, base.PoolsPath, ref.UserName, ref.Password, ref.Certificate, ref.SANInCertificate, ref.ClientCertificate, ref.ClientKey, ref.ClientCertAuthSetting, service.logger)
 	service.logger.Infof("Result from validate remote cluster call: err=%v, statusCode=%v. time taken=%v\n", err, statusCode, time.Since(startTime))
 	if err != nil || statusCode != http.StatusOK {
 		if statusCode == http.StatusUnauthorized {
@@ -1109,15 +1144,6 @@ func (service *RemoteClusterService) validateRemoteCluster(ref *metadata.RemoteC
 			return wrapAsInvalidRemoteClusterError("Remote cluster is not enterprise version and does not support SSL.")
 		}
 
-		remoteSSLCompatible, err := service.cluster_info_svc.IsClusterCompatible(ref, []int{2, 5})
-		if err != nil {
-			return wrapAsInvalidRemoteClusterError("Failed to get target cluster version information")
-		}
-
-		if !remoteSSLCompatible {
-			return wrapAsInvalidRemoteClusterError("Remote cluster has a version lower than 2.5 and does not support SSL.")
-		}
-
 		// if ref is half-ssl, validate that target clusters is spock and up
 		if !ref.IsFullEncryption() {
 			rbacCompatible, err := service.cluster_info_svc.IsClusterCompatible(ref, base.VersionForRBACAndXattrSupport)
@@ -1130,7 +1156,7 @@ func (service *RemoteClusterService) validateRemoteCluster(ref *metadata.RemoteC
 		}
 	}
 	// get remote cluster uuid from the map
-	if updateUUid {
+	if updateRef {
 		actualUuid, ok := clusterInfo[base.RemoteClusterUuid]
 		if !ok {
 			// should never get here
@@ -1145,6 +1171,58 @@ func (service *RemoteClusterService) validateRemoteCluster(ref *metadata.RemoteC
 
 		// update uuid in ref to real value
 		ref.Uuid = actualUuidStr
+	}
+
+	return nil
+}
+
+// validate certificates in remote cluster ref
+func (service *RemoteClusterService) validateCertificates(ref *metadata.RemoteClusterReference) error {
+	// check validity of server root certificate
+	block, _ := pem.Decode(ref.Certificate)
+	if block == nil {
+		return base.InvalidCerfiticateError
+	}
+	certificate, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		return fmt.Errorf("Failed to parse certificate. err=%v", err)
+	}
+
+	// check the signature of certificate
+	err = certificate.CheckSignature(certificate.SignatureAlgorithm, certificate.RawTBSCertificate, certificate.Signature)
+	if err != nil {
+		return fmt.Errorf("Error validating the signature of certificate. err=%v", err)
+	}
+
+	// check validity of client certificate if it has been provided
+	if len(ref.ClientCertificate) > 0 {
+		clientCert, err := tls.X509KeyPair(ref.ClientCertificate, ref.ClientKey)
+		if err != nil {
+			return fmt.Errorf("Error parsing client certificate. err=%v", err)
+		}
+
+		parentCert := certificate
+
+		// clientCert.Certificate contains a chain of certificates, leaf first
+		// e.g., LeafCert, IntermediateCert1, IntermediateCert2
+		// we will be verifying these certificates in the reverse order
+		// first we check IntermediateCert2 is signed by its parent, the server root certificate
+		// then we check IntermediateCert1 is signed by IntermediateCert2
+		// then we check LeafCert is signed by IntermediateCert1
+		// if any of the certificates has been tempered with, the corresponding check should fail
+		for index := len(clientCert.Certificate) - 1; index >= 0; index-- {
+			curCert, err := x509.ParseCertificate(clientCert.Certificate[index])
+			if err != nil {
+				return fmt.Errorf("Error parsing certificate chain in client certificate. err=%v", err)
+			} else {
+				err = curCert.CheckSignatureFrom(parentCert)
+				if err != nil {
+					return fmt.Errorf("Error validating the signature of client certficate. err=%v", err)
+				}
+			}
+
+			parentCert = curCert
+		}
 	}
 
 	return nil

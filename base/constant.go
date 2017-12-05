@@ -39,6 +39,15 @@ var NodesSelfPath = "/nodes/self"
 var SSLPortsPath = "/nodes/self/xdcrSSLPorts"
 var NodeServicesPath = "/pools/default/nodeServices"
 var BPath = "/pools/default/b/"
+var ClientCertAuthPath = "settings/clientCertAuth"
+
+// constants for parsing client cert auth option setting from ns_server response
+const (
+	ClientCertAuthKey            = "clientCertAuth"
+	ClientCertAuthValueMandatory = "mandatory"
+	ClientCertAuthValueEnable    = "enable"
+	ClientCertAuthValueDisable   = "disable"
+)
 
 // constants for CAPI nozzle
 var RevsDiffPath = "/_revs_diff"
@@ -192,23 +201,29 @@ var ErrorCompressionDcpInvalidHandshake = errors.New("DCP connection is establis
 var ErrorMaxReached = errors.New("Maximum entries has been reached")
 var ErrorNilPtr = errors.New("Nil pointer given")
 
+// the full error as of now is : "x509: cannot validate certificate for xxx because it doesn't contain any IP SANs"
+// use a much shorter version for matching to reduce the chance of false negatives - the error message may be changed by golang in the future
+var NoIpSANErrMsg = "SAN"
+
 // constants used for remote cluster references
 const (
 	RemoteClustersPath = "pools/default/remoteClusters"
 
-	RemoteClusterUuid             = "uuid"
-	RemoteClusterName             = "name"
-	RemoteClusterHostName         = "hostname"
-	RemoteClusterUserName         = "username"
-	RemoteClusterPassword         = "password"
-	RemoteClusterDemandEncryption = "demandEncryption"
-	RemoteClusterEncryptionType   = "encryptionType"
-	RemoteClusterCertificate      = "certificate"
-	RemoteClusterUri              = "uri"
-	RemoteClusterValidateUri      = "validateURI"
-	RemoteClusterDeleted          = "deleted"
-	IsEnterprise                  = "isEnterprise"
-	Pools                         = "pools"
+	RemoteClusterUuid              = "uuid"
+	RemoteClusterName              = "name"
+	RemoteClusterHostName          = "hostname"
+	RemoteClusterUserName          = "username"
+	RemoteClusterPassword          = "password"
+	RemoteClusterDemandEncryption  = "demandEncryption"
+	RemoteClusterEncryptionType    = "encryptionType"
+	RemoteClusterCertificate       = "certificate"
+	RemoteClusterClientCertificate = "clientCertificate"
+	RemoteClusterClientKey         = "clientKey"
+	RemoteClusterUri               = "uri"
+	RemoteClusterValidateUri       = "validateURI"
+	RemoteClusterDeleted           = "deleted"
+	IsEnterprise                   = "isEnterprise"
+	Pools                          = "pools"
 )
 
 // constants used for create replication request
@@ -389,6 +404,7 @@ var RemoteMcRetryFactor = 2
 var VersionForSANInCertificateSupport = []int{4, 0}
 var VersionForRBACAndXattrSupport = []int{5, 0}
 var VersionForCompressionSupport = []int{5, 5}
+var VersionForClientCertSupport = []int{5, 5}
 
 var GoxdcrUserAgentPrefix = "couchbase-goxdcr"
 var GoxdcrUserAgent = ""

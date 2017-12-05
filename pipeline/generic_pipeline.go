@@ -41,8 +41,6 @@ type PartsUpdateSettingsConstructor func(pipeline common.Pipeline, part common.P
 
 type StartingSeqnoConstructor func(pipeline common.Pipeline) error
 
-type RemoteClsuterRefRetriever func(remoteClusterUUID string, refresh bool) (*metadata.RemoteClusterReference, error)
-
 type CheckpointFunc func(pipeline common.Pipeline) error
 
 //GenericPipeline is the generic implementation of a data processing pipeline
@@ -76,8 +74,6 @@ type GenericPipeline struct {
 
 	startingSeqno_constructor StartingSeqnoConstructor
 
-	remoteClusterRef_retriever RemoteClsuterRefRetriever
-
 	checkpoint_func CheckpointFunc
 
 	//the map that contains the references to all parts used in the pipeline
@@ -99,6 +95,8 @@ type GenericPipeline struct {
 	spec          *metadata.ReplicationSpecification
 	settings      metadata.ReplicationSettingsMap
 	settings_lock *sync.RWMutex
+
+	targetClusterRef *metadata.RemoteClusterReference
 
 	state common.PipelineState
 
@@ -136,7 +134,7 @@ func (genericPipeline *GenericPipeline) startPart(part common.Part, settings met
 			go func(waitGrp *sync.WaitGroup, err_ch chan partError, p common.Part, settings metadata.ReplicationSettingsMap) {
 				defer waitGrp.Done()
 				if p.State() == common.Part_Initial {
-					genericPipeline.startPart(p, settings, targetClusterRef, ssl_port_map, err_ch)
+					genericPipeline.startPart(p, settings, genericPipeline.targetClusterRef, ssl_port_map, err_ch)
 				}
 			}(waitGrp, err_ch, p, settings)
 		}
@@ -153,7 +151,7 @@ func (genericPipeline *GenericPipeline) startPart(part common.Part, settings met
 		genericPipeline.logger.Debugf("%v calling part setting constructor\n", genericPipeline.InstanceId())
 
 		// partSetting_contructor currently is only: xdcrf.ConstructUpdateSettingsForPart
-		partSettings, err = genericPipeline.partSetting_constructor(genericPipeline, part, settings, targetClusterRef, ssl_port_map)
+		partSettings, err = genericPipeline.partSetting_constructor(genericPipeline, part, settings, genericPipeline.targetClusterRef, ssl_port_map)
 		if err != nil {
 			err_ch <- partError{part.Id(), err}
 			return
@@ -197,13 +195,6 @@ func (genericPipeline *GenericPipeline) Start(settings metadata.ReplicationSetti
 	//get starting vb timestamp
 	go genericPipeline.startingSeqno_constructor(genericPipeline)
 
-	targetClusterRef, err := genericPipeline.remoteClusterRef_retriever(genericPipeline.spec.TargetClusterUUID, false)
-	if err != nil {
-		genericPipeline.logger.Errorf("%v error getting remote cluster with uuid=%v, err=%v\n", genericPipeline.InstanceId(), genericPipeline.spec.TargetClusterUUID, err)
-		errMap["genericPipeline.remoteClusterRef_retriever"] = err
-		return errMap
-	}
-
 	// start async event listeners
 	for _, async_event_listener := range GetAllAsyncComponentEventListeners(genericPipeline) {
 		async_event_listener.Start()
@@ -220,7 +211,7 @@ func (genericPipeline *GenericPipeline) Start(settings metadata.ReplicationSetti
 
 	var ssl_port_map map[string]uint16
 	if genericPipeline.sslPortMapConstructor != nil {
-		ssl_port_map, err = genericPipeline.sslPortMapConstructor(targetClusterRef, genericPipeline.spec)
+		ssl_port_map, err = genericPipeline.sslPortMapConstructor(genericPipeline.targetClusterRef, genericPipeline.spec)
 		if err != nil {
 			errMap["genericPipeline.sslPortMapConstructor"] = err
 			return errMap
@@ -235,7 +226,7 @@ func (genericPipeline *GenericPipeline) Start(settings metadata.ReplicationSetti
 		waitGrp.Add(1)
 		go func(err_ch chan partError, source common.Nozzle, settings metadata.ReplicationSettingsMap, waitGrp *sync.WaitGroup) {
 			defer waitGrp.Done()
-			genericPipeline.startPart(source, settings, targetClusterRef, ssl_port_map, err_ch)
+			genericPipeline.startPart(source, settings, genericPipeline.targetClusterRef, ssl_port_map, err_ch)
 			if len(err_ch) == 0 {
 				genericPipeline.logger.Infof("%v Incoming nozzle %s has been started", genericPipeline.InstanceId(), source.Id())
 			}
@@ -461,22 +452,22 @@ func NewPipelineWithSettingConstructor(t string,
 	sources map[string]common.Nozzle,
 	targets map[string]common.Nozzle,
 	spec *metadata.ReplicationSpecification,
+	targetClusterRef *metadata.RemoteClusterReference,
 	partsSettingsConstructor PartsSettingsConstructor,
 	sslPortMapConstructor SSLPortMapConstructor,
 	partsUpdateSettingsConstructor PartsUpdateSettingsConstructor,
 	startingSeqnoConstructor StartingSeqnoConstructor,
-	remoteClusterRefRetriever RemoteClsuterRefRetriever,
 	checkpoint_func CheckpointFunc,
 	logger_context *log.LoggerContext) *GenericPipeline {
 	pipeline := &GenericPipeline{topic: t,
-		sources: sources,
-		targets: targets,
-		spec:    spec,
+		sources:                       sources,
+		targets:                       targets,
+		spec:                          spec,
+		targetClusterRef:              targetClusterRef,
 		partSetting_constructor:       partsSettingsConstructor,
 		sslPortMapConstructor:         sslPortMapConstructor,
 		partUpdateSetting_constructor: partsUpdateSettingsConstructor,
 		startingSeqno_constructor:     startingSeqnoConstructor,
-		remoteClusterRef_retriever:    remoteClusterRefRetriever,
 		checkpoint_func:               checkpoint_func,
 		logger:                        log.NewLogger("GenericPipeline", logger_context),
 		instance_id:                   time.Now().Nanosecond(),

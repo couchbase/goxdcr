@@ -268,7 +268,7 @@ func DecodeCreateRemoteClusterRequest(request *http.Request) (justValidate bool,
 	errorsMap = make(map[string]error)
 	var err1 error
 	var name, hostName, userName, password, encryptionType string
-	var certificate []byte
+	var certificate, clientCertificate, clientKey []byte
 
 	if err1 = request.ParseForm(); err1 != nil {
 		errorsMap[base.PlaceHolderFieldKey] = ErrorParsingForm
@@ -300,6 +300,12 @@ func DecodeCreateRemoteClusterRequest(request *http.Request) (justValidate bool,
 		case base.RemoteClusterCertificate:
 			certificateStr := getStringFromValArr(valArr)
 			certificate = []byte(certificateStr)
+		case base.RemoteClusterClientCertificate:
+			clientCertificateStr := getStringFromValArr(valArr)
+			clientCertificate = []byte(clientCertificateStr)
+		case base.RemoteClusterClientKey:
+			clientKeyStr := getStringFromValArr(valArr)
+			clientKey = []byte(clientKeyStr)
 		default:
 			// ignore other parameters
 		}
@@ -312,11 +318,17 @@ func DecodeCreateRemoteClusterRequest(request *http.Request) (justValidate bool,
 	if len(hostName) == 0 {
 		errorsMap[base.RemoteClusterHostName] = base.MissingParameterError("hostname (ip)")
 	}
-	if len(userName) == 0 {
-		errorsMap[base.RemoteClusterUserName] = base.MissingParameterError("username")
+	if !demandEncryption && len(userName) == 0 {
+		errorsMap[base.RemoteClusterUserName] = errors.New("username must be given if demand encryption is not on")
 	}
-	if len(password) == 0 {
-		errorsMap[base.RemoteClusterPassword] = base.MissingParameterError("password")
+	if !demandEncryption && len(password) == 0 {
+		errorsMap[base.RemoteClusterUserName] = errors.New("password must be given if demand encryption is not on")
+	}
+	if len(userName) == 0 && len(password) > 0 {
+		errorsMap[base.RemoteClusterUserName] = errors.New("username must be given if password is specified")
+	}
+	if len(userName) > 0 && len(password) == 0 {
+		errorsMap[base.RemoteClusterPassword] = errors.New("password must be given if username is specified")
 	}
 
 	// certificate is required if demandEncryption is set to true
@@ -326,6 +338,26 @@ func DecodeCreateRemoteClusterRequest(request *http.Request) (justValidate bool,
 
 	if !demandEncryption && len(certificate) > 0 {
 		errorsMap[base.RemoteClusterCertificate] = errors.New("certificate cannot be given if demand encryption is not on")
+	}
+
+	if !demandEncryption && len(clientCertificate) > 0 {
+		errorsMap[base.RemoteClusterClientCertificate] = errors.New("client certificate cannot be given if demand encryption is not on")
+	}
+
+	if !demandEncryption && len(clientKey) > 0 {
+		errorsMap[base.RemoteClusterClientKey] = errors.New("client key cannot be given if demand encryption is not on")
+	}
+
+	if len(clientCertificate) > 0 && len(clientKey) == 0 {
+		errorsMap[base.RemoteClusterClientKey] = errors.New("client key must be given when client certificate is specified")
+	}
+
+	if len(clientCertificate) == 0 && len(clientKey) > 0 {
+		errorsMap[base.RemoteClusterClientCertificate] = errors.New("client certificate must be given when client key is specified")
+	}
+
+	if len(userName) == 0 && len(clientCertificate) == 0 {
+		errorsMap[base.PlaceHolderFieldKey] = errors.New("either username and password or client certificate and client key must be specified")
 	}
 
 	if len(encryptionType) > 0 {
@@ -347,7 +379,7 @@ func DecodeCreateRemoteClusterRequest(request *http.Request) (justValidate bool,
 	}
 
 	if len(errorsMap) == 0 {
-		remoteClusterRef, err = metadata.NewRemoteClusterReference("", name, hostAddr, userName, password, demandEncryption, encryptionType, certificate)
+		remoteClusterRef, err = metadata.NewRemoteClusterReference("", name, hostAddr, userName, password, demandEncryption, encryptionType, certificate, clientCertificate, clientKey)
 	}
 
 	return

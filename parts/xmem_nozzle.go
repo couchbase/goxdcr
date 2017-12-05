@@ -44,6 +44,9 @@ const (
 	XMEM_SETTING_INSECURESKIPVERIFY  = "insecureSkipVerify"
 	XMEM_SETTING_SAN_IN_CERITICATE   = "SANInCertificate"
 	XMEM_SETTING_REMOTE_MEM_SSL_PORT = "remote_ssl_port"
+	XMEM_SETTING_CLIENT_CERTIFICATE  = "clientCertificate"
+	XMEM_SETTING_CLIENT_KEY          = "clientKey"
+	XMEM_SETTING_CLIENT_CERT_AUTH    = "clientCertAuth"
 
 	default_demandEncryption bool = false
 )
@@ -402,10 +405,13 @@ type xmemConfig struct {
 	encryptionType     string
 	memcached_ssl_port uint16
 	// in ssl over mem mode, whether target cluster supports SANs in certificates
-	san_in_certificate bool
-	respTimeout        unsafe.Pointer // *time.Duration
-	max_read_downtime  time.Duration
-	logger             *log.CommonLogger
+	san_in_certificate    bool
+	clientCertAuthSetting base.ClientCertAuth
+	clientCertificate     []byte
+	clientKey             []byte
+	respTimeout           unsafe.Pointer // *time.Duration
+	max_read_downtime     time.Duration
+	logger                *log.CommonLogger
 }
 
 func newConfig(logger *log.CommonLogger) xmemConfig {
@@ -456,6 +462,18 @@ func (config *xmemConfig) initializeConfig(settings metadata.ReplicationSettings
 				config.encryptionType = val.(string)
 			} else {
 				return errors.New("demandEncryption=true, but encryptionType is not set in settings")
+			}
+
+			if val, ok := settings[XMEM_SETTING_CLIENT_CERTIFICATE]; ok {
+				config.clientCertificate = val.([]byte)
+			}
+
+			if val, ok := settings[XMEM_SETTING_CLIENT_KEY]; ok {
+				config.clientKey = val.([]byte)
+			}
+
+			if val, ok := settings[XMEM_SETTING_CLIENT_CERT_AUTH]; ok {
+				config.clientCertAuthSetting = val.(base.ClientCertAuth)
 			}
 
 			if val, ok := settings[XMEM_SETTING_REMOTE_MEM_SSL_PORT]; ok {
@@ -1746,7 +1764,8 @@ func (xmem *XmemNozzle) getOrCreateConnPool() (pool base.ConnPool, err error) {
 		if xmem.config.memcached_ssl_port != 0 {
 			xmem.Logger().Infof("%v Get or create ssl over memcached connection, memcached_ssl_port=%v\n", xmem.Id(), int(xmem.config.memcached_ssl_port))
 			pool, err = base.ConnPoolMgr().GetOrCreateSSLOverMemPool(poolName, hostName, xmem.config.bucketName, xmem.config.username, xmem.config.password,
-				xmem.config.connPoolSize, int(xmem.config.memcached_ssl_port), xmem.config.certificate, xmem.config.san_in_certificate)
+				xmem.config.connPoolSize, int(xmem.config.memcached_ssl_port), xmem.config.certificate, xmem.config.san_in_certificate,
+				xmem.config.clientCertificate, xmem.config.clientKey)
 
 		} else {
 			return nil, fmt.Errorf("%v cannot find memcached ssl port", xmem.Id())
@@ -1776,13 +1795,12 @@ func (xmem *XmemNozzle) initializeConnection() (err error) {
 	// this needs to be done after xmem.connType is set
 	xmem.composeUserAgent()
 
-	memClient_setMeta, err := xmem.utils.GetClientFromPoolWithRetry(xmem.Id(), pool, xmem.finish_ch, base.XmemBackoffTimeNewConn, base.XmemMaxRetryNewConn, base.MetaKvBackoffFactor, xmem.Logger())
-
+	memClient_setMeta, err := xmem.getClientWithRetry(xmem.Id(), pool, xmem.finish_ch, true /*initializing*/, xmem.Logger())
 	if err != nil {
 		return
 	}
 
-	memClient_getMeta, err := xmem.utils.GetClientFromPoolWithRetry(xmem.Id(), pool, xmem.finish_ch, base.XmemBackoffTimeNewConn, base.XmemMaxRetryNewConn, base.MetaKvBackoffFactor, xmem.Logger())
+	memClient_getMeta, err := xmem.getClientWithRetry(xmem.Id(), pool, xmem.finish_ch, true /*initializing*/, xmem.Logger())
 	if err != nil {
 		return
 	}
@@ -2682,7 +2700,7 @@ func (xmem *XmemNozzle) repairConn(client *xmemClient, reason string, rev int) e
 		return err
 	}
 
-	memClient, err := xmem.utils.GetClientFromPoolWithRetry(xmem.Id(), pool, xmem.finish_ch, base.XmemBackoffTimeNewConn, base.XmemMaxRetryNewConn, base.MetaKvBackoffFactor, xmem.Logger())
+	memClient, err := xmem.getClientWithRetry(xmem.Id(), pool, xmem.finish_ch, false /*initializing*/, xmem.Logger())
 	if err != nil {
 		xmem.handleGeneralError(err)
 		xmem.Logger().Errorf("%v - Failed to repair connections for %v. err=%v\n", xmem.Id(), client.name, err)
@@ -2826,4 +2844,35 @@ func (xmem *XmemNozzle) recordBatchSize(batchSize uint32) {
 		xmem.last_ten_batches_size[i] = xmem.last_ten_batches_size[i-1]
 	}
 	xmem.last_ten_batches_size[0] = batchSize
+}
+
+func (xmem *XmemNozzle) getClientWithRetry(xmem_id string, pool base.ConnPool, finish_ch chan bool, initializing bool, logger *log.CommonLogger) (mcc.ClientIface, error) {
+	getClientOpFunc := func(param interface{}) (interface{}, error) {
+		clientCertAuthSetting := xmem.config.clientCertAuthSetting
+		var err error
+		if !initializing && len(xmem.config.certificate) > 0 {
+			// if this is not replication startup time, and ssl is enabled, re-compute clientCertAuthSetting since it could have changed
+			hostName := base.GetHostName(xmem.config.connectStr)
+			hostAddr := base.GetHostAddr(hostName, xmem.config.memcached_ssl_port)
+			_, clientCertAuthSetting, _, err = xmem.utils.GetDefaultPoolInfoWithSecuritySettings(hostAddr, xmem.config.username, xmem.config.password, xmem.config.certificate, xmem.config.clientCertificate, xmem.config.clientKey, logger)
+			if err != nil {
+				return nil, err
+			}
+		}
+		return pool.GetNew(clientCertAuthSetting)
+	}
+
+	result, err := xmem.utils.ExponentialBackoffExecutorWithFinishSignal("xmem.getClientWithRetry", base.XmemBackoffTimeNewConn, base.XmemMaxRetryNewConn,
+		base.MetaKvBackoffFactor, getClientOpFunc, nil /*param*/, finish_ch)
+	if err != nil {
+		high_level_err := fmt.Sprintf("Failed to set up connections to target cluster after %v retries.", base.XmemMaxRetryNewConn)
+		logger.Errorf("%v %v", xmem_id, high_level_err)
+		return nil, errors.New(high_level_err)
+	}
+	client, ok := result.(mcc.ClientIface)
+	if !ok {
+		// should never get here
+		return nil, fmt.Errorf("%v getClientWithRetry returned wrong type of client", xmem_id)
+	}
+	return client, nil
 }

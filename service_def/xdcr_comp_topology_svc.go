@@ -9,6 +9,10 @@
 
 package service_def
 
+import (
+	"github.com/couchbase/goxdcr/base"
+)
+
 //XDCRCompTopologySvc abstracts the service interface that has the knowledge
 //of xdcr component topology - xdcr components in a cluster running on which nodes;
 //what are the port numbers for the admin port of xdcr component; which kv node that
@@ -62,6 +66,6 @@ type XDCRCompTopologySvc interface {
 
 	// implements base.ClusterConnectionInfoProvider
 	MyConnectionStr() (string, error)
-	MyCredentials() (string, string, []byte, bool, error)
+	MyCredentials() (string, string, []byte, bool, []byte, []byte, base.ClientCertAuth, error)
 	IsKVNode() (bool, error)
 }
