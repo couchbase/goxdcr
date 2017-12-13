@@ -90,6 +90,12 @@ var InvalidResponseError = errors.New("the server response is not according to t
 var InvalidStartResponseError = errors.New("the server initial response is not according to the spec")
 var InvalidStepResponseError = errors.New("the server final response is not according to the spec")
 
+type Features []Feature
+type Feature uint16
+const FeatureMutationToken = Feature(0x04)
+const FeatureXattr = Feature(0x06)
+const FeatureDataType = Feature(0x0b)
+
 // The Client itself.
 type Client struct {
 	conn io.ReadWriteCloser
@@ -206,7 +212,7 @@ func (c *Client) Receive() (*gomemcached.MCResponse, error) {
 	return resp, err
 }
 
-func appendFeatureCode(bytes []byte) []byte {
+func appendMutationToken(bytes []byte) []byte {
 	bytes = append(bytes, 0, 0)
 	binary.BigEndian.PutUint16(bytes[len(bytes)-2:], uint16(0x04))
 	return bytes
@@ -215,7 +221,24 @@ func appendFeatureCode(bytes []byte) []byte {
 //Send a hello command to enable MutationTokens
 func (c *Client) EnableMutationToken() (*gomemcached.MCResponse, error) {
 	var payload []byte
-	payload = appendFeatureCode(payload)
+	payload = appendMutationToken(payload)
+
+	return c.Send(&gomemcached.MCRequest{
+		Opcode: gomemcached.HELLO,
+		Key:    []byte("GoMemcached"),
+		Body:   payload,
+	})
+
+}
+
+//Send a hello command to enable specific features
+func (c *Client) EnableFeatures(features Features) (*gomemcached.MCResponse, error) {
+	var payload []byte
+
+	for _, feature := range features {
+		payload = append(payload, 0, 0)
+		binary.BigEndian.PutUint16(payload[len(payload)-2:], uint16(feature))
+	}
 
 	return c.Send(&gomemcached.MCRequest{
 		Opcode: gomemcached.HELLO,
