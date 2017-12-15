@@ -123,7 +123,7 @@ func (agent *RemoteClusterAgent) GetConnectionStringForCAPIRemoteCluster() (stri
 	return toBeSortedList[0], nil
 }
 
-func (agent *RemoteClusterAgent) initializeNewAgentContext() (*refreshContext, error) {
+func (agent *RemoteClusterAgent) initializeNewRefreshContext() (*refreshContext, error) {
 	rctx := &refreshContext{agent: agent}
 	err := rctx.initialize()
 	if err != nil {
@@ -136,10 +136,11 @@ func (agent *RemoteClusterAgent) initializeNewAgentContext() (*refreshContext, e
 // This is used as a helper context during each refresh operation
 type refreshContext struct {
 	// For comparison and editing
-	refOrig            *metadata.RemoteClusterReference
-	refCache           *metadata.RemoteClusterReference
-	origRefNodesList   []string
-	cachedRefNodesList []string
+	refOrig                 *metadata.RemoteClusterReference
+	refCache                *metadata.RemoteClusterReference
+	origRefNodesList        []string
+	cachedRefNodesList      []string
+	needToUpdateMetaKVAndCb bool
 
 	// connection related
 	connStr       string
@@ -230,7 +231,7 @@ func (rctx *refreshContext) checkAndUpdateAgentReference() error {
 		}
 
 		if !rctx.refOrig.IsSame(rctx.refCache) {
-			updateErr := rctx.agent.updateReferenceFromNoLock(rctx.refCache, true)
+			updateErr := rctx.agent.updateReferenceFromNoLock(rctx.refCache, rctx.needToUpdateMetaKVAndCb, rctx.needToUpdateMetaKVAndCb)
 			if updateErr != nil {
 				rctx.agent.logger.Warnf(updateErr.Error())
 				return updateErr
@@ -271,7 +272,7 @@ func (rctx *refreshContext) verifyNodeAndGetList(connStr string) ([]interface{},
 }
 
 func (agent *RemoteClusterAgent) Refresh() error {
-	rctx, err := agent.initializeNewAgentContext()
+	rctx, err := agent.initializeNewRefreshContext()
 	if err != nil {
 		return err
 	}
@@ -350,6 +351,7 @@ func (rctx *refreshContext) replaceHostNameUsingList(nodeList []string) {
 			rctx.refCache.HostName = sortedList[i]
 			rctx.refCache.HttpsHostName = rctx.httpsHostName
 			rctx.agent.logger.Infof("Pending update hostname in remote cluster reference %v from %v to %v.\n", rctx.refCache.Id, oldHostName, rctx.refCache.HostName)
+			rctx.needToUpdateMetaKVAndCb = true
 			return
 		}
 	}
@@ -587,7 +589,7 @@ func (agent *RemoteClusterAgent) updateRevisionFromMetaKVNoLock() error {
  * If updateMetaKv is set to true, it'll write the information to metakv.
  * Returns an error code if any non-recoverable metakv operation failed.
  */
-func (agent *RemoteClusterAgent) updateReferenceFromNoLock(newRef *metadata.RemoteClusterReference, updateMetaKv bool) error {
+func (agent *RemoteClusterAgent) updateReferenceFromNoLock(newRef *metadata.RemoteClusterReference, updateMetaKv bool, shouldCallCb bool) error {
 	var err error
 	if newRef == nil {
 		return base.ErrorResourceDoesNotExist
@@ -623,7 +625,9 @@ func (agent *RemoteClusterAgent) updateReferenceFromNoLock(newRef *metadata.Remo
 
 	if err == nil {
 		agent.commitStagedChangesNoLock()
-		agent.callMetadataChangeCbNoLock()
+		if shouldCallCb {
+			agent.callMetadataChangeCbNoLock()
+		}
 	}
 	return err
 }
@@ -631,7 +635,7 @@ func (agent *RemoteClusterAgent) updateReferenceFromNoLock(newRef *metadata.Remo
 func (agent *RemoteClusterAgent) UpdateReferenceFrom(newRef *metadata.RemoteClusterReference, updateMetaKv bool) error {
 	agent.refMtx.Lock()
 	defer agent.refMtx.Unlock()
-	return agent.updateReferenceFromNoLock(newRef, updateMetaKv)
+	return agent.updateReferenceFromNoLock(newRef, updateMetaKv, true)
 }
 
 func (agent *RemoteClusterAgent) callMetadataChangeCbNoLock() {
@@ -1195,7 +1199,7 @@ func (service *RemoteClusterService) getOrStartNewAgent(ref *metadata.RemoteClus
 	if agent, ok := service.agentMap[ref.Id]; ok {
 		defer service.agentMutex.RUnlock()
 		if updateFromRef {
-			err = agent.updateReferenceFromNoLock(ref, userInitiated)
+			err = agent.updateReferenceFromNoLock(ref, userInitiated, true)
 		}
 		return agent, true, err
 	} else {
@@ -1205,7 +1209,7 @@ func (service *RemoteClusterService) getOrStartNewAgent(ref *metadata.RemoteClus
 		if agent, ok := service.agentMap[ref.Id]; ok {
 			// someone jumped ahead of us
 			if updateFromRef {
-				err = agent.updateReferenceFromNoLock(ref, userInitiated)
+				err = agent.updateReferenceFromNoLock(ref, userInitiated, true)
 			}
 			return agent, true, err
 		} else {

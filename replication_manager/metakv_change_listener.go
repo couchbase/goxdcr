@@ -380,13 +380,9 @@ func (rccl *RemoteClusterChangeListener) remoteClusterChangeHandlerCallback(remo
 		return nil
 	}
 
-	if oldRemoteClusterRef.DemandEncryption != newRemoteClusterRef.DemandEncryption ||
-		oldRemoteClusterRef.EncryptionType != newRemoteClusterRef.EncryptionType ||
+	if !oldRemoteClusterRef.AreUserSecurityCredentialsTheSame(newRemoteClusterRef) {
 		// TODO there may be less disruptive ways to handle the following updates without restarting the pipelines
 		// restarting the pipelines seems to be acceptable considering the low frequency of such updates.
-		string(oldRemoteClusterRef.Certificate) != string(newRemoteClusterRef.Certificate) ||
-		oldRemoteClusterRef.UserName != newRemoteClusterRef.UserName ||
-		oldRemoteClusterRef.Password != newRemoteClusterRef.Password {
 		specs := replication_mgr.pipelineMgr.AllReplicationSpecsForTargetCluster(oldRemoteClusterRef.Uuid)
 
 		for _, spec := range specs {

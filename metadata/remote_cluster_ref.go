@@ -140,13 +140,23 @@ func (ref *RemoteClusterReference) IsSame(ref2 *RemoteClusterReference) bool {
 	if ref2 == nil {
 		return false
 	}
-	essentiallySame := ref.IsEssentiallySame(ref2)
-	if !essentiallySame {
+	if !ref.IsEssentiallySame(ref2) {
 		return false
 	} else {
 		return reflect.DeepEqual(ref.Revision, ref2.Revision) && ref.HttpsHostName == ref2.HttpsHostName &&
 			ref.ActiveHostName == ref2.ActiveHostName && ref.ActiveHttpsHostName == ref2.ActiveHttpsHostName
 	}
+}
+
+func (ref *RemoteClusterReference) AreUserSecurityCredentialsTheSame(ref2 *RemoteClusterReference) bool {
+	if ref == nil {
+		return ref2 == nil
+	}
+	if ref2 == nil {
+		return false
+	}
+	return ref.UserName == ref2.UserName && ref.Password == ref2.Password && ref.DemandEncryption == ref2.DemandEncryption &&
+		ref.EncryptionType == ref2.EncryptionType && bytes.Equal(ref.Certificate, ref2.Certificate) && ref.SANInCertificate == ref2.SANInCertificate
 }
 
 // checks if they are the same minus changable fields
@@ -157,10 +167,11 @@ func (ref *RemoteClusterReference) IsEssentiallySame(ref2 *RemoteClusterReferenc
 	if ref2 == nil {
 		return false
 	}
-	return ref.Id == ref2.Id && ref.Uuid == ref2.Uuid && ref.Name == ref2.Name &&
-		ref.HostName == ref2.HostName && ref.UserName == ref2.UserName &&
-		ref.Password == ref2.Password && ref.DemandEncryption == ref2.DemandEncryption &&
-		ref.EncryptionType == ref2.EncryptionType && bytes.Equal(ref.Certificate, ref2.Certificate)
+	if !ref.AreUserSecurityCredentialsTheSame(ref2) {
+		return false
+	} else {
+		return ref.Id == ref2.Id && ref.Uuid == ref2.Uuid && ref.Name == ref2.Name && ref.HostName == ref2.HostName
+	}
 }
 
 func (ref *RemoteClusterReference) String() string {

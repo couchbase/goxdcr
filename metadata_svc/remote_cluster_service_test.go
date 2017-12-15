@@ -28,6 +28,7 @@ var localhost string = "localhost"
 
 var callBackCount int
 
+// Note this callback here is meant for the metadata change callback, and NOT the metakv callback
 func testCallbackIncrementCount(string, interface{}, interface{}) error {
 	callBackCount++
 	return nil
@@ -322,7 +323,6 @@ func TestAddThenSetRemoteClusterRef(t *testing.T) {
 
 	assert.Equal(0, remoteClusterSvc.getNumberOfAgents())
 	assert.Nil(remoteClusterSvc.AddRemoteCluster(ref, true))
-	// An add should call the callback
 	assert.Equal(1, callBackCount)
 
 	assert.Equal(1, remoteClusterSvc.getNumberOfAgents())
@@ -491,6 +491,7 @@ func TestAddThenSetThenDelClusterViaCallback(t *testing.T) {
 
 	// Set op via callback
 	ref2.HostName = "newHostName"
+	ref2.UserName = "newUserName"
 	_, jsonMarshalBytes = jsonMarshalWrapper(ref2)
 	revision = 2
 
@@ -505,7 +506,7 @@ func TestAddThenSetThenDelClusterViaCallback(t *testing.T) {
 
 	assert.Nil(remoteClusterSvc.RemoteClusterServiceCallback("/test", jsonMarshalBytes, revision))
 	assert.Equal(1, remoteClusterSvc.getNumberOfAgents())
-	// A set should call the callback
+	// A set from metakv should call the callback
 	assert.Equal(2, callBackCount)
 	remoteClusterSvc.agentMutex.RLock()
 	assert.NotNil(remoteClusterSvc.agentMap[idAndName])
@@ -516,7 +517,7 @@ func TestAddThenSetThenDelClusterViaCallback(t *testing.T) {
 	assert.Nil(remoteClusterSvc.RemoteClusterServiceCallback("/test", nil, nil))
 	assert.Equal(0, remoteClusterSvc.getNumberOfAgents())
 	assert.True(remoteClusterSvc.agentCacheMapsAreSynced())
-	// A delete should call the callback
+	// A delete via metaCb already should should call the callback
 	assert.Equal(3, callBackCount)
 
 	// For completeness sake
@@ -604,11 +605,16 @@ func TestPositiveRefresh(t *testing.T) {
 	setupMocksRCS(uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
 		utilitiesMock, remoteClusterSvc, ref)
 
+	// First set the callback before creating agents
+	remoteClusterSvc.SetMetadataChangeHandlerCallback(testCallbackIncrementCount)
+
 	assert.Equal(0, remoteClusterSvc.getNumberOfAgents())
 	assert.Nil(remoteClusterSvc.AddRemoteCluster(ref, true))
+	assert.Equal(1, callBackCount)
 
 	agent, _, _ := remoteClusterSvc.getOrStartNewAgent(ref, false, false)
 	agent.Refresh()
+	assert.Equal(1, callBackCount) // refresh positive does not call callback
 	assert.Equal(hostname, agent.reference.HostName)
 	assert.True(refreshCheckActiveHostNameHelper(agent, dummyHostNameList))
 
@@ -675,14 +681,23 @@ func TestRefresh4Nodes3GoesBad(t *testing.T) {
 	setupUtilsMockPre1Good3Bad(utilitiesPreMock)
 	remoteClusterSvc.updateUtilities(utilitiesPreMock)
 
+	// First set the callback before creating agents
+	remoteClusterSvc.SetMetadataChangeHandlerCallback(testCallbackIncrementCount)
+
 	assert.Equal(0, remoteClusterSvc.getNumberOfAgents())
 	assert.Nil(remoteClusterSvc.AddRemoteCluster(ref, true))
+
+	// 1 callback for adding remote cluster
+	assert.Equal(1, callBackCount)
 
 	// First make sure positive case is good - we have "dummyHostName" as the beginning
 	agent, _, _ := remoteClusterSvc.getOrStartNewAgent(ref, false, false)
 	agent.Refresh()
 	assert.Equal(hostname, agent.reference.HostName)
 	assert.True(refreshCheckActiveHostNameHelper(agent, dummyHostNameList2))
+
+	// First refresh should not have added to callback count because the reference boostrap node has not been changed
+	assert.Equal(1, callBackCount)
 
 	// After second refresh, the remoteClusteReference should not have "dummyHostName" as the actual hostname
 	ref2 := createRemoteClusterReference(idAndName)
@@ -703,6 +718,11 @@ func TestRefresh4Nodes3GoesBad(t *testing.T) {
 	agent.Refresh()
 	assert.NotEqual(hostname, agent.reference.HostName)
 	assert.True(refreshCheckActiveHostNameHelper(agent, newNodeList))
+
+	// This second refresh should have changed the bootstrap node because node 1 was the bootstrap node and it has been declared "bad"
+	// But since it is not user input, do not need to restart
+	assert.Equal(1, callBackCount)
+
 	fmt.Println("============== Test case end: TestRefresh4Nodes3GoesBad =================")
 }
 
