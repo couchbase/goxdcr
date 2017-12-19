@@ -53,6 +53,7 @@ type ClientIface interface {
 	Observe(vb uint16, key string) (result ObserveResult, err error)
 	ObserveSeq(vb uint16, vbuuid uint64) (result *ObserveSeqResult, err error)
 	Receive() (*gomemcached.MCResponse, error)
+	ReceiveWithDeadline(deadline time.Time) (*gomemcached.MCResponse, error)
 	Send(req *gomemcached.MCRequest) (rv *gomemcached.MCResponse, err error)
 	Set(vb uint16, key string, flags int, exp int, body []byte) (*gomemcached.MCResponse, error)
 	SetKeepAliveOptions(interval time.Duration)
@@ -63,6 +64,7 @@ type ClientIface interface {
 	StatsMap(key string) (map[string]string, error)
 	StatsMapForSpecifiedStats(key string, statsMap map[string]string) error
 	Transmit(req *gomemcached.MCRequest) error
+	TransmitWithDeadline(req *gomemcached.MCRequest, deadline time.Time) error
 	TransmitResponse(res *gomemcached.MCResponse) error
 
 	// UprFeed Related
@@ -187,6 +189,20 @@ func (c *Client) Transmit(req *gomemcached.MCRequest) error {
 	return err
 }
 
+func (c *Client) TransmitWithDeadline(req *gomemcached.MCRequest, deadline time.Time) error {
+	c.conn.(net.Conn).SetWriteDeadline(deadline)
+
+	_, err := transmitRequest(c.conn, req)
+
+	// clear write deadline to avoid interference with future write operations
+	c.conn.(net.Conn).SetWriteDeadline(time.Time{})
+
+	if err != nil {
+		c.setHealthy(false)
+	}
+	return err
+}
+
 // TransmitResponse send a response, does not wait.
 func (c *Client) TransmitResponse(res *gomemcached.MCResponse) error {
 	if DefaultWriteTimeout > 0 {
@@ -206,6 +222,20 @@ func (c *Client) TransmitResponse(res *gomemcached.MCResponse) error {
 // Receive a response
 func (c *Client) Receive() (*gomemcached.MCResponse, error) {
 	resp, _, err := getResponse(c.conn, c.hdrBuf)
+	if err != nil && resp.Status != gomemcached.KEY_ENOENT {
+		c.setHealthy(false)
+	}
+	return resp, err
+}
+
+func (c *Client) ReceiveWithDeadline(deadline time.Time) (*gomemcached.MCResponse, error) {
+	c.conn.(net.Conn).SetReadDeadline(deadline)
+
+	resp, _, err := getResponse(c.conn, c.hdrBuf)
+
+	// Clear read deadline to avoid interference with future read operations.
+	c.conn.(net.Conn).SetReadDeadline(time.Time{})
+
 	if err != nil && resp.Status != gomemcached.KEY_ENOENT {
 		c.setHealthy(false)
 	}
