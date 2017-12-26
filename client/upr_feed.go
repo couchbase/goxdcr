@@ -12,6 +12,7 @@ import (
 	"github.com/couchbase/goutils/logging"
 	"strconv"
 	"sync"
+	"sync/atomic"
 )
 
 const uprMutationExtraLen = 30
@@ -21,6 +22,9 @@ const bufferAckThreshold = 0.2
 const opaqueOpen = 0xBEAF0001
 const opaqueFailover = 0xDEADBEEF
 const uprDefaultNoopInterval = 120
+
+// Counter on top of opaqueOpen that others can draw from for open and control msgs
+var opaqueOpenCtrlWell uint32 = opaqueOpen
 
 // UprEvent memcached events for UPR streams.
 type UprEvent struct {
@@ -57,13 +61,31 @@ type UprStream struct {
 	connected bool
 }
 
+const (
+	CompressionTypeNone      = iota
+	CompressionTypeSnappy    = iota
+	CompressionTypeEndMarker = iota // also means invalid
+)
+
+// kv_engine/include/mcbp/protocol/datatype.h
+const (
+	JSONDataType   uint8 = 1
+	SnappyDataType uint8 = 2
+	XattrDataType  uint8 = 4
+)
+
+type UprFeatures struct {
+	Xattribute      bool
+	CompressionType int
+}
+
 // UprFeed represents an UPR feed. A feed contains a connection to a single
 // host and multiple vBuckets
 type UprFeed struct {
 	// lock for feed.vbstreams
 	muVbstreams sync.RWMutex
 	// lock for feed.closed
-	muClosed   sync.RWMutex
+	muClosed    sync.RWMutex
 	C           <-chan *UprEvent            // Exported channel for receiving UPR events
 	vbstreams   map[uint16]*UprStream       // vb->stream mapping
 	closer      chan bool                   // closer
@@ -96,6 +118,7 @@ type UprFeedIface interface {
 	StartFeedWithConfig(datachan_len int) error
 	UprOpen(name string, sequence uint32, bufSize uint32) error
 	UprOpenWithXATTR(name string, sequence uint32, bufSize uint32) error
+	UprOpenWithFeatures(name string, sequence uint32, bufSize uint32, features UprFeatures) (error, UprFeatures)
 	UprRequestStream(vbno, opaqueMSB uint16, flags uint32, vuuid, startSequence, endSequence, snapStart, snapEnd uint64) error
 }
 
@@ -174,6 +197,10 @@ func (event *UprEvent) String() string {
 	return name
 }
 
+func (event *UprEvent) IsSnappyDataType() bool {
+	return event.Opcode == gomemcached.UPR_MUTATION && (event.DataType&SnappyDataType > 0)
+}
+
 func (feed *UprFeed) sendCommands(mc *Client) {
 	transmitCh := feed.transmitCh
 	transmitCl := feed.transmitCl
@@ -229,11 +256,10 @@ func (mc *Client) NewUprFeedWithConfigIface(ackByClient bool) (UprFeedIface, err
 }
 
 func doUprOpen(mc *Client, name string, sequence uint32, enableXATTR bool) error {
-
 	rq := &gomemcached.MCRequest{
 		Opcode: gomemcached.UPR_OPEN,
 		Key:    []byte(name),
-		Opaque: opaqueOpen,
+		Opaque: getUprOpenCtrlOpaque(),
 	}
 
 	rq.Extras = make([]byte, 8)
@@ -247,20 +273,24 @@ func doUprOpen(mc *Client, name string, sequence uint32, enableXATTR bool) error
 	}
 	binary.BigEndian.PutUint32(rq.Extras[4:], flags)
 
-	if err := mc.Transmit(rq); err != nil {
+	return sendMcRequestSync(mc, rq)
+}
+
+// Synchronously send a memcached request and wait for the response
+func sendMcRequestSync(mc *Client, req *gomemcached.MCRequest) error {
+	if err := mc.Transmit(req); err != nil {
 		return err
 	}
 
 	if res, err := mc.Receive(); err != nil {
 		return err
-	} else if res.Opcode != gomemcached.UPR_OPEN {
-		return fmt.Errorf("unexpected #opcode %v", res.Opcode)
-	} else if rq.Opaque != res.Opaque {
-		return fmt.Errorf("opaque mismatch, %v over %v", res.Opaque, res.Opaque)
+	} else if req.Opcode != res.Opcode {
+		return fmt.Errorf("unexpected #opcode sent %v received %v", req.Opcode, res.Opaque)
+	} else if req.Opaque != res.Opaque {
+		return fmt.Errorf("opaque mismatch, sent %v received %v", req.Opaque, res.Opaque)
 	} else if res.Status != gomemcached.SUCCESS {
 		return fmt.Errorf("error %v", res.Status)
 	}
-
 	return nil
 }
 
@@ -269,21 +299,34 @@ func doUprOpen(mc *Client, name string, sequence uint32, enableXATTR bool) error
 // sequence: sequence number for the connection
 // bufsize: max size of the application
 func (feed *UprFeed) UprOpen(name string, sequence uint32, bufSize uint32) error {
-	return feed.uprOpen(name, sequence, bufSize, false /*enableXATTR*/)
+	var allFeaturesDisabled UprFeatures
+	err, _ := feed.uprOpen(name, sequence, bufSize, allFeaturesDisabled)
+	return err
 }
 
 // UprOpen with XATTR enabled.
 func (feed *UprFeed) UprOpenWithXATTR(name string, sequence uint32, bufSize uint32) error {
-	return feed.uprOpen(name, sequence, bufSize, true /*enableXATTR*/)
+	var onlyXattrEnabled UprFeatures
+	onlyXattrEnabled.Xattribute = true
+	err, _ := feed.uprOpen(name, sequence, bufSize, onlyXattrEnabled)
+	return err
 }
 
-func (feed *UprFeed) uprOpen(name string, sequence uint32, bufSize uint32, enableXATTR bool) error {
+func (feed *UprFeed) UprOpenWithFeatures(name string, sequence uint32, bufSize uint32, features UprFeatures) (error, UprFeatures) {
+	return feed.uprOpen(name, sequence, bufSize, features)
+}
+
+func (feed *UprFeed) uprOpen(name string, sequence uint32, bufSize uint32, features UprFeatures) (err error, activatedFeatures UprFeatures) {
 	mc := feed.conn
 
-	var err error
-	if err = doUprOpen(mc, name, sequence, enableXATTR); err != nil {
-		return err
+	// First set this to an invalid value to state that the method hasn't gotten to executing this control yet
+	activatedFeatures.CompressionType = CompressionTypeEndMarker
+
+	if err = doUprOpen(mc, name, sequence, features.Xattribute); err != nil {
+		return
 	}
+
+	activatedFeatures.Xattribute = features.Xattribute
 
 	// send a UPR control message to set the window size for the this connection
 	if bufSize > 0 {
@@ -291,10 +334,11 @@ func (feed *UprFeed) uprOpen(name string, sequence uint32, bufSize uint32, enabl
 			Opcode: gomemcached.UPR_CONTROL,
 			Key:    []byte("connection_buffer_size"),
 			Body:   []byte(strconv.Itoa(int(bufSize))),
+			Opaque: getUprOpenCtrlOpaque(),
 		}
-		err = feed.writeToTransmitCh(rq)
+		err = sendMcRequestSync(feed.conn, rq)
 		if err != nil {
-			return err
+			return
 		}
 		feed.maxAckBytes = uint32(bufferAckThreshold * float32(bufSize))
 	}
@@ -304,23 +348,42 @@ func (feed *UprFeed) uprOpen(name string, sequence uint32, bufSize uint32, enabl
 		Opcode: gomemcached.UPR_CONTROL,
 		Key:    []byte("enable_noop"),
 		Body:   []byte("true"),
+		Opaque: getUprOpenCtrlOpaque(),
 	}
-	err = feed.writeToTransmitCh(rq)
+	err = sendMcRequestSync(feed.conn, rq)
 	if err != nil {
-		return err
+		return
 	}
 
 	rq = &gomemcached.MCRequest{
 		Opcode: gomemcached.UPR_CONTROL,
 		Key:    []byte("set_noop_interval"),
 		Body:   []byte(strconv.Itoa(int(uprDefaultNoopInterval))),
+		Opaque: getUprOpenCtrlOpaque(),
 	}
-	err = feed.writeToTransmitCh(rq)
+	err = sendMcRequestSync(feed.conn, rq)
 	if err != nil {
-		return err
+		return
 	}
 
-	return nil
+	if features.CompressionType == CompressionTypeSnappy {
+		activatedFeatures.CompressionType = CompressionTypeNone
+		rq = &gomemcached.MCRequest{
+			Opcode: gomemcached.UPR_CONTROL,
+			Key:    []byte("force_value_compression"),
+			Body:   []byte("true"),
+			Opaque: getUprOpenCtrlOpaque(),
+		}
+		err = sendMcRequestSync(feed.conn, rq)
+	} else if features.CompressionType == CompressionTypeEndMarker {
+		err = fmt.Errorf("UPR_CONTROL Failed - Invalid CompressionType: %v", features.CompressionType)
+	}
+	if err != nil {
+		return
+	}
+	activatedFeatures.CompressionType = features.CompressionType
+
+	return
 }
 
 // UprGetFailoverLog for given list of vbuckets.
@@ -772,6 +835,10 @@ func (feed *UprFeed) GetUprStats() *UprStats {
 
 func composeOpaque(vbno, opaqueMSB uint16) uint32 {
 	return (uint32(opaqueMSB) << 16) | uint32(vbno)
+}
+
+func getUprOpenCtrlOpaque() uint32 {
+	return atomic.AddUint32(&opaqueOpenCtrlWell, 1)
 }
 
 func appOpaque(opq32 uint32) uint16 {

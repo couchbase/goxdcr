@@ -98,6 +98,7 @@ const (
 // Status field for memcached response.
 type Status uint16
 
+// Matches with protocol_binary.h as source of truth
 const (
 	SUCCESS         = Status(0x00)
 	KEY_ENOENT      = Status(0x01)
