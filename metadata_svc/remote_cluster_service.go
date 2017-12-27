@@ -369,7 +369,7 @@ func (agent *RemoteClusterAgent) Start(newRef *metadata.RemoteClusterReference, 
 	err := agent.UpdateReferenceFrom(newRef, userInitiated)
 
 	if err == nil {
-		agent.logger.Infof("Agent %v %v started for cluster: %", agent.reference.Id, agent.reference.Name, agent.reference.Uuid)
+		agent.logger.Infof("Agent %v %v started for cluster: %v", agent.reference.Id, agent.reference.Name, agent.reference.Uuid)
 		agent.agentWaitGrp.Add(1)
 		go agent.runPeriodicRefresh()
 	} else {
@@ -388,13 +388,23 @@ func (agent *RemoteClusterAgent) stopAllGoRoutines() {
 // Once it's been Stopped, an agent *must* be deleted and not reused due to the stopOnce here
 func (agent *RemoteClusterAgent) Stop() {
 	agent.stopOnce.Do(func() {
+		var cachedId string
+		var cachedName string
+		var cachedUuid string
+
 		agent.refMtx.RLock()
-		cachedId := agent.reference.Id
-		cachedName := agent.reference.Name
-		cachedUuid := agent.reference.Uuid
+		if !agent.reference.IsEmpty() {
+			cachedId = agent.reference.Id
+			cachedName = agent.reference.Name
+			cachedUuid = agent.reference.Uuid
+		} else {
+			cachedId = agent.oldRef.Id
+			cachedName = agent.oldRef.Name
+			cachedUuid = agent.oldRef.Uuid
+		}
 		agent.refMtx.RUnlock()
 
-		agent.logger.Infof("Agent %v %v stopping for cluster: %", cachedId, cachedName, cachedUuid)
+		agent.logger.Infof("Agent %v %v stopping for cluster: %v", cachedId, cachedName, cachedUuid)
 		// Stop all go-routines here
 		agent.stopAllGoRoutines()
 	})
@@ -476,7 +486,7 @@ func (agent *RemoteClusterAgent) runPeriodicRefresh() {
 	for {
 		select {
 		case <-agent.refresherFinCh:
-			agent.logger.Infof(fmt.Sprintf("Agent %v is stopped.", cachedId))
+			agent.logger.Infof("Agent %v is stopped", cachedId)
 			return
 		case <-ticker.C:
 			err := agent.Refresh()
