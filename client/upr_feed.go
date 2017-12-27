@@ -495,11 +495,11 @@ func handleStreamRequest(
 	case res.Status == gomemcached.ROLLBACK:
 		logging.Infof("Rollback response. body=%v, headerBuf=%v\n", res.Body, headerBuf)
 		rollback = binary.BigEndian.Uint64(res.Body)
-		logging.Infof("Rollback %v for vb %v\n", rollback, res.Opaque)
+		logging.Infof("Rollback seqno is %v for response with opaque %v\n", rollback, res.Opaque)
 		return res.Status, rollback, nil, nil
 
 	case res.Status != gomemcached.SUCCESS:
-		err = fmt.Errorf("unexpected status %v, for %v", res.Status, res.Opaque)
+		err = fmt.Errorf("unexpected status %v for response with opaque %v", res.Status, res.Opaque)
 		return res.Status, 0, nil, err
 	}
 
