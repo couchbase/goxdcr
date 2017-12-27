@@ -1434,7 +1434,7 @@ func (ckmgr *CheckpointManager) UpdateVBTimestamps(vbno uint16, rollbackseqno ui
 		max_seqno = pipeline_start_seqno.Seqno - 1
 	}
 
-	ckmgr.logger.Infof("%v vb=%v, current_start_seqno=%v, max_seqno=%v\n", vbno, pipeline_start_seqno.Seqno, max_seqno)
+	ckmgr.logger.Infof("%v vb=%v, current_start_seqno=%v, max_seqno=%v\n", ckmgr.pipeline.Topic(), vbno, pipeline_start_seqno.Seqno, max_seqno)
 
 	vbts, err := ckmgr.getVBTimestampForVB(vbno, checkpointDoc, max_seqno)
 	if err != nil {
