@@ -14,6 +14,7 @@ import (
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/common"
 	"github.com/couchbase/goxdcr/log"
+	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/goxdcr/pipeline_utils"
 	"github.com/couchbase/goxdcr/service_def"
 	"sync"
@@ -100,7 +101,7 @@ func (throttler *BandwidthThrottler) initBandwidthUsageHistory() {
 	throttler.bandwidth_usage = usage_sum
 }
 
-func (throttler *BandwidthThrottler) Start(settings map[string]interface{}) error {
+func (throttler *BandwidthThrottler) Start(settings metadata.ReplicationSettingsMap) error {
 	throttler.logger.Infof("%v starting...", throttler.id)
 
 	throttler.wait_grp.Add(1)
@@ -231,8 +232,10 @@ func (throttler *BandwidthThrottler) Id() string {
 	return throttler.id
 }
 
-func (throttler *BandwidthThrottler) UpdateSettings(settings map[string]interface{}) error {
-	throttler.logger.Debugf("%v Updating settings. settings=%v\n", throttler.id, settings)
+func (throttler *BandwidthThrottler) UpdateSettings(settings metadata.ReplicationSettingsMap) error {
+	if throttler.logger.GetLogLevel() >= log.LogLevelDebug {
+		throttler.logger.Debugf("%v Updating settings. settings=%v\n", throttler.id, settings.CloneAndRedact())
+	}
 	overall_bandwidth_limit := settings[OVERALL_BANDWIDTH_LIMIT]
 	if overall_bandwidth_limit != nil {
 		atomic.StoreInt64(&throttler.overall_bandwidth_limit, int64(overall_bandwidth_limit.(int)))

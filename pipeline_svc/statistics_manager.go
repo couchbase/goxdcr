@@ -730,8 +730,15 @@ func (stats_mgr *StatisticsManager) initOverviewRegistry() {
 	}
 }
 
-func (stats_mgr *StatisticsManager) Start(settings map[string]interface{}) error {
+func (stats_mgr *StatisticsManager) Start(settings metadata.ReplicationSettingsMap) error {
 	stats_mgr.logger.Infof("%v StatisticsManager Starting...", stats_mgr.pipeline.InstanceId())
+	var redactedSettings metadata.ReplicationSettingsMap
+	var redactOnce sync.Once
+	redactOnceFunc := func() {
+		redactOnce.Do(func() {
+			redactedSettings = settings.CloneAndRedact()
+		})
+	}
 
 	//initialize connection
 	err := stats_mgr.initConnections()
@@ -742,10 +749,14 @@ func (stats_mgr *StatisticsManager) Start(settings map[string]interface{}) error
 	if _, ok := settings[PUBLISH_INTERVAL]; ok {
 		stats_mgr.update_interval = time.Duration(settings[PUBLISH_INTERVAL].(int)) * time.Millisecond
 	} else {
-		stats_mgr.logger.Infof("%v There is no update_interval in settings map. settings=%v\n", stats_mgr.pipeline.InstanceId(), settings)
+		redactOnceFunc()
+		stats_mgr.logger.Infof("%v There is no update_interval in settings map. settings=%v\n", stats_mgr.pipeline.InstanceId(), redactedSettings)
 	}
 
-	stats_mgr.logger.Debugf("%v StatisticsManager Starts: update_interval=%v, settings=%v\n", stats_mgr.pipeline.InstanceId(), stats_mgr.update_interval, settings)
+	if stats_mgr.logger.GetLogLevel() >= log.LogLevelDebug {
+		redactOnceFunc()
+		stats_mgr.logger.Debugf("%v StatisticsManager Starts: update_interval=%v, settings=%v\n", stats_mgr.pipeline.InstanceId(), stats_mgr.update_interval, redactedSettings)
+	}
 	stats_mgr.update_ticker_ch <- time.NewTicker(stats_mgr.update_interval)
 
 	stats_mgr.wait_grp.Add(1)
@@ -796,8 +807,10 @@ func (stats_mgr *StatisticsManager) initConnections() error {
 	return nil
 }
 
-func (stats_mgr *StatisticsManager) UpdateSettings(settings map[string]interface{}) error {
-	stats_mgr.logger.Debugf("%v Updating settings on stats manager. settings=%v\n", stats_mgr.pipeline.InstanceId(), settings)
+func (stats_mgr *StatisticsManager) UpdateSettings(settings metadata.ReplicationSettingsMap) error {
+	if stats_mgr.logger.GetLogLevel() >= log.LogLevelDebug {
+		stats_mgr.logger.Debugf("%v Updating settings on stats manager. settings=%v\n", stats_mgr.pipeline.InstanceId(), settings.CloneAndRedact())
+	}
 
 	stats_interval, err := stats_mgr.utils.GetIntSettingFromSettings(settings, PUBLISH_INTERVAL)
 	if err != nil {
@@ -1366,7 +1379,7 @@ func updateStatsForReplication(repl_status *pipeline_pkg.ReplicationStatus, cur_
 }
 
 // get stats update interval based
-func StatsUpdateInterval(settings map[string]interface{}) time.Duration {
+func StatsUpdateInterval(settings metadata.ReplicationSettingsMap) time.Duration {
 	update_interval := default_update_interval
 	if _, ok := settings[PUBLISH_INTERVAL]; ok {
 		update_interval = settings[PUBLISH_INTERVAL].(time.Duration)

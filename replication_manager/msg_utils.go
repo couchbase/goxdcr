@@ -12,7 +12,6 @@ package replication_manager
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
 	ap "github.com/couchbase/goxdcr/adminport"
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
@@ -196,7 +195,7 @@ func NewGetRemoteClustersResponse(remoteClusters map[string]*metadata.RemoteClus
 	for _, remoteCluster := range remoteClusters {
 		remoteClusterArr = append(remoteClusterArr, remoteCluster.ToMap())
 	}
-	return EncodeObjectIntoResponse(remoteClusterArr)
+	return EncodeObjectIntoResponseSensitive(remoteClusterArr)
 }
 
 func NewGetAllReplicationsResponse(replSpecs map[string]*metadata.ReplicationSpecification) (*ap.Response, error) {
@@ -211,7 +210,7 @@ func NewGetAllReplicationsResponse(replSpecs map[string]*metadata.ReplicationSpe
 	for _, specId := range specIds {
 		replArr = append(replArr, getReplicationDocMap(replSpecs[specId]))
 	}
-	return EncodeObjectIntoResponse(replArr)
+	return EncodeObjectIntoResponseSensitive(replArr)
 }
 
 func NewGetAllReplicationInfosResponse(replInfos []base.ReplicationInfo) (*ap.Response, error) {
@@ -355,7 +354,7 @@ func DecodeCreateRemoteClusterRequest(request *http.Request) (justValidate bool,
 }
 
 func NewCreateRemoteClusterResponse(remoteClusterRef *metadata.RemoteClusterReference) (*ap.Response, error) {
-	return EncodeObjectIntoResponse(remoteClusterRef.ToMap())
+	return EncodeObjectIntoResponseSensitive(remoteClusterRef.ToMap())
 }
 
 func NewOKResponse() (*ap.Response, error) {
@@ -369,7 +368,7 @@ func NewEmptyArrayResponse() (*ap.Response, error) {
 }
 
 // decode parameters from create replication request
-func DecodeCreateReplicationRequest(request *http.Request) (justValidate bool, fromBucket, toCluster, toBucket string, settings map[string]interface{}, errorsMap map[string]error, err error) {
+func DecodeCreateReplicationRequest(request *http.Request) (justValidate bool, fromBucket, toCluster, toBucket string, settings metadata.ReplicationSettingsMap, errorsMap map[string]error, err error) {
 	errorsMap = make(map[string]error)
 	var replicationType string
 
@@ -442,8 +441,8 @@ func DecodeCreateReplicationRequest(request *http.Request) (justValidate bool, f
 	return
 }
 
-func DecodeChangeReplicationSettings(request *http.Request, replicationId string) (justValidate bool, settings map[string]interface{}, errorsMap map[string]error) {
-	errorsMap = make(map[string]error)
+func DecodeChangeReplicationSettings(request *http.Request, replicationId string) (justValidate bool, settings metadata.ReplicationSettingsMap, errorsMap base.ErrorMap) {
+	errorsMap = make(base.ErrorMap)
 
 	if err := request.ParseForm(); err != nil {
 		errorsMap[base.PlaceHolderFieldKey] = ErrorParsingForm
@@ -513,8 +512,8 @@ func DecodeCreateReplicationResponse(response *http.Response) (string, error) {
 }
 
 // decode replication settings related parameters from http request
-func DecodeSettingsFromRequest(request *http.Request, isDefaultSettings bool, isUpdate bool, isCapi bool) (map[string]interface{}, map[string]error) {
-	settings := make(map[string]interface{})
+func DecodeSettingsFromRequest(request *http.Request, isDefaultSettings bool, isUpdate bool, isCapi bool) (metadata.ReplicationSettingsMap, map[string]error) {
+	settings := make(metadata.ReplicationSettingsMap)
 	errorsMap := make(map[string]error)
 
 	if err := request.ParseForm(); err != nil {
@@ -539,12 +538,14 @@ func DecodeSettingsFromRequest(request *http.Request, isDefaultSettings bool, is
 		return nil, errorsMap
 	}
 
-	logger_msgutil.Debugf("settings decoded from request: %v\n", settings)
+	if logger_msgutil.GetLogLevel() >= log.LogLevelDebug {
+		logger_msgutil.Debugf("settings decoded from request: %v\n", settings.CloneAndRedact())
+	}
 	return settings, nil
 }
 
-func DecodeSettingsFromXDCRInternalSettingsRequest(request *http.Request) (map[string]interface{}, map[string]error) {
-	settings := make(map[string]interface{})
+func DecodeSettingsFromXDCRInternalSettingsRequest(request *http.Request) (metadata.ReplicationSettingsMap, map[string]error) {
+	settings := make(metadata.ReplicationSettingsMap)
 	errorsMap := make(map[string]error)
 
 	if err := request.ParseForm(); err != nil {
@@ -565,7 +566,9 @@ func DecodeSettingsFromXDCRInternalSettingsRequest(request *http.Request) (map[s
 		return nil, errorsMap
 	}
 
-	logger_msgutil.Debugf("settings decoded from request: %v\n", settings)
+	if logger_msgutil.GetLogLevel() >= log.LogLevelDebug {
+		logger_msgutil.Debugf("settings decoded from request: %v\n", settings.CloneAndRedact())
+	}
 	return settings, nil
 }
 
@@ -585,7 +588,8 @@ func DecodeRegexpValidationRequest(request *http.Request, utils utilities.UtilsI
 			keysStr := getStringFromValArr(valArr)
 			err := json.Unmarshal([]byte(keysStr), &keys)
 			if err != nil {
-				return "", nil, utils.NewEnhancedError(fmt.Sprintf("Error parsing keys=%v.", keysStr), err)
+				logger_msgutil.Debugf("Error parsing keys=%v%v%v.", base.UdTagBegin, keysStr, base.UdTagEnd)
+				return "", nil, utils.NewEnhancedError("Error parsing keys", err)
 			}
 		default:
 			// ignore other parameters
@@ -611,9 +615,8 @@ func NewCreateReplicationResponse(replicationId string, warnings []string) (*ap.
 func NewReplicationSettingsResponse(settings *metadata.ReplicationSettings) (*ap.Response, error) {
 	if settings == nil {
 		return NewEmptyArrayResponse()
-
 	} else {
-		return EncodeObjectIntoResponse(convertSettingsToRestSettingsMap(settings, false))
+		return EncodeObjectIntoResponseSensitive(convertSettingsToRestSettingsMap(settings, false))
 	}
 }
 
@@ -627,7 +630,7 @@ func NewDefaultReplicationSettingsResponse(settings *metadata.ReplicationSetting
 			replicationSettingMap[key] = value
 		}
 
-		return EncodeObjectIntoResponse(replicationSettingMap)
+		return EncodeObjectIntoResponseSensitive(replicationSettingMap)
 	}
 }
 
@@ -653,7 +656,7 @@ func NewRegexpValidationResponse(matchesMap map[string][][]int) (*ap.Response, e
 		returnMap[key] = convertedMatches
 	}
 
-	return EncodeObjectIntoResponse(returnMap)
+	return EncodeObjectIntoResponseSensitive(returnMap)
 }
 
 // decode dynamic paramater from the path of http request
@@ -791,12 +794,16 @@ func EncodeByteArrayIntoResponse(data []byte) (*ap.Response, error) {
 
 // encode a byte array into Response object with specified status code
 func EncodeByteArrayIntoResponseWithStatusCode(data []byte, statusCode int) (*ap.Response, error) {
-	return &ap.Response{statusCode, data}, nil
+	return &ap.Response{StatusCode: statusCode, Body: data}, nil
 }
 
 // encode an arbitrary object into Response object with default status code of StatusOK
 func EncodeObjectIntoResponse(object interface{}) (*ap.Response, error) {
 	return EncodeObjectIntoResponseWithStatusCode(object, http.StatusOK)
+}
+
+func EncodeObjectIntoResponseSensitive(object interface{}) (*ap.Response, error) {
+	return EncodeObjectIntoResponseWithStatusCodeSensitive(object, http.StatusOK)
 }
 
 // encode an arbitrary object into Response object with specified status code
@@ -812,6 +819,14 @@ func EncodeObjectIntoResponseWithStatusCode(object interface{}, statusCode int) 
 		}
 	}
 	return EncodeByteArrayIntoResponseWithStatusCode(body, statusCode)
+}
+
+func EncodeObjectIntoResponseWithStatusCodeSensitive(object interface{}, statusCode int) (*ap.Response, error) {
+	res, err := EncodeObjectIntoResponseWithStatusCode(object, statusCode)
+	if err == nil && res != nil {
+		res.TagPrintingBody = true
+	}
+	return res, err
 }
 
 func EncodeAuthorizationErrorMessageIntoResponse(permission string) (*ap.Response, error) {
@@ -859,7 +874,7 @@ func EncodeReplicationSpecErrorIntoResponse(err error) (*ap.Response, error) {
 
 }
 
-func processKey(restKey string, valArr []string, settingsPtr *map[string]interface{}, isDefaultSettings bool, isUpdate bool, isEnterprise bool, isCapi bool) error {
+func processKey(restKey string, valArr []string, settingsPtr *metadata.ReplicationSettingsMap, isDefaultSettings bool, isUpdate bool, isEnterprise bool, isCapi bool) error {
 	settingsKey, ok := RestKeyToSettingsKeyMap[restKey]
 	if !ok {
 		// ignore non-settings key

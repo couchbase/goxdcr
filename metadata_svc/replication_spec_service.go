@@ -62,6 +62,32 @@ func (rsv *ReplicationSpecVal) CAS(obj CacheableMetadataObj) bool {
 	}
 }
 
+func (rsv *ReplicationSpecVal) Clone() CacheableMetadataObj {
+	if rsv != nil {
+		clonedRsv := &ReplicationSpecVal{}
+		*clonedRsv = *rsv
+		if rsv.spec != nil {
+			clonedRsv.spec = rsv.spec.Clone()
+		}
+		return clonedRsv
+	}
+	return rsv
+}
+
+func (rsv *ReplicationSpecVal) Redact() CacheableMetadataObj {
+	if rsv != nil && rsv.spec != nil {
+		rsv.spec.Redact()
+	}
+	return rsv
+}
+
+func (rsv *ReplicationSpecVal) CloneAndRedact() CacheableMetadataObj {
+	if rsv != nil {
+		return rsv.Clone().Redact()
+	}
+	return rsv
+}
+
 type ReplicationSpecService struct {
 	xdcr_comp_topology_svc   service_def.XDCRCompTopologySvc
 	metadata_svc             service_def.MetadataSvc
@@ -297,7 +323,7 @@ func (service *ReplicationSpecService) validateES(errorMap base.ErrorMap, target
  * Main Validation routine, supplemented by multiple helper sub-routines.
  * Each sub-routine may be daisy chained by variables that would be helpful for further subroutines.
  */
-func (service *ReplicationSpecService) ValidateNewReplicationSpec(sourceBucket, targetCluster, targetBucket string, settings map[string]interface{}) (string, string, *metadata.RemoteClusterReference, base.ErrorMap, error, []string) {
+func (service *ReplicationSpecService) ValidateNewReplicationSpec(sourceBucket, targetCluster, targetBucket string, settings metadata.ReplicationSettingsMap) (string, string, *metadata.RemoteClusterReference, base.ErrorMap, error, []string) {
 	errorMap := make(base.ErrorMap)
 	service.logger.Infof("Start ValidateAddReplicationSpec, sourceBucket=%v, targetCluster=%v, targetBucket=%v\n", sourceBucket, targetCluster, targetBucket)
 	defer service.logger.Infof("Finished ValidateAddReplicationSpec, sourceBucket=%v, targetCluster=%v, targetBucket=%v, errorMap=%v\n", sourceBucket, targetCluster, targetBucket, errorMap)
@@ -351,7 +377,7 @@ func (service *ReplicationSpecService) ValidateNewReplicationSpec(sourceBucket, 
 	return sourceBucketUUID, targetBucketUUID, targetClusterRef, errorMap, nil, warnings
 }
 
-func (service *ReplicationSpecService) ValidateReplicationSettings(sourceBucket, targetCluster, targetBucket string, settings map[string]interface{}) (base.ErrorMap, error) {
+func (service *ReplicationSpecService) ValidateReplicationSettings(sourceBucket, targetCluster, targetBucket string, settings metadata.ReplicationSettingsMap) (base.ErrorMap, error) {
 	var errorMap base.ErrorMap = make(base.ErrorMap)
 
 	targetClusterRef, remote_connStr, remote_userName, remote_password, certificate, sanInCertificate := service.getRemoteReference(errorMap, targetCluster)
@@ -367,7 +393,7 @@ func (service *ReplicationSpecService) ValidateReplicationSettings(sourceBucket,
 	return service.validateReplicationSettingsInternal(sourceBucket, targetCluster, targetBucket, settings, targetClusterRef, remote_connStr, remote_userName, remote_password, certificate, sanInCertificate, targetKVVBMap, targetBucketInfo)
 }
 
-func (service *ReplicationSpecService) validateReplicationSettingsInternal(sourceBucket, targetCluster, targetBucket string, settings map[string]interface{},
+func (service *ReplicationSpecService) validateReplicationSettingsInternal(sourceBucket, targetCluster, targetBucket string, settings metadata.ReplicationSettingsMap,
 	targetClusterRef *metadata.RemoteClusterReference, remote_connStr, remote_userName, remote_password string, certificate []byte, sanInCertificate bool,
 	targetKVVBMap map[string][]uint16, targetBucketInfo map[string]interface{}) (base.ErrorMap, error) {
 	errorMap := make(base.ErrorMap)
@@ -1038,7 +1064,7 @@ func (service *ReplicationSpecService) cacheSpec(cache *MetadataCache, specId st
 	if ok && cachedVal != nil {
 		cachedObj, ok1 = cachedVal.(*ReplicationSpecVal)
 		if !ok1 || cachedObj == nil {
-			panic("Object in ReplicationSpecServcie cache is not of type *replciationSpecVal")
+			panic("Object in ReplicationSpecServcie cache is not of type *replicationSpecVal")
 		}
 		updatedCachedObj = &ReplicationSpecVal{
 			spec:       spec,

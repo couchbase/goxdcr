@@ -108,6 +108,28 @@ func (ref *RemoteClusterReference) MyConnectionStr() (string, error) {
 	}
 }
 
+func (ref *RemoteClusterReference) Redact() *RemoteClusterReference {
+	if ref != nil {
+		if len(ref.UserName) > 0 && !base.IsStringRedacted(ref.UserName) {
+			ref.UserName = base.TagUD(ref.UserName)
+		}
+		if len(ref.Password) > 0 && !base.IsStringRedacted(ref.Password) {
+			ref.Password = base.TagUD(ref.Password)
+		}
+		if len(ref.Certificate) > 0 {
+			ref.Certificate = base.TagUDBytes(ref.Certificate)
+		}
+	}
+	return ref
+}
+
+func (ref *RemoteClusterReference) CloneAndRedact() *RemoteClusterReference {
+	if ref != nil {
+		return ref.Clone().Redact()
+	}
+	return ref
+}
+
 func (ref *RemoteClusterReference) MyCredentials() (string, string, []byte, bool, error) {
 	return ref.UserName, ref.Password, ref.Certificate, ref.SANInCertificate, nil
 }
@@ -174,6 +196,7 @@ func (ref *RemoteClusterReference) IsEssentiallySame(ref2 *RemoteClusterReferenc
 	}
 }
 
+// Caller of this function should be wary of the need for redaction. Recommended to use it on an already redacted object
 func (ref *RemoteClusterReference) String() string {
 	if ref == nil {
 		return "nil"

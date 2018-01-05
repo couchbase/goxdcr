@@ -123,7 +123,7 @@ func (_m *XDCRFactoryIface) constructRouter(id string, spec *metadata.Replicatio
 }
 
 // constructSettingsForCapiNozzle provides a mock function with given fields: pipeline, settings
-func (_m *XDCRFactoryIface) constructSettingsForCapiNozzle(pipeline common.Pipeline, settings map[string]interface{}) (map[string]interface{}, error) {
+func (_m *XDCRFactoryIface) constructSettingsForCapiNozzle(pipeline common.Pipeline, settings metadata.ReplicationSettingsMap) (map[string]interface{}, error) {
 	ret := _m.Called(pipeline, settings)
 
 	var r0 map[string]interface{}
@@ -146,7 +146,7 @@ func (_m *XDCRFactoryIface) constructSettingsForCapiNozzle(pipeline common.Pipel
 }
 
 // constructSettingsForCheckpointManager provides a mock function with given fields: pipeline, settings
-func (_m *XDCRFactoryIface) constructSettingsForCheckpointManager(pipeline common.Pipeline, settings map[string]interface{}) (map[string]interface{}, error) {
+func (_m *XDCRFactoryIface) constructSettingsForCheckpointManager(pipeline common.Pipeline, settings metadata.ReplicationSettingsMap) (map[string]interface{}, error) {
 	ret := _m.Called(pipeline, settings)
 
 	var r0 map[string]interface{}
@@ -169,7 +169,7 @@ func (_m *XDCRFactoryIface) constructSettingsForCheckpointManager(pipeline commo
 }
 
 // constructSettingsForDcpNozzle provides a mock function with given fields: pipeline, part, settings
-func (_m *XDCRFactoryIface) constructSettingsForDcpNozzle(pipeline common.Pipeline, part *parts.DcpNozzle, settings map[string]interface{}) (map[string]interface{}, error) {
+func (_m *XDCRFactoryIface) constructSettingsForDcpNozzle(pipeline common.Pipeline, part *parts.DcpNozzle, settings metadata.ReplicationSettingsMap) (map[string]interface{}, error) {
 	ret := _m.Called(pipeline, part, settings)
 
 	var r0 map[string]interface{}
@@ -192,7 +192,7 @@ func (_m *XDCRFactoryIface) constructSettingsForDcpNozzle(pipeline common.Pipeli
 }
 
 // constructSettingsForStatsManager provides a mock function with given fields: pipeline, settings
-func (_m *XDCRFactoryIface) constructSettingsForStatsManager(pipeline common.Pipeline, settings map[string]interface{}) (map[string]interface{}, error) {
+func (_m *XDCRFactoryIface) constructSettingsForStatsManager(pipeline common.Pipeline, settings metadata.ReplicationSettingsMap) (map[string]interface{}, error) {
 	ret := _m.Called(pipeline, settings)
 
 	var r0 map[string]interface{}
@@ -215,7 +215,7 @@ func (_m *XDCRFactoryIface) constructSettingsForStatsManager(pipeline common.Pip
 }
 
 // constructSettingsForSupervisor provides a mock function with given fields: pipeline, settings
-func (_m *XDCRFactoryIface) constructSettingsForSupervisor(pipeline common.Pipeline, settings map[string]interface{}) (map[string]interface{}, error) {
+func (_m *XDCRFactoryIface) constructSettingsForSupervisor(pipeline common.Pipeline, settings metadata.ReplicationSettingsMap) (map[string]interface{}, error) {
 	ret := _m.Called(pipeline, settings)
 
 	var r0 map[string]interface{}
@@ -238,7 +238,7 @@ func (_m *XDCRFactoryIface) constructSettingsForSupervisor(pipeline common.Pipel
 }
 
 // constructSettingsForXmemNozzle provides a mock function with given fields: pipeline, part, targetClusterRef, settings, ssl_port_map, isSSLOverMem
-func (_m *XDCRFactoryIface) constructSettingsForXmemNozzle(pipeline common.Pipeline, part common.Part, targetClusterRef *metadata.RemoteClusterReference, settings map[string]interface{}, ssl_port_map map[string]uint16, isSSLOverMem bool) (map[string]interface{}, error) {
+func (_m *XDCRFactoryIface) constructSettingsForXmemNozzle(pipeline common.Pipeline, part common.Part, targetClusterRef *metadata.RemoteClusterReference, settings metadata.ReplicationSettingsMap, ssl_port_map map[string]uint16, isSSLOverMem bool) (map[string]interface{}, error) {
 	ret := _m.Called(pipeline, part, targetClusterRef, settings, ssl_port_map, isSSLOverMem)
 
 	var r0 map[string]interface{}
@@ -293,7 +293,7 @@ func (_m *XDCRFactoryIface) constructSourceNozzles(spec *metadata.ReplicationSpe
 }
 
 // constructUpdateSettingsForCapiNozzle provides a mock function with given fields: pipeline, settings
-func (_m *XDCRFactoryIface) constructUpdateSettingsForCapiNozzle(pipeline common.Pipeline, settings map[string]interface{}) map[string]interface{} {
+func (_m *XDCRFactoryIface) constructUpdateSettingsForCapiNozzle(pipeline common.Pipeline, settings metadata.ReplicationSettingsMap) map[string]interface{} {
 	ret := _m.Called(pipeline, settings)
 
 	var r0 map[string]interface{}
@@ -309,7 +309,7 @@ func (_m *XDCRFactoryIface) constructUpdateSettingsForCapiNozzle(pipeline common
 }
 
 // constructUpdateSettingsForCheckpointManager provides a mock function with given fields: pipeline, settings
-func (_m *XDCRFactoryIface) constructUpdateSettingsForCheckpointManager(pipeline common.Pipeline, settings map[string]interface{}) (map[string]interface{}, error) {
+func (_m *XDCRFactoryIface) constructUpdateSettingsForCheckpointManager(pipeline common.Pipeline, settings metadata.ReplicationSettingsMap) (map[string]interface{}, error) {
 	ret := _m.Called(pipeline, settings)
 
 	var r0 map[string]interface{}
@@ -332,7 +332,7 @@ func (_m *XDCRFactoryIface) constructUpdateSettingsForCheckpointManager(pipeline
 }
 
 // constructUpdateSettingsForStatsManager provides a mock function with given fields: pipeline, settings
-func (_m *XDCRFactoryIface) constructUpdateSettingsForStatsManager(pipeline common.Pipeline, settings map[string]interface{}) (map[string]interface{}, error) {
+func (_m *XDCRFactoryIface) constructUpdateSettingsForStatsManager(pipeline common.Pipeline, settings metadata.ReplicationSettingsMap) (map[string]interface{}, error) {
 	ret := _m.Called(pipeline, settings)
 
 	var r0 map[string]interface{}
@@ -355,7 +355,7 @@ func (_m *XDCRFactoryIface) constructUpdateSettingsForStatsManager(pipeline comm
 }
 
 // constructUpdateSettingsForSupervisor provides a mock function with given fields: pipeline, settings
-func (_m *XDCRFactoryIface) constructUpdateSettingsForSupervisor(pipeline common.Pipeline, settings map[string]interface{}) (map[string]interface{}, error) {
+func (_m *XDCRFactoryIface) constructUpdateSettingsForSupervisor(pipeline common.Pipeline, settings metadata.ReplicationSettingsMap) (map[string]interface{}, error) {
 	ret := _m.Called(pipeline, settings)
 
 	var r0 map[string]interface{}
@@ -378,7 +378,7 @@ func (_m *XDCRFactoryIface) constructUpdateSettingsForSupervisor(pipeline common
 }
 
 // constructUpdateSettingsForXmemNozzle provides a mock function with given fields: pipeline, settings
-func (_m *XDCRFactoryIface) constructUpdateSettingsForXmemNozzle(pipeline common.Pipeline, settings map[string]interface{}) map[string]interface{} {
+func (_m *XDCRFactoryIface) constructUpdateSettingsForXmemNozzle(pipeline common.Pipeline, settings metadata.ReplicationSettingsMap) map[string]interface{} {
 	ret := _m.Called(pipeline, settings)
 
 	var r0 map[string]interface{}
@@ -543,7 +543,7 @@ func (_m *XDCRFactoryIface) ConstructSSLPortMap(targetClusterRef *metadata.Remot
 }
 
 // ConstructSettingsForPart provides a mock function with given fields: pipeline, part, settings, targetClusterRef, ssl_port_map, isSSLOverMem
-func (_m *XDCRFactoryIface) ConstructSettingsForPart(pipeline common.Pipeline, part common.Part, settings map[string]interface{}, targetClusterRef *metadata.RemoteClusterReference, ssl_port_map map[string]uint16, isSSLOverMem bool) (map[string]interface{}, error) {
+func (_m *XDCRFactoryIface) ConstructSettingsForPart(pipeline common.Pipeline, part common.Part, settings metadata.ReplicationSettingsMap, targetClusterRef *metadata.RemoteClusterReference, ssl_port_map map[string]uint16, isSSLOverMem bool) (map[string]interface{}, error) {
 	ret := _m.Called(pipeline, part, settings, targetClusterRef, ssl_port_map, isSSLOverMem)
 
 	var r0 map[string]interface{}
@@ -566,7 +566,7 @@ func (_m *XDCRFactoryIface) ConstructSettingsForPart(pipeline common.Pipeline, p
 }
 
 // ConstructSettingsForService provides a mock function with given fields: pipeline, service, settings
-func (_m *XDCRFactoryIface) ConstructSettingsForService(pipeline common.Pipeline, service common.PipelineService, settings map[string]interface{}) (map[string]interface{}, error) {
+func (_m *XDCRFactoryIface) ConstructSettingsForService(pipeline common.Pipeline, service common.PipelineService, settings metadata.ReplicationSettingsMap) (map[string]interface{}, error) {
 	ret := _m.Called(pipeline, service, settings)
 
 	var r0 map[string]interface{}
@@ -589,7 +589,7 @@ func (_m *XDCRFactoryIface) ConstructSettingsForService(pipeline common.Pipeline
 }
 
 // ConstructUpdateSettingsForPart provides a mock function with given fields: pipeline, part, settings
-func (_m *XDCRFactoryIface) ConstructUpdateSettingsForPart(pipeline common.Pipeline, part common.Part, settings map[string]interface{}) (map[string]interface{}, error) {
+func (_m *XDCRFactoryIface) ConstructUpdateSettingsForPart(pipeline common.Pipeline, part common.Part, settings metadata.ReplicationSettingsMap) (map[string]interface{}, error) {
 	ret := _m.Called(pipeline, part, settings)
 
 	var r0 map[string]interface{}
@@ -612,7 +612,7 @@ func (_m *XDCRFactoryIface) ConstructUpdateSettingsForPart(pipeline common.Pipel
 }
 
 // ConstructUpdateSettingsForService provides a mock function with given fields: pipeline, service, settings
-func (_m *XDCRFactoryIface) ConstructUpdateSettingsForService(pipeline common.Pipeline, service common.PipelineService, settings map[string]interface{}) (map[string]interface{}, error) {
+func (_m *XDCRFactoryIface) ConstructUpdateSettingsForService(pipeline common.Pipeline, service common.PipelineService, settings metadata.ReplicationSettingsMap) (map[string]interface{}, error) {
 	ret := _m.Called(pipeline, service, settings)
 
 	var r0 map[string]interface{}

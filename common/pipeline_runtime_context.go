@@ -9,11 +9,13 @@
 
 package common
 
-import ()
+import (
+	"github.com/couchbase/goxdcr/metadata"
+)
 
 //PipelineRuntimeContext manages all the services that attaches to the feed
 type PipelineRuntimeContext interface {
-	Start(map[string]interface{}) error
+	Start(metadata.ReplicationSettingsMap) error
 	Stop() error
 
 	Pipeline() Pipeline
@@ -28,5 +30,5 @@ type PipelineRuntimeContext interface {
 	//attach the service from the feed and stop the service's goroutine
 	UnregisterService(srv_name string) error
 
-	UpdateSettings(settings map[string]interface{}) error
+	UpdateSettings(settings metadata.ReplicationSettingsMap) error
 }

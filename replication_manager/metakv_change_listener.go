@@ -161,12 +161,12 @@ func (rscl *ReplicationSpecChangeListener) replicationSpecChangeHandlerCallback(
 		return err
 	}
 
-	rscl.logger.Infof("specChangedCallback called on id = %v, oldSpec=%v, newSpec=%v\n", topic, oldSpec, newSpec)
+	rscl.logger.Infof("specChangedCallback called on id = %v, oldSpec=%v, newSpec=%v\n", topic, oldSpec.CloneAndRedact(), newSpec.CloneAndRedact())
 	if oldSpec != nil {
-		rscl.logger.Infof("old spec settings=%v\n", oldSpec.Settings)
+		rscl.logger.Infof("old spec settings=%v\n", oldSpec.Settings.CloneAndRedact())
 	}
 	if newSpec != nil {
-		rscl.logger.Infof("new spec settings=%v\n", newSpec.Settings)
+		rscl.logger.Infof("new spec settings=%v\n", newSpec.Settings.CloneAndRedact())
 	}
 
 	if newSpec == nil {
@@ -258,7 +258,7 @@ func (rscl *ReplicationSpecChangeListener) liveUpdatePipeline(topic string, oldS
 		oldSettings.OptimisticReplicationThreshold != newSettings.OptimisticReplicationThreshold ||
 		oldSettings.BandwidthLimit != newSettings.BandwidthLimit {
 
-		rscl.logger.Infof("Updating pipeline %v with new settings=%v\n old settings=%v\n", topic, newSettings, oldSettings)
+		rscl.logger.Infof("Updating pipeline %v with new settings=%v\n old settings=%v\n", topic, newSettings.CloneAndRedact(), oldSettings.CloneAndRedact())
 
 		go rscl.liveUpdatePipelineWithRetry(topic, newSettings, newSpecInternalId)
 
@@ -356,7 +356,7 @@ func (rccl *RemoteClusterChangeListener) remoteClusterChangeHandlerCallback(remo
 		}
 	}
 
-	rccl.logger.Infof("remoteClusterChangedCallback called on id = %v, oldRef=%v, newRef=%v\n", remoteClusterRefId, oldRemoteClusterRef.String(), newRemoteClusterRef.String())
+	rccl.logger.Infof("remoteClusterChangedCallback called on id = %v, oldRef=%v, newRef=%v\n", remoteClusterRefId, oldRemoteClusterRef.CloneAndRedact().String(), newRemoteClusterRef.CloneAndRedact().String())
 	defer rccl.logger.Infof("Completed remoteClusterChangedCallback called on id = %v", remoteClusterRefId)
 
 	if oldRemoteClusterRef == nil {

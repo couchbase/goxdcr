@@ -16,6 +16,7 @@ import (
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/common"
 	"github.com/couchbase/goxdcr/log"
+	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/goxdcr/parts"
 	"github.com/couchbase/goxdcr/pipeline"
 	"github.com/couchbase/goxdcr/pipeline_utils"
@@ -115,7 +116,7 @@ func (pipelineSupervisor *PipelineSupervisor) Attach(p common.Pipeline) error {
 	return nil
 }
 
-func (pipelineSupervisor *PipelineSupervisor) Start(settings map[string]interface{}) error {
+func (pipelineSupervisor *PipelineSupervisor) Start(settings metadata.ReplicationSettingsMap) error {
 	// when doing health check, we want to wait long enough to ensure that we see bad stats in at least two different stats collection intervals
 	// before we declare the pipeline to be broken
 	var max_dcp_miss_count int
@@ -235,7 +236,7 @@ func (pipelineSupervisor *PipelineSupervisor) OnEvent(event *common.Event) {
 	}
 }
 
-func (pipelineSupervisor *PipelineSupervisor) init(settings map[string]interface{}) error {
+func (pipelineSupervisor *PipelineSupervisor) init(settings metadata.ReplicationSettingsMap) error {
 	//initialize settings
 	err := pipelineSupervisor.utils.ValidateSettings(pipeline_supervisor_setting_defs, settings, pipelineSupervisor.Logger())
 	if err != nil {
@@ -252,7 +253,7 @@ func (pipelineSupervisor *PipelineSupervisor) init(settings map[string]interface
 	return nil
 }
 
-func (pipelineSupervisor *PipelineSupervisor) UpdateSettings(settings map[string]interface{}) error {
+func (pipelineSupervisor *PipelineSupervisor) UpdateSettings(settings metadata.ReplicationSettingsMap) error {
 	pipelineSupervisor.Logger().Debugf("Updating settings on pipelineSupervisor %v. settings=%v\n", pipelineSupervisor.Id(), settings)
 	logLevelObj := pipelineSupervisor.utils.GetSettingFromSettings(settings, PIPELINE_LOG_LEVEL)
 

@@ -50,16 +50,19 @@ type Request interface {
 }
 
 // handler for Request
-type RequestHandler interface{
-        // extends http.Handler interface 
-        http.Handler
-        // sets server, which will be doing the actual handling
-        SetServer(Server) error
-        GetServer() Server
+type RequestHandler interface {
+	// extends http.Handler interface
+	http.Handler
+	// sets server, which will be doing the actual handling
+	SetServer(Server) error
+	GetServer() Server
 }
 
 // response returned from request handler
 type Response struct {
 	StatusCode int
-	Body []byte
+	Body       []byte
+
+	// If set, then the body contains sensitive data and should be redacted in debug log
+	TagPrintingBody bool
 }

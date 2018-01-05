@@ -221,7 +221,7 @@ func NewTestPart(id string) *TestPart {
 	return tp
 }
 
-func (tp *TestPart) Start(settings map[string]interface{}) error {
+func (tp *TestPart) Start(settings metadata.ReplicationSettingsMap) error {
 	return nil
 }
 

@@ -19,6 +19,7 @@ import (
 	common "github.com/couchbase/goxdcr/common"
 	gen_server "github.com/couchbase/goxdcr/gen_server"
 	"github.com/couchbase/goxdcr/log"
+	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/goxdcr/service_def"
 	utilities "github.com/couchbase/goxdcr/utils"
 	"math"
@@ -228,11 +229,11 @@ type DcpNozzleIface interface {
 	Open() error
 	Receive(data interface{}) error
 	SetMaxMissCount(max_dcp_miss_count int)
-	Start(settings map[string]interface{}) error
+	Start(settings metadata.ReplicationSettingsMap) error
 	Stop() error
 	PrintStatusSummary()
 	SetVBList(vbnos []uint16) error
-	UpdateSettings(settings map[string]interface{}) error
+	UpdateSettings(settings metadata.ReplicationSettingsMap) error
 
 	// Embedded from GenServer
 	Logger() *log.CommonLogger
@@ -393,7 +394,7 @@ func (dcp *DcpNozzle) prioritizeReturnErrorByFeatures(requested mcc.UprFeatures,
 	return nil
 }
 
-func (dcp *DcpNozzle) initializeMemcachedClient(settings map[string]interface{}) error {
+func (dcp *DcpNozzle) initializeMemcachedClient(settings metadata.ReplicationSettingsMap) error {
 	var dcpMcReqFeatures utilities.HELOFeatures
 	var respondedFeatures utilities.HELOFeatures
 	var err error
@@ -466,7 +467,7 @@ func (dcp *DcpNozzle) initializeUprFeed() error {
 	return err
 }
 
-func (dcp *DcpNozzle) initialize(settings map[string]interface{}) (err error) {
+func (dcp *DcpNozzle) initialize(settings metadata.ReplicationSettingsMap) (err error) {
 	dcp.finch = make(chan bool)
 
 	val, ok := settings[SETTING_COMPRESSION_TYPE]
@@ -530,7 +531,7 @@ func (dcp *DcpNozzle) Close() error {
  * Start routine initializes the DCP client, gen server, and launches go routines on various
  * monitors.
  */
-func (dcp *DcpNozzle) Start(settings map[string]interface{}) error {
+func (dcp *DcpNozzle) Start(settings metadata.ReplicationSettingsMap) error {
 	dcp.Logger().Infof("Dcp nozzle %v starting ....\n", dcp.Id())
 
 	err := dcp.SetState(common.Part_Starting)
@@ -1097,7 +1098,7 @@ func (dcp *DcpNozzle) newOpaqueForClosing() uint16 {
 	return uint16((timeNow >> 26) & 0xFFFF)
 }
 
-func (dcp *DcpNozzle) UpdateSettings(settings map[string]interface{}) error {
+func (dcp *DcpNozzle) UpdateSettings(settings metadata.ReplicationSettingsMap) error {
 	ts_obj := dcp.utils.GetSettingFromSettings(settings, DCP_VBTimestamp)
 	if ts_obj != nil {
 		new_ts, ok := settings[DCP_VBTimestamp].(map[uint16]*base.VBTimestamp)
@@ -1365,7 +1366,7 @@ func (dcp *DcpNozzle) incCounterSent() {
 	atomic.AddUint64(&dcp.counter_sent, 1)
 }
 
-func (dcp *DcpNozzle) collectDcpDataChanLen(settings map[string]interface{}) {
+func (dcp *DcpNozzle) collectDcpDataChanLen(settings metadata.ReplicationSettingsMap) {
 	defer dcp.childrenWaitGrp.Done()
 	ticker := time.NewTicker(dcp.stats_interval)
 	defer ticker.Stop()

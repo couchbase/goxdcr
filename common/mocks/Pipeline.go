@@ -1,5 +1,6 @@
 package mocks
 
+import base "github.com/couchbase/goxdcr/base"
 import common "github.com/couchbase/goxdcr/common"
 import metadata "github.com/couchbase/goxdcr/metadata"
 import mock "github.com/stretchr/testify/mock"
@@ -69,15 +70,15 @@ func (_m *Pipeline) SetState(state common.PipelineState) error {
 }
 
 // Settings provides a mock function with given fields:
-func (_m *Pipeline) Settings() map[string]interface{} {
+func (_m *Pipeline) Settings() metadata.ReplicationSettingsMap {
 	ret := _m.Called()
 
-	var r0 map[string]interface{}
-	if rf, ok := ret.Get(0).(func() map[string]interface{}); ok {
+	var r0 metadata.ReplicationSettingsMap
+	if rf, ok := ret.Get(0).(func() metadata.ReplicationSettingsMap); ok {
 		r0 = rf()
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(map[string]interface{})
+			r0 = ret.Get(0).(metadata.ReplicationSettingsMap)
 		}
 	}
 
@@ -117,14 +118,16 @@ func (_m *Pipeline) Specification() *metadata.ReplicationSpecification {
 }
 
 // Start provides a mock function with given fields: settings
-func (_m *Pipeline) Start(settings map[string]interface{}) error {
+func (_m *Pipeline) Start(settings metadata.ReplicationSettingsMap) base.ErrorMap {
 	ret := _m.Called(settings)
 
-	var r0 error
-	if rf, ok := ret.Get(0).(func(map[string]interface{}) error); ok {
+	var r0 base.ErrorMap
+	if rf, ok := ret.Get(0).(func(metadata.ReplicationSettingsMap) base.ErrorMap); ok {
 		r0 = rf(settings)
 	} else {
-		r0 = ret.Error(0)
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(base.ErrorMap)
+		}
 	}
 
 	return r0
@@ -145,14 +148,16 @@ func (_m *Pipeline) State() common.PipelineState {
 }
 
 // Stop provides a mock function with given fields:
-func (_m *Pipeline) Stop() error {
+func (_m *Pipeline) Stop() base.ErrorMap {
 	ret := _m.Called()
 
-	var r0 error
-	if rf, ok := ret.Get(0).(func() error); ok {
+	var r0 base.ErrorMap
+	if rf, ok := ret.Get(0).(func() base.ErrorMap); ok {
 		r0 = rf()
 	} else {
-		r0 = ret.Error(0)
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(base.ErrorMap)
+		}
 	}
 
 	return r0
@@ -189,11 +194,11 @@ func (_m *Pipeline) Topic() string {
 }
 
 // UpdateSettings provides a mock function with given fields: settings
-func (_m *Pipeline) UpdateSettings(settings map[string]interface{}) error {
+func (_m *Pipeline) UpdateSettings(settings metadata.ReplicationSettingsMap) error {
 	ret := _m.Called(settings)
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(map[string]interface{}) error); ok {
+	if rf, ok := ret.Get(0).(func(metadata.ReplicationSettingsMap) error); ok {
 		r0 = rf(settings)
 	} else {
 		r0 = ret.Error(0)

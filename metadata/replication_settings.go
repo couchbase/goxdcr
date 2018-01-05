@@ -35,6 +35,7 @@ const (
 	PipelineStatsInterval          = "stats_interval"
 	BandwidthLimit                 = "bandwidth_limit"
 	CompressionType                = base.CompressionTypeKey
+	XmemCertificate                = "certificate"
 )
 
 // settings whose default values cannot be viewed or changed through rest apis
@@ -230,9 +231,9 @@ func (s *ReplicationSettings) SetLogLevel(log_level string) error {
 // returns a map of validation errors, which should normally be empty since the input settingsMap
 // is constructed internally and necessary checks should have been applied before
 // I am leaving the error checks just in case.
-func (s *ReplicationSettings) UpdateSettingsFromMap(settingsMap map[string]interface{}) (changedSettingsMap map[string]interface{}, errorMap map[string]error) {
-	changedSettingsMap = make(map[string]interface{})
-	errorMap = make(map[string]error)
+func (s *ReplicationSettings) UpdateSettingsFromMap(settingsMap ReplicationSettingsMap) (changedSettingsMap ReplicationSettingsMap, errorMap base.ErrorMap) {
+	changedSettingsMap = make(ReplicationSettingsMap)
+	errorMap = make(base.ErrorMap)
 
 	for key, val := range settingsMap {
 		switch key {
@@ -405,11 +406,11 @@ func (s *ReplicationSettings) UpdateSettingsFromMap(settingsMap map[string]inter
 	return
 }
 
-func (s *ReplicationSettings) ToMap() map[string]interface{} {
+func (s *ReplicationSettings) ToMap() ReplicationSettingsMap {
 	return s.toMap(false)
 }
 
-func (s *ReplicationSettings) ToDefaultSettingsMap() map[string]interface{} {
+func (s *ReplicationSettings) ToDefaultSettingsMap() ReplicationSettingsMap {
 	return s.toMap(true)
 }
 
@@ -423,8 +424,24 @@ func (s *ReplicationSettings) Clone() *ReplicationSettings {
 	return clone
 }
 
-func (s *ReplicationSettings) toMap(isDefaultSettings bool) map[string]interface{} {
-	settings_map := make(map[string]interface{})
+func (s *ReplicationSettings) Redact() *ReplicationSettings {
+	if s != nil {
+		if len(s.FilterExpression) > 0 && !base.IsStringRedacted(s.FilterExpression) {
+			s.FilterExpression = base.TagUD(s.FilterExpression)
+		}
+	}
+	return s
+}
+
+func (s *ReplicationSettings) CloneAndRedact() *ReplicationSettings {
+	if s != nil {
+		return s.Clone().Redact()
+	}
+	return s
+}
+
+func (s *ReplicationSettings) toMap(isDefaultSettings bool) ReplicationSettingsMap {
+	settings_map := make(ReplicationSettingsMap)
 	if !isDefaultSettings {
 		settings_map[ReplicationType] = s.RepType
 		settings_map[FilterExpression] = s.FilterExpression
@@ -445,6 +462,48 @@ func (s *ReplicationSettings) toMap(isDefaultSettings bool) map[string]interface
 	settings_map[BandwidthLimit] = s.BandwidthLimit
 	settings_map[CompressionType] = s.CompressionType
 	return settings_map
+}
+
+func (s *ReplicationSettings) fromMap(settingsMap ReplicationSettingsMap) base.ErrorMap {
+	if s != nil {
+		_, errMap := s.UpdateSettingsFromMap(settingsMap)
+		return errMap
+	}
+	errMap := make(base.ErrorMap)
+	errMap["self"] = base.ErrorNilPtr
+	return errMap
+}
+
+type ReplicationSettingsMap map[string]interface{}
+
+// Things that need redact are either []byte (true) or string (false)
+var replicationSettingsMapRedactDict = map[string]bool{FilterExpression: false, XmemCertificate: true}
+
+// NOTE: This is currently "cheating" and not cloning if there's nothing to be redacted
+func (repMap ReplicationSettingsMap) CloneAndRedact() ReplicationSettingsMap {
+	for keyNeedsRedacting, byteArrayType := range replicationSettingsMapRedactDict {
+		if setting, keyExistsInSetting := repMap[keyNeedsRedacting]; keyExistsInSetting {
+			if (byteArrayType && len(setting.([]byte)) > 0) ||
+				(!byteArrayType && len(setting.(string)) > 0 && !base.IsStringRedacted(setting.(string))) {
+				clonedMap := make(ReplicationSettingsMap)
+				// For now, duplicate ReplicationSettings.Redact() logic.
+				// In the future, if more things need to be redacted, combine and use a single place to Redact()
+				// to avoid having to maintain >1 places
+				for k, v := range repMap {
+					if k == FilterExpression {
+						clonedMap[k] = base.TagUD(v)
+					} else if k == XmemCertificate {
+						clonedMap[k] = base.DeepCopyByteArray(v.([]byte))
+						clonedMap[k] = base.TagUDBytes(clonedMap[k].([]byte))
+					} else {
+						clonedMap[k] = v
+					}
+				}
+				return clonedMap
+			}
+		}
+	}
+	return repMap
 }
 
 func ValidateAndConvertSettingsValue(key, value, errorKey string, isEnterprise bool, isCapi bool) (convertedValue interface{}, err error) {

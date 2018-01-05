@@ -21,6 +21,7 @@ import (
 	"github.com/couchbase/goxdcr/gen_server"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
+	"github.com/couchbase/goxdcr/service_def"
 	utilities "github.com/couchbase/goxdcr/utils"
 	"net/http"
 	"runtime"
@@ -224,7 +225,8 @@ func (adminport *Adminport) doGetRemoteClustersRequest(request *http.Request) (*
 }
 
 func (adminport *Adminport) doCreateRemoteClusterRequest(request *http.Request) (*ap.Response, error) {
-	logger_ap.Infof("doCreateRemoteClusterRequest req=%v\n", request)
+	redactedRequest := base.CloneAndTagHttpRequest(request) // This is not an operation that occurs regularly
+	logger_ap.Infof("doCreateRemoteClusterRequest req=%v\n", redactedRequest)
 	defer logger_ap.Infof("Finished doCreateRemoteClusterRequest\n")
 
 	response, err := authWebCreds(request, base.PermissionRemoteClusterWrite)
@@ -242,8 +244,8 @@ func (adminport *Adminport) doCreateRemoteClusterRequest(request *http.Request) 
 		return EncodeRemoteClusterErrorsMapIntoResponse(errorsMap)
 	}
 
-	logger_ap.Infof("Request params: justValidate=%v, remoterClusterRef=%v\n",
-		justValidate, remoteClusterRef)
+	logger_ap.Infof("Request params: justValidate=%v, remoteClusterRef=%v\n",
+		justValidate, remoteClusterRef.CloneAndRedact())
 
 	if justValidate {
 		err = remoteClusterService.ValidateAddRemoteCluster(remoteClusterRef)
@@ -253,7 +255,7 @@ func (adminport *Adminport) doCreateRemoteClusterRequest(request *http.Request) 
 		if err != nil {
 			return EncodeRemoteClusterErrorIntoResponse(err)
 		} else {
-			go writeRemoteClusterAuditEvent(base.CreateRemoteClusterRefEventId, remoteClusterRef, getRealUserIdFromRequest(request))
+			go writeRemoteClusterAuditEvent(service_def.CreateRemoteClusterRefEventId, remoteClusterRef, getRealUserIdFromRequest(request))
 
 			return NewCreateRemoteClusterResponse(remoteClusterRef)
 		}
@@ -284,8 +286,8 @@ func (adminport *Adminport) doChangeRemoteClusterRequest(request *http.Request) 
 		return EncodeRemoteClusterErrorsMapIntoResponse(errorsMap)
 	}
 
-	logger_ap.Infof("Request params: justValidate=%v, remoterClusterRef=%v\n",
-		justValidate, remoteClusterRef)
+	logger_ap.Infof("Request params: justValidate=%v, remoteClusterRef=%v\n",
+		justValidate, remoteClusterRef.CloneAndRedact())
 
 	remoteClusterService := RemoteClusterService()
 
@@ -297,7 +299,7 @@ func (adminport *Adminport) doChangeRemoteClusterRequest(request *http.Request) 
 		if err != nil {
 			return EncodeRemoteClusterErrorIntoResponse(err)
 		} else {
-			go writeRemoteClusterAuditEvent(base.UpdateRemoteClusterRefEventId, remoteClusterRef, getRealUserIdFromRequest(request))
+			go writeRemoteClusterAuditEvent(service_def.UpdateRemoteClusterRefEventId, remoteClusterRef, getRealUserIdFromRequest(request))
 
 			return NewCreateRemoteClusterResponse(remoteClusterRef)
 		}
@@ -347,7 +349,7 @@ func (adminport *Adminport) doDeleteRemoteClusterRequest(request *http.Request) 
 		return EncodeRemoteClusterErrorIntoResponse(err)
 	}
 
-	go writeRemoteClusterAuditEvent(base.DeleteRemoteClusterRefEventId, ref, getRealUserIdFromRequest(request))
+	go writeRemoteClusterAuditEvent(service_def.DeleteRemoteClusterRefEventId, ref, getRealUserIdFromRequest(request))
 
 	return NewOKResponse()
 }
@@ -405,7 +407,7 @@ func (adminport *Adminport) doCreateReplicationRequest(request *http.Request) (*
 	}
 
 	logger_ap.Infof("Request parameters: justValidate=%v, fromBucket=%v, toCluster=%v, toBucket=%v, settings=%v\n",
-		justValidate, fromBucket, toCluster, toBucket, settings)
+		justValidate, fromBucket, toCluster, toBucket, settings.CloneAndRedact())
 
 	replicationId, errorsMap, err, warnings := CreateReplication(justValidate, fromBucket, toCluster, toBucket, settings, getRealUserIdFromRequest(request))
 
@@ -480,7 +482,7 @@ func (adminport *Adminport) doChangeDefaultReplicationSettingsRequest(request *h
 		return EncodeErrorsMapIntoResponse(errorsMap, false)
 	}
 
-	logger_ap.Infof("Request params: justValidate=%v, inputSettings=%v\n", justValidate, settingsMap)
+	logger_ap.Infof("Request params: justValidate=%v, inputSettings=%v\n", justValidate, settingsMap.CloneAndRedact())
 
 	if !justValidate {
 		errorsMap, err := UpdateDefaultSettings(settingsMap, getRealUserIdFromRequest(request))
@@ -550,7 +552,7 @@ func (adminport *Adminport) doChangeReplicationSettingsRequest(request *http.Req
 		return EncodeErrorsMapIntoResponse(errorsMap, false)
 	}
 
-	logger_ap.Infof("Request params: justValidate=%v, inputSettings=%v\n", justValidate, settingsMap)
+	logger_ap.Infof("Request params: justValidate=%v, inputSettings=%v\n", justValidate, settingsMap.CloneAndRedact())
 
 	// "pauseRequested" setting is special - it requires execute permission
 	_, pauseRequestedSpecified := settingsMap[metadata.Active]
@@ -680,14 +682,16 @@ func authenticateRequest(request *http.Request) (cbauth.Creds, error) {
 		return nil, err
 	}
 
-	logger_ap.Debugf("request url=%v, creds user = %v\n", request.URL, creds.Name())
+	if logger_ap.GetLogLevel() >= log.LogLevelDebug {
+		logger_ap.Debugf("request url=%v, creds user = %v%v%v\n", request.URL, base.UdTagBegin, creds.Name(), base.UdTagEnd)
+	}
 	return creds, nil
 }
 
 func authorizeRequest(creds cbauth.Creds, permission string) (bool, error) {
 	allowed, err := creds.IsAllowed(permission)
 	if err != nil {
-		logger_ap.Errorf("Error occured when checking for permission %v for creds %v. err=%v\n", permission, creds.Name(), err)
+		logger_ap.Errorf("Error occured when checking for permission %v for creds %v%v%v. err=%v\n", permission, base.UdTagBegin, creds.Name(), base.UdTagEnd, err)
 	}
 
 	return allowed, err
@@ -766,9 +770,9 @@ func constructBucketPermission(bucketName, suffix string) string {
 	return base.PermissionBucketPrefix + bucketName + suffix
 }
 
-func writeRemoteClusterAuditEvent(eventId uint32, remoteClusterRef *metadata.RemoteClusterReference, realUserId *base.RealUserId) {
-	event := &base.RemoteClusterRefEvent{
-		GenericFields:         base.GenericFields{log.FormatTimeWithMilliSecondPrecision(time.Now()), *realUserId},
+func writeRemoteClusterAuditEvent(eventId uint32, remoteClusterRef *metadata.RemoteClusterReference, realUserId *service_def.RealUserId) {
+	event := &service_def.RemoteClusterRefEvent{
+		GenericFields:         service_def.GenericFields{log.FormatTimeWithMilliSecondPrecision(time.Now()), *realUserId},
 		RemoteClusterName:     remoteClusterRef.Name,
 		RemoteClusterHostname: remoteClusterRef.HostName,
 		IsEncrypted:           remoteClusterRef.DemandEncryption,
@@ -778,15 +782,15 @@ func writeRemoteClusterAuditEvent(eventId uint32, remoteClusterRef *metadata.Rem
 	logAuditErrors(err)
 }
 
-func getRealUserIdFromRequest(request *http.Request) *base.RealUserId {
+func getRealUserIdFromRequest(request *http.Request) *service_def.RealUserId {
 	creds, err := cbauth.AuthWebCreds(request)
 	if err != nil {
 		logger_rm.Errorf("Error getting real user id from http request. err=%v\n", err)
 		// put unknown user in the audit log.
-		return &base.RealUserId{"internal", "unknown"}
+		return &service_def.RealUserId{"internal", "unknown"}
 	}
 
-	return &base.RealUserId{creds.Domain(), creds.Name()}
+	return &service_def.RealUserId{creds.Domain(), creds.Name()}
 }
 
 func (adminport *Adminport) IsReadyForHeartBeat() bool {
@@ -806,8 +810,8 @@ func (adminport *Adminport) doRegexpValidationRequest(request *http.Request) (*a
 		return EncodeErrorMessageIntoResponse(err, http.StatusBadRequest)
 	}
 
-	logger_ap.Infof("Request params: expression=%v, keys=%v\n",
-		expression, keys)
+	logger_ap.Infof("Request params: expression=%v%v%v, keys=%v%v%v\n",
+		base.UdTagBegin, expression, base.UdTagEnd, base.UdTagBegin, keys, base.UdTagEnd)
 
 	matchesMap, err := adminport.utils.GetMatchedKeys(expression, keys)
 	if err != nil {
@@ -929,7 +933,7 @@ func (adminport *Adminport) doChangeXDCRInternalSettingsRequest(request *http.Re
 		return EncodeErrorsMapIntoResponse(errorsMap, false)
 	}
 
-	logger_ap.Infof("Request params: xdcrInternalSettings=%v\n", settingsMap)
+	logger_ap.Infof("Request params: xdcrInternalSettings=%v\n", settingsMap.CloneAndRedact())
 
 	internalSettings, errorsMap, err := InternalSettingsService().UpdateInternalSettings(settingsMap)
 	if len(errorsMap) > 0 {

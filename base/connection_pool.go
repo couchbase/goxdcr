@@ -238,7 +238,7 @@ func authClient(client *mcc.Client, userName, password, bucketName string, plain
 		}
 
 		if err != nil {
-			logger.Errorf("err from authentication for user %v = %v\n", userName, err)
+			logger.Errorf("err from authentication for user %v%v%v = %v\n", UdTagBegin, userName, UdTagEnd, err)
 			client.Close()
 			return err
 		}

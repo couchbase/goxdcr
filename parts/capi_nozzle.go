@@ -22,6 +22,7 @@ import (
 	common "github.com/couchbase/goxdcr/common"
 	gen_server "github.com/couchbase/goxdcr/gen_server"
 	"github.com/couchbase/goxdcr/log"
+	"github.com/couchbase/goxdcr/metadata"
 	utilities "github.com/couchbase/goxdcr/utils"
 	"io"
 	"io/ioutil"
@@ -128,7 +129,7 @@ func newCapiConfig(logger *log.CommonLogger) capiConfig {
 	}
 }
 
-func (config *capiConfig) initializeConfig(settings map[string]interface{}, utils utilities.UtilsIface) error {
+func (config *capiConfig) initializeConfig(settings metadata.ReplicationSettingsMap, utils utilities.UtilsIface) error {
 	err := utils.ValidateSettings(capi_setting_defs, settings, config.logger)
 
 	if err == nil {
@@ -315,7 +316,7 @@ func (capi *CapiNozzle) setClient(client *net.TCPConn) {
 	capi.client = client
 }
 
-func (capi *CapiNozzle) Start(settings map[string]interface{}) error {
+func (capi *CapiNozzle) Start(settings metadata.ReplicationSettingsMap) error {
 	capi.Logger().Infof("%v starting ....\n", capi.Id())
 
 	err := capi.SetState(common.Part_Starting)
@@ -427,6 +428,7 @@ func (capi *CapiNozzle) Receive(data interface{}) error {
 	dataChan, ok := capi.vb_dataChan_map[vbno]
 	if !ok {
 		capi.Logger().Errorf("%v received a request with unexpected vb %v\n", capi.Id(), vbno)
+		// No need to redact vb_dataChan_map because the contents within the channels are not printed
 		capi.Logger().Errorf("%v datachan map len=%v, map = %v \n", capi.Id(), len(capi.vb_dataChan_map), capi.vb_dataChan_map)
 	}
 
@@ -615,10 +617,12 @@ func (capi *CapiNozzle) send_internal(batch *capiBatch) error {
  * Returns a map of all the keys that are fed in bigDoc_map, with a boolean value
  * The boolean value == true meaning that the document referred by key should *not* be replicated
  */
-func (capi *CapiNozzle) batchGetMeta(vbno uint16, bigDoc_map map[string]*base.WrappedMCRequest) (map[string]bool, error) {
-	capi.Logger().Debugf("%v batchGetMeta called for vb %v and bigDoc_map with len %v, map=%v\n", capi.Id(), vbno, len(bigDoc_map), bigDoc_map)
+func (capi *CapiNozzle) batchGetMeta(vbno uint16, bigDoc_map base.McRequestMap) (map[string]bool, error) {
+	if capi.Logger().GetLogLevel() >= log.LogLevelDebug {
+		capi.Logger().Debugf("%v batchGetMeta called for vb %v and bigDoc_map with len %v, map=%v%v%v\n", capi.Id(), vbno, len(bigDoc_map), base.UdTagBegin, bigDoc_map, base.UdTagEnd)
+	}
 
-	bigDoc_noRep_map := make(map[string]bool)
+	bigDoc_noRep_map := make(BigDocNoRepMap)
 
 	if len(bigDoc_map) == 0 {
 		return bigDoc_noRep_map, nil
@@ -672,10 +676,13 @@ func (capi *CapiNozzle) batchGetMeta(vbno uint16, bigDoc_map map[string]*base.Wr
 	}
 
 	// Convert the result from sending key_rev to target into a map, which if a key exists, means "send me this document"
-	bigDoc_rep_map, ok := out.(map[string]interface{})
-	capi.Logger().Debugf("%v bigDoc_rep_map=%v\n", capi.Id(), bigDoc_rep_map)
+	bigDoc_rep_map, ok := out.(base.InterfaceMap)
+	if capi.Logger().GetLogLevel() >= log.LogLevelDebug {
+		capi.Logger().Debugf("%v bigDoc_rep_map=%v%v%v\n", capi.Id(), base.UdTagBegin, bigDoc_rep_map, base.UdTagEnd)
+	}
 	if !ok {
-		return nil, errors.New(fmt.Sprintf("Error parsing return value from _revs_diff query for vbucket %v. bigDoc_rep_map=%v", vbno, bigDoc_rep_map))
+		capi.Logger().Errorf(fmt.Sprintf("Error parsing return value from _revs_diff query for vbucket %v. bigDoc_rep_map=%v%v%v", vbno, base.UdTagBegin, bigDoc_rep_map, base.UdTagEnd))
+		return nil, errors.New(fmt.Sprintf("Error parsing return value from _revs_diff query for vbucket %v.", vbno))
 	}
 
 	// bigDoc_noRep_map = bigDoc_map - bigDoc_rep_map
@@ -689,7 +696,9 @@ func (capi *CapiNozzle) batchGetMeta(vbno uint16, bigDoc_map map[string]*base.Wr
 		}
 	}
 
-	capi.Logger().Debugf("%v done with batchGetMeta,bigDoc_noRep_map=%v\n", capi.Id(), bigDoc_noRep_map)
+	if capi.Logger().GetLogLevel() >= log.LogLevelDebug {
+		capi.Logger().Debugf("%v done with batchGetMeta,bigDoc_noRep_map=%v\n", capi.Id(), bigDoc_noRep_map.CloneAndRedact())
+	}
 	return bigDoc_noRep_map, nil
 }
 
@@ -720,7 +729,7 @@ func (capi *CapiNozzle) batchSendWithRetry(batch *capiBatch) error {
 		} else {
 			if needSendStatus == Not_Send_Failed_CR {
 				if capi.Logger().GetLogLevel() >= log.LogLevelDebug {
-					capi.Logger().Debugf("%v did not send doc with key %v since it failed conflict resolution\n", capi.Id(), string(item.Req.Key))
+					capi.Logger().Debugf("%v did not send doc with key %v since it failed conflict resolution\n", capi.Id(), base.TagUD(item.Req.Key))
 				}
 				additionalInfo := DataFailedCRSourceEventAdditional{Seqno: item.Seqno,
 					Opcode:      encodeOpCode(item.Req.Opcode),
@@ -1138,7 +1147,7 @@ func (capi *CapiNozzle) initNewBatch(vbno uint16) {
 	capi.vb_batch_map[vbno] = &capiBatch{*newBatch(uint32(capi.config.maxCount), uint32(capi.config.maxSize), capi.Logger()), vbno}
 }
 
-func (capi *CapiNozzle) initialize(settings map[string]interface{}) error {
+func (capi *CapiNozzle) initialize(settings metadata.ReplicationSettingsMap) error {
 	err := capi.config.initializeConfig(settings, capi.utils)
 	if err != nil {
 		return err
@@ -1254,7 +1263,7 @@ func (capi *CapiNozzle) resetConn() error {
 	return nil
 }
 
-func (capi *CapiNozzle) UpdateSettings(settings map[string]interface{}) error {
+func (capi *CapiNozzle) UpdateSettings(settings metadata.ReplicationSettingsMap) error {
 	optimisticReplicationThreshold, ok := settings[SETTING_OPTI_REP_THRESHOLD]
 	if ok {
 		optimisticReplicationThresholdInt := optimisticReplicationThreshold.(int)

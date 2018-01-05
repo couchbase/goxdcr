@@ -9,7 +9,9 @@
 
 package common
 
-import ()
+import (
+	"github.com/couchbase/goxdcr/metadata"
+)
 
 type PartState int
 
@@ -27,7 +29,7 @@ type Part interface {
 	Connectable
 
 	//Start makes goroutine for the part working
-	Start(settings map[string]interface{}) error
+	Start(settings metadata.ReplicationSettingsMap) error
 
 	//Stop stops the part,
 	Stop() error
@@ -38,5 +40,5 @@ type Part interface {
 	//return the state of the part
 	State() PartState
 
-	UpdateSettings(settings map[string]interface{}) error
+	UpdateSettings(settings metadata.ReplicationSettingsMap) error
 }

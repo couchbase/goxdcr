@@ -229,7 +229,7 @@ func (rctx *refreshContext) checkAndUpdateAgentReference() error {
 		sortedAgentList := base.DeepCopyStringArray(rctx.agent.refNodesList)
 		sort.Strings(sortedAgentList)
 		if !rctx.agent.reference.IsSame(rctx.refOrig) || !reflect.DeepEqual(sortedAgentList, rctx.origRefNodesList) {
-			return populateRefreshDataInconsistentError(rctx.refOrig, &rctx.agent.reference, rctx.origRefNodesList, sortedAgentList)
+			return populateRefreshDataInconsistentError(rctx.refOrig.CloneAndRedact(), rctx.agent.reference.CloneAndRedact(), rctx.origRefNodesList, sortedAgentList)
 		}
 
 		if !rctx.refOrig.IsSame(rctx.refCache) {
@@ -242,7 +242,7 @@ func (rctx *refreshContext) checkAndUpdateAgentReference() error {
 			rctx.agent.cleanUpHttpsMapWhenUpdatingNodesList(rctx.agent.refNodesList, rctx.cachedRefNodesList)
 			rctx.agent.refNodesList = base.DeepCopyStringArray(rctx.cachedRefNodesList)
 		}
-		rctx.agent.logger.Infof(populateRefreshSuccessMsg(rctx.refOrig, &rctx.agent.reference, rctx.origRefNodesList, rctx.agent.refNodesList))
+		rctx.agent.logger.Infof(populateRefreshSuccessMsg(rctx.refOrig.CloneAndRedact(), rctx.agent.reference.CloneAndRedact(), rctx.origRefNodesList, rctx.agent.refNodesList))
 	}
 
 	return nil
@@ -420,6 +420,7 @@ func (agent *RemoteClusterAgent) DeleteReference(delFromMetaKv bool) (*metadata.
 	defer agent.refMtx.Unlock()
 	var err error
 
+	// When deleting reference, the clonedCopy is used for logging
 	clonedCopy := agent.reference.Clone()
 
 	if delFromMetaKv {
@@ -1296,7 +1297,7 @@ func (service *RemoteClusterService) GetRemoteClusterNameFromClusterUuid(uuid st
 			errMsg += " The remote cluster may have been deleted."
 		}
 		service.logger.Error(errMsg)
-		return base.UnknownRemoteClusterName
+		return service_def.UnknownRemoteClusterName
 	}
 	return remoteClusterRef.Name
 }
@@ -1337,7 +1338,7 @@ func (service *RemoteClusterService) RemoteClusterServiceCallback(path string, v
 	if len(value) != 0 {
 		newRef, err = constructRemoteClusterReference(value, rev)
 		if err != nil {
-			service.logger.Errorf("Error marshaling remote cluster. value=%v, err=%v\n", string(value), err)
+			service.logger.Errorf("Error marshaling remote cluster. value=%v, err=%v\n", base.TagUDBytes(value), err)
 			return err
 		}
 	}

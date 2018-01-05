@@ -30,14 +30,14 @@ var ErrorKey = "Error"
 var MaxNumberOfErrorsToTrack = 15
 
 //the function constructs start settings for parts of the pipeline
-type PartsSettingsConstructor func(pipeline common.Pipeline, part common.Part, pipeline_settings map[string]interface{},
-	targetClusterref *metadata.RemoteClusterReference, ssl_port_map map[string]uint16) (map[string]interface{}, error)
+type PartsSettingsConstructor func(pipeline common.Pipeline, part common.Part, pipeline_settings metadata.ReplicationSettingsMap,
+	targetClusterref *metadata.RemoteClusterReference, ssl_port_map map[string]uint16) (metadata.ReplicationSettingsMap, error)
 
 //the function constructs start settings for parts of the pipeline
 type SSLPortMapConstructor func(targetClusterRef *metadata.RemoteClusterReference, spec *metadata.ReplicationSpecification) (map[string]uint16, error)
 
 //the function constructs update settings for parts of the pipeline
-type PartsUpdateSettingsConstructor func(pipeline common.Pipeline, part common.Part, pipeline_settings map[string]interface{}) (map[string]interface{}, error)
+type PartsUpdateSettingsConstructor func(pipeline common.Pipeline, part common.Part, pipeline_settings metadata.ReplicationSettingsMap) (metadata.ReplicationSettingsMap, error)
 
 type StartingSeqnoConstructor func(pipeline common.Pipeline) error
 
@@ -97,7 +97,7 @@ type GenericPipeline struct {
 	logger *log.CommonLogger
 
 	spec          *metadata.ReplicationSpecification
-	settings      map[string]interface{}
+	settings      metadata.ReplicationSettingsMap
 	settings_lock *sync.RWMutex
 
 	state common.PipelineState
@@ -122,7 +122,7 @@ func (genericPipeline *GenericPipeline) SetRuntimeContext(ctx common.PipelineRun
 
 // Starts the downstream parts recursively, and eventually the part itself
 // In a more specific use case, for now, it starts the nozzles and routers (out-going nozzles first, then source nozzles)
-func (genericPipeline *GenericPipeline) startPart(part common.Part, settings map[string]interface{},
+func (genericPipeline *GenericPipeline) startPart(part common.Part, settings metadata.ReplicationSettingsMap,
 	targetClusterRef *metadata.RemoteClusterReference, ssl_port_map map[string]uint16, err_ch chan partError) {
 
 	var err error = nil
@@ -133,7 +133,7 @@ func (genericPipeline *GenericPipeline) startPart(part common.Part, settings map
 		waitGrp := &sync.WaitGroup{}
 		for _, p := range downstreamParts {
 			waitGrp.Add(1)
-			go func(waitGrp *sync.WaitGroup, err_ch chan partError, p common.Part, settings map[string]interface{}) {
+			go func(waitGrp *sync.WaitGroup, err_ch chan partError, p common.Part, settings metadata.ReplicationSettingsMap) {
 				defer waitGrp.Done()
 				if p.State() == common.Part_Initial {
 					genericPipeline.startPart(p, settings, targetClusterRef, ssl_port_map, err_ch)
@@ -170,8 +170,8 @@ func (genericPipeline *GenericPipeline) startPart(part common.Part, settings map
 //
 //settings - a map of parameter to start the pipeline. it can contain initialization paramters
 //			 for each processing steps and for runtime context of the pipeline.
-func (genericPipeline *GenericPipeline) Start(settings map[string]interface{}) base.ErrorMap {
-	genericPipeline.logger.Infof("Starting pipeline %s\n %s \n settings = %s\n", genericPipeline.InstanceId(), genericPipeline.Layout(), fmt.Sprint(settings))
+func (genericPipeline *GenericPipeline) Start(settings metadata.ReplicationSettingsMap) base.ErrorMap {
+	genericPipeline.logger.Infof("Starting pipeline %s\n %s \n settings = %s\n", genericPipeline.InstanceId(), genericPipeline.Layout(), settings.CloneAndRedact())
 	var errMap base.ErrorMap = make(base.ErrorMap)
 	var err error
 
@@ -233,7 +233,7 @@ func (genericPipeline *GenericPipeline) Start(settings map[string]interface{}) b
 	for _, source := range genericPipeline.sources {
 		waitGrp := &sync.WaitGroup{}
 		waitGrp.Add(1)
-		go func(err_ch chan partError, source common.Nozzle, settings map[string]interface{}, waitGrp *sync.WaitGroup) {
+		go func(err_ch chan partError, source common.Nozzle, settings metadata.ReplicationSettingsMap, waitGrp *sync.WaitGroup) {
 			defer waitGrp.Done()
 			genericPipeline.startPart(source, settings, targetClusterRef, ssl_port_map, err_ch)
 			if len(err_ch) == 0 {
@@ -604,7 +604,7 @@ func (genericPipeline *GenericPipeline) Specification() *metadata.ReplicationSpe
 	return genericPipeline.spec
 }
 
-func (genericPipeline *GenericPipeline) Settings() map[string]interface{} {
+func (genericPipeline *GenericPipeline) Settings() metadata.ReplicationSettingsMap {
 	genericPipeline.settings_lock.RLock()
 	defer genericPipeline.settings_lock.RUnlock()
 	return genericPipeline.settings
@@ -697,8 +697,19 @@ func (genericPipeline *GenericPipeline) SetProgressRecorder(recorder common.Pipe
 	genericPipeline.progress_recorder = recorder
 }
 
-func (genericPipeline *GenericPipeline) UpdateSettings(settings map[string]interface{}) error {
-	genericPipeline.logger.Debugf("%v update settings called with settings=%v\n", genericPipeline.InstanceId(), settings)
+func (genericPipeline *GenericPipeline) UpdateSettings(settings metadata.ReplicationSettingsMap) error {
+	var redactOnceSync sync.Once
+	var redactedSettings metadata.ReplicationSettingsMap
+	redactOnce := func() {
+		redactOnceSync.Do(func() {
+			redactedSettings = settings.CloneAndRedact()
+		})
+	}
+
+	if genericPipeline.logger.GetLogLevel() >= log.LogLevelDebug {
+		redactOnce()
+		genericPipeline.logger.Debugf("%v update settings called with settings=%v\n", genericPipeline.InstanceId(), redactedSettings)
+	}
 
 	if len(settings) == 0 {
 		return nil
@@ -709,7 +720,10 @@ func (genericPipeline *GenericPipeline) UpdateSettings(settings map[string]inter
 
 	// update settings on parts and services in pipeline
 	if genericPipeline.partSetting_constructor != nil {
-		genericPipeline.logger.Debugf("%v calling part update setting constructor with settings=%v\n", genericPipeline.InstanceId(), settings)
+		if genericPipeline.logger.GetLogLevel() >= log.LogLevelDebug {
+			redactOnce()
+			genericPipeline.logger.Debugf("%v calling part update setting constructor with settings=%v\n", genericPipeline.InstanceId(), redactedSettings)
+		}
 		for _, part := range GetAllParts(genericPipeline) {
 			partSettings, err := genericPipeline.partUpdateSetting_constructor(genericPipeline, part, settings)
 			if err != nil {
@@ -723,7 +737,10 @@ func (genericPipeline *GenericPipeline) UpdateSettings(settings map[string]inter
 	}
 
 	if genericPipeline.context != nil {
-		genericPipeline.logger.Debugf("%v calling update setting constructor on runtime context with settings=%v\n", genericPipeline.InstanceId(), settings)
+		if genericPipeline.logger.GetLogLevel() >= log.LogLevelDebug {
+			redactOnce()
+			genericPipeline.logger.Debugf("%v calling update setting constructor on runtime context with settings=%v\n", genericPipeline.InstanceId(), redactedSettings)
+		}
 		return genericPipeline.context.UpdateSettings(settings)
 	}
 
@@ -731,14 +748,14 @@ func (genericPipeline *GenericPipeline) UpdateSettings(settings map[string]inter
 
 }
 
-func (genericPipeline *GenericPipeline) updatePipelineSettings(settings map[string]interface{}) {
+func (genericPipeline *GenericPipeline) updatePipelineSettings(settings metadata.ReplicationSettingsMap) {
 	genericPipeline.settings_lock.RLock()
 	defer genericPipeline.settings_lock.RUnlock()
 	genericPipeline.updateTimestampsSetting(settings)
 	genericPipeline.updateProblematicVBSettings(settings)
 }
 
-func (genericPipeline *GenericPipeline) updateTimestampsSetting(settings map[string]interface{}) {
+func (genericPipeline *GenericPipeline) updateTimestampsSetting(settings metadata.ReplicationSettingsMap) {
 	ts_obj := settings[base.VBTimestamps]
 	if ts_obj != nil {
 		ts_map := ts_obj.(map[uint16]*base.VBTimestamp)
@@ -752,12 +769,12 @@ func (genericPipeline *GenericPipeline) updateTimestampsSetting(settings map[str
 	}
 }
 
-func (genericPipeline *GenericPipeline) updateProblematicVBSettings(settings map[string]interface{}) {
+func (genericPipeline *GenericPipeline) updateProblematicVBSettings(settings metadata.ReplicationSettingsMap) {
 	genericPipeline.updateProblematicVBSetting(settings, base.ProblematicVBSource)
 	genericPipeline.updateProblematicVBSetting(settings, base.ProblematicVBTarget)
 }
 
-func (genericPipeline *GenericPipeline) updateProblematicVBSetting(settings map[string]interface{}, settings_key string) {
+func (genericPipeline *GenericPipeline) updateProblematicVBSetting(settings metadata.ReplicationSettingsMap, settings_key string) {
 	vb_err_map_obj := settings[settings_key]
 	if vb_err_map_obj != nil {
 		vb_err_map := vb_err_map_obj.(map[uint16]error)

@@ -7,6 +7,7 @@ import gomemcached "github.com/couchbase/gomemcached"
 import http "net/http"
 import log "github.com/couchbase/goxdcr/log"
 import memcached "github.com/couchbase/gomemcached/client"
+import metadata "github.com/couchbase/goxdcr/metadata"
 import mock "github.com/stretchr/testify/mock"
 import net "net"
 import regexp "regexp"
@@ -749,18 +750,18 @@ func (_m *UtilsIface) GetHttpClient(certificate []byte, san_in_certificate bool,
 }
 
 // GetIntSettingFromSettings provides a mock function with given fields: settings, settingName
-func (_m *UtilsIface) GetIntSettingFromSettings(settings map[string]interface{}, settingName string) (int, error) {
+func (_m *UtilsIface) GetIntSettingFromSettings(settings metadata.ReplicationSettingsMap, settingName string) (int, error) {
 	ret := _m.Called(settings, settingName)
 
 	var r0 int
-	if rf, ok := ret.Get(0).(func(map[string]interface{}, string) int); ok {
+	if rf, ok := ret.Get(0).(func(metadata.ReplicationSettingsMap, string) int); ok {
 		r0 = rf(settings, settingName)
 	} else {
 		r0 = ret.Get(0).(int)
 	}
 
 	var r1 error
-	if rf, ok := ret.Get(1).(func(map[string]interface{}, string) error); ok {
+	if rf, ok := ret.Get(1).(func(metadata.ReplicationSettingsMap, string) error); ok {
 		r1 = rf(settings, settingName)
 	} else {
 		r1 = ret.Error(1)
@@ -1164,11 +1165,11 @@ func (_m *UtilsIface) GetServerVBucketsMap(connStr string, bucketName string, bu
 }
 
 // GetSettingFromSettings provides a mock function with given fields: settings, settingName
-func (_m *UtilsIface) GetSettingFromSettings(settings map[string]interface{}, settingName string) interface{} {
+func (_m *UtilsIface) GetSettingFromSettings(settings metadata.ReplicationSettingsMap, settingName string) interface{} {
 	ret := _m.Called(settings, settingName)
 
 	var r0 interface{}
-	if rf, ok := ret.Get(0).(func(map[string]interface{}, string) interface{}); ok {
+	if rf, ok := ret.Get(0).(func(metadata.ReplicationSettingsMap, string) interface{}); ok {
 		r0 = rf(settings, settingName)
 	} else {
 		if ret.Get(0) != nil {
@@ -1180,18 +1181,18 @@ func (_m *UtilsIface) GetSettingFromSettings(settings map[string]interface{}, se
 }
 
 // GetStringSettingFromSettings provides a mock function with given fields: settings, settingName
-func (_m *UtilsIface) GetStringSettingFromSettings(settings map[string]interface{}, settingName string) (string, error) {
+func (_m *UtilsIface) GetStringSettingFromSettings(settings metadata.ReplicationSettingsMap, settingName string) (string, error) {
 	ret := _m.Called(settings, settingName)
 
 	var r0 string
-	if rf, ok := ret.Get(0).(func(map[string]interface{}, string) string); ok {
+	if rf, ok := ret.Get(0).(func(metadata.ReplicationSettingsMap, string) string); ok {
 		r0 = rf(settings, settingName)
 	} else {
 		r0 = ret.Get(0).(string)
 	}
 
 	var r1 error
-	if rf, ok := ret.Get(1).(func(map[string]interface{}, string) error); ok {
+	if rf, ok := ret.Get(1).(func(metadata.ReplicationSettingsMap, string) error); ok {
 		r1 = rf(settings, settingName)
 	} else {
 		r1 = ret.Error(1)
@@ -1611,11 +1612,11 @@ func (_m *UtilsIface) UrlForLog(urlStr string) string {
 }
 
 // ValidateSettings provides a mock function with given fields: defs, settings, logger
-func (_m *UtilsIface) ValidateSettings(defs base.SettingDefinitions, settings map[string]interface{}, logger *log.CommonLogger) error {
+func (_m *UtilsIface) ValidateSettings(defs base.SettingDefinitions, settings metadata.ReplicationSettingsMap, logger *log.CommonLogger) error {
 	ret := _m.Called(defs, settings, logger)
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(base.SettingDefinitions, map[string]interface{}, *log.CommonLogger) error); ok {
+	if rf, ok := ret.Get(0).(func(base.SettingDefinitions, metadata.ReplicationSettingsMap, *log.CommonLogger) error); ok {
 		r0 = rf(defs, settings, logger)
 	} else {
 		r0 = ret.Error(0)

@@ -7,6 +7,7 @@ import (
 	mcc "github.com/couchbase/gomemcached/client"
 	base "github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
+	"github.com/couchbase/goxdcr/metadata"
 	"net"
 	"net/http"
 	"regexp"
@@ -89,10 +90,10 @@ type UtilsIface interface {
 	UnwrapError(infos map[string]interface{}) (err error)
 
 	// Settings utilities
-	GetIntSettingFromSettings(settings map[string]interface{}, settingName string) (int, error)
-	GetStringSettingFromSettings(settings map[string]interface{}, settingName string) (string, error)
-	GetSettingFromSettings(settings map[string]interface{}, settingName string) interface{}
-	ValidateSettings(defs base.SettingDefinitions, settings map[string]interface{}, logger *log.CommonLogger) error
+	GetIntSettingFromSettings(settings metadata.ReplicationSettingsMap, settingName string) (int, error)
+	GetStringSettingFromSettings(settings metadata.ReplicationSettingsMap, settingName string) (string, error)
+	GetSettingFromSettings(settings metadata.ReplicationSettingsMap, settingName string) interface{}
+	ValidateSettings(defs base.SettingDefinitions, settings metadata.ReplicationSettingsMap, logger *log.CommonLogger) error
 
 	// Miscellaneous helpers
 	ExponentialBackoffExecutor(name string, initialWait time.Duration, maxRetries int, factor int, op ExponentialOpFunc) error

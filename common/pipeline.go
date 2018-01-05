@@ -40,12 +40,12 @@ type Pipeline interface {
 	SetRuntimeContext(ctx PipelineRuntimeContext)
 
 	//start the data exchange
-	Start(settings map[string]interface{}) base.ErrorMap
+	Start(settings metadata.ReplicationSettingsMap) base.ErrorMap
 	//stop the data exchange
 	Stop() base.ErrorMap
 
 	Specification() *metadata.ReplicationSpecification
-	Settings() map[string]interface{}
+	Settings() metadata.ReplicationSettingsMap
 
 	State() PipelineState
 	SetState(state PipelineState) error
@@ -54,5 +54,5 @@ type Pipeline interface {
 	SetProgressRecorder(recorder PipelineProgressRecorder)
 	ReportProgress(progress string)
 
-	UpdateSettings(settings map[string]interface{}) error
+	UpdateSettings(settings metadata.ReplicationSettingsMap) error
 }

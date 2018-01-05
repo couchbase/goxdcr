@@ -28,7 +28,7 @@ var ErrorInitializingAuditService = "Error initializing audit service."
 var AuditServiceUserAgent = "Goxdcr Audit"
 
 // opcode for memcached audit command
-var AuditPutCommandCode = mc.CommandCode(0x27)
+var AuditPutCommandCode = mc.AUDIT
 
 type AuditSvc struct {
 	top_svc     service_def.XDCRCompTopologySvc
@@ -50,8 +50,10 @@ func NewAuditSvc(top_svc service_def.XDCRCompTopologySvc, loggerCtx *log.LoggerC
 	return service, nil
 }
 
-func (service *AuditSvc) Write(eventId uint32, event interface{}) error {
-	service.logger.Debugf("Writing audit event. eventId=%v, event=%v\n", eventId, event)
+func (service *AuditSvc) Write(eventId uint32, event service_def.AuditEventIface) error {
+	if service.logger.GetLogLevel() >= log.LogLevelDebug {
+		service.logger.Debugf("Writing audit event. eventId=%v, event=%v\n", eventId, event.Clone().Redact())
+	}
 
 	err := service.init()
 	if err != nil {
@@ -66,18 +68,20 @@ func (service *AuditSvc) Write(eventId uint32, event interface{}) error {
 	err = service.write_internal(client, eventId, event)
 	// ignore errors when writing audit logs. simply log them
 	if err != nil {
-		err = service.utils.NewEnhancedError(base.ErrorWritingAudit, err)
+		err = service.utils.NewEnhancedError(service_def.ErrorWritingAudit, err)
 		service.logger.Error(err.Error())
 	}
 	return nil
 }
 
-func (service *AuditSvc) write_internal(client mcc.ClientIface, eventId uint32, event interface{}) error {
+func (service *AuditSvc) write_internal(client mcc.ClientIface, eventId uint32, event service_def.AuditEventIface) error {
 	req, err := composeAuditRequest(eventId, event)
 	if err != nil {
 		return err
 	}
-	service.logger.Debugf("audit request=%v\n", req)
+	if service.logger.GetLogLevel() >= log.LogLevelDebug {
+		service.logger.Debugf("audit request=%v%v%v\n", base.UdTagBegin, req, base.UdTagEnd)
+	}
 
 	conn := client.Hijack()
 	conn.(*net.TCPConn).SetWriteDeadline(time.Now().Add(base.AuditWriteTimeout))
@@ -90,7 +94,9 @@ func (service *AuditSvc) write_internal(client mcc.ClientIface, eventId uint32, 
 
 	conn.(*net.TCPConn).SetReadDeadline(time.Now().Add(base.AuditReadTimeout))
 	res, err := client.Receive()
-	service.logger.Debugf("audit response=%v, opcode=%v, opaque=%v, status=%v, err=%v\n", res, res.Opcode, res.Opaque, res.Status, err)
+	if service.logger.GetLogLevel() >= log.LogLevelDebug {
+		service.logger.Debugf("audit response=%v%v%v, opcode=%v, opaque=%v, status=%v, err=%v\n", base.UdTagBegin, res, base.UdTagEnd, res.Opcode, res.Opaque, res.Status, err)
+	}
 
 	if err != nil {
 		return err
@@ -105,7 +111,7 @@ func (service *AuditSvc) write_internal(client mcc.ClientIface, eventId uint32, 
 	return nil
 }
 
-func composeAuditRequest(eventId uint32, event interface{}) (*mc.MCRequest, error) {
+func composeAuditRequest(eventId uint32, event service_def.AuditEventIface) (*mc.MCRequest, error) {
 	eventBytes, err := json.Marshal(event)
 	if err != nil {
 		return nil, err

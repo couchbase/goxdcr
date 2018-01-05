@@ -40,7 +40,7 @@ const (
 	SETTING_RESP_TIMEOUT             = "resp_timeout"
 	XMEM_SETTING_DEMAND_ENCRYPTION   = "demandEncryption"
 	XMEM_SETTING_ENCRYPTION_TYPE     = "encryptionType"
-	XMEM_SETTING_CERTIFICATE         = "certificate"
+	XMEM_SETTING_CERTIFICATE         = metadata.XmemCertificate
 	XMEM_SETTING_INSECURESKIPVERIFY  = "insecureSkipVerify"
 	XMEM_SETTING_SAN_IN_CERITICATE   = "SANInCertificate"
 	XMEM_SETTING_REMOTE_MEM_SSL_PORT = "remote_ssl_port"
@@ -437,7 +437,7 @@ func newConfig(logger *log.CommonLogger) xmemConfig {
 
 }
 
-func (config *xmemConfig) initializeConfig(settings map[string]interface{}, utils utilities.UtilsIface) error {
+func (config *xmemConfig) initializeConfig(settings metadata.ReplicationSettingsMap, utils utilities.UtilsIface) error {
 	err := utils.ValidateSettings(xmem_setting_defs, settings, config.logger)
 
 	if err == nil {
@@ -474,6 +474,54 @@ func (config *xmemConfig) initializeConfig(settings map[string]interface{}, util
 		}
 	}
 	return err
+}
+
+/************************************
+/* struct opaque_KeySeqnoMap
+*************************************/
+type opaqueKeySeqnoMap map[uint32][]interface{}
+
+/**
+ * The interface slice is composed of:
+ * 1. documentKey
+ * 2. Sequence number
+ * 3. vbucket number
+ * 4. time.Now()
+ */
+
+// This function will ensure that the returned interface slice will have distinct copies of argument references
+// since everything coming in is passing by value
+func compileOpaqueKeySeqnoValue(docKey string, seqno uint64, vbucket uint16, timeNow time.Time) []interface{} {
+	return []interface{}{docKey, seqno, vbucket, timeNow}
+}
+
+func (omap opaqueKeySeqnoMap) Clone() opaqueKeySeqnoMap {
+	newMap := make(opaqueKeySeqnoMap)
+	for k, v := range omap {
+		newMap[k] = compileOpaqueKeySeqnoValue(v[0].(string), v[1].(uint64), v[2].(uint16), v[3].(time.Time))
+	}
+	return newMap
+}
+
+func (omap opaqueKeySeqnoMap) Redact() opaqueKeySeqnoMap {
+	for _, v := range omap {
+		if !base.IsStringRedacted(v[0].(string)) {
+			v[0] = base.TagUD(v[0])
+		}
+	}
+	return omap
+}
+
+func (omap opaqueKeySeqnoMap) CloneAndRedact() opaqueKeySeqnoMap {
+	clonedMap := make(opaqueKeySeqnoMap)
+	for k, v := range omap {
+		if !base.IsStringRedacted(v[0].(string)) {
+			clonedMap[k] = compileOpaqueKeySeqnoValue(base.TagUD(v[0].(string)), v[1].(uint64), v[2].(uint16), v[3].(time.Time))
+		} else {
+			clonedMap[k] = v
+		}
+	}
+	return clonedMap
 }
 
 /************************************
@@ -850,9 +898,9 @@ func (xmem *XmemNozzle) Close() error {
 	return nil
 }
 
-func (xmem *XmemNozzle) Start(settings map[string]interface{}) error {
+func (xmem *XmemNozzle) Start(settings metadata.ReplicationSettingsMap) error {
 	t := time.Now()
-	xmem.Logger().Infof("%v starting ....settings=%v\n", xmem.Id(), settings)
+	xmem.Logger().Infof("%v starting ....settings=%v\n", xmem.Id(), settings.CloneAndRedact())
 	defer xmem.Logger().Infof("%v took %vs to start\n", xmem.Id(), time.Since(t).Seconds())
 
 	err := xmem.SetState(common.Part_Starting)
@@ -956,8 +1004,8 @@ func (xmem *XmemNozzle) Receive(data interface{}) error {
 	request, ok := data.(*base.WrappedMCRequest)
 
 	if !ok {
-		err = fmt.Errorf("Got data of unexpected type. data=%v", data)
-		xmem.Logger().Errorf("%v %v", xmem.Id(), err)
+		xmem.Logger().Errorf("Got data of unexpected type. data=%v%v%v", base.UdTagBegin, data, base.UdTagEnd)
+		err = fmt.Errorf("Got data of unexpected type")
 		xmem.handleGeneralError(errors.New(fmt.Sprintf("%v", err)))
 		return err
 
@@ -969,8 +1017,8 @@ func (xmem *XmemNozzle) Receive(data interface{}) error {
 func (xmem *XmemNozzle) accumuBatch(request *base.WrappedMCRequest) error {
 
 	if string(request.Req.Key) == "" {
-		err := fmt.Errorf("%v accumuBatch received request with Empty key, req.UniqueKey=%v\n", xmem.Id(), request.UniqueKey)
-		xmem.Logger().Errorf("%v %v", xmem.Id(), err)
+		xmem.Logger().Errorf("%v accumuBatch received request with Empty key, req.UniqueKey=%v%v%v\n", xmem.Id(), base.UdTagBegin, request.UniqueKey, base.UdTagEnd)
+		err := fmt.Errorf("%v accumuBatch received request with Empty key\n", xmem.Id())
 		xmem.handleGeneralError(errors.New(fmt.Sprintf("%v", err)))
 		return err
 	}
@@ -1258,7 +1306,9 @@ func (xmem *XmemNozzle) preprocessMCRequest(req *base.WrappedMCRequest) error {
 		mc_req.DataType = mc_req.DataType & ^(base.PROTOCOL_BINARY_DATATYPE_XATTR)
 		// strip xattr off the mutation body
 		if len(mc_req.Body) < 4 {
-			return fmt.Errorf("%v mutation body is too short to store xattr. key=%v, body=%v", xmem.Id(), string(mc_req.Key), mc_req.Body)
+			xmem.Logger().Errorf("%v mutation body is too short to store xattr. key=%v%v%v, body=%v%v%v", xmem.Id(), base.UdTagBegin, mc_req.Key, base.UdTagEnd,
+				base.UdTagBegin, mc_req.Body, base.UdTagEnd)
+			return fmt.Errorf("%v mutation body is too short to store xattr.", xmem.Id())
 		}
 		// the first four bytes in body stored the length of the xattr fields
 		xattr_length := binary.BigEndian.Uint32(mc_req.Body[0:4])
@@ -1386,7 +1436,7 @@ func (xmem *XmemNozzle) sendSetMeta_internal(batch *dataBatch) error {
 
 // Launched as a part of the batchGetMeta, which will fire off the requests and this is the handler to decrypt the info coming back
 func (xmem *XmemNozzle) batchGetMetaHandler(count int, finch chan bool, return_ch chan bool,
-	opaque_keySeqno_map map[uint32][]interface{}, respMap map[string]*mc.MCResponse, logger *log.CommonLogger) {
+	opaque_keySeqno_map opaqueKeySeqnoMap, respMap base.MCResponseMap, logger *log.CommonLogger) {
 	defer func() {
 		//handle the panic gracefully.
 		if r := recover(); r != nil {
@@ -1423,7 +1473,8 @@ func (xmem *XmemNozzle) batchGetMetaHandler(count int, finch chan bool, return_c
 							seqno, ok2 := keySeqno[1].(uint64)
 							vbno, ok3 := keySeqno[2].(uint16)
 							if ok1 && ok2 && ok3 {
-								xmem.Logger().Warnf("%v received fatal error from getMeta client. key=%v, seqno=%v, vb=%v, response=%v\n", xmem.Id(), key, seqno, vbno, response)
+								xmem.Logger().Warnf("%v received fatal error from getMeta client. key=%v%v%v, seqno=%v, vb=%v, response=%v%v%v\n", xmem.Id(), base.UdTagBegin, key, base.UdTagEnd, seqno, vbno,
+									base.UdTagBegin, response, base.UdTagEnd)
 							}
 						}
 					}
@@ -1433,13 +1484,11 @@ func (xmem *XmemNozzle) batchGetMetaHandler(count int, finch chan bool, return_c
 
 				if !isNetTimeoutError(err) {
 					logger.Errorf("%v batchGetMeta received fatal error and had to abort. Expected %v responses, got %v responses. err=%v", xmem.Id(), count, len(respMap), err)
-					logger.Infof("%v Expected=%v, Received=%v\n", xmem.Id(), opaque_keySeqno_map, respMap)
-					return
+					logger.Infof("%v Expected=%v, Received=%v\n", xmem.Id(), opaque_keySeqno_map.CloneAndRedact(), base.UdTagBegin, respMap, base.UdTagEnd)
 				} else {
 					logger.Errorf("%v batchGetMeta timed out. Expected %v responses, got %v responses", xmem.Id(), count, len(respMap))
-					logger.Infof("%v Expected=%v, Received=%v\n", xmem.Id(), opaque_keySeqno_map, respMap)
+					logger.Infof("%v Expected=%v, Received=%v\n", xmem.Id(), opaque_keySeqno_map.CloneAndRedact(), base.UdTagBegin, respMap, base.UdTagEnd)
 				}
-
 				return
 
 			} else {
@@ -1467,7 +1516,8 @@ func (xmem *XmemNozzle) batchGetMetaHandler(count int, finch chan bool, return_c
 								// this response requires connection reset
 
 								// log the corresponding request to facilitate debugging
-								xmem.Logger().Warnf("%v received error from getMeta client. key=%v, seqno=%v, response=%v\n", xmem.Id(), key, seqno, response)
+								xmem.Logger().Warnf("%v received error from getMeta client. key=%v%v%v, seqno=%v, response=%v%v%v\n", xmem.Id(), base.UdTagBegin, key, base.UdTagEnd, seqno,
+									base.UdTagBegin, response, base.UdTagEnd)
 								err = fmt.Errorf("error response with status %v from memcached", response.Status)
 								xmem.repairConn(xmem.client_for_getMeta, err.Error(), rev)
 								// no need to wait further since connection has been reset
@@ -1495,8 +1545,8 @@ func (xmem *XmemNozzle) batchGetMetaHandler(count int, finch chan bool, return_c
  * Returns a map of all the keys that are fed in bigDoc_map, with a boolean value
  * The boolean value == true meaning that the document referred by key should *not* be replicated
  */
-func (xmem *XmemNozzle) batchGetMeta(bigDoc_map map[string]*base.WrappedMCRequest) (map[string]bool, error) {
-	bigDoc_noRep_map := make(map[string]bool)
+func (xmem *XmemNozzle) batchGetMeta(bigDoc_map base.McRequestMap) (map[string]bool, error) {
+	bigDoc_noRep_map := make(BigDocNoRepMap)
 
 	//if the bigDoc_map size is 0, return
 	if len(bigDoc_map) == 0 {
@@ -1504,8 +1554,8 @@ func (xmem *XmemNozzle) batchGetMeta(bigDoc_map map[string]*base.WrappedMCReques
 	}
 
 	xmem.Logger().Debugf("%v GetMeta for %v documents\n", xmem.Id(), len(bigDoc_map))
-	respMap := make(map[string]*mc.MCResponse, xmem.config.maxCount)
-	opaque_keySeqno_map := make(map[uint32][]interface{})
+	respMap := make(base.MCResponseMap, xmem.config.maxCount)
+	opaque_keySeqno_map := make(opaqueKeySeqnoMap)
 	receiver_fin_ch := make(chan bool, 1)
 	receiver_return_ch := make(chan bool, 1)
 
@@ -1523,10 +1573,12 @@ func (xmem *XmemNozzle) batchGetMeta(bigDoc_map map[string]*base.WrappedMCReques
 	sent_key_map := make(map[string]bool, len(bigDoc_map))
 
 	//de-dupe and prepare the packages
-	for key, originalReq := range bigDoc_map {
+	for _, originalReq := range bigDoc_map {
 		docKey := string(originalReq.Req.Key)
 		if docKey == "" {
-			return nil, fmt.Errorf("%v received empty docKey. unique-key= %v, req=%v, bigDoc_map=%v", xmem.Id(), key, originalReq.Req, bigDoc_map)
+			xmem.Logger().Errorf("%v received empty docKey. unique-key= %v%v%v, req=%v%v%v, bigDoc_map=%v%v%v", xmem.Id(),
+				base.UdTagBegin, originalReq.Req.Key, base.UdTagEnd, base.UdTagBegin, originalReq.Req, base.UdTagEnd, base.UdTagBegin, bigDoc_map, base.UdTagEnd)
+			return nil, fmt.Errorf("%v received empty docKey.", xmem.Id())
 		}
 
 		if _, ok := sent_key_map[docKey]; !ok {
@@ -1534,7 +1586,7 @@ func (xmem *XmemNozzle) batchGetMeta(bigDoc_map map[string]*base.WrappedMCReques
 			// .Bytes() returns data ready to be fed over the wire
 			reqs_bytes = append(reqs_bytes, req.Bytes())
 			// a Map of array of items and map key is the opaque currently based on time (passed to the target and back)
-			opaque_keySeqno_map[opaque] = []interface{}{docKey, originalReq.Seqno, originalReq.Req.VBucket, time.Now()}
+			opaque_keySeqno_map[opaque] = compileOpaqueKeySeqnoValue(docKey, originalReq.Seqno, originalReq.Req.VBucket, time.Now())
 			opaque++
 			numOfReqsInReqBytesBatch++
 			sent_key_map[docKey] = true
@@ -1576,32 +1628,42 @@ func (xmem *XmemNozzle) batchGetMeta(bigDoc_map map[string]*base.WrappedMCReques
 		if ok && resp.Status == mc.SUCCESS {
 			doc_meta_target, err := xmem.decodeGetMetaResp([]byte(key), resp)
 			if err != nil {
-				xmem.Logger().Warnf("%v batchGetMeta: Error decoding getMeta response for doc %v. err=%v. Skip conflict resolution and send the doc", xmem.Id(), key, err)
+				xmem.Logger().Warnf("%v batchGetMeta: Error decoding getMeta response for doc %v%v%v. err=%v. Skip conflict resolution and send the doc", xmem.Id(), base.UdTagBegin, key, base.UdTagEnd, err)
 				continue
 			}
 			doc_meta_source := decodeSetMetaReq(wrappedReq)
 			if !xmem.conflict_resolver(doc_meta_source, doc_meta_target, xmem.source_cr_mode, xmem.xattrEnabled, xmem.Logger()) {
 				if xmem.Logger().GetLogLevel() >= log.LogLevelDebug {
-					xmem.Logger().Debugf("%v doc %v failed source side conflict resolution. source meta=%v, target meta=%v. no need to send\n", xmem.Id(), key, doc_meta_source, doc_meta_target)
+					docMetaSrcRedacted := doc_meta_source.CloneAndRedact()
+					docMetaTgtRedacted := doc_meta_target.CloneAndRedact()
+					xmem.Logger().Debugf("%v doc %v%v%v failed source side conflict resolution. source meta=%v, target meta=%v. no need to send\n", xmem.Id(), base.UdTagBegin, key, base.UdTagEnd, docMetaSrcRedacted, docMetaTgtRedacted)
 				}
 				bigDoc_noRep_map[wrappedReq.UniqueKey] = true
 			} else if xmem.Logger().GetLogLevel() >= log.LogLevelDebug {
-				xmem.Logger().Debugf("%v doc %v succeeded source side conflict resolution. source meta=%v, target meta=%v. sending it to target\n", xmem.Id(), key, doc_meta_source, doc_meta_target)
+				docMetaSrcRedacted := doc_meta_source.CloneAndRedact()
+				docMetaTgtRedacted := doc_meta_target.CloneAndRedact()
+				xmem.Logger().Debugf("%v doc %v%v%v succeeded source side conflict resolution. source meta=%v, target meta=%v. sending it to target\n", xmem.Id(), base.UdTagBegin, key, base.UdTagEnd, docMetaSrcRedacted, docMetaTgtRedacted)
 			}
 		} else if ok && isTopologyChangeMCError(resp.Status) {
 			bigDoc_noRep_map[wrappedReq.UniqueKey] = false
 		} else {
 			if !ok || resp == nil {
-				xmem.Logger().Debugf("%v batchGetMeta: doc %s is not found in target system, send it", xmem.Id(), key)
+				if xmem.Logger().GetLogLevel() >= log.LogLevelDebug {
+					xmem.Logger().Debugf("%v batchGetMeta: doc %v%s%v is not found in target system, send it", xmem.Id(), base.UdTagBegin, key, base.UdTagEnd)
+				}
 			} else if resp.Status == mc.KEY_ENOENT {
-				xmem.Logger().Debugf("%v batchGetMeta: doc %s does not exist on target. Skip conflict resolution and send the doc", xmem.Id(), key)
+				if xmem.Logger().GetLogLevel() >= log.LogLevelDebug {
+					xmem.Logger().Debugf("%v batchGetMeta: doc %v%s%v does not exist on target. Skip conflict resolution and send the doc", xmem.Id(), base.UdTagBegin, key, base.UdTagEnd)
+				}
 			} else {
-				xmem.Logger().Warnf("%v batchGetMeta: memcached response for doc %s has error status %v. Skip conflict resolution and send the doc", xmem.Id(), key, resp.Status)
+				xmem.Logger().Warnf("%v batchGetMeta: memcached response for doc %v%s%v has error status %v. Skip conflict resolution and send the doc", xmem.Id(), base.UdTagBegin, key, base.UdTagEnd, resp.Status)
 			}
 		}
 	}
 
-	xmem.Logger().Debugf("%v Done with batchGetMeta, bigDoc_noRep_map=%v\n", xmem.Id(), bigDoc_noRep_map)
+	if xmem.Logger().GetLogLevel() >= log.LogLevelDebug {
+		xmem.Logger().Debugf("%v Done with batchGetMeta, bigDoc_noRep_map=%v\n", xmem.Id(), bigDoc_noRep_map.CloneAndRedact())
+	}
 	return bigDoc_noRep_map, nil
 }
 
@@ -1774,7 +1836,7 @@ func (xmem *XmemNozzle) initNewBatch() {
 	atomic.StoreUint32(&xmem.cur_batch_count, 0)
 }
 
-func (xmem *XmemNozzle) initialize(settings map[string]interface{}) error {
+func (xmem *XmemNozzle) initialize(settings metadata.ReplicationSettingsMap) error {
 	err := xmem.config.initializeConfig(settings, xmem.utils)
 	if err != nil {
 		return err
@@ -1858,7 +1920,8 @@ func (xmem *XmemNozzle) receiveResponse(finch chan bool, waitGrp *sync.WaitGroup
 
 					// error is temporary. resend doc
 					pos := xmem.getPosFromOpaque(response.Opaque)
-					xmem.Logger().Errorf("%v Received temporary error in setMeta response. Response status=%v, err = %v, response=%v\n", xmem.Id(), response.Status.String(), err, response)
+					xmem.Logger().Errorf("%v Received temporary error in setMeta response. Response status=%v, err = %v, response=%v%v%v\n", xmem.Id(), response.Status.String(), err,
+						base.UdTagBegin, response, base.UdTagEnd)
 					//resend and reset the retry=0 as retry is an indicator of network status,
 					//here we have received the response, so reset retry=0
 					_, err = xmem.buf.modSlot(pos, xmem.resendWithReset)
@@ -1886,11 +1949,11 @@ func (xmem *XmemNozzle) receiveResponse(finch chan bool, waitGrp *sync.WaitGroup
 								//    non-0 CAS and will get ENOENT response from target
 								// this is an extremely rare scenario considering the fact that tombstones are kept for 7 days.
 								// make GOXDCR exhibit the same behavior as that of 3.x XDCR -> log the error and resend the doc
-								xmem.Logger().Errorf("%v received KEY_ENOENT error from setMeta client. response status=%v, opcode=%v, seqno=%v, req.Key=%v, req.Cas=%v, req.Extras=%v\n", xmem.Id(), response.Status, response.Opcode, seqno, string(req.Key), req.Cas, req.Extras)
+								xmem.Logger().Errorf("%v received KEY_ENOENT error from setMeta client. response status=%v, opcode=%v, seqno=%v, req.Key=%v%v%v, req.Cas=%v, req.Extras=%v\n", xmem.Id(), response.Status, response.Opcode, seqno, base.UdTagBegin, req.Key, base.UdTagEnd, req.Cas, req.Extras)
 								_, err = xmem.buf.modSlot(pos, xmem.resendWithReset)
 							} else {
 								// for other non-temporary errors, repair connections
-								xmem.Logger().Errorf("%v received error response from setMeta client. Repairing connection. response status=%v, opcode=%v, seqno=%v, req.Key=%v, req.Cas=%v, req.Extras=%v\n", xmem.Id(), response.Status, response.Opcode, seqno, string(req.Key), req.Cas, req.Extras)
+								xmem.Logger().Errorf("%v received error response from setMeta client. Repairing connection. response status=%v, opcode=%v, seqno=%v, req.Key=%v%v%v, req.Cas=%v, req.Extras=%v\n", xmem.Id(), response.Status, response.Opcode, seqno, base.UdTagBegin, req.Key, base.UdTagEnd, req.Cas, req.Extras)
 								xmem.repairConn(xmem.client_for_setMeta, "error response from memcached", rev)
 							}
 						} else if req != nil {
@@ -2676,7 +2739,7 @@ func (xmem *XmemNozzle) ConnStr() string {
 	return xmem.config.connectStr
 }
 
-func (xmem *XmemNozzle) UpdateSettings(settings map[string]interface{}) error {
+func (xmem *XmemNozzle) UpdateSettings(settings metadata.ReplicationSettingsMap) error {
 	optimisticReplicationThreshold, ok := settings[SETTING_OPTI_REP_THRESHOLD]
 	if ok {
 		optimisticReplicationThresholdInt := optimisticReplicationThreshold.(int)

@@ -15,11 +15,12 @@ import (
 	"github.com/couchbase/goxdcr/base"
 	common "github.com/couchbase/goxdcr/common"
 	"github.com/couchbase/goxdcr/log"
+	"github.com/couchbase/goxdcr/metadata"
 	"sync"
 )
 
-type ServiceSettingsConstructor func(pipeline common.Pipeline, service common.PipelineService, pipeline_settings map[string]interface{}) (map[string]interface{}, error)
-type ServiceUpdateSettingsConstructor func(pipeline common.Pipeline, service common.PipelineService, pipeline_settings map[string]interface{}) (map[string]interface{}, error)
+type ServiceSettingsConstructor func(pipeline common.Pipeline, service common.PipelineService, pipeline_settings metadata.ReplicationSettingsMap) (metadata.ReplicationSettingsMap, error)
+type ServiceUpdateSettingsConstructor func(pipeline common.Pipeline, service common.PipelineService, pipeline_settings metadata.ReplicationSettingsMap) (metadata.ReplicationSettingsMap, error)
 type StartSeqnoConstructor func(pipeline common.Pipeline) error
 
 type PipelineRuntimeCtx struct {
@@ -54,7 +55,7 @@ func New(p common.Pipeline) (*PipelineRuntimeCtx, error) {
 	return NewWithSettingConstructor(p, nil, nil, log.DefaultLoggerContext)
 }
 
-func (ctx *PipelineRuntimeCtx) Start(params map[string]interface{}) error {
+func (ctx *PipelineRuntimeCtx) Start(params metadata.ReplicationSettingsMap) error {
 	ctx.runtime_svcs_lock.RLock()
 	defer ctx.runtime_svcs_lock.RUnlock()
 
@@ -183,7 +184,7 @@ func (ctx *PipelineRuntimeCtx) UnregisterService(srv_name string) error {
 	return err
 }
 
-func (ctx *PipelineRuntimeCtx) UpdateSettings(settings map[string]interface{}) error {
+func (ctx *PipelineRuntimeCtx) UpdateSettings(settings metadata.ReplicationSettingsMap) error {
 	ctx.runtime_svcs_lock.RLock()
 	defer ctx.runtime_svcs_lock.RUnlock()
 
@@ -201,7 +202,7 @@ func (ctx *PipelineRuntimeCtx) UpdateSettings(settings map[string]interface{}) e
 			}
 			err = svc.UpdateSettings(service_settings)
 			if err != nil {
-				ctx.logger.Errorf("Error updating settings for service %v. settings=%v, err=%v", name, service_settings, err)
+				ctx.logger.Errorf("Error updating settings for service %v. settings=%v, err=%v", name, service_settings.CloneAndRedact(), err)
 				return err
 			}
 		}

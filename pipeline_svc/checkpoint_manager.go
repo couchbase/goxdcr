@@ -246,7 +246,7 @@ func (ckmgr *CheckpointManager) populateRemoteBucketInfo(pipeline common.Pipelin
 	return nil
 }
 
-func (ckmgr *CheckpointManager) Start(settings map[string]interface{}) error {
+func (ckmgr *CheckpointManager) Start(settings metadata.ReplicationSettingsMap) error {
 	if ckpt_interval, ok := settings[CHECKPOINT_INTERVAL].(int); ok {
 		ckmgr.ckpt_interval = time.Duration(ckpt_interval) * time.Second
 	} else {
@@ -800,7 +800,7 @@ func (ckmgr *CheckpointManager) ckptRecordsWLock(ckptDoc *metadata.CheckpointsDo
 	return ret
 }
 
-func (ckmgr *CheckpointManager) UpdateSettings(settings map[string]interface{}) error {
+func (ckmgr *CheckpointManager) UpdateSettings(settings metadata.ReplicationSettingsMap) error {
 	ckmgr.logger.Debugf("Updating settings on checkpoint manager for pipeline %v. settings=%v\n", ckmgr.pipeline.Topic(), settings)
 	checkpoint_interval, err := ckmgr.utils.GetIntSettingFromSettings(settings, CHECKPOINT_INTERVAL)
 	if err != nil {
@@ -1461,7 +1461,7 @@ func GetStartSeqnos(pipeline common.Pipeline, logger *log.CommonLogger) (map[uin
 		if ok {
 			return startSeqnos_obj_with_lock.Object.(map[uint16]*base.VBTimestamp), startSeqnos_obj_with_lock.Lock
 		} else {
-			logger.Errorf("%v Didn't find 'VBTimesstamps' in settings. settings=%v\n", pipeline.Topic(), settings)
+			logger.Errorf("%v Didn't find 'VBTimesstamps' in settings. settings=%v\n", pipeline.Topic(), settings.CloneAndRedact())
 		}
 	} else {
 		logger.Info("pipleine is nil")

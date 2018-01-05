@@ -2,6 +2,7 @@ package metadata_svc
 
 import (
 	"errors"
+	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
 	"sync"
 	"sync/atomic"
@@ -14,6 +15,9 @@ type CacheableMetadataObj interface {
 	// if CAS is the same, increment CAS of current object and return true
 	// otherwise, return false
 	CAS(obj CacheableMetadataObj) bool
+	Clone() CacheableMetadataObj
+	Redact() CacheableMetadataObj
+	CloneAndRedact() CacheableMetadataObj
 }
 
 type MetadataCache struct {
@@ -58,7 +62,11 @@ func (cache *MetadataCache) Upsert(key string, val CacheableMetadataObj) error {
 
 	new_val_map[key] = val
 	cache.cache.Store(new_val_map)
-	cache.logger.Debugf("Done with upserting key=%v, val=%v, cache val=%v\n", key, val, cache.cache)
+
+	if cache.logger.GetLogLevel() >= log.LogLevelDebug {
+		cache.logger.Debugf("Done with upserting key=%v, val=%v, cache val=%v%v%v\n", key, val.CloneAndRedact(),
+			base.UdTagBegin, new_val_map, base.UdTagEnd)
+	}
 	return nil
 }
 

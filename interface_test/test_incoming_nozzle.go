@@ -13,8 +13,8 @@ import (
 	"errors"
 	"fmt"
 	common "github.com/couchbase/goxdcr/common"
-	part "github.com/couchbase/goxdcr/part"
 	"github.com/couchbase/goxdcr/log"
+	part "github.com/couchbase/goxdcr/part"
 	"reflect"
 	"sync"
 )
@@ -33,27 +33,27 @@ type testIncomingNozzle struct {
 	isStarted bool
 
 	//the lock to serialize the request to open\close the nozzle
-	openLock sync.RWMutex
+	openLock  sync.RWMutex
 	startLock sync.RWMutex
 
 	waitGrp sync.WaitGroup
 }
 
 func newInComingNozzle(id string) *testIncomingNozzle {
-	nozzle := &testIncomingNozzle{start_int :0, 
-	communicationChan: nil, 
-	isOpen: false, 
-	isStarted: false, 
-	openLock: sync.RWMutex{}, 
-	startLock: sync.RWMutex{}, 
-	waitGrp: sync.WaitGroup{}}
+	nozzle := &testIncomingNozzle{start_int: 0,
+		communicationChan: nil,
+		isOpen:            false,
+		isStarted:         false,
+		openLock:          sync.RWMutex{},
+		startLock:         sync.RWMutex{},
+		waitGrp:           sync.WaitGroup{}}
 	funcw := nozzle.IsStarted
 	funce := (part.IsStarted_Callback_Func)(funcw)
 	nozzle.AbstractPart = part.NewAbstractPartWithLogger(id, &funce, log.NewLogger("testIncomingNozzle", log.DefaultLoggerContext))
 	return nozzle
 }
 
-func (p *testIncomingNozzle) Start(settings map[string]interface{}) error {
+func (p *testIncomingNozzle) Start(settings metadata.ReplicationSettingsMap) error {
 	p.startLock.Lock()
 	defer p.startLock.Unlock()
 
@@ -63,7 +63,7 @@ func (p *testIncomingNozzle) Start(settings map[string]interface{}) error {
 	return nil
 }
 
-func (p *testIncomingNozzle) init(settings map[string]interface{}) error {
+func (p *testIncomingNozzle) init(settings metadata.ReplicationSettingsMap) error {
 	p.communicationChan = make(chan []interface{})
 
 	start, ok := settings["start_int"]

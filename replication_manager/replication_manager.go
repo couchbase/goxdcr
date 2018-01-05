@@ -56,28 +56,10 @@ var GoXDCROptions struct {
 }
 
 /************************************
-/* struct ReplicationManager
+/* ReplicationManager Interface
 *************************************/
 type ReplicationManagerIf interface {
-	initMetadataChangeMonitor()
-	initReplications()
-	checkReplicationStatus(fin_chan chan bool)
-	init(repl_spec_svc service_def.ReplicationSpecSvc,
-		remote_cluster_svc service_def.RemoteClusterSvc,
-		cluster_info_svc service_def.ClusterInfoSvc,
-		xdcr_topology_svc service_def.XDCRCompTopologySvc,
-		replication_settings_svc service_def.ReplicationSettingsSvc,
-		checkpoint_svc service_def.CheckpointsService,
-		capi_svc service_def.CAPIService,
-		audit_svc service_def.AuditSvc,
-		uilog_svc service_def.UILogSvc,
-		global_setting_svc service_def.GlobalSettingsSvc,
-		bucket_settings_svc service_def.BucketSettingsSvc,
-		internal_settings_svc service_def.InternalSettingsSvc)
-	createAndPersistReplicationSpec(justValidate bool, sourceBucket, targetCluster, targetBucket string, settings map[string]interface{}) (*metadata.ReplicationSpecification, map[string]error, error, []string)
-	OnError(s common.Supervisor, errMap map[string]error)
-	upgradeRemoteClusterRefs()
-	getPipelineFromPipelineSupevisor(s common.Supervisor) (common.Pipeline, error)
+	OnError(s common.Supervisor, errMap base.ErrorMap)
 }
 
 /************************************
@@ -450,9 +432,9 @@ func InternalSettingsService() service_def.InternalSettingsSvc {
 
 //CreateReplication create the replication specification in metadata store
 //and start the replication pipeline
-func CreateReplication(justValidate bool, sourceBucket, targetCluster, targetBucket string, settings map[string]interface{}, realUserId *base.RealUserId) (string, map[string]error, error, []string) {
+func CreateReplication(justValidate bool, sourceBucket, targetCluster, targetBucket string, settings metadata.ReplicationSettingsMap, realUserId *service_def.RealUserId) (string, map[string]error, error, []string) {
 	logger_rm.Infof("Creating replication - justValidate=%v, sourceBucket=%s, targetCluster=%s, targetBucket=%s, settings=%v\n",
-		justValidate, sourceBucket, targetCluster, targetBucket, settings)
+		justValidate, sourceBucket, targetCluster, targetBucket, settings.CloneAndRedact())
 
 	var spec *metadata.ReplicationSpecification
 	spec, errorsMap, err, warnings := replication_mgr.createAndPersistReplicationSpec(justValidate, sourceBucket, targetCluster, targetBucket, settings)
@@ -476,7 +458,7 @@ func CreateReplication(justValidate bool, sourceBucket, targetCluster, targetBuc
 
 //DeleteReplication stops the running replication of given replicationId and
 //delete the replication specification from the metadata store
-func DeleteReplication(topic string, realUserId *base.RealUserId) error {
+func DeleteReplication(topic string, realUserId *service_def.RealUserId) error {
 	logger_rm.Infof("Deleting replication %s\n", topic)
 
 	// delete replication spec
@@ -488,7 +470,7 @@ func DeleteReplication(topic string, realUserId *base.RealUserId) error {
 		return err
 	}
 
-	go writeGenericReplicationEvent(base.CancelReplicationEventId, spec, realUserId)
+	go writeGenericReplicationEvent(service_def.CancelReplicationEventId, spec, realUserId)
 
 	logger_rm.Infof("Pipeline %s is deleted\n", topic)
 
@@ -500,7 +482,7 @@ func PipelineMasterSupervisor() *supervisor.GenericSupervisor {
 }
 
 //update the  replication settings and XDCR process setting
-func UpdateDefaultSettings(settings map[string]interface{}, realUserId *base.RealUserId) (map[string]error, error) {
+func UpdateDefaultSettings(settings metadata.ReplicationSettingsMap, realUserId *service_def.RealUserId) (map[string]error, error) {
 
 	// Validate process setting keys
 	GlobalSettingsMap := metadata.ValidateGlobalSettingsKey(settings)
@@ -523,7 +505,7 @@ func UpdateDefaultSettings(settings map[string]interface{}, realUserId *base.Rea
 }
 
 //update the process  settings
-func UpdateGlobalSettings(settings map[string]interface{}, realUserId *base.RealUserId) (map[string]error, error) {
+func UpdateGlobalSettings(settings metadata.ReplicationSettingsMap, realUserId *service_def.RealUserId) (map[string]error, error) {
 	defaultSettings, err := GlobalSettingsService().GetDefaultGlobalSettings()
 	if err != nil {
 		return nil, err
@@ -539,7 +521,7 @@ func UpdateGlobalSettings(settings map[string]interface{}, realUserId *base.Real
 		if err != nil {
 			return nil, err
 		}
-		logger_rm.Infof("Default Process settings saved succesfully\n")
+		logger_rm.Infof("Default Process settings saved successfully\n")
 	} else {
 		logger_rm.Infof("Did not update process  settings since there are no real changes")
 	}
@@ -548,7 +530,7 @@ func UpdateGlobalSettings(settings map[string]interface{}, realUserId *base.Real
 }
 
 //update the default replication settings
-func UpdateDefaultReplicationSettings(settings map[string]interface{}, realUserId *base.RealUserId) (map[string]error, error) {
+func UpdateDefaultReplicationSettings(settings metadata.ReplicationSettingsMap, realUserId *service_def.RealUserId) (map[string]error, error) {
 	defaultSettings, err := ReplicationSettingsService().GetDefaultReplicationSettings()
 	if err != nil {
 		return nil, err
@@ -576,8 +558,8 @@ func UpdateDefaultReplicationSettings(settings map[string]interface{}, realUserI
 }
 
 //update the per-replication settings
-func UpdateReplicationSettings(topic string, settings map[string]interface{}, realUserId *base.RealUserId) (map[string]error, error) {
-	logger_rm.Infof("Update replication settings for %v, settings=%v\n", topic, settings)
+func UpdateReplicationSettings(topic string, settings metadata.ReplicationSettingsMap, realUserId *service_def.RealUserId) (map[string]error, error) {
+	logger_rm.Infof("Update replication settings for %v, settings=%v\n", topic, settings.CloneAndRedact())
 	// read replication spec with the specified replication id
 	replSpec, err := ReplicationSpecService().ReplicationSpec(topic)
 	if err != nil {
@@ -630,9 +612,9 @@ func UpdateReplicationSettings(topic string, settings map[string]interface{}, re
 		active, ok := changedSettingsMap[metadata.Active]
 		if ok {
 			if active.(bool) {
-				go writeGenericReplicationEvent(base.ResumeReplicationEventId, replSpec, realUserId)
+				go writeGenericReplicationEvent(service_def.ResumeReplicationEventId, replSpec, realUserId)
 			} else {
-				go writeGenericReplicationEvent(base.PauseReplicationEventId, replSpec, realUserId)
+				go writeGenericReplicationEvent(service_def.PauseReplicationEventId, replSpec, realUserId)
 			}
 		}
 		logger_rm.Infof("Done with replication settings auditing for replication %v\n", topic)
@@ -671,9 +653,9 @@ func GetStatistics(bucket string) (*expvar.Map, error) {
 }
 
 //create and persist the replication specification
-func (rm *replicationManager) createAndPersistReplicationSpec(justValidate bool, sourceBucket, targetCluster, targetBucket string, settings map[string]interface{}) (*metadata.ReplicationSpecification, map[string]error, error, []string) {
+func (rm *replicationManager) createAndPersistReplicationSpec(justValidate bool, sourceBucket, targetCluster, targetBucket string, settings metadata.ReplicationSettingsMap) (*metadata.ReplicationSpecification, map[string]error, error, []string) {
 	logger_rm.Infof("Creating replication spec - justValidate=%v, sourceBucket=%s, targetCluster=%s, targetBucket=%s, settings=%v\n",
-		justValidate, sourceBucket, targetCluster, targetBucket, settings)
+		justValidate, sourceBucket, targetCluster, targetBucket, settings.CloneAndRedact())
 	// validate that everything is alright with the replication configuration before actually creating it
 	sourceBucketUUID, targetBucketUUID, targetClusterRef, errorMap, err, warnings := replication_mgr.repl_spec_svc.ValidateNewReplicationSpec(sourceBucket, targetCluster, targetBucket, settings)
 	if err != nil || len(errorMap) > 0 {
@@ -1008,7 +990,7 @@ func exitProcess_once(byForce bool) {
 	}
 }
 
-func writeGenericReplicationEvent(eventId uint32, spec *metadata.ReplicationSpecification, realUserId *base.RealUserId) {
+func writeGenericReplicationEvent(eventId uint32, spec *metadata.ReplicationSpecification, realUserId *service_def.RealUserId) {
 	event, err := constructGenericReplicationEvent(spec, realUserId)
 	if err == nil {
 		err = AuditService().Write(eventId, event)
@@ -1017,69 +999,69 @@ func writeGenericReplicationEvent(eventId uint32, spec *metadata.ReplicationSpec
 	logAuditErrors(err)
 }
 
-func writeCreateReplicationEvent(spec *metadata.ReplicationSpecification, realUserId *base.RealUserId) {
+func writeCreateReplicationEvent(spec *metadata.ReplicationSpecification, realUserId *service_def.RealUserId) {
 	genericReplicationEvent, err := constructGenericReplicationEvent(spec, realUserId)
 	if err == nil {
-		createReplicationEvent := &base.CreateReplicationEvent{
+		createReplicationEvent := &service_def.CreateReplicationEvent{
 			GenericReplicationEvent: *genericReplicationEvent,
 			FilterExpression:        spec.Settings.FilterExpression}
 
-		err = AuditService().Write(base.CreateReplicationEventId, createReplicationEvent)
+		err = AuditService().Write(service_def.CreateReplicationEventId, createReplicationEvent)
 	}
 
 	logAuditErrors(err)
 }
 
-func writeUpdateDefaultReplicationSettingsEvent(changedSettingsMap *map[string]interface{}, realUserId *base.RealUserId) {
+func writeUpdateDefaultReplicationSettingsEvent(changedSettingsMap *metadata.ReplicationSettingsMap, realUserId *service_def.RealUserId) {
 	event, err := constructUpdateDefaultReplicationSettingsEvent(changedSettingsMap, realUserId)
 	if err == nil {
-		err = AuditService().Write(base.UpdateDefaultReplicationSettingsEventId, event)
+		err = AuditService().Write(service_def.UpdateDefaultReplicationSettingsEventId, event)
 	}
 	logAuditErrors(err)
 }
 
-func writeUpdateReplicationSettingsEvent(spec *metadata.ReplicationSpecification, changedSettingsMap *map[string]interface{}, realUserId *base.RealUserId) {
+func writeUpdateReplicationSettingsEvent(spec *metadata.ReplicationSpecification, changedSettingsMap *metadata.ReplicationSettingsMap, realUserId *service_def.RealUserId) {
 	replicationSpecificFields, err := constructReplicationSpecificFieldsFromSpec(spec)
 	if err == nil {
-		var updateDefaultReplicationSettingsEvent *base.UpdateDefaultReplicationSettingsEvent
+		var updateDefaultReplicationSettingsEvent *service_def.UpdateDefaultReplicationSettingsEvent
 		updateDefaultReplicationSettingsEvent, err = constructUpdateDefaultReplicationSettingsEvent(changedSettingsMap, realUserId)
 		if err == nil {
-			updateReplicationSettingsEvent := &base.UpdateReplicationSettingsEvent{
+			updateReplicationSettingsEvent := &service_def.UpdateReplicationSettingsEvent{
 				ReplicationSpecificFields:             *replicationSpecificFields,
 				UpdateDefaultReplicationSettingsEvent: *updateDefaultReplicationSettingsEvent}
-			err = AuditService().Write(base.UpdateReplicationSettingsEventId, updateReplicationSettingsEvent)
+			err = AuditService().Write(service_def.UpdateReplicationSettingsEventId, updateReplicationSettingsEvent)
 		}
 	}
 	logAuditErrors(err)
 }
 
-func writeUpdateBucketSettingsEvent(bucketName string, lwwEnabled bool, realUserId *base.RealUserId) {
+func writeUpdateBucketSettingsEvent(bucketName string, lwwEnabled bool, realUserId *service_def.RealUserId) {
 	updateBucketSettingsEvent := constructUpdateBucketSettingsEvent(bucketName, lwwEnabled, realUserId)
-	err := AuditService().Write(base.UpdateBucketSettingsEventId, updateBucketSettingsEvent)
+	err := AuditService().Write(service_def.UpdateBucketSettingsEventId, updateBucketSettingsEvent)
 	logAuditErrors(err)
 }
 
-func constructGenericReplicationFields(realUserId *base.RealUserId) (*base.GenericReplicationFields, error) {
+func constructGenericReplicationFields(realUserId *service_def.RealUserId) (*service_def.GenericReplicationFields, error) {
 	localClusterName, err := XDCRCompTopologyService().MyHostAddr()
 	if err != nil {
 		return nil, err
 	}
 
-	return &base.GenericReplicationFields{
-		GenericFields:    base.GenericFields{log.FormatTimeWithMilliSecondPrecision(time.Now()), *realUserId},
+	return &service_def.GenericReplicationFields{
+		GenericFields:    service_def.GenericFields{log.FormatTimeWithMilliSecondPrecision(time.Now()), *realUserId},
 		LocalClusterName: localClusterName}, nil
 }
 
-func constructReplicationSpecificFieldsFromSpec(spec *metadata.ReplicationSpecification) (*base.ReplicationSpecificFields, error) {
+func constructReplicationSpecificFieldsFromSpec(spec *metadata.ReplicationSpecification) (*service_def.ReplicationSpecificFields, error) {
 	remoteClusterName := RemoteClusterService().GetRemoteClusterNameFromClusterUuid(spec.TargetClusterUUID)
 
-	return &base.ReplicationSpecificFields{
+	return &service_def.ReplicationSpecificFields{
 		SourceBucketName:  spec.SourceBucketName,
 		RemoteClusterName: remoteClusterName,
 		TargetBucketName:  spec.TargetBucketName}, nil
 }
 
-func constructGenericReplicationEvent(spec *metadata.ReplicationSpecification, realUserId *base.RealUserId) (*base.GenericReplicationEvent, error) {
+func constructGenericReplicationEvent(spec *metadata.ReplicationSpecification, realUserId *service_def.RealUserId) (*service_def.GenericReplicationEvent, error) {
 	genericReplicationFields, err := constructGenericReplicationFields(realUserId)
 	if err != nil {
 		return nil, err
@@ -1090,12 +1072,12 @@ func constructGenericReplicationEvent(spec *metadata.ReplicationSpecification, r
 		return nil, err
 	}
 
-	return &base.GenericReplicationEvent{
+	return &service_def.GenericReplicationEvent{
 		GenericReplicationFields:  *genericReplicationFields,
 		ReplicationSpecificFields: *replicationSpecificFields}, nil
 }
 
-func constructUpdateDefaultReplicationSettingsEvent(changedSettingsMap *map[string]interface{}, realUserId *base.RealUserId) (*base.UpdateDefaultReplicationSettingsEvent, error) {
+func constructUpdateDefaultReplicationSettingsEvent(changedSettingsMap *metadata.ReplicationSettingsMap, realUserId *service_def.RealUserId) (*service_def.UpdateDefaultReplicationSettingsEvent, error) {
 	logger_rm.Info("Start constructUpdateDefaultReplicationSettingsEvent....")
 	genericReplicationFields, err := constructGenericReplicationFields(realUserId)
 	if err != nil {
@@ -1113,27 +1095,27 @@ func constructUpdateDefaultReplicationSettingsEvent(changedSettingsMap *map[stri
 	}
 	logger_rm.Info("Done constructUpdateDefaultReplicationSettingsEvent....")
 
-	return &base.UpdateDefaultReplicationSettingsEvent{
+	return &service_def.UpdateDefaultReplicationSettingsEvent{
 		GenericReplicationFields: *genericReplicationFields,
 		UpdatedSettings:          convertedSettingsMap}, nil
 }
 
-func constructUpdateBucketSettingsEvent(bucketName string, lwwEnabled bool, realUserId *base.RealUserId) *base.UpdateBucketSettingsEvent {
+func constructUpdateBucketSettingsEvent(bucketName string, lwwEnabled bool, realUserId *service_def.RealUserId) *service_def.UpdateBucketSettingsEvent {
 	logger_rm.Info("Start constructUpdateBucketSettingsEvent....")
 
 	settingsMap := make(map[string]interface{})
 	settingsMap[LWWEnabled] = lwwEnabled
 	logger_rm.Info("Done constructUpdateBucketSettingsEvent....")
 
-	return &base.UpdateBucketSettingsEvent{
-		GenericFields:   base.GenericFields{log.FormatTimeWithMilliSecondPrecision(time.Now()), *realUserId},
+	return &service_def.UpdateBucketSettingsEvent{
+		GenericFields:   service_def.GenericFields{log.FormatTimeWithMilliSecondPrecision(time.Now()), *realUserId},
 		UpdatedSettings: settingsMap}
 
 }
 
 func logAuditErrors(err error) {
 	if err != nil {
-		err = replication_mgr.utils.NewEnhancedError(base.ErrorWritingAudit, err)
+		err = replication_mgr.utils.NewEnhancedError(service_def.ErrorWritingAudit, err)
 		logger_rm.Errorf(err.Error())
 	}
 }
@@ -1162,7 +1144,7 @@ func getBucketSettings(bucketName string) (map[string]interface{}, error) {
 	return bucketSettings.ToMap(), nil
 }
 
-func setBucketSettings(bucketName string, lwwEnabled bool, realUserId *base.RealUserId) (map[string]interface{}, error) {
+func setBucketSettings(bucketName string, lwwEnabled bool, realUserId *service_def.RealUserId) (map[string]interface{}, error) {
 	bucketSettings := &metadata.BucketSettings{BucketName: bucketName, LWWEnabled: lwwEnabled}
 	err := BucketSettingsService().SetBucketSettings(bucketName, bucketSettings)
 	if err != nil {

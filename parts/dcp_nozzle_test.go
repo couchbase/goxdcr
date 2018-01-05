@@ -9,6 +9,7 @@ import (
 	"github.com/couchbase/goxdcr/base"
 	common "github.com/couchbase/goxdcr/common"
 	"github.com/couchbase/goxdcr/log"
+	"github.com/couchbase/goxdcr/metadata"
 	service_def "github.com/couchbase/goxdcr/service_def/mocks"
 	utilsReal "github.com/couchbase/goxdcr/utils"
 	utilsMock "github.com/couchbase/goxdcr/utils/mocks"
@@ -99,7 +100,7 @@ func uprFeedChanWrapper(uprFeed *mcMock.UprFeedIface, eventCh <-chan *mcReal.Upr
 func setupMocksWithTs(xdcrTopology *service_def.XDCRCompTopologySvc,
 	utils *utilsMock.UtilsIface,
 	nozzle *DcpNozzle,
-	settings map[string]interface{},
+	settings metadata.ReplicationSettingsMap,
 	mcClient *mcMock.ClientIface,
 	uprFeed *mcMock.UprFeedIface,
 	vbTs *base.VBTimestamp) {
@@ -113,7 +114,7 @@ func setupMocksWithTs(xdcrTopology *service_def.XDCRCompTopologySvc,
 func setupMocks(xdcrTopology *service_def.XDCRCompTopologySvc,
 	utils *utilsMock.UtilsIface,
 	nozzle *DcpNozzle,
-	settings map[string]interface{},
+	settings metadata.ReplicationSettingsMap,
 	mcClient *mcMock.ClientIface,
 	uprFeed *mcMock.UprFeedIface) {
 
@@ -127,7 +128,7 @@ func setupMocks(xdcrTopology *service_def.XDCRCompTopologySvc,
 func setupMocksInternal(xdcrTopology *service_def.XDCRCompTopologySvc,
 	utils *utilsMock.UtilsIface,
 	nozzle *DcpNozzle,
-	settings map[string]interface{},
+	settings metadata.ReplicationSettingsMap,
 	mcClient *mcMock.ClientIface,
 	uprFeed *mcMock.UprFeedIface,
 	featureSet utilsReal.HELOFeatures) {

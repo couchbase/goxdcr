@@ -71,6 +71,46 @@ var InvalidIntValue int = -1
 // the value indicates that no value is passed in at all
 var NonExistentIntValue int = -2
 
+type migrationDataMap map[string]interface{}
+
+// Map of key and bool to indicate the value is a stream of bytes
+var migrationDataMapRedactKeys = map[string]bool{"password": false,
+	"userName":    false,
+	"certificate": true,
+}
+
+func (mdm migrationDataMap) Clone() migrationDataMap {
+	if mdm != nil {
+		clone := make(migrationDataMap)
+		for k, v := range mdm {
+			if isByteArray, exists := migrationDataMapRedactKeys[k]; exists && isByteArray {
+				clone[k] = base.DeepCopyByteArray(v.([]byte))
+			} else {
+				clone[k] = v
+			}
+		}
+		return clone
+	}
+	return mdm
+}
+
+func (mdm migrationDataMap) Redact() migrationDataMap {
+	for key, redactBytes := range migrationDataMapRedactKeys {
+		if v, ok := mdm[key]; ok {
+			if redactBytes {
+				mdm[key] = base.TagUDBytes(v.([]byte))
+			} else {
+				mdm[key] = base.TagUD(v)
+			}
+		}
+	}
+	return mdm
+}
+
+func (mdm migrationDataMap) CloneAndRedact() migrationDataMap {
+	return mdm.Clone().Redact()
+}
+
 type MigrationSvc struct {
 	xdcr_comp_topology_svc   service_def.XDCRCompTopologySvc
 	remote_cluster_svc       service_def.RemoteClusterSvc
@@ -249,14 +289,15 @@ func (service *MigrationSvc) migrateRemoteCluster(remoteClusterData interface{},
 	fatalErrorList := make([]error, 0)
 	mildErrorList := make([]error, 0)
 
-	remoteCluster, ok := remoteClusterData.(map[string]interface{})
+	remoteCluster, ok := remoteClusterData.(migrationDataMap)
 	if !ok {
 		err := incorrectMetadataValueTypeError(TypeRemoteCluster, remoteClusterData, "map[string]interface{}")
 		fatalErrorList = append(fatalErrorList, err)
 		return deletedRemoteClusterUuidList, fatalErrorList, mildErrorList
 	}
 	service.logger.Info("Starting to migrate remote cluster")
-	service.logger.Infof("data=%v\n", sanitizeForLogging(remoteCluster))
+	redactedClusterData := remoteCluster.CloneAndRedact()
+	service.logger.Infof("data=%v\n", redactedClusterData)
 
 	name := ""
 	uuid := ""
@@ -272,7 +313,7 @@ func (service *MigrationSvc) migrateRemoteCluster(remoteClusterData interface{},
 	if ok {
 		name, mildErrorList = getStringValue(base.RemoteClusterName, nameData, TypeRemoteCluster, mildErrorList)
 	} else {
-		mildErrorList = append(mildErrorList, missingRequiredFieldError(base.RemoteClusterName, TypeRemoteCluster, sanitizeForLogging(remoteCluster)))
+		mildErrorList = append(mildErrorList, missingRequiredFieldError(base.RemoteClusterName, TypeRemoteCluster, redactedClusterData))
 	}
 
 	if name == "" {
@@ -281,7 +322,7 @@ func (service *MigrationSvc) migrateRemoteCluster(remoteClusterData interface{},
 		// in the unlikely event that Name is missing, skip the remote cluster reference
 		// in comparison, if other required fields are missing, we can still migrate the remote cluster reference
 		// and let users decide what to do with the migrated and invalid reference later
-		mildErrorList = append(mildErrorList, fmt.Errorf("Skipping migrating remote cluster %v since it does not have Name specified", sanitizeForLogging(remoteCluster)))
+		mildErrorList = append(mildErrorList, fmt.Errorf("Skipping migrating remote cluster %v since it does not have Name specified", redactedClusterData))
 		return deletedRemoteClusterUuidList, fatalErrorList, mildErrorList
 	}
 
@@ -289,7 +330,7 @@ func (service *MigrationSvc) migrateRemoteCluster(remoteClusterData interface{},
 	if ok {
 		uuid, mildErrorList = getStringValue(base.RemoteClusterUuid, uuidData, TypeRemoteCluster, mildErrorList)
 	} else {
-		mildErrorList = append(mildErrorList, missingRequiredFieldError(base.RemoteClusterUuid, TypeRemoteCluster, sanitizeForLogging(remoteCluster)))
+		mildErrorList = append(mildErrorList, missingRequiredFieldError(base.RemoteClusterUuid, TypeRemoteCluster, redactedClusterData))
 	}
 
 	if deletedData, ok := remoteCluster[base.RemoteClusterDeleted]; ok {
@@ -314,21 +355,21 @@ func (service *MigrationSvc) migrateRemoteCluster(remoteClusterData interface{},
 	if ok {
 		hostname, mildErrorList = getStringValue(base.RemoteClusterHostName, hostnameData, TypeRemoteCluster, mildErrorList)
 	} else {
-		mildErrorList = append(mildErrorList, missingRequiredFieldError(base.RemoteClusterHostName, TypeRemoteCluster, sanitizeForLogging(remoteCluster)))
+		mildErrorList = append(mildErrorList, missingRequiredFieldError(base.RemoteClusterHostName, TypeRemoteCluster, redactedClusterData))
 	}
 
 	usernameData, ok := remoteCluster[base.RemoteClusterUserName]
 	if ok {
 		username, mildErrorList = getStringValue(base.RemoteClusterUserName, usernameData, TypeRemoteCluster, mildErrorList)
 	} else {
-		mildErrorList = append(mildErrorList, missingRequiredFieldError(base.RemoteClusterUserName, TypeRemoteCluster, sanitizeForLogging(remoteCluster)))
+		mildErrorList = append(mildErrorList, missingRequiredFieldError(base.RemoteClusterUserName, TypeRemoteCluster, redactedClusterData))
 	}
 
 	passwordData, ok := remoteCluster[base.RemoteClusterPassword]
 	if ok {
 		password, mildErrorList = getStringValue(base.RemoteClusterPassword, passwordData, TypeRemoteCluster, mildErrorList)
 	} else {
-		mildErrorList = append(mildErrorList, missingRequiredFieldError(base.RemoteClusterPassword, TypeRemoteCluster, sanitizeForLogging(remoteCluster)))
+		mildErrorList = append(mildErrorList, missingRequiredFieldError(base.RemoteClusterPassword, TypeRemoteCluster, redactedClusterData))
 	}
 
 	if demandEncryptionData, ok := remoteCluster[base.RemoteClusterDemandEncryption]; ok {
@@ -344,11 +385,11 @@ func (service *MigrationSvc) migrateRemoteCluster(remoteClusterData interface{},
 	}
 
 	if demandEncryption && len(certificate) == 0 {
-		mildErrorList = append(mildErrorList, errors.New(fmt.Sprintf("Certificate of remote cluster is required when demandEncryption is enabled. data=%v", sanitizeForLogging(remoteCluster))))
+		mildErrorList = append(mildErrorList, errors.New(fmt.Sprintf("Certificate of remote cluster is required when demandEncryption is enabled. data=%v", redactedClusterData)))
 	}
 
 	if !demandEncryption && len(certificate) > 0 {
-		mildErrorList = append(mildErrorList, errors.New(fmt.Sprintf("Certificate of remote cluster has been specified when demandEncryption is not enabled. data=%v", sanitizeForLogging(remoteCluster))))
+		mildErrorList = append(mildErrorList, errors.New(fmt.Sprintf("Certificate of remote cluster has been specified when demandEncryption is not enabled. data=%v", redactedClusterData)))
 	}
 
 	encryptionType := ""
@@ -365,7 +406,7 @@ func (service *MigrationSvc) migrateRemoteCluster(remoteClusterData interface{},
 		return deletedRemoteClusterUuidList, fatalErrorList, mildErrorList
 	}
 
-	service.logger.Infof("Remote cluster constructed = %v\n", ref)
+	service.logger.Infof("Remote cluster constructed = %v\n", ref.CloneAndRedact())
 
 	// delete remote cluster if it already exists
 	_, err = service.remote_cluster_svc.DelRemoteCluster(name)
@@ -395,7 +436,7 @@ func (service *MigrationSvc) migrateRemoteCluster(remoteClusterData interface{},
 
 func (service *MigrationSvc) migrateReplicationSettings(replicationSettingsData interface{}) (int, int, []error) {
 	service.logger.Info("Starting to migrate default replication settings")
-	service.logger.Infof("data=%v\n", replicationSettingsData)
+	service.logger.Infof("data=%v\n", (replicationSettingsData.(metadata.ReplicationSettingsMap)).CloneAndRedact())
 
 	fatalErrorList := make([]error, 0)
 
@@ -403,7 +444,7 @@ func (service *MigrationSvc) migrateReplicationSettings(replicationSettingsData 
 		return SettingWorkerProcessesDefault, SettingMaxConcurrentRepsDefault, fatalErrorList
 	}
 
-	oldSettingsMap, ok := replicationSettingsData.(map[string]interface{})
+	oldSettingsMap, ok := replicationSettingsData.(metadata.ReplicationSettingsMap)
 	if !ok {
 		err := incorrectMetadataValueTypeError(TypeReplicationSettings, replicationSettingsData, "map[string]interface{}")
 		fatalErrorList = append(fatalErrorList, err)
@@ -652,8 +693,8 @@ func addErrorMapToErrorList(errorMap map[string]error, errorList []error) []erro
 }
 
 // get goxdcr settings from replication doc or erlang settings map
-func (service *MigrationSvc) getGoxdcrSettingsMap(oldSettingsMap map[string]interface{}, errorList []error, defaultWorkerProcesses, defaultMaxConcurrentReps int) (map[string]interface{}, []error, int, int) {
-	settingsMap := make(map[string]interface{})
+func (service *MigrationSvc) getGoxdcrSettingsMap(oldSettingsMap metadata.ReplicationSettingsMap, errorList []error, defaultWorkerProcesses, defaultMaxConcurrentReps int) (metadata.ReplicationSettingsMap, []error, int, int) {
+	settingsMap := make(metadata.ReplicationSettingsMap)
 	if replType, ok := oldSettingsMap[base.ReplicationDocType]; ok {
 		replTypeStr, errorList := getStringValue(base.ReplicationDocType, replType, TypeReplicationDoc, errorList)
 		if replTypeStr != "" {
@@ -725,7 +766,7 @@ func (service *MigrationSvc) getGoxdcrSettingsMap(oldSettingsMap map[string]inte
 	}
 	settingsMap[metadata.TargetNozzlePerNode] = targetNozzlePerNode
 
-	service.logger.Infof("Done with converting replication settings to goxdcr settings. old settings=%v\n new settings=%v\n errorList=%v\n", oldSettingsMap, settingsMap, errorList)
+	service.logger.Infof("Done with converting replication settings to goxdcr settings. old settings=%v\n new settings=%v\n errorList=%v\n", oldSettingsMap.CloneAndRedact(), settingsMap.CloneAndRedact(), errorList)
 
 	return settingsMap, errorList, workerProcesses, maxConcurrentReps
 }
@@ -832,16 +873,4 @@ func getReplicationIdAndVBFromCheckpointId(checkpointDocId string) (string, uint
 	} else {
 		return "", 0, invalidFieldValueError(CheckpointDocId, checkpointDocId, TypeCheckpoint)
 	}
-}
-
-func sanitizeForLogging(data map[string]interface{}) map[string]interface{} {
-	ret_map := make(map[string]interface{})
-	for key, value := range data {
-		if key == "password" {
-			ret_map[key] = "xxxx"
-		} else {
-			ret_map[key] = value
-		}
-	}
-	return ret_map
 }

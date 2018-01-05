@@ -274,7 +274,7 @@ func (_m *ReplicationSpecSvc) ValidateAndGC(spec *metadata.ReplicationSpecificat
 }
 
 // ValidateNewReplicationSpec provides a mock function with given fields: sourceBucket, targetCluster, targetBucket, settings
-func (_m *ReplicationSpecSvc) ValidateNewReplicationSpec(sourceBucket string, targetCluster string, targetBucket string, settings map[string]interface{}) (string, string, *metadata.RemoteClusterReference, base.ErrorMap, error, []string) {
+func (_m *ReplicationSpecSvc) ValidateNewReplicationSpec(sourceBucket string, targetCluster string, targetBucket string, settings metadata.ReplicationSettingsMap) (string, string, *metadata.RemoteClusterReference, base.ErrorMap, error, []string) {
 	ret := _m.Called(sourceBucket, targetCluster, targetBucket, settings)
 
 	var r0 string
@@ -329,7 +329,7 @@ func (_m *ReplicationSpecSvc) ValidateNewReplicationSpec(sourceBucket string, ta
 }
 
 // ValidateReplicationSettings provides a mock function with given fields: sourceBucket, targetCluster, targetBucket, settings
-func (_m *ReplicationSpecSvc) ValidateReplicationSettings(sourceBucket string, targetCluster string, targetBucket string, settings map[string]interface{}) (base.ErrorMap, error) {
+func (_m *ReplicationSpecSvc) ValidateReplicationSettings(sourceBucket string, targetCluster string, targetBucket string, settings metadata.ReplicationSettingsMap) (base.ErrorMap, error) {
 	ret := _m.Called(sourceBucket, targetCluster, targetBucket, settings)
 
 	var r0 base.ErrorMap

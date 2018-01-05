@@ -16,6 +16,7 @@ import (
 	mc "github.com/couchbase/gomemcached"
 	base "github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
+	"github.com/couchbase/goxdcr/metadata"
 	"sync/atomic"
 	"time"
 )
@@ -100,6 +101,32 @@ func (doc_meta documentMetadata) String() string {
 	return fmt.Sprintf("[key=%s; revSeq=%v;cas=%v;flags=%v;expiry=%v;deletion=%v:datatype=%v]", doc_meta.key, doc_meta.revSeq, doc_meta.cas, doc_meta.flags, doc_meta.expiry, doc_meta.deletion, doc_meta.dataType)
 }
 
+func (doc_meta *documentMetadata) Clone() *documentMetadata {
+	var clone *documentMetadata
+	if doc_meta != nil {
+		clone = &documentMetadata{}
+		*clone = *doc_meta
+		clone.key = base.DeepCopyByteArray(doc_meta.key)
+	}
+	return clone
+}
+
+func (doc_meta *documentMetadata) Redact() *documentMetadata {
+	if doc_meta != nil {
+		if len(doc_meta.key) > 0 {
+			doc_meta.key = base.TagUDBytes(doc_meta.key)
+		}
+	}
+	return doc_meta
+}
+
+func (doc_meta *documentMetadata) CloneAndRedact() *documentMetadata {
+	if doc_meta != nil {
+		return doc_meta.Clone().Redact()
+	}
+	return doc_meta
+}
+
 // We determine the "commit" time as the time we hear back from the target, for statistics purposes
 type GetMetaReceivedEventAdditional struct {
 	Key         string
@@ -126,7 +153,7 @@ type DataSentEventAdditional struct {
 }
 
 // does not return error since the assumption is that settings have been validated prior
-func (config *baseConfig) initializeConfig(settings map[string]interface{}) {
+func (config *baseConfig) initializeConfig(settings metadata.ReplicationSettingsMap) {
 	if val, ok := settings[SETTING_BATCHSIZE]; ok {
 		config.maxSize = val.(int)
 	}
@@ -168,7 +195,7 @@ func (config *baseConfig) initializeConfig(settings map[string]interface{}) {
 type dataBatch struct {
 	// the document whose size is larger than optimistic replication threshold
 	// key of the map is the document key
-	bigDoc_map map[string]*base.WrappedMCRequest
+	bigDoc_map base.McRequestMap
 	// tracks big docs that do not need to be replicated
 	// key of the map is the document key_revSeqno
 	// value of the map has two possible values:
@@ -191,7 +218,7 @@ func newBatch(cap_count uint32, cap_size uint32, logger *log.CommonLogger) *data
 		curSize:           0,
 		capacity_count:    cap_count,
 		capacity_size:     cap_size,
-		bigDoc_map:        make(map[string]*base.WrappedMCRequest),
+		bigDoc_map:        make(base.McRequestMap),
 		bigDoc_noRep_map:  make(map[string]bool),
 		batch_nonempty_ch: make(chan bool),
 		nonempty_set:      false,
@@ -275,11 +302,31 @@ func decodeSetMetaReq(wrapped_req *base.WrappedMCRequest) documentMetadata {
 	return ret
 }
 
-// TODO more common functions, e.g., data queuing and batch processing,
-// may be refectored into a base class, BatchedNozzle
+type BigDocNoRepMap map[string]bool
 
-/************************************
-/* struct BatchedNozzle
-*************************************/
-/*type BatchedNozzle struct {
-}*/
+func (norepMap BigDocNoRepMap) Clone() BigDocNoRepMap {
+	var clonedMap BigDocNoRepMap = make(BigDocNoRepMap)
+	for k, v := range norepMap {
+		clonedMap[k] = v
+	}
+	return clonedMap
+}
+
+func (norepMap BigDocNoRepMap) Redact() BigDocNoRepMap {
+	for k, v := range norepMap {
+		// Right now, only User Data tag. In the future, need to check others
+		if !base.IsStringRedacted(k) {
+			norepMap[base.TagUD(k)] = v
+			delete(norepMap, k)
+		}
+	}
+	return norepMap
+}
+
+func (norepMap BigDocNoRepMap) CloneAndRedact() BigDocNoRepMap {
+	var clonedMap BigDocNoRepMap = make(BigDocNoRepMap)
+	for k, v := range norepMap {
+		clonedMap[base.TagUD(k)] = v
+	}
+	return clonedMap
+}

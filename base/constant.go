@@ -190,6 +190,7 @@ var ErrorCompressionNotSupported = errors.New("Specified compression type is not
 var ErrorCompressionUnableToConvert = errors.New("Unable to translate user input to internal compression Type")
 var ErrorCompressionDcpInvalidHandshake = errors.New("DCP connection is established as compressed even though compression is not requested.")
 var ErrorMaxReached = errors.New("Maximum entries has been reached")
+var ErrorNilPtr = errors.New("Nil pointer given")
 
 // constants used for remote cluster references
 const (
@@ -421,6 +422,22 @@ var TimeoutDcpCloseUprStreams = 3 * time.Second
 var TimeoutDcpCloseUprFeed = 3 * time.Second
 
 var NetTCP = "tcp"
+
+/**
+ * Log Redaction section
+ * Spectrum 1 - User Data redaction (ud) tags
+ * Spectrum 2 - Metadata redaction tags (TBD)
+ * Spectrum 3 - System Data redaction tags (TBD)
+ */
+const (
+	UdTagBegin = "<ud>("
+	UdTagEnd   = ")</ud>"
+)
+
+var UdTagBeginBytes = []byte(UdTagBegin)
+var UdTagEndBytes = []byte(UdTagEnd)
+
+const HttpReqUserKey = "Menelaus-Auth-User"
 
 // --------------- Constants that are configurable -----------------
 

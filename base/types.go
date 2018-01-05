@@ -98,6 +98,10 @@ func (req *WrappedMCRequest) ConstructUniqueKey() {
 	req.UniqueKey = buffer.String()
 }
 
+type McRequestMap map[string]*WrappedMCRequest
+
+type MCResponseMap map[string]*gomemcached.MCResponse
+
 type MetadataChangeListener interface {
 	Id() string
 	Start() error
@@ -200,4 +204,26 @@ func (s *Stack) Pop() interface{} {
 	d := (*s)[len(*s)-1]
 	(*s) = (*s)[:len(*s)-1]
 	return d
+}
+
+type InterfaceMap map[string]interface{}
+
+// Shallow clone
+func (in InterfaceMap) Clone() InterfaceMap {
+	clonedMap := make(InterfaceMap)
+	for k, v := range in {
+		clonedMap[k] = v
+	}
+	return clonedMap
+}
+
+// Redact only works on keys
+func (in InterfaceMap) Redact() InterfaceMap {
+	for k, v := range in {
+		if !IsStringRedacted(k) {
+			in[TagUD(k)] = v
+			delete(in, k)
+		}
+	}
+	return in
 }

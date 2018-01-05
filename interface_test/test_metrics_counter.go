@@ -35,7 +35,7 @@ func (h *testMetricsCollector) Attach(pipeline common.Pipeline) error {
 	return nil
 }
 
-func (h *testMetricsCollector) Start(settings map[string]interface{}) error {
+func (h *testMetricsCollector) Start(settings metadata.ReplicationSettingsMap) error {
 	h.hookup()
 	h.bStarted = true
 	return nil

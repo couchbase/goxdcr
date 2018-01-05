@@ -10,6 +10,7 @@
 package common
 
 import (
+	"github.com/couchbase/goxdcr/metadata"
 	"time"
 )
 
@@ -20,14 +21,14 @@ type Supervisor interface {
 	AddChild(child Supervisable) error
 	RemoveChild(childId string) error
 	Child(childId string) (Supervisable, error)
-	Start(settings map[string]interface{}) error
+	Start(settings metadata.ReplicationSettingsMap) error
 	Stop() error
 	ReportFailure(errors map[string]error)
 }
 
 // Components that can be supervised, e.g., parts, replication manager, etc.
 type Supervisable interface {
-	Id()  string
+	Id() string
 	IsReadyForHeartBeat() bool
 	HeartBeat_sync() bool
 	HeartBeat_async(respchan chan []interface{}, timestamp time.Time) error
@@ -37,4 +38,3 @@ type Supervisable interface {
 type SupervisorFailureHandler interface {
 	OnError(supervisor Supervisor, errors map[string]error)
 }
-

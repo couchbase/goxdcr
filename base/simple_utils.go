@@ -20,6 +20,8 @@ import (
 	"github.com/couchbase/goxdcr/log"
 	"math"
 	mrand "math/rand"
+	"net/http"
+	"net/url"
 	"reflect"
 	"sort"
 	"strconv"
@@ -708,4 +710,78 @@ func GetUnionOfErrorMapsSize(map1, map2 ErrorMap) (counter int) {
 		}
 	}
 	return
+}
+
+// Redaction User Data tag - cbcollect will hash these values externally
+// Makes a copy of the data coming in
+// Expensive to call, so ONLY call on DEBUG or calls that do not happen regularly
+func TagUD(constData interface{}) string {
+	return fmt.Sprintf("%s%v%s", UdTagBegin, constData, UdTagEnd)
+}
+
+// Modifies data coming in
+func TagUDBytes(data []byte) []byte {
+	if len(data) > 0 {
+		data = append(data, UdTagEndBytes...)
+		data = append(data, UdTagBeginBytes...)
+		copy(data[len(UdTagBeginBytes):], data)
+		copy(data[0:], UdTagBeginBytes)
+	}
+	return data
+}
+
+// During debug mode, a bunch of HTTP requests will have user identifiable information. Redact them.
+func CloneAndTagHttpRequest(r *http.Request) *http.Request {
+	if r != nil {
+		clonedReq := &http.Request{}
+		*clonedReq = *r
+
+		// Take care of URL user if it is there
+		if r.URL != nil && r.URL.User != nil {
+			origUsername := r.URL.User.Username()
+			origPassword, pwSet := r.URL.User.Password()
+			redactedUsername := TagUD(origUsername)
+			var redactedPassword string
+			if pwSet {
+				redactedPassword = TagUD(origPassword)
+			}
+
+			var redactedUserInfo *url.Userinfo
+			if pwSet {
+				redactedUserInfo = url.UserPassword(redactedUsername, redactedPassword)
+			} else {
+				redactedUserInfo = url.User(redactedUsername)
+			}
+			clonedReq.URL.User = redactedUserInfo
+		}
+
+		// Take care of Header that may have user information
+		v := r.Header.Get(HttpReqUserKey)
+		if len(v) > 0 {
+			// First make a clone
+			h2 := make(http.Header, len(r.Header))
+			for k, vv := range r.Header {
+				vv2 := make([]string, len(vv))
+				copy(vv2, vv)
+				h2[k] = vv2
+			}
+
+			valueSlice := make([]string, len(v))
+			for i := 0; i < len(v); i++ {
+				valueSlice[i] = TagUD(v[i])
+			}
+			h2[HttpReqUserKey] = valueSlice
+			clonedReq.Header = h2
+		} else {
+			clonedReq.Header = r.Header
+		}
+
+		return clonedReq
+	}
+	return r
+}
+
+func IsStringRedacted(input string) bool {
+	// Currently, only user tag
+	return strings.HasPrefix(input, UdTagBegin) && strings.HasSuffix(input, UdTagEnd)
 }

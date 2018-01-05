@@ -15,6 +15,7 @@ import (
 	mcc "github.com/couchbase/gomemcached/client"
 	base "github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
+	"github.com/couchbase/goxdcr/metadata"
 	"io"
 	"io/ioutil"
 	"net"
@@ -95,11 +96,13 @@ func (u *Utilities) loggerForFunc(logger *log.CommonLogger) *log.CommonLogger {
 }
 
 func (u *Utilities) ValidateSettings(defs base.SettingDefinitions,
-	settings map[string]interface{},
+	settings metadata.ReplicationSettingsMap,
 	logger *log.CommonLogger) error {
 	var l *log.CommonLogger = u.loggerForFunc(logger)
 
-	l.Debugf("Start validate setting=%v, defs=%v", settings, defs)
+	if l.GetLogLevel() >= log.LogLevelDebug {
+		l.Debugf("Start validate setting=%v, defs=%v", settings.CloneAndRedact(), defs)
+	}
 	var err *base.SettingsError = nil
 	for key, def := range defs {
 		val, ok := settings[key]
@@ -290,12 +293,12 @@ func (u *Utilities) UrlForLog(urlStr string) string {
 }
 
 func (u *Utilities) GetMatchedKeys(expression string, keys []string) (map[string][][]int, error) {
-	u.logger_utils.Infof("GetMatchedKeys expression=%v, expression in bytes=%v\n", expression, []byte(expression))
+	u.logger_utils.Infof("GetMatchedKeys expression=%v%v%v, expression in bytes=%v\n", base.UdTagBegin, expression, base.UdTagEnd, base.TagUDBytes([]byte(expression)))
 	if !utf8.ValidString(expression) {
 		return nil, errors.New("expression is not valid utf8")
 	}
 	for _, key := range keys {
-		u.logger_utils.Infof("key=%v, key_bytes=%v\n", key, []byte(key))
+		u.logger_utils.Infof("key=%v%v%v, key_bytes=%v\n", base.UdTagBegin, key, base.UdTagEnd, base.TagUDBytes([]byte(key)))
 		if !utf8.ValidString(key) {
 			return nil, errors.New("key is not valid utf8")
 		}
@@ -315,7 +318,9 @@ func (u *Utilities) GetMatchedKeys(expression string, keys []string) (map[string
 		} else {
 			matches = make([][]int, 0)
 		}
-		u.logger_utils.Debugf("key=%v, matches with byte index=%v\n", key, matches)
+		if u.logger_utils.GetLogLevel() >= log.LogLevelDebug {
+			u.logger_utils.Debugf("key=%v%v%v, matches with byte index=%v\n", base.UdTagBegin, key, base.UdTagEnd, matches)
+		}
 		convertedMatches, err := u.convertByteIndexToRuneIndex(key, matches)
 		if err != nil {
 			return nil, err
@@ -354,7 +359,9 @@ func (u *Utilities) convertByteIndexToRuneIndex(key string, matches [][]int) ([]
 		}
 	}
 
-	u.logger_utils.Debugf("key=%v, indexMap=%v\n", key, indexMap)
+	if u.logger_utils.GetLogLevel() >= log.LogLevelDebug {
+		u.logger_utils.Debugf("key=%v, indexMap=%v%v%v\n", base.UdTagBegin, key, base.UdTagEnd, indexMap)
+	}
 
 	var ok bool
 	for _, match := range matches {
@@ -412,7 +419,9 @@ func (u *Utilities) GetMemcachedConnectionWFeatures(serverAddr, bucketName, user
 		return nil, respondedFeatures, err
 	}
 	username, password, err := cbauth.GetMemcachedServiceAuth(serverAddr)
-	logger.Debugf("memcached auth: username=%v, password=%v, err=%v\n", username, password, err)
+	if u.logger_utils.GetLogLevel() >= log.LogLevelDebug {
+		logger.Debugf("memcached auth: username=%v%v%v, password=%v%v%v, err=%v\n", base.UdTagBegin, username, base.UdTagEnd, base.UdTagBegin, password, base.UdTagEnd, err)
+	}
 	if err != nil {
 		return nil, respondedFeatures, err
 	}
@@ -518,9 +527,8 @@ func (u *Utilities) SendHELOWithFeatures(client mcc.ClientIface, userAgent strin
 		bodyLen := len(response.Body)
 		if (bodyLen & 1) != 0 {
 			// body has to have even number of bytes
-			errMsg := fmt.Sprintf("Received response body with odd number of bytes from HELO command. userAgent=%v, response body=%v.", userAgent, response.Body)
-			logger.Error(errMsg)
-			err = errors.New(errMsg)
+			logger.Errorf("Received response body with odd number of bytes from HELO command. userAgent=%v, (redacted) response body=%v%v%v.", userAgent, base.UdTagBegin, response.Body, base.UdTagEnd)
+			err = errors.New(fmt.Sprintf("Received response body with odd number of bytes from HELO command. userAgent=%v.", userAgent))
 			return
 		}
 		pos := 0
@@ -591,7 +599,7 @@ func (u *Utilities) ComposeHELORequest(userAgent string, features HELOFeatures) 
 	}
 }
 
-func (u *Utilities) GetIntSettingFromSettings(settings map[string]interface{}, settingName string) (int, error) {
+func (u *Utilities) GetIntSettingFromSettings(settings metadata.ReplicationSettingsMap, settingName string) (int, error) {
 	settingObj := u.GetSettingFromSettings(settings, settingName)
 	if settingObj == nil {
 		return -1, nil
@@ -605,7 +613,7 @@ func (u *Utilities) GetIntSettingFromSettings(settings map[string]interface{}, s
 	return setting, nil
 }
 
-func (u *Utilities) GetStringSettingFromSettings(settings map[string]interface{}, settingName string) (string, error) {
+func (u *Utilities) GetStringSettingFromSettings(settings metadata.ReplicationSettingsMap, settingName string) (string, error) {
 	settingObj := u.GetSettingFromSettings(settings, settingName)
 	if settingObj == nil {
 		return "", nil
@@ -619,7 +627,7 @@ func (u *Utilities) GetStringSettingFromSettings(settings map[string]interface{}
 	return setting, nil
 }
 
-func (u *Utilities) GetSettingFromSettings(settings map[string]interface{}, settingName string) interface{} {
+func (u *Utilities) GetSettingFromSettings(settings metadata.ReplicationSettingsMap, settingName string) interface{} {
 	if settings == nil {
 		return nil
 	}

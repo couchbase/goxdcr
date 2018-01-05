@@ -47,7 +47,7 @@ func (p *example_part) runData() {
 	}
 }
 
-func (p *example_part) Start(settings map[string]interface{}) error {
+func (p *example_part) Start(settings metadata.ReplicationSettingsMap) error {
 	return p.Start_server()
 }
 

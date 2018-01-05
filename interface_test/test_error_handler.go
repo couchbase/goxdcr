@@ -32,7 +32,7 @@ func (h *testErrorHandler) Attach(pipeline common.Pipeline) error {
 	return nil
 }
 
-func (h *testErrorHandler) Start(settings map[string]interface{}) error {
+func (h *testErrorHandler) Start(settings metadata.ReplicationSettingsMap) error {
 	h.hookup()
 	h.bStarted = true
 	return nil

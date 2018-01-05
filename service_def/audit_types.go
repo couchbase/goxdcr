@@ -7,9 +7,11 @@
 // either express or implied. See the License for the specific language governing permissions
 // and limitations under the License.
 
-package base
+package service_def
 
-import ()
+import (
+	"github.com/couchbase/goxdcr/base"
+)
 
 const (
 	CreateRemoteClusterRefEventId           uint32 = 16384
@@ -86,4 +88,69 @@ type ReplicationSpecificFields struct {
 type RealUserId struct {
 	Source   string `json:"source"`
 	Username string `json:"user"`
+}
+
+func (userId *RealUserId) Redact() {
+	if !base.IsStringRedacted(userId.Username) {
+		userId.Username = base.TagUD(userId.Username)
+	}
+}
+
+func (generics *GenericFields) Redact() {
+	generics.RealUserid.Redact()
+}
+
+func (event *RemoteClusterRefEvent) Redact() AuditEventIface {
+	event.GenericFields.Redact()
+	return event
+}
+
+func (event *RemoteClusterRefEvent) Clone() AuditEventIface {
+	clonedEvent := &RemoteClusterRefEvent{}
+	*clonedEvent = *event
+	return clonedEvent
+}
+
+func (event *CreateReplicationEvent) Redact() AuditEventIface {
+	event.GenericFields.Redact()
+	return event
+}
+
+func (event *CreateReplicationEvent) Clone() AuditEventIface {
+	clonedEvent := &CreateReplicationEvent{}
+	*clonedEvent = *event
+	return clonedEvent
+}
+
+func (event *UpdateDefaultReplicationSettingsEvent) Redact() AuditEventIface {
+	event.GenericFields.Redact()
+	return event
+}
+
+func (event *UpdateDefaultReplicationSettingsEvent) Clone() AuditEventIface {
+	clonedEvent := &UpdateDefaultReplicationSettingsEvent{}
+	*clonedEvent = *event
+	return clonedEvent
+}
+
+func (event *UpdateBucketSettingsEvent) Redact() AuditEventIface {
+	event.GenericFields.Redact()
+	return event
+}
+
+func (event *UpdateBucketSettingsEvent) Clone() AuditEventIface {
+	clonedEvent := &UpdateBucketSettingsEvent{}
+	*clonedEvent = *event
+	return clonedEvent
+}
+
+func (event *GenericReplicationEvent) Redact() AuditEventIface {
+	event.GenericFields.Redact()
+	return event
+}
+
+func (event *GenericReplicationEvent) Clone() AuditEventIface {
+	clonedEvent := &GenericReplicationEvent{}
+	*clonedEvent = *event
+	return clonedEvent
 }

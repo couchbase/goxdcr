@@ -26,10 +26,39 @@ type apiRequest struct {
 	url                string
 	username           string
 	password           string
-	body               map[string]interface{}
+	body               base.InterfaceMap
 	certificate        []byte
 	SANInCertificate   bool
 	insecureSkipVerify bool
+}
+
+// Shallow copy bare bones information for redaction
+func (req *apiRequest) CloneLite() *apiRequest {
+	clonedReq := &apiRequest{}
+	if req != nil {
+		*clonedReq = *req
+		clonedReq.certificate = nil
+	}
+	return clonedReq
+}
+
+func (req *apiRequest) Redact() *apiRequest {
+	if req != nil {
+		if !base.IsStringRedacted(req.username) {
+			req.username = base.TagUD(req.username)
+		}
+		if !base.IsStringRedacted(req.password) {
+			req.password = base.TagUD(req.password)
+		}
+	}
+	return req
+}
+
+func (req *apiRequest) CloneAndRedact() *apiRequest {
+	if req != nil {
+		return req.CloneLite().Redact()
+	}
+	return req
 }
 
 //CAPIService is a wrapper around the rest interface provided by couchbase server
@@ -73,7 +102,9 @@ func (capi_svc *CAPIService) PreReplicate(remoteBucket *service_def.RemoteBucket
 		return
 	}
 
-	capi_svc.logger.Debugf("request to _pre_replicate = %v\n", api_base)
+	if capi_svc.logger.GetLogLevel() >= log.LogLevelDebug {
+		capi_svc.logger.Debugf("request to _pre_replicate = %v\n", api_base.CloneAndRedact())
+	}
 	http_client := remoteBucket.RestAddrHttpClientMap[api_base.url]
 	status_code, respMap, _, err := capi_svc.send_post(PRE_REPLICATE_CMD, api_base, http_client, base.MaxRetryCapiService)
 	capi_svc.logger.Debugf("response from _pre_replicate is status_code=%v respMap=%v for %v\n", status_code, respMap, knownRemoteVBStatus)

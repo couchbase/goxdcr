@@ -34,65 +34,13 @@ const (
 // interface so we can autogenerate mock and do unit test
 type XDCRFactoryIface interface {
 	NewPipeline(topic string, progress_recorder common.PipelineProgressRecorder) (common.Pipeline, error)
-	registerAsyncListenersOnSources(pipeline common.Pipeline, logger_ctx *log.LoggerContext)
-	registerAsyncListenersOnTargets(pipeline common.Pipeline, logger_ctx *log.LoggerContext)
-	constructSourceNozzles(spec *metadata.ReplicationSpecification, topic string, logger_ctx *log.LoggerContext) (map[string]common.Nozzle, map[string][]uint16, error)
-	partId(prefix string, topic string, kvaddr string, index int) string
-	filterVBList(targetkvVBList []uint16, kv_vb_map map[string][]uint16) []uint16
-	constructOutgoingNozzles(spec *metadata.ReplicationSpecification, kv_vb_map map[string][]uint16,
-		sourceCRMode base.ConflictResolutionMode, targetBucketInfo map[string]interface{},
-		targetClusterRef *metadata.RemoteClusterReference, logger_ctx *log.LoggerContext) (outNozzles map[string]common.Nozzle,
-		vbNozzleMap map[uint16]string, kvVBMap map[string][]uint16, targetUserName string, targetPassword string, targetHasRBACSupport bool, err error)
-	constructRouter(id string, spec *metadata.ReplicationSpecification,
-		downStreamParts map[string]common.Part,
-		vbNozzleMap map[uint16]string,
-		sourceCRMode base.ConflictResolutionMode,
-		logger_ctx *log.LoggerContext) (*parts.Router, error)
-	getOutNozzleType(targetClusterRef *metadata.RemoteClusterReference, spec *metadata.ReplicationSpecification) (base.XDCROutgoingNozzleType, error)
-	constructXMEMNozzle(topic string, kvaddr string,
-		sourceBucketName string,
-		targetBucketName string,
-		username string,
-		password string,
-		nozzle_index int,
-		connPoolSize int,
-		sourceCRMode base.ConflictResolutionMode,
-		targetBucketInfo map[string]interface{},
-		logger_ctx *log.LoggerContext) common.Nozzle
-	constructCAPINozzle(topic string,
-		username string,
-		password string,
-		certificate []byte,
-		vbList []uint16,
-		vbCouchApiBaseMap map[uint16]string,
-		nozzle_index int,
-		logger_ctx *log.LoggerContext) (common.Nozzle, error)
-	ConstructSettingsForPart(pipeline common.Pipeline, part common.Part, settings map[string]interface{},
+	ConstructSettingsForPart(pipeline common.Pipeline, part common.Part, settings metadata.ReplicationSettingsMap,
 		targetClusterRef *metadata.RemoteClusterReference, ssl_port_map map[string]uint16,
-		isSSLOverMem bool) (map[string]interface{}, error)
-	ConstructUpdateSettingsForPart(pipeline common.Pipeline, part common.Part, settings map[string]interface{}) (map[string]interface{}, error)
-	constructUpdateSettingsForXmemNozzle(pipeline common.Pipeline, settings map[string]interface{}) map[string]interface{}
-	constructUpdateSettingsForCapiNozzle(pipeline common.Pipeline, settings map[string]interface{}) map[string]interface{}
+		isSSLOverMem bool) (metadata.ReplicationSettingsMap, error)
+	ConstructUpdateSettingsForPart(pipeline common.Pipeline, part common.Part, settings metadata.ReplicationSettingsMap) (metadata.ReplicationSettingsMap, error)
 	SetStartSeqno(pipeline common.Pipeline) error
 	CheckpointBeforeStop(pipeline common.Pipeline) error
-	constructSettingsForXmemNozzle(pipeline common.Pipeline, part common.Part,
-		targetClusterRef *metadata.RemoteClusterReference, settings map[string]interface{},
-		ssl_port_map map[string]uint16, isSSLOverMem bool) (map[string]interface{}, error)
-	constructSettingsForCapiNozzle(pipeline common.Pipeline, settings map[string]interface{}) (map[string]interface{}, error)
-	getTargetTimeoutEstimate(topic string) time.Duration
-	constructSettingsForDcpNozzle(pipeline common.Pipeline, part *parts.DcpNozzle, settings map[string]interface{}) (map[string]interface{}, error)
-	registerServices(pipeline common.Pipeline, logger_ctx *log.LoggerContext,
-		kv_vb_map map[string][]uint16, targetUserName, targetPassword string,
-		targetBucketName string, target_kv_vb_map map[string][]uint16,
-		targetClusterRef *metadata.RemoteClusterReference, targetHasRBACSupport bool) error
-	ConstructSettingsForService(pipeline common.Pipeline, service common.PipelineService, settings map[string]interface{}) (map[string]interface{}, error)
-	ConstructUpdateSettingsForService(pipeline common.Pipeline, service common.PipelineService, settings map[string]interface{}) (map[string]interface{}, error)
-	constructSettingsForSupervisor(pipeline common.Pipeline, settings map[string]interface{}) (map[string]interface{}, error)
-	constructSettingsForStatsManager(pipeline common.Pipeline, settings map[string]interface{}) (map[string]interface{}, error)
-	constructSettingsForCheckpointManager(pipeline common.Pipeline, settings map[string]interface{}) (map[string]interface{}, error)
-	constructUpdateSettingsForSupervisor(pipeline common.Pipeline, settings map[string]interface{}) (map[string]interface{}, error)
-	constructUpdateSettingsForStatsManager(pipeline common.Pipeline, settings map[string]interface{}) (map[string]interface{}, error)
-	constructUpdateSettingsForCheckpointManager(pipeline common.Pipeline, settings map[string]interface{}) (map[string]interface{}, error)
+	ConstructUpdateSettingsForService(pipeline common.Pipeline, service common.PipelineService, settings metadata.ReplicationSettingsMap) (metadata.ReplicationSettingsMap, error)
 	ConstructSSLPortMap(targetClusterRef *metadata.RemoteClusterReference, spec *metadata.ReplicationSpecification) (map[string]uint16, bool, error)
 }
 
@@ -517,7 +465,7 @@ func (xdcrf *XDCRFactory) constructOutgoingNozzles(spec *metadata.ReplicationSpe
 			targetPassword = bucketPwd
 		}
 	}
-	xdcrf.logger.Infof("%v username for target bucket access=%v\n", spec.Id, targetUserName)
+	xdcrf.logger.Infof("%v username for target bucket access=%v%v%v\n", spec.Id, base.UdTagBegin, targetUserName, base.UdTagEnd)
 
 	maxTargetNozzlePerNode := spec.Settings.TargetNozzlePerNode
 	xdcrf.logger.Infof("Target topology retrieved. kvVBMap = %v\n", kvVBMap)
@@ -668,8 +616,8 @@ func (xdcrf *XDCRFactory) constructCAPINozzle(topic string,
 	return nozzle, nil
 }
 
-func (xdcrf *XDCRFactory) ConstructSettingsForPart(pipeline common.Pipeline, part common.Part, settings map[string]interface{},
-	targetClusterRef *metadata.RemoteClusterReference, ssl_port_map map[string]uint16) (map[string]interface{}, error) {
+func (xdcrf *XDCRFactory) ConstructSettingsForPart(pipeline common.Pipeline, part common.Part, settings metadata.ReplicationSettingsMap,
+	targetClusterRef *metadata.RemoteClusterReference, ssl_port_map map[string]uint16) (metadata.ReplicationSettingsMap, error) {
 
 	if _, ok := part.(*parts.XmemNozzle); ok {
 		xdcrf.logger.Debugf("Construct settings for XmemNozzle %s", part.Id())
@@ -685,7 +633,7 @@ func (xdcrf *XDCRFactory) ConstructSettingsForPart(pipeline common.Pipeline, par
 	}
 }
 
-func (xdcrf *XDCRFactory) ConstructUpdateSettingsForPart(pipeline common.Pipeline, part common.Part, settings map[string]interface{}) (map[string]interface{}, error) {
+func (xdcrf *XDCRFactory) ConstructUpdateSettingsForPart(pipeline common.Pipeline, part common.Part, settings metadata.ReplicationSettingsMap) (metadata.ReplicationSettingsMap, error) {
 
 	if _, ok := part.(*parts.XmemNozzle); ok {
 		xdcrf.logger.Debugf("Construct update settings for XmemNozzle %s", part.Id())
@@ -698,8 +646,8 @@ func (xdcrf *XDCRFactory) ConstructUpdateSettingsForPart(pipeline common.Pipelin
 	}
 }
 
-func (xdcrf *XDCRFactory) constructUpdateSettingsForXmemNozzle(pipeline common.Pipeline, settings map[string]interface{}) map[string]interface{} {
-	xmemSettings := make(map[string]interface{})
+func (xdcrf *XDCRFactory) constructUpdateSettingsForXmemNozzle(pipeline common.Pipeline, settings metadata.ReplicationSettingsMap) metadata.ReplicationSettingsMap {
+	xmemSettings := make(metadata.ReplicationSettingsMap)
 
 	optiRepThreshold, ok := settings[metadata.OptimisticReplicationThreshold]
 	if ok {
@@ -710,8 +658,8 @@ func (xdcrf *XDCRFactory) constructUpdateSettingsForXmemNozzle(pipeline common.P
 
 }
 
-func (xdcrf *XDCRFactory) constructUpdateSettingsForCapiNozzle(pipeline common.Pipeline, settings map[string]interface{}) map[string]interface{} {
-	capiSettings := make(map[string]interface{})
+func (xdcrf *XDCRFactory) constructUpdateSettingsForCapiNozzle(pipeline common.Pipeline, settings metadata.ReplicationSettingsMap) metadata.ReplicationSettingsMap {
+	capiSettings := make(metadata.ReplicationSettingsMap)
 
 	optiRepThreshold, ok := settings[metadata.OptimisticReplicationThreshold]
 	if ok {
@@ -745,9 +693,9 @@ func (xdcrf *XDCRFactory) CheckpointBeforeStop(pipeline common.Pipeline) error {
 }
 
 func (xdcrf *XDCRFactory) constructSettingsForXmemNozzle(pipeline common.Pipeline, part common.Part,
-	targetClusterRef *metadata.RemoteClusterReference, settings map[string]interface{},
-	ssl_port_map map[string]uint16) (map[string]interface{}, error) {
-	xmemSettings := make(map[string]interface{})
+	targetClusterRef *metadata.RemoteClusterReference, settings metadata.ReplicationSettingsMap,
+	ssl_port_map map[string]uint16) (metadata.ReplicationSettingsMap, error) {
+	xmemSettings := make(metadata.ReplicationSettingsMap)
 	spec := pipeline.Specification()
 	repSettings := spec.Settings
 	xmemConnStr := part.(*parts.XmemNozzle).ConnStr()
@@ -773,14 +721,14 @@ func (xdcrf *XDCRFactory) constructSettingsForXmemNozzle(pipeline common.Pipelin
 		xmemSettings[parts.XMEM_SETTING_REMOTE_MEM_SSL_PORT] = mem_ssl_port
 		xmemSettings[parts.XMEM_SETTING_SAN_IN_CERITICATE] = targetClusterRef.SANInCertificate
 
-		xdcrf.logger.Infof("xmemSettings=%v\n", xmemSettings)
+		xdcrf.logger.Infof("xmemSettings=%v\n", xmemSettings.CloneAndRedact())
 	}
 	return xmemSettings, nil
 
 }
 
-func (xdcrf *XDCRFactory) constructSettingsForCapiNozzle(pipeline common.Pipeline, settings map[string]interface{}) (map[string]interface{}, error) {
-	capiSettings := make(map[string]interface{})
+func (xdcrf *XDCRFactory) constructSettingsForCapiNozzle(pipeline common.Pipeline, settings metadata.ReplicationSettingsMap) (map[string]interface{}, error) {
+	capiSettings := make(metadata.ReplicationSettingsMap)
 	repSettings := pipeline.Specification().Settings
 
 	capiSettings[parts.SETTING_BATCHCOUNT] = getSettingFromSettingsMap(settings, metadata.BatchCount, repSettings.BatchCount)
@@ -799,9 +747,9 @@ func (xdcrf *XDCRFactory) getTargetTimeoutEstimate(topic string) time.Duration {
 	return 100 * time.Millisecond
 }
 
-func (xdcrf *XDCRFactory) constructSettingsForDcpNozzle(pipeline common.Pipeline, part *parts.DcpNozzle, settings map[string]interface{}) (map[string]interface{}, error) {
+func (xdcrf *XDCRFactory) constructSettingsForDcpNozzle(pipeline common.Pipeline, part *parts.DcpNozzle, settings metadata.ReplicationSettingsMap) (map[string]interface{}, error) {
 	xdcrf.logger.Debugf("Construct settings for DcpNozzle ....")
-	dcpNozzleSettings := make(map[string]interface{})
+	dcpNozzleSettings := make(metadata.ReplicationSettingsMap)
 	spec := pipeline.Specification()
 	repSettings := spec.Settings
 
@@ -879,7 +827,7 @@ func (xdcrf *XDCRFactory) registerServices(pipeline common.Pipeline, logger_ctx 
 	return nil
 }
 
-func (xdcrf *XDCRFactory) ConstructSettingsForService(pipeline common.Pipeline, service common.PipelineService, settings map[string]interface{}) (map[string]interface{}, error) {
+func (xdcrf *XDCRFactory) ConstructSettingsForService(pipeline common.Pipeline, service common.PipelineService, settings metadata.ReplicationSettingsMap) (metadata.ReplicationSettingsMap, error) {
 	switch service.(type) {
 	case *pipeline_svc.PipelineSupervisor:
 		xdcrf.logger.Debug("Construct settings for PipelineSupervisor")
@@ -896,7 +844,7 @@ func (xdcrf *XDCRFactory) ConstructSettingsForService(pipeline common.Pipeline, 
 
 // the major difference between ConstructSettingsForService and ConstructUpdateSettingsForService is that
 // when a parameter is not specified, the former sets default value and the latter does nothing
-func (xdcrf *XDCRFactory) ConstructUpdateSettingsForService(pipeline common.Pipeline, service common.PipelineService, settings map[string]interface{}) (map[string]interface{}, error) {
+func (xdcrf *XDCRFactory) ConstructUpdateSettingsForService(pipeline common.Pipeline, service common.PipelineService, settings metadata.ReplicationSettingsMap) (metadata.ReplicationSettingsMap, error) {
 	switch service.(type) {
 	case *pipeline_svc.PipelineSupervisor:
 		xdcrf.logger.Debug("Construct update settings for PipelineSupervisor")
@@ -914,8 +862,8 @@ func (xdcrf *XDCRFactory) ConstructUpdateSettingsForService(pipeline common.Pipe
 	return settings, nil
 }
 
-func (xdcrf *XDCRFactory) constructSettingsForSupervisor(pipeline common.Pipeline, settings map[string]interface{}) (map[string]interface{}, error) {
-	s := make(map[string]interface{})
+func (xdcrf *XDCRFactory) constructSettingsForSupervisor(pipeline common.Pipeline, settings metadata.ReplicationSettingsMap) (metadata.ReplicationSettingsMap, error) {
+	s := make(metadata.ReplicationSettingsMap)
 	log_level_str := getSettingFromSettingsMap(settings, metadata.PipelineLogLevel, pipeline.Specification().Settings.LogLevel.String())
 	log_level, err := log.LogLevelFromStr(log_level_str.(string))
 	if err != nil {
@@ -925,20 +873,20 @@ func (xdcrf *XDCRFactory) constructSettingsForSupervisor(pipeline common.Pipelin
 	return s, nil
 }
 
-func (xdcrf *XDCRFactory) constructSettingsForStatsManager(pipeline common.Pipeline, settings map[string]interface{}) (map[string]interface{}, error) {
-	s := make(map[string]interface{})
+func (xdcrf *XDCRFactory) constructSettingsForStatsManager(pipeline common.Pipeline, settings metadata.ReplicationSettingsMap) (metadata.ReplicationSettingsMap, error) {
+	s := make(metadata.ReplicationSettingsMap)
 	s[pipeline_svc.PUBLISH_INTERVAL] = getSettingFromSettingsMap(settings, metadata.PipelineStatsInterval, pipeline.Specification().Settings.StatsInterval)
 	return s, nil
 }
 
-func (xdcrf *XDCRFactory) constructSettingsForCheckpointManager(pipeline common.Pipeline, settings map[string]interface{}) (map[string]interface{}, error) {
-	s := make(map[string]interface{})
+func (xdcrf *XDCRFactory) constructSettingsForCheckpointManager(pipeline common.Pipeline, settings metadata.ReplicationSettingsMap) (metadata.ReplicationSettingsMap, error) {
+	s := make(metadata.ReplicationSettingsMap)
 	s[pipeline_svc.CHECKPOINT_INTERVAL] = getSettingFromSettingsMap(settings, metadata.CheckpointInterval, pipeline.Specification().Settings.CheckpointInterval)
 	return s, nil
 }
 
-func (xdcrf *XDCRFactory) constructUpdateSettingsForSupervisor(pipeline common.Pipeline, settings map[string]interface{}) (map[string]interface{}, error) {
-	s := make(map[string]interface{})
+func (xdcrf *XDCRFactory) constructUpdateSettingsForSupervisor(pipeline common.Pipeline, settings metadata.ReplicationSettingsMap) (metadata.ReplicationSettingsMap, error) {
+	s := make(metadata.ReplicationSettingsMap)
 	log_level_str := getSettingFromSettingsMap(settings, metadata.PipelineLogLevel, nil)
 	if log_level_str != nil {
 		log_level, err := log.LogLevelFromStr(log_level_str.(string))
@@ -950,8 +898,8 @@ func (xdcrf *XDCRFactory) constructUpdateSettingsForSupervisor(pipeline common.P
 	return s, nil
 }
 
-func (xdcrf *XDCRFactory) constructUpdateSettingsForStatsManager(pipeline common.Pipeline, settings map[string]interface{}) (map[string]interface{}, error) {
-	s := make(map[string]interface{})
+func (xdcrf *XDCRFactory) constructUpdateSettingsForStatsManager(pipeline common.Pipeline, settings metadata.ReplicationSettingsMap) (metadata.ReplicationSettingsMap, error) {
+	s := make(metadata.ReplicationSettingsMap)
 	publish_interval := getSettingFromSettingsMap(settings, metadata.PipelineStatsInterval, nil)
 	if publish_interval != nil {
 		s[pipeline_svc.PUBLISH_INTERVAL] = publish_interval
@@ -959,9 +907,11 @@ func (xdcrf *XDCRFactory) constructUpdateSettingsForStatsManager(pipeline common
 	return s, nil
 }
 
-func (xdcrf *XDCRFactory) constructUpdateSettingsForCheckpointManager(pipeline common.Pipeline, settings map[string]interface{}) (map[string]interface{}, error) {
-	xdcrf.logger.Debugf("constructUpdateSettingsForCheckpointManager called with settings=%v\n", settings)
-	s := make(map[string]interface{})
+func (xdcrf *XDCRFactory) constructUpdateSettingsForCheckpointManager(pipeline common.Pipeline, settings metadata.ReplicationSettingsMap) (metadata.ReplicationSettingsMap, error) {
+	if xdcrf.logger.GetLogLevel() >= log.LogLevelDebug {
+		xdcrf.logger.Debugf("constructUpdateSettingsForCheckpointManager called with settings=%v\n", settings.CloneAndRedact())
+	}
+	s := make(metadata.ReplicationSettingsMap)
 	checkpoint_interval := getSettingFromSettingsMap(settings, metadata.CheckpointInterval, nil)
 	if checkpoint_interval != nil {
 		s[pipeline_svc.CHECKPOINT_INTERVAL] = checkpoint_interval
@@ -969,9 +919,11 @@ func (xdcrf *XDCRFactory) constructUpdateSettingsForCheckpointManager(pipeline c
 	return s, nil
 }
 
-func (xdcrf *XDCRFactory) constructUpdateSettingsForBandwidthThrottler(pipeline common.Pipeline, settings map[string]interface{}) (map[string]interface{}, error) {
-	xdcrf.logger.Debugf("constructUpdateSettingsForBandwidthThrottler called with settings=%v\n", settings)
-	s := make(map[string]interface{})
+func (xdcrf *XDCRFactory) constructUpdateSettingsForBandwidthThrottler(pipeline common.Pipeline, settings metadata.ReplicationSettingsMap) (metadata.ReplicationSettingsMap, error) {
+	if xdcrf.logger.GetLogLevel() >= log.LogLevelDebug {
+		xdcrf.logger.Debugf("constructUpdateSettingsForBandwidthThrottler called with settings=%v\n", settings.CloneAndRedact())
+	}
+	s := make(metadata.ReplicationSettingsMap)
 	overall_bandwidth_limit := settings[metadata.BandwidthLimit]
 	if overall_bandwidth_limit != nil {
 		s[pipeline_svc.OVERALL_BANDWIDTH_LIMIT] = overall_bandwidth_limit
@@ -983,7 +935,7 @@ func (xdcrf *XDCRFactory) constructUpdateSettingsForBandwidthThrottler(pipeline 
 	return s, nil
 }
 
-func getSettingFromSettingsMap(settings map[string]interface{}, setting_name string, default_value interface{}) interface{} {
+func getSettingFromSettingsMap(settings metadata.ReplicationSettingsMap, setting_name string, default_value interface{}) interface{} {
 	if settings != nil {
 		if setting, ok := settings[setting_name]; ok {
 			return setting

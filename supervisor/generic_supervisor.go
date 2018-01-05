@@ -16,6 +16,7 @@ import (
 	"github.com/couchbase/goxdcr/common"
 	"github.com/couchbase/goxdcr/gen_server"
 	"github.com/couchbase/goxdcr/log"
+	"github.com/couchbase/goxdcr/metadata"
 	utilities "github.com/couchbase/goxdcr/utils"
 	"reflect"
 	"sync"
@@ -145,7 +146,7 @@ func (supervisor *GenericSupervisor) Child(childId string) (common.Supervisable,
 	}
 }
 
-func (supervisor *GenericSupervisor) Start(settings map[string]interface{}) error {
+func (supervisor *GenericSupervisor) Start(settings metadata.ReplicationSettingsMap) error {
 	supervisor.Logger().Infof("Starting supervisor %v.\n", supervisor.Id())
 
 	err := supervisor.Init(settings)
@@ -247,7 +248,7 @@ func (supervisor *GenericSupervisor) sendHeartBeats(waitGrp *sync.WaitGroup) {
 	return
 }
 
-func (supervisor *GenericSupervisor) Init(settings map[string]interface{}) error {
+func (supervisor *GenericSupervisor) Init(settings metadata.ReplicationSettingsMap) error {
 	//initialize settings
 	err := supervisor.utils.ValidateSettings(supervisor_setting_defs, settings, supervisor.Logger())
 	if err != nil {

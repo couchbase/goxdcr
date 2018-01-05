@@ -18,8 +18,8 @@ type ReplicationSpecSvc interface {
 	ReplicationSpec(replicationId string) (*metadata.ReplicationSpecification, error)
 	// additionalInfo is an optional parameter, which, if provided, will be written to replication creation ui log
 	AddReplicationSpec(spec *metadata.ReplicationSpecification, additionalInfo string) error
-	ValidateNewReplicationSpec(sourceBucket, targetCluster, targetBucket string, settings map[string]interface{}) (string, string, *metadata.RemoteClusterReference, base.ErrorMap, error, []string)
-	ValidateReplicationSettings(sourceBucket, targetCluster, targetBucket string, settings map[string]interface{}) (base.ErrorMap, error)
+	ValidateNewReplicationSpec(sourceBucket, targetCluster, targetBucket string, settings metadata.ReplicationSettingsMap) (string, string, *metadata.RemoteClusterReference, base.ErrorMap, error, []string)
+	ValidateReplicationSettings(sourceBucket, targetCluster, targetBucket string, settings metadata.ReplicationSettingsMap) (base.ErrorMap, error)
 	SetReplicationSpec(spec *metadata.ReplicationSpecification) error
 	DelReplicationSpec(replicationId string) (*metadata.ReplicationSpecification, error)
 	DelReplicationSpecWithReason(replicationId string, reason string) (*metadata.ReplicationSpecification, error)

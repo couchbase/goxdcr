@@ -95,6 +95,21 @@ func (spec *ReplicationSpecification) Clone() *ReplicationSpecification {
 		Revision: spec.Revision}
 }
 
+func (spec *ReplicationSpecification) Redact() *ReplicationSpecification {
+	if spec != nil {
+		// Currently only the Settings has user identifiable data in filtered expression
+		spec.Settings.Redact()
+	}
+	return spec
+}
+
+func (spec *ReplicationSpecification) CloneAndRedact() *ReplicationSpecification {
+	if spec != nil {
+		return spec.Clone().Redact()
+	}
+	return spec
+}
+
 func ReplicationId(sourceBucketName string, targetClusterUUID string, targetBucketName string) string {
 	parts := []string{targetClusterUUID, sourceBucketName, targetBucketName}
 	return strings.Join(parts, base.KeyPartsDelimiter)

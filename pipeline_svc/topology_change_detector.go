@@ -96,7 +96,7 @@ func (top_detect_svc *TopologyChangeDetectorSvc) Attach(pipeline common.Pipeline
 	return nil
 }
 
-func (top_detect_svc *TopologyChangeDetectorSvc) Start(map[string]interface{}) error {
+func (top_detect_svc *TopologyChangeDetectorSvc) Start(metadata.ReplicationSettingsMap) error {
 	//register itself with pipeline supervisor
 	supervisor := top_detect_svc.pipeline.RuntimeContext().Service(base.PIPELINE_SUPERVISOR_SVC)
 	if supervisor == nil {
@@ -553,7 +553,7 @@ func (top_detect_svc *TopologyChangeDetectorSvc) DelReplicationSpec(spec *metada
 	return fmt.Errorf(logMessage)
 }
 
-func (top_detect_svc *TopologyChangeDetectorSvc) UpdateSettings(settings map[string]interface{}) error {
+func (top_detect_svc *TopologyChangeDetectorSvc) UpdateSettings(settings metadata.ReplicationSettingsMap) error {
 	return nil
 }
 

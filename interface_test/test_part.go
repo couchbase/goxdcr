@@ -12,13 +12,13 @@ package interface_test
 import (
 	"errors"
 	common "github.com/couchbase/goxdcr/common"
-	part "github.com/couchbase/goxdcr/part"
 	"github.com/couchbase/goxdcr/log"
+	part "github.com/couchbase/goxdcr/part"
 	"reflect"
 	"sync"
 )
 
-var logger_part = log.NewLogger ("testPart", log.DefaultLoggerContext)
+var logger_part = log.NewLogger("testPart", log.DefaultLoggerContext)
 
 //constants
 var cmdStop = 0
@@ -42,19 +42,19 @@ type testPart struct {
 }
 
 func newTestPart(id string) *testPart {
-	p := &testPart{increase_amount: 0, 
-	dataChan: nil, 
-	communicationChan: nil, 
-	isStarted: false, 
-	stateLock: sync.Mutex{}, 
-	waitGrp: sync.WaitGroup{}}
+	p := &testPart{increase_amount: 0,
+		dataChan:          nil,
+		communicationChan: nil,
+		isStarted:         false,
+		stateLock:         sync.Mutex{},
+		waitGrp:           sync.WaitGroup{}}
 	funcw := p.IsStarted
 	funce := (part.IsStarted_Callback_Func)(funcw)
 	p.AbstractPart = part.NewAbstractPartWithLogger(id, &funce, log.NewLogger("testPart", log.DefaultLoggerContext))
 	return p
 }
 
-func (p *testPart) Start(settings map[string]interface{}) error {
+func (p *testPart) Start(settings metadata.ReplicationSettingsMap) error {
 	logger_part.Debugf("Try to start part %s", p.Id())
 	p.stateLock.Lock()
 	defer p.stateLock.Unlock()
@@ -65,7 +65,7 @@ func (p *testPart) Start(settings map[string]interface{}) error {
 	return nil
 }
 
-func (p *testPart) init(settings map[string]interface{}) error {
+func (p *testPart) init(settings metadata.ReplicationSettingsMap) error {
 	p.dataChan = make(chan interface{}, 1)
 	p.communicationChan = make(chan []interface{}, 1)
 

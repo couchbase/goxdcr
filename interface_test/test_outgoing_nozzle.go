@@ -13,12 +13,12 @@ import (
 	"errors"
 	"fmt"
 	common "github.com/couchbase/goxdcr/common"
-	part "github.com/couchbase/goxdcr/part"
 	"github.com/couchbase/goxdcr/log"
+	part "github.com/couchbase/goxdcr/part"
 	"sync"
 )
 
-var logger_outnozzle = log.NewLogger ("testOutgoingNozzle", log.DefaultLoggerContext)
+var logger_outnozzle = log.NewLogger("testOutgoingNozzle", log.DefaultLoggerContext)
 
 type testOutgoingNozzle struct {
 	part.AbstractPart
@@ -37,19 +37,19 @@ type testOutgoingNozzle struct {
 }
 
 func newOutgoingNozzle(id string) *testOutgoingNozzle {
-	nozzle := &testOutgoingNozzle{dataChan: nil, 
-	communicationChan: nil, 
-	isOpen: false, 
-	isStarted: false, 
-	stateLock: sync.Mutex{}, 
-	waitGrp: sync.WaitGroup{}}
+	nozzle := &testOutgoingNozzle{dataChan: nil,
+		communicationChan: nil,
+		isOpen:            false,
+		isStarted:         false,
+		stateLock:         sync.Mutex{},
+		waitGrp:           sync.WaitGroup{}}
 	funcw := nozzle.IsStarted
 	funce := (part.IsStarted_Callback_Func)(funcw)
 	nozzle.AbstractPart = part.NewAbstractPartWithLogger(id, &funce, log.NewLogger("testOutgoingNozzle", log.DefaultLoggerContext))
 	return nozzle
 }
 
-func (p *testOutgoingNozzle) Start(settings map[string]interface{}) error {
+func (p *testOutgoingNozzle) Start(settings metadata.ReplicationSettingsMap) error {
 	logger_outnozzle.Debugf("Try to start part %s", p.Id())
 	p.stateLock.Lock()
 	defer p.stateLock.Unlock()
@@ -60,7 +60,7 @@ func (p *testOutgoingNozzle) Start(settings map[string]interface{}) error {
 	return nil
 }
 
-func (p *testOutgoingNozzle) init(settings map[string]interface{}) error {
+func (p *testOutgoingNozzle) init(settings metadata.ReplicationSettingsMap) error {
 	p.dataChan = make(chan interface{})
 	p.communicationChan = make(chan []interface{})
 	return nil

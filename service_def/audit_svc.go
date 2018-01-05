@@ -9,9 +9,14 @@
 
 package service_def
 
-import (
-)
+import ()
+
+type AuditEventIface interface {
+	Redact() AuditEventIface
+	Clone() AuditEventIface
+}
 
 type AuditSvc interface {
-	Write (eventId uint32, event interface{}) error
+	//	Write(eventId uint32, event interface{}) error
+	Write(eventId uint32, event AuditEventIface) error
 }

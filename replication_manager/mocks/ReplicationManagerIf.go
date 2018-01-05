@@ -18,7 +18,7 @@ func (_m *ReplicationManagerIf) checkReplicationStatus(fin_chan chan bool) {
 }
 
 // createAndPersistReplicationSpec provides a mock function with given fields: justValidate, sourceBucket, targetCluster, targetBucket, settings
-func (_m *ReplicationManagerIf) createAndPersistReplicationSpec(justValidate bool, sourceBucket string, targetCluster string, targetBucket string, settings map[string]interface{}) (*metadata.ReplicationSpecification, map[string]error, error, []string) {
+func (_m *ReplicationManagerIf) createAndPersistReplicationSpec(justValidate bool, sourceBucket string, targetCluster string, targetBucket string, settings metadata.ReplicationSettingsMap) (*metadata.ReplicationSpecification, map[string]error, error, []string) {
 	ret := _m.Called(justValidate, sourceBucket, targetCluster, targetBucket, settings)
 
 	var r0 *metadata.ReplicationSpecification

@@ -18,6 +18,7 @@ import (
 	"github.com/couchbase/goxdcr/service_def"
 	utilities "github.com/couchbase/goxdcr/utils"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -82,8 +83,21 @@ func (meta_svc *MetaKVMetadataSvc) AddSensitive(key string, value []byte) error 
 //if metakv operation failed after max number of retries, return ErrorFailedAfterRetry
 func (meta_svc *MetaKVMetadataSvc) add(key string, value []byte, sensitive bool) error {
 	var err error
+	var redactedValue []byte
+	valueToPrint := &value
 	start_time := time.Now()
 	defer meta_svc.logger.Debugf("Took %vs to add %v to metakv\n", time.Since(start_time).Seconds(), key)
+
+	var redactOnceSync sync.Once
+	redactOnce := func() {
+		redactOnceSync.Do(func() {
+			if sensitive {
+				redactedValue = base.DeepCopyByteArray(value)
+				redactedValue = base.TagUDBytes(redactedValue)
+				valueToPrint = &redactedValue
+			}
+		})
+	}
 
 	metakvOpAddFunc := func() error {
 		if sensitive {
@@ -97,7 +111,8 @@ func (meta_svc *MetaKVMetadataSvc) add(key string, value []byte, sensitive bool)
 		} else if err == nil {
 			return nil
 		} else {
-			meta_svc.logger.Warnf("metakv.Add failed. key=%v, value=%v, err=%v\n", key, value, err)
+			redactOnce()
+			meta_svc.logger.Warnf("metakv.Add failed. key=%v, value=%v, err=%v\n", key, valueToPrint, err)
 			return err
 		}
 	}
@@ -107,7 +122,8 @@ func (meta_svc *MetaKVMetadataSvc) add(key string, value []byte, sensitive bool)
 
 	if expOpErr != nil {
 		// Executor will return error only if it timed out with ErrorFailedAfterRetry. Log it and override the ret err
-		meta_svc.logger.Errorf("metakv.Add failed after max retry. key=%v, value=%v, err=%v\n", key, value, err)
+		redactOnce()
+		meta_svc.logger.Errorf("metakv.Add failed after max retry. key=%v, value=%v, err=%v\n", key, valueToPrint, err)
 		err = expOpErr
 	}
 
@@ -137,8 +153,21 @@ func (meta_svc *MetaKVMetadataSvc) SetSensitive(key string, value []byte, rev in
 //if metakv operation failed after max number of retries, return ErrorFailedAfterRetry
 func (meta_svc *MetaKVMetadataSvc) set(key string, value []byte, rev interface{}, sensitive bool) error {
 	var err error
+	var redactedValue []byte
+	valueToPrint := &value
 	start_time := time.Now()
 	defer meta_svc.logger.Debugf("Took %vs to set %v to metakv\n", time.Since(start_time).Seconds(), key)
+
+	var redactOnceSync sync.Once
+	redactOnce := func() {
+		redactOnceSync.Do(func() {
+			if sensitive {
+				redactedValue = base.DeepCopyByteArray(value)
+				redactedValue = base.TagUDBytes(redactedValue)
+				valueToPrint = &redactedValue
+			}
+		})
+	}
 
 	metakvOpSetFunc := func() error {
 		if sensitive {
@@ -152,7 +181,8 @@ func (meta_svc *MetaKVMetadataSvc) set(key string, value []byte, rev interface{}
 		} else if err == nil {
 			return nil
 		} else {
-			meta_svc.logger.Warnf("metakv.Set failed. key=%v, value=%v, err=%v\n", key, value, err)
+			redactOnce()
+			meta_svc.logger.Warnf("metakv.Set failed. key=%v, value=%v, err=%v\n", key, valueToPrint, err)
 			return err
 		}
 	}
@@ -161,8 +191,8 @@ func (meta_svc *MetaKVMetadataSvc) set(key string, value []byte, rev interface{}
 		base.MetaKvBackoffFactor, metakvOpSetFunc)
 
 	if expOpErr != nil {
-		// Executor will return error only if it timed out with ErrorFailedAfterRetry. Log it and override the ret err
-		meta_svc.logger.Errorf("metakv.Set failed after max retry. key=%v, value=%v, err=%v\n", key, value, err)
+		redactOnce()
+		meta_svc.logger.Errorf("metakv.Set failed after max retry. key=%v, value=%v, err=%v\n", key, valueToPrint, err)
 		err = expOpErr
 	}
 	return err

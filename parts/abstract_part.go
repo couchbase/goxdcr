@@ -16,6 +16,7 @@ import (
 	common "github.com/couchbase/goxdcr/common"
 	component "github.com/couchbase/goxdcr/component"
 	"github.com/couchbase/goxdcr/log"
+	"github.com/couchbase/goxdcr/metadata"
 	"sync"
 )
 
@@ -129,6 +130,6 @@ func (p *AbstractPart) IsReadyForHeartBeat() bool {
 	return p.state == common.Part_Running
 }
 
-func (p *AbstractPart) UpdateSettings(settings map[string]interface{}) error {
+func (p *AbstractPart) UpdateSettings(settings metadata.ReplicationSettingsMap) error {
 	return nil
 }
