@@ -43,7 +43,7 @@ func (c *AbstractComponent) RegisterComponentEventListener(eventType common.Comp
 
 	listenerList := c.event_listeners[eventType]
 	if listenerList == nil {
-		listenerList = make([]common.ComponentEventListener, 0, 15)
+		listenerList = make([]common.ComponentEventListener, 0, 2)
 	}
 
 	listenerList = append(listenerList, listener)

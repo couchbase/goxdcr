@@ -299,9 +299,11 @@ func min(num1 int, num2 int) int {
 
 // get nozzle list from nozzle map
 func getNozzleList(nozzle_map map[string]common.Nozzle) []common.Nozzle {
-	nozzle_list := make([]common.Nozzle, 0)
+	nozzle_list := make([]common.Nozzle, len(nozzle_map))
+	index := 0
 	for _, nozzle := range nozzle_map {
-		nozzle_list = append(nozzle_list, nozzle)
+		nozzle_list[index] = nozzle
+		index++
 	}
 	return nozzle_list
 }
