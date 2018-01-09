@@ -212,6 +212,7 @@ const (
 
 // constants used for create replication request
 const (
+	Type       = "type"
 	FromBucket = "fromBucket"
 	ToCluster  = "toCluster"
 	ToBucket   = "toBucket"

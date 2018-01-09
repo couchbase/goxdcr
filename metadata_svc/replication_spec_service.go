@@ -257,13 +257,13 @@ func (service *ReplicationSpecService) validateXmemSettings(targetClusterRef *me
 	return errorMap
 }
 
-func (service *ReplicationSpecService) validateES(errorMap base.ErrorMap, targetBucketInfo map[string]interface{}, repl_type interface{}, sourceConflictResolutionType, targetConflictResolutionType string) []string {
+func (service *ReplicationSpecService) validateES(errorMap base.ErrorMap, targetClusterRef *metadata.RemoteClusterReference, targetBucketInfo map[string]interface{}, repl_type interface{}, sourceConflictResolutionType, targetConflictResolutionType string) []string {
 	warnings := make([]string, 0)
 	isTargetES := service.utils.CheckWhetherClusterIsESBasedOnBucketInfo(targetBucketInfo)
 	if repl_type != metadata.ReplicationTypeCapi {
 		// for xmem replication, validate that target is not an elasticsearch cluster
 		if isTargetES {
-			errorMap[base.PlaceHolderFieldKey] = errors.New("Replication to an Elasticsearch target cluster using XDCR Version 2 (XMEM protocol) is not supported. Use XDCR Version 1 (CAPI protocol) instead.")
+			errorMap[base.Type] = errors.New("Replication to an Elasticsearch target cluster using XDCR Version 2 (XMEM protocol) is not supported. Use XDCR Version 1 (CAPI protocol) instead.")
 			return warnings
 		}
 
@@ -273,11 +273,18 @@ func (service *ReplicationSpecService) validateES(errorMap base.ErrorMap, target
 			return warnings
 		}
 	} else {
-		//for capi replication, if target is not elastic search cluster, compose a warning to be displayed in the replication creation ui log
+		// for capi replication
+		// if encryption is enabled, return error
+		if targetClusterRef.IsEncryptionEnabled() {
+			errorMap[base.Type] = errors.New("XDCR Version 1 (CAPI protocol) replication does not support encryption")
+			return warnings
+		}
+
+		// if target is not elastic search cluster, compose a warning to be displayed in the replication creation ui log
 		if !isTargetES {
 			warnings = append(warnings, fmt.Sprintf("XDCR Version 1 (CAPI protocol) replication has been deprecated and should be used only for an Elasticsearch target cluster. Since the current target cluster is a Couchbase Server cluster, use XDCR Version 2 (XMEM protocol) instead."))
 		}
-		// also for capi replication,  if source bucket has timestamp conflict resolution enabled,
+		// if source bucket has timestamp conflict resolution enabled,
 		// compose a warning to be displayed in the replication creation ui log
 		if sourceConflictResolutionType == base.ConflictResolutionType_Lww {
 			warnings = append(warnings, fmt.Sprintf("Replication to an Elasticsearch target cluster uses XDCR Version 1 (CAPI protocol), which does not support Timestamp Based Conflict Resolution. Even though the replication source bucket has Timestamp Based Conflict Resolution enabled, the replication will use Sequence Number Based Conflict Resolution instead."))
@@ -332,7 +339,7 @@ func (service *ReplicationSpecService) ValidateNewReplicationSpec(sourceBucket, 
 		repl_type = metadata.ReplicationTypeXmem
 	}
 
-	warnings := service.validateES(errorMap, targetBucketInfo, repl_type, sourceConflictResolutionType, targetConflictResolutionType)
+	warnings := service.validateES(errorMap, targetClusterRef, targetBucketInfo, repl_type, sourceConflictResolutionType, targetConflictResolutionType)
 	if len(errorMap) > 0 {
 		return "", "", nil, errorMap, nil, nil
 	}

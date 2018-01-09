@@ -52,7 +52,6 @@ const (
 
 // constants used for parsing replication settings
 const (
-	Type                           = "type"
 	ReplicationType                = "replicationType"
 	FilterExpression               = "filterExpression"
 	PauseRequested                 = "pauseRequested"
@@ -124,7 +123,7 @@ var MissingOldSettingsInRequest = errors.New("Invalid http request. No old repli
 
 // replication settings key in rest api -> internal replication settings key
 var RestKeyToSettingsKeyMap = map[string]string{
-	Type:                           metadata.ReplicationType,
+	base.Type:                      metadata.ReplicationType,
 	FilterExpression:               metadata.FilterExpression,
 	PauseRequested:                 metadata.Active,
 	CheckpointInterval:             metadata.CheckpointInterval,
@@ -146,7 +145,7 @@ var RestKeyToSettingsKeyMap = map[string]string{
 
 // internal replication settings key -> replication settings key in rest api
 var SettingsKeyToRestKeyMap = map[string]string{
-	metadata.ReplicationType:                Type,
+	metadata.ReplicationType:                base.Type,
 	metadata.FilterExpression:               FilterExpression,
 	metadata.Active:                         PauseRequested,
 	metadata.CheckpointInterval:             CheckpointInterval,
@@ -377,7 +376,7 @@ func DecodeCreateReplicationRequest(request *http.Request) (justValidate bool, f
 			if err != nil {
 				errorsMap[base.JustValidate] = err
 			}
-		case Type:
+		case base.Type:
 			replType := getStringFromValArr(valArr)
 			isCapi = (replType == metadata.ReplicationTypeCapi)
 		default:
