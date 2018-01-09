@@ -720,8 +720,7 @@ func TestRefresh4Nodes3GoesBad(t *testing.T) {
 	assert.True(refreshCheckActiveHostNameHelper(agent, newNodeList))
 
 	// This second refresh should have changed the bootstrap node because node 1 was the bootstrap node and it has been declared "bad"
-	// But since it is not user input, do not need to restart
-	assert.Equal(1, callBackCount)
+	assert.Equal(2, callBackCount)
 
 	fmt.Println("============== Test case end: TestRefresh4Nodes3GoesBad =================")
 }
