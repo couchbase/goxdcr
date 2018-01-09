@@ -582,3 +582,19 @@ func StringListsFindMissingFromFirst(list1 []string, list2 []string) []string {
 	}
 	return missingSlice
 }
+
+// flatten a string array into a string. each string element in string array is separated by line breaks
+func FlattenStringArray(input []string) string {
+	var output string
+	if len(input) > 0 {
+		var buffer bytes.Buffer
+		for index, str := range input {
+			if index != 0 {
+				buffer.WriteString("\n")
+			}
+			buffer.WriteString(str)
+		}
+		output = buffer.String()
+	}
+	return output
+}

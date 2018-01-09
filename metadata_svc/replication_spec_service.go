@@ -252,87 +252,87 @@ func (service *ReplicationSpecService) validateXmemSettings(errorMap ErrorMap, t
 	}
 }
 
-func (service *ReplicationSpecService) validateES(errorMap ErrorMap, targetBucketInfo map[string]interface{}, repl_type interface{}, sourceConflictResolutionType, targetConflictResolutionType string) string {
-	var warning string
+func (service *ReplicationSpecService) validateES(errorMap ErrorMap, targetBucketInfo map[string]interface{}, repl_type interface{}, sourceConflictResolutionType, targetConflictResolutionType string) []string {
+	warnings := make([]string, 0)
 	isTargetES := service.utils.CheckWhetherClusterIsESBasedOnBucketInfo(targetBucketInfo)
 	if repl_type != metadata.ReplicationTypeCapi {
 		// for xmem replication, validate that target is not an elasticsearch cluster
 		if isTargetES {
 			errorMap[base.PlaceHolderFieldKey] = errors.New("Replication to an Elasticsearch target cluster using XDCR Version 2 (XMEM protocol) is not supported. Use XDCR Version 1 (CAPI protocol) instead.")
-			return warning
+			return warnings
 		}
 
 		// for xmem replication, validate that source and target bucket have the same conflict resolution type metadata
 		if sourceConflictResolutionType != targetConflictResolutionType {
 			errorMap[base.PlaceHolderFieldKey] = errors.New("Replication between buckets with different ConflictResolutionType setting is not allowed")
-			return warning
+			return warnings
 		}
 	} else {
 		//for capi replication, if target is not elastic search cluster, compose a warning to be displayed in the replication creation ui log
 		if !isTargetES {
-			warning = fmt.Sprintf("\nXDCR Version 1 (CAPI protocol) replication has been deprecated and should be used only for an Elasticsearch target cluster. Since the current target cluster is a Couchbase Server cluster, use XDCR Version 2 (XMEM protocol) instead.")
+			warnings = append(warnings, fmt.Sprintf("XDCR Version 1 (CAPI protocol) replication has been deprecated and should be used only for an Elasticsearch target cluster. Since the current target cluster is a Couchbase Server cluster, use XDCR Version 2 (XMEM protocol) instead."))
 		}
 		// also for capi replication,  if source bucket has timestamp conflict resolution enabled,
 		// compose a warning to be displayed in the replication creation ui log
 		if sourceConflictResolutionType == base.ConflictResolutionType_Lww {
-			warning += fmt.Sprintf("\nReplication to an Elasticsearch target cluster uses XDCR Version 1 (CAPI protocol), which does not support Timestamp Based Conflict Resolution. Even though the replication source bucket has Timestamp Based Conflict Resolution enabled, the replication will use Sequence Number Based Conflict Resolution instead.")
+			warnings = append(warnings, fmt.Sprintf("Replication to an Elasticsearch target cluster uses XDCR Version 1 (CAPI protocol), which does not support Timestamp Based Conflict Resolution. Even though the replication source bucket has Timestamp Based Conflict Resolution enabled, the replication will use Sequence Number Based Conflict Resolution instead."))
 		}
 	}
-	return warning
+	return warnings
 }
 
 /**
  * Main Validation routine, supplemented by multiple helper sub-routines.
  * Each sub-routine may be daisy chained by variables that would be helpful for further subroutines.
  */
-func (service *ReplicationSpecService) ValidateNewReplicationSpec(sourceBucket, targetCluster, targetBucket string, settings map[string]interface{}) (string, string, *metadata.RemoteClusterReference, map[string]error, error, string) {
+func (service *ReplicationSpecService) ValidateNewReplicationSpec(sourceBucket, targetCluster, targetBucket string, settings map[string]interface{}) (string, string, *metadata.RemoteClusterReference, map[string]error, error, []string) {
 	errorMap := make(ErrorMap)
 	service.logger.Infof("Start ValidateAddReplicationSpec, sourceBucket=%v, targetCluster=%v, targetBucket=%v\n", sourceBucket, targetCluster, targetBucket)
 	defer service.logger.Infof("Finished ValidateAddReplicationSpec, sourceBucket=%v, targetCluster=%v, targetBucket=%v, errorMap=%v\n", sourceBucket, targetCluster, targetBucket, errorMap)
 
 	sourceBucketUUID, sourceConflictResolutionType, err := service.validateSourceBucket(errorMap, sourceBucket, targetCluster, targetBucket)
 	if len(errorMap) > 0 || err != nil {
-		return "", "", nil, errorMap, err, ""
+		return "", "", nil, errorMap, err, nil
 	}
 
 	targetClusterRef, remote_connStr, remote_userName, remote_password, certificate, sanInCertificate := service.getRemoteReference(errorMap, targetCluster)
 	if len(errorMap) > 0 {
-		return "", "", nil, errorMap, nil, ""
+		return "", "", nil, errorMap, nil, nil
 	}
 
 	err = service.validateSrcTargetNonIdenticalBucket(errorMap, sourceBucket, targetBucket, targetClusterRef)
 	if len(errorMap) > 0 || err != nil {
-		return "", "", nil, errorMap, err, ""
+		return "", "", nil, errorMap, err, nil
 	}
 
 	targetBucketInfo, targetBucketUUID, targetConflictResolutionType, targetKVVBMap := service.validateTargetBucket(errorMap, remote_connStr, targetBucket, remote_userName, remote_password, certificate, sanInCertificate, sourceBucket, targetCluster)
 	if len(errorMap) > 0 {
-		return "", "", nil, errorMap, nil, ""
+		return "", "", nil, errorMap, nil, nil
 	}
 
 	service.validateReplicationSpecDoesNotAlreadyExist(errorMap, sourceBucket, targetClusterRef, targetBucket)
 	if len(errorMap) > 0 {
-		return "", "", nil, errorMap, nil, ""
+		return "", "", nil, errorMap, nil, nil
 	}
 
 	repl_type, ok := settings[metadata.ReplicationType]
 	if !ok || repl_type == metadata.ReplicationTypeXmem {
 		service.validateXmemSettings(errorMap, targetClusterRef, targetKVVBMap, sourceBucket, targetBucket, targetBucketInfo)
 		if len(errorMap) > 0 {
-			return "", "", nil, errorMap, nil, ""
+			return "", "", nil, errorMap, nil, nil
 		}
 	}
 
-	warning := service.validateES(errorMap, targetBucketInfo, repl_type, sourceConflictResolutionType, targetConflictResolutionType)
+	warnings := service.validateES(errorMap, targetBucketInfo, repl_type, sourceConflictResolutionType, targetConflictResolutionType)
 	if len(errorMap) > 0 {
-		return "", "", nil, errorMap, nil, ""
+		return "", "", nil, errorMap, nil, nil
 	}
 
-	if warning != "" {
-		service.logger.Warn(warning)
+	if warnings != nil {
+		service.logger.Warnf("Warnings from ValidateAddReplicationSpec : %v\n", base.FlattenStringArray(warnings))
 	}
 
-	return sourceBucketUUID, targetBucketUUID, targetClusterRef, errorMap, nil, warning
+	return sourceBucketUUID, targetBucketUUID, targetClusterRef, errorMap, nil, warnings
 }
 
 //validate target bucket
@@ -659,7 +659,7 @@ func (service *ReplicationSpecService) writeUiLogWithAdditionalInfo(spec *metada
 		remoteClusterName := service.remote_cluster_svc.GetRemoteClusterNameFromClusterUuid(spec.TargetClusterUUID)
 		uiLogMsg := fmt.Sprintf("Replication from bucket \"%s\" to bucket \"%s\" on cluster \"%s\" %s.", spec.SourceBucketName, spec.TargetBucketName, remoteClusterName, action)
 		if additionalInfo != "" {
-			uiLogMsg += fmt.Sprintf(" %s", additionalInfo)
+			uiLogMsg += fmt.Sprintf("\n%s", additionalInfo)
 		}
 		service.uilog_svc.Write(uiLogMsg)
 	}

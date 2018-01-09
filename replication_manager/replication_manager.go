@@ -74,7 +74,7 @@ type ReplicationManagerIf interface {
 		global_setting_svc service_def.GlobalSettingsSvc,
 		bucket_settings_svc service_def.BucketSettingsSvc,
 		internal_settings_svc service_def.InternalSettingsSvc)
-	createAndPersistReplicationSpec(justValidate bool, sourceBucket, targetCluster, targetBucket string, settings map[string]interface{}) (*metadata.ReplicationSpecification, map[string]error, error)
+	createAndPersistReplicationSpec(justValidate bool, sourceBucket, targetCluster, targetBucket string, settings map[string]interface{}) (*metadata.ReplicationSpecification, map[string]error, error, []string)
 	OnError(s common.Supervisor, errMap map[string]error)
 	upgradeRemoteClusterRefs()
 	getPipelineFromPipelineSupevisor(s common.Supervisor) (common.Pipeline, error)
@@ -450,28 +450,28 @@ func InternalSettingsService() service_def.InternalSettingsSvc {
 
 //CreateReplication create the replication specification in metadata store
 //and start the replication pipeline
-func CreateReplication(justValidate bool, sourceBucket, targetCluster, targetBucket string, settings map[string]interface{}, realUserId *base.RealUserId) (string, map[string]error, error) {
+func CreateReplication(justValidate bool, sourceBucket, targetCluster, targetBucket string, settings map[string]interface{}, realUserId *base.RealUserId) (string, map[string]error, error, []string) {
 	logger_rm.Infof("Creating replication - justValidate=%v, sourceBucket=%s, targetCluster=%s, targetBucket=%s, settings=%v\n",
 		justValidate, sourceBucket, targetCluster, targetBucket, settings)
 
 	var spec *metadata.ReplicationSpecification
-	spec, errorsMap, err := replication_mgr.createAndPersistReplicationSpec(justValidate, sourceBucket, targetCluster, targetBucket, settings)
+	spec, errorsMap, err, warnings := replication_mgr.createAndPersistReplicationSpec(justValidate, sourceBucket, targetCluster, targetBucket, settings)
 	if err != nil {
 		logger_rm.Errorf("%v\n", err)
-		return "", nil, err
+		return "", nil, err, nil
 	} else if len(errorsMap) != 0 {
-		return "", errorsMap, nil
+		return "", errorsMap, nil, nil
 	}
 
 	if justValidate {
-		return spec.Id, nil, nil
+		return spec.Id, nil, nil, warnings
 	}
 
 	go writeCreateReplicationEvent(spec, realUserId)
 
 	logger_rm.Infof("Replication specification %s is created\n", spec.Id)
 
-	return spec.Id, nil, nil
+	return spec.Id, nil, nil, warnings
 }
 
 //DeleteReplication stops the running replication of given replicationId and
@@ -655,24 +655,24 @@ func GetStatistics(bucket string) (*expvar.Map, error) {
 }
 
 //create and persist the replication specification
-func (rm *replicationManager) createAndPersistReplicationSpec(justValidate bool, sourceBucket, targetCluster, targetBucket string, settings map[string]interface{}) (*metadata.ReplicationSpecification, map[string]error, error) {
+func (rm *replicationManager) createAndPersistReplicationSpec(justValidate bool, sourceBucket, targetCluster, targetBucket string, settings map[string]interface{}) (*metadata.ReplicationSpecification, map[string]error, error, []string) {
 	logger_rm.Infof("Creating replication spec - justValidate=%v, sourceBucket=%s, targetCluster=%s, targetBucket=%s, settings=%v\n",
 		justValidate, sourceBucket, targetCluster, targetBucket, settings)
 
 	// validate that everything is alright with the replication configuration before actually creating it
-	sourceBucketUUID, targetBucketUUID, targetClusterRef, errorMap, err, warning := replication_mgr.repl_spec_svc.ValidateNewReplicationSpec(sourceBucket, targetCluster, targetBucket, settings)
+	sourceBucketUUID, targetBucketUUID, targetClusterRef, errorMap, err, warnings := replication_mgr.repl_spec_svc.ValidateNewReplicationSpec(sourceBucket, targetCluster, targetBucket, settings)
 	if err != nil || len(errorMap) > 0 {
-		return nil, errorMap, err
+		return nil, errorMap, err, nil
 	}
 
 	spec, err := metadata.NewReplicationSpecification(sourceBucket, sourceBucketUUID, targetClusterRef.Uuid, targetBucket, targetBucketUUID)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, err, nil
 	}
 
 	replSettings, err := ReplicationSettingsService().GetDefaultReplicationSettings()
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, err, nil
 	}
 
 	// default isCapi to false if replication type is not explicitly specified in settings
@@ -691,22 +691,22 @@ func (rm *replicationManager) createAndPersistReplicationSpec(justValidate bool,
 
 	_, errorMap = replSettings.UpdateSettingsFromMap(settings)
 	if len(errorMap) != 0 {
-		return nil, errorMap, nil
+		return nil, errorMap, nil, nil
 	}
 	spec.Settings = replSettings
 
 	if justValidate {
-		return spec, nil, nil
+		return spec, nil, nil, warnings
 	}
 
 	//persist it
-	err = replication_mgr.repl_spec_svc.AddReplicationSpec(spec, warning)
+	err = replication_mgr.repl_spec_svc.AddReplicationSpec(spec, base.FlattenStringArray(warnings))
 	if err == nil {
 		logger_rm.Infof("Success adding replication specification %s\n", spec.Id)
-		return spec, nil, nil
+		return spec, nil, nil, warnings
 	} else {
 		logger_rm.Errorf("Error adding replication specification %s. err=%v\n", spec.Id, err)
-		return spec, nil, err
+		return nil, nil, err, nil
 	}
 }
 

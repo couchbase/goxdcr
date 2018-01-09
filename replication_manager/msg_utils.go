@@ -76,6 +76,7 @@ const (
 // constants for parsing create replication response
 const (
 	ReplicationId = "id"
+	Warnings      = "warnings"
 )
 
 // constants for RegexpValidation request
@@ -573,9 +574,12 @@ func DecodeRegexpValidationRequest(request *http.Request, utils utilities.UtilsI
 	return expression, keys, nil
 }
 
-func NewCreateReplicationResponse(replicationId string) (*ap.Response, error) {
+func NewCreateReplicationResponse(replicationId string, warnings []string) (*ap.Response, error) {
 	params := make(map[string]interface{})
 	params[ReplicationId] = replicationId
+	if len(warnings) > 0 {
+		params[Warnings] = warnings
+	}
 	return EncodeObjectIntoResponse(params)
 }
 

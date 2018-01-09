@@ -407,7 +407,7 @@ func (adminport *Adminport) doCreateReplicationRequest(request *http.Request) (*
 	logger_ap.Infof("Request parameters: justValidate=%v, fromBucket=%v, toCluster=%v, toBucket=%v, settings=%v\n",
 		justValidate, fromBucket, toCluster, toBucket, settings)
 
-	replicationId, errorsMap, err := CreateReplication(justValidate, fromBucket, toCluster, toBucket, settings, getRealUserIdFromRequest(request))
+	replicationId, errorsMap, err, warnings := CreateReplication(justValidate, fromBucket, toCluster, toBucket, settings, getRealUserIdFromRequest(request))
 
 	if err != nil {
 		return EncodeReplicationSpecErrorIntoResponse(err)
@@ -415,7 +415,7 @@ func (adminport *Adminport) doCreateReplicationRequest(request *http.Request) (*
 		logger_ap.Errorf("Error creating replication. errorsMap=%v\n", errorsMap)
 		return EncodeErrorsMapIntoResponse(errorsMap, true)
 	} else {
-		return NewCreateReplicationResponse(replicationId)
+		return NewCreateReplicationResponse(replicationId, warnings)
 	}
 }
 
