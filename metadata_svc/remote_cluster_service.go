@@ -11,7 +11,9 @@
 package metadata_svc
 
 import (
+	"crypto/x509"
 	"encoding/json"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"github.com/couchbase/goxdcr/base"
@@ -1012,6 +1014,22 @@ func (service *RemoteClusterService) validateRemoteCluster(ref *metadata.RemoteC
 
 		if !isEnterprise || !sourceSSLCompatible {
 			return wrapAsInvalidRemoteClusterError("Encryption can only be used in enterprise edition when the entire cluster is running at least 2.5 version of Couchbase Server")
+		}
+
+		// check validity of certificate
+		block, _ := pem.Decode(ref.Certificate)
+		if block == nil {
+			return wrapAsInvalidRemoteClusterError(base.InvalidCerfiticateError.Error())
+		}
+		certificate, err := x509.ParseCertificate(block.Bytes)
+		if err != nil {
+			return wrapAsInvalidRemoteClusterError(fmt.Sprintf("Failed to parse certificate. err=%v", err))
+		}
+
+		// check the signature of certificate
+		err = certificate.CheckSignature(certificate.SignatureAlgorithm, certificate.RawTBSCertificate, certificate.Signature)
+		if err != nil {
+			return wrapAsInvalidRemoteClusterError(fmt.Sprintf("Error validating the signature of certificate. err=%v", err))
 		}
 	}
 
