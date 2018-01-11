@@ -404,6 +404,11 @@ var MaxRemoteMcRetry = 5
 var RemoteMcRetryWaitTime = 200 * time.Millisecond
 var RemoteMcRetryFactor = 2
 
+// The following will result in a max of 3 seconds of retry time before declaring failure
+var BucketInfoOpMaxRetry = 5
+var BucketInfoOpWaitTime = 100 * time.Millisecond
+var BucketInfoOpRetryFactor = 2
+
 // minimum versions where various features are supported
 var VersionForSANInCertificateSupport = []int{4, 0}
 var VersionForRBACAndXattrSupport = []int{5, 0}

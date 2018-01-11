@@ -1130,39 +1130,46 @@ func (u *Utilities) RemoteBucketValidationInfo(hostAddr, bucketName, username, p
 func (u *Utilities) bucketValidationInfoInternal(hostAddr, bucketName, username, password string, certificate []byte, sanInCertificate bool, clientCertificate, clientKey []byte,
 	clientCertAuthSetting base.ClientCertAuth, logger *log.CommonLogger, remote bool) (bucketInfo map[string]interface{}, bucketType string, bucketUUID string, bucketConflictResolutionType string,
 	bucketEvictionPolicy string, bucketKVVBMap map[string][]uint16, err error) {
-	bucketInfo, err = u.GetBucketInfo(hostAddr, bucketName, username, password, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, logger)
-	if err != nil {
-		return
+
+	bucketValidationInfoOp := func() error {
+		bucketInfo, err = u.GetBucketInfo(hostAddr, bucketName, username, password, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, logger)
+		if err != nil {
+			return err
+		}
+
+		bucketType, err = u.GetBucketTypeFromBucketInfo(bucketName, bucketInfo)
+		if err != nil {
+			err = fmt.Errorf("Error retrieving BucketType setting on bucket %v. err=%v", bucketName, err)
+			return err
+		}
+		bucketUUID, err = u.GetBucketUuidFromBucketInfo(bucketName, bucketInfo, logger)
+		if err != nil {
+			err = fmt.Errorf("Error retrieving UUID setting on bucket %v. err=%v", bucketName, err)
+			return err
+		}
+		bucketConflictResolutionType, err = u.GetConflictResolutionTypeFromBucketInfo(bucketName, bucketInfo)
+		if err != nil {
+			err = fmt.Errorf("Error retrieving ConflictResolutionType setting on bucket %v. err=%v", bucketName, err)
+			return err
+		}
+		bucketEvictionPolicy, err = u.GetEvictionPolicyFromBucketInfo(bucketName, bucketInfo)
+		if err != nil {
+			err = fmt.Errorf("Error retrieving EvictionPolicy setting on bucket %v. err=%v", bucketName, err)
+			return err
+		}
+		bucketKVVBMap, err = u.GetServerVBucketsMap(hostAddr, bucketName, bucketInfo)
+		if err != nil {
+			err = fmt.Errorf("Error retrieving server vb map on bucket %v. err=%v", bucketName, err)
+			return err
+		}
+
+		if remote {
+			u.TranslateKvVbMap(bucketKVVBMap, bucketInfo)
+		}
+		return nil
 	}
 
-	bucketType, err = u.GetBucketTypeFromBucketInfo(bucketName, bucketInfo)
-	if err != nil {
-		err = fmt.Errorf("Error retrieving BucketType setting on bucket %v. err=%v", bucketName, err)
-		return
-	}
-	bucketUUID, err = u.GetBucketUuidFromBucketInfo(bucketName, bucketInfo, logger)
-	if err != nil {
-		err = fmt.Errorf("Error retrieving UUID setting on bucket %v. err=%v", bucketName, err)
-		return
-	}
-	bucketConflictResolutionType, err = u.GetConflictResolutionTypeFromBucketInfo(bucketName, bucketInfo)
-	if err != nil {
-		err = fmt.Errorf("Error retrieving ConflictResolutionType setting on bucket %v. err=%v", bucketName, err)
-		return
-	}
-	bucketEvictionPolicy, err = u.GetEvictionPolicyFromBucketInfo(bucketName, bucketInfo)
-	if err != nil {
-		err = fmt.Errorf("Error retrieving EvictionPolicy setting on bucket %v. err=%v", bucketName, err)
-		return
-	}
-	bucketKVVBMap, err = u.GetServerVBucketsMap(hostAddr, bucketName, bucketInfo)
-	if err != nil {
-		err = fmt.Errorf("Error retrieving server vb map on bucket %v. err=%v", bucketName, err)
-		return
-	}
-	if remote {
-		u.TranslateKvVbMap(bucketKVVBMap, bucketInfo)
-	}
+	err = u.ExponentialBackoffExecutor("BucketValidationInfo", base.BucketInfoOpWaitTime, base.BucketInfoOpMaxRetry, base.BucketInfoOpRetryFactor, bucketValidationInfoOp)
 	return
 }
 
@@ -2208,24 +2215,27 @@ func (u *Utilities) NewTCPConn(hostName string) (*net.TCPConn, error) {
 
 /**
  * Executes a anonymous function that returns an error. If the error is non nil, retry with exponential backoff.
- * Returns base.ErrorFailedAfterRetry if operation times out, nil otherwise.
+ * Returns base.ErrorFailedAfterRetry + the last recorded error if operation times out, nil otherwise.
  * Max retries == the times to retry in additional to the initial try, should the initial try fail
  * initialWait == Initial time with which to start
  * Factor == exponential backoff factor based off of initialWait
  */
 func (u *Utilities) ExponentialBackoffExecutor(name string, initialWait time.Duration, maxRetries int, factor int, op ExponentialOpFunc) error {
 	waitTime := initialWait
+	var opErr error
 	for i := 0; i <= maxRetries; i++ {
-		if op() == nil {
+		opErr = op()
+		if opErr == nil {
 			return nil
 		} else if i != maxRetries {
-			u.logger_utils.Warnf("ExponentialBackoffExecutor for %v encountered error. Sleeping %v\n",
-				name, waitTime)
+			u.logger_utils.Warnf("ExponentialBackoffExecutor for %v encountered error (%v). Sleeping %v\n",
+				name, opErr.Error(), waitTime)
 			time.Sleep(waitTime)
 			waitTime *= time.Duration(factor)
 		}
 	}
-	return base.ErrorFailedAfterRetry
+	opErr = fmt.Errorf("%v Last error: %v", base.ErrorFailedAfterRetry.Error(), opErr.Error())
+	return opErr
 }
 
 /*
@@ -2234,24 +2244,27 @@ func (u *Utilities) ExponentialBackoffExecutor(name string, initialWait time.Dur
  */
 func (u *Utilities) ExponentialBackoffExecutorWithFinishSignal(name string, initialWait time.Duration, maxRetries int, factor int, op ExponentialOpFunc2, param interface{}, finCh chan bool) (interface{}, error) {
 	waitTime := initialWait
+	var result interface{}
+	var err error
 	for i := 0; i <= maxRetries; i++ {
 		select {
 		case <-finCh:
 			u.logger_utils.Warnf("ExponentialBackoffExecutorWithFinishSignal for %v aborting because of finch closure\n", name)
 			break
 		default:
-			result, err := op(param)
+			result, err = op(param)
 			if err == nil {
 				return result, nil
 			} else if i != maxRetries {
-				u.logger_utils.Warnf("ExponentialBackoffExecutorWithFinishSignal for %v encountered error. Sleeping %v\n",
-					name, waitTime)
+				u.logger_utils.Warnf("ExponentialBackoffExecutorWithFinishSignal for %v encountered error (%v). Sleeping %v\n",
+					name, err.Error(), waitTime)
 				base.WaitForTimeoutOrFinishSignal(waitTime, finCh)
 				waitTime *= time.Duration(factor)
 			}
 		}
 	}
-	return nil, base.ErrorFailedAfterRetry
+	err = fmt.Errorf("%v Last error: %v", base.ErrorFailedAfterRetry.Error(), err.Error())
+	return nil, err
 }
 
 // get two security related settings from target
