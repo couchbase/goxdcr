@@ -44,8 +44,9 @@ type ClientIface interface {
 	Del(vb uint16, key string) (*gomemcached.MCResponse, error)
 	EnableMutationToken() (*gomemcached.MCResponse, error)
 	Get(vb uint16, key string) (*gomemcached.MCResponse, error)
+	GetSubdoc(vb uint16, key string, subPaths []string) (*gomemcached.MCResponse, error)
 	GetAndTouch(vb uint16, key string, exp int) (*gomemcached.MCResponse, error)
-	GetBulk(vb uint16, keys []string, rv map[string]*gomemcached.MCResponse) error
+	GetBulk(vb uint16, keys []string, rv map[string]*gomemcached.MCResponse, subPaths []string) error
 	GetMeta(vb uint16, key string) (*gomemcached.MCResponse, error)
 	GetRandomDoc() (*gomemcached.MCResponse, error)
 	Hijack() io.ReadWriteCloser
@@ -94,6 +95,7 @@ var InvalidStepResponseError = errors.New("the server final response is not acco
 
 type Features []Feature
 type Feature uint16
+
 const FeatureMutationToken = Feature(0x04)
 const FeatureXattr = Feature(0x06)
 const FeatureDataType = Feature(0x0b)
@@ -284,6 +286,19 @@ func (c *Client) Get(vb uint16, key string) (*gomemcached.MCResponse, error) {
 		Opcode:  gomemcached.GET,
 		VBucket: vb,
 		Key:     []byte(key),
+	})
+}
+
+// Get the xattrs, doc value for the input key
+func (c *Client) GetSubdoc(vb uint16, key string, subPaths []string) (*gomemcached.MCResponse, error) {
+
+	extraBuf, valueBuf := GetSubDocVal(subPaths)
+	return c.Send(&gomemcached.MCRequest{
+		Opcode:  gomemcached.SUBDOC_MULTI_LOOKUP,
+		VBucket: vb,
+		Key:     []byte(key),
+		Extras:  extraBuf,
+		Body:    valueBuf,
 	})
 }
 
@@ -726,7 +741,7 @@ func (c *Client) Append(vb uint16, key string, data []byte) (*gomemcached.MCResp
 }
 
 // GetBulk gets keys in bulk
-func (c *Client) GetBulk(vb uint16, keys []string, rv map[string]*gomemcached.MCResponse) error {
+func (c *Client) GetBulk(vb uint16, keys []string, rv map[string]*gomemcached.MCResponse, subPaths []string) error {
 	stopch := make(chan bool)
 	var wg sync.WaitGroup
 
@@ -761,7 +776,10 @@ func (c *Client) GetBulk(vb uint16, keys []string, rv map[string]*gomemcached.MC
 				return
 			default:
 				res, err := c.Receive()
-				if err != nil {
+				if err != nil &&
+					res.Status != gomemcached.SUBDOC_BAD_MULTI &&
+					res.Status != gomemcached.SUBDOC_PATH_NOT_FOUND &&
+					res.Status != gomemcached.SUBDOC_MULTI_PATH_FAILURE_DELETED {
 					if res.Status != gomemcached.KEY_ENOENT {
 						errch <- err
 						return
@@ -785,23 +803,38 @@ func (c *Client) GetBulk(vb uint16, keys []string, rv map[string]*gomemcached.MC
 					ok = false
 				}
 
+				if res.Opcode == gomemcached.SUBDOC_GET || res.Opcode == gomemcached.SUBDOC_MULTI_LOOKUP {
+					opaque := res.Opaque - opStart
+					rv[keys[opaque]] = res
+				}
+
 			}
 		}
 	}()
 
-	for _, k := range keys {
-		err := c.Transmit(&gomemcached.MCRequest{
-			Opcode:  gomemcached.GET,
-			VBucket: vb,
-			Key:     []byte(k),
-			Opaque:  c.opaque,
-		})
+	memcachedReqPkt := &gomemcached.MCRequest{
+		Opcode:  gomemcached.GET,
+		VBucket: vb,
+	}
+
+	if len(subPaths) > 0 {
+		extraBuf, valueBuf := GetSubDocVal(subPaths)
+		memcachedReqPkt.Opcode = gomemcached.SUBDOC_MULTI_LOOKUP
+		memcachedReqPkt.Extras = extraBuf
+		memcachedReqPkt.Body = valueBuf
+	}
+
+	for _, k := range keys { // Start of Get request
+		memcachedReqPkt.Key = []byte(k)
+		memcachedReqPkt.Opaque = c.opaque
+
+		err := c.Transmit(memcachedReqPkt)
 		if err != nil {
 			logging.Errorf(" Transmit failed in GetBulkAll %v", err)
 			return err
 		}
 		c.opaque++
-	}
+	} // End of Get request
 
 	// finally transmit a NOOP
 	err := c.Transmit(&gomemcached.MCRequest{
@@ -817,6 +850,49 @@ func (c *Client) GetBulk(vb uint16, keys []string, rv map[string]*gomemcached.MC
 	c.opaque++
 
 	return <-errch
+}
+
+func GetSubDocVal(subPaths []string) (extraBuf, valueBuf []byte) {
+
+	var ops []string
+	totalBytesLen := 0
+	num := 1
+
+	for _, v := range subPaths {
+		totalBytesLen = totalBytesLen + len([]byte(v))
+		ops = append(ops, v)
+		num = num + 1
+	}
+
+	// Xattr retrieval - subdoc multi get
+	extraBuf = append(extraBuf, uint8(0x04))
+
+	valueBuf = make([]byte, num*4+totalBytesLen)
+
+	//opcode for subdoc get
+	op := gomemcached.SUBDOC_GET
+
+	// Calculate path total bytes
+	// There are 2 ops - get xattrs - both input and $document and get whole doc
+	valIter := 0
+
+	for _, v := range ops {
+		pathBytes := []byte(v)
+		valueBuf[valIter+0] = uint8(op)
+
+		// SubdocFlagXattrPath indicates that the path refers to
+		// an Xattr rather than the document body.
+		valueBuf[valIter+1] = uint8(gomemcached.SUBDOC_FLAG_XATTR)
+
+		// 2 byte key
+		binary.BigEndian.PutUint16(valueBuf[valIter+2:], uint16(len(pathBytes)))
+
+		// Then n bytes path
+		copy(valueBuf[valIter+4:], pathBytes)
+		valIter = valIter + 4 + len(pathBytes)
+	}
+
+	return
 }
 
 // ObservedStatus is the type reported by the Observe method

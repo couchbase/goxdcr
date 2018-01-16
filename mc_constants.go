@@ -90,8 +90,9 @@ const (
 	OBSERVE_SEQNO = CommandCode(0x91) // Sequence Number based Observe
 	OBSERVE       = CommandCode(0x92)
 
-	GET_META = CommandCode(0xA0) // Get meta. returns with expiry, flags, cas etc
-
+	GET_META            = CommandCode(0xA0) // Get meta. returns with expiry, flags, cas etc
+	SUBDOC_GET          = CommandCode(0xc5) // Get subdoc. Returns with xattrs
+	SUBDOC_MULTI_LOOKUP = CommandCode(0xd0) // Multi lookup. Doc xattrs and meta.
 )
 
 // Status field for memcached response.
@@ -120,6 +121,11 @@ const (
 	EINTERNAL       = Status(0x84)
 	EBUSY           = Status(0x85)
 	TMPFAIL         = Status(0x86)
+
+	// SUBDOC
+	SUBDOC_PATH_NOT_FOUND             = Status(0xc0)
+	SUBDOC_BAD_MULTI                  = Status(0xcc)
+	SUBDOC_MULTI_PATH_FAILURE_DELETED = Status(0xd3)
 )
 
 // the producer/consumer bit in dcp flags
@@ -127,6 +133,9 @@ var DCP_PRODUCER uint32 = 0x01
 
 // the include XATTRS bit in dcp flags
 var DCP_OPEN_INCLUDE_XATTRS uint32 = 0x04
+
+// Datatype to Include XATTRS in SUBDOC GET
+var SUBDOC_FLAG_XATTR uint8 = 0x04
 
 // MCItem is an internal representation of an item.
 type MCItem struct {
@@ -214,6 +223,8 @@ func init() {
 	CommandNames[UPR_NOOP] = "UPR_NOOP"
 	CommandNames[UPR_BUFFERACK] = "UPR_BUFFERACK"
 	CommandNames[UPR_CONTROL] = "UPR_CONTROL"
+	CommandNames[SUBDOC_GET] = "SUBDOC_GET"
+	CommandNames[SUBDOC_MULTI_LOOKUP] = "SUBDOC_MULTI_LOOKUP"
 
 	StatusNames = make(map[Status]string)
 	StatusNames[SUCCESS] = "SUCCESS"
@@ -238,6 +249,8 @@ func init() {
 	StatusNames[EINTERNAL] = "EINTERNAL"
 	StatusNames[EBUSY] = "EBUSY"
 	StatusNames[TMPFAIL] = "TMPFAIL"
+	StatusNames[SUBDOC_PATH_NOT_FOUND] = "SUBDOC_PATH_NOT_FOUND"
+	StatusNames[SUBDOC_BAD_MULTI] = "SUBDOC_BAD_MULTI"
 
 }
 
