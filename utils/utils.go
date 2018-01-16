@@ -818,6 +818,12 @@ func (u *Utilities) HttpsHostAddr(hostAddr string, logger *log.CommonLogger) (st
 func (u *Utilities) GetSSLPort(hostAddr string, logger *log.CommonLogger) (uint16, error, bool) {
 	portInfo := make(map[string]interface{})
 	err, statusCode := u.QueryRestApiWithAuth(hostAddr, base.SSLPortsPath, false, "", "", nil, false, base.MethodGet, "", nil, 0, &portInfo, nil, false, logger)
+	if err == nil && statusCode == http.StatusUnauthorized {
+		// SSLPorts request normally do not require any user credentials
+		// the only place unauthorized error could be returned is when target is elasticsearch cluster
+		// treat this case differently so that a more specific error message can be returned to user
+		return 0, base.ErrorUnauthorized, false
+	}
 	if err != nil || statusCode != http.StatusOK {
 		return 0, fmt.Errorf("Failed on calling %v, err=%v, statusCode=%v", base.SSLPortsPath, err, statusCode), false
 	}

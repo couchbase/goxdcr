@@ -158,6 +158,7 @@ var ErrorResourceDoesNotExist = errors.New("Specified resource does not exist.")
 var ErrorResourceDoesNotMatch = errors.New("Specified resource does not match the item to which is being compared.")
 var ErrorNoPortNumber = errors.New("No port number")
 var ErrorInvalidPortNumber = errors.New("Port number is not a valid integer")
+var ErrorUnauthorized = errors.New("unauthorized")
 
 // constants used for remote cluster references
 const (

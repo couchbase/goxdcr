@@ -1047,7 +1047,11 @@ func (service *RemoteClusterService) validateRemoteCluster(ref *metadata.RemoteC
 				if isInternalError {
 					return err
 				} else {
-					return wrapAsInvalidRemoteClusterError(fmt.Sprintf("Could not connect to \"%v\" on port %v. This could be due to an incorrect host/port combination or a firewall in place between the servers.", hostName, port))
+					if err.Error() == base.ErrorUnauthorized.Error() {
+						return wrapAsInvalidRemoteClusterError(fmt.Sprintf("Could not get ssl port for %v. Remote cluster could be an Elasticsearch cluster that does not support ssl encryption. Please double check remote cluster configuration or turn off ssl encryption.", hostName))
+					} else {
+						return wrapAsInvalidRemoteClusterError(fmt.Sprintf("Could not get ssl port for %v. err=%v", hostName, err))
+					}
 				}
 			}
 			// store https host name in ref for later re-use
