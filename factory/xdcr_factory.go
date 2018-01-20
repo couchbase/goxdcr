@@ -125,15 +125,17 @@ func (xdcrf *XDCRFactory) NewPipeline(topic string, progress_recorder common.Pip
 		return nil, err
 	}
 
-	username, password, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, err := targetClusterRef.MyCredentials()
+	username, password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, err := targetClusterRef.MyCredentials()
 	if err != nil {
 		return nil, err
 	}
 
-	targetBucketInfo, err := xdcrf.utils.GetBucketInfo(connStr, spec.TargetBucketName, username, password, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, xdcrf.logger)
+	targetBucketInfo, err := xdcrf.utils.GetBucketInfo(connStr, spec.TargetBucketName, username, password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, xdcrf.logger)
 	if err != nil {
 		return nil, err
 	}
+
+	isTargetES := xdcrf.utils.CheckWhetherClusterIsESBasedOnBucketInfo(targetBucketInfo)
 
 	conflictResolutionType, err := xdcrf.utils.GetConflictResolutionTypeFromBucketInfo(spec.TargetBucketName, targetBucketInfo)
 	if err != nil {
@@ -149,7 +151,7 @@ func (xdcrf *XDCRFactory) NewPipeline(topic string, progress_recorder common.Pip
 		sourceCRMode = base.GetCRModeFromConflictResolutionTypeSetting(conflictResolutionType)
 	}
 
-	xdcrf.logger.Infof("%v sourceCRMode=%v clientCertAuthSetting=%v isCapiReplication=%v\n", topic, sourceCRMode, clientCertAuthSetting, isCapiReplication)
+	xdcrf.logger.Infof("%v sourceCRMode=%v httpAuthMech=%v clientCertAuthSetting=%v isCapiReplication=%v isTargetES=%v\n", topic, sourceCRMode, httpAuthMech, clientCertAuthSetting, isCapiReplication, isTargetES)
 
 	/**
 	 * Construct the Source nozzles
@@ -175,7 +177,7 @@ func (xdcrf *XDCRFactory) NewPipeline(topic string, progress_recorder common.Pip
 	 * 3. kvVBMap - map of remote KVNodes -> vbucket# responsible for per node
 	 */
 	outNozzles, vbNozzleMap, target_kv_vb_map, targetUserName, targetPassword, targetClusterVersion, err :=
-		xdcrf.constructOutgoingNozzles(spec, kv_vb_map, sourceCRMode, targetBucketInfo, targetClusterRef, isCapiReplication, logger_ctx)
+		xdcrf.constructOutgoingNozzles(spec, kv_vb_map, sourceCRMode, targetBucketInfo, targetClusterRef, isCapiReplication, isTargetES, logger_ctx)
 
 	if err != nil {
 		return nil, err
@@ -229,7 +231,7 @@ func (xdcrf *XDCRFactory) NewPipeline(topic string, progress_recorder common.Pip
 	} else {
 		//register services to the pipeline context, so when pipeline context starts as part of the pipeline starting, these services will start as well
 		pipeline.SetRuntimeContext(pipelineContext)
-		err = xdcrf.registerServices(pipeline, logger_ctx, kv_vb_map, targetUserName, targetPassword, spec.TargetBucketName, target_kv_vb_map, targetClusterRef, targetClusterVersion, isCapiReplication)
+		err = xdcrf.registerServices(pipeline, logger_ctx, kv_vb_map, targetUserName, targetPassword, spec.TargetBucketName, target_kv_vb_map, targetClusterRef, targetClusterVersion, isCapiReplication, isTargetES)
 		if err != nil {
 			return nil, err
 		}
@@ -417,7 +419,7 @@ func (xdcrf *XDCRFactory) filterVBList(targetkvVBList []uint16, kv_vb_map map[st
  */
 func (xdcrf *XDCRFactory) constructOutgoingNozzles(spec *metadata.ReplicationSpecification, kv_vb_map map[string][]uint16,
 	sourceCRMode base.ConflictResolutionMode, targetBucketInfo map[string]interface{},
-	targetClusterRef *metadata.RemoteClusterReference, isCapiReplication bool, logger_ctx *log.LoggerContext) (outNozzles map[string]common.Nozzle,
+	targetClusterRef *metadata.RemoteClusterReference, isCapiReplication bool, isTargetES bool, logger_ctx *log.LoggerContext) (outNozzles map[string]common.Nozzle,
 	vbNozzleMap map[uint16]string, kvVBMap map[string][]uint16, targetUserName string, targetPassword string, targetClusterVersion int, err error) {
 	outNozzles = make(map[string]common.Nozzle)
 	vbNozzleMap = make(map[uint16]string)
@@ -432,13 +434,13 @@ func (xdcrf *XDCRFactory) constructOutgoingNozzles(spec *metadata.ReplicationSpe
 		return
 	}
 
-	if isCapiReplication {
+	if isTargetES {
 		targetUserName = targetClusterRef.UserName
 		targetPassword = targetClusterRef.Password
 		// set target cluster version to 0 so that topology change detector will not listen to target version change
 		targetClusterVersion = 0
 	} else {
-		targetClusterVersion, err = xdcrf.utils.GetClusterCompatibilityFromBucketInfo(spec.TargetBucketName, targetBucketInfo, xdcrf.logger)
+		targetClusterVersion, err = xdcrf.utils.GetClusterCompatibilityFromBucketInfo(targetBucketInfo, xdcrf.logger)
 		if err != nil {
 			return
 		}
@@ -763,7 +765,7 @@ func (xdcrf *XDCRFactory) constructSettingsForDcpNozzle(pipeline common.Pipeline
 func (xdcrf *XDCRFactory) registerServices(pipeline common.Pipeline, logger_ctx *log.LoggerContext,
 	kv_vb_map map[string][]uint16, targetUserName, targetPassword string, targetBucketName string,
 	target_kv_vb_map map[string][]uint16, targetClusterRef *metadata.RemoteClusterReference,
-	targetClusterVersion int, isCapi bool) error {
+	targetClusterVersion int, isCapi bool, isTargetES bool) error {
 	through_seqno_tracker_svc := service_impl.NewThroughSeqnoTrackerSvc(logger_ctx)
 	through_seqno_tracker_svc.Attach(pipeline)
 
@@ -781,7 +783,7 @@ func (xdcrf *XDCRFactory) registerServices(pipeline common.Pipeline, logger_ctx 
 		xdcrf.remote_cluster_svc, xdcrf.repl_spec_svc, xdcrf.cluster_info_svc,
 		xdcrf.xdcr_topology_svc, through_seqno_tracker_svc, kv_vb_map, targetUserName,
 		targetPassword, targetBucketName, target_kv_vb_map, targetClusterRef,
-		targetClusterVersion, logger_ctx, xdcrf.utils)
+		targetClusterVersion, isTargetES, logger_ctx, xdcrf.utils)
 	if err != nil {
 		xdcrf.logger.Errorf("Failed to construct CheckpointManager for %v. err=%v ckpt_svc=%v, capi_svc=%v, remote_cluster_svc=%v, repl_spec_svc=%v\n", pipeline.Topic(), err, xdcrf.checkpoint_svc, xdcrf.capi_svc,
 			xdcrf.remote_cluster_svc, xdcrf.repl_spec_svc)
@@ -952,7 +954,7 @@ func (xdcrf *XDCRFactory) ConstructSSLPortMap(targetClusterRef *metadata.RemoteC
 	// otherwise, the ssl ports in the map are proxy ssl ports
 	if targetClusterRef.IsFullEncryption() && nozzleType == base.Xmem {
 
-		username, password, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, err := targetClusterRef.MyCredentials()
+		username, password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, err := targetClusterRef.MyCredentials()
 		if err != nil {
 			return nil, err
 		}
@@ -961,7 +963,7 @@ func (xdcrf *XDCRFactory) ConstructSSLPortMap(targetClusterRef *metadata.RemoteC
 			return nil, err
 		}
 
-		ssl_port_map, err = xdcrf.utils.GetMemcachedSSLPortMap(connStr, username, password, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, spec.TargetBucketName, xdcrf.logger)
+		ssl_port_map, err = xdcrf.utils.GetMemcachedSSLPortMap(connStr, username, password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, spec.TargetBucketName, xdcrf.logger)
 		if err != nil {
 			xdcrf.logger.Errorf("Failed to get memcached ssl port, err=%v\n", err)
 			return nil, err

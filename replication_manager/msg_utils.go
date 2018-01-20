@@ -268,7 +268,8 @@ func DecodeJustValidateFromRequest(request *http.Request) (bool, error) {
 func DecodeCreateRemoteClusterRequest(request *http.Request) (justValidate bool, remoteClusterRef *metadata.RemoteClusterReference, errorsMap map[string]error, err error) {
 	errorsMap = make(map[string]error)
 	var err1 error
-	var name, hostName, userName, password, encryptionType string
+	var demandEncryption bool
+	var name, hostName, userName, password, secureType, encryptionType string
 	var certificate, clientCertificate, clientKey []byte
 
 	if err1 = request.ParseForm(); err1 != nil {
@@ -276,8 +277,8 @@ func DecodeCreateRemoteClusterRequest(request *http.Request) (justValidate bool,
 		return
 	}
 
-	// default to false if not passed in
-	demandEncryption := false
+	// default to none if not passed in
+	secureType = base.SecureTypeNone
 
 	for key, valArr := range request.Form {
 		switch key {
@@ -294,10 +295,8 @@ func DecodeCreateRemoteClusterRequest(request *http.Request) (justValidate bool,
 			userName = getStringFromValArr(valArr)
 		case base.RemoteClusterPassword:
 			password = getStringFromValArr(valArr)
-		case base.RemoteClusterDemandEncryption:
-			demandEncryption = getDemandEncryptionFromValArr(valArr)
-		case base.RemoteClusterEncryptionType:
-			encryptionType = getStringFromValArr(valArr)
+		case base.RemoteClusterSecureType:
+			secureType = getStringFromValArr(valArr)
 		case base.RemoteClusterCertificate:
 			certificateStr := getStringFromValArr(valArr)
 			certificate = []byte(certificateStr)
@@ -312,6 +311,12 @@ func DecodeCreateRemoteClusterRequest(request *http.Request) (justValidate bool,
 		}
 	}
 
+	// convert secureType to the old, internally stored, demandEncryption and encryptionType
+	demandEncryption, encryptionType, err1 = convertSecureType(secureType)
+	if err1 != nil {
+		errorsMap[base.RemoteClusterSecureType] = err1
+	}
+
 	// check required parameters
 	if len(name) == 0 {
 		errorsMap[base.RemoteClusterName] = base.MissingParameterError("cluster name")
@@ -319,11 +324,11 @@ func DecodeCreateRemoteClusterRequest(request *http.Request) (justValidate bool,
 	if len(hostName) == 0 {
 		errorsMap[base.RemoteClusterHostName] = base.MissingParameterError("hostname (ip)")
 	}
-	if !demandEncryption && len(userName) == 0 {
-		errorsMap[base.RemoteClusterUserName] = errors.New("username must be given if demand encryption is not on")
+	if secureType == base.SecureTypeNone && len(userName) == 0 {
+		errorsMap[base.RemoteClusterUserName] = errors.New("username must be given if secure type is none")
 	}
-	if !demandEncryption && len(password) == 0 {
-		errorsMap[base.RemoteClusterUserName] = errors.New("password must be given if demand encryption is not on")
+	if secureType == base.SecureTypeNone && len(password) == 0 {
+		errorsMap[base.RemoteClusterUserName] = errors.New("password must be given if secure type is none")
 	}
 	if len(userName) == 0 && len(password) > 0 {
 		errorsMap[base.RemoteClusterUserName] = errors.New("username must be given if password is specified")
@@ -333,20 +338,20 @@ func DecodeCreateRemoteClusterRequest(request *http.Request) (justValidate bool,
 	}
 
 	// certificate is required if demandEncryption is set to true
-	if demandEncryption && len(certificate) == 0 {
-		errorsMap[base.RemoteClusterCertificate] = errors.New("certificate must be given if demand encryption is on")
+	if secureType == base.SecureTypeFull && len(certificate) == 0 {
+		errorsMap[base.RemoteClusterCertificate] = errors.New("certificate must be given if secure type is full")
 	}
 
-	if !demandEncryption && len(certificate) > 0 {
-		errorsMap[base.RemoteClusterCertificate] = errors.New("certificate cannot be given if demand encryption is not on")
+	if secureType == base.SecureTypeNone && len(certificate) > 0 {
+		errorsMap[base.RemoteClusterCertificate] = errors.New("certificate cannot be given if secure type is none")
 	}
 
-	if !demandEncryption && len(clientCertificate) > 0 {
-		errorsMap[base.RemoteClusterClientCertificate] = errors.New("client certificate cannot be given if demand encryption is not on")
+	if secureType == base.SecureTypeNone && len(clientCertificate) > 0 {
+		errorsMap[base.RemoteClusterClientCertificate] = errors.New("client certificate cannot be given if secure type is none")
 	}
 
-	if !demandEncryption && len(clientKey) > 0 {
-		errorsMap[base.RemoteClusterClientKey] = errors.New("client key cannot be given if demand encryption is not on")
+	if secureType == base.SecureTypeNone && len(clientKey) > 0 {
+		errorsMap[base.RemoteClusterClientKey] = errors.New("client key cannot be given if secure type is none")
 	}
 
 	if len(clientCertificate) > 0 && len(clientKey) == 0 {
@@ -361,19 +366,6 @@ func DecodeCreateRemoteClusterRequest(request *http.Request) (justValidate bool,
 		errorsMap[base.PlaceHolderFieldKey] = errors.New("either username and password or client certificate and client key must be specified")
 	}
 
-	if len(encryptionType) > 0 {
-		if encryptionType != metadata.EncryptionType_Full && encryptionType != metadata.EncryptionType_Half {
-			errorsMap[base.RemoteClusterEncryptionType] = errors.New("invalid value")
-		} else if !demandEncryption {
-			errorsMap[base.RemoteClusterEncryptionType] = errors.New("encryptionType cannot be given if demand encryption is not on")
-		}
-	}
-
-	if demandEncryption && len(encryptionType) == 0 {
-		// default encryptionType to "full" if not specified
-		encryptionType = metadata.EncryptionType_Full
-	}
-
 	hostAddr, err1 := base.ValidateHostAddr(hostName)
 	if err1 != nil {
 		errorsMap[base.RemoteClusterHostName] = err1
@@ -383,6 +375,23 @@ func DecodeCreateRemoteClusterRequest(request *http.Request) (justValidate bool,
 		remoteClusterRef, err = metadata.NewRemoteClusterReference("", name, hostAddr, userName, password, demandEncryption, encryptionType, certificate, clientCertificate, clientKey)
 	}
 
+	return
+}
+
+// convert secureType parameter to the internally stored demandEncryption and encrytionType parameters
+func convertSecureType(secureType string) (demandEncryption bool, encryptionType string, err error) {
+	switch secureType {
+	case base.SecureTypeNone:
+		demandEncryption = false
+	case base.SecureTypeHalf:
+		demandEncryption = true
+		encryptionType = metadata.EncryptionType_Half
+	case base.SecureTypeFull:
+		demandEncryption = true
+		encryptionType = metadata.EncryptionType_Full
+	default:
+		err = errors.New("Invalid value")
+	}
 	return
 }
 

@@ -48,20 +48,20 @@ func (_m *UtilsIface) BucketNotFoundError(bucketName string) error {
 	return r0
 }
 
-// BucketPassword provides a mock function with given fields: hostAddr, bucketName, username, password, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, logger
-func (_m *UtilsIface) BucketPassword(hostAddr string, bucketName string, username string, password string, certificate []byte, sanInCertificate bool, clientCertificate []byte, clientKey []byte, clientCertAuthSetting base.ClientCertAuth, logger *log.CommonLogger) (string, error) {
-	ret := _m.Called(hostAddr, bucketName, username, password, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, logger)
+// BucketPassword provides a mock function with given fields: hostAddr, bucketName, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, logger
+func (_m *UtilsIface) BucketPassword(hostAddr string, bucketName string, username string, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCertificate []byte, clientKey []byte, clientCertAuthSetting base.ClientCertAuth, logger *log.CommonLogger) (string, error) {
+	ret := _m.Called(hostAddr, bucketName, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, logger)
 
 	var r0 string
-	if rf, ok := ret.Get(0).(func(string, string, string, string, []byte, bool, []byte, []byte, base.ClientCertAuth, *log.CommonLogger) string); ok {
-		r0 = rf(hostAddr, bucketName, username, password, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, logger)
+	if rf, ok := ret.Get(0).(func(string, string, string, string, base.HttpAuthMech, []byte, bool, []byte, []byte, base.ClientCertAuth, *log.CommonLogger) string); ok {
+		r0 = rf(hostAddr, bucketName, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, logger)
 	} else {
 		r0 = ret.Get(0).(string)
 	}
 
 	var r1 error
-	if rf, ok := ret.Get(1).(func(string, string, string, string, []byte, bool, []byte, []byte, base.ClientCertAuth, *log.CommonLogger) error); ok {
-		r1 = rf(hostAddr, bucketName, username, password, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, logger)
+	if rf, ok := ret.Get(1).(func(string, string, string, string, base.HttpAuthMech, []byte, bool, []byte, []byte, base.ClientCertAuth, *log.CommonLogger) error); ok {
+		r1 = rf(hostAddr, bucketName, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, logger)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -69,20 +69,20 @@ func (_m *UtilsIface) BucketPassword(hostAddr string, bucketName string, usernam
 	return r0, r1
 }
 
-// BucketUUID provides a mock function with given fields: hostAddr, bucketName, username, password, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, logger
-func (_m *UtilsIface) BucketUUID(hostAddr string, bucketName string, username string, password string, certificate []byte, sanInCertificate bool, clientCertificate []byte, clientKey []byte, clientCertAuthSetting base.ClientCertAuth, logger *log.CommonLogger) (string, error) {
-	ret := _m.Called(hostAddr, bucketName, username, password, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, logger)
+// BucketUUID provides a mock function with given fields: hostAddr, bucketName, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, logger
+func (_m *UtilsIface) BucketUUID(hostAddr string, bucketName string, username string, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCertificate []byte, clientKey []byte, clientCertAuthSetting base.ClientCertAuth, logger *log.CommonLogger) (string, error) {
+	ret := _m.Called(hostAddr, bucketName, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, logger)
 
 	var r0 string
-	if rf, ok := ret.Get(0).(func(string, string, string, string, []byte, bool, []byte, []byte, base.ClientCertAuth, *log.CommonLogger) string); ok {
-		r0 = rf(hostAddr, bucketName, username, password, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, logger)
+	if rf, ok := ret.Get(0).(func(string, string, string, string, base.HttpAuthMech, []byte, bool, []byte, []byte, base.ClientCertAuth, *log.CommonLogger) string); ok {
+		r0 = rf(hostAddr, bucketName, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, logger)
 	} else {
 		r0 = ret.Get(0).(string)
 	}
 
 	var r1 error
-	if rf, ok := ret.Get(1).(func(string, string, string, string, []byte, bool, []byte, []byte, base.ClientCertAuth, *log.CommonLogger) error); ok {
-		r1 = rf(hostAddr, bucketName, username, password, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, logger)
+	if rf, ok := ret.Get(1).(func(string, string, string, string, base.HttpAuthMech, []byte, bool, []byte, []byte, base.ClientCertAuth, *log.CommonLogger) error); ok {
+		r1 = rf(hostAddr, bucketName, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, logger)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -90,13 +90,13 @@ func (_m *UtilsIface) BucketUUID(hostAddr string, bucketName string, username st
 	return r0, r1
 }
 
-// BucketValidationInfo provides a mock function with given fields: hostAddr, bucketName, username, password, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, logger
-func (_m *UtilsIface) BucketValidationInfo(hostAddr string, bucketName string, username string, password string, certificate []byte, sanInCertificate bool, clientCertificate []byte, clientKey []byte, clientCertAuthSetting base.ClientCertAuth, logger *log.CommonLogger) (map[string]interface{}, string, string, string, string, map[string][]uint16, error) {
-	ret := _m.Called(hostAddr, bucketName, username, password, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, logger)
+// BucketValidationInfo provides a mock function with given fields: hostAddr, bucketName, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, logger
+func (_m *UtilsIface) BucketValidationInfo(hostAddr string, bucketName string, username string, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCertificate []byte, clientKey []byte, clientCertAuthSetting base.ClientCertAuth, logger *log.CommonLogger) (map[string]interface{}, string, string, string, string, map[string][]uint16, error) {
+	ret := _m.Called(hostAddr, bucketName, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, logger)
 
 	var r0 map[string]interface{}
-	if rf, ok := ret.Get(0).(func(string, string, string, string, []byte, bool, []byte, []byte, base.ClientCertAuth, *log.CommonLogger) map[string]interface{}); ok {
-		r0 = rf(hostAddr, bucketName, username, password, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, logger)
+	if rf, ok := ret.Get(0).(func(string, string, string, string, base.HttpAuthMech, []byte, bool, []byte, []byte, base.ClientCertAuth, *log.CommonLogger) map[string]interface{}); ok {
+		r0 = rf(hostAddr, bucketName, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, logger)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(map[string]interface{})
@@ -104,36 +104,36 @@ func (_m *UtilsIface) BucketValidationInfo(hostAddr string, bucketName string, u
 	}
 
 	var r1 string
-	if rf, ok := ret.Get(1).(func(string, string, string, string, []byte, bool, []byte, []byte, base.ClientCertAuth, *log.CommonLogger) string); ok {
-		r1 = rf(hostAddr, bucketName, username, password, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, logger)
+	if rf, ok := ret.Get(1).(func(string, string, string, string, base.HttpAuthMech, []byte, bool, []byte, []byte, base.ClientCertAuth, *log.CommonLogger) string); ok {
+		r1 = rf(hostAddr, bucketName, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, logger)
 	} else {
 		r1 = ret.Get(1).(string)
 	}
 
 	var r2 string
-	if rf, ok := ret.Get(2).(func(string, string, string, string, []byte, bool, []byte, []byte, base.ClientCertAuth, *log.CommonLogger) string); ok {
-		r2 = rf(hostAddr, bucketName, username, password, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, logger)
+	if rf, ok := ret.Get(2).(func(string, string, string, string, base.HttpAuthMech, []byte, bool, []byte, []byte, base.ClientCertAuth, *log.CommonLogger) string); ok {
+		r2 = rf(hostAddr, bucketName, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, logger)
 	} else {
 		r2 = ret.Get(2).(string)
 	}
 
 	var r3 string
-	if rf, ok := ret.Get(3).(func(string, string, string, string, []byte, bool, []byte, []byte, base.ClientCertAuth, *log.CommonLogger) string); ok {
-		r3 = rf(hostAddr, bucketName, username, password, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, logger)
+	if rf, ok := ret.Get(3).(func(string, string, string, string, base.HttpAuthMech, []byte, bool, []byte, []byte, base.ClientCertAuth, *log.CommonLogger) string); ok {
+		r3 = rf(hostAddr, bucketName, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, logger)
 	} else {
 		r3 = ret.Get(3).(string)
 	}
 
 	var r4 string
-	if rf, ok := ret.Get(4).(func(string, string, string, string, []byte, bool, []byte, []byte, base.ClientCertAuth, *log.CommonLogger) string); ok {
-		r4 = rf(hostAddr, bucketName, username, password, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, logger)
+	if rf, ok := ret.Get(4).(func(string, string, string, string, base.HttpAuthMech, []byte, bool, []byte, []byte, base.ClientCertAuth, *log.CommonLogger) string); ok {
+		r4 = rf(hostAddr, bucketName, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, logger)
 	} else {
 		r4 = ret.Get(4).(string)
 	}
 
 	var r5 map[string][]uint16
-	if rf, ok := ret.Get(5).(func(string, string, string, string, []byte, bool, []byte, []byte, base.ClientCertAuth, *log.CommonLogger) map[string][]uint16); ok {
-		r5 = rf(hostAddr, bucketName, username, password, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, logger)
+	if rf, ok := ret.Get(5).(func(string, string, string, string, base.HttpAuthMech, []byte, bool, []byte, []byte, base.ClientCertAuth, *log.CommonLogger) map[string][]uint16); ok {
+		r5 = rf(hostAddr, bucketName, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, logger)
 	} else {
 		if ret.Get(5) != nil {
 			r5 = ret.Get(5).(map[string][]uint16)
@@ -141,8 +141,8 @@ func (_m *UtilsIface) BucketValidationInfo(hostAddr string, bucketName string, u
 	}
 
 	var r6 error
-	if rf, ok := ret.Get(6).(func(string, string, string, string, []byte, bool, []byte, []byte, base.ClientCertAuth, *log.CommonLogger) error); ok {
-		r6 = rf(hostAddr, bucketName, username, password, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, logger)
+	if rf, ok := ret.Get(6).(func(string, string, string, string, base.HttpAuthMech, []byte, bool, []byte, []byte, base.ClientCertAuth, *log.CommonLogger) error); ok {
+		r6 = rf(hostAddr, bucketName, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, logger)
 	} else {
 		r6 = ret.Error(6)
 	}
@@ -180,13 +180,13 @@ func (_m *UtilsIface) ComposeHELORequest(userAgent string, features utils.HELOFe
 	return r0
 }
 
-// ConstructHttpRequest provides a mock function with given fields: baseURL, path, preservePathEncoding, username, password, certificate, userAuthMode, httpCommand, contentType, body, logger
-func (_m *UtilsIface) ConstructHttpRequest(baseURL string, path string, preservePathEncoding bool, username string, password string, certificate []byte, userAuthMode base.UserAuthMode, httpCommand string, contentType string, body []byte, logger *log.CommonLogger) (*http.Request, string, error) {
-	ret := _m.Called(baseURL, path, preservePathEncoding, username, password, certificate, userAuthMode, httpCommand, contentType, body, logger)
+// ConstructHttpRequest provides a mock function with given fields: baseURL, path, preservePathEncoding, username, password, authMech, userAuthMode, httpCommand, contentType, body, logger
+func (_m *UtilsIface) ConstructHttpRequest(baseURL string, path string, preservePathEncoding bool, username string, password string, authMech base.HttpAuthMech, userAuthMode base.UserAuthMode, httpCommand string, contentType string, body []byte, logger *log.CommonLogger) (*http.Request, string, error) {
+	ret := _m.Called(baseURL, path, preservePathEncoding, username, password, authMech, userAuthMode, httpCommand, contentType, body, logger)
 
 	var r0 *http.Request
-	if rf, ok := ret.Get(0).(func(string, string, bool, string, string, []byte, base.UserAuthMode, string, string, []byte, *log.CommonLogger) *http.Request); ok {
-		r0 = rf(baseURL, path, preservePathEncoding, username, password, certificate, userAuthMode, httpCommand, contentType, body, logger)
+	if rf, ok := ret.Get(0).(func(string, string, bool, string, string, base.HttpAuthMech, base.UserAuthMode, string, string, []byte, *log.CommonLogger) *http.Request); ok {
+		r0 = rf(baseURL, path, preservePathEncoding, username, password, authMech, userAuthMode, httpCommand, contentType, body, logger)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*http.Request)
@@ -194,15 +194,15 @@ func (_m *UtilsIface) ConstructHttpRequest(baseURL string, path string, preserve
 	}
 
 	var r1 string
-	if rf, ok := ret.Get(1).(func(string, string, bool, string, string, []byte, base.UserAuthMode, string, string, []byte, *log.CommonLogger) string); ok {
-		r1 = rf(baseURL, path, preservePathEncoding, username, password, certificate, userAuthMode, httpCommand, contentType, body, logger)
+	if rf, ok := ret.Get(1).(func(string, string, bool, string, string, base.HttpAuthMech, base.UserAuthMode, string, string, []byte, *log.CommonLogger) string); ok {
+		r1 = rf(baseURL, path, preservePathEncoding, username, password, authMech, userAuthMode, httpCommand, contentType, body, logger)
 	} else {
 		r1 = ret.Get(1).(string)
 	}
 
 	var r2 error
-	if rf, ok := ret.Get(2).(func(string, string, bool, string, string, []byte, base.UserAuthMode, string, string, []byte, *log.CommonLogger) error); ok {
-		r2 = rf(baseURL, path, preservePathEncoding, username, password, certificate, userAuthMode, httpCommand, contentType, body, logger)
+	if rf, ok := ret.Get(2).(func(string, string, bool, string, string, base.HttpAuthMech, base.UserAuthMode, string, string, []byte, *log.CommonLogger) error); ok {
+		r2 = rf(baseURL, path, preservePathEncoding, username, password, authMech, userAuthMode, httpCommand, contentType, body, logger)
 	} else {
 		r2 = ret.Error(2)
 	}
@@ -323,13 +323,13 @@ func (_m *UtilsIface) ExponentialBackoffExecutorWithFinishSignal(name string, in
 	return r0, r1
 }
 
-// GetBucketInfo provides a mock function with given fields: hostAddr, bucketName, username, password, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, logger
-func (_m *UtilsIface) GetBucketInfo(hostAddr string, bucketName string, username string, password string, certificate []byte, sanInCertificate bool, clientCertificate []byte, clientKey []byte, clientCertAuthSetting base.ClientCertAuth, logger *log.CommonLogger) (map[string]interface{}, error) {
-	ret := _m.Called(hostAddr, bucketName, username, password, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, logger)
+// GetBucketInfo provides a mock function with given fields: hostAddr, bucketName, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, logger
+func (_m *UtilsIface) GetBucketInfo(hostAddr string, bucketName string, username string, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCertificate []byte, clientKey []byte, clientCertAuthSetting base.ClientCertAuth, logger *log.CommonLogger) (map[string]interface{}, error) {
+	ret := _m.Called(hostAddr, bucketName, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, logger)
 
 	var r0 map[string]interface{}
-	if rf, ok := ret.Get(0).(func(string, string, string, string, []byte, bool, []byte, []byte, base.ClientCertAuth, *log.CommonLogger) map[string]interface{}); ok {
-		r0 = rf(hostAddr, bucketName, username, password, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, logger)
+	if rf, ok := ret.Get(0).(func(string, string, string, string, base.HttpAuthMech, []byte, bool, []byte, []byte, base.ClientCertAuth, *log.CommonLogger) map[string]interface{}); ok {
+		r0 = rf(hostAddr, bucketName, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, logger)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(map[string]interface{})
@@ -337,8 +337,8 @@ func (_m *UtilsIface) GetBucketInfo(hostAddr string, bucketName string, username
 	}
 
 	var r1 error
-	if rf, ok := ret.Get(1).(func(string, string, string, string, []byte, bool, []byte, []byte, base.ClientCertAuth, *log.CommonLogger) error); ok {
-		r1 = rf(hostAddr, bucketName, username, password, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, logger)
+	if rf, ok := ret.Get(1).(func(string, string, string, string, base.HttpAuthMech, []byte, bool, []byte, []byte, base.ClientCertAuth, *log.CommonLogger) error); ok {
+		r1 = rf(hostAddr, bucketName, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, logger)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -409,13 +409,13 @@ func (_m *UtilsIface) GetBucketUuidFromBucketInfo(bucketName string, bucketInfo 
 	return r0, r1
 }
 
-// GetBuckets provides a mock function with given fields: hostAddr, username, password, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, logger
-func (_m *UtilsIface) GetBuckets(hostAddr string, username string, password string, certificate []byte, sanInCertificate bool, clientCertificate []byte, clientKey []byte, clientCertAuthSetting base.ClientCertAuth, logger *log.CommonLogger) (map[string]string, error) {
-	ret := _m.Called(hostAddr, username, password, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, logger)
+// GetBuckets provides a mock function with given fields: hostAddr, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, logger
+func (_m *UtilsIface) GetBuckets(hostAddr string, username string, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCertificate []byte, clientKey []byte, clientCertAuthSetting base.ClientCertAuth, logger *log.CommonLogger) (map[string]string, error) {
+	ret := _m.Called(hostAddr, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, logger)
 
 	var r0 map[string]string
-	if rf, ok := ret.Get(0).(func(string, string, string, []byte, bool, []byte, []byte, base.ClientCertAuth, *log.CommonLogger) map[string]string); ok {
-		r0 = rf(hostAddr, username, password, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, logger)
+	if rf, ok := ret.Get(0).(func(string, string, string, base.HttpAuthMech, []byte, bool, []byte, []byte, base.ClientCertAuth, *log.CommonLogger) map[string]string); ok {
+		r0 = rf(hostAddr, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, logger)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(map[string]string)
@@ -423,8 +423,8 @@ func (_m *UtilsIface) GetBuckets(hostAddr string, username string, password stri
 	}
 
 	var r1 error
-	if rf, ok := ret.Get(1).(func(string, string, string, []byte, bool, []byte, []byte, base.ClientCertAuth, *log.CommonLogger) error); ok {
-		r1 = rf(hostAddr, username, password, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, logger)
+	if rf, ok := ret.Get(1).(func(string, string, string, base.HttpAuthMech, []byte, bool, []byte, []byte, base.ClientCertAuth, *log.CommonLogger) error); ok {
+		r1 = rf(hostAddr, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, logger)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -432,20 +432,20 @@ func (_m *UtilsIface) GetBuckets(hostAddr string, username string, password stri
 	return r0, r1
 }
 
-// GetClusterCompatibilityFromBucketInfo provides a mock function with given fields: bucketName, bucketInfo, logger
-func (_m *UtilsIface) GetClusterCompatibilityFromBucketInfo(bucketName string, bucketInfo map[string]interface{}, logger *log.CommonLogger) (int, error) {
-	ret := _m.Called(bucketName, bucketInfo, logger)
+// GetClusterCompatibilityFromBucketInfo provides a mock function with given fields: bucketInfo, logger
+func (_m *UtilsIface) GetClusterCompatibilityFromBucketInfo(bucketInfo map[string]interface{}, logger *log.CommonLogger) (int, error) {
+	ret := _m.Called(bucketInfo, logger)
 
 	var r0 int
-	if rf, ok := ret.Get(0).(func(string, map[string]interface{}, *log.CommonLogger) int); ok {
-		r0 = rf(bucketName, bucketInfo, logger)
+	if rf, ok := ret.Get(0).(func(map[string]interface{}, *log.CommonLogger) int); ok {
+		r0 = rf(bucketInfo, logger)
 	} else {
 		r0 = ret.Get(0).(int)
 	}
 
 	var r1 error
-	if rf, ok := ret.Get(1).(func(string, map[string]interface{}, *log.CommonLogger) error); ok {
-		r1 = rf(bucketName, bucketInfo, logger)
+	if rf, ok := ret.Get(1).(func(map[string]interface{}, *log.CommonLogger) error); ok {
+		r1 = rf(bucketInfo, logger)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -474,13 +474,13 @@ func (_m *UtilsIface) GetClusterCompatibilityFromNodeList(nodeList []interface{}
 	return r0, r1
 }
 
-// GetClusterInfo provides a mock function with given fields: hostAddr, path, username, password, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, logger
-func (_m *UtilsIface) GetClusterInfo(hostAddr string, path string, username string, password string, certificate []byte, sanInCertificate bool, clientCertificate []byte, clientKey []byte, clientCertAuthSetting base.ClientCertAuth, logger *log.CommonLogger) (map[string]interface{}, error) {
-	ret := _m.Called(hostAddr, path, username, password, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, logger)
+// GetClusterInfo provides a mock function with given fields: hostAddr, path, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, logger
+func (_m *UtilsIface) GetClusterInfo(hostAddr string, path string, username string, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCertificate []byte, clientKey []byte, clientCertAuthSetting base.ClientCertAuth, logger *log.CommonLogger) (map[string]interface{}, error) {
+	ret := _m.Called(hostAddr, path, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, logger)
 
 	var r0 map[string]interface{}
-	if rf, ok := ret.Get(0).(func(string, string, string, string, []byte, bool, []byte, []byte, base.ClientCertAuth, *log.CommonLogger) map[string]interface{}); ok {
-		r0 = rf(hostAddr, path, username, password, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, logger)
+	if rf, ok := ret.Get(0).(func(string, string, string, string, base.HttpAuthMech, []byte, bool, []byte, []byte, base.ClientCertAuth, *log.CommonLogger) map[string]interface{}); ok {
+		r0 = rf(hostAddr, path, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, logger)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(map[string]interface{})
@@ -488,8 +488,8 @@ func (_m *UtilsIface) GetClusterInfo(hostAddr string, path string, username stri
 	}
 
 	var r1 error
-	if rf, ok := ret.Get(1).(func(string, string, string, string, []byte, bool, []byte, []byte, base.ClientCertAuth, *log.CommonLogger) error); ok {
-		r1 = rf(hostAddr, path, username, password, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, logger)
+	if rf, ok := ret.Get(1).(func(string, string, string, string, base.HttpAuthMech, []byte, bool, []byte, []byte, base.ClientCertAuth, *log.CommonLogger) error); ok {
+		r1 = rf(hostAddr, path, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, logger)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -497,13 +497,13 @@ func (_m *UtilsIface) GetClusterInfo(hostAddr string, path string, username stri
 	return r0, r1
 }
 
-// GetClusterInfoWStatusCode provides a mock function with given fields: hostAddr, path, username, password, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, logger
-func (_m *UtilsIface) GetClusterInfoWStatusCode(hostAddr string, path string, username string, password string, certificate []byte, sanInCertificate bool, clientCertificate []byte, clientKey []byte, clientCertAuthSetting base.ClientCertAuth, logger *log.CommonLogger) (map[string]interface{}, error, int) {
-	ret := _m.Called(hostAddr, path, username, password, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, logger)
+// GetClusterInfoWStatusCode provides a mock function with given fields: hostAddr, path, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, logger
+func (_m *UtilsIface) GetClusterInfoWStatusCode(hostAddr string, path string, username string, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCertificate []byte, clientKey []byte, clientCertAuthSetting base.ClientCertAuth, logger *log.CommonLogger) (map[string]interface{}, error, int) {
+	ret := _m.Called(hostAddr, path, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, logger)
 
 	var r0 map[string]interface{}
-	if rf, ok := ret.Get(0).(func(string, string, string, string, []byte, bool, []byte, []byte, base.ClientCertAuth, *log.CommonLogger) map[string]interface{}); ok {
-		r0 = rf(hostAddr, path, username, password, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, logger)
+	if rf, ok := ret.Get(0).(func(string, string, string, string, base.HttpAuthMech, []byte, bool, []byte, []byte, base.ClientCertAuth, *log.CommonLogger) map[string]interface{}); ok {
+		r0 = rf(hostAddr, path, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, logger)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(map[string]interface{})
@@ -511,15 +511,15 @@ func (_m *UtilsIface) GetClusterInfoWStatusCode(hostAddr string, path string, us
 	}
 
 	var r1 error
-	if rf, ok := ret.Get(1).(func(string, string, string, string, []byte, bool, []byte, []byte, base.ClientCertAuth, *log.CommonLogger) error); ok {
-		r1 = rf(hostAddr, path, username, password, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, logger)
+	if rf, ok := ret.Get(1).(func(string, string, string, string, base.HttpAuthMech, []byte, bool, []byte, []byte, base.ClientCertAuth, *log.CommonLogger) error); ok {
+		r1 = rf(hostAddr, path, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, logger)
 	} else {
 		r1 = ret.Error(1)
 	}
 
 	var r2 int
-	if rf, ok := ret.Get(2).(func(string, string, string, string, []byte, bool, []byte, []byte, base.ClientCertAuth, *log.CommonLogger) int); ok {
-		r2 = rf(hostAddr, path, username, password, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, logger)
+	if rf, ok := ret.Get(2).(func(string, string, string, string, base.HttpAuthMech, []byte, bool, []byte, []byte, base.ClientCertAuth, *log.CommonLogger) int); ok {
+		r2 = rf(hostAddr, path, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, logger)
 	} else {
 		r2 = ret.Get(2).(int)
 	}
@@ -527,20 +527,20 @@ func (_m *UtilsIface) GetClusterInfoWStatusCode(hostAddr string, path string, us
 	return r0, r1, r2
 }
 
-// GetClusterUUID provides a mock function with given fields: hostAddr, username, password, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, logger
-func (_m *UtilsIface) GetClusterUUID(hostAddr string, username string, password string, certificate []byte, sanInCertificate bool, clientCertificate []byte, clientKey []byte, clientCertAuthSetting base.ClientCertAuth, logger *log.CommonLogger) (string, error) {
-	ret := _m.Called(hostAddr, username, password, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, logger)
+// GetClusterUUID provides a mock function with given fields: hostAddr, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, logger
+func (_m *UtilsIface) GetClusterUUID(hostAddr string, username string, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCertificate []byte, clientKey []byte, clientCertAuthSetting base.ClientCertAuth, logger *log.CommonLogger) (string, error) {
+	ret := _m.Called(hostAddr, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, logger)
 
 	var r0 string
-	if rf, ok := ret.Get(0).(func(string, string, string, []byte, bool, []byte, []byte, base.ClientCertAuth, *log.CommonLogger) string); ok {
-		r0 = rf(hostAddr, username, password, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, logger)
+	if rf, ok := ret.Get(0).(func(string, string, string, base.HttpAuthMech, []byte, bool, []byte, []byte, base.ClientCertAuth, *log.CommonLogger) string); ok {
+		r0 = rf(hostAddr, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, logger)
 	} else {
 		r0 = ret.Get(0).(string)
 	}
 
 	var r1 error
-	if rf, ok := ret.Get(1).(func(string, string, string, []byte, bool, []byte, []byte, base.ClientCertAuth, *log.CommonLogger) error); ok {
-		r1 = rf(hostAddr, username, password, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, logger)
+	if rf, ok := ret.Get(1).(func(string, string, string, base.HttpAuthMech, []byte, bool, []byte, []byte, base.ClientCertAuth, *log.CommonLogger) error); ok {
+		r1 = rf(hostAddr, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, logger)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -548,20 +548,20 @@ func (_m *UtilsIface) GetClusterUUID(hostAddr string, username string, password 
 	return r0, r1
 }
 
-// GetClusterUUIDAndNodeListWithMinInfo provides a mock function with given fields: hostAddr, username, password, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, logger
-func (_m *UtilsIface) GetClusterUUIDAndNodeListWithMinInfo(hostAddr string, username string, password string, certificate []byte, sanInCertificate bool, clientCertificate []byte, clientKey []byte, clientCertAuthSetting base.ClientCertAuth, logger *log.CommonLogger) (string, []interface{}, error) {
-	ret := _m.Called(hostAddr, username, password, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, logger)
+// GetClusterUUIDAndNodeListWithMinInfo provides a mock function with given fields: hostAddr, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, logger
+func (_m *UtilsIface) GetClusterUUIDAndNodeListWithMinInfo(hostAddr string, username string, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCertificate []byte, clientKey []byte, clientCertAuthSetting base.ClientCertAuth, logger *log.CommonLogger) (string, []interface{}, error) {
+	ret := _m.Called(hostAddr, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, logger)
 
 	var r0 string
-	if rf, ok := ret.Get(0).(func(string, string, string, []byte, bool, []byte, []byte, base.ClientCertAuth, *log.CommonLogger) string); ok {
-		r0 = rf(hostAddr, username, password, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, logger)
+	if rf, ok := ret.Get(0).(func(string, string, string, base.HttpAuthMech, []byte, bool, []byte, []byte, base.ClientCertAuth, *log.CommonLogger) string); ok {
+		r0 = rf(hostAddr, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, logger)
 	} else {
 		r0 = ret.Get(0).(string)
 	}
 
 	var r1 []interface{}
-	if rf, ok := ret.Get(1).(func(string, string, string, []byte, bool, []byte, []byte, base.ClientCertAuth, *log.CommonLogger) []interface{}); ok {
-		r1 = rf(hostAddr, username, password, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, logger)
+	if rf, ok := ret.Get(1).(func(string, string, string, base.HttpAuthMech, []byte, bool, []byte, []byte, base.ClientCertAuth, *log.CommonLogger) []interface{}); ok {
+		r1 = rf(hostAddr, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, logger)
 	} else {
 		if ret.Get(1) != nil {
 			r1 = ret.Get(1).([]interface{})
@@ -569,8 +569,8 @@ func (_m *UtilsIface) GetClusterUUIDAndNodeListWithMinInfo(hostAddr string, user
 	}
 
 	var r2 error
-	if rf, ok := ret.Get(2).(func(string, string, string, []byte, bool, []byte, []byte, base.ClientCertAuth, *log.CommonLogger) error); ok {
-		r2 = rf(hostAddr, username, password, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, logger)
+	if rf, ok := ret.Get(2).(func(string, string, string, base.HttpAuthMech, []byte, bool, []byte, []byte, base.ClientCertAuth, *log.CommonLogger) error); ok {
+		r2 = rf(hostAddr, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, logger)
 	} else {
 		r2 = ret.Error(2)
 	}
@@ -671,43 +671,6 @@ func (_m *UtilsIface) GetConflictResolutionTypeFromBucketInfo(bucketName string,
 	return r0, r1
 }
 
-// GetDefaultPoolInfoWithSecuritySettings provides a mock function with given fields: hostAddr, username, password, certificate, clientCertificate, clientKey, logger
-func (_m *UtilsIface) GetDefaultPoolInfoWithSecuritySettings(hostAddr string, username string, password string, certificate []byte, clientCertificate []byte, clientKey []byte, logger *log.CommonLogger) (bool, base.ClientCertAuth, map[string]interface{}, error) {
-	ret := _m.Called(hostAddr, username, password, certificate, clientCertificate, clientKey, logger)
-
-	var r0 bool
-	if rf, ok := ret.Get(0).(func(string, string, string, []byte, []byte, []byte, *log.CommonLogger) bool); ok {
-		r0 = rf(hostAddr, username, password, certificate, clientCertificate, clientKey, logger)
-	} else {
-		r0 = ret.Get(0).(bool)
-	}
-
-	var r1 base.ClientCertAuth
-	if rf, ok := ret.Get(1).(func(string, string, string, []byte, []byte, []byte, *log.CommonLogger) base.ClientCertAuth); ok {
-		r1 = rf(hostAddr, username, password, certificate, clientCertificate, clientKey, logger)
-	} else {
-		r1 = ret.Get(1).(base.ClientCertAuth)
-	}
-
-	var r2 map[string]interface{}
-	if rf, ok := ret.Get(2).(func(string, string, string, []byte, []byte, []byte, *log.CommonLogger) map[string]interface{}); ok {
-		r2 = rf(hostAddr, username, password, certificate, clientCertificate, clientKey, logger)
-	} else {
-		if ret.Get(2) != nil {
-			r2 = ret.Get(2).(map[string]interface{})
-		}
-	}
-
-	var r3 error
-	if rf, ok := ret.Get(3).(func(string, string, string, []byte, []byte, []byte, *log.CommonLogger) error); ok {
-		r3 = rf(hostAddr, username, password, certificate, clientCertificate, clientKey, logger)
-	} else {
-		r3 = ret.Error(3)
-	}
-
-	return r0, r1, r2, r3
-}
-
 // GetEvictionPolicyFromBucketInfo provides a mock function with given fields: bucketName, bucketInfo
 func (_m *UtilsIface) GetEvictionPolicyFromBucketInfo(bucketName string, bucketInfo map[string]interface{}) (string, error) {
 	ret := _m.Called(bucketName, bucketInfo)
@@ -771,6 +734,27 @@ func (_m *UtilsIface) GetExternalAddressAndKvPortsFromNodeInfo(nodeInfo map[stri
 	return r0, r1, r2, r3, r4
 }
 
+// GetExternalHostAddrFromNodeInfo provides a mock function with given fields: adminHostAddr, nodeInfo, isHttps, logger
+func (_m *UtilsIface) GetExternalHostAddrFromNodeInfo(adminHostAddr string, nodeInfo map[string]interface{}, isHttps bool, logger *log.CommonLogger) (string, error) {
+	ret := _m.Called(adminHostAddr, nodeInfo, isHttps, logger)
+
+	var r0 string
+	if rf, ok := ret.Get(0).(func(string, map[string]interface{}, bool, *log.CommonLogger) string); ok {
+		r0 = rf(adminHostAddr, nodeInfo, isHttps, logger)
+	} else {
+		r0 = ret.Get(0).(string)
+	}
+
+	var r1 error
+	if rf, ok := ret.Get(1).(func(string, map[string]interface{}, bool, *log.CommonLogger) error); ok {
+		r1 = rf(adminHostAddr, nodeInfo, isHttps, logger)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
 // GetHostAddrFromNodeInfo provides a mock function with given fields: adminHostAddr, nodeInfo, logger
 func (_m *UtilsIface) GetHostAddrFromNodeInfo(adminHostAddr string, nodeInfo map[string]interface{}, logger *log.CommonLogger) (string, error) {
 	ret := _m.Called(adminHostAddr, nodeInfo, logger)
@@ -813,13 +797,13 @@ func (_m *UtilsIface) GetHostNameFromNodeInfo(adminHostAddr string, nodeInfo map
 	return r0, r1
 }
 
-// GetHttpClient provides a mock function with given fields: username, certificate, san_in_certificate, clientCertificate, clientKey, clientCertAuthSetting, ssl_con_str, logger
-func (_m *UtilsIface) GetHttpClient(username string, certificate []byte, san_in_certificate bool, clientCertificate []byte, clientKey []byte, clientCertAuthSetting base.ClientCertAuth, ssl_con_str string, logger *log.CommonLogger) (*http.Client, error) {
-	ret := _m.Called(username, certificate, san_in_certificate, clientCertificate, clientKey, clientCertAuthSetting, ssl_con_str, logger)
+// GetHttpClient provides a mock function with given fields: username, authMech, certificate, san_in_certificate, clientCertificate, clientKey, clientCertAuthSetting, ssl_con_str, logger
+func (_m *UtilsIface) GetHttpClient(username string, authMech base.HttpAuthMech, certificate []byte, san_in_certificate bool, clientCertificate []byte, clientKey []byte, clientCertAuthSetting base.ClientCertAuth, ssl_con_str string, logger *log.CommonLogger) (*http.Client, error) {
+	ret := _m.Called(username, authMech, certificate, san_in_certificate, clientCertificate, clientKey, clientCertAuthSetting, ssl_con_str, logger)
 
 	var r0 *http.Client
-	if rf, ok := ret.Get(0).(func(string, []byte, bool, []byte, []byte, base.ClientCertAuth, string, *log.CommonLogger) *http.Client); ok {
-		r0 = rf(username, certificate, san_in_certificate, clientCertificate, clientKey, clientCertAuthSetting, ssl_con_str, logger)
+	if rf, ok := ret.Get(0).(func(string, base.HttpAuthMech, []byte, bool, []byte, []byte, base.ClientCertAuth, string, *log.CommonLogger) *http.Client); ok {
+		r0 = rf(username, authMech, certificate, san_in_certificate, clientCertificate, clientKey, clientCertAuthSetting, ssl_con_str, logger)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*http.Client)
@@ -827,8 +811,8 @@ func (_m *UtilsIface) GetHttpClient(username string, certificate []byte, san_in_
 	}
 
 	var r1 error
-	if rf, ok := ret.Get(1).(func(string, []byte, bool, []byte, []byte, base.ClientCertAuth, string, *log.CommonLogger) error); ok {
-		r1 = rf(username, certificate, san_in_certificate, clientCertificate, clientKey, clientCertAuthSetting, ssl_con_str, logger)
+	if rf, ok := ret.Get(1).(func(string, base.HttpAuthMech, []byte, bool, []byte, []byte, base.ClientCertAuth, string, *log.CommonLogger) error); ok {
+		r1 = rf(username, authMech, certificate, san_in_certificate, clientCertificate, clientKey, clientCertAuthSetting, ssl_con_str, logger)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -1041,13 +1025,13 @@ func (_m *UtilsIface) GetMemcachedRawConn(serverAddr string, username string, pa
 	return r0, r1
 }
 
-// GetMemcachedSSLPortMap provides a mock function with given fields: hostName, username, password, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, bucket, logger
-func (_m *UtilsIface) GetMemcachedSSLPortMap(hostName string, username string, password string, certificate []byte, sanInCertificate bool, clientCertificate []byte, clientKey []byte, clientCertAuthSetting base.ClientCertAuth, bucket string, logger *log.CommonLogger) (base.SSLPortMap, error) {
-	ret := _m.Called(hostName, username, password, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, bucket, logger)
+// GetMemcachedSSLPortMap provides a mock function with given fields: hostName, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, bucket, logger
+func (_m *UtilsIface) GetMemcachedSSLPortMap(hostName string, username string, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCertificate []byte, clientKey []byte, clientCertAuthSetting base.ClientCertAuth, bucket string, logger *log.CommonLogger) (base.SSLPortMap, error) {
+	ret := _m.Called(hostName, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, bucket, logger)
 
 	var r0 base.SSLPortMap
-	if rf, ok := ret.Get(0).(func(string, string, string, []byte, bool, []byte, []byte, base.ClientCertAuth, string, *log.CommonLogger) base.SSLPortMap); ok {
-		r0 = rf(hostName, username, password, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, bucket, logger)
+	if rf, ok := ret.Get(0).(func(string, string, string, base.HttpAuthMech, []byte, bool, []byte, []byte, base.ClientCertAuth, string, *log.CommonLogger) base.SSLPortMap); ok {
+		r0 = rf(hostName, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, bucket, logger)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(base.SSLPortMap)
@@ -1055,8 +1039,8 @@ func (_m *UtilsIface) GetMemcachedSSLPortMap(hostName string, username string, p
 	}
 
 	var r1 error
-	if rf, ok := ret.Get(1).(func(string, string, string, []byte, bool, []byte, []byte, base.ClientCertAuth, string, *log.CommonLogger) error); ok {
-		r1 = rf(hostName, username, password, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, bucket, logger)
+	if rf, ok := ret.Get(1).(func(string, string, string, base.HttpAuthMech, []byte, bool, []byte, []byte, base.ClientCertAuth, string, *log.CommonLogger) error); ok {
+		r1 = rf(hostName, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, bucket, logger)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -1087,13 +1071,13 @@ func (_m *UtilsIface) GetNodeListFromInfoMap(infoMap map[string]interface{}, log
 	return r0, r1
 }
 
-// GetNodeListWithFullInfo provides a mock function with given fields: hostAddr, username, password, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, logger
-func (_m *UtilsIface) GetNodeListWithFullInfo(hostAddr string, username string, password string, certificate []byte, sanInCertificate bool, clientCertificate []byte, clientKey []byte, clientCertAuthSetting base.ClientCertAuth, logger *log.CommonLogger) ([]interface{}, error) {
-	ret := _m.Called(hostAddr, username, password, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, logger)
+// GetNodeListWithFullInfo provides a mock function with given fields: hostAddr, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, logger
+func (_m *UtilsIface) GetNodeListWithFullInfo(hostAddr string, username string, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCertificate []byte, clientKey []byte, clientCertAuthSetting base.ClientCertAuth, logger *log.CommonLogger) ([]interface{}, error) {
+	ret := _m.Called(hostAddr, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, logger)
 
 	var r0 []interface{}
-	if rf, ok := ret.Get(0).(func(string, string, string, []byte, bool, []byte, []byte, base.ClientCertAuth, *log.CommonLogger) []interface{}); ok {
-		r0 = rf(hostAddr, username, password, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, logger)
+	if rf, ok := ret.Get(0).(func(string, string, string, base.HttpAuthMech, []byte, bool, []byte, []byte, base.ClientCertAuth, *log.CommonLogger) []interface{}); ok {
+		r0 = rf(hostAddr, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, logger)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).([]interface{})
@@ -1101,8 +1085,8 @@ func (_m *UtilsIface) GetNodeListWithFullInfo(hostAddr string, username string, 
 	}
 
 	var r1 error
-	if rf, ok := ret.Get(1).(func(string, string, string, []byte, bool, []byte, []byte, base.ClientCertAuth, *log.CommonLogger) error); ok {
-		r1 = rf(hostAddr, username, password, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, logger)
+	if rf, ok := ret.Get(1).(func(string, string, string, base.HttpAuthMech, []byte, bool, []byte, []byte, base.ClientCertAuth, *log.CommonLogger) error); ok {
+		r1 = rf(hostAddr, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, logger)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -1110,13 +1094,13 @@ func (_m *UtilsIface) GetNodeListWithFullInfo(hostAddr string, username string, 
 	return r0, r1
 }
 
-// GetNodeListWithMinInfo provides a mock function with given fields: hostAddr, username, password, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, logger
-func (_m *UtilsIface) GetNodeListWithMinInfo(hostAddr string, username string, password string, certificate []byte, sanInCertificate bool, clientCertificate []byte, clientKey []byte, clientCertAuthSetting base.ClientCertAuth, logger *log.CommonLogger) ([]interface{}, error) {
-	ret := _m.Called(hostAddr, username, password, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, logger)
+// GetNodeListWithMinInfo provides a mock function with given fields: hostAddr, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, logger
+func (_m *UtilsIface) GetNodeListWithMinInfo(hostAddr string, username string, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCertificate []byte, clientKey []byte, clientCertAuthSetting base.ClientCertAuth, logger *log.CommonLogger) ([]interface{}, error) {
+	ret := _m.Called(hostAddr, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, logger)
 
 	var r0 []interface{}
-	if rf, ok := ret.Get(0).(func(string, string, string, []byte, bool, []byte, []byte, base.ClientCertAuth, *log.CommonLogger) []interface{}); ok {
-		r0 = rf(hostAddr, username, password, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, logger)
+	if rf, ok := ret.Get(0).(func(string, string, string, base.HttpAuthMech, []byte, bool, []byte, []byte, base.ClientCertAuth, *log.CommonLogger) []interface{}); ok {
+		r0 = rf(hostAddr, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, logger)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).([]interface{})
@@ -1124,8 +1108,8 @@ func (_m *UtilsIface) GetNodeListWithMinInfo(hostAddr string, username string, p
 	}
 
 	var r1 error
-	if rf, ok := ret.Get(1).(func(string, string, string, []byte, bool, []byte, []byte, base.ClientCertAuth, *log.CommonLogger) error); ok {
-		r1 = rf(hostAddr, username, password, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, logger)
+	if rf, ok := ret.Get(1).(func(string, string, string, base.HttpAuthMech, []byte, bool, []byte, []byte, base.ClientCertAuth, *log.CommonLogger) error); ok {
+		r1 = rf(hostAddr, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, logger)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -1274,6 +1258,50 @@ func (_m *UtilsIface) GetRemoteServerVBucketsMap(connStr string, bucketName stri
 	return r0, r1
 }
 
+// GetSecuritySettingsAndDefaultPoolInfo provides a mock function with given fields: hostAddr, hostHttpsAddr, username, password, certificate, clientCertificate, clientKey, scramShaEnabled, logger
+func (_m *UtilsIface) GetSecuritySettingsAndDefaultPoolInfo(hostAddr string, hostHttpsAddr string, username string, password string, certificate []byte, clientCertificate []byte, clientKey []byte, scramShaEnabled bool, logger *log.CommonLogger) (bool, base.ClientCertAuth, base.HttpAuthMech, map[string]interface{}, error) {
+	ret := _m.Called(hostAddr, hostHttpsAddr, username, password, certificate, clientCertificate, clientKey, scramShaEnabled, logger)
+
+	var r0 bool
+	if rf, ok := ret.Get(0).(func(string, string, string, string, []byte, []byte, []byte, bool, *log.CommonLogger) bool); ok {
+		r0 = rf(hostAddr, hostHttpsAddr, username, password, certificate, clientCertificate, clientKey, scramShaEnabled, logger)
+	} else {
+		r0 = ret.Get(0).(bool)
+	}
+
+	var r1 base.ClientCertAuth
+	if rf, ok := ret.Get(1).(func(string, string, string, string, []byte, []byte, []byte, bool, *log.CommonLogger) base.ClientCertAuth); ok {
+		r1 = rf(hostAddr, hostHttpsAddr, username, password, certificate, clientCertificate, clientKey, scramShaEnabled, logger)
+	} else {
+		r1 = ret.Get(1).(base.ClientCertAuth)
+	}
+
+	var r2 base.HttpAuthMech
+	if rf, ok := ret.Get(2).(func(string, string, string, string, []byte, []byte, []byte, bool, *log.CommonLogger) base.HttpAuthMech); ok {
+		r2 = rf(hostAddr, hostHttpsAddr, username, password, certificate, clientCertificate, clientKey, scramShaEnabled, logger)
+	} else {
+		r2 = ret.Get(2).(base.HttpAuthMech)
+	}
+
+	var r3 map[string]interface{}
+	if rf, ok := ret.Get(3).(func(string, string, string, string, []byte, []byte, []byte, bool, *log.CommonLogger) map[string]interface{}); ok {
+		r3 = rf(hostAddr, hostHttpsAddr, username, password, certificate, clientCertificate, clientKey, scramShaEnabled, logger)
+	} else {
+		if ret.Get(3) != nil {
+			r3 = ret.Get(3).(map[string]interface{})
+		}
+	}
+
+	var r4 error
+	if rf, ok := ret.Get(4).(func(string, string, string, string, []byte, []byte, []byte, bool, *log.CommonLogger) error); ok {
+		r4 = rf(hostAddr, hostHttpsAddr, username, password, certificate, clientCertificate, clientKey, scramShaEnabled, logger)
+	} else {
+		r4 = ret.Error(4)
+	}
+
+	return r0, r1, r2, r3, r4
+}
+
 // GetServerVBucketsMap provides a mock function with given fields: connStr, bucketName, bucketInfo
 func (_m *UtilsIface) GetServerVBucketsMap(connStr string, bucketName string, bucketInfo map[string]interface{}) (map[string][]uint16, error) {
 	ret := _m.Called(connStr, bucketName, bucketInfo)
@@ -1377,7 +1405,7 @@ func (_m *UtilsIface) InvalidRuneIndexErrorMessage(key string, index int) string
 }
 
 // InvokeRestWithRetry provides a mock function with given fields: baseURL, path, preservePathEncoding, httpCommand, contentType, body, timeout, out, client, keep_client_alive, logger, num_retry
-func (_m *UtilsIface) InvokeRestWithRetry(baseURL string, path string, preservePathEncoding bool, httpCommand string, contentType string, body []byte, timeout time.Duration, out interface{}, client *http.Client, keep_client_alive bool, logger *log.CommonLogger, num_retry int) (error, int, *http.Client) {
+func (_m *UtilsIface) InvokeRestWithRetry(baseURL string, path string, preservePathEncoding bool, httpCommand string, contentType string, body []byte, timeout time.Duration, out interface{}, client *http.Client, keep_client_alive bool, logger *log.CommonLogger, num_retry int) (error, int) {
 	ret := _m.Called(baseURL, path, preservePathEncoding, httpCommand, contentType, body, timeout, out, client, keep_client_alive, logger, num_retry)
 
 	var r0 error
@@ -1394,46 +1422,28 @@ func (_m *UtilsIface) InvokeRestWithRetry(baseURL string, path string, preserveP
 		r1 = ret.Get(1).(int)
 	}
 
-	var r2 *http.Client
-	if rf, ok := ret.Get(2).(func(string, string, bool, string, string, []byte, time.Duration, interface{}, *http.Client, bool, *log.CommonLogger, int) *http.Client); ok {
-		r2 = rf(baseURL, path, preservePathEncoding, httpCommand, contentType, body, timeout, out, client, keep_client_alive, logger, num_retry)
-	} else {
-		if ret.Get(2) != nil {
-			r2 = ret.Get(2).(*http.Client)
-		}
-	}
-
-	return r0, r1, r2
+	return r0, r1
 }
 
-// InvokeRestWithRetryWithAuth provides a mock function with given fields: baseURL, path, preservePathEncoding, username, password, certificate, san_in_certificate, clientCertificate, clientKey, clientCertAuthSetting, insecureSkipVerify, httpCommand, contentType, body, timeout, out, client, keep_client_alive, logger, num_retry
-func (_m *UtilsIface) InvokeRestWithRetryWithAuth(baseURL string, path string, preservePathEncoding bool, username string, password string, certificate []byte, san_in_certificate bool, clientCertificate []byte, clientKey []byte, clientCertAuthSetting base.ClientCertAuth, insecureSkipVerify bool, httpCommand string, contentType string, body []byte, timeout time.Duration, out interface{}, client *http.Client, keep_client_alive bool, logger *log.CommonLogger, num_retry int) (error, int, *http.Client) {
-	ret := _m.Called(baseURL, path, preservePathEncoding, username, password, certificate, san_in_certificate, clientCertificate, clientKey, clientCertAuthSetting, insecureSkipVerify, httpCommand, contentType, body, timeout, out, client, keep_client_alive, logger, num_retry)
+// InvokeRestWithRetryWithAuth provides a mock function with given fields: baseURL, path, preservePathEncoding, username, password, authMech, certificate, san_in_certificate, clientCertificate, clientKey, clientCertAuthSetting, insecureSkipVerify, httpCommand, contentType, body, timeout, out, client, keep_client_alive, logger, num_retry
+func (_m *UtilsIface) InvokeRestWithRetryWithAuth(baseURL string, path string, preservePathEncoding bool, username string, password string, authMech base.HttpAuthMech, certificate []byte, san_in_certificate bool, clientCertificate []byte, clientKey []byte, clientCertAuthSetting base.ClientCertAuth, insecureSkipVerify bool, httpCommand string, contentType string, body []byte, timeout time.Duration, out interface{}, client *http.Client, keep_client_alive bool, logger *log.CommonLogger, num_retry int) (error, int) {
+	ret := _m.Called(baseURL, path, preservePathEncoding, username, password, authMech, certificate, san_in_certificate, clientCertificate, clientKey, clientCertAuthSetting, insecureSkipVerify, httpCommand, contentType, body, timeout, out, client, keep_client_alive, logger, num_retry)
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(string, string, bool, string, string, []byte, bool, []byte, []byte, base.ClientCertAuth, bool, string, string, []byte, time.Duration, interface{}, *http.Client, bool, *log.CommonLogger, int) error); ok {
-		r0 = rf(baseURL, path, preservePathEncoding, username, password, certificate, san_in_certificate, clientCertificate, clientKey, clientCertAuthSetting, insecureSkipVerify, httpCommand, contentType, body, timeout, out, client, keep_client_alive, logger, num_retry)
+	if rf, ok := ret.Get(0).(func(string, string, bool, string, string, base.HttpAuthMech, []byte, bool, []byte, []byte, base.ClientCertAuth, bool, string, string, []byte, time.Duration, interface{}, *http.Client, bool, *log.CommonLogger, int) error); ok {
+		r0 = rf(baseURL, path, preservePathEncoding, username, password, authMech, certificate, san_in_certificate, clientCertificate, clientKey, clientCertAuthSetting, insecureSkipVerify, httpCommand, contentType, body, timeout, out, client, keep_client_alive, logger, num_retry)
 	} else {
 		r0 = ret.Error(0)
 	}
 
 	var r1 int
-	if rf, ok := ret.Get(1).(func(string, string, bool, string, string, []byte, bool, []byte, []byte, base.ClientCertAuth, bool, string, string, []byte, time.Duration, interface{}, *http.Client, bool, *log.CommonLogger, int) int); ok {
-		r1 = rf(baseURL, path, preservePathEncoding, username, password, certificate, san_in_certificate, clientCertificate, clientKey, clientCertAuthSetting, insecureSkipVerify, httpCommand, contentType, body, timeout, out, client, keep_client_alive, logger, num_retry)
+	if rf, ok := ret.Get(1).(func(string, string, bool, string, string, base.HttpAuthMech, []byte, bool, []byte, []byte, base.ClientCertAuth, bool, string, string, []byte, time.Duration, interface{}, *http.Client, bool, *log.CommonLogger, int) int); ok {
+		r1 = rf(baseURL, path, preservePathEncoding, username, password, authMech, certificate, san_in_certificate, clientCertificate, clientKey, clientCertAuthSetting, insecureSkipVerify, httpCommand, contentType, body, timeout, out, client, keep_client_alive, logger, num_retry)
 	} else {
 		r1 = ret.Get(1).(int)
 	}
 
-	var r2 *http.Client
-	if rf, ok := ret.Get(2).(func(string, string, bool, string, string, []byte, bool, []byte, []byte, base.ClientCertAuth, bool, string, string, []byte, time.Duration, interface{}, *http.Client, bool, *log.CommonLogger, int) *http.Client); ok {
-		r2 = rf(baseURL, path, preservePathEncoding, username, password, certificate, san_in_certificate, clientCertificate, clientKey, clientCertAuthSetting, insecureSkipVerify, httpCommand, contentType, body, timeout, out, client, keep_client_alive, logger, num_retry)
-	} else {
-		if ret.Get(2) != nil {
-			r2 = ret.Get(2).(*http.Client)
-		}
-	}
-
-	return r0, r1, r2
+	return r0, r1
 }
 
 // IsSeriousNetError provides a mock function with given fields: err
@@ -1613,20 +1623,20 @@ func (_m *UtilsIface) QueryRestApi(baseURL string, path string, preservePathEnco
 	return r0, r1
 }
 
-// QueryRestApiWithAuth provides a mock function with given fields: baseURL, path, preservePathEncoding, username, password, certificate, san_in_certificate, clientCertificate, clientKey, clientCertAuthSetting, setUserAuth, httpCommand, contentType, body, timeout, out, client, keep_client_alive, logger
-func (_m *UtilsIface) QueryRestApiWithAuth(baseURL string, path string, preservePathEncoding bool, username string, password string, certificate []byte, san_in_certificate bool, clientCertificate []byte, clientKey []byte, clientCertAuthSetting base.ClientCertAuth, setUserAuth bool, httpCommand string, contentType string, body []byte, timeout time.Duration, out interface{}, client *http.Client, keep_client_alive bool, logger *log.CommonLogger) (error, int) {
-	ret := _m.Called(baseURL, path, preservePathEncoding, username, password, certificate, san_in_certificate, clientCertificate, clientKey, clientCertAuthSetting, setUserAuth, httpCommand, contentType, body, timeout, out, client, keep_client_alive, logger)
+// QueryRestApiWithAuth provides a mock function with given fields: baseURL, path, preservePathEncoding, username, password, authMech, certificate, san_in_certificate, clientCertificate, clientKey, clientCertAuthSetting, setUserAuth, httpCommand, contentType, body, timeout, out, client, keep_client_alive, logger
+func (_m *UtilsIface) QueryRestApiWithAuth(baseURL string, path string, preservePathEncoding bool, username string, password string, authMech base.HttpAuthMech, certificate []byte, san_in_certificate bool, clientCertificate []byte, clientKey []byte, clientCertAuthSetting base.ClientCertAuth, setUserAuth bool, httpCommand string, contentType string, body []byte, timeout time.Duration, out interface{}, client *http.Client, keep_client_alive bool, logger *log.CommonLogger) (error, int) {
+	ret := _m.Called(baseURL, path, preservePathEncoding, username, password, authMech, certificate, san_in_certificate, clientCertificate, clientKey, clientCertAuthSetting, setUserAuth, httpCommand, contentType, body, timeout, out, client, keep_client_alive, logger)
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(string, string, bool, string, string, []byte, bool, []byte, []byte, base.ClientCertAuth, bool, string, string, []byte, time.Duration, interface{}, *http.Client, bool, *log.CommonLogger) error); ok {
-		r0 = rf(baseURL, path, preservePathEncoding, username, password, certificate, san_in_certificate, clientCertificate, clientKey, clientCertAuthSetting, setUserAuth, httpCommand, contentType, body, timeout, out, client, keep_client_alive, logger)
+	if rf, ok := ret.Get(0).(func(string, string, bool, string, string, base.HttpAuthMech, []byte, bool, []byte, []byte, base.ClientCertAuth, bool, string, string, []byte, time.Duration, interface{}, *http.Client, bool, *log.CommonLogger) error); ok {
+		r0 = rf(baseURL, path, preservePathEncoding, username, password, authMech, certificate, san_in_certificate, clientCertificate, clientKey, clientCertAuthSetting, setUserAuth, httpCommand, contentType, body, timeout, out, client, keep_client_alive, logger)
 	} else {
 		r0 = ret.Error(0)
 	}
 
 	var r1 int
-	if rf, ok := ret.Get(1).(func(string, string, bool, string, string, []byte, bool, []byte, []byte, base.ClientCertAuth, bool, string, string, []byte, time.Duration, interface{}, *http.Client, bool, *log.CommonLogger) int); ok {
-		r1 = rf(baseURL, path, preservePathEncoding, username, password, certificate, san_in_certificate, clientCertificate, clientKey, clientCertAuthSetting, setUserAuth, httpCommand, contentType, body, timeout, out, client, keep_client_alive, logger)
+	if rf, ok := ret.Get(1).(func(string, string, bool, string, string, base.HttpAuthMech, []byte, bool, []byte, []byte, base.ClientCertAuth, bool, string, string, []byte, time.Duration, interface{}, *http.Client, bool, *log.CommonLogger) int); ok {
+		r1 = rf(baseURL, path, preservePathEncoding, username, password, authMech, certificate, san_in_certificate, clientCertificate, clientKey, clientCertAuthSetting, setUserAuth, httpCommand, contentType, body, timeout, out, client, keep_client_alive, logger)
 	} else {
 		r1 = ret.Get(1).(int)
 	}
@@ -1653,13 +1663,13 @@ func (_m *UtilsIface) RegexpMatch(regExp *regexp.Regexp, key []byte) bool {
 	return r0
 }
 
-// RemoteBucketValidationInfo provides a mock function with given fields: hostAddr, bucketName, username, password, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, logger
-func (_m *UtilsIface) RemoteBucketValidationInfo(hostAddr string, bucketName string, username string, password string, certificate []byte, sanInCertificate bool, clientCertificate []byte, clientKey []byte, clientCertAuthSetting base.ClientCertAuth, logger *log.CommonLogger) (map[string]interface{}, string, string, string, string, map[string][]uint16, error) {
-	ret := _m.Called(hostAddr, bucketName, username, password, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, logger)
+// RemoteBucketValidationInfo provides a mock function with given fields: hostAddr, bucketName, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, logger
+func (_m *UtilsIface) RemoteBucketValidationInfo(hostAddr string, bucketName string, username string, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCertificate []byte, clientKey []byte, clientCertAuthSetting base.ClientCertAuth, logger *log.CommonLogger) (map[string]interface{}, string, string, string, string, map[string][]uint16, error) {
+	ret := _m.Called(hostAddr, bucketName, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, logger)
 
 	var r0 map[string]interface{}
-	if rf, ok := ret.Get(0).(func(string, string, string, string, []byte, bool, []byte, []byte, base.ClientCertAuth, *log.CommonLogger) map[string]interface{}); ok {
-		r0 = rf(hostAddr, bucketName, username, password, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, logger)
+	if rf, ok := ret.Get(0).(func(string, string, string, string, base.HttpAuthMech, []byte, bool, []byte, []byte, base.ClientCertAuth, *log.CommonLogger) map[string]interface{}); ok {
+		r0 = rf(hostAddr, bucketName, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, logger)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(map[string]interface{})
@@ -1667,36 +1677,36 @@ func (_m *UtilsIface) RemoteBucketValidationInfo(hostAddr string, bucketName str
 	}
 
 	var r1 string
-	if rf, ok := ret.Get(1).(func(string, string, string, string, []byte, bool, []byte, []byte, base.ClientCertAuth, *log.CommonLogger) string); ok {
-		r1 = rf(hostAddr, bucketName, username, password, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, logger)
+	if rf, ok := ret.Get(1).(func(string, string, string, string, base.HttpAuthMech, []byte, bool, []byte, []byte, base.ClientCertAuth, *log.CommonLogger) string); ok {
+		r1 = rf(hostAddr, bucketName, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, logger)
 	} else {
 		r1 = ret.Get(1).(string)
 	}
 
 	var r2 string
-	if rf, ok := ret.Get(2).(func(string, string, string, string, []byte, bool, []byte, []byte, base.ClientCertAuth, *log.CommonLogger) string); ok {
-		r2 = rf(hostAddr, bucketName, username, password, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, logger)
+	if rf, ok := ret.Get(2).(func(string, string, string, string, base.HttpAuthMech, []byte, bool, []byte, []byte, base.ClientCertAuth, *log.CommonLogger) string); ok {
+		r2 = rf(hostAddr, bucketName, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, logger)
 	} else {
 		r2 = ret.Get(2).(string)
 	}
 
 	var r3 string
-	if rf, ok := ret.Get(3).(func(string, string, string, string, []byte, bool, []byte, []byte, base.ClientCertAuth, *log.CommonLogger) string); ok {
-		r3 = rf(hostAddr, bucketName, username, password, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, logger)
+	if rf, ok := ret.Get(3).(func(string, string, string, string, base.HttpAuthMech, []byte, bool, []byte, []byte, base.ClientCertAuth, *log.CommonLogger) string); ok {
+		r3 = rf(hostAddr, bucketName, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, logger)
 	} else {
 		r3 = ret.Get(3).(string)
 	}
 
 	var r4 string
-	if rf, ok := ret.Get(4).(func(string, string, string, string, []byte, bool, []byte, []byte, base.ClientCertAuth, *log.CommonLogger) string); ok {
-		r4 = rf(hostAddr, bucketName, username, password, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, logger)
+	if rf, ok := ret.Get(4).(func(string, string, string, string, base.HttpAuthMech, []byte, bool, []byte, []byte, base.ClientCertAuth, *log.CommonLogger) string); ok {
+		r4 = rf(hostAddr, bucketName, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, logger)
 	} else {
 		r4 = ret.Get(4).(string)
 	}
 
 	var r5 map[string][]uint16
-	if rf, ok := ret.Get(5).(func(string, string, string, string, []byte, bool, []byte, []byte, base.ClientCertAuth, *log.CommonLogger) map[string][]uint16); ok {
-		r5 = rf(hostAddr, bucketName, username, password, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, logger)
+	if rf, ok := ret.Get(5).(func(string, string, string, string, base.HttpAuthMech, []byte, bool, []byte, []byte, base.ClientCertAuth, *log.CommonLogger) map[string][]uint16); ok {
+		r5 = rf(hostAddr, bucketName, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, logger)
 	} else {
 		if ret.Get(5) != nil {
 			r5 = ret.Get(5).(map[string][]uint16)
@@ -1704,8 +1714,8 @@ func (_m *UtilsIface) RemoteBucketValidationInfo(hostAddr string, bucketName str
 	}
 
 	var r6 error
-	if rf, ok := ret.Get(6).(func(string, string, string, string, []byte, bool, []byte, []byte, base.ClientCertAuth, *log.CommonLogger) error); ok {
-		r6 = rf(hostAddr, bucketName, username, password, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, logger)
+	if rf, ok := ret.Get(6).(func(string, string, string, string, base.HttpAuthMech, []byte, bool, []byte, []byte, base.ClientCertAuth, *log.CommonLogger) error); ok {
+		r6 = rf(hostAddr, bucketName, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, logger)
 	} else {
 		r6 = ret.Error(6)
 	}

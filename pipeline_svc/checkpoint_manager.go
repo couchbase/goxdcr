@@ -98,8 +98,8 @@ type CheckpointManager struct {
 	ssl_con_str_map  map[string]string
 	target_kv_vb_map map[string][]uint16
 
-	// whether replication is of capi type
-	capi bool
+	// whether target cluster is elasticsearch
+	isTargetES bool
 
 	user_agent string
 
@@ -141,7 +141,7 @@ func NewCheckpointManager(checkpoints_svc service_def.CheckpointsService, capi_s
 	xdcr_topology_svc service_def.XDCRCompTopologySvc, through_seqno_tracker_svc service_def.ThroughSeqnoTrackerSvc,
 	active_vbs map[string][]uint16, target_username, target_password string, target_bucket_name string,
 	target_kv_vb_map map[string][]uint16, target_cluster_ref *metadata.RemoteClusterReference,
-	target_cluster_version int, logger_ctx *log.LoggerContext, utilsIn utilities.UtilsIface) (*CheckpointManager, error) {
+	target_cluster_version int, isTargetES bool, logger_ctx *log.LoggerContext, utilsIn utilities.UtilsIface) (*CheckpointManager, error) {
 	if checkpoints_svc == nil || capi_svc == nil || remote_cluster_svc == nil || rep_spec_svc == nil || cluster_info_svc == nil || xdcr_topology_svc == nil {
 		return nil, errors.New("checkpoints_svc, capi_svc, remote_cluster_svc, rep_spec_svc, cluster_info_svc and xdcr_topology_svc can't be nil")
 	}
@@ -172,7 +172,8 @@ func NewCheckpointManager(checkpoints_svc service_def.CheckpointsService, capi_s
 		kv_mem_clients:            make(map[string]mcc.ClientIface),
 		target_cluster_ref:        target_cluster_ref,
 		target_cluster_version:    target_cluster_version,
-		utils: utilsIn,
+		isTargetES:                isTargetES,
+		utils:                     utilsIn,
 	}, nil
 }
 
@@ -258,7 +259,7 @@ func (ckmgr *CheckpointManager) Start(settings metadata.ReplicationSettingsMap) 
 	ckmgr.startRandomizedCheckpointingTicker()
 
 	//initialize connections
-	if !ckmgr.capi {
+	if !ckmgr.isTargetES {
 		err := ckmgr.initConnections()
 		if err != nil {
 			return err
@@ -290,8 +291,6 @@ func (ckmgr *CheckpointManager) initialize() {
 	}
 
 	ckmgr.composeUserAgent()
-
-	ckmgr.capi = ckmgr.pipeline.Specification().Settings.IsCapi()
 }
 
 // compose user agent string for HELO command
@@ -329,12 +328,12 @@ func (ckmgr *CheckpointManager) initSSLConStrMap() error {
 		return err
 	}
 
-	username, password, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, err := ckmgr.target_cluster_ref.MyCredentials()
+	username, password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, err := ckmgr.target_cluster_ref.MyCredentials()
 	if err != nil {
 		return err
 	}
 
-	ssl_port_map, err := ckmgr.utils.GetMemcachedSSLPortMap(connStr, username, password, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, ckmgr.target_bucket_name, ckmgr.logger)
+	ssl_port_map, err := ckmgr.utils.GetMemcachedSSLPortMap(connStr, username, password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, ckmgr.target_bucket_name, ckmgr.logger)
 	if err != nil {
 		return err
 	}
@@ -355,13 +354,13 @@ func (ckmgr *CheckpointManager) initSSLConStrMap() error {
 
 func (ckmgr *CheckpointManager) getNewMemcachedClient(server_addr string, initializing bool) (mcc.ClientIface, error) {
 	if ckmgr.target_cluster_ref.IsFullEncryption() {
-		_, _, certificate, san_in_certificate, client_certificate, client_key, clientCertAuthSetting, err := ckmgr.target_cluster_ref.MyCredentials()
+		_, _, _, certificate, san_in_certificate, client_certificate, client_key, clientCertAuthSetting, err := ckmgr.target_cluster_ref.MyCredentials()
 		if err != nil {
 			return nil, err
 		}
 		ssl_con_str := ckmgr.ssl_con_str_map[server_addr]
 
-		if !initializing && len(certificate) > 0 {
+		if !initializing {
 			// if not initializing at replication startup time, retrieve up to date security settings
 			latestTargetClusterRef, err := ckmgr.remote_cluster_svc.RemoteClusterByUuid(ckmgr.target_cluster_ref.Uuid, false)
 			if err != nil {
@@ -371,7 +370,9 @@ func (ckmgr *CheckpointManager) getNewMemcachedClient(server_addr string, initia
 			if err != nil {
 				return nil, err
 			}
-			san_in_certificate, clientCertAuthSetting, _, err = ckmgr.utils.GetDefaultPoolInfoWithSecuritySettings(connStr, ckmgr.target_username, ckmgr.target_password, certificate, client_certificate, client_key, ckmgr.logger)
+			// hostAddr not used in full encryption mode
+			san_in_certificate, clientCertAuthSetting, _, _, err = ckmgr.utils.GetSecuritySettingsAndDefaultPoolInfo("" /*hostAddr*/, connStr,
+				ckmgr.target_username, ckmgr.target_password, certificate, client_certificate, client_key, false /*scramShaEnabled*/, ckmgr.logger)
 			if err != nil {
 				return nil, err
 			}
@@ -456,7 +457,7 @@ func (ckmgr *CheckpointManager) Stop() error {
 	close(ckmgr.finish_ch)
 
 	//close the connections
-	if !ckmgr.capi {
+	if !ckmgr.isTargetES {
 		ckmgr.closeConnections()
 	}
 
@@ -1005,7 +1006,7 @@ func (ckmgr *CheckpointManager) PerformCkpt(fin_ch <-chan bool) {
 	var through_seqno_map map[uint16]uint64
 	var high_seqno_and_vbuuid_map map[uint16][]uint64
 	var xattr_seqno_map map[uint16]uint64
-	if !ckmgr.capi {
+	if !ckmgr.isTargetES {
 		// get through seqnos for all vbuckets in the pipeline
 		through_seqno_map = ckmgr.through_seqno_tracker_svc.GetThroughSeqnos()
 		// get high seqno and vbuuid for all vbuckets in the pipeline
@@ -1051,7 +1052,7 @@ func (ckmgr *CheckpointManager) performCkpt(fin_ch <-chan bool, wait_grp *sync.W
 	var high_seqno_and_vbuuid_map map[uint16][]uint64
 	// map of vbucketID -> the seqno that corresponds to the first occurrence of xattribute
 	var xattr_seqno_map map[uint16]uint64
-	if !ckmgr.capi {
+	if !ckmgr.isTargetES {
 		// get through seqnos for all vbuckets in the pipeline
 		through_seqno_map = ckmgr.through_seqno_tracker_svc.GetThroughSeqnos()
 		// get high seqno and vbuuid for all vbuckets in the pipeline
@@ -1177,7 +1178,7 @@ func (ckmgr *CheckpointManager) doCheckpoint(vbno uint16, through_seqno_map map[
 		ckpt_obj.lock.RUnlock()
 
 		var through_seqno uint64
-		if !ckmgr.capi {
+		if !ckmgr.isTargetES {
 			// non-capi mode, all through_seqnos have been computed prior
 			through_seqno, ok = through_seqno_map[vbno]
 			if !ok {
@@ -1213,7 +1214,7 @@ func (ckmgr *CheckpointManager) doCheckpoint(vbno uint16, through_seqno_map map[
 		// Items: 3 and 4
 		var remote_seqno uint64
 		var commitForCheckpointErr error
-		if !ckmgr.capi {
+		if !ckmgr.isTargetES {
 			// non-capi mode, high_seqno and vbuuid on target have been retrieved through vbucket-seqno stats
 			high_seqno_and_vbuuid, ok := high_seqno_and_vbuuid_map[vbno]
 			if !ok {
@@ -1237,8 +1238,8 @@ func (ckmgr *CheckpointManager) doCheckpoint(vbno uint16, through_seqno_map map[
 		// 1. in capi mode, we can rely on commitForCheckpoint() for target vb opaque check
 		///   - a VB_OPAQUE_MISMATCH_ERR would be returned if target vb opaque has changed
 		// 2. in non-capi mode, we need to do the target vb opaque check ourselves
-		if (ckmgr.capi && commitForCheckpointErr == nil) ||
-			(!ckmgr.capi && curCkptTargetVBOpaque.IsSame(targetVBOpaque)) {
+		if (ckmgr.isTargetES && commitForCheckpointErr == nil) ||
+			(!ckmgr.isTargetES && curCkptTargetVBOpaque.IsSame(targetVBOpaque)) {
 			// if target vb opaque has not changed, persist checkpoint record
 			ckptRecordTargetSeqno := remote_seqno
 			// Item 2:
@@ -1265,7 +1266,7 @@ func (ckmgr *CheckpointManager) doCheckpoint(vbno uint16, through_seqno_map map[
 			}
 
 			var xattr_seqno uint64
-			if !ckmgr.capi {
+			if !ckmgr.isTargetES {
 				xattr_seqno, ok = xattr_seqno_map[vbno]
 				if !ok {
 					// leave xattr_seqno at 0

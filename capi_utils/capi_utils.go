@@ -38,7 +38,13 @@ func ConstructVBCouchApiBaseMap(targetBucketName string, targetBucketInfo map[st
 }
 
 func ConstructServerCouchApiBaseMap(targetBucketName string, targetBucketInfo map[string]interface{}, remoteClusterRef *metadata.RemoteClusterReference, utils utilities.UtilsIface) (map[string]string, error) {
-	serverCouchApiBaseMap := make(map[string]string)
+	return ConstructCapiServiceEndPointMap(targetBucketName, targetBucketInfo, remoteClusterRef, utils, true /*useCouchApiBase*/)
+}
+
+// construct map for capi service end point, e.g., _pre_replicate
+func ConstructCapiServiceEndPointMap(targetBucketName string, targetBucketInfo map[string]interface{}, remoteClusterRef *metadata.RemoteClusterReference, utils utilities.UtilsIface, useCouchApiBase bool) (map[string]string, error) {
+	endPointMap := make(map[string]string)
+
 	nodeList, err := utils.GetNodeListFromInfoMap(targetBucketInfo, logger_capi_utils)
 	if err != nil {
 		return nil, err
@@ -47,49 +53,63 @@ func ConstructServerCouchApiBaseMap(targetBucketName string, targetBucketInfo ma
 	for _, node := range nodeList {
 		nodeMap, ok := node.(map[string]interface{})
 		if !ok {
-			return nil, ErrorBuildingVBCouchApiBaseMap(targetBucketName, remoteClusterRef.Name, node)
-		}
-		hostname, err := utils.GetHostNameFromNodeInfo(remoteClusterRef.HostName, nodeMap, logger_capi_utils)
-		if err != nil {
-			return nil, err
+			return nil, ErrorBuildingCapiServerEndPointMap(targetBucketName, remoteClusterRef.Name, node)
 		}
 
-		// get couchApiBase
-		var couchApiBaseObj interface{}
-		if remoteClusterRef.IsEncryptionEnabled() {
-			couchApiBaseObj, ok = nodeMap[base.CouchApiBaseHttps]
+		var endPoint string
+		var hostname string
+		if useCouchApiBase {
+			// endPoint is couchApiBase in nodeInfo
+			hostname, err = utils.GetHostNameFromNodeInfo(remoteClusterRef.HostName, nodeMap, logger_capi_utils)
+			if err != nil {
+				return nil, err
+			}
+
+			// get couchApiBase
+			var couchApiBaseObj interface{}
+			if remoteClusterRef.IsHttps() {
+				couchApiBaseObj, ok = nodeMap[base.CouchApiBaseHttps]
+			} else {
+				couchApiBaseObj, ok = nodeMap[base.CouchApiBase]
+			}
+			if !ok {
+				//skip this node, during rebalance it is possible that the node is on the server list, but it is not master for any vb, so no couchApiBase
+				continue
+			}
+			endPoint, ok = couchApiBaseObj.(string)
+			if !ok {
+				return nil, ErrorBuildingCapiServerEndPointMap(targetBucketName, remoteClusterRef.Name, node)
+			}
+
+			// If external nodes info is present, replace
+			endPoint = utils.ReplaceCouchApiBaseObjWithExternals(endPoint, nodeMap)
 		} else {
-			couchApiBaseObj, ok = nodeMap[base.CouchApiBase]
-		}
-		if !ok {
-			//skip this node, during rebalance it is possible that the node is on the server list, but it is not master for any vb, so no couchApiBase
-			continue
-		}
-		couchApiBase, ok := couchApiBaseObj.(string)
-		if !ok {
-			return nil, ErrorBuildingVBCouchApiBaseMap(targetBucketName, remoteClusterRef.Name, node)
-		}
+			// endPoint is host address in nodeInfo
+			endPoint, err = utils.GetExternalHostAddrFromNodeInfo(remoteClusterRef.HostName, nodeMap, remoteClusterRef.IsHttps(), logger_capi_utils)
+			if err != nil {
+				return nil, err
+			}
 
-		// If external nodes info is present, replace
-		couchApiBase = utils.ReplaceCouchApiBaseObjWithExternals(couchApiBase, nodeMap)
+			hostname = base.GetHostName(endPoint)
+		}
 
 		// Get internal direct ports
 		portsObj, ok := nodeMap[base.PortsKey]
 		if !ok {
-			return nil, ErrorBuildingVBCouchApiBaseMap(targetBucketName, remoteClusterRef.Name, node)
+			return nil, ErrorBuildingCapiServerEndPointMap(targetBucketName, remoteClusterRef.Name, node)
 		}
 		portsMap, ok := portsObj.(map[string]interface{})
 		if !ok {
-			return nil, ErrorBuildingVBCouchApiBaseMap(targetBucketName, remoteClusterRef.Name, node)
+			return nil, ErrorBuildingCapiServerEndPointMap(targetBucketName, remoteClusterRef.Name, node)
 		}
 
 		directPortObj, ok := portsMap[base.DirectPortKey]
 		if !ok {
-			return nil, ErrorBuildingVBCouchApiBaseMap(targetBucketName, remoteClusterRef.Name, node)
+			return nil, ErrorBuildingCapiServerEndPointMap(targetBucketName, remoteClusterRef.Name, node)
 		}
 		directPortFloat, ok := directPortObj.(float64)
 		if !ok {
-			return nil, ErrorBuildingVBCouchApiBaseMap(targetBucketName, remoteClusterRef.Name, node)
+			return nil, ErrorBuildingCapiServerEndPointMap(targetBucketName, remoteClusterRef.Name, node)
 		}
 
 		portToUse := uint16(directPortFloat)
@@ -106,10 +126,10 @@ func ConstructServerCouchApiBaseMap(targetBucketName string, targetBucketInfo ma
 		// server addr = host:directPort or externalHost:kv
 		serverAddr := base.GetHostAddr(hostname, portToUse)
 
-		serverCouchApiBaseMap[serverAddr] = couchApiBase
+		endPointMap[serverAddr] = endPoint
 	}
 
-	return serverCouchApiBaseMap, nil
+	return endPointMap, nil
 }
 
 // Get the host:port portion of couchApiBase, which would be the connection string for capi tcp connection
@@ -127,8 +147,8 @@ func GetCapiConnectionStrFromCouchApiBase(couchApiBase string) (string, error) {
 	return couchApiBase2[:index], nil
 }
 
-func ErrorBuildingVBCouchApiBaseMap(bucketName, refName string, info interface{}) error {
-	errMsg := fmt.Sprintf("Error constructing vb couchApiBase map for bucket %v on remote cluster %v because of failure to parse bucket info.", bucketName, refName)
+func ErrorBuildingCapiServerEndPointMap(bucketName, refName string, info interface{}) error {
+	errMsg := fmt.Sprintf("Error constructing capi service end point map for bucket %v on remote cluster %v because of failure to parse bucket info.", bucketName, refName)
 	logger_capi_utils.Errorf("%v bucketInfo=%v.", errMsg, info)
 	return errors.New(errMsg)
 }

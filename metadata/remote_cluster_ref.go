@@ -48,8 +48,9 @@ type RemoteClusterReference struct {
 	EncryptionType   string `json:"encryptionType"`
 	Certificate      []byte `json:"certificate"`
 	// hostname to use when making https connection
-	HttpsHostName    string `json:"httpsHostName"`
-	SANInCertificate bool   `json:"SANInCertificate"`
+	HttpsHostName    string            `json:"httpsHostName"`
+	SANInCertificate bool              `json:"SANInCertificate"`
+	HttpAuthMech     base.HttpAuthMech `json:"httpAuthMech"`
 
 	ClientCertificate []byte `json:"clientCertificate"`
 	ClientKey         []byte `json:"clientKey"`
@@ -100,7 +101,7 @@ func RemoteClusterRefId() (string, error) {
 
 // implements base.ClusterConnectionInfoProvider
 func (ref *RemoteClusterReference) MyConnectionStr() (string, error) {
-	if ref.IsEncryptionEnabled() {
+	if ref.IsHttps() {
 		if len(ref.ActiveHttpsHostName) > 0 {
 			return ref.ActiveHttpsHostName, nil
 		} else {
@@ -141,8 +142,8 @@ func (ref *RemoteClusterReference) CloneAndRedact() *RemoteClusterReference {
 	return ref
 }
 
-func (ref *RemoteClusterReference) MyCredentials() (string, string, []byte, bool, []byte, []byte, base.ClientCertAuth, error) {
-	return ref.UserName, ref.Password, ref.Certificate, ref.SANInCertificate, ref.ClientCertificate, ref.ClientKey, ref.ClientCertAuthSetting, nil
+func (ref *RemoteClusterReference) MyCredentials() (string, string, base.HttpAuthMech, []byte, bool, []byte, []byte, base.ClientCertAuth, error) {
+	return ref.UserName, ref.Password, ref.HttpAuthMech, ref.Certificate, ref.SANInCertificate, ref.ClientCertificate, ref.ClientKey, ref.ClientCertAuthSetting, nil
 }
 
 // convert to a map for output
@@ -158,14 +159,14 @@ func (ref *RemoteClusterReference) ToMap() map[string]interface{} {
 	outputMap[base.RemoteClusterHostName] = ref.HostName
 	outputMap[base.RemoteClusterUserName] = ref.UserName
 	outputMap[base.RemoteClusterDeleted] = false
-	if ref.IsEncryptionEnabled() {
-		outputMap[base.RemoteClusterDemandEncryption] = ref.DemandEncryption
-		outputMap[base.RemoteClusterEncryptionType] = ref.EncryptionType
+	outputMap[base.RemoteClusterSecureType] = ref.GetSecureTypeString()
+	if len(ref.Certificate) > 0 {
 		outputMap[base.RemoteClusterCertificate] = string(ref.Certificate)
-		if len(ref.ClientCertificate) > 0 {
-			outputMap[base.RemoteClusterClientCertificate] = string(ref.ClientCertificate)
-		}
 	}
+	if len(ref.ClientCertificate) > 0 {
+		outputMap[base.RemoteClusterClientCertificate] = string(ref.ClientCertificate)
+	}
+
 	return outputMap
 }
 
@@ -204,7 +205,8 @@ func (ref *RemoteClusterReference) AreSecuritySettingsTheSame(ref2 *RemoteCluste
 	if ref2 == nil {
 		return false
 	}
-	return ref.SANInCertificate == ref2.SANInCertificate && ref.ClientCertAuthSetting == ref2.ClientCertAuthSetting
+	return ref.SANInCertificate == ref2.SANInCertificate && ref.ClientCertAuthSetting == ref2.ClientCertAuthSetting &&
+		ref.HttpAuthMech == ref2.HttpAuthMech
 }
 
 // checks if they are the same minus changable fields
@@ -240,8 +242,8 @@ func (ref *RemoteClusterReference) String() string {
 		clientKey = "xxxx"
 	}
 
-	return fmt.Sprintf("id:%v; uuid:%v; name:%v; hostName:%v; userName:%v; password:%v; demandEncryption:%v: encryptionType:%v; certificate:%v; clientCertificate:%v; clientKey:%v; ClientCertAuthSetting:%v; revision:%v",
-		ref.Id, ref.Uuid, ref.Name, ref.HostName, ref.UserName, password, ref.DemandEncryption, ref.EncryptionType, ref.Certificate, ref.ClientCertificate, clientKey, ref.ClientCertAuthSetting, ref.Revision)
+	return fmt.Sprintf("id:%v; uuid:%v; name:%v; hostName:%v; userName:%v; password:%v; secureType:%v; certificate:%v; clientCertificate:%v; clientKey:%v; SanInCertificate:%v; ClientCertAuthSetting:%v; HttpAuthMech:%v, revision:%v",
+		ref.Id, ref.Uuid, ref.Name, ref.HostName, ref.UserName, password, ref.GetSecureTypeString(), ref.Certificate, ref.ClientCertificate, clientKey, ref.SANInCertificate, ref.ClientCertAuthSetting, ref.HttpAuthMech, ref.Revision)
 }
 
 func (ref *RemoteClusterReference) LoadFrom(inRef *RemoteClusterReference) {
@@ -271,6 +273,7 @@ func (ref *RemoteClusterReference) LoadNonActivesFrom(inRef *RemoteClusterRefere
 	ref.EncryptionType = inRef.EncryptionType
 	ref.SANInCertificate = inRef.SANInCertificate
 	ref.ClientCertAuthSetting = inRef.ClientCertAuthSetting
+	ref.HttpAuthMech = inRef.HttpAuthMech
 	// !!! shallow copy of revision.
 	// ref.Revision should only be passed along and should never be modified
 	ref.Revision = inRef.Revision
@@ -328,6 +331,7 @@ func (ref *RemoteClusterReference) cloneCommonFields() *RemoteClusterReference {
 		EncryptionType:        ref.EncryptionType,
 		SANInCertificate:      ref.SANInCertificate,
 		ClientCertAuthSetting: ref.ClientCertAuthSetting,
+		HttpAuthMech:          ref.HttpAuthMech,
 		// !!! shallow copy of revision.
 		// ref.Revision should only be passed along and should never be modified
 		Revision: ref.Revision,
@@ -349,6 +353,24 @@ func (ref *RemoteClusterReference) IsFullEncryption() bool {
 	return ref.DemandEncryption && (len(ref.EncryptionType) == 0 || ref.EncryptionType == EncryptionType_Full)
 }
 
+func (ref *RemoteClusterReference) IsHalfEncryption() bool {
+	return ref.DemandEncryption && ref.EncryptionType == EncryptionType_Half
+}
+
+func (ref *RemoteClusterReference) IsHttps() bool {
+	return ref.HttpAuthMech == base.HttpAuthMechHttps
+}
+
 func (ref *RemoteClusterReference) Clear() {
 	ref.LoadFrom(remoteClusterReferenceSampleEmptyRef)
+}
+
+func (ref *RemoteClusterReference) GetSecureTypeString() string {
+	if !ref.IsEncryptionEnabled() {
+		return base.SecureTypeNone
+	} else if ref.IsFullEncryption() {
+		return base.SecureTypeFull
+	} else {
+		return base.SecureTypeHalf
+	}
 }

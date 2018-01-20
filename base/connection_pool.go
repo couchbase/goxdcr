@@ -57,7 +57,7 @@ type ConnPool interface {
 	Get() (mcc.ClientIface, error)
 	// clientCertAuthSetting needs to be passed in since it is difficult to
 	// compute it in this package - we cannot call utils methods from here
-	GetNew(clientCertAuthSetting ClientCertAuth) (mcc.ClientIface, error)
+	GetNew(sanInCertificate bool, clientCertAuthSetting ClientCertAuth) (mcc.ClientIface, error)
 	GetCAS() uint32
 	Release(client mcc.ClientIface)
 	ReleaseConnections(cas uint32)
@@ -202,8 +202,8 @@ func (p *connPool) Get() (mcc.ClientIface, error) {
 	return nil, errors.New("connection pool is closed")
 }
 
-// clientCertAuthSetting does not matter in non-ssl mode
-func (p *connPool) GetNew(clientCertAuthSetting ClientCertAuth) (mcc.ClientIface, error) {
+// inputs do not matter in non-ssl mode
+func (p *connPool) GetNew(sanInCertificate bool, clientCertAuthSetting ClientCertAuth) (mcc.ClientIface, error) {
 	return p.newConnFunc()
 }
 
@@ -270,9 +270,9 @@ func (p *sslOverMemConnPool) Certificate() []byte {
 	return p.certificate
 }
 
-func (p *sslOverMemConnPool) GetNew(clientCertAuthSetting ClientCertAuth) (mcc.ClientIface, error) {
+func (p *sslOverMemConnPool) GetNew(sanInCertificate bool, clientCertAuthSetting ClientCertAuth) (mcc.ClientIface, error) {
 	ssl_con_str := GetHostAddr(p.hostName, uint16(p.remote_memcached_port))
-	return NewTLSConn(ssl_con_str, p.userName, p.password, p.certificate, p.san_in_certificate, p.clientCertificate, p.clientKey, clientCertAuthSetting, p.bucketName, p.logger)
+	return NewTLSConn(ssl_con_str, p.userName, p.password, p.certificate, sanInCertificate, p.clientCertificate, p.clientKey, clientCertAuthSetting, p.bucketName, p.logger)
 }
 
 func (p *sslOverMemConnPool) ConnType() ConnType {

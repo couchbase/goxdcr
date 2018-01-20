@@ -58,7 +58,7 @@ func (service *UILogSvc) writeUILog_async(message string) {
 	paramMap[base.UILogMessageKey] = message
 	body, _ := service.utils.EncodeMapIntoByteArray(paramMap)
 
-	err, statusCode, _ := service.utils.InvokeRestWithRetry(hostname, base.UILogPath, false, base.MethodPost, "", body, 0, nil, nil, false, service.logger, base.UILogRetry)
+	err, statusCode := service.utils.InvokeRestWithRetry(hostname, base.UILogPath, false, base.MethodPost, "", body, 0, nil, nil, false, service.logger, base.UILogRetry)
 	if err != nil {
 		service.logger.Errorf("Error writing UI log. err = %v\n", err.Error())
 	} else {

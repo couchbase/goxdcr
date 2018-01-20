@@ -328,7 +328,7 @@ func TestGetMgmtPortActive(t *testing.T) {
 	assert.Nil(err)
 
 	for _, nodeList := range nodesList {
-		hostAddr, hostPort, err := testUtils.getExternalMgtHostAndPort(nodeList.(map[string]interface{}))
+		hostAddr, hostPort, err := testUtils.getExternalMgtHostAndPort(nodeList.(map[string]interface{}), false /*isHttps*/)
 		assert.Nil(err)
 		assert.NotEqual(-1, hostPort)
 		assert.True(len(hostAddr) > 0)
@@ -344,7 +344,7 @@ func TestGetMgmtPortInActive(t *testing.T) {
 	assert.Nil(err)
 
 	for _, nodeList := range nodesList {
-		hostAddr, hostPort, err := testUtils.getExternalMgtHostAndPort(nodeList.(map[string]interface{}))
+		hostAddr, hostPort, err := testUtils.getExternalMgtHostAndPort(nodeList.(map[string]interface{}), false /*isHttps*/)
 		assert.NotNil(err)
 		assert.Equal(-1, hostPort)
 		assert.True(len(hostAddr) == 0)

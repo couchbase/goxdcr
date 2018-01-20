@@ -655,7 +655,7 @@ func (capi *CapiNozzle) batchGetMeta(vbno uint16, bigDoc_map base.McRequestMap) 
 
 	// Query the Target by feeding it the current key -> revisions
 	var out interface{}
-	err, statusCode := capi.utils.QueryRestApiWithAuth(couchApiBaseHost, couchApiBasePath+base.RevsDiffPath, true, capi.config.username, capi.config.password, capi.config.certificate, false, nil, nil, base.ClientCertAuthDisable, false, base.MethodPost, base.JsonContentType,
+	err, statusCode := capi.utils.QueryRestApiWithAuth(couchApiBaseHost, couchApiBasePath+base.RevsDiffPath, true, capi.config.username, capi.config.password, base.HttpAuthMechPlain, nil, false, nil, nil, base.ClientCertAuthDisable, false, base.MethodPost, base.JsonContentType,
 		keysAndRevisions, capi.config.connectionTimeout, &out, nil, false, capi.Logger())
 	capi.Logger().Debugf("%v results of _revs_diff query for vb %v: err=%v, status=%v\n", capi.Id(), vbno, err, statusCode)
 	if err != nil {
@@ -896,7 +896,7 @@ func (capi *CapiNozzle) batchUpdateDocs(vbno uint16, req_list *[]*base.WrappedMC
 
 	total_length := len(BodyPartsPrefix) + doc_length + len(BodyPartsSuffix)
 
-	http_req, _, err := capi.utils.ConstructHttpRequest(couchApiBaseHost, couchApiBasePath+base.BulkDocsPath, true, capi.config.username, capi.config.password, capi.config.certificate, base.UserAuthModeBasic, base.MethodPost, base.JsonContentType,
+	http_req, _, err := capi.utils.ConstructHttpRequest(couchApiBaseHost, couchApiBasePath+base.BulkDocsPath, true, capi.config.username, capi.config.password, base.HttpAuthMechPlain, base.UserAuthModeBasic, base.MethodPost, base.JsonContentType,
 		nil, capi.Logger())
 	if err != nil {
 		return

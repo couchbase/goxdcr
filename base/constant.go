@@ -213,13 +213,14 @@ var NoIpSANErrMsg = "IP SANs"
 const (
 	RemoteClustersPath = "pools/default/remoteClusters"
 
-	RemoteClusterUuid              = "uuid"
-	RemoteClusterName              = "name"
-	RemoteClusterHostName          = "hostname"
-	RemoteClusterUserName          = "username"
-	RemoteClusterPassword          = "password"
+	RemoteClusterUuid     = "uuid"
+	RemoteClusterName     = "name"
+	RemoteClusterHostName = "hostname"
+	RemoteClusterUserName = "username"
+	RemoteClusterPassword = "password"
+	// for migration only
 	RemoteClusterDemandEncryption  = "demandEncryption"
-	RemoteClusterEncryptionType    = "encryptionType"
+	RemoteClusterSecureType        = "secureType"
 	RemoteClusterCertificate       = "certificate"
 	RemoteClusterClientCertificate = "clientCertificate"
 	RemoteClusterClientKey         = "clientKey"
@@ -228,6 +229,13 @@ const (
 	RemoteClusterDeleted           = "deleted"
 	IsEnterprise                   = "isEnterprise"
 	Pools                          = "pools"
+)
+
+// secure type for remote cluster reference
+const (
+	SecureTypeNone = "none"
+	SecureTypeHalf = "half"
+	SecureTypeFull = "full"
 )
 
 // constants used for create replication request
@@ -414,6 +422,7 @@ var VersionForSANInCertificateSupport = []int{4, 0}
 var VersionForRBACAndXattrSupport = []int{5, 0}
 var VersionForCompressionSupport = []int{5, 5}
 var VersionForClientCertSupport = []int{5, 5}
+var VersionForHttpScramShaSupport = []int{5, 5}
 
 var GoxdcrUserAgentPrefix = "couchbase-goxdcr"
 var GoxdcrUserAgent = ""

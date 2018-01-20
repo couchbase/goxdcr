@@ -33,11 +33,11 @@ func (ci_svc *ClusterInfoSvc) getBucketInfo(clusterConnInfoProvider base.Cluster
 	if err != nil {
 		return "", nil, err
 	}
-	userName, password, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, err := clusterConnInfoProvider.MyCredentials()
+	userName, password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, err := clusterConnInfoProvider.MyCredentials()
 	if err != nil {
 		return "", nil, err
 	}
-	bucketInfo, err := ci_svc.utils.GetBucketInfo(connStr, bucketName, userName, password, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, ci_svc.logger)
+	bucketInfo, err := ci_svc.utils.GetBucketInfo(connStr, bucketName, userName, password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, ci_svc.logger)
 
 	return connStr, bucketInfo, err
 }
@@ -59,7 +59,7 @@ func (ci_svc *ClusterInfoSvc) IsClusterCompatible(clusterConnInfoProvider base.C
 		return false, err
 	}
 
-	username, password, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, err := clusterConnInfoProvider.MyCredentials()
+	username, password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, err := clusterConnInfoProvider.MyCredentials()
 	if err != nil {
 		return false, err
 	}
@@ -67,7 +67,7 @@ func (ci_svc *ClusterInfoSvc) IsClusterCompatible(clusterConnInfoProvider base.C
 	// so far IsClusterCompatible is called only when the remote cluster reference is ssl enabled
 	// which indicates that the target cluster is not an elastic search cluster
 	// it should be safe to call GetNodeListWithFullInfo() to retrive full node info
-	nodeList, err := ci_svc.utils.GetNodeListWithFullInfo(connStr, username, password, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, ci_svc.logger)
+	nodeList, err := ci_svc.utils.GetNodeListWithFullInfo(connStr, username, password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, ci_svc.logger)
 	if err == nil && len(nodeList) > 0 {
 		clusterCompatibility, err := ci_svc.utils.GetClusterCompatibilityFromNodeList(nodeList)
 		if err != nil {

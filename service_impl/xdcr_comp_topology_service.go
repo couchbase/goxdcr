@@ -222,8 +222,8 @@ func (top_svc *XDCRTopologySvc) MyConnectionStr() (string, error) {
 	return base.GetHostAddr(host, top_svc.adminport), nil
 }
 
-func (top_svc *XDCRTopologySvc) MyCredentials() (string, string, []byte, bool, []byte, []byte, base.ClientCertAuth, error) {
-	return "", "", nil, false, nil, nil, base.ClientCertAuthDisable, nil
+func (top_svc *XDCRTopologySvc) MyCredentials() (string, string, base.HttpAuthMech, []byte, bool, []byte, []byte, base.ClientCertAuth, error) {
+	return "", "", base.HttpAuthMechPlain, nil, false, nil, nil, base.ClientCertAuthDisable, nil
 }
 
 func (top_svc *XDCRTopologySvc) MyClusterUuid() (string, error) {

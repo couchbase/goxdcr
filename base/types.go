@@ -68,8 +68,8 @@ func (vbts *VBTimestamp) String() string {
 
 type ClusterConnectionInfoProvider interface {
 	MyConnectionStr() (string, error)
-	// returns username, password, certificate, whether certificate contains SAN, client certificate, client key, client cert auth setting on remote cluster
-	MyCredentials() (string, string, []byte, bool, []byte, []byte, ClientCertAuth, error)
+	// returns username, password, http auth mechanism, certificate, whether certificate contains SAN, client certificate, client key, client cert auth setting on remote cluster
+	MyCredentials() (string, string, HttpAuthMech, []byte, bool, []byte, []byte, ClientCertAuth, error)
 }
 
 type ReplicationInfo struct {
@@ -273,3 +273,29 @@ const (
 	// basic user auth using passed in username and password - so far this applies to user in remote clusters only
 	UserAuthModeBasic UserAuthMode = iota
 )
+
+// http authentication mode
+type HttpAuthMech int
+
+const (
+	// plain http authentication
+	HttpAuthMechPlain HttpAuthMech = iota
+	// scram sha authentication
+	HttpAuthMechScramSha HttpAuthMech = iota
+	// https authentication
+	HttpAuthMechHttps HttpAuthMech = iota
+)
+
+// for logging
+func (httpAuthMech HttpAuthMech) String() string {
+	switch httpAuthMech {
+	case HttpAuthMechPlain:
+		return "Plain"
+	case HttpAuthMechScramSha:
+		return "ScramSha"
+	case HttpAuthMechHttps:
+		return "Https"
+	default:
+		return "Unknown"
+	}
+}

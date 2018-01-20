@@ -12,6 +12,9 @@ import (
 	"net/http"
 )
 
+const GoxdcrPrefix = "_goxdcr/"
+const BucketUuidPrefix = "?bucket_uuid="
+
 const (
 	PRE_REPLICATE_CMD       string = "_pre_replicate"
 	MASS_VBOPAQUE_CHECK_CMD string = "_mass_vbopaque_check"
@@ -24,9 +27,11 @@ var NO_VB_OPAQUE_IN_RESP_ERR error = errors.New("No vb opaque in the response")
 //apiRequest is a structure for http request used for CAPI
 type apiRequest struct {
 	url                   string
+	path                  string
 	username              string
 	password              string
 	body                  base.InterfaceMap
+	httpAuthMech          base.HttpAuthMech
 	certificate           []byte
 	SANInCertificate      bool
 	insecureSkipVerify    bool
@@ -96,7 +101,7 @@ func NewCAPIService(cluster_info_service *ClusterInfoSvc, logger_ctx *log.Logger
 func (capi_svc *CAPIService) PreReplicate(remoteBucket *service_def.RemoteBucketInfo,
 	knownRemoteVBStatus *service_def.RemoteVBReplicationStatus, xdcrCheckpointingCapbility bool) (bMatch bool, current_remoteVBOpaque metadata.TargetVBOpaque, err error) {
 	capi_svc.logger.Debug("Calling _pre_replicate")
-	api_base, err := capi_svc.composeAPIRequestBaseForVb(remoteBucket, knownRemoteVBStatus.VBNo)
+	api_base, err := capi_svc.composeAPIRequestBaseForVb(remoteBucket, knownRemoteVBStatus.VBNo, PRE_REPLICATE_CMD)
 	if err != nil {
 		return
 	}
@@ -109,7 +114,7 @@ func (capi_svc *CAPIService) PreReplicate(remoteBucket *service_def.RemoteBucket
 		capi_svc.logger.Debugf("request to _pre_replicate = %v\n", api_base.CloneAndRedact())
 	}
 	http_client := remoteBucket.RestAddrHttpClientMap[api_base.url]
-	status_code, respMap, _, err := capi_svc.send_post(PRE_REPLICATE_CMD, api_base, http_client, base.MaxRetryCapiService)
+	status_code, respMap, err := capi_svc.send_post(api_base, http_client, base.MaxRetryCapiService)
 	capi_svc.logger.Debugf("response from _pre_replicate is status_code=%v respMap=%v for %v\n", status_code, respMap, knownRemoteVBStatus)
 	if err != nil {
 		capi_svc.logger.Errorf("Calling _pre_replicate on %v failed for vb=%v, err=%v\n", api_base.url, knownRemoteVBStatus.VBNo, err)
@@ -134,14 +139,14 @@ func (capi_svc *CAPIService) PreReplicate(remoteBucket *service_def.RemoteBucket
 //			  err
 func (capi_svc *CAPIService) CommitForCheckpoint(remoteBucket *service_def.RemoteBucketInfo, remoteVBOpaque metadata.TargetVBOpaque, vbno uint16) (remote_seqno uint64, vbOpaque metadata.TargetVBOpaque, err error) {
 	capi_svc.logger.Debug("Calling _commit_for_checkpoint")
-	api_base, err := capi_svc.composeAPIRequestBaseForVb(remoteBucket, vbno)
+	api_base, err := capi_svc.composeAPIRequestBaseForVb(remoteBucket, vbno, COMMIT_FOR_CKPT_CMD)
 	if err != nil {
 		return
 	}
 	api_base.body["vb"] = vbno
 	api_base.body["vbopaque"] = remoteVBOpaque.Value()
 	http_client := remoteBucket.RestAddrHttpClientMap[api_base.url]
-	status_code, respMap, _, err := capi_svc.send_post(COMMIT_FOR_CKPT_CMD, api_base, http_client, base.MaxRetryCapiService)
+	status_code, respMap, err := capi_svc.send_post(api_base, http_client, base.MaxRetryCapiService)
 
 	if err == nil && status_code == 400 {
 		vbOpaque, err := getVBOpaqueFromRespMap(status_code, respMap, vbno)
@@ -227,14 +232,14 @@ func (capi_svc *CAPIService) massValidateVBUUIDsForServer(remoteBucket *service_
 	server_addr string, vblist []uint16) (matching []uint16, mismatching []uint16, missing []uint16, err error) {
 	capi_svc.logger.Infof("Calling _mass_vbopaque_check for server %v\n", server_addr)
 
-	api_base, err := capi_svc.composeAPIRequestBaseForServer(remoteBucket, server_addr)
+	api_base, err := capi_svc.composeAPIRequestBaseForServer(remoteBucket, server_addr, MASS_VBOPAQUE_CHECK_CMD)
 	if err != nil {
 		return
 	}
 
 	api_base.body["vbopaques"] = vbopaques
 	http_client := remoteBucket.RestAddrHttpClientMap[api_base.url]
-	status_code, respMap, _, err := capi_svc.send_post(MASS_VBOPAQUE_CHECK_CMD, api_base, http_client, base.MaxRetryCapiService)
+	status_code, respMap, err := capi_svc.send_post(api_base, http_client, base.MaxRetryCapiService)
 
 	capi_svc.logger.Debugf("vbopaques=%v\n", vbopaques)
 	if err != nil {
@@ -285,30 +290,30 @@ func (capi_svc *CAPIService) parseMassValidateSeqNosResp(url string, resp_status
 	return
 }
 
-func (capi_svc *CAPIService) composeAPIRequestBaseForVb(remoteBucket *service_def.RemoteBucketInfo, vbno uint16) (*apiRequest, error) {
+func (capi_svc *CAPIService) composeAPIRequestBaseForVb(remoteBucket *service_def.RemoteBucketInfo, vbno uint16, restMethodName string) (*apiRequest, error) {
 	rest_addr, err := capi_svc.lookUpConnectionStrForVb(remoteBucket, vbno)
 	if err != nil {
 		return nil, err
 	}
 
-	return capi_svc.composeAPIRequestBase(remoteBucket, rest_addr)
+	return capi_svc.composeAPIRequestBase(remoteBucket, rest_addr, restMethodName)
 }
 
-func (capi_svc *CAPIService) composeAPIRequestBaseForServer(remoteBucket *service_def.RemoteBucketInfo, server_addr string) (*apiRequest, error) {
+func (capi_svc *CAPIService) composeAPIRequestBaseForServer(remoteBucket *service_def.RemoteBucketInfo, server_addr string, restMethodName string) (*apiRequest, error) {
 	rest_addr, err := capi_svc.lookUpConnectionStrForServer(remoteBucket, server_addr)
 	if err != nil {
 		return nil, err
 	}
 
-	return capi_svc.composeAPIRequestBase(remoteBucket, rest_addr)
+	return capi_svc.composeAPIRequestBase(remoteBucket, rest_addr, restMethodName)
 }
 
-func (capi_svc *CAPIService) composeAPIRequestBase(remoteBucket *service_def.RemoteBucketInfo, rest_addr string) (*apiRequest, error) {
+func (capi_svc *CAPIService) composeAPIRequestBase(remoteBucket *service_def.RemoteBucketInfo, rest_addr string, restMethodName string) (*apiRequest, error) {
 	if remoteBucket.RemoteClusterRef == nil || remoteBucket.UUID == "" {
 		return nil, errors.New("Remote Bucket information is not fully populated")
 	}
 
-	username, password, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, err := remoteBucket.RemoteClusterRef.MyCredentials()
+	username, password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, err := remoteBucket.RemoteClusterRef.MyCredentials()
 	if err != nil {
 		return nil, err
 	}
@@ -320,13 +325,23 @@ func (capi_svc *CAPIService) composeAPIRequestBase(remoteBucket *service_def.Rem
 	api_base.username = username
 	api_base.password = password
 	api_base.body = make(map[string]interface{})
-	api_base.body["bucket"] = remoteBucket.BucketName
-	api_base.body["bucketUUID"] = remoteBucket.UUID
+	api_base.httpAuthMech = httpAuthMech
 	api_base.certificate = certificate
 	api_base.SANInCertificate = sanInCertificate
 	api_base.clientCertificate = clientCertificate
 	api_base.clientKey = clientKey
 	api_base.clientCertAuthSetting = clientCertAuthSetting
+
+	if remoteBucket.UseCouchApiBase {
+		// old way of using couchApiBase as the url
+		api_base.path = restMethodName
+		api_base.body["bucket"] = remoteBucket.BucketName
+		api_base.body["bucketUUID"] = remoteBucket.UUID
+	} else {
+		// post-vulcan way of using new end point url in ns_server
+		// e.g., _goxdcr/_pre_replicate/default?bucket_uuid=88f51cad913124c38d5a1894b51af683
+		api_base.path = GoxdcrPrefix + restMethodName + base.UrlDelimiter + remoteBucket.BucketName + BucketUuidPrefix + remoteBucket.UUID
+	}
 	return api_base, nil
 }
 
@@ -362,14 +377,15 @@ func (capi_svc *CAPIService) composePreReplicateBody(api_base *apiRequest, known
 	return nil
 }
 
-func (capi_svc *CAPIService) send_post(restMethodName string, api_base *apiRequest, client *http.Client, num_retry int) (int, map[string]interface{}, *http.Client, error) {
+func (capi_svc *CAPIService) send_post(api_base *apiRequest, client *http.Client, num_retry int) (int, map[string]interface{}, error) {
 	var ret_map = make(map[string]interface{})
 	body, err := json.Marshal(api_base.body)
 	if err != nil {
-		return 0, nil, nil, err
+		return 0, nil, err
 	}
-	err, statusCode, ret_client := capi_svc.utils.InvokeRestWithRetryWithAuth(api_base.url, restMethodName, false, api_base.username, api_base.password, api_base.certificate, api_base.SANInCertificate, api_base.clientCertificate, api_base.clientKey, api_base.clientCertAuthSetting, api_base.insecureSkipVerify, base.MethodPost, base.JsonContentType, body, 0, &ret_map, client, true, capi_svc.logger, num_retry)
-	return statusCode, ret_map, ret_client, err
+
+	err, statusCode := capi_svc.utils.InvokeRestWithRetryWithAuth(api_base.url, api_base.path, false, api_base.username, api_base.password, api_base.httpAuthMech, api_base.certificate, api_base.SANInCertificate, api_base.clientCertificate, api_base.clientKey, api_base.clientCertAuthSetting, api_base.insecureSkipVerify, base.MethodPost, base.JsonContentType, body, 0, &ret_map, client, true, capi_svc.logger, num_retry)
+	return statusCode, ret_map, err
 }
 
 func (capi_svc *CAPIService) parsePreReplicateResp(hostName string,

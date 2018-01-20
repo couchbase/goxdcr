@@ -33,8 +33,10 @@ type RemoteBucketInfo struct {
 	VBServerMap              map[string][]uint16
 	MemcachedAddrRestAddrMap map[string]string
 	RestAddrHttpClientMap    map[string]*http.Client
-	logger                   *log.CommonLogger
-	utils                    utilities.UtilsIface
+	// Whether to use couchApiBase or host address for capi service end point
+	UseCouchApiBase bool
+	logger          *log.CommonLogger
+	utils           utilities.UtilsIface
 }
 
 func NewRemoteBucketInfo(remoteClusterRefName string, bucketName string, remote_cluster_ref *metadata.RemoteClusterReference,
@@ -65,7 +67,7 @@ func (remoteBucket *RemoteBucketInfo) refresh_internal(remote_cluster_svc Remote
 		remoteBucket.RemoteClusterRef = remoteClusterRef
 	}
 
-	username, password, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, err := remoteBucket.RemoteClusterRef.MyCredentials()
+	username, password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, err := remoteBucket.RemoteClusterRef.MyCredentials()
 	if err != nil {
 		return err
 	}
@@ -74,7 +76,7 @@ func (remoteBucket *RemoteBucketInfo) refresh_internal(remote_cluster_svc Remote
 		return err
 	}
 
-	targetBucketInfo, err := remoteBucket.utils.GetBucketInfo(connStr, remoteBucket.BucketName, username, password, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, remoteBucket.logger)
+	targetBucketInfo, err := remoteBucket.utils.GetBucketInfo(connStr, remoteBucket.BucketName, username, password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, remoteBucket.logger)
 	if err != nil {
 		return err
 	}
@@ -116,24 +118,45 @@ func (remoteBucket *RemoteBucketInfo) refresh_internal(remote_cluster_svc Remote
 	remoteBucket.MemcachedAddrRestAddrMap = make(map[string]string)
 	remoteBucket.RestAddrHttpClientMap = make(map[string]*http.Client)
 
-	urlmap, err := capi_utils.ConstructServerCouchApiBaseMap(remoteBucket.BucketName, targetBucketInfo, remoteBucket.RemoteClusterRef, remoteBucket.utils)
+	isTargetES := remoteBucket.utils.CheckWhetherClusterIsESBasedOnBucketInfo(targetBucketInfo)
+	// use CouchApiBase when target is elasticsearch or pre-Vulcan couchbase server
+	if isTargetES {
+		remoteBucket.UseCouchApiBase = true
+	} else {
+		clusterCompatibility, err := remoteBucket.utils.GetClusterCompatibilityFromBucketInfo(targetBucketInfo, remoteBucket.logger)
+		if err != nil {
+			return err
+		}
+		nsServerScramShaSupport := base.IsClusterCompatible(clusterCompatibility, base.VersionForHttpScramShaSupport)
+		remoteBucket.UseCouchApiBase = !nsServerScramShaSupport
+	}
+
+	urlmap, err := capi_utils.ConstructCapiServiceEndPointMap(remoteBucket.BucketName, targetBucketInfo, remoteBucket.RemoteClusterRef, remoteBucket.utils, remoteBucket.UseCouchApiBase)
 	if err != nil {
 		return err
 	}
 
-	//the url it returns http://127.0.0.1:9500/default%2B77aceaa5b49efbd92a261b8a1e72dab5
-	//we only need the host part
 	for serverAddr, urlstr := range urlmap {
-		u, err := url.Parse(urlstr)
+		var hostAddr string
+		if remoteBucket.UseCouchApiBase {
+			// urlstr is couchApiBase, which looks like http://127.0.0.1:9500/default%2B77aceaa5b49efbd92a261b8a1e72dab5
+			// we only need the host part
+			u, err := url.Parse(urlstr)
+			if err != nil {
+				return err
+			}
+			hostAddr = u.Host
+		} else {
+			// urlstr is the host address, e.g., 127.0.0.1:9000, which can be used as is
+			hostAddr = urlstr
+		}
+
+		remoteBucket.MemcachedAddrRestAddrMap[serverAddr] = hostAddr
+		http_client, err := remoteBucket.utils.GetHttpClient(username, remoteBucket.RemoteClusterRef.HttpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, hostAddr, remoteBucket.logger)
 		if err != nil {
 			return err
 		}
-		remoteBucket.MemcachedAddrRestAddrMap[serverAddr] = u.Host
-		http_client, err := remoteBucket.utils.GetHttpClient(username, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, u.Host, remoteBucket.logger)
-		if err != nil {
-			return err
-		}
-		remoteBucket.RestAddrHttpClientMap[u.Host] = http_client
+		remoteBucket.RestAddrHttpClientMap[hostAddr] = http_client
 	}
 	remoteBucket.logger.Infof("remoteBucket.MemcachedAddrRestAddrMap=%v\n", remoteBucket.MemcachedAddrRestAddrMap)
 

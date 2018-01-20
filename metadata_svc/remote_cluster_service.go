@@ -194,12 +194,19 @@ func (rctx *refreshContext) getConnStrAndSetHttps(hostname string) (string, erro
 	var err error
 	rctx.httpsHostName = ""
 	if rctx.refCache.IsEncryptionEnabled() {
-		rctx.httpsHostName, err = rctx.agent.getHttpsAddrFunc(hostname)
-		if err != nil {
-			rctx.agent.logger.Warnf("When refreshing remote cluster reference %v, skipping node %v since received error getting https address. err=%v\n", rctx.refCache.Id, hostname, err)
-			return "", err
+		if len(rctx.refCache.Certificate) > 0 {
+			// populate httpsHostName since it may be needed for the retrieval of security settings
+			rctx.httpsHostName, err = rctx.agent.getHttpsAddrFunc(hostname)
+			if err != nil {
+				rctx.agent.logger.Warnf("When refreshing remote cluster reference %v, skipping node %v since received error getting https address. err=%v\n", rctx.refCache.Id, hostname, err)
+				return "", err
+			}
 		}
-		return rctx.httpsHostName, nil
+		if rctx.refCache.IsHttps() {
+			return rctx.httpsHostName, nil
+		} else {
+			return rctx.hostName, nil
+		}
 	} else {
 		return rctx.hostName, nil
 	}
@@ -265,22 +272,22 @@ func (rctx *refreshContext) finalizeRefCacheListFrom(listToBeUsed []string) {
 }
 
 func (rctx *refreshContext) verifyNodeAndGetList(connStr string, updateSecuritySettings bool) ([]interface{}, error) {
-	username, password, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, err := rctx.refCache.MyCredentials()
+	username, password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, err := rctx.refCache.MyCredentials()
 	if err != nil {
 		rctx.agent.logger.Warnf("When refreshing remote cluster reference %v, skipping node %v because of error retrieving user credentials from reference. err=%v\n", rctx.refCache.Id, connStr, err)
 		return nil, err
 	}
 
 	var defaultPoolInfo map[string]interface{}
-	if updateSecuritySettings && len(certificate) > 0 {
-		// if updateSecuritySettings is true and ssl is enabled, get up to date sanInCertificate and clientCertAuthSetting from target
-		sanInCertificate, clientCertAuthSetting, defaultPoolInfo, err = rctx.agent.utils.GetDefaultPoolInfoWithSecuritySettings(connStr, username, password, certificate, clientCertificate, clientKey, rctx.agent.logger)
+	if updateSecuritySettings && rctx.refCache.IsEncryptionEnabled() {
+		// if updateSecuritySettings is true, get up to date security settings from target
+		sanInCertificate, clientCertAuthSetting, httpAuthMech, defaultPoolInfo, err = rctx.agent.utils.GetSecuritySettingsAndDefaultPoolInfo(rctx.hostName, rctx.httpsHostName, username, password, certificate, clientCertificate, clientKey, rctx.refCache.IsHalfEncryption(), rctx.agent.logger)
 		if err != nil {
 			rctx.agent.logger.Warnf("When refreshing remote cluster reference %v, skipping node %v because of error retrieving security settings from target. err=%v\n", rctx.refCache.Id, connStr, err)
 			return nil, err
 		}
 	} else {
-		defaultPoolInfo, err = rctx.agent.utils.GetClusterInfo(connStr, base.DefaultPoolPath, username, password, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, rctx.agent.logger)
+		defaultPoolInfo, err = rctx.agent.utils.GetClusterInfo(connStr, base.DefaultPoolPath, username, password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, rctx.agent.logger)
 		if err != nil {
 			rctx.agent.logger.Warnf("When refreshing remote cluster reference %v, skipping node %v because of error retrieving default pool info from target. err=%v\n", rctx.refCache.Id, connStr, err)
 			return nil, err
@@ -298,14 +305,18 @@ func (rctx *refreshContext) verifyNodeAndGetList(connStr string, updateSecurityS
 		return nil, UUIDMismatchError
 	} else {
 		// update security settings only if the target node is still in the same target cluster
-		if updateSecuritySettings && len(certificate) > 0 {
+		if updateSecuritySettings && rctx.refCache.IsEncryptionEnabled() {
 			if rctx.refCache.SANInCertificate != sanInCertificate {
 				rctx.agent.logger.Infof("Updating sanInCertificate in remote cluster reference %v to %v\n", rctx.refCache.Id, sanInCertificate)
 				rctx.refCache.SANInCertificate = sanInCertificate
 			}
 			if rctx.refCache.ClientCertAuthSetting != clientCertAuthSetting {
-				rctx.agent.logger.Infof("Updating client cert auth in remote cluster reference %v from %v to %v\n", rctx.refCache.Id, rctx.refCache.ClientCertAuthSetting, clientCertAuthSetting)
+				rctx.agent.logger.Infof("Updating clientCertAuthSetting in remote cluster reference %v from %v to %v\n", rctx.refCache.Id, rctx.refCache.ClientCertAuthSetting, clientCertAuthSetting)
 				rctx.refCache.ClientCertAuthSetting = clientCertAuthSetting
+			}
+			if rctx.refCache.HttpAuthMech != httpAuthMech {
+				rctx.agent.logger.Infof("Updating httpAuthMech in remote cluster reference %v from %v to %v\n", rctx.refCache.Id, rctx.refCache.HttpAuthMech, httpAuthMech)
+				rctx.refCache.HttpAuthMech = httpAuthMech
 			}
 		}
 		return nodeList, nil
@@ -479,7 +490,7 @@ func (agent *RemoteClusterAgent) DeleteReference(delFromMetaKv bool) (*metadata.
  * Write lock needs to be held
  */
 func (agent *RemoteClusterAgent) syncInternalsFromStagedReferenceNoLock() error {
-	username, password, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, err := agent.pendingRef.MyCredentials()
+	username, password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, err := agent.pendingRef.MyCredentials()
 	if err != nil {
 		return err
 	}
@@ -489,7 +500,7 @@ func (agent *RemoteClusterAgent) syncInternalsFromStagedReferenceNoLock() error 
 	}
 
 	// use GetNodeListWithMinInfo API to ensure that it is supported by target cluster, which could be an elastic search cluster
-	nodeList, err := agent.utils.GetNodeListWithMinInfo(connStr, username, password, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, agent.logger)
+	nodeList, err := agent.utils.GetNodeListWithMinInfo(connStr, username, password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, agent.logger)
 	if err == nil {
 		agent.logger.Debugf("connStr=%v, nodeList=%v\n", connStr, nodeList)
 
@@ -1075,7 +1086,6 @@ func (service *RemoteClusterService) ValidateRemoteCluster(ref *metadata.RemoteC
 // this is the case when ref is being created or updated by user
 func (service *RemoteClusterService) validateRemoteCluster(ref *metadata.RemoteClusterReference, updateRef bool) error {
 	if ref.IsEncryptionEnabled() {
-		// check if source cluster supports SSL when SSL is specified
 		isEnterprise, err := service.xdcr_topology_svc.IsMyClusterEnterprise()
 		if err != nil {
 			return err
@@ -1121,11 +1131,11 @@ func (service *RemoteClusterService) validateRemoteCluster(ref *metadata.RemoteC
 			ref.ActiveHttpsHostName = ref.HttpsHostName
 
 			// this is called here since ref.HttpsHostName needs to be populated prior
-			ref.SANInCertificate, ref.ClientCertAuthSetting, _, err = service.utils.GetDefaultPoolInfoWithSecuritySettings(ref.HttpsHostName, ref.UserName, ref.Password, ref.Certificate, ref.ClientCertificate, ref.ClientKey, service.logger)
+			ref.SANInCertificate, ref.ClientCertAuthSetting, ref.HttpAuthMech, _, err = service.utils.GetSecuritySettingsAndDefaultPoolInfo(ref.HostName, ref.HttpsHostName, ref.UserName, ref.Password, ref.Certificate, ref.ClientCertificate, ref.ClientKey, ref.IsHalfEncryption(), service.logger)
 			if err != nil {
 				return wrapAsInvalidRemoteClusterError(err.Error())
 			}
-			service.logger.Infof("Set SANInCertificate=%v, ClientCertAuthSetting=%v for remote cluster reference %v\n", ref.SANInCertificate, ref.ClientCertAuthSetting, ref.Name)
+			service.logger.Infof("Set SANInCertificate=%v, ClientCertAuthSetting=%v HttpAuthMech=%v for remote cluster reference %v\n", ref.SANInCertificate, ref.ClientCertAuthSetting, ref.HttpAuthMech, ref.Name)
 		}
 	}
 
@@ -1143,7 +1153,7 @@ func (service *RemoteClusterService) validateRemoteCluster(ref *metadata.RemoteC
 	if err != nil {
 		return err
 	}
-	clusterInfo, err, statusCode := service.utils.GetClusterInfoWStatusCode(hostAddr, base.PoolsPath, ref.UserName, ref.Password, ref.Certificate, ref.SANInCertificate, ref.ClientCertificate, ref.ClientKey, ref.ClientCertAuthSetting, service.logger)
+	clusterInfo, err, statusCode := service.utils.GetClusterInfoWStatusCode(hostAddr, base.PoolsPath, ref.UserName, ref.Password, ref.HttpAuthMech, ref.Certificate, ref.SANInCertificate, ref.ClientCertificate, ref.ClientKey, ref.ClientCertAuthSetting, service.logger)
 	service.logger.Infof("Result from validate remote cluster call: err=%v, statusCode=%v. time taken=%v\n", err, statusCode, time.Since(startTime))
 	if err != nil || statusCode != http.StatusOK {
 		if statusCode == http.StatusUnauthorized {
@@ -1175,8 +1185,8 @@ func (service *RemoteClusterService) validateRemoteCluster(ref *metadata.RemoteC
 			return wrapAsInvalidRemoteClusterError("Remote cluster is not enterprise version and does not support SSL.")
 		}
 
-		// if ref is half-ssl, validate that target clusters is spock and up
-		if !ref.IsFullEncryption() {
+		// if ref is half secured, validate that target clusters is spock and up
+		if ref.IsHalfEncryption() {
 			rbacCompatible, err := service.cluster_info_svc.IsClusterCompatible(ref, base.VersionForRBACAndXattrSupport)
 			if err != nil {
 				return wrapAsInvalidRemoteClusterError("Failed to get target cluster version information")
@@ -1209,6 +1219,10 @@ func (service *RemoteClusterService) validateRemoteCluster(ref *metadata.RemoteC
 
 // validate certificates in remote cluster ref
 func (service *RemoteClusterService) validateCertificates(ref *metadata.RemoteClusterReference) error {
+	if len(ref.Certificate) == 0 {
+		return nil
+	}
+
 	// check validity of server root certificate
 	block, _ := pem.Decode(ref.Certificate)
 	if block == nil {
@@ -1226,34 +1240,36 @@ func (service *RemoteClusterService) validateCertificates(ref *metadata.RemoteCl
 	}
 
 	// check validity of client certificate if it has been provided
-	if len(ref.ClientCertificate) > 0 {
-		clientCert, err := tls.X509KeyPair(ref.ClientCertificate, ref.ClientKey)
+	if len(ref.ClientCertificate) == 0 {
+		return nil
+	}
+
+	clientCert, err := tls.X509KeyPair(ref.ClientCertificate, ref.ClientKey)
+	if err != nil {
+		return fmt.Errorf("Error parsing client certificate. err=%v", err)
+	}
+
+	parentCert := certificate
+
+	// clientCert.Certificate contains a chain of certificates, leaf first
+	// e.g., LeafCert, IntermediateCert1, IntermediateCert2
+	// we will be verifying these certificates in the reverse order
+	// first we check IntermediateCert2 is signed by its parent, the server root certificate
+	// then we check IntermediateCert1 is signed by IntermediateCert2
+	// then we check LeafCert is signed by IntermediateCert1
+	// if any of the certificates has been tempered with, the corresponding check should fail
+	for index := len(clientCert.Certificate) - 1; index >= 0; index-- {
+		curCert, err := x509.ParseCertificate(clientCert.Certificate[index])
 		if err != nil {
-			return fmt.Errorf("Error parsing client certificate. err=%v", err)
-		}
-
-		parentCert := certificate
-
-		// clientCert.Certificate contains a chain of certificates, leaf first
-		// e.g., LeafCert, IntermediateCert1, IntermediateCert2
-		// we will be verifying these certificates in the reverse order
-		// first we check IntermediateCert2 is signed by its parent, the server root certificate
-		// then we check IntermediateCert1 is signed by IntermediateCert2
-		// then we check LeafCert is signed by IntermediateCert1
-		// if any of the certificates has been tempered with, the corresponding check should fail
-		for index := len(clientCert.Certificate) - 1; index >= 0; index-- {
-			curCert, err := x509.ParseCertificate(clientCert.Certificate[index])
+			return fmt.Errorf("Error parsing certificate chain in client certificate. err=%v", err)
+		} else {
+			err = curCert.CheckSignatureFrom(parentCert)
 			if err != nil {
-				return fmt.Errorf("Error parsing certificate chain in client certificate. err=%v", err)
-			} else {
-				err = curCert.CheckSignatureFrom(parentCert)
-				if err != nil {
-					return fmt.Errorf("Error validating the signature of client certficate. err=%v", err)
-				}
+				return fmt.Errorf("Error validating the signature of client certficate. err=%v", err)
 			}
-
-			parentCert = curCert
 		}
+
+		parentCert = curCert
 	}
 
 	return nil

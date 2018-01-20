@@ -2859,8 +2859,9 @@ func (xmem *XmemNozzle) recordBatchSize(batchSize uint32) {
 
 func (xmem *XmemNozzle) getClientWithRetry(xmem_id string, pool base.ConnPool, finish_ch chan bool, initializing bool, logger *log.CommonLogger) (mcc.ClientIface, error) {
 	getClientOpFunc := func(param interface{}) (interface{}, error) {
+		sanInCertificate := xmem.config.san_in_certificate
 		clientCertAuthSetting := xmem.config.clientCertAuthSetting
-		if !initializing && len(xmem.config.certificate) > 0 {
+		if !initializing && xmem.config.encryptionType == metadata.EncryptionType_Full {
 			// if this is not replication startup time, and ssl is enabled, re-compute clientCertAuthSetting since it could have changed
 			targetClusterRef, err := xmem.remoteClusterSvc.RemoteClusterByUuid(xmem.targetClusterUuid, false)
 			if err != nil {
@@ -2870,12 +2871,15 @@ func (xmem *XmemNozzle) getClientWithRetry(xmem_id string, pool base.ConnPool, f
 			if err != nil {
 				return nil, err
 			}
-			_, clientCertAuthSetting, _, err = xmem.utils.GetDefaultPoolInfoWithSecuritySettings(connStr, xmem.config.username, xmem.config.password, xmem.config.certificate, xmem.config.clientCertificate, xmem.config.clientKey, logger)
+			// hostAddr not used in full encryption mode
+			sanInCertificate, clientCertAuthSetting, _, _, err = xmem.utils.GetSecuritySettingsAndDefaultPoolInfo("" /*hostAddr*/, connStr,
+				xmem.config.username, xmem.config.password, xmem.config.certificate, xmem.config.clientCertificate,
+				xmem.config.clientKey, false /*scramShaEnabled*/, logger)
 			if err != nil {
 				return nil, err
 			}
 		}
-		return pool.GetNew(clientCertAuthSetting)
+		return pool.GetNew(sanInCertificate, clientCertAuthSetting)
 	}
 
 	result, err := xmem.utils.ExponentialBackoffExecutorWithFinishSignal("xmem.getClientWithRetry", base.XmemBackoffTimeNewConn, base.XmemMaxRetryNewConn,
