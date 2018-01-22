@@ -235,3 +235,27 @@ func (in InterfaceMap) Redact() InterfaceMap {
 	}
 	return in
 }
+
+// bucket info map
+type BucketKVVbMap map[string][]uint16
+
+// Usually, server vbucket maps are consisted of host:directPort
+// To support External hosts, we need to manually look up external hosts if they exist, as well as
+// the external direct port if they exist.
+func (kvVbMap BucketKVVbMap) ReplaceInternalWithExternalHosts(translationMap map[string]string) {
+	var keysToDelete []string
+	// bucketKVVBMap's key is usually [internalHostname:internalPort]
+	// The translated map will look like [internalHostname:internalPort] -> [externalHostName:externalPort/internalPort]
+	for internalHostAndPort, vbSlice := range kvVbMap {
+		var externalHostAndPort string
+		externalHostAndPort, internalExists := translationMap[internalHostAndPort]
+		if internalExists {
+			// replace the internal key with external key and the same value
+			kvVbMap[externalHostAndPort] = vbSlice
+			keysToDelete = append(keysToDelete, internalHostAndPort)
+		}
+	}
+	for _, key := range keysToDelete {
+		delete(kvVbMap, key)
+	}
+}

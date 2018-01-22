@@ -62,6 +62,8 @@ var NodesKey = "nodes"
 var HostNameKey = "hostname"
 var ThisNodeKey = "thisNode"
 var SSLPortKey = "httpsMgmt"
+var SSLMgtPortKey = "mgmtSSL"
+var MgtPortKey = "mgmt"
 var PortsKey = "ports"
 var DirectPortKey = "direct"
 var NodeExtKey = "nodesExt"
@@ -83,6 +85,10 @@ var EvictionPolicyKey = "evictionPolicy"
 var BucketNameKey = "name"
 var ClusterMembershipKey = "clusterMembership"
 var AuthTypeKey = "authType"
+var AlternateKey = "alternateAddresses"
+var ExternalKey = "external"
+var CapiPortKey = "capi"
+var CapiSSLPortKey = "capiSSL"
 
 // URL related constants
 var UrlDelimiter = "/"
@@ -732,5 +738,7 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	ThresholdForThroughSeqnoComputation = thresholdForThroughSeqnoComputation
 	StatsLogInterval = statsLogInterval
 	XmemDefaultRespTimeout = xmemDefaultRespTimeout
-	BypassSanInCertificateCheck = (bypassSanInCertificateCheck != 0)
+	if !BypassSanInCertificateCheck /* If set to true in the source code, honor it */ {
+		BypassSanInCertificateCheck = (bypassSanInCertificateCheck != 0)
+	}
 }

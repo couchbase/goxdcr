@@ -123,7 +123,7 @@ func setupMocks(srcResolutionType string,
 		bucketType, bucketUUID, srcResolutionType, bucketEvictionPolicy, bucketKVVBMap, err)
 
 	// TARGET mock - emptyString since we're feeding a dummy target
-	utilitiesMock.On("BucketValidationInfo", "",
+	utilitiesMock.On("RemoteBucketValidationInfo", "",
 		mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(bucketInfo,
 		bucketType, bucketUUID, destResolutionType, bucketEvictionPolicy, bucketKVVBMap, err)
 

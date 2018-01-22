@@ -8,7 +8,6 @@ import (
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
 	service_def "github.com/couchbase/goxdcr/service_def/mocks"
-	//	"github.com/couchbase/goxdcr/simple_utils"
 	utilsMock "github.com/couchbase/goxdcr/utils/mocks"
 	"github.com/stretchr/testify/assert"
 	mock "github.com/stretchr/testify/mock"
@@ -105,7 +104,7 @@ func setupUtilsMockGeneric(utilitiesMock *utilsMock.UtilsIface) {
 	emptyList := make([]interface{}, 5)
 	hostnameList := append(emptyList, localhost)
 	utilitiesMock.On("GetNodeListWithMinInfo", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(emptyList, nil)
-	utilitiesMock.On("GetNodeNameListFromNodeList", mock.Anything, mock.Anything, mock.Anything).Return(dummyHostNameList, nil)
+	utilitiesMock.On("GetRemoteNodeNameListFromNodeList", mock.Anything, mock.Anything, mock.Anything).Return(dummyHostNameList, nil)
 	utilitiesMock.On("GetHostName", mock.Anything).Return(localhost)
 	utilitiesMock.On("GetPortNumber", mock.Anything).Return(uint16(9999), nil)
 	utilitiesMock.On("GetClusterUUIDAndNodeListWithMinInfo", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(uuidField, hostnameList, nil)
@@ -117,7 +116,7 @@ func setupUtilsMockPre1Good3Bad(utilitiesMock *utilsMock.UtilsIface) {
 	emptyList := make([]interface{}, 5)
 	hostnameList := append(emptyList, localhost)
 	utilitiesMock.On("GetNodeListWithMinInfo", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(emptyList, nil)
-	utilitiesMock.On("GetNodeNameListFromNodeList", mock.Anything, mock.Anything, mock.Anything).Return(dummyHostNameList2, nil)
+	utilitiesMock.On("GetRemoteNodeNameListFromNodeList", mock.Anything, mock.Anything, mock.Anything).Return(dummyHostNameList2, nil)
 	utilitiesMock.On("GetHostName", mock.Anything).Return(localhost)
 	utilitiesMock.On("GetPortNumber", mock.Anything).Return(uint16(9999), nil)
 	utilitiesMock.On("GetClusterUUIDAndNodeListWithMinInfo", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(uuidField, hostnameList, nil)
@@ -130,7 +129,7 @@ func setupUtilsOneNode(utilitiesMock *utilsMock.UtilsIface) {
 	singleList := []string{hostname}
 	hostnameList := append(emptyList, localhost)
 	utilitiesMock.On("GetNodeListWithMinInfo", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(emptyList, nil)
-	utilitiesMock.On("GetNodeNameListFromNodeList", mock.Anything, mock.Anything, mock.Anything).Return(singleList, nil)
+	utilitiesMock.On("GetRemoteNodeNameListFromNodeList", mock.Anything, mock.Anything, mock.Anything).Return(singleList, nil)
 	utilitiesMock.On("GetHostName", mock.Anything).Return(localhost)
 	utilitiesMock.On("GetPortNumber", mock.Anything).Return(uint16(9999), nil)
 	utilitiesMock.On("GetClusterUUIDAndNodeListWithMinInfo", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(uuidField, hostnameList, nil)
@@ -162,10 +161,10 @@ func setupUtilsMock1Good3Bad(utilitiesMock *utilsMock.UtilsIface) []string {
 	utilitiesMock.On("GetClusterUUIDAndNodeListWithMinInfoFromDefaultPoolInfo", emptyMap, mock.Anything).Return(uuidField, emptyList, nil)
 
 	// diff from generic above
-	utilitiesMock.On("GetNodeNameListFromNodeList", mock.Anything, hostname, mock.Anything).Return(splitNames2, nil)
-	utilitiesMock.On("GetNodeNameListFromNodeList", mock.Anything, hostname2, mock.Anything).Return(splitNames2, nil)
-	utilitiesMock.On("GetNodeNameListFromNodeList", mock.Anything, hostname3, mock.Anything).Return(splitNames2, nil)
-	utilitiesMock.On("GetNodeNameListFromNodeList", mock.Anything, hostname4, mock.Anything).Return(splitNames1, nil)
+	utilitiesMock.On("GetRemoteNodeNameListFromNodeList", mock.Anything, hostname, mock.Anything).Return(splitNames2, nil)
+	utilitiesMock.On("GetRemoteNodeNameListFromNodeList", mock.Anything, hostname2, mock.Anything).Return(splitNames2, nil)
+	utilitiesMock.On("GetRemoteNodeNameListFromNodeList", mock.Anything, hostname3, mock.Anything).Return(splitNames2, nil)
+	utilitiesMock.On("GetRemoteNodeNameListFromNodeList", mock.Anything, hostname4, mock.Anything).Return(splitNames1, nil)
 	return splitNames1
 }
 
@@ -191,9 +190,9 @@ func setupUtilsMockListNode2Bad(utilitiesMock *utilsMock.UtilsIface) []string {
 	utilitiesMock.On("GetClusterUUIDAndNodeListWithMinInfoFromDefaultPoolInfo", emptyMap, mock.Anything).Return(uuidField2, hostnameList, nil)
 
 	// diff from generic above
-	utilitiesMock.On("GetNodeNameListFromNodeList", mock.Anything, hostname, mock.Anything).Return(splitNames2, nil)
-	utilitiesMock.On("GetNodeNameListFromNodeList", mock.Anything, hostname2, mock.Anything).Return(splitNames2, nil)
-	utilitiesMock.On("GetNodeNameListFromNodeList", mock.Anything, hostname3, mock.Anything).Return(splitNames1, nil)
+	utilitiesMock.On("GetRemoteNodeNameListFromNodeList", mock.Anything, hostname, mock.Anything).Return(splitNames2, nil)
+	utilitiesMock.On("GetRemoteNodeNameListFromNodeList", mock.Anything, hostname2, mock.Anything).Return(splitNames2, nil)
+	utilitiesMock.On("GetRemoteNodeNameListFromNodeList", mock.Anything, hostname3, mock.Anything).Return(splitNames1, nil)
 	return splitNames1
 }
 
@@ -221,10 +220,10 @@ func setupUtilsMockFirstNodeBad(utilitiesMock *utilsMock.UtilsIface) {
 	utilitiesMock.On("GetClusterUUIDAndNodeListWithMinInfoFromDefaultPoolInfo", emptyMap, mock.Anything).Return("", emptyList, dummyErr)
 
 	// diff from generic above
-	utilitiesMock.On("GetNodeNameListFromNodeList", mock.Anything, hostname, mock.Anything).Return(splitNames2, nil)
-	utilitiesMock.On("GetNodeNameListFromNodeList", mock.Anything, hostname2, mock.Anything).Return(emptyStrList, dummyErr)
-	utilitiesMock.On("GetNodeNameListFromNodeList", mock.Anything, hostname3, mock.Anything).Return(emptyStrList, dummyErr)
-	utilitiesMock.On("GetNodeNameListFromNodeList", mock.Anything, hostname4, mock.Anything).Return(emptyStrList, dummyErr)
+	utilitiesMock.On("GetRemoteNodeNameListFromNodeList", mock.Anything, hostname, mock.Anything).Return(splitNames2, nil)
+	utilitiesMock.On("GetRemoteNodeNameListFromNodeList", mock.Anything, hostname2, mock.Anything).Return(emptyStrList, dummyErr)
+	utilitiesMock.On("GetRemoteNodeNameListFromNodeList", mock.Anything, hostname3, mock.Anything).Return(emptyStrList, dummyErr)
+	utilitiesMock.On("GetRemoteNodeNameListFromNodeList", mock.Anything, hostname4, mock.Anything).Return(emptyStrList, dummyErr)
 }
 
 func createRemoteClusterReference(id string) *metadata.RemoteClusterReference {

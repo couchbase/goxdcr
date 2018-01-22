@@ -21,7 +21,7 @@ func ConstructVBCouchApiBaseMap(targetBucketName string, targetBucketInfo map[st
 
 	// construct vbCouchApiBaseMap map with key = vbno and value = couchApiBase
 	vbCouchApiBaseMap := make(map[uint16]string)
-	vbMap, err := utils.GetServerVBucketsMap(remoteClusterRef.HostName, targetBucketName, targetBucketInfo)
+	vbMap, err := utils.GetRemoteServerVBucketsMap(remoteClusterRef.HostName, targetBucketName, targetBucketInfo)
 	if err != nil {
 		return nil, err
 	}
@@ -65,12 +65,15 @@ func ConstructServerCouchApiBaseMap(targetBucketName string, targetBucketInfo ma
 			//skip this node, during rebalance it is possible that the node is on the server list, but it is not master for any vb, so no couchApiBase
 			continue
 		}
-
 		couchApiBase, ok := couchApiBaseObj.(string)
 		if !ok {
 			return nil, ErrorBuildingVBCouchApiBaseMap(targetBucketName, remoteClusterRef.Name, node)
 		}
 
+		// If external nodes info is present, replace
+		couchApiBase = utils.ReplaceCouchApiBaseObjWithExternals(couchApiBase, nodeMap)
+
+		// Get internal direct ports
 		portsObj, ok := nodeMap[base.PortsKey]
 		if !ok {
 			return nil, ErrorBuildingVBCouchApiBaseMap(targetBucketName, remoteClusterRef.Name, node)
@@ -80,7 +83,6 @@ func ConstructServerCouchApiBaseMap(targetBucketName string, targetBucketInfo ma
 			return nil, ErrorBuildingVBCouchApiBaseMap(targetBucketName, remoteClusterRef.Name, node)
 		}
 
-		// get direct port
 		directPortObj, ok := portsMap[base.DirectPortKey]
 		if !ok {
 			return nil, ErrorBuildingVBCouchApiBaseMap(targetBucketName, remoteClusterRef.Name, node)
@@ -90,8 +92,19 @@ func ConstructServerCouchApiBaseMap(targetBucketName string, targetBucketInfo ma
 			return nil, ErrorBuildingVBCouchApiBaseMap(targetBucketName, remoteClusterRef.Name, node)
 		}
 
-		// server addr = host:directPort
-		serverAddr := base.GetHostAddr(hostname, uint16(directPortFloat))
+		portToUse := uint16(directPortFloat)
+
+		// Potentially, get external kv (direct) ports
+		externalHostName, externalKvPort, externalKvPortErr, _, _ := utils.GetExternalAddressAndKvPortsFromNodeInfo(nodeMap)
+		if len(externalHostName) > 0 {
+			hostname = externalHostName
+			if externalKvPortErr == nil {
+				portToUse = uint16(externalKvPort)
+			}
+		}
+
+		// server addr = host:directPort or externalHost:kv
+		serverAddr := base.GetHostAddr(hostname, portToUse)
 
 		serverCouchApiBaseMap[serverAddr] = couchApiBase
 	}

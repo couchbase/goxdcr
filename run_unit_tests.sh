@@ -14,6 +14,7 @@ pipeline_manager
 parts
 metadata
 metadata_svc
+utils
 )
 
 for directory in ${DIRS_WITH_UT[@]}

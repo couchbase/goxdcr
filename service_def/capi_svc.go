@@ -108,7 +108,7 @@ func (remoteBucket *RemoteBucketInfo) refresh_internal(remote_cluster_svc Remote
 		remoteBucket.Capabilities = append(remoteBucket.Capabilities, capability)
 	}
 
-	remoteBucket.VBServerMap, err = remoteBucket.utils.GetServerVBucketsMap(connStr, remoteBucket.BucketName, targetBucketInfo)
+	remoteBucket.VBServerMap, err = remoteBucket.utils.GetRemoteServerVBucketsMap(connStr, remoteBucket.BucketName, targetBucketInfo)
 	if err != nil {
 		return fmt.Errorf("Failed to get VBServerMap for remote bucket %v", remoteBucket.BucketName)
 	}

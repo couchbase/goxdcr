@@ -319,8 +319,7 @@ func (agent *RemoteClusterAgent) Refresh() error {
 	}
 
 	var nodeNameList []string
-
-	for rctx.index = 0; rctx.index < len(rctx.cachedRefNodesList); rctx.index++ {
+	for rctx.index = 0; rctx.index < len(rctx.cachedRefNodesList /*already shuffled*/); rctx.index++ {
 		rctx.hostName = rctx.cachedRefNodesList[rctx.index]
 		rctx.connStr, err = rctx.getConnStrAndSetHttps(rctx.hostName)
 		if err != nil {
@@ -341,7 +340,7 @@ func (agent *RemoteClusterAgent) Refresh() error {
 			// rctx.hostname is in the cluster and is available - make it the activeHost
 			rctx.checkAndUpdateActiveHost()
 
-			nodeNameList, err = agent.utils.GetNodeNameListFromNodeList(nodeList, rctx.connStr, agent.logger)
+			nodeNameList, err = agent.utils.GetRemoteNodeNameListFromNodeList(nodeList, rctx.connStr, agent.logger)
 			if err == nil {
 				// This node is an acceptable replacement for active node - and sets atLeastOneValid
 				rctx.finalizeRefCacheListFrom(nodeNameList)
@@ -494,7 +493,7 @@ func (agent *RemoteClusterAgent) syncInternalsFromStagedReferenceNoLock() error 
 	if err == nil {
 		agent.logger.Debugf("connStr=%v, nodeList=%v\n", connStr, nodeList)
 
-		nodeNameList, err := agent.utils.GetNodeNameListFromNodeList(nodeList, connStr, agent.logger)
+		nodeNameList, err := agent.utils.GetRemoteNodeNameListFromNodeList(nodeList, connStr, agent.logger)
 		if err != nil {
 			agent.logger.Errorf("Error getting nodes from target cluster. skipping alternative node computation. ref=%v\n", agent.pendingRef.HostName)
 			agent.pendingRefNodes = base.DeepCopyStringArray(agent.refNodesList)
@@ -1072,7 +1071,7 @@ func (service *RemoteClusterService) validateRemoteCluster(ref *metadata.RemoteC
 
 		if ref.IsEncryptionEnabled() {
 			if ref.HttpsHostName == "" {
-				httpsHostAddr, err, isInternalError := service.utils.HttpsHostAddr(ref.HostName, service.logger)
+				httpsHostAddr, err, isInternalError := service.utils.HttpsRemoteHostAddr(ref.HostName, service.logger)
 				if err != nil {
 					if isInternalError {
 						return err
@@ -1451,7 +1450,7 @@ func (service *RemoteClusterService) getHttpsAddrFromMap(hostName string) (strin
 	var err error
 	httpsHostName, ok = service.httpsAddrMap[hostName]
 	if !ok {
-		httpsHostName, err, _ = service.utils.HttpsHostAddr(hostName, service.logger)
+		httpsHostName, err, _ = service.utils.HttpsRemoteHostAddr(hostName, service.logger)
 		if err != nil {
 			return "", err
 		}

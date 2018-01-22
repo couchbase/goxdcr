@@ -411,7 +411,7 @@ func (top_detect_svc *TopologyChangeDetectorSvc) getTargetBucketInfo() (int, map
 	if err == nil {
 		targetBucketUUID, err = top_detect_svc.utils.GetBucketUuidFromBucketInfo(bucketName, targetBucketInfo, top_detect_svc.logger)
 		if err == nil {
-			targetServerVBMap, err = top_detect_svc.utils.GetServerVBucketsMap(connStr, bucketName, targetBucketInfo)
+			targetServerVBMap, err = top_detect_svc.utils.GetRemoteServerVBucketsMap(connStr, bucketName, targetBucketInfo)
 			if err == nil {
 				if !top_detect_svc.capi {
 					targetClusterCompatibility, err = top_detect_svc.utils.GetClusterCompatibilityFromBucketInfo(bucketName, targetBucketInfo, top_detect_svc.logger)
