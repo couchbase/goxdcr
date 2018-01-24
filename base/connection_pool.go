@@ -769,7 +769,10 @@ func MakeTLSConn(ssl_con_str, username string, certificate []byte, check_server_
 			Intermediates: x509.NewCertPool(),
 		}
 
-		if check_server_name {
+		// BypassSanInCertificateCheck is by default false
+		// In case that some bug in the system prevents ssl connections from being setup because of server name check
+		// BypassSanInCertificateCheck can be turned to true to unblock customers
+		if check_server_name && !BypassSanInCertificateCheck {
 			// need to check server name. get sever name from ssl_con_str
 			opts.DNSName = hostname
 		} else {

@@ -1819,11 +1819,23 @@ func (u *Utilities) GetDefaultPoolInfoWithSecuritySettings(hostAddr, username, p
 
 	defaultPoolInfo := make(map[string]interface{})
 	// we do not know the correct values of sanInCertificate and clientCertAuthSetting, so we
-	// 1. set sanInCertificate to false
+	// 1. set sanInCertificate set to true for better security
 	// 2. set client cert auth to enable and setUserAuth to true, so as to ensure that both client cert and username are send to target
-	err, statusCode := u.QueryRestApiWithAuth(hostAddr, base.DefaultPoolPath, false, username, password, certificate, false /*sanInCertificate*/, clientCertificate, clientKey, base.ClientCertAuthEnable, true /*setUserAuth*/, base.MethodGet, "", nil, 0, &defaultPoolInfo, nil, false, logger)
+	err, statusCode := u.QueryRestApiWithAuth(hostAddr, base.DefaultPoolPath, false, username, password, certificate, true /*sanInCertificate*/, clientCertificate, clientKey, base.ClientCertAuthEnable, true /*setUserAuth*/, base.MethodGet, "", nil, 0, &defaultPoolInfo, nil, false, logger)
 	if err != nil || statusCode != http.StatusOK {
-		return false, base.ClientCertAuthDisable, nil, fmt.Errorf("Failed on calling host=%v, path=%v, err=%v, statusCode=%v", hostAddr, base.DefaultPoolPath, err, statusCode)
+		if err != nil && strings.Contains(err.Error(), base.NoIpSANErrMsg) {
+			// if the error is about certificate not containing IP SANs, it could be that the target cluster is of an old version
+			// make a second try with sanInCertificate set to false
+			// after we retrieve target cluster version, we will then re-set sanInCertificate to the appropriate value
+			logger.Warnf("Received certificate validation error from %v. Target may be an old version that does not support SAN in certificates. Retrying connection to target using sanInCertificate = false.", hostAddr)
+			err, statusCode = u.QueryRestApiWithAuth(hostAddr, base.DefaultPoolPath, false, username, password, certificate, false /*sanInCertificate*/, clientCertificate, clientKey, base.ClientCertAuthEnable, true /*setUserAuth*/, base.MethodGet, "", nil, 0, &defaultPoolInfo, nil, false, logger)
+			if err != nil || statusCode != http.StatusOK {
+				// if the second try still fails, return error
+				return false, base.ClientCertAuthDisable, nil, fmt.Errorf("Failed on calling host=%v, path=%v, err=%v, statusCode=%v", hostAddr, base.DefaultPoolPath, err, statusCode)
+			}
+		} else {
+			return false, base.ClientCertAuthDisable, nil, fmt.Errorf("Failed on calling host=%v, path=%v, err=%v, statusCode=%v", hostAddr, base.DefaultPoolPath, err, statusCode)
+		}
 	}
 
 	nodeList, err := u.GetNodeListFromInfoMap(defaultPoolInfo, logger)

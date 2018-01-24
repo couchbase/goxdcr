@@ -203,7 +203,7 @@ var ErrorNilPtr = errors.New("Nil pointer given")
 
 // the full error as of now is : "x509: cannot validate certificate for xxx because it doesn't contain any IP SANs"
 // use a much shorter version for matching to reduce the chance of false negatives - the error message may be changed by golang in the future
-var NoIpSANErrMsg = "SAN"
+var NoIpSANErrMsg = "IP SANs"
 
 // constants used for remote cluster references
 const (
@@ -645,6 +645,9 @@ var MaxRCSMetaKVOpsRetry int = 5
 // Time to wait between metakv get ops
 var TimeBetweenMetaKVGetOps = time.Duration(500) * time.Millisecond
 
+// when set to true, bypass san in certificate check in ssl connections
+var BypassSanInCertificateCheck bool = false
+
 func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeCountBeforeRestart,
 	maxTopologyStableCountBeforeRestart, maxWorkersForCheckpointing int,
 	timeoutCheckpointBeforeStop time.Duration, capiDataChanSizeMultiplier int,
@@ -670,7 +673,8 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	xmemMaxRetryInterval time.Duration, heloTimeout time.Duration,
 	waitTimeBetweenMetadataChangeListeners time.Duration, keepAlivePeriod time.Duration,
 	thresholdPercentageForEventChanSizeLogging int, thresholdForThroughSeqnoComputation time.Duration,
-	statsLogInterval time.Duration, xmemDefaultRespTimeout time.Duration) {
+	statsLogInterval time.Duration, xmemDefaultRespTimeout time.Duration,
+	bypassSanInCertificateCheck int) {
 	TopologyChangeCheckInterval = topologyChangeCheckInterval
 	MaxTopologyChangeCountBeforeRestart = maxTopologyChangeCountBeforeRestart
 	MaxTopologyStableCountBeforeRestart = maxTopologyStableCountBeforeRestart
@@ -728,4 +732,5 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	ThresholdForThroughSeqnoComputation = thresholdForThroughSeqnoComputation
 	StatsLogInterval = statsLogInterval
 	XmemDefaultRespTimeout = xmemDefaultRespTimeout
+	BypassSanInCertificateCheck = (bypassSanInCertificateCheck != 0)
 }

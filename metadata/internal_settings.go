@@ -140,6 +140,8 @@ const (
 	StatsLogIntervalKey = "StatsLogInterval"
 	// default resp timeout, which is used as the interval for checkAndRepaitBufferMonitor (milliseconds)
 	XmemDefaultRespTimeoutKey = "XmemDefaultRespTimeout"
+	// when set to 1, bypass san in certificate check in ssl connections
+	BypassSanInCertificateCheckKey = "BypassSanInCertificateCheck"
 )
 
 var TopologyChangeCheckIntervalConfig = &SettingsConfig{10, &Range{1, 100}}
@@ -194,6 +196,7 @@ var ThresholdPercentageForEventChanSizeLoggingConfig = &SettingsConfig{90, &Rang
 var ThresholdForThroughSeqnoComputationConfig = &SettingsConfig{100, &Range{1, 60000}}
 var StatsLogIntervalConfig = &SettingsConfig{30, &Range{1, 36000}}
 var XmemDefaultRespTimeoutConfig = &SettingsConfig{1000, &Range{1, 3600000}}
+var BypassSanInCertificateCheckConfig = &SettingsConfig{0, &Range{0, 1}}
 
 var XDCRInternalSettingsConfigMap = map[string]*SettingsConfig{
 	TopologyChangeCheckIntervalKey:                TopologyChangeCheckIntervalConfig,
@@ -248,6 +251,7 @@ var XDCRInternalSettingsConfigMap = map[string]*SettingsConfig{
 	ThresholdForThroughSeqnoComputationKey:        ThresholdForThroughSeqnoComputationConfig,
 	StatsLogIntervalKey:                           StatsLogIntervalConfig,
 	XmemDefaultRespTimeoutKey:                     XmemDefaultRespTimeoutConfig,
+	BypassSanInCertificateCheckKey:                BypassSanInCertificateCheckConfig,
 }
 
 type InternalSettings struct {
