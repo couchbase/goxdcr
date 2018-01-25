@@ -595,7 +595,7 @@ func UpdateReplicationSettings(topic string, settings map[string]interface{}, re
 	changedSettingsMap, errorMap := replSpec.Settings.UpdateSettingsFromMap(settings)
 
 	// Only Re-evaluate Compression pre-requisites if it is turned on to catch any cluster-wide compression changes
-	if compressionType, ok := changedSettingsMap[metadata.CompressionType]; ok && (compressionType.(base.CompressionType) != base.CompressionTypeNone) {
+	if compressionType, ok := changedSettingsMap[metadata.CompressionType]; ok && (base.CompressionType(compressionType.(int)) != base.CompressionTypeNone) {
 		validateRoutineErrorMap, validateErr := ReplicationSpecService().ValidateReplicationSettings(replSpecificFields.SourceBucketName,
 			replSpecificFields.RemoteClusterName, replSpecificFields.TargetBucketName, settings)
 		if len(validateRoutineErrorMap) > 0 {
