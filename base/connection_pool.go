@@ -671,6 +671,11 @@ func MakeTLSConn(ssl_con_str, username string, certificate []byte, check_server_
 		return nil, nil, false, fmt.Errorf("No certificate has been provided. Can't establish ssl connection to %v", ssl_con_str)
 	}
 
+	// BypassSanInCertificateCheck is by default false
+	// In case that some bug in the system prevents ssl connections from being setup because of server name check
+	// BypassSanInCertificateCheck can be turned to true to disable server name check and to unblock customer
+	check_server_name = check_server_name && !BypassSanInCertificateCheck
+
 	useClientCert, err := ValidateTlsParameters(ssl_con_str, username, clientCertificate, clientKey, clientCertAuthSetting)
 	if err != nil {
 		return nil, nil, false, err
@@ -708,7 +713,13 @@ func MakeTLSConn(ssl_con_str, username string, certificate []byte, check_server_
 	}
 
 	tlsConfig.BuildNameToCertificate()
-	tlsConfig.InsecureSkipVerify = true
+	// If check_server_name is false, we need to disable server name check during tls handshake to prevent it from failing
+	// There is no way to disable just server name check in tls handshake, though.
+	// We have to set InsecureSkipVerify to true to disable the entire certificate check during tls handshake
+	// We will perform cerficate check with server name check disabled after tls handshake
+	// If check_server_name is true, there is no need for all these complexities.
+	// We can simply set InsecureSkipVerify to false and let tls handshake do all the verifications
+	tlsConfig.InsecureSkipVerify = !check_server_name
 	hostname := GetHostName(ssl_con_str)
 	tlsConfig.ServerName = hostname
 
@@ -759,7 +770,9 @@ func MakeTLSConn(ssl_con_str, username string, certificate []byte, check_server_
 		return nil, nil, false, err
 	}
 
-	if cert_remote.IsCA {
+	// If check_server_name is false, certificate check has been disabled during tls handshake
+	// Perform additional certificate check here, with server name verification disabled (i.e., with opts.DNSName not set)
+	if !check_server_name && cert_remote.IsCA {
 		connState := tlsConn.ConnectionState()
 		peer_certs := connState.PeerCertificates
 
@@ -767,16 +780,6 @@ func MakeTLSConn(ssl_con_str, username string, certificate []byte, check_server_
 			Roots:         tlsConfig.RootCAs,
 			CurrentTime:   time.Now(),
 			Intermediates: x509.NewCertPool(),
-		}
-
-		// BypassSanInCertificateCheck is by default false
-		// In case that some bug in the system prevents ssl connections from being setup because of server name check
-		// BypassSanInCertificateCheck can be turned to true to unblock customers
-		if check_server_name && !BypassSanInCertificateCheck {
-			// need to check server name. get sever name from ssl_con_str
-			opts.DNSName = hostname
-		} else {
-			logger.Debug("remote peer is old and its certificate doesn't have IP SANs, skip verifying ServerName")
 		}
 
 		for i, cert := range peer_certs {
