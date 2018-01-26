@@ -165,6 +165,30 @@ var SettingsKeyToRestKeyMap = map[string]string{
 	metadata.TimeoutPercentageCap:           TimeoutPercentageCap,*/
 }
 
+// Conversion to REST for user -> pauseRequested - Pretty much a NOT operation
+// User wants to know if the replication is paused. Internally, we store it as Active or not active
+var ReplicationPauseRequestsedValuesMap = map[interface{}]interface{}{
+	// Replication is active? Then pause is not Requested
+	true: false,
+	// Replication is paused - Then pause is requested
+	false: true,
+}
+
+// For outside world via REST, they would prefer to see descriptive names of compression settings instead of 0 or 1
+var CompressionTypeRESTValuesMap = map[interface{}]interface{}{
+	base.CompressionTypeNone:   base.CompressionTypeStrings[base.CompressionTypeNone],
+	base.CompressionTypeSnappy: base.CompressionTypeStrings[base.CompressionTypeSnappy],
+}
+
+/**
+ * In cases where internally we store values differently from what the REST API requires, this
+ * map performs the translation. The key is the Rest Key
+ */
+var SettingsValueToRestValueMap = map[string]map[interface{}]interface{}{
+	base.CompressionTypeREST: CompressionTypeRESTValuesMap,
+	PauseRequested:           ReplicationPauseRequestsedValuesMap,
+}
+
 var logger_msgutil *log.CommonLogger = log.NewLogger("MsgUtils", log.DefaultLoggerContext)
 
 func NewGetRemoteClustersResponse(remoteClusters map[string]*metadata.RemoteClusterReference) (*ap.Response, error) {
@@ -675,15 +699,19 @@ func convertSettingsToRestSettingsMap(settings *metadata.ReplicationSettings, is
 
 	for key, value := range settingsMap {
 		restKey := SettingsKeyToRestKeyMap[key]
-		if restKey == PauseRequested {
-			// pauseRequested = !active
-			valueBool := value.(bool)
-			restSettingsMap[restKey] = !valueBool
-		} else {
-			restSettingsMap[restKey] = value
-		}
+		convertedValue := convertSettingsInternalValuesToRESTValues(restKey, value)
+		restSettingsMap[restKey] = convertedValue
 	}
 	return restSettingsMap
+}
+
+func convertSettingsInternalValuesToRESTValues(restKey string, origValue interface{}) interface{} {
+	if valuesMap, ok := SettingsValueToRestValueMap[restKey]; ok {
+		if newValue, valueOk := valuesMap[origValue]; valueOk {
+			return newValue
+		}
+	}
+	return origValue
 }
 
 func getStringFromValArr(valArr []string) string {
