@@ -1000,19 +1000,19 @@ func (xmem *XmemNozzle) accumuBatch(request *base.WrappedMCRequest) error {
 
 func (xmem *XmemNozzle) checkAndUpdateReceivedStats(request *base.WrappedMCRequest) {
 	atomic.AddUint64(&xmem.counter_received, 1)
-	if checkBool, err := base.IsRequestCompressedType(request, base.SnappyDataType); checkBool && err == nil {
+	if checkBool, err := base.IsRequestCompressedType(request, base.CompressionTypeSnappy); checkBool && err == nil {
 		atomic.AddUint64(&xmem.counter_compressed_received, 1)
 	} else if err != nil {
-		xmem.Logger().Warnf("Error %v received while checking for data type %v", err, base.SnappyDataType)
+		xmem.Logger().Warnf("Error %v received while checking for data type %v", err, base.CompressionTypeSnappy)
 	}
 }
 
 func (xmem *XmemNozzle) checkAndUpdateSentStats(request *base.WrappedMCRequest) {
 	atomic.AddUint64(&xmem.counter_sent, 1)
-	if checkBool, err := base.IsRequestCompressedType(request, base.SnappyDataType); checkBool && err == nil {
+	if checkBool, err := base.IsRequestCompressedType(request, base.CompressionTypeSnappy); checkBool && err == nil {
 		atomic.AddUint64(&xmem.counter_compressed_sent, 1)
 	} else if err != nil {
-		xmem.Logger().Warnf("Error %v received while checking for data type %v", err, base.SnappyDataType)
+		xmem.Logger().Warnf("Error %v received while checking for data type %v", err, base.CompressionTypeSnappy)
 	}
 }
 

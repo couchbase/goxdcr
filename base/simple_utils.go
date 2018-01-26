@@ -611,7 +611,7 @@ func FlattenStringArray(input []string) string {
 func IsRequestCompressedType(req *WrappedMCRequest, checkType CompressionType) (retVal bool, err error) {
 	if req == nil || req.Req == nil {
 		retVal = false
-		err = ErrorInvalidInput
+		// Do not return error if item is nil, since xmem nozzle should handle it fine
 		return
 	}
 	switch checkType {
@@ -625,6 +625,7 @@ func IsRequestCompressedType(req *WrappedMCRequest, checkType CompressionType) (
 		}
 	default:
 		retVal = false
+		// Only return error if user of this function fed in an invalid value
 		err = ErrorInvalidType
 	}
 	return
