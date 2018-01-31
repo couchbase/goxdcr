@@ -40,6 +40,7 @@ const (
 	QUITQ      = CommandCode(0x17)
 	FLUSHQ     = CommandCode(0x18)
 	APPENDQ    = CommandCode(0x19)
+	AUDIT      = CommandCode(0x27)
 	PREPENDQ   = CommandCode(0x1a)
 	GAT        = CommandCode(0x1d)
 	HELLO      = CommandCode(0x1f)
