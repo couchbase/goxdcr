@@ -439,6 +439,12 @@ var UdTagEndBytes = []byte(UdTagEnd)
 
 const HttpReqUserKey = "Menelaus-Auth-User"
 
+// retry interval for setDerivedObj op
+var RetryIntervalSetDerivedObj = 100 * time.Millisecond
+
+// max number of retries for setDerivedObj op
+var MaxNumOfRetriesSetDerivedObj = 8
+
 // --------------- Constants that are configurable -----------------
 
 // timeout for checkpointing attempt before pipeline is stopped - to put an upper bound on the delay of pipeline stop/restart

@@ -1078,6 +1078,29 @@ func (service *ReplicationSpecService) cacheSpec(cache *MetadataCache, specId st
 }
 
 func (service *ReplicationSpecService) SetDerivedObj(specId string, derivedObj interface{}) error {
+	var err error
+	setDerivedObjFunc := func() error {
+		err = service.setDerivedObjInner(specId, derivedObj)
+		if err == service_def.MetadataNotFoundErr {
+			return nil
+		} else {
+			return err
+		}
+	}
+
+	expOpErr := service.utils.ExponentialBackoffExecutor("ReplSpecSvc.SetDerivedObj", base.RetryIntervalSetDerivedObj, base.MaxNumOfRetriesSetDerivedObj,
+		base.MetaKvBackoffFactor, setDerivedObjFunc)
+
+	if expOpErr != nil {
+		// Executor will return error only if it timed out with ErrorFailedAfterRetry. Log it and override the ret err
+		service.logger.Errorf("SetDerivedObj for %v failed after max retry. err=%v", specId, err)
+		err = expOpErr
+	}
+
+	return err
+}
+
+func (service *ReplicationSpecService) setDerivedObjInner(specId string, derivedObj interface{}) error {
 	cache := service.getCache()
 
 	cachedVal, ok := cache.Get(specId)
