@@ -344,11 +344,26 @@ func (service *ReplicationSpecService) AddReplicationSpec(spec *metadata.Replica
 		return err
 	}
 
+	err = service.loadLatestMetakvRevisionIntoSpec(spec)
+	if err != nil {
+		return err
+	}
+
 	err = service.updateCache(spec.Id, spec)
 	if err == nil {
 		service.writeUiLogWithAdditionalInfo(spec, "created", additionalInfo)
 	}
 	return err
+}
+
+func (service *ReplicationSpecService) loadLatestMetakvRevisionIntoSpec(spec *metadata.ReplicationSpecification) error {
+	key := getKeyFromReplicationId(spec.Id)
+	_, rev, err := service.metadata_svc.Get(key)
+	if err != nil {
+		return err
+	}
+	spec.Revision = rev
+	return nil
 }
 
 func (service *ReplicationSpecService) SetReplicationSpec(spec *metadata.ReplicationSpecification) error {
@@ -363,15 +378,14 @@ func (service *ReplicationSpecService) SetReplicationSpec(spec *metadata.Replica
 		return err
 	}
 
-	_, rev, err := service.metadata_svc.Get(key)
+	err = service.loadLatestMetakvRevisionIntoSpec(spec)
 	if err != nil {
 		return err
 	}
-	spec.Revision = rev
 
 	err = service.updateCache(spec.Id, spec)
 	if err == nil {
-		service.logger.Infof("Replication spec %s has been updated, rev=%v\n", spec.Id, rev)
+		service.logger.Infof("Replication spec %s has been updated, rev=%v\n", spec.Id, spec.Revision)
 		return nil
 	} else {
 		return err
@@ -765,6 +779,29 @@ func (service *ReplicationSpecService) cacheSpec(cache *MetadataCache, specId st
 }
 
 func (service *ReplicationSpecService) SetDerivedObj(specId string, derivedObj interface{}) error {
+	var err error
+	setDerivedObjFunc := func() error {
+		err = service.setDerivedObjInner(specId, derivedObj)
+		if err == service_def.MetadataNotFoundErr {
+			return nil
+		} else {
+			return err
+		}
+	}
+
+	expOpErr := utils.ExponentialBackoffExecutor("ReplSpecSvc.SetDerivedObj", base.RetryIntervalSetDerivedObj, base.MaxNumOfRetriesSetDerivedObj,
+		base.MetaKvBackoffFactor, setDerivedObjFunc)
+
+	if expOpErr != nil {
+		// Executor will return error only if it timed out with ErrorFailedAfterRetry. Log it and override the ret err
+		service.logger.Errorf("SetDerivedObj for %v failed after max retry. err=%v", specId, err)
+		err = expOpErr
+	}
+
+	return err
+}
+
+func (service *ReplicationSpecService) setDerivedObjInner(specId string, derivedObj interface{}) error {
 	cache := service.getCache()
 
 	cachedVal, ok := cache.Get(specId)

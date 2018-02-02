@@ -423,6 +423,12 @@ var TimeoutPartsStop = 10 * time.Second
 var TimeoutDcpCloseUprStreams = 3 * time.Second
 var TimeoutDcpCloseUprFeed = 3 * time.Second
 
+// retry interval for setDerivedObj op
+var RetryIntervalSetDerivedObj = 100 * time.Millisecond
+
+// max number of retries for setDerivedObj op
+var MaxNumOfRetriesSetDerivedObj = 8
+
 // --------------- Constants that are configurable -----------------
 
 // timeout for checkpointing attempt before pipeline is stopped - to put an upper bound on the delay of pipeline stop/restart
