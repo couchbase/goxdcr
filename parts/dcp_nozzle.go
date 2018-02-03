@@ -373,7 +373,8 @@ func (dcp *DcpNozzle) composeUserAgent() {
 // Given the list of features, if a specific user requested feature is not essential to pipeline uptime
 // and may be a cause of the error, respond it back as high-priority so Pipeline can restart without it
 func (dcp *DcpNozzle) prioritizeReturnErrorByFeatures(requested mcc.UprFeatures, responded mcc.UprFeatures) error {
-	if responded.CompressionType != base.CompressionTypeEndMarker && requested.CompressionType != responded.CompressionType {
+	// UPRFeed's end marker is equivalent to the Auto, which is -1 from the XDCR's end marker
+	if responded.CompressionType != (base.CompressionTypeEndMarker-1) && requested.CompressionType != responded.CompressionType {
 		if requested.CompressionType == base.CompressionTypeNone && responded.CompressionType == base.CompressionTypeSnappy {
 			dcp.Logger().Warnf(fmt.Sprintf("%v did not request compression, but DCP responded with compression type %v\n",
 				dcp.Id(), base.CompressionTypeStrings[responded.CompressionType]))
@@ -472,7 +473,7 @@ func (dcp *DcpNozzle) initialize(settings metadata.ReplicationSettingsMap) (err 
 
 	val, ok := settings[SETTING_COMPRESSION_TYPE]
 	if ok && (val.(int) != (int)(dcp.compressionSetting)) {
-		dcp.compressionSetting = (base.CompressionType)(val.(int))
+		dcp.compressionSetting = base.GetCompressionType(val.(int))
 	}
 
 	dcp.initializeUprHandshakeHelpers()

@@ -177,6 +177,7 @@ var ReplicationPauseRequestsedValuesMap = map[interface{}]interface{}{
 var CompressionTypeRESTValuesMap = map[interface{}]interface{}{
 	base.CompressionTypeNone:   base.CompressionTypeStrings[base.CompressionTypeNone],
 	base.CompressionTypeSnappy: base.CompressionTypeStrings[base.CompressionTypeSnappy],
+	base.CompressionTypeAuto:   base.CompressionTypeStrings[base.CompressionTypeAuto],
 }
 
 /**

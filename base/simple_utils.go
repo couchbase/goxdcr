@@ -785,3 +785,12 @@ func IsStringRedacted(input string) bool {
 	// Currently, only user tag
 	return strings.HasPrefix(input, UdTagBegin) && strings.HasSuffix(input, UdTagEnd)
 }
+
+// A pointer function to lookup Auto with the actual compression type - right now it's Snappy
+func GetCompressionType(inType int) CompressionType {
+	if (CompressionType)(inType) == CompressionTypeAuto {
+		return CompressionTypeSnappy
+	} else {
+		return (CompressionType)(inType)
+	}
+}

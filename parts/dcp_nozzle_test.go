@@ -409,3 +409,21 @@ func TestNonFeatureInitializationErrorCompressedWhenNotRequested(t *testing.T) {
 
 	fmt.Println("============== Test case end: TestNonFeatureInitializationErrorCompressedWhenNotRequested =================")
 }
+
+func TestStartNozzleAuto(t *testing.T) {
+	assert := assert.New(t)
+	fmt.Println("============== Test case start: TestStartStopDCPNozzleAuto =================")
+	xdcrTopology, utils, nozzle, settings, mcc, upr, _ := setupBoilerPlate()
+	setupUprFeedMock(upr)
+	// Test a success data coming back
+	setupUprFeedMockData(upr)
+	setupMocks(xdcrTopology, utils, nozzle, settings, mcc, upr)
+
+	settings[SETTING_COMPRESSION_TYPE] = base.CompressionTypeAuto
+
+	assert.Nil(nozzle.Start(settings))
+	assert.Equal(nozzle.State(), common.Part_Running)
+
+	assert.Equal((base.CompressionType)(base.CompressionTypeSnappy), nozzle.compressionSetting)
+	fmt.Println("============== Test case end: TestStartStopDCPNozzleAuto =================")
+}

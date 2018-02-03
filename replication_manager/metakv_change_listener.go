@@ -239,7 +239,7 @@ func needToReconstructPipeline(oldSettings *metadata.ReplicationSettings, newSet
 	repTypeChanged := !(oldSettings.RepType == newSettings.RepType)
 	sourceNozzlePerNodeChanged := !(oldSettings.SourceNozzlePerNode == newSettings.SourceNozzlePerNode)
 	targetNozzlePerNodeChanged := !(oldSettings.TargetNozzlePerNode == newSettings.TargetNozzlePerNode)
-	compressionTypeChanged := !(oldSettings.CompressionType == newSettings.CompressionType)
+	compressionTypeChanged := base.GetCompressionType(oldSettings.CompressionType) != base.GetCompressionType(newSettings.CompressionType)
 
 	// the following may qualify for live update in the future.
 	// batchCount is tricky since the sizes of xmem data channels depend on it.

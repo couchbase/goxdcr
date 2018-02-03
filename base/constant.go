@@ -132,15 +132,13 @@ const (
 	Capi XDCROutgoingNozzleType = iota
 )
 
-// Compression Section
-type CompressionType int
-
 // Last element is invalid and is there to keep consistency with the EndMarker
-var CompressionTypeStrings = [...]string{"None", "Snappy", "Invalid"}
+var CompressionTypeStrings = [...]string{"None", "Snappy", "Auto", "Invalid"}
 
 const (
 	CompressionTypeNone      = iota
 	CompressionTypeSnappy    = iota
+	CompressionTypeAuto      = iota
 	CompressionTypeEndMarker = iota
 )
 

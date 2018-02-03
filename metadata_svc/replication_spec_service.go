@@ -437,7 +437,7 @@ func (service *ReplicationSpecService) validateCompression(sourceBucket string, 
 	var requestedFeaturesSet utilities.HELOFeatures
 	var err error
 	errorMap := make(base.ErrorMap)
-	requestedFeaturesSet.CompressionType = (base.CompressionType)(compressionType)
+	requestedFeaturesSet.CompressionType = base.GetCompressionType(compressionType)
 	errKey := base.CompressionTypeREST
 
 	if compressionType == base.CompressionTypeNone {

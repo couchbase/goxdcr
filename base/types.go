@@ -259,3 +259,6 @@ func (kvVbMap BucketKVVbMap) ReplaceInternalWithExternalHosts(translationMap map
 		delete(kvVbMap, key)
 	}
 }
+
+// Compression Section
+type CompressionType int

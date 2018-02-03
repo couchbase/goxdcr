@@ -20,7 +20,7 @@ func setupBoilerPlateXmem() (*utilsMock.UtilsIface,
 	utilitiesMock := &utilsMock.UtilsIface{}
 	dummyDataObjRecycler := func(string, *base.WrappedMCRequest) {}
 
-	xmemNozzle := NewXmemNozzle("testId", "testTopic", "testConnPoolNamePrefix", 5, /* connPoolConnSize*/
+	xmemNozzle := NewXmemNozzle("testId", nil, "", "testTopic", "testConnPoolNamePrefix", 5, /* connPoolConnSize*/
 		"testConnectString", "testSourceBucket", "testTargetBucket", "testUserName", "testPw",
 		dummyDataObjRecycler, base.CRMode_RevId, log.DefaultLoggerContext, utilitiesMock)
 
@@ -75,4 +75,16 @@ func TestNegNoCompressionXmemNozzle(t *testing.T) {
 
 	assert.Equal(base.ErrorCompressionNotSupported, xmem.initialize(settings))
 	fmt.Println("============== Test case start: TestNegNoCompressionXmemNozzle =================")
+}
+
+func TestPositiveXmemNozzleAuto(t *testing.T) {
+	assert := assert.New(t)
+	fmt.Println("============== Test case start: TestPositiveXmemNozzleAuto =================")
+	utils, _, settings, xmem := setupBoilerPlateXmem()
+	settings[SETTING_COMPRESSION_TYPE] = base.CompressionTypeAuto
+	setupMocksXmem(utils)
+
+	assert.Nil(xmem.initialize(settings))
+	assert.Equal((base.CompressionType)(base.CompressionTypeSnappy), xmem.compressionSetting)
+	fmt.Println("============== Test case end: TestPositiveXmemNozzleAuto =================")
 }
