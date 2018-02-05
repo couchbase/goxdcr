@@ -490,7 +490,7 @@ func (service *ReplicationSpecService) validateCompressionPreReq(targetBucket st
 	}
 	hasCompressionSupport := base.IsClusterCompatible(targetClusterCompatibility, base.VersionForCompressionSupport)
 	if !hasCompressionSupport {
-		errorMap[base.ToCluster] = fmt.Errorf("Remote Cluster Couchbase software currently is at a version that does not support compression. Please upgrade the destination cluster to version %v.%v or above to enable this feature",
+		errorMap[base.ToCluster] = fmt.Errorf("The version of Couchbase software installed on the remote cluster does not support compression. Please upgrade the destination cluster to version %v.%v or above to enable this feature",
 			base.VersionForCompressionSupport[0], base.VersionForCompressionSupport[1])
 		return errorMap, err
 	}

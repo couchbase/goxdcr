@@ -1085,7 +1085,7 @@ func (r *PipelineUpdater) raiseXattrWarningIfNeeded(p common.Pipeline) {
 func (r *PipelineUpdater) raiseCompressionWarningIfNeeded() {
 	if r.disabledFeatures > 0 && (r.disabledFeatures&disabledCompression > 0) {
 		spec := r.rep_status.Spec()
-		errMsg := fmt.Sprintf("Replication from source bucket '%v' to target bucket '%v' has been started without compression enabled due to errors that occurred during clusters handshaking. This may result in more data bandwidth usage. Please ensure that both the source and target clusters are at or above version %v.%v, and that both clusters are individually configured correctly to enable compression.",
+		errMsg := fmt.Sprintf("Replication from source bucket '%v' to target bucket '%v' has been started without compression enabled due to errors that occurred during clusters handshaking. This may result in more data bandwidth usage. Please ensure that both the source and target clusters are at or above version %v.%v, and restart the replication.",
 			spec.SourceBucketName, spec.TargetBucketName, base.VersionForCompressionSupport[0], base.VersionForCompressionSupport[1])
 		r.logger.Warn(errMsg)
 		r.pipelineMgr.GetLogSvc().Write(errMsg)
