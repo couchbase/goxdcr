@@ -896,7 +896,7 @@ func (capi *CapiNozzle) batchUpdateDocs(vbno uint16, req_list *[]*base.WrappedMC
 
 	total_length := len(BodyPartsPrefix) + doc_length + len(BodyPartsSuffix)
 
-	http_req, _, err := capi.utils.ConstructHttpRequest(couchApiBaseHost, couchApiBasePath+base.BulkDocsPath, true, capi.config.username, capi.config.password, capi.config.certificate, false, base.MethodPost, base.JsonContentType,
+	http_req, _, err := capi.utils.ConstructHttpRequest(couchApiBaseHost, couchApiBasePath+base.BulkDocsPath, true, capi.config.username, capi.config.password, capi.config.certificate, true/*setHttpUserAuth*/, base.MethodPost, base.JsonContentType,
 		nil, capi.Logger())
 	if err != nil {
 		return
