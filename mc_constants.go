@@ -110,6 +110,7 @@ const (
 	DELTA_BADVAL    = Status(0x06)
 	NOT_MY_VBUCKET  = Status(0x07)
 	NO_BUCKET       = Status(0x08)
+	LOCKED          = Status(0x09)
 	AUTH_STALE      = Status(0x1f)
 	AUTH_ERROR      = Status(0x20)
 	AUTH_CONTINUE   = Status(0x21)
