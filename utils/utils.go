@@ -1782,8 +1782,6 @@ func (u *Utilities) RemovePrefix(prefix string, str string) string {
 }
 
 //this expect the baseURL doesn't contain username and password
-//if username and password passed in is "", assume it is local rest call,
-//then call cbauth to add authenticate information
 func (u *Utilities) QueryRestApiWithAuth(
 	baseURL string,
 	path string,
@@ -1817,7 +1815,6 @@ func (u *Utilities) QueryRestApiWithAuth(
 
 	err, statusCode := u.doRestCall(req, timeout, out, http_client, logger)
 	u.cleanupAfterRestCall(keep_client_alive, err, http_client, logger)
-
 	return err, statusCode
 }
 
@@ -1840,17 +1837,31 @@ func (u *Utilities) prepareForRestCall(baseURL string,
 	var l *log.CommonLogger = u.loggerForFunc(logger)
 	var ret_client *http.Client = client
 
-	// set username and password in http request header if
-	// 1. setUserAuth has been explicitly requested (when we need to check client cert setting on target)
-	// or 2. ssl is not enabled
-	// or 3. client cert auth has been set to disable on target
-	// or 4. client cert auth has been set to enable on target, and client cert has not been provided
-	setHttpUserAuth := setUserAuth ||
-		len(certificate) == 0 ||
-		clientCertAuthSetting == base.ClientCertAuthDisable ||
-		(len(clientCertificate) == 0 && clientCertAuthSetting == base.ClientCertAuthEnable)
+	userAuthMode := base.UserAuthModeNone
 
-	req, host, err := u.ConstructHttpRequest(baseURL, path, preservePathEncoding, username, password, certificate, setHttpUserAuth, httpCommand, contentType, body, l)
+	if len(username) == 0 && len(clientCertificate) == 0 && path != base.SSLPortsPath {
+		// username and clientCertificate can be both empty only when
+		// 1. this is a local http call to the same node
+		// or 2. this is a call to /nodes/self/xdcrSSLPorts on target to retrieve ssl port for subsequent https calls
+		// treat case 1 separately, since we will need to set local user auth in http request
+		userAuthMode = base.UserAuthModeLocal
+	} else {
+		// for http calls to remote target, set username and password in http request header if
+		// I. username has been provided
+		// and (1. setUserAuth has been explicitly requested (when we need to check client cert setting on target)
+		// or 2. ssl is not enabled
+		// or 3. client cert auth has been set to disable on target
+		// or 4. client cert auth has been set to enable on target, and client cert has not been provided)
+		if len(username) != 0 &&
+			(setUserAuth ||
+				len(certificate) == 0 ||
+				clientCertAuthSetting == base.ClientCertAuthDisable ||
+				(len(clientCertificate) == 0 && clientCertAuthSetting == base.ClientCertAuthEnable)) {
+			userAuthMode = base.UserAuthModeBasic
+		}
+	}
+
+	req, host, err := u.ConstructHttpRequest(baseURL, path, preservePathEncoding, username, password, certificate, userAuthMode, httpCommand, contentType, body, l)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -2011,8 +2022,6 @@ func (u *Utilities) GetHttpClient(username string, certificate []byte, san_in_ce
 }
 
 //this expect the baseURL doesn't contain username and password
-//if username and password passed in is "", assume it is local rest call,
-//then call cbauth to add authenticate information
 func (u *Utilities) ConstructHttpRequest(
 	baseURL string,
 	path string,
@@ -2020,7 +2029,7 @@ func (u *Utilities) ConstructHttpRequest(
 	username string,
 	password string,
 	certificate []byte,
-	setHttpUserAuth bool,
+	userAuthMode base.UserAuthMode,
 	httpCommand string,
 	contentType string,
 	body []byte,
@@ -2079,19 +2088,19 @@ func (u *Utilities) ConstructHttpRequest(
 
 	req.Header.Set(base.UserAgent, base.GoxdcrUserAgent)
 
-	// setHttpUserAuth may be false only when client cert is used in https connection
-	if setHttpUserAuth {
-		// username is nil when calling /nodes/self/xdcrSSLPorts on target
-		// other username can be nil only in local rest calls
-		if username == "" && path != base.SSLPortsPath {
-			err := cbauth.SetRequestAuth(req)
-			if err != nil {
-				l.Errorf("Failed to set authentication to request, req=%v\n", req)
-				return nil, "", err
-			}
-		} else {
-			req.SetBasicAuth(username, password)
+	switch userAuthMode {
+	case base.UserAuthModeLocal:
+		err := cbauth.SetRequestAuth(req)
+		if err != nil {
+			l.Errorf("Failed to set authentication to request. err=%v\n req=%v\n", err, req)
+			return nil, "", err
 		}
+	case base.UserAuthModeBasic:
+		req.SetBasicAuth(username, password)
+	case base.UserAuthModeNone:
+		// no op
+	default:
+		return nil, "", fmt.Errorf("Invalid userAuthMode %v", userAuthMode)
 	}
 
 	//TODO: log request would log password barely
@@ -2260,20 +2269,20 @@ func (u *Utilities) GetDefaultPoolInfoWithSecuritySettings(hostAddr, username, p
 	// we do not know the correct values of sanInCertificate and clientCertAuthSetting, so we
 	// 1. set sanInCertificate set to true for better security, unless it is declared to be disabled
 	// 2. set client cert auth to enable and setUserAuth to true, so as to ensure that both client cert and username are send to target
-	err, statusCode := u.QueryRestApiWithAuth(hostAddr, base.DefaultPoolPath, false, username, password, certificate, !base.BypassSanInCertificateCheck /*sanInCertificate*/, clientCertificate, clientKey, base.ClientCertAuthEnable, true /*setUserAuth*/, base.MethodGet, "", nil, 0, &defaultPoolInfo, nil, false, logger)
+	err, statusCode := u.QueryRestApiWithAuth(hostAddr, base.DefaultPoolPath, false, username, password, certificate, true /*sanInCertificate*/, clientCertificate, clientKey, base.ClientCertAuthEnable, true /*setUserAuth*/, base.MethodGet, "", nil, 0, &defaultPoolInfo, nil, false, logger)
 	if err != nil || statusCode != http.StatusOK {
 		if err != nil && strings.Contains(err.Error(), base.NoIpSANErrMsg) {
 			// if the error is about certificate not containing IP SANs, it could be that the target cluster is of an old version
 			// make a second try with sanInCertificate set to false
 			// after we retrieve target cluster version, we will then re-set sanInCertificate to the appropriate value
-			logger.Warnf("Received certificate validation error from %v. Target may be an old version that does not support SAN in certificates. Retrying connection to target using sanInCertificate = false.", hostAddr)
+			logger.Debugf("Received certificate validation error from %v. Target may be an old version that does not support SAN in certificates. Retrying connection to target using sanInCertificate = false.", hostAddr)
 			err, statusCode = u.QueryRestApiWithAuth(hostAddr, base.DefaultPoolPath, false, username, password, certificate, false /*sanInCertificate*/, clientCertificate, clientKey, base.ClientCertAuthEnable, true /*setUserAuth*/, base.MethodGet, "", nil, 0, &defaultPoolInfo, nil, false, logger)
 			if err != nil || statusCode != http.StatusOK {
 				// if the second try still fails, return error
-				return false, base.ClientCertAuthDisable, nil, fmt.Errorf("Failed on calling host=%v, path=%v, err=%v, statusCode=%v", hostAddr, base.DefaultPoolPath, err, statusCode)
+				return false, base.ClientCertAuthDisable, nil, fmt.Errorf("Failed to retrieve security settings from host=%v, err=%v, statusCode=%v %v", hostAddr, err, statusCode, u.getAdditionalErrorMessage(statusCode, username))
 			}
 		} else {
-			return false, base.ClientCertAuthDisable, nil, fmt.Errorf("Failed on calling host=%v, path=%v, err=%v, statusCode=%v", hostAddr, base.DefaultPoolPath, err, statusCode)
+			return false, base.ClientCertAuthDisable, nil, fmt.Errorf("Failed to retrieve security settings from host=%v, err=%v, statusCode=%v %v", hostAddr, err, statusCode, u.getAdditionalErrorMessage(statusCode, username))
 		}
 	}
 
@@ -2378,4 +2387,19 @@ func (u *Utilities) ReplaceCouchApiBaseObjWithExternals(couchApiBase string, nod
 		return recompiledUrl
 	}
 	return couchApiBase
+}
+
+func (u *Utilities) getAdditionalErrorMessage(statusCode int, username string) string {
+	errMsg := ""
+	if statusCode == http.StatusUnauthorized {
+		errMsg = "(Received unauthorized error from target. Please double check user credentials."
+		// if username has not been specified [implying that client certificate has been provided and is being used]
+		// unauthorized error could also be returned if target has client cert auth setting set to disable
+		if len(username) == 0 {
+			errMsg += " Since client certificate is being used, please ensure that target is version 5.5 and up and has client certificate authentication setting set to \"enable\" or \"mandatory\".)"
+		} else {
+			errMsg += ")"
+		}
+	}
+	return errMsg
 }

@@ -66,7 +66,7 @@ type UtilsIface interface {
 	GetServerVBucketsMap(connStr, bucketName string, bucketInfo map[string]interface{}) (map[string][]uint16, error)
 
 	// Network related utilities
-	ConstructHttpRequest(baseURL string, path string, preservePathEncoding bool, username string, password string, certificate []byte, setUserAuth bool, httpCommand string, contentType string, body []byte, logger *log.CommonLogger) (*http.Request, string, error)
+	ConstructHttpRequest(baseURL string, path string, preservePathEncoding bool, username string, password string, certificate []byte, userAuthMode base.UserAuthMode, httpCommand string, contentType string, body []byte, logger *log.CommonLogger) (*http.Request, string, error)
 	EnforcePrefix(prefix string, str string) string
 	EncodeHttpRequest(req *http.Request) ([]byte, error)
 	EncodeHttpRequestHeader(reqBytes []byte, key, value string) []byte

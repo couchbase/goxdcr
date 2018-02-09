@@ -12,7 +12,6 @@ package service_impl
 import (
 	"errors"
 	"fmt"
-	"github.com/couchbase/cbauth"
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/service_def"
@@ -224,16 +223,7 @@ func (top_svc *XDCRTopologySvc) MyConnectionStr() (string, error) {
 }
 
 func (top_svc *XDCRTopologySvc) MyCredentials() (string, string, []byte, bool, []byte, []byte, base.ClientCertAuth, error) {
-	connStr, err := top_svc.MyConnectionStr()
-	if err != nil {
-		return "", "", nil, false, nil, nil, base.ClientCertAuthDisable, err
-	}
-	if connStr == "" {
-		return "", "", nil, false, nil, nil, base.ClientCertAuthDisable, errors.New("XDCRTopologySvc.MyConnectionStr() returned empty string")
-	}
-
-	username, password, err := cbauth.GetHTTPServiceAuth(connStr)
-	return username, password, nil, false, nil, nil, base.ClientCertAuthDisable, err
+	return "", "", nil, false, nil, nil, base.ClientCertAuthDisable, nil
 }
 
 func (top_svc *XDCRTopologySvc) MyClusterUuid() (string, error) {

@@ -262,3 +262,14 @@ func (kvVbMap BucketKVVbMap) ReplaceInternalWithExternalHosts(translationMap map
 
 // Compression Section
 type CompressionType int
+
+type UserAuthMode int
+
+const (
+	// no user auth
+	UserAuthModeNone UserAuthMode = iota
+	// use implicit local user auth
+	UserAuthModeLocal UserAuthMode = iota
+	// basic user auth using passed in username and password - so far this applies to user in remote clusters only
+	UserAuthModeBasic UserAuthMode = iota
+)

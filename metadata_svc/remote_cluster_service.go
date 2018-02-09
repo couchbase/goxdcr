@@ -1123,7 +1123,7 @@ func (service *RemoteClusterService) validateRemoteCluster(ref *metadata.RemoteC
 			// this is called here since ref.HttpsHostName needs to be populated prior
 			ref.SANInCertificate, ref.ClientCertAuthSetting, _, err = service.utils.GetDefaultPoolInfoWithSecuritySettings(ref.HttpsHostName, ref.UserName, ref.Password, ref.Certificate, ref.ClientCertificate, ref.ClientKey, service.logger)
 			if err != nil {
-				return wrapAsInvalidRemoteClusterError(fmt.Sprintf("Error checking security settings on target cluster. err=%v", err))
+				return wrapAsInvalidRemoteClusterError(err.Error())
 			}
 			service.logger.Infof("Set SANInCertificate=%v, ClientCertAuthSetting=%v for remote cluster reference %v\n", ref.SANInCertificate, ref.ClientCertAuthSetting, ref.Name)
 		}
