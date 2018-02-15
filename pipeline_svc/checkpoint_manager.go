@@ -363,7 +363,15 @@ func (ckmgr *CheckpointManager) getNewMemcachedClient(server_addr string, initia
 
 		if !initializing && len(certificate) > 0 {
 			// if not initializing at replication startup time, retrieve up to date security settings
-			san_in_certificate, clientCertAuthSetting, _, err = ckmgr.utils.GetDefaultPoolInfoWithSecuritySettings(ssl_con_str, ckmgr.target_username, ckmgr.target_password, certificate, client_certificate, client_key, ckmgr.logger)
+			latestTargetClusterRef, err := ckmgr.remote_cluster_svc.RemoteClusterByUuid(ckmgr.target_cluster_ref.Uuid, false)
+			if err != nil {
+				return nil, err
+			}
+			connStr, err := latestTargetClusterRef.MyConnectionStr()
+			if err != nil {
+				return nil, err
+			}
+			san_in_certificate, clientCertAuthSetting, _, err = ckmgr.utils.GetDefaultPoolInfoWithSecuritySettings(connStr, ckmgr.target_username, ckmgr.target_password, certificate, client_certificate, client_key, ckmgr.logger)
 			if err != nil {
 				return nil, err
 			}

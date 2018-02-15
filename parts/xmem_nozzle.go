@@ -741,6 +741,10 @@ type XmemNozzle struct {
 	gen_server.GenServer
 	AbstractPart
 
+	//remote cluster reference for retrieving up to date remote cluster reference
+	remoteClusterSvc  service_def.RemoteClusterSvc
+	targetClusterUuid string
+
 	bOpen      bool
 	lock_bOpen sync.RWMutex
 
@@ -817,6 +821,8 @@ type XmemNozzle struct {
 }
 
 func NewXmemNozzle(id string,
+	remoteClusterSvc service_def.RemoteClusterSvc,
+	targetClusterUuid string,
 	topic string,
 	connPoolNamePrefix string,
 	connPoolConnSize int,
@@ -841,6 +847,8 @@ func NewXmemNozzle(id string,
 
 	xmem := &XmemNozzle{GenServer: server,
 		AbstractPart:        part,
+		remoteClusterSvc:    remoteClusterSvc,
+		targetClusterUuid:   targetClusterUuid,
 		bOpen:               true,
 		lock_bOpen:          sync.RWMutex{},
 		dataChan:            nil,
@@ -2849,12 +2857,17 @@ func (xmem *XmemNozzle) recordBatchSize(batchSize uint32) {
 func (xmem *XmemNozzle) getClientWithRetry(xmem_id string, pool base.ConnPool, finish_ch chan bool, initializing bool, logger *log.CommonLogger) (mcc.ClientIface, error) {
 	getClientOpFunc := func(param interface{}) (interface{}, error) {
 		clientCertAuthSetting := xmem.config.clientCertAuthSetting
-		var err error
 		if !initializing && len(xmem.config.certificate) > 0 {
 			// if this is not replication startup time, and ssl is enabled, re-compute clientCertAuthSetting since it could have changed
-			hostName := base.GetHostName(xmem.config.connectStr)
-			hostAddr := base.GetHostAddr(hostName, xmem.config.memcached_ssl_port)
-			_, clientCertAuthSetting, _, err = xmem.utils.GetDefaultPoolInfoWithSecuritySettings(hostAddr, xmem.config.username, xmem.config.password, xmem.config.certificate, xmem.config.clientCertificate, xmem.config.clientKey, logger)
+			targetClusterRef, err := xmem.remoteClusterSvc.RemoteClusterByUuid(xmem.targetClusterUuid, false)
+			if err != nil {
+				return nil, err
+			}
+			connStr, err := targetClusterRef.MyConnectionStr()
+			if err != nil {
+				return nil, err
+			}
+			_, clientCertAuthSetting, _, err = xmem.utils.GetDefaultPoolInfoWithSecuritySettings(connStr, xmem.config.username, xmem.config.password, xmem.config.certificate, xmem.config.clientCertificate, xmem.config.clientKey, logger)
 			if err != nil {
 				return nil, err
 			}

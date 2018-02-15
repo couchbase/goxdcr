@@ -513,7 +513,7 @@ func (xdcrf *XDCRFactory) constructOutgoingNozzles(spec *metadata.ReplicationSpe
 				}
 			} else {
 				connSize := numOfOutNozzles * 2
-				outNozzle = xdcrf.constructXMEMNozzle(spec.Id, kvaddr, spec.SourceBucketName, spec.TargetBucketName, targetUserName, targetPassword, i, connSize, sourceCRMode, targetBucketInfo, logger_ctx)
+				outNozzle = xdcrf.constructXMEMNozzle(spec.Id, spec.TargetClusterUUID, kvaddr, spec.SourceBucketName, spec.TargetBucketName, targetUserName, targetPassword, i, connSize, sourceCRMode, targetBucketInfo, logger_ctx)
 			}
 
 			// Add the created nozzle to the collective map of outNozzles to be returned
@@ -559,7 +559,9 @@ func (xdcrf *XDCRFactory) getOutNozzleType(targetClusterRef *metadata.RemoteClus
 	}
 }
 
-func (xdcrf *XDCRFactory) constructXMEMNozzle(topic string, kvaddr string,
+func (xdcrf *XDCRFactory) constructXMEMNozzle(topic string,
+	targetClusterUuid string,
+	kvaddr string,
 	sourceBucketName string,
 	targetBucketName string,
 	username string,
@@ -571,7 +573,7 @@ func (xdcrf *XDCRFactory) constructXMEMNozzle(topic string, kvaddr string,
 	logger_ctx *log.LoggerContext) common.Nozzle {
 	// partIds of the xmem nozzles look like "xmem_$topic_$kvaddr_1"
 	xmemNozzle_Id := xdcrf.partId(XMEM_NOZZLE_NAME_PREFIX, topic, kvaddr, nozzle_index)
-	nozzle := parts.NewXmemNozzle(xmemNozzle_Id, topic, topic, connPoolSize, kvaddr, sourceBucketName, targetBucketName,
+	nozzle := parts.NewXmemNozzle(xmemNozzle_Id, xdcrf.remote_cluster_svc, targetClusterUuid, topic, topic, connPoolSize, kvaddr, sourceBucketName, targetBucketName,
 		username, password, pipeline_manager.RecycleMCRequestObj, sourceCRMode, logger_ctx, xdcrf.utils)
 	return nozzle
 }
