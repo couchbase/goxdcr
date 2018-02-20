@@ -169,7 +169,7 @@ func (genericPipeline *GenericPipeline) startPart(part common.Part, settings met
 //settings - a map of parameter to start the pipeline. it can contain initialization paramters
 //			 for each processing steps and for runtime context of the pipeline.
 func (genericPipeline *GenericPipeline) Start(settings metadata.ReplicationSettingsMap) base.ErrorMap {
-	genericPipeline.logger.Infof("Starting pipeline %s\n %s \n settings = %s\n", genericPipeline.InstanceId(), genericPipeline.Layout(), settings.CloneAndRedact())
+	genericPipeline.logger.Infof("Starting pipeline %s\n %s \n settings = %v\n", genericPipeline.InstanceId(), genericPipeline.Layout(), settings.CloneAndRedact())
 	var errMap base.ErrorMap = make(base.ErrorMap)
 	var err error
 

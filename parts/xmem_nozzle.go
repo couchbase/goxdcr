@@ -1341,11 +1341,13 @@ func (xmem *XmemNozzle) preprocessMCRequest(req *base.WrappedMCRequest) error {
 		mc_req.Body = mc_req.Body[xattr_length+4:]
 	}
 
-	contains_datatype := (mc_req.DataType != 0)
-	if contains_datatype {
-		// since data type is never enabled in the memcached connection, if request contains data type
-		// unset all data type bits except xattr bit
-		mc_req.DataType = mc_req.DataType & base.PROTOCOL_BINARY_DATATYPE_XATTR
+	// Memcached does not like it when any other flags are in there. Purge and re-do
+	if mc_req.DataType > 0 {
+		if xmem.compressionSetting == base.CompressionTypeSnappy {
+			mc_req.DataType &= (base.PROTOCOL_BINARY_DATATYPE_XATTR | base.SnappyDataType)
+		} else {
+			mc_req.DataType &= base.PROTOCOL_BINARY_DATATYPE_XATTR
+		}
 	}
 
 	return nil
@@ -1721,6 +1723,7 @@ func (xmem *XmemNozzle) composeRequestForGetMeta(key string, vb uint16, opaque u
 		Opcode: base.GET_WITH_META}
 
 	// if xattr is enabled, request that data type be included in getMeta response
+	// Not needed for compression since GetMeta connection is to not use compression
 	if xmem.xattrEnabled {
 		req.Extras = make([]byte, 1)
 		req.Extras[0] = byte(base.ReqExtMetaDataType)
