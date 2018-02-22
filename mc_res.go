@@ -55,11 +55,11 @@ func IsFatal(e error) bool {
 	if e == nil {
 		return false
 	}
-	switch errStatus(e) {
-	case KEY_ENOENT, KEY_EEXISTS, NOT_STORED, TMPFAIL:
-		return false
+	_, ok := isFatal[errStatus(e)]
+	if ok {
+		return true
 	}
-	return true
+	return false
 }
 
 // Size is number of bytes this response consumes on the wire.

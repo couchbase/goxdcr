@@ -131,6 +131,18 @@ const (
 	SUBDOC_MULTI_PATH_FAILURE_DELETED = Status(0xd3)
 )
 
+var isFatal = map[Status]bool {
+	DELTA_BADVAL: true,
+	NOT_MY_VBUCKET: true,
+	NO_BUCKET: true,
+	AUTH_STALE: true,
+	AUTH_ERROR: true,
+	ERANGE: true,
+	ROLLBACK: true,
+	EACCESS: true,
+	ENOMEM: true,
+}
+
 // the producer/consumer bit in dcp flags
 var DCP_PRODUCER uint32 = 0x01
 
