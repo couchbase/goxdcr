@@ -209,8 +209,9 @@ func (top_detect_svc *TopologyChangeDetectorSvc) handleSourceToplogyChange(vblis
 		top_detect_svc.logger.Infof("Number of source topology changes seen by pipeline %v is %v\n", top_detect_svc.pipeline.Topic(), top_detect_svc.source_topology_change_count)
 		// restart pipeline if consecutive topology changes reaches limit -- cannot wait any longer
 		if top_detect_svc.source_topology_change_count >= base.MaxTopologyChangeCountBeforeRestart {
-			err = fmt.Errorf("Timeout waiting for source topology changes to complete for pipeline %v.", top_detect_svc.pipeline.Topic())
-			top_detect_svc.restartPipeline(err)
+			var sourceTopoChangeRestartString = "Restarting pipeline due to source topology change..."
+			top_detect_svc.logger.Warnf("Pipeline %v: %v", top_detect_svc.pipeline.Topic(), sourceTopoChangeRestartString)
+			top_detect_svc.restartPipeline(errors.New(sourceTopoChangeRestartString))
 			return err
 		}
 
@@ -266,8 +267,9 @@ func (top_detect_svc *TopologyChangeDetectorSvc) handleTargetToplogyChange(diff_
 		top_detect_svc.logger.Infof("Number of target topology changes seen by pipeline %v is %v\n", top_detect_svc.pipeline.Topic(), top_detect_svc.target_topology_change_count)
 		// restart pipeline if consecutive topology changes reaches limit -- cannot wait any longer
 		if top_detect_svc.target_topology_change_count >= base.MaxTopologyChangeCountBeforeRestart {
-			err = fmt.Errorf("Timeout waiting for target topology changes to complete for pipeline %v.", top_detect_svc.pipeline.Topic())
-			top_detect_svc.restartPipeline(err)
+			var targetTopoChangeRestartString = "Restarting pipeline due to target topology change..."
+			top_detect_svc.logger.Warnf("Pipeline %v: %v", top_detect_svc.pipeline.Topic(), targetTopoChangeRestartString)
+			top_detect_svc.restartPipeline(errors.New(targetTopoChangeRestartString))
 			return err
 		}
 
