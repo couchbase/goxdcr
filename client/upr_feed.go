@@ -17,6 +17,7 @@ import (
 
 const uprMutationExtraLen = 30
 const uprDeletetionExtraLen = 18
+const uprDeletetionWithDeletionTimeExtraLen = 21
 const uprSnapshotExtraLen = 20
 const bufferAckThreshold = 0.2
 const opaqueOpen = 0xBEAF0001
@@ -75,8 +76,9 @@ const (
 )
 
 type UprFeatures struct {
-	Xattribute      bool
-	CompressionType int
+	Xattribute          bool
+	CompressionType     int
+	IncludeDeletionTime bool
 }
 
 // UprFeed represents an UPR feed. A feed contains a connection to a single
@@ -170,6 +172,13 @@ func makeUprEvent(rq gomemcached.MCRequest, stream *UprStream) *UprEvent {
 		event.LockTime = binary.BigEndian.Uint32(rq.Extras[24:28])
 		event.MetadataSize = binary.BigEndian.Uint16(rq.Extras[28:30])
 
+	} else if len(rq.Extras) >= uprDeletetionWithDeletionTimeExtraLen &&
+		event.Opcode == gomemcached.UPR_DELETION {
+
+		event.Seqno = binary.BigEndian.Uint64(rq.Extras[:8])
+		event.RevSeqno = binary.BigEndian.Uint64(rq.Extras[8:16])
+		event.Expiry = binary.BigEndian.Uint32(rq.Extras[16:20])
+
 	} else if len(rq.Extras) >= uprDeletetionExtraLen &&
 		event.Opcode == gomemcached.UPR_DELETION ||
 		event.Opcode == gomemcached.UPR_EXPIRATION {
@@ -255,7 +264,7 @@ func (mc *Client) NewUprFeedWithConfigIface(ackByClient bool) (UprFeedIface, err
 	return mc.NewUprFeedWithConfig(ackByClient)
 }
 
-func doUprOpen(mc *Client, name string, sequence uint32, enableXATTR bool) error {
+func doUprOpen(mc *Client, name string, sequence uint32, features UprFeatures) error {
 	rq := &gomemcached.MCRequest{
 		Opcode: gomemcached.UPR_OPEN,
 		Key:    []byte(name),
@@ -267,9 +276,11 @@ func doUprOpen(mc *Client, name string, sequence uint32, enableXATTR bool) error
 
 	// opens a producer type connection
 	flags := gomemcached.DCP_PRODUCER
-	if enableXATTR {
-		// set DCP_OPEN_INCLUDE_XATTRS bit in flags
+	if features.Xattribute {
 		flags = flags | gomemcached.DCP_OPEN_INCLUDE_XATTRS
+	}
+	if features.IncludeDeletionTime {
+		flags = flags | gomemcached.DCP_OPEN_INCLUDE_DELETE_TIMES
 	}
 	binary.BigEndian.PutUint32(rq.Extras[4:], flags)
 
@@ -322,7 +333,7 @@ func (feed *UprFeed) uprOpen(name string, sequence uint32, bufSize uint32, featu
 	// First set this to an invalid value to state that the method hasn't gotten to executing this control yet
 	activatedFeatures.CompressionType = CompressionTypeEndMarker
 
-	if err = doUprOpen(mc, name, sequence, features.Xattribute); err != nil {
+	if err = doUprOpen(mc, name, sequence, features); err != nil {
 		return
 	}
 
@@ -395,7 +406,8 @@ func (mc *Client) UprGetFailoverLog(
 		Opaque: opaqueFailover,
 	}
 
-	if err := doUprOpen(mc, "FailoverLog", 0, false); err != nil {
+	var allFeaturesDisabled UprFeatures
+	if err := doUprOpen(mc, "FailoverLog", 0, allFeaturesDisabled); err != nil {
 		return nil, fmt.Errorf("UPR_OPEN Failed %s", err.Error())
 	}
 

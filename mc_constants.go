@@ -148,6 +148,8 @@ var DCP_PRODUCER uint32 = 0x01
 
 // the include XATTRS bit in dcp flags
 var DCP_OPEN_INCLUDE_XATTRS uint32 = 0x04
+// the include deletion time bit in dcp flags
+var DCP_OPEN_INCLUDE_DELETE_TIMES uint32 = 0x20
 
 // Datatype to Include XATTRS in SUBDOC GET
 var SUBDOC_FLAG_XATTR uint8 = 0x04
