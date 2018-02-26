@@ -792,7 +792,39 @@ func NewRemoteClusterService(uilog_svc service_def.UILogSvc, metakv_svc service_
 		agentCacheUuidMap:    make(map[string]*RemoteClusterAgent),
 	}
 
-	return svc, nil
+	return svc, svc.loadFromMetaKV()
+}
+
+func (service *RemoteClusterService) loadFromMetaKV() error {
+	var KVsFromMetaKV []*service_def.MetadataEntry
+	var KVsFromMetaKVErr error
+
+	getAllKVsOpFunc := func() error {
+		KVsFromMetaKV, KVsFromMetaKVErr = service.metakv_svc.GetAllMetadataFromCatalog(RemoteClustersCatalogKey)
+		return KVsFromMetaKVErr
+	}
+	err := service.utils.ExponentialBackoffExecutor("GetAllMetadataFromCatalogRemoteCluster", base.RetryIntervalMetakv,
+		base.MaxNumOfMetakvRetries, base.MetaKvBackoffFactor, getAllKVsOpFunc)
+	if err != nil {
+		service.logger.Errorf("Unable to get all the KVs from metakv: %v", err)
+		return err
+	}
+
+	var ref *metadata.RemoteClusterReference
+	for _, KVentry := range KVsFromMetaKV {
+		ref, err = constructRemoteClusterReference(KVentry.Value, KVentry.Rev)
+
+		if err != nil {
+			service.logger.Errorf("Unable to construct remote cluster %v from metaKV's data. err: %v. value: %v\n", KVentry.Key, base.TagUDBytes(KVentry.Value), err)
+			continue
+		}
+		_, _, err = service.getOrStartNewAgent(ref, false, true)
+		if err != nil {
+			service.logger.Errorf("Failed to start new agent for remote cluster %v. err: %v\n", KVentry.Key, err)
+			continue
+		}
+	}
+	return nil
 }
 
 func (service *RemoteClusterService) SetMetadataChangeHandlerCallback(call_back base.MetadataChangeHandlerCallback) {
