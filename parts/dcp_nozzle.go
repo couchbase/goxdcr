@@ -446,6 +446,7 @@ func (dcp *DcpNozzle) initializeUprFeed() error {
 		// for source side conflict resolution
 		uprFeatures.Xattribute = true
 		uprFeatures.CompressionType = (int)(dcp.compressionSetting)
+		uprFeatures.IncludeDeletionTime = true
 		featuresErr, activatedFeatures := dcp.uprFeed.UprOpenWithFeatures(uprFeedName, uint32(0) /*seqno*/, base.UprFeedBufferSize, uprFeatures)
 		if featuresErr != nil {
 			err = featuresErr
