@@ -1,12 +1,14 @@
 package utils
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	base "github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/stretchr/testify/assert"
 	"io/ioutil"
+	"math/rand"
 	"strings"
 	"testing"
 )
@@ -418,4 +420,23 @@ func TestGetCapiPortsInternal(t *testing.T) {
 	}
 
 	fmt.Println("============== Test case end: TestGetCapiPortsInternal =================")
+}
+
+func TestTagAndGetUDBytes(t *testing.T) {
+	assert := assert.New(t)
+	fmt.Println("============== Test case start: TestTagAndGetUDBytes =================")
+	testBytes := make([]byte, 5)
+	rand.Read(testBytes)
+
+	assert.False(bytes.HasPrefix(testBytes, base.UdTagBeginBytes))
+	assert.False(bytes.HasSuffix(testBytes, base.UdTagEndBytes))
+	assert.False(base.IsByteSliceRedacted(testBytes))
+
+	testBytes = base.TagUDBytes(testBytes)
+
+	assert.True(bytes.HasPrefix(testBytes, base.UdTagBeginBytes))
+	assert.True(bytes.HasSuffix(testBytes, base.UdTagEndBytes))
+	assert.True(base.IsByteSliceRedacted(testBytes))
+
+	fmt.Println("============== Test case end: TestTagAndGetUDBytes =================")
 }

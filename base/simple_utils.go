@@ -786,6 +786,10 @@ func IsStringRedacted(input string) bool {
 	return strings.HasPrefix(input, UdTagBegin) && strings.HasSuffix(input, UdTagEnd)
 }
 
+func IsByteSliceRedacted(constData []byte) bool {
+	return bytes.HasPrefix(constData, UdTagBeginBytes) && bytes.HasSuffix(constData, UdTagEndBytes)
+}
+
 // A pointer function to lookup Auto with the actual compression type - right now it's Snappy
 func GetCompressionType(inType int) CompressionType {
 	if (CompressionType)(inType) == CompressionTypeAuto {

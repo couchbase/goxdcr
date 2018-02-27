@@ -36,6 +36,8 @@ const (
 	BandwidthLimit                 = "bandwidth_limit"
 	CompressionType                = base.CompressionTypeKey
 	XmemCertificate                = "certificate"
+	XmemClientCertificate          = "clientCertificate"
+	XmemClientKey                  = "clientKey"
 )
 
 // settings whose default values cannot be viewed or changed through rest apis
@@ -476,28 +478,72 @@ func (s *ReplicationSettings) fromMap(settingsMap ReplicationSettingsMap) base.E
 
 type ReplicationSettingsMap map[string]interface{}
 
-// Things that need redact are either []byte (true) or string (false)
-var replicationSettingsMapRedactDict = map[string]bool{FilterExpression: false, XmemCertificate: true}
+type redactDictType int
+
+const (
+	redactDictString      redactDictType = iota
+	redactDictBytes       redactDictType = iota
+	redactDictStringClear redactDictType = iota // Should be cleared instead of tagged
+	redactDictBytesClear  redactDictType = iota // Should be cleared instead of tagged
+)
+
+// The dictionary map is a kv pair of KeyNeedsRedacting -> RedactTypeAndOperation
+var replicationSettingsMapRedactDict = map[string]redactDictType{FilterExpression: redactDictString,
+	XmemCertificate:       redactDictBytes,
+	XmemClientKey:         redactDictBytesClear, // Clear the value instead of redaction
+	XmemClientCertificate: redactDictBytes}
+
+// Input - the key that is being redacted. Value - the value to be redacted
+// The function will redact the value automatically if the key needs to be redacted, otherwise, it will do shallow clone
+func (repMap ReplicationSettingsMap) repSettingsMapCloneAndRedactHelper(k string, v interface{}) {
+	if redactOpType, ok := replicationSettingsMapRedactDict[k]; ok {
+		switch redactOpType {
+		case redactDictBytes:
+			if !base.IsByteSliceRedacted(v.([]byte)) {
+				repMap[k] = base.DeepCopyByteArray(v.([]byte))
+				repMap[k] = base.TagUDBytes(repMap[k].([]byte))
+			} else {
+				// Redacted already, so shallow copy already-redacted data
+				repMap[k] = v
+			}
+		case redactDictString:
+			if !base.IsStringRedacted(v.(string)) {
+				repMap[k] = base.TagUD(v.(string))
+			} else {
+				repMap[k] = v
+			}
+		case redactDictBytesClear:
+			if len(v.([]byte)) > 0 {
+				repMap[k] = []byte{}
+			} else {
+				repMap[k] = v
+			}
+		case redactDictStringClear:
+			repMap[k] = ""
+		default:
+			// Shallow copy since we don't know what to do with it
+			repMap[k] = v
+		}
+	} else {
+		// Not a key that needs redacting. Do shallow copy
+		repMap[k] = v
+	}
+}
 
 // NOTE: This is currently "cheating" and not cloning if there's nothing to be redacted
 func (repMap ReplicationSettingsMap) CloneAndRedact() ReplicationSettingsMap {
-	for keyNeedsRedacting, byteArrayType := range replicationSettingsMapRedactDict {
+	for keyNeedsRedacting, valueType := range replicationSettingsMapRedactDict {
 		if setting, keyExistsInSetting := repMap[keyNeedsRedacting]; keyExistsInSetting {
-			if (byteArrayType && len(setting.([]byte)) > 0) ||
-				(!byteArrayType && len(setting.(string)) > 0 && !base.IsStringRedacted(setting.(string))) {
+			if ((valueType == redactDictBytes && len(setting.([]byte)) > 0) && !base.IsByteSliceRedacted(setting.([]byte))) ||
+				(valueType == redactDictString && len(setting.(string)) > 0 && !base.IsStringRedacted(setting.(string))) ||
+				(valueType == redactDictBytesClear && len(setting.([]byte)) > 0) ||
+				(valueType == redactDictStringClear && len(setting.(string)) > 0) {
 				clonedMap := make(ReplicationSettingsMap)
 				// For now, duplicate ReplicationSettings.Redact() logic.
 				// In the future, if more things need to be redacted, combine and use a single place to Redact()
 				// to avoid having to maintain >1 places
 				for k, v := range repMap {
-					if k == FilterExpression {
-						clonedMap[k] = base.TagUD(v)
-					} else if k == XmemCertificate {
-						clonedMap[k] = base.DeepCopyByteArray(v.([]byte))
-						clonedMap[k] = base.TagUDBytes(clonedMap[k].([]byte))
-					} else {
-						clonedMap[k] = v
-					}
+					clonedMap.repSettingsMapCloneAndRedactHelper(k, v)
 				}
 				return clonedMap
 			}

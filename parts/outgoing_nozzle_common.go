@@ -113,7 +113,7 @@ func (doc_meta *documentMetadata) Clone() *documentMetadata {
 
 func (doc_meta *documentMetadata) Redact() *documentMetadata {
 	if doc_meta != nil {
-		if len(doc_meta.key) > 0 {
+		if len(doc_meta.key) > 0 && !base.IsByteSliceRedacted(doc_meta.key) {
 			doc_meta.key = base.TagUDBytes(doc_meta.key)
 		}
 	}

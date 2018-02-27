@@ -123,10 +123,10 @@ func (ref *RemoteClusterReference) Redact() *RemoteClusterReference {
 		if len(ref.Password) > 0 && !base.IsStringRedacted(ref.Password) {
 			ref.Password = base.TagUD(ref.Password)
 		}
-		if len(ref.Certificate) > 0 {
+		if len(ref.Certificate) > 0 && !base.IsByteSliceRedacted(ref.Certificate) {
 			ref.Certificate = base.TagUDBytes(ref.Certificate)
 		}
-		if len(ref.ClientCertificate) > 0 {
+		if len(ref.ClientCertificate) > 0 && !base.IsByteSliceRedacted(ref.ClientCertificate) {
 			ref.ClientCertificate = base.TagUDBytes(ref.ClientCertificate)
 		}
 		// no need to redact ClientKey since it is always nil in this ref for redact

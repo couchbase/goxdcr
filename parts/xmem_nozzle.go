@@ -44,8 +44,8 @@ const (
 	XMEM_SETTING_INSECURESKIPVERIFY  = "insecureSkipVerify"
 	XMEM_SETTING_SAN_IN_CERITICATE   = "SANInCertificate"
 	XMEM_SETTING_REMOTE_MEM_SSL_PORT = "remote_ssl_port"
-	XMEM_SETTING_CLIENT_CERTIFICATE  = "clientCertificate"
-	XMEM_SETTING_CLIENT_KEY          = "clientKey"
+	XMEM_SETTING_CLIENT_CERTIFICATE  = metadata.XmemClientCertificate
+	XMEM_SETTING_CLIENT_KEY          = metadata.XmemClientKey
 	XMEM_SETTING_CLIENT_CERT_AUTH    = "clientCertAuth"
 
 	default_demandEncryption bool = false
