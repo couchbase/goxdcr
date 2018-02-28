@@ -20,6 +20,7 @@ import (
 	"github.com/couchbase/goxdcr/log"
 	"math"
 	mrand "math/rand"
+	"net"
 	"net/http"
 	"net/url"
 	"reflect"
@@ -473,8 +474,14 @@ func FlattenBytesList(bytesList [][]byte, size int) []byte {
 }
 
 // return host address in the form of hostName:port
+// hostName could be
+// 1. ipv4 address, which is always without brackets
+// 2. ipv6 address without brackets
+// 3. ipv6 address with brackets
+// in case 1 and 2, net.JoinHostPort() can be called directly
+// in case 3, the brackets need to be stripped before net.JoinHostPort() can be called
 func GetHostAddr(hostName string, port uint16) string {
-	return hostName + UrlPortNumberDelimiter + strconv.FormatInt(int64(port), ParseIntBase)
+	return net.JoinHostPort(StripBracketsFromHostName(hostName), fmt.Sprintf("%v", port))
 }
 
 // extract host name from hostAddr, which is in the form of hostName:port
@@ -530,13 +537,25 @@ func ValidateHostAddr(hostAddr string) (string, error) {
 	hostName := GetHostName(hostAddr)
 	if strings.Contains(hostName, Ipv6AddressSeparator) {
 		// host name contains ":" and has to be an ipv6 address. validate that it is enclosed in "[]"
-		if !strings.HasPrefix(hostName, LeftBracket) || !strings.HasSuffix(hostName, RightBracket) {
+		if !IsIpAddressEnclosedInBrackets(hostName) {
 			return "", errors.New("ipv6 address needs to be enclosed in square brackets")
 		}
 	}
 
 	return hostAddr, nil
 
+}
+
+func IsIpAddressEnclosedInBrackets(hostName string) bool {
+	return strings.HasPrefix(hostName, LeftBracket) && strings.HasSuffix(hostName, RightBracket)
+}
+
+func StripBracketsFromHostName(hostName string) string {
+	if !IsIpAddressEnclosedInBrackets(hostName) {
+		return hostName
+	}
+
+	return hostName[len(LeftBracket) : len(hostName)-len(RightBracket)]
 }
 
 func ShuffleStringsList(list []string) {

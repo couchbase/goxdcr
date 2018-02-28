@@ -797,12 +797,12 @@ func (u *Utilities) GetEvictionPolicyFromBucketInfo(bucketName string, bucketInf
  * The second section is couchbase REST related utility functions
  */
 // This method is used to get the SSL port for target nodes - will use alternate fields if possible
-func (u *Utilities) GetMemcachedSSLPortMap(hostName, username, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool,
+func (u *Utilities) GetMemcachedSSLPortMap(connStr, username, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool,
 	clientCertificate []byte, clientKey []byte, clientCertAuthSetting base.ClientCertAuth, bucket string, logger *log.CommonLogger) (base.SSLPortMap, error) {
 	ret := make(base.SSLPortMap)
 
-	logger.Infof("GetMemcachedSSLPort, hostName=%v\n", hostName)
-	bucketInfo, err := u.GetClusterInfo(hostName, base.BPath+bucket, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, logger)
+	logger.Infof("GetMemcachedSSLPort, connStr=%v\n", connStr)
+	bucketInfo, err := u.GetClusterInfo(connStr, base.BPath+bucket, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, logger)
 	if err != nil {
 		return nil, err
 	}
@@ -817,6 +817,7 @@ func (u *Utilities) GetMemcachedSSLPortMap(hostName, username, password string, 
 		return nil, u.BucketInfoParseError(bucketInfo, logger)
 	}
 
+	var hostName string
 	for _, nodeExt := range nodesExtArray {
 		var portNumberToUse uint16
 		nodeExtMap, ok := nodeExt.(map[string]interface{})
@@ -824,9 +825,11 @@ func (u *Utilities) GetMemcachedSSLPortMap(hostName, username, password string, 
 			return nil, u.BucketInfoParseError(bucketInfo, logger)
 		}
 
-		hostname, err := u.GetHostNameFromNodeInfo(hostName, nodeExtMap, logger)
+		// note that this is the only place where nodeExtMap contains a hostname without port
+		// instead of a host address with port
+		hostName, err = u.getHostNameWithoutPortFromNodeInfo(connStr, nodeExtMap, logger)
 		if err != nil {
-			return nil, err
+			return nil, u.BucketInfoParseError(bucketInfo, logger)
 		}
 
 		// Internal key
@@ -850,7 +853,7 @@ func (u *Utilities) GetMemcachedSSLPortMap(hostName, username, password string, 
 			return nil, u.BucketInfoParseError(bucketInfo, logger)
 		}
 
-		hostAddr := base.GetHostAddr(hostname, uint16(kvPortFloat))
+		hostAddr := base.GetHostAddr(hostName, uint16(kvPortFloat))
 
 		kv_ssl_port, ok := services_map[base.KVSSLPortKey]
 		if !ok {
@@ -1711,19 +1714,27 @@ func (u *Utilities) getExternalHostAndCapiPorts(nodeInfo map[string]interface{})
 	return hostAddr, capiPort, capiPortErr, capiSSLPort, capiSSLPortErr
 }
 
-// Given target cluster node info maps, get a list of hostAddrs
 func (u *Utilities) GetHostAddrFromNodeInfo(adminHostAddr string, nodeInfo map[string]interface{}, logger *log.CommonLogger) (string, error) {
+	hostAddr, err := u.getHostAddrFromNodeInfoInternal(adminHostAddr, nodeInfo, logger)
+	if err == base.ErrorNoHostName {
+		hostAddr = adminHostAddr
+		err = nil
+	}
+	return hostAddr, err
+}
+
+func (u *Utilities) getHostAddrFromNodeInfoInternal(adminHostAddr string, nodeInfo map[string]interface{}, logger *log.CommonLogger) (string, error) {
 	var hostAddr string
 	var ok bool
 
 	hostAddrObj, ok := nodeInfo[base.HostNameKey]
 	if !ok {
-		logger.Infof("hostname is missing from node info %v. This could happen in local test env where target cluster consists of a single node, %v. Just use that node.\n", nodeInfo, adminHostAddr)
-		hostAddr = adminHostAddr
+		logger.Infof("hostname is missing from node info %v. Host name in remote cluster reference, %v, will be used.\n", nodeInfo, adminHostAddr)
+		return "", base.ErrorNoHostName
 	} else {
 		hostAddr, ok = hostAddrObj.(string)
 		if !ok {
-			return "", fmt.Errorf("Error constructing ssl port map for target cluster %v. host name, %v, is of wrong type\n", hostAddr, hostAddrObj)
+			return "", fmt.Errorf("Error getting host address from target cluster %v. host name, %v, is of wrong type\n", adminHostAddr, hostAddrObj)
 		}
 	}
 
@@ -1819,6 +1830,18 @@ func (u *Utilities) GetHostNameFromNodeInfo(adminHostAddr string, nodeInfo map[s
 		return "", err
 	}
 	return base.GetHostName(hostAddr), nil
+}
+
+// this method is called when nodeInfo came from the terse bucket call, pools/default/b/[bucketName]
+// where hostname in nodeInfo is a host name without port rather than a host address with port
+func (u *Utilities) getHostNameWithoutPortFromNodeInfo(adminHostAddr string, nodeInfo map[string]interface{}, logger *log.CommonLogger) (string, error) {
+	hostName, err := u.getHostAddrFromNodeInfoInternal(adminHostAddr, nodeInfo, logger)
+	if err == base.ErrorNoHostName {
+		hostName = base.GetHostName(adminHostAddr)
+		err = nil
+	}
+
+	return hostName, err
 }
 
 //convenient api for rest calls to local cluster

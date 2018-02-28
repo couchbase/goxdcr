@@ -95,9 +95,9 @@ var UrlDelimiter = "/"
 var UrlPortNumberDelimiter = ":"
 
 // constants for ipv6 addresses
-var Ipv6AddressSeparator = ":"
-var LeftBracket = "["
-var RightBracket = "]"
+const Ipv6AddressSeparator = ":"
+const LeftBracket = "["
+const RightBracket = "]"
 
 var ClusterMembership_Active = "active"
 
@@ -204,6 +204,7 @@ var ErrorCompressionUnableToConvert = errors.New("Unable to translate user input
 var ErrorCompressionDcpInvalidHandshake = errors.New("DCP connection is established as compressed even though compression is not requested.")
 var ErrorMaxReached = errors.New("Maximum entries has been reached")
 var ErrorNilPtr = errors.New("Nil pointer given")
+var ErrorNoHostName = errors.New("hostname is missing")
 
 // the full error as of now is : "x509: cannot validate certificate for xxx because it doesn't contain any IP SANs"
 // use a much shorter version for matching to reduce the chance of false negatives - the error message may be changed by golang in the future
