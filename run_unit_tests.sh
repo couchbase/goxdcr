@@ -10,6 +10,7 @@ declare -a DIRS_WITH_UT
 
 DIRS_WITH_UT=(
 base
+pipeline
 pipeline_manager
 parts
 metadata

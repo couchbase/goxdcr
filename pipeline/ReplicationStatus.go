@@ -123,7 +123,7 @@ func NewReplicationStatus(specId string, spec_getter ReplicationSpecGetter, logg
 	rep_status := &ReplicationStatus{specId: specId,
 		pipeline_:   nil,
 		logger:      logger,
-		err_list:    PipelineErrorArray{},
+		err_list:    make(PipelineErrorArray, 0, PipelineErrorMaxEntries),
 		spec_getter: spec_getter,
 		lock:        &sync.RWMutex{},
 		obj_pool:    base.NewMCRequestPool(specId, logger),
@@ -180,14 +180,9 @@ func (rs *ReplicationStatus) RepId() string {
 }
 
 func (rs *ReplicationStatus) AddError(err error) {
-	// need to lock because this method could be called concurrently from pipeline_manager and updater
 	rs.lock.Lock()
 	defer rs.lock.Unlock()
 
-	rs.addErrorNoLock(err)
-}
-
-func (rs *ReplicationStatus) addErrorNoLock(err error) {
 	if err != nil {
 		end := len(rs.err_list)
 		if end > PipelineErrorMaxEntries-1 {
@@ -207,9 +202,45 @@ func (rs *ReplicationStatus) addErrorNoLock(err error) {
 func (rs *ReplicationStatus) AddErrorsFromMap(errMap base.ErrorMap) {
 	rs.lock.Lock()
 	defer rs.lock.Unlock()
-	for _, v := range errMap {
-		rs.addErrorNoLock(v)
+
+	var i int
+
+	// Need to potentially shift existing errors over
+	var errorsToKeep int
+	if len(errMap) == 0 {
+		return
+	} else if len(errMap) >= PipelineErrorMaxEntries {
+		errorsToKeep = 0
+	} else if len(errMap)+len(rs.err_list) <= PipelineErrorMaxEntries {
+		errorsToKeep = len(rs.err_list)
+	} else {
+		errorsToKeep = PipelineErrorMaxEntries - len(errMap)
 	}
+
+	// Grow the slice if needed
+	totalErrorsToBeInList := base.IntMin((errorsToKeep + len(errMap)), PipelineErrorMaxEntries)
+	needToGrowListBy := totalErrorsToBeInList - len(rs.err_list)
+	for i = 0; i < needToGrowListBy; i++ {
+		rs.err_list = append(rs.err_list, PipelineError{})
+	}
+
+	// Shift existing elements that are to be saved
+	keepBeginIndex := totalErrorsToBeInList - errorsToKeep
+	for i = totalErrorsToBeInList - 1; i >= keepBeginIndex; i-- {
+		readFromIndex := i - keepBeginIndex
+		rs.err_list[i] = rs.err_list[readFromIndex]
+	}
+
+	// Now that shifted has finished, fill in the newer ones
+	i = 0
+	for _, v := range errMap {
+		if i == keepBeginIndex {
+			break
+		}
+		rs.err_list[i] = PipelineError{Timestamp: time.Now(), ErrMsg: v.Error()}
+		i++
+	}
+	rs.Publish(false)
 }
 
 func (rs *ReplicationStatus) RuntimeStatus(lock bool) ReplicationState {
