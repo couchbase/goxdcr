@@ -269,8 +269,7 @@ func (service *ReplicationSpecService) populateConnectionCreds(targetClusterRef 
 	return
 }
 
-func (service *ReplicationSpecService) validateXmemSettings(targetClusterRef *metadata.RemoteClusterReference, targetKVVBMap map[string][]uint16, sourceBucket, targetBucket string, targetBucketInfo map[string]interface{}, kvConnStr, username, password string) base.ErrorMap {
-	errorMap := make(base.ErrorMap)
+func (service *ReplicationSpecService) validateXmemSettings(errorMap base.ErrorMap, targetClusterRef *metadata.RemoteClusterReference, targetKVVBMap map[string][]uint16, sourceBucket, targetBucket string, targetBucketInfo map[string]interface{}, kvConnStr, username, password string) {
 	if targetClusterRef.IsEncryptionEnabled() && !targetClusterRef.IsFullEncryption() {
 		// for half-ssl ref, validate that target memcached supports SCRAM-SHA authentication
 		client, err := service.utils.GetRemoteMemcachedConnection(kvConnStr, username, password, targetBucket,
@@ -281,10 +280,8 @@ func (service *ReplicationSpecService) validateXmemSettings(targetClusterRef *me
 		}
 		if err != nil {
 			errorMap[base.ToCluster] = fmt.Errorf("Error verifying SCRAM-SHA authentication support. err=%v", err)
-			return errorMap
 		}
 	}
-	return errorMap
 }
 
 func (service *ReplicationSpecService) validateES(errorMap base.ErrorMap, targetClusterRef *metadata.RemoteClusterReference, targetBucketInfo map[string]interface{}, repl_type interface{}, sourceConflictResolutionType, targetConflictResolutionType string) []string {
@@ -357,11 +354,11 @@ func (service *ReplicationSpecService) ValidateNewReplicationSpec(sourceBucket, 
 		return "", "", nil, errorMap, nil, nil
 	}
 
-	errorMap, err = service.validateReplicationSettingsInternal(sourceBucket, targetCluster, targetBucket, settings,
+	err = service.validateReplicationSettingsInternal(errorMap, sourceBucket, targetCluster, targetBucket, settings,
 		targetClusterRef, remote_connStr, remote_userName, remote_password, certificate, sanInCertificate,
 		clientCertificate, clientKey, clientCertAuthSetting, targetKVVBMap, targetBucketInfo)
-	if len(errorMap) > 0 {
-		return "", "", nil, errorMap, nil, nil
+	if len(errorMap) > 0 || err != nil {
+		return "", "", nil, errorMap, err, nil
 	}
 
 	repl_type, ok := settings[metadata.ReplicationType]
@@ -394,116 +391,112 @@ func (service *ReplicationSpecService) ValidateReplicationSettings(sourceBucket,
 		return nil, err
 	}
 
-	return service.validateReplicationSettingsInternal(sourceBucket, targetCluster, targetBucket, settings, targetClusterRef, remote_connStr, remote_userName, remote_password, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, targetKVVBMap, targetBucketInfo)
+	err = service.validateReplicationSettingsInternal(errorMap, sourceBucket, targetCluster, targetBucket, settings, targetClusterRef, remote_connStr, remote_userName, remote_password, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, targetKVVBMap, targetBucketInfo)
+	return errorMap, err
 }
 
-func (service *ReplicationSpecService) validateReplicationSettingsInternal(sourceBucket, targetCluster, targetBucket string, settings metadata.ReplicationSettingsMap,
+func (service *ReplicationSpecService) validateReplicationSettingsInternal(errorMap base.ErrorMap, sourceBucket, targetCluster, targetBucket string, settings metadata.ReplicationSettingsMap,
 	targetClusterRef *metadata.RemoteClusterReference, remote_connStr, remote_userName, remote_password string, certificate []byte, sanInCertificate bool,
-	clientCertificate, clientKey []byte, clientCertAuthSetting base.ClientCertAuth, targetKVVBMap map[string][]uint16, targetBucketInfo map[string]interface{}) (base.ErrorMap, error) {
-	errorMap := make(base.ErrorMap)
+	clientCertificate, clientKey []byte, clientCertAuthSetting base.ClientCertAuth, targetKVVBMap map[string][]uint16, targetBucketInfo map[string]interface{}) error {
 
 	var populateErr error
 	var err error
 	allKvConnStrs, username, password, populateErr := service.populateConnectionCreds(targetClusterRef, targetKVVBMap, targetBucket, targetBucketInfo)
 	if populateErr != nil {
-		return nil, populateErr
+		return populateErr
 	}
 
 	repl_type, ok := settings[metadata.ReplicationType]
 	compressionType, compressionOk := settings[metadata.CompressionType]
 	if !ok || repl_type == metadata.ReplicationTypeXmem {
-		errorMap = service.validateXmemSettings(targetClusterRef, targetKVVBMap, sourceBucket, targetBucket, targetBucketInfo, allKvConnStrs[0], username, password)
+		service.validateXmemSettings(errorMap, targetClusterRef, targetKVVBMap, sourceBucket, targetBucket, targetBucketInfo, allKvConnStrs[0], username, password)
 		if len(errorMap) > 0 {
-			return errorMap, nil
+			return nil
 		}
 
 		// Compression is only allowed in XMEM mode
 		if compressionOk && compressionType != base.CompressionTypeNone {
-			errorMap, err = service.validateCompression(sourceBucket, targetClusterRef, targetKVVBMap, targetBucket, targetBucketInfo, compressionType.(int), allKvConnStrs, username, password, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting)
+			err = service.validateCompression(errorMap, sourceBucket, targetClusterRef, targetKVVBMap, targetBucket, targetBucketInfo, compressionType.(int), allKvConnStrs, username, password, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting)
 			if len(errorMap) > 0 || err != nil {
-				return errorMap, err
+				return err
 			}
 		}
 	} else if compressionOk && compressionType != base.CompressionTypeNone {
 		errorMap[base.CompressionTypeREST] = fmt.Errorf("Compression feature is incompatible with XDCR Version 1 (CAPI Protocol)")
-		return errorMap, nil
+		return nil
 	}
-	return errorMap, nil
+	return nil
 }
 
 // validate compression - should only be called if compression setting dictates that there is compression
-func (service *ReplicationSpecService) validateCompression(sourceBucket string, targetClusterRef *metadata.RemoteClusterReference, targetKVVBMap map[string][]uint16, targetBucket string, targetBucketInfo map[string]interface{}, compressionType int, allKvConnStrs []string, username, password string,
-	certificate []byte, SANInCertificate bool, clientCertificate, clientKey []byte, clientCertAuthSetting base.ClientCertAuth) (base.ErrorMap, error) {
+func (service *ReplicationSpecService) validateCompression(errorMap base.ErrorMap, sourceBucket string, targetClusterRef *metadata.RemoteClusterReference, targetKVVBMap map[string][]uint16, targetBucket string, targetBucketInfo map[string]interface{}, compressionType int, allKvConnStrs []string, username, password string,
+	certificate []byte, SANInCertificate bool, clientCertificate, clientKey []byte, clientCertAuthSetting base.ClientCertAuth) error {
 	var requestedFeaturesSet utilities.HELOFeatures
 	var err error
-	errorMap := make(base.ErrorMap)
 	requestedFeaturesSet.CompressionType = base.GetCompressionType(compressionType)
 	errKey := base.CompressionTypeREST
 
 	if compressionType == base.CompressionTypeNone {
 		// Don't check anything
-		return errorMap, err
+		return err
 	}
 
-	errorMap, err = service.validateCompressionPreReq(targetBucket, targetBucketInfo, compressionType, errKey)
+	err = service.validateCompressionPreReq(errorMap, targetBucket, targetBucketInfo, compressionType, errKey)
 	if len(errorMap) > 0 || err != nil {
-		return errorMap, err
+		return err
 	}
 
-	errorMap, err = service.validateCompressionLocal(sourceBucket, targetBucket, errKey, requestedFeaturesSet)
+	err = service.validateCompressionLocal(errorMap, sourceBucket, targetBucket, errKey, requestedFeaturesSet)
 	if len(errorMap) > 0 || err != nil {
-		return errorMap, err
+		return err
 	}
 
 	// Need to validate each node of the target to make sure all of them can support compression
 	for i := 0; i < len(allKvConnStrs); i++ {
-		errorMap, err = service.validateCompressionTarget(sourceBucket, targetClusterRef, targetBucket, allKvConnStrs[i], username, password,
+		err = service.validateCompressionTarget(errorMap, sourceBucket, targetClusterRef, targetBucket, allKvConnStrs[i], username, password,
 			certificate, SANInCertificate, clientCertificate, clientKey, clientCertAuthSetting, errKey, requestedFeaturesSet)
 		if len(errorMap) > 0 || err != nil {
-			return errorMap, err
+			return err
 		}
 	}
 
-	return errorMap, err
+	return err
 }
 
-func (service *ReplicationSpecService) validateCompressionPreReq(targetBucket string, targetBucketInfo map[string]interface{}, compressionType int,
-	errKey string) (base.ErrorMap, error) {
+func (service *ReplicationSpecService) validateCompressionPreReq(errorMap base.ErrorMap, targetBucket string, targetBucketInfo map[string]interface{}, compressionType int,
+	errKey string) error {
 	var err error
-	errorMap := make(base.ErrorMap)
 	isEnterprise, enterpriseErr := service.xdcr_comp_topology_svc.IsMyClusterEnterprise()
 	if enterpriseErr != nil {
 		err = enterpriseErr
-		return errorMap, err
+		return err
 	} else if !isEnterprise {
 		errMsg := fmt.Sprintf("Compression feature is available only on Enterprise Edition")
 		service.logger.Error(errMsg)
 		errorMap[errKey] = fmt.Errorf(errMsg)
-		return errorMap, err
+		return err
 	}
 
 	// Version check
 	targetClusterCompatibility, err := service.utils.GetClusterCompatibilityFromBucketInfo(targetBucket, targetBucketInfo, service.logger)
 	if err != nil {
 		errorMap[base.ToCluster] = fmt.Errorf("Error retrieving cluster compatibility on bucket %v. err=%v", targetBucket, err)
-		return errorMap, err
+		return err
 	}
 	hasCompressionSupport := base.IsClusterCompatible(targetClusterCompatibility, base.VersionForCompressionSupport)
 	if !hasCompressionSupport {
 		errorMap[base.ToCluster] = fmt.Errorf("The version of Couchbase software installed on the remote cluster does not support compression. Please upgrade the destination cluster to version %v.%v or above to enable this feature",
 			base.VersionForCompressionSupport[0], base.VersionForCompressionSupport[1])
-		return errorMap, err
+		return err
 	}
-	return errorMap, err
+	return err
 }
 
-func (service *ReplicationSpecService) validateCompressionLocal(sourceBucket string, targetBucket string, errKey string,
-	requestedFeaturesSet utilities.HELOFeatures) (base.ErrorMap, error) {
-	var err error
-	errorMap := make(base.ErrorMap)
+func (service *ReplicationSpecService) validateCompressionLocal(errorMap base.ErrorMap, sourceBucket string, targetBucket string, errKey string,
+	requestedFeaturesSet utilities.HELOFeatures) error {
 	localAddr, err := service.xdcr_comp_topology_svc.MyMemcachedAddr()
 	if err != nil {
-		return errorMap, err
+		return err
 	}
 	localClient, respondedFeatures, err := service.utils.GetMemcachedConnectionWFeatures(localAddr, sourceBucket,
 		base.ComposeUserAgentWithBucketNames("Goxdcr ReplSpecSvc", sourceBucket, targetBucket), base.KeepAlivePeriod, requestedFeaturesSet, service.logger)
@@ -511,20 +504,19 @@ func (service *ReplicationSpecService) validateCompressionLocal(sourceBucket str
 		localClient.Close()
 	}
 	if err != nil {
-		return errorMap, err
+		return err
 	}
 	if respondedFeatures.CompressionType != requestedFeaturesSet.CompressionType {
 		errorMap[errKey] = fmt.Errorf("Source cluster %v does not support %v compression. Please verify the configuration on the source cluster for %v compression support, or disable compression for this replication.",
 			localAddr, base.CompressionTypeStrings[requestedFeaturesSet.CompressionType], base.CompressionTypeStrings[requestedFeaturesSet.CompressionType])
-		return errorMap, err
+		return err
 	}
-	return errorMap, err
+	return err
 }
 
-func (service *ReplicationSpecService) validateCompressionTarget(sourceBucket string, targetClusterRef *metadata.RemoteClusterReference, targetBucket string, kvConnStr, username, password string,
-	certificate []byte, SANInCertificate bool, clientCertificate, clientKey []byte, clientCertAuthSetting base.ClientCertAuth, errKey string, requestedFeaturesSet utilities.HELOFeatures) (base.ErrorMap, error) {
+func (service *ReplicationSpecService) validateCompressionTarget(errorMap base.ErrorMap, sourceBucket string, targetClusterRef *metadata.RemoteClusterReference, targetBucket string, kvConnStr, username, password string,
+	certificate []byte, SANInCertificate bool, clientCertificate, clientKey []byte, clientCertAuthSetting base.ClientCertAuth, errKey string, requestedFeaturesSet utilities.HELOFeatures) error {
 	var conn mcc.ClientIface
-	errorMap := make(base.ErrorMap)
 	sslPortMap := make(base.SSLPortMap)
 	var err error
 
@@ -533,16 +525,16 @@ func (service *ReplicationSpecService) validateCompressionTarget(sourceBucket st
 		var connStr string
 		connStr, err = targetClusterRef.MyConnectionStr()
 		if err != nil {
-			return errorMap, err
+			return err
 		}
 		sslPortMap, err = service.utils.GetMemcachedSSLPortMap(connStr, username, password, certificate, SANInCertificate, clientCertificate, clientKey, clientCertAuthSetting, targetBucket, service.logger)
 		if err != nil {
-			return errorMap, err
+			return err
 		}
 		sslPort, ok := sslPortMap[kvConnStr]
 		if !ok {
 			err = errors.New(fmt.Sprintf("Unable to populate sslPort using kvConnStr: %v sslPortMap: %v", kvConnStr, sslPortMap))
-			return errorMap, err
+			return err
 		}
 		hostName := base.GetHostName(kvConnStr)
 		sslConStr := base.GetHostAddr(hostName, sslPort)
@@ -559,20 +551,20 @@ func (service *ReplicationSpecService) validateCompressionTarget(sourceBucket st
 	}
 	defer connCloseFunc()
 	if err != nil {
-		return errorMap, err
+		return err
 	}
 
 	respondedFeatures, err := service.utils.SendHELOWithFeatures(conn, base.ComposeUserAgentWithBucketNames("Goxdcr ReplSpecSvc", sourceBucket, targetBucket), base.HELOTimeout, base.HELOTimeout, requestedFeaturesSet, service.logger)
 	if err != nil {
-		return errorMap, err
+		return err
 	}
 
 	if respondedFeatures.CompressionType != requestedFeaturesSet.CompressionType {
 		errorMap[base.ToCluster] = fmt.Errorf("Target cluster (node %v) does not support %v compression. Please verify the configuration on the target cluster for %v compression support, or disable compression for this replication.",
 			kvConnStr, base.CompressionTypeStrings[requestedFeaturesSet.CompressionType], base.CompressionTypeStrings[requestedFeaturesSet.CompressionType])
-		return errorMap, err
+		return err
 	}
-	return errorMap, err
+	return err
 }
 
 //validate target bucket

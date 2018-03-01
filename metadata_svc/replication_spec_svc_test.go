@@ -80,7 +80,8 @@ func setupMocks(srcResolutionType string,
 	utilitiesMock *utilsMock.UtilsIface,
 	replSpecSvc *ReplicationSpecService,
 	clientMock *mcMock.ClientIface,
-	isEnterprise bool) {
+	isEnterprise bool,
+	isElasticSearch bool) {
 
 	// RemoteClusterMock
 	mockRemoteClusterRef := &metadata.RemoteClusterReference{Uuid: "1"}
@@ -135,7 +136,7 @@ func setupMocks(srcResolutionType string,
 		mock.Anything).Return(0x50005, nil)
 
 	// Xmem mock
-	utilitiesMock.On("CheckWhetherClusterIsESBasedOnBucketInfo", mock.Anything).Return(false)
+	utilitiesMock.On("CheckWhetherClusterIsESBasedOnBucketInfo", mock.Anything).Return(isElasticSearch)
 
 	// client mock
 	clientMock.On("Close").Return(nil)
@@ -163,7 +164,8 @@ func TestValidateNewReplicationSpec(t *testing.T) {
 	// Begin mocks
 	setupMocks(base.ConflictResolutionType_Seqno, base.ConflictResolutionType_Seqno,
 		xdcrTopologyMock, metadataSvcMock, uiLogSvcMock, remoteClusterMock,
-		clusterInfoSvcMock, utilitiesMock, replSpecSvc, clientMock, true)
+		clusterInfoSvcMock, utilitiesMock, replSpecSvc, clientMock, true, /*IsEnterprise*/
+		false /*IsElastic*/)
 
 	// Assume XMEM replication type
 	settings[metadata.ReplicationType] = metadata.ReplicationTypeXmem
@@ -187,7 +189,8 @@ func TestNegativeConflictResolutionType(t *testing.T) {
 	// Begin mocks
 	setupMocks(base.ConflictResolutionType_Seqno, base.ConflictResolutionType_Lww,
 		xdcrTopologyMock, metadataSvcMock, uiLogSvcMock, remoteClusterMock,
-		clusterInfoSvcMock, utilitiesMock, replSpecSvc, clientMock, true)
+		clusterInfoSvcMock, utilitiesMock, replSpecSvc, clientMock, true, /*IsEnterprise*/
+		false /*IsElastic*/)
 
 	// Assume XMEM replication type
 	settings[metadata.ReplicationType] = metadata.ReplicationTypeXmem
@@ -212,7 +215,8 @@ func TestDifferentConflictResolutionTypeOnCapi(t *testing.T) {
 	// Begin mocks
 	setupMocks(base.ConflictResolutionType_Seqno, base.ConflictResolutionType_Lww,
 		xdcrTopologyMock, metadataSvcMock, uiLogSvcMock, remoteClusterMock,
-		clusterInfoSvcMock, utilitiesMock, replSpecSvc, clientMock, true)
+		clusterInfoSvcMock, utilitiesMock, replSpecSvc, clientMock, true, /*IsEnterprise*/
+		false /*IsElastic*/)
 
 	// Assume CAPI (elasticsearch) replication type
 	settings[metadata.ReplicationType] = metadata.ReplicationTypeCapi
@@ -234,7 +238,8 @@ func TestAddReplicationSpec(t *testing.T) {
 	// Begin mocks
 	setupMocks(base.ConflictResolutionType_Seqno, base.ConflictResolutionType_Lww,
 		xdcrTopologyMock, metadataSvcMock, uiLogSvcMock, remoteClusterMock,
-		clusterInfoSvcMock, utilitiesMock, replSpecSvc, clientMock, true)
+		clusterInfoSvcMock, utilitiesMock, replSpecSvc, clientMock, true, /*IsEnterprise*/
+		false /*IsElastic*/)
 
 	spec := &metadata.ReplicationSpecification{
 		Id:               "test",
@@ -267,7 +272,8 @@ func TestCompressionPositive(t *testing.T) {
 	// Begin mocks
 	setupMocks(base.ConflictResolutionType_Seqno, base.ConflictResolutionType_Seqno,
 		xdcrTopologyMock, metadataSvcMock, uiLogSvcMock, remoteClusterMock,
-		clusterInfoSvcMock, utilitiesMock, replSpecSvc, clientMock, true)
+		clusterInfoSvcMock, utilitiesMock, replSpecSvc, clientMock, true, /*IsEnterprise*/
+		false /*IsElastic*/)
 
 	var fullFeatures utilities.HELOFeatures
 	fullFeatures.Xattribute = true
@@ -298,7 +304,8 @@ func TestCompressionNegNotEnterprise(t *testing.T) {
 	// Begin mocks
 	setupMocks(base.ConflictResolutionType_Seqno, base.ConflictResolutionType_Seqno,
 		xdcrTopologyMock, metadataSvcMock, uiLogSvcMock, remoteClusterMock,
-		clusterInfoSvcMock, utilitiesMock, replSpecSvc, clientMock, false /*Enterprise*/)
+		clusterInfoSvcMock, utilitiesMock, replSpecSvc, clientMock, false, /*Enterprise*/
+		false /*IsElastic*/)
 
 	var fullFeatures utilities.HELOFeatures
 	fullFeatures.Xattribute = true
@@ -324,7 +331,8 @@ func TestCompressionNegCAPI(t *testing.T) {
 	// Begin mocks
 	setupMocks(base.ConflictResolutionType_Seqno, base.ConflictResolutionType_Seqno,
 		xdcrTopologyMock, metadataSvcMock, uiLogSvcMock, remoteClusterMock,
-		clusterInfoSvcMock, utilitiesMock, replSpecSvc, clientMock, false /*Enterprise*/)
+		clusterInfoSvcMock, utilitiesMock, replSpecSvc, clientMock, false, /*Enterprise*/
+		false /*IsElastic*/)
 
 	var fullFeatures utilities.HELOFeatures
 	fullFeatures.Xattribute = true
@@ -351,7 +359,8 @@ func TestCompressionNegNoSnappy(t *testing.T) {
 	// Begin mocks
 	setupMocks(base.ConflictResolutionType_Seqno, base.ConflictResolutionType_Seqno,
 		xdcrTopologyMock, metadataSvcMock, uiLogSvcMock, remoteClusterMock,
-		clusterInfoSvcMock, utilitiesMock, replSpecSvc, clientMock, true)
+		clusterInfoSvcMock, utilitiesMock, replSpecSvc, clientMock, true, /*IsEnterprise*/
+		false /*IsElastic*/)
 
 	var noCompressionFeature utilities.HELOFeatures
 	noCompressionFeature.Xattribute = true
@@ -370,4 +379,26 @@ func TestCompressionNegNoSnappy(t *testing.T) {
 	assert.NotEqual(len(errMap), 0)
 
 	fmt.Println("============== Test case end: TestCompressionNegNoSnappy =================")
+}
+
+func TestElasticSearch(t *testing.T) {
+	assert := assert.New(t)
+	fmt.Println("============== Test case start: TestElasticSearch =================")
+	xdcrTopologyMock, metadataSvcMock, uiLogSvcMock, remoteClusterMock,
+		clusterInfoSvcMock, utilitiesMock, replSpecSvc,
+		sourceBucket, targetBucket, targetCluster, settings, clientMock := setupBoilerPlate()
+
+	// Begin mocks
+	setupMocks(base.ConflictResolutionType_Seqno, base.ConflictResolutionType_Seqno,
+		xdcrTopologyMock, metadataSvcMock, uiLogSvcMock, remoteClusterMock,
+		clusterInfoSvcMock, utilitiesMock, replSpecSvc, clientMock, true, /*IsEnterprise*/
+		true /*IsElastic*/)
+
+	// Xmem using elas
+	settings[metadata.ReplicationType] = metadata.ReplicationTypeXmem
+
+	_, _, _, errMap, _, _ := replSpecSvc.ValidateNewReplicationSpec(sourceBucket, targetCluster, targetBucket, settings)
+	assert.NotEqual(len(errMap), 0)
+
+	fmt.Println("============== Test case start: TestElasticSearch =================")
 }
