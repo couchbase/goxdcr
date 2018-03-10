@@ -248,13 +248,18 @@ func (service *ReplicationSpecService) populateConnectionCreds(targetClusterRef 
 		i++
 	}
 
-	targetClusterCompatibility, err := service.utils.GetClusterCompatibilityFromBucketInfo(targetBucketInfo, service.logger)
-	if err != nil {
-		err = fmt.Errorf("Error retrieving cluster compatibility on bucket %v. err=%v", targetBucket, err)
-		return
-	}
+	hasRBACSupport := false
+	isTargetES := service.utils.CheckWhetherClusterIsESBasedOnBucketInfo(targetBucketInfo)
+	if !isTargetES {
+		var targetClusterCompatibility int
+		targetClusterCompatibility, err = service.utils.GetClusterCompatibilityFromBucketInfo(targetBucketInfo, service.logger)
+		if err != nil {
+			err = fmt.Errorf("Error retrieving cluster compatibility on bucket %v. err=%v", targetBucket, err)
+			return
+		}
 
-	hasRBACSupport := base.IsClusterCompatible(targetClusterCompatibility, base.VersionForRBACAndXattrSupport)
+		hasRBACSupport = base.IsClusterCompatible(targetClusterCompatibility, base.VersionForRBACAndXattrSupport)
+	}
 
 	if hasRBACSupport {
 		username = targetClusterRef.UserName
