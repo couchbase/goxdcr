@@ -219,8 +219,12 @@ const (
 	RemoteClusterHostName = "hostname"
 	RemoteClusterUserName = "username"
 	RemoteClusterPassword = "password"
-	// for migration only
-	RemoteClusterDemandEncryption  = "demandEncryption"
+	// To be deprecated
+	RemoteClusterDemandEncryption = "demandEncryption"
+	// To be deprecated
+	RemoteClusterEncryptionType = "encryptionType"
+	// New parameter that should be used in the place of RemoteClusterDemandEncryption
+	// and RemoteClusterEncryptionType starting at 5.5
 	RemoteClusterSecureType        = "secureType"
 	RemoteClusterCertificate       = "certificate"
 	RemoteClusterClientCertificate = "clientCertificate"

@@ -277,9 +277,6 @@ func DecodeCreateRemoteClusterRequest(request *http.Request) (justValidate bool,
 		return
 	}
 
-	// default to none if not passed in
-	secureType = base.SecureTypeNone
-
 	for key, valArr := range request.Form {
 		switch key {
 		case base.JustValidate:
@@ -297,6 +294,10 @@ func DecodeCreateRemoteClusterRequest(request *http.Request) (justValidate bool,
 			password = getStringFromValArr(valArr)
 		case base.RemoteClusterSecureType:
 			secureType = getStringFromValArr(valArr)
+		case base.RemoteClusterDemandEncryption:
+			demandEncryption = getDemandEncryptionFromValArr(valArr)
+		case base.RemoteClusterEncryptionType:
+			encryptionType = getStringFromValArr(valArr)
 		case base.RemoteClusterCertificate:
 			certificateStr := getStringFromValArr(valArr)
 			certificate = []byte(certificateStr)
@@ -311,10 +312,31 @@ func DecodeCreateRemoteClusterRequest(request *http.Request) (justValidate bool,
 		}
 	}
 
-	// convert secureType to the old, internally stored, demandEncryption and encryptionType
-	demandEncryption, encryptionType, err1 = convertSecureType(secureType)
-	if err1 != nil {
-		errorsMap[base.RemoteClusterSecureType] = err1
+	if len(secureType) > 0 {
+		// if secureType is specified, use it
+		// if demandEncryption and encryptionType are also specified, they will get overwritten
+		demandEncryption, encryptionType, err1 = convertSecureTypeToEncryptionType(secureType)
+		if err1 != nil {
+			errorsMap[base.RemoteClusterSecureType] = err1
+			// cannot proceed if secureType is invalid
+			return
+		}
+	} else {
+		// if secureType is not specified, use demandEncryption and encryptionType
+		// if demandEncryption and encryptionType are not specified either,
+		// demandEncryption will be defaulted to false and that is all we need to derive other settings
+
+		if demandEncryption && len(encryptionType) == 0 {
+			encryptionType = metadata.EncryptionType_Full
+		}
+
+		secureType, err1 = convertEncryptionTypeToSecureType(demandEncryption, encryptionType)
+		if err1 != nil {
+			errorsMap[base.RemoteClusterEncryptionType] = err1
+			// cannot proceed if encryptionType is invalid
+			return
+		}
+
 	}
 
 	// check required parameters
@@ -378,8 +400,8 @@ func DecodeCreateRemoteClusterRequest(request *http.Request) (justValidate bool,
 	return
 }
 
-// convert secureType parameter to the internally stored demandEncryption and encrytionType parameters
-func convertSecureType(secureType string) (demandEncryption bool, encryptionType string, err error) {
+// convert secureType parameter to demandEncryption and encrytionType
+func convertSecureTypeToEncryptionType(secureType string) (demandEncryption bool, encryptionType string, err error) {
 	switch secureType {
 	case base.SecureTypeNone:
 		demandEncryption = false
@@ -393,6 +415,27 @@ func convertSecureType(secureType string) (demandEncryption bool, encryptionType
 		err = errors.New("Invalid value")
 	}
 	return
+}
+
+// convert demandEncryption and encrytionType to secureType
+func convertEncryptionTypeToSecureType(demandEncryption bool, encryptionType string) (secureType string, err error) {
+	if len(encryptionType) > 0 {
+		if encryptionType != metadata.EncryptionType_Full && encryptionType != metadata.EncryptionType_Half {
+			return "", errors.New("invalid value")
+		} else if !demandEncryption {
+			return "", errors.New("encryptionType cannot be given if demand encryption is not on")
+		}
+	}
+
+	if !demandEncryption {
+		return base.SecureTypeNone, nil
+	}
+
+	if encryptionType == metadata.EncryptionType_Full {
+		return base.SecureTypeFull, nil
+	}
+
+	return base.SecureTypeHalf, nil
 }
 
 func NewCreateRemoteClusterResponse(remoteClusterRef *metadata.RemoteClusterReference) (*ap.Response, error) {
