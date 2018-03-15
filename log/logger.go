@@ -235,6 +235,8 @@ func LogLevelFromStr(levelStr string) (LogLevel, error) {
 	switch levelStr {
 	case LOG_LEVEL_ERROR_STR:
 		level = LogLevelError
+	case LOG_LEVEL_WARN_STR:
+		level = LogLevelWarn
 	case LOG_LEVEL_INFO_STR:
 		level = LogLevelInfo
 	case LOG_LEVEL_DEBUG_STR:
