@@ -160,6 +160,11 @@ func (ref *RemoteClusterReference) ToMap() map[string]interface{} {
 	outputMap[base.RemoteClusterUserName] = ref.UserName
 	outputMap[base.RemoteClusterDeleted] = false
 	outputMap[base.RemoteClusterSecureType] = ref.GetSecureTypeString()
+	// To be deprecated
+	if ref.IsEncryptionEnabled() {
+		outputMap[base.RemoteClusterDemandEncryption] = ref.DemandEncryption
+		outputMap[base.RemoteClusterEncryptionType] = ref.EncryptionType
+	}
 	if len(ref.Certificate) > 0 {
 		outputMap[base.RemoteClusterCertificate] = string(ref.Certificate)
 	}
