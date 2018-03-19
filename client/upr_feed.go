@@ -81,6 +81,145 @@ type UprFeatures struct {
 	IncludeDeletionTime bool
 }
 
+/**
+ * Used to handle multiple concurrent calls UprRequestStream() by UprFeed clients
+ * It is expected that a client that calls UprRequestStream() more than once should issue
+ * different "opaque" (version) numbers
+ */
+type opaqueStreamMap map[uint16]*UprStream // opaque -> stream
+
+type vbStreamNegotiator struct {
+	vbHandshakeMap map[uint16]opaqueStreamMap // vbno -> opaqueStreamMap
+	mutex          sync.RWMutex
+}
+
+func (negotiator *vbStreamNegotiator) initialize() {
+	negotiator.mutex.Lock()
+	negotiator.vbHandshakeMap = make(map[uint16]opaqueStreamMap)
+	negotiator.mutex.Unlock()
+}
+
+func (negotiator *vbStreamNegotiator) registerRequest(vbno, opaque uint16, vbuuid, startSequence, endSequence uint64) {
+	negotiator.mutex.Lock()
+	defer negotiator.mutex.Unlock()
+
+	var osMap opaqueStreamMap
+	var ok bool
+	if osMap, ok = negotiator.vbHandshakeMap[vbno]; !ok {
+		osMap = make(opaqueStreamMap)
+		negotiator.vbHandshakeMap[vbno] = osMap
+	}
+
+	if _, ok = osMap[opaque]; !ok {
+		osMap[opaque] = &UprStream{
+			Vbucket:  vbno,
+			Vbuuid:   vbuuid,
+			StartSeq: startSequence,
+			EndSeq:   endSequence,
+		}
+	}
+}
+
+func (negotiator *vbStreamNegotiator) getStreamsCntFromMap(vbno uint16) int {
+	negotiator.mutex.RLock()
+	defer negotiator.mutex.RUnlock()
+
+	osmap, ok := negotiator.vbHandshakeMap[vbno]
+	if !ok {
+		return 0
+	} else {
+		return len(osmap)
+	}
+}
+
+func (negotiator *vbStreamNegotiator) getStreamFromMap(vbno, opaque uint16) (*UprStream, error) {
+	negotiator.mutex.RLock()
+	defer negotiator.mutex.RUnlock()
+
+	osmap, ok := negotiator.vbHandshakeMap[vbno]
+	if !ok {
+		return nil, fmt.Errorf("Error: stream for vb: %v does not exist", vbno)
+	}
+
+	stream, ok := osmap[opaque]
+	if !ok {
+		return nil, fmt.Errorf("Error: stream for vb: %v opaque: %v does not exist", vbno, opaque)
+	}
+	return stream, nil
+}
+
+func (negotiator *vbStreamNegotiator) deleteStreamFromMap(vbno, opaque uint16) {
+	negotiator.mutex.Lock()
+	defer negotiator.mutex.Unlock()
+
+	osmap, ok := negotiator.vbHandshakeMap[vbno]
+	if !ok {
+		return
+	}
+
+	delete(osmap, opaque)
+	if len(osmap) == 0 {
+		delete(negotiator.vbHandshakeMap, vbno)
+	}
+}
+
+func (negotiator *vbStreamNegotiator) handleStreamRequest(feed *UprFeed,
+	headerBuf [gomemcached.HDR_LEN]byte, pktPtr *gomemcached.MCRequest, bytesReceivedFromDCP int,
+	response *gomemcached.MCResponse) (*UprEvent, error) {
+	var event *UprEvent
+
+	if feed == nil || response == nil || pktPtr == nil {
+		return nil, errors.New("Invalid inputs")
+	}
+
+	// Get Stream from negotiator map
+	vbno := vbOpaque(response.Opaque)
+	opaque := appOpaque(response.Opaque)
+
+	stream, err := negotiator.getStreamFromMap(vbno, opaque)
+	if err != nil {
+		err = fmt.Errorf("Stream not found for vb %d appOpaque %v: %#v", vbno, appOpaque, *pktPtr)
+		logging.Errorf(err.Error())
+		return nil, err
+	}
+
+	status, rb, flog, err := handleStreamRequest(response, headerBuf[:])
+
+	if status == gomemcached.ROLLBACK {
+		event = makeUprEvent(*pktPtr, stream, bytesReceivedFromDCP)
+		event.Status = status
+		// rollback stream
+		logging.Infof("UPR_STREAMREQ with rollback %d for vb %d Failed: %v", rb, vbno, err)
+		negotiator.deleteStreamFromMap(vbno, opaque)
+	} else if status == gomemcached.SUCCESS {
+		event = makeUprEvent(*pktPtr, stream, bytesReceivedFromDCP)
+		event.Seqno = stream.StartSeq
+		event.FailoverLog = flog
+		event.Status = status
+		feed.activateStream(vbno, opaque, stream)
+		feed.negotiator.deleteStreamFromMap(vbno, opaque)
+		logging.Infof("UPR_STREAMREQ for vb %d successful", vbno)
+
+	} else if err != nil {
+		logging.Errorf("UPR_STREAMREQ for vbucket %d erro %s", vbno, err.Error())
+		event = &UprEvent{
+			Opcode:  gomemcached.UPR_STREAMREQ,
+			Status:  status,
+			VBucket: vbno,
+			Error:   err,
+		}
+		negotiator.deleteStreamFromMap(vbno, opaque)
+	}
+	return event, nil
+}
+
+func (negotiator *vbStreamNegotiator) cleanUpVbStreams(vbno uint16) {
+	negotiator.mutex.Lock()
+	defer negotiator.mutex.Unlock()
+
+	delete(negotiator.vbHandshakeMap, vbno)
+}
+
 // UprFeed represents an UPR feed. A feed contains a connection to a single
 // host and multiple vBuckets
 type UprFeed struct {
@@ -89,7 +228,8 @@ type UprFeed struct {
 	// lock for feed.closed
 	muClosed    sync.RWMutex
 	C           <-chan *UprEvent            // Exported channel for receiving UPR events
-	vbstreams   map[uint16]*UprStream       // vb->stream mapping
+	negotiator  vbStreamNegotiator          // Used for pre-vbstreams, concurrent vb stream negotiation
+	vbstreams   map[uint16]*UprStream       // official live vb->stream mapping
 	closer      chan bool                   // closer
 	conn        *Client                     // connection to UPR producer
 	Error       error                       // error
@@ -241,6 +381,24 @@ loop:
 	logging.Infof("sendCommands exiting")
 }
 
+// Sets the specified stream as the connected stream for this vbno, and also cleans up negotiator
+func (feed *UprFeed) activateStream(vbno, opaque uint16, stream *UprStream) error {
+	feed.muVbstreams.Lock()
+	defer feed.muVbstreams.Unlock()
+
+	// Set this stream as the officially connected stream for this vb
+	stream.connected = true
+	feed.vbstreams[vbno] = stream
+	return nil
+}
+
+func (feed *UprFeed) cleanUpVbStream(vbno uint16) {
+	feed.muVbstreams.Lock()
+	defer feed.muVbstreams.Unlock()
+
+	delete(feed.vbstreams, vbno)
+}
+
 // NewUprFeed creates a new UPR Feed.
 // TODO: Describe side-effects on bucket instance and its connection pool.
 func (mc *Client) NewUprFeed() (*UprFeed, error) {
@@ -257,6 +415,8 @@ func (mc *Client) NewUprFeedWithConfig(ackByClient bool) (*UprFeed, error) {
 		transmitCl:  make(chan bool),
 		ackByClient: ackByClient,
 	}
+
+	feed.negotiator.initialize()
 
 	go feed.sendCommands(mc)
 	return feed, nil
@@ -460,18 +620,9 @@ func (feed *UprFeed) UprRequestStream(vbno, opaqueMSB uint16, flags uint32,
 	binary.BigEndian.PutUint64(rq.Extras[32:40], snapStart)
 	binary.BigEndian.PutUint64(rq.Extras[40:48], snapEnd)
 
-	stream := &UprStream{
-		Vbucket:  vbno,
-		Vbuuid:   vuuid,
-		StartSeq: startSequence,
-		EndSeq:   endSequence,
-	}
-
-	feed.muVbstreams.Lock()
+	feed.negotiator.registerRequest(vbno, opaqueMSB, vuuid, startSequence, endSequence)
 	// Any client that has ever called this method, regardless of return code,
 	// should expect a potential UPR_CLOSESTREAM message due to this new map entry prior to Transmit.
-	feed.vbstreams[vbno] = stream
-	feed.muVbstreams.Unlock()
 
 	if err := feed.conn.Transmit(rq); err != nil {
 		logging.Errorf("Error in StreamRequest %s", err.Error())
@@ -514,9 +665,10 @@ func (feed *UprFeed) GetError() error {
 
 func (feed *UprFeed) validateCloseStream(vbno uint16) error {
 	feed.muVbstreams.RLock()
-	defer feed.muVbstreams.RUnlock()
+	nilVbStream := feed.vbstreams[vbno] == nil
+	feed.muVbstreams.RUnlock()
 
-	if feed.vbstreams[vbno] == nil {
+	if nilVbStream && (feed.negotiator.getStreamsCntFromMap(vbno) == 0) {
 		return fmt.Errorf("Stream for vb %d has not been requested", vbno)
 	}
 
@@ -654,6 +806,7 @@ loop:
 				}
 
 				vb := vbOpaque(pkt.Opaque)
+				appOpaque := appOpaque(pkt.Opaque)
 				uprStats.TotalBytes = uint64(bytes)
 
 				feed.muVbstreams.RLock()
@@ -662,43 +815,11 @@ loop:
 
 				switch pkt.Opcode {
 				case gomemcached.UPR_STREAMREQ:
-					if stream == nil {
-						logging.Infof("Stream not found for vb %d: %#v", vb, pkt)
+					event, err = feed.negotiator.handleStreamRequest(feed, headerBuf, &pkt, bytes, res)
+					if err != nil {
+						logging.Infof(err.Error())
 						break loop
 					}
-					status, rb, flog, err := handleStreamRequest(res, headerBuf[:])
-					if status == gomemcached.ROLLBACK {
-						event = makeUprEvent(pkt, stream, bytes)
-						event.Status = status
-						// rollback stream
-						logging.Infof("UPR_STREAMREQ with rollback %d for vb %d Failed: %v", rb, vb, err)
-						// delete the stream from the vbmap for the feed
-						feed.muVbstreams.Lock()
-						delete(feed.vbstreams, vb)
-						feed.muVbstreams.Unlock()
-
-					} else if status == gomemcached.SUCCESS {
-						event = makeUprEvent(pkt, stream, bytes)
-						event.Seqno = stream.StartSeq
-						event.FailoverLog = flog
-						event.Status = status
-						stream.connected = true
-						logging.Infof("UPR_STREAMREQ for vb %d successful", vb)
-
-					} else if err != nil {
-						logging.Errorf("UPR_STREAMREQ for vbucket %d erro %s", vb, err.Error())
-						event = &UprEvent{
-							Opcode:  gomemcached.UPR_STREAMREQ,
-							Status:  status,
-							VBucket: vb,
-							Error:   err,
-						}
-						// delete the stream
-						feed.muVbstreams.Lock()
-						delete(feed.vbstreams, vb)
-						feed.muVbstreams.Unlock()
-					}
-
 				case gomemcached.UPR_MUTATION,
 					gomemcached.UPR_DELETION,
 					gomemcached.UPR_EXPIRATION:
@@ -718,9 +839,8 @@ loop:
 					event = makeUprEvent(pkt, stream, bytes)
 					logging.Infof("Stream Ended for vb %d", vb)
 
-					feed.muVbstreams.Lock()
-					delete(feed.vbstreams, vb)
-					feed.muVbstreams.Unlock()
+					feed.negotiator.deleteStreamFromMap(vb, appOpaque)
+					feed.cleanUpVbStream(vb)
 
 				case gomemcached.UPR_SNAPSHOT:
 					if stream == nil {
@@ -748,9 +868,8 @@ loop:
 					event.Opcode = gomemcached.UPR_STREAMEND // opcode re-write !!
 					logging.Infof("Stream Closed for vb %d StreamEnd simulated", vb)
 
-					feed.muVbstreams.Lock()
-					delete(feed.vbstreams, vb)
-					feed.muVbstreams.Unlock()
+					feed.negotiator.deleteStreamFromMap(vb, appOpaque)
+					feed.cleanUpVbStream(vb)
 
 				case gomemcached.UPR_ADDSTREAM:
 					logging.Infof("Opcode %v not implemented", pkt.Opcode)
@@ -873,6 +992,7 @@ func (feed *UprFeed) Close() {
 	if !feed.closed {
 		close(feed.closer)
 		feed.closed = true
+		feed.negotiator.initialize()
 	}
 }
 
