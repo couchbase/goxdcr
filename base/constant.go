@@ -469,8 +469,8 @@ var NetTCP = "tcp"
  * Spectrum 3 - System Data redaction tags (TBD)
  */
 const (
-	UdTagBegin = "<ud>("
-	UdTagEnd   = ")</ud>"
+	UdTagBegin = "<ud>"
+	UdTagEnd   = "</ud>"
 )
 
 var UdTagBeginBytes = []byte(UdTagBegin)
