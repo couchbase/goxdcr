@@ -353,7 +353,7 @@ func (c *Client) AuthScramSha(user, pass string) (*gomemcached.MCResponse, error
 		return nil, errors.Wrap(err, "Unable to initialize scramsha.")
 	}
 
-	logging.Infof("Using %v authentication for user %v", method, user)
+	logging.Infof("Using %v authentication for user %v%v%v", method, gomemcached.UdTagBegin, user, gomemcached.UdTagEnd)
 
 	message, err := s.GetStartRequest(user)
 	if err != nil {
@@ -397,7 +397,7 @@ func (c *Client) AuthScramSha(user, pass string) (*gomemcached.MCResponse, error
 }
 
 func (c *Client) AuthPlain(user, pass string) (*gomemcached.MCResponse, error) {
-	logging.Infof("Using plain authentication for user %v", user)
+	logging.Infof("Using plain authentication for user %v%v%v", gomemcached.UdTagBegin, user, gomemcached.UdTagEnd)
 	return c.Send(&gomemcached.MCRequest{
 		Opcode: gomemcached.SASL_AUTH,
 		Key:    []byte("PLAIN"),

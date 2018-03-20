@@ -131,16 +131,22 @@ const (
 	SUBDOC_MULTI_PATH_FAILURE_DELETED = Status(0xd3)
 )
 
-var isFatal = map[Status]bool {
-	DELTA_BADVAL: true,
+// for log redaction
+const (
+	UdTagBegin = "<ud>"
+	UdTagEnd   = "</ud>"
+)
+
+var isFatal = map[Status]bool{
+	DELTA_BADVAL:   true,
 	NOT_MY_VBUCKET: true,
-	NO_BUCKET: true,
-	AUTH_STALE: true,
-	AUTH_ERROR: true,
-	ERANGE: true,
-	ROLLBACK: true,
-	EACCESS: true,
-	ENOMEM: true,
+	NO_BUCKET:      true,
+	AUTH_STALE:     true,
+	AUTH_ERROR:     true,
+	ERANGE:         true,
+	ROLLBACK:       true,
+	EACCESS:        true,
+	ENOMEM:         true,
 }
 
 // the producer/consumer bit in dcp flags
@@ -148,6 +154,7 @@ var DCP_PRODUCER uint32 = 0x01
 
 // the include XATTRS bit in dcp flags
 var DCP_OPEN_INCLUDE_XATTRS uint32 = 0x04
+
 // the include deletion time bit in dcp flags
 var DCP_OPEN_INCLUDE_DELETE_TIMES uint32 = 0x20
 
