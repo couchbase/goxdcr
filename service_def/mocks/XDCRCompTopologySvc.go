@@ -164,7 +164,7 @@ func (_m *XDCRCompTopologySvc) MyConnectionStr() (string, error) {
 }
 
 // MyCredentials provides a mock function with given fields:
-func (_m *XDCRCompTopologySvc) MyCredentials() (string, string, base.HttpAuthMech, []byte, bool, []byte, []byte, base.ClientCertAuth, error) {
+func (_m *XDCRCompTopologySvc) MyCredentials() (string, string, base.HttpAuthMech, []byte, bool, []byte, []byte, error) {
 	ret := _m.Called()
 
 	var r0 string
@@ -222,21 +222,14 @@ func (_m *XDCRCompTopologySvc) MyCredentials() (string, string, base.HttpAuthMec
 		}
 	}
 
-	var r7 base.ClientCertAuth
-	if rf, ok := ret.Get(7).(func() base.ClientCertAuth); ok {
+	var r7 error
+	if rf, ok := ret.Get(7).(func() error); ok {
 		r7 = rf()
 	} else {
-		r7 = ret.Get(7).(base.ClientCertAuth)
+		r7 = ret.Error(7)
 	}
 
-	var r8 error
-	if rf, ok := ret.Get(8).(func() error); ok {
-		r8 = rf()
-	} else {
-		r8 = ret.Error(8)
-	}
-
-	return r0, r1, r2, r3, r4, r5, r6, r7, r8
+	return r0, r1, r2, r3, r4, r5, r6, r7
 }
 
 // MyHost provides a mock function with given fields:

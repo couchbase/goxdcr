@@ -368,7 +368,7 @@ func (pipelineMgr *PipelineManager) validatePipeline(topic string) error {
 	}
 
 	// refresh remote cluster reference when retrieving it, hence making sure that all fields,
-	// especially the security settings like clientCertAuthSetting, are up to date
+	// especially the security settings like sanInCertificate, are up to date
 	targetClusterRef, err := pipelineMgr.remote_cluster_svc.RemoteClusterByUuid(spec.TargetClusterUUID, true)
 	if err != nil {
 		pipelineMgr.logger.Errorf("Error getting remote cluster with uuid=%v for pipeline %v, err=%v\n", spec.TargetClusterUUID, topic, err)

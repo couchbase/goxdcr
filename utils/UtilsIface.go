@@ -33,7 +33,7 @@ type UtilsIface interface {
 	GetMemcachedClient(serverAddr, bucketName string, kv_mem_clients map[string]mcc.ClientIface, userAgent string, keepAlivePeriod time.Duration, logger *log.CommonLogger) (mcc.ClientIface, error)
 	GetMemcachedConnection(serverAddr, bucketName, userAgent string, keepAlivePeriod time.Duration, logger *log.CommonLogger) (mcc.ClientIface, error)
 	GetMemcachedConnectionWFeatures(serverAddr, bucketName, userAgent string, keepAlivePeriod time.Duration, features HELOFeatures, logger *log.CommonLogger) (mcc.ClientIface, HELOFeatures, error)
-	GetMemcachedSSLPortMap(hostName, username, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCertificate, clientKey []byte, clientCertAuthSetting base.ClientCertAuth, bucket string, logger *log.CommonLogger) (base.SSLPortMap, error)
+	GetMemcachedSSLPortMap(hostName, username, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCertificate, clientKey []byte, bucket string, logger *log.CommonLogger) (base.SSLPortMap, error)
 	GetMemcachedRawConn(serverAddr, username, password, bucketName string, plainAuth bool, keepAlivePeriod time.Duration, logger *log.CommonLogger) (mcc.ClientIface, error)
 
 	/**
@@ -44,7 +44,7 @@ type UtilsIface interface {
 	// Buckets related utilities
 	BucketInfoParseError(bucketInfo map[string]interface{}, logger *log.CommonLogger) error
 	BucketValidationInfo(hostAddr, bucketName, username, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCertificate, clientKey []byte,
-		clientCertAuthSetting base.ClientCertAuth, logger *log.CommonLogger) (bucketInfo map[string]interface{}, bucketType string, bucketUUID string, bucketConflictResolutionType string,
+		logger *log.CommonLogger) (bucketInfo map[string]interface{}, bucketType string, bucketUUID string, bucketConflictResolutionType string,
 		bucketEvictionPolicy string, bucketKVVBMap map[string][]uint16, err error)
 	CheckWhetherClusterIsESBasedOnBucketInfo(bucketInfo map[string]interface{}) bool
 	GetBucketPasswordFromBucketInfo(bucketName string, bucketInfo map[string]interface{}, logger *log.CommonLogger) (string, error)
@@ -72,7 +72,7 @@ type UtilsIface interface {
 	EncodeHttpRequestHeader(reqBytes []byte, key, value string) []byte
 	EncodeMapIntoByteArray(data map[string]interface{}) ([]byte, error)
 	GetExternalHostAddrFromNodeInfo(adminHostAddr string, nodeInfo map[string]interface{}, isHttps bool, logger *log.CommonLogger) (string, error)
-	GetHttpClient(username string, authMech base.HttpAuthMech, certificate []byte, san_in_certificate bool, clientCertificate, clientKey []byte, clientCertAuthSetting base.ClientCertAuth, ssl_con_str string, logger *log.CommonLogger) (*http.Client, error)
+	GetHttpClient(username string, authMech base.HttpAuthMech, certificate []byte, san_in_certificate bool, clientCertificate, clientKey []byte, ssl_con_str string, logger *log.CommonLogger) (*http.Client, error)
 	GetHostAddrFromNodeInfo(adminHostAddr string, nodeInfo map[string]interface{}, logger *log.CommonLogger) (string, error)
 	GetHostNameFromNodeInfo(adminHostAddr string, nodeInfo map[string]interface{}, logger *log.CommonLogger) (string, error)
 	RemovePrefix(prefix string, str string) string
@@ -107,28 +107,28 @@ type UtilsIface interface {
 	 * ------------------------
 	 */
 	// Buckets related utilities
-	BucketUUID(hostAddr, bucketName, username, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCertificate, clientKey []byte, clientCertAuthSetting base.ClientCertAuth, logger *log.CommonLogger) (string, error)
-	BucketPassword(hostAddr, bucketName, username, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCertificate, clientKey []byte, clientCertAuthSetting base.ClientCertAuth, logger *log.CommonLogger) (string, error)
-	GetBuckets(hostAddr, username, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCertificate, clientKey []byte, clientCertAuthSetting base.ClientCertAuth, logger *log.CommonLogger) (map[string]string, error)
-	GetBucketInfo(hostAddr, bucketName, username, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCertificate, clientKey []byte, clientCertAuthSetting base.ClientCertAuth, logger *log.CommonLogger) (map[string]interface{}, error)
+	BucketUUID(hostAddr, bucketName, username, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCertificate, clientKey []byte, logger *log.CommonLogger) (string, error)
+	BucketPassword(hostAddr, bucketName, username, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCertificate, clientKey []byte, logger *log.CommonLogger) (string, error)
+	GetBuckets(hostAddr, username, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCertificate, clientKey []byte, logger *log.CommonLogger) (map[string]string, error)
+	GetBucketInfo(hostAddr, bucketName, username, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCertificate, clientKey []byte, logger *log.CommonLogger) (map[string]interface{}, error)
 	GetIntExtHostNameKVPortTranslationMap(mapContainingNodesKey map[string]interface{}) (map[string]string, error)
 	RemoteBucketValidationInfo(hostAddr, bucketName, username, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCertificate, clientKey []byte,
-		clientCertAuthSetting base.ClientCertAuth, logger *log.CommonLogger) (bucketInfo map[string]interface{}, bucketType string, bucketUUID string, bucketConflictResolutionType string,
+		logger *log.CommonLogger) (bucketInfo map[string]interface{}, bucketType string, bucketUUID string, bucketConflictResolutionType string,
 		bucketEvictionPolicy string, bucketKVVBMap map[string][]uint16, err error)
 	TranslateKvVbMap(kvVBMap base.BucketKVVbMap, targetBucketInfo map[string]interface{})
 
 	// Cluster related utilities
 	GetClusterCompatibilityFromBucketInfo(bucketInfo map[string]interface{}, logger *log.CommonLogger) (int, error)
-	GetClusterInfo(hostAddr, path, username, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCertificate, clientKey []byte, clientCertAuthSetting base.ClientCertAuth, logger *log.CommonLogger) (map[string]interface{}, error)
-	GetClusterInfoWStatusCode(hostAddr, path, username, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCertificate, clientKey []byte, clientCertAuthSetting base.ClientCertAuth, logger *log.CommonLogger) (map[string]interface{}, error, int)
-	GetClusterUUID(hostAddr, username, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCertificate, clientKey []byte, clientCertAuthSetting base.ClientCertAuth, logger *log.CommonLogger) (string, error)
-	GetClusterUUIDAndNodeListWithMinInfo(hostAddr, username, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCertificate, clientKey []byte, clientCertAuthSetting base.ClientCertAuth, logger *log.CommonLogger) (string, []interface{}, error)
+	GetClusterInfo(hostAddr, path, username, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCertificate, clientKey []byte, logger *log.CommonLogger) (map[string]interface{}, error)
+	GetClusterInfoWStatusCode(hostAddr, path, username, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCertificate, clientKey []byte, logger *log.CommonLogger) (map[string]interface{}, error, int)
+	GetClusterUUID(hostAddr, username, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCertificate, clientKey []byte, logger *log.CommonLogger) (string, error)
+	GetClusterUUIDAndNodeListWithMinInfo(hostAddr, username, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCertificate, clientKey []byte, logger *log.CommonLogger) (string, []interface{}, error)
 	GetClusterUUIDAndNodeListWithMinInfoFromDefaultPoolInfo(defaultPoolInfo map[string]interface{}, logger *log.CommonLogger) (string, []interface{}, error)
-	GetSecuritySettingsAndDefaultPoolInfo(hostAddr, hostHttpsAddr, username, password string, certificate []byte, clientCertificate, clientKey []byte, scramShaEnabled bool, logger *log.CommonLogger) (bool, base.ClientCertAuth, base.HttpAuthMech, map[string]interface{}, error)
+	GetSecuritySettingsAndDefaultPoolInfo(hostAddr, hostHttpsAddr, username, password string, certificate []byte, clientCertificate, clientKey []byte, scramShaEnabled bool, logger *log.CommonLogger) (bool, base.HttpAuthMech, map[string]interface{}, error)
 	GetExternalAddressAndKvPortsFromNodeInfo(nodeInfo map[string]interface{}) (string, int, error, int, error)
 	GetNodeListFromInfoMap(infoMap map[string]interface{}, logger *log.CommonLogger) ([]interface{}, error)
-	GetNodeListWithFullInfo(hostAddr, username, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCertificate, clientKey []byte, clientCertAuthSetting base.ClientCertAuth, logger *log.CommonLogger) ([]interface{}, error)
-	GetNodeListWithMinInfo(hostAddr, username, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCertificate, clientKey []byte, clientCertAuthSetting base.ClientCertAuth, logger *log.CommonLogger) ([]interface{}, error)
+	GetNodeListWithFullInfo(hostAddr, username, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCertificate, clientKey []byte, logger *log.CommonLogger) ([]interface{}, error)
+	GetNodeListWithMinInfo(hostAddr, username, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCertificate, clientKey []byte, logger *log.CommonLogger) ([]interface{}, error)
 	GetRemoteNodeNameListFromNodeList(nodeList []interface{}, connStr string, logger *log.CommonLogger) ([]string, error)
 	GetRemoteServerVBucketsMap(connStr, bucketName string, bucketInfo map[string]interface{}) (map[string][]uint16, error)
 
@@ -140,15 +140,15 @@ type UtilsIface interface {
 	InvokeRestWithRetry(baseURL string, path string, preservePathEncoding bool, httpCommand string, contentType string, body []byte, timeout time.Duration, out interface{}, client *http.Client, keep_client_alive bool,
 		logger *log.CommonLogger, num_retry int) (error, int)
 	InvokeRestWithRetryWithAuth(baseURL string, path string, preservePathEncoding bool, username string, password string, authMech base.HttpAuthMech,
-		certificate []byte, san_in_certificate bool, clientCertificate, clientKey []byte, clientCertAuthSetting base.ClientCertAuth,
+		certificate []byte, san_in_certificate bool, clientCertificate, clientKey []byte,
 		insecureSkipVerify bool, httpCommand string, contentType string, body []byte, timeout time.Duration,
 		out interface{}, client *http.Client, keep_client_alive bool, logger *log.CommonLogger, num_retry int) (error, int)
 	LocalPool(localConnectStr string) (couchbase.Pool, error)
 	NewTCPConn(hostName string) (*net.TCPConn, error)
 	QueryRestApi(baseURL string, path string, preservePathEncoding bool, httpCommand string, contentType string, body []byte, timeout time.Duration, out interface{}, logger *log.CommonLogger) (error, int)
 	QueryRestApiWithAuth(baseURL string, path string, preservePathEncoding bool, username string, password string, authMech base.HttpAuthMech,
-		certificate []byte, san_in_certificate bool, clientCertificate, clientKey []byte, clientCertAuthSetting base.ClientCertAuth,
-		setUserAuth bool, httpCommand string, contentType string, body []byte, timeout time.Duration, out interface{},
+		certificate []byte, san_in_certificate bool, clientCertificate, clientKey []byte,
+		httpCommand string, contentType string, body []byte, timeout time.Duration, out interface{},
 		client *http.Client, keep_client_alive bool, logger *log.CommonLogger) (error, int)
 
 	ReplaceCouchApiBaseObjWithExternals(couchApiBase string, nodeInfo map[string]interface{}) string

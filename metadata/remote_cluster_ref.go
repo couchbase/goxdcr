@@ -54,8 +54,6 @@ type RemoteClusterReference struct {
 
 	ClientCertificate []byte `json:"clientCertificate"`
 	ClientKey         []byte `json:"clientKey"`
-	// client cert auth setting on target
-	ClientCertAuthSetting base.ClientCertAuth `json:"clientCertAuthSetting"`
 
 	// these are hostname actually used to connect to target
 	// they are rotated among nodes in target cluster to achieve load balancing on target
@@ -142,8 +140,8 @@ func (ref *RemoteClusterReference) CloneAndRedact() *RemoteClusterReference {
 	return ref
 }
 
-func (ref *RemoteClusterReference) MyCredentials() (string, string, base.HttpAuthMech, []byte, bool, []byte, []byte, base.ClientCertAuth, error) {
-	return ref.UserName, ref.Password, ref.HttpAuthMech, ref.Certificate, ref.SANInCertificate, ref.ClientCertificate, ref.ClientKey, ref.ClientCertAuthSetting, nil
+func (ref *RemoteClusterReference) MyCredentials() (string, string, base.HttpAuthMech, []byte, bool, []byte, []byte, error) {
+	return ref.UserName, ref.Password, ref.HttpAuthMech, ref.Certificate, ref.SANInCertificate, ref.ClientCertificate, ref.ClientKey, nil
 }
 
 // convert to a map for output
@@ -210,7 +208,7 @@ func (ref *RemoteClusterReference) AreSecuritySettingsTheSame(ref2 *RemoteCluste
 	if ref2 == nil {
 		return false
 	}
-	return ref.SANInCertificate == ref2.SANInCertificate && ref.ClientCertAuthSetting == ref2.ClientCertAuthSetting &&
+	return ref.SANInCertificate == ref2.SANInCertificate &&
 		ref.HttpAuthMech == ref2.HttpAuthMech
 }
 
@@ -247,8 +245,8 @@ func (ref *RemoteClusterReference) String() string {
 		clientKey = "xxxx"
 	}
 
-	return fmt.Sprintf("id:%v; uuid:%v; name:%v; hostName:%v; userName:%v; password:%v; secureType:%v; certificate:%v; clientCertificate:%v; clientKey:%v; SanInCertificate:%v; ClientCertAuthSetting:%v; HttpAuthMech:%v, revision:%v",
-		ref.Id, ref.Uuid, ref.Name, ref.HostName, ref.UserName, password, ref.GetSecureTypeString(), ref.Certificate, ref.ClientCertificate, clientKey, ref.SANInCertificate, ref.ClientCertAuthSetting, ref.HttpAuthMech, ref.Revision)
+	return fmt.Sprintf("id:%v; uuid:%v; name:%v; hostName:%v; userName:%v; password:%v; secureType:%v; certificate:%v; clientCertificate:%v; clientKey:%v; SanInCertificate:%v; HttpAuthMech:%v, revision:%v",
+		ref.Id, ref.Uuid, ref.Name, ref.HostName, ref.UserName, password, ref.GetSecureTypeString(), ref.Certificate, ref.ClientCertificate, clientKey, ref.SANInCertificate, ref.HttpAuthMech, ref.Revision)
 }
 
 func (ref *RemoteClusterReference) LoadFrom(inRef *RemoteClusterReference) {
@@ -277,7 +275,6 @@ func (ref *RemoteClusterReference) LoadNonActivesFrom(inRef *RemoteClusterRefere
 	ref.HttpsHostName = inRef.HttpsHostName
 	ref.EncryptionType = inRef.EncryptionType
 	ref.SANInCertificate = inRef.SANInCertificate
-	ref.ClientCertAuthSetting = inRef.ClientCertAuthSetting
 	ref.HttpAuthMech = inRef.HttpAuthMech
 	// !!! shallow copy of revision.
 	// ref.Revision should only be passed along and should never be modified
@@ -324,19 +321,18 @@ func (ref *RemoteClusterReference) cloneCommonFields() *RemoteClusterReference {
 		return nil
 	}
 	return &RemoteClusterReference{Id: ref.Id,
-		Uuid:                  ref.Uuid,
-		Name:                  ref.Name,
-		HostName:              ref.HostName,
-		HttpsHostName:         ref.HttpsHostName,
-		UserName:              ref.UserName,
-		Password:              ref.Password,
-		DemandEncryption:      ref.DemandEncryption,
-		Certificate:           base.DeepCopyByteArray(ref.Certificate),
-		ClientCertificate:     base.DeepCopyByteArray(ref.ClientCertificate),
-		EncryptionType:        ref.EncryptionType,
-		SANInCertificate:      ref.SANInCertificate,
-		ClientCertAuthSetting: ref.ClientCertAuthSetting,
-		HttpAuthMech:          ref.HttpAuthMech,
+		Uuid:              ref.Uuid,
+		Name:              ref.Name,
+		HostName:          ref.HostName,
+		HttpsHostName:     ref.HttpsHostName,
+		UserName:          ref.UserName,
+		Password:          ref.Password,
+		DemandEncryption:  ref.DemandEncryption,
+		Certificate:       base.DeepCopyByteArray(ref.Certificate),
+		ClientCertificate: base.DeepCopyByteArray(ref.ClientCertificate),
+		EncryptionType:    ref.EncryptionType,
+		SANInCertificate:  ref.SANInCertificate,
+		HttpAuthMech:      ref.HttpAuthMech,
 		// !!! shallow copy of revision.
 		// ref.Revision should only be passed along and should never be modified
 		Revision: ref.Revision,

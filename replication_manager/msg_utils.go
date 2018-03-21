@@ -339,54 +339,7 @@ func DecodeCreateRemoteClusterRequest(request *http.Request) (justValidate bool,
 
 	}
 
-	// check required parameters
-	if len(name) == 0 {
-		errorsMap[base.RemoteClusterName] = base.MissingParameterError("cluster name")
-	}
-	if len(hostName) == 0 {
-		errorsMap[base.RemoteClusterHostName] = base.MissingParameterError("hostname (ip)")
-	}
-	if secureType == base.SecureTypeNone && len(userName) == 0 {
-		errorsMap[base.RemoteClusterUserName] = errors.New("username must be given if secure type is none")
-	}
-	if secureType == base.SecureTypeNone && len(password) == 0 {
-		errorsMap[base.RemoteClusterUserName] = errors.New("password must be given if secure type is none")
-	}
-	if len(userName) == 0 && len(password) > 0 {
-		errorsMap[base.RemoteClusterUserName] = errors.New("username must be given if password is specified")
-	}
-	if len(userName) > 0 && len(password) == 0 {
-		errorsMap[base.RemoteClusterPassword] = errors.New("password must be given if username is specified")
-	}
-
-	// certificate is required if demandEncryption is set to true
-	if secureType == base.SecureTypeFull && len(certificate) == 0 {
-		errorsMap[base.RemoteClusterCertificate] = errors.New("certificate must be given if secure type is full")
-	}
-
-	if secureType == base.SecureTypeNone && len(certificate) > 0 {
-		errorsMap[base.RemoteClusterCertificate] = errors.New("certificate cannot be given if secure type is none")
-	}
-
-	if secureType == base.SecureTypeNone && len(clientCertificate) > 0 {
-		errorsMap[base.RemoteClusterClientCertificate] = errors.New("client certificate cannot be given if secure type is none")
-	}
-
-	if secureType == base.SecureTypeNone && len(clientKey) > 0 {
-		errorsMap[base.RemoteClusterClientKey] = errors.New("client key cannot be given if secure type is none")
-	}
-
-	if len(clientCertificate) > 0 && len(clientKey) == 0 {
-		errorsMap[base.RemoteClusterClientKey] = errors.New("client key must be given when client certificate is specified")
-	}
-
-	if len(clientCertificate) == 0 && len(clientKey) > 0 {
-		errorsMap[base.RemoteClusterClientCertificate] = errors.New("client certificate must be given when client key is specified")
-	}
-
-	if len(userName) == 0 && len(clientCertificate) == 0 {
-		errorsMap[base.PlaceHolderFieldKey] = errors.New("either username and password or client certificate and client key must be specified")
-	}
+	validateRemoteClusterParameters(name, hostName, secureType, userName, password, certificate, clientCertificate, clientKey, errorsMap)
 
 	hostAddr, err1 := base.ValidateHostAddr(hostName)
 	if err1 != nil {
@@ -398,6 +351,67 @@ func DecodeCreateRemoteClusterRequest(request *http.Request) (justValidate bool,
 	}
 
 	return
+}
+
+func validateRemoteClusterParameters(name, hostName, secureType, userName, password string, certificate, clientCertificate, clientKey []byte, errorsMap map[string]error) {
+	// check required parameters
+	if len(name) == 0 {
+		errorsMap[base.RemoteClusterName] = base.MissingParameterError("cluster name")
+	}
+	if len(hostName) == 0 {
+		errorsMap[base.RemoteClusterHostName] = base.MissingParameterError("hostname (ip)")
+	}
+	if secureType != base.SecureTypeFull && len(userName) == 0 {
+		errorsMap[base.RemoteClusterUserName] = errors.New("username must be given when secure type is not full")
+	}
+	if secureType != base.SecureTypeFull && len(password) == 0 {
+		errorsMap[base.RemoteClusterPassword] = errors.New("password must be given when secure type is not full")
+	}
+	if secureType == base.SecureTypeFull && len(certificate) == 0 {
+		errorsMap[base.RemoteClusterCertificate] = errors.New("certificate must be given when secure type is full")
+	}
+
+	if secureType == base.SecureTypeNone && len(certificate) > 0 {
+		errorsMap[base.RemoteClusterCertificate] = errors.New("certificate cannot be given when secure type is none")
+	}
+
+	if secureType != base.SecureTypeFull && len(clientCertificate) > 0 {
+		errorsMap[base.RemoteClusterClientCertificate] = errors.New("client certificate cannot be given when secure type is not full")
+	}
+
+	if secureType != base.SecureTypeFull && len(clientKey) > 0 {
+		errorsMap[base.RemoteClusterClientKey] = errors.New("client key cannot be given when secure type is not full")
+	}
+
+	// full secure type is special in that it is the only mode where
+	// 1. client certificate / client key can be given
+	// 2. username / password can be omited
+	// either clientCert or username needs to be given, but not both
+	if secureType == base.SecureTypeFull {
+		if len(userName) == 0 && len(clientCertificate) == 0 {
+			errorsMap[base.PlaceHolderFieldKey] = errors.New("either username or client certificate must be given when secure type is full")
+		} else if len(userName) > 0 && len(clientCertificate) > 0 {
+			errorsMap[base.PlaceHolderFieldKey] = errors.New("username and client certificate cannot both be given when secure type is full")
+		} else {
+			if len(userName) > 0 {
+				// userName is given
+				if len(password) == 0 {
+					errorsMap[base.RemoteClusterPassword] = errors.New("password must be given when username is specified")
+				}
+				if len(clientKey) > 0 {
+					errorsMap[base.RemoteClusterClientKey] = errors.New("client key cannot be given when client certificate is not specified")
+				}
+			} else {
+				// client certificate is given
+				if len(clientKey) == 0 {
+					errorsMap[base.RemoteClusterClientKey] = errors.New("client key must be given when client certificate is specified")
+				}
+				if len(password) > 0 {
+					errorsMap[base.RemoteClusterPassword] = errors.New("password cannot be given when username is not specified")
+				}
+			}
+		}
+	}
 }
 
 // convert secureType parameter to demandEncryption and encrytionType

@@ -39,15 +39,6 @@ var NodesSelfPath = "/nodes/self"
 var SSLPortsPath = "/nodes/self/xdcrSSLPorts"
 var NodeServicesPath = "/pools/default/nodeServices"
 var BPath = "/pools/default/b/"
-var ClientCertAuthPath = "settings/clientCertAuth"
-
-// constants for parsing client cert auth option setting from ns_server response
-const (
-	ClientCertAuthKey            = "clientCertAuth"
-	ClientCertAuthValueMandatory = "mandatory"
-	ClientCertAuthValueEnable    = "enable"
-	ClientCertAuthValueDisable   = "disable"
-)
 
 // constants for CAPI nozzle
 var RevsDiffPath = "/_revs_diff"

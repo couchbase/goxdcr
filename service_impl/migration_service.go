@@ -674,12 +674,12 @@ func (service *MigrationSvc) targetBucketUUID(targetClusterUUID, bucketName stri
 	if err_target != nil {
 		return "", err_target
 	}
-	remote_userName, remote_password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, err_target := ref.MyCredentials()
+	remote_userName, remote_password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey, err_target := ref.MyCredentials()
 	if err_target != nil {
 		return "", err_target
 	}
 
-	return service.utils.BucketUUID(remote_connStr, bucketName, remote_userName, remote_password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, service.logger)
+	return service.utils.BucketUUID(remote_connStr, bucketName, remote_userName, remote_password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey, service.logger)
 }
 
 func addErrorMapToErrorList(errorMap map[string]error, errorList []error) []error {

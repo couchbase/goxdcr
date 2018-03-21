@@ -328,12 +328,12 @@ func (ckmgr *CheckpointManager) initSSLConStrMap() error {
 		return err
 	}
 
-	username, password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, err := ckmgr.target_cluster_ref.MyCredentials()
+	username, password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey, err := ckmgr.target_cluster_ref.MyCredentials()
 	if err != nil {
 		return err
 	}
 
-	ssl_port_map, err := ckmgr.utils.GetMemcachedSSLPortMap(connStr, username, password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, ckmgr.target_bucket_name, ckmgr.logger)
+	ssl_port_map, err := ckmgr.utils.GetMemcachedSSLPortMap(connStr, username, password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey, ckmgr.target_bucket_name, ckmgr.logger)
 	if err != nil {
 		return err
 	}
@@ -354,7 +354,7 @@ func (ckmgr *CheckpointManager) initSSLConStrMap() error {
 
 func (ckmgr *CheckpointManager) getNewMemcachedClient(server_addr string, initializing bool) (mcc.ClientIface, error) {
 	if ckmgr.target_cluster_ref.IsFullEncryption() {
-		_, _, _, certificate, san_in_certificate, client_certificate, client_key, clientCertAuthSetting, err := ckmgr.target_cluster_ref.MyCredentials()
+		_, _, _, certificate, san_in_certificate, client_certificate, client_key, err := ckmgr.target_cluster_ref.MyCredentials()
 		if err != nil {
 			return nil, err
 		}
@@ -371,13 +371,13 @@ func (ckmgr *CheckpointManager) getNewMemcachedClient(server_addr string, initia
 				return nil, err
 			}
 			// hostAddr not used in full encryption mode
-			san_in_certificate, clientCertAuthSetting, _, _, err = ckmgr.utils.GetSecuritySettingsAndDefaultPoolInfo("" /*hostAddr*/, connStr,
+			san_in_certificate, _, _, err = ckmgr.utils.GetSecuritySettingsAndDefaultPoolInfo("" /*hostAddr*/, connStr,
 				ckmgr.target_username, ckmgr.target_password, certificate, client_certificate, client_key, false /*scramShaEnabled*/, ckmgr.logger)
 			if err != nil {
 				return nil, err
 			}
 		}
-		return base.NewTLSConn(ssl_con_str, ckmgr.target_username, ckmgr.target_password, certificate, san_in_certificate, client_certificate, client_key, clientCertAuthSetting, ckmgr.target_bucket_name, ckmgr.logger)
+		return base.NewTLSConn(ssl_con_str, ckmgr.target_username, ckmgr.target_password, certificate, san_in_certificate, client_certificate, client_key, ckmgr.target_bucket_name, ckmgr.logger)
 	} else {
 		return ckmgr.utils.GetRemoteMemcachedConnection(server_addr, ckmgr.target_username, ckmgr.target_password,
 			ckmgr.target_bucket_name, ckmgr.user_agent, !ckmgr.target_cluster_ref.IsEncryptionEnabled(), /*plain_auth*/

@@ -55,9 +55,7 @@ type NewConnFunc func() (mcc.ClientIface, error)
 
 type ConnPool interface {
 	Get() (mcc.ClientIface, error)
-	// clientCertAuthSetting needs to be passed in since it is difficult to
-	// compute it in this package - we cannot call utils methods from here
-	GetNew(sanInCertificate bool, clientCertAuthSetting ClientCertAuth) (mcc.ClientIface, error)
+	GetNew(sanInCertificate bool) (mcc.ClientIface, error)
 	GetCAS() uint32
 	Release(client mcc.ClientIface)
 	ReleaseConnections(cas uint32)
@@ -203,7 +201,7 @@ func (p *connPool) Get() (mcc.ClientIface, error) {
 }
 
 // inputs do not matter in non-ssl mode
-func (p *connPool) GetNew(sanInCertificate bool, clientCertAuthSetting ClientCertAuth) (mcc.ClientIface, error) {
+func (p *connPool) GetNew(sanInCertificate bool) (mcc.ClientIface, error) {
 	return p.newConnFunc()
 }
 
@@ -270,9 +268,9 @@ func (p *sslOverMemConnPool) Certificate() []byte {
 	return p.certificate
 }
 
-func (p *sslOverMemConnPool) GetNew(sanInCertificate bool, clientCertAuthSetting ClientCertAuth) (mcc.ClientIface, error) {
+func (p *sslOverMemConnPool) GetNew(sanInCertificate bool) (mcc.ClientIface, error) {
 	ssl_con_str := GetHostAddr(p.hostName, uint16(p.remote_memcached_port))
-	return NewTLSConn(ssl_con_str, p.userName, p.password, p.certificate, sanInCertificate, p.clientCertificate, p.clientKey, clientCertAuthSetting, p.bucketName, p.logger)
+	return NewTLSConn(ssl_con_str, p.userName, p.password, p.certificate, sanInCertificate, p.clientCertificate, p.clientKey, p.bucketName, p.logger)
 }
 
 func (p *sslOverMemConnPool) ConnType() ConnType {
@@ -625,14 +623,14 @@ func NewConn(hostName string, userName string, password string, bucketName strin
 	return conn, nil
 }
 
-func NewTLSConn(ssl_con_str string, username string, password string, certificate []byte, san_in_certificate bool, clientCertificate, clientKey []byte, clientCertAuthSetting ClientCertAuth, bucketName string, logger *log.CommonLogger) (mcc.ClientIface, error) {
+func NewTLSConn(ssl_con_str string, username string, password string, certificate []byte, san_in_certificate bool, clientCertificate, clientKey []byte, bucketName string, logger *log.CommonLogger) (mcc.ClientIface, error) {
 	if len(certificate) == 0 {
 		return nil, fmt.Errorf("No certificate has been provided. Can't establish ssl connection to %v", ssl_con_str)
 	}
 
 	logger.Infof("Trying to create a ssl over memcached connection on %v", ssl_con_str)
 
-	conn, _, useClientCert, err := MakeTLSConn(ssl_con_str, username, certificate, san_in_certificate, clientCertificate, clientKey, clientCertAuthSetting, logger)
+	conn, _, err := MakeTLSConn(ssl_con_str, username, certificate, san_in_certificate, clientCertificate, clientKey, logger)
 	if err != nil {
 		return nil, err
 	}
@@ -644,7 +642,7 @@ func NewTLSConn(ssl_con_str string, username string, password string, certificat
 		return nil, err
 	}
 
-	if useClientCert {
+	if len(clientCertificate) > 0 {
 		// if client cert has been used in handshake, there is no need to further authenticate client,
 		// just select bucket
 		if bucketName != "" {
@@ -666,20 +664,15 @@ func NewTLSConn(ssl_con_str string, username string, password string, certificat
 	return client, nil
 }
 
-func MakeTLSConn(ssl_con_str, username string, certificate []byte, check_server_name bool, clientCertificate, clientKey []byte, clientCertAuthSetting ClientCertAuth, logger *log.CommonLogger) (*tls.Conn, *tls.Config, bool, error) {
+func MakeTLSConn(ssl_con_str, username string, certificate []byte, check_server_name bool, clientCertificate, clientKey []byte, logger *log.CommonLogger) (*tls.Conn, *tls.Config, error) {
 	if len(certificate) == 0 {
-		return nil, nil, false, fmt.Errorf("No certificate has been provided. Can't establish ssl connection to %v", ssl_con_str)
+		return nil, nil, fmt.Errorf("No certificate has been provided. Can't establish ssl connection to %v", ssl_con_str)
 	}
 
 	// BypassSanInCertificateCheck is by default false
 	// In case that some bug in the system prevents ssl connections from being setup because of server name check
 	// BypassSanInCertificateCheck can be turned to true to disable server name check and to unblock customer
 	check_server_name = check_server_name && !BypassSanInCertificateCheck
-
-	useClientCert, err := ValidateTlsParameters(ssl_con_str, username, clientCertificate, clientKey, clientCertAuthSetting)
-	if err != nil {
-		return nil, nil, false, err
-	}
 
 	// enforce timeout
 	errChannel := make(chan error, 2)
@@ -690,24 +683,24 @@ func MakeTLSConn(ssl_con_str, username string, certificate []byte, check_server_
 	caPool := x509.NewCertPool()
 	ok := caPool.AppendCertsFromPEM(certificate)
 	if !ok {
-		return nil, nil, false, InvalidCerfiticateError
+		return nil, nil, InvalidCerfiticateError
 	}
 
 	block, _ := pem.Decode([]byte(certificate))
 	if block == nil {
-		return nil, nil, false, InvalidCerfiticateError
+		return nil, nil, InvalidCerfiticateError
 	}
 	cert_remote, err := x509.ParseCertificate(block.Bytes)
 	if err != nil {
-		return nil, nil, false, InvalidCerfiticateError
+		return nil, nil, InvalidCerfiticateError
 	}
 
 	tlsConfig := &tls.Config{RootCAs: caPool}
 
-	if useClientCert {
+	if len(clientCertificate) > 0 {
 		clientCert, err := tls.X509KeyPair(clientCertificate, clientKey)
 		if err != nil {
-			return nil, nil, false, fmt.Errorf("Failed to parse client certificate and client key. err=%v", err)
+			return nil, nil, fmt.Errorf("Failed to parse client certificate and client key. err=%v", err)
 		}
 		tlsConfig.Certificates = []tls.Certificate{clientCert}
 	}
@@ -732,7 +725,7 @@ func MakeTLSConn(ssl_con_str, username string, certificate []byte, check_server_
 
 	if err != nil {
 		logger.Errorf("Failed to connect to %v, err=%v\n", ssl_con_str, err)
-		return nil, nil, false, err
+		return nil, nil, err
 	}
 
 	tcpConn, ok := rawConn.(*net.TCPConn)
@@ -740,7 +733,7 @@ func MakeTLSConn(ssl_con_str, username string, certificate []byte, check_server_
 		// should never get here
 		rawConn.Close()
 		logger.Errorf("Failed to get tcp connection when connecting to %v\n", ssl_con_str)
-		return nil, nil, false, err
+		return nil, nil, err
 	}
 
 	// always set keep alive
@@ -751,7 +744,7 @@ func MakeTLSConn(ssl_con_str, username string, certificate []byte, check_server_
 	if err != nil {
 		tcpConn.Close()
 		logger.Errorf("Failed to set keep alive options when connecting to %v. err=%v\n", ssl_con_str, err)
-		return nil, nil, false, err
+		return nil, nil, err
 	}
 
 	// wrap as tls connection
@@ -767,7 +760,7 @@ func MakeTLSConn(ssl_con_str, username string, certificate []byte, check_server_
 	if err != nil {
 		tlsConn.Close()
 		logger.Errorf("TLS handshake failed when connecting to %v, err=%v\n", ssl_con_str, err)
-		return nil, nil, false, err
+		return nil, nil, err
 	}
 
 	// If check_server_name is false, certificate check has been disabled during tls handshake
@@ -793,45 +786,13 @@ func MakeTLSConn(ssl_con_str, username string, certificate []byte, check_server_
 			//close the conn
 			tlsConn.Close()
 			logger.Errorf("TLS Verify failed when connecting to %v, err=%v\n", ssl_con_str, err)
-			return nil, nil, false, err
+			return nil, nil, err
 		}
 	}
-	return tlsConn, tlsConfig, useClientCert, nil
+	return tlsConn, tlsConfig, nil
 
 }
 
 func DialTCPWithTimeout(network, address string) (net.Conn, error) {
 	return dialer.Dial(network, address)
-}
-
-// validates input parameters and determines which to use for tls/https connections
-// returns:
-// 1. [true, nil] when client cert should be used
-// 2. [false, nil] when username and password should be used
-// 3. [false, error] when connections cannot be set up because of issues with input parameters
-func ValidateTlsParameters(hostAddr, username string, clientCertificate, clientKey []byte, clientCertAuthSetting ClientCertAuth) (bool, error) {
-	switch clientCertAuthSetting {
-	case ClientCertAuthDisable:
-		if len(username) == 0 {
-			return false, fmt.Errorf("Failed to set up secure connection to %v because username and password have not been specified and client cert is not supported by target.", hostAddr)
-		} else {
-			return false, nil
-		}
-	case ClientCertAuthEnable:
-		if len(clientCertificate) != 0 {
-			// use client cert if it has been specified
-			return true, nil
-		} else {
-			// use username if client cert has not been specified
-			return false, nil
-		}
-	case ClientCertAuthMandatory:
-		if len(clientCertificate) == 0 {
-			return false, fmt.Errorf("Failed to set up secure connection to %v because client cert, which is required by target, has not been specified.", hostAddr)
-		} else {
-			return true, nil
-		}
-	}
-
-	return false, fmt.Errorf("Failed to set up secure connection to %v due to unexpected client cert auth setting, %v.", hostAddr, clientCertAuthSetting)
 }

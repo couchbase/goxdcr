@@ -146,9 +146,8 @@ func setupMocks(srcResolutionType string,
 
 	utilitiesMock.On("GetMemcachedConnectionWFeatures", mock.Anything, mock.Anything, mock.Anything,
 		mock.Anything, mock.Anything, mock.Anything).Return(clientMock, respondFeatures, nil)
-	utilitiesMock.On("GetDefaultPoolInfoWithSecuritySettings", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(false, base.ClientCertAuthDisable, nil, nil)
+	utilitiesMock.On("GetSecuritySettingsAndDefaultPoolInfo", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(false, nil, nil)
 	utilitiesMock.On("GetBucketPasswordFromBucketInfo", mock.Anything, mock.Anything, mock.Anything).Return("", nil)
-
 }
 
 /**

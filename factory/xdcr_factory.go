@@ -125,12 +125,12 @@ func (xdcrf *XDCRFactory) NewPipeline(topic string, progress_recorder common.Pip
 		return nil, err
 	}
 
-	username, password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, err := targetClusterRef.MyCredentials()
+	username, password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey, err := targetClusterRef.MyCredentials()
 	if err != nil {
 		return nil, err
 	}
 
-	targetBucketInfo, err := xdcrf.utils.GetBucketInfo(connStr, spec.TargetBucketName, username, password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, xdcrf.logger)
+	targetBucketInfo, err := xdcrf.utils.GetBucketInfo(connStr, spec.TargetBucketName, username, password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey, xdcrf.logger)
 	if err != nil {
 		return nil, err
 	}
@@ -151,7 +151,7 @@ func (xdcrf *XDCRFactory) NewPipeline(topic string, progress_recorder common.Pip
 		sourceCRMode = base.GetCRModeFromConflictResolutionTypeSetting(conflictResolutionType)
 	}
 
-	xdcrf.logger.Infof("%v sourceCRMode=%v httpAuthMech=%v clientCertAuthSetting=%v isCapiReplication=%v isTargetES=%v\n", topic, sourceCRMode, httpAuthMech, clientCertAuthSetting, isCapiReplication, isTargetES)
+	xdcrf.logger.Infof("%v sourceCRMode=%v httpAuthMech=%v isCapiReplication=%v isTargetES=%v\n", topic, sourceCRMode, httpAuthMech, isCapiReplication, isTargetES)
 
 	/**
 	 * Construct the Source nozzles
@@ -707,7 +707,6 @@ func (xdcrf *XDCRFactory) constructSettingsForXmemNozzle(pipeline common.Pipelin
 	xmemSettings[parts.XMEM_SETTING_CERTIFICATE] = targetClusterRef.Certificate
 	xmemSettings[parts.XMEM_SETTING_CLIENT_CERTIFICATE] = targetClusterRef.ClientCertificate
 	xmemSettings[parts.XMEM_SETTING_CLIENT_KEY] = targetClusterRef.ClientKey
-	xmemSettings[parts.XMEM_SETTING_CLIENT_CERT_AUTH] = targetClusterRef.ClientCertAuthSetting
 	xmemSettings[parts.XMEM_SETTING_ENCRYPTION_TYPE] = targetClusterRef.EncryptionType
 	if targetClusterRef.IsFullEncryption() {
 		mem_ssl_port, ok := ssl_port_map[xmemConnStr]
@@ -954,7 +953,7 @@ func (xdcrf *XDCRFactory) ConstructSSLPortMap(targetClusterRef *metadata.RemoteC
 	// otherwise, the ssl ports in the map are proxy ssl ports
 	if targetClusterRef.IsFullEncryption() && nozzleType == base.Xmem {
 
-		username, password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, err := targetClusterRef.MyCredentials()
+		username, password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey, err := targetClusterRef.MyCredentials()
 		if err != nil {
 			return nil, err
 		}
@@ -963,7 +962,7 @@ func (xdcrf *XDCRFactory) ConstructSSLPortMap(targetClusterRef *metadata.RemoteC
 			return nil, err
 		}
 
-		ssl_port_map, err = xdcrf.utils.GetMemcachedSSLPortMap(connStr, username, password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey, clientCertAuthSetting, spec.TargetBucketName, xdcrf.logger)
+		ssl_port_map, err = xdcrf.utils.GetMemcachedSSLPortMap(connStr, username, password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey, spec.TargetBucketName, xdcrf.logger)
 		if err != nil {
 			xdcrf.logger.Errorf("Failed to get memcached ssl port, err=%v\n", err)
 			return nil, err
