@@ -762,8 +762,15 @@ func (dcp *DcpNozzle) processData() (err error) {
 				goto done
 			}
 
-			// increment ack bytes in uprfeed, which is necessary for uprfeed flow control to work
-			uprFeed.IncrementAckBytes(m.AckSize)
+			// acknowledge the processing of the mutation to uprFeed, which is necessary for uprFeed flow control to work
+			err = uprFeed.ClientAck(m)
+			if err != nil {
+				// should never get here
+				err = fmt.Errorf("%v Received error when trying to send ack to uprFeed. Stop dcp nozzle now. err=%v.", dcp.Id(), err)
+				dcp.Logger().Errorf(err.Error())
+				dcp.handleGeneralError(err)
+				goto done
+			}
 
 			if m.Opcode == mc.UPR_STREAMREQ {
 				// This is a reply coming back from dcp.uprFeed.UprRequestStream(), which triggers UPR_STREAMREQ to the producer
