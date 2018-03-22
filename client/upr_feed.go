@@ -114,7 +114,7 @@ type UprFeedIface interface {
 	CloseStream(vbno, opaqueMSB uint16) error
 	GetError() error
 	GetUprStats() *UprStats
-	IncrementAckBytes(bytes uint32) error
+	ClientAck(event *UprEvent) error
 	GetUprEventCh() <-chan *UprEvent
 	StartFeed() error
 	StartFeedWithConfig(datachan_len int) error
@@ -146,7 +146,7 @@ func (flogp *FailoverLog) Latest() (vbuuid, seqno uint64, err error) {
 	return vbuuid, seqno, ErrorInvalidLog
 }
 
-func makeUprEvent(rq gomemcached.MCRequest, stream *UprStream) *UprEvent {
+func makeUprEvent(rq gomemcached.MCRequest, stream *UprStream, bytesReceivedFromDCP int) *UprEvent {
 	event := &UprEvent{
 		Opcode:   rq.Opcode,
 		VBucket:  stream.Vbucket,
@@ -156,8 +156,14 @@ func makeUprEvent(rq gomemcached.MCRequest, stream *UprStream) *UprEvent {
 		Cas:      rq.Cas,
 		ExtMeta:  rq.ExtMeta,
 		DataType: rq.DataType,
-		AckSize:  uint32(rq.Size()),
 	}
+
+	// set AckSize for events that need to be acked to DCP,
+	// i.e., events with CommandCodes that need to be buffered in DCP
+	if _, ok := gomemcached.BufferedCommandCodeMap[rq.Opcode]; ok {
+		event.AckSize = uint32(bytesReceivedFromDCP)
+	}
+
 	// 16 LSBits are used by client library to encode vbucket number.
 	// 16 MSBits are left for application to multiplex on opaque value.
 	event.Opaque = appOpaque(rq.Opaque)
@@ -628,7 +634,6 @@ loop:
 			logging.Infof("Feed has been closed. Exiting.")
 			break loop
 		default:
-			sendAck := false
 			bytes, err := pkt.Receive(mc, headerBuf[:])
 			if err != nil {
 				logging.Errorf("Error in receive %s", err.Error())
@@ -663,7 +668,7 @@ loop:
 					}
 					status, rb, flog, err := handleStreamRequest(res, headerBuf[:])
 					if status == gomemcached.ROLLBACK {
-						event = makeUprEvent(pkt, stream)
+						event = makeUprEvent(pkt, stream, bytes)
 						event.Status = status
 						// rollback stream
 						logging.Infof("UPR_STREAMREQ with rollback %d for vb %d Failed: %v", rb, vb, err)
@@ -673,7 +678,7 @@ loop:
 						feed.muVbstreams.Unlock()
 
 					} else if status == gomemcached.SUCCESS {
-						event = makeUprEvent(pkt, stream)
+						event = makeUprEvent(pkt, stream, bytes)
 						event.Seqno = stream.StartSeq
 						event.FailoverLog = flog
 						event.Status = status
@@ -701,9 +706,8 @@ loop:
 						logging.Infof("Stream not found for vb %d: %#v", vb, pkt)
 						break loop
 					}
-					event = makeUprEvent(pkt, stream)
+					event = makeUprEvent(pkt, stream, bytes)
 					uprStats.TotalMutation++
-					sendAck = true
 
 				case gomemcached.UPR_STREAMEND:
 					if stream == nil {
@@ -711,9 +715,8 @@ loop:
 						break loop
 					}
 					//stream has ended
-					event = makeUprEvent(pkt, stream)
+					event = makeUprEvent(pkt, stream, bytes)
 					logging.Infof("Stream Ended for vb %d", vb)
-					sendAck = true
 
 					feed.muVbstreams.Lock()
 					delete(feed.vbstreams, vb)
@@ -725,9 +728,8 @@ loop:
 						break loop
 					}
 					// snapshot marker
-					event = makeUprEvent(pkt, stream)
+					event = makeUprEvent(pkt, stream, bytes)
 					uprStats.TotalSnapShot++
-					sendAck = true
 
 				case gomemcached.UPR_FLUSH:
 					if stream == nil {
@@ -735,17 +737,16 @@ loop:
 						break loop
 					}
 					// special processing for flush ?
-					event = makeUprEvent(pkt, stream)
+					event = makeUprEvent(pkt, stream, bytes)
 
 				case gomemcached.UPR_CLOSESTREAM:
 					if stream == nil {
 						logging.Infof("Stream not found for vb %d: %#v", vb, pkt)
 						break loop
 					}
-					event = makeUprEvent(pkt, stream)
+					event = makeUprEvent(pkt, stream, bytes)
 					event.Opcode = gomemcached.UPR_STREAMEND // opcode re-write !!
 					logging.Infof("Stream Closed for vb %d StreamEnd simulated", vb)
-					sendAck = true
 
 					feed.muVbstreams.Lock()
 					delete(feed.vbstreams, vb)
@@ -792,8 +793,8 @@ loop:
 			}
 
 			if !feed.ackByClient {
-				// if client does not ack, use the size of data sent to client to determine if ack to dcp is needed
-				feed.sendBufferAckIfNeeded(sendAck, uint32(bytes))
+				// if client does not ack, do the ack check now
+				feed.sendBufferAckIfNeeded(event)
 			}
 		}
 	}
@@ -805,28 +806,32 @@ loop:
 	logging.Infof("runFeed exiting")
 }
 
-// Client, after setting ackByClient flag to true in NewUprFeedWithConfig() call,
-// can call this API to notify gomemcached that the client has completed processing
-// of a number of bytes
+// Client, after completing processing of an UprEvent, need to call this API to notify UprFeed,
+// so that UprFeed can update its ack bytes stats and send ack to DCP if needed
+// Client needs to set ackByClient flag to true in NewUprFeedWithConfig() call as a prerequisite for this call to work
 // This API is not thread safe. Caller should NOT have more than one go rountine calling this API
-func (feed *UprFeed) IncrementAckBytes(bytes uint32) error {
+func (feed *UprFeed) ClientAck(event *UprEvent) error {
 	if !feed.ackByClient {
 		return errors.New("Upr feed does not have ackByclient flag set")
 	}
-	feed.sendBufferAckIfNeeded(true, bytes)
+	feed.sendBufferAckIfNeeded(event)
 	return nil
 }
 
+// increment ack bytes if the event needs to be acked to DCP
 // send buffer ack if enough ack bytes have been accumulated
-func (feed *UprFeed) sendBufferAckIfNeeded(sendAck bool, bytes uint32) {
-	if sendAck {
-		totalBytes := feed.toAckBytes + bytes
-		if totalBytes > feed.maxAckBytes {
-			feed.toAckBytes = 0
-			feed.sendBufferAck(totalBytes)
-		} else {
-			feed.toAckBytes = totalBytes
-		}
+func (feed *UprFeed) sendBufferAckIfNeeded(event *UprEvent) {
+	if event == nil || event.AckSize == 0 {
+		// this indicates that there is no need to ack to DCP
+		return
+	}
+
+	totalBytes := feed.toAckBytes + event.AckSize
+	if totalBytes > feed.maxAckBytes {
+		feed.toAckBytes = 0
+		feed.sendBufferAck(totalBytes)
+	} else {
+		feed.toAckBytes = totalBytes
 	}
 }
 

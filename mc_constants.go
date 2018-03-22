@@ -62,6 +62,8 @@ const (
 	SASL_AUTH       = CommandCode(0x21)
 	SASL_STEP       = CommandCode(0x22)
 
+	SET_VBUCKET = CommandCode(0x3d)
+
 	TAP_CONNECT          = CommandCode(0x40) // Client-sent request to initiate Tap feed
 	TAP_MUTATION         = CommandCode(0x41) // Notification of a SET/ADD/REPLACE/etc. on the server
 	TAP_DELETE           = CommandCode(0x42) // Notification of a DELETE on the server
@@ -95,6 +97,16 @@ const (
 	SUBDOC_GET          = CommandCode(0xc5) // Get subdoc. Returns with xattrs
 	SUBDOC_MULTI_LOOKUP = CommandCode(0xd0) // Multi lookup. Doc xattrs and meta.
 )
+
+// command codes that are counted toward DCP control buffer
+// when DCP clients receive DCP messages with these command codes, they need to provide acknowledgement
+var BufferedCommandCodeMap = map[CommandCode]bool{
+	SET_VBUCKET:    true,
+	UPR_STREAMEND:  true,
+	UPR_SNAPSHOT:   true,
+	UPR_MUTATION:   true,
+	UPR_DELETION:   true,
+	UPR_EXPIRATION: true}
 
 // Status field for memcached response.
 type Status uint16
