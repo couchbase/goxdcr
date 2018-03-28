@@ -33,31 +33,70 @@ func NewReplicationSettingsSvc(metadata_svc service_def.MetadataSvc, logger_ctx 
 }
 
 func (repl_settings_svc *ReplicationSettingsSvc) GetDefaultReplicationSettings() (*metadata.ReplicationSettings, error) {
-	var defaultSettings *metadata.ReplicationSettings
 	repl_settings_svc.replicationSettingsMtx.Lock()
 	defer repl_settings_svc.replicationSettingsMtx.Unlock()
 
+	return repl_settings_svc.getReplicationSettings(true /*populateDefault*/)
+}
+
+// getter for replication settings
+// if populateDefault is false, it simple returns the settings values in metakv, which could be empty
+// if populateDefault is true, it ensures that the values for all settings keys are populated
+func (repl_settings_svc *ReplicationSettingsSvc) getReplicationSettings(populateDefault bool) (*metadata.ReplicationSettings, error) {
+	replicationSettings, err := repl_settings_svc.getReplicationSettingsFromMetakv()
+	if err != nil {
+		return nil, err
+	}
+	if populateDefault {
+		replicationSettings.PopulateDefault()
+	}
+	return replicationSettings, nil
+}
+
+// retrieves replication settings from metakv
+// returns empty replication settings if not found in metakv
+func (repl_settings_svc *ReplicationSettingsSvc) getReplicationSettingsFromMetakv() (*metadata.ReplicationSettings, error) {
+	// first try to read v2 replication settings from metakv
 	bytes, rev, err := repl_settings_svc.metadata_svc.Get(DefaultReplicationSettingsKey)
 	if err != nil && err != service_def.MetadataNotFoundErr {
 		return nil, err
 	}
 	if err == service_def.MetadataNotFoundErr {
-		// initialize default settings if it does not exist
-		defaultSettings = metadata.DefaultReplicationSettings()
-	} else {
-		defaultSettings, err = repl_settings_svc.constructReplicationSettingsObject(bytes, rev)
-		if err != nil {
-			return nil, err
-		}
-		// set rev number
-		defaultSettings.Revision = rev
+		repl_settings_svc.logger.Info("Default replication settings not found in metakv")
+		return metadata.EmptyReplicationSettings(), nil
 	}
-	return defaultSettings, nil
+
+	return repl_settings_svc.constructReplicationSettingsObject(bytes, rev)
 }
 
-func (repl_settings_svc *ReplicationSettingsSvc) SetDefaultReplicationSettings(settings *metadata.ReplicationSettings) error {
+func (repl_settings_svc *ReplicationSettingsSvc) UpdateDefaultReplicationSettings(settingsMap map[string]interface{}) (metadata.ReplicationSettingsMap, map[string]error, error) {
 	repl_settings_svc.replicationSettingsMtx.Lock()
 	defer repl_settings_svc.replicationSettingsMtx.Unlock()
+
+	replicationSettings, err := repl_settings_svc.getReplicationSettings(false /*populateDefault*/)
+	if err != nil {
+		repl_settings_svc.logger.Warnf("Skipped update to default replication settings because of error retrieving current default replication settings. err=%v", err)
+		return nil, nil, err
+	}
+
+	changedSettingMap, errorsMap := replicationSettings.UpdateSettingsFromMap(settingsMap)
+	if len(errorsMap) > 0 {
+		return nil, errorsMap, nil
+	}
+
+	if len(changedSettingMap) > 0 {
+		err := repl_settings_svc.setDefaultReplicationSettings(replicationSettings)
+		if err != nil {
+			repl_settings_svc.logger.Warnf("Error updating default replication settings. err=%v\n", err)
+			return nil, nil, err
+		}
+	} else {
+		repl_settings_svc.logger.Infof("Skipped update to default replication settings since there have been no real changes.")
+	}
+	return changedSettingMap, nil, nil
+}
+
+func (repl_settings_svc *ReplicationSettingsSvc) setDefaultReplicationSettings(settings *metadata.ReplicationSettings) error {
 	bytes, err := json.Marshal(settings)
 	if err != nil {
 		return err

@@ -15,8 +15,8 @@ import (
 )
 
 type GlobalSettingsSvc interface {
-	GetDefaultGlobalSettings() (*metadata.GlobalSettings, error)
-	SetDefaultGlobalSettings(*metadata.GlobalSettings) error
+	GetGlobalSettings() (*metadata.GlobalSettings, error)
+	UpdateGlobalSettings(metadata.ReplicationSettingsMap) (map[string]error, error)
 
 	// Service call back function for process changed event
 	GlobalSettingsServiceCallback(path string, value []byte, rev interface{}) error

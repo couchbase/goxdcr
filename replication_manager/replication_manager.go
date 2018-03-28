@@ -519,79 +519,35 @@ func DeleteReplication(topic string, realUserId *service_def.RealUserId) error {
 
 //update the  replication settings and XDCR process setting
 func UpdateDefaultSettings(settings metadata.ReplicationSettingsMap, realUserId *service_def.RealUserId) (map[string]error, error) {
+	logger_rm.Infof("UpdateDefaultSettings called with settings=%v\n", settings)
+
 	// Validate process setting keys
-	GlobalSettingsMap := metadata.ValidateGlobalSettingsKey(settings)
-	if len(GlobalSettingsMap) > 0 {
+	globalSettingsMap := metadata.ValidateGlobalSettingsKey(settings)
+	if len(globalSettingsMap) > 0 {
 		//First update XDCR Process specific setting
-		errorMap, err := UpdateGlobalSettings(GlobalSettingsMap, realUserId)
-		if len(errorMap) != 0 || err != nil {
+		errorMap, err := GlobalSettingsService().UpdateGlobalSettings(globalSettingsMap)
+		if len(errorMap) > 0 || err != nil {
 			return errorMap, err
 		}
+		logger_rm.Infof("Updated global settings\n")
+	} else {
+		logger_rm.Infof("Did not update global settings since there are no real changes\n")
 	}
 
 	//validate replication settings
 	replicationSettingMap := metadata.ValidateReplicationSettingsKey(settings)
 	if len(replicationSettingMap) > 0 {
 		//Now update default replication setting
-		errorMapRep, err := UpdateDefaultReplicationSettings(replicationSettingMap, realUserId)
-		if len(errorMapRep) != 0 || err != nil {
-			return errorMapRep, err
+		changedSettingsMap, errorMap, err := ReplicationSettingsService().UpdateDefaultReplicationSettings(replicationSettingMap)
+		if len(errorMap) > 0 || err != nil {
+			return errorMap, err
 		}
-	}
-
-	logger_rm.Infof("Updated replication settings\n")
-
-	return nil, nil
-}
-
-//update the process  settings
-func UpdateGlobalSettings(settings metadata.ReplicationSettingsMap, realUserId *service_def.RealUserId) (map[string]error, error) {
-	defaultSettings, err := GlobalSettingsService().GetDefaultGlobalSettings()
-	if err != nil {
-		return nil, err
-	}
-
-	changedSettingsMap, errorMap := defaultSettings.UpdateSettingsFromMap(settings)
-	if len(errorMap) != 0 {
-		return errorMap, nil
-	}
-
-	if len(changedSettingsMap) != 0 {
-		err = GlobalSettingsService().SetDefaultGlobalSettings(defaultSettings)
-		if err != nil {
-			return nil, err
-		}
-		logger_rm.Infof("Default Process settings saved successfully\n")
-	} else {
-		logger_rm.Infof("Did not update process  settings since there are no real changes")
-	}
-
-	return nil, nil
-}
-
-//update the default replication settings
-func UpdateDefaultReplicationSettings(settings metadata.ReplicationSettingsMap, realUserId *service_def.RealUserId) (map[string]error, error) {
-	defaultSettings, err := ReplicationSettingsService().GetDefaultReplicationSettings()
-	if err != nil {
-		return nil, err
-	}
-
-	changedSettingsMap, errorMap := defaultSettings.UpdateSettingsFromMap(settings)
-	if len(errorMap) != 0 {
-		return errorMap, nil
-	}
-
-	if len(changedSettingsMap) != 0 {
-		err = ReplicationSettingsService().SetDefaultReplicationSettings(defaultSettings)
-		if err != nil {
-			return nil, err
+		if len(changedSettingsMap) != 0 {
+			go writeUpdateDefaultReplicationSettingsEvent(&changedSettingsMap, realUserId)
 		}
 		logger_rm.Infof("Updated default replication settings\n")
-
-		go writeUpdateDefaultReplicationSettingsEvent(&changedSettingsMap, realUserId)
-
 	} else {
-		logger_rm.Infof("Did not update default replication settings since there are no real changes")
+		logger_rm.Infof("Did not update default replication settings since there are no real changes\n")
 	}
 
 	return nil, nil

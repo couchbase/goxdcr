@@ -50,6 +50,10 @@ func GetGlobalSettingsConfigMap() map[string]*SettingsConfig {
 	return GlobalSettingsConfigMap
 }
 
+func EmptyGlobalSettings() *GlobalSettings {
+	return &GlobalSettings{Settings: EmptySettings(GetGlobalSettingsConfigMap)}
+}
+
 func DefaultGlobalSettings() *GlobalSettings {
 	defaultSettings := &GlobalSettings{Settings: DefaultSettings(GetGlobalSettingsConfigMap)}
 	defaultSettings.populateFieldsUsingMap()
@@ -81,7 +85,6 @@ func (s *GlobalSettings) PostProcessAfterUnmarshalling() {
 
 		// no need for populateFieldsUsingMap() since fields and map in metakv should already be consistent
 	}
-	s.HandleUpgrade()
 }
 
 func (s *GlobalSettings) UpdateSettingsFromMap(settingsMap map[string]interface{}) (changedSettingsMap ReplicationSettingsMap, errorMap map[string]error) {
@@ -97,8 +100,12 @@ func (s *GlobalSettings) UpdateSettingsFromMap(settingsMap map[string]interface{
 // this is needed when we load pre-upgrade global settings from metakv
 func (s *GlobalSettings) populateMapUsingFields() {
 	s.Settings = EmptySettings(GetGlobalSettingsConfigMap)
-	s.Values[GoMaxProcsKey] = s.GoMaxProcs
-	s.Values[GoGCKey] = s.GoGC
+	if s.GoMaxProcs != GoMaxProcsConfig.defaultValue.(int) {
+		s.Values[GoMaxProcsKey] = s.GoMaxProcs
+	}
+	if s.GoGC != GoGCConfig.defaultValue.(int) {
+		s.Values[GoGCKey] = s.GoGC
+	}
 }
 
 // populate field values using settings map

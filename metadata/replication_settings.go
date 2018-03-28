@@ -435,7 +435,6 @@ func (s *ReplicationSettings) PostProcessAfterUnmarshalling() {
 
 		// no need for populateFieldsUsingMap() since fields and map in metakv should already be consistent
 	}
-	s.HandleUpgrade()
 	s.UpgradeFilterIfNeeded()
 }
 
@@ -492,20 +491,48 @@ func (s *ReplicationSettings) UpgradeFilterIfNeeded() {
 // this is needed when we load pre-upgrade replication settings from metakv
 func (s *ReplicationSettings) populateMapUsingFields() {
 	s.Settings = EmptySettings(GetReplicationSettingsConfigMap)
-	s.Values[ReplicationTypeKey] = s.RepType
-	s.Values[FilterExpressionKey] = s.FilterExpression
-	s.Values[ActiveKey] = s.Active
-	s.Values[CheckpointIntervalKey] = s.CheckpointInterval
-	s.Values[BatchCountKey] = s.BatchCount
-	s.Values[BatchSizeKey] = s.BatchSize
-	s.Values[FailureRestartIntervalKey] = s.FailureRestartInterval
-	s.Values[OptimisticReplicationThresholdKey] = s.OptimisticReplicationThreshold
-	s.Values[SourceNozzlePerNodeKey] = s.SourceNozzlePerNode
-	s.Values[TargetNozzlePerNodeKey] = s.TargetNozzlePerNode
-	s.Values[PipelineLogLevelKey] = s.LogLevel
-	s.Values[PipelineStatsIntervalKey] = s.StatsInterval
-	s.Values[BandwidthLimitKey] = s.BandwidthLimit
-	s.Values[CompressionTypeKey] = s.GetCompressionType()
+	if s.RepType != ReplicationTypeConfig.defaultValue.(string) {
+		s.Values[ReplicationTypeKey] = s.RepType
+	}
+	if s.FilterExpression != FilterExpressionConfig.defaultValue.(string) {
+		s.Values[FilterExpressionKey] = s.FilterExpression
+	}
+	if s.Active != ActiveConfig.defaultValue.(bool) {
+		s.Values[ActiveKey] = s.Active
+	}
+	if s.CheckpointInterval != CheckpointIntervalConfig.defaultValue.(int) {
+		s.Values[CheckpointIntervalKey] = s.CheckpointInterval
+	}
+	if s.BatchCount != BatchCountConfig.defaultValue.(int) {
+		s.Values[BatchCountKey] = s.BatchCount
+	}
+	if s.BatchSize != BatchSizeConfig.defaultValue.(int) {
+		s.Values[BatchSizeKey] = s.BatchSize
+	}
+	if s.FailureRestartInterval != FailureRestartIntervalConfig.defaultValue.(int) {
+		s.Values[FailureRestartIntervalKey] = s.FailureRestartInterval
+	}
+	if s.OptimisticReplicationThreshold != OptimisticReplicationThresholdConfig.defaultValue.(int) {
+		s.Values[OptimisticReplicationThresholdKey] = s.OptimisticReplicationThreshold
+	}
+	if s.SourceNozzlePerNode != SourceNozzlePerNodeConfig.defaultValue.(int) {
+		s.Values[SourceNozzlePerNodeKey] = s.SourceNozzlePerNode
+	}
+	if s.TargetNozzlePerNode != TargetNozzlePerNodeConfig.defaultValue.(int) {
+		s.Values[TargetNozzlePerNodeKey] = s.TargetNozzlePerNode
+	}
+	if s.LogLevel != PipelineLogLevelConfig.defaultValue.(log.LogLevel) {
+		s.Values[PipelineLogLevelKey] = s.LogLevel
+	}
+	if s.StatsInterval != PipelineStatsIntervalConfig.defaultValue.(int) {
+		s.Values[PipelineStatsIntervalKey] = s.StatsInterval
+	}
+	if s.BandwidthLimit != BandwidthLimitConfig.defaultValue.(int) {
+		s.Values[BandwidthLimitKey] = s.BandwidthLimit
+	}
+	if s.CompressionType != CompressionTypeConfig.defaultValue.(int) {
+		s.Values[CompressionTypeKey] = s.GetCompressionType()
+	}
 }
 
 // populate field values using settings map

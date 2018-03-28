@@ -718,6 +718,10 @@ func (service *ReplicationSpecService) loadLatestMetakvRevisionIntoSpec(spec *me
 }
 
 func (service *ReplicationSpecService) SetReplicationSpec(spec *metadata.ReplicationSpecification) error {
+	return service.setReplicationSpecInternal(spec, true /*lock*/)
+}
+
+func (service *ReplicationSpecService) setReplicationSpecInternal(spec *metadata.ReplicationSpecification, lock bool) error {
 	value, err := json.Marshal(spec)
 	if err != nil {
 		return err
@@ -734,7 +738,7 @@ func (service *ReplicationSpecService) SetReplicationSpec(spec *metadata.Replica
 		return err
 	}
 
-	err = service.updateCache(spec.Id, spec)
+	err = service.updateCacheInternal(spec.Id, spec, lock)
 	if err == nil {
 		service.logger.Infof("Replication spec %s has been updated, rev=%v\n", spec.Id, spec.Revision)
 		return nil
@@ -801,7 +805,7 @@ func (service *ReplicationSpecService) initCacheFromMetaKV() (err error) {
 		rev := KVentry.Rev
 
 		replicationId := service.getReplicationIdFromKey(key)
-		replSpec, err := constructReplicationSpec(marshalledSpec, rev)
+		replSpec, err := service.constructReplicationSpec(marshalledSpec, rev, false /*lock*/)
 		if err != nil {
 			service.logger.Errorf("Unable to construct spec %v from metaKV's data. err: %v", key, err)
 			continue
@@ -907,7 +911,7 @@ func (service *ReplicationSpecService) removeSpecFromCache(specId string) error 
 	return nil
 }
 
-func constructReplicationSpec(value []byte, rev interface{}) (*metadata.ReplicationSpecification, error) {
+func (service *ReplicationSpecService) constructReplicationSpec(value []byte, rev interface{}, lock bool) (*metadata.ReplicationSpecification, error) {
 	if value == nil {
 		return nil, nil
 	}
@@ -921,14 +925,42 @@ func constructReplicationSpec(value []byte, rev interface{}) (*metadata.Replicat
 
 	spec.Settings.PostProcessAfterUnmarshalling()
 
+	service.handleSettingsUpgrade(spec, lock)
+
 	return spec, nil
+}
+
+// spec.Settings needs to have all setting values populated,
+// otherwise, replication behavior may change unexpectedly after upgrade when there are changes to default setting values.
+// When new replication spec is created, spec.Settings always has all applicable setting values populated.
+// The only scenario where values may be missing from spec.Settings is when new setting keys are added after upgrade.
+// This method checks whether there are values missing from spec.Settings.
+// If there are, it populates these values using default values, and writes updated settings/spec to metakv.
+func (service *ReplicationSpecService) handleSettingsUpgrade(spec *metadata.ReplicationSpecification, lock bool) {
+	updatedKeys := spec.Settings.PopulateDefault()
+	if len(updatedKeys) == 0 {
+		return
+	}
+
+	service.logger.Infof("Updating spec %v in metakv since its settings has been upgraded. upgraded settings keys = %v", spec.Id, updatedKeys)
+	err := service.setReplicationSpecInternal(spec, lock)
+	if err != nil {
+		// ignore this error since it is not fatal.
+		// 1. updated settings will be saved to metakv if there are further updates to spec
+		// 2. if updated settings are not saved to metakv, there is no impact if default values of new settings are not changed
+		// 3. in the worst case that updated settings are not saved to metakv, and default values of new settings are changed,
+		//    the old default values will be used, which is not desirable but will not cause production downtime
+		// not to ignore this error would be more risky, since some critical ops, like responding to metakv updates,
+		// may get skipped
+		service.logger.Warnf("Error upgrading replication settings in spec %v in metakv. err = %v\n", spec.Id, err)
+	}
 }
 
 // Implement callback function for metakv
 func (service *ReplicationSpecService) ReplicationSpecServiceCallback(path string, value []byte, rev interface{}) error {
 	service.logger.Infof("ReplicationSpecServiceCallback called on path = %v\n", path)
 
-	newSpec, err := constructReplicationSpec(value, rev)
+	newSpec, err := service.constructReplicationSpec(value, rev, true/*lock*/)
 	if err != nil {
 		service.logger.Errorf("Error marshaling replication spec. value=%v, err=%v\n", string(value), err)
 		return err
@@ -973,10 +1005,18 @@ func (service *ReplicationSpecService) updateCacheInternalNoLock(specId string, 
 }
 
 func (service *ReplicationSpecService) updateCache(specId string, newSpec *metadata.ReplicationSpecification) error {
-	//this ensures that all accesses to the cache in this method are a single atomic operation,
-	// this is needed because this method can be called concurrently
-	service.cache_lock.Lock()
-	defer service.cache_lock.Unlock()
+	return service.updateCacheInternal(specId, newSpec, true /*lock*/)
+}
+
+func (service *ReplicationSpecService) updateCacheNoLock(specId string, newSpec *metadata.ReplicationSpecification) error {
+	return service.updateCacheInternal(specId, newSpec, false /*lock*/)
+}
+
+func (service *ReplicationSpecService) updateCacheInternal(specId string, newSpec *metadata.ReplicationSpecification, lock bool) error {
+	if lock {
+		service.cache_lock.Lock()
+		defer service.cache_lock.Unlock()
+	}
 
 	oldSpec, updated, err := service.updateCacheInternalNoLock(specId, newSpec)
 

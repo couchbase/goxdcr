@@ -16,5 +16,5 @@ import (
 // this service is likely provided by exposing an erlang rest api in ns_server
 type ReplicationSettingsSvc interface {
 	GetDefaultReplicationSettings() (*metadata.ReplicationSettings, error)
-	SetDefaultReplicationSettings(*metadata.ReplicationSettings) error
+	UpdateDefaultReplicationSettings(map[string]interface{}) (metadata.ReplicationSettingsMap, map[string]error, error)
 }

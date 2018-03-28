@@ -181,14 +181,17 @@ func (s *Settings) HandleDataTypeConversionAfterUnmarshalling() {
 	}
 }
 
-// after upgrade, settings that did not exist in before-upgrade version do not exist in s.Values
-// add these settings to s.Values with default values
-func (s *Settings) HandleUpgrade() {
+// some settings may not have user specified values in metakv.
+// populate their values with default values
+func (s *Settings) PopulateDefault() []string {
+	updatedKeys := make([]string, 0)
 	for settingsKey, settingsConfig := range s.configMapRetriever() {
 		if _, ok := s.Values[settingsKey]; !ok {
 			s.Values[settingsKey] = settingsConfig.defaultValue
+			updatedKeys = append(updatedKeys, settingsKey)
 		}
 	}
+	return updatedKeys
 }
 
 func (s *Settings) String() string {

@@ -72,56 +72,97 @@ func getGlobalSettingKey() string {
 	return metadata.GlobalConfigurationKey + base.KeyPartsDelimiter + metadata.DefaultGlobalSettingsKey
 }
 
-func (service *GlobalSettingsSvc) GetDefaultGlobalSettings() (*metadata.GlobalSettings, error) {
-	var defaultGlobalSettings *metadata.GlobalSettings
+// This method will pull  process setting setting
+func (service *GlobalSettingsSvc) GetGlobalSettings() (*metadata.GlobalSettings, error) {
 	service.globalSettingsMtx.Lock()
 	defer service.globalSettingsMtx.Unlock()
 
+	return service.getGlobalSettings(true /*populateDefault*/)
+}
+
+// getter for global settings
+// if populateDefault is false, it simple returns the settings values in metakv, which could be empty
+// this is nencessary when the retrieved global settings will be used as the base for update
+// if populateDefault is true, it ensures that the values for all settings keys are populated
+func (service *GlobalSettingsSvc) getGlobalSettings(populateDefault bool) (*metadata.GlobalSettings, error) {
+	globalSettings, err := service.getGlobalSettingsFromMetakv()
+	if err != nil {
+		return nil, err
+	}
+	if populateDefault {
+		globalSettings.PopulateDefault()
+	}
+	return globalSettings, nil
+}
+
+// retrieves global settings from metakv
+// returns empty global settings if not found in metakv
+func (service *GlobalSettingsSvc) getGlobalSettingsFromMetakv() (*metadata.GlobalSettings, error) {
 	pKey := getGlobalSettingKey()
-
 	service.logger.Infof("getDefaultGlobalSetting Processing = %v\n", pKey)
-	//Pull Global Setting if it does not exists than intialize it
-	bytes, rev, err := service.metadata_svc.Get(pKey)
 
+	var globalSettings *metadata.GlobalSettings
+	bytes, rev, err := service.metadata_svc.Get(pKey)
 	if err != nil {
 		if err == service_def.MetadataNotFoundErr {
-			// initialize default process settings if it does not exist
-			defaultGlobalSettings = metadata.DefaultGlobalSettings()
+			service.logger.Info("Global settings not found in metakv")
+			return metadata.EmptyGlobalSettings(), nil
 		} else {
+			service.logger.Errorf("Error retrieving global settings = %v\n", err)
 			return nil, err
 		}
 	} else {
-		defaultGlobalSettings, err = service.constructGlobalSettingObject(bytes, rev)
+		globalSettings, err = service.constructGlobalSettingObject(bytes, rev)
 		if err != nil {
+			service.logger.Errorf("Error constructing global settings = %v\n", err)
 			return nil, err
 		}
 	}
-	return defaultGlobalSettings, nil
+	return globalSettings, nil
 }
 
-func (service *GlobalSettingsSvc) SetDefaultGlobalSettings(settings *metadata.GlobalSettings) error {
+func (service *GlobalSettingsSvc) UpdateGlobalSettings(settings metadata.ReplicationSettingsMap) (map[string]error, error) {
 	service.globalSettingsMtx.Lock()
 	defer service.globalSettingsMtx.Unlock()
 
-	bytes, err := json.Marshal(settings)
+	globalSettings, err := service.getGlobalSettings(false /*populateDefault*/)
+	if err != nil {
+		return nil, err
+	}
+
+	changedSettingsMap, errorMap := globalSettings.UpdateSettingsFromMap(settings)
+	if len(errorMap) != 0 {
+		return errorMap, nil
+	}
+
+	if len(changedSettingsMap) == 0 {
+		service.logger.Infof("Skipping update of global settings since there are no real changes. settings=%v\n", settings)
+		return nil, nil
+	}
+
+	return nil, service.setGlobalSettings(globalSettings)
+}
+
+func (service *GlobalSettingsSvc) setGlobalSettings(globalSettings *metadata.GlobalSettings) error {
+	bytes, err := json.Marshal(globalSettings)
 	if err != nil {
 		return err
 	}
 	pKey := getGlobalSettingKey()
-	service.logger.Infof("setDefaultGlobalSetting = %v\n", pKey)
-	if settings.Revision != nil {
-		return service.metadata_svc.Set(pKey, bytes, settings.Revision)
+	if globalSettings.Revision != nil {
+		return service.metadata_svc.Set(pKey, bytes, globalSettings.Revision)
 	} else {
 		return service.metadata_svc.Add(pKey, bytes)
 	}
 
 	//update setting
 	if service.metadata_change_callback != nil {
-		err := service.metadata_change_callback(pKey, nil, settings)
+		err := service.metadata_change_callback(pKey, nil, globalSettings)
 		if err != nil {
 			service.logger.Error(err.Error())
 			return err
 		}
 	}
+	service.logger.Infof("Global settings saved successfully. settings=%v\n", globalSettings)
 	return nil
 }

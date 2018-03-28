@@ -460,7 +460,7 @@ func (adminport *Adminport) doViewDefaultReplicationSettingsRequest(request *htt
 		return nil, err
 	}
 	// default process settings
-	defaultProcessSetting, err := GlobalSettingsService().GetDefaultGlobalSettings()
+	defaultProcessSetting, err := GlobalSettingsService().GetGlobalSettings()
 
 	if err != nil {
 		return nil, err
@@ -502,7 +502,7 @@ func (adminport *Adminport) doChangeDefaultReplicationSettingsRequest(request *h
 	}
 
 	// default process settings
-	defaultProcessSetting, err := GlobalSettingsService().GetDefaultGlobalSettings()
+	defaultProcessSetting, err := GlobalSettingsService().GetGlobalSettings()
 
 	if err != nil {
 		return nil, err

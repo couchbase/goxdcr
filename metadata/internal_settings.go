@@ -421,7 +421,6 @@ func (s *InternalSettings) Clone() *InternalSettings {
 
 func (s *InternalSettings) PostProcessAfterUnmarshalling() {
 	s.Settings.PostProcessAfterUnmarshalling(GetInternalSettingsConfigMap)
-	s.HandleUpgrade()
 }
 
 func ValidateAndConvertXDCRInternalSettingsValue(key, value string) (interface{}, error) {
@@ -445,8 +444,6 @@ func ConstructInternalSettingsFromV1Settings(v1Settings *V1InternalSettings) *In
 	s.Values[CapiReadTimeoutKey] = v1Settings.CapiReadTimeout
 	s.Values[MaxCheckpointRecordsToKeepKey] = v1Settings.MaxCheckpointRecordsToKeep
 	s.Values[MaxCheckpointRecordsToReadKey] = v1Settings.MaxCheckpointRecordsToRead
-
-	s.HandleUpgrade()
 
 	return s
 }

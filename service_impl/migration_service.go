@@ -457,27 +457,14 @@ func (service *MigrationSvc) migrateReplicationSettings(replicationSettingsData 
 		return InvalidIntValue, InvalidIntValue, fatalErrorList
 	}
 
-	defaultSettings, err := service.replication_settings_svc.GetDefaultReplicationSettings()
+	_, errorMap, err := service.replication_settings_svc.UpdateDefaultReplicationSettings(settingsMap)
 	if err != nil {
 		fatalErrorList = append(fatalErrorList, err)
 		return InvalidIntValue, InvalidIntValue, fatalErrorList
 	}
 
-	changedSettingsMap, errorMap := defaultSettings.UpdateSettingsFromMap(settingsMap)
-
-	fatalErrorList = addErrorMapToErrorList(errorMap, fatalErrorList)
-	if len(fatalErrorList) > 0 {
-		return InvalidIntValue, InvalidIntValue, fatalErrorList
-	}
-
-	if len(changedSettingsMap) == 0 {
-		// no op if no real changes
-		return workerProcesses, maxConcurrentReps, fatalErrorList
-	}
-
-	err = service.replication_settings_svc.SetDefaultReplicationSettings(defaultSettings)
-	if err != nil {
-		fatalErrorList = append(fatalErrorList, err)
+	if len(errorMap) > 0 {
+		fatalErrorList = addErrorMapToErrorList(errorMap, fatalErrorList)
 		return InvalidIntValue, InvalidIntValue, fatalErrorList
 	}
 

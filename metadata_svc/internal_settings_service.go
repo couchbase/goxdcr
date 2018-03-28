@@ -38,32 +38,49 @@ func NewInternalSettingsSvc(metadata_svc service_def.MetadataSvc, logger_ctx *lo
 		logger:       log.NewLogger("IntSettSvc", logger_ctx),
 	}
 
-	service.internalSettingsMtx.Lock()
-	defer service.internalSettingsMtx.Unlock()
-	// initializes the cached internal_settings object, which can be used to determine if any change has been made to it later
-	service.internal_settings, _ = service.getInternalSettingsFromMetakv(true /*useDefaultSettingsAtError*/)
+	service.initializeInternalSettings()
 	return service
 }
 
-// this method returns
-// 1. (internal settings, nil) when it successfully retrieves internal settings from metakv,
-// 2. (default internal settings, nil) when it cannot find internal settings in metakv
-// 3. (default internal settings, nil) when it encounters a non-MetadataNotFoundErr error from metakv, and useDefaultSettingsAtError is true
-// 4. (nil, err) when it encounters a non-MetadataNotFoundErr error from metakv, and useDefaultSettingsAtError is false
-// this method never returns non-nil err when useDefaultSettingsAtError is true
-func (service *InternalSettingsSvc) getInternalSettingsFromMetakv(useDefaultSettingsAtError bool) (*metadata.InternalSettings, error) {
+// initializes the cached internal_settings object, which can be used to determine if any change has been made to it later
+func (service *InternalSettingsSvc) initializeInternalSettings() {
+	service.internalSettingsMtx.Lock()
+	defer service.internalSettingsMtx.Unlock()
+
+	internal_settings, err := service.getInternalSettings(true /*populateDefault*/)
+	if err == nil {
+		service.internal_settings = internal_settings
+	} else {
+		service.logger.Warnf("%v. Use default values instead.", err)
+		service.internal_settings = metadata.DefaultInternalSettings()
+	}
+}
+
+// getter for internal settings
+// if populateDefault is false, it simple returns the settings values in metakv, which could be empty
+// this is nencessary when the retrieved internal settings will be used as the base for update
+// if populateDefault is true, it ensures that the values for all settings keys are populated
+func (service *InternalSettingsSvc) getInternalSettings(populateDefault bool) (*metadata.InternalSettings, error) {
+	internal_settings, err := service.getInternalSettingsFromMetakv()
+	if err != nil {
+		return nil, err
+	}
+	if populateDefault {
+		internal_settings.PopulateDefault()
+	}
+	return internal_settings, nil
+}
+
+// retrieves internal settings from metakv
+// returns empty internal settings if not found in metakv
+func (service *InternalSettingsSvc) getInternalSettingsFromMetakv() (*metadata.InternalSettings, error) {
 	// first try to read new internal settings from metakv
 	internal_settings, err := service.getV2InternalSettings()
 	if err == nil {
 		return internal_settings, nil
 	} else if err != service_def.MetadataNotFoundErr {
-		if useDefaultSettingsAtError {
-			service.logger.Warnf("Error retrieving v2 internal settings. err = %v. Using default values", err)
-			return metadata.DefaultInternalSettings(), nil
-		} else {
-			service.logger.Warnf("Error retrieving v2 internal settings. err = %v.", err)
-			return nil, err
-		}
+		service.logger.Warnf("Error retrieving internal settings. err = %v.", err)
+		return nil, err
 	}
 
 	// err == service_def.MetadataNotFoundErr
@@ -74,16 +91,11 @@ func (service *InternalSettingsSvc) getInternalSettingsFromMetakv(useDefaultSett
 		return internal_settings, nil
 	} else {
 		if err == service_def.MetadataNotFoundErr {
-			service.logger.Info("Internal settings not found. Using default values")
-			return metadata.DefaultInternalSettings(), nil
+			service.logger.Info("Internal settings not found in metakv")
+			return metadata.EmptyInternalSettings(), nil
 		} else {
-			if useDefaultSettingsAtError {
-				service.logger.Warnf("Error retrieving v1 internal settings. err = %v. Using default values", err)
-				return metadata.DefaultInternalSettings(), nil
-			} else {
-				service.logger.Warnf("Error retrieving v1 internal settings. err = %v.", err)
-				return nil, err
-			}
+			service.logger.Warnf("Error retrieving v1 internal settings. err = %v.", err)
+			return nil, err
 		}
 	}
 }
@@ -130,9 +142,9 @@ func (service *InternalSettingsSvc) UpdateInternalSettings(settingsMap map[strin
 	defer service.internalSettingsMtx.Unlock()
 	// cannot use service.internal_settings as the base since it could have been default internal settings
 	// retrieve from metakv to be sure that the base is correct
-	internal_settings, err := service.getInternalSettingsFromMetakv(false /*useDefaultSettingsAtError*/)
+	internal_settings, err := service.getInternalSettings(false /*populateDefault*/)
 	if err != nil {
-		service.logger.Warnf("Skipping update to internal settings because of error retrieving current internal settings. err=%v", err)
+		service.logger.Warnf("Skipped update to internal settings because of error retrieving current internal settings. err=%v", err)
 		return nil, nil, err
 	}
 
@@ -154,6 +166,8 @@ func (service *InternalSettingsSvc) UpdateInternalSettings(settingsMap map[strin
 		service.logger.Infof("Skipped update to internal settings since there have been no real changes.")
 	}
 
+	// this is necessary for all settings values to be shown in rest api response
+	internal_settings.PopulateDefault()
 	return internal_settings, nil, nil
 }
 
@@ -223,6 +237,8 @@ func (service *InternalSettingsSvc) InternalSettingsServiceCallback(path string,
 			service.logger.Errorf("Error marshaling Internal Settings Object. value=%v, err=%v\n", string(value), err)
 			return nil
 		}
+		// this is necessary for change detection to work correctly
+		internal_settings.PopulateDefault()
 	}
 
 	if service.metadata_change_callback != nil {
