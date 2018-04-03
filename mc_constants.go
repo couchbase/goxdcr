@@ -151,7 +151,6 @@ const (
 
 var isFatal = map[Status]bool{
 	DELTA_BADVAL:   true,
-	NOT_MY_VBUCKET: true,
 	NO_BUCKET:      true,
 	AUTH_STALE:     true,
 	AUTH_ERROR:     true,
