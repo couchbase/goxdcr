@@ -104,6 +104,11 @@ func Connect(prot, dest string) (rv *Client, err error) {
 	return Wrap(conn)
 }
 
+func SetDefaultTimeouts(dail, read, write time.Duration) {
+	DefaultDialTimeout = dail
+	DefaultWriteTimeout = write
+}
+
 func (c *Client) SetKeepAliveOptions(interval time.Duration) {
 	c.conn.(*net.TCPConn).SetKeepAlive(true)
 	c.conn.(*net.TCPConn).SetKeepAlivePeriod(interval)
