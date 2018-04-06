@@ -9,7 +9,7 @@
                    "enabled" : true,
                    "mandatory_fields" : {
                                          "timestamp" : "",
-                                         "real_userid" : {"source" : "", "user" : ""},
+                                         "real_userid" : {"domain" : "", "user" : ""},
 					 "cluster_name" : "",
 					 "cluster_hostname" : "",
 					 "is_encrypted" : true,
@@ -24,7 +24,7 @@
                    "enabled" : true,
                    "mandatory_fields" : {
                                          "timestamp" : "",
-                                         "real_userid" : {"source" : "", "user" : ""},
+                                         "real_userid" : {"domain" : "", "user" : ""},
 					 "cluster_name" : "",
                                          "cluster_hostname" : "",
                                          "is_encrypted" : true,
@@ -39,7 +39,7 @@
                    "enabled" : true,
                    "mandatory_fields" : {
                                          "timestamp" : "",
-                                         "real_userid" : {"source" : "", "user" : ""},
+                                         "real_userid" : {"domain" : "", "user" : ""},
                                          "cluster_name" : "",
                                          "cluster_hostname" : "",
                                          "is_encrypted" : true,
@@ -54,7 +54,7 @@
                    "enabled" : true,
                    "mandatory_fields" : {
                                          "timestamp" : "",
-                                         "real_userid" : {"source" : "", "user" : ""},
+                                         "real_userid" : {"domain" : "", "user" : ""},
 					 "local_cluster_name" : "",
 					 "source_bucket_name" : "",
 					 "remote_cluster_name" : "",
@@ -71,7 +71,7 @@
                    "enabled" : true,
                    "mandatory_fields" : {
                                          "timestamp" : "",
-                   			 "real_userid" : {"source" : "", "user" : ""},
+                                         "real_userid" : {"domain" : "", "user" : ""},
 					 "local_cluster_name" : "",
                                          "source_bucket_name" : "",
                                          "remote_cluster_name" : "",
@@ -86,11 +86,11 @@
                    "enabled" : true,
                    "mandatory_fields" : {
                                          "timestamp" : "",
-                                         "real_userid" : {"source" : "", "user" : ""},
+                                         "real_userid" : {"domain" : "", "user" : ""},
                                          "local_cluster_name" : "",
 					 "source_bucket_name" : "",
                                          "remote_cluster_name" : "",
-                                         "target_bucket_name" : ""  
+                                         "target_bucket_name" : ""
                                         },
                    "optional_fields" : {}
                 },
@@ -101,11 +101,11 @@
                    "enabled" : true,
                    "mandatory_fields" : {
                                          "timestamp" : "",
-                                         "real_userid" : {"source" : "", "user" : ""},
-					 "local_cluster_name" : "",                                         
+                                         "real_userid" : {"domain" : "", "user" : ""},
+					 "local_cluster_name" : "",
 					 "source_bucket_name" : "",
                                          "remote_cluster_name" : "",
-                                         "target_bucket_name" : "" 
+                                         "target_bucket_name" : ""
                                         },
                    "optional_fields" : {}
                 },
@@ -116,7 +116,7 @@
                    "enabled" : true,
                    "mandatory_fields" : {
                                          "timestamp" : "",
-                                         "real_userid" : {"source" : "", "user" : ""},
+                                         "real_userid" : {"domain" : "", "user" : ""},
 					 "local_cluster_name" : "",
 					 "updated_settings" : {}
  					},
@@ -129,9 +129,9 @@
                    "enabled" : true,
                    "mandatory_fields" : {
                                          "timestamp" : "",
-                                         "real_userid" : {"source" : "", "user" : ""},
-					 "local_cluster_name" : "",                                         
-				         "source_bucket_name" : "",
+                                         "real_userid" : {"domain" : "", "user" : ""},
+                                         "local_cluster_name" : "",
+                                         "source_bucket_name" : "",
                                          "remote_cluster_name" : "",
                                          "target_bucket_name" : "" ,
 					 "updated_settings" : {}
@@ -145,7 +145,7 @@
                    "enabled" : true,
                    "mandatory_fields" : {
                                          "timestamp" : "",
-                                         "real_userid" : {"source" : "", "user" : ""},
+                                         "real_userid" : {"domain" : "", "user" : ""},
                                          "bucket_name" : "",
                                          "updated_settings" : {}
                                         },
