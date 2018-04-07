@@ -268,13 +268,18 @@ func (c *Client) Get(vb uint16, key string) (*gomemcached.MCResponse, error) {
 func (c *Client) GetSubdoc(vb uint16, key string, subPaths []string) (*gomemcached.MCResponse, error) {
 
 	extraBuf, valueBuf := GetSubDocVal(subPaths)
-	return c.Send(&gomemcached.MCRequest{
+	res, err := c.Send(&gomemcached.MCRequest{
 		Opcode:  gomemcached.SUBDOC_MULTI_LOOKUP,
 		VBucket: vb,
 		Key:     []byte(key),
 		Extras:  extraBuf,
 		Body:    valueBuf,
 	})
+
+	if err != nil && IfResStatusError(res) {
+		return res, err
+	}
+	return res, nil
 }
 
 // Get the value for a key, and update expiry
@@ -555,11 +560,9 @@ func (c *Client) GetBulk(vb uint16, keys []string, rv map[string]*gomemcached.MC
 				return
 			default:
 				res, err := c.Receive()
-				if err != nil &&
-					res.Status != gomemcached.SUBDOC_BAD_MULTI &&
-					res.Status != gomemcached.SUBDOC_PATH_NOT_FOUND &&
-					res.Status != gomemcached.SUBDOC_MULTI_PATH_FAILURE_DELETED {
-					if res.Status != gomemcached.KEY_ENOENT {
+
+				if err != nil && IfResStatusError(res) {
+					if res == nil || res.Status != gomemcached.KEY_ENOENT {
 						errch <- err
 						return
 					}
@@ -1051,4 +1054,11 @@ func (c *Client) setHealthy(healthy bool) {
 		healthyState = Healthy
 	}
 	atomic.StoreUint32(&c.healthy, healthyState)
+}
+
+func IfResStatusError(response *gomemcached.MCResponse) bool {
+	return response == nil ||
+		(response.Status != gomemcached.SUBDOC_BAD_MULTI &&
+			response.Status != gomemcached.SUBDOC_PATH_NOT_FOUND &&
+			response.Status != gomemcached.SUBDOC_MULTI_PATH_FAILURE_DELETED)
 }
