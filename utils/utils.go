@@ -1945,28 +1945,16 @@ func (u *Utilities) queryRestApiWithScramShaAuth(
 	}
 
 	res, err := scramsha.DoScramSha(req, username, password, client)
+	statusCode := 0
+	if res != nil {
+		statusCode = res.StatusCode
+	}
 	if err != nil {
-		statusCode := 0
-		if res != nil {
-			statusCode = res.StatusCode
-		}
 		return fmt.Errorf("Received error when making SCRAM-SHA connection. baseURL=%v, path=%v, err=%v", baseURL, path, err), statusCode, client
 	}
 
-	if res != nil && res.StatusCode != http.StatusOK {
-		// make sure that response body is read and closed
-		u.parseResponseBody(res, out, logger)
-		err = fmt.Errorf("Received unexpected status code when making SCRAM-SHA connection. baseURL=%v, path=%v, statusCode=%v", baseURL, path, res.StatusCode)
-		logger.Warnf("%v res=%v%v%v\n", err, base.UdTagBegin, res, base.UdTagEnd)
-		return err, res.StatusCode, client
-	}
-
 	err = u.parseResponseBody(res, out, logger)
-	if err != nil {
-		return err, res.StatusCode, client
-	}
-
-	return nil, res.StatusCode, client
+	return err, statusCode, client
 
 }
 
