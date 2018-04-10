@@ -88,6 +88,8 @@ func (rsv *ReplicationSpecVal) CloneAndRedact() CacheableMetadataObj {
 	return rsv
 }
 
+type specGCMap map[string]int
+
 type ReplicationSpecService struct {
 	xdcr_comp_topology_svc   service_def.XDCRCompTopologySvc
 	metadata_svc             service_def.MetadataSvc
@@ -99,6 +101,11 @@ type ReplicationSpecService struct {
 	logger                   *log.CommonLogger
 	metadata_change_callback base.MetadataChangeHandlerCallback
 	utils                    utilities.UtilsIface
+
+	// Replication Spec GC Counters
+	gcMtx    sync.Mutex
+	srcGcMap specGCMap
+	tgtGcMap specGCMap
 }
 
 func NewReplicationSpecService(uilog_svc service_def.UILogSvc, remote_cluster_svc service_def.RemoteClusterSvc,
@@ -115,6 +122,8 @@ func NewReplicationSpecService(uilog_svc service_def.UILogSvc, remote_cluster_sv
 		cache_lock:             &sync.Mutex{},
 		logger:                 logger,
 		utils:                  utilities_in,
+		srcGcMap:               make(specGCMap),
+		tgtGcMap:               make(specGCMap),
 	}
 
 	return svc, svc.initCacheFromMetaKV()
@@ -803,6 +812,23 @@ func (service *ReplicationSpecService) AllReplicationSpecIdsForBucket(bucket str
 	return repIds, nil
 }
 
+func (service *ReplicationSpecService) AllReplicationSpecIdsForTargetBucket(bucket string) ([]string, error) {
+	var repIds []string
+	allRepIds, err := service.AllReplicationSpecIds()
+	if err != nil {
+		return nil, err
+	}
+
+	for _, repId := range allRepIds {
+		// there should not be any errors since allRepIds should contain valid replication ids
+		match, _ := metadata.IsReplicationIdForTargetBucket(repId, bucket)
+		if match {
+			repIds = append(repIds, repId)
+		}
+	}
+	return repIds, nil
+}
+
 func (service *ReplicationSpecService) removeSpecFromCache(specId string) error {
 	//soft remove it from cache by setting SpecVal.spec = nil, but keep the key there
 	//so that the derived object can still be retrieved and be acted on for cleaning-up.
@@ -887,6 +913,13 @@ func (service *ReplicationSpecService) updateCache(specId string, newSpec *metad
 
 	oldSpec, updated, err := service.updateCacheInternalNoLock(specId, newSpec)
 
+	if updated && oldSpec != nil && newSpec == nil {
+		service.gcMtx.Lock()
+		delete(service.srcGcMap, oldSpec.Id)
+		delete(service.tgtGcMap, oldSpec.Id)
+		service.gcMtx.Unlock()
+	}
+
 	if updated && service.metadata_change_callback != nil {
 		err = service.metadata_change_callback(specId, oldSpec, newSpec)
 		if err != nil {
@@ -943,75 +976,139 @@ func (service *ReplicationSpecService) getReplicationIdFromKey(key string) strin
 	return key[len(prefix):]
 }
 
-func (service *ReplicationSpecService) validateExistingReplicationSpec(spec *metadata.ReplicationSpecification) (error, error) {
-	//validate the existence of source bucket
-	local_connStr, _ := service.xdcr_comp_topology_svc.MyConnectionStr()
-	if local_connStr == "" {
-		err := fmt.Errorf("XDCRTopologySvc.MyConnectionStr() returned empty string when validating spec %v", spec.Id)
-		return err, err
+func getBucketMissingError(bucketName string) error {
+	return fmt.Errorf("Bucket %v has been missing for %v times", bucketName, base.ReplicationSpecGCCnt)
+}
+
+func getBucketChangedError(bucketName, origUUID, newUUID string) error {
+	return fmt.Errorf("Bucket %v UUID has changed from %v to %v, indicating a bucket deletion and recreation", bucketName, origUUID, newUUID)
+}
+
+// Returns true if GC count hits the max
+func (service *ReplicationSpecService) incrementGCCnt(gcMap specGCMap, specId string) bool {
+	service.gcMtx.Lock()
+	defer service.gcMtx.Unlock()
+	gcMap[specId]++
+	if gcMap[specId] >= base.ReplicationSpecGCCnt {
+		return true
 	}
-	sourceBucketUuid, err_source := service.utils.LocalBucketUUID(local_connStr, spec.SourceBucketName, service.logger)
+	return false
+}
 
-	if err_source != nil {
-		if err_source == service.utils.GetNonExistentBucketError() {
-			/* When we get NonExistentBucketError, there are two possibilities:
-			1. the source bucket has been deleted.
-			2. the source node is not accessible.
+// Returns true if need to delete the spec, and a non-nil error along with it for the reason why
+func (service *ReplicationSpecService) gcTargetBucket(spec *metadata.ReplicationSpecification) (bool, error) {
+	if spec == nil {
+		return false, base.ErrorInvalidInput
+	}
 
-			We need to make an additional call to retrieve a list of buckets from source cluster
-			A. if the call returns successfully and shows that the source bucket is no longer in bucket list, it is case #1
-			It is safe to delete replication spec in this case.
-			B. if the call returns successfully and shows that the source bucket is still in bucket list, we can use the new info
-			retrieved to continue source bucket validation
-			C. if the call does not return sucessfully, we have to play safe and skip the current round of source bucket check */
-			buckets, err := service.utils.GetLocalBuckets(local_connStr, service.logger)
-			if err == nil {
-				foundSourceBucket := false
-				for bucketName, bucketUuid := range buckets {
-					if bucketName == spec.SourceBucketName {
-						foundSourceBucket = true
-						sourceBucketUuid = bucketUuid
-						break
-					}
-				}
-				if !foundSourceBucket {
-					// case 1, delete repl spec
-					errMsg := fmt.Sprintf("spec %v refers to non-existent source bucket \"%v\"", spec.Id, spec.SourceBucketName)
-					service.logger.Warn(errMsg)
-					return InvalidReplicationSpecError, errors.New(errMsg)
-				}
-				// if source bucket is found, we have already populated sourceBucketUuid accordingly
-				// continue with source bucket validation
-			} else {
-				// case 2, source node inaccessible. skip source bucket check
-				errMsg := fmt.Sprintf("Skipping source bucket check for spec %v since source node %v is not accessible. err=%v", spec.Id, local_connStr, err)
-				service.logger.Warn(errMsg)
-				err = errors.New(errMsg)
-				return err, err
-			}
-		} else {
-			errMsg := fmt.Sprintf("Skipping source bucket check for spec %v since failed to get bucket infor for %v. err=%v", spec.Id, spec.SourceBucketName, err_source)
-			service.logger.Warn(errMsg)
-			err := errors.New(errMsg)
-			return err, err
+	ref, err := service.remote_cluster_svc.RemoteClusterByUuid(spec.TargetClusterUUID, false /*refresh*/)
+	if err != nil {
+		service.logger.Warnf("Unable to retrieve reference from spec %v due to %v", spec.Id, err.Error())
+		return false, err
+	}
+
+	connStr, err := ref.MyConnectionStr()
+	if err != nil {
+		service.logger.Warnf("Unable to retrieve connStr for reference %v due to %v", ref, err)
+		return false, err
+	}
+
+	username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, err := ref.MyCredentials()
+	if err != nil {
+		service.logger.Warnf("Unable to retrieve credentials for reference %v due to %v", ref.Name, err.Error())
+		return false, err
+	}
+
+	bucketInfo, err := service.utils.GetBucketInfo(connStr, spec.TargetBucketName, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, service.logger)
+	if err == service.utils.GetNonExistentBucketError() {
+		shouldDel := service.incrementGCCnt(service.tgtGcMap, spec.Id)
+		if shouldDel {
+			err = getBucketMissingError(spec.TargetBucketName)
+			return shouldDel, err
+		}
+	} else {
+		service.gcMtx.Lock()
+		service.tgtGcMap[spec.Id] = 0
+		service.gcMtx.Unlock()
+	}
+	if err != nil {
+		service.logger.Warnf("Unable to retrieve bucket info for target bucket %v due to err: %v", spec.TargetBucketName, err.Error())
+		return false, err
+	}
+
+	if spec.TargetBucketUUID != "" {
+		extractedUuid, err := service.utils.GetBucketUuidFromBucketInfo(spec.TargetBucketName, bucketInfo, service.logger)
+		if err != nil {
+			service.logger.Warnf("Unable to check target bucket %v UUID due to %v", spec.TargetBucketName, err.Error())
+			return false, err
+		}
+
+		if extractedUuid != spec.TargetBucketUUID {
+			return true, getBucketChangedError(spec.TargetBucketName, spec.TargetBucketUUID, extractedUuid)
 		}
 	}
 
-	if spec.SourceBucketUUID != "" && sourceBucketUuid != "" && spec.SourceBucketUUID != sourceBucketUuid {
-		errMsg := fmt.Sprintf("spec %v refers to bucket %v which was deleted and recreated", spec.Id, spec.SourceBucketName)
-		service.logger.Error(errMsg)
-		return InvalidReplicationSpecError, errors.New(errMsg)
+	return false, nil
+}
+
+// Returns true if need to delete the spec, and a non-nil error along with it for the reason why
+func (service *ReplicationSpecService) gcSourceBucket(spec *metadata.ReplicationSpecification) (bool, error) {
+	if spec == nil {
+		return false, base.ErrorInvalidInput
 	}
 
-	return nil, nil
+	local_connStr, _ := service.xdcr_comp_topology_svc.MyConnectionStr()
+	if local_connStr == "" {
+		err := fmt.Errorf("XDCRTopologySvc.MyConnectionStr() returned empty string when validating spec %v", spec.Id)
+		return false, err
+	}
+
+	username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, err := service.xdcr_comp_topology_svc.MyCredentials()
+	if err != nil {
+		service.logger.Warnf("Unable to retrieve credentials due to %v", err.Error())
+		return false, err
+	}
+
+	bucketInfo, err := service.utils.GetBucketInfo(local_connStr, spec.SourceBucketName, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, service.logger)
+	if err == service.utils.GetNonExistentBucketError() {
+		shouldDel := service.incrementGCCnt(service.srcGcMap, spec.Id)
+		if shouldDel {
+			err = getBucketMissingError(spec.SourceBucketName)
+			return shouldDel, err
+		}
+	} else {
+		service.gcMtx.Lock()
+		service.srcGcMap[spec.Id] = 0
+		service.gcMtx.Unlock()
+	}
+	if err != nil {
+		service.logger.Warnf("Unable to retrieve bucket info for source bucket %v due to %v", spec.SourceBucketName, err.Error())
+		return false, err
+	}
+
+	if spec.SourceBucketUUID != "" {
+		extractedUuid, err := service.utils.GetBucketUuidFromBucketInfo(spec.SourceBucketName, bucketInfo, service.logger)
+		if err != nil {
+			service.logger.Warnf("Unable to check source bucket %v UUID due to %v", spec.SourceBucketName, err.Error())
+			return false, err
+		}
+
+		if extractedUuid != spec.SourceBucketUUID {
+			return true, getBucketChangedError(spec.SourceBucketName, spec.SourceBucketUUID, extractedUuid)
+		}
+	}
+	return false, nil
 }
 
 func (service *ReplicationSpecService) ValidateAndGC(spec *metadata.ReplicationSpecification) {
-	err, detail_err := service.validateExistingReplicationSpec(spec)
+	needToRemove, detailErr := service.gcSourceBucket(spec)
+	if !needToRemove {
+		needToRemove, detailErr = service.gcTargetBucket(spec)
+	}
 
-	if err == InvalidReplicationSpecError {
-		service.logger.Errorf("Replication specification %v is no longer valid, garbage collect it. error=%v\n", spec.Id, detail_err)
-		_, err1 := service.DelReplicationSpecWithReason(spec.Id, detail_err.Error())
+	if needToRemove {
+		service.logger.Errorf("Replication specification %v is no longer valid, garbage collect it. error=%v\n", spec.Id, detailErr)
+		_, err1 := service.DelReplicationSpecWithReason(spec.Id, detailErr.Error())
 		if err1 != nil {
 			service.logger.Infof("Failed to garbage collect spec %v, err=%v\n", spec.Id, err1)
 		}

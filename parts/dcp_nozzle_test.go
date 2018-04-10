@@ -63,6 +63,7 @@ func setupUprFeedGeneric(uprFeed *mcMock.UprFeedIface) {
 	uprFeed.On("UprRequestStream", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything,
 		mock.Anything, mock.Anything, mock.Anything).Return(nil)
 	uprFeed.On("Close").Return(nil)
+	uprFeed.On("ClientAck", mock.Anything).Return(nil)
 }
 
 func setupUprFeedMock(uprFeed *mcMock.UprFeedIface) {

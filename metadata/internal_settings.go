@@ -142,6 +142,8 @@ const (
 	XmemDefaultRespTimeoutKey = "XmemDefaultRespTimeout"
 	// when set to 1, bypass san in certificate check in ssl connections
 	BypassSanInCertificateCheckKey = "BypassSanInCertificateCheck"
+	// Number of times to verify bucket is missing before removing an invalid replicationSpec
+	ReplicationSpecGCCntKey = "ReplicationSpecGCCnt"
 )
 
 var TopologyChangeCheckIntervalConfig = &SettingsConfig{10, &Range{1, 100}}
@@ -197,6 +199,7 @@ var ThresholdForThroughSeqnoComputationConfig = &SettingsConfig{100, &Range{1, 6
 var StatsLogIntervalConfig = &SettingsConfig{30, &Range{1, 36000}}
 var XmemDefaultRespTimeoutConfig = &SettingsConfig{1000, &Range{1, 3600000}}
 var BypassSanInCertificateCheckConfig = &SettingsConfig{0, &Range{0, 1}}
+var ReplicationSpecGCCntConfig = &SettingsConfig{4, &Range{1, 100}}
 
 var XDCRInternalSettingsConfigMap = map[string]*SettingsConfig{
 	TopologyChangeCheckIntervalKey:                TopologyChangeCheckIntervalConfig,
@@ -252,6 +255,7 @@ var XDCRInternalSettingsConfigMap = map[string]*SettingsConfig{
 	StatsLogIntervalKey:                           StatsLogIntervalConfig,
 	XmemDefaultRespTimeoutKey:                     XmemDefaultRespTimeoutConfig,
 	BypassSanInCertificateCheckKey:                BypassSanInCertificateCheckConfig,
+	ReplicationSpecGCCntKey:                       ReplicationSpecGCCntConfig,
 }
 
 type InternalSettings struct {

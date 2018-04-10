@@ -662,6 +662,9 @@ var TimeBetweenMetaKVGetOps = time.Duration(500) * time.Millisecond
 // when set to true, bypass san in certificate check in ssl connections
 var BypassSanInCertificateCheck bool = false
 
+// Number of times to verify bucket is missing before removing an invalid replicationSpec
+var ReplicationSpecGCCnt int = 4
+
 func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeCountBeforeRestart,
 	maxTopologyStableCountBeforeRestart, maxWorkersForCheckpointing int,
 	timeoutCheckpointBeforeStop time.Duration, capiDataChanSizeMultiplier int,
@@ -688,7 +691,8 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	waitTimeBetweenMetadataChangeListeners time.Duration, keepAlivePeriod time.Duration,
 	thresholdPercentageForEventChanSizeLogging int, thresholdForThroughSeqnoComputation time.Duration,
 	statsLogInterval time.Duration, xmemDefaultRespTimeout time.Duration,
-	bypassSanInCertificateCheck int) {
+	bypassSanInCertificateCheck int,
+	replicationSpecGCCnt int) {
 	TopologyChangeCheckInterval = topologyChangeCheckInterval
 	MaxTopologyChangeCountBeforeRestart = maxTopologyChangeCountBeforeRestart
 	MaxTopologyStableCountBeforeRestart = maxTopologyStableCountBeforeRestart
@@ -749,4 +753,5 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	if !BypassSanInCertificateCheck /* If set to true in the source code, honor it */ {
 		BypassSanInCertificateCheck = (bypassSanInCertificateCheck != 0)
 	}
+	ReplicationSpecGCCnt = replicationSpecGCCnt
 }

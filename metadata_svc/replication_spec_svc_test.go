@@ -109,6 +109,7 @@ func setupMocks(srcResolutionType string,
 
 	// RemoteClusterSvc mock
 	remoteClusterMock.On("GetRemoteClusterNameFromClusterUuid", mock.Anything).Return("TestRemoteCluster")
+	remoteClusterMock.On("RemoteClusterByRefId", mock.Anything, mock.Anything).Return(nil, nil)
 
 	// UI Log mock service
 	uiLogSvcMock.On("Write", mock.Anything).Return(nil)

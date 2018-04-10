@@ -124,10 +124,28 @@ func IsReplicationIdForSourceBucket(replicationId string, sourceBucketName strin
 	}
 }
 
+func IsReplicationIdForTargetBucket(replicationId string, targetBucketName string) (bool, error) {
+	replBucketName, err := GetTargetBucketNameFromReplicationId(replicationId)
+	if err != nil {
+		return false, err
+	} else {
+		return replBucketName == targetBucketName, nil
+	}
+}
+
 func GetSourceBucketNameFromReplicationId(replicationId string) (string, error) {
 	parts := strings.Split(replicationId, base.KeyPartsDelimiter)
 	if len(parts) == 3 {
 		return parts[1], nil
+	} else {
+		return "", fmt.Errorf("Invalid replication id: %v", replicationId)
+	}
+}
+
+func GetTargetBucketNameFromReplicationId(replicationId string) (string, error) {
+	parts := strings.Split(replicationId, base.KeyPartsDelimiter)
+	if len(parts) == 3 {
+		return parts[2], nil
 	} else {
 		return "", fmt.Errorf("Invalid replication id: %v", replicationId)
 	}

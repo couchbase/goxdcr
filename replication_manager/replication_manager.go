@@ -254,6 +254,7 @@ func initConstants(xdcr_topology_svc service_def.XDCRCompTopologySvc, internal_s
 		time.Duration(internal_settings.Values[metadata.StatsLogIntervalKey].(int))*time.Second,
 		time.Duration(internal_settings.Values[metadata.XmemDefaultRespTimeoutKey].(int))*time.Millisecond,
 		internal_settings.Values[metadata.BypassSanInCertificateCheckKey].(int),
+		internal_settings.Values[metadata.ReplicationSpecGCCntKey].(int),
 	)
 }
 
