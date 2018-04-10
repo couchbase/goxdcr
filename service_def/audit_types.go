@@ -86,7 +86,7 @@ type ReplicationSpecificFields struct {
 }
 
 type RealUserId struct {
-	Source   string `json:"source"`
+	Domain   string `json:"domain"`
 	Username string `json:"user"`
 }
 
