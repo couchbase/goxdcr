@@ -1874,8 +1874,8 @@ func (xmem *XmemNozzle) initialize(settings metadata.ReplicationSettingsMap) err
 	}
 
 	compressionVal, ok := settings[SETTING_COMPRESSION_TYPE]
-	if ok && (compressionVal.(int) != (int)(xmem.compressionSetting)) {
-		xmem.compressionSetting = base.GetCompressionType(compressionVal.(int))
+	if ok && (compressionVal.(base.CompressionType) != xmem.compressionSetting) {
+		xmem.compressionSetting = compressionVal.(base.CompressionType)
 	}
 
 	xmem.dataChan = make(chan *base.WrappedMCRequest, xmem.config.maxCount*10)

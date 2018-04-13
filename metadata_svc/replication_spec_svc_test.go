@@ -81,17 +81,43 @@ func setupMocks(srcResolutionType string,
 	replSpecSvc *ReplicationSpecService,
 	clientMock *mcMock.ClientIface,
 	isEnterprise bool,
-	isElasticSearch bool) {
+	isElasticSearch bool,
+	compressionPass bool) {
 
 	// RemoteClusterMock
-	mockRemoteClusterRef := &metadata.RemoteClusterReference{Uuid: "1"}
+	hostAddr := "localhost:9000"
+	mockRemoteClusterRef := &metadata.RemoteClusterReference{Uuid: "1", HostName: hostAddr}
 	remoteClusterMock.On("RemoteClusterByRefName", mock.Anything, mock.Anything).Return(mockRemoteClusterRef, nil)
+
+	// Compression features for utils mock
+	var fullFeatures utilities.HELOFeatures
+	fullFeatures.Xattribute = true
+	fullFeatures.CompressionType = base.CompressionTypeSnappy
+	var noCompressionFeature utilities.HELOFeatures
+	noCompressionFeature.Xattribute = true
+	noCompressionFeature.CompressionType = base.CompressionTypeNone
+	var respondFeatures utilities.HELOFeatures
+	respondFeatures.CompressionType = base.CompressionTypeSnappy
+	var respondNoFeatures utilities.HELOFeatures
+	respondNoFeatures.CompressionType = base.CompressionTypeNone
 
 	// Utilities mock
 	var port uint16 = 9000
-	hostAddr := "localhost:9000"
 	utilitiesMock.On("GetHostAddr", "localhost", port).Return(hostAddr)
+	//	utilitiesMock.On("GetMemcachedRawConn", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil, nil)
+	utilitiesMock.On("GetMemcachedRawConn", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(clientMock, nil)
+	if compressionPass {
+		utilitiesMock.On("SendHELOWithFeatures", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(fullFeatures, nil)
+		utilitiesMock.On("GetMemcachedConnectionWFeatures", mock.Anything, mock.Anything, mock.Anything,
+			mock.Anything, mock.Anything, mock.Anything).Return(clientMock, respondFeatures, nil)
+	} else {
+		utilitiesMock.On("SendHELOWithFeatures", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(noCompressionFeature, nil)
+		utilitiesMock.On("GetMemcachedConnectionWFeatures", mock.Anything, mock.Anything, mock.Anything,
+			mock.Anything, mock.Anything, mock.Anything).Return(clientMock, respondNoFeatures, nil)
+	}
 	myConnectionStr := base.GetHostAddr("localhost", port)
+	utilitiesMock.On("GetSecuritySettingsAndDefaultPoolInfo", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(false, nil, nil)
+	utilitiesMock.On("GetBucketPasswordFromBucketInfo", mock.Anything, mock.Anything, mock.Anything).Return("", nil)
 
 	var bucketInfo map[string]interface{}
 	bucketType := base.CouchbaseBucketType
@@ -121,11 +147,11 @@ func setupMocks(srcResolutionType string,
 
 	// LOCAL mock
 	utilitiesMock.On("BucketValidationInfo", hostAddr,
-		mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(bucketInfo,
+		mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(bucketInfo,
 		bucketType, bucketUUID, srcResolutionType, bucketEvictionPolicy, bucketKVVBMap, err)
 
 	// TARGET mock - emptyString since we're feeding a dummy target
-	utilitiesMock.On("RemoteBucketValidationInfo", "",
+	utilitiesMock.On("RemoteBucketValidationInfo", hostAddr,
 		mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(bucketInfo,
 		bucketType, bucketUUID, destResolutionType, bucketEvictionPolicy, bucketKVVBMap, err)
 
@@ -141,14 +167,6 @@ func setupMocks(srcResolutionType string,
 
 	// client mock
 	clientMock.On("Close").Return(nil)
-
-	var respondFeatures utilities.HELOFeatures
-	respondFeatures.CompressionType = base.CompressionTypeSnappy
-
-	utilitiesMock.On("GetMemcachedConnectionWFeatures", mock.Anything, mock.Anything, mock.Anything,
-		mock.Anything, mock.Anything, mock.Anything).Return(clientMock, respondFeatures, nil)
-	utilitiesMock.On("GetSecuritySettingsAndDefaultPoolInfo", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(false, nil, nil)
-	utilitiesMock.On("GetBucketPasswordFromBucketInfo", mock.Anything, mock.Anything, mock.Anything).Return("", nil)
 }
 
 /**
@@ -166,7 +184,7 @@ func TestValidateNewReplicationSpec(t *testing.T) {
 	setupMocks(base.ConflictResolutionType_Seqno, base.ConflictResolutionType_Seqno,
 		xdcrTopologyMock, metadataSvcMock, uiLogSvcMock, remoteClusterMock,
 		clusterInfoSvcMock, utilitiesMock, replSpecSvc, clientMock, true, /*IsEnterprise*/
-		false /*IsElastic*/)
+		false /*IsElastic*/, true /*CompressionPass*/)
 
 	// Assume XMEM replication type
 	settings[metadata.ReplicationType] = metadata.ReplicationTypeXmem
@@ -191,7 +209,7 @@ func TestNegativeConflictResolutionType(t *testing.T) {
 	setupMocks(base.ConflictResolutionType_Seqno, base.ConflictResolutionType_Lww,
 		xdcrTopologyMock, metadataSvcMock, uiLogSvcMock, remoteClusterMock,
 		clusterInfoSvcMock, utilitiesMock, replSpecSvc, clientMock, true, /*IsEnterprise*/
-		false /*IsElastic*/)
+		false /*IsElastic*/, true /*CompressionPass*/)
 
 	// Assume XMEM replication type
 	settings[metadata.ReplicationType] = metadata.ReplicationTypeXmem
@@ -217,7 +235,7 @@ func TestDifferentConflictResolutionTypeOnCapi(t *testing.T) {
 	setupMocks(base.ConflictResolutionType_Seqno, base.ConflictResolutionType_Lww,
 		xdcrTopologyMock, metadataSvcMock, uiLogSvcMock, remoteClusterMock,
 		clusterInfoSvcMock, utilitiesMock, replSpecSvc, clientMock, true, /*IsEnterprise*/
-		false /*IsElastic*/)
+		false /*IsElastic*/, false /*CompressionPass*/)
 
 	// Assume CAPI (elasticsearch) replication type
 	settings[metadata.ReplicationType] = metadata.ReplicationTypeCapi
@@ -240,7 +258,7 @@ func TestAddReplicationSpec(t *testing.T) {
 	setupMocks(base.ConflictResolutionType_Seqno, base.ConflictResolutionType_Lww,
 		xdcrTopologyMock, metadataSvcMock, uiLogSvcMock, remoteClusterMock,
 		clusterInfoSvcMock, utilitiesMock, replSpecSvc, clientMock, true, /*IsEnterprise*/
-		false /*IsElastic*/)
+		false /*IsElastic*/, true /*CompressionPass*/)
 
 	spec := &metadata.ReplicationSpecification{
 		Id:               "test",
@@ -274,13 +292,7 @@ func TestCompressionPositive(t *testing.T) {
 	setupMocks(base.ConflictResolutionType_Seqno, base.ConflictResolutionType_Seqno,
 		xdcrTopologyMock, metadataSvcMock, uiLogSvcMock, remoteClusterMock,
 		clusterInfoSvcMock, utilitiesMock, replSpecSvc, clientMock, true, /*IsEnterprise*/
-		false /*IsElastic*/)
-
-	var fullFeatures utilities.HELOFeatures
-	fullFeatures.Xattribute = true
-	fullFeatures.CompressionType = base.CompressionTypeSnappy
-	utilitiesMock.On("GetMemcachedRawConn", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(clientMock, nil)
-	utilitiesMock.On("SendHELOWithFeatures", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(fullFeatures, nil)
+		false /*IsElastic*/, true /*CompressionPass*/)
 
 	// Turning off should be allowed
 	settings[metadata.CompressionType] = base.CompressionTypeNone
@@ -306,13 +318,7 @@ func TestCompressionNegNotEnterprise(t *testing.T) {
 	setupMocks(base.ConflictResolutionType_Seqno, base.ConflictResolutionType_Seqno,
 		xdcrTopologyMock, metadataSvcMock, uiLogSvcMock, remoteClusterMock,
 		clusterInfoSvcMock, utilitiesMock, replSpecSvc, clientMock, false, /*Enterprise*/
-		false /*IsElastic*/)
-
-	var fullFeatures utilities.HELOFeatures
-	fullFeatures.Xattribute = true
-	fullFeatures.CompressionType = base.CompressionTypeSnappy
-	utilitiesMock.On("GetMemcachedRawConn", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(clientMock, nil)
-	utilitiesMock.On("SendHELOWithFeatures", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(fullFeatures, nil)
+		false /*IsElastic*/, true /*CompressionPass*/)
 
 	// Turning on should be disallowed
 	settings[metadata.CompressionType] = base.CompressionTypeSnappy
@@ -333,13 +339,7 @@ func TestCompressionNegCAPI(t *testing.T) {
 	setupMocks(base.ConflictResolutionType_Seqno, base.ConflictResolutionType_Seqno,
 		xdcrTopologyMock, metadataSvcMock, uiLogSvcMock, remoteClusterMock,
 		clusterInfoSvcMock, utilitiesMock, replSpecSvc, clientMock, false, /*Enterprise*/
-		false /*IsElastic*/)
-
-	var fullFeatures utilities.HELOFeatures
-	fullFeatures.Xattribute = true
-	fullFeatures.CompressionType = base.CompressionTypeSnappy
-	utilitiesMock.On("GetMemcachedRawConn", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(clientMock, nil)
-	utilitiesMock.On("SendHELOWithFeatures", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(fullFeatures, nil)
+		false /*IsElastic*/, false /*CompressionPass*/)
 
 	// Turning on should be disallowed
 	settings[metadata.CompressionType] = base.CompressionTypeSnappy
@@ -361,13 +361,7 @@ func TestCompressionNegNoSnappy(t *testing.T) {
 	setupMocks(base.ConflictResolutionType_Seqno, base.ConflictResolutionType_Seqno,
 		xdcrTopologyMock, metadataSvcMock, uiLogSvcMock, remoteClusterMock,
 		clusterInfoSvcMock, utilitiesMock, replSpecSvc, clientMock, true, /*IsEnterprise*/
-		false /*IsElastic*/)
-
-	var noCompressionFeature utilities.HELOFeatures
-	noCompressionFeature.Xattribute = true
-	noCompressionFeature.CompressionType = base.CompressionTypeNone
-	utilitiesMock.On("GetMemcachedRawConn", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(clientMock, nil)
-	utilitiesMock.On("SendHELOWithFeatures", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(noCompressionFeature, nil)
+		false /*IsElastic*/, false /*CompressionPass*/)
 
 	// Turning off should be allowed
 	settings[metadata.CompressionType] = base.CompressionTypeNone
@@ -378,6 +372,18 @@ func TestCompressionNegNoSnappy(t *testing.T) {
 	settings[metadata.CompressionType] = base.CompressionTypeSnappy
 	_, _, _, errMap, _, _ = replSpecSvc.ValidateNewReplicationSpec(sourceBucket, targetCluster, targetBucket, settings)
 	assert.NotEqual(len(errMap), 0)
+
+	// Setting to Auto should result in warning only, and no error
+	settings[metadata.CompressionType] = base.CompressionTypeAuto
+	_, _, _, errMap, _, warnings := replSpecSvc.ValidateNewReplicationSpec(sourceBucket, targetCluster, targetBucket, settings)
+	assert.Equal(len(errMap), 0)
+	assert.NotEqual(len(warnings), 0)
+
+	// Setting path should be allowed as well
+	settings[metadata.CompressionType] = base.CompressionTypeAuto
+	errMap, err := replSpecSvc.ValidateReplicationSettings(sourceBucket, targetCluster, targetBucket, settings)
+	errExists := len(errMap) > 0 || err != nil
+	assert.False(errExists)
 
 	fmt.Println("============== Test case end: TestCompressionNegNoSnappy =================")
 }
@@ -393,7 +399,7 @@ func TestElasticSearch(t *testing.T) {
 	setupMocks(base.ConflictResolutionType_Seqno, base.ConflictResolutionType_Seqno,
 		xdcrTopologyMock, metadataSvcMock, uiLogSvcMock, remoteClusterMock,
 		clusterInfoSvcMock, utilitiesMock, replSpecSvc, clientMock, true, /*IsEnterprise*/
-		true /*IsElastic*/)
+		true /*IsElastic*/, false /*CompressionPass*/)
 
 	// Xmem using elas
 	settings[metadata.ReplicationType] = metadata.ReplicationTypeXmem

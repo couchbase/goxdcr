@@ -52,7 +52,7 @@ func setupBoilerPlate() (*service_def.XDCRCompTopologySvc,
 	settingsMap[DCP_Stats_Interval] = 88888888
 
 	// Enable compression by default
-	settingsMap[SETTING_COMPRESSION_TYPE] = (int)(base.CompressionTypeSnappy)
+	settingsMap[SETTING_COMPRESSION_TYPE] = (base.CompressionType)(base.CompressionTypeSnappy)
 
 	return xdcrTopologyMock, utilitiesMock, nozzle, settingsMap, clientIface, uprfeedIface, vbTimestamp
 }
@@ -69,7 +69,7 @@ func setupUprFeedGeneric(uprFeed *mcMock.UprFeedIface) {
 func setupUprFeedMock(uprFeed *mcMock.UprFeedIface) {
 	var allFeaturesActivated mcReal.UprFeatures
 	allFeaturesActivated.Xattribute = true
-	allFeaturesActivated.CompressionType = 1
+	allFeaturesActivated.CompressionType = base.CompressionTypeSnappy
 	uprFeed.On("UprOpenWithXATTR", mock.Anything, mock.Anything, mock.Anything).Return(nil)
 	uprFeed.On("UprOpenWithFeatures", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil, allFeaturesActivated)
 	setupUprFeedGeneric(uprFeed)
@@ -96,6 +96,7 @@ func feedEventToReceiver(eventCh chan *mcReal.UprEvent, event *mcReal.UprEvent) 
 func uprFeedChanWrapper(uprFeed *mcMock.UprFeedIface, eventCh <-chan *mcReal.UprEvent) {
 	uprFeed.On("GetUprEventCh").Return(eventCh)
 	uprFeed.On("Close").Return(nil)
+	uprFeed.On("ClientAck", mock.Anything).Return(nil)
 }
 
 func setupMocksWithTs(xdcrTopology *service_def.XDCRCompTopologySvc,
@@ -359,6 +360,7 @@ func TestSendAndReceiveUnhandledError(t *testing.T) {
 func TestFeatureInitializationError(t *testing.T) {
 	assert := assert.New(t)
 	var noFeaturesActivated mcReal.UprFeatures
+	noFeaturesActivated.CompressionType = base.CompressionTypeNone
 	fmt.Println("============== Test case start: TestFeatureInitializationError =================")
 	xdcrTopology, utils, nozzle, settings, mcc, upr, _ := setupBoilerPlate()
 	setupMocks(xdcrTopology, utils, nozzle, settings, mcc, upr)
@@ -388,6 +390,7 @@ func TestMcCompressionError(t *testing.T) {
 	assert := assert.New(t)
 	fmt.Println("============== Test case start: TestMcCompressionError =================")
 	var noFeatures utilsReal.HELOFeatures
+	noFeatures.CompressionType = base.CompressionTypeNone
 	xdcrTopology, utils, nozzle, settings, mcc, upr, _ := setupBoilerPlate()
 	setupMocksInternal(xdcrTopology, utils, nozzle, settings, mcc, upr, noFeatures)
 
@@ -405,12 +408,13 @@ func TestNonFeatureInitializationErrorCompressedWhenNotRequested(t *testing.T) {
 	setupMocks(xdcrTopology, utils, nozzle, settings, mcc, upr)
 	setupUprFeedMockFeatureNeg(upr, allFeaturesActivated)
 
-	settings[SETTING_COMPRESSION_TYPE] = (int)(base.CompressionTypeNone)
+	settings[SETTING_COMPRESSION_TYPE] = (base.CompressionType)(base.CompressionTypeNone)
 	assert.Equal(base.ErrorCompressionDcpInvalidHandshake, nozzle.initialize(settings))
 
 	fmt.Println("============== Test case end: TestNonFeatureInitializationErrorCompressedWhenNotRequested =================")
 }
 
+// AUTO is no longer a supported value. XDCR Factory should have passed in a non-auto
 func TestStartNozzleAuto(t *testing.T) {
 	assert := assert.New(t)
 	fmt.Println("============== Test case start: TestStartStopDCPNozzleAuto =================")
@@ -420,11 +424,9 @@ func TestStartNozzleAuto(t *testing.T) {
 	setupUprFeedMockData(upr)
 	setupMocks(xdcrTopology, utils, nozzle, settings, mcc, upr)
 
-	settings[SETTING_COMPRESSION_TYPE] = base.CompressionTypeAuto
+	settings[SETTING_COMPRESSION_TYPE] = (base.CompressionType)(base.CompressionTypeAuto)
 
-	assert.Nil(nozzle.Start(settings))
-	assert.Equal(nozzle.State(), common.Part_Running)
-
-	assert.Equal((base.CompressionType)(base.CompressionTypeSnappy), nozzle.compressionSetting)
+	assert.NotNil(nozzle.Start(settings))
+	assert.NotEqual(nozzle.State(), common.Part_Running)
 	fmt.Println("============== Test case end: TestStartStopDCPNozzleAuto =================")
 }

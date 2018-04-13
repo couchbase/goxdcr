@@ -79,7 +79,7 @@ var TimeoutPercentageCapConfig = &SettingsConfig{50, &Range{0, 100}}
 var PipelineLogLevelConfig = &SettingsConfig{log.LogLevelInfo, nil}
 var PipelineStatsIntervalConfig = &SettingsConfig{1000, &Range{200, 600000}}
 var BandwidthLimitConfig = &SettingsConfig{0, &Range{0, 1000000}}
-var CompressionTypeConfig = &SettingsConfig{base.CompressionTypeNone, &Range{base.CompressionTypeNone, base.CompressionTypeEndMarker - 1}}
+var CompressionTypeConfig = &SettingsConfig{base.CompressionTypeAuto, &Range{base.CompressionTypeStartMarker + 1, base.CompressionTypeEndMarker - 1}}
 
 var SettingsConfigMap = map[string]*SettingsConfig{
 	ReplicationType:                ReplicationTypeConfig,
@@ -464,16 +464,6 @@ func (s *ReplicationSettings) toMap(isDefaultSettings bool) ReplicationSettingsM
 	settings_map[BandwidthLimit] = s.BandwidthLimit
 	settings_map[CompressionType] = s.CompressionType
 	return settings_map
-}
-
-func (s *ReplicationSettings) fromMap(settingsMap ReplicationSettingsMap) base.ErrorMap {
-	if s != nil {
-		_, errMap := s.UpdateSettingsFromMap(settingsMap)
-		return errMap
-	}
-	errMap := make(base.ErrorMap)
-	errMap["self"] = base.ErrorNilPtr
-	return errMap
 }
 
 type ReplicationSettingsMap map[string]interface{}

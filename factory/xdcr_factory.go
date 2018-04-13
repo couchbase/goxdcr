@@ -701,7 +701,7 @@ func (xdcrf *XDCRFactory) constructSettingsForXmemNozzle(pipeline common.Pipelin
 	xmemSettings[parts.SETTING_BATCH_EXPIRATION_TIME] = time.Duration(float64(repSettings.MaxExpectedReplicationLag)*0.7) * time.Millisecond
 	xmemSettings[parts.SETTING_OPTI_REP_THRESHOLD] = getSettingFromSettingsMap(settings, metadata.OptimisticReplicationThreshold, repSettings.OptimisticReplicationThreshold)
 	xmemSettings[parts.SETTING_STATS_INTERVAL] = getSettingFromSettingsMap(settings, metadata.PipelineStatsInterval, repSettings.StatsInterval)
-	xmemSettings[parts.SETTING_COMPRESSION_TYPE] = getSettingFromSettingsMap(settings, metadata.CompressionType, repSettings.CompressionType)
+	xmemSettings[parts.SETTING_COMPRESSION_TYPE] = base.GetCompressionType(getSettingFromSettingsMap(settings, metadata.CompressionType, repSettings.CompressionType).(int))
 
 	xmemSettings[parts.XMEM_SETTING_DEMAND_ENCRYPTION] = targetClusterRef.DemandEncryption
 	xmemSettings[parts.XMEM_SETTING_CERTIFICATE] = targetClusterRef.Certificate
@@ -757,7 +757,12 @@ func (xdcrf *XDCRFactory) constructSettingsForDcpNozzle(pipeline common.Pipeline
 
 	dcpNozzleSettings[parts.DCP_VBTimestampUpdater] = ckpt_svc.(*pipeline_svc.CheckpointManager).UpdateVBTimestamps
 	dcpNozzleSettings[parts.DCP_Stats_Interval] = getSettingFromSettingsMap(settings, metadata.PipelineStatsInterval, repSettings.StatsInterval)
-	dcpNozzleSettings[parts.SETTING_COMPRESSION_TYPE] = getSettingFromSettingsMap(settings, metadata.CompressionType, repSettings.CompressionType)
+	if repSettings.IsCapi() {
+		// For CAPI nozzle, do not allow DCP to have compression
+		dcpNozzleSettings[parts.SETTING_COMPRESSION_TYPE] = (base.CompressionType)(base.CompressionTypeNone)
+	} else {
+		dcpNozzleSettings[parts.SETTING_COMPRESSION_TYPE] = base.GetCompressionType(getSettingFromSettingsMap(settings, metadata.CompressionType, repSettings.CompressionType).(int))
+	}
 	return dcpNozzleSettings, nil
 }
 

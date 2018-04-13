@@ -474,8 +474,8 @@ func (dcp *DcpNozzle) initialize(settings metadata.ReplicationSettingsMap) (err 
 	dcp.finch = make(chan bool)
 
 	val, ok := settings[SETTING_COMPRESSION_TYPE]
-	if ok && (val.(int) != (int)(dcp.compressionSetting)) {
-		dcp.compressionSetting = base.GetCompressionType(val.(int))
+	if ok && (val.(base.CompressionType) != dcp.compressionSetting) {
+		dcp.compressionSetting = val.(base.CompressionType)
 	}
 
 	dcp.initializeUprHandshakeHelpers()

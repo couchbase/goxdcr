@@ -124,13 +124,16 @@ const (
 )
 
 // Last element is invalid and is there to keep consistency with the EndMarker
-var CompressionTypeStrings = [...]string{"None", "Snappy", "Auto", "Invalid"}
+var CompressionTypeStrings = [...]string{"Invalid", "None", "Snappy", "Auto", "Invalid"}
 
+// Start and End markers are considered invalid values
+// Auto is considered a XDCR-only value
 const (
-	CompressionTypeNone      = iota
-	CompressionTypeSnappy    = iota
-	CompressionTypeAuto      = iota
-	CompressionTypeEndMarker = iota
+	CompressionTypeStartMarker = iota
+	CompressionTypeNone        = iota
+	CompressionTypeSnappy      = iota
+	CompressionTypeAuto        = iota
+	CompressionTypeEndMarker   = iota
 )
 
 const CompressionTypeREST = "compressionType"

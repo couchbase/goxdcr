@@ -368,7 +368,7 @@ func (service *ReplicationSpecService) ValidateNewReplicationSpec(sourceBucket, 
 		return "", "", nil, errorMap, nil, nil
 	}
 
-	err = service.validateReplicationSettingsInternal(errorMap, sourceBucket, targetCluster, targetBucket, settings,
+	err, warnings := service.validateReplicationSettingsInternal(errorMap, sourceBucket, targetCluster, targetBucket, settings,
 		targetClusterRef, remote_connStr, remote_userName, remote_password, httpAuthMech, certificate, sanInCertificate,
 		clientCertificate, clientKey, targetKVVBMap, targetBucketInfo)
 	if len(errorMap) > 0 || err != nil {
@@ -380,10 +380,12 @@ func (service *ReplicationSpecService) ValidateNewReplicationSpec(sourceBucket, 
 		repl_type = metadata.ReplicationTypeXmem
 	}
 
-	warnings := service.validateES(errorMap, targetClusterRef, targetBucketInfo, repl_type, sourceConflictResolutionType, targetConflictResolutionType)
+	esWarnings := service.validateES(errorMap, targetClusterRef, targetBucketInfo, repl_type, sourceConflictResolutionType, targetConflictResolutionType)
 	if len(errorMap) > 0 {
 		return "", "", nil, errorMap, nil, nil
 	}
+
+	base.ConcatenateStringSlices(warnings, esWarnings)
 
 	if warnings != nil {
 		service.logger.Warnf("Warnings from ValidateAddReplicationSpec : %v\n", base.FlattenStringArray(warnings))
@@ -405,41 +407,62 @@ func (service *ReplicationSpecService) ValidateReplicationSettings(sourceBucket,
 		return nil, err
 	}
 
-	err = service.validateReplicationSettingsInternal(errorMap, sourceBucket, targetCluster, targetBucket, settings, targetClusterRef, remote_connStr, remote_userName, remote_password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey, targetKVVBMap, targetBucketInfo)
+	err, _ = service.validateReplicationSettingsInternal(errorMap, sourceBucket, targetCluster, targetBucket, settings, targetClusterRef, remote_connStr, remote_userName, remote_password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey, targetKVVBMap, targetBucketInfo)
 	return errorMap, err
 }
 
 func (service *ReplicationSpecService) validateReplicationSettingsInternal(errorMap base.ErrorMap, sourceBucket, targetCluster, targetBucket string, settings metadata.ReplicationSettingsMap,
 	targetClusterRef *metadata.RemoteClusterReference, remote_connStr, remote_userName, remote_password string, httpAuthMech base.HttpAuthMech, certificate []byte, sanInCertificate bool,
-	clientCertificate, clientKey []byte, targetKVVBMap map[string][]uint16, targetBucketInfo map[string]interface{}) error {
-
+	clientCertificate, clientKey []byte, targetKVVBMap map[string][]uint16, targetBucketInfo map[string]interface{}) (error, []string) {
 	var populateErr error
 	var err error
+	var warnings []string
+
 	allKvConnStrs, username, password, populateErr := service.populateConnectionCreds(targetClusterRef, targetKVVBMap, targetBucket, targetBucketInfo)
 	if populateErr != nil {
-		return populateErr
+		return populateErr, warnings
 	}
 
 	repl_type, ok := settings[metadata.ReplicationType]
 	compressionType, compressionOk := settings[metadata.CompressionType]
+	if !compressionOk {
+		compressionType = metadata.DefaultSettings().CompressionType
+		settings[metadata.CompressionType] = compressionType
+	}
+
 	if !ok || repl_type == metadata.ReplicationTypeXmem {
 		service.validateXmemSettings(errorMap, targetClusterRef, targetKVVBMap, sourceBucket, targetBucket, targetBucketInfo, allKvConnStrs[0], username, password)
 		if len(errorMap) > 0 {
-			return nil
+			return nil, warnings
 		}
 
 		// Compression is only allowed in XMEM mode
-		if compressionOk && compressionType != base.CompressionTypeNone {
+		if compressionType != base.CompressionTypeNone {
 			err = service.validateCompression(errorMap, sourceBucket, targetClusterRef, targetKVVBMap, targetBucket, targetBucketInfo, compressionType.(int), allKvConnStrs, username, password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey)
 			if len(errorMap) > 0 || err != nil {
-				return err
+				if compressionType == base.CompressionTypeAuto {
+					warning := fmt.Sprintf("Compression pre-requisite to cluster %v check failed. Compression will be temporarily disabled for replication.", targetClusterRef.Name)
+					warnings = append(warnings, warning)
+					// Since we are disabling compression, reset errors
+					for k, _ := range errorMap {
+						delete(errorMap, k)
+					}
+					err = nil
+				} else {
+					return err, warnings
+				}
 			}
 		}
-	} else if compressionOk && compressionType != base.CompressionTypeNone {
-		errorMap[base.CompressionTypeREST] = fmt.Errorf("Compression feature is incompatible with XDCR Version 1 (CAPI Protocol)")
-		return nil
+	} else {
+		if compressionType == base.CompressionTypeAuto {
+			warning := fmt.Sprintf("Compression is disabled automatically for XDCR Version 1 (CAPI Protocol)")
+			warnings = append(warnings, warning)
+		} else if compressionType != base.CompressionTypeNone {
+			errorMap[base.CompressionTypeREST] = fmt.Errorf("Compression feature is incompatible with XDCR Version 1 (CAPI Protocol)")
+			return nil, warnings
+		}
 	}
-	return nil
+	return nil, warnings
 }
 
 // validate compression - should only be called if compression setting dictates that there is compression

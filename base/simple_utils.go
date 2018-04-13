@@ -686,6 +686,12 @@ func MergeErrorMaps(dest ErrorMap, src ErrorMap, overwrite bool) {
 	}
 }
 
+func ConcatenateStringSlices(dest []string, src []string) {
+	for _, str := range src {
+		dest = append(dest, str)
+	}
+}
+
 // Efficiently concatenate and flatten errmap into a presentable single error string
 // Note map coming in should be read-protected
 func FlattenErrorMap(errMap ErrorMap) string {
@@ -721,9 +727,9 @@ func CheckErrorMapForError(errMap ErrorMap, toCheck error, exactMatch bool) bool
 }
 
 func CompressionStringToConversionTypeConverter(userInput string) (int, error) {
-	// Last element of the CompressionTypeStrings is not to be used
-	for i := 0; i < len(CompressionTypeStrings)-1; i++ {
-		if CompressionTypeStrings[i] == userInput || strings.ToLower(CompressionTypeStrings[i]) == strings.ToLower(userInput) {
+	// First and Last element of the CompressionTypeStrings is not to be used
+	for i := 1; i < len(CompressionTypeStrings)-1; i++ {
+		if strings.ToLower(CompressionTypeStrings[i]) == strings.ToLower(userInput) {
 			return i, nil
 		}
 	}
