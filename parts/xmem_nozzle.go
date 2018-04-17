@@ -1206,9 +1206,7 @@ func (xmem *XmemNozzle) finalCleanup() {
 	if xmem.buf != nil {
 		xmem.Logger().Infof("%v recycling %v objects in buffer\n", xmem.Id(), xmem.buf.itemCountInBuffer())
 		for _, bufferredReq := range xmem.buf.slots {
-			if bufferredReq != nil && bufferredReq.req != nil {
-				xmem.recycleDataObj(bufferredReq.req)
-			}
+			xmem.cleanupBufferedMCRequest(bufferredReq)
 		}
 	}
 
@@ -1217,6 +1215,16 @@ func (xmem *XmemNozzle) finalCleanup() {
 		for data := range xmem.dataChan {
 			xmem.dataObj_recycler(xmem.topic, data)
 		}
+	}
+
+}
+
+func (xmem *XmemNozzle) cleanupBufferedMCRequest(req *bufferedMCRequest) {
+	req.lock.Lock()
+	defer req.lock.Unlock()
+	if req.req != nil {
+		xmem.recycleDataObj(req.req)
+		resetBufferedMCRequest(req)
 	}
 
 }
@@ -2621,7 +2629,7 @@ func (xmem *XmemNozzle) writeToClientWithoutThrottling(client *xmemClient, bytes
 		return err, rev
 	}
 
-	_, err = conn.Write(bytes)
+	n, err := conn.Write(bytes)
 
 	if err == nil {
 		client.reportOpSuccess()
@@ -2629,7 +2637,10 @@ func (xmem *XmemNozzle) writeToClientWithoutThrottling(client *xmemClient, bytes
 	} else {
 		xmem.Logger().Errorf("%v writeToClient error: %s\n", xmem.Id(), fmt.Sprint(err))
 
-		if xmem.utils.IsSeriousNetError(err) {
+		// repair connection if
+		// 1. received serious net error like connection closed
+		// or 2. sent incomplete data to target
+		if xmem.utils.IsSeriousNetError(err) || (n != 0 && n != len(bytes)) {
 			xmem.repairConn(client, err.Error(), rev)
 
 		} else if isNetError(err) {
