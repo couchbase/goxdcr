@@ -529,7 +529,7 @@ type V1InternalSettings struct {
 
 // after upgrade, old internal settings that did not exist in before-upgrade version will take 0 value
 // these 0 values need to be replaced by defaule values
-func (os V1InternalSettings) HandleUpgrade() {
+func (os *V1InternalSettings) HandleUpgrade() {
 	if os.TopologyChangeCheckInterval == 0 {
 		os.TopologyChangeCheckInterval = TopologyChangeCheckIntervalConfig.defaultValue.(int)
 	}
