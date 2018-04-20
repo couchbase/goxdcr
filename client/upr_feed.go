@@ -63,9 +63,10 @@ type UprStream struct {
 }
 
 const (
-	CompressionTypeNone      = iota
-	CompressionTypeSnappy    = iota
-	CompressionTypeEndMarker = iota // also means invalid
+	CompressionTypeStartMarker = iota // also means invalid
+	CompressionTypeNone        = iota
+	CompressionTypeSnappy      = iota
+	CompressionTypeEndMarker   = iota // also means invalid
 )
 
 // kv_engine/include/mcbp/protocol/datatype.h
