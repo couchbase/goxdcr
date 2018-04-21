@@ -570,6 +570,18 @@ func ShuffleStringsList(list []string) {
 	}
 }
 
+func ShuffleVbList(list []uint16) {
+	r := mrand.New(mrand.NewSource(time.Now().Unix()))
+	// Start at the end of the slice, go backwards and scramble
+	for i := len(list); i > 1; i-- {
+		randIndex := r.Intn(i)
+		// Swap values and continue until we're done
+		if (i - 1) != randIndex {
+			list[i-1], list[randIndex] = list[randIndex], list[i-1]
+		}
+	}
+}
+
 func StringListContains(list []string, checkStr string) bool {
 	for _, str := range list {
 		if str == checkStr {

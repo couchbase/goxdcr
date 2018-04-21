@@ -659,6 +659,11 @@ func (ckmgr *CheckpointManager) SetVBTimestamps(topic string) error {
 	getter_wait_grp := &sync.WaitGroup{}
 	err_ch := make(chan interface{}, len(listOfVbs))
 	getter_id := 0
+
+	// shuffles listOfVbs so as to load balance vbs for each outnozzle across startSeqnoGetters
+	// this way, if a startSeqnoGetter executes faster than others, it won't overload one particular outnozzle
+	base.ShuffleVbList(listOfVbs)
+
 	for {
 		end_index := start_index + workload
 		if end_index > len(listOfVbs) {

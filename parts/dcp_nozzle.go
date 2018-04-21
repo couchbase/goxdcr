@@ -981,6 +981,10 @@ done:
  * structured being updated indirectly from checkpoint manager.
  */
 func (dcp *DcpNozzle) startUprStreams_internal(streams_to_start []uint16) error {
+
+	// randomizes the sequence of vbs to start, so that each outnozzle gets roughly even load
+	base.ShuffleVbList(streams_to_start)
+
 	for _, vbno := range streams_to_start {
 		vbts, err := dcp.getTS(vbno, true)
 		if err == nil && vbts != nil {
