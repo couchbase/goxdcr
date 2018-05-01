@@ -855,11 +855,16 @@ func (service *ReplicationSpecService) AllReplicationSpecIdsForTargetBucket(buck
 func (service *ReplicationSpecService) removeSpecFromCache(specId string) error {
 	//soft remove it from cache by setting SpecVal.spec = nil, but keep the key there
 	//so that the derived object can still be retrieved and be acted on for cleaning-up.
-	val, ok := service.getCache().Get(specId)
+	cache := service.getCache()
+	val, ok := cache.Get(specId)
 	if ok && val != nil {
 		specVal, ok1 := val.(*ReplicationSpecVal)
 		if ok1 {
-			specVal.spec = nil
+			updatedCachedObj := &ReplicationSpecVal{
+				spec:       nil,
+				derivedObj: specVal.derivedObj,
+				cas:        specVal.cas}
+			return cache.Upsert(specId, updatedCachedObj)
 		}
 	}
 
