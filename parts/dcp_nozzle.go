@@ -299,8 +299,9 @@ type DcpNozzle struct {
 	// Each vb stream has its own helper to help with DCP handshaking
 	vbHandshakeMap map[uint16]*dcpStreamReqHelper
 
-	xdcr_topology_svc        service_def.XDCRCompTopologySvc
-	stats_interval           time.Duration
+	xdcr_topology_svc service_def.XDCRCompTopologySvc
+	// stats collection interval in milliseconds
+	stats_interval           uint32
 	stats_interval_change_ch chan bool
 	user_agent               string
 	is_capi                  bool
@@ -493,7 +494,7 @@ func (dcp *DcpNozzle) initialize(settings metadata.ReplicationSettingsMap) (err 
 	dcp.vbtimestamp_updater = settings[DCP_VBTimestampUpdater].(func(uint16, uint64) (*base.VBTimestamp, error))
 
 	if val, ok := settings[DCP_Stats_Interval]; ok {
-		dcp.stats_interval = time.Duration(val.(int)) * time.Millisecond
+		dcp.setStatsInterval(uint32(val.(int)))
 	} else {
 		return errors.New("setting 'stats_interval' is missing")
 	}
@@ -1127,7 +1128,7 @@ func (dcp *DcpNozzle) UpdateSettings(settings metadata.ReplicationSettingsMap) e
 	}
 
 	if _, ok := settings[DCP_Stats_Interval]; ok {
-		dcp.stats_interval = time.Duration(settings[DCP_Stats_Interval].(int)) * time.Millisecond
+		dcp.setStatsInterval(uint32(settings[DCP_Stats_Interval].(int)))
 		dcp.stats_interval_change_ch <- true
 	}
 
@@ -1381,9 +1382,17 @@ func (dcp *DcpNozzle) incCounterSent() {
 	atomic.AddUint64(&dcp.counter_sent, 1)
 }
 
+func (dcp *DcpNozzle) getStatsInterval() uint32 {
+	return atomic.LoadUint32(&dcp.stats_interval)
+}
+
+func (dcp *DcpNozzle) setStatsInterval(stats_interval uint32) {
+	atomic.StoreUint32(&dcp.stats_interval, stats_interval)
+}
+
 func (dcp *DcpNozzle) collectDcpDataChanLen(settings metadata.ReplicationSettingsMap) {
 	defer dcp.childrenWaitGrp.Done()
-	ticker := time.NewTicker(dcp.stats_interval)
+	ticker := time.NewTicker(time.Duration(dcp.getStatsInterval()) * time.Millisecond)
 	defer ticker.Stop()
 	for {
 		select {
@@ -1391,7 +1400,7 @@ func (dcp *DcpNozzle) collectDcpDataChanLen(settings metadata.ReplicationSetting
 			return
 		case <-dcp.stats_interval_change_ch:
 			ticker.Stop()
-			ticker = time.NewTicker(dcp.stats_interval)
+			ticker = time.NewTicker(time.Duration(dcp.getStatsInterval()) * time.Millisecond)
 		case <-ticker.C:
 			dcp.getDcpDataChanLen()
 		}
