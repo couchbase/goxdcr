@@ -948,7 +948,9 @@ func (dcp *DcpNozzle) startUprStreams() error {
 		case <-finch:
 			goto done
 		case <-init_ch:
-			err = dcp.startUprStreams_internal(dcp.GetVBList())
+			// dcp.GetVBList() returns the original vb list in dcp.
+			// hence a copy is needed when the list needs to be modified
+			err = dcp.startUprStreams_internal(base.DeepCopyUint16Array(dcp.GetVBList()))
 			if err != nil {
 				return err
 			}

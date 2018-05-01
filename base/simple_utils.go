@@ -286,8 +286,18 @@ func DeepCopyUint64Array(in []uint64) []uint64 {
 		return nil
 	}
 
-	out := make([]uint64, 0)
-	out = append(out, in...)
+	out := make([]uint64, len(in))
+	copy(out, in)
+	return out
+}
+
+func DeepCopyUint16Array(in []uint16) []uint16 {
+	if in == nil {
+		return nil
+	}
+
+	out := make([]uint16, len(in))
+	copy(out, in)
 	return out
 }
 
