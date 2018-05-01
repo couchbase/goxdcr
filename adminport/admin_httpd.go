@@ -1,4 +1,4 @@
-// Copyright (c) 2013 Couchbase, Inc.
+// Copyright (c) 2013-2018 Couchbase, Inc.
 // Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file
 // except in compliance with the License. You may obtain a copy of the License at
 //   http://www.apache.org/licenses/LICENSE-2.0
@@ -40,7 +40,6 @@ import (
 	"fmt"
 	base "github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
-	"net"
 	"net/http"
 	"sync"
 )
@@ -50,7 +49,6 @@ var logger_server *log.CommonLogger = log.NewLogger("HttpServer", log.DefaultLog
 
 type httpServer struct {
 	mu        sync.RWMutex   // handle concurrent updates to this object
-	lis       net.Listener   // TCP listener
 	srv       *http.Server   // http server
 	urlPrefix string         // URL path prefix for adminport
 	reqch     chan<- Request // request channel back to application
@@ -81,26 +79,23 @@ func NewHTTPServer(name, connAddr, urlPrefix string, reqch chan<- Request, handl
 }
 
 // Start is part of Server interface.
-func (s *httpServer) Start() (err error) {
-
-	if s.lis, err = net.Listen("tcp", s.srv.Addr); err != nil {
-		return err
-	}
+func (s *httpServer) Start() chan error {
+	errCh := make(chan error, 1)
 
 	// Server routine
 	go func() {
 		defer s.shutdown()
 
 		logger_server.Infof("%s starting ...\n", s.logPrefix)
-		err := s.srv.Serve(s.lis) // serve until listener is closed.
-		if err != nil {
-			logger_server.Errorf("%s exited with error %v\n", s.logPrefix, err)
-		}
+		// ListenAndServe blocks and returns a non-nil error if something wrong happens
+		err := s.srv.ListenAndServe()
+		logger_server.Errorf("%s exited with error %v\n", s.logPrefix, err)
+		errCh <- err
 	}()
-	return
+	return errCh
 }
 
-// Stop is part of Server interface.
+// Stop is part of Server interface. Once stopped, Start() cannot be called again
 func (s *httpServer) Stop() {
 	s.shutdown()
 	logger_server.Infof("%s ... stopped\n", s.logPrefix)
@@ -110,10 +105,10 @@ func (s *httpServer) shutdown() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if s.lis != nil {
-		s.lis.Close()
+	if s.srv != nil {
+		s.srv.Close()
 		close(s.reqch)
-		s.lis = nil
+		s.srv = nil
 	}
 }
 

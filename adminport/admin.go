@@ -30,7 +30,7 @@ type Server interface {
 
 	// Start server routine and wait for incoming request, Register() and
 	// Unregister() APIs cannot be called after starting the server.
-	Start() error
+	Start() chan error
 
 	// Stop server routine. TODO: server routine shall quite only after
 	// outstanding requests are serviced.

@@ -92,15 +92,14 @@ func (adminport *Adminport) Start() {
 	server := ap.NewHTTPServer("xdcr", hostAddr, base.AdminportUrlPrefix, reqch, new(ap.Handler))
 	finch := adminport.finch
 
-	err = server.Start()
-	if err != nil {
-		goto done
-	}
+	startErrCh := server.Start()
 
 	logger_ap.Infof("http server started %v !\n", hostAddr)
 
 	for {
 		select {
+		case err = <-startErrCh:
+			goto done
 		case <-finch:
 			goto done
 		case req, ok := <-reqch: // admin requests are serialized here
