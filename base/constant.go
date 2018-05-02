@@ -110,7 +110,7 @@ var AdminportNumber uint16 = 13000
 var GometaRequestPortNumber uint16 = 11000
 
 // read timeout for golib's http server.
-var AdminportReadTimeout = 1 * time.Second
+var AdminportReadTimeout = 60 * time.Second
 
 // write timeout for golib's http server.
 var AdminportWriteTimeout = 180 * time.Second
