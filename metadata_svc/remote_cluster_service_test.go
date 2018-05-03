@@ -1,7 +1,6 @@
 package metadata_svc
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"github.com/couchbase/goxdcr/base"
@@ -59,8 +58,8 @@ func setupBoilerPlateRCS() (*service_def.UILogSvc,
 }
 
 func jsonMarshalWrapper(ref *metadata.RemoteClusterReference) (key string, value []byte) {
-	jsonKey := ref.Id
-	jsonBytes, _ := json.Marshal(ref)
+	jsonKey := ref.Id()
+	jsonBytes, _ := ref.Marshal()
 	return jsonKey, jsonBytes
 }
 
@@ -230,11 +229,9 @@ func setupUtilsMockFirstNodeBad(utilitiesMock *utilsMock.UtilsIface) {
 
 func createRemoteClusterReference(id string) *metadata.RemoteClusterReference {
 	// Use name the same as ID for ease
-	aRef := &metadata.RemoteClusterReference{Id: id,
-		Name:     id,
-		Uuid:     uuidField,
-		HostName: hostname,
-	}
+
+	aRef, _ := metadata.NewRemoteClusterReference(uuidField, id, hostname, "", "", false, "", nil, nil, nil)
+	aRef.SetId(id)
 	return aRef
 }
 
@@ -340,7 +337,7 @@ func TestAddThenSetRemoteClusterRef(t *testing.T) {
 
 	idAndName := "test"
 	ref := createRemoteClusterReference(idAndName)
-	ref.UserName = "oldUserName"
+	ref.SetUserName("oldUserName")
 
 	setupMocksRCS(uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
 		utilitiesMock, remoteClusterSvc, ref)
@@ -359,13 +356,13 @@ func TestAddThenSetRemoteClusterRef(t *testing.T) {
 
 	// check before update
 	agent, exists, _ := remoteClusterSvc.getOrStartNewAgent(ref, false, false)
-	assert.Equal("oldUserName", agent.reference.UserName)
+	assert.Equal("oldUserName", agent.reference.UserName())
 
 	// Update the remoteClusterSvc and agents with a new mock svc to return the actual reference
 	newRef := ref.Clone()
 	idAndName2 := "newName"
-	newRef.Name = idAndName2
-	newRef.UserName = "newUserName"
+	newRef.SetName(idAndName2)
+	newRef.SetUserName("newUserName")
 	_, jsonMarshalBytes := jsonMarshalWrapper(newRef)
 	revision := 2
 	metadataSvcMock2 := &service_def.MetadataSvc{}
@@ -390,7 +387,7 @@ func TestAddThenSetRemoteClusterRef(t *testing.T) {
 	assert.True(remoteClusterSvc.agentCacheMapsAreSynced())
 	agent, exists, _ = remoteClusterSvc.getOrStartNewAgent(newRef, false, false)
 	assert.True(exists)
-	assert.Equal("newUserName", agent.reference.UserName)
+	assert.Equal("newUserName", agent.reference.UserName())
 
 	remoteClusterSvc.DelRemoteCluster(idAndName2)
 	assert.Equal(0, remoteClusterSvc.getNumberOfAgents())
@@ -517,8 +514,8 @@ func TestAddThenSetThenDelClusterViaCallback(t *testing.T) {
 	assert.Equal(1, callBackCount)
 
 	// Set op via callback
-	ref2.HostName = "newHostName"
-	ref2.UserName = "newUserName"
+	ref2.SetHostName("newHostName")
+	ref2.SetUserName("newUserName")
 	_, jsonMarshalBytes = jsonMarshalWrapper(ref2)
 	revision = 2
 
@@ -537,7 +534,7 @@ func TestAddThenSetThenDelClusterViaCallback(t *testing.T) {
 	assert.Equal(2, callBackCount)
 	remoteClusterSvc.agentMutex.RLock()
 	assert.NotNil(remoteClusterSvc.agentMap[idAndName])
-	assert.Equal(ref2.HostName, remoteClusterSvc.agentMap[idAndName].reference.HostName)
+	assert.Equal(ref2.HostName(), remoteClusterSvc.agentMap[idAndName].reference.HostName())
 	remoteClusterSvc.agentMutex.RUnlock()
 
 	// Delete op via callback
@@ -612,7 +609,7 @@ func refreshCheckActiveHostNameHelper(agent *RemoteClusterAgent, nodeList []stri
 	// find that it should be in here
 	var findCheck bool
 	for _, name := range nodeList {
-		if agent.reference.ActiveHostName == name {
+		if agent.reference.ActiveHostName() == name {
 			findCheck = true
 			break
 		}
@@ -642,7 +639,7 @@ func TestPositiveRefresh(t *testing.T) {
 	agent, _, _ := remoteClusterSvc.getOrStartNewAgent(ref, false, false)
 	agent.Refresh()
 	assert.Equal(1, callBackCount) // refresh positive does not call callback
-	assert.Equal(hostname, agent.reference.HostName)
+	assert.Equal(hostname, agent.reference.HostName())
 	assert.True(refreshCheckActiveHostNameHelper(agent, dummyHostNameList))
 
 	fmt.Println("============== Test case end: TestPositiveRefresh =================")
@@ -666,12 +663,12 @@ func TestRefresh3Nodes2GoesBad(t *testing.T) {
 	// First make sure positive case is good - we have "dummyHostName" as the beginning
 	agent, _, _ := remoteClusterSvc.getOrStartNewAgent(ref, false, false)
 	agent.Refresh()
-	assert.Equal(hostname, agent.reference.HostName)
+	assert.Equal(hostname, agent.reference.HostName())
 	assert.True(refreshCheckActiveHostNameHelper(agent, dummyHostNameList))
 
 	// After second refresh, the remoteClusteReference should not have "dummyHostName" as the actual hostname
 	ref2 := createRemoteClusterReference(idAndName)
-	ref2.HostName = hostname3
+	ref2.SetHostName(hostname3)
 
 	// hostName 1 and 3 have been moved
 	// set things up for second refresh
@@ -720,7 +717,7 @@ func TestRefresh4Nodes3GoesBad(t *testing.T) {
 	// First make sure positive case is good - we have "dummyHostName" as the beginning
 	agent, _, _ := remoteClusterSvc.getOrStartNewAgent(ref, false, false)
 	agent.Refresh()
-	assert.Equal(hostname, agent.reference.HostName)
+	assert.Equal(hostname, agent.reference.HostName())
 	assert.True(refreshCheckActiveHostNameHelper(agent, dummyHostNameList2))
 
 	// First refresh should not have added to callback count because the reference boostrap node has not been changed
@@ -728,7 +725,7 @@ func TestRefresh4Nodes3GoesBad(t *testing.T) {
 
 	// After second refresh, the remoteClusteReference should not have "dummyHostName" as the actual hostname
 	ref2 := createRemoteClusterReference(idAndName)
-	ref2.HostName = hostname4
+	ref2.SetHostName(hostname4)
 
 	// hostName 1 and 2 and 3 have been moved
 	// set things up for second refresh
@@ -767,7 +764,7 @@ func TestRefreshFirstNodeIsBad(t *testing.T) {
 	// First make sure positive case is good - we have "dummyHostName" as the beginning
 	agent, _, _ := remoteClusterSvc.getOrStartNewAgent(ref, false, false)
 	agent.Refresh()
-	assert.Equal(hostname, agent.reference.HostName)
+	assert.Equal(hostname, agent.reference.HostName())
 	assert.True(refreshCheckActiveHostNameHelper(agent, dummyHostNameList))
 
 	// hostName 1 and 2 and 3 have been moved

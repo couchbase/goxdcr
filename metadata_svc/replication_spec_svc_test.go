@@ -86,7 +86,8 @@ func setupMocks(srcResolutionType string,
 
 	// RemoteClusterMock
 	hostAddr := "localhost:9000"
-	mockRemoteClusterRef := &metadata.RemoteClusterReference{Uuid: "1", HostName: hostAddr}
+
+	mockRemoteClusterRef, _ := metadata.NewRemoteClusterReference("1", "", hostAddr, "", "", false, "", nil, nil, nil)
 	remoteClusterMock.On("RemoteClusterByRefName", mock.Anything, mock.Anything).Return(mockRemoteClusterRef, nil)
 
 	// Compression features for utils mock

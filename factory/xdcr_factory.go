@@ -424,7 +424,7 @@ func (xdcrf *XDCRFactory) constructOutgoingNozzles(spec *metadata.ReplicationSpe
 	outNozzles = make(map[string]common.Nozzle)
 	vbNozzleMap = make(map[uint16]string)
 	// Get a Map of Remote kvNode -> vBucket#s it's responsible for
-	kvVBMap, err = xdcrf.utils.GetRemoteServerVBucketsMap(targetClusterRef.HostName, spec.TargetBucketName, targetBucketInfo)
+	kvVBMap, err = xdcrf.utils.GetRemoteServerVBucketsMap(targetClusterRef.HostName(), spec.TargetBucketName, targetBucketInfo)
 	if err != nil {
 		xdcrf.logger.Errorf("Error getting server vbuckets map, err=%v\n", err)
 		return
@@ -435,8 +435,8 @@ func (xdcrf *XDCRFactory) constructOutgoingNozzles(spec *metadata.ReplicationSpe
 	}
 
 	if isTargetES {
-		targetUserName = targetClusterRef.UserName
-		targetPassword = targetClusterRef.Password
+		targetUserName = targetClusterRef.UserName()
+		targetPassword = targetClusterRef.Password()
 		// set target cluster version to 0 so that topology change detector will not listen to target version change
 		targetClusterVersion = 0
 	} else {
@@ -447,8 +447,8 @@ func (xdcrf *XDCRFactory) constructOutgoingNozzles(spec *metadata.ReplicationSpe
 		targetHasRBACSupport := base.IsClusterCompatible(targetClusterVersion, base.VersionForRBACAndXattrSupport)
 		if targetHasRBACSupport {
 			// if target is spock and up, simply use the username and password in remote cluster ref
-			targetUserName = targetClusterRef.UserName
-			targetPassword = targetClusterRef.Password
+			targetUserName = targetClusterRef.UserName()
+			targetPassword = targetClusterRef.Password()
 		} else {
 			// if target is pre-spock, use bucket name and bucket password
 			targetUserName = spec.TargetBucketName
@@ -509,7 +509,7 @@ func (xdcrf *XDCRFactory) constructOutgoingNozzles(spec *metadata.ReplicationSpe
 			var outNozzle common.Nozzle
 
 			if isCapiReplication {
-				outNozzle, err = xdcrf.constructCAPINozzle(spec.Id, targetUserName, targetPassword, targetClusterRef.Certificate, vbList, vbCouchApiBaseMap, i, logger_ctx)
+				outNozzle, err = xdcrf.constructCAPINozzle(spec.Id, targetUserName, targetPassword, targetClusterRef.Certificate(), vbList, vbCouchApiBaseMap, i, logger_ctx)
 				if err != nil {
 					return
 				}
@@ -703,11 +703,11 @@ func (xdcrf *XDCRFactory) constructSettingsForXmemNozzle(pipeline common.Pipelin
 	xmemSettings[parts.SETTING_STATS_INTERVAL] = getSettingFromSettingsMap(settings, metadata.PipelineStatsInterval, repSettings.StatsInterval)
 	xmemSettings[parts.SETTING_COMPRESSION_TYPE] = base.GetCompressionType(getSettingFromSettingsMap(settings, metadata.CompressionType, repSettings.CompressionType).(int))
 
-	xmemSettings[parts.XMEM_SETTING_DEMAND_ENCRYPTION] = targetClusterRef.DemandEncryption
-	xmemSettings[parts.XMEM_SETTING_CERTIFICATE] = targetClusterRef.Certificate
-	xmemSettings[parts.XMEM_SETTING_CLIENT_CERTIFICATE] = targetClusterRef.ClientCertificate
-	xmemSettings[parts.XMEM_SETTING_CLIENT_KEY] = targetClusterRef.ClientKey
-	xmemSettings[parts.XMEM_SETTING_ENCRYPTION_TYPE] = targetClusterRef.EncryptionType
+	xmemSettings[parts.XMEM_SETTING_DEMAND_ENCRYPTION] = targetClusterRef.DemandEncryption()
+	xmemSettings[parts.XMEM_SETTING_CERTIFICATE] = targetClusterRef.Certificate()
+	xmemSettings[parts.XMEM_SETTING_CLIENT_CERTIFICATE] = targetClusterRef.ClientCertificate()
+	xmemSettings[parts.XMEM_SETTING_CLIENT_KEY] = targetClusterRef.ClientKey()
+	xmemSettings[parts.XMEM_SETTING_ENCRYPTION_TYPE] = targetClusterRef.EncryptionType()
 	if targetClusterRef.IsFullEncryption() {
 		mem_ssl_port, ok := ssl_port_map[xmemConnStr]
 		if !ok {
@@ -716,7 +716,7 @@ func (xdcrf *XDCRFactory) constructSettingsForXmemNozzle(pipeline common.Pipelin
 		xdcrf.logger.Infof("mem_ssl_port=%v\n", mem_ssl_port)
 
 		xmemSettings[parts.XMEM_SETTING_REMOTE_MEM_SSL_PORT] = mem_ssl_port
-		xmemSettings[parts.XMEM_SETTING_SAN_IN_CERITICATE] = targetClusterRef.SANInCertificate
+		xmemSettings[parts.XMEM_SETTING_SAN_IN_CERITICATE] = targetClusterRef.SANInCertificate()
 
 		xdcrf.logger.Infof("xmemSettings=%v\n", xmemSettings.CloneAndRedact())
 	}

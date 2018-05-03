@@ -334,7 +334,7 @@ func (adminport *Adminport) doDeleteRemoteClusterRequest(request *http.Request) 
 	}
 	replIds := make([]string, 0)
 	for _, spec := range specs {
-		if spec.TargetClusterUUID == ref.Uuid {
+		if spec.TargetClusterUUID == ref.Uuid() {
 			replIds = append(replIds, spec.Id)
 		}
 	}
@@ -772,10 +772,10 @@ func constructBucketPermission(bucketName, suffix string) string {
 func writeRemoteClusterAuditEvent(eventId uint32, remoteClusterRef *metadata.RemoteClusterReference, realUserId *service_def.RealUserId) {
 	event := &service_def.RemoteClusterRefEvent{
 		GenericFields:         service_def.GenericFields{log.FormatTimeWithMilliSecondPrecision(time.Now()), *realUserId},
-		RemoteClusterName:     remoteClusterRef.Name,
-		RemoteClusterHostname: remoteClusterRef.HostName,
-		IsEncrypted:           remoteClusterRef.DemandEncryption,
-		EncryptionType:        remoteClusterRef.EncryptionType}
+		RemoteClusterName:     remoteClusterRef.Name(),
+		RemoteClusterHostname: remoteClusterRef.HostName(),
+		IsEncrypted:           remoteClusterRef.DemandEncryption(),
+		EncryptionType:        remoteClusterRef.EncryptionType()}
 
 	err := AuditService().Write(eventId, event)
 	logAuditErrors(err)

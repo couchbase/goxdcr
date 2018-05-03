@@ -193,7 +193,7 @@ func (service *ReplicationSpecService) validateSrcTargetNonIdenticalBucket(error
 			return errors.New("cannot get local cluster uuid")
 		}
 
-		if sourceClusterUuid == targetClusterRef.Uuid {
+		if sourceClusterUuid == targetClusterRef.Uuid() {
 			errorMap[base.PlaceHolderFieldKey] = errors.New("Replication from a bucket to the same bucket is not allowed")
 		} else {
 			service.logger.Infof("Validated that source bucket and target bucket are not the same. time taken=%v\n", time.Since(start_time))
@@ -235,7 +235,7 @@ func (service *ReplicationSpecService) getRemoteReference(errorMap base.ErrorMap
 }
 
 func (service *ReplicationSpecService) validateReplicationSpecDoesNotAlreadyExist(errorMap base.ErrorMap, sourceBucket string, targetClusterRef *metadata.RemoteClusterReference, targetBucket string) {
-	repId := metadata.ReplicationId(sourceBucket, targetClusterRef.Uuid, targetBucket)
+	repId := metadata.ReplicationId(sourceBucket, targetClusterRef.Uuid(), targetBucket)
 	_, err := service.replicationSpec(repId)
 	if err == nil {
 		errorMap[base.PlaceHolderFieldKey] = errors.New(ReplicationSpecAlreadyExistErrorMessage)
@@ -270,8 +270,8 @@ func (service *ReplicationSpecService) populateConnectionCreds(targetClusterRef 
 	}
 
 	if hasRBACSupport {
-		username = targetClusterRef.UserName
-		password = targetClusterRef.Password
+		username = targetClusterRef.UserName()
+		password = targetClusterRef.Password()
 	} else {
 		username = targetBucket
 		password, err = service.utils.GetBucketPasswordFromBucketInfo(targetBucket, targetBucketInfo, service.logger)

@@ -236,7 +236,7 @@ func (ckmgr *CheckpointManager) populateRemoteBucketInfo(pipeline common.Pipelin
 	if err != nil {
 		return err
 	}
-	remote_bucket, err := service_def.NewRemoteBucketInfo(ckmgr.target_cluster_ref.Name, spec.TargetBucketName, ckmgr.target_cluster_ref, ckmgr.remote_cluster_svc, ckmgr.cluster_info_svc, ckmgr.logger, ckmgr.utils)
+	remote_bucket, err := service_def.NewRemoteBucketInfo(ckmgr.target_cluster_ref.Name(), spec.TargetBucketName, ckmgr.target_cluster_ref, ckmgr.remote_cluster_svc, ckmgr.cluster_info_svc, ckmgr.logger, ckmgr.utils)
 	if err != nil {
 		return err
 	}
@@ -362,7 +362,7 @@ func (ckmgr *CheckpointManager) getNewMemcachedClient(server_addr string, initia
 
 		if !initializing {
 			// if not initializing at replication startup time, retrieve up to date security settings
-			latestTargetClusterRef, err := ckmgr.remote_cluster_svc.RemoteClusterByUuid(ckmgr.target_cluster_ref.Uuid, false)
+			latestTargetClusterRef, err := ckmgr.remote_cluster_svc.RemoteClusterByUuid(ckmgr.target_cluster_ref.Uuid(), false)
 			if err != nil {
 				return nil, err
 			}

@@ -668,7 +668,7 @@ func (rm *replicationManager) createAndPersistReplicationSpec(justValidate bool,
 		return nil, errorMap, err, nil
 	}
 
-	spec, err := metadata.NewReplicationSpecification(sourceBucket, sourceBucketUUID, targetClusterRef.Uuid, targetBucket, targetBucketUUID)
+	spec, err := metadata.NewReplicationSpecification(sourceBucket, sourceBucketUUID, targetClusterRef.Uuid(), targetBucket, targetBucketUUID)
 	if err != nil {
 		return nil, nil, err, nil
 	}
@@ -1176,14 +1176,14 @@ func (rm *replicationManager) upgradeRemoteClusterRefs() {
 		return
 	}
 	for _, remoteClusterRef := range remoteClusterRefs {
-		if remoteClusterRef.IsEncryptionEnabled() && len(remoteClusterRef.EncryptionType) == 0 {
-			remoteClusterRef.EncryptionType = metadata.EncryptionType_Full
-			err = remoteClusterSvc.SetRemoteCluster(remoteClusterRef.Name, remoteClusterRef)
+		if remoteClusterRef.IsEncryptionEnabled() && len(remoteClusterRef.EncryptionType()) == 0 {
+			remoteClusterRef.SetEncryptionType(metadata.EncryptionType_Full)
+			err = remoteClusterSvc.SetRemoteCluster(remoteClusterRef.Name(), remoteClusterRef)
 			if err != nil {
-				logger_rm.Warnf("Skipping upgrading remote cluster ref %v because of err =%v", remoteClusterRef.Name, err)
+				logger_rm.Warnf("Skipping upgrading remote cluster ref %v because of err =%v", remoteClusterRef.Name(), err)
 				continue
 			} else {
-				logger_rm.Infof("Successfully upgraded remote cluster ref %v", remoteClusterRef.Name)
+				logger_rm.Infof("Successfully upgraded remote cluster ref %v", remoteClusterRef.Name())
 			}
 		}
 	}

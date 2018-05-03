@@ -369,7 +369,7 @@ func (rccl *RemoteClusterChangeListener) remoteClusterChangeHandlerCallback(remo
 
 		// if there are existing replications referencing the old cluster ref, there must have been a racing condition
 		// between the replication creation and the cluster ref deletion. Delete the now orphaned replications to ensure consistency
-		topics := replication_mgr.pipelineMgr.AllReplicationsForTargetCluster(oldRemoteClusterRef.Uuid)
+		topics := replication_mgr.pipelineMgr.AllReplicationsForTargetCluster(oldRemoteClusterRef.Uuid())
 		if len(topics) > 0 {
 			rccl.logger.Infof("Deleting replications, %v, since the referenced remote cluster, %v, has been deleted\n", topics, oldRemoteClusterRef.Name)
 			for _, topic := range topics {
@@ -385,7 +385,7 @@ func (rccl *RemoteClusterChangeListener) remoteClusterChangeHandlerCallback(remo
 		!oldRemoteClusterRef.AreSecuritySettingsTheSame(newRemoteClusterRef) {
 		// TODO there may be less disruptive ways to handle the following updates without restarting the pipelines
 		// restarting the pipelines seems to be acceptable considering the low frequency of such updates.
-		specs := replication_mgr.pipelineMgr.AllReplicationSpecsForTargetCluster(oldRemoteClusterRef.Uuid)
+		specs := replication_mgr.pipelineMgr.AllReplicationSpecsForTargetCluster(oldRemoteClusterRef.Uuid())
 
 		for _, spec := range specs {
 			// if critical info in remote cluster reference, e.g., log info or certificate, is changed,

@@ -21,7 +21,7 @@ func ConstructVBCouchApiBaseMap(targetBucketName string, targetBucketInfo map[st
 
 	// construct vbCouchApiBaseMap map with key = vbno and value = couchApiBase
 	vbCouchApiBaseMap := make(map[uint16]string)
-	vbMap, err := utils.GetRemoteServerVBucketsMap(remoteClusterRef.HostName, targetBucketName, targetBucketInfo)
+	vbMap, err := utils.GetRemoteServerVBucketsMap(remoteClusterRef.HostName(), targetBucketName, targetBucketInfo)
 	if err != nil {
 		return nil, err
 	}
@@ -53,14 +53,14 @@ func ConstructCapiServiceEndPointMap(targetBucketName string, targetBucketInfo m
 	for _, node := range nodeList {
 		nodeMap, ok := node.(map[string]interface{})
 		if !ok {
-			return nil, ErrorBuildingCapiServerEndPointMap(targetBucketName, remoteClusterRef.Name, node)
+			return nil, ErrorBuildingCapiServerEndPointMap(targetBucketName, remoteClusterRef.Name(), node)
 		}
 
 		var endPoint string
 		var hostname string
 		if useCouchApiBase {
 			// endPoint is couchApiBase in nodeInfo
-			hostname, err = utils.GetHostNameFromNodeInfo(remoteClusterRef.HostName, nodeMap, logger_capi_utils)
+			hostname, err = utils.GetHostNameFromNodeInfo(remoteClusterRef.HostName(), nodeMap, logger_capi_utils)
 			if err != nil {
 				return nil, err
 			}
@@ -78,14 +78,14 @@ func ConstructCapiServiceEndPointMap(targetBucketName string, targetBucketInfo m
 			}
 			endPoint, ok = couchApiBaseObj.(string)
 			if !ok {
-				return nil, ErrorBuildingCapiServerEndPointMap(targetBucketName, remoteClusterRef.Name, node)
+				return nil, ErrorBuildingCapiServerEndPointMap(targetBucketName, remoteClusterRef.Name(), node)
 			}
 
 			// If external nodes info is present, replace
 			endPoint = utils.ReplaceCouchApiBaseObjWithExternals(endPoint, nodeMap)
 		} else {
 			// endPoint is host address in nodeInfo
-			endPoint, err = utils.GetExternalHostAddrFromNodeInfo(remoteClusterRef.HostName, nodeMap, remoteClusterRef.IsHttps(), logger_capi_utils)
+			endPoint, err = utils.GetExternalHostAddrFromNodeInfo(remoteClusterRef.HostName(), nodeMap, remoteClusterRef.IsHttps(), logger_capi_utils)
 			if err != nil {
 				return nil, err
 			}
@@ -96,20 +96,20 @@ func ConstructCapiServiceEndPointMap(targetBucketName string, targetBucketInfo m
 		// Get internal direct ports
 		portsObj, ok := nodeMap[base.PortsKey]
 		if !ok {
-			return nil, ErrorBuildingCapiServerEndPointMap(targetBucketName, remoteClusterRef.Name, node)
+			return nil, ErrorBuildingCapiServerEndPointMap(targetBucketName, remoteClusterRef.Name(), node)
 		}
 		portsMap, ok := portsObj.(map[string]interface{})
 		if !ok {
-			return nil, ErrorBuildingCapiServerEndPointMap(targetBucketName, remoteClusterRef.Name, node)
+			return nil, ErrorBuildingCapiServerEndPointMap(targetBucketName, remoteClusterRef.Name(), node)
 		}
 
 		directPortObj, ok := portsMap[base.DirectPortKey]
 		if !ok {
-			return nil, ErrorBuildingCapiServerEndPointMap(targetBucketName, remoteClusterRef.Name, node)
+			return nil, ErrorBuildingCapiServerEndPointMap(targetBucketName, remoteClusterRef.Name(), node)
 		}
 		directPortFloat, ok := directPortObj.(float64)
 		if !ok {
-			return nil, ErrorBuildingCapiServerEndPointMap(targetBucketName, remoteClusterRef.Name, node)
+			return nil, ErrorBuildingCapiServerEndPointMap(targetBucketName, remoteClusterRef.Name(), node)
 		}
 
 		portToUse := uint16(directPortFloat)
