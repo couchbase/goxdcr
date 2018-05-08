@@ -446,17 +446,24 @@ func (capi *CapiNozzle) Receive(data interface{}) error {
 	dataChan <- req
 
 	//accumulate the batchCount and batchSize
-	capi.accumuBatch(vbno, req)
+	err = capi.accumuBatch(vbno, req)
+	if err != nil {
+		capi.handleGeneralError(err)
+	}
 
-	return nil
+	return err
 }
 
-func (capi *CapiNozzle) accumuBatch(vbno uint16, request *base.WrappedMCRequest) {
+func (capi *CapiNozzle) accumuBatch(vbno uint16, request *base.WrappedMCRequest) error {
 	capi.vb_batch_map_lock <- true
 	defer func() { <-capi.vb_batch_map_lock }()
 
 	batch := capi.vb_batch_map[vbno]
-	_, isFirst, isFull := batch.accumuBatch(request, capi.optimisticRep)
+	_, isFirst, isFull, err := batch.accumuBatch(request, capi.optimisticRep)
+	if err != nil {
+		return err
+	}
+
 	if isFirst {
 		select {
 		case capi.batches_nonempty_ch <- true:
@@ -468,6 +475,8 @@ func (capi *CapiNozzle) accumuBatch(vbno uint16, request *base.WrappedMCRequest)
 	if isFull {
 		capi.batchReady(vbno)
 	}
+
+	return nil
 }
 
 func (capi *CapiNozzle) processData_batch(finch chan bool, waitGrp *sync.WaitGroup) (err error) {
@@ -741,7 +750,10 @@ func (capi *CapiNozzle) batchSendWithRetry(batch *capiBatch) error {
 		atomic.AddInt32(&capi.items_in_dataChan, -1)
 		atomic.AddInt64(&capi.bytes_in_dataChan, int64(0-item.Req.Size()))
 
-		needSendStatus := needSend(item, &batch.dataBatch, capi.Logger())
+		needSendStatus, err := needSend(item, &batch.dataBatch, capi.Logger())
+		if err != nil {
+			return err
+		}
 		if needSendStatus == Send {
 			capi.adjustRequest(item)
 			req_list = append(req_list, item)

@@ -12,6 +12,7 @@ package parts
 
 import (
 	"encoding/binary"
+	"errors"
 	"fmt"
 	mc "github.com/couchbase/gomemcached"
 	base "github.com/couchbase/goxdcr/base"
@@ -225,7 +226,7 @@ func newBatch(cap_count uint32, cap_size uint32, logger *log.CommonLogger) *data
 		logger:            logger}
 }
 
-func (b *dataBatch) accumuBatch(req *base.WrappedMCRequest, classifyFunc func(req *mc.MCRequest) bool) (uint32, bool, bool) {
+func (b *dataBatch) accumuBatch(req *base.WrappedMCRequest, classifyFunc func(req *mc.MCRequest) bool) (uint32, bool, bool, error) {
 	var curCount uint32
 	var isFirst bool = false
 	var isFull bool = true
@@ -248,8 +249,10 @@ func (b *dataBatch) accumuBatch(req *base.WrappedMCRequest, classifyFunc func(re
 		if curCount < b.capacity_count && curSize < b.capacity_size*1000 {
 			isFull = false
 		}
+		return curCount, isFirst, isFull, nil
 	}
-	return curCount, isFirst, isFull
+
+	return curCount, isFirst, isFull, errors.New("accumuBatch saw a nil req")
 }
 
 func (b *dataBatch) count() uint32 {
@@ -273,18 +276,18 @@ func (b *dataBatch) incrementSize(delta uint32) uint32 {
 // Send - doc needs to be sent to target
 // Not_Send_Failed_CR - doc does not need to be sent to target since it failed source side conflict resolution
 // Not_Send_Other - doc does not need to be sent to target for other reasons, e.g., since target no longer owns the vbucket involved
-func needSend(req *base.WrappedMCRequest, batch *dataBatch, logger *log.CommonLogger) NeedSendStatus {
+func needSend(req *base.WrappedMCRequest, batch *dataBatch, logger *log.CommonLogger) (NeedSendStatus, error) {
 	if req == nil || req.Req == nil {
-		panic("req is null")
+		return Send, errors.New("needSend saw a nil req")
 	}
 
 	failedCR, ok := batch.bigDoc_noRep_map[req.UniqueKey]
 	if !ok {
-		return Send
+		return Send, nil
 	} else if failedCR {
-		return Not_Send_Failed_CR
+		return Not_Send_Failed_CR, nil
 	} else {
-		return Not_Send_Other
+		return Not_Send_Other, nil
 	}
 }
 

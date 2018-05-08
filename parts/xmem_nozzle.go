@@ -1031,7 +1031,12 @@ func (xmem *XmemNozzle) Receive(data interface{}) error {
 
 	}
 
-	return xmem.accumuBatch(request)
+	err = xmem.accumuBatch(request)
+	if err != nil {
+		xmem.handleGeneralError(err)
+	}
+
+	return err
 }
 
 func (xmem *XmemNozzle) accumuBatch(request *base.WrappedMCRequest) error {
@@ -1039,7 +1044,6 @@ func (xmem *XmemNozzle) accumuBatch(request *base.WrappedMCRequest) error {
 	if string(request.Req.Key) == "" {
 		xmem.Logger().Errorf("%v accumuBatch received request with Empty key, req.UniqueKey=%v%v%v\n", xmem.Id(), base.UdTagBegin, request.UniqueKey, base.UdTagEnd)
 		err := fmt.Errorf("%v accumuBatch received request with Empty key\n", xmem.Id())
-		xmem.handleGeneralError(errors.New(fmt.Sprintf("%v", err)))
 		return err
 	}
 
@@ -1053,7 +1057,11 @@ func (xmem *XmemNozzle) accumuBatch(request *base.WrappedMCRequest) error {
 
 	xmem.checkAndUpdateReceivedStats(request)
 
-	curCount, _, isFull := xmem.batch.accumuBatch(request, xmem.optimisticRep)
+	curCount, _, isFull, err := xmem.batch.accumuBatch(request, xmem.optimisticRep)
+	if err != nil {
+		return err
+	}
+
 	if curCount > 0 {
 		atomic.StoreUint32(&xmem.cur_batch_count, curCount)
 	}
@@ -1253,7 +1261,10 @@ func (xmem *XmemNozzle) batchSetMetaWithRetry(batch *dataBatch, numOfRetry int) 
 
 		if item != nil {
 			atomic.AddUint64(&xmem.counter_waittime, uint64(time.Since(item.Start_time).Seconds()*1000))
-			needSendStatus := needSend(item, batch, xmem.Logger())
+			needSendStatus, err := needSend(item, batch, xmem.Logger())
+			if err != nil {
+				return err
+			}
 			if needSendStatus == Send {
 
 				err = xmem.preprocessMCRequest(item)
