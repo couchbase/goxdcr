@@ -683,7 +683,7 @@ func TestRefresh3Nodes2GoesBad(t *testing.T) {
 
 	// Second refresh
 	agent.Refresh()
-	assert.NotEqual(hostname, agent.reference.HostName)
+	assert.NotEqual(hostname, agent.reference.HostName())
 	assert.True(refreshCheckActiveHostNameHelper(agent, newNodeList))
 
 	fmt.Println("============== Test case end: TestRefresh3Nodes2GoesBad =================")
@@ -740,7 +740,7 @@ func TestRefresh4Nodes3GoesBad(t *testing.T) {
 
 	// Second refresh
 	agent.Refresh()
-	assert.NotEqual(hostname, agent.reference.HostName)
+	assert.NotEqual(hostname, agent.reference.HostName())
 	assert.True(refreshCheckActiveHostNameHelper(agent, newNodeList))
 
 	// This second refresh should have changed the bootstrap node because node 1 was the bootstrap node and it has been declared "bad"

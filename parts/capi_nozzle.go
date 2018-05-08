@@ -633,15 +633,29 @@ func (capi *CapiNozzle) batchGetMeta(vbno uint16, bigDoc_map base.McRequestMap) 
 		return nil, err
 	}
 
+	// used for de-dup
+	// if there are multiple mutations with the same key and different seqnos
+	// this map helps identify the mutation with the highest seqno, for which GetMeta request will be sent to target
+	key_highest_seqno_map := make(map[string]uint64)
 	// Used for sending to target
 	key_rev_map := make(map[string]string)
 	// Used for stats updating
 	key_seqnostarttime_map := make(map[string][]interface{})
 	sent_id_map := make(map[string]bool)
+
+	// this loop performs de-dup.
+	// if there are multiple mutations with the same key, key_highest_seqno_map tracks the mutation with the highest seqno
+	for _, req := range bigDoc_map {
+		key := string(req.Req.Key)
+		if seqno, ok := key_highest_seqno_map[key]; !ok || seqno < req.Seqno {
+			key_highest_seqno_map[key] = req.Seqno
+		}
+	}
+
 	// Populate necessary data maps above from the passed in bigDoc_map to be able to query the target
 	for id, req := range bigDoc_map {
 		key := string(req.Req.Key)
-		if _, ok := key_rev_map[key]; !ok {
+		if seqno, ok := key_highest_seqno_map[key]; ok && seqno == req.Seqno {
 			key_rev_map[key] = getSerializedRevision(req.Req)
 			key_seqnostarttime_map[key] = []interface{}{req.Seqno, time.Now()}
 			sent_id_map[id] = true
@@ -690,9 +704,14 @@ func (capi *CapiNozzle) batchGetMeta(vbno uint16, bigDoc_map base.McRequestMap) 
 		if _, found := sent_id_map[id]; found {
 			docKey := string(req.Req.Key)
 			if _, ok = bigDoc_rep_map[docKey]; !ok {
-				// True == failed CR, else other reasons
+				// true -> failed CR
 				bigDoc_noRep_map[id] = true
 			}
+		} else {
+			// if id is not found in sent_id_map, it must have been de-duped
+			// do not send it to target
+			// true -> failed CR  -- consider it to have failed CR with other source side mutations
+			bigDoc_noRep_map[id] = true
 		}
 	}
 
