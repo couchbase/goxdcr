@@ -24,7 +24,6 @@ import (
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
 	utilities "github.com/couchbase/goxdcr/utils"
-	"io"
 	"io/ioutil"
 	"net"
 	"net/http"
@@ -325,28 +324,33 @@ func (capi *CapiNozzle) Start(settings metadata.ReplicationSettingsMap) error {
 	}
 
 	err = capi.initialize(settings)
-	capi.Logger().Infof("%v initialized\n", capi.Id())
-	if err == nil {
-		capi.childrenWaitGrp.Add(1)
-		go capi.selfMonitor(capi.finish_ch, &capi.childrenWaitGrp)
-
-		capi.childrenWaitGrp.Add(1)
-		go capi.processData_batch(capi.finish_ch, &capi.childrenWaitGrp)
-
-		capi.start_time = time.Now()
-		err = capi.Start_server()
-	}
-
-	if err == nil {
-		err = capi.SetState(common.Part_Running)
-		if err == nil {
-			capi.Logger().Infof("%v has been started successfully\n", capi.Id())
-		}
-	}
 	if err != nil {
-		capi.Logger().Errorf("%v failed to start. err=%v\n", capi.Id(), err)
+		return err
 	}
-	return err
+
+	capi.Logger().Infof("%v initialized\n", capi.Id())
+
+	capi.childrenWaitGrp.Add(1)
+	go capi.selfMonitor(capi.finish_ch, &capi.childrenWaitGrp)
+
+	capi.childrenWaitGrp.Add(1)
+	go capi.processData_batch(capi.finish_ch, &capi.childrenWaitGrp)
+
+	capi.start_time = time.Now()
+	err = capi.Start_server()
+	if err != nil {
+		capi.Logger().Errorf("%v failed to start server. err=%v\n", capi.Id(), err)
+		return err
+	}
+
+	err = capi.SetState(common.Part_Running)
+	if err != nil {
+		capi.Logger().Errorf("%v failed to set state to running. err=%v\n", capi.Id(), err)
+		return err
+	}
+
+	capi.Logger().Infof("%v has been started successfully\n", capi.Id())
+	return nil
 }
 
 func (capi *CapiNozzle) Stop() error {
@@ -370,6 +374,9 @@ func (capi *CapiNozzle) Stop() error {
 	}
 
 	err = capi.Stop_server()
+	if err != nil {
+		capi.Logger().Warnf("%v failed to stop server. err=%v\n", capi.Id(), err)
+	}
 
 	err = capi.SetState(common.Part_Stopped)
 	if err == nil {
@@ -443,7 +450,10 @@ func (capi *CapiNozzle) Receive(data interface{}) error {
 	atomic.AddInt32(&capi.items_in_dataChan, 1)
 	atomic.AddInt64(&capi.bytes_in_dataChan, int64(size))
 
-	dataChan <- req
+	err = capi.writeToDataChan(dataChan, req)
+	if err != nil {
+		return err
+	}
 
 	//accumulate the batchCount and batchSize
 	err = capi.accumuBatch(vbno, req)
@@ -452,6 +462,16 @@ func (capi *CapiNozzle) Receive(data interface{}) error {
 	}
 
 	return err
+}
+
+func (capi *CapiNozzle) writeToDataChan(dataChan chan *base.WrappedMCRequest, request *base.WrappedMCRequest) error {
+	select {
+	case dataChan <- request:
+		return nil
+	// provides an alternative exit path when capi stops
+	case <-capi.finish_ch:
+		return PartStoppedError
+	}
 }
 
 func (capi *CapiNozzle) accumuBatch(vbno uint16, request *base.WrappedMCRequest) error {
@@ -598,9 +618,6 @@ func (capi *CapiNozzle) send_internal(batch *capiBatch) error {
 	if batch != nil {
 		count := batch.count()
 
-		new_counter_sent := atomic.AddUint32(&capi.counter_sent, count)
-		capi.Logger().Debugf("So far, capi %v processed %d items", capi.Id(), new_counter_sent)
-
 		// A map of documents that should not be replicated
 		var bigDoc_noRep_map map[string]bool
 		// Populate no replication map to optimize data bandwidth before actually sending
@@ -616,6 +633,8 @@ func (capi *CapiNozzle) send_internal(batch *capiBatch) error {
 		err = capi.batchSendWithRetry(batch)
 		if err == nil {
 			capi.recordLastSentBatch(batch.vbno, count)
+			new_counter_sent := atomic.AddUint32(&capi.counter_sent, count)
+			capi.Logger().Debugf("So far, capi %v processed %d items", capi.Id(), new_counter_sent)
 		}
 	}
 	return err
@@ -1004,22 +1023,22 @@ func (capi *CapiNozzle) writeDocs(vbno uint16, req_bytes []byte, doc_list [][]by
 			// if no error, keep sending body parts
 			if partIndex == 0 {
 				// send initial request to tcp
-				if !capi.writeToPartCh(part_ch, req_bytes) {
+				if !capi.writeToPartCh(part_ch, fin_ch, req_bytes) {
 					return
 				}
 			} else if partIndex == 1 {
 				// write body part prefix
-				if !capi.writeToPartCh(part_ch, BodyPartsPrefix) {
+				if !capi.writeToPartCh(part_ch, fin_ch, BodyPartsPrefix) {
 					return
 				}
 			} else if partIndex < len(doc_list)+2 {
 				// write individual doc
-				if !capi.writeToPartCh(part_ch, doc_list[partIndex-2]) {
+				if !capi.writeToPartCh(part_ch, fin_ch, doc_list[partIndex-2]) {
 					return
 				}
 			} else {
 				// write body part suffix
-				if !capi.writeToPartCh(part_ch, BodyPartsSuffix) {
+				if !capi.writeToPartCh(part_ch, fin_ch, BodyPartsSuffix) {
 					return
 				}
 				// all parts have been sent. terminate sendBodyPart rountine
@@ -1033,18 +1052,14 @@ func (capi *CapiNozzle) writeDocs(vbno uint16, req_bytes []byte, doc_list [][]by
 }
 
 // use timeout to give it a chance to detect nozzle stop event and abort
-func (capi *CapiNozzle) writeToPartCh(part_ch chan []byte, data []byte) bool {
-	timeoutticker := time.NewTicker(capi.config.writeTimeout)
-	defer timeoutticker.Stop()
+func (capi *CapiNozzle) writeToPartCh(part_ch chan []byte, fin_ch chan bool, data []byte) bool {
 	for {
 		select {
+		case <-fin_ch:
+			capi.Logger().Infof("%v received finish signal. Aborting writing to part ch", capi.Id())
+			return false
 		case part_ch <- data:
 			return true
-		case <-timeoutticker.C:
-			if capi.validateRunningState() != nil {
-				capi.Logger().Infof("%v is no longer running, aborting writing to part ch", capi.Id())
-				return false
-			}
 		}
 	}
 }
@@ -1086,11 +1101,13 @@ func (capi *CapiNozzle) tcpProxy(vbno uint16, part_ch chan []byte, resp_ch chan 
 				defer response.Body.Close()
 
 				if response.StatusCode != 201 {
+					// read response body to be safe.
+					// error in reading can be ignored since connection will get closed soon
+					ioutil.ReadAll(response.Body)
+
 					errMsg := fmt.Sprintf("Received unexpected status code, %v, from update docs request for vb %v\n", response.StatusCode, vbno)
 					capi.Logger().Errorf("%v %v", capi.Id(), errMsg)
 					err_ch <- errors.New(errMsg)
-
-					// no need to read leftover bytes, if any, since connection will get reset soon
 					return
 				}
 
@@ -1113,15 +1130,6 @@ func (capi *CapiNozzle) tcpProxy(vbno uint16, part_ch chan []byte, resp_ch chan 
 		}
 	}
 
-}
-
-func (capi *CapiNozzle) getResponseBodyLength(response *http.Response) (int, error) {
-	contents, err := ioutil.ReadAll(response.Body)
-	if err != nil && (err == io.ErrUnexpectedEOF || strings.Contains(err.Error(), base.UnexpectedEOF)) {
-		// unexpected EOF is expected when response.Body does not contain all response bytes, which happens often
-		err = nil
-	}
-	return len(contents), err
 }
 
 // malformed http response error may print the entire response buffer, which can be arbitrarily long
@@ -1220,10 +1228,15 @@ func (capi *CapiNozzle) PrintStatusSummary() {
 
 func (capi *CapiNozzle) handleGeneralError(err error) {
 	if capi.handleError() {
-		capi.Logger().Errorf("%v raise error condition %v\n", capi.Id(), err)
-		capi.RaiseEvent(common.NewEvent(common.ErrorEncountered, nil, capi, nil, err))
+		err1 := capi.SetState(common.Part_Error)
+		if err1 == nil {
+			capi.Logger().Errorf("%v raise error condition %v\n", capi.Id(), err)
+			capi.RaiseEvent(common.NewEvent(common.ErrorEncountered, nil, capi, nil, err))
+		} else {
+			capi.Logger().Infof("%v is already in error state. err=%v is ignored\n", capi.Id(), err)
+		}
 	} else {
-		capi.Logger().Debugf("%v in shutdown process, err=%v is ignored\n", capi.Id(), err)
+		capi.Logger().Infof("%v is already in shutdown process, err=%v is ignored\n", capi.Id(), err)
 	}
 }
 
@@ -1236,10 +1249,6 @@ func (capi *CapiNozzle) optimisticRep(req *mc.MCRequest) bool {
 
 func (capi *CapiNozzle) getOptiRepThreshold() uint32 {
 	return atomic.LoadUint32(&(capi.config.optiRepThreshold))
-}
-
-func (capi *CapiNozzle) getPoolName(config capiConfig) string {
-	return "Couch_Capi_" + config.connectStr
 }
 
 func (capi *CapiNozzle) getCouchApiBaseHostAndPathForVB(vbno uint16) (string, string, error) {
