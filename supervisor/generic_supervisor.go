@@ -39,6 +39,7 @@ const (
 	default_heartbeat_interval            time.Duration = 3000 * time.Millisecond
 	default_heartbeat_resp_check_interval time.Duration = 500 * time.Millisecond
 	default_heartbeat_timeout             time.Duration = 4000 * time.Millisecond
+
 	// adminport could miss heart beat because it is actively processing rest requests.
 	// since we use a http read timeout of 180 seconds, the time threshold for heartbeat miss should be larger than 180 seconds.
 	// setting it to 600 seconds to be conservative, since false positive will get goxdcr process restarted.

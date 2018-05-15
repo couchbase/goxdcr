@@ -66,10 +66,8 @@ type ReplicationManagerIf interface {
 /* struct ReplicationManager
 *************************************/
 type replicationManager struct {
-	// supervises the livesness of adminport and pipelineMasterSupervisor
+	// supervises the livesness of adminport
 	supervisor.GenericSupervisor
-	// supervises the liveness of all pipeline supervisors
-	pipelineMasterSupervisor *supervisor.GenericSupervisor
 	// Single instance of pipeline_mgr here instead of using a global
 	pipelineMgr *pipeline_manager.PipelineManager
 
@@ -145,11 +143,6 @@ func StartReplicationManager(sourceKVHost string, xdcrRestPort uint16,
 
 		// initializes replication manager
 		replication_mgr.init(repl_spec_svc, remote_cluster_svc, cluster_info_svc, xdcr_topology_svc, replication_settings_svc, checkpoint_svc, capi_svc, audit_svc, uilog_svc, global_setting_svc, bucket_settings_svc, internal_settings_svc)
-
-		// start pipeline master supervisor
-		// TODO should we make heart beat settings configurable?
-		replication_mgr.pipelineMasterSupervisor.Start(nil)
-		logger_rm.Info("Master supervisor has started")
 
 		// start replication manager supervisor
 		// TODO should we make heart beat settings configurable?
@@ -375,7 +368,6 @@ func (rm *replicationManager) init(
 	internal_settings_svc service_def.InternalSettingsSvc) {
 
 	rm.GenericSupervisor = *supervisor.NewGenericSupervisor(base.ReplicationManagerSupervisorId, log.DefaultLoggerContext, rm, nil, rm.utils)
-	rm.pipelineMasterSupervisor = supervisor.NewGenericSupervisor(base.PipelineMasterSupervisorId, log.DefaultLoggerContext, rm, &rm.GenericSupervisor, rm.utils)
 	rm.repl_spec_svc = repl_spec_svc
 	rm.remote_cluster_svc = remote_cluster_svc
 	rm.cluster_info_svc = cluster_info_svc
@@ -389,7 +381,7 @@ func (rm *replicationManager) init(
 	rm.global_setting_svc = global_setting_svc
 	rm.bucket_settings_svc = bucket_settings_svc
 	rm.internal_settings_svc = internal_settings_svc
-	fac := factory.NewXDCRFactory(repl_spec_svc, remote_cluster_svc, cluster_info_svc, xdcr_topology_svc, checkpoint_svc, capi_svc, uilog_svc, bucket_settings_svc, log.DefaultLoggerContext, log.DefaultLoggerContext, rm, rm.pipelineMasterSupervisor, rm.utils)
+	fac := factory.NewXDCRFactory(repl_spec_svc, remote_cluster_svc, cluster_info_svc, xdcr_topology_svc, checkpoint_svc, capi_svc, uilog_svc, bucket_settings_svc, log.DefaultLoggerContext, log.DefaultLoggerContext, rm, rm.utils)
 
 	rm.pipelineMgr = pipeline_manager.NewPipelineManager(fac, repl_spec_svc, xdcr_topology_svc, remote_cluster_svc, cluster_info_svc, checkpoint_svc, uilog_svc, log.DefaultLoggerContext, rm.utils)
 
@@ -483,10 +475,6 @@ func DeleteReplication(topic string, realUserId *service_def.RealUserId) error {
 	logger_rm.Infof("Pipeline %s is deleted\n", topic)
 
 	return nil
-}
-
-func PipelineMasterSupervisor() *supervisor.GenericSupervisor {
-	return replication_mgr.pipelineMasterSupervisor
 }
 
 //update the  replication settings and XDCR process setting
@@ -802,27 +790,9 @@ func (rm *replicationManager) OnError(s common.Supervisor, errMap map[string]err
 	logger_rm.Infof("Supervisor %v of type %v reported errors %v\n", s.Id(), reflect.TypeOf(s), errMap)
 
 	if s.Id() == base.ReplicationManagerSupervisorId {
-		// the errors came from the replication manager supervisor because adminport or pipeline master supervisor is not longer alive.
+		// the errors came from the replication manager supervisor because adminport is not longer alive.
 		// there is nothing we can do except to abort xdcr. ns_server will restart xdcr while later
 		exitProcess(false)
-	} else if s.Id() == base.PipelineMasterSupervisorId {
-		if len(errMap) == 0 {
-			logger_rm.Warnf("Pipeline master supervisor reported empty error map. Ignoring it. Supervisor id=%v, type=%v\n", s.Id(), reflect.TypeOf(s))
-			return
-		}
-
-		// the errors came from the pipeline master supervisor because some pipeline supervisors are not longer alive.
-		for childId, err1 := range errMap {
-			child, _ := s.Child(childId)
-			// child could be null if the pipeline has been stopped so far. //TODO should we restart it here?
-			if child != nil {
-				pipeline, err := rm.getPipelineFromPipelineSupevisor(child.(common.Supervisor))
-				if err == nil {
-					// try to fix the pipeline
-					rm.pipelineMgr.UpdatePipeline(pipeline.Topic(), err1)
-				}
-			}
-		}
 	} else {
 		// the errors came from a pipeline supervisor because some parts are not longer alive.
 		pipeline, err := rm.getPipelineFromPipelineSupevisor(s)
@@ -940,9 +910,6 @@ func cleanup() {
 
 		//stop the generic supervisor
 		replication_mgr.Stop()
-
-		//stop pipelineMasterSupervisor
-		replication_mgr.pipelineMasterSupervisor.Stop()
 
 		// stop listening to spec changed events
 		replication_mgr.metadata_change_callback_cancel_ch <- struct{}{}

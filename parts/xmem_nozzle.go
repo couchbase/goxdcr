@@ -18,7 +18,6 @@ import (
 	mcc "github.com/couchbase/gomemcached/client"
 	base "github.com/couchbase/goxdcr/base"
 	common "github.com/couchbase/goxdcr/common"
-	gen_server "github.com/couchbase/goxdcr/gen_server"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/goxdcr/service_def"
@@ -731,8 +730,6 @@ func (client *xmemClient) incrementBackOffFactor() {
 /* struct XmemNozzle
 *************************************/
 type XmemNozzle struct {
-	//parent inheritance
-	gen_server.GenServer
 	AbstractPart
 
 	//remote cluster reference for retrieving up to date remote cluster reference
@@ -830,17 +827,9 @@ func NewXmemNozzle(id string,
 	logger_context *log.LoggerContext,
 	utilsIn utilities.UtilsIface) *XmemNozzle {
 
-	//callback functions from GenServer
-	var msg_callback_func gen_server.Msg_Callback_Func
-	var exit_callback_func gen_server.Exit_Callback_Func
-	var error_handler_func gen_server.Error_Handler_Func
+	part := NewAbstractPartWithLogger(id, log.NewLogger("XmemNozzle", logger_context))
 
-	server := gen_server.NewGenServer(&msg_callback_func,
-		&exit_callback_func, &error_handler_func, logger_context, "XmemNozzle", utilsIn)
-	part := NewAbstractPartWithLogger(id, server.Logger())
-
-	xmem := &XmemNozzle{GenServer: server,
-		AbstractPart:        part,
+	xmem := &XmemNozzle{AbstractPart: part,
 		remoteClusterSvc:    remoteClusterSvc,
 		targetClusterUuid:   targetClusterUuid,
 		bOpen:               true,
@@ -849,7 +838,7 @@ func NewXmemNozzle(id string,
 		receive_token_ch:    nil,
 		client_for_setMeta:  nil,
 		client_for_getMeta:  nil,
-		config:              newConfig(server.Logger()),
+		config:              newConfig(part.Logger()),
 		batches_ready_queue: nil,
 		batch:               nil,
 		batch_lock:          make(chan bool, 1),
@@ -879,9 +868,6 @@ func NewXmemNozzle(id string,
 	xmem.config.connPoolNamePrefix = connPoolNamePrefix
 	xmem.config.connPoolSize = connPoolConnSize
 
-	msg_callback_func = nil
-	exit_callback_func = xmem.onExit
-	error_handler_func = xmem.handleGeneralError
 	return xmem
 
 }
@@ -947,7 +933,6 @@ func (xmem *XmemNozzle) Start(settings metadata.ReplicationSettingsMap) error {
 	go xmem.processData_sendbatch(xmem.finish_ch, &xmem.childrenWaitGrp)
 
 	xmem.start_time = time.Now()
-	err = xmem.Start_server()
 	xmem.SetState(common.Part_Running)
 	xmem.Logger().Infof("%v has been started", xmem.Id())
 
@@ -963,10 +948,7 @@ func (xmem *XmemNozzle) Stop() error {
 
 	xmem.Logger().Debugf("%v processed %v items\n", xmem.Id(), atomic.LoadUint64(&xmem.counter_sent))
 
-	err = xmem.Stop_server()
-	if err != nil {
-		return err
-	}
+	xmem.onExit()
 
 	err = xmem.SetState(common.Part_Stopped)
 	if err == nil {

@@ -62,9 +62,9 @@ type PipelineSupervisor struct {
 }
 
 func NewPipelineSupervisor(id string, logger_ctx *log.LoggerContext, failure_handler common.SupervisorFailureHandler,
-	parentSupervisor *supervisor.GenericSupervisor, cluster_info_svc service_def.ClusterInfoSvc,
-	xdcr_topology_svc service_def.XDCRCompTopologySvc, utilsIn utilities.UtilsIface) *PipelineSupervisor {
-	supervisor := supervisor.NewGenericSupervisor(id, logger_ctx, failure_handler, parentSupervisor, utilsIn)
+	cluster_info_svc service_def.ClusterInfoSvc, xdcr_topology_svc service_def.XDCRCompTopologySvc,
+	utilsIn utilities.UtilsIface) *PipelineSupervisor {
+	supervisor := supervisor.NewGenericSupervisor(id, logger_ctx, failure_handler, nil, utilsIn)
 	pipelineSupervisor := &PipelineSupervisor{GenericSupervisor: supervisor,
 		errors_seen:         make(map[string]error),
 		errors_seen_lock:    &sync.RWMutex{},
@@ -91,8 +91,6 @@ func (pipelineSupervisor *PipelineSupervisor) Attach(p common.Pipeline) error {
 	partsMap := pipeline.GetAllParts(p)
 
 	for _, part := range partsMap {
-		// the assumption here is that all XDCR parts are Supervisable
-		pipelineSupervisor.AddChild(part.(common.Supervisable))
 
 		//register itself with all parts' ErrorEncountered event
 		part.RegisterComponentEventListener(common.ErrorEncountered, pipelineSupervisor)

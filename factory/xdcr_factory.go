@@ -17,7 +17,6 @@ import (
 	"github.com/couchbase/goxdcr/pipeline_utils"
 	"github.com/couchbase/goxdcr/service_def"
 	"github.com/couchbase/goxdcr/service_impl"
-	"github.com/couchbase/goxdcr/supervisor"
 	utilities "github.com/couchbase/goxdcr/utils"
 	"math"
 	"strconv"
@@ -56,11 +55,10 @@ type XDCRFactory struct {
 	//bucket settings service
 	bucket_settings_svc service_def.BucketSettingsSvc
 
-	default_logger_ctx         *log.LoggerContext
-	pipeline_failure_handler   common.SupervisorFailureHandler
-	logger                     *log.CommonLogger
-	pipeline_master_supervisor *supervisor.GenericSupervisor
-	utils                      utilities.UtilsIface
+	default_logger_ctx       *log.LoggerContext
+	pipeline_failure_handler common.SupervisorFailureHandler
+	logger                   *log.CommonLogger
+	utils                    utilities.UtilsIface
 }
 
 // set call back functions is done only once
@@ -75,19 +73,17 @@ func NewXDCRFactory(repl_spec_svc service_def.ReplicationSpecSvc,
 	pipeline_default_logger_ctx *log.LoggerContext,
 	factory_logger_ctx *log.LoggerContext,
 	pipeline_failure_handler common.SupervisorFailureHandler,
-	pipeline_master_supervisor *supervisor.GenericSupervisor,
 	utilsIn utilities.UtilsIface) *XDCRFactory {
 	return &XDCRFactory{repl_spec_svc: repl_spec_svc,
-		remote_cluster_svc:         remote_cluster_svc,
-		cluster_info_svc:           cluster_info_svc,
-		xdcr_topology_svc:          xdcr_topology_svc,
-		checkpoint_svc:             checkpoint_svc,
-		capi_svc:                   capi_svc,
-		uilog_svc:                  uilog_svc,
-		bucket_settings_svc:        bucket_settings_svc,
-		default_logger_ctx:         pipeline_default_logger_ctx,
-		pipeline_failure_handler:   pipeline_failure_handler,
-		pipeline_master_supervisor: pipeline_master_supervisor,
+		remote_cluster_svc:       remote_cluster_svc,
+		cluster_info_svc:         cluster_info_svc,
+		xdcr_topology_svc:        xdcr_topology_svc,
+		checkpoint_svc:           checkpoint_svc,
+		capi_svc:                 capi_svc,
+		uilog_svc:                uilog_svc,
+		bucket_settings_svc:      bucket_settings_svc,
+		default_logger_ctx:       pipeline_default_logger_ctx,
+		pipeline_failure_handler: pipeline_failure_handler,
 		logger: log.NewLogger("XDCRFactory", factory_logger_ctx),
 		utils:  utilsIn}
 }
@@ -775,7 +771,7 @@ func (xdcrf *XDCRFactory) registerServices(pipeline common.Pipeline, logger_ctx 
 
 	//register pipeline supervisor
 	supervisor := pipeline_svc.NewPipelineSupervisor(base.PipelineSupervisorIdPrefix+pipeline.Topic(), logger_ctx,
-		xdcrf.pipeline_failure_handler, xdcrf.pipeline_master_supervisor, xdcrf.cluster_info_svc, xdcrf.xdcr_topology_svc, xdcrf.utils)
+		xdcrf.pipeline_failure_handler, xdcrf.cluster_info_svc, xdcrf.xdcr_topology_svc, xdcrf.utils)
 	err := ctx.RegisterService(base.PIPELINE_SUPERVISOR_SVC, supervisor)
 	if err != nil {
 		return err

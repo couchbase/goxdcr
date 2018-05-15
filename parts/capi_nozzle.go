@@ -20,7 +20,6 @@ import (
 	mc "github.com/couchbase/gomemcached"
 	base "github.com/couchbase/goxdcr/base"
 	common "github.com/couchbase/goxdcr/common"
-	gen_server "github.com/couchbase/goxdcr/gen_server"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
 	utilities "github.com/couchbase/goxdcr/utils"
@@ -151,9 +150,6 @@ func (config *capiConfig) initializeConfig(settings metadata.ReplicationSettings
 /* struct CapiNozzle
 *************************************/
 type CapiNozzle struct {
-
-	//parent inheritance
-	gen_server.GenServer
 	AbstractPart
 
 	bOpen      bool
@@ -216,22 +212,15 @@ func NewCapiNozzle(id string,
 	logger_context *log.LoggerContext,
 	utilsIn utilities.UtilsIface) *CapiNozzle {
 
-	//callback functions from GenServer
-	var msg_callback_func gen_server.Msg_Callback_Func
-	var exit_callback_func gen_server.Exit_Callback_Func
-	var error_handler_func gen_server.Error_Handler_Func
+	part := NewAbstractPartWithLogger(id, log.NewLogger("CapiNozzle", logger_context))
 
-	server := gen_server.NewGenServer(&msg_callback_func,
-		&exit_callback_func, &error_handler_func, logger_context, "CapiNozzle", utilsIn)
-	part := NewAbstractPartWithLogger(id, server.Logger())
-
-	capi := &CapiNozzle{GenServer: server, /*gen_server.GenServer*/
-		AbstractPart:        part,                           /*part.AbstractPart*/
-		bOpen:               true,                           /*bOpen	bool*/
-		lock_bOpen:          sync.RWMutex{},                 /*lock_bOpen	sync.RWMutex*/
-		config:              newCapiConfig(server.Logger()), /*config	capiConfig*/
-		batches_ready:       nil,                            /*batches_ready chan *capiBatch*/
-		childrenWaitGrp:     sync.WaitGroup{},               /*childrenWaitGrp sync.WaitGroup*/
+	capi := &CapiNozzle{
+		AbstractPart:        part,                         /*part.AbstractPart*/
+		bOpen:               true,                         /*bOpen	bool*/
+		lock_bOpen:          sync.RWMutex{},               /*lock_bOpen	sync.RWMutex*/
+		config:              newCapiConfig(part.Logger()), /*config	capiConfig*/
+		batches_ready:       nil,                          /*batches_ready chan *capiBatch*/
+		childrenWaitGrp:     sync.WaitGroup{},             /*childrenWaitGrp sync.WaitGroup*/
 		finish_ch:           make(chan bool, 1),
 		batches_nonempty_ch: make(chan bool, 1),
 		//		send_allow_ch:    make(chan bool, 1), /*send_allow_ch chan bool*/
@@ -254,10 +243,6 @@ func NewCapiNozzle(id string,
 	capi.config.password = password
 	capi.config.certificate = certificate
 	capi.config.vbCouchApiBaseMap = vbCouchApiBaseMap
-
-	msg_callback_func = nil
-	exit_callback_func = capi.onExit
-	error_handler_func = capi.handleGeneralError
 
 	return capi
 
@@ -336,13 +321,6 @@ func (capi *CapiNozzle) Start(settings metadata.ReplicationSettingsMap) error {
 	capi.childrenWaitGrp.Add(1)
 	go capi.processData_batch(capi.finish_ch, &capi.childrenWaitGrp)
 
-	capi.start_time = time.Now()
-	err = capi.Start_server()
-	if err != nil {
-		capi.Logger().Errorf("%v failed to start server. err=%v\n", capi.Id(), err)
-		return err
-	}
-
 	err = capi.SetState(common.Part_Running)
 	if err != nil {
 		capi.Logger().Errorf("%v failed to set state to running. err=%v\n", capi.Id(), err)
@@ -373,10 +351,7 @@ func (capi *CapiNozzle) Stop() error {
 		close(capi.batches_ready)
 	}
 
-	err = capi.Stop_server()
-	if err != nil {
-		capi.Logger().Warnf("%v failed to stop server. err=%v\n", capi.Id(), err)
-	}
+	capi.onExit()
 
 	err = capi.SetState(common.Part_Stopped)
 	if err == nil {

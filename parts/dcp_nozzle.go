@@ -17,7 +17,6 @@ import (
 	mcc "github.com/couchbase/gomemcached/client"
 	base "github.com/couchbase/goxdcr/base"
 	common "github.com/couchbase/goxdcr/common"
-	gen_server "github.com/couchbase/goxdcr/gen_server"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/goxdcr/service_def"
@@ -231,9 +230,8 @@ type DcpNozzleIface interface {
 	PrintStatusSummary()
 	UpdateSettings(settings metadata.ReplicationSettingsMap) error
 
-	// Embedded from GenServer
-	Logger() *log.CommonLogger
 	// Embedded from AbstractPart
+	Logger() *log.CommonLogger
 	RaiseEvent(event *common.Event)
 }
 
@@ -241,9 +239,6 @@ type DcpNozzleIface interface {
 /* struct DcpNozzle
 *************************************/
 type DcpNozzle struct {
-
-	//parent composition
-	gen_server.GenServer
 	AbstractPart
 
 	// the list of vbuckets that the dcp nozzle is responsible for
@@ -313,23 +308,15 @@ func NewDcpNozzle(id string,
 	logger_context *log.LoggerContext,
 	utilsIn utilities.UtilsIface) *DcpNozzle {
 
-	//callback functions from GenServer
-	var msg_callback_func gen_server.Msg_Callback_Func
-	var exit_callback_func gen_server.Exit_Callback_Func
-	var error_handler_func gen_server.Error_Handler_Func
-
-	server := gen_server.NewGenServer(&msg_callback_func,
-		&exit_callback_func, &error_handler_func, logger_context, "DcpNozzle", utilsIn)
-	part := NewAbstractPartWithLogger(id, server.Logger())
+	part := NewAbstractPartWithLogger(id, log.NewLogger("DcpNozzle", logger_context))
 
 	dcp := &DcpNozzle{
 		sourceBucketName:         sourceBucketName,
 		targetBucketName:         targetBucketName,
 		vbnos:                    vbnos,
 		vb_xattr_seqno_map:       make(map[uint16]*uint64),
-		GenServer:                server, /*gen_server.GenServer*/
-		AbstractPart:             part,   /*AbstractPart*/
-		bOpen:                    true,   /*bOpen	bool*/
+		AbstractPart:             part, /*AbstractPart*/
+		bOpen:                    true, /*bOpen	bool*/
 		lock_bOpen:               sync.RWMutex{},
 		childrenWaitGrp:          sync.WaitGroup{}, /*childrenWaitGrp sync.WaitGroup*/
 		lock_uprFeed:             sync.RWMutex{},
@@ -341,10 +328,6 @@ func NewDcpNozzle(id string,
 		utils:                    utilsIn,
 		vbHandshakeMap:           make(map[uint16]*dcpStreamReqHelper),
 	}
-
-	msg_callback_func = nil
-	exit_callback_func = dcp.onExit
-	error_handler_func = dcp.handleGeneralError
 
 	for _, vbno := range vbnos {
 		dcp.cur_ts[vbno] = &vbtsWithLock{lock: &sync.RWMutex{}, ts: nil}
@@ -551,10 +534,6 @@ func (dcp *DcpNozzle) Start(settings metadata.ReplicationSettingsMap) error {
 
 	// start gen_server
 	dcp.start_time = time.Now()
-	err = dcp.Start_server()
-	if err != nil {
-		return err
-	}
 
 	//start datachan length stats collection
 	dcp.childrenWaitGrp.Add(1)
@@ -618,10 +597,7 @@ func (dcp *DcpNozzle) Stop() error {
 
 	dcp.Logger().Debugf("%v received %v items, sent %v items\n", dcp.Id(), dcp.counterReceived(), dcp.counterSent())
 
-	err = dcp.Stop_server()
-	if err != nil {
-		dcp.Logger().Warnf("%v received error when stopping server. err=%v\n", dcp.Id(), err)
-	}
+	dcp.onExit()
 
 	// Wait for all go-routines to exit before cleaning up helpers
 	dcp.cleanUpProcessDataHelpers()
