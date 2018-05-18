@@ -301,21 +301,26 @@ func (stats_mgr *StatisticsManager) updateStats() error {
 			ticker.Stop()
 			ticker = new_ticker
 		case <-stats_mgr.finish_ch:
+			stats_mgr.logger.Infof("%v updateStats received finish signal", stats_mgr.pipeline.InstanceId())
 			stats_mgr.cleanupBeforeExit()
-			return nil
+			goto done
 		// this ensures that stats are printed out immediately after updateStats is started
 		case <-init_ch:
 			err := stats_mgr.updateStatsOnce()
 			if err != nil {
-				return nil
+				stats_mgr.logger.Warnf("%v updateStatsOnce encountered error = %v", stats_mgr.pipeline.InstanceId(), err)
+				goto done
 			}
 		case <-ticker.C:
 			err := stats_mgr.updateStatsOnce()
 			if err != nil {
-				return nil
+				stats_mgr.logger.Warnf("%v updateStatsOnce encountered error = %v", stats_mgr.pipeline.InstanceId(), err)
+				goto done
 			}
 		}
 	}
+done:
+	ticker.Stop()
 	return nil
 }
 
