@@ -111,20 +111,7 @@ func (pipelineSupervisor *PipelineSupervisor) Attach(p common.Pipeline) error {
 }
 
 func (pipelineSupervisor *PipelineSupervisor) Start(settings metadata.ReplicationSettingsMap) error {
-	// when doing health check, we want to wait long enough to ensure that we see bad stats in at least two different stats collection intervals
-	// before we declare the pipeline to be broken
-	var max_dcp_miss_count int
-	stats_update_interval := StatsUpdateInterval(settings)
-	number_of_waits_to_ensure_stats_update := int(stats_update_interval.Nanoseconds()/health_check_interval.Nanoseconds()) + 1
-	if number_of_waits_to_ensure_stats_update < default_max_dcp_miss_count {
-		max_dcp_miss_count = default_max_dcp_miss_count
-	} else {
-		max_dcp_miss_count = number_of_waits_to_ensure_stats_update
-	}
-
-	for _, dcp_nozzle := range pipelineSupervisor.pipeline.Sources() {
-		dcp_nozzle.(*parts.DcpNozzle).SetMaxMissCount(max_dcp_miss_count)
-	}
+	pipelineSupervisor.setMaxDcpMissCount(settings)
 
 	// do the generic supervisor start stuff
 	err := pipelineSupervisor.GenericSupervisor.Start(settings)
@@ -137,6 +124,25 @@ func (pipelineSupervisor *PipelineSupervisor) Start(settings metadata.Replicatio
 	go pipelineSupervisor.monitorPipelineHealth()
 
 	return err
+}
+
+func (pipelineSupervisor *PipelineSupervisor) setMaxDcpMissCount(settings metadata.ReplicationSettingsMap) {
+	// when doing health check, we want to wait long enough to ensure that we see bad stats in at least two different stats collection intervals
+	// before we declare the pipeline to be broken
+	var max_dcp_miss_count int
+	stats_update_interval := StatsUpdateInterval(settings)
+	number_of_waits_to_ensure_stats_update := int(stats_update_interval.Nanoseconds()/health_check_interval.Nanoseconds()) + 1
+	if number_of_waits_to_ensure_stats_update < default_max_dcp_miss_count {
+		max_dcp_miss_count = default_max_dcp_miss_count
+	} else {
+		max_dcp_miss_count = number_of_waits_to_ensure_stats_update
+	}
+
+	pipelineSupervisor.Logger().Infof("%v updating max_dcp_miss_count to %v\n", pipelineSupervisor.Id(), max_dcp_miss_count)
+
+	for _, dcp_nozzle := range pipelineSupervisor.pipeline.Sources() {
+		dcp_nozzle.(*parts.DcpNozzle).SetMaxMissCount(max_dcp_miss_count)
+	}
 }
 
 func (pipelineSupervisor *PipelineSupervisor) Stop() error {
@@ -228,37 +234,25 @@ func (pipelineSupervisor *PipelineSupervisor) OnEvent(event *common.Event) {
 	}
 }
 
-func (pipelineSupervisor *PipelineSupervisor) init(settings metadata.ReplicationSettingsMap) error {
-	//initialize settings
-	err := pipelineSupervisor.utils.ValidateSettings(pipeline_supervisor_setting_defs, settings, pipelineSupervisor.Logger())
-	if err != nil {
-		pipelineSupervisor.Logger().Errorf("The setting for Pipeline supervisor %v is not valid. err=%v", pipelineSupervisor.Id(), err)
-		return err
-	}
-
-	pipelineSupervisor.Init(settings)
-
-	if val, ok := settings[PIPELINE_LOG_LEVEL]; ok {
-		pipelineSupervisor.LoggerContext().SetLogLevel(val.(log.LogLevel))
-	}
-
-	return nil
-}
-
 func (pipelineSupervisor *PipelineSupervisor) UpdateSettings(settings metadata.ReplicationSettingsMap) error {
 	pipelineSupervisor.Logger().Debugf("Updating settings on pipelineSupervisor %v. settings=%v\n", pipelineSupervisor.Id(), settings)
 	logLevelObj := pipelineSupervisor.utils.GetSettingFromSettings(settings, PIPELINE_LOG_LEVEL)
 
-	if logLevelObj == nil {
-		// logLevel not specified. no op
-		return nil
+	if logLevelObj != nil {
+
+		logLevel, ok := logLevelObj.(log.LogLevel)
+		if !ok {
+			return fmt.Errorf("Log level %v is of wrong type %v", logLevelObj, reflect.TypeOf(logLevelObj))
+		}
+		pipelineSupervisor.LoggerContext().SetLogLevel(logLevel)
+		pipelineSupervisor.Logger().Infof("%v Updated log level to %v\n", pipelineSupervisor.Id(), logLevel)
 	}
 
-	logLevel, ok := logLevelObj.(log.LogLevel)
-	if !ok {
-		return fmt.Errorf("Log level %v is of wrong type", logLevelObj)
+	updateIntervalObj := pipelineSupervisor.utils.GetSettingFromSettings(settings, PUBLISH_INTERVAL)
+	if updateIntervalObj != nil {
+		pipelineSupervisor.setMaxDcpMissCount(settings)
 	}
-	pipelineSupervisor.LoggerContext().SetLogLevel(logLevel)
+
 	return nil
 }
 

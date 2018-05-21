@@ -865,6 +865,7 @@ func (xdcrf *XDCRFactory) ConstructUpdateSettingsForService(pipeline common.Pipe
 
 func (xdcrf *XDCRFactory) constructSettingsForSupervisor(pipeline common.Pipeline, settings metadata.ReplicationSettingsMap) (metadata.ReplicationSettingsMap, error) {
 	s := make(metadata.ReplicationSettingsMap)
+	s[pipeline_svc.PUBLISH_INTERVAL] = getSettingFromSettingsMap(settings, metadata.PipelineStatsInterval, pipeline.Specification().Settings.StatsInterval)
 	log_level_str := getSettingFromSettingsMap(settings, metadata.PipelineLogLevel, pipeline.Specification().Settings.LogLevel.String())
 	log_level, err := log.LogLevelFromStr(log_level_str.(string))
 	if err != nil {
@@ -895,6 +896,11 @@ func (xdcrf *XDCRFactory) constructUpdateSettingsForSupervisor(pipeline common.P
 			return nil, err
 		}
 		s[pipeline_svc.PIPELINE_LOG_LEVEL] = log_level
+	}
+
+	publish_interval := getSettingFromSettingsMap(settings, metadata.PipelineStatsInterval, nil)
+	if publish_interval != nil {
+		s[pipeline_svc.PUBLISH_INTERVAL] = publish_interval
 	}
 	return s, nil
 }

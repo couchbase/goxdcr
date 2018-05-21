@@ -284,8 +284,8 @@ type DcpNozzle struct {
 	// the number of times that the dcp nozzle did not receive anything from dcp when there are
 	// items remaining in dcp
 	// dcp is considered to be stuck and pipeline broken when this number reaches a limit
-	dcp_miss_count     int
-	max_dcp_miss_count int
+	dcp_miss_count     uint32
+	max_dcp_miss_count uint32
 
 	// Each vb stream has its own helper to help with DCP handshaking
 	vbHandshakeMap map[uint16]*dcpStreamReqHelper
@@ -1190,7 +1190,12 @@ func (dcp *DcpNozzle) GetStreamState(vbno uint16) (DcpStreamState, error) {
 }
 
 func (dcp *DcpNozzle) SetMaxMissCount(max_dcp_miss_count int) {
-	dcp.max_dcp_miss_count = max_dcp_miss_count
+	atomic.StoreUint32(&dcp.max_dcp_miss_count, uint32(max_dcp_miss_count))
+	dcp.Logger().Infof("%v set max dcp miss count to %v\n", dcp.Id(), max_dcp_miss_count)
+}
+
+func (dcp *DcpNozzle) getMaxMissCount() uint32 {
+	return atomic.LoadUint32(&dcp.max_dcp_miss_count)
 }
 
 func (dcp *DcpNozzle) checkInactiveUprStreams() {
@@ -1280,7 +1285,7 @@ func (dcp *DcpNozzle) CheckStuckness(dcp_stats map[string]map[string]string) err
 	dcp.dcp_miss_count++
 	dcp.Logger().Infof("%v Incrementing dcp miss count. Dcp miss count = %v\n", dcp.Id(), dcp.dcp_miss_count)
 
-	if dcp.dcp_miss_count > dcp.max_dcp_miss_count {
+	if dcp.dcp_miss_count > dcp.getMaxMissCount() {
 		//declare pipeline broken
 		dcp.Logger().Errorf("%v is stuck", dcp.Id())
 		return errors.New("Dcp is stuck")

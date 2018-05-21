@@ -27,9 +27,9 @@ import (
 	"github.com/couchbase/goxdcr/service_def"
 	utilities "github.com/couchbase/goxdcr/utils"
 	"github.com/rcrowley/go-metrics"
-	"reflect"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -104,18 +104,18 @@ const (
 
 const (
 	default_sample_size     = 1000
-	default_update_interval = 1000 * time.Millisecond
+	default_update_interval = 1000
 )
 
 // stats to initialize for paused replications that have never been run -- mostly the stats visible from UI
-var StatsToInitializeForPausedReplications = [10]string{DOCS_WRITTEN_METRIC, DOCS_FAILED_CR_SOURCE_METRIC, DOCS_FILTERED_METRIC,
+var StatsToInitializeForPausedReplications = []string{DOCS_WRITTEN_METRIC, DOCS_FAILED_CR_SOURCE_METRIC, DOCS_FILTERED_METRIC,
 	RATE_DOC_CHECKS_METRIC, RATE_OPT_REPD_METRIC, RATE_RECEIVED_DCP_METRIC, RATE_REPLICATED_METRIC,
 	BANDWIDTH_USAGE_METRIC, DOCS_LATENCY_METRIC, META_LATENCY_METRIC}
 
 // stats to clear when replications are paused
 // 1. all rate type stats
 // 2. internal stats that are not visible on UI
-var StatsToClearForPausedReplications = [13]string{SIZE_REP_QUEUE_METRIC, DOCS_REP_QUEUE_METRIC, DOCS_LATENCY_METRIC, META_LATENCY_METRIC,
+var StatsToClearForPausedReplications = []string{SIZE_REP_QUEUE_METRIC, DOCS_REP_QUEUE_METRIC, DOCS_LATENCY_METRIC, META_LATENCY_METRIC,
 	TIME_COMMITING_METRIC, NUM_FAILEDCKPTS_METRIC, RATE_DOC_CHECKS_METRIC, RATE_OPT_REPD_METRIC, RATE_RECEIVED_DCP_METRIC,
 	RATE_REPLICATED_METRIC, BANDWIDTH_USAGE_METRIC, THROTTLE_LATENCY_METRIC}
 
@@ -137,7 +137,7 @@ var NonIncreasingMetricKeyMap = map[string]bool{
 
 // the fixed user agent string for connections to collect stats for paused replications
 // it is possible to construct the user agent string dynamically by adding source and target bucket info to it
-// it would cause too many string re-allocations, though
+// it would cause many string re-allocations, though
 var UserAgentPausedReplication = "Goxdcr client for paused replication"
 
 type SampleStats struct {
@@ -165,8 +165,8 @@ type StatisticsManager struct {
 
 	//settings - sample size
 	sample_size int
-	//settings - statistics update interval
-	update_interval time.Duration
+	//settings - statistics update interval in milliseconds
+	update_interval uint32
 
 	//the channel to communicate finish signal with statistic updater
 	finish_ch chan bool
@@ -251,10 +251,19 @@ func (stats_mgr *StatisticsManager) cleanupBeforeExit() error {
 	if err != nil {
 		return err
 	}
-	rs.CleanupBeforeExit(StatsToClearForPausedReplications[:])
+	rs.CleanupBeforeExit(StatsToClearForPausedReplications)
 	statsLog, _ := stats_mgr.formatStatsForLog()
-	stats_mgr.logger.Infof("expvar=%v\n", statsLog)
+	stats_mgr.logger.Infof("%v expvar=%v\n", stats_mgr.pipeline.InstanceId(), statsLog)
 	return nil
+}
+
+func (stats_mgr *StatisticsManager) getUpdateInterval() time.Duration {
+	return time.Duration(atomic.LoadUint32(&stats_mgr.update_interval)) * time.Millisecond
+}
+
+func (stats_mgr *StatisticsManager) setUpdateInterval(update_interval int) {
+	atomic.StoreUint32(&stats_mgr.update_interval, uint32(update_interval))
+	stats_mgr.logger.Infof("%v set update interval to %v ms\n", stats_mgr.pipeline.InstanceId(), update_interval)
 }
 
 func getHighSeqNos(serverAddr string, vbnos []uint16, conn mcc.ClientIface, stats_map map[string]string, utils utilities.UtilsIface) (map[uint16]uint64, error) {
@@ -554,7 +563,7 @@ func (stats_mgr *StatisticsManager) processCalculatedStats(overview_expvar_map *
 
 	//calculate rate_replication
 	docs_written := stats_mgr.getOverviewRegistry().Get(DOCS_WRITTEN_METRIC).(metrics.Counter).Count()
-	interval_in_sec := stats_mgr.update_interval.Seconds()
+	interval_in_sec := stats_mgr.getUpdateInterval().Seconds()
 	rate_replicated := float64(docs_written-docs_written_old) / interval_in_sec
 	rate_replicated_var := new(expvar.Float)
 	rate_replicated_var.Set(rate_replicated)
@@ -737,32 +746,17 @@ func (stats_mgr *StatisticsManager) initOverviewRegistry() {
 
 func (stats_mgr *StatisticsManager) Start(settings metadata.ReplicationSettingsMap) error {
 	stats_mgr.logger.Infof("%v StatisticsManager Starting...", stats_mgr.pipeline.InstanceId())
-	var redactedSettings metadata.ReplicationSettingsMap
-	var redactOnce sync.Once
-	redactOnceFunc := func() {
-		redactOnce.Do(func() {
-			redactedSettings = settings.CloneAndRedact()
-		})
-	}
 
-	//initialize connection
-	err := stats_mgr.initConnections()
+	err := stats_mgr.initializeConfig(settings)
 	if err != nil {
 		return err
 	}
 
-	if _, ok := settings[PUBLISH_INTERVAL]; ok {
-		stats_mgr.update_interval = time.Duration(settings[PUBLISH_INTERVAL].(int)) * time.Millisecond
-	} else {
-		redactOnceFunc()
-		stats_mgr.logger.Infof("%v There is no update_interval in settings map. settings=%v\n", stats_mgr.pipeline.InstanceId(), redactedSettings)
+	//initialize connection
+	err = stats_mgr.initConnections()
+	if err != nil {
+		return err
 	}
-
-	if stats_mgr.logger.GetLogLevel() >= log.LogLevelDebug {
-		redactOnceFunc()
-		stats_mgr.logger.Debugf("%v StatisticsManager Starts: update_interval=%v, settings=%v\n", stats_mgr.pipeline.InstanceId(), stats_mgr.update_interval, redactedSettings)
-	}
-	stats_mgr.update_ticker_ch <- time.NewTicker(stats_mgr.update_interval)
 
 	stats_mgr.wait_grp.Add(1)
 	go stats_mgr.updateStats()
@@ -773,9 +767,41 @@ func (stats_mgr *StatisticsManager) Start(settings metadata.ReplicationSettingsM
 	return nil
 }
 
+func (stats_mgr *StatisticsManager) initializeConfig(settings metadata.ReplicationSettingsMap) error {
+	var redactedSettings metadata.ReplicationSettingsMap
+	var redactOnce sync.Once
+	redactOnceFunc := func() {
+		redactOnce.Do(func() {
+			redactedSettings = settings.CloneAndRedact()
+		})
+	}
+
+	var update_interval int
+	var update_interval_duration time.Duration
+	if update_interval_obj, ok := settings[PUBLISH_INTERVAL]; ok {
+		update_interval, ok = update_interval_obj.(int)
+		if !ok {
+			return fmt.Errorf("%v update_interval in settings map is not of integer type. update_interval=%v\n", stats_mgr.pipeline.InstanceId(), update_interval_obj)
+		}
+		stats_mgr.setUpdateInterval(update_interval)
+		update_interval_duration = time.Duration(update_interval) * time.Millisecond
+	} else {
+		redactOnceFunc()
+		stats_mgr.logger.Infof("%v There is no update_interval in settings map. settings=%v\n", stats_mgr.pipeline.InstanceId(), redactedSettings)
+		update_interval_duration = stats_mgr.getUpdateInterval()
+	}
+
+	if stats_mgr.logger.GetLogLevel() >= log.LogLevelDebug {
+		redactOnceFunc()
+		stats_mgr.logger.Debugf("%v StatisticsManager Starts: update_interval=%v, settings=%v\n", stats_mgr.pipeline.InstanceId(), update_interval_duration, redactedSettings)
+	}
+	stats_mgr.update_ticker_ch <- time.NewTicker(update_interval_duration)
+	return nil
+}
+
 func (stats_mgr *StatisticsManager) Stop() error {
 	stats_mgr.logger.Infof("%v StatisticsManager Stopping...", stats_mgr.pipeline.InstanceId())
-	stats_mgr.finish_ch <- true
+	close(stats_mgr.finish_ch)
 
 	//close the connections
 	stats_mgr.closeConnections()
@@ -817,23 +843,24 @@ func (stats_mgr *StatisticsManager) UpdateSettings(settings metadata.Replication
 		stats_mgr.logger.Debugf("%v Updating settings on stats manager. settings=%v\n", stats_mgr.pipeline.InstanceId(), settings.CloneAndRedact())
 	}
 
-	stats_interval, err := stats_mgr.utils.GetIntSettingFromSettings(settings, PUBLISH_INTERVAL)
+	update_interval, err := stats_mgr.utils.GetIntSettingFromSettings(settings, PUBLISH_INTERVAL)
 	if err != nil {
 		return err
 	}
 
-	if stats_interval < 0 {
-		// stats_interval not specified. no op
+	if update_interval < 0 {
+		// update_interval not specified. no op
 		return nil
 	}
 
-	if int(stats_mgr.update_interval.Nanoseconds()) == stats_interval*1000000 {
+	if stats_mgr.getUpdateInterval().Nanoseconds() == int64(update_interval)*1000000 {
 		// no op if no real updates
+		stats_mgr.logger.Infof("Skipped update of stats collection interval for pipeline %v since it already has the value of %v ms.\n", stats_mgr.pipeline.InstanceId(), update_interval)
 		return nil
 	}
 
-	stats_mgr.update_interval = time.Duration(stats_interval) * time.Millisecond
-	stats_mgr.update_ticker_ch <- time.NewTicker(stats_mgr.update_interval)
+	stats_mgr.setUpdateInterval(update_interval)
+	stats_mgr.update_ticker_ch <- time.NewTicker(stats_mgr.getUpdateInterval())
 
 	return nil
 }
@@ -937,13 +964,11 @@ func (outNozzle_collector *outNozzleCollector) OnEvent(event *common.Event) {
 func (outNozzle_collector *outNozzleCollector) ProcessEvent(event *common.Event) error {
 	metric_map := outNozzle_collector.component_map[event.Component.Id()]
 	if event.EventType == common.StatsUpdate {
-		outNozzle_collector.stats_mgr.logger.Debugf("%v Received a StatsUpdate event from %v", outNozzle_collector.Id(), reflect.TypeOf(event.Component))
 		queue_size := event.OtherInfos.([]int)[0]
 		queue_size_bytes := event.OtherInfos.([]int)[1]
 		setCounter(metric_map[DOCS_REP_QUEUE_METRIC].(metrics.Counter), queue_size)
 		setCounter(metric_map[SIZE_REP_QUEUE_METRIC].(metrics.Counter), queue_size_bytes)
 	} else if event.EventType == common.DataSent {
-		outNozzle_collector.stats_mgr.logger.Debugf("%v Received a DataSent event from %v", outNozzle_collector.Id(), reflect.TypeOf(event.Component))
 		event_otherInfo := event.OtherInfos.(parts.DataSentEventAdditional)
 		req_size := event_otherInfo.Req_size
 		opti_replicated := event_otherInfo.IsOptRepd
@@ -972,7 +997,6 @@ func (outNozzle_collector *outNozzleCollector) ProcessEvent(event *common.Event)
 		metric_map[DOCS_LATENCY_METRIC].(metrics.Histogram).Sample().Update(commit_time.Nanoseconds() / 1000000)
 		metric_map[RESP_WAIT_METRIC].(metrics.Histogram).Sample().Update(resp_wait_time.Nanoseconds() / 1000000)
 	} else if event.EventType == common.DataFailedCRSource {
-		outNozzle_collector.stats_mgr.logger.Debugf("%v Received a DataFailedCRSource event from %v", outNozzle_collector.Id(), reflect.TypeOf(event.Component))
 		metric_map[DOCS_FAILED_CR_SOURCE_METRIC].(metrics.Counter).Inc(1)
 		event_otherInfos := event.OtherInfos.(parts.DataFailedCRSourceEventAdditional)
 		expiry_set := event_otherInfos.IsExpirySet
@@ -989,12 +1013,10 @@ func (outNozzle_collector *outNozzleCollector) ProcessEvent(event *common.Event)
 			outNozzle_collector.stats_mgr.logger.Warnf("Invalid opcode, %v, in DataFailedCRSource event from %v.", req_opcode, event.Component.Id())
 		}
 	} else if event.EventType == common.GetMetaReceived {
-		outNozzle_collector.stats_mgr.logger.Debugf("%v Received a GetMetaReceived event from %v", outNozzle_collector.Id(), reflect.TypeOf(event.Component))
 		event_otherInfos := event.OtherInfos.(parts.GetMetaReceivedEventAdditional)
 		commit_time := event_otherInfos.Commit_time
 		metric_map[META_LATENCY_METRIC].(metrics.Histogram).Sample().Update(commit_time.Nanoseconds() / 1000000)
 	} else if event.EventType == common.DataThrottled {
-		outNozzle_collector.stats_mgr.logger.Debugf("%v Received a DataThrottled event from %v", outNozzle_collector.Id(), reflect.TypeOf(event.Component))
 		throttle_latency := event.OtherInfos.(time.Duration)
 		metric_map[THROTTLE_LATENCY_METRIC].(metrics.Histogram).Sample().Update(throttle_latency.Nanoseconds() / 1000000)
 	}
@@ -1066,7 +1088,6 @@ func (dcp_collector *dcpCollector) OnEvent(event *common.Event) {
 func (dcp_collector *dcpCollector) ProcessEvent(event *common.Event) error {
 	metric_map := dcp_collector.component_map[event.Component.Id()]
 	if event.EventType == common.DataReceived {
-		dcp_collector.stats_mgr.logger.Debugf("%v Received a DataReceived event from %v", dcp_collector.Id(), reflect.TypeOf(event.Component))
 		uprEvent := event.Data.(*mcc.UprEvent)
 		metric_map[DOCS_RECEIVED_DCP_METRIC].(metrics.Counter).Inc(1)
 
@@ -1137,8 +1158,6 @@ func (r_collector *routerCollector) ProcessEvent(event *common.Event) error {
 	metric_map := r_collector.component_map[event.Component.Id()]
 	if event.EventType == common.DataFiltered {
 		uprEvent := event.Data.(*mcc.UprEvent)
-		seqno := uprEvent.Seqno
-		r_collector.stats_mgr.logger.Debugf("%v Received a DataFiltered event for %v", r_collector.Id(), seqno)
 		metric_map[DOCS_FILTERED_METRIC].(metrics.Counter).Inc(1)
 
 		if uprEvent.Expiry != 0 {
@@ -1390,11 +1409,10 @@ func updateStatsForReplication(repl_status *pipeline_pkg.ReplicationStatus, cur_
 	return nil
 }
 
-// get stats update interval based
 func StatsUpdateInterval(settings metadata.ReplicationSettingsMap) time.Duration {
 	update_interval := default_update_interval
 	if _, ok := settings[PUBLISH_INTERVAL]; ok {
-		update_interval = settings[PUBLISH_INTERVAL].(time.Duration)
+		update_interval = settings[PUBLISH_INTERVAL].(int)
 	}
-	return update_interval
+	return time.Duration(update_interval) * time.Millisecond
 }
