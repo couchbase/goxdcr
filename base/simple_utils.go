@@ -859,3 +859,16 @@ func IntMax(x, y int) int {
 	}
 	return y
 }
+
+// construct vb->server map for the vbs in vbList using server->vbList map
+func ConstructVbServerMap(vbList []uint16, serverVbMap map[string][]uint16) map[uint16]string {
+	vbServerMap := make(map[uint16]string)
+	for server, serverVbList := range serverVbMap {
+		for _, vb := range serverVbList {
+			if _, found := SearchVBInSortedList(vb, vbList); found {
+				vbServerMap[vb] = server
+			}
+		}
+	}
+	return vbServerMap
+}
