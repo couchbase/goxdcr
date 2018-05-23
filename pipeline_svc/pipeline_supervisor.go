@@ -35,10 +35,6 @@ const (
 )
 
 const (
-	CMD_CHANGE_LOG_LEVEL int = 2
-)
-
-const (
 	health_check_interval      = 120 * time.Second
 	default_max_dcp_miss_count = 10
 )
@@ -149,7 +145,7 @@ func (pipelineSupervisor *PipelineSupervisor) Stop() error {
 	// do the generic supervisor stop stuff
 	err := pipelineSupervisor.GenericSupervisor.Stop()
 	if err != nil {
-		return err
+		pipelineSupervisor.Logger().Warnf("%v received error when stopping, %v\n", pipelineSupervisor.Id(), err)
 	}
 
 	//close the connections
@@ -164,7 +160,7 @@ func (pipelineSupervisor *PipelineSupervisor) closeConnections() {
 	for serverAddr, client := range pipelineSupervisor.kv_mem_clients {
 		err := client.Close()
 		if err != nil {
-			pipelineSupervisor.Logger().Infof("%v error from closing connection for %v is %v\n", pipelineSupervisor.Id(), serverAddr, err)
+			pipelineSupervisor.Logger().Warnf("%v error from closing connection for %v is %v\n", pipelineSupervisor.Id(), serverAddr, err)
 		}
 	}
 	pipelineSupervisor.kv_mem_clients = make(map[string]mcc.ClientIface)
@@ -201,23 +197,21 @@ func (pipelineSupervisor *PipelineSupervisor) monitorPipelineHealth() error {
 }
 
 func (pipelineSupervisor *PipelineSupervisor) OnEvent(event *common.Event) {
+	var err error
 	if event.EventType == common.ErrorEncountered {
-		if pipelineSupervisor.pipeline.State() != common.Pipeline_Error {
-			if event.OtherInfos != nil {
-				pipelineSupervisor.setError(event.Component.Id(), event.OtherInfos.(error))
-			}
-			pipelineSupervisor.declarePipelineBroken()
+		partId := event.Component.Id()
+		if event.OtherInfos != nil {
+			err = event.OtherInfos.(error)
 		} else {
-			pipelineSupervisor.errors_seen_lock.RLock()
-			defer pipelineSupervisor.errors_seen_lock.RUnlock()
-			pipelineSupervisor.Logger().Infof("%v Received error report : %v, but error is ignored. pipeline_state=%v\n", pipelineSupervisor.pipeline.Topic(), pipelineSupervisor.errors_seen, pipelineSupervisor.pipeline.State())
-
+			// should not get here
+			err = errors.New("Unknown")
+			pipelineSupervisor.Logger().Warnf("%v Received nil error from part %v\n", pipelineSupervisor.pipeline.Topic(), partId)
 		}
-
+		pipelineSupervisor.setError(partId, err)
 	} else if event.EventType == common.VBErrorEncountered {
 		additionalInfo := event.OtherInfos.(*base.VBErrorEventAdditional)
 		vbno := additionalInfo.Vbno
-		err := additionalInfo.Error
+		err = additionalInfo.Error
 		errType := additionalInfo.ErrorType
 		pipelineSupervisor.Logger().Debugf("%v Received error report on vb %v. err=%v, err type=%v\n", pipelineSupervisor.pipeline.Topic(), vbno, err, errType)
 		settings := make(map[string]interface{})
@@ -276,27 +270,12 @@ func (pipelineSupervisor *PipelineSupervisor) ReportFailure(errors map[string]er
 	pipelineSupervisor.GenericSupervisor.ReportFailure(errors)
 }
 
-func (pipelineSupervisor *PipelineSupervisor) declarePipelineBroken() {
-	pipelineSupervisor.errors_seen_lock.RLock()
-	defer pipelineSupervisor.errors_seen_lock.RUnlock()
-	err := pipelineSupervisor.pipeline.SetState(common.Pipeline_Error)
-	if err == nil {
-		pipelineSupervisor.Logger().Errorf("%v Received error report : %v", pipelineSupervisor.Id(), pipelineSupervisor.errors_seen)
-		pipelineSupervisor.ReportFailure(pipelineSupervisor.errors_seen)
-		pipelineSupervisor.pipeline.ReportProgress(fmt.Sprintf("Received error report : %v", pipelineSupervisor.errors_seen))
-
-	} else {
-		pipelineSupervisor.Logger().Infof("%v Received error report : %v, but error is ignored. pipeline_state=%v\n", pipelineSupervisor.Id(), pipelineSupervisor.errors_seen, pipelineSupervisor.pipeline.State())
-
-	}
-}
-
 // check if any runtime stats indicates that pipeline is broken
 func (pipelineSupervisor *PipelineSupervisor) checkPipelineHealth() error {
 	if !pipeline_utils.IsPipelineRunning(pipelineSupervisor.pipeline.State()) {
 		//the pipeline is no longer running, kill myself
 		message := "Pipeline is no longer running, exit."
-		pipelineSupervisor.Logger().Infof("%v message", pipelineSupervisor.Id())
+		pipelineSupervisor.Logger().Infof("%v %v", pipelineSupervisor.Id(), message)
 		return errors.New(message)
 	}
 
@@ -309,9 +288,7 @@ func (pipelineSupervisor *PipelineSupervisor) checkPipelineHealth() error {
 	for _, dcp_nozzle := range pipelineSupervisor.pipeline.Sources() {
 		err = dcp_nozzle.(*parts.DcpNozzle).CheckStuckness(dcp_stats)
 		if err != nil {
-			//declare pipeline broken
 			pipelineSupervisor.setError(dcp_nozzle.Id(), err)
-			pipelineSupervisor.declarePipelineBroken()
 			return err
 		}
 	}
@@ -365,5 +342,15 @@ func (pipelineSupervisor *PipelineSupervisor) getDcpStats() (map[string]map[stri
 func (pipelineSupervisor *PipelineSupervisor) setError(partId string, err error) {
 	pipelineSupervisor.errors_seen_lock.Lock()
 	defer pipelineSupervisor.errors_seen_lock.Unlock()
-	pipelineSupervisor.errors_seen[partId] = err
+
+	err1 := pipelineSupervisor.pipeline.SetState(common.Pipeline_Error)
+	if err1 == nil {
+		pipelineSupervisor.errors_seen[partId] = err
+		pipelineSupervisor.Logger().Errorf("%v Received error report : %v\n. errors_seen=%v\n", pipelineSupervisor.Id(), err, pipelineSupervisor.errors_seen)
+		pipelineSupervisor.ReportFailure(pipelineSupervisor.errors_seen)
+		pipelineSupervisor.pipeline.ReportProgress(fmt.Sprintf("Received error report : %v", err))
+
+	} else {
+		pipelineSupervisor.Logger().Infof("%v Received error report : %v, but error is ignored. pipeline_state=%v\n errors_seen=%v\n", pipelineSupervisor.Id(), err, pipelineSupervisor.pipeline.State(), pipelineSupervisor.errors_seen)
+	}
 }
