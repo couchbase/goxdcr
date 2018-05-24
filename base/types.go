@@ -350,3 +350,29 @@ func DeepCopyStringPairList(list StringPairList) StringPairList {
 	copy(out, list)
 	return out
 }
+
+type ComponentError struct {
+	ComponentId string
+	Err         error
+}
+
+func FormatErrMsg(errCh chan ComponentError) map[string]error {
+	// use -1 to indicate no upper limit on number of errors to return
+	return FormatErrMsgWithUpperLimit(errCh, -1)
+}
+
+func FormatErrMsgWithUpperLimit(errCh chan ComponentError, maxNumberOfErrorsToTrack int) map[string]error {
+	errMap := make(map[string]error)
+	for {
+		select {
+		case componentErr := <-errCh:
+			errMap[componentErr.ComponentId] = componentErr.Err
+			if maxNumberOfErrorsToTrack > 0 && len(errMap) >= maxNumberOfErrorsToTrack {
+				return errMap
+			}
+		default:
+			return errMap
+		}
+	}
+	return errMap
+}

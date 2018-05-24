@@ -35,7 +35,7 @@ type PipelineOpSerializerIface interface {
 }
 
 type SerializerRepStatusPair struct {
-	repStatus (*pipeline.ReplicationStatus)
+	repStatus *pipeline.ReplicationStatus
 	errCode   error
 }
 
@@ -194,22 +194,21 @@ func (serializer *PipelineOpSerializer) distributeJob(oneJob Job) (retErr error)
 func (serializer *PipelineOpSerializer) handleJobs(pipelineTopic string) {
 	defer serializer.childWGrp.Done()
 	var job Job
+	var err error
+
+	serializer.mapMtx.RLock()
+	jobCh, ok := serializer.jobTopicMap[pipelineTopic]
+	if !ok {
+		serializer.logger.Errorf(fmt.Sprintf("Error: Job multiplex channel for %v does not exist", pipelineTopic))
+		serializer.mapMtx.RUnlock()
+		return
+	}
+	serializer.mapMtx.RUnlock()
 
 forloop:
 	for {
-		serializer.mapMtx.RLock()
-
-		_, ok := serializer.jobTopicMap[pipelineTopic]
-		if !ok {
-			serializer.logger.Errorf(fmt.Sprintf("Error: Job multiplex channel for %v does not exist", pipelineTopic))
-			serializer.mapMtx.RUnlock()
-			return
-		}
-
 		select {
-		case job = <-serializer.jobTopicMap[pipelineTopic]:
-			// Unlock Readlock here while the processing below takes place
-			serializer.mapMtx.RUnlock()
+		case job = <-jobCh:
 			if serializer.isStopped() {
 				return
 			}
@@ -228,11 +227,20 @@ forloop:
 				// Return to caller who is waiting
 				job.repStatusCh <- repStatusPair
 			case PipelineInit:
-				serializer.pipelineMgr.GetOrCreateReplicationStatus(job.pipelineTopic, nil)
+				_, err = serializer.pipelineMgr.GetOrCreateReplicationStatus(job.pipelineTopic, nil)
+				if err != nil {
+					serializer.logger.Warnf("Error getting replication status for pipeline %v. err=%v", job.pipelineTopic, err)
+				}
 			case PipelineDeletion:
-				serializer.pipelineMgr.RemoveReplicationStatus(job.pipelineTopic)
+				err = serializer.pipelineMgr.RemoveReplicationStatus(job.pipelineTopic)
+				if err != nil {
+					serializer.logger.Warnf("Error removing replication status for pipeline %v. err=%v", job.pipelineTopic, err)
+				}
 			case PipelineUpdate:
-				serializer.pipelineMgr.Update(job.pipelineTopic, job.errForUpdateOp)
+				err = serializer.pipelineMgr.Update(job.pipelineTopic, job.errForUpdateOp)
+				if err != nil {
+					serializer.logger.Warnf("Error updating pipeline %v. err=%v", job.pipelineTopic, err)
+				}
 			default:
 				serializer.logger.Errorf(fmt.Sprintf("Unknown job type: %v -> %v", job.jobType, job))
 			}
@@ -245,7 +253,6 @@ forloop:
 				go serializer.cleanupJob(pipelineTopic)
 			}
 			serializer.stoppedLk.RUnlock()
-			serializer.mapMtx.RUnlock()
 			// Without a break label, this break would have applied to the innermost select
 			break forloop
 		}

@@ -736,6 +736,23 @@ func CompressionStringToConversionTypeConverter(userInput string) (int, error) {
 	return (int)(CompressionTypeNone), ErrorCompressionUnableToConvert
 }
 
+func ConcatenateErrors(errorMap ErrorMap, incomingErrorMap ErrorMap, maxNumberOfErrors int, logger *log.CommonLogger) {
+	overflowErrorMap := make(ErrorMap)
+	for errorKey, err := range incomingErrorMap {
+		if _, ok := errorMap[errorKey]; !ok {
+			if len(errorMap) < maxNumberOfErrors {
+				errorMap[errorKey] = err
+			} else {
+				overflowErrorMap[errorKey] = err
+			}
+		}
+	}
+
+	if len(overflowErrorMap) > 0 {
+		logger.Warnf("Failed to add all errors to error map since the error map is full. errors discarded = %v", overflowErrorMap)
+	}
+}
+
 // Given two maps, find the total number of elements in an union should these maps be combined
 func GetUnionOfErrorMapsSize(map1, map2 ErrorMap) (counter int) {
 	var mapToBeWalked ErrorMap

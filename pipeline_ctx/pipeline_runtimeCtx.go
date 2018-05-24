@@ -23,6 +23,8 @@ type ServiceSettingsConstructor func(pipeline common.Pipeline, service common.Pi
 type ServiceUpdateSettingsConstructor func(pipeline common.Pipeline, service common.PipelineService, pipeline_settings metadata.ReplicationSettingsMap) (metadata.ReplicationSettingsMap, error)
 type StartSeqnoConstructor func(pipeline common.Pipeline) error
 
+const RuntimeContext = "RuntimeCtx"
+
 type PipelineRuntimeCtx struct {
 	//registered runtime pipeline service
 	runtime_svcs      map[string]common.PipelineService
@@ -43,7 +45,7 @@ func NewWithSettingConstructor(p common.Pipeline, service_settings_constructor S
 		runtime_svcs: make(map[string]common.PipelineService),
 		pipeline:     p,
 		isRunning:    false,
-		logger:       log.NewLogger("RuntimeCtx", logger_context),
+		logger:       log.NewLogger(RuntimeContext, logger_context),
 		service_settings_constructor:        service_settings_constructor,
 		runtime_svcs_lock:                   &sync.RWMutex{},
 		service_update_settings_constructor: service_update_settings_constructor}
@@ -101,45 +103,55 @@ func (ctx *PipelineRuntimeCtx) Start(params metadata.ReplicationSettingsMap) err
 	return err
 }
 
-func (ctx *PipelineRuntimeCtx) Stop() error {
+func (ctx *PipelineRuntimeCtx) Stop() base.ErrorMap {
 	topic := ""
 	if ctx.pipeline != nil {
 		topic = ctx.pipeline.Topic()
 	}
 
+	errMap := make(base.ErrorMap)
+
 	ctx.logger.Infof("%v Pipeline context is stopping...", topic)
 
+	stopServicesFunc := func() error {
+		ctx.runtime_svcs_lock.RLock()
+		defer ctx.runtime_svcs_lock.RUnlock()
+
+		waitGrp := &sync.WaitGroup{}
+		errCh := make(chan base.ComponentError, len(ctx.runtime_svcs))
+
+		//stop all registered services
+		for name, service := range ctx.runtime_svcs {
+			// stop services in parallel to ensure that all services get their turns
+			waitGrp.Add(1)
+			go ctx.stopService(name, service, waitGrp, errCh)
+		}
+
+		waitGrp.Wait()
+
+		if len(errCh) != 0 {
+			errMap = base.FormatErrMsg(errCh)
+		}
+		return nil
+	}
+
 	// put a timeout around service stopping to avoid being stuck
-	err := base.ExecWithTimeout(ctx.stopServices, base.TimeoutRuntimeContextStop, ctx.logger)
+	err := base.ExecWithTimeout(stopServicesFunc, base.TimeoutRuntimeContextStop, ctx.logger)
 	if err != nil {
-		ctx.logger.Warnf("%v error stopping pipeline context. err=%v", topic, err)
-	} else {
-		ctx.logger.Infof("%v pipeline context has stopped successfully", topic)
-	}
-	return err
-}
-
-// stopServices() never returns non-nil error
-// it has error in sigurature just to meet the requirement of ExecWithTimeout.
-func (ctx *PipelineRuntimeCtx) stopServices() error {
-	ctx.runtime_svcs_lock.RLock()
-	defer ctx.runtime_svcs_lock.RUnlock()
-
-	wait_grp := &sync.WaitGroup{}
-
-	//stop all registered services
-	for name, service := range ctx.runtime_svcs {
-		// stop services in parallel to ensure that all services get their turns
-		wait_grp.Add(1)
-		go ctx.stopService(name, service, wait_grp)
+		// if err is not nill, it is possible that stopServicesFunc is still running and may still access errMap
+		// return errMap1 instead of errMap to avoid race conditions
+		ctx.logger.Warnf("%v Error stopping pipeline context. err=%v", topic, err)
+		errMap1 := make(base.ErrorMap)
+		errMap1[RuntimeContext] = err
+		return errMap1
 	}
 
-	wait_grp.Wait()
-	return nil
+	ctx.logger.Infof("%v pipeline context has stopped successfully", topic)
+	return errMap
 }
 
-func (ctx *PipelineRuntimeCtx) stopService(name string, service common.PipelineService, wait_grp *sync.WaitGroup) {
-	defer wait_grp.Done()
+func (ctx *PipelineRuntimeCtx) stopService(name string, service common.PipelineService, waitGrp *sync.WaitGroup, errCh chan base.ComponentError) {
+	defer waitGrp.Done()
 
 	topic := ""
 	if ctx.pipeline != nil {
@@ -149,6 +161,7 @@ func (ctx *PipelineRuntimeCtx) stopService(name string, service common.PipelineS
 	err := service.Stop()
 	if err != nil {
 		ctx.logger.Warnf("%v failed to stop service %s. err=%v", topic, name, err)
+		errCh <- base.ComponentError{name, err}
 	} else {
 		ctx.logger.Infof("%v successfully stopped service %s.", topic, name)
 	}

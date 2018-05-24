@@ -1052,11 +1052,6 @@ func (ckmgr *CheckpointManager) performCkpt_internal(vb_list []uint16, fin_ch <-
 			ckmgr.logger.Infof("Aborting checkpointing routine for %v with vb list %v since received finish signal. index=%v\n", ckmgr.pipeline.Topic(), vb_list, index)
 			return
 		default:
-			if pipeline_utils.IsPipelineStopping(ckmgr.pipeline.State()) {
-				ckmgr.logger.Infof("Pipeline %v is already stopping/stopped, exit do_checkpointing for vb list %v. index=%v\n", ckmgr.pipeline.Topic(), vb_list, index)
-				return
-			}
-
 			start_time_vb := time.Now()
 			err := ckmgr.doCheckpoint(vb, through_seqno_map, high_seqno_and_vbuuid_map, xattr_seqno_map)
 			committing_time_vb := time.Since(start_time_vb)

@@ -10,13 +10,14 @@
 package common
 
 import (
+	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/metadata"
 )
 
 //PipelineRuntimeContext manages all the services that attaches to the feed
 type PipelineRuntimeContext interface {
 	Start(metadata.ReplicationSettingsMap) error
-	Stop() error
+	Stop() base.ErrorMap
 
 	Pipeline() Pipeline
 

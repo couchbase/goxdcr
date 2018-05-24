@@ -104,11 +104,6 @@ type GenericPipeline struct {
 	progress_recorder common.PipelineProgressRecorder
 }
 
-type partError struct {
-	partId string
-	err    error
-}
-
 //Get the runtime context of this pipeline
 func (genericPipeline *GenericPipeline) RuntimeContext() common.PipelineRuntimeContext {
 	return genericPipeline.context
@@ -119,12 +114,12 @@ func (genericPipeline *GenericPipeline) SetRuntimeContext(ctx common.PipelineRun
 }
 
 func (genericPipeline *GenericPipeline) startPartsWithTimeout(ssl_port_map map[string]uint16, errMap base.ErrorMap) {
-	err_ch := make(chan partError, 1000)
+	err_ch := make(chan base.ComponentError, 1000)
 	startPartsFunc := func() error {
 		for _, source := range genericPipeline.sources {
 			waitGrp := &sync.WaitGroup{}
 			waitGrp.Add(1)
-			go func(err_ch chan partError, source common.Nozzle, settings metadata.ReplicationSettingsMap, waitGrp *sync.WaitGroup, ssl_port_map map[string]uint16) {
+			go func(err_ch chan base.ComponentError, source common.Nozzle, settings metadata.ReplicationSettingsMap, waitGrp *sync.WaitGroup, ssl_port_map map[string]uint16) {
 				defer waitGrp.Done()
 				genericPipeline.startPart(source, settings, genericPipeline.targetClusterRef, ssl_port_map, err_ch)
 				if len(err_ch) == 0 {
@@ -136,7 +131,7 @@ func (genericPipeline *GenericPipeline) startPartsWithTimeout(ssl_port_map map[s
 
 			waitGrp.Wait()
 			if len(err_ch) != 0 {
-				partErrs := formatErrMsg(err_ch)
+				partErrs := base.FormatErrMsgWithUpperLimit(err_ch, MaxNumberOfErrorsToTrack)
 				err := fmt.Errorf("Pipeline %v failed to start, err=%v\n", genericPipeline.Topic(), base.FlattenErrorMap(partErrs))
 				genericPipeline.logger.Errorf("%v", err)
 				// This func is run serially so no need for lock - if changes in the future, need lock
@@ -162,7 +157,7 @@ func (genericPipeline *GenericPipeline) startPartsWithTimeout(ssl_port_map map[s
 // Starts the downstream parts recursively, and eventually the part itself
 // In a more specific use case, for now, it starts the nozzles and routers (out-going nozzles first, then source nozzles)
 func (genericPipeline *GenericPipeline) startPart(part common.Part, settings metadata.ReplicationSettingsMap,
-	targetClusterRef *metadata.RemoteClusterReference, ssl_port_map map[string]uint16, err_ch chan partError) {
+	targetClusterRef *metadata.RemoteClusterReference, ssl_port_map map[string]uint16, err_ch chan base.ComponentError) {
 
 	var err error = nil
 
@@ -172,7 +167,7 @@ func (genericPipeline *GenericPipeline) startPart(part common.Part, settings met
 		waitGrp := &sync.WaitGroup{}
 		for _, p := range downstreamParts {
 			waitGrp.Add(1)
-			go func(waitGrp *sync.WaitGroup, err_ch chan partError, p common.Part, settings metadata.ReplicationSettingsMap) {
+			go func(waitGrp *sync.WaitGroup, err_ch chan base.ComponentError, p common.Part, settings metadata.ReplicationSettingsMap) {
 				defer waitGrp.Done()
 				if p.State() == common.Part_Initial {
 					genericPipeline.startPart(p, settings, genericPipeline.targetClusterRef, ssl_port_map, err_ch)
@@ -194,14 +189,14 @@ func (genericPipeline *GenericPipeline) startPart(part common.Part, settings met
 		// partSetting_contructor currently is only: xdcrf.ConstructUpdateSettingsForPart
 		partSettings, err = genericPipeline.partSetting_constructor(genericPipeline, part, settings, genericPipeline.targetClusterRef, ssl_port_map)
 		if err != nil {
-			err_ch <- partError{part.Id(), err}
+			err_ch <- base.ComponentError{part.Id(), err}
 			return
 		}
 	}
 
 	err = part.Start(partSettings)
 	if err != nil && err.Error() != parts.PartAlreadyStartedError.Error() {
-		err_ch <- partError{part.Id(), err}
+		err_ch <- base.ComponentError{part.Id(), err}
 	}
 }
 
@@ -306,54 +301,49 @@ func (genericPipeline *GenericPipeline) Start(settings metadata.ReplicationSetti
 	return errMap
 }
 
-func formatErrMsg(err_ch chan partError) map[string]error {
-	errMap := make(map[string]error)
-	for {
-		select {
-		case part_err := <-err_ch:
-			errMap[part_err.partId] = part_err.err
-			if len(errMap) >= MaxNumberOfErrorsToTrack {
-				return errMap
-			}
-		default:
-			return errMap
+func (genericPipeline *GenericPipeline) stopPartsWithTimeout() base.ErrorMap {
+	errMap := make(base.ErrorMap)
+
+	partsMap := GetAllParts(genericPipeline)
+	err_ch := make(chan base.ComponentError, len(partsMap))
+
+	stopPartsFunc := func() error {
+		wait_grp := &sync.WaitGroup{}
+		for _, part := range partsMap {
+			wait_grp.Add(1)
+			// stop parts in parallel to ensure that all parts get their turns
+			go genericPipeline.stopPart(part, wait_grp, err_ch)
 		}
+
+		wait_grp.Wait()
+		if len(err_ch) != 0 {
+			errMap = base.FormatErrMsgWithUpperLimit(err_ch, MaxNumberOfErrorsToTrack)
+		}
+		return nil
 	}
+
+	// put a timeout around part stopping to avoid being stuck
+	err := base.ExecWithTimeout(stopPartsFunc, base.TimeoutPartsStop, genericPipeline.logger)
+	if err != nil {
+		// if err is not nill, it is possible that stopPartsFunc is still running and may still access errMap
+		// return errMap1 instead of errMap to avoid race conditions
+		genericPipeline.logger.Warnf("%v error stopping pipeline parts.", genericPipeline.InstanceId(), err)
+		errMap1 := make(base.ErrorMap)
+		errMap1["genericPipeline.StopParts"] = err
+		return errMap1
+	}
+
+	genericPipeline.logger.Infof("%v pipeline parts have stopped successfully", genericPipeline.InstanceId())
 	return errMap
 }
 
-func (genericPipeline *GenericPipeline) stopPartsWithTimeout() error {
-	// put a timeout around part stopping to avoid being stuck
-	err := base.ExecWithTimeout(genericPipeline.stopParts, base.TimeoutPartsStop, genericPipeline.logger)
-	if err != nil {
-		genericPipeline.logger.Warnf("%v error stopping pipeline parts. err=%v", genericPipeline.InstanceId(), err)
-	} else {
-		genericPipeline.logger.Infof("%v pipeline parts have stopped successfully", genericPipeline.InstanceId())
-	}
-	return err
-}
-
-// stopParts() never returns non-nil error
-// it has error in sigurature just to meet the requirement of ExecWithTimeout.
-func (genericPipeline *GenericPipeline) stopParts() error {
-	partsMap := GetAllParts(genericPipeline)
-	wait_grp := &sync.WaitGroup{}
-	for _, part := range partsMap {
-		wait_grp.Add(1)
-		// stop parts in parallel to ensure that all parts get their turns
-		go genericPipeline.stopPart(part, wait_grp)
-	}
-
-	wait_grp.Wait()
-	return nil
-}
-
-func (genericPipeline *GenericPipeline) stopPart(part common.Part, wait_grp *sync.WaitGroup) {
+func (genericPipeline *GenericPipeline) stopPart(part common.Part, wait_grp *sync.WaitGroup, err_ch chan base.ComponentError) {
 	defer wait_grp.Done()
 	genericPipeline.logger.Infof("%v trying to stop part %v\n", genericPipeline.InstanceId(), part.Id())
 	err := part.Stop()
 	if err != nil {
 		genericPipeline.logger.Warnf("%v failed to stop part %v, err=%v, let it alone to die\n", genericPipeline.InstanceId(), part.Id(), err)
+		err_ch <- base.ComponentError{part.Id(), err}
 	}
 }
 
@@ -400,14 +390,14 @@ func (genericPipeline *GenericPipeline) Stop() base.ErrorMap {
 	genericPipeline.logger.Infof("Stopping pipeline %v\n", genericPipeline.InstanceId())
 	var err error
 
-	// perform checkpoint first before stopping
-	genericPipeline.checkpoint_func(genericPipeline)
-
 	err = genericPipeline.SetState(common.Pipeline_Stopping)
 	if err != nil {
 		errMap["genericPipeline.SetState.Pipeline_Stopping"] = err
 		return errMap
 	}
+
+	// perform checkpoint first before stopping
+	genericPipeline.checkpoint_func(genericPipeline)
 
 	// stop async event listeners so that RaiseEvent() would not block
 	for _, asyncEventListener := range GetAllAsyncComponentEventListeners(genericPipeline) {
@@ -417,7 +407,8 @@ func (genericPipeline *GenericPipeline) Stop() base.ErrorMap {
 	genericPipeline.ReportProgress("Async listeners have been stopped")
 
 	// stop services before stopping parts to avoid spurious errors from services
-	genericPipeline.context.Stop()
+	contextErrMap := genericPipeline.context.Stop()
+	base.ConcatenateErrors(errMap, contextErrMap, MaxNumberOfErrorsToTrack, genericPipeline.logger)
 	genericPipeline.ReportProgress("Runtime context has been stopped")
 
 	//close the sources
@@ -431,7 +422,8 @@ func (genericPipeline *GenericPipeline) Stop() base.ErrorMap {
 	genericPipeline.logger.Infof("%v source nozzles have been closed", genericPipeline.InstanceId())
 	genericPipeline.ReportProgress("Source nozzles have been closed")
 
-	genericPipeline.stopPartsWithTimeout()
+	partsErrMap := genericPipeline.stopPartsWithTimeout()
+	base.ConcatenateErrors(errMap, partsErrMap, MaxNumberOfErrorsToTrack, genericPipeline.logger)
 	genericPipeline.ReportProgress("Pipeline has been stopped")
 
 	err = genericPipeline.SetState(common.Pipeline_Stopped)
@@ -439,7 +431,7 @@ func (genericPipeline *GenericPipeline) Stop() base.ErrorMap {
 		errMap["genericPipeline.SetState.Pipeline_Stopped"] = err
 	}
 
-	genericPipeline.logger.Infof("Pipeline %v has been stopped\n", genericPipeline.InstanceId())
+	genericPipeline.logger.Infof("Pipeline %v has been stopped\n errMap=%v\n", genericPipeline.InstanceId(), errMap)
 	return errMap
 }
 

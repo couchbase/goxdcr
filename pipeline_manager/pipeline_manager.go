@@ -28,6 +28,7 @@ import (
 
 var ReplicationSpecNotActive error = errors.New("Replication specification not found or no longer active")
 var ReplicationStatusNotFound error = errors.New("Replication Status not found")
+var UpdaterStoppedError error = errors.New("Updater already stopped")
 
 var default_failure_restart_interval = 10
 
@@ -46,7 +47,6 @@ type PipelineManager struct {
 	uilog_svc          service_def.UILogSvc
 	once               sync.Once
 	logger             *log.CommonLogger
-	child_waitGrp      *sync.WaitGroup
 	serializer         *PipelineOpSerializer
 	utils              utilities.UtilsIface
 }
@@ -95,7 +95,6 @@ func NewPipelineManager(factory common.PipelineFactory, repl_spec_svc service_de
 		logger:             log.NewLogger("PipelineMgr", logger_context),
 		cluster_info_svc:   cluster_info_svc,
 		uilog_svc:          uilog_svc,
-		child_waitGrp:      &sync.WaitGroup{},
 		utils:              utilsIn,
 	}
 	pipelineMgrRetVar.logger.Info("Pipeline Manager is constucted")
@@ -209,10 +208,7 @@ func (pipelineMgr *PipelineManager) ReplicationStatusMap() map[string]*pipeline.
 }
 
 func LogStatusSummary() {
-	rep_status_map := pipeline_mgr.ReplicationStatusMap()
-	if len(rep_status_map) > 0 {
-		pipeline_mgr.logger.Infof("Replication Status = %v\n", rep_status_map)
-	}
+	pipeline_mgr.logger.Infof("Replication Status = %v\n", pipeline_mgr.ReplicationStatusMap())
 }
 
 func (pipelineMgr *PipelineManager) AllReplicationsForBucket(bucket string) []string {
@@ -230,8 +226,9 @@ func (pipelineMgr *PipelineManager) AllReplicationsForBucket(bucket string) []st
 func (pipelineMgr *PipelineManager) AllReplicationSpecsForTargetCluster(targetClusterUuid string) map[string]*metadata.ReplicationSpecification {
 	ret := make(map[string]*metadata.ReplicationSpecification)
 	for topic, rep_status := range pipelineMgr.ReplicationStatusMap() {
-		if rep_status.Spec().TargetClusterUUID == targetClusterUuid {
-			ret[topic] = rep_status.Spec()
+		spec := rep_status.Spec()
+		if spec.TargetClusterUUID == targetClusterUuid {
+			ret[topic] = spec
 		}
 	}
 
@@ -240,10 +237,10 @@ func (pipelineMgr *PipelineManager) AllReplicationSpecsForTargetCluster(targetCl
 
 func (pipelineMgr *PipelineManager) AllReplicationsForTargetCluster(targetClusterUuid string) []string {
 	ret := make([]string, 0)
-	specs := pipelineMgr.AllReplicationSpecsForTargetCluster(targetClusterUuid)
-
-	for topic, _ := range specs {
-		ret = append(ret, topic)
+	for topic, rep_status := range pipelineMgr.ReplicationStatusMap() {
+		if rep_status.Spec().TargetClusterUUID == targetClusterUuid {
+			ret = append(ret, topic)
+		}
 	}
 
 	return ret
@@ -268,15 +265,11 @@ func (pipelineMgr *PipelineManager) CheckPipelines() {
 		//validate replication spec
 		spec := rep_status.Spec()
 		if spec != nil {
-			pipelineMgr.logger.Infof("checkpipeline spec=%v, uuid=%v", spec, spec.SourceBucketUUID)
+			pipelineMgr.logger.Infof("checking pipeline spec=%v, source bucket uuid=%v", spec, spec.SourceBucketUUID)
 			pipelineMgr.repl_spec_svc.ValidateAndGC(spec)
 		}
 	}
 	LogStatusSummary()
-}
-
-func RuntimeCtx(topic string) common.PipelineRuntimeContext {
-	return pipeline_mgr.runtimeCtx(topic)
 }
 
 func (pipelineMgr *PipelineManager) OnExit() error {
@@ -284,18 +277,13 @@ func (pipelineMgr *PipelineManager) OnExit() error {
 	pipelineMgr.StopSerializer()
 	pipelineMgr.StopAllUpdaters()
 
-	pipelineMgr.logger.Infof("Sent finish signal to all running repairer")
-	pipelineMgr.child_waitGrp.Wait()
-
+	pipelineMgr.logger.Infof("All running repairers stopped")
 	return nil
 
 }
 
 func (pipelineMgr *PipelineManager) StopAllUpdaters() {
 	rep_status_map := pipelineMgr.ReplicationStatusMap()
-	if rep_status_map == nil {
-		return
-	}
 	for _, rep_status := range rep_status_map {
 		updater := rep_status.Updater()
 		if updater != nil {
@@ -316,43 +304,42 @@ func (pipelineMgr *PipelineManager) StartPipeline(topic string) base.ErrorMap {
 	pipelineMgr.logger.Infof("Starting the pipeline %s\n", topic)
 
 	rep_status, _ := pipelineMgr.ReplicationStatus(topic)
-	if rep_status == nil || (rep_status != nil && rep_status.RuntimeStatus(true) != pipeline.Replicating) {
-		// validate the pipeline before starting it
-		err = pipelineMgr.validatePipeline(topic)
-		if err != nil {
-			errMap[fmt.Sprintf("pipelineMgr.validatePipeline(%v)", topic)] = err
-			return errMap
-		}
-
-		if rep_status == nil {
-			// This should not be nil as updater should be the only one calling this and
-			// it would have created a rep_status way before here
-			errMap[fmt.Sprintf("pipelineMgr.ReplicationStatus(%v)", topic)] = errors.New("Error: Replication Status is missing when starting pipeline.")
-			return errMap
-		}
-
-		rep_status.RecordProgress("Start pipeline construction")
-
-		p, err := pipelineMgr.pipeline_factory.NewPipeline(topic, rep_status.RecordProgress)
-		if err != nil {
-			errMap[fmt.Sprintf("pipelineMgr.pipeline_factory.NewPipeline(%v)", topic)] = err
-			return errMap
-		}
-
-		rep_status.RecordProgress("Pipeline is constructed")
-		rep_status.SetPipeline(p)
-
-		pipelineMgr.logger.Infof("Pipeline %v is constructed. Starting it.", p.InstanceId())
-		p.SetProgressRecorder(rep_status.RecordProgress)
-		errMap = p.Start(rep_status.SettingsMap())
-		if len(errMap) > 0 {
-			pipelineMgr.logger.Error("Failed to start the pipeline")
-		}
+	if rep_status == nil {
+		// This should not be nil as updater should be the only one calling this and
+		// it would have created a rep_status way before here
+		errMap[fmt.Sprintf("pipelineMgr.ReplicationStatus(%v)", topic)] = errors.New("Error: Replication Status is missing when starting pipeline.")
 		return errMap
-	} else {
+	}
+
+	if rep_status.RuntimeStatus(true) == pipeline.Replicating {
 		//the pipeline is already running
 		pipelineMgr.logger.Infof("The pipeline asked to be started, %v, is already running", topic)
 		return errMap
+	}
+
+	// validate the pipeline before starting it
+	err = pipelineMgr.validatePipeline(topic)
+	if err != nil {
+		errMap[fmt.Sprintf("pipelineMgr.validatePipeline(%v)", topic)] = err
+		return errMap
+	}
+
+	rep_status.RecordProgress("Start pipeline construction")
+
+	p, err := pipelineMgr.pipeline_factory.NewPipeline(topic, rep_status.RecordProgress)
+	if err != nil {
+		errMap[fmt.Sprintf("pipelineMgr.pipeline_factory.NewPipeline(%v)", topic)] = err
+		return errMap
+	}
+
+	rep_status.RecordProgress("Pipeline is constructed")
+	rep_status.SetPipeline(p)
+
+	pipelineMgr.logger.Infof("Pipeline %v is constructed. Starting it.", p.InstanceId())
+	p.SetProgressRecorder(rep_status.RecordProgress)
+	errMap = p.Start(rep_status.SettingsMap())
+	if len(errMap) > 0 {
+		pipelineMgr.logger.Errorf("Failed to start the pipeline %v", p.InstanceId())
 	}
 	return errMap
 }
@@ -468,15 +455,6 @@ func (pipelineMgr *PipelineManager) StopPipeline(rep_status pipeline.Replication
 	return errMap
 }
 
-func (pipelineMgr *PipelineManager) runtimeCtx(topic string) common.PipelineRuntimeContext {
-	pipeline := pipelineMgr.pipeline(topic)
-	if pipeline != nil {
-		return pipeline.RuntimeContext()
-	}
-
-	return nil
-}
-
 func (pipelineMgr *PipelineManager) pipeline(topic string) common.Pipeline {
 	pipeline := pipelineMgr.getPipelineFromMap(topic)
 	return pipeline
@@ -526,7 +504,7 @@ func (pipelineMgr *PipelineManager) launchUpdater(topic string, cur_err error, r
 		retry_interval = settingsMap[metadata.FailureRestartInterval].(int)
 	}
 
-	updater := newPipelineUpdater(topic, retry_interval, pipelineMgr.child_waitGrp, cur_err, rep_status, pipelineMgr.logger, pipelineMgr)
+	updater := newPipelineUpdater(topic, retry_interval, cur_err, rep_status, pipelineMgr.logger, pipelineMgr)
 
 	// SetUpdater should not fail
 	err := rep_status.SetUpdater(updater)
@@ -534,9 +512,8 @@ func (pipelineMgr *PipelineManager) launchUpdater(topic string, cur_err error, r
 		return err
 	}
 
-	pipelineMgr.child_waitGrp.Add(1)
 	go updater.run()
-	pipelineMgr.logger.Infof("Pipeline updater %v is lauched with retry_interval=%v\n", topic, retry_interval)
+	pipelineMgr.logger.Infof("Pipeline updater %v is launched with retry_interval=%v\n", topic, retry_interval)
 
 	return nil
 }
@@ -700,9 +677,6 @@ type PipelineUpdater struct {
 	// Note - lock ordering not to be violated: 1. overflowErrors 2. currentErrors
 	overflowErrors *pmErrMapType
 
-	// passed in from and managed by pipeline_manager
-	waitGrp *sync.WaitGroup
-
 	// Pipeline Manager that created this updater
 	pipelineMgr Pipeline_mgr_iface
 
@@ -728,6 +702,9 @@ type PipelineUpdater struct {
 	// Unit test only - should be in milliseconds
 	testCustomScheduleTime time.Duration
 	testInjectionError     int32
+
+	stopped     bool
+	stoppedLock sync.Mutex
 }
 
 type pmErrMapType struct {
@@ -766,18 +743,10 @@ func (em *pmErrMapType) LoadErrMap(newMap base.ErrorMap) {
 	em.errMap = base.DeepCopyErrorMap(newMap)
 }
 
-func (em *pmErrMapType) ConcatenateErrors(incomingMap base.ErrorMap) (err error) {
+func (em *pmErrMapType) ConcatenateErrors(incomingMap base.ErrorMap) {
 	em.curErrMtx.Lock()
 	defer em.curErrMtx.Unlock()
-	// Traditionally, Pipeline Manager give priority to existing / first errors coming in
-	if base.GetUnionOfErrorMapsSize(em.errMap, incomingMap) <= MaxErrorDataEntries {
-		base.MergeErrorMaps(em.errMap, incomingMap, false /*overwrite*/)
-	} else {
-		em.logger.Warnf("Unable to record the errors as maximum entries of %v has been reached in the current error map. The errors lost are: %v\n",
-			MaxErrorDataEntries, incomingMap)
-		err = base.ErrorMaxReached
-	}
-	return
+	base.ConcatenateErrors(em.errMap, incomingMap, MaxErrorDataEntries, em.logger)
 }
 
 // The behavior is to not overwrite keys - since traditionally Pipeline Manager's error handling
@@ -789,7 +758,11 @@ func (em *pmErrMapType) AddError(source string, err error) error {
 	em.curErrMtx.Lock()
 	defer em.curErrMtx.Unlock()
 	if _, ok := em.errMap[source]; !ok {
-		em.errMap[source] = err
+		if len(em.errMap) < MaxErrorDataEntries {
+			em.errMap[source] = err
+		} else {
+			em.logger.Warnf("Failed to add error to error map since the error map is full. error discarded = %v", err)
+		}
 	}
 	return nil
 }
@@ -800,7 +773,7 @@ func (em *pmErrMapType) ContainsError(checkErr error, exactMatch bool) bool {
 	return base.CheckErrorMapForError(em.errMap, checkErr, exactMatch)
 }
 
-func newPipelineUpdater(pipeline_name string, retry_interval int, waitGrp *sync.WaitGroup, cur_err error, rep_status_in pipeline.ReplicationStatusIface, logger *log.CommonLogger, pipelineMgr_in *PipelineManager) *PipelineUpdater {
+func newPipelineUpdater(pipeline_name string, retry_interval int, cur_err error, rep_status_in pipeline.ReplicationStatusIface, logger *log.CommonLogger, pipelineMgr_in *PipelineManager) *PipelineUpdater {
 	if rep_status_in == nil {
 		panic("nil ReplicationStatus")
 	}
@@ -810,7 +783,6 @@ func newPipelineUpdater(pipeline_name string, retry_interval int, waitGrp *sync.
 		done_ch:                make(chan bool, 1),
 		update_now_ch:          make(chan bool, 1),
 		update_err_map_ch:      make(chan base.ErrorMap, 1),
-		waitGrp:                waitGrp,
 		rep_status:             rep_status_in,
 		logger:                 logger,
 		pipelineMgr:            pipelineMgr_in,
@@ -834,7 +806,6 @@ func (r *PipelineUpdater) getLastResult() bool {
 
 //start the repairer
 func (r *PipelineUpdater) run() {
-	defer r.waitGrp.Done()
 	defer close(r.done_ch)
 
 	var retErr error
@@ -863,7 +834,9 @@ func (r *PipelineUpdater) run() {
 			if r.getLastResult() {
 				// Last time update succeeded, so this error then triggers an immediate update
 				r.logger.Infof("Replication %v's status experienced changes or errors (%v), updating now\n", r.pipeline_name, base.FlattenErrorMap(retErrMap))
-				if retErrMap = r.update(); len(retErrMap) > 0 {
+				retErrMap = r.update()
+				r.cancelFutureRefresh()
+				if len(retErrMap) > 0 {
 					updateAgain = true
 				}
 			} else {
@@ -940,11 +913,7 @@ func (r *PipelineUpdater) update() base.ErrorMap {
 	var p common.Pipeline
 	var checkReplicationActivenessKey string = "r.CheckReplicationActiveness"
 
-	// Before executing, pick up any errors that were not captured by the channel
-	r.overflowErrors.curErrMtx.RLock()
-	// If current errors map is too full, then these overflow errors may be missed
-	r.currentErrors.ConcatenateErrors(r.overflowErrors.errMap)
-	r.overflowErrors.curErrMtx.RUnlock()
+	r.pickupOverflowErrors()
 
 	if r.currentErrors.IsEmpty() {
 		r.logger.Infof("Try to start/restart Pipeline %v. \n", r.pipeline_name)
@@ -1019,6 +988,15 @@ RE:
 	return errMap
 }
 
+// pick up overflow errors that were not captured by the channel
+func (r *PipelineUpdater) pickupOverflowErrors() {
+	r.overflowErrors.curErrMtx.Lock()
+	defer r.overflowErrors.curErrMtx.Unlock()
+	// If current errors map is too full, then these overflow errors may be missed
+	r.currentErrors.ConcatenateErrors(r.overflowErrors.errMap)
+	r.overflowErrors.errMap = make(base.ErrorMap)
+}
+
 func (r *PipelineUpdater) reportStatus() {
 	if r.rep_status != nil {
 		r.currentErrors.curErrMtx.RLock()
@@ -1038,46 +1016,44 @@ func (r *PipelineUpdater) raiseWarningsIfNeeded(p common.Pipeline) {
 // 3. target cluster does not support xattr
 // 4. current node is the master for vbucket 0 - this is needed to ensure that warning is shown on UI only once, instead of once per source node
 func (r *PipelineUpdater) raiseXattrWarningIfNeeded(p common.Pipeline) {
-	if r.currentErrors.IsEmpty() {
-		if p == nil {
-			r.logger.Warnf("Skipping xattr warning check since pipeline %v has not been started\n", r.pipeline_name)
-			return
-		}
-		spec := p.Specification()
-		if spec == nil {
-			r.logger.Warnf("Skipping xattr warning check since cannot find replication spec for pipeline %v\n", r.pipeline_name)
-			return
-		}
-		if spec.Settings.IsCapi() {
-			return
-		}
-		targetClusterRef, err := r.pipelineMgr.GetRemoteClusterSvc().RemoteClusterByUuid(spec.TargetClusterUUID, false)
-		if err != nil {
-			r.logger.Warnf("Skipping xattr warning check since received error getting remote cluster with uuid=%v for pipeline %v, err=%v\n", spec.TargetClusterUUID, spec.Id, err)
-			return
-		}
-		hasXattrSupport, err := r.pipelineMgr.GetClusterInfoSvc().IsClusterCompatible(targetClusterRef, base.VersionForRBACAndXattrSupport)
-		if err != nil {
-			r.logger.Warnf("Skipping xattr warning check since received error checking target cluster version. target cluster=%v, pipeline=%v, err=%v\n", spec.TargetClusterUUID, spec.Id, err)
-			return
-		}
-		if !hasXattrSupport {
-			errMsg := fmt.Sprintf("Replication from source bucket '%v' to target bucket '%v' on cluster '%v' has been started. Note - Target cluster is older than 5.0.0, hence some of the new feature enhancements such as \"Extended Attributes (XATTR)\" are not supported, which might result in loss of XATTR data. If this is not acceptable, please pause the replication, upgrade cluster '%v' to 5.0.0, and restart replication.", spec.SourceBucketName, spec.TargetBucketName, targetClusterRef.Name(), targetClusterRef.Name())
-			r.logger.Warn(errMsg)
+	if p == nil {
+		r.logger.Warnf("Skipping xattr warning check since pipeline %v has not been started\n", r.pipeline_name)
+		return
+	}
+	spec := p.Specification()
+	if spec == nil {
+		r.logger.Warnf("Skipping xattr warning check since cannot find replication spec for pipeline %v\n", r.pipeline_name)
+		return
+	}
+	if spec.Settings.IsCapi() {
+		return
+	}
+	targetClusterRef, err := r.pipelineMgr.GetRemoteClusterSvc().RemoteClusterByUuid(spec.TargetClusterUUID, false)
+	if err != nil {
+		r.logger.Warnf("Skipping xattr warning check since received error getting remote cluster with uuid=%v for pipeline %v, err=%v\n", spec.TargetClusterUUID, spec.Id, err)
+		return
+	}
+	hasXattrSupport, err := r.pipelineMgr.GetClusterInfoSvc().IsClusterCompatible(targetClusterRef, base.VersionForRBACAndXattrSupport)
+	if err != nil {
+		r.logger.Warnf("Skipping xattr warning check since received error checking target cluster version. target cluster=%v, pipeline=%v, err=%v\n", spec.TargetClusterUUID, spec.Id, err)
+		return
+	}
+	if !hasXattrSupport {
+		errMsg := fmt.Sprintf("Replication from source bucket '%v' to target bucket '%v' on cluster '%v' has been started. Note - Target cluster is older than 5.0.0, hence some of the new feature enhancements such as \"Extended Attributes (XATTR)\" are not supported, which might result in loss of XATTR data. If this is not acceptable, please pause the replication, upgrade cluster '%v' to 5.0.0, and restart replication.", spec.SourceBucketName, spec.TargetBucketName, targetClusterRef.Name(), targetClusterRef.Name())
+		r.logger.Warn(errMsg)
 
-			sourceVbList := pipeline_utils.GetSourceVBListPerPipeline(p)
-			containsVb0 := false
-			for _, vbno := range sourceVbList {
-				if vbno == 0 {
-					containsVb0 = true
-					break
-				}
+		sourceVbList := pipeline_utils.GetSourceVBListPerPipeline(p)
+		containsVb0 := false
+		for _, vbno := range sourceVbList {
+			if vbno == 0 {
+				containsVb0 = true
+				break
 			}
+		}
 
-			if containsVb0 {
-				// write warning to UI
-				r.pipelineMgr.GetLogSvc().Write(errMsg)
-			}
+		if containsVb0 {
+			// write warning to UI
+			r.pipelineMgr.GetLogSvc().Write(errMsg)
 		}
 	}
 }
@@ -1096,24 +1072,30 @@ func (r *PipelineUpdater) checkReplicationActiveness() (err error) {
 	spec, err := r.pipelineMgr.GetReplSpecSvc().ReplicationSpec(r.pipeline_name)
 	if err != nil || spec == nil || !spec.Settings.Active {
 		err = ReplicationSpecNotActive
-	} else {
-		r.logger.Debugf("Pipeline %v is not paused or deleted\n", r.pipeline_name)
 	}
 	return
 }
 
-//It should be called only once.
 func (r *PipelineUpdater) stop() {
-	defer func() {
-		if e := recover(); e != nil {
-			r.logger.Infof("Updater for pipeline is already stopped\n", r.pipeline_name)
-		}
-	}()
+	err := r.setStopped()
+	if err != nil {
+		return
+	}
 
 	close(r.fin_ch)
 
 	// wait for updater to really stop
 	<-r.done_ch
+}
+
+func (r *PipelineUpdater) setStopped() error {
+	r.stoppedLock.Lock()
+	defer r.stoppedLock.Unlock()
+	if r.stopped {
+		return UpdaterStoppedError
+	}
+	r.stopped = true
+	return nil
 }
 
 // This method will update the replicationStatus immediately
@@ -1145,11 +1127,8 @@ func (r *PipelineUpdater) sendUpdateErrMap(errMap base.ErrorMap) {
 	select {
 	case r.update_err_map_ch <- errMap:
 	default:
-		if concatErr := r.overflowErrors.ConcatenateErrors(errMap); concatErr != nil {
-			r.logger.Infof("Updater is currently running. Errors are captured in overflow map, and may be picked up if the current pipeline restart fails")
-		} else {
-			r.logger.Infof("Updater is currently running. Errors are not captured in overflow map due to overflow map overflowing...")
-		}
+		r.overflowErrors.ConcatenateErrors(errMap)
+		r.logger.Infof("Updater is currently running. Errors are captured in overflow map, and may be picked up if the current pipeline restart fails")
 	}
 	r.logger.Infof("Replication status is updated with error(s) %v, current status=%v\n", base.FlattenErrorMap(errMap), r.rep_status)
 }
