@@ -202,11 +202,4 @@ type CAPIService interface {
 	//			  vb_uuid	   - the new vb uuid if there was a topology change
 	//			  err
 	CommitForCheckpoint(remoteBucket *RemoteBucketInfo, remoteVBOpaque metadata.TargetVBOpaque, vbno uint16) (remote_seqno uint64, vbOpaque metadata.TargetVBOpaque, err error)
-	//call to mass validate vb uuids on remote cluster
-	//Parameters: remoteBucket - the information about the remote bucket
-	//			  remoteVBUUIDs - the map of vbno and vbuuid
-	//returns: matching - the list of vb numbers whose vbuuid matches
-	//		   mismatching - the list of vb numbers whose vbuuid mismatches
-	//		   missing	- the list of vb numbers whose vbuuid is not kept on file
-	MassValidateVBUUIDs(remoteBucket *RemoteBucketInfo, remoteVBUUIDs map[uint16]metadata.TargetVBOpaque) (matching []uint16, mismatching []uint16, missing []uint16, err error)
 }

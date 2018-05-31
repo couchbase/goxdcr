@@ -26,17 +26,16 @@ var NO_VB_OPAQUE_IN_RESP_ERR error = errors.New("No vb opaque in the response")
 
 //apiRequest is a structure for http request used for CAPI
 type apiRequest struct {
-	url                string
-	path               string
-	username           string
-	password           string
-	body               base.InterfaceMap
-	httpAuthMech       base.HttpAuthMech
-	certificate        []byte
-	SANInCertificate   bool
-	insecureSkipVerify bool
-	clientCertificate  []byte
-	clientKey          []byte
+	url               string
+	path              string
+	username          string
+	password          string
+	body              base.InterfaceMap
+	httpAuthMech      base.HttpAuthMech
+	certificate       []byte
+	SANInCertificate  bool
+	clientCertificate []byte
+	clientKey         []byte
 }
 
 // Shallow copy bare bones information for redaction
@@ -49,7 +48,7 @@ func (req *apiRequest) CloneLite() *apiRequest {
 	return clonedReq
 }
 
-func (req *apiRequest) Redact() *apiRequest {
+func (req *apiRequest) redact() *apiRequest {
 	if req != nil {
 		if !base.IsStringRedacted(req.username) {
 			req.username = base.TagUD(req.username)
@@ -63,7 +62,7 @@ func (req *apiRequest) Redact() *apiRequest {
 
 func (req *apiRequest) CloneAndRedact() *apiRequest {
 	if req != nil {
-		return req.CloneLite().Redact()
+		return req.CloneLite().redact()
 	}
 	return req
 }
@@ -99,7 +98,6 @@ func NewCAPIService(cluster_info_service *ClusterInfoSvc, logger_ctx *log.Logger
 // Refer to ns_server/deps/ns_couchdb/src/capi_replication.erl for server side source code
 func (capi_svc *CAPIService) PreReplicate(remoteBucket *service_def.RemoteBucketInfo,
 	knownRemoteVBStatus *service_def.RemoteVBReplicationStatus, xdcrCheckpointingCapbility bool) (bMatch bool, current_remoteVBOpaque metadata.TargetVBOpaque, err error) {
-	capi_svc.logger.Debug("Calling _pre_replicate")
 	api_base, err := capi_svc.composeAPIRequestBaseForVb(remoteBucket, knownRemoteVBStatus.VBNo, PRE_REPLICATE_CMD)
 	if err != nil {
 		return
@@ -117,7 +115,7 @@ func (capi_svc *CAPIService) PreReplicate(remoteBucket *service_def.RemoteBucket
 	capi_svc.logger.Debugf("response from _pre_replicate is status_code=%v respMap=%v for %v\n", status_code, respMap, knownRemoteVBStatus)
 	if err != nil {
 		capi_svc.logger.Errorf("Calling _pre_replicate on %v failed for vb=%v, err=%v\n", api_base.url, knownRemoteVBStatus.VBNo, err)
-		return false, nil, err
+		return
 	}
 
 	bMatch, current_remoteVBOpaque, err = capi_svc.parsePreReplicateResp(api_base.url, status_code, respMap, knownRemoteVBStatus.VBNo, xdcrCheckpointingCapbility)
@@ -137,7 +135,6 @@ func (capi_svc *CAPIService) PreReplicate(remoteBucket *service_def.RemoteBucket
 //			  vb_uuid	   - the new vb uuid if there was a topology change
 //			  err
 func (capi_svc *CAPIService) CommitForCheckpoint(remoteBucket *service_def.RemoteBucketInfo, remoteVBOpaque metadata.TargetVBOpaque, vbno uint16) (remote_seqno uint64, vbOpaque metadata.TargetVBOpaque, err error) {
-	capi_svc.logger.Debug("Calling _commit_for_checkpoint")
 	api_base, err := capi_svc.composeAPIRequestBaseForVb(remoteBucket, vbno, COMMIT_FOR_CKPT_CMD)
 	if err != nil {
 		return
@@ -187,105 +184,6 @@ func (capi_svc *CAPIService) CommitForCheckpoint(remoteBucket *service_def.Remot
 		err = errors.New(msg)
 		return 0, nil, err
 	}
-	return
-}
-
-//MassValidateVBUUIDs (_mass_vbopaque_check)
-//Parameters: remoteBucket - the information about the remote bucket
-//			  remoteVBUUIDs - the map of vbno and vbuuid
-//returns: matching - the list of vb numbers whose vbuuid matches
-//		   mismatching - the list of vb numbers whose vbuuid mismatches
-//		   missing	- the list of vb numbers whose vbuuid is not kept on file
-func (capi_svc *CAPIService) MassValidateVBUUIDs(remoteBucket *service_def.RemoteBucketInfo, remoteVBUUIDs map[uint16]metadata.TargetVBOpaque) (matching []uint16, mismatching []uint16, missing []uint16, err error) {
-	capi_svc.logger.Info("Calling _mass_vbopaque_check")
-
-	matching = make([]uint16, 0)
-	mismatching = make([]uint16, 0)
-	missing = make([]uint16, 0)
-	for server_addr, vblist := range remoteBucket.VBServerMap {
-		vbopaques := [][]interface{}{}
-		for _, vbno := range vblist {
-			if remotevbuuid, ok := remoteVBUUIDs[vbno]; ok && remotevbuuid != nil {
-				vbopaques = append(vbopaques, []interface{}{vbno, remotevbuuid.Value()})
-			}
-		}
-
-		if len(vbopaques) == 0 {
-			continue
-		}
-
-		matching_per_server, mismatching_per_server, missing_per_server, err1 := capi_svc.massValidateVBUUIDsForServer(remoteBucket, vbopaques, server_addr, vblist)
-		if err1 != nil {
-			err = err1
-			return
-		}
-		matching = append(matching, matching_per_server...)
-		mismatching = append(mismatching, mismatching_per_server...)
-		missing = append(missing, missing_per_server...)
-	}
-
-	return
-}
-
-func (capi_svc *CAPIService) massValidateVBUUIDsForServer(remoteBucket *service_def.RemoteBucketInfo, vbopaques [][]interface{},
-	server_addr string, vblist []uint16) (matching []uint16, mismatching []uint16, missing []uint16, err error) {
-	capi_svc.logger.Infof("Calling _mass_vbopaque_check for server %v\n", server_addr)
-
-	api_base, err := capi_svc.composeAPIRequestBaseForServer(remoteBucket, server_addr, MASS_VBOPAQUE_CHECK_CMD)
-	if err != nil {
-		return
-	}
-
-	api_base.body["vbopaques"] = vbopaques
-	http_client := remoteBucket.RestAddrHttpClientMap[api_base.url]
-	status_code, respMap, err := capi_svc.send_post(api_base, http_client, base.MaxRetryCapiService)
-
-	capi_svc.logger.Debugf("vbopaques=%v\n", vbopaques)
-	if err != nil {
-		return nil, nil, nil, err
-	}
-	matching, mismatching, missing, err = capi_svc.parseMassValidateSeqNosResp(api_base.url, status_code, respMap, vbopaques)
-	return
-}
-
-func (capi_svc *CAPIService) parseMassValidateSeqNosResp(url string, resp_status_code int,
-	respMap map[string]interface{}, vbOpaques [][]interface{}) (matching []uint16, mismatching []uint16, missing []uint16, err error) {
-	mismatchingobj, ok := respMap["mismatched"]
-	if !ok {
-		err = errors.New("Can't find 'mismatched' in response")
-		return
-	}
-	mismatching_pairs := mismatchingobj.([]interface{})
-	mismatching, err = getVBLists(mismatching_pairs)
-	if err != nil {
-		return
-	}
-	missingobj, ok := respMap["missing"]
-	if !ok {
-		err = errors.New("Can't find 'missing' in response")
-		return
-	}
-	missing_list := missingobj.([]interface{})
-	missing = make([]uint16, len(missing_list))
-	for index, vb := range missing_list {
-		missing[index] = uint16(vb.(float64))
-	}
-
-	bad_vb_list := []uint16{}
-	bad_vb_list = append(mismatching, missing...)
-	matching = []uint16{}
-	//loop through the provided vbOpaques
-	for _, vbpair := range vbOpaques {
-		vb, ok := vbpair[0].(uint16)
-		if !ok {
-			panic(fmt.Sprintf("wrong format of vbOpaques, the first element in %v is expected to be uint16", vbpair))
-		}
-		if !isInBadList(vb, bad_vb_list, capi_svc.logger) {
-			matching = append(matching, vb)
-		}
-
-	}
-	capi_svc.logger.Debugf("mismatching=%v, missing=%v, matching=%v\n", mismatching, missing, matching)
 	return
 }
 
@@ -382,7 +280,7 @@ func (capi_svc *CAPIService) send_post(api_base *apiRequest, client *http.Client
 		return 0, nil, err
 	}
 
-	err, statusCode := capi_svc.utils.InvokeRestWithRetryWithAuth(api_base.url, api_base.path, false, api_base.username, api_base.password, api_base.httpAuthMech, api_base.certificate, api_base.SANInCertificate, api_base.clientCertificate, api_base.clientKey, api_base.insecureSkipVerify, base.MethodPost, base.JsonContentType, body, 0, &ret_map, client, true, capi_svc.logger, num_retry)
+	err, statusCode := capi_svc.utils.InvokeRestWithRetryWithAuth(api_base.url, api_base.path, false, api_base.username, api_base.password, api_base.httpAuthMech, api_base.certificate, api_base.SANInCertificate, api_base.clientCertificate, api_base.clientKey, false, base.MethodPost, base.JsonContentType, body, 0, &ret_map, client, true, capi_svc.logger, num_retry)
 	return statusCode, ret_map, err
 }
 
@@ -399,8 +297,7 @@ func (capi_svc *CAPIService) parsePreReplicateResp(hostName string,
 			return false, nil, err
 		}
 
-		capi_svc.logger.Debugf("_re_replicate returns remote VBOpaque=%v\n", vbOpaque)
-		capi_svc.logger.Debugf("_pre_replicate returned %v status", bMatch)
+		capi_svc.logger.Debugf("_re_replicate returned match=%v, remote VBOpaque=%v\n", bMatch, vbOpaque)
 		return bMatch, vbOpaque, nil
 	} else {
 		var retError error = fmt.Errorf("unexpected status code, %v, in _pre_replicate response. respMap=%v\n", resp_status_code, respMap)
@@ -505,28 +402,4 @@ func (capi_svc *CAPIService) lookUpConnectionStrForServer(remoteBucket *service_
 		return "", errors.New(fmt.Sprintf("server addr is nil"))
 	}
 
-}
-
-//helper function to MassValidateVBUUIDs
-//it returns a list of vbno given a list of [vbno, vbuuid] pair
-func getVBLists(pair_list []interface{}) ([]uint16, error) {
-	ret := []uint16{}
-	for _, pairObj := range pair_list {
-		pair, ok := pairObj.([]interface{})
-		if !ok || len(pair) != 2 {
-			return ret, fmt.Errorf("_mass_vbopaque_check retruns an invalid response. element in mismatch field should have format of [vbno, vbuuid], it is %v, pair_list=%v", pairObj, pair_list)
-		}
-		vb := uint16(pair[0].(float64))
-		ret = append(ret, vb)
-	}
-	return ret, nil
-}
-
-func isInBadList(vb uint16, bad_vb_list []uint16, logger *log.CommonLogger) bool {
-	for _, vbno := range bad_vb_list {
-		if vb == vbno {
-			return true
-		}
-	}
-	return false
 }
