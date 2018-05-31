@@ -106,9 +106,8 @@ func (event *RemoteClusterRefEvent) Redact() AuditEventIface {
 }
 
 func (event *RemoteClusterRefEvent) Clone() AuditEventIface {
-	clonedEvent := &RemoteClusterRefEvent{}
-	*clonedEvent = *event
-	return clonedEvent
+	clonedEvent := *event
+	return &clonedEvent
 }
 
 func (event *CreateReplicationEvent) Redact() AuditEventIface {
@@ -117,9 +116,8 @@ func (event *CreateReplicationEvent) Redact() AuditEventIface {
 }
 
 func (event *CreateReplicationEvent) Clone() AuditEventIface {
-	clonedEvent := &CreateReplicationEvent{}
-	*clonedEvent = *event
-	return clonedEvent
+	clonedEvent := *event
+	return &clonedEvent
 }
 
 func (event *UpdateDefaultReplicationSettingsEvent) Redact() AuditEventIface {
@@ -128,9 +126,8 @@ func (event *UpdateDefaultReplicationSettingsEvent) Redact() AuditEventIface {
 }
 
 func (event *UpdateDefaultReplicationSettingsEvent) Clone() AuditEventIface {
-	clonedEvent := &UpdateDefaultReplicationSettingsEvent{}
-	*clonedEvent = *event
-	return clonedEvent
+	clonedEvent := *event
+	return &clonedEvent
 }
 
 func (event *UpdateBucketSettingsEvent) Redact() AuditEventIface {
@@ -139,9 +136,8 @@ func (event *UpdateBucketSettingsEvent) Redact() AuditEventIface {
 }
 
 func (event *UpdateBucketSettingsEvent) Clone() AuditEventIface {
-	clonedEvent := &UpdateBucketSettingsEvent{}
-	*clonedEvent = *event
-	return clonedEvent
+	clonedEvent := *event
+	return &clonedEvent
 }
 
 func (event *GenericReplicationEvent) Redact() AuditEventIface {
@@ -150,7 +146,6 @@ func (event *GenericReplicationEvent) Redact() AuditEventIface {
 }
 
 func (event *GenericReplicationEvent) Clone() AuditEventIface {
-	clonedEvent := &GenericReplicationEvent{}
-	*clonedEvent = *event
-	return clonedEvent
+	clonedEvent := *event
+	return &clonedEvent
 }

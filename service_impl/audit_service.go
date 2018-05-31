@@ -31,19 +31,23 @@ var AuditServiceUserAgent = "Goxdcr Audit"
 var AuditPutCommandCode = mc.AUDIT
 
 type AuditSvc struct {
-	top_svc     service_def.XDCRCompTopologySvc
-	kvaddr      string
-	logger      *log.CommonLogger
-	initialized bool
-	utils       utilities.UtilsIface
+	top_svc service_def.XDCRCompTopologySvc
+	kvaddr  string
+	logger  *log.CommonLogger
+	utils   utilities.UtilsIface
 }
 
 func NewAuditSvc(top_svc service_def.XDCRCompTopologySvc, loggerCtx *log.LoggerContext, utilsIn utilities.UtilsIface) (*AuditSvc, error) {
 	service := &AuditSvc{
-		top_svc:     top_svc,
-		logger:      log.NewLogger("AuditSvc", loggerCtx),
-		initialized: false,
-		utils:       utilsIn,
+		top_svc: top_svc,
+		logger:  log.NewLogger("AuditSvc", loggerCtx),
+		utils:   utilsIn,
+	}
+
+	err := service.init()
+	if err != nil {
+		service.logger.Errorf("Error creating audit service. err=%v\n", err)
+		return nil, err
 	}
 
 	service.logger.Infof("Created audit service.\n")
@@ -55,10 +59,6 @@ func (service *AuditSvc) Write(eventId uint32, event service_def.AuditEventIface
 		service.logger.Debugf("Writing audit event. eventId=%v, event=%v\n", eventId, event.Clone().Redact())
 	}
 
-	err := service.init()
-	if err != nil {
-		return err
-	}
 	client, err := service.getClient()
 	if err != nil {
 		return nil
@@ -95,17 +95,21 @@ func (service *AuditSvc) write_internal(client mcc.ClientIface, eventId uint32, 
 	conn.(*net.TCPConn).SetReadDeadline(time.Now().Add(base.AuditReadTimeout))
 	res, err := client.Receive()
 	if service.logger.GetLogLevel() >= log.LogLevelDebug {
-		service.logger.Debugf("audit response=%v%v%v, opcode=%v, opaque=%v, status=%v, err=%v\n", base.UdTagBegin, res, base.UdTagEnd, res.Opcode, res.Opaque, res.Status, err)
+		if res != nil {
+			service.logger.Debugf("audit response=%v%v%v, opcode=%v, opaque=%v, status=%v, err=%v\n", base.UdTagBegin, res, base.UdTagEnd, res.Opcode, res.Opaque, res.Status, err)
+		} else {
+			service.logger.Debugf("audit response is nil, err=%v\n", err)
+		}
 	}
 
 	if err != nil {
 		return err
 	} else if res.Opcode != AuditPutCommandCode {
-		return errors.New(fmt.Sprintf("unexpected #opcode %v", res.Opcode))
+		return errors.New(fmt.Sprintf("audit unexpected #opcode %v", res.Opcode))
 	} else if req.Opaque != res.Opaque {
-		return errors.New(fmt.Sprintf("opaque mismatch, %v over %v", req.Opaque, res.Opaque))
+		return errors.New(fmt.Sprintf("audit opaque mismatch, %v over %v", req.Opaque, res.Opaque))
 	} else if res.Status != mc.SUCCESS {
-		return errors.New(fmt.Sprintf("unsuccessful status = %v", res.Status))
+		return errors.New(fmt.Sprintf("audit unsuccessful status = %v", res.Status))
 	}
 
 	return nil
@@ -131,19 +135,15 @@ func composeAuditRequest(eventId uint32, event service_def.AuditEventIface) (*mc
 
 func (service *AuditSvc) init() error {
 	var err error
-	if !service.initialized {
-		service.kvaddr, err = service.top_svc.MyMemcachedAddr()
-		if err != nil {
-			return service.utils.NewEnhancedError(ErrorInitializingAuditService+" Error getting memcached address of current host.", err)
-		} else {
-			service.initialized = true
-		}
+	service.kvaddr, err = service.top_svc.MyMemcachedAddr()
+	if err != nil {
+		return service.utils.NewEnhancedError(ErrorInitializingAuditService+" Error getting memcached address of current host.", err)
 	}
-	return err
+	return nil
 }
 
 func (service *AuditSvc) getClient() (mcc.ClientIface, error) {
-	// audit connection is not kept alive
+	// audit connection is sparse and is not kept alive
 	client, err := service.utils.GetMemcachedConnection(service.kvaddr, "" /*bucketName*/, AuditServiceUserAgent,
 		0 /*keepAlivePeriod*/, service.logger)
 
