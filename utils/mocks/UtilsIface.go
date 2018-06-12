@@ -1184,22 +1184,22 @@ func (_m *UtilsIface) GetRemoteMemcachedConnectionWFeatures(serverAddr string, u
 	return r0, r1, r2
 }
 
-// GetRemoteNodeNameListFromNodeList provides a mock function with given fields: nodeList, connStr, logger
-func (_m *UtilsIface) GetRemoteNodeNameListFromNodeList(nodeList []interface{}, connStr string, logger *log.CommonLogger) ([]string, error) {
-	ret := _m.Called(nodeList, connStr, logger)
+// GetRemoteNodeAddressesListFromNodeList provides a mock function with given fields: nodeList, connStr, needHttps, logger
+func (_m *UtilsIface) GetRemoteNodeAddressesListFromNodeList(nodeList []interface{}, connStr string, needHttps bool, logger *log.CommonLogger) (base.StringPairList, error) {
+	ret := _m.Called(nodeList, connStr, needHttps, logger)
 
-	var r0 []string
-	if rf, ok := ret.Get(0).(func([]interface{}, string, *log.CommonLogger) []string); ok {
-		r0 = rf(nodeList, connStr, logger)
+	var r0 base.StringPairList
+	if rf, ok := ret.Get(0).(func([]interface{}, string, bool, *log.CommonLogger) base.StringPairList); ok {
+		r0 = rf(nodeList, connStr, needHttps, logger)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).([]string)
+			r0 = ret.Get(0).(base.StringPairList)
 		}
 	}
 
 	var r1 error
-	if rf, ok := ret.Get(1).(func([]interface{}, string, *log.CommonLogger) error); ok {
-		r1 = rf(nodeList, connStr, logger)
+	if rf, ok := ret.Get(1).(func([]interface{}, string, bool, *log.CommonLogger) error); ok {
+		r1 = rf(nodeList, connStr, needHttps, logger)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -1208,7 +1208,7 @@ func (_m *UtilsIface) GetRemoteNodeNameListFromNodeList(nodeList []interface{}, 
 }
 
 // GetRemoteSSLPort provides a mock function with given fields: hostAddr, logger
-func (_m *UtilsIface) GetRemoteSSLPort(hostAddr string, logger *log.CommonLogger) (uint16, error, bool) {
+func (_m *UtilsIface) GetRemoteSSLPort(hostAddr string, logger *log.CommonLogger) (uint16, error) {
 	ret := _m.Called(hostAddr, logger)
 
 	var r0 uint16
@@ -1225,14 +1225,7 @@ func (_m *UtilsIface) GetRemoteSSLPort(hostAddr string, logger *log.CommonLogger
 		r1 = ret.Error(1)
 	}
 
-	var r2 bool
-	if rf, ok := ret.Get(2).(func(string, *log.CommonLogger) bool); ok {
-		r2 = rf(hostAddr, logger)
-	} else {
-		r2 = ret.Get(2).(bool)
-	}
-
-	return r0, r1, r2
+	return r0, r1
 }
 
 // GetRemoteServerVBucketsMap provides a mock function with given fields: connStr, bucketName, bucketInfo
@@ -1356,7 +1349,7 @@ func (_m *UtilsIface) GetStringSettingFromSettings(settings metadata.Replication
 }
 
 // HttpsRemoteHostAddr provides a mock function with given fields: hostAddr, logger
-func (_m *UtilsIface) HttpsRemoteHostAddr(hostAddr string, logger *log.CommonLogger) (string, error, bool) {
+func (_m *UtilsIface) HttpsRemoteHostAddr(hostAddr string, logger *log.CommonLogger) (string, error) {
 	ret := _m.Called(hostAddr, logger)
 
 	var r0 string
@@ -1373,14 +1366,7 @@ func (_m *UtilsIface) HttpsRemoteHostAddr(hostAddr string, logger *log.CommonLog
 		r1 = ret.Error(1)
 	}
 
-	var r2 bool
-	if rf, ok := ret.Get(2).(func(string, *log.CommonLogger) bool); ok {
-		r2 = rf(hostAddr, logger)
-	} else {
-		r2 = ret.Get(2).(bool)
-	}
-
-	return r0, r1, r2
+	return r0, r1
 }
 
 // InvalidRuneIndexErrorMessage provides a mock function with given fields: key, index

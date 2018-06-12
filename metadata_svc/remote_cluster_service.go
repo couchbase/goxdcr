@@ -61,17 +61,14 @@ type RemoteClusterAgentIface interface {
 	GetConnectionStringForCAPIRemoteCluster() string
 }
 
-// function pointer type
-type GetHttpsAddrFromRCSFunc func(hostName string) (string, error)
-type RemoveHttpsAddrFromRCSFunc func(hostName string) error
 type RemoteClusterAgent struct {
 	/** Members protected by refMutex */
 	// Mutex used to protect any internal data structure that may be modified
 	refMtx sync.RWMutex
 	// The offical local copy of the RemoteClusterReference. Use Clone() method to make a copy.
 	reference metadata.RemoteClusterReference
-	// The most up-to-date cached list of nodes
-	refNodesList []string
+	// The most up-to-date cached list of nodes in pairs of [httpAddr, httpsAddr]
+	refNodesList base.StringPairList
 	// function pointer to callback
 	metadataChangeCallback base.MetadataChangeHandlerCallback
 
@@ -82,11 +79,6 @@ type RemoteClusterAgent struct {
 	// Make sure we call stop only once
 	stopOnce sync.Once
 
-	/** Inherited from parent at run-time */
-	// Function pointer to Remote Cluster Service's cached map of https addresses
-	getHttpsAddrFunc GetHttpsAddrFromRCSFunc
-	// Clean up old entries
-	rmHttpsAddrFunc RemoveHttpsAddrFromRCSFunc
 	// for logging
 	logger *log.CommonLogger
 	// Metadata service reference
@@ -98,7 +90,7 @@ type RemoteClusterAgent struct {
 
 	/* Staging changes area */
 	pendingRef      metadata.RemoteClusterReference
-	pendingRefNodes []string
+	pendingRefNodes base.StringPairList
 	/* Post processing */
 	oldRef *metadata.RemoteClusterReference
 }
@@ -118,9 +110,10 @@ func (agent *RemoteClusterAgent) GetConnectionStringForCAPIRemoteCluster() (stri
 		// fall back to using reference.activeHostName
 		return agent.reference.MyConnectionStr()
 	}
-	toBeSortedList := base.DeepCopyStringArray(agent.refNodesList)
+	// we only need the string1/hostname part for capi
+	// since capi replication is always non-ssl type, and there is no need for https addr
+	toBeSortedList := agent.refNodesList.GetListOfFirstString()
 	sort.Strings(toBeSortedList)
-	// capi replication is always non-ssl type, there is no need to construct https addr
 	return toBeSortedList[0], nil
 }
 
@@ -139,8 +132,8 @@ type refreshContext struct {
 	// For comparison and editing
 	refOrig            *metadata.RemoteClusterReference
 	refCache           *metadata.RemoteClusterReference
-	origRefNodesList   []string
-	cachedRefNodesList []string
+	origRefNodesList   base.StringPairList
+	cachedRefNodesList base.StringPairList
 
 	// connection related
 	connStr       string
@@ -165,49 +158,44 @@ func (rctx *refreshContext) initialize() error {
 	// for editing
 	rctx.refCache = rctx.agent.reference.Clone()
 	// For comparison
-	rctx.origRefNodesList = base.DeepCopyStringArray(rctx.agent.refNodesList)
+	rctx.origRefNodesList = base.DeepCopyStringPairList(rctx.agent.refNodesList)
 	// for editing
-	rctx.cachedRefNodesList = base.DeepCopyStringArray(rctx.agent.refNodesList)
+	rctx.cachedRefNodesList = base.DeepCopyStringPairList(rctx.agent.refNodesList)
 	rctx.agent.refMtx.RUnlock()
 
-	if err == nil {
-		rctx.index = 0
-		rctx.atLeastOneValid = false
-		if len(rctx.cachedRefNodesList) == 0 {
-			// target node list may be empty if goxdcr process has been restarted. populate it with ActiveHostName or HostName
-			activeHostName := rctx.refOrig.ActiveHostName()
-			if len(activeHostName) == 0 {
-				activeHostName = rctx.refOrig.HostName()
-			}
-			rctx.cachedRefNodesList = append(rctx.cachedRefNodesList, activeHostName)
-		} else if len(rctx.cachedRefNodesList) > 1 {
-			// Randomize the list of hosts to walk through
-			base.ShuffleStringsList(rctx.cachedRefNodesList)
-		}
+	if err != nil {
+		return err
 	}
-	return err
+
+	rctx.index = 0
+	rctx.atLeastOneValid = false
+	if len(rctx.cachedRefNodesList) == 0 {
+		// target node list may be empty if goxdcr process has been restarted. populate it with ActiveHostName or HostName
+		activeHostName := rctx.refOrig.ActiveHostName()
+		if len(activeHostName) == 0 {
+			activeHostName = rctx.refOrig.HostName()
+		}
+		activeHttpsHostName := rctx.refOrig.ActiveHttpsHostName()
+		if len(activeHttpsHostName) == 0 {
+			activeHttpsHostName = rctx.refOrig.HttpsHostName()
+		}
+		rctx.cachedRefNodesList = append(rctx.cachedRefNodesList, base.StringPair{activeHostName, activeHttpsHostName})
+	} else if len(rctx.cachedRefNodesList) > 1 {
+		// Randomize the list of hosts to walk through
+		base.ShuffleStringPairList(rctx.cachedRefNodesList)
+	}
+
+	return nil
 }
 
-// Returns a connection string and also sets context's httpsHostName if it has one
-func (rctx *refreshContext) getConnStrAndSetHttps(hostname string) (string, error) {
-	var err error
-	rctx.httpsHostName = ""
-	if rctx.refCache.IsEncryptionEnabled() {
-		if len(rctx.refCache.Certificate()) > 0 {
-			// populate httpsHostName since it may be needed for the retrieval of security settings
-			rctx.httpsHostName, err = rctx.agent.getHttpsAddrFunc(hostname)
-			if err != nil {
-				rctx.agent.logger.Warnf("When refreshing remote cluster reference %v, skipping node %v since received error getting https address. err=%v\n", rctx.refCache.Id(), hostname, err)
-				return "", err
-			}
-		}
-		if rctx.refCache.IsHttps() {
-			return rctx.httpsHostName, nil
-		} else {
-			return rctx.hostName, nil
-		}
+func (rctx *refreshContext) setHostNamesAndConnStr(pair base.StringPair) {
+	rctx.hostName = pair.GetFirstString()
+	rctx.httpsHostName = pair.GetSecondString()
+
+	if rctx.refCache.IsHttps() {
+		rctx.connStr = rctx.httpsHostName
 	} else {
-		return rctx.hostName, nil
+		rctx.connStr = rctx.hostName
 	}
 }
 
@@ -223,16 +211,16 @@ func (rctx *refreshContext) checkAndUpdateActiveHost() {
 // Updates the agent reference if changes are made
 // Will also update the reference's boostrap hostname if necessary
 func (rctx *refreshContext) checkAndUpdateAgentReference() error {
-	sort.Strings(rctx.origRefNodesList)
-	sort.Strings(rctx.cachedRefNodesList)
+	sort.Sort(rctx.origRefNodesList)
+	sort.Sort(rctx.cachedRefNodesList)
 	nodesListUpdated := !reflect.DeepEqual(rctx.origRefNodesList, rctx.cachedRefNodesList)
 
 	if !rctx.refOrig.IsSame(rctx.refCache) || nodesListUpdated {
 		rctx.agent.refMtx.Lock()
 		defer rctx.agent.refMtx.Unlock()
 		// First see if anyone has changed the reference from underneath us
-		sortedAgentList := base.DeepCopyStringArray(rctx.agent.refNodesList)
-		sort.Strings(sortedAgentList)
+		sortedAgentList := base.DeepCopyStringPairList(rctx.agent.refNodesList)
+		sort.Sort(sortedAgentList)
 		if !rctx.agent.reference.IsSame(rctx.refOrig) || !reflect.DeepEqual(sortedAgentList, rctx.origRefNodesList) {
 			return populateRefreshDataInconsistentError(rctx.refOrig.CloneAndRedact(), rctx.agent.reference.CloneAndRedact(), rctx.origRefNodesList, sortedAgentList)
 		}
@@ -254,8 +242,7 @@ func (rctx *refreshContext) checkAndUpdateAgentReference() error {
 				return updateErr
 			}
 		} else {
-			rctx.agent.cleanUpHttpsMapWhenUpdatingNodesList(rctx.agent.refNodesList, rctx.cachedRefNodesList)
-			rctx.agent.refNodesList = base.DeepCopyStringArray(rctx.cachedRefNodesList)
+			rctx.agent.refNodesList = base.DeepCopyStringPairList(rctx.cachedRefNodesList)
 		}
 		rctx.agent.logger.Infof(populateRefreshSuccessMsg(rctx.refOrig.CloneAndRedact(), rctx.agent.reference.CloneAndRedact(), rctx.origRefNodesList, rctx.agent.refNodesList))
 	}
@@ -263,7 +250,7 @@ func (rctx *refreshContext) checkAndUpdateAgentReference() error {
 	return nil
 }
 
-func (rctx *refreshContext) finalizeRefCacheListFrom(listToBeUsed []string) {
+func (rctx *refreshContext) finalizeRefCacheListFrom(listToBeUsed base.StringPairList) {
 	rctx.cachedRefNodesList = listToBeUsed
 	if !rctx.atLeastOneValid {
 		rctx.atLeastOneValid = true
@@ -326,13 +313,9 @@ func (agent *RemoteClusterAgent) Refresh() error {
 		return err
 	}
 
-	var nodeNameList []string
+	var nodeAddressesList base.StringPairList
 	for rctx.index = 0; rctx.index < len(rctx.cachedRefNodesList /*already shuffled*/); rctx.index++ {
-		rctx.hostName = rctx.cachedRefNodesList[rctx.index]
-		rctx.connStr, err = rctx.getConnStrAndSetHttps(rctx.hostName)
-		if err != nil {
-			continue
-		}
+		rctx.setHostNamesAndConnStr(rctx.cachedRefNodesList[rctx.index])
 
 		nodeList, err := rctx.verifyNodeAndGetList(rctx.connStr, true /*updateSecuritySettings*/)
 		if err != nil {
@@ -340,7 +323,6 @@ func (agent *RemoteClusterAgent) Refresh() error {
 				if rctx.hostName == rctx.refOrig.HostName() && len(rctx.cachedRefNodesList) == 1 {
 					// If this is the only node to be checked AND this is the bootstrap node
 					// then there's nothing to do now as there is no more nodes in the list to walk
-					rctx.agent.rmHttpsAddrFunc(rctx.hostName)
 					return BootStrapNodeHasMovedError
 				}
 			}
@@ -348,15 +330,23 @@ func (agent *RemoteClusterAgent) Refresh() error {
 			// rctx.hostname is in the cluster and is available - make it the activeHost
 			rctx.checkAndUpdateActiveHost()
 
-			nodeNameList, err = agent.utils.GetRemoteNodeNameListFromNodeList(nodeList, rctx.connStr, agent.logger)
+			nodeAddressesList, err = agent.utils.GetRemoteNodeAddressesListFromNodeList(nodeList, rctx.connStr, rctx.refCache.IsEncryptionEnabled(), agent.logger)
 			if err == nil {
 				// This node is an acceptable replacement for active node - and sets atLeastOneValid
-				rctx.finalizeRefCacheListFrom(nodeNameList)
+				rctx.finalizeRefCacheListFrom(nodeAddressesList)
 
 				//  so check the list to make sure that the bootstrap node is valid
-				if !base.StringListContains(nodeNameList, rctx.refCache.HostName()) {
+				hostNameInCluster := false
+				for _, pair := range nodeAddressesList {
+					// refCache.HostName() could be http addr or https addr
+					if pair.GetFirstString() == rctx.refCache.HostName() || pair.GetSecondString() == rctx.refCache.HostName() {
+						hostNameInCluster = true
+						break
+					}
+				}
+				if !hostNameInCluster {
 					// Bootstrap mode is NOT in the node list - find a replace node if possible, from the already pulled list
-					rctx.replaceHostNameUsingList(nodeNameList)
+					rctx.replaceHostNameUsingList(nodeAddressesList)
 				}
 				// We are done
 				break
@@ -379,26 +369,28 @@ func (agent *RemoteClusterAgent) Refresh() error {
 	return err
 }
 
-func (rctx *refreshContext) replaceHostNameUsingList(nodeList []string) {
+func (rctx *refreshContext) replaceHostNameUsingList(nodeAddressesList base.StringPairList) {
 	// sort the node list, so that the selection of the replacement node will be deterministic
 	// in other words, if two source nodes performs the selection at the same time,
 	// they will get the same replacement node. this way less strain is put on metakv
-	sortedList := base.DeepCopyStringArray(nodeList)
-	sort.Strings(sortedList)
+	sortedList := base.DeepCopyStringPairList(nodeAddressesList)
+	sort.Sort(sortedList)
 
 	for i := 0; i < len(sortedList); i++ {
-		replaceConnStr, err := rctx.getConnStrAndSetHttps(sortedList[i])
-		if err != nil {
-			continue
-		}
+		rctx.setHostNamesAndConnStr(sortedList[i])
 
 		// updateSecuritySettings is set to false since security settings should have been updated shortly before in Refresh()
-		_, err = rctx.verifyNodeAndGetList(replaceConnStr, false /*updateSecuritySettings*/)
+		_, err := rctx.verifyNodeAndGetList(rctx.connStr, false /*updateSecuritySettings*/)
 
 		if err == nil {
 			// this is the node to set
 			oldHostName := rctx.refCache.HostName()
-			rctx.refCache.SetHostName(sortedList[i])
+			if rctx.refCache.IsFullEncryption() {
+				// in full encryption mode, set hostname in ref to https address
+				rctx.refCache.SetHostName(rctx.httpsHostName)
+			} else {
+				rctx.refCache.SetHostName(rctx.hostName)
+			}
 			rctx.refCache.SetHttpsHostName(rctx.httpsHostName)
 			rctx.agent.logger.Infof("Pending update hostname in remote cluster reference %v from %v to %v.\n", rctx.refCache.Id(), oldHostName, rctx.refCache.HostName())
 			return
@@ -501,15 +493,12 @@ func (agent *RemoteClusterAgent) syncInternalsFromStagedReferenceNoLock() error 
 	if err == nil {
 		agent.logger.Debugf("connStr=%v, nodeList=%v\n", connStr, nodeList)
 
-		nodeNameList, err := agent.utils.GetRemoteNodeNameListFromNodeList(nodeList, connStr, agent.logger)
+		nodeAddressesList, err := agent.utils.GetRemoteNodeAddressesListFromNodeList(nodeList, connStr, agent.pendingRef.IsEncryptionEnabled(), agent.logger)
 		if err != nil {
 			agent.logger.Errorf("Error getting nodes from target cluster. skipping alternative node computation. ref=%v\n", agent.pendingRef.HostName())
-			agent.pendingRefNodes = base.DeepCopyStringArray(agent.refNodesList)
+			agent.pendingRefNodes = base.DeepCopyStringPairList(agent.refNodesList)
 		} else {
-			agent.pendingRefNodes = make([]string, 0)
-			for _, nodeName := range nodeNameList {
-				agent.pendingRefNodes = append(agent.pendingRefNodes, nodeName)
-			}
+			agent.pendingRefNodes = base.DeepCopyStringPairList(nodeAddressesList)
 		}
 		agent.logger.Debugf("agent.pendingRefNodes after internal sync =%v", agent.pendingRefNodes)
 
@@ -517,7 +506,7 @@ func (agent *RemoteClusterAgent) syncInternalsFromStagedReferenceNoLock() error 
 		agent.logger.Infof("Remote cluster reference %v has a bad connectivity, didn't populate alternative connection strings. err=%v", agent.pendingRef.Id(), err)
 		err = InvalidConnectionStrError
 		agent.logger.Infof("nodes_connStrs from old cache =%v", agent.refNodesList)
-		agent.pendingRefNodes = base.DeepCopyStringArray(agent.refNodesList)
+		agent.pendingRefNodes = base.DeepCopyStringPairList(agent.refNodesList)
 	}
 
 	return err
@@ -550,20 +539,11 @@ func (agent *RemoteClusterAgent) runPeriodicRefresh() {
 // Prepare a staging area to populate run-time data for the incoming reference
 func (agent *RemoteClusterAgent) stageNewReferenceNoLock(newRef *metadata.RemoteClusterReference, userInitiated bool) {
 	agent.pendingRef.LoadFrom(newRef)
-	agent.pendingRefNodes = make([]string, 0)
+	agent.pendingRefNodes = make(base.StringPairList, 0)
 	if !agent.reference.IsEmpty() {
 		agent.pendingRef.SetId(agent.reference.Id())
 		if userInitiated {
 			agent.pendingRef.SetRevision(agent.reference.Revision())
-		}
-	}
-}
-
-func (agent *RemoteClusterAgent) cleanUpHttpsMapWhenUpdatingNodesList(oldList []string, newList []string) {
-	nodesRemovedList := base.StringListsFindMissingFromFirst(oldList, newList)
-	if len(nodesRemovedList) > 0 {
-		for _, node := range nodesRemovedList {
-			agent.rmHttpsAddrFunc(node)
 		}
 	}
 }
@@ -573,12 +553,7 @@ func (agent *RemoteClusterAgent) commitStagedChangesNoLock() {
 	if !agent.pendingRef.IsEmpty() {
 		agent.oldRef = agent.reference.Clone()
 		agent.reference.LoadFrom(&agent.pendingRef)
-		agent.cleanUpHttpsMapWhenUpdatingNodesList(agent.refNodesList, agent.pendingRefNodes)
-		agent.refNodesList = base.DeepCopyStringArray(agent.pendingRefNodes)
-		oldHostName := agent.oldRef.HostName()
-		if !agent.oldRef.IsEmpty() && oldHostName != agent.reference.HostName() {
-			agent.rmHttpsAddrFunc(oldHostName)
-		}
+		agent.refNodesList = base.DeepCopyStringPairList(agent.pendingRefNodes)
 	}
 }
 
@@ -591,15 +566,6 @@ func (agent *RemoteClusterAgent) IsSame(ref *metadata.RemoteClusterReference) bo
 func (agent *RemoteClusterAgent) clearReferenceNoLock() {
 	agent.oldRef = agent.reference.Clone()
 	agent.reference.Clear()
-	if agent.oldRef != nil && !agent.oldRef.IsEmpty() {
-		agent.rmHttpsAddrFunc(agent.oldRef.HostName())
-	}
-
-	if len(agent.refNodesList) > 0 {
-		for _, node := range agent.refNodesList {
-			agent.rmHttpsAddrFunc(node)
-		}
-	}
 	agent.refNodesList = nil
 }
 
@@ -1107,36 +1073,9 @@ func (service *RemoteClusterService) validateRemoteCluster(ref *metadata.RemoteC
 	}
 
 	if updateRef {
-		ref.SetActiveHostName(refHostName)
-
-		if ref.IsEncryptionEnabled() {
-			if ref.HttpsHostName() == "" {
-				httpsHostAddr, err, isInternalError := service.utils.HttpsRemoteHostAddr(ref.HostName(), service.logger)
-				if err != nil {
-					if isInternalError {
-						return err
-					} else {
-						if err.Error() == base.ErrorUnauthorized.Error() {
-							return wrapAsInvalidRemoteClusterError(fmt.Sprintf("Could not get ssl port for %v. Remote cluster could be an Elasticsearch cluster that does not support ssl encryption. Please double check remote cluster configuration or turn off ssl encryption.", hostName))
-						} else {
-							return wrapAsInvalidRemoteClusterError(fmt.Sprintf("Could not get ssl port for %v. err=%v", hostName, err))
-						}
-					}
-				}
-				// store https host name in ref for later re-use
-				ref.SetHttpsHostName(httpsHostAddr)
-			}
-			refHttpsHostName := ref.HttpsHostName()
-			ref.SetActiveHttpsHostName(refHttpsHostName)
-
-			// this is called here since ref.HttpsHostName needs to be populated prior
-			refSANInCertificate, refHttpAuthMech, _, err := service.utils.GetSecuritySettingsAndDefaultPoolInfo(refHostName, refHttpsHostName, ref.UserName(), ref.Password(), ref.Certificate(), ref.ClientCertificate(), ref.ClientKey(), ref.IsHalfEncryption(), service.logger)
-			if err != nil {
-				return wrapAsInvalidRemoteClusterError(err.Error())
-			}
-			ref.SetSANInCertificate(refSANInCertificate)
-			ref.SetHttpAuthMech(refHttpAuthMech)
-			service.logger.Infof("Set SANInCertificate=%v HttpAuthMech=%v for remote cluster reference %v\n", refSANInCertificate, refHttpAuthMech, ref.Name())
+		err = service.setHostNamesAndSecuritySettings(ref)
+		if err != nil {
+			return wrapAsInvalidRemoteClusterError(err.Error())
 		}
 	}
 
@@ -1208,6 +1147,112 @@ func (service *RemoteClusterService) validateRemoteCluster(ref *metadata.RemoteC
 	}
 
 	return nil
+}
+
+func (service *RemoteClusterService) setHostNamesAndSecuritySettings(ref *metadata.RemoteClusterReference) error {
+	if !ref.IsEncryptionEnabled() {
+		ref.SetActiveHostName(ref.HostName())
+		// nothing more needs to be done if encryption is not enabled
+		return nil
+	}
+
+	refHostName := ref.HostName()
+	refHttpsHostName := ref.HttpsHostName()
+	var err error
+	var err1 error
+
+	if refHttpsHostName == "" {
+		if !ref.IsFullEncryption() {
+			// half encryption mode
+			// refHostName is always a http address
+			// we will need to retrieve https port from target and compute https address
+			refHttpsHostName, err = service.getHttpsRemoteHostAddr(refHostName)
+			if err != nil {
+				return err
+			}
+		} else {
+			// in full encryption mode, customer may optionally put hostName:httpsPort in hostname field of remote cluster reference
+			// in this case there is no need to make a http call to target to retrieve https port
+			// we assume this is the case, and will try other cases later if this does not work
+			refHttpsHostName = refHostName
+		}
+	}
+
+	refSANInCertificate, refHttpAuthMech, defaultPoolInfo, err := service.utils.GetSecuritySettingsAndDefaultPoolInfo(refHostName, refHttpsHostName, ref.UserName(), ref.Password(), ref.Certificate(), ref.ClientCertificate(), ref.ClientKey(), ref.IsHalfEncryption(), service.logger)
+	if err != nil {
+		if !ref.IsFullEncryption() {
+			return wrapAsInvalidRemoteClusterError(err.Error())
+		}
+		// in full encryption mode, the error could have been caused by refHostName, and hence refHttpsHostName, containing a http address,
+		// try treating refHostName as a http address and compute the corresponding https address by retrieving tls port from target
+		refHttpsHostName, err1 = service.getHttpsRemoteHostAddr(refHostName)
+		if err1 != nil {
+			// if the attempt to treat refHostName as a http address also fails, return all errors and let user decide what to do
+			errMsg := fmt.Sprintf("Cannot use HostName, %v, as a https address or a http address. Error when using it as a https address=%v\n. Error when using it as a http address=%v\n", ref.HostName(), err, err1)
+			return wrapAsInvalidRemoteClusterError(errMsg)
+		}
+
+		// now we have valid https address, re-do security settings retrieval
+		refSANInCertificate, refHttpAuthMech, defaultPoolInfo, err = service.utils.GetSecuritySettingsAndDefaultPoolInfo(refHostName, refHttpsHostName, ref.UserName(), ref.Password(), ref.Certificate(), ref.ClientCertificate(), ref.ClientKey(), ref.IsHalfEncryption(), service.logger)
+		if err != nil {
+			return wrapAsInvalidRemoteClusterError(err.Error())
+		}
+	}
+
+	// by now defaultPoolInfo contains valid info
+	// compute http address based on the returned defaultPoolInfo
+	// even though http address is needed only by half secure type reference as of now,
+	// always compute and populate http address to be more consistent and less error prone
+	nodeList, err := service.utils.GetNodeListFromInfoMap(defaultPoolInfo, service.logger)
+	if err != nil {
+		err = fmt.Errorf("Can't get nodes information for cluster %v for ref %v, err=%v", refHostName, ref.Id(), err)
+		return wrapAsInvalidRemoteClusterError(err.Error())
+	}
+
+	nodeAddressesList, err := service.utils.GetRemoteNodeAddressesListFromNodeList(nodeList, refHostName, true /*needHttps*/, service.logger)
+	if err != nil {
+		err = fmt.Errorf("Can't get node addresses from node info for cluster %v for cluster reference %v, err=%v", refHostName, ref.Id(), err)
+		return wrapAsInvalidRemoteClusterError(err.Error())
+	}
+
+	refHttpHostName := ""
+	for _, pair := range nodeAddressesList {
+		// need both checks to cover all scenarios
+		// first check is for the half encryption mode where refHostName is http address and refHttpsHostName may not have been populated
+		// second check is for the full encryption mode, where refHostName may be a https address
+		if pair.GetFirstString() == refHostName || pair.GetSecondString() == refHttpsHostName {
+			refHttpHostName = pair.GetFirstString()
+			break
+		}
+	}
+
+	if len(refHttpHostName) == 0 {
+		// this should not happen in production
+		// if it does happen, leave refHttpHostName empty for now.
+		// hopefully remote cluster refresh will get ref.ActiveHostName refreshed/populated
+		service.logger.Warnf("Can't get http address for cluster %v for cluster reference %v", refHostName, ref.Id())
+	}
+
+	ref.SetActiveHostName(refHttpHostName)
+	ref.SetHttpsHostName(refHttpsHostName)
+	ref.SetActiveHttpsHostName(refHttpsHostName)
+
+	ref.SetSANInCertificate(refSANInCertificate)
+	ref.SetHttpAuthMech(refHttpAuthMech)
+	service.logger.Infof("Set hostName=%v, httpsHostName=%v, SANInCertificate=%v HttpAuthMech=%v for remote cluster reference %v\n", refHttpHostName, refHttpsHostName, refSANInCertificate, refHttpAuthMech, ref.Id())
+	return nil
+}
+
+func (service *RemoteClusterService) getHttpsRemoteHostAddr(hostName string) (string, error) {
+	refHttpsHostName, err := service.utils.HttpsRemoteHostAddr(hostName, service.logger)
+	if err != nil {
+		if err.Error() == base.ErrorUnauthorized.Error() {
+			return "", wrapAsInvalidRemoteClusterError(fmt.Sprintf("Could not get ssl port for %v. Remote cluster could be an Elasticsearch cluster that does not support ssl encryption. Please double check remote cluster configuration or turn off ssl encryption.", hostName))
+		} else {
+			return "", wrapAsInvalidRemoteClusterError(fmt.Sprintf("Could not get ssl port for %v. err=%v", hostName, err))
+		}
+	}
+	return refHttpsHostName, nil
 }
 
 // validate certificates in remote cluster ref
@@ -1287,8 +1332,6 @@ func (service *RemoteClusterService) NewRemoteClusterAgent() *RemoteClusterAgent
 		utils:                  service.utils,
 		logger:                 service.logger,
 		metadataChangeCallback: service.metadata_change_callback,
-		getHttpsAddrFunc:       service.getHttpsAddrFromMap,
-		rmHttpsAddrFunc:        service.removeHttpsAddrFromMap,
 		refresherFinCh:         make(chan bool, 1),
 	}
 	return newAgent
@@ -1484,37 +1527,6 @@ func (service *RemoteClusterService) RemoteClusterServiceCallback(path string, v
 	return err
 }
 
-func (service *RemoteClusterService) getHttpsAddrFromMap(hostName string) (string, error) {
-	service.httpsAddrMap_lock.Lock()
-	defer service.httpsAddrMap_lock.Unlock()
-
-	var httpsHostName string
-	var ok bool
-	var err error
-	httpsHostName, ok = service.httpsAddrMap[hostName]
-	if !ok {
-		httpsHostName, err, _ = service.utils.HttpsRemoteHostAddr(hostName, service.logger)
-		if err != nil {
-			return "", err
-		}
-		service.httpsAddrMap[hostName] = httpsHostName
-	}
-	return httpsHostName, nil
-}
-
-func (service *RemoteClusterService) removeHttpsAddrFromMap(hostName string) error {
-	service.httpsAddrMap_lock.Lock()
-	defer service.httpsAddrMap_lock.Unlock()
-
-	_, ok := service.httpsAddrMap[hostName]
-	if !ok {
-		return base.ErrorResourceDoesNotExist
-	} else {
-		delete(service.httpsAddrMap, hostName)
-	}
-	return nil
-}
-
 func (service *RemoteClusterService) GetConnectionStringForRemoteCluster(ref *metadata.RemoteClusterReference, isCapiReplication bool) (string, error) {
 	if !isCapiReplication {
 		// for xmem replication, return ref.activeHostName, which is rotated among target nodes for load balancing
@@ -1539,12 +1551,12 @@ func (service *RemoteClusterService) GetConnectionStringForRemoteCluster(ref *me
 /**
  * Helper functions
  */
-func populateRefreshDataInconsistentError(origRef *metadata.RemoteClusterReference, newRef *metadata.RemoteClusterReference, origList []string, newList []string) error {
+func populateRefreshDataInconsistentError(origRef *metadata.RemoteClusterReference, newRef *metadata.RemoteClusterReference, origList base.StringPairList, newList base.StringPairList) error {
 	return errors.New(fmt.Sprintf("Refresher has experienced someone updating the reference from underneath it while it was populating data.\n Expected Original: %v %v\n Actual Reference in memory: %v %v\n Will skip updating the actual reference this time around.",
 		origRef, origList, newRef, newList))
 }
 
-func populateRefreshSuccessMsg(origRef *metadata.RemoteClusterReference, newRef *metadata.RemoteClusterReference, origList []string, newList []string) string {
+func populateRefreshSuccessMsg(origRef *metadata.RemoteClusterReference, newRef *metadata.RemoteClusterReference, origList base.StringPairList, newList base.StringPairList) string {
 	return fmt.Sprintf("Refresher has successfully committed staged changes:\n Original: %v %v\n Actual staged changes now in memory: %v %v\n",
 		origRef, origList, newRef, newList)
 }

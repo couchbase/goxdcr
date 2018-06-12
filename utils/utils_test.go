@@ -181,26 +181,29 @@ func TestGetNodeListWithMinInfo(t *testing.T) {
 }
 
 func TestGetNodeNameListFromNodeListExternal(t *testing.T) {
-	fmt.Println("============== Test case start: TestGetNodeNameListFromNodeListExternal =================")
+	fmt.Println("============== Test case start: TestGetNodeAddressesListFromNodeListExternal =================")
 	assert := assert.New(t)
 
 	nodeList, _ := getNodeListWithMinInfoMock(true /*external*/)
-	nodeNameList, err := testUtils.GetRemoteNodeNameListFromNodeList(nodeList, connStr, logger)
+	nodeAddressesList, err := testUtils.GetRemoteNodeAddressesListFromNodeList(nodeList, connStr, false, logger)
 	assert.Nil(err)
+
+	nodeNameList := nodeAddressesList.GetListOfFirstString()
 
 	// This should be external nodes only
 	assert.False((localNodeList)(nodeNameList).check())
 	assert.True((externalNodeList)(nodeNameList).check())
 
-	fmt.Println("============== Test case start: TestGetNodeNameListFromNodeListExternal =================")
+	fmt.Println("============== Test case start: TestGetNodeAddressesListFromNodeListExternal =================")
 }
 
 func TestGetNodeNameListFromNodeListExternalK8(t *testing.T) {
 	assert := assert.New(t)
 
 	nodeList, _ := getNodeListWithMinInfoMockK8()
-	nodeNameList, err := testUtils.GetRemoteNodeNameListFromNodeList(nodeList, connStr, logger)
+	nodeAddressList, err := testUtils.GetRemoteNodeAddressesListFromNodeList(nodeList, connStr, false, logger)
 	assert.Nil(err)
+	nodeNameList := nodeAddressList.GetListOfFirstString()
 
 	// This should be external nodes only
 	assert.False((localNodeList)(nodeNameList).check())
@@ -209,19 +212,21 @@ func TestGetNodeNameListFromNodeListExternalK8(t *testing.T) {
 }
 
 func TestGetNodeNameListFromNodeListInternal(t *testing.T) {
-	fmt.Println("============== Test case start: TestGetNodeNameListFromNodeListInternal =================")
+	fmt.Println("============== Test case start: TestGetNodeAddressesListFromNodeListInternal =================")
 	assert := assert.New(t)
 
 	nodeList, err := getNodeListWithMinInfoMock(false /*external*/)
 	assert.Nil(err)
-	nodeNameList, err := testUtils.GetRemoteNodeNameListFromNodeList(nodeList, connStr, logger)
+	nodeAddressesList, err := testUtils.GetRemoteNodeAddressesListFromNodeList(nodeList, connStr, false, logger)
 	assert.Nil(err)
+
+	nodeNameList := nodeAddressesList.GetListOfFirstString()
 
 	// This should be internal nodes only
 	assert.True((localNodeList)(nodeNameList).check())
 	assert.False((externalNodeList)(nodeNameList).check())
 
-	fmt.Println("============== Test case start: TestGetNodeNameListFromNodeListInternal =================")
+	fmt.Println("============== Test case start: TestGetNodeAddressesListFromNodeListInternal =================")
 }
 
 func TestGetIntExtHostNameTranslationMap(t *testing.T) {
