@@ -13,6 +13,7 @@ import (
 	"bytes"
 	"fmt"
 	"github.com/couchbase/gomemcached"
+	mrand "math/rand"
 	"reflect"
 	"sync"
 	"time"
@@ -296,4 +297,56 @@ func (httpAuthMech HttpAuthMech) String() string {
 	default:
 		return "Unknown"
 	}
+}
+
+// StringPair holds a pair of strings
+type StringPair [2]string
+
+func (sp StringPair) GetFirstString() string {
+	return sp[0]
+}
+
+func (sp StringPair) GetSecondString() string {
+	return sp[1]
+}
+
+// StringPairList is used mainly to facilitate sorting
+// StringPairList can be sorted by first string through sort.Sort(list)
+type StringPairList []StringPair
+
+func (spl StringPairList) Len() int           { return len(spl) }
+func (spl StringPairList) Swap(i, j int)      { spl[i], spl[j] = spl[j], spl[i] }
+func (spl StringPairList) Less(i, j int) bool { return spl[i][0] < spl[j][0] }
+
+// get a list of string1
+func (spl StringPairList) GetListOfFirstString() []string {
+	result := make([]string, len(spl))
+
+	for i := 0; i < len(spl); i++ {
+		result[i] = spl[i][0]
+	}
+
+	return result
+}
+
+func ShuffleStringPairList(list StringPairList) {
+	r := mrand.New(mrand.NewSource(time.Now().Unix()))
+	// Start at the end of the slice, go backwards and scramble
+	for i := len(list); i > 1; i-- {
+		randIndex := r.Intn(i)
+		// Swap values and continue until we're done
+		if (i - 1) != randIndex {
+			list[i-1], list[randIndex] = list[randIndex], list[i-1]
+		}
+	}
+}
+
+func DeepCopyStringPairList(list StringPairList) StringPairList {
+	if list == nil {
+		return nil
+	}
+
+	out := make([]StringPair, len(list))
+	copy(out, list)
+	return out
 }

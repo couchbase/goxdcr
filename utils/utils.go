@@ -895,18 +895,18 @@ func (u *Utilities) BucketInfoParseError(bucketInfo map[string]interface{}, logg
 	return fmt.Errorf(errMsg)
 }
 
-func (u *Utilities) HttpsRemoteHostAddr(hostAddr string, logger *log.CommonLogger) (string, error, bool) {
+func (u *Utilities) HttpsRemoteHostAddr(hostAddr string, logger *log.CommonLogger) (string, error) {
 	// Extract hostname to be combined with SSL port
 	hostName := base.GetHostName(hostAddr)
 	// Extract SSL port, prioritizing externalAddress SSL port if it is there
-	sslPort, err, isInternalError := u.GetRemoteSSLPort(hostAddr, logger)
+	sslPort, err := u.GetRemoteSSLPort(hostAddr, logger)
 	if err != nil {
-		return "", err, isInternalError
+		return "", err
 	}
-	return base.GetHostAddr(hostName, sslPort), nil, false
+	return base.GetHostAddr(hostName, sslPort), nil
 }
 
-func (u *Utilities) GetRemoteSSLPort(hostAddr string, logger *log.CommonLogger) (uint16, error, bool) {
+func (u *Utilities) GetRemoteSSLPort(hostAddr string, logger *log.CommonLogger) (uint16, error) {
 	var portNumber uint16
 	portInfo := make(map[string]interface{})
 	err, statusCode := u.QueryRestApiWithAuth(hostAddr, base.SSLPortsPath, false, "", "", base.HttpAuthMechPlain, nil, false, nil, nil, base.MethodGet, "", nil, 0, &portInfo, nil, false, logger)
@@ -914,10 +914,10 @@ func (u *Utilities) GetRemoteSSLPort(hostAddr string, logger *log.CommonLogger) 
 		// SSLPorts request normally do not require any user credentials
 		// the only place unauthorized error could be returned is when target is elasticsearch cluster
 		// treat this case differently so that a more specific error message can be returned to user
-		return 0, base.ErrorUnauthorized, false
+		return 0, base.ErrorUnauthorized
 	}
 	if err != nil || statusCode != http.StatusOK {
-		return 0, fmt.Errorf("Failed on calling %v, err=%v, statusCode=%v", base.SSLPortsPath, err, statusCode), false
+		return 0, fmt.Errorf("Failed on calling %v, err=%v, statusCode=%v", base.SSLPortsPath, err, statusCode)
 	}
 
 	// If the external exists, use that, otherwise use the internal SSL port
@@ -929,17 +929,17 @@ func (u *Utilities) GetRemoteSSLPort(hostAddr string, logger *log.CommonLogger) 
 		if !ok {
 			errMsg := "Failed to parse port info. ssl port is missing."
 			logger.Errorf("%v. portInfo=%v", errMsg, portInfo)
-			return 0, fmt.Errorf(errMsg), true
+			return 0, fmt.Errorf(errMsg)
 		}
 
 		sslPortFloat, ok := sslPort.(float64)
 		if !ok {
-			return 0, fmt.Errorf("ssl port is of wrong type. Expected type: float64; Actual type: %s", reflect.TypeOf(sslPort)), true
+			return 0, fmt.Errorf("ssl port is of wrong type. Expected type: float64; Actual type: %s", reflect.TypeOf(sslPort))
 		}
 		portNumber = uint16(sslPortFloat)
 	}
 
-	return portNumber, nil, false
+	return portNumber, nil
 }
 
 func (u *Utilities) GetClusterInfoWStatusCode(hostAddr, path, username, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCertificate, clientKey []byte, logger *log.CommonLogger) (map[string]interface{}, error, int) {
@@ -1336,12 +1336,14 @@ func (u *Utilities) GetClusterCompatibilityFromNodeList(nodeList []interface{}) 
 }
 
 // Used externally only - returns a list of nodes for management access
-// Always returns http address (not https), since the node name list is used only by remote cluster service,
-// which expects http address
-func (u *Utilities) GetRemoteNodeNameListFromNodeList(nodeList []interface{}, connStr string, logger *log.CommonLogger) ([]string, error) {
-	nodeNameList := make([]string, 0)
+// if needHttps is true, returns both http addresses and https addresses
+// if needHttps is false, returns http addresses and empty https addresses
+func (u *Utilities) GetRemoteNodeAddressesListFromNodeList(nodeList []interface{}, connStr string, needHttps bool, logger *log.CommonLogger) (base.StringPairList, error) {
+	nodeAddressesList := make(base.StringPairList, len(nodeList))
 	var hostAddr string
+	var hostHttpsAddr string
 	var err error
+	index := 0
 
 	for _, node := range nodeList {
 		nodeInfoMap, ok := node.(map[string]interface{})
@@ -1358,9 +1360,21 @@ func (u *Utilities) GetRemoteNodeNameListFromNodeList(nodeList []interface{}, co
 			return nil, errors.New(errMsg)
 		}
 
-		nodeNameList = append(nodeNameList, hostAddr)
+		if needHttps {
+			hostHttpsAddr, err = u.GetExternalHostAddrFromNodeInfo(connStr, nodeInfoMap, true /*isHttps*/, logger)
+			if err != nil {
+				errMsg := fmt.Sprintf("cannot get https hostname from node info %v", nodeInfoMap)
+				logger.Error(errMsg)
+				return nil, errors.New(errMsg)
+			}
+		} else {
+			hostHttpsAddr = ""
+		}
+
+		nodeAddressesList[index] = base.StringPair{hostAddr, hostHttpsAddr}
+		index++
 	}
-	return nodeNameList, nil
+	return nodeAddressesList, nil
 }
 
 func (u *Utilities) GetHttpsMgtPortFromNodeInfo(nodeInfo map[string]interface{}) (int, error) {

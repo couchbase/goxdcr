@@ -20,8 +20,8 @@ var hostname string = "dummyHostName1:9999"
 var hostname2 string = "dummyHostName2:9999"
 var hostname3 string = "dummyHostName3:9999"
 var hostname4 string = "dummyHostName4:9999"
-var dummyHostNameList = []string{hostname, hostname2, hostname3}
-var dummyHostNameList2 = []string{hostname, hostname2, hostname3, hostname4}
+var dummyHostNameList = base.StringPairList{base.StringPair{hostname, ""}, base.StringPair{hostname2, ""}, base.StringPair{hostname3, ""}}
+var dummyHostNameList2 = base.StringPairList{base.StringPair{hostname, ""}, base.StringPair{hostname2, ""}, base.StringPair{hostname3, ""}, base.StringPair{hostname4, ""}}
 var localhost string = "localhost"
 var emptyMap = map[string]interface{}{}
 var nonEmptyMap = map[string]interface{}{"test": "test"}
@@ -105,7 +105,7 @@ func setupUtilsMockGeneric(utilitiesMock *utilsMock.UtilsIface) {
 	emptyList := make([]interface{}, 5)
 	hostnameList := append(emptyList, localhost)
 	utilitiesMock.On("GetNodeListWithMinInfo", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(emptyList, nil)
-	utilitiesMock.On("GetRemoteNodeNameListFromNodeList", mock.Anything, mock.Anything, mock.Anything).Return(dummyHostNameList, nil)
+	utilitiesMock.On("GetRemoteNodeAddressesListFromNodeList", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(dummyHostNameList, nil)
 	utilitiesMock.On("GetHostName", mock.Anything).Return(localhost)
 	utilitiesMock.On("GetPortNumber", mock.Anything).Return(uint16(9999), nil)
 	utilitiesMock.On("GetClusterUUIDAndNodeListWithMinInfo", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(uuidField, hostnameList, nil)
@@ -117,7 +117,7 @@ func setupUtilsMockPre1Good3Bad(utilitiesMock *utilsMock.UtilsIface) {
 	emptyList := make([]interface{}, 5)
 	hostnameList := append(emptyList, localhost)
 	utilitiesMock.On("GetNodeListWithMinInfo", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(emptyList, nil)
-	utilitiesMock.On("GetRemoteNodeNameListFromNodeList", mock.Anything, mock.Anything, mock.Anything).Return(dummyHostNameList2, nil)
+	utilitiesMock.On("GetRemoteNodeAddressesListFromNodeList", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(dummyHostNameList2, nil)
 	utilitiesMock.On("GetHostName", mock.Anything).Return(localhost)
 	utilitiesMock.On("GetPortNumber", mock.Anything).Return(uint16(9999), nil)
 	utilitiesMock.On("GetClusterInfo", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil, nil)
@@ -127,10 +127,10 @@ func setupUtilsMockPre1Good3Bad(utilitiesMock *utilsMock.UtilsIface) {
 
 func setupUtilsOneNode(utilitiesMock *utilsMock.UtilsIface) {
 	emptyList := make([]interface{}, 5)
-	singleList := []string{hostname}
+	singleList := base.StringPairList{base.StringPair{hostname, ""}}
 	hostnameList := append(emptyList, localhost)
 	utilitiesMock.On("GetNodeListWithMinInfo", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(emptyList, nil)
-	utilitiesMock.On("GetRemoteNodeNameListFromNodeList", mock.Anything, mock.Anything, mock.Anything).Return(singleList, nil)
+	utilitiesMock.On("GetRemoteNodeAddressesListFromNodeList", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(singleList, nil)
 	utilitiesMock.On("GetHostName", mock.Anything).Return(localhost)
 	utilitiesMock.On("GetPortNumber", mock.Anything).Return(uint16(9999), nil)
 	utilitiesMock.On("GetClusterUUIDAndNodeListWithMinInfo", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(uuidField, hostnameList, nil)
@@ -140,13 +140,13 @@ func setupUtilsOneNode(utilitiesMock *utilsMock.UtilsIface) {
 
 // emulates where node1 and 2 and 3 becomes cluster splitNames2 and rebalanced
 // original cluster is now only consists of splitnames1 (hostname3)
-func setupUtilsMock1Good3Bad(utilitiesMock *utilsMock.UtilsIface) []string {
+func setupUtilsMock1Good3Bad(utilitiesMock *utilsMock.UtilsIface) base.StringPairList {
 	emptyList := make([]interface{}, 5)
 	hostnameList := append(emptyList, localhost)
 	// the good one
-	splitNames1 := []string{hostname4}
+	splitNames1 := base.StringPairList{base.StringPair{hostname4, ""}}
 	// the bad ones
-	splitNames2 := []string{hostname, hostname2, hostname3}
+	splitNames2 := base.StringPairList{base.StringPair{hostname, ""}, base.StringPair{hostname2, ""}, base.StringPair{hostname3, ""}}
 	utilitiesMock.On("GetNodeListWithMinInfo", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(emptyList, nil)
 	utilitiesMock.On("GetHostName", mock.Anything).Return(localhost)
 	utilitiesMock.On("GetPortNumber", mock.Anything).Return(uint16(9999), nil)
@@ -162,22 +162,22 @@ func setupUtilsMock1Good3Bad(utilitiesMock *utilsMock.UtilsIface) []string {
 	utilitiesMock.On("GetClusterUUIDAndNodeListWithMinInfoFromDefaultPoolInfo", emptyMap, mock.Anything).Return(uuidField, emptyList, nil)
 
 	// diff from generic above
-	utilitiesMock.On("GetRemoteNodeNameListFromNodeList", mock.Anything, hostname, mock.Anything).Return(splitNames2, nil)
-	utilitiesMock.On("GetRemoteNodeNameListFromNodeList", mock.Anything, hostname2, mock.Anything).Return(splitNames2, nil)
-	utilitiesMock.On("GetRemoteNodeNameListFromNodeList", mock.Anything, hostname3, mock.Anything).Return(splitNames2, nil)
-	utilitiesMock.On("GetRemoteNodeNameListFromNodeList", mock.Anything, hostname4, mock.Anything).Return(splitNames1, nil)
+	utilitiesMock.On("GetRemoteNodeAddressesListFromNodeList", mock.Anything, hostname, mock.Anything, mock.Anything).Return(splitNames2, nil)
+	utilitiesMock.On("GetRemoteNodeAddressesListFromNodeList", mock.Anything, hostname2, mock.Anything, mock.Anything).Return(splitNames2, nil)
+	utilitiesMock.On("GetRemoteNodeAddressesListFromNodeList", mock.Anything, hostname3, mock.Anything, mock.Anything).Return(splitNames2, nil)
+	utilitiesMock.On("GetRemoteNodeAddressesListFromNodeList", mock.Anything, hostname4, mock.Anything, mock.Anything).Return(splitNames1, nil)
 	return splitNames1
 }
 
 // emulates where node1 and 2 becomes cluster splitNames2 and rebalanced
 // original cluster is now only consists of splitnames1 (hostname3)
-func setupUtilsMockListNode2Bad(utilitiesMock *utilsMock.UtilsIface) []string {
+func setupUtilsMockListNode2Bad(utilitiesMock *utilsMock.UtilsIface) base.StringPairList {
 	emptyList := make([]interface{}, 5)
 	hostnameList := append(emptyList, localhost)
 	// good one
-	splitNames1 := []string{hostname3}
+	splitNames1 := base.StringPairList{base.StringPair{hostname3, ""}}
 	// bad ones
-	splitNames2 := []string{hostname, hostname2}
+	splitNames2 := base.StringPairList{base.StringPair{hostname, ""}, base.StringPair{hostname2, ""}}
 	utilitiesMock.On("GetNodeListWithMinInfo", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(emptyList, nil)
 	utilitiesMock.On("GetHostName", mock.Anything).Return(localhost)
 	utilitiesMock.On("GetPortNumber", mock.Anything).Return(uint16(9999), nil)
@@ -191,9 +191,9 @@ func setupUtilsMockListNode2Bad(utilitiesMock *utilsMock.UtilsIface) []string {
 	utilitiesMock.On("GetClusterUUIDAndNodeListWithMinInfoFromDefaultPoolInfo", emptyMap, mock.Anything).Return(uuidField2, hostnameList, nil)
 
 	// diff from generic above
-	utilitiesMock.On("GetRemoteNodeNameListFromNodeList", mock.Anything, hostname, mock.Anything).Return(splitNames2, nil)
-	utilitiesMock.On("GetRemoteNodeNameListFromNodeList", mock.Anything, hostname2, mock.Anything).Return(splitNames2, nil)
-	utilitiesMock.On("GetRemoteNodeNameListFromNodeList", mock.Anything, hostname3, mock.Anything).Return(splitNames1, nil)
+	utilitiesMock.On("GetRemoteNodeAddressesListFromNodeList", mock.Anything, hostname, mock.Anything, mock.Anything).Return(splitNames2, nil)
+	utilitiesMock.On("GetRemoteNodeAddressesListFromNodeList", mock.Anything, hostname2, mock.Anything, mock.Anything).Return(splitNames2, nil)
+	utilitiesMock.On("GetRemoteNodeAddressesListFromNodeList", mock.Anything, hostname3, mock.Anything, mock.Anything).Return(splitNames1, nil)
 	return splitNames1
 }
 
@@ -205,7 +205,7 @@ func setupUtilsMockFirstNodeBad(utilitiesMock *utilsMock.UtilsIface) {
 	hostnameList := append(emptyList, localhost)
 
 	// the bad ones
-	splitNames2 := []string{hostname, hostname2, hostname3}
+	splitNames2 := base.StringPairList{base.StringPair{hostname, ""}, base.StringPair{hostname2, ""}, base.StringPair{hostname3, ""}}
 	utilitiesMock.On("GetNodeListWithMinInfo", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(emptyList, nil)
 	utilitiesMock.On("GetHostName", mock.Anything).Return(localhost)
 	utilitiesMock.On("GetPortNumber", mock.Anything).Return(uint16(9999), nil)
@@ -221,10 +221,10 @@ func setupUtilsMockFirstNodeBad(utilitiesMock *utilsMock.UtilsIface) {
 	utilitiesMock.On("GetClusterUUIDAndNodeListWithMinInfoFromDefaultPoolInfo", emptyMap, mock.Anything).Return("", emptyList, dummyErr)
 
 	// diff from generic above
-	utilitiesMock.On("GetRemoteNodeNameListFromNodeList", mock.Anything, hostname, mock.Anything).Return(splitNames2, nil)
-	utilitiesMock.On("GetRemoteNodeNameListFromNodeList", mock.Anything, hostname2, mock.Anything).Return(emptyStrList, dummyErr)
-	utilitiesMock.On("GetRemoteNodeNameListFromNodeList", mock.Anything, hostname3, mock.Anything).Return(emptyStrList, dummyErr)
-	utilitiesMock.On("GetRemoteNodeNameListFromNodeList", mock.Anything, hostname4, mock.Anything).Return(emptyStrList, dummyErr)
+	utilitiesMock.On("GetRemoteNodeAddressesListFromNodeList", mock.Anything, hostname, mock.Anything).Return(splitNames2, nil)
+	utilitiesMock.On("GetRemoteNodeAddressesListFromNodeList", mock.Anything, hostname2, mock.Anything, mock.Anything).Return(emptyStrList, dummyErr)
+	utilitiesMock.On("GetRemoteNodeAddressesListFromNodeList", mock.Anything, hostname3, mock.Anything, mock.Anything).Return(emptyStrList, dummyErr)
+	utilitiesMock.On("GetRemoteNodeAddressesListFromNodeList", mock.Anything, hostname4, mock.Anything, mock.Anything).Return(emptyStrList, dummyErr)
 }
 
 func createRemoteClusterReference(id string) *metadata.RemoteClusterReference {
@@ -590,9 +590,9 @@ func TestGetConnectionStringForRemoteCluster(t *testing.T) {
 	// Have a host in the list, should return sorted top one
 	remoteClusterSvc.agentMutex.RLock()
 	remoteClusterSvc.agentMap[idAndName].refMtx.Lock()
-	remoteClusterSvc.agentMap[idAndName].refNodesList = append(remoteClusterSvc.agentMap[idAndName].refNodesList, "dummyNewHost")
+	remoteClusterSvc.agentMap[idAndName].refNodesList = append(remoteClusterSvc.agentMap[idAndName].refNodesList, base.StringPair{"dummyNewHost", ""})
 	topHostName := "aaaaaHost"
-	remoteClusterSvc.agentMap[idAndName].refNodesList = append(remoteClusterSvc.agentMap[idAndName].refNodesList, topHostName)
+	remoteClusterSvc.agentMap[idAndName].refNodesList = append(remoteClusterSvc.agentMap[idAndName].refNodesList, base.StringPair{topHostName, ""})
 	remoteClusterSvc.agentMap[idAndName].refMtx.Unlock()
 	remoteClusterSvc.agentMutex.RUnlock()
 	hostStr, _ = remoteClusterSvc.GetConnectionStringForRemoteCluster(ref, true)
@@ -605,11 +605,11 @@ func TestGetConnectionStringForRemoteCluster(t *testing.T) {
 	fmt.Println("============== Test case end: TestGetConnectionStringForRemoteCluster =================")
 }
 
-func refreshCheckActiveHostNameHelper(agent *RemoteClusterAgent, nodeList []string) bool {
+func refreshCheckActiveHostNameHelper(agent *RemoteClusterAgent, nodeList base.StringPairList) bool {
 	// find that it should be in here
 	var findCheck bool
-	for _, name := range nodeList {
-		if agent.reference.ActiveHostName() == name {
+	for _, pair := range nodeList {
+		if agent.reference.ActiveHostName() == pair.GetFirstString() {
 			findCheck = true
 			break
 		}
