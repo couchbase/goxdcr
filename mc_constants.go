@@ -150,14 +150,15 @@ const (
 )
 
 var isFatal = map[Status]bool{
-	DELTA_BADVAL:   true,
-	NO_BUCKET:      true,
-	AUTH_STALE:     true,
-	AUTH_ERROR:     true,
-	ERANGE:         true,
-	ROLLBACK:       true,
-	EACCESS:        true,
-	ENOMEM:         true,
+	DELTA_BADVAL:  true,
+	NO_BUCKET:     true,
+	AUTH_STALE:    true,
+	AUTH_ERROR:    true,
+	ERANGE:        true,
+	ROLLBACK:      true,
+	EACCESS:       true,
+	ENOMEM:        true,
+	NOT_SUPPORTED: true,
 }
 
 // the producer/consumer bit in dcp flags
