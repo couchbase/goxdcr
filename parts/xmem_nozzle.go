@@ -2365,11 +2365,11 @@ func (xmem *XmemNozzle) resendWithReset(req *bufferedMCRequest, pos uint16) (boo
 	if req.req != nil {
 		bytesList := getBytesListFromReq(req)
 		old_sequence := xmem.buf.sequences[pos]
-		old_num_of_retry := req.num_of_retry
 
-		// always reset num_of_retry to 0
-		req.num_of_retry = 0
-		if old_num_of_retry != 0 {
+		// reset num_of_retry to 0 and reset timedout to false
+		if req.num_of_retry != 0 || req.timedout {
+			req.num_of_retry = 0
+			req.timedout = false
 			modified = true
 		}
 
