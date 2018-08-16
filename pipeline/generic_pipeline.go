@@ -118,6 +118,43 @@ func (genericPipeline *GenericPipeline) SetRuntimeContext(ctx common.PipelineRun
 	genericPipeline.context = ctx
 }
 
+func (genericPipeline *GenericPipeline) startPartsWithTimeout(ssl_port_map map[string]uint16) error {
+	err_ch := make(chan partError, 1000)
+	startPartsFunc := func() error {
+		for _, source := range genericPipeline.sources {
+			waitGrp := &sync.WaitGroup{}
+			waitGrp.Add(1)
+			go func(err_ch chan partError, source common.Nozzle, settings metadata.ReplicationSettingsMap, waitGrp *sync.WaitGroup, ssl_port_map map[string]uint16) {
+				defer waitGrp.Done()
+				genericPipeline.startPart(source, settings, genericPipeline.targetClusterRef, ssl_port_map, err_ch)
+				if len(err_ch) == 0 {
+					genericPipeline.logger.Infof("%v Incoming nozzle %s has been started", genericPipeline.InstanceId(), source.Id())
+				}
+				return
+
+			}(err_ch, source, genericPipeline.settings, waitGrp, ssl_port_map)
+
+			waitGrp.Wait()
+			if len(err_ch) != 0 {
+				errMap := formatErrMsg(err_ch)
+				err := fmt.Errorf("Pipeline %v failed to start, err=%v\n", genericPipeline.Topic(), errMap)
+				genericPipeline.logger.Errorf("%v", err)
+				return err
+			}
+		}
+		return nil
+	}
+
+	// put a timeout around part part starting to avoid being stuck
+	err := base.ExecWithTimeout(startPartsFunc, base.TimeoutPartsStart, genericPipeline.logger)
+	if err != nil {
+		genericPipeline.logger.Errorf("%v error starting pipeline parts. err=%v", genericPipeline.InstanceId(), err)
+	} else {
+		genericPipeline.logger.Infof("%v pipeline parts have started successfully", genericPipeline.InstanceId())
+	}
+	return err
+}
+
 // Starts the downstream parts recursively, and eventually the part itself
 // In a more specific use case, for now, it starts the nozzles and routers (out-going nozzles first, then source nozzles)
 func (genericPipeline *GenericPipeline) startPart(part common.Part, settings metadata.ReplicationSettingsMap,
@@ -220,27 +257,12 @@ func (genericPipeline *GenericPipeline) Start(settings metadata.ReplicationSetti
 
 	//start all the processing steps of the Pipeline
 	//start the incoming nozzle which would start the downstream steps subsequently
-	err_ch := make(chan partError, 1000)
-	for _, source := range genericPipeline.sources {
-		waitGrp := &sync.WaitGroup{}
-		waitGrp.Add(1)
-		go func(err_ch chan partError, source common.Nozzle, settings metadata.ReplicationSettingsMap, waitGrp *sync.WaitGroup) {
-			defer waitGrp.Done()
-			genericPipeline.startPart(source, settings, genericPipeline.targetClusterRef, ssl_port_map, err_ch)
-			if len(err_ch) == 0 {
-				genericPipeline.logger.Infof("%v Incoming nozzle %s has been started", genericPipeline.InstanceId(), source.Id())
-			}
-			return
-
-		}(err_ch, source, genericPipeline.settings, waitGrp)
-
-		waitGrp.Wait()
-		if len(err_ch) != 0 {
-			errMap = formatErrMsg(err_ch)
-			genericPipeline.logger.Errorf("Pipeline %v failed to start, err=%v\n", genericPipeline.Topic(), errMap)
-			return errMap
-		}
+	err = genericPipeline.startPartsWithTimeout(ssl_port_map)
+	if err != nil {
+		errMap["genericPipeline.startParts"] = err
+		return errMap
 	}
+
 	genericPipeline.logger.Infof("%v All parts have been started", genericPipeline.Topic())
 	genericPipeline.ReportProgress("All parts have been started")
 

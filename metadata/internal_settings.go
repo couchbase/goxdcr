@@ -144,6 +144,13 @@ const (
 	BypassSanInCertificateCheckKey = "BypassSanInCertificateCheck"
 	// Number of times to verify bucket is missing before removing an invalid replicationSpec
 	ReplicationSpecGCCntKey = "ReplicationSpecGCCnt"
+
+	TimeoutRuntimeContextStartKey = "TimeoutRuntimeContextStart"
+	TimeoutRuntimeContextStopKey  = "TimeoutRuntimeContextStop"
+	TimeoutPartsStartKey          = "TimeoutPartsStart"
+	TimeoutPartsStopKey           = "TimeoutPartsStop"
+	TimeoutDcpCloseUprStreamsKey  = "TimeoutDcpCloseUprStreams"
+	TimeoutDcpCloseUprFeedKey     = "TimeoutDcpCloseUprFeed"
 )
 
 var TopologyChangeCheckIntervalConfig = &SettingsConfig{10, &Range{1, 100}}
@@ -200,6 +207,12 @@ var StatsLogIntervalConfig = &SettingsConfig{30, &Range{1, 36000}}
 var XmemDefaultRespTimeoutConfig = &SettingsConfig{1000, &Range{1, 3600000}}
 var BypassSanInCertificateCheckConfig = &SettingsConfig{0, &Range{0, 1}}
 var ReplicationSpecGCCntConfig = &SettingsConfig{4, &Range{1, 100}}
+var TimeoutRuntimeContextStartConfig = &SettingsConfig{30, &Range{1, 3600}}
+var TimeoutRuntimeContextStopConfig = &SettingsConfig{5, &Range{1, 3600}}
+var TimeoutPartsStartConfig = &SettingsConfig{30, &Range{1, 3600}}
+var TimeoutPartsStopConfig = &SettingsConfig{10, &Range{1, 3600}}
+var TimeoutDcpCloseUprStreamsConfig = &SettingsConfig{3, &Range{1, 3600}}
+var TimeoutDcpCloseUprFeedConfig = &SettingsConfig{3, &Range{1, 3600}}
 
 var XDCRInternalSettingsConfigMap = map[string]*SettingsConfig{
 	TopologyChangeCheckIntervalKey:                TopologyChangeCheckIntervalConfig,
@@ -256,6 +269,12 @@ var XDCRInternalSettingsConfigMap = map[string]*SettingsConfig{
 	XmemDefaultRespTimeoutKey:                     XmemDefaultRespTimeoutConfig,
 	BypassSanInCertificateCheckKey:                BypassSanInCertificateCheckConfig,
 	ReplicationSpecGCCntKey:                       ReplicationSpecGCCntConfig,
+	TimeoutRuntimeContextStartKey:                 TimeoutRuntimeContextStartConfig,
+	TimeoutRuntimeContextStopKey:                  TimeoutRuntimeContextStopConfig,
+	TimeoutPartsStartKey:                          TimeoutPartsStartConfig,
+	TimeoutPartsStopKey:                           TimeoutPartsStopConfig,
+	TimeoutDcpCloseUprStreamsKey:                  TimeoutDcpCloseUprStreamsConfig,
+	TimeoutDcpCloseUprFeedKey:                     TimeoutDcpCloseUprFeedConfig,
 }
 
 type InternalSettings struct {

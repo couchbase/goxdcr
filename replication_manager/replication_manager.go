@@ -255,6 +255,12 @@ func initConstants(xdcr_topology_svc service_def.XDCRCompTopologySvc, internal_s
 		time.Duration(internal_settings.Values[metadata.XmemDefaultRespTimeoutKey].(int))*time.Millisecond,
 		internal_settings.Values[metadata.BypassSanInCertificateCheckKey].(int),
 		internal_settings.Values[metadata.ReplicationSpecGCCntKey].(int),
+		time.Duration(internal_settings.Values[metadata.TimeoutRuntimeContextStartKey].(int))*time.Second,
+		time.Duration(internal_settings.Values[metadata.TimeoutRuntimeContextStopKey].(int))*time.Second,
+		time.Duration(internal_settings.Values[metadata.TimeoutPartsStartKey].(int))*time.Second,
+		time.Duration(internal_settings.Values[metadata.TimeoutPartsStopKey].(int))*time.Second,
+		time.Duration(internal_settings.Values[metadata.TimeoutDcpCloseUprStreamsKey].(int))*time.Second,
+		time.Duration(internal_settings.Values[metadata.TimeoutDcpCloseUprFeedKey].(int))*time.Second,
 	)
 }
 
