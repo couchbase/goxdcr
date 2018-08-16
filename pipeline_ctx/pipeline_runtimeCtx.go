@@ -59,22 +59,39 @@ func (ctx *PipelineRuntimeCtx) Start(params metadata.ReplicationSettingsMap) err
 	ctx.runtime_svcs_lock.RLock()
 	defer ctx.runtime_svcs_lock.RUnlock()
 
-	var err error = nil
-	//start all registered services
-	for name, svc := range ctx.runtime_svcs {
-		settings := params
-		if ctx.service_settings_constructor != nil {
-			settings, err = ctx.service_settings_constructor(ctx.pipeline, svc, params)
-			if err != nil {
-				return err
+	topic := ""
+	if ctx.pipeline != nil {
+		topic = ctx.pipeline.Topic()
+	}
+
+	startServicesFunc := func() error {
+		var err error = nil
+		//start all registered services
+		for name, svc := range ctx.runtime_svcs {
+			settings := params
+			if ctx.service_settings_constructor != nil {
+				settings, err = ctx.service_settings_constructor(ctx.pipeline, svc, params)
+				if err != nil {
+					return err
+				}
 			}
+			err = svc.Start(settings)
+			if err != nil {
+				err1 := fmt.Errorf("Failed to start service %v for %v. err=%v", name, topic, err)
+				ctx.logger.Errorf("%v", err1)
+				return err1
+			}
+			ctx.logger.Infof("Service %v has been started for %v", name, topic)
 		}
-		err = svc.Start(settings)
-		if err != nil {
-			ctx.logger.Errorf("Failed to start service %s", name)
-			break
-		}
-		ctx.logger.Infof("Service %s has been started", name)
+		return nil
+	}
+
+	// put a timeout around service starting to avoid being stuck
+	err := base.ExecWithTimeout(startServicesFunc, base.TimeoutRuntimeContextStart, ctx.logger)
+	if err != nil {
+		ctx.logger.Errorf("%v error starting pipeline context. err=%v", topic, err)
+	} else {
+		ctx.logger.Infof("%v pipeline context has started successfully", topic)
 	}
 
 	if err == nil {
