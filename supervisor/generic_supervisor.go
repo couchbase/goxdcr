@@ -36,10 +36,14 @@ const (
 	// child is considered to be broken if it had missed this number of heart beats consecutively
 	MISSED_HEARTBEAT_THRESHOLD = "missed_heartbeat_threshold"
 
-	default_heartbeat_interval            time.Duration = 1000 * time.Millisecond
+	default_heartbeat_interval            time.Duration = 3000 * time.Millisecond
 	default_heartbeat_resp_check_interval time.Duration = 500 * time.Millisecond
 	default_heartbeat_timeout             time.Duration = 4000 * time.Millisecond
-	default_missed_heartbeat_threshold                  = 5
+	// adminport could miss heart beat because it is actively processing rest requests.
+	// since we use a http read timeout of 180 seconds, the time threshold for heartbeat miss should be larger than 180 seconds.
+	// setting it to 600 seconds to be conservative, since false positive will get goxdcr process restarted.
+	// hence the heartbeat miss count threshold is 600/3 = 200
+	default_missed_heartbeat_threshold = 200
 )
 
 var supervisor_setting_defs base.SettingDefinitions = base.SettingDefinitions{HEARTBEAT_TIMEOUT: base.NewSettingDef(reflect.TypeOf((*time.Duration)(nil)), false),
@@ -231,7 +235,7 @@ func (supervisor *GenericSupervisor) sendHeartBeats(waitGrp *sync.WaitGroup) {
 				err := child.HeartBeat_async(respch, time.Now())
 				if err != nil {
 					supervisor.Logger().Infof("Send heartbeat failed for %v, err=%v\n", childId, err)
-					heartbeat_report[childId] = skip
+					heartbeat_report[childId] = respondedNotOk
 				} else {
 					heartbeat_resp_chs[childId] = respch
 					heartbeat_report[childId] = notYetResponded
