@@ -105,6 +105,7 @@ type ReplicationStatus struct {
 	pipeline_        common.Pipeline
 	err_list         PipelineErrorArray
 	progress         string
+	oldProgress      string
 	logger           *log.CommonLogger
 	specId           string
 	specInternalId   string
@@ -348,10 +349,14 @@ func (rs *ReplicationStatus) PublishWithStatus(status string, lock bool) {
 	statusVar.Set(status)
 	rep_map.Set("Status", statusVar)
 
+	//publish old progress
+	oldProgressVar := new(expvar.String)
+	oldProgressVar.Set(rs.oldProgress)
+	rep_map.Set("OldProgress", oldProgressVar)
+
 	//publish progress
-	progress := rs.progress
 	progressVar := new(expvar.String)
-	progressVar.Set(progress)
+	progressVar.Set(rs.progress)
 	rep_map.Set("Progress", progressVar)
 
 	//publish errors
@@ -433,6 +438,7 @@ func (rs *ReplicationStatus) ClearErrors() {
 func (rs *ReplicationStatus) RecordProgress(progress string) {
 	rs.lock.Lock()
 	defer rs.lock.Unlock()
+	rs.oldProgress = rs.progress
 	rs.progress = progress
 	rs.Publish(false)
 }
@@ -446,7 +452,7 @@ func (rs *ReplicationStatus) GetProgress() string {
 func (rs *ReplicationStatus) String() string {
 	rs.lock.RLock()
 	defer rs.lock.RUnlock()
-	return fmt.Sprintf("name={%v}, status={%v}, errors={%v}, progress={%v}\n", rs.specId, rs.RuntimeStatus(false), rs.err_list, rs.progress)
+	return fmt.Sprintf("name={%v}, status={%v}, errors={%v}, oldProgress={%v}, progress={%v}\n", rs.specId, rs.RuntimeStatus(false), rs.err_list, rs.oldProgress, rs.progress)
 }
 
 // The caller should check if return value is null, if the creation process is ongoing

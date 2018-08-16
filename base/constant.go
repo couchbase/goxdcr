@@ -449,7 +449,9 @@ var MaxRetryForRandomIdGeneration = 5
 
 var ExecutionTimeoutError = errors.New("Execution timed out")
 
+var TimeoutRuntimeContextStart = 30 * time.Second
 var TimeoutRuntimeContextStop = 5 * time.Second
+var TimeoutPartsStart = 30 * time.Second
 var TimeoutPartsStop = 10 * time.Second
 var TimeoutDcpCloseUprStreams = 3 * time.Second
 var TimeoutDcpCloseUprFeed = 3 * time.Second
@@ -695,7 +697,13 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	thresholdPercentageForEventChanSizeLogging int, thresholdForThroughSeqnoComputation time.Duration,
 	statsLogInterval time.Duration, xmemDefaultRespTimeout time.Duration,
 	bypassSanInCertificateCheck int,
-	replicationSpecGCCnt int) {
+	replicationSpecGCCnt int,
+	timeoutRuntimeContextStart time.Duration,
+	timeoutRuntimeContextStop time.Duration,
+	timeoutPartsStart time.Duration,
+	timeoutPartsStop time.Duration,
+	timeoutDcpCloseUprStreams time.Duration,
+	timeoutDcpCloseUprFeed time.Duration) {
 	TopologyChangeCheckInterval = topologyChangeCheckInterval
 	MaxTopologyChangeCountBeforeRestart = maxTopologyChangeCountBeforeRestart
 	MaxTopologyStableCountBeforeRestart = maxTopologyStableCountBeforeRestart
@@ -757,4 +765,10 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 		BypassSanInCertificateCheck = (bypassSanInCertificateCheck != 0)
 	}
 	ReplicationSpecGCCnt = replicationSpecGCCnt
+	TimeoutRuntimeContextStart = timeoutRuntimeContextStart
+	TimeoutRuntimeContextStop = timeoutRuntimeContextStop
+	TimeoutPartsStart = timeoutPartsStart
+	TimeoutPartsStop = timeoutPartsStop
+	TimeoutDcpCloseUprStreams = timeoutDcpCloseUprStreams
+	TimeoutDcpCloseUprFeed = timeoutDcpCloseUprFeed
 }
