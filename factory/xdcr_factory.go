@@ -770,8 +770,6 @@ func (xdcrf *XDCRFactory) registerServices(pipeline common.Pipeline, logger_ctx 
 	kv_vb_map map[string][]uint16, targetUserName, targetPassword string, targetBucketName string,
 	target_kv_vb_map map[string][]uint16, targetClusterRef *metadata.RemoteClusterReference,
 	targetClusterVersion int, isCapi bool, isTargetES bool) error {
-	through_seqno_tracker_svc := service_impl.NewThroughSeqnoTrackerSvc(logger_ctx)
-	through_seqno_tracker_svc.Attach(pipeline)
 
 	ctx := pipeline.RuntimeContext()
 
@@ -782,6 +780,12 @@ func (xdcrf *XDCRFactory) registerServices(pipeline common.Pipeline, logger_ctx 
 	if err != nil {
 		return err
 	}
+
+	// through seqno tracker needs to be initialized after pipeline supervisor
+	// since it uses the latter as error handler
+	through_seqno_tracker_svc := service_impl.NewThroughSeqnoTrackerSvc(logger_ctx)
+	through_seqno_tracker_svc.Attach(pipeline)
+
 	//register pipeline checkpoint manager
 	ckptMgr, err := pipeline_svc.NewCheckpointManager(xdcrf.checkpoint_svc, xdcrf.capi_svc,
 		xdcrf.remote_cluster_svc, xdcrf.repl_spec_svc, xdcrf.cluster_info_svc,

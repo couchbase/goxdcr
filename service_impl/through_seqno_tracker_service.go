@@ -182,6 +182,7 @@ func truncateGapSeqnoList(through_seqno uint64, seqno_list []uint64) []uint64 {
 func NewThroughSeqnoTrackerSvc(logger_ctx *log.LoggerContext) *ThroughSeqnoTrackerSvc {
 	logger := log.NewLogger("ThrSeqTrackSvc", logger_ctx)
 	tsTracker := &ThroughSeqnoTrackerSvc{
+		AbstractComponent:           component.NewAbstractComponentWithLogger("ThrSeqTrackSvc", logger),
 		logger:                      logger,
 		vb_map:                      make(map[uint16]bool),
 		through_seqno_map:           make(map[uint16]*base.SeqnoWithLock),
@@ -225,10 +226,13 @@ func (tsTracker *ThroughSeqnoTrackerSvc) Attach(pipeline common.Pipeline) error 
 	//register pipeline supervisor as through seqno service's error handler
 	supervisor := pipeline.RuntimeContext().Service(base.PIPELINE_SUPERVISOR_SVC)
 	if supervisor == nil {
-		return errors.New("Pipeline supervisor has to exist")
+		err := errors.New("Pipeline supervisor has to exist")
+		tsTracker.logger.Errorf("%v", err)
+		return err
 	}
 	err := tsTracker.RegisterComponentEventListener(common.ErrorEncountered, supervisor.(*pipeline_svc.PipelineSupervisor))
 	if err != nil {
+		tsTracker.logger.Errorf("%v", err)
 		return err
 	}
 
