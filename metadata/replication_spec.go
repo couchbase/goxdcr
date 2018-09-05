@@ -1,4 +1,4 @@
-// Copyright (c) 2013 Couchbase, Inc.
+// Copyright (c) 2013-2019 Couchbase, Inc.
 // Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file
 // except in compliance with the License. You may obtain a copy of the License at
 //   http://www.apache.org/licenses/LICENSE-2.0
@@ -61,6 +61,15 @@ func NewReplicationSpecification(sourceBucketName string, sourceBucketUUID strin
 		Settings:          DefaultReplicationSettings()}, nil
 }
 
+func (spec *ReplicationSpecification) String() string {
+	var specSettingsMap ReplicationSettingsMap
+	if spec.Settings != nil {
+		specSettingsMap = spec.Settings.CloneAndRedact().ToMap(false /*defaultSettings*/)
+	}
+	return fmt.Sprintf("Id: %v InternalId: %v SourceBucketName: %v SourceBucketUUID: %v TargetClusterUUID: %v TargetBucketName: %v TargetBucketUUID: %v Settings: %v",
+		spec.Id, spec.InternalId, spec.SourceBucketName, spec.SourceBucketUUID, spec.TargetClusterUUID, spec.TargetBucketName, spec.TargetBucketUUID, specSettingsMap)
+}
+
 // checks if the passed in spec is the same as the current spec
 // used to check if a spec in cache needs to be refreshed
 func (spec *ReplicationSpecification) SameSpec(spec2 *ReplicationSpecification) bool {
@@ -108,6 +117,25 @@ func (spec *ReplicationSpecification) CloneAndRedact() *ReplicationSpecification
 		return spec.Clone().Redact()
 	}
 	return spec
+}
+
+// Modifies the in-memory version of the spec, does not persist changes onto metakv
+// This should only be called once, after loading from metakv
+func (spec *ReplicationSpecification) UpgradeFilterIfNeeded() {
+	if spec.Settings == nil || len(spec.Settings.FilterExpression) == 0 {
+		return
+	}
+
+	if _, ok := spec.Settings.Values[FilterVersionKey]; !ok {
+		// This shouldn't happen... but for now, assume that the filter was input as a key version
+		// since spec creation should have entered it as a valid value
+		spec.Settings.Values[FilterVersionKey] = base.FilterVersionKeyOnly
+	}
+
+	if spec.Settings.Values[FilterVersionKey] == base.FilterVersionKeyOnly {
+		spec.Settings.FilterExpression = base.UpgradeFilter(spec.Settings.FilterExpression)
+		spec.Settings.Values[FilterExpressionKey] = spec.Settings.FilterExpression
+	}
 }
 
 func ReplicationId(sourceBucketName string, targetClusterUUID string, targetBucketName string) string {

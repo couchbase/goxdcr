@@ -1,4 +1,4 @@
-// Copyright (c) 2013 Couchbase, Inc.
+// Copyright (c) 2013-2019 Couchbase, Inc.
 // Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file
 // except in compliance with the License. You may obtain a copy of the License at
 //   http://www.apache.org/licenses/LICENSE-2.0
@@ -19,7 +19,6 @@ import (
 	utilities "github.com/couchbase/goxdcr/utils"
 	"io/ioutil"
 	"net/http"
-	"regexp"
 	"sort"
 	"strconv"
 )
@@ -69,6 +68,8 @@ const (
 	ReplicationTypeValue           = "continuous"
 	GoMaxProcs                     = "goMaxProcs"
 	GoGC                           = "goGC"
+	FilterVersionKey               = "filterVersion"
+	FilterSkipRestreamKey          = "filterSkipRestream"
 )
 
 // constants for parsing create replication response
@@ -138,6 +139,8 @@ var RestKeyToSettingsKeyMap = map[string]string{
 	GoMaxProcs:                     metadata.GoMaxProcsKey,
 	GoGC:                           metadata.GoGCKey,
 	base.CompressionTypeREST:       metadata.CompressionTypeKey,
+	FilterVersionKey:               metadata.FilterVersionKey,
+	FilterSkipRestreamKey:          metadata.FilterSkipRestreamKey,
 	/*MaxExpectedReplicationLag:      metadata.MaxExpectedReplicationLag,
 	TimeoutPercentageCap:           metadata.TimeoutPercentageCap,*/
 }
@@ -160,6 +163,8 @@ var SettingsKeyToRestKeyMap = map[string]string{
 	metadata.GoMaxProcsKey:                     GoMaxProcs,
 	metadata.GoGCKey:                           GoGC,
 	metadata.CompressionTypeKey:                base.CompressionTypeREST,
+	metadata.FilterVersionKey:                  FilterVersionKey,
+	metadata.FilterSkipRestreamKey:             FilterSkipRestreamKey,
 	/*metadata.MaxExpectedReplicationLag:      MaxExpectedReplicationLag,
 	metadata.TimeoutPercentageCap:           TimeoutPercentageCap,*/
 }
@@ -235,7 +240,7 @@ func getReplicationDocMap(replSpec *metadata.ReplicationSpecification) map[strin
 		}
 
 		// copy other replication settings into replication doc
-		for key, value := range replSpec.Settings.ToMap(false /*isDefaultSettings*/) {
+		for key, value := range replSpec.Settings.ToRESTMap() {
 			if key != metadata.ReplicationTypeKey && key != metadata.ActiveKey {
 				replDocMap[key] = value
 			}
@@ -525,19 +530,42 @@ func DecodeCreateReplicationRequest(request *http.Request) (justValidate bool, f
 		errorsMap[key] = value
 	}
 
-	isEnterprise, err := XDCRCompTopologyService().IsMyClusterEnterprise()
+	err = filterExpressionVariousChecks(settings, true /*creation*/, false /*isDefaultSettings*/)
 	if err != nil {
-		return
-	}
-
-	if !isEnterprise {
-		filterExpression, ok := settings[metadata.FilterExpressionKey]
-		if ok && len(filterExpression.(string)) > 0 {
-			errorsMap[FilterExpression] = errors.New("Filter expression can be specified in Enterprise edition only")
-		}
+		errorsMap[FilterExpression] = err
 	}
 
 	return
+}
+
+func filterExpressionVariousChecks(settings metadata.ReplicationSettingsMap, creation bool, isDefaultSettings bool) error {
+	isEnterprise, err := XDCRCompTopologyService().IsMyClusterEnterprise()
+	if err != nil {
+		return err
+	}
+
+	filterExpression, ok := settings[metadata.FilterExpressionKey]
+	if !ok {
+		// No filter means do not check anything else
+		return nil
+	} else if len(filterExpression.(string)) > 0 && !isEnterprise {
+		return base.ErrorFilterEnterpriseOnly
+	} else if len(filterExpression.(string)) == 0 {
+		return nil
+	}
+
+	if !isDefaultSettings && creation {
+		settings[metadata.FilterVersionKey] = base.FilterVersionAdvanced
+	}
+
+	_, ok = settings[metadata.FilterSkipRestreamKey]
+	if creation {
+		settings[metadata.FilterSkipRestreamKey] = false
+	} else if !ok && !isDefaultSettings {
+		return base.ErrorFilterSkipRestreamRequired
+	}
+
+	return nil
 }
 
 func DecodeChangeReplicationSettings(request *http.Request, replicationId string) (justValidate bool, settings metadata.ReplicationSettingsMap, errorsMap base.ErrorMap) {
@@ -575,6 +603,11 @@ func DecodeChangeReplicationSettings(request *http.Request, replicationId string
 	settings, settingsErrorsMap := DecodeSettingsFromRequest(request, isDefaultSettings, true, isCapi)
 	for key, value := range settingsErrorsMap {
 		errorsMap[key] = value
+	}
+
+	err = filterExpressionVariousChecks(settings, false /*creation*/, isDefaultSettings)
+	if err != nil {
+		errorsMap[FilterExpression] = err
 	}
 
 	return
@@ -631,6 +664,11 @@ func DecodeSettingsFromRequest(request *http.Request, isDefaultSettings bool, is
 		if err != nil {
 			errorsMap[key] = err
 		}
+	}
+
+	err = filterExpressionVariousChecks(settings, !isUpdate, isDefaultSettings)
+	if err != nil {
+		errorsMap[FilterExpression] = err
 	}
 
 	if len(errorsMap) > 0 {
@@ -773,11 +811,6 @@ func DecodeDynamicParamInURL(request *http.Request, pathPrefix string, paramName
 	return paramValue, nil
 }
 
-func verifyFilterExpression(filterExpression string) error {
-	_, err := regexp.Compile(filterExpression)
-	return err
-}
-
 func convertGlobalSettingsToRestSettingsMap(settings *metadata.GlobalSettings) map[string]interface{} {
 	restSettingsMap := make(map[string]interface{})
 	var settingsMap map[string]interface{}
@@ -792,7 +825,12 @@ func convertGlobalSettingsToRestSettingsMap(settings *metadata.GlobalSettings) m
 
 func convertSettingsToRestSettingsMap(settings *metadata.ReplicationSettings, isDefaultSettings bool) map[string]interface{} {
 	restSettingsMap := make(map[string]interface{})
-	settingsMap := settings.ToMap(isDefaultSettings)
+	var settingsMap map[string]interface{}
+	if isDefaultSettings {
+		settingsMap = settings.ToDefaultSettingsMap()
+	} else {
+		settingsMap = settings.ToMap(isDefaultSettings)
+	}
 
 	for key, value := range settingsMap {
 		restKey := SettingsKeyToRestKeyMap[key]

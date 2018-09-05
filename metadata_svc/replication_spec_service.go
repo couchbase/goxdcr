@@ -1,4 +1,4 @@
-// Copyright (c) 2013 Couchbase, Inc.
+// Copyright (c) 2013-2019 Couchbase, Inc.
 // Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file
 // except in compliance with the License. You may obtain a copy of the License at
 //   http://www.apache.org/licenses/LICENSE-2.0
@@ -370,7 +370,7 @@ func (service *ReplicationSpecService) ValidateNewReplicationSpec(sourceBucket, 
 
 	err, warnings := service.validateReplicationSettingsInternal(errorMap, sourceBucket, targetCluster, targetBucket, settings,
 		targetClusterRef, remote_connStr, remote_userName, remote_password, httpAuthMech, certificate, sanInCertificate,
-		clientCertificate, clientKey, targetKVVBMap, targetBucketInfo)
+		clientCertificate, clientKey, targetKVVBMap, targetBucketInfo, true /*newSetting*/)
 	if len(errorMap) > 0 || err != nil {
 		return "", "", nil, errorMap, err, nil
 	}
@@ -407,13 +407,13 @@ func (service *ReplicationSpecService) ValidateReplicationSettings(sourceBucket,
 		return nil, err
 	}
 
-	err, _ = service.validateReplicationSettingsInternal(errorMap, sourceBucket, targetCluster, targetBucket, settings, targetClusterRef, remote_connStr, remote_userName, remote_password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey, targetKVVBMap, targetBucketInfo)
+	err, _ = service.validateReplicationSettingsInternal(errorMap, sourceBucket, targetCluster, targetBucket, settings, targetClusterRef, remote_connStr, remote_userName, remote_password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey, targetKVVBMap, targetBucketInfo, false /*new*/)
 	return errorMap, err
 }
 
 func (service *ReplicationSpecService) validateReplicationSettingsInternal(errorMap base.ErrorMap, sourceBucket, targetCluster, targetBucket string, settings metadata.ReplicationSettingsMap,
 	targetClusterRef *metadata.RemoteClusterReference, remote_connStr, remote_userName, remote_password string, httpAuthMech base.HttpAuthMech, certificate []byte, sanInCertificate bool,
-	clientCertificate, clientKey []byte, targetKVVBMap map[string][]uint16, targetBucketInfo map[string]interface{}) (error, []string) {
+	clientCertificate, clientKey []byte, targetKVVBMap map[string][]uint16, targetBucketInfo map[string]interface{}, newSettings bool) (error, []string) {
 	var populateErr error
 	var err error
 	var warnings []string
@@ -428,6 +428,16 @@ func (service *ReplicationSpecService) validateReplicationSettingsInternal(error
 	if !compressionOk {
 		compressionType = metadata.DefaultReplicationSettings().CompressionType
 		settings[metadata.CompressionTypeKey] = compressionType
+	}
+
+	if filter, ok := settings[metadata.FilterExpressionKey].(string); ok {
+		// Validate filter if it's a new setting OR it's an existing adv filter
+		if version, ok := settings[metadata.FilterVersionKey]; newSettings || (ok && (version.(base.FilterVersionType) == base.FilterVersionAdvanced)) {
+			err = base.ValidateAdvFilter(filter)
+			if err != nil {
+				return err, warnings
+			}
+		}
 	}
 
 	if !ok || repl_type == metadata.ReplicationTypeXmem {
@@ -454,6 +464,7 @@ func (service *ReplicationSpecService) validateReplicationSettingsInternal(error
 			}
 		}
 	} else {
+		// CAPI mode
 		if compressionType == base.CompressionTypeAuto {
 			warning := fmt.Sprintf("Compression is disabled automatically for XDCR Version 1 (CAPI Protocol)")
 			warnings = append(warnings, warning)
@@ -462,6 +473,7 @@ func (service *ReplicationSpecService) validateReplicationSettingsInternal(error
 			return nil, warnings
 		}
 	}
+
 	return nil, warnings
 }
 
@@ -657,7 +669,11 @@ func (service *ReplicationSpecService) validateBucket(sourceBucket, targetCluste
 }
 
 func (service *ReplicationSpecService) AddReplicationSpec(spec *metadata.ReplicationSpecification, additionalInfo string) error {
-	service.logger.Infof("Start AddReplicationSpec, spec=%v, additionalInfo=%v\n", spec, additionalInfo)
+	if spec == nil {
+		service.logger.Errorf("Start AddReplicationSpec has nil spec")
+		return base.ErrorInvalidInput
+	}
+	service.logger.Infof("Start AddReplicationSpec, spec=%v, additionalInfo=%v\n", spec.String(), additionalInfo)
 
 	value, err := json.Marshal(spec)
 	if err != nil {
@@ -884,6 +900,8 @@ func constructReplicationSpec(value []byte, rev interface{}) (*metadata.Replicat
 	spec.Revision = rev
 
 	spec.Settings.PostProcessAfterUnmarshalling()
+
+	spec.UpgradeFilterIfNeeded()
 
 	return spec, nil
 }

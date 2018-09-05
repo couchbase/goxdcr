@@ -1,4 +1,4 @@
-// Copyright (c) 2013 Couchbase, Inc.
+// Copyright (c) 2013-2019 Couchbase, Inc.
 // Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file
 // except in compliance with the License. You may obtain a copy of the License at
 //   http://www.apache.org/licenses/LICENSE-2.0
@@ -17,7 +17,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/couchbase/gojsonsm"
+	mcc "github.com/couchbase/gomemcached/client"
 	"github.com/couchbase/goxdcr/log"
+	"io/ioutil"
 	"math"
 	mrand "math/rand"
 	"net"
@@ -888,4 +891,115 @@ func ConstructVbServerMap(vbList []uint16, serverVbMap map[string][]uint16) map[
 		}
 	}
 	return vbServerMap
+}
+
+func UpgradeFilter(oldFilter string) string {
+	return fmt.Sprintf("%v(`%v`, \"%v\")", gojsonsm.FuncRegexp, ReservedWordsMap[ExternalKeyKey], oldFilter)
+}
+
+func ValidateAdvFilter(filter string) error {
+	// participle within gojsonsm has an issue where if given a regex, it could cause stack overflow
+	// To prevent this, we're going to check to make sure it has at least one operator to see if it's a valid
+	// advacned filter expression
+	var operatorFound bool
+	for _, operator := range gojsonsm.GojsonsmOperators {
+		if strings.Contains(filter, operator) {
+			operatorFound = true
+			break
+		}
+	}
+	if !operatorFound {
+		return ErrorFilterInvalidFormat
+	}
+
+	_, err := gojsonsm.GetFilterExpressionMatcher(ReplaceKeyWordsForExpression(filter))
+	if err != nil {
+		err = fmt.Errorf("Error validating advanced filter: %v", err.Error())
+	}
+	return err
+}
+
+// Given a destination, insert the "ins" at pos
+// This insert should not generate garbage unless a contiguous block of memory cannot be found
+func CleanInsert(dest, ins []byte, pos int) ([]byte, error) {
+	insLen := len(ins)
+
+	if pos < 0 || pos >= len(dest) {
+		return nil, ErrorInvalidInput
+	}
+
+	dest = append(dest, ins...)
+	copy(dest[pos+insLen:], dest[pos:])
+	copy(dest[pos:], ins[:])
+	return dest, nil
+}
+
+var AddFilterKeyExtraBytes int = 6 + len(ReservedWordsMap[ExternalKeyKey])
+
+// For advanced filtering, need to populate key into the actual data to be filtered
+func AddKeyToBeFiltered(currentValue []byte, key []byte) ([]byte, error) {
+	if currentValue[0] != '{' {
+		return currentValue, ErrorInvalidInput
+	}
+	keyBytesToBeInserted := json.RawMessage(fmt.Sprintf("\"%v\":\"%v\",", ReservedWordsMap[ExternalKeyKey], string(key)))
+	return CleanInsert(currentValue, keyBytesToBeInserted, 1)
+}
+
+var AddFilterXattrExtraBytes int = 4 + len(ReservedWordsMap[ExternalKeyXattr])
+
+func AddXattrToBeFiltered(currentValue []byte, xAttr []byte) ([]byte, error) {
+	if currentValue[0] != '{' {
+		return currentValue, ErrorInvalidInput
+	}
+	// Always insert Xattr at the end, no need for comma at the end
+	xattrBytesToBeInserted := json.RawMessage(fmt.Sprintf(",\"%v\":%v", ReservedWordsMap[ExternalKeyXattr], string(xAttr)))
+	// Look for reverse pos, for the last }
+	var i int
+	for i = len(currentValue) - 1; currentValue[i] != '}' && i >= 0; i-- {
+	}
+	if i < 0 {
+		return currentValue, ErrorInvalidInput
+	}
+	return CleanInsert(currentValue, xattrBytesToBeInserted, i)
+}
+
+func RetrieveUprJsonAndConvert(fileName string) (*mcc.UprEvent, error) {
+	data, err := ioutil.ReadFile(fileName)
+	if err != nil {
+		return nil, err
+	}
+
+	var uprEvent mcc.UprEvent
+	err = json.Unmarshal(data, &uprEvent)
+	if err != nil {
+		return nil, err
+	}
+
+	return &uprEvent, nil
+}
+
+func ReplaceKeyWordsForExpression(expression string) string {
+	expressionBytes := []byte(expression)
+
+	// Replace all backtick with quotes
+	for k, regex := range ReservedWordsReplaceMap {
+		expressionBytes = regex.ReplaceAll(expressionBytes, []byte(fmt.Sprintf("`%v`", ReservedWordsMap[k])), 0 /*flags*/)
+	}
+
+	return string(expressionBytes)
+}
+
+func ReplaceKeyWordsForOutput(expression string) string {
+	for internal, external := range ReverseReservedWordsMap {
+		expression = strings.Replace(expression, fmt.Sprintf("`%v`", internal), external, -1)
+	}
+	return expression
+}
+
+func FilterContainsXattrExpression(expression string) bool {
+	return strings.Contains(expression, ReservedWordsMap[ExternalKeyXattr])
+}
+
+func FilterContainsKeyExpression(expression string) bool {
+	return strings.Contains(expression, ReservedWordsMap[ExternalKeyKey])
 }

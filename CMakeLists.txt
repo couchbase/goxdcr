@@ -41,11 +41,21 @@ ENDIF (DEFINED FORESTDB_TARGET)
 #  DEPENDS goxdcr_unit_tests
 #)
 
+SET (LDFLAGS)
+IF (APPLE)
+  # On macOS, we must use -rpath to locate libraries
+  # TODO: Remove debug info stripping (-s) added to allow 1.7.6 to work on macOS
+  SET (LDFLAGS "-s -extldflags '-Wl,-rpath,@executable_path/../lib'")
+ENDIF ()
+
 GoInstall (TARGET goxdcr PACKAGE github.com/couchbase/goxdcr/main
   GOPATH "${PROJECT_SOURCE_DIR}/../../../.." "${GODEPSDIR}"
   ${_forestdb_dep}
   CGO_INCLUDE_DIRS "${FORESTDB_INCLUDE_DIR}"
   CGO_LIBRARY_DIRS "${FORESTDB_LIBRARY_DIR}"
+  CGO_INCLUDE_DIRS "${PCRE_INCLUDE_DIR}"
+  CGO_LIBRARY_DIRS "${PCRE_LIBRARY_DIR}"
   GOTAGS pcre
+  LDFLAGS "${LDFLAGS}"
   INSTALL_PATH bin OUTPUT goxdcr
   GOVERSION 1.11)

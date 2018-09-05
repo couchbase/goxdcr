@@ -1,4 +1,4 @@
-// Copyright (c) 2013 Couchbase, Inc.
+// Copyright (c) 2013-2019 Couchbase, Inc.
 // Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file
 // except in compliance with the License. You may obtain a copy of the License at
 //   http://www.apache.org/licenses/LICENSE-2.0
@@ -11,7 +11,10 @@ package base
 
 import (
 	"errors"
+	"fmt"
 	mc "github.com/couchbase/gomemcached"
+	"github.com/glenn-brown/golang-pkg-pcre/src/pkg/pcre"
+	"strings"
 	"time"
 )
 
@@ -200,6 +203,13 @@ var ErrorMaxReached = errors.New("Maximum entries has been reached")
 var ErrorNilPtr = errors.New("Nil pointer given")
 var ErrorNoHostName = errors.New("hostname is missing")
 var ErrorInvalidSettingsKey = errors.New("Invalid settings key")
+var ErrorSizeExceeded = errors.New("Size is larger than maximum allowed")
+var ErrorNoMatcher = errors.New("Internal error - unable to establish GoJsonsm Matcher")
+var ErrorNoDataPool = errors.New("Internal error - unable to establish GoXDCR datapool")
+var ErrorFilterEnterpriseOnly = errors.New("Filter expression can be specified in Enterprise edition only")
+var ErrorFilterInvalidVersion = errors.New("Filter version specified is deprecated")
+var ErrorFilterInvalidFormat = errors.New("Filter specified using key-only regex is deprecated")
+var ErrorFilterSkipRestreamRequired = errors.New("Filter skip restream flag is required along with a filter")
 
 // the full error as of now is : "x509: cannot validate certificate for xxx because it doesn't contain any IP SANs"
 // use a much shorter version for matching to reduce the chance of false negatives - the error message may be changed by golang in the future
@@ -417,6 +427,11 @@ var BucketInfoOpMaxRetry = 5
 var BucketInfoOpWaitTime = 100 * time.Millisecond
 var BucketInfoOpRetryFactor = 2
 
+// Retry for serializer - should be relatively quick
+var PipelineSerializerMaxRetry = 3
+var PipelineSerializerRetryWaitTime = 100 * time.Millisecond
+var PipelineSerializerRetryFactor = 2
+
 // minimum versions where various features are supported
 var VersionForSANInCertificateSupport = []int{4, 0}
 var VersionForRBACAndXattrSupport = []int{5, 0}
@@ -482,6 +497,23 @@ var RetryIntervalSetDerivedObj = 100 * time.Millisecond
 var MaxNumOfRetriesSetDerivedObj = 8
 
 var NumberOfWorkersForCheckpointing = 5
+
+type FilterVersionType int
+
+const (
+	// Note the default is KeyOnly because from a version that did not have this key, that is the
+	// expected version so we can do proper handling.
+	// AdvInMemory version means that the filter itself is advanced, but in metakv it is still stored as KeyOnly
+	FilterVersionKeyOnly  FilterVersionType = iota
+	FilterVersionAdvanced FilterVersionType = iota
+)
+
+type FilterFlagType int
+
+const (
+	FilterFlagSkipXattr FilterFlagType = 0x1
+	FilterFlagSkipKey   FilterFlagType = 0x2
+)
 
 // --------------- Constants that are configurable -----------------
 
@@ -783,4 +815,29 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	TimeoutPartsStop = timeoutPartsStop
 	TimeoutDcpCloseUprStreams = timeoutDcpCloseUprStreams
 	TimeoutDcpCloseUprFeed = timeoutDcpCloseUprFeed
+}
+
+// Need to escape the () to result in "META().xattrs" literal
+const ExternalKeyXattr = "META\\(\\).xattrs"
+const ExternalKeyKey = "META\\(\\).id"
+const InternalKeyXattr = "[$%XDCRInternalMeta*%$]"
+const InternalKeyKey = "[$%XDCRInternalKey*%$]"
+
+// From end user's perspective, they will see the reserved word they entered
+// However, internally, XDCR will insert more obscure internal keys to prevent collision with actual
+// user's data
+var ReservedWordsMap = map[string]string{
+	ExternalKeyKey:   InternalKeyKey,
+	ExternalKeyXattr: InternalKeyXattr,
+}
+
+var ReverseReservedWordsMap = map[string]string{
+	InternalKeyKey:   fmt.Sprintf("%v", strings.Replace(ExternalKeyKey, "\\", "", -1 /*replaceAll*/)),
+	InternalKeyXattr: fmt.Sprintf("%v", strings.Replace(ExternalKeyXattr, "\\", "", -1 /*replaceAll*/)),
+}
+
+// The regexp here returns true if the specified values are not escaped (enclosed by backticks)
+var ReservedWordsReplaceMap = map[string]pcre.Regexp{
+	ExternalKeyKey:   pcre.MustCompile(fmt.Sprintf("(?<!`)%v(?!`)", ExternalKeyKey), 0 /*flags*/),
+	ExternalKeyXattr: pcre.MustCompile(fmt.Sprintf("(?<!`)%v(?!`)", ExternalKeyXattr), 0 /*flags*/),
 }

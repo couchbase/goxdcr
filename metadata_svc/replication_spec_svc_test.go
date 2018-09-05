@@ -410,3 +410,52 @@ func TestElasticSearch(t *testing.T) {
 
 	fmt.Println("============== Test case start: TestElasticSearch =================")
 }
+
+func TestOriginalRegexInvalidateFilter(t *testing.T) {
+	assert := assert.New(t)
+	fmt.Println("============== Test case start: TestOriginalRegexInvalidateFilter =================")
+	xdcrTopologyMock, metadataSvcMock, uiLogSvcMock, remoteClusterMock,
+		clusterInfoSvcMock, utilitiesMock, replSpecSvc,
+		sourceBucket, targetBucket, targetCluster, settings, clientMock := setupBoilerPlate()
+
+	// Begin mocks
+	setupMocks(base.ConflictResolutionType_Seqno, base.ConflictResolutionType_Seqno,
+		xdcrTopologyMock, metadataSvcMock, uiLogSvcMock, remoteClusterMock,
+		clusterInfoSvcMock, utilitiesMock, replSpecSvc, clientMock, true, /*IsEnterprise*/
+		true /*IsElastic*/, false /*CompressionPass*/)
+
+	// Xmem using elas
+	settings[metadata.FilterExpressionKey] = "^abc"
+
+	_, _, _, _, err, _ := replSpecSvc.ValidateNewReplicationSpec(sourceBucket, targetCluster, targetBucket, settings)
+	assert.NotNil(err)
+
+	// If it's an existing replication with an old filter, it's ok
+	errMap, err := replSpecSvc.ValidateReplicationSettings(sourceBucket, targetCluster, targetBucket, settings)
+	assert.Nil(err)
+	assert.Equal(0, len(errMap))
+
+	fmt.Println("============== Test case end: TestOriginalRegexInvalidateFilter =================")
+}
+
+func TestOriginalRegexUpgradedFilter(t *testing.T) {
+	assert := assert.New(t)
+	fmt.Println("============== Test case start: TestOriginalRegexUpgradedFilter =================")
+	xdcrTopologyMock, metadataSvcMock, uiLogSvcMock, remoteClusterMock,
+		clusterInfoSvcMock, utilitiesMock, replSpecSvc,
+		sourceBucket, targetBucket, targetCluster, settings, clientMock := setupBoilerPlate()
+
+	// Begin mocks
+	setupMocks(base.ConflictResolutionType_Seqno, base.ConflictResolutionType_Seqno,
+		xdcrTopologyMock, metadataSvcMock, uiLogSvcMock, remoteClusterMock,
+		clusterInfoSvcMock, utilitiesMock, replSpecSvc, clientMock, true, /*IsEnterprise*/
+		true /*IsElastic*/, false /*CompressionPass*/)
+
+	// Xmem using elas
+	settings[metadata.FilterExpressionKey] = base.UpgradeFilter("^abc")
+
+	_, _, _, _, err, _ := replSpecSvc.ValidateNewReplicationSpec(sourceBucket, targetCluster, targetBucket, settings)
+	assert.Nil(err)
+
+	fmt.Println("============== Test case end: TestOriginalRegexUpgradedFilter =================")
+}

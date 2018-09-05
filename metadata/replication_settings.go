@@ -1,4 +1,4 @@
-// Copyright (c) 2013 Couchbase, Inc.
+// Copyright (c) 2013-2019 Couchbase, Inc.
 // Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file
 // except in compliance with the License. You may obtain a copy of the License at
 //   http://www.apache.org/licenses/LICENSE-2.0
@@ -12,7 +12,6 @@ package metadata
 import (
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
-	"regexp"
 	"strconv"
 )
 
@@ -32,6 +31,8 @@ const (
 	PipelineStatsIntervalKey          = "stats_interval"
 	BandwidthLimitKey                 = "bandwidth_limit"
 	CompressionTypeKey                = base.CompressionTypeKey
+	FilterVersionKey                  = "filter_expression_version"
+	FilterSkipRestreamKey             = "filter_skip_restream"
 )
 
 // keys to facilitate redaction of replication settings map
@@ -42,10 +43,13 @@ const (
 )
 
 // settings whose default values cannot be viewed or changed through rest apis
-var ImmutableDefaultSettings = []string{ReplicationTypeKey, FilterExpressionKey, ActiveKey}
+var ImmutableDefaultSettings = []string{ReplicationTypeKey, FilterExpressionKey, ActiveKey, FilterVersionKey}
 
 // settings whose values cannot be changed after replication is created
-var ImmutableSettings = []string{FilterExpressionKey}
+var ImmutableSettings = []string{}
+
+// settings that are internal and should be hidden from outside
+var HiddenSettings = []string{FilterVersionKey, FilterSkipRestreamKey}
 
 var MaxBatchCount = 10000
 
@@ -69,6 +73,10 @@ var PipelineStatsIntervalConfig = &SettingsConfig{1000, &Range{200, 600000}}
 var BandwidthLimitConfig = &SettingsConfig{0, &Range{0, 1000000}}
 var CompressionTypeConfig = &SettingsConfig{base.CompressionTypeAuto, &Range{base.CompressionTypeStartMarker + 1, base.CompressionTypeEndMarker - 1}}
 
+// Set to keyOnly as default because prior to adv filtering, this config did not exist
+var FilterVersionConfig = &SettingsConfig{base.FilterVersionKeyOnly, nil}
+var FilterSkipRestreamConfig = &SettingsConfig{false, nil}
+
 var ReplicationSettingsConfigMap = map[string]*SettingsConfig{
 	ReplicationTypeKey:                ReplicationTypeConfig,
 	FilterExpressionKey:               FilterExpressionConfig,
@@ -84,6 +92,8 @@ var ReplicationSettingsConfigMap = map[string]*SettingsConfig{
 	PipelineStatsIntervalKey:          PipelineStatsIntervalConfig,
 	BandwidthLimitKey:                 BandwidthLimitConfig,
 	CompressionTypeKey:                CompressionTypeConfig,
+	FilterVersionKey:                  FilterVersionConfig,
+	FilterSkipRestreamKey:             FilterSkipRestreamConfig,
 }
 
 type ReplicationSettings struct {
@@ -92,7 +102,7 @@ type ReplicationSettings struct {
 	//type - XMEM or CAPI
 	RepType string `json:"type"`
 
-	//the filter expression
+	//the filter expression - can be used for either version 0 (key-only regex) or version 1 (XDCR Advanced filtering)
 	FilterExpression string `json:"filter_exp"`
 
 	//if the replication is active
@@ -216,10 +226,33 @@ func (s *ReplicationSettings) CloneAndRedact() *ReplicationSettings {
 }
 
 func (s *ReplicationSettings) ToMap(isDefaultSettings bool) ReplicationSettingsMap {
+	return s.toMapInternal(isDefaultSettings, false /* hideInternals */)
+}
+
+func (s *ReplicationSettings) ToRESTMap() ReplicationSettingsMap {
+	settingsMap := s.toMapInternal(false /* defaultSettings */, true /* hideInternals */)
+	if filter, ok := settingsMap[FilterExpressionKey]; ok {
+		// For UI, we should not show internal XDCR Filtering key or xattributes
+		settingsMap[FilterExpressionKey] = base.ReplaceKeyWordsForOutput(filter.(string))
+	}
+	return settingsMap
+}
+
+func (s *ReplicationSettings) ToDefaultSettingsMap() ReplicationSettingsMap {
+	return s.toMapInternal(true /* defaultSettings */, true /* hideInternals */)
+}
+
+func (s *ReplicationSettings) toMapInternal(isDefaultSettings bool, hideInternals bool) ReplicationSettingsMap {
 	settingsMap := ReplicationSettingsMap(s.Settings.ToMap())
 	if isDefaultSettings {
 		// remove keys that do not belong to default settings
 		for _, key := range ImmutableDefaultSettings {
+			delete(settingsMap, key)
+		}
+	}
+
+	if hideInternals {
+		for _, key := range HiddenSettings {
 			delete(settingsMap, key)
 		}
 	}
@@ -241,6 +274,11 @@ func (s *ReplicationSettings) PostProcessAfterUnmarshalling() {
 		logLevel := s.Values[PipelineLogLevelKey]
 		if logLevel != nil {
 			s.Values[PipelineLogLevelKey] = log.LogLevel(logLevel.(int))
+		}
+
+		filterVersion := s.Values[FilterVersionKey]
+		if filterVersion != nil {
+			s.Values[FilterVersionKey] = base.FilterVersionType(filterVersion.(int))
 		}
 
 		// no need for populateFieldsUsingMap() since fields and map in metakv should already be consistent
@@ -429,11 +467,19 @@ func ValidateAndConvertReplicationSettingsValue(key, value, errorKey string, isE
 		}
 	case FilterExpressionKey:
 		// check that filter expression is a valid regular expression
-		_, err = regexp.Compile(value)
+		err = base.ValidateAdvFilter(value)
 		if err != nil {
 			return
 		}
 		convertedValue = value
+	case FilterSkipRestreamKey:
+		var skip bool
+		skip, err = strconv.ParseBool(value)
+		if err != nil {
+			err = base.IncorrectValueTypeError("a boolean")
+			return
+		}
+		convertedValue = skip
 	case ActiveKey:
 		var paused bool
 		paused, err = strconv.ParseBool(value)

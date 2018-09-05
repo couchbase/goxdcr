@@ -84,8 +84,8 @@ func NewXDCRFactory(repl_spec_svc service_def.ReplicationSpecSvc,
 		bucket_settings_svc:      bucket_settings_svc,
 		default_logger_ctx:       pipeline_default_logger_ctx,
 		pipeline_failure_handler: pipeline_failure_handler,
-		logger: log.NewLogger("XDCRFactory", factory_logger_ctx),
-		utils:  utilsIn}
+		logger:                   log.NewLogger("XDCRFactory", factory_logger_ctx),
+		utils:                    utilsIn}
 }
 
 /**
@@ -541,7 +541,11 @@ func (xdcrf *XDCRFactory) constructRouter(id string, spec *metadata.ReplicationS
 	logger_ctx *log.LoggerContext) (*parts.Router, error) {
 	routerId := "Router" + PART_NAME_DELIMITER + id
 	router, err := parts.NewRouter(routerId, spec.Id, spec.Settings.FilterExpression, downStreamParts, vbNozzleMap, sourceCRMode, logger_ctx, pipeline_manager.NewMCRequestObj, xdcrf.utils)
-	xdcrf.logger.Infof("Constructed router %v", routerId)
+	if err != nil {
+		xdcrf.logger.Errorf("Error (%v) constructing router %v", err.Error(), routerId)
+	} else {
+		xdcrf.logger.Infof("Constructed router %v", routerId)
+	}
 	return router, err
 }
 

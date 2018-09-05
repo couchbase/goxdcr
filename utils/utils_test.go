@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"github.com/couchbase/gocb"
 	base "github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/stretchr/testify/assert"
@@ -577,4 +578,154 @@ func TestTagAndGetUDBytes(t *testing.T) {
 	assert.True(base.IsByteSliceRedacted(testBytes))
 
 	fmt.Println("============== Test case end: TestTagAndGetUDBytes =================")
+}
+
+// Don't change these - these are already dumped in the testData files
+var docKey string = "TestDocKey"
+var docValue string = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+var docMap map[string]interface{} = map[string]interface{}{
+	"Key": docValue,
+}
+
+// If ns_server cluster run is running, generate a Xattr doc
+// At DCP nozzle, serialize the uprEvent as a json and write it to a file
+func TestGenerateXattr(t *testing.T) {
+	serializedMap, err := json.Marshal(docMap)
+	if err != nil {
+		return
+	}
+
+	cluster, err := gocb.Connect("http://localhost:9000")
+	if err != nil {
+		return
+	}
+
+	cluster.Authenticate(gocb.PasswordAuthenticator{
+		Username: "Administrator",
+		Password: "wewewe",
+	})
+
+	bucket, err := cluster.OpenBucket("b1", "")
+	if err != nil {
+		return
+	}
+
+	_, err = bucket.Insert(docKey, &serializedMap, 0)
+	if err != nil {
+		return
+	}
+
+	_, err = bucket.MutateIn(docKey, 0, 0).InsertEx("TestXattr", 30, gocb.SubdocFlagXattr|gocb.SubdocFlagCreatePath).Execute()
+	if err != nil {
+		fmt.Printf("Error with Insert: %v\n", err)
+		return
+	}
+	_, err = bucket.MutateIn(docKey, 0, 0).InsertEx("AnotherXattr", "TestValueString", gocb.SubdocFlagXattr|gocb.SubdocFlagCreatePath).Execute()
+	if err != nil {
+		fmt.Printf("Error with Insert2: %v\n", err)
+		return
+	}
+
+	//Put the following in DCP nozzle to dump uprEvent to a file
+	// Import: bytes, encoding/binary, encoding/json, io/ioutil
+
+	//	fileName := "/tmp/uprEventDump.bin"
+	//	dumpBytes := new(bytes.Buffer)
+	//	json.NewEncoder(dumpBytes).Encode(*m)
+	//	writeErr := ioutil.WriteFile(fileName, dumpBytes.Bytes(), 0644)
+	//	if writeErr == nil {
+	//		dcp.Logger().Infof("Wrote dump file successfully to %v\n", fileName)
+	//	} else {
+	//		dcp.Logger().Warnf("Unable to write file due to %v\n", writeErr)
+	//	}
+
+}
+
+func TestStripXattrAndCompression(t *testing.T) {
+	unCompressedFile := "./testInternalData/uprNotCompress.json"
+	compressedFile := "./testInternalData/uprCompression.json"
+	xAttrUncompressedFile := "./testInternalData/uprXattrNotCompress.json"
+	xAttrCompressedFile := "./testInternalData/uprXattrCompress.json"
+
+	fmt.Println("============== Test case start: TestStripXattrAndCompression =================")
+	assert := assert.New(t)
+	dp := NewDataPool()
+
+	checkMap, err := json.Marshal(docMap)
+	assert.Nil(err)
+
+	uprEvent, err := base.RetrieveUprJsonAndConvert(unCompressedFile)
+	assert.Nil(err)
+	assert.NotNil(uprEvent)
+	assert.Equal(docKey, string(uprEvent.Key))
+	assert.Equal(checkMap, uprEvent.Value)
+	_, err, releaseFunc := testUtils.ProcessUprEventForFiltering(uprEvent, dp, base.FilterFlagType(0) /*skipXattr*/)
+	assert.Nil(err)
+	defer releaseFunc()
+
+	uprEventCompressed, err := base.RetrieveUprJsonAndConvert(compressedFile)
+	assert.Nil(err)
+	assert.NotNil(uprEvent)
+	assert.Equal(docKey, string(uprEventCompressed.Key))
+	assert.NotEqual(checkMap, uprEventCompressed.Value)
+	_, err, releaseFunc2 := testUtils.ProcessUprEventForFiltering(uprEventCompressed, dp, base.FilterFlagType(0) /*skipXattr*/)
+	defer releaseFunc2()
+
+	assert.Nil(err)
+
+	uprEventXattr, err := base.RetrieveUprJsonAndConvert(xAttrUncompressedFile)
+	assert.Nil(err)
+	assert.NotNil(uprEventXattr)
+	assert.Equal(docKey, string(uprEventXattr.Key))
+	_, err, releaseFunc3 := testUtils.ProcessUprEventForFiltering(uprEventXattr, dp, base.FilterFlagType(0) /*skipXattr*/)
+	assert.Nil(err)
+	defer releaseFunc3()
+
+	uprEventXattrCompressed, err := base.RetrieveUprJsonAndConvert(xAttrCompressedFile)
+	assert.Nil(err)
+	assert.NotNil(uprEventXattrCompressed)
+	assert.Equal(docKey, string(uprEventXattrCompressed.Key))
+	assert.NotEqual(checkMap, uprEventXattrCompressed.Value)
+	_, err, releaseFunc4 := testUtils.ProcessUprEventForFiltering(uprEventXattrCompressed, dp, base.FilterFlagType(0) /*skipXattr*/)
+	assert.Nil(err)
+	defer releaseFunc4()
+
+	fmt.Println("============== Test case end: TestStripXattrAndCompression =================")
+}
+
+func TestProcessBinaryFile(t *testing.T) {
+	fmt.Println("============== Test case start: TestProcessBinaryFile =================")
+	assert := assert.New(t)
+	binaryFile := "./testInternalData/uprBinary.json"
+	dp := NewDataPool()
+
+	uprEvent, err := base.RetrieveUprJsonAndConvert(binaryFile)
+	assert.Nil(err)
+	assert.NotNil(uprEvent)
+
+	checkMap := map[string]interface{}{
+		base.ReservedWordsMap[base.ExternalKeyKey]: string(uprEvent.Key),
+	}
+	checkSlice, err := json.Marshal(checkMap)
+	assert.Nil(err)
+
+	retSlice, err, _ := testUtils.ProcessUprEventForFiltering(uprEvent, dp, base.FilterFlagType(0) /*skipXattr*/)
+	assert.Nil(err)
+	assert.Equal(checkSlice, retSlice)
+
+	fmt.Println("============== Test case end: TestProcessBinaryFile =================")
+}
+
+func TestDataPool(t *testing.T) {
+	fmt.Println("============== Test case start: TestDataPool =================")
+	dp := NewDataPool()
+
+	assert := assert.New(t)
+	_, err := dp.GetByteSlice(uint64(22 << 20))
+	assert.NotNil(err)
+
+	slice, err := dp.GetByteSlice(uint64(51))
+	assert.Equal(100, cap(slice))
+
+	fmt.Println("============== Test case start: TestDataPool =================")
 }

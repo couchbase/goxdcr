@@ -1,4 +1,4 @@
-// Copyright (c) 2013 Couchbase, Inc.
+// Copyright (c) 2018 Couchbase, Inc.
 // Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file
 // except in compliance with the License. You may obtain a copy of the License at
 //   http://www.apache.org/licenses/LICENSE-2.0
@@ -19,7 +19,6 @@ import (
 	connector "github.com/couchbase/goxdcr/connector"
 	"github.com/couchbase/goxdcr/log"
 	utilities "github.com/couchbase/goxdcr/utils"
-	"regexp"
 	"time"
 )
 
@@ -36,10 +35,10 @@ type ReqCreator func(id string) (*base.WrappedMCRequest, error)
 type Router struct {
 	id string
 	*connector.Router
-	filterRegexp *regexp.Regexp    // filter expression
-	routingMap   map[uint16]string // pvbno -> partId. This defines the loading balancing strategy of which vbnos would be routed to which part
-	req_creator  ReqCreator
-	topic        string
+	filter      *Filter
+	routingMap  map[uint16]string // pvbno -> partId. This defines the loading balancing strategy of which vbnos would be routed to which part
+	req_creator ReqCreator
+	topic       string
 	// whether lww conflict resolution mode has been enabled
 	sourceCRMode base.ConflictResolutionMode
 	utils        utilities.UtilsIface
@@ -60,18 +59,20 @@ func NewRouter(id string, topic string, filterExpression string,
 	sourceCRMode base.ConflictResolutionMode,
 	logger_context *log.LoggerContext, req_creator ReqCreator,
 	utilsIn utilities.UtilsIface) (*Router, error) {
-	// compile filter expression
-	var filterRegexp *regexp.Regexp
+
+	var filter *Filter
 	var err error
+
 	if len(filterExpression) > 0 {
-		filterRegexp, err = regexp.Compile(filterExpression)
+		filter, err = NewFilter(id, filterExpression, utilsIn)
 		if err != nil {
 			return nil, err
 		}
 	}
+
 	router := &Router{
 		id:           id,
-		filterRegexp: filterRegexp,
+		filter:       filter,
 		routingMap:   routingMap,
 		topic:        topic,
 		sourceCRMode: sourceCRMode,
@@ -165,13 +166,14 @@ func (router *Router) route(data interface{}) (map[string]interface{}, error) {
 	}
 
 	// filter data if filter expession has been defined
-	if router.filterRegexp != nil {
-		if !router.utils.RegexpMatch(router.filterRegexp, uprEvent.Key) {
+	if router.filter != nil {
+		if !router.filter.FilterUprEvent(uprEvent) {
 			// if data does not match filter expression, drop it. return empty result
 			router.RaiseEvent(common.NewEvent(common.DataFiltered, uprEvent, router, nil, nil))
 			return result, nil
 		}
 	}
+
 	mcRequest, err := router.ComposeMCRequest(uprEvent)
 	if err != nil {
 		return nil, router.utils.NewEnhancedError("Error creating new memcached request.", err)

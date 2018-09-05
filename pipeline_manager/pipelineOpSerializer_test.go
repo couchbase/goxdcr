@@ -130,3 +130,16 @@ func TestPipelineOpSerializerStopped(t *testing.T) {
 	assert.Equal(SerializerStoppedErr, stoppedErr)
 	fmt.Println("============== Test case start: TestPipelineOpSerializerStopped =================")
 }
+
+func TestPipelineOpSerializerReinit(t *testing.T) {
+	assert := assert.New(t)
+	fmt.Println("============== Test case start: TestPipelineOpSerializerReinit =================")
+	serializer, pipelineMgr := setupBoilerPlateSerializer()
+	pipelineMgr.On("CleanupPipeline", mock.Anything).Return(nil).Times(1)
+	pipelineMgr.On("Update", mock.Anything, mock.Anything).Return(nil).Times(1)
+
+	assert.Nil(serializer.ReInit("TestTopic"))
+	time.Sleep(serializerSleepTime)
+	assert.Equal(0, len(serializer.jobTopicMap))
+	fmt.Println("============== Test case end: TestPipelineOpSerializerReinit =================")
+}

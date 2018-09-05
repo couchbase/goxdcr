@@ -2,6 +2,7 @@ package metadata
 
 import (
 	"fmt"
+	"github.com/couchbase/goxdcr/base"
 	"github.com/stretchr/testify/assert"
 	"testing"
 )
@@ -54,4 +55,29 @@ func TestValidateCompressionSetting(t *testing.T) {
 	converted, err = ValidateAndConvertReplicationSettingsValue(CompressionTypeKey, "asdf", "", true, false)
 	assert.NotNil(err)
 	fmt.Println("============== Test case end: TestValidateCompressionSetting =================")
+}
+
+func TestDefaultFilterLevel(t *testing.T) {
+	assert := assert.New(t)
+	fmt.Println("============== Test case start: TestDefaultFilterLevel =================")
+	defaultSettings := DefaultReplicationSettings()
+	assert.Equal(base.FilterVersionKeyOnly, defaultSettings.Values[FilterVersionKey])
+	fmt.Println("============== Test case end: TestDefaultFilterLevel =================")
+}
+
+func TestViewOldFilterAsNew(t *testing.T) {
+	assert := assert.New(t)
+	fmt.Println("============== Test case start: TestViewOldFilterAsNew =================")
+	settings := setupBoilerPlate()
+	settings.Values[FilterVersionKey] = 0
+	var expression string = "^abc"
+	// replication_spec_service will call this once loaded from metakv
+	settings.FilterExpression = base.UpgradeFilter(expression)
+	settings.Values[FilterExpressionKey] = base.UpgradeFilter(expression)
+
+	outMap := settings.ToMap(false /*default*/)
+
+	assert.Equal(base.UpgradeFilter(expression), outMap[FilterExpressionKey])
+
+	fmt.Println("============== Test case end: TestViewOldFilterAsNew =================")
 }

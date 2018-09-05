@@ -339,7 +339,7 @@ func (adminport *Adminport) doDeleteRemoteClusterRequest(request *http.Request) 
 		}
 	}
 	if len(replIds) > 0 {
-		err = fmt.Errorf("Cannot delete remote cluster `%v` since it is referenced by replications %v", ref.Name, replIds)
+		err = fmt.Errorf("Cannot delete remote cluster `%v` since it is referenced by replications %v", ref.Name(), replIds)
 		return EncodeRemoteClusterValidationErrorIntoResponse(err)
 	}
 

@@ -16,6 +16,7 @@ import (
 	base "github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
+	"github.com/golang/snappy"
 	"io"
 	"io/ioutil"
 	"net"
@@ -81,10 +82,6 @@ type CouchBucket struct {
 func (u *Utilities) GetNonExistentBucketError() error {
 	return NonExistentBucketError
 }
-
-//func (u *Utilities) GetLoggerUtils (*log.CommonLogger) {
-//	return u.logger_utils
-//}
 
 func (u *Utilities) loggerForFunc(logger *log.CommonLogger) *log.CommonLogger {
 	var l *log.CommonLogger
@@ -2625,4 +2622,126 @@ func (u *Utilities) getAdditionalErrorMessage(statusCode int, username string) s
 		}
 	}
 	return errMsg
+}
+
+func (u *Utilities) ProcessUprEventForFiltering(uprEvent *mcc.UprEvent, dp DataPoolIface, flags base.FilterFlagType) ([]byte, error, ReleaseMemFunc) {
+	var incomingBody []byte = uprEvent.Value
+	var body []byte
+	var xattr map[string]interface{}
+	var err error
+
+	if uprEvent == nil || dp == nil {
+		return nil, base.ErrorInvalidInput, nil
+	}
+
+	// We cannot tell how much Xattr is using until we deflate - so we have to just allocate >1 slices if
+	// that's the case
+	slicesToBeReleased := make([][]byte, 0, 2)
+	releaseFunc := func() {
+		for _, aSlice := range slicesToBeReleased {
+			dp.PutByteSlice(aSlice)
+		}
+	}
+
+	// Simplify things
+	needToProcessXattr := uprEvent.DataType&mcc.XattrDataType > 0 && flags&base.FilterFlagSkipXattr == 0
+	needToProcessBody := needToProcessXattr || uprEvent.DataType&mcc.JSONDataType > 0
+	shouldSkipKey := flags&base.FilterFlagSkipKey > 0
+	bodyIsCompressed := uprEvent.DataType&mcc.SnappyDataType > 0
+
+	if needToProcessBody {
+		if bodyIsCompressed {
+			lenOfDecodedData, err := snappy.DecodedLen(incomingBody)
+			if err != nil {
+				return nil, err, releaseFunc
+			}
+
+			body, err = dp.GetByteSlice(uint64(lenOfDecodedData + len(uprEvent.Key) + base.AddFilterKeyExtraBytes))
+			if err != nil {
+				return nil, err, releaseFunc
+			}
+			slicesToBeReleased = append(slicesToBeReleased, body)
+
+			body, err = snappy.Decode(body, incomingBody)
+			if err != nil {
+				return nil, err, releaseFunc
+			}
+		} else {
+			body, err = dp.GetByteSlice(uint64(len(incomingBody) + len(uprEvent.Key) + base.AddFilterKeyExtraBytes))
+			if err != nil {
+				return nil, err, releaseFunc
+			}
+			slicesToBeReleased = append(slicesToBeReleased, body)
+			copy(body, incomingBody)
+		}
+	}
+
+	if needToProcessXattr {
+		xattr = make(map[string]interface{})
+		var pos uint32
+		var separator uint32
+		//	first uint32 in the body contains the size of the entire XATTR section
+		totalXattrSize := binary.BigEndian.Uint32(body[pos : pos+4])
+		pos = pos + 4
+
+		// Followed by uint32 -> key -> NUL -> value -> NUL (repeat)
+		for pos < totalXattrSize {
+			//			lenOfNextPair := binary.BigEndian.Uint32(body[pos : pos+4])
+			pos = pos + 4
+
+			// Search for end of key
+			for separator = pos; body[separator] != '\x00'; separator++ {
+			}
+			key := string(body[pos:separator])
+			pos = pos + (separator - pos + 1)
+
+			// Search for end of value
+			for separator = pos; body[separator] != '\x00'; separator++ {
+			}
+			value := body[pos:separator]
+			// separator should be pointing at a 0 byte. Next uint32 is after this byte
+			pos = pos + (separator - pos + 1)
+
+			var uData interface{}
+			err = json.Unmarshal(value, &uData)
+			if err != nil {
+				return nil, err, releaseFunc
+			}
+			xattr[key] = uData
+		}
+
+		xattrSlice, err := json.Marshal(xattr)
+		if err != nil {
+			return nil, err, releaseFunc
+		}
+
+		// Once we're done with xAttribute parsing, rest is body
+		body = body[pos:]
+
+		newBodySlice, err := dp.GetByteSlice(uint64(len(xattrSlice) + len(body) + base.AddFilterXattrExtraBytes))
+		if err != nil {
+			return nil, err, releaseFunc
+		}
+		slicesToBeReleased = append(slicesToBeReleased, newBodySlice)
+		copy(newBodySlice, body)
+		body = newBodySlice
+
+		// Add Xattr to body
+		body, err = base.AddXattrToBeFiltered(body, xattrSlice)
+		if err != nil {
+			return nil, err, releaseFunc
+		}
+	}
+
+	if !shouldSkipKey {
+		if !needToProcessBody {
+			// Only thing passing to filter is the document key
+			body = json.RawMessage(fmt.Sprintf("{\"%v\":\"%v\"}", base.ReservedWordsMap[base.ExternalKeyKey], string(uprEvent.Key)))
+		} else {
+			// Add Key to Body
+			body, err = base.AddKeyToBeFiltered(body, uprEvent.Key)
+		}
+	}
+
+	return body, err, releaseFunc
 }

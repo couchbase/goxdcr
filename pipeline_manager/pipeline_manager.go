@@ -54,8 +54,10 @@ type PipelineManager struct {
 type Pipeline_mgr_iface interface {
 	// External APIs
 	InitiateRepStatus(pipelineName string) error
+	ReInitStreams(pipelineName string) error
 	UpdatePipeline(pipelineName string, cur_err error) error
 	DeletePipeline(pipelineName string) error
+	CheckPipelines()
 
 	// Internal APIs
 	OnExit() error
@@ -68,7 +70,9 @@ type Pipeline_mgr_iface interface {
 	AllReplicationsForBucket(bucket string) []string
 	AllReplications() []string
 	AllReplicationsForTargetCluster(targetClusterUuid string) []string
+	CleanupPipeline(topic string) error
 	RemoveReplicationStatus(topic string) error
+	RemoveReplicationCheckpoints(topic string) error
 	AllReplicationSpecsForTargetCluster(targetClusterUuid string) map[string]*metadata.ReplicationSpecification
 	GetOrCreateReplicationStatus(topic string, cur_err error) (*pipeline.ReplicationStatus, error)
 	GetLastUpdateResult(topic string) bool // whether or not the last update was successful
@@ -169,6 +173,20 @@ func (pipelineMgr *PipelineManager) RemoveReplicationStatus(topic string) error 
 	}
 
 	return nil
+}
+
+func (pipelineMgr *PipelineManager) RemoveReplicationCheckpoints(topic string) error {
+	rep_status, err := pipelineMgr.ReplicationStatus(topic)
+	if err != nil {
+		return err
+	}
+	replId := rep_status.RepId()
+
+	err = pipelineMgr.checkpoint_svc.DelCheckpointsDocs(replId)
+	if err != nil {
+		pipelineMgr.logger.Errorf("Unable to delete checkpoints for pipeline %v\n", topic)
+	}
+	return err
 }
 
 // External APIs
@@ -455,6 +473,43 @@ func (pipelineMgr *PipelineManager) StopPipeline(rep_status pipeline.Replication
 	return errMap
 }
 
+// Stops pipeline and cleans all checkpoints with it, results in a restream
+// Add retry mechanism here because failure will not be ideal
+// Should be called only from serializer
+func (pipelineMgr *PipelineManager) CleanupPipeline(topic string) error {
+	var rep_status *pipeline.ReplicationStatus
+	var err error
+	defer pipelineMgr.logger.Infof("%v CleanupPipeline including checkpoints removal finished (err = %v)", err)
+	getOp := func() error {
+		rep_status, err = pipelineMgr.GetOrCreateReplicationStatus(topic, nil)
+		return err
+	}
+	err = pipelineMgr.utils.ExponentialBackoffExecutor(fmt.Sprintf("GetOrCreateReplicationStatus %v", topic), base.PipelineSerializerRetryWaitTime, base.PipelineSerializerMaxRetry, base.PipelineSerializerRetryFactor, getOp)
+
+	if err != nil {
+		return err
+	}
+
+	updater := rep_status.Updater().(PipelineUpdater)
+	replId := rep_status.RepId()
+
+	// Stop the updater to stop the pipeline so it will not handle any more jobs before we remove the checkpoints
+	updater.stop()
+
+	retryOp := func() error {
+		return pipelineMgr.checkpoint_svc.DelCheckpointsDocs(replId)
+	}
+	err = pipelineMgr.utils.ExponentialBackoffExecutor(fmt.Sprintf("DelCheckpointsDocs %v", topic), base.PipelineSerializerRetryWaitTime, base.PipelineSerializerMaxRetry, base.PipelineSerializerRetryFactor, retryOp)
+	if err != nil {
+		pipelineMgr.logger.Warnf("Removing checkpoint resulting in error: %v\n")
+	}
+
+	// regardless of err above, we should restart updater
+	err = pipelineMgr.launchUpdater(topic, nil, rep_status)
+
+	return err
+}
+
 func (pipelineMgr *PipelineManager) pipeline(topic string) common.Pipeline {
 	pipeline := pipelineMgr.getPipelineFromMap(topic)
 	return pipeline
@@ -581,6 +636,10 @@ func (pipelineMgr *PipelineManager) GetLastUpdateResult(topic string) bool {
 		updater := repStatus.Updater().(*PipelineUpdater)
 		return updater.getLastResult()
 	}
+}
+
+func (pipelineMgr *PipelineManager) ReInitStreams(pipelineName string) error {
+	return pipelineMgr.serializer.ReInit(pipelineName)
 }
 
 // Bunch of getters

@@ -76,6 +76,25 @@ func (_m *Pipeline_mgr_iface) AllReplicationsForTargetCluster(targetClusterUuid 
 	return r0
 }
 
+// CheckPipelines provides a mock function with given fields:
+func (_m *Pipeline_mgr_iface) CheckPipelines() {
+	_m.Called()
+}
+
+// CleanupPipeline provides a mock function with given fields: topic
+func (_m *Pipeline_mgr_iface) CleanupPipeline(topic string) error {
+	ret := _m.Called(topic)
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(string) error); ok {
+		r0 = rf(topic)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
 // DeletePipeline provides a mock function with given fields: pipelineName
 func (_m *Pipeline_mgr_iface) DeletePipeline(pipelineName string) error {
 	ret := _m.Called(pipelineName)
@@ -228,6 +247,34 @@ func (_m *Pipeline_mgr_iface) OnExit() error {
 	var r0 error
 	if rf, ok := ret.Get(0).(func() error); ok {
 		r0 = rf()
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// ReInitStreams provides a mock function with given fields: pipelineName
+func (_m *Pipeline_mgr_iface) ReInitStreams(pipelineName string) error {
+	ret := _m.Called(pipelineName)
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(string) error); ok {
+		r0 = rf(pipelineName)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// RemoveReplicationCheckpoints provides a mock function with given fields: topic
+func (_m *Pipeline_mgr_iface) RemoveReplicationCheckpoints(topic string) error {
+	ret := _m.Called(topic)
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(string) error); ok {
+		r0 = rf(topic)
 	} else {
 		r0 = ret.Error(0)
 	}

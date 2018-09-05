@@ -21,3 +21,51 @@ func (_m *CacheableMetadataObj) CAS(obj metadata_svc.CacheableMetadataObj) bool 
 
 	return r0
 }
+
+// Clone provides a mock function with given fields:
+func (_m *CacheableMetadataObj) Clone() metadata_svc.CacheableMetadataObj {
+	ret := _m.Called()
+
+	var r0 metadata_svc.CacheableMetadataObj
+	if rf, ok := ret.Get(0).(func() metadata_svc.CacheableMetadataObj); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(metadata_svc.CacheableMetadataObj)
+		}
+	}
+
+	return r0
+}
+
+// CloneAndRedact provides a mock function with given fields:
+func (_m *CacheableMetadataObj) CloneAndRedact() metadata_svc.CacheableMetadataObj {
+	ret := _m.Called()
+
+	var r0 metadata_svc.CacheableMetadataObj
+	if rf, ok := ret.Get(0).(func() metadata_svc.CacheableMetadataObj); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(metadata_svc.CacheableMetadataObj)
+		}
+	}
+
+	return r0
+}
+
+// Redact provides a mock function with given fields:
+func (_m *CacheableMetadataObj) Redact() metadata_svc.CacheableMetadataObj {
+	ret := _m.Called()
+
+	var r0 metadata_svc.CacheableMetadataObj
+	if rf, ok := ret.Get(0).(func() metadata_svc.CacheableMetadataObj); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(metadata_svc.CacheableMetadataObj)
+		}
+	}
+
+	return r0
+}
