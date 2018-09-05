@@ -574,12 +574,12 @@ func (pipelineMgr *PipelineManager) Update(topic string, cur_err error) error {
 
 	updaterObj := rep_status.Updater()
 	if updaterObj == nil {
-		errorStr := fmt.Sprint("Failed to get updater from replication status in topic %v in update()", topic)
+		errorStr := fmt.Sprintf("Failed to get updater from replication status in topic %v in update()", topic)
 		return errors.New(errorStr)
 	} else {
 		updater, ok := updaterObj.(*PipelineUpdater)
 		if updater == nil || !ok {
-			errorStr := fmt.Sprint("Unable to cast updaterObj as type PipelineUpdater in topic %v", topic)
+			errorStr := fmt.Sprintf("Unable to cast updaterObj as type PipelineUpdater in topic %v", topic)
 			return errors.New(errorStr)
 		}
 
@@ -1062,7 +1062,7 @@ func (r *PipelineUpdater) raiseXattrWarningIfNeeded(p common.Pipeline) {
 			return
 		}
 		if !hasXattrSupport {
-			errMsg := fmt.Sprintf("Replication from source bucket '%v' to target bucket '%v' on cluster '%v' has been started. Note - Target cluster is older than 5.0.0, hence some of the new feature enhancements such as \"Extended Attributes (XATTR)\" are not supported, which might result in loss of XATTR data. If this is not acceptable, please pause the replication, upgrade cluster '%v' to 5.0.0, and restart replication.", spec.SourceBucketName, spec.TargetBucketName, targetClusterRef.Name, targetClusterRef.Name)
+			errMsg := fmt.Sprintf("Replication from source bucket '%v' to target bucket '%v' on cluster '%v' has been started. Note - Target cluster is older than 5.0.0, hence some of the new feature enhancements such as \"Extended Attributes (XATTR)\" are not supported, which might result in loss of XATTR data. If this is not acceptable, please pause the replication, upgrade cluster '%v' to 5.0.0, and restart replication.", spec.SourceBucketName, spec.TargetBucketName, targetClusterRef.Name(), targetClusterRef.Name())
 			r.logger.Warn(errMsg)
 
 			sourceVbList := pipeline_utils.GetSourceVBListPerPipeline(p)

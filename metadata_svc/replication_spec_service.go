@@ -441,7 +441,7 @@ func (service *ReplicationSpecService) validateReplicationSettingsInternal(error
 			err = service.validateCompression(errorMap, sourceBucket, targetClusterRef, targetKVVBMap, targetBucket, targetBucketInfo, compressionType.(int), allKvConnStrs, username, password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey)
 			if len(errorMap) > 0 || err != nil {
 				if compressionType == base.CompressionTypeAuto {
-					warning := fmt.Sprintf("Compression pre-requisite to cluster %v check failed. Compression will be temporarily disabled for replication.", targetClusterRef.Name)
+					warning := fmt.Sprintf("Compression pre-requisite to cluster %v check failed. Compression will be temporarily disabled for replication.", targetClusterRef.Name())
 					warnings = append(warnings, warning)
 					// Since we are disabling compression, reset errors
 					for k, _ := range errorMap {

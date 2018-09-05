@@ -384,7 +384,7 @@ func (dcp *DcpNozzle) prioritizeReturnErrorByFeatures(requested mcc.UprFeatures,
 
 		} else if requested.CompressionType == base.CompressionTypeSnappy && responded.CompressionType == base.CompressionTypeNone {
 			dcp.Logger().Warnf(fmt.Sprintf("%v requested compression type %v, but DCP responded with compression type %v\n",
-				dcp.Id, base.CompressionTypeStrings[requested.CompressionType], base.CompressionTypeStrings[responded.CompressionType]))
+				dcp.Id(), base.CompressionTypeStrings[requested.CompressionType], base.CompressionTypeStrings[responded.CompressionType]))
 			return base.ErrorCompressionNotSupported
 		}
 	}
@@ -1018,7 +1018,7 @@ func (dcp *DcpNozzle) startUprStreamInner(vbno uint16, vbts *base.VBTimestamp, v
 		if ok && statusObj != nil {
 			ignore := dcp.vbHandshakeMap[vbno].registerRequest(version, vbts.Seqno)
 			if ignore {
-				dcp.Logger().Debugf(fmt.Sprintf("%v ignoring send request for seqno %v since it has already been handled", vbts.Seqno))
+				dcp.Logger().Debugf(fmt.Sprintf("%v ignoring send request for seqno %v since it has already been handled", dcp.Id(), vbts.Seqno))
 			} else {
 				// version passed in == opaque, which will be passed back to us
 				err = dcp.uprFeed.UprRequestStream(vbno, version, flags, vbts.Vbuuid, vbts.Seqno, seqEnd, vbts.SnapshotStart, vbts.SnapshotEnd)

@@ -532,7 +532,7 @@ func (connPoolMgr *connPoolMgr) fillPool(p ConnPool, connectionSize int) error {
 		}
 		f := p.NewConnFunc()
 		if f == nil {
-			return fmt.Errorf("Pool %v is not properly initialized, no NewConnFunc is set")
+			return fmt.Errorf("Pool %v is not properly initialized, no NewConnFunc is set", p.Name())
 		}
 		waitGrp.Add(1)
 		go func(connectionsToCreate int, waitGrp *sync.WaitGroup, f NewConnFunc) {
