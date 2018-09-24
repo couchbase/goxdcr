@@ -397,14 +397,14 @@ func (ckmgr *CheckpointManager) closeConnections() {
 	ckmgr.kv_mem_clients = make(map[string]mcc.ClientIface)
 }
 
-func (ckmgr *CheckpointManager) getHighSeqnoAndVBUuidFromTarget() map[uint16][]uint64 {
+func (ckmgr *CheckpointManager) getHighSeqnoAndVBUuidFromTarget(fin_ch chan bool) map[uint16][]uint64 {
 	ckmgr.kv_mem_clients_lock.Lock()
 	defer ckmgr.kv_mem_clients_lock.Unlock()
 
 	// A map of vbucketID -> slice of 2 elements of 1)HighSeqNo and 2)VbUuid in that order
 	high_seqno_and_vbuuid_map := make(map[uint16][]uint64)
 	for serverAddr, vbnos := range ckmgr.target_kv_vb_map {
-		ckmgr.getHighSeqnoAndVBUuidForServerWithRetry(serverAddr, vbnos, high_seqno_and_vbuuid_map)
+		ckmgr.getHighSeqnoAndVBUuidForServerWithRetry(serverAddr, vbnos, high_seqno_and_vbuuid_map, fin_ch)
 	}
 	ckmgr.logger.Infof("high_seqno_and_vbuuid_map=%v\n", high_seqno_and_vbuuid_map)
 	return high_seqno_and_vbuuid_map
@@ -412,10 +412,10 @@ func (ckmgr *CheckpointManager) getHighSeqnoAndVBUuidFromTarget() map[uint16][]u
 
 // checkpointing cannot be done without high seqno and vbuuid from target
 // if retrieval of such stats fails, retry
-func (ckmgr *CheckpointManager) getHighSeqnoAndVBUuidForServerWithRetry(serverAddr string, vbnos []uint16, high_seqno_and_vbuuid_map map[uint16][]uint64) {
+func (ckmgr *CheckpointManager) getHighSeqnoAndVBUuidForServerWithRetry(serverAddr string, vbnos []uint16, high_seqno_and_vbuuid_map map[uint16][]uint64, fin_ch chan bool) {
 	var stats_map map[string]string
 
-	statMapOp := func() error {
+	statMapOp := func(param interface{}) (interface{}, error) {
 		var err error
 		client, ok := ckmgr.kv_mem_clients[serverAddr]
 		if !ok {
@@ -423,7 +423,7 @@ func (ckmgr *CheckpointManager) getHighSeqnoAndVBUuidForServerWithRetry(serverAd
 			client, err = ckmgr.getNewMemcachedClient(serverAddr, false /*initializing*/)
 			if err != nil {
 				ckmgr.logger.Warnf("%v Retrieval of high seqno and vbuuid stats failed. serverAddr=%v, vbnos=%v\n", ckmgr.pipeline.Topic(), serverAddr, vbnos)
-				return err
+				return nil, err
 			} else {
 				ckmgr.kv_mem_clients[serverAddr] = client
 			}
@@ -438,11 +438,11 @@ func (ckmgr *CheckpointManager) getHighSeqnoAndVBUuidForServerWithRetry(serverAd
 			}
 			delete(ckmgr.kv_mem_clients, serverAddr)
 		}
-		return err
+		return nil, err
 	}
 
-	opErr := ckmgr.utils.ExponentialBackoffExecutor("StatsMapOnVBToSeqno", base.RemoteMcRetryWaitTime, base.MaxRemoteMcRetry,
-		base.RemoteMcRetryFactor, statMapOp)
+	opErr, _ := ckmgr.utils.ExponentialBackoffExecutorWithFinishSignal("StatsMapOnVBToSeqno", base.RemoteMcRetryWaitTime, base.MaxRemoteMcRetry,
+		base.RemoteMcRetryFactor, statMapOp, nil, fin_ch)
 
 	if opErr != nil {
 		ckmgr.logger.Errorf("%v Retrieval of high seqno and vbuuid stats failed after %v retries. serverAddr=%v, vbnos=%v\n",
@@ -494,6 +494,8 @@ func (ckmgr *CheckpointManager) CheckpointBeforeStop() {
 		case <-timeout_timer.C:
 			close(close_ch)
 			ckmgr.logger.Infof("Checkpointing for pipeline %v timed out after %v.", ckmgr.pipeline.Topic(), base.TimeoutCheckpointBeforeStop)
+			// do not wait for ckmgr.PerformCkpt to complete, which could get stuck if call to target never comes back
+			return
 		}
 	}
 }
@@ -1004,7 +1006,7 @@ func (ckmgr *CheckpointManager) checkpointing() {
 }
 
 // public API. performs one checkpoint operation on request
-func (ckmgr *CheckpointManager) PerformCkpt(fin_ch <-chan bool) {
+func (ckmgr *CheckpointManager) PerformCkpt(fin_ch chan bool) {
 	ckmgr.logger.Infof("Start one time checkpointing for replication %v\n", ckmgr.pipeline.Topic())
 	defer ckmgr.logger.Infof("Done one time checkpointing for replication %v\n", ckmgr.pipeline.Topic())
 
@@ -1015,7 +1017,7 @@ func (ckmgr *CheckpointManager) PerformCkpt(fin_ch <-chan bool) {
 		// get through seqnos for all vbuckets in the pipeline
 		through_seqno_map = ckmgr.through_seqno_tracker_svc.GetThroughSeqnos()
 		// get high seqno and vbuuid for all vbuckets in the pipeline
-		high_seqno_and_vbuuid_map = ckmgr.getHighSeqnoAndVBUuidFromTarget()
+		high_seqno_and_vbuuid_map = ckmgr.getHighSeqnoAndVBUuidFromTarget(fin_ch)
 		// get first seen xattr seqnos for all vbuckets in the pipeline
 		xattr_seqno_map = pipeline_utils.GetXattrSeqnos(ckmgr.pipeline)
 	}
@@ -1048,7 +1050,7 @@ func (ckmgr *CheckpointManager) PerformCkpt(fin_ch <-chan bool) {
 }
 
 // local API. supports periodical checkpoint operations
-func (ckmgr *CheckpointManager) performCkpt(fin_ch <-chan bool, wait_grp *sync.WaitGroup) {
+func (ckmgr *CheckpointManager) performCkpt(fin_ch chan bool, wait_grp *sync.WaitGroup) {
 	ckmgr.logger.Infof("Start checkpointing for replication %v\n", ckmgr.pipeline.Topic())
 	defer ckmgr.logger.Infof("Done checkpointing for replication %v\n", ckmgr.pipeline.Topic())
 	// vbucketID -> ThroughSeqNumber
@@ -1061,7 +1063,7 @@ func (ckmgr *CheckpointManager) performCkpt(fin_ch <-chan bool, wait_grp *sync.W
 		// get through seqnos for all vbuckets in the pipeline
 		through_seqno_map = ckmgr.through_seqno_tracker_svc.GetThroughSeqnos()
 		// get high seqno and vbuuid for all vbuckets in the pipeline
-		high_seqno_and_vbuuid_map = ckmgr.getHighSeqnoAndVBUuidFromTarget()
+		high_seqno_and_vbuuid_map = ckmgr.getHighSeqnoAndVBUuidFromTarget(fin_ch)
 		// get first seen xattr seqnos for all vbuckets in the pipeline
 		xattr_seqno_map = pipeline_utils.GetXattrSeqnos(ckmgr.pipeline)
 	}
