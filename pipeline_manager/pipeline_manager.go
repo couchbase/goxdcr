@@ -905,7 +905,9 @@ func (r *PipelineUpdater) checkAndDisableProblematicFeatures() {
 		r.rep_status.ClearCustomSettings()
 		r.replSpecSettingsHelper.Clear()
 	} else {
-		if r.currentErrors.ContainsError(base.ErrorCompressionNotSupported, true /*exactMatch*/) {
+		// The compression not support error message may be embedded in higher level error messages.
+		// Use non-exact match to be safe
+		if r.currentErrors.ContainsError(base.ErrorCompressionNotSupported, false /*exactMatch*/) {
 			r.disableCompression()
 		}
 	}
