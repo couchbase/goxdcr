@@ -30,6 +30,12 @@ func NewSettingDef(data_type reflect.Type, bReq bool) *SettingDef {
 type SettingDefinitions map[string]*SettingDef
 
 type ErrorMap map[string]error
+
+// Not thread safe - callers need to sync
+func (errMap *ErrorMap) AddErrors(otherMap ErrorMap) {
+	MergeErrorMaps(*errMap, otherMap, true /*overwrite*/)
+}
+
 type SSLPortMap map[string]uint16
 
 type SettingsError struct {

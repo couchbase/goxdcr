@@ -118,7 +118,7 @@ func (genericPipeline *GenericPipeline) SetRuntimeContext(ctx common.PipelineRun
 	genericPipeline.context = ctx
 }
 
-func (genericPipeline *GenericPipeline) startPartsWithTimeout(ssl_port_map map[string]uint16) error {
+func (genericPipeline *GenericPipeline) startPartsWithTimeout(ssl_port_map map[string]uint16, errMap base.ErrorMap) {
 	err_ch := make(chan partError, 1000)
 	startPartsFunc := func() error {
 		for _, source := range genericPipeline.sources {
@@ -136,10 +136,12 @@ func (genericPipeline *GenericPipeline) startPartsWithTimeout(ssl_port_map map[s
 
 			waitGrp.Wait()
 			if len(err_ch) != 0 {
-				errMap := formatErrMsg(err_ch)
-				err := fmt.Errorf("Pipeline %v failed to start, err=%v\n", genericPipeline.Topic(), errMap)
+				partErrs := formatErrMsg(err_ch)
+				err := fmt.Errorf("Pipeline %v failed to start, err=%v\n", genericPipeline.Topic(), base.FlattenErrorMap(partErrs))
 				genericPipeline.logger.Errorf("%v", err)
-				return err
+				// This func is run serially so no need for lock - if changes in the future, need lock
+				errMap.AddErrors(partErrs)
+				return nil
 			}
 		}
 		return nil
@@ -148,11 +150,13 @@ func (genericPipeline *GenericPipeline) startPartsWithTimeout(ssl_port_map map[s
 	// put a timeout around part part starting to avoid being stuck
 	err := base.ExecWithTimeout(startPartsFunc, base.TimeoutPartsStart, genericPipeline.logger)
 	if err != nil {
-		genericPipeline.logger.Errorf("%v error starting pipeline parts. err=%v", genericPipeline.InstanceId(), err)
+		genericPipeline.logger.Errorf("%v timed out when starting pipeline parts. err=%v", genericPipeline.InstanceId(), err)
+		errMap["genericPipeline.startPartsWithTimeout"] = err
+	} else if len(errMap) > 0 {
+		genericPipeline.logger.Errorf("%v error starting pipeline parts. errs=%v", genericPipeline.InstanceId(), base.FlattenErrorMap(errMap))
 	} else {
 		genericPipeline.logger.Infof("%v pipeline parts have started successfully", genericPipeline.InstanceId())
 	}
-	return err
 }
 
 // Starts the downstream parts recursively, and eventually the part itself
@@ -257,9 +261,8 @@ func (genericPipeline *GenericPipeline) Start(settings metadata.ReplicationSetti
 
 	//start all the processing steps of the Pipeline
 	//start the incoming nozzle which would start the downstream steps subsequently
-	err = genericPipeline.startPartsWithTimeout(ssl_port_map)
-	if err != nil {
-		errMap["genericPipeline.startParts"] = err
+	genericPipeline.startPartsWithTimeout(ssl_port_map, errMap)
+	if len(errMap) > 0 {
 		return errMap
 	}
 
