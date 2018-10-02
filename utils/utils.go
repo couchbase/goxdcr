@@ -2399,8 +2399,9 @@ func (u *Utilities) ExponentialBackoffExecutorWithFinishSignal(name string, init
 	for i := 0; i <= maxRetries; i++ {
 		select {
 		case <-finCh:
-			u.logger_utils.Warnf("ExponentialBackoffExecutorWithFinishSignal for %v aborting because of finch closure\n", name)
-			break
+			err = fmt.Errorf("ExponentialBackoffExecutorWithFinishSignal for %v aborting because of finch closure\n", name)
+			u.logger_utils.Warnf(err.Error())
+			return nil, err
 		default:
 			result, err = op(param)
 			if err == nil {
