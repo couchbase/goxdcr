@@ -496,6 +496,8 @@ func (ckmgr *CheckpointManager) CheckpointBeforeStop() {
 		case <-timeout_timer.C:
 			close(close_ch)
 			ckmgr.logger.Infof("Checkpointing for pipeline %v timed out after %v.", ckmgr.pipeline.Topic(), base.TimeoutCheckpointBeforeStop)
+			// do not wait for ckmgr.PerformCkpt to complete, which could get stuck if call to target never comes back
+			return
 		}
 	}
 }
