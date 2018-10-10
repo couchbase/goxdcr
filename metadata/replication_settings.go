@@ -421,7 +421,9 @@ func (s *ReplicationSettings) Clone() *ReplicationSettings {
 		return nil
 	}
 
-	clone := &ReplicationSettings{}
+	clone := &ReplicationSettings{
+		LogLevel: PipelineLogLevelConfig.defaultValue.(log.LogLevel),
+	}
 	clone.UpdateSettingsFromMap(s.ToMap())
 	return clone
 }
