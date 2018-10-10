@@ -24,8 +24,11 @@ type LogLevel int
 
 var GOXDCR_COMPONENT_CODE = "GOXDCR."
 
+// starting point of valid log level values
+const BaseLogLevel = 10
+
 const (
-	LogLevelFatal LogLevel = iota
+	LogLevelFatal LogLevel = iota + BaseLogLevel
 	LogLevelError
 	LogLevelWarn
 	LogLevelInfo
@@ -76,9 +79,10 @@ type LoggerContext struct {
 }
 
 func (lc *LoggerContext) SetLogLevel(logLevel LogLevel) {
-	if lc.Log_level != logLevel {
+	logLevel2 := upgradeLogLevelIfNeeded(logLevel)
+	if lc.Log_level != logLevel2 {
 		// update log level only when necessary, e.g., when explicitly requested by user
-		lc.Log_level = logLevel
+		lc.Log_level = logLevel2
 	}
 }
 
@@ -250,7 +254,8 @@ func LogLevelFromStr(levelStr string) (LogLevel, error) {
 }
 
 func (level LogLevel) String() string {
-	switch level {
+	level2 := upgradeLogLevelIfNeeded(level)
+	switch level2 {
 	case LogLevelFatal:
 		return LOG_LEVEL_FATAL_STR
 	case LogLevelError:
@@ -303,4 +308,13 @@ func (l *CommonLogger) processCommonFields(level LogLevel) string {
 // example format: 2015-03-17T10:15:06.717-07:00
 func FormatTimeWithMilliSecondPrecision(origTime time.Time) string {
 	return origTime.Format("2006-01-02T15:04:05.000Z07:00")
+}
+
+func upgradeLogLevelIfNeeded(level LogLevel) LogLevel {
+	if level < BaseLogLevel {
+		// logLevel is before upgrade. convert it to new info log level
+		return LogLevelInfo
+	}
+
+	return level
 }
