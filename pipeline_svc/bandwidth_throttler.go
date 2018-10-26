@@ -36,13 +36,10 @@ type BandwidthThrottler struct {
 	number_of_source_nodes  uint32
 	overall_bandwidth_limit int64
 
-	// bandwidth limit for the current node in byte/sec
+	// bandwidth limit for the current node in bytes per second
 	bandwidth_limit int64
-	// bandwidth usage in the current 1 second interval
-	bandwidth_usage int64
-
-	bandwidth_usage_history     []int64
-	bandwidth_usage_history_sum int64
+	// remaining quota for bandwidth usage in bytes
+	bandwidth_usage_quota int64
 
 	cond_var *sync.Cond
 
@@ -75,30 +72,20 @@ func (throttler *BandwidthThrottler) Attach(pipeline common.Pipeline) error {
 	throttler.overall_bandwidth_limit = int64(pipeline.Specification().Settings.BandwidthLimit)
 	throttler.logger.Infof("%v set overall bandwidth limit to %v and number of source nodes to %v\n", throttler.id, throttler.overall_bandwidth_limit, throttler.number_of_source_nodes)
 
-	err = throttler.setBandwidthLimit()
+	bandwidth_limit, err := throttler.setBandwidthLimit()
 	if err != nil {
 		return err
 	}
 
-	throttler.initBandwidthUsageHistory()
+	throttler.initBandwidthUsageQuota(bandwidth_limit)
 
 	throttler.logger.Infof("%v attached to pipeline", throttler.id)
 	return nil
 }
 
-func (throttler *BandwidthThrottler) initBandwidthUsageHistory() {
-	// bandwidth usage of the current time slot is captured in bandwidth_usage, and not in bandwidth_usage_history.
-	// that is why length of history is (number of slots - 1)
-	throttler.bandwidth_usage_history = make([]int64, base.NumberOfSlotsForBandwidthThrottling-1)
-
-	// initialize slots in bandwidth history with usage = bandwidth_limit/numberOfSlots to smooth out initial traffic
-	usage_per_slot := throttler.bandwidth_limit / int64(base.NumberOfSlotsForBandwidthThrottling)
-	for i := 0; i < base.NumberOfSlotsForBandwidthThrottling-1; i++ {
-		throttler.bandwidth_usage_history[i] = usage_per_slot
-	}
-	usage_sum := usage_per_slot * int64(base.NumberOfSlotsForBandwidthThrottling-1)
-	throttler.bandwidth_usage_history_sum = usage_sum
-	throttler.bandwidth_usage = usage_sum
+func (throttler *BandwidthThrottler) initBandwidthUsageQuota(bandwidth_limit int64) {
+	// set quota to limit/numberOfSlots to ensure a slow and smooth start
+	atomic.StoreInt64(&throttler.bandwidth_usage_quota, bandwidth_limit/int64(base.NumberOfSlotsForBandwidthThrottling))
 }
 
 func (throttler *BandwidthThrottler) Start(settings metadata.ReplicationSettingsMap) error {
@@ -147,36 +134,48 @@ func (throttler *BandwidthThrottler) update() error {
 }
 
 func (throttler *BandwidthThrottler) updateOnce() {
-	length := len(throttler.bandwidth_usage_history)
-	// track the oldest entry in history before it gets rotated out
-	usage_oldest_slot := throttler.bandwidth_usage_history[0]
-	for i := 1; i < length; i++ {
-		// rotate entries in bandwidth_usage_history to the left - the first/oldest entry gets rotated out
-		throttler.bandwidth_usage_history[i-1] = throttler.bandwidth_usage_history[i]
+	var new_bandwidth_usage_quota int64
+	for {
+		bandwidth_limit := atomic.LoadInt64(&throttler.bandwidth_limit)
+		bandwidth_usage_quota := atomic.LoadInt64(&throttler.bandwidth_usage_quota)
+		// increment quota
+		new_bandwidth_usage_quota = bandwidth_usage_quota + bandwidth_limit/int64(base.NumberOfSlotsForBandwidthThrottling)
+		if new_bandwidth_usage_quota > bandwidth_limit {
+			// keep quota below limit
+			new_bandwidth_usage_quota = bandwidth_limit
+		}
+		if atomic.CompareAndSwapInt64(&throttler.bandwidth_usage_quota, bandwidth_usage_quota, new_bandwidth_usage_quota) {
+			break
+		}
 	}
 
-	// decrement bandwidth usage by usage_oldest_slot since it is no longer in the current 1 second moving window
-	new_bandwith_usage := atomic.AddInt64(&throttler.bandwidth_usage, 0-int64(usage_oldest_slot))
-	throttler.bandwidth_usage_history_sum -= usage_oldest_slot
-	// compute usage in the current time slot
-	usage_current_slot := new_bandwith_usage - throttler.bandwidth_usage_history_sum
-	// move the current time slot into history
-	throttler.bandwidth_usage_history[length-1] = usage_current_slot
-	throttler.bandwidth_usage_history_sum += usage_current_slot
-
-	// wake up all routines blocked by throttler.Wait()
-	throttler.broadcast()
+	// if new quota is larger than 0, wake up all routines blocked by throttler.Wait()
+	if new_bandwidth_usage_quota > 0 {
+		throttler.broadcast()
+	}
 }
 
 // input:
 // 1. numberOfBytes - the total number of bytes that caller wants to send
 // 2. minNumberOfBytes - the minimum number of bytes that caller wants to send, if numberOfBytes cannot be send
+// 3. numberOfBytesOfFirstItem - the number of bytes of the first item in the caller's list
+
+// numberOfBytesOfFirstItem is needed to prevent stuckness and starvation.
+// 1. stuckness: if a document has size > bandwidth_limit, it will never get sent
+//    if we do not let bandwidth_usage_quota fall below 0
+// 2. starvation: if a document has size > bandwidth_limit/numberOfSlots, it may never get sent
+//    if we do not let bandwidth_usage_quota fall below 0, since mutations in other vbuckets
+//    could keep using up bandwidth and never let bandwidth_usage_quota exceed bandwidth_limit/numberOfSlots
+// In order to prevent these scenarios, we always send the first document if it has size > bandwidth_limit/numberOfSlots,
+// even if bandwidth_usage_quota falls below 0 as a result.
+// When this happens, we will wait for bandwidth_usage_quota to climb back to the positive territory before we send any more mutations.
+
 // output:
 // 1. bytesCanSend - the number of bytes that caller can proceed to send.
-//    it can take one of three values: numberOfBytes, minNumberOfBytes, 0
+//    it can take one of four values: numberOfBytes, minNumberOfBytes, numberOfBytesOfFirstItem, 0
 // 2. bytesAllowed - the number of bytes remaining in bandwidth allowance that caller can ATTEMPT to send
 //    caller cannot just send this number of bytes, though. It has to call Throttle() again
-func (throttler *BandwidthThrottler) Throttle(numberOfBytes int, minNumberOfBytes int) (bytesCanSend int, bytesAllowed int64) {
+func (throttler *BandwidthThrottler) Throttle(numberOfBytes, minNumberOfBytes, numberOfBytesOfFirstItem int64) (bytesCanSend int64, bytesAllowed int64) {
 	bandwidth_limit := atomic.LoadInt64(&throttler.bandwidth_limit)
 	if bandwidth_limit == 0 {
 		// if bandwidth limit is 0, bandwdith throttling is not enabled
@@ -184,32 +183,48 @@ func (throttler *BandwidthThrottler) Throttle(numberOfBytes int, minNumberOfByte
 	}
 
 	for {
-		bandwidth_usage := atomic.LoadInt64(&throttler.bandwidth_usage)
+		bandwidth_usage_quota := atomic.LoadInt64(&throttler.bandwidth_usage_quota)
+		if bandwidth_usage_quota <= 0 {
+			return 0, 0
+		}
 		// first check if numberOfBytes can be sent
-		new_bandwidth_usage := bandwidth_usage + int64(numberOfBytes)
-		if new_bandwidth_usage <= bandwidth_limit {
+		if bandwidth_usage_quota >= numberOfBytes {
 			// numberOfBytes can be sent
-			if atomic.CompareAndSwapInt64(&throttler.bandwidth_usage, bandwidth_usage, new_bandwidth_usage) {
+			if atomic.CompareAndSwapInt64(&throttler.bandwidth_usage_quota, bandwidth_usage_quota, bandwidth_usage_quota-numberOfBytes) {
 				return numberOfBytes, 0
 			} else {
-				// throttler.bandwidth_usage has been updated by some one else. retry the entire op
+				// throttler.bandwidth_usage_quota has been updated by some one else. retry the entire op
+				continue
+			}
+			// if numberOfBytes cannot be sent, check if minNumberOfBytes can be sent
+		} else if bandwidth_usage_quota >= minNumberOfBytes {
+			// minNumberOfBytes can be sent
+			if atomic.CompareAndSwapInt64(&throttler.bandwidth_usage_quota, bandwidth_usage_quota, bandwidth_usage_quota-minNumberOfBytes) {
+				return minNumberOfBytes, bandwidth_usage_quota - minNumberOfBytes
+			} else {
+				// throttler.bandwidth_usage_quota has been updated by some one else. retry the entire op
 				continue
 			}
 		} else {
-			// if numberOfBytes cannot be sent, check if minNumberOfBytes can be sent
-			new_bandwidth_usage = bandwidth_usage + int64(minNumberOfBytes)
-			if new_bandwidth_usage <= bandwidth_limit {
-				// minNumberOfBytes can be sent
-				if atomic.CompareAndSwapInt64(&throttler.bandwidth_usage, bandwidth_usage, new_bandwidth_usage) {
-					return minNumberOfBytes, bandwidth_limit - new_bandwidth_usage
+			// if even minNumberOfBytes cannot be sent, check if first item should be sent
+			bandwidth_usage_per_slot := bandwidth_limit / int64(base.NumberOfSlotsForBandwidthThrottling)
+			if bandwidth_usage_per_slot < numberOfBytesOfFirstItem {
+				// If first item is big, sends it to avoid stuckness and starvation,
+				// even if bandwidth_usage_quota may drop below 0 afterward
+				new_bandwidth_usage_quota := bandwidth_usage_quota - numberOfBytesOfFirstItem
+				if atomic.CompareAndSwapInt64(&throttler.bandwidth_usage_quota, bandwidth_usage_quota, new_bandwidth_usage_quota) {
+					if new_bandwidth_usage_quota > 0 {
+						return numberOfBytesOfFirstItem, new_bandwidth_usage_quota
+					} else {
+						return numberOfBytesOfFirstItem, 0
+					}
 				} else {
-					// throttler.bandwidth_usage has been updated by some one else. retry the entire op
+					// throttler.bandwidth_usage_quota has been updated by some one else. retry the entire op
 					continue
 				}
-			} else {
-				// even minNumberOfBytes can not be sent
-				return 0, bandwidth_limit - bandwidth_usage
 			}
+			// when we get there, nothing can be sent
+			return 0, bandwidth_usage_quota
 		}
 	}
 }
@@ -252,26 +267,45 @@ func (throttler *BandwidthThrottler) UpdateSettings(settings metadata.Replicatio
 	}
 
 	if overall_bandwidth_limit != nil || number_of_source_nodes != nil {
-		err := throttler.setBandwidthLimit()
+		bandwidth_limit, err := throttler.setBandwidthLimit()
 		if err != nil {
 			throttler.logger.Errorf(err.Error())
 			return err
 		}
+
+		throttler.adjustBandwidthUsageQuota(bandwidth_limit)
 	}
 
 	return nil
 }
 
-func (throttler *BandwidthThrottler) setBandwidthLimit() error {
+func (throttler *BandwidthThrottler) setBandwidthLimit() (int64, error) {
 	number_of_source_nodes := atomic.LoadUint32(&throttler.number_of_source_nodes)
 	if number_of_source_nodes == 0 {
-		return errorZeroSrcNode
+		return 0, errorZeroSrcNode
 	}
 	overall_bandwidth_limit := atomic.LoadInt64(&throttler.overall_bandwidth_limit)
 	bandwidth_limit := overall_bandwidth_limit * 1024 * 1024 / int64(number_of_source_nodes)
 	atomic.StoreInt64(&throttler.bandwidth_limit, bandwidth_limit)
 	throttler.logger.Infof("%v updated bandwidth limit to %v\n", throttler.id, bandwidth_limit)
-	return nil
+
+	return bandwidth_limit, nil
+}
+
+// adjust quota when new limit is set
+func (throttler *BandwidthThrottler) adjustBandwidthUsageQuota(bandwidth_limit int64) {
+	for {
+		bandwidth_usage_quota := atomic.LoadInt64(&throttler.bandwidth_usage_quota)
+		if bandwidth_usage_quota <= bandwidth_limit {
+			// nothing to do
+			return
+		}
+
+		// adjust quota to ensure that it is within limit
+		if atomic.CompareAndSwapInt64(&throttler.bandwidth_usage_quota, bandwidth_usage_quota, bandwidth_limit) {
+			return
+		}
+	}
 }
 
 func (throttler *BandwidthThrottler) PrintStatusSummary() {
@@ -279,9 +313,10 @@ func (throttler *BandwidthThrottler) PrintStatusSummary() {
 	if bandwidth_limit == 0 {
 		return
 	}
-	bandwidth_usage := atomic.LoadInt64(&throttler.bandwidth_usage)
-	if bandwidth_usage > bandwidth_limit {
-		throttler.logger.Errorf("%v went over the limit. bandwidth_limit=%v, bandwidth_usage=%v", throttler.id, bandwidth_limit, bandwidth_usage)
+	bandwidth_usage_quota := atomic.LoadInt64(&throttler.bandwidth_usage_quota)
+	if bandwidth_usage_quota < 0 {
+		throttler.logger.Warnf("%v went over the limit. Need cool down before more mutations can be sent. bandwidth_limit=%v, bandwidth_usage_quota=%v", throttler.id, bandwidth_limit, bandwidth_usage_quota)
+	} else {
+		throttler.logger.Infof("%v bandwidth_limit=%v, bandwidth_usage_quota=%v", throttler.id, bandwidth_limit, bandwidth_usage_quota)
 	}
-	throttler.logger.Infof("%v bandwidth_limit=%v, bandwidth_usage=%v", throttler.id, bandwidth_limit, bandwidth_usage)
 }

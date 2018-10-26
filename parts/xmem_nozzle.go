@@ -2058,6 +2058,7 @@ func (xmem *XmemNozzle) receiveResponse(finch chan bool, waitGrp *sync.WaitGroup
 						Commit_time:    committing_time,
 						Resp_wait_time: resp_wait_time,
 					}
+
 					xmem.RaiseEvent(common.NewEvent(common.DataSent, nil, xmem, nil, additionalInfo))
 
 					//feedback the most current commit_time to xmem.config.respTimeout
@@ -2556,8 +2557,12 @@ func (xmem *XmemNozzle) writeToClient(client *xmemClient, bytesList [][]byte, re
 
 		// Bandwidth throttling
 		curBytesList := stack.Pop().([][]byte)
-		numberOfBytes, minNumberOfBytes, minIndex := computeNumberOfBytes(curBytesList)
-		bytesCanSend, bytesAllowed := xmem.bandwidthThrottler.Throttle(numberOfBytes, minNumberOfBytes)
+		if len(curBytesList) == 0 {
+			// should never get here
+			continue
+		}
+		numberOfBytes, minNumberOfBytes, minIndex, numberOfBytesOfFirstItem := computeNumberOfBytes(curBytesList)
+		bytesCanSend, bytesAllowed := xmem.bandwidthThrottler.Throttle(numberOfBytes, minNumberOfBytes, numberOfBytesOfFirstItem)
 
 		if bytesCanSend == numberOfBytes {
 			// if all the bytes can be sent, send them
@@ -2566,44 +2571,60 @@ func (xmem *XmemNozzle) writeToClient(client *xmemClient, bytesList [][]byte, re
 			if err != nil {
 				return
 			}
+			continue
+		}
+
+		if bytesCanSend == minNumberOfBytes {
+			// send minNumberOfBytes
+			flattenedBytes := base.FlattenBytesList(curBytesList[:minIndex+1], minNumberOfBytes)
+			err, rev = xmem.writeToClientWithoutThrottling(client, flattenedBytes, renewTimeout)
+			if err != nil {
+				return
+			}
+
+			curBytesList = curBytesList[minIndex+1:]
+		} else if bytesCanSend == numberOfBytesOfFirstItem {
+			// send numberOfBytesOfFirstItem
+			flattenedBytes := base.FlattenBytesList(curBytesList[:1], numberOfBytesOfFirstItem)
+			err, rev = xmem.writeToClientWithoutThrottling(client, flattenedBytes, renewTimeout)
+			if err != nil {
+				return
+			}
+
+			curBytesList = curBytesList[1:]
+		}
+
+		if len(curBytesList) == 0 {
+			continue
+		}
+
+		// construct a subset of the bytes that fit in bytesAllowed
+		splitIndex := computeNumberOfBytesUsingBytesAllowed(curBytesList, bytesAllowed)
+		if splitIndex < 0 {
+			// cannot even send a single item
+			// push curBytesList back to the stack to be retried at a later time
+			stack.Push(curBytesList)
+			start_time := time.Now()
+			xmem.bandwidthThrottler.Wait()
+			xmem.RaiseEvent(common.NewEvent(common.DataThrottled, nil, xmem, nil, time.Since(start_time)))
 		} else {
-			if bytesCanSend == minNumberOfBytes {
-				// send minNumberOfBytes if it can be sent
-				flattenedBytes := base.FlattenBytesList(curBytesList[:minIndex+1], minNumberOfBytes)
-				err, rev = xmem.writeToClientWithoutThrottling(client, flattenedBytes, renewTimeout)
-				if err != nil {
-					return
-				}
-
-				curBytesList = curBytesList[minIndex+1:]
+			// split the input into two pieces
+			if splitIndex < len(curBytesList)-1 {
+				// push second part of input first so that it will be processed AFTER the first part
+				stack.Push(curBytesList[splitIndex+1:])
 			}
-
-			// construct a subset of the bytes that fit in bytesAllowed
-			splitIndex := computeNumberOfBytesUsingBytesAllowed(curBytesList, bytesAllowed)
-			if splitIndex < 0 {
-				// cannot even send a single item
-				// push curBytesList back to the stack to be retried at a later time
-				stack.Push(curBytesList)
-				start_time := time.Now()
-				xmem.bandwidthThrottler.Wait()
-				xmem.RaiseEvent(common.NewEvent(common.DataThrottled, nil, xmem, nil, time.Since(start_time)))
-			} else {
-				// split the input into two pieces
-				if splitIndex < len(curBytesList)-1 {
-					// push second part of input first so that it will be processed AFTER the first part
-					stack.Push(curBytesList[splitIndex+1:])
-				}
-				stack.Push(curBytesList[:splitIndex+1])
-			}
+			stack.Push(curBytesList[:splitIndex+1])
 		}
 	}
 
 	return
 }
 
-func computeNumberOfBytes(bytesList [][]byte) (numberOfBytes int, minNumberOfBytes int, minIndex int) {
+func computeNumberOfBytes(bytesList [][]byte) (numberOfBytes, minNumberOfBytes int64, minIndex int, numberOfBytesOfFirstItem int64) {
+	numberOfBytesOfFirstItem = int64(len(bytesList[0]))
+
 	for _, bytes := range bytesList {
-		numberOfBytes += len(bytes)
+		numberOfBytes += int64(len(bytes))
 	}
 
 	if len(bytesList) == 1 {
@@ -2613,11 +2634,11 @@ func computeNumberOfBytes(bytesList [][]byte) (numberOfBytes int, minNumberOfByt
 		return
 	}
 
-	targetMinNumberOfBytes := numberOfBytes * base.PercentageOfBytesToSendAsMin / 100
-	curNumberOfBytes := 0
+	targetMinNumberOfBytes := numberOfBytes * int64(base.PercentageOfBytesToSendAsMin) / 100
+	var curNumberOfBytes int64 = 0
 	minIndex = -1
 	for index, bytes := range bytesList {
-		curLen := len(bytes)
+		curLen := int64(len(bytes))
 		if curNumberOfBytes+curLen <= targetMinNumberOfBytes {
 			curNumberOfBytes += curLen
 			minIndex = index
@@ -2631,8 +2652,8 @@ func computeNumberOfBytes(bytesList [][]byte) (numberOfBytes int, minNumberOfByt
 		minNumberOfBytes = curNumberOfBytes
 	} else {
 		// this can happen if the first item has a size that is bigger than targetMinNumberOfBytes
-		// include the first item in minNumberOfBytes
-		minNumberOfBytes = len(bytesList[0])
+		// include only the first item in minNumberOfBytes
+		minNumberOfBytes = int64(len(bytesList[0]))
 		minIndex = 0
 	}
 
@@ -2640,13 +2661,16 @@ func computeNumberOfBytes(bytesList [][]byte) (numberOfBytes int, minNumberOfByt
 }
 
 func computeNumberOfBytesUsingBytesAllowed(bytesList [][]byte, bytesAllowed int64) (splitIndex int) {
+	if bytesAllowed <= 0 {
+		return -1
+	}
+
 	splitIndex = -1
-	splitBytes := 0
+	var splitBytes int64 = 0
 	for index, bytes := range bytesList {
-		curLen := len(bytes)
-		if int64(splitBytes+curLen) <= bytesAllowed {
+		splitBytes += int64(len(bytes))
+		if splitBytes <= bytesAllowed {
 			splitIndex = index
-			splitBytes += curLen
 			continue
 		} else {
 			break
