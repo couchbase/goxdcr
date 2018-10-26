@@ -231,7 +231,7 @@ func initConstants(xdcr_topology_svc service_def.XDCRCompTopologySvc, internal_s
 		time.Duration(internal_settings.Values[metadata.XmemBackoffWaitTimeKey].(int))*time.Millisecond,
 		internal_settings.Values[metadata.XmemMaxRetryNewConnKey].(int),
 		time.Duration(internal_settings.Values[metadata.XmemBackoffTimeNewConnKey].(int))*time.Millisecond,
-		time.Duration(internal_settings.Values[metadata.XmemSelfMonitorIntervalKey].(int))*time.Millisecond,
+		time.Duration(internal_settings.Values[metadata.XmemSelfMonitorIntervalKey].(int))*time.Second,
 		internal_settings.Values[metadata.XmemMaxIdleCountKey].(int),
 		internal_settings.Values[metadata.XmemMaxDataChanSizeKey].(int),
 		internal_settings.Values[metadata.XmemMaxBatchSizeKey].(int),
