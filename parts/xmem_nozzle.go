@@ -2524,7 +2524,7 @@ func (xmem *XmemNozzle) writeToClient(client *xmemClient, bytesList [][]byte, re
 
 		if bytesCanSend == numberOfBytes {
 			// if all the bytes can be sent, send them
-			flattenedBytes := base.FlattenBytesList(bytesList, numberOfBytes)
+			flattenedBytes := base.FlattenBytesList(curBytesList, numberOfBytes)
 			err, rev = xmem.writeToClientWithoutThrottling(client, flattenedBytes, renewTimeout)
 			if err != nil {
 				return
@@ -2532,7 +2532,7 @@ func (xmem *XmemNozzle) writeToClient(client *xmemClient, bytesList [][]byte, re
 		} else {
 			if bytesCanSend == minNumberOfBytes {
 				// send minNumberOfBytes if it can be sent
-				flattenedBytes := base.FlattenBytesList(bytesList[:minIndex+1], minNumberOfBytes)
+				flattenedBytes := base.FlattenBytesList(curBytesList[:minIndex+1], minNumberOfBytes)
 				err, rev = xmem.writeToClientWithoutThrottling(client, flattenedBytes, renewTimeout)
 				if err != nil {
 					return
