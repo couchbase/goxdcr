@@ -40,47 +40,6 @@ func (_m *CAPIService) CommitForCheckpoint(remoteBucket *service_def.RemoteBucke
 	return r0, r1, r2
 }
 
-// MassValidateVBUUIDs provides a mock function with given fields: remoteBucket, remoteVBUUIDs
-func (_m *CAPIService) MassValidateVBUUIDs(remoteBucket *service_def.RemoteBucketInfo, remoteVBUUIDs map[uint16]metadata.TargetVBOpaque) ([]uint16, []uint16, []uint16, error) {
-	ret := _m.Called(remoteBucket, remoteVBUUIDs)
-
-	var r0 []uint16
-	if rf, ok := ret.Get(0).(func(*service_def.RemoteBucketInfo, map[uint16]metadata.TargetVBOpaque) []uint16); ok {
-		r0 = rf(remoteBucket, remoteVBUUIDs)
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).([]uint16)
-		}
-	}
-
-	var r1 []uint16
-	if rf, ok := ret.Get(1).(func(*service_def.RemoteBucketInfo, map[uint16]metadata.TargetVBOpaque) []uint16); ok {
-		r1 = rf(remoteBucket, remoteVBUUIDs)
-	} else {
-		if ret.Get(1) != nil {
-			r1 = ret.Get(1).([]uint16)
-		}
-	}
-
-	var r2 []uint16
-	if rf, ok := ret.Get(2).(func(*service_def.RemoteBucketInfo, map[uint16]metadata.TargetVBOpaque) []uint16); ok {
-		r2 = rf(remoteBucket, remoteVBUUIDs)
-	} else {
-		if ret.Get(2) != nil {
-			r2 = ret.Get(2).([]uint16)
-		}
-	}
-
-	var r3 error
-	if rf, ok := ret.Get(3).(func(*service_def.RemoteBucketInfo, map[uint16]metadata.TargetVBOpaque) error); ok {
-		r3 = rf(remoteBucket, remoteVBUUIDs)
-	} else {
-		r3 = ret.Error(3)
-	}
-
-	return r0, r1, r2, r3
-}
-
 // PreReplicate provides a mock function with given fields: remoteBucket, knownRemoteVBStatus, xdcrCheckpointingCapbility
 func (_m *CAPIService) PreReplicate(remoteBucket *service_def.RemoteBucketInfo, knownRemoteVBStatus *service_def.RemoteVBReplicationStatus, xdcrCheckpointingCapbility bool) (bool, metadata.TargetVBOpaque, error) {
 	ret := _m.Called(remoteBucket, knownRemoteVBStatus, xdcrCheckpointingCapbility)
