@@ -14,12 +14,14 @@ import (
 )
 
 // The test data's external node name is 10.10.10.10 instead of the regular 127.0.0.1
-const localAddress = "127.0.0.1"
+var localAddresses = []string{"127.0.0.1", "cb-example-0000.cb-example.default.svc"}
 
-var externalAddresses = []string{"10.10.10.10", "11.11.11.11", "12.12.12.12"}
+var externalAddresses = []string{"10.10.10.10", "11.11.11.11", "12.12.12.12",
+	"cb-example-0000.cb-example.us-west1.spjmurray.co.uk", "cb-example-0001.cb-example.us-west1.spjmurray.co.uk", "cb-example-0002.cb-example.us-west1.spjmurray.co.uk"}
 
 const testExternalDataDir = "testExternalData/"
 const testInternalDataDir = "testInternalData/"
+const testK8DataDir = "testK8ExternalData/"
 
 var logger = log.NewLogger("testLogger", log.DefaultLoggerContext)
 var testUtils = NewUtilities()
@@ -52,8 +54,21 @@ func getClusterInfoMock(external bool) (map[string]interface{}, error) {
 	return readJsonHelper(fileName)
 }
 
+func getClusterInfoMockK8() (map[string]interface{}, error) {
+	fileName := fmt.Sprintf("%v%v", testK8DataDir, "pools_default.json")
+	return readJsonHelper(fileName)
+}
+
 func getNodeListWithMinInfoMock(external bool) ([]interface{}, error) {
 	clusterInfo, err := getClusterInfoMock(external)
+	if err != nil {
+		return nil, err
+	}
+	return testUtils.GetNodeListFromInfoMap(clusterInfo, logger)
+}
+
+func getNodeListWithMinInfoMockK8() ([]interface{}, error) {
+	clusterInfo, err := getClusterInfoMockK8()
 	if err != nil {
 		return nil, err
 	}
@@ -77,8 +92,10 @@ type externalNodeList []string
 
 func (list externalNodeList) check() bool {
 	for _, node := range list {
-		if strings.Contains(node, localAddress) {
-			return false
+		for _, localAddress := range localAddresses {
+			if strings.Contains(node, localAddress) {
+				return false
+			}
 		}
 	}
 	return true
@@ -95,6 +112,14 @@ func getBucketInfoMock(external bool) (map[string]interface{}, error) {
 	return readJsonHelper(fileName)
 }
 
+// Only has external
+func getBucketInfoMockK8() (map[string]interface{}, error) {
+	var fileName string
+	var defaultPoolBucketsFile = "pools_default_buckets_default.json"
+	fileName = fmt.Sprintf("%v%v", testK8DataDir, defaultPoolBucketsFile)
+	return readJsonHelper(fileName)
+}
+
 func getBucketDetailedInfoMock(external bool) (map[string]interface{}, error) {
 	var fileName string
 	var poolsBBFile = "pools_default_b_b2.json"
@@ -103,6 +128,12 @@ func getBucketDetailedInfoMock(external bool) (map[string]interface{}, error) {
 	} else {
 		fileName = fmt.Sprintf("%v%v", testInternalDataDir, poolsBBFile)
 	}
+	return readJsonHelper(fileName)
+}
+
+func getBucketDetailedInfoMockK8() (map[string]interface{}, error) {
+	var poolsBBFile = "pools_default_b_default.json"
+	fileName := fmt.Sprintf("%v%v", testK8DataDir, poolsBBFile)
 	return readJsonHelper(fileName)
 }
 
@@ -164,6 +195,19 @@ func TestGetNodeNameListFromNodeListExternal(t *testing.T) {
 	fmt.Println("============== Test case start: TestGetNodeNameListFromNodeListExternal =================")
 }
 
+func TestGetNodeNameListFromNodeListExternalK8(t *testing.T) {
+	assert := assert.New(t)
+
+	nodeList, _ := getNodeListWithMinInfoMockK8()
+	nodeNameList, err := testUtils.GetRemoteNodeNameListFromNodeList(nodeList, connStr, logger)
+	assert.Nil(err)
+
+	// This should be external nodes only
+	assert.False((localNodeList)(nodeNameList).check())
+	assert.True((externalNodeList)(nodeNameList).check())
+
+}
+
 func TestGetNodeNameListFromNodeListInternal(t *testing.T) {
 	fmt.Println("============== Test case start: TestGetNodeNameListFromNodeListInternal =================")
 	assert := assert.New(t)
@@ -209,6 +253,35 @@ func TestGetIntExtHostNameTranslationMap(t *testing.T) {
 	}
 
 	fmt.Println("============== Test case start: TestGetIntExtHostNameTranslationMap =================")
+}
+
+func TestGetIntExtHostNameTranslationMapK8(t *testing.T) {
+	assert := assert.New(t)
+
+	bucketInfoMap, err := getBucketInfoMockK8()
+	assert.Nil(err)
+
+	translatedMap, err := testUtils.GetIntExtHostNameKVPortTranslationMap(bucketInfoMap)
+
+	assert.Nil(err)
+	assert.NotEqual(0, len(translatedMap))
+
+	for internal, external := range translatedMap {
+		if base.GetHostName(external) == externalAddresses[1] || base.GetHostName(external) == externalAddresses[3] ||
+			base.GetHostName(external) == externalAddresses[4] || base.GetHostName(external) == externalAddresses[5] {
+			// For these test case, use the internal host's port number
+			internalPort, portErr := base.GetPortNumber(internal)
+			assert.Nil(portErr)
+			externalPort, portErr := base.GetPortNumber(external)
+			assert.Equal(externalPort, internalPort)
+		} else {
+			// ports should be different
+			internalPort, portErr := base.GetPortNumber(internal)
+			assert.Nil(portErr)
+			externalPort, portErr := base.GetPortNumber(external)
+			assert.NotEqual(externalPort, internalPort)
+		}
+	}
 }
 
 func TestGetIntExtHostNameTranslationMapInternal(t *testing.T) {
@@ -264,6 +337,41 @@ func TestReplaceKVVBMapExternal(t *testing.T) {
 	fmt.Println("============== Test case start: TestReplaceKVVBMapExternal =================")
 }
 
+func TestReplaceKVVBMapExternalK8(t *testing.T) {
+	assert := assert.New(t)
+
+	bucketInfoMap, err := getBucketInfoMockK8()
+	assert.Nil(err)
+
+	translatedMap, err := testUtils.GetIntExtHostNameKVPortTranslationMap(bucketInfoMap)
+	fmt.Printf("TranslatedMap: %v\n", translatedMap)
+
+	assert.Nil(err)
+	assert.NotEqual(0, len(translatedMap))
+
+	kvVbMap, err := testUtils.GetServerVBucketsMap("dummyConnStr", "b2", bucketInfoMap)
+	assert.Nil(err)
+
+	// Before translate, should be internal only
+	var nodeNameList []string
+	for kv, _ := range kvVbMap {
+		nodeNameList = append(nodeNameList, kv)
+	}
+	assert.True((localNodeList)(nodeNameList).check())
+	assert.False((externalNodeList)(nodeNameList).check())
+
+	// Translate, should be external only
+	((base.BucketKVVbMap)(kvVbMap)).ReplaceInternalWithExternalHosts(translatedMap)
+
+	nodeNameList = make([]string, len(nodeNameList), len(nodeNameList))
+	for kv, _ := range kvVbMap {
+		nodeNameList = append(nodeNameList, kv)
+	}
+
+	assert.False((localNodeList)(nodeNameList).check())
+	assert.True((externalNodeList)(nodeNameList).check())
+}
+
 func TestGetMemcachedSSLPortMapExternal(t *testing.T) {
 	fmt.Println("============== Test case start: TestGetMemcachedSSLPortMapExternal =================")
 	assert := assert.New(t)
@@ -291,6 +399,31 @@ func TestGetMemcachedSSLPortMapExternal(t *testing.T) {
 		}
 	}
 	fmt.Println("============== Test case start: TestGetMemcachedSSLPortMapExternal =================")
+}
+
+func TestGetMemcachedSSLPortMapExternalK8(t *testing.T) {
+	assert := assert.New(t)
+
+	bbucketInfo, err := getBucketDetailedInfoMockK8()
+	assert.Nil(err)
+
+	nodesExt, ok := bbucketInfo[base.NodeExtKey]
+	assert.True(ok)
+
+	nodesExtArray, ok := nodesExt.([]interface{})
+	assert.True(ok)
+
+	for _, nodeExt := range nodesExtArray {
+		nodeExtMap, ok := nodeExt.(map[string]interface{})
+		assert.True(ok)
+
+		//		externalHostAddr, _, _, externalSSLPort, externalSSLPortErr := testUtils.GetExternalAddressAndKvPortsFromNodeInfo(nodeExtMap)
+		externalHostAddr, _, _, _, externalSSLPortErr := testUtils.GetExternalAddressAndKvPortsFromNodeInfo(nodeExtMap)
+		// all has no SSL port
+		assert.NotNil(externalSSLPortErr)
+		// Hostaddr should be returned
+		assert.NotEqual("", externalHostAddr)
+	}
 }
 
 func TestGetSSLMgmtPortActive(t *testing.T) {

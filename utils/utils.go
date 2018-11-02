@@ -1474,7 +1474,7 @@ func (u *Utilities) GetExternalAddressAndKvPortsFromNodeInfo(nodeInfo map[string
 
 	portsObjRaw, portsObjExists := externalObj[base.PortsKey]
 	if !portsObjExists {
-		return "", -1, base.ErrorNoPortNumber, -1, base.ErrorNoPortNumber
+		return hostAddr, -1, base.ErrorNoPortNumber, -1, base.ErrorNoPortNumber
 	}
 
 	portErr = base.ErrorNoPortNumber
@@ -1761,6 +1761,7 @@ func (u *Utilities) GetIntExtHostNameKVPortTranslationMap(mapContainingNodesKey 
 			// skip this node
 			continue
 		}
+
 		internalAddressAndPortRaw, internalAddressOk := nodeInfo[base.HostNameKey]
 		if !internalAddressOk {
 			u.logger_utils.Warnf("GetIntExtHostNameKVPortTranslationMap unable to retrieve internal host name from %v", nodeInfo)
