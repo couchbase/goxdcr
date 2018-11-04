@@ -488,7 +488,7 @@ var replicationSettingsMapRedactDict = map[string]redactDictType{FilterExpressio
 // Input - the key that is being redacted. Value - the value to be redacted
 // The function will redact the value automatically if the key needs to be redacted, otherwise, it will do shallow clone
 func (repMap ReplicationSettingsMap) repSettingsMapCloneAndRedactHelper(k string, v interface{}) {
-	if redactOpType, ok := replicationSettingsMapRedactDict[k]; ok {
+	if redactOpType, ok := replicationSettingsMapRedactDict[k]; ok && v != nil {
 		switch redactOpType {
 		case redactDictBytes:
 			if !base.IsByteSliceRedacted(v.([]byte)) {
@@ -525,7 +525,7 @@ func (repMap ReplicationSettingsMap) repSettingsMapCloneAndRedactHelper(k string
 // NOTE: This is currently "cheating" and not cloning if there's nothing to be redacted
 func (repMap ReplicationSettingsMap) CloneAndRedact() ReplicationSettingsMap {
 	for keyNeedsRedacting, valueType := range replicationSettingsMapRedactDict {
-		if setting, keyExistsInSetting := repMap[keyNeedsRedacting]; keyExistsInSetting {
+		if setting, keyExistsInSetting := repMap[keyNeedsRedacting]; keyExistsInSetting && setting != nil {
 			if ((valueType == redactDictBytes && len(setting.([]byte)) > 0) && !base.IsByteSliceRedacted(setting.([]byte))) ||
 				(valueType == redactDictString && len(setting.(string)) > 0 && !base.IsStringRedacted(setting.(string))) ||
 				(valueType == redactDictBytesClear && len(setting.([]byte)) > 0) ||
