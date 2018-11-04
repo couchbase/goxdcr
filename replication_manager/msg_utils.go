@@ -999,8 +999,9 @@ func processKey(restKey string, valArr []string, settingsPtr *metadata.Replicati
 func validateAndConvertAllSettingValue(key, value, restKey string, isEnterprise bool, isCapi bool) (convertedValue interface{}, err error) {
 	//check if value is replication specific setting
 	convertedValue, err = metadata.ValidateAndConvertSettingsValue(key, value, restKey, isEnterprise, isCapi)
+
 	//if we find converted value is null  than check if value is global process specific setting
-	if convertedValue == nil {
+	if convertedValue == nil && err == nil {
 		convertedValue, err = metadata.ValidateAndConvertGlobalSettingsValue(key, value, restKey)
 	}
 	return
