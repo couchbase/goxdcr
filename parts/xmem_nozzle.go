@@ -792,6 +792,13 @@ type XmemNozzle struct {
 	bandwidthThrottler service_def.BandwidthThrottlerSvc
 	compressionSetting base.CompressionType
 	utils              utilities.UtilsIface
+
+	// Protect data memebers that may be accessed concurrently by Start() and Stop()
+	// i.e., buf, dataChan, client_for_setMeta, client_for_setMeta
+	// Access to these data members in other parts of xmem do not need to be protected,
+	// since such access can only happen after Start() has completed successfully 
+	// and after the data members have been initialized and set
+	stateLock sync.RWMutex
 }
 
 func NewXmemNozzle(id string,
@@ -1162,8 +1169,10 @@ func (xmem *XmemNozzle) processBatch(batch *dataBatch) error {
 }
 
 func (xmem *XmemNozzle) onExit() {
-	//in the process of stopping, no need to report any error to replication manager anymore
-	xmem.buf.close()
+	buf := xmem.getRequestBuffer()
+	if buf != nil {
+		buf.close()
+	}
 
 	//notify the data processing routine
 	close(xmem.finish_ch)
@@ -1175,20 +1184,28 @@ func (xmem *XmemNozzle) finalCleanup() {
 	xmem.childrenWaitGrp.Wait()
 
 	//cleanup
-	xmem.client_for_setMeta.close()
-	xmem.client_for_getMeta.close()
+	client_for_setMeta := xmem.getClient(true /*isSetMeta*/)
+	if client_for_setMeta != nil {
+		client_for_setMeta.close()
+	}
+	client_for_getMeta := xmem.getClient(false /*isSetMeta*/)
+	if client_for_getMeta != nil {
+		client_for_getMeta.close()
+	}
 
 	//recycle all the bufferred MCRequest to object pool
-	if xmem.buf != nil {
-		xmem.Logger().Infof("%v recycling %v objects in buffer\n", xmem.Id(), xmem.buf.itemCountInBuffer())
-		for _, bufferredReq := range xmem.buf.slots {
+	buf := xmem.getRequestBuffer()
+	if buf != nil {
+		xmem.Logger().Infof("%v recycling %v objects in buffer\n", xmem.Id(), buf.itemCountInBuffer())
+		for _, bufferredReq := range buf.slots {
 			xmem.cleanupBufferedMCRequest(bufferredReq)
 		}
 	}
 
-	if xmem.dataChan != nil {
-		xmem.Logger().Infof("%v recycling %v objects in data channel\n", xmem.Id(), len(xmem.dataChan))
-		for data := range xmem.dataChan {
+	dataChan := xmem.getDataChan()
+	if dataChan != nil {
+		xmem.Logger().Infof("%v recycling %v objects in data channel\n", xmem.Id(), len(dataChan))
+		for data := range dataChan {
 			xmem.dataObj_recycler(xmem.topic, data)
 		}
 	}
@@ -1786,12 +1803,12 @@ func (xmem *XmemNozzle) initializeConnection() (err error) {
 		return
 	}
 
-	xmem.client_for_setMeta = newXmemClient(SetMetaClientName, xmem.config.readTimeout,
+	xmem.setClient(newXmemClient(SetMetaClientName, xmem.config.readTimeout,
 		xmem.config.writeTimeout, memClient_setMeta,
-		xmem.config.maxRetry, xmem.config.max_read_downtime, xmem.Logger())
-	xmem.client_for_getMeta = newXmemClient(GetMetaClientName, xmem.config.readTimeout,
+		xmem.config.maxRetry, xmem.config.max_read_downtime, xmem.Logger()), true /*isSetMeta*/)
+	xmem.setClient(newXmemClient(GetMetaClientName, xmem.config.readTimeout,
 		xmem.config.writeTimeout, memClient_getMeta,
-		xmem.config.maxRetry, xmem.config.max_read_downtime, xmem.Logger())
+		xmem.config.maxRetry, xmem.config.max_read_downtime, xmem.Logger()), false /*isSetMeta*/)
 
 	// send helo command to setMeta and getMeta clients
 	features, err := xmem.sendHELO(true /*setMeta*/)
@@ -1851,7 +1868,7 @@ func (xmem *XmemNozzle) initialize(settings metadata.ReplicationSettingsMap) err
 		xmem.compressionSetting = compressionVal.(base.CompressionType)
 	}
 
-	xmem.dataChan = make(chan *base.WrappedMCRequest, xmem.config.maxCount*10)
+	xmem.setDataChan(make(chan *base.WrappedMCRequest, xmem.config.maxCount*10))
 	xmem.bytes_in_dataChan = 0
 	xmem.dataChan_control = make(chan bool, 1)
 	// put a true here so the first writeToDataChan() can go through
@@ -1866,7 +1883,7 @@ func (xmem *XmemNozzle) initialize(settings metadata.ReplicationSettingsMap) err
 	xmem.initNewBatch()
 
 	xmem.receive_token_ch = make(chan int, xmem.config.maxCount*2)
-	xmem.buf = newReqBuffer(uint16(xmem.config.maxCount*2), uint16(float64(xmem.config.maxCount)*0.2), xmem.receive_token_ch, xmem.Logger())
+	xmem.setRequestBuffer(newReqBuffer(uint16(xmem.config.maxCount*2), uint16(float64(xmem.config.maxCount)*0.2), xmem.receive_token_ch, xmem.Logger()))
 
 	xmem.Logger().Infof("%v About to start initializing connection", xmem.Id())
 	err = xmem.initializeConnection()
@@ -1877,6 +1894,50 @@ func (xmem *XmemNozzle) initialize(settings metadata.ReplicationSettingsMap) err
 	}
 
 	return err
+}
+
+func (xmem *XmemNozzle) getRequestBuffer() *requestBuffer {
+	xmem.stateLock.RLock()
+	defer xmem.stateLock.RUnlock()
+	return xmem.buf
+}
+
+func (xmem *XmemNozzle) setRequestBuffer(buf *requestBuffer) {
+	xmem.stateLock.Lock()
+	defer xmem.stateLock.Unlock()
+	xmem.buf = buf
+}
+
+func (xmem *XmemNozzle) getDataChan() chan *base.WrappedMCRequest {
+	xmem.stateLock.RLock()
+	defer xmem.stateLock.RUnlock()
+	return xmem.dataChan
+}
+
+func (xmem *XmemNozzle) setDataChan(dataChan chan *base.WrappedMCRequest) {
+	xmem.stateLock.Lock()
+	defer xmem.stateLock.Unlock()
+	xmem.dataChan = dataChan
+}
+
+func (xmem *XmemNozzle) getClient(isSetMeta bool) *xmemClient {
+	xmem.stateLock.RLock()
+	defer xmem.stateLock.RUnlock()
+	if isSetMeta {
+		return xmem.client_for_setMeta
+	} else {
+		return xmem.client_for_getMeta
+	}
+}
+
+func (xmem *XmemNozzle) setClient(client *xmemClient, isSetMeta bool) {
+	xmem.stateLock.Lock()
+	defer xmem.stateLock.Unlock()
+	if isSetMeta {
+		xmem.client_for_setMeta = client
+	} else {
+		xmem.client_for_getMeta = client
+	}
 }
 
 func (xmem *XmemNozzle) receiveResponse(finch chan bool, waitGrp *sync.WaitGroup) {
