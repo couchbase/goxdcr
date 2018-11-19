@@ -1221,7 +1221,7 @@ func (stats_mgr *StatisticsManager) getReplicationStatus() (*pipeline_pkg.Replic
 }
 
 func UpdateStats(cluster_info_svc service_def.ClusterInfoSvc, xdcr_topology_svc service_def.XDCRCompTopologySvc,
-	checkpoints_svc service_def.CheckpointsService, kv_mem_clients map[string]mcc.ClientIface,
+	checkpoints_svc service_def.CheckpointsService, bucket_kv_mem_clients map[string]map[string]mcc.ClientIface,
 	logger *log.CommonLogger, utils utilities.UtilsIface) {
 	logger.Debug("updateStats for paused replications")
 
@@ -1237,6 +1237,13 @@ func UpdateStats(cluster_info_svc service_def.ClusterInfoSvc, xdcr_topology_svc 
 		if err != nil {
 			logger.Errorf("Error retrieving kv_vb_map for paused replication %v. err=%v", repl_id, err)
 			continue
+		}
+
+		// get the kv_mem_client map for the corresponding source bucket
+		kv_mem_clients := bucket_kv_mem_clients[spec.SourceBucketName]
+		if kv_mem_clients == nil {
+			kv_mem_clients = make(map[string]mcc.ClientIface)
+			bucket_kv_mem_clients[spec.SourceBucketName] = kv_mem_clients
 		}
 
 		if overview_stats == nil {

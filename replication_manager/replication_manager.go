@@ -339,7 +339,10 @@ func (rm *replicationManager) checkReplicationStatus(fin_chan chan bool) {
 	stats_update_ticker := time.NewTicker(StatsUpdateIntervalForPausedReplications)
 	defer stats_update_ticker.Stop()
 
-	kv_mem_clients := make(map[string]mcc.ClientIface)
+	// key of outer map - bucket name
+	// key of inner map - kv address
+	// value - memcached client
+	bucket_kv_mem_clients := make(map[string]map[string]mcc.ClientIface)
 
 	for {
 		select {
@@ -348,7 +351,7 @@ func (rm *replicationManager) checkReplicationStatus(fin_chan chan bool) {
 		case <-status_check_ticker.C:
 			rm.pipelineMgr.CheckPipelines()
 		case <-stats_update_ticker.C:
-			pipeline_svc.UpdateStats(ClusterInfoService(), XDCRCompTopologyService(), CheckpointService(), kv_mem_clients, logger_rm, rm.utils)
+			pipeline_svc.UpdateStats(ClusterInfoService(), XDCRCompTopologyService(), CheckpointService(), bucket_kv_mem_clients, logger_rm, rm.utils)
 		}
 	}
 }
