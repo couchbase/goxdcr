@@ -796,7 +796,7 @@ type XmemNozzle struct {
 	// Protect data memebers that may be accessed concurrently by Start() and Stop()
 	// i.e., buf, dataChan, client_for_setMeta, client_for_setMeta
 	// Access to these data members in other parts of xmem do not need to be protected,
-	// since such access can only happen after Start() has completed successfully 
+	// since such access can only happen after Start() has completed successfully
 	// and after the data members have been initialized and set
 	stateLock sync.RWMutex
 }

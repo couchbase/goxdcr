@@ -77,6 +77,17 @@ func TestNegNoCompressionXmemNozzle(t *testing.T) {
 	fmt.Println("============== Test case start: TestNegNoCompressionXmemNozzle =================")
 }
 
+func TestPosNoCompressionXmemNozzle(t *testing.T) {
+	assert := assert.New(t)
+	fmt.Println("============== Test case start: TestNegNoCompressionXmemNozzle =================")
+	utils, _, settings, xmem := setupBoilerPlateXmem()
+	settings[SETTING_COMPRESSION_TYPE] = (base.CompressionType)(base.CompressionTypeNone)
+	setupMocksCompressNeg(utils)
+
+	assert.Equal(nil, xmem.initialize(settings))
+	fmt.Println("============== Test case start: TestNegNoCompressionXmemNozzle =================")
+}
+
 // AUTO is no longer a supported value. XDCR Factory should have passed in a non-auto
 func TestPositiveXmemNozzleAuto(t *testing.T) {
 	assert := assert.New(t)

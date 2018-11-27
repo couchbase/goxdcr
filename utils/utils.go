@@ -513,6 +513,9 @@ func (u *Utilities) SendHELO(client mcc.ClientIface, userAgent string, readTimeo
 // we need to know whether data type is indeed enabled from helo response
 // unsuccessful response is treated as errors
 func (u *Utilities) SendHELOWithFeatures(client mcc.ClientIface, userAgent string, readTimeout, writeTimeout time.Duration, requestedFeatures HELOFeatures, logger *log.CommonLogger) (respondedFeatures HELOFeatures, err error) {
+	// Initially set initial respondedFeatures to None since no compression negotiated should not be invalid
+	respondedFeatures.CompressionType = base.CompressionTypeNone
+
 	heloReq := u.ComposeHELORequest(userAgent, requestedFeatures)
 
 	var response *mc.MCResponse
