@@ -433,6 +433,7 @@ func (rs *ReplicationStatus) ClearErrors() {
 	rs.lock.Lock()
 	defer rs.lock.Unlock()
 	rs.err_list = PipelineErrorArray{}
+	rs.Publish(false)
 }
 
 func (rs *ReplicationStatus) RecordProgress(progress string) {
