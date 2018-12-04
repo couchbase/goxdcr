@@ -44,7 +44,7 @@ func NewAuditSvc(top_svc service_def.XDCRCompTopologySvc, loggerCtx *log.LoggerC
 		utils:   utilsIn,
 	}
 
-	err := service.init()
+	err := service.initWithRetry()
 	if err != nil {
 		service.logger.Errorf("Error creating audit service. err=%v\n", err)
 		return nil, err
@@ -131,6 +131,11 @@ func composeAuditRequest(eventId uint32, event service_def.AuditEventIface) (*mc
 
 	req.Opaque = eventId
 	return req, nil
+}
+
+func (service *AuditSvc) initWithRetry() error {
+	return service.utils.ExponentialBackoffExecutor("auditSvs.Init", base.RetryIntervalMetakv, base.MaxNumOfMetakvRetries,
+		base.MetaKvBackoffFactor, service.init)
 }
 
 func (service *AuditSvc) init() error {
