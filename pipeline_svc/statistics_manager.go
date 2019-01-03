@@ -1276,7 +1276,7 @@ func UpdateStats(cluster_info_svc service_def.ClusterInfoSvc, xdcr_topology_svc 
 			}
 		} else {
 			if repl_status.RuntimeStatus(true) != pipeline_pkg.Replicating {
-				err := updateStatsForReplication(repl_status, cur_kv_vb_map, checkpoints_svc, kv_mem_clients, logger, utils)
+				err := updateStatsForReplication(repl_status, overview_stats, cur_kv_vb_map, checkpoints_svc, kv_mem_clients, logger, utils)
 				if err != nil {
 					logger.Errorf("Error updating stats for paused replication %v. err=%v", repl_id, err)
 					continue
@@ -1348,7 +1348,7 @@ func calculateTotalChanges(kv_vb_map map[string][]uint16, kv_mem_clients map[str
 	return int64(total_changes), nil
 }
 
-func updateStatsForReplication(repl_status *pipeline_pkg.ReplicationStatus, cur_kv_vb_map map[string][]uint16,
+func updateStatsForReplication(repl_status *pipeline_pkg.ReplicationStatus, overview_stats *expvar.Map, cur_kv_vb_map map[string][]uint16,
 	checkpoints_svc service_def.CheckpointsService, kv_mem_clients map[string]mcc.ClientIface,
 	logger *log.CommonLogger, utils utilities.UtilsIface) error {
 
@@ -1364,7 +1364,6 @@ func updateStatsForReplication(repl_status *pipeline_pkg.ReplicationStatus, cur_
 	var err error
 	// old_vb_list is already sorted
 	old_vb_list := repl_status.VbList()
-	overview_stats := repl_status.GetOverviewStats()
 	spec := repl_status.Spec()
 	if spec == nil {
 		logger.Infof("replication %v has been deleted, skip updating stats\n", repl_status.RepId())
