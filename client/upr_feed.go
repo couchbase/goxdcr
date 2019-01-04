@@ -53,6 +53,16 @@ type UprEvent struct {
 	AckSize      uint32 // The number of bytes that can be Acked to DCP
 }
 
+type PriorityType string
+
+// high > medium > disabled > low
+const (
+	PriorityDisabled PriorityType = ""
+	PriorityLow      PriorityType = "low"
+	PriorityMed      PriorityType = "medium"
+	PriorityHigh     PriorityType = "high"
+)
+
 // UprStream is per stream data structure over an UPR Connection.
 type UprStream struct {
 	Vbucket   uint16 // Vbucket id
@@ -80,6 +90,7 @@ type UprFeatures struct {
 	Xattribute          bool
 	CompressionType     int
 	IncludeDeletionTime bool
+	DcpPriority         PriorityType
 }
 
 /**
@@ -263,6 +274,8 @@ type UprFeedIface interface {
 	UprOpenWithXATTR(name string, sequence uint32, bufSize uint32) error
 	UprOpenWithFeatures(name string, sequence uint32, bufSize uint32, features UprFeatures) (error, UprFeatures)
 	UprRequestStream(vbno, opaqueMSB uint16, flags uint32, vuuid, startSequence, endSequence, snapStart, snapEnd uint64) error
+	// Set DCP priority on an existing DCP connection. The command is sent asynchronously without waiting for a response
+	SetPriorityAsync(p PriorityType) error
 }
 
 type UprStats struct {
@@ -494,6 +507,25 @@ func (feed *UprFeed) UprOpenWithFeatures(name string, sequence uint32, bufSize u
 	return feed.uprOpen(name, sequence, bufSize, features)
 }
 
+func (feed *UprFeed) SetPriorityAsync(p PriorityType) error {
+	return feed.setPriority(p, false /*sync*/)
+}
+
+func (feed *UprFeed) setPriority(p PriorityType, sync bool) error {
+	rq := &gomemcached.MCRequest{
+		Opcode: gomemcached.UPR_CONTROL,
+		Key:    []byte("set_priority"),
+		Body:   []byte(p),
+		Opaque: getUprOpenCtrlOpaque(),
+	}
+	if sync {
+		return sendMcRequestSync(feed.conn, rq)
+	} else {
+		return feed.writeToTransmitCh(rq)
+
+	}
+}
+
 func (feed *UprFeed) uprOpen(name string, sequence uint32, bufSize uint32, features UprFeatures) (err error, activatedFeatures UprFeatures) {
 	mc := feed.conn
 
@@ -560,6 +592,13 @@ func (feed *UprFeed) uprOpen(name string, sequence uint32, bufSize uint32, featu
 		return
 	}
 	activatedFeatures.CompressionType = features.CompressionType
+
+	if features.DcpPriority != PriorityDisabled {
+		err = feed.setPriority(features.DcpPriority, true /*sync*/)
+		if err == nil {
+			activatedFeatures.DcpPriority = features.DcpPriority
+		}
+	}
 
 	return
 }
