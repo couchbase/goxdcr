@@ -554,7 +554,7 @@ func (adminport *Adminport) doChangeReplicationSettingsRequest(request *http.Req
 	logger_ap.Infof("Request params: justValidate=%v, inputSettings=%v\n", justValidate, settingsMap.CloneAndRedact())
 
 	// "pauseRequested" setting is special - it requires execute permission
-	_, pauseRequestedSpecified := settingsMap[metadata.Active]
+	_, pauseRequestedSpecified := settingsMap[metadata.ActiveKey]
 	// all other settings require write permission
 	otherSettingsSpecified := (!pauseRequestedSpecified && len(settingsMap) > 0) || (pauseRequestedSpecified && len(settingsMap) > 1)
 	permissionSuffices := make([]string, 0)

@@ -122,44 +122,44 @@ var MissingOldSettingsInRequest = errors.New("Invalid http request. No old repli
 
 // replication settings key in rest api -> internal replication settings key
 var RestKeyToSettingsKeyMap = map[string]string{
-	base.Type:                      metadata.ReplicationType,
-	FilterExpression:               metadata.FilterExpression,
-	PauseRequested:                 metadata.Active,
-	CheckpointInterval:             metadata.CheckpointInterval,
-	BatchCount:                     metadata.BatchCount,
-	BatchSize:                      metadata.BatchSize,
-	FailureRestartInterval:         metadata.FailureRestartInterval,
-	OptimisticReplicationThreshold: metadata.OptimisticReplicationThreshold,
-	SourceNozzlePerNode:            metadata.SourceNozzlePerNode,
-	TargetNozzlePerNode:            metadata.TargetNozzlePerNode,
-	LogLevel:                       metadata.PipelineLogLevel,
-	StatsInterval:                  metadata.PipelineStatsInterval,
-	BandwidthLimit:                 metadata.BandwidthLimit,
-	GoMaxProcs:                     metadata.GoMaxProcs,
-	GoGC:                           metadata.GoGC,
-	base.CompressionTypeREST: metadata.CompressionType,
+	base.Type:                      metadata.ReplicationTypeKey,
+	FilterExpression:               metadata.FilterExpressionKey,
+	PauseRequested:                 metadata.ActiveKey,
+	CheckpointInterval:             metadata.CheckpointIntervalKey,
+	BatchCount:                     metadata.BatchCountKey,
+	BatchSize:                      metadata.BatchSizeKey,
+	FailureRestartInterval:         metadata.FailureRestartIntervalKey,
+	OptimisticReplicationThreshold: metadata.OptimisticReplicationThresholdKey,
+	SourceNozzlePerNode:            metadata.SourceNozzlePerNodeKey,
+	TargetNozzlePerNode:            metadata.TargetNozzlePerNodeKey,
+	LogLevel:                       metadata.PipelineLogLevelKey,
+	StatsInterval:                  metadata.PipelineStatsIntervalKey,
+	BandwidthLimit:                 metadata.BandwidthLimitKey,
+	GoMaxProcs:                     metadata.GoMaxProcsKey,
+	GoGC:                           metadata.GoGCKey,
+	base.CompressionTypeREST:       metadata.CompressionTypeKey,
 	/*MaxExpectedReplicationLag:      metadata.MaxExpectedReplicationLag,
 	TimeoutPercentageCap:           metadata.TimeoutPercentageCap,*/
 }
 
 // internal replication settings key -> replication settings key in rest api
 var SettingsKeyToRestKeyMap = map[string]string{
-	metadata.ReplicationType:                base.Type,
-	metadata.FilterExpression:               FilterExpression,
-	metadata.Active:                         PauseRequested,
-	metadata.CheckpointInterval:             CheckpointInterval,
-	metadata.BatchCount:                     BatchCount,
-	metadata.BatchSize:                      BatchSize,
-	metadata.FailureRestartInterval:         FailureRestartInterval,
-	metadata.OptimisticReplicationThreshold: OptimisticReplicationThreshold,
-	metadata.SourceNozzlePerNode:            SourceNozzlePerNode,
-	metadata.TargetNozzlePerNode:            TargetNozzlePerNode,
-	metadata.PipelineLogLevel:               LogLevel,
-	metadata.PipelineStatsInterval:          StatsInterval,
-	metadata.BandwidthLimit:                 BandwidthLimit,
-	metadata.GoMaxProcs:                     GoMaxProcs,
-	metadata.GoGC:                           GoGC,
-	metadata.CompressionType:                base.CompressionTypeREST,
+	metadata.ReplicationTypeKey:                base.Type,
+	metadata.FilterExpressionKey:               FilterExpression,
+	metadata.ActiveKey:                         PauseRequested,
+	metadata.CheckpointIntervalKey:             CheckpointInterval,
+	metadata.BatchCountKey:                     BatchCount,
+	metadata.BatchSizeKey:                      BatchSize,
+	metadata.FailureRestartIntervalKey:         FailureRestartInterval,
+	metadata.OptimisticReplicationThresholdKey: OptimisticReplicationThreshold,
+	metadata.SourceNozzlePerNodeKey:            SourceNozzlePerNode,
+	metadata.TargetNozzlePerNodeKey:            TargetNozzlePerNode,
+	metadata.PipelineLogLevelKey:               LogLevel,
+	metadata.PipelineStatsIntervalKey:          StatsInterval,
+	metadata.BandwidthLimitKey:                 BandwidthLimit,
+	metadata.GoMaxProcsKey:                     GoMaxProcs,
+	metadata.GoGCKey:                           GoGC,
+	metadata.CompressionTypeKey:                base.CompressionTypeREST,
 	/*metadata.MaxExpectedReplicationLag:      MaxExpectedReplicationLag,
 	metadata.TimeoutPercentageCap:           TimeoutPercentageCap,*/
 }
@@ -235,8 +235,8 @@ func getReplicationDocMap(replSpec *metadata.ReplicationSpecification) map[strin
 		}
 
 		// copy other replication settings into replication doc
-		for key, value := range replSpec.Settings.ToMap() {
-			if key != metadata.ReplicationType && key != metadata.Active {
+		for key, value := range replSpec.Settings.ToMap(false /*isDefaultSettings*/) {
+			if key != metadata.ReplicationTypeKey && key != metadata.ActiveKey {
 				replDocMap[key] = value
 			}
 		}
@@ -531,7 +531,7 @@ func DecodeCreateReplicationRequest(request *http.Request) (justValidate bool, f
 	}
 
 	if !isEnterprise {
-		filterExpression, ok := settings[metadata.FilterExpression]
+		filterExpression, ok := settings[metadata.FilterExpressionKey]
 		if ok && len(filterExpression.(string)) > 0 {
 			errorsMap[FilterExpression] = errors.New("Filter expression can be specified in Enterprise edition only")
 		}
@@ -792,12 +792,7 @@ func convertGlobalSettingsToRestSettingsMap(settings *metadata.GlobalSettings) m
 
 func convertSettingsToRestSettingsMap(settings *metadata.ReplicationSettings, isDefaultSettings bool) map[string]interface{} {
 	restSettingsMap := make(map[string]interface{})
-	var settingsMap map[string]interface{}
-	if isDefaultSettings {
-		settingsMap = settings.ToDefaultSettingsMap()
-	} else {
-		settingsMap = settings.ToMap()
-	}
+	settingsMap := settings.ToMap(isDefaultSettings)
 
 	for key, value := range settingsMap {
 		restKey := SettingsKeyToRestKeyMap[key]
@@ -997,12 +992,12 @@ func processKey(restKey string, valArr []string, settingsPtr *metadata.Replicati
 }
 
 func validateAndConvertAllSettingValue(key, value, restKey string, isEnterprise bool, isCapi bool) (convertedValue interface{}, err error) {
-	//check if value is replication specific setting
-	convertedValue, err = metadata.ValidateAndConvertSettingsValue(key, value, restKey, isEnterprise, isCapi)
+	//check if key is a replication setting
+	convertedValue, err = metadata.ValidateAndConvertReplicationSettingsValue(key, value, restKey, isEnterprise, isCapi)
 
-	//if we find converted value is null  than check if value is global process specific setting
-	if convertedValue == nil && err == nil {
-		convertedValue, err = metadata.ValidateAndConvertGlobalSettingsValue(key, value, restKey)
+	//if key is not a valid replication settings,  check if key is a global setting
+	if err == base.ErrorInvalidSettingsKey {
+		convertedValue, err = metadata.ValidateAndConvertGlobalSettingsValue(key, value)
 	}
 	return
 }

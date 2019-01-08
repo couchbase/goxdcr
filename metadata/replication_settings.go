@@ -10,41 +10,42 @@
 package metadata
 
 import (
-	"errors"
-	"fmt"
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
 	"regexp"
 	"strconv"
 )
 
+// keys for replication settings
 const (
-	ReplicationType                = "replication_type"
-	FilterExpression               = "filter_expression"
-	Active                         = "active"
-	CheckpointInterval             = "checkpoint_interval"
-	BatchCount                     = "worker_batch_size"
-	BatchSize                      = "doc_batch_size_kb"
-	FailureRestartInterval         = "failure_restart_interval"
-	OptimisticReplicationThreshold = "optimistic_replication_threshold"
-	SourceNozzlePerNode            = "source_nozzle_per_node"
-	TargetNozzlePerNode            = "target_nozzle_per_node"
-	MaxExpectedReplicationLag      = "max_expected_replication_lag"
-	TimeoutPercentageCap           = "timeout_percentage_cap"
-	PipelineLogLevel               = "log_level"
-	PipelineStatsInterval          = "stats_interval"
-	BandwidthLimit                 = "bandwidth_limit"
-	CompressionType                = base.CompressionTypeKey
-	XmemCertificate                = "certificate"
-	XmemClientCertificate          = "clientCertificate"
-	XmemClientKey                  = "clientKey"
+	ReplicationTypeKey                = "replication_type"
+	FilterExpressionKey               = "filter_expression"
+	ActiveKey                         = "active"
+	CheckpointIntervalKey             = "checkpoint_interval"
+	BatchCountKey                     = "worker_batch_size"
+	BatchSizeKey                      = "doc_batch_size_kb"
+	FailureRestartIntervalKey         = "failure_restart_interval"
+	OptimisticReplicationThresholdKey = "optimistic_replication_threshold"
+	SourceNozzlePerNodeKey            = "source_nozzle_per_node"
+	TargetNozzlePerNodeKey            = "target_nozzle_per_node"
+	PipelineLogLevelKey               = "log_level"
+	PipelineStatsIntervalKey          = "stats_interval"
+	BandwidthLimitKey                 = "bandwidth_limit"
+	CompressionTypeKey                = base.CompressionTypeKey
+)
+
+// keys to facilitate redaction of replication settings map
+const (
+	XmemCertificate       = "certificate"
+	XmemClientCertificate = "clientCertificate"
+	XmemClientKey         = "clientKey"
 )
 
 // settings whose default values cannot be viewed or changed through rest apis
-var ImmutableDefaultSettings = [3]string{ReplicationType, FilterExpression, Active}
+var ImmutableDefaultSettings = []string{ReplicationTypeKey, FilterExpressionKey, ActiveKey}
 
 // settings whose values cannot be changed after replication is created
-var ImmutableSettings = [1]string{FilterExpression}
+var ImmutableSettings = []string{FilterExpressionKey}
 
 var MaxBatchCount = 10000
 
@@ -53,17 +54,6 @@ const (
 	ReplicationTypeCapi = "capi"
 )
 
-type SettingsConfig struct {
-	defaultValue interface{}
-	*Range
-}
-
-type Range struct {
-	MinValue int
-	MaxValue int
-}
-
-// TODO change to "capi"?
 var ReplicationTypeConfig = &SettingsConfig{ReplicationTypeXmem, nil}
 var FilterExpressionConfig = &SettingsConfig{"", nil}
 var ActiveConfig = &SettingsConfig{true, nil}
@@ -74,37 +64,31 @@ var FailureRestartIntervalConfig = &SettingsConfig{10, &Range{1, 300}}
 var OptimisticReplicationThresholdConfig = &SettingsConfig{256, &Range{0, 20 * 1024 * 1024}}
 var SourceNozzlePerNodeConfig = &SettingsConfig{2, &Range{1, 100}}
 var TargetNozzlePerNodeConfig = &SettingsConfig{2, &Range{1, 100}}
-var MaxExpectedReplicationLagConfig = &SettingsConfig{1000, &Range{100, 60000}}
-var TimeoutPercentageCapConfig = &SettingsConfig{50, &Range{0, 100}}
 var PipelineLogLevelConfig = &SettingsConfig{log.LogLevelInfo, nil}
 var PipelineStatsIntervalConfig = &SettingsConfig{1000, &Range{200, 600000}}
 var BandwidthLimitConfig = &SettingsConfig{0, &Range{0, 1000000}}
 var CompressionTypeConfig = &SettingsConfig{base.CompressionTypeAuto, &Range{base.CompressionTypeStartMarker + 1, base.CompressionTypeEndMarker - 1}}
 
-var SettingsConfigMap = map[string]*SettingsConfig{
-	ReplicationType:                ReplicationTypeConfig,
-	FilterExpression:               FilterExpressionConfig,
-	Active:                         ActiveConfig,
-	CheckpointInterval:             CheckpointIntervalConfig,
-	BatchCount:                     BatchCountConfig,
-	BatchSize:                      BatchSizeConfig,
-	FailureRestartInterval:         FailureRestartIntervalConfig,
-	OptimisticReplicationThreshold: OptimisticReplicationThresholdConfig,
-	SourceNozzlePerNode:            SourceNozzlePerNodeConfig,
-	TargetNozzlePerNode:            TargetNozzlePerNodeConfig,
-	MaxExpectedReplicationLag:      MaxExpectedReplicationLagConfig,
-	TimeoutPercentageCap:           TimeoutPercentageCapConfig,
-	PipelineLogLevel:               PipelineLogLevelConfig,
-	PipelineStatsInterval:          PipelineStatsIntervalConfig,
-	BandwidthLimit:                 BandwidthLimitConfig,
-	CompressionType:                CompressionTypeConfig,
+var ReplicationSettingsConfigMap = map[string]*SettingsConfig{
+	ReplicationTypeKey:                ReplicationTypeConfig,
+	FilterExpressionKey:               FilterExpressionConfig,
+	ActiveKey:                         ActiveConfig,
+	CheckpointIntervalKey:             CheckpointIntervalConfig,
+	BatchCountKey:                     BatchCountConfig,
+	BatchSizeKey:                      BatchSizeConfig,
+	FailureRestartIntervalKey:         FailureRestartIntervalConfig,
+	OptimisticReplicationThresholdKey: OptimisticReplicationThresholdConfig,
+	SourceNozzlePerNodeKey:            SourceNozzlePerNodeConfig,
+	TargetNozzlePerNodeKey:            TargetNozzlePerNodeConfig,
+	PipelineLogLevelKey:               PipelineLogLevelConfig,
+	PipelineStatsIntervalKey:          PipelineStatsIntervalConfig,
+	BandwidthLimitKey:                 BandwidthLimitConfig,
+	CompressionTypeKey:                CompressionTypeConfig,
 }
 
-/***********************************
-/* struct ReplicationSettings
-*************************************/
-
 type ReplicationSettings struct {
+	*Settings
+
 	//type - XMEM or CAPI
 	RepType string `json:"type"`
 
@@ -180,260 +164,47 @@ type ReplicationSettings struct {
 	Revision interface{}
 }
 
-func DefaultSettings() *ReplicationSettings {
-	return &ReplicationSettings{
-		RepType:                        ReplicationTypeConfig.defaultValue.(string),
-		FilterExpression:               FilterExpressionConfig.defaultValue.(string),
-		Active:                         ActiveConfig.defaultValue.(bool),
-		CheckpointInterval:             CheckpointIntervalConfig.defaultValue.(int),
-		BatchCount:                     BatchCountConfig.defaultValue.(int),
-		BatchSize:                      BatchSizeConfig.defaultValue.(int),
-		FailureRestartInterval:         FailureRestartIntervalConfig.defaultValue.(int),
-		OptimisticReplicationThreshold: OptimisticReplicationThresholdConfig.defaultValue.(int),
-		SourceNozzlePerNode:            SourceNozzlePerNodeConfig.defaultValue.(int),
-		TargetNozzlePerNode:            TargetNozzlePerNodeConfig.defaultValue.(int),
-		MaxExpectedReplicationLag:      MaxExpectedReplicationLagConfig.defaultValue.(int),
-		TimeoutPercentageCap:           TimeoutPercentageCapConfig.defaultValue.(int),
-		LogLevel:                       PipelineLogLevelConfig.defaultValue.(log.LogLevel),
-		StatsInterval:                  PipelineStatsIntervalConfig.defaultValue.(int),
-		BandwidthLimit:                 BandwidthLimitConfig.defaultValue.(int),
-		CompressionType:                CompressionTypeConfig.defaultValue.(int),
-	}
+// config map retriever required by Settings
+func GetReplicationSettingsConfigMap() map[string]*SettingsConfig {
+	return ReplicationSettingsConfigMap
 }
 
-// If a feature is enabled, and it only works with Enterprise, return an error
-func enterpriseOnlyFeature(convertedValue, defaultValue interface{}, isEnterprise bool) error {
-	if convertedValue != defaultValue {
-		if !isEnterprise {
-			return errors.New("The value can be specified only in enterprise edition")
-		}
-	}
-	return nil
+func EmptyReplicationSettings() *ReplicationSettings {
+	return &ReplicationSettings{Settings: EmptySettings(GetReplicationSettingsConfigMap)}
 }
 
-// If a feature is enabled, and it only works with non-CAPI, return an error
-func nonCAPIOnlyFeature(convertedValue, defaultValue interface{}, isCapi bool) error {
-	if convertedValue != defaultValue {
-		if isCapi {
-			return errors.New("The value can not be specified for CAPI replication")
-		}
-	}
-	return nil
+func DefaultReplicationSettings() *ReplicationSettings {
+	defaultSettings := &ReplicationSettings{Settings: DefaultSettings(GetReplicationSettingsConfigMap)}
+	defaultSettings.populateFieldsUsingMap()
+	return defaultSettings
 }
 
-func (s *ReplicationSettings) SetLogLevel(log_level string) error {
-	l, err := log.LogLevelFromStr(log_level)
-	if err == nil {
-		s.LogLevel = l
-	}
-	return err
-}
-
-// returns a map of settings that have indeed been changed and their new values.
-// returns a map of validation errors, which should normally be empty since the input settingsMap
-// is constructed internally and necessary checks should have been applied before
-// I am leaving the error checks just in case.
-func (s *ReplicationSettings) UpdateSettingsFromMap(settingsMap ReplicationSettingsMap) (changedSettingsMap ReplicationSettingsMap, errorMap base.ErrorMap) {
-	changedSettingsMap = make(ReplicationSettingsMap)
-	errorMap = make(base.ErrorMap)
-
-	for key, val := range settingsMap {
-		switch key {
-		case ReplicationType:
-			repType, ok := val.(string)
-			if !ok {
-				errorMap[key] = base.IncorrectValueTypeInMapError(key, val, "string")
-				continue
-			}
-			if s.RepType != repType {
-				s.RepType = repType
-				changedSettingsMap[key] = repType
-			}
-		case FilterExpression:
-			filterExpression, ok := val.(string)
-			if !ok {
-				errorMap[key] = base.IncorrectValueTypeInMapError(key, val, "string")
-				continue
-			}
-			if s.FilterExpression != filterExpression {
-				s.FilterExpression = filterExpression
-				changedSettingsMap[key] = filterExpression
-			}
-		case Active:
-			active, ok := val.(bool)
-			if !ok {
-				errorMap[key] = base.IncorrectValueTypeInMapError(key, val, "bool")
-				continue
-			}
-			if s.Active != active {
-				s.Active = active
-				changedSettingsMap[key] = active
-			}
-		case CheckpointInterval:
-			checkpointInterval, ok := val.(int)
-			if !ok {
-				errorMap[key] = base.IncorrectValueTypeInMapError(key, val, "int")
-				continue
-			}
-			if s.CheckpointInterval != checkpointInterval {
-				s.CheckpointInterval = checkpointInterval
-				changedSettingsMap[key] = checkpointInterval
-			}
-
-		case BatchCount:
-			batchCount, ok := val.(int)
-			if !ok {
-				errorMap[key] = base.IncorrectValueTypeInMapError(key, val, "int")
-				continue
-			}
-			if s.BatchCount != batchCount {
-				s.BatchCount = batchCount
-				changedSettingsMap[key] = batchCount
-			}
-		case BatchSize:
-			batchSize, ok := val.(int)
-			if !ok {
-				errorMap[key] = base.IncorrectValueTypeInMapError(key, val, "int")
-				continue
-			}
-			if s.BatchSize != batchSize {
-				s.BatchSize = batchSize
-				changedSettingsMap[key] = batchSize
-			}
-		case FailureRestartInterval:
-			failureRestartInterval, ok := val.(int)
-			if !ok {
-				errorMap[key] = base.IncorrectValueTypeInMapError(key, val, "int")
-				continue
-			}
-			if s.FailureRestartInterval != failureRestartInterval {
-				s.FailureRestartInterval = failureRestartInterval
-				changedSettingsMap[key] = failureRestartInterval
-			}
-		case OptimisticReplicationThreshold:
-			optimisticReplicationThreshold, ok := val.(int)
-			if !ok {
-				errorMap[key] = base.IncorrectValueTypeInMapError(key, val, "int")
-				continue
-			}
-			if s.OptimisticReplicationThreshold != optimisticReplicationThreshold {
-				s.OptimisticReplicationThreshold = optimisticReplicationThreshold
-				changedSettingsMap[key] = optimisticReplicationThreshold
-			}
-		case SourceNozzlePerNode:
-			sourceNozzlePerNode, ok := val.(int)
-			if !ok {
-				errorMap[key] = base.IncorrectValueTypeInMapError(key, val, "int")
-				continue
-			}
-			if s.SourceNozzlePerNode != sourceNozzlePerNode {
-				s.SourceNozzlePerNode = sourceNozzlePerNode
-				changedSettingsMap[key] = sourceNozzlePerNode
-			}
-		case TargetNozzlePerNode:
-			targetNozzlePerNode, ok := val.(int)
-			if !ok {
-				errorMap[key] = base.IncorrectValueTypeInMapError(key, val, "int")
-				continue
-			}
-			if s.TargetNozzlePerNode != targetNozzlePerNode {
-				s.TargetNozzlePerNode = targetNozzlePerNode
-				changedSettingsMap[key] = targetNozzlePerNode
-			}
-		case MaxExpectedReplicationLag:
-			maxExpectedReplicationLag, ok := val.(int)
-			if !ok {
-				errorMap[key] = base.IncorrectValueTypeInMapError(key, val, "int")
-				continue
-			}
-			if s.MaxExpectedReplicationLag != maxExpectedReplicationLag {
-				s.MaxExpectedReplicationLag = maxExpectedReplicationLag
-				changedSettingsMap[key] = maxExpectedReplicationLag
-			}
-		case TimeoutPercentageCap:
-			timeoutPercentageCap, ok := val.(int)
-			if !ok {
-				errorMap[key] = base.IncorrectValueTypeInMapError(key, val, "int")
-				continue
-			}
-			if s.TimeoutPercentageCap != timeoutPercentageCap {
-				s.TimeoutPercentageCap = timeoutPercentageCap
-				changedSettingsMap[key] = timeoutPercentageCap
-			}
-		case PipelineLogLevel:
-			l, ok := val.(string)
-			if !ok {
-				errorMap[key] = base.IncorrectValueTypeInMapError(key, val, "string")
-				continue
-			}
-			if s.LogLevel.String() != l {
-				s.SetLogLevel(l)
-				changedSettingsMap[key] = l
-			}
-		case PipelineStatsInterval:
-			interval, ok := val.(int)
-			if !ok {
-				errorMap[key] = base.IncorrectValueTypeInMapError(key, val, "int")
-				continue
-			}
-			if s.StatsInterval != interval {
-				s.StatsInterval = interval
-				changedSettingsMap[key] = interval
-			}
-		case BandwidthLimit:
-			bandwidthLimit, ok := val.(int)
-			if !ok {
-				errorMap[key] = base.IncorrectValueTypeInMapError(key, val, "int")
-				continue
-			}
-			if s.BandwidthLimit != bandwidthLimit {
-				s.BandwidthLimit = bandwidthLimit
-				changedSettingsMap[key] = bandwidthLimit
-			}
-		case CompressionType:
-			compressionType, ok := val.(int)
-			if !ok {
-				errorMap[key] = base.IncorrectValueTypeInMapError(key, val, "int")
-				continue
-			}
-			if s.CompressionType != compressionType {
-				s.CompressionType = compressionType
-				changedSettingsMap[key] = compressionType
-			}
-		default:
-			errorMap[key] = errors.New(fmt.Sprintf("Invalid key in map, %v", key))
-		}
-	}
-
-	return
-}
-
-func (s *ReplicationSettings) ToMap() ReplicationSettingsMap {
-	return s.toMap(false)
-}
-
-func (s *ReplicationSettings) ToDefaultSettingsMap() ReplicationSettingsMap {
-	return s.toMap(true)
+func ValidateReplicationSettingsKey(settingsMap map[string]interface{}) map[string]interface{} {
+	return ValidateSettingsKey(settingsMap, ReplicationSettingsConfigMap)
 }
 
 func (s *ReplicationSettings) Clone() *ReplicationSettings {
-	if s == nil {
-		return nil
-	}
-
-	clone := &ReplicationSettings{
-		LogLevel: PipelineLogLevelConfig.defaultValue.(log.LogLevel),
-	}
-	clone.UpdateSettingsFromMap(s.ToMap())
-	return clone
+	settings := &ReplicationSettings{Settings: s.Settings.Clone()}
+	settings.populateFieldsUsingMap()
+	return settings
 }
 
 func (s *ReplicationSettings) Redact() *ReplicationSettings {
-	if s != nil {
-		if len(s.FilterExpression) > 0 && !base.IsStringRedacted(s.FilterExpression) {
-			s.FilterExpression = base.TagUD(s.FilterExpression)
+	if s == nil {
+		return s
+	}
+
+	if filterExpression, ok := s.Values[FilterExpressionKey]; ok {
+		filterExpressionStr := filterExpression.(string)
+		if len(filterExpressionStr) > 0 && !base.IsStringRedacted(filterExpressionStr) {
+			s.Values[FilterExpressionKey] = base.TagUD(filterExpressionStr)
 		}
 	}
+
+	if len(s.FilterExpression) > 0 && !base.IsStringRedacted(s.FilterExpression) {
+		s.FilterExpression = base.TagUD(s.FilterExpression)
+	}
+
 	return s
 }
 
@@ -444,28 +215,125 @@ func (s *ReplicationSettings) CloneAndRedact() *ReplicationSettings {
 	return s
 }
 
-func (s *ReplicationSettings) toMap(isDefaultSettings bool) ReplicationSettingsMap {
-	settings_map := make(ReplicationSettingsMap)
-	if !isDefaultSettings {
-		settings_map[ReplicationType] = s.RepType
-		settings_map[FilterExpression] = s.FilterExpression
-		settings_map[Active] = s.Active
+func (s *ReplicationSettings) ToMap(isDefaultSettings bool) ReplicationSettingsMap {
+	settingsMap := ReplicationSettingsMap(s.Settings.ToMap())
+	if isDefaultSettings {
+		// remove keys that do not belong to default settings
+		for _, key := range ImmutableDefaultSettings {
+			delete(settingsMap, key)
+		}
 	}
-	settings_map[CheckpointInterval] = s.CheckpointInterval
-	settings_map[BatchCount] = s.BatchCount
-	settings_map[BatchSize] = s.BatchSize
-	settings_map[FailureRestartInterval] = s.FailureRestartInterval
-	settings_map[OptimisticReplicationThreshold] = s.OptimisticReplicationThreshold
-	settings_map[SourceNozzlePerNode] = s.SourceNozzlePerNode
-	settings_map[TargetNozzlePerNode] = s.TargetNozzlePerNode
-	// commenting these out since not yet supported
-	/*settings_map[MaxExpectedReplicationLag] = s.MaxExpectedReplicationLag
-	settings_map[TimeoutPercentageCap] = s.TimeoutPercentageCap*/
-	settings_map[PipelineLogLevel] = s.LogLevel.String()
-	settings_map[PipelineStatsInterval] = s.StatsInterval
-	settings_map[BandwidthLimit] = s.BandwidthLimit
-	settings_map[CompressionType] = s.CompressionType
-	return settings_map
+
+	// convert log level to string
+	settingsMap[PipelineLogLevelKey] = s.Values[PipelineLogLevelKey].(log.LogLevel).String()
+
+	return settingsMap
+}
+
+func (s *ReplicationSettings) PostProcessAfterUnmarshalling() {
+	if s.Settings == nil {
+		// if s.Settings is nil, which could happen during/after upgrade, populate s.Settings using fields in s
+		s.populateMapUsingFields()
+	} else {
+		s.Settings.PostProcessAfterUnmarshalling(GetReplicationSettingsConfigMap)
+
+		// special handling
+		logLevel := s.Values[PipelineLogLevelKey]
+		if logLevel != nil {
+			s.Values[PipelineLogLevelKey] = log.LogLevel(logLevel.(int))
+		}
+
+		// no need for populateFieldsUsingMap() since fields and map in metakv should already be consistent
+	}
+	s.HandleUpgrade()
+}
+
+func (s *ReplicationSettings) UpdateSettingsFromMap(settingsMap map[string]interface{}) (changedSettingsMap ReplicationSettingsMap, errorMap map[string]error) {
+	changedSettingsMap, errorMap = s.Settings.UpdateSettingsFromMap(settingsMap)
+	if len(errorMap) > 0 {
+		return
+	}
+	s.populateFieldsUsingMap()
+	return
+}
+
+func (s *ReplicationSettings) SetCompressionType(compressionType int) {
+	s.Values[CompressionTypeKey] = compressionType
+	s.CompressionType = compressionType
+}
+
+// populate settings map using field values
+// this is needed when we load pre-upgrade replication settings from metakv
+func (s *ReplicationSettings) populateMapUsingFields() {
+	s.Settings = EmptySettings(GetReplicationSettingsConfigMap)
+	s.Values[ReplicationTypeKey] = s.RepType
+	s.Values[FilterExpressionKey] = s.FilterExpression
+	s.Values[ActiveKey] = s.Active
+	s.Values[CheckpointIntervalKey] = s.CheckpointInterval
+	s.Values[BatchCountKey] = s.BatchCount
+	s.Values[BatchSizeKey] = s.BatchSize
+	s.Values[FailureRestartIntervalKey] = s.FailureRestartInterval
+	s.Values[OptimisticReplicationThresholdKey] = s.OptimisticReplicationThreshold
+	s.Values[SourceNozzlePerNodeKey] = s.SourceNozzlePerNode
+	s.Values[TargetNozzlePerNodeKey] = s.TargetNozzlePerNode
+	s.Values[PipelineLogLevelKey] = s.LogLevel
+	s.Values[PipelineStatsIntervalKey] = s.StatsInterval
+	s.Values[BandwidthLimitKey] = s.BandwidthLimit
+	s.Values[CompressionTypeKey] = s.CompressionType
+}
+
+// populate field values using settings map
+// this needs to be done whenever the settings map is changed
+// so as to ensure that field values and settings map are in sync
+func (s *ReplicationSettings) populateFieldsUsingMap() {
+	var value interface{}
+	var ok bool
+	if value, ok = s.Values[ReplicationTypeKey]; ok {
+		s.RepType = value.(string)
+	}
+	if value, ok = s.Values[FilterExpressionKey]; ok {
+		s.FilterExpression = value.(string)
+	}
+	if value, ok = s.Values[ActiveKey]; ok {
+		s.Active = value.(bool)
+	}
+	if value, ok = s.Values[CheckpointIntervalKey]; ok {
+		s.CheckpointInterval = value.(int)
+	}
+	if value, ok = s.Values[BatchCountKey]; ok {
+		s.BatchCount = value.(int)
+	}
+	if value, ok = s.Values[BatchSizeKey]; ok {
+		s.BatchSize = value.(int)
+	}
+	if value, ok = s.Values[FailureRestartIntervalKey]; ok {
+		s.FailureRestartInterval = value.(int)
+	}
+	if value, ok = s.Values[OptimisticReplicationThresholdKey]; ok {
+		s.OptimisticReplicationThreshold = value.(int)
+	}
+	if value, ok = s.Values[SourceNozzlePerNodeKey]; ok {
+		s.SourceNozzlePerNode = value.(int)
+	}
+	if value, ok = s.Values[TargetNozzlePerNodeKey]; ok {
+		s.TargetNozzlePerNode = value.(int)
+	}
+	if value, ok = s.Values[PipelineLogLevelKey]; ok {
+		s.LogLevel = value.(log.LogLevel)
+	}
+	if value, ok = s.Values[PipelineStatsIntervalKey]; ok {
+		s.StatsInterval = value.(int)
+	}
+	if value, ok = s.Values[BandwidthLimitKey]; ok {
+		s.BandwidthLimit = value.(int)
+	}
+	if value, ok = s.Values[CompressionTypeKey]; ok {
+		s.CompressionType = value.(int)
+	}
+}
+
+func (s *ReplicationSettings) IsCapi() bool {
+	return s.RepType == ReplicationTypeCapi
 }
 
 type ReplicationSettingsMap map[string]interface{}
@@ -480,7 +348,7 @@ const (
 )
 
 // The dictionary map is a kv pair of KeyNeedsRedacting -> RedactTypeAndOperation
-var replicationSettingsMapRedactDict = map[string]redactDictType{FilterExpression: redactDictString,
+var replicationSettingsMapRedactDict = map[string]redactDictType{FilterExpressionKey: redactDictString,
 	XmemCertificate:       redactDictBytes,
 	XmemClientKey:         redactDictBytesClear, // Clear the value instead of redaction
 	XmemClientCertificate: redactDictBytes}
@@ -544,28 +412,29 @@ func (repMap ReplicationSettingsMap) CloneAndRedact() ReplicationSettingsMap {
 	return repMap
 }
 
-func ValidateAndConvertSettingsValue(key, value, errorKey string, isEnterprise bool, isCapi bool) (convertedValue interface{}, err error) {
+func ValidateAndConvertReplicationSettingsValue(key, value, errorKey string, isEnterprise bool, isCapi bool) (convertedValue interface{}, err error) {
 	switch key {
-	case ReplicationType:
+	// special cases
+	case ReplicationTypeKey:
 		if value != ReplicationTypeXmem && value != ReplicationTypeCapi {
 			err = base.GenericInvalidValueError(errorKey)
 		} else {
 			convertedValue = value
 		}
-	case PipelineLogLevel:
-		if _, err = log.LogLevelFromStr(value); err != nil {
+	case PipelineLogLevelKey:
+		if logLevel, err := log.LogLevelFromStr(value); err != nil {
 			err = base.GenericInvalidValueError(errorKey)
 		} else {
-			convertedValue = value
+			convertedValue = logLevel
 		}
-	case FilterExpression:
+	case FilterExpressionKey:
 		// check that filter expression is a valid regular expression
 		_, err = regexp.Compile(value)
 		if err != nil {
 			return
 		}
 		convertedValue = value
-	case Active:
+	case ActiveKey:
 		var paused bool
 		paused, err = strconv.ParseBool(value)
 		if err != nil {
@@ -573,34 +442,19 @@ func ValidateAndConvertSettingsValue(key, value, errorKey string, isEnterprise b
 			return
 		}
 		convertedValue = !paused
-
-	case CheckpointInterval, BatchCount, BatchSize, FailureRestartInterval,
-		OptimisticReplicationThreshold, SourceNozzlePerNode,
-		TargetNozzlePerNode, MaxExpectedReplicationLag, TimeoutPercentageCap,
-		PipelineStatsInterval, BandwidthLimit:
-		convertedValue, err = strconv.ParseInt(value, base.ParseIntBase, base.ParseIntBitSize)
+	case BandwidthLimitKey:
+		convertedValue, err = ValidateAndConvertSettingsValue(key, value, ReplicationSettingsConfigMap)
 		if err != nil {
-			err = base.IncorrectValueTypeError("an integer")
 			return
 		}
 
-		// convert it to int to make future processing easier
-		convertedValue = int(convertedValue.(int64))
-
-		// network usage limit and compression are supported only in EE
-		if key == BandwidthLimit {
-			if err = enterpriseOnlyFeature(convertedValue.(int), 0, isEnterprise); err != nil {
-				return
-			}
-			if err = nonCAPIOnlyFeature(convertedValue.(int), 0, isCapi); err != nil {
-				return
-			}
+		if err = enterpriseOnlyFeature(convertedValue.(int), 0, isEnterprise); err != nil {
+			return
 		}
-
-		// range check for int parameters
-		err = RangeCheck(convertedValue.(int), SettingsConfigMap[key])
-
-	case CompressionType:
+		if err = nonCAPIOnlyFeature(convertedValue.(int), 0, isCapi); err != nil {
+			return
+		}
+	case CompressionTypeKey:
 		if convertedValue, err = base.CompressionStringToConversionTypeConverter(value); err != nil {
 			return
 		}
@@ -611,8 +465,8 @@ func ValidateAndConvertSettingsValue(key, value, errorKey string, isEnterprise b
 			return
 		}
 	default:
-		// a nil converted value indicates that the key is not a settings key
-		convertedValue = nil
+		// generic cases that can be handled by ValidateAndConvertSettingsValue
+		convertedValue, err = ValidateAndConvertSettingsValue(key, value, ReplicationSettingsConfigMap)
 	}
 
 	return
@@ -642,45 +496,4 @@ func IsSettingValueMutable(key string) bool {
 		}
 	}
 	return mutable
-}
-
-func ValidateSettingsKey(settingsMap map[string]interface{}) (returnedSettingsMap map[string]interface{}) {
-	returnedSettingsMap = make(map[string]interface{})
-
-	for key, val := range settingsMap {
-		switch key {
-
-		case ReplicationType, FilterExpression,
-			Active,
-			CheckpointInterval,
-			BatchCount,
-			BatchSize,
-			FailureRestartInterval,
-			OptimisticReplicationThreshold,
-			SourceNozzlePerNode,
-			TargetNozzlePerNode,
-			MaxExpectedReplicationLag,
-			TimeoutPercentageCap,
-			PipelineLogLevel,
-			PipelineStatsInterval,
-			BandwidthLimit,
-			CompressionType:
-			returnedSettingsMap[key] = val
-		}
-	}
-	return
-}
-
-// range check for int parameters
-func RangeCheck(intValue int, settingsConfig *SettingsConfig) error {
-	if settingsConfig.Range != nil {
-		if intValue < settingsConfig.Range.MinValue || intValue > settingsConfig.Range.MaxValue {
-			return base.InvalidValueError("an integer", settingsConfig.Range.MinValue, settingsConfig.Range.MaxValue)
-		}
-	}
-	return nil
-}
-
-func (s *ReplicationSettings) IsCapi() bool {
-	return s.RepType == ReplicationTypeCapi
 }

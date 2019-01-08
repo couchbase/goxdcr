@@ -33,7 +33,7 @@ func NewReplicationSettingsSvc(metadata_svc service_def.MetadataSvc, logger_ctx 
 }
 
 func (repl_settings_svc *ReplicationSettingsSvc) GetDefaultReplicationSettings() (*metadata.ReplicationSettings, error) {
-	var defaultSettings metadata.ReplicationSettings
+	var defaultSettings *metadata.ReplicationSettings
 	repl_settings_svc.replicationSettingsMtx.Lock()
 	defer repl_settings_svc.replicationSettingsMtx.Unlock()
 
@@ -43,16 +43,16 @@ func (repl_settings_svc *ReplicationSettingsSvc) GetDefaultReplicationSettings()
 	}
 	if err == service_def.MetadataNotFoundErr {
 		// initialize default settings if it does not exist
-		defaultSettings = *metadata.DefaultSettings()
+		defaultSettings = metadata.DefaultReplicationSettings()
 	} else {
-		err = json.Unmarshal(bytes, &defaultSettings)
+		defaultSettings, err = repl_settings_svc.constructReplicationSettingsObject(bytes, rev)
 		if err != nil {
 			return nil, err
 		}
 		// set rev number
 		defaultSettings.Revision = rev
 	}
-	return &defaultSettings, nil
+	return defaultSettings, nil
 }
 
 func (repl_settings_svc *ReplicationSettingsSvc) SetDefaultReplicationSettings(settings *metadata.ReplicationSettings) error {
@@ -67,4 +67,16 @@ func (repl_settings_svc *ReplicationSettingsSvc) SetDefaultReplicationSettings(s
 	} else {
 		return repl_settings_svc.metadata_svc.Add(DefaultReplicationSettingsKey, bytes)
 	}
+}
+
+func (repl_settings_svc *ReplicationSettingsSvc) constructReplicationSettingsObject(value []byte, rev interface{}) (*metadata.ReplicationSettings, error) {
+	settings := &metadata.ReplicationSettings{}
+	err := json.Unmarshal(value, settings)
+	if err != nil {
+		return nil, err
+	}
+	settings.Revision = rev
+
+	settings.PostProcessAfterUnmarshalling()
+	return settings, nil
 }

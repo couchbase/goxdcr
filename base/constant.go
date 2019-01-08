@@ -199,6 +199,7 @@ var ErrorCompressionDcpInvalidHandshake = errors.New("DCP connection is establis
 var ErrorMaxReached = errors.New("Maximum entries has been reached")
 var ErrorNilPtr = errors.New("Nil pointer given")
 var ErrorNoHostName = errors.New("hostname is missing")
+var ErrorInvalidSettingsKey = errors.New("Invalid settings key")
 
 // the full error as of now is : "x509: cannot validate certificate for xxx because it doesn't contain any IP SANs"
 // use a much shorter version for matching to reduce the chance of false negatives - the error message may be changed by golang in the future

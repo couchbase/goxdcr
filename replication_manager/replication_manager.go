@@ -482,22 +482,26 @@ func DeleteReplication(topic string, realUserId *service_def.RealUserId) error {
 
 //update the  replication settings and XDCR process setting
 func UpdateDefaultSettings(settings metadata.ReplicationSettingsMap, realUserId *service_def.RealUserId) (map[string]error, error) {
-
 	// Validate process setting keys
 	GlobalSettingsMap := metadata.ValidateGlobalSettingsKey(settings)
-	//First update XDCR Process specific setting
-	errorMap, err := UpdateGlobalSettings(GlobalSettingsMap, realUserId)
-	if len(errorMap) != 0 {
-		return errorMap, err
+	if len(GlobalSettingsMap) > 0 {
+		//First update XDCR Process specific setting
+		errorMap, err := UpdateGlobalSettings(GlobalSettingsMap, realUserId)
+		if len(errorMap) != 0 || err != nil {
+			return errorMap, err
+		}
 	}
 
 	//validate replication settings
-	replicationSettingMap := metadata.ValidateSettingsKey(settings)
-	//Now update default replication setting
-	errorMapRep, err := UpdateDefaultReplicationSettings(replicationSettingMap, realUserId)
-	if len(errorMapRep) != 0 {
-		return errorMapRep, err
+	replicationSettingMap := metadata.ValidateReplicationSettingsKey(settings)
+	if len(replicationSettingMap) > 0 {
+		//Now update default replication setting
+		errorMapRep, err := UpdateDefaultReplicationSettings(replicationSettingMap, realUserId)
+		if len(errorMapRep) != 0 || err != nil {
+			return errorMapRep, err
+		}
 	}
+
 	logger_rm.Infof("Updated replication settings\n")
 
 	return nil, nil
@@ -579,7 +583,7 @@ func UpdateReplicationSettings(topic string, settings metadata.ReplicationSettin
 	changedSettingsMap, errorMap := replSpec.Settings.UpdateSettingsFromMap(settings)
 
 	// Only Re-evaluate Compression pre-requisites if it is turned on and actually switched algorithms to catch any cluster-wide compression changes
-	if compressionType, ok := changedSettingsMap[metadata.CompressionType]; ok && (base.GetCompressionType(compressionType.(int)) != base.CompressionTypeNone) &&
+	if compressionType, ok := changedSettingsMap[metadata.CompressionTypeKey]; ok && (base.GetCompressionType(compressionType.(int)) != base.CompressionTypeNone) &&
 		base.GetCompressionType(oldCompressionType) != base.GetCompressionType(compressionType.(int)) {
 		validateRoutineErrorMap, validateErr := ReplicationSpecService().ValidateReplicationSettings(replSpecificFields.SourceBucketName,
 			replSpecificFields.RemoteClusterName, replSpecificFields.TargetBucketName, settings)
@@ -612,7 +616,7 @@ func UpdateReplicationSettings(topic string, settings metadata.ReplicationSettin
 		go writeUpdateReplicationSettingsEvent(replSpec, &changedSettingsMap, realUserId)
 
 		// if the active flag has been changed, log Pause/ResumeReplication event
-		active, ok := changedSettingsMap[metadata.Active]
+		active, ok := changedSettingsMap[metadata.ActiveKey]
 		if ok {
 			if active.(bool) {
 				go writeGenericReplicationEvent(service_def.ResumeReplicationEventId, replSpec, realUserId)
@@ -678,7 +682,7 @@ func (rm *replicationManager) createAndPersistReplicationSpec(justValidate bool,
 	// default isCapi to false if replication type is not explicitly specified in settings
 	isCapi := false
 	for key, value := range settings {
-		if key == metadata.ReplicationType {
+		if key == metadata.ReplicationTypeKey {
 			isCapi = (value == metadata.ReplicationTypeCapi)
 			break
 		}
@@ -1069,7 +1073,7 @@ func constructUpdateDefaultReplicationSettingsEvent(changedSettingsMap *metadata
 	// convert keys in changedSettingsMap from internal metadata keys to external facing rest api keys
 	convertedSettingsMap := make(map[string]interface{})
 	for key, value := range *changedSettingsMap {
-		if key == metadata.Active {
+		if key == metadata.ActiveKey {
 			convertedSettingsMap[SettingsKeyToRestKeyMap[key]] = !(value.(bool))
 		} else {
 			convertedSettingsMap[SettingsKeyToRestKeyMap[key]] = value

@@ -279,7 +279,7 @@ func (rscl *ReplicationSpecChangeListener) liveUpdatePipelineWithRetry(topic str
 				// check if the pipeline is associated with the correct repl spec to which the new settings belongs
 				curSpecInternalId := rs.Spec().InternalId
 				if curSpecInternalId == specInternalId {
-					err = pipeline.UpdateSettings(newSettings.ToMap())
+					err = pipeline.UpdateSettings(newSettings.ToMap(false /*isDefaultSettings*/))
 					if err != nil {
 						rscl.logger.Errorf("Live update on pipeline %v returned err = %v", topic, err)
 					}
@@ -506,7 +506,7 @@ func NewInternalSettingsChangeListener(internal_setting_svc service_def.Internal
 	utilsIn utilities.UtilsIface) *InternalSettingsChangeListener {
 	iscl := &InternalSettingsChangeListener{
 		NewMetakvChangeListener(base.InternalSettingsChangeListener,
-			metadata_svc.GetCatalogPathFromCatalogKey(metadata_svc.V2InternalSettingsCatalogKey),
+			metadata_svc.GetCatalogPathFromCatalogKey(metadata_svc.InternalSettingsCatalogKey),
 			cancel_chan,
 			children_waitgrp,
 			internal_setting_svc.InternalSettingsServiceCallback,

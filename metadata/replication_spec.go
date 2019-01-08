@@ -58,7 +58,7 @@ func NewReplicationSpecification(sourceBucketName string, sourceBucketUUID strin
 		TargetClusterUUID: targetClusterUUID,
 		TargetBucketName:  targetBucketName,
 		TargetBucketUUID:  targetBucketUUID,
-		Settings:          DefaultSettings()}, nil
+		Settings:          DefaultReplicationSettings()}, nil
 }
 
 // checks if the passed in spec is the same as the current spec

@@ -12,13 +12,16 @@ import (
 const (
 	// catalog key for v1 internal settings with individual setting fields
 	// have to use the same key as before so that we can load v1 settings before upgrade
-	V1InternalSettingsCatalogKey = "InternalSettings"
+	v1InternalSettingsCatalogKey = "InternalSettings"
 	// catalog key for v2 internal settings with map
-	V2InternalSettingsCatalogKey = "V2InternalSettings"
+	v2InternalSettingsCatalogKey = "V2InternalSettings"
+
+	// publically exposed catalog key for internal settings
+	InternalSettingsCatalogKey = v2InternalSettingsCatalogKey
 )
 
-var V1InternalSettingsMetakvKey = V1InternalSettingsCatalogKey + base.KeyPartsDelimiter + metadata.InternalSettingsKey
-var V2InternalSettingsMetakvKey = V2InternalSettingsCatalogKey + base.KeyPartsDelimiter + metadata.InternalSettingsKey
+var v1InternalSettingsMetakvKey = v1InternalSettingsCatalogKey + base.KeyPartsDelimiter + metadata.InternalSettingsKey
+var v2InternalSettingsMetakvKey = v2InternalSettingsCatalogKey + base.KeyPartsDelimiter + metadata.InternalSettingsKey
 
 type InternalSettingsSvc struct {
 	metadata_svc             service_def.MetadataSvc
@@ -55,10 +58,10 @@ func (service *InternalSettingsSvc) getInternalSettingsFromMetakv(useDefaultSett
 		return internal_settings, nil
 	} else if err != service_def.MetadataNotFoundErr {
 		if useDefaultSettingsAtError {
-			service.logger.Warnf("Error retrieving internal settings. err = %v. Using default values", err)
+			service.logger.Warnf("Error retrieving v2 internal settings. err = %v. Using default values", err)
 			return metadata.DefaultInternalSettings(), nil
 		} else {
-			service.logger.Warnf("Error retrieving internal settings. err = %v.", err)
+			service.logger.Warnf("Error retrieving v2 internal settings. err = %v.", err)
 			return nil, err
 		}
 	}
@@ -75,10 +78,10 @@ func (service *InternalSettingsSvc) getInternalSettingsFromMetakv(useDefaultSett
 			return metadata.DefaultInternalSettings(), nil
 		} else {
 			if useDefaultSettingsAtError {
-				service.logger.Warnf("Error retrieving V1 internal settings. err = %v. Using default values", err)
+				service.logger.Warnf("Error retrieving v1 internal settings. err = %v. Using default values", err)
 				return metadata.DefaultInternalSettings(), nil
 			} else {
-				service.logger.Warnf("Error retrieving internal settings. err = %v.", err)
+				service.logger.Warnf("Error retrieving v1 internal settings. err = %v.", err)
 				return nil, err
 			}
 		}
@@ -96,7 +99,7 @@ func (service *InternalSettingsSvc) GetInternalSettings() *metadata.InternalSett
 
 func (service *InternalSettingsSvc) getV2InternalSettings() (*metadata.InternalSettings, error) {
 	var internal_settings *metadata.InternalSettings
-	bytes, rev, err := service.metadata_svc.Get(V2InternalSettingsMetakvKey)
+	bytes, rev, err := service.metadata_svc.Get(v2InternalSettingsMetakvKey)
 	if err != nil {
 		return nil, err
 	} else {
@@ -110,7 +113,7 @@ func (service *InternalSettingsSvc) getV2InternalSettings() (*metadata.InternalS
 
 func (service *InternalSettingsSvc) getV2InternalSettingsFromV1() (*metadata.InternalSettings, error) {
 	var internal_settings *metadata.InternalSettings
-	bytes, rev, err := service.metadata_svc.Get(V1InternalSettingsMetakvKey)
+	bytes, rev, err := service.metadata_svc.Get(v1InternalSettingsMetakvKey)
 	if err != nil {
 		return nil, err
 	} else {
@@ -133,12 +136,12 @@ func (service *InternalSettingsSvc) UpdateInternalSettings(settingsMap map[strin
 		return nil, nil, err
 	}
 
-	changed, errorsMap := internal_settings.UpdateSettingsFromMap(settingsMap)
+	changedSettingMap, errorsMap := internal_settings.UpdateSettingsFromMap(settingsMap)
 	if len(errorsMap) > 0 {
 		return nil, errorsMap, nil
 	}
 
-	if changed {
+	if len(changedSettingMap) > 0 {
 		err := service.setV2InternalSettings(internal_settings)
 		if err != nil {
 			return nil, nil, err
@@ -161,9 +164,9 @@ func (service *InternalSettingsSvc) setV2InternalSettings(internal_settings *met
 	}
 
 	if internal_settings.Revision != nil {
-		err = service.metadata_svc.Set(V2InternalSettingsMetakvKey, bytes, internal_settings.Revision)
+		err = service.metadata_svc.Set(v2InternalSettingsMetakvKey, bytes, internal_settings.Revision)
 	} else {
-		err = service.metadata_svc.Add(V2InternalSettingsMetakvKey, bytes)
+		err = service.metadata_svc.Add(v2InternalSettingsMetakvKey, bytes)
 	}
 
 	if err != nil {
@@ -177,19 +180,14 @@ func (service *InternalSettingsSvc) setV2InternalSettings(internal_settings *met
 
 // construct new internal settings object (with map)
 func (service *InternalSettingsSvc) constructV2InternalSettingsObject(value []byte, rev interface{}) (*metadata.InternalSettings, error) {
-	v2_settings := &metadata.InternalSettings{}
+	v2_settings := metadata.EmptyInternalSettings()
 	err := json.Unmarshal(value, v2_settings)
 	if err != nil {
 		return nil, err
 	}
 
 	v2_settings.Revision = rev
-
-	// handle data type change caused by marshalling and unmarshalling
-	v2_settings.HandleDataTypeConversionAfterUnmarshalling()
-
-	// handle v2 settings added after the v2 settings type is introduced
-	v2_settings.HandleUpgrade()
+	v2_settings.PostProcessAfterUnmarshalling()
 
 	return v2_settings, nil
 }
@@ -203,13 +201,9 @@ func (service *InternalSettingsSvc) constructV2InternalSettingsObjectFromV1(valu
 	}
 	v1_settings.HandleUpgrade()
 
-	v2_settings := &metadata.InternalSettings{Values: make(map[string]interface{})}
-	// convert old internal settings into internal settings
-	v2_settings.ConvertFromV1InternalSettings(v1_settings)
+	v2_settings := metadata.ConstructInternalSettingsFromV1Settings(v1_settings)
 	service.logger.Infof("Converted v1 internal settings to v2 internal settings. v1=%v\n v2=%v\n", v1_settings, v2_settings)
 
-	// handle v2 settings added after the v2 settings type is introduced
-	v2_settings.HandleUpgrade()
 	return v2_settings, nil
 }
 

@@ -52,14 +52,16 @@ func (service *GlobalSettingsSvc) GlobalSettingsServiceCallback(path string, val
 }
 
 func (service *GlobalSettingsSvc) constructGlobalSettingObject(value []byte, rev interface{}) (*metadata.GlobalSettings, error) {
-	ref := &metadata.GlobalSettings{}
-	err := json.Unmarshal(value, ref)
+	settings := &metadata.GlobalSettings{}
+	err := json.Unmarshal(value, settings)
 	if err != nil {
 		return nil, err
 	}
-	ref.Revision = rev
+	settings.Revision = rev
 
-	return ref, err
+	settings.PostProcessAfterUnmarshalling()
+
+	return settings, err
 }
 
 func (service *GlobalSettingsSvc) SetMetadataChangeHandlerCallback(call_back base.MetadataChangeHandlerCallback) {
@@ -70,9 +72,8 @@ func getGlobalSettingKey() string {
 	return metadata.GlobalConfigurationKey + base.KeyPartsDelimiter + metadata.DefaultGlobalSettingsKey
 }
 
-// This method will pull  process setting setting
 func (service *GlobalSettingsSvc) GetDefaultGlobalSettings() (*metadata.GlobalSettings, error) {
-	var defaultGlobalSettings metadata.GlobalSettings
+	var defaultGlobalSettings *metadata.GlobalSettings
 	service.globalSettingsMtx.Lock()
 	defer service.globalSettingsMtx.Unlock()
 
@@ -85,24 +86,23 @@ func (service *GlobalSettingsSvc) GetDefaultGlobalSettings() (*metadata.GlobalSe
 	if err != nil {
 		if err == service_def.MetadataNotFoundErr {
 			// initialize default process settings if it does not exist
-			defaultGlobalSettings = *metadata.DefaultGlobalSettings()
+			defaultGlobalSettings = metadata.DefaultGlobalSettings()
 		} else {
 			return nil, err
 		}
 	} else {
-		err = json.Unmarshal(bytes, &defaultGlobalSettings)
+		defaultGlobalSettings, err = service.constructGlobalSettingObject(bytes, rev)
 		if err != nil {
 			return nil, err
 		}
-		// set rev number
-		defaultGlobalSettings.Revision = rev
 	}
-	return &defaultGlobalSettings, nil
+	return defaultGlobalSettings, nil
 }
 
 func (service *GlobalSettingsSvc) SetDefaultGlobalSettings(settings *metadata.GlobalSettings) error {
 	service.globalSettingsMtx.Lock()
 	defer service.globalSettingsMtx.Unlock()
+
 	bytes, err := json.Marshal(settings)
 	if err != nil {
 		return err

@@ -700,9 +700,9 @@ func (service *MigrationSvc) getGoxdcrSettingsMap(oldSettingsMap metadata.Replic
 		if replTypeStr != "" {
 			switch replTypeStr {
 			case base.ReplicationDocTypeCapi:
-				settingsMap[metadata.ReplicationType] = metadata.ReplicationTypeCapi
+				settingsMap[metadata.ReplicationTypeKey] = metadata.ReplicationTypeCapi
 			case base.ReplicationDocTypeXmem:
-				settingsMap[metadata.ReplicationType] = metadata.ReplicationTypeXmem
+				settingsMap[metadata.ReplicationTypeKey] = metadata.ReplicationTypeXmem
 			default:
 				errorList = append(errorList, invalidFieldValueError(replTypeStr, base.ReplicationDocType, TypeReplicationDoc))
 			}
@@ -711,33 +711,33 @@ func (service *MigrationSvc) getGoxdcrSettingsMap(oldSettingsMap metadata.Replic
 	}
 	if pauseRequested, ok := oldSettingsMap[base.ReplicationDocPauseRequested]; ok {
 		var boolPauseRequested bool
-		boolPauseRequested, errorList = getBoolValue(metadata.CheckpointInterval, pauseRequested, TypeReplicationDoc, errorList)
-		settingsMap[metadata.Active] = !boolPauseRequested
+		boolPauseRequested, errorList = getBoolValue(metadata.CheckpointIntervalKey, pauseRequested, TypeReplicationDoc, errorList)
+		settingsMap[metadata.ActiveKey] = !boolPauseRequested
 	}
-	if checkpointInterval, ok := oldSettingsMap[metadata.CheckpointInterval]; ok {
+	if checkpointInterval, ok := oldSettingsMap[metadata.CheckpointIntervalKey]; ok {
 		var intCheckpointInterval int
-		intCheckpointInterval, errorList = getIntValue(metadata.CheckpointInterval, checkpointInterval, TypeReplicationDoc, errorList)
-		settingsMap[metadata.CheckpointInterval] = intCheckpointInterval
+		intCheckpointInterval, errorList = getIntValue(metadata.CheckpointIntervalKey, checkpointInterval, TypeReplicationDoc, errorList)
+		settingsMap[metadata.CheckpointIntervalKey] = intCheckpointInterval
 	}
-	if batchCount, ok := oldSettingsMap[metadata.BatchCount]; ok {
+	if batchCount, ok := oldSettingsMap[metadata.BatchCountKey]; ok {
 		var intBatchCount int
-		intBatchCount, errorList = getIntValue(metadata.BatchCount, batchCount, TypeReplicationDoc, errorList)
-		settingsMap[metadata.BatchCount] = intBatchCount
+		intBatchCount, errorList = getIntValue(metadata.BatchCountKey, batchCount, TypeReplicationDoc, errorList)
+		settingsMap[metadata.BatchCountKey] = intBatchCount
 	}
-	if batchSize, ok := oldSettingsMap[metadata.BatchSize]; ok {
+	if batchSize, ok := oldSettingsMap[metadata.BatchSizeKey]; ok {
 		var intBatchSize int
-		intBatchSize, errorList = getIntValue(metadata.BatchSize, batchSize, TypeReplicationDoc, errorList)
-		settingsMap[metadata.BatchSize] = intBatchSize
+		intBatchSize, errorList = getIntValue(metadata.BatchSizeKey, batchSize, TypeReplicationDoc, errorList)
+		settingsMap[metadata.BatchSizeKey] = intBatchSize
 	}
-	if failureRestartInterval, ok := oldSettingsMap[metadata.FailureRestartInterval]; ok {
+	if failureRestartInterval, ok := oldSettingsMap[metadata.FailureRestartIntervalKey]; ok {
 		var intFailureRestartInterval int
-		intFailureRestartInterval, errorList = getIntValue(metadata.FailureRestartInterval, failureRestartInterval, TypeReplicationDoc, errorList)
-		settingsMap[metadata.FailureRestartInterval] = intFailureRestartInterval
+		intFailureRestartInterval, errorList = getIntValue(metadata.FailureRestartIntervalKey, failureRestartInterval, TypeReplicationDoc, errorList)
+		settingsMap[metadata.FailureRestartIntervalKey] = intFailureRestartInterval
 	}
-	if optimisticReplicationThreshold, ok := oldSettingsMap[metadata.OptimisticReplicationThreshold]; ok {
+	if optimisticReplicationThreshold, ok := oldSettingsMap[metadata.OptimisticReplicationThresholdKey]; ok {
 		var intOptimisticReplicationThreshold int
-		intOptimisticReplicationThreshold, errorList = getIntValue(metadata.OptimisticReplicationThreshold, optimisticReplicationThreshold, TypeReplicationDoc, errorList)
-		settingsMap[metadata.OptimisticReplicationThreshold] = intOptimisticReplicationThreshold
+		intOptimisticReplicationThreshold, errorList = getIntValue(metadata.OptimisticReplicationThresholdKey, optimisticReplicationThreshold, TypeReplicationDoc, errorList)
+		settingsMap[metadata.OptimisticReplicationThresholdKey] = intOptimisticReplicationThreshold
 	}
 
 	workerProcesses := NonExistentIntValue
@@ -764,7 +764,7 @@ func (service *MigrationSvc) getGoxdcrSettingsMap(oldSettingsMap metadata.Replic
 	if targetNozzlePerNode > metadata.TargetNozzlePerNodeConfig.MaxValue {
 		targetNozzlePerNode = metadata.TargetNozzlePerNodeConfig.MaxValue
 	}
-	settingsMap[metadata.TargetNozzlePerNode] = targetNozzlePerNode
+	settingsMap[metadata.TargetNozzlePerNodeKey] = targetNozzlePerNode
 
 	service.logger.Infof("Done with converting replication settings to goxdcr settings. old settings=%v\n new settings=%v\n errorList=%v\n", oldSettingsMap.CloneAndRedact(), settingsMap.CloneAndRedact(), errorList)
 

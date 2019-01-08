@@ -496,12 +496,12 @@ func (pipelineMgr *PipelineManager) livePipelines() map[string]common.Pipeline {
 // Should be only called by GetOrCreateReplicationStatus
 func (pipelineMgr *PipelineManager) launchUpdater(topic string, cur_err error, rep_status *pipeline.ReplicationStatus) error {
 	settingsMap := rep_status.SettingsMap()
-	retry_interval_obj := settingsMap[metadata.FailureRestartInterval]
+	retry_interval_obj := settingsMap[metadata.FailureRestartIntervalKey]
 	// retry_interval_obj may be null in abnormal scenarios, e.g., when replication spec has been deleted
 	// default retry_interval to 10 seconds in such cases
 	retry_interval := default_failure_restart_interval
 	if retry_interval_obj != nil {
-		retry_interval = settingsMap[metadata.FailureRestartInterval].(int)
+		retry_interval = settingsMap[metadata.FailureRestartIntervalKey].(int)
 	}
 
 	updater := newPipelineUpdater(topic, retry_interval, cur_err, rep_status, pipelineMgr.logger, pipelineMgr)
@@ -893,7 +893,7 @@ func (r *PipelineUpdater) disableCompression() {
 	r.disabledFeatures |= disabledCompression
 
 	r.logger.Infof("Temporarily disabling compression for pipeline: %v", r.pipeline_name)
-	settings.CompressionType = (int)(base.CompressionTypeNone)
+	settings.SetCompressionType((int)(base.CompressionTypeNone))
 
 	r.rep_status.SetCustomSettings(settings)
 }

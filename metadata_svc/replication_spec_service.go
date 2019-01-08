@@ -375,7 +375,7 @@ func (service *ReplicationSpecService) ValidateNewReplicationSpec(sourceBucket, 
 		return "", "", nil, errorMap, err, nil
 	}
 
-	repl_type, ok := settings[metadata.ReplicationType]
+	repl_type, ok := settings[metadata.ReplicationTypeKey]
 	if !ok {
 		repl_type = metadata.ReplicationTypeXmem
 	}
@@ -423,11 +423,11 @@ func (service *ReplicationSpecService) validateReplicationSettingsInternal(error
 		return populateErr, warnings
 	}
 
-	repl_type, ok := settings[metadata.ReplicationType]
-	compressionType, compressionOk := settings[metadata.CompressionType]
+	repl_type, ok := settings[metadata.ReplicationTypeKey]
+	compressionType, compressionOk := settings[metadata.CompressionTypeKey]
 	if !compressionOk {
-		compressionType = metadata.DefaultSettings().CompressionType
-		settings[metadata.CompressionType] = compressionType
+		compressionType = metadata.DefaultReplicationSettings().CompressionType
+		settings[metadata.CompressionTypeKey] = compressionType
 	}
 
 	if !ok || repl_type == metadata.ReplicationTypeXmem {
@@ -882,6 +882,9 @@ func constructReplicationSpec(value []byte, rev interface{}) (*metadata.Replicat
 		return nil, err
 	}
 	spec.Revision = rev
+
+	spec.Settings.PostProcessAfterUnmarshalling()
+
 	return spec, nil
 }
 

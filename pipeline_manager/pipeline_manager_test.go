@@ -86,8 +86,11 @@ func setupBoilerPlate() (*log.CommonLogger,
 	//		Pipeline_updater: testRepairer,
 	//		Obj_pool:         base.NewMCRequestPool(testTopic, testLogger)}
 
-	testReplicationSettings := &metadata.ReplicationSettings{FailureRestartInterval: 10,
-		CompressionType: (int)(base.CompressionTypeSnappy)}
+	testReplicationSettings := metadata.DefaultReplicationSettings()
+	settingsMap := make(map[string]interface{})
+	settingsMap[metadata.FailureRestartIntervalKey] = 10
+	settingsMap[metadata.CompressionTypeKey] = (int)(base.CompressionTypeSnappy)
+	testReplicationSettings.UpdateSettingsFromMap(settingsMap)
 	testReplicationSpec := &metadata.ReplicationSpecification{Settings: testReplicationSettings, Revision: 1}
 
 	specGetterFxLiteral := func(specId string) (*metadata.ReplicationSpecification, error) { return testReplicationSpec, nil }
@@ -145,19 +148,22 @@ func setupDetailedMocking(testLogger *log.CommonLogger,
 	xdcrTopologyMock.On("IsKVNode").Return(isKVNode, nil)
 
 	remoteClusterMock.On("RemoteClusterByUuid", "", false).Return(testRemoteClusterRef, nil)
+	remoteClusterMock.On("RemoteClusterByUuid", "", true).Return(testRemoteClusterRef, nil)
 	remoteClusterMock.On("ValidateRemoteCluster", testRemoteClusterRef).Return(nil)
 
-	pipelineMock.On("NewPipeline", testTopic, mock.AnythingOfType("common.PipelineProgressRecorder")).Return(&testPipeline, nil)
 	var emptyNozzles map[string]commonReal.Nozzle
 	testPipeline.On("Sources").Return(emptyNozzles)
 	// Test pipeline running test
 	testPipeline.On("State").Return(commonReal.Pipeline_Running)
 	testPipeline.On("InstanceId").Return(testTopic)
 	testPipeline.On("SetProgressRecorder", mock.AnythingOfType("common.PipelineProgressRecorder")).Return(nil)
-	testStatusMap := testReplicationStatus.SettingsMap()
 	emptyMap := make(base.ErrorMap)
-	testPipeline.On("Start", testStatusMap).Return(emptyMap)
-	testPipeline.On("Stop", testStatusMap).Return(emptyMap)
+	testPipeline.On("Start", mock.Anything).Return(emptyMap)
+	testPipeline.On("Stop", mock.Anything).Return(emptyMap)
+	testPipeline.On("Specification").Return(testReplicationSpec)
+	testPipeline.On("Topic").Return(testTopic)
+
+	pipelineMock.On("NewPipeline", testTopic, mock.AnythingOfType("common.PipelineProgressRecorder")).Return(testPipeline, nil)
 
 	uiLogSvc.On("Write", mock.Anything).Return(nil)
 }

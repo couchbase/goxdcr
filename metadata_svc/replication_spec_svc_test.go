@@ -188,7 +188,7 @@ func TestValidateNewReplicationSpec(t *testing.T) {
 		false /*IsElastic*/, true /*CompressionPass*/)
 
 	// Assume XMEM replication type
-	settings[metadata.ReplicationType] = metadata.ReplicationTypeXmem
+	settings[metadata.ReplicationTypeKey] = metadata.ReplicationTypeXmem
 
 	_, _, _, errMap, _, _ := replSpecSvc.ValidateNewReplicationSpec(sourceBucket, targetCluster, targetBucket, settings)
 	assert.Equal(len(errMap), 0)
@@ -213,7 +213,7 @@ func TestNegativeConflictResolutionType(t *testing.T) {
 		false /*IsElastic*/, true /*CompressionPass*/)
 
 	// Assume XMEM replication type
-	settings[metadata.ReplicationType] = metadata.ReplicationTypeXmem
+	settings[metadata.ReplicationTypeKey] = metadata.ReplicationTypeXmem
 
 	_, _, _, errMap, _, _ := replSpecSvc.ValidateNewReplicationSpec(sourceBucket, targetCluster, targetBucket, settings)
 	// Should have only one error
@@ -239,7 +239,7 @@ func TestDifferentConflictResolutionTypeOnCapi(t *testing.T) {
 		false /*IsElastic*/, false /*CompressionPass*/)
 
 	// Assume CAPI (elasticsearch) replication type
-	settings[metadata.ReplicationType] = metadata.ReplicationTypeCapi
+	settings[metadata.ReplicationTypeKey] = metadata.ReplicationTypeCapi
 
 	_, _, _, errMap, _, _ := replSpecSvc.ValidateNewReplicationSpec(sourceBucket, targetCluster, targetBucket, settings)
 	// Should pass
@@ -266,7 +266,7 @@ func TestAddReplicationSpec(t *testing.T) {
 		InternalId:       "internalTest",
 		SourceBucketName: "testSrc",
 		TargetBucketName: "testTgt",
-		Settings:         metadata.DefaultSettings(),
+		Settings:         metadata.DefaultReplicationSettings(),
 	}
 
 	assert.Nil(replSpecSvc.AddReplicationSpec(spec, ""))
@@ -296,12 +296,12 @@ func TestCompressionPositive(t *testing.T) {
 		false /*IsElastic*/, true /*CompressionPass*/)
 
 	// Turning off should be allowed
-	settings[metadata.CompressionType] = base.CompressionTypeNone
+	settings[metadata.CompressionTypeKey] = base.CompressionTypeNone
 	_, _, _, errMap, _, _ := replSpecSvc.ValidateNewReplicationSpec(sourceBucket, targetCluster, targetBucket, settings)
 	assert.Equal(len(errMap), 0)
 
 	// Turning on should be allowed
-	settings[metadata.CompressionType] = base.CompressionTypeSnappy
+	settings[metadata.CompressionTypeKey] = base.CompressionTypeSnappy
 	_, _, _, errMap, _, _ = replSpecSvc.ValidateNewReplicationSpec(sourceBucket, targetCluster, targetBucket, settings)
 	assert.Equal(len(errMap), 0)
 
@@ -322,7 +322,7 @@ func TestCompressionNegNotEnterprise(t *testing.T) {
 		false /*IsElastic*/, true /*CompressionPass*/)
 
 	// Turning on should be disallowed
-	settings[metadata.CompressionType] = base.CompressionTypeSnappy
+	settings[metadata.CompressionTypeKey] = base.CompressionTypeSnappy
 	_, _, _, errMap, _, _ := replSpecSvc.ValidateNewReplicationSpec(sourceBucket, targetCluster, targetBucket, settings)
 	assert.NotEqual(len(errMap), 0)
 
@@ -343,8 +343,8 @@ func TestCompressionNegCAPI(t *testing.T) {
 		false /*IsElastic*/, false /*CompressionPass*/)
 
 	// Turning on should be disallowed
-	settings[metadata.CompressionType] = base.CompressionTypeSnappy
-	settings[metadata.ReplicationType] = metadata.ReplicationTypeCapi
+	settings[metadata.CompressionTypeKey] = base.CompressionTypeSnappy
+	settings[metadata.ReplicationTypeKey] = metadata.ReplicationTypeCapi
 	_, _, _, errMap, _, _ := replSpecSvc.ValidateNewReplicationSpec(sourceBucket, targetCluster, targetBucket, settings)
 	assert.NotEqual(len(errMap), 0)
 
@@ -365,23 +365,23 @@ func TestCompressionNegNoSnappy(t *testing.T) {
 		false /*IsElastic*/, false /*CompressionPass*/)
 
 	// Turning off should be allowed
-	settings[metadata.CompressionType] = base.CompressionTypeNone
+	settings[metadata.CompressionTypeKey] = base.CompressionTypeNone
 	_, _, _, errMap, _, _ := replSpecSvc.ValidateNewReplicationSpec(sourceBucket, targetCluster, targetBucket, settings)
 	assert.Equal(len(errMap), 0)
 
 	// Turning on should result in error
-	settings[metadata.CompressionType] = base.CompressionTypeSnappy
+	settings[metadata.CompressionTypeKey] = base.CompressionTypeSnappy
 	_, _, _, errMap, _, _ = replSpecSvc.ValidateNewReplicationSpec(sourceBucket, targetCluster, targetBucket, settings)
 	assert.NotEqual(len(errMap), 0)
 
 	// Setting to Auto should result in warning only, and no error
-	settings[metadata.CompressionType] = base.CompressionTypeAuto
+	settings[metadata.CompressionTypeKey] = base.CompressionTypeAuto
 	_, _, _, errMap, _, warnings := replSpecSvc.ValidateNewReplicationSpec(sourceBucket, targetCluster, targetBucket, settings)
 	assert.Equal(len(errMap), 0)
 	assert.NotEqual(len(warnings), 0)
 
 	// Setting path should be allowed as well
-	settings[metadata.CompressionType] = base.CompressionTypeAuto
+	settings[metadata.CompressionTypeKey] = base.CompressionTypeAuto
 	errMap, err := replSpecSvc.ValidateReplicationSettings(sourceBucket, targetCluster, targetBucket, settings)
 	errExists := len(errMap) > 0 || err != nil
 	assert.False(errExists)
@@ -403,7 +403,7 @@ func TestElasticSearch(t *testing.T) {
 		true /*IsElastic*/, false /*CompressionPass*/)
 
 	// Xmem using elas
-	settings[metadata.ReplicationType] = metadata.ReplicationTypeXmem
+	settings[metadata.ReplicationTypeKey] = metadata.ReplicationTypeXmem
 
 	_, _, _, errMap, _, _ := replSpecSvc.ValidateNewReplicationSpec(sourceBucket, targetCluster, targetBucket, settings)
 	assert.NotEqual(len(errMap), 0)

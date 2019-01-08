@@ -387,7 +387,7 @@ func (rs *ReplicationStatus) SetVbList(vb_list []uint16) {
 func (rs *ReplicationStatus) SettingsMap() map[string]interface{} {
 	settings := rs.settingsInternal(false /*clone*/)
 	if settings != nil {
-		return settings.ToMap()
+		return settings.ToMap(false /*isDefaultSettings*/)
 	} else {
 		//empty map
 		return make(map[string]interface{})

@@ -2,9 +2,7 @@ package metadata
 
 import (
 	"fmt"
-	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
-	"strconv"
 )
 
 var GoGCDefaultValue = 100
@@ -12,13 +10,13 @@ var logger_ps *log.CommonLogger = log.NewLogger("GlobalSetting", log.DefaultLogg
 
 /*
  *  global_setting will contain all the process level configuration that could be applied to all the
- *  replication running the system
+ *  replications
  */
 
 const (
-	GoMaxProcs = "gomaxprocs"
-	GoGC       = "gogc"
-	//setting that would be applied at the GOXDCR Process level that would affect all replications
+	GoMaxProcsKey = "gomaxprocs"
+	GoGCKey       = "gogc"
+
 	DefaultGlobalSettingsKey = "GlobalSettings"
 	GlobalConfigurationKey   = "GlobalConfiguration"
 )
@@ -30,12 +28,12 @@ var GoMaxProcsConfig = &SettingsConfig{4, &Range{1, 10000}}
 var GoGCConfig = &SettingsConfig{100, &Range{-1, 10000}}
 
 var GlobalSettingsConfigMap = map[string]*SettingsConfig{
-	GoMaxProcs: GoMaxProcsConfig,
-	GoGC:       GoGCConfig,
+	GoMaxProcsKey: GoMaxProcsConfig,
+	GoGCKey:       GoGCConfig,
 }
 
 type GlobalSettings struct {
-
+	*Settings
 	//maxprocs setting for golang to use number of core in the system
 	GoMaxProcs int `json:"goMaxProcs"`
 	//gogc setting sets the initial garbage collection target percentage.
@@ -46,120 +44,92 @@ type GlobalSettings struct {
 	Revision interface{}
 }
 
+// config map retriever required by Settings
+func GetGlobalSettingsConfigMap() map[string]*SettingsConfig {
+	return GlobalSettingsConfigMap
+}
+
 func DefaultGlobalSettings() *GlobalSettings {
-	return &GlobalSettings{GoMaxProcs: GoMaxProcsConfig.defaultValue.(int),
-		GoGC: GoGCConfig.defaultValue.(int)}
-}
-
-func ValidateGlobalSettingsKey(settingsMap map[string]interface{}) (globalSettingsMap map[string]interface{}) {
-	globalSettingsMap = make(map[string]interface{})
-
-	for key, val := range settingsMap {
-		switch key {
-		case GoMaxProcs:
-			fallthrough
-		case GoGC:
-			globalSettingsMap[key] = val
-		}
-	}
-	return
-}
-
-// returns a map of settings that have indeed been changed and their new values.
-// returns a map of validation errors, which should normally be empty since the input settingsMap
-// is constructed internally and necessary checks should have been applied before
-// I am leaving the error checks just in case.
-func (s *GlobalSettings) UpdateSettingsFromMap(settingsMap map[string]interface{}) (changedSettingsMap map[string]interface{}, errorMap map[string]error) {
-	changedSettingsMap = make(map[string]interface{})
-	errorMap = make(map[string]error)
-
-	for key, val := range settingsMap {
-		switch key {
-		case GoMaxProcs:
-			maxprocs, ok := val.(int)
-			if !ok {
-				errorMap[key] = base.IncorrectValueTypeInMapError(key, val, "int")
-				continue
-			}
-			if s.GoMaxProcs != maxprocs {
-				s.GoMaxProcs = maxprocs
-				changedSettingsMap[key] = maxprocs
-			}
-		case GoGC:
-			gogc, ok := val.(int)
-			if !ok {
-				errorMap[key] = base.IncorrectValueTypeInMapError(key, val, "int")
-				continue
-			}
-			if s.GoGC != gogc {
-				s.GoGC = gogc
-				changedSettingsMap[key] = gogc
-			}
-		}
-	}
-	return
-}
-
-func ValidateAndConvertGlobalSettingsValue(key, value, errorKey string) (convertedValue interface{}, err error) {
-	switch key {
-	case GoMaxProcs:
-		convertedValue, err = strconv.ParseInt(value, base.ParseIntBase, base.ParseIntBitSize)
-		if err != nil {
-			err = base.IncorrectValueTypeError("an integer")
-			return
-		}
-		// convert it to int to make future processing easier
-		convertedValue = int(convertedValue.(int64))
-
-		// range check for int parameters
-		err = RangeCheck(convertedValue.(int), GlobalSettingsConfigMap[key])
-	case GoGC:
-		convertedValue, err = strconv.ParseInt(value, base.ParseIntBase, base.ParseIntBitSize)
-		if err != nil {
-			err = base.IncorrectValueTypeError("an integer")
-			return
-		}
-		// convert it to int to make future processing easier
-		convertedValue = int(convertedValue.(int64))
-
-		if convertedValue == 0 {
-			err = fmt.Errorf("0 is not a valid value for GOGC")
-		} else {
-			// range check for int parameters
-			err = RangeCheck(convertedValue.(int), GlobalSettingsConfigMap[key])
-		}
-	default:
-		// a nil converted value indicates that the key is not a settings key
-		convertedValue = nil
-	}
-	return
+	defaultSettings := &GlobalSettings{Settings: DefaultSettings(GetGlobalSettingsConfigMap)}
+	defaultSettings.populateFieldsUsingMap()
+	return defaultSettings
 }
 
 func (s *GlobalSettings) ToMap() map[string]interface{} {
-	settings_map := make(map[string]interface{})
-	settings_map[GoMaxProcs] = s.GoMaxProcs
-	// 0 value for GOGC can only have come from upgrade.
-	// It is not used at runtime and should not be visible to users
-	// do not add GoGC field and value to map if it has the value of 0
-	if s.GoGC != 0 {
-		settings_map[GoGC] = s.GoGC
+	settingsMap := s.Settings.ToMap()
+
+	if goGC, ok := settingsMap[GoGCKey]; ok {
+		if goGC.(int) == 0 {
+			// 0 value for GOGC can only have come from upgrade.
+			// It is not used at runtime and should not be visible to users
+			// Remove GoGC field and value from map in this case
+			delete(settingsMap, GoGCKey)
+		}
 	}
-	return settings_map
+
+	return settingsMap
 }
 
-func (s *GlobalSettings) Clone() *GlobalSettings {
-	if s == nil {
-		return nil
-	}
+// post processing after global settings is loaded from metakv
+func (s *GlobalSettings) PostProcessAfterUnmarshalling() {
+	if s.Settings == nil {
+		// if s.Settings is nil, which could happen during/after upgrade, populate s.Settings using fields in s
+		s.populateMapUsingFields()
+	} else {
+		s.Settings.PostProcessAfterUnmarshalling(GetGlobalSettingsConfigMap)
 
-	clone := &GlobalSettings{}
-	clone.UpdateSettingsFromMap(s.ToMap())
-	return clone
+		// no need for populateFieldsUsingMap() since fields and map in metakv should already be consistent
+	}
+	s.HandleUpgrade()
 }
 
-func (s *GlobalSettings) String() string {
-	if s == nil {
-		return "nil"
+func (s *GlobalSettings) UpdateSettingsFromMap(settingsMap map[string]interface{}) (changedSettingsMap ReplicationSettingsMap, errorMap map[string]error) {
+	changedSettingsMap, errorMap = s.Settings.UpdateSettingsFromMap(settingsMap)
+	if len(errorMap) > 0 {
+		return
 	}
-	return fmt.Sprintf("GoMaxProcs:%v, GoGC:%v", s.GoMaxProcs, s.GoGC)
+	s.populateFieldsUsingMap()
+	return
+}
+
+// populate settings map using field values
+// this is needed when we load pre-upgrade global settings from metakv
+func (s *GlobalSettings) populateMapUsingFields() {
+	s.Settings = EmptySettings(GetGlobalSettingsConfigMap)
+	s.Values[GoMaxProcsKey] = s.GoMaxProcs
+	s.Values[GoGCKey] = s.GoGC
+}
+
+// populate field values using settings map
+// this needs to be done whenever the settings map is changed,
+// so as to ensure that field values and settings map are in sync
+func (s *GlobalSettings) populateFieldsUsingMap() {
+	var value interface{}
+	var ok bool
+	if value, ok = s.Values[GoMaxProcsKey]; ok {
+		s.GoMaxProcs = value.(int)
+	}
+	if value, ok = s.Values[GoGCKey]; ok {
+		s.GoGC = value.(int)
+	}
+}
+
+func ValidateGlobalSettingsKey(settingsMap map[string]interface{}) map[string]interface{} {
+	return ValidateSettingsKey(settingsMap, GlobalSettingsConfigMap)
+}
+
+func ValidateAndConvertGlobalSettingsValue(key, value string) (convertedValue interface{}, err error) {
+	convertedValue, err = ValidateAndConvertSettingsValue(key, value, GlobalSettingsConfigMap)
+	if err != nil {
+		return
+	}
+
+	// additional checks
+	switch key {
+	case GoGCKey:
+		if convertedValue == 0 {
+			err = fmt.Errorf("0 is not a valid value for GOGC")
+		}
+	}
+	return
 }
