@@ -557,11 +557,11 @@ func newXmemClient(name string, read_timeout, write_timeout time.Duration,
 		write_timeout:                    write_timeout,
 		max_downtime:                     max_downtime,
 		max_continuous_write_failure:     max_continuous_failure,
-		healthy:        true,
-		num_of_repairs: 0,
-		lock:           sync.RWMutex{},
-		backoff_factor: 0,
-		downtime_start: time.Date(1, time.January, 1, 0, 0, 0, 0, time.UTC),
+		healthy:                          true,
+		num_of_repairs:                   0,
+		lock:                             sync.RWMutex{},
+		backoff_factor:                   0,
+		downtime_start:                   time.Date(1, time.January, 1, 0, 0, 0, 0, time.UTC),
 	}
 }
 
@@ -1199,14 +1199,6 @@ func (xmem *XmemNozzle) finalCleanup() {
 		xmem.Logger().Infof("%v recycling %v objects in buffer\n", xmem.Id(), buf.itemCountInBuffer())
 		for _, bufferredReq := range buf.slots {
 			xmem.cleanupBufferedMCRequest(bufferredReq)
-		}
-	}
-
-	dataChan := xmem.getDataChan()
-	if dataChan != nil {
-		xmem.Logger().Infof("%v recycling %v objects in data channel\n", xmem.Id(), len(dataChan))
-		for data := range dataChan {
-			xmem.dataObj_recycler(xmem.topic, data)
 		}
 	}
 
