@@ -21,6 +21,7 @@ import (
 	"github.com/couchbase/goxdcr/service_def"
 	utilities "github.com/couchbase/goxdcr/utils"
 	"net"
+	"sync"
 	"time"
 )
 
@@ -31,10 +32,12 @@ var AuditServiceUserAgent = "Goxdcr Audit"
 var AuditPutCommandCode = mc.AUDIT
 
 type AuditSvc struct {
-	top_svc service_def.XDCRCompTopologySvc
-	kvaddr  string
-	logger  *log.CommonLogger
-	utils   utilities.UtilsIface
+	top_svc     service_def.XDCRCompTopologySvc
+	kvaddr      string
+	logger      *log.CommonLogger
+	utils       utilities.UtilsIface
+	initialized bool
+	stateLock   sync.RWMutex
 }
 
 func NewAuditSvc(top_svc service_def.XDCRCompTopologySvc, loggerCtx *log.LoggerContext, utilsIn utilities.UtilsIface) (*AuditSvc, error) {
@@ -44,19 +47,45 @@ func NewAuditSvc(top_svc service_def.XDCRCompTopologySvc, loggerCtx *log.LoggerC
 		utils:   utilsIn,
 	}
 
-	err := service.initWithRetry()
-	if err != nil {
-		service.logger.Errorf("Error creating audit service. err=%v\n", err)
-		return nil, err
-	}
-
 	service.logger.Infof("Created audit service.\n")
 	return service, nil
+}
+
+func (service *AuditSvc) isInitialized() bool {
+	service.stateLock.RLock()
+	defer service.stateLock.RUnlock()
+	return service.initialized
+}
+
+func (service *AuditSvc) initIfNeeded() error {
+	if service.isInitialized() {
+		return nil
+	}
+
+	service.stateLock.Lock()
+	defer service.stateLock.Unlock()
+
+	// check again in case someone else sneaked in before Lock()
+	if service.initialized {
+		return nil
+	}
+
+	err := service.utils.ExponentialBackoffExecutor("auditSvs.Init", base.RetryIntervalMetakv, base.MaxNumOfMetakvRetries,
+		base.MetaKvBackoffFactor, service.init)
+	if err == nil {
+		service.initialized = true
+	}
+	return err
 }
 
 func (service *AuditSvc) Write(eventId uint32, event service_def.AuditEventIface) error {
 	if service.logger.GetLogLevel() >= log.LogLevelDebug {
 		service.logger.Debugf("Writing audit event. eventId=%v, event=%v\n", eventId, event.Clone().Redact())
+	}
+
+	err := service.initIfNeeded()
+	if err != nil {
+		return err
 	}
 
 	client, err := service.getClient()
@@ -131,11 +160,6 @@ func composeAuditRequest(eventId uint32, event service_def.AuditEventIface) (*mc
 
 	req.Opaque = eventId
 	return req, nil
-}
-
-func (service *AuditSvc) initWithRetry() error {
-	return service.utils.ExponentialBackoffExecutor("auditSvs.Init", base.RetryIntervalMetakv, base.MaxNumOfMetakvRetries,
-		base.MetaKvBackoffFactor, service.init)
 }
 
 func (service *AuditSvc) init() error {
