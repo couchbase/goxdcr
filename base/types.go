@@ -11,6 +11,7 @@ package base
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"github.com/couchbase/gomemcached"
 	mrand "math/rand"
@@ -375,4 +376,46 @@ func FormatErrMsgWithUpperLimit(errCh chan ComponentError, maxNumberOfErrorsToTr
 		}
 	}
 	return errMap
+}
+
+type PriorityType int
+
+const (
+	PriorityTypeHigh PriorityType = iota
+	PriorityTypeMedium PriorityType = iota
+	PriorityTypeLow  PriorityType = iota
+)
+
+// priority shown on UI and rest api
+const (
+	PriorityHighString string = "High"
+	PriorityMediumString string = "Medium"
+	PriorityLowString  string = "Low"
+)
+
+func PriorityTypeFromStr(priorityStr string) (PriorityType, error) {
+	var priority PriorityType
+	switch priorityStr {
+	case PriorityHighString:
+		priority = PriorityTypeHigh
+	case PriorityMediumString:
+		priority = PriorityTypeMedium
+	case PriorityLowString:
+		priority = PriorityTypeLow
+	default:
+		return -1, errors.New(fmt.Sprintf("%v is not a valid priority", priorityStr))
+	}
+	return priority, nil
+}
+
+func (priority PriorityType) String() string {
+	switch priority {
+	case PriorityTypeHigh:
+		return PriorityHighString
+	case PriorityTypeMedium:
+		return PriorityMediumString
+	case PriorityTypeLow:
+		return PriorityLowString
+	}
+	return "Unknown"
 }

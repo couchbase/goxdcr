@@ -944,8 +944,6 @@ func allowableErrorCodes(err error) bool {
 func (r *PipelineUpdater) checkAndDisableProblematicFeatures() {
 	// First make sure that no one has changed replicationSettings from underneath us
 	if r.replSpecSettingsHelper.HasChanged() {
-		// If the real specs have been changed, disregard customSettings so we'll read the most up to date changes
-		r.rep_status.ClearCustomSettings()
 		r.replSpecSettingsHelper.Clear()
 	} else if r.currentErrors != nil {
 		if r.currentErrors.ContainsError(base.ErrorCompressionNotSupported, true /*exactMatch*/) {
@@ -961,12 +959,10 @@ func (r *PipelineUpdater) disableCompression(reason error) {
 		r.logger.Errorf(fmt.Sprintf("Unable to disable compression for pipeline %v - rep_status is nil", r.pipeline_name))
 		return
 	}
-	settings := r.rep_status.Settings()
-	r.disabledFeatures |= disabledCompression
 
-	r.logger.Infof("Temporarily disabling compression for pipeline: %v due to %v", r.pipeline_name, reason)
-	settings.SetCompressionType((int)(base.CompressionTypeNone))
-
+	r.logger.Infof("Temporarily disabling compression for pipeline: %v", r.pipeline_name)
+	settings := make(map[string]interface{})
+	settings[base.CompressionTypeKey] = (int)(base.CompressionTypeNone)
 	r.rep_status.SetCustomSettings(settings)
 
 	switch reason {
@@ -978,6 +974,7 @@ func (r *PipelineUpdater) disableCompression(reason error) {
 		r.disabledCompressionReason = DCInvalid
 	}
 
+	r.disabledFeatures |= disabledCompression
 	// For unit test only
 	r.testCurrentDisabledFeatures = r.disabledFeatures
 }
@@ -985,7 +982,7 @@ func (r *PipelineUpdater) disableCompression(reason error) {
 func (r *PipelineUpdater) resetDisabledFeatures() {
 	if r.disabledFeatures > 0 {
 		r.logger.Infof("Restoring compression for pipeline: %v the next time it restarts", r.pipeline_name)
-		r.rep_status.ClearCustomSettings()
+		r.rep_status.ClearTemporaryCustomSettings()
 		r.disabledFeatures = 0
 		r.disabledCompressionReason = DCNotDisabled
 	}

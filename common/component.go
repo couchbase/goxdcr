@@ -49,6 +49,8 @@ const (
 	DataThrottled ComponentEventType = iota
 	// Unable to get recycled data from datapool
 	DataPoolGetFail ComponentEventType = iota
+	//data sending is throttled due to throughput limit being reached
+	DataThroughputThrottled ComponentEventType = iota
 )
 
 type Event struct {

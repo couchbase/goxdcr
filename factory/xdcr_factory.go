@@ -36,7 +36,9 @@ type XDCRFactoryIface interface {
 	ConstructSettingsForPart(pipeline common.Pipeline, part common.Part, settings metadata.ReplicationSettingsMap,
 		targetClusterRef *metadata.RemoteClusterReference, ssl_port_map map[string]uint16,
 		isSSLOverMem bool) (metadata.ReplicationSettingsMap, error)
+	ConstructSettingsForConnector(pipeline common.Pipeline, connector common.Connector, settings metadata.ReplicationSettingsMap) (metadata.ReplicationSettingsMap, error)
 	ConstructUpdateSettingsForPart(pipeline common.Pipeline, part common.Part, settings metadata.ReplicationSettingsMap) (metadata.ReplicationSettingsMap, error)
+	ConstructUpdateSettingsForConnector(pipeline common.Pipeline, connector common.Connector, settings metadata.ReplicationSettingsMap) (metadata.ReplicationSettingsMap, error)
 	SetStartSeqno(pipeline common.Pipeline) error
 	CheckpointBeforeStop(pipeline common.Pipeline) error
 	ConstructUpdateSettingsForService(pipeline common.Pipeline, service common.PipelineService, settings metadata.ReplicationSettingsMap) (metadata.ReplicationSettingsMap, error)
@@ -53,7 +55,8 @@ type XDCRFactory struct {
 	capi_svc           service_def.CAPIService
 	uilog_svc          service_def.UILogSvc
 	//bucket settings service
-	bucket_settings_svc service_def.BucketSettingsSvc
+	bucket_settings_svc      service_def.BucketSettingsSvc
+	throughput_throttler_svc service_def.ThroughputThrottlerSvc
 
 	default_logger_ctx       *log.LoggerContext
 	pipeline_failure_handler common.SupervisorFailureHandler
@@ -70,6 +73,7 @@ func NewXDCRFactory(repl_spec_svc service_def.ReplicationSpecSvc,
 	capi_svc service_def.CAPIService,
 	uilog_svc service_def.UILogSvc,
 	bucket_settings_svc service_def.BucketSettingsSvc,
+	throughput_throttler_svc service_def.ThroughputThrottlerSvc,
 	pipeline_default_logger_ctx *log.LoggerContext,
 	factory_logger_ctx *log.LoggerContext,
 	pipeline_failure_handler common.SupervisorFailureHandler,
@@ -82,6 +86,7 @@ func NewXDCRFactory(repl_spec_svc service_def.ReplicationSpecSvc,
 		capi_svc:                 capi_svc,
 		uilog_svc:                uilog_svc,
 		bucket_settings_svc:      bucket_settings_svc,
+		throughput_throttler_svc: throughput_throttler_svc,
 		default_logger_ctx:       pipeline_default_logger_ctx,
 		pipeline_failure_handler: pipeline_failure_handler,
 		logger:                   log.NewLogger("XDCRFactory", factory_logger_ctx),
@@ -210,8 +215,8 @@ func (xdcrf *XDCRFactory) NewPipeline(topic string, progress_recorder common.Pip
 
 	// construct and initializes the pipeline
 	pipeline := pp.NewPipelineWithSettingConstructor(topic, sourceNozzles, outNozzles, spec, targetClusterRef,
-		xdcrf.ConstructSettingsForPart, xdcrf.ConstructSSLPortMap, xdcrf.ConstructUpdateSettingsForPart,
-		xdcrf.SetStartSeqno, xdcrf.CheckpointBeforeStop, logger_ctx)
+		xdcrf.ConstructSettingsForPart, xdcrf.ConstructSettingsForConnector, xdcrf.ConstructSSLPortMap, xdcrf.ConstructUpdateSettingsForPart,
+		xdcrf.ConstructUpdateSettingsForConnector, xdcrf.SetStartSeqno, xdcrf.CheckpointBeforeStop, logger_ctx)
 
 	// These listeners are the driving factors of the pipeline
 	xdcrf.registerAsyncListenersOnSources(pipeline, logger_ctx)
@@ -273,6 +278,9 @@ func (xdcrf *XDCRFactory) registerAsyncListenersOnSources(pipeline common.Pipeli
 		data_filtered_event_listener := component.NewDefaultAsyncComponentEventListenerImpl(
 			pipeline_utils.GetElementIdFromNameAndIndex(pipeline, base.DataFilteredEventListener, i),
 			pipeline.Topic(), logger_ctx)
+		data_throughput_throttled_event_listener := component.NewDefaultAsyncComponentEventListenerImpl(
+			pipeline_utils.GetElementIdFromNameAndIndex(pipeline, base.DataThroughputThrottledEventListener, i),
+			pipeline.Topic(), logger_ctx)
 
 		for index := load_distribution[i][0]; index < load_distribution[i][1]; index++ {
 			// Get the source DCP nozzle
@@ -285,6 +293,7 @@ func (xdcrf *XDCRFactory) registerAsyncListenersOnSources(pipeline common.Pipeli
 			// For filtering event, register the event ON the router itself to let the router take care of it
 			conn := dcp_part.Connector()
 			conn.RegisterComponentEventListener(common.DataFiltered, data_filtered_event_listener)
+			conn.RegisterComponentEventListener(common.DataThroughputThrottled, data_throughput_throttled_event_listener)
 		}
 	}
 }
@@ -540,7 +549,11 @@ func (xdcrf *XDCRFactory) constructRouter(id string, spec *metadata.ReplicationS
 	sourceCRMode base.ConflictResolutionMode,
 	logger_ctx *log.LoggerContext) (*parts.Router, error) {
 	routerId := "Router" + PART_NAME_DELIMITER + id
-	router, err := parts.NewRouter(routerId, spec.Id, spec.Settings.FilterExpression, downStreamParts, vbNozzleMap, sourceCRMode, logger_ctx, pipeline_manager.NewMCRequestObj, xdcrf.utils)
+	// when initializing router, needToThrottle is set to true as long as replication priority is not High
+	// for replications with Medium priority and ongoing flag set, needToThrottle will be updated to false
+	// through a UpdateSettings() call to the router in the pipeline startup sequence before parts are started
+	router, err := parts.NewRouter(routerId, spec.Id, spec.Settings.FilterExpression, downStreamParts, vbNozzleMap, sourceCRMode,
+		logger_ctx, pipeline_manager.NewMCRequestObj, xdcrf.utils, xdcrf.throughput_throttler_svc, spec.Settings.GetPriority() != base.PriorityTypeHigh)
 	if err != nil {
 		xdcrf.logger.Errorf("Error (%v) constructing router %v", err.Error(), routerId)
 	} else {
@@ -628,6 +641,15 @@ func (xdcrf *XDCRFactory) ConstructSettingsForPart(pipeline common.Pipeline, par
 	}
 }
 
+func (xdcrf *XDCRFactory) ConstructSettingsForConnector(pipeline common.Pipeline, connector common.Connector, settings metadata.ReplicationSettingsMap) (metadata.ReplicationSettingsMap, error) {
+	if _, ok := connector.(*parts.Router); ok {
+		xdcrf.logger.Debugf("Construct settings for Router %s", connector.Id())
+		return xdcrf.constructSettingsForRouter(pipeline, settings)
+	} else {
+		return settings, nil
+	}
+}
+
 func (xdcrf *XDCRFactory) ConstructUpdateSettingsForPart(pipeline common.Pipeline, part common.Part, settings metadata.ReplicationSettingsMap) (metadata.ReplicationSettingsMap, error) {
 
 	if _, ok := part.(*parts.XmemNozzle); ok {
@@ -636,6 +658,19 @@ func (xdcrf *XDCRFactory) ConstructUpdateSettingsForPart(pipeline common.Pipelin
 	} else if _, ok := part.(*parts.CapiNozzle); ok {
 		xdcrf.logger.Debugf("Construct update settings for CapiNozzle %s", part.Id())
 		return xdcrf.constructUpdateSettingsForCapiNozzle(pipeline, settings), nil
+	} else if _, ok := part.(*parts.DcpNozzle); ok {
+		xdcrf.logger.Debugf("Construct update settings for DcpNozzle %s", part.Id())
+		return xdcrf.constructUpdateSettingsForDcpNozzle(pipeline, settings), nil
+	} else {
+		return settings, nil
+	}
+}
+
+func (xdcrf *XDCRFactory) ConstructUpdateSettingsForConnector(pipeline common.Pipeline, connector common.Connector, settings metadata.ReplicationSettingsMap) (metadata.ReplicationSettingsMap, error) {
+	if _, ok := connector.(*parts.Router); ok {
+		xdcrf.logger.Debugf("Construct update settings for Router %s", connector.Id())
+		// use the same constructSettingsForRouter() method as in ConstructSettingsForConnector()
+		return xdcrf.constructSettingsForRouter(pipeline, settings)
 	} else {
 		return settings, nil
 	}
@@ -662,6 +697,27 @@ func (xdcrf *XDCRFactory) constructUpdateSettingsForCapiNozzle(pipeline common.P
 	}
 
 	return capiSettings
+}
+
+func (xdcrf *XDCRFactory) constructUpdateSettingsForDcpNozzle(pipeline common.Pipeline, settings metadata.ReplicationSettingsMap) metadata.ReplicationSettingsMap {
+	dcpSettings := make(metadata.ReplicationSettingsMap)
+
+	vbTimestamp, ok := settings[base.VBTimestamps]
+	if ok {
+		dcpSettings[parts.DCP_VBTimestamp] = vbTimestamp
+	}
+
+	statsInterval, ok := settings[metadata.PipelineStatsIntervalKey]
+	if ok {
+		dcpSettings[parts.DCP_Stats_Interval] = statsInterval
+	}
+
+	dcpPriority, ok := settings[parts.DCP_Priority]
+	if ok {
+		dcpSettings[parts.DCP_Priority] = dcpPriority
+	}
+
+	return dcpSettings
 }
 
 func (xdcrf *XDCRFactory) SetStartSeqno(pipeline common.Pipeline) error {
@@ -763,7 +819,25 @@ func (xdcrf *XDCRFactory) constructSettingsForDcpNozzle(pipeline common.Pipeline
 	} else {
 		dcpNozzleSettings[parts.SETTING_COMPRESSION_TYPE] = base.GetCompressionType(getSettingFromSettingsMap(settings, metadata.CompressionTypeKey, repSettings.CompressionType).(int))
 	}
+
+	// dcp priority settings could have been set through replStatus.customSettings.
+	dcpPriority, ok := settings[parts.DCP_Priority]
+	if ok {
+		dcpNozzleSettings[parts.DCP_Priority] = dcpPriority
+	}
+
 	return dcpNozzleSettings, nil
+}
+
+func (xdcrf *XDCRFactory) constructSettingsForRouter(pipeline common.Pipeline, settings metadata.ReplicationSettingsMap) (metadata.ReplicationSettingsMap, error) {
+	routerSettings := make(metadata.ReplicationSettingsMap)
+
+	needToThrottle, ok := settings[parts.NeedToThrottleKey]
+	if ok {
+		routerSettings[parts.NeedToThrottleKey] = needToThrottle
+	}
+
+	return routerSettings, nil
 }
 
 func (xdcrf *XDCRFactory) registerServices(pipeline common.Pipeline, logger_ctx *log.LoggerContext,

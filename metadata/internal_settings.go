@@ -151,6 +151,48 @@ const (
 	TimeoutPartsStopKey           = "TimeoutPartsStop"
 	TimeoutDcpCloseUprStreamsKey  = "TimeoutDcpCloseUprStreams"
 	TimeoutDcpCloseUprFeedKey     = "TimeoutDcpCloseUprFeed"
+
+	/* --Resource menagement related settings ---*/
+
+	// interval for resource management actions
+	ResourceManagementIntervalKey = "ResourceManagementInterval"
+	// interval for logging resource management stats
+	ResourceManagementStatsIntervalKey = "ResourceManagementStatsInterval"
+	// once changes_left becomes smaller than this threshold, replication will be classified as ongoing replication
+	ChangesLeftThresholdForOngoingReplicationKey = "ChangesLeftThresholdForOngoingReplication"
+	// all the ratio related constants are defined as multiples of 1/ResourceManagementRatioBase
+	// so that we can do integer arithmetic
+	ResourceManagementRatioBaseKey = "ResourceManagementRatioBase"
+	// upper bound for ratio of throughput of high priority replications to throughput of all replications
+	// this is to ensure that low priority replications will not be completely starved
+	ResourceManagementRatioUpperBoundKey = "ResourceManagementRatioUpperBound"
+	// lower bound for ratio of throughput of high priority replications to throughput of all replications
+	ResourceManagementRatioLowerBoundKey = "ResourceManagementRatioLowerBound"
+	// the first increment when throttling is first turned on.
+	ResourceManagementRatioFirstIncrementKey = "ResourceManagementRatioFirstIncrement"
+	// increment amount when ratio is being increased
+	ResourceManagementRatioIncrementKey = "ResourceManagementRatioIncrement"
+	// decrement amount when ratio is being decreased
+	ResourceManagementRatioDecrementKey = "ResourceManagementRatioDecrement"
+	// max count that increasing throttling has not been effective
+	// we will start decreaing throttling when the max is reached
+	MaxCountIneffectiveThrottlingIncreaseKey = "MaxCountIneffectiveThrottlingIncrease"
+	// max count that throttling has been decreased
+	// we will go back to increasing throttling when the max is reached
+	MaxCountThrottlingDecreaseKey = "MaxCountThrottlingDecrease"
+	// max count for wait period
+	// we will start decreasing throttling when the max is reached
+	MaxCountWaitPeriodKey = "MaxCountWaitPeriod"
+	// when the number of consecutive terms where there have been backlog reaches the threshold, set DCP priorities
+	MaxCountBacklogForSetDcpPriorityKey = "MaxCountBacklogForSetDcpPriority"
+	// when the number of consecutive terms where there have been no backlog reaches the threshold, reset DCP priorities to normal
+	MaxCountNoBacklogForResetDcpPriorityKey = "MaxCountNoBacklogForResetDcpPriority"
+	// interval for printing throughput throttler stats to log file
+	ThroughputThrottlerLogIntervalKey = "ThroughputThrottlerLogInterval"
+	// number of time slots [per measurement interval] for throughput throttling
+	NumberOfSlotsForThroughputThrottlingKey = "NumberOfSlotsForThroughputThrottling"
+	// when actual acpu usage exceeds maxCpu * ThresholdRatioForMaxCpu/100, cpu is considered to have maxed out
+	ThresholdRatioForMaxCpuKey = "ThresholdRatioForMaxCpu"
 )
 
 var TopologyChangeCheckIntervalConfig = &SettingsConfig{10, &Range{1, 100}}
@@ -215,6 +257,23 @@ var TimeoutPartsStartConfig = &SettingsConfig{30, &Range{1, 3600}}
 var TimeoutPartsStopConfig = &SettingsConfig{10, &Range{1, 3600}}
 var TimeoutDcpCloseUprStreamsConfig = &SettingsConfig{3, &Range{1, 3600}}
 var TimeoutDcpCloseUprFeedConfig = &SettingsConfig{3, &Range{1, 3600}}
+var ResourceManagementIntervalConfig = &SettingsConfig{1000, &Range{10, 3600000}}
+var ResourceManagementStatsIntervalConfig = &SettingsConfig{10000, &Range{10, 3600000}}
+var ChangesLeftThresholdForOngoingReplicationConfig = &SettingsConfig{200000, &Range{1, 200000000}}
+var ResourceManagementRatioBaseConfig = &SettingsConfig{100, &Range{10, 10000}}
+var ResourceManagementRatioUpperBoundConfig = &SettingsConfig{90, &Range{1, 10000}}
+var ResourceManagementRatioLowerBoundConfig = &SettingsConfig{-1, &Range{-1, 10000}}
+var ResourceManagementRatioFirstIncrementConfig = &SettingsConfig{15, &Range{1, 10000}}
+var ResourceManagementRatioDecrementConfig = &SettingsConfig{5, &Range{1, 10000}}
+var ResourceManagementRatioIncrementConfig = &SettingsConfig{5, &Range{1, 10000}}
+var MaxCountIneffectiveThrottlingIncreaseConfig = &SettingsConfig{5, &Range{1, 1000}}
+var MaxCountThrottlingDecreaseConfig = &SettingsConfig{6, &Range{1, 1000}}
+var MaxCountWaitPeriodConfig = &SettingsConfig{5, &Range{1, 1000}}
+var MaxCountBacklogForSetDcpPriorityConfig = &SettingsConfig{5, &Range{1, 1000}}
+var MaxCountNoBacklogForResetDcpPriorityConfig = &SettingsConfig{300, &Range{1, 10000}}
+var ThroughputThrottlerLogIntervalConfig = &SettingsConfig{10, &Range{1, 3600}}
+var NumberOfSlotsForThroughputThrottlingConfig = &SettingsConfig{10, &Range{1, 1000}}
+var ThresholdRatioForMaxCpuConfig = &SettingsConfig{95, &Range{1, 1000}}
 
 var XDCRInternalSettingsConfigMap = map[string]*SettingsConfig{
 	TopologyChangeCheckIntervalKey:                TopologyChangeCheckIntervalConfig,
@@ -279,6 +338,23 @@ var XDCRInternalSettingsConfigMap = map[string]*SettingsConfig{
 	TimeoutPartsStopKey:                           TimeoutPartsStopConfig,
 	TimeoutDcpCloseUprStreamsKey:                  TimeoutDcpCloseUprStreamsConfig,
 	TimeoutDcpCloseUprFeedKey:                     TimeoutDcpCloseUprFeedConfig,
+	ResourceManagementIntervalKey:                 ResourceManagementIntervalConfig,
+	ResourceManagementStatsIntervalKey:            ResourceManagementStatsIntervalConfig,
+	ChangesLeftThresholdForOngoingReplicationKey:  ChangesLeftThresholdForOngoingReplicationConfig,
+	ResourceManagementRatioBaseKey:                ResourceManagementRatioBaseConfig,
+	ResourceManagementRatioUpperBoundKey:          ResourceManagementRatioUpperBoundConfig,
+	ResourceManagementRatioLowerBoundKey:          ResourceManagementRatioLowerBoundConfig,
+	ResourceManagementRatioFirstIncrementKey:      ResourceManagementRatioFirstIncrementConfig,
+	ResourceManagementRatioDecrementKey:           ResourceManagementRatioDecrementConfig,
+	ResourceManagementRatioIncrementKey:           ResourceManagementRatioIncrementConfig,
+	MaxCountIneffectiveThrottlingIncreaseKey:      MaxCountIneffectiveThrottlingIncreaseConfig,
+	MaxCountThrottlingDecreaseKey:                 MaxCountThrottlingDecreaseConfig,
+	MaxCountWaitPeriodKey:                         MaxCountWaitPeriodConfig,
+	MaxCountBacklogForSetDcpPriorityKey:           MaxCountBacklogForSetDcpPriorityConfig,
+	MaxCountNoBacklogForResetDcpPriorityKey:       MaxCountNoBacklogForResetDcpPriorityConfig,
+	ThroughputThrottlerLogIntervalKey:             ThroughputThrottlerLogIntervalConfig,
+	NumberOfSlotsForThroughputThrottlingKey:       NumberOfSlotsForThroughputThrottlingConfig,
+	ThresholdRatioForMaxCpuKey:                    ThresholdRatioForMaxCpuConfig,
 }
 
 func InitConstants(xmemMaxIdleCountLowerBound int, xmemMaxIdleCountUpperBound int) {

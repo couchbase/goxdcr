@@ -319,6 +319,10 @@ var CouchApiBaseUriDelimiter = "%2f"
 
 var XDCR_EXPVAR_ROOT = "XDCR_Replications"
 
+const ChangesLeftStats = "changes_left"
+const DocsFromDcpStats = "docs_received_from_dcp"
+const DocsRepQueueStats = "docs_rep_queue"
+
 //constants for replication docs
 const (
 	RemoteClustersForReplicationDoc = "remoteClusters"
@@ -355,13 +359,14 @@ var EventChanSize = 10000
 
 // names of async component event listeners
 const (
-	DataReceivedEventListener    = "DataReceivedEventListener"
-	DataProcessedEventListener   = "DataProcessedEventListener"
-	DataFilteredEventListener    = "DataFilteredEventListener"
-	DataSentEventListener        = "DataSentEventListener"
-	DataFailedCREventListener    = "DataFailedCREventListener"
-	GetMetaReceivedEventListener = "GetMetaReceivedEventListener"
-	DataThrottledEventListener   = "DataThrottledEventListener"
+	DataReceivedEventListener            = "DataReceivedEventListener"
+	DataProcessedEventListener           = "DataProcessedEventListener"
+	DataFilteredEventListener            = "DataFilteredEventListener"
+	DataSentEventListener                = "DataSentEventListener"
+	DataFailedCREventListener            = "DataFailedCREventListener"
+	GetMetaReceivedEventListener         = "GetMetaReceivedEventListener"
+	DataThrottledEventListener           = "DataThrottledEventListener"
+	DataThroughputThrottledEventListener = "DataThroughputThrottledEventListener"
 )
 
 const (
@@ -480,6 +485,8 @@ var TimeoutDcpCloseUprFeed = 3 * time.Second
 
 var NetTCP = "tcp"
 
+var CurrentTime = "CurrentTime"
+
 /**
  * Log Redaction section
  * Spectrum 1 - User Data redaction (ud) tags
@@ -521,6 +528,10 @@ const (
 	FilterFlagSkipKey   FilterFlagType = 0x2
 	FilterFlagKeyOnly   FilterFlagType = 0x4
 )
+
+var DefaultGoMaxProcs int = 4
+
+var BacklogThresholdDefault = 1000
 
 // --------------- Constants that are configurable -----------------
 
@@ -718,6 +729,64 @@ var BypassSanInCertificateCheck bool = false
 // Number of times to verify bucket is missing before removing an invalid replicationSpec
 var ReplicationSpecGCCnt int = 4
 
+// interval for resource management actions
+var ResourceManagementInterval = 1000 * time.Millisecond
+
+// interval for logging resource management stats
+var ResourceManagementStatsInterval = 10000 * time.Millisecond
+
+// once changes_left becomes smaller than this threshold, replication will be classified as ongoing replication
+var ChangesLeftThresholdForOngoingReplication = 200000
+
+// all the ratio related constants are defined as multiples of 1/ResourceManagementRatioBase
+// so that we can do integer arithmetic
+var ResourceManagementRatioBase = 100
+
+// lower bound for ratio of throughput of high priority replications to throughput of all replications
+// the default value of -1 indicates that there is no lower bound
+var ResourceManagementRatioLowerBound = -1
+
+// upper bound for ratio of throughput of high priority replications to throughput of all replications
+// this is to ensure that low priority replications will not be completely starved
+var ResourceManagementRatioUpperBound = 90
+
+// the first increment when throttling is first turned on.
+// it is much larger than subsequent increments
+var ResourceManagementRatioFirstIncrement = 15
+
+// increment amount when ratio is being increased
+var ResourceManagementRatioIncrement = 5
+
+// decrement amount when ratio is being decreased
+var ResourceManagementRatioDecrement = 5
+
+// max count that increasing throttling has not been effective
+// we will start decreasing throttling when the max is reached
+var MaxCountIneffectiveThrottlingIncrease = 5
+
+// max count that throttling has been decreased
+// we will go back to increasing throttling when the max is reached
+var MaxCountThrottlingDecrease = 6
+
+// max count for wait period
+// we will start decreasing throttling when the max is reached
+var MaxCountWaitPeriod = 5
+
+// when the number of consecutive terms where there have been backlog reaches the threshold, set DCP priorities
+var MaxCountBacklogForSetDcpPriority = 5
+
+// when the number of consecutive terms where there have been no backlog reaches the threshold, reset DCP priorities to normal
+var MaxCountNoBacklogForResetDcpPriority = 300
+
+// interval for printing throughput throttler stats to log file
+var ThroughputThrottlerLogInterval = 10 * time.Second
+
+// number of time slots [per measurement interval] for throughput throttling
+var NumberOfSlotsForThroughputThrottling = 10
+
+// when actual acpu usage exceeds maxCpu * ThresholdRatioForMaxCpu/100, cpu is considered to have maxed out
+var ThresholdRatioForMaxCpu = 95
+
 func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeCountBeforeRestart,
 	maxTopologyStableCountBeforeRestart, maxWorkersForCheckpointing int,
 	timeoutCheckpointBeforeStop time.Duration, capiDataChanSizeMultiplier int,
@@ -745,14 +814,19 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	waitTimeBetweenMetadataChangeListeners time.Duration, keepAlivePeriod time.Duration,
 	thresholdPercentageForEventChanSizeLogging int, thresholdForThroughSeqnoComputation time.Duration,
 	statsLogInterval time.Duration, xmemDefaultRespTimeout time.Duration,
-	bypassSanInCertificateCheck int,
-	replicationSpecGCCnt int,
-	timeoutRuntimeContextStart time.Duration,
-	timeoutRuntimeContextStop time.Duration,
-	timeoutPartsStart time.Duration,
-	timeoutPartsStop time.Duration,
-	timeoutDcpCloseUprStreams time.Duration,
-	timeoutDcpCloseUprFeed time.Duration) {
+	bypassSanInCertificateCheck int, replicationSpecGCCnt int, timeoutRuntimeContextStart time.Duration,
+	timeoutRuntimeContextStop time.Duration, timeoutPartsStart time.Duration,
+	timeoutPartsStop time.Duration, timeoutDcpCloseUprStreams time.Duration,
+	timeoutDcpCloseUprFeed time.Duration,
+	resourceManagementInterval time.Duration, resourceManagementStatsInterval time.Duration,
+	changesLeftThresholdForOngoingReplication int, resourceManagementRatioBase int,
+	resourceManagementRatioUpperBound int, resourceManagementRatioLowerBound int,
+	resourceManagementRatioFirstIncrement int, resourceManagementRatioIncrement int,
+	resourceManagementRatioDecrement int, maxCountIneffectiveThrottlingIncrease int,
+	maxCountThrottlingDecrease int, maxCountWaitPeriod int,
+	maxCountBacklogForSetDcpPriority int,
+	maxCountNoBacklogForResetDcpPriority int, throughputThrottlerLogInterval time.Duration,
+	numberOfSlotsForThroughputThrottling int, thresholdRatioForMaxCpu int) {
 	TopologyChangeCheckInterval = topologyChangeCheckInterval
 	MaxTopologyChangeCountBeforeRestart = maxTopologyChangeCountBeforeRestart
 	MaxTopologyStableCountBeforeRestart = maxTopologyStableCountBeforeRestart
@@ -822,6 +896,23 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	TimeoutPartsStop = timeoutPartsStop
 	TimeoutDcpCloseUprStreams = timeoutDcpCloseUprStreams
 	TimeoutDcpCloseUprFeed = timeoutDcpCloseUprFeed
+	ResourceManagementInterval = resourceManagementInterval
+	ResourceManagementStatsInterval = resourceManagementStatsInterval
+	ChangesLeftThresholdForOngoingReplication = changesLeftThresholdForOngoingReplication
+	ResourceManagementRatioBase = resourceManagementRatioBase
+	ResourceManagementRatioUpperBound = resourceManagementRatioUpperBound
+	ResourceManagementRatioLowerBound = resourceManagementRatioLowerBound
+	ResourceManagementRatioFirstIncrement = resourceManagementRatioFirstIncrement
+	ResourceManagementRatioIncrement = resourceManagementRatioIncrement
+	ResourceManagementRatioDecrement = resourceManagementRatioDecrement
+	MaxCountIneffectiveThrottlingIncrease = maxCountIneffectiveThrottlingIncrease
+	MaxCountThrottlingDecrease = maxCountThrottlingDecrease
+	MaxCountWaitPeriod = maxCountWaitPeriod
+	MaxCountBacklogForSetDcpPriority = maxCountBacklogForSetDcpPriority
+	MaxCountNoBacklogForResetDcpPriority = maxCountNoBacklogForResetDcpPriority
+	ThroughputThrottlerLogInterval = throughputThrottlerLogInterval
+	NumberOfSlotsForThroughputThrottling = numberOfSlotsForThroughputThrottling
+	ThresholdRatioForMaxCpu = thresholdRatioForMaxCpu
 }
 
 // Need to escape the () to result in "META().xattrs" literal

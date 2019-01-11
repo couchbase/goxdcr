@@ -16,6 +16,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"expvar"
 	"fmt"
 	"github.com/couchbase/gojsonsm"
 	mcc "github.com/couchbase/gomemcached/client"
@@ -1064,4 +1065,13 @@ func InitPcreVars() {
 			ReservedWordsReplaceMap[ExternalKeyXattr] = externalXattrReplace
 		}
 	})
+}
+
+// parse stats value from stats map
+func ParseStats(statsMap *expvar.Map, statsName string) (int64, error) {
+	statsVal := statsMap.Get(statsName)
+	if statsVal == nil {
+		return 0, fmt.Errorf("Cannot find value for stats %v", statsName)
+	}
+	return strconv.ParseInt(statsVal.String(), ParseIntBase, ParseIntBitSize)
 }

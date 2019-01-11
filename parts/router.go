@@ -12,13 +12,17 @@ package parts
 import (
 	"encoding/binary"
 	"errors"
+	"fmt"
 	mc "github.com/couchbase/gomemcached"
 	mcc "github.com/couchbase/gomemcached/client"
 	"github.com/couchbase/goxdcr/base"
 	common "github.com/couchbase/goxdcr/common"
 	connector "github.com/couchbase/goxdcr/connector"
 	"github.com/couchbase/goxdcr/log"
+	"github.com/couchbase/goxdcr/metadata"
+	"github.com/couchbase/goxdcr/service_def"
 	utilities "github.com/couchbase/goxdcr/utils"
+	"sync/atomic"
 	"time"
 )
 
@@ -26,6 +30,14 @@ var ErrorInvalidDataForRouter = errors.New("Input data to Router is invalid.")
 var ErrorNoDownStreamNodesForRouter = errors.New("No downstream nodes have been defined for the Router.")
 var ErrorNoRoutingMapForRouter = errors.New("No routingMap has been defined for Router.")
 var ErrorInvalidRoutingMapForRouter = errors.New("routingMap in Router is invalid.")
+
+var NeedToThrottleKey = "NeedToThrottle"
+
+// enum for whether router needs to be throttled
+const (
+	NoNeedToThrottle int32 = 0
+	NeedToThrottle   int32 = 1
+)
 
 type ReqCreator func(id string) (*base.WrappedMCRequest, error)
 
@@ -42,6 +54,11 @@ type Router struct {
 	// whether lww conflict resolution mode has been enabled
 	sourceCRMode base.ConflictResolutionMode
 	utils        utilities.UtilsIface
+
+	throughputThrottlerSvc service_def.ThroughputThrottlerSvc
+	// whether the current replication/router needs to be throttled
+	// when Priority or Ongoing setting is changed, this field will be updated through UpdateSettings() call
+	needToThrottle int32
 }
 
 /**
@@ -58,8 +75,9 @@ func NewRouter(id string, topic string, filterExpression string,
 	routingMap map[uint16]string,
 	sourceCRMode base.ConflictResolutionMode,
 	logger_context *log.LoggerContext, req_creator ReqCreator,
-	utilsIn utilities.UtilsIface) (*Router, error) {
-
+	utilsIn utilities.UtilsIface,
+	throughputThrottlerSvc service_def.ThroughputThrottlerSvc,
+	needToThrottle bool) (*Router, error) {
 	var filter *Filter
 	var err error
 
@@ -71,20 +89,27 @@ func NewRouter(id string, topic string, filterExpression string,
 	}
 
 	router := &Router{
-		id:           id,
-		filter:       filter,
-		routingMap:   routingMap,
-		topic:        topic,
-		sourceCRMode: sourceCRMode,
-		req_creator:  req_creator,
-		utils:        utilsIn,
+		id:                     id,
+		filter:                 filter,
+		routingMap:             routingMap,
+		topic:                  topic,
+		sourceCRMode:           sourceCRMode,
+		req_creator:            req_creator,
+		utils:                  utilsIn,
+		throughputThrottlerSvc: throughputThrottlerSvc,
+	}
+
+	if needToThrottle {
+		router.needToThrottle = NeedToThrottle
+	} else {
+		router.needToThrottle = NoNeedToThrottle
 	}
 
 	// routingFunc is the main intelligence of the router's functionality
 	var routingFunc connector.Routing_Callback_Func = router.route
 	router.Router = connector.NewRouter(id, downStreamParts, &routingFunc, logger_context, "XDCRRouter")
 
-	router.Logger().Infof("%v created with %d downstream parts \n", router.id, len(downStreamParts))
+	router.Logger().Infof("%v created with %d downstream parts needToThrottle=%v\n", router.id, len(downStreamParts), needToThrottle)
 	return router, nil
 }
 
@@ -147,6 +172,8 @@ func (router *Router) ComposeMCRequest(event *mcc.UprEvent) (*base.WrappedMCRequ
 // Implementation of the routing algorithm
 // Currently doing static dispatching based on vbucket number.
 func (router *Router) route(data interface{}) (map[string]interface{}, error) {
+	router.throttle()
+
 	result := make(map[string]interface{})
 
 	// only *mc.UprEvent type data is accepted
@@ -191,6 +218,31 @@ func (router *Router) route(data interface{}) (map[string]interface{}, error) {
 	return result, nil
 }
 
+func (router *Router) throttle() {
+	if atomic.LoadInt32(&router.needToThrottle) == NoNeedToThrottle {
+		return
+	}
+
+	// this statement before the for loop is to ensure that
+	// we do not incur the overhead of collecting start time
+	// and raising event when throttling does not happen
+	if router.throughputThrottlerSvc.CanSend() {
+		return
+	}
+
+	start_time := time.Now()
+	for {
+		if router.throughputThrottlerSvc.CanSend() {
+			break
+		} else {
+			router.throughputThrottlerSvc.Wait()
+		}
+	}
+
+	router.RaiseEvent(common.NewEvent(common.DataThroughputThrottled, nil, router, nil, time.Since(start_time)))
+
+}
+
 func (router *Router) RoutingMap() map[uint16]string {
 	return router.routingMap
 }
@@ -208,6 +260,29 @@ func (router *Router) RoutingMapByDownstreams() map[string][]uint16 {
 		ret[partId] = vblist
 	}
 	return ret
+}
+
+func (router *Router) UpdateSettings(settings metadata.ReplicationSettingsMap) error {
+	needToThrottleObj, ok := settings[NeedToThrottleKey]
+	if !ok {
+		return nil
+	}
+	needToThrottle, ok := needToThrottleObj.(bool)
+	if !ok {
+		err := fmt.Errorf("%v invalid data type for needToThrottle. value = %v\n", router.id, needToThrottleObj)
+		router.Logger().Warn(err.Error())
+		return err
+	}
+
+	router.Logger().Infof("%v changing needToThrottle to %v\n", router.id, needToThrottle)
+
+	if needToThrottle {
+		atomic.StoreInt32(&router.needToThrottle, NeedToThrottle)
+	} else {
+		atomic.StoreInt32(&router.needToThrottle, NoNeedToThrottle)
+	}
+
+	return nil
 }
 
 func (router *Router) newWrappedMCRequest() (*base.WrappedMCRequest, error) {

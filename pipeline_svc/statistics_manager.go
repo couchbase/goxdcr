@@ -44,7 +44,7 @@ const (
 	DOCS_PROCESSED_METRIC  = "docs_processed"
 	DATA_REPLICATED_METRIC = "data_replicated"
 	SIZE_REP_QUEUE_METRIC  = "size_rep_queue"
-	DOCS_REP_QUEUE_METRIC  = "docs_rep_queue"
+	DOCS_REP_QUEUE_METRIC  = base.DocsRepQueueStats
 
 	DOCS_FILTERED_METRIC         = "docs_filtered"
 	DOCS_UNABLE_TO_FILTER_METRIC = "docs_unable_to_filter"
@@ -58,7 +58,7 @@ const (
 	DELETION_FAILED_CR_SOURCE_METRIC = "deletion_failed_cr_source"
 	SET_FAILED_CR_SOURCE_METRIC      = "set_failed_cr_source"
 
-	CHANGES_LEFT_METRIC = "changes_left"
+	CHANGES_LEFT_METRIC = base.ChangesLeftStats
 	DOCS_LATENCY_METRIC = "wtavg_docs_latency"
 	META_LATENCY_METRIC = "wtavg_meta_latency"
 	RESP_WAIT_METRIC    = "resp_wait_time"
@@ -73,7 +73,7 @@ const (
 	DOCS_OPT_REPD_METRIC = "docs_opt_repd"
 	RATE_OPT_REPD_METRIC = "rate_doc_opt_repd"
 
-	DOCS_RECEIVED_DCP_METRIC = "docs_received_from_dcp"
+	DOCS_RECEIVED_DCP_METRIC = base.DocsFromDcpStats
 	RATE_RECEIVED_DCP_METRIC = "rate_received_from_dcp"
 
 	EXPIRY_RECEIVED_DCP_METRIC   = "expiry_received_from_dcp"
@@ -85,6 +85,9 @@ const (
 
 	// latency caused by bandwidth throttling
 	THROTTLE_LATENCY_METRIC = "throttle_latency"
+
+	// latency caused by throughput throttling
+	THROUGHPUT_THROTTLE_LATENCY_METRIC = "throughput_throttle_latency"
 
 	//	TIME_COMMITTING_METRIC = "time_committing"
 	//rate
@@ -121,7 +124,7 @@ var StatsToInitializeForPausedReplications = []string{DOCS_WRITTEN_METRIC, DOCS_
 // 2. internal stats that are not visible on UI
 var StatsToClearForPausedReplications = []string{SIZE_REP_QUEUE_METRIC, DOCS_REP_QUEUE_METRIC, DOCS_LATENCY_METRIC, META_LATENCY_METRIC,
 	TIME_COMMITING_METRIC, NUM_FAILEDCKPTS_METRIC, RATE_DOC_CHECKS_METRIC, RATE_OPT_REPD_METRIC, RATE_RECEIVED_DCP_METRIC,
-	RATE_REPLICATED_METRIC, BANDWIDTH_USAGE_METRIC, THROTTLE_LATENCY_METRIC}
+	RATE_REPLICATED_METRIC, BANDWIDTH_USAGE_METRIC, THROTTLE_LATENCY_METRIC, THROUGHPUT_THROTTLE_LATENCY_METRIC}
 
 // keys for metrics in overview
 var OverviewMetricKeys = []string{CHANGES_LEFT_METRIC, DOCS_CHECKED_METRIC, DOCS_WRITTEN_METRIC, EXPIRY_DOCS_WRITTEN_METRIC, DELETION_DOCS_WRITTEN_METRIC,
@@ -130,8 +133,8 @@ var OverviewMetricKeys = []string{CHANGES_LEFT_METRIC, DOCS_CHECKED_METRIC, DOCS
 	EXPIRY_FILTERED_METRIC, DELETION_FILTERED_METRIC, SET_FILTERED_METRIC, NUM_CHECKPOINTS_METRIC, NUM_FAILEDCKPTS_METRIC,
 	TIME_COMMITING_METRIC, DOCS_OPT_REPD_METRIC, DOCS_RECEIVED_DCP_METRIC, EXPIRY_RECEIVED_DCP_METRIC,
 	DELETION_RECEIVED_DCP_METRIC, SET_RECEIVED_DCP_METRIC, SIZE_REP_QUEUE_METRIC, DOCS_REP_QUEUE_METRIC, DOCS_LATENCY_METRIC,
-	RESP_WAIT_METRIC, META_LATENCY_METRIC, DCP_DISPATCH_TIME_METRIC, DCP_DATACH_LEN, THROTTLE_LATENCY_METRIC, DP_GET_FAIL_METRIC,
-}
+	RESP_WAIT_METRIC, META_LATENCY_METRIC, DCP_DISPATCH_TIME_METRIC, DCP_DATACH_LEN, THROTTLE_LATENCY_METRIC, THROUGHPUT_THROTTLE_LATENCY_METRIC,
+	DP_GET_FAIL_METRIC}
 
 // keys for metrics that do not monotonically increase during replication, to which the "going backward" check should not be applied
 var NonIncreasingMetricKeyMap = map[string]bool{
@@ -540,6 +543,12 @@ func (stats_mgr *StatisticsManager) processRawStats() error {
 	}
 
 	stats_mgr.logger.Debugf("Overview=%v for pipeline %v\n", map_for_overview, stats_mgr.pipeline.Topic())
+
+	// set current time to map_for_interview
+	current_time_var := new(expvar.Int)
+	current_time_var.Set(time.Now().UnixNano())
+	map_for_overview.Set(base.CurrentTime, current_time_var)
+
 	rs.SetOverviewStats(map_for_overview)
 	return nil
 }
@@ -1144,6 +1153,8 @@ func (r_collector *routerCollector) Mount(pipeline common.Pipeline, stats_mgr *S
 		registry_router.Register(SET_FILTERED_METRIC, set_filtered)
 		dp_failed := metrics.NewCounter()
 		registry_router.Register(DP_GET_FAIL_METRIC, dp_failed)
+		throughput_throttle_latency := metrics.NewHistogram(metrics.NewUniformSample(stats_mgr.sample_size))
+		registry_router.Register(THROUGHPUT_THROTTLE_LATENCY_METRIC, throughput_throttle_latency)
 
 		metric_map := make(map[string]interface{})
 		metric_map[DOCS_FILTERED_METRIC] = docs_filtered
@@ -1152,11 +1163,14 @@ func (r_collector *routerCollector) Mount(pipeline common.Pipeline, stats_mgr *S
 		metric_map[DELETION_FILTERED_METRIC] = deletion_filtered
 		metric_map[SET_FILTERED_METRIC] = set_filtered
 		metric_map[DP_GET_FAIL_METRIC] = dp_failed
+		metric_map[THROUGHPUT_THROTTLE_LATENCY_METRIC] = throughput_throttle_latency
 		r_collector.component_map[conn.Id()] = metric_map
 	}
 
 	async_listener_map := pipeline_pkg.GetAllAsyncComponentEventListeners(pipeline)
 	pipeline_utils.RegisterAsyncComponentEventHandler(async_listener_map, base.DataFilteredEventListener, r_collector)
+	pipeline_utils.RegisterAsyncComponentEventHandler(async_listener_map, base.DataThroughputThrottledEventListener, r_collector)
+
 	return nil
 }
 
@@ -1185,6 +1199,9 @@ func (r_collector *routerCollector) ProcessEvent(event *common.Event) error {
 		metric_map[DOCS_UNABLE_TO_FILTER_METRIC].(metrics.Counter).Inc(1)
 	case common.DataPoolGetFail:
 		metric_map[DP_GET_FAIL_METRIC].(metrics.Counter).Inc(event.Data.(int64))
+	case common.DataThroughputThrottled:
+		throughput_throttle_latency := event.OtherInfos.(time.Duration)
+		metric_map[THROUGHPUT_THROTTLE_LATENCY_METRIC].(metrics.Histogram).Sample().Update(throughput_throttle_latency.Nanoseconds() / 1000000)
 	}
 
 	return nil

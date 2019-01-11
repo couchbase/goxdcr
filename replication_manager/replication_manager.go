@@ -26,6 +26,7 @@ import (
 	"github.com/couchbase/goxdcr/pipeline"
 	"github.com/couchbase/goxdcr/pipeline_manager"
 	"github.com/couchbase/goxdcr/pipeline_svc"
+	"github.com/couchbase/goxdcr/resource_manager"
 	"github.com/couchbase/goxdcr/service_def"
 	"github.com/couchbase/goxdcr/supervisor"
 	utilities "github.com/couchbase/goxdcr/utils"
@@ -70,6 +71,8 @@ type replicationManager struct {
 	supervisor.GenericSupervisor
 	// Single instance of pipeline_mgr here instead of using a global
 	pipelineMgr pipeline_manager.Pipeline_mgr_iface
+
+	resourceMgr resource_manager.ResourceMgrIface
 
 	//replication specification service handle
 	repl_spec_svc service_def.ReplicationSpecSvc
@@ -129,6 +132,7 @@ func StartReplicationManager(sourceKVHost string, xdcrRestPort uint16,
 	global_setting_svc service_def.GlobalSettingsSvc,
 	bucket_settings_svc service_def.BucketSettingsSvc,
 	internal_settings_svc service_def.InternalSettingsSvc,
+	throughput_throttler_svc service_def.ThroughputThrottlerSvc,
 	utilitiesIn utilities.UtilsIface) {
 
 	replication_mgr.once.Do(func() {
@@ -142,7 +146,7 @@ func StartReplicationManager(sourceKVHost string, xdcrRestPort uint16,
 		replication_mgr.utils = utilitiesIn
 
 		// initializes replication manager
-		replication_mgr.init(repl_spec_svc, remote_cluster_svc, cluster_info_svc, xdcr_topology_svc, replication_settings_svc, checkpoint_svc, capi_svc, audit_svc, uilog_svc, global_setting_svc, bucket_settings_svc, internal_settings_svc)
+		replication_mgr.init(repl_spec_svc, remote_cluster_svc, cluster_info_svc, xdcr_topology_svc, replication_settings_svc, checkpoint_svc, capi_svc, audit_svc, uilog_svc, global_setting_svc, bucket_settings_svc, internal_settings_svc, throughput_throttler_svc)
 
 		// start replication manager supervisor
 		// TODO should we make heart beat settings configurable?
@@ -178,7 +182,6 @@ func StartReplicationManager(sourceKVHost string, xdcrRestPort uint16,
 		logger_rm.Info("ReplicationManager is running")
 
 	})
-
 }
 
 func initConstants(xdcr_topology_svc service_def.XDCRCompTopologySvc, internal_settings_svc service_def.InternalSettingsSvc) {
@@ -259,6 +262,23 @@ func initConstants(xdcr_topology_svc service_def.XDCRCompTopologySvc, internal_s
 		time.Duration(internal_settings.Values[metadata.TimeoutPartsStopKey].(int))*time.Second,
 		time.Duration(internal_settings.Values[metadata.TimeoutDcpCloseUprStreamsKey].(int))*time.Second,
 		time.Duration(internal_settings.Values[metadata.TimeoutDcpCloseUprFeedKey].(int))*time.Second,
+		time.Duration(internal_settings.Values[metadata.ResourceManagementIntervalKey].(int))*time.Millisecond,
+		time.Duration(internal_settings.Values[metadata.ResourceManagementStatsIntervalKey].(int))*time.Millisecond,
+		internal_settings.Values[metadata.ChangesLeftThresholdForOngoingReplicationKey].(int),
+		internal_settings.Values[metadata.ResourceManagementRatioBaseKey].(int),
+		internal_settings.Values[metadata.ResourceManagementRatioUpperBoundKey].(int),
+		internal_settings.Values[metadata.ResourceManagementRatioLowerBoundKey].(int),
+		internal_settings.Values[metadata.ResourceManagementRatioFirstIncrementKey].(int),
+		internal_settings.Values[metadata.ResourceManagementRatioIncrementKey].(int),
+		internal_settings.Values[metadata.ResourceManagementRatioDecrementKey].(int),
+		internal_settings.Values[metadata.MaxCountIneffectiveThrottlingIncreaseKey].(int),
+		internal_settings.Values[metadata.MaxCountThrottlingDecreaseKey].(int),
+		internal_settings.Values[metadata.MaxCountWaitPeriodKey].(int),
+		internal_settings.Values[metadata.MaxCountBacklogForSetDcpPriorityKey].(int),
+		internal_settings.Values[metadata.MaxCountNoBacklogForResetDcpPriorityKey].(int),
+		time.Duration(internal_settings.Values[metadata.ThroughputThrottlerLogIntervalKey].(int))*time.Second,
+		internal_settings.Values[metadata.NumberOfSlotsForThroughputThrottlingKey].(int),
+		internal_settings.Values[metadata.ThresholdRatioForMaxCpuKey].(int),
 	)
 }
 
@@ -275,7 +295,8 @@ func (rm *replicationManager) initMetadataChangeMonitor() {
 		rm.metadata_change_callback_cancel_ch,
 		rm.children_waitgrp,
 		log.DefaultLoggerContext,
-		rm.utils)
+		rm.utils,
+		rm.resourceMgr)
 
 	mcm.RegisterListener(globalSettingChangeListener)
 	rm.global_setting_svc.SetMetadataChangeHandlerCallback(globalSettingChangeListener.globalSettingChangeHandlerCallback)
@@ -306,7 +327,8 @@ func (rm *replicationManager) initMetadataChangeMonitor() {
 		rm.metadata_change_callback_cancel_ch,
 		rm.children_waitgrp,
 		log.DefaultLoggerContext,
-		rm.utils)
+		rm.utils,
+		rm.resourceMgr)
 	mcm.RegisterListener(replicationSpecChangeListener)
 	rm.repl_spec_svc.SetMetadataChangeHandlerCallback(replicationSpecChangeListener.replicationSpecChangeHandlerCallback)
 
@@ -373,7 +395,8 @@ func (rm *replicationManager) init(
 	uilog_svc service_def.UILogSvc,
 	global_setting_svc service_def.GlobalSettingsSvc,
 	bucket_settings_svc service_def.BucketSettingsSvc,
-	internal_settings_svc service_def.InternalSettingsSvc) {
+	internal_settings_svc service_def.InternalSettingsSvc,
+	throughput_throttler_svc service_def.ThroughputThrottlerSvc) {
 
 	rm.GenericSupervisor = *supervisor.NewGenericSupervisor(base.ReplicationManagerSupervisorId, log.DefaultLoggerContext, rm, nil, rm.utils)
 	rm.repl_spec_svc = repl_spec_svc
@@ -389,14 +412,17 @@ func (rm *replicationManager) init(
 	rm.global_setting_svc = global_setting_svc
 	rm.bucket_settings_svc = bucket_settings_svc
 	rm.internal_settings_svc = internal_settings_svc
-	fac := factory.NewXDCRFactory(repl_spec_svc, remote_cluster_svc, cluster_info_svc, xdcr_topology_svc, checkpoint_svc, capi_svc, uilog_svc, bucket_settings_svc, log.DefaultLoggerContext, log.DefaultLoggerContext, rm, rm.utils)
+
+	fac := factory.NewXDCRFactory(repl_spec_svc, remote_cluster_svc, cluster_info_svc, xdcr_topology_svc, checkpoint_svc, capi_svc, uilog_svc, bucket_settings_svc, throughput_throttler_svc, log.DefaultLoggerContext, log.DefaultLoggerContext, rm, rm.utils)
 
 	rm.pipelineMgr = pipeline_manager.NewPipelineManager(fac, repl_spec_svc, xdcr_topology_svc, remote_cluster_svc, cluster_info_svc, checkpoint_svc, uilog_svc, log.DefaultLoggerContext, rm.utils)
+
+	rm.resourceMgr = resource_manager.NewResourceManager(rm.pipelineMgr, repl_spec_svc, xdcr_topology_svc, remote_cluster_svc, cluster_info_svc, checkpoint_svc, uilog_svc, throughput_throttler_svc, log.DefaultLoggerContext, rm.utils)
+	rm.resourceMgr.Start()
 
 	rm.metadata_change_callback_cancel_ch = make(chan struct{}, 1)
 
 	logger_rm.Info("Replication manager is initialized")
-
 }
 
 func ReplicationSpecService() service_def.ReplicationSpecSvc {
@@ -959,6 +985,8 @@ func cleanup() {
 
 		close(replication_mgr.status_logger_finch)
 		close(replication_mgr.mem_stats_logger_finch)
+
+		replication_mgr.resourceMgr.Stop()
 
 		logger_rm.Infof("Replication manager exists")
 	} else {

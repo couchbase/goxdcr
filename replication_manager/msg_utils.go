@@ -70,6 +70,9 @@ const (
 	GoGC                           = "goGC"
 	FilterVersionKey               = "filterVersion"
 	FilterSkipRestreamKey          = "filterSkipRestream"
+	Priority                       = "priority"
+	// desired latency is the parameter exposed to UI and CLI
+	BacklogThreshold = "desiredLatency"
 )
 
 // constants for parsing create replication response
@@ -141,8 +144,8 @@ var RestKeyToSettingsKeyMap = map[string]string{
 	base.CompressionTypeREST:       metadata.CompressionTypeKey,
 	FilterVersionKey:               metadata.FilterVersionKey,
 	FilterSkipRestreamKey:          metadata.FilterSkipRestreamKey,
-	/*MaxExpectedReplicationLag:      metadata.MaxExpectedReplicationLag,
-	TimeoutPercentageCap:           metadata.TimeoutPercentageCap,*/
+	Priority:                       metadata.PriorityKey,
+	BacklogThreshold:               metadata.BacklogThresholdKey,
 }
 
 // internal replication settings key -> replication settings key in rest api
@@ -165,8 +168,8 @@ var SettingsKeyToRestKeyMap = map[string]string{
 	metadata.CompressionTypeKey:                base.CompressionTypeREST,
 	metadata.FilterVersionKey:                  FilterVersionKey,
 	metadata.FilterSkipRestreamKey:             FilterSkipRestreamKey,
-	/*metadata.MaxExpectedReplicationLag:      MaxExpectedReplicationLag,
-	metadata.TimeoutPercentageCap:           TimeoutPercentageCap,*/
+	metadata.PriorityKey:                       Priority,
+	metadata.BacklogThresholdKey:               BacklogThreshold,
 }
 
 // Conversion to REST for user -> pauseRequested - Pretty much a NOT operation

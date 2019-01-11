@@ -24,6 +24,29 @@ func (_m *ReplicationSpecSvc) AddReplicationSpec(spec *metadata.ReplicationSpeci
 	return r0
 }
 
+// AllActiveReplicationSpecsReadOnly provides a mock function with given fields:
+func (_m *ReplicationSpecSvc) AllActiveReplicationSpecsReadOnly() (map[string]*metadata.ReplicationSpecification, error) {
+	ret := _m.Called()
+
+	var r0 map[string]*metadata.ReplicationSpecification
+	if rf, ok := ret.Get(0).(func() map[string]*metadata.ReplicationSpecification); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(map[string]*metadata.ReplicationSpecification)
+		}
+	}
+
+	var r1 error
+	if rf, ok := ret.Get(1).(func() error); ok {
+		r1 = rf()
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
 // AllReplicationSpecIds provides a mock function with given fields:
 func (_m *ReplicationSpecSvc) AllReplicationSpecIds() ([]string, error) {
 	ret := _m.Called()

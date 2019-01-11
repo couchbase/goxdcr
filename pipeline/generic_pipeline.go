@@ -33,11 +33,16 @@ var MaxNumberOfErrorsToTrack = 15
 type PartsSettingsConstructor func(pipeline common.Pipeline, part common.Part, pipeline_settings metadata.ReplicationSettingsMap,
 	targetClusterref *metadata.RemoteClusterReference, ssl_port_map map[string]uint16) (metadata.ReplicationSettingsMap, error)
 
+type ConnectorSettingsConstructor func(pipeline common.Pipeline, connector common.Connector, pipeline_settings metadata.ReplicationSettingsMap) (metadata.ReplicationSettingsMap, error)
+
 //the function constructs start settings for parts of the pipeline
 type SSLPortMapConstructor func(targetClusterRef *metadata.RemoteClusterReference, spec *metadata.ReplicationSpecification) (map[string]uint16, error)
 
 //the function constructs update settings for parts of the pipeline
 type PartsUpdateSettingsConstructor func(pipeline common.Pipeline, part common.Part, pipeline_settings metadata.ReplicationSettingsMap) (metadata.ReplicationSettingsMap, error)
+
+//the function constructs update settings for connectors of the pipeline
+type ConnectorsUpdateSettingsConstructor func(pipeline common.Pipeline, connector common.Connector, pipeline_settings metadata.ReplicationSettingsMap) (metadata.ReplicationSettingsMap, error)
 
 type StartingSeqnoConstructor func(pipeline common.Pipeline) error
 
@@ -68,9 +73,11 @@ type GenericPipeline struct {
 	//the lock to serialize the request to start\stop the pipeline
 	stateLock sync.RWMutex
 
-	partSetting_constructor       PartsSettingsConstructor
-	sslPortMapConstructor         SSLPortMapConstructor
-	partUpdateSetting_constructor PartsUpdateSettingsConstructor
+	partSetting_constructor            PartsSettingsConstructor
+	connectorSetting_constructor       ConnectorSettingsConstructor
+	sslPortMapConstructor              SSLPortMapConstructor
+	partUpdateSetting_constructor      PartsUpdateSettingsConstructor
+	connectorUpdateSetting_constructor ConnectorsUpdateSettingsConstructor
 
 	startingSeqno_constructor StartingSeqnoConstructor
 
@@ -251,6 +258,22 @@ func (genericPipeline *GenericPipeline) Start(settings metadata.ReplicationSetti
 		if err != nil {
 			errMap["genericPipeline.sslPortMapConstructor"] = err
 			return errMap
+		}
+	}
+
+	// apply settings to connectors in pipeline
+	if genericPipeline.connectorSetting_constructor != nil {
+		for _, connector := range GetAllConnectors(genericPipeline) {
+			connectorSettings, err := genericPipeline.connectorSetting_constructor(genericPipeline, connector, settings)
+			if err != nil {
+				errMap["genericPipeline.connectorSettingConstructor"] = err
+				return errMap
+			}
+			err = connector.UpdateSettings(connectorSettings)
+			if err != nil {
+				errMap["genericPipeline.UpdateSettingsToConnector"] = err
+				return errMap
+			}
 		}
 	}
 
@@ -471,25 +494,29 @@ func NewPipelineWithSettingConstructor(t string,
 	spec *metadata.ReplicationSpecification,
 	targetClusterRef *metadata.RemoteClusterReference,
 	partsSettingsConstructor PartsSettingsConstructor,
+	connectorSettingsConstructor ConnectorSettingsConstructor,
 	sslPortMapConstructor SSLPortMapConstructor,
 	partsUpdateSettingsConstructor PartsUpdateSettingsConstructor,
+	connectorUpdateSetting_constructor ConnectorsUpdateSettingsConstructor,
 	startingSeqnoConstructor StartingSeqnoConstructor,
 	checkpoint_func CheckpointFunc,
 	logger_context *log.LoggerContext) *GenericPipeline {
 	pipeline := &GenericPipeline{topic: t,
-		sources:                       sources,
-		targets:                       targets,
-		spec:                          spec,
-		targetClusterRef:              targetClusterRef,
-		partSetting_constructor:       partsSettingsConstructor,
-		sslPortMapConstructor:         sslPortMapConstructor,
-		partUpdateSetting_constructor: partsUpdateSettingsConstructor,
-		startingSeqno_constructor:     startingSeqnoConstructor,
-		checkpoint_func:               checkpoint_func,
-		logger:                        log.NewLogger("GenericPipeline", logger_context),
-		instance_id:                   time.Now().Nanosecond(),
-		state:                         common.Pipeline_Initial,
-		settings_lock:                 &sync.RWMutex{}}
+		sources:                            sources,
+		targets:                            targets,
+		spec:                               spec,
+		targetClusterRef:                   targetClusterRef,
+		partSetting_constructor:            partsSettingsConstructor,
+		connectorSetting_constructor:       connectorSettingsConstructor,
+		sslPortMapConstructor:              sslPortMapConstructor,
+		partUpdateSetting_constructor:      partsUpdateSettingsConstructor,
+		connectorUpdateSetting_constructor: connectorUpdateSetting_constructor,
+		startingSeqno_constructor:          startingSeqnoConstructor,
+		checkpoint_func:                    checkpoint_func,
+		logger:                             log.NewLogger("GenericPipeline", logger_context),
+		instance_id:                        time.Now().Nanosecond(),
+		state:                              common.Pipeline_Initial,
+		settings_lock:                      &sync.RWMutex{}}
 	// NOTE: Calling initialize here as part of constructor
 	pipeline.initialize()
 	pipeline.logger.Debugf("Pipeline %s has been initialized with a part setting constructor %v", t, partsSettingsConstructor)
@@ -727,7 +754,7 @@ func (genericPipeline *GenericPipeline) UpdateSettings(settings metadata.Replica
 	genericPipeline.updatePipelineSettings(settings)
 
 	// update settings on parts and services in pipeline
-	if genericPipeline.partSetting_constructor != nil {
+	if genericPipeline.partUpdateSetting_constructor != nil {
 		if genericPipeline.logger.GetLogLevel() >= log.LogLevelDebug {
 			redactOnce()
 			genericPipeline.logger.Debugf("%v calling part update setting constructor with settings=%v\n", genericPipeline.InstanceId(), redactedSettings)
@@ -738,6 +765,24 @@ func (genericPipeline *GenericPipeline) UpdateSettings(settings metadata.Replica
 				return err
 			}
 			err = part.UpdateSettings(partSettings)
+			if err != nil {
+				return err
+			}
+		}
+	}
+
+	// update settings on connectors in pipeline
+	if genericPipeline.connectorUpdateSetting_constructor != nil {
+		if genericPipeline.logger.GetLogLevel() >= log.LogLevelDebug {
+			redactOnce()
+			genericPipeline.logger.Debugf("%v calling connector update setting constructor with settings=%v\n", genericPipeline.InstanceId(), redactedSettings)
+		}
+		for _, connector := range GetAllConnectors(genericPipeline) {
+			connectorSettings, err := genericPipeline.connectorUpdateSetting_constructor(genericPipeline, connector, settings)
+			if err != nil {
+				return err
+			}
+			err = connector.UpdateSettings(connectorSettings)
 			if err != nil {
 				return err
 			}

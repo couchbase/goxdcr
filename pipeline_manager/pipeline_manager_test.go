@@ -592,9 +592,9 @@ func TestUpdaterCompressionErr(t *testing.T) {
 	setupMockPipelineMgr(replSpecSvcMock, testReplicationSettings, testTopic, testRepairer, xdcrTopologyMock, uiLogSvc)
 
 	// At this time, no customSettings
-	origSettings := testRepairer.rep_status.Settings()
+	origSettings := testRepairer.rep_status.SettingsMap()
 	assert.NotNil(origSettings)
-	assert.Equal((int)(base.CompressionTypeSnappy), origSettings.CompressionType)
+	assert.Equal((int)(base.CompressionTypeSnappy), origSettings[metadata.CompressionTypeKey])
 
 	// Pretend the last error was because Compression was not supported
 	testRepairer.currentErrors.AddError("UnitTest", base.ErrorCompressionNotSupported)
@@ -602,14 +602,14 @@ func TestUpdaterCompressionErr(t *testing.T) {
 	testRepairer.disableCompression(base.ErrorCompressionNotSupported)
 
 	// Modified settings
-	tempSettings := testRepairer.rep_status.Settings()
-	assert.Equal((int)(base.CompressionTypeNone), tempSettings.CompressionType)
+	tempSettings := testRepairer.rep_status.SettingsMap()
+	assert.Equal((int)(base.CompressionTypeNone), tempSettings[metadata.CompressionTypeKey])
 
 	errMap := testRepairer.update()
 	assert.Equal(0, len(errMap))
 
-	checkSettings := testRepairer.rep_status.Settings()
-	assert.Equal((int)(base.CompressionTypeSnappy), checkSettings.CompressionType)
+	checkSettings := testRepairer.rep_status.SettingsMap()
+	assert.Equal((int)(base.CompressionTypeSnappy), checkSettings[metadata.CompressionTypeKey])
 	fmt.Println("============== Test case end: TestUpdaterCompressionErr =================")
 }
 
@@ -666,9 +666,9 @@ func TestUpdaterCompressionErrRevChanged(t *testing.T) {
 	setupMockPipelineMgr(replSpecSvcMock, testReplicationSettings, testTopic, testRepairer, xdcrTopologyMock, uiLogSvc)
 
 	// At this time, no customSettings
-	origSettings := testRepairer.rep_status.Settings()
+	origSettings := testRepairer.rep_status.SettingsMap()
 	assert.NotNil(origSettings)
-	assert.Equal((int)(base.CompressionTypeSnappy), origSettings.CompressionType)
+	assert.Equal((int)(base.CompressionTypeSnappy), origSettings[metadata.CompressionTypeKey])
 
 	// Inject an error to mark the revision
 	atomic.StoreInt32(&testRepairer.testInjectionError, pipelineUpdaterErrInjOfflineFail)
@@ -682,16 +682,14 @@ func TestUpdaterCompressionErrRevChanged(t *testing.T) {
 	assert.True(testRepairer.currentErrors.ContainsError(base.ErrorCompressionNotSupported, true))
 
 	// Modify settings in the ReplicationSpec
-	modifiedSettings := origSettings.Clone()
-	modifiedSettings.BatchCount = 1024 // magic
-	modifiedSettings.Revision = 2
+	origSettings[metadata.BatchCountKey] = 1024 // magic
 
 	// Need to recreate a new mock so that we'll return this new spec and new settings
 	testLogger2, pipelineMock2, replSpecSvcMock2, xdcrTopologyMock2, remoteClusterMock2,
 		pipelineMgr2, testRepairer2, testReplicationStatus2, testTopic2,
 		testReplicationSettings2, testReplicationSpec2, testRemoteClusterRef2, testPipeline2, uiLogSvc2, replStatusMock2 := setupBoilerPlate()
 
-	testReplicationSpec2.Settings = modifiedSettings
+	testReplicationSpec2.Settings.UpdateSettingsFromMap(origSettings)
 
 	setupGenericMocking(testLogger2, pipelineMock2, replSpecSvcMock2, xdcrTopologyMock2, remoteClusterMock2,
 		pipelineMgr2, testRepairer2, testReplicationStatus2, testTopic2,
@@ -709,8 +707,8 @@ func TestUpdaterCompressionErrRevChanged(t *testing.T) {
 	// revision should have changed due to the new replicationSettings - meaning that customSettings is cleared
 	assert.Nil(testRepairer.replSpecSettingsHelper.GetCurrentSettingsRevision())
 
-	checkSettings := testRepairer.rep_status.Settings()
-	assert.Equal((int)(base.CompressionTypeSnappy), checkSettings.CompressionType)
+	checkSettings := testRepairer.rep_status.SettingsMap()
+	assert.Equal((int)(base.CompressionTypeSnappy), checkSettings[metadata.CompressionTypeKey])
 	fmt.Println("============== Test case end: TestUpdaterCompressionErrRevChanged =================")
 }
 

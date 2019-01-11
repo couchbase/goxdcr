@@ -173,6 +173,7 @@ func main() {
 			processSetting_svc,
 			bucketSettings_svc,
 			internalSettings_svc,
+			service_impl.NewThroughputThrottlerSvc(nil),
 			utils)
 
 		// keep main alive in normal mode

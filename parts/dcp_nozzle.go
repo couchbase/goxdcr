@@ -37,6 +37,7 @@ const (
 	EVENT_DCP_DISPATCH_TIME = "dcp_dispatch_time"
 	EVENT_DCP_DATACH_LEN    = "dcp_datach_length"
 	DCP_Stats_Interval      = "stats_interval"
+	DCP_Priority            = "dcpPriority"
 )
 
 type DcpStreamState int
@@ -298,6 +299,9 @@ type DcpNozzle struct {
 	is_capi                  bool
 	utils                    utilities.UtilsIface
 	compressionSetting       base.CompressionType
+
+	dcpPrioritySetting mcc.PriorityType
+	lockSetting       sync.RWMutex
 }
 
 func NewDcpNozzle(id string,
@@ -327,6 +331,7 @@ func NewDcpNozzle(id string,
 		is_capi:                  is_capi,
 		utils:                    utilsIn,
 		vbHandshakeMap:           make(map[uint16]*dcpStreamReqHelper),
+		dcpPrioritySetting:       mcc.PriorityDisabled,
 	}
 
 	for _, vbno := range vbnos {
@@ -425,6 +430,7 @@ func (dcp *DcpNozzle) initializeUprFeed() error {
 		// for source side conflict resolution
 		uprFeatures.Xattribute = true
 		uprFeatures.CompressionType = (int)(dcp.compressionSetting)
+		uprFeatures.DcpPriority = dcp.getDcpPrioritySetting()
 		uprFeatures.IncludeDeletionTime = true
 		featuresErr, activatedFeatures := dcp.uprFeed.UprOpenWithFeatures(uprFeedName, uint32(0) /*seqno*/, base.UprFeedBufferSize, uprFeatures)
 		if featuresErr != nil {
@@ -454,6 +460,10 @@ func (dcp *DcpNozzle) initialize(settings metadata.ReplicationSettingsMap) (err 
 	val, ok := settings[SETTING_COMPRESSION_TYPE]
 	if ok && (val.(base.CompressionType) != dcp.compressionSetting) {
 		dcp.compressionSetting = val.(base.CompressionType)
+	}
+
+	if val, ok = settings[DCP_Priority]; ok {
+		dcp.setDcpPrioritySetting(val.(mcc.PriorityType))
 	}
 
 	dcp.initializeUprHandshakeHelpers()
@@ -1096,12 +1106,54 @@ func (dcp *DcpNozzle) UpdateSettings(settings metadata.ReplicationSettingsMap) e
 		}
 	}
 
-	if _, ok := settings[DCP_Stats_Interval]; ok {
-		dcp.setStatsInterval(uint32(settings[DCP_Stats_Interval].(int)))
+	if statsInterval, ok := settings[DCP_Stats_Interval]; ok {
+		dcp.setStatsInterval(uint32(statsInterval.(int)))
 		dcp.stats_interval_change_ch <- true
 	}
 
+	if dcpPriority, ok := settings[DCP_Priority]; ok {
+		dcp.setDcpPriority(dcpPriority.(mcc.PriorityType))
+	}
+
 	return nil
+}
+
+func (dcp *DcpNozzle) setDcpPriority(priority mcc.PriorityType) error {
+	if !dcp.setDcpPrioritySetting(priority) {
+		// no real changes
+		return nil
+	}
+
+	feed := dcp.getUprFeed()
+	if feed == nil {
+		dcp.Logger().Infof("%v skipping set dcp priority operation because feed is nil", dcp.Id())
+		return nil
+	}
+	err := feed.SetPriorityAsync(priority)
+	if err != nil {
+		dcp.Logger().Warnf("%v Error from SetPiority  = %v\n", dcp.Id(), err)
+	}
+	return err
+}
+
+func (dcp *DcpNozzle) getDcpPrioritySetting() mcc.PriorityType {
+	dcp.lockSetting.RLock()
+	defer dcp.lockSetting.RUnlock()
+	return dcp.dcpPrioritySetting
+}
+
+// returns true if dcp priority has indeed been set to a different value
+func (dcp *DcpNozzle) setDcpPrioritySetting(priority mcc.PriorityType) bool {
+	dcp.lockSetting.Lock()
+	defer dcp.lockSetting.Unlock()
+	if dcp.dcpPrioritySetting == priority {
+		dcp.Logger().Infof("%v skipping setting dcp priority to %v since there is no real change\n", dcp.Id(), priority)
+		return false
+	}
+
+	dcp.Logger().Infof("%v changing dcp priority from %v to %v\n", dcp.Id(), dcp.dcpPrioritySetting, priority)
+	dcp.dcpPrioritySetting = priority
+	return true
 }
 
 func (dcp *DcpNozzle) onUpdateStartingSeqno(new_startingSeqnos map[uint16]*base.VBTimestamp) error {

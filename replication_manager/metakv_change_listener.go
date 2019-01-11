@@ -19,7 +19,9 @@ import (
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/goxdcr/metadata_svc"
+	"github.com/couchbase/goxdcr/parts"
 	"github.com/couchbase/goxdcr/pipeline_utils"
+	"github.com/couchbase/goxdcr/resource_manager"
 	"github.com/couchbase/goxdcr/service_def"
 	utilities "github.com/couchbase/goxdcr/utils"
 	"runtime"
@@ -128,13 +130,15 @@ func (mcl *MetakvChangeListener) failureCallback(err error) {
 // listener for replication spec
 type ReplicationSpecChangeListener struct {
 	*MetakvChangeListener
+	resourceManager resource_manager.ResourceMgrIface
 }
 
 func NewReplicationSpecChangeListener(repl_spec_svc service_def.ReplicationSpecSvc,
 	cancel_chan chan struct{},
 	children_waitgrp *sync.WaitGroup,
 	logger_ctx *log.LoggerContext,
-	utilsIn utilities.UtilsIface) *ReplicationSpecChangeListener {
+	utilsIn utilities.UtilsIface,
+	resourceManager resource_manager.ResourceMgrIface) *ReplicationSpecChangeListener {
 	rscl := &ReplicationSpecChangeListener{
 		NewMetakvChangeListener(base.ReplicationSpecChangeListener,
 			metadata_svc.GetCatalogPathFromCatalogKey(metadata_svc.ReplicationSpecsCatalogKey),
@@ -144,6 +148,7 @@ func NewReplicationSpecChangeListener(repl_spec_svc service_def.ReplicationSpecS
 			logger_ctx,
 			"ReplicationSpecChangeListener",
 			utilsIn),
+		resourceManager,
 	}
 	return rscl
 }
@@ -171,7 +176,11 @@ func (rscl *ReplicationSpecChangeListener) replicationSpecChangeHandlerCallback(
 
 	if newSpec == nil {
 		// Replication Spec is deleted.
-		return replication_mgr.pipelineMgr.DeletePipeline(topic)
+		err = replication_mgr.pipelineMgr.DeletePipeline(topic)
+		if err == nil {
+			go replication_mgr.resourceMgr.HandlePipelineDeletion(topic)
+		}
+		return err
 	}
 
 	specActive := newSpec.Settings.Active
@@ -271,14 +280,29 @@ func needToRestreamPipeline(oldSettings *metadata.ReplicationSettings, newSettin
 
 func (rscl *ReplicationSpecChangeListener) liveUpdatePipeline(topic string, oldSettings *metadata.ReplicationSettings, newSettings *metadata.ReplicationSettings, newSpecInternalId string) error {
 	// perform live update on pipeline if qualifying settings have been changed
+	isOldReplHighPriority := rscl.resourceManager.IsReplHighPriority(topic, oldSettings.GetPriority())
+	isNewReplHighPriority := rscl.resourceManager.IsReplHighPriority(topic, newSettings.GetPriority())
 	if oldSettings.LogLevel != newSettings.LogLevel || oldSettings.CheckpointInterval != newSettings.CheckpointInterval ||
 		oldSettings.StatsInterval != newSettings.StatsInterval ||
 		oldSettings.OptimisticReplicationThreshold != newSettings.OptimisticReplicationThreshold ||
-		oldSettings.BandwidthLimit != newSettings.BandwidthLimit {
+		oldSettings.BandwidthLimit != newSettings.BandwidthLimit ||
+		isOldReplHighPriority != isNewReplHighPriority {
 
-		rscl.logger.Infof("Updating pipeline %v with new settings=%v\n old settings=%v\n", topic, newSettings.CloneAndRedact(), oldSettings.CloneAndRedact())
+		newSettingsMap := newSettings.ToMap(false /*isDefaultSettings*/)
 
-		go rscl.liveUpdatePipelineWithRetry(topic, newSettings, newSpecInternalId)
+		if isOldReplHighPriority != isNewReplHighPriority {
+			// if replication priority has changed, need to change needToThrottle setting accordingly
+			needToThrottle := false
+			if isOldReplHighPriority {
+				// priority changed from high to low, need to throttle the replication now
+				needToThrottle = true
+			}
+			newSettingsMap[parts.NeedToThrottleKey] = needToThrottle
+		}
+
+		rscl.logger.Infof("Updating pipeline %v with new settings=%v\n old settings=%v\n", topic, newSettingsMap.CloneAndRedact(), oldSettings.CloneAndRedact())
+
+		go rscl.liveUpdatePipelineWithRetry(topic, newSettingsMap, newSpecInternalId)
 
 		return nil
 	}
@@ -286,7 +310,7 @@ func (rscl *ReplicationSpecChangeListener) liveUpdatePipeline(topic string, oldS
 	return nil
 }
 
-func (rscl *ReplicationSpecChangeListener) liveUpdatePipelineWithRetry(topic string, newSettings *metadata.ReplicationSettings, specInternalId string) {
+func (rscl *ReplicationSpecChangeListener) liveUpdatePipelineWithRetry(topic string, newSettingsMap metadata.ReplicationSettingsMap, specInternalId string) {
 	numOfRetry := 0
 	backoffTime := base.WaitTimeForLiveUpdatePipeline
 	for {
@@ -297,7 +321,7 @@ func (rscl *ReplicationSpecChangeListener) liveUpdatePipelineWithRetry(topic str
 				// check if the pipeline is associated with the correct repl spec to which the new settings belongs
 				curSpecInternalId := rs.Spec().InternalId
 				if curSpecInternalId == specInternalId {
-					err = pipeline.UpdateSettings(newSettings.ToMap(false /*isDefaultSettings*/))
+					err = pipeline.UpdateSettings(newSettingsMap)
 					if err != nil {
 						rscl.logger.Errorf("Live update on pipeline %v returned err = %v", topic, err)
 					}
@@ -444,13 +468,15 @@ func (rccl *RemoteClusterChangeListener) validateRemoteClusterRef(remoteClusterR
 // listener for GOXDCR Process level setting changes.
 type GlobalSettingChangeListener struct {
 	*MetakvChangeListener
+	resourceManager resource_manager.ResourceMgrIface
 }
 
 func NewGlobalSettingChangeListener(process_setting_svc service_def.GlobalSettingsSvc,
 	cancel_chan chan struct{},
 	children_waitgrp *sync.WaitGroup,
 	logger_ctx *log.LoggerContext,
-	utilsIn utilities.UtilsIface) *GlobalSettingChangeListener {
+	utilsIn utilities.UtilsIface,
+	resourceManager resource_manager.ResourceMgrIface) *GlobalSettingChangeListener {
 	pscl := &GlobalSettingChangeListener{
 		NewMetakvChangeListener(base.GlobalSettingChangeListener,
 			metadata_svc.GetCatalogPathFromCatalogKey(metadata_svc.GlobalSettingCatalogKey),
@@ -460,6 +486,7 @@ func NewGlobalSettingChangeListener(process_setting_svc service_def.GlobalSettin
 			logger_ctx,
 			"GlobalSettingChangeListener",
 			utilsIn),
+		resourceManager,
 	}
 	return pscl
 }
@@ -492,6 +519,8 @@ func (pscl *GlobalSettingChangeListener) globalSettingChangeHandlerCallback(sett
 		pscl.logger.Infof("new Global settings=%v\n", newSetting.String())
 	}
 	if newSetting.GoMaxProcs > 0 {
+		pscl.resourceManager.HandleGoMaxProcsChange(newSetting.GoMaxProcs)
+
 		currentValue := runtime.GOMAXPROCS(0)
 		if newSetting.GoMaxProcs != currentValue {
 			runtime.GOMAXPROCS(newSetting.GoMaxProcs)

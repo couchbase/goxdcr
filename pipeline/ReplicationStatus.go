@@ -33,6 +33,9 @@ const (
 
 var OVERVIEW_METRICS_KEY = "Overview"
 
+// temporary custom settings that need to be cleared after pipeline update
+var TemporaryCustomSettings = []string{metadata.CompressionTypeKey}
+
 func (rep_state ReplicationState) String() string {
 	if rep_state == Pending {
 		return base.Pending
@@ -88,7 +91,6 @@ type ReplicationStatusIface interface {
 	VbList() []uint16
 	SetVbList(vb_list []uint16)
 	SettingsMap() map[string]interface{}
-	Settings() *metadata.ReplicationSettings
 	Errors() PipelineErrorArray
 	ClearErrors()
 	RecordProgress(progress string)
@@ -97,8 +99,9 @@ type ReplicationStatusIface interface {
 	Updater() interface{}
 	SetUpdater(updater interface{}) error
 	ObjectPool() *base.MCRequestPool
-	SetCustomSettings(customSettings *metadata.ReplicationSettings)
-	ClearCustomSettings()
+	SetCustomSettings(customSettings map[string]interface{})
+	ClearCustomSetting(settingsKey string)
+	ClearTemporaryCustomSettings()
 }
 
 type ReplicationStatus struct {
@@ -113,7 +116,7 @@ type ReplicationStatus struct {
 	pipeline_updater interface{}
 	obj_pool         *base.MCRequestPool
 	lock             *sync.RWMutex
-	customSettings   *metadata.ReplicationSettings
+	customSettings   map[string]interface{}
 	// tracks the list of vbs managed by the replication.
 	// useful when replication is paused, when it can be compared with the current vb_list to determine
 	// whether topology change has occured on source
@@ -122,13 +125,14 @@ type ReplicationStatus struct {
 
 func NewReplicationStatus(specId string, spec_getter ReplicationSpecGetter, logger *log.CommonLogger) *ReplicationStatus {
 	rep_status := &ReplicationStatus{specId: specId,
-		pipeline_:   nil,
-		logger:      logger,
-		err_list:    make(PipelineErrorArray, 0, PipelineErrorMaxEntries),
-		spec_getter: spec_getter,
-		lock:        &sync.RWMutex{},
-		obj_pool:    base.NewMCRequestPool(specId, logger),
-		progress:    ""}
+		pipeline_:      nil,
+		logger:         logger,
+		err_list:       make(PipelineErrorArray, 0, PipelineErrorMaxEntries),
+		spec_getter:    spec_getter,
+		lock:           &sync.RWMutex{},
+		obj_pool:       base.NewMCRequestPool(specId, logger),
+		customSettings: make(map[string]interface{}),
+		progress:       ""}
 
 	rep_status.Publish(false)
 	return rep_status
@@ -147,18 +151,28 @@ func (rs *ReplicationStatus) SetPipeline(pipeline common.Pipeline) {
 	rs.Publish(false)
 }
 
-func (rs *ReplicationStatus) SetCustomSettings(customSettings *metadata.ReplicationSettings) {
+func (rs *ReplicationStatus) SetCustomSettings(customSettings map[string]interface{}) {
 	rs.lock.Lock()
 	defer rs.lock.Unlock()
 
-	rs.customSettings = customSettings
+	for key, value := range customSettings {
+		rs.customSettings[key] = value
+	}
 }
 
-func (rs *ReplicationStatus) ClearCustomSettings() {
+func (rs *ReplicationStatus) ClearCustomSetting(settingsKey string) {
+	rs.lock.Lock()
+	defer rs.lock.Unlock()
+	delete(rs.customSettings, settingsKey)
+}
+
+func (rs *ReplicationStatus) ClearTemporaryCustomSettings() {
 	rs.lock.Lock()
 	defer rs.lock.Unlock()
 
-	rs.customSettings = nil
+	for _, settingsKey := range TemporaryCustomSettings {
+		delete(rs.customSettings, settingsKey)
+	}
 }
 
 func (rs *ReplicationStatus) Spec() *metadata.ReplicationSpecification {
@@ -385,41 +399,29 @@ func (rs *ReplicationStatus) SetVbList(vb_list []uint16) {
 }
 
 func (rs *ReplicationStatus) SettingsMap() map[string]interface{} {
-	settings := rs.settingsInternal(false /*clone*/)
-	if settings != nil {
-		return settings.ToMap(false /*isDefaultSettings*/)
-	} else {
-		//empty map
-		return make(map[string]interface{})
-	}
-}
+	settingsMap := rs.getSpecSettingsMap()
 
-// Pipeline manager uses this method to get the ReplicationSettings to pass down to start the parts
-// customSettings is used by PipelineManager when it needs some ways to override certain start parameters
-func (rs *ReplicationStatus) Settings() *metadata.ReplicationSettings {
-	return rs.settingsInternal(true /*clone*/)
-}
-
-func (rs *ReplicationStatus) settingsInternal(clone bool) *metadata.ReplicationSettings {
 	rs.lock.RLock()
 	defer rs.lock.RUnlock()
-	if rs.customSettings != nil {
-		if clone {
-			return rs.customSettings.Clone()
-		} else {
-			return rs.customSettings
+
+	// add custom settings on top of repl spec settings
+
+	if len(rs.customSettings) > 0 {
+		rs.logger.Infof("Applying custom settings for %v. settings = %v\n", rs.specId, rs.customSettings)
+		for key, value := range rs.customSettings {
+			settingsMap[key] = value
 		}
+	}
+
+	return settingsMap
+}
+
+func (rs *ReplicationStatus) getSpecSettingsMap() map[string]interface{} {
+	spec := rs.Spec()
+	if spec != nil {
+		return spec.Settings.ToMap(false /*isDefaultSettings*/)
 	} else {
-		spec := rs.Spec()
-		if spec != nil {
-			if clone {
-				return spec.Settings.Clone()
-			} else {
-				return spec.Settings
-			}
-		} else {
-			return nil
-		}
+		return make(map[string]interface{})
 	}
 }
 

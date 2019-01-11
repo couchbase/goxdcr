@@ -33,6 +33,13 @@ const (
 	CompressionTypeKey                = base.CompressionTypeKey
 	FilterVersionKey                  = "filter_expression_version"
 	FilterSkipRestreamKey             = "filter_skip_restream"
+	PriorityKey                       = "priority"
+	// threshold for deciding whether replication has backlog
+	// defined as desired latency, i.e., changesLeft/throughput,
+	// in other words, nnumber of mutations left to process/ number of mutations that can be processed per millisecond
+	// the unit for backlogThreshold is millisecond
+	// the default value is 1000 (millisecond)
+	BacklogThresholdKey = "backlogThreshold"
 )
 
 // keys to facilitate redaction of replication settings map
@@ -72,6 +79,8 @@ var PipelineLogLevelConfig = &SettingsConfig{log.LogLevelInfo, nil}
 var PipelineStatsIntervalConfig = &SettingsConfig{1000, &Range{200, 600000}}
 var BandwidthLimitConfig = &SettingsConfig{0, &Range{0, 1000000}}
 var CompressionTypeConfig = &SettingsConfig{base.CompressionTypeAuto, &Range{base.CompressionTypeStartMarker + 1, base.CompressionTypeEndMarker - 1}}
+var PriorityConfig = &SettingsConfig{base.PriorityTypeHigh, nil}
+var BacklogThresholdConfig = &SettingsConfig{base.BacklogThresholdDefault, &Range{10, 10000000}}
 
 // Set to keyOnly as default because prior to adv filtering, this config did not exist
 var FilterVersionConfig = &SettingsConfig{base.FilterVersionKeyOnly, nil}
@@ -94,6 +103,8 @@ var ReplicationSettingsConfigMap = map[string]*SettingsConfig{
 	CompressionTypeKey:                CompressionTypeConfig,
 	FilterVersionKey:                  FilterVersionConfig,
 	FilterSkipRestreamKey:             FilterSkipRestreamConfig,
+	PriorityKey:                       PriorityConfig,
+	BacklogThresholdKey:               BacklogThresholdConfig,
 }
 
 type ReplicationSettings struct {
@@ -257,8 +268,9 @@ func (s *ReplicationSettings) toMapInternal(isDefaultSettings bool, hideInternal
 		}
 	}
 
-	// convert log level to string
+	// convert logLevel and Priority to string
 	settingsMap[PipelineLogLevelKey] = s.Values[PipelineLogLevelKey].(log.LogLevel).String()
+	settingsMap[PriorityKey] = s.Values[PriorityKey].(base.PriorityType).String()
 
 	return settingsMap
 }
@@ -281,6 +293,11 @@ func (s *ReplicationSettings) PostProcessAfterUnmarshalling() {
 			s.Values[FilterVersionKey] = base.FilterVersionType(filterVersion.(int))
 		}
 
+		priority := s.Values[PriorityKey]
+		if priority != nil {
+			s.Values[PriorityKey] = base.PriorityType(priority.(int))
+		}
+
 		// no need for populateFieldsUsingMap() since fields and map in metakv should already be consistent
 	}
 	s.HandleUpgrade()
@@ -293,11 +310,6 @@ func (s *ReplicationSettings) UpdateSettingsFromMap(settingsMap map[string]inter
 	}
 	s.populateFieldsUsingMap()
 	return
-}
-
-func (s *ReplicationSettings) SetCompressionType(compressionType int) {
-	s.Values[CompressionTypeKey] = compressionType
-	s.CompressionType = compressionType
 }
 
 // populate settings map using field values
@@ -372,6 +384,15 @@ func (s *ReplicationSettings) populateFieldsUsingMap() {
 
 func (s *ReplicationSettings) IsCapi() bool {
 	return s.RepType == ReplicationTypeCapi
+}
+
+func (s *ReplicationSettings) GetPriority() base.PriorityType {
+	priority, _ := s.GetSettingValueOrDefaultValue(PriorityKey)
+	return priority.(base.PriorityType)
+}
+
+func (s *ReplicationSettings) GetBacklogThreshold() int {
+	return s.GetIntSettingValue(BacklogThresholdKey)
 }
 
 type ReplicationSettingsMap map[string]interface{}
@@ -510,6 +531,29 @@ func ValidateAndConvertReplicationSettingsValue(key, value, errorKey string, isE
 		if err = nonCAPIOnlyFeature(convertedValue, base.CompressionTypeNone, isCapi); err != nil {
 			return
 		}
+	case PriorityKey:
+		if convertedValue, err = base.PriorityTypeFromStr(value); err != nil {
+			err = base.GenericInvalidValueError(errorKey)
+			return
+		}
+		if err = enterpriseOnlyFeature(convertedValue.(base.PriorityType), base.PriorityTypeHigh, isEnterprise); err != nil {
+			return
+		}
+		if err = nonCAPIOnlyFeature(convertedValue.(base.PriorityType), base.PriorityTypeHigh, isCapi); err != nil {
+			return
+		}
+
+	case BacklogThresholdKey:
+		convertedValue, err = ValidateAndConvertSettingsValue(key, value, ReplicationSettingsConfigMap)
+		if err != nil {
+			return
+		}
+		if err = enterpriseOnlyFeature(convertedValue.(int), base.BacklogThresholdDefault, isEnterprise); err != nil {
+			return
+		}
+		if err = nonCAPIOnlyFeature(convertedValue.(int), base.BacklogThresholdDefault, isCapi); err != nil {
+			return
+		}
 	default:
 		// generic cases that can be handled by ValidateAndConvertSettingsValue
 		convertedValue, err = ValidateAndConvertSettingsValue(key, value, ReplicationSettingsConfigMap)
@@ -521,25 +565,21 @@ func ValidateAndConvertReplicationSettingsValue(key, value, errorKey string, isE
 // check if the default value of the specified settings can be changed through rest api
 // it assumes that the key provided is a valid settings key
 func IsSettingDefaultValueMutable(key string) bool {
-	mutable := true
 	for _, setting := range ImmutableDefaultSettings {
 		if setting == key {
-			mutable = false
-			break
+			return false
 		}
 	}
-	return mutable
+	return true
 }
 
 // check if the value the specified settings can be changed after replication is created
 // it assumes that the key provided is a valid settings key
 func IsSettingValueMutable(key string) bool {
-	mutable := true
 	for _, setting := range ImmutableSettings {
 		if setting == key {
-			mutable = false
-			break
+			return false
 		}
 	}
-	return mutable
+	return true
 }

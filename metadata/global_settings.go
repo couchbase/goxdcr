@@ -2,6 +2,7 @@ package metadata
 
 import (
 	"fmt"
+	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
 )
 
@@ -21,7 +22,7 @@ const (
 	GlobalConfigurationKey   = "GlobalConfiguration"
 )
 
-var GoMaxProcsConfig = &SettingsConfig{4, &Range{1, 10000}}
+var GoMaxProcsConfig = &SettingsConfig{base.DefaultGoMaxProcs, &Range{1, 10000}}
 
 // -1 indicates that GC is disabled completely
 // note, 0 is not a valid value for GOGC, which will be checked separately from the range check

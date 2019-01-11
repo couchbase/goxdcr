@@ -821,6 +821,24 @@ func (service *ReplicationSpecService) AllReplicationSpecs() (map[string]*metada
 	return specs, nil
 }
 
+// Note, this method returns spec instead of spec.Clone() to avoid generating too much garbage.
+// This method should be used when:
+// 1. The method is called frequently
+// and 2. The specs returned are NEVER modified
+// With the above restriction, there should not be concurrent access issues
+// since this service performs copy on write and never modifies the specs either.
+func (service *ReplicationSpecService) AllActiveReplicationSpecsReadOnly() (map[string]*metadata.ReplicationSpecification, error) {
+	specs := make(map[string]*metadata.ReplicationSpecification, 0)
+	values_map := service.getCache().GetMap()
+	for key, val := range values_map {
+		spec := val.(*ReplicationSpecVal).spec
+		if spec != nil && spec.Settings.Active {
+			specs[key] = spec
+		}
+	}
+	return specs, nil
+}
+
 func (service *ReplicationSpecService) AllReplicationSpecIds() ([]string, error) {
 	repIds := []string{}
 	values_map := service.getCache().GetMap()
