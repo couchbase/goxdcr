@@ -433,7 +433,7 @@ func newConfig(logger *log.CommonLogger) xmemConfig {
 		logger:             logger,
 	}
 
-	atomic.StoreUint32(&config.maxIdleCount, base.XmemMaxIdleCount)
+	atomic.StoreUint32(&config.maxIdleCount, uint32(base.XmemMaxIdleCount))
 	resptimeout := base.XmemDefaultRespTimeout
 	atomic.StorePointer(&config.respTimeout, unsafe.Pointer(&resptimeout))
 
@@ -2068,7 +2068,8 @@ func (xmem *XmemNozzle) adjustRespTimeout(committing_time time.Duration) {
 func (xmem *XmemNozzle) adjustMaxIdleCount(factor float64) {
 	old_maxIdleCount := xmem.getMaxIdleCount()
 	new_maxIdleCount := uint32(float64(old_maxIdleCount) * factor)
-	new_maxIdleCount = uint32(math.Max(float64(new_maxIdleCount), float64(old_maxIdleCount)))
+	new_maxIdleCount = uint32(math.Max(float64(new_maxIdleCount), float64(base.XmemMaxIdleCountLowerBound)))
+	new_maxIdleCount = uint32(math.Min(float64(new_maxIdleCount), float64(base.XmemMaxIdleCountUpperBound)))
 	atomic.StoreUint32(&xmem.config.maxIdleCount, new_maxIdleCount)
 }
 

@@ -599,7 +599,13 @@ var XmemSelfMonitorInterval = 6 * time.Second
 // initial max idle count;
 // it is dynamically adjusted at runtime by factor = actual response wait time / previous response wait time
 // if xmem idle count exceeds this max, it will be declared to be stuck
-var XmemMaxIdleCount uint32 = 60
+var XmemMaxIdleCount = 60
+
+// lower bound for xmem max idle count
+var XmemMaxIdleCountLowerBound = 10
+
+// upper bound for xmem max idle count
+var XmemMaxIdleCountUpperBound = 120
 
 // //the maximum amount of data (in bytes) xmem data channel can hold
 var XmemMaxDataChanSize = 10 * 1024 * 1024
@@ -686,7 +692,8 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	xmemReadTimeout time.Duration, xmemMaxReadDownTime time.Duration,
 	xmemBackoffWaitTime time.Duration, xmemMaxRetryNewConn int,
 	xmemBackoffTimeNewConn time.Duration, xmemSelfMonitorInterval time.Duration,
-	xmemMaxIdleCount int, xmemMaxDataChanSize int, xmemMaxBatchSize int,
+	xmemMaxIdleCount int, xmemMaxIdleCountLowerBound int, xmemMaxIdleCountUpperBound int,
+	xmemMaxDataChanSize int, xmemMaxBatchSize int,
 	capiRetryInterval time.Duration, maxLengthSnapshotHistory int,
 	maxRetryTargetStats int, retryIntervalTargetStats time.Duration,
 	numberOfSlotsForBandwidthThrottling int, percentageOfBytesToSendAsMin int,
@@ -740,7 +747,9 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	XmemMaxRetryNewConn = xmemMaxRetryNewConn
 	XmemBackoffTimeNewConn = xmemBackoffTimeNewConn
 	XmemSelfMonitorInterval = xmemSelfMonitorInterval
-	XmemMaxIdleCount = uint32(xmemMaxIdleCount)
+	XmemMaxIdleCount = xmemMaxIdleCount
+	XmemMaxIdleCountLowerBound = xmemMaxIdleCountLowerBound
+	XmemMaxIdleCountUpperBound = xmemMaxIdleCountUpperBound
 	XmemMaxDataChanSize = xmemMaxDataChanSize
 	XmemMaxBatchSize = xmemMaxBatchSize
 	CapiRetryInterval = capiRetryInterval

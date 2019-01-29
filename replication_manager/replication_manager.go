@@ -200,6 +200,9 @@ func initConstants(xdcr_topology_svc service_def.XDCRCompTopologySvc, internal_s
 
 	logger_rm.Infof("XDCR internal settings: %v\n", internal_settings.ToMap())
 
+	metadata.InitConstants(internal_settings.Values[metadata.XmemMaxIdleCountLowerBoundKey].(int),
+		internal_settings.Values[metadata.XmemMaxIdleCountUpperBoundKey].(int))
+
 	base.InitConstants(time.Duration(internal_settings.Values[metadata.TopologyChangeCheckIntervalKey].(int))*time.Second,
 		internal_settings.Values[metadata.MaxTopologyChangeCountBeforeRestartKey].(int),
 		internal_settings.Values[metadata.MaxTopologyStableCountBeforeRestartKey].(int),
@@ -233,6 +236,8 @@ func initConstants(xdcr_topology_svc service_def.XDCRCompTopologySvc, internal_s
 		time.Duration(internal_settings.Values[metadata.XmemBackoffTimeNewConnKey].(int))*time.Millisecond,
 		time.Duration(internal_settings.Values[metadata.XmemSelfMonitorIntervalKey].(int))*time.Second,
 		internal_settings.Values[metadata.XmemMaxIdleCountKey].(int),
+		internal_settings.Values[metadata.XmemMaxIdleCountLowerBoundKey].(int),
+		internal_settings.Values[metadata.XmemMaxIdleCountUpperBoundKey].(int),
 		internal_settings.Values[metadata.XmemMaxDataChanSizeKey].(int),
 		internal_settings.Values[metadata.XmemMaxBatchSizeKey].(int),
 		time.Duration(internal_settings.Values[metadata.CapiRetryIntervalKey].(int))*time.Millisecond,
