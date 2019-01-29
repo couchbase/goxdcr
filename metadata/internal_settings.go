@@ -1,6 +1,7 @@
 package metadata
 
 import (
+	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
 	"math"
 )
@@ -94,6 +95,10 @@ const (
 	// it is dynamically adjusted at runtime by factor = actual response wait time / previous response wait time
 	// if xmem idle count exceeds this max, it will be declared to be stuck
 	XmemMaxIdleCountKey = "XmemMaxIdleCount"
+	// lower bound for xmem max idle count
+	XmemMaxIdleCountLowerBoundKey = "XmemMaxIdleCountLowerBound"
+	// upper bound for xmem max idle count
+	XmemMaxIdleCountUpperBoundKey = "XmemMaxIdleCountUpperBound"
 	//the maximum amount of data (in bytes) xmem data channel can hold
 	XmemMaxDataChanSizeKey = "XmemMaxDataChanSize"
 	// max batch size that can be sent in one writeToClient() op
@@ -180,6 +185,8 @@ var XmemMaxRetryNewConnConfig = &SettingsConfig{10, &Range{0, 1000}}
 var XmemBackoffTimeNewConnConfig = &SettingsConfig{1000, &Range{1, 60000}}
 var XmemSelfMonitorIntervalConfig = &SettingsConfig{6, &Range{1, math.MaxInt32}}
 var XmemMaxIdleCountConfig = &SettingsConfig{60, &Range{1, 3600}}
+var XmemMaxIdleCountLowerBoundConfig = &SettingsConfig{10, &Range{1, base.XmemMaxIdleCountUpperBound}}
+var XmemMaxIdleCountUpperBoundConfig = &SettingsConfig{120, &Range{base.XmemMaxIdleCountLowerBound, 3600}}
 var XmemMaxDataChanSizeConfig = &SettingsConfig{10 * 1024 * 1024, &Range{1, math.MaxInt32}}
 var XmemMaxBatchSizeConfig = &SettingsConfig{50, &Range{1, MaxBatchCount}}
 var CapiRetryIntervalConfig = &SettingsConfig{500, &Range{1, 60000}}
@@ -242,6 +249,8 @@ var XDCRInternalSettingsConfigMap = map[string]*SettingsConfig{
 	XmemBackoffTimeNewConnKey:                     XmemBackoffTimeNewConnConfig,
 	XmemSelfMonitorIntervalKey:                    XmemSelfMonitorIntervalConfig,
 	XmemMaxIdleCountKey:                           XmemMaxIdleCountConfig,
+	XmemMaxIdleCountLowerBoundKey:                 XmemMaxIdleCountLowerBoundConfig,
+	XmemMaxIdleCountUpperBoundKey:                 XmemMaxIdleCountUpperBoundConfig,
 	XmemMaxDataChanSizeKey:                        XmemMaxDataChanSizeConfig,
 	XmemMaxBatchSizeKey:                           XmemMaxBatchSizeConfig,
 	CapiRetryIntervalKey:                          CapiRetryIntervalConfig,
@@ -270,6 +279,13 @@ var XDCRInternalSettingsConfigMap = map[string]*SettingsConfig{
 	TimeoutPartsStopKey:                           TimeoutPartsStopConfig,
 	TimeoutDcpCloseUprStreamsKey:                  TimeoutDcpCloseUprStreamsConfig,
 	TimeoutDcpCloseUprFeedKey:                     TimeoutDcpCloseUprFeedConfig,
+}
+
+func InitConstants(xmemMaxIdleCountLowerBound int, xmemMaxIdleCountUpperBound int) {
+	XmemMaxIdleCountLowerBoundConfig = &SettingsConfig{10, &Range{1, xmemMaxIdleCountUpperBound}}
+	XmemMaxIdleCountUpperBoundConfig = &SettingsConfig{120, &Range{xmemMaxIdleCountLowerBound, 3600}}
+	XDCRInternalSettingsConfigMap[XmemMaxIdleCountLowerBoundKey] = XmemMaxIdleCountLowerBoundConfig
+	XDCRInternalSettingsConfigMap[XmemMaxIdleCountUpperBoundKey] = XmemMaxIdleCountUpperBoundConfig
 }
 
 type InternalSettings struct {
