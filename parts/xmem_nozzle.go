@@ -765,6 +765,7 @@ type XmemNozzle struct {
 	counter_waittime            uint64
 	counter_batches             int64
 	start_time                  time.Time
+	counter_resend              uint64
 
 	receive_token_ch chan int
 
@@ -1716,6 +1717,7 @@ func (xmem *XmemNozzle) sendSingleSetMeta(bytesList [][]byte, numOfRetry int) er
 		for j := 0; j < numOfRetry; j++ {
 			err, rev := xmem.writeToClient(xmem.client_for_setMeta, bytesList, true)
 			if err == nil {
+				atomic.AddUint64(&xmem.counter_resend, 1)
 				return nil
 			} else if err == badConnectionError {
 				xmem.repairConn(xmem.client_for_setMeta, err.Error(), rev)
@@ -2447,8 +2449,13 @@ func (xmem *XmemNozzle) PrintStatusSummary() {
 		if counter_sent > 0 {
 			avg_wait_time = float64(atomic.LoadUint64(&xmem.counter_waittime)) / float64(counter_sent)
 		}
-		xmem.Logger().Infof("%v state =%v connType=%v received %v items (%v compressed), sent %v items (%v compressed), %v items waiting to confirm, %v in queue, %v in current batch, avg wait time is %vms, size of last ten batches processed %v, len(batches_ready_queue)=%v\n",
-			xmem.Id(), xmem.State(), connType, atomic.LoadUint64(&xmem.counter_received), atomic.LoadUint64(&xmem.counter_compressed_received), atomic.LoadUint64(&xmem.counter_sent), atomic.LoadUint64(&xmem.counter_compressed_sent), xmem.buf.itemCountInBuffer(), len(xmem.dataChan), atomic.LoadUint32(&xmem.cur_batch_count), avg_wait_time, xmem.getLastTenBatchSize(), len(xmem.batches_ready_queue))
+		xmem.Logger().Infof("%v state =%v connType=%v received %v items (%v compressed), sent %v items (%v compressed), %v items waiting to confirm, %v in queue, %v in current batch, avg wait time is %vms, size of last ten batches processed %v, len(batches_ready_queue)=%v resend=%v repair_count_getMeta=%v repair_count_setMeta=%v\n",
+			xmem.Id(), xmem.State(), connType, atomic.LoadUint64(&xmem.counter_received),
+			atomic.LoadUint64(&xmem.counter_compressed_received), atomic.LoadUint64(&xmem.counter_sent),
+			atomic.LoadUint64(&xmem.counter_compressed_sent), xmem.buf.itemCountInBuffer(), len(xmem.dataChan),
+			atomic.LoadUint32(&xmem.cur_batch_count), avg_wait_time, xmem.getLastTenBatchSize(),
+			len(xmem.batches_ready_queue), atomic.LoadUint64(&xmem.counter_resend),
+			xmem.client_for_getMeta.repairCount(), xmem.client_for_setMeta.repairCount())
 	} else {
 		xmem.Logger().Infof("%v state =%v ", xmem.Id(), xmem.State())
 	}
