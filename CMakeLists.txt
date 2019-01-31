@@ -48,4 +48,4 @@ GoInstall (TARGET goxdcr PACKAGE github.com/couchbase/goxdcr/main
   CGO_LIBRARY_DIRS "${FORESTDB_LIBRARY_DIR}"
   GOTAGS pcre
   INSTALL_PATH bin OUTPUT goxdcr
-  GOVERSION 1.8.5)
+  GOVERSION 1.11)
