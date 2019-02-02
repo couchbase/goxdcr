@@ -1,3 +1,5 @@
+// +build !pcre
+
 package metadata
 
 import (

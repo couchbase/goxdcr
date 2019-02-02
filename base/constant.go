@@ -13,8 +13,8 @@ import (
 	"errors"
 	"fmt"
 	mc "github.com/couchbase/gomemcached"
-	"github.com/glenn-brown/golang-pkg-pcre/src/pkg/pcre"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -210,6 +210,7 @@ var ErrorFilterEnterpriseOnly = errors.New("Filter expression can be specified i
 var ErrorFilterInvalidVersion = errors.New("Filter version specified is deprecated")
 var ErrorFilterInvalidFormat = errors.New("Filter specified using key-only regex is deprecated")
 var ErrorFilterSkipRestreamRequired = errors.New("Filter skip restream flag is required along with a filter")
+var ErrorNotSupported = errors.New("Not supported")
 
 // the full error as of now is : "x509: cannot validate certificate for xxx because it doesn't contain any IP SANs"
 // use a much shorter version for matching to reduce the chance of false negatives - the error message may be changed by golang in the future
@@ -837,7 +838,6 @@ var ReverseReservedWordsMap = map[string]string{
 }
 
 // The regexp here returns true if the specified values are not escaped (enclosed by backticks)
-var ReservedWordsReplaceMap = map[string]pcre.Regexp{
-	ExternalKeyKey:   pcre.MustCompile(fmt.Sprintf("(?<!`)%v(?!`)", ExternalKeyKey), 0 /*flags*/),
-	ExternalKeyXattr: pcre.MustCompile(fmt.Sprintf("(?<!`)%v(?!`)", ExternalKeyXattr), 0 /*flags*/),
-}
+var ReservedWordsReplaceMap = map[string]PcreWrapperInterface{}
+
+var ReservedWordsReplaceMapOnce sync.Once

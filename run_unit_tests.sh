@@ -22,6 +22,9 @@ for directory in ${DIRS_WITH_UT[@]}
 do
 	cd ${ROOT_DIR}/${directory}
 	go test
+	if (( `ls -l *pcre_test.go 2> /dev/null | grep -c .` > 0 )); then
+		go test -tags=pcre
+	fi
 	result=$?
 	if (( !$result == 0 ));then
 		exit $result

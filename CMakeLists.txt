@@ -48,6 +48,11 @@ IF (APPLE)
   SET (LDFLAGS "-s -extldflags '-Wl,-rpath,@executable_path/../lib'")
 ENDIF ()
 
+SET (xdcrGoTags)
+IF (NOT WIN32)
+	SET (xdcrGoTags "pcre")
+ENDIF ()
+
 GoInstall (TARGET goxdcr PACKAGE github.com/couchbase/goxdcr/main
   GOPATH "${PROJECT_SOURCE_DIR}/../../../.." "${GODEPSDIR}"
   ${_forestdb_dep}
@@ -55,7 +60,7 @@ GoInstall (TARGET goxdcr PACKAGE github.com/couchbase/goxdcr/main
   CGO_LIBRARY_DIRS "${FORESTDB_LIBRARY_DIR}"
   CGO_INCLUDE_DIRS "${PCRE_INCLUDE_DIR}"
   CGO_LIBRARY_DIRS "${PCRE_LIBRARY_DIR}"
-  GOTAGS pcre
+  GOTAGS "${xdcrGoTags}"
   LDFLAGS "${LDFLAGS}"
   INSTALL_PATH bin OUTPUT goxdcr
   GOVERSION 1.11)

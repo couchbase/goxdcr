@@ -96,7 +96,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	host :=top_svc.GetLocalHostName()
+	host := top_svc.GetLocalHostName()
 
 	metakv_svc, err := metadata_svc.NewMetaKVMetadataSvc(nil, utils)
 	if err != nil {

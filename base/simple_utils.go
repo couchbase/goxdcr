@@ -982,8 +982,8 @@ func ReplaceKeyWordsForExpression(expression string) string {
 	expressionBytes := []byte(expression)
 
 	// Replace all backtick with quotes
-	for k, regex := range ReservedWordsReplaceMap {
-		expressionBytes = regex.ReplaceAll(expressionBytes, []byte(fmt.Sprintf("`%v`", ReservedWordsMap[k])), 0 /*flags*/)
+	for k, regexIface := range ReservedWordsReplaceMap {
+		expressionBytes = regexIface.ReplaceAll(expressionBytes, []byte(fmt.Sprintf("`%v`", ReservedWordsMap[k])), 0 /*flags*/)
 	}
 
 	return string(expressionBytes)
@@ -1002,4 +1002,20 @@ func FilterContainsXattrExpression(expression string) bool {
 
 func FilterContainsKeyExpression(expression string) bool {
 	return strings.Contains(expression, ReservedWordsMap[ExternalKeyKey])
+}
+
+func InitPcreVars() {
+	ReservedWordsReplaceMapOnce.Do(func() {
+		ReservedWordsReplaceMap = make(map[string]PcreWrapperInterface)
+
+		externalKeyKeyReplace, err := MakePcreRegex(fmt.Sprintf("(?<!`)%v(?!`)", ExternalKeyKey))
+		if err == nil {
+			ReservedWordsReplaceMap[ExternalKeyKey] = externalKeyKeyReplace
+		}
+
+		externalXattrReplace, err := MakePcreRegex(fmt.Sprintf("(?<!`)%v(?!`)", ExternalKeyXattr))
+		if err == nil {
+			ReservedWordsReplaceMap[ExternalKeyXattr] = externalXattrReplace
+		}
+	})
 }

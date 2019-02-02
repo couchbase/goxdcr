@@ -1,3 +1,5 @@
+// +build !pcre
+
 package pipeline_manager
 
 import (

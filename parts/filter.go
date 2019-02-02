@@ -32,6 +32,9 @@ type Filter struct {
 }
 
 func NewFilter(id string, filterExpression string, utils utilities.UtilsIface) (*Filter, error) {
+	// Initialize PCRE things, if they are there
+	base.InitPcreVars()
+
 	dpPtr := utilities.NewDataPool()
 	if dpPtr == nil {
 		return nil, base.ErrorNoDataPool
