@@ -179,7 +179,7 @@ func (negotiator *vbStreamNegotiator) handleStreamRequest(feed *UprFeed,
 
 	stream, err := negotiator.getStreamFromMap(vbno, opaque)
 	if err != nil {
-		err = fmt.Errorf("Stream not found for vb %d appOpaque %v: %#v", vbno, appOpaque, *pktPtr)
+		err = fmt.Errorf("Stream not found for vb %d: %#v", vbno, *pktPtr)
 		logging.Errorf(err.Error())
 		return nil, err
 	}

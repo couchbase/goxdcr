@@ -93,9 +93,11 @@ const (
 	OBSERVE_SEQNO = CommandCode(0x91) // Sequence Number based Observe
 	OBSERVE       = CommandCode(0x92)
 
-	GET_META            = CommandCode(0xA0) // Get meta. returns with expiry, flags, cas etc
-	SUBDOC_GET          = CommandCode(0xc5) // Get subdoc. Returns with xattrs
-	SUBDOC_MULTI_LOOKUP = CommandCode(0xd0) // Multi lookup. Doc xattrs and meta.
+	GET_META                 = CommandCode(0xA0) // Get meta. returns with expiry, flags, cas etc
+	GET_COLLECTIONS_MANIFEST = CommandCode(0xba) // Get entire collections manifest.
+	SUBDOC_GET               = CommandCode(0xc5) // Get subdoc. Returns with xattrs
+	SUBDOC_MULTI_LOOKUP      = CommandCode(0xd0) // Multi lookup. Doc xattrs and meta.
+
 )
 
 // command codes that are counted toward DCP control buffer
@@ -261,6 +263,7 @@ func init() {
 	CommandNames[UPR_CONTROL] = "UPR_CONTROL"
 	CommandNames[SUBDOC_GET] = "SUBDOC_GET"
 	CommandNames[SUBDOC_MULTI_LOOKUP] = "SUBDOC_MULTI_LOOKUP"
+	CommandNames[GET_COLLECTIONS_MANIFEST] = "GET_COLLECTIONS_MANIFEST"
 
 	StatusNames = make(map[Status]string)
 	StatusNames[SUCCESS] = "SUCCESS"

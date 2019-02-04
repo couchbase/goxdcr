@@ -74,6 +74,7 @@ type Feature uint16
 
 const FeatureMutationToken = Feature(0x04)
 const FeatureXattr = Feature(0x06)
+const FeatureCollections = Feature(0x12)
 const FeatureDataType = Feature(0x0b)
 
 // The Client itself.
@@ -288,6 +289,19 @@ func (c *Client) GetSubdoc(vb uint16, key string, subPaths []string) (*gomemcach
 		Key:     []byte(key),
 		Extras:  extraBuf,
 		Body:    valueBuf,
+	})
+
+	if err != nil && IfResStatusError(res) {
+		return res, err
+	}
+	return res, nil
+}
+
+// Retrieve the collections manifest.
+func (c *Client) GetCollectionsManifest() (*gomemcached.MCResponse, error) {
+
+	res, err := c.Send(&gomemcached.MCRequest{
+		Opcode: gomemcached.GET_COLLECTIONS_MANIFEST,
 	})
 
 	if err != nil && IfResStatusError(res) {
