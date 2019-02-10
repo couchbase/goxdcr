@@ -31,6 +31,7 @@ type ClientIface interface {
 	Del(vb uint16, key string) (*gomemcached.MCResponse, error)
 	EnableMutationToken() (*gomemcached.MCResponse, error)
 	Get(vb uint16, key string) (*gomemcached.MCResponse, error)
+	GetFromCollection(vb uint16, cid uint16, key string) (*gomemcached.MCResponse, error)
 	GetSubdoc(vb uint16, key string, subPaths []string) (*gomemcached.MCResponse, error)
 	GetAndTouch(vb uint16, key string, exp int) (*gomemcached.MCResponse, error)
 	GetBulk(vb uint16, keys []string, rv map[string]*gomemcached.MCResponse, subPaths []string) error
@@ -279,6 +280,22 @@ func (c *Client) Get(vb uint16, key string) (*gomemcached.MCResponse, error) {
 	})
 }
 
+// Get the value for a key from a collection, identified by collection id.
+func (c *Client) GetFromCollection(vb uint16, cid uint32, key string) (*gomemcached.MCResponse, error) {
+	keyBytes := []byte(key)
+	encodedCid := make([]byte, binary.MaxVarintLen32)
+	lenEncodedCid := binary.PutUvarint(encodedCid, uint64(cid))
+	encodedKey := make([]byte, 0, lenEncodedCid+len(keyBytes))
+	encodedKey = append(encodedKey, encodedCid[0:lenEncodedCid]...)
+	encodedKey = append(encodedKey, keyBytes...)
+
+	return c.Send(&gomemcached.MCRequest{
+		Opcode:  gomemcached.GET,
+		VBucket: vb,
+		Key:     encodedKey,
+	})
+}
+
 // Get the xattrs, doc value for the input key
 func (c *Client) GetSubdoc(vb uint16, key string, subPaths []string) (*gomemcached.MCResponse, error) {
 
@@ -302,6 +319,20 @@ func (c *Client) GetCollectionsManifest() (*gomemcached.MCResponse, error) {
 
 	res, err := c.Send(&gomemcached.MCRequest{
 		Opcode: gomemcached.GET_COLLECTIONS_MANIFEST,
+	})
+
+	if err != nil && IfResStatusError(res) {
+		return res, err
+	}
+	return res, nil
+}
+
+// Retrieve the collections manifest.
+func (c *Client) CollectionsGetCID(scope string, collection string) (*gomemcached.MCResponse, error) {
+
+	res, err := c.Send(&gomemcached.MCRequest{
+		Opcode: gomemcached.COLLECTIONS_GET_CID,
+		Key:    []byte(scope + "." + collection),
 	})
 
 	if err != nil && IfResStatusError(res) {
