@@ -212,6 +212,9 @@ var ErrorFilterInvalidFormat = errors.New("Filter specified using key-only regex
 var ErrorFilterSkipRestreamRequired = errors.New("Filter skip restream flag is required along with a filter")
 var ErrorNotSupported = errors.New("Not supported")
 
+// Various non-error internal msgs
+var FilterForcePassThrough = errors.New("No data is to be filtered, should allow passthrough")
+
 // the full error as of now is : "x509: cannot validate certificate for xxx because it doesn't contain any IP SANs"
 // use a much shorter version for matching to reduce the chance of false negatives - the error message may be changed by golang in the future
 var NoIpSANErrMsg = "IP SANs"

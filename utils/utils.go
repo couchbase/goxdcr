@@ -2743,5 +2743,11 @@ func (u *Utilities) ProcessUprEventForFiltering(uprEvent *mcc.UprEvent, dp DataP
 		}
 	}
 
+	if !needToProcessBody && shouldSkipKey {
+		// This means that the UPR Event coming in is a DCP_MUTATION but is not a JSON document
+		// In addition, user did not request filter on Xattribute, nor keys.
+		// This is a special case and should be allowed to pass through
+		return nil, base.FilterForcePassThrough, releaseFunc
+	}
 	return body, err, releaseFunc
 }

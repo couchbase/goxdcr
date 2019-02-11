@@ -87,7 +87,11 @@ func (filter *Filter) FilterUprEvent(uprEvent *mcc.UprEvent) bool {
 		defer releaseFunc()
 	}
 	if err != nil {
-		return false
+		if err == base.FilterForcePassThrough {
+			return true
+		} else {
+			return false
+		}
 	}
 	return filter.FilterByteSlice(sliceToBeFiltered)
 }
