@@ -34,7 +34,7 @@ func TestFilterBool(t *testing.T) {
 	fmt.Println("============== Test case start: TestFilterBool =================")
 	assert := assert.New(t)
 
-	udMarsh, err := ioutil.ReadFile("testData/MB-33010.json")
+	udMarsh, err := ioutil.ReadFile("./testdata/MB-33010.json")
 	assert.Nil(err)
 
 	filter, err := NewFilter(filterId, "bool=false", realUtil)
@@ -67,7 +67,7 @@ func TestFilterBool2(t *testing.T) {
 	fmt.Println("============== Test case start: TestFilterBool2 =================")
 	assert := assert.New(t)
 
-	uprEvent, err := RetrieveUprFile("testData/MB-33010.json")
+	uprEvent, err := RetrieveUprFile("./testdata/MB-33010.json")
 	assert.Nil(err)
 	assert.NotNil(uprEvent)
 
@@ -75,7 +75,7 @@ func TestFilterBool2(t *testing.T) {
 	assert.Nil(err)
 	assert.NotNil(filter)
 
-	dataSlice, err, _ := realUtil.ProcessUprEventForFiltering(uprEvent, dp, 0 /*flags*/)
+	dataSlice, err, _, _, _ := realUtil.ProcessUprEventForFiltering(uprEvent, dp, 0 /*flags*/)
 	assert.Nil(err)
 
 	matchResult, err := filter.matcher.Match(dataSlice)

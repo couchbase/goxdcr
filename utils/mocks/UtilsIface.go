@@ -1581,7 +1581,7 @@ func (_m *UtilsIface) ParseHighSeqnoStat(vbnos []uint16, stats_map map[string]st
 }
 
 // ProcessUprEventForFiltering provides a mock function with given fields: uprEvent, dp, flags
-func (_m *UtilsIface) ProcessUprEventForFiltering(uprEvent *memcached.UprEvent, dp utils.DataPoolIface, flags base.FilterFlagType) ([]byte, error, utils.ReleaseMemFunc) {
+func (_m *UtilsIface) ProcessUprEventForFiltering(uprEvent *memcached.UprEvent, dp utils.DataPoolIface, flags base.FilterFlagType) ([]byte, error, string, utils.ReleaseMemFunc, int64) {
 	ret := _m.Called(uprEvent, dp, flags)
 
 	var r0 []byte
@@ -1600,16 +1600,30 @@ func (_m *UtilsIface) ProcessUprEventForFiltering(uprEvent *memcached.UprEvent, 
 		r1 = ret.Error(1)
 	}
 
-	var r2 utils.ReleaseMemFunc
-	if rf, ok := ret.Get(2).(func(*memcached.UprEvent, utils.DataPoolIface, base.FilterFlagType) utils.ReleaseMemFunc); ok {
+	var r2 string
+	if rf, ok := ret.Get(2).(func(*memcached.UprEvent, utils.DataPoolIface, base.FilterFlagType) string); ok {
 		r2 = rf(uprEvent, dp, flags)
 	} else {
-		if ret.Get(2) != nil {
-			r2 = ret.Get(2).(utils.ReleaseMemFunc)
+		r2 = ret.Get(2).(string)
+	}
+
+	var r3 utils.ReleaseMemFunc
+	if rf, ok := ret.Get(3).(func(*memcached.UprEvent, utils.DataPoolIface, base.FilterFlagType) utils.ReleaseMemFunc); ok {
+		r3 = rf(uprEvent, dp, flags)
+	} else {
+		if ret.Get(3) != nil {
+			r3 = ret.Get(3).(utils.ReleaseMemFunc)
 		}
 	}
 
-	return r0, r1, r2
+	var r4 int64
+	if rf, ok := ret.Get(4).(func(*memcached.UprEvent, utils.DataPoolIface, base.FilterFlagType) int64); ok {
+		r4 = rf(uprEvent, dp, flags)
+	} else {
+		r4 = ret.Get(4).(int64)
+	}
+
+	return r0, r1, r2, r3, r4
 }
 
 // QueryRestApi provides a mock function with given fields: baseURL, path, preservePathEncoding, httpCommand, contentType, body, timeout, out, logger

@@ -102,3 +102,12 @@ func TestKeyOnlyExpr(t *testing.T) {
 	}
 	fmt.Println("============== Test case end: TestKeyOnlyExpr =================")
 }
+
+// Before MB-33032 panics... now should not panic
+func TestInvalidRegex(t *testing.T) {
+	assert := assert.New(t)
+	fmt.Println("============== Test case start: TestInsert =================")
+	err := ValidateAdvFilter("REGEXP_CONTAINS(META().id, \"Invalid((((((\")")
+	assert.NotNil(err)
+	fmt.Println("============== Test case end: TestInsert =================")
+}

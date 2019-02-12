@@ -51,7 +51,7 @@ func NewFilter(id string, filterExpression string, utils utilities.UtilsIface) (
 		dp:                       dpPtr,
 	}
 
-	matcher, err := gojsonsm.GetFilterExpressionMatcher(filter.filterExpressionInternal)
+	matcher, err := base.GoJsonsmGetFilterExprMatcher(filter.filterExpressionInternal)
 	if err != nil {
 		return nil, fmt.Errorf("Unable to parse expression: %v Err: %v", filter.filterExpressionInternal, err.Error())
 	}
@@ -74,32 +74,49 @@ func NewFilter(id string, filterExpression string, utils utilities.UtilsIface) (
 	return filter, nil
 }
 
-func (filter *Filter) FilterUprEvent(uprEvent *mcc.UprEvent) bool {
+// Returns:
+// 1. bool - Whether or not it was a match
+// 2. err code
+// 3. If err is not nil, additional description
+// 4. Total bytes of failed datapool gets - which means len of []byte alloc (garbage)
+func (filter *Filter) FilterUprEvent(uprEvent *mcc.UprEvent) (bool, error, string, int64) {
+	var err error
 	if uprEvent == nil {
-		return false
+		return false, base.ErrorInvalidInput, "UprEvent is nil", 0
 	}
 
 	if uprEvent.Opcode == mc.UPR_DELETION || uprEvent.Opcode == mc.UPR_EXPIRATION {
 		// For now, pass through
-		return true
+		return true, nil, "", 0
 	}
 
-	sliceToBeFiltered, err, releaseFunc := filter.utils.ProcessUprEventForFiltering(uprEvent, filter.dp, filter.flags)
+	sliceToBeFiltered, err, errDesc, releaseFunc, failedDpCnt := filter.utils.ProcessUprEventForFiltering(uprEvent, filter.dp, filter.flags)
 	if releaseFunc != nil {
 		defer releaseFunc()
 	}
 	if err != nil {
 		if err == base.FilterForcePassThrough {
-			return true
+			return true, nil, "", failedDpCnt
 		} else {
-			return false
+			return false, err, errDesc, failedDpCnt
 		}
 	}
-	return filter.FilterByteSlice(sliceToBeFiltered)
+	matched, err := filter.FilterByteSlice(sliceToBeFiltered)
+	return matched, err, "", failedDpCnt
 }
 
-func (filter *Filter) FilterByteSlice(slice []byte) bool {
+func (filter *Filter) matchWrapper(slice []byte, errPtr *error) (matched bool) {
+	defer func() {
+		if r := recover(); r != nil {
+			*errPtr = fmt.Errorf("Error from matcher: %v", r)
+		}
+	}()
+	matched, *errPtr = filter.matcher.Match(slice)
+	return matched
+}
+
+func (filter *Filter) FilterByteSlice(slice []byte) (matched bool, err error) {
 	defer filter.matcher.Reset()
-	match, _ := filter.matcher.Match(slice)
-	return match
+	matched = filter.matchWrapper(slice, &err)
+	return
 }

@@ -715,6 +715,15 @@ func (h *replSettingsRevContext) HasChanged() bool {
 	return false
 }
 
+type DisableCompressionReason int
+
+const (
+	DCNotDisabled  DisableCompressionReason = iota
+	DCIncompatible DisableCompressionReason = iota
+	DCDecompress   DisableCompressionReason = iota
+	DCInvalid      DisableCompressionReason = iota
+)
+
 //pipelineRepairer is responsible to repair a failing pipeline
 //it will retry after the retry_interval
 type PipelineUpdater struct {
@@ -755,12 +764,14 @@ type PipelineUpdater struct {
 	runCounter uint64
 
 	// Disabled Features - with a monitor context to go along with it
-	disabledFeatures       uint8
-	replSpecSettingsHelper *replSettingsRevContext
+	disabledFeatures          uint8
+	replSpecSettingsHelper    *replSettingsRevContext
+	disabledCompressionReason DisableCompressionReason
 
-	// Unit test only - should be in milliseconds
-	testCustomScheduleTime time.Duration
-	testInjectionError     int32
+	// Unit test only - should be in milliseconds - should be only read by unit tests
+	testCustomScheduleTime      time.Duration
+	testInjectionError          int32
+	testCurrentDisabledFeatures uint8
 
 	stopped     bool
 	stoppedLock sync.Mutex
@@ -936,14 +947,16 @@ func (r *PipelineUpdater) checkAndDisableProblematicFeatures() {
 		// If the real specs have been changed, disregard customSettings so we'll read the most up to date changes
 		r.rep_status.ClearCustomSettings()
 		r.replSpecSettingsHelper.Clear()
-	} else {
+	} else if r.currentErrors != nil {
 		if r.currentErrors.ContainsError(base.ErrorCompressionNotSupported, true /*exactMatch*/) {
-			r.disableCompression()
+			r.disableCompression(base.ErrorCompressionNotSupported)
+		} else if r.currentErrors.ContainsError(base.ErrorCompressionUnableToInflate, false /*exactMatch*/) {
+			r.disableCompression(base.ErrorCompressionUnableToInflate)
 		}
 	}
 }
 
-func (r *PipelineUpdater) disableCompression() {
+func (r *PipelineUpdater) disableCompression(reason error) {
 	if r.rep_status == nil {
 		r.logger.Errorf(fmt.Sprintf("Unable to disable compression for pipeline %v - rep_status is nil", r.pipeline_name))
 		return
@@ -951,10 +964,22 @@ func (r *PipelineUpdater) disableCompression() {
 	settings := r.rep_status.Settings()
 	r.disabledFeatures |= disabledCompression
 
-	r.logger.Infof("Temporarily disabling compression for pipeline: %v", r.pipeline_name)
+	r.logger.Infof("Temporarily disabling compression for pipeline: %v due to %v", r.pipeline_name, reason)
 	settings.SetCompressionType((int)(base.CompressionTypeNone))
 
 	r.rep_status.SetCustomSettings(settings)
+
+	switch reason {
+	case base.ErrorCompressionNotSupported:
+		r.disabledCompressionReason = DCIncompatible
+	case base.ErrorCompressionUnableToInflate:
+		r.disabledCompressionReason = DCDecompress
+	default:
+		r.disabledCompressionReason = DCInvalid
+	}
+
+	// For unit test only
+	r.testCurrentDisabledFeatures = r.disabledFeatures
 }
 
 func (r *PipelineUpdater) resetDisabledFeatures() {
@@ -962,6 +987,7 @@ func (r *PipelineUpdater) resetDisabledFeatures() {
 		r.logger.Infof("Restoring compression for pipeline: %v the next time it restarts", r.pipeline_name)
 		r.rep_status.ClearCustomSettings()
 		r.disabledFeatures = 0
+		r.disabledCompressionReason = DCNotDisabled
 	}
 }
 
@@ -1120,8 +1146,18 @@ func (r *PipelineUpdater) raiseXattrWarningIfNeeded(p common.Pipeline) {
 func (r *PipelineUpdater) raiseCompressionWarningIfNeeded() {
 	if r.disabledFeatures > 0 && (r.disabledFeatures&disabledCompression > 0) {
 		spec := r.rep_status.Spec()
-		errMsg := fmt.Sprintf("Replication from source bucket '%v' to target bucket '%v' has been started without compression enabled due to errors that occurred during clusters handshaking. This may result in more data bandwidth usage. Please ensure that both the source and target clusters are at or above version %v.%v, and restart the replication.",
-			spec.SourceBucketName, spec.TargetBucketName, base.VersionForCompressionSupport[0], base.VersionForCompressionSupport[1])
+		var errMsg string
+		switch r.disabledCompressionReason {
+		case DCIncompatible:
+			errMsg = fmt.Sprintf("Replication from source bucket '%v' to target bucket '%v' has been started without compression enabled due to errors that occurred during clusters handshaking. This may result in more data bandwidth usage. Please ensure that both the source and target clusters are at or above version %v.%v, and restart the replication.",
+				spec.SourceBucketName, spec.TargetBucketName, base.VersionForCompressionSupport[0], base.VersionForCompressionSupport[1])
+		case DCDecompress:
+			errMsg = fmt.Sprintf("Replication from source bucket '%v' to target bucket '%v' has been started without compression enabled due to errors that occurred while attempting to decompress data for filtering. This may result in more data bandwidth usage. Please check the XDCR error logs for more information.",
+				spec.SourceBucketName, spec.TargetBucketName)
+		default:
+			errMsg = fmt.Sprintf("Replication from source bucket '%v' to target bucket '%v' has been started without compression enabled due to unknown errors. This may result in more data bandwidth usage.",
+				spec.SourceBucketName, spec.TargetBucketName)
+		}
 		r.logger.Warn(errMsg)
 		r.pipelineMgr.GetLogSvc().Write(errMsg)
 	}

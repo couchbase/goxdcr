@@ -167,10 +167,19 @@ func (router *Router) route(data interface{}) (map[string]interface{}, error) {
 
 	// filter data if filter expession has been defined
 	if router.filter != nil {
-		if !router.filter.FilterUprEvent(uprEvent) {
-			// if data does not match filter expression, drop it. return empty result
-			router.RaiseEvent(common.NewEvent(common.DataFiltered, uprEvent, router, nil, nil))
-			return result, nil
+		matched, err, errDesc, failedDpCnt := router.filter.FilterUprEvent(uprEvent)
+		if failedDpCnt > 0 {
+			router.RaiseEvent(common.NewEvent(common.DataPoolGetFail, failedDpCnt, router, nil, nil))
+		}
+		if !matched || err != nil {
+			if err != nil {
+				// Let pipeline supervisor do the logging
+				router.RaiseEvent(common.NewEvent(common.DataUnableToFilter, err, router, nil, errDesc))
+			} else {
+				// if data does not match filter expression, drop it. return empty result
+				router.RaiseEvent(common.NewEvent(common.DataFiltered, uprEvent, router, nil, nil))
+			}
+			return result, err
 		}
 	}
 

@@ -46,10 +46,11 @@ const (
 	SIZE_REP_QUEUE_METRIC  = "size_rep_queue"
 	DOCS_REP_QUEUE_METRIC  = "docs_rep_queue"
 
-	DOCS_FILTERED_METRIC     = "docs_filtered"
-	EXPIRY_FILTERED_METRIC   = "expiry_filtered"
-	DELETION_FILTERED_METRIC = "deletion_filtered"
-	SET_FILTERED_METRIC      = "set_filtered"
+	DOCS_FILTERED_METRIC         = "docs_filtered"
+	DOCS_UNABLE_TO_FILTER_METRIC = "docs_unable_to_filter"
+	EXPIRY_FILTERED_METRIC       = "expiry_filtered"
+	DELETION_FILTERED_METRIC     = "deletion_filtered"
+	SET_FILTERED_METRIC          = "set_filtered"
 
 	// the number of docs that failed conflict resolution on the source cluster side due to optimistic replication
 	DOCS_FAILED_CR_SOURCE_METRIC     = "docs_failed_cr_source"
@@ -100,6 +101,9 @@ const (
 	SOURCE_NODE_PASSWORD = "source_host_password"
 	SAMPLE_SIZE          = "sample_size"
 	PUBLISH_INTERVAL     = "publish_interval"
+
+	// Memory related statistics
+	DP_GET_FAIL_METRIC = "datapool_failed_gets"
 )
 
 const (
@@ -122,11 +126,11 @@ var StatsToClearForPausedReplications = []string{SIZE_REP_QUEUE_METRIC, DOCS_REP
 // keys for metrics in overview
 var OverviewMetricKeys = []string{CHANGES_LEFT_METRIC, DOCS_CHECKED_METRIC, DOCS_WRITTEN_METRIC, EXPIRY_DOCS_WRITTEN_METRIC, DELETION_DOCS_WRITTEN_METRIC,
 	SET_DOCS_WRITTEN_METRIC, DOCS_PROCESSED_METRIC, DOCS_FAILED_CR_SOURCE_METRIC, EXPIRY_FAILED_CR_SOURCE_METRIC,
-	DELETION_FAILED_CR_SOURCE_METRIC, SET_FAILED_CR_SOURCE_METRIC, DATA_REPLICATED_METRIC, DOCS_FILTERED_METRIC,
+	DELETION_FAILED_CR_SOURCE_METRIC, SET_FAILED_CR_SOURCE_METRIC, DATA_REPLICATED_METRIC, DOCS_FILTERED_METRIC, DOCS_UNABLE_TO_FILTER_METRIC,
 	EXPIRY_FILTERED_METRIC, DELETION_FILTERED_METRIC, SET_FILTERED_METRIC, NUM_CHECKPOINTS_METRIC, NUM_FAILEDCKPTS_METRIC,
 	TIME_COMMITING_METRIC, DOCS_OPT_REPD_METRIC, DOCS_RECEIVED_DCP_METRIC, EXPIRY_RECEIVED_DCP_METRIC,
 	DELETION_RECEIVED_DCP_METRIC, SET_RECEIVED_DCP_METRIC, SIZE_REP_QUEUE_METRIC, DOCS_REP_QUEUE_METRIC, DOCS_LATENCY_METRIC,
-	RESP_WAIT_METRIC, META_LATENCY_METRIC, DCP_DISPATCH_TIME_METRIC, DCP_DATACH_LEN, THROTTLE_LATENCY_METRIC,
+	RESP_WAIT_METRIC, META_LATENCY_METRIC, DCP_DISPATCH_TIME_METRIC, DCP_DATACH_LEN, THROTTLE_LATENCY_METRIC, DP_GET_FAIL_METRIC,
 }
 
 // keys for metrics that do not monotonically increase during replication, to which the "going backward" check should not be applied
@@ -1130,18 +1134,24 @@ func (r_collector *routerCollector) Mount(pipeline common.Pipeline, stats_mgr *S
 		registry_router := stats_mgr.getOrCreateRegistry(conn.Id())
 		docs_filtered := metrics.NewCounter()
 		registry_router.Register(DOCS_FILTERED_METRIC, docs_filtered)
+		docs_unable_to_filter := metrics.NewCounter()
+		registry_router.Register(DOCS_UNABLE_TO_FILTER_METRIC, docs_unable_to_filter)
 		expiry_filtered := metrics.NewCounter()
 		registry_router.Register(EXPIRY_FILTERED_METRIC, expiry_filtered)
 		deletion_filtered := metrics.NewCounter()
 		registry_router.Register(DELETION_FILTERED_METRIC, deletion_filtered)
 		set_filtered := metrics.NewCounter()
 		registry_router.Register(SET_FILTERED_METRIC, set_filtered)
+		dp_failed := metrics.NewCounter()
+		registry_router.Register(DP_GET_FAIL_METRIC, dp_failed)
 
 		metric_map := make(map[string]interface{})
 		metric_map[DOCS_FILTERED_METRIC] = docs_filtered
+		metric_map[DOCS_UNABLE_TO_FILTER_METRIC] = docs_unable_to_filter
 		metric_map[EXPIRY_FILTERED_METRIC] = expiry_filtered
 		metric_map[DELETION_FILTERED_METRIC] = deletion_filtered
 		metric_map[SET_FILTERED_METRIC] = set_filtered
+		metric_map[DP_GET_FAIL_METRIC] = dp_failed
 		r_collector.component_map[conn.Id()] = metric_map
 	}
 
@@ -1156,7 +1166,8 @@ func (r_collector *routerCollector) Id() string {
 
 func (r_collector *routerCollector) ProcessEvent(event *common.Event) error {
 	metric_map := r_collector.component_map[event.Component.Id()]
-	if event.EventType == common.DataFiltered {
+	switch event.EventType {
+	case common.DataFiltered:
 		uprEvent := event.Data.(*mcc.UprEvent)
 		metric_map[DOCS_FILTERED_METRIC].(metrics.Counter).Inc(1)
 
@@ -1170,6 +1181,10 @@ func (r_collector *routerCollector) ProcessEvent(event *common.Event) error {
 		} else {
 			r_collector.stats_mgr.logger.Warnf("Invalid opcode, %v, in DataFiltered event from %v.", uprEvent.Opcode, event.Component.Id())
 		}
+	case common.DataUnableToFilter:
+		metric_map[DOCS_UNABLE_TO_FILTER_METRIC].(metrics.Counter).Inc(1)
+	case common.DataPoolGetFail:
+		metric_map[DP_GET_FAIL_METRIC].(metrics.Counter).Inc(event.Data.(int64))
 	}
 
 	return nil

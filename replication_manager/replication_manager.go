@@ -841,21 +841,15 @@ func (rm *replicationManager) OnError(s common.Supervisor, errMap map[string]err
 		pipeline, err := rm.getPipelineFromPipelineSupevisor(s)
 		if err == nil {
 			// try to fix the pipeline
-
 			var errMsg string
-			if len(errMap) > 1 {
-				errMsg = fmt.Sprintf("%v", errMap)
-			} else if len(errMap) == 1 {
-				// strip the "map[]" wapper when there is only one error in errMap
-				for partId, partMsg := range errMap {
-					errMsg = partId + ":" + partMsg.Error()
-					break
-				}
-			} else {
+			if len(errMap) == 0 {
 				// errMap is empty, which should not have happened. use predefined error message
 				logger_rm.Warnf("Supervisor %v of type %v reported empty error map\n", s.Id(), reflect.TypeOf(s))
 				errMsg = "pipeline failed"
+			} else {
+				errMsg = base.FlattenErrorMap(errMap)
 			}
+			// NOTE because we flatten the error map here, any error checked should not be exact match
 			rm.pipelineMgr.UpdatePipeline(pipeline.Topic(), errors.New(errMsg))
 		}
 	}

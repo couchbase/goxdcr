@@ -143,7 +143,9 @@ func TestCompressionXattrKeyFiltering(t *testing.T) {
 	filter, err := NewFilter(filterId, "META().id = \"TestDocKey\" AND REGEXP_CONTAINS(`Key`, \"^A+$\") AND META().xattrs.TestXattr = 30 AND META().xattrs.AnotherXattr = \"TestValueString\"", realUtil)
 	assert.Nil(err)
 
-	assert.True(filter.FilterUprEvent(uprEvent))
+	result, err, _, _ := filter.FilterUprEvent(uprEvent)
+	assert.True(result)
+	assert.Nil(err)
 
 	fmt.Println("============== Test case end: TestCompressionXattrKeyFiltering =================")
 }
@@ -161,7 +163,9 @@ func TestCompressionKeyFiltering(t *testing.T) {
 	filter, err := NewFilter(filterId, "META().id = \"TestDocKey\" AND REGEXP_CONTAINS(`Key`, \"^A+$\")", realUtil)
 	assert.Nil(err)
 
-	assert.True(filter.FilterUprEvent(uprEvent))
+	result, err, _, _ := filter.FilterUprEvent(uprEvent)
+	assert.True(result)
+	assert.Nil(err)
 
 	fmt.Println("============== Test case end: TestCompressionXattrKeyFiltering =================")
 }

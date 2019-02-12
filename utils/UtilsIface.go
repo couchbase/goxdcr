@@ -36,7 +36,7 @@ type UtilsIface interface {
 	GetMemcachedConnectionWFeatures(serverAddr, bucketName, userAgent string, keepAlivePeriod time.Duration, features HELOFeatures, logger *log.CommonLogger) (mcc.ClientIface, HELOFeatures, error)
 	GetMemcachedSSLPortMap(hostName, username, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCertificate, clientKey []byte, bucket string, logger *log.CommonLogger) (base.SSLPortMap, error)
 	GetMemcachedRawConn(serverAddr, username, password, bucketName string, plainAuth bool, keepAlivePeriod time.Duration, logger *log.CommonLogger) (mcc.ClientIface, error)
-	ProcessUprEventForFiltering(uprEvent *mcc.UprEvent, dp DataPoolIface, flags base.FilterFlagType) ([]byte, error, ReleaseMemFunc)
+	ProcessUprEventForFiltering(uprEvent *mcc.UprEvent, dp DataPoolIface, flags base.FilterFlagType) ([]byte, error, string, ReleaseMemFunc, int64)
 
 	/**
 	 * ------------------------

@@ -703,7 +703,7 @@ func FlattenErrorMap(errMap ErrorMap) string {
 	var first bool = true
 	for k, v := range errMap {
 		if !first {
-			buffer.WriteString("\n")
+			buffer.WriteByte('\n')
 		} else {
 			first = false
 		}
@@ -898,6 +898,29 @@ func UpgradeFilter(oldFilter string) string {
 	return fmt.Sprintf("%v(`%v`, \"%v\")", gojsonsm.FuncRegexp, ReservedWordsMap[ExternalKeyKey], oldFilter)
 }
 
+func gojsonsmGetFilterWrapper(filter string, errPtr *error) gojsonsm.Matcher {
+	var matcher gojsonsm.Matcher
+	defer func() {
+		if r := recover(); r != nil {
+			*errPtr = fmt.Errorf("Error from FilterExpressionMatcher: %v", r)
+		}
+	}()
+
+	matcher, *errPtr = gojsonsm.GetFilterExpressionMatcher(filter)
+	return matcher
+}
+
+func GoJsonsmGetFilterExprMatcher(filter string) (gojsonsm.Matcher, error) {
+	// Used to catch any panics too
+	var err error
+	matcher := gojsonsmGetFilterWrapper(filter, &err)
+
+	if err != nil {
+		return nil, err
+	}
+	return matcher, nil
+}
+
 func ValidateAdvFilter(filter string) error {
 	// participle within gojsonsm has an issue where if given a regex, it could cause stack overflow
 	// To prevent this, we're going to check to make sure it has at least one operator to see if it's a valid
@@ -913,7 +936,7 @@ func ValidateAdvFilter(filter string) error {
 		return ErrorFilterInvalidFormat
 	}
 
-	_, err := gojsonsm.GetFilterExpressionMatcher(ReplaceKeyWordsForExpression(filter))
+	_, err := GoJsonsmGetFilterExprMatcher(ReplaceKeyWordsForExpression(filter))
 	if err != nil {
 		err = fmt.Errorf("Error validating advanced filter: %v", err.Error())
 	}

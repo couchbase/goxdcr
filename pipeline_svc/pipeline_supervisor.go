@@ -24,6 +24,7 @@ import (
 	"github.com/couchbase/goxdcr/supervisor"
 	utilities "github.com/couchbase/goxdcr/utils"
 	"reflect"
+	"strings"
 	"sync"
 	"time"
 )
@@ -35,8 +36,10 @@ const (
 )
 
 const (
-	health_check_interval      = 120 * time.Second
-	default_max_dcp_miss_count = 10
+	health_check_interval          = 120 * time.Second
+	default_max_dcp_miss_count     = 10
+	filterErrCheckAndPrintInterval = 5 * time.Second
+	maxFilterErrorsPerInterval     = 20
 )
 
 var pipeline_supervisor_setting_defs base.SettingDefinitions = base.SettingDefinitions{supervisor.HEARTBEAT_TIMEOUT: base.NewSettingDef(reflect.TypeOf((*time.Duration)(nil)), false),
@@ -59,6 +62,9 @@ type PipelineSupervisor struct {
 	user_agent string
 
 	utils utilities.UtilsIface
+
+	// Filtering Errors should be regulated for printing otherwise to prevent log flooding
+	filterErrCh chan error
 }
 
 func NewPipelineSupervisor(id string, logger_ctx *log.LoggerContext, failure_handler common.SupervisorFailureHandler,
@@ -73,6 +79,7 @@ func NewPipelineSupervisor(id string, logger_ctx *log.LoggerContext, failure_han
 		kv_mem_clients:      make(map[string]mcc.ClientIface),
 		kv_mem_clients_lock: &sync.Mutex{},
 		utils:               utilsIn,
+		filterErrCh:         make(chan error, maxFilterErrorsPerInterval),
 	}
 	return pipelineSupervisor
 }
@@ -104,6 +111,7 @@ func (pipelineSupervisor *PipelineSupervisor) Attach(p common.Pipeline) error {
 	for _, connector := range connectorsMap {
 		connector.RegisterComponentEventListener(common.ErrorEncountered, pipelineSupervisor)
 		connector.RegisterComponentEventListener(common.VBErrorEncountered, pipelineSupervisor)
+		connector.RegisterComponentEventListener(common.DataUnableToFilter, pipelineSupervisor)
 		pipelineSupervisor.Logger().Debugf("Registering ErrorEncountered event on connector %v\n", connector.Id())
 	}
 
@@ -120,8 +128,9 @@ func (pipelineSupervisor *PipelineSupervisor) Start(settings metadata.Replicatio
 	}
 
 	// start an additional go routine for pipeline health monitoring
-	pipelineSupervisor.GenericSupervisor.ChidrenWaitGroup().Add(1)
+	pipelineSupervisor.GenericSupervisor.ChidrenWaitGroup().Add(2)
 	go pipelineSupervisor.monitorPipelineHealth()
+	go pipelineSupervisor.checkAndLogFilterErrors()
 
 	return err
 }
@@ -200,9 +209,57 @@ func (pipelineSupervisor *PipelineSupervisor) monitorPipelineHealth() error {
 	return nil
 }
 
+func (pipelineSupervisor *PipelineSupervisor) logFilterError(err error, desc string) {
+	combinedErr := fmt.Errorf("Filter error: %v - %v", err, desc)
+	select {
+	case pipelineSupervisor.filterErrCh <- combinedErr:
+		// Error added to channel
+	default:
+		// Error channel is full. Can't add anymore. Have to drop
+	}
+}
+
+func (pipelineSupervisor *PipelineSupervisor) checkAndLogFilterErrors() {
+	pipelineSupervisor.Logger().Infof("%v checkAndLogFilterErrors started", pipelineSupervisor.Id())
+
+	defer pipelineSupervisor.GenericSupervisor.ChidrenWaitGroup().Done()
+
+	filterCheckTicker := time.NewTicker(filterErrCheckAndPrintInterval)
+	defer filterCheckTicker.Stop()
+
+	fin_ch := pipelineSupervisor.GenericSupervisor.FinishChannel()
+
+	for {
+		select {
+		case <-fin_ch:
+			pipelineSupervisor.Logger().Infof("checkAndLogFilterErrors routine is exiting because parent supervisor %v has been stopped\n", pipelineSupervisor.Id())
+			return
+		case <-filterCheckTicker.C:
+			var msgsPrinted int
+			var errMsgs []string
+			select {
+			case errMsg := <-pipelineSupervisor.filterErrCh:
+				msgsPrinted++
+				if msgsPrinted > maxFilterErrorsPerInterval {
+					break
+				}
+				errMsgs = append(errMsgs, errMsg.Error())
+			default:
+				// No error msgs
+				break
+			}
+			if len(errMsgs) > 0 {
+				pipelineSupervisor.Logger().Warnf("Last %v filtering errors: %v", msgsPrinted, strings.Join(errMsgs, ", "))
+			}
+		}
+	}
+	return
+}
+
 func (pipelineSupervisor *PipelineSupervisor) OnEvent(event *common.Event) {
 	var err error
-	if event.EventType == common.ErrorEncountered {
+	switch event.EventType {
+	case common.ErrorEncountered:
 		partId := event.Component.Id()
 		if event.OtherInfos != nil {
 			err = event.OtherInfos.(error)
@@ -212,7 +269,7 @@ func (pipelineSupervisor *PipelineSupervisor) OnEvent(event *common.Event) {
 			pipelineSupervisor.Logger().Warnf("%v Received nil error from part %v\n", pipelineSupervisor.pipeline.Topic(), partId)
 		}
 		pipelineSupervisor.setError(partId, err)
-	} else if event.EventType == common.VBErrorEncountered {
+	case common.VBErrorEncountered:
 		additionalInfo := event.OtherInfos.(*base.VBErrorEventAdditional)
 		vbno := additionalInfo.Vbno
 		err = additionalInfo.Error
@@ -229,9 +286,20 @@ func (pipelineSupervisor *PipelineSupervisor) OnEvent(event *common.Event) {
 		// at the next topology check time, we will decide whether the problematic vbs are caused by topology
 		// changes and will restart pipeline if they are not
 		pipelineSupervisor.pipeline.UpdateSettings(settings)
-	} else {
+	case common.DataUnableToFilter:
+		err = event.Data.(error)
+		pipelineSupervisor.logFilterError(err, string(event.OtherInfos.(string)))
+		if filterErrIsRecoverable(err) {
+			// Raise error so pipeline will restart and take recovery actions
+			pipelineSupervisor.setError(event.Component.Id(), err)
+		}
+	default:
 		pipelineSupervisor.Logger().Errorf("%v Pipeline supervisor didn't register to recieve event %v for component %v", pipelineSupervisor.Id(), event.EventType, event.Component.Id())
 	}
+}
+
+func filterErrIsRecoverable(err error) bool {
+	return err == base.ErrorCompressionUnableToInflate
 }
 
 func (pipelineSupervisor *PipelineSupervisor) UpdateSettings(settings metadata.ReplicationSettingsMap) error {

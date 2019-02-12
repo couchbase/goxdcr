@@ -27,6 +27,8 @@ const (
 	DataSent ComponentEventType = iota
 	//data is filtered out by the component
 	DataFiltered ComponentEventType = iota
+	//data is unable to be successfully parsed to be filtered
+	DataUnableToFilter ComponentEventType = iota
 	//fatal error encountered by the component
 	ErrorEncountered ComponentEventType = iota
 	//error encountered in a particular vb by the component
@@ -45,6 +47,8 @@ const (
 	SnapshotMarkerReceived ComponentEventType = iota
 	//data sending is throttled due to bandwidth usage limit being reached
 	DataThrottled ComponentEventType = iota
+	// Unable to get recycled data from datapool
+	DataPoolGetFail ComponentEventType = iota
 )
 
 type Event struct {

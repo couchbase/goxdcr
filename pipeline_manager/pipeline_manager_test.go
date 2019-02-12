@@ -71,7 +71,7 @@ func setupBoilerPlate() (*log.CommonLogger,
 
 	pipelineMgr := NewPipelineManager(pipelineMock, replSpecSvcMock, xdcrTopologyMock,
 		remoteClusterMock, nil /*cluster_info_svc*/, nil, /*checkpoint_svc*/
-		nil /*uilogsvc*/, log.DefaultLoggerContext, utilsNew)
+		uiLogSvcMock, log.DefaultLoggerContext, utilsNew)
 
 	// Some things needed for pipelinemgr
 	testTopic := "testTopic"
@@ -599,7 +599,7 @@ func TestUpdaterCompressionErr(t *testing.T) {
 	// Pretend the last error was because Compression was not supported
 	testRepairer.currentErrors.AddError("UnitTest", base.ErrorCompressionNotSupported)
 
-	testRepairer.disableCompression()
+	testRepairer.disableCompression(base.ErrorCompressionNotSupported)
 
 	// Modified settings
 	tempSettings := testRepairer.rep_status.Settings()
@@ -712,4 +712,36 @@ func TestUpdaterCompressionErrRevChanged(t *testing.T) {
 	checkSettings := testRepairer.rep_status.Settings()
 	assert.Equal((int)(base.CompressionTypeSnappy), checkSettings.CompressionType)
 	fmt.Println("============== Test case end: TestUpdaterCompressionErrRevChanged =================")
+}
+
+func TestFilterCompressionErrorParsing(t *testing.T) {
+	assert := assert.New(t)
+	fmt.Println("============== Test case start: TestFilterCompressionErrorParsing=================")
+	testLogger, pipelineMock, replSpecSvcMock, xdcrTopologyMock, remoteClusterMock,
+		pipelineMgr, testRepairer, testReplicationStatus, testTopic,
+		testReplicationSettings, testReplicationSpec, testRemoteClusterRef, testPipeline, uiLogSvc, replStatusMock := setupBoilerPlate()
+
+	setupGenericMocking(testLogger, pipelineMock, replSpecSvcMock, xdcrTopologyMock, remoteClusterMock,
+		pipelineMgr, testRepairer, testReplicationStatus, testTopic,
+		testReplicationSettings, testReplicationSpec, testRemoteClusterRef, testPipeline, uiLogSvc, replStatusMock)
+
+	setupLaunchUpdater(testRepairer, true)
+	assert.Equal(uint64(0), atomic.LoadUint64(&testRepairer.runCounter))
+
+	// This is what happens in replicationManager
+	dummyErrMap := make(base.ErrorMap)
+	dummyErrMap["testPart"] = fmt.Errorf("Dummy error1")
+	dummyErrMap["testPart2"] = fmt.Errorf("Dummy error1")
+	dummyErrMap["routerId"] = base.ErrorCompressionUnableToInflate
+
+	assert.Equal(uint8(0), testRepairer.testCurrentDisabledFeatures&disabledCompression)
+
+	pipelineMgr.Update(testTopic, errors.New(base.FlattenErrorMap(dummyErrMap)))
+	assert.True(testRepairer.isScheduledTimerNil())
+	time.Sleep(time.Duration(1) * time.Second)
+	assert.Equal(uint64(1), atomic.LoadUint64(&testRepairer.runCounter))
+
+	assert.NotEqual(uint8(0), testRepairer.testCurrentDisabledFeatures&disabledCompression)
+
+	fmt.Println("============== Test case end: TestFilterCompressionErrorParsing =================")
 }
