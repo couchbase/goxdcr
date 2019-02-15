@@ -27,6 +27,7 @@ import (
 	"net/http"
 	"net/url"
 	"reflect"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -1002,6 +1003,28 @@ func FilterContainsXattrExpression(expression string) bool {
 
 func FilterContainsKeyExpression(expression string) bool {
 	return strings.Contains(expression, ReservedWordsMap[ExternalKeyKey])
+}
+
+// Checks for at least one of the valid key expression connected by one or more valid key expression connected by AND or OR
+// Logic explained:
+// Either a single instance that starts and ends with one of: "REGEXP_CONTAINS(key, \".*\")" OR "key op \"alphanumeric\"*"
+// OR
+// One single instance  instance of the above (that does not start and end) followed by one or more instances of (AND|OR [statement above])
+// A = {NOT }* Key Op "Value"
+// B = {NOT }* REGEXP_CONTAINS(Key, "regex")
+// ^((A|B) ((AND|OR) (A|B))*)$
+var singleAwesomeKeyOnlyRegex *regexp.Regexp = regexp.MustCompile(fmt.Sprintf("^(((((NOT *)*%v *(=|>|>=|<|<=) *\"[a-zA-Z0-9_]*\") *|((NOT *)*REGEXP_CONTAINS\\( *%v *, *\".*\" *\\)) *))((AND|OR) *(((NOT *)*%v *(=|>|>=|<|<=) *\"[a-zA-Z0-9_]*\") *|((NOT *)*REGEXP_CONTAINS\\( *%v *, *\".*\" *\\)) *))*)$", ExternalKeyKey, ExternalKeyKey, ExternalKeyKey, ExternalKeyKey))
+
+// NOTE - takes in user entered META().id as key
+func FilterOnlyContainsKeyExpression(expression string) bool {
+	// Valid key operations only are:
+	// 1. META().id {=/</<=/>/>=} somethingExact
+	// 2. NOT 1.
+	// 3. REGEXP_CONTAINS(META().id, "regex")
+	// 4. NOT 4.
+	// 5. Any combination of the above connected with AND or OR
+	// If any parenthesis are used, then too bad...
+	return singleAwesomeKeyOnlyRegex.MatchString(expression)
 }
 
 func InitPcreVars() {

@@ -67,6 +67,8 @@ func NewFilter(id string, filterExpression string, utils utilities.UtilsIface) (
 
 	if !base.FilterContainsKeyExpression(filter.filterExpressionInternal) {
 		filter.flags |= base.FilterFlagSkipKey
+	} else if base.FilterOnlyContainsKeyExpression(filterExpression) {
+		filter.flags |= base.FilterFlagKeyOnly
 	}
 
 	return filter, nil

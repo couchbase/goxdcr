@@ -2645,7 +2645,7 @@ func (u *Utilities) ProcessUprEventForFiltering(uprEvent *mcc.UprEvent, dp DataP
 
 	// Simplify things
 	needToProcessXattr := uprEvent.DataType&mcc.XattrDataType > 0 && flags&base.FilterFlagSkipXattr == 0
-	needToProcessBody := needToProcessXattr || uprEvent.DataType&mcc.JSONDataType > 0
+	needToProcessBody := needToProcessXattr || (uprEvent.DataType&mcc.JSONDataType > 0 && flags&base.FilterFlagKeyOnly == 0)
 	shouldSkipKey := flags&base.FilterFlagSkipKey > 0
 	bodyIsCompressed := uprEvent.DataType&mcc.SnappyDataType > 0
 

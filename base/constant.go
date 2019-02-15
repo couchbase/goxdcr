@@ -517,6 +517,7 @@ type FilterFlagType int
 const (
 	FilterFlagSkipXattr FilterFlagType = 0x1
 	FilterFlagSkipKey   FilterFlagType = 0x2
+	FilterFlagKeyOnly   FilterFlagType = 0x4
 )
 
 // --------------- Constants that are configurable -----------------
