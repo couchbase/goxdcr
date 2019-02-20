@@ -1004,6 +1004,7 @@ func RetrieveUprJsonAndConvert(fileName string) (*mcc.UprEvent, error) {
 }
 
 func ReplaceKeyWordsForExpression(expression string) string {
+	InitPcreVars()
 	expressionBytes := []byte(expression)
 
 	// Replace all backtick with quotes
@@ -1022,11 +1023,11 @@ func ReplaceKeyWordsForOutput(expression string) string {
 }
 
 func FilterContainsXattrExpression(expression string) bool {
-	return strings.Contains(expression, ReservedWordsMap[ExternalKeyXattr])
+	return strings.Contains(expression, ExternalKeyXattrContains)
 }
 
 func FilterContainsKeyExpression(expression string) bool {
-	return strings.Contains(expression, ReservedWordsMap[ExternalKeyKey])
+	return strings.Contains(expression, ExternalKeyKeyContains)
 }
 
 // Checks for at least one of the valid key expression connected by one or more valid key expression connected by AND or OR

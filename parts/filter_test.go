@@ -26,6 +26,8 @@ func TestFilter(t *testing.T) {
 	assert.Nil(err)
 	assert.NotNil(filter)
 	assert.Equal(0, len(base.ReservedWordsReplaceMap))
+	assert.True(filter.flags&base.FilterFlagSkipKey == 0)
+	assert.True(filter.flags&base.FilterFlagSkipXattr > 0)
 
 	fmt.Println("============== Test case end: TestFilterCreation =================")
 }

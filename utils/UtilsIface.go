@@ -10,7 +10,6 @@ import (
 	"github.com/couchbase/goxdcr/metadata"
 	"net"
 	"net/http"
-	"regexp"
 	"time"
 )
 
@@ -31,6 +30,7 @@ type UtilsIface interface {
 	 * ------------------------
 	 */
 	ComposeHELORequest(userAgent string, features HELOFeatures) *mc.MCRequest
+	FilterExpressionMatchesDoc(expression, docId, username, password, bucketName, addr string, port uint16) (result bool, err error)
 	GetMemcachedClient(serverAddr, bucketName string, kv_mem_clients map[string]mcc.ClientIface, userAgent string, keepAlivePeriod time.Duration, logger *log.CommonLogger) (mcc.ClientIface, error)
 	GetMemcachedConnection(serverAddr, bucketName, userAgent string, keepAlivePeriod time.Duration, logger *log.CommonLogger) (mcc.ClientIface, error)
 	GetMemcachedConnectionWFeatures(serverAddr, bucketName, userAgent string, keepAlivePeriod time.Duration, features HELOFeatures, logger *log.CommonLogger) (mcc.ClientIface, HELOFeatures, error)
@@ -100,8 +100,6 @@ type UtilsIface interface {
 	ExponentialBackoffExecutor(name string, initialWait time.Duration, maxRetries int, factor int, op ExponentialOpFunc) error
 	ExponentialBackoffExecutorWithFinishSignal(name string, initialWait time.Duration, maxRetries int, factor int, op ExponentialOpFunc2, param interface{}, finCh chan bool) (interface{}, error)
 	GetMapFromExpvarMap(expvarMap *expvar.Map) map[string]interface{}
-	GetMatchedKeys(expression string, keys []string) (map[string][][]int, error)
-	RegexpMatch(regExp *regexp.Regexp, key []byte) bool
 
 	/**
 	 * ------------------------

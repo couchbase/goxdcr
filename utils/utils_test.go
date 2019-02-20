@@ -6,7 +6,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"github.com/couchbase/gocb"
 	base "github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/stretchr/testify/assert"
@@ -25,13 +24,13 @@ var externalAddresses = []string{"10.10.10.10", "11.11.11.11", "12.12.12.12",
 const testExternalDataDir = "testExternalData/"
 const testInternalDataDir = "testInternalData/"
 const testK8DataDir = "testK8ExternalData/"
+const testFilteringDataDir = "testFilteringData/"
 
 var logger = log.NewLogger("testLogger", log.DefaultLoggerContext)
 var testUtils = NewUtilities()
 var connStr = "testConnStr"
 
-func readJsonHelper(fileName string) (retMap map[string]interface{}, err error) {
-	var byteSlice []byte
+func readJsonHelper(fileName string) (retMap map[string]interface{}, byteSlice []byte, err error) {
 	byteSlice, err = ioutil.ReadFile(fileName)
 	if err != nil {
 		return
@@ -54,12 +53,14 @@ func getClusterInfoMock(external bool) (map[string]interface{}, error) {
 	} else {
 		fileName = fmt.Sprintf("%v%v", testInternalDataDir, "pools_default.json")
 	}
-	return readJsonHelper(fileName)
+	retMap, _, err := readJsonHelper(fileName)
+	return retMap, err
 }
 
 func getClusterInfoMockK8() (map[string]interface{}, error) {
 	fileName := fmt.Sprintf("%v%v", testK8DataDir, "pools_default.json")
-	return readJsonHelper(fileName)
+	retMap, _, err := readJsonHelper(fileName)
+	return retMap, err
 }
 
 func getNodeListWithMinInfoMock(external bool) ([]interface{}, error) {
@@ -112,7 +113,8 @@ func getBucketInfoMock(external bool) (map[string]interface{}, error) {
 	} else {
 		fileName = fmt.Sprintf("%v%v", testInternalDataDir, defaultPoolBucketsFile)
 	}
-	return readJsonHelper(fileName)
+	retMap, _, err := readJsonHelper(fileName)
+	return retMap, err
 }
 
 // Only has external
@@ -120,7 +122,8 @@ func getBucketInfoMockK8() (map[string]interface{}, error) {
 	var fileName string
 	var defaultPoolBucketsFile = "pools_default_buckets_default.json"
 	fileName = fmt.Sprintf("%v%v", testK8DataDir, defaultPoolBucketsFile)
-	return readJsonHelper(fileName)
+	retMap, _, err := readJsonHelper(fileName)
+	return retMap, err
 }
 
 func getBucketDetailedInfoMock(external bool) (map[string]interface{}, error) {
@@ -131,13 +134,15 @@ func getBucketDetailedInfoMock(external bool) (map[string]interface{}, error) {
 	} else {
 		fileName = fmt.Sprintf("%v%v", testInternalDataDir, poolsBBFile)
 	}
-	return readJsonHelper(fileName)
+	retMap, _, err := readJsonHelper(fileName)
+	return retMap, err
 }
 
 func getBucketDetailedInfoMockK8() (map[string]interface{}, error) {
 	var poolsBBFile = "pools_default_b_default.json"
 	fileName := fmt.Sprintf("%v%v", testK8DataDir, poolsBBFile)
-	return readJsonHelper(fileName)
+	retMap, _, err := readJsonHelper(fileName)
+	return retMap, err
 }
 
 func getRemoteSSLPortMock(active bool) (map[string]interface{}, error) {
@@ -149,7 +154,8 @@ func getRemoteSSLPortMock(active bool) (map[string]interface{}, error) {
 	} else {
 		fileName = fmt.Sprintf("%v%v", testExternalDataDir, idleFile)
 	}
-	return readJsonHelper(fileName)
+	retMap, _, err := readJsonHelper(fileName)
+	return retMap, err
 }
 
 func getPoolsDefaultBucketMock(external bool) (map[string]interface{}, error) {
@@ -160,7 +166,8 @@ func getPoolsDefaultBucketMock(external bool) (map[string]interface{}, error) {
 	} else {
 		fileName = fmt.Sprintf("%v%v", testInternalDataDir, defaultPoolsBucketFile)
 	}
-	return readJsonHelper(fileName)
+	retMap, _, err := readJsonHelper(fileName)
+	return retMap, err
 }
 
 func getPoolsNodesMock(external bool) (map[string]interface{}, error) {
@@ -171,7 +178,8 @@ func getPoolsNodesMock(external bool) (map[string]interface{}, error) {
 	} else {
 		fileName = fmt.Sprintf("%v%v", testInternalDataDir, poolsNodesFile)
 	}
-	return readJsonHelper(fileName)
+	retMap, _, err := readJsonHelper(fileName)
+	return retMap, err
 
 }
 
@@ -587,60 +595,6 @@ var docKey string = "TestDocKey"
 var docValue string = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
 var docMap map[string]interface{} = map[string]interface{}{
 	"Key": docValue,
-}
-
-// If ns_server cluster run is running, generate a Xattr doc
-// At DCP nozzle, serialize the uprEvent as a json and write it to a file
-func TestGenerateXattr(t *testing.T) {
-	serializedMap, err := json.Marshal(docMap)
-	if err != nil {
-		return
-	}
-
-	cluster, err := gocb.Connect("http://localhost:9000")
-	if err != nil {
-		return
-	}
-
-	cluster.Authenticate(gocb.PasswordAuthenticator{
-		Username: "Administrator",
-		Password: "wewewe",
-	})
-
-	bucket, err := cluster.OpenBucket("b1", "")
-	if err != nil {
-		return
-	}
-
-	_, err = bucket.Insert(docKey, &serializedMap, 0)
-	if err != nil {
-		return
-	}
-
-	_, err = bucket.MutateIn(docKey, 0, 0).InsertEx("TestXattr", 30, gocb.SubdocFlagXattr|gocb.SubdocFlagCreatePath).Execute()
-	if err != nil {
-		fmt.Printf("Error with Insert: %v\n", err)
-		return
-	}
-	_, err = bucket.MutateIn(docKey, 0, 0).InsertEx("AnotherXattr", "TestValueString", gocb.SubdocFlagXattr|gocb.SubdocFlagCreatePath).Execute()
-	if err != nil {
-		fmt.Printf("Error with Insert2: %v\n", err)
-		return
-	}
-
-	//Put the following in DCP nozzle to dump uprEvent to a file
-	// Import: bytes, encoding/binary, encoding/json, io/ioutil
-
-	//	fileName := "/tmp/uprEventDump.bin"
-	//	dumpBytes := new(bytes.Buffer)
-	//	json.NewEncoder(dumpBytes).Encode(*m)
-	//	writeErr := ioutil.WriteFile(fileName, dumpBytes.Bytes(), 0644)
-	//	if writeErr == nil {
-	//		dcp.Logger().Infof("Wrote dump file successfully to %v\n", fileName)
-	//	} else {
-	//		dcp.Logger().Warnf("Unable to write file due to %v\n", writeErr)
-	//	}
-
 }
 
 func TestStripXattrAndCompression(t *testing.T) {

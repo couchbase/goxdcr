@@ -49,6 +49,8 @@ func TestXattrAdd(t *testing.T) {
 
 	assert.Nil(err)
 	assert.NotNil(filter)
+	assert.True((filter.flags & base.FilterFlagSkipXattr) == 0)
+	assert.True((filter.flags & base.FilterFlagSkipKey) > 0)
 
 	testRaw := json.RawMessage(`{"Testdoc": true}`)
 	testData, err := testRaw.MarshalJSON()
@@ -139,8 +141,8 @@ func TestCompressionXattrKeyFiltering(t *testing.T) {
 	assert.Nil(err)
 	assert.NotNil(uprEvent)
 
-	// NOTE - I screwed this up by using "Key" for internal doc. It's supposed to be KEY so I could test between unescaped KEY vs escaped KEY
-	filter, err := NewFilter(filterId, "META().id = \"TestDocKey\" AND REGEXP_CONTAINS(`Key`, \"^A+$\") AND META().xattrs.TestXattr = 30 AND META().xattrs.AnotherXattr = \"TestValueString\"", realUtil)
+	var testExpression string = fmt.Sprintf("META().xattrs.AnotherXattr = \"TestValueString\" AND META().xattrs.TestXattr = 30 AND META().id = \"%v\" AND REGEXP_CONTAINS(Key, \"^AA\")", "TestDocKey")
+	filter, err := NewFilter(filterId, testExpression, realUtil)
 	assert.Nil(err)
 
 	result, err, _, _ := filter.FilterUprEvent(uprEvent)
@@ -159,7 +161,6 @@ func TestCompressionKeyFiltering(t *testing.T) {
 	assert.Nil(err)
 	assert.NotNil(uprEvent)
 
-	// NOTE - I screwed this up by using "Key" for internal doc. It's supposed to be KEY so I could test between unescaped KEY vs escaped KEY
 	filter, err := NewFilter(filterId, "META().id = \"TestDocKey\" AND REGEXP_CONTAINS(`Key`, \"^A+$\")", realUtil)
 	assert.Nil(err)
 
@@ -170,7 +171,6 @@ func TestCompressionKeyFiltering(t *testing.T) {
 	fmt.Println("============== Test case end: TestCompressionXattrKeyFiltering =================")
 }
 
-// This is a make-up test to test the KEY vs Key one
 func TestReservedWords(t *testing.T) {
 	fmt.Println("============== Test case start: TestCompressionXattrKeyFiltering =================")
 	assert := assert.New(t)

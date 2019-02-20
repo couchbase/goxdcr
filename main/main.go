@@ -161,6 +161,7 @@ func main() {
 		// start replication manager in normal mode
 		rm.StartReplicationManager(host,
 			uint16(options.xdcrRestPort),
+			uint16(options.sourceKVAdminPort),
 			replication_spec_svc,
 			remote_cluster_svc,
 			cluster_info_svc,

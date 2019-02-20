@@ -10,7 +10,6 @@ import memcached "github.com/couchbase/gomemcached/client"
 import metadata "github.com/couchbase/goxdcr/metadata"
 import mock "github.com/stretchr/testify/mock"
 import net "net"
-import regexp "regexp"
 import time "time"
 import utils "github.com/couchbase/goxdcr/utils"
 
@@ -315,6 +314,27 @@ func (_m *UtilsIface) ExponentialBackoffExecutorWithFinishSignal(name string, in
 	var r1 error
 	if rf, ok := ret.Get(1).(func(string, time.Duration, int, int, utils.ExponentialOpFunc2, interface{}, chan bool) error); ok {
 		r1 = rf(name, initialWait, maxRetries, factor, op, param, finCh)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// FilterExpressionMatchesDoc provides a mock function with given fields: expression, docId, username, password, bucketName, addr, port
+func (_m *UtilsIface) FilterExpressionMatchesDoc(expression string, docId string, username string, password string, bucketName string, addr string, port uint16) (bool, error) {
+	ret := _m.Called(expression, docId, username, password, bucketName, addr, port)
+
+	var r0 bool
+	if rf, ok := ret.Get(0).(func(string, string, string, string, string, string, uint16) bool); ok {
+		r0 = rf(expression, docId, username, password, bucketName, addr, port)
+	} else {
+		r0 = ret.Get(0).(bool)
+	}
+
+	var r1 error
+	if rf, ok := ret.Get(1).(func(string, string, string, string, string, string, uint16) error); ok {
+		r1 = rf(expression, docId, username, password, bucketName, addr, port)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -900,29 +920,6 @@ func (_m *UtilsIface) GetMapFromExpvarMap(expvarMap *expvar.Map) map[string]inte
 	}
 
 	return r0
-}
-
-// GetMatchedKeys provides a mock function with given fields: expression, keys
-func (_m *UtilsIface) GetMatchedKeys(expression string, keys []string) (map[string][][]int, error) {
-	ret := _m.Called(expression, keys)
-
-	var r0 map[string][][]int
-	if rf, ok := ret.Get(0).(func(string, []string) map[string][][]int); ok {
-		r0 = rf(expression, keys)
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(map[string][][]int)
-		}
-	}
-
-	var r1 error
-	if rf, ok := ret.Get(1).(func(string, []string) error); ok {
-		r1 = rf(expression, keys)
-	} else {
-		r1 = ret.Error(1)
-	}
-
-	return r0, r1
 }
 
 // GetMemcachedClient provides a mock function with given fields: serverAddr, bucketName, kv_mem_clients, userAgent, keepAlivePeriod, logger
@@ -1671,20 +1668,6 @@ func (_m *UtilsIface) QueryRestApiWithAuth(baseURL string, path string, preserve
 // RecoverPanic provides a mock function with given fields: err
 func (_m *UtilsIface) RecoverPanic(err *error) {
 	_m.Called(err)
-}
-
-// RegexpMatch provides a mock function with given fields: regExp, key
-func (_m *UtilsIface) RegexpMatch(regExp *regexp.Regexp, key []byte) bool {
-	ret := _m.Called(regExp, key)
-
-	var r0 bool
-	if rf, ok := ret.Get(0).(func(*regexp.Regexp, []byte) bool); ok {
-		r0 = rf(regExp, key)
-	} else {
-		r0 = ret.Get(0).(bool)
-	}
-
-	return r0
 }
 
 // RemoteBucketValidationInfo provides a mock function with given fields: hostAddr, bucketName, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, logger

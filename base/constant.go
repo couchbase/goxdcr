@@ -11,9 +11,7 @@ package base
 
 import (
 	"errors"
-	"fmt"
 	mc "github.com/couchbase/gomemcached"
-	"strings"
 	"sync"
 	"time"
 )
@@ -213,6 +211,8 @@ var ErrorFilterInvalidFormat = errors.New("Filter specified using key-only regex
 var ErrorFilterParsingError = errors.New("Filter unable to parse DCP packet")
 var ErrorFilterSkipRestreamRequired = errors.New("Filter skip restream flag is required along with a filter")
 var ErrorNotSupported = errors.New("Not supported")
+var ErrorInvalidJSONMap = errors.New("Retrieved value is not a valid JSON key-value map")
+var ErrorInvalidCAS = errors.New("Invalid CAS")
 
 // Various non-error internal msgs
 var FilterForcePassThrough = errors.New("No data is to be filtered, should allow passthrough")
@@ -918,6 +918,8 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 // Need to escape the () to result in "META().xattrs" literal
 const ExternalKeyXattr = "META\\(\\).xattrs"
 const ExternalKeyKey = "META\\(\\).id"
+const ExternalKeyKeyContains = "META().id"
+const ExternalKeyXattrContains = "META().xattrs"
 const InternalKeyXattr = "[$%XDCRInternalMeta*%$]"
 const InternalKeyKey = "[$%XDCRInternalKey*%$]"
 
@@ -930,11 +932,15 @@ var ReservedWordsMap = map[string]string{
 }
 
 var ReverseReservedWordsMap = map[string]string{
-	InternalKeyKey:   fmt.Sprintf("%v", strings.Replace(ExternalKeyKey, "\\", "", -1 /*replaceAll*/)),
-	InternalKeyXattr: fmt.Sprintf("%v", strings.Replace(ExternalKeyXattr, "\\", "", -1 /*replaceAll*/)),
+	InternalKeyKey:   ExternalKeyKeyContains,
+	InternalKeyXattr: ExternalKeyXattrContains,
 }
 
 // The regexp here returns true if the specified values are not escaped (enclosed by backticks)
 var ReservedWordsReplaceMap = map[string]PcreWrapperInterface{}
 
+// Used to make sure the pcre's are initialized only once, when needed
 var ReservedWordsReplaceMapOnce sync.Once
+
+// This constant is used when communicating with KV to retrieve a list of all the available xattr keys
+const XattributeToc = "$XTOC"

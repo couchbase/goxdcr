@@ -119,7 +119,8 @@ type replicationManager struct {
 //singleton
 var replication_mgr replicationManager
 
-func StartReplicationManager(sourceKVHost string, xdcrRestPort uint16,
+func StartReplicationManager(sourceKVHost string,
+	xdcrRestPort uint16, sourceKVAdminPort uint16,
 	repl_spec_svc service_def.ReplicationSpecSvc,
 	remote_cluster_svc service_def.RemoteClusterSvc,
 	cluster_info_svc service_def.ClusterInfoSvc,
@@ -173,7 +174,7 @@ func StartReplicationManager(sourceKVHost string, xdcrRestPort uint16,
 		replication_mgr.initMetadataChangeMonitor()
 
 		// start adminport
-		adminport := NewAdminport(sourceKVHost, xdcrRestPort, replication_mgr.adminport_finch, replication_mgr.utils)
+		adminport := NewAdminport(sourceKVHost, xdcrRestPort, sourceKVAdminPort, replication_mgr.adminport_finch, replication_mgr.utils)
 		go adminport.Start()
 		logger_rm.Info("Admin port has been launched")
 		// add adminport as children of replication manager supervisor

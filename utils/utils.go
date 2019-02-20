@@ -10,6 +10,8 @@ import (
 	"fmt"
 	"github.com/couchbase/cbauth"
 	"github.com/couchbase/go-couchbase"
+	"github.com/couchbase/gocb"
+	"github.com/couchbase/gojsonsm"
 	mc "github.com/couchbase/gomemcached"
 	mcc "github.com/couchbase/gomemcached/client"
 	"github.com/couchbase/goutils/scramsha"
@@ -23,7 +25,6 @@ import (
 	"net/http"
 	"net/url"
 	"reflect"
-	"regexp"
 	"strconv"
 	"strings"
 	"syscall"
@@ -290,47 +291,141 @@ func (u *Utilities) UrlForLog(urlStr string) string {
 	}
 }
 
-func (u *Utilities) GetMatchedKeys(expression string, keys []string) (map[string][][]int, error) {
-	u.logger_utils.Infof("GetMatchedKeys expression=%v%v%v, expression in bytes=%v\n", base.UdTagBegin, expression, base.UdTagEnd, base.TagUDBytes([]byte(expression)))
-	if !utf8.ValidString(expression) {
-		return nil, errors.New("expression is not valid utf8")
-	}
-	for _, key := range keys {
-		u.logger_utils.Infof("key=%v%v%v, key_bytes=%v\n", base.UdTagBegin, key, base.UdTagEnd, base.TagUDBytes([]byte(key)))
-		if !utf8.ValidString(key) {
-			return nil, errors.New("key is not valid utf8")
-		}
-	}
+func filterExpressionGetXattrHelper(bucket *gocb.Bucket, docId string, docCas gocb.Cas) ([]byte, error) {
+	var xattrMap map[string]interface{}
+	var xtoc interface{}
+	var xattrSlice []byte
 
-	regExp, err := regexp.Compile(expression)
+	xattrMap = make(map[string]interface{})
+	frag, err := bucket.LookupIn(docId).GetEx(base.XattributeToc, gocb.SubdocFlagXattr).Execute()
 	if err != nil {
 		return nil, err
 	}
 
-	matchesMap := make(map[string][][]int)
-
-	for _, key := range keys {
-		var matches [][]int
-		if u.RegexpMatch(regExp, []byte(key)) {
-			matches = regExp.FindAllStringIndex(key, -1)
-		} else {
-			matches = make([][]int, 0)
-		}
-		if u.logger_utils.GetLogLevel() >= log.LogLevelDebug {
-			u.logger_utils.Debugf("key=%v%v%v, matches with byte index=%v\n", base.UdTagBegin, key, base.UdTagEnd, matches)
-		}
-		convertedMatches, err := u.convertByteIndexToRuneIndex(key, matches)
-		if err != nil {
-			return nil, err
-		}
-		matchesMap[key] = convertedMatches
+	if frag.Cas() != docCas {
+		return nil, base.ErrorInvalidCAS
 	}
 
-	return matchesMap, nil
+	err = frag.Content(base.XattributeToc, &xtoc)
+	if err != nil {
+		return nil, err
+	}
+
+	tocList := xtoc.([]interface{})
+	for _, tocEntry := range tocList {
+		if entry, ok := tocEntry.(string); ok {
+			frag, err := bucket.LookupIn(docId).GetEx(entry, gocb.SubdocFlagXattr).Execute()
+			if err != nil {
+				return nil, err
+			}
+
+			if frag.Cas() != docCas {
+				return nil, base.ErrorInvalidCAS
+			}
+
+			var value interface{}
+			frag.Content(entry, &value)
+			xattrMap[entry] = value
+		}
+	}
+	xattrSlice, err = json.Marshal(xattrMap)
+	if err != nil {
+		return nil, err
+	}
+
+	return xattrSlice, nil
 }
 
-func (u *Utilities) RegexpMatch(regExp *regexp.Regexp, key []byte) bool {
-	return regExp.Match(key)
+func filterExpressionGetDocVal(bucket *gocb.Bucket, docId string) ([]byte, gocb.Cas, error) {
+	var retrievedDocVal interface{}
+	docCas, err := bucket.Get(docId, &retrievedDocVal)
+	if err != nil {
+		return nil, docCas, err
+	}
+
+	valMap, ok := retrievedDocVal.(map[string]interface{})
+	if !ok {
+		err = fmt.Errorf("Retrieved document (%v) value is not a valid key-value map", docId)
+		return nil, docCas, err
+	}
+
+	bodySlice, err := json.Marshal(valMap)
+	if err != nil {
+		return nil, docCas, err
+	}
+
+	return bodySlice, docCas, err
+}
+
+func (u *Utilities) FilterExpressionMatchesDoc(expression, docId, username, password, bucketName, addr string, port uint16) (result bool, err error) {
+	var bodySlice []byte
+	var docCas gocb.Cas
+
+	cluster, err := gocb.Connect(fmt.Sprintf("http://%v:%v", addr, port))
+	if err != nil {
+		return
+	}
+
+	cluster.Authenticate(gocb.PasswordAuthenticator{
+		Username: username,
+		Password: password,
+	})
+
+	bucket, err := cluster.OpenBucket(bucketName, "")
+	if err != nil {
+		return
+	}
+
+	retrieveRetryOp := func() ([]byte, error) {
+		bodySlice, docCas, err = filterExpressionGetDocVal(bucket, docId)
+		if err != nil {
+			err = fmt.Errorf("Error getting doc %v value: %v", docId, err.Error())
+			return nil, err
+		}
+
+		if base.FilterContainsXattrExpression(expression) {
+			xattrSlice, err := filterExpressionGetXattrHelper(bucket, docId, docCas)
+			if err != nil {
+				err = fmt.Errorf("Error getting doc %v xattributes: %v", docId, err.Error())
+				return nil, err
+			}
+
+			bodySlice, err = base.AddXattrToBeFiltered(bodySlice, xattrSlice)
+			if err != nil {
+				err = fmt.Errorf("Error adding doc %v xattributes to be filtered: %v", docId, err.Error())
+				return nil, err
+			}
+		}
+
+		if base.FilterContainsKeyExpression(expression) {
+			bodySlice, err = base.AddKeyToBeFiltered(bodySlice, []byte(docId))
+			if err != nil {
+				err = fmt.Errorf("Error adding doc %v ID to be filtered: %v", docId, err.Error())
+			}
+		}
+		return bodySlice, err
+	}
+
+	retryOp := func() error {
+		bodySlice, err = retrieveRetryOp()
+		return err
+	}
+	err = u.ExponentialBackoffExecutor("filterTesterXattrRetriever", base.BucketInfoOpWaitTime, base.BucketInfoOpMaxRetry, base.BucketInfoOpRetryFactor, retryOp)
+	if err != nil {
+		if strings.Contains(err.Error(), base.ErrorInvalidCAS.Error()) {
+			err = fmt.Errorf("Unable to successfully retrieve document %v because it keeps mutating", docId)
+		}
+		return
+	}
+
+	matcher, err := gojsonsm.GetFilterExpressionMatcher(base.ReplaceKeyWordsForExpression(expression))
+	if err != nil {
+		err = fmt.Errorf("Error filtering doc %v ID: %v", docId, err.Error())
+		return
+	}
+
+	result, err = matcher.Match(bodySlice)
+	return
 }
 
 // given a matches map, convert the indices from byte index to rune index

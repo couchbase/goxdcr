@@ -32,9 +32,6 @@ type Filter struct {
 }
 
 func NewFilter(id string, filterExpression string, utils utilities.UtilsIface) (*Filter, error) {
-	// Initialize PCRE things, if they are there
-	base.InitPcreVars()
-
 	dpPtr := utilities.NewDataPool()
 	if dpPtr == nil {
 		return nil, base.ErrorNoDataPool
@@ -61,11 +58,11 @@ func NewFilter(id string, filterExpression string, utils utilities.UtilsIface) (
 		return nil, base.ErrorNoMatcher
 	}
 
-	if !base.FilterContainsXattrExpression(filter.filterExpressionInternal) {
+	if !base.FilterContainsXattrExpression(filterExpression) {
 		filter.flags |= base.FilterFlagSkipXattr
 	}
 
-	if !base.FilterContainsKeyExpression(filter.filterExpressionInternal) {
+	if !base.FilterContainsKeyExpression(filterExpression) {
 		filter.flags |= base.FilterFlagSkipKey
 	} else if base.FilterOnlyContainsKeyExpression(filterExpression) {
 		filter.flags |= base.FilterFlagKeyOnly

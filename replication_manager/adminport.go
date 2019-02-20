@@ -43,12 +43,13 @@ var logger_ap *log.CommonLogger = log.NewLogger("AdminPort", log.DefaultLoggerCo
 type Adminport struct {
 	sourceKVHost string
 	xdcrRestPort uint16
+	kvAdminPort  uint16
 	gen_server.GenServer
 	finch chan bool
 	utils utilities.UtilsIface
 }
 
-func NewAdminport(laddr string, xdcrRestPort uint16, finch chan bool, utilsIn utilities.UtilsIface) *Adminport {
+func NewAdminport(laddr string, xdcrRestPort, kvAdminPort uint16, finch chan bool, utilsIn utilities.UtilsIface) *Adminport {
 
 	//callback functions from GenServer
 	var msg_callback_func gen_server.Msg_Callback_Func
@@ -61,6 +62,7 @@ func NewAdminport(laddr string, xdcrRestPort uint16, finch chan bool, utilsIn ut
 	adminport := &Adminport{
 		sourceKVHost: laddr,
 		xdcrRestPort: xdcrRestPort,
+		kvAdminPort:  kvAdminPort,
 		GenServer:    server, /*gen_server.GenServer*/
 		finch:        finch,
 		utils:        utilsIn,
@@ -804,21 +806,18 @@ func (adminport *Adminport) doRegexpValidationRequest(request *http.Request) (*a
 		return response, err
 	}
 
-	expression, keys, err := DecodeRegexpValidationRequest(request, adminport.utils)
+	expression, docId, username, password, bucket, err := DecodeRegexpValidationRequest(request, adminport.utils)
 	if err != nil {
 		return EncodeErrorMessageIntoResponse(err, http.StatusBadRequest)
 	}
 
-	logger_ap.Infof("Request params: expression=%v%v%v, keys=%v%v%v\n",
-		base.UdTagBegin, expression, base.UdTagEnd, base.UdTagBegin, keys, base.UdTagEnd)
+	logger_ap.Infof("Request params: expression=%v%v%v docId=%v%v%v\n username=%v%v%v password=XXX bucket=%v",
+		base.UdTagBegin, expression, base.UdTagEnd,
+		base.UdTagBegin, docId, base.UdTagEnd,
+		base.UdTagBegin, username, base.UdTagEnd,
+		bucket)
 
-	matchesMap, err := adminport.utils.GetMatchedKeys(expression, keys)
-	if err != nil {
-		return EncodeErrorMessageIntoResponse(err, http.StatusBadRequest)
-	}
-
-	return NewRegexpValidationResponse(matchesMap)
-
+	return NewRegexpValidationResponse(adminport.utils.FilterExpressionMatchesDoc(expression, docId, username, password, bucket, adminport.sourceKVHost, adminport.kvAdminPort))
 }
 
 func (adminport *Adminport) doStartBlockProfile(request *http.Request) (*ap.Response, error) {

@@ -15,15 +15,13 @@ func TestSkipXattrAndStringsConversion(t *testing.T) {
 	InitPcreVars()
 
 	userFilter := "META().id = \"something\" AND META().xattrs.testXattrKey EXISTS"
-	assert.True(strings.Contains(userFilter, "META()"))
-	assert.True(strings.Contains(userFilter, "META()"))
+	assert.True(FilterContainsXattrExpression(userFilter))
+	assert.True(FilterContainsKeyExpression(userFilter))
 
 	filterExpressionInternal := ReplaceKeyWordsForExpression(userFilter)
 
-	assert.True(FilterContainsXattrExpression(filterExpressionInternal))
-	assert.True(FilterContainsKeyExpression(filterExpressionInternal))
-	assert.False(strings.Contains(filterExpressionInternal, ExternalKeyXattr))
-	assert.False(strings.Contains(filterExpressionInternal, ExternalKeyKey))
+	assert.False(strings.Contains(filterExpressionInternal, ExternalKeyXattrContains))
+	assert.False(strings.Contains(filterExpressionInternal, ExternalKeyKeyContains))
 	assert.False(strings.Contains(filterExpressionInternal, "META()"))
 
 	filterExpressionExternal := ReplaceKeyWordsForOutput(filterExpressionInternal)
@@ -31,6 +29,8 @@ func TestSkipXattrAndStringsConversion(t *testing.T) {
 	// No escaped (i.e. no "META\\(\\)" )
 	assert.False(strings.Contains(filterExpressionExternal, ExternalKeyXattr))
 	assert.False(strings.Contains(filterExpressionExternal, ExternalKeyKey))
+	assert.True(strings.Contains(filterExpressionExternal, ExternalKeyXattrContains))
+	assert.True(strings.Contains(filterExpressionExternal, ExternalKeyKeyContains))
 
 	userFilter = fmt.Sprintf("REGEXP_CONTAINS(`%v`, \"^d\")", InternalKeyKey)
 	assert.False(strings.Contains(userFilter, "META()"))
