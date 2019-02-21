@@ -201,6 +201,29 @@ func (_m *ClientIface) Close() error {
 	return r0
 }
 
+// CollectionsGetCID provides a mock function with given fields: scope, collection
+func (_m *ClientIface) CollectionsGetCID(scope string, collection string) (*gomemcached.MCResponse, error) {
+	ret := _m.Called(scope, collection)
+
+	var r0 *gomemcached.MCResponse
+	if rf, ok := ret.Get(0).(func(string, string) *gomemcached.MCResponse); ok {
+		r0 = rf(scope, collection)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*gomemcached.MCResponse)
+		}
+	}
+
+	var r1 error
+	if rf, ok := ret.Get(1).(func(string, string) error); ok {
+		r1 = rf(scope, collection)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
 // Decr provides a mock function with given fields: vb, key, amt, def, exp
 func (_m *ClientIface) Decr(vb uint16, key string, amt uint64, def uint64, exp int) (uint64, error) {
 	ret := _m.Called(vb, key, amt, def, exp)
@@ -326,6 +349,52 @@ func (_m *ClientIface) GetBulk(vb uint16, keys []string, rv map[string]*gomemcac
 	}
 
 	return r0
+}
+
+// GetCollectionsManifest provides a mock function with given fields:
+func (_m *ClientIface) GetCollectionsManifest() (*gomemcached.MCResponse, error) {
+	ret := _m.Called()
+
+	var r0 *gomemcached.MCResponse
+	if rf, ok := ret.Get(0).(func() *gomemcached.MCResponse); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*gomemcached.MCResponse)
+		}
+	}
+
+	var r1 error
+	if rf, ok := ret.Get(1).(func() error); ok {
+		r1 = rf()
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// GetFromCollection provides a mock function with given fields: vb, cid, key
+func (_m *ClientIface) GetFromCollection(vb uint16, cid uint32, key string) (*gomemcached.MCResponse, error) {
+	ret := _m.Called(vb, cid, key)
+
+	var r0 *gomemcached.MCResponse
+	if rf, ok := ret.Get(0).(func(uint16, uint32, string) *gomemcached.MCResponse); ok {
+		r0 = rf(vb, cid, key)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*gomemcached.MCResponse)
+		}
+	}
+
+	var r1 error
+	if rf, ok := ret.Get(1).(func(uint16, uint32, string) error); ok {
+		r1 = rf(vb, cid, key)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
 }
 
 // GetMeta provides a mock function with given fields: vb, key
