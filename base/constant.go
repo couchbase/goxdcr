@@ -729,6 +729,9 @@ var BypassSanInCertificateCheck bool = false
 // Number of times to verify bucket is missing before removing an invalid replicationSpec
 var ReplicationSpecGCCnt int = 4
 
+// interval for cpu stats collection
+var CpuCollectionInterval = 2000 * time.Millisecond
+
 // interval for resource management actions
 var ResourceManagementInterval = 1000 * time.Millisecond
 
@@ -817,7 +820,7 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	bypassSanInCertificateCheck int, replicationSpecGCCnt int, timeoutRuntimeContextStart time.Duration,
 	timeoutRuntimeContextStop time.Duration, timeoutPartsStart time.Duration,
 	timeoutPartsStop time.Duration, timeoutDcpCloseUprStreams time.Duration,
-	timeoutDcpCloseUprFeed time.Duration,
+	timeoutDcpCloseUprFeed time.Duration, cpuCollectionInterval time.Duration,
 	resourceManagementInterval time.Duration, resourceManagementStatsInterval time.Duration,
 	changesLeftThresholdForOngoingReplication int, resourceManagementRatioBase int,
 	resourceManagementRatioUpperBound int, resourceManagementRatioLowerBound int,
@@ -896,6 +899,7 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	TimeoutPartsStop = timeoutPartsStop
 	TimeoutDcpCloseUprStreams = timeoutDcpCloseUprStreams
 	TimeoutDcpCloseUprFeed = timeoutDcpCloseUprFeed
+	CpuCollectionInterval = cpuCollectionInterval
 	ResourceManagementInterval = resourceManagementInterval
 	ResourceManagementStatsInterval = resourceManagementStatsInterval
 	ChangesLeftThresholdForOngoingReplication = changesLeftThresholdForOngoingReplication

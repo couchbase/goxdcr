@@ -206,6 +206,8 @@ type ResourceManager struct {
 
 	// max cpu usage as a percentage, as defined by goMaxProcs
 	maxCpu int32
+	// current cpu usage
+	cpu int32
 }
 
 type ResourceMgrIface interface {
@@ -253,6 +255,9 @@ func (rm *ResourceManager) Start() error {
 
 	// this does not return error as of now
 	rm.throughputThrottlerSvc.Start()
+
+	rm.waitGrp.Add(1)
+	go rm.collectCpuUsage()
 
 	rm.waitGrp.Add(1)
 	go rm.manageResources()
@@ -312,6 +317,14 @@ func (rm *ResourceManager) getMaxCpu() int32 {
 	return atomic.LoadInt32(&rm.maxCpu)
 }
 
+func (rm *ResourceManager) getCpu() int32 {
+	return atomic.LoadInt32(&rm.cpu)
+}
+
+func (rm *ResourceManager) setCpu(cpu int32) {
+	atomic.StoreInt32(&rm.cpu, cpu)
+}
+
 // returns whether cpu has been maxed out
 // if state.cpu has value of -1 because of cpu collection failure, use previousState.cpu instead
 // if previousState.cpu is also -1, this method returns false
@@ -345,6 +358,24 @@ func (rm *ResourceManager) closeSystemStats() {
 	}
 }
 
+func (rm *ResourceManager) collectCpuUsage() {
+	rm.logger.Info("collectCpuUsage starting ....\n")
+	defer rm.logger.Info("collectCpuUsage exiting\n")
+
+	defer rm.waitGrp.Done()
+	ticker := time.NewTicker(base.CpuCollectionInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-rm.finch:
+			return
+		case <-ticker.C:
+			rm.collectCpuUsageOnce()
+		}
+	}
+}
+
 func (rm *ResourceManager) manageResources() {
 	rm.logger.Info("manageResources starting ....\n")
 	defer rm.logger.Info("manageResources exiting\n")
@@ -370,13 +401,11 @@ func (rm *ResourceManager) manageResourcesOnce() error {
 		return err
 	}
 
-	cpu := rm.collectCpuUsage()
-
 	specReplStatsMap := rm.collectReplStats(specs)
 
 	previousState := rm.getPreviousState()
 
-	state := rm.computeState(specReplStatsMap, previousState, cpu)
+	state := rm.computeState(specReplStatsMap, previousState)
 
 	rm.computeActionsToTake(previousState, state)
 
@@ -387,22 +416,25 @@ func (rm *ResourceManager) manageResourcesOnce() error {
 	return nil
 }
 
-func (rm *ResourceManager) collectCpuUsage() int32 {
+func (rm *ResourceManager) collectCpuUsageOnce() {
 	systemStats, err := rm.getSystemStats()
 	if err != nil {
 		rm.logger.Warnf("Error retrieving system stats. err=%v\n", err)
 		// use a negative value to indicate invalid cpu value
-		return -1
+		rm.setCpu(-1)
+		return
 	}
 
 	_, cpu, err := systemStats.ProcessCpuPercent()
 	if err != nil {
 		rm.logger.Warnf("Error retrieving cpu usage. err=%v\n", err)
 		// use a negative value to indicate invalid cpu value
-		return -1
+		rm.setCpu(-1)
+		return
 	}
-	// return the integer portion of cpu, which is a percentage
-	return int32(cpu)
+
+	// use the integer portion of cpu, which is a percentage
+	rm.setCpu(int32(cpu))
 }
 
 func (rm *ResourceManager) logStats() {
@@ -474,9 +506,9 @@ func (rm *ResourceManager) collectReplStats(specs map[string]*metadata.Replicati
 }
 
 func (rm *ResourceManager) computeState(specReplStatsMap map[*metadata.ReplicationSpecification]*ReplStats,
-	previousState *State, cpu int32) (state *State) {
+	previousState *State) (state *State) {
 	state = newState()
-	state.cpu = cpu
+	state.cpu = rm.getCpu()
 
 	for spec, replStats := range specReplStatsMap {
 		isReplHighPriority := rm.IsReplHighPriority(spec.Id, spec.Settings.GetPriority())
