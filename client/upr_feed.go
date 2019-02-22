@@ -72,6 +72,27 @@ type UprStream struct {
 	connected bool
 }
 
+type FeedState int
+
+const (
+	FeedStateInitial = iota
+	FeedStateOpened  = iota
+	FeedStateClosed  = iota
+)
+
+func (fs FeedState) String() string {
+	switch fs {
+	case FeedStateInitial:
+		return "Initial"
+	case FeedStateOpened:
+		return "Opened"
+	case FeedStateClosed:
+		return "Closed"
+	default:
+		return "Unknown"
+	}
+}
+
 const (
 	CompressionTypeStartMarker = iota // also means invalid
 	CompressionTypeNone        = iota
@@ -237,8 +258,6 @@ func (negotiator *vbStreamNegotiator) cleanUpVbStreams(vbno uint16) {
 type UprFeed struct {
 	// lock for feed.vbstreams
 	muVbstreams sync.RWMutex
-	// lock for feed.closed
-	muClosed    sync.RWMutex
 	C           <-chan *UprEvent            // Exported channel for receiving UPR events
 	negotiator  vbStreamNegotiator          // Used for pre-vbstreams, concurrent vb stream negotiation
 	vbstreams   map[uint16]*UprStream       // official live vb->stream mapping
@@ -251,12 +270,12 @@ type UprFeed struct {
 	stats       UprStats                    // Stats for upr client
 	transmitCh  chan *gomemcached.MCRequest // transmit command channel
 	transmitCl  chan bool                   //  closer channel for transmit go-routine
-	closed      bool                        // flag indicating whether the feed has been closed
-	// flag indicating whether client of upr feed will send ack to upr feed
 	// if flag is true, upr feed will use ack from client to determine whether/when to send ack to DCP
 	// if flag is false, upr feed will track how many bytes it has sent to client
 	// and use that to determine whether/when to send ack to DCP
 	ackByClient bool
+	feedState   FeedState
+	muFeedState sync.RWMutex
 }
 
 // Exported interface - to allow for mocking
@@ -508,6 +527,12 @@ func (feed *UprFeed) UprOpenWithFeatures(name string, sequence uint32, bufSize u
 }
 
 func (feed *UprFeed) SetPriorityAsync(p PriorityType) error {
+	if !feed.isOpen() {
+		// do not send this command if upr feed is not yet open, otherwise it may interfere with
+		// feed start up process, which relies on synchronous message exchange with DCP.
+		return fmt.Errorf("Upr feed is not open. State=%v", feed.getState())
+	}
+
 	return feed.setPriority(p, false /*sync*/)
 }
 
@@ -597,8 +622,13 @@ func (feed *UprFeed) uprOpen(name string, sequence uint32, bufSize uint32, featu
 		err = feed.setPriority(features.DcpPriority, true /*sync*/)
 		if err == nil {
 			activatedFeatures.DcpPriority = features.DcpPriority
+		} else {
+			return
 		}
 	}
+
+	// everything is ok so far, set upr feed to open state
+	feed.setOpen()
 
 	return
 }
@@ -1027,18 +1057,37 @@ func vbOpaque(opq32 uint32) uint16 {
 
 // Close this UprFeed.
 func (feed *UprFeed) Close() {
-	feed.muClosed.Lock()
-	defer feed.muClosed.Unlock()
-	if !feed.closed {
+	feed.muFeedState.Lock()
+	defer feed.muFeedState.Unlock()
+	if feed.feedState != FeedStateClosed {
 		close(feed.closer)
-		feed.closed = true
+		feed.feedState = FeedStateClosed
 		feed.negotiator.initialize()
 	}
 }
 
 // check if the UprFeed has been closed
 func (feed *UprFeed) Closed() bool {
-	feed.muClosed.RLock()
-	defer feed.muClosed.RUnlock()
-	return feed.closed
+	feed.muFeedState.RLock()
+	defer feed.muFeedState.RUnlock()
+	return feed.feedState == FeedStateClosed
+}
+
+// set upr feed to opened state after initialization is done
+func (feed *UprFeed) setOpen() {
+	feed.muFeedState.Lock()
+	defer feed.muFeedState.Unlock()
+	feed.feedState = FeedStateOpened
+}
+
+func (feed *UprFeed) isOpen() bool {
+	feed.muFeedState.RLock()
+	defer feed.muFeedState.RUnlock()
+	return feed.feedState == FeedStateOpened
+}
+
+func (feed *UprFeed) getState() FeedState {
+	feed.muFeedState.RLock()
+	defer feed.muFeedState.RUnlock()
+	return feed.feedState
 }
