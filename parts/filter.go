@@ -99,7 +99,10 @@ func (filter *Filter) FilterUprEvent(uprEvent *mcc.UprEvent) (bool, error, strin
 		}
 	}
 	matched, err := filter.FilterByteSlice(sliceToBeFiltered)
-	return matched, err, "", failedDpCnt
+	if err != nil {
+		errDesc = fmt.Sprintf("gojsonsm filter returned err for document %v%v%v", base.UdTagBegin, string(uprEvent.Key), base.UdTagEnd)
+	}
+	return matched, err, errDesc, failedDpCnt
 }
 
 func (filter *Filter) matchWrapper(slice []byte, errPtr *error) (matched bool) {

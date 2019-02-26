@@ -206,7 +206,8 @@ func (router *Router) route(data interface{}) (map[string]interface{}, error) {
 				// if data does not match filter expression, drop it. return empty result
 				router.RaiseEvent(common.NewEvent(common.DataFiltered, uprEvent, router, nil, nil))
 			}
-			return result, err
+			// Let supervisor set the err instead of the router, to minimize pipeline interruption
+			return result, nil
 		}
 	}
 
