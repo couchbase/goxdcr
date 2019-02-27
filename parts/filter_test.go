@@ -86,3 +86,26 @@ func TestFilterBool2(t *testing.T) {
 
 	fmt.Println("============== Test case end: TestFilterBool2 =================")
 }
+
+func TestFilterPerf(t *testing.T) {
+	fmt.Println("============== Test case start: TestFilterPerf =================")
+	assert := assert.New(t)
+
+	uprEvent, err := RetrieveUprFile("./testdata/perfData.bin")
+	assert.Nil(err)
+	assert.NotNil(uprEvent)
+
+	filter, err := NewFilter(filterId, "city EXISTS", realUtil)
+	assert.Nil(err)
+	assert.NotNil(filter)
+	assert.Equal(base.FilterFlagType(3), filter.flags)
+
+	dataSlice, err, _, _, _ := realUtil.ProcessUprEventForFiltering(uprEvent, dp, filter.flags)
+	assert.Nil(err)
+
+	matchResult, err := filter.matcher.Match(dataSlice)
+	assert.Nil(err)
+	assert.True(matchResult)
+
+	fmt.Println("============== Test case end: TestFilterPerf =================")
+}

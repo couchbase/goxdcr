@@ -2755,11 +2755,13 @@ func getBodySlice(incomingBody, key []byte, dp DataPoolIface, slicesToBeReleased
 	return body, nil, dpFailedCnt
 }
 
-func processXattribute(body, key []byte, dp DataPoolIface, slicesToBeReleased [][]byte) ([]byte, error, int64) {
+func processXattribute(body, key []byte, shouldSkipInsert bool, dp DataPoolIface, slicesToBeReleased [][]byte) ([]byte, error, int64) {
 	xattr := make(map[string]interface{})
 	var pos uint32
 	var separator uint32
 	var dpFailedCnt int64
+	var xattrSlice []byte
+	var err error
 
 	//	first uint32 in the body contains the size of the entire XATTR section
 	totalXattrSize := binary.BigEndian.Uint32(body[pos : pos+4])
@@ -2771,60 +2773,65 @@ func processXattribute(body, key []byte, dp DataPoolIface, slicesToBeReleased []
 	}
 	pos = pos + 4
 
-	// Followed by uint32 -> key -> NUL -> value -> NUL (repeat)
-	for pos < totalXattrSize {
-		pos = pos + 4
-
-		// Search for end of key
-		for separator = pos; body[separator] != '\x00'; separator++ {
-			if separator >= maxDocSizeBytes {
-				return nil, fmt.Errorf("For document %v%v%v, Unable to correctly parse xattr to find a xattr key", base.UdTagBegin, string(key), base.UdTagEnd), dpFailedCnt
-			}
-		}
-		key := string(body[pos:separator])
-		pos = pos + (separator - pos + 1)
-
-		// Search for end of value
-		for separator = pos; body[separator] != '\x00'; separator++ {
-			if separator >= maxDocSizeBytes {
-				return nil, fmt.Errorf("For document %v%v%v, Unable to correctly parse xattr to find value for xattr key %v%v%v", base.UdTagBegin, string(key), base.UdTagEnd, base.UdTagBegin, key, base.UdTagEnd), dpFailedCnt
-			}
-		}
-		value := body[pos:separator]
-		// separator should be pointing at a 0 byte. Next uint32 is after this byte
-		pos = pos + (separator - pos + 1)
-
-		var uData interface{}
-		err := json.Unmarshal(value, &uData)
-		if err != nil {
-			return nil, fmt.Errorf("For document %v%v%v, Unable to correctly parse xattr value for xattr key %v%v%v", base.UdTagBegin, string(key), base.UdTagEnd, base.UdTagBegin, key, base.UdTagEnd), dpFailedCnt
-		}
-		xattr[key] = uData
-	}
-
-	xattrSlice, err := json.Marshal(xattr)
-	if err != nil {
-		return nil, fmt.Errorf("For document %v%v%v, unable to serialize xattr for filtering processing %v", base.UdTagBegin, string(key), base.UdTagEnd, err), dpFailedCnt
-	}
-
-	// Once we're done with xAttribute parsing, rest is body
-	body = body[pos:]
-
-	bodySize := uint64(len(xattrSlice) + len(body) + base.AddFilterXattrExtraBytes)
-	newBodySlice, err := dp.GetByteSlice(bodySize)
-	if err != nil {
-		newBodySlice = make([]byte, 0, bodySize)
-		dpFailedCnt = int64(bodySize)
+	if shouldSkipInsert {
+		// TotalXattrSize does not account the last NUL char (4 bytes of '\x00') in the else branch's logic
+		body = body[totalXattrSize+4:]
 	} else {
-		slicesToBeReleased = append(slicesToBeReleased, newBodySlice)
-	}
-	copy(newBodySlice, body)
-	body = newBodySlice
+		// Followed by uint32 -> key -> NUL -> value -> NUL (repeat)
+		for pos < totalXattrSize {
+			pos = pos + 4
 
-	// Add Xattr to body
-	body, err = base.AddXattrToBeFiltered(body, xattrSlice)
-	if err != nil {
-		return nil, fmt.Errorf("For document %v%v%v Unable to add xattr to body as the body may be malformed JSON", base.UdTagBegin, string(key), base.UdTagEnd), dpFailedCnt
+			// Search for end of key
+			for separator = pos; body[separator] != '\x00'; separator++ {
+				if separator >= maxDocSizeBytes {
+					return nil, fmt.Errorf("For document %v%v%v, Unable to correctly parse xattr to find a xattr key", base.UdTagBegin, string(key), base.UdTagEnd), dpFailedCnt
+				}
+			}
+			key := string(body[pos:separator])
+			pos = pos + (separator - pos + 1)
+
+			// Search for end of value
+			for separator = pos; body[separator] != '\x00'; separator++ {
+				if separator >= maxDocSizeBytes {
+					return nil, fmt.Errorf("For document %v%v%v, Unable to correctly parse xattr to find value for xattr key %v%v%v", base.UdTagBegin, string(key), base.UdTagEnd, base.UdTagBegin, key, base.UdTagEnd), dpFailedCnt
+				}
+			}
+			value := body[pos:separator]
+			// separator should be pointing at a 0 byte. Next uint32 is after this byte
+			pos = pos + (separator - pos + 1)
+
+			var uData interface{}
+			err := json.Unmarshal(value, &uData)
+			if err != nil {
+				return nil, fmt.Errorf("For document %v%v%v, Unable to correctly parse xattr value for xattr key %v%v%v", base.UdTagBegin, string(key), base.UdTagEnd, base.UdTagBegin, key, base.UdTagEnd), dpFailedCnt
+			}
+			xattr[key] = uData
+		}
+
+		xattrSlice, err = json.Marshal(xattr)
+		if err != nil {
+			return nil, fmt.Errorf("For document %v%v%v, unable to serialize xattr for filtering processing %v", base.UdTagBegin, string(key), base.UdTagEnd, err), dpFailedCnt
+		}
+
+		// Once we're done with xAttribute parsing, rest is body
+		body = body[pos:]
+
+		bodySize := uint64(len(xattrSlice) + len(body) + base.AddFilterXattrExtraBytes)
+		newBodySlice, err := dp.GetByteSlice(bodySize)
+		if err != nil {
+			newBodySlice = make([]byte, 0, bodySize)
+			dpFailedCnt = int64(bodySize)
+		} else {
+			slicesToBeReleased = append(slicesToBeReleased, newBodySlice)
+		}
+		copy(newBodySlice, body)
+		body = newBodySlice
+
+		// Add Xattr to body
+		body, err = base.AddXattrToBeFiltered(body, xattrSlice)
+		if err != nil {
+			return nil, fmt.Errorf("For document %v%v%v Unable to add xattr to body as the body may be malformed JSON", base.UdTagBegin, string(key), base.UdTagEnd), dpFailedCnt
+		}
 	}
 	return body, nil, dpFailedCnt
 }
@@ -2849,8 +2856,9 @@ func (u *Utilities) ProcessUprEventForFiltering(uprEvent *mcc.UprEvent, dp DataP
 	}
 
 	// Simplify things
-	needToProcessXattr := uprEvent.DataType&mcc.XattrDataType > 0 && flags&base.FilterFlagSkipXattr == 0
-	needToProcessBody := needToProcessXattr || (uprEvent.DataType&mcc.JSONDataType > 0 && flags&base.FilterFlagKeyOnly == 0)
+	bodyContainsXattr := uprEvent.DataType&mcc.XattrDataType > 0
+	shouldSkipXattr := flags&base.FilterFlagSkipXattr > 0
+	needToProcessBody := bodyContainsXattr || (uprEvent.DataType&mcc.JSONDataType > 0 && flags&base.FilterFlagKeyOnly == 0)
 	shouldSkipKey := flags&base.FilterFlagSkipKey > 0
 	bodyIsCompressed := uprEvent.DataType&mcc.SnappyDataType > 0
 
@@ -2865,9 +2873,9 @@ func (u *Utilities) ProcessUprEventForFiltering(uprEvent *mcc.UprEvent, dp DataP
 		}
 	}
 
-	if needToProcessXattr {
+	if bodyContainsXattr {
 		var failedCnt int64
-		body, err, failedCnt = processXattribute(body, uprEvent.Key, dp, slicesToBeReleased)
+		body, err, failedCnt = processXattribute(body, uprEvent.Key, shouldSkipXattr, dp, slicesToBeReleased)
 		if failedCnt > 0 {
 			totalFailedCnt += failedCnt
 		}
