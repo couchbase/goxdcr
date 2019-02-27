@@ -60,7 +60,7 @@ type Event struct {
 	Data interface{}
 	//the originating component
 	Component Component
-	//the data items derived from the original item. This only used by DataProcessed event
+	//the data items derived from the original item.
 	DerivedData []interface{}
 	//any other information the event might be able to supply to its listener
 	OtherInfos interface{}

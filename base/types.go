@@ -381,16 +381,16 @@ func FormatErrMsgWithUpperLimit(errCh chan ComponentError, maxNumberOfErrorsToTr
 type PriorityType int
 
 const (
-	PriorityTypeHigh PriorityType = iota
+	PriorityTypeHigh   PriorityType = iota
 	PriorityTypeMedium PriorityType = iota
-	PriorityTypeLow  PriorityType = iota
+	PriorityTypeLow    PriorityType = iota
 )
 
 // priority shown on UI and rest api
 const (
-	PriorityHighString string = "High"
+	PriorityHighString   string = "High"
 	PriorityMediumString string = "Medium"
-	PriorityLowString  string = "Low"
+	PriorityLowString    string = "Low"
 )
 
 func PriorityTypeFromStr(priorityStr string) (PriorityType, error) {

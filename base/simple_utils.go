@@ -1076,3 +1076,7 @@ func ParseStats(statsMap *expvar.Map, statsName string) (int64, error) {
 	}
 	return strconv.ParseInt(statsVal.String(), ParseIntBase, ParseIntBitSize)
 }
+
+func FilterErrorIsRecoverable(err error) bool {
+	return err == ErrorCompressionUnableToInflate
+}

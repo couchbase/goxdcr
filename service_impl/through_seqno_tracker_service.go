@@ -1,4 +1,4 @@
-// Copyright (c) 2013 Couchbase, Inc.
+// Copyright (c) 2013-2019 Couchbase, Inc.
 // Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file
 // except in compliance with the License. You may obtain a copy of the License at
 //   http://www.apache.org/licenses/LICENSE-2.0
@@ -239,34 +239,49 @@ func (tsTracker *ThroughSeqnoTrackerSvc) Attach(pipeline common.Pipeline) error 
 	return nil
 }
 
+func (tsTracker *ThroughSeqnoTrackerSvc) markUprEventAsFiltered(uprEvent *mcc.UprEvent) {
+	if uprEvent == nil {
+		return
+	}
+	seqno := uprEvent.Seqno
+	vbno := uprEvent.VBucket
+	tsTracker.addFilteredSeqno(vbno, seqno)
+}
+
 func (tsTracker *ThroughSeqnoTrackerSvc) ProcessEvent(event *common.Event) error {
 	if !tsTracker.isPipelineRunning() {
 		tsTracker.logger.Tracef("Pipeline %s is no longer running, skip ProcessEvent for %v\n", tsTracker.rep_id, event)
 	}
 
-	if event.EventType == common.DataSent {
+	switch event.EventType {
+	case common.DataSent:
 		vbno := event.OtherInfos.(parts.DataSentEventAdditional).VBucket
 		seqno := event.OtherInfos.(parts.DataSentEventAdditional).Seqno
 		tsTracker.addSentSeqno(vbno, seqno)
-	} else if event.EventType == common.DataFiltered {
-		upr_event := event.Data.(*mcc.UprEvent)
-		seqno := upr_event.Seqno
-		vbno := upr_event.VBucket
-		tsTracker.addFilteredSeqno(vbno, seqno)
-	} else if event.EventType == common.DataFailedCRSource {
+	case common.DataFiltered:
+		uprEvent := event.Data.(*mcc.UprEvent)
+		tsTracker.markUprEventAsFiltered(uprEvent)
+	case common.DataUnableToFilter:
+		err := event.DerivedData[0].(error)
+		// If error is recoverable, do not mark it filtered in order to avoid data loss
+		if !base.FilterErrorIsRecoverable(err) {
+			uprEvent := event.Data.(*mcc.UprEvent)
+			tsTracker.markUprEventAsFiltered(uprEvent)
+		}
+	case common.DataFailedCRSource:
 		seqno := event.OtherInfos.(parts.DataFailedCRSourceEventAdditional).Seqno
 		vbno := event.OtherInfos.(parts.DataFailedCRSourceEventAdditional).VBucket
 		tsTracker.addFailedCRSeqno(vbno, seqno)
-	} else if event.EventType == common.DataReceived {
+	case common.DataReceived:
 		upr_event := event.Data.(*mcc.UprEvent)
 		seqno := upr_event.Seqno
 		vbno := upr_event.VBucket
 		// Sets last sequence number, and should the sequence number skip due to gap, this will take care of it
 		tsTracker.processGapSeqnos(vbno, seqno)
-	} else {
+	default:
 		tsTracker.logger.Warnf("Incorrect event type, %v, received by %v", event.EventType, tsTracker.id)
-	}
 
+	}
 	return nil
 
 }

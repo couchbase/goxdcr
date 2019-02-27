@@ -10,6 +10,7 @@
 package pipeline_svc
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	mcc "github.com/couchbase/gomemcached/client"
@@ -287,19 +288,21 @@ func (pipelineSupervisor *PipelineSupervisor) OnEvent(event *common.Event) {
 		// changes and will restart pipeline if they are not
 		pipelineSupervisor.pipeline.UpdateSettings(settings)
 	case common.DataUnableToFilter:
-		err = event.Data.(error)
-		pipelineSupervisor.logFilterError(err, string(event.OtherInfos.(string)))
-		if filterErrIsRecoverable(err) {
+		err = event.DerivedData[0].(error)
+		pipelineSupervisor.logFilterError(err, string(event.DerivedData[1].(string)))
+		if base.FilterErrorIsRecoverable(err) {
 			// Raise error so pipeline will restart and take recovery actions
 			pipelineSupervisor.setError(event.Component.Id(), err)
+		} else if pipelineSupervisor.Logger().GetLogLevel() >= log.LogLevelDebug {
+			uprEvent := event.Data.(*mcc.UprEvent)
+			uprDumpBytes, err := json.Marshal(*uprEvent)
+			if err == nil {
+				pipelineSupervisor.Logger().Debugf("Failed filtering uprEvent dump\n%v%v%v\n", base.UdTagBegin, string(uprDumpBytes), base.UdTagEnd)
+			}
 		}
 	default:
 		pipelineSupervisor.Logger().Errorf("%v Pipeline supervisor didn't register to recieve event %v for component %v", pipelineSupervisor.Id(), event.EventType, event.Component.Id())
 	}
-}
-
-func filterErrIsRecoverable(err error) bool {
-	return err == base.ErrorCompressionUnableToInflate
 }
 
 func (pipelineSupervisor *PipelineSupervisor) UpdateSettings(settings metadata.ReplicationSettingsMap) error {
