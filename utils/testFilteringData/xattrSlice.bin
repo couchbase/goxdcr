@@ -1,1 +1,1 @@
-{"AnotherXattr":"TestValueString","TestXattr":30}
+{"AnotherXattr":"TestValueString","MapXattr":{"array":["a","b","c"],"floatType":1,"stringType":"string"},"NilXattr":null,"TestXattr":30}

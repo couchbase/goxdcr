@@ -6,8 +6,32 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/stretchr/testify/assert"
+	"io/ioutil"
+	"reflect"
 	"testing"
 )
+
+const testFilteringDataDir = "../utils/testFilteringData/"
+
+func getXattrValueMock() (map[string]interface{}, []byte, error) {
+	fileName := fmt.Sprintf("%v%v", testFilteringDataDir, "xattrSlice.bin")
+	return readJsonHelper(fileName)
+}
+
+func readJsonHelper(fileName string) (retMap map[string]interface{}, byteSlice []byte, err error) {
+	byteSlice, err = ioutil.ReadFile(fileName)
+	if err != nil {
+		return
+	}
+	var unmarshalledIface interface{}
+	err = json.Unmarshal(byteSlice, &unmarshalledIface)
+	if err != nil {
+		return
+	}
+
+	retMap = unmarshalledIface.(map[string]interface{})
+	return
+}
 
 func TestMapUnion(t *testing.T) {
 	assert := assert.New(t)
@@ -110,4 +134,36 @@ func TestInvalidRegex(t *testing.T) {
 	err := ValidateAdvFilter("REGEXP_CONTAINS(META().id, \"Invalid((((((\")")
 	assert.NotNil(err)
 	fmt.Println("============== Test case end: TestInsert =================")
+}
+
+func TestCustomRawJson(t *testing.T) {
+	assert := assert.New(t)
+	fmt.Println("============== Test case start: TestCustomRawJson =================")
+	retMap, xattrSlice, err := getXattrValueMock()
+	assert.Nil(err)
+	assert.NotEqual(0, len(retMap))
+	assert.NotEqual(0, len(xattrSlice))
+
+	allocatedBytes := make([]byte, len(xattrSlice))
+	var pos int
+
+	for k, v := range retMap {
+		keySlice := []byte(k)
+		allocatedBytes, pos = WriteJsonRawMsg(allocatedBytes, keySlice, pos, true /*isKey*/, len(keySlice))
+
+		marshaledValueBytes, err := json.Marshal(v)
+		assert.Nil(err)
+		allocatedBytes, pos = WriteJsonRawMsg(allocatedBytes, marshaledValueBytes, pos, false /*isKey*/, len(marshaledValueBytes))
+	}
+
+	checkMap := make(map[string]interface{})
+	err = json.Unmarshal(allocatedBytes, &checkMap)
+	assert.Nil(err)
+
+	for k, v := range checkMap {
+		checkValue, ok := retMap[k]
+		assert.True(ok)
+		assert.True(reflect.DeepEqual(checkValue, v))
+	}
+	fmt.Println("============== Test case end: TestCustomRawJson =================")
 }

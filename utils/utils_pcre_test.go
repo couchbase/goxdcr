@@ -92,6 +92,24 @@ func TestGenerateXattrUsingGoCB(t *testing.T) {
 		return
 	}
 
+	_, err = bucket.MutateIn(docKey, 0, 0).InsertEx("NilXattr", nil, gocb.SubdocFlagXattr|gocb.SubdocFlagCreatePath).Execute()
+	if err != nil {
+		fmt.Printf("Error with Insert3: %v\n", err)
+		return
+	}
+
+	mapTypeXattr := make(map[string]interface{})
+	mapTypeXattrArr := []string{"a", "b", "c"}
+	mapTypeXattr["stringType"] = "string"
+	mapTypeXattr["floatType"] = 1.0
+	mapTypeXattr["array"] = mapTypeXattrArr
+
+	_, err = bucket.MutateIn(docKey, 0, 0).InsertEx("MapXattr", mapTypeXattr, gocb.SubdocFlagXattr|gocb.SubdocFlagCreatePath).Execute()
+	if err != nil {
+		fmt.Printf("Error with Insert3: %v\n", err)
+		return
+	}
+
 	var docRetrieveVal interface{}
 	_, err = bucket.Get(docKey, &docRetrieveVal)
 

@@ -927,11 +927,14 @@ const ExternalKeyXattrContains = "META().xattrs"
 const InternalKeyXattr = "[$%XDCRInternalMeta*%$]"
 const InternalKeyKey = "[$%XDCRInternalKey*%$]"
 
+var CachedInternalKeyKeyByteSlice = []byte(InternalKeyKey)
+var CachedInternalKeyKeyByteSize = len(CachedInternalKeyKeyByteSlice)
+
 // From end user's perspective, they will see the reserved word they entered
 // However, internally, XDCR will insert more obscure internal keys to prevent collision with actual
 // user's data
 var ReservedWordsMap = map[string]string{
-	ExternalKeyKey:   InternalKeyKey,
+	ExternalKeyKey:   InternalKeyKey, /* if this entry changes, CachedInternalKeyKeyByteSlice needs to change too */
 	ExternalKeyXattr: InternalKeyXattr,
 }
 

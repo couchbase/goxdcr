@@ -1080,3 +1080,42 @@ func ParseStats(statsMap *expvar.Map, statsName string) (int64, error) {
 func FilterErrorIsRecoverable(err error) bool {
 	return err == ErrorCompressionUnableToInflate
 }
+
+// Given a correctly allocatedBytes slice that can contain the whole rawJSON message, write the given information without
+// the use of any data structures on the heap
+// Input:
+// 	 allocatedBytes - finalized byte slice that will contain the specific marshalled JSON
+//   bytesToWrite - This can be either key or value in []byte form
+//   pos - current position to continue the write
+// 	 isKey - whether or not specified input is a key or value
+//   size - In cases where bytesToWrite originated from dataPool, the length may not reflect the actual
+//			length of the data (i.e. string). Use this field to avoid calling len and avoid out of bounds error
+// Returns:
+// 	 original byte slice reference
+// 	 updated position
+func WriteJsonRawMsg(allocatedBytes, bytesToWrite []byte, pos int, isKey bool, size int) ([]byte, int) {
+	if isKey {
+		if pos == 0 {
+			// Need to do an open bracket
+			allocatedBytes[pos] = '{'
+			pos++
+		} else {
+			allocatedBytes[pos] = ','
+			pos++
+		}
+		allocatedBytes[pos] = '"'
+		pos++
+		copy(allocatedBytes[pos:], bytesToWrite[:])
+		pos += size
+		allocatedBytes[pos] = '"'
+		pos++
+		allocatedBytes[pos] = ':'
+		pos++
+	} else {
+		copy(allocatedBytes[pos:], bytesToWrite[:])
+		pos += size
+		allocatedBytes[pos] = '}'
+		// Do not increment pos here because if there is a next key, it will replace this } with a ,
+	}
+	return allocatedBytes, pos
+}

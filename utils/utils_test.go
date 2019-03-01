@@ -667,7 +667,8 @@ func TestProcessBinaryFile(t *testing.T) {
 
 	retSlice, err, _, _, _ := testUtils.ProcessUprEventForFiltering(uprEvent, dp, base.FilterFlagType(0) /*skipXattr*/)
 	assert.Nil(err)
-	assert.Equal(checkSlice, retSlice)
+
+	assert.Equal(checkSlice, bytes.Trim(retSlice, "\x00"))
 
 	fmt.Println("============== Test case end: TestProcessBinaryFile =================")
 }
