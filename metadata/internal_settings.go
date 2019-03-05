@@ -168,33 +168,33 @@ const (
 	// upper bound for ratio of throughput of high priority replications to throughput of all replications
 	// this is to ensure that low priority replications will not be completely starved
 	ResourceManagementRatioUpperBoundKey = "ResourceManagementRatioUpperBound"
-	// lower bound for ratio of throughput of high priority replications to throughput of all replications
-	ResourceManagementRatioLowerBoundKey = "ResourceManagementRatioLowerBound"
-	// the first increment when throttling is first turned on.
-	ResourceManagementRatioFirstIncrementKey = "ResourceManagementRatioFirstIncrement"
-	// increment amount when ratio is being increased
-	ResourceManagementRatioIncrementKey = "ResourceManagementRatioIncrement"
-	// decrement amount when ratio is being decreased
-	ResourceManagementRatioDecrementKey = "ResourceManagementRatioDecrement"
-	// max count that increasing throttling has not been effective
-	// we will start decreaing throttling when the max is reached
-	MaxCountIneffectiveThrottlingIncreaseKey = "MaxCountIneffectiveThrottlingIncrease"
-	// max count that throttling has been decreased
-	// we will go back to increasing throttling when the max is reached
-	MaxCountThrottlingDecreaseKey = "MaxCountThrottlingDecrease"
-	// max count for wait period
-	// we will start decreasing throttling when the max is reached
-	MaxCountWaitPeriodKey = "MaxCountWaitPeriod"
 	// when the number of consecutive terms where there have been backlog reaches the threshold, set DCP priorities
 	MaxCountBacklogForSetDcpPriorityKey = "MaxCountBacklogForSetDcpPriority"
 	// when the number of consecutive terms where there have been no backlog reaches the threshold, reset DCP priorities to normal
 	MaxCountNoBacklogForResetDcpPriorityKey = "MaxCountNoBacklogForResetDcpPriority"
+	// extra quota given to replications when cpu is not yet maximized
+	// max throughput is computed as currentThroughput * (1 + ExtraQuotaForUnderutilizedCPU/ResourceManagementRatioBase)
+	ExtraQuotaForUnderutilizedCPUKey = "ExtraQuotaForUnderutilizedCPU"
 	// interval for printing throughput throttler stats to log file
 	ThroughputThrottlerLogIntervalKey = "ThroughputThrottlerLogInterval"
+	// interval for clearing tokens in throughput throttler
+	ThroughputThrottlerClearTokensIntervalKey = "ThroughputThrottlerClearTokensInterval"
 	// number of time slots [per measurement interval] for throughput throttling
 	NumberOfSlotsForThroughputThrottlingKey = "NumberOfSlotsForThroughputThrottling"
-	// when actual acpu usage exceeds maxCpu * ThresholdRatioForMaxCpu/100, cpu is considered to have maxed out
-	ThresholdRatioForMaxCpuKey = "ThresholdRatioForMaxCpu"
+	// interval for throttler calibration, i.e., for stopping reassigning tokens to low priority replications
+	IntervalForThrottlerCalibrationKey = "IntervalForThrottlerCalibration"
+	// number of throughput samples to keep
+	ThroughputSampleSizeKey = "ThroughputSampleSize"
+	// alpha for exponential decay sampling
+	ThroughputSampleAlphaKey = "ThroughputSampleAlpha"
+	// when actual process cpu usage exceeds maxProcessCpu * ThresholdRatioForProcessCpu/100, process cpu is considered to have maxed out
+	ThresholdRatioForProcessCpuKey = "ThresholdRatioForProcessCpu"
+	// when actual total cpu usage exceeds totalCpu * ThresholdRatioForTotalCpu/100, total cpu is considered to have maxed out
+	ThresholdRatioForTotalCpuKey = "ThresholdRatioForTotalCpu"
+	// max count of consecutive terms where cpu has not been maxed out
+	MaxCountCpuNotMaxedKey = "MaxCountCpuNotMaxed"
+	// max count of consecutive terms where throughput dropped from previous high
+	MaxCountThroughputDropKey = "MaxCountThroughputDrop"
 )
 
 var TopologyChangeCheckIntervalConfig = &SettingsConfig{10, &Range{1, 100}}
@@ -265,18 +265,19 @@ var ResourceManagementStatsIntervalConfig = &SettingsConfig{10000, &Range{10, 36
 var ChangesLeftThresholdForOngoingReplicationConfig = &SettingsConfig{200000, &Range{1, 200000000}}
 var ResourceManagementRatioBaseConfig = &SettingsConfig{100, &Range{10, 10000}}
 var ResourceManagementRatioUpperBoundConfig = &SettingsConfig{90, &Range{1, 10000}}
-var ResourceManagementRatioLowerBoundConfig = &SettingsConfig{-1, &Range{-1, 10000}}
-var ResourceManagementRatioFirstIncrementConfig = &SettingsConfig{15, &Range{1, 10000}}
-var ResourceManagementRatioDecrementConfig = &SettingsConfig{5, &Range{1, 10000}}
-var ResourceManagementRatioIncrementConfig = &SettingsConfig{5, &Range{1, 10000}}
-var MaxCountIneffectiveThrottlingIncreaseConfig = &SettingsConfig{5, &Range{1, 1000}}
-var MaxCountThrottlingDecreaseConfig = &SettingsConfig{6, &Range{1, 1000}}
-var MaxCountWaitPeriodConfig = &SettingsConfig{5, &Range{1, 1000}}
 var MaxCountBacklogForSetDcpPriorityConfig = &SettingsConfig{5, &Range{1, 1000}}
 var MaxCountNoBacklogForResetDcpPriorityConfig = &SettingsConfig{300, &Range{1, 10000}}
-var ThroughputThrottlerLogIntervalConfig = &SettingsConfig{10, &Range{1, 3600}}
+var ExtraQuotaForUnderutilizedCPUConfig = &SettingsConfig{10, &Range{0, 1000}}
+var ThroughputThrottlerLogIntervalConfig = &SettingsConfig{10000, &Range{10, 3600000}}
+var ThroughputThrottlerClearTokensIntervalConfig = &SettingsConfig{3000, &Range{10, 3600000}}
 var NumberOfSlotsForThroughputThrottlingConfig = &SettingsConfig{10, &Range{1, 1000}}
-var ThresholdRatioForMaxCpuConfig = &SettingsConfig{95, &Range{1, 1000}}
+var IntervalForThrottlerCalibrationConfig = &SettingsConfig{4, &Range{1, 1000}}
+var ThroughputSampleSizeConfig = &SettingsConfig{1028, &Range{10, 1000000}}
+var ThroughputSampleAlphaConfig = &SettingsConfig{15, &Range{1, 1000}}
+var ThresholdRatioForProcessCpuConfig = &SettingsConfig{95, &Range{1, 1000}}
+var ThresholdRatioForTotalCpuConfig = &SettingsConfig{95, &Range{1, 1000}}
+var MaxCountCpuNotMaxedConfig = &SettingsConfig{3, &Range{1, 1000}}
+var MaxCountThroughputDropConfig = &SettingsConfig{3, &Range{1, 1000}}
 
 var XDCRInternalSettingsConfigMap = map[string]*SettingsConfig{
 	TopologyChangeCheckIntervalKey:                TopologyChangeCheckIntervalConfig,
@@ -347,18 +348,19 @@ var XDCRInternalSettingsConfigMap = map[string]*SettingsConfig{
 	ChangesLeftThresholdForOngoingReplicationKey:  ChangesLeftThresholdForOngoingReplicationConfig,
 	ResourceManagementRatioBaseKey:                ResourceManagementRatioBaseConfig,
 	ResourceManagementRatioUpperBoundKey:          ResourceManagementRatioUpperBoundConfig,
-	ResourceManagementRatioLowerBoundKey:          ResourceManagementRatioLowerBoundConfig,
-	ResourceManagementRatioFirstIncrementKey:      ResourceManagementRatioFirstIncrementConfig,
-	ResourceManagementRatioDecrementKey:           ResourceManagementRatioDecrementConfig,
-	ResourceManagementRatioIncrementKey:           ResourceManagementRatioIncrementConfig,
-	MaxCountIneffectiveThrottlingIncreaseKey:      MaxCountIneffectiveThrottlingIncreaseConfig,
-	MaxCountThrottlingDecreaseKey:                 MaxCountThrottlingDecreaseConfig,
-	MaxCountWaitPeriodKey:                         MaxCountWaitPeriodConfig,
 	MaxCountBacklogForSetDcpPriorityKey:           MaxCountBacklogForSetDcpPriorityConfig,
 	MaxCountNoBacklogForResetDcpPriorityKey:       MaxCountNoBacklogForResetDcpPriorityConfig,
+	ExtraQuotaForUnderutilizedCPUKey:              ExtraQuotaForUnderutilizedCPUConfig,
 	ThroughputThrottlerLogIntervalKey:             ThroughputThrottlerLogIntervalConfig,
+	ThroughputThrottlerClearTokensIntervalKey:     ThroughputThrottlerClearTokensIntervalConfig,
 	NumberOfSlotsForThroughputThrottlingKey:       NumberOfSlotsForThroughputThrottlingConfig,
-	ThresholdRatioForMaxCpuKey:                    ThresholdRatioForMaxCpuConfig,
+	IntervalForThrottlerCalibrationKey:            IntervalForThrottlerCalibrationConfig,
+	ThroughputSampleSizeKey:                       ThroughputSampleSizeConfig,
+	ThroughputSampleAlphaKey:                      ThroughputSampleAlphaConfig,
+	ThresholdRatioForProcessCpuKey:                ThresholdRatioForProcessCpuConfig,
+	ThresholdRatioForTotalCpuKey:                  ThresholdRatioForTotalCpuConfig,
+	MaxCountCpuNotMaxedKey:                        MaxCountCpuNotMaxedConfig,
+	MaxCountThroughputDropKey:                     MaxCountThroughputDropConfig,
 }
 
 func InitConstants(xmemMaxIdleCountLowerBound int, xmemMaxIdleCountUpperBound int) {

@@ -9,16 +9,23 @@
 
 package service_def
 
+// Keys for configurable service settings
+const HighTokensKey = "HighTokens"
+const MaxReassignableHighTokensKey = "MaxReassignableHighTokens"
+const LowTokensKey = "LowTokens"
+const NeedToCalibrateKey = "NeedToCalibrate"
+
 type ThroughputThrottlerSvc interface {
 	Start() error
 	Stop() error
 
-	SetThroughputLimit(limit int64) error
+	// update various settings, e.g., high tokens and throughput limit
+	UpdateSettings(setting map[string]interface{}) map[string]error
 
 	// output:
 	// true - if the mutation can be sent
 	// false - if the mutation cannot be sent
-	CanSend() bool
+	CanSend(isHighPriorityReplication bool) bool
 
 	// blocks till the next measurement interval, when throughput allowance may become available
 	Wait()

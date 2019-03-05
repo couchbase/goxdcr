@@ -291,13 +291,13 @@ func (rscl *ReplicationSpecChangeListener) liveUpdatePipeline(topic string, oldS
 		newSettingsMap := newSettings.ToMap(false /*isDefaultSettings*/)
 
 		if isOldReplHighPriority != isNewReplHighPriority {
-			// if replication priority has changed, need to change needToThrottle setting accordingly
-			needToThrottle := false
+			// if replication priority has changed, need to change isHighReplication setting accordingly
+			isHighReplication := true
 			if isOldReplHighPriority {
-				// priority changed from high to low, need to throttle the replication now
-				needToThrottle = true
+				// priority changed from high to low
+				isHighReplication = false
 			}
-			newSettingsMap[parts.NeedToThrottleKey] = needToThrottle
+			newSettingsMap[parts.IsHighReplicationKey] = isHighReplication
 		}
 
 		rscl.logger.Infof("Updating pipeline %v with new settings=%v\n old settings=%v\n", topic, newSettingsMap.CloneAndRedact(), oldSettings.CloneAndRedact())

@@ -22,7 +22,6 @@ import (
 	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/goxdcr/service_def"
 	utilities "github.com/couchbase/goxdcr/utils"
-	"sync/atomic"
 	"time"
 )
 
@@ -31,13 +30,7 @@ var ErrorNoDownStreamNodesForRouter = errors.New("No downstream nodes have been 
 var ErrorNoRoutingMapForRouter = errors.New("No routingMap has been defined for Router.")
 var ErrorInvalidRoutingMapForRouter = errors.New("routingMap in Router is invalid.")
 
-var NeedToThrottleKey = "NeedToThrottle"
-
-// enum for whether router needs to be throttled
-const (
-	NoNeedToThrottle int32 = 0
-	NeedToThrottle   int32 = 1
-)
+var IsHighReplicationKey = "IsHighReplication"
 
 type ReqCreator func(id string) (*base.WrappedMCRequest, error)
 
@@ -56,9 +49,9 @@ type Router struct {
 	utils        utilities.UtilsIface
 
 	throughputThrottlerSvc service_def.ThroughputThrottlerSvc
-	// whether the current replication/router needs to be throttled
+	// whether the current replication is a high priority replication
 	// when Priority or Ongoing setting is changed, this field will be updated through UpdateSettings() call
-	needToThrottle int32
+	isHighReplication *base.AtomicBooleanType
 }
 
 /**
@@ -77,7 +70,7 @@ func NewRouter(id string, topic string, filterExpression string,
 	logger_context *log.LoggerContext, req_creator ReqCreator,
 	utilsIn utilities.UtilsIface,
 	throughputThrottlerSvc service_def.ThroughputThrottlerSvc,
-	needToThrottle bool) (*Router, error) {
+	isHighReplication bool) (*Router, error) {
 	var filter *Filter
 	var err error
 
@@ -96,20 +89,17 @@ func NewRouter(id string, topic string, filterExpression string,
 		sourceCRMode:           sourceCRMode,
 		req_creator:            req_creator,
 		utils:                  utilsIn,
+		isHighReplication:         &base.AtomicBooleanType{},
 		throughputThrottlerSvc: throughputThrottlerSvc,
 	}
 
-	if needToThrottle {
-		router.needToThrottle = NeedToThrottle
-	} else {
-		router.needToThrottle = NoNeedToThrottle
-	}
+	router.isHighReplication.Set(isHighReplication)
 
 	// routingFunc is the main intelligence of the router's functionality
 	var routingFunc connector.Routing_Callback_Func = router.route
 	router.Router = connector.NewRouter(id, downStreamParts, &routingFunc, logger_context, "XDCRRouter")
 
-	router.Logger().Infof("%v created with %d downstream parts needToThrottle=%v\n", router.id, len(downStreamParts), needToThrottle)
+	router.Logger().Infof("%v created with %d downstream parts isHighReplication=%v\n", router.id, len(downStreamParts), isHighReplication)
 	return router, nil
 }
 
@@ -227,20 +217,16 @@ func (router *Router) route(data interface{}) (map[string]interface{}, error) {
 }
 
 func (router *Router) throttle() {
-	if atomic.LoadInt32(&router.needToThrottle) == NoNeedToThrottle {
-		return
-	}
-
 	// this statement before the for loop is to ensure that
 	// we do not incur the overhead of collecting start time
 	// and raising event when throttling does not happen
-	if router.throughputThrottlerSvc.CanSend() {
+	if router.throughputThrottlerSvc.CanSend(router.isHighReplication.Get()) {
 		return
 	}
 
 	start_time := time.Now()
 	for {
-		if router.throughputThrottlerSvc.CanSend() {
+		if router.throughputThrottlerSvc.CanSend(router.isHighReplication.Get()) {
 			break
 		} else {
 			router.throughputThrottlerSvc.Wait()
@@ -271,24 +257,20 @@ func (router *Router) RoutingMapByDownstreams() map[string][]uint16 {
 }
 
 func (router *Router) UpdateSettings(settings metadata.ReplicationSettingsMap) error {
-	needToThrottleObj, ok := settings[NeedToThrottleKey]
+	isHighReplicationObj, ok := settings[IsHighReplicationKey]
 	if !ok {
 		return nil
 	}
-	needToThrottle, ok := needToThrottleObj.(bool)
+	isHighReplication, ok := isHighReplicationObj.(bool)
 	if !ok {
-		err := fmt.Errorf("%v invalid data type for needToThrottle. value = %v\n", router.id, needToThrottleObj)
+		err := fmt.Errorf("%v invalid data type for isHighReplication. value = %v\n", router.id, isHighReplicationObj)
 		router.Logger().Warn(err.Error())
 		return err
 	}
 
-	router.Logger().Infof("%v changing needToThrottle to %v\n", router.id, needToThrottle)
+	router.Logger().Infof("%v changing isHighReplication to %v\n", router.id, isHighReplication)
 
-	if needToThrottle {
-		atomic.StoreInt32(&router.needToThrottle, NeedToThrottle)
-	} else {
-		atomic.StoreInt32(&router.needToThrottle, NoNeedToThrottle)
-	}
+	router.isHighReplication.Set(isHighReplication)
 
 	return nil
 }

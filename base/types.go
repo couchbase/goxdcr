@@ -17,6 +17,7 @@ import (
 	mrand "math/rand"
 	"reflect"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -421,3 +422,33 @@ func (priority PriorityType) String() string {
 }
 
 type DpGetterFunc func(uint64) ([]byte, error)
+
+// atomic boolean type which uses a uint32 integer to store boolean value
+type AtomicBooleanType struct {
+	val uint32
+}
+
+const (
+	AtomicBooleanTrue  uint32 = 1
+	AtomicBooleanFalse uint32 = 0
+)
+
+func (a *AtomicBooleanType) Set(value bool) {
+	if value {
+		a.SetTrue()
+	} else {
+		a.SetFalse()
+	}
+}
+
+func (a *AtomicBooleanType) SetTrue() {
+	atomic.StoreUint32(&a.val, AtomicBooleanTrue)
+}
+
+func (a *AtomicBooleanType) SetFalse() {
+	atomic.StoreUint32(&a.val, AtomicBooleanFalse)
+}
+
+func (a *AtomicBooleanType) Get() bool {
+	return atomic.LoadUint32(&a.val) == AtomicBooleanTrue
+}

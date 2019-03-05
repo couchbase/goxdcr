@@ -20,6 +20,7 @@ import (
 	"github.com/couchbase/goxdcr/pipeline_manager"
 	"github.com/couchbase/goxdcr/service_def"
 	utilities "github.com/couchbase/goxdcr/utils"
+	"github.com/rcrowley/go-metrics"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -40,29 +41,25 @@ type ReplStats struct {
 	throughput int64
 }
 
-type ThrottleAction int
+type ThrottlerCalibrationAction int
 
 const (
-	// no throttling
-	ThrottleActionNone ThrottleAction = iota
-	// increase throttling
-	ThrottleActionIncrease
-	// decrease throttling
-	ThrottleActionDecrease
-	// wait action/period before we switch to decrease action when increase action is not effective
-	ThrottleActionWait
+	// no op. keep current throttler calibration option
+	ThrottlerCalibrationActionNone ThrottlerCalibrationAction = iota
+	// enable thottler calibration
+	ThrottlerCalibrationActionEnable
+	// disable thottler calibration
+	ThrottlerCalibrationActionDisable
 )
 
-func (ta ThrottleAction) String() string {
-	switch ta {
-	case ThrottleActionNone:
+func (tca ThrottlerCalibrationAction) String() string {
+	switch tca {
+	case ThrottlerCalibrationActionNone:
 		return "None"
-	case ThrottleActionIncrease:
-		return "Inc"
-	case ThrottleActionDecrease:
-		return "Dec"
-	case ThrottleActionWait:
-		return "Wait"
+	case ThrottlerCalibrationActionEnable:
+		return "Enable"
+	case ThrottlerCalibrationActionDisable:
+		return "Disable"
 	default:
 		return "Unknown"
 	}
@@ -94,37 +91,39 @@ func (da DcpPriorityAction) String() string {
 
 // state of resource manager, which changes at each management interval
 type State struct {
-	// cpu usage percentage
-	cpu int32
-	// ratio of throughput of high priority replications to throughput of all replications
-	// computed as "highThroughput * 100/ overallThroughput"
-	currentRatio int
-	// target ratio after resource management actions
-	targetRatio int
+	// goxdcr cpu usage percentage
+	cpu int64
+	// total cpu of the entire machine
+	totalCpu int64
+	// idle cpu of the entire machine
+	idleCpu int64
 	// throughput limit for low priority replications
-	// computed based on targetRatio
 	throughputLimit int64
+	// tokens given to high priority replications
+	highTokens int64
+	// max high tokens that can be reassigned to low priority replications
+	maxReassignableTokens int64
 	// throughput of all replications
 	overallThroughput int64
 	// throughput of high priority replications
+	// not used for control, just for informational purpose
 	highThroughput int64
-	// throughput of high priority replications with backlog
-	backlogThroughput int64
-	// whether highThroughput stats has changed since last interval
-	highThroughputStatsChanged bool
-	// whether backlogThroughput stats has changed since last interval
-	backlogThroughputStatsChanged bool
+	// max throughput that system can sustain
+	maxThroughput int64
+	// throughput needed to satisfy QOS for high priority replications
+	throughputNeededByHighRepl int64
 	// whether high priority replications exist
 	highPriorityReplExist bool
 	// whether low priority replications exist
 	lowPriorityReplExist bool
 	// whether high priority replications with backlog exist
 	backlogReplExist bool
+
 	// runtime stats of active replications
 	replStatsMap map[string]*ReplStats
 
-	throttleAction    ThrottleAction
-	dcpPriorityAction DcpPriorityAction
+	throttlerCalibrationAction ThrottlerCalibrationAction
+	dcpPriorityAction          DcpPriorityAction
 }
 
 func newState() *State {
@@ -135,34 +134,34 @@ func newState() *State {
 
 func (s *State) String() string {
 	var buffer bytes.Buffer
-	buffer.WriteString("cpu: ")
-	buffer.WriteString(fmt.Sprintf("%v", s.cpu))
-	buffer.WriteString(" currentRatio: ")
-	buffer.WriteString(strconv.Itoa(s.currentRatio))
-	buffer.WriteString(" targetRatio: ")
-	buffer.WriteString(strconv.Itoa(s.targetRatio))
-	buffer.WriteString(" overallTP: ")
+	buffer.WriteString("overallTP: ")
 	buffer.WriteString(strconv.FormatInt(s.overallThroughput, base.ParseIntBase))
 	buffer.WriteString(" highTP: ")
 	buffer.WriteString(strconv.FormatInt(s.highThroughput, base.ParseIntBase))
-	buffer.WriteString(" backlogTP: ")
-	buffer.WriteString(strconv.FormatInt(s.backlogThroughput, base.ParseIntBase))
-	buffer.WriteString(" highTPChanged: ")
-	buffer.WriteString(strconv.FormatBool(s.highThroughputStatsChanged))
-	buffer.WriteString(" backlogTPChanged: ")
-	buffer.WriteString(strconv.FormatBool(s.backlogThroughputStatsChanged))
-	buffer.WriteString(" highReplExist: ")
+	buffer.WriteString(" highExist: ")
 	buffer.WriteString(strconv.FormatBool(s.highPriorityReplExist))
-	buffer.WriteString(" lowReplExist: ")
+	buffer.WriteString(" lowExist: ")
 	buffer.WriteString(strconv.FormatBool(s.lowPriorityReplExist))
-	buffer.WriteString(" backlogReplExist: ")
+	buffer.WriteString(" backlogExist: ")
 	buffer.WriteString(strconv.FormatBool(s.backlogReplExist))
-	buffer.WriteString(" throughputLimit: ")
+	buffer.WriteString(" maxTP: ")
+	buffer.WriteString(strconv.FormatInt(s.maxThroughput, base.ParseIntBase))
+	buffer.WriteString(" highTPNeeded: ")
+	buffer.WriteString(strconv.FormatInt(s.throughputNeededByHighRepl, base.ParseIntBase))
+	buffer.WriteString(" highTokens: ")
+	buffer.WriteString(strconv.FormatInt(s.highTokens, base.ParseIntBase))
+	buffer.WriteString(" maxTokens: ")
+	buffer.WriteString(strconv.FormatInt(s.maxReassignableTokens, base.ParseIntBase))
+	buffer.WriteString(" lowTPLimit: ")
 	buffer.WriteString(fmt.Sprintf("%v", s.throughputLimit))
-	buffer.WriteString(" throttleAction: ")
-	buffer.WriteString(s.throttleAction.String())
+	buffer.WriteString(" calibration: ")
+	buffer.WriteString(s.throttlerCalibrationAction.String())
 	buffer.WriteString(" dcpAction: ")
 	buffer.WriteString(s.dcpPriorityAction.String())
+	buffer.WriteString(" processCpu: ")
+	buffer.WriteString(fmt.Sprintf("%v", s.cpu))
+	buffer.WriteString(" idleCpu: ")
+	buffer.WriteString(fmt.Sprintf("%v", s.idleCpu*100/s.totalCpu))
 	return buffer.String()
 }
 
@@ -181,15 +180,19 @@ type ResourceManager struct {
 	finch                  chan bool
 
 	// count of consecutive terms where there has been backlog
-	backlogCount int32
+	backlogCount uint32
 	// count of consecutive terms where there has been no backlog
-	noBacklogCount int32
-	// count of consecutive ThrottleActionIncrease actions which have not been effective
-	ineffectiveIncreaseThrottlingCount int32
-	// count of consecutive ThrottleActionDecrease actions
-	decreaseThrottlingCount int32
-	// count of consecutive wait actions
-	waitCount int32
+	noBacklogCount uint32
+
+	// count of consecutive terms where cpu has not been maxed out
+	cpuNotMaxedCount uint32
+	// boolean indicating whether we are currently in extra quota period
+	inExtraQuotaPeriod *base.AtomicBooleanType
+
+	// if overall throughput starts to drop in extra quota period, this captures the throughput before drop
+	throughputBeforeDrop int64
+	// count of consecutive terms where overall throughput stays below throughputBeforeDrop
+	throughputDropCount uint32
 
 	// replications with ongoing flags set
 	ongoingReplMap map[string]bool
@@ -205,9 +208,21 @@ type ResourceManager struct {
 	systemStats unsafe.Pointer //*SystemStats
 
 	// max cpu usage as a percentage, as defined by goMaxProcs
-	maxCpu int32
-	// current cpu usage
-	cpu int32
+	maxCpu int64
+	cpu    int64
+	// total cpu of the entire machine
+	totalCpu int64
+	// accumulative total cpu of the entire machine
+	accumulativeTotalCpu int64
+	// idle cpu of the entire machine
+	idleCpu int64
+	// previous accumulative idle cpu of the entire machine
+	accumulativeIdleCpu int64
+
+	// historical samples of overall throughputs, which can be used as an estimate of max throughput system can sustain
+	overallThroughputSamples metrics.Sample
+	// historical samples of high priority replication throughputs
+	highThroughputSamples metrics.Sample
 }
 
 type ResourceMgrIface interface {
@@ -225,20 +240,25 @@ func NewResourceManager(pipelineMgr pipeline_manager.Pipeline_mgr_iface, repl_sp
 	logger_context *log.LoggerContext, utilsIn utilities.UtilsIface) ResourceMgrIface {
 
 	resourceMgrRetVar := &ResourceManager{
-		pipelineMgr:            pipelineMgr,
-		repl_spec_svc:          repl_spec_svc,
-		xdcr_topology_svc:      xdcr_topology_svc,
-		remote_cluster_svc:     remote_cluster_svc,
-		checkpoint_svc:         checkpoint_svc,
-		logger:                 log.NewLogger(ResourceManagerName, logger_context),
-		cluster_info_svc:       cluster_info_svc,
-		uilog_svc:              uilog_svc,
-		utils:                  utilsIn,
-		finch:                  make(chan bool),
-		ongoingReplMap:         make(map[string]bool),
-		replDcpPriorityMap:     make(map[string]mcc.PriorityType),
-		throughputThrottlerSvc: throughput_throttler_svc,
-		maxCpu:                 int32(base.DefaultGoMaxProcs * 100),
+		pipelineMgr:              pipelineMgr,
+		repl_spec_svc:            repl_spec_svc,
+		xdcr_topology_svc:        xdcr_topology_svc,
+		remote_cluster_svc:       remote_cluster_svc,
+		checkpoint_svc:           checkpoint_svc,
+		logger:                   log.NewLogger(ResourceManagerName, logger_context),
+		cluster_info_svc:         cluster_info_svc,
+		uilog_svc:                uilog_svc,
+		utils:                    utilsIn,
+		finch:                    make(chan bool),
+		ongoingReplMap:           make(map[string]bool),
+		replDcpPriorityMap:       make(map[string]mcc.PriorityType),
+		throughputThrottlerSvc:   throughput_throttler_svc,
+		maxCpu:                   int64(base.DefaultGoMaxProcs * 100),
+		overallThroughputSamples: metrics.NewExpDecaySample(base.ThroughputSampleSize, float64(base.ThroughputSampleAlpha)/1000),
+		highThroughputSamples:    metrics.NewExpDecaySample(base.ThroughputSampleSize, float64(base.ThroughputSampleAlpha)/1000),
+		accumulativeTotalCpu:     -1,
+		accumulativeIdleCpu:      -1,
+		inExtraQuotaPeriod:       &base.AtomicBooleanType{},
 	}
 
 	resourceMgrRetVar.logger.Info("Resource Manager is initialized")
@@ -289,13 +309,17 @@ func (rm *ResourceManager) GetThroughputThrottler() service_def.ThroughputThrott
 }
 
 func (rm *ResourceManager) IsReplHighPriority(replId string, priority base.PriorityType) bool {
+	return rm.isReplHighPriority(replId, priority, true)
+}
+
+func (rm *ResourceManager) isReplHighPriority(replId string, priority base.PriorityType, lock bool) bool {
 	switch priority {
 	case base.PriorityTypeHigh:
 		return true
 	case base.PriorityTypeLow:
 		return false
 	case base.PriorityTypeMedium:
-		return rm.isReplOngoing(replId)
+		return rm.isReplOngoing(replId, lock)
 	}
 	// should never get here
 	return false
@@ -310,31 +334,97 @@ func (rm *ResourceManager) HandlePipelineDeletion(replId string) {
 }
 
 func (rm *ResourceManager) HandleGoMaxProcsChange(goMaxProcs int) {
-	atomic.StoreInt32(&rm.maxCpu, int32(goMaxProcs*100))
+	atomic.StoreInt64(&rm.maxCpu, int64(goMaxProcs*100))
 }
 
-func (rm *ResourceManager) getMaxCpu() int32 {
-	return atomic.LoadInt32(&rm.maxCpu)
+func (rm *ResourceManager) getMaxCpu() int64 {
+	return atomic.LoadInt64(&rm.maxCpu)
 }
 
-func (rm *ResourceManager) getCpu() int32 {
-	return atomic.LoadInt32(&rm.cpu)
+func (rm *ResourceManager) getCpu() int64 {
+	return atomic.LoadInt64(&rm.cpu)
 }
 
-func (rm *ResourceManager) setCpu(cpu int32) {
-	atomic.StoreInt32(&rm.cpu, cpu)
+func (rm *ResourceManager) setCpu(cpu int64) {
+	atomic.StoreInt64(&rm.cpu, cpu)
 }
 
-// returns whether cpu has been maxed out
+func (rm *ResourceManager) getTotalCpu() int64 {
+	return atomic.LoadInt64(&rm.totalCpu)
+}
+
+func (rm *ResourceManager) setTotalCpu(accumulativeTotalCpu int64) {
+	if accumulativeTotalCpu < 0 {
+		// did not get valid value
+		atomic.StoreInt64(&rm.totalCpu, -1)
+		// leave rm.accumulativeTotalCpu alone
+		return
+	}
+
+	previousAccumulativeTotalCpu := atomic.LoadInt64(&rm.accumulativeTotalCpu)
+	if previousAccumulativeTotalCpu < 0 {
+		// cannot compute totalCpu without previousAccumulativeTotalCpu
+		atomic.StoreInt64(&rm.totalCpu, -1)
+	} else {
+		atomic.StoreInt64(&rm.totalCpu, accumulativeTotalCpu-previousAccumulativeTotalCpu)
+	}
+	atomic.StoreInt64(&rm.accumulativeTotalCpu, accumulativeTotalCpu)
+}
+
+func (rm *ResourceManager) getIdleCpu() int64 {
+	return atomic.LoadInt64(&rm.idleCpu)
+}
+
+func (rm *ResourceManager) setIdleCpu(accumulativeIdleCpu int64) {
+	if accumulativeIdleCpu < 0 {
+		// did not get valid value
+		atomic.StoreInt64(&rm.idleCpu, -1)
+		// leave rm.accumulativeIdleCpu alone
+		return
+	}
+
+	previousAccumulativeIdleCpu := atomic.LoadInt64(&rm.accumulativeIdleCpu)
+	if previousAccumulativeIdleCpu < 0 {
+		// cannot compute idleCpu without previousAccumulativeIdleCpu
+		atomic.StoreInt64(&rm.idleCpu, -1)
+	} else {
+		atomic.StoreInt64(&rm.idleCpu, accumulativeIdleCpu-previousAccumulativeIdleCpu)
+	}
+	atomic.StoreInt64(&rm.accumulativeIdleCpu, accumulativeIdleCpu)
+}
+
+func (rm *ResourceManager) cpuMaxedout(previousState *State, state *State) bool {
+	return rm.processCpuMaxedout(previousState, state) || rm.overallCpuMaxedout(previousState, state)
+}
+
+// returns whether goxdcr process cpu has been maxed out
 // if state.cpu has value of -1 because of cpu collection failure, use previousState.cpu instead
 // if previousState.cpu is also -1, this method returns false
 // in such cases we are effectively reverting back to the algorithm where cpu was not a factor
-func (rm *ResourceManager) cpuMaxedout(previousState *State, state *State) bool {
+func (rm *ResourceManager) processCpuMaxedout(previousState *State, state *State) bool {
 	cpu := state.cpu
 	if cpu < 0 {
 		cpu = previousState.cpu
 	}
-	return cpu >= rm.getMaxCpu()*int32(base.ThresholdRatioForMaxCpu)/100
+	return cpu >= rm.getMaxCpu()*int64(base.ThresholdRatioForProcessCpu)/100
+}
+
+// returns whether the cpu on the current node has been maxed out
+func (rm *ResourceManager) overallCpuMaxedout(previousState *State, state *State) bool {
+	totalCpu := state.totalCpu
+	if totalCpu < 0 {
+		totalCpu = previousState.totalCpu
+	}
+	idleCpu := state.idleCpu
+	if idleCpu < 0 {
+		idleCpu = previousState.totalCpu
+	}
+
+	if totalCpu >= 0 && idleCpu >= 0 && idleCpu < totalCpu*int64(100-base.ThresholdRatioForTotalCpu)/100 {
+		return true
+	}
+
+	return false
 }
 
 func (rm *ResourceManager) getSystemStats() (*SystemStats, error) {
@@ -430,11 +520,21 @@ func (rm *ResourceManager) collectCpuUsageOnce() {
 		rm.logger.Warnf("Error retrieving cpu usage. err=%v\n", err)
 		// use a negative value to indicate invalid cpu value
 		rm.setCpu(-1)
-		return
+	} else {
+		// use the integer portion of cpu, which is a percentage
+		rm.setCpu(cpu)
 	}
 
-	// use the integer portion of cpu, which is a percentage
-	rm.setCpu(int32(cpu))
+	accumulativeTotalCpu, accumulativeIdleCpu, err := systemStats.OverallCpu()
+	if err != nil {
+		rm.logger.Warnf("Error retrieving overall cpu. err=%v\n", err)
+		// use a negative value to indicate invalid cpu value
+		rm.setTotalCpu(-1)
+		rm.setIdleCpu(-1)
+	} else {
+		rm.setTotalCpu(accumulativeTotalCpu)
+		rm.setIdleCpu(accumulativeIdleCpu)
+	}
 }
 
 func (rm *ResourceManager) logStats() {
@@ -468,8 +568,9 @@ func (rm *ResourceManager) logState() {
 }
 
 func (rm *ResourceManager) logCounters() {
-	rm.logger.Infof("backlogCount=%v, noBacklogCount=%v ineffectiveIncCount=%v, decCount=%v, waitCount=%v\n", atomic.LoadInt32(&rm.backlogCount), atomic.LoadInt32(&rm.noBacklogCount),
-		atomic.LoadInt32(&rm.ineffectiveIncreaseThrottlingCount), atomic.LoadInt32(&rm.decreaseThrottlingCount), atomic.LoadInt32(&rm.waitCount))
+	rm.logger.Infof("backlogCount=%v, noBacklogCount=%v extraQuota=%v cpuNotMaxedCount=%v throughputDropCount=%v\n",
+		atomic.LoadUint32(&rm.backlogCount), atomic.LoadUint32(&rm.noBacklogCount), rm.inExtraQuotaPeriod.Get(),
+		atomic.LoadUint32(&rm.cpuNotMaxedCount), atomic.LoadUint32(&rm.throughputDropCount))
 }
 
 func (rm *ResourceManager) logMaps() {
@@ -509,6 +610,8 @@ func (rm *ResourceManager) computeState(specReplStatsMap map[*metadata.Replicati
 	previousState *State) (state *State) {
 	state = newState()
 	state.cpu = rm.getCpu()
+	state.totalCpu = rm.getTotalCpu()
+	state.idleCpu = rm.getIdleCpu()
 
 	for spec, replStats := range specReplStatsMap {
 		isReplHighPriority := rm.IsReplHighPriority(spec.Id, spec.Settings.GetPriority())
@@ -559,300 +662,187 @@ func (rm *ResourceManager) computeState(specReplStatsMap map[*metadata.Replicati
 
 		if isReplHighPriority {
 			state.highThroughput += throughput
-			state.highThroughputStatsChanged = statsChanged
 
-			if (throughput == 0 && replStats.changesLeft > 0) ||
-				// backlogThreshold is in ms, hence we need to divide throughput by 1000 to convert it to mutations per ms
-				// we are multiplying changesLeft by 1000 to acheive the same effect
-				(throughput > 0 && replStats.changesLeft*1000/throughput > int64(spec.Settings.GetBacklogThreshold())) {
+			// for high priority replications, compute throughputNeededByHighRepl
+			throughputNeededByHighRepl := replStats.changesLeft * 1000 / int64(spec.Settings.GetBacklogThreshold())
+			state.throughputNeededByHighRepl += throughputNeededByHighRepl
+
+			if throughput < throughputNeededByHighRepl {
 				state.backlogReplExist = true
-				state.backlogThroughput += throughput
-				state.backlogThroughputStatsChanged = statsChanged
 			}
 		}
 	}
 
-	state.currentRatio = base.ResourceManagementRatioBase
-	if state.overallThroughput != 0 {
-		state.currentRatio = int(state.highThroughput * int64(base.ResourceManagementRatioBase) / state.overallThroughput)
+	rm.overallThroughputSamples.Update(state.overallThroughput)
+
+	if state.highPriorityReplExist {
+		// update high throughput sample only when high replications exist
+		rm.highThroughputSamples.Update(state.highThroughput)
 	}
+
+	state.maxThroughput = state.overallThroughput
 
 	return state
 }
 
 func (rm *ResourceManager) computeActionsToTake(previousState, state *State) {
-	if !state.backlogReplExist {
-		rm.computeActionsToTakeWithoutBacklog(previousState, state)
-	} else {
-		rm.computeActionsToTakeWithBacklog(previousState, state)
-	}
+	rm.computeThrottlingActions(previousState, state)
+	rm.computeDcpActions(state)
 }
 
-func (rm *ResourceManager) computeActionsToTakeWithoutBacklog(previousState, state *State) {
-	noBacklogCount := atomic.AddInt32(&rm.noBacklogCount, 1)
-
-	// reset all counters used in backlog scenario
-	atomic.StoreInt32(&rm.backlogCount, 0)
-	atomic.StoreInt32(&rm.ineffectiveIncreaseThrottlingCount, 0)
-	atomic.StoreInt32(&rm.waitCount, 0)
-	atomic.StoreInt32(&rm.decreaseThrottlingCount, 0)
-
+func (rm *ResourceManager) computeThrottlingActions(previousState, state *State) {
 	if !state.highPriorityReplExist || !state.lowPriorityReplExist {
-		rm.computeActionsToTakeWithOneGroup(state)
+		// when there is at most one group of replications, there is no need for throttling
+
+		// set highTokens to 0 to reduce overhead of high tokens maintenance
+		state.highTokens = 0
+		// set throughputLimit to 0 to indicate no throttling
+		state.throughputLimit = 0
 		return
 	}
 
-	if noBacklogCount >= int32(base.MaxCountNoBacklogForResetDcpPriority) {
-		state.dcpPriorityAction = DcpPriorityActionReset
-	}
+	if !rm.inExtraQuotaPeriod.Get() {
+		// not in extra quota period
+		if !rm.cpuMaxedout(previousState, state) {
+			newCount := atomic.AddUint32(&rm.cpuNotMaxedCount, 1)
+			if newCount > uint32(base.MaxCountCpuNotMaxed) {
+				// start extra quota period
+				rm.inExtraQuotaPeriod.SetTrue()
+				state.throttlerCalibrationAction = ThrottlerCalibrationActionDisable
 
-	state.throttleAction = ThrottleActionDecrease
-
-	if previousState == nil {
-		// this can happen only when goxdcr process is first started
-		// without a previous state to consult, decrease throttling
-		state.targetRatio = decrementRatio(state.currentRatio, -1, base.ResourceManagementRatioDecrement)
-		computeThroughputLimit(state)
+				rm.applyExtraQuota(state)
+			}
+		} else {
+			atomic.StoreUint32(&rm.cpuNotMaxedCount, 0)
+		}
 	} else {
-		state.targetRatio = decrementRatio(state.currentRatio, previousState.targetRatio, base.ResourceManagementRatioDecrement)
-		computeThroughputLimit(state)
+		// in extra quota period
 
-		// make sure that throughput limit does not decrease
-		// otherwise we may have serious problems when throughput of high priority replications drops
-		// suddenly, e.g., because of backfill completion
-		if state.throughputLimit < previousState.throughputLimit {
-			state.throughputLimit = previousState.throughputLimit
+		stopExtraQuota := false
+		if rm.cpuMaxedout(previousState, state) {
+			// stop extra quota period when cpu is maxed out
+			stopExtraQuota = true
+		}
+
+		if atomic.LoadUint32(&rm.throughputDropCount) == 0 {
+			// have not seen throughput drop before
+			if state.overallThroughput < previousState.overallThroughput {
+				// first drop in throughput
+				atomic.StoreUint32(&rm.throughputDropCount, 1)
+				// remember throughput before drop
+				atomic.StoreInt64(&rm.throughputBeforeDrop, previousState.overallThroughput)
+			}
+		} else {
+			// already seen throughput drop before
+			if state.overallThroughput < atomic.LoadInt64(&rm.throughputBeforeDrop) {
+				newCount := atomic.AddUint32(&rm.throughputDropCount, 1)
+				if newCount > uint32(base.MaxCountThroughputDrop) {
+					// stop extra quota period if throughput stayed below previous max for a number of terms
+					stopExtraQuota = true
+				}
+			} else {
+				// throughput got back to previous max. reset counter and stay in extra quota period
+				atomic.StoreUint32(&rm.throughputDropCount, 0)
+			}
+		}
+
+		if stopExtraQuota {
+			// stop extra quota period
+			atomic.StoreUint32(&rm.throughputDropCount, 0)
+			atomic.StoreUint32(&rm.cpuNotMaxedCount, 0)
+			rm.inExtraQuotaPeriod.SetFalse()
+			state.throttlerCalibrationAction = ThrottlerCalibrationActionEnable
+
+			// do not apply extra quota
+
+		} else {
+			// stay in extra quota period
+			rm.applyExtraQuota(state)
 		}
 	}
 
+	state.highTokens, state.throughputLimit, state.maxReassignableTokens = rm.computeTokens(state.maxThroughput, state.throughputNeededByHighRepl)
 }
 
-func (rm *ResourceManager) computeActionsToTakeWithBacklog(previousState, state *State) {
-	atomic.StoreInt32(&rm.noBacklogCount, 0)
-	backlogCount := atomic.AddInt32(&rm.backlogCount, 1)
-
-	if !state.lowPriorityReplExist {
-		rm.computeActionsToTakeWithOneGroup(state)
-		return
+func (rm *ResourceManager) applyExtraQuota(state *State) {
+	// set maxThroughput as max of current throughput and historical mean throughput
+	meanHistoricalThroughput := int64(rm.overallThroughputSamples.Mean())
+	if state.maxThroughput < meanHistoricalThroughput {
+		state.maxThroughput = meanHistoricalThroughput
 	}
 
-	if backlogCount >= int32(base.MaxCountBacklogForSetDcpPriority) {
-		state.dcpPriorityAction = DcpPriorityActionSet
+	// give extra quota to max throughput to allow cpu utilization to go up
+	state.maxThroughput += state.maxThroughput * int64(base.ExtraQuotaForUnderutilizedCPU) / int64(base.ResourceManagementRatioBase)
+}
+
+func (rm *ResourceManager) computeTokens(maxThroughput, throughputNeededByHighRepl int64) (highTokens, throughputLimit, maxReassignableTokens int64) {
+	// this is the max throughput high priority replications are allowed, after reserving minimum quota for low priority replications
+	maxThroughputAllowedForHighRepl := maxThroughput * int64(base.ResourceManagementRatioUpperBound) / int64(base.ResourceManagementRatioBase)
+
+	// high tokens = min(throughputNeeded, throughputAllowed)
+	highTokens = throughputNeededByHighRepl
+	if highTokens > maxThroughputAllowedForHighRepl {
+		highTokens = maxThroughputAllowedForHighRepl
 	}
 
-	currentRatio := state.currentRatio
-
-	if previousState == nil {
-		// this can happen only when goxdcr process is first started
-		// increase throttling
-		state.targetRatio = incrementRatio(currentRatio, -1 /*previousTargetRatio*/, base.ResourceManagementRatioFirstIncrement)
-		computeThroughputLimit(state)
-		state.throttleAction = ThrottleActionIncrease
-		return
+	// max tokens that can be reassigned to low priority replications
+	// = min(highTokens - actuallyUsedTokens, maxReassignableTokens)
+	// = min(highTokens - actuallyUsedTokens, highTokens - meanHighThroughput)
+	// = highTokens - max(actuallyUsedTokens, meanHighThroughput).
+	maxReassignableTokens = highTokens - int64(rm.highThroughputSamples.Mean())
+	if maxReassignableTokens < 0 {
+		maxReassignableTokens = 0
 	}
 
-	// tracks if this is the first time we need to throttle
-	//  1. when this is the first time we see backlog
-	// or 2. when there was backlog before, and there is the first time low priority replications are present
-	firstThrottle := (backlogCount == 1) || !previousState.lowPriorityReplExist
-
-	switch previousState.throttleAction {
-	case ThrottleActionNone:
-		deltaRatio := base.ResourceManagementRatioIncrement
-		if firstThrottle {
-			deltaRatio = base.ResourceManagementRatioFirstIncrement
-		}
-		state.targetRatio = incrementRatio(currentRatio, previousState.targetRatio, deltaRatio)
-		state.throttleAction = ThrottleActionIncrease
-	case ThrottleActionIncrease:
-		// if last action was increase, no need to check for firstThrottle since it cannot be true
-
-		if throughputImproved(previousState, state) || rm.cpuMaxedout(previousState, state) {
-			// keep increasing throttling if
-			// 1.  throughput of high priority replications improved
-			// or 2. cpu is currently maxed out
-			atomic.StoreInt32(&rm.ineffectiveIncreaseThrottlingCount, 0)
-			state.targetRatio = incrementRatio(currentRatio, previousState.targetRatio, base.ResourceManagementRatioIncrement)
-			state.throttleAction = ThrottleActionIncrease
-		} else if !throughputStatsChanged(state) {
-			// stats has not changed. we do not know whether throttling has been effective
-			// keep increasing throttling for now to be conservative.
-			// keep ineffectiveIncreaseThrottlingCount as is
-			state.targetRatio = incrementRatio(currentRatio, previousState.targetRatio, base.ResourceManagementRatioIncrement)
-			state.throttleAction = ThrottleActionIncrease
-		} else {
-			// previous increase throttling action is not effective
-			ineffectiveIncreaseThrottlingCount := atomic.AddInt32(&rm.ineffectiveIncreaseThrottlingCount, 1)
-			if ineffectiveIncreaseThrottlingCount > int32(base.MaxCountIneffectiveThrottlingIncrease) {
-				// start wait period. keep throughput limit as is
-				atomic.StoreInt32(&rm.ineffectiveIncreaseThrottlingCount, 0)
-				atomic.StoreInt32(&rm.waitCount, 1)
-				state.targetRatio = previousState.targetRatio
-				state.throughputLimit = previousState.throughputLimit
-				state.throttleAction = ThrottleActionWait
-				return
-			} else {
-				// keep increasing throttling
-				state.targetRatio = incrementRatio(currentRatio, previousState.targetRatio, base.ResourceManagementRatioIncrement)
-				state.throttleAction = ThrottleActionIncrease
-			}
-		}
-	case ThrottleActionWait:
-		// if last action was Wait, no need to check for fistThrottle since it cannot be true
-
-		if throughputImproved(previousState, state) || rm.cpuMaxedout(previousState, state) {
-			// stop waiting and start increasing throttling
-			atomic.StoreInt32(&rm.waitCount, 0)
-			state.targetRatio = incrementRatio(currentRatio, previousState.targetRatio, base.ResourceManagementRatioIncrement)
-			state.throttleAction = ThrottleActionIncrease
-		} else {
-			// throughput stats has not changed or throughput still has not improved
-
-			var waitCount int32
-			if throughputStatsChanged(state) {
-				// increment waitCount only if stats has changed
-				waitCount = atomic.AddInt32(&rm.waitCount, 1)
-			} else {
-				waitCount = atomic.LoadInt32(&rm.waitCount)
-			}
-
-			if waitCount > int32(base.MaxCountWaitPeriod) {
-				// max count for wait period reached. start decreasing throttling
-				// note that this cannot happen when throughput stats did not change
-				atomic.StoreInt32(&rm.waitCount, 0)
-				atomic.StoreInt32(&rm.decreaseThrottlingCount, 1)
-				state.targetRatio = decrementRatio(currentRatio, previousState.targetRatio, base.ResourceManagementRatioDecrement)
-				state.throttleAction = ThrottleActionDecrease
-			} else {
-				// continue to wait. leave throughput limit as is
-				state.targetRatio = previousState.targetRatio
-				state.throughputLimit = previousState.throughputLimit
-				state.throttleAction = ThrottleActionWait
-				return
-			}
-
-		}
-	case ThrottleActionDecrease:
-		// last action could be decrease in two scenarios:
-		// 1. there was no backlog before
-		// 2. there was backlog, and throttling had not been effective, and we were trying decreasing throttling
-		// These two scenarios can be differentiated by firstThrottle flag
-
-		if firstThrottle {
-			// in scenario 1, increase throttling [by a lot]
-			state.targetRatio = incrementRatio(currentRatio, previousState.targetRatio, base.ResourceManagementRatioFirstIncrement)
-			state.throttleAction = ThrottleActionIncrease
-		} else {
-			// in scenario 2, check whether decreasing throttling had had negative impact
-			if throughputDegraded(previousState, state) || rm.cpuMaxedout(previousState, state) {
-				// stop decreasing throttling and start increasing throttling
-				atomic.StoreInt32(&rm.decreaseThrottlingCount, 0)
-				state.targetRatio = incrementRatio(currentRatio, previousState.targetRatio, base.ResourceManagementRatioIncrement)
-				state.throttleAction = ThrottleActionIncrease
-			} else {
-				if !throughputStatsChanged(state) {
-					// stats has not changed. we do not know whether decreasing throttling had negative impact
-					// keep previous throughput limit as is
-					// keep decreaseThrottlingCount as is
-					state.targetRatio = previousState.targetRatio
-					state.throughputLimit = previousState.throughputLimit
-					state.throttleAction = ThrottleActionDecrease
-					return
-				} else {
-					// continue decreasing throttling
-					decreaseThrottlingCount := atomic.AddInt32(&rm.decreaseThrottlingCount, 1)
-					if decreaseThrottlingCount > int32(base.MaxCountThrottlingDecrease) {
-						// reached threshold for decreasing throttling
-						// go back to increasing throttling again
-						atomic.StoreInt32(&rm.decreaseThrottlingCount, 0)
-						state.targetRatio = incrementRatio(currentRatio, previousState.targetRatio, base.ResourceManagementRatioIncrement)
-						state.throttleAction = ThrottleActionIncrease
-					} else {
-						// continue descreasing throttling
-						state.targetRatio = decrementRatio(currentRatio, previousState.targetRatio, base.ResourceManagementRatioDecrement)
-						state.throttleAction = ThrottleActionDecrease
-					}
-				}
-			}
-		}
-	}
-
-	computeThroughputLimit(state)
+	// assign remaining tokens, which serves as a throughput limit, to low priority replications
+	throughputLimit = maxThroughput - highTokens
 
 	return
 }
 
-func (rm *ResourceManager) computeActionsToTakeWithOneGroup(state *State) {
-	// when there is at most one group of replications
-	// 1. there should be no throttling actions. throughput limit will be set to 0
-	// 2. there should be no dcp priority setting. set dcp priority back to medium
-
-	// use "-1" to indicate that targetRatio is not applicable
-	state.targetRatio = -1
-	state.throughputLimit = 0
-	state.throttleAction = ThrottleActionNone
-	state.dcpPriorityAction = DcpPriorityActionReset
-}
-
-func incrementRatio(currentRatio, previousTargetRatio, delta int) int {
-	return computeNewRatio(currentRatio, previousTargetRatio, delta, true /*incrementing*/, base.ResourceManagementRatioLowerBound, base.ResourceManagementRatioUpperBound)
-}
-
-func decrementRatio(currentRatio, previousTargetRatio, delta int) int {
-	return computeNewRatio(currentRatio, previousTargetRatio, delta, false /*incrementing*/, base.ResourceManagementRatioLowerBound, base.ResourceManagementRatioUpperBound)
-}
-
-// change ratio to min(currentRatio, previousTargetRatio) +/- delta
-// make sure that the resulting ratio stays within [lowerBound, upperBound]
-func computeNewRatio(currentRatio, previousTargetRatio, delta int, incrementing bool, lowerBound int, upperBound int) int {
-	newRatio := currentRatio
-
-	// set base ratio as the larger of currentRatio and previousTargetRatio to be conservative
-	if previousTargetRatio > 0 && newRatio < previousTargetRatio {
-		newRatio = previousTargetRatio
-	}
-
-	if incrementing {
-		newRatio += delta
+func (rm *ResourceManager) computeDcpActions(state *State) {
+	if !state.backlogReplExist {
+		rm.computeDcpActionsWithoutBacklog(state)
 	} else {
-		newRatio -= delta
+		rm.computeDcpActionsWithBacklog(state)
 	}
-	if newRatio > upperBound {
-		newRatio = upperBound
+}
+
+func (rm *ResourceManager) computeDcpActionsWithoutBacklog(state *State) {
+	noBacklogCount := atomic.AddUint32(&rm.noBacklogCount, 1)
+	atomic.StoreUint32(&rm.backlogCount, 0)
+
+	if !state.highPriorityReplExist || !state.lowPriorityReplExist {
+		state.dcpPriorityAction = DcpPriorityActionReset
+		return
 	}
-	// lowerBound <= 0 indicates that lowerBound does not exist
-	// Note that newRatio could be < 0 if lowerBound does not exist
-	// When throughputs of high priority replications are really low,
-	// it is necessary for newRatio to be negative for throughput limit to be effectively increased
-	if lowerBound > 0 && newRatio < lowerBound {
-		newRatio = lowerBound
+
+	if noBacklogCount >= uint32(base.MaxCountNoBacklogForResetDcpPriority) {
+		state.dcpPriorityAction = DcpPriorityActionReset
+		return
+	}
+}
+
+func (rm *ResourceManager) computeDcpActionsWithBacklog(state *State) {
+	backlogCount := atomic.AddUint32(&rm.backlogCount, 1)
+	atomic.StoreUint32(&rm.noBacklogCount, 0)
+
+	if !state.lowPriorityReplExist {
+		state.dcpPriorityAction = DcpPriorityActionReset
+		return
 	}
 
-	return newRatio
-}
+	if backlogCount >= uint32(base.MaxCountBacklogForSetDcpPriority) {
+		state.dcpPriorityAction = DcpPriorityActionSet
+		return
+	}
 
-// returns whether throughput stats has changed since last interval
-func throughputStatsChanged(state *State) bool {
-	return state.highThroughputStatsChanged || state.backlogThroughputStatsChanged
-}
-
-func throughputImproved(previousState *State, state *State) bool {
-	return state.highThroughput > previousState.highThroughput ||
-		state.backlogThroughput > previousState.backlogThroughput
-}
-
-func throughputDegraded(previousState *State, state *State) bool {
-	return state.highThroughput < previousState.highThroughput ||
-		state.backlogThroughput < previousState.backlogThroughput
-}
-
-func computeThroughputLimit(state *State) {
-	state.throughputLimit = state.overallThroughput - state.overallThroughput*int64(state.targetRatio)/int64(base.ResourceManagementRatioBase)
+	return
 }
 
 func (rm *ResourceManager) takeActions(specs map[string]*metadata.ReplicationSpecification,
 	previousState *State, state *State) {
-	rm.setThroughputLimit(previousState, state)
+	rm.setThrottlerActions(previousState, state)
 
 	switch state.dcpPriorityAction {
 	case DcpPriorityActionSet:
@@ -864,26 +854,61 @@ func (rm *ResourceManager) takeActions(specs map[string]*metadata.ReplicationSpe
 	}
 }
 
-func (rm *ResourceManager) setThroughputLimit(previousState *State, state *State) {
-	// -1 indicates that there is no previous limit
+func (rm *ResourceManager) setThrottlerActions(previousState, state *State) {
+	// -1 indicates that there are no previous tokens
+	var previousHighTokens int64 = -1
+	var previousMaxReassignableTokens int64 = -1
 	var previousThroughputLimit int64 = -1
 	if previousState != nil {
+		previousHighTokens = previousState.highTokens
+		previousMaxReassignableTokens = previousState.maxReassignableTokens
 		previousThroughputLimit = previousState.throughputLimit
 	}
 
-	if state.throughputLimit == previousThroughputLimit {
-		// skip setting throughput limit if it is the same as the previous limit
-		// we will never get here when previous limit is -1
-		return
+	settings := rm.constructSettings(state, previousHighTokens, previousMaxReassignableTokens, previousThroughputLimit)
+	errMap := rm.throughputThrottlerSvc.UpdateSettings(settings)
+	if len(errMap) > 0 {
+		if err, ok := errMap[service_def.HighTokensKey]; ok {
+			rm.logger.Warnf("Error setting tokens for high priority replications to %v. err=%v", state.highTokens, err)
+			state.highTokens = previousHighTokens
+		}
+		if err, ok := errMap[service_def.MaxReassignableHighTokensKey]; ok {
+			rm.logger.Warnf("Error setting max reassignable tokens for high priority replications to %v. err=%v", state.maxReassignableTokens, err)
+			state.maxReassignableTokens = previousMaxReassignableTokens
+		}
+		if err, ok := errMap[service_def.LowTokensKey]; ok {
+			rm.logger.Warnf("Error setting tokens for low priority replications to %v. err=%v", state.throughputLimit, err)
+			state.throughputLimit = previousThroughputLimit
+		}
+	}
+}
+
+// construct settings map for throttler service
+func (rm *ResourceManager) constructSettings(state *State, previousHighTokens, previousMaxReassignableTokens, previousThroughputLimit int64) map[string]interface{} {
+	settings := make(map[string]interface{})
+
+	if state.highTokens != previousHighTokens {
+		settings[service_def.HighTokensKey] = state.highTokens
 	}
 
-	err := rm.throughputThrottlerSvc.SetThroughputLimit(state.throughputLimit)
-	if err != nil {
-		rm.logger.Warnf("Error setting throughput limit to %v. err=%v", state.throughputLimit, err)
-		// keep the previous limit
-		// previous limit could be -1, which would still work
-		state.throughputLimit = previousThroughputLimit
+	if state.maxReassignableTokens != previousMaxReassignableTokens {
+		settings[service_def.MaxReassignableHighTokensKey] = state.maxReassignableTokens
 	}
+
+	if state.throughputLimit != previousThroughputLimit {
+		settings[service_def.LowTokensKey] = state.throughputLimit
+	}
+
+	switch state.throttlerCalibrationAction {
+	case ThrottlerCalibrationActionEnable:
+		settings[service_def.NeedToCalibrateKey] = true
+	case ThrottlerCalibrationActionDisable:
+		settings[service_def.NeedToCalibrateKey] = false
+	default:
+		// no op
+	}
+
+	return settings
 }
 
 func (rm *ResourceManager) setDcpPriorities(specs map[string]*metadata.ReplicationSpecification, state *State) {
@@ -898,7 +923,7 @@ func (rm *ResourceManager) setDcpPriorities(specs map[string]*metadata.Replicati
 			rm.logger.Warnf("Skipping setting dcp priority for %v because of error retrieving replication spec", replId)
 			continue
 		}
-		if rm.IsReplHighPriority(spec.Id, spec.Settings.GetPriority()) {
+		if rm.isReplHighPriority(spec.Id, spec.Settings.GetPriority(), false /*lock*/) {
 			targetPriority = mcc.PriorityHigh
 		} else {
 			targetPriority = mcc.PriorityLow
@@ -947,9 +972,12 @@ func (rm *ResourceManager) resetDcpPriorities(state *State) {
 	}
 }
 
-func (rm *ResourceManager) isReplOngoing(replId string) bool {
-	rm.mapLock.RLock()
-	defer rm.mapLock.RUnlock()
+func (rm *ResourceManager) isReplOngoing(replId string, lock bool) bool {
+	if lock {
+		rm.mapLock.RLock()
+		defer rm.mapLock.RUnlock()
+	}
+
 	if ongoing, ok := rm.ongoingReplMap[replId]; ok && ongoing {
 		return true
 	} else {
@@ -958,15 +986,15 @@ func (rm *ResourceManager) isReplOngoing(replId string) bool {
 }
 
 func (rm *ResourceManager) setReplOngoing(spec *metadata.ReplicationSpecification) error {
-	if rm.isReplOngoing(spec.Id) {
+	if rm.isReplOngoing(spec.Id, true) {
 		// replication is already ongoing. no op
 		return nil
 	}
 
 	if spec.Settings.GetPriority() == base.PriorityTypeMedium {
-		// change "needToThrottle" flag on Medium replication
+		// change "isHighReplication" flag on Medium replication
 		settings := make(map[string]interface{})
-		settings[parts.NeedToThrottleKey] = false
+		settings[parts.IsHighReplicationKey] = true
 
 		err := rm.applySettingsToPipeline(spec.Id, settings)
 		if err != nil {

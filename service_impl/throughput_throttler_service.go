@@ -13,6 +13,8 @@ import (
 	"fmt"
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
+	"github.com/couchbase/goxdcr/service_def"
+	"math"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -22,24 +24,41 @@ import (
 type ThroughputThrottler struct {
 	id string
 
-	// throughput limit as number of mutations per second
+	// throughput limit for low priority replications, as number of mutations per second
 	throughput_limit int64
-	// remaining quota for throughput as number of mutations
+	// remaining quota for low priority replications, as number of mutations
 	throughput_quota int64
+	// tokens for high priority replications, as number of mutations per second
+	high_tokens int64
+	// high tokens that are not used up by high priority replications, as number of mutations.
+	// it can be negative, in which case it needs to be brought back to the positive territory
+	// by future unused tokens before any tokens can be reassigned to low priority replications
+	unused_high_tokens int64
+	// unused high tokens that have been reassigned to low priority replications, as number of mutations.
+	reassigned_high_tokens int64
+	// max number of high tokens that can be reassigned to low priority replications in a time slot
+	max_reassignable_tokens_per_slot int64
+	// whether calibation(stop reassigning tokens to low priority replications) is needed
+	needToCalibrate *base.AtomicBooleanType
+	// number of times update() method is called. needed for calibration
+	updateCount uint64
 
 	cond_var *sync.Cond
 
 	finish_ch chan bool
 	wait_grp  sync.WaitGroup
 
+	once sync.Once
+
 	logger *log.CommonLogger
 }
 
 func NewThroughputThrottlerSvc(logger_ctx *log.LoggerContext) *ThroughputThrottler {
 	return &ThroughputThrottler{
-		finish_ch: make(chan bool),
-		cond_var:  sync.NewCond(&sync.Mutex{}),
-		logger:    log.NewLogger("TpThrottler", logger_ctx)}
+		finish_ch:       make(chan bool),
+		cond_var:        sync.NewCond(&sync.Mutex{}),
+		needToCalibrate: &base.AtomicBooleanType{},
+		logger:          log.NewLogger("TpThrottler", logger_ctx)}
 }
 
 func (throttler *ThroughputThrottler) Start() error {
@@ -47,6 +66,9 @@ func (throttler *ThroughputThrottler) Start() error {
 
 	throttler.wait_grp.Add(1)
 	go throttler.update()
+
+	throttler.wait_grp.Add(1)
+	go throttler.clearReassignedTokens()
 
 	throttler.wait_grp.Add(1)
 	go throttler.logStats()
@@ -91,6 +113,8 @@ func (throttler *ThroughputThrottler) update() error {
 
 func (throttler *ThroughputThrottler) updateOnce() {
 	var new_throughput_quota int64
+
+	// update throughput_quota
 	for {
 		throughput_limit := atomic.LoadInt64(&throttler.throughput_limit)
 		if throughput_limit == 0 {
@@ -110,13 +134,72 @@ func (throttler *ThroughputThrottler) updateOnce() {
 		}
 	}
 
+	// process unused_high_tokens
+	high_tokens := atomic.LoadInt64(&throttler.high_tokens)
+	new_high_tokens := high_tokens / int64(base.NumberOfSlotsForThroughputThrottling)
+
+	// reassign tokes to low priority replications when
+	// 1. calibration is not enabled
+	// or 2. calibration is enabled, and current time slot is not picked for calibration
+	if !throttler.needToCalibrate.Get() || int(math.Mod(float64(throttler.updateCount), float64(base.IntervalForThrottlerCalibration))) != 0 {
+		max_reassignable_tokens_per_slot := atomic.LoadInt64(&throttler.max_reassignable_tokens_per_slot)
+
+		// reassignable_high_tokens is the smaller of unused token and max_reassignable_tokens_per_slot
+		reassignable_high_tokens := atomic.LoadInt64(&throttler.unused_high_tokens)
+		if reassignable_high_tokens > max_reassignable_tokens_per_slot {
+			reassignable_high_tokens = max_reassignable_tokens_per_slot
+		}
+
+		// reassign high tokens, which could be negative, to low priority replications
+		atomic.AddInt64(&throttler.reassigned_high_tokens, reassignable_high_tokens)
+	}
+
+	// assign more high tokens for the next time slot
+	// note that CompareAndSwap is not used here because
+	// 1. it is not easy to handle failure to CompareAndSwap since the operation on reassigned_high_tokens above is not idempotent
+	// 2. unused_high_tokens being a little off due to race condition is not a critial problem
+	atomic.StoreInt64(&throttler.unused_high_tokens, new_high_tokens)
+
+	throttler.updateCount++
+
 	throttler.broadcast()
+}
+
+// clear reassigned high tokens periodically to get a clean slate
+func (throttler *ThroughputThrottler) clearReassignedTokens() error {
+	throttler.logger.Infof("%v clearReassignedTokens starting...", throttler.id)
+	defer throttler.logger.Infof("%v clearReassignedTokens stopped...", throttler.id)
+
+	defer throttler.wait_grp.Done()
+
+	finish_ch := throttler.finish_ch
+
+	ticker := time.NewTicker(base.ThroughputThrottlerClearTokensInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-finish_ch:
+			return nil
+		case <-ticker.C:
+			atomic.StoreInt64(&throttler.reassigned_high_tokens, 0)
+		}
+	}
+
+	return nil
 }
 
 // output:
 // true - if the mutation can be sent
 // false - if the mutation cannot be sent
-func (throttler *ThroughputThrottler) CanSend() bool {
+func (throttler *ThroughputThrottler) CanSend(isHighPriorityReplication bool) bool {
+	if isHighPriorityReplication {
+		// for high priority replications, only bookkeeping is needed
+		atomic.AddInt64(&throttler.unused_high_tokens, -1)
+		return true
+	}
+
+	// for low priority replications, we need to check whether quota/token is available
 	for {
 		throughput_limit := atomic.LoadInt64(&throttler.throughput_limit)
 		if throughput_limit == 0 {
@@ -124,17 +207,30 @@ func (throttler *ThroughputThrottler) CanSend() bool {
 			return true
 		}
 
+		// first try to get allowance from throughput quota
 		throughput_quota := atomic.LoadInt64(&throttler.throughput_quota)
-		if throughput_quota <= 0 {
-			return false
+		if throughput_quota > 0 {
+			if atomic.CompareAndSwapInt64(&throttler.throughput_quota, throughput_quota, throughput_quota-1) {
+				return true
+			} else {
+				// throttler.throughput_quota has been updated by some one else. retry the entire op
+				continue
+			}
 		}
 
-		if atomic.CompareAndSwapInt64(&throttler.throughput_quota, throughput_quota, throughput_quota-1) {
-			return true
-		} else {
-			// throttler.throughput_quota has been updated by some one else. retry the entire op
-			continue
+		// if there is no quota left, check if we can get allowance from reassigned high tokens
+		reassigned_high_tokens := atomic.LoadInt64(&throttler.reassigned_high_tokens)
+		if reassigned_high_tokens > 0 {
+			if atomic.CompareAndSwapInt64(&throttler.reassigned_high_tokens, reassigned_high_tokens, reassigned_high_tokens-1) {
+				return true
+			} else {
+				// throttler.reassigned_high_tokens has been updated by some one else. retry the entire op
+				continue
+			}
 		}
+
+		// no quota/token available. cannot send
+		return false
 	}
 }
 
@@ -156,26 +252,86 @@ func (throttler *ThroughputThrottler) Id() string {
 	return throttler.id
 }
 
-func (throttler *ThroughputThrottler) SetThroughputLimit(limit int64) error {
-	if limit < 0 {
-		err := fmt.Errorf("Throughput limit cannot be negative. Limit=%v\n", limit)
-		throttler.logger.Warnf("%v %v", throttler.id, err.Error())
-		return err
+func (throttler *ThroughputThrottler) UpdateSettings(settings map[string]interface{}) map[string]error {
+	errMap := make(map[string]error)
+	highTokens, ok := settings[service_def.HighTokensKey]
+	if ok {
+		err := throttler.setHighTokens(highTokens.(int64))
+		if err != nil {
+			errMap[service_def.HighTokensKey] = err
+		}
 	}
 
-	atomic.StoreInt64(&throttler.throughput_limit, limit)
-	throttler.logger.Infof("%v updated throughput limit to %v\n", throttler.id, limit)
+	maxReassignableHighTokens, ok := settings[service_def.MaxReassignableHighTokensKey]
+	if ok {
+		err := throttler.setMaxReassignableHighTokens(maxReassignableHighTokens.(int64))
+		if err != nil {
+			errMap[service_def.MaxReassignableHighTokensKey] = err
+		}
+	}
+
+	lowTokens, ok := settings[service_def.LowTokensKey]
+	if ok {
+		err := throttler.setLowTokens(lowTokens.(int64))
+		if err != nil {
+			errMap[service_def.LowTokensKey] = err
+		}
+	}
+
+	needToCalibrate, ok := settings[service_def.NeedToCalibrateKey]
+	if ok {
+		throttler.needToCalibrate.Set(needToCalibrate.(bool))
+	}
+
+	return errMap
+}
+
+func (throttler *ThroughputThrottler) setHighTokens(tokens int64) error {
+	if tokens < 0 {
+		return fmt.Errorf("High tokens cannot be negative. tokens=%v\n", tokens)
+	}
+
+	atomic.StoreInt64(&throttler.high_tokens, tokens)
+
+	throttler.once.Do(func() {
+		// initialize unused_high_tokens the first time tokens is set
+		atomic.StoreInt64(&throttler.unused_high_tokens, tokens/int64(base.NumberOfSlotsForThroughputThrottling))
+	})
+
+	return nil
+}
+
+func (throttler *ThroughputThrottler) setMaxReassignableHighTokens(tokens int64) error {
+	if tokens < 0 {
+		return fmt.Errorf("Max reassignable tokens cannot be negative. tokens=%v\n", tokens)
+	}
+
+	atomic.StoreInt64(&throttler.max_reassignable_tokens_per_slot, tokens/int64(base.NumberOfSlotsForThroughputThrottling))
+
+	return nil
+}
+
+func (throttler *ThroughputThrottler) setLowTokens(tokens int64) error {
+	if tokens < 0 {
+		return fmt.Errorf("Throughput limit cannot be negative. limit=%v\n", tokens)
+	}
+
+	atomic.StoreInt64(&throttler.throughput_limit, tokens)
+
+	if tokens == 0 {
+		return nil
+	}
 
 	// reset quota accordingly
-	newQuota := limit / int64(base.NumberOfSlotsForThroughputThrottling)
+	newQuota := tokens / int64(base.NumberOfSlotsForThroughputThrottling)
 	for {
 		oldQuota := atomic.LoadInt64(&throttler.throughput_quota)
 		if oldQuota <= newQuota {
 			// ok to leave old quota if it is lower than new quota
 			break
 		} else {
-			// this is possible when oldLimit > limit
-			// set new quota to honor the newer, smaller, limit
+			// this is possible when old tokens > tokens
+			// set new quota to honor the newer, smaller, tokens
 			if atomic.CompareAndSwapInt64(&throttler.throughput_quota, oldQuota, newQuota) {
 				break
 			}
@@ -210,9 +366,14 @@ func (throttler *ThroughputThrottler) logStatsOnce() {
 		return
 	}
 	throughput_quota := atomic.LoadInt64(&throttler.throughput_quota)
+	high_tokens := atomic.LoadInt64(&throttler.high_tokens)
+	unused_high_tokens := atomic.LoadInt64(&throttler.unused_high_tokens)
+	reassigned_high_tokens := atomic.LoadInt64(&throttler.reassigned_high_tokens)
+	max_reassignable_tokens_per_slot := atomic.LoadInt64(&throttler.max_reassignable_tokens_per_slot)
+	needToCalibrate := throttler.needToCalibrate.Get()
 	if throughput_quota < 0 {
-		throttler.logger.Errorf("%v went over the limit. throughput_limit=%v, throughput_quota=%v", throttler.id, throughput_limit, throughput_quota)
+		throttler.logger.Errorf("%v went over the limit. throughput_limit=%v, throughput_quota=%v, high_tokens=%v, unused_tokens=%v, reassignable_tokens=%v, reassigned_tokens=%v, needToCalibrate=%v\n", throttler.id, throughput_limit, throughput_quota, high_tokens, unused_high_tokens, reassigned_high_tokens, max_reassignable_tokens_per_slot, needToCalibrate)
 	} else {
-		throttler.logger.Infof("%v throughput_limit=%v, throughput_quota=%v", throttler.id, throughput_limit, throughput_quota)
+		throttler.logger.Infof("%v throughput_limit=%v, throughput_quota=%v, high_tokens=%v, unused_tokens=%v, reassignable_tokens=%v, reassigned_tokens=%v, needToCalibrate=%v\n", throttler.id, throughput_limit, throughput_quota, high_tokens, unused_high_tokens, reassigned_high_tokens, max_reassignable_tokens_per_slot, needToCalibrate)
 	}
 }

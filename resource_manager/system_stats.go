@@ -54,13 +54,25 @@ func (h *SystemStats) Close() {
 //
 // Get CPU percentage
 //
-func (h *SystemStats) ProcessCpuPercent() (C.sigar_pid_t, float64, error) {
+func (h *SystemStats) ProcessCpuPercent() (C.sigar_pid_t, int64, error) {
 
 	// Sigar returns a ratio of (system_time + user_time) / elapsed time
 	var cpu C.sigar_proc_cpu_t
 	if err := C.sigar_proc_cpu_get(h.handle, h.pid, &cpu); err != C.SIGAR_OK {
-		return C.sigar_pid_t(0), float64(0), errors.New(fmt.Sprintf("Fail to get CPU.  Err=%v", C.sigar_strerror(h.handle, err)))
+		return C.sigar_pid_t(0), 0, errors.New(fmt.Sprintf("Fail to get process CPU.  Err=%v", C.sigar_strerror(h.handle, err)))
 	}
 
-	return h.pid, float64(cpu.percent) * 100, nil
+	return h.pid, int64(cpu.percent * 100), nil
+}
+
+// returns total cpu and idle cpu
+func (h *SystemStats) OverallCpu() (int64, int64, error) {
+
+	// Sigar returns a ratio of (system_time + user_time) / elapsed time
+	var cpu C.sigar_cpu_t
+	if err := C.sigar_cpu_get(h.handle, &cpu); err != C.SIGAR_OK {
+		return 0, 0, errors.New(fmt.Sprintf("Fail to get CPU.  Err=%v", C.sigar_strerror(h.handle, err)))
+	}
+
+	return int64(cpu.total), int64(cpu.idle), nil
 }

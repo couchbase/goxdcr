@@ -750,35 +750,9 @@ var ChangesLeftThresholdForOngoingReplication = 200000
 // so that we can do integer arithmetic
 var ResourceManagementRatioBase = 100
 
-// lower bound for ratio of throughput of high priority replications to throughput of all replications
-// the default value of -1 indicates that there is no lower bound
-var ResourceManagementRatioLowerBound = -1
-
 // upper bound for ratio of throughput of high priority replications to throughput of all replications
 // this is to ensure that low priority replications will not be completely starved
 var ResourceManagementRatioUpperBound = 90
-
-// the first increment when throttling is first turned on.
-// it is much larger than subsequent increments
-var ResourceManagementRatioFirstIncrement = 15
-
-// increment amount when ratio is being increased
-var ResourceManagementRatioIncrement = 5
-
-// decrement amount when ratio is being decreased
-var ResourceManagementRatioDecrement = 5
-
-// max count that increasing throttling has not been effective
-// we will start decreasing throttling when the max is reached
-var MaxCountIneffectiveThrottlingIncrease = 5
-
-// max count that throttling has been decreased
-// we will go back to increasing throttling when the max is reached
-var MaxCountThrottlingDecrease = 6
-
-// max count for wait period
-// we will start decreasing throttling when the max is reached
-var MaxCountWaitPeriod = 5
 
 // when the number of consecutive terms where there have been backlog reaches the threshold, set DCP priorities
 var MaxCountBacklogForSetDcpPriority = 5
@@ -786,14 +760,40 @@ var MaxCountBacklogForSetDcpPriority = 5
 // when the number of consecutive terms where there have been no backlog reaches the threshold, reset DCP priorities to normal
 var MaxCountNoBacklogForResetDcpPriority = 300
 
+// extra quota given to replications when cpu is not yet maximized
+var ExtraQuotaForUnderutilizedCPU = 10
+
 // interval for printing throughput throttler stats to log file
-var ThroughputThrottlerLogInterval = 10 * time.Second
+var ThroughputThrottlerLogInterval = 10000 * time.Millisecond
+
+// interval for clearing tokens in throughput throttler
+var ThroughputThrottlerClearTokensInterval = 3000 * time.Millisecond
 
 // number of time slots [per measurement interval] for throughput throttling
 var NumberOfSlotsForThroughputThrottling = 10
 
-// when actual acpu usage exceeds maxCpu * ThresholdRatioForMaxCpu/100, cpu is considered to have maxed out
-var ThresholdRatioForMaxCpu = 95
+// interval for throttler calibration, i.e., for stopping reassigning tokens to low priority replications, as number of time slots
+var IntervalForThrottlerCalibration = 4
+
+// number of throughput samples to keep
+var ThroughputSampleSize = 1028
+
+// alpha for exponential decay sampling. Actual alpha = ThroughputSampleAlpha / 1000
+var ThroughputSampleAlpha = 15
+
+// when actual process cpu usage exceeds maxProcessCpu * ThresholdRatioForProcessCpu/100, process cpu is considered to have maxed out
+var ThresholdRatioForProcessCpu = 95
+
+// when actual total cpu usage exceeds totalCpu * ThresholdRatioForTotalCpu/100, total cpu is considered to have maxed out
+var ThresholdRatioForTotalCpu = 95
+
+// max count of consecutive terms where cpu has not been maxed out
+// an extra quota period will be started when the max count is reached
+var MaxCountCpuNotMaxed = 3
+
+// max count of consecutive terms where throughput dropped from previous high
+// if we are in extra quota period, the period will be ended when the max count is reached
+var MaxCountThroughputDrop = 3
 
 func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeCountBeforeRestart,
 	maxTopologyStableCountBeforeRestart, maxWorkersForCheckpointing int,
@@ -828,13 +828,14 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	timeoutDcpCloseUprFeed time.Duration, cpuCollectionInterval time.Duration,
 	resourceManagementInterval time.Duration, resourceManagementStatsInterval time.Duration,
 	changesLeftThresholdForOngoingReplication int, resourceManagementRatioBase int,
-	resourceManagementRatioUpperBound int, resourceManagementRatioLowerBound int,
-	resourceManagementRatioFirstIncrement int, resourceManagementRatioIncrement int,
-	resourceManagementRatioDecrement int, maxCountIneffectiveThrottlingIncrease int,
-	maxCountThrottlingDecrease int, maxCountWaitPeriod int,
-	maxCountBacklogForSetDcpPriority int,
-	maxCountNoBacklogForResetDcpPriority int, throughputThrottlerLogInterval time.Duration,
-	numberOfSlotsForThroughputThrottling int, thresholdRatioForMaxCpu int) {
+	resourceManagementRatioUpperBound int, maxCountBacklogForSetDcpPriority int,
+	maxCountNoBacklogForResetDcpPriority int, extraQuotaForUnderutilizedCPU int,
+	throughputThrottlerLogInterval time.Duration,
+	throughputThrottlerClearTokensInterval time.Duration,
+	numberOfSlotsForThroughputThrottling int, intervalForThrottlerCalibration int,
+	throughputSampleSize int, throughputSampleAlpha int,
+	thresholdRatioForProcessCpu int, thresholdRatioForTotalCpu int,
+	maxCountCpuNotMaxed int, maxCountThroughputDrop int) {
 	TopologyChangeCheckInterval = topologyChangeCheckInterval
 	MaxTopologyChangeCountBeforeRestart = maxTopologyChangeCountBeforeRestart
 	MaxTopologyStableCountBeforeRestart = maxTopologyStableCountBeforeRestart
@@ -910,18 +911,19 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	ChangesLeftThresholdForOngoingReplication = changesLeftThresholdForOngoingReplication
 	ResourceManagementRatioBase = resourceManagementRatioBase
 	ResourceManagementRatioUpperBound = resourceManagementRatioUpperBound
-	ResourceManagementRatioLowerBound = resourceManagementRatioLowerBound
-	ResourceManagementRatioFirstIncrement = resourceManagementRatioFirstIncrement
-	ResourceManagementRatioIncrement = resourceManagementRatioIncrement
-	ResourceManagementRatioDecrement = resourceManagementRatioDecrement
-	MaxCountIneffectiveThrottlingIncrease = maxCountIneffectiveThrottlingIncrease
-	MaxCountThrottlingDecrease = maxCountThrottlingDecrease
-	MaxCountWaitPeriod = maxCountWaitPeriod
 	MaxCountBacklogForSetDcpPriority = maxCountBacklogForSetDcpPriority
 	MaxCountNoBacklogForResetDcpPriority = maxCountNoBacklogForResetDcpPriority
+	ExtraQuotaForUnderutilizedCPU = extraQuotaForUnderutilizedCPU
 	ThroughputThrottlerLogInterval = throughputThrottlerLogInterval
+	ThroughputThrottlerClearTokensInterval = throughputThrottlerClearTokensInterval
 	NumberOfSlotsForThroughputThrottling = numberOfSlotsForThroughputThrottling
-	ThresholdRatioForMaxCpu = thresholdRatioForMaxCpu
+	IntervalForThrottlerCalibration = intervalForThrottlerCalibration
+	ThroughputSampleSize = throughputSampleSize
+	ThroughputSampleAlpha = throughputSampleAlpha
+	ThresholdRatioForProcessCpu = thresholdRatioForProcessCpu
+	ThresholdRatioForTotalCpu = thresholdRatioForTotalCpu
+	MaxCountCpuNotMaxed = maxCountCpuNotMaxed
+	MaxCountThroughputDrop = maxCountThroughputDrop
 }
 
 // Need to escape the () to result in "META().xattrs" literal
