@@ -390,7 +390,8 @@ func (u *Utilities) FilterExpressionMatchesDoc(expression, docId, username, pass
 				return nil, err
 			}
 
-			bodySlice, err = base.AddXattrToBeFiltered(bodySlice, xattrSlice)
+			// This isn't called from UI enough to warrant datapool
+			bodySlice, err, _ = base.AddXattrToBeFiltered(bodySlice, xattrSlice, nil, nil)
 			if err != nil {
 				err = fmt.Errorf("Error adding doc %v xattributes to be filtered: %v", docId, err.Error())
 				return nil, err
@@ -398,7 +399,7 @@ func (u *Utilities) FilterExpressionMatchesDoc(expression, docId, username, pass
 		}
 
 		if base.FilterContainsKeyExpression(expression) {
-			bodySlice, err = base.AddKeyToBeFiltered(bodySlice, []byte(docId))
+			bodySlice, err, _ = base.AddKeyToBeFiltered(bodySlice, []byte(docId), nil, nil)
 			if err != nil {
 				err = fmt.Errorf("Error adding doc %v ID to be filtered: %v", docId, err.Error())
 			}
@@ -2759,6 +2760,7 @@ func processXattribute(body, key []byte, shouldSkipInsert bool, dp DataPoolIface
 	var pos uint32
 	var separator uint32
 	var dpFailedCnt int64
+	var failedCnt int64
 
 	//	first uint32 in the body contains the size of the entire XATTR section
 	totalXattrSize := binary.BigEndian.Uint32(body[pos : pos+4])
@@ -2780,7 +2782,7 @@ func processXattribute(body, key []byte, shouldSkipInsert bool, dp DataPoolIface
 		xattrSlice, err := dp.GetByteSlice(bodySize)
 		if err != nil {
 			xattrSlice = make([]byte, 0, bodySize)
-			dpFailedCnt = int64(bodySize)
+			dpFailedCnt += int64(bodySize)
 		} else {
 			slicesToBeReleased = append(slicesToBeReleased, xattrSlice)
 		}
@@ -2795,7 +2797,7 @@ func processXattribute(body, key []byte, shouldSkipInsert bool, dp DataPoolIface
 					return nil, fmt.Errorf("For document %v%v%v, Unable to correctly parse xattr to find a xattr key", base.UdTagBegin, string(key), base.UdTagEnd), dpFailedCnt
 				}
 			}
-			xattrSlice, xattrSlicePos = base.WriteJsonRawMsg(xattrSlice, body[pos:separator], xattrSlicePos, true, len(body[pos:separator]))
+			xattrSlice, xattrSlicePos = base.WriteJsonRawMsg(xattrSlice, body[pos:separator], xattrSlicePos, true, len(body[pos:separator]), false)
 			pos = pos + (separator - pos + 1)
 
 			// Search for end of value
@@ -2804,7 +2806,7 @@ func processXattribute(body, key []byte, shouldSkipInsert bool, dp DataPoolIface
 					return nil, fmt.Errorf("For document %v%v%v, Unable to correctly parse xattr to find value for xattr key %v%v%v", base.UdTagBegin, string(key), base.UdTagEnd, base.UdTagBegin, key, base.UdTagEnd), dpFailedCnt
 				}
 			}
-			xattrSlice, xattrSlicePos = base.WriteJsonRawMsg(xattrSlice, body[pos:separator], xattrSlicePos, false, len(body[pos:separator]))
+			xattrSlice, xattrSlicePos = base.WriteJsonRawMsg(xattrSlice, body[pos:separator], xattrSlicePos, false, len(body[pos:separator]), false)
 
 			// separator should be pointing at a 0 byte. Next uint32 is after this byte
 			pos = pos + (separator - pos + 1)
@@ -2817,7 +2819,7 @@ func processXattribute(body, key []byte, shouldSkipInsert bool, dp DataPoolIface
 		newBodySlice, err := dp.GetByteSlice(bodySize)
 		if err != nil {
 			newBodySlice = make([]byte, 0, bodySize)
-			dpFailedCnt = int64(bodySize)
+			dpFailedCnt += int64(bodySize)
 		} else {
 			slicesToBeReleased = append(slicesToBeReleased, newBodySlice)
 		}
@@ -2825,7 +2827,8 @@ func processXattribute(body, key []byte, shouldSkipInsert bool, dp DataPoolIface
 		body = newBodySlice
 
 		// Add Xattr to body
-		body, err = base.AddXattrToBeFiltered(body, xattrSlice)
+		body, err, failedCnt = base.AddXattrToBeFiltered(body, xattrSlice, dp.GetByteSlice, slicesToBeReleased)
+		dpFailedCnt += failedCnt
 		if err != nil {
 			return nil, fmt.Errorf("For document %v%v%v Unable to add xattr to body as the body may be malformed JSON", base.UdTagBegin, string(key), base.UdTagEnd), dpFailedCnt
 		}
@@ -2858,8 +2861,8 @@ func processKeyOnlyForFiltering(key []byte, dp DataPoolIface, slicesToBeReleased
 	newDocKeyBody[len(key)+1] = '"'
 
 	var bodyPos int
-	body, bodyPos = base.WriteJsonRawMsg(body, base.CachedInternalKeyKeyByteSlice, bodyPos, true /*key*/, base.CachedInternalKeyKeyByteSize)
-	body, bodyPos = base.WriteJsonRawMsg(body, newDocKeyBody, bodyPos, false /*uprEvent key as value*/, int(docKeySize))
+	body, bodyPos = base.WriteJsonRawMsg(body, base.CachedInternalKeyKeyByteSlice, bodyPos, true /*key*/, base.CachedInternalKeyKeyByteSize, false)
+	body, bodyPos = base.WriteJsonRawMsg(body, newDocKeyBody, bodyPos, false /*uprEvent key as value*/, int(docKeySize), false)
 	return body, 0
 }
 
@@ -2913,16 +2916,19 @@ func (u *Utilities) ProcessUprEventForFiltering(uprEvent *mcc.UprEvent, dp DataP
 	}
 
 	if !shouldSkipKey {
+		var failedCnt int64
 		if !needToProcessBody {
 			// Only thing passing to filter is the document key
-			var failedCnt int64
 			body, failedCnt = processKeyOnlyForFiltering(uprEvent.Key, dp, slicesToBeReleased)
 			if failedCnt > 0 {
 				totalFailedCnt += failedCnt
 			}
 		} else {
 			// Add Key to Body
-			body, err = base.AddKeyToBeFiltered(body, uprEvent.Key)
+			body, err, failedCnt = base.AddKeyToBeFiltered(body, uprEvent.Key, dp.GetByteSlice, slicesToBeReleased)
+			if failedCnt > 0 {
+				totalFailedCnt += failedCnt
+			}
 			if err != nil {
 				additionalErrDesc = fmt.Sprintf("For document %v%v%v Unable to add key to body as the body may be malformed JSON", base.UdTagBegin, string(uprEvent.Key), base.UdTagEnd)
 				return nil, base.ErrorFilterParsingError, additionalErrDesc, releaseFunc, totalFailedCnt

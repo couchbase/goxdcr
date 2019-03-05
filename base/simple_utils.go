@@ -961,8 +961,7 @@ func CleanInsert(dest, ins []byte, pos int) ([]byte, error) {
 
 var AddFilterKeyExtraBytes int = 6 + len(ReservedWordsMap[ExternalKeyKey])
 
-// For advanced filtering, need to populate key into the actual data to be filtered
-func AddKeyToBeFiltered(currentValue []byte, key []byte) ([]byte, error) {
+func addKeyToBeFilteredWithoutDP(currentValue, key []byte) ([]byte, error) {
 	if currentValue[0] != '{' {
 		return currentValue, ErrorInvalidInput
 	}
@@ -970,12 +969,66 @@ func AddKeyToBeFiltered(currentValue []byte, key []byte) ([]byte, error) {
 	return CleanInsert(currentValue, keyBytesToBeInserted, 1)
 }
 
+// For advanced filtering, need to populate key into the actual data to be filtered
+// If we can try not to move data and just use datapool and append to the end, it may be still faster
+// to have gojsonsm step through the JSON than to do memory move
+func AddKeyToBeFiltered(currentValue, key []byte, dpGetter DpGetterFunc, toBeReleased [][]byte) ([]byte, error, int64) {
+	if dpGetter != nil {
+		// { "bodyKey":bodyValue...
+		// 	,"KeyKey":"<Key>" 	<- sizeToGet
+		// }
+		sizeToGet := len(ReservedWordsMap[ExternalKeyKey]) + len(key) + 6 + len(currentValue)
+		dpSlice, err := AppendSingleKVToAllocatedBody(currentValue, CachedInternalKeyKeyByteSlice,
+			key, dpGetter, toBeReleased, uint64(sizeToGet), CachedInternalKeyKeyByteSize, len(key), true)
+		if err != nil {
+			retBytes, err := addKeyToBeFilteredWithoutDP(currentValue, key)
+			return retBytes, err, int64(len(retBytes))
+		}
+		return dpSlice, err, 0
+	} else {
+		retBytes, err := addKeyToBeFilteredWithoutDP(currentValue, key)
+		return retBytes, err, int64(len(retBytes))
+	}
+}
+
 var AddFilterXattrExtraBytes int = 4 + len(ReservedWordsMap[ExternalKeyXattr])
 
-func AddXattrToBeFiltered(currentValue []byte, xAttr []byte) ([]byte, error) {
-	if currentValue[0] != '{' {
+func AppendSingleKVToAllocatedBody(currentValue, key, value []byte, dpGetter DpGetterFunc, toBeReleased [][]byte, sizeToGet uint64, keySize, valueSize int, valueNeedsQuotes bool) ([]byte, error) {
+	var pos int
+	var endPos int
+	var dpSlice []byte
+	var err error
+	dpSlice, err = dpGetter(sizeToGet)
+	if err != nil {
+		return nil, err
+	}
+	if toBeReleased != nil {
+		toBeReleased = append(toBeReleased, dpSlice)
+	}
+	copy(dpSlice[0:], currentValue[:])
+	// Scan backwards until the last }
+	for pos = len(dpSlice) - 1; pos > 0 && dpSlice[pos] != '}'; pos-- {
+	}
+	if pos == 0 {
 		return currentValue, ErrorInvalidInput
 	}
+
+	dpSlice, pos = WriteJsonRawMsg(dpSlice, key, pos, true /*isKey*/, keySize, false)
+	dpSlice, pos = WriteJsonRawMsg(dpSlice, value, pos, false, valueSize, valueNeedsQuotes)
+
+	// Add one more '}
+	for endPos = len(dpSlice) - 1; endPos > 0 && dpSlice[endPos] != '}'; endPos-- {
+	}
+
+	if endPos == 0 || endPos == len(dpSlice)-1 {
+		return currentValue, ErrorInvalidInput
+	}
+	dpSlice[endPos+1] = '}'
+
+	return dpSlice, nil
+}
+
+func addXattrToBeFilteredWithoutDP(currentValue, xAttr []byte) ([]byte, error) {
 	// Always insert Xattr at the end, no need for comma at the end
 	xattrBytesToBeInserted := json.RawMessage(fmt.Sprintf(",\"%v\":%v", ReservedWordsMap[ExternalKeyXattr], string(xAttr)))
 	// Look for reverse pos, for the last }
@@ -986,6 +1039,34 @@ func AddXattrToBeFiltered(currentValue []byte, xAttr []byte) ([]byte, error) {
 		return currentValue, ErrorInvalidInput
 	}
 	return CleanInsert(currentValue, xattrBytesToBeInserted, i)
+}
+
+func AddXattrToBeFiltered(currentValue []byte, xAttr []byte, dpGetter DpGetterFunc, toBeReleased [][]byte) ([]byte, error, int64) {
+	if currentValue[0] != '{' {
+		return currentValue, ErrorInvalidInput, 0
+	}
+	var err error
+	var dpSlice []byte
+	if dpGetter != nil {
+		var valueSize int
+		// { "bodyKey":bodyValue...
+		// 	,"XattrKey":<xattr> 	<- sizeToGet
+		// }
+		sizeToGet := len(ReservedWordsMap[ExternalKeyXattr]) + len(xAttr) + 4 + len(currentValue)
+		// Because xattr is most likely a dp slice, we need to do this to ensure we don't write extra NUL bytes
+		for valueSize = len(xAttr) - 1; valueSize > 0 && xAttr[valueSize] != '}'; valueSize-- {
+		}
+		dpSlice, err = AppendSingleKVToAllocatedBody(currentValue, CachedInternalKeyXattrByteSlice, xAttr, dpGetter, toBeReleased, uint64(sizeToGet),
+			CachedInternalKeyXattrByteSize, valueSize, false)
+		if err != nil {
+			retBytes, err := addXattrToBeFilteredWithoutDP(currentValue, xAttr)
+			return retBytes, err, int64(len(retBytes))
+		}
+		return dpSlice, err, 0
+	} else {
+		retBytes, err := addXattrToBeFilteredWithoutDP(currentValue, xAttr)
+		return retBytes, err, int64(len(retBytes))
+	}
 }
 
 func RetrieveUprJsonAndConvert(fileName string) (*mcc.UprEvent, error) {
@@ -1090,10 +1171,11 @@ func FilterErrorIsRecoverable(err error) bool {
 // 	 isKey - whether or not specified input is a key or value
 //   size - In cases where bytesToWrite originated from dataPool, the length may not reflect the actual
 //			length of the data (i.e. string). Use this field to avoid calling len and avoid out of bounds error
+//   valueNeedsQuotes - If the []byte of bytesToWrite is a string value but the string doesn't contain ", surround it with them
 // Returns:
 // 	 original byte slice reference
 // 	 updated position
-func WriteJsonRawMsg(allocatedBytes, bytesToWrite []byte, pos int, isKey bool, size int) ([]byte, int) {
+func WriteJsonRawMsg(allocatedBytes, bytesToWrite []byte, pos int, isKey bool, size int, valueNeedsQuotes bool) ([]byte, int) {
 	if isKey {
 		if pos == 0 {
 			// Need to do an open bracket
@@ -1112,8 +1194,16 @@ func WriteJsonRawMsg(allocatedBytes, bytesToWrite []byte, pos int, isKey bool, s
 		allocatedBytes[pos] = ':'
 		pos++
 	} else {
+		if valueNeedsQuotes {
+			allocatedBytes[pos] = '"'
+			pos++
+		}
 		copy(allocatedBytes[pos:], bytesToWrite[:])
 		pos += size
+		if valueNeedsQuotes {
+			allocatedBytes[pos] = '"'
+			pos++
+		}
 		allocatedBytes[pos] = '}'
 		// Do not increment pos here because if there is a next key, it will replace this } with a ,
 	}

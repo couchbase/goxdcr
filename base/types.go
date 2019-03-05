@@ -419,3 +419,5 @@ func (priority PriorityType) String() string {
 	}
 	return "Unknown"
 }
+
+type DpGetterFunc func(uint64) ([]byte, error)

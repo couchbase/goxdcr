@@ -929,6 +929,8 @@ const InternalKeyKey = "[$%XDCRInternalKey*%$]"
 
 var CachedInternalKeyKeyByteSlice = []byte(InternalKeyKey)
 var CachedInternalKeyKeyByteSize = len(CachedInternalKeyKeyByteSlice)
+var CachedInternalKeyXattrByteSlice = []byte(InternalKeyXattr)
+var CachedInternalKeyXattrByteSize = len(CachedInternalKeyXattrByteSlice)
 
 // From end user's perspective, they will see the reserved word they entered
 // However, internally, XDCR will insert more obscure internal keys to prevent collision with actual

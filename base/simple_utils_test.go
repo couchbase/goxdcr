@@ -149,11 +149,11 @@ func TestCustomRawJson(t *testing.T) {
 
 	for k, v := range retMap {
 		keySlice := []byte(k)
-		allocatedBytes, pos = WriteJsonRawMsg(allocatedBytes, keySlice, pos, true /*isKey*/, len(keySlice))
+		allocatedBytes, pos = WriteJsonRawMsg(allocatedBytes, keySlice, pos, true /*isKey*/, len(keySlice), false)
 
 		marshaledValueBytes, err := json.Marshal(v)
 		assert.Nil(err)
-		allocatedBytes, pos = WriteJsonRawMsg(allocatedBytes, marshaledValueBytes, pos, false /*isKey*/, len(marshaledValueBytes))
+		allocatedBytes, pos = WriteJsonRawMsg(allocatedBytes, marshaledValueBytes, pos, false /*isKey*/, len(marshaledValueBytes), false)
 	}
 
 	checkMap := make(map[string]interface{})

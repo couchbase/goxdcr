@@ -3,6 +3,7 @@
 package utils
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"github.com/couchbase/gocb"
@@ -187,12 +188,12 @@ func TestGenerateXattrUsingGoCB(t *testing.T) {
 	//		fmt.Printf("err getting $XTOC: %v\n", err)
 	//	}
 
-	//	_, err = base.AddXattrToBeFiltered(bodySlice, xattrSlice)
+	//	_, err = base.AddXattrToBeFiltered(bodySlice, xattrSlice, nil, nil)
 	//	if err != nil {
 	//		fmt.Printf("err adding Xattr %v\n", err)
 	//	}
 	//
-	//	_, err = base.AddKeyToBeFiltered(bodySlice, []byte(docKey))
+	//	_, err, _ = base.AddKeyToBeFiltered(bodySlice, []byte(docKey), nil, nil)
 	//	if err != nil {
 	//		fmt.Printf("err adding key %v\n", err)
 	//	}
@@ -235,10 +236,10 @@ func TestMatchDocKeyValueAndXattr(t *testing.T) {
 
 	assert.True(base.FilterContainsXattrExpression(testExpression))
 
-	bodySlice, err = base.AddXattrToBeFiltered(bodySlice, xattrSlice)
+	bodySlice, err, _ = base.AddXattrToBeFiltered(bodySlice, xattrSlice, nil, nil)
 	assert.Nil(err)
 
-	bodySlice, err = base.AddKeyToBeFiltered(bodySlice, []byte(docKey))
+	bodySlice, err, _ = base.AddKeyToBeFiltered(bodySlice, []byte(docKey), nil, nil)
 	assert.Nil(err)
 
 	testMap := make(map[string]interface{})
@@ -253,6 +254,48 @@ func TestMatchDocKeyValueAndXattr(t *testing.T) {
 	assert.True(match)
 
 	fmt.Println("============== Test case end: TestMatchDocKeyValueAndXattr =================")
+}
+
+func TestMatchDocKeyValueAndXattrWithDP(t *testing.T) {
+	fmt.Println("============== Test case start: TestMatchDocKeyValueAndXattrWithDP =================")
+	assert := assert.New(t)
+
+	dp := NewDataPool()
+
+	retMap, bodySlice, err := getDocValueMock()
+	assert.Nil(err)
+
+	assert.NotEqual(0, len(retMap))
+	assert.NotEqual(0, len(bodySlice))
+
+	retMap, xattrSlice, err := getXattrValueMock()
+	assert.Nil(err)
+	assert.NotEqual(0, len(retMap))
+	assert.NotEqual(0, len(xattrSlice))
+
+	assert.True(base.FilterContainsXattrExpression(testExpression))
+
+	bodySlice, err, _ = base.AddXattrToBeFiltered(bodySlice, xattrSlice, dp.GetByteSlice, nil)
+	assert.Nil(err)
+
+	bodySlice, err, _ = base.AddKeyToBeFiltered(bodySlice, []byte(docKey), nil, nil)
+	assert.Nil(err)
+
+	// for unit test, trim nul chars but gojsonsm will be fine
+	bodySlice = bytes.Trim(bodySlice, "\x00")
+
+	testMap := make(map[string]interface{})
+	err = json.Unmarshal(bodySlice, &testMap)
+	assert.Nil(err)
+
+	matcher, err := gojsonsm.GetFilterExpressionMatcher(base.ReplaceKeyWordsForExpression(testExpression))
+	assert.Nil(err)
+
+	match, err := matcher.Match(bodySlice)
+	assert.Nil(err)
+	assert.True(match)
+
+	fmt.Println("============== Test case end: TestMatchDocKeyValueAndXattrWithDP =================")
 }
 
 func TestMatchPcreNegLookahead(t *testing.T) {

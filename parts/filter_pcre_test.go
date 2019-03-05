@@ -117,7 +117,7 @@ func TestKeyAddXattr(t *testing.T) {
 	assert.False(filter.FilterByteSlice(testData))
 
 	var dataSlice []byte = testData
-	dataSlice, err = base.AddKeyToBeFiltered(dataSlice, []byte("abcdef"))
+	dataSlice, err, _ = base.AddKeyToBeFiltered(dataSlice, []byte("abcdef"), nil, nil)
 	assert.Nil(err)
 
 	testXattr := make(map[string]interface{})
@@ -125,7 +125,7 @@ func TestKeyAddXattr(t *testing.T) {
 	xattrMapData, err := json.Marshal(testXattr)
 	assert.Nil(err)
 
-	dataSlice, err = base.AddXattrToBeFiltered(dataSlice, xattrMapData)
+	dataSlice, err, _ = base.AddXattrToBeFiltered(dataSlice, xattrMapData, nil, nil)
 	assert.Nil(err)
 
 	assert.True(filter.FilterByteSlice(dataSlice))
