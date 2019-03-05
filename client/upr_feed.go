@@ -112,6 +112,7 @@ type UprFeatures struct {
 	CompressionType     int
 	IncludeDeletionTime bool
 	DcpPriority         PriorityType
+	EnableExpiry        bool
 }
 
 /**
@@ -627,9 +628,22 @@ func (feed *UprFeed) uprOpen(name string, sequence uint32, bufSize uint32, featu
 		}
 	}
 
+	if features.EnableExpiry {
+		rq := &gomemcached.MCRequest{
+			Opcode: gomemcached.UPR_CONTROL,
+			Key:    []byte("enable_expiry_opcode"),
+			Body:   []byte("true"),
+			Opaque: getUprOpenCtrlOpaque(),
+		}
+		err = sendMcRequestSync(feed.conn, rq)
+		if err != nil {
+			return
+		}
+		activatedFeatures.EnableExpiry = true
+	}
+
 	// everything is ok so far, set upr feed to open state
 	feed.setOpen()
-
 	return
 }
 
