@@ -301,7 +301,7 @@ type DcpNozzle struct {
 	compressionSetting       base.CompressionType
 
 	dcpPrioritySetting mcc.PriorityType
-	lockSetting       sync.RWMutex
+	lockSetting        sync.RWMutex
 }
 
 func NewDcpNozzle(id string,
@@ -432,6 +432,7 @@ func (dcp *DcpNozzle) initializeUprFeed() error {
 		uprFeatures.CompressionType = (int)(dcp.compressionSetting)
 		uprFeatures.DcpPriority = dcp.getDcpPrioritySetting()
 		uprFeatures.IncludeDeletionTime = true
+		uprFeatures.EnableExpiry = true
 		featuresErr, activatedFeatures := dcp.uprFeed.UprOpenWithFeatures(uprFeedName, uint32(0) /*seqno*/, base.UprFeedBufferSize, uprFeatures)
 		if featuresErr != nil {
 			err = featuresErr

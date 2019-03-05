@@ -147,9 +147,16 @@ func (router *Router) ComposeMCRequest(event *mcc.UprEvent) (*base.WrappedMCRequ
 		binary.BigEndian.PutUint64(req.Extras[8:16], event.RevSeqno)
 		binary.BigEndian.PutUint64(req.Extras[16:24], event.Cas)
 
+		var options uint32
 		if router.sourceCRMode == base.CRMode_LWW {
 			// if source bucket is of lww type, add FORCE_ACCEPT_WITH_META_OPS options for memcached
-			binary.BigEndian.PutUint32(req.Extras[24:28], base.FORCE_ACCEPT_WITH_META_OPS)
+			options |= base.FORCE_ACCEPT_WITH_META_OPS
+		}
+		if event.Opcode == mc.UPR_EXPIRATION {
+			options |= base.IS_EXPIRATION
+		}
+		if options > 0 {
+			binary.BigEndian.PutUint32(req.Extras[24:28], options)
 		}
 
 	} else if event.Opcode == mc.UPR_SNAPSHOT {

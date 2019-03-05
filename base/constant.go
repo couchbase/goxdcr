@@ -425,6 +425,9 @@ var UnexpectedEOF = "unexpected EOF"
 // flag for memcached to enable lww to lww bucket replication
 var FORCE_ACCEPT_WITH_META_OPS uint32 = 0x02
 
+// https://github.com/couchbase/kv_engine/blob/master/engines/ep/docs/protocol/del_with_meta.md
+var IS_EXPIRATION uint32 = 0x10
+
 // read/write timeout for helo command to memcached
 var HELOTimeout time.Duration = time.Duration(120) * time.Second
 

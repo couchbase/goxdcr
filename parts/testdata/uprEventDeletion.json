@@ -1,0 +1,1 @@
+{"Opcode":88,"Status":0,"VBucket":221,"DataType":0,"Opaque":1,"VBuuid":0,"Flags":0,"Expiry":1551816724,"Key":"VGVzdERvY0tleQ==","Value":"","OldValue":null,"Cas":1551816787588087808,"Seqno":45,"RevSeqno":47,"LockTime":0,"MetadataSize":0,"SnapstartSeq":0,"SnapendSeq":0,"SnapshotType":0,"FailoverLog":null,"Error":null,"ExtMeta":"","AckSize":55}
