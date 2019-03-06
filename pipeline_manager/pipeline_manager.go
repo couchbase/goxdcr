@@ -479,7 +479,7 @@ func (pipelineMgr *PipelineManager) StopPipeline(rep_status pipeline.Replication
 func (pipelineMgr *PipelineManager) CleanupPipeline(topic string) error {
 	var rep_status *pipeline.ReplicationStatus
 	var err error
-	defer pipelineMgr.logger.Infof("%v CleanupPipeline including checkpoints removal finished (err = %v)", err)
+	defer pipelineMgr.logger.Infof("%v CleanupPipeline including checkpoints removal finished (err = %v)", topic, err)
 	getOp := func() error {
 		rep_status, err = pipelineMgr.GetOrCreateReplicationStatus(topic, nil)
 		return err
@@ -490,7 +490,7 @@ func (pipelineMgr *PipelineManager) CleanupPipeline(topic string) error {
 		return err
 	}
 
-	updater := rep_status.Updater().(PipelineUpdater)
+	updater := rep_status.Updater().(*PipelineUpdater)
 	replId := rep_status.RepId()
 
 	// Stop the updater to stop the pipeline so it will not handle any more jobs before we remove the checkpoints
