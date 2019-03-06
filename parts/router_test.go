@@ -19,7 +19,7 @@ import (
 func setupBoilerPlateRouter() (routerId, topic, filterExpression string, downStreamParts map[string]common.Part,
 	routingMap map[uint16]string, crMode base.ConflictResolutionMode, loggerCtx *log.LoggerContext,
 	req_creater ReqCreator, utilsMock utilities.UtilsIface, throughputThrottlerSvc service_def.ThroughputThrottlerSvc,
-	needToThrottle bool) {
+	needToThrottle bool, expDelMode base.FilterExpDelType) {
 	routerId = "routerUnitTest"
 	topic = "testTopic"
 	filterExpression = ""
@@ -31,6 +31,7 @@ func setupBoilerPlateRouter() (routerId, topic, filterExpression string, downStr
 	throughputThrottlerSvc = &ThroughputThrottlerMock.ThroughputThrottlerSvc{}
 	req_creater = nil
 	needToThrottle = false
+	expDelMode = base.FilterExpDelNone
 
 	return
 }
@@ -42,10 +43,10 @@ func TestRouterRouteFunc(t *testing.T) {
 	routerId, topic, filterExpression, downStreamParts,
 		routingMap, crMode, loggerCtx,
 		req_creater, utilsMock, throughputThrottlerSvc,
-		needToThrottle := setupBoilerPlateRouter()
+		needToThrottle, expDelMode := setupBoilerPlateRouter()
 
 	router, err := NewRouter(routerId, topic, filterExpression, downStreamParts,
-		routingMap, crMode, loggerCtx, req_creater, utilsMock, throughputThrottlerSvc, needToThrottle)
+		routingMap, crMode, loggerCtx, req_creater, utilsMock, throughputThrottlerSvc, needToThrottle, expDelMode)
 
 	assert.Nil(err)
 	assert.NotNil(router)
@@ -73,4 +74,179 @@ func TestRouterRouteFunc(t *testing.T) {
 	assert.True(checkUint&base.IS_EXPIRATION > 0)
 
 	fmt.Println("============== Test case end: TestRouterRouteFunc =================")
+}
+
+func TestRouterInitialNone(t *testing.T) {
+	fmt.Println("============== Test case start: TestRouterInitialNone =================")
+	assert := assert.New(t)
+
+	routerId, topic, filterExpression, downStreamParts,
+		routingMap, crMode, loggerCtx,
+		req_creater, utilsMock, throughputThrottlerSvc,
+		needToThrottle, expDelMode := setupBoilerPlateRouter()
+
+	router, err := NewRouter(routerId, topic, filterExpression, downStreamParts,
+		routingMap, crMode, loggerCtx, req_creater, utilsMock, throughputThrottlerSvc, needToThrottle, expDelMode)
+
+	assert.Nil(err)
+	assert.NotNil(router)
+
+	assert.Equal(base.FilterExpDelNone, router.expDelMode.Get())
+
+	fmt.Println("============== Test case end: TestRouterInitialNone =================")
+}
+
+func TestRouterSkipDeletion(t *testing.T) {
+	fmt.Println("============== Test case start: TestRouterSkipDeletion =================")
+	assert := assert.New(t)
+
+	routerId, topic, filterExpression, downStreamParts,
+		routingMap, crMode, loggerCtx,
+		req_creater, utilsMock, throughputThrottlerSvc,
+		needToThrottle, expDelMode := setupBoilerPlateRouter()
+
+	expDelMode = base.FilterExpDelSkipDeletes
+
+	router, err := NewRouter(routerId, topic, filterExpression, downStreamParts,
+		routingMap, crMode, loggerCtx, req_creater, utilsMock, throughputThrottlerSvc, needToThrottle, expDelMode)
+
+	assert.Nil(err)
+	assert.NotNil(router)
+
+	assert.NotEqual(base.FilterExpDelNone, router.expDelMode.Get())
+
+	delEvent, err := RetrieveUprFile("./testdata/uprEventDeletion.json")
+	assert.Nil(err)
+	assert.NotNil(delEvent)
+
+	expEvent, err := RetrieveUprFile("./testdata/uprEventExpiration.json")
+	assert.Nil(err)
+	assert.NotNil(expEvent)
+
+	shouldContinue := router.ProcessExpDelTTL(delEvent)
+	assert.False(shouldContinue)
+
+	shouldContinue = router.ProcessExpDelTTL(expEvent)
+	assert.True(shouldContinue)
+
+	fmt.Println("============== Test case end: TestRouterSkipDeletion =================")
+}
+
+func TestRouterSkipExpiration(t *testing.T) {
+	fmt.Println("============== Test case start: TestRouterSkipExpiration =================")
+	assert := assert.New(t)
+
+	routerId, topic, filterExpression, downStreamParts,
+		routingMap, crMode, loggerCtx,
+		req_creater, utilsMock, throughputThrottlerSvc,
+		needToThrottle, expDelMode := setupBoilerPlateRouter()
+
+	expDelMode = base.FilterExpDelSkipExpiration
+
+	router, err := NewRouter(routerId, topic, filterExpression, downStreamParts,
+		routingMap, crMode, loggerCtx, req_creater, utilsMock, throughputThrottlerSvc, needToThrottle, expDelMode)
+
+	assert.Nil(err)
+	assert.NotNil(router)
+
+	assert.NotEqual(base.FilterExpDelNone, router.expDelMode.Get())
+
+	delEvent, err := RetrieveUprFile("./testdata/uprEventDeletion.json")
+	assert.Nil(err)
+	assert.NotNil(delEvent)
+
+	expEvent, err := RetrieveUprFile("./testdata/uprEventExpiration.json")
+	assert.Nil(err)
+	assert.NotNil(expEvent)
+
+	shouldContinue := router.ProcessExpDelTTL(delEvent)
+	assert.True(shouldContinue)
+
+	shouldContinue = router.ProcessExpDelTTL(expEvent)
+	assert.False(shouldContinue)
+
+	fmt.Println("============== Test case end: TestRouterSkipExpiration =================")
+}
+
+func TestRouterSkipDeletesStripTTL(t *testing.T) {
+	fmt.Println("============== Test case start: TestRouterSkipExpiryStripTTL =================")
+	assert := assert.New(t)
+
+	routerId, topic, filterExpression, downStreamParts,
+		routingMap, crMode, loggerCtx,
+		req_creater, utilsMock, throughputThrottlerSvc,
+		needToThrottle, expDelMode := setupBoilerPlateRouter()
+
+	expDelMode = base.FilterExpDelSkipExpiration | base.FilterExpDelStripExpiration
+
+	router, err := NewRouter(routerId, topic, filterExpression, downStreamParts,
+		routingMap, crMode, loggerCtx, req_creater, utilsMock, throughputThrottlerSvc, needToThrottle, expDelMode)
+
+	assert.Nil(err)
+	assert.NotNil(router)
+
+	assert.NotEqual(base.FilterExpDelNone, router.expDelMode.Get())
+
+	// delEvent contains expiry
+	delEvent, err := RetrieveUprFile("./testdata/uprEventDeletion.json")
+	assert.Nil(err)
+	assert.NotNil(delEvent)
+
+	expEvent, err := RetrieveUprFile("./testdata/uprEventExpiration.json")
+	assert.Nil(err)
+	assert.NotNil(expEvent)
+
+	assert.NotEqual(0, int(delEvent.Expiry))
+	shouldContinue := router.ProcessExpDelTTL(delEvent)
+	assert.True(shouldContinue)
+	assert.Equal(0, int(delEvent.Expiry))
+
+	shouldContinue = router.ProcessExpDelTTL(expEvent)
+	assert.False(shouldContinue)
+
+	fmt.Println("============== Test case end: TestRouterSkipExpiryStripTTL =================")
+}
+
+func TestRouterExpDelAllMode(t *testing.T) {
+	fmt.Println("============== Test case start: TestRouterExpDelAllMode =================")
+	assert := assert.New(t)
+
+	routerId, topic, filterExpression, downStreamParts,
+		routingMap, crMode, loggerCtx,
+		req_creater, utilsMock, throughputThrottlerSvc,
+		needToThrottle, expDelMode := setupBoilerPlateRouter()
+
+	expDelMode = base.FilterExpDelAll
+
+	router, err := NewRouter(routerId, topic, filterExpression, downStreamParts,
+		routingMap, crMode, loggerCtx, req_creater, utilsMock, throughputThrottlerSvc, needToThrottle, expDelMode)
+
+	assert.Nil(err)
+	assert.NotNil(router)
+
+	assert.NotEqual(base.FilterExpDelNone, router.expDelMode.Get())
+
+	delEvent, err := RetrieveUprFile("./testdata/uprEventDeletion.json")
+	assert.Nil(err)
+	assert.NotNil(delEvent)
+
+	mutEvent, err := RetrieveUprFile("./testdata/perfDataExpiry.json")
+	assert.Nil(err)
+	assert.NotNil(mutEvent)
+
+	expEvent, err := RetrieveUprFile("./testdata/uprEventExpiration.json")
+	assert.Nil(err)
+	assert.NotNil(expEvent)
+
+	assert.NotEqual(0, int(mutEvent.Expiry))
+	shouldContinue := router.ProcessExpDelTTL(mutEvent)
+	assert.True(shouldContinue)
+	assert.Equal(0, int(mutEvent.Expiry))
+
+	shouldContinue = router.ProcessExpDelTTL(expEvent)
+	assert.False(shouldContinue)
+
+	shouldContinue = router.ProcessExpDelTTL(delEvent)
+	assert.False(shouldContinue)
+	fmt.Println("============== Test case end: TestRouterExpDelAllMode =================")
 }

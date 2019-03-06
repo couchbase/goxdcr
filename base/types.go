@@ -452,3 +452,59 @@ func (a *AtomicBooleanType) SetFalse() {
 func (a *AtomicBooleanType) Get() bool {
 	return atomic.LoadUint32(&a.val) == AtomicBooleanTrue
 }
+
+type FilterExpDelType int
+
+const (
+	filterExpDelStripN   = 0
+	filterExpDelSkipDelN = 1
+	filterExpDelSkipExpN = 2
+)
+
+var FilterExpDelNone FilterExpDelType = 0x0
+var FilterExpDelStripExpiration FilterExpDelType = 1 << filterExpDelStripN  // 0x1
+var FilterExpDelSkipDeletes FilterExpDelType = 1 << filterExpDelSkipDelN    // 0x2
+var FilterExpDelSkipExpiration FilterExpDelType = 1 << filterExpDelSkipExpN // 0x4
+var FilterExpDelAll FilterExpDelType = FilterExpDelStripExpiration | FilterExpDelSkipDeletes | FilterExpDelSkipExpiration
+
+func (a *FilterExpDelType) IsStripExpirationSet() bool {
+	return *a&FilterExpDelStripExpiration > 0
+}
+
+func (a *FilterExpDelType) IsSkipDeletesSet() bool {
+	return *a&FilterExpDelSkipDeletes > 0
+}
+
+func (a *FilterExpDelType) IsSkipExpirationSet() bool {
+	return *a&FilterExpDelSkipExpiration > 0
+}
+
+func (a *FilterExpDelType) SetStripExpiration(setVal bool) {
+	curValue := *a&FilterExpDelStripExpiration > 0
+	if curValue != setVal {
+		*a ^= 1 << filterExpDelStripN
+	}
+}
+
+func (a *FilterExpDelType) SetSkipDeletes(setVal bool) {
+	curValue := *a&FilterExpDelSkipDeletes > 0
+	if curValue != setVal {
+		*a ^= 1 << filterExpDelSkipDelN
+	}
+}
+
+func (a *FilterExpDelType) SetSkipExpiration(setVal bool) {
+	curValue := *a&FilterExpDelSkipExpiration > 0
+	if curValue != setVal {
+		*a ^= 1 << filterExpDelSkipExpN
+	}
+}
+
+func (a FilterExpDelType) String() string {
+	return fmt.Sprintf("%d", a)
+}
+
+func (a FilterExpDelType) LogString() string {
+	return fmt.Sprintf("StripTTL(%v), SkipDeletes(%v), SkipExpiration(%v)",
+		a&FilterExpDelStripExpiration > 0, a&FilterExpDelSkipDeletes > 0, a&FilterExpDelSkipExpiration > 0)
+}

@@ -97,3 +97,141 @@ func TestUpgradeCompressionType(t *testing.T) {
 	assert.Equal(base.CompressionTypeAuto, settings.CompressionType)
 	fmt.Println("============== Test case end: TestUpgradeCompressionType =================")
 }
+
+func TestDefaultFilterExpDel(t *testing.T) {
+	assert := assert.New(t)
+	fmt.Println("============== Test case start: TestDefaultFilterExpDel =================")
+	defaultSettings := DefaultReplicationSettings()
+	assert.Equal(base.FilterExpDelNone, defaultSettings.Values[FilterExpDelKey])
+	getDefaultMode := defaultSettings.GetExpDelMode()
+	assert.Equal(base.FilterExpDelNone, getDefaultMode)
+	defaultSettings.Settings.Values[base.FilterExpDelKey] = base.FilterExpDelSkipDeletes
+	getMode := defaultSettings.GetExpDelMode()
+	assert.Equal(base.FilterExpDelSkipDeletes, getMode)
+	fmt.Println("============== Test case end: TestDefaultFilterExpDel =================")
+}
+
+func TestFlagBasedUpdates(t *testing.T) {
+	assert := assert.New(t)
+	fmt.Println("============== Test case start: TestFlagBasedUpdates =================")
+	existSettings := DefaultReplicationSettings()
+	assert.Equal(base.FilterExpDelNone, existSettings.Values[FilterExpDelKey])
+	// Incoming map of one flag set
+	incomingMap := make(map[string]interface{})
+	incomingMap[FilterExpDelKey] = base.FilterExpDelSkipExpiration
+	existSettings.UpdateSettingsFromMap(incomingMap)
+	assert.Equal(base.FilterExpDelSkipExpiration, existSettings.Values[FilterExpDelKey].(base.FilterExpDelType))
+
+	// Turn off one flag
+	existSettings = DefaultReplicationSettings()
+	existSettings.Values[FilterExpDelKey] = base.FilterExpDelAll
+	checkMode := existSettings.GetExpDelMode()
+	assert.True(checkMode&base.FilterExpDelStripExpiration > 0)
+	assert.True(checkMode&base.FilterExpDelSkipDeletes > 0)
+	assert.True(checkMode&base.FilterExpDelSkipExpiration > 0)
+	incomingMap = make(map[string]interface{})
+	var newMode base.FilterExpDelType
+	newMode.SetSkipDeletes(true)
+	newMode.SetStripExpiration(true)
+	newMode.SetSkipExpiration(false)
+	incomingMap[FilterExpDelKey] = newMode
+	existSettings.UpdateSettingsFromMap(incomingMap)
+	checkMode = existSettings.GetExpDelMode()
+	assert.True(checkMode&base.FilterExpDelStripExpiration > 0)
+	assert.True(checkMode&base.FilterExpDelSkipDeletes > 0)
+	assert.False(checkMode&base.FilterExpDelSkipExpiration > 0)
+
+	outMap := existSettings.ToMap(false /*default*/)
+	stripExp, ok := outMap[BypassExpiryKey]
+	assert.True(ok)
+	assert.True(stripExp.(bool))
+	filterDel, ok := outMap[FilterDelKey]
+	assert.True(ok)
+	assert.True(filterDel.(bool))
+	filterExp, ok := outMap[FilterExpKey]
+	assert.True(ok)
+	assert.False(filterExp.(bool))
+
+	restMap := existSettings.ToRESTMap()
+	_, ok = restMap[FilterExpDelKey]
+	assert.False(ok)
+
+	fmt.Println("============== Test case end: TestFlagBasedUpdates =================")
+}
+
+func TestValidateSettingExpDelFlagPersist(t *testing.T) {
+	assert := assert.New(t)
+	fmt.Println("============== Test case start: TestValidateSettingExpDelFlagPersist =================")
+	helper := NewMultiValueHelper()
+	var valArr []string = []string{"true"}
+	var key string = FilterExpKey
+	checkValArr := valArr[0]
+	retKey, retValArr, err := helper.CheckAndConvertMultiValue(key, valArr)
+	assert.Equal(base.FilterExpDelKey, retKey)
+	assert.NotEqual(retValArr[0], checkValArr)
+	assert.Nil(err)
+	assert.Equal(retValArr[0], base.FilterExpDelSkipExpiration.String())
+	key = FilterDelKey
+	valArr[0] = "true"
+	retKey, retValArr, err = helper.CheckAndConvertMultiValue(key, valArr)
+	var checkVal base.FilterExpDelType
+	checkVal.SetSkipDeletes(true)
+	checkVal.SetSkipExpiration(true)
+	assert.Equal(checkVal.String(), retValArr[0])
+	fmt.Println("============== Test case end: TestValidateSettingExpDelFlagPersist =================")
+}
+
+func TestMultiValueHelperCheckAndConvert(t *testing.T) {
+	assert := assert.New(t)
+	fmt.Println("============== Test case start: TestMultiValueHelperCheckAndConvert =================")
+	mvHelper := NewMultiValueHelper()
+	var valArr []string
+
+	// Assuming user passes in 2 flags, skipDel and skipExp
+	key := FilterExpKey
+	valArr = append(valArr, "true")
+	key, valArr, err := mvHelper.CheckAndConvertMultiValue(key, valArr)
+	assert.Nil(err)
+	assert.NotEqual(FilterExpKey, key)
+	assert.NotEqual("true", valArr[0])
+	key = FilterDelKey
+	valArr[0] = "true"
+	key, valArr, err = mvHelper.CheckAndConvertMultiValue(key, valArr)
+	assert.Nil(err)
+
+	// test export to settingsmap
+	settingsMap := make(ReplicationSettingsMap)
+	mvHelper.ExportToSettingsMap(settingsMap)
+	assert.Equal(1, len(settingsMap))
+
+	// Test import - assuming existing setting already has stripTTL set
+	// Combining both should result in ALL
+	replSettings := setupBoilerPlate()
+	var setVal base.FilterExpDelType
+	setVal.SetStripExpiration(true)
+	replSettings.Values[FilterExpDelKey] = setVal
+	assert.NotEqual(base.FilterExpDelNone, replSettings.Values[FilterExpDelKey].(base.FilterExpDelType))
+
+	changedSettingsMap, errMap := replSettings.UpdateSettingsFromMap(settingsMap)
+	assert.Equal(1, len(changedSettingsMap))
+	assert.Equal(0, len(errMap))
+	assert.Equal(base.FilterExpDelAll, replSettings.Values[FilterExpDelKey].(base.FilterExpDelType))
+
+	// Assuming all 3 were specified now
+	mvHelper = NewMultiValueHelper()
+	key = FilterExpKey
+	valArr[0] = "false"
+	mvHelper.CheckAndConvertMultiValue(key, valArr)
+	key = FilterDelKey
+	valArr[0] = "true"
+	mvHelper.CheckAndConvertMultiValue(key, valArr)
+	key = BypassExpiryKey
+	valArr[0] = "false"
+	mvHelper.CheckAndConvertMultiValue(key, valArr)
+	mvHelper.ExportToSettingsMap(settingsMap)
+	assert.Equal(1, len(settingsMap))
+	replSettings.UpdateSettingsFromMap(settingsMap)
+	assert.Equal(base.FilterExpDelSkipDeletes, replSettings.Values[FilterExpDelKey].(base.FilterExpDelType))
+
+	fmt.Println("============== Test case end: TestMultiValueHelperCheckAndConvert =================")
+}

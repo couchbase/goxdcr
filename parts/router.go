@@ -22,6 +22,7 @@ import (
 	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/goxdcr/service_def"
 	utilities "github.com/couchbase/goxdcr/utils"
+	"sync/atomic"
 	"time"
 )
 
@@ -31,8 +32,28 @@ var ErrorNoRoutingMapForRouter = errors.New("No routingMap has been defined for 
 var ErrorInvalidRoutingMapForRouter = errors.New("routingMap in Router is invalid.")
 
 var IsHighReplicationKey = "IsHighReplication"
+var NeedToThrottleKey = "NeedToThrottle"
+var FilterExpDelKey = base.FilterExpDelKey
+
+// enum for whether router needs to be throttled
+const (
+	NoNeedToThrottle int32 = 0
+	NeedToThrottle   int32 = 1
+)
 
 type ReqCreator func(id string) (*base.WrappedMCRequest, error)
+
+type FilterExpDelAtomicType struct {
+	val uint32
+}
+
+func (f *FilterExpDelAtomicType) Set(value base.FilterExpDelType) {
+	atomic.StoreUint32(&f.val, uint32(value))
+}
+
+func (f *FilterExpDelAtomicType) Get() base.FilterExpDelType {
+	return base.FilterExpDelType(atomic.LoadUint32(&f.val))
+}
 
 // XDCR Router does two things:
 // 1. converts UprEvent(DCP) to MCRequest (MemCached)
@@ -47,6 +68,7 @@ type Router struct {
 	// whether lww conflict resolution mode has been enabled
 	sourceCRMode base.ConflictResolutionMode
 	utils        utilities.UtilsIface
+	expDelMode   FilterExpDelAtomicType
 
 	throughputThrottlerSvc service_def.ThroughputThrottlerSvc
 	// whether the current replication is a high priority replication
@@ -70,7 +92,8 @@ func NewRouter(id string, topic string, filterExpression string,
 	logger_context *log.LoggerContext, req_creator ReqCreator,
 	utilsIn utilities.UtilsIface,
 	throughputThrottlerSvc service_def.ThroughputThrottlerSvc,
-	isHighReplication bool) (*Router, error) {
+	isHighReplication bool,
+	filterExpDelType base.FilterExpDelType) (*Router, error) {
 	var filter *Filter
 	var err error
 
@@ -89,11 +112,13 @@ func NewRouter(id string, topic string, filterExpression string,
 		sourceCRMode:           sourceCRMode,
 		req_creator:            req_creator,
 		utils:                  utilsIn,
-		isHighReplication:         &base.AtomicBooleanType{},
+		isHighReplication:      &base.AtomicBooleanType{},
 		throughputThrottlerSvc: throughputThrottlerSvc,
 	}
 
 	router.isHighReplication.Set(isHighReplication)
+
+	router.expDelMode.Set(filterExpDelType)
 
 	// routingFunc is the main intelligence of the router's functionality
 	var routingFunc connector.Routing_Callback_Func = router.route
@@ -189,6 +214,12 @@ func (router *Router) route(data interface{}) (map[string]interface{}, error) {
 		return nil, ErrorInvalidRoutingMapForRouter
 	}
 
+	shouldContinue := router.ProcessExpDelTTL(uprEvent)
+	if !shouldContinue {
+		router.RaiseEvent(common.NewEvent(common.DataFiltered, uprEvent, router, nil, nil))
+		return result, nil
+	}
+
 	// filter data if filter expession has been defined
 	if router.filter != nil {
 		matched, err, errDesc, failedDpCnt := router.filter.FilterUprEvent(uprEvent)
@@ -256,11 +287,21 @@ func (router *Router) RoutingMapByDownstreams() map[string][]uint16 {
 	return ret
 }
 
-func (router *Router) UpdateSettings(settings metadata.ReplicationSettingsMap) error {
-	isHighReplicationObj, ok := settings[IsHighReplicationKey]
+func (router *Router) updateExpDelMode(expDelModeObj interface{}) error {
+	expDelMode, ok := expDelModeObj.(base.FilterExpDelType)
 	if !ok {
-		return nil
+		err := fmt.Errorf("%v invalid data type for expDelMode. value = %v\n", router.id, expDelMode)
+		router.Logger().Warn(err.Error())
+		return err
 	}
+
+	router.Logger().Infof("Router %v's Deletion/Expiration filter method: %v\n", expDelMode.LogString())
+
+	router.expDelMode.Set(expDelMode)
+	return nil
+}
+
+func (router *Router) updateHighRepl(isHighReplicationObj interface{}) error {
 	isHighReplication, ok := isHighReplicationObj.(bool)
 	if !ok {
 		err := fmt.Errorf("%v invalid data type for isHighReplication. value = %v\n", router.id, isHighReplicationObj)
@@ -269,10 +310,34 @@ func (router *Router) UpdateSettings(settings metadata.ReplicationSettingsMap) e
 	}
 
 	router.Logger().Infof("%v changing isHighReplication to %v\n", router.id, isHighReplication)
-
 	router.isHighReplication.Set(isHighReplication)
-
 	return nil
+}
+
+func (router *Router) UpdateSettings(settings metadata.ReplicationSettingsMap) error {
+	errMap := make(base.ErrorMap)
+
+	isHighReplicationObj, ok := settings[IsHighReplicationKey]
+	if ok {
+		err := router.updateHighRepl(isHighReplicationObj)
+		if err != nil {
+			errMap["UpdatingIsHighReplication"] = err
+		}
+	}
+
+	expDelModeObj, ok := settings[metadata.FilterExpDelKey]
+	if ok {
+		err := router.updateExpDelMode(expDelModeObj)
+		if err != nil {
+			errMap["UpdatingFilterExpDel"] = err
+		}
+	}
+
+	if len(errMap) > 0 {
+		return fmt.Errorf("Router %v UpdateSettings error(s): %v", router.id, base.FlattenErrorMap(errMap))
+	} else {
+		return nil
+	}
 }
 
 func (router *Router) newWrappedMCRequest() (*base.WrappedMCRequest, error) {
@@ -283,4 +348,31 @@ func (router *Router) newWrappedMCRequest() (*base.WrappedMCRequest, error) {
 			Req: &mc.MCRequest{},
 		}, nil
 	}
+}
+
+// Returns bool indicating if the data should continue to be sent
+func (router *Router) ProcessExpDelTTL(uprEvent *mcc.UprEvent) bool {
+	expDelMode := router.expDelMode.Get()
+	if expDelMode == base.FilterExpDelNone {
+		return true
+	}
+
+	if expDelMode&base.FilterExpDelSkipDeletes > 0 {
+		if uprEvent.Opcode == mc.UPR_DELETION {
+			return false
+		}
+	}
+
+	if expDelMode&base.FilterExpDelSkipExpiration > 0 {
+		if uprEvent.Opcode == mc.UPR_EXPIRATION {
+			return false
+		}
+	}
+
+	if expDelMode&base.FilterExpDelStripExpiration > 0 {
+		uprEvent.Expiry = uint32(0)
+		router.RaiseEvent(common.NewEvent(common.ExpiryFieldStripped, uprEvent, router, nil, nil))
+	}
+
+	return true
 }

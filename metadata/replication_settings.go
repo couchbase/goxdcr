@@ -10,6 +10,7 @@
 package metadata
 
 import (
+	"fmt"
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
 	"strconv"
@@ -40,6 +41,12 @@ const (
 	// the unit for backlogThreshold is millisecond
 	// the default value is 1000 (millisecond)
 	BacklogThresholdKey = "backlogThreshold"
+	// FilterExpDelKey is a combination flag of the 3 below it
+	FilterExpDelKey = base.FilterExpDelKey
+	// These 3 are used for REST input/output into an internal flag of FilterExpDelKey
+	FilterExpKey    = base.FilterExpKey
+	FilterDelKey    = base.FilterDelKey
+	BypassExpiryKey = base.BypassExpiryKey
 )
 
 // keys to facilitate redaction of replication settings map
@@ -56,7 +63,14 @@ var ImmutableDefaultSettings = []string{ReplicationTypeKey, FilterExpressionKey,
 var ImmutableSettings = []string{}
 
 // settings that are internal and should be hidden from outside
-var HiddenSettings = []string{FilterVersionKey, FilterSkipRestreamKey}
+var HiddenSettings = []string{FilterVersionKey, FilterSkipRestreamKey, FilterExpDelKey}
+
+// settings that are externally multiple values, but internally single value
+var MultiValueMap map[string]string = map[string]string{
+	FilterExpKey:    FilterExpDelKey,
+	FilterDelKey:    FilterExpDelKey,
+	BypassExpiryKey: FilterExpDelKey,
+}
 
 var MaxBatchCount = 10000
 
@@ -81,6 +95,7 @@ var BandwidthLimitConfig = &SettingsConfig{0, &Range{0, 1000000}}
 var CompressionTypeConfig = &SettingsConfig{base.CompressionTypeAuto, &Range{base.CompressionTypeStartMarker + 1, base.CompressionTypeEndMarker - 1}}
 var PriorityConfig = &SettingsConfig{base.PriorityTypeHigh, nil}
 var BacklogThresholdConfig = &SettingsConfig{base.BacklogThresholdDefault, &Range{10, 10000000}}
+var FilterExpDelConfig = &SettingsConfig{base.FilterExpDelNone, &Range{int(base.FilterExpDelNone), int(base.FilterExpDelAll)}}
 
 // Set to keyOnly as default because prior to adv filtering, this config did not exist
 var FilterVersionConfig = &SettingsConfig{base.FilterVersionKeyOnly, nil}
@@ -105,8 +120,10 @@ var ReplicationSettingsConfigMap = map[string]*SettingsConfig{
 	FilterSkipRestreamKey:             FilterSkipRestreamConfig,
 	PriorityKey:                       PriorityConfig,
 	BacklogThresholdKey:               BacklogThresholdConfig,
+	FilterExpDelKey:                   FilterExpDelConfig,
 }
 
+// Adding values in this struct is deprecated - use ReplicationSettings.Settings.Values instead
 type ReplicationSettings struct {
 	*Settings
 
@@ -185,6 +202,120 @@ type ReplicationSettings struct {
 	Revision interface{}
 }
 
+type ReplicationMultiValueHelper struct {
+	activeConfig  map[string]interface{}
+	flagKeyIssued map[string]bool
+}
+
+func NewMultiValueHelper() *ReplicationMultiValueHelper {
+	return &ReplicationMultiValueHelper{activeConfig: make(map[string]interface{}),
+		flagKeyIssued: make(map[string]bool),
+	}
+}
+
+func (r *ReplicationMultiValueHelper) CheckAndConvertMultiValue(key string, valArr []string) (restKey string, outValArr []string, err error) {
+	var settingsConfigKey string
+	var newVal interface{}
+	for k, v := range MultiValueMap {
+		if key == k {
+			settingsConfigKey = v
+			break
+		}
+	}
+	// This section here is to allow passthrough, in case MultiValueMap returns nothing, this function call
+	// would have been transparent to the caller
+	restKey = key
+	outValArr = valArr
+	if len(settingsConfigKey) == 0 {
+		return
+	}
+	restKey = settingsConfigKey
+	if _, ok := r.activeConfig[settingsConfigKey]; !ok {
+		if config, ok := ReplicationSettingsConfigMap[settingsConfigKey]; ok {
+			r.activeConfig[settingsConfigKey] = config.defaultValue
+		} else {
+			err = fmt.Errorf("CheckAndConvertMultiValue error - invalid activeConfigKey %v", settingsConfigKey)
+			return
+		}
+	}
+
+	switch restKey {
+	case FilterExpDelKey:
+		newVal, err = r.handleFilterExpDelKey(r.activeConfig[settingsConfigKey].(base.FilterExpDelType), key, valArr[0])
+		// Need to set it using newVal to persist because we're passing interface references
+		r.activeConfig[settingsConfigKey] = newVal
+		outValArr[0] = newVal.(base.FilterExpDelType).String()
+	default:
+		err = base.ErrorInvalidInput
+	}
+	return
+}
+
+func (r *ReplicationMultiValueHelper) handleFilterExpDelKey(curConfig base.FilterExpDelType, key, val string) (retVal interface{}, err error) {
+	boolVal, err := strconv.ParseBool(val)
+	if err != nil {
+		err = base.IncorrectValueTypeError("a boolean")
+		return
+	}
+	r.flagKeyIssued[key] = boolVal
+	switch key {
+	case FilterExpKey:
+		curConfig.SetSkipExpiration(boolVal)
+	case FilterDelKey:
+		curConfig.SetSkipDeletes(boolVal)
+	case BypassExpiryKey:
+		curConfig.SetStripExpiration(boolVal)
+	}
+	retVal = curConfig
+	return
+}
+
+func (r *ReplicationMultiValueHelper) handleFilterExpDelKeyImport(s *ReplicationSettings, sm ReplicationSettingsMap) {
+	// Get the existing value
+	var curVal base.FilterExpDelType
+	var ok bool
+	if curVal, ok = s.Values[FilterExpDelKey].(base.FilterExpDelType); !ok {
+		curVal = FilterExpDelConfig.defaultValue.(base.FilterExpDelType)
+	}
+
+	if val, ok := r.flagKeyIssued[FilterExpKey]; ok {
+		curVal.SetSkipExpiration(val)
+	}
+	if val, ok := r.flagKeyIssued[FilterDelKey]; ok {
+		curVal.SetSkipDeletes(val)
+	}
+	if val, ok := r.flagKeyIssued[BypassExpiryKey]; ok {
+		curVal.SetStripExpiration(val)
+	}
+
+	sm[FilterExpDelKey] = curVal
+}
+
+// When exporting, we just export the replicationMultiValueHelper, which ReplicationSetting will
+// check for and make sure to do the right interaction combinations
+func (r *ReplicationMultiValueHelper) ExportToSettingsMap(settings ReplicationSettingsMap) {
+	for k, _ := range r.activeConfig {
+		settings[k] = *r
+	}
+
+	for k, _ := range MultiValueMap {
+		delete(settings, k)
+	}
+}
+
+func (r *ReplicationMultiValueHelper) ImportToReplicationSettings(s *ReplicationSettings, sm ReplicationSettingsMap) {
+	for k, _ := range r.activeConfig {
+		if k == FilterExpDelKey {
+			r.handleFilterExpDelKeyImport(s, sm)
+		}
+	}
+	// Everything else, not implemented
+	// Cleanup the older keys
+	for k, _ := range MultiValueMap {
+		delete(s.Values, k)
+	}
+}
+
 // config map retriever required by Settings
 func GetReplicationSettingsConfigMap() map[string]*SettingsConfig {
 	return ReplicationSettingsConfigMap
@@ -254,6 +385,7 @@ func (s *ReplicationSettings) ToDefaultSettingsMap() ReplicationSettingsMap {
 }
 
 func (s *ReplicationSettings) toMapInternal(isDefaultSettings bool, hideInternals bool) ReplicationSettingsMap {
+	s.exportFlagTypeValues()
 	settingsMap := ReplicationSettingsMap(s.Settings.ToMap())
 	if isDefaultSettings {
 		// remove keys that do not belong to default settings
@@ -300,12 +432,37 @@ func (s *ReplicationSettings) PostProcessAfterUnmarshalling() {
 			s.Values[PriorityKey] = base.PriorityType(priority.(int))
 		}
 
+		filterExpDelMode := s.Values[FilterExpDelKey]
+		if filterExpDelMode != nil {
+			s.Values[FilterExpDelKey] = base.FilterExpDelType(filterExpDelMode.(int))
+		}
+
 		// no need for populateFieldsUsingMap() since fields and map in metakv should already be consistent
 	}
 	s.HandleUpgrade()
 }
 
+func (s *ReplicationSettings) exportFlagTypeValues() {
+	expDelMode := s.GetExpDelMode()
+	s.Values[BypassExpiryKey] = expDelMode.IsStripExpirationSet()
+	s.Values[FilterExpKey] = expDelMode.IsSkipExpirationSet()
+	s.Values[FilterDelKey] = expDelMode.IsSkipDeletesSet()
+}
+
+func (s *ReplicationSettings) PreprocessReplMultiValues(settingsMap map[string]interface{}) {
+	var mvHelper ReplicationMultiValueHelper
+	var found bool
+	for _, v := range settingsMap {
+		if mvHelper, found = v.(ReplicationMultiValueHelper); found {
+			break
+		}
+	}
+	// One issue of mvHelper is enough to restore all potential multiflag values
+	mvHelper.ImportToReplicationSettings(s, settingsMap)
+}
+
 func (s *ReplicationSettings) UpdateSettingsFromMap(settingsMap map[string]interface{}) (changedSettingsMap ReplicationSettingsMap, errorMap map[string]error) {
+	s.PreprocessReplMultiValues(settingsMap)
 	changedSettingsMap, errorMap = s.Settings.UpdateSettingsFromMap(settingsMap)
 	if len(errorMap) > 0 {
 		return
@@ -404,6 +561,11 @@ func (s *ReplicationSettings) GetCompressionType() int {
 	} else {
 		return s.CompressionType
 	}
+}
+
+func (s *ReplicationSettings) GetExpDelMode() base.FilterExpDelType {
+	expDel, _ := s.GetSettingValueOrDefaultValue(base.FilterExpDelKey)
+	return expDel.(base.FilterExpDelType)
 }
 
 type ReplicationSettingsMap map[string]interface{}
@@ -563,6 +725,17 @@ func ValidateAndConvertReplicationSettingsValue(key, value, errorKey string, isE
 			return
 		}
 		if err = nonCAPIOnlyFeature(convertedValue.(int), base.BacklogThresholdDefault, isCapi); err != nil {
+			return
+		}
+	case FilterExpDelKey:
+		convertedValue, err = ValidateAndConvertSettingsValue(key, value, ReplicationSettingsConfigMap)
+		if err != nil {
+			return
+		}
+		if err = enterpriseOnlyFeature(convertedValue.(base.FilterExpDelType), base.FilterExpDelNone, isEnterprise); err != nil {
+			return
+		}
+		if err = nonCAPIOnlyFeature(convertedValue.(base.FilterExpDelType), base.FilterExpDelNone, isCapi); err != nil {
 			return
 		}
 	default:

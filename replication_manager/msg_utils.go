@@ -71,8 +71,10 @@ const (
 	FilterVersionKey               = "filterVersion"
 	FilterSkipRestreamKey          = "filterSkipRestream"
 	Priority                       = "priority"
-	// desired latency is the parameter exposed to UI and CLI
-	BacklogThreshold = "desiredLatency"
+	BacklogThreshold               = "desiredLatency" // desired latency is the parameter exposed to UI and CLI
+	FilterExpKey                   = "filterExpiration"
+	FilterDelKey                   = "filterDeletion"
+	BypassExpiryKey                = "filterBypassExpiry" // bypass sounds better to external, translates into strip internally
 )
 
 // constants for parsing create replication response
@@ -151,6 +153,9 @@ var RestKeyToSettingsKeyMap = map[string]string{
 	FilterSkipRestreamKey:          metadata.FilterSkipRestreamKey,
 	Priority:                       metadata.PriorityKey,
 	BacklogThreshold:               metadata.BacklogThresholdKey,
+	FilterExpKey:                   metadata.FilterExpKey,
+	FilterDelKey:                   metadata.FilterDelKey,
+	BypassExpiryKey:                metadata.BypassExpiryKey,
 }
 
 // internal replication settings key -> replication settings key in rest api
@@ -175,6 +180,9 @@ var SettingsKeyToRestKeyMap = map[string]string{
 	metadata.FilterSkipRestreamKey:             FilterSkipRestreamKey,
 	metadata.PriorityKey:                       Priority,
 	metadata.BacklogThresholdKey:               BacklogThreshold,
+	metadata.FilterExpKey:                      FilterExpKey,
+	metadata.FilterDelKey:                      FilterDelKey,
+	metadata.BypassExpiryKey:                   BypassExpiryKey,
 }
 
 // Conversion to REST for user -> pauseRequested - Pretty much a NOT operation
@@ -542,7 +550,6 @@ func DecodeCreateReplicationRequest(request *http.Request) (justValidate bool, f
 	if err != nil {
 		errorsMap[FilterExpression] = err
 	}
-
 	return
 }
 
@@ -617,7 +624,6 @@ func DecodeChangeReplicationSettings(request *http.Request, replicationId string
 	if err != nil {
 		errorsMap[FilterExpression] = err
 	}
-
 	return
 }
 
@@ -655,6 +661,7 @@ func DecodeCreateReplicationResponse(response *http.Response) (string, error) {
 func DecodeSettingsFromRequest(request *http.Request, isDefaultSettings bool, isUpdate bool, isCapi bool) (metadata.ReplicationSettingsMap, map[string]error) {
 	settings := make(metadata.ReplicationSettingsMap)
 	errorsMap := make(map[string]error)
+	mvHelper := metadata.NewMultiValueHelper()
 
 	if err := request.ParseForm(); err != nil {
 		errorsMap[base.PlaceHolderFieldKey] = ErrorParsingForm
@@ -668,7 +675,12 @@ func DecodeSettingsFromRequest(request *http.Request, isDefaultSettings bool, is
 	}
 
 	for key, valArr := range request.Form {
-		err := processKey(key, valArr, &settings, isDefaultSettings, isUpdate, isEnterprise, isCapi)
+		key, valArr, err := mvHelper.CheckAndConvertMultiValue(key, valArr)
+		if err != nil {
+			errorsMap[key] = err
+			continue
+		}
+		err = processKey(key, valArr, &settings, isDefaultSettings, isUpdate, isEnterprise, isCapi)
 		if err != nil {
 			errorsMap[key] = err
 		}
@@ -683,6 +695,7 @@ func DecodeSettingsFromRequest(request *http.Request, isDefaultSettings bool, is
 		return nil, errorsMap
 	}
 
+	mvHelper.ExportToSettingsMap(settings)
 	if logger_msgutil.GetLogLevel() >= log.LogLevelDebug {
 		logger_msgutil.Debugf("settings decoded from request: %v\n", settings.CloneAndRedact())
 	}

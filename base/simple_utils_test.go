@@ -199,3 +199,13 @@ func TestSkipXattrAndStringsConversionNonPcre(t *testing.T) {
 
 	fmt.Println("============== Test case end: TestSkipXattrAndStringsConversionNonPcre =================")
 }
+
+func TestFlagType(t *testing.T) {
+	fmt.Println("============== Test case start: TestFlagType =================")
+	assert := assert.New(t)
+	baseType := FilterExpDelStripExpiration
+	assert.True(baseType&FilterExpDelStripExpiration > 0)
+	baseType.SetStripExpiration(false)
+	assert.False(baseType&FilterExpDelStripExpiration > 0)
+	fmt.Println("============== Test case end: TestFlagType =================")
+}

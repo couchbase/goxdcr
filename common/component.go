@@ -51,6 +51,8 @@ const (
 	DataPoolGetFail ComponentEventType = iota
 	//data sending is throttled due to throughput limit being reached
 	DataThroughputThrottled ComponentEventType = iota
+	// Expiry field has been stripped
+	ExpiryFieldStripped ComponentEventType = iota
 )
 
 type Event struct {

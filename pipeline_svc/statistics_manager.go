@@ -51,6 +51,7 @@ const (
 	EXPIRY_FILTERED_METRIC       = "expiry_filtered"
 	DELETION_FILTERED_METRIC     = "deletion_filtered"
 	SET_FILTERED_METRIC          = "set_filtered"
+	EXPIRY_STRIPPED_METRIC       = "expiry_stripped"
 
 	// the number of docs that failed conflict resolution on the source cluster side due to optimistic replication
 	DOCS_FAILED_CR_SOURCE_METRIC     = "docs_failed_cr_source"
@@ -134,7 +135,7 @@ var OverviewMetricKeys = []string{CHANGES_LEFT_METRIC, DOCS_CHECKED_METRIC, DOCS
 	TIME_COMMITING_METRIC, DOCS_OPT_REPD_METRIC, DOCS_RECEIVED_DCP_METRIC, EXPIRY_RECEIVED_DCP_METRIC,
 	DELETION_RECEIVED_DCP_METRIC, SET_RECEIVED_DCP_METRIC, SIZE_REP_QUEUE_METRIC, DOCS_REP_QUEUE_METRIC, DOCS_LATENCY_METRIC,
 	RESP_WAIT_METRIC, META_LATENCY_METRIC, DCP_DISPATCH_TIME_METRIC, DCP_DATACH_LEN, THROTTLE_LATENCY_METRIC, THROUGHPUT_THROTTLE_LATENCY_METRIC,
-	DP_GET_FAIL_METRIC}
+	DP_GET_FAIL_METRIC, EXPIRY_STRIPPED_METRIC}
 
 // keys for metrics that do not monotonically increase during replication, to which the "going backward" check should not be applied
 var NonIncreasingMetricKeyMap = map[string]bool{
@@ -1155,6 +1156,8 @@ func (r_collector *routerCollector) Mount(pipeline common.Pipeline, stats_mgr *S
 		registry_router.Register(DP_GET_FAIL_METRIC, dp_failed)
 		throughput_throttle_latency := metrics.NewHistogram(metrics.NewUniformSample(stats_mgr.sample_size))
 		registry_router.Register(THROUGHPUT_THROTTLE_LATENCY_METRIC, throughput_throttle_latency)
+		expiry_stripped := metrics.NewCounter()
+		registry_router.Register(EXPIRY_STRIPPED_METRIC, expiry_stripped)
 
 		metric_map := make(map[string]interface{})
 		metric_map[DOCS_FILTERED_METRIC] = docs_filtered
@@ -1164,6 +1167,7 @@ func (r_collector *routerCollector) Mount(pipeline common.Pipeline, stats_mgr *S
 		metric_map[SET_FILTERED_METRIC] = set_filtered
 		metric_map[DP_GET_FAIL_METRIC] = dp_failed
 		metric_map[THROUGHPUT_THROTTLE_LATENCY_METRIC] = throughput_throttle_latency
+		metric_map[EXPIRY_STRIPPED_METRIC] = expiry_stripped
 		r_collector.component_map[conn.Id()] = metric_map
 	}
 
@@ -1202,6 +1206,8 @@ func (r_collector *routerCollector) ProcessEvent(event *common.Event) error {
 	case common.DataThroughputThrottled:
 		throughput_throttle_latency := event.OtherInfos.(time.Duration)
 		metric_map[THROUGHPUT_THROTTLE_LATENCY_METRIC].(metrics.Histogram).Sample().Update(throughput_throttle_latency.Nanoseconds() / 1000000)
+	case common.ExpiryFieldStripped:
+		metric_map[EXPIRY_STRIPPED_METRIC].(metrics.Counter).Inc(1)
 	}
 
 	return nil

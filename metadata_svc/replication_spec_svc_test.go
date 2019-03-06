@@ -461,3 +461,24 @@ func TestOriginalRegexUpgradedFilter(t *testing.T) {
 
 	fmt.Println("============== Test case end: TestOriginalRegexUpgradedFilter =================")
 }
+
+func TestStripExpiry(t *testing.T) {
+	assert := assert.New(t)
+	fmt.Println("============== Test case start: TestStripExpiry =================")
+	xdcrTopologyMock, metadataSvcMock, uiLogSvcMock, remoteClusterMock,
+		clusterInfoSvcMock, utilitiesMock, replSpecSvc,
+		sourceBucket, targetBucket, targetCluster, settings, clientMock := setupBoilerPlate()
+
+	// Begin mocks
+	setupMocks(base.ConflictResolutionType_Seqno, base.ConflictResolutionType_Seqno,
+		xdcrTopologyMock, metadataSvcMock, uiLogSvcMock, remoteClusterMock,
+		clusterInfoSvcMock, utilitiesMock, replSpecSvc, clientMock, true, /*IsEnterprise*/
+		false /*IsElastic*/, false /*CompressionPass*/)
+
+	settings[metadata.FilterExpDelKey] = base.FilterExpDelStripExpiration
+
+	_, _, _, errMap, _, _ := replSpecSvc.ValidateNewReplicationSpec(sourceBucket, targetCluster, targetBucket, settings)
+	assert.Equal(len(errMap), 0)
+
+	fmt.Println("============== Test case start: TestStripExpiry =================")
+}

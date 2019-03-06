@@ -11,6 +11,7 @@ package base
 
 import (
 	"errors"
+	"fmt"
 	mc "github.com/couchbase/gomemcached"
 	"sync"
 	"time"
@@ -213,6 +214,7 @@ var ErrorFilterSkipRestreamRequired = errors.New("Filter skip restream flag is r
 var ErrorNotSupported = errors.New("Not supported")
 var ErrorInvalidJSONMap = errors.New("Retrieved value is not a valid JSON key-value map")
 var ErrorInvalidCAS = errors.New("Invalid CAS")
+var ErrorExpDelTrio = fmt.Errorf("%v, %v, and %v must be specified together", FilterExpKey, FilterDelKey, BypassExpiryKey)
 
 // Various non-error internal msgs
 var FilterForcePassThrough = errors.New("No data is to be filtered, should allow passthrough")
@@ -960,3 +962,9 @@ var ReservedWordsReplaceMapOnce sync.Once
 
 // This constant is used when communicating with KV to retrieve a list of all the available xattr keys
 const XattributeToc = "$XTOC"
+
+const FilterExpDelKey = "filter_exp_del"
+
+const FilterExpKey = "filterExpiration"
+const FilterDelKey = "filterDeletion"
+const BypassExpiryKey = "filterBypassExpiry"
