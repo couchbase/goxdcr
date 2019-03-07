@@ -536,6 +536,8 @@ var DefaultGoMaxProcs int = 4
 
 var BacklogThresholdDefault = 1000
 
+var MaxDocSizeByte uint32 = 20 << 20
+
 // --------------- Constants that are configurable -----------------
 
 // timeout for checkpointing attempt before pipeline is stopped - to put an upper bound on the delay of pipeline stop/restart

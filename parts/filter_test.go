@@ -25,7 +25,7 @@ func TestFilter(t *testing.T) {
 
 	assert.Nil(err)
 	assert.NotNil(filter)
-	assert.Equal(0, len(base.ReservedWordsReplaceMap))
+	assert.Equal(2, len(base.ReservedWordsReplaceMap))
 	assert.True(filter.flags&base.FilterFlagSkipKey == 0)
 	assert.True(filter.flags&base.FilterFlagSkipXattr > 0)
 
@@ -77,8 +77,10 @@ func TestFilterBool2(t *testing.T) {
 	assert.Nil(err)
 	assert.NotNil(filter)
 
-	dataSlice, err, _, _, _ := realUtil.ProcessUprEventForFiltering(uprEvent, dp, 0 /*flags*/)
+	slices := make([][]byte, 0, 2)
+	dataSlice, err, _, releaseFunc, _ := realUtil.ProcessUprEventForFiltering(uprEvent, dp, 0 /*flags*/, &slices)
 	assert.Nil(err)
+	assert.NotNil(releaseFunc)
 
 	matchResult, err := filter.matcher.Match(dataSlice)
 	assert.Nil(err)
@@ -100,12 +102,39 @@ func TestFilterPerf(t *testing.T) {
 	assert.NotNil(filter)
 	assert.Equal(base.FilterFlagType(3), filter.flags)
 
-	dataSlice, err, _, _, _ := realUtil.ProcessUprEventForFiltering(uprEvent, dp, filter.flags)
+	slices := make([][]byte, 0, 2)
+	dataSlice, err, _, releaseFunc, _ := realUtil.ProcessUprEventForFiltering(uprEvent, dp, filter.flags, &slices)
 	assert.Nil(err)
+	assert.NotNil(releaseFunc)
 
 	matchResult, err := filter.matcher.Match(dataSlice)
 	assert.Nil(err)
 	assert.True(matchResult)
 
 	fmt.Println("============== Test case end: TestFilterPerf =================")
+}
+
+func TestFilterPerfKeyOnly(t *testing.T) {
+	fmt.Println("============== Test case start: TestFilterPerfKeyOnly =================")
+	assert := assert.New(t)
+
+	uprEvent, err := RetrieveUprFile("./testdata/perfData.bin")
+	assert.Nil(err)
+	assert.NotNil(uprEvent)
+
+	filter, err := NewFilter(filterId, "META().id = \"26dcc0-000000001586\"", realUtil)
+	assert.Nil(err)
+	assert.NotNil(filter)
+	assert.True(filter.flags&base.FilterFlagKeyOnly > 0)
+
+	slices := make([][]byte, 0, 2)
+	dataSlice, err, _, releaseFunc, _ := realUtil.ProcessUprEventForFiltering(uprEvent, dp, filter.flags, &slices)
+	assert.Nil(err)
+	assert.NotNil(releaseFunc)
+
+	matchResult, err := filter.matcher.Match(dataSlice)
+	assert.Nil(err)
+	assert.True(matchResult)
+
+	fmt.Println("============== Test case end: TestFilterPerfKeyOnly =================")
 }

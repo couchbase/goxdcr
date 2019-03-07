@@ -1577,13 +1577,13 @@ func (_m *UtilsIface) ParseHighSeqnoStat(vbnos []uint16, stats_map map[string]st
 	return r0
 }
 
-// ProcessUprEventForFiltering provides a mock function with given fields: uprEvent, dp, flags
-func (_m *UtilsIface) ProcessUprEventForFiltering(uprEvent *memcached.UprEvent, dp utils.DataPoolIface, flags base.FilterFlagType) ([]byte, error, string, utils.ReleaseMemFunc, int64) {
-	ret := _m.Called(uprEvent, dp, flags)
+// ProcessUprEventForFiltering provides a mock function with given fields: uprEvent, dp, flags, slicesBuf
+func (_m *UtilsIface) ProcessUprEventForFiltering(uprEvent *memcached.UprEvent, dp utils.DataPoolIface, flags base.FilterFlagType, slicesBuf *[][]byte) ([]byte, error, string, utils.ReleaseMemFunc, int64) {
+	ret := _m.Called(uprEvent, dp, flags, slicesBuf)
 
 	var r0 []byte
-	if rf, ok := ret.Get(0).(func(*memcached.UprEvent, utils.DataPoolIface, base.FilterFlagType) []byte); ok {
-		r0 = rf(uprEvent, dp, flags)
+	if rf, ok := ret.Get(0).(func(*memcached.UprEvent, utils.DataPoolIface, base.FilterFlagType, *[][]byte) []byte); ok {
+		r0 = rf(uprEvent, dp, flags, slicesBuf)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).([]byte)
@@ -1591,22 +1591,22 @@ func (_m *UtilsIface) ProcessUprEventForFiltering(uprEvent *memcached.UprEvent, 
 	}
 
 	var r1 error
-	if rf, ok := ret.Get(1).(func(*memcached.UprEvent, utils.DataPoolIface, base.FilterFlagType) error); ok {
-		r1 = rf(uprEvent, dp, flags)
+	if rf, ok := ret.Get(1).(func(*memcached.UprEvent, utils.DataPoolIface, base.FilterFlagType, *[][]byte) error); ok {
+		r1 = rf(uprEvent, dp, flags, slicesBuf)
 	} else {
 		r1 = ret.Error(1)
 	}
 
 	var r2 string
-	if rf, ok := ret.Get(2).(func(*memcached.UprEvent, utils.DataPoolIface, base.FilterFlagType) string); ok {
-		r2 = rf(uprEvent, dp, flags)
+	if rf, ok := ret.Get(2).(func(*memcached.UprEvent, utils.DataPoolIface, base.FilterFlagType, *[][]byte) string); ok {
+		r2 = rf(uprEvent, dp, flags, slicesBuf)
 	} else {
 		r2 = ret.Get(2).(string)
 	}
 
 	var r3 utils.ReleaseMemFunc
-	if rf, ok := ret.Get(3).(func(*memcached.UprEvent, utils.DataPoolIface, base.FilterFlagType) utils.ReleaseMemFunc); ok {
-		r3 = rf(uprEvent, dp, flags)
+	if rf, ok := ret.Get(3).(func(*memcached.UprEvent, utils.DataPoolIface, base.FilterFlagType, *[][]byte) utils.ReleaseMemFunc); ok {
+		r3 = rf(uprEvent, dp, flags, slicesBuf)
 	} else {
 		if ret.Get(3) != nil {
 			r3 = ret.Get(3).(utils.ReleaseMemFunc)
@@ -1614,8 +1614,8 @@ func (_m *UtilsIface) ProcessUprEventForFiltering(uprEvent *memcached.UprEvent, 
 	}
 
 	var r4 int64
-	if rf, ok := ret.Get(4).(func(*memcached.UprEvent, utils.DataPoolIface, base.FilterFlagType) int64); ok {
-		r4 = rf(uprEvent, dp, flags)
+	if rf, ok := ret.Get(4).(func(*memcached.UprEvent, utils.DataPoolIface, base.FilterFlagType, *[][]byte) int64); ok {
+		r4 = rf(uprEvent, dp, flags, slicesBuf)
 	} else {
 		r4 = ret.Get(4).(int64)
 	}

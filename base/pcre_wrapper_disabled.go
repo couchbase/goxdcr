@@ -11,14 +11,53 @@
 
 package base
 
+import (
+	"regexp"
+	"strings"
+)
+
 type PcreWrapper struct {
 }
 
 func MakePcreRegex(expression string) (PcreWrapperInterface, error) {
-	return &PcreWrapper{}, ErrorNotSupported
+	if strings.Contains(expression, ExternalKeyKey) {
+		return MakeMetaKeyWorkaround(), nil
+	} else if strings.Contains(expression, ExternalKeyXattr) {
+		return MakeMetaXattrWorkaround(), nil
+	} else {
+		return &PcreWrapper{}, ErrorNotSupported
+	}
 }
 
 func (p *PcreWrapper) ReplaceAll(orig, strToSub []byte, flags int) []byte {
 	// Do nothing just return the original bytes
 	return orig
+}
+
+type PcreMetaKeyWorkaround struct {
+}
+
+// Note, this is not meant to be a direct replacement of pcre. This is only supported for if PCRE is not supported to do META() conversion
+func MakeMetaKeyWorkaround() PcreWrapperInterface {
+	return &PcreMetaKeyWorkaround{}
+}
+
+func (p *PcreMetaKeyWorkaround) ReplaceAll(orig, strToSub []byte, flags int) []byte {
+	keyRegex := regexp.MustCompile(ExternalKeyKey)
+	retBytes := keyRegex.ReplaceAllLiteral(orig, strToSub)
+	return retBytes
+}
+
+type PcreMetaXattrWorkaround struct {
+}
+
+func MakeMetaXattrWorkaround() PcreWrapperInterface {
+	return &PcreMetaXattrWorkaround{}
+}
+
+func (p *PcreMetaXattrWorkaround) ReplaceAll(orig, strToSub []byte, flags int) []byte {
+	xattrRegex := regexp.MustCompile(ExternalKeyXattr)
+	retBytes := xattrRegex.ReplaceAllLiteral(orig, strToSub)
+
+	return retBytes
 }

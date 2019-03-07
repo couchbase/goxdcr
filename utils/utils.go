@@ -390,8 +390,7 @@ func (u *Utilities) FilterExpressionMatchesDoc(expression, docId, username, pass
 				return nil, err
 			}
 
-			// This isn't called from UI enough to warrant datapool
-			bodySlice, err, _ = base.AddXattrToBeFiltered(bodySlice, xattrSlice, nil, nil)
+			bodySlice, err = base.AddXattrToBeFilteredWithoutDP(bodySlice, xattrSlice)
 			if err != nil {
 				err = fmt.Errorf("Error adding doc %v xattributes to be filtered: %v", docId, err.Error())
 				return nil, err
@@ -399,7 +398,8 @@ func (u *Utilities) FilterExpressionMatchesDoc(expression, docId, username, pass
 		}
 
 		if base.FilterContainsKeyExpression(expression) {
-			bodySlice, err, _ = base.AddKeyToBeFiltered(bodySlice, []byte(docId), nil, nil)
+			testBytes := []byte(docId)
+			bodySlice, err, _ = base.AddKeyToBeFiltered(bodySlice, testBytes, nil, nil, len(testBytes)-1)
 			if err != nil {
 				err = fmt.Errorf("Error adding doc %v ID to be filtered: %v", docId, err.Error())
 			}
@@ -2720,7 +2720,7 @@ func (u *Utilities) getAdditionalErrorMessage(statusCode int, username string) s
 	return errMsg
 }
 
-func decompressSnappyBody(incomingBody, key []byte, dp DataPoolIface, slicesToBeReleased [][]byte) ([]byte, error, string, int64) {
+func decompressSnappyBody(incomingBody, key []byte, dp DataPoolIface, slicesToBeReleased *[][]byte) ([]byte, error, string, int64) {
 	var dpFailedCnt int64
 	lenOfDecodedData, err := snappy.DecodedLen(incomingBody)
 	if err != nil {
@@ -2733,7 +2733,7 @@ func decompressSnappyBody(incomingBody, key []byte, dp DataPoolIface, slicesToBe
 		body = make([]byte, 0, uncompressedBodySize)
 		dpFailedCnt = int64(uncompressedBodySize)
 	} else {
-		slicesToBeReleased = append(slicesToBeReleased, body)
+		*slicesToBeReleased = append(*slicesToBeReleased, body)
 	}
 
 	body, err = snappy.Decode(body, incomingBody)
@@ -2743,7 +2743,7 @@ func decompressSnappyBody(incomingBody, key []byte, dp DataPoolIface, slicesToBe
 	return body, err, "", dpFailedCnt
 }
 
-func getBodySlice(incomingBody, key []byte, dp DataPoolIface, slicesToBeReleased [][]byte) ([]byte, error, int64) {
+func getBodySlice(incomingBody, key []byte, dp DataPoolIface, slicesToBeReleased *[][]byte) ([]byte, error, int64) {
 	var dpFailedCnt int64
 	bodySize := uint64(len(incomingBody) + len(key) + base.AddFilterKeyExtraBytes)
 	body, err := dp.GetByteSlice(bodySize)
@@ -2751,23 +2751,97 @@ func getBodySlice(incomingBody, key []byte, dp DataPoolIface, slicesToBeReleased
 		body = make([]byte, 0, bodySize)
 		dpFailedCnt = int64(bodySize)
 	}
-	slicesToBeReleased = append(slicesToBeReleased, body)
+	*slicesToBeReleased = append(*slicesToBeReleased, body)
 	copy(body, incomingBody)
 	return body, nil, dpFailedCnt
 }
 
-func processXattribute(body, key []byte, shouldSkipInsert bool, dp DataPoolIface, slicesToBeReleased [][]byte) ([]byte, error, int64) {
-	var pos uint32
+func stripAndPrependXattribute(body, key []byte, xattrSize uint32, dp DataPoolIface, slicesToBeReleased *[][]byte) ([]byte, error, int64) {
+	var dpFailedCnt int64
+	actualBody := body[xattrSize+4:]
+
+	bodySize := uint64(int(xattrSize) + 4 + len(body) + base.AddFilterXattrExtraBytes)
+
+	combinedBody, err := dp.GetByteSlice(bodySize)
+	if err != nil {
+		combinedBody = make([]byte, 0, bodySize)
+		dpFailedCnt += int64(bodySize)
+	} else {
+		*slicesToBeReleased = append(*slicesToBeReleased, combinedBody)
+	}
+
+	// Prereq check
+	if actualBody[0] != '{' {
+		return nil, base.ErrorInvalidInput, dpFailedCnt
+	}
+
+	// Current body looks like (spaces added for readability):
+	// { key : val }
+	// Want to insert xattr at the beginning so "combinedBody" looks like:
+	// { XdcrInternalXattrKey : { xattrKey : xattrVal } , key : val }
+
+	// { XdcrInternalXattrKey :
+	combinedBodyPos := 0
+	combinedBody, combinedBodyPos = base.WriteJsonRawMsg(combinedBody, base.CachedInternalKeyXattrByteSlice, combinedBodyPos, true /*key*/, base.CachedInternalKeyXattrByteSize, false /*needQuotes*/, combinedBodyPos == 0 /*firstKey*/)
+
+	// { XdcrInternalXattrKey : { xattrKey : xattrVal }
+	// Followed by uint32 -> key -> NUL -> value -> NUL (repeat)
+	var pos uint32 = 4 // skip the first 4 bytes, which is the size of the xattr
 	var separator uint32
+	for pos < xattrSize+4 {
+		pos = pos + 4
+
+		// Search for end of key
+		for separator = pos; body[separator] != '\x00'; separator++ {
+			if separator >= xattrSize+4 {
+				return nil, fmt.Errorf("For document %v%v%v, Unable to correctly parse xattr to find a xattr key", base.UdTagBegin, string(key), base.UdTagEnd), dpFailedCnt
+			}
+		}
+		// Note the first time through this loop, pos == 8
+		combinedBody, combinedBodyPos = base.WriteJsonRawMsg(combinedBody, body[pos:separator], combinedBodyPos, true /*key*/, len(body[pos:separator]), false /*needsQuotes*/, pos == 8 /*firstKey*/)
+		pos = separator + 1
+
+		// Search for end of value
+		for separator = pos; body[separator] != '\x00'; separator++ {
+			if separator >= xattrSize+4 {
+				return nil, fmt.Errorf("For document %v%v%v, Unable to correctly parse xattr to find value for xattr key %v%v%v", base.UdTagBegin, string(key), base.UdTagEnd, base.UdTagBegin, key, base.UdTagEnd), dpFailedCnt
+			}
+		}
+		combinedBody, combinedBodyPos = base.WriteJsonRawMsg(combinedBody, body[pos:separator], combinedBodyPos, false, len(body[pos:separator]), false, false)
+
+		// separator should be pointing at a 0 byte. Next uint32 is after this byte
+		pos = separator + 1
+	}
+	// Currently:                                     v - combinedBodyPos
+	// { XdcrInternalXattrKey : { xattrKey : xattrVal }
+
+	// Targeted:                                        v - combinedBodyPos
+	// { XdcrInternalXattrKey : { xattrKey : xattrVal },
+	combinedBodyPos++
+	combinedBody[combinedBodyPos] = ','
+	combinedBodyPos++
+
+	// ActualBody:
+	// { key : val }
+	// targeted combinedBody:
+	// { XdcrInternalXattrKey : { xattrKey : xattrVal }, key : val }
+	copy(combinedBody[combinedBodyPos:], actualBody[1:])
+
+	return combinedBody, nil, dpFailedCnt
+}
+
+func processXattribute(body, key []byte, shouldSkipInsert bool, dp DataPoolIface, slicesToBeReleased *[][]byte) ([]byte, error, int64) {
+	var pos uint32
+	//	var separator uint32
 	var dpFailedCnt int64
 	var failedCnt int64
+	var err error
 
 	//	first uint32 in the body contains the size of the entire XATTR section
 	totalXattrSize := binary.BigEndian.Uint32(body[pos : pos+4])
-	maxDocSizeBytes := uint32(20 << 20)
 	// Couchbase doc size is max of 20MB. Xattribute count against this limit.
 	// So if total xattr size is greater than this limit, then something is wrong
-	if totalXattrSize > maxDocSizeBytes {
+	if totalXattrSize > base.MaxDocSizeByte {
 		return nil, fmt.Errorf("For document %v%v%v, unable to correctly parse xattribute from DCP packet. Xattr size determined to be %v bytes, which is invalid", base.UdTagBegin, string(key), base.UdTagEnd, totalXattrSize), dpFailedCnt
 	}
 	pos = pos + 4
@@ -2777,72 +2851,21 @@ func processXattribute(body, key []byte, shouldSkipInsert bool, dp DataPoolIface
 		newBody := body[totalXattrSize+4:]
 		body = newBody
 	} else {
-		var xattrSlicePos int
-		bodySize := uint64(totalXattrSize + 4)
-		xattrSlice, err := dp.GetByteSlice(bodySize)
-		if err != nil {
-			xattrSlice = make([]byte, 0, bodySize)
-			dpFailedCnt += int64(bodySize)
-		} else {
-			slicesToBeReleased = append(slicesToBeReleased, xattrSlice)
-		}
-
-		// Followed by uint32 -> key -> NUL -> value -> NUL (repeat)
-		for pos < totalXattrSize {
-			pos = pos + 4
-
-			// Search for end of key
-			for separator = pos; body[separator] != '\x00'; separator++ {
-				if separator >= maxDocSizeBytes {
-					return nil, fmt.Errorf("For document %v%v%v, Unable to correctly parse xattr to find a xattr key", base.UdTagBegin, string(key), base.UdTagEnd), dpFailedCnt
-				}
-			}
-			xattrSlice, xattrSlicePos = base.WriteJsonRawMsg(xattrSlice, body[pos:separator], xattrSlicePos, true, len(body[pos:separator]), false)
-			pos = pos + (separator - pos + 1)
-
-			// Search for end of value
-			for separator = pos; body[separator] != '\x00'; separator++ {
-				if separator >= maxDocSizeBytes {
-					return nil, fmt.Errorf("For document %v%v%v, Unable to correctly parse xattr to find value for xattr key %v%v%v", base.UdTagBegin, string(key), base.UdTagEnd, base.UdTagBegin, key, base.UdTagEnd), dpFailedCnt
-				}
-			}
-			xattrSlice, xattrSlicePos = base.WriteJsonRawMsg(xattrSlice, body[pos:separator], xattrSlicePos, false, len(body[pos:separator]), false)
-
-			// separator should be pointing at a 0 byte. Next uint32 is after this byte
-			pos = pos + (separator - pos + 1)
-		}
-
-		// Once we're done with xAttribute parsing, rest is body
-		body = body[pos:]
-
-		bodySize = uint64(len(xattrSlice) + len(body) + base.AddFilterXattrExtraBytes)
-		newBodySlice, err := dp.GetByteSlice(bodySize)
-		if err != nil {
-			newBodySlice = make([]byte, 0, bodySize)
-			dpFailedCnt += int64(bodySize)
-		} else {
-			slicesToBeReleased = append(slicesToBeReleased, newBodySlice)
-		}
-		copy(newBodySlice, body)
-		body = newBodySlice
-
-		// Add Xattr to body
-		body, err, failedCnt = base.AddXattrToBeFiltered(body, xattrSlice, dp.GetByteSlice, slicesToBeReleased)
-		dpFailedCnt += failedCnt
-		if err != nil {
-			return nil, fmt.Errorf("For document %v%v%v Unable to add xattr to body as the body may be malformed JSON", base.UdTagBegin, string(key), base.UdTagEnd), dpFailedCnt
+		body, err, failedCnt = stripAndPrependXattribute(body, key, totalXattrSize, dp, slicesToBeReleased)
+		if failedCnt > 0 {
+			dpFailedCnt += failedCnt
 		}
 	}
-	return body, nil, dpFailedCnt
+	return body, err, dpFailedCnt
 }
 
-func processKeyOnlyForFiltering(key []byte, dp DataPoolIface, slicesToBeReleased [][]byte) ([]byte, int64) {
+func processKeyOnlyForFiltering(key []byte, dp DataPoolIface, slicesToBeReleased *[][]byte) ([]byte, int64) {
 	var body []byte
 	// "key"
 	docKeySize := uint64(len(key) + 2)
 	newDocKeyBody, err := dp.GetByteSlice(docKeySize)
 	if err == nil {
-		slicesToBeReleased = append(slicesToBeReleased, newDocKeyBody)
+		*slicesToBeReleased = append(*slicesToBeReleased, newDocKeyBody)
 		// {  : " " } <- 5
 		bodySize := docKeySize + uint64(5+len(base.ReservedWordsMap[base.ExternalKeyKey]))
 		body, err = dp.GetByteSlice(bodySize)
@@ -2853,7 +2876,7 @@ func processKeyOnlyForFiltering(key []byte, dp DataPoolIface, slicesToBeReleased
 		return body, int64(len(body))
 	}
 
-	slicesToBeReleased = append(slicesToBeReleased, body)
+	*slicesToBeReleased = append(*slicesToBeReleased, body)
 	// Because we are using UprEvent.Key as a body, and the string hasn't been serialized,
 	// we need to enclose it in " "
 	newDocKeyBody[0] = '"'
@@ -2861,12 +2884,12 @@ func processKeyOnlyForFiltering(key []byte, dp DataPoolIface, slicesToBeReleased
 	newDocKeyBody[len(key)+1] = '"'
 
 	var bodyPos int
-	body, bodyPos = base.WriteJsonRawMsg(body, base.CachedInternalKeyKeyByteSlice, bodyPos, true /*key*/, base.CachedInternalKeyKeyByteSize, false)
-	body, bodyPos = base.WriteJsonRawMsg(body, newDocKeyBody, bodyPos, false /*uprEvent key as value*/, int(docKeySize), false)
+	body, bodyPos = base.WriteJsonRawMsg(body, base.CachedInternalKeyKeyByteSlice, bodyPos, true /*key*/, base.CachedInternalKeyKeyByteSize, false, bodyPos == 0)
+	body, bodyPos = base.WriteJsonRawMsg(body, newDocKeyBody, bodyPos, false /*uprEvent key as value*/, int(docKeySize), false /*valueNeedsQuotes*/, false /*firstKey*/)
 	return body, 0
 }
 
-func (u *Utilities) ProcessUprEventForFiltering(uprEvent *mcc.UprEvent, dp DataPoolIface, flags base.FilterFlagType) ([]byte, error, string, ReleaseMemFunc, int64) {
+func (u *Utilities) ProcessUprEventForFiltering(uprEvent *mcc.UprEvent, dp DataPoolIface, flags base.FilterFlagType, slicesToBeReleased *[][]byte) ([]byte, error, string, ReleaseMemFunc, int64) {
 	var body []byte
 	var err error
 	var additionalErrDesc string
@@ -2878,17 +2901,17 @@ func (u *Utilities) ProcessUprEventForFiltering(uprEvent *mcc.UprEvent, dp DataP
 
 	// We cannot tell how much Xattr is using until we deflate - so we have to just allocate >1 slices if
 	// that's the case
-	slicesToBeReleased := make([][]byte, 0, 2)
 	releaseFunc := func() {
-		for _, aSlice := range slicesToBeReleased {
+		for _, aSlice := range *slicesToBeReleased {
 			dp.PutByteSlice(aSlice)
 		}
+		*slicesToBeReleased = (*slicesToBeReleased)[:0]
 	}
 
 	// Simplify things
 	bodyContainsXattr := uprEvent.DataType&mcc.XattrDataType > 0
 	shouldSkipXattr := flags&base.FilterFlagSkipXattr > 0
-	needToProcessBody := bodyContainsXattr || (uprEvent.DataType&mcc.JSONDataType > 0 && flags&base.FilterFlagKeyOnly == 0)
+	needToProcessBody := flags&base.FilterFlagKeyOnly == 0 && (bodyContainsXattr || uprEvent.DataType&mcc.JSONDataType > 0)
 	shouldSkipKey := flags&base.FilterFlagSkipKey > 0
 	bodyIsCompressed := uprEvent.DataType&mcc.SnappyDataType > 0
 
@@ -2901,17 +2924,17 @@ func (u *Utilities) ProcessUprEventForFiltering(uprEvent *mcc.UprEvent, dp DataP
 		} else {
 			body, err, totalFailedCnt = getBodySlice(uprEvent.Value, uprEvent.Key, dp, slicesToBeReleased)
 		}
-	}
 
-	if bodyContainsXattr {
-		var failedCnt int64
-		body, err, failedCnt = processXattribute(body, uprEvent.Key, shouldSkipXattr, dp, slicesToBeReleased)
-		if failedCnt > 0 {
-			totalFailedCnt += failedCnt
-		}
-		if err != nil {
-			additionalErrDesc = fmt.Sprintf("For document %v%v%v Unable to parse xattribute: %v", base.UdTagBegin, string(uprEvent.Key), base.UdTagEnd, err)
-			return nil, base.ErrorFilterParsingError, additionalErrDesc, releaseFunc, totalFailedCnt
+		if bodyContainsXattr {
+			var failedCnt int64
+			body, err, failedCnt = processXattribute(body, uprEvent.Key, shouldSkipXattr, dp, slicesToBeReleased)
+			if failedCnt > 0 {
+				totalFailedCnt += failedCnt
+			}
+			if err != nil {
+				additionalErrDesc = fmt.Sprintf("For document %v%v%v Unable to parse xattribute: %v", base.UdTagBegin, string(uprEvent.Key), base.UdTagEnd, err)
+				return nil, base.ErrorFilterParsingError, additionalErrDesc, releaseFunc, totalFailedCnt
+			}
 		}
 	}
 
@@ -2925,7 +2948,12 @@ func (u *Utilities) ProcessUprEventForFiltering(uprEvent *mcc.UprEvent, dp DataP
 			}
 		} else {
 			// Add Key to Body
-			body, err, failedCnt = base.AddKeyToBeFiltered(body, uprEvent.Key, dp.GetByteSlice, slicesToBeReleased)
+			var endValue int = len(body) - 1
+			if needToProcessBody && bodyIsCompressed {
+				// When we decompress snappy, the value gotten from the datapool will have filled up 0 bytes, which throws off the len
+				endValue = -1
+			}
+			body, err, failedCnt = base.AddKeyToBeFiltered(body, uprEvent.Key, dp.GetByteSlice, slicesToBeReleased, endValue)
 			if failedCnt > 0 {
 				totalFailedCnt += failedCnt
 			}

@@ -89,7 +89,7 @@ func (p *DataPool) GetByteSlice(sizeRequested uint64) ([]byte, error) {
 func (p *DataPool) PutByteSlice(doneSlice []byte) {
 	sliceCap := uint64(cap(doneSlice))
 	i := sort.Search(NumOfSizes, func(i int) bool {
-		return sliceCap == p.byteSlicePoolClasses[i]
+		return sliceCap <= p.byteSlicePoolClasses[i]
 	})
 
 	if i >= 0 && i < NumOfSizes {

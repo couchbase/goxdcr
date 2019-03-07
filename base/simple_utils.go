@@ -972,14 +972,14 @@ func addKeyToBeFilteredWithoutDP(currentValue, key []byte) ([]byte, error) {
 // For advanced filtering, need to populate key into the actual data to be filtered
 // If we can try not to move data and just use datapool and append to the end, it may be still faster
 // to have gojsonsm step through the JSON than to do memory move
-func AddKeyToBeFiltered(currentValue, key []byte, dpGetter DpGetterFunc, toBeReleased [][]byte) ([]byte, error, int64) {
+func AddKeyToBeFiltered(currentValue, key []byte, dpGetter DpGetterFunc, toBeReleased *[][]byte, currentValueEndBody int) ([]byte, error, int64) {
 	if dpGetter != nil {
 		// { "bodyKey":bodyValue...
 		// 	,"KeyKey":"<Key>" 	<- sizeToGet
 		// }
 		sizeToGet := len(ReservedWordsMap[ExternalKeyKey]) + len(key) + 6 + len(currentValue)
-		dpSlice, err := AppendSingleKVToAllocatedBody(currentValue, CachedInternalKeyKeyByteSlice,
-			key, dpGetter, toBeReleased, uint64(sizeToGet), CachedInternalKeyKeyByteSize, len(key), true)
+		dpSlice, err, _ := AppendSingleKVToAllocatedBody(currentValue, CachedInternalKeyKeyByteSlice,
+			key, dpGetter, toBeReleased, uint64(sizeToGet), CachedInternalKeyKeyByteSize, len(key), true, currentValueEndBody)
 		if err != nil {
 			retBytes, err := addKeyToBeFilteredWithoutDP(currentValue, key)
 			return retBytes, err, int64(len(retBytes))
@@ -993,42 +993,50 @@ func AddKeyToBeFiltered(currentValue, key []byte, dpGetter DpGetterFunc, toBeRel
 
 var AddFilterXattrExtraBytes int = 4 + len(ReservedWordsMap[ExternalKeyXattr])
 
-func AppendSingleKVToAllocatedBody(currentValue, key, value []byte, dpGetter DpGetterFunc, toBeReleased [][]byte, sizeToGet uint64, keySize, valueSize int, valueNeedsQuotes bool) ([]byte, error) {
-	var pos int
-	var endPos int
-	var dpSlice []byte
-	var err error
-	dpSlice, err = dpGetter(sizeToGet)
-	if err != nil {
-		return nil, err
-	}
-	if toBeReleased != nil {
-		toBeReleased = append(toBeReleased, dpSlice)
-	}
-	copy(dpSlice[0:], currentValue[:])
-	// Scan backwards until the last }
-	for pos = len(dpSlice) - 1; pos > 0 && dpSlice[pos] != '}'; pos-- {
-	}
-	if pos == 0 {
-		return currentValue, ErrorInvalidInput
-	}
-
-	dpSlice, pos = WriteJsonRawMsg(dpSlice, key, pos, true /*isKey*/, keySize, false)
-	dpSlice, pos = WriteJsonRawMsg(dpSlice, value, pos, false, valueSize, valueNeedsQuotes)
-
-	// Add one more '}
-	for endPos = len(dpSlice) - 1; endPos > 0 && dpSlice[endPos] != '}'; endPos-- {
-	}
-
-	if endPos == 0 || endPos == len(dpSlice)-1 {
-		return currentValue, ErrorInvalidInput
-	}
-	dpSlice[endPos+1] = '}'
-
-	return dpSlice, nil
+func appendKVWriteToSlice(target, source []byte) []byte {
+	copy(target, source)
+	return target
 }
 
-func addXattrToBeFilteredWithoutDP(currentValue, xAttr []byte) ([]byte, error) {
+func appendKVWriteKeyValue(dpSlice, key, value []byte, pos, keySize, valueSize int, valueNeedsQuotes bool) ([]byte, int) {
+	dpSlice, pos = WriteJsonRawMsg(dpSlice, key, pos, true /*isKey*/, keySize, false, pos == 0)
+	dpSlice, pos = WriteJsonRawMsg(dpSlice, value, pos, false, valueSize, valueNeedsQuotes, pos == 0)
+	// pos points to the last "}"
+	return dpSlice, pos
+}
+
+func AppendSingleKVToAllocatedBody(currentValue, key, value []byte, dpGetter DpGetterFunc, toBeReleased *[][]byte, sizeToGet uint64, keySize, valueSize int, valueNeedsQuotes bool, currentValueEndBracket int) ([]byte, error, int) {
+	var dpSlice []byte
+	var err error
+	var pos int
+	dpSlice, err = dpGetter(sizeToGet)
+	if err != nil {
+		return nil, err, -1
+	}
+	if toBeReleased != nil {
+		*toBeReleased = append(*toBeReleased, dpSlice)
+	}
+	dpSlice = appendKVWriteToSlice(dpSlice, currentValue)
+	if currentValueEndBracket > 0 {
+		pos = currentValueEndBracket
+	} else {
+		// Scan backwards until the last }
+		pos = GetLastBracketPos(dpSlice, len(dpSlice))
+		if pos <= 0 {
+			return currentValue, ErrorInvalidInput, -1
+		}
+	}
+
+	dpSlice, pos = appendKVWriteKeyValue(dpSlice, key, value, pos, keySize, valueSize, valueNeedsQuotes)
+
+	// Add one more '}
+	//	pos++
+	//	dpSlice[pos] = '}'
+
+	return dpSlice, err, pos
+}
+
+func AddXattrToBeFilteredWithoutDP(currentValue, xAttr []byte) ([]byte, error) {
 	// Always insert Xattr at the end, no need for comma at the end
 	xattrBytesToBeInserted := json.RawMessage(fmt.Sprintf(",\"%v\":%v", ReservedWordsMap[ExternalKeyXattr], string(xAttr)))
 	// Look for reverse pos, for the last }
@@ -1041,32 +1049,22 @@ func addXattrToBeFilteredWithoutDP(currentValue, xAttr []byte) ([]byte, error) {
 	return CleanInsert(currentValue, xattrBytesToBeInserted, i)
 }
 
-func AddXattrToBeFiltered(currentValue []byte, xAttr []byte, dpGetter DpGetterFunc, toBeReleased [][]byte) ([]byte, error, int64) {
-	if currentValue[0] != '{' {
-		return currentValue, ErrorInvalidInput, 0
+func getSizeToGetFromDP(currentValue, xAttr []byte) (sizeToGet, xAttrSize int) {
+	// { "bodyKey":bodyValue...
+	// 	,"XattrKey":<xattr> 	<- sizeToGet
+	// }
+	xAttrSize = len(xAttr)
+	sizeToGet = CachedInternalKeyXattrByteSize + xAttrSize + len(currentValue) + 4
+	return
+}
+
+func GetLastBracketPos(slice []byte, size int) (valueSize int) {
+	for valueSize = size - 1; valueSize > 0 && slice[valueSize] != '}'; valueSize-- {
 	}
-	var err error
-	var dpSlice []byte
-	if dpGetter != nil {
-		var valueSize int
-		// { "bodyKey":bodyValue...
-		// 	,"XattrKey":<xattr> 	<- sizeToGet
-		// }
-		sizeToGet := len(ReservedWordsMap[ExternalKeyXattr]) + len(xAttr) + 4 + len(currentValue)
-		// Because xattr is most likely a dp slice, we need to do this to ensure we don't write extra NUL bytes
-		for valueSize = len(xAttr) - 1; valueSize > 0 && xAttr[valueSize] != '}'; valueSize-- {
-		}
-		dpSlice, err = AppendSingleKVToAllocatedBody(currentValue, CachedInternalKeyXattrByteSlice, xAttr, dpGetter, toBeReleased, uint64(sizeToGet),
-			CachedInternalKeyXattrByteSize, valueSize, false)
-		if err != nil {
-			retBytes, err := addXattrToBeFilteredWithoutDP(currentValue, xAttr)
-			return retBytes, err, int64(len(retBytes))
-		}
-		return dpSlice, err, 0
-	} else {
-		retBytes, err := addXattrToBeFilteredWithoutDP(currentValue, xAttr)
-		return retBytes, err, int64(len(retBytes))
+	if valueSize == 0 && slice[valueSize] != '}' {
+		valueSize = -1
 	}
+	return
 }
 
 func RetrieveUprJsonAndConvert(fileName string) (*mcc.UprEvent, error) {
@@ -1119,7 +1117,7 @@ func FilterContainsKeyExpression(expression string) bool {
 // A = {NOT }* Key Op "Value"
 // B = {NOT }* REGEXP_CONTAINS(Key, "regex")
 // ^((A|B) ((AND|OR) (A|B))*)$
-var singleAwesomeKeyOnlyRegex *regexp.Regexp = regexp.MustCompile(fmt.Sprintf("^(((((NOT *)*%v *(=|>|>=|<|<=) *\"[a-zA-Z0-9_]*\") *|((NOT *)*REGEXP_CONTAINS\\( *%v *, *\".*\" *\\)) *))((AND|OR) *(((NOT *)*%v *(=|>|>=|<|<=) *\"[a-zA-Z0-9_]*\") *|((NOT *)*REGEXP_CONTAINS\\( *%v *, *\".*\" *\\)) *))*)$", ExternalKeyKey, ExternalKeyKey, ExternalKeyKey, ExternalKeyKey))
+var singleAwesomeKeyOnlyRegex *regexp.Regexp = regexp.MustCompile(fmt.Sprintf("^(((((NOT *)*%v *(=|>|>=|<|<=) *\"[a-zA-Z0-9_-]*\") *|((NOT *)*REGEXP_CONTAINS\\( *%v *, *\".*\" *\\)) *))((AND|OR) *(((NOT *)*%v *(=|>|>=|<|<=) *\"[a-zA-Z0-9_-]*\") *|((NOT *)*REGEXP_CONTAINS\\( *%v *, *\".*\" *\\)) *))*)$", ExternalKeyKey, ExternalKeyKey, ExternalKeyKey, ExternalKeyKey))
 
 // NOTE - takes in user entered META().id as key
 func FilterOnlyContainsKeyExpression(expression string) bool {
@@ -1172,12 +1170,13 @@ func FilterErrorIsRecoverable(err error) bool {
 //   size - In cases where bytesToWrite originated from dataPool, the length may not reflect the actual
 //			length of the data (i.e. string). Use this field to avoid calling len and avoid out of bounds error
 //   valueNeedsQuotes - If the []byte of bytesToWrite is a string value but the string doesn't contain ", surround it with them
+//   isFirstKey - if the key is the first one, then add an open bracket. Otherwise, convert prev } to a comma for appending a new key
 // Returns:
 // 	 original byte slice reference
 // 	 updated position
-func WriteJsonRawMsg(allocatedBytes, bytesToWrite []byte, pos int, isKey bool, size int, valueNeedsQuotes bool) ([]byte, int) {
+func WriteJsonRawMsg(allocatedBytes, bytesToWrite []byte, pos int, isKey bool, size int, valueNeedsQuotes bool, isFirstKey bool) ([]byte, int) {
 	if isKey {
-		if pos == 0 {
+		if isFirstKey {
 			// Need to do an open bracket
 			allocatedBytes[pos] = '{'
 			pos++

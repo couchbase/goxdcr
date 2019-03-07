@@ -29,6 +29,7 @@ type Filter struct {
 	utils                    utilities.UtilsIface
 	dp                       utilities.DataPoolIface
 	flags                    base.FilterFlagType
+	slicesToBeReleasedBuf    [][]byte
 }
 
 func NewFilter(id string, filterExpression string, utils utilities.UtilsIface) (*Filter, error) {
@@ -46,6 +47,7 @@ func NewFilter(id string, filterExpression string, utils utilities.UtilsIface) (
 		filterExpressionInternal: base.ReplaceKeyWordsForExpression(filterExpression),
 		utils:                    utils,
 		dp:                       dpPtr,
+		slicesToBeReleasedBuf:    make([][]byte, 0, 2),
 	}
 
 	matcher, err := base.GoJsonsmGetFilterExprMatcher(filter.filterExpressionInternal)
@@ -87,10 +89,11 @@ func (filter *Filter) FilterUprEvent(uprEvent *mcc.UprEvent) (bool, error, strin
 		return true, nil, "", 0
 	}
 
-	sliceToBeFiltered, err, errDesc, releaseFunc, failedDpCnt := filter.utils.ProcessUprEventForFiltering(uprEvent, filter.dp, filter.flags)
+	sliceToBeFiltered, err, errDesc, releaseFunc, failedDpCnt := filter.utils.ProcessUprEventForFiltering(uprEvent, filter.dp, filter.flags, &filter.slicesToBeReleasedBuf)
 	if releaseFunc != nil {
 		defer releaseFunc()
 	}
+
 	if err != nil {
 		if err == base.FilterForcePassThrough {
 			return true, nil, "", failedDpCnt
@@ -102,6 +105,7 @@ func (filter *Filter) FilterUprEvent(uprEvent *mcc.UprEvent) (bool, error, strin
 	if err != nil {
 		errDesc = fmt.Sprintf("gojsonsm filter returned err for document %v%v%v", base.UdTagBegin, string(uprEvent.Key), base.UdTagEnd)
 	}
+
 	return matched, err, errDesc, failedDpCnt
 }
 

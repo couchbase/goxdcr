@@ -183,6 +183,10 @@ func getPoolsNodesMock(external bool) (map[string]interface{}, error) {
 
 }
 
+func MakeSlicesBuf() [][]byte {
+	return make([][]byte, 0, 2)
+}
+
 func TestGetNodeListWithMinInfo(t *testing.T) {
 	fmt.Println("============== Test case start: TestGetNodeListWithMinInfo =================")
 	assert := assert.New(t)
@@ -615,7 +619,8 @@ func TestStripXattrAndCompression(t *testing.T) {
 	assert.NotNil(uprEvent)
 	assert.Equal(docKey, string(uprEvent.Key))
 	assert.Equal(checkMap, uprEvent.Value)
-	_, err, _, releaseFunc, _ := testUtils.ProcessUprEventForFiltering(uprEvent, dp, base.FilterFlagType(0) /*skipXattr*/)
+	slices := MakeSlicesBuf()
+	_, err, _, releaseFunc, _ := testUtils.ProcessUprEventForFiltering(uprEvent, dp, base.FilterFlagType(0) /*skipXattr*/, &slices)
 	assert.Nil(err)
 	defer releaseFunc()
 
@@ -624,7 +629,7 @@ func TestStripXattrAndCompression(t *testing.T) {
 	assert.NotNil(uprEvent)
 	assert.Equal(docKey, string(uprEventCompressed.Key))
 	assert.NotEqual(checkMap, uprEventCompressed.Value)
-	_, err, _, releaseFunc2, _ := testUtils.ProcessUprEventForFiltering(uprEventCompressed, dp, base.FilterFlagType(0) /*skipXattr*/)
+	_, err, _, releaseFunc2, _ := testUtils.ProcessUprEventForFiltering(uprEventCompressed, dp, base.FilterFlagType(0) /*skipXattr*/, &slices)
 	defer releaseFunc2()
 
 	assert.Nil(err)
@@ -633,7 +638,7 @@ func TestStripXattrAndCompression(t *testing.T) {
 	assert.Nil(err)
 	assert.NotNil(uprEventXattr)
 	assert.Equal(docKey, string(uprEventXattr.Key))
-	_, err, _, releaseFunc3, _ := testUtils.ProcessUprEventForFiltering(uprEventXattr, dp, base.FilterFlagType(0) /*skipXattr*/)
+	_, err, _, releaseFunc3, _ := testUtils.ProcessUprEventForFiltering(uprEventXattr, dp, base.FilterFlagType(0) /*skipXattr*/, &slices)
 	assert.Nil(err)
 	defer releaseFunc3()
 
@@ -642,7 +647,7 @@ func TestStripXattrAndCompression(t *testing.T) {
 	assert.NotNil(uprEventXattrCompressed)
 	assert.Equal(docKey, string(uprEventXattrCompressed.Key))
 	assert.NotEqual(checkMap, uprEventXattrCompressed.Value)
-	_, err, _, releaseFunc4, _ := testUtils.ProcessUprEventForFiltering(uprEventXattrCompressed, dp, base.FilterFlagType(0) /*skipXattr*/)
+	_, err, _, releaseFunc4, _ := testUtils.ProcessUprEventForFiltering(uprEventXattrCompressed, dp, base.FilterFlagType(0) /*skipXattr*/, &slices)
 	assert.Nil(err)
 	defer releaseFunc4()
 
@@ -665,7 +670,8 @@ func TestProcessBinaryFile(t *testing.T) {
 	checkSlice, err := json.Marshal(checkMap)
 	assert.Nil(err)
 
-	retSlice, err, _, _, _ := testUtils.ProcessUprEventForFiltering(uprEvent, dp, base.FilterFlagType(0) /*skipXattr*/)
+	slices := MakeSlicesBuf()
+	retSlice, err, _, _, _ := testUtils.ProcessUprEventForFiltering(uprEvent, dp, base.FilterFlagType(0) /*skipXattr*/, &slices)
 	assert.Nil(err)
 
 	assert.Equal(checkSlice, bytes.Trim(retSlice, "\x00"))

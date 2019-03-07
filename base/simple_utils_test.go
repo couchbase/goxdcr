@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"io/ioutil"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -149,11 +150,11 @@ func TestCustomRawJson(t *testing.T) {
 
 	for k, v := range retMap {
 		keySlice := []byte(k)
-		allocatedBytes, pos = WriteJsonRawMsg(allocatedBytes, keySlice, pos, true /*isKey*/, len(keySlice), false)
+		allocatedBytes, pos = WriteJsonRawMsg(allocatedBytes, keySlice, pos, true /*isKey*/, len(keySlice), false, pos == 0 /*firstKey*/)
 
 		marshaledValueBytes, err := json.Marshal(v)
 		assert.Nil(err)
-		allocatedBytes, pos = WriteJsonRawMsg(allocatedBytes, marshaledValueBytes, pos, false /*isKey*/, len(marshaledValueBytes), false)
+		allocatedBytes, pos = WriteJsonRawMsg(allocatedBytes, marshaledValueBytes, pos, false /*isKey*/, len(marshaledValueBytes), false, pos == 0 /*firstKey*/)
 	}
 
 	checkMap := make(map[string]interface{})
@@ -166,4 +167,35 @@ func TestCustomRawJson(t *testing.T) {
 		assert.True(reflect.DeepEqual(checkValue, v))
 	}
 	fmt.Println("============== Test case end: TestCustomRawJson =================")
+}
+
+func TestSkipXattrAndStringsConversionNonPcre(t *testing.T) {
+	fmt.Println("============== Test case start: TestSkipXattrAndStringsConversionNonPcre =================")
+	assert := assert.New(t)
+	InitPcreVars()
+
+	userFilter := "META().id = \"something\" AND META().xattrs.testXattrKey EXISTS"
+	assert.True(FilterContainsXattrExpression(userFilter))
+	assert.True(FilterContainsKeyExpression(userFilter))
+
+	filterExpressionInternal := ReplaceKeyWordsForExpression(userFilter)
+
+	assert.False(strings.Contains(filterExpressionInternal, ExternalKeyXattrContains))
+	assert.False(strings.Contains(filterExpressionInternal, ExternalKeyKeyContains))
+	assert.False(strings.Contains(filterExpressionInternal, "META()"))
+
+	filterExpressionExternal := ReplaceKeyWordsForOutput(filterExpressionInternal)
+	assert.True(strings.Contains(filterExpressionExternal, "META()"))
+	// No escaped (i.e. no "META\\(\\)" )
+	assert.False(strings.Contains(filterExpressionExternal, ExternalKeyXattr))
+	assert.False(strings.Contains(filterExpressionExternal, ExternalKeyKey))
+	assert.True(strings.Contains(filterExpressionExternal, ExternalKeyXattrContains))
+	assert.True(strings.Contains(filterExpressionExternal, ExternalKeyKeyContains))
+
+	userFilter = fmt.Sprintf("REGEXP_CONTAINS(`%v`, \"^d\")", InternalKeyKey)
+	assert.False(strings.Contains(userFilter, "META()"))
+	userFilter = ReplaceKeyWordsForOutput(userFilter)
+	assert.True(strings.Contains(filterExpressionExternal, "META()"))
+
+	fmt.Println("============== Test case end: TestSkipXattrAndStringsConversionNonPcre =================")
 }
