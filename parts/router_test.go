@@ -69,7 +69,7 @@ func TestRouterRouteFunc(t *testing.T) {
 	wrappedMCRequest, err = router.ComposeMCRequest(uprEvent)
 	assert.Nil(err)
 	assert.NotNil(wrappedMCRequest)
-	checkUint = binary.BigEndian.Uint32(wrappedMCRequest.Req.Extras[0:4])
+	checkUint = binary.BigEndian.Uint32(wrappedMCRequest.Req.Extras[24:28])
 	assert.True(checkUint&base.IS_EXPIRATION > 0)
 
 	fmt.Println("============== Test case end: TestRouterRouteFunc =================")

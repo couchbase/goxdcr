@@ -134,7 +134,7 @@ func (router *Router) ComposeMCRequest(event *mcc.UprEvent) (*base.WrappedMCRequ
 		event.Opcode == mc.UPR_EXPIRATION {
 
 		extrasSize := 24
-		if router.sourceCRMode == base.CRMode_LWW {
+		if router.sourceCRMode == base.CRMode_LWW || event.Opcode == mc.UPR_EXPIRATION {
 			extrasSize = 28
 		}
 		if len(req.Extras) != extrasSize {
