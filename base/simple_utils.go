@@ -1224,3 +1224,37 @@ func GetNumberOfVbs(kvVBMap map[string][]uint16) int {
 	}
 	return numberOfVBs
 }
+
+// check whether source byte array contains the same string as target string
+// this impl avoids converting byte array to string
+func Equals(source []byte, target string) bool {
+	if len(source) != len(target) {
+		return false
+	}
+	for i := 0; i < len(target); i++ {
+		if target[i] != source[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// check whether source byte array contains a prefix which is "target + target2"
+func HasPrefix(source []byte, target string, target2 string) bool {
+	len1 := len(target)
+	len2 := len(target2)
+	if len(source) < len1+len2 {
+		return false
+	}
+	for i := 0; i < len1; i++ {
+		if target[i] != source[i] {
+			return false
+		}
+	}
+	for i := 0; i < len2; i++ {
+		if target2[i] != source[i+len1] {
+			return false
+		}
+	}
+	return true
+}

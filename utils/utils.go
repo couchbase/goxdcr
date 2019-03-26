@@ -2731,7 +2731,7 @@ func (u *Utilities) getUnauthorizedError(username string) error {
 	return errors.New(errMsg)
 }
 
-func decompressSnappyBody(incomingBody, key []byte, dp DataPoolIface, slicesToBeReleased *[][]byte) ([]byte, error, string, int64, int) {
+func decompressSnappyBody(incomingBody, key []byte, dp DataPoolIface, slicesToBeReleased *[][]byte, needExtraBytesInBody bool) ([]byte, error, string, int64, int) {
 	var dpFailedCnt int64
 	lenOfDecodedData, err := snappy.DecodedLen(incomingBody)
 	lastBodyPos := lenOfDecodedData - 1
@@ -2739,7 +2739,10 @@ func decompressSnappyBody(incomingBody, key []byte, dp DataPoolIface, slicesToBe
 		return nil, base.ErrorCompressionUnableToInflate, fmt.Sprintf("XDCR for key %v%v%v is unable to decode snappy uncompressed size: %v", base.UdTagBegin, string(key), base.UdTagEnd, err), dpFailedCnt, lastBodyPos
 	}
 
-	uncompressedBodySize := uint64(lenOfDecodedData + len(key) + base.AddFilterKeyExtraBytes)
+	uncompressedBodySize := uint64(lenOfDecodedData)
+	if needExtraBytesInBody {
+		uncompressedBodySize += uint64(len(key) + base.AddFilterKeyExtraBytes)
+	}
 	body, err := dp.GetByteSlice(uncompressedBodySize)
 	if err != nil {
 		body = make([]byte, 0, uncompressedBodySize)
@@ -2974,25 +2977,10 @@ func (u *Utilities) AddKeyToBeFiltered(currentValue, key []byte, dpGetter base.D
 	}
 }
 
-func (u *Utilities) ProcessUprEventForFiltering(uprEvent *mcc.UprEvent, dp DataPoolIface, flags base.FilterFlagType, slicesToBeReleased *[][]byte) ([]byte, error, string, ReleaseMemFunc, int64) {
-	var body []byte
+func (u *Utilities) ProcessUprEventForFiltering(uprEvent *mcc.UprEvent, body []byte, endBodyPos int, dp DataPoolIface, flags base.FilterFlagType, slicesToBeReleased *[][]byte) ([]byte, error, string, int64) {
 	var err error
 	var additionalErrDesc string
 	var totalFailedCnt int64
-	var endBodyPos int
-
-	if uprEvent == nil || dp == nil {
-		return nil, base.ErrorInvalidInput, additionalErrDesc, nil, totalFailedCnt
-	}
-
-	// We cannot tell how much Xattr is using until we deflate - so we have to just allocate >1 slices if
-	// that's the case
-	releaseFunc := func() {
-		for _, aSlice := range *slicesToBeReleased {
-			dp.PutByteSlice(aSlice)
-		}
-		*slicesToBeReleased = (*slicesToBeReleased)[:0]
-	}
 
 	// Simplify things
 	bodyContainsXattr := uprEvent.DataType&mcc.XattrDataType > 0
@@ -3011,15 +2999,18 @@ func (u *Utilities) ProcessUprEventForFiltering(uprEvent *mcc.UprEvent, dp DataP
 		(filterReferencesXattr && bodyContainsXattr)
 
 	if needToProcessBody {
-		if bodyIsCompressed {
-			body, err, additionalErrDesc, totalFailedCnt, endBodyPos = decompressSnappyBody(uprEvent.Value, uprEvent.Key, dp, slicesToBeReleased)
-			if err != nil {
-				return nil, err, additionalErrDesc, releaseFunc, totalFailedCnt
-			}
-		} else {
-			body, err, additionalErrDesc, totalFailedCnt, endBodyPos = getBodySlice(uprEvent.Value, uprEvent.Key, dp, slicesToBeReleased)
-			if err != nil {
-				return nil, err, additionalErrDesc, releaseFunc, totalFailedCnt
+		if len(body) == 0 {
+			// process/retrieve body only if it has not been passed in
+			if bodyIsCompressed {
+				body, err, additionalErrDesc, totalFailedCnt, endBodyPos = decompressSnappyBody(uprEvent.Value, uprEvent.Key, dp, slicesToBeReleased, true /*needExtraBytesInBody*/)
+				if err != nil {
+					return nil, err, additionalErrDesc, totalFailedCnt
+				}
+			} else {
+				body, err, additionalErrDesc, totalFailedCnt, endBodyPos = getBodySlice(uprEvent.Value, uprEvent.Key, dp, slicesToBeReleased)
+				if err != nil {
+					return nil, err, additionalErrDesc, totalFailedCnt
+				}
 			}
 		}
 
@@ -3038,7 +3029,7 @@ func (u *Utilities) ProcessUprEventForFiltering(uprEvent *mcc.UprEvent, dp DataP
 			}
 			if err != nil {
 				additionalErrDesc = fmt.Sprintf("For document %v%v%v Unable to parse xattribute: %v", base.UdTagBegin, string(uprEvent.Key), base.UdTagEnd, err)
-				return nil, base.ErrorFilterParsingError, additionalErrDesc, releaseFunc, totalFailedCnt
+				return nil, base.ErrorFilterParsingError, additionalErrDesc, totalFailedCnt
 			}
 		}
 	}
@@ -3059,7 +3050,7 @@ func (u *Utilities) ProcessUprEventForFiltering(uprEvent *mcc.UprEvent, dp DataP
 			}
 			if err != nil {
 				additionalErrDesc = fmt.Sprintf("For document %v%v%v Unable to add key to body as the body may be malformed JSON", base.UdTagBegin, string(uprEvent.Key), base.UdTagEnd)
-				return nil, base.ErrorFilterParsingError, additionalErrDesc, releaseFunc, totalFailedCnt
+				return nil, base.ErrorFilterParsingError, additionalErrDesc, totalFailedCnt
 			}
 		}
 	}
@@ -3068,7 +3059,7 @@ func (u *Utilities) ProcessUprEventForFiltering(uprEvent *mcc.UprEvent, dp DataP
 		// This means that the UPR Event coming in is a DCP_MUTATION but is not a JSON document
 		// In addition, user did not request filter on Xattribute, nor keys.
 		// This is a special case and should be allowed to pass through
-		return nil, base.FilterForcePassThrough, additionalErrDesc, releaseFunc, totalFailedCnt
+		return nil, base.FilterForcePassThrough, additionalErrDesc, totalFailedCnt
 	}
 
 	if endBodyPos > 0 {
@@ -3077,7 +3068,61 @@ func (u *Utilities) ProcessUprEventForFiltering(uprEvent *mcc.UprEvent, dp DataP
 		body = body[0 : endBodyPos+1]
 	}
 
-	return body, nil, additionalErrDesc, releaseFunc, totalFailedCnt
+	return body, nil, additionalErrDesc, totalFailedCnt
+}
+
+// check whether transaction xattrs exist in uprEvent
+func (u *Utilities) CheckForTransactionXattrsInUprEvent(uprEvent *mcc.UprEvent, dp DataPoolIface, slicesToBeReleased *[][]byte, needToFilterBody bool) (hasTxnXattrs bool, body []byte, endBodyPos int, err error, additionalErrDesc string, totalFailedCnt int64) {
+	// by default body is nil and endBodyPos is -1
+	endBodyPos = -1
+
+	if uprEvent.DataType&mcc.SnappyDataType > 0 {
+		body, err, additionalErrDesc, totalFailedCnt, endBodyPos = decompressSnappyBody(uprEvent.Value, uprEvent.Key, dp, slicesToBeReleased, needToFilterBody)
+		if err != nil {
+			return
+		}
+	}
+
+	if body != nil {
+		hasTxnXattrs, err = u.hasTransactionXattrs(body)
+	} else {
+		// if body is nil, decompression was not needed/performed. simply use uprEvent.Value
+		hasTxnXattrs, err = u.hasTransactionXattrs(uprEvent.Value)
+	}
+
+	if body != nil && !needToFilterBody {
+		// if needToFilterBody is false, body does not contain extra bytes for key and cannot be shared with advanced filtering
+		// pass a nil body back to be absolutely sure that body won't somehow be used by advanced filtering
+		body = nil
+		endBodyPos = -1
+	}
+
+	return
+
+}
+
+// returns
+// 1. whether body has transaction xattrs
+// 2. error
+func (u *Utilities) hasTransactionXattrs(body []byte) (bool, error) {
+	iterator, err := base.NewXattrIterator(body)
+	if err != nil {
+		return false, err
+	}
+
+	for iterator.HasNext() {
+		key, _, err := iterator.Next()
+		if err != nil {
+			return false, err
+		}
+		if base.Equals(key, base.TransactionXattrKey) {
+			// found transaction xattrs.
+			return true, nil
+		}
+	}
+
+	// if we get here, there are no transaction xattrs
+	return false, nil
 }
 
 // Verifies whether target bucket is still valid

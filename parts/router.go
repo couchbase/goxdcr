@@ -98,11 +98,11 @@ func NewRouter(id string, topic string, filterExpression string,
 	var err error
 	var filterPrintMsg string = "<nil>"
 
+	filter, err = NewFilter(id, filterExpression, utilsIn)
+	if err != nil {
+		return nil, err
+	}
 	if len(filterExpression) > 0 {
-		filter, err = NewFilter(id, filterExpression, utilsIn)
-		if err != nil {
-			return nil, err
-		}
 		filterPrintMsg = fmt.Sprintf("%v%v%v", base.UdTagBegin, filter.filterExpressionInternal, base.UdTagEnd)
 	}
 
@@ -222,16 +222,16 @@ func (router *Router) route(data interface{}) (map[string]interface{}, error) {
 
 	// filter data if filter expession has been defined
 	if router.filter != nil {
-		matched, err, errDesc, failedDpCnt := router.filter.FilterUprEvent(uprEvent)
+		needToReplicate, err, errDesc, failedDpCnt := router.filter.FilterUprEvent(uprEvent)
 		if failedDpCnt > 0 {
 			router.RaiseEvent(common.NewEvent(common.DataPoolGetFail, failedDpCnt, router, nil, nil))
 		}
-		if !matched || err != nil {
+		if !needToReplicate || err != nil {
 			if err != nil {
 				// Let pipeline supervisor do the logging
 				router.RaiseEvent(common.NewEvent(common.DataUnableToFilter, uprEvent, router, []interface{}{err, errDesc}, nil))
 			} else {
-				// if data does not match filter expression, drop it. return empty result
+				// if data does not need to be replicated, drop it. return empty result
 				router.RaiseEvent(common.NewEvent(common.DataFiltered, uprEvent, router, nil, nil))
 			}
 			// Let supervisor set the err instead of the router, to minimize pipeline interruption

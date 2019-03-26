@@ -78,9 +78,8 @@ func TestFilterBool2(t *testing.T) {
 	assert.NotNil(filter)
 
 	slices := make([][]byte, 0, 2)
-	dataSlice, err, _, releaseFunc, _ := realUtil.ProcessUprEventForFiltering(uprEvent, dp, 0 /*flags*/, &slices)
+	dataSlice, err, _, _ := realUtil.ProcessUprEventForFiltering(uprEvent, nil, 0, dp, 0 /*flags*/, &slices)
 	assert.Nil(err)
-	assert.NotNil(releaseFunc)
 
 	matchResult, err := filter.matcher.Match(dataSlice)
 	assert.Nil(err)
@@ -103,9 +102,8 @@ func TestFilterPerf(t *testing.T) {
 	assert.Equal(base.FilterFlagType(3), filter.flags)
 
 	slices := make([][]byte, 0, 2)
-	dataSlice, err, _, releaseFunc, _ := realUtil.ProcessUprEventForFiltering(uprEvent, dp, filter.flags, &slices)
+	dataSlice, err, _, _ := realUtil.ProcessUprEventForFiltering(uprEvent, nil, 0, dp, filter.flags, &slices)
 	assert.Nil(err)
-	assert.NotNil(releaseFunc)
 
 	matchResult, err := filter.matcher.Match(dataSlice)
 	assert.Nil(err)
@@ -128,9 +126,8 @@ func TestFilterPerfKeyOnly(t *testing.T) {
 	assert.True(filter.flags&base.FilterFlagKeyOnly > 0)
 
 	slices := make([][]byte, 0, 2)
-	dataSlice, err, _, releaseFunc, _ := realUtil.ProcessUprEventForFiltering(uprEvent, dp, filter.flags, &slices)
+	dataSlice, err, _, _ := realUtil.ProcessUprEventForFiltering(uprEvent, nil, 0, dp, filter.flags, &slices)
 	assert.Nil(err)
-	assert.NotNil(releaseFunc)
 
 	matchResult, err := filter.matcher.Match(dataSlice)
 	assert.Nil(err)
@@ -153,9 +150,8 @@ func TestKeyPanic(t *testing.T) {
 	assert.True(filter.flags&base.FilterFlagKeyOnly > 0)
 
 	slices := make([][]byte, 0, 2)
-	dataSlice, err, _, releaseFunc, _ := realUtil.ProcessUprEventForFiltering(uprEvent, dp, filter.flags, &slices)
+	dataSlice, err, _, _ := realUtil.ProcessUprEventForFiltering(uprEvent, nil, 0, dp, filter.flags, &slices)
 	assert.Nil(err)
-	assert.NotNil(releaseFunc)
 
 	matchResult, err := filter.matcher.Match(dataSlice)
 	assert.Nil(err)
@@ -212,4 +208,209 @@ func TestFilterUtilsMethods(t *testing.T) {
 	assert.Nil(err)
 	assert.True(match)
 	fmt.Println("============== Test case end: TestFilterUtilsMethod =================")
+}
+
+// test that active transaction record is filtered out
+func TestActiveTxnRecordFiltering(t *testing.T) {
+	fmt.Println("============== Test case start: TestActiveTxnRecordFiltering =================")
+	assert := assert.New(t)
+
+	activeTxnRecordFile := "../utils/testInternalData/uprActiveTxnRecordNotCompress.json"
+	uprEvent, err := base.RetrieveUprJsonAndConvert(activeTxnRecordFile)
+	assert.Nil(err)
+	assert.NotNil(uprEvent)
+
+	filter, err := NewFilter(filterId, "", realUtil)
+	assert.Nil(err)
+	assert.NotNil(filter)
+
+	result, err, _, _ := filter.FilterUprEvent(uprEvent)
+	assert.False(result)
+	assert.Nil(err)
+
+	fmt.Println("============== Test case end: TestActiveTxnRecordFiltering =================")
+}
+
+// test that transaction client record is filtered out
+func TestTxnClientRecordFiltering(t *testing.T) {
+	fmt.Println("============== Test case start: TestTxnClientRecordFiltering =================")
+	assert := assert.New(t)
+
+	txnClientRecordFile := "../utils/testInternalData/uprTxnClientRecordNotCompress.json"
+	uprEvent, err := base.RetrieveUprJsonAndConvert(txnClientRecordFile)
+	assert.Nil(err)
+	assert.NotNil(uprEvent)
+
+	filter, err := NewFilter(filterId, "", realUtil)
+	assert.Nil(err)
+	assert.NotNil(filter)
+
+	result, err, _, _ := filter.FilterUprEvent(uprEvent)
+	assert.False(result)
+	assert.Nil(err)
+
+	fmt.Println("============== Test case end: TestTxnClientRecordFiltering =================")
+}
+
+// test that txn attrs, when not mixed with non txn attrs, are filtered out
+func TestTransXattrOnlyFilteringWithoutCompression(t *testing.T) {
+	fmt.Println("============== Test case start: TestTransXattrOnlyFilteringWithoutCompression =================")
+	assert := assert.New(t)
+
+	transXattrFile := "../utils/testInternalData/uprTransXattrOnlyNotCompress.json"
+	uprEvent, err := base.RetrieveUprJsonAndConvert(transXattrFile)
+	assert.Nil(err)
+	assert.NotNil(uprEvent)
+
+	filter, err := NewFilter(filterId, "", realUtil)
+	assert.Nil(err)
+	assert.NotNil(filter)
+	result, err, _, _ := filter.FilterUprEvent(uprEvent)
+	assert.False(result)
+	assert.Nil(err)
+
+	fmt.Println("============== Test case end: TestTransXattrOnlyFilteringWithoutCompression =================")
+}
+
+// test that txn attrs, when not mixed with non txn attrs, are filtered out
+func TestTransXattrOnlyFilteringWithCompression(t *testing.T) {
+	fmt.Println("============== Test case start: TestTransXattrOnlyFilteringWithCompression =================")
+	assert := assert.New(t)
+
+	transXattrFile := "../utils/testInternalData/uprTransXattrOnlyCompress.json"
+	uprEvent, err := base.RetrieveUprJsonAndConvert(transXattrFile)
+	assert.Nil(err)
+	assert.NotNil(uprEvent)
+
+	filter, err := NewFilter(filterId, "", realUtil)
+	assert.Nil(err)
+	assert.NotNil(filter)
+	result, err, _, _ := filter.FilterUprEvent(uprEvent)
+	assert.False(result)
+	assert.Nil(err)
+
+	fmt.Println("============== Test case end: TestTransXattrOnlyFilteringWithCompression =================")
+}
+
+// test that txn attrs, when mixed with non txn attrs, are filtered out
+func TestMixedXattrFilteringWithCompression(t *testing.T) {
+	fmt.Println("============== Test case start: TestMixedXattrFilteringWithCompression =================")
+	assert := assert.New(t)
+
+	transXattrCompressedFile := "../utils/testInternalData/uprTransXattrCompress.json"
+	uprEvent, err := base.RetrieveUprJsonAndConvert(transXattrCompressedFile)
+	assert.Nil(err)
+	assert.NotNil(uprEvent)
+
+	filter, err := NewFilter(filterId, "", realUtil)
+	assert.Nil(err)
+	assert.NotNil(filter)
+	result, err, _, _ := filter.FilterUprEvent(uprEvent)
+	assert.False(result)
+	assert.Nil(err)
+
+	fmt.Println("============== Test case end: TestMixedXattrFilteringWithCompression =================")
+}
+
+func TestMixedTransXattrFilteringWithoutCompression(t *testing.T) {
+	fmt.Println("============== Test case start: TestMixedTransXattrFilteringWithoutCompression =================")
+	assert := assert.New(t)
+
+	transXattrNotCompressedFile := "../utils/testInternalData/uprTransXattrNotCompress.json"
+	uprEvent, err := base.RetrieveUprJsonAndConvert(transXattrNotCompressedFile)
+	assert.Nil(err)
+	assert.NotNil(uprEvent)
+
+	filter, err := NewFilter(filterId, "", realUtil)
+	assert.Nil(err)
+	assert.NotNil(filter)
+	result, err, _, _ := filter.FilterUprEvent(uprEvent)
+	assert.False(result)
+	assert.Nil(err)
+
+	fmt.Println("============== Test case end: TestMixedTransXattrFilteringWithoutCompression =================")
+}
+
+// Regression test - make sure that when txn xattrs are not present, none txn related attrs
+// can be processed correctly
+func TestNonTransXattrFilteringWithoutCompression(t *testing.T) {
+	fmt.Println("============== Test case start: TestNonTransXattrFilteringWithoutCompression =================")
+	assert := assert.New(t)
+
+	xattrNotCompressedFile := "../utils/testInternalData/uprXattrNotCompress.json"
+	uprEvent, err := base.RetrieveUprJsonAndConvert(xattrNotCompressedFile)
+	assert.Nil(err)
+	assert.NotNil(uprEvent)
+
+	filter, err := NewFilter(filterId, "META().xattrs.TestXattr = 30", realUtil)
+	assert.Nil(err)
+	assert.NotNil(filter)
+	result, err, _, _ := filter.FilterUprEvent(uprEvent)
+	assert.True(result)
+	assert.Nil(err)
+
+	fmt.Println("============== Test case end: TestNonTransXattrFilteringWithoutCompression =================")
+}
+
+// Regression test - make sure that when txn xattrs are not present, none txn related attrs
+// can be processed correctly
+func TestNonTransXattrFilteringWithoutCompressionNegative(t *testing.T) {
+	fmt.Println("============== Test case start: TestNonTransXattrFilteringWithoutCompressionNegative =================")
+	assert := assert.New(t)
+
+	xattrNotCompressedFile := "../utils/testInternalData/uprXattrNotCompress.json"
+	uprEvent, err := base.RetrieveUprJsonAndConvert(xattrNotCompressedFile)
+	assert.Nil(err)
+	assert.NotNil(uprEvent)
+
+	filter, err := NewFilter(filterId, "META().xattrs.TestXattr = 31", realUtil)
+	assert.Nil(err)
+	assert.NotNil(filter)
+	result, err, _, _ := filter.FilterUprEvent(uprEvent)
+	assert.False(result)
+	assert.Nil(err)
+
+	fmt.Println("============== Test case end: TestNonTransXattrFilteringWithoutCompressionNegative =================")
+}
+
+// Regression test - make sure that when txn xattrs are not present, none txn related attrs
+// can be processed correctly
+func TestNonTransXattrFilteringWithCompression(t *testing.T) {
+	fmt.Println("============== Test case start: TestNonTransXattrFilteringWithCompression =================")
+	assert := assert.New(t)
+
+	xattrCompressedFile := "../utils/testInternalData/uprXattrCompress.json"
+	uprEvent, err := base.RetrieveUprJsonAndConvert(xattrCompressedFile)
+	assert.Nil(err)
+	assert.NotNil(uprEvent)
+
+	filter, err := NewFilter(filterId, "META().xattrs.TestXattr = 30", realUtil)
+	assert.Nil(err)
+	assert.NotNil(filter)
+	result, err, _, _ := filter.FilterUprEvent(uprEvent)
+	assert.True(result)
+	assert.Nil(err)
+
+	fmt.Println("============== Test case end: TestNonTransXattrFilteringWithCompression =================")
+}
+
+// Regression test - make sure that when txn xattrs are not present, none txn related attrs
+// can be processed correctly
+func TestNonTransXattrFilteringWithCompressionNegative(t *testing.T) {
+	fmt.Println("============== Test case start: TestNonTransXattrFilteringWithCompressionNegative =================")
+	assert := assert.New(t)
+
+	xattrCompressedFile := "../utils/testInternalData/uprXattrCompress.json"
+	uprEvent, err := base.RetrieveUprJsonAndConvert(xattrCompressedFile)
+	assert.Nil(err)
+	assert.NotNil(uprEvent)
+
+	filter, err := NewFilter(filterId, "META().xattrs.TestXattr = 31", realUtil)
+	assert.Nil(err)
+	assert.NotNil(filter)
+	result, err, _, _ := filter.FilterUprEvent(uprEvent)
+	assert.False(result)
+	assert.Nil(err)
+
+	fmt.Println("============== Test case end: TestNonTransXattrFilteringWithCompressionNegative =================")
 }
