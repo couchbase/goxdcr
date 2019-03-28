@@ -83,3 +83,17 @@ func TestViewOldFilterAsNew(t *testing.T) {
 
 	fmt.Println("============== Test case end: TestViewOldFilterAsNew =================")
 }
+
+// Test <5.5 to >=5.5 upgrade
+func TestUpgradeCompressionType(t *testing.T) {
+	assert := assert.New(t)
+	fmt.Println("============== Test case start: TestUpgradeCompressionType =================")
+	settings := ReplicationSettings{}
+	settings.Settings = nil // to simulate upgrade
+
+	assert.Equal(0, settings.CompressionType)
+
+	settings.PostProcessAfterUnmarshalling()
+	assert.Equal(base.CompressionTypeAuto, settings.CompressionType)
+	fmt.Println("============== Test case end: TestUpgradeCompressionType =================")
+}

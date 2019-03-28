@@ -279,6 +279,8 @@ func (s *ReplicationSettings) PostProcessAfterUnmarshalling() {
 	if s.Settings == nil {
 		// if s.Settings is nil, which could happen during/after upgrade, populate s.Settings using fields in s
 		s.populateMapUsingFields()
+		// In case the map values are different from fields, which is likely for compression, repopulate fields
+		s.populateFieldsUsingMap()
 	} else {
 		s.Settings.PostProcessAfterUnmarshalling(GetReplicationSettingsConfigMap)
 
@@ -329,7 +331,7 @@ func (s *ReplicationSettings) populateMapUsingFields() {
 	s.Values[PipelineLogLevelKey] = s.LogLevel
 	s.Values[PipelineStatsIntervalKey] = s.StatsInterval
 	s.Values[BandwidthLimitKey] = s.BandwidthLimit
-	s.Values[CompressionTypeKey] = s.CompressionType
+	s.Values[CompressionTypeKey] = s.GetCompressionType()
 }
 
 // populate field values using settings map
@@ -393,6 +395,15 @@ func (s *ReplicationSettings) GetPriority() base.PriorityType {
 
 func (s *ReplicationSettings) GetBacklogThreshold() int {
 	return s.GetIntSettingValue(BacklogThresholdKey)
+}
+
+func (s *ReplicationSettings) GetCompressionType() int {
+	if s.CompressionType < CompressionTypeConfig.MinValue ||
+		s.CompressionType > CompressionTypeConfig.MaxValue {
+		return CompressionTypeConfig.defaultValue.(int)
+	} else {
+		return s.CompressionType
+	}
 }
 
 type ReplicationSettingsMap map[string]interface{}
