@@ -81,6 +81,8 @@ type dcpStreamReqHelper struct {
 	sentMsgs map[uint16]uint64
 	// Keeps track of the seqno that has been ACK'ed. Key is the seqno, and value is whether or not it's been ack'ed
 	ackedMsgs map[uint64]bool
+	// Whether or not this helper is no longer usable
+	isDisabled bool
 
 	// Current version counter well - monotonously increasing - use atomics and not lock
 	currentVersionWell uint64
@@ -92,7 +94,11 @@ func (reqHelper *dcpStreamReqHelper) initialize() {
 	atomic.StoreUint64(&reqHelper.currentVersionWell, 0)
 }
 
-func (reqHelper *dcpStreamReqHelper) isStreamActive() bool {
+func (reqHelper *dcpStreamReqHelper) isStreamActiveNoLock() bool {
+	if reqHelper.isDisabled {
+		return false
+	}
+
 	status, err := reqHelper.dcp.GetStreamState(reqHelper.vbno)
 	if err != nil {
 		reqHelper.dcp.Logger().Errorf("Invalid Stream state for vbno: %v even though helper for vb exists.", reqHelper.vbno)
@@ -108,8 +114,12 @@ func (reqHelper *dcpStreamReqHelper) getNewVersion() uint16 {
 
 	if newVersion > math.MaxUint16 {
 		errStr := fmt.Sprintf("Error: dcpStreamHelper for vbno: %v internal version overflow", reqHelper.vbno)
-		reqHelper.dcp.Logger().Errorf(errStr)
-		reqHelper.dcp.RaiseEvent(common.NewEvent(common.ErrorEncountered, nil, nil, nil, errStr))
+		reqHelper.lock.RLock()
+		defer reqHelper.lock.RUnlock()
+		if !reqHelper.isDisabled {
+			reqHelper.dcp.Logger().Errorf(errStr)
+			reqHelper.dcp.RaiseEvent(common.NewEvent(common.ErrorEncountered, nil, nil, nil, errStr))
+		}
 		atomic.StoreUint64(&reqHelper.currentVersionWell, 0)
 		newVersion = 0
 	}
@@ -143,10 +153,14 @@ func (reqHelper *dcpStreamReqHelper) deregisterRequestNoLock(version uint16) {
 /**
  * Register a sent request into the map for book-keeping
  */
-func (reqHelper *dcpStreamReqHelper) registerRequest(version uint16, seqno uint64) (alreadyAcked bool) {
+func (reqHelper *dcpStreamReqHelper) registerRequest(version uint16, seqno uint64) (alreadyAcked bool, helperErr error) {
 	reqHelper.lock.Lock()
 	defer reqHelper.lock.Unlock()
-	if reqHelper.isStreamActive() {
+	if reqHelper.isDisabled {
+		helperErr = reqHelper.getDisabledError()
+		return
+	}
+	if reqHelper.isStreamActiveNoLock() {
 		alreadyAcked = true
 	} else {
 		alreadyAcked = reqHelper.ackedMsgs[seqno]
@@ -167,11 +181,15 @@ func (reqHelper *dcpStreamReqHelper) processRollbackResponse(version uint16) (ig
 	reqHelper.lock.Lock()
 	defer reqHelper.lock.Unlock()
 
+	if reqHelper.isDisabled {
+		helperErr = reqHelper.getDisabledError()
+		return
+	}
 	// default to not ignore response
 	ignoreResponse = false
 	var acked bool
 
-	if reqHelper.isStreamActive() {
+	if reqHelper.isStreamActiveNoLock() {
 		// If the vb stream is active already, ignore all rollback requests
 		ignoreResponse = true
 	} else {
@@ -213,10 +231,28 @@ func (reqHelper *dcpStreamReqHelper) processRollbackResponse(version uint16) (ig
 func (reqHelper *dcpStreamReqHelper) processSuccessResponse(version uint16) {
 	reqHelper.lock.Lock()
 	defer reqHelper.lock.Unlock()
+	if reqHelper.isDisabled {
+		return
+	}
+
 	if reqHelper.isStreamActive() {
 		// reset stats
 		reqHelper.initialize()
 	}
+
+	// reset stats
+	reqHelper.initialize()
+}
+
+func (reqHelper *dcpStreamReqHelper) disable() {
+	reqHelper.lock.Lock()
+	defer reqHelper.lock.Unlock()
+	reqHelper.isDisabled = true
+	reqHelper.dcp = nil
+}
+
+func (reqHelper *dcpStreamReqHelper) getDisabledError() error {
+	return fmt.Errorf("vbReqHelper %v is disabled", reqHelper.vbno)
 }
 
 type DcpNozzleIface interface {
@@ -637,11 +673,8 @@ func (dcp *DcpNozzle) Stop() error {
 }
 
 func (dcp *DcpNozzle) cleanUpProcessDataHelpers() {
-	for vbno, helper := range dcp.vbHandshakeMap {
-		if helper != nil {
-			helper.dcp = nil
-		}
-		delete(dcp.vbHandshakeMap, vbno)
+	for _, helper := range dcp.vbHandshakeMap {
+		helper.disable()
 	}
 }
 
@@ -1014,7 +1047,12 @@ func (dcp *DcpNozzle) startUprStreamInner(vbno uint16, vbts *base.VBTimestamp, v
 	if dcp.uprFeed != nil {
 		statusObj, ok := dcp.vb_stream_status[vbno]
 		if ok && statusObj != nil {
-			ignore := dcp.vbHandshakeMap[vbno].registerRequest(version, vbts.Seqno)
+			var ignore bool
+			ignore, err = dcp.vbHandshakeMap[vbno].registerRequest(version, vbts.Seqno)
+			if err != nil {
+				dcp.handleGeneralError(err)
+				return
+			}
 			if ignore {
 				dcp.Logger().Debugf(fmt.Sprintf("%v ignoring send request for seqno %v since it has already been handled", vbts.Seqno))
 			} else {
