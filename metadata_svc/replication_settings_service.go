@@ -51,6 +51,7 @@ func (repl_settings_svc *ReplicationSettingsSvc) GetDefaultReplicationSettings()
 		}
 		// set rev number
 		defaultSettings.Revision = rev
+		defaultSettings.PostProcessAfterUnmarshalling()
 	}
 	return &defaultSettings, nil
 }
