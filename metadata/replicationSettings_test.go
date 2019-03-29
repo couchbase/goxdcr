@@ -2,6 +2,7 @@ package metadata
 
 import (
 	"fmt"
+	"github.com/couchbase/goxdcr/base"
 	"github.com/stretchr/testify/assert"
 	"testing"
 )
@@ -54,4 +55,21 @@ func TestValidateCompressionSetting(t *testing.T) {
 	converted, err = ValidateAndConvertSettingsValue(CompressionType, "asdf", "", true, false)
 	assert.NotNil(err)
 	fmt.Println("============== Test case end: TestValidateCompressionSetting =================")
+}
+
+func TestCompressionUpgrade(t *testing.T) {
+	assert := assert.New(t)
+	fmt.Println("============== Test case start: TestCompressionUpgrade =================")
+	setting := DefaultSettings()
+	// After loading from metakv, non-existing values will be 0
+	setting.CompressionType = 0
+	setting.PostProcessAfterUnmarshalling()
+	assert.NotEqual(0, setting.CompressionType)
+
+	setting = DefaultSettings()
+	// Non-0 value
+	setting.CompressionType = base.CompressionTypeAuto
+	setting.PostProcessAfterUnmarshalling()
+	assert.Equal(base.CompressionTypeAuto, setting.CompressionType)
+	fmt.Println("============== Test case end: TestCompressionUpgrade =================")
 }

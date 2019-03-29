@@ -881,6 +881,9 @@ func constructReplicationSpec(value []byte, rev interface{}) (*metadata.Replicat
 	if err != nil {
 		return nil, err
 	}
+	if spec.Settings != nil {
+		spec.Settings.PostProcessAfterUnmarshalling()
+	}
 	spec.Revision = rev
 	return spec, nil
 }

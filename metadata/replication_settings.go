@@ -229,6 +229,14 @@ func (s *ReplicationSettings) SetLogLevel(log_level string) error {
 	return err
 }
 
+func (s *ReplicationSettings) PostProcessAfterUnmarshalling() {
+	// This is a method that only exists in 6.0.2 and beyond. It is done in a more complete method in >= 6.5
+	// Since CompressionType is the only one that could have invalid unmarshal value, check it
+	if s.CompressionType < CompressionTypeConfig.MinValue || s.CompressionType > CompressionTypeConfig.MaxValue {
+		s.CompressionType = CompressionTypeConfig.defaultValue.(int)
+	}
+}
+
 // returns a map of settings that have indeed been changed and their new values.
 // returns a map of validation errors, which should normally be empty since the input settingsMap
 // is constructed internally and necessary checks should have been applied before
