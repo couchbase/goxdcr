@@ -2720,11 +2720,12 @@ func (u *Utilities) getAdditionalErrorMessage(statusCode int, username string) s
 	return errMsg
 }
 
-func decompressSnappyBody(incomingBody, key []byte, dp DataPoolIface, slicesToBeReleased *[][]byte) ([]byte, error, string, int64) {
+func decompressSnappyBody(incomingBody, key []byte, dp DataPoolIface, slicesToBeReleased *[][]byte) ([]byte, error, string, int64, int) {
 	var dpFailedCnt int64
 	lenOfDecodedData, err := snappy.DecodedLen(incomingBody)
+	lastBodyPos := lenOfDecodedData - 1
 	if err != nil {
-		return nil, base.ErrorCompressionUnableToInflate, fmt.Sprintf("XDCR for key %v%v%v is unable to decode snappy uncompressed size: %v", base.UdTagBegin, string(key), base.UdTagEnd, err), dpFailedCnt
+		return nil, base.ErrorCompressionUnableToInflate, fmt.Sprintf("XDCR for key %v%v%v is unable to decode snappy uncompressed size: %v", base.UdTagBegin, string(key), base.UdTagEnd, err), dpFailedCnt, lastBodyPos
 	}
 
 	uncompressedBodySize := uint64(lenOfDecodedData + len(key) + base.AddFilterKeyExtraBytes)
@@ -2738,14 +2739,27 @@ func decompressSnappyBody(incomingBody, key []byte, dp DataPoolIface, slicesToBe
 
 	body, err = snappy.Decode(body, incomingBody)
 	if err != nil {
-		return nil, base.ErrorCompressionUnableToInflate, fmt.Sprintf("XDCR for key %v%v%v is unable to snappy decompress body value: %v", base.UdTagBegin, string(key), base.UdTagEnd, err), dpFailedCnt
+		return nil, base.ErrorCompressionUnableToInflate, fmt.Sprintf("XDCR for key %v%v%v is unable to snappy decompress body value: %v", base.UdTagBegin, string(key), base.UdTagEnd, err), dpFailedCnt, lastBodyPos
 	}
-	return body, err, "", dpFailedCnt
+
+	// Check to make sure the last bracket position is correct
+	if body[lastBodyPos] != '}' {
+		return nil, base.ErrorInvalidInput, fmt.Sprintf("XDCR for key %v%v%v after decompression seems to be an invalid JSON", base.UdTagBegin, string(key), base.UdTagEnd), dpFailedCnt, lastBodyPos
+	}
+
+	return body, err, "", dpFailedCnt, lastBodyPos
 }
 
-func getBodySlice(incomingBody, key []byte, dp DataPoolIface, slicesToBeReleased *[][]byte) ([]byte, error, int64) {
+func getBodySlice(incomingBody, key []byte, dp DataPoolIface, slicesToBeReleased *[][]byte) ([]byte, error, string, int64, int) {
 	var dpFailedCnt int64
-	bodySize := uint64(len(incomingBody) + len(key) + base.AddFilterKeyExtraBytes)
+	var incomingBodyLen int = len(incomingBody)
+	lastBodyPos := incomingBodyLen - 1
+	bodySize := uint64(incomingBodyLen + len(key) + base.AddFilterKeyExtraBytes)
+
+	if incomingBody[lastBodyPos] != '}' {
+		return nil, base.ErrorInvalidInput, fmt.Sprintf("Document %v%v%v body is not a valid JSON", base.UdTagBegin, string(key), base.UdTagEnd), dpFailedCnt, lastBodyPos
+	}
+
 	body, err := dp.GetByteSlice(bodySize)
 	if err != nil {
 		body = make([]byte, 0, bodySize)
@@ -2753,12 +2767,13 @@ func getBodySlice(incomingBody, key []byte, dp DataPoolIface, slicesToBeReleased
 	}
 	*slicesToBeReleased = append(*slicesToBeReleased, body)
 	copy(body, incomingBody)
-	return body, nil, dpFailedCnt
+	return body, nil, "", dpFailedCnt, lastBodyPos
 }
 
-func stripAndPrependXattribute(body, key []byte, xattrSize uint32, dp DataPoolIface, slicesToBeReleased *[][]byte) ([]byte, error, int64) {
+func stripAndPrependXattribute(body, key []byte, xattrSize uint32, dp DataPoolIface, slicesToBeReleased *[][]byte, endBodyPos int) ([]byte, error, int64, int) {
 	var dpFailedCnt int64
 	actualBody := body[xattrSize+4:]
+	endBodyPos = endBodyPos - int(xattrSize) - 4
 
 	bodySize := uint64(int(xattrSize) + 4 + len(body) + base.AddFilterXattrExtraBytes)
 
@@ -2772,7 +2787,7 @@ func stripAndPrependXattribute(body, key []byte, xattrSize uint32, dp DataPoolIf
 
 	// Prereq check
 	if actualBody[0] != '{' {
-		return nil, base.ErrorInvalidInput, dpFailedCnt
+		return nil, base.ErrorInvalidInput, dpFailedCnt, endBodyPos
 	}
 
 	// Current body looks like (spaces added for readability):
@@ -2794,7 +2809,7 @@ func stripAndPrependXattribute(body, key []byte, xattrSize uint32, dp DataPoolIf
 		// Search for end of key
 		for separator = pos; body[separator] != '\x00'; separator++ {
 			if separator >= xattrSize+4 {
-				return nil, fmt.Errorf("For document %v%v%v, Unable to correctly parse xattr to find a xattr key", base.UdTagBegin, string(key), base.UdTagEnd), dpFailedCnt
+				return nil, fmt.Errorf("For document %v%v%v, Unable to correctly parse xattr to find a xattr key", base.UdTagBegin, string(key), base.UdTagEnd), dpFailedCnt, endBodyPos
 			}
 		}
 		// Note the first time through this loop, pos == 8
@@ -2804,7 +2819,7 @@ func stripAndPrependXattribute(body, key []byte, xattrSize uint32, dp DataPoolIf
 		// Search for end of value
 		for separator = pos; body[separator] != '\x00'; separator++ {
 			if separator >= xattrSize+4 {
-				return nil, fmt.Errorf("For document %v%v%v, Unable to correctly parse xattr to find value for xattr key %v%v%v", base.UdTagBegin, string(key), base.UdTagEnd, base.UdTagBegin, key, base.UdTagEnd), dpFailedCnt
+				return nil, fmt.Errorf("For document %v%v%v, Unable to correctly parse xattr to find value for xattr key %v%v%v", base.UdTagBegin, string(key), base.UdTagEnd, base.UdTagBegin, key, base.UdTagEnd), dpFailedCnt, endBodyPos
 			}
 		}
 		combinedBody, combinedBodyPos = base.WriteJsonRawMsg(combinedBody, body[pos:separator], combinedBodyPos, false, len(body[pos:separator]), false, false)
@@ -2819,6 +2834,8 @@ func stripAndPrependXattribute(body, key []byte, xattrSize uint32, dp DataPoolIf
 	// { XdcrInternalXattrKey : { xattrKey : xattrVal },
 	combinedBodyPos++
 	combinedBody[combinedBodyPos] = ','
+	// endBodyPos is added instead of combinedBodyPos+1 is because below we are copying actualBody[1:] to skip the first {
+	endBodyPos += combinedBodyPos
 	combinedBodyPos++
 
 	// ActualBody:
@@ -2827,10 +2844,10 @@ func stripAndPrependXattribute(body, key []byte, xattrSize uint32, dp DataPoolIf
 	// { XdcrInternalXattrKey : { xattrKey : xattrVal }, key : val }
 	copy(combinedBody[combinedBodyPos:], actualBody[1:])
 
-	return combinedBody, nil, dpFailedCnt
+	return combinedBody, nil, dpFailedCnt, endBodyPos
 }
 
-func processXattribute(body, key []byte, shouldSkipInsert bool, dp DataPoolIface, slicesToBeReleased *[][]byte) ([]byte, error, int64) {
+func processXattribute(body, key []byte, shouldSkipInsert bool, dp DataPoolIface, slicesToBeReleased *[][]byte, endBodyPos int) ([]byte, error, int64, int) {
 	var pos uint32
 	//	var separator uint32
 	var dpFailedCnt int64
@@ -2842,21 +2859,21 @@ func processXattribute(body, key []byte, shouldSkipInsert bool, dp DataPoolIface
 	// Couchbase doc size is max of 20MB. Xattribute count against this limit.
 	// So if total xattr size is greater than this limit, then something is wrong
 	if totalXattrSize > base.MaxDocSizeByte {
-		return nil, fmt.Errorf("For document %v%v%v, unable to correctly parse xattribute from DCP packet. Xattr size determined to be %v bytes, which is invalid", base.UdTagBegin, string(key), base.UdTagEnd, totalXattrSize), dpFailedCnt
+		return nil, fmt.Errorf("For document %v%v%v, unable to correctly parse xattribute from DCP packet. Xattr size determined to be %v bytes, which is invalid", base.UdTagBegin, string(key), base.UdTagEnd, totalXattrSize), dpFailedCnt, endBodyPos
 	}
-	pos = pos + 4
 
 	if shouldSkipInsert {
 		// TotalXattrSize does not account the last NUL char (4 bytes of '\x00') in the else branch's logic
 		newBody := body[totalXattrSize+4:]
 		body = newBody
+		endBodyPos = endBodyPos - int(totalXattrSize) - 4
 	} else {
-		body, err, failedCnt = stripAndPrependXattribute(body, key, totalXattrSize, dp, slicesToBeReleased)
+		body, err, failedCnt, endBodyPos = stripAndPrependXattribute(body, key, totalXattrSize, dp, slicesToBeReleased, endBodyPos)
 		if failedCnt > 0 {
 			dpFailedCnt += failedCnt
 		}
 	}
-	return body, err, dpFailedCnt
+	return body, err, dpFailedCnt, endBodyPos
 }
 
 func processKeyOnlyForFiltering(key []byte, dp DataPoolIface, slicesToBeReleased *[][]byte) ([]byte, int64) {
@@ -2894,6 +2911,7 @@ func (u *Utilities) ProcessUprEventForFiltering(uprEvent *mcc.UprEvent, dp DataP
 	var err error
 	var additionalErrDesc string
 	var totalFailedCnt int64
+	var endBodyPos int
 
 	if uprEvent == nil || dp == nil {
 		return nil, base.ErrorInvalidInput, additionalErrDesc, nil, totalFailedCnt
@@ -2917,17 +2935,20 @@ func (u *Utilities) ProcessUprEventForFiltering(uprEvent *mcc.UprEvent, dp DataP
 
 	if needToProcessBody {
 		if bodyIsCompressed {
-			body, err, additionalErrDesc, totalFailedCnt = decompressSnappyBody(uprEvent.Value, uprEvent.Key, dp, slicesToBeReleased)
+			body, err, additionalErrDesc, totalFailedCnt, endBodyPos = decompressSnappyBody(uprEvent.Value, uprEvent.Key, dp, slicesToBeReleased)
 			if err != nil {
 				return nil, err, additionalErrDesc, releaseFunc, totalFailedCnt
 			}
 		} else {
-			body, err, totalFailedCnt = getBodySlice(uprEvent.Value, uprEvent.Key, dp, slicesToBeReleased)
+			body, err, additionalErrDesc, totalFailedCnt, endBodyPos = getBodySlice(uprEvent.Value, uprEvent.Key, dp, slicesToBeReleased)
+			if err != nil {
+				return nil, err, additionalErrDesc, releaseFunc, totalFailedCnt
+			}
 		}
 
 		if bodyContainsXattr {
 			var failedCnt int64
-			body, err, failedCnt = processXattribute(body, uprEvent.Key, shouldSkipXattr, dp, slicesToBeReleased)
+			body, err, failedCnt, endBodyPos = processXattribute(body, uprEvent.Key, shouldSkipXattr, dp, slicesToBeReleased, endBodyPos)
 			if failedCnt > 0 {
 				totalFailedCnt += failedCnt
 			}
@@ -2948,12 +2969,7 @@ func (u *Utilities) ProcessUprEventForFiltering(uprEvent *mcc.UprEvent, dp DataP
 			}
 		} else {
 			// Add Key to Body
-			var endValue int = len(body) - 1
-			if needToProcessBody && bodyIsCompressed {
-				// When we decompress snappy, the value gotten from the datapool will have filled up 0 bytes, which throws off the len
-				endValue = -1
-			}
-			body, err, failedCnt = base.AddKeyToBeFiltered(body, uprEvent.Key, dp.GetByteSlice, slicesToBeReleased, endValue)
+			body, err, failedCnt = base.AddKeyToBeFiltered(body, uprEvent.Key, dp.GetByteSlice, slicesToBeReleased, endBodyPos)
 			if failedCnt > 0 {
 				totalFailedCnt += failedCnt
 			}

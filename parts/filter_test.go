@@ -138,3 +138,28 @@ func TestFilterPerfKeyOnly(t *testing.T) {
 
 	fmt.Println("============== Test case end: TestFilterPerfKeyOnly =================")
 }
+
+func TestKeyPanic(t *testing.T) {
+	fmt.Println("============== Test case start: TestKeyPanic =================")
+	assert := assert.New(t)
+
+	uprEvent, err := RetrieveUprFile("./testdata/edgyMB-33583.json")
+	assert.Nil(err)
+	assert.NotNil(uprEvent)
+
+	filter, err := NewFilter(filterId, "REGEXP_CONTAINS(META().id, 'C1-key-1')", realUtil)
+	assert.Nil(err)
+	assert.NotNil(filter)
+	//	assert.True(filter.flags&base.FilterFlagKeyOnly > 0)
+
+	slices := make([][]byte, 0, 2)
+	dataSlice, err, _, releaseFunc, _ := realUtil.ProcessUprEventForFiltering(uprEvent, dp, filter.flags, &slices)
+	assert.Nil(err)
+	assert.NotNil(releaseFunc)
+
+	matchResult, err := filter.matcher.Match(dataSlice)
+	assert.Nil(err)
+	assert.False(matchResult)
+
+	fmt.Println("============== Test case end: TestKeyPanic =================")
+}

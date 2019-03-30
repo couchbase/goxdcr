@@ -973,11 +973,11 @@ func addKeyToBeFilteredWithoutDP(currentValue, key []byte) ([]byte, error) {
 // If we can try not to move data and just use datapool and append to the end, it may be still faster
 // to have gojsonsm step through the JSON than to do memory move
 func AddKeyToBeFiltered(currentValue, key []byte, dpGetter DpGetterFunc, toBeReleased *[][]byte, currentValueEndBody int) ([]byte, error, int64) {
-	if dpGetter != nil {
+	if dpGetter != nil && currentValueEndBody > 0 {
 		// { "bodyKey":bodyValue...
 		// 	,"KeyKey":"<Key>" 	<- sizeToGet
 		// }
-		sizeToGet := len(ReservedWordsMap[ExternalKeyKey]) + len(key) + 6 + len(currentValue)
+		sizeToGet := CachedInternalKeyKeyByteSize + len(key) + 6 + len(currentValue)
 		dpSlice, err, _ := AppendSingleKVToAllocatedBody(currentValue, CachedInternalKeyKeyByteSlice,
 			key, dpGetter, toBeReleased, uint64(sizeToGet), CachedInternalKeyKeyByteSize, len(key), true, currentValueEndBody)
 		if err != nil {
@@ -993,11 +993,6 @@ func AddKeyToBeFiltered(currentValue, key []byte, dpGetter DpGetterFunc, toBeRel
 
 var AddFilterXattrExtraBytes int = 4 + len(ReservedWordsMap[ExternalKeyXattr])
 
-func appendKVWriteToSlice(target, source []byte) []byte {
-	copy(target, source)
-	return target
-}
-
 func appendKVWriteKeyValue(dpSlice, key, value []byte, pos, keySize, valueSize int, valueNeedsQuotes bool) ([]byte, int) {
 	dpSlice, pos = WriteJsonRawMsg(dpSlice, key, pos, true /*isKey*/, keySize, false, pos == 0)
 	dpSlice, pos = WriteJsonRawMsg(dpSlice, value, pos, false, valueSize, valueNeedsQuotes, pos == 0)
@@ -1009,6 +1004,14 @@ func AppendSingleKVToAllocatedBody(currentValue, key, value []byte, dpGetter DpG
 	var dpSlice []byte
 	var err error
 	var pos int
+	if currentValueEndBracket <= 0 {
+		// Since the dpSlice is retrieved from datapool, it is more than likely that it contains older data
+		// If we do not know the end bracket location, looking backwards is too risky as it most likely
+		// will have invalid data from previous mutations. Do not process
+		err = ErrorInvalidInput
+		return nil, err, pos
+	}
+
 	dpSlice, err = dpGetter(sizeToGet)
 	if err != nil {
 		return nil, err, -1
@@ -1016,22 +1019,9 @@ func AppendSingleKVToAllocatedBody(currentValue, key, value []byte, dpGetter DpG
 	if toBeReleased != nil {
 		*toBeReleased = append(*toBeReleased, dpSlice)
 	}
-	dpSlice = appendKVWriteToSlice(dpSlice, currentValue)
-	if currentValueEndBracket > 0 {
-		pos = currentValueEndBracket
-	} else {
-		// Scan backwards until the last }
-		pos = GetLastBracketPos(dpSlice, len(dpSlice))
-		if pos <= 0 {
-			return currentValue, ErrorInvalidInput, -1
-		}
-	}
-
+	copy(dpSlice, currentValue)
+	pos = currentValueEndBracket
 	dpSlice, pos = appendKVWriteKeyValue(dpSlice, key, value, pos, keySize, valueSize, valueNeedsQuotes)
-
-	// Add one more '}
-	//	pos++
-	//	dpSlice[pos] = '}'
 
 	return dpSlice, err, pos
 }
