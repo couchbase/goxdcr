@@ -97,7 +97,7 @@ func TestFilterPerf(t *testing.T) {
 	assert.Nil(err)
 	assert.NotNil(uprEvent)
 
-	filter, err := NewFilter(filterId, "city EXISTS", realUtil)
+	filter, err := NewFilter(filterId, "EXISTS(city)", realUtil)
 	assert.Nil(err)
 	assert.NotNil(filter)
 	assert.Equal(base.FilterFlagType(3), filter.flags)
