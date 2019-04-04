@@ -5,10 +5,10 @@ package utils
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/couchbase/gocb"
 	"github.com/couchbase/gojsonsm"
 	base "github.com/couchbase/goxdcr/base"
 	"github.com/stretchr/testify/assert"
+	gocb "gopkg.in/couchbase/gocb.v1"
 	"io/ioutil"
 	"testing"
 )
