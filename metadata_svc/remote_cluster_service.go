@@ -1091,6 +1091,9 @@ func (service *RemoteClusterService) validateRemoteCluster(ref *metadata.RemoteC
 		if statusCode == http.StatusUnauthorized {
 			return wrapAsInvalidRemoteClusterError(fmt.Sprintf("Authentication failed. Verify username and password. Got HTTP status %v from REST call get to %v%v. Body was: []", statusCode, hostAddr, base.PoolsPath))
 		} else {
+			if err == nil {
+				err = fmt.Errorf("Received non-OK HTTP status %v from %v%v", statusCode, hostAddr, base.PoolsPath)
+			}
 			return service.formErrorFromValidatingRemotehost(ref, hostName, port, err)
 		}
 	}
@@ -1322,6 +1325,10 @@ func (service *RemoteClusterService) formErrorFromValidatingRemotehost(ref *meta
 	} else {
 		// if encryption is on, several different errors could be returned here, e.g., invalid hostname, invalid certificate, certificate by unknown authority, etc.
 		// just return the err
+		// Error passed in should not be nil. But add this here just to be safe
+		if err == nil {
+			err = fmt.Errorf("refName: %v hostname: %v port: %v", ref.Name(), hostName, port)
+		}
 		return wrapAsInvalidRemoteClusterError(err.Error())
 	}
 }
