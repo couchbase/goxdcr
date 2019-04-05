@@ -112,11 +112,9 @@ func NewRouter(id string, topic string, filterExpression string,
 		sourceCRMode:           sourceCRMode,
 		req_creator:            req_creator,
 		utils:                  utilsIn,
-		isHighReplication:      &base.AtomicBooleanType{},
+		isHighReplication:      base.NewAtomicBooleanType(isHighReplication),
 		throughputThrottlerSvc: throughputThrottlerSvc,
 	}
-
-	router.isHighReplication.Set(isHighReplication)
 
 	router.expDelMode.Set(filterExpDelType)
 

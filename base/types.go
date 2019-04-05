@@ -433,6 +433,12 @@ const (
 	AtomicBooleanFalse uint32 = 0
 )
 
+func NewAtomicBooleanType(value bool) *AtomicBooleanType {
+	atomicBoolean := &AtomicBooleanType{}
+	atomicBoolean.Set(value)
+	return atomicBoolean
+}
+
 func (a *AtomicBooleanType) Set(value bool) {
 	if value {
 		a.SetTrue()

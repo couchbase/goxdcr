@@ -161,7 +161,11 @@ func (s *State) String() string {
 	buffer.WriteString(" processCpu: ")
 	buffer.WriteString(fmt.Sprintf("%v", s.cpu))
 	buffer.WriteString(" idleCpu: ")
-	buffer.WriteString(fmt.Sprintf("%v", s.idleCpu*100/s.totalCpu))
+	if s.totalCpu != 0 {
+		buffer.WriteString(fmt.Sprintf("%v", s.idleCpu*100/s.totalCpu))
+	} else {
+		buffer.WriteString("0")
+	}
 	return buffer.String()
 }
 

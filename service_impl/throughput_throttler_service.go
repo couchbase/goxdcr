@@ -57,7 +57,7 @@ func NewThroughputThrottlerSvc(logger_ctx *log.LoggerContext) *ThroughputThrottl
 	return &ThroughputThrottler{
 		finish_ch:       make(chan bool),
 		cond_var:        sync.NewCond(&sync.Mutex{}),
-		needToCalibrate: &base.AtomicBooleanType{},
+		needToCalibrate: base.NewAtomicBooleanType(true),
 		logger:          log.NewLogger("TpThrottler", logger_ctx)}
 }
 
