@@ -215,3 +215,16 @@ func TestFlagType(t *testing.T) {
 	assert.False(baseType&FilterExpDelStripExpiration > 0)
 	fmt.Println("============== Test case end: TestFlagType =================")
 }
+
+// MB-33121
+func TestLegacyKeyMsg(t *testing.T) {
+	fmt.Println("============== Test case start: TestLegacyKeyMsg =================")
+	assert := assert.New(t)
+
+	err := ValidateAdvFilter("oneWordRegex$")
+	assert.Equal(ErrorFilterInvalidFormat, err)
+
+	err = ValidateAdvFilter("int LIKE 0")
+	assert.Equal(ErrorFilterInvalidExpression, err)
+	fmt.Println("============== Test case end: TestLegacyKeyMsg =================")
+}

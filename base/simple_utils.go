@@ -923,9 +923,9 @@ func GoJsonsmGetFilterExprMatcher(filter string) (gojsonsm.Matcher, error) {
 }
 
 func ValidateAdvFilter(filter string) error {
-	// participle within gojsonsm has an issue where if given a regex, it could cause stack overflow
-	// To prevent this, we're going to check to make sure it has at least one operator to see if it's a valid
-	// advacned filter expression
+	// From XDCR's perspective, instead of calling and creating gojson filter obj, this function call provides a simple and cheap
+	// way to verify whether or not the filter can potentially be valid by finding operators in the filter
+	// Once it's valid, spend the resource and do the actual matcher parsing
 	var operatorFound bool
 	for _, operator := range gojsonsm.GojsonsmOperators {
 		if strings.Contains(filter, operator) {
@@ -934,7 +934,11 @@ func ValidateAdvFilter(filter string) error {
 		}
 	}
 	if !operatorFound {
-		return ErrorFilterInvalidFormat
+		if !strings.Contains(filter, " ") {
+			// Having no white-space most likely means user entered a single word, and most likely meant as a key-only regex
+			return ErrorFilterInvalidFormat
+		}
+		return ErrorFilterInvalidExpression
 	}
 
 	_, err := GoJsonsmGetFilterExprMatcher(ReplaceKeyWordsForExpression(filter))

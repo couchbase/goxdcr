@@ -209,6 +209,7 @@ var ErrorNoDataPool = errors.New("Internal error - unable to establish GoXDCR da
 var ErrorFilterEnterpriseOnly = errors.New("Filter expression can be specified in Enterprise edition only")
 var ErrorFilterInvalidVersion = errors.New("Filter version specified is deprecated")
 var ErrorFilterInvalidFormat = errors.New("Filter specified using key-only regex is deprecated")
+var ErrorFilterInvalidExpression = errors.New("Filter expression is invalid")
 var ErrorFilterParsingError = errors.New("Filter unable to parse DCP packet")
 var ErrorFilterSkipRestreamRequired = errors.New("Filter skip restream flag is required along with a filter")
 var ErrorNotSupported = errors.New("Not supported")
