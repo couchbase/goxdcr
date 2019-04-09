@@ -1102,12 +1102,15 @@ func FilterContainsKeyExpression(expression string) bool {
 // Checks for at least one of the valid key expression connected by one or more valid key expression connected by AND or OR
 // Logic explained:
 // Either a single instance that starts and ends with one of: "REGEXP_CONTAINS(key, \".*\")" OR "key op \"alphanumeric\"*"
+// Note that escaped " can be replaced with '
 // OR
 // One single instance  instance of the above (that does not start and end) followed by one or more instances of (AND|OR [statement above])
 // A = {NOT }* Key Op "Value"
 // B = {NOT }* REGEXP_CONTAINS(Key, "regex")
 // ^((A|B) ((AND|OR) (A|B))*)$
-var singleAwesomeKeyOnlyRegex *regexp.Regexp = regexp.MustCompile(fmt.Sprintf("^(((((NOT *)*%v *(=|>|>=|<|<=) *\"[a-zA-Z0-9_-]*\") *|((NOT *)*REGEXP_CONTAINS\\( *%v *, *\".*\" *\\)) *))((AND|OR) *(((NOT *)*%v *(=|>|>=|<|<=) *\"[a-zA-Z0-9_-]*\") *|((NOT *)*REGEXP_CONTAINS\\( *%v *, *\".*\" *\\)) *))*)$", ExternalKeyKey, ExternalKeyKey, ExternalKeyKey, ExternalKeyKey))
+const keyOnlyRegexOp = "=|==|!=|<>|>|>=|<|<="
+
+var singleAwesomeKeyOnlyRegex *regexp.Regexp = regexp.MustCompile(fmt.Sprintf("^(((((NOT *)*%v *(%v) *(\"|')[a-zA-Z0-9_-]*(\"|')) *|((NOT *)*REGEXP_CONTAINS\\( *%v *, *(\"|').*(\"|') *\\)) *))((AND|OR) *(((NOT *)*%v *(%v) *(\"|')[a-zA-Z0-9_-]*(\"|')) *|((NOT *)*REGEXP_CONTAINS\\( *%v *, *(\"|').*(\"|') *\\)) *))*)$", ExternalKeyKey, keyOnlyRegexOp, ExternalKeyKey, ExternalKeyKey, keyOnlyRegexOp, ExternalKeyKey))
 
 // NOTE - takes in user entered META().id as key
 func FilterOnlyContainsKeyExpression(expression string) bool {
