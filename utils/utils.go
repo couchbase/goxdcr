@@ -2154,22 +2154,22 @@ func (u *Utilities) doRestCall(req *http.Request,
 
 }
 
-func (u *Utilities) parseResponseBody(res *http.Response,
-	out interface{},
-	logger *log.CommonLogger) error {
+func (u *Utilities) parseResponseBody(res *http.Response, out interface{}, logger *log.CommonLogger) (err error) {
 	var l *log.CommonLogger = u.loggerForFunc(logger)
 	if res != nil && res.Body != nil {
 		defer res.Body.Close()
-		bod, e := ioutil.ReadAll(io.LimitReader(res.Body, res.ContentLength))
-		if e != nil {
-			l.Infof("Failed to read response body, err=%v\n res=%v\n", e, res)
-			return e
+		var bod []byte
+		bod, err = ioutil.ReadAll(io.LimitReader(res.Body, res.ContentLength))
+		if err != nil {
+			l.Errorf("Failed to read response body, err=%v\n res=%v\n", err, res)
+			return
 		}
 		if out != nil {
-			err_marshal := json.Unmarshal(bod, out)
-			if err_marshal != nil {
-				l.Infof("Failed to unmarshal the response as json, err=%v, bod=%v\n res=%v\n", err_marshal, bod, res)
+			err = json.Unmarshal(bod, out)
+			if err != nil {
+				l.Errorf("Failed to unmarshal the response as json, err=%v, bod=%v\n res=%v\n", err, string(bod), res)
 				out = bod
+				return
 			} else {
 				l.Debugf("out=%v\n", out)
 			}
@@ -2177,7 +2177,7 @@ func (u *Utilities) parseResponseBody(res *http.Response,
 			l.Debugf("out is nil")
 		}
 	}
-	return nil
+	return
 }
 
 //convenient api for rest calls to local cluster
@@ -2236,7 +2236,7 @@ func (u *Utilities) InvokeRestWithRetryWithAuth(baseURL string,
 			}
 		}
 
-		logger.Infof("Received error when making rest call. baseURL=%v, path=%v, err=%v, statusCode=%v, num_retry=%v\n", baseURL, path, err, statusCode, i)
+		logger.Errorf("Received error when making rest call or unmarshalling data. baseURL=%v, path=%v, err=%v, statusCode=%v, num_retry=%v\n", baseURL, path, err, statusCode, i)
 
 		//cleanup the idle connection if the error is serious network error
 		u.cleanupAfterRestCall(true /*keep_client_alive*/, err, statusCode, http_client, logger)
