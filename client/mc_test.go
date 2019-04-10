@@ -9,6 +9,7 @@ import (
 	"net"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/couchbase/gomemcached"
 )
@@ -48,6 +49,15 @@ func (t tracked) Read([]byte) (int, error) {
 func (t tracked) Write([]byte) (int, error) {
 	return 0, io.EOF
 }
+
+func (t tracked) SetReadDeadline(time.Time) error {
+	return nil
+}
+
+func (t tracked) SetDeadline(time.Time) error {
+	return nil
+}
+
 
 func TestClose(t *testing.T) {
 	var tr tracked

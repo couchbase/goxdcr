@@ -2,6 +2,7 @@
 package memcached
 
 import (
+	"crypto/tls"
 	"encoding/binary"
 	"fmt"
 	"github.com/couchbase/gomemcached"
@@ -80,9 +81,16 @@ const FeatureXattr = Feature(0x06)
 const FeatureCollections = Feature(0x12)
 const FeatureDataType = Feature(0x0b)
 
+type memcachedConnection interface {
+	io.ReadWriteCloser
+
+	SetReadDeadline(time.Time) error
+	SetDeadline(time.Time) error
+}
+
 // The Client itself.
 type Client struct {
-	conn io.ReadWriteCloser
+	conn memcachedConnection
 	// use uint32 type so that it can be accessed through atomic APIs
 	healthy uint32
 	opaque  uint32
@@ -109,6 +117,15 @@ func Connect(prot, dest string) (rv *Client, err error) {
 	return Wrap(conn)
 }
 
+// Connect to a memcached server using TLS.
+func ConnectTLS(prot, dest string, config *tls.Config) (rv *Client, err error) {
+	conn, err := tls.Dial(prot, dest, config)
+	if err != nil {
+		return nil, err
+	}
+	return Wrap(conn)
+}
+
 func SetDefaultTimeouts(dial, read, write time.Duration) {
 	DefaultDialTimeout = dial
 	DefaultWriteTimeout = write
@@ -119,22 +136,25 @@ func SetDefaultDialTimeout(dial time.Duration) {
 }
 
 func (c *Client) SetKeepAliveOptions(interval time.Duration) {
-	c.conn.(*net.TCPConn).SetKeepAlive(true)
-	c.conn.(*net.TCPConn).SetKeepAlivePeriod(interval)
+	tcpConn, ok := c.conn.(*net.TCPConn)
+	if ok {
+		tcpConn.SetKeepAlive(true)
+		tcpConn.SetKeepAlivePeriod(interval)
+	}
 }
 
 func (c *Client) SetReadDeadline(t time.Time) {
-	c.conn.(*net.TCPConn).SetReadDeadline(t)
+	c.conn.SetReadDeadline(t)
 }
 
 func (c *Client) SetDeadline(t time.Time) {
-	c.conn.(*net.TCPConn).SetDeadline(t)
+	c.conn.SetDeadline(t)
 }
 
 // Wrap an existing transport.
-func Wrap(rwc io.ReadWriteCloser) (rv *Client, err error) {
+func Wrap(conn memcachedConnection) (rv *Client, err error) {
 	client := &Client{
-		conn:   rwc,
+		conn:   conn,
 		hdrBuf: make([]byte, gomemcached.HDR_LEN),
 		opaque: uint32(1),
 	}
