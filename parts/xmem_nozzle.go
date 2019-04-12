@@ -83,7 +83,10 @@ type bufferedMCRequest struct {
 	num_of_retry int
 	timedout     bool
 	reservation  int
-	lock         sync.RWMutex
+	// whether a mutation locked response has been received for the corresponding MCRequest
+	// this affects the number of retries allowed on the MCRequest
+	mutationLocked bool
+	lock           sync.RWMutex
 }
 
 func newBufferedMCRequest() *bufferedMCRequest {
@@ -102,6 +105,7 @@ func resetBufferedMCRequest(request *bufferedMCRequest) {
 	request.sent_time = nil
 	request.num_of_retry = 0
 	request.timedout = false
+	request.mutationLocked = false
 	request.reservation = UninitializedReseverationNumber
 }
 
@@ -384,12 +388,14 @@ type xmemConfig struct {
 	encryptionType     string
 	memcached_ssl_port uint16
 	// in ssl over mem mode, whether target cluster supports SANs in certificates
-	san_in_certificate bool
-	clientCertificate  []byte
-	clientKey          []byte
-	respTimeout        unsafe.Pointer // *time.Duration
-	max_read_downtime  time.Duration
-	logger             *log.CommonLogger
+	san_in_certificate             bool
+	clientCertificate              []byte
+	clientKey                      []byte
+	respTimeout                    unsafe.Pointer // *time.Duration
+	max_read_downtime              time.Duration
+	logger                         *log.CommonLogger
+	maxRetryMutationLocked         int
+	maxRetryIntervalMutationLocked time.Duration
 }
 
 func newConfig(logger *log.CommonLogger) xmemConfig {
@@ -405,12 +411,14 @@ func newConfig(logger *log.CommonLogger) xmemConfig {
 			username:            "",
 			password:            "",
 		},
-		bucketName:         "",
-		demandEncryption:   default_demandEncryption,
-		certificate:        []byte{},
-		max_read_downtime:  base.XmemMaxReadDownTime,
-		memcached_ssl_port: 0,
-		logger:             logger,
+		bucketName:                     "",
+		demandEncryption:               default_demandEncryption,
+		certificate:                    []byte{},
+		max_read_downtime:              base.XmemMaxReadDownTime,
+		memcached_ssl_port:             0,
+		logger:                         logger,
+		maxRetryMutationLocked:         base.XmemMaxRetryMutationLocked,
+		maxRetryIntervalMutationLocked: base.XmemMaxRetryIntervalMutationLocked,
 	}
 
 	atomic.StoreUint32(&config.maxIdleCount, uint32(base.XmemMaxIdleCount))
@@ -766,6 +774,8 @@ type XmemNozzle struct {
 	counter_batches             int64
 	start_time                  time.Time
 	counter_resend              uint64
+	// counter of times LOCKED status is returned by KV
+	counter_locked uint64
 
 	receive_token_ch chan int
 
@@ -1839,6 +1849,11 @@ func (xmem *XmemNozzle) validateFeatures(features utilities.HELOFeatures) error 
 			return errors.New(errMsg)
 		}
 	}
+
+	if !features.Xerror {
+		xmem.Logger().Warnf("%v Attempted to send HELO with Xerror enabled, but received response without Xerror enabled",
+			xmem.Id())
+	}
 	return nil
 }
 
@@ -1973,7 +1988,14 @@ func (xmem *XmemNozzle) receiveResponse(finch chan bool, waitGrp *sync.WaitGroup
 				errMsg := fmt.Sprintf("%v readFromClient returned nil error and nil response. Ignoring it", xmem.Id())
 				xmem.Logger().Warn(errMsg)
 			} else if response.Status != mc.SUCCESS && !isIgnorableMCError(response.Status) {
-				if isTemporaryMCError(response.Status) {
+				if isMutationLockedError(response.Status) {
+					// if target mutation is currently locked, resend doc
+					pos := xmem.getPosFromOpaque(response.Opaque)
+					atomic.AddUint64(&xmem.counter_locked, 1)
+					// set the mutationLocked flag on the corresponding bufferedMCRequest
+					// which will allow resendIfTimeout() method to perform resend with exponential backoff with appropriate settings
+					_, err = xmem.buf.modSlot(pos, xmem.setMutationLockedFlag)
+				} else if isTemporaryMCError(response.Status) {
 					// target may be overloaded. increase backoff factor to alleviate stress on target
 					xmem.client_for_setMeta.incrementBackOffFactor()
 
@@ -2140,6 +2162,20 @@ func isTemporaryMCError(resp_status mc.Status) bool {
 	case mc.EBUSY:
 		fallthrough
 	case mc.NOT_INITIALIZED:
+		fallthrough
+		// this used to be remapped to and handled in the same way as TMPFAIL
+		// keep the same behavior for now
+	case mc.SYNC_WRITE_IN_PROGRESS:
+		return true
+	default:
+		return false
+	}
+}
+
+// check if memcached response status indicates mutation locked error, which requires resending the corresponding request
+func isMutationLockedError(resp_status mc.Status) bool {
+	switch resp_status {
+	case mc.LOCKED:
 		return true
 	default:
 		return false
@@ -2306,10 +2342,14 @@ func (xmem *XmemNozzle) resendIfTimeout(req *bufferedMCRequest, pos uint16) (boo
 	// 1. there is a valid WrappedMCRequest associated with req
 	// and 2. req has not timed out, i.e., has not reached max retry limit
 	if req.req != nil && !req.timedout {
-		if req.num_of_retry > xmem.config.maxRetry {
+		maxRetry := xmem.config.maxRetry
+		if req.mutationLocked {
+			maxRetry = xmem.config.maxRetryMutationLocked
+		}
+		if req.num_of_retry > maxRetry {
 			req.timedout = true
 			err = errors.New(fmt.Sprintf("%v Failed to resend document %s, has tried to resend it %v, maximum retry %v reached",
-				xmem.Id(), req.req.Req.Key, req.num_of_retry, xmem.config.maxRetry))
+				xmem.Id(), req.req.Req.Key, req.num_of_retry, maxRetry))
 			xmem.Logger().Error(err.Error())
 
 			// release lock before the expensive repairConn call
@@ -2320,7 +2360,7 @@ func (xmem *XmemNozzle) resendIfTimeout(req *bufferedMCRequest, pos uint16) (boo
 		}
 
 		respWaitTime := time.Since(*req.sent_time)
-		if respWaitTime > xmem.timeoutDuration(req.num_of_retry) {
+		if respWaitTime > xmem.timeoutDuration(req.num_of_retry, req.mutationLocked) {
 			// resend the mutation
 
 			bytesList := getBytesListFromReq(req)
@@ -2363,12 +2403,16 @@ func getBytesListFromReq(req *bufferedMCRequest) [][]byte {
 	return bytesList
 }
 
-func (xmem *XmemNozzle) timeoutDuration(numofRetry int) time.Duration {
+func (xmem *XmemNozzle) timeoutDuration(numofRetry int, isMutationLocked bool) time.Duration {
 	duration := xmem.getRespTimeout()
+	maxDuration := xmem.config.maxRetryInterval
+	if isMutationLocked {
+		maxDuration = xmem.config.maxRetryIntervalMutationLocked
+	}
 	for i := 1; i <= numofRetry; i++ {
 		duration *= 2
-		if duration > xmem.config.maxRetryInterval {
-			duration = xmem.config.maxRetryInterval
+		if duration > maxDuration {
+			duration = maxDuration
 			break
 		}
 	}
@@ -2389,6 +2433,11 @@ func (xmem *XmemNozzle) resendWithReset(req *bufferedMCRequest, pos uint16) (boo
 
 	bytesList := getBytesListFromReq(req)
 	old_sequence := xmem.buf.sequences[pos]
+
+	if req.mutationLocked {
+		req.mutationLocked = false
+		modified = true
+	}
 
 	// reset num_of_retry to 0 and reset timedout to false
 	if req.num_of_retry != 0 || req.timedout {
@@ -2423,6 +2472,29 @@ func (xmem *XmemNozzle) resendWithReset(req *bufferedMCRequest, pos uint16) (boo
 	return modified, nil
 }
 
+// set mutationLocked flag on the bufferedMCRequest
+// returns true if modification is made on the bufferedMCRequest
+func (xmem *XmemNozzle) setMutationLockedFlag(req *bufferedMCRequest, pos uint16) (bool, error) {
+	req.lock.Lock()
+	defer req.lock.Unlock()
+
+	// check that there is a valid WrappedMCRequest associated with req
+	if req.req == nil {
+		return false, nil
+	}
+
+	if !req.mutationLocked {
+		req.mutationLocked = true
+		req.num_of_retry = 0
+		req.timedout = false
+		return true, nil
+	}
+
+	// no op if req has already been marked as mutationLocked before
+
+	return false, nil
+}
+
 func (xmem *XmemNozzle) getPosFromOpaque(opaque uint32) uint16 {
 	result := uint16(0x0000FFFF & opaque)
 	return result
@@ -2450,12 +2522,12 @@ func (xmem *XmemNozzle) PrintStatusSummary() {
 		if counter_sent > 0 {
 			avg_wait_time = float64(atomic.LoadUint64(&xmem.counter_waittime)) / float64(counter_sent)
 		}
-		xmem.Logger().Infof("%v state =%v connType=%v received %v items (%v compressed), sent %v items (%v compressed), %v items waiting to confirm, %v in queue, %v in current batch, avg wait time is %vms, size of last ten batches processed %v, len(batches_ready_queue)=%v resend=%v repair_count_getMeta=%v repair_count_setMeta=%v\n",
+		xmem.Logger().Infof("%v state =%v connType=%v received %v items (%v compressed), sent %v items (%v compressed), %v items waiting to confirm, %v in queue, %v in current batch, avg wait time is %vms, size of last ten batches processed %v, len(batches_ready_queue)=%v, resend=%v, locked=%v, repair_count_getMeta=%v, repair_count_setMeta=%v\n",
 			xmem.Id(), xmem.State(), connType, atomic.LoadUint64(&xmem.counter_received),
 			atomic.LoadUint64(&xmem.counter_compressed_received), atomic.LoadUint64(&xmem.counter_sent),
 			atomic.LoadUint64(&xmem.counter_compressed_sent), xmem.buf.itemCountInBuffer(), len(xmem.dataChan),
 			atomic.LoadUint32(&xmem.cur_batch_count), avg_wait_time, xmem.getLastTenBatchSize(),
-			len(xmem.batches_ready_queue), atomic.LoadUint64(&xmem.counter_resend),
+			len(xmem.batches_ready_queue), atomic.LoadUint64(&xmem.counter_resend), atomic.LoadUint64(&xmem.counter_locked),
 			xmem.client_for_getMeta.repairCount(), xmem.client_for_setMeta.repairCount())
 	} else {
 		xmem.Logger().Infof("%v state =%v ", xmem.Id(), xmem.State())
@@ -2482,6 +2554,7 @@ func (xmem *XmemNozzle) optimisticRep(req *mc.MCRequest) bool {
 func (xmem *XmemNozzle) sendHELO(setMeta bool) (utilities.HELOFeatures, error) {
 	var features utilities.HELOFeatures
 	features.Xattribute = true
+	features.Xerror = true
 	if setMeta {
 		// For setMeta, negotiate compression, if it is set
 		features.CompressionType = xmem.compressionSetting

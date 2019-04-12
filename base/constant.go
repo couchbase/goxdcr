@@ -471,6 +471,9 @@ var HELO_FEATURE_XATTR uint16 = 0x06
 // value representing snappy compression
 var HELO_FEATURE_SNAPPY uint16 = 0x0a
 
+// value representing XERROR
+var HELO_FEATURE_XERROR uint16 = 0x07
+
 // new XATTR bit in data type field in dcp mutations
 var PROTOCOL_BINARY_DATATYPE_XATTR uint8 = 0x04
 
@@ -708,6 +711,13 @@ var MaxNumberOfAsyncListeners = 4
 //max interval between retries when resending docs  (seconds)
 var XmemMaxRetryInterval = 300 * time.Second
 
+// max retry for xmem resend operation on mutation locked error
+var XmemMaxRetryMutationLocked = 20
+
+//max interval between retries when resending docs on mutation locked errors  (seconds)
+// the upper limit on lock period is as of now 30 seconds
+var XmemMaxRetryIntervalMutationLocked = 30 * time.Second
+
 var WaitTimeBetweenMetadataChangeListeners = 1 * time.Second
 
 // Keep alive period for tcp connections
@@ -821,7 +831,8 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	numberOfSlotsForBandwidthThrottling int, percentageOfBytesToSendAsMin int,
 	auditWriteTimeout time.Duration, auditReadTimeout time.Duration,
 	maxRetryCapiService int, maxNumberOfAsyncListeners int,
-	xmemMaxRetryInterval time.Duration, heloTimeout time.Duration,
+	xmemMaxRetryInterval time.Duration, xmemMaxRetryMutationLocked int,
+	xmemMaxRetryIntervalMutationLocked time.Duration, heloTimeout time.Duration,
 	waitTimeBetweenMetadataChangeListeners time.Duration, keepAlivePeriod time.Duration,
 	thresholdPercentageForEventChanSizeLogging int, thresholdForThroughSeqnoComputation time.Duration,
 	statsLogInterval time.Duration, xmemDefaultRespTimeout time.Duration,
@@ -891,6 +902,8 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	MaxRetryCapiService = maxRetryCapiService
 	MaxNumberOfAsyncListeners = maxNumberOfAsyncListeners
 	XmemMaxRetryInterval = xmemMaxRetryInterval
+	XmemMaxRetryMutationLocked = xmemMaxRetryMutationLocked
+	XmemMaxRetryIntervalMutationLocked = xmemMaxRetryIntervalMutationLocked
 	HELOTimeout = heloTimeout
 	WaitTimeBetweenMetadataChangeListeners = waitTimeBetweenMetadataChangeListeners
 	KeepAlivePeriod = keepAlivePeriod

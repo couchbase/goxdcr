@@ -20,6 +20,7 @@ type ReleaseMemFunc func()
 type HELOFeatures struct {
 	Xattribute      bool
 	CompressionType base.CompressionType
+	Xerror          bool
 }
 
 type UtilsIface interface {

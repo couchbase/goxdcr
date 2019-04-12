@@ -126,6 +126,11 @@ const (
 	MaxNumberOfAsyncListenersKey = "MaxNumberOfAsyncListeners"
 	//max interval between retries when resending docs  (seconds)
 	XmemMaxRetryIntervalKey = "XmemMaxRetryInterval"
+	// max retry for xmem resend operation on mutation locked error
+	XmemMaxRetryMutationLockedKey = "XmemMaxRetryMutationLocked"
+	//max interval between retries when resending docs on mutation locked errors  (seconds)
+	// the upper limit on lock period is as of now 30 seconds
+	XmemMaxRetryIntervalMutationLockedKey = "XmemMaxRetryIntervalMutationLocked"
 	// read/write timeout for helo command to memcached (seconds)
 	HELOTimeoutKey = "HELOTimeout"
 	// wait time between metadata change listeners (milliseconds)
@@ -244,6 +249,8 @@ var AuditReadTimeoutConfig = &SettingsConfig{1, &Range{1, 3600}}
 var MaxRetryCapiServiceConfig = &SettingsConfig{5, &Range{0, 100}}
 var MaxNumberOfAsyncListenersConfig = &SettingsConfig{4, &Range{1, 100}}
 var XmemMaxRetryIntervalConfig = &SettingsConfig{300, &Range{1, 3600}}
+var XmemMaxRetryMutationLockedConfig = &SettingsConfig{20, &Range{0, 1000}}
+var XmemMaxRetryIntervalMutationLockedConfig = &SettingsConfig{30, &Range{1, 3600}}
 var HELOTimeoutConfig = &SettingsConfig{120, &Range{1, 3600}}
 var WaitTimeBetweenMetadataChangeListenersConfig = &SettingsConfig{1000, &Range{10, 60000}}
 var KeepAlivePeriodConfig = &SettingsConfig{30, &Range{1, 3600}}
@@ -327,6 +334,8 @@ var XDCRInternalSettingsConfigMap = map[string]*SettingsConfig{
 	MaxRetryCapiServiceKey:                        MaxRetryCapiServiceConfig,
 	MaxNumberOfAsyncListenersKey:                  MaxNumberOfAsyncListenersConfig,
 	XmemMaxRetryIntervalKey:                       XmemMaxRetryIntervalConfig,
+	XmemMaxRetryMutationLockedKey:                 XmemMaxRetryMutationLockedConfig,
+	XmemMaxRetryIntervalMutationLockedKey:         XmemMaxRetryIntervalMutationLockedConfig,
 	HELOTimeoutKey:                                HELOTimeoutConfig,
 	WaitTimeBetweenMetadataChangeListenersKey:     WaitTimeBetweenMetadataChangeListenersConfig,
 	KeepAlivePeriodKey:                            KeepAlivePeriodConfig,

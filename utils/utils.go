@@ -43,6 +43,9 @@ func (f *HELOFeatures) NumberOfActivatedFeatures() int {
 	if f.CompressionType != base.CompressionTypeNone {
 		result++
 	}
+	if f.Xerror {
+		result++
+	}
 	return result
 }
 
@@ -640,6 +643,9 @@ func (u *Utilities) SendHELOWithFeatures(client mcc.ClientIface, userAgent strin
 			if feature == base.HELO_FEATURE_SNAPPY {
 				respondedFeatures.CompressionType = base.CompressionTypeSnappy
 			}
+			if feature == base.HELO_FEATURE_XERROR {
+				respondedFeatures.Xerror = true
+			}
 			pos += 2
 		}
 		logger.Infof("Successfully sent HELO command with userAgent=%v. attributes=%v", userAgent, respondedFeatures)
@@ -686,6 +692,12 @@ func (u *Utilities) ComposeHELORequest(userAgent string, features HELOFeatures) 
 	// Compression
 	if features.CompressionType == base.CompressionTypeSnappy {
 		binary.BigEndian.PutUint16(value[sliceIndex:sliceIndex+base.HELO_BYTES_PER_FEATURE], base.HELO_FEATURE_SNAPPY)
+		sliceIndex += base.HELO_BYTES_PER_FEATURE
+	}
+
+	// Xerror
+	if features.Xerror {
+		binary.BigEndian.PutUint16(value[sliceIndex:sliceIndex+base.HELO_BYTES_PER_FEATURE], base.HELO_FEATURE_XERROR)
 		sliceIndex += base.HELO_BYTES_PER_FEATURE
 	}
 

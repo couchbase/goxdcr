@@ -248,6 +248,8 @@ func initConstants(xdcr_topology_svc service_def.XDCRCompTopologySvc, internal_s
 		internal_settings.Values[metadata.MaxRetryCapiServiceKey].(int),
 		internal_settings.Values[metadata.MaxNumberOfAsyncListenersKey].(int),
 		time.Duration(internal_settings.Values[metadata.XmemMaxRetryIntervalKey].(int))*time.Second,
+		internal_settings.Values[metadata.XmemMaxRetryMutationLockedKey].(int),
+		time.Duration(internal_settings.Values[metadata.XmemMaxRetryIntervalMutationLockedKey].(int))*time.Second,
 		time.Duration(internal_settings.Values[metadata.HELOTimeoutKey].(int))*time.Second,
 		time.Duration(internal_settings.Values[metadata.WaitTimeBetweenMetadataChangeListenersKey].(int))*time.Millisecond,
 		time.Duration(internal_settings.Values[metadata.KeepAlivePeriodKey].(int))*time.Second,
