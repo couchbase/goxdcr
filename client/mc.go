@@ -492,10 +492,9 @@ func (c *Client) AuthPlain(user, pass string) (*gomemcached.MCResponse, error) {
 
 // select bucket
 func (c *Client) SelectBucket(bucket string) (*gomemcached.MCResponse, error) {
-
 	return c.Send(&gomemcached.MCRequest{
 		Opcode: gomemcached.SELECT_BUCKET,
-		Key:    []byte(fmt.Sprintf("%s", bucket))})
+		Key:    []byte(bucket)})
 }
 
 func (c *Client) store(opcode gomemcached.CommandCode, vb uint16,
