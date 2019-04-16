@@ -293,7 +293,7 @@ func (router *Router) updateExpDelMode(expDelModeObj interface{}) error {
 		return err
 	}
 
-	router.Logger().Infof("Router %v's Deletion/Expiration filter method: %v\n", expDelMode.LogString())
+	router.Logger().Infof("Router %v's Deletion/Expiration filter method: %v\n", router.id, expDelMode.LogString())
 
 	router.expDelMode.Set(expDelMode)
 	return nil
