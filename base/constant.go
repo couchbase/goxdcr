@@ -41,6 +41,7 @@ var NodesSelfPath = "/nodes/self"
 var SSLPortsPath = "/nodes/self/xdcrSSLPorts"
 var NodeServicesPath = "/pools/default/nodeServices"
 var BPath = "/pools/default/b/"
+var DocsPath = "/docs/"
 
 // constants for CAPI nozzle
 var RevsDiffPath = "/_revs_diff"
@@ -181,6 +182,7 @@ var ParseIntBitSize = 64
 
 // Various error messages
 var ErrorNotResponding = errors.New("Not responding")
+var ErrorNotOK = errors.New("Not OK")
 var ErrorNotMyVbucket = errors.New("NOT_MY_VBUCKET")
 var InvalidStateTransitionErrMsg = "Can't move to state %v - %v's current state is %v, can only move to state [%v]"
 var InvalidCerfiticateError = errors.New("certificate must be a single, PEM-encoded x509 certificate and nothing more (failed to parse given certificate)")
@@ -412,6 +414,7 @@ const (
 	PermissionBucketXDCRReadSuffix    = "].xdcr!read"
 	PermissionBucketXDCRWriteSuffix   = "].xdcr!write"
 	PermissionBucketXDCRExecuteSuffix = "].xdcr!execute"
+	PermissionBucketDataReadSuffix    = "].data!read"
 	PermissionXDCRInternalRead        = "cluster.admin.internal.xdcr!read"
 	PermissionXDCRInternalWrite       = "cluster.admin.internal.xdcr!write"
 )
@@ -982,3 +985,10 @@ const FilterExpDelKey = "filter_exp_del"
 const FilterExpKey = "filterExpiration"
 const FilterDelKey = "filterDeletion"
 const BypassExpiryKey = "filterBypassExpiry"
+
+// UI+ns_server returned document content, keyed by special keys
+const (
+	BucketDocBodyKey  = "json"
+	BucketDocMetaKey  = "meta"
+	BucketDocXattrKey = "xattrs"
+)

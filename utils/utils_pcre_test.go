@@ -210,11 +210,6 @@ func TestGenerateXattrUsingGoCB(t *testing.T) {
 	//		dcp.Logger().Warnf("Unable to write file due to %v\n", writeErr)
 	//	}
 
-	assert := assert.New(t)
-	result, checkErr := testUtils.FilterExpressionMatchesDoc(testExpression, docKey, "Administrator", "wewewe", "b1", "127.0.0.1", 9000)
-	assert.Nil(checkErr)
-	assert.True(result)
-
 	fmt.Println("============== Test case end: TestGenerateXattrUsingGoCB =================")
 }
 

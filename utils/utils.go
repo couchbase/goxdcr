@@ -360,75 +360,69 @@ func filterExpressionGetDocVal(bucket *gocb.Bucket, docId string) ([]byte, gocb.
 	return bodySlice, docCas, err
 }
 
-func (u *Utilities) FilterExpressionMatchesDoc(expression, docId, username, password, bucketName, addr string, port uint16) (result bool, err error) {
-	var bodySlice []byte
-	var docCas gocb.Cas
+// Called by UI to run a test on a specific document. This cannot be unit-tested as the authentication will fail
+// Queries ns_server REST endpoint for a document content
+// ns_server returns the document in a special json format, so then massage the data into gojsonsm compatible format
+// and pass it through gojsonsm for testing
+func (u *Utilities) FilterExpressionMatchesDoc(expression, docId, bucketName, addr string, port uint16) (result bool, err error) {
+	nsServerDocContent := make(map[string]interface{})
+	hostAddr := base.GetHostAddr(addr, port)
+	var statusCode int
 
-	cluster, err := gocb.Connect(fmt.Sprintf("http://%v:%v", addr, port))
+	matcher, err := base.ValidateAndGetAdvFilter(expression)
 	if err != nil {
 		return
-	}
-
-	cluster.Authenticate(gocb.PasswordAuthenticator{
-		Username: username,
-		Password: password,
-	})
-
-	bucket, err := cluster.OpenBucket(bucketName, "")
-	if err != nil {
-		return
-	}
-
-	retrieveRetryOp := func() ([]byte, error) {
-		bodySlice, docCas, err = filterExpressionGetDocVal(bucket, docId)
-		if err != nil {
-			err = fmt.Errorf("Error getting doc %v value: %v", docId, err.Error())
-			return nil, err
-		}
-
-		if base.FilterContainsXattrExpression(expression) {
-			xattrSlice, err := filterExpressionGetXattrHelper(bucket, docId, docCas)
-			if err != nil {
-				err = fmt.Errorf("Error getting doc %v xattributes: %v", docId, err.Error())
-				return nil, err
-			}
-
-			bodySlice, err = base.AddXattrToBeFilteredWithoutDP(bodySlice, xattrSlice)
-			if err != nil {
-				err = fmt.Errorf("Error adding doc %v xattributes to be filtered: %v", docId, err.Error())
-				return nil, err
-			}
-		}
-
-		if base.FilterContainsKeyExpression(expression) {
-			testBytes := []byte(docId)
-			bodySlice, err, _ = base.AddKeyToBeFiltered(bodySlice, testBytes, nil, nil, len(testBytes)-1)
-			if err != nil {
-				err = fmt.Errorf("Error adding doc %v ID to be filtered: %v", docId, err.Error())
-			}
-		}
-		return bodySlice, err
 	}
 
 	retryOp := func() error {
-		bodySlice, err = retrieveRetryOp()
-		return err
+		err, statusCode = u.QueryRestApi(hostAddr, base.DefaultPoolBucketsPath+bucketName+base.DocsPath+docId, false /*preservePathEncoding*/, base.MethodGet, "" /*contentType*/, nil, /*body*/
+			0 /*timeout*/, &nsServerDocContent, u.logger_utils)
+
+		if err != nil {
+			return err
+		} else if statusCode != http.StatusOK {
+			return fmt.Errorf("Err returned: %v along with http status code: %v", err, statusCode)
+		} else {
+			return nil
+		}
 	}
+
 	err = u.ExponentialBackoffExecutor("filterTesterXattrRetriever", base.BucketInfoOpWaitTime, base.BucketInfoOpMaxRetry, base.BucketInfoOpRetryFactor, retryOp)
 	if err != nil {
-		if strings.Contains(err.Error(), base.ErrorInvalidCAS.Error()) {
-			err = fmt.Errorf("Unable to successfully retrieve document %v because it keeps mutating", docId)
+		return
+	}
+
+	return u.processNsServerDocForFiltering(matcher, nsServerDocContent, docId)
+}
+
+func (u *Utilities) processNsServerDocForFiltering(matcher gojsonsm.Matcher, nsServerDocContent map[string]interface{}, docId string) (result bool, err error) {
+	// Take care of the body - it shows up as a string of pre-formatted json
+	// i.e. the whole {"k":"v"} as the value of specified key below
+	processedJson := make(map[string]interface{})
+	if body, ok := nsServerDocContent[base.BucketDocBodyKey].(string); ok {
+		marshaledBytes := []byte(body)
+		err = json.Unmarshal(marshaledBytes, &processedJson)
+		if err != nil {
+			err = fmt.Errorf("Unable to process document body: %v", err)
+			return
 		}
-		return
 	}
 
-	matcher, err := gojsonsm.GetFilterExpressionMatcher(base.ReplaceKeyWordsForExpression(expression))
+	// Add document key in
+	processedJson[base.InternalKeyKey] = docId
+
+	// Add xattribute
+	if xattrs, ok := nsServerDocContent[base.BucketDocXattrKey].(map[string]interface{}); ok {
+		processedJson[base.InternalKeyXattr] = xattrs
+	}
+
+	byteSlice, err := json.Marshal(processedJson)
 	if err != nil {
-		err = fmt.Errorf("Error filtering doc %v ID: %v", docId, err.Error())
+		err = fmt.Errorf("Unable to marshal postprocessed data for matching: %v", err)
 		return
 	}
 
-	result, err = matcher.Match(bodySlice)
+	result, err = matcher.Match(byteSlice)
 	return
 }
 

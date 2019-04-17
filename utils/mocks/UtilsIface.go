@@ -321,20 +321,20 @@ func (_m *UtilsIface) ExponentialBackoffExecutorWithFinishSignal(name string, in
 	return r0, r1
 }
 
-// FilterExpressionMatchesDoc provides a mock function with given fields: expression, docId, username, password, bucketName, addr, port
-func (_m *UtilsIface) FilterExpressionMatchesDoc(expression string, docId string, username string, password string, bucketName string, addr string, port uint16) (bool, error) {
-	ret := _m.Called(expression, docId, username, password, bucketName, addr, port)
+// FilterExpressionMatchesDoc provides a mock function with given fields: expression, docId, bucketName, addr, port
+func (_m *UtilsIface) FilterExpressionMatchesDoc(expression string, docId string, bucketName string, addr string, port uint16) (bool, error) {
+	ret := _m.Called(expression, docId, bucketName, addr, port)
 
 	var r0 bool
-	if rf, ok := ret.Get(0).(func(string, string, string, string, string, string, uint16) bool); ok {
-		r0 = rf(expression, docId, username, password, bucketName, addr, port)
+	if rf, ok := ret.Get(0).(func(string, string, string, string, uint16) bool); ok {
+		r0 = rf(expression, docId, bucketName, addr, port)
 	} else {
 		r0 = ret.Get(0).(bool)
 	}
 
 	var r1 error
-	if rf, ok := ret.Get(1).(func(string, string, string, string, string, string, uint16) error); ok {
-		r1 = rf(expression, docId, username, password, bucketName, addr, port)
+	if rf, ok := ret.Get(1).(func(string, string, string, string, uint16) error); ok {
+		r1 = rf(expression, docId, bucketName, addr, port)
 	} else {
 		r1 = ret.Error(1)
 	}

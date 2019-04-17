@@ -692,3 +692,50 @@ func TestDataPool(t *testing.T) {
 
 	fmt.Println("============== Test case start: TestDataPool =================")
 }
+
+func TestProcessNsServerDoc(t *testing.T) {
+	fmt.Println("============== Test case start: TestProcessNsServerDoc =================")
+	var docKey string = "TestDocKey"
+	var testExpression string = fmt.Sprintf("META().xattrs.AnotherXattr = \"TestValueString\" AND META().xattrs.TestXattr = 30 AND META().id = \"%v\" AND REGEXP_CONTAINS(Key, \"^AA\")", docKey)
+	assert := assert.New(t)
+	fileName := "./testFilteringData/UIFilteringSampleDoc.json"
+	data, err := ioutil.ReadFile(fileName)
+	assert.Nil(err)
+
+	docKVs := make(map[string]interface{})
+	err = json.Unmarshal(data, &docKVs)
+	assert.Nil(err)
+
+	matcher, err := base.ValidateAndGetAdvFilter(testExpression)
+	assert.Nil(err)
+
+	matched, err := testUtils.processNsServerDocForFiltering(matcher, docKVs, docKey)
+	assert.True(matched)
+	assert.Nil(err)
+
+	fmt.Println("============== Test case end: TestProcessNsServerDoc =================")
+}
+
+// Tests when the doc coming back does not have a body
+func TestProcessNsServerNilDoc(t *testing.T) {
+	fmt.Println("============== Test case start: TestProcessNsServerDocNeg =================")
+	var docKey string = "TestDocKey"
+	var testExpression string = fmt.Sprintf("META().xattrs.AnotherXattr = \"TestValueString\" AND META().xattrs.TestXattr = 30 AND META().id = \"%v\"", docKey)
+	assert := assert.New(t)
+	fileName := "./testFilteringData/UIFilteringSampleDocNeg.json"
+	data, err := ioutil.ReadFile(fileName)
+	assert.Nil(err)
+
+	docKVs := make(map[string]interface{})
+	err = json.Unmarshal(data, &docKVs)
+	assert.Nil(err)
+
+	matcher, err := base.ValidateAndGetAdvFilter(testExpression)
+	assert.Nil(err)
+
+	matched, err := testUtils.processNsServerDocForFiltering(matcher, docKVs, docKey)
+	assert.True(matched)
+	assert.Nil(err)
+
+	fmt.Println("============== Test case end: TestProcessNsServerDocNeg =================")
+}

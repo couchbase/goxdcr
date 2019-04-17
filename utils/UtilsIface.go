@@ -31,7 +31,7 @@ type UtilsIface interface {
 	 * ------------------------
 	 */
 	ComposeHELORequest(userAgent string, features HELOFeatures) *mc.MCRequest
-	FilterExpressionMatchesDoc(expression, docId, username, password, bucketName, addr string, port uint16) (result bool, err error)
+	FilterExpressionMatchesDoc(expression, docId, bucketName, addr string, port uint16) (result bool, err error)
 	GetMemcachedClient(serverAddr, bucketName string, kv_mem_clients map[string]mcc.ClientIface, userAgent string, keepAlivePeriod time.Duration, logger *log.CommonLogger) (mcc.ClientIface, error)
 	GetMemcachedConnection(serverAddr, bucketName, userAgent string, keepAlivePeriod time.Duration, logger *log.CommonLogger) (mcc.ClientIface, error)
 	GetMemcachedConnectionWFeatures(serverAddr, bucketName, userAgent string, keepAlivePeriod time.Duration, features HELOFeatures, logger *log.CommonLogger) (mcc.ClientIface, HELOFeatures, error)

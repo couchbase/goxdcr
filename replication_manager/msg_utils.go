@@ -88,8 +88,6 @@ const (
 	// Input
 	Expression = "expression"
 	DocID      = "docId"
-	UserName   = "username"
-	Password   = "password"
 	Bucket     = "bucket"
 	// Output
 	MatchResult = "result"
@@ -730,7 +728,7 @@ func DecodeSettingsFromXDCRInternalSettingsRequest(request *http.Request) (metad
 	return settings, nil
 }
 
-func DecodeRegexpValidationRequest(request *http.Request, utils utilities.UtilsIface) (expression, docId, username, password, bucket string, err error) {
+func DecodeRegexpValidationRequest(request *http.Request, utils utilities.UtilsIface) (expression, docId, bucket string, err error) {
 	if err = request.ParseForm(); err != nil {
 		return
 	}
@@ -741,10 +739,6 @@ func DecodeRegexpValidationRequest(request *http.Request, utils utilities.UtilsI
 			expression = getStringFromValArr(valArr)
 		case DocID:
 			docId = getStringFromValArr(valArr)
-		case UserName:
-			username = getStringFromValArr(valArr)
-		case Password:
-			password = getStringFromValArr(valArr)
 		case Bucket:
 			bucket = getStringFromValArr(valArr)
 		default:
@@ -756,10 +750,6 @@ func DecodeRegexpValidationRequest(request *http.Request, utils utilities.UtilsI
 		err = base.MissingParameterError(Expression)
 	} else if len(docId) == 0 {
 		err = base.MissingParameterError(DocID)
-	} else if len(username) == 0 {
-		err = base.MissingParameterError(UserName)
-	} else if len(password) == 0 {
-		err = base.MissingParameterError(Password)
 	} else if len(bucket) == 0 {
 		err = base.MissingParameterError(Bucket)
 	}

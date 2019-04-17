@@ -1,0 +1,1 @@
+{"meta":{"id":"TestDocKey","rev":"5-1596533edd9c00000000000002000000","expiration":0,"flags":33554432},"xattrs":{"TestXattr":30,"AnotherXattr":"TestValueString","NilXattr":null,"MapXattr":{"array":["a","b","c"],"floatType":1,"stringType":"string"}}}

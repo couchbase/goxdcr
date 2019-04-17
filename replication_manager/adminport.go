@@ -801,23 +801,22 @@ func (adminport *Adminport) IsReadyForHeartBeat() bool {
 func (adminport *Adminport) doRegexpValidationRequest(request *http.Request) (*ap.Response, error) {
 	logger_ap.Infof("doRegexpValidationRequest\n")
 
-	response, err := authWebCreds(request, base.PermissionXDCRInternalRead)
-	if response != nil || err != nil {
-		return response, err
-	}
-
-	expression, docId, username, password, bucket, err := DecodeRegexpValidationRequest(request, adminport.utils)
+	expression, docId, bucket, err := DecodeRegexpValidationRequest(request, adminport.utils)
 	if err != nil {
 		return EncodeErrorMessageIntoResponse(err, http.StatusBadRequest)
 	}
 
-	logger_ap.Infof("Request params: expression=%v%v%v docId=%v%v%v\n username=%v%v%v password=XXX bucket=%v",
+	response, err := authWebCreds(request, constructBucketPermission(bucket, base.PermissionBucketDataReadSuffix))
+	if response != nil || err != nil {
+		return response, err
+	}
+
+	logger_ap.Infof("Request params: expression=%v%v%v docId=%v%v%v\n bucket=%v",
 		base.UdTagBegin, expression, base.UdTagEnd,
 		base.UdTagBegin, docId, base.UdTagEnd,
-		base.UdTagBegin, username, base.UdTagEnd,
 		bucket)
 
-	return NewRegexpValidationResponse(adminport.utils.FilterExpressionMatchesDoc(expression, docId, username, password, bucket, adminport.sourceKVHost, adminport.kvAdminPort))
+	return NewRegexpValidationResponse(adminport.utils.FilterExpressionMatchesDoc(expression, docId, bucket, adminport.sourceKVHost, adminport.kvAdminPort))
 }
 
 func (adminport *Adminport) doStartBlockProfile(request *http.Request) (*ap.Response, error) {

@@ -923,6 +923,11 @@ func GoJsonsmGetFilterExprMatcher(filter string) (gojsonsm.Matcher, error) {
 }
 
 func ValidateAdvFilter(filter string) error {
+	_, err := ValidateAndGetAdvFilter(filter)
+	return err
+}
+
+func ValidateAndGetAdvFilter(filter string) (gojsonsm.Matcher, error) {
 	// From XDCR's perspective, instead of calling and creating gojson filter obj, this function call provides a simple and cheap
 	// way to verify whether or not the filter can potentially be valid by finding operators in the filter
 	// Once it's valid, spend the resource and do the actual matcher parsing
@@ -936,16 +941,16 @@ func ValidateAdvFilter(filter string) error {
 	if !operatorFound {
 		if !strings.Contains(filter, " ") {
 			// Having no white-space most likely means user entered a single word, and most likely meant as a key-only regex
-			return ErrorFilterInvalidFormat
+			return nil, ErrorFilterInvalidFormat
 		}
-		return ErrorFilterInvalidExpression
+		return nil, ErrorFilterInvalidExpression
 	}
 
-	_, err := GoJsonsmGetFilterExprMatcher(ReplaceKeyWordsForExpression(filter))
+	matcher, err := GoJsonsmGetFilterExprMatcher(ReplaceKeyWordsForExpression(filter))
 	if err != nil {
 		err = fmt.Errorf("Error validating advanced filter: %v", err.Error())
 	}
-	return err
+	return matcher, err
 }
 
 // Given a destination, insert the "ins" at pos
