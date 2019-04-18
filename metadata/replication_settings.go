@@ -371,17 +371,13 @@ func (s *ReplicationSettings) ToMap(isDefaultSettings bool) ReplicationSettingsM
 	return s.toMapInternal(isDefaultSettings, false /* hideInternals */)
 }
 
-func (s *ReplicationSettings) ToRESTMap() ReplicationSettingsMap {
-	settingsMap := s.toMapInternal(false /* defaultSettings */, true /* hideInternals */)
+func (s *ReplicationSettings) ToRESTMap(isDefaultSettings bool) ReplicationSettingsMap {
+	settingsMap := s.toMapInternal(isDefaultSettings, true /* hideInternals */)
 	if filter, ok := settingsMap[FilterExpressionKey]; ok {
 		// For UI, we should not show internal XDCR Filtering key or xattributes
 		settingsMap[FilterExpressionKey] = base.ReplaceKeyWordsForOutput(filter.(string))
 	}
 	return settingsMap
-}
-
-func (s *ReplicationSettings) ToDefaultSettingsMap() ReplicationSettingsMap {
-	return s.toMapInternal(true /* defaultSettings */, true /* hideInternals */)
 }
 
 func (s *ReplicationSettings) toMapInternal(isDefaultSettings bool, hideInternals bool) ReplicationSettingsMap {

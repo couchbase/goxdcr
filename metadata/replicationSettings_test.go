@@ -152,7 +152,7 @@ func TestFlagBasedUpdates(t *testing.T) {
 	assert.True(ok)
 	assert.False(filterExp.(bool))
 
-	restMap := existSettings.ToRESTMap()
+	restMap := existSettings.ToRESTMap(false /*defaultSettings*/)
 	_, ok = restMap[FilterExpDelKey]
 	assert.False(ok)
 

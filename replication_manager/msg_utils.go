@@ -254,7 +254,7 @@ func getReplicationDocMap(replSpec *metadata.ReplicationSpecification) map[strin
 		}
 
 		// copy other replication settings into replication doc
-		for key, value := range replSpec.Settings.ToRESTMap() {
+		for key, value := range replSpec.Settings.ToRESTMap(false /*defaultSettings*/) {
 			if key != metadata.ReplicationTypeKey && key != metadata.ActiveKey {
 				replDocMap[key] = value
 			}
@@ -835,12 +835,7 @@ func convertGlobalSettingsToRestSettingsMap(settings *metadata.GlobalSettings) m
 
 func convertSettingsToRestSettingsMap(settings *metadata.ReplicationSettings, isDefaultSettings bool) map[string]interface{} {
 	restSettingsMap := make(map[string]interface{})
-	var settingsMap map[string]interface{}
-	if isDefaultSettings {
-		settingsMap = settings.ToDefaultSettingsMap()
-	} else {
-		settingsMap = settings.ToMap(isDefaultSettings)
-	}
+	settingsMap := settings.ToRESTMap(isDefaultSettings)
 
 	for key, value := range settingsMap {
 		restKey := SettingsKeyToRestKeyMap[key]
