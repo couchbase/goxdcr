@@ -141,6 +141,9 @@ const (
 	TMPFAIL            = Status(0x86)
 	UNKNOWN_COLLECTION = Status(0x88)
 
+	SYNC_WRITE_IN_PROGRESS = Status(0xa2)
+	SYNC_WRITE_AMBIGUOUS   = Status(0xa3)
+
 	// SUBDOC
 	SUBDOC_PATH_NOT_FOUND             = Status(0xc0)
 	SUBDOC_BAD_MULTI                  = Status(0xcc)
