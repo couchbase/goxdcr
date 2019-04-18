@@ -923,6 +923,11 @@ func GoJsonsmGetFilterExprMatcher(filter string) (gojsonsm.Matcher, error) {
 }
 
 func ValidateAdvFilter(filter string) error {
+	// Empty filter means to unset a filter, and that's valid
+	if len(filter) == 0 {
+		return nil
+	}
+
 	_, err := ValidateAndGetAdvFilter(filter)
 	return err
 }

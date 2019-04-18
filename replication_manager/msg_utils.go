@@ -561,14 +561,18 @@ func filterExpressionVariousChecks(settings metadata.ReplicationSettingsMap, cre
 	if !ok {
 		// No filter means do not check anything else
 		return nil
-	} else if len(filterExpression.(string)) > 0 && !isEnterprise {
-		return base.ErrorFilterEnterpriseOnly
+	} else if len(filterExpression.(string)) > 0 {
+		if !isEnterprise {
+			return base.ErrorFilterEnterpriseOnly
+		}
+		// Anytime user edits the filter from this point forward (6.5), the filter version expected is now advanced
+		if !isDefaultSettings {
+			settings[metadata.FilterVersionKey] = base.FilterVersionAdvanced
+		}
 	} else if len(filterExpression.(string)) == 0 {
-		return nil
-	}
-
-	if !isDefaultSettings && creation {
-		settings[metadata.FilterVersionKey] = base.FilterVersionAdvanced
+		// Explicitly setting filter to be empty string means to clear a filter
+		// The Version shouldn't exist if there is no filter
+		delete(settings, metadata.FilterVersionKey)
 	}
 
 	_, ok = settings[metadata.FilterSkipRestreamKey]

@@ -914,8 +914,6 @@ func constructReplicationSpec(value []byte, rev interface{}) (*metadata.Replicat
 
 	spec.Settings.PostProcessAfterUnmarshalling()
 
-	spec.UpgradeFilterIfNeeded()
-
 	return spec, nil
 }
 

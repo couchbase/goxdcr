@@ -119,25 +119,6 @@ func (spec *ReplicationSpecification) CloneAndRedact() *ReplicationSpecification
 	return spec
 }
 
-// Modifies the in-memory version of the spec, does not persist changes onto metakv
-// This should only be called once, after loading from metakv
-func (spec *ReplicationSpecification) UpgradeFilterIfNeeded() {
-	if spec.Settings == nil || len(spec.Settings.FilterExpression) == 0 {
-		return
-	}
-
-	if _, ok := spec.Settings.Values[FilterVersionKey]; !ok {
-		// This shouldn't happen... but for now, assume that the filter was input as a key version
-		// since spec creation should have entered it as a valid value
-		spec.Settings.Values[FilterVersionKey] = base.FilterVersionKeyOnly
-	}
-
-	if spec.Settings.Values[FilterVersionKey] == base.FilterVersionKeyOnly {
-		spec.Settings.FilterExpression = base.UpgradeFilter(spec.Settings.FilterExpression)
-		spec.Settings.Values[FilterExpressionKey] = spec.Settings.FilterExpression
-	}
-}
-
 func ReplicationId(sourceBucketName string, targetClusterUUID string, targetBucketName string) string {
 	parts := []string{targetClusterUUID, sourceBucketName, targetBucketName}
 	return strings.Join(parts, base.KeyPartsDelimiter)

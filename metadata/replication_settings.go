@@ -436,6 +436,7 @@ func (s *ReplicationSettings) PostProcessAfterUnmarshalling() {
 		// no need for populateFieldsUsingMap() since fields and map in metakv should already be consistent
 	}
 	s.HandleUpgrade()
+	s.UpgradeFilterIfNeeded()
 }
 
 func (s *ReplicationSettings) exportFlagTypeValues() {
@@ -465,6 +466,26 @@ func (s *ReplicationSettings) UpdateSettingsFromMap(settingsMap map[string]inter
 	}
 	s.populateFieldsUsingMap()
 	return
+}
+
+// Modifies the in-memory version of the spec, does not persist changes onto metakv
+// This should only be called once, after loading from metakv
+func (s *ReplicationSettings) UpgradeFilterIfNeeded() {
+	if len(s.FilterExpression) == 0 {
+		return
+	}
+
+	if _, ok := s.Values[FilterVersionKey]; !ok {
+		// This shouldn't happen... but for now, assume that the filter was input as a key version
+		// since spec creation should have entered it as a valid value
+		s.Values[FilterVersionKey] = base.FilterVersionKeyOnly
+	}
+
+	if s.Values[FilterVersionKey] == base.FilterVersionKeyOnly {
+		s.FilterExpression = base.UpgradeFilter(s.FilterExpression)
+		s.Values[FilterExpressionKey] = s.FilterExpression
+		s.Values[FilterVersionKey] = base.FilterVersionAdvanced
+	}
 }
 
 // populate settings map using field values
