@@ -1529,7 +1529,7 @@ func (xmem *XmemNozzle) batchGetMetaHandler(count int, finch chan bool, return_c
 						}
 						xmem.RaiseEvent(common.NewEvent(common.GetMetaReceived, nil, xmem, nil, additionalInfo))
 
-						if response.Status != mc.SUCCESS && !isIgnorableMCError(response.Status) && !isTemporaryMCError(response.Status) && response.Status != mc.KEY_ENOENT {
+						if response.Status != mc.SUCCESS && !isIgnorableMCResponse(response) && !isTemporaryMCError(response.Status) {
 							if isTopologyChangeMCError(response.Status) {
 								vb_err := fmt.Errorf("Received error %v on vb %v\n", base.ErrorNotMyVbucket, vbno)
 								xmem.handleVBError(vbno, vb_err)
@@ -1989,7 +1989,7 @@ func (xmem *XmemNozzle) receiveResponse(finch chan bool, waitGrp *sync.WaitGroup
 			} else if response == nil {
 				errMsg := fmt.Sprintf("%v readFromClient returned nil error and nil response. Ignoring it", xmem.Id())
 				xmem.Logger().Warn(errMsg)
-			} else if response.Status != mc.SUCCESS && !isIgnorableMCError(response.Status) {
+			} else if response.Status != mc.SUCCESS && !isIgnorableMCResponse(response) {
 				if isMutationLockedError(response.Status) {
 					// if target mutation is currently locked, resend doc
 					pos := xmem.getPosFromOpaque(response.Opaque)
@@ -2021,19 +2021,6 @@ func (xmem *XmemNozzle) receiveResponse(finch chan bool, waitGrp *sync.WaitGroup
 							if isTopologyChangeMCError(response.Status) {
 								vb_err := fmt.Errorf("Received error %v on vb %v\n", base.ErrorNotMyVbucket, req.VBucket)
 								xmem.handleVBError(req.VBucket, vb_err)
-							} else if response.Status == mc.KEY_ENOENT {
-								// KEY_ENOENT response is returned when a SetMeta request is on an existing document,
-								// i.e., doc with non-0 CAS, and the target cannot find the document.
-								// This is unlikely, but possible in the following scenario:
-								// 1. a document is created on source
-								// 2. the Document is replicated to target
-								// 3. the document is deleted on target and tombstone is removed.
-								// 4. the document is updated on source. this produces a SetWithMeta request with
-								//    non-0 CAS and will get ENOENT response from target
-								// this is an extremely rare scenario considering the fact that tombstones are kept for 7 days.
-								// make GOXDCR exhibit the same behavior as that of 3.x XDCR -> log the error and resend the doc
-								xmem.Logger().Errorf("%v received KEY_ENOENT error from setMeta client. response status=%v, opcode=%v, seqno=%v, req.Key=%v%v%v, req.Cas=%v, req.Extras=%v\n", xmem.Id(), response.Status, response.Opcode, seqno, base.UdTagBegin, req.Key, base.UdTagEnd, req.Cas, req.Extras)
-								_, err = xmem.buf.modSlot(pos, xmem.resendWithReset)
 							} else {
 								// for other non-temporary errors, repair connections
 								xmem.Logger().Errorf("%v received error response from setMeta client. Repairing connection. response status=%v, opcode=%v, seqno=%v, req.Key=%v%v%v, req.Cas=%v, req.Extras=%v\n", xmem.Id(), response.Status, response.Opcode, seqno, base.UdTagBegin, req.Key, base.UdTagEnd, req.Cas, req.Extras)
@@ -2091,7 +2078,7 @@ func (xmem *XmemNozzle) receiveResponse(finch chan bool, waitGrp *sync.WaitGroup
 					xmem.recycleDataObj(wrappedReq)
 				} else {
 					if req != nil {
-						xmem.Logger().Debugf("%v Got the response, response.Opaque=%v, req.Opaque=%v\n", xmem.Id(), response.Opaque, req.Opaque)
+						xmem.Logger().Debugf("%v Got the response, response.Opcode=%v response.Opaque=%v, req.Opaque=%v req.Status=%v\n", xmem.Id(), response.Opcode, response.Opaque, req.Opaque, response.Status)
 					} else {
 						xmem.Logger().Debugf("%v Got the response, pos=%v, req in that pos is nil\n", xmem.Id(), pos)
 					}
@@ -2185,13 +2172,19 @@ func isMutationLockedError(resp_status mc.Status) bool {
 }
 
 // check if memcached response status indicates ignorable error, which requires no corrective action at all
-func isIgnorableMCError(resp_status mc.Status) bool {
-	switch resp_status {
-	case mc.KEY_EEXISTS:
-		return true
-	default:
+func isIgnorableMCResponse(resp *mc.MCResponse) bool {
+	if resp == nil {
 		return false
 	}
+
+	switch resp.Status {
+	case mc.KEY_ENOENT:
+		return true
+	case mc.KEY_EEXISTS:
+		return true
+	}
+
+	return false
 }
 
 // get max idle count adjusted by backoff_factor

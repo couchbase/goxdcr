@@ -11,6 +11,7 @@ package base
 
 import (
 	"bytes"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"github.com/couchbase/gomemcached"
@@ -513,4 +514,65 @@ func (a FilterExpDelType) String() string {
 func (a FilterExpDelType) LogString() string {
 	return fmt.Sprintf("StripTTL(%v), SkipDeletes(%v), SkipExpiration(%v)",
 		a&FilterExpDelStripExpiration > 0, a&FilterExpDelSkipDeletes > 0, a&FilterExpDelSkipExpiration > 0)
+}
+
+type XattrIterator struct {
+	body []byte
+	// end position of xattrs
+	endPos uint32
+	// current cursor position
+	pos uint32
+}
+
+func NewXattrIterator(body []byte) (*XattrIterator, error) {
+	if len(body) < 4 {
+		return nil, fmt.Errorf("body is too short to contain valid xattrs")
+	}
+	xattrSize := binary.BigEndian.Uint32(body[0:4])
+	// Couchbase doc size is max of 20MB. Xattribute count against this limit.
+	// So if total xattr size is greater than this limit, then something is wrong
+	if xattrSize > MaxDocSizeByte {
+		return nil, fmt.Errorf("xattrs size exceeds max doc size")
+	}
+	return &XattrIterator{
+		body:   body,
+		endPos: xattrSize + 4,
+		// jump to the beginning of the first xattr
+		pos: 4,
+	}, nil
+}
+
+func (xi *XattrIterator) HasNext() bool {
+	return xi.pos < xi.endPos
+}
+
+func (xi *XattrIterator) Next() ([]byte, []byte, error) {
+	// xattrs pattern: uint32 -> key -> NUL -> value -> NUL (repeat)
+
+	xi.pos += 4
+	var separator uint32
+
+	// Search for end of key
+	for separator = xi.pos; xi.body[separator] != '\x00'; separator++ {
+		if separator >= xi.endPos {
+			return nil, nil, fmt.Errorf("Error parsing xattr key")
+		}
+	}
+
+	key := xi.body[xi.pos:separator]
+
+	xi.pos = separator + 1
+
+	// Search for end of value
+	for separator = xi.pos; xi.body[separator] != '\x00'; separator++ {
+		if separator >= xi.endPos {
+			return nil, nil, fmt.Errorf("Error parsing xattr value")
+		}
+	}
+
+	value := xi.body[xi.pos:separator]
+
+	xi.pos = separator + 1
+
+	return key, value, nil
 }

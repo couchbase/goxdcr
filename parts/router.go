@@ -96,12 +96,14 @@ func NewRouter(id string, topic string, filterExpression string,
 	filterExpDelType base.FilterExpDelType) (*Router, error) {
 	var filter *Filter
 	var err error
+	var filterPrintMsg string = "<nil>"
 
 	if len(filterExpression) > 0 {
 		filter, err = NewFilter(id, filterExpression, utilsIn)
 		if err != nil {
 			return nil, err
 		}
+		filterPrintMsg = fmt.Sprintf("%v%v%v", base.UdTagBegin, filter.filterExpressionInternal, base.UdTagEnd)
 	}
 
 	router := &Router{
@@ -122,7 +124,7 @@ func NewRouter(id string, topic string, filterExpression string,
 	var routingFunc connector.Routing_Callback_Func = router.route
 	router.Router = connector.NewRouter(id, downStreamParts, &routingFunc, logger_context, "XDCRRouter")
 
-	router.Logger().Infof("%v created with %d downstream parts isHighReplication=%v\n", router.id, len(downStreamParts), isHighReplication)
+	router.Logger().Infof("%v created with %d downstream parts isHighReplication=%v and filter=%v\n", router.id, len(downStreamParts), isHighReplication, filterPrintMsg)
 	return router, nil
 }
 

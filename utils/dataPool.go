@@ -3,6 +3,7 @@ package utils
 import (
 	base "github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
+	"math/rand"
 	"sort"
 	"sync"
 )
@@ -13,6 +14,23 @@ type DataPoolIface interface {
 	GetByteSlice(sizeRequested uint64) ([]byte, error)
 	PutByteSlice(doneSlice []byte)
 }
+
+// Fake data pool used to simulate returning a byte slice filled with garbage
+type FakeDataPool struct {
+}
+
+func NewFakeDataPool() *FakeDataPool {
+	return &FakeDataPool{}
+}
+
+func (fd *FakeDataPool) GetByteSlice(sizeRequested uint64) ([]byte, error) {
+	garbageSlice := make([]byte, sizeRequested+50, sizeRequested+50)
+	rand.Read(garbageSlice)
+	return garbageSlice, nil
+}
+
+// Nothing
+func (fd *FakeDataPool) PutByteSlice(doneSlice []byte) {}
 
 type DataPool struct {
 	byteSlicePoolClasses [NumOfSizes]uint64

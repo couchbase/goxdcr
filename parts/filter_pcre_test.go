@@ -118,8 +118,9 @@ func TestKeyAddXattr(t *testing.T) {
 
 	var dataSlice []byte = testData
 	testKey := []byte("abcdef")
-	dataSlice, err, _ = base.AddKeyToBeFiltered(dataSlice, testKey, nil, nil, len(testKey)-1)
+	dataSlice, err, _, lastBracketPos := realUtil.AddKeyToBeFiltered(dataSlice, testKey, nil, nil, len(testKey)-1)
 	assert.Nil(err)
+	assert.Equal("}", string(dataSlice[lastBracketPos]))
 
 	testXattr := make(map[string]interface{})
 	testXattr["VersionSupported"] = 2.0

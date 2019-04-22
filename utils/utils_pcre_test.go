@@ -235,8 +235,9 @@ func TestMatchDocKeyValueAndXattr(t *testing.T) {
 
 	docKeyBytes := []byte(docKey)
 
-	bodySlice, err, _ = base.AddKeyToBeFiltered(bodySlice, docKeyBytes, nil, nil, len(docKeyBytes)-1)
+	bodySlice, err, _, lastBracketPos := testUtils.AddKeyToBeFiltered(bodySlice, docKeyBytes, nil, nil, len(docKeyBytes)-1)
 	assert.Nil(err)
+	assert.Equal("}", string(bodySlice[lastBracketPos]))
 
 	testMap := make(map[string]interface{})
 	err = json.Unmarshal(bodySlice, &testMap)

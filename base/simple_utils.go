@@ -975,41 +975,15 @@ func CleanInsert(dest, ins []byte, pos int) ([]byte, error) {
 
 var AddFilterKeyExtraBytes int = 6 + len(ReservedWordsMap[ExternalKeyKey])
 
-func addKeyToBeFilteredWithoutDP(currentValue, key []byte) ([]byte, error) {
-	if currentValue[0] != '{' {
-		return currentValue, ErrorInvalidInput
-	}
-	keyBytesToBeInserted := json.RawMessage(fmt.Sprintf("\"%v\":\"%v\",", ReservedWordsMap[ExternalKeyKey], string(key)))
-	return CleanInsert(currentValue, keyBytesToBeInserted, 1)
-}
-
-// For advanced filtering, need to populate key into the actual data to be filtered
-// If we can try not to move data and just use datapool and append to the end, it may be still faster
-// to have gojsonsm step through the JSON than to do memory move
-func AddKeyToBeFiltered(currentValue, key []byte, dpGetter DpGetterFunc, toBeReleased *[][]byte, currentValueEndBody int) ([]byte, error, int64) {
-	if dpGetter != nil && currentValueEndBody > 0 {
-		// { "bodyKey":bodyValue...
-		// 	,"KeyKey":"<Key>" 	<- sizeToGet
-		// }
-		sizeToGet := CachedInternalKeyKeyByteSize + len(key) + 6 + len(currentValue)
-		dpSlice, err, _ := AppendSingleKVToAllocatedBody(currentValue, CachedInternalKeyKeyByteSlice,
-			key, dpGetter, toBeReleased, uint64(sizeToGet), CachedInternalKeyKeyByteSize, len(key), true, currentValueEndBody)
-		if err != nil {
-			retBytes, err := addKeyToBeFilteredWithoutDP(currentValue, key)
-			return retBytes, err, int64(len(retBytes))
-		}
-		return dpSlice, err, 0
-	} else {
-		retBytes, err := addKeyToBeFilteredWithoutDP(currentValue, key)
-		return retBytes, err, int64(len(retBytes))
-	}
-}
-
 var AddFilterXattrExtraBytes int = 4 + len(ReservedWordsMap[ExternalKeyXattr])
 
 func appendKVWriteKeyValue(dpSlice, key, value []byte, pos, keySize, valueSize int, valueNeedsQuotes bool) ([]byte, int) {
-	dpSlice, pos = WriteJsonRawMsg(dpSlice, key, pos, true /*isKey*/, keySize, false, pos == 0)
-	dpSlice, pos = WriteJsonRawMsg(dpSlice, value, pos, false, valueSize, valueNeedsQuotes, pos == 0)
+	dpSlice, pos = WriteJsonRawMsg(dpSlice, key, pos, WriteJsonKey, keySize, pos == 0)
+	valueMode := WriteJsonValue
+	if !valueNeedsQuotes {
+		valueMode = WriteJsonValueNoQuotes
+	}
+	dpSlice, pos = WriteJsonRawMsg(dpSlice, value, pos, valueMode, valueSize, pos == 0)
 	// pos points to the last "}"
 	return dpSlice, pos
 }
@@ -1122,9 +1096,16 @@ func FilterContainsKeyExpression(expression string) bool {
 // A = {NOT }* Key Op "Value"
 // B = {NOT }* REGEXP_CONTAINS(Key, "regex")
 // ^((A|B) ((AND|OR) (A|B))*)$
-const keyOnlyRegexOp = "=|==|!=|<>|>|>=|<|<="
+const compareOp = "=|==|!=|<>|>|>=|<|<="
 
-var singleAwesomeKeyOnlyRegex *regexp.Regexp = regexp.MustCompile(fmt.Sprintf("^(((((NOT *)*%v *(%v) *(\"|')[a-zA-Z0-9_-]*(\"|')) *|((NOT *)*REGEXP_CONTAINS\\( *%v *, *(\"|').*(\"|') *\\)) *))((AND|OR) *(((NOT *)*%v *(%v) *(\"|')[a-zA-Z0-9_-]*(\"|')) *|((NOT *)*REGEXP_CONTAINS\\( *%v *, *(\"|').*(\"|') *\\)) *))*)$", ExternalKeyKey, keyOnlyRegexOp, ExternalKeyKey, ExternalKeyKey, keyOnlyRegexOp, ExternalKeyKey))
+// Do not allow single or double quotes to be part of the regex set
+const regexValidCharSet = `[^'"]`
+
+var singleAwesomeKeyOnlyRegex *regexp.Regexp = regexp.MustCompile(fmt.Sprintf("^(((((NOT *)*%v *(%v) *(\"|')[a-zA-Z0-9_-]*(\"|')) *|((NOT *)*REGEXP_CONTAINS\\( *%v *, *(\"|')%v+(\"|') *\\)) *))((AND|OR) *(((NOT *)*%v *(%v) *(\"|')[a-zA-Z0-9_-]*(\"|')) *|((NOT *)*REGEXP_CONTAINS\\( *%v *, *(\"|')%v+(\"|') *\\)) *))*)$", ExternalKeyKey, compareOp, ExternalKeyKey, regexValidCharSet, ExternalKeyKey, compareOp, ExternalKeyKey, regexValidCharSet))
+
+// Almost the same as key but replace it with xattr
+// For xattr, instead of matching META().xattr we need to match it to "META().xattrs." + "[identifier]*"
+var singleAwesomeXattrOnlyRegex *regexp.Regexp = regexp.MustCompile(fmt.Sprintf("^(((((NOT *)*%v[.][.a-zA-Z0-9_-]+ *(%v) *(\"|')[a-zA-Z0-9_-]*(\"|')) *|((NOT *)*REGEXP_CONTAINS\\( *%v[.][a-zA-Z0-9_-]+ *, *(\"|')%v+(\"|') *\\)) *))((AND|OR) *(((NOT *)*%v[.][.a-zA-Z0-9_-]+ *(%v) *(\"|')[a-zA-Z0-9_-]*(\"|')) *|((NOT *)*REGEXP_CONTAINS\\( *%v[.][.a-zA-Z0-9_-]+ *, *(\"|')%v+(\"|') *\\)) *))*)$", ExternalKeyXattr, compareOp, ExternalKeyXattr, regexValidCharSet, ExternalKeyXattr, compareOp, ExternalKeyXattr, regexValidCharSet))
 
 // NOTE - takes in user entered META().id as key
 func FilterOnlyContainsKeyExpression(expression string) bool {
@@ -1136,6 +1117,11 @@ func FilterOnlyContainsKeyExpression(expression string) bool {
 	// 5. Any combination of the above connected with AND or OR
 	// If any parenthesis are used, then too bad...
 	return singleAwesomeKeyOnlyRegex.MatchString(expression)
+}
+
+// Xattr counterpart of the key above
+func FilterOnlyContainsXattrExpression(expression string) bool {
+	return singleAwesomeXattrOnlyRegex.MatchString(expression)
 }
 
 func InitPcreVars() {
@@ -1167,22 +1153,29 @@ func FilterErrorIsRecoverable(err error) bool {
 	return err == ErrorCompressionUnableToInflate
 }
 
+type WriteJsonRawMsgType int
+
+const (
+	WriteJsonKey           WriteJsonRawMsgType = iota
+	WriteJsonValue         WriteJsonRawMsgType = iota
+	WriteJsonValueNoQuotes WriteJsonRawMsgType = iota
+)
+
 // Given a correctly allocatedBytes slice that can contain the whole rawJSON message, write the given information without
 // the use of any data structures on the heap
 // Input:
 // 	 allocatedBytes - finalized byte slice that will contain the specific marshalled JSON
 //   bytesToWrite - This can be either key or value in []byte form
+//   mode - mode above
 //   pos - current position to continue the write
-// 	 isKey - whether or not specified input is a key or value
 //   size - In cases where bytesToWrite originated from dataPool, the length may not reflect the actual
 //			length of the data (i.e. string). Use this field to avoid calling len and avoid out of bounds error
-//   valueNeedsQuotes - If the []byte of bytesToWrite is a string value but the string doesn't contain ", surround it with them
 //   isFirstKey - if the key is the first one, then add an open bracket. Otherwise, convert prev } to a comma for appending a new key
 // Returns:
 // 	 original byte slice reference
 // 	 updated position
-func WriteJsonRawMsg(allocatedBytes, bytesToWrite []byte, pos int, isKey bool, size int, valueNeedsQuotes bool, isFirstKey bool) ([]byte, int) {
-	if isKey {
+func WriteJsonRawMsg(allocatedBytes, bytesToWrite []byte, pos int, mode WriteJsonRawMsgType, size int, isFirstKey bool) ([]byte, int) {
+	if mode == WriteJsonKey {
 		if isFirstKey {
 			// Need to do an open bracket
 			allocatedBytes[pos] = '{'
@@ -1200,13 +1193,13 @@ func WriteJsonRawMsg(allocatedBytes, bytesToWrite []byte, pos int, isKey bool, s
 		allocatedBytes[pos] = ':'
 		pos++
 	} else {
-		if valueNeedsQuotes {
+		if mode == WriteJsonValue {
 			allocatedBytes[pos] = '"'
 			pos++
 		}
 		copy(allocatedBytes[pos:], bytesToWrite[:])
 		pos += size
-		if valueNeedsQuotes {
+		if mode == WriteJsonValue {
 			allocatedBytes[pos] = '"'
 			pos++
 		}

@@ -62,6 +62,8 @@ func NewFilter(id string, filterExpression string, utils utilities.UtilsIface) (
 
 	if !base.FilterContainsXattrExpression(filterExpression) {
 		filter.flags |= base.FilterFlagSkipXattr
+	} else if base.FilterOnlyContainsXattrExpression(filterExpression) {
+		filter.flags |= base.FilterFlagXattrOnly
 	}
 
 	if !base.FilterContainsKeyExpression(filterExpression) {
@@ -103,7 +105,7 @@ func (filter *Filter) FilterUprEvent(uprEvent *mcc.UprEvent) (bool, error, strin
 	}
 	matched, err := filter.FilterByteSlice(sliceToBeFiltered)
 	if err != nil {
-		errDesc = fmt.Sprintf("gojsonsm filter returned err for document %v%v%v", base.UdTagBegin, string(uprEvent.Key), base.UdTagEnd)
+		errDesc = fmt.Sprintf("gojsonsm filter returned err for document %v%v%v, data: %v", base.UdTagBegin, string(uprEvent.Key), base.UdTagEnd, string(sliceToBeFiltered))
 	}
 
 	return matched, err, errDesc, failedDpCnt

@@ -295,6 +295,9 @@ func (pipelineSupervisor *PipelineSupervisor) OnEvent(event *common.Event) {
 			pipelineSupervisor.setError(event.Component.Id(), err)
 		} else if pipelineSupervisor.Logger().GetLogLevel() >= log.LogLevelDebug {
 			uprEvent := event.Data.(*mcc.UprEvent)
+			if uprEvent == nil {
+				return
+			}
 			uprDumpBytes, err := json.Marshal(*uprEvent)
 			if err == nil {
 				pipelineSupervisor.Logger().Debugf("Failed filtering uprEvent dump\n%v%v%v\n", base.UdTagBegin, string(uprDumpBytes), base.UdTagEnd)

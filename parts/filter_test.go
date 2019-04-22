@@ -150,7 +150,7 @@ func TestKeyPanic(t *testing.T) {
 	filter, err := NewFilter(filterId, "REGEXP_CONTAINS(META().id, 'C1-key-1')", realUtil)
 	assert.Nil(err)
 	assert.NotNil(filter)
-	//	assert.True(filter.flags&base.FilterFlagKeyOnly > 0)
+	assert.True(filter.flags&base.FilterFlagKeyOnly > 0)
 
 	slices := make([][]byte, 0, 2)
 	dataSlice, err, _, releaseFunc, _ := realUtil.ProcessUprEventForFiltering(uprEvent, dp, filter.flags, &slices)
@@ -162,4 +162,54 @@ func TestKeyPanic(t *testing.T) {
 	assert.False(matchResult)
 
 	fmt.Println("============== Test case end: TestKeyPanic =================")
+}
+
+func TestFilterUtilsMethods(t *testing.T) {
+	fmt.Println("============== Test case end: TestFilterUtilsMethod =================")
+	assert := assert.New(t)
+	unCompressedFile := "../utils/testInternalData/uprNotCompress.json"
+	compressedFile := "../utils/testInternalData/uprCompression.json"
+	xAttrUncompressedFile := "../utils/testInternalData/uprXattrNotCompress.json"
+	xAttrCompressedFile := "../utils/testInternalData/uprXattrCompress.json"
+
+	uprEvent, err := base.RetrieveUprJsonAndConvert(unCompressedFile)
+	assert.Nil(err)
+	assert.NotNil(uprEvent)
+	filter, err := NewFilter(filterId, "REGEXP_CONTAINS(Key, \"^A+\")", realUtil)
+	assert.Nil(err)
+	assert.NotNil(filter)
+	match, err, _, _ := filter.FilterUprEvent(uprEvent)
+	assert.Nil(err)
+	assert.True(match)
+
+	uprEvent, err = base.RetrieveUprJsonAndConvert(compressedFile)
+	assert.Nil(err)
+	assert.NotNil(uprEvent)
+	filter, err = NewFilter(filterId, "REGEXP_CONTAINS(Key, \"^A+\")", realUtil)
+	assert.Nil(err)
+	assert.NotNil(filter)
+	match, err, _, _ = filter.FilterUprEvent(uprEvent)
+	assert.Nil(err)
+	assert.True(match)
+
+	uprEvent, err = base.RetrieveUprJsonAndConvert(xAttrUncompressedFile)
+	assert.Nil(err)
+	assert.NotNil(uprEvent)
+	filter, err = NewFilter(filterId, "META().xattrs.AnotherXattr = \"TestValueString\" AND META().xattrs.TestXattr = 30 AND META().id = \"TestDocKey\"", realUtil)
+	assert.Nil(err)
+	assert.NotNil(filter)
+	match, err, _, _ = filter.FilterUprEvent(uprEvent)
+	assert.Nil(err)
+	assert.True(match)
+
+	uprEvent, err = base.RetrieveUprJsonAndConvert(xAttrCompressedFile)
+	assert.Nil(err)
+	assert.NotNil(uprEvent)
+	filter, err = NewFilter(filterId, "META().xattrs.AnotherXattr = \"TestValueString\" AND META().xattrs.TestXattr = 30", realUtil)
+	assert.Nil(err)
+	assert.NotNil(filter)
+	match, err, _, _ = filter.FilterUprEvent(uprEvent)
+	assert.Nil(err)
+	assert.True(match)
+	fmt.Println("============== Test case end: TestFilterUtilsMethod =================")
 }

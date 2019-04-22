@@ -99,10 +99,7 @@ func TestKeyOnlyExpr(t *testing.T) {
 	expressions = append(expressions, fmt.Sprintf("NOT %v>=\"abc\" OR REGEXP_CONTAINS(%v, \"^d\")", ReverseReservedWordsMap[InternalKeyKey], ReverseReservedWordsMap[InternalKeyKey]))
 	expressions = append(expressions, fmt.Sprintf("NOT %v>=\"abc\" OR REGEXP_CONTAINS(%v, '^d')", ReverseReservedWordsMap[InternalKeyKey], ReverseReservedWordsMap[InternalKeyKey]))
 	expressions = append(expressions, fmt.Sprintf("REGEXP_CONTAINS(%v,\"^abc$\")", ReverseReservedWordsMap[InternalKeyKey]))
-	expressions = append(expressions, fmt.Sprintf("REGEXP_CONTAINS(%v,\"^a\"+b\"+c$\")", ReverseReservedWordsMap[InternalKeyKey]))
-	expressions = append(expressions, fmt.Sprintf("REGEXP_CONTAINS(%v,\"^a'+b'+c$\")", ReverseReservedWordsMap[InternalKeyKey]))
 	expressions = append(expressions, fmt.Sprintf("REGEXP_CONTAINS(%v,'^abc$')", ReverseReservedWordsMap[InternalKeyKey]))
-	expressions = append(expressions, fmt.Sprintf("REGEXP_CONTAINS(%v,'^a\"b\"c$')", ReverseReservedWordsMap[InternalKeyKey]))
 	expressions = append(expressions, fmt.Sprintf("NOT REGEXP_CONTAINS(%v ,  \"^abc$\"  )", ReverseReservedWordsMap[InternalKeyKey]))
 	expressions = append(expressions, fmt.Sprintf("NOT REGEXP_CONTAINS(%v ,  \"^abc$\"  ) AND %v = \"abc\"", ReverseReservedWordsMap[InternalKeyKey], ReverseReservedWordsMap[InternalKeyKey]))
 	expressions = append(expressions, fmt.Sprintf("NOT REGEXP_CONTAINS(%v ,  \"^abc$\"  ) AND %v > \"a\"", ReverseReservedWordsMap[InternalKeyKey], ReverseReservedWordsMap[InternalKeyKey]))
@@ -115,23 +112,106 @@ func TestKeyOnlyExpr(t *testing.T) {
 	falseExpr = append(falseExpr, fmt.Sprintf("%v > testField", ReverseReservedWordsMap[InternalKeyKey]))
 	falseExpr = append(falseExpr, fmt.Sprintf("REGEXP_CONTAINS(%v, testField)", ReverseReservedWordsMap[InternalKeyKey]))
 	falseExpr = append(falseExpr, fmt.Sprintf("%v=\"abc\" AND %v.xatrKey = \"value\"", ReverseReservedWordsMap[InternalKeyKey], ReverseReservedWordsMap[InternalKeyXattr]))
+	falseExpr = append(falseExpr, fmt.Sprintf("%v=\"abc\" AND %v.xatrKey = \"value\"", ReverseReservedWordsMap[InternalKeyKey], ReverseReservedWordsMap[InternalKeyXattr]))
 	falseExpr = append(falseExpr, fmt.Sprintf("NOT REGEXP_CONTAINS(%v ,  \"^abc$\"  ) AND ", ReverseReservedWordsMap[InternalKeyKey]))
 	falseExpr = append(falseExpr, fmt.Sprintf("NOT %v>=\"abc\" AND", ReverseReservedWordsMap[InternalKeyKey]))
+	falseExpr = append(falseExpr, fmt.Sprintf("REGEXP_CONTAINS(%v, \"value\") AND field = \"value\")", ReverseReservedWordsMap[InternalKeyKey]))
 	// Fails because = op should only take identifier string
 	falseExpr = append(falseExpr, fmt.Sprintf("%v=\"^abc$\"", ReverseReservedWordsMap[InternalKeyXattr]))
 	// Parenthesis not supported
 	falseExpr = append(falseExpr, fmt.Sprintf("REGEXP_CONTAINS(%v ,  \"^abc$\"  ) AND (NOT %v > \"a\" OR REGEXP_CONTAINS(%v,\"^123\"))", ReverseReservedWordsMap[InternalKeyKey], ReverseReservedWordsMap[InternalKeyKey], ReverseReservedWordsMap[InternalKeyKey]))
 	// Try to sneak one in
 	falseExpr = append(falseExpr, fmt.Sprintf("NOT REGEXP_CONTAINS(%v ,  \"^abc$\"  ) AND %v = \"abc\" AND NOT %v = field", ReverseReservedWordsMap[InternalKeyKey], ReverseReservedWordsMap[InternalKeyKey], ReverseReservedWordsMap[InternalKeyKey]))
+	// Disallow double quotes within REGEXP_CONTAINS to prevent greedy injection (i.e. mixing of valid syntax)
+	falseExpr = append(falseExpr, fmt.Sprintf("REGEXP_CONTAINS(%v, \"value\") AND field2 = field1 AND field = ROUND(\"23\")", ReverseReservedWordsMap[InternalKeyKey]))
+	falseExpr = append(falseExpr, fmt.Sprintf("REGEXP_CONTAINS(%v,\"^a\"+b\"+c$\")", ReverseReservedWordsMap[InternalKeyKey]))
+	falseExpr = append(falseExpr, fmt.Sprintf("REGEXP_CONTAINS(%v,\"^a'+b'+c$\")", ReverseReservedWordsMap[InternalKeyKey]))
+	falseExpr = append(falseExpr, fmt.Sprintf("REGEXP_CONTAINS(%v,'^a\"b\"c$')", ReverseReservedWordsMap[InternalKeyKey]))
+	falseExpr = append(falseExpr, fmt.Sprintf("%v = \"a \" AND %v = \"b\"\"", ReverseReservedWordsMap[InternalKeyKey], ReverseReservedWordsMap[InternalKeyKey]))
+	// Disallow single quotes
+	falseExpr = append(falseExpr, fmt.Sprintf("REGEXP_CONTAINS(%v,''^abc$'')", ReverseReservedWordsMap[InternalKeyKey]))
+	falseExpr = append(falseExpr, fmt.Sprintf("REGEXP_CONTAINS(%v,\"'^abc$'\")", ReverseReservedWordsMap[InternalKeyKey]))
 
 	for _, expr := range expressions {
-		assert.True(FilterOnlyContainsKeyExpression(expr))
+		result := FilterOnlyContainsKeyExpression(expr)
+		assert.True(result)
+		if !result {
+			fmt.Printf("Failed expr: %v\n", expr)
+		}
 	}
 
 	for _, expr := range falseExpr {
-		assert.False(FilterOnlyContainsKeyExpression(expr))
+		result := FilterOnlyContainsKeyExpression(expr)
+		assert.False(result)
+		if result {
+			fmt.Printf("Succeeded expr: %v\n", expr)
+		}
 	}
 	fmt.Println("============== Test case end: TestKeyOnlyExpr =================")
+}
+
+func TestXattrOnlyExpr(t *testing.T) {
+	assert := assert.New(t)
+	fmt.Println("============== Test case start: TestXattrOnlyExpr =================")
+	var expressions []string
+	expressions = append(expressions, fmt.Sprintf("%v.key=\"abc\"", ReverseReservedWordsMap[InternalKeyXattr]))
+	expressions = append(expressions, fmt.Sprintf("%v.key='abc'", ReverseReservedWordsMap[InternalKeyXattr]))
+	expressions = append(expressions, fmt.Sprintf("%v.key =   \"abc\"", ReverseReservedWordsMap[InternalKeyXattr]))
+	expressions = append(expressions, fmt.Sprintf("%v.key.key2 =   \"abc\"", ReverseReservedWordsMap[InternalKeyXattr]))
+	expressions = append(expressions, fmt.Sprintf("NOT %v.key<\"abc\"", ReverseReservedWordsMap[InternalKeyXattr]))
+	expressions = append(expressions, fmt.Sprintf("NOT %v.key>=\"abc\"", ReverseReservedWordsMap[InternalKeyXattr]))
+	expressions = append(expressions, fmt.Sprintf("NOT %v.key.key2 >=\"abc\"", ReverseReservedWordsMap[InternalKeyXattr]))
+	expressions = append(expressions, fmt.Sprintf("NOT %v.key>=\"abc\" OR REGEXP_CONTAINS(%v.key, \"^d\")", ReverseReservedWordsMap[InternalKeyXattr], ReverseReservedWordsMap[InternalKeyXattr]))
+	expressions = append(expressions, fmt.Sprintf("NOT %v.key.key2>=\"abc\" OR REGEXP_CONTAINS(%v.key.key2, '^d')", ReverseReservedWordsMap[InternalKeyXattr], ReverseReservedWordsMap[InternalKeyXattr]))
+	expressions = append(expressions, fmt.Sprintf("REGEXP_CONTAINS(%v.key,\"^abc$\")", ReverseReservedWordsMap[InternalKeyXattr]))
+	expressions = append(expressions, fmt.Sprintf("REGEXP_CONTAINS(%v.key,'^abc$')", ReverseReservedWordsMap[InternalKeyXattr]))
+	expressions = append(expressions, fmt.Sprintf("NOT REGEXP_CONTAINS(%v.key ,  \"^abc$\"  )", ReverseReservedWordsMap[InternalKeyXattr]))
+	expressions = append(expressions, fmt.Sprintf("NOT REGEXP_CONTAINS(%v.key ,  \"^abc$\"  ) AND %v.key = \"abc\"", ReverseReservedWordsMap[InternalKeyXattr], ReverseReservedWordsMap[InternalKeyXattr]))
+	expressions = append(expressions, fmt.Sprintf("NOT REGEXP_CONTAINS(%v.key ,  \"^abc$\"  ) AND %v.key.key2 > \"a\"", ReverseReservedWordsMap[InternalKeyXattr], ReverseReservedWordsMap[InternalKeyXattr]))
+	expressions = append(expressions, fmt.Sprintf("NOT REGEXP_CONTAINS(%v.key ,  \"^abc$\"  ) AND %v.key = \"abc\" AND NOT %v.key = \"def\"", ReverseReservedWordsMap[InternalKeyXattr], ReverseReservedWordsMap[InternalKeyXattr], ReverseReservedWordsMap[InternalKeyXattr]))
+	expressions = append(expressions, fmt.Sprintf("REGEXP_CONTAINS(%v.key ,  \"^abc$\"  ) OR REGEXP_CONTAINS(%v.key,\"^123\")", ReverseReservedWordsMap[InternalKeyXattr], ReverseReservedWordsMap[InternalKeyXattr]))
+
+	var falseExpr []string
+	// fields are not wrapped
+	falseExpr = append(falseExpr, fmt.Sprintf("%v.key = testField", ReverseReservedWordsMap[InternalKeyXattr]))
+	falseExpr = append(falseExpr, fmt.Sprintf("%v.key > testField", ReverseReservedWordsMap[InternalKeyXattr]))
+	falseExpr = append(falseExpr, fmt.Sprintf("REGEXP_CONTAINS(%v.key, testField)", ReverseReservedWordsMap[InternalKeyXattr]))
+	// Adding a field - actually adding anything is considered a complex enough to not need to optimize for
+	falseExpr = append(falseExpr, fmt.Sprintf("%v.key + field > \"abc\"", ReverseReservedWordsMap[InternalKeyXattr]))
+	falseExpr = append(falseExpr, fmt.Sprintf("ABS(%v.key) > \"abc\"", ReverseReservedWordsMap[InternalKeyXattr]))
+	// Mixed key with xattr mode
+	falseExpr = append(falseExpr, fmt.Sprintf("%v=\"abc\" AND %v.xatrKey = \"value\"", ReverseReservedWordsMap[InternalKeyKey], ReverseReservedWordsMap[InternalKeyXattr]))
+	falseExpr = append(falseExpr, fmt.Sprintf("NOT REGEXP_CONTAINS(%v.key ,  \"^abc$\"  ) AND ", ReverseReservedWordsMap[InternalKeyXattr]))
+	falseExpr = append(falseExpr, fmt.Sprintf("NOT %v.key>=\"abc\" AND", ReverseReservedWordsMap[InternalKeyXattr]))
+	// Fails because = op should only take identifier string
+	falseExpr = append(falseExpr, fmt.Sprintf("%v.key=\"^abc$\"", ReverseReservedWordsMap[InternalKeyXattr]))
+	// Parenthesis not supported
+	falseExpr = append(falseExpr, fmt.Sprintf("REGEXP_CONTAINS(%v.key ,  \"^abc$\"  ) AND (NOT %v.key > \"a\" OR REGEXP_CONTAINS(%v.key,\"^123\"))", ReverseReservedWordsMap[InternalKeyXattr], ReverseReservedWordsMap[InternalKeyXattr], ReverseReservedWordsMap[InternalKeyXattr]))
+	// Try to sneak one in
+	falseExpr = append(falseExpr, fmt.Sprintf("NOT REGEXP_CONTAINS(%v.key ,  \"^abc$\"  ) AND %v.key = \"abc\" AND NOT %v.key = field", ReverseReservedWordsMap[InternalKeyXattr], ReverseReservedWordsMap[InternalKeyXattr], ReverseReservedWordsMap[InternalKeyXattr]))
+	// No " or ' in character classes
+	falseExpr = append(falseExpr, fmt.Sprintf("REGEXP_CONTAINS(%v.key,\"^a\"+b\"+c$\")", ReverseReservedWordsMap[InternalKeyXattr]))
+	falseExpr = append(falseExpr, fmt.Sprintf("REGEXP_CONTAINS(%v.key,\"^a'+b'+c$\")", ReverseReservedWordsMap[InternalKeyXattr]))
+	falseExpr = append(falseExpr, fmt.Sprintf("REGEXP_CONTAINS(%v.key,'^a\"b\"c$')", ReverseReservedWordsMap[InternalKeyXattr]))
+	// Arrays are not supported. Too bad
+	falseExpr = append(falseExpr, fmt.Sprintf("NOT %v.key[3] > \"a\"", ReverseReservedWordsMap[InternalKeyXattr]))
+
+	for _, expr := range expressions {
+		result := FilterOnlyContainsXattrExpression(expr)
+		assert.True(result)
+		if !result {
+			fmt.Printf("Failed expr: %v\n", expr)
+		}
+	}
+
+	for _, expr := range falseExpr {
+		result := FilterOnlyContainsXattrExpression(expr)
+		assert.False(result)
+		if result {
+			fmt.Printf("Succeeded expr: %v\n", expr)
+		}
+	}
+	fmt.Println("============== Test case end: TestXattrOnlyExpr =================")
 }
 
 // Before MB-33032 panics... now should not panic
@@ -156,11 +236,11 @@ func TestCustomRawJson(t *testing.T) {
 
 	for k, v := range retMap {
 		keySlice := []byte(k)
-		allocatedBytes, pos = WriteJsonRawMsg(allocatedBytes, keySlice, pos, true /*isKey*/, len(keySlice), false, pos == 0 /*firstKey*/)
+		allocatedBytes, pos = WriteJsonRawMsg(allocatedBytes, keySlice, pos, WriteJsonKey, len(keySlice), pos == 0 /*firstKey*/)
 
 		marshaledValueBytes, err := json.Marshal(v)
 		assert.Nil(err)
-		allocatedBytes, pos = WriteJsonRawMsg(allocatedBytes, marshaledValueBytes, pos, false /*isKey*/, len(marshaledValueBytes), false, pos == 0 /*firstKey*/)
+		allocatedBytes, pos = WriteJsonRawMsg(allocatedBytes, marshaledValueBytes, pos, WriteJsonValueNoQuotes, len(marshaledValueBytes), pos == 0 /*firstKey*/)
 	}
 
 	checkMap := make(map[string]interface{})

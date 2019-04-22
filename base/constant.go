@@ -539,6 +539,7 @@ const (
 	FilterFlagSkipXattr FilterFlagType = 0x1
 	FilterFlagSkipKey   FilterFlagType = 0x2
 	FilterFlagKeyOnly   FilterFlagType = 0x4
+	FilterFlagXattrOnly FilterFlagType = 0x8
 )
 
 var DefaultGoMaxProcs int = 4
