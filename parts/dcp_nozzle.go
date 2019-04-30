@@ -467,7 +467,12 @@ func (dcp *DcpNozzle) initializeUprFeed() error {
 		uprFeatures.DcpPriority = dcp.getDcpPrioritySetting()
 		uprFeatures.IncludeDeletionTime = true
 		uprFeatures.EnableExpiry = true
-		featuresErr, activatedFeatures := dcp.uprFeed.UprOpenWithFeatures(uprFeedName, uint32(0) /*seqno*/, base.UprFeedBufferSize, uprFeatures)
+		feed := dcp.getUprFeed()
+		if feed == nil {
+			err = fmt.Errorf("%v uprfeed is nil\n", dcp.Id())
+			return err
+		}
+		featuresErr, activatedFeatures := feed.UprOpenWithFeatures(uprFeedName, uint32(0) /*seqno*/, base.UprFeedBufferSize, uprFeatures)
 		if featuresErr != nil {
 			err = featuresErr
 			dcp.Logger().Errorf("Trying to activate UPRFeatures received error code: %v", err.Error())

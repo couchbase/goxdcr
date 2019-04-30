@@ -148,6 +148,9 @@ func setupMocksInternal(xdcrTopology *service_def.XDCRCompTopologySvc,
 	// client mock
 	mcClient.On("NewUprFeedWithConfigIface", mock.Anything, mock.Anything).Return(uprFeed, nil)
 	mcClient.On("Close").Return(nil)
+
+	// UprMock
+	nozzle.uprFeed = uprFeed
 }
 
 func generateUprEvent(opcode mc.CommandCode, status mc.Status, vbno uint16, opaque uint16) *mcReal.UprEvent {
@@ -431,4 +434,23 @@ func TestStartNozzleAuto(t *testing.T) {
 	assert.NotNil(nozzle.Start(settings))
 	assert.NotEqual(nozzle.State(), common.Part_Running)
 	fmt.Println("============== Test case end: TestStartStopDCPNozzleAuto =================")
+}
+
+func TestUprFeedNil(t *testing.T) {
+	fmt.Println("============== Test case start: TestUprFeedNil =================")
+	assert := assert.New(t)
+	xdcrTopology, utils, nozzle, settings, mcc, upr, _ := setupBoilerPlate()
+	setupUprFeedMock(upr)
+	// Test a success data coming back
+	setupUprFeedMockData(upr)
+	setupMocks(xdcrTopology, utils, nozzle, settings, mcc, upr)
+
+	settings[SETTING_COMPRESSION_TYPE] = (base.CompressionType)(base.CompressionTypeAuto)
+
+	assert.NotNil(nozzle.Start(settings))
+	assert.NotNil(nozzle.getUprFeed())
+
+	assert.Nil(nozzle.Stop())
+	assert.Nil(nozzle.getUprFeed())
+	fmt.Println("============== Test case end: TestUprFeedNil =================")
 }
