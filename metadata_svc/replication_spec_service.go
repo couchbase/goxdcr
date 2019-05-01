@@ -960,7 +960,7 @@ func (service *ReplicationSpecService) handleSettingsUpgrade(spec *metadata.Repl
 func (service *ReplicationSpecService) ReplicationSpecServiceCallback(path string, value []byte, rev interface{}) error {
 	service.logger.Infof("ReplicationSpecServiceCallback called on path = %v\n", path)
 
-	newSpec, err := service.constructReplicationSpec(value, rev, true/*lock*/)
+	newSpec, err := service.constructReplicationSpec(value, rev, true /*lock*/)
 	if err != nil {
 		service.logger.Errorf("Error marshaling replication spec. value=%v, err=%v\n", string(value), err)
 		return err
@@ -1114,48 +1114,29 @@ func (service *ReplicationSpecService) gcTargetBucket(spec *metadata.Replication
 		return false, err
 	}
 
-	connStr, err := ref.MyConnectionStr()
-	if err != nil {
-		service.logger.Warnf("Unable to retrieve connStr for reference %v due to %v", ref, err)
-		return false, err
+	err = service.utils.VerifyTargetBucket(spec.TargetBucketName, spec.TargetBucketUUID, ref, service.logger)
+	if err == nil {
+		service.gcMtx.Lock()
+		service.tgtGcMap[spec.Id] = 0
+		service.gcMtx.Unlock()
+		return false, nil
 	}
 
-	username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, err := ref.MyCredentials()
-	if err != nil {
-		service.logger.Warnf("Unable to retrieve credentials for reference %v due to %v", ref.Name, err.Error())
-		return false, err
-	}
+	service.logger.Warnf("Error verifying target bucket for %v. err=%v", spec.Id, err)
 
-	bucketInfo, err := service.utils.GetBucketInfo(connStr, spec.TargetBucketName, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, service.logger)
 	if err == service.utils.GetNonExistentBucketError() {
 		shouldDel := service.incrementGCCnt(service.tgtGcMap, spec.Id)
 		if shouldDel {
 			err = getBucketMissingError(spec.TargetBucketName)
 			return shouldDel, err
-		}
-	} else {
-		service.gcMtx.Lock()
-		service.tgtGcMap[spec.Id] = 0
-		service.gcMtx.Unlock()
-	}
-	if err != nil {
-		service.logger.Warnf("Unable to retrieve bucket info for target bucket %v due to err: %v", spec.TargetBucketName, err.Error())
-		return false, err
-	}
-
-	if spec.TargetBucketUUID != "" {
-		extractedUuid, err := service.utils.GetBucketUuidFromBucketInfo(spec.TargetBucketName, bucketInfo, service.logger)
-		if err != nil {
-			service.logger.Warnf("Unable to check target bucket %v UUID due to %v", spec.TargetBucketName, err.Error())
+		} else {
 			return false, err
 		}
-
-		if extractedUuid != spec.TargetBucketUUID {
-			return true, getBucketChangedError(spec.TargetBucketName, spec.TargetBucketUUID, extractedUuid)
-		}
+	} else if err == service.utils.GetBucketRecreatedError() {
+		return true, err
+	} else {
+		return false, err
 	}
-
-	return false, nil
 }
 
 // Returns true if need to delete the spec, and a non-nil error along with it for the reason why
@@ -1211,6 +1192,10 @@ func (service *ReplicationSpecService) ValidateAndGC(spec *metadata.ReplicationS
 	needToRemove, detailErr := service.gcSourceBucket(spec)
 	if !needToRemove {
 		needToRemove, detailErr = service.gcTargetBucket(spec)
+	}
+
+	if detailErr != nil {
+		service.logger.Warnf("Error validating replication specification %v. error=%v\n", spec.Id, detailErr)
 	}
 
 	if needToRemove {

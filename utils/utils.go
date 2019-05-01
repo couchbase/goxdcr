@@ -33,6 +33,7 @@ import (
 )
 
 var NonExistentBucketError error = errors.New("Bucket doesn't exist")
+var BucketRecreatedError error = errors.New("Bucket has been deleted and recreated")
 var TargetMayNotSupportScramShaError error = errors.New("Target may not support ScramSha")
 
 func (f *HELOFeatures) NumberOfActivatedFeatures() int {
@@ -85,6 +86,10 @@ type CouchBucket struct {
 
 func (u *Utilities) GetNonExistentBucketError() error {
 	return NonExistentBucketError
+}
+
+func (u *Utilities) GetBucketRecreatedError() error {
+	return BucketRecreatedError
 }
 
 func (u *Utilities) loggerForFunc(logger *log.CommonLogger) *log.CommonLogger {
@@ -3073,4 +3078,38 @@ func (u *Utilities) ProcessUprEventForFiltering(uprEvent *mcc.UprEvent, dp DataP
 	}
 
 	return body, nil, additionalErrDesc, releaseFunc, totalFailedCnt
+}
+
+// Verifies whether target bucket is still valid
+func (u *Utilities) VerifyTargetBucket(targetBucketName, targetBucketUuid string, remoteClusterRef *metadata.RemoteClusterReference, logger *log.CommonLogger) error {
+	connStr, err := remoteClusterRef.MyConnectionStr()
+	if err != nil {
+		return err
+	}
+
+	username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, err := remoteClusterRef.MyCredentials()
+	if err != nil {
+		return err
+	}
+
+	bucketInfo, err := u.GetBucketInfo(connStr, targetBucketName, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, logger)
+	if err != nil {
+		return err
+	}
+
+	if targetBucketUuid == "" {
+		return nil
+	}
+
+	extractedUuid, err := u.GetBucketUuidFromBucketInfo(targetBucketName, bucketInfo, logger)
+	if err != nil {
+		return err
+	}
+
+	if extractedUuid != targetBucketUuid {
+		logger.Warnf("Bucket %v UUID has changed from %v to %v, indicating a bucket deletion and recreation", targetBucketName, targetBucketUuid, extractedUuid)
+		return BucketRecreatedError
+	}
+
+	return nil
 }

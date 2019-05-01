@@ -84,6 +84,7 @@ type UtilsIface interface {
 	// Errors related utilities
 	BucketNotFoundError(bucketName string) error
 	GetNonExistentBucketError() error
+	GetBucketRecreatedError() error
 	IsSeriousNetError(err error) bool
 	InvalidRuneIndexErrorMessage(key string, index int) string
 	NewEnhancedError(msg string, err error) error
@@ -118,6 +119,7 @@ type UtilsIface interface {
 		logger *log.CommonLogger) (bucketInfo map[string]interface{}, bucketType string, bucketUUID string, bucketConflictResolutionType string,
 		bucketEvictionPolicy string, bucketKVVBMap map[string][]uint16, err error)
 	TranslateKvVbMap(kvVBMap base.BucketKVVbMap, targetBucketInfo map[string]interface{})
+	VerifyTargetBucket(targetBucketName, targetBucketUuid string, remoteClusterRef *metadata.RemoteClusterReference, logger *log.CommonLogger) error
 
 	// Cluster related utilities
 	GetClusterCompatibilityFromBucketInfo(bucketInfo map[string]interface{}, logger *log.CommonLogger) (int, error)

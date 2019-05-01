@@ -728,6 +728,7 @@ type XmemNozzle struct {
 	//remote cluster reference for retrieving up to date remote cluster reference
 	remoteClusterSvc  service_def.RemoteClusterSvc
 	targetClusterUuid string
+	targetBucketUuid  string
 
 	bOpen      bool
 	lock_bOpen sync.RWMutex
@@ -823,6 +824,7 @@ func NewXmemNozzle(id string,
 	connectString string,
 	sourceBucketName string,
 	targetBucketName string,
+	targetBucketUuid string,
 	username string,
 	password string,
 	dataObj_recycler base.DataObjRecycler,
@@ -856,6 +858,7 @@ func NewXmemNozzle(id string,
 		topic:               topic,
 		source_cr_mode:      source_cr_mode,
 		sourceBucketName:    sourceBucketName,
+		targetBucketUuid:    targetBucketUuid,
 		utils:               utilsIn,
 	}
 
@@ -2996,13 +2999,21 @@ func (xmem *XmemNozzle) recordBatchSize(batchSize uint32) {
 
 func (xmem *XmemNozzle) getClientWithRetry(xmem_id string, pool base.ConnPool, finish_ch chan bool, initializing bool, logger *log.CommonLogger) (mcc.ClientIface, error) {
 	getClientOpFunc := func(param interface{}) (interface{}, error) {
+		// first verify whether target bucket is still valid
+		targetClusterRef, err := xmem.remoteClusterSvc.RemoteClusterByUuid(xmem.targetClusterUuid, false /*refresh*/)
+		if err != nil {
+			return nil, err
+		}
+		err = xmem.utils.VerifyTargetBucket(xmem.config.bucketName, xmem.targetBucketUuid, targetClusterRef, logger)
+		if err != nil {
+			// err could be target bucket missing or recreated, or something else
+			// skip creating client anyway
+			// this will ensure that client will not be created against incorrect target bucket
+			return nil, err
+		}
+
 		sanInCertificate := xmem.config.san_in_certificate
 		if !initializing && xmem.config.encryptionType == metadata.EncryptionType_Full {
-			// if this is not replication startup time, and ssl is enabled, re-compute security settings since they could have changed
-			targetClusterRef, err := xmem.remoteClusterSvc.RemoteClusterByUuid(xmem.targetClusterUuid, false)
-			if err != nil {
-				return nil, err
-			}
 			connStr, err := targetClusterRef.MyConnectionStr()
 			if err != nil {
 				return nil, err
