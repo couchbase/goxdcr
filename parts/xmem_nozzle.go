@@ -714,7 +714,9 @@ func (client *xmemClient) incrementBackOffFactor() {
 	client.lock.Lock()
 	defer client.lock.Unlock()
 
-	client.backoff_factor++
+	if client.backoff_factor < base.XmemMaxBackoffFactor {
+		client.backoff_factor++
+	}
 }
 
 /************************************
@@ -2201,7 +2203,6 @@ func (xmem *XmemNozzle) getMaxIdleCount() uint32 {
 func (xmem *XmemNozzle) getAdjustedMaxIdleCount() uint32 {
 	max_idle_count := xmem.getMaxIdleCount()
 	backoff_factor := math.Max(float64(xmem.client_for_getMeta.getBackOffFactor()), float64(xmem.client_for_setMeta.getBackOffFactor()))
-	backoff_factor = math.Min(float64(10), backoff_factor)
 
 	//if client_for_getMeta.backoff_factor > 0 or client_for_setMeta.backoff_factor > 0, it means the target system is possibly under load, need to be more patient before
 	//declare the stuckness.

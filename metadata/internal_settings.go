@@ -83,8 +83,10 @@ const (
 	// network connection will be repaired if its down time (the time that it receives
 	// continuous network error responses from read or write) exceeds max down time (seconds)
 	XmemMaxReadDownTimeKey = "XmemMaxReadDownTime"
-	//wait time between write is backoff_factor*XmemBackoffWaitTime (milliseconds)
+	//wait time between writes is backoff_factor*XmemBackoffWaitTime (milliseconds)
 	XmemBackoffWaitTimeKey = "XmemBackoffWaitTime"
+	//max backoff factor
+	XmemMaxBackoffFactorKey = "XmemMaxBackoffFactor"
 	// max retry for new xmem connection
 	XmemMaxRetryNewConnKey = "XmemMaxRetryNewConn"
 	// initial backoff time between retries for new xmem connection (milliseconds)
@@ -230,6 +232,7 @@ var XmemWriteTimeoutConfig = &SettingsConfig{120, &Range{1, 3600}}
 var XmemReadTimeoutConfig = &SettingsConfig{120, &Range{1, 3600}}
 var XmemMaxReadDownTimeConfig = &SettingsConfig{60, &Range{1, 3600}}
 var XmemBackoffWaitTimeConfig = &SettingsConfig{10, &Range{1, 1000}}
+var XmemMaxBackoffFactorConfig = &SettingsConfig{10, &Range{1, 1000}}
 var XmemMaxRetryNewConnConfig = &SettingsConfig{10, &Range{0, 1000}}
 var XmemBackoffTimeNewConnConfig = &SettingsConfig{1000, &Range{1, 60000}}
 var XmemSelfMonitorIntervalConfig = &SettingsConfig{6, &Range{1, math.MaxInt32}}
@@ -315,6 +318,7 @@ var XDCRInternalSettingsConfigMap = map[string]*SettingsConfig{
 	XmemReadTimeoutKey:                            XmemReadTimeoutConfig,
 	XmemMaxReadDownTimeKey:                        XmemMaxReadDownTimeConfig,
 	XmemBackoffWaitTimeKey:                        XmemBackoffWaitTimeConfig,
+	XmemMaxBackoffFactorKey:                       XmemMaxBackoffFactorConfig,
 	XmemMaxRetryNewConnKey:                        XmemMaxRetryNewConnConfig,
 	XmemBackoffTimeNewConnKey:                     XmemBackoffTimeNewConnConfig,
 	XmemSelfMonitorIntervalKey:                    XmemSelfMonitorIntervalConfig,

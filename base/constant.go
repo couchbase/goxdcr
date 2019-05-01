@@ -651,8 +651,11 @@ var XmemReadTimeout = 120 * time.Second
 // continuous network error responses from read or write) exceeds max down time (seconds)
 var XmemMaxReadDownTime = 60 * time.Second
 
-//wait time between write is backoff_factor*XmemBackoffWaitTime (milliseconds)
+//wait time between writes is backoff_factor*XmemBackoffWaitTime
 var XmemBackoffWaitTime = 10 * time.Millisecond
+
+// max backoff factor
+var XmemMaxBackoffFactor = 10
 
 // max retry for new xmem connection
 var XmemMaxRetryNewConn = 10
@@ -825,7 +828,7 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	uprFeedDataChanLength int, uprFeedBufferSize int,
 	xmemMaxRetry int, xmemWriteTimeout time.Duration,
 	xmemReadTimeout time.Duration, xmemMaxReadDownTime time.Duration,
-	xmemBackoffWaitTime time.Duration, xmemMaxRetryNewConn int,
+	xmemBackoffWaitTime time.Duration, xmemMaxBackoffFactor int, xmemMaxRetryNewConn int,
 	xmemBackoffTimeNewConn time.Duration, xmemSelfMonitorInterval time.Duration,
 	xmemMaxIdleCount int, xmemMaxIdleCountLowerBound int, xmemMaxIdleCountUpperBound int,
 	xmemMaxDataChanSize int, xmemMaxBatchSize int,
@@ -886,6 +889,7 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	XmemReadTimeout = xmemReadTimeout
 	XmemMaxReadDownTime = xmemMaxReadDownTime
 	XmemBackoffWaitTime = xmemBackoffWaitTime
+	XmemMaxBackoffFactor = xmemMaxBackoffFactor
 	XmemMaxRetryNewConn = xmemMaxRetryNewConn
 	XmemBackoffTimeNewConn = xmemBackoffTimeNewConn
 	XmemSelfMonitorInterval = xmemSelfMonitorInterval
