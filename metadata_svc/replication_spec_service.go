@@ -166,19 +166,19 @@ func (service *ReplicationSpecService) replicationSpec(replicationId string) (*m
 }
 
 //validate the existence of source bucket
-func (service *ReplicationSpecService) validateSourceBucket(errorMap base.ErrorMap, sourceBucket, targetCluster, targetBucket string) (string, string, error) {
+func (service *ReplicationSpecService) validateSourceBucket(errorMap base.ErrorMap, sourceBucket, targetCluster, targetBucket string) (string, int, string, error) {
 	var err_source error
 	start_time := time.Now()
 	local_connStr, _ := service.xdcr_comp_topology_svc.MyConnectionStr()
 	if local_connStr == "" {
-		return "", "", errors.New("XDCRTopologySvc.MyConnectionStr() returned empty string")
+		return "", 0, "", errors.New("XDCRTopologySvc.MyConnectionStr() returned empty string")
 	}
 
-	_, sourceBucketType, sourceBucketUUID, sourceConflictResolutionType, sourceEvictionPolicy, _, err_source := service.utils.BucketValidationInfo(local_connStr, sourceBucket, "", "", base.HttpAuthMechPlain, nil, false, nil, nil, service.logger)
+	_, sourceBucketType, sourceBucketUUID, sourceConflictResolutionType, sourceEvictionPolicy, sourceBucketKVVBMap, err_source := service.utils.BucketValidationInfo(local_connStr, sourceBucket, "", "", base.HttpAuthMechPlain, nil, false, nil, nil, service.logger)
 	service.logger.Infof("Result from local bucket look up: bucketName=%v, err_source=%v, time taken=%v\n", sourceBucket, err_source, time.Since(start_time))
 	service.validateBucket(sourceBucket, targetCluster, targetBucket, sourceBucketType, sourceEvictionPolicy, err_source, errorMap, true)
 
-	return sourceBucketUUID, sourceConflictResolutionType, nil
+	return sourceBucketUUID, base.GetNumberOfVbs(sourceBucketKVVBMap), sourceConflictResolutionType, nil
 }
 
 // validate that the source bucket and target bucket are not the same bucket
@@ -343,7 +343,7 @@ func (service *ReplicationSpecService) ValidateNewReplicationSpec(sourceBucket, 
 	service.logger.Infof("Start ValidateAddReplicationSpec, sourceBucket=%v, targetCluster=%v, targetBucket=%v\n", sourceBucket, targetCluster, targetBucket)
 	defer service.logger.Infof("Finished ValidateAddReplicationSpec, sourceBucket=%v, targetCluster=%v, targetBucket=%v, errorMap=%v\n", sourceBucket, targetCluster, targetBucket, errorMap)
 
-	sourceBucketUUID, sourceConflictResolutionType, err := service.validateSourceBucket(errorMap, sourceBucket, targetCluster, targetBucket)
+	sourceBucketUUID, sourceBucketNumberOfVbs, sourceConflictResolutionType, err := service.validateSourceBucket(errorMap, sourceBucket, targetCluster, targetBucket)
 	if len(errorMap) > 0 || err != nil {
 		return "", "", nil, errorMap, err, nil
 	}
@@ -363,8 +363,15 @@ func (service *ReplicationSpecService) ValidateNewReplicationSpec(sourceBucket, 
 		return "", "", nil, errorMap, err, nil
 	}
 
-	targetBucketInfo, targetBucketUUID, targetConflictResolutionType, targetKVVBMap := service.validateTargetBucket(errorMap, remote_connStr, targetBucket, remote_userName, remote_password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey, sourceBucket, targetCluster)
+	targetBucketInfo, targetBucketUUID, targetBucketNumberOfVbs, targetConflictResolutionType, targetKVVBMap := service.validateTargetBucket(errorMap, remote_connStr, targetBucket, remote_userName, remote_password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey, sourceBucket, targetCluster)
 	if len(errorMap) > 0 {
+		return "", "", nil, errorMap, nil, nil
+	}
+
+	if sourceBucketNumberOfVbs != targetBucketNumberOfVbs {
+		errMsg := fmt.Sprintf("The number of vbuckets in source cluster, %v, and target cluster, %v, does not match. This configuration is not supported.", sourceBucketNumberOfVbs, targetBucketNumberOfVbs)
+		service.logger.Error(errMsg)
+		errorMap[base.ToBucket] = errors.New(errMsg)
 		return "", "", nil, errorMap, nil, nil
 	}
 
@@ -618,7 +625,7 @@ func (service *ReplicationSpecService) validateCompressionTarget(errorMap base.E
 
 //validate target bucket
 func (service *ReplicationSpecService) validateTargetBucket(errorMap base.ErrorMap, remote_connStr, targetBucket, remote_userName, remote_password string, httpAuthMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCertificate, clientKey []byte,
-	sourceBucket string, targetCluster string) (targetBucketInfo map[string]interface{}, targetBucketUUID, targetConflictResolutionType string, targetKVVBMap map[string][]uint16) {
+	sourceBucket string, targetCluster string) (targetBucketInfo map[string]interface{}, targetBucketUUID string, targetBucketNumberOfVBs int, targetConflictResolutionType string, targetKVVBMap map[string][]uint16) {
 	start_time := time.Now()
 
 	targetBucketInfo, targetBucketType, targetBucketUUID, targetConflictResolutionType, _, targetKVVBMap, err_target := service.utils.RemoteBucketValidationInfo(remote_connStr, targetBucket, remote_userName, remote_password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey, service.logger)
@@ -626,7 +633,7 @@ func (service *ReplicationSpecService) validateTargetBucket(errorMap base.ErrorM
 
 	service.validateBucket(sourceBucket, targetCluster, targetBucket, targetBucketType, "", err_target, errorMap, false)
 
-	return targetBucketInfo, targetBucketUUID, targetConflictResolutionType, targetKVVBMap
+	return targetBucketInfo, targetBucketUUID, base.GetNumberOfVbs(targetKVVBMap), targetConflictResolutionType, targetKVVBMap
 }
 
 func (service *ReplicationSpecService) validateBucket(sourceBucket, targetCluster, targetBucket, bucketType string, evictionPolicy string, err error, errorMap map[string]error, isSourceBucket bool) {

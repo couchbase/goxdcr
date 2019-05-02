@@ -1208,3 +1208,12 @@ func WriteJsonRawMsg(allocatedBytes, bytesToWrite []byte, pos int, mode WriteJso
 	}
 	return allocatedBytes, pos
 }
+
+// get number of vbuckets in a cluster based on kv vb map
+func GetNumberOfVbs(kvVBMap map[string][]uint16) int {
+	numberOfVBs := 0
+	for _, vbList := range kvVBMap {
+		numberOfVBs += len(vbList)
+	}
+	return numberOfVBs
+}
