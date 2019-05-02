@@ -62,6 +62,9 @@ func NewReplicationSpecification(sourceBucketName string, sourceBucketUUID strin
 }
 
 func (spec *ReplicationSpecification) String() string {
+	if spec == nil {
+		return ""
+	}
 	var specSettingsMap ReplicationSettingsMap
 	if spec.Settings != nil {
 		specSettingsMap = spec.Settings.CloneAndRedact().ToMap(false /*defaultSettings*/)
