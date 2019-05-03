@@ -676,6 +676,9 @@ var BypassSanInCertificateCheck bool = false
 // Number of times to verify bucket is missing before removing an invalid replicationSpec
 var ReplicationSpecGCCnt int = 4
 
+// Whether or not source bucket can be ephemeral with NRU for replication creation
+var AllowSourceNRU bool = false
+
 func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeCountBeforeRestart,
 	maxTopologyStableCountBeforeRestart, maxWorkersForCheckpointing int,
 	timeoutCheckpointBeforeStop time.Duration, capiDataChanSizeMultiplier int,
@@ -710,7 +713,8 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	timeoutPartsStart time.Duration,
 	timeoutPartsStop time.Duration,
 	timeoutDcpCloseUprStreams time.Duration,
-	timeoutDcpCloseUprFeed time.Duration) {
+	timeoutDcpCloseUprFeed time.Duration,
+	allowSourceNRU bool) {
 	TopologyChangeCheckInterval = topologyChangeCheckInterval
 	MaxTopologyChangeCountBeforeRestart = maxTopologyChangeCountBeforeRestart
 	MaxTopologyStableCountBeforeRestart = maxTopologyStableCountBeforeRestart
@@ -780,4 +784,5 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	TimeoutPartsStop = timeoutPartsStop
 	TimeoutDcpCloseUprStreams = timeoutDcpCloseUprStreams
 	TimeoutDcpCloseUprFeed = timeoutDcpCloseUprFeed
+	AllowSourceNRU = allowSourceNRU
 }

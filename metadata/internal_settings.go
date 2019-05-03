@@ -148,6 +148,8 @@ const (
 	BypassSanInCertificateCheckKey = "BypassSanInCertificateCheck"
 	// Number of times to verify bucket is missing before removing an invalid replicationSpec
 	ReplicationSpecGCCntKey = "ReplicationSpecGCCnt"
+	// Override setting to allow replication to be created on a source ephemeral bucket with NRU policy
+	AllowSourceNRUKey = "AllowSourceNRUCreation"
 
 	TimeoutRuntimeContextStartKey = "TimeoutRuntimeContextStart"
 	TimeoutRuntimeContextStopKey  = "TimeoutRuntimeContextStop"
@@ -219,6 +221,7 @@ var TimeoutPartsStartConfig = &SettingsConfig{30, &Range{1, 3600}}
 var TimeoutPartsStopConfig = &SettingsConfig{10, &Range{1, 3600}}
 var TimeoutDcpCloseUprStreamsConfig = &SettingsConfig{3, &Range{1, 3600}}
 var TimeoutDcpCloseUprFeedConfig = &SettingsConfig{3, &Range{1, 3600}}
+var AllowSourceNRUConfig = &SettingsConfig{false, nil}
 
 var XDCRInternalSettingsConfigMap = map[string]*SettingsConfig{
 	TopologyChangeCheckIntervalKey:                TopologyChangeCheckIntervalConfig,
@@ -283,6 +286,7 @@ var XDCRInternalSettingsConfigMap = map[string]*SettingsConfig{
 	TimeoutPartsStopKey:                           TimeoutPartsStopConfig,
 	TimeoutDcpCloseUprStreamsKey:                  TimeoutDcpCloseUprStreamsConfig,
 	TimeoutDcpCloseUprFeedKey:                     TimeoutDcpCloseUprFeedConfig,
+	AllowSourceNRUKey:                             AllowSourceNRUConfig,
 }
 
 func InitConstants(xmemMaxIdleCountLowerBound int, xmemMaxIdleCountUpperBound int) {

@@ -644,7 +644,7 @@ func (service *ReplicationSpecService) validateBucket(sourceBucket, targetCluste
 		errMsg := fmt.Sprintf("Incompatible %v bucket '%v'", qualifier, bucketName)
 		service.logger.Error(errMsg)
 		errorMap[errKey] = fmt.Errorf(errMsg)
-	} else if isSourceBucket && bucketType == base.EphemeralBucketType && evictionPolicy == base.EvictionPolicyNRU {
+	} else if !base.AllowSourceNRU && isSourceBucket && bucketType == base.EphemeralBucketType && evictionPolicy == base.EvictionPolicyNRU {
 		// source bucket cannot be ephemeral bucket with eviction
 		errMsg := fmt.Sprintf("XDCR replication for ephemeral bucket with eviction '%v' is not allowed", bucketName)
 		service.logger.Error(errMsg)

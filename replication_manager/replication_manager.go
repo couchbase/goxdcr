@@ -266,6 +266,7 @@ func initConstants(xdcr_topology_svc service_def.XDCRCompTopologySvc, internal_s
 		time.Duration(internal_settings.Values[metadata.TimeoutPartsStopKey].(int))*time.Second,
 		time.Duration(internal_settings.Values[metadata.TimeoutDcpCloseUprStreamsKey].(int))*time.Second,
 		time.Duration(internal_settings.Values[metadata.TimeoutDcpCloseUprFeedKey].(int))*time.Second,
+		internal_settings.Values[metadata.AllowSourceNRUKey].(bool),
 	)
 }
 
