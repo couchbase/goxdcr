@@ -137,6 +137,30 @@ var OverviewMetricKeys = []string{CHANGES_LEFT_METRIC, DOCS_CHECKED_METRIC, DOCS
 	RESP_WAIT_METRIC, META_LATENCY_METRIC, DCP_DISPATCH_TIME_METRIC, DCP_DATACH_LEN, THROTTLE_LATENCY_METRIC, THROUGHPUT_THROTTLE_LATENCY_METRIC,
 	DP_GET_FAIL_METRIC, EXPIRY_STRIPPED_METRIC}
 
+// Stats per vbucket
+type VBCountMetricMap map[string]int64
+
+func MakeVBCountMetricMap() VBCountMetricMap {
+	return VBCountMetricMap{
+		DOCS_FILTERED_METRIC:         0,
+		DOCS_UNABLE_TO_FILTER_METRIC: 0}
+}
+
+var VBCountMetrics = MakeVBCountMetricMap()
+
+func NewVBStatsMapFromCkpt(ckptDoc *metadata.CheckpointsDoc, agreedIndex int) VBCountMetricMap {
+	if agreedIndex < 0 || ckptDoc == nil || agreedIndex >= len(ckptDoc.Checkpoint_records) {
+		return nil
+	}
+
+	record := ckptDoc.Checkpoint_records[agreedIndex]
+
+	vbStatMap := make(VBCountMetricMap)
+	vbStatMap[DOCS_FILTERED_METRIC] = base.Uint64ToInt64(record.Filtered_Items_Cnt)
+	vbStatMap[DOCS_UNABLE_TO_FILTER_METRIC] = base.Uint64ToInt64(record.Filtered_Failed_Cnt)
+	return vbStatMap
+}
+
 // keys for metrics that do not monotonically increase during replication, to which the "going backward" check should not be applied
 var NonIncreasingMetricKeyMap = map[string]bool{
 	SIZE_REP_QUEUE_METRIC: true,
@@ -205,6 +229,14 @@ type StatisticsManager struct {
 	utils utilities.UtilsIface
 }
 
+type StatsMgrIface interface {
+	Start(settings metadata.ReplicationSettingsMap) error
+	Stop() error
+	GetCountMetrics(key string) (int64, error)
+	GetVBCountMetrics(vb uint16) (VBCountMetricMap, error)
+	SetVBCountMetrics(vb uint16, metricKVs VBCountMetricMap) error
+}
+
 func NewStatisticsManager(through_seqno_tracker_svc service_def.ThroughSeqnoTrackerSvc,
 	cluster_info_svc service_def.ClusterInfoSvc, xdcr_topology_svc service_def.XDCRCompTopologySvc,
 	logger_ctx *log.LoggerContext, active_vbs map[string][]uint16, bucket_name string,
@@ -252,6 +284,10 @@ func (stats_mgr *StatisticsManager) initialize() {
 			stats_mgr.stats_map[fmt.Sprintf(base.VBUCKET_HIGH_SEQNO_STAT_KEY_FORMAT, vb)] = ""
 		}
 	}
+}
+
+func (statsMgr *StatisticsManager) getRouterCollector() *routerCollector {
+	return (statsMgr.collectors[2]).(*routerCollector)
 }
 
 func (stats_mgr *StatisticsManager) cleanupBeforeExit() error {
@@ -434,6 +470,7 @@ func (stats_mgr *StatisticsManager) formatStatsForLog() (string, error) {
 
 //process the raw stats, aggregate them into overview registry
 //expose the raw stats and overview stats to expvar
+//Locking is done by caller
 func (stats_mgr *StatisticsManager) processRawStats() error {
 	rs, err := stats_mgr.getReplicationStatus()
 	if err != nil {
@@ -1087,7 +1124,6 @@ func (dcp_collector *dcpCollector) Mount(pipeline common.Pipeline, stats_mgr *St
 	async_listener_map := pipeline_pkg.GetAllAsyncComponentEventListeners(pipeline)
 	pipeline_utils.RegisterAsyncComponentEventHandler(async_listener_map, base.DataReceivedEventListener, dcp_collector)
 	pipeline_utils.RegisterAsyncComponentEventHandler(async_listener_map, base.DataProcessedEventListener, dcp_collector)
-
 	return nil
 }
 
@@ -1101,7 +1137,8 @@ func (dcp_collector *dcpCollector) OnEvent(event *common.Event) {
 
 func (dcp_collector *dcpCollector) ProcessEvent(event *common.Event) error {
 	metric_map := dcp_collector.component_map[event.Component.Id()]
-	if event.EventType == common.DataReceived {
+	switch event.EventType {
+	case common.DataReceived:
 		uprEvent := event.Data.(*mcc.UprEvent)
 		metric_map[DOCS_RECEIVED_DCP_METRIC].(metrics.Counter).Inc(1)
 
@@ -1115,10 +1152,10 @@ func (dcp_collector *dcpCollector) ProcessEvent(event *common.Event) error {
 		} else {
 			dcp_collector.stats_mgr.logger.Warnf("Invalid opcode, %v, in DataReceived event from %v.", uprEvent.Opcode, event.Component.Id())
 		}
-	} else if event.EventType == common.DataProcessed {
+	case common.DataProcessed:
 		dcp_dispatch_time := event.OtherInfos.(float64)
 		metric_map[DCP_DISPATCH_TIME_METRIC].(metrics.Histogram).Sample().Update(int64(dcp_dispatch_time))
-	} else if event.EventType == common.StatsUpdate {
+	case common.StatsUpdate:
 		dcp_datach_len := event.OtherInfos.(int)
 		setCounter(metric_map[DCP_DATACH_LEN].(metrics.Counter), dcp_datach_len)
 	}
@@ -1128,15 +1165,27 @@ func (dcp_collector *dcpCollector) ProcessEvent(event *common.Event) error {
 
 //metrics collector for Router
 type routerCollector struct {
-	id            string
-	stats_mgr     *StatisticsManager
+	id        string
+	stats_mgr *StatisticsManager
+
+	// key of outer map: component id
+	// key of inner map: metric name
+	// value of inner map: metric value
 	component_map map[string]map[string]interface{}
+
+	// For vb-based metric across all DCP nozzles
+	vbBasedMetric map[uint16]map[string]interface{}
+
+	// A map of vb-> routerIDs
+	routerVbsIdMap map[uint16]string
 }
 
 func (r_collector *routerCollector) Mount(pipeline common.Pipeline, stats_mgr *StatisticsManager) error {
 	r_collector.id = pipeline_utils.GetElementIdFromName(pipeline, base.RouterStatsCollector)
 	r_collector.stats_mgr = stats_mgr
 	r_collector.component_map = make(map[string]map[string]interface{})
+	r_collector.vbBasedMetric = make(map[uint16]map[string]interface{})
+	r_collector.routerVbsIdMap = make(map[uint16]string)
 	dcp_parts := pipeline.Sources()
 	for _, dcp_part := range dcp_parts {
 		//get connector
@@ -1168,10 +1217,24 @@ func (r_collector *routerCollector) Mount(pipeline common.Pipeline, stats_mgr *S
 		metric_map[DP_GET_FAIL_METRIC] = dp_failed
 		metric_map[THROUGHPUT_THROTTLE_LATENCY_METRIC] = throughput_throttle_latency
 		metric_map[EXPIRY_STRIPPED_METRIC] = expiry_stripped
+
+		// VB specific stats
+		listOfVbs := dcp_part.ResponsibleVBs()
+		for _, i := range listOfVbs {
+			r_collector.routerVbsIdMap[i] = conn.Id()
+			metricsMap := make(map[string]interface{})
+			for k, _ := range VBCountMetrics {
+				metricsMap[k] = metrics.NewCounter()
+				metrics.Register(fmt.Sprintf("%v:%v", conn.Id(), i), metricsMap[k])
+			}
+			r_collector.vbBasedMetric[i] = metricsMap
+		}
+
 		r_collector.component_map[conn.Id()] = metric_map
 	}
 
 	async_listener_map := pipeline_pkg.GetAllAsyncComponentEventListeners(pipeline)
+	pipeline_utils.RegisterAsyncComponentEventHandler(async_listener_map, base.DataFilteredEventListener, r_collector)
 	pipeline_utils.RegisterAsyncComponentEventHandler(async_listener_map, base.DataFilteredEventListener, r_collector)
 	pipeline_utils.RegisterAsyncComponentEventHandler(async_listener_map, base.DataThroughputThrottledEventListener, r_collector)
 
@@ -1182,8 +1245,28 @@ func (r_collector *routerCollector) Id() string {
 	return r_collector.id
 }
 
+func (r_collector *routerCollector) handleVBEvent(event *common.Event, metricKey string) error {
+	switch metricKey {
+	case DOCS_FILTERED_METRIC:
+		fallthrough
+	case DOCS_UNABLE_TO_FILTER_METRIC:
+		uprEvent := event.Data.(*mcc.UprEvent)
+		vbucket := uprEvent.VBucket
+		metricMap, ok := r_collector.vbBasedMetric[vbucket]
+		if !ok {
+			return base.ErrorNotMyVbucket
+		}
+		// NOTE - this won't be an issue with the later Changelist changes. Not locking for now
+		metricMap[metricKey].(metrics.Counter).Inc(1)
+		return nil
+	default:
+		return base.ErrorInvalidInput
+	}
+}
+
 func (r_collector *routerCollector) ProcessEvent(event *common.Event) error {
 	metric_map := r_collector.component_map[event.Component.Id()]
+	var err error
 	switch event.EventType {
 	case common.DataFiltered:
 		uprEvent := event.Data.(*mcc.UprEvent)
@@ -1199,8 +1282,13 @@ func (r_collector *routerCollector) ProcessEvent(event *common.Event) error {
 		} else {
 			r_collector.stats_mgr.logger.Warnf("Invalid opcode, %v, in DataFiltered event from %v.", uprEvent.Opcode, event.Component.Id())
 		}
+
+		// Handle VB specific tasks
+		err = r_collector.handleVBEvent(event, DOCS_FILTERED_METRIC)
 	case common.DataUnableToFilter:
 		metric_map[DOCS_UNABLE_TO_FILTER_METRIC].(metrics.Counter).Inc(1)
+		// Handle VB specific tasks
+		err = r_collector.handleVBEvent(event, DOCS_UNABLE_TO_FILTER_METRIC)
 	case common.DataPoolGetFail:
 		metric_map[DP_GET_FAIL_METRIC].(metrics.Counter).Inc(event.Data.(int64))
 	case common.DataThroughputThrottled:
@@ -1210,7 +1298,7 @@ func (r_collector *routerCollector) ProcessEvent(event *common.Event) error {
 		metric_map[EXPIRY_STRIPPED_METRIC].(metrics.Counter).Inc(1)
 	}
 
-	return nil
+	return err
 }
 
 //metrics collector for checkpointmanager
@@ -1452,4 +1540,84 @@ func StatsUpdateInterval(settings metadata.ReplicationSettingsMap) time.Duration
 		update_interval = settings[PUBLISH_INTERVAL].(int)
 	}
 	return time.Duration(update_interval) * time.Millisecond
+}
+
+func (stats_mgr *StatisticsManager) GetCountMetrics(key string) (int64, error) {
+	overviewRegistry, ok := stats_mgr.registries[OVERVIEW_METRICS_KEY]
+	if !ok || overviewRegistry == nil {
+		return 0, base.ErrorResourceDoesNotExist
+	}
+	registry := overviewRegistry.Get(key)
+	if registry == nil {
+		return 0, base.ErrorInvalidInput
+	}
+	return registry.(metrics.Counter).Count(), nil
+}
+
+func (stats_mgr *StatisticsManager) GetVBCountMetrics(vb uint16) (VBCountMetricMap, error) {
+	// Currently only DCP has vb specific stats
+	vbBasedMetric, ok := stats_mgr.getRouterCollector().vbBasedMetric[vb]
+	if !ok {
+		return nil, base.ErrorNotMyVbucket
+	}
+
+	metricsMap := make(map[string]int64)
+	for k, _ := range VBCountMetrics {
+		registry, ok := (vbBasedMetric[k])
+		if !ok {
+			continue
+		}
+		counter := registry.(metrics.Counter)
+		metricsMap[k] = counter.Count()
+	}
+
+	return metricsMap, nil
+}
+
+func (stats_mgr *StatisticsManager) SetVBCountMetrics(vb uint16, metricKVs VBCountMetricMap) error {
+	// Currently only DCP has vb specific stats
+	vbBasedMetric, ok := stats_mgr.getRouterCollector().vbBasedMetric[vb]
+	if !ok {
+		return base.ErrorNotMyVbucket
+	}
+
+	// First find the router part responsible for this vb
+	routerId, found := stats_mgr.getRouterCollector().routerVbsIdMap[vb]
+	if !found {
+		return base.ErrorNotMyVbucket
+	}
+
+	registry_router := stats_mgr.registries[routerId]
+	if registry_router == nil {
+		return fmt.Errorf("Unable to find registry for router ID %v", routerId)
+	}
+
+	// For keys that are passed in, set the counter appropriately
+	for k, v := range metricKVs {
+		// Increment vb-related counters
+		registry, ok := vbBasedMetric[k]
+		if !ok {
+			return base.ErrorInvalidInput
+		}
+		counter := registry.(metrics.Counter)
+		currentVal := counter.Count()
+		// Difference here is to address scenario when rollback occurs
+		// If rollback happens, then the difference is new - old
+		// Either increment or decrement the current count in both vb specific and stats_mgr.registries
+		difference := v - currentVal
+		counter.Inc(difference)
+
+		// Increment stats independent of VB that need this
+		metricsIface := registry_router.Get(k)
+		if metricsIface == nil {
+			return fmt.Errorf("%v Unable to get metric\n", routerId)
+		}
+		counter, ok = metricsIface.(metrics.Counter)
+		if !ok || counter == nil {
+			return fmt.Errorf("%v Unable to get metric counter\n", routerId)
+		}
+		counter.Inc(difference)
+	}
+
+	return nil
 }

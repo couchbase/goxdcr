@@ -111,6 +111,7 @@ type CheckpointManager struct {
 
 	target_cluster_version int
 	utils                  utilities.UtilsIface
+	statsMgr               StatsMgrIface
 }
 
 // Checkpoint Manager keeps track of one checkpointRecord per vbucket
@@ -142,7 +143,7 @@ func NewCheckpointManager(checkpoints_svc service_def.CheckpointsService, capi_s
 	xdcr_topology_svc service_def.XDCRCompTopologySvc, through_seqno_tracker_svc service_def.ThroughSeqnoTrackerSvc,
 	active_vbs map[string][]uint16, target_username, target_password string, target_bucket_name string,
 	target_kv_vb_map map[string][]uint16, target_cluster_ref *metadata.RemoteClusterReference,
-	target_cluster_version int, isTargetES bool, logger_ctx *log.LoggerContext, utilsIn utilities.UtilsIface) (*CheckpointManager, error) {
+	target_cluster_version int, isTargetES bool, logger_ctx *log.LoggerContext, utilsIn utilities.UtilsIface, statsMgr StatsMgrIface) (*CheckpointManager, error) {
 	if checkpoints_svc == nil || capi_svc == nil || remote_cluster_svc == nil || rep_spec_svc == nil || cluster_info_svc == nil || xdcr_topology_svc == nil {
 		return nil, errors.New("checkpoints_svc, capi_svc, remote_cluster_svc, rep_spec_svc, cluster_info_svc and xdcr_topology_svc can't be nil")
 	}
@@ -175,6 +176,7 @@ func NewCheckpointManager(checkpoints_svc service_def.CheckpointsService, capi_s
 		target_cluster_version:    target_cluster_version,
 		isTargetES:                isTargetES,
 		utils:                     utilsIn,
+		statsMgr:                  statsMgr,
 	}, nil
 }
 
@@ -729,8 +731,15 @@ func (ckmgr *CheckpointManager) startSeqnoGetter(getter_id int, listOfVbs []uint
 
 	for _, vbno := range listOfVbs {
 		// use math.MaxUint64 as max_seqno to make all checkpoint records eligible
-		vbts, err := ckmgr.getVBTimestampForVB(vbno, ckptDocs[vbno], math.MaxUint64)
+		vbts, vbStats, err := ckmgr.getVBTimestampAndStatsFromCkpts(vbno, ckptDocs[vbno], math.MaxUint64)
 		if err != nil {
+			err_info := []interface{}{vbno, err}
+			err_ch <- err_info
+			return
+		}
+		err = ckmgr.statsMgr.SetVBCountMetrics(vbno, vbStats)
+		if err != nil {
+			err = fmt.Errorf("%v setting vbStat %v for resulted with err %v", ckmgr.pipeline.Topic(), vbno, err)
 			err_info := []interface{}{vbno, err}
 			err_ch <- err_info
 			return
@@ -744,8 +753,9 @@ func (ckmgr *CheckpointManager) startSeqnoGetter(getter_id int, listOfVbs []uint
 	}
 }
 
-// get start seqno for a specific vb that is less than max_seqno
-func (ckmgr *CheckpointManager) getVBTimestampForVB(vbno uint16, ckptDoc *metadata.CheckpointsDoc, max_seqno uint64) (*base.VBTimestamp, error) {
+// Given a specific vbno and a list of checkpoints and a max possible seqno, return:
+// valid VBTimestamp and corresponding VB-specific stats for statsMgr that was stored in the same ckpt doc
+func (ckmgr *CheckpointManager) getVBTimestampAndStatsFromCkpts(vbno uint16, ckptDoc *metadata.CheckpointsDoc, max_seqno uint64) (*base.VBTimestamp, VBCountMetricMap, error) {
 	var agreedIndex int = -1
 
 	ckptRecordsList := ckmgr.ckptRecordsWLock(ckptDoc, vbno)
@@ -780,7 +790,7 @@ func (ckmgr *CheckpointManager) getVBTimestampForVB(vbno uint16, ckptDoc *metada
 					goto POPULATE
 				} else {
 					ckmgr.logger.Errorf("%v Pre_replicate failed for %v. err=%v\n", ckmgr.pipeline.Topic(), vbno, err)
-					return nil, err
+					return nil, nil, err
 				}
 			}
 
@@ -798,7 +808,12 @@ func (ckmgr *CheckpointManager) getVBTimestampForVB(vbno uint16, ckptDoc *metada
 		} // end if remote_vb_status
 	}
 POPULATE:
-	return ckmgr.populateVBTimestamp(ckptDoc, agreedIndex, vbno)
+	vbts, err := ckmgr.populateVBTimestamp(ckptDoc, agreedIndex, vbno)
+	if err != nil {
+		return vbts, nil, err
+	}
+	vbStatMap := NewVBStatsMapFromCkpt(ckptDoc, agreedIndex)
+	return vbts, vbStatMap, err
 }
 
 /**
@@ -1081,8 +1096,7 @@ func (ckmgr *CheckpointManager) performCkpt_internal(vb_list []uint16, fin_ch <-
  * If an error occurs during persistence, ignore and override the error and logs an error message.
  */
 func (ckptRecord *checkpointRecordWithLock) updateAndPersist(ckmgr *CheckpointManager, vbno uint16, versionNumberIn uint64,
-	xattrSeqno uint64, seqno uint64, targetSeqno uint64, failoverUuid uint64,
-	dcpSsSeqno uint64, dcpSsEndSeqno uint64) error {
+	xattrSeqno uint64, incomingRecord *metadata.CheckpointRecord) error {
 
 	if ckptRecord == nil {
 		return errors.New("Nil ckptRecord")
@@ -1099,11 +1113,7 @@ func (ckptRecord *checkpointRecordWithLock) updateAndPersist(ckmgr *CheckpointMa
 		return ckptRecordMismatch
 	}
 	// Update the record
-	ckptRecord.ckpt.Seqno = seqno
-	ckptRecord.ckpt.Target_Seqno = targetSeqno
-	ckptRecord.ckpt.Failover_uuid = failoverUuid
-	ckptRecord.ckpt.Dcp_snapshot_seqno = dcpSsSeqno
-	ckptRecord.ckpt.Dcp_snapshot_end_seqno = dcpSsEndSeqno
+	ckptRecord.ckpt.Load(incomingRecord)
 	ckptRecord.versionNum++
 
 	// Persist the record
@@ -1215,9 +1225,18 @@ func (ckmgr *CheckpointManager) doCheckpoint(vbno uint16, through_seqno_map map[
 		return nil
 	}
 
+	// Get stats that need to persist
+	vbCountMetrics, err := ckmgr.statsMgr.GetVBCountMetrics(vbno)
+	if err != nil {
+		ckmgr.logger.Warnf("%v unable to get %v metric from stats manager\n", DOCS_FILTERED_METRIC)
+		return err
+	}
+	filteredItems := vbCountMetrics[DOCS_FILTERED_METRIC]
+	filterFailed := vbCountMetrics[DOCS_UNABLE_TO_FILTER_METRIC]
 	// Write-operation - feed the temporary variables and update them into the record and also write them to metakv
-	err = ckpt_obj.updateAndPersist(ckmgr, vbno, currRecordVersion, xattr_seqno, through_seqno, ckptRecordTargetSeqno,
-		ckRecordFailoverUuid, ckRecordDcpSnapSeqno, ckRecordDcpSnapEndSeqno)
+	newCkpt := metadata.NewCheckpointRecord(ckRecordFailoverUuid, through_seqno, ckRecordDcpSnapSeqno, ckRecordDcpSnapEndSeqno, ckptRecordTargetSeqno,
+		uint64(filteredItems), uint64(filterFailed))
+	err = ckpt_obj.updateAndPersist(ckmgr, vbno, currRecordVersion, xattr_seqno, newCkpt)
 
 	if err != nil {
 		// We weren't able to atomically update the checkpoint record. This checkpoint record is essentially lost
@@ -1443,7 +1462,7 @@ func (ckmgr *CheckpointManager) UpdateVBTimestamps(vbno uint16, rollbackseqno ui
 
 	ckmgr.logger.Infof("%v vb=%v, current_start_seqno=%v, max_seqno=%v\n", ckmgr.pipeline.Topic(), vbno, pipeline_start_seqno.Seqno, max_seqno)
 
-	vbts, err := ckmgr.getVBTimestampForVB(vbno, checkpointDoc, max_seqno)
+	vbts, vbStats, err := ckmgr.getVBTimestampAndStatsFromCkpts(vbno, checkpointDoc, max_seqno)
 	if err != nil {
 		return nil, err
 	}
@@ -1452,6 +1471,10 @@ func (ckmgr *CheckpointManager) UpdateVBTimestamps(vbno uint16, rollbackseqno ui
 
 	//set the start seqno on through_seqno_tracker_svc
 	ckmgr.through_seqno_tracker_svc.SetStartSeqno(vbno, vbts.Seqno)
+	err = ckmgr.statsMgr.SetVBCountMetrics(vbno, vbStats)
+	if err != nil {
+		ckmgr.logger.Warnf("%v setting vbStat for vb %v returned error %v Stats: %v\n", ckmgr.pipeline.Topic(), vbno, err, vbStats)
+	}
 	ckmgr.logger.Infof("%v Rolled back startSeqno to %v for vb=%v\n", ckmgr.pipeline.Topic(), vbts.Seqno, vbno)
 
 	ckmgr.logger.Infof("%v Retry vbts=%v\n", ckmgr.pipeline.Topic(), vbts)

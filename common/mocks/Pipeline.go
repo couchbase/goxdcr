@@ -10,6 +10,22 @@ type Pipeline struct {
 	mock.Mock
 }
 
+// GetAsyncListenerMap provides a mock function with given fields:
+func (_m *Pipeline) GetAsyncListenerMap() map[string]common.AsyncComponentEventListener {
+	ret := _m.Called()
+
+	var r0 map[string]common.AsyncComponentEventListener
+	if rf, ok := ret.Get(0).(func() map[string]common.AsyncComponentEventListener); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(map[string]common.AsyncComponentEventListener)
+		}
+	}
+
+	return r0
+}
+
 // InstanceId provides a mock function with given fields:
 func (_m *Pipeline) InstanceId() string {
 	ret := _m.Called()
@@ -43,6 +59,11 @@ func (_m *Pipeline) RuntimeContext() common.PipelineRuntimeContext {
 	}
 
 	return r0
+}
+
+// SetAsyncListenerMap provides a mock function with given fields: _a0
+func (_m *Pipeline) SetAsyncListenerMap(_a0 map[string]common.AsyncComponentEventListener) {
+	_m.Called(_a0)
 }
 
 // SetProgressRecorder provides a mock function with given fields: recorder

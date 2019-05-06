@@ -882,6 +882,13 @@ func IntMax(x, y int) int {
 	return y
 }
 
+func Uint64ToInt64(x uint64) int64 {
+	if x >= math.MaxInt64 {
+		return math.MaxInt64
+	}
+	return int64(x)
+}
+
 // construct vb->server map for the vbs in vbList using server->vbList map
 func ConstructVbServerMap(vbList []uint16, serverVbMap map[string][]uint16) map[uint16]string {
 	vbServerMap := make(map[uint16]string)

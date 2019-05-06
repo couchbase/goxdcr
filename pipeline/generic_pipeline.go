@@ -586,16 +586,17 @@ func addConnectorToMap(connector common.Connector, connectorsMap map[string]comm
 // This is the only time when genericPipeline.asyncEventListenerMap is initialized/modified, when concurrent access is not possible.
 // Hence there are no real concurrency issues.
 func GetAllAsyncComponentEventListeners(p common.Pipeline) map[string]common.AsyncComponentEventListener {
-	genericPipeline := p.(*GenericPipeline)
-	if genericPipeline.asyncEventListenerMap == nil {
-		genericPipeline.asyncEventListenerMap = make(map[string]common.AsyncComponentEventListener)
+	asyncListenerMap := p.GetAsyncListenerMap()
+	if asyncListenerMap == nil {
+		asyncListenerMap = make(map[string]common.AsyncComponentEventListener)
 		partsMap := make(map[string]common.Part)
 		// add async listeners on parts and connectors to listeners map
-		for _, source := range genericPipeline.Sources() {
-			addAsyncListenersToMap(source, genericPipeline.asyncEventListenerMap, partsMap)
+		for _, source := range p.Sources() {
+			addAsyncListenersToMap(source, asyncListenerMap, partsMap)
 		}
+		p.SetAsyncListenerMap(asyncListenerMap)
 	}
-	return genericPipeline.asyncEventListenerMap
+	return asyncListenerMap
 }
 
 // Modifies and adds to "listenersMap"
@@ -867,6 +868,15 @@ func isUpdateNeeded(existing_vb_err_map_obj *base.ObjectWithLock, vb_err_map map
 		}
 	}
 	return false
+}
+
+// Should avoid concurrent use
+func (genericPipeline *GenericPipeline) GetAsyncListenerMap() map[string]common.AsyncComponentEventListener {
+	return genericPipeline.asyncEventListenerMap
+}
+
+func (genericPipeline *GenericPipeline) SetAsyncListenerMap(asyncListenerMap map[string]common.AsyncComponentEventListener) {
+	genericPipeline.asyncEventListenerMap = asyncListenerMap
 }
 
 //enforcer for GenericPipeline to implement Pipeline

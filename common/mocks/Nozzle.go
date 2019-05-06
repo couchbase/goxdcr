@@ -130,6 +130,22 @@ func (_m *Nozzle) RegisterComponentEventListener(eventType common.ComponentEvent
 	return r0
 }
 
+// ResponsibleVBs provides a mock function with given fields:
+func (_m *Nozzle) ResponsibleVBs() []uint16 {
+	ret := _m.Called()
+
+	var r0 []uint16
+	if rf, ok := ret.Get(0).(func() []uint16); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]uint16)
+		}
+	}
+
+	return r0
+}
+
 // SetConnector provides a mock function with given fields: connector
 func (_m *Nozzle) SetConnector(connector common.Connector) error {
 	ret := _m.Called(connector)

@@ -813,6 +813,8 @@ type XmemNozzle struct {
 	// since such access can only happen after Start() has completed successfully
 	// and after the data members have been initialized and set
 	stateLock sync.RWMutex
+
+	vbList []uint16
 }
 
 func NewXmemNozzle(id string,
@@ -830,7 +832,8 @@ func NewXmemNozzle(id string,
 	dataObj_recycler base.DataObjRecycler,
 	source_cr_mode base.ConflictResolutionMode,
 	logger_context *log.LoggerContext,
-	utilsIn utilities.UtilsIface) *XmemNozzle {
+	utilsIn utilities.UtilsIface,
+	vbList []uint16) *XmemNozzle {
 
 	part := NewAbstractPartWithLogger(id, log.NewLogger("XmemNozzle", logger_context))
 
@@ -860,6 +863,7 @@ func NewXmemNozzle(id string,
 		sourceBucketName:    sourceBucketName,
 		targetBucketUuid:    targetBucketUuid,
 		utils:               utilsIn,
+		vbList:              vbList,
 	}
 
 	xmem.last_ten_batches_size = []uint32{0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
@@ -3042,4 +3046,8 @@ func (xmem *XmemNozzle) getClientWithRetry(xmem_id string, pool base.ConnPool, f
 		return nil, fmt.Errorf("%v getClientWithRetry returned wrong type of client", xmem_id)
 	}
 	return client, nil
+}
+
+func (xmem *XmemNozzle) ResponsibleVBs() []uint16 {
+	return xmem.vbList
 }

@@ -290,9 +290,12 @@ func (xdcrf *XDCRFactory) registerAsyncListenersOnSources(pipeline common.Pipeli
 			dcp_part.RegisterComponentEventListener(common.DataReceived, data_received_event_listener)
 			dcp_part.RegisterComponentEventListener(common.DataProcessed, data_processed_event_listener)
 
-			// For filtering event, register the event ON the router itself to let the router take care of it
+			dcp_part.RegisterComponentEventListener(common.DataFiltered, data_filtered_event_listener)
+			dcp_part.RegisterComponentEventListener(common.DataUnableToFilter, data_filtered_event_listener)
+
 			conn := dcp_part.Connector()
 			conn.RegisterComponentEventListener(common.DataFiltered, data_filtered_event_listener)
+			conn.RegisterComponentEventListener(common.DataUnableToFilter, data_filtered_event_listener)
 			conn.RegisterComponentEventListener(common.DataThroughputThrottled, data_throughput_throttled_event_listener)
 		}
 	}
@@ -520,7 +523,7 @@ func (xdcrf *XDCRFactory) constructOutgoingNozzles(spec *metadata.ReplicationSpe
 				}
 			} else {
 				connSize := numOfOutNozzles * 2
-				outNozzle = xdcrf.constructXMEMNozzle(spec.Id, spec.TargetClusterUUID, kvaddr, spec.SourceBucketName, spec.TargetBucketName, spec.TargetBucketUUID, targetUserName, targetPassword, i, connSize, sourceCRMode, targetBucketInfo, logger_ctx)
+				outNozzle = xdcrf.constructXMEMNozzle(spec.Id, spec.TargetClusterUUID, kvaddr, spec.SourceBucketName, spec.TargetBucketName, targetUserName, targetPassword, i, connSize, sourceCRMode, targetBucketInfo, logger_ctx, vbList)
 			}
 
 			// Add the created nozzle to the collective map of outNozzles to be returned
@@ -587,11 +590,12 @@ func (xdcrf *XDCRFactory) constructXMEMNozzle(topic string,
 	connPoolSize int,
 	sourceCRMode base.ConflictResolutionMode,
 	targetBucketInfo map[string]interface{},
-	logger_ctx *log.LoggerContext) common.Nozzle {
+	logger_ctx *log.LoggerContext,
+	vbList []uint16) common.Nozzle {
 	// partIds of the xmem nozzles look like "xmem_$topic_$kvaddr_1"
 	xmemNozzle_Id := xdcrf.partId(XMEM_NOZZLE_NAME_PREFIX, topic, kvaddr, nozzle_index)
-	nozzle := parts.NewXmemNozzle(xmemNozzle_Id, xdcrf.remote_cluster_svc, targetClusterUuid, topic, topic, connPoolSize, kvaddr, sourceBucketName, targetBucketName, targetBucketUuid,
-		username, password, pipeline_manager.RecycleMCRequestObj, sourceCRMode, logger_ctx, xdcrf.utils)
+	nozzle := parts.NewXmemNozzle(xmemNozzle_Id, xdcrf.remote_cluster_svc, targetClusterUuid, topic, topic, connPoolSize, kvaddr, sourceBucketName, targetBucketName,
+		username, password, pipeline_manager.RecycleMCRequestObj, sourceCRMode, logger_ctx, xdcrf.utils, vbList)
 	return nozzle
 }
 
@@ -622,7 +626,7 @@ func (xdcrf *XDCRFactory) constructCAPINozzle(topic string,
 	xdcrf.logger.Debugf("Construct CapiNozzle: topic=%s, kvaddr=%s", topic, capiConnectionStr)
 	// partIds of the capi nozzles look like "capi_$topic_$kvaddr_1"
 	capiNozzle_Id := xdcrf.partId(CAPI_NOZZLE_NAME_PREFIX, topic, capiConnectionStr, nozzle_index)
-	nozzle := parts.NewCapiNozzle(capiNozzle_Id, topic, capiConnectionStr, username, password, certificate, subVBCouchApiBaseMap, pipeline_manager.RecycleMCRequestObj, logger_ctx, xdcrf.utils)
+	nozzle := parts.NewCapiNozzle(capiNozzle_Id, topic, capiConnectionStr, username, password, certificate, subVBCouchApiBaseMap, pipeline_manager.RecycleMCRequestObj, logger_ctx, xdcrf.utils, vbList)
 	return nozzle, nil
 }
 
@@ -867,25 +871,27 @@ func (xdcrf *XDCRFactory) registerServices(pipeline common.Pipeline, logger_ctx 
 	through_seqno_tracker_svc := service_impl.NewThroughSeqnoTrackerSvc(logger_ctx)
 	through_seqno_tracker_svc.Attach(pipeline)
 
+	//register pipeline statistics manager
+	bucket_name := pipeline.Specification().SourceBucketName
+	actualStatsMgr := pipeline_svc.NewStatisticsManager(through_seqno_tracker_svc, xdcrf.cluster_info_svc,
+		xdcrf.xdcr_topology_svc, logger_ctx, kv_vb_map, bucket_name, xdcrf.utils)
+	err = ctx.RegisterService(base.STATISTICS_MGR_SVC, actualStatsMgr)
+	if err != nil {
+		return err
+	}
+
 	//register pipeline checkpoint manager
 	ckptMgr, err := pipeline_svc.NewCheckpointManager(xdcrf.checkpoint_svc, xdcrf.capi_svc,
 		xdcrf.remote_cluster_svc, xdcrf.repl_spec_svc, xdcrf.cluster_info_svc,
 		xdcrf.xdcr_topology_svc, through_seqno_tracker_svc, kv_vb_map, targetUserName,
 		targetPassword, targetBucketName, target_kv_vb_map, targetClusterRef,
-		targetClusterVersion, isTargetES, logger_ctx, xdcrf.utils)
+		targetClusterVersion, isTargetES, logger_ctx, xdcrf.utils, actualStatsMgr)
 	if err != nil {
 		xdcrf.logger.Errorf("Failed to construct CheckpointManager for %v. err=%v ckpt_svc=%v, capi_svc=%v, remote_cluster_svc=%v, repl_spec_svc=%v\n", pipeline.Topic(), err, xdcrf.checkpoint_svc, xdcrf.capi_svc,
 			xdcrf.remote_cluster_svc, xdcrf.repl_spec_svc)
 		return err
 	}
 	err = ctx.RegisterService(base.CHECKPOINT_MGR_SVC, ckptMgr)
-	if err != nil {
-		return err
-	}
-	//register pipeline statistics manager
-	bucket_name := pipeline.Specification().SourceBucketName
-	err = ctx.RegisterService(base.STATISTICS_MGR_SVC, pipeline_svc.NewStatisticsManager(through_seqno_tracker_svc, xdcrf.cluster_info_svc,
-		xdcrf.xdcr_topology_svc, logger_ctx, kv_vb_map, bucket_name, xdcrf.utils))
 	if err != nil {
 		return err
 	}

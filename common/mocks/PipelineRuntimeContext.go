@@ -1,5 +1,6 @@
 package mocks
 
+import base "github.com/couchbase/goxdcr/base"
 import common "github.com/couchbase/goxdcr/common"
 import metadata "github.com/couchbase/goxdcr/metadata"
 import mock "github.com/stretchr/testify/mock"
@@ -70,14 +71,16 @@ func (_m *PipelineRuntimeContext) Start(_a0 metadata.ReplicationSettingsMap) err
 }
 
 // Stop provides a mock function with given fields:
-func (_m *PipelineRuntimeContext) Stop() error {
+func (_m *PipelineRuntimeContext) Stop() base.ErrorMap {
 	ret := _m.Called()
 
-	var r0 error
-	if rf, ok := ret.Get(0).(func() error); ok {
+	var r0 base.ErrorMap
+	if rf, ok := ret.Get(0).(func() base.ErrorMap); ok {
 		r0 = rf()
 	} else {
-		r0 = ret.Error(0)
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(base.ErrorMap)
+		}
 	}
 
 	return r0

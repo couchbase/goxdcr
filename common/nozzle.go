@@ -32,4 +32,7 @@ type Nozzle interface {
 
 	//IsOpen returns true if the nozzle is open; returns false if the nozzle is closed
 	IsOpen() bool
+
+	// Returns a list of its responsible VBs (Read-only)
+	ResponsibleVBs() []uint16
 }

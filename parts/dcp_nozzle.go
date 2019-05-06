@@ -1482,3 +1482,7 @@ func (dcp *DcpNozzle) getDcpDataChanLen() {
 	dcp.RaiseEvent(common.NewEvent(common.StatsUpdate, nil, dcp, nil, dcp_dispatch_len))
 
 }
+
+func (dcp *DcpNozzle) ResponsibleVBs() []uint16 {
+	return dcp.vbnos
+}

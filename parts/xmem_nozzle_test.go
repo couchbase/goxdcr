@@ -21,10 +21,11 @@ func setupBoilerPlateXmem() (*utilsMock.UtilsIface,
 
 	utilitiesMock := &utilsMock.UtilsIface{}
 	dummyDataObjRecycler := func(string, *base.WrappedMCRequest) {}
+	vbList := []uint16{0, 1, 2}
 
 	xmemNozzle := NewXmemNozzle("testId", nil, "", "testTopic", "testConnPoolNamePrefix", 5, /* connPoolConnSize*/
 		"testConnectString", "testSourceBucket", "testTargetBucket", "testTargetBucketUuid", "testUserName", "testPw",
-		dummyDataObjRecycler, base.CRMode_RevId, log.DefaultLoggerContext, utilitiesMock)
+		dummyDataObjRecycler, base.CRMode_RevId, log.DefaultLoggerContext, utilitiesMock, vbList)
 
 	// settings map
 	settingsMap := make(map[string]interface{})

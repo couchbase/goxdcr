@@ -194,6 +194,8 @@ type CapiNozzle struct {
 	// stores a list of last sent batches in the form of []*BatchInfo
 	last_sent_batches      []*BatchInfo
 	last_sent_batches_lock sync.RWMutex
+
+	vbList []uint16
 }
 
 type BatchInfo struct {
@@ -210,7 +212,8 @@ func NewCapiNozzle(id string,
 	vbCouchApiBaseMap map[uint16]string,
 	dataObj_recycler base.DataObjRecycler,
 	logger_context *log.LoggerContext,
-	utilsIn utilities.UtilsIface) *CapiNozzle {
+	utilsIn utilities.UtilsIface,
+	vbList []uint16) *CapiNozzle {
 
 	part := NewAbstractPartWithLogger(id, log.NewLogger("CapiNozzle", logger_context))
 
@@ -231,6 +234,7 @@ func NewCapiNozzle(id string,
 		dataObj_recycler:  dataObj_recycler,
 		topic:             topic,
 		utils:             utilsIn,
+		vbList:            vbList,
 	}
 
 	capi.last_sent_batches = make([]*BatchInfo, BatchHistorySize)
@@ -1326,4 +1330,8 @@ func (capi *CapiNozzle) getLastSentBatches() string {
 	}
 	buffer.WriteByte(']')
 	return buffer.String()
+}
+
+func (capi *CapiNozzle) ResponsibleVBs() []uint16 {
+	return capi.vbList
 }

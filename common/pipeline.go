@@ -55,4 +55,7 @@ type Pipeline interface {
 	ReportProgress(progress string)
 
 	UpdateSettings(settings metadata.ReplicationSettingsMap) error
+
+	GetAsyncListenerMap() map[string]AsyncComponentEventListener
+	SetAsyncListenerMap(map[string]AsyncComponentEventListener)
 }

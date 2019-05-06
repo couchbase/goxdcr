@@ -15,6 +15,8 @@ const (
 	TargetSeqno         string = "target_seqno"
 	TargetVbUuid        string = "target_vb_uuid"
 	StartUpTime         string = "startup_time"
+	FilteredCnt         string = "filtered_items_cnt"
+	FilteredFailedCnt   string = "filtered_failed_cnt"
 )
 
 type CheckpointRecord struct {
@@ -30,6 +32,22 @@ type CheckpointRecord struct {
 	Target_vb_opaque TargetVBOpaque `json:"target_vb_opaque"`
 	//target vb high sequence number
 	Target_Seqno uint64 `json:"target_seqno"`
+	// Number of items filtered
+	Filtered_Items_Cnt uint64 `json:"filtered_items_cnt"`
+	// Number of items failed filter
+	Filtered_Failed_Cnt uint64 `json:"filtered_failed_cnt"`
+}
+
+func NewCheckpointRecord(failoverUuid, seqno, dcpSnapSeqno, dcpSnapEnd, targetSeqno, filteredItems, filterFailed uint64) *CheckpointRecord {
+	return &CheckpointRecord{
+		Failover_uuid:          failoverUuid,
+		Seqno:                  seqno,
+		Dcp_snapshot_seqno:     dcpSnapSeqno,
+		Dcp_snapshot_end_seqno: dcpSnapEnd,
+		Target_Seqno:           targetSeqno,
+		Filtered_Items_Cnt:     filteredItems,
+		Filtered_Failed_Cnt:    filterFailed,
+	}
 }
 
 func (ckptRecord *CheckpointRecord) IsSame(new_record *CheckpointRecord) bool {
@@ -44,12 +62,29 @@ func (ckptRecord *CheckpointRecord) IsSame(new_record *CheckpointRecord) bool {
 		ckptRecord.Dcp_snapshot_seqno == new_record.Dcp_snapshot_seqno &&
 		ckptRecord.Dcp_snapshot_end_seqno == new_record.Dcp_snapshot_end_seqno &&
 		ckptRecord.Target_vb_opaque.IsSame(new_record.Target_vb_opaque) &&
-		ckptRecord.Target_Seqno == new_record.Target_Seqno {
+		ckptRecord.Target_Seqno == new_record.Target_Seqno &&
+		ckptRecord.Filtered_Failed_Cnt == new_record.Filtered_Failed_Cnt &&
+		ckptRecord.Filtered_Items_Cnt == new_record.Filtered_Items_Cnt {
 		return true
 	} else {
 		return false
 	}
 }
+
+// Loads each value individually minus the opaque
+func (ckptRecord *CheckpointRecord) Load(other *CheckpointRecord) {
+	if ckptRecord == nil || other == nil {
+		return
+	}
+	ckptRecord.Failover_uuid = other.Failover_uuid
+	ckptRecord.Seqno = other.Seqno
+	ckptRecord.Dcp_snapshot_seqno = other.Dcp_snapshot_seqno
+	ckptRecord.Dcp_snapshot_end_seqno = other.Dcp_snapshot_end_seqno
+	ckptRecord.Target_Seqno = other.Target_Seqno
+	ckptRecord.Filtered_Items_Cnt = other.Filtered_Items_Cnt
+	ckptRecord.Filtered_Failed_Cnt = other.Filtered_Failed_Cnt
+}
+
 func (ckptRecord *CheckpointRecord) UnmarshalJSON(data []byte) error {
 	var fieldMap map[string]interface{}
 	err := json.Unmarshal(data, &fieldMap)
@@ -90,6 +125,16 @@ func (ckptRecord *CheckpointRecord) UnmarshalJSON(data []byte) error {
 			return err
 		}
 		ckptRecord.Target_vb_opaque = target_vb_opaque_obj
+	}
+
+	filteredCnt, ok := fieldMap[FilteredCnt]
+	if ok {
+		ckptRecord.Filtered_Items_Cnt = uint64(filteredCnt.(float64))
+	}
+
+	filteredFailedCnt, ok := fieldMap[FilteredFailedCnt]
+	if ok {
+		ckptRecord.Filtered_Failed_Cnt = uint64(filteredFailedCnt.(float64))
 	}
 
 	return nil
