@@ -2643,12 +2643,16 @@ func (u *Utilities) getDefaultPoolInfoUsingHttps(hostHttpsAddr, username, passwo
 			err, statusCode = u.QueryRestApiWithAuth(hostHttpsAddr, base.DefaultPoolPath, false, username, password, base.HttpAuthMechHttps, certificate, false /*sanInCertificate*/, clientCertificate, clientKey, base.MethodGet, "", nil, base.ShortHttpTimeout, &defaultPoolInfo, nil, false, logger)
 			if err == nil && statusCode == http.StatusOK {
 				return defaultPoolInfo, nil
+			} else if statusCode == http.StatusUnauthorized {
+				return nil, u.getUnauthorizedError(username)
 			} else {
 				// if the second try still fails, return error
-				return nil, fmt.Errorf("Failed to retrieve secruity settings from host=%v, err=%v, statusCode=%v %v", hostHttpsAddr, err, statusCode, u.getAdditionalErrorMessage(statusCode, username))
+				return nil, fmt.Errorf("Failed to retrieve secruity settings from host=%v, err=%v, statusCode=%v", hostHttpsAddr, err, statusCode)
 			}
+		} else if statusCode == http.StatusUnauthorized {
+			return nil, u.getUnauthorizedError(username)
 		} else {
-			return nil, fmt.Errorf("Failed to retrieve secruity settings from host=%v, err=%v, statusCode=%v %v", hostHttpsAddr, err, statusCode, u.getAdditionalErrorMessage(statusCode, username))
+			return nil, fmt.Errorf("Failed to retrieve secruity settings from host=%v, err=%v, statusCode=%v", hostHttpsAddr, err, statusCode)
 		}
 	}
 }
@@ -2716,19 +2720,15 @@ func (u *Utilities) ReplaceCouchApiBaseObjWithExternals(couchApiBase string, nod
 	return couchApiBase
 }
 
-func (u *Utilities) getAdditionalErrorMessage(statusCode int, username string) string {
-	errMsg := ""
-	if statusCode == http.StatusUnauthorized {
-		errMsg = "(Received unauthorized error from target. Please double check user credentials."
-		// if username has not been specified [implying that client certificate has been provided and is being used]
-		// unauthorized error could also be returned if target has client cert auth setting set to disable
-		if len(username) == 0 {
-			errMsg += " Since client certificate is being used, please ensure that target is version 5.5 and up and has client certificate authentication setting set to \"enable\" or \"mandatory\".)"
-		} else {
-			errMsg += ")"
-		}
+func (u *Utilities) getUnauthorizedError(username string) error {
+	errMsg := "Received unauthorized error from target. Please double check user credentials."
+	// if username has not been specified [implying that client certificate has been provided and is being used]
+	// unauthorized error could also be returned if target has client cert auth setting set to disable
+	if len(username) == 0 {
+		errMsg += " Since client certificate is being used, please ensure that target is version 5.5 and up and has client certificate authentication setting set to \"enable\" or \"mandatory\"."
 	}
-	return errMsg
+
+	return errors.New(errMsg)
 }
 
 func decompressSnappyBody(incomingBody, key []byte, dp DataPoolIface, slicesToBeReleased *[][]byte) ([]byte, error, string, int64, int) {
