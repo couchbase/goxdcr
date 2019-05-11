@@ -27,6 +27,7 @@ import (
 	"github.com/couchbase/goxdcr/service_def"
 	utilities "github.com/couchbase/goxdcr/utils"
 	"github.com/rcrowley/go-metrics"
+	"sort"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -140,10 +141,14 @@ var OverviewMetricKeys = []string{CHANGES_LEFT_METRIC, DOCS_CHECKED_METRIC, DOCS
 // Stats per vbucket
 type VBCountMetricMap map[string]int64
 
+var VBMetricKeys = []string{DOCS_FILTERED_METRIC, DOCS_UNABLE_TO_FILTER_METRIC}
+
 func MakeVBCountMetricMap() VBCountMetricMap {
-	return VBCountMetricMap{
-		DOCS_FILTERED_METRIC:         0,
-		DOCS_UNABLE_TO_FILTER_METRIC: 0}
+	newMap := make(VBCountMetricMap)
+	for _, key := range VBMetricKeys {
+		newMap[key] = 0
+	}
+	return newMap
 }
 
 var VBCountMetrics = MakeVBCountMetricMap()
@@ -235,6 +240,7 @@ type StatsMgrIface interface {
 	GetCountMetrics(key string) (int64, error)
 	GetVBCountMetrics(vb uint16) (VBCountMetricMap, error)
 	SetVBCountMetrics(vb uint16, metricKVs VBCountMetricMap) error
+	HandleLatestThroughSeqnos(SeqnoMap map[uint16]uint64)
 }
 
 func NewStatisticsManager(through_seqno_tracker_svc service_def.ThroughSeqnoTrackerSvc,
@@ -918,6 +924,8 @@ func (stats_mgr *StatisticsManager) UpdateSettings(settings metadata.Replication
 
 type MetricsCollector interface {
 	Mount(pipeline common.Pipeline, stats_mgr *StatisticsManager) error
+	OnEvent(event *common.Event)
+	HandleLatestThroughSeqnos(SeqnoMap map[uint16]uint64)
 }
 
 //metrics collector for XMem/CapiNozzle
@@ -1010,6 +1018,11 @@ func (outNozzle_collector *outNozzleCollector) Id() string {
 
 func (outNozzle_collector *outNozzleCollector) OnEvent(event *common.Event) {
 	outNozzle_collector.ProcessEvent(event)
+}
+
+func (outNozzleCollector *outNozzleCollector) HandleLatestThroughSeqnos(SeqnoMap map[uint16]uint64) {
+	// Nothing
+	return
 }
 
 func (outNozzle_collector *outNozzleCollector) ProcessEvent(event *common.Event) error {
@@ -1135,6 +1148,10 @@ func (dcp_collector *dcpCollector) OnEvent(event *common.Event) {
 	dcp_collector.ProcessEvent(event)
 }
 
+func (dcp_collector *dcpCollector) HandleLatestThroughSeqnos(SeqnoMap map[uint16]uint64) {
+	// Do nothing
+}
+
 func (dcp_collector *dcpCollector) ProcessEvent(event *common.Event) error {
 	metric_map := dcp_collector.component_map[event.Component.Id()]
 	switch event.EventType {
@@ -1163,6 +1180,45 @@ func (dcp_collector *dcpCollector) ProcessEvent(event *common.Event) error {
 	return nil
 }
 
+type vbBasedThroughSeqnoHelper struct {
+	id       string
+	statsMgr *StatisticsManager
+
+	// These are sorted because DCP streams send seqno in an increasing order
+	sortedSeqnoListMap map[string]*base.SortedSeqnoListWithLock
+}
+
+func newVbBasedThroughSeqnoHelper(id string, statsMgr *StatisticsManager) *vbBasedThroughSeqnoHelper {
+	helper := &vbBasedThroughSeqnoHelper{
+		id:                 id,
+		statsMgr:           statsMgr,
+		sortedSeqnoListMap: make(map[string]*base.SortedSeqnoListWithLock),
+	}
+
+	for _, key := range VBMetricKeys {
+		helper.sortedSeqnoListMap[key] = base.NewSortedSeqnoListWithLock()
+	}
+	return helper
+}
+
+func (vbh *vbBasedThroughSeqnoHelper) handleIncomingSeqno(seqno uint64, metricKey string) {
+	vbh.sortedSeqnoListMap[metricKey].AppendSeqno(seqno)
+}
+
+func (vbh *vbBasedThroughSeqnoHelper) mergeWithMetrics(metricsMap map[string]interface{}, latestSeqno uint64) {
+	for _, key := range VBMetricKeys {
+		sortedList := vbh.sortedSeqnoListMap[key].GetSortedSeqnoList(false)
+		// Figure out how many count are to be committed to metrics
+		i := sort.Search(len(sortedList), func(i int) bool {
+			return sortedList[i] > latestSeqno
+		})
+		metricsMap[key].(metrics.Counter).Inc(int64(i))
+
+		// Clear incremented count from staging areas
+		vbh.sortedSeqnoListMap[key].TruncateSeqnos(latestSeqno)
+	}
+}
+
 //metrics collector for Router
 type routerCollector struct {
 	id        string
@@ -1178,6 +1234,9 @@ type routerCollector struct {
 
 	// A map of vb-> routerIDs
 	routerVbsIdMap map[uint16]string
+
+	// Helpers to ensure that stored filter metrics are correct
+	vbBasedHelper map[uint16]*vbBasedThroughSeqnoHelper
 }
 
 func (r_collector *routerCollector) Mount(pipeline common.Pipeline, stats_mgr *StatisticsManager) error {
@@ -1186,6 +1245,7 @@ func (r_collector *routerCollector) Mount(pipeline common.Pipeline, stats_mgr *S
 	r_collector.component_map = make(map[string]map[string]interface{})
 	r_collector.vbBasedMetric = make(map[uint16]map[string]interface{})
 	r_collector.routerVbsIdMap = make(map[uint16]string)
+	r_collector.vbBasedHelper = make(map[uint16]*vbBasedThroughSeqnoHelper)
 	dcp_parts := pipeline.Sources()
 	for _, dcp_part := range dcp_parts {
 		//get connector
@@ -1223,6 +1283,7 @@ func (r_collector *routerCollector) Mount(pipeline common.Pipeline, stats_mgr *S
 		for _, i := range listOfVbs {
 			r_collector.routerVbsIdMap[i] = conn.Id()
 			metricsMap := make(map[string]interface{})
+			r_collector.vbBasedHelper[i] = newVbBasedThroughSeqnoHelper(fmt.Sprintf("%v:%v", r_collector.Id(), i), r_collector.stats_mgr)
 			for k, _ := range VBCountMetrics {
 				metricsMap[k] = metrics.NewCounter()
 				metrics.Register(fmt.Sprintf("%v:%v", conn.Id(), i), metricsMap[k])
@@ -1252,16 +1313,45 @@ func (r_collector *routerCollector) handleVBEvent(event *common.Event, metricKey
 	case DOCS_UNABLE_TO_FILTER_METRIC:
 		uprEvent := event.Data.(*mcc.UprEvent)
 		vbucket := uprEvent.VBucket
-		metricMap, ok := r_collector.vbBasedMetric[vbucket]
+		seqno := uprEvent.Seqno
+		helper, ok := r_collector.vbBasedHelper[vbucket]
 		if !ok {
 			return base.ErrorNotMyVbucket
 		}
-		// NOTE - this won't be an issue with the later Changelist changes. Not locking for now
-		metricMap[metricKey].(metrics.Counter).Inc(1)
+		helper.handleIncomingSeqno(seqno, metricKey)
 		return nil
 	default:
 		return base.ErrorInvalidInput
 	}
+}
+
+func (r_collector *routerCollector) OnEvent(event *common.Event) {
+	r_collector.ProcessEvent(event)
+}
+
+func (r_collector *routerCollector) HandleLatestThroughSeqnos(SeqnoMap map[uint16]uint64) {
+	var waitGrp sync.WaitGroup
+
+	for vb, _ := range r_collector.vbBasedMetric {
+		waitGrp.Add(1)
+		go r_collector.handleLatestThroughSeqnoForVb(vb, SeqnoMap[vb], &waitGrp)
+	}
+
+	waitGrp.Wait()
+}
+
+func (r_collector *routerCollector) handleLatestThroughSeqnoForVb(vb uint16, latestSeqno uint64, waitGrp *sync.WaitGroup) {
+	defer waitGrp.Done()
+	metricsMap, ok := r_collector.vbBasedMetric[vb]
+	if !ok {
+		return
+	}
+	vbHelper, ok := r_collector.vbBasedHelper[vb]
+	if !ok {
+		return
+	}
+
+	vbHelper.mergeWithMetrics(metricsMap, latestSeqno)
 }
 
 func (r_collector *routerCollector) ProcessEvent(event *common.Event) error {
@@ -1336,6 +1426,10 @@ func (ckpt_collector *checkpointMgrCollector) initRegistry() {
 	registry_ckpt.Register(NUM_CHECKPOINTS_METRIC, metrics.NewCounter())
 	registry_ckpt.Register(NUM_FAILEDCKPTS_METRIC, metrics.NewCounter())
 
+}
+
+func (ckpt_collector *checkpointMgrCollector) HandleLatestThroughSeqnos(SeqnoMap map[uint16]uint64) {
+	// Do nothing
 }
 
 func (ckpt_collector *checkpointMgrCollector) OnEvent(event *common.Event) {
@@ -1620,4 +1714,10 @@ func (stats_mgr *StatisticsManager) SetVBCountMetrics(vb uint16, metricKVs VBCou
 	}
 
 	return nil
+}
+
+func (statsMgr *StatisticsManager) HandleLatestThroughSeqnos(SeqnoMap map[uint16]uint64) {
+	for _, collector := range statsMgr.collectors {
+		collector.HandleLatestThroughSeqnos(SeqnoMap)
+	}
 }

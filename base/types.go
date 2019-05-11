@@ -576,3 +576,57 @@ func (xi *XattrIterator) Next() ([]byte, []byte, error) {
 
 	return key, value, nil
 }
+
+type SortedSeqnoListWithLock struct {
+	seqno_list []uint64
+	lock       *sync.RWMutex
+}
+
+func NewSortedSeqnoListWithLock() *SortedSeqnoListWithLock {
+	return &SortedSeqnoListWithLock{make([]uint64, 0), &sync.RWMutex{}}
+}
+
+// when needToSort is true, sort the internal seqno_list before returning it
+// sorting is needed only when seqno_list is not already sorted, which is the case only for sent_seqno_list
+// in other words, needToSort should be set to true only when operating on sent_seqno_list
+func (list_obj *SortedSeqnoListWithLock) GetSortedSeqnoList(needToSort bool) []uint64 {
+	if needToSort {
+		list_obj.lock.Lock()
+		defer list_obj.lock.Unlock()
+
+		SortUint64List(list_obj.seqno_list)
+		return DeepCopyUint64Array(list_obj.seqno_list)
+	} else {
+		list_obj.lock.RLock()
+		defer list_obj.lock.RUnlock()
+
+		return DeepCopyUint64Array(list_obj.seqno_list)
+	}
+}
+
+func (list_obj *SortedSeqnoListWithLock) GetLengthOfSeqnoList() int {
+	list_obj.lock.RLock()
+	defer list_obj.lock.RUnlock()
+
+	return len(list_obj.seqno_list)
+}
+
+// append seqno to the end of seqno_list
+func (list_obj *SortedSeqnoListWithLock) AppendSeqno(seqno uint64) {
+	list_obj.lock.Lock()
+	defer list_obj.lock.Unlock()
+	list_obj.seqno_list = append(list_obj.seqno_list, seqno)
+}
+
+// truncate all seqnos that are no larger than passed in through_seqno
+func (list_obj *SortedSeqnoListWithLock) TruncateSeqnos(through_seqno uint64) {
+	list_obj.lock.Lock()
+	defer list_obj.lock.Unlock()
+	seqno_list := list_obj.seqno_list
+	index, found := SearchUint64List(seqno_list, through_seqno)
+	if found {
+		list_obj.seqno_list = seqno_list[index+1:]
+	} else if index > 0 {
+		list_obj.seqno_list = seqno_list[index:]
+	}
+}

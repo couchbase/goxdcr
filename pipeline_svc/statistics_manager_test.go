@@ -190,7 +190,18 @@ func TestStatsMgrWithDCPCollector(t *testing.T) {
 	passedEvent.Component = fakeComponent
 	passedEvent.Data = uprEvent
 
-	routerCollector.ProcessEvent(passedEvent)
+	assert.Nil(routerCollector.ProcessEvent(passedEvent))
+
+	assert.Equal(1, routerCollector.vbBasedHelper[uprEvent.VBucket].sortedSeqnoListMap[DOCS_FILTERED_METRIC].GetLengthOfSeqnoList())
+	assert.Equal(int64(0), (routerCollector.vbBasedMetric[uprEvent.VBucket][DOCS_FILTERED_METRIC]).(metrics.Counter).Count())
+
+	seqnoCommitMap := make(map[uint16]uint64)
+	seqnoCommitMap[uprEvent.VBucket] = uprEvent.Seqno
+
+	assert.Equal(int64(0), (routerCollector.vbBasedMetric[uprEvent.VBucket][DOCS_FILTERED_METRIC]).(metrics.Counter).Count())
+	routerCollector.HandleLatestThroughSeqnos(seqnoCommitMap)
+	assert.Equal(int64(1), (routerCollector.vbBasedMetric[uprEvent.VBucket][DOCS_FILTERED_METRIC]).(metrics.Counter).Count())
+	assert.Equal(0, routerCollector.vbBasedHelper[uprEvent.VBucket].sortedSeqnoListMap[DOCS_FILTERED_METRIC].GetLengthOfSeqnoList())
 
 	metricsMap, err := statsMgr.GetVBCountMetrics(uprEvent.VBucket)
 	assert.Nil(err)

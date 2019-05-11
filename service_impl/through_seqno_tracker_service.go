@@ -40,16 +40,16 @@ type ThroughSeqnoTrackerSvc struct {
 	through_seqno_map map[uint16]*base.SeqnoWithLock
 
 	// stores for each vb a sorted list of the seqnos that have been sent to and confirmed by target
-	vb_sent_seqno_list_map map[uint16]*SortedSeqnoListWithLock
+	vb_sent_seqno_list_map map[uint16]*base.SortedSeqnoListWithLock
 
 	// Note: lists in the following two maps are treated in the same way in through_seqno computation
 	// they are maintained as two seperate lists because insertions into the lists are simpler
 	// and quicker this way - each insertion is simply an append to the end of the list
 
 	// stores for each vb a sorted list of seqnos that have been filtered out
-	vb_filtered_seqno_list_map map[uint16]*SortedSeqnoListWithLock
+	vb_filtered_seqno_list_map map[uint16]*base.SortedSeqnoListWithLock
 	// stores for each vb a sorted list of seqnos that have failed conflict resolution on source
-	vb_failed_cr_seqno_list_map map[uint16]*SortedSeqnoListWithLock
+	vb_failed_cr_seqno_list_map map[uint16]*base.SortedSeqnoListWithLock
 
 	// gap_seqno_list_1[i] stores the start seqno of the ith gap range
 	// gap_seqno_list_2[i] stores the end seqno of  the ith gap range
@@ -66,60 +66,6 @@ type ThroughSeqnoTrackerSvc struct {
 	rep_id string
 
 	logger *log.CommonLogger
-}
-
-type SortedSeqnoListWithLock struct {
-	seqno_list []uint64
-	lock       *sync.RWMutex
-}
-
-func newSortedSeqnoListWithLock() *SortedSeqnoListWithLock {
-	return &SortedSeqnoListWithLock{make([]uint64, 0), &sync.RWMutex{}}
-}
-
-// when needToSort is true, sort the internal seqno_list before returning it
-// sorting is needed only when seqno_list is not already sorted, which is the case only for sent_seqno_list
-// in other words, needToSort should be set to true only when operating on sent_seqno_list
-func (list_obj *SortedSeqnoListWithLock) getSortedSeqnoList(needToSort bool) []uint64 {
-	if needToSort {
-		list_obj.lock.Lock()
-		defer list_obj.lock.Unlock()
-
-		base.SortUint64List(list_obj.seqno_list)
-		return base.DeepCopyUint64Array(list_obj.seqno_list)
-	} else {
-		list_obj.lock.RLock()
-		defer list_obj.lock.RUnlock()
-
-		return base.DeepCopyUint64Array(list_obj.seqno_list)
-	}
-}
-
-func (list_obj *SortedSeqnoListWithLock) getLengthOfSeqnoList() int {
-	list_obj.lock.RLock()
-	defer list_obj.lock.RUnlock()
-
-	return len(list_obj.seqno_list)
-}
-
-// append seqno to the end of seqno_list
-func (list_obj *SortedSeqnoListWithLock) appendSeqno(seqno uint64, logger *log.CommonLogger) {
-	list_obj.lock.Lock()
-	defer list_obj.lock.Unlock()
-	list_obj.seqno_list = append(list_obj.seqno_list, seqno)
-}
-
-// truncate all seqnos that are no larger than passed in through_seqno
-func (list_obj *SortedSeqnoListWithLock) truncateSeqnos(through_seqno uint64) {
-	list_obj.lock.Lock()
-	defer list_obj.lock.Unlock()
-	seqno_list := list_obj.seqno_list
-	index, found := base.SearchUint64List(seqno_list, through_seqno)
-	if found {
-		list_obj.seqno_list = seqno_list[index+1:]
-	} else if index > 0 {
-		list_obj.seqno_list = seqno_list[index:]
-	}
 }
 
 // struct containing two seqno lists that need to be accessed and locked together
@@ -187,9 +133,9 @@ func NewThroughSeqnoTrackerSvc(logger_ctx *log.LoggerContext) *ThroughSeqnoTrack
 		vb_map:                      make(map[uint16]bool),
 		through_seqno_map:           make(map[uint16]*base.SeqnoWithLock),
 		vb_last_seen_seqno_map:      make(map[uint16]*base.SeqnoWithLock),
-		vb_sent_seqno_list_map:      make(map[uint16]*SortedSeqnoListWithLock),
-		vb_filtered_seqno_list_map:  make(map[uint16]*SortedSeqnoListWithLock),
-		vb_failed_cr_seqno_list_map: make(map[uint16]*SortedSeqnoListWithLock),
+		vb_sent_seqno_list_map:      make(map[uint16]*base.SortedSeqnoListWithLock),
+		vb_filtered_seqno_list_map:  make(map[uint16]*base.SortedSeqnoListWithLock),
+		vb_failed_cr_seqno_list_map: make(map[uint16]*base.SortedSeqnoListWithLock),
 		vb_gap_seqno_list_map:       make(map[uint16]*DualSortedSeqnoListWithLock),
 	}
 	return tsTracker
@@ -204,9 +150,9 @@ func (tsTracker *ThroughSeqnoTrackerSvc) initialize(pipeline common.Pipeline) {
 		tsTracker.through_seqno_map[vbno] = base.NewSeqnoWithLock()
 		tsTracker.vb_last_seen_seqno_map[vbno] = base.NewSeqnoWithLock()
 
-		tsTracker.vb_sent_seqno_list_map[vbno] = newSortedSeqnoListWithLock()
-		tsTracker.vb_filtered_seqno_list_map[vbno] = newSortedSeqnoListWithLock()
-		tsTracker.vb_failed_cr_seqno_list_map[vbno] = newSortedSeqnoListWithLock()
+		tsTracker.vb_sent_seqno_list_map[vbno] = base.NewSortedSeqnoListWithLock()
+		tsTracker.vb_filtered_seqno_list_map[vbno] = base.NewSortedSeqnoListWithLock()
+		tsTracker.vb_failed_cr_seqno_list_map[vbno] = base.NewSortedSeqnoListWithLock()
 		tsTracker.vb_gap_seqno_list_map[vbno] = newDualSortedSeqnoListWithLock()
 	}
 }
@@ -288,18 +234,18 @@ func (tsTracker *ThroughSeqnoTrackerSvc) ProcessEvent(event *common.Event) error
 
 func (tsTracker *ThroughSeqnoTrackerSvc) addSentSeqno(vbno uint16, sent_seqno uint64) {
 	tsTracker.validateVbno(vbno, "addSentSeqno")
-	tsTracker.vb_sent_seqno_list_map[vbno].appendSeqno(sent_seqno, tsTracker.logger)
+	tsTracker.vb_sent_seqno_list_map[vbno].AppendSeqno(sent_seqno)
 }
 
 func (tsTracker *ThroughSeqnoTrackerSvc) addFilteredSeqno(vbno uint16, filtered_seqno uint64) {
 	tsTracker.validateVbno(vbno, "addFilteredSeqno")
-	tsTracker.vb_filtered_seqno_list_map[vbno].appendSeqno(filtered_seqno, tsTracker.logger)
+	tsTracker.vb_filtered_seqno_list_map[vbno].AppendSeqno(filtered_seqno)
 }
 
 func (tsTracker *ThroughSeqnoTrackerSvc) addFailedCRSeqno(vbno uint16, failed_cr_seqno uint64) {
 	tsTracker.validateVbno(vbno, "addFailedCRSeqno")
 
-	tsTracker.vb_failed_cr_seqno_list_map[vbno].appendSeqno(failed_cr_seqno, tsTracker.logger)
+	tsTracker.vb_failed_cr_seqno_list_map[vbno].AppendSeqno(failed_cr_seqno)
 }
 
 func (tsTracker *ThroughSeqnoTrackerSvc) processGapSeqnos(vbno uint16, current_seqno uint64) {
@@ -323,9 +269,9 @@ func (tsTracker *ThroughSeqnoTrackerSvc) processGapSeqnos(vbno uint16, current_s
 }
 
 func (tsTracker *ThroughSeqnoTrackerSvc) truncateSeqnoLists(vbno uint16, through_seqno uint64) {
-	tsTracker.vb_sent_seqno_list_map[vbno].truncateSeqnos(through_seqno)
-	tsTracker.vb_filtered_seqno_list_map[vbno].truncateSeqnos(through_seqno)
-	tsTracker.vb_failed_cr_seqno_list_map[vbno].truncateSeqnos(through_seqno)
+	tsTracker.vb_sent_seqno_list_map[vbno].TruncateSeqnos(through_seqno)
+	tsTracker.vb_filtered_seqno_list_map[vbno].TruncateSeqnos(through_seqno)
+	tsTracker.vb_failed_cr_seqno_list_map[vbno].TruncateSeqnos(through_seqno)
 	tsTracker.vb_gap_seqno_list_map[vbno].truncateSeqnos(through_seqno)
 }
 
@@ -356,11 +302,11 @@ func (tsTracker *ThroughSeqnoTrackerSvc) GetThroughSeqno(vbno uint16) uint64 {
 	defer through_seqno_obj.Unlock()
 
 	last_through_seqno := through_seqno_obj.GetSeqnoWithoutLock()
-	sent_seqno_list := tsTracker.vb_sent_seqno_list_map[vbno].getSortedSeqnoList(true)
+	sent_seqno_list := tsTracker.vb_sent_seqno_list_map[vbno].GetSortedSeqnoList(true)
 	max_sent_seqno := maxSeqno(sent_seqno_list)
-	filtered_seqno_list := tsTracker.vb_filtered_seqno_list_map[vbno].getSortedSeqnoList(false)
+	filtered_seqno_list := tsTracker.vb_filtered_seqno_list_map[vbno].GetSortedSeqnoList(false)
 	max_filtered_seqno := maxSeqno(filtered_seqno_list)
-	failed_cr_seqno_list := tsTracker.vb_failed_cr_seqno_list_map[vbno].getSortedSeqnoList(false)
+	failed_cr_seqno_list := tsTracker.vb_failed_cr_seqno_list_map[vbno].GetSortedSeqnoList(false)
 	max_failed_cr_seqno := maxSeqno(failed_cr_seqno_list)
 	gap_seqno_list_1, gap_seqno_list_2 := tsTracker.vb_gap_seqno_list_map[vbno].getSortedSeqnoLists()
 	max_end_gap_seqno := maxSeqno(gap_seqno_list_2)
@@ -589,9 +535,9 @@ func (tsTracker *ThroughSeqnoTrackerSvc) PrintStatusSummary() {
 	start_time := time.Now()
 	var count, sum_sent, max_sent, sum_filtered, max_filtered, sum_failed_cr, max_failed_cr, sum_gap, max_gap int
 	for _, vbno := range tsTracker.getVbList() {
-		length_sent_seqno_list := tsTracker.vb_sent_seqno_list_map[vbno].getLengthOfSeqnoList()
-		length_filtered_seqno_list := tsTracker.vb_filtered_seqno_list_map[vbno].getLengthOfSeqnoList()
-		length_failed_cr_seqno_list := tsTracker.vb_failed_cr_seqno_list_map[vbno].getLengthOfSeqnoList()
+		length_sent_seqno_list := tsTracker.vb_sent_seqno_list_map[vbno].GetLengthOfSeqnoList()
+		length_filtered_seqno_list := tsTracker.vb_filtered_seqno_list_map[vbno].GetLengthOfSeqnoList()
+		length_failed_cr_seqno_list := tsTracker.vb_failed_cr_seqno_list_map[vbno].GetLengthOfSeqnoList()
 		length_gap_seqno_list := tsTracker.vb_gap_seqno_list_map[vbno].getLengthOfSeqnoLists()
 
 		count++

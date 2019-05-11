@@ -989,6 +989,8 @@ func (ckmgr *CheckpointManager) PerformCkpt(fin_ch chan bool) {
 	if !ckmgr.isTargetES {
 		// get through seqnos for all vbuckets in the pipeline
 		through_seqno_map = ckmgr.through_seqno_tracker_svc.GetThroughSeqnos()
+		// Let statsmgr know of the latest through seqno for it to prepare data for checkpointing
+		ckmgr.statsMgr.HandleLatestThroughSeqnos(through_seqno_map)
 		// get high seqno and vbuuid for all vbuckets in the pipeline
 		high_seqno_and_vbuuid_map = ckmgr.getHighSeqnoAndVBUuidFromTarget(fin_ch)
 		// get first seen xattr seqnos for all vbuckets in the pipeline
@@ -1038,6 +1040,8 @@ func (ckmgr *CheckpointManager) performCkpt(fin_ch chan bool, wait_grp *sync.Wai
 	if !ckmgr.isTargetES {
 		// get through seqnos for all vbuckets in the pipeline
 		through_seqno_map = ckmgr.through_seqno_tracker_svc.GetThroughSeqnos()
+		// Let statsmgr know of the latest through seqno for it to prepare data for checkpointing
+		ckmgr.statsMgr.HandleLatestThroughSeqnos(through_seqno_map)
 		// get high seqno and vbuuid for all vbuckets in the pipeline
 		high_seqno_and_vbuuid_map = ckmgr.getHighSeqnoAndVBUuidFromTarget(fin_ch)
 		// get first seen xattr seqnos for all vbuckets in the pipeline
@@ -1058,6 +1062,7 @@ func (ckmgr *CheckpointManager) performCkpt_internal(vb_list []uint16, fin_ch <-
 	if time_to_wait != 0 {
 		interval_btwn_vb = time.Duration((time_to_wait.Seconds()/float64(len(vb_list)))*1000) * time.Millisecond
 	}
+
 	ckmgr.logger.Infof("Checkpointing for replication %v, vb_list=%v, time_to_wait=%v, interval_btwn_vb=%v sec\n", ckmgr.pipeline.Topic(), vb_list, time_to_wait, interval_btwn_vb.Seconds())
 	err_map := make(map[uint16]error)
 
