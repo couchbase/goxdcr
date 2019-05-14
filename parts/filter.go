@@ -19,7 +19,12 @@ import (
 )
 
 type FilterIface interface {
-	FilterUprEvent(uprEvent *mcc.UprEvent) bool
+	// Returns:
+	// 1. bool - Whether or not it was a match
+	// 2. err code
+	// 3. If err is not nil, additional description
+	// 4. Total bytes of failed datapool gets - which means len of []byte alloc (garbage)
+	FilterUprEvent(uprEvent *mcc.UprEvent) (bool, error, string, int64)
 }
 
 type Filter struct {
