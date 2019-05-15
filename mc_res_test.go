@@ -192,11 +192,13 @@ func TestIsFatal(t *testing.T) {
 		is bool
 	}{
 		{nil, false},
-		{errors.New("something"), true},
-		{&MCResponse{}, true},
+		{errors.New("something"), false},
+		{&MCResponse{}, false},
 		{&MCResponse{Status: KEY_ENOENT}, false},
-		{&MCResponse{Status: EINVAL}, true},
+		{&MCResponse{Status: EINVAL}, false},
 		{&MCResponse{Status: TMPFAIL}, false},
+		{&MCResponse{Status: AUTH_ERROR}, true},
+		{&MCResponse{Status: NOT_SUPPORTED}, true},
 	}
 
 	for i, x := range tests {

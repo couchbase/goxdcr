@@ -146,9 +146,8 @@ func BenchmarkTransmitResNull(b *testing.B) {
 
 func TestMust(t *testing.T) {
 	must(nil)
-	errored := false
 	func() {
-		defer func() { _, errored = recover().(error) }()
+		defer func() { recover() }()
 		must(&gomemcached.MCResponse{})
 	}()
 }
