@@ -3006,9 +3006,9 @@ func (u *Utilities) ProcessUprEventForFiltering(uprEvent *mcc.UprEvent, dp DataP
 	// Second level simplify logic for needToProcessBody
 	filterReferencesBody := !filterIsKeyOnly
 	filterReferencesXattr := !shouldSkipXattr
-	uprEventHasParsableBody := bodyContainsXattr || dataTypeIsJson
 
-	needToProcessBody := uprEventHasParsableBody && (filterReferencesBody || filterReferencesXattr)
+	needToProcessBody := (filterReferencesBody && dataTypeIsJson) ||
+		(filterReferencesXattr && bodyContainsXattr)
 
 	if needToProcessBody {
 		if bodyIsCompressed {
