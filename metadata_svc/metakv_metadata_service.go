@@ -23,14 +23,16 @@ import (
 )
 
 type MetaKVMetadataSvc struct {
-	logger *log.CommonLogger
-	utils  utilities.UtilsIface
+	logger   *log.CommonLogger
+	utils    utilities.UtilsIface
+	readOnly bool
 }
 
-func NewMetaKVMetadataSvc(logger_ctx *log.LoggerContext, utilsIn utilities.UtilsIface) (*MetaKVMetadataSvc, error) {
+func NewMetaKVMetadataSvc(logger_ctx *log.LoggerContext, utilsIn utilities.UtilsIface, readOnly bool) (*MetaKVMetadataSvc, error) {
 	return &MetaKVMetadataSvc{
-		logger: log.NewLogger("MetadataSvc", logger_ctx),
-		utils:  utilsIn,
+		logger:   log.NewLogger("MetadataSvc", logger_ctx),
+		utils:    utilsIn,
+		readOnly: readOnly,
 	}, nil
 }
 
@@ -71,10 +73,16 @@ func (meta_svc *MetaKVMetadataSvc) Get(key string) ([]byte, interface{}, error) 
 }
 
 func (meta_svc *MetaKVMetadataSvc) Add(key string, value []byte) error {
+	if meta_svc.readOnly {
+		return nil
+	}
 	return meta_svc.add(key, value, false)
 }
 
 func (meta_svc *MetaKVMetadataSvc) AddSensitive(key string, value []byte) error {
+	if meta_svc.readOnly {
+		return nil
+	}
 	return meta_svc.add(key, value, true)
 }
 
@@ -131,20 +139,32 @@ func (meta_svc *MetaKVMetadataSvc) add(key string, value []byte, sensitive bool)
 }
 
 func (meta_svc *MetaKVMetadataSvc) AddWithCatalog(catalogKey, key string, value []byte) error {
+	if meta_svc.readOnly {
+		return nil
+	}
 	// ignore catalogKey
 	return meta_svc.Add(key, value)
 }
 
 func (meta_svc *MetaKVMetadataSvc) AddSensitiveWithCatalog(catalogKey, key string, value []byte) error {
+	if meta_svc.readOnly {
+		return nil
+	}
 	// ignore catalogKey
 	return meta_svc.AddSensitive(key, value)
 }
 
 func (meta_svc *MetaKVMetadataSvc) Set(key string, value []byte, rev interface{}) error {
+	if meta_svc.readOnly {
+		return nil
+	}
 	return meta_svc.set(key, value, rev, false)
 }
 
 func (meta_svc *MetaKVMetadataSvc) SetSensitive(key string, value []byte, rev interface{}) error {
+	if meta_svc.readOnly {
+		return nil
+	}
 	return meta_svc.set(key, value, rev, true)
 }
 
@@ -202,6 +222,9 @@ func (meta_svc *MetaKVMetadataSvc) set(key string, value []byte, rev interface{}
 //if the rev provided doesn't match with the rev metakv has, return service_def.ErrorRevisionMismatch
 //if metakv operation failed after max number of retries, return ErrorFailedAfterRetry
 func (meta_svc *MetaKVMetadataSvc) Del(key string, rev interface{}) error {
+	if meta_svc.readOnly {
+		return nil
+	}
 	var err error
 	start_time := time.Now()
 	defer meta_svc.logger.Debugf("Took %vs to delete %v from metakv\n", time.Since(start_time).Seconds(), key)
@@ -231,6 +254,9 @@ func (meta_svc *MetaKVMetadataSvc) Del(key string, rev interface{}) error {
 }
 
 func (meta_svc *MetaKVMetadataSvc) DelWithCatalog(catalogKey, key string, rev interface{}) error {
+	if meta_svc.readOnly {
+		return nil
+	}
 	// ignore catalogKey
 	return meta_svc.Del(key, rev)
 }
@@ -238,6 +264,9 @@ func (meta_svc *MetaKVMetadataSvc) DelWithCatalog(catalogKey, key string, rev in
 //Wrap metakv.RecursiveDelete with retries
 //if metakv operation failed after max number of retries, return ErrorFailedAfterRetry
 func (meta_svc *MetaKVMetadataSvc) DelAllFromCatalog(catalogKey string) error {
+	if meta_svc.readOnly {
+		return nil
+	}
 	start_time := time.Now()
 	defer meta_svc.logger.Debugf("Took %vs to RecursiveDelete for catalogKey=%v to metakv\n", time.Since(start_time).Seconds(), catalogKey)
 

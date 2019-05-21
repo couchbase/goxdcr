@@ -903,7 +903,7 @@ func ConstructVbServerMap(vbList []uint16, serverVbMap map[string][]uint16) map[
 }
 
 func UpgradeFilter(oldFilter string) string {
-	return fmt.Sprintf("%v(`%v`, \"%v\")", gojsonsm.FuncRegexp, ReservedWordsMap[ExternalKeyKey], oldFilter)
+	return fmt.Sprintf("%v(%v, \"%v\")", gojsonsm.FuncRegexp, ExternalKeyKeyContains, oldFilter)
 }
 
 func gojsonsmGetFilterWrapper(filter string, errPtr *error) gojsonsm.Matcher {
