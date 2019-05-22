@@ -674,7 +674,7 @@ var TimeBetweenMetaKVGetOps = time.Duration(500) * time.Millisecond
 var BypassSanInCertificateCheck bool = false
 
 // Number of times to verify bucket is missing before removing an invalid replicationSpec
-var ReplicationSpecGCCnt int = 4
+var ReplicationSpecGCCnt int = 6
 
 func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeCountBeforeRestart,
 	maxTopologyStableCountBeforeRestart, maxWorkersForCheckpointing int,

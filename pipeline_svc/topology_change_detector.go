@@ -86,7 +86,7 @@ func NewTopologyChangeDetectorSvc(cluster_info_svc service_def.ClusterInfoSvc,
 		vblist_last:                             make([]uint16, 0),
 		httpsAddrMap:                            make(map[string]string),
 		check_target_version_for_rbac_and_xattr: !target_has_rbac_and_xattr_support,
-		utils: utilsIn,
+		utils:                                   utilsIn,
 	}
 }
 
@@ -428,75 +428,10 @@ func (top_detect_svc *TopologyChangeDetectorSvc) getTargetBucketInfo() (int, map
 		}
 	}
 
-	if err != nil && err != top_detect_svc.utils.GetNonExistentBucketError() {
-		errMsg := fmt.Sprintf("Skipping target bucket check for spec %v since failed to get bucket infor for %v. err=%v", top_detect_svc.pipeline.Topic(), bucketName, err)
+	if err != nil {
+		errMsg := fmt.Sprintf("Skipping target bucket check for spec %v since failed to get bucket info for %v. err=%v", top_detect_svc.pipeline.Topic(), bucketName, err)
 		top_detect_svc.logger.Warn(errMsg)
 		return 0, nil, errors.New(errMsg)
-	}
-
-	targetClusterUUIDChecked := false
-
-	if err == top_detect_svc.utils.GetNonExistentBucketError() {
-		/* When we get NonExistentBucketError, there are three possibilities:
-		1. the target node is not accessible, either because it has been removed from target cluster,
-		   or because of temporary network issues. in this case we skip target check for the current round
-		   hopefully things will work in the next target check round, when a different node will be used
-		   or the same node will come back
-		2. the target node has been moved to a different cluster, which does not have bucket with the same name.
-		   in this case we skip target check for the current round
-		3. the target bucket has been deleted. in this case we need to delete repl spec
-
-		In order to differetiate between these cases, we first make a call to retrieve target cluster uuid
-		A. if the call returns error, it is case #1
-		B. if the call returns a different cluster uuid as that in repl spec, it is case #2
-		C. if the call returns the same cluster uuid as that in repl spec, we need to make another call to retrieve
-			bucket list from target
-			C.1 if the call returns error, skip current target bucket check
-			C.2 if the call returns a bucket list that does not contain target bucket, it is case #3. the repl spec needs to be deleted
-			C.3 if the call returns a bucket list that contains target bucket, continue with target bucket validation
-		*/
-		curTargetClusterUUID, err := top_detect_svc.utils.GetClusterUUID(connStr, username, password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey, top_detect_svc.logger)
-		if err != nil {
-			// case 1, target node not accessible, skip target check
-			logMessage := fmt.Sprintf("%v skipping target bucket check since %v is not accessible. err=%v\n", spec.Id, connStr, err)
-			top_detect_svc.logger.Warn(logMessage)
-			return 0, nil, errors.New(logMessage)
-		} else {
-			if curTargetClusterUUID != spec.TargetClusterUUID {
-				// case 2, target node has been moved to a different cluster. skip target check
-				logMessage := fmt.Sprintf("%v skipping target bucket check since %v has been moved to a different cluster %v.\n", spec.Id, connStr, curTargetClusterUUID)
-				top_detect_svc.logger.Warn(logMessage)
-				return 0, nil, errors.New(logMessage)
-			}
-
-			// set the flag to avoid unnecessary re-work in target bucket uuid validation
-			targetClusterUUIDChecked = true
-
-			//	additional check is needed
-			buckets, err := top_detect_svc.utils.GetBuckets(connStr, username, password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey, top_detect_svc.logger)
-			if err != nil {
-				// case 1, target node not accessible, skip target check
-				errMsg := fmt.Sprintf("Skipping target bucket check for spec %v since target node %v is not accessible. err=%v", spec.Id, connStr, err)
-				top_detect_svc.logger.Warn(errMsg)
-				return 0, nil, errors.New(errMsg)
-			}
-			foundTargetBucket := false
-			for bucketName, bucketUUID := range buckets {
-				if bucketName == spec.TargetBucketName {
-					foundTargetBucket = true
-					targetBucketUUID = bucketUUID
-					break
-				}
-			}
-			if !foundTargetBucket {
-				// case 3, delete repl spec
-				reason := fmt.Sprintf("the target bucket \"%v\" has been deleted", spec.TargetBucketName)
-				err = top_detect_svc.DelReplicationSpec(spec, reason)
-				return 0, nil, err
-			}
-			// if target bucket is found, we have already populated targetBucketUUID accordingly
-			// continue with target bucket validation
-		}
 	}
 
 	// validate target bucket uuid
@@ -504,19 +439,11 @@ func (top_detect_svc *TopologyChangeDetectorSvc) getTargetBucketInfo() (int, map
 		/*When target bucket uuid does not match, there are two possibilities:
 		4. target node has been moved to a different cluster, which happens to have bucket with the same name
 		5. target bucket has been deleted and re-created. in this case we need to delete repl spec
-		We need to make an additional call to retrieve target cluster uuid, if it has not been done before, to differentiate between these two cases
+		We need to make an additional call to retrieve target cluster uuid to differentiate between these two cases
 		D. if the call returns a different cluster uuid as that in repl spec, it is case #4
 		E. if the call returns the same cluster uuid as that in repl spec, it is case #5
 		F. if the call returns error, we have to play safe and skip the current target bucket check */
 
-		if targetClusterUUIDChecked {
-			// if we have already verified that target cluster uuid has not changed, it has to be case 5
-			reason := fmt.Sprintf("the target bucket \"%v\" has been deleted and recreated", spec.TargetBucketName)
-			err = top_detect_svc.DelReplicationSpec(spec, reason)
-			return 0, nil, err
-		}
-
-		//
 		curTargetClusterUUID, err := top_detect_svc.utils.GetClusterUUID(connStr, username, password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey, top_detect_svc.logger)
 		if err != nil {
 			// target node not accessible, skip target check
