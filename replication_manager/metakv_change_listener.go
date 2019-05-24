@@ -272,7 +272,7 @@ func needToRestreamPipeline(oldSettings *metadata.ReplicationSettings, newSettin
 	skip := false
 	filterChanged := !(oldSettings.FilterExpression == newSettings.FilterExpression)
 
-	if val, ok := newSettings.Values[FilterSkipRestreamKey]; ok {
+	if val, ok := newSettings.Values[metadata.FilterSkipRestreamKey]; ok {
 		skip = val.(bool)
 	}
 	return !skip && filterChanged
