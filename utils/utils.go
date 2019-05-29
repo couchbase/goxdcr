@@ -427,7 +427,7 @@ func (u *Utilities) processNsServerDocForFiltering(matcher gojsonsm.Matcher, nsS
 		return
 	}
 
-	result, err = matcher.Match(byteSlice)
+	result = base.MatchWrapper(matcher, byteSlice, &err)
 	return
 }
 

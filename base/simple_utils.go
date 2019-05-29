@@ -1258,3 +1258,13 @@ func HasPrefix(source []byte, target string, target2 string) bool {
 	}
 	return true
 }
+
+func MatchWrapper(matcher gojsonsm.Matcher, slice []byte, errPtr *error) (matched bool) {
+	defer func() {
+		if r := recover(); r != nil {
+			*errPtr = fmt.Errorf("Error from matcher: %v", r)
+		}
+	}()
+	matched, *errPtr = matcher.Match(slice)
+	return matched
+}

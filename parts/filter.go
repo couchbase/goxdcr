@@ -205,18 +205,8 @@ func (filter *Filter) filterUprEvent(uprEvent *mcc.UprEvent, body []byte, endBod
 	return matched, err, errDesc, failedDpCnt
 }
 
-func (filter *Filter) matchWrapper(slice []byte, errPtr *error) (matched bool) {
-	defer func() {
-		if r := recover(); r != nil {
-			*errPtr = fmt.Errorf("Error from matcher: %v", r)
-		}
-	}()
-	matched, *errPtr = filter.matcher.Match(slice)
-	return matched
-}
-
 func (filter *Filter) FilterByteSlice(slice []byte) (matched bool, err error) {
 	defer filter.matcher.Reset()
-	matched = filter.matchWrapper(slice, &err)
+	matched = base.MatchWrapper(filter.matcher, slice, &err)
 	return
 }
