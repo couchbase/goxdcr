@@ -906,27 +906,14 @@ func UpgradeFilter(oldFilter string) string {
 	return fmt.Sprintf("%v(%v, \"%v\")", gojsonsm.FuncRegexp, ExternalKeyKeyContains, oldFilter)
 }
 
-func gojsonsmGetFilterWrapper(filter string, errPtr *error) gojsonsm.Matcher {
-	var matcher gojsonsm.Matcher
+func GoJsonsmGetFilterExprMatcher(filter string) (matcher gojsonsm.Matcher, err error) {
 	defer func() {
 		if r := recover(); r != nil {
-			*errPtr = fmt.Errorf("Error from FilterExpressionMatcher: %v", r)
+			err = fmt.Errorf("Error from FilterExpressionMatcher: %v", r)
 		}
 	}()
 
-	matcher, *errPtr = gojsonsm.GetFilterExpressionMatcher(filter)
-	return matcher
-}
-
-func GoJsonsmGetFilterExprMatcher(filter string) (gojsonsm.Matcher, error) {
-	// Used to catch any panics too
-	var err error
-	matcher := gojsonsmGetFilterWrapper(filter, &err)
-
-	if err != nil {
-		return nil, err
-	}
-	return matcher, nil
+	return gojsonsm.GetFilterExpressionMatcher(filter)
 }
 
 func ValidateAdvFilter(filter string) error {
@@ -958,9 +945,13 @@ func ValidateAndGetAdvFilter(filter string) (gojsonsm.Matcher, error) {
 		return nil, ErrorFilterInvalidExpression
 	}
 
-	matcher, err := GoJsonsmGetFilterExprMatcher(ReplaceKeyWordsForExpression(filter))
+	internalStr, err := ReplaceKeyWordsForExpressionWErr(filter)
 	if err != nil {
-		err = fmt.Errorf("Error validating advanced filter: %v", err.Error())
+		err = fmt.Errorf("Error validating advanced filter keywords: %v", err.Error())
+	}
+	matcher, err := GoJsonsmGetFilterExprMatcher(internalStr)
+	if err != nil {
+		err = fmt.Errorf("%v", err.Error())
 	}
 	return matcher, err
 }
@@ -1068,7 +1059,15 @@ func RetrieveUprJsonAndConvert(fileName string) (*mcc.UprEvent, error) {
 }
 
 func ReplaceKeyWordsForExpression(expression string) string {
-	InitPcreVars()
+	str, _ := ReplaceKeyWordsForExpressionWErr(expression)
+	return str
+}
+
+func ReplaceKeyWordsForExpressionWErr(expression string) (string, error) {
+	err := InitPcreVars()
+	if err != nil {
+		return "", err
+	}
 	expressionBytes := []byte(expression)
 
 	// Replace all backtick with quotes
@@ -1076,7 +1075,7 @@ func ReplaceKeyWordsForExpression(expression string) string {
 		expressionBytes = regexIface.ReplaceAll(expressionBytes, []byte(fmt.Sprintf("`%v`", ReservedWordsMap[k])), 0 /*flags*/)
 	}
 
-	return string(expressionBytes)
+	return string(expressionBytes), nil
 }
 
 func ReplaceKeyWordsForOutput(expression string) string {
@@ -1131,20 +1130,29 @@ func FilterOnlyContainsXattrExpression(expression string) bool {
 	return singleAwesomeXattrOnlyRegex.MatchString(expression)
 }
 
-func InitPcreVars() {
+func InitPcreVars() (err error) {
 	ReservedWordsReplaceMapOnce.Do(func() {
 		ReservedWordsReplaceMap = make(map[string]PcreWrapperInterface)
 
-		externalKeyKeyReplace, err := MakePcreRegex(fmt.Sprintf("(?<!`)%v(?!`)", ExternalKeyKey))
+		defer func() {
+			if r := recover(); r != nil {
+				err = fmt.Errorf("Error from PCRE: %v", r)
+			}
+		}()
+
+		var externalKeyKeyReplace PcreWrapperInterface
+		externalKeyKeyReplace, err = MakePcreRegex(fmt.Sprintf("(?<!`)%v(?!`)", ExternalKeyKey))
 		if err == nil {
 			ReservedWordsReplaceMap[ExternalKeyKey] = externalKeyKeyReplace
 		}
 
-		externalXattrReplace, err := MakePcreRegex(fmt.Sprintf("(?<!`)%v(?!`)", ExternalKeyXattr))
+		var externalXattrReplace PcreWrapperInterface
+		externalXattrReplace, err = MakePcreRegex(fmt.Sprintf("(?<!`)%v(?!`)", ExternalKeyXattr))
 		if err == nil {
 			ReservedWordsReplaceMap[ExternalKeyXattr] = externalXattrReplace
 		}
 	})
+	return
 }
 
 // parse stats value from stats map
@@ -1259,12 +1267,11 @@ func HasPrefix(source []byte, target string, target2 string) bool {
 	return true
 }
 
-func MatchWrapper(matcher gojsonsm.Matcher, slice []byte, errPtr *error) (matched bool) {
+func MatchWrapper(matcher gojsonsm.Matcher, slice []byte) (matched bool, err error) {
 	defer func() {
 		if r := recover(); r != nil {
-			*errPtr = fmt.Errorf("Error from matcher: %v", r)
+			err = fmt.Errorf("Error from matcher: %v", r)
 		}
 	}()
-	matched, *errPtr = matcher.Match(slice)
-	return matched
+	return matcher.Match(slice)
 }
