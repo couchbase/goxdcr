@@ -48,10 +48,7 @@ IF (APPLE)
   SET (LDFLAGS "-s -extldflags '-Wl,-rpath,@executable_path/../lib'")
 ENDIF ()
 
-SET (xdcrGoTags)
-IF (NOT WIN32)
-	SET (xdcrGoTags "pcre")
-ENDIF ()
+SET (xdcrGoTags "pcre")
 
 SET(CGO_INCLUDE_DIRS "${FORESTDB_INCLUDE_DIR};${PCRE_INCLUDE_DIR};${sigar_SOURCE_DIR}/include")
 SET(CGO_LIBRARY_DIRS "${FORESTDB_LIBRARY_DIR};${PCRE_LIBRARY_DIR};${sigar_BINARY_DIR}/src")

@@ -1,5 +1,3 @@
-// +build !pcre
-
 package parts
 
 import (

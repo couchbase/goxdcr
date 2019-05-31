@@ -430,8 +430,7 @@ func (u *Utilities) processNsServerDocForFiltering(matcher gojsonsm.Matcher, nsS
 		return
 	}
 
-	result = base.MatchWrapper(matcher, byteSlice, &err)
-	return
+	return base.MatchWrapper(matcher, byteSlice)
 }
 
 // given a matches map, convert the indices from byte index to rune index
