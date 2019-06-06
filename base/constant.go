@@ -544,7 +544,7 @@ const (
 
 var DefaultGoMaxProcs int = 4
 
-var BacklogThresholdDefault = 1000
+var BacklogThresholdDefault = 50
 
 var MaxDocSizeByte uint32 = 20 << 20
 
