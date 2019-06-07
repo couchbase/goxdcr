@@ -191,6 +191,8 @@ type ResourceManager struct {
 	// count of consecutive terms where cpu has not been maxed out
 	cpuNotMaxedCount uint32
 	// boolean indicating whether we are currently in extra quota period
+	// This is activated when CPU hasn't maxed out for base.MaxCountCpuNotMaxed times
+	// to enable the system to push the limits a bit more
 	inExtraQuotaPeriod *base.AtomicBooleanType
 
 	// if overall throughput starts to drop in extra quota period, this captures the throughput before drop
@@ -668,9 +670,11 @@ func (rm *ResourceManager) computeState(specReplStatsMap map[*metadata.Replicati
 			state.highThroughput += throughput
 
 			// for high priority replications, compute throughputNeededByHighRepl
-			throughputNeededByHighRepl := replStats.changesLeft * 1000 / int64(spec.Settings.GetBacklogThreshold())
+			// This is the throughput desired to clear the changesLeft in whatever time specified
+			throughputNeededByHighRepl := replStats.changesLeft * 1000 / int64(spec.Settings.GetDesiredLatencyMs())
 			state.throughputNeededByHighRepl += throughputNeededByHighRepl
 
+			// If we cannot clear the changesLeft within specified time, this is considered backlog
 			if throughput < throughputNeededByHighRepl {
 				state.backlogReplExist = true
 			}
@@ -789,10 +793,6 @@ func (rm *ResourceManager) computeTokens(maxThroughput, throughputNeededByHighRe
 		highTokens = maxThroughputAllowedForHighRepl
 	}
 
-	// max tokens that can be reassigned to low priority replications
-	// = min(highTokens - actuallyUsedTokens, maxReassignableTokens)
-	// = min(highTokens - actuallyUsedTokens, highTokens - meanHighThroughput)
-	// = highTokens - max(actuallyUsedTokens, meanHighThroughput).
 	maxReassignableTokens = highTokens - int64(rm.highThroughputSamples.Mean())
 	if maxReassignableTokens < 0 {
 		maxReassignableTokens = 0

@@ -594,7 +594,7 @@ func (s *ReplicationSettings) GetPriority() base.PriorityType {
 	return priority.(base.PriorityType)
 }
 
-func (s *ReplicationSettings) GetBacklogThreshold() int {
+func (s *ReplicationSettings) GetDesiredLatencyMs() int {
 	return s.GetIntSettingValue(BacklogThresholdKey)
 }
 

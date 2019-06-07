@@ -144,6 +144,13 @@ func (throttler *ThroughputThrottler) updateOnce() {
 	if !throttler.needToCalibrate.Get() || int(math.Mod(float64(throttler.updateCount), float64(base.IntervalForThrottlerCalibration))) != 0 {
 		max_reassignable_tokens_per_slot := atomic.LoadInt64(&throttler.max_reassignable_tokens_per_slot)
 
+		// tokens that can be reassigned to low priority replications
+		// = min(unused_high_tokens, max_reassignable_high_tokens)
+		// Conceptually:
+		// ---------------
+		// = min(highTokens - actuallyUsedTokens, highTokens - meanHighThroughput)
+		// = highTokens - max(actuallyUsedTokens, meanHighThroughput).
+
 		// reassignable_high_tokens is the smaller of unused token and max_reassignable_tokens_per_slot
 		reassignable_high_tokens := atomic.LoadInt64(&throttler.unused_high_tokens)
 		if reassignable_high_tokens > max_reassignable_tokens_per_slot {
@@ -167,7 +174,7 @@ func (throttler *ThroughputThrottler) updateOnce() {
 
 // clear reassigned high tokens periodically to get a clean slate
 func (throttler *ThroughputThrottler) clearReassignedTokens() error {
-	throttler.logger.Infof("%v clearReassignedTokens starting...", throttler.id)
+	throttler.logger.Infof("%v clearReassignedTokens starting... clearing every %v", throttler.id, base.ThroughputThrottlerClearTokensInterval)
 	defer throttler.logger.Infof("%v clearReassignedTokens stopped...", throttler.id)
 
 	defer throttler.wait_grp.Done()
