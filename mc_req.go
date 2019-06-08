@@ -38,7 +38,7 @@ func (req MCRequest) String() string {
 		req.Opcode, len(req.Body), req.Key)
 }
 
-func (req *MCRequest) fillHeaderBytes(data []byte) int {
+func (req *MCRequest) FillHeaderBytes(data []byte) int {
 
 	pos := 0
 	data[pos] = REQ_MAGIC
@@ -93,7 +93,7 @@ func (req *MCRequest) fillHeaderBytes(data []byte) int {
 func (req *MCRequest) HeaderBytes() []byte {
 	data := make([]byte, HDR_LEN+len(req.Extras)+len(req.Key))
 
-	req.fillHeaderBytes(data)
+	req.FillHeaderBytes(data)
 
 	return data
 }
@@ -102,7 +102,7 @@ func (req *MCRequest) HeaderBytes() []byte {
 func (req *MCRequest) Bytes() []byte {
 	data := make([]byte, req.Size())
 
-	pos := req.fillHeaderBytes(data)
+	pos := req.FillHeaderBytes(data)
 
 	if len(req.Body) > 0 {
 		copy(data[pos:pos+len(req.Body)], req.Body)

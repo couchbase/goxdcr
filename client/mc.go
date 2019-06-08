@@ -1138,3 +1138,7 @@ func IfResStatusError(response *gomemcached.MCResponse) bool {
 			response.Status != gomemcached.SUBDOC_PATH_NOT_FOUND &&
 			response.Status != gomemcached.SUBDOC_MULTI_PATH_FAILURE_DELETED)
 }
+
+func (c *Client) Conn() io.ReadWriteCloser {
+	return c.conn
+}
