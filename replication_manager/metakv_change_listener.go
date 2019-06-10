@@ -251,7 +251,7 @@ func (rscl *ReplicationSpecChangeListener) validateReplicationSpec(specObj inter
 // whether there are critical changes to the replication spec that require pipeline reconstruction
 func needToReconstructPipeline(oldSettings *metadata.ReplicationSettings, newSettings *metadata.ReplicationSettings) bool {
 
-	// the following require reconstuction of pipeline
+	// the following require reconstruction of pipeline
 	repTypeChanged := !(oldSettings.RepType == newSettings.RepType)
 	sourceNozzlePerNodeChanged := !(oldSettings.SourceNozzlePerNode == newSettings.SourceNozzlePerNode)
 	targetNozzlePerNodeChanged := !(oldSettings.TargetNozzlePerNode == newSettings.TargetNozzlePerNode)

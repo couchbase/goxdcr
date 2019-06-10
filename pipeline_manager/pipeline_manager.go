@@ -101,7 +101,7 @@ func NewPipelineManager(factory common.PipelineFactory, repl_spec_svc service_de
 		uilog_svc:          uilog_svc,
 		utils:              utilsIn,
 	}
-	pipelineMgrRetVar.logger.Info("Pipeline Manager is constucted")
+	pipelineMgrRetVar.logger.Info("Pipeline Manager is constructed")
 
 	//initialize the expvar storage for replication status
 	pipeline.RootStorage()

@@ -1058,7 +1058,7 @@ func (capi *CapiNozzle) tcpProxy(vbno uint16, part_ch chan []byte, resp_ch chan 
 				client.SetWriteDeadline(time.Now().Add(capi.config.writeTimeout))
 				_, err := client.Write(part)
 				if err != nil {
-					capi.Logger().Errorf("%v Received error when writing boby part. err=%v\n", capi.Id(), err)
+					capi.Logger().Errorf("%v Received error when writing body part. err=%v\n", capi.Id(), err)
 					err_ch <- err
 					return
 				}
