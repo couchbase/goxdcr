@@ -1,0 +1,148 @@
+#!/bin/bash
+set -u
+
+# Copyright (c) 2019 Couchbase, Inc.
+# Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file
+# except in compliance with the License. You may obtain a copy of the License at
+#   http://www.apache.org/licenses/LICENSE-2.0
+# Unless required by applicable law or agreed to in writing, software distributed under the
+# License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND,
+# either express or implied. See the License for the specific language governing permissions
+# and limitations under the License.
+
+# globals
+declare DEFAULT_ADMIN
+declare DEFAULT_PW
+declare -a NODEPORTS
+declare -a CLUSTERNAMES
+declare -a BUCKETNAMES
+declare -a RAMQUOTA
+
+# optional globals
+# if not defined, will look for it using locate
+declare CBWORKLOADGEN
+
+# Run curl in silent mode to prevent progress bar
+CURL="curl -s"
+
+
+# Tests and see if "cluster_run -n x" has been run
+function testForClusterRun {
+	for port in ${NODEPORTS[@]}
+		do
+		$CURL -u $DEFAULT_ADMIN:$DEFAULT_PW -X GET http://localhost:$port/nodes/self/controller/settings > /dev/null 2>&1
+		if (( $? != 0 ));then
+			echo "Node $port not found. Skipping cluster_run XDCR init"
+			return 1
+		fi
+	done
+}
+
+function setupCluster {
+	for ((i=0; i < ${#NODEPORTS[@]}; i++))
+	do
+		echo "Setting up Node port ${NODEPORTS[$i]} name ${CLUSTERNAMES[$i]}"
+		$CURL -u $DEFAULT_ADMIN:$DEFAULT_PW -X POST http://localhost:${NODEPORTS[$i]}/nodes/self/controller/settings > /dev/null 2>&1
+		$CURL -X POST http://localhost:${NODEPORTS[$i]}/node/controller/rename -d hostname=127.0.0.1 > /dev/null 2>&1
+		$CURL -X POST http://localhost:${NODEPORTS[$i]}/node/controller/setupServices -d services=kv > /dev/null 2>&1
+		$CURL -u $DEFAULT_ADMIN:$DEFAULT_PW -v -X POST http://localhost:${NODEPORTS[$i]}/settings/web -d password=$DEFAULT_PW -d username=$DEFAULT_ADMIN -d port=${NODEPORTS[$i]} > /dev/null 2>&1
+
+	done
+}
+
+function setupBuckets {
+	for ((i=0; i < ${#NODEPORTS[@]}; i++))
+	do
+		echo "Setting up bucket ${BUCKETNAMES[$i]}"
+		$CURL -u $DEFAULT_ADMIN:$DEFAULT_PW -X POST http://localhost:${NODEPORTS[$i]}/pools/default/buckets -d ramQuotaMB=${RAMQUOTA[$i]} -d name=${BUCKETNAMES[$i]} > /dev/null 2>&1
+	done
+}
+
+# Takes 2 arguments:
+# 1- the ID number of node as source
+# 2- The ID number of node as target
+function createRemoteClusterReference {
+	local sourceID=$1
+	local targetID=$2
+
+	echo "Creating remote cluster reference from ${CLUSTERNAMES[$sourceID]} to ${CLUSTERNAMES[$targetID]}"
+	$CURL -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:${NODEPORTS[$sourceID]}/pools/default/remoteClusters -d name=${CLUSTERNAMES[$targetID]} -d hostname=127.0.0.1:${NODEPORTS[$targetID]} -d username=$DEFAULT_ADMIN -d password=$DEFAULT_PW
+	echo ""
+}
+
+function createReplicationInternal {
+	local sourceID=$1
+	local targetID=$2
+
+	replicationID=`$CURL -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:${NODEPORTS[$sourceID]}/controller/createReplication -d fromBucket=${BUCKETNAMES[$sourceID]} -d toCluster=${CLUSTERNAMES[$targetID]} -d toBucket=${BUCKETNAMES[$targetID]} -d replicationType=continuous -d checkpointInterval=60 -d statsInterval=500`
+	echo "$replicationID"
+}
+
+# Check if jq is present. It is used for parsing JSON in a bash environment
+function checkJQ {
+	which jq > /dev/null 2>&1
+	echo $?
+}
+
+function getKeyUsingJQ {
+	local arg=$1
+	local key=$2
+	if [[ -z "$arg" ]];then
+		return ""
+	fi
+
+	echo $arg | jq ${key}
+}
+
+function createReplication {
+	local sourceID=$1
+	local targetID=$2
+
+	echo "Creating replication from ${CLUSTERNAMES[$sourceID]} to ${CLUSTERNAMES[$targetID]} "
+	repId=`createReplicationInternal $sourceID $targetID`
+	if (( `checkJQ` == 0 ));then
+		repIdReal=`getKeyUsingJQ $repId '.id'`
+		restFriendlyReplID=`echo $repIdReal | sed 's|/|%2F|g'`
+		echo "ReplicationID: $repIdReal Rest-FriendlyID: $restFriendlyReplID"
+	else
+		echo "Captured replicationID: $repId"
+	fi
+}
+
+function findCbWorkloadGen {
+	if [[ ! -z "$CBWORKLOADGEN" ]];then
+		echo "$CBWORKLOADGEN"
+		return 0
+	fi
+
+	which locate > /dev/null 2>&1
+	if (( $? != 0 ));then
+		return $?
+	fi
+	# Just pick one
+	workloadGen=`locate cbworkloadgen | grep build\/couchbase-cli | head -n 1`
+	if (( $? != 0 ));then
+		echo ""
+		return 1
+	fi
+	echo "$workloadGen"
+	return 0
+}
+
+function runCbWorkloadGen {
+	local clusterID=$1
+	if [[ -z "$clusterID" ]];then
+		echo "Invalid input"
+		return 1
+	fi
+
+	workloadGen=`findCbWorkloadGen`
+	if (( $? != 0 ));then
+		echo "Could not find workload generator binary"
+		return 1
+	fi
+
+	echo "Running cbworkloadGen on ${NODEPORTS[$clusterID]} bucket ${BUCKETNAMES[$clusterID]}"
+	$workloadGen -i 10000 -n 127.0.0.1:${NODEPORTS[$clusterID]} -b ${BUCKETNAMES[$clusterID]} -u $DEFAULT_ADMIN -p $DEFAULT_PW --prefix=xdcrProv_$clusterID
+}
+
