@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 set -u
 
 # Copyright (c) 2019 Couchbase, Inc.
@@ -10,25 +10,47 @@ set -u
 # either express or implied. See the License for the specific language governing permissions
 # and limitations under the License.
 
+# BASH VERSION CHECK - since hash maps are implemented >= bash version 4
+bash_major_version=`echo ${BASH_VERSION}|cut -d. -f1`
+if (( $bash_major_version < 4 ));then
+	echo "===================================================================="
+	echo "Bash version >= 4 is required. Current bash version: ${BASH_VERSION}. Script may fail"
+	echo "How to upgrade bash on MacOS:"
+	echo "1. Run \"brew update && brew install bash\" to install the latest version of bash for macOS"
+	echo "2. Run \"sudo vim /etc/shells\" and add \"/usr/local/bin/bash\" to the list"
+	echo "3. Run \"chsh -s /usr/local/bin/bash\" to set default shell to the new one"
+	echo "4. Exit and restart the current session"
+	echo "===================================================================="
+	return 1
+fi
+
 # globals
+# -----------------
 declare DEFAULT_ADMIN
 declare DEFAULT_PW
-declare -a NODEPORTS
-declare -a CLUSTERNAMES
-declare -a BUCKETNAMES
-declare -a RAMQUOTA
+
+# topological globals
+# -----------------
+# cluster -> Bucket(s)
+# Bucket -> Scopes
+# Scopes -> Collections
+declare -A CLUSTER_NAME_PORT_MAP
+declare -A CLUSTER_NAME_BUCKET_MAP
+declare -A BUCKET_NAME_RAMQUOTA_MAP
+declare -A BUCKET_NAME_SCOPE_MAP
+declare -A SCOPE_NAME_COLLECTION_MAP
 
 # optional globals
+# -----------------
 # if not defined, will look for it using locate
-declare CBWORKLOADGEN
+declare CBWORKLOADGEN=""
 
 # Run curl in silent mode to prevent progress bar
 CURL="curl -s"
 
-
 # Tests and see if "cluster_run -n x" has been run
 function testForClusterRun {
-	for port in ${NODEPORTS[@]}
+	for port in ${CLUSTER_NAME_PORT_MAP[@]}
 		do
 		$CURL -u $DEFAULT_ADMIN:$DEFAULT_PW -X GET http://localhost:$port/nodes/self/controller/settings > /dev/null 2>&1
 		if (( $? != 0 ));then
@@ -39,34 +61,128 @@ function testForClusterRun {
 }
 
 function setupCluster {
-	for ((i=0; i < ${#NODEPORTS[@]}; i++))
+	for clusterName in `echo ${!CLUSTER_NAME_PORT_MAP[@]}`
 	do
-		echo "Setting up Node port ${NODEPORTS[$i]} name ${CLUSTERNAMES[$i]}"
-		$CURL -u $DEFAULT_ADMIN:$DEFAULT_PW -X POST http://localhost:${NODEPORTS[$i]}/nodes/self/controller/settings > /dev/null 2>&1
-		$CURL -X POST http://localhost:${NODEPORTS[$i]}/node/controller/rename -d hostname=127.0.0.1 > /dev/null 2>&1
-		$CURL -X POST http://localhost:${NODEPORTS[$i]}/node/controller/setupServices -d services=kv > /dev/null 2>&1
-		$CURL -u $DEFAULT_ADMIN:$DEFAULT_PW -v -X POST http://localhost:${NODEPORTS[$i]}/settings/web -d password=$DEFAULT_PW -d username=$DEFAULT_ADMIN -d port=${NODEPORTS[$i]} > /dev/null 2>&1
-
+		local port=${CLUSTER_NAME_PORT_MAP[$clusterName]:-}
+		echo "SETTING up cluster name $clusterName on port $port"
+		$CURL -u $DEFAULT_ADMIN:$DEFAULT_PW -X POST http://localhost:$port/nodes/self/controller/settings > /dev/null 2>&1
+		$CURL -X POST http://localhost:$port/node/controller/rename -d hostname=127.0.0.1 > /dev/null 2>&1
+		$CURL -X POST http://localhost:$port/node/controller/setupServices -d services=kv > /dev/null 2>&1
+		$CURL -u $DEFAULT_ADMIN:$DEFAULT_PW -v -X POST http://localhost:$port/settings/web -d password=$DEFAULT_PW -d username=$DEFAULT_ADMIN -d port=$port > /dev/null 2>&1
+		if (( $? != 0 ));then
+			return $?
+		fi
+		# enable developer preview
+		echo -n "Enabling developer preview on $clusterName"
+		$CURL -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://localhost:$port/settings/developerPreview -d enabled="true"
+		echo ""
 	done
 }
 
 function setupBuckets {
-	for ((i=0; i < ${#NODEPORTS[@]}; i++))
+	for clusterName in `echo ${!CLUSTER_NAME_BUCKET_MAP[@]}`
 	do
-		echo "Setting up bucket ${BUCKETNAMES[$i]}"
-		$CURL -u $DEFAULT_ADMIN:$DEFAULT_PW -X POST http://localhost:${NODEPORTS[$i]}/pools/default/buckets -d ramQuotaMB=${RAMQUOTA[$i]} -d name=${BUCKETNAMES[$i]} > /dev/null 2>&1
+		local bucketNames=(${CLUSTER_NAME_BUCKET_MAP[$clusterName]:-})
+		local port=${CLUSTER_NAME_PORT_MAP[$clusterName]:-}
+		for bucketName in `echo ${bucketNames[@]}`
+		do
+			echo "For cluster $clusterName CREATING bucket $bucketName"
+			local ramQuota=${BUCKET_NAME_RAMQUOTA_MAP[$bucketName]:-}
+			$CURL -u $DEFAULT_ADMIN:$DEFAULT_PW -X POST http://localhost:$port/pools/default/buckets -d ramQuotaMB=$ramQuota -d name=$bucketName > /dev/null 2>&1
+			if (( $? != 0 ));then
+				return $?
+			fi
+			# If bucket has scopes
+			if [[ ! -z "${BUCKET_NAME_SCOPE_MAP[$bucketName]:-}" ]];then
+				setupScopes $clusterName $bucketName
+			fi
+		done
 	done
 }
 
-# Takes 2 arguments:
-# 1- the ID number of node as source
-# 2- The ID number of node as target
-function createRemoteClusterReference {
-	local sourceID=$1
-	local targetID=$2
 
-	echo "Creating remote cluster reference from ${CLUSTERNAMES[$sourceID]} to ${CLUSTERNAMES[$targetID]}"
-	$CURL -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:${NODEPORTS[$sourceID]}/pools/default/remoteClusters -d name=${CLUSTERNAMES[$targetID]} -d hostname=127.0.0.1:${NODEPORTS[$targetID]} -d username=$DEFAULT_ADMIN -d password=$DEFAULT_PW
+# inputs
+# 1. cluster name
+# 2. bucket name
+function setupScopes {
+	local clusterName=$1
+	local bucketName=$2
+	if [[ -z "${clusterName:-}" ]] || [[ -z "${bucketName:-}" ]];then
+		echo "Invalid input"
+		return 1
+	fi
+
+	local -a scopesArr=(${BUCKET_NAME_SCOPE_MAP[$bucketName]:-})
+	if [[ -z "${scopesArr:-}" ]];then
+		echo "No scopes found for bucket $bucketName"
+		return 1
+	fi
+
+	local port=${CLUSTER_NAME_PORT_MAP[$clusterName]:-}
+	for scopeName in `echo ${scopesArr[@]}`
+	do
+		echo "For cluster $clusterName bucket $bucketName CREATING scope $scopeName"
+		$CURL -u $DEFAULT_ADMIN:$DEFAULT_PW -X POST http://localhost:$port/pools/default/buckets/$bucketName/collections -d name=$scopeName > /dev/null 2>&1
+		# If scope has collections
+		if [[ ! -z "${SCOPE_NAME_COLLECTION_MAP[$scopeName]:-}" ]];then
+			setupCollections $clusterName $bucketName $scopeName
+		fi
+	done
+}
+
+# inputs
+# 1. cluster name
+# 2. bucket name
+# 3. scope name
+function setupCollections {
+	local clusterName=$1
+	local bucketName=$2
+	local scopeName=$3
+	if [[ -z "${clusterName:-}" ]] || [[ -z "${bucketName:-}" ]] || [[ -z "${scopeName:-}" ]];then
+		echo "Invalid input"
+		return 1
+	fi
+
+	local collectionsArr=(${SCOPE_NAME_COLLECTION_MAP[$scopeName]:-})
+	if [[ -z "${collectionsArr:-}" ]];then
+		echo "No collections found for scope $scopeName"
+		return 1
+	fi
+
+	local port=${CLUSTER_NAME_PORT_MAP[$clusterName]:-}
+	for collectionName in `echo ${collectionsArr[@]}`
+	do
+		echo "For cluster $clusterName bucket $bucketName scope $scopeName CREATING collection $collectionName"
+		$CURL -u $DEFAULT_ADMIN:$DEFAULT_PW -X POST http://localhost:$port/pools/default/buckets/$bucketName/collections/$scopeName -d name=$collectionName > /dev/null 2>&1
+	done
+}
+
+function setupTopologies {
+	setupCluster
+	if (( $? != 0 ));then
+		return $?
+	fi
+	setupBuckets
+	if (( $? != 0 ));then
+		return $?
+	fi
+}
+
+# Takes 2 arguments:
+# 1- Source cluster name
+# 2- Target cluster name
+function createRemoteClusterReference {
+	local source=$1
+	local target=$2
+	if [[ -z "${source:-}" ]] || [[ -z "${target:-}" ]];then
+		echo "Invalid input"
+		return 1
+	fi
+	local sourcePort=${CLUSTER_NAME_PORT_MAP[$source]:-}
+	local targetPort=${CLUSTER_NAME_PORT_MAP[$target]:-}
+
+	echo "Creating remote cluster reference from $source to $target"
+	$CURL -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$sourcePort/pools/default/remoteClusters -d name=$target -d hostname=127.0.0.1:$targetPort -d username=$DEFAULT_ADMIN -d password=$DEFAULT_PW
 	echo ""
 }
 
@@ -91,26 +207,76 @@ function getKeyUsingJQ {
 		return ""
 	fi
 
-	echo $arg | jq ${key}
+	echo $arg | jq ${key} 2> /dev/null
 }
 
-function createReplication {
-	local sourceID=$1
-	local targetID=$2
+function validateClusterBucket {
+	local cluster=$1
+	local bucket=$2
 
-	echo "Creating replication from ${CLUSTERNAMES[$sourceID]} to ${CLUSTERNAMES[$targetID]} "
-	repId=`createReplicationInternal $sourceID $targetID`
+	local -a bucketsArr
+	bucketsArr=(${CLUSTER_NAME_BUCKET_MAP[$cluster]:-})
+	local found="false"
+	for checkBucket in `echo ${bucketsArr[@]}`
+	do
+		if [[ "$bucket" == "$checkBucket" ]];then
+			found="true"
+			break
+		fi
+	done
+	if [[ "$found" == "false" ]];then
+		echo "Bucket $bucket is not defined for cluster $cluster"
+		return 1
+	fi
+	return 0
+}
+
+#Input:
+# 1 - source cluster
+# 2 - source bucketname
+# 3 - target cluster
+# 4 - target bucketname
+# TODO - optional args for replication
+function createBucketReplication {
+	local sourceCluster=$1
+	local sourceBucket=$2
+	local targetCluster=$3
+	local targetBucket=$4
+
+	if [[ -z "${sourceCluster:-}" ]] || [[ -z "${sourceBucket:-}" ]] || [[ -z "${targetCluster:-}" ]] || [[ -z "${targetBucket:-}" ]];then
+		echo "Invalid input"
+		return 1
+	fi
+	# check if bucket belongs to cluster
+	validateClusterBucket $sourceCluster $sourceBucket
+	if (( $? != 0 ));then
+		return $?
+	fi
+	validateClusterBucket $targetCluster $targetBucket
+	if (( $? != 0 ));then
+		return $?
+	fi
+
+	echo "Creating replication from $sourceCluster:$sourceBucket to $targetCluster:$targetBucket "
+	local sourcePort=${CLUSTER_NAME_PORT_MAP[$sourceCluster]:-}
+
+	repId=`$CURL -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$sourcePort/controller/createReplication -d fromBucket=$sourceBucket -d toCluster=$targetCluster -d toBucket=$targetBucket -d replicationType=continuous -d checkpointInterval=60 -d statsInterval=500`
+
 	if (( `checkJQ` == 0 ));then
 		repIdReal=`getKeyUsingJQ $repId '.id'`
-		restFriendlyReplID=`echo $repIdReal | sed 's|/|%2F|g'`
-		echo "ReplicationID: $repIdReal Rest-FriendlyID: $restFriendlyReplID"
+		if [[ "$repIdReal" == "" ]];then
+			echo "Captured replicationID: $repId"
+		else
+			restFriendlyReplID=`echo $repIdReal | sed 's|/|%2F|g'`
+			echo "ReplicationID: $repIdReal Rest-FriendlyID: $restFriendlyReplID"
+		fi
 	else
 		echo "Captured replicationID: $repId"
 	fi
 }
 
 function findCbWorkloadGen {
-	if [[ ! -z "$CBWORKLOADGEN" ]];then
+	if [[ ! -z "${CBWORKLOADGEN:-}" ]];then
 		echo "$CBWORKLOADGEN"
 		return 0
 	fi
@@ -125,24 +291,102 @@ function findCbWorkloadGen {
 		echo ""
 		return 1
 	fi
+	if [[ -z "$CBWORKLOADGEN" ]];then
+		# set it in case needed it in future
+		CBWORKLOADGEN=$workloadGen
+	fi
 	echo "$workloadGen"
 	return 0
 }
 
-function runCbWorkloadGen {
-	local clusterID=$1
-	if [[ -z "$clusterID" ]];then
+# Input
+# 1 - cluster name
+# 2 - bucket name
+function runCbWorkloadGenBucket {
+	local clusterName=$1
+	local bucketName=$2
+	if [[ -z "${clusterName:-}" ]] || [[ -z "${bucketName:-}" ]];then
 		echo "Invalid input"
 		return 1
 	fi
+	local port=${CLUSTER_NAME_PORT_MAP[$clusterName]:-}
 
 	workloadGen=`findCbWorkloadGen`
-	if (( $? != 0 ));then
+	if (( $? != 0 )) || [[ -z "$workloadGen" ]];then
 		echo "Could not find workload generator binary"
 		return 1
 	fi
 
-	echo "Running cbworkloadGen on ${NODEPORTS[$clusterID]} bucket ${BUCKETNAMES[$clusterID]}"
-	$workloadGen -i 10000 -n 127.0.0.1:${NODEPORTS[$clusterID]} -b ${BUCKETNAMES[$clusterID]} -u $DEFAULT_ADMIN -p $DEFAULT_PW --prefix=xdcrProv_$clusterID
+	echo "Running cbworkloadGen on $clusterName bucket $bucketName"
+	$workloadGen -i 10000 -n 127.0.0.1:$port -b $bucketName -u $DEFAULT_ADMIN -p $DEFAULT_PW --prefix=xdcrProv_$clusterName
 }
 
+function waitForBgJobs {
+	echo "Waiting for background jobs to finish..."
+	jobsCnt=`jobs -l | grep -c "Running"`
+	while (( $jobsCnt > 0 ))
+	do
+		sleep 1
+		jobsCnt=`jobs -l | grep -c "Running"`
+	done
+}
+
+# Print a summary of all the topology setup -> scope and collection info
+# Uses the manifest REST API
+function printGlobalScopeAndCollectionInfo {
+	checkJQ
+	if (( $? != 0 ));then
+		echo "jq not found - cannot run $0"
+		return 1
+	fi
+
+	for clusterName in `echo ${!CLUSTER_NAME_PORT_MAP[@]}`
+	do
+		local port=${CLUSTER_NAME_PORT_MAP[$clusterName]:-}
+		local -a buckets=(${CLUSTER_NAME_BUCKET_MAP[$clusterName]:-})
+		for bucketName in `echo ${buckets[@]}`
+		do
+			# Get the manifest for this bucket
+			local manifestOutput=""
+			local manifestVersion=""
+			manifestOutput=`$CURL -u $DEFAULT_ADMIN:$DEFAULT_PW -X GET http://localhost:$port/pools/default/buckets/$bucketName/collections`
+			if (( $? != 0 ));then
+				echo "Error retrieving manifest - Cluster $clusterName bucket $bucketName scope $scopeName"
+				continue
+			elif [[ -z "$manifestOutput" ]];then
+				echo "Retrieved empty manifest JSON - Cluster $clusterName bucket $bucketName scope $scopeName"
+				continue
+			fi
+
+			manifestVersion=`echo "$manifestOutput" | jq '.uid'`
+			echo "Cluster $clusterName Bucket $bucketName collections manifest version: $manifestVersion"
+
+			local scopes=(${BUCKET_NAME_SCOPE_MAP[$bucketName]:-})
+			for scopeName in `echo ${scopes[@]:-}`
+			do
+				local scopesOutputRaw=""
+				local scopeOutput=""
+				local scopeUID=""
+				# TODO(Neil): I think these numbers are LEB128? Need to confirm
+				scopesOutputRaw=`echo "$manifestOutput" | jq '.scopes'`
+				scopeOutput=`echo "$scopesOutputRaw" | jq ".${scopeName}"`
+				scopeUID=`echo "$scopeOutput" | jq '.uid'`
+				echo "Cluster $clusterName Bucket $bucketName ScopeName $scopeName UID $scopeUID"
+
+				# get individual collections
+				local collectionsArr=(${SCOPE_NAME_COLLECTION_MAP[$scopeName]:-})
+				if [[ -z "${collectionsArr:-}" ]];then
+					echo "No collections found for scope $scopeName"
+					continue
+				fi
+				for collectionName in `echo ${collectionsArr[@]}`
+				do
+					local collectionsOutputRaw=`echo "$scopeOutput" | jq '.collections'`
+					local collectionOutput=`echo "$collectionsOutputRaw" | jq ".${collectionName}"`
+					local collectionUID=`echo "$collectionOutput" | jq '.uid'`
+					echo "Cluster $clusterName Bucket $bucketName ScopeName $scopeName CollectionName $collectionName UID $collectionUID"
+				done
+			done
+		done
+	done
+}

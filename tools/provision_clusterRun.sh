@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 set -u
 
 # Copyright (c) 2019 Couchbase, Inc.
@@ -17,14 +17,46 @@ set -u
 
 # main logic all exist elsewhere
 . ./clusterRunProvision.shlib
+if (( $? != 0 ));then
+	exit $?
+fi
 
 # set globals
+# -----------------
 DEFAULT_ADMIN="Administrator"
 DEFAULT_PW="wewewe"
-NODEPORTS=(9000 9001)
-CLUSTERNAMES=("C1" "C2")
-BUCKETNAMES=("B1" "B2")
-RAMQUOTA=(100 100)
+
+# =============================
+# topological map information
+# =============================
+# cluster -> Bucket(s)
+# -----------------
+CLUSTER_NAME_PORT_MAP=(["C1"]=9000 ["C2"]=9001)
+# Set c1 to have 2 buckets and c2 to have 1 bucket
+declare -a cluster1BucketsArr
+cluster1BucketsArr=("B0" "B1")
+CLUSTER_NAME_BUCKET_MAP=(["C1"]=${cluster1BucketsArr[@]}  ["C2"]="B2")
+BUCKET_NAME_RAMQUOTA_MAP=(["B0"]=100 ["B1"]=100 ["B2"]=100)
+
+# Bucket -> Scopes
+# -----------------
+declare -a scope1Arr=("S1" "S2")
+BUCKET_NAME_SCOPE_MAP=(["B1"]=${scope1Arr[@]} ["B2"]="S3")
+
+# Scopes -> Collections
+# ----------------------
+declare -a collection1Arr=("col1" "col2")
+declare -a collection2Arr=("col1" "col2" "col3")
+SCOPE_NAME_COLLECTION_MAP=(["S1"]=${collection1Arr[@]} ["S2"]=${collection2Arr[@]} ["S3"]=${collection2Arr[@]})
+
+
+function runDataLoad {
+	# Run CBWorkloadgen in parallel
+	runCbWorkloadGenBucket "C1" "B0" &
+	runCbWorkloadGenBucket "C1" "B1" &
+	runCbWorkloadGenBucket "C2" "B2" &
+	waitForBgJobs
+}
 
 #MAIN
 testForClusterRun
@@ -32,12 +64,16 @@ if (( $? != 0 ));then
 	exit $?
 fi
 
-setupCluster
-setupBuckets
-createRemoteClusterReference 0 1
-createRemoteClusterReference 1 0
-createReplication 0 1
-createReplication 1 0
-
-runCbWorkloadGen 0
-runCbWorkloadGen 1
+setupTopologies
+if (( $? != 0 ));then
+	exit $?
+fi
+# Wait for vbuckets and all the other things to propagate before XDCR provisioning
+sleep 1
+createRemoteClusterReference "C1" "C2"
+createRemoteClusterReference "C2" "C1"
+sleep 1
+createBucketReplication "C1" "B1" "C2" "B2"
+createBucketReplication "C2" "B2" "C1" "B1"
+printGlobalScopeAndCollectionInfo
+runDataLoad
