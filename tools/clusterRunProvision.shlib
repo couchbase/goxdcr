@@ -28,6 +28,9 @@ fi
 # -----------------
 declare DEFAULT_ADMIN
 declare DEFAULT_PW
+# Run curl in silent mode to prevent progress bar
+CURL="curl -s"
+
 
 # topological globals
 # -----------------
@@ -39,14 +42,128 @@ declare -A CLUSTER_NAME_BUCKET_MAP
 declare -A BUCKET_NAME_RAMQUOTA_MAP
 declare -A BUCKET_NAME_SCOPE_MAP
 declare -A SCOPE_NAME_COLLECTION_MAP
+declare -A BUCKET_PROPERTIES_OUTPUT_MAP
+declare -A BUCKET_REPL_PROPERTIES_MAP
+declare -A BUCKET_REPL_PROPERTIES_OUTPUT_MAP
 
 # optional globals
 # -----------------
 # if not defined, will look for it using locate
 declare CBWORKLOADGEN=""
+# Key is in the format of "BucketName,ParameterName"
+# Value is in the format of actual value to send
+declare -A BUCKET_NAME_PROPERTIES_MAP
 
-# Run curl in silent mode to prevent progress bar
-CURL="curl -s"
+# Input: 
+# 1. Bucket name
+# 2. An associative array of Key - Parameter Value - value to send
+# Will store information as:
+# BUCKET_NAME_PROPERTIES_MAP=([B1,CompressionMode]="Active" [B1,ramQuotaMB]="100" )
+function insertPropertyIntoBucketNamePropertyMap {
+	local bucketName=$1
+	local -n incomingMap=$2
+	for key in ${!incomingMap[@]}
+	do
+		BUCKET_NAME_PROPERTIES_MAP[${bucketName},${key}]=${incomingMap[$key]}
+	done
+	export BUCKET_NAME_PROPERTIES_MAP
+}
+
+# Input:
+# 1. Bucket name
+# Outputs associative array as a exported global of BUCKET_PROPERTIES_OUTPUT_MAP
+function getPropertiesFromBucketNamePropertyMap {
+	local bucketName=$1
+
+	# first clear previous data - cannot use unset as it breaks the return val
+	BUCKET_PROPERTIES_OUTPUT_MAP=()
+
+	# key is bucketName,Property
+	for bp in ${!BUCKET_NAME_PROPERTIES_MAP[@]}
+	do
+		key=`echo "$bp" | cut -d, -f1`
+		property=`echo "$bp" | cut -d, -f2`
+		if [[ $key != $bucketName ]];then
+			continue
+		fi
+		BUCKET_PROPERTIES_OUTPUT_MAP["$property"]=${BUCKET_NAME_PROPERTIES_MAP[$bp]}
+	done
+	export BUCKET_PROPERTIES_OUTPUT_MAP
+}
+
+# Input:
+# 1. Source Cluster name
+# 2. Source Bucket name
+# 3. Target Cluster name
+# 4. Target Cluster name
+# 2. An associative array of Key - Parameter Value - value to send
+function insertPropertyIntoBucketReplPropertyMap {
+	local sourceCluster=$1
+	local sourceBucket=$2
+	local targetCluster=$3
+	local targetBucket=$4
+	local -n incomingMap=$5
+	
+	for key in ${!incomingMap[@]}
+	do
+		BUCKET_REPL_PROPERTIES_MAP[${sourceCluster},${sourceBucket},${targetCluster},${targetBucket},${key}]=${incomingMap[$key]}
+	done
+	export BUCKET_REPL_PROPERTIES_MAP
+}
+
+# Input:
+# 1. Source Cluster name
+# 2. Source Bucket name
+# 3. Target Cluster name
+# 4. Target Cluster name
+function getPropertiesFromBucketReplPropertyMap {
+	local sourceCluster=$1
+	local sourceBucket=$2
+	local targetCluster=$3
+	local targetBucket=$4
+	
+	local checkString="${sourceCluster},${sourceBucket},${targetCluster},${targetBucket}"
+	# key is bucketName,Property
+	for bp in ${!BUCKET_REPL_PROPERTIES_MAP[@]}
+	do
+		key=`echo "$bp" | cut -d, -f1-4`
+		property=`echo "$bp" | cut -d, -f5`
+		if [[ $key != $checkString ]];then
+			continue
+		fi
+		BUCKET_REPL_PROPERTIES_OUTPUT_MAP["$property"]=${BUCKET_REPL_PROPERTIES_MAP[$bp]}
+	done
+}
+
+
+
+function printBucketPropertiesResults {
+	declare -p BUCKET_PROPERTIES_OUTPUT_MAP | cut -d' ' -f3- | cut -d'=' -f2-
+}
+
+function printBucketReplPropertiesResults {
+	declare -p BUCKET_REPL_PROPERTIES_OUTPUT_MAP | cut -d' ' -f3- | cut -d= -f2-
+}
+
+declare -a getBucketOutArr
+function getBucketPropertiesRESTString {
+	getBucketOutArr=()
+	for property in "${!BUCKET_PROPERTIES_OUTPUT_MAP[@]}"
+	do
+		getBucketOutArr+=("-d")
+		getBucketOutArr+=("${property}=${BUCKET_PROPERTIES_OUTPUT_MAP[$property]}")
+	done
+}
+
+declare -a getBucketReplOutArr
+function getBucketReplPropertiesRESTString {
+	getBucketReplOutArr=()
+	for property in "${!BUCKET_REPL_PROPERTIES_OUTPUT_MAP[@]}"
+	do
+		getBucketReplOutArr+=("-d")
+		getBucketReplOutArr+=("${property}=${BUCKET_REPL_PROPERTIES_OUTPUT_MAP[$property]}")
+	done
+}
 
 # Tests and see if "cluster_run -n x" has been run
 function testForClusterRun {
@@ -86,9 +203,15 @@ function setupBuckets {
 		local port=${CLUSTER_NAME_PORT_MAP[$clusterName]:-}
 		for bucketName in `echo ${bucketNames[@]}`
 		do
-			echo "For cluster $clusterName CREATING bucket $bucketName"
-			local ramQuota=${BUCKET_NAME_RAMQUOTA_MAP[$bucketName]:-}
-			$CURL -u $DEFAULT_ADMIN:$DEFAULT_PW -X POST http://localhost:$port/pools/default/buckets -d ramQuotaMB=$ramQuota -d name=$bucketName > /dev/null 2>&1
+			getPropertiesFromBucketNamePropertyMap "$bucketName"
+			echo "For cluster $clusterName CREATING bucket $bucketName with properties `printBucketPropertiesResults`"
+			local ramQuotaCheck=${BUCKET_PROPERTIES_OUTPUT_MAP["ramQuotaMB"]:-}
+			if [[ -z "$ramQuotaCheck" ]];then
+				echo "Missing ramQuota for $bucketName"
+				return 1
+			fi
+			getBucketPropertiesRESTString
+			$CURL -u $DEFAULT_ADMIN:$DEFAULT_PW -X POST http://localhost:$port/pools/default/buckets -d name=$bucketName ${getBucketOutArr[@]}  > /dev/null 2>&1
 			if (( $? != 0 ));then
 				return $?
 			fi
@@ -242,8 +365,9 @@ function createBucketReplication {
 	local sourceBucket=$2
 	local targetCluster=$3
 	local targetBucket=$4
+	local -a replProperties=$5
 
-	if [[ -z "${sourceCluster:-}" ]] || [[ -z "${sourceBucket:-}" ]] || [[ -z "${targetCluster:-}" ]] || [[ -z "${targetBucket:-}" ]];then
+	if [[ -z "${sourceCluster:-}" ]] || [[ -z "${sourceBucket:-}" ]] || [[ -z "${targetCluster:-}" ]] || [[ -z "${targetBucket:-}" ]] || [[ -z "${replProperties}" ]];then
 		echo "Invalid input"
 		return 1
 	fi
@@ -256,11 +380,14 @@ function createBucketReplication {
 	if (( $? != 0 ));then
 		return $?
 	fi
+	
+	insertPropertyIntoBucketReplPropertyMap $sourceCluster $sourceBucket $targetCluster $targetBucket $replProperties
+	getPropertiesFromBucketReplPropertyMap $sourceCluster $sourceBucket $targetCluster $targetBucket
 
-	echo "Creating replication from $sourceCluster:$sourceBucket to $targetCluster:$targetBucket "
 	local sourcePort=${CLUSTER_NAME_PORT_MAP[$sourceCluster]:-}
+	getBucketReplPropertiesRESTString
 
-	repId=`$CURL -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$sourcePort/controller/createReplication -d fromBucket=$sourceBucket -d toCluster=$targetCluster -d toBucket=$targetBucket -d replicationType=continuous -d checkpointInterval=60 -d statsInterval=500`
+	repId=`$CURL -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$sourcePort/controller/createReplication -d fromBucket=$sourceBucket -d toCluster=$targetCluster -d toBucket=$targetBucket "${getBucketReplOutArr[@]}"`
 
 	if (( `checkJQ` == 0 ));then
 		repIdReal=`getKeyUsingJQ $repId '.id'`
@@ -273,6 +400,62 @@ function createBucketReplication {
 	else
 		echo "Captured replicationID: $repId"
 	fi
+}
+
+function findCbDocLoader {
+	if [[ ! -z "${CBDOCLOADER:-}" ]];then
+		echo "$CBDOCLOADER"
+		return 0
+	fi
+
+	which locate > /dev/null 2>&1
+	if (( $? != 0 ));then
+		return $?
+	fi
+	# Just pick one
+	docloader=`locate cbdocloader | grep install | grep bin | head -n 1`
+	if (( $? != 0 ));then
+		echo ""
+		return 1
+	fi
+	if [[ -z "${CBDOCLOADER:-}" ]];then
+		# set it in case needed it in future
+		export CBDOCLOADER=$docloader
+	fi
+	echo "$docloader"
+	return 0
+
+}
+
+#Input
+# 1 - cluster name
+# 2 - bucket name
+# 3 - file name
+function runDocLoader {
+	local clusterName=$1
+	local bucketName=$2
+	local fileName=$3
+	if [[ -z "${clusterName:-}" ]] || [[ -z "${bucketName:-}" ]] || [[ -z "${fileName:-}" ]];then
+		echo "Invalid input"
+		return 1
+	fi
+	local port=${CLUSTER_NAME_PORT_MAP[$clusterName]:-}
+	
+	docLoader=`findCbDocLoader`
+	if (( $? != 0 ));then
+		echo "Could not find docLoader"
+		return 1
+	fi
+	
+	getPropertiesFromBucketNamePropertyMap "$bucketName"
+	local ramQuota=${BUCKET_PROPERTIES_OUTPUT_MAP["ramQuotaMB"]:-}
+	if [[ -z "$ramQuota" ]];then
+		echo "Missing ramQuota for $bucketName"
+		return 1
+	fi
+
+	Echo "Executing cbdocloader on bucket $bucketName for file $fileName..."
+	$docLoader -c localhost:${port} -u $DEFAULT_ADMIN -p $DEFAULT_PW -b $bucketName -m $ramQuota -d $fileName
 }
 
 function findCbWorkloadGen {

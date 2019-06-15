@@ -5,6 +5,7 @@ package base
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/couchbase/gojsonsm"
 	"github.com/stretchr/testify/assert"
 	"io/ioutil"
 	"reflect"
@@ -307,4 +308,25 @@ func TestLegacyKeyMsg(t *testing.T) {
 	err = ValidateAdvFilter("int LIKE 0")
 	assert.Equal(ErrorFilterInvalidExpression, err)
 	fmt.Println("============== Test case end: TestLegacyKeyMsg =================")
+}
+
+func TestDemo(t *testing.T) {
+	assert := assert.New(t)
+
+	filter := `(county = "United States" OR country = "Canada" AND type="brewery") OR (type="beer" AND DATE(updated) >= DATE("2019-01-01"))`
+	matcher, err := ValidateAndGetAdvFilter(filter)
+	assert.Nil(err)
+
+	realMatcher, realErr := gojsonsm.GetFilterExpressionMatcher(filter)
+	assert.Nil(realErr)
+
+	marshalledData := []byte(`{"[$%XDCRInternalKey*%$]":"big_buck_brewery-big_buck_beer","[$%XDCRInternalMeta*%$]":{},"abv":5.2,"brewery_id":"big_buck_brewery","category":"North American Ale","description":"A standard American-style beer and our flagship brand.  A small amount of corn is added to the grist to give the brew a smooth character.  Features a rich, golden color and a light malt character balanced with a mild dose of hops.","ibu":0,"name":"Big Buck Beer","srm":0,"style":"American-Style Pale Ale","type":"beer","upc":0,"updated":"2019-03-22 20:00:20"}`)
+
+	result := MatchWrapper(matcher, marshalledData, &err)
+	assert.True(result)
+
+	result, err = realMatcher.Match(marshalledData)
+	assert.True(result)
+	assert.Nil(err)
+
 }

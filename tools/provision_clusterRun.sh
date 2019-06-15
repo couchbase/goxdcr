@@ -36,7 +36,15 @@ CLUSTER_NAME_PORT_MAP=(["C1"]=9000 ["C2"]=9001)
 declare -a cluster1BucketsArr
 cluster1BucketsArr=("B0" "B1")
 CLUSTER_NAME_BUCKET_MAP=(["C1"]=${cluster1BucketsArr[@]}  ["C2"]="B2")
-BUCKET_NAME_RAMQUOTA_MAP=(["B0"]=100 ["B1"]=100 ["B2"]=100)
+
+# Bucket properties
+declare -A BucketProperty=(["ramQuotaMB"]=100)
+declare -A Bucket1Properties=(["ramQuotaMB"]=100 ["CompressionMode"]="Active")
+insertPropertyIntoBucketNamePropertyMap "B0" BucketProperty
+insertPropertyIntoBucketNamePropertyMap "B1" Bucket1Properties
+insertPropertyIntoBucketNamePropertyMap "B2" BucketProperty
+
+declare -A DefaultBucketReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500)
 
 # Bucket -> Scopes
 # -----------------
@@ -73,7 +81,7 @@ sleep 1
 createRemoteClusterReference "C1" "C2"
 createRemoteClusterReference "C2" "C1"
 sleep 1
-createBucketReplication "C1" "B1" "C2" "B2"
-createBucketReplication "C2" "B2" "C1" "B1"
+createBucketReplication "C1" "B1" "C2" "B2" DefaultBucketReplProperties
+createBucketReplication "C2" "B2" "C1" "B1" DefaultBucketReplProperties
 printGlobalScopeAndCollectionInfo
 runDataLoad
