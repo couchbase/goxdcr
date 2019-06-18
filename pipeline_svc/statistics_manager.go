@@ -296,6 +296,10 @@ func (statsMgr *StatisticsManager) getRouterCollector() *routerCollector {
 	return (statsMgr.collectors[2]).(*routerCollector)
 }
 
+func (statsMgr *StatisticsManager) getdcpCollector() *dcpCollector {
+	return (statsMgr.collectors[1]).(*dcpCollector)
+}
+
 func (stats_mgr *StatisticsManager) cleanupBeforeExit() error {
 	rs, err := stats_mgr.getReplicationStatus()
 	if err != nil {
@@ -1166,6 +1170,8 @@ func (dcp_collector *dcpCollector) ProcessEvent(event *common.Event) error {
 			metric_map[DELETION_RECEIVED_DCP_METRIC].(metrics.Counter).Inc(1)
 		} else if uprEvent.Opcode == mc.UPR_MUTATION {
 			metric_map[SET_RECEIVED_DCP_METRIC].(metrics.Counter).Inc(1)
+		} else if uprEvent.Opcode == mc.UPR_EXPIRATION {
+			metric_map[EXPIRY_RECEIVED_DCP_METRIC].(metrics.Counter).Inc(1)
 		} else {
 			dcp_collector.stats_mgr.logger.Warnf("Invalid opcode, %v, in DataReceived event from %v.", uprEvent.Opcode, event.Component.Id())
 		}
@@ -1369,6 +1375,8 @@ func (r_collector *routerCollector) ProcessEvent(event *common.Event) error {
 			metric_map[DELETION_FILTERED_METRIC].(metrics.Counter).Inc(1)
 		} else if uprEvent.Opcode == mc.UPR_MUTATION {
 			metric_map[SET_FILTERED_METRIC].(metrics.Counter).Inc(1)
+		} else if uprEvent.Opcode == mc.UPR_EXPIRATION {
+			metric_map[EXPIRY_FILTERED_METRIC].(metrics.Counter).Inc(1)
 		} else {
 			r_collector.stats_mgr.logger.Warnf("Invalid opcode, %v, in DataFiltered event from %v.", uprEvent.Opcode, event.Component.Id())
 		}

@@ -69,6 +69,7 @@ func setupBoilerPlate() (*log.CommonLogger,
 	vbs = append(vbs, 550) // perfData
 	vbs = append(vbs, 12)
 	vbs = append(vbs, 102)
+	vbs = append(vbs, 221)
 	activeVBs[testDCPPart] = vbs
 
 	pipeline := &common.Pipeline{}
@@ -177,7 +178,7 @@ func TestStatsMgrWithDCPCollector(t *testing.T) {
 	statsMgr.initOverviewRegistry()
 
 	routerCollector := statsMgr.getRouterCollector()
-	assert.Equal(3, len(routerCollector.vbBasedMetric))
+	assert.Equal(4, len(routerCollector.vbBasedMetric))
 
 	uprEvent, err := RetrieveUprFile(uprEventFile)
 	assert.Nil(err)
@@ -281,4 +282,60 @@ func TestStatsMgrWithDCPCollector(t *testing.T) {
 	assert.NotNil(counter)
 	assert.Equal(int64(21), counter.Count())
 	fmt.Println("============== Test case end: TestStatsMgrWithDCPCollector =================")
+}
+
+var uprEventFileWithExpiration string = "../parts/testdata/uprEventExpiration.json"
+
+func TestStatsMgrWithExpiration(t *testing.T) {
+	fmt.Println("============== Test case start: TestStatsMgrWithExpiration =================")
+	assert := assert.New(t)
+	_, throughSeqSvc, clusterInfoSvc, xdcrTopologySvc, utils, activeVBs,
+		pipeline, replicationSpec, runtimeCtx, ckptService, capiSvc, remoteClusterSvc, replSpecSvc,
+		targetKVVbMap, remoteClusterRef, dcpNozzle, connector := setupBoilerPlate()
+
+	setupMocks(throughSeqSvc, clusterInfoSvc, xdcrTopologySvc, utils, activeVBs,
+		pipeline, replicationSpec, runtimeCtx, ckptService, capiSvc, remoteClusterSvc, replSpecSvc,
+		targetKVVbMap, remoteClusterRef, dcpNozzle, connector)
+
+	statsMgr := NewStatisticsManager(throughSeqSvc, clusterInfoSvc, xdcrTopologySvc,
+		log.DefaultLoggerContext, activeVBs, "TestBucket", utils)
+	assert.NotNil(statsMgr)
+
+	ckptManager := setupCheckpointMgr(ckptService, capiSvc, remoteClusterSvc, replSpecSvc, clusterInfoSvc,
+		xdcrTopologySvc, throughSeqSvc, activeVBs, targetKVVbMap, remoteClusterRef, utils, statsMgr)
+	setupInnerMock(runtimeCtx, ckptManager)
+
+	statsMgr.Attach(pipeline)
+	statsMgr.initOverviewRegistry()
+
+	routerCollector := statsMgr.getRouterCollector()
+	assert.Equal(4, len(routerCollector.vbBasedMetric))
+
+	dcpCollector := statsMgr.getdcpCollector()
+	assert.NotNil(dcpCollector)
+
+	uprEvent, err := RetrieveUprFile(uprEventFileWithExpiration)
+	assert.Nil(err)
+	assert.NotNil(uprEvent)
+
+	passedEvent := &commonReal.Event{}
+	passedEvent.EventType = commonReal.DataFiltered
+	fakeComponent := &common.Component{}
+	fakeComponent.On("Id").Return(testRouter).Once()
+	passedEvent.Component = fakeComponent
+	passedEvent.Data = uprEvent
+
+	assert.Nil(routerCollector.ProcessEvent(passedEvent))
+	assert.Equal(int64(1), (routerCollector.component_map[testRouter][EXPIRY_FILTERED_METRIC]).(metrics.Counter).Count())
+	assert.Equal(int64(1), (routerCollector.component_map[testRouter][DOCS_FILTERED_METRIC]).(metrics.Counter).Count())
+
+	passedEvent.EventType = commonReal.DataReceived
+	fakeComponent.On("Id").Return(testDCPPart)
+	passedEvent.Component = fakeComponent
+
+	assert.Nil(dcpCollector.ProcessEvent(passedEvent))
+	assert.Equal(int64(1), (dcpCollector.component_map[testDCPPart][EXPIRY_RECEIVED_DCP_METRIC]).(metrics.Counter).Count())
+	assert.Equal(int64(1), (dcpCollector.component_map[testDCPPart][DOCS_RECEIVED_DCP_METRIC]).(metrics.Counter).Count())
+
+	fmt.Println("============== Test case end: TestStatsMgrWithExpiration =================")
 }
