@@ -24,13 +24,15 @@ if (( $bash_major_version < 4 ));then
 	return 1
 fi
 
+. ./importExporter.shlib
+
 # globals
 # -----------------
 declare DEFAULT_ADMIN
 declare DEFAULT_PW
 # Run curl in silent mode to prevent progress bar
 CURL="curl -s"
-
+POOLS_DEFAULT_BUCKETS_PATH="pools/default/buckets"
 
 # topological globals
 # -----------------
@@ -38,6 +40,7 @@ CURL="curl -s"
 # Bucket -> Scopes
 # Scopes -> Collections
 declare -A CLUSTER_NAME_PORT_MAP
+declare -A CLUSTER_NAME_XDCR_PORT_MAP
 declare -A CLUSTER_NAME_BUCKET_MAP
 declare -A BUCKET_NAME_RAMQUOTA_MAP
 declare -A BUCKET_NAME_SCOPE_MAP
@@ -45,6 +48,7 @@ declare -A SCOPE_NAME_COLLECTION_MAP
 declare -A BUCKET_PROPERTIES_OUTPUT_MAP
 declare -A BUCKET_REPL_PROPERTIES_MAP
 declare -A BUCKET_REPL_PROPERTIES_OUTPUT_MAP
+declare -A BUCKET_REPL_EXPORT_MAP
 
 # optional globals
 # -----------------
@@ -54,7 +58,7 @@ declare CBWORKLOADGEN=""
 # Value is in the format of actual value to send
 declare -A BUCKET_NAME_PROPERTIES_MAP
 
-# Input: 
+# Input:
 # 1. Bucket name
 # 2. An associative array of Key - Parameter Value - value to send
 # Will store information as:
@@ -103,13 +107,31 @@ function insertPropertyIntoBucketReplPropertyMap {
 	local targetCluster=$3
 	local targetBucket=$4
 	local -n incomingMap=$5
-	
+
 	for key in ${!incomingMap[@]}
 	do
 		BUCKET_REPL_PROPERTIES_MAP[${sourceCluster},${sourceBucket},${targetCluster},${targetBucket},${key}]=${incomingMap[$key]}
 	done
 	export BUCKET_REPL_PROPERTIES_MAP
 }
+
+# Input:
+# 1. Source Cluster name
+# 2. Source Bucket name
+# 3. Target Cluster name
+# 4. Target Cluster name
+# 2. An associative array of Key - Parameter Value - value to send
+function insertBucketReplIntoExportMap {
+	local sourceCluster=$1
+	local sourceBucket=$2
+	local targetCluster=$3
+	local targetBucket=$4
+	local replRestID=$5
+
+	BUCKET_REPL_EXPORT_MAP[${sourceCluster},${sourceBucket},${targetCluster},${targetBucket}]=${replRestID}
+	export BUCKET_REPL_EXPORT_MAP
+}
+
 
 # Input:
 # 1. Source Cluster name
@@ -165,6 +187,40 @@ function getBucketReplPropertiesRESTString {
 	done
 }
 
+function getBucketInfoRaw {
+	local clusterName=$1
+	local bucketName=$2
+	local port=${CLUSTER_NAME_PORT_MAP[$clusterName]:-}
+
+	$CURL -u $DEFAULT_ADMIN:$DEFAULT_PW -X GET http://localhost:$port/$POOLS_DEFAULT_BUCKETS_PATH/$bucketName
+}
+
+function getBucketInfo {
+	local clusterName=$1
+	local bucketName=$2
+
+	if (( `checkJQ` != 0 ));then
+		getBucketInfoRaw $clusterName $bucketName
+	else
+		echo `getBucketInfoRaw $clusterName $bucketName` | jq
+	fi
+}
+
+function getBucketItemCount {
+	local clusterName=$1
+	local bucketName=$2
+
+	if (( `checkJQ` != 0 ));then
+		echo "Cannot run $0 without jq"
+		return 1
+	fi
+	
+	rawOutput=`getBucketInfoRaw $clusterName $bucketName`
+	basicStats=`echo "$rawOutput" | jq '.basicStats'`
+	itemCount=`echo "$basicStats" | jq '.itemCount'`
+	echo "$itemCount"
+}
+
 # Tests and see if "cluster_run -n x" has been run
 function testForClusterRun {
 	for port in ${CLUSTER_NAME_PORT_MAP[@]}
@@ -211,7 +267,7 @@ function setupBuckets {
 				return 1
 			fi
 			getBucketPropertiesRESTString
-			$CURL -u $DEFAULT_ADMIN:$DEFAULT_PW -X POST http://localhost:$port/pools/default/buckets -d name=$bucketName ${getBucketOutArr[@]}  > /dev/null 2>&1
+			$CURL -u $DEFAULT_ADMIN:$DEFAULT_PW -X POST http://localhost:$port/$POOLS_DEFAULT_BUCKETS_PATH -d name=$bucketName ${getBucketOutArr[@]}  > /dev/null 2>&1
 			if (( $? != 0 ));then
 				return $?
 			fi
@@ -245,7 +301,7 @@ function setupScopes {
 	for scopeName in `echo ${scopesArr[@]}`
 	do
 		echo "For cluster $clusterName bucket $bucketName CREATING scope $scopeName"
-		$CURL -u $DEFAULT_ADMIN:$DEFAULT_PW -X POST http://localhost:$port/pools/default/buckets/$bucketName/collections -d name=$scopeName > /dev/null 2>&1
+		$CURL -u $DEFAULT_ADMIN:$DEFAULT_PW -X POST http://localhost:$port/$POOLS_DEFAULT_BUCKETS_PATH/$bucketName/collections -d name=$scopeName > /dev/null 2>&1
 		# If scope has collections
 		if [[ ! -z "${SCOPE_NAME_COLLECTION_MAP[$scopeName]:-}" ]];then
 			setupCollections $clusterName $bucketName $scopeName
@@ -276,7 +332,7 @@ function setupCollections {
 	for collectionName in `echo ${collectionsArr[@]}`
 	do
 		echo "For cluster $clusterName bucket $bucketName scope $scopeName CREATING collection $collectionName"
-		$CURL -u $DEFAULT_ADMIN:$DEFAULT_PW -X POST http://localhost:$port/pools/default/buckets/$bucketName/collections/$scopeName -d name=$collectionName > /dev/null 2>&1
+		$CURL -u $DEFAULT_ADMIN:$DEFAULT_PW -X POST http://localhost:$port/$POOLS_DEFAULT_BUCKETS_PATH/$bucketName/collections/$scopeName -d name=$collectionName > /dev/null 2>&1
 	done
 }
 
@@ -320,14 +376,23 @@ function createReplicationInternal {
 # Check if jq is present. It is used for parsing JSON in a bash environment
 function checkJQ {
 	which jq > /dev/null 2>&1
+	if (( $? != 0 ));then
+		which brew > /dev/null 2>&1
+		if (( $? != 0 ));then
+			return $?
+		fi
+		echo "jq not found... installing from homebrew"
+		brew install jq
+		return $?
+	fi
 	echo $?
 }
 
 function getKeyUsingJQ {
 	local arg=$1
 	local key=$2
-	if [[ -z "$arg" ]];then
-		return ""
+	if [[ -z "${arg:-}" ]];then
+		return 1
 	fi
 
 	echo $arg | jq ${key} 2> /dev/null
@@ -396,6 +461,7 @@ function createBucketReplication {
 		else
 			restFriendlyReplID=`echo $repIdReal | sed 's|/|%2F|g'`
 			echo "ReplicationID: $repIdReal Rest-FriendlyID: $restFriendlyReplID"
+			insertBucketReplIntoExportMap "$sourceCluster" "$sourceBucket" "$targetCluster" "$targetBucket" "$restFriendlyReplID"
 		fi
 	else
 		echo "Captured replicationID: $repId"
@@ -517,8 +583,7 @@ function waitForBgJobs {
 # Print a summary of all the topology setup -> scope and collection info
 # Uses the manifest REST API
 function printGlobalScopeAndCollectionInfo {
-	checkJQ
-	if (( $? != 0 ));then
+	if (( `checkJQ` != 0 ));then
 		echo "jq not found - cannot run $0"
 		return 1
 	fi
@@ -532,7 +597,7 @@ function printGlobalScopeAndCollectionInfo {
 			# Get the manifest for this bucket
 			local manifestOutput=""
 			local manifestVersion=""
-			manifestOutput=`$CURL -u $DEFAULT_ADMIN:$DEFAULT_PW -X GET http://localhost:$port/pools/default/buckets/$bucketName/collections`
+			manifestOutput=`$CURL -u $DEFAULT_ADMIN:$DEFAULT_PW -X GET http://localhost:$port/$POOLS_DEFAULT_BUCKETS_PATH/$bucketName/collections`
 			if (( $? != 0 ));then
 				echo "Error retrieving manifest - Cluster $clusterName bucket $bucketName scope $scopeName"
 				continue

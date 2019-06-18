@@ -1,0 +1,92 @@
+#!/usr/bin/env bash
+set -u
+
+# Copyright (c) 2019 Couchbase, Inc.
+# Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file
+# except in compliance with the License. You may obtain a copy of the License at
+#   http://www.apache.org/licenses/LICENSE-2.0
+# Unless required by applicable law or agreed to in writing, software distributed under the
+# License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND,
+# either express or implied. See the License for the specific language governing permissions
+# and limitations under the License.
+
+function exportSingleVarMap {
+	local name=$1
+	#first see if it is exported validly
+	if (( `declare -p $name | grep -c "="` == 0 ));then
+		return 1
+	fi
+
+	# First check if declare shows -Ax or just -A
+	flag=`declare -p $name| awk '{print $2}'`
+	if (( $? != 0 ));then
+		return $?
+	fi
+	declare -p $name | sed "s/declare ${flag}/export -A/g"
+}
+
+function exportSingleVar {
+	local name=$1
+	flag=`declare -p $name| awk '{print $2}'`
+	if (( $? != 0 ));then
+		return $?
+	fi
+	declare -p $name | sed "s/declare ${flag}/export /g"
+}
+
+declare variablesFile="XDCR_Provisioning_VarFile"
+
+function exportProvisionedConfig {
+	local -a outputArr
+
+	tempFile=`mktemp`
+	if [[ ! -f "$tempFile" ]];then
+		echo "Unable to establish tempfile $tempFile"
+		return 1
+	fi
+
+	for mapName in CLUSTER_NAME_PORT_MAP \
+					CLUSTER_NAME_XDCR_PORT_MAP \
+					CLUSTER_NAME_BUCKET_MAP \
+					BUCKET_NAME_RAMQUOTA_MAP \
+					BUCKET_NAME_SCOPE_MAP \
+					SCOPE_NAME_COLLECTION_MAP \
+					BUCKET_PROPERTIES_OUTPUT_MAP \
+					BUCKET_REPL_PROPERTIES_MAP \
+					BUCKET_REPL_PROPERTIES_OUTPUT_MAP \
+					BUCKET_REPL_EXPORT_MAP
+	do
+		local outputStr=`exportSingleVarMap $mapName`
+		if (( $? == 0 ));then
+			outputArr+=("$outputStr")
+		fi
+	done
+
+	for varName in DEFAULT_ADMIN DEFAULT_PW
+	do
+		local outputStr=`exportSingleVar $varName`
+		if (( $? == 0 ));then
+			outputArr+=("$outputStr")
+		fi
+	done
+
+	# Export the cluster name to port
+	echo "If needed, run the following export command to enable other helper scripts to load the provisioned configuration:"
+	echo "============================================"
+	echo "export $variablesFile=$tempFile"
+	echo "============================================"
+	for oneLine in "${outputArr[@]}"
+	do
+		echo "$oneLine" >> $tempFile
+	done
+}
+
+function importProvisionedConfig {
+	# Find the exported variables file
+	if [[ -z "${variablesFile:-}" ]];then
+		echo "Cannot find variable file in environment"
+		exit 1
+	else
+		. `printenv $variablesFile`
+	fi
+}

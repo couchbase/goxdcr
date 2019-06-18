@@ -33,31 +33,35 @@ DEFAULT_PW="wewewe"
 # -----------------
 CLUSTER_NAME_PORT_MAP=(["C1"]=9000 ["C2"]=9001)
 CLUSTER_NAME_XDCR_PORT_MAP=(["C1"]=13000 ["C2"]=13001)
-# Set c1 to have 2 buckets and c2 to have 1 bucket
 declare -a cluster1BucketsArr
+declare -a cluster2BucketsArr
 cluster1BucketsArr=("B0" "B1")
-CLUSTER_NAME_BUCKET_MAP=(["C1"]=${cluster1BucketsArr[@]}  ["C2"]="B2")
+cluster2BucketsArr=("B2" "B3")
+CLUSTER_NAME_BUCKET_MAP=(["C1"]=${cluster1BucketsArr[@]}  ["C2"]=${cluster2BucketsArr[@]})
 
 # Bucket properties
-declare -A BucketProperty=(["ramQuotaMB"]=100)
-declare -A Bucket1Properties=(["ramQuotaMB"]=100 ["CompressionMode"]="Active")
-insertPropertyIntoBucketNamePropertyMap "B0" BucketProperty
+declare -A Bucket0Properties=(["ramQuotaMB"]=100 ["compressionMode"]="off")
+declare -A Bucket1Properties=(["ramQuotaMB"]=100 ["compressionMode"]="active")
+declare -A Bucket2Properties=(["ramQuotaMB"]=100 ["compressionMode"]="off")
+declare -A Bucket3Properties=(["ramQuotaMB"]=100 ["compressionMode"]="off")
+insertPropertyIntoBucketNamePropertyMap "B0" Bucket0Properties
 insertPropertyIntoBucketNamePropertyMap "B1" Bucket1Properties
-insertPropertyIntoBucketNamePropertyMap "B2" BucketProperty
+insertPropertyIntoBucketNamePropertyMap "B2" Bucket2Properties
+insertPropertyIntoBucketNamePropertyMap "B3" Bucket3Properties
 
-pcre_filter='REGEXP_CONTAINS(click, "q(?!uit)")'
-declare -A DefaultBucketReplProperties=(["filterExpression"]="$pcre_filter" ["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500)
+declare -A NoCompressionReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500 ["compressionType"]="None")
+declare -A CompressionReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500 ["compressionType"]="Auto")
 
 # Bucket -> Scopes
 # -----------------
-declare -a scope1Arr=("S1" "S2")
-BUCKET_NAME_SCOPE_MAP=(["B1"]=${scope1Arr[@]} ["B2"]="S3")
+#declare -a scope1Arr=("S1" "S2")
+#BUCKET_NAME_SCOPE_MAP=(["B1"]=${scope1Arr[@]} ["B2"]="S3")
 
 # Scopes -> Collections
 # ----------------------
-declare -a collection1Arr=("col1" "col2")
-declare -a collection2Arr=("col1" "col2" "col3")
-SCOPE_NAME_COLLECTION_MAP=(["S1"]=${collection1Arr[@]} ["S2"]=${collection2Arr[@]} ["S3"]=${collection2Arr[@]})
+#declare -a collection1Arr=("col1" "col2")
+#declare -a collection2Arr=("col1" "col2" "col3")
+#SCOPE_NAME_COLLECTION_MAP=(["S1"]=${collection1Arr[@]} ["S2"]=${collection2Arr[@]} ["S3"]=${collection2Arr[@]})
 
 
 function runDataLoad {
@@ -65,7 +69,16 @@ function runDataLoad {
 	runCbWorkloadGenBucket "C1" "B0" &
 	runCbWorkloadGenBucket "C1" "B1" &
 	runCbWorkloadGenBucket "C2" "B2" &
+	runCbWorkloadGenBucket "C2" "B3" &
 	waitForBgJobs
+}
+
+function checkItemCnt {
+	local cluster=$1
+	local bucket=$2
+	
+	itemCount=`getBucketItemCount "$cluster" "$bucket"`
+	echo "Item count for cluster $cluster bucket $bucket: $itemCount"
 }
 
 #MAIN
@@ -83,9 +96,17 @@ sleep 1
 createRemoteClusterReference "C1" "C2"
 createRemoteClusterReference "C2" "C1"
 sleep 1
-createBucketReplication "C1" "B1" "C2" "B2" DefaultBucketReplProperties
-createBucketReplication "C2" "B2" "C1" "B1" DefaultBucketReplProperties
-printGlobalScopeAndCollectionInfo
 runDataLoad
+sleep 1
+createBucketReplication "C1" "B0" "C2" "B2" NoCompressionReplProperties
+createBucketReplication "C1" "B1" "C2" "B3" NoCompressionReplProperties
+createBucketReplication "C2" "B2" "C1" "B0" NoCompressionReplProperties
+createBucketReplication "C2" "B3" "C1" "B1" NoCompressionReplProperties
 
-exportProvisionedConfig
+sleep 1
+checkItemCnt "C1" "B1"
+checkItemCnt "C1" "B2"
+checkItemCnt "C2" "B3"
+checkItemCnt "C2" "B4"
+
+#exportProvisionedConfig
