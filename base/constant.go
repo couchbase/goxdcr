@@ -815,6 +815,13 @@ var MaxCountCpuNotMaxed = 3
 // if we are in extra quota period, the period will be ended when the max count is reached
 var MaxCountThroughputDrop = 3
 
+// Internal key to wrap around incoming document's xattributes for advanced filtering
+// Customers may change it if a specific key conflicts with this
+var InternalKeyXattr = "[$%XDCRInternalMeta*%$]"
+
+// Internal key to wrap around incoming key for advanced filtering
+var InternalKeyKey = "[$%XDCRInternalKey*%$]"
+
 func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeCountBeforeRestart,
 	maxTopologyStableCountBeforeRestart, maxWorkersForCheckpointing int,
 	timeoutCheckpointBeforeStop time.Duration, capiDataChanSizeMultiplier int,
@@ -856,7 +863,8 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	numberOfSlotsForThroughputThrottling int, intervalForThrottlerCalibration int,
 	throughputSampleSize int, throughputSampleAlpha int,
 	thresholdRatioForProcessCpu int, thresholdRatioForTotalCpu int,
-	maxCountCpuNotMaxed int, maxCountThroughputDrop int) {
+	maxCountCpuNotMaxed int, maxCountThroughputDrop int,
+	filteringInternalKey string, filteringInternalXattr string) {
 	TopologyChangeCheckInterval = topologyChangeCheckInterval
 	MaxTopologyChangeCountBeforeRestart = maxTopologyChangeCountBeforeRestart
 	MaxTopologyStableCountBeforeRestart = maxTopologyStableCountBeforeRestart
@@ -948,6 +956,8 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	ThresholdRatioForTotalCpu = thresholdRatioForTotalCpu
 	MaxCountCpuNotMaxed = maxCountCpuNotMaxed
 	MaxCountThroughputDrop = maxCountThroughputDrop
+	InternalKeyKey = filteringInternalKey
+	InternalKeyXattr = filteringInternalXattr
 }
 
 // Need to escape the () to result in "META().xattrs" literal
@@ -955,8 +965,6 @@ const ExternalKeyXattr = "META\\(\\).xattrs"
 const ExternalKeyKey = "META\\(\\).id"
 const ExternalKeyKeyContains = "META().id"
 const ExternalKeyXattrContains = "META().xattrs"
-const InternalKeyXattr = "[$%XDCRInternalMeta*%$]"
-const InternalKeyKey = "[$%XDCRInternalKey*%$]"
 
 var CachedInternalKeyKeyByteSlice = []byte(InternalKeyKey)
 var CachedInternalKeyKeyByteSize = len(CachedInternalKeyKeyByteSlice)

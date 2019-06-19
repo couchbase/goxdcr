@@ -202,6 +202,12 @@ const (
 	MaxCountCpuNotMaxedKey = "MaxCountCpuNotMaxed"
 	// max count of consecutive terms where throughput dropped from previous high
 	MaxCountThroughputDropKey = "MaxCountThroughputDrop"
+
+	/* --End Resource menagement related settings ---*/
+
+	// Internal keys to wrap around incoming document's key or xattributes for advanced filtering
+	FilteringInternalKey   = "FilteringInternalKeyKey"
+	FilteringInternalXattr = "FilteringInternalXattrKey"
 )
 
 var TopologyChangeCheckIntervalConfig = &SettingsConfig{10, &Range{1, 100}}
@@ -288,6 +294,8 @@ var ThresholdRatioForProcessCpuConfig = &SettingsConfig{95, &Range{1, 1000}}
 var ThresholdRatioForTotalCpuConfig = &SettingsConfig{95, &Range{1, 1000}}
 var MaxCountCpuNotMaxedConfig = &SettingsConfig{3, &Range{1, 1000}}
 var MaxCountThroughputDropConfig = &SettingsConfig{3, &Range{1, 1000}}
+var FilteringInternalKeyConfig = &SettingsConfig{base.InternalKeyKey, nil}
+var FilteringInternalXattrConfig = &SettingsConfig{base.InternalKeyXattr, nil}
 
 var XDCRInternalSettingsConfigMap = map[string]*SettingsConfig{
 	TopologyChangeCheckIntervalKey:                TopologyChangeCheckIntervalConfig,
@@ -374,6 +382,8 @@ var XDCRInternalSettingsConfigMap = map[string]*SettingsConfig{
 	ThresholdRatioForTotalCpuKey:                  ThresholdRatioForTotalCpuConfig,
 	MaxCountCpuNotMaxedKey:                        MaxCountCpuNotMaxedConfig,
 	MaxCountThroughputDropKey:                     MaxCountThroughputDropConfig,
+	FilteringInternalKey:                          FilteringInternalKeyConfig,
+	FilteringInternalXattr:                        FilteringInternalXattrConfig,
 }
 
 func InitConstants(xmemMaxIdleCountLowerBound int, xmemMaxIdleCountUpperBound int) {

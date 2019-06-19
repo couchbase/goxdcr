@@ -285,6 +285,8 @@ func initConstants(xdcr_topology_svc service_def.XDCRCompTopologySvc, internal_s
 		internal_settings.Values[metadata.ThresholdRatioForTotalCpuKey].(int),
 		internal_settings.Values[metadata.MaxCountCpuNotMaxedKey].(int),
 		internal_settings.Values[metadata.MaxCountThroughputDropKey].(int),
+		internal_settings.Values[metadata.FilteringInternalKey].(string),
+		internal_settings.Values[metadata.FilteringInternalXattr].(string),
 	)
 }
 
