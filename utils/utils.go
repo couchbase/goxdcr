@@ -394,6 +394,9 @@ func (u *Utilities) FilterExpressionMatchesDoc(expression, docId, bucketName, ad
 
 	err = u.ExponentialBackoffExecutor("filterTesterXattrRetriever", base.BucketInfoOpWaitTime, base.BucketInfoOpMaxRetry, base.BucketInfoOpRetryFactor, retryOp)
 	if err != nil {
+		if strings.Contains(err.Error(), base.ErrorResourceDoesNotExist.Error()) {
+			err = fmt.Errorf("Specified document not found")
+		}
 		return
 	}
 
@@ -2170,6 +2173,12 @@ func (u *Utilities) parseResponseBody(res *http.Response, out interface{}, logge
 	if res != nil && res.Body != nil {
 		defer res.Body.Close()
 		var bod []byte
+		if res.ContentLength == 0 {
+			// If res.Body is empty, json.Unmarshal on an empty Body will return the error "unexpected end of JSON input"
+			// Return a more specific error here so upstream callers can handle it
+			err = base.ErrorResourceDoesNotExist
+			return
+		}
 		bod, err = ioutil.ReadAll(io.LimitReader(res.Body, res.ContentLength))
 		if err != nil {
 			l.Errorf("Failed to read response body, err=%v\n res=%v\n", err, res)
@@ -2181,11 +2190,7 @@ func (u *Utilities) parseResponseBody(res *http.Response, out interface{}, logge
 				l.Errorf("Failed to unmarshal the response as json, err=%v, bod=%v\n res=%v\n", err, string(bod), res)
 				out = bod
 				return
-			} else {
-				l.Debugf("out=%v\n", out)
 			}
-		} else {
-			l.Debugf("out is nil")
 		}
 	}
 	return
