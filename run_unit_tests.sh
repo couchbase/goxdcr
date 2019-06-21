@@ -27,15 +27,7 @@ do
 	if (( !$result == 0 ));then
 		exit $result
 	fi
-	pcreTestsFound=false
-	for testFile in `ls *_test.go`
-	do
-		if (( `head $testFile | grep -c "build pcre"` > 0));then
-			pcreTestsFound=true
-			break
-		fi
-	done
-	if [[ "$pcreTestsFound" == "true" ]];then
+	if (( `ls -l *pcre_test.go 2> /dev/null | grep -c .` > 0 )); then
 		go test -tags=pcre
 		result=$?
 		if (( !$result == 0 ));then

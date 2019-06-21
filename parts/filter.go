@@ -207,5 +207,6 @@ func (filter *Filter) filterUprEvent(uprEvent *mcc.UprEvent, body []byte, endBod
 
 func (filter *Filter) FilterByteSlice(slice []byte) (matched bool, err error) {
 	defer filter.matcher.Reset()
-	return base.MatchWrapper(filter.matcher, slice)
+	matched = base.MatchWrapper(filter.matcher, slice, &err)
+	return
 }

@@ -1,3 +1,5 @@
+// +build !pcre
+
 package base
 
 import (
@@ -308,7 +310,6 @@ func TestLegacyKeyMsg(t *testing.T) {
 	fmt.Println("============== Test case end: TestLegacyKeyMsg =================")
 }
 
-// Show and tell demo
 func TestDemo(t *testing.T) {
 	assert := assert.New(t)
 
@@ -321,41 +322,11 @@ func TestDemo(t *testing.T) {
 
 	marshalledData := []byte(`{"[$%XDCRInternalKey*%$]":"big_buck_brewery-big_buck_beer","[$%XDCRInternalMeta*%$]":{},"abv":5.2,"brewery_id":"big_buck_brewery","category":"North American Ale","description":"A standard American-style beer and our flagship brand.  A small amount of corn is added to the grist to give the brew a smooth character.  Features a rich, golden color and a light malt character balanced with a mild dose of hops.","ibu":0,"name":"Big Buck Beer","srm":0,"style":"American-Style Pale Ale","type":"beer","upc":0,"updated":"2019-03-22 20:00:20"}`)
 
-	result, err := MatchWrapper(matcher, marshalledData)
+	result := MatchWrapper(matcher, marshalledData, &err)
 	assert.True(result)
 
 	result, err = realMatcher.Match(marshalledData)
 	assert.True(result)
 	assert.Nil(err)
-}
 
-func TestSkipXattrAndStringsConversion(t *testing.T) {
-	fmt.Println("============== Test case start: TestSkipXattrAndStringsConversion =================")
-	assert := assert.New(t)
-	InitPcreVars()
-
-	userFilter := "META().id = \"something\" AND META().xattrs.testXattrKey EXISTS"
-	assert.True(FilterContainsXattrExpression(userFilter))
-	assert.True(FilterContainsKeyExpression(userFilter))
-
-	filterExpressionInternal := ReplaceKeyWordsForExpression(userFilter)
-
-	assert.False(strings.Contains(filterExpressionInternal, ExternalKeyXattrContains))
-	assert.False(strings.Contains(filterExpressionInternal, ExternalKeyKeyContains))
-	assert.False(strings.Contains(filterExpressionInternal, "META()"))
-
-	filterExpressionExternal := ReplaceKeyWordsForOutput(filterExpressionInternal)
-	assert.True(strings.Contains(filterExpressionExternal, "META()"))
-	// No escaped (i.e. no "META\\(\\)" )
-	assert.False(strings.Contains(filterExpressionExternal, ExternalKeyXattr))
-	assert.False(strings.Contains(filterExpressionExternal, ExternalKeyKey))
-	assert.True(strings.Contains(filterExpressionExternal, ExternalKeyXattrContains))
-	assert.True(strings.Contains(filterExpressionExternal, ExternalKeyKeyContains))
-
-	userFilter = fmt.Sprintf("REGEXP_CONTAINS(`%v`, \"^d\")", InternalKeyKey)
-	assert.False(strings.Contains(userFilter, "META()"))
-	userFilter = ReplaceKeyWordsForOutput(userFilter)
-	assert.True(strings.Contains(filterExpressionExternal, "META()"))
-
-	fmt.Println("============== Test case end: TestSkipXattrAndStringsConversion =================")
 }
