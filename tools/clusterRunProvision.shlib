@@ -73,6 +73,10 @@ function insertPropertyIntoBucketNamePropertyMap {
 	export BUCKET_NAME_PROPERTIES_MAP
 }
 
+function cleanupBucketNamePropertyMap {
+	BUCKET_NAME_PROPERTIES_MAP=()
+}
+
 # Input:
 # 1. Bucket name
 # Outputs associative array as a exported global of BUCKET_PROPERTIES_OUTPUT_MAP
@@ -209,16 +213,29 @@ function getBucketInfo {
 function getBucketItemCount {
 	local clusterName=$1
 	local bucketName=$2
+	local maxRetry=3
 
 	if (( `checkJQ` != 0 ));then
 		echo "Cannot run $0 without jq"
 		return 1
 	fi
-	
-	rawOutput=`getBucketInfoRaw $clusterName $bucketName`
-	basicStats=`echo "$rawOutput" | jq '.basicStats'`
-	itemCount=`echo "$basicStats" | jq '.itemCount'`
-	echo "$itemCount"
+
+	for (( i=0; $i < $maxRetry; i=$(($i+1)) ))
+	do
+		rawOutput=`getBucketInfoRaw $clusterName $bucketName`
+		if (( $? != 0 ));then
+			continue
+		fi
+		basicStats=`echo "$rawOutput" | jq '.basicStats'`
+		if (( $? != 0 ));then
+			continue
+		fi
+		itemCount=`echo "$basicStats" | jq '.itemCount'`
+		if (( $? == 0 ));then
+			echo "$itemCount"
+			break
+		fi
+	done
 }
 
 # Tests and see if "cluster_run -n x" has been run
@@ -275,6 +292,19 @@ function setupBuckets {
 			if [[ ! -z "${BUCKET_NAME_SCOPE_MAP[$bucketName]:-}" ]];then
 				setupScopes $clusterName $bucketName
 			fi
+		done
+	done
+}
+
+function cleanupBuckets {
+	for clusterName in `echo ${!CLUSTER_NAME_BUCKET_MAP[@]}`
+	do
+		local bucketNames=(${CLUSTER_NAME_BUCKET_MAP[$clusterName]:-})
+		local port=${CLUSTER_NAME_PORT_MAP[$clusterName]:-}
+		for bucketName in `echo ${bucketNames[@]}`
+		do
+		echo "For cluster $clusterName DELETING bucket $bucketName"
+		$CURL -u $DEFAULT_ADMIN:$DEFAULT_PW -X DELETE http://localhost:$port/$POOLS_DEFAULT_BUCKETS_PATH/$bucketName > /dev/null 2>&1
 		done
 	done
 }
@@ -466,6 +496,21 @@ function createBucketReplication {
 	else
 		echo "Captured replicationID: $repId"
 	fi
+}
+
+function cleanupBucketReplications {
+	for replKey in "${!BUCKET_REPL_EXPORT_MAP[@]}"
+	do
+		local sourceCluster=`echo "$replKey" | cut -d, -f1`
+		local restID=`echo "${BUCKET_REPL_EXPORT_MAP[$replKey]}" | sed 's/"//g'`
+		local sourcePort=${CLUSTER_NAME_PORT_MAP[$sourceCluster]:-}
+		local sourceBucket=`echo "$replKey" | cut -d, -f2`
+		local targetCluster=`echo "$replKey" | cut -d, -f3`
+		local targetBucket=`echo "$replKey" | cut -d, -f4`
+
+		echo "DELETING replication from sourceCluster $sourceCluster sourceBucket $sourceBucket to targetCluster $targetCluster targetBucket $targetBucket..."
+		$CURL -X DELETE -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$sourcePort/controller/cancelXDCR/${restID} > /dev/null 2>&1
+	done
 }
 
 function findCbDocLoader {
