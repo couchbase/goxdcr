@@ -48,7 +48,12 @@ IF (APPLE)
   SET (LDFLAGS "-s -extldflags '-Wl,-rpath,@executable_path/../lib'")
 ENDIF ()
 
-SET (xdcrGoTags "pcre")
+IF (BUILD_ENTERPRISE)
+   MESSAGE(STATUS "Building EE edition of XDCR")
+   SET (xdcrGoTags "pcre")
+ELSE (BUILD_ENTERPRISE)
+   MESSAGE(STATUS "Building CE edition of XDCR")
+ENDIF (BUILD_ENTERPRISE)
 
 SET(CGO_INCLUDE_DIRS "${FORESTDB_INCLUDE_DIR};${PCRE_INCLUDE_DIR};${sigar_SOURCE_DIR}/include")
 SET(CGO_LIBRARY_DIRS "${FORESTDB_LIBRARY_DIR};${PCRE_LIBRARY_DIR};${sigar_BINARY_DIR}/src")
