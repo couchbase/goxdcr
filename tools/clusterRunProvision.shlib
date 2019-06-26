@@ -612,7 +612,8 @@ function runCbWorkloadGenBucket {
 	fi
 
 	echo "Running cbworkloadGen on $clusterName bucket $bucketName"
-	$workloadGen -i 10000 -n 127.0.0.1:$port -b $bucketName -u $DEFAULT_ADMIN -p $DEFAULT_PW --prefix=xdcrProv_$clusterName
+	# Run 10000 items of json documents with set/get ratio of 100%
+	$workloadGen -i 10000 -j -r 1 -n 127.0.0.1:$port -b $bucketName -u $DEFAULT_ADMIN -p $DEFAULT_PW --prefix=xdcrProv_$clusterName
 }
 
 function waitForBgJobs {
@@ -682,4 +683,33 @@ function printGlobalScopeAndCollectionInfo {
 			done
 		done
 	done
+}
+
+# Stats library
+
+# Gets the last reading of the stats output
+function getStats {
+	local srcClusterName=$1
+	local srcBucketName=$2
+	local targetClusterName=$3
+	local targetBucketName=$4
+	local statsName=$5
+
+	restId=`getRestIDFromExportedData "$srcClusterName" "$srcBucketName" "$targetClusterName" "$targetBucketName"`
+	if (( $? != 0 ));then
+		return $?
+	fi
+
+	local port=${CLUSTER_NAME_PORT_MAP[$srcClusterName]}
+	if (( `checkJQ` != 0 ));then
+		return 1
+	fi
+
+	statsOutput=`$CURL -u $DEFAULT_ADMIN:$DEFAULT_PW -X GET http://localhost:$port/$POOLS_DEFAULT_BUCKETS_PATH/$srcBucketName/stats/replications%2F${restId}%2F${statsName}`
+	if (( $? != 0 ));then
+		return $?
+	fi
+
+	# Gets the last element of the array with -1 indexing
+	echo "$statsOutput"  | jq ".nodeStats.\"[::1]:${port}\"[-1]"
 }

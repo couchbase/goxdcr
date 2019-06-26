@@ -71,19 +71,7 @@ function runDataLoad {
 }
 
 EXPECTED_CNT=20000
-function checkItemCnt {
-	local cluster=$1
-	local bucket=$2
-	local expectedCnt=$3
 
-	itemCount=`getBucketItemCount "$cluster" "$bucket"`
-	if (( $itemCount == $expectedCnt ));then
-		echo "Item count for cluster $cluster bucket $bucket: $itemCount"
-	else
-		echo "ERROR: Cluster $cluster bucket $bucket only has $itemCount items"
-		exit 1
-	fi
-}
 
 #MAIN
 sleepTime=10
@@ -92,6 +80,46 @@ if (( $? != 0 ));then
 	exit $?
 fi
 sleep 1
+
+function checkItemCnt {
+	local cluster=$1
+	local bucket=$2
+	local expectedCnt=$3
+
+	for (( i=0; $i < 3; i=$(($i+1)) ))
+	do
+		itemCount=`getBucketItemCount "$cluster" "$bucket"`
+		if (( $itemCount == $expectedCnt ));then
+			echo "Item count for cluster $cluster bucket $bucket: $itemCount"
+			return 0
+		else
+			echo "ERROR: Cluster $cluster bucket $bucket only has $itemCount items"
+		fi
+		echo "Sleeping $sleepTime and retrying..."
+		sleep $sleepTime
+	done
+	exit 1
+}
+
+function printTestCaseStats {
+	local srcCluster=$1
+	local srcBucket=$2
+	local targetCluster=$3
+	local targetBucket=$4
+	local -a statsKeys=("docs_written" "data_replicated")
+
+	echo "FROM $srcCluster $srcBucket TO $targetCluster $targetBucket"
+	echo "-----------------------------------------------------------"
+	for key in "${statsKeys[@]}"
+	do
+		local data=`getStats "$srcCluster" "$srcBucket" "$targetCluster" "$targetBucket" "$key"`
+		if (( $? != 0 ));then
+			continue
+		fi
+		echo "$key: $data"
+	done
+	echo "-----------------------------------------------------------"
+}
 
 function runTestCase {
 	local testCaseName=$1
@@ -158,18 +186,26 @@ function runTestCase {
 	checkItemCnt "C2" "B3" $EXPECTED_CNT
 
 	# Cleaning up buckets should remove all existing replications
-	echo "TEST CASE $testCaseName passed"
+	echo "========================================================="
+	echo "TEST CASE $testCaseName sourceBucket $sourceBucketPolicy targetBucket $targetBucketPolicy replCompression $replPolicy"
+	echo "Summary: "
+	printTestCaseStats "C1" "B0" "C2" "B2"
+	printTestCaseStats "C1" "B1" "C2" "B3"
+	printTestCaseStats "C2" "B2" "C1" "B0"
+	printTestCaseStats "C2" "B3" "C1" "B1"
+	echo "========================================================="
 	cleanupBucketReplications
 	cleanupBuckets
 	sleep $sleepTime
 }
+
 
 runTestCase "1a" "Active" "Active" "Auto"
 runTestCase "1b" "Active" "Active" "None"
 runTestCase "2a" "Active" "Passive" "Auto"
 runTestCase "2b" "Active" "Passive" "None"
 runTestCase "3a" "Active" "None" "Auto"
-runTestCase "3b" "Active" "None" "Auto"
+runTestCase "3b" "Active" "None" "None"
 runTestCase "4a" "Passive" "Active" "Auto"
 runTestCase "4b" "Passive" "Active" "None"
 runTestCase "5a" "Passive" "Passive" "Auto"

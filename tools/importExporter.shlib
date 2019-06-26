@@ -90,3 +90,32 @@ function importProvisionedConfig {
 		. `printenv $variablesFile`
 	fi
 }
+
+# Returns via stdout: REST id
+# Returns status code 0 if found
+function getRestIDFromExportedData {
+	local srcClusterName=$1
+	local srcBucketName=$2
+	local targetClusterName=$3
+	local targetBucketName=$4
+
+	for replKey in "${!BUCKET_REPL_EXPORT_MAP[@]}"
+	do
+		local chkSourceCluster=`echo "$replKey" | cut -d, -f1`
+		local restID=`echo "${BUCKET_REPL_EXPORT_MAP[$replKey]}" | sed 's/"//g'`
+		local chkSourcePort=${CLUSTER_NAME_PORT_MAP[$chkSourceCluster]:-}
+		local chkSourceBucket=`echo "$replKey" | cut -d, -f2`
+		local chkTargetCluster=`echo "$replKey" | cut -d, -f3`
+		local chkTargetBucket=`echo "$replKey" | cut -d, -f4`
+
+		if [[ "$srcClusterName" == "$chkSourceCluster" ]] && [[ "$srcBucketName" == "$chkSourceBucket" ]] \
+		&& [[ "$targetClusterName" == "$chkTargetCluster" ]] && [[ "$targetBucketName" == "$chkTargetBucket" ]]
+		then
+			echo "$restID"
+			return 0
+		fi
+	done
+
+	# not found
+	return 1
+}
