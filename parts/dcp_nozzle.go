@@ -327,12 +327,13 @@ type DcpNozzle struct {
 
 	xdcr_topology_svc service_def.XDCRCompTopologySvc
 	// stats collection interval in milliseconds
-	stats_interval           uint32
-	stats_interval_change_ch chan bool
-	user_agent               string
-	is_capi                  bool
-	utils                    utilities.UtilsIface
-	compressionSetting       base.CompressionType
+	stats_interval              uint32
+	stats_interval_change_ch    chan bool
+	user_agent                  string
+	is_capi                     bool
+	utils                       utilities.UtilsIface
+	memcachedCompressionSetting base.CompressionType
+	uprFeedCompressionSetting   base.CompressionType
 
 	dcpPrioritySetting mcc.PriorityType
 	lockSetting        sync.RWMutex
@@ -424,13 +425,13 @@ func (dcp *DcpNozzle) initializeMemcachedClient(settings metadata.ReplicationSet
 		return err
 	}
 
-	dcpMcReqFeatures.CompressionType = dcp.compressionSetting
+	dcpMcReqFeatures.CompressionType = dcp.memcachedCompressionSetting
 
 	dcp.client, respondedFeatures, err = dcp.utils.GetMemcachedConnectionWFeatures(addr, dcp.sourceBucketName, dcp.user_agent, base.KeepAlivePeriod, dcpMcReqFeatures, dcp.Logger())
 
-	if err == nil && (dcp.compressionSetting != base.CompressionTypeNone) && (respondedFeatures.CompressionType != dcp.compressionSetting) {
+	if err == nil && (dcp.memcachedCompressionSetting != base.CompressionTypeNone) && (respondedFeatures.CompressionType != dcp.memcachedCompressionSetting) {
 		dcp.Logger().Errorf("%v Attempting to send HELO with compression type: %v, but received response with %v",
-			dcp.Id(), dcp.compressionSetting, respondedFeatures.CompressionType)
+			dcp.Id(), dcp.memcachedCompressionSetting, respondedFeatures.CompressionType)
 		// Let dcp.Stop() take care of client.Close()
 		return base.ErrorCompressionNotSupported
 	}
@@ -463,7 +464,7 @@ func (dcp *DcpNozzle) initializeUprFeed() error {
 		// even if target cluster does not support xattr, we still need to get xattr data type from dcp
 		// for source side conflict resolution
 		uprFeatures.Xattribute = true
-		uprFeatures.CompressionType = (int)(dcp.compressionSetting)
+		uprFeatures.CompressionType = (int)(dcp.uprFeedCompressionSetting)
 		uprFeatures.DcpPriority = dcp.getDcpPrioritySetting()
 		uprFeatures.IncludeDeletionTime = true
 		uprFeatures.EnableExpiry = true
@@ -494,15 +495,39 @@ func (dcp *DcpNozzle) initializeUprFeed() error {
 	return err
 }
 
+func (dcp *DcpNozzle) initializeCompressionSettings(settings metadata.ReplicationSettingsMap) error {
+	compressionVal, ok := settings[SETTING_COMPRESSION_TYPE].(base.CompressionType)
+	if !ok {
+		// Unusual case
+		dcp.Logger().Warnf("%v missing compression type setting. Defaulting to ForceUncompress")
+		compressionVal = base.CompressionTypeForceUncompress
+	}
+
+	switch compressionVal {
+	case base.CompressionTypeNone:
+		// For DCP - None means "Enable memcached snappy HELO but don't force DCP to compress"
+		dcp.memcachedCompressionSetting = base.CompressionTypeSnappy
+		dcp.uprFeedCompressionSetting = base.CompressionTypeNone
+	case base.CompressionTypeSnappy:
+		// Snappy means force DCP to compress using snappy
+		dcp.memcachedCompressionSetting = base.CompressionTypeSnappy
+		dcp.uprFeedCompressionSetting = base.CompressionTypeSnappy
+	case base.CompressionTypeForceUncompress:
+		// This is only used when target cannot receive snappy data
+		dcp.memcachedCompressionSetting = base.CompressionTypeNone
+		dcp.uprFeedCompressionSetting = base.CompressionTypeNone
+	default:
+		return base.ErrorCompressionNotSupported
+	}
+	return nil
+}
+
 func (dcp *DcpNozzle) initialize(settings metadata.ReplicationSettingsMap) (err error) {
 	dcp.finch = make(chan bool)
 
-	val, ok := settings[SETTING_COMPRESSION_TYPE]
-	if ok && (val.(base.CompressionType) != dcp.compressionSetting) {
-		dcp.compressionSetting = val.(base.CompressionType)
-	}
+	err = dcp.initializeCompressionSettings(settings)
 
-	if val, ok = settings[DCP_Priority]; ok {
+	if val, ok := settings[DCP_Priority]; ok {
 		dcp.setDcpPrioritySetting(val.(mcc.PriorityType))
 	}
 

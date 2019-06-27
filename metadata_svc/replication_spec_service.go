@@ -458,6 +458,8 @@ func (service *ReplicationSpecService) validateReplicationSettingsInternal(error
 			err = service.validateCompression(errorMap, sourceBucket, targetClusterRef, targetKVVBMap, targetBucket, targetBucketInfo, compressionType.(int), allKvConnStrs, username, password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey)
 			if len(errorMap) > 0 || err != nil {
 				if compressionType == base.CompressionTypeAuto {
+					// If target doesn't support the compression setting but AUTO is set, let the replication creation/change through
+					// because Pipeline Manager will be able to detect this and then handle it
 					warning := fmt.Sprintf("Compression pre-requisite to cluster %v check failed. Compression will be temporarily disabled for replication.", targetClusterRef.Name())
 					warnings = append(warnings, warning)
 					// Since we are disabling compression, reset errors

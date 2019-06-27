@@ -1852,9 +1852,10 @@ func (xmem *XmemNozzle) validateFeatures(features utilities.HELOFeatures) error 
 		errMsg := fmt.Sprintf("%v Attempted to send HELO with compression type: %v, but received response with %v",
 			xmem.Id(), xmem.compressionSetting, features.CompressionType)
 		xmem.Logger().Error(errMsg)
-		if xmem.compressionSetting != base.CompressionTypeNone {
+		if xmem.compressionSetting != base.CompressionTypeForceUncompress {
 			return base.ErrorCompressionNotSupported
 		} else {
+			// This is potentially a serious issue
 			return errors.New(errMsg)
 		}
 	}
@@ -1875,15 +1876,38 @@ func (xmem *XmemNozzle) initNewBatch() {
 	atomic.StoreUint32(&xmem.cur_batch_count, 0)
 }
 
+func (xmem *XmemNozzle) initializeCompressionSettings(settings metadata.ReplicationSettingsMap) error {
+	compressionVal, ok := settings[SETTING_COMPRESSION_TYPE].(base.CompressionType)
+	if !ok {
+		// Unusual case
+		xmem.Logger().Warnf("%v missing compression type setting. Defaulting to ForceUncompress")
+		compressionVal = base.CompressionTypeForceUncompress
+	}
+
+	switch compressionVal {
+	case base.CompressionTypeNone:
+		fallthrough
+	case base.CompressionTypeSnappy:
+		// Note for XMEM, compressionTypeSnappy simply means "negotiate with target to make sure it can receive snappy data"
+		xmem.compressionSetting = base.CompressionTypeSnappy
+	case base.CompressionTypeForceUncompress:
+		// This is only used when target cannot receive snappy data
+		xmem.compressionSetting = base.CompressionTypeNone
+	default:
+		return base.ErrorCompressionNotSupported
+	}
+	return nil
+}
+
 func (xmem *XmemNozzle) initialize(settings metadata.ReplicationSettingsMap) error {
 	err := xmem.config.initializeConfig(settings, xmem.utils)
 	if err != nil {
 		return err
 	}
 
-	compressionVal, ok := settings[SETTING_COMPRESSION_TYPE]
-	if ok && (compressionVal.(base.CompressionType) != xmem.compressionSetting) {
-		xmem.compressionSetting = compressionVal.(base.CompressionType)
+	err = xmem.initializeCompressionSettings(settings)
+	if err != nil {
+		return err
 	}
 
 	xmem.setDataChan(make(chan *base.WrappedMCRequest, xmem.config.maxCount*10))

@@ -127,16 +127,22 @@ const (
 )
 
 // Last element is invalid and is there to keep consistency with the EndMarker
-var CompressionTypeStrings = [...]string{"Invalid", "None", "Snappy", "Auto", "Invalid"}
+var CompressionTypeStrings = [...]string{"Invalid", "None", "Snappy", "Auto", "ForceUncompress", "Invalid"}
 
-// Start and End markers are considered invalid values
-// Auto is considered a XDCR-only value
 const (
+	// Start and End markers are considered invalid values
 	CompressionTypeStartMarker = iota
-	CompressionTypeNone        = iota
-	CompressionTypeSnappy      = iota
-	CompressionTypeAuto        = iota
-	CompressionTypeEndMarker   = iota
+	// None means try to establish memcached with snappy HELO. KV will send document down as they are stored
+	// If target doesn't support receiving snappy data, fallback to ForceUncompress
+	CompressionTypeNone = iota
+	// Snappy means only establish snappy compression, otherwise do not replicate (will be deprecated)
+	CompressionTypeSnappy = iota
+	// Auto means try to establish snappy if possible. If not, fall back to None
+	CompressionTypeAuto = iota // XDCR only
+	// ForceUncompress means request source KV to send decompressed data if they are compressed
+	// This is needed for replicating to pre-snappy legacy clusters
+	CompressionTypeForceUncompress = iota // XDCR only
+	CompressionTypeEndMarker       = iota
 )
 
 const CompressionTypeREST = "compressionType"

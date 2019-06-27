@@ -962,7 +962,7 @@ func (r *PipelineUpdater) disableCompression(reason error) {
 
 	r.logger.Infof("Temporarily disabling compression for pipeline: %v", r.pipeline_name)
 	settings := make(map[string]interface{})
-	settings[base.CompressionTypeKey] = (int)(base.CompressionTypeNone)
+	settings[base.CompressionTypeKey] = (int)(base.CompressionTypeForceUncompress)
 	r.rep_status.SetCustomSettings(settings)
 
 	switch reason {

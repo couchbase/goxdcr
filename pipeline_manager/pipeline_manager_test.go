@@ -611,7 +611,7 @@ func TestUpdaterCompressionErr(t *testing.T) {
 
 	// Modified settings
 	tempSettings := testRepairer.rep_status.SettingsMap()
-	assert.Equal((int)(base.CompressionTypeNone), tempSettings[metadata.CompressionTypeKey])
+	assert.Equal((int)(base.CompressionTypeForceUncompress), tempSettings[metadata.CompressionTypeKey])
 
 	errMap := testRepairer.update()
 	assert.Equal(0, len(errMap))

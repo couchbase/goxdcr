@@ -155,7 +155,7 @@ func TestPosNoCompressionXmemNozzle(t *testing.T) {
 	assert := assert.New(t)
 	fmt.Println("============== Test case start: TestNegNoCompressionXmemNozzle =================")
 	utils, _, settings, xmem, _, _, _ := setupBoilerPlateXmem()
-	settings[SETTING_COMPRESSION_TYPE] = (base.CompressionType)(base.CompressionTypeNone)
+	settings[SETTING_COMPRESSION_TYPE] = (base.CompressionType)(base.CompressionTypeForceUncompress)
 	setupMocksCompressNeg(utils)
 
 	assert.Equal(nil, xmem.initialize(settings))
