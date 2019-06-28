@@ -71,6 +71,9 @@ type RemoteClusterAgent struct {
 	refNodesList base.StringPairList
 	// function pointer to callback
 	metadataChangeCallback base.MetadataChangeHandlerCallback
+	// Flag to state that metakv deletes have occured. Any concurrent refresh() taking place
+	// when delete occures should NOT write to metakv after this is set
+	deletedFromMetakv bool
 
 	// Wait group for making sure we exit synchronized
 	agentWaitGrp sync.WaitGroup
@@ -469,6 +472,7 @@ func (agent *RemoteClusterAgent) DeleteReference(delFromMetaKv bool) (*metadata.
 	if service_def.DelOpConsideredPass(err) {
 		agent.clearReferenceNoLock()
 		agent.callMetadataChangeCbNoLock()
+		agent.deletedFromMetakv = true
 	}
 	return clonedCopy, err
 }
@@ -708,6 +712,10 @@ func (agent *RemoteClusterAgent) writeToMetaKVNoLock() error {
 	var err error
 	refForMetaKv := agent.pendingRef.CloneForMetakvUpdate()
 
+	if agent.deletedFromMetakv {
+		return base.ErrorResourceDoesNotExist
+	}
+
 	key := refForMetaKv.Id()
 	value, err := refForMetaKv.Marshal()
 	if err != nil {
@@ -825,12 +833,12 @@ func getUnknownCluster(customType string, customStr string) error {
 
 func (service *RemoteClusterService) RemoteClusterByRefId(refId string, refresh bool) (*metadata.RemoteClusterReference, error) {
 	service.agentMutex.RLock()
-	defer service.agentMutex.RUnlock()
-
 	agent := service.agentMap[refId]
 	if agent == nil {
+		service.agentMutex.RUnlock()
 		return nil, getUnknownCluster("refId", refId)
 	}
+	service.agentMutex.RUnlock()
 
 	if refresh {
 		err := agent.Refresh()
@@ -849,12 +857,12 @@ func (service *RemoteClusterService) RemoteClusterByRefId(refId string, refresh 
 
 func (service *RemoteClusterService) RemoteClusterByRefName(refName string, refresh bool) (*metadata.RemoteClusterReference, error) {
 	service.agentMutex.RLock()
-	defer service.agentMutex.RUnlock()
-
 	agent := service.agentCacheRefNameMap[refName]
 	if agent == nil {
+		service.agentMutex.RUnlock()
 		return nil, getUnknownCluster("refName", refName)
 	}
+	service.agentMutex.RUnlock()
 
 	if refresh {
 		err := agent.Refresh()
@@ -873,12 +881,12 @@ func (service *RemoteClusterService) RemoteClusterByRefName(refName string, refr
 
 func (service *RemoteClusterService) RemoteClusterByUuid(uuid string, refresh bool) (*metadata.RemoteClusterReference, error) {
 	service.agentMutex.RLock()
-	defer service.agentMutex.RUnlock()
-
 	agent := service.agentCacheUuidMap[uuid]
 	if agent == nil {
+		service.agentMutex.RUnlock()
 		return nil, getUnknownCluster("uuid", uuid)
 	}
+	service.agentMutex.RUnlock()
 
 	if refresh {
 		err := agent.Refresh()
