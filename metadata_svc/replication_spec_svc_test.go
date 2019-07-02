@@ -376,7 +376,7 @@ func TestCompressionNegNoSnappy(t *testing.T) {
 	_, _, _, errMap, _, _ := replSpecSvc.ValidateNewReplicationSpec(sourceBucket, targetCluster, targetBucket, settings)
 	assert.Equal(len(errMap), 0)
 
-	// Turning on should result in error
+	// Turning on Snappy should result in error since it is not a valid input anymore
 	settings[metadata.CompressionTypeKey] = base.CompressionTypeSnappy
 	_, _, _, errMap, _, _ = replSpecSvc.ValidateNewReplicationSpec(sourceBucket, targetCluster, targetBucket, settings)
 	assert.NotEqual(len(errMap), 0)

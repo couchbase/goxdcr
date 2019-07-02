@@ -92,6 +92,7 @@ var TargetNozzlePerNodeConfig = &SettingsConfig{2, &Range{1, 100}}
 var PipelineLogLevelConfig = &SettingsConfig{log.LogLevelInfo, nil}
 var PipelineStatsIntervalConfig = &SettingsConfig{1000, &Range{200, 600000}}
 var BandwidthLimitConfig = &SettingsConfig{0, &Range{0, 1000000}}
+// user can only configure compression to 1 (None) or 3(Auto). 2 (Snappy) is for internal use
 var CompressionTypeConfig = &SettingsConfig{base.CompressionTypeAuto, &Range{base.CompressionTypeStartMarker + 1, base.CompressionTypeEndMarker - 1}}
 var PriorityConfig = &SettingsConfig{base.PriorityTypeHigh, nil}
 var BacklogThresholdConfig = &SettingsConfig{base.BacklogThresholdDefault, &Range{10, 10000000}}
@@ -195,7 +196,7 @@ type ReplicationSettings struct {
 	// bandwidth usage limit in MB/sec
 	BandwidthLimit int `json:"bandwidth_limit"`
 
-	// Compression type - 0: None, 1: Snappy - REST will be inputting with string coming in
+	// Compression type - 1: None, 2: Snappy, 3: Auto - REST will be inputting with string coming in
 	CompressionType int `json:"compression_type"`
 
 	// revision number to be used by metadata service. not included in json - not currently being used/set
@@ -600,7 +601,8 @@ func (s *ReplicationSettings) GetDesiredLatencyMs() int {
 
 func (s *ReplicationSettings) GetCompressionType() int {
 	if s.CompressionType < CompressionTypeConfig.MinValue ||
-		s.CompressionType > CompressionTypeConfig.MaxValue {
+		s.CompressionType > CompressionTypeConfig.MaxValue ||
+		s.CompressionType == base.CompressionTypeSnappy {
 		return CompressionTypeConfig.defaultValue.(int)
 	} else {
 		return s.CompressionType
@@ -739,7 +741,7 @@ func ValidateAndConvertReplicationSettingsValue(key, value, errorKey string, isE
 			return
 		}
 	case CompressionTypeKey:
-		if convertedValue, err = base.CompressionStringToConversionTypeConverter(value); err != nil {
+		if convertedValue, err = base.CompressionStringToCompressionTypeConverter(value); err != nil {
 			return
 		}
 		if err = enterpriseOnlyFeature(convertedValue, base.CompressionTypeNone, isEnterprise); err != nil {

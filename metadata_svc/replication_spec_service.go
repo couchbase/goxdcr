@@ -949,6 +949,9 @@ func (service *ReplicationSpecService) handleSettingsUpgrade(spec *metadata.Repl
 	if !isEnterprise && spec.Settings.Values[metadata.CompressionTypeKey] == base.CompressionTypeAuto {
 		spec.Settings.Values[metadata.CompressionTypeKey] = base.CompressionTypeNone
 		updatedKeys = append(updatedKeys, metadata.CompressionTypeKey)
+	} else if spec.Settings.Values[metadata.CompressionTypeKey] == base.CompressionTypeSnappy {
+		spec.Settings.Values[metadata.CompressionTypeKey] = base.CompressionTypeAuto
+		updatedKeys = append(updatedKeys, metadata.CompressionTypeKey)
 	}
 	if len(updatedKeys) == 0 {
 		return

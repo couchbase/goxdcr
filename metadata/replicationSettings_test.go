@@ -34,13 +34,15 @@ func TestValidateCompressionSetting(t *testing.T) {
 	assert := assert.New(t)
 	fmt.Println("============== Test case start: TestValidateCompressionSetting =================")
 
-	// enterprise enabled non CAPI - acceptable values are 0 and 1
+	// enterprise enabled non CAPI - acceptable values are None and Auto.
 	converted, err := ValidateAndConvertReplicationSettingsValue(CompressionTypeKey, "None", "", true, false)
 	assert.NotNil(converted)
 	assert.Nil(err)
-	converted, err = ValidateAndConvertReplicationSettingsValue(CompressionTypeKey, "Snappy", "", true, false)
+	converted, err = ValidateAndConvertReplicationSettingsValue(CompressionTypeKey, "Auto", "", true, false)
 	assert.NotNil(converted)
 	assert.Nil(err)
+	converted, err = ValidateAndConvertReplicationSettingsValue(CompressionTypeKey, "Snappy", "", true, false)
+	assert.NotNil(err)
 
 	// Not enterprise - disallow everything except reset
 	converted, err = ValidateAndConvertReplicationSettingsValue(CompressionTypeKey, "None", "", false, false)

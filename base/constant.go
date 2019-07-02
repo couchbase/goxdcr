@@ -135,7 +135,7 @@ const (
 	// None means try to establish memcached with snappy HELO. KV will send document down as they are stored
 	// If target doesn't support receiving snappy data, fallback to ForceUncompress
 	CompressionTypeNone = iota
-	// Snappy means only establish snappy compression, otherwise do not replicate (will be deprecated)
+	// Snappy is for internal use only. Users could set it with older server. Now they cannot.
 	CompressionTypeSnappy = iota
 	// Auto means try to establish snappy if possible. If not, fall back to None
 	CompressionTypeAuto = iota // XDCR only

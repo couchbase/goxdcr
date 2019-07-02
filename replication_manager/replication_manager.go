@@ -599,7 +599,8 @@ func UpdateReplicationSettings(topic string, settings metadata.ReplicationSettin
 	changedSettingsMap, errorMap := replSpec.Settings.UpdateSettingsFromMap(settings)
 
 	// Only Re-evaluate Compression pre-requisites if it is turned on and actually switched algorithms to catch any cluster-wide compression changes
-	if compressionType, ok := changedSettingsMap[metadata.CompressionTypeKey]; ok && (base.GetCompressionType(compressionType.(int)) != base.CompressionTypeNone) &&
+	compressionType, CompressionOk := changedSettingsMap[metadata.CompressionTypeKey]
+	if CompressionOk && (base.GetCompressionType(compressionType.(int)) != base.CompressionTypeNone) &&
 		base.GetCompressionType(oldCompressionType) != base.GetCompressionType(compressionType.(int)) {
 		validateRoutineErrorMap, validateErr := ReplicationSpecService().ValidateReplicationSettings(replSpecificFields.SourceBucketName,
 			replSpecificFields.RemoteClusterName, replSpecificFields.TargetBucketName, settings)
@@ -609,7 +610,10 @@ func UpdateReplicationSettings(topic string, settings metadata.ReplicationSettin
 			return nil, validateErr
 		}
 	}
-
+	// If compression is SNAPPY and is not changed, take this oppurtunity to change it to AUTO
+	if oldCompressionType == base.CompressionTypeSnappy && !CompressionOk {
+		changedSettingsMap[metadata.CompressionTypeKey] = base.CompressionTypeAuto
+	}
 	if len(errorMap) != 0 {
 		return errorMap, nil
 	}

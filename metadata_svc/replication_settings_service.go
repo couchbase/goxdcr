@@ -59,7 +59,10 @@ func (repl_settings_svc *ReplicationSettingsSvc) getReplicationSettings(populate
 	}
 	if !isEnterprise {
 		replicationSettings.Values[base.CompressionTypeKey] = base.CompressionTypeNone
+	} else if replicationSettings.Values[base.CompressionTypeKey] == base.CompressionTypeSnappy {
+		replicationSettings.Values[base.CompressionTypeKey] = base.CompressionTypeAuto
 	}
+
 	return replicationSettings, nil
 }
 

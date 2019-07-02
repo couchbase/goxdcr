@@ -731,9 +731,13 @@ func CheckErrorMapForError(errMap ErrorMap, toCheck error, exactMatch bool) bool
 	return false
 }
 
-func CompressionStringToConversionTypeConverter(userInput string) (int, error) {
+func CompressionStringToCompressionTypeConverter(userInput string) (int, error) {
 	// First and Last element of the CompressionTypeStrings is not to be used
 	for i := 1; i < len(CompressionTypeStrings)-1; i++ {
+		if i == CompressionTypeSnappy {
+			// Users cannot specify Snappy
+			continue
+		}
 		if strings.ToLower(CompressionTypeStrings[i]) == strings.ToLower(userInput) {
 			return i, nil
 		}
