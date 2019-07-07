@@ -328,6 +328,11 @@ func TestCompressionNegNotEnterprise(t *testing.T) {
 	_, _, _, errMap, _, _ := replSpecSvc.ValidateNewReplicationSpec(sourceBucket, targetCluster, targetBucket, settings)
 	assert.NotEqual(len(errMap), 0)
 
+	// Setting to auto should be disallowed
+	settings[metadata.CompressionTypeKey] = base.CompressionTypeAuto
+	_, _, _, errMap, _, _ = replSpecSvc.ValidateNewReplicationSpec(sourceBucket, targetCluster, targetBucket, settings)
+	assert.NotEqual(len(errMap), 0)
+
 	fmt.Println("============== Test case end: TestCompressionNegNotEnterprise =================")
 }
 

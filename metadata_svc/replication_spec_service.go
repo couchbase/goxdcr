@@ -457,8 +457,12 @@ func (service *ReplicationSpecService) validateReplicationSettingsInternal(error
 		if compressionType != base.CompressionTypeNone {
 			err = service.validateCompression(errorMap, sourceBucket, targetClusterRef, targetKVVBMap, targetBucket, targetBucketInfo, compressionType.(int), allKvConnStrs, username, password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey)
 			if len(errorMap) > 0 || err != nil {
-				if compressionType == base.CompressionTypeAuto {
-					// If target doesn't support the compression setting but AUTO is set, let the replication creation/change through
+				isEnterprise, err := service.xdcr_comp_topology_svc.IsMyClusterEnterprise()
+				if err != nil {
+					return err, nil
+				}
+				if compressionType == base.CompressionTypeAuto && isEnterprise {
+					// For enterprise version, if target doesn't support the compression setting but AUTO is set, let the replication creation/change through
 					// because Pipeline Manager will be able to detect this and then handle it
 					warning := fmt.Sprintf("Compression pre-requisite to cluster %v check failed. Compression will be temporarily disabled for replication.", targetClusterRef.Name())
 					warnings = append(warnings, warning)
@@ -940,6 +944,11 @@ func (service *ReplicationSpecService) constructReplicationSpec(value []byte, re
 // If there are, it populates these values using default values, and writes updated settings/spec to metakv.
 func (service *ReplicationSpecService) handleSettingsUpgrade(spec *metadata.ReplicationSpecification, lock bool) {
 	updatedKeys := spec.Settings.PopulateDefault()
+	isEnterprise, _ := service.xdcr_comp_topology_svc.IsMyClusterEnterprise()
+	if !isEnterprise && spec.Settings.Values[metadata.CompressionTypeKey] == base.CompressionTypeAuto {
+		spec.Settings.Values[metadata.CompressionTypeKey] = base.CompressionTypeNone
+		updatedKeys = append(updatedKeys, metadata.CompressionTypeKey)
+	}
 	if len(updatedKeys) == 0 {
 		return
 	}

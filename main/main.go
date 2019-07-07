@@ -134,7 +134,7 @@ func main() {
 
 		migration_svc := service_impl.NewMigrationSvc(top_svc, remote_cluster_svc,
 			replication_spec_svc,
-			metadata_svc.NewReplicationSettingsSvc(metakv_svc, nil),
+			metadata_svc.NewReplicationSettingsSvc(metakv_svc, nil, top_svc),
 			metadata_svc.NewCheckpointsService(metakv_svc, nil),
 			nil, utils)
 		err = migration_svc.Migrate()
@@ -166,7 +166,7 @@ func main() {
 			remote_cluster_svc,
 			cluster_info_svc,
 			top_svc,
-			metadata_svc.NewReplicationSettingsSvc(metakv_svc, nil),
+			metadata_svc.NewReplicationSettingsSvc(metakv_svc, nil, top_svc),
 			metadata_svc.NewCheckpointsService(metakv_svc, nil),
 			service_impl.NewCAPIService(cluster_info_svc, nil, utils),
 			audit_svc,

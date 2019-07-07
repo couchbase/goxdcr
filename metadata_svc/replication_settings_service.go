@@ -11,6 +11,7 @@ package metadata_svc
 
 import (
 	"encoding/json"
+	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/goxdcr/service_def"
@@ -22,12 +23,14 @@ var DefaultReplicationSettingsKey = "DefaultReplicationSettings"
 type ReplicationSettingsSvc struct {
 	metadata_svc           service_def.MetadataSvc
 	logger                 *log.CommonLogger
+	xdcr_topology_svc      service_def.XDCRCompTopologySvc
 	replicationSettingsMtx sync.Mutex
 }
 
-func NewReplicationSettingsSvc(metadata_svc service_def.MetadataSvc, logger_ctx *log.LoggerContext) *ReplicationSettingsSvc {
+func NewReplicationSettingsSvc(metadata_svc service_def.MetadataSvc, logger_ctx *log.LoggerContext, top_svc service_def.XDCRCompTopologySvc) *ReplicationSettingsSvc {
 	return &ReplicationSettingsSvc{
 		metadata_svc: metadata_svc,
+		xdcr_topology_svc:	top_svc,
 		logger:       log.NewLogger("ReplSettSvc", logger_ctx),
 	}
 }
@@ -49,6 +52,13 @@ func (repl_settings_svc *ReplicationSettingsSvc) getReplicationSettings(populate
 	}
 	if populateDefault {
 		replicationSettings.PopulateDefault()
+	}
+	isEnterprise, err := repl_settings_svc.xdcr_topology_svc.IsMyClusterEnterprise()
+	if err != nil {
+		return nil, err
+	}
+	if !isEnterprise {
+		replicationSettings.Values[base.CompressionTypeKey] = base.CompressionTypeNone
 	}
 	return replicationSettings, nil
 }
