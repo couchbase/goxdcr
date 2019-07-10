@@ -429,12 +429,17 @@ func (service *ReplicationSpecService) validateReplicationSettingsInternal(error
 	if populateErr != nil {
 		return populateErr, warnings
 	}
+	isEnterprise, _ := service.xdcr_comp_topology_svc.IsMyClusterEnterprise()
 
 	repl_type, ok := settings[metadata.ReplicationTypeKey]
 	compressionType, compressionOk := settings[metadata.CompressionTypeKey]
 	if !compressionOk {
-		compressionType = metadata.DefaultReplicationSettings().CompressionType
-		settings[metadata.CompressionTypeKey] = compressionType
+		if isEnterprise {
+			compressionType = metadata.DefaultReplicationSettings().CompressionType
+			settings[metadata.CompressionTypeKey] = compressionType
+		} else {
+			compressionType = base.CompressionTypeNone
+		}
 	}
 
 	if filter, ok := settings[metadata.FilterExpressionKey].(string); ok {
@@ -457,10 +462,6 @@ func (service *ReplicationSpecService) validateReplicationSettingsInternal(error
 		if compressionType != base.CompressionTypeNone {
 			err = service.validateCompression(errorMap, sourceBucket, targetClusterRef, targetKVVBMap, targetBucket, targetBucketInfo, compressionType.(int), allKvConnStrs, username, password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey)
 			if len(errorMap) > 0 || err != nil {
-				isEnterprise, err := service.xdcr_comp_topology_svc.IsMyClusterEnterprise()
-				if err != nil {
-					return err, nil
-				}
 				if compressionType == base.CompressionTypeAuto && isEnterprise {
 					// For enterprise version, if target doesn't support the compression setting but AUTO is set, let the replication creation/change through
 					// because Pipeline Manager will be able to detect this and then handle it
