@@ -11,6 +11,7 @@ package metadata_svc
 
 import (
 	"encoding/json"
+	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/goxdcr/service_def"
@@ -22,12 +23,14 @@ var DefaultReplicationSettingsKey = "DefaultReplicationSettings"
 type ReplicationSettingsSvc struct {
 	metadata_svc           service_def.MetadataSvc
 	logger                 *log.CommonLogger
+	xdcr_topology_svc      service_def.XDCRCompTopologySvc
 	replicationSettingsMtx sync.Mutex
 }
 
-func NewReplicationSettingsSvc(metadata_svc service_def.MetadataSvc, logger_ctx *log.LoggerContext) *ReplicationSettingsSvc {
+func NewReplicationSettingsSvc(metadata_svc service_def.MetadataSvc, logger_ctx *log.LoggerContext, top_svc service_def.XDCRCompTopologySvc) *ReplicationSettingsSvc {
 	return &ReplicationSettingsSvc{
 		metadata_svc: metadata_svc,
+		xdcr_topology_svc:	top_svc,
 		logger:       log.NewLogger("ReplSettSvc", logger_ctx),
 	}
 }
@@ -36,7 +39,6 @@ func (repl_settings_svc *ReplicationSettingsSvc) GetDefaultReplicationSettings()
 	var defaultSettings metadata.ReplicationSettings
 	repl_settings_svc.replicationSettingsMtx.Lock()
 	defer repl_settings_svc.replicationSettingsMtx.Unlock()
-
 	bytes, rev, err := repl_settings_svc.metadata_svc.Get(DefaultReplicationSettingsKey)
 	if err != nil && err != service_def.MetadataNotFoundErr {
 		return nil, err
@@ -52,6 +54,13 @@ func (repl_settings_svc *ReplicationSettingsSvc) GetDefaultReplicationSettings()
 		// set rev number
 		defaultSettings.Revision = rev
 		defaultSettings.PostProcessAfterUnmarshalling()
+	}
+	isEnterprise, err := repl_settings_svc.xdcr_topology_svc.IsMyClusterEnterprise()
+	if err != nil {
+		return nil, err
+	}
+	if !isEnterprise {
+		defaultSettings.CompressionType = base.CompressionTypeNone
 	}
 	return &defaultSettings, nil
 }

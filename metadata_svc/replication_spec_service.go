@@ -422,12 +422,17 @@ func (service *ReplicationSpecService) validateReplicationSettingsInternal(error
 	if populateErr != nil {
 		return populateErr, warnings
 	}
+	isEnterprise, _ := service.xdcr_comp_topology_svc.IsMyClusterEnterprise()
 
 	repl_type, ok := settings[metadata.ReplicationType]
 	compressionType, compressionOk := settings[metadata.CompressionType]
 	if !compressionOk {
-		compressionType = metadata.DefaultSettings().CompressionType
-		settings[metadata.CompressionType] = compressionType
+		if isEnterprise {
+			compressionType = metadata.DefaultSettings().CompressionType
+			settings[metadata.CompressionType] = compressionType
+		} else {
+			compressionType = base.CompressionTypeNone
+		}
 	}
 
 	if !ok || repl_type == metadata.ReplicationTypeXmem {
@@ -440,7 +445,11 @@ func (service *ReplicationSpecService) validateReplicationSettingsInternal(error
 		if compressionType != base.CompressionTypeNone {
 			err = service.validateCompression(errorMap, sourceBucket, targetClusterRef, targetKVVBMap, targetBucket, targetBucketInfo, compressionType.(int), allKvConnStrs, username, password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey)
 			if len(errorMap) > 0 || err != nil {
-				if compressionType == base.CompressionTypeAuto {
+				isEnterprise, err := service.xdcr_comp_topology_svc.IsMyClusterEnterprise()
+				if err != nil {
+					return err, nil
+				}
+				if compressionType == base.CompressionTypeAuto && isEnterprise {
 					warning := fmt.Sprintf("Compression pre-requisite to cluster %v check failed. Compression will be temporarily disabled for replication.", targetClusterRef.Name)
 					warnings = append(warnings, warning)
 					// Since we are disabling compression, reset errors
@@ -783,7 +792,7 @@ func (service *ReplicationSpecService) initCacheFromMetaKV() (err error) {
 		rev := KVentry.Rev
 
 		replicationId := service.getReplicationIdFromKey(key)
-		replSpec, err := constructReplicationSpec(marshalledSpec, rev)
+		replSpec, err := service.constructReplicationSpec(marshalledSpec, rev)
 		if err != nil {
 			service.logger.Errorf("Unable to construct spec %v from metaKV's data. err: %v", key, err)
 			continue
@@ -871,7 +880,7 @@ func (service *ReplicationSpecService) removeSpecFromCache(specId string) error 
 	return nil
 }
 
-func constructReplicationSpec(value []byte, rev interface{}) (*metadata.ReplicationSpecification, error) {
+func (service *ReplicationSpecService) constructReplicationSpec(value []byte, rev interface{}) (*metadata.ReplicationSpecification, error) {
 	if value == nil {
 		return nil, nil
 	}
@@ -884,6 +893,10 @@ func constructReplicationSpec(value []byte, rev interface{}) (*metadata.Replicat
 	if spec.Settings != nil {
 		spec.Settings.PostProcessAfterUnmarshalling()
 	}
+	isEnterprise, _ := service.xdcr_comp_topology_svc.IsMyClusterEnterprise()
+	if !isEnterprise && spec.Settings.CompressionType == base.CompressionTypeAuto {
+		spec.Settings.CompressionType = base.CompressionTypeNone
+	}
 	spec.Revision = rev
 	return spec, nil
 }
@@ -892,7 +905,7 @@ func constructReplicationSpec(value []byte, rev interface{}) (*metadata.Replicat
 func (service *ReplicationSpecService) ReplicationSpecServiceCallback(path string, value []byte, rev interface{}) error {
 	service.logger.Infof("ReplicationSpecServiceCallback called on path = %v\n", path)
 
-	newSpec, err := constructReplicationSpec(value, rev)
+	newSpec, err := service.constructReplicationSpec(value, rev)
 	if err != nil {
 		service.logger.Errorf("Error marshaling replication spec. value=%v, err=%v\n", string(value), err)
 		return err
