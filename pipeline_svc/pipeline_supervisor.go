@@ -198,7 +198,7 @@ func (pipelineSupervisor *PipelineSupervisor) monitorPipelineHealth() error {
 		case <-health_check_ticker.C:
 			err := base.ExecWithTimeout(pipelineSupervisor.checkPipelineHealth, 1000*time.Millisecond, pipelineSupervisor.Logger())
 			if err != nil {
-				if err == base.ExecutionTimeoutError {
+				if err == base.ErrorExecutionTimedOut {
 					// ignore timeout error and continue
 					pipelineSupervisor.Logger().Infof("Received timeout error when checking pipeline health. topic=%v\n", pipelineSupervisor.pipeline.Topic())
 				} else {

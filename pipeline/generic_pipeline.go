@@ -24,6 +24,9 @@ import (
 
 var ErrorKey = "Error"
 
+const PipelineContextStart = "genericPipeline.context.Start"
+const PipelinePartStart = "genericPipeline.startPartsWithTimeout"
+
 // In certain scenarios, e.g., incorrect bucket password, a large number of parts
 // may return error when starting. limit the number of errors we track and log
 // to avoid overly long log entries
@@ -153,7 +156,7 @@ func (genericPipeline *GenericPipeline) startPartsWithTimeout(ssl_port_map map[s
 	err := base.ExecWithTimeout(startPartsFunc, base.TimeoutPartsStart, genericPipeline.logger)
 	if err != nil {
 		genericPipeline.logger.Errorf("%v timed out when starting pipeline parts. err=%v", genericPipeline.InstanceId(), err)
-		errMap["genericPipeline.startPartsWithTimeout"] = err
+		errMap[PipelinePartStart] = err
 	} else if len(errMap) > 0 {
 		genericPipeline.logger.Errorf("%v error starting pipeline parts. errs=%v", genericPipeline.InstanceId(), base.FlattenErrorMap(errMap))
 	} else {
@@ -246,7 +249,7 @@ func (genericPipeline *GenericPipeline) Start(settings metadata.ReplicationSetti
 	//start the runtime
 	err = genericPipeline.context.Start(genericPipeline.settings)
 	if err != nil {
-		errMap["genericPipeline.context.Start"] = err
+		errMap[PipelineContextStart] = err
 		return errMap
 	}
 	genericPipeline.logger.Debugf("%v The runtime context has been started", genericPipeline.InstanceId())

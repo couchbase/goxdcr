@@ -677,7 +677,7 @@ func MakeTLSConn(ssl_con_str, username string, certificate []byte, check_server_
 	// enforce timeout
 	errChannel := make(chan error, 2)
 	time.AfterFunc(dialer.Timeout, func() {
-		errChannel <- ExecutionTimeoutError
+		errChannel <- ErrorExecutionTimedOut
 	})
 
 	caPool := x509.NewCertPool()

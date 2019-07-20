@@ -35,8 +35,6 @@ import (
 	"time"
 )
 
-var ErrorNoSourceKV = errors.New("Invalid configuration. No source kv node is found.")
-
 type Action func() error
 type Action2 func(input interface{}) (interface{}, error)
 
@@ -57,7 +55,7 @@ func ExecWithTimeout(action Action, timeout_duration time.Duration, logger *log.
 		case <-timeoutticker.C:
 			logger.Infof("Executing Action timed out")
 			logger.Info("****************************")
-			return ExecutionTimeoutError
+			return ErrorExecutionTimedOut
 		}
 	}
 
@@ -88,7 +86,7 @@ func ExecWithTimeout2(action Action2, input interface{}, timeout_duration time.D
 		case <-timeoutticker.C:
 			logger.Info("Executing Action2 timed out")
 			logger.Info("****************************")
-			return nil, ExecutionTimeoutError
+			return nil, ErrorExecutionTimedOut
 		}
 	}
 }
@@ -1274,7 +1272,7 @@ func HasPrefix(source []byte, target string, target2 string) bool {
 func MatchWrapper(matcher gojsonsm.Matcher, slice []byte) (matched bool, err error) {
 	defer func() {
 		if r := recover(); r != nil {
-			err = fmt.Errorf("Error from matcher: %v", r)
+			err = fmt.Errorf("Error from matcher: %v\n", r)
 		}
 	}()
 	return matcher.Match(slice)

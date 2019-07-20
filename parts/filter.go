@@ -60,7 +60,6 @@ func NewFilter(id string, filterExpression string, utils utilities.UtilsIface) (
 	}
 
 	// if filter expression has been defined, proceed to populate expression filtering related fields
-
 	filter.hasFilterExpression = true
 	filter.filterExpressionInternal = base.ReplaceKeyWordsForExpression(filterExpression)
 	matcher, err := base.GoJsonsmGetFilterExprMatcher(filter.filterExpressionInternal)

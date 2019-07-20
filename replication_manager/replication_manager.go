@@ -757,6 +757,24 @@ func bypassUIErrorCodes(errStr string) bool {
 	return false
 }
 
+func processErrorMsgForUI(errStr string) string {
+	// For pipeline start timeouts, return a more friendly error msg
+	if (strings.Contains(errStr, pipeline.PipelineContextStart) || strings.Contains(errStr, pipeline.PipelinePartStart)) &&
+		strings.Contains(errStr, base.ErrorExecutionTimedOut) {
+		errStr = base.ErrorPipelineStartTimedOutUI.Error()
+	}
+
+	//prepend current node name, if not empty, to the error message to make it more helpful
+	cur_node, err := XDCRCompTopologyService().MyHost()
+	if err != nil {
+		cur_node = ""
+	}
+	if cur_node != "" {
+		errStr = cur_node + ":" + errStr
+	}
+	return errStr
+}
+
 // get info of all running replications - serves back to consumers who call the REST end point, i.e. UI
 func GetReplicationInfos() ([]base.ReplicationInfo, error) {
 	replInfos := make([]base.ReplicationInfo, 0)
@@ -781,20 +799,9 @@ func GetReplicationInfos() ([]base.ReplicationInfo, error) {
 			// set error list
 			errs := rep_status.Errors()
 			if len(errs) > 0 {
-				cur_node, err := XDCRCompTopologyService().MyHost()
-				if err != nil {
-					cur_node = ""
-				}
-
 				for _, pipeline_error := range errs {
 					if !bypassUIErrorCodes(pipeline_error.ErrMsg) {
-						//prepend current node name, if not empty, to the error message to make it more helpful
-						var err_msg string
-						if len(cur_node) > 0 {
-							err_msg = cur_node + ":" + pipeline_error.ErrMsg
-						} else {
-							err_msg = pipeline_error.ErrMsg
-						}
+						err_msg := processErrorMsgForUI(pipeline_error.ErrMsg)
 						errInfo := base.ErrorInfo{pipeline_error.Timestamp.UnixNano(), err_msg}
 						replInfo.ErrorList = append(replInfo.ErrorList, errInfo)
 					}

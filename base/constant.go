@@ -224,6 +224,9 @@ var ErrorNotSupported = errors.New("Not supported")
 var ErrorInvalidJSONMap = errors.New("Retrieved value is not a valid JSON key-value map")
 var ErrorInvalidCAS = errors.New("Invalid CAS")
 var ErrorExpDelTrio = fmt.Errorf("%v, %v, and %v must be specified together", FilterExpKey, FilterDelKey, BypassExpiryKey)
+var ErrorNoSourceKV = errors.New("Invalid configuration. No source kv node is found.")
+var ErrorExecutionTimedOut = errors.New("Execution timed out")
+var ErrorPipelineStartTimedOutUI = errors.New("Pipeline did not start in a timely manner, possibly due to busy source or target. Will try again...")
 
 // Various non-error internal msgs
 var FilterForcePassThrough = errors.New("No data is to be filtered, should allow passthrough")
@@ -491,8 +494,6 @@ var LengthOfRandomId = 16
 
 // max retry for random id generation
 var MaxRetryForRandomIdGeneration = 5
-
-var ExecutionTimeoutError = errors.New("Execution timed out")
 
 var TimeoutRuntimeContextStart = 30 * time.Second
 var TimeoutRuntimeContextStop = 5 * time.Second
