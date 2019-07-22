@@ -760,7 +760,7 @@ func bypassUIErrorCodes(errStr string) bool {
 func processErrorMsgForUI(errStr string) string {
 	// For pipeline start timeouts, return a more friendly error msg
 	if (strings.Contains(errStr, pipeline.PipelineContextStart) || strings.Contains(errStr, pipeline.PipelinePartStart)) &&
-		strings.Contains(errStr, base.ErrorExecutionTimedOut) {
+		strings.Contains(errStr, base.ErrorExecutionTimedOut.Error()) {
 		errStr = base.ErrorPipelineStartTimedOutUI.Error()
 	}
 
