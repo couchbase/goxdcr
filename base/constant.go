@@ -829,6 +829,30 @@ var InternalKeyXattr = "[$%XDCRInternalMeta*%$]"
 // Internal key to wrap around incoming key for advanced filtering
 var InternalKeyKey = "[$%XDCRInternalKey*%$]"
 
+// Cached variables
+var CachedInternalKeyKeyByteSlice = []byte(InternalKeyKey)
+var CachedInternalKeyKeyByteSize = len(CachedInternalKeyKeyByteSlice)
+var CachedInternalKeyXattrByteSlice = []byte(InternalKeyXattr)
+var CachedInternalKeyXattrByteSize = len(CachedInternalKeyXattrByteSlice)
+
+// From end user's perspective, they will see the reserved word they entered
+// However, internally, XDCR will insert more obscure internal keys to prevent collision with actual
+// user's data
+var ReservedWordsMap = map[string]string{
+	ExternalKeyKey:   InternalKeyKey, /* if this entry changes, CachedInternalKeyKeyByteSlice needs to change too */
+	ExternalKeyXattr: InternalKeyXattr,
+}
+var ReverseReservedWordsMap = map[string]string{
+	InternalKeyKey:   ExternalKeyKeyContains,
+	InternalKeyXattr: ExternalKeyXattrContains,
+}
+
+// The regexp here returns true if the specified values are not escaped (enclosed by backticks)
+var ReservedWordsReplaceMap = map[string]PcreWrapperInterface{}
+
+// Used to make sure the pcre's are initialized only once, when needed
+var ReservedWordsReplaceMapOnce sync.Once
+
 func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeCountBeforeRestart,
 	maxTopologyStableCountBeforeRestart, maxWorkersForCheckpointing int,
 	timeoutCheckpointBeforeStop time.Duration, capiDataChanSizeMultiplier int,
@@ -965,6 +989,18 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	MaxCountThroughputDrop = maxCountThroughputDrop
 	InternalKeyKey = filteringInternalKey
 	InternalKeyXattr = filteringInternalXattr
+	CachedInternalKeyKeyByteSlice = []byte(InternalKeyKey)
+	CachedInternalKeyKeyByteSize = len(CachedInternalKeyKeyByteSlice)
+	CachedInternalKeyXattrByteSlice = []byte(InternalKeyXattr)
+	CachedInternalKeyXattrByteSize = len(CachedInternalKeyXattrByteSlice)
+	ReservedWordsMap = map[string]string{
+		ExternalKeyKey:   InternalKeyKey, /* if this entry changes, CachedInternalKeyKeyByteSlice needs to change too */
+		ExternalKeyXattr: InternalKeyXattr,
+	}
+	ReverseReservedWordsMap = map[string]string{
+		InternalKeyKey:   ExternalKeyKeyContains,
+		InternalKeyXattr: ExternalKeyXattrContains,
+	}
 }
 
 // Need to escape the () to result in "META().xattrs" literal
@@ -972,30 +1008,6 @@ const ExternalKeyXattr = "META\\(\\).xattrs"
 const ExternalKeyKey = "META\\(\\).id"
 const ExternalKeyKeyContains = "META().id"
 const ExternalKeyXattrContains = "META().xattrs"
-
-var CachedInternalKeyKeyByteSlice = []byte(InternalKeyKey)
-var CachedInternalKeyKeyByteSize = len(CachedInternalKeyKeyByteSlice)
-var CachedInternalKeyXattrByteSlice = []byte(InternalKeyXattr)
-var CachedInternalKeyXattrByteSize = len(CachedInternalKeyXattrByteSlice)
-
-// From end user's perspective, they will see the reserved word they entered
-// However, internally, XDCR will insert more obscure internal keys to prevent collision with actual
-// user's data
-var ReservedWordsMap = map[string]string{
-	ExternalKeyKey:   InternalKeyKey, /* if this entry changes, CachedInternalKeyKeyByteSlice needs to change too */
-	ExternalKeyXattr: InternalKeyXattr,
-}
-
-var ReverseReservedWordsMap = map[string]string{
-	InternalKeyKey:   ExternalKeyKeyContains,
-	InternalKeyXattr: ExternalKeyXattrContains,
-}
-
-// The regexp here returns true if the specified values are not escaped (enclosed by backticks)
-var ReservedWordsReplaceMap = map[string]PcreWrapperInterface{}
-
-// Used to make sure the pcre's are initialized only once, when needed
-var ReservedWordsReplaceMapOnce sync.Once
 
 // This constant is used when communicating with KV to retrieve a list of all the available xattr keys
 const XattributeToc = "$XTOC"
