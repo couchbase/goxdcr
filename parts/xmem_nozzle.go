@@ -45,6 +45,7 @@ const (
 	XMEM_SETTING_REMOTE_MEM_SSL_PORT = "remote_ssl_port"
 	XMEM_SETTING_CLIENT_CERTIFICATE  = metadata.XmemClientCertificate
 	XMEM_SETTING_CLIENT_KEY          = metadata.XmemClientKey
+	XMEM_SETTING_MANIFEST_GETTER     = "xmemManifestGetter"
 
 	default_demandEncryption bool = false
 )
@@ -815,6 +816,8 @@ type XmemNozzle struct {
 	stateLock sync.RWMutex
 
 	vbList []uint16
+
+	collectionsManifest *metadata.CollectionsManifest
 }
 
 func NewXmemNozzle(id string,
@@ -1909,6 +1912,9 @@ func (xmem *XmemNozzle) initialize(settings metadata.ReplicationSettingsMap) err
 	if err != nil {
 		return err
 	}
+
+	getterFunc := settings[XMEM_SETTING_MANIFEST_GETTER].(service_def.CollectionsManifestPartsFunc)
+	xmem.collectionsManifest = getterFunc(xmem.vbList)
 
 	xmem.setDataChan(make(chan *base.WrappedMCRequest, xmem.config.maxCount*10))
 	xmem.bytes_in_dataChan = 0

@@ -1,4 +1,4 @@
-// Copyright (c) 2013 Couchbase, Inc.
+// Copyright (c) 2013-2019 Couchbase, Inc.
 // Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file
 // except in compliance with the License. You may obtain a copy of the License at
 //   http://www.apache.org/licenses/LICENSE-2.0
@@ -7,11 +7,10 @@
 // either express or implied. See the License for the specific language governing permissions
 // and limitations under the License.
 
-package replication_manager
+package base
 
 import (
 	"fmt"
-	"github.com/couchbase/goxdcr/base"
 	"time"
 )
 
@@ -21,23 +20,23 @@ type MetadataChangeMonitor struct {
 	// listeners are started in the same order
 	// hence if listener A needs to be started after listener B
 	// all we need to do is to register listener A after listener B
-	listeners []base.MetadataChangeListener
+	listeners []MetadataChangeListener
 }
 
 func NewMetadataChangeMonitor() *MetadataChangeMonitor {
 	return &MetadataChangeMonitor{
-		listeners: make([]base.MetadataChangeListener, 0),
+		listeners: make([]MetadataChangeListener, 0),
 	}
 }
 
 func (mcm *MetadataChangeMonitor) Start() {
 	for _, listener := range mcm.listeners {
 		listener.Start()
-		time.Sleep(base.WaitTimeBetweenMetadataChangeListeners)
+		time.Sleep(WaitTimeBetweenMetadataChangeListeners)
 	}
 }
 
-func (mcm *MetadataChangeMonitor) RegisterListener(listener base.MetadataChangeListener) error {
+func (mcm *MetadataChangeMonitor) RegisterListener(listener MetadataChangeListener) error {
 	for _, existing_listener := range mcm.listeners {
 		if existing_listener.Id() == listener.Id() {
 			return fmt.Errorf("listener with the same Id, %v, already exists", listener.Id())

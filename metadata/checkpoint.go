@@ -17,6 +17,8 @@ const (
 	StartUpTime         string = "startup_time"
 	FilteredCnt         string = "filtered_items_cnt"
 	FilteredFailedCnt   string = "filtered_failed_cnt"
+	SourceManifest      string = "source_manifest"
+	TargetManifest      string = "target_manifest"
 )
 
 type CheckpointRecord struct {
@@ -36,9 +38,13 @@ type CheckpointRecord struct {
 	Filtered_Items_Cnt uint64 `json:"filtered_items_cnt"`
 	// Number of items failed filter
 	Filtered_Failed_Cnt uint64 `json:"filtered_failed_cnt"`
+	// Manifests uid corresponding to this checkpoint
+	SourceManifest uint64 `json:"source_manifest"`
+	TargetManifest uint64 `json:"target_manifest"`
 }
 
-func NewCheckpointRecord(failoverUuid, seqno, dcpSnapSeqno, dcpSnapEnd, targetSeqno, filteredItems, filterFailed uint64) *CheckpointRecord {
+func NewCheckpointRecord(failoverUuid, seqno, dcpSnapSeqno, dcpSnapEnd, targetSeqno, filteredItems, filterFailed,
+	srcManifest, tgtManifest uint64) *CheckpointRecord {
 	return &CheckpointRecord{
 		Failover_uuid:          failoverUuid,
 		Seqno:                  seqno,
@@ -47,6 +53,8 @@ func NewCheckpointRecord(failoverUuid, seqno, dcpSnapSeqno, dcpSnapEnd, targetSe
 		Target_Seqno:           targetSeqno,
 		Filtered_Items_Cnt:     filteredItems,
 		Filtered_Failed_Cnt:    filterFailed,
+		SourceManifest:         srcManifest,
+		TargetManifest:         tgtManifest,
 	}
 }
 
@@ -64,7 +72,9 @@ func (ckptRecord *CheckpointRecord) IsSame(new_record *CheckpointRecord) bool {
 		ckptRecord.Target_vb_opaque.IsSame(new_record.Target_vb_opaque) &&
 		ckptRecord.Target_Seqno == new_record.Target_Seqno &&
 		ckptRecord.Filtered_Failed_Cnt == new_record.Filtered_Failed_Cnt &&
-		ckptRecord.Filtered_Items_Cnt == new_record.Filtered_Items_Cnt {
+		ckptRecord.Filtered_Items_Cnt == new_record.Filtered_Items_Cnt &&
+		ckptRecord.SourceManifest == new_record.SourceManifest &&
+		ckptRecord.TargetManifest == new_record.TargetManifest {
 		return true
 	} else {
 		return false
@@ -83,6 +93,8 @@ func (ckptRecord *CheckpointRecord) Load(other *CheckpointRecord) {
 	ckptRecord.Target_Seqno = other.Target_Seqno
 	ckptRecord.Filtered_Items_Cnt = other.Filtered_Items_Cnt
 	ckptRecord.Filtered_Failed_Cnt = other.Filtered_Failed_Cnt
+	ckptRecord.SourceManifest = other.SourceManifest
+	ckptRecord.TargetManifest = other.TargetManifest
 }
 
 func (ckptRecord *CheckpointRecord) UnmarshalJSON(data []byte) error {
@@ -137,6 +149,15 @@ func (ckptRecord *CheckpointRecord) UnmarshalJSON(data []byte) error {
 		ckptRecord.Filtered_Failed_Cnt = uint64(filteredFailedCnt.(float64))
 	}
 
+	sourceManifestVer, ok := fieldMap[SourceManifest]
+	if ok {
+		ckptRecord.SourceManifest = uint64(sourceManifestVer.(float64))
+	}
+
+	targetManifestVer, ok := fieldMap[TargetManifest]
+	if ok {
+		ckptRecord.TargetManifest = uint64(targetManifestVer.(float64))
+	}
 	return nil
 }
 

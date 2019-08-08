@@ -10,6 +10,7 @@ import (
 	mcc "github.com/couchbase/gomemcached/client"
 	base "github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
+	"github.com/couchbase/goxdcr/metadata"
 	"github.com/stretchr/testify/assert"
 	gocb "gopkg.in/couchbase/gocb.v1"
 	"io/ioutil"
@@ -1014,4 +1015,36 @@ func TestMatchPcreNegLookahead(t *testing.T) {
 	assert.True(match)
 
 	fmt.Println("============== Test case end: TestMatchPcreNegLookahead =================")
+}
+
+func TestGetCollectionsManifest(t *testing.T) {
+	assert := assert.New(t)
+	cluster, err := gocb.Connect("http://localhost:9000")
+	if err != nil {
+		return
+	}
+
+	cluster.Authenticate(gocb.PasswordAuthenticator{
+		Username: "Administrator",
+		Password: "wewewe",
+	})
+
+	_, err = cluster.OpenBucket("B1", "")
+	if err != nil {
+		return
+	}
+
+	manifest, err := testUtils.GetCollectionsManifest("localhost:9000", "B1", "Administrator", "wewewe", base.HttpAuthMechPlain, nil, false, nil, nil, logger)
+	assert.Nil(err)
+	assert.NotNil(manifest)
+
+	// Get manifest to match
+	manifestTestFile := "../metadata/testData/provisionedManifest.json"
+	data, err := ioutil.ReadFile(manifestTestFile)
+	assert.Nil(err)
+	var provisionedManifest metadata.CollectionsManifest
+	err = provisionedManifest.LoadBytes(data)
+	assert.Nil(err)
+
+	assert.True(manifest.Equals(&provisionedManifest))
 }

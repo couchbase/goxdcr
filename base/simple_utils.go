@@ -240,6 +240,17 @@ func SearchUint64List(seqno_list []uint64, seqno uint64) (int, bool) {
 	}
 }
 
+type StringList []string
+
+func (s StringList) Len() int           { return len(s) }
+func (s StringList) Swap(i, j int)      { s[i], s[j] = s[j], s[i] }
+func (s StringList) Less(i, j int) bool { return s[i] < s[j] }
+
+func SortStringList(list []string) []string {
+	sort.Sort(StringList(list))
+	return list
+}
+
 func MissingValueError(param string) error {
 	return errors.New(fmt.Sprintf("%v cannot be empty", param))
 }

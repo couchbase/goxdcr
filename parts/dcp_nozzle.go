@@ -38,6 +38,7 @@ const (
 	EVENT_DCP_DATACH_LEN    = "dcp_datach_length"
 	DCP_Stats_Interval      = "stats_interval"
 	DCP_Priority            = "dcpPriority"
+	DCP_Manifest_Getter     = "dcpManifestGetter"
 )
 
 type DcpStreamState int
@@ -337,6 +338,8 @@ type DcpNozzle struct {
 
 	dcpPrioritySetting mcc.PriorityType
 	lockSetting        sync.RWMutex
+
+	collectionsManifest *metadata.CollectionsManifest
 }
 
 func NewDcpNozzle(id string,
@@ -530,6 +533,9 @@ func (dcp *DcpNozzle) initialize(settings metadata.ReplicationSettingsMap) (err 
 	if val, ok := settings[DCP_Priority]; ok {
 		dcp.setDcpPrioritySetting(val.(mcc.PriorityType))
 	}
+
+	manifestGetterFunc := settings[DCP_Manifest_Getter].(service_def.CollectionsManifestPartsFunc)
+	dcp.collectionsManifest = manifestGetterFunc(dcp.vbnos)
 
 	dcp.initializeUprHandshakeHelpers()
 

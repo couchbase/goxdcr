@@ -44,6 +44,29 @@ func (_m *RemoteClusterSvc) CheckAndUnwrapRemoteClusterError(err error) (bool, e
 	return r0, r1
 }
 
+// CollectionManifestGetter provides a mock function with given fields: bucketName
+func (_m *RemoteClusterSvc) CollectionManifestGetter(bucketName string) (*metadata.CollectionsManifest, error) {
+	ret := _m.Called(bucketName)
+
+	var r0 *metadata.CollectionsManifest
+	if rf, ok := ret.Get(0).(func(string) *metadata.CollectionsManifest); ok {
+		r0 = rf(bucketName)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*metadata.CollectionsManifest)
+		}
+	}
+
+	var r1 error
+	if rf, ok := ret.Get(1).(func(string) error); ok {
+		r1 = rf(bucketName)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
 // DelRemoteCluster provides a mock function with given fields: refName
 func (_m *RemoteClusterSvc) DelRemoteCluster(refName string) (*metadata.RemoteClusterReference, error) {
 	ret := _m.Called(refName)
@@ -81,6 +104,29 @@ func (_m *RemoteClusterSvc) GetConnectionStringForRemoteCluster(ref *metadata.Re
 	var r1 error
 	if rf, ok := ret.Get(1).(func(*metadata.RemoteClusterReference, bool) error); ok {
 		r1 = rf(ref, isCapiReplication)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// GetManifestByUuid provides a mock function with given fields: uuid, bucketName, forceRefresh
+func (_m *RemoteClusterSvc) GetManifestByUuid(uuid string, bucketName string, forceRefresh bool) (*metadata.CollectionsManifest, error) {
+	ret := _m.Called(uuid, bucketName, forceRefresh)
+
+	var r0 *metadata.CollectionsManifest
+	if rf, ok := ret.Get(0).(func(string, string, bool) *metadata.CollectionsManifest); ok {
+		r0 = rf(uuid, bucketName, forceRefresh)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*metadata.CollectionsManifest)
+		}
+	}
+
+	var r1 error
+	if rf, ok := ret.Get(1).(func(string, string, bool) error); ok {
+		r1 = rf(uuid, bucketName, forceRefresh)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -208,6 +254,20 @@ func (_m *RemoteClusterSvc) RemoteClusters() (map[string]*metadata.RemoteCluster
 	return r0, r1
 }
 
+// RequestRemoteMonitoring provides a mock function with given fields: spec
+func (_m *RemoteClusterSvc) RequestRemoteMonitoring(spec *metadata.ReplicationSpecification) error {
+	ret := _m.Called(spec)
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(*metadata.ReplicationSpecification) error); ok {
+		r0 = rf(spec)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
 // SetMetadataChangeHandlerCallback provides a mock function with given fields: callBack
 func (_m *RemoteClusterSvc) SetMetadataChangeHandlerCallback(callBack base.MetadataChangeHandlerCallback) {
 	_m.Called(callBack)
@@ -220,6 +280,20 @@ func (_m *RemoteClusterSvc) SetRemoteCluster(refName string, ref *metadata.Remot
 	var r0 error
 	if rf, ok := ret.Get(0).(func(string, *metadata.RemoteClusterReference) error); ok {
 		r0 = rf(refName, ref)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// UnRequestRemoteMonitoring provides a mock function with given fields: spec
+func (_m *RemoteClusterSvc) UnRequestRemoteMonitoring(spec *metadata.ReplicationSpecification) error {
+	ret := _m.Called(spec)
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(*metadata.ReplicationSpecification) error); ok {
+		r0 = rf(spec)
 	} else {
 		r0 = ret.Error(0)
 	}

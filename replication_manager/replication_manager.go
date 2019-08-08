@@ -98,6 +98,8 @@ type replicationManager struct {
 	internal_settings_svc service_def.InternalSettingsSvc
 	// Mockable utils object
 	utils utilities.UtilsIface
+	// Collections Manifests service
+	collectionsManifestSvc service_def.CollectionsManifestSvc
 
 	once sync.Once
 
@@ -134,7 +136,8 @@ func StartReplicationManager(sourceKVHost string,
 	bucket_settings_svc service_def.BucketSettingsSvc,
 	internal_settings_svc service_def.InternalSettingsSvc,
 	throughput_throttler_svc service_def.ThroughputThrottlerSvc,
-	utilitiesIn utilities.UtilsIface) {
+	utilitiesIn utilities.UtilsIface,
+	collectionsManifestSvc service_def.CollectionsManifestSvc) {
 
 	replication_mgr.once.Do(func() {
 		// ns_server shutdown protocol: poll stdin and exit upon reciept of EOF
@@ -147,7 +150,10 @@ func StartReplicationManager(sourceKVHost string,
 		replication_mgr.utils = utilitiesIn
 
 		// initializes replication manager
-		replication_mgr.init(repl_spec_svc, remote_cluster_svc, cluster_info_svc, xdcr_topology_svc, replication_settings_svc, checkpoint_svc, capi_svc, audit_svc, uilog_svc, global_setting_svc, bucket_settings_svc, internal_settings_svc, throughput_throttler_svc)
+		replication_mgr.init(repl_spec_svc, remote_cluster_svc, cluster_info_svc,
+			xdcr_topology_svc, replication_settings_svc, checkpoint_svc, capi_svc, audit_svc,
+			uilog_svc, global_setting_svc, bucket_settings_svc, internal_settings_svc,
+			throughput_throttler_svc, collectionsManifestSvc)
 
 		// start replication manager supervisor
 		// TODO should we make heart beat settings configurable?
@@ -291,7 +297,7 @@ func initConstants(xdcr_topology_svc service_def.XDCRCompTopologySvc, internal_s
 }
 
 func (rm *replicationManager) initMetadataChangeMonitor() {
-	mcm := NewMetadataChangeMonitor()
+	mcm := base.NewMetadataChangeMonitor()
 
 	// the sequence of the listener registration matters
 	// for example, replicationSpecChangeListener will get all active replications started
@@ -303,7 +309,6 @@ func (rm *replicationManager) initMetadataChangeMonitor() {
 		rm.metadata_change_callback_cancel_ch,
 		rm.children_waitgrp,
 		log.DefaultLoggerContext,
-		rm.utils,
 		rm.resourceMgr)
 
 	mcm.RegisterListener(globalSettingChangeListener)
@@ -313,8 +318,7 @@ func (rm *replicationManager) initMetadataChangeMonitor() {
 		rm.internal_settings_svc,
 		rm.metadata_change_callback_cancel_ch,
 		rm.children_waitgrp,
-		log.DefaultLoggerContext,
-		rm.utils)
+		log.DefaultLoggerContext)
 
 	mcm.RegisterListener(internalSettingsChangeListener)
 	rm.internal_settings_svc.SetMetadataChangeHandlerCallback(internalSettingsChangeListener.internalSettingsChangeHandlerCallback)
@@ -324,8 +328,7 @@ func (rm *replicationManager) initMetadataChangeMonitor() {
 		rm.repl_spec_svc,
 		rm.metadata_change_callback_cancel_ch,
 		rm.children_waitgrp,
-		log.DefaultLoggerContext,
-		rm.utils)
+		log.DefaultLoggerContext)
 
 	mcm.RegisterListener(remoteClusterChangeListener)
 	rm.remote_cluster_svc.SetMetadataChangeHandlerCallback(remoteClusterChangeListener.remoteClusterChangeHandlerCallback)
@@ -335,7 +338,6 @@ func (rm *replicationManager) initMetadataChangeMonitor() {
 		rm.metadata_change_callback_cancel_ch,
 		rm.children_waitgrp,
 		log.DefaultLoggerContext,
-		rm.utils,
 		rm.resourceMgr)
 	mcm.RegisterListener(replicationSpecChangeListener)
 	rm.repl_spec_svc.SetMetadataChangeHandlerCallback(replicationSpecChangeListener.replicationSpecChangeHandlerCallback)
@@ -361,7 +363,7 @@ func (rm *replicationManager) initReplications() {
 		}
 	} else {
 		logger_rm.Errorf("Failed to initReplications - unable to retrieve specs from service cache.")
-		exitProcess(false)
+		ExitProcess(false)
 	}
 }
 
@@ -404,7 +406,8 @@ func (rm *replicationManager) init(
 	global_setting_svc service_def.GlobalSettingsSvc,
 	bucket_settings_svc service_def.BucketSettingsSvc,
 	internal_settings_svc service_def.InternalSettingsSvc,
-	throughput_throttler_svc service_def.ThroughputThrottlerSvc) {
+	throughput_throttler_svc service_def.ThroughputThrottlerSvc,
+	collectionsManifestSvc service_def.CollectionsManifestSvc) {
 
 	rm.GenericSupervisor = *supervisor.NewGenericSupervisor(base.ReplicationManagerSupervisorId, log.DefaultLoggerContext, rm, nil, rm.utils)
 	rm.repl_spec_svc = repl_spec_svc
@@ -420,8 +423,11 @@ func (rm *replicationManager) init(
 	rm.global_setting_svc = global_setting_svc
 	rm.bucket_settings_svc = bucket_settings_svc
 	rm.internal_settings_svc = internal_settings_svc
+	rm.collectionsManifestSvc = collectionsManifestSvc
 
-	fac := factory.NewXDCRFactory(repl_spec_svc, remote_cluster_svc, cluster_info_svc, xdcr_topology_svc, checkpoint_svc, capi_svc, uilog_svc, bucket_settings_svc, throughput_throttler_svc, log.DefaultLoggerContext, log.DefaultLoggerContext, rm, rm.utils)
+	fac := factory.NewXDCRFactory(repl_spec_svc, remote_cluster_svc, cluster_info_svc, xdcr_topology_svc,
+		checkpoint_svc, capi_svc, uilog_svc, bucket_settings_svc, throughput_throttler_svc,
+		log.DefaultLoggerContext, log.DefaultLoggerContext, rm, rm.utils, collectionsManifestSvc)
 
 	rm.pipelineMgr = pipeline_manager.NewPipelineManager(fac, repl_spec_svc, xdcr_topology_svc, remote_cluster_svc, cluster_info_svc, checkpoint_svc, uilog_svc, log.DefaultLoggerContext, rm.utils)
 
@@ -836,7 +842,7 @@ func (rm *replicationManager) OnError(s common.Supervisor, errMap map[string]err
 	if s.Id() == base.ReplicationManagerSupervisorId {
 		// the errors came from the replication manager supervisor because adminport is not longer alive.
 		// there is nothing we can do except to abort xdcr. ns_server will restart xdcr while later
-		exitProcess(false)
+		ExitProcess(false)
 	} else {
 		// the errors came from a pipeline supervisor because some parts are not longer alive.
 		pipeline, err := rm.getPipelineFromPipelineSupevisor(s)
@@ -904,15 +910,15 @@ func pollStdin() {
 		logger_rm.Infof("received byte %v\n", ch)
 		if err == io.EOF {
 			logger_rm.Infof("Received EOF; Exiting...")
-			exitProcess(false)
+			ExitProcess(false)
 		}
 		if err != nil {
 			logger_rm.Errorf("Unexpected error polling stdin: %v\n", err)
-			exitProcess(true)
+			ExitProcess(true)
 		}
 		if ch == '\n' || ch == '\r' {
 			logger_rm.Infof("Received EOL; Exiting...")
-			exitProcess(false)
+			ExitProcess(false)
 		}
 	}
 }
@@ -989,7 +995,7 @@ func checkAndSetRunningState() bool {
 }
 
 //crash
-func exitProcess(byForce bool) {
+func ExitProcess(byForce bool) {
 	wasRunning := checkAndSetRunningState()
 	if wasRunning {
 		logger_rm.Info("Replication manager is exiting...")

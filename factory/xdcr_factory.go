@@ -47,16 +47,16 @@ type XDCRFactoryIface interface {
 
 // Factory for XDCR pipelines
 type XDCRFactory struct {
-	repl_spec_svc      service_def.ReplicationSpecSvc
-	remote_cluster_svc service_def.RemoteClusterSvc
-	cluster_info_svc   service_def.ClusterInfoSvc
-	xdcr_topology_svc  service_def.XDCRCompTopologySvc
-	checkpoint_svc     service_def.CheckpointsService
-	capi_svc           service_def.CAPIService
-	uilog_svc          service_def.UILogSvc
-	//bucket settings service
+	repl_spec_svc            service_def.ReplicationSpecSvc
+	remote_cluster_svc       service_def.RemoteClusterSvc
+	cluster_info_svc         service_def.ClusterInfoSvc
+	xdcr_topology_svc        service_def.XDCRCompTopologySvc
+	checkpoint_svc           service_def.CheckpointsService
+	capi_svc                 service_def.CAPIService
+	uilog_svc                service_def.UILogSvc
 	bucket_settings_svc      service_def.BucketSettingsSvc
 	throughput_throttler_svc service_def.ThroughputThrottlerSvc
+	collectionsManifestSvc   service_def.CollectionsManifestSvc
 
 	default_logger_ctx       *log.LoggerContext
 	pipeline_failure_handler common.SupervisorFailureHandler
@@ -77,7 +77,8 @@ func NewXDCRFactory(repl_spec_svc service_def.ReplicationSpecSvc,
 	pipeline_default_logger_ctx *log.LoggerContext,
 	factory_logger_ctx *log.LoggerContext,
 	pipeline_failure_handler common.SupervisorFailureHandler,
-	utilsIn utilities.UtilsIface) *XDCRFactory {
+	utilsIn utilities.UtilsIface,
+	collectionsManifestSvc service_def.CollectionsManifestSvc) *XDCRFactory {
 	return &XDCRFactory{repl_spec_svc: repl_spec_svc,
 		remote_cluster_svc:       remote_cluster_svc,
 		cluster_info_svc:         cluster_info_svc,
@@ -90,7 +91,9 @@ func NewXDCRFactory(repl_spec_svc service_def.ReplicationSpecSvc,
 		default_logger_ctx:       pipeline_default_logger_ctx,
 		pipeline_failure_handler: pipeline_failure_handler,
 		logger:                   log.NewLogger("XDCRFactory", factory_logger_ctx),
-		utils:                    utilsIn}
+		utils:                    utilsIn,
+		collectionsManifestSvc:   collectionsManifestSvc,
+	}
 }
 
 /**
@@ -770,6 +773,12 @@ func (xdcrf *XDCRFactory) constructSettingsForXmemNozzle(pipeline common.Pipelin
 	xmemSettings[parts.XMEM_SETTING_CLIENT_CERTIFICATE] = targetClusterRef.ClientCertificate()
 	xmemSettings[parts.XMEM_SETTING_CLIENT_KEY] = targetClusterRef.ClientKey()
 	xmemSettings[parts.XMEM_SETTING_ENCRYPTION_TYPE] = targetClusterRef.EncryptionType()
+
+	var getterFunc service_def.CollectionsManifestPartsFunc = func(vblist []uint16) *metadata.CollectionsManifest {
+		return xdcrf.collectionsManifestSvc.GetTargetManifestForNozzle(pipeline.Specification(), vblist)
+	}
+	xmemSettings[parts.XMEM_SETTING_MANIFEST_GETTER] = getterFunc
+
 	if targetClusterRef.IsFullEncryption() {
 		mem_ssl_port, ok := ssl_port_map[xmemConnStr]
 		if !ok {
@@ -832,6 +841,11 @@ func (xdcrf *XDCRFactory) constructSettingsForDcpNozzle(pipeline common.Pipeline
 		dcpNozzleSettings[parts.DCP_Priority] = dcpPriority
 	}
 
+	var getterFunc service_def.CollectionsManifestPartsFunc = func(vblist []uint16) *metadata.CollectionsManifest {
+		return xdcrf.collectionsManifestSvc.GetSourceManifestForNozzle(pipeline.Specification(), vblist)
+	}
+	dcpNozzleSettings[parts.DCP_Manifest_Getter] = getterFunc
+
 	return dcpNozzleSettings, nil
 }
 
@@ -880,8 +894,9 @@ func (xdcrf *XDCRFactory) registerServices(pipeline common.Pipeline, logger_ctx 
 	ckptMgr, err := pipeline_svc.NewCheckpointManager(xdcrf.checkpoint_svc, xdcrf.capi_svc,
 		xdcrf.remote_cluster_svc, xdcrf.repl_spec_svc, xdcrf.cluster_info_svc,
 		xdcrf.xdcr_topology_svc, through_seqno_tracker_svc, kv_vb_map, targetUserName,
-		targetPassword, targetBucketName, target_kv_vb_map, targetClusterRef,
-		targetClusterVersion, isTargetES, logger_ctx, xdcrf.utils, actualStatsMgr)
+		targetPassword, target_kv_vb_map, targetClusterRef,
+		targetClusterVersion, isTargetES, logger_ctx, xdcrf.utils, actualStatsMgr,
+		xdcrf.collectionsManifestSvc)
 	if err != nil {
 		xdcrf.logger.Errorf("Failed to construct CheckpointManager for %v. err=%v ckpt_svc=%v, capi_svc=%v, remote_cluster_svc=%v, repl_spec_svc=%v\n", pipeline.Topic(), err, xdcrf.checkpoint_svc, xdcrf.capi_svc,
 			xdcrf.remote_cluster_svc, xdcrf.repl_spec_svc)

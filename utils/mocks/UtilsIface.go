@@ -771,6 +771,29 @@ func (_m *UtilsIface) GetClusterUUIDFromURI(uri string) (string, error) {
 	return r0, r1
 }
 
+// GetCollectionsManifest provides a mock function with given fields: hostAddr, bucketName, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, logger
+func (_m *UtilsIface) GetCollectionsManifest(hostAddr string, bucketName string, username string, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCertificate []byte, clientKey []byte, logger *log.CommonLogger) (*metadata.CollectionsManifest, error) {
+	ret := _m.Called(hostAddr, bucketName, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, logger)
+
+	var r0 *metadata.CollectionsManifest
+	if rf, ok := ret.Get(0).(func(string, string, string, string, base.HttpAuthMech, []byte, bool, []byte, []byte, *log.CommonLogger) *metadata.CollectionsManifest); ok {
+		r0 = rf(hostAddr, bucketName, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, logger)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*metadata.CollectionsManifest)
+		}
+	}
+
+	var r1 error
+	if rf, ok := ret.Get(1).(func(string, string, string, string, base.HttpAuthMech, []byte, bool, []byte, []byte, *log.CommonLogger) error); ok {
+		r1 = rf(hostAddr, bucketName, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, logger)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
 // GetConflictResolutionTypeFromBucketInfo provides a mock function with given fields: bucketName, bucketInfo
 func (_m *UtilsIface) GetConflictResolutionTypeFromBucketInfo(bucketName string, bucketInfo map[string]interface{}) (string, error) {
 	ret := _m.Called(bucketName, bucketInfo)

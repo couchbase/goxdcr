@@ -42,6 +42,7 @@ var SSLPortsPath = "/nodes/self/xdcrSSLPorts"
 var NodeServicesPath = "/pools/default/nodeServices"
 var BPath = "/pools/default/b/"
 var DocsPath = "/docs/"
+var CollectionsManifestPath = "/collections"
 
 // constants for CAPI nozzle
 var RevsDiffPath = "/_revs_diff"
@@ -83,6 +84,14 @@ var AlternateKey = "alternateAddresses"
 var ExternalKey = "external"
 var CapiPortKey = "capi"
 var CapiSSLPortKey = "capiSSL"
+
+// Collection consts
+const UIDKey = "uid"
+const NameKey = "name"
+const CollectionsKey = "collections"
+const DefaultScopeCollectionName = "_default"
+
+var CollectionsUidBase int = 16
 
 // URL related constants
 var UrlDelimiter = "/"
@@ -175,11 +184,12 @@ const (
 
 // metadata change listener related constants
 const (
-	ReplicationSpecChangeListener  = "ReplicationSpecChangeListener"
-	RemoteClusterChangeListener    = "RemoteClusterChangeListener"
-	GlobalSettingChangeListener    = "GlobalSettingChangeListener"
-	BucketSettingsChangeListener   = "BucketSettingsChangeListener"
-	InternalSettingsChangeListener = "InternalSettingsChangeListener"
+	ReplicationSpecChangeListener            = "ReplicationSpecChangeListener"
+	ReplicationSpecChangeListenerCollections = "ReplicationSpecChangeListenerCM"
+	RemoteClusterChangeListener              = "RemoteClusterChangeListener"
+	GlobalSettingChangeListener              = "GlobalSettingChangeListener"
+	BucketSettingsChangeListener             = "BucketSettingsChangeListener"
+	InternalSettingsChangeListener           = "InternalSettingsChangeListener"
 )
 
 // constants for integer parsing

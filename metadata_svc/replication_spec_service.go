@@ -91,16 +91,17 @@ func (rsv *ReplicationSpecVal) CloneAndRedact() CacheableMetadataObj {
 type specGCMap map[string]int
 
 type ReplicationSpecService struct {
-	xdcr_comp_topology_svc   service_def.XDCRCompTopologySvc
-	metadata_svc             service_def.MetadataSvc
-	uilog_svc                service_def.UILogSvc
-	remote_cluster_svc       service_def.RemoteClusterSvc
-	cluster_info_svc         service_def.ClusterInfoSvc
-	cache                    *MetadataCache
-	cache_lock               *sync.Mutex
-	logger                   *log.CommonLogger
-	metadata_change_callback base.MetadataChangeHandlerCallback
-	utils                    utilities.UtilsIface
+	xdcr_comp_topology_svc  service_def.XDCRCompTopologySvc
+	metadata_svc            service_def.MetadataSvc
+	uilog_svc               service_def.UILogSvc
+	remote_cluster_svc      service_def.RemoteClusterSvc
+	cluster_info_svc        service_def.ClusterInfoSvc
+	cache                   *MetadataCache
+	cache_lock              *sync.Mutex
+	logger                  *log.CommonLogger
+	utils                   utilities.UtilsIface
+	metadataChangeCallbacks []base.MetadataChangeHandlerCallback
+	metadataChangeCbMtx     sync.RWMutex
 
 	// Replication Spec GC Counters
 	gcMtx    sync.Mutex
@@ -130,7 +131,9 @@ func NewReplicationSpecService(uilog_svc service_def.UILogSvc, remote_cluster_sv
 }
 
 func (service *ReplicationSpecService) SetMetadataChangeHandlerCallback(call_back base.MetadataChangeHandlerCallback) {
-	service.metadata_change_callback = call_back
+	service.metadataChangeCbMtx.Lock()
+	service.metadataChangeCallbacks = append(service.metadataChangeCallbacks, call_back)
+	service.metadataChangeCbMtx.Unlock()
 }
 
 func (service *ReplicationSpecService) initCache() {
@@ -817,7 +820,7 @@ func (service *ReplicationSpecService) initCacheFromMetaKV() (err error) {
 			service.logger.Errorf("Unable to construct spec %v from metaKV's data. err: %v", key, err)
 			continue
 		}
-		service.updateCacheInternalNoLock(replicationId, replSpec)
+		service.updateCacheInternal(replicationId, replSpec, false /*lock*/)
 	}
 	return
 
@@ -1040,17 +1043,27 @@ func (service *ReplicationSpecService) updateCacheInternal(specId string, newSpe
 		delete(service.srcGcMap, oldSpec.Id)
 		delete(service.tgtGcMap, oldSpec.Id)
 		service.gcMtx.Unlock()
+		service.remote_cluster_svc.UnRequestRemoteMonitoring(oldSpec)
 	}
 
-	if updated && service.metadata_change_callback != nil {
-		err = service.metadata_change_callback(specId, oldSpec, newSpec)
-		if err != nil {
-			service.logger.Error(err.Error())
-			return err
+	if updated && oldSpec == nil && newSpec != nil {
+		service.remote_cluster_svc.RequestRemoteMonitoring(newSpec)
+	}
+
+	var lastErr error
+	service.metadataChangeCbMtx.RLock()
+	if updated && len(service.metadataChangeCallbacks) > 0 {
+		for _, cb := range service.metadataChangeCallbacks {
+			err = cb(specId, oldSpec, newSpec)
+			if err != nil {
+				service.logger.Error(err.Error())
+				lastErr = err
+			}
 		}
 	}
+	service.metadataChangeCbMtx.RUnlock()
 
-	return nil
+	return lastErr
 }
 
 func (service *ReplicationSpecService) writeUiLog(spec *metadata.ReplicationSpecification, action, reason string) {

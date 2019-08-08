@@ -28,6 +28,10 @@ type RemoteClusterSvc interface {
 	// Gets a map of cloned remote cluster references, with unique ID being the key
 	RemoteClusters() (map[string]*metadata.RemoteClusterReference, error)
 
+	// Remote Cluster Service may need to monitor target bucket info
+	RequestRemoteMonitoring(spec *metadata.ReplicationSpecification) error
+	UnRequestRemoteMonitoring(spec *metadata.ReplicationSpecification) error
+
 	// get connection string for specified remote cluster
 	// when isCapiReplication is false, return ref.activeHostName, which is rotated among target nodes for load balancing
 	// when isCapiReplication is true, return the lexicographically smallest hostname in hostname list of ref,
@@ -38,6 +42,9 @@ type RemoteClusterSvc interface {
 
 	// used by auditing and ui logging
 	GetRemoteClusterNameFromClusterUuid(uuid string) string
+
+	// Gets the last pulled manifest
+	GetManifestByUuid(uuid, bucketName string, forceRefresh bool) (manifest *metadata.CollectionsManifest, err error)
 
 	// Remote cluster service could return two different types of errors:
 	// 1. unexpected internal server error

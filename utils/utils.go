@@ -3173,3 +3173,18 @@ func (u *Utilities) VerifyTargetBucket(targetBucketName, targetBucketUuid string
 
 	return nil
 }
+
+func (u *Utilities) GetCollectionsManifest(hostAddr, bucketName, username, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCertificate, clientKey []byte, logger *log.CommonLogger) (*metadata.CollectionsManifest, error) {
+	manifestInfo := make(map[string]interface{})
+	err, statusCode := u.QueryRestApiWithAuth(hostAddr, base.DefaultPoolBucketsPath+bucketName+base.CollectionsManifestPath, false, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, base.MethodGet, "", nil, 0, &manifestInfo, nil, false, logger)
+	if err == nil && statusCode == http.StatusOK {
+		manifest, err := metadata.NewCollectionsManifestFromMap(manifestInfo)
+		return &manifest, err
+	}
+	if statusCode == http.StatusNotFound {
+		return nil, u.GetNonExistentBucketError()
+	} else {
+		logger.Errorf("Failed to get manifest for bucket '%v'. host=%v, err=%v, statusCode=%v", bucketName, hostAddr, err, statusCode)
+		return nil, fmt.Errorf("Failed to get manifest info")
+	}
+}

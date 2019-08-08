@@ -65,6 +65,8 @@ type CheckpointManager struct {
 
 	through_seqno_tracker_svc service_def.ThroughSeqnoTrackerSvc
 
+	collectionsManifestSvc service_def.CollectionsManifestSvc
+
 	//the interval between checkpointing in seconds
 	ckpt_interval uint32
 
@@ -141,9 +143,10 @@ type snapshotHistoryWithLock struct {
 func NewCheckpointManager(checkpoints_svc service_def.CheckpointsService, capi_svc service_def.CAPIService,
 	remote_cluster_svc service_def.RemoteClusterSvc, rep_spec_svc service_def.ReplicationSpecSvc, cluster_info_svc service_def.ClusterInfoSvc,
 	xdcr_topology_svc service_def.XDCRCompTopologySvc, through_seqno_tracker_svc service_def.ThroughSeqnoTrackerSvc,
-	active_vbs map[string][]uint16, target_username, target_password string, target_bucket_name string,
+	active_vbs map[string][]uint16, target_username, target_password string,
 	target_kv_vb_map map[string][]uint16, target_cluster_ref *metadata.RemoteClusterReference,
-	target_cluster_version int, isTargetES bool, logger_ctx *log.LoggerContext, utilsIn utilities.UtilsIface, statsMgr StatsMgrIface) (*CheckpointManager, error) {
+	target_cluster_version int, isTargetES bool, logger_ctx *log.LoggerContext, utilsIn utilities.UtilsIface, statsMgr StatsMgrIface,
+	collectionsManifestSvc service_def.CollectionsManifestSvc) (*CheckpointManager, error) {
 	if checkpoints_svc == nil || capi_svc == nil || remote_cluster_svc == nil || rep_spec_svc == nil || cluster_info_svc == nil || xdcr_topology_svc == nil {
 		return nil, errors.New("checkpoints_svc, capi_svc, remote_cluster_svc, rep_spec_svc, cluster_info_svc and xdcr_topology_svc can't be nil")
 	}
@@ -166,7 +169,6 @@ func NewCheckpointManager(checkpoints_svc service_def.CheckpointsService, capi_s
 		active_vbs:                active_vbs,
 		target_username:           target_username,
 		target_password:           target_password,
-		target_bucket_name:        target_bucket_name,
 		target_kv_vb_map:          target_kv_vb_map,
 		wait_grp:                  &sync.WaitGroup{},
 		failoverlog_map:           make(map[uint16]*failoverlogWithLock),
@@ -177,6 +179,7 @@ func NewCheckpointManager(checkpoints_svc service_def.CheckpointsService, capi_s
 		isTargetES:                isTargetES,
 		utils:                     utilsIn,
 		statsMgr:                  statsMgr,
+		collectionsManifestSvc:    collectionsManifestSvc,
 	}, nil
 }
 
@@ -279,6 +282,8 @@ func (ckmgr *CheckpointManager) startRandomizedCheckpointingTicker() {
 }
 
 func (ckmgr *CheckpointManager) initialize() {
+	ckmgr.target_bucket_name = ckmgr.pipeline.Specification().TargetBucketName
+
 	listOfVbs := ckmgr.getMyVBs()
 	for _, vbno := range listOfVbs {
 		ckmgr.cur_ckpts[vbno] = &checkpointRecordWithLock{ckpt: &metadata.CheckpointRecord{}, lock: &sync.RWMutex{}}
@@ -1139,6 +1144,8 @@ func (ckptRecord *checkpointRecordWithLock) updateAndPersist(ckmgr *CheckpointMa
  * 4. Target VB Opaque (i.e. VBUuid in recent releases) - we don't touch this
  * 5. Snapshot start sequence number (correlating to item 1)
  * 6. Snapshot end sequence number (correlating to item 1)
+ * 7. filtering stats
+ * 8. corresponding manifests for both source and target
  */
 func (ckmgr *CheckpointManager) doCheckpoint(vbno uint16, through_seqno_map map[uint16]uint64,
 	high_seqno_and_vbuuid_map map[uint16][]uint64, xattr_seqno_map map[uint16]uint64) (err error) {
@@ -1230,17 +1237,20 @@ func (ckmgr *CheckpointManager) doCheckpoint(vbno uint16, through_seqno_map map[
 		return nil
 	}
 
-	// Get stats that need to persist
+	// Item 7: Get stats that need to persist
 	vbCountMetrics, err := ckmgr.statsMgr.GetVBCountMetrics(vbno)
 	if err != nil {
-		ckmgr.logger.Warnf("%v unable to get %v metric from stats manager\n", DOCS_FILTERED_METRIC)
+		ckmgr.logger.Warnf("%v unable to get %v metric from stats manager\n", ckmgr.pipeline.Topic(), DOCS_FILTERED_METRIC)
 		return err
 	}
 	filteredItems := vbCountMetrics[DOCS_FILTERED_METRIC]
 	filterFailed := vbCountMetrics[DOCS_UNABLE_TO_FILTER_METRIC]
+	// Item 8: Manifests - for now feed default manifest
+	defaultManifest := metadata.NewDefaultCollectionsManifest()
+
 	// Write-operation - feed the temporary variables and update them into the record and also write them to metakv
 	newCkpt := metadata.NewCheckpointRecord(ckRecordFailoverUuid, through_seqno, ckRecordDcpSnapSeqno, ckRecordDcpSnapEndSeqno, ckptRecordTargetSeqno,
-		uint64(filteredItems), uint64(filterFailed))
+		uint64(filteredItems), uint64(filterFailed), defaultManifest.Uid(), defaultManifest.Uid())
 	err = ckpt_obj.updateAndPersist(ckmgr, vbno, currRecordVersion, xattr_seqno, newCkpt)
 
 	if err != nil {

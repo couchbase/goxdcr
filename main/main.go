@@ -12,6 +12,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"github.com/couchbase/goxdcr/backfill_manager"
 	base "github.com/couchbase/goxdcr/base"
 	log "github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata_svc"
@@ -155,7 +156,15 @@ func main() {
 			fmt.Printf("Error starting replication spec service. err=%v\n", err)
 			os.Exit(1)
 		}
-
+		checkpointsService := metadata_svc.NewCheckpointsService(metakv_svc, nil)
+		manifestsService := metadata_svc.NewManifestsService(metakv_svc, nil)
+		collectionsManifestService, err := metadata_svc.NewCollectionsManifestService(remote_cluster_svc,
+			replication_spec_svc, uilog_svc, log.DefaultLoggerContext, utils, checkpointsService,
+			top_svc, manifestsService)
+		if err != nil {
+			fmt.Printf("Error starting collections manifest service. err=%v\n", err)
+			os.Exit(1)
+		}
 		internalSettings_svc := metadata_svc.NewInternalSettingsSvc(metakv_svc, nil)
 
 		// start replication manager in normal mode
@@ -167,7 +176,7 @@ func main() {
 			cluster_info_svc,
 			top_svc,
 			metadata_svc.NewReplicationSettingsSvc(metakv_svc, nil, top_svc),
-			metadata_svc.NewCheckpointsService(metakv_svc, nil),
+			checkpointsService,
 			service_impl.NewCAPIService(cluster_info_svc, nil, utils),
 			audit_svc,
 			uilog_svc,
@@ -175,7 +184,12 @@ func main() {
 			bucketSettings_svc,
 			internalSettings_svc,
 			service_impl.NewThroughputThrottlerSvc(nil),
-			utils)
+			utils,
+			collectionsManifestService)
+
+		backfillMgr := backfill_manager.NewBackfillManager(collectionsManifestService,
+			rm.ExitProcess, replication_spec_svc)
+		backfillMgr.Start()
 
 		// keep main alive in normal mode
 		<-done
