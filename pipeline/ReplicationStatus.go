@@ -248,11 +248,11 @@ func (rs *ReplicationStatus) AddErrorsFromMap(errMap base.ErrorMap) {
 
 	// Now that shifted has finished, fill in the newer ones
 	i = 0
-	for _, v := range errMap {
+	for k, v := range errMap {
 		if i == keepBeginIndex {
 			break
 		}
-		rs.err_list[i] = PipelineError{Timestamp: time.Now(), ErrMsg: v.Error()}
+		rs.err_list[i] = PipelineError{Timestamp: time.Now(), ErrMsg: fmt.Sprintf("%s:%s", k, v.Error())}
 		i++
 	}
 	rs.Publish(false)
