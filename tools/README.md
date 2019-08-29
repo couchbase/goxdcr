@@ -92,3 +92,17 @@ Edits a specific live replication setting.
 
 Example: ./replicationSettings.sh -s 1 -v "filterExpression=" -v "filterSkipRestream=true"
 ```
+
+## collectionsManagement.sh
+Provides a quick and easy way to view/create/delete scopes and collections
+```
+./collectionsManagement.sh [-h] -l | -g <ClusterName> -b <bucketName> | -n/-d <ClusterName> -b <bucketName> -s <ScopeName> [-c <CollectionName>]
+	h: This help page
+	l: List all available <clusterName> for setting and displaying
+	b: Bucket name to operate on
+	g: Gets all collections for cluster <clusterName>
+	n: Creates a *new* collection or scope on a cluster
+	d: Deletes a collection or scope on a cluster
+	s: Specifies a scope
+	c: (optional) Specifies a collection under a scope
+```
