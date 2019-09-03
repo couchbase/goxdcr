@@ -1025,7 +1025,7 @@ const (
 	BucketDocXattrKey = "xattrs"
 )
 
-const TransactionClientRecordKey = "txn-client-record"
-const ActiveTransactionRecordPrefix = "atr-"
+const TransactionClientRecordKey = "_txn:client-record"
+const ActiveTransactionRecordPrefix = "_txn:atr-"
 const ActiveTransactionRecordSuffix = "^-#[a-f0-9]+$"
 const TransactionXattrKey = "txn"

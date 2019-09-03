@@ -214,7 +214,7 @@ func TestActiveTxnRecordFiltering(t *testing.T) {
 	fmt.Println("============== Test case start: TestActiveTxnRecordFiltering =================")
 	assert := assert.New(t)
 
-	activeTxnRecordFile := "../utils/testInternalData/uprActiveTxnRecordNotCompress.json"
+	activeTxnRecordFile := "../utils/testInternalData/uprActiveTxnRecordNotCompressV2.json"
 	uprEvent, err := base.RetrieveUprJsonAndConvert(activeTxnRecordFile)
 	assert.Nil(err)
 	assert.NotNil(uprEvent)
@@ -235,7 +235,7 @@ func TestTxnClientRecordFiltering(t *testing.T) {
 	fmt.Println("============== Test case start: TestTxnClientRecordFiltering =================")
 	assert := assert.New(t)
 
-	txnClientRecordFile := "../utils/testInternalData/uprTxnClientRecordNotCompress.json"
+	txnClientRecordFile := "../utils/testInternalData/uprTxnClientRecordNotCompressV2.json"
 	uprEvent, err := base.RetrieveUprJsonAndConvert(txnClientRecordFile)
 	assert.Nil(err)
 	assert.NotNil(uprEvent)
