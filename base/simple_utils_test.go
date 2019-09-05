@@ -6,9 +6,11 @@ import (
 	"github.com/couchbase/gojsonsm"
 	"github.com/stretchr/testify/assert"
 	"io/ioutil"
+	"math/rand"
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 const testFilteringDataDir = "../utils/testFilteringData/"
@@ -358,4 +360,29 @@ func TestSkipXattrAndStringsConversion(t *testing.T) {
 	assert.True(strings.Contains(filterExpressionExternal, "META()"))
 
 	fmt.Println("============== Test case end: TestSkipXattrAndStringsConversion =================")
+}
+
+func TestUleb128EncoderDecoder(t *testing.T) {
+	fmt.Println("============== Test case start: TestUleb128EncoderDecoder =================")
+	assert := assert.New(t)
+
+	seed := rand.NewSource(time.Now().UnixNano())
+	generator := rand.New(seed)
+
+	for i := 0; i < 50; i++ {
+		input := generator.Uint64()
+		testLeb, err := NewUleb128(input)
+		assert.Nil(err)
+
+		verifyOutput := testLeb.ToUint64()
+		assert.Equal(verifyOutput, input)
+	}
+
+	// Direct mem mapping test - for reading key with embedded CID
+	var testByteSlice []byte = make([]byte, 1, 1)
+	testByteSlice[0] = 0x09
+	var testOut uint64 = Uleb128(testByteSlice).ToUint64()
+	assert.Equal(uint64(9), testOut)
+
+	fmt.Println("============== Test case end: TestUleb128EncoderDecoder =================")
 }

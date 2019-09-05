@@ -53,6 +53,7 @@ import (
  */
 
 type CollectionsManifestPartsFunc func(vblist []uint16) *metadata.CollectionsManifest
+type CollectionsManifestReqFunc func(manifestUid uint64) (*metadata.CollectionsManifest, error)
 
 type CollectionsManifestSvc interface {
 	CollectionsManifestOps
@@ -66,6 +67,8 @@ type CollectionsManifestSvc interface {
 	// APIs for Nozzles
 	GetSourceManifestForNozzle(spec *metadata.ReplicationSpecification, vblist []uint16) *metadata.CollectionsManifest
 	GetTargetManifestForNozzle(spec *metadata.ReplicationSpecification, vblist []uint16) *metadata.CollectionsManifest
+	GetSpecificSourceManifest(spec *metadata.ReplicationSpecification, manifestVersion uint64) (*metadata.CollectionsManifest, error)
+	GetSpecificTargetManifest(spec *metadata.ReplicationSpecification, manifestVersion uint64) (*metadata.CollectionsManifest, error)
 
 	// This service should allow multiple calls and each call should be append
 	SetMetadataChangeHandlerCallback(callBack base.MetadataChangeHandlerCallback)

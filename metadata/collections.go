@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/couchbase/goxdcr/base"
+	"reflect"
 	"sort"
 	"strconv"
 	"strings"
@@ -46,6 +47,33 @@ func (c *CollectionsManifest) String() string {
 	return strings.Join(output, " ")
 }
 
+func (c *CollectionsManifest) GetScopeAndCollectionName(collectionId uint64) (scopeName, collectionName string, err error) {
+	for _, scope := range c.Scopes() {
+		for _, collection := range scope.Collections {
+			if collection.Uid == collectionId {
+				scopeName = scope.Name
+				collectionName = collection.Name
+				return
+			}
+		}
+	}
+	err = base.ErrorNotFound
+	return
+}
+
+func (c *CollectionsManifest) GetCollectionId(scopeName, collectionName string) (uint64, error) {
+	for _, scope := range c.Scopes() {
+		if scopeName == scope.Name {
+			for _, collection := range scope.Collections {
+				if collection.Name == collectionName {
+					return collection.Uid, nil
+				}
+			}
+		}
+	}
+	return 0, base.ErrorNotFound
+}
+
 // TODO - meta obj
 type collectionsTempObj struct {
 	// data for unmarshalling and parsing
@@ -81,7 +109,7 @@ func NewCollectionsManifestFromMap(manifestInfo map[string]interface{}) (Collect
 	if uid, ok := manifestInfo["uid"].(string); ok {
 		tempObj.UidTemp_ = uid
 	} else {
-		return manifest, base.ErrorInvalidInput
+		return manifest, fmt.Errorf("Uid is not float64, but %v instead", reflect.TypeOf(manifestInfo["uid"]))
 	}
 
 	if scopes, ok := manifestInfo["scopes"].([]interface{}); ok {
@@ -339,7 +367,7 @@ func (s *Scope) String() string {
 func NewScope(name string, scopeDetail map[string]interface{}) (Scope, error) {
 	uidString, ok := scopeDetail[base.UIDKey].(string)
 	if !ok {
-		return Scope{}, base.ErrorInvalidInput
+		return Scope{}, fmt.Errorf("Uid is not float64, but %v instead", reflect.TypeOf(scopeDetail[base.UIDKey]))
 	}
 	uid, err := strconv.ParseUint(uidString, base.CollectionsUidBase, 64)
 	if err != nil {

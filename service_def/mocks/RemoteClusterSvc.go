@@ -44,29 +44,6 @@ func (_m *RemoteClusterSvc) CheckAndUnwrapRemoteClusterError(err error) (bool, e
 	return r0, r1
 }
 
-// CollectionManifestGetter provides a mock function with given fields: bucketName
-func (_m *RemoteClusterSvc) CollectionManifestGetter(bucketName string) (*metadata.CollectionsManifest, error) {
-	ret := _m.Called(bucketName)
-
-	var r0 *metadata.CollectionsManifest
-	if rf, ok := ret.Get(0).(func(string) *metadata.CollectionsManifest); ok {
-		r0 = rf(bucketName)
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*metadata.CollectionsManifest)
-		}
-	}
-
-	var r1 error
-	if rf, ok := ret.Get(1).(func(string) error); ok {
-		r1 = rf(bucketName)
-	} else {
-		r1 = ret.Error(1)
-	}
-
-	return r0, r1
-}
-
 // DelRemoteCluster provides a mock function with given fields: refName
 func (_m *RemoteClusterSvc) DelRemoteCluster(refName string) (*metadata.RemoteClusterReference, error) {
 	ret := _m.Called(refName)

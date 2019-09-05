@@ -6,13 +6,13 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"github.com/couchbase/gocb"
 	"github.com/couchbase/gojsonsm"
 	mcc "github.com/couchbase/gomemcached/client"
 	base "github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
 	"github.com/stretchr/testify/assert"
-	gocb "gopkg.in/couchbase/gocb.v1"
 	"io/ioutil"
 	"math/rand"
 	"strings"
@@ -812,7 +812,7 @@ func TestGenerateXattrUsingGoCB(t *testing.T) {
 		Password: "wewewe",
 	})
 
-	bucket, err := cluster.OpenBucket("b1", "")
+	bucket, err := cluster.OpenBucket("B1", "")
 	if err != nil {
 		return
 	}

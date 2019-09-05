@@ -82,7 +82,7 @@ func (m *ManifestsService) GetSourceManifests(replSpec *metadata.ReplicationSpec
 	key := getManifestDocKey(replSpec.Id, true /*source*/)
 	manifestsDoc, err := m.getInternal(key)
 	if err == service_def.MetadataNotFoundErr {
-		return nil, nil
+		return nil, service_def.MetadataNotFoundErr
 	} else if err != nil {
 		return nil, err
 	} else {

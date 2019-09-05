@@ -84,9 +84,10 @@ func setupBoilerPlate() (*log.CommonLogger,
 	replSpecSvc := &service_def.ReplicationSpecSvc{}
 	targetKVVbMap := make(map[string][]uint16)
 	remoteClusterRef := &metadata.RemoteClusterReference{}
+	colManifestSvc := &service_def.CollectionsManifestSvc{}
 
 	dcpNozzle := parts.NewDcpNozzle(testDCPPart, "sourceBucket", "targetBucket", vbs, xdcrTopologySvc,
-		false /*isCapi*/, log.DefaultLoggerContext, utils)
+		false /*isCapi*/, log.DefaultLoggerContext, utils, colManifestSvc)
 
 	connector := &common.Connector{}
 

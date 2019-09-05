@@ -128,11 +128,13 @@ func NewRouter(id string, topic string, filterExpression string,
 	return router, nil
 }
 
-func (router *Router) ComposeMCRequest(event *mcc.UprEvent) (*base.WrappedMCRequest, error) {
+func (router *Router) ComposeMCRequest(wrappedEvent *base.WrappedUprEvent) (*base.WrappedMCRequest, error) {
 	wrapped_req, err := router.newWrappedMCRequest()
 	if err != nil {
 		return nil, err
 	}
+
+	event := wrappedEvent.UprEvent
 
 	req := wrapped_req.Req
 	req.Cas = event.Cas
@@ -186,6 +188,11 @@ func (router *Router) ComposeMCRequest(event *mcc.UprEvent) (*base.WrappedMCRequ
 
 	wrapped_req.Seqno = event.Seqno
 	wrapped_req.Start_time = time.Now()
+
+	wrapped_req.CollectionUsed = wrappedEvent.CollectionUsed
+	wrapped_req.ScopeName = wrappedEvent.ScopeName
+	wrapped_req.CollectionName = wrappedEvent.CollectionName
+
 	wrapped_req.ConstructUniqueKey()
 
 	return wrapped_req, nil
@@ -198,11 +205,13 @@ func (router *Router) route(data interface{}) (map[string]interface{}, error) {
 
 	result := make(map[string]interface{})
 
-	// only *mc.UprEvent type data is accepted
-	uprEvent, ok := data.(*mcc.UprEvent)
+	wrappedUpr, ok := data.(*base.WrappedUprEvent)
 	if !ok {
 		return nil, ErrorInvalidDataForRouter
 	}
+
+	// only *mc.UprEvent type data is accepted
+	uprEvent := wrappedUpr.UprEvent
 
 	if router.routingMap == nil {
 		return nil, ErrorNoRoutingMapForRouter
@@ -220,26 +229,23 @@ func (router *Router) route(data interface{}) (map[string]interface{}, error) {
 		return result, nil
 	}
 
-	// filter data if filter expession has been defined
-	if router.filter != nil {
-		needToReplicate, err, errDesc, failedDpCnt := router.filter.FilterUprEvent(uprEvent)
-		if failedDpCnt > 0 {
-			router.RaiseEvent(common.NewEvent(common.DataPoolGetFail, failedDpCnt, router, nil, nil))
+	needToReplicate, err, errDesc, failedDpCnt := router.filter.FilterUprEvent(uprEvent)
+	if failedDpCnt > 0 {
+		router.RaiseEvent(common.NewEvent(common.DataPoolGetFail, failedDpCnt, router, nil, nil))
+	}
+	if !needToReplicate || err != nil {
+		if err != nil {
+			// Let pipeline supervisor do the logging
+			router.RaiseEvent(common.NewEvent(common.DataUnableToFilter, uprEvent, router, []interface{}{err, errDesc}, nil))
+		} else {
+			// if data does not need to be replicated, drop it. return empty result
+			router.RaiseEvent(common.NewEvent(common.DataFiltered, uprEvent, router, nil, nil))
 		}
-		if !needToReplicate || err != nil {
-			if err != nil {
-				// Let pipeline supervisor do the logging
-				router.RaiseEvent(common.NewEvent(common.DataUnableToFilter, uprEvent, router, []interface{}{err, errDesc}, nil))
-			} else {
-				// if data does not need to be replicated, drop it. return empty result
-				router.RaiseEvent(common.NewEvent(common.DataFiltered, uprEvent, router, nil, nil))
-			}
-			// Let supervisor set the err instead of the router, to minimize pipeline interruption
-			return result, nil
-		}
+		// Let supervisor set the err instead of the router, to minimize pipeline interruption
+		return result, nil
 	}
 
-	mcRequest, err := router.ComposeMCRequest(uprEvent)
+	mcRequest, err := router.ComposeMCRequest(wrappedUpr)
 	if err != nil {
 		return nil, router.utils.NewEnhancedError("Error creating new memcached request.", err)
 	}

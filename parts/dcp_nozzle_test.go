@@ -12,6 +12,7 @@ import (
 	common "github.com/couchbase/goxdcr/common"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
+	service_def_real "github.com/couchbase/goxdcr/service_def"
 	service_def "github.com/couchbase/goxdcr/service_def/mocks"
 	utilsReal "github.com/couchbase/goxdcr/utils"
 	utilsMock "github.com/couchbase/goxdcr/utils/mocks"
@@ -33,12 +34,14 @@ func setupBoilerPlate() (*service_def.XDCRCompTopologySvc,
 	utilitiesMock := &utilsMock.UtilsIface{}
 	clientIface := &mcMock.ClientIface{}
 	uprfeedIface := &mcMock.UprFeedIface{}
+	colManifestSvc := &service_def.CollectionsManifestSvc{}
+
 	vblist := make([]uint16, 0, 1024)
 	vblist = append(vblist, 0)
 	vblist = append(vblist, 1)
 	vblist = append(vblist, 5)
 	nozzle := NewDcpNozzle("testNozzle", "source", "target", vblist, xdcrTopologyMock,
-		false, log.DefaultLoggerContext, utilitiesMock)
+		false, log.DefaultLoggerContext, utilitiesMock, colManifestSvc)
 
 	// base VBTimeStamp
 	vbTimestamp := &base.VBTimestamp{Vbno: 0, Seqno: 1000}
@@ -72,6 +75,7 @@ func setupUprFeedMock(uprFeed *mcMock.UprFeedIface) {
 	var allFeaturesActivated mcReal.UprFeatures
 	allFeaturesActivated.Xattribute = true
 	allFeaturesActivated.CompressionType = base.CompressionTypeSnappy
+	allFeaturesActivated.EnableExpiry = true
 	uprFeed.On("UprOpenWithXATTR", mock.Anything, mock.Anything, mock.Anything).Return(nil)
 	uprFeed.On("UprOpenWithFeatures", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil, allFeaturesActivated)
 	setupUprFeedGeneric(uprFeed)
@@ -151,6 +155,17 @@ func setupMocksInternal(xdcrTopology *service_def.XDCRCompTopologySvc,
 
 	// UprMock
 	nozzle.uprFeed = uprFeed
+
+	defaultManifest := metadata.NewDefaultCollectionsManifest()
+	defaultManifestGetter := func(vblist []uint16) *metadata.CollectionsManifest {
+		return &defaultManifest
+	}
+	settings[DCP_Manifest_Getter] = service_def_real.CollectionsManifestPartsFunc(defaultManifestGetter)
+
+	specificManifestGetter := func(manifestUid uint64) (*metadata.CollectionsManifest, error) {
+		return &defaultManifest, nil
+	}
+	settings[DCP_Specific_Manifest_Getter] = service_def_real.CollectionsManifestReqFunc(specificManifestGetter)
 }
 
 func generateUprEvent(opcode mc.CommandCode, status mc.Status, vbno uint16, opaque uint16) *mcReal.UprEvent {

@@ -8,6 +8,7 @@ import (
 	base "github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
+	"github.com/couchbase/goxdcr/service_def"
 	serviceDefMocks "github.com/couchbase/goxdcr/service_def/mocks"
 	utilsReal "github.com/couchbase/goxdcr/utils"
 	utilsMock "github.com/couchbase/goxdcr/utils/mocks"
@@ -65,6 +66,12 @@ func setupBoilerPlateXmem() (*utilsMock.UtilsIface,
 	settingsMap[SETTING_OPTI_REP_THRESHOLD] = 0
 	settingsMap[SETTING_BATCHSIZE] = 1024
 	settingsMap[SETTING_BATCHCOUNT] = 1
+
+	defaultManifest := metadata.NewDefaultCollectionsManifest()
+	defaultManifestGetter := func(vblist []uint16) *metadata.CollectionsManifest {
+		return &defaultManifest
+	}
+	settingsMap[XMEM_SETTING_MANIFEST_GETTER] = service_def.CollectionsManifestPartsFunc(defaultManifestGetter)
 
 	router, _ := NewRouter("testId", "testTopic", "" /*FilterExpression*/, nil /*downstreamparts*/, nil, /*routingMap*/
 		base.CRMode_RevId, log.DefaultLoggerContext, nil, utilitiesMock, nil /*throughputThrottler*/, false /*highRepl*/, base.FilterExpDelNone)

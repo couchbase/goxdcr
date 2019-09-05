@@ -686,7 +686,7 @@ function runCbWorkloadGenCollection {
 
 	echo "Running cbworkloadGen on $clusterName bucket $bucketName scope: $scopeName collection $collectionName (ID: $collectionId)"
 	# Run 10000 items of json documents with set/get ratio of 100%
-	$workloadGen -i 10000 -j -r 1 -n 127.0.0.1:$port -b $bucketName -u $DEFAULT_ADMIN -p $DEFAULT_PW --prefix=xdcrProv_$clusterName -c $collectionId
+	$workloadGen -i 10000 -j -r 1 -n 127.0.0.1:$port -b $bucketName -u $DEFAULT_ADMIN -p $DEFAULT_PW --prefix=xdcrProvCollections_$clusterName -c $collectionId
 }
 
 function waitForBgJobs {

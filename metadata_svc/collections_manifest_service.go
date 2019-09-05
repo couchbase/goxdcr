@@ -270,6 +270,26 @@ func (c *CollectionsManifestService) GetSourceManifestForNozzle(spec *metadata.R
 	return agent.GetAndRecordSourceManifest(vblist)
 }
 
+func (c *CollectionsManifestService) GetSpecificSourceManifest(spec *metadata.ReplicationSpecification, manifestVersion uint64) (*metadata.CollectionsManifest, error) {
+	c.agentsMtx.RLock()
+	agent, ok := c.agentsMap[spec.Id]
+	c.agentsMtx.RUnlock()
+	if !ok {
+		return nil, fmt.Errorf("Unable to find agent for spec %v\n", spec.Id)
+	}
+	return agent.GetSpecificSourceManifest(manifestVersion), nil
+}
+
+func (c *CollectionsManifestService) GetSpecificTargetManifest(spec *metadata.ReplicationSpecification, manifestVersion uint64) (*metadata.CollectionsManifest, error) {
+	c.agentsMtx.RLock()
+	agent, ok := c.agentsMap[spec.Id]
+	c.agentsMtx.RUnlock()
+	if !ok {
+		return nil, fmt.Errorf("Unable to find agent for spec %v\n", spec.Id)
+	}
+	return agent.GetSpecificTargetManifest(manifestVersion), nil
+}
+
 func (c *CollectionsManifestService) GetTargetManifestForNozzle(spec *metadata.ReplicationSpecification, vblist []uint16) *metadata.CollectionsManifest {
 	c.agentsMtx.RLock()
 	agent, ok := c.agentsMap[spec.Id]
@@ -379,7 +399,7 @@ func (a *CollectionsManifestAgent) runPeriodicRefresh() {
 			return
 		case <-ticker.C:
 			oldSrc, newSrc := a.refreshSource()
-			oldTgt, newTgt := a.refreshTarget()
+			oldTgt, newTgt := a.refreshTarget(false)
 
 			if newSrc != nil || newTgt != nil {
 				oldPair := metadata.NewCollectionsManifestPair(oldSrc, oldTgt)
@@ -566,6 +586,10 @@ func (a *CollectionsManifestAgent) loadManifestsFromMetakv() error {
 func (a *CollectionsManifestAgent) Start() error {
 	if atomic.CompareAndSwapUint32(&a.started, 0, 1) {
 		err := a.loadManifestsFromMetakv()
+		if err == service_def.MetadataNotFoundErr {
+			a.refreshSource()
+			a.refreshTarget(true)
+		}
 		go a.runPeriodicRefresh()
 		go a.runPersistRequestHandler()
 		return err
@@ -591,6 +615,31 @@ func (a *CollectionsManifestAgent) GetSourceManifest() *metadata.CollectionsMani
 	}
 	defer a.srcMtx.RUnlock()
 	return a.sourceCache[a.lastSourcePull]
+}
+
+// Returns nil if not found in cache
+func (a *CollectionsManifestAgent) GetSpecificSourceManifest(manifestVersion uint64) *metadata.CollectionsManifest {
+	a.srcMtx.RLock()
+	defer a.srcMtx.RUnlock()
+
+	manifest, ok := a.sourceCache[manifestVersion]
+	if !ok {
+		manifest = nil
+	}
+
+	return manifest
+}
+
+func (a *CollectionsManifestAgent) GetSpecificTargetManifest(manifestVersion uint64) *metadata.CollectionsManifest {
+	a.tgtMtx.RLock()
+	defer a.tgtMtx.RUnlock()
+
+	manifest, ok := a.targetCache[manifestVersion]
+	if !ok {
+		manifest = nil
+	}
+
+	return manifest
 }
 
 func (a *CollectionsManifestAgent) GetAndRecordSourceManifest(vblist []uint16) *metadata.CollectionsManifest {
@@ -649,7 +698,7 @@ func (a *CollectionsManifestAgent) GetTargetManifest() *metadata.CollectionsMani
 	_, ok := a.targetCache[a.lastTargetPull]
 	if !ok {
 		a.tgtMtx.RUnlock()
-		a.refreshTarget()
+		a.refreshTarget(false)
 		a.tgtMtx.RLock()
 	}
 	defer a.tgtMtx.RUnlock()
@@ -670,25 +719,26 @@ func (a *CollectionsManifestAgent) GetAndRecordTargetManifest(vblist []uint16) *
 }
 
 // return nils if no update
-func (a *CollectionsManifestAgent) refreshTarget() (oldManifest, newManifest *metadata.CollectionsManifest) {
+func (a *CollectionsManifestAgent) refreshTarget(force bool) (oldManifest, newManifest *metadata.CollectionsManifest) {
 	var manifest *metadata.CollectionsManifest
 	var err error
 	var ok bool
 	getRetry := func() error {
 		clusterUuid := a.replicationSpec.TargetClusterUUID
 		bucketName := a.replicationSpec.TargetBucketName
-		manifest, err = a.remoteClusterSvc.GetManifestByUuid(clusterUuid, bucketName, false /*forceRefresh*/)
+		manifest, err = a.remoteClusterSvc.GetManifestByUuid(clusterUuid, bucketName, force)
 		if err != nil {
 			a.logger.Errorf("RemoteClusterService GetManifest on %v for bucket %v returned %v\n", clusterUuid, bucketName, err)
 			manifest = &metadata.CollectionsManifest{}
 			return err
 		} else {
+			a.logger.Infof("NEIL DEBUG RemoteClusterService GetManifest on %v for bucket %v returned %v with manifest %v\n", clusterUuid, bucketName, err, manifest)
 			return nil
 		}
 	}
 	retryErr := a.utilities.ExponentialBackoffExecutor(targetRefreshStr, base.RemoteMcRetryWaitTime, base.MaxRemoteMcRetry,
 		base.RemoteMcRetryFactor, getRetry)
-	if retryErr != nil {
+	if retryErr != nil || manifest == nil {
 		defaultManifest := metadata.NewDefaultCollectionsManifest()
 		manifest = &defaultManifest
 	}

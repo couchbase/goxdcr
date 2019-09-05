@@ -36,16 +36,17 @@ import (
 
 //configuration settings for XmemNozzle
 const (
-	SETTING_RESP_TIMEOUT             = "resp_timeout"
-	XMEM_SETTING_DEMAND_ENCRYPTION   = "demandEncryption"
-	XMEM_SETTING_ENCRYPTION_TYPE     = "encryptionType"
-	XMEM_SETTING_CERTIFICATE         = metadata.XmemCertificate
-	XMEM_SETTING_INSECURESKIPVERIFY  = "insecureSkipVerify"
-	XMEM_SETTING_SAN_IN_CERITICATE   = "SANInCertificate"
-	XMEM_SETTING_REMOTE_MEM_SSL_PORT = "remote_ssl_port"
-	XMEM_SETTING_CLIENT_CERTIFICATE  = metadata.XmemClientCertificate
-	XMEM_SETTING_CLIENT_KEY          = metadata.XmemClientKey
-	XMEM_SETTING_MANIFEST_GETTER     = "xmemManifestGetter"
+	SETTING_RESP_TIMEOUT                  = "resp_timeout"
+	XMEM_SETTING_DEMAND_ENCRYPTION        = "demandEncryption"
+	XMEM_SETTING_ENCRYPTION_TYPE          = "encryptionType"
+	XMEM_SETTING_CERTIFICATE              = metadata.XmemCertificate
+	XMEM_SETTING_INSECURESKIPVERIFY       = "insecureSkipVerify"
+	XMEM_SETTING_SAN_IN_CERITICATE        = "SANInCertificate"
+	XMEM_SETTING_REMOTE_MEM_SSL_PORT      = "remote_ssl_port"
+	XMEM_SETTING_CLIENT_CERTIFICATE       = metadata.XmemClientCertificate
+	XMEM_SETTING_CLIENT_KEY               = metadata.XmemClientKey
+	XMEM_SETTING_MANIFEST_GETTER          = "xmemManifestGetter"
+	XMEM_SETTING_SPECIFIC_MANIFEST_GETTER = "xmemSpecificManifestGetter"
 
 	default_demandEncryption bool = false
 )
@@ -817,7 +818,9 @@ type XmemNozzle struct {
 
 	vbList []uint16
 
-	collectionsManifest *metadata.CollectionsManifest
+	collectionsManifestMtx     sync.RWMutex
+	collectionsManifest        *metadata.CollectionsManifest
+	collectionsManifestVersion uint64 /* atomically updated */
 }
 
 func NewXmemNozzle(id string,
@@ -1019,14 +1022,14 @@ func (xmem *XmemNozzle) Receive(data interface{}) error {
 	}
 
 	request, ok := data.(*base.WrappedMCRequest)
-
 	if !ok {
 		xmem.Logger().Errorf("Got data of unexpected type. data=%v%v%v", base.UdTagBegin, data, base.UdTagEnd)
 		err = fmt.Errorf("Got data of unexpected type")
 		xmem.handleGeneralError(errors.New(fmt.Sprintf("%v", err)))
 		return err
-
 	}
+
+	xmem.mapToTargetCollection(request)
 
 	err = xmem.accumuBatch(request)
 	if err != nil {
@@ -1034,6 +1037,34 @@ func (xmem *XmemNozzle) Receive(data interface{}) error {
 	}
 
 	return err
+}
+
+func (xmem *XmemNozzle) mapToTargetCollection(request *base.WrappedMCRequest) error {
+	if !request.CollectionUsed {
+		return nil
+	}
+
+	xmem.collectionsManifestMtx.RLock()
+	manifestId := xmem.collectionsManifest.Uid()
+	targetColId, err := xmem.collectionsManifest.GetCollectionId(request.ScopeName, request.CollectionName)
+	xmem.collectionsManifestMtx.RUnlock()
+
+	if err != nil {
+		return err
+	}
+
+	request.MappedManifestId = manifestId
+	request.MappedTargetCollectionId = targetColId
+
+	leb128Cid, err := base.NewUleb128(targetColId)
+	if err != nil {
+		return err
+	}
+
+	request.Req.Key = append([]byte(leb128Cid), request.Req.Key...)
+	request.ConstructUniqueKey()
+
+	return nil
 }
 
 func (xmem *XmemNozzle) accumuBatch(request *base.WrappedMCRequest) error {
@@ -1547,7 +1578,7 @@ func (xmem *XmemNozzle) batchGetMetaHandler(count int, finch chan bool, return_c
 								// this response requires connection reset
 
 								// log the corresponding request to facilitate debugging
-								xmem.Logger().Warnf("%v received error from getMeta client. key=%v%v%v, seqno=%v, response=%v%v%v\n", xmem.Id(), base.UdTagBegin, key, base.UdTagEnd, seqno,
+								xmem.Logger().Warnf("%v received error from getMeta client. key=%v%v%v, seqno=%v, response=%v%v%v\n", xmem.Id(), base.UdTagBegin, string(key), base.UdTagEnd, seqno,
 									base.UdTagBegin, response, base.UdTagEnd)
 								err = fmt.Errorf("error response with status %v from memcached", response.Status)
 								xmem.repairConn(xmem.client_for_getMeta, err.Error(), rev)
@@ -1915,6 +1946,7 @@ func (xmem *XmemNozzle) initialize(settings metadata.ReplicationSettingsMap) err
 
 	getterFunc := settings[XMEM_SETTING_MANIFEST_GETTER].(service_def.CollectionsManifestPartsFunc)
 	xmem.collectionsManifest = getterFunc(xmem.vbList)
+	atomic.StoreUint64(&xmem.collectionsManifestVersion, xmem.collectionsManifest.Uid())
 
 	xmem.setDataChan(make(chan *base.WrappedMCRequest, xmem.config.maxCount*10))
 	xmem.bytes_in_dataChan = 0
@@ -2060,7 +2092,7 @@ func (xmem *XmemNozzle) receiveResponse(finch chan bool, waitGrp *sync.WaitGroup
 								xmem.handleVBError(req.VBucket, vb_err)
 							} else {
 								// for other non-temporary errors, repair connections
-								xmem.Logger().Errorf("%v received error response from setMeta client. Repairing connection. response status=%v, opcode=%v, seqno=%v, req.Key=%v%v%v, req.Cas=%v, req.Extras=%v\n", xmem.Id(), response.Status, response.Opcode, seqno, base.UdTagBegin, req.Key, base.UdTagEnd, req.Cas, req.Extras)
+								xmem.Logger().Errorf("%v received error response from setMeta client. Repairing connection. response status=%v, opcode=%v, seqno=%v, keyLen=%v, req.Key=%v%v%v, req.Cas=%v, req.Extras=%v\n", xmem.Id(), response.Status, response.Opcode, seqno, req.Keylen, base.UdTagBegin, string(req.Key), base.UdTagEnd, req.Cas, req.Extras)
 								xmem.repairConn(xmem.client_for_setMeta, "error response from memcached", rev)
 							}
 						} else if req != nil {
@@ -2586,6 +2618,7 @@ func (xmem *XmemNozzle) sendHELO(setMeta bool) (utilities.HELOFeatures, error) {
 	var features utilities.HELOFeatures
 	features.Xattribute = true
 	features.Xerror = true
+	features.Collections = true
 	if setMeta {
 		// For setMeta, negotiate compression, if it is set
 		features.CompressionType = xmem.compressionSetting

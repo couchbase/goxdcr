@@ -47,6 +47,9 @@ func (f *HELOFeatures) NumberOfActivatedFeatures() int {
 	if f.Xerror {
 		result++
 	}
+	if f.Collections {
+		result++
+	}
 	return result
 }
 
@@ -100,6 +103,49 @@ func (u *Utilities) loggerForFunc(logger *log.CommonLogger) *log.CommonLogger {
 		l = u.logger_utils
 	}
 	return l
+}
+
+// compose a HELO command
+func (u *Utilities) ComposeHELORequest(userAgent string, features HELOFeatures) *mc.MCRequest {
+	var value []byte
+	var numOfFeatures = features.NumberOfActivatedFeatures()
+	var sliceIndex int
+	bytesToAllocate := base.HELO_BYTES_PER_FEATURE * (numOfFeatures + 1) // TCP_NO_DELAY is included by default
+	value = make([]byte, bytesToAllocate)
+
+	// tcp no delay - [0:2]
+	binary.BigEndian.PutUint16(value[sliceIndex:sliceIndex+base.HELO_BYTES_PER_FEATURE], base.HELO_FEATURE_TCP_NO_DELAY)
+	sliceIndex += base.HELO_BYTES_PER_FEATURE
+
+	// Xattribute
+	if features.Xattribute {
+		binary.BigEndian.PutUint16(value[sliceIndex:sliceIndex+base.HELO_BYTES_PER_FEATURE], base.HELO_FEATURE_XATTR)
+		sliceIndex += base.HELO_BYTES_PER_FEATURE
+	}
+
+	// Compression
+	if features.CompressionType == base.CompressionTypeSnappy {
+		binary.BigEndian.PutUint16(value[sliceIndex:sliceIndex+base.HELO_BYTES_PER_FEATURE], base.HELO_FEATURE_SNAPPY)
+		sliceIndex += base.HELO_BYTES_PER_FEATURE
+	}
+
+	// Xerror
+	if features.Xerror {
+		binary.BigEndian.PutUint16(value[sliceIndex:sliceIndex+base.HELO_BYTES_PER_FEATURE], base.HELO_FEATURE_XERROR)
+		sliceIndex += base.HELO_BYTES_PER_FEATURE
+	}
+
+	// Collections
+	if features.Collections {
+		binary.BigEndian.PutUint16(value[sliceIndex:sliceIndex+base.HELO_BYTES_PER_FEATURE], base.HELO_FEATURE_COLLECTIONS)
+		sliceIndex += base.HELO_BYTES_PER_FEATURE
+	}
+
+	return &mc.MCRequest{
+		Key:    []byte(userAgent),
+		Opcode: mc.HELLO,
+		Body:   value,
+	}
 }
 
 func (u *Utilities) ValidateSettings(defs base.SettingDefinitions,
@@ -589,20 +635,24 @@ func (u *Utilities) GetRemoteMemcachedConnection(serverAddr, username, password,
 // the helo is purely informational, for the identification of the client
 // unsuccessful response is not treated as errors
 func (u *Utilities) SendHELO(client mcc.ClientIface, userAgent string, readTimeout, writeTimeout time.Duration,
-	logger *log.CommonLogger) (err error) {
+	//	logger *log.CommonLogger) (err error) {
+	logger *log.CommonLogger) error {
 	var allFeaturesDisabled HELOFeatures
-	heloReq := u.ComposeHELORequest(userAgent, allFeaturesDisabled)
 
-	var response *mc.MCResponse
-	response, err = u.sendHELORequest(client, heloReq, userAgent, readTimeout, writeTimeout, logger)
+	//	heloReq := u.ComposeHELORequest(userAgent, allFeaturesDisabled)
+
+	//	var response *mc.MCResponse
+	//	response, err = u.sendHELORequest(client, heloReq, userAgent, readTimeout, writeTimeout, logger)
+	_, err := u.SendHELOWithFeatures(client, userAgent, readTimeout, writeTimeout, allFeaturesDisabled, logger)
 	if err != nil {
 		logger.Errorf("Received error response from HELO command. userAgent=%v, err=%v.", userAgent, err)
-	} else if response.Status != mc.SUCCESS {
-		logger.Warnf("Received unexpected response from HELO command. userAgent=%v, response status=%v.", userAgent, response.Status)
+		//	} else if response.Status != mc.SUCCESS {
+		//		logger.Warnf("Received unexpected response from HELO command. userAgent=%v, response status=%v.", userAgent, response.Status)
 	} else {
 		logger.Infof("Successfully sent HELO command with userAgent=%v", userAgent)
 	}
-	return
+	return err
+	//	return
 }
 
 // send helo to memcached with data type (including xattr) feature enabled
@@ -613,12 +663,37 @@ func (u *Utilities) SendHELOWithFeatures(client mcc.ClientIface, userAgent strin
 	// Initially set initial respondedFeatures to None since no compression negotiated should not be invalid
 	respondedFeatures.CompressionType = base.CompressionTypeNone
 
-	heloReq := u.ComposeHELORequest(userAgent, requestedFeatures)
+	//	heloReq := u.ComposeHELORequest(userAgent, requestedFeatures)
 
-	var response *mc.MCResponse
-	response, err = u.sendHELORequest(client, heloReq, userAgent, readTimeout, writeTimeout, logger)
+	// Translate XDCR feature set to gomemcached featureset
+	var clientFeatureSet mcc.Features
+
+	// TCP No delay is always first
+	clientFeatureSet = append(clientFeatureSet, mcc.FeatureTcpNoDelay)
+
+	if requestedFeatures.Xattribute {
+		clientFeatureSet = append(clientFeatureSet, mcc.FeatureXattr)
+	}
+
+	if requestedFeatures.CompressionType == base.CompressionTypeSnappy {
+		clientFeatureSet = append(clientFeatureSet, mcc.FeatureCollections)
+	}
+
+	if requestedFeatures.Xerror {
+		clientFeatureSet = append(clientFeatureSet, mcc.FeatureXerror)
+	}
+
+	if requestedFeatures.Collections {
+		clientFeatureSet = append(clientFeatureSet, mcc.FeatureCollections)
+	}
+
+	//	var response *mc.MCResponse
+	//	response, err = u.sendHELORequest(client, heloReq, userAgent, readTimeout, writeTimeout, logger)
+	response, err := client.EnableFeatures(clientFeatureSet)
+
 	if err != nil {
 		logger.Errorf("Received error response from HELO command. userAgent=%v, err=%v.", userAgent, err)
+		//		logger.Errorf("Received error response from HELO command. userAgent=%v, err=%v.", userAgent, err)
 	} else if response.Status != mc.SUCCESS {
 		errMsg := fmt.Sprintf("Received unexpected response from HELO command. userAgent=%v, response status=%v.", userAgent, response.Status)
 		logger.Error(errMsg)
@@ -647,6 +722,9 @@ func (u *Utilities) SendHELOWithFeatures(client mcc.ClientIface, userAgent strin
 			if feature == base.HELO_FEATURE_XERROR {
 				respondedFeatures.Xerror = true
 			}
+			if feature == base.HELO_FEATURE_COLLECTIONS {
+				respondedFeatures.Collections = true
+			}
 			pos += 2
 		}
 		logger.Infof("Successfully sent HELO command with userAgent=%v. attributes=%v", userAgent, respondedFeatures)
@@ -669,44 +747,9 @@ func (u *Utilities) sendHELORequest(client mcc.ClientIface, heloReq *mc.MCReques
 	conn.(net.Conn).SetReadDeadline(time.Now().Add(readTimeout))
 	response, err = client.Receive()
 	conn.(net.Conn).SetReadDeadline(time.Time{})
+	u.logger_utils.Infof("NEIL DEBUG MCResonse Opcode: %v Status %v Key %v Body %v\n", response.Opcode,
+		response.Status, string(response.Key), string(response.Body))
 	return
-}
-
-// compose a HELO command
-func (u *Utilities) ComposeHELORequest(userAgent string, features HELOFeatures) *mc.MCRequest {
-	var value []byte
-	var numOfFeatures = features.NumberOfActivatedFeatures()
-	var sliceIndex int
-	bytesToAllocate := base.HELO_BYTES_PER_FEATURE * (numOfFeatures + 1) // TCP_NO_DELAY is included by default
-	value = make([]byte, bytesToAllocate)
-
-	// tcp no delay - [0:2]
-	binary.BigEndian.PutUint16(value[sliceIndex:sliceIndex+base.HELO_BYTES_PER_FEATURE], base.HELO_FEATURE_TCP_NO_DELAY)
-	sliceIndex += base.HELO_BYTES_PER_FEATURE
-
-	// Xattribute
-	if features.Xattribute {
-		binary.BigEndian.PutUint16(value[sliceIndex:sliceIndex+base.HELO_BYTES_PER_FEATURE], base.HELO_FEATURE_XATTR)
-		sliceIndex += base.HELO_BYTES_PER_FEATURE
-	}
-
-	// Compression
-	if features.CompressionType == base.CompressionTypeSnappy {
-		binary.BigEndian.PutUint16(value[sliceIndex:sliceIndex+base.HELO_BYTES_PER_FEATURE], base.HELO_FEATURE_SNAPPY)
-		sliceIndex += base.HELO_BYTES_PER_FEATURE
-	}
-
-	// Xerror
-	if features.Xerror {
-		binary.BigEndian.PutUint16(value[sliceIndex:sliceIndex+base.HELO_BYTES_PER_FEATURE], base.HELO_FEATURE_XERROR)
-		sliceIndex += base.HELO_BYTES_PER_FEATURE
-	}
-
-	return &mc.MCRequest{
-		Key:    []byte(userAgent),
-		Opcode: mc.HELLO,
-		Body:   value,
-	}
 }
 
 func (u *Utilities) GetIntSettingFromSettings(settings metadata.ReplicationSettingsMap, settingName string) (int, error) {
@@ -3179,12 +3222,14 @@ func (u *Utilities) GetCollectionsManifest(hostAddr, bucketName, username, passw
 	err, statusCode := u.QueryRestApiWithAuth(hostAddr, base.DefaultPoolBucketsPath+bucketName+base.CollectionsManifestPath, false, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, base.MethodGet, "", nil, 0, &manifestInfo, nil, false, logger)
 	if err == nil && statusCode == http.StatusOK {
 		manifest, err := metadata.NewCollectionsManifestFromMap(manifestInfo)
+		u.logger_utils.Infof("NEIL DEBUG Retrieved manifestInfo: %v manifest: %v err: %v\n", manifestInfo, manifest, err)
 		return &manifest, err
 	}
 	if statusCode == http.StatusNotFound {
+		u.logger_utils.Warnf("Getting collection manifest from %v bucket %v resulted in statusNotFound", hostAddr, bucketName)
 		return nil, u.GetNonExistentBucketError()
 	} else {
-		logger.Errorf("Failed to get manifest for bucket '%v'. host=%v, err=%v, statusCode=%v", bucketName, hostAddr, err, statusCode)
+		u.logger_utils.Errorf("Failed to get manifest for bucket '%v'. host=%v, err=%v, statusCode=%v", bucketName, hostAddr, err, statusCode)
 		return nil, fmt.Errorf("Failed to get manifest info")
 	}
 }

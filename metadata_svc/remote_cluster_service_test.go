@@ -3,12 +3,14 @@
 package metadata_svc
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
 	service_def "github.com/couchbase/goxdcr/service_def/mocks"
+	utilsReal "github.com/couchbase/goxdcr/utils"
 	utilsMock "github.com/couchbase/goxdcr/utils/mocks"
 	"github.com/stretchr/testify/assert"
 	mock "github.com/stretchr/testify/mock"
@@ -33,14 +35,17 @@ var nonEmptyMap = map[string]interface{}{"test": "test"}
 
 var callBackCount int
 
+var utilsreal utilsReal.UtilsIface = utilsReal.NewUtilities()
+
 // Note this callback here is meant for the metadata change callback, and NOT the metakv callback
 func testCallbackIncrementCount(string, interface{}, interface{}) error {
 	callBackCount++
 	return nil
 }
 
+var testDir string = "testdata/"
+
 func getMetadataManifestRCS(fileName string) (*metadata.CollectionsManifest, error) {
-	var testDir string = "testdata/"
 	fullFileName := testDir + fileName
 	data, err := ioutil.ReadFile(fullFileName)
 	if err != nil {
@@ -48,6 +53,22 @@ func getMetadataManifestRCS(fileName string) (*metadata.CollectionsManifest, err
 	}
 	manifest, err := metadata.NewCollectionsManifestFromBytes(data)
 	return &manifest, err
+}
+
+func getNodeListForRefresh() []interface{} {
+	fullFileName := testDir + "nodeList.json"
+	data, err := ioutil.ReadFile(fullFileName)
+	if err != nil {
+		panic(err)
+	}
+
+	var output []interface{}
+	err = json.Unmarshal(data, &output)
+	if err != nil {
+		panic(err)
+	}
+
+	return output
 }
 
 func setupBoilerPlateRCS() (*service_def.UILogSvc,
@@ -110,6 +131,15 @@ func setupMocksRCS(uiLogSvcMock *service_def.UILogSvc,
 
 	utilitiesMock.On("GetCollectionsManifest", mock.Anything, mock.Anything, mock.Anything, mock.Anything,
 		mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(manifest, nil)
+
+	// NOT working
+	var realInt int = -1
+	var realErr error
+	getClusterCompatibilitiesCallFunc := func(args mock.Arguments) {
+		nodeList := args.Get(0).([]interface{})
+		realInt, realErr = utilsreal.GetClusterCompatibilityFromNodeList(nodeList)
+	}
+	utilitiesMock.On("GetClusterCompatibilityFromNodeList", mock.Anything).Run(getClusterCompatibilitiesCallFunc).Return(realInt, realErr)
 
 	// UI svc
 	uiLogSvcMock.On("Write", mock.Anything).Return(nil)
@@ -932,4 +962,28 @@ func TestNoWriteAfterDeletes(t *testing.T) {
 	assert.NotNil(agent.UpdateReferenceFrom(ref, true /*updateMetaKV*/))
 
 	fmt.Println("============== Test case end: TestNoWriteAfterDeletes =================")
+}
+
+func TestReadCompatibility(t *testing.T) {
+	assert := assert.New(t)
+	fmt.Println("============== Test case start: TestReadCompatibility =================")
+	uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
+		utilitiesMock, remoteClusterSvc, manifest := setupBoilerPlateRCS()
+
+	nodeList := getNodeListForRefresh()
+	assert.NotNil(nodeList)
+
+	idAndName := "test"
+	ref := createRemoteClusterReference(idAndName)
+
+	setupMocksRCS(uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
+		utilitiesMock, remoteClusterSvc, ref, 0 /* networkDelay*/, manifest)
+
+	// First make sure positive case is good - we have "dummyHostName" as the beginning
+	agent, _, _ := remoteClusterSvc.getOrStartNewAgent(ref, false, false)
+	//	agent.Refresh()
+
+	agent.checkAndUpdateCompatibility(nodeList)
+
+	fmt.Println("============== Test case end: TestReadCompatibility =================")
 }

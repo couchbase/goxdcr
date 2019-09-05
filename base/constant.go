@@ -237,6 +237,7 @@ var ErrorExpDelTrio = fmt.Errorf("%v, %v, and %v must be specified together", Fi
 var ErrorNoSourceKV = errors.New("Invalid configuration. No source kv node is found.")
 var ErrorExecutionTimedOut = errors.New("Execution timed out")
 var ErrorPipelineStartTimedOutUI = errors.New("Pipeline did not start in a timely manner, possibly due to busy source or target. Will try again...")
+var ErrorNotFound = errors.New("Specified entity is not found")
 
 // Various non-error internal msgs
 var FilterForcePassThrough = errors.New("No data is to be filtered, should allow passthrough")
@@ -496,6 +497,9 @@ var HELO_FEATURE_SNAPPY uint16 = 0x0a
 // value representing XERROR
 var HELO_FEATURE_XERROR uint16 = 0x07
 
+// Collections Feature
+var HELO_FEATURE_COLLECTIONS uint16 = 0x12
+
 // new XATTR bit in data type field in dcp mutations
 var PROTOCOL_BINARY_DATATYPE_XATTR uint8 = 0x04
 
@@ -539,6 +543,8 @@ var RetryIntervalSetDerivedObj = 100 * time.Millisecond
 var MaxNumOfRetriesSetDerivedObj = 8
 
 var NumberOfWorkersForCheckpointing = 5
+
+const NumberOfVbs = 1024
 
 type FilterVersionType int
 

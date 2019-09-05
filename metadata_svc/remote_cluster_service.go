@@ -13,6 +13,7 @@ package metadata_svc
 import (
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/json"
 	"encoding/pem"
 	"errors"
 	"fmt"
@@ -21,6 +22,7 @@ import (
 	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/goxdcr/service_def"
 	utilities "github.com/couchbase/goxdcr/utils"
+	"io/ioutil"
 	"net/http"
 	"reflect"
 	"sort"
@@ -83,6 +85,7 @@ type RemoteClusterAgent struct {
 	// Flag to state that metakv deletes have occured. Any concurrent refresh() taking place
 	// when delete occures should NOT write to metakv after this is set
 	deletedFromMetakv bool
+	// Last refreshed remote cluster compatibility version
 
 	// Wait group for making sure we exit synchronized
 	agentWaitGrp sync.WaitGroup
@@ -149,10 +152,11 @@ func (agent *RemoteClusterAgent) initializeNewRefreshContext() (*refreshContext,
 // This is used as a helper context during each refresh operation
 type refreshContext struct {
 	// For comparison and editing
-	refOrig            *metadata.RemoteClusterReference
-	refCache           *metadata.RemoteClusterReference
-	origRefNodesList   base.StringPairList
-	cachedRefNodesList base.StringPairList
+	refOrig             *metadata.RemoteClusterReference
+	refCache            *metadata.RemoteClusterReference
+	origRefNodesList    base.StringPairList
+	cachedRefNodesList  base.StringPairList
+	targetCompatibility string
 
 	// connection related
 	connStr       string
@@ -326,6 +330,13 @@ func (rctx *refreshContext) verifyNodeAndGetList(connStr string, updateSecurityS
 	}
 }
 
+func (agent *RemoteClusterAgent) checkAndUpdateCompatibility(nodeList []interface{}) {
+
+	version, _ := agent.utils.GetClusterCompatibilityFromNodeList(nodeList)
+	fmt.Printf("NEIL DEBUG version: %v\n", version)
+
+}
+
 func (agent *RemoteClusterAgent) Refresh() error {
 	rctx, err := agent.initializeNewRefreshContext()
 	if err != nil {
@@ -346,6 +357,8 @@ func (agent *RemoteClusterAgent) Refresh() error {
 				}
 			}
 		} else {
+			nodeListJson, _ := json.Marshal(nodeList)
+			ioutil.WriteFile("/tmp/nodeList.json", nodeListJson, 0644)
 			// rctx.hostname is in the cluster and is available - make it the activeHost
 			rctx.checkAndUpdateActiveHost()
 
@@ -766,6 +779,7 @@ func (agent *RemoteClusterAgent) RegisterBucketRequest(bucketName string) error 
 		// Use TopologyChangeCheckInterval as min interval between pulls, while agent refreshes at a longer interval
 		manifestGetter = NewBucketManifestGetter(bucketName, agent, base.TopologyChangeCheckInterval)
 		agent.bucketManifestGetters[bucketName] = manifestGetter
+		agent.logger.Infof("NEIL DEBUG remote cluster bucket %v has a getter", bucketName)
 	}
 
 	_, ok = agent.bucketRefCnt[bucketName]
@@ -802,6 +816,7 @@ func (agent *RemoteClusterAgent) CollectionManifestGetter(bucketName string) (*m
 	connStr, err := agent.reference.MyConnectionStr()
 	if err != nil {
 		agent.refMtx.RUnlock()
+		agent.logger.Errorf("Unable to get connectionStr with err: %v\n", err)
 		return nil, err
 	}
 	username, password, httpAuthMech, certificate, sanInCertificate, clientCertificate,
@@ -809,6 +824,7 @@ func (agent *RemoteClusterAgent) CollectionManifestGetter(bucketName string) (*m
 	agent.refMtx.RUnlock()
 
 	if err != nil {
+		agent.logger.Errorf("Unable to get credentials with err: %v\n", err)
 		return nil, err
 	}
 
@@ -820,16 +836,13 @@ func (agent *RemoteClusterAgent) GetManifest(bucketName string, refreshIfPossibl
 	agent.bucketMtx.RLock()
 	getter, ok := agent.bucketManifestGetters[bucketName]
 	if !ok {
+		agent.logger.Warnf("Unable to find manifest getter for bucket %v", bucketName)
 		agent.bucketMtx.RUnlock()
 		return nil
 	}
 	agent.bucketMtx.RUnlock()
 
-	if refreshIfPossible {
-		return getter.GetManifest()
-	} else {
-		return getter.lastStoredManifest
-	}
+	return getter.GetManifest()
 }
 
 func (agent *RemoteClusterAgent) refreshBucketsManifests() {

@@ -32,7 +32,7 @@ func (_m *CollectionsManifestSvc) CollectionManifestGetter(bucketName string) (*
 	return r0, r1
 }
 
-// GetManifests provides a mock function with given fields: spec
+// GetLatestManifests provides a mock function with given fields: spec
 func (_m *CollectionsManifestSvc) GetLatestManifests(spec *metadata.ReplicationSpecification) (*metadata.CollectionsManifest, *metadata.CollectionsManifest, error) {
 	ret := _m.Called(spec)
 
@@ -62,6 +62,107 @@ func (_m *CollectionsManifestSvc) GetLatestManifests(spec *metadata.ReplicationS
 	}
 
 	return r0, r1, r2
+}
+
+// GetOngoingManifests provides a mock function with given fields: spec, vb
+func (_m *CollectionsManifestSvc) GetOngoingManifests(spec *metadata.ReplicationSpecification, vb uint16) (*metadata.CollectionsManifestPair, error) {
+	ret := _m.Called(spec, vb)
+
+	var r0 *metadata.CollectionsManifestPair
+	if rf, ok := ret.Get(0).(func(*metadata.ReplicationSpecification, uint16) *metadata.CollectionsManifestPair); ok {
+		r0 = rf(spec, vb)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*metadata.CollectionsManifestPair)
+		}
+	}
+
+	var r1 error
+	if rf, ok := ret.Get(1).(func(*metadata.ReplicationSpecification, uint16) error); ok {
+		r1 = rf(spec, vb)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// GetSourceManifestForNozzle provides a mock function with given fields: spec, vblist
+func (_m *CollectionsManifestSvc) GetSourceManifestForNozzle(spec *metadata.ReplicationSpecification, vblist []uint16) *metadata.CollectionsManifest {
+	ret := _m.Called(spec, vblist)
+
+	var r0 *metadata.CollectionsManifest
+	if rf, ok := ret.Get(0).(func(*metadata.ReplicationSpecification, []uint16) *metadata.CollectionsManifest); ok {
+		r0 = rf(spec, vblist)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*metadata.CollectionsManifest)
+		}
+	}
+
+	return r0
+}
+
+// GetSpecificSourceManifest provides a mock function with given fields: spec, manifestVersion
+func (_m *CollectionsManifestSvc) GetSpecificSourceManifest(spec *metadata.ReplicationSpecification, manifestVersion uint64) (*metadata.CollectionsManifest, error) {
+	ret := _m.Called(spec, manifestVersion)
+
+	var r0 *metadata.CollectionsManifest
+	if rf, ok := ret.Get(0).(func(*metadata.ReplicationSpecification, uint64) *metadata.CollectionsManifest); ok {
+		r0 = rf(spec, manifestVersion)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*metadata.CollectionsManifest)
+		}
+	}
+
+	var r1 error
+	if rf, ok := ret.Get(1).(func(*metadata.ReplicationSpecification, uint64) error); ok {
+		r1 = rf(spec, manifestVersion)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// GetSpecificTargetManifest provides a mock function with given fields: spec, manifestVersion
+func (_m *CollectionsManifestSvc) GetSpecificTargetManifest(spec *metadata.ReplicationSpecification, manifestVersion uint64) (*metadata.CollectionsManifest, error) {
+	ret := _m.Called(spec, manifestVersion)
+
+	var r0 *metadata.CollectionsManifest
+	if rf, ok := ret.Get(0).(func(*metadata.ReplicationSpecification, uint64) *metadata.CollectionsManifest); ok {
+		r0 = rf(spec, manifestVersion)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*metadata.CollectionsManifest)
+		}
+	}
+
+	var r1 error
+	if rf, ok := ret.Get(1).(func(*metadata.ReplicationSpecification, uint64) error); ok {
+		r1 = rf(spec, manifestVersion)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// GetTargetManifestForNozzle provides a mock function with given fields: spec, vblist
+func (_m *CollectionsManifestSvc) GetTargetManifestForNozzle(spec *metadata.ReplicationSpecification, vblist []uint16) *metadata.CollectionsManifest {
+	ret := _m.Called(spec, vblist)
+
+	var r0 *metadata.CollectionsManifest
+	if rf, ok := ret.Get(0).(func(*metadata.ReplicationSpecification, []uint16) *metadata.CollectionsManifest); ok {
+		r0 = rf(spec, vblist)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*metadata.CollectionsManifest)
+		}
+	}
+
+	return r0
 }
 
 // PersistNeededManifests provides a mock function with given fields: spec
