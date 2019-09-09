@@ -152,7 +152,7 @@ func TestCreateScopeEvent(t *testing.T) {
 	assert.Equal(event.SystemEvent, ScopeCreate)
 
 	creationEvent := ScopeCreateEvent(event)
-	checkScopeName, err := creationEvent.GetName()
+	checkScopeName, err := creationEvent.GetSystemEventName()
 	assert.Nil(err)
 	assert.Equal("S1", checkScopeName)
 
@@ -161,8 +161,8 @@ func TestCreateScopeEvent(t *testing.T) {
 	assert.Nil(err)
 	assert.Equal(manifestUid, checkManifest)
 
-	var scopeId uint32 = binary.BigEndian.Uint32(mcReq.Body[8:12])
-	checkScopeId, err := creationEvent.GetId()
+	var scopeId uint32 = 8
+	checkScopeId, err := creationEvent.GetScopeId()
 	assert.Nil(err)
 	assert.Equal(scopeId, checkScopeId)
 
@@ -191,23 +191,28 @@ func TestCreateCollectionEvent(t *testing.T) {
 	assert.Equal(gomemcached.DCP_SYSTEM_EVENT, event.Opcode)
 	assert.True(event.IsCollectionType())
 	// The key should be the name of the scope being created
-	assert.Equal([]byte("c1"), event.Key)
+	assert.Equal([]byte("C1"), event.Key)
 	assert.Equal(event.SystemEvent, CollectionCreate)
 
 	creationEvent := CollectionCreateEvent(event)
-	checkName, err := creationEvent.GetName()
+	checkName, err := creationEvent.GetSystemEventName()
 	assert.Nil(err)
-	assert.Equal("c1", checkName)
+	assert.Equal("C1", checkName)
 
 	var manifestUid uint64 = binary.BigEndian.Uint64(mcReq.Body[0:8])
 	checkManifest, err := creationEvent.GetManifestId()
 	assert.Nil(err)
 	assert.Equal(manifestUid, checkManifest)
 
-	var colId uint32 = binary.BigEndian.Uint32(mcReq.Body[8:12])
-	checkId, err := creationEvent.GetId()
+	var scopeId uint32 = 8
+	checkId, err := creationEvent.GetScopeId()
 	assert.Nil(err)
-	assert.Equal(colId, checkId)
+	assert.Equal(scopeId, checkId)
+
+	var collectionId uint32 = 9
+	checkId, err = creationEvent.GetCollectionId()
+	assert.Nil(err)
+	assert.Equal(collectionId, checkId)
 
 	// Extras - first uint64 is "by_seqno" - the sequence number of this event
 	var bySeqno uint64 = binary.BigEndian.Uint64(mcReq.Extras[:8])
@@ -242,10 +247,16 @@ func TestDeleteCollectionEvent(t *testing.T) {
 	assert.Nil(err)
 	assert.Equal(manifestUid, checkManifest)
 
-	var colId uint32 = binary.BigEndian.Uint32(mcReq.Body[8:12])
-	checkId, err := delEvent.GetId()
+	var scopeId uint32 = 8
+	checkId, err := delEvent.GetScopeId()
 	assert.Nil(err)
-	assert.Equal(colId, checkId)
+	assert.Equal(scopeId, checkId)
+
+	// Unfortunately the same but it's ok
+	var collectionId uint32 = 9
+	checkId, err = delEvent.GetCollectionId()
+	assert.Nil(err)
+	assert.Equal(collectionId, checkId)
 
 	// Extras - first uint64 is "by_seqno" - the sequence number of this event
 	var bySeqno uint64 = binary.BigEndian.Uint64(mcReq.Extras[:8])
@@ -280,10 +291,10 @@ func TestDeleteScopeEvent(t *testing.T) {
 	assert.Nil(err)
 	assert.Equal(manifestUid, checkManifest)
 
-	var colId uint32 = binary.BigEndian.Uint32(mcReq.Body[8:12])
-	checkId, err := delEvent.GetId()
+	var scopeId uint32 = 8
+	checkId, err := delEvent.GetScopeId()
 	assert.Nil(err)
-	assert.Equal(colId, checkId)
+	assert.Equal(scopeId, checkId)
 
 	// Extras - first uint64 is "by_seqno" - the sequence number of this event
 	var bySeqno uint64 = binary.BigEndian.Uint64(mcReq.Extras[:8])

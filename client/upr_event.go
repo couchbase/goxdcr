@@ -4,47 +4,63 @@ import (
 	"encoding/binary"
 	"fmt"
 	"github.com/couchbase/gomemcached"
-	"github.com/couchbase/goutils/logging"
 )
 
 type SystemEventType int
 
+const InvalidSysEvent SystemEventType = -1
+
 const (
-	CollectionCreate SystemEventType = iota
-	CollectionDrop   SystemEventType = iota
-	CollectionFlush  SystemEventType = iota
-	ScopeCreate      SystemEventType = iota
-	ScopeDrop        SystemEventType = iota
+	CollectionCreate  SystemEventType = 0
+	CollectionDrop    SystemEventType = iota
+	CollectionFlush   SystemEventType = iota
+	ScopeCreate       SystemEventType = iota
+	ScopeDrop         SystemEventType = iota
+	CollectionChanged SystemEventType = iota
 )
 
 type ScopeCreateEvent interface {
-	GetName() (string, error)
-	GetId() (uint32, error) // Gets the SID of the created scope
+	GetSystemEventName() (string, error)
+	GetScopeId() (uint32, error)
 	GetManifestId() (uint64, error)
 }
 
 type CollectionCreateEvent interface {
-	GetName() (string, error)
-	GetId() (uint32, error) // Gets the CID of the created collection
+	GetSystemEventName() (string, error)
+	GetScopeId() (uint32, error)
+	GetCollectionId() (uint32, error)
 	GetManifestId() (uint64, error)
+	GetMaxTTL() (uint32, error)
 }
 
 type CollectionDropEvent interface {
-	GetId() (uint32, error) // Gets the CID of the dropped collection
+	GetScopeId() (uint32, error)
+	GetCollectionId() (uint32, error)
 	GetManifestId() (uint64, error)
 }
 
+// TODO - KV documentation is not finalized, not implemented
 type CollectionFlushEvent interface {
-	GetId() (uint32, error) // Gets the CID of the flush collection
+	GetScopeId() (uint32, error)
+	GetCollectionId() (uint32, error)
 	GetManifestId() (uint64, error)
 }
 
 type ScopeDropEvent interface {
-	GetId() (uint32, error) // Gets the SID of the dropped scope
+	GetScopeId() (uint32, error)
 	GetManifestId() (uint64, error)
 }
 
-var InvalidOp error = fmt.Errorf("Invalid Operation")
+type CollectionChangedEvent interface {
+	GetCollectionId() (uint32, error)
+	GetManifestId() (uint64, error)
+	GetMaxTTL() (uint32, error)
+}
+
+var ErrorInvalidOp error = fmt.Errorf("Invalid Operation")
+var ErrorInvalidVersion error = fmt.Errorf("Invalid version for parsing")
+var ErrorValueTooShort error = fmt.Errorf("Value length is too short")
+var ErrorNoMaxTTL error = fmt.Errorf("This event has no max TTL")
 
 // UprEvent memcached events for UPR streams.
 type UprEvent struct {
@@ -80,15 +96,16 @@ type FailoverLog [][2]uint64
 
 func makeUprEvent(rq gomemcached.MCRequest, stream *UprStream, bytesReceivedFromDCP int) *UprEvent {
 	event := &UprEvent{
-		Opcode:   rq.Opcode,
-		VBucket:  stream.Vbucket,
-		VBuuid:   stream.Vbuuid,
-		Key:      rq.Key,
-		Value:    rq.Body,
-		Cas:      rq.Cas,
-		ExtMeta:  rq.ExtMeta,
-		DataType: rq.DataType,
-		ValueLen: len(rq.Body),
+		Opcode:      rq.Opcode,
+		VBucket:     stream.Vbucket,
+		VBuuid:      stream.Vbuuid,
+		Key:         rq.Key,
+		Value:       rq.Body,
+		Cas:         rq.Cas,
+		ExtMeta:     rq.ExtMeta,
+		DataType:    rq.DataType,
+		ValueLen:    len(rq.Body),
+		SystemEvent: InvalidSysEvent,
 	}
 
 	// set AckSize for events that need to be acked to DCP,
@@ -170,62 +187,118 @@ func (event *UprEvent) PopulateEvent(extras []byte) {
 	event.SysEventVersion = uint8(versionTemp >> 8)
 }
 
-func (event *UprEvent) GetName() (string, error) {
+func (event *UprEvent) GetSystemEventName() (string, error) {
 	switch event.SystemEvent {
 	case CollectionCreate:
 		fallthrough
 	case ScopeCreate:
 		return string(event.Key), nil
 	default:
-		logging.Errorf("Unable to handle unknown event")
-		return "", InvalidOp
+		return "", ErrorInvalidOp
 	}
 }
 
 func (event *UprEvent) GetManifestId() (uint64, error) {
 	switch event.SystemEvent {
-	case CollectionCreate:
+	// Version 0 only checks
+	case CollectionChanged:
 		fallthrough
-	case CollectionDrop:
-		fallthrough
-	case CollectionFlush:
+	case ScopeDrop:
 		fallthrough
 	case ScopeCreate:
 		fallthrough
-	case ScopeDrop:
-		if event.SysEventVersion != 0 {
-			return 0, fmt.Errorf("Invalid version for parsing createScope")
+	case CollectionDrop:
+		if event.SysEventVersion > 0 {
+			return 0, ErrorInvalidVersion
+		}
+		fallthrough
+	case CollectionCreate:
+		// CollectionCreate supports version 1
+		if event.SysEventVersion > 1 {
+			return 0, ErrorInvalidVersion
 		}
 		if event.ValueLen < 8 {
-			return 0, fmt.Errorf("Value is too short")
+			return 0, ErrorValueTooShort
 		}
 		return binary.BigEndian.Uint64(event.Value[0:8]), nil
 	default:
-		logging.Errorf("Unable to handle unknown event")
-		return 0, InvalidOp
+		return 0, ErrorInvalidOp
 	}
 }
 
-func (event *UprEvent) GetId() (uint32, error) {
+func (event *UprEvent) GetCollectionId() (uint32, error) {
 	switch event.SystemEvent {
-	case CollectionCreate:
-		fallthrough
 	case CollectionDrop:
+		if event.SysEventVersion > 0 {
+			return 0, ErrorInvalidVersion
+		}
 		fallthrough
-	case CollectionFlush:
-		fallthrough
-	case ScopeCreate:
-		fallthrough
-	case ScopeDrop:
-		if event.SysEventVersion != 0 {
-			return 0, fmt.Errorf("Invalid version for parsing createScope")
+	case CollectionCreate:
+		if event.SysEventVersion > 1 {
+			return 0, ErrorInvalidVersion
+		}
+		if event.ValueLen < 16 {
+			return 0, ErrorValueTooShort
+		}
+		return binary.BigEndian.Uint32(event.Value[12:16]), nil
+	case CollectionChanged:
+		if event.SysEventVersion > 0 {
+			return 0, ErrorInvalidVersion
 		}
 		if event.ValueLen < 12 {
-			return 0, fmt.Errorf("Value is too short")
+			return 0, ErrorValueTooShort
 		}
 		return binary.BigEndian.Uint32(event.Value[8:12]), nil
 	default:
-		logging.Errorf("Unable to handle unknown event")
-		return 0, InvalidOp
+		return 0, ErrorInvalidOp
+	}
+}
+
+func (event *UprEvent) GetScopeId() (uint32, error) {
+	switch event.SystemEvent {
+	// version 0 checks
+	case ScopeCreate:
+		fallthrough
+	case ScopeDrop:
+		fallthrough
+	case CollectionDrop:
+		if event.SysEventVersion > 0 {
+			return 0, ErrorInvalidVersion
+		}
+		fallthrough
+	case CollectionCreate:
+		// CollectionCreate could be either 0 or 1
+		if event.SysEventVersion > 1 {
+			return 0, ErrorInvalidVersion
+		}
+		if event.ValueLen < 12 {
+			return 0, ErrorValueTooShort
+		}
+		return binary.BigEndian.Uint32(event.Value[8:12]), nil
+	default:
+		return 0, ErrorInvalidOp
+	}
+}
+
+func (event *UprEvent) GetMaxTTL() (uint32, error) {
+	switch event.SystemEvent {
+	case CollectionCreate:
+		if event.SysEventVersion < 1 {
+			return 0, ErrorNoMaxTTL
+		}
+		if event.ValueLen < 20 {
+			return 0, ErrorValueTooShort
+		}
+		return binary.BigEndian.Uint32(event.Value[16:20]), nil
+	case CollectionChanged:
+		if event.SysEventVersion > 0 {
+			return 0, ErrorInvalidVersion
+		}
+		if event.ValueLen < 16 {
+			return 0, ErrorValueTooShort
+		}
+		return binary.BigEndian.Uint32(event.Value[12:16]), nil
+	default:
+		return 0, ErrorInvalidOp
 	}
 }
