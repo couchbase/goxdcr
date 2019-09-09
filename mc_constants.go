@@ -99,6 +99,8 @@ const (
 	SUBDOC_GET               = CommandCode(0xc5) // Get subdoc. Returns with xattrs
 	SUBDOC_MULTI_LOOKUP      = CommandCode(0xd0) // Multi lookup. Doc xattrs and meta.
 
+	DCP_SYSTEM_EVENT = CommandCode(0x5f) // A system event has occurred
+
 )
 
 // command codes that are counted toward DCP control buffer

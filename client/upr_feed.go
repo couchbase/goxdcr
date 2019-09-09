@@ -19,6 +19,7 @@ const uprMutationExtraLen = 30
 const uprDeletetionExtraLen = 18
 const uprDeletetionWithDeletionTimeExtraLen = 21
 const uprSnapshotExtraLen = 20
+const dcpSystemEventExtraLen = 13
 const bufferAckThreshold = 0.2
 const opaqueOpen = 0xBEAF0001
 const opaqueFailover = 0xDEADBEEF
@@ -26,32 +27,6 @@ const uprDefaultNoopInterval = 120
 
 // Counter on top of opaqueOpen that others can draw from for open and control msgs
 var opaqueOpenCtrlWell uint32 = opaqueOpen
-
-// UprEvent memcached events for UPR streams.
-type UprEvent struct {
-	Opcode       gomemcached.CommandCode // Type of event
-	Status       gomemcached.Status      // Response status
-	VBucket      uint16                  // VBucket this event applies to
-	DataType     uint8                   // data type
-	Opaque       uint16                  // 16 MSB of opaque
-	VBuuid       uint64                  // This field is set by downstream
-	Flags        uint32                  // Item flags
-	Expiry       uint32                  // Item expiration time
-	Key, Value   []byte                  // Item key/value
-	OldValue     []byte                  // TODO: TBD: old document value
-	Cas          uint64                  // CAS value of the item
-	Seqno        uint64                  // sequence number of the mutation
-	RevSeqno     uint64                  // rev sequence number : deletions
-	LockTime     uint32                  // Lock time
-	MetadataSize uint16                  // Metadata size
-	SnapstartSeq uint64                  // start sequence number of this snapshot
-	SnapendSeq   uint64                  // End sequence number of the snapshot
-	SnapshotType uint32                  // 0: disk 1: memory
-	FailoverLog  *FailoverLog            // Failover log containing vvuid and sequnce number
-	Error        error                   // Error value in case of a failure
-	ExtMeta      []byte
-	AckSize      uint32 // The number of bytes that can be Acked to DCP
-}
 
 type PriorityType string
 
@@ -305,9 +280,6 @@ type UprStats struct {
 	TotalSnapShot      uint64
 }
 
-// FailoverLog containing vvuid and sequnce number
-type FailoverLog [][2]uint64
-
 // error codes
 var ErrorInvalidLog = errors.New("couchbase.errorInvalidLog")
 
@@ -318,76 +290,6 @@ func (flogp *FailoverLog) Latest() (vbuuid, seqno uint64, err error) {
 		return latest[0], latest[1], nil
 	}
 	return vbuuid, seqno, ErrorInvalidLog
-}
-
-func makeUprEvent(rq gomemcached.MCRequest, stream *UprStream, bytesReceivedFromDCP int) *UprEvent {
-	event := &UprEvent{
-		Opcode:   rq.Opcode,
-		VBucket:  stream.Vbucket,
-		VBuuid:   stream.Vbuuid,
-		Key:      rq.Key,
-		Value:    rq.Body,
-		Cas:      rq.Cas,
-		ExtMeta:  rq.ExtMeta,
-		DataType: rq.DataType,
-	}
-
-	// set AckSize for events that need to be acked to DCP,
-	// i.e., events with CommandCodes that need to be buffered in DCP
-	if _, ok := gomemcached.BufferedCommandCodeMap[rq.Opcode]; ok {
-		event.AckSize = uint32(bytesReceivedFromDCP)
-	}
-
-	// 16 LSBits are used by client library to encode vbucket number.
-	// 16 MSBits are left for application to multiplex on opaque value.
-	event.Opaque = appOpaque(rq.Opaque)
-
-	if len(rq.Extras) >= uprMutationExtraLen &&
-		event.Opcode == gomemcached.UPR_MUTATION {
-
-		event.Seqno = binary.BigEndian.Uint64(rq.Extras[:8])
-		event.RevSeqno = binary.BigEndian.Uint64(rq.Extras[8:16])
-		event.Flags = binary.BigEndian.Uint32(rq.Extras[16:20])
-		event.Expiry = binary.BigEndian.Uint32(rq.Extras[20:24])
-		event.LockTime = binary.BigEndian.Uint32(rq.Extras[24:28])
-		event.MetadataSize = binary.BigEndian.Uint16(rq.Extras[28:30])
-
-	} else if len(rq.Extras) >= uprDeletetionWithDeletionTimeExtraLen &&
-		event.Opcode == gomemcached.UPR_DELETION {
-
-		event.Seqno = binary.BigEndian.Uint64(rq.Extras[:8])
-		event.RevSeqno = binary.BigEndian.Uint64(rq.Extras[8:16])
-		event.Expiry = binary.BigEndian.Uint32(rq.Extras[16:20])
-
-	} else if len(rq.Extras) >= uprDeletetionExtraLen &&
-		event.Opcode == gomemcached.UPR_DELETION ||
-		event.Opcode == gomemcached.UPR_EXPIRATION {
-
-		event.Seqno = binary.BigEndian.Uint64(rq.Extras[:8])
-		event.RevSeqno = binary.BigEndian.Uint64(rq.Extras[8:16])
-		event.MetadataSize = binary.BigEndian.Uint16(rq.Extras[16:18])
-
-	} else if len(rq.Extras) >= uprSnapshotExtraLen &&
-		event.Opcode == gomemcached.UPR_SNAPSHOT {
-
-		event.SnapstartSeq = binary.BigEndian.Uint64(rq.Extras[:8])
-		event.SnapendSeq = binary.BigEndian.Uint64(rq.Extras[8:16])
-		event.SnapshotType = binary.BigEndian.Uint32(rq.Extras[16:20])
-	}
-
-	return event
-}
-
-func (event *UprEvent) String() string {
-	name := gomemcached.CommandNames[event.Opcode]
-	if name == "" {
-		name = fmt.Sprintf("#%d", event.Opcode)
-	}
-	return name
-}
-
-func (event *UprEvent) IsSnappyDataType() bool {
-	return event.Opcode == gomemcached.UPR_MUTATION && (event.DataType&SnappyDataType > 0)
 }
 
 func (feed *UprFeed) sendCommands(mc *Client) {
@@ -973,6 +875,12 @@ loop:
 					if err := feed.conn.TransmitResponse(noop); err != nil {
 						logging.Warnf("failed to transmit command %s. Error %s", noop.Opcode.String(), err.Error())
 					}
+				case gomemcached.DCP_SYSTEM_EVENT:
+					if stream == nil {
+						logging.Infof("Stream not found for vb %d: %#v", vb, pkt)
+						break loop
+					}
+					event = makeUprEvent(pkt, stream, bytes)
 				default:
 					logging.Infof("Recived an unknown response for vbucket %d", vb)
 				}
