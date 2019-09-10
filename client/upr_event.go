@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"github.com/couchbase/gomemcached"
+	"math"
 )
 
 type SystemEventType int
@@ -13,7 +14,7 @@ const InvalidSysEvent SystemEventType = -1
 const (
 	CollectionCreate  SystemEventType = 0
 	CollectionDrop    SystemEventType = iota
-	CollectionFlush   SystemEventType = iota
+	CollectionFlush   SystemEventType = iota // KV did not implement
 	ScopeCreate       SystemEventType = iota
 	ScopeDrop         SystemEventType = iota
 	CollectionChanged SystemEventType = iota
@@ -34,13 +35,6 @@ type CollectionCreateEvent interface {
 }
 
 type CollectionDropEvent interface {
-	GetScopeId() (uint32, error)
-	GetCollectionId() (uint32, error)
-	GetManifestId() (uint64, error)
-}
-
-// TODO - KV documentation is not finalized, not implemented
-type CollectionFlushEvent interface {
 	GetScopeId() (uint32, error)
 	GetCollectionId() (uint32, error)
 	GetManifestId() (uint64, error)
@@ -89,6 +83,7 @@ type UprEvent struct {
 	SystemEvent     SystemEventType         // Only valid if IsSystemEvent() is true
 	SysEventVersion uint8                   // Based on the version, the way Extra bytes is parsed is different
 	ValueLen        int                     // Cache it to avoid len() calls for performance
+	CollectionId    uint64                  // Valid if Collection is in use
 }
 
 // FailoverLog containing vvuid and sequnce number
@@ -96,17 +91,19 @@ type FailoverLog [][2]uint64
 
 func makeUprEvent(rq gomemcached.MCRequest, stream *UprStream, bytesReceivedFromDCP int) *UprEvent {
 	event := &UprEvent{
-		Opcode:      rq.Opcode,
-		VBucket:     stream.Vbucket,
-		VBuuid:      stream.Vbuuid,
-		Key:         rq.Key,
-		Value:       rq.Body,
-		Cas:         rq.Cas,
-		ExtMeta:     rq.ExtMeta,
-		DataType:    rq.DataType,
-		ValueLen:    len(rq.Body),
-		SystemEvent: InvalidSysEvent,
+		Opcode:       rq.Opcode,
+		VBucket:      stream.Vbucket,
+		VBuuid:       stream.Vbuuid,
+		Value:        rq.Body,
+		Cas:          rq.Cas,
+		ExtMeta:      rq.ExtMeta,
+		DataType:     rq.DataType,
+		ValueLen:     len(rq.Body),
+		SystemEvent:  InvalidSysEvent,
+		CollectionId: math.MaxUint64,
 	}
+
+	event.PopulateFieldsBasedOnStreamType(rq, stream.StreamType)
 
 	// set AckSize for events that need to be acked to DCP,
 	// i.e., events with CommandCodes that need to be buffered in DCP
@@ -156,6 +153,32 @@ func makeUprEvent(rq gomemcached.MCRequest, stream *UprStream, bytesReceivedFrom
 	return event
 }
 
+func (event *UprEvent) PopulateFieldsBasedOnStreamType(rq gomemcached.MCRequest, streamType DcpStreamType) {
+	switch streamType {
+	case CollectionsNonStreamId:
+		switch rq.Opcode {
+		// Only these will have CID encoded within the key
+		case gomemcached.UPR_MUTATION,
+			gomemcached.UPR_DELETION,
+			gomemcached.UPR_EXPIRATION:
+			uleb128 := Uleb128(rq.Key)
+			result, bytesShifted := uleb128.ToUint64(rq.Keylen)
+			event.CollectionId = result
+			event.Key = rq.Key[bytesShifted:]
+		default:
+			event.Key = rq.Key
+		}
+	case CollectionsStreamId:
+		// TODO - not implemented
+		fallthrough
+	case NonCollectionStream:
+		// Let default behavior be legacy stream type
+		fallthrough
+	default:
+		event.Key = rq.Key
+	}
+}
+
 func (event *UprEvent) String() string {
 	name := gomemcached.CommandNames[event.Opcode]
 	if name == "" {
@@ -169,7 +192,7 @@ func (event *UprEvent) IsSnappyDataType() bool {
 }
 
 func (event *UprEvent) IsCollectionType() bool {
-	return event.IsSystemEvent()
+	return event.IsSystemEvent() || event.CollectionId <= math.MaxUint32
 }
 
 func (event *UprEvent) IsSystemEvent() bool {
@@ -301,4 +324,23 @@ func (event *UprEvent) GetMaxTTL() (uint32, error) {
 	default:
 		return 0, ErrorInvalidOp
 	}
+}
+
+type Uleb128 []byte
+
+func (u Uleb128) ToUint64(cachedLen int) (result uint64, bytesShifted int) {
+	var shift uint = 0
+
+	for curByte := 0; curByte < cachedLen; curByte++ {
+		oneByte := u[curByte]
+		last7Bits := 0x7f & oneByte
+		result |= uint64(last7Bits) << shift
+		bytesShifted++
+		if oneByte&0x80 == 0 {
+			break
+		}
+		shift += 7
+	}
+
+	return
 }

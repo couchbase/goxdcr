@@ -38,13 +38,22 @@ const (
 	PriorityHigh     PriorityType = "high"
 )
 
+type DcpStreamType int
+
+const (
+	NonCollectionStream    DcpStreamType = iota
+	CollectionsNonStreamId DcpStreamType = iota
+	CollectionsStreamId    DcpStreamType = iota
+)
+
 // UprStream is per stream data structure over an UPR Connection.
 type UprStream struct {
-	Vbucket   uint16 // Vbucket id
-	Vbuuid    uint64 // vbucket uuid
-	StartSeq  uint64 // start sequence number
-	EndSeq    uint64 // end sequence number
-	connected bool
+	Vbucket    uint16 // Vbucket id
+	Vbuuid     uint64 // vbucket uuid
+	StartSeq   uint64 // start sequence number
+	EndSeq     uint64 // end sequence number
+	connected  bool
+	StreamType DcpStreamType
 }
 
 type FeedState int
@@ -249,9 +258,11 @@ type UprFeed struct {
 	// if flag is true, upr feed will use ack from client to determine whether/when to send ack to DCP
 	// if flag is false, upr feed will track how many bytes it has sent to client
 	// and use that to determine whether/when to send ack to DCP
-	ackByClient bool
-	feedState   FeedState
-	muFeedState sync.RWMutex
+	ackByClient       bool
+	feedState         FeedState
+	muFeedState       sync.RWMutex
+	activatedFeatures UprFeatures
+	collectionEnabled bool // This is needed separately because parsing depends on this
 }
 
 // Exported interface - to allow for mocking
@@ -322,6 +333,10 @@ func (feed *UprFeed) activateStream(vbno, opaque uint16, stream *UprStream) erro
 	feed.muVbstreams.Lock()
 	defer feed.muVbstreams.Unlock()
 
+	if feed.collectionEnabled {
+		stream.StreamType = CollectionsNonStreamId
+	}
+
 	// Set this stream as the officially connected stream for this vb
 	stream.connected = true
 	feed.vbstreams[vbno] = stream
@@ -344,12 +359,13 @@ func (mc *Client) NewUprFeed() (*UprFeed, error) {
 func (mc *Client) NewUprFeedWithConfig(ackByClient bool) (*UprFeed, error) {
 
 	feed := &UprFeed{
-		conn:        mc,
-		closer:      make(chan bool, 1),
-		vbstreams:   make(map[uint16]*UprStream),
-		transmitCh:  make(chan *gomemcached.MCRequest),
-		transmitCl:  make(chan bool),
-		ackByClient: ackByClient,
+		conn:              mc,
+		closer:            make(chan bool, 1),
+		vbstreams:         make(map[uint16]*UprStream),
+		transmitCh:        make(chan *gomemcached.MCRequest),
+		transmitCl:        make(chan bool),
+		ackByClient:       ackByClient,
+		collectionEnabled: mc.CollectionEnabled(),
 	}
 
 	feed.negotiator.initialize()
@@ -545,6 +561,7 @@ func (feed *UprFeed) uprOpen(name string, sequence uint32, bufSize uint32, featu
 	}
 
 	// everything is ok so far, set upr feed to open state
+	feed.activatedFeatures = activatedFeatures
 	feed.setOpen()
 	return
 }

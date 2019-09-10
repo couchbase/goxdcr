@@ -25,6 +25,8 @@ type MCRequest struct {
 	Extras, Key, Body, ExtMeta []byte
 	// Datatype identifier
 	DataType uint8
+	// len() calls are expensive - cache this in case for collection
+	Keylen int
 }
 
 // Size gives the number of bytes this request requires.
@@ -148,6 +150,7 @@ func (req *MCRequest) Receive(r io.Reader, hdrBytes []byte) (int, error) {
 	}
 
 	klen := int(binary.BigEndian.Uint16(hdrBytes[2:]))
+	req.Keylen = klen
 	elen := int(hdrBytes[4])
 	// Data type at 5
 	req.DataType = uint8(hdrBytes[5])

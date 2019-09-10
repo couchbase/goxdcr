@@ -271,7 +271,6 @@ func TestDeleteScopeEvent(t *testing.T) {
 
 	deletionFile := "./unitTestData/scopeDel.json"
 	mcReq := retrieveMcRequest(deletionFile)
-
 	assert.NotNil(mcReq)
 
 	// Collection drop does not send key, so vbno is not going to be the same
@@ -301,4 +300,68 @@ func TestDeleteScopeEvent(t *testing.T) {
 	assert.Equal(bySeqno, event.Seqno)
 
 	fmt.Println("============== Test case TestDeleteScopeEvent =================")
+}
+
+func TestLegacyNoCollectionMutation(t *testing.T) {
+	assert := assert.New(t)
+	fmt.Println("============== Test case TestLegacyNoCollectionMutation =================")
+
+	mutationFile := "./unitTestData/origNoCollectionMut.json"
+	mcReq := retrieveMcRequest(mutationFile)
+	assert.NotNil(mcReq)
+
+	tempStream := &UprStream{Vbucket: mcReq.VBucket}
+	tempBytes := 1024
+	event := makeUprEvent(*mcReq, tempStream, tempBytes)
+	assert.False(event.IsSystemEvent())
+
+	assert.Equal("d1", string(event.Key))
+
+	fmt.Println("============== Test case TestLegacyNoCollectionMutation =================")
+}
+
+func TestDefaultScopeMutation(t *testing.T) {
+	assert := assert.New(t)
+	fmt.Println("============== Test case TestDefaultScopeMutation =================")
+
+	mutationFile := "./unitTestData/defaultScopeDefaultColMutation.json"
+	mcReq := retrieveMcRequest(mutationFile)
+	assert.NotNil(mcReq)
+
+	// The StreamType activate uleb128 parsing of key
+	tempStream := &UprStream{Vbucket: mcReq.VBucket, StreamType: CollectionsNonStreamId}
+	tempBytes := 1024
+	event := makeUprEvent(*mcReq, tempStream, tempBytes)
+	assert.False(event.IsSystemEvent())
+
+	assert.Equal("d1", string(event.Key))
+	assert.Equal(uint64(0), event.CollectionId)
+
+	fmt.Println("============== Test case TestDefaultScopeMutation =================")
+}
+
+func TestNonDefaultScopeMutation(t *testing.T) {
+	assert := assert.New(t)
+	fmt.Println("============== Test case TestNonDefaultScopeMutation =================")
+
+	mutationFile := "./unitTestData/scope_and_collection_mutation.json"
+	mcReq := retrieveMcRequest(mutationFile)
+	assert.NotNil(mcReq)
+
+	// The StreamType activate uleb128 parsing of key
+	tempStream := &UprStream{Vbucket: mcReq.VBucket, StreamType: CollectionsNonStreamId}
+	tempBytes := 1024
+	event := makeUprEvent(*mcReq, tempStream, tempBytes)
+	assert.False(event.IsSystemEvent())
+
+	// Manifest version 4
+	// ScopeName S1 (UID 8)
+	// ScopeName S1 CollectionName C1 (UID 9)
+
+	assert.Equal("d1", string(event.Key))
+	assert.Equal(`{"key":"a sentence"}`, string(event.Value))
+	assert.True(event.IsCollectionType())
+	assert.Equal(uint64(9), event.CollectionId)
+
+	fmt.Println("============== Test case TestNonDefaultScopeMutation =================")
 }
