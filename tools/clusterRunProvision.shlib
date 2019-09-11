@@ -653,6 +653,42 @@ function runCbWorkloadGenBucket {
 	$workloadGen -i 10000 -j -r 1 -n 127.0.0.1:$port -b $bucketName -u $DEFAULT_ADMIN -p $DEFAULT_PW --prefix=xdcrProv_$clusterName
 }
 
+function runCbWorkloadGenCollection {
+	local clusterName=$1
+	local bucketName=$2
+	local scopeName=$3
+	local collectionName=$4
+	local collectionId
+
+	if [[ -z "${clusterName:-}" ]] || [[ -z "${bucketName:-}" ]] || [[ -z "${scopeName:-}" ]] || [[ -z "${collectionName:-}" ]];then
+		echo "Invalid input"
+		return 1
+	fi
+	local port=${CLUSTER_NAME_PORT_MAP[$clusterName]:-}
+
+	workloadGen=`findCbWorkloadGen`
+	if (( $? != 0 )) || [[ -z "$workloadGen" ]];then
+		echo "Could not find workload generator binary"
+		return 1
+	fi
+
+	manifestOutput=`getManifest $clusterName $bucketName`
+	if (( $? != 0 ));then
+		echo "Error retrieving manifest"
+		return 1
+	fi
+
+	collectionId=`getCollectionIdFromScopeAndCollectionName "$manifestOutput" "$scopeName" "$collectionName"`
+	if (( $? != 0 ));then
+		echo "Error retrieving collection ID"
+		return 1
+	fi
+
+	echo "Running cbworkloadGen on $clusterName bucket $bucketName scope: $scopeName collection $collectionName (ID: $collectionId)"
+	# Run 10000 items of json documents with set/get ratio of 100%
+	$workloadGen -i 10000 -j -r 1 -n 127.0.0.1:$port -b $bucketName -u $DEFAULT_ADMIN -p $DEFAULT_PW --prefix=xdcrProv_$clusterName -c $collectionId
+}
+
 function waitForBgJobs {
 	echo "Waiting for background jobs to finish..."
 	jobsCnt=`jobs -l | grep -c "Running"`
@@ -728,6 +764,43 @@ function prettyPrintManifest {
 			echo "ScopeName $scopeName CollectionName $collectionName (UID $collectionUID)"
 		done
 	done
+}
+
+# Returns non-0 if not found
+function getCollectionIdFromScopeAndCollectionName {
+	local manifest=$1
+	local requestedScopeName=$2
+	local requestedCollectionName=$3
+
+	local scopesRaw=`echo "$manifest" | jq '.scopes'`
+
+	local scopesKeys=`echo "$scopesRaw" | jq 'keys'`
+	_jqFilterArray "${scopesKeys}"
+
+
+	for scopeName in "${JQ_KEYS_FILTER_FUNC_ARR[@]}"
+	do
+		if [[ "$scopeName" == "$requestedScopeName" ]];then
+			local scopeOutput=`echo "$scopesRaw" | jq ".${scopeName}"`
+			local scopeUID=`echo "$scopeOutput" | jq '.uid'`
+			local collectionsKeysRaw=`echo "$scopeOutput" | jq '.collections|keys'`
+			_jqFilterArray "$collectionsKeysRaw"
+
+			for collectionName in "${JQ_KEYS_FILTER_FUNC_ARR[@]}"
+			do
+				if [[ "$collectionName" == "$requestedCollectionName" ]];then
+					local collectionsOutputRaw=`echo "$scopeOutput" | jq '.collections'`
+					local collectionOutput=`echo "$collectionsOutputRaw" | jq ".${collectionName}"`
+					local collectionUID=`echo "$collectionOutput" | jq '.uid'`
+					echo "$collectionUID"
+					return 0
+				fi
+			done
+		fi
+	done
+	# not found
+	echo ""
+	return 1
 }
 
 function printSingleClusterBucketScopeAndCollection {
