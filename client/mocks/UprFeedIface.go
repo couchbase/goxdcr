@@ -192,6 +192,20 @@ func (_m *UprFeedIface) UprOpenWithXATTR(name string, sequence uint32, bufSize u
 	return r0
 }
 
+// UprRequestCollectionsStream provides a mock function with given fields: vbno, opaqueMSB, flags, vbuuid, startSeq, endSeq, snapStart, snapEnd, filter
+func (_m *UprFeedIface) UprRequestCollectionsStream(vbno uint16, opaqueMSB uint16, flags uint32, vbuuid uint64, startSeq uint64, endSeq uint64, snapStart uint64, snapEnd uint64, filter *memcached.CollectionsFilter) error {
+	ret := _m.Called(vbno, opaqueMSB, flags, vbuuid, startSeq, endSeq, snapStart, snapEnd, filter)
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(uint16, uint16, uint32, uint64, uint64, uint64, uint64, uint64, *memcached.CollectionsFilter) error); ok {
+		r0 = rf(vbno, opaqueMSB, flags, vbuuid, startSeq, endSeq, snapStart, snapEnd, filter)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
 // UprRequestStream provides a mock function with given fields: vbno, opaqueMSB, flags, vuuid, startSequence, endSequence, snapStart, snapEnd
 func (_m *UprFeedIface) UprRequestStream(vbno uint16, opaqueMSB uint16, flags uint32, vuuid uint64, startSequence uint64, endSequence uint64, snapStart uint64, snapEnd uint64) error {
 	ret := _m.Called(vbno, opaqueMSB, flags, vuuid, startSequence, endSequence, snapStart, snapEnd)

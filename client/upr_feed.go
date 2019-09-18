@@ -38,13 +38,30 @@ const (
 	PriorityHigh     PriorityType = "high"
 )
 
-type DcpStreamType int
+type DcpStreamType int32
+
+var UninitializedStream DcpStreamType = -1
 
 const (
-	NonCollectionStream    DcpStreamType = iota
+	NonCollectionStream    DcpStreamType = 0
 	CollectionsNonStreamId DcpStreamType = iota
 	CollectionsStreamId    DcpStreamType = iota
 )
+
+func (t DcpStreamType) String() string {
+	switch t {
+	case UninitializedStream:
+		return "Un-Initialized Stream"
+	case NonCollectionStream:
+		return "Traditional Non-Collection Stream"
+	case CollectionsNonStreamId:
+		return "Collections Stream without StreamID"
+	case CollectionsStreamId:
+		return "Collection Stream with StreamID"
+	default:
+		return "Unknown Stream Type"
+	}
+}
 
 // UprStream is per stream data structure over an UPR Connection.
 type UprStream struct {
@@ -263,6 +280,10 @@ type UprFeed struct {
 	muFeedState       sync.RWMutex
 	activatedFeatures UprFeatures
 	collectionEnabled bool // This is needed separately because parsing depends on this
+	// DCP StreamID allows multiple filtered collection streams to share a single DCP Stream
+	// It is not allowed once a regular/legacy stream was started originally
+	streamsType        DcpStreamType
+	initStreamTypeOnce sync.Once
 }
 
 // Exported interface - to allow for mocking
@@ -282,6 +303,9 @@ type UprFeedIface interface {
 	UprRequestStream(vbno, opaqueMSB uint16, flags uint32, vuuid, startSequence, endSequence, snapStart, snapEnd uint64) error
 	// Set DCP priority on an existing DCP connection. The command is sent asynchronously without waiting for a response
 	SetPriorityAsync(p PriorityType) error
+
+	// Various Collection-Type RequestStreams
+	UprRequestCollectionsStream(vbno, opaqueMSB uint16, flags uint32, vbuuid, startSeq, endSeq, snapStart, snapEnd uint64, filter *CollectionsFilter) error
 }
 
 type UprStats struct {
@@ -334,7 +358,7 @@ func (feed *UprFeed) activateStream(vbno, opaque uint16, stream *UprStream) erro
 	defer feed.muVbstreams.Unlock()
 
 	if feed.collectionEnabled {
-		stream.StreamType = CollectionsNonStreamId
+		stream.StreamType = feed.streamsType
 	}
 
 	// Set this stream as the officially connected stream for this vb
@@ -357,7 +381,6 @@ func (mc *Client) NewUprFeed() (*UprFeed, error) {
 }
 
 func (mc *Client) NewUprFeedWithConfig(ackByClient bool) (*UprFeed, error) {
-
 	feed := &UprFeed{
 		conn:              mc,
 		closer:            make(chan bool, 1),
@@ -366,6 +389,7 @@ func (mc *Client) NewUprFeedWithConfig(ackByClient bool) (*UprFeed, error) {
 		transmitCl:        make(chan bool),
 		ackByClient:       ackByClient,
 		collectionEnabled: mc.CollectionEnabled(),
+		streamsType:       UninitializedStream,
 	}
 
 	feed.negotiator.initialize()
@@ -608,10 +632,55 @@ func (mc *Client) UprGetFailoverLog(
 func (feed *UprFeed) UprRequestStream(vbno, opaqueMSB uint16, flags uint32,
 	vuuid, startSequence, endSequence, snapStart, snapEnd uint64) error {
 
+	return feed.UprRequestCollectionsStream(vbno, opaqueMSB, flags, vuuid, startSequence, endSequence, snapStart, snapEnd, nil)
+}
+
+func (feed *UprFeed) initStreamType(filter *CollectionsFilter) (err error) {
+	streamInitFunc := func() {
+		if feed.streamsType != UninitializedStream {
+			// Shouldn't happen
+			err = fmt.Errorf("The current feed has already been started in %v mode", feed.streamsType.String())
+		} else {
+			if !feed.collectionEnabled {
+				feed.streamsType = NonCollectionStream
+			} else {
+				if filter != nil && filter.UseStreamId {
+					feed.streamsType = CollectionsStreamId
+				} else {
+					feed.streamsType = CollectionsNonStreamId
+				}
+			}
+		}
+	}
+	feed.initStreamTypeOnce.Do(streamInitFunc)
+	return
+}
+
+func (feed *UprFeed) UprRequestCollectionsStream(vbno, opaqueMSB uint16, flags uint32,
+	vbuuid, startSequence, endSequence, snapStart, snapEnd uint64, filter *CollectionsFilter) error {
+
+	err := feed.initStreamType(filter)
+	if err != nil {
+		return err
+	}
+
+	var mcRequestBody []byte
+	if filter != nil {
+		err = filter.IsValid()
+		if err != nil {
+			return err
+		}
+		mcRequestBody, err = filter.ToStreamReqBody()
+		if err != nil {
+			return err
+		}
+	}
+
 	rq := &gomemcached.MCRequest{
 		Opcode:  gomemcached.UPR_STREAMREQ,
 		VBucket: vbno,
 		Opaque:  composeOpaque(vbno, opaqueMSB),
+		Body:    mcRequestBody,
 	}
 
 	rq.Extras = make([]byte, 48) // #Extras
@@ -619,15 +688,15 @@ func (feed *UprFeed) UprRequestStream(vbno, opaqueMSB uint16, flags uint32,
 	binary.BigEndian.PutUint32(rq.Extras[4:8], uint32(0))
 	binary.BigEndian.PutUint64(rq.Extras[8:16], startSequence)
 	binary.BigEndian.PutUint64(rq.Extras[16:24], endSequence)
-	binary.BigEndian.PutUint64(rq.Extras[24:32], vuuid)
+	binary.BigEndian.PutUint64(rq.Extras[24:32], vbuuid)
 	binary.BigEndian.PutUint64(rq.Extras[32:40], snapStart)
 	binary.BigEndian.PutUint64(rq.Extras[40:48], snapEnd)
 
-	feed.negotiator.registerRequest(vbno, opaqueMSB, vuuid, startSequence, endSequence)
+	feed.negotiator.registerRequest(vbno, opaqueMSB, vbuuid, startSequence, endSequence)
 	// Any client that has ever called this method, regardless of return code,
 	// should expect a potential UPR_CLOSESTREAM message due to this new map entry prior to Transmit.
 
-	if err := feed.conn.Transmit(rq); err != nil {
+	if err = feed.conn.Transmit(rq); err != nil {
 		logging.Errorf("Error in StreamRequest %s", err.Error())
 		// If an error occurs during transmit, then the UPRFeed will keep the stream
 		// in the vbstreams map. This is to prevent nil lookup from any previously
