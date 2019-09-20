@@ -195,15 +195,18 @@ func TestRequestTransmit(t *testing.T) {
 }
 
 func TestReceiveRequest(t *testing.T) {
+	key := []byte("somekey")
+
 	req := MCRequest{
 		Opcode:  SET,
 		Cas:     0,
 		Opaque:  7242,
 		VBucket: 824,
 		Extras:  []byte{1},
-		Key:     []byte("somekey"),
+		Key:     key,
 		Body:    []byte("somevalue"),
 		ExtMeta: []byte{},
+		Keylen:  len(key),
 	}
 
 	data := req.Bytes()
