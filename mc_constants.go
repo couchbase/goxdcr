@@ -6,8 +6,10 @@ import (
 )
 
 const (
-	REQ_MAGIC = 0x80
-	RES_MAGIC = 0x81
+	REQ_MAGIC      = 0x80
+	RES_MAGIC      = 0x81
+	FLEX_MAGIC     = 0x08
+	FLEX_RES_MAGIC = 0x18
 )
 
 // CommandCode for memcached packets.

@@ -34,10 +34,17 @@ type nonStreamIdResumeCollectionsMeta struct {
 	CollectionsList []string `json:"collections"`
 }
 
+type streamIdNonResumeCollectionsMeta struct {
+	CollectionsList []string `json:"collections"`
+	StreamId        uint16   `json:"sid"`
+}
+
+type streamIdNonResumeScopeMeta struct {
+	ScopeId  string `json:"scope"`
+	StreamId uint16 `json:"sid"`
+}
+
 func (c *CollectionsFilter) IsValid() error {
-	if c.UseStreamId {
-		return fmt.Errorf("Not implemented yet")
-	}
 	if c.UseManifestUid {
 		return fmt.Errorf("Not implemented yet")
 	}
@@ -49,6 +56,17 @@ func (c *CollectionsFilter) IsValid() error {
 	return nil
 }
 
+func (c *CollectionsFilter) outputCollectionsFilterColList() (outputList []string) {
+	for _, collectionUint := range c.CollectionsList {
+		outputList = append(outputList, fmt.Sprintf("%x", collectionUint))
+	}
+	return
+}
+
+func (c *CollectionsFilter) outputScopeId() string {
+	return fmt.Sprintf("%x", c.ScopeId)
+}
+
 func (c *CollectionsFilter) ToStreamReqBody() ([]byte, error) {
 	if err := c.IsValid(); err != nil {
 		return nil, err
@@ -58,8 +76,26 @@ func (c *CollectionsFilter) ToStreamReqBody() ([]byte, error) {
 
 	switch c.UseStreamId {
 	case true:
-		// TODO
-		return nil, fmt.Errorf("NotImplemented0")
+		switch c.UseManifestUid {
+		case true:
+			// TODO
+			return nil, fmt.Errorf("NotImplemented0")
+		case false:
+			switch len(c.CollectionsList) > 0 {
+			case true:
+				filter := &streamIdNonResumeCollectionsMeta{
+					StreamId:        c.StreamId,
+					CollectionsList: c.outputCollectionsFilterColList(),
+				}
+				output = *filter
+			case false:
+				filter := &streamIdNonResumeScopeMeta{
+					StreamId: c.StreamId,
+					ScopeId:  c.outputScopeId(),
+				}
+				output = *filter
+			}
+		}
 	case false:
 		switch c.UseManifestUid {
 		case true:
@@ -68,13 +104,12 @@ func (c *CollectionsFilter) ToStreamReqBody() ([]byte, error) {
 		case false:
 			switch len(c.CollectionsList) > 0 {
 			case true:
-				collections := &nonStreamIdNonResumeCollectionsMeta{}
-				for _, collectionUint := range c.CollectionsList {
-					collections.CollectionsList = append(collections.CollectionsList, fmt.Sprintf("%x", collectionUint))
+				filter := &nonStreamIdNonResumeCollectionsMeta{
+					CollectionsList: c.outputCollectionsFilterColList(),
 				}
-				output = *collections
+				output = *filter
 			case false:
-				output = nonStreamIdNonResumeScopeMeta{ScopeId: fmt.Sprintf("%x", c.ScopeId)}
+				output = nonStreamIdNonResumeScopeMeta{ScopeId: c.outputScopeId()}
 			}
 		}
 	}

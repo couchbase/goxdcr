@@ -114,6 +114,7 @@ type UprFeatures struct {
 	IncludeDeletionTime bool
 	DcpPriority         PriorityType
 	EnableExpiry        bool
+	EnableStreamId      bool
 }
 
 /**
@@ -584,6 +585,20 @@ func (feed *UprFeed) uprOpen(name string, sequence uint32, bufSize uint32, featu
 		activatedFeatures.EnableExpiry = true
 	}
 
+	if features.EnableStreamId {
+		rq := &gomemcached.MCRequest{
+			Opcode: gomemcached.UPR_CONTROL,
+			Key:    []byte("enable_stream_id"),
+			Body:   []byte("true"),
+			Opaque: getUprOpenCtrlOpaque(),
+		}
+		err = sendMcRequestSync(feed.conn, rq)
+		if err != nil {
+			return
+		}
+		activatedFeatures.EnableStreamId = true
+	}
+
 	// everything is ok so far, set upr feed to open state
 	feed.activatedFeatures = activatedFeatures
 	feed.setOpen()
@@ -636,6 +651,11 @@ func (feed *UprFeed) UprRequestStream(vbno, opaqueMSB uint16, flags uint32,
 }
 
 func (feed *UprFeed) initStreamType(filter *CollectionsFilter) (err error) {
+	if filter.UseStreamId && !feed.activatedFeatures.EnableStreamId {
+		err = fmt.Errorf("Cannot use streamID based filter if the feed was not started with the streamID feature")
+		return
+	}
+
 	streamInitFunc := func() {
 		if feed.streamsType != UninitializedStream {
 			// Shouldn't happen

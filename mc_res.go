@@ -194,7 +194,7 @@ func (res *MCResponse) ReceiveWithBuf(r io.Reader, hdrBytes, buf []byte) (n int,
 		}
 	}()
 
-	bufNeed := klen+elen+bodyLen
+	bufNeed := klen + elen + bodyLen
 	if buf != nil && cap(buf) >= bufNeed {
 		buf = buf[0:bufNeed]
 	} else {

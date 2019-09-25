@@ -58,7 +58,6 @@ func (t tracked) SetDeadline(time.Time) error {
 	return nil
 }
 
-
 func TestClose(t *testing.T) {
 	var tr tracked
 	c, err := Wrap(&tr)
@@ -101,6 +100,7 @@ func TestTransmitReq(t *testing.T) {
 		Key:     []byte("somekey"),
 		Body:    []byte("somevalue"),
 	}
+	req.Keylen = len(req.Key)
 
 	// Verify nil transmit is OK
 	_, err := transmitRequest(nil, &req)
@@ -154,6 +154,7 @@ func TestTransmitReqWithExtMeta(t *testing.T) {
 		Body:    []byte("somevalue"),
 		ExtMeta: []byte(ExtMetaStr),
 	}
+	req.Keylen = len(req.Key)
 
 	// add length of extended metadata to the corresponding bytes in Extras
 	req.Extras = make([]byte, 30)

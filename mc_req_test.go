@@ -3,6 +3,7 @@ package gomemcached
 import (
 	"bytes"
 	"fmt"
+	"github.com/stretchr/testify/assert"
 	"io"
 	"io/ioutil"
 	"reflect"
@@ -18,6 +19,7 @@ func TestEncodingRequest(t *testing.T) {
 		Key:     []byte("somekey"),
 		Body:    []byte("somevalue"),
 	}
+	req.Keylen = len(req.Key)
 
 	got := req.Bytes()
 
@@ -59,6 +61,7 @@ func TestEncodingRequestWithExtras(t *testing.T) {
 		Key:     []byte("somekey"),
 		Body:    []byte("somevalue"),
 	}
+	req.Keylen = len(req.Key)
 
 	buf := &bytes.Buffer{}
 	req.Transmit(buf)
@@ -98,6 +101,7 @@ func TestEncodingRequestWithLargeBody(t *testing.T) {
 		Key:     []byte("somekey"),
 		Body:    make([]byte, 256),
 	}
+	req.Keylen = len(req.Key)
 
 	buf := &bytes.Buffer{}
 	req.Transmit(buf)
@@ -136,6 +140,7 @@ func BenchmarkEncodingRequest(b *testing.B) {
 		Key:     []byte("somekey"),
 		Body:    []byte("somevalue"),
 	}
+	req.Keylen = len(req.Key)
 
 	b.SetBytes(int64(req.Size()))
 
@@ -153,6 +158,7 @@ func BenchmarkEncodingRequest0CAS(b *testing.B) {
 		Key:     []byte("somekey"),
 		Body:    []byte("somevalue"),
 	}
+	req.Keylen = len(req.Key)
 
 	b.SetBytes(int64(req.Size()))
 
@@ -171,6 +177,7 @@ func BenchmarkEncodingRequest1Extra(b *testing.B) {
 		Key:     []byte("somekey"),
 		Body:    []byte("somevalue"),
 	}
+	req.Keylen = len(req.Key)
 
 	b.SetBytes(int64(req.Size()))
 
@@ -181,6 +188,7 @@ func BenchmarkEncodingRequest1Extra(b *testing.B) {
 
 func TestRequestTransmit(t *testing.T) {
 	res := MCRequest{Key: []byte("thekey")}
+	res.Keylen = len(res.Key)
 	_, err := res.Transmit(ioutil.Discard)
 	if err != nil {
 		t.Errorf("Error sending small request: %v", err)
@@ -196,7 +204,6 @@ func TestRequestTransmit(t *testing.T) {
 
 func TestReceiveRequest(t *testing.T) {
 	key := []byte("somekey")
-
 	req := MCRequest{
 		Opcode:  SET,
 		Cas:     0,
@@ -279,13 +286,14 @@ func TestReceiveRequestShortBody(t *testing.T) {
 		Key:     []byte("somekey"),
 		Body:    []byte("somevalue"),
 	}
+	req.Keylen = len(req.Key)
 
 	data := req.Bytes()
 
 	req2 := MCRequest{}
 	n, err := req2.Receive(bytes.NewReader(data[:len(data)-3]), nil)
-	if err != nil {
-		t.Errorf("Got error, got %#v", req2)
+	if err == nil {
+		t.Errorf("Expected error %v, got %#v", err, req2)
 	}
 	if n != len(data)-3 {
 		t.Errorf("Expected to have read %v bytes, read %v", len(data)-3, n)
@@ -302,6 +310,7 @@ func TestReceiveRequestBadMagic(t *testing.T) {
 		Key:     []byte("somekey"),
 		Body:    []byte("somevalue"),
 	}
+	req.Keylen = len(req.Key)
 
 	data := req.Bytes()
 	data[0] = 0x83
@@ -323,6 +332,7 @@ func TestReceiveRequestLongBody(t *testing.T) {
 		Key:     []byte("somekey"),
 		Body:    make([]byte, MaxBodyLen+5),
 	}
+	req.Keylen = len(req.Key)
 
 	data := req.Bytes()
 
@@ -343,6 +353,7 @@ func BenchmarkReceiveRequest(b *testing.B) {
 		Key:     []byte("somekey"),
 		Body:    []byte("somevalue"),
 	}
+	req.Keylen = len(req.Key)
 
 	data := req.Bytes()
 	data[0] = REQ_MAGIC
@@ -372,6 +383,7 @@ func BenchmarkReceiveRequestNoBuf(b *testing.B) {
 		Key:     []byte("somekey"),
 		Body:    []byte("somevalue"),
 	}
+	req.Keylen = len(req.Key)
 
 	data := req.Bytes()
 	data[0] = REQ_MAGIC
@@ -453,4 +465,169 @@ func TestReceivingUPRNoop(t *testing.T) {
 	if err != io.EOF {
 		t.Errorf("Expected EOF!")
 	}
+}
+
+func TestStreamIDSnapshotReceive(t *testing.T) {
+	assert := assert.New(t)
+	nonRegularMutationHeader, err := ioutil.ReadFile("./unitTestData/flexSnapOpHdr.bin")
+	if err != nil {
+		panic(fmt.Sprintf("%v", err))
+	}
+
+	req := &MCRequest{}
+	elen, totalbodyLen, framingElen := req.receiveFlexibleFramingHeader(nonRegularMutationHeader)
+
+	assert.Equal(0, req.Keylen)
+	assert.Equal(UPR_SNAPSHOT, req.Opcode)
+	assert.Equal(3, framingElen)
+	assert.Equal(20, elen)
+	assert.Equal(925, int(req.VBucket))
+	assert.Equal(23, totalbodyLen)
+}
+
+func TestStreamIDSnapshotFull(t *testing.T) {
+	assert := assert.New(t)
+	ssHeader, err := ioutil.ReadFile("./unitTestData/header.0x56.bin")
+	assert.Nil(err)
+	assert.NotNil(ssHeader)
+	assert.Equal(24, len(ssHeader))
+
+	req := &MCRequest{}
+	elen, totalBodyLen, framingElen := req.receiveFlexibleFramingHeader(ssHeader)
+	assert.Equal(0, req.Keylen)
+	assert.Equal(UPR_SNAPSHOT, req.Opcode)
+	assert.Equal(3, framingElen)
+	assert.Equal(20, elen)
+	assert.Equal(23, totalBodyLen)
+
+	ssBody, err := ioutil.ReadFile("./unitTestData/body.0x56.bin")
+	assert.Nil(err)
+	assert.NotNil(ssBody)
+	assert.Equal(totalBodyLen, len(ssBody))
+	err = req.populateFlexBodyInternal(ssBody, totalBodyLen, elen, framingElen)
+	assert.Nil(err)
+	assert.Equal(1, len(req.FramingExtras))
+	streamId, err := req.FramingExtras[0].GetStreamId()
+	assert.Nil(err)
+	assert.Equal(uint16(1), streamId)
+
+	truncatedHeader := req.HeaderBytes()[0:24]
+	assert.Equal(ssHeader, truncatedHeader)
+
+	checkSlice := ssHeader
+	checkSlice = append(checkSlice, ssBody...)
+	assert.Equal(checkSlice, req.Bytes())
+}
+
+func TestStreamIDMutation(t *testing.T) {
+	assert := assert.New(t)
+	ssHeader, err := ioutil.ReadFile("./unitTestData/header.0x57.bin")
+	assert.Nil(err)
+	assert.NotNil(ssHeader)
+	assert.Equal(24, len(ssHeader))
+
+	req := &MCRequest{}
+	elen, totalBodyLen, framingElen := req.receiveFlexibleFramingHeader(ssHeader)
+	assert.Equal(UPR_MUTATION, req.Opcode)
+	assert.Equal(3, framingElen)
+	assert.Equal(31, elen)
+	assert.Equal(148, totalBodyLen)
+
+	mutBody, err := ioutil.ReadFile("./unitTestData/body.0x57.bin")
+	assert.Nil(err)
+	assert.NotNil(mutBody)
+	assert.Equal(totalBodyLen, len(mutBody))
+	err = req.populateFlexBodyInternal(mutBody, totalBodyLen, elen, framingElen)
+	assert.Nil(err)
+	assert.Equal(1, len(req.FramingExtras))
+	streamId, err := req.FramingExtras[0].GetStreamId()
+	assert.Nil(err)
+	assert.Equal(uint16(1), streamId)
+
+	truncatedHeader := req.HeaderBytes()[0:24]
+	assert.Equal(ssHeader, truncatedHeader)
+
+	checkSlice := ssHeader
+	checkSlice = append(checkSlice, mutBody...)
+	assert.Equal(checkSlice, req.Bytes())
+}
+
+func TestSystemEventMutation(t *testing.T) {
+	assert := assert.New(t)
+	sysHeader, err := ioutil.ReadFile("./unitTestData/header.0x5f.bin")
+	assert.Nil(err)
+	assert.NotNil(sysHeader)
+	assert.Equal(24, len(sysHeader))
+
+	req := &MCRequest{}
+	elen, totalBodyLen, framingElen := req.receiveFlexibleFramingHeader(sysHeader)
+	assert.Equal(DCP_SYSTEM_EVENT, req.Opcode)
+	assert.Equal(3, framingElen)
+
+	sysBody, err := ioutil.ReadFile("./unitTestData/body.0x5f.bin")
+	assert.Nil(err)
+	assert.NotNil(sysBody)
+	assert.Equal(totalBodyLen, len(sysBody))
+	err = req.populateFlexBodyInternal(sysBody, totalBodyLen, elen, framingElen)
+	assert.Nil(err)
+	assert.Equal(1, len(req.FramingExtras))
+	streamId, err := req.FramingExtras[0].GetStreamId()
+	assert.Nil(err)
+	assert.Equal(uint16(1), streamId)
+
+	checkSlice := sysHeader
+	checkSlice = append(checkSlice, sysBody...)
+	assert.Equal(checkSlice, req.Bytes())
+}
+
+func TestSliceShifter(t *testing.T) {
+	assert := assert.New(t)
+	testSlice := []byte("abc")
+	assert.Equal("61", fmt.Sprintf("%x", testSlice[0]))
+	assert.Equal("62", fmt.Sprintf("%x", testSlice[1]))
+	assert.Equal("63", fmt.Sprintf("%x", testSlice[2]))
+	assert.Equal(3, len(testSlice))
+	shiftSlice := ShiftByteSliceLeft4Bits(testSlice)
+	assert.Equal("16", fmt.Sprintf("%x", shiftSlice[0]))
+	assert.Equal("26", fmt.Sprintf("%x", shiftSlice[1]))
+	assert.Equal("30", fmt.Sprintf("%x", shiftSlice[2]))
+	assert.Equal(3, len(shiftSlice))
+	reverseShiftSlice := ShiftByteSliceRight4Bits(shiftSlice)
+	assert.Equal("1", fmt.Sprintf("%x", reverseShiftSlice[0]))
+	assert.Equal("62", fmt.Sprintf("%x", reverseShiftSlice[1]))
+	assert.Equal("63", fmt.Sprintf("%x", reverseShiftSlice[2]))
+	assert.Equal(3, len(reverseShiftSlice))
+
+	testSlice = []byte("abc")
+	shiftSlice2 := ShiftByteSliceRight4Bits(testSlice)
+	assert.Equal("6", fmt.Sprintf("%x", shiftSlice2[0]))
+	assert.Equal("16", fmt.Sprintf("%x", shiftSlice2[1]))
+	assert.Equal("26", fmt.Sprintf("%x", shiftSlice2[2]))
+	assert.Equal("30", fmt.Sprintf("%x", shiftSlice2[3]))
+
+	mergedSlice := Merge2HalfByteSlices(shiftSlice, shiftSlice2)
+	assert.Equal("16", fmt.Sprintf("%x", mergedSlice[0]))
+	assert.Equal("26", fmt.Sprintf("%x", mergedSlice[1]))
+	assert.Equal("36", fmt.Sprintf("%x", mergedSlice[2]))
+	assert.Equal("16", fmt.Sprintf("%x", mergedSlice[3]))
+	assert.Equal("26", fmt.Sprintf("%x", mergedSlice[4]))
+	assert.Equal("30", fmt.Sprintf("%x", mergedSlice[5]))
+	assert.Equal(6, len(mergedSlice))
+
+	mergedSlice = Merge2HalfByteSlices(shiftSlice, reverseShiftSlice)
+	assert.Equal("16", fmt.Sprintf("%x", mergedSlice[0]))
+	assert.Equal("26", fmt.Sprintf("%x", mergedSlice[1]))
+	assert.Equal("31", fmt.Sprintf("%x", mergedSlice[2]))
+	assert.Equal("62", fmt.Sprintf("%x", mergedSlice[3]))
+	assert.Equal("63", fmt.Sprintf("%x", mergedSlice[4]))
+	assert.Equal(5, len(mergedSlice))
+
+	shiftSlice = Merge2HalfByteSlices(shiftSlice, reverseShiftSlice)
+	assert.Equal("16", fmt.Sprintf("%x", shiftSlice[0]))
+	assert.Equal("26", fmt.Sprintf("%x", shiftSlice[1]))
+	assert.Equal("31", fmt.Sprintf("%x", shiftSlice[2]))
+	assert.Equal("62", fmt.Sprintf("%x", shiftSlice[3]))
+	assert.Equal("63", fmt.Sprintf("%x", shiftSlice[4]))
+	assert.Equal(5, len(shiftSlice))
+
 }
