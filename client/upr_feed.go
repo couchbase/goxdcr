@@ -651,7 +651,7 @@ func (feed *UprFeed) UprRequestStream(vbno, opaqueMSB uint16, flags uint32,
 }
 
 func (feed *UprFeed) initStreamType(filter *CollectionsFilter) (err error) {
-	if filter.UseStreamId && !feed.activatedFeatures.EnableStreamId {
+	if filter != nil && filter.UseStreamId && !feed.activatedFeatures.EnableStreamId {
 		err = fmt.Errorf("Cannot use streamID based filter if the feed was not started with the streamID feature")
 		return
 	}
