@@ -732,36 +732,45 @@ function _jqFilterArray {
 	done
 }
 
+# Called hexString because input is in a form of double quoted string
+# Also converts them to upper case because bc only takes A-F for hex
+function hexStringToDec {
+	local hexString=$1
+	local hex=`echo "$hexString" | sed 's/"//g' | tr '[:lower:]' '[:upper:]'`
+
+	echo "obase=10; ibase=16; $hex" | bc
+}
+
 function prettyPrintManifest {
 	local manifest=$1
 
 	# get manifest version
 	local manifestVersion=`echo "$manifest" | jq '.uid'`
-	echo "Manifest version $manifestVersion"
+	local manifestVersionDec=`hexStringToDec $manifestVersion`
+	echo "Manifest version $manifestVersionDec"
 
 	#get all the scopes
-	local scopesRaw=`echo "$manifest" | jq '.scopes'`
+	local scopesList=`echo "$manifest" | jq '.scopes'`
+	local scopesListLen=`echo "$manifest" | jq '.scopes | length'`
 
-	local scopesKeys=`echo "$scopesRaw" | jq 'keys'`
-	_jqFilterArray "${scopesKeys}"
-
-	#echo "${JQ_KEYS_FILTER_FUNC_ARR[@]}"
-	for scopeName in "${JQ_KEYS_FILTER_FUNC_ARR[@]}"
+	for (( i=0; $i < $scopesListLen; i=$(($i+1)) ))
 	do
-		local scopeOutput=`echo "$scopesRaw" | jq ".${scopeName}"`
+		local scopeOutput=`echo "$scopesList" | jq .[$i]`
+		local scopeName=`echo "$scopeOutput" | jq '.name'`
 		local scopeUID=`echo "$scopeOutput" | jq '.uid'`
-		echo "ScopeName $scopeName (UID $scopeUID)"
+		local scopeUIDdec=`hexStringToDec "$scopeUID"`
+		echo "ScopeName $scopeName (UID $scopeUIDdec)"
 
 		# Get individual collections within this scope
-		local collectionsKeysRaw=`echo "$scopeOutput" | jq '.collections|keys'`
-		_jqFilterArray "$collectionsKeysRaw"
-
-		for collectionName in "${JQ_KEYS_FILTER_FUNC_ARR[@]}"
+		local collectionsList=`echo "$scopeOutput" | jq '.collections'`
+		local collectionsListLen=`echo "$scopeOutput" | jq '.collections | length'`
+		for (( j=0; $j < $collectionsListLen; j=$(($j+1)) ))
 		do
-			local collectionsOutputRaw=`echo "$scopeOutput" | jq '.collections'`
-			local collectionOutput=`echo "$collectionsOutputRaw" | jq ".${collectionName}"`
-			local collectionUID=`echo "$collectionOutput" | jq '.uid'`
-			echo "ScopeName $scopeName CollectionName $collectionName (UID $collectionUID)"
+			local collectionsOutput=`echo "$collectionsList" | jq .[$j]`
+			local collectionName=`echo "$collectionsOutput" | jq '.name'`
+			local collectionUID=`echo "$collectionsOutput" | jq '.uid'`
+			local collectionUIDdec=`hexStringToDec "$collectionUID"`
+			echo "ScopeName $scopeName CollectionName $collectionName (UID $collectionUIDdec)"
 		done
 	done
 }
