@@ -1249,26 +1249,6 @@ func Equals(source []byte, target string) bool {
 	return true
 }
 
-// check whether source byte array contains a prefix which is "target + target2"
-func HasPrefix(source []byte, target string, target2 string) bool {
-	len1 := len(target)
-	len2 := len(target2)
-	if len(source) < len1+len2 {
-		return false
-	}
-	for i := 0; i < len1; i++ {
-		if target[i] != source[i] {
-			return false
-		}
-	}
-	for i := 0; i < len2; i++ {
-		if target2[i] != source[i+len1] {
-			return false
-		}
-	}
-	return true
-}
-
 func MatchWrapper(matcher gojsonsm.Matcher, slice []byte) (matched bool, err error) {
 	defer func() {
 		if r := recover(); r != nil {

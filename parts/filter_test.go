@@ -585,3 +585,19 @@ func TestReservedWords(t *testing.T) {
 	assert.True(strings.Contains(filter.filterExpressionInternal, "KEY"))
 	fmt.Println("============== Test case start: TestCompressionXattrKeyFiltering =================")
 }
+
+func TestTransactionMB36043(t *testing.T) {
+	assert := assert.New(t)
+
+	filter, err := NewFilter(filterId, "REGEXP_CONTAINS(META().id, \".*\")", realUtil)
+	assert.Nil(err)
+	assert.NotNil(filter)
+
+	txnFile := "./testdata/transactionDoc.json"
+	txnUprEvent, err := base.RetrieveUprJsonAndConvert(txnFile)
+	assert.Nil(err)
+	assert.NotNil(txnUprEvent)
+
+	needToReplicate, _, _, _, _, _ := filter.filterTransactionRelatedUprEvent(txnUprEvent, nil)
+	assert.False(needToReplicate)
+}
