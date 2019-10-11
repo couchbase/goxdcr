@@ -16,7 +16,6 @@ import (
 	mcc "github.com/couchbase/gomemcached/client"
 	"github.com/couchbase/goxdcr/base"
 	utilities "github.com/couchbase/goxdcr/utils"
-	"regexp"
 )
 
 type FilterIface interface {
@@ -37,8 +36,6 @@ type Filter struct {
 	dp                       utilities.DataPoolIface
 	flags                    base.FilterFlagType
 	slicesToBeReleasedBuf    [][]byte
-	// regular expression for matching transaction client records
-	tcrRegexp *regexp.Regexp
 }
 
 func NewFilter(id string, filterExpression string, utils utilities.UtilsIface) (*Filter, error) {
@@ -51,7 +48,6 @@ func NewFilter(id string, filterExpression string, utils utilities.UtilsIface) (
 		id:                    id,
 		utils:                 utils,
 		dp:                    dpPtr,
-		tcrRegexp:             regexp.MustCompile(base.ActiveTransactionRecordSuffix),
 		slicesToBeReleasedBuf: make([][]byte, 0, 2),
 	}
 
@@ -142,11 +138,8 @@ func (filter *Filter) filterTransactionRelatedUprEvent(uprEvent *mcc.UprEvent, s
 		return false, nil, 0, nil, "", 0
 	}
 
-	// active transaction records look like "atr-[VbucketId]-#[a-f1-9]+"
-	// regexp is used only to match the parts after the variable VbucketId,
-	// this way we do not need to generate a new regexp for each uprEvent
-	vbidStr := fmt.Sprintf("%v", uprEvent.VBucket)
-	if base.HasPrefix(uprEvent.Key, base.ActiveTransactionRecordPrefix, vbidStr) && filter.tcrRegexp.Match(uprEvent.Key[len(base.ActiveTransactionRecordPrefix)+len(vbidStr):]) {
+	// active transaction records look like "_txn:atr-[VbucketId]-#[a-f1-9]+"
+	if base.ActiveTxnRecordRegexp.Match(uprEvent.Key) {
 		// filter out active transaction record
 		return false, nil, 0, nil, "", 0
 	}
