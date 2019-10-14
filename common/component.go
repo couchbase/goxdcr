@@ -53,6 +53,8 @@ const (
 	DataThroughputThrottled ComponentEventType = iota
 	// Expiry field has been stripped
 	ExpiryFieldStripped ComponentEventType = iota
+	// When DCP sends down a system event
+	SystemEventReceived ComponentEventType = iota
 )
 
 type Event struct {

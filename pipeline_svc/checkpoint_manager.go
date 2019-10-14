@@ -89,6 +89,9 @@ type CheckpointManager struct {
 	failoverlog_map      map[uint16]*failoverlogWithLock
 	snapshot_history_map map[uint16]*snapshotHistoryWithLock
 
+	// Map of vbucket# -> Collections Manifest received from DCP (via system events)
+	manifestUidMap map[uint16]*manifestUidWithLock
+
 	logger *log.CommonLogger
 
 	target_username    string
@@ -140,6 +143,11 @@ type snapshotHistoryWithLock struct {
 	lock             sync.RWMutex
 }
 
+type manifestUidWithLock struct {
+	manifestUid uint64
+	lock        sync.RWMutex
+}
+
 func NewCheckpointManager(checkpoints_svc service_def.CheckpointsService, capi_svc service_def.CAPIService,
 	remote_cluster_svc service_def.RemoteClusterSvc, rep_spec_svc service_def.ReplicationSpecSvc, cluster_info_svc service_def.ClusterInfoSvc,
 	xdcr_topology_svc service_def.XDCRCompTopologySvc, through_seqno_tracker_svc service_def.ThroughSeqnoTrackerSvc,
@@ -180,6 +188,7 @@ func NewCheckpointManager(checkpoints_svc service_def.CheckpointsService, capi_s
 		utils:                     utilsIn,
 		statsMgr:                  statsMgr,
 		collectionsManifestSvc:    collectionsManifestSvc,
+		manifestUidMap:            make(map[uint16]*manifestUidWithLock),
 	}, nil
 }
 
@@ -1343,7 +1352,12 @@ func (ckmgr *CheckpointManager) persistCkptRecord(vbno uint16, ckpt_record *meta
 }
 
 func (ckmgr *CheckpointManager) OnEvent(event *common.Event) {
-	if event.EventType == common.StreamingStart {
+	if event == nil {
+		return
+	}
+
+	switch event.EventType {
+	case common.StreamingStart:
 		upr_event, ok := event.Data.(*mcc.UprEvent)
 		if ok {
 			flog := upr_event.FailoverLog
@@ -1362,7 +1376,7 @@ func (ckmgr *CheckpointManager) OnEvent(event *common.Event) {
 				ckmgr.handleGeneralError(err)
 			}
 		}
-	} else if event.EventType == common.SnapshotMarkerReceived {
+	case common.SnapshotMarkerReceived:
 		upr_event, ok := event.Data.(*mcc.UprEvent)
 		ckmgr.logger.Debugf("%v Received snapshot vb=%v, start=%v, end=%v\n", ckmgr.pipeline.Topic(), upr_event.VBucket, upr_event.SnapstartSeq, upr_event.SnapendSeq)
 		if ok {
@@ -1388,8 +1402,22 @@ func (ckmgr *CheckpointManager) OnEvent(event *common.Event) {
 				ckmgr.handleGeneralError(err)
 			}
 		}
+	case common.SystemEventReceived:
+		uprEvent, ok := event.Data.(*mcc.UprEvent)
+		if ok {
+			vbucket := uprEvent.VBucket
+			manifestId, err := uprEvent.GetManifestId()
+			if err != nil {
+				err := fmt.Errorf("%v Received system event but had issues extracting manifest ID: %v\n", err)
+				ckmgr.handleGeneralError(err)
+			} else {
+				ckmgr.logger.Infof("NEIL DEBUG %v Received systemevent vb=%v, manifestId=%v err=%v\n", ckmgr.pipeline.Topic(), vbucket, manifestId, err)
+				ckmgr.manifestUidMap[vbucket].lock.Lock()
+				ckmgr.manifestUidMap[vbucket].manifestUid = manifestId
+				ckmgr.manifestUidMap[vbucket].lock.Unlock()
+			}
+		}
 	}
-
 }
 
 func (ckmgr *CheckpointManager) getFailoverUUIDForSeqno(vbno uint16, seqno uint64) (uint64, error) {

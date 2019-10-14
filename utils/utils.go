@@ -747,8 +747,6 @@ func (u *Utilities) sendHELORequest(client mcc.ClientIface, heloReq *mc.MCReques
 	conn.(net.Conn).SetReadDeadline(time.Now().Add(readTimeout))
 	response, err = client.Receive()
 	conn.(net.Conn).SetReadDeadline(time.Time{})
-	u.logger_utils.Infof("NEIL DEBUG MCResonse Opcode: %v Status %v Key %v Body %v\n", response.Opcode,
-		response.Status, string(response.Key), string(response.Body))
 	return
 }
 
@@ -3221,9 +3219,7 @@ func (u *Utilities) GetCollectionsManifest(hostAddr, bucketName, username, passw
 	manifestInfo := make(map[string]interface{})
 	err, statusCode := u.QueryRestApiWithAuth(hostAddr, base.DefaultPoolBucketsPath+bucketName+base.CollectionsManifestPath, false, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, base.MethodGet, "", nil, 0, &manifestInfo, nil, false, logger)
 	if err == nil && statusCode == http.StatusOK {
-		manifest, err := metadata.NewCollectionsManifestFromMap(manifestInfo)
-		u.logger_utils.Infof("NEIL DEBUG Retrieved manifestInfo: %v manifest: %v err: %v\n", manifestInfo, manifest, err)
-		return &manifest, err
+		return metadata.NewCollectionsManifestFromMap(manifestInfo)
 	}
 	if statusCode == http.StatusNotFound {
 		u.logger_utils.Warnf("Getting collection manifest from %v bucket %v resulted in statusNotFound", hostAddr, bucketName)

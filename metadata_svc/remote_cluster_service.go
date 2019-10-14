@@ -779,7 +779,6 @@ func (agent *RemoteClusterAgent) RegisterBucketRequest(bucketName string) error 
 		// Use TopologyChangeCheckInterval as min interval between pulls, while agent refreshes at a longer interval
 		manifestGetter = NewBucketManifestGetter(bucketName, agent, base.TopologyChangeCheckInterval)
 		agent.bucketManifestGetters[bucketName] = manifestGetter
-		agent.logger.Infof("NEIL DEBUG remote cluster bucket %v has a getter", bucketName)
 	}
 
 	_, ok = agent.bucketRefCnt[bucketName]

@@ -495,7 +495,7 @@ func (dcp *DcpNozzle) initializeUprFeed() error {
 		uprFeatures.IncludeDeletionTime = true
 		uprFeatures.EnableExpiry = true
 		// NEIL
-		uprFeatures.EnableStreamId = true
+		//		uprFeatures.EnableStreamId = true
 		feed := dcp.getUprFeed()
 		if feed == nil {
 			err = fmt.Errorf("%v uprfeed is nil\n", dcp.Id())
@@ -949,6 +949,7 @@ func (dcp *DcpNozzle) processData() (err error) {
 				dcp.incCounterReceived()
 				dcp.RaiseEvent(common.NewEvent(common.DataReceived, m, dcp, nil /*derivedItems*/, nil /*otherInfos*/))
 				dcp.RaiseEvent(common.NewEvent(common.DataFiltered, m, dcp.cachedConnector, nil, nil))
+				dcp.RaiseEvent(common.NewEvent(common.SystemEventReceived, m, dcp, nil /*derivedItems*/, nil /*otherInfos*/))
 			} else {
 				// Regular mutations coming in from DCP stream
 				if dcp.IsOpen() {
@@ -1194,12 +1195,13 @@ func (dcp *DcpNozzle) startUprStreamInner(vbno uint16, vbts *base.VBTimestamp, v
 				// NEIL - the following was used to ensure it works
 				//					scope1Id := dcp.collectionsManifest.Scopes()["S1"].Uid
 				//	collectionsFilter := &mcc.CollectionsFilter{ScopeId: uint32(scope1Id)}
-				col1Id := dcp.collectionsManifest.Scopes()["S1"].Collections["col1"].Uid
-				collectionsFilter := &mcc.CollectionsFilter{UseStreamId: true,
-					StreamId:        uint16(1),
-					CollectionsList: []uint32{uint32(col1Id)},
-				}
-				err = dcp.uprFeed.UprRequestCollectionsStream(vbno, version, flags, vbts.Vbuuid, vbts.Seqno, seqEnd, vbts.SnapshotStart, vbts.SnapshotEnd, collectionsFilter)
+
+				//				col1Id := dcp.collectionsManifest.Scopes()["S1"].Collections["col1"].Uid
+				//				collectionsFilter := &mcc.CollectionsFilter{UseStreamId: true,
+				//					StreamId:        uint16(1),
+				//					CollectionsList: []uint32{uint32(col1Id)},
+				//				}
+				err = dcp.uprFeed.UprRequestCollectionsStream(vbno, version, flags, vbts.Vbuuid, vbts.Seqno, seqEnd, vbts.SnapshotStart, vbts.SnapshotEnd, nil)
 				if err == nil {
 					err = dcp.setStreamState(vbno, Dcp_Stream_Init)
 				}

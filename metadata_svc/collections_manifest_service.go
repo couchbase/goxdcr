@@ -731,9 +731,6 @@ func (a *CollectionsManifestAgent) refreshTarget(force bool) (oldManifest, newMa
 			a.logger.Errorf("RemoteClusterService GetManifest on %v for bucket %v returned %v\n", clusterUuid, bucketName, err)
 			manifest = &metadata.CollectionsManifest{}
 			return err
-		} else {
-			a.logger.Infof("NEIL DEBUG RemoteClusterService GetManifest on %v for bucket %v returned %v with manifest %v\n", clusterUuid, bucketName, err, manifest)
-			return nil
 		}
 	}
 	retryErr := a.utilities.ExponentialBackoffExecutor(targetRefreshStr, base.RemoteMcRetryWaitTime, base.MaxRemoteMcRetry,
