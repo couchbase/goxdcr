@@ -51,6 +51,9 @@ type ThroughSeqnoTrackerSvc struct {
 	// stores for each vb a sorted list of seqnos that have failed conflict resolution on source
 	vb_failed_cr_seqno_list_map map[uint16]*base.SortedSeqnoListWithLock
 
+	// System events sent down are recorded in this list
+	vbSystemEventsSeqnoListMap map[uint16]*DualSortedSeqnoListWithLock
+
 	// gap_seqno_list_1[i] stores the start seqno of the ith gap range
 	// gap_seqno_list_2[i] stores the end seqno of  the ith gap range
 	// for example, if we receive seqno 5 and then 10 from dcp, the gap range is [6,9]
@@ -112,19 +115,48 @@ func (list_obj *DualSortedSeqnoListWithLock) truncateSeqnos(vbno uint16, through
 	list_obj.lock.Lock()
 	defer list_obj.lock.Unlock()
 
-	list_obj.seqno_list_1 = truncateGapSeqnoList(vbno, through_seqno, list_obj.seqno_list_1)
-	list_obj.seqno_list_2 = truncateGapSeqnoList(vbno, through_seqno, list_obj.seqno_list_2)
+	list_obj.seqno_list_1, _ = truncateGapSeqnoList(vbno, through_seqno, list_obj.seqno_list_1)
+	list_obj.seqno_list_2, _ = truncateGapSeqnoList(vbno, through_seqno, list_obj.seqno_list_2)
 }
 
-func truncateGapSeqnoList(vbno uint16, through_seqno uint64, seqno_list []uint64) []uint64 {
+// When we truncate based on a through_seqno, this is the "reverse" truncate of the Seqnos
+// In other words, the lists (like systemEvents) may not contain the actual throughSeqno
+// When we truncate, will truncate regularly if the seqno is in the list.
+// If it is not in the list, we will round down and then truncate.
+// i.e.
+// list1:
+// 0 2 4 5 6...
+// Truncate at 4:
+// 4 5 6 ...
+// Truncate at 3:
+// 2 4 5 6 ...
+func (list_obj *DualSortedSeqnoListWithLock) truncateSeqnoFloor(vbno uint16, throughSeqno uint64) {
+	list_obj.lock.Lock()
+	defer list_obj.lock.Unlock()
+
+	index, found := base.SearchUint64List(list_obj.seqno_list_1, throughSeqno)
+	if found {
+		list_obj.seqno_list_1 = list_obj.seqno_list_1[index:]
+		list_obj.seqno_list_2 = list_obj.seqno_list_2[index:]
+	} else if index > 0 {
+		if list_obj.seqno_list_1[index-1] >= throughSeqno {
+			panic("Incorrect use of truncateSeqnoFloor")
+		}
+		list_obj.seqno_list_1 = list_obj.seqno_list_1[index-1:]
+		list_obj.seqno_list_2 = list_obj.seqno_list_2[index-1:]
+	}
+	// TODO - unit test this
+}
+
+func truncateGapSeqnoList(vbno uint16, through_seqno uint64, seqno_list []uint64) ([]uint64, int) {
 	index, found := base.SearchUint64List(seqno_list, through_seqno)
 	if found {
 		panic(fmt.Sprintf("vbno: %v through_seqno %v cannot be in gap_seqno_list", vbno, through_seqno))
 	} else if index > 0 {
-		return seqno_list[index:]
+		return seqno_list[index:], index
 	}
 
-	return seqno_list
+	return seqno_list, index
 }
 
 func NewThroughSeqnoTrackerSvc(logger_ctx *log.LoggerContext) *ThroughSeqnoTrackerSvc {
@@ -139,6 +171,7 @@ func NewThroughSeqnoTrackerSvc(logger_ctx *log.LoggerContext) *ThroughSeqnoTrack
 		vb_filtered_seqno_list_map:  make(map[uint16]*base.SortedSeqnoListWithLock),
 		vb_failed_cr_seqno_list_map: make(map[uint16]*base.SortedSeqnoListWithLock),
 		vb_gap_seqno_list_map:       make(map[uint16]*DualSortedSeqnoListWithLock),
+		vbSystemEventsSeqnoListMap:  make(map[uint16]*DualSortedSeqnoListWithLock),
 	}
 	return tsTracker
 }
@@ -156,6 +189,7 @@ func (tsTracker *ThroughSeqnoTrackerSvc) initialize(pipeline common.Pipeline) {
 		tsTracker.vb_filtered_seqno_list_map[vbno] = base.NewSortedSeqnoListWithLock()
 		tsTracker.vb_failed_cr_seqno_list_map[vbno] = base.NewSortedSeqnoListWithLock()
 		tsTracker.vb_gap_seqno_list_map[vbno] = newDualSortedSeqnoListWithLock()
+		tsTracker.vbSystemEventsSeqnoListMap[vbno] = newDualSortedSeqnoListWithLock()
 	}
 }
 
@@ -196,6 +230,18 @@ func (tsTracker *ThroughSeqnoTrackerSvc) markUprEventAsFiltered(uprEvent *mcc.Up
 	tsTracker.addFilteredSeqno(vbno, seqno)
 }
 
+func (tsTracker *ThroughSeqnoTrackerSvc) markSystemEvent(uprEvent *mcc.UprEvent) {
+	if uprEvent == nil {
+		return
+	}
+	seqno := uprEvent.Seqno
+	vbno := uprEvent.VBucket
+
+	manifestId, err := uprEvent.GetManifestId()
+	tsTracker.logger.Infof("NEIL DEBUG received system event for vb: %v manifest: %v err: %v", uprEvent.VBucket, manifestId, err)
+	tsTracker.addSystemSeqno(vbno, seqno, manifestId)
+}
+
 func (tsTracker *ThroughSeqnoTrackerSvc) ProcessEvent(event *common.Event) error {
 	if !tsTracker.isPipelineRunning() {
 		tsTracker.logger.Tracef("Pipeline %s is no longer running, skip ProcessEvent for %v\n", tsTracker.rep_id, event)
@@ -208,19 +254,19 @@ func (tsTracker *ThroughSeqnoTrackerSvc) ProcessEvent(event *common.Event) error
 		tsTracker.addSentSeqno(vbno, seqno)
 	case common.DataFiltered:
 		uprEvent := event.Data.(*mcc.UprEvent)
-		//		seqno := uprEvent.Seqno
-		//		vbno := uprEvent.VBucket
+		seqno := uprEvent.Seqno
+		vbno := uprEvent.VBucket
 		tsTracker.markUprEventAsFiltered(uprEvent)
-		//		tsTracker.processGapSeqnos(vbno, seqno)
+		tsTracker.processGapSeqnos(vbno, seqno)
 	case common.DataUnableToFilter:
 		err := event.DerivedData[0].(error)
 		// If error is recoverable, do not mark it filtered in order to avoid data loss
 		if !base.FilterErrorIsRecoverable(err) {
 			uprEvent := event.Data.(*mcc.UprEvent)
-			//			seqno := uprEvent.Seqno
-			//			vbno := uprEvent.VBucket
+			seqno := uprEvent.Seqno
+			vbno := uprEvent.VBucket
 			tsTracker.markUprEventAsFiltered(uprEvent)
-			//			tsTracker.processGapSeqnos(vbno, seqno)
+			tsTracker.processGapSeqnos(vbno, seqno)
 		}
 	case common.DataFailedCRSource:
 		seqno := event.OtherInfos.(parts.DataFailedCRSourceEventAdditional).Seqno
@@ -233,6 +279,12 @@ func (tsTracker *ThroughSeqnoTrackerSvc) ProcessEvent(event *common.Event) error
 		vbno := upr_event.VBucket
 		//		tsTracker.logger.Infof("NEIL vb %v received seqno %v", vbno, seqno)
 		// Sets last sequence number, and should the sequence number skip due to gap, this will take care of it
+		tsTracker.processGapSeqnos(vbno, seqno)
+	case common.SystemEventReceived:
+		uprEvent := event.Data.(*mcc.UprEvent)
+		seqno := uprEvent.Seqno
+		vbno := uprEvent.VBucket
+		tsTracker.markSystemEvent(uprEvent)
 		tsTracker.processGapSeqnos(vbno, seqno)
 	default:
 		tsTracker.logger.Warnf("Incorrect event type, %v, received by %v", event.EventType, tsTracker.id)
@@ -249,8 +301,12 @@ func (tsTracker *ThroughSeqnoTrackerSvc) addSentSeqno(vbno uint16, sent_seqno ui
 
 func (tsTracker *ThroughSeqnoTrackerSvc) addFilteredSeqno(vbno uint16, filtered_seqno uint64) {
 	tsTracker.validateVbno(vbno, "addFilteredSeqno")
-	//	tsTracker.logger.Infof("NEIL vb %v adding %v as filtered", vbno, filtered_seqno)
 	tsTracker.vb_filtered_seqno_list_map[vbno].AppendSeqno(filtered_seqno)
+}
+
+func (tsTracker *ThroughSeqnoTrackerSvc) addSystemSeqno(vbno uint16, systemEventSeqno, manifestId uint64) {
+	tsTracker.validateVbno(vbno, "addSystemSeqno")
+	tsTracker.vbSystemEventsSeqnoListMap[vbno].appendSeqnos(systemEventSeqno, manifestId)
 }
 
 func (tsTracker *ThroughSeqnoTrackerSvc) addFailedCRSeqno(vbno uint16, failed_cr_seqno uint64) {
@@ -276,11 +332,6 @@ func (tsTracker *ThroughSeqnoTrackerSvc) processGapSeqnos(vbno uint16, current_s
 	if last_seen_seqno < current_seqno-1 {
 		// If the current sequence number is not consecutive, then this means we have hit a gap. Store it in gap list.
 		tsTracker.vb_gap_seqno_list_map[vbno].appendSeqnos(last_seen_seqno+1, current_seqno-1, tsTracker.logger)
-		//		tsTracker.logger.Infof("NEIL vb %v received seqno %v creating gap [%v, %v]", vbno, current_seqno,
-		//			last_seen_seqno+1, current_seqno-1)
-	} else {
-		//		tsTracker.logger.Infof("NEIL vb %v last_seen_seqno was %v and processGap is %v, skip create gap",
-		//			vbno, last_seen_seqno, current_seqno)
 	}
 }
 
@@ -289,6 +340,7 @@ func (tsTracker *ThroughSeqnoTrackerSvc) truncateSeqnoLists(vbno uint16, through
 	tsTracker.vb_filtered_seqno_list_map[vbno].TruncateSeqnos(through_seqno)
 	tsTracker.vb_failed_cr_seqno_list_map[vbno].TruncateSeqnos(through_seqno)
 	tsTracker.vb_gap_seqno_list_map[vbno].truncateSeqnos(vbno, through_seqno)
+	tsTracker.vbSystemEventsSeqnoListMap[vbno].truncateList1Seqnos(vbno, through_seqno)
 }
 
 /**
@@ -326,6 +378,9 @@ func (tsTracker *ThroughSeqnoTrackerSvc) GetThroughSeqno(vbno uint16) uint64 {
 	max_failed_cr_seqno := maxSeqno(failed_cr_seqno_list)
 	gap_seqno_list_1, gap_seqno_list_2 := tsTracker.vb_gap_seqno_list_map[vbno].getSortedSeqnoLists()
 	max_end_gap_seqno := maxSeqno(gap_seqno_list_2)
+	// TODO - think some more about manifestID
+	systemEventSeqnoList, _ := tsTracker.vbSystemEventsSeqnoListMap[vbno].getSortedSeqnoLists()
+	maxSystemEventSeqno := maxSeqno(systemEventSeqnoList)
 
 	// Goal of algorithm:
 	// Find the right through_seqno for stats and checkpointing, with the constraint that through_seqno cannot be
@@ -342,12 +397,14 @@ func (tsTracker *ThroughSeqnoTrackerSvc) GetThroughSeqno(vbno uint16) uint64 {
 	var last_sent_index int = -1
 	var last_filtered_index int = -1
 	var last_failed_cr_index int = -1
+	var lastSysEventIndex int = -1
 	var found_seqno_type int = -1
 
 	const (
 		SeqnoTypeSent     int = 1
 		SeqnoTypeFiltered int = 2
 		SeqnoTypeFailedCR int = 3
+		SeqnoTypeSysEvent int = 4
 	)
 
 	for {
@@ -391,18 +448,30 @@ func (tsTracker *ThroughSeqnoTrackerSvc) GetThroughSeqno(vbno uint16) uint64 {
 			}
 		}
 
+		if iter_seqno <= maxSystemEventSeqno {
+			systemEventIdx, systemEventFound := base.SearchUint64List(systemEventSeqnoList, iter_seqno)
+			if systemEventFound {
+				lastSysEventIndex = systemEventIdx
+				found_seqno_type = SeqnoTypeSysEvent
+			}
+
+		}
+
 		// stop if cannot find seqno in any of the lists
 		break
 	}
 
-	if last_sent_index >= 0 || last_filtered_index >= 0 || last_failed_cr_index >= 0 {
-		if found_seqno_type == SeqnoTypeSent {
+	if last_sent_index >= 0 || last_filtered_index >= 0 || last_failed_cr_index >= 0 || lastSysEventIndex >= 0 {
+		switch found_seqno_type {
+		case SeqnoTypeSent:
 			through_seqno = sent_seqno_list[last_sent_index]
-		} else if found_seqno_type == SeqnoTypeFiltered {
+		case SeqnoTypeFiltered:
 			through_seqno = filtered_seqno_list[last_filtered_index]
-		} else if found_seqno_type == SeqnoTypeFailedCR {
+		case SeqnoTypeFailedCR:
 			through_seqno = failed_cr_seqno_list[last_failed_cr_index]
-		} else {
+		case SeqnoTypeSysEvent:
+			through_seqno = systemEventSeqnoList[lastSysEventIndex]
+		default:
 			panic(fmt.Sprintf("unexpected found_seqno_type, %v", found_seqno_type))
 		}
 

@@ -3219,7 +3219,8 @@ func (u *Utilities) GetCollectionsManifest(hostAddr, bucketName, username, passw
 	manifestInfo := make(map[string]interface{})
 	err, statusCode := u.QueryRestApiWithAuth(hostAddr, base.DefaultPoolBucketsPath+bucketName+base.CollectionsManifestPath, false, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, base.MethodGet, "", nil, 0, &manifestInfo, nil, false, logger)
 	if err == nil && statusCode == http.StatusOK {
-		return metadata.NewCollectionsManifestFromMap(manifestInfo)
+		manifest, err := metadata.NewCollectionsManifestFromMap(manifestInfo)
+		return &manifest, err
 	}
 	if statusCode == http.StatusNotFound {
 		u.logger_utils.Warnf("Getting collection manifest from %v bucket %v resulted in statusNotFound", hostAddr, bucketName)

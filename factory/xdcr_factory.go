@@ -291,6 +291,7 @@ func (xdcrf *XDCRFactory) registerAsyncListenersOnSources(pipeline common.Pipeli
 
 			// Stats manager will handle the data received and processed events
 			dcp_part.RegisterComponentEventListener(common.DataReceived, data_received_event_listener)
+			dcp_part.RegisterComponentEventListener(common.SystemEventReceived, data_received_event_listener)
 			dcp_part.RegisterComponentEventListener(common.DataProcessed, data_processed_event_listener)
 
 			dcp_part.RegisterComponentEventListener(common.DataFiltered, data_filtered_event_listener)

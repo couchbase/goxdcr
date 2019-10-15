@@ -732,6 +732,7 @@ func (a *CollectionsManifestAgent) refreshTarget(force bool) (oldManifest, newMa
 			manifest = &metadata.CollectionsManifest{}
 			return err
 		}
+		return nil
 	}
 	retryErr := a.utilities.ExponentialBackoffExecutor(targetRefreshStr, base.RemoteMcRetryWaitTime, base.MaxRemoteMcRetry,
 		base.RemoteMcRetryFactor, getRetry)

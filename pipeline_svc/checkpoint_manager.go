@@ -89,9 +89,6 @@ type CheckpointManager struct {
 	failoverlog_map      map[uint16]*failoverlogWithLock
 	snapshot_history_map map[uint16]*snapshotHistoryWithLock
 
-	// Map of vbucket# -> Collections Manifest received from DCP (via system events)
-	manifestUidMap map[uint16]*manifestUidWithLock
-
 	logger *log.CommonLogger
 
 	target_username    string
@@ -143,11 +140,6 @@ type snapshotHistoryWithLock struct {
 	lock             sync.RWMutex
 }
 
-type manifestUidWithLock struct {
-	manifestUid uint64
-	lock        sync.RWMutex
-}
-
 func NewCheckpointManager(checkpoints_svc service_def.CheckpointsService, capi_svc service_def.CAPIService,
 	remote_cluster_svc service_def.RemoteClusterSvc, rep_spec_svc service_def.ReplicationSpecSvc, cluster_info_svc service_def.ClusterInfoSvc,
 	xdcr_topology_svc service_def.XDCRCompTopologySvc, through_seqno_tracker_svc service_def.ThroughSeqnoTrackerSvc,
@@ -188,7 +180,6 @@ func NewCheckpointManager(checkpoints_svc service_def.CheckpointsService, capi_s
 		utils:                     utilsIn,
 		statsMgr:                  statsMgr,
 		collectionsManifestSvc:    collectionsManifestSvc,
-		manifestUidMap:            make(map[uint16]*manifestUidWithLock),
 	}, nil
 }
 
@@ -209,6 +200,7 @@ func (ckmgr *CheckpointManager) Attach(pipeline common.Pipeline) error {
 	for _, dcp := range dcp_parts {
 		dcp.RegisterComponentEventListener(common.StreamingStart, ckmgr)
 		dcp.RegisterComponentEventListener(common.SnapshotMarkerReceived, ckmgr)
+		dcp.RegisterComponentEventListener(common.SystemEventReceived, ckmgr)
 	}
 
 	//register pipeline supervisor as ckmgr's error handler
@@ -1400,21 +1392,6 @@ func (ckmgr *CheckpointManager) OnEvent(event *common.Event) {
 			} else {
 				err := fmt.Errorf("%v  Received snapshot marker on an unknown vb=%v\n", ckmgr.pipeline.Topic(), vbno)
 				ckmgr.handleGeneralError(err)
-			}
-		}
-	case common.SystemEventReceived:
-		uprEvent, ok := event.Data.(*mcc.UprEvent)
-		if ok {
-			vbucket := uprEvent.VBucket
-			manifestId, err := uprEvent.GetManifestId()
-			if err != nil {
-				err := fmt.Errorf("%v Received system event but had issues extracting manifest ID: %v\n", err)
-				ckmgr.handleGeneralError(err)
-			} else {
-				ckmgr.logger.Infof("NEIL DEBUG %v Received systemevent vb=%v, manifestId=%v err=%v\n", ckmgr.pipeline.Topic(), vbucket, manifestId, err)
-				ckmgr.manifestUidMap[vbucket].lock.Lock()
-				ckmgr.manifestUidMap[vbucket].manifestUid = manifestId
-				ckmgr.manifestUidMap[vbucket].lock.Unlock()
 			}
 		}
 	}

@@ -946,7 +946,6 @@ func (dcp *DcpNozzle) processData() (err error) {
 				}
 			} else if m.IsSystemEvent() {
 				// Let's just pretend we received it and processed it in one shot
-				dcp.incCounterReceived()
 				dcp.RaiseEvent(common.NewEvent(common.DataReceived, m, dcp, nil /*derivedItems*/, nil /*otherInfos*/))
 				dcp.RaiseEvent(common.NewEvent(common.DataFiltered, m, dcp.cachedConnector, nil, nil))
 				dcp.RaiseEvent(common.NewEvent(common.SystemEventReceived, m, dcp, nil /*derivedItems*/, nil /*otherInfos*/))
