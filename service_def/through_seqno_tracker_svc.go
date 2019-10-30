@@ -21,4 +21,6 @@ type ThroughSeqnoTrackerSvc interface {
 	GetThroughSeqnos() map[uint16]uint64
 	SetStartSeqno(vbno uint16, seqno uint64)
 	PrintStatusSummary()
+
+	GetManifestIds(seqnoMap map[uint16]uint64) map[uint16]uint64
 }

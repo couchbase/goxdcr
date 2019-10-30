@@ -130,7 +130,7 @@ func (list_obj *DualSortedSeqnoListWithLock) truncateSeqnos(vbno uint16, through
 // 4 5 6 ...
 // Truncate at 3:
 // 2 4 5 6 ...
-func (list_obj *DualSortedSeqnoListWithLock) truncateSeqnoFloor(vbno uint16, throughSeqno uint64) {
+func (list_obj *DualSortedSeqnoListWithLock) truncateSeqno1Floor(throughSeqno uint64) {
 	list_obj.lock.Lock()
 	defer list_obj.lock.Unlock()
 
@@ -139,13 +139,28 @@ func (list_obj *DualSortedSeqnoListWithLock) truncateSeqnoFloor(vbno uint16, thr
 		list_obj.seqno_list_1 = list_obj.seqno_list_1[index:]
 		list_obj.seqno_list_2 = list_obj.seqno_list_2[index:]
 	} else if index > 0 {
-		if list_obj.seqno_list_1[index-1] >= throughSeqno {
-			panic("Incorrect use of truncateSeqnoFloor")
-		}
 		list_obj.seqno_list_1 = list_obj.seqno_list_1[index-1:]
 		list_obj.seqno_list_2 = list_obj.seqno_list_2[index-1:]
 	}
-	// TODO - unit test this
+}
+
+// Given a through seqno, find it in the list1. If it is not in List1, then use the next lower seqno
+// in list1 as the found "pair"
+// Then, return the list2 pair value
+func (list_obj *DualSortedSeqnoListWithLock) getList2BasedonList1Floor(throughSeqno uint64) (uint64, error) {
+	list_obj.lock.RLock()
+	defer list_obj.lock.RUnlock()
+
+	index, found := base.SearchUint64List(list_obj.seqno_list_1, throughSeqno)
+	if found {
+		list2Element := list_obj.seqno_list_2[index]
+		return list2Element, nil
+	} else if index > 0 {
+		list2Element := list_obj.seqno_list_2[index-1]
+		return list2Element, nil
+	} else {
+		return 0, base.ErrorNotFound
+	}
 }
 
 func truncateGapSeqnoList(vbno uint16, through_seqno uint64, seqno_list []uint64) ([]uint64, int) {
@@ -306,7 +321,7 @@ func (tsTracker *ThroughSeqnoTrackerSvc) addFilteredSeqno(vbno uint16, filtered_
 
 func (tsTracker *ThroughSeqnoTrackerSvc) addSystemSeqno(vbno uint16, systemEventSeqno, manifestId uint64) {
 	tsTracker.validateVbno(vbno, "addSystemSeqno")
-	tsTracker.vbSystemEventsSeqnoListMap[vbno].appendSeqnos(systemEventSeqno, manifestId)
+	tsTracker.vbSystemEventsSeqnoListMap[vbno].appendSeqnos(systemEventSeqno, manifestId, tsTracker.logger)
 }
 
 func (tsTracker *ThroughSeqnoTrackerSvc) addFailedCRSeqno(vbno uint16, failed_cr_seqno uint64) {
@@ -340,7 +355,7 @@ func (tsTracker *ThroughSeqnoTrackerSvc) truncateSeqnoLists(vbno uint16, through
 	tsTracker.vb_filtered_seqno_list_map[vbno].TruncateSeqnos(through_seqno)
 	tsTracker.vb_failed_cr_seqno_list_map[vbno].TruncateSeqnos(through_seqno)
 	tsTracker.vb_gap_seqno_list_map[vbno].truncateSeqnos(vbno, through_seqno)
-	tsTracker.vbSystemEventsSeqnoListMap[vbno].truncateList1Seqnos(vbno, through_seqno)
+	tsTracker.vbSystemEventsSeqnoListMap[vbno].truncateSeqno1Floor(through_seqno)
 }
 
 /**
@@ -363,6 +378,7 @@ func (tsTracker *ThroughSeqnoTrackerSvc) GetThroughSeqno(vbno uint16) uint64 {
 	tsTracker.validateVbno(vbno, "GetThroughSeqno")
 
 	// lock through_seqno_map[vbno] throughout the computation to ensure that
+
 	// two GetThroughSeqno() routines won't interleave, which would cause issues
 	// since we truncate seqno lists in accordance with through_seqno
 	through_seqno_obj := tsTracker.through_seqno_map[vbno]
@@ -453,8 +469,8 @@ func (tsTracker *ThroughSeqnoTrackerSvc) GetThroughSeqno(vbno uint16) uint64 {
 			if systemEventFound {
 				lastSysEventIndex = systemEventIdx
 				found_seqno_type = SeqnoTypeSysEvent
+				continue
 			}
-
 		}
 
 		// stop if cannot find seqno in any of the lists
@@ -553,6 +569,18 @@ func (tsTracker *ThroughSeqnoTrackerSvc) GetThroughSeqnos() map[uint16]uint64 {
 	}
 
 	return result_map
+}
+
+func (tsTracker *ThroughSeqnoTrackerSvc) GetManifestIds(seqnoMap map[uint16]uint64) map[uint16]uint64 {
+	retMap := make(map[uint16]uint64)
+	for vbno, seqno := range seqnoMap {
+		lastSeenManifestId, err := tsTracker.vbSystemEventsSeqnoListMap[vbno].getList2BasedonList1Floor(seqno)
+		if err != nil {
+			tsTracker.logger.Warnf("Unable to retrieve manifest for vb %v\n", vbno)
+		}
+		retMap[vbno] = lastSeenManifestId
+	}
+	return retMap
 }
 
 func (tsTracker *ThroughSeqnoTrackerSvc) getThroughSeqnos(executor_id int, listOfVbs []uint16, result_map map[uint16]uint64, wait_grp *sync.WaitGroup) {

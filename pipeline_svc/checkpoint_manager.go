@@ -114,6 +114,10 @@ type CheckpointManager struct {
 	target_cluster_version int
 	utils                  utilities.UtilsIface
 	statsMgr               StatsMgrIface
+
+	// Cached version of manifest map when used for checkpointing
+	cachedManifestMap     map[uint16]uint64
+	cachedManifestMapLock sync.RWMutex
 }
 
 // Checkpoint Manager keeps track of one checkpointRecord per vbucket
@@ -1059,6 +1063,20 @@ func (ckmgr *CheckpointManager) performCkpt(fin_ch chan bool, wait_grp *sync.Wai
 
 }
 
+func (ckmgr *CheckpointManager) updateLocalManifestMap(throughSeqnoMap map[uint16]uint64) {
+	ckmgr.cachedManifestMapLock.Lock()
+	defer ckmgr.cachedManifestMapLock.Unlock()
+
+	ckmgr.cachedManifestMap = ckmgr.through_seqno_tracker_svc.GetManifestIds(throughSeqnoMap)
+}
+
+func (ckmgr *CheckpointManager) getManifestIdFromCache(vbno uint16) uint64 {
+	ckmgr.cachedManifestMapLock.RLock()
+	defer ckmgr.cachedManifestMapLock.RUnlock()
+
+	return ckmgr.cachedManifestMap[vbno]
+}
+
 func (ckmgr *CheckpointManager) performCkpt_internal(vb_list []uint16, fin_ch <-chan bool, wait_grp *sync.WaitGroup, time_to_wait time.Duration,
 	through_seqno_map map[uint16]uint64, high_seqno_and_vbuuid_map map[uint16][]uint64, xattr_seqno_map map[uint16]uint64, total_committing_time *int64) {
 
@@ -1071,6 +1089,8 @@ func (ckmgr *CheckpointManager) performCkpt_internal(vb_list []uint16, fin_ch <-
 
 	ckmgr.logger.Infof("Checkpointing for replication %v, vb_list=%v, time_to_wait=%v, interval_btwn_vb=%v sec\n", ckmgr.pipeline.Topic(), vb_list, time_to_wait, interval_btwn_vb.Seconds())
 	err_map := make(map[uint16]error)
+
+	ckmgr.updateLocalManifestMap(through_seqno_map)
 
 	for index, vb := range vb_list {
 		select {
@@ -1247,11 +1267,12 @@ func (ckmgr *CheckpointManager) doCheckpoint(vbno uint16, through_seqno_map map[
 	filteredItems := vbCountMetrics[DOCS_FILTERED_METRIC]
 	filterFailed := vbCountMetrics[DOCS_UNABLE_TO_FILTER_METRIC]
 	// Item 8: Manifests - for now feed default manifest
-	defaultManifest := metadata.NewDefaultCollectionsManifest()
+	srcManifestId := ckmgr.getManifestIdFromCache(vbno)
+	ckmgr.logger.Infof("NEIL DEBUG srcManifestId for vb: %v is %v\n", vbno, srcManifestId)
 
 	// Write-operation - feed the temporary variables and update them into the record and also write them to metakv
 	newCkpt := metadata.NewCheckpointRecord(ckRecordFailoverUuid, through_seqno, ckRecordDcpSnapSeqno, ckRecordDcpSnapEndSeqno, ckptRecordTargetSeqno,
-		uint64(filteredItems), uint64(filterFailed), defaultManifest.Uid(), defaultManifest.Uid())
+		uint64(filteredItems), uint64(filterFailed), srcManifestId, srcManifestId /* TODO implement target*/)
 	err = ckpt_obj.updateAndPersist(ckmgr, vbno, currRecordVersion, xattr_seqno, newCkpt)
 
 	if err != nil {

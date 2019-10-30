@@ -22,6 +22,22 @@ func (_m *ThroughSeqnoTrackerSvc) Attach(pipeline common.Pipeline) error {
 	return r0
 }
 
+// GetManifestIds provides a mock function with given fields: seqnoMap
+func (_m *ThroughSeqnoTrackerSvc) GetManifestIds(seqnoMap map[uint16]uint64) map[uint16]uint64 {
+	ret := _m.Called(seqnoMap)
+
+	var r0 map[uint16]uint64
+	if rf, ok := ret.Get(0).(func(map[uint16]uint64) map[uint16]uint64); ok {
+		r0 = rf(seqnoMap)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(map[uint16]uint64)
+		}
+	}
+
+	return r0
+}
+
 // GetThroughSeqno provides a mock function with given fields: vbno
 func (_m *ThroughSeqnoTrackerSvc) GetThroughSeqno(vbno uint16) uint64 {
 	ret := _m.Called(vbno)
