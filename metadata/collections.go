@@ -48,6 +48,10 @@ func (c *CollectionsManifest) String() string {
 }
 
 func (c *CollectionsManifest) GetScopeAndCollectionName(collectionId uint64) (scopeName, collectionName string, err error) {
+	if c == nil {
+		err = base.ErrorInvalidInput
+		return
+	}
 	for _, scope := range c.Scopes() {
 		for _, collection := range scope.Collections {
 			if collection.Uid == collectionId {
@@ -62,6 +66,9 @@ func (c *CollectionsManifest) GetScopeAndCollectionName(collectionId uint64) (sc
 }
 
 func (c *CollectionsManifest) GetCollectionId(scopeName, collectionName string) (uint64, error) {
+	if c == nil {
+		return 0, base.ErrorInvalidInput
+	}
 	for _, scope := range c.Scopes() {
 		if scopeName == scope.Name {
 			for _, collection := range scope.Collections {

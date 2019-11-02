@@ -330,12 +330,12 @@ func (rctx *refreshContext) verifyNodeAndGetList(connStr string, updateSecurityS
 	}
 }
 
-func (agent *RemoteClusterAgent) checkAndUpdateCompatibility(nodeList []interface{}) {
-
-	version, _ := agent.utils.GetClusterCompatibilityFromNodeList(nodeList)
-	fmt.Printf("NEIL DEBUG version: %v\n", version)
-
-}
+//func (agent *RemoteClusterAgent) checkAndUpdateCompatibility(nodeList []interface{}) {
+//
+//	version, _ := agent.utils.GetClusterCompatibilityFromNodeList(nodeList)
+//	//	fmt.Printf("NEIL DEBUG version: %v\n", version)
+//
+//}
 
 func (agent *RemoteClusterAgent) Refresh() error {
 	rctx, err := agent.initializeNewRefreshContext()
@@ -777,7 +777,7 @@ func (agent *RemoteClusterAgent) RegisterBucketRequest(bucketName string) error 
 	manifestGetter, ok := agent.bucketManifestGetters[bucketName]
 	if !ok {
 		// Use TopologyChangeCheckInterval as min interval between pulls, while agent refreshes at a longer interval
-		manifestGetter = NewBucketManifestGetter(bucketName, agent, base.TopologyChangeCheckInterval)
+		manifestGetter = NewBucketManifestGetter(bucketName, agent, 1*time.Second)
 		agent.bucketManifestGetters[bucketName] = manifestGetter
 	}
 

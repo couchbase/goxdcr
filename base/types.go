@@ -64,6 +64,11 @@ func (se SettingsError) Add(key string, err error) {
 	se.err_map[key] = err
 }
 
+type CollectionsManifestIdPair struct {
+	SourceManifestId uint64
+	TargetManifestId uint64
+}
+
 // timestamp for a specific vb
 type VBTimestamp struct {
 	Vbno          uint16
@@ -71,6 +76,7 @@ type VBTimestamp struct {
 	Seqno         uint64
 	SnapshotStart uint64
 	SnapshotEnd   uint64
+	ManifestIDs   CollectionsManifestIdPair
 }
 
 func (vbts *VBTimestamp) String() string {
@@ -135,6 +141,35 @@ type ObjectWithLock struct {
 	Lock   *sync.RWMutex
 }
 
+type Uint64WithLock SeqnoWithLock
+
+func (u *Uint64WithLock) Get() uint64 {
+	return (*SeqnoWithLock)(u).GetSeqno()
+}
+
+func (u *Uint64WithLock) Set(val uint64) {
+	(*SeqnoWithLock)(u).SetSeqno(val)
+}
+
+func (u *Uint64WithLock) SetIfLarger(val uint64) {
+	s := (*SeqnoWithLock)(u)
+	s.RLock()
+	if s.GetSeqnoWithoutLock() < val {
+		s.RUnlock()
+		s.Lock()
+		if s.GetSeqnoWithoutLock() < val {
+			s.SetSeqnoWithoutLock(val)
+		}
+		s.Unlock()
+	} else {
+		s.RUnlock()
+	}
+}
+
+func NewUint64WithLock() *Uint64WithLock {
+	return (*Uint64WithLock)(NewSeqnoWithLock())
+}
+
 type SeqnoWithLock struct {
 	seqno uint64
 	lock  *sync.RWMutex
@@ -160,6 +195,14 @@ func (seqno_obj *SeqnoWithLock) Lock() {
 
 func (seqno_obj *SeqnoWithLock) Unlock() {
 	seqno_obj.lock.Unlock()
+}
+
+func (seqno_obj *SeqnoWithLock) RLock() {
+	seqno_obj.lock.RLock()
+}
+
+func (seqno_obj *SeqnoWithLock) RUnlock() {
+	seqno_obj.lock.RUnlock()
 }
 
 func (seqno_obj *SeqnoWithLock) GetSeqnoWithoutLock() uint64 {

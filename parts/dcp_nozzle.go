@@ -946,6 +946,7 @@ func (dcp *DcpNozzle) processData() (err error) {
 				}
 			} else if m.IsSystemEvent() {
 				// Let's just pretend we received it and processed it in one shot
+				dcp.handleSystemEvent(m)
 				dcp.RaiseEvent(common.NewEvent(common.DataReceived, m, dcp, nil /*derivedItems*/, nil /*otherInfos*/))
 				dcp.RaiseEvent(common.NewEvent(common.DataFiltered, m, dcp.cachedConnector, nil, nil))
 				dcp.RaiseEvent(common.NewEvent(common.SystemEventReceived, m, dcp, nil /*derivedItems*/, nil /*otherInfos*/))
@@ -997,18 +998,32 @@ func (dcp *DcpNozzle) composeWrappedUprEvent(m *mcc.UprEvent) *base.WrappedUprEv
 		return wrappedEvent
 	}
 
+	var collectionName string
+	var scopeName string
+	var err error
+
+	matchCollectionIDFunc := func() error {
+		topManifestUid := atomic.LoadUint64(&dcp.vbHighestManifestUidArray[m.VBucket])
+		manifest, err := dcp.specificManifestGetter(topManifestUid)
+		if err != nil {
+			dcp.Logger().Errorf("Asking for manifest %v got error: %v\n", topManifestUid, err)
+			return err
+		}
+
+		scopeName, collectionName, err = manifest.GetScopeAndCollectionName(m.CollectionId)
+		if err != nil {
+			err = fmt.Errorf("%v: vb %v topManifestID: %v manifest: %v asking for collectionId: %v", err, m.VBucket, topManifestUid, manifest, m.CollectionId)
+			return err
+		}
+
+		return nil
+	}
+	err = dcp.utils.ExponentialBackoffExecutor("DcpComposeWrappedUprEvent", base.BucketInfoOpWaitTime, base.BucketInfoOpMaxRetry*2, base.BucketInfoOpRetryFactor, matchCollectionIDFunc)
+	if err != nil {
+		panic(fmt.Sprintf("Unable to send wrapped event: %v due to err: %v\n", m, err))
+	}
+
 	wrappedEvent.CollectionUsed = true
-
-	topManifestUid := atomic.LoadUint64(&dcp.vbHighestManifestUidArray[m.VBucket])
-	manifest, err := dcp.specificManifestGetter(topManifestUid)
-	if err != nil {
-		panic(fmt.Sprintf("Error: %v", err))
-	}
-
-	scopeName, collectionName, err := manifest.GetScopeAndCollectionName(m.CollectionId)
-	if err != nil {
-		panic(fmt.Sprintf("GetScopeCollectionName Error: %v", err))
-	}
 
 	wrappedEvent.ScopeName = scopeName
 	wrappedEvent.CollectionName = collectionName
@@ -1366,6 +1381,7 @@ func (dcp *DcpNozzle) onUpdateStartingSeqno(new_startingSeqnos map[uint16]*base.
 }
 
 func (dcp *DcpNozzle) setTS(vbno uint16, ts *base.VBTimestamp, need_lock bool) error {
+	atomic.StoreUint64(&dcp.vbHighestManifestUidArray[vbno], ts.ManifestIDs.SourceManifestId)
 	ts_entry := dcp.cur_ts[vbno]
 	if ts_entry != nil {
 		if need_lock {

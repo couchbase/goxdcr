@@ -117,6 +117,7 @@ type CheckpointManager struct {
 
 	// Cached version of manifest map when used for checkpointing
 	cachedManifestMap     map[uint16]uint64
+	cachedTgtManifestMap  map[uint16]uint64
 	cachedManifestMapLock sync.RWMutex
 }
 
@@ -717,12 +718,12 @@ func (ckmgr *CheckpointManager) SetVBTimestamps(topic string) error {
 }
 
 func (ckmgr *CheckpointManager) setTimestampForVB(vbno uint16, ts *base.VBTimestamp) error {
-	ckmgr.logger.Infof("%v Set VBTimestamp: vb=%v, ts.Seqno=%v\n", ckmgr.pipeline.Topic(), vbno, ts.Seqno)
+	ckmgr.logger.Infof("%v Set VBTimestamp: vb=%v, ts.Seqno=%v ts.SourceManifestId=%v ts.TargetManifestId=%v\n", ckmgr.pipeline.Topic(), vbno, ts.Seqno, ts.ManifestIDs.SourceManifestId, ts.ManifestIDs.TargetManifestId)
 	ckmgr.logger.Debugf("%v vb=%v ts=%v\n", ckmgr.pipeline.Topic(), vbno, ts)
 	defer ckmgr.logger.Debugf("%v Set VBTimestamp for vb=%v completed\n", ckmgr.pipeline.Topic(), vbno)
 
 	//set the start seqno on through_seqno_tracker_svc
-	ckmgr.through_seqno_tracker_svc.SetStartSeqno(vbno, ts.Seqno)
+	ckmgr.through_seqno_tracker_svc.SetStartSeqno(vbno, ts)
 
 	settings := make(map[string]interface{})
 	ts_map := make(map[uint16]*base.VBTimestamp)
@@ -899,6 +900,8 @@ func (ckmgr *CheckpointManager) populateVBTimestamp(ckptDoc *metadata.Checkpoint
 			vbts.Seqno = ckpt_record.Seqno
 			vbts.SnapshotStart = ckpt_record.Dcp_snapshot_seqno
 			vbts.SnapshotEnd = ckpt_record.Dcp_snapshot_end_seqno
+			vbts.ManifestIDs.SourceManifestId = ckpt_record.SourceManifest
+			vbts.ManifestIDs.TargetManifestId = ckpt_record.TargetManifest
 
 			//For all stream requests the snapshot start seqno must be less than or equal
 			//to the start seqno and the start seqno must be less than or equal to the snapshot end seqno.
@@ -923,6 +926,8 @@ func (ckmgr *CheckpointManager) populateVBTimestamp(ckptDoc *metadata.Checkpoint
 			obj.ckpt.Dcp_snapshot_seqno = vbts.SnapshotStart
 			obj.ckpt.Dcp_snapshot_end_seqno = vbts.SnapshotEnd
 			obj.ckpt.Seqno = vbts.Seqno
+			obj.ckpt.SourceManifest = vbts.ManifestIDs.SourceManifestId
+			obj.ckpt.TargetManifest = vbts.ManifestIDs.TargetManifestId
 		}
 	} else {
 		err := fmt.Errorf("%v Calling populateVBTimestamp on vb=%v which is not in MyVBList", ckmgr.pipeline.Topic(), vbno)
@@ -1067,14 +1072,15 @@ func (ckmgr *CheckpointManager) updateLocalManifestMap(throughSeqnoMap map[uint1
 	ckmgr.cachedManifestMapLock.Lock()
 	defer ckmgr.cachedManifestMapLock.Unlock()
 
-	ckmgr.cachedManifestMap = ckmgr.through_seqno_tracker_svc.GetManifestIds(throughSeqnoMap)
+	ckmgr.cachedManifestMap = ckmgr.through_seqno_tracker_svc.GetSrcManifestIds(throughSeqnoMap)
+	ckmgr.cachedTgtManifestMap = ckmgr.through_seqno_tracker_svc.GetTgtManifestIds()
 }
 
-func (ckmgr *CheckpointManager) getManifestIdFromCache(vbno uint16) uint64 {
+func (ckmgr *CheckpointManager) getManifestIdFromCache(vbno uint16) (uint64, uint64) {
 	ckmgr.cachedManifestMapLock.RLock()
 	defer ckmgr.cachedManifestMapLock.RUnlock()
 
-	return ckmgr.cachedManifestMap[vbno]
+	return ckmgr.cachedManifestMap[vbno], ckmgr.cachedTgtManifestMap[vbno]
 }
 
 func (ckmgr *CheckpointManager) performCkpt_internal(vb_list []uint16, fin_ch <-chan bool, wait_grp *sync.WaitGroup, time_to_wait time.Duration,
@@ -1267,12 +1273,15 @@ func (ckmgr *CheckpointManager) doCheckpoint(vbno uint16, through_seqno_map map[
 	filteredItems := vbCountMetrics[DOCS_FILTERED_METRIC]
 	filterFailed := vbCountMetrics[DOCS_UNABLE_TO_FILTER_METRIC]
 	// Item 8: Manifests - for now feed default manifest
-	srcManifestId := ckmgr.getManifestIdFromCache(vbno)
-	ckmgr.logger.Infof("NEIL DEBUG srcManifestId for vb: %v is %v\n", vbno, srcManifestId)
+	srcManifestId, tgtManifestId := ckmgr.getManifestIdFromCache(vbno)
+	//	ckmgr.logger.Infof("NEIL DEBUG vb: %v is SourceManifest: %v TargetManifest: %v\n", vbno, srcManifestId, tgtManifestId)
+	// TODO BACKFILL - need to check
+	// 1. Based on the Specification() call, get the spec, check to ensure that the buckets are affected by the manifest change
+	// 2. to ensure that backfill is happening before this checkpoint is saved
 
 	// Write-operation - feed the temporary variables and update them into the record and also write them to metakv
 	newCkpt := metadata.NewCheckpointRecord(ckRecordFailoverUuid, through_seqno, ckRecordDcpSnapSeqno, ckRecordDcpSnapEndSeqno, ckptRecordTargetSeqno,
-		uint64(filteredItems), uint64(filterFailed), srcManifestId, srcManifestId /* TODO implement target*/)
+		uint64(filteredItems), uint64(filterFailed), srcManifestId, tgtManifestId /* TODO implement target*/)
 	err = ckpt_obj.updateAndPersist(ckmgr, vbno, currRecordVersion, xattr_seqno, newCkpt)
 
 	if err != nil {
@@ -1511,12 +1520,13 @@ func (ckmgr *CheckpointManager) UpdateVBTimestamps(vbno uint16, rollbackseqno ui
 	pipeline_startSeqnos_map[vbno] = vbts
 
 	//set the start seqno on through_seqno_tracker_svc
-	ckmgr.through_seqno_tracker_svc.SetStartSeqno(vbno, vbts.Seqno)
+	ckmgr.through_seqno_tracker_svc.SetStartSeqno(vbno, vbts)
 	err = ckmgr.statsMgr.SetVBCountMetrics(vbno, vbStats)
 	if err != nil {
 		ckmgr.logger.Warnf("%v setting vbStat for vb %v returned error %v Stats: %v\n", ckmgr.pipeline.Topic(), vbno, err, vbStats)
 	}
-	ckmgr.logger.Infof("%v Rolled back startSeqno to %v for vb=%v\n", ckmgr.pipeline.Topic(), vbts.Seqno, vbno)
+	ckmgr.logger.Infof("%v Rolled back startSeqno to %v for vb=%v sourceManifestId=%v targetManfiestId=%v\n", ckmgr.pipeline.Topic(), vbts.Seqno, vbno,
+		vbts.ManifestIDs.SourceManifestId, vbts.ManifestIDs.TargetManifestId)
 
 	ckmgr.logger.Infof("%v Retry vbts=%v\n", ckmgr.pipeline.Topic(), vbts)
 

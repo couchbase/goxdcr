@@ -117,7 +117,7 @@ func (c *CollectionsManifestService) handleNewReplSpec(spec *metadata.Replicatio
 		// whereas previous instance of the source bucket has uid of > 0
 		// Replication spec service should gc the spec if this is the case, but there is a window
 		// when the manifest service may pull a manifest from a reincarnated bucket
-		getter = NewBucketManifestGetter(spec.SourceBucketName, c, base.TopologyChangeCheckInterval)
+		getter = NewBucketManifestGetter(spec.SourceBucketName, c, 1*time.Second)
 		c.srcBucketGetters[spec.SourceBucketName] = getter
 	}
 	c.srcBucketGettersRefCnt[spec.SourceBucketName]++
@@ -367,7 +367,7 @@ func NewCollectionsManifestAgent(name string,
 	srcManifestGetter AgentSrcManifestGetter,
 	metakvSvc service_def.ManifestsService,
 	metadataChangeCb base.MetadataChangeHandlerCallback) *CollectionsManifestAgent {
-	return &CollectionsManifestAgent{
+	manifestAgent := &CollectionsManifestAgent{
 		remoteClusterSvc:       remoteClusterSvc,
 		checkpointsSvc:         checkpointsSvc,
 		logger:                 logger,
@@ -387,6 +387,10 @@ func NewCollectionsManifestAgent(name string,
 		srcNozzlePullMap:       make(map[uint16]*metadata.CollectionsManifest),
 		tgtNozzlePullMap:       make(map[uint16]*metadata.CollectionsManifest),
 	}
+	defaultManifest := metadata.NewDefaultCollectionsManifest()
+	manifestAgent.sourceCache[0] = &defaultManifest
+	manifestAgent.targetCache[0] = &defaultManifest
+	return manifestAgent
 }
 
 func (a *CollectionsManifestAgent) runPeriodicRefresh() {
@@ -401,7 +405,7 @@ func (a *CollectionsManifestAgent) runPeriodicRefresh() {
 			oldSrc, newSrc := a.refreshSource()
 			oldTgt, newTgt := a.refreshTarget(false)
 
-			if newSrc != nil || newTgt != nil {
+			if newSrc != nil && newSrc.Uid() > 0 && newTgt != nil && newTgt.Uid() > 0 {
 				oldPair := metadata.NewCollectionsManifestPair(oldSrc, oldTgt)
 				newPair := metadata.NewCollectionsManifestPair(newSrc, newTgt)
 				err := a.metadataChangeCb(a.replicationSpec.Id, oldPair, newPair)
@@ -620,13 +624,16 @@ func (a *CollectionsManifestAgent) GetSourceManifest() *metadata.CollectionsMani
 // Returns nil if not found in cache
 func (a *CollectionsManifestAgent) GetSpecificSourceManifest(manifestVersion uint64) *metadata.CollectionsManifest {
 	a.srcMtx.RLock()
-	defer a.srcMtx.RUnlock()
 
 	manifest, ok := a.sourceCache[manifestVersion]
 	if !ok {
-		manifest = nil
+		a.srcMtx.RUnlock()
+		a.refreshSource()
+		a.srcMtx.RLock()
+		manifest, _ = a.sourceCache[manifestVersion]
 	}
 
+	a.srcMtx.RUnlock()
 	return manifest
 }
 
@@ -663,7 +670,6 @@ func (a *CollectionsManifestAgent) refreshSource() (oldManifest, newManifest *me
 		manifest = a.srcManifestGetter()
 		if manifest == nil {
 			// Give a empty manifest for good measure
-			manifest = &metadata.CollectionsManifest{}
 			return fmt.Errorf("Unable to retrieve manifest from source bucket %v\n", a.replicationSpec.SourceBucketName)
 		} else {
 			return nil
@@ -674,12 +680,14 @@ func (a *CollectionsManifestAgent) refreshSource() (oldManifest, newManifest *me
 	if retryErr != nil {
 		defaultManifest := metadata.NewDefaultCollectionsManifest()
 		manifest = &defaultManifest
+		a.logger.Warnf("refreshSource err: %v\n", retryErr)
 	}
 
 	a.srcMtx.RLock()
 	if a.lastSourcePull < manifest.Uid() || a.lastSourcePull == 0 && manifest.Uid() == 0 {
 		a.srcMtx.RUnlock()
 		a.srcMtx.Lock()
+		a.logger.Infof("CollectionsManifestAgent: Updated source manifest from old version %v to new version %v\n", a.lastTargetPull, manifest.Uid())
 		oldManifest, ok = a.sourceCache[a.lastSourcePull]
 		a.lastSourcePull = manifest.Uid()
 		a.sourceCache[manifest.Uid()] = manifest
@@ -729,7 +737,6 @@ func (a *CollectionsManifestAgent) refreshTarget(force bool) (oldManifest, newMa
 		manifest, err = a.remoteClusterSvc.GetManifestByUuid(clusterUuid, bucketName, force)
 		if err != nil {
 			a.logger.Errorf("RemoteClusterService GetManifest on %v for bucket %v returned %v\n", clusterUuid, bucketName, err)
-			manifest = &metadata.CollectionsManifest{}
 			return err
 		}
 		return nil
@@ -739,12 +746,15 @@ func (a *CollectionsManifestAgent) refreshTarget(force bool) (oldManifest, newMa
 	if retryErr != nil || manifest == nil {
 		defaultManifest := metadata.NewDefaultCollectionsManifest()
 		manifest = &defaultManifest
+		a.logger.Errorf("refreshTarget returned err: %v\n", retryErr)
 	}
 
 	a.tgtMtx.RLock()
-	if a.lastTargetPull < manifest.Uid() || a.lastTargetPull == 0 && manifest.Uid() == 0 {
+	//	if a.lastTargetPull < manifest.Uid() || a.lastTargetPull == 0 && manifest.Uid() > 0 {
+	if a.lastTargetPull < manifest.Uid() {
 		a.tgtMtx.RUnlock()
 		a.tgtMtx.Lock()
+		a.logger.Infof("CollectionsManifestAgent: Updated target manifest from old version %v to new version %v\n", a.lastTargetPull, manifest.Uid())
 		oldManifest, ok = a.targetCache[a.lastTargetPull]
 		a.lastTargetPull = manifest.Uid()
 		a.targetCache[manifest.Uid()] = manifest

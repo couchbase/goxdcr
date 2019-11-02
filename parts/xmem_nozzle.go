@@ -818,9 +818,10 @@ type XmemNozzle struct {
 
 	vbList []uint16
 
-	collectionsManifestMtx     sync.RWMutex
-	collectionsManifest        *metadata.CollectionsManifest
-	collectionsManifestVersion uint64 /* atomically updated */
+	specificManifestGetter service_def.CollectionsManifestPartsFunc
+	collectionsManifestMtx sync.RWMutex
+	collectionsManifest    *metadata.CollectionsManifest
+	//	collectionsManifestVersion uint64 /* atomically updated */
 }
 
 func NewXmemNozzle(id string,
@@ -1044,13 +1045,25 @@ func (xmem *XmemNozzle) mapToTargetCollection(request *base.WrappedMCRequest) er
 		return nil
 	}
 
-	xmem.collectionsManifestMtx.RLock()
-	manifestId := xmem.collectionsManifest.Uid()
-	targetColId, err := xmem.collectionsManifest.GetCollectionId(request.ScopeName, request.CollectionName)
-	xmem.collectionsManifestMtx.RUnlock()
+	var err error
+	var targetColId uint64
+	var manifestId uint64
+	matchCollectionIDFunc := func() error {
+		xmem.collectionsManifestMtx.RLock()
+		manifestId = xmem.collectionsManifest.Uid()
+		targetColId, err = xmem.collectionsManifest.GetCollectionId(request.ScopeName, request.CollectionName)
 
-	if err != nil {
+		if err != nil {
+			fmt.Errorf("%v: manifest: %v asking for target scope: %v collection: %v", err, xmem.collectionsManifest, request.ScopeName, request.CollectionName)
+			defer xmem.refreshTargetManifest()
+		}
+		xmem.collectionsManifestMtx.RUnlock()
 		return err
+	}
+
+	err = xmem.utils.ExponentialBackoffExecutor("XmemMapToTargetCollection", base.BucketInfoOpWaitTime, base.BucketInfoOpMaxRetry*2, base.BucketInfoOpRetryFactor, matchCollectionIDFunc)
+	if err != nil {
+		panic(fmt.Sprintf("Unable to send memcached request: %v due to err: %v\n", request, err))
 	}
 
 	request.MappedManifestId = manifestId
@@ -1333,6 +1346,7 @@ func (xmem *XmemNozzle) batchSetMetaWithRetry(batch *dataBatch, numOfRetry int) 
 						Opcode:      encodeOpCode(item.Req.Opcode),
 						IsExpirySet: (binary.BigEndian.Uint32(item.Req.Extras[4:8]) != 0),
 						VBucket:     item.Req.VBucket,
+						ManifestId:  item.MappedManifestId,
 					}
 					xmem.RaiseEvent(common.NewEvent(common.DataFailedCRSource, nil, xmem, nil, additionalInfo))
 				}
@@ -1933,6 +1947,13 @@ func (xmem *XmemNozzle) initializeCompressionSettings(settings metadata.Replicat
 	return nil
 }
 
+func (xmem *XmemNozzle) refreshTargetManifest() {
+	xmem.collectionsManifestMtx.Lock()
+	defer xmem.collectionsManifestMtx.Unlock()
+
+	xmem.collectionsManifest = xmem.specificManifestGetter(xmem.vbList)
+}
+
 func (xmem *XmemNozzle) initialize(settings metadata.ReplicationSettingsMap) error {
 	err := xmem.config.initializeConfig(settings, xmem.utils)
 	if err != nil {
@@ -1944,9 +1965,8 @@ func (xmem *XmemNozzle) initialize(settings metadata.ReplicationSettingsMap) err
 		return err
 	}
 
-	getterFunc := settings[XMEM_SETTING_MANIFEST_GETTER].(service_def.CollectionsManifestPartsFunc)
-	xmem.collectionsManifest = getterFunc(xmem.vbList)
-	atomic.StoreUint64(&xmem.collectionsManifestVersion, xmem.collectionsManifest.Uid())
+	xmem.specificManifestGetter = settings[XMEM_SETTING_MANIFEST_GETTER].(service_def.CollectionsManifestPartsFunc)
+	xmem.refreshTargetManifest()
 
 	xmem.setDataChan(make(chan *base.WrappedMCRequest, xmem.config.maxCount*10))
 	xmem.bytes_in_dataChan = 0
@@ -2131,6 +2151,7 @@ func (xmem *XmemNozzle) receiveResponse(finch chan bool, waitGrp *sync.WaitGroup
 						Req_size:       req.Size(),
 						Commit_time:    committing_time,
 						Resp_wait_time: resp_wait_time,
+						ManifestId:     wrappedReq.MappedManifestId,
 					}
 
 					xmem.RaiseEvent(common.NewEvent(common.DataSent, nil, xmem, nil, additionalInfo))

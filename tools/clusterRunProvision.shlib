@@ -680,6 +680,9 @@ function runCbWorkloadGenCollection {
 
 	collectionId=`getCollectionIdFromScopeAndCollectionName "$manifestOutput" "$scopeName" "$collectionName"`
 	if (( $? != 0 ));then
+		echo "NEIL DEBUG asking for scope $scopeName collection $collectionName"
+		echo "ManifestOutput:"
+		echo "$manifestOutput"
 		echo "Error retrieving collection ID"
 		return 1
 	fi
@@ -756,7 +759,7 @@ function prettyPrintManifest {
 	for (( i=0; $i < $scopesListLen; i=$(($i+1)) ))
 	do
 		local scopeOutput=`echo "$scopesList" | jq .[$i]`
-		local scopeName=`echo "$scopeOutput" | jq '.name'`
+		local scopeName=`echo "$scopeOutput" | jq '.name' | sed 's/"//g'`
 		local scopeUID=`echo "$scopeOutput" | jq '.uid'`
 		local scopeUIDdec=`hexStringToDec "$scopeUID"`
 		echo "ScopeName $scopeName (UID $scopeUIDdec)"
@@ -767,7 +770,7 @@ function prettyPrintManifest {
 		for (( j=0; $j < $collectionsListLen; j=$(($j+1)) ))
 		do
 			local collectionsOutput=`echo "$collectionsList" | jq .[$j]`
-			local collectionName=`echo "$collectionsOutput" | jq '.name'`
+			local collectionName=`echo "$collectionsOutput" | jq '.name' | sed 's/"//g'`
 			local collectionUID=`echo "$collectionsOutput" | jq '.uid'`
 			local collectionUIDdec=`hexStringToDec "$collectionUID"`
 			echo "ScopeName $scopeName CollectionName $collectionName (UID $collectionUIDdec)"
@@ -780,33 +783,34 @@ function getCollectionIdFromScopeAndCollectionName {
 	local manifest=$1
 	local requestedScopeName=$2
 	local requestedCollectionName=$3
+	
+	#get all the scopes
+	local scopesList=`echo "$manifest" | jq '.scopes'`
+	local scopesListLen=`echo "$manifest" | jq '.scopes | length'`
 
-	local scopesRaw=`echo "$manifest" | jq '.scopes'`
-
-	local scopesKeys=`echo "$scopesRaw" | jq 'keys'`
-	_jqFilterArray "${scopesKeys}"
-
-
-	for scopeName in "${JQ_KEYS_FILTER_FUNC_ARR[@]}"
+	for (( i=0; $i < $scopesListLen; i=$(($i+1)) ))
 	do
+		local scopeOutput=`echo "$scopesList" | jq .[$i]`
+		local scopeName=`echo "$scopeOutput" | jq '.name' | sed 's/"//g'`
+		
 		if [[ "$scopeName" == "$requestedScopeName" ]];then
-			local scopeOutput=`echo "$scopesRaw" | jq ".${scopeName}"`
-			local scopeUID=`echo "$scopeOutput" | jq '.uid'`
-			local collectionsKeysRaw=`echo "$scopeOutput" | jq '.collections|keys'`
-			_jqFilterArray "$collectionsKeysRaw"
-
-			for collectionName in "${JQ_KEYS_FILTER_FUNC_ARR[@]}"
+			local collectionsList=`echo "$scopeOutput" | jq '.collections'`
+			local collectionsListLen=`echo "$scopeOutput" | jq '.collections | length'`
+			for (( j=0; $j < $collectionsListLen; j=$(($j+1)) ))
 			do
+				local collectionsOutput=`echo "$collectionsList" | jq .[$j]`
+				local collectionName=`echo "$collectionsOutput" | jq '.name' | sed 's/"//g'`
+				local collectionUID=`echo "$collectionsOutput" | jq '.uid'`
+				local collectionUIDdec=`hexStringToDec "$collectionUID"`
+				
 				if [[ "$collectionName" == "$requestedCollectionName" ]];then
-					local collectionsOutputRaw=`echo "$scopeOutput" | jq '.collections'`
-					local collectionOutput=`echo "$collectionsOutputRaw" | jq ".${collectionName}"`
-					local collectionUID=`echo "$collectionOutput" | jq '.uid'`
-					echo "$collectionUID"
+					echo "$collectionUIDdec"
 					return 0
 				fi
 			done
 		fi
 	done
+
 	# not found
 	echo ""
 	return 1

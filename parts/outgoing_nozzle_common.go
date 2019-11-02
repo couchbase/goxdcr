@@ -140,6 +140,7 @@ type DataFailedCRSourceEventAdditional struct {
 	Opcode      mc.CommandCode
 	IsExpirySet bool
 	VBucket     uint16
+	ManifestId  uint64
 }
 
 type DataSentEventAdditional struct {
@@ -151,6 +152,7 @@ type DataSentEventAdditional struct {
 	IsExpirySet    bool
 	VBucket        uint16
 	Req_size       int
+	ManifestId     uint64
 }
 
 // does not return error since the assumption is that settings have been validated prior

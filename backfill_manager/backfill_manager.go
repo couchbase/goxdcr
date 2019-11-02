@@ -133,7 +133,7 @@ func (c *BackfillMgr) collectionsManifestChangeCb(replId string, oldVal, newVal 
 		if srcErr != nil {
 			c.logger.Errorf("Unable to diff between source manifests: %v", srcErr.Error())
 		}
-		c.logger.Infof(fmt.Sprintf("Source Added or removed:\n%v\nRemoved:\n%v\n", addedOrModified.String(), removed.String()))
+		c.logger.Infof(fmt.Sprintf("NEIL DEBUG Source Added or removed:\n%v\nRemoved:\n%v\n", addedOrModified.String(), removed.String()))
 	}
 
 	// Handle target
@@ -148,7 +148,7 @@ func (c *BackfillMgr) collectionsManifestChangeCb(replId string, oldVal, newVal 
 		if tgtErr != nil {
 			c.logger.Errorf("Unable to diff between target manifests: %v", tgtErr.Error())
 		}
-		c.logger.Infof(fmt.Sprintf("Target Added or removed:\n%v\nRemoved:\n%v\n", addedOrModified.String(), removed.String()))
+		c.logger.Infof(fmt.Sprintf("NEIL DEBUG Target Added or removed:\n%v\nRemoved:\n%v\n", addedOrModified.String(), removed.String()))
 	}
 
 	if tgtErr != nil && srcErr != nil {

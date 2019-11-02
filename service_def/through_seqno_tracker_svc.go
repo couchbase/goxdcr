@@ -10,6 +10,7 @@
 package service_def
 
 import (
+	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/common"
 )
 
@@ -19,8 +20,9 @@ type ThroughSeqnoTrackerSvc interface {
 	GetThroughSeqno(vbno uint16) uint64
 	// get through seqnos for all vbs managed by the pipeline
 	GetThroughSeqnos() map[uint16]uint64
-	SetStartSeqno(vbno uint16, seqno uint64)
+	SetStartSeqno(vbno uint16, vbTimeStamp *base.VBTimestamp)
 	PrintStatusSummary()
 
-	GetManifestIds(seqnoMap map[uint16]uint64) map[uint16]uint64
+	GetSrcManifestIds(seqnoMap map[uint16]uint64) map[uint16]uint64
+	GetTgtManifestIds() map[uint16]uint64
 }

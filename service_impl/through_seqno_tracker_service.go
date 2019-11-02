@@ -42,6 +42,9 @@ type ThroughSeqnoTrackerSvc struct {
 	// stores for each vb a sorted list of the seqnos that have been sent to and confirmed by target
 	vb_sent_seqno_list_map map[uint16]*base.SortedSeqnoListWithLock
 
+	// A map of vb -> (hightest) manifestId that was last successful acked by the target
+	vbLastSuccessfulManifestMap map[uint16]*base.Uint64WithLock
+
 	// Note: lists in the following two maps are treated in the same way in through_seqno computation
 	// they are maintained as two seperate lists because insertions into the lists are simpler
 	// and quicker this way - each insertion is simply an append to the end of the list
@@ -183,6 +186,7 @@ func NewThroughSeqnoTrackerSvc(logger_ctx *log.LoggerContext) *ThroughSeqnoTrack
 		through_seqno_map:           make(map[uint16]*base.SeqnoWithLock),
 		vb_last_seen_seqno_map:      make(map[uint16]*base.SeqnoWithLock),
 		vb_sent_seqno_list_map:      make(map[uint16]*base.SortedSeqnoListWithLock),
+		vbLastSuccessfulManifestMap: make(map[uint16]*base.Uint64WithLock),
 		vb_filtered_seqno_list_map:  make(map[uint16]*base.SortedSeqnoListWithLock),
 		vb_failed_cr_seqno_list_map: make(map[uint16]*base.SortedSeqnoListWithLock),
 		vb_gap_seqno_list_map:       make(map[uint16]*DualSortedSeqnoListWithLock),
@@ -201,6 +205,7 @@ func (tsTracker *ThroughSeqnoTrackerSvc) initialize(pipeline common.Pipeline) {
 		tsTracker.vb_last_seen_seqno_map[vbno] = base.NewSeqnoWithLock()
 
 		tsTracker.vb_sent_seqno_list_map[vbno] = base.NewSortedSeqnoListWithLock()
+		tsTracker.vbLastSuccessfulManifestMap[vbno] = base.NewUint64WithLock()
 		tsTracker.vb_filtered_seqno_list_map[vbno] = base.NewSortedSeqnoListWithLock()
 		tsTracker.vb_failed_cr_seqno_list_map[vbno] = base.NewSortedSeqnoListWithLock()
 		tsTracker.vb_gap_seqno_list_map[vbno] = newDualSortedSeqnoListWithLock()
@@ -252,8 +257,7 @@ func (tsTracker *ThroughSeqnoTrackerSvc) markSystemEvent(uprEvent *mcc.UprEvent)
 	seqno := uprEvent.Seqno
 	vbno := uprEvent.VBucket
 
-	manifestId, err := uprEvent.GetManifestId()
-	tsTracker.logger.Infof("NEIL DEBUG received system event for vb: %v manifest: %v err: %v", uprEvent.VBucket, manifestId, err)
+	manifestId, _ := uprEvent.GetManifestId()
 	tsTracker.addSystemSeqno(vbno, seqno, manifestId)
 }
 
@@ -266,7 +270,8 @@ func (tsTracker *ThroughSeqnoTrackerSvc) ProcessEvent(event *common.Event) error
 	case common.DataSent:
 		vbno := event.OtherInfos.(parts.DataSentEventAdditional).VBucket
 		seqno := event.OtherInfos.(parts.DataSentEventAdditional).Seqno
-		tsTracker.addSentSeqno(vbno, seqno)
+		manifestId := event.OtherInfos.(parts.DataSentEventAdditional).ManifestId
+		tsTracker.addSentInfo(vbno, seqno, manifestId)
 	case common.DataFiltered:
 		uprEvent := event.Data.(*mcc.UprEvent)
 		seqno := uprEvent.Seqno
@@ -309,9 +314,10 @@ func (tsTracker *ThroughSeqnoTrackerSvc) ProcessEvent(event *common.Event) error
 
 }
 
-func (tsTracker *ThroughSeqnoTrackerSvc) addSentSeqno(vbno uint16, sent_seqno uint64) {
-	tsTracker.validateVbno(vbno, "addSentSeqno")
+func (tsTracker *ThroughSeqnoTrackerSvc) addSentInfo(vbno uint16, sent_seqno, manifestId uint64) {
+	tsTracker.validateVbno(vbno, "addSentInfo")
 	tsTracker.vb_sent_seqno_list_map[vbno].AppendSeqno(sent_seqno)
+	tsTracker.vbLastSuccessfulManifestMap[vbno].SetIfLarger(manifestId)
 }
 
 func (tsTracker *ThroughSeqnoTrackerSvc) addFilteredSeqno(vbno uint16, filtered_seqno uint64) {
@@ -571,14 +577,23 @@ func (tsTracker *ThroughSeqnoTrackerSvc) GetThroughSeqnos() map[uint16]uint64 {
 	return result_map
 }
 
-func (tsTracker *ThroughSeqnoTrackerSvc) GetManifestIds(seqnoMap map[uint16]uint64) map[uint16]uint64 {
+func (tsTracker *ThroughSeqnoTrackerSvc) GetSrcManifestIds(seqnoMap map[uint16]uint64) map[uint16]uint64 {
 	retMap := make(map[uint16]uint64)
 	for vbno, seqno := range seqnoMap {
 		lastSeenManifestId, err := tsTracker.vbSystemEventsSeqnoListMap[vbno].getList2BasedonList1Floor(seqno)
 		if err != nil {
-			tsTracker.logger.Warnf("Unable to retrieve manifest for vb %v\n", vbno)
+			tsTracker.logger.Warnf("Unable to retrieve manifest for vb %v, requesting seqno %v err: %v\n", vbno, seqno, err)
 		}
 		retMap[vbno] = lastSeenManifestId
+	}
+	//	tsTracker.logger.Infof("NEIL DEBUG srcTracker map: %v\n", retMap)
+	return retMap
+}
+
+func (tsTracker *ThroughSeqnoTrackerSvc) GetTgtManifestIds() map[uint16]uint64 {
+	retMap := make(map[uint16]uint64)
+	for vbno, manifestIdObj := range tsTracker.vbLastSuccessfulManifestMap {
+		retMap[vbno] = manifestIdObj.Get()
 	}
 	return retMap
 }
@@ -592,10 +607,11 @@ func (tsTracker *ThroughSeqnoTrackerSvc) getThroughSeqnos(executor_id int, listO
 	}
 }
 
-func (tsTracker *ThroughSeqnoTrackerSvc) SetStartSeqno(vbno uint16, seqno uint64) {
+func (tsTracker *ThroughSeqnoTrackerSvc) SetStartSeqno(vbno uint16, vbts *base.VBTimestamp) {
 	tsTracker.validateVbno(vbno, "setStartSeqno")
-	obj, _ := tsTracker.through_seqno_map[vbno]
-	obj.SetSeqno(seqno)
+	tsTracker.through_seqno_map[vbno].SetSeqno(vbts.Seqno)
+	tsTracker.vbSystemEventsSeqnoListMap[vbno].appendSeqnos(vbts.Seqno, vbts.ManifestIDs.SourceManifestId, nil)
+	tsTracker.vbLastSuccessfulManifestMap[vbno].Set(vbts.ManifestIDs.TargetManifestId)
 }
 
 func (tsTracker *ThroughSeqnoTrackerSvc) validateVbno(vbno uint16, caller string) {
