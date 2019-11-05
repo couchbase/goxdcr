@@ -115,10 +115,21 @@ type CheckpointManager struct {
 	utils                  utilities.UtilsIface
 	statsMgr               StatsMgrIface
 
-	// Cached version of manifest map when used for checkpointing
-	cachedManifestMap     map[uint16]uint64
-	cachedTgtManifestMap  map[uint16]uint64
+	// Mutex used to synchronize the following manifest maps to ensure no data leakage
 	cachedManifestMapLock sync.RWMutex
+	// Cached version of manifest map when used for checkpointing - fed from throughSeqnoSvc
+	cachedManifestMap    map[uint16]uint64
+	cachedTgtManifestMap map[uint16]uint64
+	// Manifest map showing the last successful checkpointed manifestId
+	// This is used in conjunction with the above cached throughseqnoMap to make sure that ckptmgr
+	// only allows checkpoints to be created if there is no backfill condition OR if all backfill
+	// conditions are met
+	lastCkptManifestMap    map[uint16]uint64
+	lastTgtCkptManifestMap map[uint16]uint64
+
+	// Used to catch the initial target manifest
+	pipelineStartedWithoutCkpt      uint32 // atomic
+	initManifestMapsWithoutCkptOnce sync.Once
 }
 
 // Checkpoint Manager keeps track of one checkpointRecord per vbucket
@@ -185,6 +196,10 @@ func NewCheckpointManager(checkpoints_svc service_def.CheckpointsService, capi_s
 		utils:                     utilsIn,
 		statsMgr:                  statsMgr,
 		collectionsManifestSvc:    collectionsManifestSvc,
+		cachedManifestMap:         make(map[uint16]uint64),
+		cachedTgtManifestMap:      make(map[uint16]uint64),
+		lastCkptManifestMap:       make(map[uint16]uint64),
+		lastTgtCkptManifestMap:    make(map[uint16]uint64),
 	}, nil
 }
 
@@ -220,6 +235,12 @@ func (ckmgr *CheckpointManager) Attach(pipeline common.Pipeline) error {
 	err = ckmgr.RegisterComponentEventListener(common.VBErrorEncountered, supervisor.(*PipelineSupervisor))
 	if err != nil {
 		return err
+	}
+
+	// Register these to trap cases for pipelineStartedWithoutCkpt
+	for _, xmem := range pipeline.Targets() {
+		xmem.RegisterComponentEventListener(common.DataSent, ckmgr)
+		xmem.RegisterComponentEventListener(common.GetMetaReceived, ckmgr)
 	}
 
 	ckmgr.initialize()
@@ -298,7 +319,6 @@ func (ckmgr *CheckpointManager) initialize() {
 			snapshot_history: make([]*snapshot, 0, base.MaxLengthSnapshotHistory),
 		}
 	}
-
 	ckmgr.composeUserAgent()
 }
 
@@ -625,6 +645,9 @@ func (ckmgr *CheckpointManager) SetVBTimestamps(topic string) error {
 		return err
 	}
 	ckmgr.logger.Infof("Found %v checkpoint documents for replication %v\n", len(ckptDocs), topic)
+	if len(ckptDocs) == 0 {
+		atomic.StoreUint32(&ckmgr.pipelineStartedWithoutCkpt, 1)
+	}
 
 	deleted_vbnos := make([]uint16, 0)
 	target_support_xattr_now := base.IsClusterCompatible(ckmgr.target_cluster_version, base.VersionForRBACAndXattrSupport)
@@ -724,6 +747,16 @@ func (ckmgr *CheckpointManager) setTimestampForVB(vbno uint16, ts *base.VBTimest
 
 	//set the start seqno on through_seqno_tracker_svc
 	ckmgr.through_seqno_tracker_svc.SetStartSeqno(vbno, ts)
+
+	// Ensure that this vb's current starting point is sync'ed
+	if atomic.LoadUint32(&ckmgr.pipelineStartedWithoutCkpt) == 0 {
+		ckmgr.cachedManifestMapLock.Lock()
+		ckmgr.cachedManifestMap[vbno] = ts.ManifestIDs.SourceManifestId
+		ckmgr.cachedTgtManifestMap[vbno] = ts.ManifestIDs.TargetManifestId
+		ckmgr.lastCkptManifestMap[vbno] = ts.ManifestIDs.SourceManifestId
+		ckmgr.lastTgtCkptManifestMap[vbno] = ts.ManifestIDs.TargetManifestId
+		ckmgr.cachedManifestMapLock.Unlock()
+	}
 
 	settings := make(map[string]interface{})
 	ts_map := make(map[uint16]*base.VBTimestamp)
@@ -1076,11 +1109,11 @@ func (ckmgr *CheckpointManager) updateLocalManifestMap(throughSeqnoMap map[uint1
 	ckmgr.cachedTgtManifestMap = ckmgr.through_seqno_tracker_svc.GetTgtManifestIds()
 }
 
-func (ckmgr *CheckpointManager) getManifestIdFromCache(vbno uint16) (uint64, uint64) {
+func (ckmgr *CheckpointManager) getManifestIdsForCkptOp(vbno uint16) (uint64, uint64, uint64, uint64) {
 	ckmgr.cachedManifestMapLock.RLock()
 	defer ckmgr.cachedManifestMapLock.RUnlock()
 
-	return ckmgr.cachedManifestMap[vbno], ckmgr.cachedTgtManifestMap[vbno]
+	return ckmgr.cachedManifestMap[vbno], ckmgr.cachedTgtManifestMap[vbno], ckmgr.lastCkptManifestMap[vbno], ckmgr.lastTgtCkptManifestMap[vbno]
 }
 
 func (ckmgr *CheckpointManager) performCkpt_internal(vb_list []uint16, fin_ch <-chan bool, wait_grp *sync.WaitGroup, time_to_wait time.Duration,
@@ -1163,6 +1196,77 @@ func (ckptRecord *checkpointRecordWithLock) updateAndPersist(ckmgr *CheckpointMa
 	return nil
 }
 
+// Returns a list of collectionIDs that must have backfill exist
+func (ckmgr *CheckpointManager) backfillCheckSourceBucket(oldManifestId, newManifestId uint64) ([]uint64, error) {
+	var collectionIDs []uint64
+	//	spec := ckmgr.pipeline.Specification()
+
+	//	oldManifest, err := ckmgr.collectionsManifestSvc.GetSpecificSourceManifest(spec, oldManifestId)
+	//	if err != nil {
+	//		return collectionIDs, err
+	//	}
+	//
+	//	newManifest, err := ckmgr.collectionsManifestSvc.GetSpecificSourceManifest(spec, newManifestId)
+	//	if err != nil {
+	//		return collectionIDs, err
+	//	}
+	//
+	// TODO - For now, not sure what to do about added or modified source
+	return collectionIDs, nil
+}
+
+func (ckmgr *CheckpointManager) backfillCheckTargetBucket(oldManifestId, newManifestId uint64) ([]uint64, error) {
+	var collectionIDs []uint64
+	spec := ckmgr.pipeline.Specification()
+
+	oldManifest, err := ckmgr.collectionsManifestSvc.GetSpecificTargetManifest(spec, oldManifestId)
+	if err != nil {
+		return collectionIDs, fmt.Errorf("Getting target manifest version %v: %v", oldManifestId, err)
+	}
+
+	newManifest, err := ckmgr.collectionsManifestSvc.GetSpecificTargetManifest(spec, newManifestId)
+	if err != nil {
+		return collectionIDs, fmt.Errorf("Getting target manifest version %v: %v", newManifestId, err)
+	}
+
+	addedOrModified, _, err := newManifest.Diff(oldManifest)
+	if err != nil {
+		return collectionIDs, fmt.Errorf("Diffing manifest: %v", err)
+	}
+
+	// TODO - check with backfill mgr. For now, return them as they are
+	for _, scope := range addedOrModified {
+		for _, collection := range scope.Collections {
+			collectionIDs = append(collectionIDs, collection.Uid)
+		}
+	}
+	return collectionIDs, nil
+}
+
+func (ckmgr *CheckpointManager) backfillMgrPrereqCheck(vbno uint16, srcManifestId, tgtManifestId, lastSrcManifestId, lastTgtManifestId uint64) error {
+	if srcManifestId == lastSrcManifestId && tgtManifestId == lastTgtManifestId {
+		// No manifest changes - safe to checkpoint
+		return nil
+	} else if srcManifestId < lastSrcManifestId || tgtManifestId < lastTgtManifestId {
+		if srcManifestId < lastSrcManifestId {
+			ckmgr.logger.Warnf("Vbno %v going backward - last checkpointed source manifest %v, checkpointing %v", vbno, lastSrcManifestId, srcManifestId)
+		}
+		if tgtManifestId < lastTgtManifestId {
+			ckmgr.logger.Warnf("Vbno %v going backward - last checkpointed target manifest %v, checkpointing %v", vbno, lastTgtManifestId, tgtManifestId)
+		}
+		return nil
+	} else {
+		list, err := ckmgr.backfillCheckTargetBucket(lastTgtManifestId, tgtManifestId)
+		if err != nil {
+			return err
+		}
+		if len(list) > 0 {
+			return fmt.Errorf("The following collections are modified or new (between %v and %v) on target and are not being backfilled: %v. Skipping checkpointing...", lastTgtManifestId, tgtManifestId, list)
+		}
+		return nil
+	}
+}
+
 /**
  * Given the current information, we want to establish a single checkpoint entry and persist it. We need to populate the followings:
  * 1. The Source vbucket through sequence number
@@ -1197,6 +1301,18 @@ func (ckmgr *CheckpointManager) doCheckpoint(vbno uint16, through_seqno_map map[
 	ckpt_obj.lock.RUnlock()
 
 	through_seqno, err := ckmgr.getThroughSeqno(vbno, through_seqno_map)
+	if err != nil {
+		ckmgr.logger.Warnf("%v skipping checkpointing for vb=%v. err=%v", ckmgr.pipeline.Topic(), vbno, err)
+		return nil
+	}
+
+	// Item 8: Manifests - for now feed default manifest - do this first TODO - change number
+	srcManifestId, tgtManifestId, lastSuccessfulSrcManId, lastSuccessfulTgtManifestId := ckmgr.getManifestIdsForCkptOp(vbno)
+	//	ckmgr.logger.Infof("NEIL DEBUG vb: %v is SourceManifest: %v TargetManifest: %v\n", vbno, srcManifestId, tgtManifestId)
+	// TODO BACKFILL - need to check
+	// 1. Based on the Specification() call, get the spec, check to ensure that the buckets are affected by the manifest change
+	// 2. to ensure that backfill is happening before this checkpoint is saved
+	err = ckmgr.backfillMgrPrereqCheck(vbno, srcManifestId, tgtManifestId, lastSuccessfulSrcManId, lastSuccessfulTgtManifestId)
 	if err != nil {
 		ckmgr.logger.Warnf("%v skipping checkpointing for vb=%v. err=%v", ckmgr.pipeline.Topic(), vbno, err)
 		return nil
@@ -1272,16 +1388,10 @@ func (ckmgr *CheckpointManager) doCheckpoint(vbno uint16, through_seqno_map map[
 	}
 	filteredItems := vbCountMetrics[DOCS_FILTERED_METRIC]
 	filterFailed := vbCountMetrics[DOCS_UNABLE_TO_FILTER_METRIC]
-	// Item 8: Manifests - for now feed default manifest
-	srcManifestId, tgtManifestId := ckmgr.getManifestIdFromCache(vbno)
-	//	ckmgr.logger.Infof("NEIL DEBUG vb: %v is SourceManifest: %v TargetManifest: %v\n", vbno, srcManifestId, tgtManifestId)
-	// TODO BACKFILL - need to check
-	// 1. Based on the Specification() call, get the spec, check to ensure that the buckets are affected by the manifest change
-	// 2. to ensure that backfill is happening before this checkpoint is saved
 
 	// Write-operation - feed the temporary variables and update them into the record and also write them to metakv
 	newCkpt := metadata.NewCheckpointRecord(ckRecordFailoverUuid, through_seqno, ckRecordDcpSnapSeqno, ckRecordDcpSnapEndSeqno, ckptRecordTargetSeqno,
-		uint64(filteredItems), uint64(filterFailed), srcManifestId, tgtManifestId /* TODO implement target*/)
+		uint64(filteredItems), uint64(filterFailed), srcManifestId, tgtManifestId)
 	err = ckpt_obj.updateAndPersist(ckmgr, vbno, currRecordVersion, xattr_seqno, newCkpt)
 
 	if err != nil {
@@ -1423,6 +1533,29 @@ func (ckmgr *CheckpointManager) OnEvent(event *common.Event) {
 				err := fmt.Errorf("%v  Received snapshot marker on an unknown vb=%v\n", ckmgr.pipeline.Topic(), vbno)
 				ckmgr.handleGeneralError(err)
 			}
+		}
+	case common.DataSent:
+		fallthrough
+	case common.GetMetaReceived:
+		if atomic.LoadUint32(&ckmgr.pipelineStartedWithoutCkpt) == 1 {
+			ckmgr.initManifestMapsWithoutCkptOnce.Do(func() {
+				srcManifest, tgtManifest, err := ckmgr.collectionsManifestSvc.GetLatestManifests(ckmgr.pipeline.Specification())
+				if err != nil {
+					ckmgr.logger.Warnf("Initializing getting manifests returned err: %v\n", err)
+				} else {
+					ckmgr.logger.Infof("Initializing manifest markers to start with source %v target %v", srcManifest.Uid(), tgtManifest.Uid())
+				}
+
+				listOfVbs := ckmgr.getMyVBs()
+				ckmgr.cachedManifestMapLock.Lock()
+				defer ckmgr.cachedManifestMapLock.Unlock()
+				for _, vbno := range listOfVbs {
+					ckmgr.cachedManifestMap[vbno] = srcManifest.Uid()
+					ckmgr.cachedTgtManifestMap[vbno] = tgtManifest.Uid()
+					ckmgr.lastCkptManifestMap[vbno] = srcManifest.Uid()
+					ckmgr.lastTgtCkptManifestMap[vbno] = tgtManifest.Uid()
+				}
+			})
 		}
 	}
 }

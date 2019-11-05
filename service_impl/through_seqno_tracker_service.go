@@ -500,6 +500,9 @@ func (tsTracker *ThroughSeqnoTrackerSvc) GetThroughSeqno(vbno uint16) uint64 {
 		through_seqno_obj.SetSeqnoWithoutLock(through_seqno)
 
 		// truncate no longer needed entries from seqno lists to reduce memory/cpu overhead for future computations
+		tsTracker.logger.Infof("NEIL DEBUG vbno %v truncating seqno: %v sent: %v filtered: %v failedCR %v sysEvent %v gap: %v gap2: %v",
+			vbno, through_seqno, sent_seqno_list, filtered_seqno_list, failed_cr_seqno_list, systemEventSeqnoList,
+			gap_seqno_list_1, gap_seqno_list_2)
 		go tsTracker.truncateSeqnoLists(vbno, through_seqno)
 	}
 	return through_seqno
