@@ -294,12 +294,7 @@ func (tsTracker *ThroughSeqnoTrackerSvc) ProcessEvent(event *common.Event) error
 		tsTracker.addFailedCRSeqno(vbno, seqno)
 		//		tsTracker.logger.Infof("NEIL vb %v failedCR seqno %v", vbno, seqno)
 	case common.DataReceived:
-		upr_event := event.Data.(*mcc.UprEvent)
-		seqno := upr_event.Seqno
-		vbno := upr_event.VBucket
-		//		tsTracker.logger.Infof("NEIL vb %v received seqno %v", vbno, seqno)
-		// Sets last sequence number, and should the sequence number skip due to gap, this will take care of it
-		tsTracker.processGapSeqnos(vbno, seqno)
+		// do nothing
 	case common.SystemEventReceived:
 		uprEvent := event.Data.(*mcc.UprEvent)
 		seqno := uprEvent.Seqno
@@ -500,9 +495,6 @@ func (tsTracker *ThroughSeqnoTrackerSvc) GetThroughSeqno(vbno uint16) uint64 {
 		through_seqno_obj.SetSeqnoWithoutLock(through_seqno)
 
 		// truncate no longer needed entries from seqno lists to reduce memory/cpu overhead for future computations
-		tsTracker.logger.Infof("NEIL DEBUG vbno %v truncating seqno: %v sent: %v filtered: %v failedCR %v sysEvent %v gap: %v gap2: %v",
-			vbno, through_seqno, sent_seqno_list, filtered_seqno_list, failed_cr_seqno_list, systemEventSeqnoList,
-			gap_seqno_list_1, gap_seqno_list_2)
 		go tsTracker.truncateSeqnoLists(vbno, through_seqno)
 	}
 	return through_seqno
@@ -589,7 +581,6 @@ func (tsTracker *ThroughSeqnoTrackerSvc) GetSrcManifestIds(seqnoMap map[uint16]u
 		}
 		retMap[vbno] = lastSeenManifestId
 	}
-	//	tsTracker.logger.Infof("NEIL DEBUG srcTracker map: %v\n", retMap)
 	return retMap
 }
 

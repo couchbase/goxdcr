@@ -1952,6 +1952,7 @@ func (xmem *XmemNozzle) refreshTargetManifest() {
 	defer xmem.collectionsManifestMtx.Unlock()
 
 	xmem.collectionsManifest = xmem.specificManifestGetter(xmem.vbList)
+	xmem.Logger().Infof("NEIL DEBUG xmem refreshTargetManifest got version: %v\n", xmem.collectionsManifest.Uid())
 }
 
 func (xmem *XmemNozzle) initialize(settings metadata.ReplicationSettingsMap) error {
@@ -2374,6 +2375,9 @@ func (xmem *XmemNozzle) selfMonitor(finch chan bool, waitGrp *sync.WaitGroup) {
 				xmem.handleGeneralError(errors.New("Xmem is stuck"))
 				goto done
 			}
+
+			// Take this opportunity to refresh the latest manifest
+			xmem.refreshTargetManifest()
 		case <-statsTicker.C:
 			xmem.RaiseEvent(common.NewEvent(common.StatsUpdate, nil, xmem, nil, []int{len(xmem.dataChan), xmem.bytesInDataChan()}))
 		}

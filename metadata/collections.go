@@ -318,7 +318,53 @@ func (c *CollectionsManifest) Scopes() ScopesMap {
 	return c.scopes
 }
 
+type CollectionsMapping map[*Collection]Collection
+
+// Given one "source" manifest and one "target" manifest, try to map implicitly by name
+// Returns:
+func (sourceManifest *CollectionsManifest) MapAsSourceToTargetByName(targetManifest *CollectionsManifest) (successfulMapping CollectionsMapping, unmappedSources map[uint64]Collection, unmappedTarget map[uint64]Collection) {
+	if sourceManifest == nil || targetManifest == nil {
+		return
+	}
+
+	successfulMapping = make(CollectionsMapping)
+	unmappedSources = make(map[uint64]Collection)
+	unmappedTarget = make(map[uint64]Collection)
+
+	// First mark all of them as unmappedTarget
+	for _, scope := range targetManifest.Scopes() {
+		for _, collection := range scope.Collections {
+			unmappedTarget[collection.Uid] = collection
+		}
+	}
+
+	for scopeName, scope := range sourceManifest.Scopes() {
+		targetScope, exists := targetManifest.Scopes()[scopeName]
+		if !exists {
+			// All of these collections are unmapped
+			for _, collection := range scope.Collections {
+				unmappedSources[collection.Uid] = collection
+			}
+		} else {
+			for collectionName, collection := range scope.Collections {
+				targetCollection, exists := targetScope.Collections[collectionName]
+				if !exists {
+					unmappedSources[collection.Uid] = collection
+				} else {
+					successfulMapping[&collection] = targetCollection
+					delete(unmappedTarget, targetCollection.Uid)
+				}
+			}
+		}
+	}
+	return
+}
+
 type ScopesMap map[string]Scope
+
+func (s ScopesMap) Len() int {
+	return len(s)
+}
 
 func (s *ScopesMap) String() string {
 	if s == nil {

@@ -1,5 +1,6 @@
 package mocks
 
+import base "github.com/couchbase/goxdcr/base"
 import common "github.com/couchbase/goxdcr/common"
 import mock "github.com/stretchr/testify/mock"
 
@@ -22,13 +23,29 @@ func (_m *ThroughSeqnoTrackerSvc) Attach(pipeline common.Pipeline) error {
 	return r0
 }
 
-// GetManifestIds provides a mock function with given fields: seqnoMap
-func (_m *ThroughSeqnoTrackerSvc) GetManifestIds(seqnoMap map[uint16]uint64) map[uint16]uint64 {
+// GetSrcManifestIds provides a mock function with given fields: seqnoMap
+func (_m *ThroughSeqnoTrackerSvc) GetSrcManifestIds(seqnoMap map[uint16]uint64) map[uint16]uint64 {
 	ret := _m.Called(seqnoMap)
 
 	var r0 map[uint16]uint64
 	if rf, ok := ret.Get(0).(func(map[uint16]uint64) map[uint16]uint64); ok {
 		r0 = rf(seqnoMap)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(map[uint16]uint64)
+		}
+	}
+
+	return r0
+}
+
+// GetTgtManifestIds provides a mock function with given fields:
+func (_m *ThroughSeqnoTrackerSvc) GetTgtManifestIds() map[uint16]uint64 {
+	ret := _m.Called()
+
+	var r0 map[uint16]uint64
+	if rf, ok := ret.Get(0).(func() map[uint16]uint64); ok {
+		r0 = rf()
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(map[uint16]uint64)
@@ -73,7 +90,7 @@ func (_m *ThroughSeqnoTrackerSvc) PrintStatusSummary() {
 	_m.Called()
 }
 
-// SetStartSeqno provides a mock function with given fields: vbno, seqno
-func (_m *ThroughSeqnoTrackerSvc) SetStartSeqno(vbno uint16, seqno uint64) {
-	_m.Called(vbno, seqno)
+// SetStartSeqno provides a mock function with given fields: vbno, vbTimeStamp
+func (_m *ThroughSeqnoTrackerSvc) SetStartSeqno(vbno uint16, vbTimeStamp *base.VBTimestamp) {
+	_m.Called(vbno, vbTimeStamp)
 }

@@ -238,3 +238,23 @@ func TestManifestsListSort(t *testing.T) {
 
 	fmt.Println("============== Test case end: TestManifestsListSort =================")
 }
+
+func TestManifestMapping(t *testing.T) {
+	assert := assert.New(t)
+	fmt.Println("============== Test case start: TestManifestMapping =================")
+	data, _ := ioutil.ReadFile(provisionedFile)
+	source, _ := NewCollectionsManifestFromBytes(data)
+	target, _ := NewCollectionsManifestFromBytes(data)
+
+	// unmapped source
+	delete(target.Scopes()["S1"].Collections, "col2")
+
+	// unmapped target
+	target.Scopes()["S2"].Collections["colTest"] = Collection{1234, "colTest"}
+
+	_, unmappedSrc, unmappedTgt := source.MapAsSourceToTargetByName(&target)
+	assert.Equal(1, len(unmappedSrc))
+	assert.Equal(1, len(unmappedTgt))
+
+	fmt.Println("============== Test case end: TestManifestMapping =================")
+}

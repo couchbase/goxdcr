@@ -1215,7 +1215,8 @@ func (ckmgr *CheckpointManager) backfillCheckSourceBucket(oldManifestId, newMani
 	return collectionIDs, nil
 }
 
-func (ckmgr *CheckpointManager) backfillCheckTargetBucket(oldManifestId, newManifestId uint64) ([]uint64, error) {
+func (ckmgr *CheckpointManager) backfillCheckTargetBucket(currentSrcManifestId, oldManifestId, newManifestId uint64) ([]uint64, error) {
+	// A list of collectionIDs that have added or changed underneath since last ckpt and require backfill
 	var collectionIDs []uint64
 	spec := ckmgr.pipeline.Specification()
 
@@ -1234,13 +1235,33 @@ func (ckmgr *CheckpointManager) backfillCheckTargetBucket(oldManifestId, newMani
 		return collectionIDs, fmt.Errorf("Diffing manifest: %v", err)
 	}
 
-	// TODO - check with backfill mgr. For now, return them as they are
+	if addedOrModified.Len() == 0 {
+		// No added or modified targets since last time
+		return collectionIDs, nil
+	}
+
+	srcManifest, err := ckmgr.collectionsManifestSvc.GetSpecificSourceManifest(spec, currentSrcManifestId)
+	if err != nil {
+		return collectionIDs, fmt.Errorf("Getting current source manifest version %v: %v", currentSrcManifestId, err)
+	}
+
+	// If these added or modified target collections are unmapped from source, then they are ignorable
+	_, _, unmappedTarget := srcManifest.MapAsSourceToTargetByName(newManifest)
 	for _, scope := range addedOrModified {
 		for _, collection := range scope.Collections {
-			collectionIDs = append(collectionIDs, collection.Uid)
+			_, collectionIsUnmapped := unmappedTarget[collection.Uid]
+			if !collectionIsUnmapped {
+				collectionIDs = append(collectionIDs, collection.Uid)
+			}
 		}
 	}
-	return collectionIDs, nil
+
+	if len(collectionIDs) > 0 {
+		err = fmt.Errorf("These target collections are mapped and not being backfilled: %v\n", collectionIDs)
+	}
+
+	// TODO - check with backfill mgr. For now, return them as they are
+	return collectionIDs, err
 }
 
 func (ckmgr *CheckpointManager) backfillMgrPrereqCheck(vbno uint16, srcManifestId, tgtManifestId, lastSrcManifestId, lastTgtManifestId uint64) error {
@@ -1256,7 +1277,8 @@ func (ckmgr *CheckpointManager) backfillMgrPrereqCheck(vbno uint16, srcManifestI
 		}
 		return nil
 	} else {
-		list, err := ckmgr.backfillCheckTargetBucket(lastTgtManifestId, tgtManifestId)
+
+		list, err := ckmgr.backfillCheckTargetBucket(srcManifestId, lastTgtManifestId, tgtManifestId)
 		if err != nil {
 			return err
 		}
