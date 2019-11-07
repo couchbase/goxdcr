@@ -24,6 +24,29 @@ func (_m *CollectionsManifestAgentIface) GetAndRecordSourceManifest(vblist []uin
 	return r0
 }
 
+// GetLastPersistedManifests provides a mock function with given fields:
+func (_m *CollectionsManifestAgentIface) GetLastPersistedManifests() (*metadata.CollectionsManifestPair, error) {
+	ret := _m.Called()
+
+	var r0 *metadata.CollectionsManifestPair
+	if rf, ok := ret.Get(0).(func() *metadata.CollectionsManifestPair); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*metadata.CollectionsManifestPair)
+		}
+	}
+
+	var r1 error
+	if rf, ok := ret.Get(1).(func() error); ok {
+		r1 = rf()
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
 // GetOngoingManifests provides a mock function with given fields: vb
 func (_m *CollectionsManifestAgentIface) GetOngoingManifests(vb uint16) *metadata.CollectionsManifestPair {
 	ret := _m.Called(vb)

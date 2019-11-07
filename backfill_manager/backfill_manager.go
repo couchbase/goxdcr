@@ -29,21 +29,25 @@ type BackfillMgr struct {
 	cancelChan      chan struct{}
 
 	cleanupOnce sync.Once
+
+	cacheMtx           sync.RWMutex
+	cacheSpecSourceMap map[string]*metadata.CollectionsManifest
+	cacheSpecTargetMap map[string]*metadata.CollectionsManifest
 }
 
-func (c *BackfillMgr) backfillMgrExitFunc(force bool) {
+func (b *BackfillMgr) backfillMgrExitFunc(force bool) {
 
 	if !force {
-		c.cleanup()
+		b.cleanup()
 	}
 }
 
-func (c *BackfillMgr) cleanup() {
-	c.cleanupOnce.Do(func() {
-		c.logger.Infof("BackfillMgr exiting")
-		c.Stop()
-		c.cancelChan <- struct{}{}
-		c.logger.Infof("BackfillMgr exited")
+func (b *BackfillMgr) cleanup() {
+	b.cleanupOnce.Do(func() {
+		b.logger.Infof("BackfillMgr exiting")
+		b.Stop()
+		b.cancelChan <- struct{}{}
+		b.logger.Infof("BackfillMgr exited")
 	})
 }
 
@@ -56,6 +60,8 @@ func NewBackfillManager(collectionsManifestSvc service_def.CollectionsManifestSv
 		replSpecSvc:            replSpecSvc,
 		cancelChan:             make(chan struct{}, 1),
 		logger:                 log.NewLogger("BackfillMgr", log.DefaultLoggerContext),
+		cacheSpecSourceMap:     make(map[string]*metadata.CollectionsManifest),
+		cacheSpecTargetMap:     make(map[string]*metadata.CollectionsManifest),
 	}
 
 	wrappedExitFunc := func(force bool) {
@@ -69,44 +75,65 @@ func NewBackfillManager(collectionsManifestSvc service_def.CollectionsManifestSv
 	return backfillMgr
 }
 
-func (c *BackfillMgr) Start() {
-	c.logger.Infof("BackfillMgr Starting...")
-	c.initMetadataChangeMonitor()
+func (b *BackfillMgr) Start() {
+	b.logger.Infof("BackfillMgr Starting...")
+	b.initMetadataChangeMonitor()
 
-	c.collectionsManifestSvc.SetMetadataChangeHandlerCallback(c.collectionsManifestChangeCb)
-	c.replSpecSvc.SetMetadataChangeHandlerCallback(c.replicationSpecChangeHandlerCallback)
+	b.collectionsManifestSvc.SetMetadataChangeHandlerCallback(b.collectionsManifestChangeCb)
+	b.replSpecSvc.SetMetadataChangeHandlerCallback(b.replicationSpecChangeHandlerCallback)
 
-	c.logger.Infof("BackfillMgr Started")
+	b.initCache()
+	b.logger.Infof("BackfillMgr Started")
 }
 
-func (c *BackfillMgr) Stop() {
-	c.logger.Infof("BackfillMgr Stopping...")
+func (b *BackfillMgr) Stop() {
+	b.logger.Infof("BackfillMgr Stopping...")
 
-	c.logger.Infof("BackfillMgr Stopped")
+	b.logger.Infof("BackfillMgr Stopped")
 }
 
-func (c *BackfillMgr) initMetadataChangeMonitor() {
+func (b *BackfillMgr) initMetadataChangeMonitor() {
 	// TODO - future metadata change monitors
 	//	mcm := base.NewMetadataChangeMonitor()
 }
 
-func (c *BackfillMgr) replicationSpecChangeHandlerCallback(changedSpecId string, oldSpecObj interface{}, newSpecObj interface{}) error {
+func (b *BackfillMgr) initCache() {
+	// The following doesn't return a non-nil error for now
+	replSpecMap, _ := b.replSpecSvc.AllReplicationSpecs()
+	for replId, spec := range replSpecMap {
+		if spec == nil {
+			continue
+		}
+		manifestPair, err := b.collectionsManifestSvc.GetLastPersistedManifests(spec)
+		if err != nil {
+			b.logger.Errorf("Retrieving manifest for spec %v returned %v", replId, err)
+			continue
+		}
+		b.cacheMtx.Lock()
+		b.cacheSpecSourceMap[replId] = manifestPair.Source
+		b.cacheSpecTargetMap[replId] = manifestPair.Target
+		b.logger.Infof("NEIL DEBUG for replicationID: %v retrieved manifests for source: %v target: %v", replId, manifestPair.Source, manifestPair.Target)
+		b.cacheMtx.Unlock()
+	}
+}
+
+func (b *BackfillMgr) replicationSpecChangeHandlerCallback(changedSpecId string, oldSpecObj interface{}, newSpecObj interface{}) error {
 	oldSpec, ok := oldSpecObj.(*metadata.ReplicationSpecification)
 	newSpec, ok2 := newSpecObj.(*metadata.ReplicationSpecification)
 
 	if !ok || !ok2 {
-		c.logger.Errorf("BackfillMgr error converting oldSpec: %v newSpec: %v", ok, ok2)
+		b.logger.Errorf("BackfillMgr error converting oldSpec: %v newSpec: %v", ok, ok2)
 		return base.ErrorInvalidInput
 	}
 
-	c.logger.Infof("BackfillMgr detected specId %v old %v new %v", changedSpecId, oldSpec, newSpec)
+	b.logger.Infof("BackfillMgr detected specId %v old %v new %v", changedSpecId, oldSpec, newSpec)
 
-	c.collectionsManifestSvc.ReplicationSpecChangeCallback(changedSpecId, oldSpecObj, newSpecObj)
+	b.collectionsManifestSvc.ReplicationSpecChangeCallback(changedSpecId, oldSpecObj, newSpecObj)
 
 	return nil
 }
 
-func (c *BackfillMgr) collectionsManifestChangeCb(replId string, oldVal, newVal interface{}) error {
+func (b *BackfillMgr) collectionsManifestChangeCb(replId string, oldVal, newVal interface{}) error {
 	oldManifest, ok := oldVal.(*metadata.CollectionsManifestPair)
 	if !ok {
 		return base.ErrorInvalidInput
@@ -123,32 +150,32 @@ func (c *BackfillMgr) collectionsManifestChangeCb(replId string, oldVal, newVal 
 
 	// Handle source
 	if oldManifest.Source == nil && newManifest.Source != nil {
-		c.logger.Infof("Source manifest did not exist, now it has: %v\n", newManifest.Source.String())
+		b.logger.Infof("Source manifest did not exist, now it has: %v\n", newManifest.Source.String())
 	} else if oldManifest.Source != nil && newManifest.Source == nil {
 		// Don't think it's possible...
-		c.logger.Infof("Source manifest has been deleted")
+		b.logger.Infof("Source manifest has been deleted")
 		srcErr = base.ErrorInvalidInput
 	} else {
 		addedOrModified, removed, srcErr = newManifest.Source.Diff(oldManifest.Source)
 		if srcErr != nil {
-			c.logger.Errorf("Unable to diff between source manifests: %v", srcErr.Error())
+			b.logger.Errorf("Unable to diff between source manifests: %v", srcErr.Error())
 		}
-		c.logger.Infof(fmt.Sprintf("NEIL DEBUG Source Added or removed:\n%v\nRemoved:\n%v\n", addedOrModified.String(), removed.String()))
+		b.logger.Infof(fmt.Sprintf("NEIL DEBUG Source Added or removed:\n%v\nRemoved:\n%v\n", addedOrModified.String(), removed.String()))
 	}
 
 	// Handle target
 	if oldManifest.Target == nil && newManifest.Target != nil {
-		c.logger.Infof("Target manifest did not exist, now it has: %v\n", newManifest.Target.String())
+		b.logger.Infof("Target manifest did not exist, now it has: %v\n", newManifest.Target.String())
 	} else if oldManifest.Target != nil && newManifest.Target == nil {
 		// Don't think it's possible...
-		c.logger.Infof("Target manifest has been deleted")
+		b.logger.Infof("Target manifest has been deleted")
 		tgtErr = base.ErrorInvalidInput
 	} else {
 		addedOrModified, removed, tgtErr = newManifest.Target.Diff(oldManifest.Target)
 		if tgtErr != nil {
-			c.logger.Errorf("Unable to diff between target manifests: %v", tgtErr.Error())
+			b.logger.Errorf("Unable to diff between target manifests: %v", tgtErr.Error())
 		}
-		c.logger.Infof(fmt.Sprintf("NEIL DEBUG Target Added or removed:\n%v\nRemoved:\n%v\n", addedOrModified.String(), removed.String()))
+		b.logger.Infof(fmt.Sprintf("NEIL DEBUG Target Added or removed:\n%v\nRemoved:\n%v\n", addedOrModified.String(), removed.String()))
 	}
 
 	if tgtErr != nil && srcErr != nil {
@@ -158,5 +185,6 @@ func (c *BackfillMgr) collectionsManifestChangeCb(replId string, oldVal, newVal 
 			return tgtErr
 		}
 	}
+
 	return nil
 }

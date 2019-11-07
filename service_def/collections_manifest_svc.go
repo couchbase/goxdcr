@@ -63,6 +63,7 @@ type CollectionsManifestSvc interface {
 	// Checkpointing
 	PersistNeededManifests(spec *metadata.ReplicationSpecification) error
 	GetOngoingManifests(spec *metadata.ReplicationSpecification, vb uint16) (*metadata.CollectionsManifestPair, error)
+	GetLastPersistedManifests(spec *metadata.ReplicationSpecification) (*metadata.CollectionsManifestPair, error)
 
 	// APIs for Nozzles
 	GetSourceManifestForNozzle(spec *metadata.ReplicationSpecification, vblist []uint16) *metadata.CollectionsManifest
@@ -87,4 +88,5 @@ type CollectionsManifestAgentIface interface {
 	GetTargetManifest() *metadata.CollectionsManifest
 	GetOngoingManifests(vb uint16) *metadata.CollectionsManifestPair
 	PersistNeededManifests() (error, error, bool, bool)
+	GetLastPersistedManifests() (*metadata.CollectionsManifestPair, error)
 }

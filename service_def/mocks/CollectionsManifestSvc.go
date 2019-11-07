@@ -32,6 +32,29 @@ func (_m *CollectionsManifestSvc) CollectionManifestGetter(bucketName string) (*
 	return r0, r1
 }
 
+// GetLastPersistedManifests provides a mock function with given fields: spec
+func (_m *CollectionsManifestSvc) GetLastPersistedManifests(spec *metadata.ReplicationSpecification) (*metadata.CollectionsManifestPair, error) {
+	ret := _m.Called(spec)
+
+	var r0 *metadata.CollectionsManifestPair
+	if rf, ok := ret.Get(0).(func(*metadata.ReplicationSpecification) *metadata.CollectionsManifestPair); ok {
+		r0 = rf(spec)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*metadata.CollectionsManifestPair)
+		}
+	}
+
+	var r1 error
+	if rf, ok := ret.Get(1).(func(*metadata.ReplicationSpecification) error); ok {
+		r1 = rf(spec)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
 // GetLatestManifests provides a mock function with given fields: spec
 func (_m *CollectionsManifestSvc) GetLatestManifests(spec *metadata.ReplicationSpecification) (*metadata.CollectionsManifest, *metadata.CollectionsManifest, error) {
 	ret := _m.Called(spec)

@@ -1153,9 +1153,11 @@ func (ckmgr *CheckpointManager) performCkpt_internal(vb_list []uint16, fin_ch <-
 		}
 	}
 
-	ckmgr.logger.Infof("Done checkpointing for replication %v with vb list %v\n", ckmgr.pipeline.Topic(), vb_list)
 	if len(err_map) > 0 {
 		ckmgr.logger.Infof("Errors encountered in checkpointing for replication %v: %v\n", ckmgr.pipeline.Topic(), err_map)
+	} else {
+		ckmgr.logger.Infof("Done checkpointing for replication %v with vb list %v\n", ckmgr.pipeline.Topic(), vb_list)
+		ckmgr.collectionsManifestSvc.PersistNeededManifests(ckmgr.pipeline.Specification())
 	}
 }
 

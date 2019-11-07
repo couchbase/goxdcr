@@ -106,8 +106,11 @@ func (c *CollectionsManifestService) start() error {
 
 // handle new and del should be called sequencially since replSpecService calls the callback sequentially
 func (c *CollectionsManifestService) handleNewReplSpec(spec *metadata.ReplicationSpecification, starting bool) error {
+	// TODO - if NOT starting, load from metakv
 	if !starting {
 		c.logger.Infof("Handling new spec: %v\n", spec)
+	} else {
+		c.logger.Infof("Handling existing spec: %v\n", spec)
 	}
 	c.srcBucketGetterMtx.Lock()
 	getter, ok := c.srcBucketGetters[spec.SourceBucketName]
@@ -224,6 +227,15 @@ func (c *CollectionsManifestService) GetOngoingManifests(spec *metadata.Replicat
 	return agent.GetOngoingManifests(vb), nil
 }
 
+func (c *CollectionsManifestService) GetLastPersistedManifests(spec *metadata.ReplicationSpecification) (*metadata.CollectionsManifestPair, error) {
+	agent, err := c.getAgent(spec)
+	if err != nil {
+		defaultPair := &metadata.CollectionsManifestPair{&defaultManifest, &defaultManifest}
+		return defaultPair, err
+	}
+	return agent.GetLastPersistedManifests()
+}
+
 // Entry point by checkpoint manager as part of checkpointing
 func (c *CollectionsManifestService) PersistNeededManifests(spec *metadata.ReplicationSpecification) error {
 	agent, err := c.getAgent(spec)
@@ -333,6 +345,10 @@ type CollectionsManifestAgent struct {
 	lastTargetPull uint64
 	sourceCache    ManifestsCache
 	targetCache    ManifestsCache
+	// When Backfill manager starts up, it needs to know the highest manifest saved for a replication
+	// This must be restored from checkpoint and not from ns_server to ensure no data loss
+	lastSourceStoredManifest uint64
+	lastTargetStoredManifest uint64
 
 	// Last pulled manifest by nozzles
 	srcNozzleMtx     sync.RWMutex
@@ -548,9 +564,13 @@ func (a *CollectionsManifestAgent) loadManifestsFromMetakv() error {
 	srcGet, srcErr := a.metakvSvc.GetSourceManifests(a.replicationSpec)
 	tgtGet, tgtErr := a.metakvSvc.GetTargetManifests(a.replicationSpec)
 
+	a.logger.Infof("NEIL DEBUG loadManifestFromMetakv srcGet: %v srcErr: %v tgtGet: %v tgtErr: %v",
+		srcGet, srcErr, tgtGet, tgtErr)
+
 	if srcErr != nil {
 		a.logger.Warnf("Unable to load source from metakv: %v\n", srcErr)
 	} else if srcGet != nil {
+		var maxPull uint64
 		a.srcMtx.Lock()
 		a.sourceCache = make(ManifestsCache)
 		for _, manifest := range *srcGet {
@@ -558,13 +578,19 @@ func (a *CollectionsManifestAgent) loadManifestsFromMetakv() error {
 				continue
 			}
 			a.sourceCache[manifest.Uid()] = manifest
+			if manifest.Uid() > maxPull {
+				maxPull = manifest.Uid()
+			}
 		}
+		a.lastSourcePull = maxPull
+		a.lastSourceStoredManifest = maxPull
 		a.srcMtx.Unlock()
 	}
 
 	if tgtErr != nil {
 		a.logger.Warnf("Unable to load target from metakv: %v\n", tgtErr)
 	} else if tgtGet != nil {
+		var maxPull uint64
 		a.tgtMtx.Lock()
 		a.targetCache = make(ManifestsCache)
 		for _, manifest := range *tgtGet {
@@ -572,7 +598,12 @@ func (a *CollectionsManifestAgent) loadManifestsFromMetakv() error {
 				continue
 			}
 			a.targetCache[manifest.Uid()] = manifest
+			if manifest.Uid() > maxPull {
+				maxPull = manifest.Uid()
+			}
 		}
+		a.lastTargetPull = maxPull
+		a.lastTargetStoredManifest = maxPull
 		a.tgtMtx.Unlock()
 	}
 
@@ -590,6 +621,7 @@ func (a *CollectionsManifestAgent) loadManifestsFromMetakv() error {
 func (a *CollectionsManifestAgent) Start() error {
 	if atomic.CompareAndSwapUint32(&a.started, 0, 1) {
 		err := a.loadManifestsFromMetakv()
+		a.logger.Infof("NEIL DEBUG agent starting loading from metakv %v", err)
 		if err == service_def.MetadataNotFoundErr {
 			a.refreshSource()
 			a.refreshTarget(true)
@@ -922,6 +954,28 @@ func (a *CollectionsManifestAgent) GetOngoingManifests(vb uint16) *metadata.Coll
 		tgtManifest = &defaultManifest
 	}
 	return &metadata.CollectionsManifestPair{srcManifest, tgtManifest}
+}
+
+func (a *CollectionsManifestAgent) GetLastPersistedManifests() (*metadata.CollectionsManifestPair, error) {
+	if atomic.LoadUint32(&a.loadedFromMetakv) == 0 {
+		return nil, fmt.Errorf("metakv manifests Has not been loaded yet")
+	}
+
+	a.srcMtx.RLock()
+	srcManifest, ok := a.sourceCache[a.lastSourceStoredManifest]
+	a.srcMtx.RUnlock()
+	if !ok {
+		return nil, fmt.Errorf("Cannot find manifest %v", a.lastSourceStoredManifest)
+	}
+
+	a.tgtMtx.RLock()
+	tgtManifest, ok := a.targetCache[a.lastTargetStoredManifest]
+	a.tgtMtx.RUnlock()
+	if !ok {
+		return nil, fmt.Errorf("Cannot find manifest %v", a.lastTargetStoredManifest)
+	}
+
+	return &metadata.CollectionsManifestPair{srcManifest, tgtManifest}, nil
 }
 
 // Unit test func
