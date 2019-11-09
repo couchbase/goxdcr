@@ -176,9 +176,9 @@ func (this *CollectionsManifest) Equals(other *CollectionsManifest) bool {
 	return true
 }
 
-func (c *CollectionsManifest) Diff(older *CollectionsManifest) (addedOrModified, removed ScopesMap, err error) {
+func (c *CollectionsManifest) Diff(older *CollectionsManifest) (added, modified, removed ScopesMap, err error) {
 	if c == nil || older == nil {
-		return ScopesMap{}, ScopesMap{}, base.ErrorInvalidInput
+		return ScopesMap{}, ScopesMap{}, ScopesMap{}, base.ErrorInvalidInput
 	}
 
 	if c.Uid() < older.Uid() {
@@ -188,7 +188,8 @@ func (c *CollectionsManifest) Diff(older *CollectionsManifest) (addedOrModified,
 		return
 	}
 
-	addedOrModified = make(ScopesMap)
+	added = make(ScopesMap)
+	modified = make(ScopesMap)
 	removed = make(ScopesMap)
 
 	// First, find things that exists in the current manifest that doesn't exist in the older one
@@ -196,14 +197,27 @@ func (c *CollectionsManifest) Diff(older *CollectionsManifest) (addedOrModified,
 	for scopeName, scope := range c.Scopes() {
 		olderScope, exists := older.Scopes()[scopeName]
 		if !exists {
-			addedOrModified[scopeName] = scope
+			added[scopeName] = scope
 		} else if exists && !scope.Equals(olderScope) {
-			addedOrModified[scopeName] = NewEmptyScope(scopeName, scope.Uid)
+			collectionAddedYet := false
+			collectionModifiedYet := false
 			// At least one collection is different
+			// If this scope is different because all the collections are removed, the "removed" portion
+			// should catch it
 			for collectionName, collection := range scope.Collections {
 				olderCollection, exists := olderScope.Collections[collectionName]
-				if !exists || exists && !collection.Equals(olderCollection) {
-					addedOrModified[scopeName].Collections[collectionName] = collection
+				if !exists {
+					if !collectionAddedYet {
+						added[scopeName] = NewEmptyScope(scopeName, scope.Uid)
+						collectionAddedYet = true
+					}
+					added[scopeName].Collections[collectionName] = collection
+				} else if exists && !collection.Equals(olderCollection) {
+					if !collectionModifiedYet {
+						modified[scopeName] = NewEmptyScope(scopeName, scope.Uid)
+						collectionModifiedYet = true
+					}
+					modified[scopeName].Collections[collectionName] = collection
 				}
 			}
 		}
@@ -318,18 +332,93 @@ func (c *CollectionsManifest) Scopes() ScopesMap {
 	return c.scopes
 }
 
-type CollectionsMapping map[*Collection]Collection
+func (target *CollectionsManifest) GetBackfillCollectionIDs(prevTarget, source *CollectionsManifest) (backfillNeeded map[*Collection]Collection, err error) {
+	// Don't care about removed (for now)
+	added, modified, _, err := target.Diff(prevTarget)
+	if err != nil {
+		return
+	}
+
+	backfillNeeded = make(map[*Collection]Collection)
+	// These are collections that are mapped from source to target
+	srcToTargetMapping, _, _ := source.MapAsSourceToTargetByName(target)
+	for srcCol, targetCol := range srcToTargetMapping {
+		collection, found := added.GetCollection(targetCol.Uid)
+		if found {
+			backfillNeeded[srcCol] = collection
+			break
+		}
+		collection, found = modified.GetCollection(targetCol.Uid)
+		if found {
+			backfillNeeded[srcCol] = collection
+			break
+		}
+	}
+	return
+}
+
+type CollectionToCollectionMapping map[*Collection]Collection
+
+type CollectionIdKeyedMap map[uint64]Collection
+
+func (c CollectionIdKeyedMap) Diff(other CollectionIdKeyedMap) (missing, missingFromOther CollectionIdKeyedMap) {
+	missing = make(CollectionIdKeyedMap)
+	missingFromOther = make(CollectionIdKeyedMap)
+
+	// Cheat here by using sorting and compare
+	var cList []uint64
+	var oList []uint64
+
+	for cid, _ := range c {
+		cList = append(cList, cid)
+	}
+	for cid, _ := range other {
+		oList = append(oList, cid)
+	}
+
+	cList = base.SortUint64List(cList)
+	oList = base.SortUint64List(oList)
+
+	var cIdx int
+	var oIdx int
+
+	for cIdx = 0; cIdx < len(cList); cIdx++ {
+		if cList[cIdx] == oList[oIdx] {
+			if oIdx < len(oList) {
+				oIdx++
+			}
+		} else if cList[cIdx] < oList[oIdx] {
+			missingFromOther[cList[cIdx]] = c[cList[cIdx]]
+		} else /* cList[cIdx] > oList[oIdx] */ {
+			missing[oList[oIdx]] = other[oList[oIdx]]
+			oIdx++
+			if oIdx == len(oList) {
+				break
+			}
+		}
+	}
+
+	for ; cIdx < len(cList); cIdx++ {
+		missingFromOther[cList[cIdx]] = c[cList[cIdx]]
+	}
+
+	for ; oIdx < len(oList); oIdx++ {
+		missing[oList[oIdx]] = other[oList[oIdx]]
+	}
+
+	return
+}
 
 // Given one "source" manifest and one "target" manifest, try to map implicitly by name
 // Returns:
-func (sourceManifest *CollectionsManifest) MapAsSourceToTargetByName(targetManifest *CollectionsManifest) (successfulMapping CollectionsMapping, unmappedSources map[uint64]Collection, unmappedTarget map[uint64]Collection) {
+func (sourceManifest *CollectionsManifest) MapAsSourceToTargetByName(targetManifest *CollectionsManifest) (successfulMapping CollectionToCollectionMapping, unmappedSources CollectionIdKeyedMap, unmappedTarget CollectionIdKeyedMap) {
 	if sourceManifest == nil || targetManifest == nil {
 		return
 	}
 
-	successfulMapping = make(CollectionsMapping)
-	unmappedSources = make(map[uint64]Collection)
-	unmappedTarget = make(map[uint64]Collection)
+	successfulMapping = make(CollectionToCollectionMapping)
+	unmappedSources = make(CollectionIdKeyedMap)
+	unmappedTarget = make(CollectionIdKeyedMap)
 
 	// First mark all of them as unmappedTarget
 	for _, scope := range targetManifest.Scopes() {
@@ -398,6 +487,19 @@ func (s ScopesMap) Clone() ScopesMap {
 		clone[k] = v.Clone()
 	}
 	return clone
+}
+
+func (s ScopesMap) GetCollection(id uint64) (col Collection, found bool) {
+	for _, scope := range s {
+		for _, collection := range scope.Collections {
+			if collection.Uid == id {
+				col = collection
+				found = true
+				return
+			}
+		}
+	}
+	return
 }
 
 type Scope struct {

@@ -421,7 +421,7 @@ func (a *CollectionsManifestAgent) runPeriodicRefresh() {
 			oldSrc, newSrc := a.refreshSource()
 			oldTgt, newTgt := a.refreshTarget(false)
 
-			if newSrc != nil && newSrc.Uid() > 0 && newTgt != nil && newTgt.Uid() > 0 {
+			if newSrc != nil && newSrc.Uid() > 0 || newTgt != nil && newTgt.Uid() > 0 {
 				oldPair := metadata.NewCollectionsManifestPair(oldSrc, oldTgt)
 				newPair := metadata.NewCollectionsManifestPair(newSrc, newTgt)
 				err := a.metadataChangeCb(a.replicationSpec.Id, oldPair, newPair)
@@ -716,7 +716,7 @@ func (a *CollectionsManifestAgent) refreshSource() (oldManifest, newManifest *me
 	}
 
 	a.srcMtx.RLock()
-	if a.lastSourcePull < manifest.Uid() || a.lastSourcePull == 0 && manifest.Uid() == 0 {
+	if a.lastSourcePull < manifest.Uid() {
 		a.srcMtx.RUnlock()
 		a.srcMtx.Lock()
 		a.logger.Infof("CollectionsManifestAgent: Updated source manifest from old version %v to new version %v\n", a.lastTargetPull, manifest.Uid())

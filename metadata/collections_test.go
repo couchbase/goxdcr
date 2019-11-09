@@ -101,13 +101,14 @@ func TestCollectionsManifestDiff(t *testing.T) {
 
 	assert.False(emptyCollectionManifest.Equals(&provisionedManifest))
 
-	addedOrModified, removed, err := provisionedManifest.Diff(&emptyCollectionManifest)
+	added, modified, removed, err := provisionedManifest.Diff(&emptyCollectionManifest)
 	assert.Nil(err)
 	assert.Equal(0, len(removed))
-	assert.NotEqual(0, len(addedOrModified))
+	assert.NotEqual(0, len(added))
+	assert.Equal(0, len(modified))
 	// Since comparing against empty, all non-defaults are new
 	provisionedCnt := provisionedManifest.Count(false /*includeDefaultScope*/, false /*includeDefaultCollection*/)
-	addedCnt := addedOrModified.Count(true /*includeDefaultScope*/, true /*includeDefaultCollection*/)
+	addedCnt := added.Count(true /*includeDefaultScope*/, true /*includeDefaultCollection*/)
 	assert.Equal(provisionedCnt, addedCnt)
 
 	// Change 2 collections uid and see those as modified
@@ -123,20 +124,22 @@ func TestCollectionsManifestDiff(t *testing.T) {
 	assert.NotEqual(changedManifest.Scopes()["S2"].Collections["col1"].Uid, provisionedManifest.Scopes()["S2"].Collections["col1"].Uid)
 	// Add a new collection
 	changedManifest.scopes["S2"].Collections["col1Clone"] = changedManifest.scopes["S2"].Collections["col1"].Clone()
-	addedOrModified, removed, err = changedManifest.Diff(&provisionedManifest)
+	added, modified, removed, err = changedManifest.Diff(&provisionedManifest)
 	assert.Nil(err)
-	assert.Equal(3, addedOrModified.Count(true, true))
+	assert.Equal(2, modified.Count(true, true))
+	assert.Equal(1, added.Count(true, true))
 
 	// Prevent diffing against newer
-	_, _, err = emptyCollectionManifest.Diff(&provisionedManifest)
+	_, _, _, err = emptyCollectionManifest.Diff(&provisionedManifest)
 	assert.NotNil(err)
 
 	// Hack it so we can diff against an empty one
 	emptyCollectionManifest.uid = 10000
-	addedOrModified, removed, err = emptyCollectionManifest.Diff(&provisionedManifest)
+	added, modified, removed, err = emptyCollectionManifest.Diff(&provisionedManifest)
 	assert.Nil(err)
 	assert.NotEqual(0, len(removed))
-	assert.Equal(0, len(addedOrModified))
+	assert.Equal(0, len(added))
+	assert.Equal(0, len(modified))
 	removedCnt := removed.Count(true, true)
 	assert.Equal(provisionedCnt, removedCnt)
 
@@ -257,4 +260,48 @@ func TestManifestMapping(t *testing.T) {
 	assert.Equal(1, len(unmappedTgt))
 
 	fmt.Println("============== Test case end: TestManifestMapping =================")
+}
+
+func TestManifestFindBackfill(t *testing.T) {
+	assert := assert.New(t)
+	fmt.Println("============== Test case start: TestManifestFindBackfill =================")
+	data, err := ioutil.ReadFile(provisionedFile)
+	if err != nil {
+		panic(err)
+	}
+	source, _ := NewCollectionsManifestFromBytes(data)
+	target, _ := NewCollectionsManifestFromBytes(data)
+	target2, _ := NewCollectionsManifestFromBytes(data)
+
+	// Create a hole in target
+	delete(target.scopes["S2"].Collections, "col1")
+
+	// unmapped target
+	target2.scopes["S2"].Collections["colTest"] = Collection{1234, "colTest"}
+
+	output, err := target2.GetBackfillCollectionIDs(&target, &source)
+	assert.Nil(err)
+	assert.Equal(1, len(output))
+	fmt.Println("============== Test case end: TestManifestFindBackfill =================")
+}
+
+func TestCollectionKeyedMapDiff(t *testing.T) {
+	assert := assert.New(t)
+	fmt.Println("============== Test case start: TestCollectionKeyedMapDiff =================")
+	aMap := make(CollectionIdKeyedMap)
+	bMap := make(CollectionIdKeyedMap)
+
+	aMap[0] = Collection{}
+	aMap[1] = Collection{}
+	aMap[2] = Collection{}
+
+	bMap[0] = Collection{}
+	bMap[1] = Collection{}
+	bMap[3] = Collection{}
+	bMap[4] = Collection{}
+
+	missing, missingFromOther := aMap.Diff(bMap)
+	assert.Equal(1, len(missingFromOther))
+	assert.Equal(2, len(missing))
+	fmt.Println("============== Test case end: TestCollectionKeyedMapDiff =================")
 }

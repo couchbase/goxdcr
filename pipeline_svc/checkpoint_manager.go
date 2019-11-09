@@ -1232,12 +1232,12 @@ func (ckmgr *CheckpointManager) backfillCheckTargetBucket(currentSrcManifestId, 
 		return collectionIDs, fmt.Errorf("Getting target manifest version %v: %v", newManifestId, err)
 	}
 
-	addedOrModified, _, err := newManifest.Diff(oldManifest)
+	added, modified, _, err := newManifest.Diff(oldManifest)
 	if err != nil {
 		return collectionIDs, fmt.Errorf("Diffing manifest: %v", err)
 	}
 
-	if addedOrModified.Len() == 0 {
+	if added.Len() == 0 && modified.Len() == 0 {
 		// No added or modified targets since last time
 		return collectionIDs, nil
 	}
@@ -1249,7 +1249,15 @@ func (ckmgr *CheckpointManager) backfillCheckTargetBucket(currentSrcManifestId, 
 
 	// If these added or modified target collections are unmapped from source, then they are ignorable
 	_, _, unmappedTarget := srcManifest.MapAsSourceToTargetByName(newManifest)
-	for _, scope := range addedOrModified {
+	for _, scope := range added {
+		for _, collection := range scope.Collections {
+			_, collectionIsUnmapped := unmappedTarget[collection.Uid]
+			if !collectionIsUnmapped {
+				collectionIDs = append(collectionIDs, collection.Uid)
+			}
+		}
+	}
+	for _, scope := range modified {
 		for _, collection := range scope.Collections {
 			_, collectionIsUnmapped := unmappedTarget[collection.Uid]
 			if !collectionIsUnmapped {

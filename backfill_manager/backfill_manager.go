@@ -10,7 +10,6 @@
 package backfill_manager
 
 import (
-	"fmt"
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
@@ -134,48 +133,40 @@ func (b *BackfillMgr) replicationSpecChangeHandlerCallback(changedSpecId string,
 }
 
 func (b *BackfillMgr) collectionsManifestChangeCb(replId string, oldVal, newVal interface{}) error {
-	oldManifest, ok := oldVal.(*metadata.CollectionsManifestPair)
+	oldManifests, ok := oldVal.(*metadata.CollectionsManifestPair)
 	if !ok {
 		return base.ErrorInvalidInput
 	}
-	newManifest, ok := newVal.(*metadata.CollectionsManifestPair)
+	newManifests, ok := newVal.(*metadata.CollectionsManifestPair)
 	if !ok {
 		return base.ErrorInvalidInput
 	}
 
-	var addedOrModified metadata.ScopesMap
-	var removed metadata.ScopesMap
 	var srcErr error
 	var tgtErr error
 
 	// Handle source
-	if oldManifest.Source == nil && newManifest.Source != nil {
-		b.logger.Infof("Source manifest did not exist, now it has: %v\n", newManifest.Source.String())
-	} else if oldManifest.Source != nil && newManifest.Source == nil {
+	if oldManifests.Source == nil && newManifests.Source != nil {
+		b.logger.Infof("Source manifest did not exist, now it has: %v\n", newManifests.Source.String())
+	} else if oldManifests.Source != nil && newManifests.Source == nil {
 		// Don't think it's possible...
 		b.logger.Infof("Source manifest has been deleted")
 		srcErr = base.ErrorInvalidInput
-	} else {
-		addedOrModified, removed, srcErr = newManifest.Source.Diff(oldManifest.Source)
-		if srcErr != nil {
-			b.logger.Errorf("Unable to diff between source manifests: %v", srcErr.Error())
-		}
-		b.logger.Infof(fmt.Sprintf("NEIL DEBUG Source Added or removed:\n%v\nRemoved:\n%v\n", addedOrModified.String(), removed.String()))
 	}
 
 	// Handle target
-	if oldManifest.Target == nil && newManifest.Target != nil {
-		b.logger.Infof("Target manifest did not exist, now it has: %v\n", newManifest.Target.String())
-	} else if oldManifest.Target != nil && newManifest.Target == nil {
+	if oldManifests.Target == nil && newManifests.Target != nil {
+		b.logger.Infof("Target manifest did not exist, now it has: %v\n", newManifests.Target.String())
+	} else if oldManifests.Target != nil && newManifests.Target == nil {
 		// Don't think it's possible...
 		b.logger.Infof("Target manifest has been deleted")
 		tgtErr = base.ErrorInvalidInput
 	} else {
-		addedOrModified, removed, tgtErr = newManifest.Target.Diff(oldManifest.Target)
+		_, _, _, tgtErr = newManifests.Target.Diff(oldManifests.Target)
 		if tgtErr != nil {
 			b.logger.Errorf("Unable to diff between target manifests: %v", tgtErr.Error())
 		}
-		b.logger.Infof(fmt.Sprintf("NEIL DEBUG Target Added or removed:\n%v\nRemoved:\n%v\n", addedOrModified.String(), removed.String()))
+		//		b.logger.Infof(fmt.Sprintf("NEIL DEBUG Target Added or removed:\n%v\nRemoved:\n%v\n", addedOrModified.String(), removed.String()))
 	}
 
 	if tgtErr != nil && srcErr != nil {
@@ -186,5 +177,64 @@ func (b *BackfillMgr) collectionsManifestChangeCb(replId string, oldVal, newVal 
 		}
 	}
 
+	if newManifests.Source == nil && newManifests.Target == nil {
+		// Nothing changed
+	} else if newManifests.Source != nil && newManifests.Target == nil {
+		// Source changed but target did not
+		// TODO
+		b.logger.Infof("NEIL DEBUG source only change")
+
+	} else if newManifests.Source == nil && newManifests.Target != nil {
+		// Source did not change but target did change
+		b.handleTargetOnlyChange(replId, oldManifests.Target, newManifests.Target)
+	} else {
+		// Both changed
+		b.logger.Infof("NEIL DEBUG both change")
+	}
+
 	return nil
+}
+
+func (b *BackfillMgr) handleTargetOnlyChange(replId string, oldTargetManifest, newTargetManifest *metadata.CollectionsManifest) {
+	// For added and modified since last time, need to launch backfill if they are mapped from source
+	b.cacheMtx.RLock()
+	sourceManifest, ok := b.cacheSpecSourceMap[replId]
+	b.cacheMtx.RUnlock()
+	if !ok {
+		panic("TODO")
+	}
+
+	backfillIDs, err := newTargetManifest.GetBackfillCollectionIDs(oldTargetManifest, sourceManifest)
+	if err != nil {
+		b.logger.Errorf("handleTargetOnlyChange error: %v", err)
+		return
+	}
+
+	b.logger.Infof("These collections Need to backfill %v", backfillIDs)
+
+	// Store the target
+	b.cacheMtx.Lock()
+	b.cacheSpecTargetMap[replId] = newTargetManifest
+	b.cacheMtx.Unlock()
+}
+
+func (b *BackfillMgr) handleSourceOnlyChange(replId string, oldSourceManifest, newSourceManifest *metadata.CollectionsManifest) {
+	b.cacheMtx.RLock()
+	targetManifest, ok := b.cacheSpecTargetMap[replId]
+	b.cacheMtx.RUnlock()
+	if !ok {
+		panic("TODO")
+	}
+
+	_, _, origUnmappedTargetCols := oldSourceManifest.MapAsSourceToTargetByName(targetManifest)
+	_, _, nowUnmappedTargetCols := newSourceManifest.MapAsSourceToTargetByName(targetManifest)
+
+	_, missingFromOrig := nowUnmappedTargetCols.Diff(origUnmappedTargetCols)
+
+	// Perhaps do not need backfill
+	b.logger.Infof("These source->target collection are now mapped: %v\n", missingFromOrig)
+
+	b.cacheMtx.Lock()
+	b.cacheSpecSourceMap[replId] = newSourceManifest
+	b.cacheMtx.Unlock()
 }
