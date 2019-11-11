@@ -226,6 +226,10 @@ func (router *Router) route(data interface{}) (map[string]interface{}, error) {
 		if failedDpCnt > 0 {
 			router.RaiseEvent(common.NewEvent(common.DataPoolGetFail, failedDpCnt, router, nil, nil))
 		}
+		if router.Logger().GetLogLevel() >= log.LogLevelDebug && errDesc != "" {
+			router.Logger().Debugf("Matcher doc %v%v%v matched: %v with error: %v and additional info: %v",
+				base.UdTagBegin, string(uprEvent.Key), base.UdTagEnd, needToReplicate, err, errDesc)
+		}
 		if !needToReplicate || err != nil {
 			if err != nil {
 				// Let pipeline supervisor do the logging
