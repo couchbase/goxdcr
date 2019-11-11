@@ -430,7 +430,11 @@ func (u *Utilities) processNsServerDocForFiltering(matcher gojsonsm.Matcher, nsS
 		return
 	}
 
-	return base.MatchWrapper(matcher, byteSlice)
+	matched, status, err := base.MatchWrapper(matcher, byteSlice)
+	if u.logger_utils.GetLogLevel() >= log.LogLevelDebug && status&gojsonsm.MatcherCollateUsed > 0 {
+		u.logger_utils.Debugf("Matcher used collate to determine outcome (%v) for document %v%v%v", matched, base.UdTagBegin, docId, base.UdTagEnd)
+	}
+	return matched, err
 }
 
 // given a matches map, convert the indices from byte index to rune index

@@ -1249,11 +1249,11 @@ func Equals(source []byte, target string) bool {
 	return true
 }
 
-func MatchWrapper(matcher gojsonsm.Matcher, slice []byte) (matched bool, err error) {
+func MatchWrapper(matcher gojsonsm.Matcher, slice []byte) (matched bool, status int, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			err = fmt.Errorf("Error from matcher: %v\n", r)
 		}
 	}()
-	return matcher.Match(slice)
+	return matcher.MatchWithStatus(slice)
 }

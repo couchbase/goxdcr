@@ -27,6 +27,8 @@ type FilterIface interface {
 	FilterUprEvent(uprEvent *mcc.UprEvent) (bool, error, string, int64)
 }
 
+const collateErrDesc = " Collate was used to determine outcome"
+
 type Filter struct {
 	id                       string
 	hasFilterExpression      bool
@@ -189,15 +191,19 @@ func (filter *Filter) filterUprEvent(uprEvent *mcc.UprEvent, body []byte, endBod
 			return false, err, errDesc, failedDpCnt
 		}
 	}
-	matched, err := filter.FilterByteSlice(sliceToBeFiltered)
+	matched, status, err := filter.FilterByteSlice(sliceToBeFiltered)
 	if err != nil {
-		errDesc = fmt.Sprintf("gojsonsm filter returned err for document %v%v%v, data: %v", base.UdTagBegin, string(uprEvent.Key), base.UdTagEnd, string(sliceToBeFiltered))
+		errDesc = fmt.Sprintf("gojsonsm filter returned err %v (%v) for document %v%v%v, data: %v%v%v",
+			err.Error(), errDesc, base.UdTagBegin, string(uprEvent.Key), base.UdTagEnd, base.UdTagBegin, string(sliceToBeFiltered), base.UdTagEnd)
+	} else if status&gojsonsm.MatcherCollateUsed > 0 {
+		// no error returned
+		errDesc = collateErrDesc
 	}
 
 	return matched, err, errDesc, failedDpCnt
 }
 
-func (filter *Filter) FilterByteSlice(slice []byte) (matched bool, err error) {
+func (filter *Filter) FilterByteSlice(slice []byte) (matched bool, status int, err error) {
 	defer filter.matcher.Reset()
 	return base.MatchWrapper(filter.matcher, slice)
 }

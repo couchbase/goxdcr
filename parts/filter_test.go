@@ -427,7 +427,10 @@ func TestKeyAdd(t *testing.T) {
 	testRaw := json.RawMessage(`{"Testdoc": true}`)
 	testData, err := testRaw.MarshalJSON()
 	assert.Nil(err)
-	assert.False(filter.FilterByteSlice(testData))
+	matched, status, err := filter.FilterByteSlice(testData)
+	assert.False(matched)
+	assert.Equal(0, status)
+	assert.Nil(err)
 
 	tempMap := make(map[string]interface{})
 	err = json.Unmarshal(testData, &tempMap)
@@ -435,7 +438,10 @@ func TestKeyAdd(t *testing.T) {
 	testData2, err := json.Marshal(tempMap)
 	assert.Nil(err)
 
-	assert.True(filter.FilterByteSlice(testData2))
+	matched, status, err = filter.FilterByteSlice(testData2)
+	assert.True(matched)
+	assert.Equal(0, status)
+	assert.Nil(err)
 
 	fmt.Println("============== Test case end: TestKeyAdd =================")
 }
@@ -454,7 +460,10 @@ func TestXattrAdd(t *testing.T) {
 	testRaw := json.RawMessage(`{"Testdoc": true}`)
 	testData, err := testRaw.MarshalJSON()
 	assert.Nil(err)
-	assert.False(filter.FilterByteSlice(testData))
+	matched, status, err := filter.FilterByteSlice(testData)
+	assert.False(matched)
+	assert.Equal(0, status)
+	assert.Nil(err)
 
 	tempMap := make(map[string]interface{})
 	err = json.Unmarshal(testData, &tempMap)
@@ -466,7 +475,10 @@ func TestXattrAdd(t *testing.T) {
 	testData2, err := json.Marshal(tempMap)
 	assert.Nil(err)
 
-	assert.True(filter.FilterByteSlice(testData2))
+	matched, status, err = filter.FilterByteSlice(testData2)
+	assert.True(matched)
+	assert.Equal(0, status)
+	assert.Nil(err)
 
 	fmt.Println("============== Test case end: TestXattrAdd =================")
 }
@@ -492,7 +504,10 @@ func TestKeyAddXattrPretest(t *testing.T) {
 	testData, err := json.Marshal(testDoc)
 	assert.Nil(err)
 
-	assert.True(filter.FilterByteSlice(testData))
+	matched, status, err := filter.FilterByteSlice(testData)
+	assert.True(matched)
+	assert.Equal(0, status)
+	assert.Nil(err)
 
 	fmt.Println("============== Test case end: TestKeyAddXattrPretest =================")
 }
@@ -513,7 +528,10 @@ func TestKeyAddXattr(t *testing.T) {
 
 	testData, err := json.Marshal(testDoc)
 	assert.Nil(err)
-	assert.False(filter.FilterByteSlice(testData))
+	matched, status, err := filter.FilterByteSlice(testData)
+	assert.False(matched)
+	assert.Equal(0, status)
+	assert.Nil(err)
 
 	var dataSlice []byte = testData
 	testKey := []byte("abcdef")
@@ -529,7 +547,10 @@ func TestKeyAddXattr(t *testing.T) {
 	dataSlice, err = base.AddXattrToBeFilteredWithoutDP(dataSlice, xattrMapData)
 	assert.Nil(err)
 
-	assert.True(filter.FilterByteSlice(dataSlice))
+	matched, status, err = filter.FilterByteSlice(dataSlice)
+	assert.True(matched)
+	assert.Equal(0, status)
+	assert.Nil(err)
 	fmt.Println("============== Test case end: TestKeyAddXattr =================")
 }
 
