@@ -329,7 +329,7 @@ func (c *CollectionsManifest) Uid() uint64 {
 }
 
 func (c *CollectionsManifest) Scopes() ScopesMap {
-	return c.scopes
+	return c.scopes.Clone()
 }
 
 func (target *CollectionsManifest) GetBackfillCollectionIDs(prevTarget, source *CollectionsManifest) (backfillNeeded map[*Collection]Collection, err error) {
@@ -339,10 +339,14 @@ func (target *CollectionsManifest) GetBackfillCollectionIDs(prevTarget, source *
 		return
 	}
 
+	fmt.Printf("NEIL DEBUG added: %v modified: %v src %v target %v\n", added, modified, source, target)
+
 	backfillNeeded = make(map[*Collection]Collection)
 	// These are collections that are mapped from source to target
 	srcToTargetMapping, _, _ := source.MapAsSourceToTargetByName(target)
+	fmt.Printf("NEIL DEBUG srcToTargetMapping: %v\n", srcToTargetMapping)
 	for srcCol, targetCol := range srcToTargetMapping {
+		//		fmt.Printf("NEIL DEBUG map src %v target %v\n", srcCol, targetCol)
 		collection, found := added.GetCollection(targetCol.Uid)
 		if found {
 			backfillNeeded[srcCol] = collection
@@ -428,19 +432,26 @@ func (sourceManifest *CollectionsManifest) MapAsSourceToTargetByName(targetManif
 	}
 
 	for scopeName, scope := range sourceManifest.Scopes() {
+		fmt.Printf("Source scope: %v\n", scopeName)
 		targetScope, exists := targetManifest.Scopes()[scopeName]
 		if !exists {
+			fmt.Printf("Target scope not found\n")
 			// All of these collections are unmapped
 			for _, collection := range scope.Collections {
 				unmappedSources[collection.Uid] = collection
 			}
 		} else {
+			fmt.Printf("Target scope found\n")
 			for collectionName, collection := range scope.Collections {
+				fmt.Printf("Source collection: %v\n", collectionName)
 				targetCollection, exists := targetScope.Collections[collectionName]
 				if !exists {
+					fmt.Printf("Target collection not found\n")
 					unmappedSources[collection.Uid] = collection
 				} else {
-					successfulMapping[&collection] = targetCollection
+					colCopy := collection.Clone()
+					successfulMapping[&colCopy] = targetCollection
+					fmt.Printf("Target collection found. Current mapping: %v\n", successfulMapping)
 					delete(unmappedTarget, targetCollection.Uid)
 				}
 			}

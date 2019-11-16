@@ -13,6 +13,7 @@ import (
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
+	"github.com/couchbase/goxdcr/pipeline"
 	"github.com/couchbase/goxdcr/service_def"
 	"sync"
 )
@@ -99,21 +100,38 @@ func (b *BackfillMgr) initMetadataChangeMonitor() {
 func (b *BackfillMgr) initCache() {
 	// The following doesn't return a non-nil error for now
 	replSpecMap, _ := b.replSpecSvc.AllReplicationSpecs()
-	for replId, spec := range replSpecMap {
-		if spec == nil {
-			continue
-		}
-		manifestPair, err := b.collectionsManifestSvc.GetLastPersistedManifests(spec)
+	for replId, _ := range replSpecMap {
+		err := b.refreshLatestManifest(replId)
 		if err != nil {
 			b.logger.Errorf("Retrieving manifest for spec %v returned %v", replId, err)
 			continue
 		}
-		b.cacheMtx.Lock()
-		b.cacheSpecSourceMap[replId] = manifestPair.Source
-		b.cacheSpecTargetMap[replId] = manifestPair.Target
-		b.logger.Infof("NEIL DEBUG for replicationID: %v retrieved manifests for source: %v target: %v", replId, manifestPair.Source, manifestPair.Target)
-		b.cacheMtx.Unlock()
+		//		manifestPair, err := b.collectionsManifestSvc.GetLastPersistedManifests(spec)
+		//		if err != nil {
+		//			b.logger.Errorf("Retrieving manifest for spec %v returned %v", replId, err)
+		//			continue
+		//		}
+		//		b.cacheMtx.Lock()
+		//		b.cacheSpecSourceMap[replId] = manifestPair.Source
+		//		b.cacheSpecTargetMap[replId] = manifestPair.Target
+		//		b.logger.Infof("NEIL DEBUG for replicationID: %v retrieved manifests for source: %v target: %v", replId, manifestPair.Source, manifestPair.Target)
+		//		b.cacheMtx.Unlock()
 	}
+}
+
+func (b *BackfillMgr) refreshLatestManifest(replId string) error {
+	// CollectionsManifestService only cares about replication ID within the spec
+	idOnlySpec := &metadata.ReplicationSpecification{Id: replId}
+	manifestPair, err := b.collectionsManifestSvc.GetLastPersistedManifests(idOnlySpec)
+	if err != nil {
+		return err
+	}
+	b.cacheMtx.Lock()
+	b.cacheSpecSourceMap[replId] = manifestPair.Source
+	b.cacheSpecTargetMap[replId] = manifestPair.Target
+	b.logger.Infof("NEIL DEBUG for replicationID: %v retrieved manifests for source: %v target: %v", replId, manifestPair.Source, manifestPair.Target)
+	b.cacheMtx.Unlock()
+	return nil
 }
 
 func (b *BackfillMgr) replicationSpecChangeHandlerCallback(changedSpecId string, oldSpecObj interface{}, newSpecObj interface{}) error {
@@ -128,6 +146,23 @@ func (b *BackfillMgr) replicationSpecChangeHandlerCallback(changedSpecId string,
 	b.logger.Infof("BackfillMgr detected specId %v old %v new %v", changedSpecId, oldSpec, newSpec)
 
 	b.collectionsManifestSvc.ReplicationSpecChangeCallback(changedSpecId, oldSpecObj, newSpecObj)
+
+	if oldSpecObj.(*metadata.ReplicationSpecification) == nil &&
+		newSpecObj.(*metadata.ReplicationSpecification) != nil {
+		// New spec
+		err := b.refreshLatestManifest(changedSpecId)
+		if err != nil {
+			b.logger.Errorf("Unable to refresh manifest for new replication %v\n", changedSpecId)
+			return err
+		}
+	} else if newSpecObj.(*metadata.ReplicationSpecification) == nil &&
+		oldSpecObj.(*metadata.ReplicationSpecification) != nil {
+		// Delete spec
+		b.cacheMtx.Lock()
+		delete(b.cacheSpecSourceMap, changedSpecId)
+		delete(b.cacheSpecTargetMap, changedSpecId)
+		b.cacheMtx.Unlock()
+	}
 
 	return nil
 }
@@ -181,15 +216,17 @@ func (b *BackfillMgr) collectionsManifestChangeCb(replId string, oldVal, newVal 
 		// Nothing changed
 	} else if newManifests.Source != nil && newManifests.Target == nil {
 		// Source changed but target did not
-		// TODO
 		b.logger.Infof("NEIL DEBUG source only change")
-
+		b.handleSourceOnlyChange(replId, oldManifests.Source, newManifests.Source)
 	} else if newManifests.Source == nil && newManifests.Target != nil {
 		// Source did not change but target did change
 		b.handleTargetOnlyChange(replId, oldManifests.Target, newManifests.Target)
 	} else {
 		// Both changed
 		b.logger.Infof("NEIL DEBUG both change")
+		// First handle source change then target change
+		b.handleSourceOnlyChange(replId, oldManifests.Source, newManifests.Source)
+		b.handleTargetOnlyChange(replId, oldManifests.Target, newManifests.Target)
 	}
 
 	return nil
@@ -204,18 +241,43 @@ func (b *BackfillMgr) handleTargetOnlyChange(replId string, oldTargetManifest, n
 		panic("TODO")
 	}
 
+	if sourceManifest.Uid() == 0 {
+		// Nothing has been persisted, backfill everything
+		dummySpec := &metadata.ReplicationSpecification{Id: replId}
+		var err error
+		sourceManifest, _, err = b.collectionsManifestSvc.GetLatestManifests(dummySpec)
+		if err != nil {
+			return
+		}
+	}
+
+	b.logger.Infof("NEIL DEBUG diffing\nsourceManifest %v\n oldTarget %v\n newTarget %v\n", sourceManifest, oldTargetManifest, newTargetManifest)
+
 	backfillIDs, err := newTargetManifest.GetBackfillCollectionIDs(oldTargetManifest, sourceManifest)
 	if err != nil {
 		b.logger.Errorf("handleTargetOnlyChange error: %v", err)
 		return
 	}
 
-	b.logger.Infof("These collections Need to backfill %v", backfillIDs)
-
 	// Store the target
 	b.cacheMtx.Lock()
 	b.cacheSpecTargetMap[replId] = newTargetManifest
 	b.cacheMtx.Unlock()
+
+	//TODO - move this
+	replicationStatusRaw, err := b.replSpecSvc.GetDerivedObj(replId)
+	if err != nil {
+		return
+	}
+	replicationStatus, _ := replicationStatusRaw.(*pipeline.ReplicationStatus)
+	throughSeqnos := replicationStatus.GetThroughSeqnos()
+	var highestSeqnoAcrossVBs uint64
+	for _, seqno := range throughSeqnos {
+		if seqno > highestSeqnoAcrossVBs {
+			highestSeqnoAcrossVBs = seqno
+		}
+	}
+	b.logger.Infof("These collections Need to backfill %v to seqno: %v", backfillIDs, highestSeqnoAcrossVBs)
 }
 
 func (b *BackfillMgr) handleSourceOnlyChange(replId string, oldSourceManifest, newSourceManifest *metadata.CollectionsManifest) {

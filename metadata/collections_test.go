@@ -14,6 +14,9 @@ var testDir string = "testData/"
 var emptyManifest string = testDir + "emptyCollectionManifest.json"
 var provisionedFile string = testDir + "provisionedManifest.json"
 var provisionedFileCustom string = testDir + "provisionedManifestv2.json"
+var sourcev7 string = testDir + "diffSourcev7.json"
+var targetv7 string = testDir + "diffTargetv7.json"
+var targetv9 string = testDir + "diffTargetv9.json"
 
 func TestUnmarshalCollectionManifest(t *testing.T) {
 	assert := assert.New(t)
@@ -250,16 +253,36 @@ func TestManifestMapping(t *testing.T) {
 	target, _ := NewCollectionsManifestFromBytes(data)
 
 	// unmapped source
-	delete(target.Scopes()["S1"].Collections, "col2")
+	delete(target.scopes["S1"].Collections, "col2")
 
 	// unmapped target
-	target.Scopes()["S2"].Collections["colTest"] = Collection{1234, "colTest"}
+	target.scopes["S2"].Collections["colTest"] = Collection{1234, "colTest"}
 
 	_, unmappedSrc, unmappedTgt := source.MapAsSourceToTargetByName(&target)
 	assert.Equal(1, len(unmappedSrc))
 	assert.Equal(1, len(unmappedTgt))
 
 	fmt.Println("============== Test case end: TestManifestMapping =================")
+}
+
+func TestManifestMappingReal(t *testing.T) {
+	assert := assert.New(t)
+	fmt.Println("============== Test case start: TestManifestMappingReal =================")
+	data, _ := ioutil.ReadFile(sourcev7)
+	source, _ := NewCollectionsManifestFromBytes(data)
+	data, _ = ioutil.ReadFile(targetv7)
+	target, _ := NewCollectionsManifestFromBytes(data)
+	data, _ = ioutil.ReadFile(targetv9)
+	target2, _ := NewCollectionsManifestFromBytes(data)
+
+	output, err := target2.GetBackfillCollectionIDs(&target, &source)
+	assert.Nil(err)
+	fmt.Printf("NEIL DEBUG output %v\n", output)
+
+	mappedSrcToTarget, unmappedSrc, unmappedTgt := source.MapAsSourceToTargetByName(&target)
+	fmt.Printf("NEIL DEBUG mapped: %v, unmappedSrc: %v unmappedTgt: %v\n", mappedSrcToTarget, unmappedSrc, unmappedTgt)
+
+	fmt.Println("============== Test case end: TestManifestMappingReal =================")
 }
 
 func TestManifestFindBackfill(t *testing.T) {
@@ -273,11 +296,10 @@ func TestManifestFindBackfill(t *testing.T) {
 	target, _ := NewCollectionsManifestFromBytes(data)
 	target2, _ := NewCollectionsManifestFromBytes(data)
 
-	// Create a hole in target
-	delete(target.scopes["S2"].Collections, "col1")
-
-	// unmapped target
-	target2.scopes["S2"].Collections["colTest"] = Collection{1234, "colTest"}
+	newCol := target.scopes["S1"].Collections["col1"].Clone()
+	newCol.Uid++
+	target2.uid++
+	target2.scopes["S1"].Collections["col1"] = newCol
 
 	output, err := target2.GetBackfillCollectionIDs(&target, &source)
 	assert.Nil(err)

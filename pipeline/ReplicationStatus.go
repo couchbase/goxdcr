@@ -80,6 +80,7 @@ type ReplicationStatusIface interface {
 	// Called by UI every second
 	GetStats(registryName string) *expvar.Map
 	GetSpecInternalId() string
+	GetThroughSeqnos() map[uint16]uint64
 	GetOverviewStats() *expvar.Map
 	SetStats(registryName string, stats *expvar.Map)
 	SetOverviewStats(stats *expvar.Map)
@@ -90,6 +91,7 @@ type ReplicationStatusIface interface {
 	Pipeline() common.Pipeline
 	VbList() []uint16
 	SetVbList(vb_list []uint16)
+	SetThroughSeqno(vb uint16, throughSeqno uint64)
 	SettingsMap() map[string]interface{}
 	Errors() PipelineErrorArray
 	ClearErrors()
@@ -121,18 +123,22 @@ type ReplicationStatus struct {
 	// useful when replication is paused, when it can be compared with the current vb_list to determine
 	// whether topology change has occured on source
 	vb_list []uint16
+	// Every time through sequence service gets the latest sequence number, it is updated here
+	// This is NOT real-time information, but is in sync with checkpoint (or whoever calls GetThroughSeqno)
+	vbThroughSeqnoMap map[uint16]uint64
 }
 
 func NewReplicationStatus(specId string, spec_getter ReplicationSpecGetter, logger *log.CommonLogger) *ReplicationStatus {
 	rep_status := &ReplicationStatus{specId: specId,
-		pipeline_:      nil,
-		logger:         logger,
-		err_list:       make(PipelineErrorArray, 0, PipelineErrorMaxEntries),
-		spec_getter:    spec_getter,
-		lock:           &sync.RWMutex{},
-		obj_pool:       base.NewMCRequestPool(specId, logger),
-		customSettings: make(map[string]interface{}),
-		progress:       ""}
+		pipeline_:         nil,
+		logger:            logger,
+		err_list:          make(PipelineErrorArray, 0, PipelineErrorMaxEntries),
+		spec_getter:       spec_getter,
+		lock:              &sync.RWMutex{},
+		obj_pool:          base.NewMCRequestPool(specId, logger),
+		customSettings:    make(map[string]interface{}),
+		vbThroughSeqnoMap: make(map[uint16]uint64),
+		progress:          ""}
 
 	rep_status.Publish(false)
 	return rep_status
@@ -398,6 +404,12 @@ func (rs *ReplicationStatus) SetVbList(vb_list []uint16) {
 	rs.vb_list = vb_list
 }
 
+func (rs *ReplicationStatus) SetThroughSeqno(vb uint16, throughSeqno uint64) {
+	rs.lock.Lock()
+	defer rs.lock.Unlock()
+	rs.vbThroughSeqnoMap[vb] = throughSeqno
+}
+
 func (rs *ReplicationStatus) SettingsMap() map[string]interface{} {
 	settingsMap := rs.getSpecSettingsMap()
 
@@ -483,4 +495,14 @@ func (rs *ReplicationStatus) GetSpecInternalId() string {
 	rs.lock.RLock()
 	defer rs.lock.RUnlock()
 	return rs.specInternalId
+}
+
+func (rs *ReplicationStatus) GetThroughSeqnos() (mapCopy map[uint16]uint64) {
+	mapCopy = make(map[uint16]uint64)
+	rs.lock.RLock()
+	defer rs.lock.RUnlock()
+	for k, v := range rs.vbThroughSeqnoMap {
+		mapCopy[k] = v
+	}
+	return
 }

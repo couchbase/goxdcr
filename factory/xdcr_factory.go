@@ -893,7 +893,7 @@ func (xdcrf *XDCRFactory) registerServices(pipeline common.Pipeline, logger_ctx 
 
 	// through seqno tracker needs to be initialized after pipeline supervisor
 	// since it uses the latter as error handler
-	through_seqno_tracker_svc := service_impl.NewThroughSeqnoTrackerSvc(logger_ctx)
+	through_seqno_tracker_svc := service_impl.NewThroughSeqnoTrackerSvc(logger_ctx, xdcrf.repl_spec_svc)
 	through_seqno_tracker_svc.Attach(pipeline)
 
 	//Create pipeline statistics manager.

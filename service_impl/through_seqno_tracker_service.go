@@ -22,6 +22,7 @@ import (
 	"github.com/couchbase/goxdcr/pipeline_manager"
 	"github.com/couchbase/goxdcr/pipeline_svc"
 	"github.com/couchbase/goxdcr/pipeline_utils"
+	"github.com/couchbase/goxdcr/service_def"
 	"sync"
 	"time"
 )
@@ -74,6 +75,8 @@ type ThroughSeqnoTrackerSvc struct {
 	logger *log.CommonLogger
 
 	unitTesting bool
+
+	replSpecSvc service_def.ReplicationSpecSvc
 }
 
 // struct containing two seqno lists that need to be accessed and locked together
@@ -177,7 +180,7 @@ func truncateGapSeqnoList(vbno uint16, through_seqno uint64, seqno_list []uint64
 	return seqno_list, index
 }
 
-func NewThroughSeqnoTrackerSvc(logger_ctx *log.LoggerContext) *ThroughSeqnoTrackerSvc {
+func NewThroughSeqnoTrackerSvc(logger_ctx *log.LoggerContext, replSpecSvc service_def.ReplicationSpecSvc) *ThroughSeqnoTrackerSvc {
 	logger := log.NewLogger("ThrSeqTrackSvc", logger_ctx)
 	tsTracker := &ThroughSeqnoTrackerSvc{
 		AbstractComponent:           component.NewAbstractComponentWithLogger("ThrSeqTrackSvc", logger),
@@ -191,6 +194,7 @@ func NewThroughSeqnoTrackerSvc(logger_ctx *log.LoggerContext) *ThroughSeqnoTrack
 		vb_failed_cr_seqno_list_map: make(map[uint16]*base.SortedSeqnoListWithLock),
 		vb_gap_seqno_list_map:       make(map[uint16]*DualSortedSeqnoListWithLock),
 		vbSystemEventsSeqnoListMap:  make(map[uint16]*DualSortedSeqnoListWithLock),
+		replSpecSvc:                 replSpecSvc,
 	}
 	return tsTracker
 }
@@ -497,7 +501,22 @@ func (tsTracker *ThroughSeqnoTrackerSvc) GetThroughSeqno(vbno uint16) uint64 {
 		// truncate no longer needed entries from seqno lists to reduce memory/cpu overhead for future computations
 		go tsTracker.truncateSeqnoLists(vbno, through_seqno)
 	}
+	// TODO - background this
+	tsTracker.setReplStatusThroughSeqno(vbno, through_seqno)
 	return through_seqno
+}
+
+func (tsTracker *ThroughSeqnoTrackerSvc) setReplStatusThroughSeqno(vb uint16, seqno uint64) error {
+	replStatusRaw, err := tsTracker.replSpecSvc.GetDerivedObj(tsTracker.rep_id)
+	if err != nil {
+		return err
+	}
+	if replStatusRaw == nil {
+		return fmt.Errorf("ReplicationStatusNotFound")
+	}
+	replStatus := replStatusRaw.(*pipeline_pkg.ReplicationStatus)
+	replStatus.SetThroughSeqno(vb, seqno)
+	return nil
 }
 
 // if seqno is a gap seqno, return (true, seqno of end of gap range)
