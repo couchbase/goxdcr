@@ -34,16 +34,11 @@ function exportSingleVar {
 	declare -p $name | sed "s/declare ${flag}/export /g"
 }
 
-declare variablesFile="XDCR_Provisioning_VarFile"
+declare XDCR_HIDDEN_EXPORTFILE=".xdcrToolsExport"
 
 function exportProvisionedConfig {
 	local -a outputArr
-
-	tempFile=`mktemp`
-	if [[ ! -f "$tempFile" ]];then
-		echo "Unable to establish tempfile $tempFile"
-		return 1
-	fi
+	local outputFile=$XDCR_HIDDEN_EXPORTFILE
 
 	for mapName in CLUSTER_NAME_PORT_MAP \
 					CLUSTER_NAME_XDCR_PORT_MAP \
@@ -70,25 +65,15 @@ function exportProvisionedConfig {
 		fi
 	done
 
-	# Export the cluster name to port
-	echo "If needed, run the following export command to enable other helper scripts to load the provisioned configuration:"
-	echo "============================================"
-	echo "export $variablesFile=$tempFile"
-	echo "============================================"
 	for oneLine in "${outputArr[@]}"
 	do
-		echo "$oneLine" >> $tempFile
+		echo "$oneLine" >> $outputFile
 	done
 }
 
 function importProvisionedConfig {
 	# Find the exported variables file
-	if [[ -z "${variablesFile:-}" ]];then
-		echo "Cannot find variable file in environment"
-		exit 1
-	else
-		. `printenv $variablesFile`
-	fi
+	. $XDCR_HIDDEN_EXPORTFILE
 }
 
 # Returns via stdout: REST id
