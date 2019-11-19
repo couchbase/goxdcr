@@ -277,10 +277,12 @@ func TestManifestMappingReal(t *testing.T) {
 
 	output, err := target2.GetBackfillCollectionIDs(&target, &source)
 	assert.Nil(err)
-	fmt.Printf("NEIL DEBUG output %v\n", output)
+	assert.Equal(1, len(output))
 
 	mappedSrcToTarget, unmappedSrc, unmappedTgt := source.MapAsSourceToTargetByName(&target)
-	fmt.Printf("NEIL DEBUG mapped: %v, unmappedSrc: %v unmappedTgt: %v\n", mappedSrcToTarget, unmappedSrc, unmappedTgt)
+	assert.Equal(0, len(unmappedSrc))
+	assert.Equal(0, len(unmappedTgt))
+	assert.Equal(6, len(mappedSrcToTarget))
 
 	fmt.Println("============== Test case end: TestManifestMappingReal =================")
 }

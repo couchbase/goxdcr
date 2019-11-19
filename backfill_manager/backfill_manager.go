@@ -105,20 +105,11 @@ func (b *BackfillMgr) initCache() {
 		if err != nil {
 			b.logger.Errorf("Retrieving manifest for spec %v returned %v", replId, err)
 			continue
-		}
-		//		manifestPair, err := b.collectionsManifestSvc.GetLastPersistedManifests(spec)
-		//		if err != nil {
-		//			b.logger.Errorf("Retrieving manifest for spec %v returned %v", replId, err)
-		//			continue
-		//		}
-		//		b.cacheMtx.Lock()
-		//		b.cacheSpecSourceMap[replId] = manifestPair.Source
-		//		b.cacheSpecTargetMap[replId] = manifestPair.Target
-		//		b.logger.Infof("NEIL DEBUG for replicationID: %v retrieved manifests for source: %v target: %v", replId, manifestPair.Source, manifestPair.Target)
-		//		b.cacheMtx.Unlock()
 	}
 }
 
+// We call this "latestManifest" because it is used to determine the data that needs to be backfilled
+// It is safer to backfill already backfilled-data than to have miss data at all
 func (b *BackfillMgr) refreshLatestManifest(replId string) error {
 	// CollectionsManifestService only cares about replication ID within the spec
 	idOnlySpec := &metadata.ReplicationSpecification{Id: replId}
@@ -129,7 +120,6 @@ func (b *BackfillMgr) refreshLatestManifest(replId string) error {
 	b.cacheMtx.Lock()
 	b.cacheSpecSourceMap[replId] = manifestPair.Source
 	b.cacheSpecTargetMap[replId] = manifestPair.Target
-	b.logger.Infof("NEIL DEBUG for replicationID: %v retrieved manifests for source: %v target: %v", replId, manifestPair.Source, manifestPair.Target)
 	b.cacheMtx.Unlock()
 	return nil
 }
@@ -201,7 +191,6 @@ func (b *BackfillMgr) collectionsManifestChangeCb(replId string, oldVal, newVal 
 		if tgtErr != nil {
 			b.logger.Errorf("Unable to diff between target manifests: %v", tgtErr.Error())
 		}
-		//		b.logger.Infof(fmt.Sprintf("NEIL DEBUG Target Added or removed:\n%v\nRemoved:\n%v\n", addedOrModified.String(), removed.String()))
 	}
 
 	if tgtErr != nil && srcErr != nil {
@@ -216,14 +205,12 @@ func (b *BackfillMgr) collectionsManifestChangeCb(replId string, oldVal, newVal 
 		// Nothing changed
 	} else if newManifests.Source != nil && newManifests.Target == nil {
 		// Source changed but target did not
-		b.logger.Infof("NEIL DEBUG source only change")
 		b.handleSourceOnlyChange(replId, oldManifests.Source, newManifests.Source)
 	} else if newManifests.Source == nil && newManifests.Target != nil {
 		// Source did not change but target did change
 		b.handleTargetOnlyChange(replId, oldManifests.Target, newManifests.Target)
 	} else {
 		// Both changed
-		b.logger.Infof("NEIL DEBUG both change")
 		// First handle source change then target change
 		b.handleSourceOnlyChange(replId, oldManifests.Source, newManifests.Source)
 		b.handleTargetOnlyChange(replId, oldManifests.Target, newManifests.Target)
@@ -250,8 +237,6 @@ func (b *BackfillMgr) handleTargetOnlyChange(replId string, oldTargetManifest, n
 			return
 		}
 	}
-
-	b.logger.Infof("NEIL DEBUG diffing\nsourceManifest %v\n oldTarget %v\n newTarget %v\n", sourceManifest, oldTargetManifest, newTargetManifest)
 
 	backfillIDs, err := newTargetManifest.GetBackfillCollectionIDs(oldTargetManifest, sourceManifest)
 	if err != nil {
