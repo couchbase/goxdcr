@@ -167,6 +167,13 @@ func main() {
 		}
 		internalSettings_svc := metadata_svc.NewInternalSettingsSvc(metakv_svc, nil)
 
+		backfillReplicationService, err := metadata_svc.NewBackfillReplicationService(uilog_svc,
+			metakv_svc, log.DefaultLoggerContext, utils, replication_spec_svc)
+		if err != nil {
+			fmt.Printf("Error starting collections manifest service. err=%v\n", err)
+			os.Exit(1)
+		}
+
 		// start replication manager in normal mode
 		rm.StartReplicationManager(host,
 			uint16(options.xdcrRestPort),
@@ -188,7 +195,7 @@ func main() {
 			collectionsManifestService)
 
 		backfillMgr := backfill_manager.NewBackfillManager(collectionsManifestService,
-			rm.ExitProcess, replication_spec_svc)
+			rm.ExitProcess, replication_spec_svc, backfillReplicationService)
 		backfillMgr.Start()
 
 		// keep main alive in normal mode

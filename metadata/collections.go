@@ -23,6 +23,10 @@ type CollectionsManifestPair struct {
 	Target *CollectionsManifest
 }
 
+func (c *CollectionsManifestPair) Same(other *CollectionsManifestPair) bool {
+	return c.Source.Equals(other.Source) && c.Target.Equals(other.Target)
+}
+
 func NewCollectionsManifestPair(source, target *CollectionsManifest) *CollectionsManifestPair {
 	return &CollectionsManifestPair{
 		Source: source,
@@ -332,36 +336,151 @@ func (c *CollectionsManifest) Scopes() ScopesMap {
 	return c.scopes.Clone()
 }
 
-func (target *CollectionsManifest) GetBackfillCollectionIDs(prevTarget, source *CollectionsManifest) (backfillNeeded map[*Collection]Collection, err error) {
+func (target *CollectionsManifest) GetBackfillCollectionIDs(prevTarget, source *CollectionsManifest) (backfillNeeded CollectionToCollectionMapping, err error) {
 	// Don't care about removed (for now)
 	added, modified, _, err := target.Diff(prevTarget)
 	if err != nil {
 		return
 	}
 
-	fmt.Printf("NEIL DEBUG added: %v modified: %v src %v target %v\n", added, modified, source, target)
+	//	fmt.Printf("NEIL DEBUG added: %v modified: %v src %v target %v\n", added, modified, source, target)
 
-	backfillNeeded = make(map[*Collection]Collection)
+	backfillNeeded = make(CollectionToCollectionMapping)
 	// These are collections that are mapped from source to target
 	srcToTargetMapping, _, _ := source.MapAsSourceToTargetByName(target)
-	fmt.Printf("NEIL DEBUG srcToTargetMapping: %v\n", srcToTargetMapping)
+	//	fmt.Printf("NEIL DEBUG srcToTargetMapping: %v\n", srcToTargetMapping)
 	for srcCol, targetCol := range srcToTargetMapping {
 		//		fmt.Printf("NEIL DEBUG map src %v target %v\n", srcCol, targetCol)
 		collection, found := added.GetCollection(targetCol.Uid)
 		if found {
-			backfillNeeded[srcCol] = collection
+			backfillNeeded[srcCol] = &collection
 			break
 		}
 		collection, found = modified.GetCollection(targetCol.Uid)
 		if found {
-			backfillNeeded[srcCol] = collection
+			backfillNeeded[srcCol] = &collection
 			break
 		}
 	}
 	return
 }
 
-type CollectionToCollectionMapping map[*Collection]Collection
+type CollectionsList []Collection
+
+func (c CollectionsList) Len() int           { return len(c) }
+func (c CollectionsList) Swap(i, j int)      { c[i], c[j] = c[j], c[i] }
+func (c CollectionsList) Less(i, j int) bool { return c[i].Uid < c[j].Uid }
+
+func SortCollectionsList(list CollectionsList) CollectionsList {
+	sort.Sort(list)
+	return list
+}
+
+func (c CollectionsList) Equals(other CollectionsList) bool {
+	if len(c) != len(other) {
+		return false
+	}
+
+	// Lists are logically "equal" if they have the same items but in diff order
+	aList := SortCollectionsList(c)
+	bList := SortCollectionsList(other)
+
+	for i, col := range aList {
+		if !col.Equals(bList[i]) {
+			return false
+		}
+	}
+	return true
+}
+
+type c2cMarshalObj struct {
+	SourceCollections []*Collection `json:Source`
+	// keys are integers of the index above written as strings
+	IndirectTargetMap map[string]*Collection `json:Map`
+}
+
+func newc2cMarshalObj() *c2cMarshalObj {
+	return &c2cMarshalObj{
+		IndirectTargetMap: make(map[string]*Collection),
+	}
+}
+
+// TODO - change this to map of collection to a list of collections
+type CollectionToCollectionMapping map[*Collection]*Collection
+
+func (c *CollectionToCollectionMapping) MarshalJSON() ([]byte, error) {
+	if c == nil {
+		return nil, base.ErrorInvalidInput
+	}
+
+	marshalObj := newc2cMarshalObj()
+
+	var i int
+	for k, v := range *c {
+		marshalObj.SourceCollections = append(marshalObj.SourceCollections, k)
+		marshalObj.IndirectTargetMap[strconv.Itoa(i)] = v
+		i++
+	}
+
+	return json.Marshal(marshalObj)
+}
+
+func (c *CollectionToCollectionMapping) UnmarshalJSON(b []byte) error {
+	if c == nil {
+		return base.ErrorInvalidInput
+	}
+
+	unmarshalObj := &c2cMarshalObj{}
+
+	err := json.Unmarshal(b, unmarshalObj)
+	if err != nil {
+		return err
+	}
+
+	for i := 0; i < len(unmarshalObj.SourceCollections); i++ {
+		sourceCol := unmarshalObj.SourceCollections[i]
+		targetCol, ok := unmarshalObj.IndirectTargetMap[strconv.Itoa(i)]
+		if !ok {
+			return fmt.Errorf("Unable to unmarshal CollectionToCollectionMapping raw: %v", unmarshalObj)
+		}
+		(*c)[sourceCol] = targetCol
+	}
+
+	return nil
+}
+
+func (c *CollectionToCollectionMapping) Same(other *CollectionToCollectionMapping) bool {
+	if c == nil && other != nil || c != nil && other == nil {
+		return false
+	} else if c == nil && other == nil {
+		return true
+	}
+
+	if len(*c) != len(*other) {
+		return false
+	}
+
+	// TODO - fix this
+	for k, v := range *c {
+		otherV, ok := (*other)[k]
+		if !ok {
+			return false
+		} else if !v.Equals(*otherV) {
+			return false
+		}
+	}
+
+	for k, v := range *other {
+		origV, ok := (*c)[k]
+		if !ok {
+			return false
+		} else if !origV.Equals(*v) {
+			return false
+		}
+	}
+
+	return true
+}
 
 type CollectionIdKeyedMap map[uint64]Collection
 
@@ -450,7 +569,7 @@ func (sourceManifest *CollectionsManifest) MapAsSourceToTargetByName(targetManif
 					unmappedSources[collection.Uid] = collection
 				} else {
 					colCopy := collection.Clone()
-					successfulMapping[&colCopy] = targetCollection
+					successfulMapping[&colCopy] = &targetCollection
 					fmt.Printf("Target collection found. Current mapping: %v\n", successfulMapping)
 					delete(unmappedTarget, targetCollection.Uid)
 				}
@@ -514,8 +633,8 @@ func (s ScopesMap) GetCollection(id uint64) (col Collection, found bool) {
 }
 
 type Scope struct {
-	Uid         uint64
-	Name        string
+	Uid         uint64 `json:"Uid"`
+	Name        string `json:"Name"`
 	Collections CollectionsMap
 }
 
@@ -600,8 +719,8 @@ func (s Scope) Clone() Scope {
 }
 
 type Collection struct {
-	Uid  uint64
-	Name string
+	Uid  uint64 `json:"Uid"`
+	Name string `json:"Name"`
 }
 
 func (c *Collection) String() string {

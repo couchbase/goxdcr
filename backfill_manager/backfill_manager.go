@@ -22,6 +22,7 @@ type BackfillMgr struct {
 	collectionsManifestSvc service_def.CollectionsManifestSvc
 	exitFunc               base.ParentExitFunc
 	replSpecSvc            service_def.ReplicationSpecSvc
+	backfillReplSvc        service_def.BackfillReplSvc
 
 	logger *log.CommonLogger
 
@@ -33,6 +34,9 @@ type BackfillMgr struct {
 	cacheMtx           sync.RWMutex
 	cacheSpecSourceMap map[string]*metadata.CollectionsManifest
 	cacheSpecTargetMap map[string]*metadata.CollectionsManifest
+
+	specReqHandlersMtx  sync.RWMutex
+	specToReqHandlerMap map[string]*BackfillRequestHandler
 }
 
 func (b *BackfillMgr) backfillMgrExitFunc(force bool) {
@@ -53,15 +57,18 @@ func (b *BackfillMgr) cleanup() {
 
 func NewBackfillManager(collectionsManifestSvc service_def.CollectionsManifestSvc,
 	parentExitFunc base.ParentExitFunc,
-	replSpecSvc service_def.ReplicationSpecSvc) *BackfillMgr {
+	replSpecSvc service_def.ReplicationSpecSvc,
+	backfillReplSvc service_def.BackfillReplSvc) *BackfillMgr {
 
 	backfillMgr := &BackfillMgr{
 		collectionsManifestSvc: collectionsManifestSvc,
 		replSpecSvc:            replSpecSvc,
+		backfillReplSvc:        backfillReplSvc,
 		cancelChan:             make(chan struct{}, 1),
 		logger:                 log.NewLogger("BackfillMgr", log.DefaultLoggerContext),
 		cacheSpecSourceMap:     make(map[string]*metadata.CollectionsManifest),
 		cacheSpecTargetMap:     make(map[string]*metadata.CollectionsManifest),
+		specToReqHandlerMap:    make(map[string]*BackfillRequestHandler),
 	}
 
 	wrappedExitFunc := func(force bool) {
@@ -75,7 +82,7 @@ func NewBackfillManager(collectionsManifestSvc service_def.CollectionsManifestSv
 	return backfillMgr
 }
 
-func (b *BackfillMgr) Start() {
+func (b *BackfillMgr) Start() error {
 	b.logger.Infof("BackfillMgr Starting...")
 	b.initMetadataChangeMonitor()
 
@@ -83,18 +90,46 @@ func (b *BackfillMgr) Start() {
 	b.replSpecSvc.SetMetadataChangeHandlerCallback(b.replicationSpecChangeHandlerCallback)
 
 	b.initCache()
+	err := b.startHandlers()
+	if err != nil {
+		return err
+	}
 	b.logger.Infof("BackfillMgr Started")
+	return nil
 }
 
 func (b *BackfillMgr) Stop() {
 	b.logger.Infof("BackfillMgr Stopping...")
-
+	errMap := b.stopHandlers()
+	if len(errMap) > 0 {
+		b.logger.Errorf("Stopping handlers returned: %v\n", errMap)
+	}
 	b.logger.Infof("BackfillMgr Stopped")
 }
 
 func (b *BackfillMgr) initMetadataChangeMonitor() {
 	// TODO - future metadata change monitors
 	//	mcm := base.NewMetadataChangeMonitor()
+}
+
+func (b *BackfillMgr) createNewBackfillReqHandler(replId string, startHandler bool) error {
+	b.specReqHandlersMtx.Lock()
+	defer b.specReqHandlersMtx.Unlock()
+
+	persistCb := func(info metadata.BackfillPersistInfo) error {
+		return b.backfillRequestPersistCallback(replId, info)
+	}
+	handler := NewBackfillRequestHandler(b.logger, replId, persistCb)
+	b.specToReqHandlerMap[replId] = handler
+
+	if startHandler {
+		return handler.Start()
+	}
+	return nil
+}
+
+func (b *BackfillMgr) deleteBackfillReqHandler(replId string) {
+
 }
 
 func (b *BackfillMgr) initCache() {
@@ -104,8 +139,85 @@ func (b *BackfillMgr) initCache() {
 		err := b.refreshLatestManifest(replId)
 		if err != nil {
 			b.logger.Errorf("Retrieving manifest for spec %v returned %v", replId, err)
-			continue
+		}
+
+		b.createNewBackfillReqHandler(replId, false /*startHandler*/)
 	}
+}
+
+func (b *BackfillMgr) startHandlers() error {
+	b.specReqHandlersMtx.RLock()
+	defer b.specReqHandlersMtx.RUnlock()
+
+	for _, handler := range b.specToReqHandlerMap {
+		err := handler.Start()
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (b *BackfillMgr) stopHandlersInternalNoLock(handlers []*BackfillRequestHandler) base.ErrorMap {
+	errCh := make(chan base.ComponentError, len(handlers))
+	var errMap base.ErrorMap
+
+	stopHandlersFunc := func() error {
+		var stopChildWait sync.WaitGroup
+
+		for _, handler := range handlers {
+			stopChildWait.Add(1)
+			go handler.Stop(&stopChildWait, errCh)
+		}
+		stopChildWait.Wait()
+
+		if len(errCh) > 0 {
+			errMap = base.FormatErrMsgWithUpperLimit(errCh, 10000 /* doesn't matter*/)
+		}
+		return nil
+	}
+
+	err := base.ExecWithTimeout(stopHandlersFunc, base.TimeoutPartsStop, b.logger)
+	if err != nil {
+		// if err is not nill, it is possible that stopHandlersFunc is still running and may still access errMap
+		// return errMap1 instead of errMap to avoid race conditions
+		errMap1 := make(base.ErrorMap)
+		errMap1["backfillMgr.stopHandlers"] = err
+		return errMap1
+	}
+
+	return errMap
+}
+
+func (b *BackfillMgr) stopHandlers() base.ErrorMap {
+	b.specReqHandlersMtx.Lock()
+	defer b.specReqHandlersMtx.Unlock()
+
+	var handlerList []*BackfillRequestHandler
+
+	for _, handler := range b.specToReqHandlerMap {
+		handlerList = append(handlerList, handler)
+	}
+
+	return b.stopHandlersInternalNoLock(handlerList)
+}
+
+func (b *BackfillMgr) stopHandler(replId string) base.ErrorMap {
+	b.specReqHandlersMtx.RLock()
+	handler, ok := b.specToReqHandlerMap[replId]
+	b.specReqHandlersMtx.RUnlock()
+
+	if !ok {
+		errMap := make(base.ErrorMap)
+		errMap["stopHandler"] = base.ErrorInvalidInput
+		return errMap
+	}
+
+	var handlerList []*BackfillRequestHandler
+	handlerList = append(handlerList, handler)
+
+	return b.stopHandlersInternalNoLock(handlerList)
 }
 
 // We call this "latestManifest" because it is used to determine the data that needs to be backfilled
@@ -137,6 +249,7 @@ func (b *BackfillMgr) replicationSpecChangeHandlerCallback(changedSpecId string,
 
 	b.collectionsManifestSvc.ReplicationSpecChangeCallback(changedSpecId, oldSpecObj, newSpecObj)
 
+	// TODO - these should be handled by a different go routine as to not block
 	if oldSpecObj.(*metadata.ReplicationSpecification) == nil &&
 		newSpecObj.(*metadata.ReplicationSpecification) != nil {
 		// New spec
@@ -145,6 +258,7 @@ func (b *BackfillMgr) replicationSpecChangeHandlerCallback(changedSpecId string,
 			b.logger.Errorf("Unable to refresh manifest for new replication %v\n", changedSpecId)
 			return err
 		}
+		b.createNewBackfillReqHandler(changedSpecId, true /*startHandler*/)
 	} else if newSpecObj.(*metadata.ReplicationSpecification) == nil &&
 		oldSpecObj.(*metadata.ReplicationSpecification) != nil {
 		// Delete spec
@@ -152,6 +266,11 @@ func (b *BackfillMgr) replicationSpecChangeHandlerCallback(changedSpecId string,
 		delete(b.cacheSpecSourceMap, changedSpecId)
 		delete(b.cacheSpecTargetMap, changedSpecId)
 		b.cacheMtx.Unlock()
+
+		b.stopHandler(changedSpecId)
+		b.specReqHandlersMtx.Lock()
+		delete(b.specToReqHandlerMap, changedSpecId)
+		b.specReqHandlersMtx.Unlock()
 	}
 
 	return nil
@@ -238,7 +357,7 @@ func (b *BackfillMgr) handleTargetOnlyChange(replId string, oldTargetManifest, n
 		}
 	}
 
-	backfillIDs, err := newTargetManifest.GetBackfillCollectionIDs(oldTargetManifest, sourceManifest)
+	backfillMapping, err := newTargetManifest.GetBackfillCollectionIDs(oldTargetManifest, sourceManifest)
 	if err != nil {
 		b.logger.Errorf("handleTargetOnlyChange error: %v", err)
 		return
@@ -262,7 +381,19 @@ func (b *BackfillMgr) handleTargetOnlyChange(replId string, oldTargetManifest, n
 			highestSeqnoAcrossVBs = seqno
 		}
 	}
-	b.logger.Infof("These collections Need to backfill %v to seqno: %v", backfillIDs, highestSeqnoAcrossVBs)
+	b.logger.Infof("These collections Need to backfill %v to seqno: %v", backfillMapping, highestSeqnoAcrossVBs)
+
+	b.specReqHandlersMtx.RLock()
+	handler, ok := b.specToReqHandlerMap[replId]
+	if !ok {
+		b.logger.Errorf("Unable to find spec handler for %v\n", replId)
+	}
+	b.specReqHandlersMtx.RUnlock()
+	var manifestPair metadata.CollectionsManifestPair
+	manifestPair.Source = sourceManifest
+	manifestPair.Target = newTargetManifest
+	request := metadata.NewBackfillRequest(manifestPair, backfillMapping, highestSeqnoAcrossVBs)
+	handler.HandleBackfillRequest(request)
 }
 
 func (b *BackfillMgr) handleSourceOnlyChange(replId string, oldSourceManifest, newSourceManifest *metadata.CollectionsManifest) {
@@ -284,4 +415,24 @@ func (b *BackfillMgr) handleSourceOnlyChange(replId string, oldSourceManifest, n
 	b.cacheMtx.Lock()
 	b.cacheSpecSourceMap[replId] = newSourceManifest
 	b.cacheMtx.Unlock()
+}
+
+func (b *BackfillMgr) backfillRequestPersistCallback(replId string, info metadata.BackfillPersistInfo) error {
+	b.logger.Infof("NEIL DEBUG for replication %v received callback to store data", replId)
+
+	// TODO - this needs burst control
+	backfillReplSpec, err := b.backfillReplSvc.ReplicationSpec(replId)
+	if err != nil {
+		backfillReplSpec = metadata.NewBackfillReplicationSpec(replId, &info)
+		err = b.backfillReplSvc.AddReplicationSpec(backfillReplSpec)
+		b.logger.Infof("NEIL DEBUG Add backfill replication spec returned %v\n", err)
+	} else {
+		// Set operation
+		// TODO - right now overwrite, but this is incorrect need to optimize and then write
+		backfillReplSpec.BackfillTasks = &info
+		err = b.backfillReplSvc.SetReplicationSpec(backfillReplSpec)
+		b.logger.Infof("NEIL DEBUG Set backfill replication spec returned %v\n", err)
+	}
+
+	return err
 }

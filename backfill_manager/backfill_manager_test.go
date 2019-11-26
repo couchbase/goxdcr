@@ -8,25 +8,28 @@ import (
 )
 
 func setupBoilerPlate() (*service_def.CollectionsManifestSvc,
-	*service_def.ReplicationSpecSvc) {
+	*service_def.ReplicationSpecSvc,
+	*service_def.BackfillReplSvc) {
 	manifestSvc := &service_def.CollectionsManifestSvc{}
 	replSpecSvc := &service_def.ReplicationSpecSvc{}
+	backfillReplSvc := &service_def.BackfillReplSvc{}
 
-	return manifestSvc, replSpecSvc
+	return manifestSvc, replSpecSvc, backfillReplSvc
 }
 
 func setupMock(manifestSvc *service_def.CollectionsManifestSvc,
-	replSpecSvc *service_def.ReplicationSpecSvc) {
+	replSpecSvc *service_def.ReplicationSpecSvc,
+	backfillReplSvc *service_def.BackfillReplSvc) {
 
 }
 
 func TestBackfillMgrLaunch(t *testing.T) {
 	assert := assert.New(t)
 	fmt.Println("============== Test case start: TestBackfillMgrLaunch =================")
-	manifestSvc, replSpecSvc := setupBoilerPlate()
-	setupMock(manifestSvc, replSpecSvc)
+	manifestSvc, replSpecSvc, backfillReplSvc := setupBoilerPlate()
+	setupMock(manifestSvc, replSpecSvc, backfillReplSvc)
 
-	backfillMgr := NewBackfillManager(manifestSvc, nil /*exitFunc*/, replSpecSvc)
+	backfillMgr := NewBackfillManager(manifestSvc, nil /*exitFunc*/, replSpecSvc, backfillReplSvc)
 	assert.NotNil(backfillMgr)
 
 	fmt.Println("============== Test case end: TestBackfillMgrLaunch =================")

@@ -37,7 +37,8 @@ var InvalidReplicationSpecError = errors.New("Invalid Replication spec")
 //replication spec and its derived object
 //This is what is put into the cache
 type ReplicationSpecVal struct {
-	spec       *metadata.ReplicationSpecification
+	//	spec       *metadata.ReplicationSpecification
+	spec       metadata.GenericSpecification
 	derivedObj interface{}
 	cas        int64
 }
@@ -47,7 +48,7 @@ func (rsv *ReplicationSpecVal) CAS(obj CacheableMetadataObj) bool {
 		return true
 	} else if rsv2, ok := obj.(*ReplicationSpecVal); ok {
 		if rsv.cas == rsv2.cas {
-			if !rsv.spec.SameSpec(rsv2.spec) {
+			if !rsv.spec.(*metadata.ReplicationSpecification).SameSpec(rsv2.spec.(*metadata.ReplicationSpecification)) {
 				// increment cas only when the metadata portion of ReplicationSpecVal has been changed
 				// in other words, concurrent updates to the metadata portion is not allowed -- later write fails
 				// while concurrent updates to the runtime portion is allowed -- later write wins
@@ -67,7 +68,7 @@ func (rsv *ReplicationSpecVal) Clone() CacheableMetadataObj {
 		clonedRsv := &ReplicationSpecVal{}
 		*clonedRsv = *rsv
 		if rsv.spec != nil {
-			clonedRsv.spec = rsv.spec.Clone()
+			clonedRsv.spec = rsv.spec.CloneGeneric()
 		}
 		return clonedRsv
 	}
@@ -76,7 +77,7 @@ func (rsv *ReplicationSpecVal) Clone() CacheableMetadataObj {
 
 func (rsv *ReplicationSpecVal) Redact() CacheableMetadataObj {
 	if rsv != nil && rsv.spec != nil {
-		rsv.spec.Redact()
+		rsv.spec.RedactGeneric()
 	}
 	return rsv
 }
@@ -165,7 +166,7 @@ func (service *ReplicationSpecService) replicationSpec(replicationId string) (*m
 		return nil, errors.New(ReplicationSpecNotFoundErrorMessage)
 	}
 
-	return val.(*ReplicationSpecVal).spec, nil
+	return val.(*ReplicationSpecVal).spec.(*metadata.ReplicationSpecification), nil
 }
 
 //validate the existence of source bucket
@@ -694,7 +695,7 @@ func (service *ReplicationSpecService) AddReplicationSpec(spec *metadata.Replica
 
 	service.logger.Info("Adding it to metadata store...")
 
-	key := getKeyFromReplicationId(spec.Id)
+	key := service.getKeyFromReplicationId(spec.Id)
 	err = service.metadata_svc.AddWithCatalog(ReplicationSpecsCatalogKey, key, value)
 	if err != nil {
 		return err
@@ -713,7 +714,7 @@ func (service *ReplicationSpecService) AddReplicationSpec(spec *metadata.Replica
 }
 
 func (service *ReplicationSpecService) loadLatestMetakvRevisionIntoSpec(spec *metadata.ReplicationSpecification) error {
-	key := getKeyFromReplicationId(spec.Id)
+	key := service.getKeyFromReplicationId(spec.Id)
 	_, rev, err := service.metadata_svc.Get(key)
 	if err != nil {
 		return err
@@ -736,7 +737,7 @@ func (service *ReplicationSpecService) setReplicationSpecInternal(spec *metadata
 	if err != nil {
 		return err
 	}
-	key := getKeyFromReplicationId(spec.Id)
+	key := service.getKeyFromReplicationId(spec.Id)
 
 	err = service.metadata_svc.Set(key, value, spec.Revision)
 	if err != nil {
@@ -767,7 +768,7 @@ func (service *ReplicationSpecService) DelReplicationSpecWithReason(replicationI
 		return nil, errors.New(ReplicationSpecNotFoundErrorMessage)
 	}
 
-	key := getKeyFromReplicationId(replicationId)
+	key := service.getKeyFromReplicationId(replicationId)
 	err = service.metadata_svc.DelWithCatalog(ReplicationSpecsCatalogKey, key, spec.Revision)
 	if err != nil {
 		service.logger.Errorf("Failed to delete replication spec, key=%v, err=%v\n", key, err)
@@ -831,7 +832,7 @@ func (service *ReplicationSpecService) AllReplicationSpecs() (map[string]*metada
 	values_map := service.getCache().GetMap()
 	for key, val := range values_map {
 		if val.(*ReplicationSpecVal).spec != nil {
-			specs[key] = val.(*ReplicationSpecVal).spec.Clone()
+			specs[key] = val.(*ReplicationSpecVal).spec.(*metadata.ReplicationSpecification).Clone()
 		}
 	}
 	return specs, nil
@@ -847,7 +848,7 @@ func (service *ReplicationSpecService) AllActiveReplicationSpecsReadOnly() (map[
 	specs := make(map[string]*metadata.ReplicationSpecification, 0)
 	values_map := service.getCache().GetMap()
 	for key, val := range values_map {
-		spec := val.(*ReplicationSpecVal).spec
+		spec := val.(*ReplicationSpecVal).spec.(*metadata.ReplicationSpecification)
 		if spec != nil && spec.Settings.Active {
 			specs[key] = spec
 		}
@@ -859,7 +860,7 @@ func (service *ReplicationSpecService) AllReplicationSpecIds() ([]string, error)
 	repIds := []string{}
 	values_map := service.getCache().GetMap()
 	for key, val := range values_map {
-		if val.(*ReplicationSpecVal).spec != nil {
+		if val.(*ReplicationSpecVal).spec.(*metadata.ReplicationSpecification) != nil {
 			repIds = append(repIds, key)
 		}
 	}
@@ -1098,7 +1099,7 @@ func (service *ReplicationSpecService) IsReplicationValidationError(err error) b
 	}
 }
 
-func getKeyFromReplicationId(replicationId string) string {
+func (service *ReplicationSpecService) getKeyFromReplicationId(replicationId string) string {
 	return ReplicationSpecsCatalogKey + base.KeyPartsDelimiter + replicationId
 }
 
@@ -1332,7 +1333,7 @@ func (service *ReplicationSpecService) setDerivedObjInner(specId string, derived
 		panic("Object in ReplicationSpecServcie cache is not of type *replciationSpecVal")
 	}
 
-	if cachedObj.spec == nil && derivedObj == nil {
+	if cachedObj.spec.(*metadata.ReplicationSpecification) == nil && derivedObj == nil {
 		//remove it from the cache
 		service.logger.Infof("Remove spec %v from the cache\n", specId)
 		cache.Delete(specId)

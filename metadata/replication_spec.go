@@ -122,6 +122,18 @@ func (spec *ReplicationSpecification) CloneAndRedact() *ReplicationSpecification
 	return spec
 }
 
+func (spec *ReplicationSpecification) SameSpecGeneric(other GenericSpecification) bool {
+	return spec.SameSpec(other.(*ReplicationSpecification))
+}
+
+func (spec *ReplicationSpecification) CloneGeneric() GenericSpecification {
+	return spec.Clone()
+}
+
+func (spec *ReplicationSpecification) RedactGeneric() GenericSpecification {
+	return spec.Redact()
+}
+
 func ReplicationId(sourceBucketName string, targetClusterUUID string, targetBucketName string) string {
 	parts := []string{targetClusterUUID, sourceBucketName, targetBucketName}
 	return strings.Join(parts, base.KeyPartsDelimiter)
