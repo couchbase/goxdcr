@@ -14,15 +14,16 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
+	"sync"
+	"time"
+
 	mcc "github.com/couchbase/gomemcached/client"
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/goxdcr/service_def"
 	utilities "github.com/couchbase/goxdcr/utils"
-	"strings"
-	"sync"
-	"time"
 )
 
 const (
@@ -1285,31 +1286,10 @@ func (service *ReplicationSpecService) cacheSpec(cache *MetadataCache, specId st
 }
 
 func (service *ReplicationSpecService) SetDerivedObj(specId string, derivedObj interface{}) error {
-	var err error
-	setDerivedObjFunc := func() error {
-		err = service.setDerivedObjInner(specId, derivedObj)
-		if err == service_def.MetadataNotFoundErr {
-			return nil
-		} else {
-			return err
-		}
-	}
+	service.cache_lock.Lock()
+	defer service.cache_lock.Unlock()
 
-	expOpErr := service.utils.ExponentialBackoffExecutor("ReplSpecSvc.SetDerivedObj", base.RetryIntervalSetDerivedObj, base.MaxNumOfRetriesSetDerivedObj,
-		base.MetaKvBackoffFactor, setDerivedObjFunc)
-
-	if expOpErr != nil {
-		// Executor will return error only if it timed out with ErrorFailedAfterRetry. Log it and override the ret err
-		service.logger.Errorf("SetDerivedObj for %v failed after max retry. err=%v", specId, err)
-		err = expOpErr
-	}
-
-	return err
-}
-
-func (service *ReplicationSpecService) setDerivedObjInner(specId string, derivedObj interface{}) error {
 	cache := service.getCache()
-
 	cachedVal, ok := cache.Get(specId)
 	if !ok || cachedVal == nil {
 		return fmt.Errorf(ReplicationSpecNotFoundErrorMessage)
@@ -1337,6 +1317,9 @@ func (service *ReplicationSpecService) setDerivedObjInner(specId string, derived
 }
 
 func (service *ReplicationSpecService) GetDerivedObj(specId string) (interface{}, error) {
+	service.cache_lock.Lock()
+	defer service.cache_lock.Unlock()
+
 	cachedVal, ok := service.getCache().Get(specId)
 	if !ok || cachedVal == nil {
 		return nil, fmt.Errorf(ReplicationSpecNotFoundErrorMessage)
