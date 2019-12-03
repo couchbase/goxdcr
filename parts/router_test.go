@@ -54,9 +54,10 @@ func TestRouterRouteFunc(t *testing.T) {
 	uprEvent, err := RetrieveUprFile("./testdata/uprEventDeletion.json")
 	assert.Nil(err)
 	assert.NotNil(uprEvent)
+	wrappedUprEvent := &base.WrappedUprEvent{UprEvent: uprEvent}
 
 	// Deletion does not contain any flags
-	wrappedMCRequest, err := router.ComposeMCRequest(uprEvent)
+	wrappedMCRequest, err := router.ComposeMCRequest(wrappedUprEvent)
 	assert.Nil(err)
 	assert.NotNil(wrappedMCRequest)
 	checkUint := binary.BigEndian.Uint32(wrappedMCRequest.Req.Extras[0:4])
@@ -66,8 +67,9 @@ func TestRouterRouteFunc(t *testing.T) {
 	uprEvent, err = RetrieveUprFile("./testdata/uprEventExpiration.json")
 	assert.Nil(err)
 	assert.NotNil(uprEvent)
+	wrappedUprEvent = &base.WrappedUprEvent{UprEvent: uprEvent}
 
-	wrappedMCRequest, err = router.ComposeMCRequest(uprEvent)
+	wrappedMCRequest, err = router.ComposeMCRequest(wrappedUprEvent)
 	assert.Nil(err)
 	assert.NotNil(wrappedMCRequest)
 	checkUint = binary.BigEndian.Uint32(wrappedMCRequest.Req.Extras[24:28])
@@ -118,15 +120,17 @@ func TestRouterSkipDeletion(t *testing.T) {
 	delEvent, err := RetrieveUprFile("./testdata/uprEventDeletion.json")
 	assert.Nil(err)
 	assert.NotNil(delEvent)
+	delWrapped := &base.WrappedUprEvent{UprEvent: delEvent}
 
 	expEvent, err := RetrieveUprFile("./testdata/uprEventExpiration.json")
 	assert.Nil(err)
 	assert.NotNil(expEvent)
+	expWrapped := &base.WrappedUprEvent{UprEvent: expEvent}
 
-	shouldContinue := router.ProcessExpDelTTL(delEvent)
+	shouldContinue := router.ProcessExpDelTTL(delWrapped)
 	assert.False(shouldContinue)
 
-	shouldContinue = router.ProcessExpDelTTL(expEvent)
+	shouldContinue = router.ProcessExpDelTTL(expWrapped)
 	assert.True(shouldContinue)
 
 	fmt.Println("============== Test case end: TestRouterSkipDeletion =================")
@@ -154,15 +158,17 @@ func TestRouterSkipExpiration(t *testing.T) {
 	delEvent, err := RetrieveUprFile("./testdata/uprEventDeletion.json")
 	assert.Nil(err)
 	assert.NotNil(delEvent)
+	delWrapped := &base.WrappedUprEvent{UprEvent: delEvent}
 
 	expEvent, err := RetrieveUprFile("./testdata/uprEventExpiration.json")
 	assert.Nil(err)
 	assert.NotNil(expEvent)
+	expWrapped := &base.WrappedUprEvent{UprEvent: expEvent}
 
-	shouldContinue := router.ProcessExpDelTTL(delEvent)
+	shouldContinue := router.ProcessExpDelTTL(delWrapped)
 	assert.True(shouldContinue)
 
-	shouldContinue = router.ProcessExpDelTTL(expEvent)
+	shouldContinue = router.ProcessExpDelTTL(expWrapped)
 	assert.False(shouldContinue)
 
 	fmt.Println("============== Test case end: TestRouterSkipExpiration =================")
@@ -191,17 +197,19 @@ func TestRouterSkipDeletesStripTTL(t *testing.T) {
 	delEvent, err := RetrieveUprFile("./testdata/uprEventDeletion.json")
 	assert.Nil(err)
 	assert.NotNil(delEvent)
+	delWrapped := &base.WrappedUprEvent{UprEvent: delEvent}
 
 	expEvent, err := RetrieveUprFile("./testdata/uprEventExpiration.json")
 	assert.Nil(err)
 	assert.NotNil(expEvent)
+	expWrapped := &base.WrappedUprEvent{UprEvent: expEvent}
 
 	assert.NotEqual(0, int(delEvent.Expiry))
-	shouldContinue := router.ProcessExpDelTTL(delEvent)
+	shouldContinue := router.ProcessExpDelTTL(delWrapped)
 	assert.True(shouldContinue)
 	assert.Equal(0, int(delEvent.Expiry))
 
-	shouldContinue = router.ProcessExpDelTTL(expEvent)
+	shouldContinue = router.ProcessExpDelTTL(expWrapped)
 	assert.False(shouldContinue)
 
 	fmt.Println("============== Test case end: TestRouterSkipExpiryStripTTL =================")
@@ -229,24 +237,27 @@ func TestRouterExpDelAllMode(t *testing.T) {
 	delEvent, err := RetrieveUprFile("./testdata/uprEventDeletion.json")
 	assert.Nil(err)
 	assert.NotNil(delEvent)
+	delWrapped := &base.WrappedUprEvent{UprEvent: delEvent}
 
 	mutEvent, err := RetrieveUprFile("./testdata/perfDataExpiry.json")
 	assert.Nil(err)
 	assert.NotNil(mutEvent)
+	mutWrapped := &base.WrappedUprEvent{UprEvent: mutEvent}
 
 	expEvent, err := RetrieveUprFile("./testdata/uprEventExpiration.json")
 	assert.Nil(err)
 	assert.NotNil(expEvent)
+	expWrapped := &base.WrappedUprEvent{UprEvent: expEvent}
 
 	assert.NotEqual(0, int(mutEvent.Expiry))
-	shouldContinue := router.ProcessExpDelTTL(mutEvent)
+	shouldContinue := router.ProcessExpDelTTL(mutWrapped)
 	assert.True(shouldContinue)
 	assert.Equal(0, int(mutEvent.Expiry))
 
-	shouldContinue = router.ProcessExpDelTTL(expEvent)
+	shouldContinue = router.ProcessExpDelTTL(expWrapped)
 	assert.False(shouldContinue)
 
-	shouldContinue = router.ProcessExpDelTTL(delEvent)
+	shouldContinue = router.ProcessExpDelTTL(delWrapped)
 	assert.False(shouldContinue)
 	fmt.Println("============== Test case end: TestRouterExpDelAllMode =================")
 }

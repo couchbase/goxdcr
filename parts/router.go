@@ -14,7 +14,6 @@ import (
 	"errors"
 	"fmt"
 	mc "github.com/couchbase/gomemcached"
-	mcc "github.com/couchbase/gomemcached/client"
 	"github.com/couchbase/goxdcr/base"
 	common "github.com/couchbase/goxdcr/common"
 	connector "github.com/couchbase/goxdcr/connector"
@@ -223,7 +222,7 @@ func (router *Router) route(data interface{}) (map[string]interface{}, error) {
 		return nil, ErrorInvalidRoutingMapForRouter
 	}
 
-	shouldContinue := router.ProcessExpDelTTL(uprEvent)
+	shouldContinue := router.ProcessExpDelTTL(wrappedUpr)
 	if !shouldContinue {
 		router.RaiseEvent(common.NewEvent(common.DataFiltered, uprEvent, router, nil, nil))
 		return result, nil
@@ -357,12 +356,13 @@ func (router *Router) newWrappedMCRequest() (*base.WrappedMCRequest, error) {
 }
 
 // Returns bool indicating if the data should continue to be sent
-func (router *Router) ProcessExpDelTTL(uprEvent *mcc.UprEvent) bool {
+func (router *Router) ProcessExpDelTTL(wrappedEvent *base.WrappedUprEvent) bool {
 	expDelMode := router.expDelMode.Get()
 	if expDelMode == base.FilterExpDelNone {
 		return true
 	}
 
+	uprEvent := wrappedEvent.UprEvent
 	if expDelMode&base.FilterExpDelSkipDeletes > 0 {
 		if uprEvent.Opcode == mc.UPR_DELETION {
 			return false

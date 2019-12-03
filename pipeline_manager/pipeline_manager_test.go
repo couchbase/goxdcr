@@ -169,6 +169,7 @@ func setupDetailedMocking(testLogger *log.CommonLogger,
 	testPipeline.On("Topic").Return(testTopic)
 
 	pipelineMock.On("NewPipeline", testTopic, mock.AnythingOfType("common.PipelineProgressRecorder")).Return(testPipeline, nil)
+	pipelineMock.On("DeletePipeline", testTopic).Return(nil)
 
 	uiLogSvc.On("Write", mock.Anything).Return(nil)
 

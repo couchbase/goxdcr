@@ -8,6 +8,16 @@ type PipelineFactory struct {
 	mock.Mock
 }
 
+// ConfirmPipelineCreated provides a mock function with given fields: topic
+func (_m *PipelineFactory) ConfirmPipelineCreated(topic string) {
+	_m.Called(topic)
+}
+
+// DeletePipeline provides a mock function with given fields: topic
+func (_m *PipelineFactory) DeletePipeline(topic string) {
+	_m.Called(topic)
+}
+
 // NewPipeline provides a mock function with given fields: topic, progressRecorder
 func (_m *PipelineFactory) NewPipeline(topic string, progressRecorder common.PipelineProgressRecorder) (common.Pipeline, error) {
 	ret := _m.Called(topic, progressRecorder)

@@ -20,6 +20,7 @@ import (
 	utilities "github.com/couchbase/goxdcr/utils"
 	"math"
 	"strconv"
+	"sync"
 	"time"
 )
 
@@ -33,6 +34,7 @@ const (
 // interface so we can autogenerate mock and do unit test
 type XDCRFactoryIface interface {
 	NewPipeline(topic string, progress_recorder common.PipelineProgressRecorder) (common.Pipeline, error)
+	DeletePipeline(topic string)
 	ConstructSettingsForPart(pipeline common.Pipeline, part common.Part, settings metadata.ReplicationSettingsMap,
 		targetClusterRef *metadata.RemoteClusterReference, ssl_port_map map[string]uint16,
 		isSSLOverMem bool) (metadata.ReplicationSettingsMap, error)
@@ -62,6 +64,12 @@ type XDCRFactory struct {
 	pipeline_failure_handler common.SupervisorFailureHandler
 	logger                   *log.CommonLogger
 	utils                    utilities.UtilsIface
+
+	// Components for sharing resources
+	cacheMtx              sync.RWMutex
+	cacheSpecMap          map[string]*metadata.ReplicationSpecification
+	cacheSrcBucketReplCnt map[string]uint64
+	cacheSourceNozzles    map[string][]common.Nozzle
 }
 
 // set call back functions is done only once
@@ -93,6 +101,9 @@ func NewXDCRFactory(repl_spec_svc service_def.ReplicationSpecSvc,
 		logger:                   log.NewLogger("XDCRFactory", factory_logger_ctx),
 		utils:                    utilsIn,
 		collectionsManifestSvc:   collectionsManifestSvc,
+		cacheSpecMap:             make(map[string]*metadata.ReplicationSpecification),
+		cacheSrcBucketReplCnt:    make(map[string]uint64),
+		cacheSourceNozzles:       make(map[string][]common.Nozzle),
 	}
 }
 
@@ -107,6 +118,15 @@ func (xdcrf *XDCRFactory) NewPipeline(topic string, progress_recorder common.Pip
 		return nil, err
 	}
 	xdcrf.logger.Debugf("replication specification = %v\n", spec)
+
+	xdcrf.cacheMtx.Lock()
+	cachedSpec, exists := xdcrf.cacheSpecMap[topic]
+	if !exists {
+		xdcrf.cacheSpecMap[topic] = spec
+		cachedSpec = spec
+	}
+	xdcrf.cacheSrcBucketReplCnt[cachedSpec.SourceBucketName]++
+	xdcrf.cacheMtx.Unlock()
 
 	logger_ctx := log.CopyCtx(xdcrf.default_logger_ctx)
 	logger_ctx.SetLogLevel(spec.Settings.LogLevel)
@@ -247,6 +267,26 @@ func (xdcrf *XDCRFactory) NewPipeline(topic string, progress_recorder common.Pip
 	return pipeline, nil
 }
 
+func (x *XDCRFactory) DeletePipeline(topic string) {
+	x.cacheMtx.Lock()
+	defer x.cacheMtx.Unlock()
+
+	spec, ok := x.cacheSpecMap[topic]
+	if !ok {
+		panic("Cannot find spec")
+	}
+	delete(x.cacheSpecMap, topic)
+
+	if x.cacheSrcBucketReplCnt[spec.SourceBucketName] == 0 {
+		panic("Bucket count is 0")
+	}
+
+	x.cacheSrcBucketReplCnt[spec.SourceBucketName]--
+	if x.cacheSrcBucketReplCnt[spec.SourceBucketName] == 0 {
+		delete(x.cacheSrcBucketReplCnt, spec.SourceBucketName)
+	}
+}
+
 func min(num1 int, num2 int) int {
 	return int(math.Min(float64(num1), float64(num2)))
 }
@@ -350,6 +390,7 @@ func (xdcrf *XDCRFactory) constructSourceNozzles(spec *metadata.ReplicationSpeci
 	logger_ctx *log.LoggerContext) (map[string]common.Nozzle, map[string][]uint16, error) {
 	sourceNozzles := make(map[string]common.Nozzle)
 
+	// TODO(Neil) - need to address this
 	maxNozzlesPerNode := spec.Settings.SourceNozzlePerNode
 
 	// Get a map of kvNode -> vBuckets responsibile for

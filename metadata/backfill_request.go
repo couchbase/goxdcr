@@ -1,6 +1,8 @@
 package metadata
 
-import ()
+import (
+	"github.com/couchbase/goxdcr/base"
+)
 
 type BackfillRequest struct {
 	Manifests            CollectionsManifestPair
@@ -19,6 +21,25 @@ func NewBackfillRequest(manifests CollectionsManifestPair, mapping CollectionToC
 type BackfillPersistInfo struct {
 	// List of backfill requests
 	Requests []*BackfillRequest
+}
+
+func (b *BackfillPersistInfo) GetHighestEndSeqno() (uint64, error) {
+	if b == nil || len(b.Requests) == 0 {
+		return 0, base.ErrorInvalidInput
+	}
+
+	var highSeqno uint64
+	for _, req := range b.Requests {
+		if req.HighestSeqno > highSeqno {
+			highSeqno = req.HighestSeqno
+		}
+	}
+
+	return highSeqno, nil
+}
+
+func (b *BackfillPersistInfo) GetStreamType() DcpStreamType {
+	return DcpStreamTypeBackfill
 }
 
 func (b *BackfillPersistInfo) Same(other *BackfillPersistInfo) bool {

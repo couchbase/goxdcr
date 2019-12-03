@@ -25,13 +25,13 @@ func (_m *Nozzle) AsyncComponentEventListeners() map[string]common.AsyncComponen
 	return r0
 }
 
-// Close provides a mock function with given fields:
-func (_m *Nozzle) Close() error {
-	ret := _m.Called()
+// Close provides a mock function with given fields: instanceId
+func (_m *Nozzle) Close(instanceId string) error {
+	ret := _m.Called(instanceId)
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func() error); ok {
-		r0 = rf()
+	if rf, ok := ret.Get(0).(func(string) error); ok {
+		r0 = rf(instanceId)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -69,27 +69,13 @@ func (_m *Nozzle) Id() string {
 	return r0
 }
 
-// IsOpen provides a mock function with given fields:
-func (_m *Nozzle) IsOpen() bool {
-	ret := _m.Called()
-
-	var r0 bool
-	if rf, ok := ret.Get(0).(func() bool); ok {
-		r0 = rf()
-	} else {
-		r0 = ret.Get(0).(bool)
-	}
-
-	return r0
-}
-
-// Open provides a mock function with given fields:
-func (_m *Nozzle) Open() error {
-	ret := _m.Called()
+// Open provides a mock function with given fields: instanceId
+func (_m *Nozzle) Open(instanceId string) error {
+	ret := _m.Called(instanceId)
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func() error); ok {
-		r0 = rf()
+	if rf, ok := ret.Get(0).(func(string) error); ok {
+		r0 = rf(instanceId)
 	} else {
 		r0 = ret.Error(0)
 	}

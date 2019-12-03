@@ -258,7 +258,7 @@ func (capi *CapiNozzle) IsOpen() bool {
 	return capi.bOpen
 }
 
-func (capi *CapiNozzle) Open() error {
+func (capi *CapiNozzle) Open(instanceId string) error {
 	capi.lock_bOpen.Lock()
 	defer capi.lock_bOpen.Unlock()
 	if !capi.bOpen {
@@ -268,7 +268,7 @@ func (capi *CapiNozzle) Open() error {
 	return nil
 }
 
-func (capi *CapiNozzle) Close() error {
+func (capi *CapiNozzle) Close(instanceId string) error {
 	capi.lock_bOpen.Lock()
 	defer capi.lock_bOpen.Unlock()
 	if capi.bOpen {

@@ -23,15 +23,12 @@ type Nozzle interface {
 	//Open opens the Nozzle
 	//
 	//Data can be passed to the downstream
-	Open() error
+	Open(instanceId string) error
 
 	//Close closes the Nozzle
 	//
 	//Data can get to this nozzle, but would not be passed to the downstream
-	Close() error
-
-	//IsOpen returns true if the nozzle is open; returns false if the nozzle is closed
-	IsOpen() bool
+	Close(instanceId string) error
 
 	// Returns a list of its responsible VBs (Read-only)
 	ResponsibleVBs() []uint16

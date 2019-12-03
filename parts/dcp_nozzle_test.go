@@ -78,6 +78,7 @@ func setupUprFeedMock(uprFeed *mcMock.UprFeedIface) {
 	allFeaturesActivated.EnableExpiry = true
 	uprFeed.On("UprOpenWithXATTR", mock.Anything, mock.Anything, mock.Anything).Return(nil)
 	uprFeed.On("UprOpenWithFeatures", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil, allFeaturesActivated)
+	uprFeed.On("UprRequestCollectionsStream", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
 	setupUprFeedGeneric(uprFeed)
 }
 

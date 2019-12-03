@@ -292,7 +292,7 @@ func (genericPipeline *GenericPipeline) Start(settings metadata.ReplicationSetti
 
 	//open targets
 	for _, target := range genericPipeline.targets {
-		err = target.Open()
+		err = target.Open(genericPipeline.InstanceId())
 		if err != nil {
 			genericPipeline.logger.Errorf("%v failed to open outgoing nozzle %s. err=%v", genericPipeline.InstanceId(), target.Id(), err)
 			errMap["genericPipeline.outgoingNozzle.Open"] = err
@@ -305,7 +305,7 @@ func (genericPipeline *GenericPipeline) Start(settings metadata.ReplicationSetti
 	//open source
 	for _, source := range genericPipeline.sources {
 
-		err = source.Open()
+		err = source.Open(genericPipeline.InstanceId())
 		if err != nil {
 			genericPipeline.logger.Errorf("%v failed to open incoming nozzle %s. err=%v", genericPipeline.InstanceId(), source.Id(), err)
 			errMap["genericPipeline.sourceNozzle.Open"] = err
@@ -439,7 +439,7 @@ func (genericPipeline *GenericPipeline) Stop() base.ErrorMap {
 
 	//close the sources
 	for _, source := range genericPipeline.sources {
-		err = source.Close()
+		err = source.Close(genericPipeline.InstanceId())
 		if err != nil {
 			genericPipeline.logger.Warnf("%v failed to close source %v. err=%v", genericPipeline.InstanceId(), source.Id(), err)
 			errMap[fmt.Sprintf("genericPipeline.%v.Close", source.Id())] = err

@@ -217,7 +217,8 @@ func TestXmemSendAPacket(t *testing.T) {
 	uprNotCompressFile := "../utils/testInternalData/uprNotCompress.json"
 	event, err := RetrieveUprFile(uprNotCompressFile)
 	assert.Nil(err)
-	wrappedMCRequest, err := router.ComposeMCRequest(event)
+	wrappedEvent := &base.WrappedUprEvent{UprEvent: event}
+	wrappedMCRequest, err := router.ComposeMCRequest(wrappedEvent)
 	assert.Nil(err)
 	assert.NotNil(wrappedMCRequest)
 

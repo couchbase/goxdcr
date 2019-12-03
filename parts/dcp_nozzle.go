@@ -254,12 +254,12 @@ func (reqHelper *dcpStreamReqHelper) getDisabledError() error {
 
 type DcpNozzleIface interface {
 	CheckStuckness(dcp_stats map[string]map[string]string) error
-	Close() error
+	Close(string) error
 	GetStreamState(vbno uint16) (DcpStreamState, error)
 	GetVBList() []uint16
 	GetXattrSeqnos() map[uint16]uint64
 	IsOpen() bool
-	Open() error
+	Open(string) error
 	Receive(data interface{}) error
 	SetMaxMissCount(max_dcp_miss_count int)
 	Start(settings metadata.ReplicationSettingsMap) error
@@ -354,6 +354,10 @@ type DcpNozzle struct {
 	specificManifestGetter service_def.CollectionsManifestReqFunc
 
 	cachedConnector common.Connector
+
+	// Start/Stop Synchronization
+	startStopSync sync.Mutex
+	startStopCnt  uint32
 }
 
 func NewDcpNozzle(id string,
@@ -602,7 +606,7 @@ func (dcp *DcpNozzle) initializeUprHandshakeHelpers() {
 	}
 }
 
-func (dcp *DcpNozzle) Open() error {
+func (dcp *DcpNozzle) Open(instanceId string) error {
 	dcp.lock_bOpen.Lock()
 	defer dcp.lock_bOpen.Unlock()
 	if !dcp.bOpen {
@@ -612,7 +616,7 @@ func (dcp *DcpNozzle) Open() error {
 	return nil
 }
 
-func (dcp *DcpNozzle) Close() error {
+func (dcp *DcpNozzle) Close(instanceId string) error {
 	dcp.lock_bOpen.Lock()
 	defer dcp.lock_bOpen.Unlock()
 	if dcp.bOpen {
@@ -626,6 +630,18 @@ func (dcp *DcpNozzle) Close() error {
  * monitors.
  */
 func (dcp *DcpNozzle) Start(settings metadata.ReplicationSettingsMap) error {
+	dcp.startStopSync.Lock()
+	defer dcp.startStopSync.Unlock()
+
+	dcp.startStopCnt++
+	if dcp.startStopCnt == 1 {
+		return dcp.startInternal(settings)
+	}
+
+	return nil
+}
+
+func (dcp *DcpNozzle) startInternal(settings metadata.ReplicationSettingsMap) error {
 	dcp.Logger().Infof("Dcp nozzle %v starting ....\n", dcp.Id())
 
 	err := dcp.SetState(common.Part_Starting)
@@ -681,6 +697,19 @@ func (dcp *DcpNozzle) Start(settings metadata.ReplicationSettingsMap) error {
 }
 
 func (dcp *DcpNozzle) Stop() error {
+	dcp.startStopSync.Lock()
+	defer dcp.startStopSync.Unlock()
+
+	dcp.startStopCnt--
+
+	if dcp.startStopCnt == 0 {
+		return dcp.stopInternal()
+	}
+
+	return nil
+}
+
+func (dcp *DcpNozzle) stopInternal() error {
 	dcp.Logger().Infof("%v is stopping...\n", dcp.Id())
 	err := dcp.SetState(common.Part_Stopping)
 	if err != nil {

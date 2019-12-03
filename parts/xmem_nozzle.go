@@ -900,7 +900,7 @@ func (xmem *XmemNozzle) IsOpen() bool {
 	return xmem.bOpen
 }
 
-func (xmem *XmemNozzle) Open() error {
+func (xmem *XmemNozzle) Open(instanceId string) error {
 	xmem.lock_bOpen.Lock()
 	defer xmem.lock_bOpen.Unlock()
 
@@ -911,7 +911,7 @@ func (xmem *XmemNozzle) Open() error {
 	return nil
 }
 
-func (xmem *XmemNozzle) Close() error {
+func (xmem *XmemNozzle) Close(instanceId string) error {
 	xmem.lock_bOpen.Lock()
 	defer xmem.lock_bOpen.Unlock()
 
