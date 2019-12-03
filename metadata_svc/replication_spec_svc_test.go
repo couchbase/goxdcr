@@ -5,18 +5,23 @@ package metadata_svc
 import (
 	"errors"
 	"fmt"
+	mrand "math/rand"
+	"testing"
+	"time"
+
 	mcMock "github.com/couchbase/gomemcached/client/mocks"
 	"github.com/couchbase/goxdcr/base"
+	commonReal "github.com/couchbase/goxdcr/common"
+	common "github.com/couchbase/goxdcr/common/mocks"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
+	"github.com/couchbase/goxdcr/pipeline_manager"
 	service_def_real "github.com/couchbase/goxdcr/service_def"
 	service_def "github.com/couchbase/goxdcr/service_def/mocks"
 	utilities "github.com/couchbase/goxdcr/utils"
 	utilsMock "github.com/couchbase/goxdcr/utils/mocks"
 	"github.com/stretchr/testify/assert"
 	mock "github.com/stretchr/testify/mock"
-	mrand "math/rand"
-	"testing"
 )
 
 func setupBoilerPlate() (*service_def.XDCRCompTopologySvc,
@@ -58,10 +63,30 @@ func setupBoilerPlate() (*service_def.XDCRCompTopologySvc,
 	targetBucket := "testTargetBucket"
 	targetCluster := "localHost"
 	settings := make(map[string]interface{})
-
 	return xdcrTopologyMock, metadataSvcMock, uiLogSvcMock, remoteClusterMock,
 		clusterInfoSvcMock, utilitiesMock, replSpecSvc, sourceBucket, targetBucket, targetCluster, settings,
 		clientMock
+}
+
+func setupPipelineBoilerPlate(replSpecSvc *ReplicationSpecService,
+	xdcrTopologyMock *service_def.XDCRCompTopologySvc,
+	remoteClusterMock *service_def.RemoteClusterSvc,
+	uiLogSvcMock *service_def.UILogSvc) (
+	*pipeline_manager.PipelineManager,
+	*common.PipelineFactory,
+	*service_def.CheckpointsService,
+	*common.Pipeline) {
+
+	pipelineMock := &common.PipelineFactory{}
+	utilsNew := utilities.NewUtilities()
+	checkPointsSvc := &service_def.CheckpointsService{}
+
+	pipelineMgr := pipeline_manager.NewPipelineManager(pipelineMock, replSpecSvc, xdcrTopologyMock,
+		remoteClusterMock, nil /*cluster_info_svc*/, checkPointsSvc,
+		uiLogSvcMock, log.DefaultLoggerContext, utilsNew)
+
+	testPipeline := &common.Pipeline{}
+	return pipelineMgr, pipelineMock, checkPointsSvc, testPipeline
 }
 
 func generateFakeListOfVBs(capacity int) []uint16 {
@@ -91,6 +116,9 @@ func setupMocks(srcResolutionType string,
 
 	mockRemoteClusterRef, _ := metadata.NewRemoteClusterReference("1", "", hostAddr, "", "", false, "", nil, nil, nil)
 	remoteClusterMock.On("RemoteClusterByRefName", mock.Anything, mock.Anything).Return(mockRemoteClusterRef, nil)
+	remoteClusterMock.On("RemoteClusterByUuid", "", false).Return(mockRemoteClusterRef, nil)
+	remoteClusterMock.On("RemoteClusterByUuid", "", true).Return(mockRemoteClusterRef, nil)
+	remoteClusterMock.On("ValidateRemoteCluster", mockRemoteClusterRef).Return(nil)
 
 	// Compression features for utils mock
 	var fullFeatures utilities.HELOFeatures
@@ -170,6 +198,30 @@ func setupMocks(srcResolutionType string,
 
 	// client mock
 	clientMock.On("Close").Return(nil)
+}
+
+func setupPipelineMock(
+	pipelineMgr *pipeline_manager.PipelineManager,
+	testPipeline *common.Pipeline,
+	testTopic string,
+	pipelineMock *common.PipelineFactory,
+	ckptMock *service_def.CheckpointsService,
+	spec *metadata.ReplicationSpecification) {
+
+	var emptyNozzles map[string]commonReal.Nozzle
+	testPipeline.On("Sources").Return(emptyNozzles)
+	// Test pipeline running test
+	testPipeline.On("State").Return(commonReal.Pipeline_Running)
+	testPipeline.On("InstanceId").Return(testTopic)
+	testPipeline.On("SetProgressRecorder", mock.AnythingOfType("common.PipelineProgressRecorder")).Return(nil)
+	emptyMap := make(base.ErrorMap)
+	testPipeline.On("Start", mock.Anything).Return(emptyMap)
+	testPipeline.On("Stop", mock.Anything).Return(emptyMap)
+	testPipeline.On("Specification").Return(spec)
+	testPipeline.On("Topic").Return(testTopic)
+
+	pipelineMock.On("NewPipeline", testTopic, mock.AnythingOfType("common.PipelineProgressRecorder")).Return(testPipeline, nil)
+	ckptMock.On("DelCheckpointsDocs", mock.Anything).Return(nil)
 }
 
 /**
@@ -486,4 +538,66 @@ func TestStripExpiry(t *testing.T) {
 	assert.Equal(len(errMap), 0)
 
 	fmt.Println("============== Test case start: TestStripExpiry =================")
+}
+
+/**
+ * Tests the concurrent access of Replication spec and status object cache by both spec update
+ * and status update
+ */
+func TestSpecMetadataCache(t *testing.T) {
+	assert := assert.New(t)
+
+	fmt.Println("============== Test case start: TestSpecMetadataCache =================")
+	xdcrTopologyMock, metadataSvcMock, uiLogSvcMock, remoteClusterMock,
+		clusterInfoSvcMock, utilitiesMock, replSpecSvc,
+		sourceBucket, targetBucket, _, _, clientMock := setupBoilerPlate()
+
+	pipelineMgr, pipelineMock, ckptMock, testPipeline := setupPipelineBoilerPlate(replSpecSvc,
+		xdcrTopologyMock, remoteClusterMock, uiLogSvcMock)
+
+	// Begin mocks
+	setupMocks(base.ConflictResolutionType_Seqno, base.ConflictResolutionType_Seqno,
+		xdcrTopologyMock, metadataSvcMock, uiLogSvcMock, remoteClusterMock,
+		clusterInfoSvcMock, utilitiesMock, replSpecSvc, clientMock, true, /*IsEnterprise*/
+		false /*IsElastic*/, true /*CompressionPass*/)
+
+	testTopic := "testTopic"
+
+	spec := &metadata.ReplicationSpecification{
+		Id:               testTopic,
+		InternalId:       "internalTest",
+		SourceBucketName: sourceBucket,
+		TargetBucketName: targetBucket,
+		Settings:         metadata.DefaultReplicationSettings(),
+	}
+
+	setupPipelineMock(pipelineMgr, testPipeline, testTopic, pipelineMock, ckptMock, spec)
+
+	//Needs N+1 loops to create N number of concurrent access of the cache
+	for i := 0; i < 2; i++ {
+		fmt.Println("	Test case TestSpecMetadataCache looping:", i)
+		internalId := fmt.Sprintf("%s-%v", testTopic, i)
+		spec = &metadata.ReplicationSpecification{
+			Id:               testTopic,
+			InternalId:       internalId,
+			SourceBucketName: sourceBucket,
+			TargetBucketName: targetBucket,
+			Settings:         metadata.DefaultReplicationSettings(),
+		}
+
+		assert.Nil(replSpecSvc.AddReplicationSpec(spec, ""))
+		time.Sleep(1 * time.Second)
+		rs, _ := pipelineMgr.ReplicationStatus(testTopic)
+		assert.Nil(rs)
+		pipelineMgr.GetOrCreateReplicationStatus(testTopic, nil)
+		assert.Nil(pipelineMgr.Update(testTopic, nil))
+		//Change the spec.InternalId to force the removal to clean up the ReplicationStatus
+		//objecat from the cache
+		spec.InternalId = internalId + "1"
+		fmt.Println("	Stopping replication testTopic:", i)
+		go pipelineMgr.RemoveReplicationStatus(testTopic)
+	}
+	//wait for RemoveReplicationStatus to finish
+	time.Sleep(2 * time.Second)
+	fmt.Println("============== Test case end: TestSpecMetadataCache =================")
 }
