@@ -13,6 +13,5 @@ import ()
 
 type PipelineFactory interface {
 	NewPipeline(topic string, progressRecorder PipelineProgressRecorder) (Pipeline, error)
-	ConfirmPipelineCreated(topic string)
 	DeletePipeline(topic string)
 }

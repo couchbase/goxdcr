@@ -50,7 +50,7 @@ func setupBoilerPlateCMS() (*service_def.RemoteClusterSvc,
 }
 
 const srcTestDir = "../metadata/testData/"
-const destTestDir = "testData/"
+const destTestDir = "./testdata/"
 
 func setupMocksCMS(remoteClusterSvc *service_def.RemoteClusterSvc,
 	replicationSpecSvc *service_def.ReplicationSpecSvc,
@@ -78,7 +78,7 @@ func setupMocksCMS(remoteClusterSvc *service_def.RemoteClusterSvc,
 	}
 	b2Manifest, err := getMetadataManifest(destTestDir, "remoteClusterManifest.json")
 	if err != nil {
-		panic("Error: unable to find b2Manifest")
+		panic(fmt.Sprintf("Error: unable to find b2Manifest, err: %v", err))
 	}
 
 	utilsMock.On("GetCollectionsManifest", "localhost:9000", "B1",
@@ -227,6 +227,8 @@ func TestCollectionsManifestAgentSetup(t *testing.T) {
 	assert.True(ok)
 	assert.NotNil(agent)
 
+	time.Sleep(1 * time.Second)
+	agent.refreshSource()
 	manifest := agent.GetSourceManifest()
 	assert.NotNil(manifest)
 
@@ -234,7 +236,7 @@ func TestCollectionsManifestAgentSetup(t *testing.T) {
 	assert.Nil(err)
 	assert.True(b1Manifest.Equals(manifest))
 
-	b2Manifest, _ := getMetadataManifest(destTestDir, "remoteClusterManifest.json")
+	//	b2Manifest, _ := getMetadataManifest(destTestDir, "remoteClusterManifest.json")
 
 	// All these gets should not trigger a mock error
 	manifest = agent.GetSourceManifest()
@@ -269,17 +271,18 @@ func TestCollectionsManifestAgentSetup(t *testing.T) {
 	collectionsManifestService.handleDelReplSpec(testSpec3)
 	assert.Equal(1, int(collectionsManifestService.srcBucketGettersRefCnt[sourceBucketName]))
 
-	// Test agent recording and getting
-	srcVblist := []uint16{0, 1, 2, 3}
-	tgtVblist := []uint16{4, 5, 6}
-	assert.Equal(0, len(agent.srcNozzlePullMap))
-	assert.Equal(0, len(agent.tgtNozzlePullMap))
-	vbSrcManifest := collectionsManifestService.GetSourceManifestForNozzle(testSpec, srcVblist)
-	vbTgtManifest := collectionsManifestService.GetTargetManifestForNozzle(testSpec, tgtVblist)
-	assert.True(vbSrcManifest.Equals(b1Manifest))
-	assert.True(vbTgtManifest.Equals(b2Manifest))
-	assert.Equal(4, len(agent.srcNozzlePullMap))
-	assert.Equal(3, len(agent.tgtNozzlePullMap))
+	// Deprecated because we don't need to get nozzle anymore?
+	//	// Test agent recording and getting
+	//	srcVblist := []uint16{0, 1, 2, 3}
+	//	tgtVblist := []uint16{4, 5, 6}
+	//	assert.Equal(0, len(agent.srcNozzlePullMap))
+	//	assert.Equal(0, len(agent.tgtNozzlePullMap))
+	//	vbSrcManifest := collectionsManifestService.GetSourceManifestForNozzle(testSpec, srcVblist)
+	//	vbTgtManifest := collectionsManifestService.GetTargetManifestForNozzle(testSpec, tgtVblist)
+	//	assert.True(vbSrcManifest.Equals(b1Manifest))
+	//	assert.True(vbTgtManifest.Equals(b2Manifest))
+	//	assert.Equal(4, len(agent.srcNozzlePullMap))
+	//	assert.Equal(3, len(agent.tgtNozzlePullMap))
 
 	// finish refcount
 	collectionsManifestService.handleDelReplSpec(testSpec)

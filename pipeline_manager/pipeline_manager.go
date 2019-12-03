@@ -358,10 +358,6 @@ func (pipelineMgr *PipelineManager) StartPipeline(topic string) base.ErrorMap {
 	errMap = p.Start(rep_status.SettingsMap())
 	if len(errMap) > 0 {
 		pipelineMgr.logger.Errorf("Failed to start the pipeline %v", p.InstanceId())
-
-		if !allErrorsAreAllowed(errMap) {
-			pipelineMgr.pipeline_factory.DeletePipeline(p.InstanceId())
-		}
 	}
 	return errMap
 }
@@ -441,8 +437,8 @@ func (pipelineMgr *PipelineManager) StopPipeline(rep_status pipeline.Replication
 				//the parts of the pipeline will eventually commit suicide.
 			} else {
 				pipelineMgr.logger.Infof("Pipeline %v has been stopped\n", replId)
-				pipelineMgr.pipeline_factory.DeletePipeline(p.InstanceId())
 			}
+			pipelineMgr.pipeline_factory.DeletePipeline(p.Topic())
 			pipelineMgr.removePipelineFromReplicationStatus(p)
 			pipelineMgr.logger.Infof("Replication Status=%v\n", rep_status)
 		} else {

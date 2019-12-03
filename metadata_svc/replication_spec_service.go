@@ -47,8 +47,8 @@ func (rsv *ReplicationSpecVal) CAS(obj CacheableMetadataObj) bool {
 	if rsv == nil || obj == nil {
 		return true
 	} else if rsv2, ok := obj.(*ReplicationSpecVal); ok {
-		if rsv.cas == rsv2.cas {
-			if !rsv.spec.(*metadata.ReplicationSpecification).SameSpec(rsv2.spec.(*metadata.ReplicationSpecification)) {
+		if rsv.cas == rsv2.cas && rsv.spec != nil && rsv2.spec != nil {
+			if !rsv.spec.(metadata.GenericSpecification).SameSpecGeneric(rsv2.spec.(metadata.GenericSpecification)) {
 				// increment cas only when the metadata portion of ReplicationSpecVal has been changed
 				// in other words, concurrent updates to the metadata portion is not allowed -- later write fails
 				// while concurrent updates to the runtime portion is allowed -- later write wins

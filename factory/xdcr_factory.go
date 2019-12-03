@@ -122,6 +122,7 @@ func (xdcrf *XDCRFactory) NewPipeline(topic string, progress_recorder common.Pip
 	xdcrf.cacheMtx.Lock()
 	cachedSpec, exists := xdcrf.cacheSpecMap[topic]
 	if !exists {
+		xdcrf.logger.Infof("NEIL DEBUG factory adding topic: %v\n", topic)
 		xdcrf.cacheSpecMap[topic] = spec
 		cachedSpec = spec
 	}
@@ -273,7 +274,7 @@ func (x *XDCRFactory) DeletePipeline(topic string) {
 
 	spec, ok := x.cacheSpecMap[topic]
 	if !ok {
-		panic("Cannot find spec")
+		panic(fmt.Sprintf("Cannot find spec %v", topic))
 	}
 	delete(x.cacheSpecMap, topic)
 
