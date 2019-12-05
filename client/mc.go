@@ -747,7 +747,10 @@ func GetSubDocVal(subPaths []string) (extraBuf, valueBuf []byte) {
 	}
 
 	// Xattr retrieval - subdoc multi get
-	extraBuf = append(extraBuf, uint8(0x04))
+	// Set deleted true only if it is not expiration
+	if len(subPaths) != 1 || subPaths[0] != "$document.exptime" {
+		extraBuf = append(extraBuf, uint8(0x04))
+	}
 
 	valueBuf = make([]byte, num*4+totalBytesLen)
 
