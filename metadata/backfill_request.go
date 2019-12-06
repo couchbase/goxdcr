@@ -38,9 +38,9 @@ func (b *BackfillPersistInfo) GetHighestEndSeqno() (uint64, error) {
 	return highSeqno, nil
 }
 
-func (b *BackfillPersistInfo) GetStreamType() DcpStreamType {
-	return DcpStreamTypeBackfill
-}
+//func (b *BackfillPersistInfo) GetStreamType() DcpStreamType {
+//	return DcpStreamTypeBackfill
+//}
 
 func (b *BackfillPersistInfo) Same(other *BackfillPersistInfo) bool {
 	if b == nil && other != nil || b != nil && other == nil {

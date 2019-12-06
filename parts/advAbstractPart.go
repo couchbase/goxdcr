@@ -11,41 +11,35 @@ package parts
 
 import (
 	"errors"
-	common "github.com/couchbase/goxdcr/common"
+	"github.com/couchbase/goxdcr/common"
 	component "github.com/couchbase/goxdcr/component"
 	"github.com/couchbase/goxdcr/log"
-	"github.com/couchbase/goxdcr/metadata"
 	"sync"
 )
 
-type AbstractPart struct {
-	*component.AbstractComponent
+type AdvAbstractPart struct {
+	*component.AdvAbstractComponent
+	connector common.Connector
 	stateLock sync.RWMutex
 	state     common.PartState
-	connector common.Connector
 }
 
-func NewAbstractPartWithLogger(id string,
-	logger *log.CommonLogger) AbstractPart {
-	return AbstractPart{
-		AbstractComponent: component.NewAbstractComponentWithLogger(id, logger),
-		state:             common.Part_Initial,
-		connector:         nil,
+func NewAdvAbstractPartWithLogger(id string, logger *log.CommonLogger) AdvAbstractPart {
+	return AdvAbstractPart{
+		AdvAbstractComponent: component.NewAdvAbstractComponentWithLogger(id, logger),
+		state:                common.Part_Initial,
+		connector:            nil,
 	}
 }
 
-func NewAbstractPart(id string) AbstractPart {
-	return NewAbstractPartWithLogger(id, log.NewLogger("AbstractPart", log.DefaultLoggerContext))
-}
-
-func (p *AbstractPart) Connector() common.Connector {
+func (p *AdvAbstractPart) Connector() common.Connector {
 	p.stateLock.RLock()
 	defer p.stateLock.RUnlock()
 
 	return p.connector
 }
 
-func (p *AbstractPart) SetConnector(connector common.Connector) error {
+func (p *AdvAbstractPart) SetConnector(connector common.Connector) error {
 	p.stateLock.Lock()
 	defer p.stateLock.Unlock()
 	if p.state.Get() != common.Part_Initial {
@@ -53,28 +47,19 @@ func (p *AbstractPart) SetConnector(connector common.Connector) error {
 	}
 
 	p.connector = connector
+	p.AdvAbstractComponent.Logger().Infof("NEIL DEBUG set connector to %v\n", connector.Id())
 	return nil
 }
 
-func (p *AbstractPart) State() common.PartState {
+func (p *AdvAbstractPart) State() common.PartState {
 	p.stateLock.RLock()
 	defer p.stateLock.RUnlock()
 	return p.state.Get()
 }
 
-func (p *AbstractPart) SetState(state common.PartState) error {
+func (p *AdvAbstractPart) SetState(state common.PartState) error {
 	p.stateLock.Lock()
 	defer p.stateLock.Unlock()
 
 	return p.state.Set(state, p.Id())
-}
-
-func (p *AbstractPart) IsReadyForHeartBeat() bool {
-	p.stateLock.RLock()
-	defer p.stateLock.RUnlock()
-	return p.state == common.Part_Running
-}
-
-func (p *AbstractPart) UpdateSettings(settings metadata.ReplicationSettingsMap) error {
-	return nil
 }

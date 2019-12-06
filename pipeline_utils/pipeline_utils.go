@@ -99,6 +99,17 @@ func RegisterAsyncComponentEventHandler(listenerMap map[string]common.AsyncCompo
 
 }
 
+func RegisterAsyncComponentEventHandlerWithLogger(listenerMap map[string]common.AsyncComponentEventListener, listenerName string, handler common.AsyncComponentEventHandler, logger *log.CommonLogger) {
+	for id, listener := range listenerMap {
+		logger.Infof("NEIL DEBUG id: %v listener: %v listenerName: %v\n", id, listener, listenerName)
+		if listenerName == GetElementNameFromIdWithIndex(id) {
+			logger.Infof("Registered...")
+			listener.RegisterComponentEventHandler(handler)
+		}
+	}
+
+}
+
 func IsPipelineUsingCapi(pipeline common.Pipeline) bool {
 	isCapi := false
 	for _, target := range pipeline.Targets() {

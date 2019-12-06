@@ -376,7 +376,7 @@ func NewDcpNozzle(id string,
 		targetBucketName:         targetBucketName,
 		vbnos:                    vbnos,
 		vb_xattr_seqno_map:       make(map[uint16]*uint64),
-		AbstractPart:             part, /*AbstractPart*/
+		AbstractPart:             part, /*AdvAbstractPart*/
 		bOpen:                    true, /*bOpen	bool*/
 		lock_bOpen:               sync.RWMutex{},
 		childrenWaitGrp:          sync.WaitGroup{}, /*childrenWaitGrp sync.WaitGroup*/
@@ -861,7 +861,7 @@ func (dcp *DcpNozzle) handleSystemEvent(event *mcc.UprEvent) {
 
 	vbno := event.VBucket
 	atomic.StoreUint64(&dcp.vbHighestManifestUidArray[vbno], manifestId)
-	dcp.Logger().Infof("Vb %v received system event %v with manifest ID: %v", vbno, event.SystemEvent, manifestId)
+	//	dcp.Logger().Infof("Vb %v received system event %v with manifest ID: %v", vbno, event.SystemEvent, manifestId)
 }
 
 func (dcp *DcpNozzle) Receive(data interface{}) error {
@@ -976,7 +976,7 @@ func (dcp *DcpNozzle) processData() (err error) {
 			} else if m.IsSystemEvent() {
 				// Let's just pretend we received it and processed it in one shot
 				dcp.handleSystemEvent(m)
-				dcp.RaiseEvent(common.NewEvent(common.DataReceived, m, dcp, nil /*derivedItems*/, nil /*otherInfos*/))
+				//				dcp.RaiseEvent(common.NewEvent(common.DataReceived, m, dcp, nil /*derivedItems*/, nil /*otherInfos*/))
 				dcp.RaiseEvent(common.NewEvent(common.DataFiltered, m, dcp.cachedConnector, nil, nil))
 				dcp.RaiseEvent(common.NewEvent(common.SystemEventReceived, m, dcp, nil /*derivedItems*/, nil /*otherInfos*/))
 			} else {

@@ -449,7 +449,7 @@ func (capi *CapiNozzle) writeToDataChan(dataChan chan *base.WrappedMCRequest, re
 		return nil
 	// provides an alternative exit path when capi stops
 	case <-capi.finish_ch:
-		return PartStoppedError
+		return common.PartStoppedError
 	}
 }
 
@@ -794,7 +794,7 @@ func (capi *CapiNozzle) batchSendWithRetry(batch *capiBatch) error {
 		}
 	} else {
 		capi.Logger().Errorf("%v error updating docs on target. err=%v\n", capi.Id(), err)
-		if err != PartStoppedError {
+		if err != common.PartStoppedError {
 			capi.handleGeneralError(err)
 		}
 	}
@@ -839,7 +839,7 @@ done:
 func (capi *CapiNozzle) validateRunningState() error {
 	state := capi.State()
 	if state == common.Part_Stopping || state == common.Part_Stopped || state == common.Part_Error {
-		return PartStoppedError
+		return common.PartStoppedError
 	}
 	return nil
 }

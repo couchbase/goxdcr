@@ -36,7 +36,9 @@ CLUSTER_NAME_XDCR_PORT_MAP=(["C1"]=13000 ["C2"]=13001)
 # Set c1 to have 2 buckets and c2 to have 1 bucket
 declare -a cluster1BucketsArr
 cluster1BucketsArr=("B0" "B1")
-CLUSTER_NAME_BUCKET_MAP=(["C1"]=${cluster1BucketsArr[@]}  ["C2"]="B2")
+cluster2BucketsArr=("B1" "B2")
+#CLUSTER_NAME_BUCKET_MAP=(["C1"]=${cluster1BucketsArr[@]}  ["C2"]="B2")
+CLUSTER_NAME_BUCKET_MAP=(["C1"]=${cluster1BucketsArr[@]}  ["C2"]=${cluster2BucketsArr[@]})
 
 # Bucket properties
 declare -A BucketProperty=(["ramQuotaMB"]=100)
@@ -68,6 +70,7 @@ function runDataLoad {
 #	runCbWorkloadGenBucket "C1" "B1" &
 #	runCbWorkloadGenBucket "C2" "B2" &
 	runCbWorkloadGenCollection "C1" "B1" "S1" "col1"
+	runCbWorkloadGenCollection "C2" "B1" "S1" "col1"
 	runCbWorkloadGenCollection "C2" "B2" "S1" "col1"
 	waitForBgJobs
 }
@@ -86,10 +89,11 @@ fi
 sleep 1
 createRemoteClusterReference "C1" "C2"
 createRemoteClusterReference "C2" "C1"
-sleep 1
-createBucketReplication "C1" "B1" "C2" "B2" DefaultBucketReplProperties
-createBucketReplication "C2" "B2" "C1" "B1" DefaultBucketReplProperties
 printGlobalScopeAndCollectionInfo
 runDataLoad
+sleep 3
+createBucketReplication "C1" "B1" "C2" "B1" DefaultBucketReplProperties
+#createBucketReplication "C1" "B1" "C2" "B2" DefaultBucketReplProperties
+createBucketReplication "C2" "B2" "C1" "B1" DefaultBucketReplProperties
 
 exportProvisionedConfig

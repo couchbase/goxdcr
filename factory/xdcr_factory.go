@@ -69,7 +69,9 @@ type XDCRFactory struct {
 	cacheMtx              sync.RWMutex
 	cacheSpecMap          map[string]*metadata.ReplicationSpecification
 	cacheSrcBucketReplCnt map[string]uint64
-	cacheSourceNozzles    map[string][]common.Nozzle
+	cacheSourceNozzles    map[string]map[string]common.Nozzle /* spec -> [ nozzleId -> nozzle] */
+	//	cacheKvVbMap          map[string]map[string][]uint16
+	cacheAdvRouter map[string]*parts.AdvRouter // key is sourceNozzleId
 }
 
 // set call back functions is done only once
@@ -103,7 +105,9 @@ func NewXDCRFactory(repl_spec_svc service_def.ReplicationSpecSvc,
 		collectionsManifestSvc:   collectionsManifestSvc,
 		cacheSpecMap:             make(map[string]*metadata.ReplicationSpecification),
 		cacheSrcBucketReplCnt:    make(map[string]uint64),
-		cacheSourceNozzles:       make(map[string][]common.Nozzle),
+		cacheSourceNozzles:       make(map[string]map[string]common.Nozzle),
+		//		cacheKvVbMap:             make(map[string]map[string][]uint16),
+		cacheAdvRouter: make(map[string]*parts.AdvRouter),
 	}
 }
 
@@ -120,9 +124,8 @@ func (xdcrf *XDCRFactory) NewPipeline(topic string, progress_recorder common.Pip
 	xdcrf.logger.Debugf("replication specification = %v\n", spec)
 
 	xdcrf.cacheMtx.Lock()
-	cachedSpec, exists := xdcrf.cacheSpecMap[topic]
-	if !exists {
-		xdcrf.logger.Infof("NEIL DEBUG factory adding topic: %v\n", topic)
+	cachedSpec, specExists := xdcrf.cacheSpecMap[topic]
+	if !specExists {
 		xdcrf.cacheSpecMap[topic] = spec
 		cachedSpec = spec
 	}
@@ -178,17 +181,21 @@ func (xdcrf *XDCRFactory) NewPipeline(topic string, progress_recorder common.Pip
 
 	xdcrf.logger.Infof("%v sourceCRMode=%v httpAuthMech=%v isCapiReplication=%v isTargetES=%v\n", topic, sourceCRMode, httpAuthMech, isCapiReplication, isTargetES)
 
+	var sourceNozzles map[string]common.Nozzle
+	var kv_vb_map map[string][]uint16
 	/**
 	 * Construct the Source nozzles
 	 * sourceNozzles - a map of DCPNozzleID -> *DCPNozzle
 	 * kv_vb_map - Map of SourceKVNode -> list of vbucket#'s that it's responsible for
 	 */
-	sourceNozzles, kv_vb_map, err := xdcrf.constructSourceNozzles(spec, topic, isCapiReplication, logger_ctx)
+	sourceNozzles, kv_vb_map, err = xdcrf.constructOrGetSourceNozzles(spec, topic, isCapiReplication, logger_ctx)
 	if err != nil {
+		xdcrf.cacheMtx.Unlock()
 		return nil, err
 	}
 	if len(sourceNozzles) == 0 {
 		// no pipeline is constructed if there is no source nozzle
+		xdcrf.cacheMtx.Unlock()
 		return nil, base.ErrorNoSourceNozzle
 	}
 
@@ -212,7 +219,7 @@ func (xdcrf *XDCRFactory) NewPipeline(topic string, progress_recorder common.Pip
 	// TODO construct queue parts. This will affect vbMap in router. may need an additional outNozzle -> downStreamPart/queue map in constructRouter
 
 	// construct routers to be able to connect the nozzles
-	for _, sourceNozzle := range sourceNozzles {
+	for sourceNozzleId, sourceNozzle := range sourceNozzles {
 		vblist := sourceNozzle.(*parts.DcpNozzle).GetVBList()
 		downStreamParts := make(map[string]common.Part)
 		for _, vb := range vblist {
@@ -228,12 +235,17 @@ func (xdcrf *XDCRFactory) NewPipeline(topic string, progress_recorder common.Pip
 			downStreamParts[targetNozzleId] = outNozzle
 		}
 
-		// Construct a router - each Source nozzle has a router.
 		router, err := xdcrf.constructRouter(sourceNozzle.Id(), spec, downStreamParts, vbNozzleMap, sourceCRMode, logger_ctx)
 		if err != nil {
 			return nil, err
 		}
-		sourceNozzle.SetConnector(router)
+
+		advRouter := xdcrf.getOrCreateAdvRouter(sourceNozzleId)
+		advRouter.AddRouter(router)
+
+		if !specExists {
+			sourceNozzle.SetConnector(advRouter)
+		}
 	}
 	progress_recorder("Source nozzles have been wired to target nozzles")
 
@@ -268,6 +280,7 @@ func (xdcrf *XDCRFactory) NewPipeline(topic string, progress_recorder common.Pip
 	return pipeline, nil
 }
 
+// TODO - think about when source topology changes pipelines will restart one by one but we really need a nuke option
 func (x *XDCRFactory) DeletePipeline(topic string) {
 	x.cacheMtx.Lock()
 	defer x.cacheMtx.Unlock()
@@ -285,7 +298,17 @@ func (x *XDCRFactory) DeletePipeline(topic string) {
 	x.cacheSrcBucketReplCnt[spec.SourceBucketName]--
 	if x.cacheSrcBucketReplCnt[spec.SourceBucketName] == 0 {
 		delete(x.cacheSrcBucketReplCnt, spec.SourceBucketName)
+		sourceNozzles, ok := x.cacheSourceNozzles[topic]
+		if !ok {
+			panic("Cannot find cached source nozzles")
+		}
+		for sourceNozzleId, _ := range sourceNozzles {
+			delete(x.cacheAdvRouter, sourceNozzleId)
+		}
+		delete(x.cacheSourceNozzles, topic)
+		//		delete(x.cacheKvVbMap, topic)
 	}
+
 }
 
 func min(num1 int, num2 int) int {
@@ -385,11 +408,14 @@ func (xdcrf *XDCRFactory) registerAsyncListenersOnTargets(pipeline common.Pipeli
  * 2. Map of SourceKVNode -> list of vbucket#'s that it's responsible for
  * Currently since XDCR is run on a per node, it should only have 1 source KV node in the map
  */
-func (xdcrf *XDCRFactory) constructSourceNozzles(spec *metadata.ReplicationSpecification,
+func (xdcrf *XDCRFactory) constructOrGetSourceNozzles(spec *metadata.ReplicationSpecification,
 	topic string,
 	isCapiReplication bool,
 	logger_ctx *log.LoggerContext) (map[string]common.Nozzle, map[string][]uint16, error) {
 	sourceNozzles := make(map[string]common.Nozzle)
+
+	xdcrf.cacheMtx.Lock()
+	defer xdcrf.cacheMtx.Unlock()
 
 	// TODO(Neil) - need to address this
 	maxNozzlesPerNode := spec.Settings.SourceNozzlePerNode
@@ -400,6 +426,7 @@ func (xdcrf *XDCRFactory) constructSourceNozzles(spec *metadata.ReplicationSpeci
 		return nil, nil, err
 	}
 
+	var specExists bool
 	for kvaddr, vbnos := range kv_vb_map {
 
 		numOfVbs := len(vbnos)
@@ -423,12 +450,34 @@ func (xdcrf *XDCRFactory) constructSourceNozzles(spec *metadata.ReplicationSpeci
 
 			// construct dcpNozzles
 			// partIds of the dcpNozzle nodes look like "dcpNozzle_$kvaddr_1"
-			id := xdcrf.partId(DCP_NOZZLE_NAME_PREFIX, spec.Id, kvaddr, i)
-			dcpNozzle := parts.NewDcpNozzle(id,
-				spec.SourceBucketName, spec.TargetBucketName, vbList, xdcrf.xdcr_topology_svc, isCapiReplication, logger_ctx,
-				xdcrf.utils, xdcrf.collectionsManifestSvc)
+			id := xdcrf.partId(fmt.Sprintf("%v_total%v", DCP_NOZZLE_NAME_PREFIX, maxNozzlesPerNode), spec.SourceBucketName, kvaddr, i)
+			if !specExists {
+				xdcrf.cacheSourceNozzles[spec.Id] = make(map[string]common.Nozzle)
+				specExists = true
+			}
+
+			var dcpNozzle common.Nozzle
+			for _, nozzleMap := range xdcrf.cacheSourceNozzles {
+				for cachedId, nozzle := range nozzleMap {
+					if cachedId == id {
+						dcpNozzle = nozzle
+						xdcrf.logger.Infof("NEIL DEBUG found dcp nozzle: %v\n", cachedId)
+						break
+					}
+				}
+				if dcpNozzle != nil {
+					break
+				}
+			}
+
+			if dcpNozzle == nil {
+				dcpNozzle = parts.NewDcpNozzle(id,
+					spec.SourceBucketName, spec.TargetBucketName, vbList, xdcrf.xdcr_topology_svc, isCapiReplication, logger_ctx,
+					xdcrf.utils, xdcrf.collectionsManifestSvc)
+				xdcrf.cacheSourceNozzles[spec.Id][id] = dcpNozzle
+				xdcrf.logger.Infof("NEIL DEBUG created and cached nozzle %v\n", id)
+			}
 			sourceNozzles[dcpNozzle.Id()] = dcpNozzle
-			xdcrf.logger.Debugf("Constructed source nozzle %v with vbList = %v \n", dcpNozzle.Id(), vbList)
 		}
 
 		xdcrf.logger.Infof("Constructed %v source nozzles for %v vbs on %v\n", len(sourceNozzles), numOfVbs, kvaddr)
@@ -591,6 +640,19 @@ func (xdcrf *XDCRFactory) constructOutgoingNozzles(spec *metadata.ReplicationSpe
 	xdcrf.logger.Infof("Constructed %v outgoing nozzles\n", len(outNozzles))
 	xdcrf.logger.Debugf("vbNozzleMap = %v\n", vbNozzleMap)
 	return
+}
+
+func (x *XDCRFactory) getOrCreateAdvRouter(dcpId string) *parts.AdvRouter {
+	x.cacheMtx.Lock()
+	defer x.cacheMtx.Unlock()
+
+	router, exists := x.cacheAdvRouter[dcpId]
+	if !exists {
+		router = parts.NewAdvRouter(dcpId)
+		x.cacheAdvRouter[dcpId] = router
+	}
+
+	return router
 }
 
 func (xdcrf *XDCRFactory) constructRouter(id string, spec *metadata.ReplicationSpecification,

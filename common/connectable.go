@@ -22,5 +22,4 @@ import ()
 type Connectable interface {
 	Connector() Connector
 	SetConnector(connector Connector) error
-	//	UnsetConnector(connector Connector) error
 }

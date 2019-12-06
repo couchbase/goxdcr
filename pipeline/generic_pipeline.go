@@ -205,7 +205,7 @@ func (genericPipeline *GenericPipeline) startPart(part common.Part, settings met
 	}
 
 	err = part.Start(partSettings)
-	if err != nil && err.Error() != parts.PartAlreadyStartedError.Error() {
+	if err != nil && err.Error() != common.PartAlreadyStartedError.Error() {
 		err_ch <- base.ComponentError{part.Id(), err}
 	}
 }
@@ -671,7 +671,7 @@ func (genericPipeline *GenericPipeline) Layout() string {
 	content := ""
 	for _, sourceNozzle := range genericPipeline.Sources() {
 		dcpSection := fmt.Sprintf("\t%s:{vbList=%v}\n", sourceNozzle.Id(), sourceNozzle.(*parts.DcpNozzle).GetVBList())
-		router := sourceNozzle.Connector().(*parts.Router)
+		router := sourceNozzle.Connector().(*parts.AdvRouter)
 		routerSection := fmt.Sprintf("\t\t%s :{\nroutingMap=%v}\n", router.Id(), router.RoutingMapByDownstreams())
 		downstreamParts := router.DownStreams()
 		targetNozzleSection := ""

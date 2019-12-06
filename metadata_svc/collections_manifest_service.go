@@ -13,9 +13,9 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"github.com/couchbase/goxdcr/base"
+	"github.com/couchbase/goxdcr/common"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
-	"github.com/couchbase/goxdcr/parts"
 	"github.com/couchbase/goxdcr/service_def"
 	"github.com/couchbase/goxdcr/utils"
 	"reflect"
@@ -630,7 +630,7 @@ func (a *CollectionsManifestAgent) Start() error {
 		go a.runPersistRequestHandler()
 		return err
 	}
-	return parts.PartAlreadyStartedError
+	return common.PartAlreadyStartedError
 }
 
 // Don't block

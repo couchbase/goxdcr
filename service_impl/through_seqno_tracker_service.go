@@ -24,6 +24,7 @@ import (
 	"github.com/couchbase/goxdcr/pipeline_utils"
 	"github.com/couchbase/goxdcr/service_def"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -77,6 +78,8 @@ type ThroughSeqnoTrackerSvc struct {
 	unitTesting bool
 
 	replSpecSvc service_def.ReplicationSpecSvc
+
+	dataReceivedCnt uint64
 }
 
 // struct containing two seqno lists that need to be accessed and locked together
@@ -224,10 +227,10 @@ func (tsTracker *ThroughSeqnoTrackerSvc) Attach(pipeline common.Pipeline) error 
 
 	asyncListenerMap := pipeline_pkg.GetAllAsyncComponentEventListeners(pipeline)
 
-	pipeline_utils.RegisterAsyncComponentEventHandler(asyncListenerMap, base.DataSentEventListener, tsTracker)
-	pipeline_utils.RegisterAsyncComponentEventHandler(asyncListenerMap, base.DataFailedCREventListener, tsTracker)
-	pipeline_utils.RegisterAsyncComponentEventHandler(asyncListenerMap, base.DataFilteredEventListener, tsTracker)
-	pipeline_utils.RegisterAsyncComponentEventHandler(asyncListenerMap, base.DataReceivedEventListener, tsTracker)
+	pipeline_utils.RegisterAsyncComponentEventHandlerWithLogger(asyncListenerMap, base.DataSentEventListener, tsTracker, tsTracker.logger)
+	pipeline_utils.RegisterAsyncComponentEventHandlerWithLogger(asyncListenerMap, base.DataFailedCREventListener, tsTracker, tsTracker.logger)
+	pipeline_utils.RegisterAsyncComponentEventHandlerWithLogger(asyncListenerMap, base.DataFilteredEventListener, tsTracker, tsTracker.logger)
+	pipeline_utils.RegisterAsyncComponentEventHandlerWithLogger(asyncListenerMap, base.DataReceivedEventListener, tsTracker, tsTracker.logger)
 
 	//register pipeline supervisor as through seqno service's error handler
 	supervisor := pipeline.RuntimeContext().Service(base.PIPELINE_SUPERVISOR_SVC)
@@ -298,13 +301,19 @@ func (tsTracker *ThroughSeqnoTrackerSvc) ProcessEvent(event *common.Event) error
 		tsTracker.addFailedCRSeqno(vbno, seqno)
 		//		tsTracker.logger.Infof("NEIL vb %v failedCR seqno %v", vbno, seqno)
 	case common.DataReceived:
-		// do nothing
+		upr_event := event.Data.(*mcc.UprEvent)
+		seqno := upr_event.Seqno
+		vbno := upr_event.VBucket
+		// Sets last sequence number, and should the sequence number skip due to gap, this will take care of it
+		tsTracker.processGapSeqnos(vbno, seqno)
+		atomic.AddUint64(&tsTracker.dataReceivedCnt, 1)
 	case common.SystemEventReceived:
 		uprEvent := event.Data.(*mcc.UprEvent)
 		seqno := uprEvent.Seqno
 		vbno := uprEvent.VBucket
 		tsTracker.markSystemEvent(uprEvent)
 		tsTracker.processGapSeqnos(vbno, seqno)
+		atomic.AddUint64(&tsTracker.dataReceivedCnt, 1)
 	default:
 		tsTracker.logger.Warnf("Incorrect event type, %v, received by %v", event.EventType, tsTracker.id)
 
@@ -705,7 +714,8 @@ func (tsTracker *ThroughSeqnoTrackerSvc) PrintStatusSummary() {
 		}
 	}
 
-	tsTracker.logger.Infof("%v time_spent=%v num_vb=%v max_sent=%v avg_sent=%v max_filtered=%v avg_filtered=%v max_failed_cr=%v avg_failed_cr=%v max_gap=%v avg_gap=%v\n",
+	tsTracker.logger.Infof("%v time_spent=%v num_vb=%v max_sent=%v avg_sent=%v max_filtered=%v avg_filtered=%v max_failed_cr=%v avg_failed_cr=%v max_gap=%v avg_gap=%v counter=%v\n",
 		tsTracker.id, time.Since(start_time), count, max_sent, sum_sent/count, max_filtered, sum_filtered/count, max_failed_cr, sum_failed_cr/count,
-		max_gap, sum_gap/count)
+		max_gap, sum_gap/count, atomic.LoadUint64(&tsTracker.dataReceivedCnt))
+
 }

@@ -1002,19 +1002,19 @@ func (xmem *XmemNozzle) batchReady() error {
 			xmem.initNewBatch()
 		// provides an alterntive exit path when xmem stops
 		case <-xmem.finish_ch:
-			return PartStoppedError
+			return common.PartStoppedError
 		}
 	}
 	return nil
 }
 
 func (xmem *XmemNozzle) Receive(data interface{}) error {
-	defer func() {
-		if r := recover(); r != nil {
-			xmem.Logger().Warnf("%v recovered from panic in Receive. arg=%v", xmem.Id(), r)
-			xmem.handleGeneralError(errors.New(fmt.Sprintf("%v", r)))
-		}
-	}()
+	//	defer func() {
+	//		if r := recover(); r != nil {
+	//			xmem.Logger().Warnf("%v recovered from panic in Receive. arg=%v", xmem.Id(), r)
+	//			xmem.handleGeneralError(errors.New(fmt.Sprintf("%v", r)))
+	//		}
+	//	}()
 
 	err := xmem.validateRunningState()
 	if err != nil {
@@ -1040,6 +1040,30 @@ func (xmem *XmemNozzle) Receive(data interface{}) error {
 	return err
 }
 
+func (xmem *XmemNozzle) getManifestId() uint64 {
+	xmem.collectionsManifestMtx.RLock()
+	defer xmem.collectionsManifestMtx.RUnlock()
+
+	if xmem.collectionsManifest == nil {
+		xmem.collectionsManifestMtx.RUnlock()
+		xmem.refreshTargetManifest()
+		xmem.collectionsManifestMtx.RLock()
+	}
+	return xmem.collectionsManifest.Uid()
+}
+
+func (xmem *XmemNozzle) getCollectionId(scopeName, collectionName string) (uint64, error) {
+	xmem.collectionsManifestMtx.RLock()
+	defer xmem.collectionsManifestMtx.RUnlock()
+
+	if xmem.collectionsManifest == nil {
+		xmem.collectionsManifestMtx.RUnlock()
+		xmem.refreshTargetManifest()
+		xmem.collectionsManifestMtx.RLock()
+	}
+	return xmem.collectionsManifest.GetCollectionId(scopeName, collectionName)
+}
+
 func (xmem *XmemNozzle) mapToTargetCollection(request *base.WrappedMCRequest) error {
 	if !request.CollectionUsed {
 		return nil
@@ -1050,8 +1074,8 @@ func (xmem *XmemNozzle) mapToTargetCollection(request *base.WrappedMCRequest) er
 	var manifestId uint64
 	matchCollectionIDFunc := func() error {
 		xmem.collectionsManifestMtx.RLock()
-		manifestId = xmem.collectionsManifest.Uid()
-		targetColId, err = xmem.collectionsManifest.GetCollectionId(request.ScopeName, request.CollectionName)
+		manifestId = xmem.getManifestId()
+		targetColId, err = xmem.getCollectionId(request.ScopeName, request.CollectionName)
 
 		if err != nil {
 			fmt.Errorf("%v: manifest: %v asking for target scope: %v collection: %v", err, xmem.collectionsManifest, request.ScopeName, request.CollectionName)
@@ -1190,7 +1214,7 @@ func (xmem *XmemNozzle) processData_sendbatch(finch chan bool, waitGrp *sync.Wai
 
 			err = xmem.processBatch(batch)
 			if err != nil {
-				if err == PartStoppedError {
+				if err == common.PartStoppedError {
 					goto done
 				}
 
@@ -1209,7 +1233,7 @@ func (xmem *XmemNozzle) processData_sendbatch(finch chan bool, waitGrp *sync.Wai
 					err = xmem.batchReady()
 					<-xmem.batch_lock
 					if err != nil {
-						if err == PartStoppedError {
+						if err == common.PartStoppedError {
 							goto done
 						} else {
 							xmem.handleGeneralError(err)
@@ -1501,7 +1525,7 @@ func (xmem *XmemNozzle) sendSetMeta_internal(batch *dataBatch) error {
 	if batch != nil {
 		//batch send
 		err = xmem.batchSetMetaWithRetry(batch, xmem.config.maxRetry)
-		if err != nil && err != PartStoppedError {
+		if err != nil && err != common.PartStoppedError {
 			high_level_err := "Error writing documents to memcached in target cluster."
 			xmem.Logger().Errorf("%v %v. err=%v", xmem.Id(), high_level_err, err)
 			xmem.handleGeneralError(errors.New(high_level_err))
@@ -1952,7 +1976,6 @@ func (xmem *XmemNozzle) refreshTargetManifest() {
 	defer xmem.collectionsManifestMtx.Unlock()
 
 	xmem.collectionsManifest = xmem.specificManifestGetter(xmem.vbList)
-	xmem.Logger().Infof("NEIL DEBUG xmem refreshTargetManifest got version: %v\n", xmem.collectionsManifest.Uid())
 }
 
 func (xmem *XmemNozzle) initialize(settings metadata.ReplicationSettingsMap) error {
@@ -2057,7 +2080,7 @@ func (xmem *XmemNozzle) receiveResponse(finch chan bool, waitGrp *sync.WaitGroup
 
 			response, err, rev := xmem.readFromClient(xmem.client_for_setMeta, true)
 			if err != nil {
-				if err == PartStoppedError {
+				if err == common.PartStoppedError {
 					goto done
 				} else if err == fatalError {
 					// if possible, log the corresponding request to facilitate debugging
@@ -2693,7 +2716,7 @@ func (xmem *XmemNozzle) getConn(client *xmemClient, readTimeout bool, writeTimeo
 func (xmem *XmemNozzle) validateRunningState() error {
 	state := xmem.State()
 	if state == common.Part_Stopping || state == common.Part_Stopped || state == common.Part_Error {
-		return PartStoppedError
+		return common.PartStoppedError
 	}
 	return nil
 }
@@ -3030,10 +3053,10 @@ func (xmem *XmemNozzle) writeToDataChan(item *base.WrappedMCRequest) error {
 			return nil
 		// provides an alternative exit path when xmem stops
 		case <-xmem.finish_ch:
-			return PartStoppedError
+			return common.PartStoppedError
 		}
 	case <-xmem.finish_ch:
-		return PartStoppedError
+		return common.PartStoppedError
 	}
 }
 
@@ -3047,7 +3070,7 @@ func (xmem *XmemNozzle) readFromDataChan() (*base.WrappedMCRequest, error) {
 		xmem.dataChanControl()
 		return item, nil
 	case <-xmem.finish_ch:
-		return nil, PartStoppedError
+		return nil, common.PartStoppedError
 	}
 }
 
