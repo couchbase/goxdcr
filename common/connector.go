@@ -13,10 +13,7 @@ import (
 	"github.com/couchbase/goxdcr/metadata"
 )
 
-//Connector abstracts the logic which moves data from one processing steps to another
-type Connector interface {
-	Component
-
+type ConnectorCommon interface {
 	Forward(data interface{}) error
 
 	//get this node's down stream nodes
@@ -26,4 +23,16 @@ type Connector interface {
 	AddDownStream(partId string, part Part) error
 
 	UpdateSettings(settings metadata.ReplicationSettingsMap) error
+}
+
+//Connector abstracts the logic which moves data from one processing steps to another
+type Connector interface {
+	Component
+	ConnectorCommon
+}
+
+type AdvConnector interface {
+	AdvComponent
+	ConnectorCommon
+	SpecificDownStreams(topic string) map[string]Part
 }

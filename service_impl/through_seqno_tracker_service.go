@@ -93,12 +93,12 @@ func newDualSortedSeqnoListWithLock() *DualSortedSeqnoListWithLock {
 	return &DualSortedSeqnoListWithLock{make([]uint64, 0), make([]uint64, 0), &sync.RWMutex{}}
 }
 
-func (list_obj *DualSortedSeqnoListWithLock) getSortedSeqnoLists() ([]uint64, []uint64) {
+func (list_obj *DualSortedSeqnoListWithLock) getSortedSeqnoLists(vbno uint16, identifier string) ([]uint64, []uint64) {
 	list_obj.lock.RLock()
 	defer list_obj.lock.RUnlock()
 
 	if len(list_obj.seqno_list_1) != len(list_obj.seqno_list_2) {
-		panic(fmt.Sprintf("lengths of gap_seqno_lists do not match. gap_seqno_list_1=%v, gap_seqno_list_2=%v", list_obj.seqno_list_1, list_obj.seqno_list_2))
+		panic(fmt.Sprintf("type %v vbno %v lengths of gap_seqno_lists do not match. gap_seqno_list_1=%v, gap_seqno_list_2=%v", vbno, identifier, list_obj.seqno_list_1, list_obj.seqno_list_2))
 	}
 
 	return base.DeepCopyUint64Array(list_obj.seqno_list_1), base.DeepCopyUint64Array(list_obj.seqno_list_2)
@@ -365,11 +365,18 @@ func (tsTracker *ThroughSeqnoTrackerSvc) processGapSeqnos(vbno uint16, current_s
 }
 
 func (tsTracker *ThroughSeqnoTrackerSvc) truncateSeqnoLists(vbno uint16, through_seqno uint64) {
+	//	origData := fmt.Sprintf("truncating throughSeq %v with\nSent: %v Filtered: %v Gap: %v SystemEvent: %v",
+	//		through_seqno, tsTracker.vb_sent_seqno_list_map[vbno], tsTracker.vb_filtered_seqno_list_map[vbno],
+	//		tsTracker.vb_gap_seqno_list_map[vbno], tsTracker.vbSystemEventsSeqnoListMap[vbno])
 	tsTracker.vb_sent_seqno_list_map[vbno].TruncateSeqnos(through_seqno)
 	tsTracker.vb_filtered_seqno_list_map[vbno].TruncateSeqnos(through_seqno)
 	tsTracker.vb_failed_cr_seqno_list_map[vbno].TruncateSeqnos(through_seqno)
 	tsTracker.vb_gap_seqno_list_map[vbno].truncateSeqnos(vbno, through_seqno)
 	tsTracker.vbSystemEventsSeqnoListMap[vbno].truncateSeqno1Floor(through_seqno)
+	//	afterData := fmt.Sprintf("truncating throughSeq %v with\nSent: %v Filtered: %v Gap: %v SystemEvent: %v",
+	//		through_seqno, tsTracker.vb_sent_seqno_list_map[vbno], tsTracker.vb_filtered_seqno_list_map[vbno],
+	//		tsTracker.vb_gap_seqno_list_map[vbno], tsTracker.vbSystemEventsSeqnoListMap[vbno])
+	//	tsTracker.logger.Infof("%v vb %v ORIG: %v ... AFTER :%v", tsTracker.Id(), vbno, origData, afterData)
 }
 
 /**
@@ -406,10 +413,10 @@ func (tsTracker *ThroughSeqnoTrackerSvc) GetThroughSeqno(vbno uint16) uint64 {
 	max_filtered_seqno := maxSeqno(filtered_seqno_list)
 	failed_cr_seqno_list := tsTracker.vb_failed_cr_seqno_list_map[vbno].GetSortedSeqnoList(false)
 	max_failed_cr_seqno := maxSeqno(failed_cr_seqno_list)
-	gap_seqno_list_1, gap_seqno_list_2 := tsTracker.vb_gap_seqno_list_map[vbno].getSortedSeqnoLists()
+	gap_seqno_list_1, gap_seqno_list_2 := tsTracker.vb_gap_seqno_list_map[vbno].getSortedSeqnoLists(vbno, "gap")
 	max_end_gap_seqno := maxSeqno(gap_seqno_list_2)
 	// TODO - think some more about manifestID
-	systemEventSeqnoList, _ := tsTracker.vbSystemEventsSeqnoListMap[vbno].getSortedSeqnoLists()
+	systemEventSeqnoList, _ := tsTracker.vbSystemEventsSeqnoListMap[vbno].getSortedSeqnoLists(vbno, "sys")
 	maxSystemEventSeqno := maxSeqno(systemEventSeqnoList)
 
 	// Goal of algorithm:

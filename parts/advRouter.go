@@ -11,36 +11,86 @@ package parts
 
 import (
 	"errors"
+	"fmt"
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/common"
+	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
 	"sync"
+	"sync/atomic"
 )
 
 // Advanced router is a conglomerate of multiple regular routers
 type AdvRouter struct {
-	common.Connector
+	common.AdvConnector
 	id string
 
-	routersList map[string]*Router
-	mtx         sync.RWMutex
+	routersOpen    map[string]*uint32
+	routersList    map[string]*Router
+	topicRouterMap map[string]*Router
+	mtx            sync.RWMutex
+
+	logger    *log.CommonLogger
+	debugOnce sync.Once
 }
 
-func NewAdvRouter(id string) *AdvRouter {
+func NewAdvRouter(id string, logger *log.CommonLogger) *AdvRouter {
 	return &AdvRouter{
-		routersList: make(map[string]*Router),
-		id:          id,
+		logger:         logger,
+		routersList:    make(map[string]*Router),
+		routersOpen:    make(map[string]*uint32),
+		topicRouterMap: make(map[string]*Router),
+		id:             id,
 	}
 }
 
-func (a *AdvRouter) AddRouter(router *Router) {
+func (a *AdvRouter) Open(topic string) {
+	a.mtx.RLock()
+	defer a.mtx.RUnlock()
+
+	router, found := a.topicRouterMap[topic]
+	if !found {
+		panic(fmt.Sprintf("Adv router not found for topic %v", topic))
+	}
+	atomic.StoreUint32(a.routersOpen[router.Id()], 1)
+	a.logger.Infof("Advanced router %v opened %v", a.Id(), router.Id())
+}
+
+func (a *AdvRouter) Close(topic string) {
+	a.mtx.RLock()
+	defer a.mtx.RUnlock()
+
+	router, found := a.topicRouterMap[topic]
+	if !found {
+		panic(fmt.Sprintf("Adv router not found for topic %v", topic))
+	}
+	atomic.StoreUint32(a.routersOpen[router.Id()], 0)
+	a.logger.Infof("Advanced router %v closed %v", a.Id(), router.Id())
+}
+
+func (a *AdvRouter) RemoveRouter(topic string, router *Router) {
+	a.mtx.Lock()
+	defer a.mtx.Unlock()
+
+	delete(a.topicRouterMap, topic)
+	delete(a.routersList, router.Id())
+	delete(a.routersOpen, router.Id())
+}
+
+func (a *AdvRouter) AddRouter(topic string, router *Router) {
 	if router == nil {
 		return
 	}
 
 	a.mtx.Lock()
 	defer a.mtx.Unlock()
+	_, exists := a.routersList[router.Id()]
+	a.logger.Infof("NEIL DEBUG advRouter %v added router: %v alreadyExists? %v", a.Id(), router.Id(), exists)
 	a.routersList[router.Id()] = router
+	a.topicRouterMap[topic] = router
+
+	var state uint32
+	a.routersOpen[router.Id()] = &state
 }
 
 func (a *AdvRouter) RoutingMapByDownstreams() map[string][]uint16 {
@@ -65,41 +115,67 @@ func (a *AdvRouter) Id() string {
 }
 
 func (a *AdvRouter) RegisterComponentEventListener(eventType common.ComponentEventType, listener common.ComponentEventListener) error {
-	a.mtx.RLock()
-	defer a.mtx.RUnlock()
-
-	errMap := make(base.ErrorMap)
-	for routerName, router := range a.routersList {
-		err := router.RegisterComponentEventListener(eventType, listener)
-		if err != nil {
-			errMap[routerName] = err
-		}
-	}
-
-	if len(errMap) > 0 {
-		return errors.New(base.FlattenErrorMap(errMap))
-	} else {
-		return nil
-	}
+	//	a.mtx.RLock()
+	//	defer a.mtx.RUnlock()
+	//
+	//	errMap := make(base.ErrorMap)
+	//	for routerName, router := range a.routersList {
+	//		err := router.RegisterComponentEventListener(eventType, listener)
+	//		if err != nil {
+	//			errMap[routerName] = err
+	//		}
+	//	}
+	//
+	//	if len(errMap) > 0 {
+	//		return errors.New(base.FlattenErrorMap(errMap))
+	//	} else {
+	//		return nil
+	//	}
+	return base.ErrorNotImplemented
 }
 
 func (a *AdvRouter) UnRegisterComponentEventListener(eventType common.ComponentEventType, listener common.ComponentEventListener) error {
+	//	a.mtx.RLock()
+	//	defer a.mtx.RUnlock()
+	//
+	//	errMap := make(base.ErrorMap)
+	//	for routerName, router := range a.routersList {
+	//		err := router.UnRegisterComponentEventListener(eventType, listener)
+	//		if err != nil {
+	//			errMap[routerName] = err
+	//		}
+	//	}
+	//
+	//	if len(errMap) > 0 {
+	//		return errors.New(base.FlattenErrorMap(errMap))
+	//	} else {
+	//		return nil
+	//	}
+	return base.ErrorNotImplemented
+}
+
+func (a *AdvRouter) RegisterSpecificComponentEventListener(topic string, eventType common.ComponentEventType, listener common.ComponentEventListener) error {
 	a.mtx.RLock()
 	defer a.mtx.RUnlock()
 
-	errMap := make(base.ErrorMap)
-	for routerName, router := range a.routersList {
-		err := router.UnRegisterComponentEventListener(eventType, listener)
-		if err != nil {
-			errMap[routerName] = err
-		}
+	router, found := a.topicRouterMap[topic]
+	if !found {
+		return base.ErrorNotFound
 	}
 
-	if len(errMap) > 0 {
-		return errors.New(base.FlattenErrorMap(errMap))
-	} else {
-		return nil
+	return router.RegisterComponentEventListener(eventType, listener)
+}
+
+func (a *AdvRouter) UnRegisterSpecificComponentEventListener(topic string, eventType common.ComponentEventType, listener common.ComponentEventListener) error {
+	a.mtx.RLock()
+	defer a.mtx.RUnlock()
+
+	router, found := a.topicRouterMap[topic]
+	if !found {
+		return base.ErrorNotFound
 	}
+
+	return router.UnRegisterComponentEventListener(eventType, listener)
 }
 
 func (a *AdvRouter) AsyncComponentEventListeners() map[string]common.AsyncComponentEventListener {
@@ -116,12 +192,26 @@ func (a *AdvRouter) AsyncComponentEventListeners() map[string]common.AsyncCompon
 	return totalMap
 }
 
+func (a *AdvRouter) SpecificAsyncComponentEventListeners(topic string) map[string]common.AsyncComponentEventListener {
+	a.mtx.RLock()
+	defer a.mtx.RUnlock()
+
+	router, ok := a.topicRouterMap[topic]
+	if !ok {
+		return nil
+	}
+	return router.AsyncComponentEventListeners()
+}
+
 func (a *AdvRouter) RaiseEvent(event *common.Event) {
 	a.mtx.RLock()
 	defer a.mtx.RUnlock()
 
 	for _, router := range a.routersList {
-		router.RaiseEvent(event)
+		open := atomic.LoadUint32(a.routersOpen[router.Id()]) != 0
+		if open {
+			router.RaiseEvent(event)
+		}
 	}
 }
 
@@ -131,8 +221,14 @@ func (a *AdvRouter) Forward(data interface{}) error {
 	a.mtx.RLock()
 	defer a.mtx.RUnlock()
 
+	var debugString string
 	for routerName, router := range a.routersList {
+		open := atomic.LoadUint32(a.routersOpen[routerName]) != 0
+		if !open {
+			return nil
+		}
 		err := router.Forward(data)
+		debugString = fmt.Sprintf("%v%v%v", debugString, " forwardedTo:", routerName)
 		if err != nil {
 			if errMap == nil {
 				errMap = make(base.ErrorMap)
@@ -141,11 +237,26 @@ func (a *AdvRouter) Forward(data interface{}) error {
 		}
 	}
 
+	a.debugOnce.Do(func() {
+		a.logger.Infof("NEIL DEBUG advRouter %v", debugString)
+	})
+
 	if len(errMap) > 0 {
 		return errors.New(base.FlattenErrorMap(errMap))
 	} else {
 		return nil
 	}
+}
+
+func (a *AdvRouter) SpecificDownStreams(topic string) map[string]common.Part {
+	a.mtx.RLock()
+	defer a.mtx.RUnlock()
+
+	router, ok := a.topicRouterMap[topic]
+	if !ok {
+		return nil
+	}
+	return router.DownStreams()
 }
 
 func (a *AdvRouter) DownStreams() map[string]common.Part {

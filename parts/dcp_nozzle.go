@@ -276,7 +276,7 @@ type DcpNozzleIface interface {
 /* struct DcpNozzle
 *************************************/
 type DcpNozzle struct {
-	AbstractPart
+	AdvAbstractPart
 
 	// the list of vbuckets that the dcp nozzle is responsible for
 	// this allows multiple  dcp nozzles to be created for a kv node
@@ -353,7 +353,7 @@ type DcpNozzle struct {
 
 	specificManifestGetter service_def.CollectionsManifestReqFunc
 
-	cachedConnector common.Connector
+	cachedConnector common.AdvConnector
 
 	// Start/Stop Synchronization
 	startStopSync sync.Mutex
@@ -369,14 +369,14 @@ func NewDcpNozzle(id string,
 	utilsIn utilities.UtilsIface,
 	collectionsManifestSvc service_def.CollectionsManifestSvc) *DcpNozzle {
 
-	part := NewAbstractPartWithLogger(id, log.NewLogger("DcpNozzle", logger_context))
+	part := NewAdvAbstractPartWithLogger(id, log.NewLogger("DcpNozzle", logger_context))
 
 	dcp := &DcpNozzle{
 		sourceBucketName:         sourceBucketName,
 		targetBucketName:         targetBucketName,
 		vbnos:                    vbnos,
 		vb_xattr_seqno_map:       make(map[uint16]*uint64),
-		AbstractPart:             part, /*AdvAbstractPart*/
+		AdvAbstractPart:          part, /*AdvAbstractPart*/
 		bOpen:                    true, /*bOpen	bool*/
 		lock_bOpen:               sync.RWMutex{},
 		childrenWaitGrp:          sync.WaitGroup{}, /*childrenWaitGrp sync.WaitGroup*/
@@ -593,7 +593,7 @@ func (dcp *DcpNozzle) initialize(settings metadata.ReplicationSettingsMap) (err 
 		return errors.New("setting 'stats_interval' is missing")
 	}
 
-	dcp.cachedConnector = dcp.Connector()
+	dcp.cachedConnector, _ = dcp.AdvConnector()
 	return
 }
 
@@ -976,8 +976,8 @@ func (dcp *DcpNozzle) processData() (err error) {
 			} else if m.IsSystemEvent() {
 				// Let's just pretend we received it and processed it in one shot
 				dcp.handleSystemEvent(m)
-				//				dcp.RaiseEvent(common.NewEvent(common.DataReceived, m, dcp, nil /*derivedItems*/, nil /*otherInfos*/))
-				dcp.RaiseEvent(common.NewEvent(common.DataFiltered, m, dcp.cachedConnector, nil, nil))
+				// TODO - Not really filtered because we're supposed to process system event later
+				//	dcp.RaiseEvent(common.NewEvent(common.DataFiltered, m, dcp.cachedConnector, nil, nil))
 				dcp.RaiseEvent(common.NewEvent(common.SystemEventReceived, m, dcp, nil /*derivedItems*/, nil /*otherInfos*/))
 			} else {
 				// Regular mutations coming in from DCP stream
@@ -998,7 +998,7 @@ func (dcp *DcpNozzle) processData() (err error) {
 						}
 						wrappedUpr := dcp.composeWrappedUprEvent(m)
 						// forward mutation downstream through connector
-						if err := dcp.Connector().Forward(wrappedUpr); err != nil {
+						if err := dcp.cachedConnector.Forward(wrappedUpr); err != nil {
 							dcp.handleGeneralError(err)
 							goto done
 						}
@@ -1146,6 +1146,8 @@ func (dcp *DcpNozzle) startUprStreams() error {
 	defer dcp.childrenWaitGrp.Done()
 
 	var err error = nil
+	dcp.Logger().Infof("NEIL DEBUG %v starting uprStream in 15 seconds", dcp.Id())
+	time.Sleep(15 * time.Second)
 	dcp.Logger().Infof("%v: startUprStreams for %v...\n", dcp.Id(), dcp.GetVBList())
 
 	init_ch := make(chan bool, 1)

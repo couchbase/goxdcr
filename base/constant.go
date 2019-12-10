@@ -238,6 +238,7 @@ var ErrorNoSourceKV = errors.New("Invalid configuration. No source kv node is fo
 var ErrorExecutionTimedOut = errors.New("Execution timed out")
 var ErrorPipelineStartTimedOutUI = errors.New("Pipeline did not start in a timely manner, possibly due to busy source or target. Will try again...")
 var ErrorNotFound = errors.New("Specified entity is not found")
+var ErrorNotImplemented = errors.New("Not implemented")
 
 // Various non-error internal msgs
 var FilterForcePassThrough = errors.New("No data is to be filtered, should allow passthrough")

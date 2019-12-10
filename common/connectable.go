@@ -21,5 +21,7 @@ import ()
 //different data passing schem
 type Connectable interface {
 	Connector() Connector
+	AdvConnector() (AdvConnector, error)
 	SetConnector(connector Connector) error
+	SetAdvConnector(connector AdvConnector) error
 }

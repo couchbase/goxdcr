@@ -10,7 +10,6 @@
 package Component
 
 import (
-	"fmt"
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/common"
 	"github.com/couchbase/goxdcr/log"
@@ -41,34 +40,49 @@ func (c *AdvAbstractComponent) Id() string {
 	return c.id
 }
 
-func (c *AdvAbstractComponent) RegisterComponentEventListener(eventType common.ComponentEventType, listener common.ComponentEventListener) error {
-	c.mutex.Lock()
-	defer c.mutex.Unlock()
-
-	for _, v := range c.eventListeners {
-		v.registerListerNoLock(eventType, listener)
+func (c *AdvAbstractComponent) SpecificAsyncComponentEventListeners(topic string) map[string]common.AsyncComponentEventListener {
+	c.mutex.RLock()
+	defer c.mutex.RUnlock()
+	listeners, ok := c.eventListeners[topic]
+	if !ok {
+		return nil
 	}
+	listenerMap := make(map[string]common.AsyncComponentEventListener)
+	listeners.exportToMap(listenerMap)
+	return listenerMap
+}
 
-	return nil
+func (c *AdvAbstractComponent) RegisterComponentEventListener(eventType common.ComponentEventType, listener common.ComponentEventListener) error {
+	return base.ErrorNotImplemented
 }
 
 func (c *AdvAbstractComponent) UnRegisterComponentEventListener(eventType common.ComponentEventType, listener common.ComponentEventListener) error {
-	c.mutex.Lock()
-	defer c.mutex.Unlock()
-	errMap := make(base.ErrorMap)
+	return base.ErrorNotImplemented
+}
 
-	for k, v := range c.eventListeners {
-		err := v.unregisterEventListenerNoLock(eventType, listener)
-		if err != nil {
-			errMap[k] = err
-		}
+func (c *AdvAbstractComponent) RegisterSpecificComponentEventListener(topic string, eventType common.ComponentEventType, listener common.ComponentEventListener) error {
+	c.mutex.RLock()
+	defer c.mutex.RUnlock()
+
+	v, ok := c.eventListeners[topic]
+	if !ok {
+		return base.ErrorInvalidInput
 	}
 
-	if len(errMap) > 0 {
-		return fmt.Errorf(base.FlattenErrorMap(errMap))
-	} else {
-		return nil
+	v.registerListerNoLock(eventType, listener)
+	return nil
+}
+
+func (c *AdvAbstractComponent) UnRegisterSpecificComponentEventListener(topic string, eventType common.ComponentEventType, listener common.ComponentEventListener) error {
+	c.mutex.RLock()
+	defer c.mutex.RUnlock()
+
+	v, ok := c.eventListeners[topic]
+	if !ok {
+		return base.ErrorInvalidInput
 	}
+
+	return v.unregisterEventListenerNoLock(eventType, listener)
 }
 
 func (c *AdvAbstractComponent) RaiseEvent(event *common.Event) {

@@ -11,6 +11,7 @@ package parts
 
 import (
 	"errors"
+	"github.com/couchbase/goxdcr/base"
 	common "github.com/couchbase/goxdcr/common"
 	component "github.com/couchbase/goxdcr/component"
 	"github.com/couchbase/goxdcr/log"
@@ -36,6 +37,10 @@ func NewAbstractPartWithLogger(id string,
 
 func NewAbstractPart(id string) AbstractPart {
 	return NewAbstractPartWithLogger(id, log.NewLogger("AbstractPart", log.DefaultLoggerContext))
+}
+
+func (p *AbstractPart) GetType() common.PartType {
+	return common.RegularPart
 }
 
 func (p *AbstractPart) Connector() common.Connector {
@@ -77,4 +82,12 @@ func (p *AbstractPart) IsReadyForHeartBeat() bool {
 
 func (p *AbstractPart) UpdateSettings(settings metadata.ReplicationSettingsMap) error {
 	return nil
+}
+
+func (p *AbstractPart) SetAdvConnector(connector common.AdvConnector) error {
+	return base.ErrorNotImplemented
+}
+
+func (p *AbstractPart) AdvConnector() (common.AdvConnector, error) {
+	return nil, base.ErrorNotImplemented
 }

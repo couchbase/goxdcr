@@ -66,12 +66,14 @@ type XDCRFactory struct {
 	utils                    utilities.UtilsIface
 
 	// Components for sharing resources
-	cacheMtx              sync.RWMutex
-	cacheSpecMap          map[string]*metadata.ReplicationSpecification
-	cacheSrcBucketReplCnt map[string]uint64
-	cacheSourceNozzles    map[string]map[string]common.Nozzle /* spec -> [ nozzleId -> nozzle] */
-	//	cacheKvVbMap          map[string]map[string][]uint16
-	cacheAdvRouter map[string]*parts.AdvRouter // key is sourceNozzleId
+	cacheMtx                               sync.RWMutex
+	cacheSpecMap                           map[string]*metadata.ReplicationSpecification
+	cacheSrcBucketReplCnt                  map[string]uint64
+	cacheSourceNozzles                     map[string]map[string]common.Nozzle /* spec -> [ nozzleId -> nozzle] */
+	cacheSrcToAdvRouter                    map[string]*parts.AdvRouter         // key is sourceNozzleId
+	cacheSpecBasicRouter                   map[string]map[string]*parts.Router /* spec -> [ routerId -> router ] */
+	cacheBasicToAdvRouter                  map[*parts.Router]*parts.AdvRouter
+	cacheTopicToUnregisterAsyncListenerCbs map[string][]func()
 }
 
 // set call back functions is done only once
@@ -90,24 +92,26 @@ func NewXDCRFactory(repl_spec_svc service_def.ReplicationSpecSvc,
 	utilsIn utilities.UtilsIface,
 	collectionsManifestSvc service_def.CollectionsManifestSvc) *XDCRFactory {
 	return &XDCRFactory{repl_spec_svc: repl_spec_svc,
-		remote_cluster_svc:       remote_cluster_svc,
-		cluster_info_svc:         cluster_info_svc,
-		xdcr_topology_svc:        xdcr_topology_svc,
-		checkpoint_svc:           checkpoint_svc,
-		capi_svc:                 capi_svc,
-		uilog_svc:                uilog_svc,
-		bucket_settings_svc:      bucket_settings_svc,
-		throughput_throttler_svc: throughput_throttler_svc,
-		default_logger_ctx:       pipeline_default_logger_ctx,
-		pipeline_failure_handler: pipeline_failure_handler,
-		logger:                   log.NewLogger("XDCRFactory", factory_logger_ctx),
-		utils:                    utilsIn,
-		collectionsManifestSvc:   collectionsManifestSvc,
-		cacheSpecMap:             make(map[string]*metadata.ReplicationSpecification),
-		cacheSrcBucketReplCnt:    make(map[string]uint64),
-		cacheSourceNozzles:       make(map[string]map[string]common.Nozzle),
-		//		cacheKvVbMap:             make(map[string]map[string][]uint16),
-		cacheAdvRouter: make(map[string]*parts.AdvRouter),
+		remote_cluster_svc:                     remote_cluster_svc,
+		cluster_info_svc:                       cluster_info_svc,
+		xdcr_topology_svc:                      xdcr_topology_svc,
+		checkpoint_svc:                         checkpoint_svc,
+		capi_svc:                               capi_svc,
+		uilog_svc:                              uilog_svc,
+		bucket_settings_svc:                    bucket_settings_svc,
+		throughput_throttler_svc:               throughput_throttler_svc,
+		default_logger_ctx:                     pipeline_default_logger_ctx,
+		pipeline_failure_handler:               pipeline_failure_handler,
+		logger:                                 log.NewLogger("XDCRFactory", factory_logger_ctx),
+		utils:                                  utilsIn,
+		collectionsManifestSvc:                 collectionsManifestSvc,
+		cacheSpecMap:                           make(map[string]*metadata.ReplicationSpecification),
+		cacheSrcBucketReplCnt:                  make(map[string]uint64),
+		cacheSourceNozzles:                     make(map[string]map[string]common.Nozzle),
+		cacheSrcToAdvRouter:                    make(map[string]*parts.AdvRouter),
+		cacheSpecBasicRouter:                   make(map[string]map[string]*parts.Router),
+		cacheBasicToAdvRouter:                  make(map[*parts.Router]*parts.AdvRouter),
+		cacheTopicToUnregisterAsyncListenerCbs: make(map[string][]func()),
 	}
 }
 
@@ -241,10 +245,19 @@ func (xdcrf *XDCRFactory) NewPipeline(topic string, progress_recorder common.Pip
 		}
 
 		advRouter := xdcrf.getOrCreateAdvRouter(sourceNozzleId)
-		advRouter.AddRouter(router)
+		advRouter.AddRouter(topic, router)
+		xdcrf.cacheMtx.Lock()
+		routersForSpec, exists := xdcrf.cacheSpecBasicRouter[spec.Id]
+		if !exists {
+			xdcrf.cacheSpecBasicRouter[spec.Id] = make(map[string]*parts.Router)
+			routersForSpec = xdcrf.cacheSpecBasicRouter[spec.Id]
+		}
+		routersForSpec[router.Id()] = router
+		xdcrf.cacheBasicToAdvRouter[router] = advRouter
+		xdcrf.cacheMtx.Unlock()
 
 		if !specExists {
-			sourceNozzle.SetConnector(advRouter)
+			sourceNozzle.SetAdvConnector(advRouter)
 		}
 	}
 	progress_recorder("Source nozzles have been wired to target nozzles")
@@ -287,13 +300,36 @@ func (x *XDCRFactory) DeletePipeline(topic string) {
 
 	spec, ok := x.cacheSpecMap[topic]
 	if !ok {
-		panic(fmt.Sprintf("Cannot find spec %v", topic))
+		// Nothing yet
+		return
 	}
 	delete(x.cacheSpecMap, topic)
+
+	x.logger.Infof("XDCRFactory deleting pipeline info %v", topic)
 
 	if x.cacheSrcBucketReplCnt[spec.SourceBucketName] == 0 {
 		panic("Bucket count is 0")
 	}
+
+	routersForSpec, exists := x.cacheSpecBasicRouter[spec.Id]
+	if exists {
+		for routerId, router := range routersForSpec {
+			advRouter, exists := x.cacheBasicToAdvRouter[router]
+			if !exists {
+				panic(fmt.Sprintf("router %v does not exist", routerId))
+			}
+			advRouter.RemoveRouter(topic, router)
+		}
+	}
+
+	callbacks, ok := x.cacheTopicToUnregisterAsyncListenerCbs[topic]
+	if !ok {
+		panic(fmt.Sprintf("Cannot find unregister callbacks for %v", topic))
+	}
+	for _, cb := range callbacks {
+		cb()
+	}
+	delete(x.cacheTopicToUnregisterAsyncListenerCbs, topic)
 
 	x.cacheSrcBucketReplCnt[spec.SourceBucketName]--
 	if x.cacheSrcBucketReplCnt[spec.SourceBucketName] == 0 {
@@ -303,10 +339,9 @@ func (x *XDCRFactory) DeletePipeline(topic string) {
 			panic("Cannot find cached source nozzles")
 		}
 		for sourceNozzleId, _ := range sourceNozzles {
-			delete(x.cacheAdvRouter, sourceNozzleId)
+			delete(x.cacheSrcToAdvRouter, sourceNozzleId)
 		}
 		delete(x.cacheSourceNozzles, topic)
-		//		delete(x.cacheKvVbMap, topic)
 	}
 
 }
@@ -326,6 +361,10 @@ func getNozzleList(nozzle_map map[string]common.Nozzle) []common.Nozzle {
 	return nozzle_list
 }
 
+func (x *XDCRFactory) storeDeregisterCbNoLock(pipeline common.Pipeline, cb func()) {
+	x.cacheTopicToUnregisterAsyncListenerCbs[pipeline.Topic()] = append(x.cacheTopicToUnregisterAsyncListenerCbs[pipeline.Topic()], cb)
+}
+
 // construct and register async componet event listeners on source nozzles
 func (xdcrf *XDCRFactory) registerAsyncListenersOnSources(pipeline common.Pipeline, logger_ctx *log.LoggerContext) {
 	sources := getNozzleList(pipeline.Sources())
@@ -334,6 +373,13 @@ func (xdcrf *XDCRFactory) registerAsyncListenersOnSources(pipeline common.Pipeli
 	num_of_listeners := min(num_of_sources, base.MaxNumberOfAsyncListeners)
 	load_distribution := base.BalanceLoad(num_of_listeners, num_of_sources)
 	xdcrf.logger.Infof("topic=%v, num_of_sources=%v, num_of_listeners=%v, load_distribution=%v\n", pipeline.Topic(), num_of_sources, num_of_listeners, load_distribution)
+
+	xdcrf.cacheMtx.RLock()
+	defer xdcrf.cacheMtx.RUnlock()
+	_, exists := xdcrf.cacheTopicToUnregisterAsyncListenerCbs[pipeline.Topic()]
+	if exists {
+		panic("Should not exist")
+	}
 
 	for i := 0; i < num_of_listeners; i++ {
 		data_received_event_listener := component.NewDefaultAsyncComponentEventListenerImpl(
@@ -351,20 +397,53 @@ func (xdcrf *XDCRFactory) registerAsyncListenersOnSources(pipeline common.Pipeli
 
 		for index := load_distribution[i][0]; index < load_distribution[i][1]; index++ {
 			// Get the source DCP nozzle
-			dcp_part := sources[index]
+			dcp_part := sources[index].(common.AdvNozzle)
 
 			// Stats manager will handle the data received and processed events
-			dcp_part.RegisterComponentEventListener(common.DataReceived, data_received_event_listener)
-			dcp_part.RegisterComponentEventListener(common.SystemEventReceived, data_received_event_listener)
-			dcp_part.RegisterComponentEventListener(common.DataProcessed, data_processed_event_listener)
+			dcp_part.RegisterSpecificComponentEventListener(pipeline.Topic(), common.DataReceived, data_received_event_listener)
+			xdcrf.storeDeregisterCbNoLock(pipeline, func() {
+				dcp_part.UnRegisterSpecificComponentEventListener(pipeline.Topic(), common.DataReceived, data_received_event_listener)
+			})
 
-			dcp_part.RegisterComponentEventListener(common.DataFiltered, data_filtered_event_listener)
-			dcp_part.RegisterComponentEventListener(common.DataUnableToFilter, data_filtered_event_listener)
+			dcp_part.RegisterSpecificComponentEventListener(pipeline.Topic(), common.SystemEventReceived, data_received_event_listener)
+			xdcrf.storeDeregisterCbNoLock(pipeline, func() {
+				dcp_part.UnRegisterSpecificComponentEventListener(pipeline.Topic(), common.SystemEventReceived, data_received_event_listener)
+			})
 
-			conn := dcp_part.Connector()
-			conn.RegisterComponentEventListener(common.DataFiltered, data_filtered_event_listener)
-			conn.RegisterComponentEventListener(common.DataUnableToFilter, data_filtered_event_listener)
-			conn.RegisterComponentEventListener(common.DataThroughputThrottled, data_throughput_throttled_event_listener)
+			dcp_part.RegisterSpecificComponentEventListener(pipeline.Topic(), common.DataProcessed, data_processed_event_listener)
+			xdcrf.storeDeregisterCbNoLock(pipeline, func() {
+				dcp_part.UnRegisterSpecificComponentEventListener(pipeline.Topic(), common.DataProcessed, data_processed_event_listener)
+			})
+
+			dcp_part.RegisterSpecificComponentEventListener(pipeline.Topic(), common.DataFiltered, data_filtered_event_listener)
+			xdcrf.storeDeregisterCbNoLock(pipeline, func() {
+				dcp_part.UnRegisterSpecificComponentEventListener(pipeline.Topic(), common.DataFiltered, data_filtered_event_listener)
+			})
+
+			dcp_part.RegisterSpecificComponentEventListener(pipeline.Topic(), common.DataUnableToFilter, data_filtered_event_listener)
+			xdcrf.storeDeregisterCbNoLock(pipeline, func() {
+				dcp_part.UnRegisterSpecificComponentEventListener(pipeline.Topic(), common.DataUnableToFilter, data_filtered_event_listener)
+			})
+
+			conn, err := dcp_part.AdvConnector()
+			if err != nil {
+				panic(err)
+			} else if conn == nil {
+				panic("Conn is nil")
+			}
+			conn.RegisterSpecificComponentEventListener(pipeline.Topic(), common.DataFiltered, data_filtered_event_listener)
+			xdcrf.storeDeregisterCbNoLock(pipeline, func() {
+				conn.UnRegisterSpecificComponentEventListener(pipeline.Topic(), common.DataFiltered, data_filtered_event_listener)
+			})
+			conn.RegisterSpecificComponentEventListener(pipeline.Topic(), common.DataUnableToFilter, data_filtered_event_listener)
+			xdcrf.storeDeregisterCbNoLock(pipeline, func() {
+				conn.UnRegisterSpecificComponentEventListener(pipeline.Topic(), common.DataUnableToFilter, data_filtered_event_listener)
+			})
+			conn.RegisterSpecificComponentEventListener(pipeline.Topic(), common.DataThroughputThrottled, data_throughput_throttled_event_listener)
+			xdcrf.storeDeregisterCbNoLock(pipeline, func() {
+				conn.UnRegisterSpecificComponentEventListener(pipeline.Topic(), common.DataThroughputThrottled, data_throughput_throttled_event_listener)
+			})
+
 		}
 	}
 }
@@ -646,10 +725,10 @@ func (x *XDCRFactory) getOrCreateAdvRouter(dcpId string) *parts.AdvRouter {
 	x.cacheMtx.Lock()
 	defer x.cacheMtx.Unlock()
 
-	router, exists := x.cacheAdvRouter[dcpId]
+	router, exists := x.cacheSrcToAdvRouter[dcpId]
 	if !exists {
-		router = parts.NewAdvRouter(dcpId)
-		x.cacheAdvRouter[dcpId] = router
+		router = parts.NewAdvRouter(dcpId, x.logger)
+		x.cacheSrcToAdvRouter[dcpId] = router
 	}
 
 	return router
@@ -660,7 +739,7 @@ func (xdcrf *XDCRFactory) constructRouter(id string, spec *metadata.ReplicationS
 	vbNozzleMap map[uint16]string,
 	sourceCRMode base.ConflictResolutionMode,
 	logger_ctx *log.LoggerContext) (*parts.Router, error) {
-	routerId := "Router" + PART_NAME_DELIMITER + id
+	routerId := "Router" + PART_NAME_DELIMITER + id + PART_NAME_DELIMITER + spec.TargetBucketName
 	// when initializing router, isHighReplication is set to true only if replication priority is High
 	// for replications with Medium priority and ongoing flag set, isHighReplication will be updated to true
 	// through a UpdateSettings() call to the router in the pipeline startup sequence before parts are started

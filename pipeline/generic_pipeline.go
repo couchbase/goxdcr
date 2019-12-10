@@ -190,6 +190,7 @@ func (genericPipeline *GenericPipeline) startPart(part common.Part, settings met
 		if len(err_ch) > 0 {
 			return
 		}
+
 	}
 
 	partSettings := settings
@@ -207,6 +208,10 @@ func (genericPipeline *GenericPipeline) startPart(part common.Part, settings met
 	err = part.Start(partSettings)
 	if err != nil && err.Error() != common.PartAlreadyStartedError.Error() {
 		err_ch <- base.ComponentError{part.Id(), err}
+	} else if advRouter, ok := part.Connector().(*parts.AdvRouter); ok {
+		// TODO - need to think about this - right now it looks like we are starting ALL the downstream parts above??
+		genericPipeline.logger.Infof("Opening adv router for %v\n", genericPipeline.Topic())
+		advRouter.Open(genericPipeline.Topic())
 	}
 }
 
@@ -444,9 +449,21 @@ func (genericPipeline *GenericPipeline) Stop() base.ErrorMap {
 			genericPipeline.logger.Warnf("%v failed to close source %v. err=%v", genericPipeline.InstanceId(), source.Id(), err)
 			errMap[fmt.Sprintf("genericPipeline.%v.Close", source.Id())] = err
 		}
+		if advRouter, ok := source.Connector().(*parts.AdvRouter); ok {
+			advRouter.Close(genericPipeline.Topic())
+		}
 	}
 	genericPipeline.logger.Infof("%v source nozzles have been closed", genericPipeline.InstanceId())
 	genericPipeline.ReportProgress("Source nozzles have been closed")
+
+	// close the target
+	for _, target := range genericPipeline.targets {
+		err = target.Close(genericPipeline.InstanceId())
+		if err != nil {
+			genericPipeline.logger.Warnf("%v failed to close target %v. err=%v", genericPipeline.InstanceId(), target.Id(), err)
+			errMap[fmt.Sprintf("genericPipeline.%v.Close", target.Id())] = err
+		}
+	}
 
 	partsErrMap := genericPipeline.stopPartsWithTimeout()
 	base.ConcatenateErrors(errMap, partsErrMap, MaxNumberOfErrorsToTrack, genericPipeline.logger)
@@ -595,7 +612,7 @@ func GetAllAsyncComponentEventListeners(p common.Pipeline) map[string]common.Asy
 		partsMap := make(map[string]common.Part)
 		// add async listeners on parts and connectors to listeners map
 		for _, source := range p.Sources() {
-			addAsyncListenersToMap(source, asyncListenerMap, partsMap)
+			addAsyncListenersToMap(p.Topic(), source, asyncListenerMap, partsMap)
 		}
 		p.SetAsyncListenerMap(asyncListenerMap)
 	}
@@ -603,19 +620,30 @@ func GetAllAsyncComponentEventListeners(p common.Pipeline) map[string]common.Asy
 }
 
 // Modifies and adds to "listenersMap"
-func addAsyncListenersToMap(part common.Part, listenersMap map[string]common.AsyncComponentEventListener, partsMap map[string]common.Part) {
+func addAsyncListenersToMap(topic string, part common.Part, listenersMap map[string]common.AsyncComponentEventListener, partsMap map[string]common.Part) {
 	if part != nil {
 		// use partsMap to check if the part has been processed before to avoid infinite loop
 		if _, ok := partsMap[part.Id()]; !ok {
 			partsMap[part.Id()] = part
 
-			mergeListenersMap(listenersMap, part.AsyncComponentEventListeners())
-
-			connector := part.Connector()
-			if connector != nil {
-				mergeListenersMap(listenersMap, connector.AsyncComponentEventListeners())
-				for _, downStreamPart := range connector.DownStreams() {
-					addAsyncListenersToMap(downStreamPart, listenersMap, partsMap)
+			switch part.GetType() {
+			case common.RegularPart:
+				mergeListenersMap(listenersMap, part.AsyncComponentEventListeners())
+				connector := part.Connector()
+				if connector != nil {
+					mergeListenersMap(listenersMap, connector.AsyncComponentEventListeners())
+					for _, downStreamPart := range connector.DownStreams() {
+						addAsyncListenersToMap(topic, downStreamPart, listenersMap, partsMap)
+					}
+				}
+			case common.AdvancedPart:
+				mergeListenersMap(listenersMap, part.(common.AdvPart).SpecificAsyncComponentEventListeners(topic))
+				connector, err := part.AdvConnector()
+				if connector != nil && err == nil {
+					mergeListenersMap(listenersMap, connector.SpecificAsyncComponentEventListeners(topic))
+					for _, downStreamPart := range connector.SpecificDownStreams(topic) {
+						addAsyncListenersToMap(topic, downStreamPart, listenersMap, partsMap)
+					}
 				}
 			}
 		}
@@ -879,6 +907,7 @@ func (genericPipeline *GenericPipeline) GetAsyncListenerMap() map[string]common.
 }
 
 func (genericPipeline *GenericPipeline) SetAsyncListenerMap(asyncListenerMap map[string]common.AsyncComponentEventListener) {
+	genericPipeline.logger.Infof("NEIL DEBUG pipeline %v setting listenermap to %v", genericPipeline.Topic(), asyncListenerMap)
 	genericPipeline.asyncEventListenerMap = asyncListenerMap
 }
 

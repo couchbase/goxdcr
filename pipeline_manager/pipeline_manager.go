@@ -62,7 +62,7 @@ type Pipeline_mgr_iface interface {
 	// Internal APIs
 	OnExit() error
 	StopAllUpdaters()
-	StopPipeline(rep_status pipeline.ReplicationStatusIface) base.ErrorMap
+	StopPipeline(rep_status pipeline.ReplicationStatusIface, pipelineName string) base.ErrorMap
 	StartPipeline(topic string) base.ErrorMap
 	Update(topic string, cur_err error) error
 	ReplicationStatusMap() map[string]*pipeline.ReplicationStatus
@@ -81,6 +81,7 @@ type Pipeline_mgr_iface interface {
 	GetLogSvc() service_def.UILogSvc
 	GetReplSpecSvc() service_def.ReplicationSpecSvc
 	GetXDCRTopologySvc() service_def.XDCRCompTopologySvc
+	GetPipelineFactory() common.PipelineFactory
 }
 
 // Global ptr, should slowly get rid of refences to this global
@@ -316,6 +317,10 @@ func (pipelineMgr *PipelineManager) StopSerializer() {
 	}
 }
 
+func (p *PipelineManager) GetPipelineFactory() common.PipelineFactory {
+	return p.pipeline_factory
+}
+
 func (pipelineMgr *PipelineManager) StartPipeline(topic string) base.ErrorMap {
 	var err error
 	errMap := make(base.ErrorMap)
@@ -413,7 +418,7 @@ func (pipelineMgr *PipelineManager) removePipelineFromReplicationStatus(p common
 }
 
 // Called internally from updater only
-func (pipelineMgr *PipelineManager) StopPipeline(rep_status pipeline.ReplicationStatusIface) base.ErrorMap {
+func (pipelineMgr *PipelineManager) StopPipeline(rep_status pipeline.ReplicationStatusIface, pipelineName string) base.ErrorMap {
 	var errMap base.ErrorMap = make(base.ErrorMap)
 
 	if rep_status == nil {
@@ -438,7 +443,6 @@ func (pipelineMgr *PipelineManager) StopPipeline(rep_status pipeline.Replication
 			} else {
 				pipelineMgr.logger.Infof("Pipeline %v has been stopped\n", replId)
 			}
-			pipelineMgr.pipeline_factory.DeletePipeline(p.Topic())
 			pipelineMgr.removePipelineFromReplicationStatus(p)
 			pipelineMgr.logger.Infof("Replication Status=%v\n", rep_status)
 		} else {
@@ -447,6 +451,7 @@ func (pipelineMgr *PipelineManager) StopPipeline(rep_status pipeline.Replication
 	} else {
 		pipelineMgr.logger.Infof("Pipeline %v is not running\n", replId)
 	}
+	pipelineMgr.pipeline_factory.DeletePipeline(pipelineName)
 
 	// if replication spec has been deleted
 	// or deleted and recreated, which is signaled by change in spec internal id
@@ -887,7 +892,7 @@ func (r *PipelineUpdater) run() {
 		case <-r.fin_ch:
 			r.logger.Infof("Quit updating pipeline %v after updating a total of %v times\n", r.pipeline_name, atomic.LoadUint64(&r.runCounter))
 			r.logger.Infof("Replication %v's status is to be closed, shutting down\n", r.pipeline_name)
-			r.pipelineMgr.StopPipeline(r.rep_status)
+			r.pipelineMgr.StopPipeline(r.rep_status, r.pipeline_name)
 			// Reset runCounter to 0 for unit test
 			atomic.StoreUint64(&r.runCounter, 0)
 			return
@@ -1010,7 +1015,7 @@ func (r *PipelineUpdater) update() base.ErrorMap {
 	r.replSpecSettingsHelper.Record()
 
 	r.logger.Infof("Try to stop pipeline %v\n", r.pipeline_name)
-	errMap = r.pipelineMgr.StopPipeline(r.rep_status)
+	errMap = r.pipelineMgr.StopPipeline(r.rep_status, r.pipeline_name)
 
 	// unit test error injection
 	if atomic.LoadInt32(&r.testInjectionError) == pipelineUpdaterErrInjOfflineFail {

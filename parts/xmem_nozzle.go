@@ -732,8 +732,7 @@ type XmemNozzle struct {
 	targetClusterUuid string
 	targetBucketUuid  string
 
-	bOpen      bool
-	lock_bOpen sync.RWMutex
+	bOpen uint32
 
 	//data channel to accept the incoming data
 	dataChan chan *base.WrappedMCRequest
@@ -822,6 +821,8 @@ type XmemNozzle struct {
 	collectionsManifestMtx sync.RWMutex
 	collectionsManifest    *metadata.CollectionsManifest
 	//	collectionsManifestVersion uint64 /* atomically updated */
+
+	debugOnce sync.Once
 }
 
 func NewXmemNozzle(id string,
@@ -847,8 +848,7 @@ func NewXmemNozzle(id string,
 	xmem := &XmemNozzle{AbstractPart: part,
 		remoteClusterSvc:    remoteClusterSvc,
 		targetClusterUuid:   targetClusterUuid,
-		bOpen:               true,
-		lock_bOpen:          sync.RWMutex{},
+		bOpen:               0,
 		dataChan:            nil,
 		receive_token_ch:    nil,
 		client_for_setMeta:  nil,
@@ -894,30 +894,16 @@ func (xmem *XmemNozzle) SetBandwidthThrottler(bandwidthThrottler service_def.Ban
 }
 
 func (xmem *XmemNozzle) IsOpen() bool {
-	xmem.lock_bOpen.RLock()
-	defer xmem.lock_bOpen.RUnlock()
-
-	return xmem.bOpen
+	return atomic.LoadUint32(&xmem.bOpen) == 1
 }
 
 func (xmem *XmemNozzle) Open(instanceId string) error {
-	xmem.lock_bOpen.Lock()
-	defer xmem.lock_bOpen.Unlock()
-
-	if !xmem.bOpen {
-		xmem.bOpen = true
-
-	}
+	atomic.StoreUint32(&xmem.bOpen, 1)
 	return nil
 }
 
 func (xmem *XmemNozzle) Close(instanceId string) error {
-	xmem.lock_bOpen.Lock()
-	defer xmem.lock_bOpen.Unlock()
-
-	if xmem.bOpen {
-		xmem.bOpen = false
-	}
+	atomic.StoreUint32(&xmem.bOpen, 0)
 	return nil
 }
 
@@ -1015,6 +1001,10 @@ func (xmem *XmemNozzle) Receive(data interface{}) error {
 	//			xmem.handleGeneralError(errors.New(fmt.Sprintf("%v", r)))
 	//		}
 	//	}()
+
+	xmem.debugOnce.Do(func() {
+		xmem.Logger().Infof("NEIL DEBUG %v received %v", xmem.Id(), data)
+	})
 
 	err := xmem.validateRunningState()
 	if err != nil {
@@ -2642,6 +2632,12 @@ func (xmem *XmemNozzle) PrintStatusSummary() {
 			xmem.client_for_getMeta.repairCount(), xmem.client_for_setMeta.repairCount())
 	} else {
 		xmem.Logger().Infof("%v state =%v ", xmem.Id(), xmem.State())
+	}
+}
+
+func (x *XmemNozzle) RaiseEvent(event *common.Event) {
+	if x.IsOpen() {
+		x.AbstractComponent.RaiseEvent(event)
 	}
 }
 

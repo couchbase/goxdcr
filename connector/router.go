@@ -11,6 +11,7 @@ package connector
 
 import (
 	"errors"
+	"fmt"
 	common "github.com/couchbase/goxdcr/common"
 	component "github.com/couchbase/goxdcr/component"
 	"github.com/couchbase/goxdcr/log"
@@ -36,6 +37,8 @@ type Router struct {
 	routing_callback *Routing_Callback_Func
 
 	stateLock sync.RWMutex
+
+	debugOnce sync.Once
 }
 
 func NewRouter(id string, downStreamParts map[string]common.Part,
@@ -57,12 +60,15 @@ func (router *Router) Forward(data interface{}) error {
 		return ErrorInvalidRouterConfig
 	}
 
+	var debugOutput string
+
 	routedData, err := (*router.routing_callback)(data)
 	if err == nil {
 		for partId, partData := range routedData {
 			part := router.downStreamParts[partId]
 			if part != nil {
 				err = part.Receive(partData)
+				debugOutput = fmt.Sprintf("%v%v%v%v%v", debugOutput, " ID: ", router.Id(), " Receive:", partId)
 				if err != nil {
 					break
 				}
@@ -71,6 +77,11 @@ func (router *Router) Forward(data interface{}) error {
 			}
 		}
 	}
+
+	router.debugOnce.Do(func() {
+		router.Logger().Infof("NEIL DEBUG: %v", debugOutput)
+	})
+
 	return err
 }
 

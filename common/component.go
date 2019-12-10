@@ -113,3 +113,11 @@ type Component interface {
 	// raise event for a component
 	RaiseEvent(event *Event)
 }
+
+type AdvComponent interface {
+	Component
+
+	SpecificAsyncComponentEventListeners(topic string) map[string]AsyncComponentEventListener
+	RegisterSpecificComponentEventListener(topic string, eventType ComponentEventType, listener ComponentEventListener) error
+	UnRegisterSpecificComponentEventListener(topic string, eventType ComponentEventType, listener ComponentEventListener) error
+}

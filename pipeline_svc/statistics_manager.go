@@ -774,7 +774,7 @@ func (stats_mgr *StatisticsManager) Attach(pipeline common.Pipeline) error {
 
 	//register the aggregation metrics for the pipeline
 	stats_mgr.initOverviewRegistry()
-	stats_mgr.logger.Infof("StatisticsManager is started for pipeline %v", stats_mgr.pipeline.Topic)
+	stats_mgr.logger.Infof("StatisticsManager is started for pipeline %v", stats_mgr.pipeline.Topic())
 
 	return nil
 }
@@ -951,6 +951,7 @@ func (outNozzle_collector *outNozzleCollector) Mount(pipeline common.Pipeline, s
 	outNozzle_collector.stats_mgr = stats_mgr
 	outNozzle_collector.component_map = make(map[string]map[string]interface{})
 	outNozzle_parts := pipeline.Targets()
+	stats_mgr.logger.Infof("Pipeline %v Outnozzle parts: %v\n", pipeline.Topic(), outNozzle_parts)
 	for _, part := range outNozzle_parts {
 		registry := stats_mgr.getOrCreateRegistry(part.Id())
 		size_rep_queue := metrics.NewCounter()
@@ -1045,6 +1046,9 @@ func (outNozzle_collector *outNozzleCollector) ProcessEvent(event *common.Event)
 		opti_replicated := event_otherInfo.IsOptRepd
 		commit_time := event_otherInfo.Commit_time
 		resp_wait_time := event_otherInfo.Resp_wait_time
+		if _, ok := metric_map[DOCS_WRITTEN_METRIC].(metrics.Counter); !ok {
+			panic(fmt.Sprintf("StatsMgr Pipeline %v error metric_map: %v eventComponentId: %v", outNozzle_collector.stats_mgr.pipeline.Topic(), metric_map, event.Component.Id()))
+		}
 		metric_map[DOCS_WRITTEN_METRIC].(metrics.Counter).Inc(1)
 		metric_map[DATA_REPLICATED_METRIC].(metrics.Counter).Inc(int64(req_size))
 		if opti_replicated {

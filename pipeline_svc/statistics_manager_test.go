@@ -130,7 +130,7 @@ func setupMocks(throughSeqSvc *service_def.ThroughSeqnoTrackerSvc,
 	connector.On("DownStreams").Return(nil)
 	connector.On("Id").Return(testRouter)
 
-	dcpNozzle.SetConnector(connector)
+	dcpNozzle.SetAdvConnector(connector)
 }
 
 func setupInnerMock(runtimeCtx *common.PipelineRuntimeContext,

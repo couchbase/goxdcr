@@ -11,6 +11,7 @@ package parts
 
 import (
 	"errors"
+	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/common"
 	component "github.com/couchbase/goxdcr/component"
 	"github.com/couchbase/goxdcr/log"
@@ -19,7 +20,7 @@ import (
 
 type AdvAbstractPart struct {
 	*component.AdvAbstractComponent
-	connector common.Connector
+	connector common.AdvConnector
 	stateLock sync.RWMutex
 	state     common.PartState
 }
@@ -32,14 +33,27 @@ func NewAdvAbstractPartWithLogger(id string, logger *log.CommonLogger) AdvAbstra
 	}
 }
 
+func (p *AdvAbstractPart) GetType() common.PartType {
+	return common.AdvancedPart
+}
+
 func (p *AdvAbstractPart) Connector() common.Connector {
 	p.stateLock.RLock()
 	defer p.stateLock.RUnlock()
-
 	return p.connector
 }
 
+func (p *AdvAbstractPart) AdvConnector() (common.AdvConnector, error) {
+	p.stateLock.RLock()
+	defer p.stateLock.RUnlock()
+	return p.connector, nil
+}
+
 func (p *AdvAbstractPart) SetConnector(connector common.Connector) error {
+	return base.ErrorNotImplemented
+}
+
+func (p *AdvAbstractPart) SetAdvConnector(connector common.AdvConnector) error {
 	p.stateLock.Lock()
 	defer p.stateLock.Unlock()
 	if p.state.Get() != common.Part_Initial {

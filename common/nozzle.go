@@ -15,11 +15,8 @@ import ()
 //and the outlet where the data flowing into the target system.
 //
 //Nozzle can be opened or closed. An closed nozzle will not allow data flow through
-//
-//Each nozzle is a goroutine
-type Nozzle interface {
-	Part
 
+type NozzleCommon interface {
 	//Open opens the Nozzle
 	//
 	//Data can be passed to the downstream
@@ -32,4 +29,14 @@ type Nozzle interface {
 
 	// Returns a list of its responsible VBs (Read-only)
 	ResponsibleVBs() []uint16
+}
+
+type Nozzle interface {
+	NozzleCommon
+	Part
+}
+
+type AdvNozzle interface {
+	NozzleCommon
+	AdvPart
 }

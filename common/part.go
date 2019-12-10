@@ -97,9 +97,17 @@ func (s *PartState) Set(state PartState, id string) error {
 	return nil
 }
 
-type Part interface {
-	Component
+type PartType int
+
+const (
+	RegularPart  PartType = iota
+	AdvancedPart PartType = iota
+)
+
+type PartCommon interface {
 	Connectable
+
+	GetType() PartType
 
 	//Start makes goroutine for the part working
 	Start(settings metadata.ReplicationSettingsMap) error
@@ -114,4 +122,14 @@ type Part interface {
 	State() PartState
 
 	UpdateSettings(settings metadata.ReplicationSettingsMap) error
+}
+
+type Part interface {
+	PartCommon
+	Component
+}
+
+type AdvPart interface {
+	PartCommon
+	AdvComponent
 }

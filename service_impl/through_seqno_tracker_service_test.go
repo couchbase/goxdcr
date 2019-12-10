@@ -8,7 +8,9 @@ import (
 	commonMock "github.com/couchbase/goxdcr/common/mocks"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/parts"
+	service_def "github.com/couchbase/goxdcr/service_def/mocks"
 	"github.com/stretchr/testify/assert"
+	mock "github.com/stretchr/testify/mock"
 	"testing"
 )
 
@@ -23,20 +25,20 @@ func makeCommonEvent(eventType common.ComponentEventType, uprEvent *mcc.UprEvent
 }
 
 func setupBoilerPlate() (*commonMock.Pipeline,
-	*ThroughSeqnoTrackerSvc,
-	*commonMock.Nozzle) {
+	*commonMock.Nozzle,
+	*service_def.ReplicationSpecSvc) {
 
 	pipelineMock := &commonMock.Pipeline{}
-	svc := NewThroughSeqnoTrackerSvc(log.DefaultLoggerContext)
-	svc.unitTesting = true
+	replSpecSvcMock := &service_def.ReplicationSpecSvc{}
 
 	nozzleMock := &commonMock.Nozzle{}
 
-	return pipelineMock, svc, nozzleMock
+	return pipelineMock, nozzleMock, replSpecSvcMock
 }
 
 func setupMocks(pipeline *commonMock.Pipeline,
-	sourceNozzle *commonMock.Nozzle) {
+	sourceNozzle *commonMock.Nozzle,
+	replSpecSvc *service_def.ReplicationSpecSvc) *ThroughSeqnoTrackerSvc {
 
 	var vbList []uint16
 	//	var i uint16
@@ -51,14 +53,20 @@ func setupMocks(pipeline *commonMock.Pipeline,
 
 	pipeline.On("Topic").Return("UnitTest")
 	pipeline.On("Sources").Return(sourceMap)
+
+	replSpecSvc.On("GetDerivedObj", mock.Anything).Return(nil, nil)
+
+	svc := NewThroughSeqnoTrackerSvc(log.DefaultLoggerContext, replSpecSvc)
+	svc.unitTesting = true
+	return svc
 }
 
 // Collections may send out system events AFTER
 func TestSeqnoTrackerOutOfOrder(t *testing.T) {
 	assert := assert.New(t)
 	fmt.Println("============== Test case start: TestSeqnoTrackerOutOfOrder =================")
-	pipelineMock, svc, sourceNozzle := setupBoilerPlate()
-	setupMocks(pipelineMock, sourceNozzle)
+	pipelineMock, sourceNozzle, specSvc := setupBoilerPlate()
+	svc := setupMocks(pipelineMock, sourceNozzle, specSvc)
 
 	svc.initialize(pipelineMock)
 
