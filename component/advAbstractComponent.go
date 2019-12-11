@@ -62,27 +62,53 @@ func (c *AdvAbstractComponent) UnRegisterComponentEventListener(eventType common
 
 func (c *AdvAbstractComponent) RegisterSpecificComponentEventListener(topic string, eventType common.ComponentEventType, listener common.ComponentEventListener) error {
 	c.mutex.RLock()
-	defer c.mutex.RUnlock()
 
 	v, ok := c.eventListeners[topic]
 	if !ok {
-		return base.ErrorInvalidInput
+		c.mutex.RUnlock()
+		c.mutex.Lock()
+		_, ok = c.eventListeners[topic]
+		if !ok {
+			c.eventListeners[topic] = make(EventListenersMap)
+			v = c.eventListeners[topic]
+		}
+		v.registerListerNoLock(eventType, listener)
+		c.mutex.Unlock()
+		return nil
 	}
 
 	v.registerListerNoLock(eventType, listener)
+	c.mutex.RUnlock()
 	return nil
 }
 
 func (c *AdvAbstractComponent) UnRegisterSpecificComponentEventListener(topic string, eventType common.ComponentEventType, listener common.ComponentEventListener) error {
 	c.mutex.RLock()
-	defer c.mutex.RUnlock()
 
 	v, ok := c.eventListeners[topic]
 	if !ok {
+		c.mutex.RUnlock()
 		return base.ErrorInvalidInput
 	}
 
-	return v.unregisterEventListenerNoLock(eventType, listener)
+	err := v.unregisterEventListenerNoLock(eventType, listener)
+	if err != nil {
+		c.mutex.RUnlock()
+		return err
+	}
+
+	if len(c.eventListeners[topic]) == 0 {
+		c.mutex.RUnlock()
+		c.mutex.Lock()
+		if len(c.eventListeners[topic]) == 0 {
+			delete(c.eventListeners, topic)
+		}
+		c.mutex.Unlock()
+		return nil
+	}
+
+	c.mutex.RUnlock()
+	return nil
 }
 
 func (c *AdvAbstractComponent) RaiseEvent(event *common.Event) {

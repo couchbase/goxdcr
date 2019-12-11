@@ -517,6 +517,7 @@ func (tsTracker *ThroughSeqnoTrackerSvc) GetThroughSeqno(vbno uint16) uint64 {
 		// truncate no longer needed entries from seqno lists to reduce memory/cpu overhead for future computations
 		go tsTracker.truncateSeqnoLists(vbno, through_seqno)
 	}
+
 	// TODO - background this
 	tsTracker.setReplStatusThroughSeqno(vbno, through_seqno)
 	return through_seqno
