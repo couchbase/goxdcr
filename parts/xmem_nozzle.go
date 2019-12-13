@@ -897,12 +897,12 @@ func (xmem *XmemNozzle) IsOpen() bool {
 	return atomic.LoadUint32(&xmem.bOpen) == 1
 }
 
-func (xmem *XmemNozzle) Open(instanceId string) error {
+func (xmem *XmemNozzle) Open(topic string) error {
 	atomic.StoreUint32(&xmem.bOpen, 1)
 	return nil
 }
 
-func (xmem *XmemNozzle) Close(instanceId string) error {
+func (xmem *XmemNozzle) Close(topic string) error {
 	atomic.StoreUint32(&xmem.bOpen, 0)
 	return nil
 }

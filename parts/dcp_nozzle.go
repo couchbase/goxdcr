@@ -298,8 +298,7 @@ type DcpNozzle struct {
 
 	finch chan bool
 
-	bOpen      bool
-	lock_bOpen sync.RWMutex
+	bOpen uint32
 
 	childrenWaitGrp sync.WaitGroup
 
@@ -358,6 +357,9 @@ type DcpNozzle struct {
 	// Start/Stop Synchronization
 	startStopSync sync.Mutex
 	startStopCnt  uint32
+	// Open/Close Sync
+	openCloseSync sync.Mutex
+	openCloseCnt  uint32
 }
 
 func NewDcpNozzle(id string,
@@ -376,9 +378,7 @@ func NewDcpNozzle(id string,
 		targetBucketName:         targetBucketName,
 		vbnos:                    vbnos,
 		vb_xattr_seqno_map:       make(map[uint16]*uint64),
-		AdvAbstractPart:          part, /*AdvAbstractPart*/
-		bOpen:                    true, /*bOpen	bool*/
-		lock_bOpen:               sync.RWMutex{},
+		AdvAbstractPart:          part,             /*AdvAbstractPart*/
 		childrenWaitGrp:          sync.WaitGroup{}, /*childrenWaitGrp sync.WaitGroup*/
 		lock_uprFeed:             sync.RWMutex{},
 		cur_ts:                   make(map[uint16]*vbtsWithLock),
@@ -606,23 +606,24 @@ func (dcp *DcpNozzle) initializeUprHandshakeHelpers() {
 	}
 }
 
-func (dcp *DcpNozzle) Open(instanceId string) error {
-	dcp.lock_bOpen.Lock()
-	defer dcp.lock_bOpen.Unlock()
-	if !dcp.bOpen {
-		dcp.bOpen = true
-
+func (dcp *DcpNozzle) Open(topic string) error {
+	atomic.StoreUint32(&dcp.bOpen, 1)
+	if advRouter, ok := dcp.Connector().(*AdvRouter); ok {
+		advRouter.Open(topic)
+		return nil
+	} else {
+		return fmt.Errorf("Unable to Open adv router for topic %v", topic)
 	}
-	return nil
 }
 
-func (dcp *DcpNozzle) Close(instanceId string) error {
-	dcp.lock_bOpen.Lock()
-	defer dcp.lock_bOpen.Unlock()
-	if dcp.bOpen {
-		dcp.bOpen = false
+func (dcp *DcpNozzle) Close(topic string) error {
+	atomic.StoreUint32(&dcp.bOpen, 0)
+	if advRouter, ok := dcp.Connector().(*AdvRouter); ok {
+		advRouter.Open(topic)
+		return nil
+	} else {
+		return fmt.Errorf("Unable to Close adv router for topic %v", topic)
 	}
-	return nil
 }
 
 /**
@@ -842,9 +843,7 @@ func (dcp *DcpNozzle) closeUprFeed() error {
 }
 
 func (dcp *DcpNozzle) IsOpen() bool {
-	dcp.lock_bOpen.RLock()
-	defer dcp.lock_bOpen.RUnlock()
-	return dcp.bOpen
+	return atomic.LoadUint32(&dcp.bOpen) > 0
 }
 
 func (dcp *DcpNozzle) handleSystemEvent(event *mcc.UprEvent) {

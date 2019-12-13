@@ -208,10 +208,10 @@ func (genericPipeline *GenericPipeline) startPart(part common.Part, settings met
 	err = part.Start(partSettings)
 	if err != nil && err.Error() != common.PartAlreadyStartedError.Error() {
 		err_ch <- base.ComponentError{part.Id(), err}
-	} else if advRouter, ok := part.Connector().(*parts.AdvRouter); ok {
-		// TODO - need to think about this - right now it looks like we are starting ALL the downstream parts above??
-		genericPipeline.logger.Infof("Opening adv router for %v\n", genericPipeline.Topic())
-		advRouter.Open(genericPipeline.Topic())
+		//	} else if advRouter, ok := part.Connector().(*parts.AdvRouter); ok {
+		//		// TODO - need to think about this - right now it looks like we are starting ALL the downstream parts above??
+		//		genericPipeline.logger.Infof("Opening adv router for %v\n", genericPipeline.Topic())
+		//		advRouter.Open(genericPipeline.Topic())
 	}
 }
 
@@ -297,7 +297,7 @@ func (genericPipeline *GenericPipeline) Start(settings metadata.ReplicationSetti
 
 	//open targets
 	for _, target := range genericPipeline.targets {
-		err = target.Open(genericPipeline.InstanceId())
+		err = target.Open(genericPipeline.Topic())
 		if err != nil {
 			genericPipeline.logger.Errorf("%v failed to open outgoing nozzle %s. err=%v", genericPipeline.InstanceId(), target.Id(), err)
 			errMap["genericPipeline.outgoingNozzle.Open"] = err
@@ -310,7 +310,7 @@ func (genericPipeline *GenericPipeline) Start(settings metadata.ReplicationSetti
 	//open source
 	for _, source := range genericPipeline.sources {
 
-		err = source.Open(genericPipeline.InstanceId())
+		err = source.Open(genericPipeline.Topic())
 		if err != nil {
 			genericPipeline.logger.Errorf("%v failed to open incoming nozzle %s. err=%v", genericPipeline.InstanceId(), source.Id(), err)
 			errMap["genericPipeline.sourceNozzle.Open"] = err
@@ -444,13 +444,10 @@ func (genericPipeline *GenericPipeline) Stop() base.ErrorMap {
 
 	//close the sources
 	for _, source := range genericPipeline.sources {
-		err = source.Close(genericPipeline.InstanceId())
+		err = source.Close(genericPipeline.Topic())
 		if err != nil {
 			genericPipeline.logger.Warnf("%v failed to close source %v. err=%v", genericPipeline.InstanceId(), source.Id(), err)
 			errMap[fmt.Sprintf("genericPipeline.%v.Close", source.Id())] = err
-		}
-		if advRouter, ok := source.Connector().(*parts.AdvRouter); ok {
-			advRouter.Close(genericPipeline.Topic())
 		}
 	}
 	genericPipeline.logger.Infof("%v source nozzles have been closed", genericPipeline.InstanceId())
@@ -458,7 +455,7 @@ func (genericPipeline *GenericPipeline) Stop() base.ErrorMap {
 
 	// close the target
 	for _, target := range genericPipeline.targets {
-		err = target.Close(genericPipeline.InstanceId())
+		err = target.Close(genericPipeline.Topic())
 		if err != nil {
 			genericPipeline.logger.Warnf("%v failed to close target %v. err=%v", genericPipeline.InstanceId(), target.Id(), err)
 			errMap[fmt.Sprintf("genericPipeline.%v.Close", target.Id())] = err
