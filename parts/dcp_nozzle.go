@@ -21,7 +21,6 @@ import (
 	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/goxdcr/service_def"
 	utilities "github.com/couchbase/goxdcr/utils"
-	"math"
 	"reflect"
 	"strconv"
 	"sync"
@@ -40,6 +39,8 @@ const (
 	DCP_Priority                 = "dcpPriority"
 	DCP_Manifest_Getter          = "dcpManifestGetter"
 	DCP_Specific_Manifest_Getter = "dcpSpecManifestGetter"
+	PipelineTopic                = base.PipelineTopic
+	UpdateSettingCb              = base.UpdateSettingCb
 )
 
 type DcpStreamState int
@@ -68,190 +69,6 @@ type streamStatusWithLock struct {
 	lock  *sync.RWMutex
 }
 
-/**
- * DCP Rollback Handshake Helper. See MB-25647 for handshake sequence design
- */
-type dcpStreamReqHelper struct {
-	// Internal copy of vbno
-	vbno uint16
-	// Internal interface of dcp nozzle to access outer wrapper methods
-	dcp DcpNozzleIface
-
-	// Locks all internals except for currentVersionWell
-	lock sync.RWMutex
-	// Keeps track of messages sent. Key is version of number, Value is the seqno for the vbucket
-	sentMsgs map[uint16]uint64
-	// Keeps track of the seqno that has been ACK'ed. Key is the seqno, and value is whether or not it's been ack'ed
-	ackedMsgs map[uint64]bool
-	// Whether or not this helper is no longer usable
-	isDisabled bool
-
-	// Current version counter well - monotonously increasing - use atomics and not lock
-	currentVersionWell uint64
-}
-
-func (reqHelper *dcpStreamReqHelper) initialize() {
-	reqHelper.sentMsgs = make(map[uint16]uint64)
-	reqHelper.ackedMsgs = make(map[uint64]bool)
-	atomic.StoreUint64(&reqHelper.currentVersionWell, 0)
-}
-
-func (reqHelper *dcpStreamReqHelper) isStreamActiveNoLock() bool {
-	if reqHelper.isDisabled {
-		return false
-	}
-
-	status, err := reqHelper.dcp.GetStreamState(reqHelper.vbno)
-	if err != nil {
-		reqHelper.dcp.Logger().Errorf("Invalid Stream state for vbno: %v even though helper for vb exists.", reqHelper.vbno)
-		return false
-	}
-	return (status == Dcp_Stream_Active)
-}
-
-func (reqHelper *dcpStreamReqHelper) getNewVersion() uint16 {
-	var newVersion uint64
-
-	newVersion = atomic.AddUint64(&reqHelper.currentVersionWell, 1)
-
-	if newVersion > math.MaxUint16 {
-		errStr := fmt.Sprintf("Error: dcpStreamHelper for vbno: %v internal version overflow", reqHelper.vbno)
-		reqHelper.lock.RLock()
-		defer reqHelper.lock.RUnlock()
-		if !reqHelper.isDisabled {
-			reqHelper.dcp.Logger().Errorf(errStr)
-			reqHelper.dcp.RaiseEvent(common.NewEvent(common.ErrorEncountered, nil, nil, nil, errStr))
-		}
-		atomic.StoreUint64(&reqHelper.currentVersionWell, 0)
-		newVersion = 0
-	}
-
-	return uint16(newVersion)
-}
-
-// Gets the number of versions that has not been ack'ed
-func (reqHelper *dcpStreamReqHelper) getNumberOfOutstandingReqs() int {
-	reqHelper.lock.RLock()
-	defer reqHelper.lock.RUnlock()
-	// Find number of un-ack'ed msgs
-	var count int
-	for _, seqno := range reqHelper.sentMsgs {
-		if !reqHelper.ackedMsgs[seqno] {
-			count++
-		}
-	}
-	return count
-}
-
-// Write lock must be held
-func (reqHelper *dcpStreamReqHelper) deregisterRequestNoLock(version uint16) {
-	seqno, ok := reqHelper.sentMsgs[version]
-	if ok {
-		// Mark that this seqno has been ack'ed
-		reqHelper.ackedMsgs[seqno] = true
-	}
-}
-
-/**
- * Register a sent request into the map for book-keeping
- */
-func (reqHelper *dcpStreamReqHelper) registerRequest(version uint16, seqno uint64) (alreadyAcked bool, helperErr error) {
-	reqHelper.lock.Lock()
-	defer reqHelper.lock.Unlock()
-	if reqHelper.isDisabled {
-		helperErr = reqHelper.getDisabledError()
-		return
-	}
-	if reqHelper.isStreamActiveNoLock() {
-		alreadyAcked = true
-	} else {
-		alreadyAcked = reqHelper.ackedMsgs[seqno]
-	}
-
-	if !alreadyAcked {
-		reqHelper.sentMsgs[version] = seqno
-	}
-	return
-}
-
-/**
- * Processes a rollback response.
- * Returns error if there's any issues with look-ups
- * Returns a bool to represent whether or not to ignore this response
- */
-func (reqHelper *dcpStreamReqHelper) processRollbackResponse(version uint16) (ignoreResponse bool, helperErr error) {
-	reqHelper.lock.Lock()
-	defer reqHelper.lock.Unlock()
-
-	if reqHelper.isDisabled {
-		helperErr = reqHelper.getDisabledError()
-		return
-	}
-	// default to not ignore response
-	ignoreResponse = false
-	var acked bool
-
-	if reqHelper.isStreamActiveNoLock() {
-		// If the vb stream is active already, ignore all rollback requests
-		ignoreResponse = true
-	} else {
-		// Check to see if this seqno has been rejected "sent back a ROLLBACK" before. If so, then this is already handled.
-		seqno, seqok := reqHelper.sentMsgs[version]
-		if !seqok {
-			helperErr = errors.New(fmt.Sprintf("Received a ROLLBACK message for vbno=%v with version=%v, but was never sent.",
-				reqHelper.vbno, version))
-			reqHelper.dcp.Logger().Warnf(helperErr.Error())
-			ignoreResponse = true
-			return
-		}
-		acked = reqHelper.ackedMsgs[seqno]
-
-		if acked {
-			ignoreResponse = true
-		}
-
-		if reqHelper.sentMsgs[version] == 0 {
-			// It is weird that we sent out a rollbackseqno of 0 to DCP and it tells us to rollback again.
-			// This should not happen. Restart pipeline. It has the same effect of panic where XDCR DCP nozzles restart.
-			helperErr = errors.New(fmt.Sprintf("Received a ROLLBACK message for vbno=%v with seqno=%v, last sent was 0",
-				reqHelper.vbno, reqHelper.sentMsgs[version]))
-		}
-	}
-
-	if !acked {
-		reqHelper.deregisterRequestNoLock(version)
-	}
-	return
-}
-
-/**
- * When a success is returned, this helper will remove the recorded response and make future
- * rollback operations no-op.
- * All history is reset until a registerRequest is called again
- */
-func (reqHelper *dcpStreamReqHelper) processSuccessResponse(version uint16) {
-	reqHelper.lock.Lock()
-	defer reqHelper.lock.Unlock()
-
-	if reqHelper.isDisabled {
-		return
-	}
-
-	// reset stats
-	reqHelper.initialize()
-}
-
-func (reqHelper *dcpStreamReqHelper) disable() {
-	reqHelper.lock.Lock()
-	defer reqHelper.lock.Unlock()
-	reqHelper.isDisabled = true
-	reqHelper.dcp = nil
-}
-
-func (reqHelper *dcpStreamReqHelper) getDisabledError() error {
-	return fmt.Errorf("vbReqHelper %v is disabled", reqHelper.vbno)
-}
-
 type DcpNozzleIface interface {
 	CheckStuckness(dcp_stats map[string]map[string]string) error
 	Close(string) error
@@ -270,6 +87,11 @@ type DcpNozzleIface interface {
 	// Embedded from AbstractPart
 	Logger() *log.CommonLogger
 	RaiseEvent(event *common.Event)
+}
+
+type uprEventWithLock struct {
+	uprEvent *mcc.UprEvent
+	lock     sync.RWMutex
 }
 
 /************************************
@@ -360,6 +182,11 @@ type DcpNozzle struct {
 	// Open/Close Sync
 	openCloseSync sync.Mutex
 	openCloseCnt  uint32
+
+	currentSnapshot       map[uint16]*uprEventWithLock
+	currentStreamingStart map[uint16]*uprEventWithLock
+
+	tsNegotiator *vbtsNegotiator
 }
 
 func NewDcpNozzle(id string,
@@ -390,7 +217,11 @@ func NewDcpNozzle(id string,
 		vbHandshakeMap:           make(map[uint16]*dcpStreamReqHelper),
 		dcpPrioritySetting:       mcc.PriorityDisabled,
 		collectionsManifestSvc:   collectionsManifestSvc,
+		currentSnapshot:          make(map[uint16]*uprEventWithLock),
+		currentStreamingStart:    make(map[uint16]*uprEventWithLock),
 	}
+
+	dcp.tsNegotiator = NewVbtsNegotiator(dcp, vbnos, 15*time.Second /*warming up period*/)
 
 	for _, vbno := range vbnos {
 		dcp.cur_ts[vbno] = &vbtsWithLock{lock: &sync.RWMutex{}, ts: nil}
@@ -399,6 +230,8 @@ func NewDcpNozzle(id string,
 			var xattr_seqno uint64 = 0
 			dcp.vb_xattr_seqno_map[vbno] = &xattr_seqno
 		}
+		dcp.currentSnapshot[vbno] = &uprEventWithLock{}
+		dcp.currentStreamingStart[vbno] = &uprEventWithLock{}
 	}
 
 	dcp.composeUserAgent()
@@ -635,6 +468,7 @@ func (dcp *DcpNozzle) Start(settings metadata.ReplicationSettingsMap) error {
 	defer dcp.startStopSync.Unlock()
 
 	dcp.startStopCnt++
+	dcp.tsNegotiator.Start(settings)
 	if dcp.startStopCnt == 1 {
 		return dcp.startInternal(settings)
 	}
@@ -695,6 +529,11 @@ func (dcp *DcpNozzle) startInternal(settings metadata.ReplicationSettingsMap) er
 	}
 
 	return err
+}
+
+func (dcp *DcpNozzle) StopWithParameters(settings metadata.ReplicationSettingsMap) error {
+	dcp.tsNegotiator.Stop(settings)
+	return dcp.Stop()
 }
 
 func (dcp *DcpNozzle) Stop() error {
@@ -758,6 +597,7 @@ func (dcp *DcpNozzle) cleanUpProcessDataHelpers() {
 	for _, helper := range dcp.vbHandshakeMap {
 		helper.disable()
 	}
+	dcp.tsNegotiator.Cleanup()
 }
 
 func (dcp *DcpNozzle) closeUprStreamsWithTimeout() {
@@ -953,6 +793,9 @@ func (dcp *DcpNozzle) processData() (err error) {
 						}
 						dcp.RaiseEvent(common.NewEvent(common.StreamingStart, m, dcp, nil, nil))
 						dcp.vbHandshakeMap[vbno].processSuccessResponse(m.Opaque)
+						dcp.currentStreamingStart[vbno].lock.Lock()
+						dcp.currentStreamingStart[vbno].uprEvent = m
+						dcp.currentStreamingStart[vbno].lock.Unlock()
 					} else {
 						err = fmt.Errorf("%v Stream for vb=%v is not supposed to be opened\n", dcp.Id(), vbno)
 						dcp.handleGeneralError(err)
@@ -1006,6 +849,10 @@ func (dcp *DcpNozzle) processData() (err error) {
 						dispatch_time := time.Since(start_time)
 						dcp.RaiseEvent(common.NewEvent(common.DataProcessed, m, dcp, dcp.getDataReceivedDerivedItems(m), dispatch_time.Seconds()*1000000 /*otherInfos*/))
 					case mc.UPR_SNAPSHOT:
+						vbno := m.VBucket
+						dcp.currentSnapshot[vbno].lock.Lock()
+						dcp.currentSnapshot[vbno].uprEvent = m
+						dcp.currentSnapshot[vbno].lock.Unlock()
 						dcp.RaiseEvent(common.NewEvent(common.SnapshotMarkerReceived, m, dcp, nil /*derivedItems*/, nil /*otherInfos*/))
 					default:
 						dcp.Logger().Infof("%v Uprevent OpCode=%v, is skipped\n", dcp.Id(), m.Opcode)
@@ -1145,10 +992,6 @@ func (dcp *DcpNozzle) startUprStreams() error {
 	defer dcp.childrenWaitGrp.Done()
 
 	var err error = nil
-	dcp.Logger().Infof("NEIL DEBUG %v starting uprStream in 15 seconds", dcp.Id())
-	time.Sleep(15 * time.Second)
-	dcp.Logger().Infof("%v: startUprStreams for %v...\n", dcp.Id(), dcp.GetVBList())
-
 	init_ch := make(chan bool, 1)
 	init_ch <- true
 
@@ -1338,10 +1181,18 @@ func (dcp *DcpNozzle) UpdateSettings(settings metadata.ReplicationSettingsMap) e
 		if !ok || new_ts == nil {
 			panic(fmt.Sprintf("setting %v should have type of map[uint16]*base.VBTimestamp", DCP_VBTimestamp))
 		}
-		err := dcp.onUpdateStartingSeqno(new_ts)
-		if err != nil {
-			return err
+		// With advDCP, it should have callback
+		_, ok = settings[base.UpdateSettingCb]
+		if !ok {
+			// nil if pipeline is constructing/starting
+			panic(fmt.Sprintf("setting %v should have updatecallback", base.UpdateSettingCb))
 		}
+		pipelineTopic, ok := settings[base.PipelineTopic].(string)
+		if !ok || pipelineTopic == "" {
+			panic("Need pipelineTopic")
+		}
+
+		dcp.tsNegotiator.HandleVbtsFromCheckpointMgr(pipelineTopic, new_ts)
 	}
 
 	if statsInterval, ok := settings[DCP_Stats_Interval]; ok {

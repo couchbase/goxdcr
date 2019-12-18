@@ -740,6 +740,10 @@ func (ckmgr *CheckpointManager) SetVBTimestamps(topic string) error {
 	return nil
 }
 
+func (ckmgr *CheckpointManager) updateSettingCb(err error, kvs map[string]interface{}) {
+	ckmgr.logger.Infof("UpdateSetting callback with returned err %v kvs %v", err, kvs)
+}
+
 func (ckmgr *CheckpointManager) setTimestampForVB(vbno uint16, ts *base.VBTimestamp) error {
 	ckmgr.logger.Infof("%v Set VBTimestamp: vb=%v, ts.Seqno=%v ts.SourceManifestId=%v ts.TargetManifestId=%v\n", ckmgr.pipeline.Topic(), vbno, ts.Seqno, ts.ManifestIDs.SourceManifestId, ts.ManifestIDs.TargetManifestId)
 	ckmgr.logger.Debugf("%v vb=%v ts=%v\n", ckmgr.pipeline.Topic(), vbno, ts)
@@ -762,6 +766,8 @@ func (ckmgr *CheckpointManager) setTimestampForVB(vbno uint16, ts *base.VBTimest
 	ts_map := make(map[uint16]*base.VBTimestamp)
 	ts_map[vbno] = ts
 	settings[base.VBTimestamps] = ts_map
+	settings[base.UpdateSettingCb] = ckmgr.updateSettingCb
+	settings[base.PipelineTopic] = ckmgr.pipeline.Topic()
 	//notify the settings change
 	ckmgr.pipeline.UpdateSettings(settings)
 

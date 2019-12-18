@@ -40,3 +40,5 @@ type AdvNozzle interface {
 	NozzleCommon
 	AdvPart
 }
+
+type TimestampCb func(err error, kv map[string]interface{})

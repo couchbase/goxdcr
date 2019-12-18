@@ -414,6 +414,8 @@ const (
 	ProblematicVBSource = "ProblematicVBSource"
 	ProblematicVBTarget = "ProblematicVBTarget"
 	VBTimestamps        = "VBTimestamps"
+	UpdateSettingCb     = "UpdateSettingCb"
+	PipelineTopic       = "PipelineTopic"
 )
 
 // flag for requesting datatype in GetMeta request

@@ -893,8 +893,28 @@ func (xdcrf *XDCRFactory) constructUpdateSettingsForCapiNozzle(pipeline common.P
 	return capiSettings
 }
 
+func (x *XDCRFactory) constructCommonSettingsForDcpNozzle(pipeline common.Pipeline, settings metadata.ReplicationSettingsMap, commonOutput metadata.ReplicationSettingsMap) {
+	// dcp priority settings could have been set through replStatus.customSettings.
+	dcpPriority, ok := settings[parts.DCP_Priority]
+	if ok {
+		commonOutput[parts.DCP_Priority] = dcpPriority
+	}
+
+	// Pipeline Name
+	commonOutput[parts.PipelineTopic] = pipeline.Topic()
+
+	// callback to checkpoint manager
+	if cb, ok := settings[parts.UpdateSettingCb]; ok {
+		commonOutput[parts.UpdateSettingCb] = cb
+	} else {
+		commonOutput[parts.UpdateSettingCb] = nil
+	}
+}
+
 func (xdcrf *XDCRFactory) constructUpdateSettingsForDcpNozzle(pipeline common.Pipeline, settings metadata.ReplicationSettingsMap) metadata.ReplicationSettingsMap {
 	dcpSettings := make(metadata.ReplicationSettingsMap)
+
+	xdcrf.constructCommonSettingsForDcpNozzle(pipeline, settings, dcpSettings)
 
 	vbTimestamp, ok := settings[base.VBTimestamps]
 	if ok {
@@ -904,11 +924,6 @@ func (xdcrf *XDCRFactory) constructUpdateSettingsForDcpNozzle(pipeline common.Pi
 	statsInterval, ok := settings[metadata.PipelineStatsIntervalKey]
 	if ok {
 		dcpSettings[parts.DCP_Stats_Interval] = statsInterval
-	}
-
-	dcpPriority, ok := settings[parts.DCP_Priority]
-	if ok {
-		dcpSettings[parts.DCP_Priority] = dcpPriority
 	}
 
 	return dcpSettings
@@ -1016,6 +1031,8 @@ func (xdcrf *XDCRFactory) constructSettingsForDcpNozzle(pipeline common.Pipeline
 		return nil, fmt.Errorf("No checkpoint manager has been registered with the pipeline %v", pipeline.Topic())
 	}
 
+	xdcrf.constructCommonSettingsForDcpNozzle(pipeline, settings, dcpNozzleSettings)
+
 	dcpNozzleSettings[parts.DCP_VBTimestampUpdater] = ckpt_svc.(*pipeline_svc.CheckpointManager).UpdateVBTimestamps
 	dcpNozzleSettings[parts.DCP_Stats_Interval] = getSettingFromSettingsMap(settings, metadata.PipelineStatsIntervalKey, repSettings.StatsInterval)
 	if repSettings.IsCapi() {
@@ -1023,12 +1040,6 @@ func (xdcrf *XDCRFactory) constructSettingsForDcpNozzle(pipeline common.Pipeline
 		dcpNozzleSettings[parts.SETTING_COMPRESSION_TYPE] = (base.CompressionType)(base.CompressionTypeNone)
 	} else {
 		dcpNozzleSettings[parts.SETTING_COMPRESSION_TYPE] = base.GetCompressionType(getSettingFromSettingsMap(settings, metadata.CompressionTypeKey, repSettings.CompressionType).(int))
-	}
-
-	// dcp priority settings could have been set through replStatus.customSettings.
-	dcpPriority, ok := settings[parts.DCP_Priority]
-	if ok {
-		dcpNozzleSettings[parts.DCP_Priority] = dcpPriority
 	}
 
 	var getterFunc service_def.CollectionsManifestPartsFunc = func(vblist []uint16) *metadata.CollectionsManifest {

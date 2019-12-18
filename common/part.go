@@ -132,4 +132,5 @@ type Part interface {
 type AdvPart interface {
 	PartCommon
 	AdvComponent
+	StopWithParameters(settings metadata.ReplicationSettingsMap) error
 }

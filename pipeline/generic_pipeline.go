@@ -208,10 +208,6 @@ func (genericPipeline *GenericPipeline) startPart(part common.Part, settings met
 	err = part.Start(partSettings)
 	if err != nil && err.Error() != common.PartAlreadyStartedError.Error() {
 		err_ch <- base.ComponentError{part.Id(), err}
-		//	} else if advRouter, ok := part.Connector().(*parts.AdvRouter); ok {
-		//		// TODO - need to think about this - right now it looks like we are starting ALL the downstream parts above??
-		//		genericPipeline.logger.Infof("Opening adv router for %v\n", genericPipeline.Topic())
-		//		advRouter.Open(genericPipeline.Topic())
 	}
 }
 
@@ -242,9 +238,6 @@ func (genericPipeline *GenericPipeline) Start(settings metadata.ReplicationSetti
 	settings[base.ProblematicVBTarget] = &base.ObjectWithLock{make(map[uint16]error), &sync.RWMutex{}}
 
 	genericPipeline.settings = settings
-
-	//get starting vb timestamp
-	go genericPipeline.startingSeqno_constructor(genericPipeline)
 
 	// start async event listeners
 	for _, async_event_listener := range GetAllAsyncComponentEventListeners(genericPipeline) {
@@ -291,6 +284,9 @@ func (genericPipeline *GenericPipeline) Start(settings metadata.ReplicationSetti
 	if len(errMap) > 0 {
 		return errMap
 	}
+
+	//get starting vb timestamp - since dcp requires start() to be called before this callback is called now
+	go genericPipeline.startingSeqno_constructor(genericPipeline)
 
 	genericPipeline.logger.Infof("%v All parts have been started", genericPipeline.Topic())
 	genericPipeline.ReportProgress("All parts have been started")
@@ -370,8 +366,20 @@ func (genericPipeline *GenericPipeline) stopPartsWithTimeout() base.ErrorMap {
 
 func (genericPipeline *GenericPipeline) stopPart(part common.Part, wait_grp *sync.WaitGroup, err_ch chan base.ComponentError) {
 	defer wait_grp.Done()
-	genericPipeline.logger.Infof("%v trying to stop part %v\n", genericPipeline.InstanceId(), part.Id())
-	err := part.Stop()
+	var err error
+	if advPart, isAdv := part.(common.AdvPart); isAdv {
+		genericPipeline.logger.Infof("%v trying to stop advanced part %v\n", genericPipeline.InstanceId(), advPart.Id())
+		partSettings, innerErr := genericPipeline.partSetting_constructor(genericPipeline, part, genericPipeline.settings, genericPipeline.targetClusterRef, nil)
+		if innerErr != nil {
+			err = innerErr
+		} else {
+			// PartSettings contain context, such as pipeline topic
+			err = advPart.StopWithParameters(partSettings)
+		}
+	} else {
+		genericPipeline.logger.Infof("%v trying to stop part %v\n", genericPipeline.InstanceId(), part.Id())
+		err = part.Stop()
+	}
 	if err != nil {
 		genericPipeline.logger.Warnf("%v failed to stop part %v, err=%v, let it alone to die\n", genericPipeline.InstanceId(), part.Id(), err)
 		err_ch <- base.ComponentError{part.Id(), err}
@@ -793,6 +801,7 @@ func (genericPipeline *GenericPipeline) UpdateSettings(settings metadata.Replica
 			if err != nil {
 				return err
 			}
+
 			err = part.UpdateSettings(partSettings)
 			if err != nil {
 				return err
