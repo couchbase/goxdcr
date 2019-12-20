@@ -407,6 +407,11 @@ func (dcp *DcpNozzle) initialize(settings metadata.ReplicationSettingsMap) (err 
 
 	dcp.initializeUprHandshakeHelpers()
 
+	err = dcp.tsNegotiator.getFailoverLogs()
+	if err != nil {
+		return err
+	}
+
 	err = dcp.initializeMemcachedClient(settings)
 	if err != nil {
 		return err

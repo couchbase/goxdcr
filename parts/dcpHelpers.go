@@ -3,6 +3,7 @@ package parts
 import (
 	"errors"
 	"fmt"
+	mcc "github.com/couchbase/gomemcached/client"
 	base "github.com/couchbase/goxdcr/base"
 	common "github.com/couchbase/goxdcr/common"
 	"github.com/couchbase/goxdcr/metadata"
@@ -250,6 +251,8 @@ type vbtsNegotiator struct {
 	topicToCallback map[string]callbackMap
 
 	topicToVbTsMap map[string]*vbtsMapWithLock
+
+	failoverLogs map[uint16]*mcc.FailoverLog
 }
 
 func NewVbtsNegotiator(dcp *DcpNozzle, vbnos []uint16, waitingPeriod time.Duration) *vbtsNegotiator {
@@ -393,13 +396,32 @@ func (v *vbtsNegotiator) negotiate() error {
 		}
 	}
 
-	//	UprGetFailoverLog(vb []uint16) (map[uint16]*FailoverLog, error)
-	failoverLogs, err := v.dcp.client.UprGetFailoverLog(validVbs)
-	v.dcp.Logger().Infof("NEIL DEBUG failoverlogs err: %v logs: %v", err, failoverLogs)
-
-	err = v.dcp.onUpdateStartingSeqno(finalTimestamp)
+	err := v.dcp.onUpdateStartingSeqno(finalTimestamp)
 	v.state.set(vbtsNegotiating, vbtsDone)
 	return err
+}
+
+func (v *vbtsNegotiator) getFailoverLogs() error {
+	vbuckets := v.dcp.vbnos
+	addr, err := v.dcp.xdcr_topology_svc.MyMemcachedAddr()
+	if err != nil {
+		return err
+	}
+
+	failoverlogClient, err := v.dcp.utils.GetMemcachedConnection(addr, v.dcp.sourceBucketName, v.dcp.user_agent, base.KeepAlivePeriod, v.dcp.Logger())
+	if err != nil {
+		return err
+	}
+	defer failoverlogClient.Close()
+
+	failoverMap, err := failoverlogClient.UprGetFailoverLog(vbuckets)
+	if err != nil {
+		v.dcp.Logger().Errorf("Failed to get failoverlog: %v", err)
+		return err
+	}
+	v.failoverLogs = failoverMap
+	v.dcp.Logger().Infof("Got failoverlogs: %v", v.failoverLogs)
+	return nil
 }
 
 func (v *vbtsNegotiator) getNumPipelines() int {
