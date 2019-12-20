@@ -65,13 +65,14 @@ SCOPE_NAME_COLLECTION_MAP=(["S1"]=${collection1Arr[@]} ["S2"]=${collection2Arr[@
 
 
 function runDataLoad {
+	local prefix=$1
 	# Run CBWorkloadgen in parallel
 	runCbWorkloadGenBucket "C1" "B0" &
 #	runCbWorkloadGenBucket "C1" "B1" &
 #	runCbWorkloadGenBucket "C2" "B2" &
-	runCbWorkloadGenCollection "C1" "B1" "S1" "col1"
-	runCbWorkloadGenCollection "C2" "B1" "S1" "col1"
-	runCbWorkloadGenCollection "C2" "B2" "S1" "col1"
+	runCbWorkloadGenCollection "C1" "B1" "S1" "col1" "$prefix"
+	runCbWorkloadGenCollection "C2" "B1" "S1" "col1" "$prefix"
+	runCbWorkloadGenCollection "C2" "B2" "S1" "col1" "$prefix"
 	waitForBgJobs
 }
 
@@ -90,10 +91,18 @@ sleep 1
 createRemoteClusterReference "C1" "C2"
 createRemoteClusterReference "C2" "C1"
 printGlobalScopeAndCollectionInfo
-runDataLoad
+runDataLoad "xdcrProvCollections_"
 sleep 3
 createBucketReplication "C1" "B1" "C2" "B1" DefaultBucketReplProperties
 createBucketReplication "C1" "B1" "C2" "B2" DefaultBucketReplProperties
 createBucketReplication "C2" "B2" "C1" "B1" DefaultBucketReplProperties
 
 exportProvisionedConfig
+
+read -p "Press enter again to re run data workload with different prefix"
+
+runDataLoad "xdcrProvCollections2_"
+
+read -p "Press enter again to re run data workload with different prefix"
+
+runDataLoad "xdcrProvCollections3_"

@@ -232,6 +232,26 @@ func NewVbtsMapWithLock() *vbtsMapWithLock {
 	return &vbtsMapWithLock{vbMap: make(map[uint16]*base.VBTimestamp)}
 }
 
+type FailoverLogMap map[uint16]*mcc.FailoverLog
+
+func (f *FailoverLogMap) ContainsVbUuid(vbno uint16, vbuuid uint64) bool {
+	if f == nil {
+		return false
+	}
+	log, exists := (*f)[vbno]
+	if !exists || log == nil {
+		return false
+	}
+
+	// 0 is vbuuid 1 is seqno
+	for _, pair := range *log {
+		if pair[0] == vbuuid {
+			return true
+		}
+	}
+	return false
+}
+
 type vbtsNegotiator struct {
 	dcp   *DcpNozzle
 	vbnos []uint16
@@ -352,6 +372,7 @@ func (v *vbtsNegotiator) negotiate() error {
 	}
 	v.dcp.Logger().Infof("%v waiting period has expired. Starting negotiation between %v pipelines", v.dcp.Id(), v.getNumPipelines())
 
+	// First, go through all the checkpoints and try to start all valid vbs if they have already shared checkpoints
 	finalTimestamp := make(map[uint16]*base.VBTimestamp)
 	invalidVbs := make(map[uint16]bool)
 	var validVbs []uint16
@@ -388,13 +409,27 @@ func (v *vbtsNegotiator) negotiate() error {
 		}
 		vbtsWLock.mutex.RUnlock()
 	}
-	if len(invalidVbs) > 0 {
-		v.dcp.Logger().Warnf("InvalidVBs: %v", invalidVbs)
-	} else {
-		for vbno, _ := range finalTimestamp {
+
+	v.dcp.Logger().Infof("NEIL DEBUG before failoverlog check, invalidVBs: %v", invalidVbs)
+
+	// Check to make sure these valid vbs' timestamps all exist in the failoverlog
+	for vbno, finalts := range finalTimestamp {
+		failoverlogMap := (FailoverLogMap)(v.failoverLogs)
+		if finalts.Vbuuid != 0 && !failoverlogMap.ContainsVbUuid(vbno, finalts.Vbuuid) {
+			invalidVbs[vbno] = true
+		} else {
 			validVbs = append(validVbs, vbno)
 		}
 	}
+
+	if len(invalidVbs) > 0 {
+		v.dcp.Logger().Warnf("InvalidVBs: %v", invalidVbs)
+		for invalidVb, _ := range invalidVbs {
+			delete(finalTimestamp, invalidVb)
+		}
+	}
+
+	v.dcp.Logger().Infof("NEIL DEBUG negotiator final timestamp length %v", len(finalTimestamp))
 
 	err := v.dcp.onUpdateStartingSeqno(finalTimestamp)
 	v.state.set(vbtsNegotiating, vbtsDone)

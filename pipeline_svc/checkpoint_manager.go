@@ -130,6 +130,8 @@ type CheckpointManager struct {
 	// Used to catch the initial target manifest
 	pipelineStartedWithoutCkpt      uint32 // atomic
 	initManifestMapsWithoutCkptOnce sync.Once
+
+	deregisterCallbacks []func()
 }
 
 // Checkpoint Manager keeps track of one checkpointRecord per vbucket
@@ -205,7 +207,7 @@ func NewCheckpointManager(checkpoints_svc service_def.CheckpointsService, capi_s
 
 func (ckmgr *CheckpointManager) Attach(pipeline common.Pipeline) error {
 
-	ckmgr.logger.Infof("Attach checkpoint manager with pipeline %v\n", pipeline.Topic())
+	ckmgr.logger.Infof("Attach checkpoint manager of %v active vbs with pipeline %v\n", len(ckmgr.getMyVBs()), pipeline.Topic())
 
 	ckmgr.pipeline = pipeline
 
@@ -217,10 +219,20 @@ func (ckmgr *CheckpointManager) Attach(pipeline common.Pipeline) error {
 	}
 
 	dcp_parts := pipeline.Sources()
-	for _, dcp := range dcp_parts {
-		dcp.RegisterComponentEventListener(common.StreamingStart, ckmgr)
-		dcp.RegisterComponentEventListener(common.SnapshotMarkerReceived, ckmgr)
-		dcp.RegisterComponentEventListener(common.SystemEventReceived, ckmgr)
+	for _, dcpBasic := range dcp_parts {
+		dcp := dcpBasic.(common.AdvNozzle)
+		dcp.RegisterSpecificComponentEventListener(ckmgr.pipeline.Topic(), common.StreamingStart, ckmgr)
+		ckmgr.deregisterCallbacks = append(ckmgr.deregisterCallbacks, func() {
+			dcp.UnRegisterSpecificComponentEventListener(ckmgr.pipeline.Topic(), common.StreamingStart, ckmgr)
+		})
+		dcp.RegisterSpecificComponentEventListener(ckmgr.pipeline.Topic(), common.SnapshotMarkerReceived, ckmgr)
+		ckmgr.deregisterCallbacks = append(ckmgr.deregisterCallbacks, func() {
+			dcp.UnRegisterSpecificComponentEventListener(ckmgr.pipeline.Topic(), common.SnapshotMarkerReceived, ckmgr)
+		})
+		dcp.RegisterSpecificComponentEventListener(ckmgr.pipeline.Topic(), common.SystemEventReceived, ckmgr)
+		ckmgr.deregisterCallbacks = append(ckmgr.deregisterCallbacks, func() {
+			dcp.UnRegisterSpecificComponentEventListener(ckmgr.pipeline.Topic(), common.SystemEventReceived, ckmgr)
+		})
 	}
 
 	//register pipeline supervisor as ckmgr's error handler
@@ -484,6 +496,11 @@ func (ckmgr *CheckpointManager) getHighSeqnoAndVBUuidForServerWithRetry(serverAd
 func (ckmgr *CheckpointManager) Stop() error {
 	//send signal to checkpoiting routine to exit
 	close(ckmgr.finish_ch)
+
+	// Unregister from source nozzle
+	for _, cb := range ckmgr.deregisterCallbacks {
+		cb()
+	}
 
 	//close the connections
 	if !ckmgr.isTargetES {
@@ -1534,13 +1551,14 @@ func (ckmgr *CheckpointManager) OnEvent(event *common.Event) {
 			vbno := upr_event.VBucket
 
 			failoverlog_obj, ok1 := ckmgr.failoverlog_map[vbno]
+			ckmgr.logger.Infof("%v Got streamingStart for vb %v with flog %v, internal obj exists? %v", ckmgr.pipeline.Topic(), vbno, *flog, ok1)
 			if ok1 {
 				failoverlog_obj.lock.Lock()
 				defer failoverlog_obj.lock.Unlock()
 
 				failoverlog_obj.failoverlog = flog
 
-				ckmgr.logger.Debugf("%v Got failover log for vb=%v\n", ckmgr.pipeline.Topic(), vbno)
+				ckmgr.logger.Infof("%v Got failover log %v for vb=%v\n", ckmgr.pipeline.Topic(), *flog, vbno)
 			} else {
 				err := fmt.Errorf("%v Received failoverlog on an unknown vb=%v\n", ckmgr.pipeline.Topic(), vbno)
 				ckmgr.handleGeneralError(err)
@@ -1600,6 +1618,7 @@ func (ckmgr *CheckpointManager) OnEvent(event *common.Event) {
 
 func (ckmgr *CheckpointManager) getFailoverUUIDForSeqno(vbno uint16, seqno uint64) (uint64, error) {
 	failoverlog_obj, ok1 := ckmgr.failoverlog_map[vbno]
+	var failoverObjStr string
 	if ok1 {
 		failoverlog_obj.lock.RLock()
 		defer failoverlog_obj.lock.RUnlock()
@@ -1613,13 +1632,14 @@ func (ckmgr *CheckpointManager) getFailoverUUIDForSeqno(vbno uint16, seqno uint6
 					return failover_uuid, nil
 				}
 			}
+			failoverObjStr = fmt.Sprintf(" received failover logs: %v", flog)
 		}
 	} else {
 		err := fmt.Errorf("%v Calling getFailoverUUIDForSeqno on an unknown vb=%v\n", ckmgr.pipeline.Topic(), vbno)
 		ckmgr.handleGeneralError(err)
 		return 0, err
 	}
-	return 0, fmt.Errorf("%v Failed to find vbuuid for vb=%v, seqno=%v\n", ckmgr.pipeline.Topic(), vbno, seqno)
+	return 0, fmt.Errorf("%v Failed to find vbuuid for vb=%v, seqno=%v - %v", ckmgr.pipeline.Topic(), vbno, seqno, failoverObjStr)
 }
 
 // find the snapshot to which the checkpoint seqno belongs

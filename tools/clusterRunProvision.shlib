@@ -658,9 +658,10 @@ function runCbWorkloadGenCollection {
 	local bucketName=$2
 	local scopeName=$3
 	local collectionName=$4
+	local prefix=$5
 	local collectionId
 
-	if [[ -z "${clusterName:-}" ]] || [[ -z "${bucketName:-}" ]] || [[ -z "${scopeName:-}" ]] || [[ -z "${collectionName:-}" ]];then
+	if [[ -z "${clusterName:-}" ]] || [[ -z "${bucketName:-}" ]] || [[ -z "${scopeName:-}" ]] || [[ -z "${collectionName:-}" ]] || [[ -z "${prefix:-}" ]];then
 		echo "Invalid input"
 		return 1
 	fi
@@ -689,7 +690,7 @@ function runCbWorkloadGenCollection {
 
 	echo "Running cbworkloadGen on $clusterName bucket $bucketName scope: $scopeName collection $collectionName (ID: $collectionId)"
 	# Run 10000 items of json documents with set/get ratio of 100%
-	$workloadGen -i 10000 -j -r 1 -n 127.0.0.1:$port -b $bucketName -u $DEFAULT_ADMIN -p $DEFAULT_PW --prefix=xdcrProvCollections_$clusterName -c $collectionId
+	$workloadGen -i 10000 -j -r 1 -n 127.0.0.1:$port -b $bucketName -u $DEFAULT_ADMIN -p $DEFAULT_PW --prefix=${prefix}${clusterName} -c $collectionId
 }
 
 function waitForBgJobs {
