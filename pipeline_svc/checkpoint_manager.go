@@ -1551,14 +1551,13 @@ func (ckmgr *CheckpointManager) OnEvent(event *common.Event) {
 			vbno := upr_event.VBucket
 
 			failoverlog_obj, ok1 := ckmgr.failoverlog_map[vbno]
-			ckmgr.logger.Infof("%v Got streamingStart for vb %v with flog %v, internal obj exists? %v", ckmgr.pipeline.Topic(), vbno, *flog, ok1)
 			if ok1 {
 				failoverlog_obj.lock.Lock()
 				defer failoverlog_obj.lock.Unlock()
 
 				failoverlog_obj.failoverlog = flog
 
-				ckmgr.logger.Infof("%v Got failover log %v for vb=%v\n", ckmgr.pipeline.Topic(), *flog, vbno)
+				ckmgr.logger.Debugf("%v Got failover log %v for vb=%v\n", ckmgr.pipeline.Topic(), *flog, vbno)
 			} else {
 				err := fmt.Errorf("%v Received failoverlog on an unknown vb=%v\n", ckmgr.pipeline.Topic(), vbno)
 				ckmgr.handleGeneralError(err)

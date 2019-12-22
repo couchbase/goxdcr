@@ -375,6 +375,7 @@ func (v *vbtsNegotiator) negotiate() error {
 	// First, go through all the checkpoints and try to start all valid vbs if they have already shared checkpoints
 	finalTimestamp := make(map[uint16]*base.VBTimestamp)
 	invalidVbs := make(map[uint16]bool)
+	//	debugInvalid := make(map[uint16][]uint64)
 	var validVbs []uint16
 
 	v.internalLock.RLock()
@@ -383,11 +384,22 @@ func (v *vbtsNegotiator) negotiate() error {
 		vbtsWLock.mutex.RLock()
 		for vbno, ts := range vbtsWLock.vbMap {
 			if finalTimestamp[vbno] == nil {
-				finalTimestamp[vbno] = &base.VBTimestamp{Vbno: vbno}
+				finalTimestamp[vbno] = &base.VBTimestamp{Vbno: vbno, Vbuuid: ts.Vbuuid}
 			} else if _, isInvalid := invalidVbs[vbno]; isInvalid {
+				//				var found bool
+				//				for _, vbuuid := range debugInvalid[vbno] {
+				//					if vbuuid == ts.Vbuuid {
+				//						found = true
+				//					}
+				//				}
+				//				if !found {
+				//					debugInvalid[vbno] = append(debugInvalid[vbno], ts.Vbuuid)
+				//				}
 				continue
 			} else if finalTimestamp[vbno].Vbuuid != ts.Vbuuid {
 				invalidVbs[vbno] = true
+				//				debugInvalid[vbno] = append(debugInvalid[vbno], finalTimestamp[vbno].Vbuuid)
+				//				debugInvalid[vbno] = append(debugInvalid[vbno], ts.Vbuuid)
 				continue
 			}
 
@@ -410,7 +422,8 @@ func (v *vbtsNegotiator) negotiate() error {
 		vbtsWLock.mutex.RUnlock()
 	}
 
-	v.dcp.Logger().Infof("NEIL DEBUG before failoverlog check, invalidVBs: %v", invalidVbs)
+	//	v.dcp.Logger().Infof("NEIL DEBUG before failoverlog check, num of invalidVBs: %v vbuuids: %v", len(invalidVbs), debugInvalid)
+	v.dcp.Logger().Infof("NEIL DEBUG before failoverlog check, num of invalidVBs: %v", len(invalidVbs))
 
 	// Check to make sure these valid vbs' timestamps all exist in the failoverlog
 	for vbno, finalts := range finalTimestamp {
@@ -423,12 +436,12 @@ func (v *vbtsNegotiator) negotiate() error {
 	}
 
 	if len(invalidVbs) > 0 {
-		v.dcp.Logger().Warnf("InvalidVBs: %v", invalidVbs)
 		for invalidVb, _ := range invalidVbs {
 			delete(finalTimestamp, invalidVb)
 		}
 	}
 
+	// TODO - need to think more about next level and find the ancestor if not found
 	v.dcp.Logger().Infof("NEIL DEBUG negotiator final timestamp length %v", len(finalTimestamp))
 
 	err := v.dcp.onUpdateStartingSeqno(finalTimestamp)

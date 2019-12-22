@@ -556,14 +556,14 @@ func (genericPipeline *GenericPipeline) initialize() {
 
 	genericPipeline.partsMap = make(map[string]common.Part)
 	for _, source := range sources {
-		addPartToMap(source, genericPipeline.partsMap)
+		genericPipeline.addPartToMap(source, genericPipeline.partsMap)
 	}
 
 	genericPipeline.connectorsMap = make(map[string]common.Connector)
 	for _, source := range sources {
 		connector := source.Connector()
 		if connector != nil {
-			addConnectorToMap(connector, genericPipeline.connectorsMap)
+			genericPipeline.addConnectorToMap(connector, genericPipeline.connectorsMap)
 		}
 	}
 }
@@ -572,16 +572,23 @@ func (genericPipeline *GenericPipeline) initialize() {
  * Given a hiearchical structure of parts and its downstream parts, recursively flatten
  * all the parts in the heiarchy into a flat partsMap
  */
-func addPartToMap(part common.Part, partsMap map[string]common.Part) {
+func (g *GenericPipeline) addPartToMap(part common.Part, partsMap map[string]common.Part) {
 	if part != nil && partsMap != nil {
 		if _, ok := partsMap[part.Id()]; !ok {
 			// process the part if it has not been processed yet to avoid infinite loop
 			partsMap[part.Id()] = part
 
+			// TODO - add only xmem related to this topic
 			connector := part.Connector()
 			if connector != nil {
-				for _, downStreamPart := range connector.DownStreams() {
-					addPartToMap(downStreamPart, partsMap)
+				if advConnector, ok := connector.(common.AdvConnector); ok {
+					for _, downStreamPart := range advConnector.SpecificDownStreams(g.Topic()) {
+						g.addPartToMap(downStreamPart, partsMap)
+					}
+				} else {
+					for _, downStreamPart := range connector.DownStreams() {
+						g.addPartToMap(downStreamPart, partsMap)
+					}
 				}
 			}
 		}
@@ -592,15 +599,24 @@ func addPartToMap(part common.Part, partsMap map[string]common.Part) {
  * Given a hiearchical structure of connectors, recursively flatten all the connectors
  * into a flat connectormap
  */
-func addConnectorToMap(connector common.Connector, connectorsMap map[string]common.Connector) {
+func (g *GenericPipeline) addConnectorToMap(connector common.Connector, connectorsMap map[string]common.Connector) {
 	if _, ok := connectorsMap[connector.Id()]; !ok {
 		// process the connector if it has not been processed yet to avoid infinite loop
 		connectorsMap[connector.Id()] = connector
 
-		for _, downStreamPart := range connector.DownStreams() {
-			downStreamConnector := downStreamPart.Connector()
-			if downStreamConnector != nil {
-				addConnectorToMap(downStreamConnector, connectorsMap)
+		if advConnector, ok := connector.(common.AdvConnector); ok {
+			for _, downStreamPart := range advConnector.SpecificDownStreams(g.Topic()) {
+				downStreamConnector := downStreamPart.Connector()
+				if downStreamConnector != nil {
+					g.addConnectorToMap(downStreamConnector, connectorsMap)
+				}
+			}
+		} else {
+			for _, downStreamPart := range connector.DownStreams() {
+				downStreamConnector := downStreamPart.Connector()
+				if downStreamConnector != nil {
+					g.addConnectorToMap(downStreamConnector, connectorsMap)
+				}
 			}
 		}
 	}

@@ -611,11 +611,16 @@ func (tsTracker *ThroughSeqnoTrackerSvc) GetThroughSeqnos() map[uint16]uint64 {
 func (tsTracker *ThroughSeqnoTrackerSvc) GetSrcManifestIds(seqnoMap map[uint16]uint64) map[uint16]uint64 {
 	retMap := make(map[uint16]uint64)
 	for vbno, seqno := range seqnoMap {
-		lastSeenManifestId, err := tsTracker.vbSystemEventsSeqnoListMap[vbno].getList2BasedonList1Floor(seqno)
-		if err != nil {
-			tsTracker.logger.Warnf("Unable to retrieve manifest for vb %v, requesting seqno %v err: %v\n", vbno, seqno, err)
+		if seqno == 0 {
+			// Seqno 0 means no manifest has been sent - return 0 for manifestId
+			retMap[vbno] = 0
+		} else {
+			lastSeenManifestId, err := tsTracker.vbSystemEventsSeqnoListMap[vbno].getList2BasedonList1Floor(seqno)
+			if err != nil {
+				tsTracker.logger.Warnf("Unable to retrieve manifest for vb %v, requesting seqno %v err: %v\n", vbno, seqno, err)
+			}
+			retMap[vbno] = lastSeenManifestId
 		}
-		retMap[vbno] = lastSeenManifestId
 	}
 	return retMap
 }

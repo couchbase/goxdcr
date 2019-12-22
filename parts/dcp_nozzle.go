@@ -120,7 +120,7 @@ type DcpNozzle struct {
 
 	finch chan bool
 
-	bOpen uint32
+	bOpen int32
 
 	childrenWaitGrp sync.WaitGroup
 
@@ -445,7 +445,7 @@ func (dcp *DcpNozzle) initializeUprHandshakeHelpers() {
 }
 
 func (dcp *DcpNozzle) Open(topic string) error {
-	atomic.StoreUint32(&dcp.bOpen, 1)
+	atomic.AddInt32(&dcp.bOpen, 1)
 	if advRouter, ok := dcp.Connector().(*AdvRouter); ok {
 		advRouter.Open(topic)
 		return nil
@@ -455,9 +455,9 @@ func (dcp *DcpNozzle) Open(topic string) error {
 }
 
 func (dcp *DcpNozzle) Close(topic string) error {
-	atomic.StoreUint32(&dcp.bOpen, 0)
+	atomic.AddInt32(&dcp.bOpen, -1)
 	if advRouter, ok := dcp.Connector().(*AdvRouter); ok {
-		advRouter.Open(topic)
+		advRouter.Close(topic)
 		return nil
 	} else {
 		return fmt.Errorf("Unable to Close adv router for topic %v", topic)
@@ -688,7 +688,7 @@ func (dcp *DcpNozzle) closeUprFeed() error {
 }
 
 func (dcp *DcpNozzle) IsOpen() bool {
-	return atomic.LoadUint32(&dcp.bOpen) > 0
+	return atomic.LoadInt32(&dcp.bOpen) > 0
 }
 
 func (dcp *DcpNozzle) handleSystemEvent(event *mcc.UprEvent) {

@@ -903,6 +903,7 @@ func (xmem *XmemNozzle) Open(topic string) error {
 }
 
 func (xmem *XmemNozzle) Close(topic string) error {
+	xmem.Logger().Infof("%v closed called on topic %v", xmem.Id(), topic)
 	atomic.StoreUint32(&xmem.bOpen, 0)
 	return nil
 }
