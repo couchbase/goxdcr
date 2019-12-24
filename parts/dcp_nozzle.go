@@ -41,6 +41,7 @@ const (
 	DCP_Specific_Manifest_Getter = "dcpSpecManifestGetter"
 	PipelineTopic                = base.PipelineTopic
 	UpdateSettingCb              = base.UpdateSettingCb
+	BackfillMgr                  = "BackfillMgr"
 )
 
 type DcpStreamState int
@@ -187,6 +188,8 @@ type DcpNozzle struct {
 	currentStreamingStart map[uint16]*uprEventWithLock
 
 	tsNegotiator *vbtsNegotiator
+
+	backfillMgr service_def.BackfillMgrIface
 }
 
 func NewDcpNozzle(id string,
@@ -432,6 +435,8 @@ func (dcp *DcpNozzle) initialize(settings metadata.ReplicationSettingsMap) (err 
 	}
 
 	dcp.cachedConnector, _ = dcp.AdvConnector()
+
+	dcp.backfillMgr = settings[BackfillMgr].(service_def.BackfillMgrIface)
 	return
 }
 

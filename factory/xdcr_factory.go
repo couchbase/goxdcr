@@ -59,6 +59,7 @@ type XDCRFactory struct {
 	bucket_settings_svc      service_def.BucketSettingsSvc
 	throughput_throttler_svc service_def.ThroughputThrottlerSvc
 	collectionsManifestSvc   service_def.CollectionsManifestSvc
+	backfillMgr              service_def.BackfillMgrIface
 
 	default_logger_ctx       *log.LoggerContext
 	pipeline_failure_handler common.SupervisorFailureHandler
@@ -90,7 +91,8 @@ func NewXDCRFactory(repl_spec_svc service_def.ReplicationSpecSvc,
 	factory_logger_ctx *log.LoggerContext,
 	pipeline_failure_handler common.SupervisorFailureHandler,
 	utilsIn utilities.UtilsIface,
-	collectionsManifestSvc service_def.CollectionsManifestSvc) *XDCRFactory {
+	collectionsManifestSvc service_def.CollectionsManifestSvc,
+	backfillMgr service_def.BackfillMgrIface) *XDCRFactory {
 	return &XDCRFactory{repl_spec_svc: repl_spec_svc,
 		remote_cluster_svc:                     remote_cluster_svc,
 		cluster_info_svc:                       cluster_info_svc,
@@ -112,6 +114,7 @@ func NewXDCRFactory(repl_spec_svc service_def.ReplicationSpecSvc,
 		cacheSpecBasicRouter:                   make(map[string]map[string]*parts.Router),
 		cacheBasicToAdvRouter:                  make(map[*parts.Router]*parts.AdvRouter),
 		cacheTopicToUnregisterAsyncListenerCbs: make(map[string][]func()),
+		backfillMgr:                            backfillMgr,
 	}
 }
 
@@ -1051,6 +1054,8 @@ func (xdcrf *XDCRFactory) constructSettingsForDcpNozzle(pipeline common.Pipeline
 		return xdcrf.collectionsManifestSvc.GetSpecificSourceManifest(spec, manifestUid)
 	}
 	dcpNozzleSettings[parts.DCP_Specific_Manifest_Getter] = getterFunc2
+
+	dcpNozzleSettings[parts.BackfillMgr] = xdcrf.backfillMgr
 	return dcpNozzleSettings, nil
 }
 

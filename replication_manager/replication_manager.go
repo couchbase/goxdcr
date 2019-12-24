@@ -116,6 +116,8 @@ type replicationManager struct {
 	status_logger_finch chan bool
 
 	mem_stats_logger_finch chan bool
+
+	backfillMgr service_def.BackfillMgrIface
 }
 
 //singleton
@@ -137,7 +139,8 @@ func StartReplicationManager(sourceKVHost string,
 	internal_settings_svc service_def.InternalSettingsSvc,
 	throughput_throttler_svc service_def.ThroughputThrottlerSvc,
 	utilitiesIn utilities.UtilsIface,
-	collectionsManifestSvc service_def.CollectionsManifestSvc) {
+	collectionsManifestSvc service_def.CollectionsManifestSvc,
+	backfillMgr service_def.BackfillMgrIface) {
 
 	replication_mgr.once.Do(func() {
 		// ns_server shutdown protocol: poll stdin and exit upon reciept of EOF
@@ -148,6 +151,8 @@ func StartReplicationManager(sourceKVHost string,
 
 		// Take in utilities
 		replication_mgr.utils = utilitiesIn
+
+		replication_mgr.backfillMgr = backfillMgr
 
 		// initializes replication manager
 		replication_mgr.init(repl_spec_svc, remote_cluster_svc, cluster_info_svc,
@@ -427,7 +432,7 @@ func (rm *replicationManager) init(
 
 	fac := factory.NewXDCRFactory(repl_spec_svc, remote_cluster_svc, cluster_info_svc, xdcr_topology_svc,
 		checkpoint_svc, capi_svc, uilog_svc, bucket_settings_svc, throughput_throttler_svc,
-		log.DefaultLoggerContext, log.DefaultLoggerContext, rm, rm.utils, collectionsManifestSvc)
+		log.DefaultLoggerContext, log.DefaultLoggerContext, rm, rm.utils, collectionsManifestSvc, rm.backfillMgr)
 
 	rm.pipelineMgr = pipeline_manager.NewPipelineManager(fac, repl_spec_svc, xdcr_topology_svc, remote_cluster_svc, cluster_info_svc, checkpoint_svc, uilog_svc, log.DefaultLoggerContext, rm.utils)
 

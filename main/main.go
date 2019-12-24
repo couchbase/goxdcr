@@ -174,6 +174,10 @@ func main() {
 			os.Exit(1)
 		}
 
+		backfillMgr := backfill_manager.NewBackfillManager(collectionsManifestService,
+			rm.ExitProcess, replication_spec_svc, backfillReplicationService)
+		backfillMgr.Start()
+
 		// start replication manager in normal mode
 		rm.StartReplicationManager(host,
 			uint16(options.xdcrRestPort),
@@ -192,11 +196,8 @@ func main() {
 			internalSettings_svc,
 			service_impl.NewThroughputThrottlerSvc(nil),
 			utils,
-			collectionsManifestService)
-
-		backfillMgr := backfill_manager.NewBackfillManager(collectionsManifestService,
-			rm.ExitProcess, replication_spec_svc, backfillReplicationService)
-		backfillMgr.Start()
+			collectionsManifestService,
+			backfillMgr)
 
 		// keep main alive in normal mode
 		<-done

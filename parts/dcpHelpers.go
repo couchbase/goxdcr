@@ -374,8 +374,9 @@ func (v *vbtsNegotiator) negotiate() error {
 
 	// First, go through all the checkpoints and try to start all valid vbs if they have already shared checkpoints
 	finalTimestamp := make(map[uint16]*base.VBTimestamp)
+	incrementalBackfill := make(metadata.VBucketBackfillMap)
 	invalidVbs := make(map[uint16]bool)
-	//	debugInvalid := make(map[uint16][]uint64)
+	//	vbucketBackfillRequest := make(metadata.VBucketBackfillMap)
 	var validVbs []uint16
 
 	v.internalLock.RLock()
@@ -384,39 +385,37 @@ func (v *vbtsNegotiator) negotiate() error {
 		vbtsWLock.mutex.RLock()
 		for vbno, ts := range vbtsWLock.vbMap {
 			if finalTimestamp[vbno] == nil {
-				finalTimestamp[vbno] = &base.VBTimestamp{Vbno: vbno, Vbuuid: ts.Vbuuid}
+				finalTimestamp[vbno] = &base.VBTimestamp{
+					Vbno:          vbno,
+					Vbuuid:        ts.Vbuuid,
+					Seqno:         ts.Seqno,
+					SnapshotStart: ts.SnapshotStart,
+					SnapshotEnd:   ts.SnapshotEnd,
+					ManifestIDs:   ts.ManifestIDs,
+				}
 			} else if _, isInvalid := invalidVbs[vbno]; isInvalid {
-				//				var found bool
-				//				for _, vbuuid := range debugInvalid[vbno] {
-				//					if vbuuid == ts.Vbuuid {
-				//						found = true
-				//					}
-				//				}
-				//				if !found {
-				//					debugInvalid[vbno] = append(debugInvalid[vbno], ts.Vbuuid)
-				//				}
 				continue
 			} else if finalTimestamp[vbno].Vbuuid != ts.Vbuuid {
 				invalidVbs[vbno] = true
-				//				debugInvalid[vbno] = append(debugInvalid[vbno], finalTimestamp[vbno].Vbuuid)
-				//				debugInvalid[vbno] = append(debugInvalid[vbno], ts.Vbuuid)
 				continue
 			}
 
-			if finalTimestamp[vbno].Seqno == 0 || ts.Seqno < finalTimestamp[vbno].Seqno {
-				finalTimestamp[vbno].Seqno = ts.Seqno
-			}
-			if finalTimestamp[vbno].SnapshotStart == 0 || ts.SnapshotStart < finalTimestamp[vbno].SnapshotStart {
-				finalTimestamp[vbno].SnapshotStart = ts.SnapshotStart
-			}
-			if finalTimestamp[vbno].SnapshotEnd == 0 || ts.SnapshotEnd < finalTimestamp[vbno].SnapshotEnd {
-				finalTimestamp[vbno].SnapshotEnd = ts.SnapshotEnd
-			}
-			if finalTimestamp[vbno].ManifestIDs.SourceManifestId == 0 || ts.ManifestIDs.SourceManifestId < finalTimestamp[vbno].ManifestIDs.SourceManifestId {
-				finalTimestamp[vbno].ManifestIDs.SourceManifestId = ts.ManifestIDs.SourceManifestId
-			}
-			if finalTimestamp[vbno].ManifestIDs.TargetManifestId == 0 || ts.ManifestIDs.TargetManifestId < finalTimestamp[vbno].ManifestIDs.TargetManifestId {
-				finalTimestamp[vbno].ManifestIDs.TargetManifestId = ts.ManifestIDs.TargetManifestId
+			result, validComparison := ts.Compare(finalTimestamp[vbno])
+			if !validComparison {
+				invalidVbs[vbno] = true
+			} else {
+				if result < 0 {
+					err := incrementalBackfill.AddBackfillRange(vbno, ts, finalTimestamp[vbno])
+					if err != nil {
+						panic(fmt.Sprintf("Error adding range %v to %v err: %v", ts, finalTimestamp[vbno], err))
+					}
+				} else if result > 0 {
+					err := incrementalBackfill.AddBackfillRange(vbno, finalTimestamp[vbno], ts)
+					if err != nil {
+						panic(fmt.Sprintf("Error adding range %v to %v err: %v", finalTimestamp[vbno], ts, err))
+					}
+					finalTimestamp[vbno] = ts
+				}
 			}
 		}
 		vbtsWLock.mutex.RUnlock()
@@ -443,6 +442,15 @@ func (v *vbtsNegotiator) negotiate() error {
 
 	// TODO - need to think more about next level and find the ancestor if not found
 	v.dcp.Logger().Infof("NEIL DEBUG negotiator final timestamp length %v", len(finalTimestamp))
+
+	// Ensure backfill is committed created before ongoing can start
+	if len(incrementalBackfill) > 0 {
+		err := v.dcp.backfillMgr.RequestIncrementalBucketBackfill(v.dcp.sourceBucketName, incrementalBackfill)
+		if err != nil {
+			v.dcp.Logger().Errorf("Unable to request backfill %v - cannot start ongoing")
+			return err
+		}
+	}
 
 	err := v.dcp.onUpdateStartingSeqno(finalTimestamp)
 	v.state.set(vbtsNegotiating, vbtsDone)

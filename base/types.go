@@ -79,8 +79,59 @@ type VBTimestamp struct {
 	ManifestIDs   CollectionsManifestIdPair
 }
 
+func (v *VBTimestamp) Empty() bool {
+	if v != nil && v.Vbno == 0 && v.Vbuuid == 0 && v.Seqno == 0 && v.SnapshotStart == 0 && v.SnapshotEnd == 0 &&
+		v.ManifestIDs.SourceManifestId == 0 && v.ManifestIDs.TargetManifestId == 0 {
+		return true
+	} else if v == nil {
+		return true
+	} else {
+		return false
+	}
+}
+
 func (vbts *VBTimestamp) String() string {
 	return fmt.Sprintf("[vbno=%v, uuid=%v, seqno=%v, sn_start=%v, sn_end=%v]", vbts.Vbno, vbts.Vbuuid, vbts.Seqno, vbts.SnapshotStart, vbts.SnapshotEnd)
+}
+
+func (vbts *VBTimestamp) Compare(other *VBTimestamp) (result int, validComparison bool) {
+	if vbts == nil || other == nil || vbts.Vbuuid != other.Vbuuid || vbts.Vbno != other.Vbno {
+		return
+	}
+
+	validComparison = true
+
+	if vbts.Seqno < other.Seqno {
+		result = -1
+		if vbts.ManifestIDs.SourceManifestId > other.ManifestIDs.SourceManifestId || vbts.ManifestIDs.TargetManifestId > other.ManifestIDs.TargetManifestId {
+			panic(fmt.Sprintf("Earlier timestamp %v has later manifest ID than %v", vbts, other))
+		}
+	} else if vbts.Seqno == other.Seqno {
+		result = 0
+		if vbts.ManifestIDs.SourceManifestId < other.ManifestIDs.SourceManifestId {
+			result = -1
+			if vbts.ManifestIDs.TargetManifestId >= other.ManifestIDs.TargetManifestId {
+				validComparison = false
+			}
+		} else if vbts.ManifestIDs.SourceManifestId > other.ManifestIDs.SourceManifestId {
+			result = 1
+			if vbts.ManifestIDs.TargetManifestId < other.ManifestIDs.TargetManifestId {
+				validComparison = false
+			}
+		} else {
+			if vbts.ManifestIDs.TargetManifestId < other.ManifestIDs.TargetManifestId {
+				result = -1
+			} else if vbts.ManifestIDs.TargetManifestId > other.ManifestIDs.TargetManifestId {
+				result = 1
+			}
+		}
+	} else {
+		result = 1
+		if vbts.ManifestIDs.SourceManifestId < other.ManifestIDs.SourceManifestId || vbts.ManifestIDs.TargetManifestId < other.ManifestIDs.TargetManifestId {
+			panic(fmt.Sprintf("Later timestamp %v has earlier manifest ID than %v", vbts, other))
+		}
+	}
+	return
 }
 
 type ClusterConnectionInfoProvider interface {

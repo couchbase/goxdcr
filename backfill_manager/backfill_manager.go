@@ -58,7 +58,7 @@ func (b *BackfillMgr) cleanup() {
 func NewBackfillManager(collectionsManifestSvc service_def.CollectionsManifestSvc,
 	parentExitFunc base.ParentExitFunc,
 	replSpecSvc service_def.ReplicationSpecSvc,
-	backfillReplSvc service_def.BackfillReplSvc) *BackfillMgr {
+	backfillReplSvc service_def.BackfillReplSvc) service_def.BackfillMgrIface {
 
 	backfillMgr := &BackfillMgr{
 		collectionsManifestSvc: collectionsManifestSvc,
@@ -392,7 +392,7 @@ func (b *BackfillMgr) handleTargetOnlyChange(replId string, oldTargetManifest, n
 	var manifestPair metadata.CollectionsManifestPair
 	manifestPair.Source = sourceManifest
 	manifestPair.Target = newTargetManifest
-	request := metadata.NewBackfillRequest(manifestPair, backfillMapping, highestSeqnoAcrossVBs)
+	request := metadata.NewBackfillRequest(manifestPair, backfillMapping, 0, highestSeqnoAcrossVBs)
 	handler.HandleBackfillRequest(request)
 }
 
@@ -435,4 +435,11 @@ func (b *BackfillMgr) backfillRequestPersistCallback(replId string, info metadat
 	}
 
 	return err
+}
+
+// This is used by DCP nozzle to request a catch-up backfill for the whole bucket
+// Note - this must persist the request
+func (b *BackfillMgr) RequestIncrementalBucketBackfill(sourceBucketName string, request metadata.VBucketBackfillMap) error {
+	b.logger.Infof("NEIL DEBUG DCP requesting backfill for bucket %v total %v mutations", sourceBucketName, request.TotalMutations())
+	return nil
 }

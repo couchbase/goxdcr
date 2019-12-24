@@ -1,20 +1,31 @@
 package metadata
 
 import (
+	"fmt"
 	"github.com/couchbase/goxdcr/base"
 )
 
+type BackfillType int
+
+const (
+	MainPipelineBackfill BackfillType = iota
+	CollectionBackfill   BackfillType = iota
+)
+
 type BackfillRequest struct {
+	Type BackfillType
+
+	SeqnoRange           [2]uint64
 	Manifests            CollectionsManifestPair
 	RequestedCollections CollectionToCollectionMapping
-	HighestSeqno         uint64
 }
 
-func NewBackfillRequest(manifests CollectionsManifestPair, mapping CollectionToCollectionMapping, highSeqno uint64) *BackfillRequest {
+func NewBackfillRequest(manifests CollectionsManifestPair, mapping CollectionToCollectionMapping, beginSeqno, highSeqno uint64) *BackfillRequest {
 	return &BackfillRequest{
+		Type:                 CollectionBackfill,
 		Manifests:            manifests,
 		RequestedCollections: mapping,
-		HighestSeqno:         highSeqno,
+		SeqnoRange:           [2]uint64{beginSeqno, highSeqno},
 	}
 }
 
@@ -30,8 +41,8 @@ func (b *BackfillPersistInfo) GetHighestEndSeqno() (uint64, error) {
 
 	var highSeqno uint64
 	for _, req := range b.Requests {
-		if req.HighestSeqno > highSeqno {
-			highSeqno = req.HighestSeqno
+		if req.SeqnoRange[1] > highSeqno {
+			highSeqno = req.SeqnoRange[1]
 		}
 	}
 
@@ -84,7 +95,7 @@ func (b *BackfillRequest) Same(other *BackfillRequest) bool {
 		return true
 	}
 
-	return b.HighestSeqno == other.HighestSeqno && b.RequestedCollections.Same(&other.RequestedCollections) &&
+	return b.SeqnoRange[1] == other.SeqnoRange[1] && b.RequestedCollections.Same(&other.RequestedCollections) &&
 		b.Manifests.Same(&other.Manifests)
 }
 
@@ -92,6 +103,48 @@ func (b *BackfillRequest) Clone() *BackfillRequest {
 	return &BackfillRequest{
 		Manifests:            b.Manifests,
 		RequestedCollections: b.RequestedCollections,
-		HighestSeqno:         b.HighestSeqno,
+		SeqnoRange:           b.SeqnoRange,
 	}
+}
+
+// A map of vbucket - start and end sequence numbers
+type VBucketBackfillMap map[uint16][2]*base.VBTimestamp
+
+// NOT SERIALIZED
+// These functions are to ensure that a maximum of range is backfilled
+func (v *VBucketBackfillMap) AddBackfillRange(vbno uint16, begin, end *base.VBTimestamp) (err error) {
+	backfillRange, exists := (*v)[vbno]
+	if !exists || backfillRange[1].Empty() { // It's ok for backfillRange[0] to be empty (i.e. backfill from 0)
+		backfillRange[0] = begin
+		backfillRange[1] = end
+		(*v)[vbno] = backfillRange
+	} else {
+		// Compare beginning
+		result, valid := backfillRange[0].Compare(begin)
+		if !valid {
+			err = fmt.Errorf("Invalid begin comparison between %v and %v", backfillRange[0], begin)
+			return
+		}
+		if result < 0 {
+			backfillRange[0] = begin
+		}
+		// Compare end
+		result, valid = backfillRange[1].Compare(end)
+		if !valid {
+			err = fmt.Errorf("Invalid end comparison between %v and %v", backfillRange[0], begin)
+			return
+		}
+		if result > 0 {
+			backfillRange[1] = end
+		}
+	}
+	return
+}
+
+func (v *VBucketBackfillMap) TotalMutations() (result uint64) {
+	for _, timestamps := range *v {
+		seqnoDiff := timestamps[1].Seqno - timestamps[0].Seqno
+		result += seqnoDiff
+	}
+	return
 }

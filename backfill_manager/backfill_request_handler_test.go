@@ -40,7 +40,7 @@ func TestBackfillReqHandler(t *testing.T) {
 	pair := metadata.CollectionsManifestPair{&dummyManifest, &dummyManifest2}
 	mapping[&dummySrcCol] = dummyTgtCol
 
-	request := metadata.NewBackfillRequest(pair, mapping, 1000)
+	request := metadata.NewBackfillRequest(pair, mapping, 0, 1000)
 	assert.Nil(rh.HandleBackfillRequest(request))
 
 	time.Sleep(100 * time.Millisecond)
