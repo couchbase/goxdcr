@@ -374,7 +374,7 @@ func (v *vbtsNegotiator) negotiate() error {
 
 	// First, go through all the checkpoints and try to start all valid vbs if they have already shared checkpoints
 	finalTimestamp := make(map[uint16]*base.VBTimestamp)
-	incrementalBackfill := make(metadata.VBucketBackfillMap)
+	overallIncremental := make(metadata.VBucketBackfillMap)
 	invalidVbs := make(map[uint16]bool)
 	//	vbucketBackfillRequest := make(metadata.VBucketBackfillMap)
 	var validVbs []uint16
@@ -405,12 +405,12 @@ func (v *vbtsNegotiator) negotiate() error {
 				invalidVbs[vbno] = true
 			} else {
 				if result < 0 {
-					err := incrementalBackfill.AddBackfillRange(vbno, ts, finalTimestamp[vbno])
+					err := overallIncremental.AddBackfillRange(vbno, ts, finalTimestamp[vbno])
 					if err != nil {
 						panic(fmt.Sprintf("Error adding range %v to %v err: %v", ts, finalTimestamp[vbno], err))
 					}
 				} else if result > 0 {
-					err := incrementalBackfill.AddBackfillRange(vbno, finalTimestamp[vbno], ts)
+					err := overallIncremental.AddBackfillRange(vbno, finalTimestamp[vbno], ts)
 					if err != nil {
 						panic(fmt.Sprintf("Error adding range %v to %v err: %v", finalTimestamp[vbno], ts, err))
 					}
@@ -441,14 +441,22 @@ func (v *vbtsNegotiator) negotiate() error {
 	}
 
 	// TODO - need to think more about next level and find the ancestor if not found
-	v.dcp.Logger().Infof("NEIL DEBUG negotiator final timestamp length %v", len(finalTimestamp))
+	//	v.dcp.Logger().Infof("NEIL DEBUG negotiator final timestamp length %v", len(finalTimestamp))
 
 	// Ensure backfill is committed created before ongoing can start
-	if len(incrementalBackfill) > 0 {
-		err := v.dcp.backfillMgr.RequestIncrementalBucketBackfill(v.dcp.sourceBucketName, incrementalBackfill)
-		if err != nil {
-			v.dcp.Logger().Errorf("Unable to request backfill %v - cannot start ongoing")
-			return err
+	if len(overallIncremental) > 0 {
+		for topic, vbtsWLock := range v.topicToVbTsMap {
+			vbtsWLock.mutex.RLock()
+			topicBackfillMap := overallIncremental.GetSpecificBackfillMap(vbtsWLock.vbMap)
+			vbtsWLock.mutex.RUnlock()
+			v.dcp.Logger().Infof("NEIL DEBUG negotiator for topic has backfillMap: %v", topicBackfillMap)
+			if len(topicBackfillMap) > 0 {
+				err := v.dcp.backfillMgr.RequestIncrementalBucketBackfill(topic, topicBackfillMap)
+				if err != nil {
+					v.dcp.Logger().Errorf("Unable to request backfill for %v - cannot start ongoing", topic)
+					return err
+				}
+			}
 		}
 	}
 

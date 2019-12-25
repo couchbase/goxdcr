@@ -26,7 +26,7 @@ func TestBackfillReqHandler(t *testing.T) {
 	assert := assert.New(t)
 	logger, persistCb := setupBRHBoilerPlate()
 	fmt.Println("============== Test case start: TestBackfillReqHandler =================")
-	rh := NewBackfillRequestHandler(logger, handlerId, persistCb)
+	rh := NewCollectionBackfillRequestHandler(logger, handlerId, persistCb, nil)
 
 	assert.NotNil(rh)
 	assert.Nil(rh.Start())
@@ -40,7 +40,7 @@ func TestBackfillReqHandler(t *testing.T) {
 	pair := metadata.CollectionsManifestPair{&dummyManifest, &dummyManifest2}
 	mapping[&dummySrcCol] = dummyTgtCol
 
-	request := metadata.NewBackfillRequest(pair, mapping, 0, 1000)
+	request := metadata.NewCollectionBackfillRequest(pair, mapping, 0, 1000)
 	assert.Nil(rh.HandleBackfillRequest(request))
 
 	time.Sleep(100 * time.Millisecond)

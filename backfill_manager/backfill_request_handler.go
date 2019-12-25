@@ -27,6 +27,7 @@ var errorStopped error = fmt.Errorf("BackfillMgr is stopping")
 type BackfillRequestHandler struct {
 	id     string
 	logger *log.CommonLogger
+	spec   *metadata.ReplicationSpecification
 
 	childrenWaitgrp sync.WaitGroup
 	finCh           chan bool
@@ -37,13 +38,14 @@ type BackfillRequestHandler struct {
 
 type BackfillPersistCb func(info metadata.BackfillPersistInfo) error
 
-func NewBackfillRequestHandler(logger *log.CommonLogger, replId string, persistCb BackfillPersistCb) *BackfillRequestHandler {
+func NewCollectionBackfillRequestHandler(logger *log.CommonLogger, replId string, persistCb BackfillPersistCb, spec *metadata.ReplicationSpecification) *BackfillRequestHandler {
 	return &BackfillRequestHandler{
 		logger:        logger,
 		id:            replId,
 		finCh:         make(chan bool),
 		incomingReqCh: make(chan *metadata.BackfillRequest, maxIncomingReqSize),
 		persistCb:     persistCb,
+		spec:          spec,
 	}
 }
 
@@ -101,7 +103,7 @@ func (b *BackfillRequestHandler) HandleBackfillRequest(req *metadata.BackfillReq
 }
 
 func (b *BackfillRequestHandler) handleBackfillRequestInternal(req *metadata.BackfillRequest) {
-	b.logger.Infof("Received backfill request: %v\n", req)
+	b.logger.Infof("%v Received backfill request: %v\n", b.id, req)
 
 	// TODO - look at current requests and optimize them
 	// Test the persist
@@ -110,4 +112,8 @@ func (b *BackfillRequestHandler) handleBackfillRequestInternal(req *metadata.Bac
 	err := b.persistCb(persistInfo)
 
 	b.logger.Infof("NEIL DEBUG persisted info: %v returned %v", persistInfo, err)
+}
+
+func (b *BackfillRequestHandler) GetSourceNucketName() string {
+	return b.spec.SourceBucketName
 }

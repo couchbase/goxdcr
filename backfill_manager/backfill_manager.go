@@ -112,14 +112,14 @@ func (b *BackfillMgr) initMetadataChangeMonitor() {
 	//	mcm := base.NewMetadataChangeMonitor()
 }
 
-func (b *BackfillMgr) createNewBackfillReqHandler(replId string, startHandler bool) error {
+func (b *BackfillMgr) createNewBackfillReqHandler(replId string, startHandler bool, spec *metadata.ReplicationSpecification) error {
 	b.specReqHandlersMtx.Lock()
 	defer b.specReqHandlersMtx.Unlock()
 
 	persistCb := func(info metadata.BackfillPersistInfo) error {
 		return b.backfillRequestPersistCallback(replId, info)
 	}
-	handler := NewBackfillRequestHandler(b.logger, replId, persistCb)
+	handler := NewCollectionBackfillRequestHandler(b.logger, replId, persistCb, spec)
 	b.specToReqHandlerMap[replId] = handler
 
 	if startHandler {
@@ -135,13 +135,13 @@ func (b *BackfillMgr) deleteBackfillReqHandler(replId string) {
 func (b *BackfillMgr) initCache() {
 	// The following doesn't return a non-nil error for now
 	replSpecMap, _ := b.replSpecSvc.AllReplicationSpecs()
-	for replId, _ := range replSpecMap {
+	for replId, spec := range replSpecMap {
 		err := b.refreshLatestManifest(replId)
 		if err != nil {
 			b.logger.Errorf("Retrieving manifest for spec %v returned %v", replId, err)
 		}
 
-		b.createNewBackfillReqHandler(replId, false /*startHandler*/)
+		b.createNewBackfillReqHandler(replId, false /*startHandler*/, spec)
 	}
 }
 
@@ -252,13 +252,14 @@ func (b *BackfillMgr) replicationSpecChangeHandlerCallback(changedSpecId string,
 	// TODO - these should be handled by a different go routine as to not block
 	if oldSpecObj.(*metadata.ReplicationSpecification) == nil &&
 		newSpecObj.(*metadata.ReplicationSpecification) != nil {
+		spec := newSpecObj.(*metadata.ReplicationSpecification)
 		// New spec
 		err := b.refreshLatestManifest(changedSpecId)
 		if err != nil {
 			b.logger.Errorf("Unable to refresh manifest for new replication %v\n", changedSpecId)
 			return err
 		}
-		b.createNewBackfillReqHandler(changedSpecId, true /*startHandler*/)
+		b.createNewBackfillReqHandler(changedSpecId, true /*startHandler*/, spec)
 	} else if newSpecObj.(*metadata.ReplicationSpecification) == nil &&
 		oldSpecObj.(*metadata.ReplicationSpecification) != nil {
 		// Delete spec
@@ -392,7 +393,7 @@ func (b *BackfillMgr) handleTargetOnlyChange(replId string, oldTargetManifest, n
 	var manifestPair metadata.CollectionsManifestPair
 	manifestPair.Source = sourceManifest
 	manifestPair.Target = newTargetManifest
-	request := metadata.NewBackfillRequest(manifestPair, backfillMapping, 0, highestSeqnoAcrossVBs)
+	request := metadata.NewCollectionBackfillRequest(manifestPair, backfillMapping, 0, highestSeqnoAcrossVBs)
 	handler.HandleBackfillRequest(request)
 }
 
@@ -439,7 +440,20 @@ func (b *BackfillMgr) backfillRequestPersistCallback(replId string, info metadat
 
 // This is used by DCP nozzle to request a catch-up backfill for the whole bucket
 // Note - this must persist the request
-func (b *BackfillMgr) RequestIncrementalBucketBackfill(sourceBucketName string, request metadata.VBucketBackfillMap) error {
-	b.logger.Infof("NEIL DEBUG DCP requesting backfill for bucket %v total %v mutations", sourceBucketName, request.TotalMutations())
+func (b *BackfillMgr) RequestIncrementalBucketBackfill(topic string, request metadata.VBucketBackfillMap) error {
+	b.logger.Infof("NEIL DEBUG DCP requesting backfill for topic %v total %v mutations", topic, request.TotalMutations())
+	b.specReqHandlersMtx.RLock()
+	defer b.specReqHandlersMtx.RUnlock()
+
+	incrementalReq := metadata.NewIncrementalBackfillRequest(request)
+	for specId, handler := range b.specToReqHandlerMap {
+		// specId is the same as topic
+		if specId == topic {
+			err := handler.HandleBackfillRequest(incrementalReq)
+			if err != nil {
+				return err
+			}
+		}
+	}
 	return nil
 }

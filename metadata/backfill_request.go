@@ -8,25 +8,52 @@ import (
 type BackfillType int
 
 const (
-	MainPipelineBackfill BackfillType = iota
-	CollectionBackfill   BackfillType = iota
+	IncrementalMainBackfill BackfillType = iota
+	CollectionBackfill      BackfillType = iota
 )
 
 type BackfillRequest struct {
 	Type BackfillType
 
-	SeqnoRange           [2]uint64
-	Manifests            CollectionsManifestPair
+	BackfillMap VBucketBackfillMap
+
+	//	SeqnoRange           [2]uint64
+	//	Manifests            CollectionsManifestPair
+
+	// For collection backfill - if it is in the mapping, then it should be backfilled
 	RequestedCollections CollectionToCollectionMapping
 }
 
-func NewBackfillRequest(manifests CollectionsManifestPair, mapping CollectionToCollectionMapping, beginSeqno, highSeqno uint64) *BackfillRequest {
+func NewIncrementalBackfillRequest(backfillMap VBucketBackfillMap) *BackfillRequest {
 	return &BackfillRequest{
-		Type:                 CollectionBackfill,
-		Manifests:            manifests,
-		RequestedCollections: mapping,
-		SeqnoRange:           [2]uint64{beginSeqno, highSeqno},
+		Type:        IncrementalMainBackfill,
+		BackfillMap: backfillMap,
 	}
+}
+
+func NewCollectionBackfillRequest(manifests CollectionsManifestPair, mapping CollectionToCollectionMapping, beginSeqno, highSeqno uint64) *BackfillRequest {
+	req := &BackfillRequest{
+		Type:                 CollectionBackfill,
+		RequestedCollections: mapping,
+		BackfillMap:          make(VBucketBackfillMap),
+	}
+
+	var i uint16
+	for i = 0; i < 1024; i++ {
+		// Everything else is 0 to start streaming from the beginning
+		startTs := &base.VBTimestamp{Vbno: i}
+		endTs := &base.VBTimestamp{
+			Vbno:        i,
+			Seqno:       highSeqno,
+			ManifestIDs: base.CollectionsManifestIdPair{manifests.Source.Uid(), manifests.Target.Uid()},
+		}
+		var tsRange [2]*base.VBTimestamp
+		tsRange[0] = startTs
+		tsRange[1] = endTs
+		req.BackfillMap[i] = tsRange
+	}
+
+	return req
 }
 
 type BackfillPersistInfo struct {
@@ -41,8 +68,9 @@ func (b *BackfillPersistInfo) GetHighestEndSeqno() (uint64, error) {
 
 	var highSeqno uint64
 	for _, req := range b.Requests {
-		if req.SeqnoRange[1] > highSeqno {
-			highSeqno = req.SeqnoRange[1]
+		highSeqnoForReq := req.BackfillMap.GetHighestEndSeqno()
+		if highSeqnoForReq > highSeqno {
+			highSeqno = highSeqnoForReq
 		}
 	}
 
@@ -95,20 +123,63 @@ func (b *BackfillRequest) Same(other *BackfillRequest) bool {
 		return true
 	}
 
-	return b.SeqnoRange[1] == other.SeqnoRange[1] && b.RequestedCollections.Same(&other.RequestedCollections) &&
-		b.Manifests.Same(&other.Manifests)
+	return b.RequestedCollections.Same(&other.RequestedCollections) && b.Type == other.Type && b.BackfillMap.Same(&other.BackfillMap)
 }
 
 func (b *BackfillRequest) Clone() *BackfillRequest {
 	return &BackfillRequest{
-		Manifests:            b.Manifests,
+		Type:                 b.Type,
 		RequestedCollections: b.RequestedCollections,
-		SeqnoRange:           b.SeqnoRange,
+		BackfillMap:          b.BackfillMap.Clone(),
 	}
 }
 
 // A map of vbucket - start and end sequence numbers
 type VBucketBackfillMap map[uint16][2]*base.VBTimestamp
+
+func (v VBucketBackfillMap) Clone() VBucketBackfillMap {
+	retMap := make(VBucketBackfillMap)
+	for k, v := range v {
+		retMap[k] = v
+	}
+	return retMap
+}
+
+func (v *VBucketBackfillMap) Same(other *VBucketBackfillMap) bool {
+	if v == nil && other == nil {
+		return true
+	} else if v == nil && other != nil || v != nil && other == nil {
+		return false
+	} else if len(*v) != len(*other) {
+		return false
+	}
+
+	for vbno, tsRange := range *v {
+		otherRange, exists := (*other)[vbno]
+		if !exists {
+			return false
+		}
+		if tsRange[0] != otherRange[0] || tsRange[1] != otherRange[1] {
+			return false
+		}
+	}
+
+	return true
+}
+
+func (v *VBucketBackfillMap) GetHighestEndSeqno() (highestSeqno uint64) {
+	if v == nil {
+		return
+	}
+
+	for _, tsRange := range *v {
+		if tsRange[1].Seqno > highestSeqno {
+			highestSeqno = tsRange[1].Seqno
+		}
+	}
+
+	return
+}
 
 // NOT SERIALIZED
 // These functions are to ensure that a maximum of range is backfilled
@@ -147,4 +218,30 @@ func (v *VBucketBackfillMap) TotalMutations() (result uint64) {
 		result += seqnoDiff
 	}
 	return
+}
+
+// Given where latest VBMap is (i.e. checkpoint), produce an incremental map if needed
+func (v *VBucketBackfillMap) GetSpecificBackfillMap(latestVBMap map[uint16]*base.VBTimestamp) VBucketBackfillMap {
+	if v == nil {
+		return nil
+	}
+	diffMap := make(VBucketBackfillMap)
+	for vbno, tsRange := range *v {
+		latestTs, exists := latestVBMap[vbno]
+		if !exists {
+			diffMap[vbno] = tsRange
+		} else {
+			result, valid := latestTs.Compare(tsRange[1])
+			if !valid {
+				panic("Should not be invalid")
+				diffMap[vbno] = tsRange
+			} else if result < 0 {
+				var newRange [2]*base.VBTimestamp
+				newRange[0] = latestTs
+				newRange[1] = tsRange[1]
+				diffMap[vbno] = newRange
+			}
+		}
+	}
+	return diffMap
 }
