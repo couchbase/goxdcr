@@ -115,6 +115,8 @@ func (b *BackfillRequestHandler) handleBackfillRequestInternal(req *metadata.Bac
 		var persistInfo metadata.BackfillPersistInfo
 		persistInfo.Requests = append(persistInfo.Requests, req)
 		err := b.persistCb(&persistInfo)
+	} else {
+
 	}
 
 	b.logger.Infof("NEIL DEBUG persisted info: %v returned %v", persistInfo, err)

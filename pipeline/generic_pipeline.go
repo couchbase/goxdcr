@@ -13,7 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/couchbase/goxdcr/base"
-	common "github.com/couchbase/goxdcr/common"
+	"github.com/couchbase/goxdcr/common"
 	log "github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/goxdcr/parts"
