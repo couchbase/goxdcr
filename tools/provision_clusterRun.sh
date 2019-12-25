@@ -95,7 +95,7 @@ runDataLoad "xdcrProvCollections_"
 sleep 3
 createBucketReplication "C1" "B1" "C2" "B1" DefaultBucketReplProperties
 createBucketReplication "C1" "B1" "C2" "B2" DefaultBucketReplProperties
-createBucketReplication "C2" "B2" "C1" "B1" DefaultBucketReplProperties
+#createBucketReplication "C2" "B2" "C1" "B1" DefaultBucketReplProperties
 
 exportProvisionedConfig
 
