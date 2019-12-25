@@ -34,17 +34,21 @@ type BackfillRequestHandler struct {
 	stopRequested   uint32
 	incomingReqCh   chan *metadata.BackfillRequest
 	persistCb       BackfillPersistCb
+	retrieveCb      BackfillRetrieveCb
 }
 
-type BackfillPersistCb func(info metadata.BackfillPersistInfo) error
+type BackfillPersistCb func(info *metadata.BackfillPersistInfo) error
+type BackfillRetrieveCb func() *metadata.BackfillPersistInfo
 
-func NewCollectionBackfillRequestHandler(logger *log.CommonLogger, replId string, persistCb BackfillPersistCb, spec *metadata.ReplicationSpecification) *BackfillRequestHandler {
+func NewCollectionBackfillRequestHandler(logger *log.CommonLogger, replId string, persistCb BackfillPersistCb, spec *metadata.ReplicationSpecification,
+	retrieveCb BackfillRetrieveCb) *BackfillRequestHandler {
 	return &BackfillRequestHandler{
 		logger:        logger,
 		id:            replId,
 		finCh:         make(chan bool),
 		incomingReqCh: make(chan *metadata.BackfillRequest, maxIncomingReqSize),
 		persistCb:     persistCb,
+		retrieveCb:    retrieveCb,
 		spec:          spec,
 	}
 }
@@ -106,10 +110,12 @@ func (b *BackfillRequestHandler) handleBackfillRequestInternal(req *metadata.Bac
 	b.logger.Infof("%v Received backfill request: %v\n", b.id, req)
 
 	// TODO - look at current requests and optimize them
-	// Test the persist
-	var persistInfo metadata.BackfillPersistInfo
-	persistInfo.Requests = append(persistInfo.Requests, req)
-	err := b.persistCb(persistInfo)
+	currentReqs := b.retrieveCb()
+	if currentReqs == nil {
+		var persistInfo metadata.BackfillPersistInfo
+		persistInfo.Requests = append(persistInfo.Requests, req)
+		err := b.persistCb(&persistInfo)
+	}
 
 	b.logger.Infof("NEIL DEBUG persisted info: %v returned %v", persistInfo, err)
 }

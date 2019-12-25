@@ -116,10 +116,13 @@ func (b *BackfillMgr) createNewBackfillReqHandler(replId string, startHandler bo
 	b.specReqHandlersMtx.Lock()
 	defer b.specReqHandlersMtx.Unlock()
 
-	persistCb := func(info metadata.BackfillPersistInfo) error {
+	persistCb := func(info *metadata.BackfillPersistInfo) error {
 		return b.backfillRequestPersistCallback(replId, info)
 	}
-	handler := NewCollectionBackfillRequestHandler(b.logger, replId, persistCb, spec)
+	retrieveCb := func() *metadata.BackfillPersistInfo {
+		return b.backfillRequestRetrieveCallback(replId)
+	}
+	handler := NewCollectionBackfillRequestHandler(b.logger, replId, persistCb, spec, retrieveCb)
 	b.specToReqHandlerMap[replId] = handler
 
 	if startHandler {
@@ -418,24 +421,36 @@ func (b *BackfillMgr) handleSourceOnlyChange(replId string, oldSourceManifest, n
 	b.cacheMtx.Unlock()
 }
 
-func (b *BackfillMgr) backfillRequestPersistCallback(replId string, info metadata.BackfillPersistInfo) error {
+// When backfill handler calls this callback and gives the BackfillPersistInfo,
+// it could change the first one to be different (i.e. collection mapping to >1 target collections)
+// This function should check if things are different - and if different, restart the backfill pipeline
+func (b *BackfillMgr) backfillRequestPersistCallback(replId string, info *metadata.BackfillPersistInfo) error {
 	b.logger.Infof("NEIL DEBUG for replication %v received callback to store data", replId)
 
 	// TODO - this needs burst control
 	backfillReplSpec, err := b.backfillReplSvc.ReplicationSpec(replId)
 	if err != nil {
-		backfillReplSpec = metadata.NewBackfillReplicationSpec(replId, &info)
+		backfillReplSpec = metadata.NewBackfillReplicationSpec(replId, info)
 		err = b.backfillReplSvc.AddReplicationSpec(backfillReplSpec)
-		b.logger.Infof("NEIL DEBUG Add backfill replication spec returned %v\n", err)
+		b.logger.Infof("NEIL DEBUG Add backfill replication spec with %v backfill tasks returned %v\n", len(backfillReplSpec.BackfillTasks.Requests), err)
 	} else {
 		// Set operation
 		// TODO - right now overwrite, but this is incorrect need to optimize and then write
-		backfillReplSpec.BackfillTasks = &info
+		backfillReplSpec.BackfillTasks = info
 		err = b.backfillReplSvc.SetReplicationSpec(backfillReplSpec)
-		b.logger.Infof("NEIL DEBUG Set backfill replication spec returned %v\n", err)
+		b.logger.Infof("NEIL DEBUG Set backfill replication spec with %v backfill tasks returned %v\n", len(backfillReplSpec.BackfillTasks.Requests), err)
 	}
 
 	return err
+}
+
+// Called by backfill request handler to retrieve the currently persisted info
+func (b *BackfillMgr) backfillRequestRetrieveCallback(replId string) *metadata.BackfillPersistInfo {
+	backfillReplSpec, err := b.backfillReplSvc.ReplicationSpec(replId)
+	if err != nil || backfillReplSpec == nil {
+		return nil
+	}
+	return backfillReplSpec.BackfillTasks
 }
 
 // This is used by DCP nozzle to request a catch-up backfill for the whole bucket

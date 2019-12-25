@@ -345,5 +345,4 @@ func (b *BackfillReplicationService) SetReplicationSpec(spec *metadata.BackfillR
 	}
 
 	return b.updateCache(spec.Id, spec)
-
 }
