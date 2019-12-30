@@ -28,7 +28,8 @@ func setupBoilerPlate() (*service_def.XDCRCompTopologySvc,
 	map[string]interface{},
 	*mcMock.ClientIface,
 	*mcMock.UprFeedIface,
-	*base.VBTimestamp) {
+	*base.VBTimestamp,
+	*service_def.BackfillMgrIface) {
 
 	xdcrTopologyMock := &service_def.XDCRCompTopologySvc{}
 	utilitiesMock := &utilsMock.UtilsIface{}
@@ -49,6 +50,8 @@ func setupBoilerPlate() (*service_def.XDCRCompTopologySvc,
 		return vbTimestamp, nil
 	}
 
+	backfillMgr := &service_def.BackfillMgrIface{}
+
 	// settings map
 	settingsMap := make(map[string]interface{})
 	settingsMap[DCP_VBTimestampUpdater] = vbReturner
@@ -59,7 +62,9 @@ func setupBoilerPlate() (*service_def.XDCRCompTopologySvc,
 	// Enable compression by default
 	settingsMap[SETTING_COMPRESSION_TYPE] = (base.CompressionType)(base.CompressionTypeSnappy)
 
-	return xdcrTopologyMock, utilitiesMock, nozzle, settingsMap, clientIface, uprfeedIface, vbTimestamp
+	settingsMap[BackfillMgr] = backfillMgr
+
+	return xdcrTopologyMock, utilitiesMock, nozzle, settingsMap, clientIface, uprfeedIface, vbTimestamp, backfillMgr
 }
 
 func setupUprFeedGeneric(uprFeed *mcMock.UprFeedIface) {
@@ -106,26 +111,13 @@ func uprFeedChanWrapper(uprFeed *mcMock.UprFeedIface, eventCh <-chan *mcReal.Upr
 	uprFeed.On("ClientAck", mock.Anything).Return(nil)
 }
 
-func setupMocksWithTs(xdcrTopology *service_def.XDCRCompTopologySvc,
-	utils *utilsMock.UtilsIface,
-	nozzle *DcpNozzle,
-	settings metadata.ReplicationSettingsMap,
-	mcClient *mcMock.ClientIface,
-	uprFeed *mcMock.UprFeedIface,
-	vbTs *base.VBTimestamp) {
-
-	nozzle.vbtimestamp_updater = settings[DCP_VBTimestampUpdater].(func(uint16, uint64) (*base.VBTimestamp, error))
-
-	setupMocks(xdcrTopology, utils, nozzle, settings, mcClient, uprFeed)
-
-}
-
 func setupMocks(xdcrTopology *service_def.XDCRCompTopologySvc,
 	utils *utilsMock.UtilsIface,
 	nozzle *DcpNozzle,
 	settings metadata.ReplicationSettingsMap,
 	mcClient *mcMock.ClientIface,
-	uprFeed *mcMock.UprFeedIface) {
+	uprFeed *mcMock.UprFeedIface,
+	backfillMgr *service_def.BackfillMgrIface) {
 
 	// Turn compression on
 	var features utilsReal.HELOFeatures
@@ -149,10 +141,12 @@ func setupMocksInternal(xdcrTopology *service_def.XDCRCompTopologySvc,
 	utils.On("ValidateSettings", mock.Anything, mock.Anything, mock.Anything).Return(nil)
 	utils.On("GetMemcachedConnectionWFeatures", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(mcClient, featureSet, nil)
 	utils.On("RecoverPanic", mock.Anything).Return(nil)
+	utils.On("GetMemcachedConnection", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(mcClient, nil)
 
 	// client mock
 	mcClient.On("NewUprFeedWithConfigIface", mock.Anything, mock.Anything).Return(uprFeed, nil)
 	mcClient.On("Close").Return(nil)
+	mcClient.On("UprGetFailoverLog", mock.Anything).Return(nil, nil)
 
 	// UprMock
 	nozzle.uprFeed = uprFeed
@@ -183,11 +177,11 @@ func generateUprEvent(opcode mc.CommandCode, status mc.Status, vbno uint16, opaq
 func TestStartNozzle(t *testing.T) {
 	assert := assert.New(t)
 	fmt.Println("============== Test case start: TestStartStopDCPNozzle =================")
-	xdcrTopology, utils, nozzle, settings, mcc, upr, _ := setupBoilerPlate()
+	xdcrTopology, utils, nozzle, settings, mcc, upr, _, backfillMgr := setupBoilerPlate()
 	setupUprFeedMock(upr)
 	// Test a success data coming back
 	setupUprFeedMockData(upr)
-	setupMocks(xdcrTopology, utils, nozzle, settings, mcc, upr)
+	setupMocks(xdcrTopology, utils, nozzle, settings, mcc, upr, backfillMgr)
 
 	assert.Nil(nozzle.Start(settings))
 	assert.Equal(nozzle.State(), common.Part_Running)
@@ -203,7 +197,7 @@ func TestStartNozzle(t *testing.T) {
 func TestStartUPRStreams(t *testing.T) {
 	assert := assert.New(t)
 	fmt.Println("============== Test case start: TestStartUPRStreams =================")
-	xdcrTopology, utils, nozzle, settings, mcc, upr, _ := setupBoilerPlate()
+	xdcrTopology, utils, nozzle, settings, mcc, upr, _, backfillMgr := setupBoilerPlate()
 
 	// base VBTimeStamp
 	var vbno uint16 = 0
@@ -212,7 +206,7 @@ func TestStartUPRStreams(t *testing.T) {
 	setupUprFeedMock(upr)
 	// Test a success data coming back
 	setupUprFeedMockData(upr)
-	setupMocks(xdcrTopology, utils, nozzle, settings, mcc, upr)
+	setupMocks(xdcrTopology, utils, nozzle, settings, mcc, upr, backfillMgr)
 
 	assert.Nil(nozzle.Start(settings))
 
@@ -227,7 +221,7 @@ func TestStartUPRStreams(t *testing.T) {
 func TestSendAndReceiveSuccess(t *testing.T) {
 	assert := assert.New(t)
 	fmt.Println("============== Test case start: TestSendAndReceiveSuccess =================")
-	xdcrTopology, utils, nozzle, settings, mcc, upr, _ := setupBoilerPlate()
+	xdcrTopology, utils, nozzle, settings, mcc, upr, _, backfillMgr := setupBoilerPlate()
 	setupUprFeedMock(upr)
 
 	/**
@@ -243,7 +237,7 @@ func TestSendAndReceiveSuccess(t *testing.T) {
 	// Test a success data coming back
 	successEvent := generateUprEvent(mc.UPR_STREAMREQ, mc.SUCCESS, vbno, version)
 	eventCh := setupUprFeedMockData(upr)
-	setupMocks(xdcrTopology, utils, nozzle, settings, mcc, upr)
+	setupMocks(xdcrTopology, utils, nozzle, settings, mcc, upr, backfillMgr)
 
 	assert.Nil(nozzle.Start(settings))
 	time.Sleep(time.Duration(250) * time.Millisecond)
@@ -279,7 +273,7 @@ func TestSendAndReceiveSuccess(t *testing.T) {
 func TestSuccessThenIgnoreRollback(t *testing.T) {
 	assert := assert.New(t)
 	fmt.Println("============== Test case start: TestSuccessThenIgnoreRollback =================")
-	xdcrTopology, utils, nozzle, settings, mcc, upr, vbts := setupBoilerPlate()
+	xdcrTopology, utils, nozzle, settings, mcc, upr, vbts, backfillMgr := setupBoilerPlate()
 	setupUprFeedMock(upr)
 
 	/**
@@ -296,7 +290,7 @@ func TestSuccessThenIgnoreRollback(t *testing.T) {
 	successEvent := generateUprEvent(mc.UPR_STREAMREQ, mc.SUCCESS, vbno, version)
 	eventCh := setupUprFeedMockData(upr)
 	setupUprFeedMockData(upr)
-	setupMocks(xdcrTopology, utils, nozzle, settings, mcc, upr)
+	setupMocks(xdcrTopology, utils, nozzle, settings, mcc, upr, backfillMgr)
 
 	assert.Nil(nozzle.Start(settings))
 	time.Sleep(time.Duration(250) * time.Millisecond)
@@ -340,7 +334,7 @@ func TestSuccessThenIgnoreRollback(t *testing.T) {
 func TestSendAndReceiveUnhandledError(t *testing.T) {
 	assert := assert.New(t)
 	fmt.Println("============== Test case start: TestSendAndReceiveUnhandledError =================")
-	xdcrTopology, utils, nozzle, settings, mcc, upr, _ := setupBoilerPlate()
+	xdcrTopology, utils, nozzle, settings, mcc, upr, _, backfillMgr := setupBoilerPlate()
 	setupUprFeedMock(upr)
 
 	/**
@@ -355,7 +349,7 @@ func TestSendAndReceiveUnhandledError(t *testing.T) {
 	// Test a success data coming back
 	failureEvent := generateUprEvent(mc.UPR_STREAMREQ, mc.UNKNOWN_COMMAND, vbno, version)
 	eventCh := setupUprFeedMockData(upr)
-	setupMocks(xdcrTopology, utils, nozzle, settings, mcc, upr)
+	setupMocks(xdcrTopology, utils, nozzle, settings, mcc, upr, backfillMgr)
 
 	assert.Nil(nozzle.Start(settings))
 	time.Sleep(time.Duration(250) * time.Millisecond)
@@ -383,8 +377,8 @@ func TestFeatureInitializationError(t *testing.T) {
 	var noFeaturesActivated mcReal.UprFeatures
 	noFeaturesActivated.CompressionType = base.CompressionTypeNone
 	fmt.Println("============== Test case start: TestFeatureInitializationError =================")
-	xdcrTopology, utils, nozzle, settings, mcc, upr, _ := setupBoilerPlate()
-	setupMocks(xdcrTopology, utils, nozzle, settings, mcc, upr)
+	xdcrTopology, utils, nozzle, settings, mcc, upr, _, backfillMgr := setupBoilerPlate()
+	setupMocks(xdcrTopology, utils, nozzle, settings, mcc, upr, backfillMgr)
 	setupUprFeedMockFeatureNeg(upr, noFeaturesActivated)
 
 	assert.Equal(base.ErrorCompressionNotSupported, nozzle.initialize(settings))
@@ -398,8 +392,8 @@ func TestNonFeatureInitializationError(t *testing.T) {
 	allFeaturesActivated.Xattribute = true
 	allFeaturesActivated.CompressionType = base.CompressionTypeSnappy
 	fmt.Println("============== Test case start: TestNonFeatureInitializationError =================")
-	xdcrTopology, utils, nozzle, settings, mcc, upr, _ := setupBoilerPlate()
-	setupMocks(xdcrTopology, utils, nozzle, settings, mcc, upr)
+	xdcrTopology, utils, nozzle, settings, mcc, upr, _, backfillMgr := setupBoilerPlate()
+	setupMocks(xdcrTopology, utils, nozzle, settings, mcc, upr, backfillMgr)
 	setupUprFeedMockFeatureNeg(upr, allFeaturesActivated)
 
 	assert.NotEqual(base.ErrorCompressionNotSupported, nozzle.initialize(settings))
@@ -412,7 +406,7 @@ func TestMcCompressionError(t *testing.T) {
 	fmt.Println("============== Test case start: TestMcCompressionError =================")
 	var noFeatures utilsReal.HELOFeatures
 	noFeatures.CompressionType = base.CompressionTypeNone
-	xdcrTopology, utils, nozzle, settings, mcc, upr, _ := setupBoilerPlate()
+	xdcrTopology, utils, nozzle, settings, mcc, upr, _, _ := setupBoilerPlate()
 	setupMocksInternal(xdcrTopology, utils, nozzle, settings, mcc, upr, noFeatures)
 
 	assert.Equal(base.ErrorCompressionNotSupported, nozzle.initialize(settings))
@@ -425,8 +419,8 @@ func TestNonFeatureInitializationErrorCompressedWhenNotRequested(t *testing.T) {
 	allFeaturesActivated.Xattribute = true
 	allFeaturesActivated.CompressionType = base.CompressionTypeSnappy
 	fmt.Println("============== Test case start: TestNonFeatureInitializationErrorCompressedWhenNotRequested =================")
-	xdcrTopology, utils, nozzle, settings, mcc, upr, _ := setupBoilerPlate()
-	setupMocks(xdcrTopology, utils, nozzle, settings, mcc, upr)
+	xdcrTopology, utils, nozzle, settings, mcc, upr, _, backfillMgr := setupBoilerPlate()
+	setupMocks(xdcrTopology, utils, nozzle, settings, mcc, upr, backfillMgr)
 	setupUprFeedMockFeatureNeg(upr, allFeaturesActivated)
 
 	settings[SETTING_COMPRESSION_TYPE] = (base.CompressionType)(base.CompressionTypeNone)
@@ -439,11 +433,11 @@ func TestNonFeatureInitializationErrorCompressedWhenNotRequested(t *testing.T) {
 func TestStartNozzleAuto(t *testing.T) {
 	assert := assert.New(t)
 	fmt.Println("============== Test case start: TestStartStopDCPNozzleAuto =================")
-	xdcrTopology, utils, nozzle, settings, mcc, upr, _ := setupBoilerPlate()
+	xdcrTopology, utils, nozzle, settings, mcc, upr, _, backfillMgr := setupBoilerPlate()
 	setupUprFeedMock(upr)
 	// Test a success data coming back
 	setupUprFeedMockData(upr)
-	setupMocks(xdcrTopology, utils, nozzle, settings, mcc, upr)
+	setupMocks(xdcrTopology, utils, nozzle, settings, mcc, upr, backfillMgr)
 
 	settings[SETTING_COMPRESSION_TYPE] = (base.CompressionType)(base.CompressionTypeAuto)
 
@@ -455,11 +449,11 @@ func TestStartNozzleAuto(t *testing.T) {
 func TestUprFeedNil(t *testing.T) {
 	fmt.Println("============== Test case start: TestUprFeedNil =================")
 	assert := assert.New(t)
-	xdcrTopology, utils, nozzle, settings, mcc, upr, _ := setupBoilerPlate()
+	xdcrTopology, utils, nozzle, settings, mcc, upr, _, backfillMgr := setupBoilerPlate()
 	setupUprFeedMock(upr)
 	// Test a success data coming back
 	setupUprFeedMockData(upr)
-	setupMocks(xdcrTopology, utils, nozzle, settings, mcc, upr)
+	setupMocks(xdcrTopology, utils, nozzle, settings, mcc, upr, backfillMgr)
 
 	settings[SETTING_COMPRESSION_TYPE] = (base.CompressionType)(base.CompressionTypeAuto)
 

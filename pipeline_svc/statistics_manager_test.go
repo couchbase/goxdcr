@@ -56,7 +56,7 @@ func setupBoilerPlate() (*log.CommonLogger,
 	map[string][]uint16,
 	*metadata.RemoteClusterReference,
 	*parts.DcpNozzle,
-	*common.Connector,
+	*common.AdvConnector,
 	*service_def.CollectionsManifestSvc) {
 
 	testLogger := log.NewLogger("testLogger", log.DefaultLoggerContext)
@@ -89,7 +89,7 @@ func setupBoilerPlate() (*log.CommonLogger,
 	dcpNozzle := parts.NewDcpNozzle(testDCPPart, "sourceBucket", "targetBucket", vbs, xdcrTopologySvc,
 		false /*isCapi*/, log.DefaultLoggerContext, utils, colManifestSvc)
 
-	connector := &common.Connector{}
+	connector := &common.AdvConnector{}
 
 	collectionsManifestSvc := &service_def.CollectionsManifestSvc{}
 
@@ -113,7 +113,7 @@ func setupMocks(throughSeqSvc *service_def.ThroughSeqnoTrackerSvc,
 	targetKVVbMap map[string][]uint16,
 	remoteClusterRef *metadata.RemoteClusterReference,
 	dcpNozzle *parts.DcpNozzle,
-	connector *common.Connector,
+	connector *common.AdvConnector,
 	collectionsManifestSvc *service_def.CollectionsManifestSvc) {
 
 	pipeline.On("Specification").Return(replicationSpec)
@@ -129,8 +129,11 @@ func setupMocks(throughSeqSvc *service_def.ThroughSeqnoTrackerSvc,
 	connector.On("AsyncComponentEventListeners").Return(nil)
 	connector.On("DownStreams").Return(nil)
 	connector.On("Id").Return(testRouter)
+	connector.On("SpecificAsyncComponentEventListeners", mock.Anything).Return(nil)
+	connector.On("SpecificDownStreams", mock.Anything).Return(nil)
 
 	dcpNozzle.SetAdvConnector(connector)
+
 }
 
 func setupInnerMock(runtimeCtx *common.PipelineRuntimeContext,

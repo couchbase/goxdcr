@@ -849,7 +849,7 @@ func (em *pmErrMapType) ContainsError(checkErr error, exactMatch bool) bool {
 	return base.CheckErrorMapForError(em.errMap, checkErr, exactMatch)
 }
 
-func newPipelineUpdater(pipeline_name string, retry_interval int, cur_err error, rep_status_in pipeline.ReplicationStatusIface, logger *log.CommonLogger, pipelineMgr_in *PipelineManager) *PipelineUpdater {
+func newPipelineUpdater(pipeline_name string, retry_interval int, cur_err error, rep_status_in pipeline.ReplicationStatusIface, logger *log.CommonLogger, pipelineMgr_in Pipeline_mgr_iface) *PipelineUpdater {
 	if rep_status_in == nil {
 		panic("nil ReplicationStatus")
 	}

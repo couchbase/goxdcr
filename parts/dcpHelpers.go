@@ -301,7 +301,8 @@ func (v *vbtsNegotiator) Cleanup() {
 func (v *vbtsNegotiator) Start(settings metadata.ReplicationSettingsMap) error {
 	topic, ok := settings[PipelineTopic].(string)
 	if !ok {
-		panic("vbtshelper cannot find pipelinetopic")
+		//		panic("vbtshelper cannot find pipelinetopic")
+		return nil
 	}
 
 	// If pipeline has exited, is safe to restart
@@ -538,7 +539,7 @@ func (v *vbtsNegotiator) HandleVbtsFromCheckpointMgr(pipelineTopic string, vbTim
 
 	for vb, ts := range vbTimestamps {
 		if existingTs, exists := storedMap.vbMap[vb]; exists {
-			panic(fmt.Sprintf("Checkpoint manager resent vb % with %v, currently: %v", vb, ts, existingTs))
+			panic(fmt.Sprintf("Checkpoint manager resent vb %v with %v, currently: %v", vb, ts, existingTs))
 		} else {
 			storedMap.vbMap[vb] = ts
 		}
