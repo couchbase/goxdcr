@@ -1101,6 +1101,7 @@ func (dcp *DcpNozzle) startUprStreamInner(vbno uint16, vbts *base.VBTimestamp, v
 				err = dcp.uprFeed.UprRequestCollectionsStream(vbno, version, flags, vbts.Vbuuid, vbts.Seqno, seqEnd, vbts.SnapshotStart, vbts.SnapshotEnd, nil)
 				if err == nil {
 					err = dcp.setStreamState(vbno, Dcp_Stream_Init)
+					//					dcp.Logger().Infof("NEIL DEBUG vbno %v starts at seqno %v to %v snapshot start %v to ssEnd %v", vbno, vbts.Seqno, seqEnd, vbts.SnapshotStart, vbts.SnapshotEnd)
 				}
 			}
 			return

@@ -633,6 +633,11 @@ func (pipelineMgr *PipelineManager) Update(topic string, cur_err error) error {
 	return nil
 }
 
+/* Implements BackfillPipelineMgr */
+func (pipelineMgr *PipelineManager) UpdateBackfillPipeline(topic string, backfillSpec *metadata.BackfillReplicationSpec) error {
+	return nil
+}
+
 // Use this only for unit test
 func (pipelineMgr *PipelineManager) GetLastUpdateResult(topic string) bool {
 	repStatus, err := pipelineMgr.ReplicationStatus(topic)

@@ -61,6 +61,15 @@ type BackfillPersistInfo struct {
 	Requests []*BackfillRequest
 }
 
+func (b *BackfillPersistInfo) AlreadyIncludes(other *BackfillRequest) bool {
+	for _, req := range b.Requests {
+		if req.Same(other) {
+			return true
+		}
+	}
+	return false
+}
+
 func (b *BackfillPersistInfo) GetHighestEndSeqno() (uint64, error) {
 	if b == nil || len(b.Requests) == 0 {
 		return 0, base.ErrorInvalidInput
@@ -76,10 +85,6 @@ func (b *BackfillPersistInfo) GetHighestEndSeqno() (uint64, error) {
 
 	return highSeqno, nil
 }
-
-//func (b *BackfillPersistInfo) GetStreamType() DcpStreamType {
-//	return DcpStreamTypeBackfill
-//}
 
 func (b *BackfillPersistInfo) Same(other *BackfillPersistInfo) bool {
 	if b == nil && other != nil || b != nil && other == nil {
@@ -116,6 +121,44 @@ func (b *BackfillPersistInfo) Clone() *BackfillPersistInfo {
 	}
 }
 
+// This will leave the first request alone
+func (b *BackfillPersistInfo) InsertNonActiveRequest(task *BackfillRequest) {
+	if len(b.Requests) == 1 {
+		b.Requests = append(b.Requests, task)
+		return
+	}
+
+	var replaceIdx int = -1
+	// Check to see if anyone else can absorb this request
+	for i, req := range b.Requests {
+		// TODO - need a better idea of what is active and what is not
+		if i == 0 {
+			continue
+		}
+		if req.Contains(task) {
+			// Nothing need to be done
+			return
+		} else if task.Contains(req) {
+			// NOT active
+			replaceIdx = i
+			break
+		}
+		// TODO - try to implement "absorb"
+		if req.NonConflictVBuckets(task) {
+			req.VBucketsCombine(task)
+			return
+		}
+	}
+
+	if replaceIdx > -1 {
+		b.Requests[replaceIdx] = task
+		return
+	}
+
+	b.Requests = append(b.Requests, task)
+	return
+}
+
 func (b *BackfillRequest) Same(other *BackfillRequest) bool {
 	if b == nil && other != nil || b != nil && other == nil {
 		return false
@@ -132,6 +175,98 @@ func (b *BackfillRequest) Clone() *BackfillRequest {
 		RequestedCollections: b.RequestedCollections,
 		BackfillMap:          b.BackfillMap.Clone(),
 	}
+}
+
+// 150k io all going to one vbucket
+var threshold uint64 = 150000
+
+// Returns true if the backfill request can accomodate the "other" request piggybacking on it
+func (b *BackfillRequest) Contains(other *BackfillRequest) bool {
+	switch b.Type {
+	case IncrementalMainBackfill:
+		switch other.Type {
+		case CollectionBackfill:
+			fallthrough
+		case IncrementalMainBackfill:
+			return b.BackfillMap.Contains(other.BackfillMap)
+		default:
+			panic("Need to implement")
+		}
+	case CollectionBackfill:
+		switch other.Type {
+		case IncrementalMainBackfill:
+			return false
+		case CollectionBackfill:
+			// TODO - do this later
+			return true
+		default:
+			panic("Need to implement")
+		}
+
+	default:
+		panic("Need to implement")
+	}
+}
+
+func (b *BackfillRequest) ContainsWThreshold(other *BackfillRequest, currentSeqnos map[uint16]uint64) bool {
+	switch b.Type {
+	case IncrementalMainBackfill:
+		switch other.Type {
+		case CollectionBackfill:
+			fallthrough
+		case IncrementalMainBackfill:
+			// Simply check the current ongoing seqno + buffer against the requested
+			return b.BackfillMap.ContainsWThreshold(other.BackfillMap, currentSeqnos, threshold)
+		default:
+			panic("Need to implement")
+		}
+	case CollectionBackfill:
+		switch other.Type {
+		case IncrementalMainBackfill:
+			return false
+		case CollectionBackfill:
+			// TODO - do this later
+			return true
+		default:
+			panic("Need to implement")
+		}
+
+	default:
+		panic("Need to implement")
+	}
+}
+
+// If the two requests do not have vbucket intersection, return true
+func (b *BackfillRequest) NonConflictVBuckets(other *BackfillRequest) bool {
+	if b == nil || other == nil {
+		return false
+	}
+
+	// If job types are different, don't even check
+	if b.Type != other.Type {
+		return false
+	}
+
+	for vbno, _ := range b.BackfillMap {
+		_, vbExists := other.BackfillMap[vbno]
+		if vbExists {
+			return false
+		}
+	}
+
+	return true
+}
+
+// If complements, then absorb
+func (b *BackfillRequest) VBucketsCombine(other *BackfillRequest) error {
+	if b == nil || other == nil || !b.NonConflictVBuckets(other) {
+		return base.ErrorInvalidInput
+	}
+
+	for k, v := range other.BackfillMap {
+		b.BackfillMap[k] = v
+	}
+	return nil
 }
 
 // A map of vbucket - start and end sequence numbers
@@ -159,7 +294,8 @@ func (v *VBucketBackfillMap) Same(other *VBucketBackfillMap) bool {
 		if !exists {
 			return false
 		}
-		if tsRange[0] != otherRange[0] || tsRange[1] != otherRange[1] {
+		// TODO _ check for nil tsRange
+		if *(tsRange[0]) != *(otherRange[0]) || *(tsRange[1]) != *(otherRange[1]) {
 			return false
 		}
 	}
@@ -244,4 +380,72 @@ func (v *VBucketBackfillMap) GetSpecificBackfillMap(latestVBMap map[uint16]*base
 		}
 	}
 	return diffMap
+}
+
+func (v VBucketBackfillMap) Contains(other VBucketBackfillMap) bool {
+	currentLen := len(v)
+	otherLen := len(other)
+	if currentLen < otherLen {
+		return false
+	}
+
+	for vbno, tsRange := range v {
+		otherTsRange, exists := other[vbno]
+		if !exists {
+			if currentLen == otherLen {
+				return false
+			} else {
+				continue
+			}
+		}
+		if otherTsRange[0].Vbuuid != 0 && tsRange[0].Vbuuid != 0 && otherTsRange[0].Vbuuid != tsRange[0].Vbuuid {
+			panic(fmt.Sprintf("NEIL DEBUG - vbuuid is different - curr %v other %v", tsRange[0].Vbuuid, otherTsRange[0].Vbuuid))
+			return false
+		}
+		if tsRange[0].Seqno > otherTsRange[0].Seqno {
+			// Other is requesting a start range earlier than current request
+			return false
+		}
+		if tsRange[1].Seqno < otherTsRange[1].Seqno {
+			// Other is requesting a longer endSeqno of this one
+			return false
+		}
+	}
+	return true
+}
+
+func (v VBucketBackfillMap) ContainsWThreshold(other VBucketBackfillMap, currentSeqnos map[uint16]uint64, threshold uint64) bool {
+	currentLen := len(v)
+	otherLen := len(other)
+	if currentLen < otherLen {
+		return false
+	}
+
+	for vbno, tsRange := range v {
+		otherTsRange, exists := other[vbno]
+		if !exists {
+			if currentLen == otherLen {
+				return false
+			} else {
+				continue
+			}
+		}
+		currentSeqno, exists := currentSeqnos[vbno]
+		if !exists {
+			panic("Should exist")
+		}
+		if otherTsRange[0].Vbuuid != 0 && tsRange[0].Vbuuid != 0 && otherTsRange[0].Vbuuid != tsRange[0].Vbuuid {
+			panic(fmt.Sprintf("NEIL DEBUG - vbuuid is different - curr %v other %v", tsRange[0].Vbuuid, otherTsRange[0].Vbuuid))
+			return false
+		}
+		if currentSeqno+threshold > otherTsRange[0].Seqno {
+			// This backfill has currently moved past the requested start of the other
+			return false
+		}
+		if tsRange[1].Seqno < otherTsRange[1].Seqno {
+			// Other is requesting a longer endSeqno of this one
+			return false
+		}
+	}
+	return true
 }

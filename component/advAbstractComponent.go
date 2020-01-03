@@ -40,6 +40,14 @@ func (c *AdvAbstractComponent) Id() string {
 	return c.id
 }
 
+// Returns nil if not found
+func (c *AdvAbstractComponent) GetPipeline(topic string) common.Pipeline {
+	c.mutex.RLock()
+	defer c.mutex.RUnlock()
+
+	return c.pipelines[topic]
+}
+
 func (c *AdvAbstractComponent) SpecificAsyncComponentEventListeners(topic string) map[string]common.AsyncComponentEventListener {
 	c.mutex.RLock()
 	defer c.mutex.RUnlock()

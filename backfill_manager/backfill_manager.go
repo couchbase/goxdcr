@@ -10,6 +10,7 @@
 package backfill_manager
 
 import (
+	"fmt"
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
@@ -23,6 +24,7 @@ type BackfillMgr struct {
 	exitFunc               base.ParentExitFunc
 	replSpecSvc            service_def.ReplicationSpecSvc
 	backfillReplSvc        service_def.BackfillReplSvc
+	backfillPipelineMgr    service_def.BackfillPipelineMgr
 
 	logger *log.CommonLogger
 
@@ -94,6 +96,10 @@ func (b *BackfillMgr) Start() error {
 	if err != nil {
 		return err
 	}
+
+	if b.backfillPipelineMgr == nil {
+		return fmt.Errorf("Cannot start before backfill pipelinemgr is set")
+	}
 	b.logger.Infof("BackfillMgr Started")
 	return nil
 }
@@ -116,13 +122,17 @@ func (b *BackfillMgr) createNewBackfillReqHandler(replId string, startHandler bo
 	b.specReqHandlersMtx.Lock()
 	defer b.specReqHandlersMtx.Unlock()
 
-	persistCb := func(info *metadata.BackfillPersistInfo) error {
-		return b.backfillRequestPersistCallback(replId, info)
+	persistCb := func(info *metadata.BackfillPersistInfo, shouldRestart bool) error {
+		return b.backfillRequestPersistCallback(replId, info, shouldRestart)
 	}
 	retrieveCb := func() *metadata.BackfillPersistInfo {
 		return b.backfillRequestRetrieveCallback(replId)
 	}
-	handler := NewCollectionBackfillRequestHandler(b.logger, replId, persistCb, spec, retrieveCb)
+	seqnoGetter := func() (map[uint16]uint64, error) {
+		return b.getThroughSeqno(replId)
+	}
+
+	handler := NewCollectionBackfillRequestHandler(b.logger, replId, persistCb, spec, retrieveCb, seqnoGetter)
 	b.specToReqHandlerMap[replId] = handler
 
 	if startHandler {
@@ -239,6 +249,17 @@ func (b *BackfillMgr) refreshLatestManifest(replId string) error {
 	return nil
 }
 
+func (b *BackfillMgr) backfillReplSpecChangeHandlerCallback(changedSpecId string, oldSpecObj interface{}, newSpecObj interface{}) error {
+	oldSpec, ok := oldSpecObj.(*metadata.BackfillReplicationSpec)
+	newSpec, ok2 := newSpecObj.(*metadata.BackfillReplicationSpec)
+	if !ok || !ok2 {
+		return base.ErrorInvalidInput
+	}
+	b.logger.Infof("Backfill spec change callback for %v detected old %v new %v", changedSpecId, oldSpec, newSpec)
+
+	return nil
+}
+
 func (b *BackfillMgr) replicationSpecChangeHandlerCallback(changedSpecId string, oldSpecObj interface{}, newSpecObj interface{}) error {
 	oldSpec, ok := oldSpecObj.(*metadata.ReplicationSpecification)
 	newSpec, ok2 := newSpecObj.(*metadata.ReplicationSpecification)
@@ -275,6 +296,9 @@ func (b *BackfillMgr) replicationSpecChangeHandlerCallback(changedSpecId string,
 		b.specReqHandlersMtx.Lock()
 		delete(b.specToReqHandlerMap, changedSpecId)
 		b.specReqHandlersMtx.Unlock()
+
+		// delete backfill spec
+		b.backfillReplSvc.DelReplicationSpec(changedSpecId)
 	}
 
 	return nil
@@ -373,12 +397,7 @@ func (b *BackfillMgr) handleTargetOnlyChange(replId string, oldTargetManifest, n
 	b.cacheMtx.Unlock()
 
 	//TODO - move this
-	replicationStatusRaw, err := b.replSpecSvc.GetDerivedObj(replId)
-	if err != nil {
-		return
-	}
-	replicationStatus, _ := replicationStatusRaw.(*pipeline.ReplicationStatus)
-	throughSeqnos := replicationStatus.GetThroughSeqnos()
+	throughSeqnos, err := b.getThroughSeqno(replId)
 	var highestSeqnoAcrossVBs uint64
 	for _, seqno := range throughSeqnos {
 		if seqno > highestSeqnoAcrossVBs {
@@ -398,6 +417,16 @@ func (b *BackfillMgr) handleTargetOnlyChange(replId string, oldTargetManifest, n
 	manifestPair.Target = newTargetManifest
 	request := metadata.NewCollectionBackfillRequest(manifestPair, backfillMapping, 0, highestSeqnoAcrossVBs)
 	handler.HandleBackfillRequest(request)
+}
+
+func (b *BackfillMgr) getThroughSeqno(replId string) (map[uint16]uint64, error) {
+	replicationStatusRaw, err := b.replSpecSvc.GetDerivedObj(replId)
+	if err != nil {
+		return nil, err
+	}
+	replicationStatus, _ := replicationStatusRaw.(*pipeline.ReplicationStatus)
+	throughSeqnos := replicationStatus.GetThroughSeqnos()
+	return throughSeqnos, nil
 }
 
 func (b *BackfillMgr) handleSourceOnlyChange(replId string, oldSourceManifest, newSourceManifest *metadata.CollectionsManifest) {
@@ -424,7 +453,7 @@ func (b *BackfillMgr) handleSourceOnlyChange(replId string, oldSourceManifest, n
 // When backfill handler calls this callback and gives the BackfillPersistInfo,
 // it could change the first one to be different (i.e. collection mapping to >1 target collections)
 // This function should check if things are different - and if different, restart the backfill pipeline
-func (b *BackfillMgr) backfillRequestPersistCallback(replId string, info *metadata.BackfillPersistInfo) error {
+func (b *BackfillMgr) backfillRequestPersistCallback(replId string, info *metadata.BackfillPersistInfo, shouldRestart bool) error {
 	b.logger.Infof("NEIL DEBUG for replication %v received callback to store data", replId)
 
 	// TODO - this needs burst control
@@ -453,10 +482,42 @@ func (b *BackfillMgr) backfillRequestRetrieveCallback(replId string) *metadata.B
 	return backfillReplSpec.BackfillTasks
 }
 
+func validateTs(vbno uint16, ts *base.VBTimestamp) error {
+	if ts == nil {
+		return fmt.Errorf("Nil timestamp")
+	} else if ts.Vbno != vbno {
+		return fmt.Errorf("Inconsistent vbno")
+	} else if ts.Vbuuid == 0 {
+		return fmt.Errorf("VBUuid for backfill cannot be 0")
+	} else {
+		return nil
+	}
+}
+
+func validateBackfillRequest(request metadata.VBucketBackfillMap) error {
+	for vbno, vbts := range request {
+		err := validateTs(vbno, vbts[0])
+		if err != nil {
+			return err
+		}
+		err = validateTs(vbno, vbts[1])
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // This is used by DCP nozzle to request a catch-up backfill for the whole bucket
 // Note - this must persist the request
 func (b *BackfillMgr) RequestIncrementalBucketBackfill(topic string, request metadata.VBucketBackfillMap) error {
 	b.logger.Infof("NEIL DEBUG DCP requesting backfill for topic %v total %v mutations", topic, request.TotalMutations())
+
+	err := validateBackfillRequest(request)
+	if err != nil {
+		panic(fmt.Sprintf("Backfill err %v", err))
+	}
+
 	b.specReqHandlersMtx.RLock()
 	defer b.specReqHandlersMtx.RUnlock()
 
@@ -471,4 +532,8 @@ func (b *BackfillMgr) RequestIncrementalBucketBackfill(topic string, request met
 		}
 	}
 	return nil
+}
+
+func (b *BackfillMgr) SetBackfillPipelineController(pipelineMgr service_def.BackfillPipelineMgr) {
+	b.backfillPipelineMgr = pipelineMgr
 }

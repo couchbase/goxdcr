@@ -35,21 +35,25 @@ type BackfillRequestHandler struct {
 	incomingReqCh   chan *metadata.BackfillRequest
 	persistCb       BackfillPersistCb
 	retrieveCb      BackfillRetrieveCb
+	getThroughSeqno LatestSeqnoGetter
 }
 
-type BackfillPersistCb func(info *metadata.BackfillPersistInfo) error
+type BackfillPersistCb func(info *metadata.BackfillPersistInfo, shouldRestart bool) error
 type BackfillRetrieveCb func() *metadata.BackfillPersistInfo
+type LatestSeqnoGetter func() (map[uint16]uint64, error)
+type RequestUpdater func(*metadata.BackfillPersistInfo) error
 
 func NewCollectionBackfillRequestHandler(logger *log.CommonLogger, replId string, persistCb BackfillPersistCb, spec *metadata.ReplicationSpecification,
-	retrieveCb BackfillRetrieveCb) *BackfillRequestHandler {
+	retrieveCb BackfillRetrieveCb, seqnoGetter LatestSeqnoGetter) *BackfillRequestHandler {
 	return &BackfillRequestHandler{
-		logger:        logger,
-		id:            replId,
-		finCh:         make(chan bool),
-		incomingReqCh: make(chan *metadata.BackfillRequest, maxIncomingReqSize),
-		persistCb:     persistCb,
-		retrieveCb:    retrieveCb,
-		spec:          spec,
+		logger:          logger,
+		id:              replId,
+		finCh:           make(chan bool),
+		incomingReqCh:   make(chan *metadata.BackfillRequest, maxIncomingReqSize),
+		persistCb:       persistCb,
+		retrieveCb:      retrieveCb,
+		spec:            spec,
+		getThroughSeqno: seqnoGetter,
 	}
 }
 
@@ -109,17 +113,32 @@ func (b *BackfillRequestHandler) HandleBackfillRequest(req *metadata.BackfillReq
 func (b *BackfillRequestHandler) handleBackfillRequestInternal(req *metadata.BackfillRequest) {
 	b.logger.Infof("%v Received backfill request: %v\n", b.id, req)
 
-	// TODO - look at current requests and optimize them
 	currentReqs := b.retrieveCb()
 	if currentReqs == nil {
+		// This is the first request - just simply persist
 		var persistInfo metadata.BackfillPersistInfo
 		persistInfo.Requests = append(persistInfo.Requests, req)
-		err := b.persistCb(&persistInfo)
+		err := b.persistCb(&persistInfo, false /*should restart*/)
+		b.logger.Infof("NEIL DEBUG persisted info: %v returned %v", persistInfo, err)
 	} else {
-
+		latestCachedSeqnos, err := b.getThroughSeqno()
+		if err != nil {
+			b.logger.Warnf("Unable to retrieve current seqno number with err %v, skipping combination")
+		} else if currentReqs.AlreadyIncludes(req) {
+			b.logger.Infof("NEIL DEBUG already includes req")
+		} else if currentReqs.Requests[0].ContainsWThreshold(req, latestCachedSeqnos) {
+			err := b.persistCb(currentReqs, true /*should restart*/)
+			b.logger.Infof("NEIL DEBUG ActivePersist with restart info: %v returned %v", currentReqs, err)
+		} else if currentReqs.Requests[0].NonConflictVBuckets(req) {
+			err := b.persistCb(currentReqs, true /*should restart*/)
+			b.logger.Infof("NEIL DEBUG ActivePersist Complement with restart info: %v returned %v", currentReqs, err)
+		} else {
+			currentReqs.InsertNonActiveRequest(req)
+			err := b.persistCb(currentReqs, false /*should restart*/)
+			b.logger.Infof("NEIL DEBUG nonActiveInsert persisted info: %v returned %v", currentReqs, err)
+		}
 	}
 
-	b.logger.Infof("NEIL DEBUG persisted info: %v returned %v", persistInfo, err)
 }
 
 func (b *BackfillRequestHandler) GetSourceNucketName() string {

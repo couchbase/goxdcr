@@ -176,7 +176,6 @@ func main() {
 
 		backfillMgr := backfill_manager.NewBackfillManager(collectionsManifestService,
 			rm.ExitProcess, replication_spec_svc, backfillReplicationService)
-		backfillMgr.Start()
 
 		// start replication manager in normal mode
 		rm.StartReplicationManager(host,

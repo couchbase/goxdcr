@@ -346,3 +346,32 @@ func (b *BackfillReplicationService) SetReplicationSpec(spec *metadata.BackfillR
 
 	return b.updateCache(spec.Id, spec)
 }
+
+func (b *BackfillReplicationService) SetMetadataChangeHandlerCallback(call_back base.MetadataChangeHandlerCallback) {
+	b.metadataChangeCbMtx.Lock()
+	defer b.metadataChangeCbMtx.Unlock()
+	b.metadataChangeCallbacks = append(b.metadataChangeCallbacks, call_back)
+}
+
+func (b *BackfillReplicationService) DelReplicationSpec(replicationId string) (*metadata.BackfillReplicationSpec, error) {
+	spec, err := b.ReplicationSpec(replicationId)
+	if err != nil {
+		return nil, errors.New(ReplicationSpecNotFoundErrorMessage)
+	}
+
+	key := b.getKeyFromReplicationId(replicationId)
+	err = b.metadataSvc.DelWithCatalog(BackfillParentCatalogKey, key, nil)
+	if err != nil {
+		b.logger.Errorf("Failed to delete backfill replication spec, key=%v, err=%v\n", key, err)
+		return nil, err
+	}
+
+	err = b.updateCache(replicationId, nil)
+	if err == nil {
+		b.logger.Infof("BackfillReplication spec %v successfully deleted. \n", key)
+		return spec, nil
+	} else {
+		b.logger.Errorf("Failed to delete backfill replication spec, key=%v, err=%v\n", key, err)
+		return nil, err
+	}
+}

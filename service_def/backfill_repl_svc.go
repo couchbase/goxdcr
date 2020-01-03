@@ -10,7 +10,7 @@
 package service_def
 
 import (
-	//	"github.com/couchbase/goxdcr/base"
+	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/metadata"
 )
 
@@ -18,8 +18,8 @@ type BackfillReplSvc interface {
 	ReplicationSpec(replicationId string) (*metadata.BackfillReplicationSpec, error)
 	AddReplicationSpec(spec *metadata.BackfillReplicationSpec) error
 	SetReplicationSpec(spec *metadata.BackfillReplicationSpec) error
-	//	DelReplicationSpec(replicationId string) (*metadata.BackfillReplicationSpec, error)
+	DelReplicationSpec(replicationId string) (*metadata.BackfillReplicationSpec, error)
 	//	AllReplicationSpecs() (map[string]*metadata.BackfillReplicationSpec, error)
 
-	//	SetMetadataChangeHandlerCallback(callBack base.MetadataChangeHandlerCallback)
+	SetMetadataChangeHandlerCallback(callBack base.MetadataChangeHandlerCallback)
 }
