@@ -375,3 +375,68 @@ func (b *BackfillReplicationService) DelReplicationSpec(replicationId string) (*
 		return nil, err
 	}
 }
+
+func (b *BackfillReplicationService) SetDerivedObj(specId string, derivedObj interface{}) error {
+	var err error
+	setDerivedObjFunc := func() error {
+		err = b.setDerivedObjInner(specId, derivedObj)
+		if err == service_def.MetadataNotFoundErr {
+			return nil
+		} else {
+			return err
+		}
+	}
+
+	expOpErr := b.utils.ExponentialBackoffExecutor("BackfillReplSpecSvc.SetDerivedObj", base.RetryIntervalSetDerivedObj, base.MaxNumOfRetriesSetDerivedObj,
+		base.MetaKvBackoffFactor, setDerivedObjFunc)
+
+	if expOpErr != nil {
+		// Executor will return error only if it timed out with ErrorFailedAfterRetry. Log it and override the ret err
+		b.logger.Errorf("SetDerivedObj for %v failed after max retry. err=%v", specId, err)
+		err = expOpErr
+	}
+
+	return err
+}
+
+func (b *BackfillReplicationService) setDerivedObjInner(specId string, derivedObj interface{}) error {
+	cache := b.getCache()
+
+	cachedVal, ok := cache.Get(specId)
+	if !ok || cachedVal == nil {
+		return fmt.Errorf(ReplicationSpecNotFoundErrorMessage)
+	}
+	cachedObj, ok := cachedVal.(*ReplicationSpecVal)
+	if !ok {
+		panic("Object in BackfillReplicationSpecServcie cache is not of type *replciationSpecVal")
+	}
+
+	if cachedObj.spec.(*metadata.BackfillReplicationSpec) == nil && derivedObj == nil {
+		//remove it from the cache
+		b.logger.Infof("Backfill Remove spec %v from the cache\n", specId)
+		cache.Delete(specId)
+	} else {
+		updatedCachedObj := &ReplicationSpecVal{
+			spec:       cachedObj.spec,
+			derivedObj: derivedObj,
+			cas:        cachedObj.cas}
+		err := cache.Upsert(specId, updatedCachedObj)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (b *BackfillReplicationService) GetDerivedObj(specId string) (interface{}, error) {
+	cachedVal, ok := b.getCache().Get(specId)
+	if !ok || cachedVal == nil {
+		return nil, fmt.Errorf(ReplicationSpecNotFoundErrorMessage)
+	}
+
+	cachedObj, ok := cachedVal.(*ReplicationSpecVal)
+	if !ok || cachedObj == nil {
+		panic("Object in ReplicationSpecServcie cache is not of type *replciationSpecVal")
+	}
+	return cachedObj.derivedObj, nil
+}

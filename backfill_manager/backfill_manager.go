@@ -470,6 +470,12 @@ func (b *BackfillMgr) backfillRequestPersistCallback(replId string, info *metada
 		b.logger.Infof("NEIL DEBUG Set backfill replication spec with %v backfill tasks returned %v\n", len(backfillReplSpec.BackfillTasks.Requests), err)
 	}
 
+	// TODO - need to go through pipelineOpSerializer
+	if shouldRestart {
+		err = b.backfillPipelineMgr.UpdateBackfillPipeline(replId, backfillReplSpec)
+		b.logger.Infof("NEIL DEBUG calling backfill pipelineMgr returned err %v", err)
+	}
+
 	return err
 }
 

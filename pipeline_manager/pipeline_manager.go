@@ -40,6 +40,7 @@ type func_report_fixed func(topic string)
 type PipelineManager struct {
 	pipeline_factory   common.PipelineFactory
 	repl_spec_svc      service_def.ReplicationSpecSvc
+	backfillReplSvc    service_def.BackfillReplSvc
 	xdcr_topology_svc  service_def.XDCRCompTopologySvc
 	remote_cluster_svc service_def.RemoteClusterSvc
 	cluster_info_svc   service_def.ClusterInfoSvc
@@ -89,7 +90,7 @@ var pipeline_mgr *PipelineManager
 
 func NewPipelineManager(factory common.PipelineFactory, repl_spec_svc service_def.ReplicationSpecSvc, xdcr_topology_svc service_def.XDCRCompTopologySvc,
 	remote_cluster_svc service_def.RemoteClusterSvc, cluster_info_svc service_def.ClusterInfoSvc, checkpoint_svc service_def.CheckpointsService,
-	uilog_svc service_def.UILogSvc, logger_context *log.LoggerContext, utilsIn utilities.UtilsIface) *PipelineManager {
+	uilog_svc service_def.UILogSvc, logger_context *log.LoggerContext, utilsIn utilities.UtilsIface, backfillReplSvc service_def.BackfillReplSvc) *PipelineManager {
 
 	pipelineMgrRetVar := &PipelineManager{
 		pipeline_factory:   factory,
@@ -101,6 +102,7 @@ func NewPipelineManager(factory common.PipelineFactory, repl_spec_svc service_de
 		cluster_info_svc:   cluster_info_svc,
 		uilog_svc:          uilog_svc,
 		utils:              utilsIn,
+		backfillReplSvc:    backfillReplSvc,
 	}
 	pipelineMgrRetVar.logger.Info("Pipeline Manager is constructed")
 
@@ -125,6 +127,17 @@ func ReplicationStatus(topic string) (*pipeline.ReplicationStatus, error) {
 // Use this one - able to be mocked
 func (pipelineMgr *PipelineManager) ReplicationStatus(topic string) (*pipeline.ReplicationStatus, error) {
 	obj, err := pipelineMgr.repl_spec_svc.GetDerivedObj(topic)
+	if err != nil {
+		return nil, err
+	}
+	if obj == nil {
+		return nil, pipelineMgr.utils.ReplicationStatusNotFoundError(topic)
+	}
+	return obj.(*pipeline.ReplicationStatus), nil
+}
+
+func (pipelineMgr *PipelineManager) BackfillReplicationStatus(topic string) (*pipeline.ReplicationStatus, error) {
+	obj, err := pipelineMgr.backfillReplSvc.GetDerivedObj(topic)
 	if err != nil {
 		return nil, err
 	}
@@ -598,6 +611,24 @@ func (pipelineMgr *PipelineManager) GetOrCreateReplicationStatus(topic string, c
 	}
 }
 
+func (pipelineMgr *PipelineManager) GetOrCreateBackfillReplStatus(topic string, getter pipeline.ReplicationSpecGetter, backfillGetter pipeline.BackfillReplicationSpecGetter) (*pipeline.ReplicationStatus, error) {
+	var repStatus *pipeline.ReplicationStatus
+	repStatus, _ = pipelineMgr.BackfillReplicationStatus(topic)
+	if repStatus != nil {
+		return repStatus, nil
+	} else {
+		var retErr error
+		repStatus = pipeline.NewBackfillReplicationStatus(topic, getter, backfillGetter, pipelineMgr.logger)
+		pipelineMgr.backfillReplSvc.SetDerivedObj(topic, repStatus)
+		pipelineMgr.logger.Infof("BackfillReplicationStatus is created and set with %v\n", topic)
+		if repStatus.Updater() != nil {
+			panic("non-nill updater with a new rep_status")
+		}
+		retErr = pipelineMgr.launchUpdater(topic, nil, repStatus)
+		return repStatus, retErr
+	}
+}
+
 // Should be called internally from serializer's Update()
 func (pipelineMgr *PipelineManager) Update(topic string, cur_err error) error {
 	// Since this Update call should be serialized, and no one else should with this pipeline name
@@ -633,8 +664,45 @@ func (pipelineMgr *PipelineManager) Update(topic string, cur_err error) error {
 	return nil
 }
 
+func getBackfillPipelineName(topic string) string {
+	return fmt.Sprintf("%v_%v", "backfill", topic)
+}
+
 /* Implements BackfillPipelineMgr */
 func (pipelineMgr *PipelineManager) UpdateBackfillPipeline(topic string, backfillSpec *metadata.BackfillReplicationSpec) error {
+	specGetter := func(specId string) (*metadata.ReplicationSpecification, error) {
+		return backfillSpec.ReplicationSpec, nil
+	}
+
+	backfillSpecGetter := func() (*metadata.BackfillReplicationSpec, error) {
+		return backfillSpec, nil
+	}
+
+	rep_status, retErr := pipelineMgr.GetOrCreateBackfillReplStatus(topic, specGetter, backfillSpecGetter)
+	if rep_status == nil {
+		combinedRetErr := errors.New(ReplicationStatusNotFound.Error() + " Cause: " + retErr.Error())
+		return combinedRetErr
+	} else if retErr != nil {
+		return retErr
+	}
+
+	// Update the backfillSpec
+	rep_status.UpdateBackfillSpecGetter(backfillSpecGetter)
+
+	updaterObj := rep_status.Updater()
+	if updaterObj == nil {
+		errorStr := fmt.Sprintf("Failed to get updater from replication status in topic %v in update()", topic)
+		return errors.New(errorStr)
+	} else {
+		updater, ok := updaterObj.(*PipelineUpdater)
+		if updater == nil || !ok {
+			errorStr := fmt.Sprintf("Unable to cast updaterObj as type PipelineUpdater in topic %v", topic)
+			return errors.New(errorStr)
+		}
+
+		pipelineMgr.logger.Infof("NEIL DEBUG about to refreshPipeline %v Manually", updater.pipeline_name)
+		//		updater.refreshPipelineManually()
+	}
 	return nil
 }
 

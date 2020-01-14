@@ -450,7 +450,7 @@ func (v *vbtsNegotiator) negotiate() error {
 			vbtsWLock.mutex.RLock()
 			topicBackfillMap := overallIncremental.GetSpecificBackfillMap(vbtsWLock.vbMap)
 			vbtsWLock.mutex.RUnlock()
-			v.dcp.Logger().Infof("NEIL DEBUG negotiator for topic has backfillMap: %v", topicBackfillMap)
+			//			v.dcp.Logger().Infof("NEIL DEBUG negotiator for topic has backfillMap: %v", topicBackfillMap)
 			if len(topicBackfillMap) > 0 {
 				err := v.dcp.backfillMgr.RequestIncrementalBucketBackfill(topic, topicBackfillMap)
 				if err != nil {

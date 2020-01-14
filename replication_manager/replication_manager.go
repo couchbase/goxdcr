@@ -117,7 +117,8 @@ type replicationManager struct {
 
 	mem_stats_logger_finch chan bool
 
-	backfillMgr service_def.BackfillMgrIface
+	backfillMgr     service_def.BackfillMgrIface
+	backfillReplSvc service_def.BackfillReplSvc
 }
 
 //singleton
@@ -140,7 +141,8 @@ func StartReplicationManager(sourceKVHost string,
 	throughput_throttler_svc service_def.ThroughputThrottlerSvc,
 	utilitiesIn utilities.UtilsIface,
 	collectionsManifestSvc service_def.CollectionsManifestSvc,
-	backfillMgr service_def.BackfillMgrIface) {
+	backfillMgr service_def.BackfillMgrIface,
+	backfillReplSvc service_def.BackfillReplSvc) {
 
 	replication_mgr.once.Do(func() {
 		// ns_server shutdown protocol: poll stdin and exit upon reciept of EOF
@@ -156,7 +158,7 @@ func StartReplicationManager(sourceKVHost string,
 		replication_mgr.init(repl_spec_svc, remote_cluster_svc, cluster_info_svc,
 			xdcr_topology_svc, replication_settings_svc, checkpoint_svc, capi_svc, audit_svc,
 			uilog_svc, global_setting_svc, bucket_settings_svc, internal_settings_svc,
-			throughput_throttler_svc, collectionsManifestSvc, backfillMgr)
+			throughput_throttler_svc, collectionsManifestSvc, backfillMgr, backfillReplSvc)
 
 		// start replication manager supervisor
 		// TODO should we make heart beat settings configurable?
@@ -411,7 +413,8 @@ func (rm *replicationManager) init(
 	internal_settings_svc service_def.InternalSettingsSvc,
 	throughput_throttler_svc service_def.ThroughputThrottlerSvc,
 	collectionsManifestSvc service_def.CollectionsManifestSvc,
-	backfillMgr service_def.BackfillMgrIface) {
+	backfillMgr service_def.BackfillMgrIface,
+	backfillReplSvc service_def.BackfillReplSvc) {
 
 	rm.GenericSupervisor = *supervisor.NewGenericSupervisor(base.ReplicationManagerSupervisorId, log.DefaultLoggerContext, rm, nil, rm.utils)
 	rm.repl_spec_svc = repl_spec_svc
@@ -429,12 +432,13 @@ func (rm *replicationManager) init(
 	rm.internal_settings_svc = internal_settings_svc
 	rm.collectionsManifestSvc = collectionsManifestSvc
 	rm.backfillMgr = backfillMgr
+	rm.backfillReplSvc = backfillReplSvc
 
 	fac := factory.NewXDCRFactory(repl_spec_svc, remote_cluster_svc, cluster_info_svc, xdcr_topology_svc,
 		checkpoint_svc, capi_svc, uilog_svc, bucket_settings_svc, throughput_throttler_svc,
 		log.DefaultLoggerContext, log.DefaultLoggerContext, rm, rm.utils, collectionsManifestSvc, rm.backfillMgr)
 
-	pipelineMgr := pipeline_manager.NewPipelineManager(fac, repl_spec_svc, xdcr_topology_svc, remote_cluster_svc, cluster_info_svc, checkpoint_svc, uilog_svc, log.DefaultLoggerContext, rm.utils)
+	pipelineMgr := pipeline_manager.NewPipelineManager(fac, repl_spec_svc, xdcr_topology_svc, remote_cluster_svc, cluster_info_svc, checkpoint_svc, uilog_svc, log.DefaultLoggerContext, rm.utils, rm.backfillReplSvc)
 	rm.pipelineMgr = pipelineMgr
 	rm.backfillMgr.SetBackfillPipelineController(pipelineMgr)
 	err := rm.backfillMgr.Start()

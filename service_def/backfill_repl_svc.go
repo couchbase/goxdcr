@@ -22,4 +22,11 @@ type BackfillReplSvc interface {
 	//	AllReplicationSpecs() (map[string]*metadata.BackfillReplicationSpec, error)
 
 	SetMetadataChangeHandlerCallback(callBack base.MetadataChangeHandlerCallback)
+
+	//get the derived object (i.e. ReplicationStatus) for the specification
+	//this is used to keep the derived object and replication spec in the same cache
+	GetDerivedObj(specId string) (interface{}, error)
+
+	//set the derived object (i.e ReplicationStatus) for the specification
+	SetDerivedObj(specId string, derivedObj interface{}) error
 }

@@ -196,7 +196,8 @@ func main() {
 			service_impl.NewThroughputThrottlerSvc(nil),
 			utils,
 			collectionsManifestService,
-			backfillMgr)
+			backfillMgr,
+			backfillReplicationService)
 
 		// keep main alive in normal mode
 		<-done

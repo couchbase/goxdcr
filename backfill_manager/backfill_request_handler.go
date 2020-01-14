@@ -118,7 +118,7 @@ func (b *BackfillRequestHandler) handleBackfillRequestInternal(req *metadata.Bac
 		// This is the first request - just simply persist
 		var persistInfo metadata.BackfillPersistInfo
 		persistInfo.Requests = append(persistInfo.Requests, req)
-		err := b.persistCb(&persistInfo, false /*should restart*/)
+		err := b.persistCb(&persistInfo, true /*should restart*/)
 		b.logger.Infof("NEIL DEBUG persisted info: %v returned %v", persistInfo, err)
 	} else {
 		latestCachedSeqnos, err := b.getThroughSeqno()

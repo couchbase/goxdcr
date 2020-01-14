@@ -58,6 +58,7 @@ type PipelineErrorArray []PipelineError
 const PipelineErrorMaxEntries = 20
 
 type ReplicationSpecGetter func(specId string) (*metadata.ReplicationSpecification, error)
+type BackfillReplicationSpecGetter func() (*metadata.BackfillReplicationSpec, error)
 
 func (errArray PipelineErrorArray) String() string {
 	bytes, err := json.Marshal(errArray)
@@ -126,6 +127,15 @@ type ReplicationStatus struct {
 	// Every time through sequence service gets the latest sequence number, it is updated here
 	// This is NOT real-time information, but is in sync with checkpoint (or whoever calls GetThroughSeqno)
 	vbThroughSeqnoMap map[uint16]uint64
+
+	backfillSpecGetter BackfillReplicationSpecGetter
+}
+
+func NewBackfillReplicationStatus(specId string, spec_getter ReplicationSpecGetter, backfillSpec BackfillReplicationSpecGetter, logger *log.CommonLogger) *ReplicationStatus {
+	repStatus := NewReplicationStatus(specId, spec_getter, logger)
+	repStatus.backfillSpecGetter = backfillSpec
+
+	return repStatus
 }
 
 func NewReplicationStatus(specId string, spec_getter ReplicationSpecGetter, logger *log.CommonLogger) *ReplicationStatus {
@@ -505,4 +515,11 @@ func (rs *ReplicationStatus) GetThroughSeqnos() (mapCopy map[uint16]uint64) {
 		mapCopy[k] = v
 	}
 	return
+}
+
+func (rs *ReplicationStatus) UpdateBackfillSpecGetter(getter BackfillReplicationSpecGetter) {
+	rs.lock.Lock()
+	defer rs.lock.Unlock()
+
+	rs.backfillSpecGetter = getter
 }
