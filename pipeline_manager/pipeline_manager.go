@@ -121,7 +121,11 @@ func NewPipelineManager(factory common.PipelineFactory, repl_spec_svc service_de
 
 // TO be deprecated, use interface method below
 func ReplicationStatus(topic string) (*pipeline.ReplicationStatus, error) {
-	return pipeline_mgr.ReplicationStatus(topic)
+	if base.PipelineHasBackfillPrefix(topic) {
+		return pipeline_mgr.BackfillReplicationStatus(topic)
+	} else {
+		return pipeline_mgr.ReplicationStatus(topic)
+	}
 }
 
 // Use this one - able to be mocked

@@ -197,6 +197,7 @@ type DcpNozzle struct {
 	backfillSpec         *metadata.BackfillReplicationSpec
 	backfillTask         *metadata.BackfillRequest
 	backfillDebugLogOnce sync.Once
+	backfillTimerFired   bool
 }
 
 func NewDcpNozzle(id string,
@@ -553,6 +554,8 @@ func (dcp *DcpNozzle) startInternal(settings metadata.ReplicationSettingsMap) er
 	// start data processing routine
 	dcp.childrenWaitGrp.Add(1)
 	go dcp.processData()
+
+	time.Sleep(1 * time.Second)
 
 	// start vbstreams
 	dcp.childrenWaitGrp.Add(1)
@@ -1136,7 +1139,7 @@ func (dcp *DcpNozzle) startUprStreamInner(vbno uint16, vbts, endTs *base.VBTimes
 				err = dcp.uprFeed.UprRequestCollectionsStream(vbno, version, flags, vbts.Vbuuid, vbts.Seqno, seqEnd, vbts.SnapshotStart, vbts.SnapshotEnd, nil)
 				if err == nil {
 					err = dcp.setStreamState(vbno, Dcp_Stream_Init)
-					//					dcp.Logger().Infof("NEIL DEBUG vbno %v starts at seqno %v to %v snapshot start %v to ssEnd %v", vbno, vbts.Seqno, seqEnd, vbts.SnapshotStart, vbts.SnapshotEnd)
+					//										dcp.Logger().Infof("NEIL DEBUG vbno %v starts at seqno %v to %v snapshot start %v to ssEnd %v", vbno, vbts.Seqno, seqEnd, vbts.SnapshotStart, vbts.SnapshotEnd)
 				}
 			}
 			return
@@ -1335,7 +1338,7 @@ func (dcp *DcpNozzle) setTS(vbno uint16, ts *base.VBTimestamp, need_lock bool) e
 
 // Returns end timestamp, nil if no end
 func (dcp *DcpNozzle) getTS(vbno uint16, need_lock bool) (*base.VBTimestamp, *base.VBTimestamp, error) {
-	if dcp.backfillTask != nil {
+	if dcp.backfillTask != nil && dcp.IsOpen() {
 		timestamps := dcp.backfillTask.BackfillMap[vbno]
 		return timestamps[0], timestamps[1], nil
 	} else {

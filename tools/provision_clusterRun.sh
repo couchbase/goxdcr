@@ -71,8 +71,8 @@ function runDataLoad {
 #	runCbWorkloadGenBucket "C1" "B1" &
 #	runCbWorkloadGenBucket "C2" "B2" &
 	runCbWorkloadGenCollection "C1" "B1" "S1" "col1" "$prefix"
-	runCbWorkloadGenCollection "C2" "B1" "S1" "col1" "$prefix"
-	runCbWorkloadGenCollection "C2" "B2" "S1" "col1" "$prefix"
+#	runCbWorkloadGenCollection "C2" "B1" "S1" "col1" "$prefix"
+#	runCbWorkloadGenCollection "C2" "B2" "S1" "col1" "$prefix"
 	waitForBgJobs
 }
 

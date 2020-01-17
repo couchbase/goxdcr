@@ -450,8 +450,8 @@ func (v *vbtsNegotiator) negotiate() error {
 			vbtsWLock.mutex.RLock()
 			topicBackfillMap := overallIncremental.GetSpecificBackfillMap(vbtsWLock.vbMap)
 			vbtsWLock.mutex.RUnlock()
-			//			v.dcp.Logger().Infof("NEIL DEBUG negotiator for topic has backfillMap: %v", topicBackfillMap)
 			if len(topicBackfillMap) > 0 {
+				v.dcp.Logger().Infof("NEIL DEBUG negotiator for dcp %v has %v vbs requesting for backfill of %v mutations", v.dcp.Id(), len(topicBackfillMap), topicBackfillMap.TotalMutations())
 				err := v.dcp.backfillMgr.RequestIncrementalBucketBackfill(topic, topicBackfillMap)
 				if err != nil {
 					v.dcp.Logger().Errorf("Unable to request backfill for %v - cannot start ongoing", topic)
