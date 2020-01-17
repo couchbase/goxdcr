@@ -272,10 +272,30 @@ func (b *BackfillRequest) VBucketsCombine(other *BackfillRequest) error {
 // A map of vbucket - start and end sequence numbers
 type VBucketBackfillMap map[uint16][2]*base.VBTimestamp
 
+func (v VBucketBackfillMap) GetVBList() []uint16 {
+	var list []uint16
+	for k, _ := range v {
+		list = append(list, k)
+	}
+	return list
+}
+
+func (v VBucketBackfillMap) GetSubsetVBList(vbnos []uint16) []uint16 {
+	var subsetList []uint16
+
+	for _, vbno := range vbnos {
+		if _, ok := v[vbno]; ok {
+			subsetList = append(subsetList, vbno)
+		}
+	}
+
+	return subsetList
+}
+
 func (v VBucketBackfillMap) Clone() VBucketBackfillMap {
 	retMap := make(VBucketBackfillMap)
-	for k, v := range v {
-		retMap[k] = v
+	for k, val := range v {
+		retMap[k] = val
 	}
 	return retMap
 }
@@ -315,6 +335,20 @@ func (v *VBucketBackfillMap) GetHighestEndSeqno() (highestSeqno uint64) {
 	}
 
 	return
+}
+
+// Returns 0 if not found
+func (v *VBucketBackfillMap) GetStartingCollectionManifestId(vbno uint16) uint64 {
+	if v == nil {
+		return 0
+	}
+
+	timestamps, ok := (*v)[vbno]
+	if !ok {
+		return 0
+	} else {
+		return timestamps[1].ManifestIDs.SourceManifestId
+	}
 }
 
 // NOT SERIALIZED

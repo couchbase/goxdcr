@@ -23,6 +23,7 @@ import (
 	utilities "github.com/couchbase/goxdcr/utils"
 	"reflect"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -192,7 +193,10 @@ type DcpNozzle struct {
 
 	backfillMgr service_def.BackfillMgrIface
 	// Non-nil if it this is backfill requested pipeline
-	backfillSpec *metadata.BackfillReplicationSpec
+	// TODO - realistically it should be a task
+	backfillSpec         *metadata.BackfillReplicationSpec
+	backfillTask         *metadata.BackfillRequest
+	backfillDebugLogOnce sync.Once
 }
 
 func NewDcpNozzle(id string,
@@ -227,7 +231,11 @@ func NewDcpNozzle(id string,
 		currentStreamingStart:    make(map[uint16]*uprEventWithLock),
 	}
 
-	dcp.tsNegotiator = NewVbtsNegotiator(dcp, vbnos, 15*time.Second /*warming up period*/)
+	waitingPeriod := 15 * time.Second
+	if strings.Contains(dcp.Id(), "backfill") {
+		waitingPeriod = 30 * time.Second
+	}
+	dcp.tsNegotiator = NewVbtsNegotiator(dcp, vbnos, waitingPeriod /*warming up period*/)
 
 	for _, vbno := range vbnos {
 		dcp.cur_ts[vbno] = &vbtsWithLock{lock: &sync.RWMutex{}, ts: nil}
@@ -411,6 +419,21 @@ func (dcp *DcpNozzle) initialize(settings metadata.ReplicationSettingsMap) (err 
 
 	dcp.specificManifestGetter = settings[DCP_Specific_Manifest_Getter].(service_def.CollectionsManifestReqFunc)
 
+	backfillSpec, ok := settings[BackfillSpec].(*metadata.BackfillReplicationSpec)
+	if ok {
+		dcp.backfillSpec = backfillSpec
+		dcp.backfillTask = dcp.backfillSpec.BackfillTasks.Requests[0]
+		if dcp.backfillTask == nil {
+			panic("Nil backfilltask")
+		}
+
+		// Do this because resuming from this point the DCP haven't gotten any sys events
+		for _, vbno := range dcp.vbnos {
+			atomic.StoreUint64(&dcp.vbHighestManifestUidArray[vbno],
+				dcp.backfillTask.BackfillMap.GetStartingCollectionManifestId(vbno))
+		}
+	}
+
 	dcp.initializeUprHandshakeHelpers()
 
 	err = dcp.tsNegotiator.getFailoverLogs()
@@ -441,10 +464,6 @@ func (dcp *DcpNozzle) initialize(settings metadata.ReplicationSettingsMap) (err 
 
 	dcp.backfillMgr = settings[BackfillMgr].(service_def.BackfillMgrIface)
 
-	backfillSpec, ok := settings[BackfillSpec].(*metadata.BackfillReplicationSpec)
-	if ok {
-		dcp.backfillSpec = backfillSpec
-	}
 	return
 }
 
@@ -531,20 +550,17 @@ func (dcp *DcpNozzle) startInternal(settings metadata.ReplicationSettingsMap) er
 		uprFeed.StartFeedWithConfig(base.UprFeedDataChanLength)
 	}
 
-	// NEIL DEBUG for now backfill Don't start
-	if dcp.backfillSpec == nil {
-		// start data processing routine
-		dcp.childrenWaitGrp.Add(1)
-		go dcp.processData()
+	// start data processing routine
+	dcp.childrenWaitGrp.Add(1)
+	go dcp.processData()
 
-		// start vbstreams
-		dcp.childrenWaitGrp.Add(1)
-		go dcp.startUprStreams()
+	// start vbstreams
+	dcp.childrenWaitGrp.Add(1)
+	go dcp.startUprStreams()
 
-		// check for inactive vbstreams
-		dcp.childrenWaitGrp.Add(1)
-		go dcp.checkInactiveUprStreams()
-	}
+	// check for inactive vbstreams
+	dcp.childrenWaitGrp.Add(1)
+	go dcp.checkInactiveUprStreams()
 
 	err = dcp.SetState(common.Part_Running)
 
@@ -807,7 +823,7 @@ func (dcp *DcpNozzle) processData() (err error) {
 							return err
 
 						}
-						dcp.startUprStream(vbno, updated_ts)
+						dcp.startUprStream(vbno, updated_ts, nil)
 					}
 				} else if m.Status == mc.SUCCESS {
 					vbno := m.VBucket
@@ -1070,9 +1086,9 @@ func (dcp *DcpNozzle) startUprStreams_internal(streams_to_start []uint16) error 
 	base.ShuffleVbList(streams_to_start)
 
 	for _, vbno := range streams_to_start {
-		vbts, err := dcp.getTS(vbno, true)
+		vbts, endTs, err := dcp.getTS(vbno, true)
 		if err == nil && vbts != nil {
-			err = dcp.startUprStream(vbno, vbts)
+			err = dcp.startUprStream(vbno, vbts, endTs)
 			if err != nil {
 				dcp.Logger().Warnf("%v: startUprStreams errored out, err=%v\n", dcp.Id(), err)
 				continue
@@ -1084,10 +1100,13 @@ func (dcp *DcpNozzle) startUprStreams_internal(streams_to_start []uint16) error 
 }
 
 // Have an internal so we can control the opaque and version being passed in
-func (dcp *DcpNozzle) startUprStreamInner(vbno uint16, vbts *base.VBTimestamp, version uint16) (err error) {
+func (dcp *DcpNozzle) startUprStreamInner(vbno uint16, vbts, endTs *base.VBTimestamp, version uint16) (err error) {
 	flags := uint32(0)
 	seqEnd := uint64(0xFFFFFFFFFFFFFFFF)
-	dcp.Logger().Debugf("%v starting vb stream for vb=%v, version=%v\n", dcp.Id(), vbno, version)
+	if endTs != nil {
+		seqEnd = endTs.Seqno
+	}
+	dcp.Logger().Infof("%v starting vb stream for vb=%v, start=%v vbuuid=%v, end=%v, version=%v\n", dcp.Id(), vbno, vbts.Seqno, vbts.Vbuuid, seqEnd, version)
 
 	dcp.lock_uprFeed.RLock()
 	defer dcp.lock_uprFeed.RUnlock()
@@ -1131,9 +1150,9 @@ func (dcp *DcpNozzle) startUprStreamInner(vbno uint16, vbts *base.VBTimestamp, v
 }
 
 // For a given stream (by vb#), send UPR_STREAMREQ via the uprFeed client method
-func (dcp *DcpNozzle) startUprStream(vbno uint16, vbts *base.VBTimestamp) error {
+func (dcp *DcpNozzle) startUprStream(vbno uint16, vbts, endTs *base.VBTimestamp) error {
 	version := dcp.vbHandshakeMap[vbno].getNewVersion()
-	return dcp.startUprStreamInner(vbno, vbts, version)
+	return dcp.startUprStreamInner(vbno, vbts, endTs, version)
 }
 
 func (dcp *DcpNozzle) getUprFeed() mcc.UprFeedIface {
@@ -1143,7 +1162,11 @@ func (dcp *DcpNozzle) getUprFeed() mcc.UprFeedIface {
 }
 
 func (dcp *DcpNozzle) GetVBList() []uint16 {
-	return dcp.vbnos
+	if dcp.backfillTask != nil {
+		return dcp.backfillTask.BackfillMap.GetSubsetVBList(dcp.vbnos)
+	} else {
+		return dcp.vbnos
+	}
 }
 
 type stateCheckFunc func(state DcpStreamState) bool
@@ -1204,22 +1227,27 @@ func (dcp *DcpNozzle) newOpaqueForClosing() uint16 {
 func (dcp *DcpNozzle) UpdateSettings(settings metadata.ReplicationSettingsMap) error {
 	ts_obj := dcp.utils.GetSettingFromSettings(settings, DCP_VBTimestamp)
 	if ts_obj != nil {
-		new_ts, ok := settings[DCP_VBTimestamp].(map[uint16]*base.VBTimestamp)
-		if !ok || new_ts == nil {
-			panic(fmt.Sprintf("setting %v should have type of map[uint16]*base.VBTimestamp", DCP_VBTimestamp))
-		}
-		// With advDCP, it should have callback
-		_, ok = settings[base.UpdateSettingCb]
-		if !ok {
-			// nil if pipeline is constructing/starting
-			panic(fmt.Sprintf("setting %v should have updatecallback", base.UpdateSettingCb))
-		}
-		pipelineTopic, ok := settings[base.PipelineTopic].(string)
-		if !ok || pipelineTopic == "" {
-			panic("Need pipelineTopic")
-		}
+		if dcp.backfillTask != nil {
+			// TODO - checkpoint mgr needs special handshaking with backfill pipelines, need to think through
+			dcp.backfillDebugLogOnce.Do(func() { dcp.Logger().Infof("NEIL DEBUG %v backfill task ignoring all checkpointmgr comms", dcp.Id()) })
+		} else {
+			new_ts, ok := settings[DCP_VBTimestamp].(map[uint16]*base.VBTimestamp)
+			if !ok || new_ts == nil {
+				panic(fmt.Sprintf("setting %v should have type of map[uint16]*base.VBTimestamp", DCP_VBTimestamp))
+			}
+			// With advDCP, it should have callback
+			_, ok = settings[base.UpdateSettingCb]
+			if !ok {
+				// nil if pipeline is constructing/starting
+				panic(fmt.Sprintf("setting %v should have updatecallback", base.UpdateSettingCb))
+			}
+			pipelineTopic, ok := settings[base.PipelineTopic].(string)
+			if !ok || pipelineTopic == "" {
+				panic("Need pipelineTopic")
+			}
 
-		dcp.tsNegotiator.HandleVbtsFromCheckpointMgr(pipelineTopic, new_ts)
+			dcp.tsNegotiator.HandleVbtsFromCheckpointMgr(pipelineTopic, new_ts)
+		}
 	}
 
 	if statsInterval, ok := settings[DCP_Stats_Interval]; ok {
@@ -1305,24 +1333,30 @@ func (dcp *DcpNozzle) setTS(vbno uint16, ts *base.VBTimestamp, need_lock bool) e
 	}
 }
 
-func (dcp *DcpNozzle) getTS(vbno uint16, need_lock bool) (*base.VBTimestamp, error) {
-	ts_entry := dcp.cur_ts[vbno]
-	if ts_entry != nil {
-		if need_lock {
-			ts_entry.lock.RLock()
-			defer ts_entry.lock.RUnlock()
-		}
-		return ts_entry.ts, nil
+// Returns end timestamp, nil if no end
+func (dcp *DcpNozzle) getTS(vbno uint16, need_lock bool) (*base.VBTimestamp, *base.VBTimestamp, error) {
+	if dcp.backfillTask != nil {
+		timestamps := dcp.backfillTask.BackfillMap[vbno]
+		return timestamps[0], timestamps[1], nil
 	} else {
-		err := fmt.Errorf("getTS failed: vbno=%v is not tracked in cur_ts map", vbno)
-		dcp.handleGeneralError(err)
-		return nil, err
+		ts_entry := dcp.cur_ts[vbno]
+		if ts_entry != nil {
+			if need_lock {
+				ts_entry.lock.RLock()
+				defer ts_entry.lock.RUnlock()
+			}
+			return ts_entry.ts, nil, nil
+		} else {
+			err := fmt.Errorf("getTS failed: vbno=%v is not tracked in cur_ts map", vbno)
+			dcp.handleGeneralError(err)
+			return nil, nil, err
+		}
 	}
 }
 
 //if the vbno is not belongs to this DcpNozzle, return true
 func (dcp *DcpNozzle) isTSSet(vbno uint16, need_lock bool) bool {
-	ts, err := dcp.getTS(vbno, need_lock)
+	ts, _, err := dcp.getTS(vbno, need_lock)
 	if err != nil {
 		err := fmt.Errorf("isTSSet failed: vbno=%v is not tracked in cur_ts map", vbno)
 		dcp.handleGeneralError(err)
