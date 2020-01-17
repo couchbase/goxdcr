@@ -383,8 +383,16 @@ func (top_detect_svc *TopologyChangeDetectorSvc) validateTargetTopology() ([]uin
 	}
 }
 
+func (t *TopologyChangeDetectorSvc) getTopic() string {
+	topic := t.pipeline.Topic()
+	if base.PipelineHasBackfillPrefix(topic) {
+		topic = base.GetPreBackfillPrefix(topic)
+	}
+	return topic
+}
+
 func (top_detect_svc *TopologyChangeDetectorSvc) getTargetBucketInfo() (int, map[string][]uint16, error) {
-	spec, _ := top_detect_svc.repl_spec_svc.ReplicationSpec(top_detect_svc.pipeline.Topic())
+	spec, _ := top_detect_svc.repl_spec_svc.ReplicationSpec(top_detect_svc.getTopic())
 	if spec == nil {
 		return 0, nil, fmt.Errorf("Cannot find replication spec for %v", top_detect_svc.pipeline.Topic())
 	}

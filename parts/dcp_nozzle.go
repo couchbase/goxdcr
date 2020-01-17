@@ -42,6 +42,7 @@ const (
 	PipelineTopic                = base.PipelineTopic
 	UpdateSettingCb              = base.UpdateSettingCb
 	BackfillMgr                  = "BackfillMgr"
+	BackfillSpec                 = base.BackfillSpec
 )
 
 type DcpStreamState int
@@ -190,6 +191,8 @@ type DcpNozzle struct {
 	tsNegotiator *vbtsNegotiator
 
 	backfillMgr service_def.BackfillMgrIface
+	// Non-nil if it this is backfill requested pipeline
+	backfillSpec *metadata.BackfillReplicationSpec
 }
 
 func NewDcpNozzle(id string,
@@ -437,6 +440,11 @@ func (dcp *DcpNozzle) initialize(settings metadata.ReplicationSettingsMap) (err 
 	dcp.cachedConnector, _ = dcp.AdvConnector()
 
 	dcp.backfillMgr = settings[BackfillMgr].(service_def.BackfillMgrIface)
+
+	backfillSpec, ok := settings[BackfillSpec].(*metadata.BackfillReplicationSpec)
+	if ok {
+		dcp.backfillSpec = backfillSpec
+	}
 	return
 }
 
@@ -504,7 +512,12 @@ func (dcp *DcpNozzle) startInternal(settings metadata.ReplicationSettingsMap) er
 	if err != nil {
 		return err
 	}
-	dcp.Logger().Infof("%v has been initialized\n", dcp.Id())
+
+	if dcp.backfillSpec == nil {
+		dcp.Logger().Infof("%v has been initialized\n", dcp.Id())
+	} else {
+		dcp.Logger().Infof("%v has been initialized as a backfill DCP Nozzle spec: %v\n", dcp.Id(), dcp.backfillSpec)
+	}
 
 	// start gen_server
 	dcp.start_time = time.Now()
@@ -518,17 +531,20 @@ func (dcp *DcpNozzle) startInternal(settings metadata.ReplicationSettingsMap) er
 		uprFeed.StartFeedWithConfig(base.UprFeedDataChanLength)
 	}
 
-	// start data processing routine
-	dcp.childrenWaitGrp.Add(1)
-	go dcp.processData()
+	// NEIL DEBUG for now backfill Don't start
+	if dcp.backfillSpec == nil {
+		// start data processing routine
+		dcp.childrenWaitGrp.Add(1)
+		go dcp.processData()
 
-	// start vbstreams
-	dcp.childrenWaitGrp.Add(1)
-	go dcp.startUprStreams()
+		// start vbstreams
+		dcp.childrenWaitGrp.Add(1)
+		go dcp.startUprStreams()
 
-	// check for inactive vbstreams
-	dcp.childrenWaitGrp.Add(1)
-	go dcp.checkInactiveUprStreams()
+		// check for inactive vbstreams
+		dcp.childrenWaitGrp.Add(1)
+		go dcp.checkInactiveUprStreams()
+	}
 
 	err = dcp.SetState(common.Part_Running)
 

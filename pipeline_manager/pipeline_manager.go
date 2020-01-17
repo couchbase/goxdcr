@@ -137,6 +137,9 @@ func (pipelineMgr *PipelineManager) ReplicationStatus(topic string) (*pipeline.R
 }
 
 func (pipelineMgr *PipelineManager) BackfillReplicationStatus(topic string) (*pipeline.ReplicationStatus, error) {
+	if base.PipelineHasBackfillPrefix(topic) {
+		topic = base.GetPreBackfillPrefix(topic)
+	}
 	obj, err := pipelineMgr.backfillReplSvc.GetDerivedObj(topic)
 	if err != nil {
 		return nil, err
@@ -336,15 +339,32 @@ func (p *PipelineManager) GetPipelineFactory() common.PipelineFactory {
 
 func (pipelineMgr *PipelineManager) StartPipeline(topic string) base.ErrorMap {
 	var err error
+	var rep_status *pipeline.ReplicationStatus
+
 	errMap := make(base.ErrorMap)
 	pipelineMgr.logger.Infof("Starting the pipeline %s\n", topic)
 
-	rep_status, _ := pipelineMgr.ReplicationStatus(topic)
+	if base.PipelineHasBackfillPrefix(topic) {
+		rep_status, _ = pipelineMgr.BackfillReplicationStatus(topic)
+	} else {
+		rep_status, _ = pipelineMgr.ReplicationStatus(topic)
+	}
+
 	if rep_status == nil {
 		// This should not be nil as updater should be the only one calling this and
 		// it would have created a rep_status way before here
 		errMap[fmt.Sprintf("pipelineMgr.ReplicationStatus(%v)", topic)] = errors.New("Error: Replication Status is missing when starting pipeline.")
 		return errMap
+	}
+
+	if rep_status.IsBackfill() {
+		backfillSpec := rep_status.BackfillSpec()
+		if backfillSpec == nil {
+			panic("Nil backfillspec")
+		}
+		backfillSetting := make(map[string]interface{})
+		backfillSetting[base.BackfillSpec] = backfillSpec
+		rep_status.SetCustomSettings(backfillSetting)
 	}
 
 	if rep_status.RuntimeStatus(true) == pipeline.Replicating {
@@ -373,6 +393,7 @@ func (pipelineMgr *PipelineManager) StartPipeline(topic string) base.ErrorMap {
 
 	pipelineMgr.logger.Infof("Pipeline %v is constructed. Starting it.", p.InstanceId())
 	p.SetProgressRecorder(rep_status.RecordProgress)
+
 	errMap = p.Start(rep_status.SettingsMap())
 	if len(errMap) > 0 {
 		pipelineMgr.logger.Errorf("Failed to start the pipeline %v", p.InstanceId())
@@ -384,7 +405,15 @@ func (pipelineMgr *PipelineManager) StartPipeline(topic string) base.ErrorMap {
 func (pipelineMgr *PipelineManager) validatePipeline(topic string) error {
 	pipelineMgr.logger.Infof("Validating pipeline %v\n", topic)
 
-	spec, err := pipelineMgr.repl_spec_svc.ReplicationSpec(topic)
+	var spec *metadata.ReplicationSpecification
+	var err error
+
+	if base.PipelineHasBackfillPrefix(topic) {
+		spec, err = pipelineMgr.repl_spec_svc.ReplicationSpec(base.GetPreBackfillPrefix(topic))
+	} else {
+		spec, err = pipelineMgr.repl_spec_svc.ReplicationSpec(topic)
+	}
+
 	if err != nil {
 		pipelineMgr.logger.Errorf("Failed to get replication specification for pipeline %v, err=%v\n", topic, err)
 		return err
@@ -624,7 +653,7 @@ func (pipelineMgr *PipelineManager) GetOrCreateBackfillReplStatus(topic string, 
 		if repStatus.Updater() != nil {
 			panic("non-nill updater with a new rep_status")
 		}
-		retErr = pipelineMgr.launchUpdater(topic, nil, repStatus)
+		retErr = pipelineMgr.launchUpdater(base.GetBackfillPipelineName(topic), nil, repStatus)
 		return repStatus, retErr
 	}
 }
@@ -664,10 +693,6 @@ func (pipelineMgr *PipelineManager) Update(topic string, cur_err error) error {
 	return nil
 }
 
-func getBackfillPipelineName(topic string) string {
-	return fmt.Sprintf("%v_%v", "backfill", topic)
-}
-
 /* Implements BackfillPipelineMgr */
 func (pipelineMgr *PipelineManager) UpdateBackfillPipeline(topic string, backfillSpec *metadata.BackfillReplicationSpec) error {
 	specGetter := func(specId string) (*metadata.ReplicationSpecification, error) {
@@ -700,8 +725,7 @@ func (pipelineMgr *PipelineManager) UpdateBackfillPipeline(topic string, backfil
 			return errors.New(errorStr)
 		}
 
-		pipelineMgr.logger.Infof("NEIL DEBUG about to refreshPipeline %v Manually", updater.pipeline_name)
-		//		updater.refreshPipelineManually()
+		updater.refreshPipelineManually()
 	}
 	return nil
 }
@@ -1077,7 +1101,7 @@ func (r *PipelineUpdater) update() base.ErrorMap {
 	r.pickupOverflowErrors()
 
 	if r.currentErrors.IsEmpty() {
-		r.logger.Infof("Try to start/restart Pipeline %v. \n", r.pipeline_name)
+		r.logger.Infof("Try to start/restart Pipeline %v. Backfil %v?\n", r.pipeline_name, r.rep_status.IsBackfill())
 	} else {
 		r.logger.Infof("Try to fix Pipeline %v. Current error(s)=%v \n", r.pipeline_name, r.currentErrors.String())
 		r.checkAndDisableProblematicFeatures()
@@ -1240,7 +1264,13 @@ func (r *PipelineUpdater) raiseCompressionWarningIfNeeded() {
 }
 
 func (r *PipelineUpdater) checkReplicationActiveness() (err error) {
-	spec, err := r.pipelineMgr.GetReplSpecSvc().ReplicationSpec(r.pipeline_name)
+	var pipelineName string = r.pipeline_name
+
+	if r.rep_status.IsBackfill() {
+		pipelineName = base.GetPreBackfillPrefix(r.pipeline_name)
+	}
+
+	spec, err := r.pipelineMgr.GetReplSpecSvc().ReplicationSpec(pipelineName)
 	if err != nil || spec == nil || !spec.Settings.Active {
 		err = ReplicationSpecNotActive
 	}

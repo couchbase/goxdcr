@@ -27,6 +27,7 @@ import (
 const (
 	PART_NAME_DELIMITER     = "_"
 	DCP_NOZZLE_NAME_PREFIX  = "dcp"
+	BACKFILL_PREFIX         = "backfill"
 	XMEM_NOZZLE_NAME_PREFIX = "xmem"
 	CAPI_NOZZLE_NAME_PREFIX = "capi"
 )
@@ -60,6 +61,7 @@ type XDCRFactory struct {
 	throughput_throttler_svc service_def.ThroughputThrottlerSvc
 	collectionsManifestSvc   service_def.CollectionsManifestSvc
 	backfillMgr              service_def.BackfillMgrIface
+	backfillReplSvc          service_def.BackfillReplSvc
 
 	default_logger_ctx       *log.LoggerContext
 	pipeline_failure_handler common.SupervisorFailureHandler
@@ -92,7 +94,8 @@ func NewXDCRFactory(repl_spec_svc service_def.ReplicationSpecSvc,
 	pipeline_failure_handler common.SupervisorFailureHandler,
 	utilsIn utilities.UtilsIface,
 	collectionsManifestSvc service_def.CollectionsManifestSvc,
-	backfillMgr service_def.BackfillMgrIface) *XDCRFactory {
+	backfillMgr service_def.BackfillMgrIface,
+	backfillReplSvc service_def.BackfillReplSvc) *XDCRFactory {
 	return &XDCRFactory{repl_spec_svc: repl_spec_svc,
 		remote_cluster_svc:                     remote_cluster_svc,
 		cluster_info_svc:                       cluster_info_svc,
@@ -115,6 +118,7 @@ func NewXDCRFactory(repl_spec_svc service_def.ReplicationSpecSvc,
 		cacheBasicToAdvRouter:                  make(map[*parts.Router]*parts.AdvRouter),
 		cacheTopicToUnregisterAsyncListenerCbs: make(map[string][]func()),
 		backfillMgr:                            backfillMgr,
+		backfillReplSvc:                        backfillReplSvc,
 	}
 }
 
@@ -123,8 +127,18 @@ func NewXDCRFactory(repl_spec_svc service_def.ReplicationSpecSvc,
  * PipelineManager is currently the only user of this method.
  */
 func (xdcrf *XDCRFactory) NewPipeline(topic string, progress_recorder common.PipelineProgressRecorder) (common.Pipeline, error) {
-	spec, err := xdcrf.repl_spec_svc.ReplicationSpec(topic)
-	if err != nil {
+	var spec *metadata.ReplicationSpecification
+	var err error
+
+	if base.PipelineHasBackfillPrefix(topic) {
+		var backfillSpec *metadata.BackfillReplicationSpec
+		backfillSpec, err = xdcrf.backfillReplSvc.ReplicationSpec(base.GetPreBackfillPrefix(topic))
+		spec = backfillSpec.ReplicationSpec
+	} else {
+		spec, err = xdcrf.repl_spec_svc.ReplicationSpec(topic)
+	}
+
+	if err != nil || spec == nil {
 		xdcrf.logger.Errorf("Failed to get replication specification for pipeline %v, err=%v\n", topic, err)
 		return nil, err
 	}
@@ -532,7 +546,11 @@ func (xdcrf *XDCRFactory) constructOrGetSourceNozzles(spec *metadata.Replication
 
 			// construct dcpNozzles
 			// partIds of the dcpNozzle nodes look like "dcpNozzle_$kvaddr_1"
-			id := xdcrf.partId(fmt.Sprintf("%v_total%v", DCP_NOZZLE_NAME_PREFIX, maxNozzlesPerNode), spec.SourceBucketName, kvaddr, i)
+			var partIdTopic string = spec.SourceBucketName
+			if base.PipelineHasBackfillPrefix(topic) {
+				partIdTopic = fmt.Sprintf("%v_%v", BACKFILL_PREFIX, partIdTopic)
+			}
+			id := xdcrf.partId(fmt.Sprintf("%v_total%v", DCP_NOZZLE_NAME_PREFIX, maxNozzlesPerNode), partIdTopic, kvaddr, i)
 			if !specExists {
 				xdcrf.cacheSourceNozzles[spec.Id] = make(map[string]common.Nozzle)
 				specExists = true
@@ -911,6 +929,10 @@ func (x *XDCRFactory) constructCommonSettingsForDcpNozzle(pipeline common.Pipeli
 		commonOutput[parts.UpdateSettingCb] = cb
 	} else {
 		commonOutput[parts.UpdateSettingCb] = nil
+	}
+
+	if backfillSpec, ok := settings[parts.BackfillSpec]; ok {
+		commonOutput[parts.BackfillSpec] = backfillSpec
 	}
 }
 

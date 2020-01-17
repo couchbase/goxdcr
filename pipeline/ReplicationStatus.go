@@ -73,6 +73,7 @@ func (errArray PipelineErrorArray) String() string {
 type ReplicationStatusIface interface {
 	SetPipeline(pipeline common.Pipeline)
 	Spec() *metadata.ReplicationSpecification
+	BackfillSpec() *metadata.BackfillReplicationSpec
 	RepId() string
 	AddError(err error)
 	AddErrorsFromMap(errMap base.ErrorMap)
@@ -105,6 +106,7 @@ type ReplicationStatusIface interface {
 	SetCustomSettings(customSettings map[string]interface{})
 	ClearCustomSetting(settingsKey string)
 	ClearTemporaryCustomSettings()
+	IsBackfill() bool
 }
 
 type ReplicationStatus struct {
@@ -192,7 +194,16 @@ func (rs *ReplicationStatus) ClearTemporaryCustomSettings() {
 }
 
 func (rs *ReplicationStatus) Spec() *metadata.ReplicationSpecification {
-	spec, err := rs.spec_getter(rs.specId)
+	var spec *metadata.ReplicationSpecification
+	var backfillSpec *metadata.BackfillReplicationSpec
+	var err error
+	if rs.backfillSpecGetter != nil {
+		backfillSpec, err = rs.backfillSpecGetter()
+		spec = backfillSpec.ReplicationSpec
+	} else {
+		spec, err = rs.spec_getter(rs.specId)
+	}
+
 	if err != nil {
 		rs.logger.Errorf("Invalid replication status %v, failed to retrieve spec. err=%v", rs.specId, err)
 
@@ -522,4 +533,22 @@ func (rs *ReplicationStatus) UpdateBackfillSpecGetter(getter BackfillReplication
 	defer rs.lock.Unlock()
 
 	rs.backfillSpecGetter = getter
+
+	// Get the backfillspec and create customsettings
+}
+
+func (rs *ReplicationStatus) IsBackfill() bool {
+	rs.lock.RLock()
+	defer rs.lock.RUnlock()
+	return rs.backfillSpecGetter != nil
+}
+
+func (rs *ReplicationStatus) BackfillSpec() *metadata.BackfillReplicationSpec {
+	rs.lock.RLock()
+	defer rs.lock.RUnlock()
+	if rs.backfillSpecGetter != nil {
+		backfillSpec, _ := rs.backfillSpecGetter()
+		return backfillSpec
+	}
+	return nil
 }

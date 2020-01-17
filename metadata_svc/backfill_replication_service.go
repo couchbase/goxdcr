@@ -165,6 +165,11 @@ func (b *BackfillReplicationService) initCacheFromMetaKV() (err error) {
 			b.logger.Errorf("Unable to construct spec %v from metaKV's data. err: %v", key, err)
 			continue
 		}
+		actualSpec, err := b.replSpecSvc.ReplicationSpec(replicationId)
+		if err != nil {
+			b.logger.Errorf("Unable to retrieve actual spec for id %v - %v", replicationId, err)
+		}
+		replSpec.ReplicationSpec = actualSpec
 		b.updateCacheInternal(replicationId, replSpec, false /*lock*/)
 	}
 

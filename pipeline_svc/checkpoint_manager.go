@@ -260,9 +260,16 @@ func (ckmgr *CheckpointManager) Attach(pipeline common.Pipeline) error {
 	return nil
 }
 
+func (ckmgr *CheckpointManager) getTopic() string {
+	topic := ckmgr.pipeline.Topic()
+	if base.PipelineHasBackfillPrefix(topic) {
+		topic = base.GetPreBackfillPrefix(topic)
+	}
+	return topic
+}
+
 func (ckmgr *CheckpointManager) populateRemoteBucketInfo(pipeline common.Pipeline) error {
-	topic := pipeline.Topic()
-	spec, err := ckmgr.rep_spec_svc.ReplicationSpec(topic)
+	spec, err := ckmgr.rep_spec_svc.ReplicationSpec(ckmgr.getTopic())
 	if err != nil {
 		return err
 	}
@@ -512,7 +519,7 @@ func (ckmgr *CheckpointManager) Stop() error {
 }
 
 func (ckmgr *CheckpointManager) CheckpointBeforeStop() {
-	spec, _ := ckmgr.rep_spec_svc.ReplicationSpec(ckmgr.pipeline.Topic())
+	spec, _ := ckmgr.rep_spec_svc.ReplicationSpec(ckmgr.getTopic())
 	if spec == nil {
 		// do not perform checkpoint if spec has been deleted
 		ckmgr.logger.Infof("Skipping checkpointing for pipeline %v before stopping since replication spec has been deleted", ckmgr.pipeline.Topic())

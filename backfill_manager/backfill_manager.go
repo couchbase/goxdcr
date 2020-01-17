@@ -459,7 +459,12 @@ func (b *BackfillMgr) backfillRequestPersistCallback(replId string, info *metada
 	// TODO - this needs burst control
 	backfillReplSpec, err := b.backfillReplSvc.ReplicationSpec(replId)
 	if err != nil {
+		actualSpec, err := b.replSpecSvc.ReplicationSpec(replId)
+		if err != nil {
+			panic(fmt.Sprintf("Unable to get actual replicationSpec %v", replId))
+		}
 		backfillReplSpec = metadata.NewBackfillReplicationSpec(replId, info)
+		backfillReplSpec.ReplicationSpec = actualSpec
 		err = b.backfillReplSvc.AddReplicationSpec(backfillReplSpec)
 		b.logger.Infof("NEIL DEBUG Add backfill replication spec with %v backfill tasks returned %v\n", len(backfillReplSpec.BackfillTasks.Requests), err)
 	} else {

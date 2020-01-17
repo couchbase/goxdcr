@@ -13,6 +13,7 @@ import (
 	"errors"
 	"fmt"
 	mc "github.com/couchbase/gomemcached"
+	"strings"
 	"sync"
 	"time"
 )
@@ -416,6 +417,7 @@ const (
 	VBTimestamps        = "VBTimestamps"
 	UpdateSettingCb     = "UpdateSettingCb"
 	PipelineTopic       = "PipelineTopic"
+	BackfillSpec        = "BackfillSpec"
 )
 
 // flag for requesting datatype in GetMeta request
@@ -1048,3 +1050,17 @@ const TransactionClientRecordKey = "_txn:client-record"
 const ActiveTransactionRecordPrefix = "_txn:atr-"
 const ActiveTransactionRecordSuffix = "^-#[a-f0-9]+$"
 const TransactionXattrKey = "txn"
+
+const backfillPrefix = "backfill_"
+
+func GetBackfillPipelineName(topic string) string {
+	return fmt.Sprintf("%v%v", backfillPrefix, topic)
+}
+
+func PipelineHasBackfillPrefix(topic string) bool {
+	return strings.HasPrefix(topic, backfillPrefix)
+}
+
+func GetPreBackfillPrefix(backfillTopic string) string {
+	return strings.TrimPrefix(backfillTopic, backfillPrefix)
+}
