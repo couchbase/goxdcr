@@ -61,13 +61,13 @@ type ClientIface interface {
 	Transmit(req *gomemcached.MCRequest) error
 	TransmitWithDeadline(req *gomemcached.MCRequest, deadline time.Time) error
 	TransmitResponse(res *gomemcached.MCResponse) error
+	UprGetFailoverLog(vb []uint16) (map[uint16]*FailoverLog, error)
 
 	// UprFeed Related
 	NewUprFeed() (*UprFeed, error)
 	NewUprFeedIface() (UprFeedIface, error)
 	NewUprFeedWithConfig(ackByClient bool) (*UprFeed, error)
 	NewUprFeedWithConfigIface(ackByClient bool) (UprFeedIface, error)
-	UprGetFailoverLog(vb []uint16) (map[uint16]*FailoverLog, error)
 }
 
 const bufsize = 1024
@@ -1139,6 +1139,43 @@ func (c *Client) StatsMapForSpecifiedStats(key string, statsMap map[string]strin
 	}
 
 	return nil
+}
+
+// UprGetFailoverLog for given list of vbuckets.
+func (mc *Client) UprGetFailoverLog(vb []uint16) (map[uint16]*FailoverLog, error) {
+
+	rq := &gomemcached.MCRequest{
+		Opcode: gomemcached.UPR_FAILOVERLOG,
+		Opaque: opaqueFailover,
+	}
+
+	var allFeaturesDisabled UprFeatures
+	if err := doUprOpen(mc, "FailoverLog", 0, allFeaturesDisabled); err != nil {
+		return nil, fmt.Errorf("UPR_OPEN Failed %s", err.Error())
+	}
+
+	failoverLogs := make(map[uint16]*FailoverLog)
+	for _, vBucket := range vb {
+		rq.VBucket = vBucket
+		if err := mc.Transmit(rq); err != nil {
+			return nil, err
+		}
+		res, err := mc.Receive()
+
+		if err != nil {
+			return nil, fmt.Errorf("failed to receive %s", err.Error())
+		} else if res.Opcode != gomemcached.UPR_FAILOVERLOG || res.Status != gomemcached.SUCCESS {
+			return nil, fmt.Errorf("unexpected #opcode %v", res.Opcode)
+		}
+
+		flog, err := parseFailoverLog(res.Body)
+		if err != nil {
+			return nil, fmt.Errorf("unable to parse failover logs for vb %d", vb)
+		}
+		failoverLogs[vBucket] = flog
+	}
+
+	return failoverLogs, nil
 }
 
 // Hijack exposes the underlying connection from this client.
