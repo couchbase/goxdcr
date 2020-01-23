@@ -251,7 +251,7 @@ func (kvVbMap BucketKVVbMap) ReplaceInternalWithExternalHosts(translationMap map
 	for internalHostAndPort, vbSlice := range kvVbMap {
 		var externalHostAndPort string
 		externalHostAndPort, internalExists := translationMap[internalHostAndPort]
-		if internalExists {
+		if internalExists && internalHostAndPort != externalHostAndPort {
 			// replace the internal key with external key and the same value
 			kvVbMap[externalHostAndPort] = vbSlice
 			keysToDelete = append(keysToDelete, internalHostAndPort)

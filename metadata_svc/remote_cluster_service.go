@@ -41,6 +41,36 @@ var InvalidConnectionStrError = errors.New("invalid connection string")
 var BootStrapNodeHasMovedError = errors.New("Bootstrap node in reference has been moved")
 var UUIDMismatchError = errors.New("UUID does not match")
 
+// Whether or not to use internal or external (alternate) addressing for communications
+type AddressType int
+
+const (
+	Uninitialized AddressType = iota
+	Internal      AddressType = iota
+	External      AddressType = iota
+)
+
+func (a AddressType) String() string {
+	switch a {
+	case Uninitialized:
+		return "Uninitialized"
+	case Internal:
+		return "Internal"
+	case External:
+		return "External"
+	default:
+		return "?? (AddressType)"
+	}
+}
+
+func (a *AddressType) Set(external bool) {
+	if external {
+		*a = External
+	} else {
+		*a = Internal
+	}
+}
+
 /**
  * A RemoteClusterAgent is responsible for handling all operations related to a specific RemoteClusterReference.
  * RemoteClusterService's job is to wrap around them and provide APIs to other components that require info
@@ -59,6 +89,7 @@ type RemoteClusterAgentIface interface {
 	// To be used for RemoteClusterService for any caller requesting a copy of the RC Reference
 	GetReferenceClone() *metadata.RemoteClusterReference
 	GetConnectionStringForCAPIRemoteCluster() string
+	UsesAlternateAddress() (bool, error)
 }
 
 type RemoteClusterAgent struct {
@@ -74,6 +105,12 @@ type RemoteClusterAgent struct {
 	// Flag to state that metakv deletes have occured. Any concurrent refresh() taking place
 	// when delete occures should NOT write to metakv after this is set
 	deletedFromMetakv bool
+	// For this remote cluster, use the following addressing scheme
+	addressPreference AddressType
+	/* refreshContext persisted information - only used by instances of refreshContext */
+	pendingAddressPreference AddressType
+	pendingAddressPrefCnt    int
+	configurationChanged     bool
 
 	// Wait group for making sure we exit synchronized
 	agentWaitGrp sync.WaitGroup
@@ -94,14 +131,25 @@ type RemoteClusterAgent struct {
 	/* Staging changes area */
 	pendingRef      metadata.RemoteClusterReference
 	pendingRefNodes base.StringPairList
+
 	/* Post processing */
 	oldRef *metadata.RemoteClusterReference
+
+	// For certain unit tests, bypass metakv
+	unitTestBypassMetaKV bool
 }
 
 func (agent *RemoteClusterAgent) GetReferenceClone() *metadata.RemoteClusterReference {
 	agent.refMtx.RLock()
 	defer agent.refMtx.RUnlock()
 	return agent.reference.Clone()
+}
+
+func (agent *RemoteClusterAgent) ConfigurationHasChanged() bool {
+	agent.refMtx.RLock()
+	defer agent.refMtx.RUnlock()
+
+	return agent.configurationChanged
 }
 
 func (agent *RemoteClusterAgent) GetConnectionStringForCAPIRemoteCluster() (string, error) {
@@ -118,6 +166,15 @@ func (agent *RemoteClusterAgent) GetConnectionStringForCAPIRemoteCluster() (stri
 	toBeSortedList := agent.refNodesList.GetListOfFirstString()
 	sort.Strings(toBeSortedList)
 	return toBeSortedList[0], nil
+}
+
+func (agent *RemoteClusterAgent) clearAddressModeAccounting() {
+	agent.refMtx.Lock()
+	defer agent.refMtx.Unlock()
+
+	agent.pendingAddressPreference = Uninitialized
+	agent.pendingAddressPrefCnt = 0
+	agent.configurationChanged = false
 }
 
 func (agent *RemoteClusterAgent) initializeNewRefreshContext() (*refreshContext, error) {
@@ -149,6 +206,12 @@ type refreshContext struct {
 
 	// agent shortcut
 	agent *RemoteClusterAgent
+
+	// addressType refresh
+	origAddressPref           AddressType
+	origAddressPrefCnt        int
+	addressPrefUpdate         bool
+	cachedNodeListWithMinInfo []interface{}
 }
 
 // Initializes the context and also populates the credentials for connecting to nodes
@@ -164,6 +227,9 @@ func (rctx *refreshContext) initialize() error {
 	rctx.origRefNodesList = base.DeepCopyStringPairList(rctx.agent.refNodesList)
 	// for editing
 	rctx.cachedRefNodesList = base.DeepCopyStringPairList(rctx.agent.refNodesList)
+	// addressType
+	rctx.origAddressPref = rctx.agent.addressPreference
+	rctx.origAddressPrefCnt = rctx.agent.pendingAddressPrefCnt
 	rctx.agent.refMtx.RUnlock()
 
 	if err != nil {
@@ -218,7 +284,7 @@ func (rctx *refreshContext) checkAndUpdateAgentReference() error {
 	sort.Sort(rctx.cachedRefNodesList)
 	nodesListUpdated := !reflect.DeepEqual(rctx.origRefNodesList, rctx.cachedRefNodesList)
 
-	if !rctx.refOrig.IsSame(rctx.refCache) || nodesListUpdated {
+	if !rctx.refOrig.IsSame(rctx.refCache) || nodesListUpdated || rctx.addressPrefUpdate {
 		rctx.agent.refMtx.Lock()
 		defer rctx.agent.refMtx.Unlock()
 		// First see if anyone has changed the reference from underneath us
@@ -237,9 +303,12 @@ func (rctx *refreshContext) checkAndUpdateAgentReference() error {
 		// 3. when refOrig.IsEssentiallySame(refCache) is false,
 		//    i.e., when there have been changes to essential fields in refCache,
 		//    updateReferenceFromNoLock is called with metakv update and metadata change callback
-		if !rctx.refOrig.IsSame(rctx.refCache) {
+		// 4. When refresh context has shown that the address preference count needs to be updated
+		//    only if there is not another concurrent refresh context updating at the same time
+		//    and that it isn't waiting for a consumer to poll
+		if !rctx.refOrig.IsSame(rctx.refCache) || rctx.addressPrefUpdate {
 			isEssentiallySame := rctx.refOrig.IsEssentiallySame(rctx.refCache)
-			updateErr := rctx.agent.updateReferenceFromNoLock(rctx.refCache, !isEssentiallySame /*updateMetaKv*/, !isEssentiallySame /*shouldCallCb*/)
+			updateErr := rctx.agent.updateReferenceFromNoLock(rctx.refCache, !isEssentiallySame /*updateMetaKv*/, !isEssentiallySame /*shouldCallCb*/, rctx)
 			if updateErr != nil {
 				rctx.agent.logger.Warnf(updateErr.Error())
 				return updateErr
@@ -247,6 +316,7 @@ func (rctx *refreshContext) checkAndUpdateAgentReference() error {
 		} else {
 			rctx.agent.refNodesList = base.DeepCopyStringPairList(rctx.cachedRefNodesList)
 		}
+
 		rctx.agent.logger.Infof(populateRefreshSuccessMsg(rctx.refOrig.CloneAndRedact(), rctx.agent.reference.CloneAndRedact(), rctx.origRefNodesList, rctx.agent.refNodesList))
 	}
 
@@ -293,9 +363,10 @@ func (rctx *refreshContext) verifyNodeAndGetList(connStr string, updateSecurityS
 	if clusterUUID != refCacheUuid {
 		rctx.agent.logger.Warnf("Cluster UUID: %v and refCache UUID: %v", clusterUUID, refCacheUuid)
 		return nil, UUIDMismatchError
-	} else {
+	}
+	if updateSecuritySettings {
 		// update security settings only if the target node is still in the same target cluster
-		if updateSecuritySettings && rctx.refCache.IsEncryptionEnabled() {
+		if rctx.refCache.IsEncryptionEnabled() {
 			if rctx.refCache.SANInCertificate() != sanInCertificate {
 				rctx.agent.logger.Infof("Updating sanInCertificate in remote cluster reference %v to %v\n", rctx.refCache.Id(), sanInCertificate)
 				rctx.refCache.SetSANInCertificate(sanInCertificate)
@@ -306,13 +377,39 @@ func (rctx *refreshContext) verifyNodeAndGetList(connStr string, updateSecurityS
 				rctx.refCache.SetHttpAuthMech(httpAuthMech)
 			}
 		}
-		return nodeList, nil
+	}
+
+	return nodeList, err
+}
+
+func (rctx *refreshContext) checkUserIntent(nodeList []interface{}) {
+	isExternal, err := rctx.agent.checkIfHostnameIsAlternate(nodeList, rctx.hostName, rctx.refCache.IsFullEncryption())
+	if err != nil {
+		rctx.agent.logger.Warnf("Unable to figure out if hostname %v is alternate or not", rctx.hostName)
+		return
+	}
+	useExternal, err := rctx.getAddressPreference()
+	if err != nil {
+		rctx.agent.logger.Warnf("Unable to figure out if should use external")
+		return
+	}
+
+	if useExternal && !isExternal || !useExternal && isExternal {
+		// Change is expected
+		rctx.addressPrefUpdate = true
+		rctx.cachedNodeListWithMinInfo = nodeList
 	}
 }
 
 func (agent *RemoteClusterAgent) Refresh() error {
 	rctx, err := agent.initializeNewRefreshContext()
 	if err != nil {
+		return err
+	}
+
+	useExternal, err := rctx.getAddressPreference()
+	if err != nil {
+		// Do not allow refresh to continue - wait until next refresh cycle to try again
 		return err
 	}
 
@@ -333,7 +430,9 @@ func (agent *RemoteClusterAgent) Refresh() error {
 			// rctx.hostname is in the cluster and is available - make it the activeHost
 			rctx.checkAndUpdateActiveHost()
 
-			nodeAddressesList, err = agent.utils.GetRemoteNodeAddressesListFromNodeList(nodeList, rctx.connStr, rctx.refCache.IsEncryptionEnabled(), agent.logger)
+			rctx.checkUserIntent(nodeList)
+
+			nodeAddressesList, err = agent.utils.GetRemoteNodeAddressesListFromNodeList(nodeList, rctx.connStr, rctx.refCache.IsEncryptionEnabled(), agent.logger, useExternal)
 			if err == nil {
 				// This node is an acceptable replacement for active node - and sets atLeastOneValid
 				rctx.finalizeRefCacheListFrom(nodeAddressesList)
@@ -370,6 +469,45 @@ func (agent *RemoteClusterAgent) Refresh() error {
 	err = rctx.checkAndUpdateAgentReference()
 
 	return err
+}
+
+func (rctx *refreshContext) getAddressPreference() (useExternal bool, err error) {
+	addressPref := rctx.origAddressPref
+	useExternal = addressPref == External
+	if addressPref == Uninitialized {
+		// Uninitialized means that when the agent started up, it had trouble determining user's intent
+		// is external or interna. Take this refresh cycle to figure that out again
+		useExternal, err = rctx.initAlternateAddress()
+	}
+	return
+}
+
+// Agent does not have its preference set yet
+func (rctx *refreshContext) initAlternateAddress() (bool, error) {
+	var useExternal bool
+
+	username, password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey, err := rctx.refCache.MyCredentials()
+	if err != nil {
+		return useExternal, err
+	}
+	connStr, err := rctx.refCache.MyConnectionStr()
+	if err != nil {
+		return useExternal, err
+	}
+	nodeList, err := rctx.agent.utils.GetNodeListWithMinInfo(connStr, username, password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey, rctx.agent.logger)
+	if err != nil {
+		return useExternal, err
+	}
+
+	useExternal, err = rctx.agent.checkIfHostnameIsAlternate(nodeList, rctx.refCache.HostName(), rctx.refCache.IsHttps())
+	if err != nil {
+		return useExternal, err
+	}
+
+	rctx.agent.setAddressPreference(useExternal, true /*lock*/, true /*setOnlyIfUninit*/)
+
+	rctx.origAddressPref = rctx.agent.getAddressPreference()
+	return rctx.origAddressPref == External, nil
 }
 
 func (rctx *refreshContext) replaceHostNameUsingList(nodeAddressesList base.StringPairList) {
@@ -482,7 +620,10 @@ func (agent *RemoteClusterAgent) DeleteReference(delFromMetaKv bool) (*metadata.
  * information for caching purposes
  * Write lock needs to be held
  */
-func (agent *RemoteClusterAgent) syncInternalsFromStagedReferenceNoLock() error {
+func (agent *RemoteClusterAgent) syncInternalsFromStagedReferenceNoLock(rctx *refreshContext) error {
+	skipPrefUpdate := agent.shouldSkipAddressPrefNoLock(rctx)
+	nodeList, shouldUseCachedList := agent.shouldUseCachedNodeListFromRctxNoLock(rctx)
+
 	username, password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey, err := agent.pendingRef.MyCredentials()
 	if err != nil {
 		return err
@@ -492,28 +633,192 @@ func (agent *RemoteClusterAgent) syncInternalsFromStagedReferenceNoLock() error 
 		return err
 	}
 
-	// use GetNodeListWithMinInfo API to ensure that it is supported by target cluster, which could be an elastic search cluster
-	nodeList, err := agent.utils.GetNodeListWithMinInfo(connStr, username, password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey, agent.logger)
-	if err == nil {
-		agent.logger.Debugf("connStr=%v, nodeList=%v\n", connStr, nodeList)
-
-		nodeAddressesList, err := agent.utils.GetRemoteNodeAddressesListFromNodeList(nodeList, connStr, agent.pendingRef.IsEncryptionEnabled(), agent.logger)
+	// If refresh context has already done the heavy lifting work of reaching the remote node to get the list
+	// Then just use it here to avoid duplicate work
+	if !shouldUseCachedList {
+		// use GetNodeListWithMinInfo API to ensure that it is supported by target cluster, which could be an elastic search cluster
+		nodeList, err = agent.utils.GetNodeListWithMinInfo(connStr, username, password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey, agent.logger)
 		if err != nil {
-			agent.logger.Errorf("Error getting nodes from target cluster. skipping alternative node computation. ref=%v\n", agent.pendingRef.HostName())
+			agent.logger.Infof("Remote cluster reference %v has a bad connectivity, didn't populate alternative connection strings. err=%v", agent.pendingRef.Id(), err)
+			err = InvalidConnectionStrError
+			agent.logger.Infof("nodes_connStrs from old cache =%v", agent.refNodesList)
 			agent.pendingRefNodes = base.DeepCopyStringPairList(agent.refNodesList)
-		} else {
-			agent.pendingRefNodes = base.DeepCopyStringPairList(nodeAddressesList)
+			return err
 		}
-		agent.logger.Debugf("agent.pendingRefNodes after internal sync =%v", agent.pendingRefNodes)
-
-	} else {
-		agent.logger.Infof("Remote cluster reference %v has a bad connectivity, didn't populate alternative connection strings. err=%v", agent.pendingRef.Id(), err)
-		err = InvalidConnectionStrError
-		agent.logger.Infof("nodes_connStrs from old cache =%v", agent.refNodesList)
-		agent.pendingRefNodes = base.DeepCopyStringPairList(agent.refNodesList)
 	}
 
-	return err
+	useExternal := agent.addressPreference == External
+	if agent.addressPreference == Uninitialized {
+		err = agent.initAddressPreference(nodeList, agent.pendingRef.HostName(), agent.pendingRef.IsHttps())
+		if err != nil {
+			return err
+		}
+		useExternal = agent.addressPreference == External
+	} else if !skipPrefUpdate {
+		isExternal, err := agent.checkIfHostnameIsAlternate(nodeList, agent.pendingRef.HostName(), agent.pendingRef.IsHttps())
+		if err != nil {
+			return err
+		}
+		if !isExternal && useExternal || isExternal && !useExternal {
+			// User intent has changed
+			if agent.pendingAddressPreference == Uninitialized {
+				// first time
+				if isExternal {
+					agent.pendingAddressPreference = External
+				} else {
+					agent.pendingAddressPreference = Internal
+				}
+			}
+			agent.pendingAddressPrefCnt++
+		} else {
+			if agent.pendingAddressPrefCnt > 0 {
+				// Either mixed-mode or flip flop
+				agent.pendingAddressPreference = Uninitialized
+				agent.pendingAddressPrefCnt = 0
+			}
+		}
+	}
+
+	nodeAddressesList, err := agent.utils.GetRemoteNodeAddressesListFromNodeList(nodeList, connStr, agent.pendingRef.IsEncryptionEnabled(), agent.logger, useExternal)
+	if err != nil {
+		agent.logger.Errorf("Error getting nodes from target cluster. skipping alternative node computation. ref=%v\n", agent.pendingRef.HostName())
+		agent.pendingRefNodes = base.DeepCopyStringPairList(agent.refNodesList)
+	} else {
+		agent.pendingRefNodes = base.DeepCopyStringPairList(nodeAddressesList)
+	}
+
+	return nil
+}
+
+// This function checks the user's "intent" to use internal vs external address
+// This means that the node user specified when declaring remote cluster
+// should be the node of intent for checking. In situations where users misconfigure
+// the cluster (i.e. missing setting up alt address/port for certain nodes in the cluster)
+// as long as the specified node still belongs in the cluster, we can use that node's alternate
+// address setup as the source for the user's intent
+func (agent *RemoteClusterAgent) initAddressPreference(nodeList []interface{}, hostname string, isHttps bool) error {
+	isExternal, err := agent.checkIfHostnameIsAlternate(nodeList, hostname, isHttps)
+	if err != nil {
+		return err
+	}
+
+	agent.setAddressPreference(isExternal, false /*lock*/, true /*setOnlyIfUninit*/)
+	return nil
+}
+
+func (agent *RemoteClusterAgent) getAddressPreference() AddressType {
+	agent.refMtx.RLock()
+	defer agent.refMtx.RUnlock()
+
+	return agent.addressPreference
+}
+
+func (agent *RemoteClusterAgent) setAddressPreference(external bool, lock bool, setOnlyIfUninitialized bool) {
+	if lock {
+		agent.refMtx.Lock()
+		defer agent.refMtx.Unlock()
+	}
+
+	if setOnlyIfUninitialized {
+		if agent.addressPreference == Uninitialized {
+			agent.addressPreference.Set(external)
+		} else {
+			return
+		}
+	} else {
+		if agent.addressPreference != Uninitialized {
+			agentIsExternal := agent.addressPreference == External
+			if agentIsExternal && !external || !agentIsExternal && external {
+				agent.configurationChanged = true
+			}
+		}
+		agent.addressPreference.Set(external)
+	}
+}
+
+func (agent *RemoteClusterAgent) checkIfHostnameIsAlternate(nodeList []interface{}, hostname string, isHttps bool) (bool, error) {
+	var isExternal bool
+	pendingHostname := base.GetHostName(hostname)
+	pendingPort, portErr := base.GetPortNumber(hostname)
+
+	for _, node := range nodeList {
+		nodeInfoMap, ok := node.(map[string]interface{})
+		if !ok {
+			return isExternal, fmt.Errorf("node info is not of map type. type of node info=%v", reflect.TypeOf(node))
+		}
+
+		extHost, extPort, extErr := agent.utils.GetExternalMgtHostAndPort(nodeInfoMap, isHttps)
+
+		var matched bool
+
+		switch extErr {
+		case base.ErrorResourceDoesNotExist:
+			// No alternate address section for this node
+			continue
+
+		case base.ErrorNoPortNumber:
+			// Alternate address did not provide port number
+			switch portErr {
+			case base.ErrorNoPortNumber:
+				// User did not enter port number
+				// This means that the external hostname sitting on default port is
+				// the user's intention, since user did not specify a non-default port
+				if extHost == pendingHostname {
+					matched = true
+				}
+			case nil:
+				// Since alternate address did not provide mgmt port number, and user provided
+				// port number, it means that the user did not intend to use external address
+				// Special case - if user specified 8091, then it is the same as didn't specifying
+				if pendingPort == base.DefaultAdminPort {
+					matched = true
+				}
+			default:
+				return isExternal, fmt.Errorf("Unable to parse pendingRef's hostname port number")
+			}
+
+		case nil:
+			// Alternate address provided port number
+			// Now, check user entry:
+			switch portErr {
+			case base.ErrorNoPortNumber:
+				// User did not enter port number
+				// User's intention is to use the original default internal port
+				if extHost == pendingHostname && extPort == int(base.DefaultAdminPort) {
+					// Only allow this if the alternate port is also the default admin port
+					matched = true
+				}
+			case nil:
+				// User entered port number
+				// User's intention to use external iff both match
+				if extHost == pendingHostname && extPort == int(pendingPort) {
+					matched = true
+				}
+			default:
+				return isExternal, fmt.Errorf("Unable to parse pendingRef's hostname port number")
+			}
+
+		default:
+			return isExternal, fmt.Errorf("Unable to parse GetExternalMgtHostAndPort")
+		}
+
+		if matched {
+			isExternal = true
+			break
+		}
+	}
+
+	return isExternal, nil
+}
+
+func (agent *RemoteClusterAgent) UsesAlternateAddress() (bool, error) {
+	agentPref := agent.getAddressPreference()
+	if agentPref == Uninitialized {
+		return false, base.ErrorRemoteClusterUninit
+	} else {
+		usesAlt := agentPref == External
+		return usesAlt, nil
+	}
 }
 
 func (agent *RemoteClusterAgent) runPeriodicRefresh() {
@@ -559,6 +864,12 @@ func (agent *RemoteClusterAgent) commitStagedChangesNoLock() {
 		agent.reference.LoadFrom(&agent.pendingRef)
 		agent.refNodesList = base.DeepCopyStringPairList(agent.pendingRefNodes)
 	}
+
+	// Only set once to prevent constant locking
+	if agent.pendingAddressPrefCnt == base.RemoteClusterAlternateAddrChangeCnt {
+		agent.setAddressPreference(agent.pendingAddressPreference == External, false /*lock*/, false /*setOnlyIfUninit*/)
+		agent.configurationChanged = true
+	}
 }
 
 func (agent *RemoteClusterAgent) IsSame(ref *metadata.RemoteClusterReference) bool {
@@ -579,6 +890,10 @@ func (agent *RemoteClusterAgent) clearReferenceNoLock() {
 func (agent *RemoteClusterAgent) updateRevisionFromMetaKVNoLock() error {
 	if len(agent.pendingRef.Id()) == 0 {
 		return base.ErrorResourceDoesNotExist
+	}
+
+	if agent.unitTestBypassMetaKV {
+		return nil
 	}
 
 	var value []byte
@@ -615,29 +930,56 @@ func (agent *RemoteClusterAgent) updateRevisionFromMetaKVNoLock() error {
 	return nil
 }
 
+func (agent *RemoteClusterAgent) shouldSkipAddressPrefNoLock(rctx *refreshContext) bool {
+	if agent.configurationChanged || (rctx != nil && (rctx.origAddressPrefCnt != agent.pendingAddressPrefCnt ||
+		rctx.origAddressPref != agent.addressPreference)) {
+		return true
+	}
+	return false
+}
+
+func (agent *RemoteClusterAgent) shouldUseCachedNodeListFromRctxNoLock(rctx *refreshContext) ([]interface{}, bool) {
+	if agent.shouldSkipAddressPrefNoLock(rctx) {
+		return nil, false
+	}
+	if rctx != nil && rctx.addressPrefUpdate && len(rctx.cachedNodeListWithMinInfo) > 0 {
+		return rctx.cachedNodeListWithMinInfo, true
+	}
+	return nil, false
+}
+
 /**
  * The agent will update its information from the incoming newRef.
  * If updateMetaKv is set to true, it'll write the information to metakv.
  * Returns an error code if any non-recoverable metakv operation failed.
  */
-func (agent *RemoteClusterAgent) updateReferenceFromNoLock(newRef *metadata.RemoteClusterReference, updateMetaKv bool, shouldCallCb bool) error {
+func (agent *RemoteClusterAgent) updateReferenceFromNoLock(newRef *metadata.RemoteClusterReference, updateMetaKv, shouldCallCb bool, rctx *refreshContext) error {
 	var err error
 	if newRef == nil {
 		return base.ErrorResourceDoesNotExist
 	}
-	// No need to update if they are the same
-	if agent.reference.IsSame(newRef) {
+
+	//	No need to update if they are the same, or we're not transitioning
+	if agent.reference.IsSame(newRef) && agent.pendingAddressPrefCnt == 0 {
 		return nil
 	}
 
 	agent.stageNewReferenceNoLock(newRef, updateMetaKv)
 
 	// Populate staged runtime information from the staged metadata information.
-	syncErr := agent.syncInternalsFromStagedReferenceNoLock()
+	syncErr := agent.syncInternalsFromStagedReferenceNoLock(rctx)
 	if syncErr != nil {
-		// Because as part of validateRemoteCluster, we already checked the remoteCluster status
-		// At this point, this error should be innocuous to pass through.
-		agent.logger.Warnf(fmt.Sprintf("Error: Issues populating runtime info: %v", syncErr.Error()))
+		if agent.addressPreference != Uninitialized {
+			// Because as part of validateRemoteCluster, we already checked the remoteCluster status
+			// At this point, this error should be innocuous to pass through.
+			agent.logger.Warnf(fmt.Sprintf("Error: Issues populating runtime info: %v", syncErr.Error()))
+		} else {
+			// Cannot figure out user intent - let refresh take care of error handling
+			agent.logger.Errorf(fmt.Sprintf("Error: Issues populating runtime info: %v and unable to set preference", syncErr.Error()))
+		}
+	}
+	if err != nil {
+		return err
 	}
 
 	/**
@@ -666,7 +1008,7 @@ func (agent *RemoteClusterAgent) updateReferenceFromNoLock(newRef *metadata.Remo
 func (agent *RemoteClusterAgent) UpdateReferenceFrom(newRef *metadata.RemoteClusterReference, updateMetaKv bool) error {
 	agent.refMtx.Lock()
 	defer agent.refMtx.Unlock()
-	return agent.updateReferenceFromNoLock(newRef, updateMetaKv, true)
+	return agent.updateReferenceFromNoLock(newRef, updateMetaKv, true /*shouldCallCallback*/, nil /*refreshContext*/)
 }
 
 func (agent *RemoteClusterAgent) callMetadataChangeCbNoLock() {
@@ -1160,6 +1502,55 @@ func (service *RemoteClusterService) validateRemoteCluster(ref *metadata.RemoteC
 	return nil
 }
 
+func (service *RemoteClusterService) getUserIntentFromReference(ref *metadata.RemoteClusterReference, fullEncryption bool) (useExternal bool, err error) {
+	var defaultPoolInfo map[string]interface{}
+
+	if fullEncryption {
+		defaultPoolInfo, err = service.utils.GetDefaultPoolInfoUsingHttps(ref.HostName(), ref.UserName(), ref.Password(), ref.Certificate(), ref.ClientCertificate(), ref.ClientKey(), service.logger)
+	} else {
+		defaultPoolInfo, err = service.utils.GetDefaultPoolInfoUsingScramSha(ref.HostName(), ref.UserName(), ref.Password(), service.logger)
+	}
+	if err != nil {
+		err = wrapAsInvalidRemoteClusterError(err.Error())
+		return
+	}
+
+	nodeList, err := service.utils.GetNodeListFromInfoMap(defaultPoolInfo, service.logger)
+	if err != nil {
+		err = wrapAsInvalidRemoteClusterError(err.Error())
+		return
+	}
+
+	checkHostName := base.GetHostName(ref.HostName())
+	checkPortNo, checkPortErr := base.GetPortNumber(ref.HostName())
+
+	for _, node := range nodeList {
+		nodeInfoMap, ok := node.(map[string]interface{})
+		if !ok {
+			err = fmt.Errorf("node info is not of map type")
+			return
+		}
+		extHost, extPort, extErr := service.utils.GetExternalMgtHostAndPort(nodeInfoMap, ref.IsHttps())
+		if fullEncryption {
+			// Calling this from full-encryption means user entered a SSL port already
+			// Need to match both to agree on intent
+			if extErr == nil && checkPortErr == nil && checkHostName == extHost && int(checkPortNo) == extPort {
+				useExternal = true
+				break
+			}
+		} else {
+			// Calling this from half-encryption means user already entered non-encrypted port
+			// Thus, as long as the user entered hostname matches an alternate hostname, then
+			// user's intent is to use alternate address
+			if (extErr == nil || extErr == base.ErrorNoPortNumber) && checkHostName == extHost {
+				useExternal = true
+				break
+			}
+		}
+	}
+	return
+}
+
 func (service *RemoteClusterService) setHostNamesAndSecuritySettings(ref *metadata.RemoteClusterReference) error {
 	if !ref.IsEncryptionEnabled() {
 		ref.SetActiveHostName(ref.HostName())
@@ -1172,12 +1563,17 @@ func (service *RemoteClusterService) setHostNamesAndSecuritySettings(ref *metada
 	var err error
 	var err1 error
 
+	useExternal, err := service.getUserIntentFromReference(ref, ref.IsFullEncryption())
+	if err != nil {
+		return err
+	}
+
 	if refHttpsHostName == "" {
 		if !ref.IsFullEncryption() {
 			// half encryption mode
 			// refHostName is always a http address
 			// we will need to retrieve https port from target and compute https address
-			refHttpsHostName, err = service.getHttpsRemoteHostAddr(refHostName)
+			refHttpsHostName, err = service.getHttpsRemoteHostAddr(refHostName, useExternal)
 			if err != nil {
 				return err
 			}
@@ -1196,7 +1592,7 @@ func (service *RemoteClusterService) setHostNamesAndSecuritySettings(ref *metada
 		}
 		// in full encryption mode, the error could have been caused by refHostName, and hence refHttpsHostName, containing a http address,
 		// try treating refHostName as a http address and compute the corresponding https address by retrieving tls port from target
-		refHttpsHostName, err1 = service.getHttpsRemoteHostAddr(refHostName)
+		refHttpsHostName, err1 = service.getHttpsRemoteHostAddr(refHostName, useExternal)
 		if err1 != nil {
 			// if the attempt to treat refHostName as a http address also fails, return all errors and let user decide what to do
 			errMsg := fmt.Sprintf("Cannot use HostName, %v, as a https address or a http address. Error when using it as a https address=%v\n. Error when using it as a http address=%v\n", ref.HostName(), err, err1)
@@ -1220,7 +1616,7 @@ func (service *RemoteClusterService) setHostNamesAndSecuritySettings(ref *metada
 		return wrapAsInvalidRemoteClusterError(err.Error())
 	}
 
-	nodeAddressesList, err := service.utils.GetRemoteNodeAddressesListFromNodeList(nodeList, refHostName, true /*needHttps*/, service.logger)
+	nodeAddressesList, err := service.utils.GetRemoteNodeAddressesListFromNodeList(nodeList, refHostName, true /*needHttps*/, service.logger, useExternal)
 	if err != nil {
 		err = fmt.Errorf("Can't get node addresses from node info for cluster %v for cluster reference %v, err=%v", refHostName, ref.Id(), err)
 		return wrapAsInvalidRemoteClusterError(err.Error())
@@ -1254,8 +1650,8 @@ func (service *RemoteClusterService) setHostNamesAndSecuritySettings(ref *metada
 	return nil
 }
 
-func (service *RemoteClusterService) getHttpsRemoteHostAddr(hostName string) (string, error) {
-	refHttpsHostName, err := service.utils.HttpsRemoteHostAddr(hostName, service.logger)
+func (service *RemoteClusterService) getHttpsRemoteHostAddr(hostName string, useExternal bool) (string, error) {
+	refHttpsHostName, err := service.utils.HttpsRemoteHostAddr(hostName, service.logger, useExternal)
 	if err != nil {
 		if err.Error() == base.ErrorUnauthorized.Error() {
 			return "", wrapAsInvalidRemoteClusterError(fmt.Sprintf("Could not get ssl port for %v. Remote cluster could be an Elasticsearch cluster that does not support ssl encryption. Please double check remote cluster configuration or turn off ssl encryption.", hostName))
@@ -1600,6 +1996,34 @@ func (service *RemoteClusterService) checkAndUpdateAgentMapsNoLock(oldRef *metad
 		retVal = true
 	}
 	return retVal
+}
+
+func (service *RemoteClusterService) ShouldUseAlternateAddress(ref *metadata.RemoteClusterReference) (bool, error) {
+	if ref == nil {
+		return false, base.ErrorInvalidInput
+	}
+
+	service.agentMutex.RLock()
+	defer service.agentMutex.RUnlock()
+	agent := service.agentMap[ref.Id()]
+	if agent == nil {
+		return false, errors.New(fmt.Sprintf("Cannot find local reference given the Id: %v", ref.Id()))
+	}
+
+	return agent.UsesAlternateAddress()
+}
+
+func (service *RemoteClusterService) GetRefListForRestartAndClearState() (list []*metadata.RemoteClusterReference, err error) {
+	service.agentMutex.RLock()
+	defer service.agentMutex.RUnlock()
+
+	for _, agent := range service.agentMap {
+		if agent.ConfigurationHasChanged() {
+			list = append(list, agent.GetReferenceClone())
+			agent.clearAddressModeAccounting()
+		}
+	}
+	return
 }
 
 /**

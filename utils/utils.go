@@ -849,12 +849,14 @@ func (u *Utilities) GetServerVBucketsMap(connStr, bucketName string, bucketInfo 
 	return serverVBMap, nil
 }
 
-func (u *Utilities) GetRemoteServerVBucketsMap(connStr, bucketName string, bucketInfo map[string]interface{}) (kvVbMap map[string][]uint16, err error) {
+func (u *Utilities) GetRemoteServerVBucketsMap(connStr, bucketName string, bucketInfo map[string]interface{}, useExternal bool) (kvVbMap map[string][]uint16, err error) {
 	kvVbMap, err = u.GetServerVBucketsMap(connStr, bucketName, bucketInfo)
 	if err != nil {
 		return
 	}
-	u.TranslateKvVbMap(kvVbMap, bucketInfo)
+	if useExternal {
+		u.TranslateKvVbMap(kvVbMap, bucketInfo)
+	}
 	return
 }
 
@@ -909,9 +911,9 @@ func (u *Utilities) GetEvictionPolicyFromBucketInfo(bucketName string, bucketInf
 /**
  * The second section is couchbase REST related utility functions
  */
-// This method is used to get the SSL port for target nodes - will use alternate fields if possible
+// This method is used to get the SSL port for target nodes - will use alternate fields if requested
 func (u *Utilities) GetMemcachedSSLPortMap(connStr, username, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool,
-	clientCertificate []byte, clientKey []byte, bucket string, logger *log.CommonLogger) (base.SSLPortMap, error) {
+	clientCertificate []byte, clientKey []byte, bucket string, logger *log.CommonLogger, useExternal bool) (base.SSLPortMap, error) {
 	ret := make(base.SSLPortMap)
 
 	logger.Infof("GetMemcachedSSLPort, connStr=%v\n", connStr)
@@ -979,9 +981,12 @@ func (u *Utilities) GetMemcachedSSLPortMap(connStr, username, password string, a
 		}
 		portNumberToUse = uint16(kvSSLPortFloat)
 
-		// Since this is a call intended for targets, get the external info
-		externalHostAddr, externalKVPort, externalKVPortErr, externalSSLPort, externalSSLPortErr := u.GetExternalAddressAndKvPortsFromNodeInfo(nodeExtMap)
-		if len(externalHostAddr) > 0 {
+		// Since this is a call intended for targets, get the external info if requested
+		if useExternal {
+			externalHostAddr, externalKVPort, externalKVPortErr, externalSSLPort, externalSSLPortErr := u.GetExternalAddressAndKvPortsFromNodeInfo(nodeExtMap)
+			if len(externalHostAddr) == 0 {
+				return nil, base.ErrorTargetNoAltHostName
+			}
 			if externalKVPortErr == nil {
 				// External address and port both exist
 				hostAddr = base.GetHostAddr(externalHostAddr, uint16(externalKVPort))
@@ -989,9 +994,9 @@ func (u *Utilities) GetMemcachedSSLPortMap(connStr, username, password string, a
 				// External address exists, but port does not. Use internal host's port number
 				hostAddr = base.GetHostAddr(externalHostAddr, uint16(kvPortFloat))
 			}
-		}
-		if externalSSLPortErr == nil {
-			portNumberToUse = uint16(externalSSLPort)
+			if externalSSLPortErr == nil {
+				portNumberToUse = uint16(externalSSLPort)
+			}
 		}
 
 		ret[hostAddr] = portNumberToUse
@@ -1008,51 +1013,57 @@ func (u *Utilities) BucketInfoParseError(bucketInfo map[string]interface{}, logg
 	return fmt.Errorf(errMsg)
 }
 
-func (u *Utilities) HttpsRemoteHostAddr(hostAddr string, logger *log.CommonLogger) (string, error) {
-	// Extract hostname to be combined with SSL port
-	hostName := base.GetHostName(hostAddr)
-	// Extract SSL port, prioritizing externalAddress SSL port if it is there
-	sslPort, err := u.GetRemoteSSLPort(hostAddr, logger)
-	if err != nil {
-		return "", err
+// The input is a non-https address, potentially with or without a port
+func (u *Utilities) HttpsRemoteHostAddr(hostAddr string, logger *log.CommonLogger, useExternal bool) (string, error) {
+	internalSSLPort, internalErr, externalSSLPort, externalErr := u.GetRemoteSSLPorts(hostAddr, logger)
+	if internalErr != nil {
+		return "", internalErr
 	}
-	return base.GetHostAddr(hostName, sslPort), nil
+
+	if useExternal && externalErr == nil {
+		return base.GetHostAddr(hostAddr, externalSSLPort), nil
+	} else {
+		return base.GetHostAddr(hostAddr, internalSSLPort), nil
+	}
 }
 
-func (u *Utilities) GetRemoteSSLPort(hostAddr string, logger *log.CommonLogger) (uint16, error) {
-	var portNumber uint16
+func (u *Utilities) GetRemoteSSLPorts(hostAddr string, logger *log.CommonLogger) (internalSSLPort uint16, internalSSLErr error, externalSSLPort uint16, externalSSLErr error) {
+	externalSSLErr = base.ErrorNoPortNumber
+
 	portInfo := make(map[string]interface{})
 	err, statusCode := u.QueryRestApiWithAuth(hostAddr, base.SSLPortsPath, false, "", "", base.HttpAuthMechPlain, nil, false, nil, nil, base.MethodGet, "", nil, 0, &portInfo, nil, false, logger)
 	if err == nil && statusCode == http.StatusUnauthorized {
 		// SSLPorts request normally do not require any user credentials
 		// the only place unauthorized error could be returned is when target is elasticsearch cluster
 		// treat this case differently so that a more specific error message can be returned to user
-		return 0, base.ErrorUnauthorized
+		internalSSLErr = base.ErrorUnauthorized
+		return
 	}
 	if err != nil || statusCode != http.StatusOK {
-		return 0, fmt.Errorf("Failed on calling %v, err=%v, statusCode=%v", base.SSLPortsPath, err, statusCode)
+		internalSSLErr = fmt.Errorf("Failed on calling %v on host %v, err=%v, statusCode=%v", base.SSLPortsPath, hostAddr, err, statusCode)
+		return
 	}
 
-	// If the external exists, use that, otherwise use the internal SSL port
-	externalSSLPort, externalErr := u.getExternalSSLMgtPort(portInfo)
-	if externalErr == nil {
-		portNumber = (uint16)(externalSSLPort)
-	} else {
-		sslPort, ok := portInfo[base.SSLPortKey]
-		if !ok {
-			errMsg := "Failed to parse port info. ssl port is missing."
-			logger.Errorf("%v. portInfo=%v", errMsg, portInfo)
-			return 0, fmt.Errorf(errMsg)
-		}
-
-		sslPortFloat, ok := sslPort.(float64)
-		if !ok {
-			return 0, fmt.Errorf("ssl port is of wrong type. Expected type: float64; Actual type: %s", reflect.TypeOf(sslPort))
-		}
-		portNumber = uint16(sslPortFloat)
+	sslPort, ok := portInfo[base.SSLPortKey]
+	if !ok {
+		errMsg := "Failed to parse port info. ssl port is missing."
+		logger.Errorf("%v. portInfo=%v", errMsg, portInfo)
+		internalSSLErr = fmt.Errorf(errMsg)
+		return
 	}
 
-	return portNumber, nil
+	sslPortFloat, ok := sslPort.(float64)
+	if !ok {
+		internalSSLErr = fmt.Errorf("ssl port is of wrong type. Expected type: float64; Actual type: %s", reflect.TypeOf(sslPort))
+		return
+	}
+	internalSSLPort = uint16(sslPortFloat)
+
+	portNumber, externalSSLErr := u.getExternalSSLMgtPort(portInfo)
+	if externalSSLErr == nil {
+		externalSSLPort = (uint16)(portNumber)
+	}
+	return
 }
 
 func (u *Utilities) GetClusterInfoWStatusCode(hostAddr, path, username, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCertificate, clientKey []byte, logger *log.CommonLogger) (map[string]interface{}, error, int) {
@@ -1238,10 +1249,10 @@ func (u *Utilities) BucketValidationInfo(hostAddr, bucketName, username, passwor
 }
 
 func (u *Utilities) RemoteBucketValidationInfo(hostAddr, bucketName, username, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCertificate, clientKey []byte,
-	logger *log.CommonLogger) (bucketInfo map[string]interface{}, bucketType string, bucketUUID string, bucketConflictResolutionType string,
+	logger *log.CommonLogger, useExternal bool) (bucketInfo map[string]interface{}, bucketType string, bucketUUID string, bucketConflictResolutionType string,
 	bucketEvictionPolicy string, bucketKVVBMap map[string][]uint16, err error) {
 
-	return u.bucketValidationInfoInternal(hostAddr, bucketName, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, logger, true /*external*/)
+	return u.bucketValidationInfoInternal(hostAddr, bucketName, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, logger, useExternal)
 }
 
 // get a number of fields in bucket for validation purpose
@@ -1451,7 +1462,7 @@ func (u *Utilities) GetClusterCompatibilityFromNodeList(nodeList []interface{}) 
 // Used externally only - returns a list of nodes for management access
 // if needHttps is true, returns both http addresses and https addresses
 // if needHttps is false, returns http addresses and empty https addresses
-func (u *Utilities) GetRemoteNodeAddressesListFromNodeList(nodeList []interface{}, connStr string, needHttps bool, logger *log.CommonLogger) (base.StringPairList, error) {
+func (u *Utilities) GetRemoteNodeAddressesListFromNodeList(nodeList []interface{}, connStr string, needHttps bool, logger *log.CommonLogger, useExternal bool) (base.StringPairList, error) {
 	nodeAddressesList := make(base.StringPairList, len(nodeList))
 	var hostAddr string
 	var hostHttpsAddr string
@@ -1466,7 +1477,7 @@ func (u *Utilities) GetRemoteNodeAddressesListFromNodeList(nodeList []interface{
 			return nil, errors.New(errMsg)
 		}
 
-		hostAddr, err = u.GetExternalHostAddrFromNodeInfo(connStr, nodeInfoMap, false /*isHttps*/, logger)
+		hostAddr, err = u.GetHostAddrFromNodeInfo(connStr, nodeInfoMap, false /*isHttps*/, logger, useExternal)
 		if err != nil {
 			errMsg := fmt.Sprintf("cannot get hostname from node info %v", nodeInfoMap)
 			logger.Error(errMsg)
@@ -1474,7 +1485,7 @@ func (u *Utilities) GetRemoteNodeAddressesListFromNodeList(nodeList []interface{
 		}
 
 		if needHttps {
-			hostHttpsAddr, err = u.GetExternalHostAddrFromNodeInfo(connStr, nodeInfoMap, true /*isHttps*/, logger)
+			hostHttpsAddr, err = u.GetHostAddrFromNodeInfo(connStr, nodeInfoMap, true /*isHttps*/, logger, useExternal)
 			if err != nil {
 				errMsg := fmt.Sprintf("cannot get https hostname from node info %v", nodeInfoMap)
 				logger.Error(errMsg)
@@ -1513,9 +1524,9 @@ func (u *Utilities) GetHttpsMgtPortFromNodeInfo(nodeInfo map[string]interface{})
 	return int(sslPortFloat), nil
 }
 
-func (u *Utilities) GetExternalHostAddrFromNodeInfo(connStr string, nodeInfo map[string]interface{}, isHttps bool, logger *log.CommonLogger) (string, error) {
+func (u *Utilities) GetHostAddrFromNodeInfo(connStr string, nodeInfo map[string]interface{}, isHttps bool, logger *log.CommonLogger, useExternal bool) (string, error) {
 	// Internal node information
-	hostAddr, err := u.GetHostAddrFromNodeInfo(connStr, nodeInfo, logger)
+	hostAddr, err := u.getAdminHostAddrFromNodeInfo(connStr, nodeInfo, logger)
 	if err != nil {
 		errMsg := fmt.Sprintf("cannot get hostname from node info %v", nodeInfo)
 		logger.Error(errMsg)
@@ -1531,18 +1542,20 @@ func (u *Utilities) GetExternalHostAddrFromNodeInfo(connStr string, nodeInfo map
 		hostAddr = base.GetHostAddr(hostName, uint16(sslPort))
 	}
 
-	// If external info exists, replace accordingly - hostAddr is currently pointing to internalNode's info
-	if externalAddr, externalMgtPort, externalErr := u.getExternalMgtHostAndPort(nodeInfo, isHttps); externalErr == nil {
-		hostAddr = base.GetHostAddr(externalAddr, (uint16)(externalMgtPort))
-	} else if externalErr == base.ErrorNoPortNumber {
-		// Extract original internal node management port from above
-		hostPort, portErr := base.GetPortNumber(hostAddr)
-		if portErr == nil {
-			// Combine externalHost:internalPort
-			hostAddr = base.GetHostAddr(externalAddr, (uint16)(hostPort))
-		} else {
-			// Original internal address did not have port number, so continue to just have externalAddr[:noPort]
-			hostAddr = externalAddr
+	if useExternal {
+		// If external info exists, replace accordingly - hostAddr is currently pointing to internalNode's info
+		if externalAddr, externalMgtPort, externalErr := u.GetExternalMgtHostAndPort(nodeInfo, isHttps); externalErr == nil {
+			hostAddr = base.GetHostAddr(externalAddr, (uint16)(externalMgtPort))
+		} else if externalErr == base.ErrorNoPortNumber {
+			// Extract original internal node management port from above
+			hostPort, portErr := base.GetPortNumber(hostAddr)
+			if portErr == nil {
+				// Combine externalHost:internalPort
+				hostAddr = base.GetHostAddr(externalAddr, (uint16)(hostPort))
+			} else {
+				// Original internal address did not have port number, so continue to just have externalAddr[:noPort]
+				hostAddr = externalAddr
+			}
 		}
 	}
 
@@ -1636,10 +1649,11 @@ func (u *Utilities) GetExternalAddressAndKvPortsFromNodeInfo(nodeInfo map[string
 	return hostAddr, portNumber, portErr, sslPortNumber, sslPortErr
 }
 
-func (u *Utilities) getExternalMgtHostAndPort(nodeInfo map[string]interface{}, isHttps bool) (string, int, error) {
+func (u *Utilities) GetExternalMgtHostAndPort(nodeInfo map[string]interface{}, isHttps bool) (string, int, error) {
 	var hostAddr string
 	var portErr error = base.ErrorNoPortNumber
 	var portNumber int = -1
+
 	alternateObjRaw, alternateExists := nodeInfo[base.AlternateKey]
 	if !alternateExists {
 		return "", -1, base.ErrorResourceDoesNotExist
@@ -1647,18 +1661,21 @@ func (u *Utilities) getExternalMgtHostAndPort(nodeInfo map[string]interface{}, i
 
 	alternateObj, ok := alternateObjRaw.(map[string]interface{})
 	if !ok {
-		u.logger_utils.Errorf("getExternalMgtHostAndPort: unable to cast alternateObj to map[string]interface{}")
+		u.logger_utils.Errorf("GetExternalMgtHostAndPort: unable to cast alternateObj to map[string]interface{}")
+		fmt.Printf("GetExternalMgtHostAndPort: unable to cast alternateObj to map[string]interface{}\n")
 		return "", -1, base.ErrorResourceDoesNotExist
 	}
 
 	externalObjRaw, externalExists := alternateObj[base.ExternalKey]
 	if !externalExists {
+		fmt.Printf("externalObjRaw does not exist\n")
 		return "", -1, base.ErrorResourceDoesNotExist
 	}
 
 	externalObj, ok := externalObjRaw.(map[string]interface{})
 	if !ok {
-		u.logger_utils.Errorf("getExternalMgtHostAndPort: unable to cast externalObj to map[string]interface{}")
+		u.logger_utils.Errorf("GetExternalMgtHostAndPort: unable to cast externalObj to map[string]interface{}")
+		fmt.Printf("GetExternalMgtHostAndPort: unable to cast externalObj to map[string]interface{}\n")
 		return "", -1, base.ErrorResourceDoesNotExist
 	}
 
@@ -1669,10 +1686,10 @@ func (u *Utilities) getExternalMgtHostAndPort(nodeInfo map[string]interface{}, i
 
 	hostAddr, ok = hostAddrObj.(string)
 	if !ok {
-		u.logger_utils.Errorf("getExternalMgtHostAndPort: unable to cast hostAddr to string")
+		u.logger_utils.Errorf("GetExternalMgtHostAndPort: unable to cast hostAddr to string")
 		return "", -1, base.ErrorResourceDoesNotExist
 	} else if len(hostAddr) == 0 {
-		u.logger_utils.Errorf("getExternalMgtHostAndPort: empty hostAddr")
+		u.logger_utils.Errorf("GetExternalMgtHostAndPort: empty hostAddr")
 		return "", -1, base.ErrorResourceDoesNotExist
 	}
 
@@ -1683,7 +1700,7 @@ func (u *Utilities) getExternalMgtHostAndPort(nodeInfo map[string]interface{}, i
 
 	portsObj, ok := portsObjRaw.(map[string]interface{})
 	if !ok {
-		u.logger_utils.Errorf("getExternalMgtHostAndPort: unable to cast portsObj to map[string]interface{}")
+		u.logger_utils.Errorf("GetExternalMgtHostAndPort: unable to cast portsObj to map[string]interface{}")
 		return hostAddr, portNumber, portErr
 	}
 
@@ -1701,7 +1718,7 @@ func (u *Utilities) getExternalMgtHostAndPort(nodeInfo map[string]interface{}, i
 
 	mgmtObj, ok := mgmtObjRaw.(float64)
 	if !ok {
-		u.logger_utils.Errorf("getExternalMgtHostAndPort: unable to cast mgmtObj to float64")
+		u.logger_utils.Errorf("GetExternalMgtHostAndPort: unable to cast mgmtObj to float64")
 		return hostAddr, portNumber, portErr
 	}
 
@@ -1841,7 +1858,7 @@ func (u *Utilities) getExternalHostAndCapiPorts(nodeInfo map[string]interface{})
 	return hostAddr, capiPort, capiPortErr, capiSSLPort, capiSSLPortErr
 }
 
-func (u *Utilities) GetHostAddrFromNodeInfo(adminHostAddr string, nodeInfo map[string]interface{}, logger *log.CommonLogger) (string, error) {
+func (u *Utilities) getAdminHostAddrFromNodeInfo(adminHostAddr string, nodeInfo map[string]interface{}, logger *log.CommonLogger) (string, error) {
 	hostAddr, err := u.getHostAddrFromNodeInfoInternal(adminHostAddr, nodeInfo, logger)
 	if err == base.ErrorNoHostName {
 		hostAddr = adminHostAddr
@@ -1953,7 +1970,7 @@ func (u *Utilities) GetIntExtHostNameKVPortTranslationMap(mapContainingNodesKey 
 }
 
 func (u *Utilities) GetHostNameFromNodeInfo(adminHostAddr string, nodeInfo map[string]interface{}, logger *log.CommonLogger) (string, error) {
-	hostAddr, err := u.GetHostAddrFromNodeInfo(adminHostAddr, nodeInfo, logger)
+	hostAddr, err := u.getAdminHostAddrFromNodeInfo(adminHostAddr, nodeInfo, logger)
 	if err != nil {
 		return "", err
 	}
@@ -2568,7 +2585,7 @@ func (u *Utilities) GetSecuritySettingsAndDefaultPoolInfo(hostAddr, hostHttpsAdd
 	if scramShaEnabled {
 		// if scram sha is enabled, we will first try to connect to target ns_server using scram sha authentication
 		// even if certificate/clientCert have been provided, we will not use them here because they are not needed by scram sha authentication
-		defaultPoolInfo, err = u.getDefaultPoolInfoUsingScramSha(hostAddr, username, password, logger)
+		defaultPoolInfo, err = u.GetDefaultPoolInfoUsingScramSha(hostAddr, username, password, logger)
 		if err == nil {
 			httpAuthMech = base.HttpAuthMechScramSha
 		} else if err != TargetMayNotSupportScramShaError {
@@ -2586,7 +2603,7 @@ func (u *Utilities) GetSecuritySettingsAndDefaultPoolInfo(hostAddr, hostHttpsAdd
 	if defaultPoolInfo == nil {
 		// if we get here, either scram sha is not enabled, or scram sha is enabled and target ns_server returned 401 error on our scram sha attempt
 		// either way, it is implied that certificate has been provided. use https to connect to target
-		defaultPoolInfo, err = u.getDefaultPoolInfoUsingHttps(hostHttpsAddr, username, password,
+		defaultPoolInfo, err = u.GetDefaultPoolInfoUsingHttps(hostHttpsAddr, username, password,
 			certificate, clientCertificate, clientKey, logger)
 		if err == nil {
 			httpAuthMech = base.HttpAuthMechHttps
@@ -2618,7 +2635,7 @@ func (u *Utilities) GetSecuritySettingsAndDefaultPoolInfo(hostAddr, hostHttpsAdd
 	if scramShaEnabled && !targetHasScramShaSupport && httpAuthMech == base.HttpAuthMechScramSha {
 		// Cluster is not ScramSha compatible. We need to fallback to https.
 		// Before doing so, we will get default pool using https again to make sure it works
-		defaultPoolInfo, err = u.getDefaultPoolInfoUsingHttps(hostHttpsAddr, username, password,
+		defaultPoolInfo, err = u.GetDefaultPoolInfoUsingHttps(hostHttpsAddr, username, password,
 			certificate, clientCertificate, clientKey, logger)
 		if err == nil {
 			httpAuthMech = base.HttpAuthMechHttps
@@ -2630,7 +2647,7 @@ func (u *Utilities) GetSecuritySettingsAndDefaultPoolInfo(hostAddr, hostHttpsAdd
 	return sanInCertificate, httpAuthMech, defaultPoolInfo, nil
 }
 
-func (u *Utilities) getDefaultPoolInfoUsingScramSha(hostAddr, username, password string, logger *log.CommonLogger) (map[string]interface{}, error) {
+func (u *Utilities) GetDefaultPoolInfoUsingScramSha(hostAddr, username, password string, logger *log.CommonLogger) (map[string]interface{}, error) {
 	defaultPoolInfo := make(map[string]interface{})
 	err, statusCode := u.QueryRestApiWithAuth(hostAddr, base.DefaultPoolPath, false, username, password, base.HttpAuthMechScramSha, nil /*certificate*/, false /*sanInCertificate*/, nil /*clientCertificate*/, nil /*clientKey*/, base.MethodGet, "", nil, base.ShortHttpTimeout, &defaultPoolInfo, nil, false, logger)
 	if err == nil && statusCode == http.StatusOK {
@@ -2645,7 +2662,7 @@ func (u *Utilities) getDefaultPoolInfoUsingScramSha(hostAddr, username, password
 	}
 }
 
-func (u *Utilities) getDefaultPoolInfoUsingHttps(hostHttpsAddr, username, password string,
+func (u *Utilities) GetDefaultPoolInfoUsingHttps(hostHttpsAddr, username, password string,
 	certificate []byte, clientCertificate, clientKey []byte, logger *log.CommonLogger) (map[string]interface{}, error) {
 	defaultPoolInfo := make(map[string]interface{})
 

@@ -278,6 +278,12 @@ func IsPipelineRunning(topic string) bool {
 }
 
 func (pipelineMgr *PipelineManager) CheckPipelines() {
+	pipelineMgr.validateAndGCSpecs()
+	pipelineMgr.checkRemoteClusterSvcForChangedConfigs()
+	LogStatusSummary()
+}
+
+func (pipelineMgr *PipelineManager) validateAndGCSpecs() {
 	rep_status_map := pipelineMgr.ReplicationStatusMap()
 	for _, rep_status := range rep_status_map {
 		//validate replication spec
@@ -287,7 +293,23 @@ func (pipelineMgr *PipelineManager) CheckPipelines() {
 			pipelineMgr.repl_spec_svc.ValidateAndGC(spec)
 		}
 	}
-	LogStatusSummary()
+}
+
+func (pipelineMgr *PipelineManager) checkRemoteClusterSvcForChangedConfigs() {
+	refList, err := pipelineMgr.remote_cluster_svc.GetRefListForRestartAndClearState()
+	if err != nil {
+		pipelineMgr.logger.Warnf("Checkpipeline got %v when asking remote cluster reference for config changes that require pipeline restarts", err)
+	}
+	for _, ref := range refList {
+		replSpecsList, err := pipelineMgr.repl_spec_svc.AllReplicationSpecsWithRemote(ref)
+		if err != nil {
+			pipelineMgr.logger.Warnf("Unable to retrieve specs for remote cluster %v ... user should manually restart pipelines replicating to this remote cluster", ref.Id())
+			continue
+		}
+		for _, spec := range replSpecsList {
+			pipelineMgr.UpdatePipeline(spec.Id, base.ErrorPipelineRestartDueToClusterConfigChange)
+		}
+	}
 }
 
 func (pipelineMgr *PipelineManager) OnExit() error {
@@ -1089,6 +1111,27 @@ func (r *PipelineUpdater) reportStatus() {
 func (r *PipelineUpdater) raiseWarningsIfNeeded() {
 	r.raiseXattrWarningIfNeeded()
 	r.raiseCompressionWarningIfNeeded()
+	r.raiseRemoteClusterRestartReasonsIfNeeded()
+}
+
+func (r *PipelineUpdater) raiseRemoteClusterRestartReasonsIfNeeded() {
+	if !r.currentErrors.ContainsError(base.ErrorPipelineRestartDueToClusterConfigChange, true /*exactMatch*/) {
+		return
+	}
+	spec := r.rep_status.Spec()
+	if spec == nil {
+		return
+	}
+	if spec.Settings.IsCapi() {
+		return
+	}
+	targetClusterRef, err := r.pipelineMgr.GetRemoteClusterSvc().RemoteClusterByUuid(spec.TargetClusterUUID, false)
+	if err != nil || targetClusterRef == nil {
+		return
+	}
+	errMsg := fmt.Sprintf("Replication from source bucket '%v' to target bucket '%v' on cluster '%v' has been restarted due to remote-cluster configuration changes\n", spec.SourceBucketName, spec.TargetBucketName, targetClusterRef.Name())
+	r.logger.Warnf(errMsg)
+	r.pipelineMgr.GetLogSvc().Write(errMsg)
 }
 
 // raise warning on UI console when

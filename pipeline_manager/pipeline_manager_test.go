@@ -811,3 +811,28 @@ func TestCleanupPipeline(t *testing.T) {
 
 	fmt.Println("============== Test case end: TestCleanupPipeline =================")
 }
+
+func TestRaiseWarningAtBeginning(t *testing.T) {
+	fmt.Println("============== Test case start: TestRaiseWarningAtBeginning =================")
+	assert := assert.New(t)
+
+	testLogger, pipelineMock, replSpecSvcMock, xdcrTopologyMock, remoteClusterMock,
+		pipelineMgr, testRepairer, testReplicationStatus, testTopic,
+		testReplicationSettings, testReplicationSpec, testRemoteClusterRef, testPipeline, uiLogSvc, replStatusMock,
+		ckptMock, clusterInfoSvc := setupBoilerPlate()
+
+	setupGenericMocking(testLogger, pipelineMock, replSpecSvcMock, xdcrTopologyMock, remoteClusterMock,
+		pipelineMgr, testRepairer, testReplicationStatus, testTopic,
+		testReplicationSettings, testReplicationSpec, testRemoteClusterRef, testPipeline, uiLogSvc, replStatusMock,
+		ckptMock, clusterInfoSvc)
+
+	setupLaunchUpdater(testRepairer, true)
+	assert.Equal(uint64(0), atomic.LoadUint64(&testRepairer.runCounter))
+
+	pipelineMgr.Update(testTopic, base.ErrorPipelineRestartDueToClusterConfigChange)
+	time.Sleep(time.Duration(1) * time.Second)
+
+	assert.Equal(uint64(1), atomic.LoadUint64(&testRepairer.runCounter))
+	assert.True(uiLogSvc.AssertNumberOfCalls(t, "Write", 1))
+	fmt.Println("============== Test case end: TestRaiseWarningAtBeginning =================")
+}

@@ -13,15 +13,15 @@ import (
 
 var logger_capi_utils *log.CommonLogger = log.NewLogger("CapiUtils", log.DefaultLoggerContext)
 
-func ConstructVBCouchApiBaseMap(targetBucketName string, targetBucketInfo map[string]interface{}, remoteClusterRef *metadata.RemoteClusterReference, utils utilities.UtilsIface) (map[uint16]string, error) {
-	serverCouchApiBaseMap, err := ConstructServerCouchApiBaseMap(targetBucketName, targetBucketInfo, remoteClusterRef, utils)
+func ConstructVBCouchApiBaseMap(targetBucketName string, targetBucketInfo map[string]interface{}, remoteClusterRef *metadata.RemoteClusterReference, utils utilities.UtilsIface, useExternal bool) (map[uint16]string, error) {
+	serverCouchApiBaseMap, err := ConstructServerCouchApiBaseMap(targetBucketName, targetBucketInfo, remoteClusterRef, utils, useExternal)
 	if err != nil {
 		return nil, err
 	}
 
 	// construct vbCouchApiBaseMap map with key = vbno and value = couchApiBase
 	vbCouchApiBaseMap := make(map[uint16]string)
-	vbMap, err := utils.GetRemoteServerVBucketsMap(remoteClusterRef.HostName(), targetBucketName, targetBucketInfo)
+	vbMap, err := utils.GetRemoteServerVBucketsMap(remoteClusterRef.HostName(), targetBucketName, targetBucketInfo, useExternal)
 	if err != nil {
 		return nil, err
 	}
@@ -37,12 +37,12 @@ func ConstructVBCouchApiBaseMap(targetBucketName string, targetBucketInfo map[st
 	return vbCouchApiBaseMap, nil
 }
 
-func ConstructServerCouchApiBaseMap(targetBucketName string, targetBucketInfo map[string]interface{}, remoteClusterRef *metadata.RemoteClusterReference, utils utilities.UtilsIface) (map[string]string, error) {
-	return ConstructCapiServiceEndPointMap(targetBucketName, targetBucketInfo, remoteClusterRef, utils, true /*useCouchApiBase*/)
+func ConstructServerCouchApiBaseMap(targetBucketName string, targetBucketInfo map[string]interface{}, remoteClusterRef *metadata.RemoteClusterReference, utils utilities.UtilsIface, useExternal bool) (map[string]string, error) {
+	return ConstructCapiServiceEndPointMap(targetBucketName, targetBucketInfo, remoteClusterRef, utils, true /*useCouchApiBase*/, useExternal)
 }
 
 // construct map for capi service end point, e.g., _pre_replicate
-func ConstructCapiServiceEndPointMap(targetBucketName string, targetBucketInfo map[string]interface{}, remoteClusterRef *metadata.RemoteClusterReference, utils utilities.UtilsIface, useCouchApiBase bool) (map[string]string, error) {
+func ConstructCapiServiceEndPointMap(targetBucketName string, targetBucketInfo map[string]interface{}, remoteClusterRef *metadata.RemoteClusterReference, utils utilities.UtilsIface, useCouchApiBase, useExternal bool) (map[string]string, error) {
 	endPointMap := make(map[string]string)
 
 	nodeList, err := utils.GetNodeListFromInfoMap(targetBucketInfo, logger_capi_utils)
@@ -81,11 +81,12 @@ func ConstructCapiServiceEndPointMap(targetBucketName string, targetBucketInfo m
 				return nil, ErrorBuildingCapiServerEndPointMap(targetBucketName, remoteClusterRef.Name(), node)
 			}
 
-			// If external nodes info is present, replace
-			endPoint = utils.ReplaceCouchApiBaseObjWithExternals(endPoint, nodeMap)
+			if useExternal {
+				endPoint = utils.ReplaceCouchApiBaseObjWithExternals(endPoint, nodeMap)
+			}
 		} else {
 			// endPoint is host address in nodeInfo
-			endPoint, err = utils.GetExternalHostAddrFromNodeInfo(remoteClusterRef.HostName(), nodeMap, remoteClusterRef.IsHttps(), logger_capi_utils)
+			endPoint, err = utils.GetHostAddrFromNodeInfo(remoteClusterRef.HostName(), nodeMap, remoteClusterRef.IsHttps(), logger_capi_utils, useExternal)
 			if err != nil {
 				return nil, err
 			}
@@ -115,11 +116,13 @@ func ConstructCapiServiceEndPointMap(targetBucketName string, targetBucketInfo m
 		portToUse := uint16(directPortFloat)
 
 		// Potentially, get external kv (direct) ports
-		externalHostName, externalKvPort, externalKvPortErr, _, _ := utils.GetExternalAddressAndKvPortsFromNodeInfo(nodeMap)
-		if len(externalHostName) > 0 {
-			hostname = externalHostName
-			if externalKvPortErr == nil {
-				portToUse = uint16(externalKvPort)
+		if useExternal {
+			externalHostName, externalKvPort, externalKvPortErr, _, _ := utils.GetExternalAddressAndKvPortsFromNodeInfo(nodeMap)
+			if len(externalHostName) > 0 {
+				hostname = externalHostName
+				if externalKvPortErr == nil {
+					portToUse = uint16(externalKvPort)
+				}
 			}
 		}
 

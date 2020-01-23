@@ -208,6 +208,8 @@ const (
 	// Internal keys to wrap around incoming document's key or xattributes for advanced filtering
 	FilteringInternalKey   = "FilteringInternalKeyKey"
 	FilteringInternalXattr = "FilteringInternalXattrKey"
+
+	RemoteClusterAlternateAddrChangeKey = "RemoteClusterAlternateAddrChangeKey"
 )
 
 var TopologyChangeCheckIntervalConfig = &SettingsConfig{10, &Range{1, 100}}
@@ -296,6 +298,7 @@ var MaxCountCpuNotMaxedConfig = &SettingsConfig{3, &Range{1, 1000}}
 var MaxCountThroughputDropConfig = &SettingsConfig{3, &Range{1, 1000}}
 var FilteringInternalKeyConfig = &SettingsConfig{base.InternalKeyKey, nil}
 var FilteringInternalXattrConfig = &SettingsConfig{base.InternalKeyXattr, nil}
+var RemoteClusterAlternateAddrChangeConfig = &SettingsConfig{base.RemoteClusterAlternateAddrChangeCnt, &Range{1, 1000}}
 
 var XDCRInternalSettingsConfigMap = map[string]*SettingsConfig{
 	TopologyChangeCheckIntervalKey:                TopologyChangeCheckIntervalConfig,
@@ -384,6 +387,7 @@ var XDCRInternalSettingsConfigMap = map[string]*SettingsConfig{
 	MaxCountThroughputDropKey:                     MaxCountThroughputDropConfig,
 	FilteringInternalKey:                          FilteringInternalKeyConfig,
 	FilteringInternalXattr:                        FilteringInternalXattrConfig,
+	RemoteClusterAlternateAddrChangeKey:           RemoteClusterAlternateAddrChangeConfig,
 }
 
 func InitConstants(xmemMaxIdleCountLowerBound int, xmemMaxIdleCountUpperBound int) {

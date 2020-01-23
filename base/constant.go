@@ -228,6 +228,9 @@ var ErrorExpDelTrio = fmt.Errorf("%v, %v, and %v must be specified together", Fi
 var ErrorNoSourceKV = errors.New("Invalid configuration. No source kv node is found.")
 var ErrorExecutionTimedOut = errors.New("Execution timed out")
 var ErrorPipelineStartTimedOutUI = errors.New("Pipeline did not start in a timely manner, possibly due to busy source or target. Will try again...")
+var ErrorRemoteClusterUninit = errors.New("Remote cluster has not been successfully contacted to figure out user intent for alternate address yet. Will try again next refresh cycle")
+var ErrorTargetNoAltHostName = errors.New("Alternate hostname is not set up on at least one node of the remote cluster")
+var ErrorPipelineRestartDueToClusterConfigChange = errors.New("Pipeline needs to update due to remote cluster configuration change")
 
 // Various non-error internal msgs
 var FilterForcePassThrough = errors.New("No data is to be filtered, should allow passthrough")
@@ -854,6 +857,10 @@ var ReservedWordsReplaceMap = map[string]PcreWrapperInterface{}
 // Used to make sure the pcre's are initialized only once, when needed
 var ReservedWordsReplaceMapOnce sync.Once
 
+// Number of times for a remote cluster to consistently change from using internal interface to
+// external interface, and vice versa
+var RemoteClusterAlternateAddrChangeCnt = 5
+
 func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeCountBeforeRestart,
 	maxTopologyStableCountBeforeRestart, maxWorkersForCheckpointing int,
 	timeoutCheckpointBeforeStop time.Duration, capiDataChanSizeMultiplier int,
@@ -896,7 +903,8 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	throughputSampleSize int, throughputSampleAlpha int,
 	thresholdRatioForProcessCpu int, thresholdRatioForTotalCpu int,
 	maxCountCpuNotMaxed int, maxCountThroughputDrop int,
-	filteringInternalKey string, filteringInternalXattr string) {
+	filteringInternalKey string, filteringInternalXattr string,
+	remoteClusterAlternateAddrChangeCnt int) {
 	TopologyChangeCheckInterval = topologyChangeCheckInterval
 	MaxTopologyChangeCountBeforeRestart = maxTopologyChangeCountBeforeRestart
 	MaxTopologyStableCountBeforeRestart = maxTopologyStableCountBeforeRestart
@@ -1002,6 +1010,7 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 		InternalKeyKey:   ExternalKeyKeyContains,
 		InternalKeyXattr: ExternalKeyXattrContains,
 	}
+	RemoteClusterAlternateAddrChangeCnt = remoteClusterAlternateAddrChangeCnt
 }
 
 // Need to escape the () to result in "META().xattrs" literal
