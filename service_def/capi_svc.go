@@ -28,6 +28,7 @@ type RemoteBucketInfo struct {
 	RemoteClusterRefName     string
 	BucketName               string
 	RemoteClusterRef         *metadata.RemoteClusterReference
+	remoteClusterSvc         RemoteClusterSvc
 	Capabilities             []string
 	UUID                     string
 	VBServerMap              map[string][]uint16
@@ -50,15 +51,16 @@ func NewRemoteBucketInfo(remoteClusterRefName string, bucketName string, remote_
 		RemoteClusterRef: remote_cluster_ref,
 		logger:           logger,
 		utils:            utilsIn,
+		remoteClusterSvc: remote_cluster_svc,
 	}
 
-	err := remoteBucket.refresh_internal(remote_cluster_svc, false)
+	err := remoteBucket.refresh_internal(false)
 	return remoteBucket, err
 }
 
-func (remoteBucket *RemoteBucketInfo) refresh_internal(remote_cluster_svc RemoteClusterSvc, full bool) error {
+func (remoteBucket *RemoteBucketInfo) refresh_internal(full bool) error {
 	if remoteBucket.RemoteClusterRef == nil && !full {
-		remoteClusterRef, err := remote_cluster_svc.RemoteClusterByRefName(remoteBucket.RemoteClusterRefName, false)
+		remoteClusterRef, err := remoteBucket.remoteClusterSvc.RemoteClusterByRefName(remoteBucket.RemoteClusterRefName, false)
 		if err != nil {
 			remoteBucket.logger.Errorf("Failed to get remote cluster reference with refName=%v, err=%v\n", remoteBucket.RemoteClusterRefName, err)
 			return err
@@ -72,6 +74,11 @@ func (remoteBucket *RemoteBucketInfo) refresh_internal(remote_cluster_svc Remote
 		return err
 	}
 	connStr, err := remoteBucket.RemoteClusterRef.MyConnectionStr()
+	if err != nil {
+		return err
+	}
+
+	useExternal, err := remoteBucket.remoteClusterSvc.ShouldUseAlternateAddress(remoteBucket.RemoteClusterRef)
 	if err != nil {
 		return err
 	}
@@ -110,7 +117,7 @@ func (remoteBucket *RemoteBucketInfo) refresh_internal(remote_cluster_svc Remote
 		remoteBucket.Capabilities = append(remoteBucket.Capabilities, capability)
 	}
 
-	remoteBucket.VBServerMap, err = remoteBucket.utils.GetRemoteServerVBucketsMap(connStr, remoteBucket.BucketName, targetBucketInfo)
+	remoteBucket.VBServerMap, err = remoteBucket.utils.GetRemoteServerVBucketsMap(connStr, remoteBucket.BucketName, targetBucketInfo, useExternal)
 	if err != nil {
 		return fmt.Errorf("Failed to get VBServerMap for remote bucket %v", remoteBucket.BucketName)
 	}
@@ -131,7 +138,7 @@ func (remoteBucket *RemoteBucketInfo) refresh_internal(remote_cluster_svc Remote
 		remoteBucket.UseCouchApiBase = !nsServerScramShaSupport
 	}
 
-	urlmap, err := capi_utils.ConstructCapiServiceEndPointMap(remoteBucket.BucketName, targetBucketInfo, remoteBucket.RemoteClusterRef, remoteBucket.utils, remoteBucket.UseCouchApiBase)
+	urlmap, err := capi_utils.ConstructCapiServiceEndPointMap(remoteBucket.BucketName, targetBucketInfo, remoteBucket.RemoteClusterRef, remoteBucket.utils, remoteBucket.UseCouchApiBase, useExternal)
 	if err != nil {
 		return err
 	}

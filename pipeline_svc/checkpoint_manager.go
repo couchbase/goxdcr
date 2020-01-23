@@ -331,7 +331,13 @@ func (ckmgr *CheckpointManager) initSSLConStrMap() error {
 		return err
 	}
 
-	ssl_port_map, err := ckmgr.utils.GetMemcachedSSLPortMap(connStr, username, password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey, ckmgr.target_bucket_name, ckmgr.logger)
+	useExternal, err := ckmgr.remote_cluster_svc.ShouldUseAlternateAddress(ckmgr.target_cluster_ref)
+	if err != nil {
+		return err
+	}
+
+	ssl_port_map, err := ckmgr.utils.GetMemcachedSSLPortMap(connStr, username, password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey,
+		ckmgr.target_bucket_name, ckmgr.logger, useExternal)
 	if err != nil {
 		return err
 	}

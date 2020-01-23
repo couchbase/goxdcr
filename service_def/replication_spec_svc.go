@@ -27,6 +27,7 @@ type ReplicationSpecSvc interface {
 	AllActiveReplicationSpecsReadOnly() (map[string]*metadata.ReplicationSpecification, error)
 	AllReplicationSpecIds() ([]string, error)
 	AllReplicationSpecIdsForBucket(bucket string) ([]string, error)
+	AllReplicationSpecsWithRemote(remoteClusterRef *metadata.RemoteClusterReference) ([]*metadata.ReplicationSpecification, error)
 
 	// checks if an error returned by the replication spec service is an internal server error or a validation error,
 	// e.g., an error indicating the replication spec involved should exist but does not, or the other way around

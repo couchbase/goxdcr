@@ -431,8 +431,15 @@ func (xdcrf *XDCRFactory) constructOutgoingNozzles(spec *metadata.ReplicationSpe
 	vbNozzleMap map[uint16]string, kvVBMap map[string][]uint16, targetUserName string, targetPassword string, targetClusterVersion int, err error) {
 	outNozzles = make(map[string]common.Nozzle)
 	vbNozzleMap = make(map[uint16]string)
+
+	useExternal, err := xdcrf.remote_cluster_svc.ShouldUseAlternateAddress(targetClusterRef)
+	if err != nil {
+		xdcrf.logger.Errorf("Error getting alternate address preference, err=%v\n", err)
+		return
+	}
+
 	// Get a Map of Remote kvNode -> vBucket#s it's responsible for
-	kvVBMap, err = xdcrf.utils.GetRemoteServerVBucketsMap(targetClusterRef.HostName(), spec.TargetBucketName, targetBucketInfo)
+	kvVBMap, err = xdcrf.utils.GetRemoteServerVBucketsMap(targetClusterRef.HostName(), spec.TargetBucketName, targetBucketInfo, useExternal)
 	if err != nil {
 		xdcrf.logger.Errorf("Error getting server vbuckets map, err=%v\n", err)
 		return
@@ -486,7 +493,7 @@ func (xdcrf *XDCRFactory) constructOutgoingNozzles(spec *metadata.ReplicationSpe
 	for kvaddr, kvVBList := range kvVBMap {
 		if isCapiReplication && len(vbCouchApiBaseMap) == 0 {
 			// construct vbCouchApiBaseMap only when nessary and only once
-			vbCouchApiBaseMap, err = capi_utils.ConstructVBCouchApiBaseMap(spec.TargetBucketName, targetBucketInfo, targetClusterRef, xdcrf.utils)
+			vbCouchApiBaseMap, err = capi_utils.ConstructVBCouchApiBaseMap(spec.TargetBucketName, targetBucketInfo, targetClusterRef, xdcrf.utils, useExternal)
 			if err != nil {
 				xdcrf.logger.Errorf("Failed to construct vbCouchApiBase map, err=%v\n", err)
 				return
@@ -1063,8 +1070,13 @@ func (xdcrf *XDCRFactory) ConstructSSLPortMap(targetClusterRef *metadata.RemoteC
 		if err != nil {
 			return nil, err
 		}
+		useExternal, err := xdcrf.remote_cluster_svc.ShouldUseAlternateAddress(targetClusterRef)
+		if err != nil {
+			return nil, err
+		}
 
-		ssl_port_map, err = xdcrf.utils.GetMemcachedSSLPortMap(connStr, username, password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey, spec.TargetBucketName, xdcrf.logger)
+		ssl_port_map, err = xdcrf.utils.GetMemcachedSSLPortMap(connStr, username, password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey,
+			spec.TargetBucketName, xdcrf.logger, useExternal)
 		if err != nil {
 			xdcrf.logger.Errorf("Failed to get memcached ssl port, err=%v\n", err)
 			return nil, err

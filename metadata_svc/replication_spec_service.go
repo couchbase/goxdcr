@@ -364,7 +364,12 @@ func (service *ReplicationSpecService) ValidateNewReplicationSpec(sourceBucket, 
 		return "", "", nil, errorMap, err, nil
 	}
 
-	targetBucketInfo, targetBucketUUID, targetBucketNumberOfVbs, targetConflictResolutionType, targetKVVBMap := service.validateTargetBucket(errorMap, remote_connStr, targetBucket, remote_userName, remote_password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey, sourceBucket, targetCluster)
+	useExternal, err := service.remote_cluster_svc.ShouldUseAlternateAddress(targetClusterRef)
+	if err != nil {
+		return "", "", nil, errorMap, err, nil
+	}
+
+	targetBucketInfo, targetBucketUUID, targetBucketNumberOfVbs, targetConflictResolutionType, targetKVVBMap := service.validateTargetBucket(errorMap, remote_connStr, targetBucket, remote_userName, remote_password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey, sourceBucket, targetCluster, useExternal)
 	if len(errorMap) > 0 {
 		return "", "", nil, errorMap, nil, nil
 	}
@@ -410,7 +415,12 @@ func (service *ReplicationSpecService) ValidateReplicationSettings(sourceBucket,
 		return errorMap, nil
 	}
 
-	targetBucketInfo, _, _, _, _, targetKVVBMap, err := service.utils.BucketValidationInfo(remote_connStr, targetBucket, remote_userName, remote_password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey, service.logger)
+	useExternal, err := service.remote_cluster_svc.ShouldUseAlternateAddress(targetClusterRef)
+	if err != nil {
+		return nil, err
+	}
+
+	targetBucketInfo, _, _, _, _, targetKVVBMap, err := service.utils.RemoteBucketValidationInfo(remote_connStr, targetBucket, remote_userName, remote_password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey, service.logger, useExternal)
 	if err != nil {
 		return nil, err
 	}
@@ -591,7 +601,11 @@ func (service *ReplicationSpecService) validateCompressionTarget(errorMap base.E
 		if err != nil {
 			return err
 		}
-		sslPortMap, err = service.utils.GetMemcachedSSLPortMap(connStr, username, password, httpAuthMech, certificate, SANInCertificate, clientCertificate, clientKey, targetBucket, service.logger)
+		useExternal, err := service.remote_cluster_svc.ShouldUseAlternateAddress(targetClusterRef)
+		if err != nil {
+			return err
+		}
+		sslPortMap, err = service.utils.GetMemcachedSSLPortMap(connStr, username, password, httpAuthMech, certificate, SANInCertificate, clientCertificate, clientKey, targetBucket, service.logger, useExternal)
 		if err != nil {
 			return err
 		}
@@ -633,10 +647,10 @@ func (service *ReplicationSpecService) validateCompressionTarget(errorMap base.E
 
 //validate target bucket
 func (service *ReplicationSpecService) validateTargetBucket(errorMap base.ErrorMap, remote_connStr, targetBucket, remote_userName, remote_password string, httpAuthMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCertificate, clientKey []byte,
-	sourceBucket string, targetCluster string) (targetBucketInfo map[string]interface{}, targetBucketUUID string, targetBucketNumberOfVBs int, targetConflictResolutionType string, targetKVVBMap map[string][]uint16) {
+	sourceBucket string, targetCluster string, useExternal bool) (targetBucketInfo map[string]interface{}, targetBucketUUID string, targetBucketNumberOfVBs int, targetConflictResolutionType string, targetKVVBMap map[string][]uint16) {
 	start_time := time.Now()
 
-	targetBucketInfo, targetBucketType, targetBucketUUID, targetConflictResolutionType, _, targetKVVBMap, err_target := service.utils.RemoteBucketValidationInfo(remote_connStr, targetBucket, remote_userName, remote_password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey, service.logger)
+	targetBucketInfo, targetBucketType, targetBucketUUID, targetConflictResolutionType, _, targetKVVBMap, err_target := service.utils.RemoteBucketValidationInfo(remote_connStr, targetBucket, remote_userName, remote_password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey, service.logger, useExternal)
 	service.logger.Infof("Result from remote bucket look up: connStr=%v, bucketName=%v, targetBucketType=%v, err_target=%v, time taken=%v\n", remote_connStr, targetBucket, targetBucketType, err_target, time.Since(start_time))
 
 	service.validateBucket(sourceBucket, targetCluster, targetBucket, targetBucketType, "", err_target, errorMap, false)
@@ -898,6 +912,26 @@ func (service *ReplicationSpecService) AllReplicationSpecIdsForTargetBucket(buck
 		}
 	}
 	return repIds, nil
+}
+
+func (service *ReplicationSpecService) AllReplicationSpecsWithRemote(remoteClusterRef *metadata.RemoteClusterReference) (list []*metadata.ReplicationSpecification, err error) {
+	if remoteClusterRef == nil {
+		err = base.ErrorInvalidInput
+		return
+	}
+
+	specsROMap, err := service.AllActiveReplicationSpecsReadOnly()
+	if err != nil {
+		service.logger.Warnf("Error retrieving all active replication specs: %v", err)
+		return
+	}
+
+	for _, roVal := range specsROMap {
+		if roVal.TargetClusterUUID == remoteClusterRef.Uuid() {
+			list = append(list, roVal.Clone())
+		}
+	}
+	return
 }
 
 func (service *ReplicationSpecService) removeSpecFromCache(specId string) error {

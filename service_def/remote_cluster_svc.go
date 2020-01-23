@@ -58,4 +58,10 @@ type RemoteClusterSvc interface {
 	// when the remote cluster service makes changes to remote cluster references, it needs to call the call back
 	// explicitly, so that the actions can be taken immediately
 	SetMetadataChangeHandlerCallback(callBack base.MetadataChangeHandlerCallback)
+
+	// Checks to see if XDCR should use alternate addressing to contact the remote cluster
+	ShouldUseAlternateAddress(ref *metadata.RemoteClusterReference) (bool, error)
+
+	// Called by PipelineMgr to check to see if any pipelines should restart due to remoteClusterRef changes
+	GetRefListForRestartAndClearState() ([]*metadata.RemoteClusterReference, error)
 }

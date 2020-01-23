@@ -80,9 +80,11 @@ func setupPipelineBoilerPlate(replSpecSvc *ReplicationSpecService,
 	pipelineMock := &common.PipelineFactory{}
 	utilsNew := utilities.NewUtilities()
 	checkPointsSvc := &service_def.CheckpointsService{}
+	clusterInfoSvc := &service_def.ClusterInfoSvc{}
+	clusterInfoSvc.On("IsClusterCompatible", mock.Anything, mock.Anything).Return(true, nil)
 
 	pipelineMgr := pipeline_manager.NewPipelineManager(pipelineMock, replSpecSvc, xdcrTopologyMock,
-		remoteClusterMock, nil /*cluster_info_svc*/, checkPointsSvc,
+		remoteClusterMock, clusterInfoSvc, checkPointsSvc,
 		uiLogSvcMock, log.DefaultLoggerContext, utilsNew)
 
 	testPipeline := &common.Pipeline{}
@@ -119,6 +121,7 @@ func setupMocks(srcResolutionType string,
 	remoteClusterMock.On("RemoteClusterByUuid", "", false).Return(mockRemoteClusterRef, nil)
 	remoteClusterMock.On("RemoteClusterByUuid", "", true).Return(mockRemoteClusterRef, nil)
 	remoteClusterMock.On("ValidateRemoteCluster", mockRemoteClusterRef).Return(nil)
+	remoteClusterMock.On("ShouldUseAlternateAddress", mock.Anything).Return(false, nil)
 
 	// Compression features for utils mock
 	var fullFeatures utilities.HELOFeatures
@@ -183,7 +186,7 @@ func setupMocks(srcResolutionType string,
 
 	// TARGET mock - emptyString since we're feeding a dummy target
 	utilitiesMock.On("RemoteBucketValidationInfo", hostAddr,
-		mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(bucketInfo,
+		mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(bucketInfo,
 		bucketType, bucketUUID, destResolutionType, bucketEvictionPolicy, bucketKVVBMap, err)
 
 	nonExistentBucketError := errors.New("NonExistentBucketError")
