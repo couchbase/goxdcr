@@ -80,7 +80,7 @@ if (( $? != 0 ));then
 	exit $?
 fi
 # Wait for vbuckets and all the other things to propagate before XDCR provisioning
-sleep 1
+sleep 5
 createRemoteClusterReference "C1" "C2"
 createRemoteClusterReference "C2" "C1"
 sleep 1

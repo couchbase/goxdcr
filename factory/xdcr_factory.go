@@ -47,16 +47,16 @@ type XDCRFactoryIface interface {
 
 // Factory for XDCR pipelines
 type XDCRFactory struct {
-	repl_spec_svc      service_def.ReplicationSpecSvc
-	remote_cluster_svc service_def.RemoteClusterSvc
-	cluster_info_svc   service_def.ClusterInfoSvc
-	xdcr_topology_svc  service_def.XDCRCompTopologySvc
-	checkpoint_svc     service_def.CheckpointsService
-	capi_svc           service_def.CAPIService
-	uilog_svc          service_def.UILogSvc
-	//bucket settings service
+	repl_spec_svc            service_def.ReplicationSpecSvc
+	remote_cluster_svc       service_def.RemoteClusterSvc
+	cluster_info_svc         service_def.ClusterInfoSvc
+	xdcr_topology_svc        service_def.XDCRCompTopologySvc
+	checkpoint_svc           service_def.CheckpointsService
+	capi_svc                 service_def.CAPIService
+	uilog_svc                service_def.UILogSvc
 	bucket_settings_svc      service_def.BucketSettingsSvc
 	throughput_throttler_svc service_def.ThroughputThrottlerSvc
+	collectionsManifestSvc   service_def.CollectionsManifestSvc
 
 	default_logger_ctx       *log.LoggerContext
 	pipeline_failure_handler common.SupervisorFailureHandler
@@ -77,7 +77,8 @@ func NewXDCRFactory(repl_spec_svc service_def.ReplicationSpecSvc,
 	pipeline_default_logger_ctx *log.LoggerContext,
 	factory_logger_ctx *log.LoggerContext,
 	pipeline_failure_handler common.SupervisorFailureHandler,
-	utilsIn utilities.UtilsIface) *XDCRFactory {
+	utilsIn utilities.UtilsIface,
+	collectionsManifestSvc service_def.CollectionsManifestSvc) *XDCRFactory {
 	return &XDCRFactory{repl_spec_svc: repl_spec_svc,
 		remote_cluster_svc:       remote_cluster_svc,
 		cluster_info_svc:         cluster_info_svc,
@@ -90,7 +91,8 @@ func NewXDCRFactory(repl_spec_svc service_def.ReplicationSpecSvc,
 		default_logger_ctx:       pipeline_default_logger_ctx,
 		pipeline_failure_handler: pipeline_failure_handler,
 		logger:                   log.NewLogger("XDCRFactory", factory_logger_ctx),
-		utils:                    utilsIn}
+		utils:                    utilsIn,
+		collectionsManifestSvc:   collectionsManifestSvc}
 }
 
 /**

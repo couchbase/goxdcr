@@ -1246,7 +1246,7 @@ func (ckmgr *CheckpointManager) doCheckpoint(vbno uint16, through_seqno_map map[
 	filterFailed := vbCountMetrics[DOCS_UNABLE_TO_FILTER_METRIC]
 	// Write-operation - feed the temporary variables and update them into the record and also write them to metakv
 	newCkpt := metadata.NewCheckpointRecord(ckRecordFailoverUuid, through_seqno, ckRecordDcpSnapSeqno, ckRecordDcpSnapEndSeqno, ckptRecordTargetSeqno,
-		uint64(filteredItems), uint64(filterFailed))
+		uint64(filteredItems), uint64(filterFailed), 0 /*DefaultCollection*/, 0 /*DefaultTargetCollection*/)
 	err = ckpt_obj.updateAndPersist(ckmgr, vbno, currRecordVersion, xattr_seqno, newCkpt)
 
 	if err != nil {

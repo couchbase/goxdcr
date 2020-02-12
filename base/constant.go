@@ -43,6 +43,7 @@ var SSLPortsPath = "/nodes/self/xdcrSSLPorts"
 var NodeServicesPath = "/pools/default/nodeServices"
 var BPath = "/pools/default/b/"
 var DocsPath = "/docs/"
+var CollectionsManifestPath = "/collections"
 
 // constants for CAPI nozzle
 var RevsDiffPath = "/_revs_diff"
@@ -84,6 +85,14 @@ var AlternateKey = "alternateAddresses"
 var ExternalKey = "external"
 var CapiPortKey = "capi"
 var CapiSSLPortKey = "capiSSL"
+
+// Collection consts
+const UIDKey = "uid"
+const NameKey = "name"
+const CollectionsKey = "collections"
+const DefaultScopeCollectionName = "_default"
+
+var CollectionsUidBase int = 16
 
 // URL related constants
 var UrlDelimiter = "/"
@@ -231,6 +240,7 @@ var ErrorPipelineStartTimedOutUI = errors.New("Pipeline did not start in a timel
 var ErrorRemoteClusterUninit = errors.New("Remote cluster has not been successfully contacted to figure out user intent for alternate address yet. Will try again next refresh cycle")
 var ErrorTargetNoAltHostName = errors.New("Alternate hostname is not set up on at least one node of the remote cluster")
 var ErrorPipelineRestartDueToClusterConfigChange = errors.New("Pipeline needs to update due to remote cluster configuration change")
+var ErrorNotFound = errors.New("Specified entity is not found")
 
 // Various non-error internal msgs
 var FilterForcePassThrough = errors.New("No data is to be filtered, should allow passthrough")
@@ -862,6 +872,10 @@ var ReservedWordsReplaceMapOnce sync.Once
 // external interface, and vice versa
 var RemoteClusterAlternateAddrChangeCnt = 5
 
+// How often in seconds to pull manifests from ns_server
+var ManifestRefreshSrcInterval = 2
+var ManifestRefreshTgtInterval = 60
+
 func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeCountBeforeRestart,
 	maxTopologyStableCountBeforeRestart, maxWorkersForCheckpointing int,
 	timeoutCheckpointBeforeStop time.Duration, capiDataChanSizeMultiplier int,
@@ -905,7 +919,8 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	thresholdRatioForProcessCpu int, thresholdRatioForTotalCpu int,
 	maxCountCpuNotMaxed int, maxCountThroughputDrop int,
 	filteringInternalKey string, filteringInternalXattr string,
-	remoteClusterAlternateAddrChangeCnt int) {
+	remoteClusterAlternateAddrChangeCnt int,
+	manifestRefreshSrcInterval int, manifestRefreshTgtInterval int) {
 	TopologyChangeCheckInterval = topologyChangeCheckInterval
 	MaxTopologyChangeCountBeforeRestart = maxTopologyChangeCountBeforeRestart
 	MaxTopologyStableCountBeforeRestart = maxTopologyStableCountBeforeRestart
@@ -1012,6 +1027,8 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 		InternalKeyXattr: ExternalKeyXattrContains,
 	}
 	RemoteClusterAlternateAddrChangeCnt = remoteClusterAlternateAddrChangeCnt
+	ManifestRefreshSrcInterval = manifestRefreshSrcInterval
+	ManifestRefreshTgtInterval = manifestRefreshTgtInterval
 }
 
 // Need to escape the () to result in "META().xattrs" literal

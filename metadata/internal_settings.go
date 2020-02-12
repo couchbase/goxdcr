@@ -210,6 +210,10 @@ const (
 	FilteringInternalXattr = "FilteringInternalXattrKey"
 
 	RemoteClusterAlternateAddrChangeKey = "RemoteClusterAlternateAddrChangeKey"
+
+	// How often to pull manifests
+	ManifestRefreshSrcIntervalKey = "ManifestRefreshSrcInterval"
+	ManifestRefreshTgtIntervalKey = "ManifestRefreshTgtInterval"
 )
 
 var TopologyChangeCheckIntervalConfig = &SettingsConfig{10, &Range{1, 100}}
@@ -299,6 +303,8 @@ var MaxCountThroughputDropConfig = &SettingsConfig{3, &Range{1, 1000}}
 var FilteringInternalKeyConfig = &SettingsConfig{base.InternalKeyKey, nil}
 var FilteringInternalXattrConfig = &SettingsConfig{base.InternalKeyXattr, nil}
 var RemoteClusterAlternateAddrChangeConfig = &SettingsConfig{base.RemoteClusterAlternateAddrChangeCnt, &Range{1, 1000}}
+var ManifestRefreshSrcIntervalConfig = &SettingsConfig{base.ManifestRefreshSrcInterval, &Range{1, 10000}}
+var ManifestRefreshTgtIntervalConfig = &SettingsConfig{base.ManifestRefreshTgtInterval, &Range{1, 10000}}
 
 var XDCRInternalSettingsConfigMap = map[string]*SettingsConfig{
 	TopologyChangeCheckIntervalKey:                TopologyChangeCheckIntervalConfig,
@@ -388,6 +394,8 @@ var XDCRInternalSettingsConfigMap = map[string]*SettingsConfig{
 	FilteringInternalKey:                          FilteringInternalKeyConfig,
 	FilteringInternalXattr:                        FilteringInternalXattrConfig,
 	RemoteClusterAlternateAddrChangeKey:           RemoteClusterAlternateAddrChangeConfig,
+	ManifestRefreshSrcIntervalKey:                 ManifestRefreshSrcIntervalConfig,
+	ManifestRefreshTgtIntervalKey:                 ManifestRefreshTgtIntervalConfig,
 }
 
 func InitConstants(xmemMaxIdleCountLowerBound int, xmemMaxIdleCountUpperBound int) {

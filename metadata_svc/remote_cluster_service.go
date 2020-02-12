@@ -130,6 +130,13 @@ type RemoteClusterAgent struct {
 	// utilites service
 	utils utilities.UtilsIface
 
+	// Each bucket on one remote cluster will have one centralized getter
+	bucketManifestGetters map[string]*BucketManifestGetter
+	// bucket refcounts
+	bucketRefCnt map[string]uint32
+	// protects the map
+	bucketMtx sync.RWMutex
+
 	/* Staging changes area */
 	pendingRef      metadata.RemoteClusterReference
 	pendingRefNodes base.StringPairList
@@ -1136,6 +1143,97 @@ func (agent *RemoteClusterAgent) setMetadataChangeCb(newCb base.MetadataChangeHa
 	agent.metadataChangeCallback = newCb
 }
 
+func (agent *RemoteClusterAgent) RegisterBucketRequest(bucketName string) error {
+	agent.bucketMtx.Lock()
+	defer agent.bucketMtx.Unlock()
+
+	manifestGetter, ok := agent.bucketManifestGetters[bucketName]
+	if !ok {
+		// Use TopologyChangeCheckInterval as min interval between pulls, while agent refreshes at a longer interval
+		manifestGetter = NewBucketManifestGetter(bucketName, agent, time.Duration(base.ManifestRefreshTgtInterval)*time.Second)
+		agent.bucketManifestGetters[bucketName] = manifestGetter
+	}
+
+	_, ok = agent.bucketRefCnt[bucketName]
+	if !ok {
+		agent.bucketRefCnt[bucketName] = uint32(0)
+	}
+	agent.bucketRefCnt[bucketName]++
+
+	return nil
+}
+
+func (agent *RemoteClusterAgent) UnRegisterBucketRefresh(bucketName string) error {
+	agent.bucketMtx.Lock()
+	defer agent.bucketMtx.Unlock()
+
+	_, ok := agent.bucketRefCnt[bucketName]
+	if !ok {
+		return base.ErrorInvalidInput
+	}
+
+	if agent.bucketRefCnt[bucketName] > uint32(0) {
+		agent.bucketRefCnt[bucketName]--
+	}
+
+	if agent.bucketRefCnt[bucketName] == uint32(0) {
+		delete(agent.bucketManifestGetters, bucketName)
+	}
+	return nil
+}
+
+// Implements CollectionsManifestOps interface
+func (agent *RemoteClusterAgent) CollectionManifestGetter(bucketName string) (*metadata.CollectionsManifest, error) {
+	agent.refMtx.RLock()
+	connStr, err := agent.reference.MyConnectionStr()
+	if err != nil {
+		agent.refMtx.RUnlock()
+		agent.logger.Errorf("Unable to get connectionStr with err: %v\n", err)
+		return nil, err
+	}
+	username, password, httpAuthMech, certificate, sanInCertificate, clientCertificate,
+		clientKey, err := agent.reference.MyCredentials()
+	agent.refMtx.RUnlock()
+
+	if err != nil {
+		agent.logger.Errorf("Unable to get credentials with err: %v\n", err)
+		return nil, err
+	}
+
+	return agent.utils.GetCollectionsManifest(connStr, bucketName, username, password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey, agent.logger)
+}
+
+// refreshIfPossible to prevent overwhelming target outside of refresh interval
+func (agent *RemoteClusterAgent) GetManifest(bucketName string, refreshIfPossible bool) *metadata.CollectionsManifest {
+	agent.bucketMtx.RLock()
+	getter, ok := agent.bucketManifestGetters[bucketName]
+	if !ok {
+		agent.logger.Warnf("Unable to find manifest getter for bucket %v", bucketName)
+		agent.bucketMtx.RUnlock()
+		return nil
+	}
+	agent.bucketMtx.RUnlock()
+
+	return getter.GetManifest()
+}
+
+func (agent *RemoteClusterAgent) refreshBucketsManifests() {
+	var waitGrp sync.WaitGroup
+	agent.bucketMtx.RLock()
+	defer agent.bucketMtx.RUnlock()
+
+	for _, getter := range agent.bucketManifestGetters {
+		waitGrp.Add(1)
+		refreshFunc := func() {
+			getter.GetManifest()
+			waitGrp.Done()
+		}
+		go refreshFunc()
+	}
+
+	waitGrp.Wait()
+}
+
 type RemoteClusterService struct {
 	metakv_svc        service_def.MetadataSvc
 	uilog_svc         service_def.UILogSvc
@@ -1809,6 +1907,8 @@ func (service *RemoteClusterService) NewRemoteClusterAgent() *RemoteClusterAgent
 		logger:                 service.logger,
 		metadataChangeCallback: service.metadata_change_callback,
 		refresherFinCh:         make(chan bool, 1),
+		bucketRefCnt:           make(map[string]uint32),
+		bucketManifestGetters:  make(map[string]*BucketManifestGetter),
 	}
 	return newAgent
 }
@@ -2158,4 +2258,53 @@ func (service *RemoteClusterService) updateMetaSvc(metaSvc service_def.MetadataS
 	for _, agent := range service.agentMap {
 		agent.metakvSvc = metaSvc
 	}
+}
+
+func (service *RemoteClusterService) GetManifestByUuid(uuid, bucketName string, forceRefresh bool) (*metadata.CollectionsManifest, error) {
+	service.agentMutex.RLock()
+	agent, ok := service.agentCacheUuidMap[uuid]
+	service.agentMutex.RUnlock()
+
+	if !ok {
+		return nil, fmt.Errorf("Unable to find remote cluster agent given cluster UUID: %v\n", uuid)
+	}
+
+	manifest := agent.GetManifest(bucketName, forceRefresh)
+	return manifest, nil
+}
+
+// TODO - MB-37885
+func (service *RemoteClusterService) RequestRemoteMonitoring(spec *metadata.ReplicationSpecification) error {
+	if spec == nil {
+		return base.ErrorInvalidInput
+	}
+
+	agent, err := service.getAgentByReplSpec(spec)
+	if err != nil {
+		return err
+	}
+	return agent.RegisterBucketRequest(spec.TargetBucketName)
+}
+
+// TODO - MB-37885
+func (service *RemoteClusterService) UnRequestRemoteMonitoring(spec *metadata.ReplicationSpecification) error {
+	if spec == nil {
+		return base.ErrorInvalidInput
+	}
+
+	agent, err := service.getAgentByReplSpec(spec)
+	if err != nil {
+		return err
+	}
+	return agent.UnRegisterBucketRefresh(spec.TargetBucketName)
+}
+
+func (service *RemoteClusterService) getAgentByReplSpec(spec *metadata.ReplicationSpecification) (*RemoteClusterAgent, error) {
+	service.agentMutex.RLock()
+	agent := service.agentCacheUuidMap[spec.TargetClusterUUID]
+	defer service.agentMutex.RUnlock()
+	if agent == nil {
+		return nil, getUnknownCluster("uuid", spec.TargetClusterUUID)
+	}
+	return agent, nil
 }

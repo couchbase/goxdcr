@@ -17,6 +17,8 @@ const (
 	StartUpTime         string = "startup_time"
 	FilteredCnt         string = "filtered_items_cnt"
 	FilteredFailedCnt   string = "filtered_failed_cnt"
+	SourceManifest      string = "source_manifest"
+	TargetManifest      string = "target_manifest"
 )
 
 type CheckpointRecord struct {
@@ -36,9 +38,13 @@ type CheckpointRecord struct {
 	Filtered_Items_Cnt uint64 `json:"filtered_items_cnt"`
 	// Number of items failed filter
 	Filtered_Failed_Cnt uint64 `json:"filtered_failed_cnt"`
+	// Manifests uid corresponding to this checkpoint
+	SourceManifest uint64 `json:"source_manifest"`
+	TargetManifest uint64 `json:"target_manifest"`
 }
 
-func NewCheckpointRecord(failoverUuid, seqno, dcpSnapSeqno, dcpSnapEnd, targetSeqno, filteredItems, filterFailed uint64) *CheckpointRecord {
+func NewCheckpointRecord(failoverUuid, seqno, dcpSnapSeqno, dcpSnapEnd, targetSeqno, filteredItems, filterFailed,
+	srcManifest, tgtManifest uint64) *CheckpointRecord {
 	return &CheckpointRecord{
 		Failover_uuid:          failoverUuid,
 		Seqno:                  seqno,
@@ -47,6 +53,8 @@ func NewCheckpointRecord(failoverUuid, seqno, dcpSnapSeqno, dcpSnapEnd, targetSe
 		Target_Seqno:           targetSeqno,
 		Filtered_Items_Cnt:     filteredItems,
 		Filtered_Failed_Cnt:    filterFailed,
+		SourceManifest:         srcManifest,
+		TargetManifest:         tgtManifest,
 	}
 }
 

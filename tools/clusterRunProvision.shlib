@@ -674,13 +674,14 @@ function runCbWorkloadGenCollection {
 
 	manifestOutput=`getManifest $clusterName $bucketName`
 	if (( $? != 0 ));then
-		echo "Error retrieving manifest"
+		echo "Error retrieving manifest for cluster $clusterName bucket $bucketName"
 		return 1
 	fi
 
 	collectionId=`getCollectionIdFromScopeAndCollectionName "$manifestOutput" "$scopeName" "$collectionName"`
 	if (( $? != 0 ));then
-		echo "Error retrieving collection ID"
+		echo "Error retrieving collection ID for scope $scopeName collection $collectionName"
+		echo "Output: $manifestOutput"
 		return 1
 	fi
 
@@ -712,24 +713,6 @@ function getManifest {
 	fi
 
 	$CURL -u $DEFAULT_ADMIN:$DEFAULT_PW -X GET http://localhost:$port/$POOLS_DEFAULT_BUCKETS_PATH/$bucketName/collections
-}
-
-declare -a JQ_KEYS_FILTER_FUNC_ARR
-
-function _jqFilterArray {
-	local jqOutputAsInput="$1"
-	# clear array
-	JQ_KEYS_FILTER_FUNC_ARR=()
-
-	for k in `echo "$jqOutputAsInput"`
-	do
-		if [[ "$k" == '[' ]] || [[ "$k" == ']' ]];then
-			continue
-		fi
-		# take out last comma and quotes
-		key=`echo "$k"| sed s/',$'//g | sed s/'"'//g`
-		JQ_KEYS_FILTER_FUNC_ARR[${#JQ_KEYS_FILTER_FUNC_ARR[@]}]="$key"
-	done
 }
 
 # Called hexString because input is in a form of double quoted string
@@ -781,33 +764,33 @@ function getCollectionIdFromScopeAndCollectionName {
 	local requestedScopeName=$2
 	local requestedCollectionName=$3
 
-	local scopesRaw=`echo "$manifest" | jq '.scopes'`
+	local scopesList=`echo "$manifest" | jq '.scopes'`
+	local scopesListLen=`echo "$manifest" | jq '.scopes | length'`
 
-	local scopesKeys=`echo "$scopesRaw" | jq 'keys'`
-	_jqFilterArray "${scopesKeys}"
-
-
-	for scopeName in "${JQ_KEYS_FILTER_FUNC_ARR[@]}"
+	for (( i=0; $i < $scopesListLen; i=$(($i+1)) ))
 	do
+		local scopeOutput=`echo "$scopesList" | jq .[$i]`
+		# Requested doesn't have double quotes, but manifest output does
+		local scopeName=`echo "$scopeOutput" | jq '.name' | sed 's/"//g'`
 		if [[ "$scopeName" == "$requestedScopeName" ]];then
-			local scopeOutput=`echo "$scopesRaw" | jq ".${scopeName}"`
-			local scopeUID=`echo "$scopeOutput" | jq '.uid'`
-			local collectionsKeysRaw=`echo "$scopeOutput" | jq '.collections|keys'`
-			_jqFilterArray "$collectionsKeysRaw"
-
-			for collectionName in "${JQ_KEYS_FILTER_FUNC_ARR[@]}"
+			local collectionsList=`echo "$scopeOutput" | jq '.collections'`
+			local collectionsListLen=`echo "$scopeOutput" | jq '.collections | length'`
+			for (( j=0; $j < $collectionsListLen; j=$(($j+1)) ))
 			do
+				local collectionsOutput=`echo "$collectionsList" | jq .[$j]`
+				# Requested doesn't have double quotes, but manifest output does
+				local collectionName=`echo "$collectionsOutput" | jq '.name' | sed 's/"//g'`
+				local collectionUID=`echo "$collectionsOutput" | jq '.uid'`
+				local collectionUIDdec=`hexStringToDec "$collectionUID"`
 				if [[ "$collectionName" == "$requestedCollectionName" ]];then
-					local collectionsOutputRaw=`echo "$scopeOutput" | jq '.collections'`
-					local collectionOutput=`echo "$collectionsOutputRaw" | jq ".${collectionName}"`
-					local collectionUID=`echo "$collectionOutput" | jq '.uid'`
-					echo "$collectionUID"
+					echo "$collectionUIDdec"
 					return 0
 				fi
 			done
 		fi
 	done
-	# not found
+
+	# Not found
 	echo ""
 	return 1
 }

@@ -99,6 +99,8 @@ type replicationManager struct {
 	internal_settings_svc service_def.InternalSettingsSvc
 	// Mockable utils object
 	utils utilities.UtilsIface
+	// Collections Manifests service
+	collectionsManifestSvc service_def.CollectionsManifestSvc
 
 	once sync.Once
 
@@ -135,7 +137,8 @@ func StartReplicationManager(sourceKVHost string,
 	bucket_settings_svc service_def.BucketSettingsSvc,
 	internal_settings_svc service_def.InternalSettingsSvc,
 	throughput_throttler_svc service_def.ThroughputThrottlerSvc,
-	utilitiesIn utilities.UtilsIface) {
+	utilitiesIn utilities.UtilsIface,
+	collectionsManifestSvc service_def.CollectionsManifestSvc) {
 
 	replication_mgr.once.Do(func() {
 		// ns_server shutdown protocol: poll stdin and exit upon reciept of EOF
@@ -148,7 +151,10 @@ func StartReplicationManager(sourceKVHost string,
 		replication_mgr.utils = utilitiesIn
 
 		// initializes replication manager
-		replication_mgr.init(repl_spec_svc, remote_cluster_svc, cluster_info_svc, xdcr_topology_svc, replication_settings_svc, checkpoint_svc, capi_svc, audit_svc, uilog_svc, global_setting_svc, bucket_settings_svc, internal_settings_svc, throughput_throttler_svc)
+		replication_mgr.init(repl_spec_svc, remote_cluster_svc, cluster_info_svc,
+			xdcr_topology_svc, replication_settings_svc, checkpoint_svc, capi_svc,
+			audit_svc, uilog_svc, global_setting_svc, bucket_settings_svc, internal_settings_svc,
+			throughput_throttler_svc, collectionsManifestSvc)
 
 		// start replication manager supervisor
 		// TODO should we make heart beat settings configurable?
@@ -289,6 +295,8 @@ func initConstants(xdcr_topology_svc service_def.XDCRCompTopologySvc, internal_s
 		internal_settings.Values[metadata.FilteringInternalKey].(string),
 		internal_settings.Values[metadata.FilteringInternalXattr].(string),
 		internal_settings.Values[metadata.RemoteClusterAlternateAddrChangeKey].(int),
+		internal_settings.Values[metadata.ManifestRefreshSrcIntervalKey].(int),
+		internal_settings.Values[metadata.ManifestRefreshTgtIntervalKey].(int),
 	)
 }
 
@@ -406,7 +414,8 @@ func (rm *replicationManager) init(
 	global_setting_svc service_def.GlobalSettingsSvc,
 	bucket_settings_svc service_def.BucketSettingsSvc,
 	internal_settings_svc service_def.InternalSettingsSvc,
-	throughput_throttler_svc service_def.ThroughputThrottlerSvc) {
+	throughput_throttler_svc service_def.ThroughputThrottlerSvc,
+	collectionsManifestSvc service_def.CollectionsManifestSvc) {
 
 	rm.GenericSupervisor = *supervisor.NewGenericSupervisor(base.ReplicationManagerSupervisorId, log.DefaultLoggerContext, rm, nil, rm.utils)
 	rm.repl_spec_svc = repl_spec_svc
@@ -422,8 +431,12 @@ func (rm *replicationManager) init(
 	rm.global_setting_svc = global_setting_svc
 	rm.bucket_settings_svc = bucket_settings_svc
 	rm.internal_settings_svc = internal_settings_svc
+	rm.collectionsManifestSvc = collectionsManifestSvc
 
-	fac := factory.NewXDCRFactory(repl_spec_svc, remote_cluster_svc, cluster_info_svc, xdcr_topology_svc, checkpoint_svc, capi_svc, uilog_svc, bucket_settings_svc, throughput_throttler_svc, log.DefaultLoggerContext, log.DefaultLoggerContext, rm, rm.utils)
+	fac := factory.NewXDCRFactory(repl_spec_svc, remote_cluster_svc, cluster_info_svc,
+		xdcr_topology_svc, checkpoint_svc, capi_svc, uilog_svc, bucket_settings_svc,
+		throughput_throttler_svc, log.DefaultLoggerContext, log.DefaultLoggerContext,
+		rm, rm.utils, collectionsManifestSvc)
 
 	rm.pipelineMgr = pipeline_manager.NewPipelineManager(fac, repl_spec_svc, xdcr_topology_svc, remote_cluster_svc, cluster_info_svc, checkpoint_svc, uilog_svc, log.DefaultLoggerContext, rm.utils)
 

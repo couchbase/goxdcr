@@ -158,6 +158,16 @@ func main() {
 
 		internalSettings_svc := metadata_svc.NewInternalSettingsSvc(metakv_svc, nil)
 
+		checkpointsService := metadata_svc.NewCheckpointsService(metakv_svc, nil)
+		manifestsService := metadata_svc.NewManifestsService(metakv_svc, nil)
+		collectionsManifestService, err := metadata_svc.NewCollectionsManifestService(remote_cluster_svc,
+			replication_spec_svc, uilog_svc, log.DefaultLoggerContext, utils, checkpointsService,
+			top_svc, manifestsService)
+		if err != nil {
+			fmt.Printf("Error starting collections manifest service. err=%v\n", err)
+			os.Exit(1)
+		}
+
 		// start replication manager in normal mode
 		rm.StartReplicationManager(host,
 			uint16(options.xdcrRestPort),
@@ -167,7 +177,7 @@ func main() {
 			cluster_info_svc,
 			top_svc,
 			metadata_svc.NewReplicationSettingsSvc(metakv_svc, nil, top_svc),
-			metadata_svc.NewCheckpointsService(metakv_svc, nil),
+			checkpointsService,
 			service_impl.NewCAPIService(cluster_info_svc, nil, utils),
 			audit_svc,
 			uilog_svc,
@@ -175,7 +185,8 @@ func main() {
 			bucketSettings_svc,
 			internalSettings_svc,
 			service_impl.NewThroughputThrottlerSvc(nil),
-			utils)
+			utils,
+			collectionsManifestService)
 
 		// keep main alive in normal mode
 		<-done
