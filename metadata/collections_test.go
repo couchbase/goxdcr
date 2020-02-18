@@ -360,3 +360,53 @@ func TestCollectionsMapping(t *testing.T) {
 	assert.True(mapping.IsSameAs(&mapping2))
 	fmt.Println("============== Test case end: TestCollectionsMapping =================")
 }
+
+func TestCollectionsNsMapping(t *testing.T) {
+	assert := assert.New(t)
+	fmt.Println("============== Test case start: TestCollectionsMapping =================")
+	mapping := make(CollectionNamespaceMapping)
+	implicitEntry := &base.CollectionNamespace{"scope", "collection"}
+	implicitEntry2 := &base.CollectionNamespace{"scope", "collection"}
+	implicitEntry3 := &base.CollectionNamespace{"scope", "collection1"}
+
+	// This tests to make sure that even though using diff structs, the info inside the map
+	// is de-referenced and deduped to work correctly
+	mapping.AddSingleMapping(implicitEntry, implicitEntry)
+	assert.Equal(1, len(mapping))
+	mapping.AddSingleMapping(implicitEntry2, implicitEntry2)
+	assert.Equal(1, len(mapping))
+	for _, v := range mapping {
+		assert.Equal(1, len(v))
+	}
+
+	oldMap := mapping.Clone()
+	mapping.AddSingleMapping(implicitEntry2, implicitEntry)
+	assert.Equal(1, len(mapping))
+	for _, v := range mapping {
+		assert.Equal(1, len(v))
+	}
+	assert.True(oldMap.IsSame(mapping))
+
+	oldMap = mapping.Clone()
+	mapping.AddSingleMapping(implicitEntry2, implicitEntry3)
+	assert.Equal(1, len(mapping))
+	for _, v := range mapping {
+		assert.Equal(2, len(v))
+	}
+	assert.False(oldMap.IsSame(mapping))
+
+	//	fmt.Printf("Before Delete MappingOutput: %v\n", mapping.String())
+	// Test delete
+	mapping = mapping.Delete(oldMap)
+	assert.Equal(1, len(mapping))
+	for _, v := range mapping {
+		assert.Equal(1, len(v))
+	}
+
+	//	fmt.Printf("After Delete MappingOutput: %v\n", mapping.String())
+	confirmMapping := make(CollectionNamespaceMapping)
+	confirmMapping.AddSingleMapping(implicitEntry2, implicitEntry3)
+	assert.True(confirmMapping.IsSame(mapping))
+
+	fmt.Println("============== Test case end: TestCollectionsMapping =================")
+}

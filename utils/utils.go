@@ -617,10 +617,30 @@ func (u *Utilities) SendHELOWithFeatures(client mcc.ClientIface, userAgent strin
 	// Initially set initial respondedFeatures to None since no compression negotiated should not be invalid
 	respondedFeatures.CompressionType = base.CompressionTypeNone
 
-	heloReq := u.ComposeHELORequest(userAgent, requestedFeatures)
+	// Translate XDCR feature set to gomemcached featureset
+	var clientFeatureSet mcc.Features
 
-	var response *mc.MCResponse
-	response, err = u.sendHELORequest(client, heloReq, userAgent, readTimeout, writeTimeout, logger)
+	// TCP No delay is always first
+	clientFeatureSet = append(clientFeatureSet, mcc.FeatureTcpNoDelay)
+
+	if requestedFeatures.Xattribute {
+		clientFeatureSet = append(clientFeatureSet, mcc.FeatureXattr)
+	}
+
+	if requestedFeatures.CompressionType == base.CompressionTypeSnappy {
+		clientFeatureSet = append(clientFeatureSet, mcc.FeatureSnappyCompression)
+	}
+
+	if requestedFeatures.Xerror {
+		clientFeatureSet = append(clientFeatureSet, mcc.FeatureXerror)
+	}
+
+	if requestedFeatures.Collections {
+		clientFeatureSet = append(clientFeatureSet, mcc.FeatureCollections)
+	}
+
+	response, err := client.EnableFeatures(clientFeatureSet)
+
 	if err != nil {
 		logger.Errorf("Received error response from HELO command. userAgent=%v, err=%v.", userAgent, err)
 	} else if response.Status != mc.SUCCESS {
@@ -650,6 +670,9 @@ func (u *Utilities) SendHELOWithFeatures(client mcc.ClientIface, userAgent strin
 			}
 			if feature == base.HELO_FEATURE_XERROR {
 				respondedFeatures.Xerror = true
+			}
+			if feature == base.HELO_FEATURE_COLLECTIONS {
+				respondedFeatures.Collections = true
 			}
 			pos += 2
 		}

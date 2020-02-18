@@ -1175,6 +1175,8 @@ func (dcp_collector *dcpCollector) ProcessEvent(event *common.Event) error {
 			metric_map[SET_RECEIVED_DCP_METRIC].(metrics.Counter).Inc(1)
 		} else if uprEvent.Opcode == mc.UPR_EXPIRATION {
 			metric_map[EXPIRY_RECEIVED_DCP_METRIC].(metrics.Counter).Inc(1)
+		} else if uprEvent.IsSystemEvent() {
+			// ignore system events
 		} else {
 			dcp_collector.stats_mgr.logger.Warnf("Invalid opcode, %v, in DataReceived event from %v.", uprEvent.Opcode, event.Component.Id())
 		}
@@ -1304,7 +1306,6 @@ func (r_collector *routerCollector) Mount(pipeline common.Pipeline, stats_mgr *S
 	}
 
 	async_listener_map := pipeline_pkg.GetAllAsyncComponentEventListeners(pipeline)
-	pipeline_utils.RegisterAsyncComponentEventHandler(async_listener_map, base.DataFilteredEventListener, r_collector)
 	pipeline_utils.RegisterAsyncComponentEventHandler(async_listener_map, base.DataFilteredEventListener, r_collector)
 	pipeline_utils.RegisterAsyncComponentEventHandler(async_listener_map, base.DataThroughputThrottledEventListener, r_collector)
 

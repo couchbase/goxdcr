@@ -100,7 +100,7 @@ type ReplicationSpecService struct {
 	cache                    *MetadataCache
 	cache_lock               *sync.Mutex
 	logger                   *log.CommonLogger
-	metadata_change_callback base.MetadataChangeHandlerCallback
+	metadata_change_callback []base.MetadataChangeHandlerCallback
 	utils                    utilities.UtilsIface
 
 	// Replication Spec GC Counters
@@ -131,7 +131,7 @@ func NewReplicationSpecService(uilog_svc service_def.UILogSvc, remote_cluster_sv
 }
 
 func (service *ReplicationSpecService) SetMetadataChangeHandlerCallback(call_back base.MetadataChangeHandlerCallback) {
-	service.metadata_change_callback = call_back
+	service.metadata_change_callback = append(service.metadata_change_callback, call_back)
 }
 
 func (service *ReplicationSpecService) initCache() {
@@ -1082,15 +1082,22 @@ func (service *ReplicationSpecService) updateCacheInternal(specId string, newSpe
 		service.remote_cluster_svc.RequestRemoteMonitoring(newSpec)
 	}
 
-	if updated && service.metadata_change_callback != nil {
-		err = service.metadata_change_callback(specId, oldSpec, newSpec)
-		if err != nil {
-			service.logger.Error(err.Error())
-			return err
+	var sumErr error
+	if updated && len(service.metadata_change_callback) > 0 {
+		for _, callback := range service.metadata_change_callback {
+			err = callback(specId, oldSpec, newSpec)
+			if err != nil {
+				service.logger.Error(err.Error())
+				if sumErr == nil {
+					sumErr = err
+				} else {
+					sumErr = fmt.Errorf("%v; %v", sumErr, err)
+				}
+			}
 		}
 	}
 
-	return nil
+	return sumErr
 }
 
 func (service *ReplicationSpecService) writeUiLog(spec *metadata.ReplicationSpecification, action, reason string) {

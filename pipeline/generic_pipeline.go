@@ -173,6 +173,13 @@ func (genericPipeline *GenericPipeline) startPart(part common.Part, settings met
 
 	// start downstreams, such as CAPI or XMEM nozzles, before we start the actual part (i.e. DCP nozzle)
 	if part.Connector() != nil {
+		if part.Connector().IsStartable() {
+			err = part.Connector().Start()
+			if err != nil {
+				err_ch <- base.ComponentError{part.Connector().Id(), err}
+			}
+		}
+
 		downstreamParts := part.Connector().DownStreams()
 		waitGrp := &sync.WaitGroup{}
 		for _, p := range downstreamParts {

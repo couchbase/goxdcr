@@ -15,6 +15,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/couchbase/gomemcached"
+	mcc "github.com/couchbase/gomemcached/client"
 	mrand "math/rand"
 	"reflect"
 	"sync"
@@ -94,11 +95,29 @@ type ErrorInfo struct {
 	ErrorMsg string
 }
 
+type CollectionNamespace struct {
+	ScopeName      string
+	CollectionName string
+}
+
+type WrappedUprEvent struct {
+	UprEvent     *mcc.UprEvent
+	ColNamespace *CollectionNamespace
+}
+
+type TargetCollectionInfo struct {
+	// The manifestID used when retrying
+	ManifestId      uint64
+	RoutingRetryCnt int
+}
+
 type WrappedMCRequest struct {
-	Seqno      uint64
-	Req        *gomemcached.MCRequest
-	Start_time time.Time
-	UniqueKey  string
+	Seqno        uint64
+	Req          *gomemcached.MCRequest
+	Start_time   time.Time
+	UniqueKey    string
+	ColNamespace *CollectionNamespace
+	ColInfo      *TargetCollectionInfo
 }
 
 func (req *WrappedMCRequest) ConstructUniqueKey() {
@@ -630,3 +649,5 @@ func (list_obj *SortedSeqnoListWithLock) TruncateSeqnos(through_seqno uint64) {
 		list_obj.seqno_list = seqno_list[index:]
 	}
 }
+
+type Uleb128 []byte

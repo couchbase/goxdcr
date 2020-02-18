@@ -1,6 +1,7 @@
 package metadata
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
@@ -963,5 +964,206 @@ func (c ManifestsList) Sha256() (result [sha256.Size]byte, err error) {
 		err = fmt.Errorf("Invalid sha256 hash - list: %v", c.String())
 	}
 	copy(result[:], tempSlice[:sha256.Size])
+	return
+}
+
+type CollectionNamespaceList []*base.CollectionNamespace
+
+func (c CollectionNamespaceList) Len() int      { return len(c) }
+func (c CollectionNamespaceList) Swap(i, j int) { c[i], c[j] = c[j], c[i] }
+func (c CollectionNamespaceList) Less(i, j int) bool {
+	if c[i].ScopeName == c[j].ScopeName {
+		return c[i].CollectionName < c[j].CollectionName
+	} else {
+		return c[i].ScopeName < c[j].ScopeName
+	}
+}
+
+func SortCollectionsNamespaceList(list CollectionNamespaceList) CollectionNamespaceList {
+	sort.Sort(list)
+	return list
+}
+
+func (c CollectionNamespaceList) String() string {
+	var buffer bytes.Buffer
+	for _, j := range c {
+		buffer.WriteString(fmt.Sprintf("|Scope: %v Collection: %v| ", j.ScopeName, j.CollectionName))
+	}
+	return buffer.String()
+}
+
+func (c CollectionNamespaceList) IsSame(other CollectionNamespaceList) bool {
+	if len(c) != len(other) {
+		return false
+	}
+
+	aList := SortCollectionsNamespaceList(c)
+	bList := SortCollectionsNamespaceList(other)
+
+	for i, col := range aList {
+		if *col != *bList[i] {
+			return false
+		}
+	}
+
+	return true
+}
+
+func (c CollectionNamespaceList) Clone() (other CollectionNamespaceList) {
+	for _, j := range c {
+		ns := &base.CollectionNamespace{}
+		*ns = *j
+		other = append(other, ns)
+	}
+	return
+}
+
+func (c CollectionNamespaceList) Contains(namespace *base.CollectionNamespace) bool {
+	if namespace == nil {
+		return false
+	}
+
+	for _, j := range c {
+		if *j == *namespace {
+			return true
+		}
+	}
+	return false
+}
+
+// This is used for namespace mapping that transcends over manifest lifecycles
+// Need to use pointers because of golang hash map support of indexable type
+// This means rest needs to do some gymanistics, instead of just simply checking for pointers
+type CollectionNamespaceMapping map[*base.CollectionNamespace]CollectionNamespaceList
+
+func (c CollectionNamespaceMapping) String() string {
+	var buffer bytes.Buffer
+	for src, tgtList := range c {
+		buffer.WriteString(fmt.Sprintf("SOURCE ||Scope: %v Collection: %v|| -> %v\n", src.ScopeName, src.CollectionName, CollectionNamespaceList(tgtList).String()))
+	}
+	return buffer.String()
+}
+
+func (c CollectionNamespaceMapping) Clone() (clone CollectionNamespaceMapping) {
+	clone = make(CollectionNamespaceMapping)
+	for k, v := range c {
+		srcClone := &base.CollectionNamespace{}
+		*srcClone = *k
+		clone[srcClone] = v.Clone()
+	}
+	return
+}
+
+// The input "src" does not have to match the actual key pointer in the map, just the right matching values
+// Returns the srcPtr for referring to the exact tgtList
+func (c CollectionNamespaceMapping) Get(src *base.CollectionNamespace) (srcPtr *base.CollectionNamespace, tgt CollectionNamespaceList, exists bool) {
+	if src == nil {
+		return
+	}
+
+	for k, v := range c {
+		if *k == *src {
+			// found
+			tgt = v
+			srcPtr = k
+			exists = true
+			return
+		}
+	}
+	return
+}
+
+func (c CollectionNamespaceMapping) AddSingleMapping(src, tgt *base.CollectionNamespace) (alreadyExists bool) {
+	if src == nil || tgt == nil {
+		return
+	}
+
+	srcPtr, tgtList, found := c.Get(src)
+
+	if !found {
+		// Just use these as entries
+		var newList CollectionNamespaceList
+		newList = append(newList, tgt)
+		c[src] = newList
+	} else {
+		// See if tgt already exists in the current list
+		if tgtList.Contains(tgt) {
+			alreadyExists = true
+			return
+		}
+
+		c[srcPtr] = append(c[srcPtr], tgt)
+	}
+	return
+}
+
+// Given a scope and collection, see if it exists as one of the targets in the mapping
+func (c CollectionNamespaceMapping) TargetNamespaceExists(checkNamespace *base.CollectionNamespace) bool {
+	if checkNamespace == nil {
+		return false
+	}
+	for _, tgtList := range c {
+		if tgtList.Contains(checkNamespace) {
+			return true
+		}
+	}
+	return false
+}
+
+// Given a set of added scopesmap, return a subset of c that contains elements in this added
+func (c CollectionNamespaceMapping) GetSubsetBasedOnAddedTargets(added ScopesMap) (retMap CollectionNamespaceMapping) {
+	retMap = make(CollectionNamespaceMapping)
+
+	for src, tgtList := range c {
+		for _, tgt := range tgtList {
+			_, found := added.GetCollectionByNames(tgt.ScopeName, tgt.CollectionName)
+			if found {
+				retMap.AddSingleMapping(src, tgt)
+			}
+		}
+	}
+	return
+}
+
+func (c CollectionNamespaceMapping) IsSame(other CollectionNamespaceMapping) bool {
+	for src, tgtList := range c {
+		_, otherTgtList, exists := other.Get(src)
+		if !exists {
+			return false
+		}
+		if !tgtList.IsSame(otherTgtList) {
+			return false
+		}
+	}
+	return true
+}
+
+func (c CollectionNamespaceMapping) Delete(subset CollectionNamespaceMapping) (result CollectionNamespaceMapping) {
+	// Instead of deleting, just make a brand new map
+	result = make(CollectionNamespaceMapping)
+
+	// Subtract B from A
+	for aSrc, aTgtList := range c {
+		_, bTgtList, exists := subset.Get(aSrc)
+		if !exists {
+			// No need to delete
+			result[aSrc] = aTgtList
+			continue
+		}
+		if aTgtList.IsSame(bTgtList) {
+			// The whole thing is deleted
+			continue
+		}
+		// Gather the subset list
+		var newList CollectionNamespaceList
+		for _, ns := range aTgtList {
+			if bTgtList.Contains(ns) {
+				continue
+			}
+			newList = append(newList, ns)
+		}
+		result[aSrc] = newList
+	}
+
 	return
 }

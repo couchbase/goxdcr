@@ -297,6 +297,7 @@ func initConstants(xdcr_topology_svc service_def.XDCRCompTopologySvc, internal_s
 		internal_settings.Values[metadata.RemoteClusterAlternateAddrChangeKey].(int),
 		internal_settings.Values[metadata.ManifestRefreshSrcIntervalKey].(int),
 		internal_settings.Values[metadata.ManifestRefreshTgtIntervalKey].(int),
+		internal_settings.Values[metadata.MaxCollectionsRoutingRetryKey].(int),
 	)
 }
 
@@ -348,6 +349,8 @@ func (rm *replicationManager) initMetadataChangeMonitor() {
 		rm.utils,
 		rm.resourceMgr)
 	mcm.RegisterListener(replicationSpecChangeListener)
+	// ReplSpecSvc allows multiple callbacks - add the collections one first to be called first
+	rm.repl_spec_svc.SetMetadataChangeHandlerCallback(rm.collectionsManifestSvc.ReplicationSpecChangeCallback)
 	rm.repl_spec_svc.SetMetadataChangeHandlerCallback(replicationSpecChangeListener.replicationSpecChangeHandlerCallback)
 
 	mcm.Start()

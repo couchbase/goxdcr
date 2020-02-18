@@ -815,6 +815,8 @@ type XmemNozzle struct {
 	stateLock sync.RWMutex
 
 	vbList []uint16
+
+	collectionEnabled uint32
 }
 
 func NewXmemNozzle(id string,
@@ -864,6 +866,7 @@ func NewXmemNozzle(id string,
 		targetBucketUuid:    targetBucketUuid,
 		utils:               utilsIn,
 		vbList:              vbList,
+		collectionEnabled:   1, /*Default to true unless otherwise disabled*/
 	}
 
 	xmem.last_ten_batches_size = []uint32{0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
@@ -1336,7 +1339,7 @@ func (xmem *XmemNozzle) preprocessMCRequest(req *base.WrappedMCRequest) error {
 		mc_req.DataType = mc_req.DataType & ^(base.PROTOCOL_BINARY_DATATYPE_XATTR)
 		// strip xattr off the mutation body
 		if len(mc_req.Body) < 4 {
-			xmem.Logger().Errorf("%v mutation body is too short to store xattr. key=%v%v%v, body=%v%v%v", xmem.Id(), base.UdTagBegin, mc_req.Key, base.UdTagEnd,
+			xmem.Logger().Errorf("%v mutation body is too short to store xattr. key=%v%v%v, body=%v%v%v", xmem.Id(), base.UdTagBegin, string(mc_req.Key), base.UdTagEnd,
 				base.UdTagBegin, mc_req.Body, base.UdTagEnd)
 			return fmt.Errorf("%v mutation body is too short to store xattr.", xmem.Id())
 		}
@@ -1539,9 +1542,9 @@ func (xmem *XmemNozzle) batchGetMetaHandler(count int, finch chan bool, return_c
 							if isTopologyChangeMCError(response.Status) {
 								vb_err := fmt.Errorf("Received error %v on vb %v\n", base.ErrorNotMyVbucket, vbno)
 								xmem.handleVBError(vbno, vb_err)
+							} else if isCollectionMappingError(response.Status) {
+								// TODO - MB-38023
 							} else {
-								// this response requires connection reset
-
 								// log the corresponding request to facilitate debugging
 								xmem.Logger().Warnf("%v received error from getMeta client. key=%v%v%v, seqno=%v, response=%v%v%v\n", xmem.Id(), base.UdTagBegin, key, base.UdTagEnd, seqno,
 									base.UdTagBegin, response, base.UdTagEnd)
@@ -1842,7 +1845,7 @@ func (xmem *XmemNozzle) initializeConnection() (err error) {
 		return err
 	}
 
-	xmem.Logger().Infof("%v done with initializeConnection.", xmem.Id())
+	xmem.Logger().Infof("%v done with initializeConnection. %v", xmem.Id(), features.String())
 	return err
 }
 
@@ -1857,6 +1860,13 @@ func (xmem *XmemNozzle) validateFeatures(features utilities.HELOFeatures) error 
 			// This is potentially a serious issue
 			return errors.New(errMsg)
 		}
+	}
+
+	collectionRequested := atomic.LoadUint32(&xmem.collectionEnabled) != 0
+	if collectionRequested && !features.Collections {
+		xmem.Logger().Errorf("%v target should have collection support returned with no collection support", xmem.Id())
+		// TODO - continue
+		return base.ErrorTargetCollectionsNotSupported
 	}
 
 	if !features.Xerror {
@@ -1925,6 +1935,11 @@ func (xmem *XmemNozzle) initialize(settings metadata.ReplicationSettingsMap) err
 
 	xmem.receive_token_ch = make(chan int, xmem.config.maxCount*2)
 	xmem.setRequestBuffer(newReqBuffer(uint16(xmem.config.maxCount*2), uint16(float64(xmem.config.maxCount)*0.2), xmem.receive_token_ch, xmem.Logger()))
+
+	_, exists := settings[ForceCollectionDisableKey]
+	if exists {
+		atomic.StoreUint32(&xmem.collectionEnabled, 0)
+	}
 
 	xmem.Logger().Infof("%v About to start initializing connection", xmem.Id())
 	err = xmem.initializeConnection()
@@ -2051,9 +2066,11 @@ func (xmem *XmemNozzle) receiveResponse(finch chan bool, waitGrp *sync.WaitGroup
 							if isTopologyChangeMCError(response.Status) {
 								vb_err := fmt.Errorf("Received error %v on vb %v\n", base.ErrorNotMyVbucket, req.VBucket)
 								xmem.handleVBError(req.VBucket, vb_err)
+							} else if isCollectionMappingError(response.Status) {
+								// TODO - MB-38023
 							} else {
 								// for other non-temporary errors, repair connections
-								xmem.Logger().Errorf("%v received error response from setMeta client. Repairing connection. response status=%v, opcode=%v, seqno=%v, req.Key=%v%v%v, req.Cas=%v, req.Extras=%v\n", xmem.Id(), response.Status, response.Opcode, seqno, base.UdTagBegin, req.Key, base.UdTagEnd, req.Cas, req.Extras)
+								xmem.Logger().Errorf("%v received error response from setMeta client. Repairing connection. response status=%v, opcode=%v, seqno=%v, req.Key=%v%v%v, req.Cas=%v, req.Extras=%v\n", xmem.Id(), response.Status, response.Opcode, seqno, base.UdTagBegin, string(req.Key), base.UdTagEnd, req.Cas, req.Extras)
 								xmem.repairConn(xmem.client_for_setMeta, "error response from memcached", rev)
 							}
 						} else if req != nil {
@@ -2165,6 +2182,15 @@ func isTopologyChangeMCError(resp_status mc.Status) bool {
 	case mc.NO_BUCKET:
 		fallthrough
 	case mc.NOT_MY_VBUCKET:
+		return true
+	default:
+		return false
+	}
+}
+
+func isCollectionMappingError(resp_status mc.Status) bool {
+	switch resp_status {
+	case mc.UNKNOWN_COLLECTION:
 		return true
 	default:
 		return false
@@ -2579,6 +2605,7 @@ func (xmem *XmemNozzle) sendHELO(setMeta bool) (utilities.HELOFeatures, error) {
 	var features utilities.HELOFeatures
 	features.Xattribute = true
 	features.Xerror = true
+	features.Collections = atomic.LoadUint32(&xmem.collectionEnabled) != 0
 	if setMeta {
 		// For setMeta, negotiate compression, if it is set
 		features.CompressionType = xmem.compressionSetting

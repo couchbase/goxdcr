@@ -1337,3 +1337,59 @@ func GetNodeListFromInfoMap(infoMap map[string]interface{}, logger *log.CommonLo
 
 	return activeNodeList, nil
 }
+
+// Used to encode a uint64 into a unsigned LEB128 32-bit int encoding
+// This is needed for converting collection/scope UID to setmeta/getmeta requests
+func NewUleb128(input uint64) (out Uleb128, err error) {
+	var outputBuf bytes.Buffer
+	var done bool
+
+	for !done {
+		oneByte := uint8(0x7f & input)
+		input >>= 7
+		if input == 0 {
+			done = true
+		}
+		if !done {
+			// Padd with 1 at most sig bit of the byte
+			oneByte |= 0x80
+		}
+		err = outputBuf.WriteByte(oneByte)
+		if err != nil {
+			return
+		}
+	}
+
+	bufferLen := outputBuf.Len()
+	out = make([]byte, bufferLen, bufferLen)
+	for i := 0; i < bufferLen; i++ {
+		out[i], err = outputBuf.ReadByte()
+		if err != nil {
+			// Shouldn't be here
+			out = nil
+			return
+		}
+	}
+	return
+}
+
+func (u Uleb128) Len() int {
+	return len([]byte(u))
+}
+
+func (u Uleb128) ToUint64() uint64 {
+	var result uint64 = 0
+	var shift uint = 0
+
+	for curByte := 0; curByte < u.Len(); curByte++ {
+		oneByte := u[curByte]
+		last7Bits := 0x7f & oneByte
+		result |= uint64(last7Bits) << shift
+		if oneByte&0x80 == 0 {
+			break
+		}
+		shift += 7
+	}
+
+	return result
+}

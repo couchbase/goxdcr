@@ -53,6 +53,14 @@ const (
 	DataThroughputThrottled ComponentEventType = iota
 	// Expiry field has been stripped
 	ExpiryFieldStripped ComponentEventType = iota
+	// When DCP sends down a system event
+	SystemEventReceived ComponentEventType = iota
+	// RoutingUpdate event
+	RoutingUpdateEvent ComponentEventType = iota
+	// Data not replicated due to broken collection mapping
+	// NOTE: This event is only supposed to be raised after ensuring the data will be
+	// re-replicated later in another backfill
+	DataNotReplicated ComponentEventType = iota
 )
 
 type Event struct {

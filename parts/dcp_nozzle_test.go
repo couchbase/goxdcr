@@ -64,6 +64,8 @@ func setupUprFeedGeneric(uprFeed *mcMock.UprFeedIface) {
 	uprFeed.On("IncrementAckBytes", mock.Anything).Return(nil)
 	uprFeed.On("UprRequestStream", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything,
 		mock.Anything, mock.Anything, mock.Anything).Return(nil)
+	uprFeed.On("UprRequestCollectionsStream", mock.Anything, mock.Anything, mock.Anything, mock.Anything,
+		mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
 	uprFeed.On("Close").Return(nil)
 	uprFeed.On("ClientAck", mock.Anything).Return(nil)
 }
@@ -81,6 +83,8 @@ func setupUprFeedMockFeatureNeg(uprFeed *mcMock.UprFeedIface, returnedFeatures m
 	var dummyErr error = errors.New("Dummy")
 
 	uprFeed.On("UprOpenWithFeatures", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(dummyErr, returnedFeatures)
+	uprFeed.On("UprRequestCollectionsStream", mock.Anything, mock.Anything, mock.Anything, mock.Anything,
+		mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(dummyErr)
 	setupUprFeedGeneric(uprFeed)
 }
 
@@ -125,6 +129,7 @@ func setupMocks(xdcrTopology *service_def.XDCRCompTopologySvc,
 	// Turn compression on
 	var features utilsReal.HELOFeatures
 	features.CompressionType = base.CompressionTypeSnappy
+	features.Collections = true
 
 	setupMocksInternal(xdcrTopology, utils, nozzle, settings, mcClient, uprFeed, features)
 }

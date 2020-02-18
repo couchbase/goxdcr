@@ -49,7 +49,7 @@ type ReplicationSpecSvc interface {
 	//set the derived object (i.e ReplicationStatus) for the specification
 	SetDerivedObj(specId string, derivedObj interface{}) error
 
-	// set the metadata change call back method
+	// set the metadata change call back methods
 	// when the replication spec service makes changes, it needs to call the call back
 	// explicitly, so that the actions can be taken immediately
 	SetMetadataChangeHandlerCallback(callBack base.MetadataChangeHandlerCallback)

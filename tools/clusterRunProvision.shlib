@@ -33,6 +33,8 @@ declare DEFAULT_PW
 # Run curl in silent mode to prevent progress bar
 CURL="curl -s"
 POOLS_DEFAULT_BUCKETS_PATH="pools/default/buckets"
+CBWORKLOAD_COLLECTION_NUM_ITEMS=10000
+
 
 # topological globals
 # -----------------
@@ -687,7 +689,7 @@ function runCbWorkloadGenCollection {
 
 	echo "Running cbworkloadGen on $clusterName bucket $bucketName scope: $scopeName collection $collectionName (ID: $collectionId)"
 	# Run 10000 items of json documents with set/get ratio of 100%
-	$workloadGen -i 10000 -j -r 1 -n 127.0.0.1:$port -b $bucketName -u $DEFAULT_ADMIN -p $DEFAULT_PW --prefix=xdcrProv_$clusterName -c $collectionId
+	$workloadGen -i $CBWORKLOAD_COLLECTION_NUM_ITEMS  -j -r 1 -n 127.0.0.1:$port -b $bucketName -u $DEFAULT_ADMIN -p $DEFAULT_PW --prefix=xdcrProv_$clusterName -c $collectionId
 }
 
 function waitForBgJobs {

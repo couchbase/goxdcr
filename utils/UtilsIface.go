@@ -2,6 +2,7 @@ package utils
 
 import (
 	"expvar"
+	"fmt"
 	"github.com/couchbase/go-couchbase"
 	mc "github.com/couchbase/gomemcached"
 	mcc "github.com/couchbase/gomemcached/client"
@@ -21,6 +22,12 @@ type HELOFeatures struct {
 	Xattribute      bool
 	CompressionType base.CompressionType
 	Xerror          bool
+	Collections     bool
+}
+
+func (h *HELOFeatures) String() string {
+	return fmt.Sprintf("Enabled features: Xattribute: %v CompressionType: %v Xerror: %v Collections: %v",
+		h.Xattribute, base.CompressionTypeStrings[h.CompressionType], h.Xerror, h.Collections)
 }
 
 type UtilsIface interface {

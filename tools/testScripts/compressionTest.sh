@@ -81,26 +81,6 @@ if (( $? != 0 ));then
 fi
 sleep 1
 
-function checkItemCnt {
-	local cluster=$1
-	local bucket=$2
-	local expectedCnt=$3
-
-	for (( i=0; $i < 3; i=$(($i+1)) ))
-	do
-		itemCount=`getBucketItemCount "$cluster" "$bucket"`
-		if (( $itemCount == $expectedCnt ));then
-			echo "Item count for cluster $cluster bucket $bucket: $itemCount"
-			return 0
-		else
-			echo "ERROR: Cluster $cluster bucket $bucket only has $itemCount items"
-		fi
-		echo "Sleeping $sleepTime and retrying..."
-		sleep $sleepTime
-	done
-	exit 1
-}
-
 function printTestCaseStats {
 	local srcCluster=$1
 	local srcBucket=$2

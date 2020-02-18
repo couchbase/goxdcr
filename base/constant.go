@@ -241,6 +241,11 @@ var ErrorRemoteClusterUninit = errors.New("Remote cluster has not been successfu
 var ErrorTargetNoAltHostName = errors.New("Alternate hostname is not set up on at least one node of the remote cluster")
 var ErrorPipelineRestartDueToClusterConfigChange = errors.New("Pipeline needs to update due to remote cluster configuration change")
 var ErrorNotFound = errors.New("Specified entity is not found")
+var ErrorTargetCollectionsNotSupported = errors.New("Target cluster does not support collections")
+var ErrorSourceCollectionsNotSupported = errors.New("Source cluster collections critical error")
+var ErrorInvalidOperation = errors.New("Invalid operation")
+var ErrorRouterRequestRetry = errors.New("Request is in retry queue")
+var ErrorIgnoreRequest = errors.New("Request should be ignored")
 
 // Various non-error internal msgs
 var FilterForcePassThrough = errors.New("No data is to be filtered, should allow passthrough")
@@ -504,6 +509,9 @@ var HELO_FEATURE_XERROR uint16 = 0x07
 // new XATTR bit in data type field in dcp mutations
 var PROTOCOL_BINARY_DATATYPE_XATTR uint8 = 0x04
 
+// Collections Feature
+var HELO_FEATURE_COLLECTIONS uint16 = 0x12
+
 // length of random id
 var LengthOfRandomId = 16
 
@@ -544,6 +552,8 @@ var RetryIntervalSetDerivedObj = 100 * time.Millisecond
 var MaxNumOfRetriesSetDerivedObj = 8
 
 var NumberOfWorkersForCheckpointing = 5
+
+const NumberOfVbs = 1024
 
 type FilterVersionType int
 
@@ -876,6 +886,9 @@ var RemoteClusterAlternateAddrChangeCnt = 5
 var ManifestRefreshSrcInterval = 2
 var ManifestRefreshTgtInterval = 60
 
+// How many times to retry collections mapping routing before declaring that mapping is broken
+var MaxCollectionsRoutingRetry = 5
+
 func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeCountBeforeRestart,
 	maxTopologyStableCountBeforeRestart, maxWorkersForCheckpointing int,
 	timeoutCheckpointBeforeStop time.Duration, capiDataChanSizeMultiplier int,
@@ -920,7 +933,8 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	maxCountCpuNotMaxed int, maxCountThroughputDrop int,
 	filteringInternalKey string, filteringInternalXattr string,
 	remoteClusterAlternateAddrChangeCnt int,
-	manifestRefreshSrcInterval int, manifestRefreshTgtInterval int) {
+	manifestRefreshSrcInterval int, manifestRefreshTgtInterval int,
+	maxCollectionsRoutingRetry int) {
 	TopologyChangeCheckInterval = topologyChangeCheckInterval
 	MaxTopologyChangeCountBeforeRestart = maxTopologyChangeCountBeforeRestart
 	MaxTopologyStableCountBeforeRestart = maxTopologyStableCountBeforeRestart
@@ -1029,6 +1043,7 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	RemoteClusterAlternateAddrChangeCnt = remoteClusterAlternateAddrChangeCnt
 	ManifestRefreshSrcInterval = manifestRefreshSrcInterval
 	ManifestRefreshTgtInterval = manifestRefreshTgtInterval
+	MaxCollectionsRoutingRetry = maxCollectionsRoutingRetry
 }
 
 // Need to escape the () to result in "META().xattrs" literal
