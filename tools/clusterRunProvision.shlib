@@ -309,6 +309,25 @@ function cleanupBuckets {
 	done
 }
 
+function createScope {
+	local clusterName=$1
+	local bucketName=$2
+	local scopeName=$3
+	local port=${CLUSTER_NAME_PORT_MAP[$clusterName]:-}
+
+	echo "For cluster $clusterName bucket $bucketName CREATING scope $scopeName"
+	$CURL -u $DEFAULT_ADMIN:$DEFAULT_PW -X POST http://localhost:$port/$POOLS_DEFAULT_BUCKETS_PATH/$bucketName/collections -d name=$scopeName > /dev/null 2>&1
+}
+
+function deleteScope {
+	local clusterName=$1
+	local bucketName=$2
+	local scopeName=$3
+	local port=${CLUSTER_NAME_PORT_MAP[$clusterName]:-}
+
+	echo "For cluster $clusterName bucket $bucketName DELETING scope $scopeName"
+	$CURL -u $DEFAULT_ADMIN:$DEFAULT_PW -X DELETE http://localhost:$port/$POOLS_DEFAULT_BUCKETS_PATH/$bucketName/collections/$scopeName/ > /dev/null 2>&1
+}
 
 # inputs
 # 1. cluster name
@@ -327,16 +346,36 @@ function setupScopes {
 		return 1
 	fi
 
-	local port=${CLUSTER_NAME_PORT_MAP[$clusterName]:-}
 	for scopeName in `echo ${scopesArr[@]}`
 	do
-		echo "For cluster $clusterName bucket $bucketName CREATING scope $scopeName"
-		$CURL -u $DEFAULT_ADMIN:$DEFAULT_PW -X POST http://localhost:$port/$POOLS_DEFAULT_BUCKETS_PATH/$bucketName/collections -d name=$scopeName > /dev/null 2>&1
+		createScope "$clusterName" "$bucketName" "$scopeName"
 		# If scope has collections
 		if [[ ! -z "${SCOPE_NAME_COLLECTION_MAP[$scopeName]:-}" ]];then
 			setupCollections $clusterName $bucketName $scopeName
 		fi
 	done
+}
+
+function createCollection {
+	local clusterName=$1
+	local bucketName=$2
+	local scopeName=$3
+	local collectionName=$4
+	local port=${CLUSTER_NAME_PORT_MAP[$clusterName]:-}
+
+	echo "For cluster $clusterName bucket $bucketName scope $scopeName CREATING collection $collectionName"
+	$CURL -u $DEFAULT_ADMIN:$DEFAULT_PW -X POST http://localhost:$port/$POOLS_DEFAULT_BUCKETS_PATH/$bucketName/collections/$scopeName -d name=$collectionName > /dev/null 2>&1
+}
+
+function deleteCollection {
+	local clusterName=$1
+	local bucketName=$2
+	local scopeName=$3
+	local collectionName=$4
+	local port=${CLUSTER_NAME_PORT_MAP[$clusterName]:-}
+
+	echo "For cluster $clusterName bucket $bucketName scope $scopeName DELETING collection $collectionName"
+	$CURL -u $DEFAULT_ADMIN:$DEFAULT_PW -X DELETE http://localhost:$port/$POOLS_DEFAULT_BUCKETS_PATH/$bucketName/collections/$scopeName/$collectionName > /dev/null 2>&1
 }
 
 # inputs
@@ -358,11 +397,9 @@ function setupCollections {
 		return 1
 	fi
 
-	local port=${CLUSTER_NAME_PORT_MAP[$clusterName]:-}
 	for collectionName in `echo ${collectionsArr[@]}`
 	do
-		echo "For cluster $clusterName bucket $bucketName scope $scopeName CREATING collection $collectionName"
-		$CURL -u $DEFAULT_ADMIN:$DEFAULT_PW -X POST http://localhost:$port/$POOLS_DEFAULT_BUCKETS_PATH/$bucketName/collections/$scopeName -d name=$collectionName > /dev/null 2>&1
+		createCollection "$clusterName" "$bucketName" "$scopeName" "$collectionName"
 	done
 }
 
@@ -616,6 +653,42 @@ function runCbWorkloadGenBucket {
 	$workloadGen -i 10000 -j -r 1 -n 127.0.0.1:$port -b $bucketName -u $DEFAULT_ADMIN -p $DEFAULT_PW --prefix=xdcrProv_$clusterName
 }
 
+function runCbWorkloadGenCollection {
+	local clusterName=$1
+	local bucketName=$2
+	local scopeName=$3
+	local collectionName=$4
+	local collectionId
+
+	if [[ -z "${clusterName:-}" ]] || [[ -z "${bucketName:-}" ]] || [[ -z "${scopeName:-}" ]] || [[ -z "${collectionName:-}" ]];then
+		echo "Invalid input"
+		return 1
+	fi
+	local port=${CLUSTER_NAME_PORT_MAP[$clusterName]:-}
+
+	workloadGen=`findCbWorkloadGen`
+	if (( $? != 0 )) || [[ -z "$workloadGen" ]];then
+		echo "Could not find workload generator binary"
+		return 1
+	fi
+
+	manifestOutput=`getManifest $clusterName $bucketName`
+	if (( $? != 0 ));then
+		echo "Error retrieving manifest"
+		return 1
+	fi
+
+	collectionId=`getCollectionIdFromScopeAndCollectionName "$manifestOutput" "$scopeName" "$collectionName"`
+	if (( $? != 0 ));then
+		echo "Error retrieving collection ID"
+		return 1
+	fi
+
+	echo "Running cbworkloadGen on $clusterName bucket $bucketName scope: $scopeName collection $collectionName (ID: $collectionId)"
+	# Run 10000 items of json documents with set/get ratio of 100%
+	$workloadGen -i 10000 -j -r 1 -n 127.0.0.1:$port -b $bucketName -u $DEFAULT_ADMIN -p $DEFAULT_PW --prefix=xdcrProv_$clusterName -c $collectionId
+}
+
 function waitForBgJobs {
 	echo "Waiting for background jobs to finish..."
 	jobsCnt=`jobs -l | grep -c "Running"`
@@ -624,6 +697,141 @@ function waitForBgJobs {
 		sleep 1
 		jobsCnt=`jobs -l | grep -c "Running"`
 	done
+}
+
+# Input: 1. clusterName
+#        2. bucketName
+function getManifest {
+	local clusterName="$1"
+	local bucketName="$2"
+	local port=${CLUSTER_NAME_PORT_MAP[$clusterName]:-}
+
+	if [[ -z "${port:-}" ]];then
+		echo ""
+		return 1
+	fi
+
+	$CURL -u $DEFAULT_ADMIN:$DEFAULT_PW -X GET http://localhost:$port/$POOLS_DEFAULT_BUCKETS_PATH/$bucketName/collections
+}
+
+declare -a JQ_KEYS_FILTER_FUNC_ARR
+
+function _jqFilterArray {
+	local jqOutputAsInput="$1"
+	# clear array
+	JQ_KEYS_FILTER_FUNC_ARR=()
+
+	for k in `echo "$jqOutputAsInput"`
+	do
+		if [[ "$k" == '[' ]] || [[ "$k" == ']' ]];then
+			continue
+		fi
+		# take out last comma and quotes
+		key=`echo "$k"| sed s/',$'//g | sed s/'"'//g`
+		JQ_KEYS_FILTER_FUNC_ARR[${#JQ_KEYS_FILTER_FUNC_ARR[@]}]="$key"
+	done
+}
+
+# Called hexString because input is in a form of double quoted string
+# Also converts them to upper case because bc only takes A-F for hex
+function hexStringToDec {
+	local hexString=$1
+	local hex=`echo "$hexString" | sed 's/"//g' | tr '[:lower:]' '[:upper:]'`
+
+	echo "obase=10; ibase=16; $hex" | bc
+}
+
+function prettyPrintManifest {
+	local manifest=$1
+
+	# get manifest version
+	local manifestVersion=`echo "$manifest" | jq '.uid'`
+	local manifestVersionDec=`hexStringToDec $manifestVersion`
+	echo "Manifest version $manifestVersionDec"
+
+	#get all the scopes
+	local scopesList=`echo "$manifest" | jq '.scopes'`
+	local scopesListLen=`echo "$manifest" | jq '.scopes | length'`
+
+	for (( i=0; $i < $scopesListLen; i=$(($i+1)) ))
+	do
+		local scopeOutput=`echo "$scopesList" | jq .[$i]`
+		local scopeName=`echo "$scopeOutput" | jq '.name'`
+		local scopeUID=`echo "$scopeOutput" | jq '.uid'`
+		local scopeUIDdec=`hexStringToDec "$scopeUID"`
+		echo "ScopeName $scopeName (UID $scopeUIDdec)"
+
+		# Get individual collections within this scope
+		local collectionsList=`echo "$scopeOutput" | jq '.collections'`
+		local collectionsListLen=`echo "$scopeOutput" | jq '.collections | length'`
+		for (( j=0; $j < $collectionsListLen; j=$(($j+1)) ))
+		do
+			local collectionsOutput=`echo "$collectionsList" | jq .[$j]`
+			local collectionName=`echo "$collectionsOutput" | jq '.name'`
+			local collectionUID=`echo "$collectionsOutput" | jq '.uid'`
+			local collectionUIDdec=`hexStringToDec "$collectionUID"`
+			echo "ScopeName $scopeName CollectionName $collectionName (UID $collectionUIDdec)"
+		done
+	done
+}
+
+# Returns non-0 if not found
+function getCollectionIdFromScopeAndCollectionName {
+	local manifest=$1
+	local requestedScopeName=$2
+	local requestedCollectionName=$3
+
+	local scopesRaw=`echo "$manifest" | jq '.scopes'`
+
+	local scopesKeys=`echo "$scopesRaw" | jq 'keys'`
+	_jqFilterArray "${scopesKeys}"
+
+
+	for scopeName in "${JQ_KEYS_FILTER_FUNC_ARR[@]}"
+	do
+		if [[ "$scopeName" == "$requestedScopeName" ]];then
+			local scopeOutput=`echo "$scopesRaw" | jq ".${scopeName}"`
+			local scopeUID=`echo "$scopeOutput" | jq '.uid'`
+			local collectionsKeysRaw=`echo "$scopeOutput" | jq '.collections|keys'`
+			_jqFilterArray "$collectionsKeysRaw"
+
+			for collectionName in "${JQ_KEYS_FILTER_FUNC_ARR[@]}"
+			do
+				if [[ "$collectionName" == "$requestedCollectionName" ]];then
+					local collectionsOutputRaw=`echo "$scopeOutput" | jq '.collections'`
+					local collectionOutput=`echo "$collectionsOutputRaw" | jq ".${collectionName}"`
+					local collectionUID=`echo "$collectionOutput" | jq '.uid'`
+					echo "$collectionUID"
+					return 0
+				fi
+			done
+		fi
+	done
+	# not found
+	echo ""
+	return 1
+}
+
+function printSingleClusterBucketScopeAndCollection {
+	local clusterName=$1
+	local bucketName=$2
+
+	# Get the manifest for this bucket
+	local manifestOutput=""
+	local manifestVersion=""
+	manifestOutput=`getManifest $clusterName $bucketName`
+	if (( $? != 0 ));then
+		echo "Error retrieving manifest - Cluster $clusterName bucket $bucketName scope $scopeName"
+		continue
+	elif [[ -z "$manifestOutput" ]];then
+		echo "Retrieved empty manifest JSON - Cluster $clusterName bucket $bucketName scope $scopeName"
+		continue
+	fi
+
+	manifestVersion=`echo "$manifestOutput" | jq '.uid'`
+	echo "Cluster $clusterName Bucket $bucketName collections manifest version: $manifestVersion"
+
+	prettyPrintManifest "$manifestOutput"
 }
 
 # Print a summary of all the topology setup -> scope and collection info
@@ -640,47 +848,7 @@ function printGlobalScopeAndCollectionInfo {
 		local -a buckets=(${CLUSTER_NAME_BUCKET_MAP[$clusterName]:-})
 		for bucketName in `echo ${buckets[@]}`
 		do
-			# Get the manifest for this bucket
-			local manifestOutput=""
-			local manifestVersion=""
-			manifestOutput=`$CURL -u $DEFAULT_ADMIN:$DEFAULT_PW -X GET http://localhost:$port/$POOLS_DEFAULT_BUCKETS_PATH/$bucketName/collections`
-			if (( $? != 0 ));then
-				echo "Error retrieving manifest - Cluster $clusterName bucket $bucketName scope $scopeName"
-				continue
-			elif [[ -z "$manifestOutput" ]];then
-				echo "Retrieved empty manifest JSON - Cluster $clusterName bucket $bucketName scope $scopeName"
-				continue
-			fi
-
-			manifestVersion=`echo "$manifestOutput" | jq '.uid'`
-			echo "Cluster $clusterName Bucket $bucketName collections manifest version: $manifestVersion"
-
-			local scopes=(${BUCKET_NAME_SCOPE_MAP[$bucketName]:-})
-			for scopeName in `echo ${scopes[@]:-}`
-			do
-				local scopesOutputRaw=""
-				local scopeOutput=""
-				local scopeUID=""
-				# TODO(Neil): I think these numbers are LEB128? Need to confirm
-				scopesOutputRaw=`echo "$manifestOutput" | jq '.scopes'`
-				scopeOutput=`echo "$scopesOutputRaw" | jq ".${scopeName}"`
-				scopeUID=`echo "$scopeOutput" | jq '.uid'`
-				echo "Cluster $clusterName Bucket $bucketName ScopeName $scopeName UID $scopeUID"
-
-				# get individual collections
-				local collectionsArr=(${SCOPE_NAME_COLLECTION_MAP[$scopeName]:-})
-				if [[ -z "${collectionsArr:-}" ]];then
-					echo "No collections found for scope $scopeName"
-					continue
-				fi
-				for collectionName in `echo ${collectionsArr[@]}`
-				do
-					local collectionsOutputRaw=`echo "$scopeOutput" | jq '.collections'`
-					local collectionOutput=`echo "$collectionsOutputRaw" | jq ".${collectionName}"`
-					local collectionUID=`echo "$collectionOutput" | jq '.uid'`
-					echo "Cluster $clusterName Bucket $bucketName ScopeName $scopeName CollectionName $collectionName UID $collectionUID"
-				done
-			done
+			printSingleClusterBucketScopeAndCollection "$clusterName" "$bucketName"
 		done
 	done
 }

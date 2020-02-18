@@ -65,6 +65,7 @@ function runDataLoad {
 	runCbWorkloadGenBucket "C1" "B0" &
 	runCbWorkloadGenBucket "C1" "B1" &
 	runCbWorkloadGenBucket "C2" "B2" &
+	runCbWorkloadGenCollection "C1" "B1" "S1" "col1"
 	waitForBgJobs
 }
 

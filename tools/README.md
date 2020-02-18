@@ -41,19 +41,9 @@ insertPropertyIntoBucketNamePropertyMap "B1" Bucket1Properties
 The above snippet shows how to set bucket properties, and the provisioning script will set up the buckets with the appropriate properties.
 
 # Exporting Topologies of Live XDCR-provisioned
-The provisioning script provides users a way to import the provisioned set up into the running bash shell's environment variables, to allow further helper scripts to work.
-This requires users to execute the export command at the end of the provisioning script, like so:
-
-```
-neil.huang@NeilsMacbookPro:~/source/couchbase/goproj/src/github.com/couchbase/goxdcr/tools$ ./provision_clusterRun.sh
-...
-If needed, run the following export command to enable other helper scripts to load the provisioned configuration:
-============================================
-export XDCR_Provisioning_VarFile=/var/folders/g3/_9ldw1x543n9fjrql5l3d6cnwd96dq/T/tmp.qPiaw4vz
-============================================
-```
-
-Once the above export statement is executed manually, then further helper scripts are then enabled.
+The provisioning script provides users a way to establish a continuous CLI environment after a provisioning script.
+As long as the function "exportProvisionedConfig" is called at the end of any provisioning scripts, any live-XDCR helper scripts below will function.
+The function exports provisioned variables into a temporary file in the local tools directory, which is then read in by the helper files.
 
 # Live-XDCR Helper Scripts
 The following is a list of helper scripts that are bundled in this tool directory.
@@ -91,4 +81,18 @@ Edits a specific live replication setting.
 	s: Sets replication settings for specified <ID> with one or more values of "key=val"
 
 Example: ./replicationSettings.sh -s 1 -v "filterExpression=" -v "filterSkipRestream=true"
+```
+
+## collectionsManagement.sh
+Provides a quick and easy way to view/create/delete scopes and collections
+```
+./collectionsManagement.sh [-h] -l | -g <ClusterName> -b <bucketName> | -n/-d <ClusterName> -b <bucketName> -s <ScopeName> [-c <CollectionName>]
+	h: This help page
+	l: List all available <clusterName> for setting and displaying
+	b: Bucket name to operate on
+	g: Gets all collections for cluster <clusterName>
+	n: Creates a *new* collection or scope on a cluster
+	d: Deletes a collection or scope on a cluster
+	s: Specifies a scope
+	c: (optional) Specifies a collection under a scope
 ```

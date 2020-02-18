@@ -766,7 +766,10 @@ func (stats_mgr *StatisticsManager) Attach(pipeline common.Pipeline) error {
 
 	//mount collectors with pipeline
 	for _, collector := range stats_mgr.collectors {
-		collector.Mount(pipeline, stats_mgr)
+		err := collector.Mount(pipeline, stats_mgr)
+		if err != nil {
+			stats_mgr.logger.Errorf(err.Error())
+		}
 	}
 
 	//register the aggregation metrics for the pipeline
@@ -1408,7 +1411,7 @@ func (ckpt_collector *checkpointMgrCollector) Mount(pipeline common.Pipeline, st
 	ckpt_collector.stats_mgr = stats_mgr
 	ckptmgr := pipeline.RuntimeContext().Service(base.CHECKPOINT_MGR_SVC)
 	if ckptmgr == nil {
-		return errors.New("CheckpointMgr has to exist")
+		return errors.New("Mount failed for checkpointMgrCollector. CheckpointMgr has to exist")
 	}
 
 	err := ckptmgr.(common.Component).RegisterComponentEventListener(common.ErrorEncountered, ckpt_collector)

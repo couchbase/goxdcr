@@ -15,3 +15,8 @@
 
 # Eclipse project files
 .project
+
+# Helper tool temporary files (and local developer symlinks)
+tools/.xdcrToolsExport
+tools/clusterRunProvision.sh
+tools/importExporter.sh

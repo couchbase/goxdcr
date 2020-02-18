@@ -1486,7 +1486,6 @@ func (xmem *XmemNozzle) batchGetMetaHandler(count int, finch chan bool, return_c
 			return
 		default:
 			if xmem.validateRunningState() != nil {
-				xmem.Logger().Infof("%v has stopped, exit from getMeta receiver", xmem.Id())
 				return
 			}
 
@@ -1510,7 +1509,7 @@ func (xmem *XmemNozzle) batchGetMetaHandler(count int, finch chan bool, return_c
 					xmem.repairConn(xmem.client_for_getMeta, err.Error(), rev)
 				}
 
-				if !isNetTimeoutError(err) {
+				if !isNetTimeoutError(err) && err != PartStoppedError {
 					logger.Errorf("%v batchGetMeta received fatal error and had to abort. Expected %v responses, got %v responses. err=%v", xmem.Id(), count, len(respMap), err)
 					logger.Infof("%v Expected=%v, Received=%v\n", xmem.Id(), opaque_keySeqno_map.CloneAndRedact(), base.UdTagBegin, respMap, base.UdTagEnd)
 				} else {

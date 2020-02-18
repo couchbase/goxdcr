@@ -871,14 +871,10 @@ func (xdcrf *XDCRFactory) registerServices(pipeline common.Pipeline, logger_ctx 
 	through_seqno_tracker_svc := service_impl.NewThroughSeqnoTrackerSvc(logger_ctx)
 	through_seqno_tracker_svc.Attach(pipeline)
 
-	//register pipeline statistics manager
+	//Create pipeline statistics manager.
 	bucket_name := pipeline.Specification().SourceBucketName
 	actualStatsMgr := pipeline_svc.NewStatisticsManager(through_seqno_tracker_svc, xdcrf.cluster_info_svc,
 		xdcrf.xdcr_topology_svc, logger_ctx, kv_vb_map, bucket_name, xdcrf.utils)
-	err = ctx.RegisterService(base.STATISTICS_MGR_SVC, actualStatsMgr)
-	if err != nil {
-		return err
-	}
 
 	//register pipeline checkpoint manager
 	ckptMgr, err := pipeline_svc.NewCheckpointManager(xdcrf.checkpoint_svc, xdcrf.capi_svc,
@@ -895,7 +891,11 @@ func (xdcrf *XDCRFactory) registerServices(pipeline common.Pipeline, logger_ctx 
 	if err != nil {
 		return err
 	}
-
+	// Register statistics manager after checkpoint manager is created
+	err = ctx.RegisterService(base.STATISTICS_MGR_SVC, actualStatsMgr)
+	if err != nil {
+		return err
+	}
 	//register topology change detect service
 	targetHasRBACAndXattrSupport := base.IsClusterCompatible(targetClusterVersion, base.VersionForRBACAndXattrSupport)
 	top_detect_svc := pipeline_svc.NewTopologyChangeDetectorSvc(xdcrf.cluster_info_svc, xdcrf.xdcr_topology_svc, xdcrf.remote_cluster_svc, xdcrf.repl_spec_svc, targetHasRBACAndXattrSupport, logger_ctx, xdcrf.utils)

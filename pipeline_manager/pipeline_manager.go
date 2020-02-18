@@ -992,7 +992,6 @@ func (r *PipelineUpdater) resetDisabledFeatures() {
 func (r *PipelineUpdater) update() base.ErrorMap {
 	var err error
 	var errMap base.ErrorMap
-	var p common.Pipeline
 	var checkReplicationActivenessKey string = "r.CheckReplicationActiveness"
 
 	r.pickupOverflowErrors()
@@ -1052,7 +1051,7 @@ RE:
 		r.logger.Infof("Pipeline %v has been updated successfully\n", r.pipeline_name)
 		r.setLastUpdateSuccess()
 		if len(errMap) == 0 {
-			r.raiseWarningsIfNeeded(p)
+			r.raiseWarningsIfNeeded()
 		}
 		if r.rep_status != nil {
 			r.rep_status.ClearErrors()
@@ -1087,8 +1086,8 @@ func (r *PipelineUpdater) reportStatus() {
 	}
 }
 
-func (r *PipelineUpdater) raiseWarningsIfNeeded(p common.Pipeline) {
-	r.raiseXattrWarningIfNeeded(p)
+func (r *PipelineUpdater) raiseWarningsIfNeeded() {
+	r.raiseXattrWarningIfNeeded()
 	r.raiseCompressionWarningIfNeeded()
 }
 
@@ -1097,12 +1096,13 @@ func (r *PipelineUpdater) raiseWarningsIfNeeded(p common.Pipeline) {
 // 2. replication is not recovering from error
 // 3. target cluster does not support xattr
 // 4. current node is the master for vbucket 0 - this is needed to ensure that warning is shown on UI only once, instead of once per source node
-func (r *PipelineUpdater) raiseXattrWarningIfNeeded(p common.Pipeline) {
+func (r *PipelineUpdater) raiseXattrWarningIfNeeded() {
+	p := r.rep_status.Pipeline()
 	if p == nil {
 		r.logger.Warnf("Skipping xattr warning check since pipeline %v has not been started\n", r.pipeline_name)
 		return
 	}
-	spec := p.Specification()
+	spec := r.rep_status.Spec()
 	if spec == nil {
 		r.logger.Warnf("Skipping xattr warning check since cannot find replication spec for pipeline %v\n", r.pipeline_name)
 		return

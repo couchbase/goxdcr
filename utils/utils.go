@@ -430,7 +430,11 @@ func (u *Utilities) processNsServerDocForFiltering(matcher gojsonsm.Matcher, nsS
 		return
 	}
 
-	return base.MatchWrapper(matcher, byteSlice)
+	matched, status, err := base.MatchWrapper(matcher, byteSlice)
+	if u.logger_utils.GetLogLevel() >= log.LogLevelDebug && status&gojsonsm.MatcherCollateUsed > 0 {
+		u.logger_utils.Debugf("Matcher used collate to determine outcome (%v) for document %v%v%v", matched, base.UdTagBegin, docId, base.UdTagEnd)
+	}
+	return matched, err
 }
 
 // given a matches map, convert the indices from byte index to rune index
@@ -2591,8 +2595,8 @@ func (u *Utilities) GetSecuritySettingsAndDefaultPoolInfo(hostAddr, hostHttpsAdd
 		}
 	}
 
-	// at this point, we have a properly set httpAuthMech and a valid defaultPoolInfo
-	// derive certificate related settings from defaultPoolInfo
+	// at this point, we have a valid defaultPoolInfo, an httpAuthMech that worked for the host
+	// derive httpAuthMech and certificate related settings from defaultPoolInfo
 
 	nodeList, err := u.GetNodeListFromInfoMap(defaultPoolInfo, logger)
 	if err != nil || len(nodeList) == 0 {
@@ -2611,6 +2615,17 @@ func (u *Utilities) GetSecuritySettingsAndDefaultPoolInfo(hostAddr, hostHttpsAdd
 		return false, base.HttpAuthMechPlain, nil, fmt.Errorf("Failed to retrieve secruity settings from host=%v using SCRAM-SHA authentication. Please check whether SCRAM-SHA is enabled on target.", hostAddr)
 	}
 
+	if scramShaEnabled && !targetHasScramShaSupport && httpAuthMech == base.HttpAuthMechScramSha {
+		// Cluster is not ScramSha compatible. We need to fallback to https.
+		// Before doing so, we will get default pool using https again to make sure it works
+		defaultPoolInfo, err = u.getDefaultPoolInfoUsingHttps(hostHttpsAddr, username, password,
+			certificate, clientCertificate, clientKey, logger)
+		if err == nil {
+			httpAuthMech = base.HttpAuthMechHttps
+		} else {
+			return false, base.HttpAuthMechPlain, nil, err
+		}
+	}
 	sanInCertificate = base.IsClusterCompatible(clusterCompatibility, base.VersionForSANInCertificateSupport)
 	return sanInCertificate, httpAuthMech, defaultPoolInfo, nil
 }

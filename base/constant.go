@@ -13,6 +13,7 @@ import (
 	"errors"
 	"fmt"
 	mc "github.com/couchbase/gomemcached"
+	"regexp"
 	"sync"
 	"time"
 )
@@ -1025,7 +1026,11 @@ const (
 	BucketDocXattrKey = "xattrs"
 )
 
-const TransactionClientRecordKey = "txn-client-record"
-const ActiveTransactionRecordPrefix = "atr-"
-const ActiveTransactionRecordSuffix = "^-#[a-f1-9]+$"
+const TransactionClientRecordKey = "_txn:client-record"
+const ActiveTransactionRecordPrefix = "^_txn:atr-"
+const ValidVbucketRangeRegexpGroup = "([0-9]|[1-9][0-9]|[1-9][0-9][0-9]|[1][0][0-2][0-3])"
+const ActiveTransactionRecordSuffix = "-#[0-9a-f]+$"
+
+var ActiveTxnRecordRegexp *regexp.Regexp = regexp.MustCompile(fmt.Sprintf("%v%v%v", ActiveTransactionRecordPrefix, ValidVbucketRangeRegexpGroup, ActiveTransactionRecordSuffix))
+
 const TransactionXattrKey = "txn"
