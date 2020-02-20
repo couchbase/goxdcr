@@ -11,6 +11,8 @@ import (
 // The current limit, 20MB, is the size limit supported by ep-engine.
 var MaxBodyLen = int(20 * 1024 * 1024)
 
+const _BUFLEN = 256
+
 // MCRequest is memcached Request
 type MCRequest struct {
 	// The command being issued
@@ -260,7 +262,11 @@ func (req *MCRequest) HeaderBytes() []byte {
 // Bytes will return the wire representation of this request.
 func (req *MCRequest) Bytes() []byte {
 	data := make([]byte, req.Size())
+	req.bytes(data)
+	return data
+}
 
+func (req *MCRequest) bytes(data []byte) {
 	pos, halfByteMode := req.FillHeaderBytes(data)
 	// TODO - the halfByteMode should be revisited for a more efficient
 	// way of doing things
@@ -282,15 +288,19 @@ func (req *MCRequest) Bytes() []byte {
 			copy(data[pos+len(req.Body):pos+len(req.Body)+len(req.ExtMeta)], req.ExtMeta)
 		}
 	}
-	return data
 }
 
 // Transmit will send this request message across a writer.
 func (req *MCRequest) Transmit(w io.Writer) (n int, err error) {
-	if len(req.Body) < 128 {
-		n, err = w.Write(req.Bytes())
+	l := req.Size()
+	if l < _BUFLEN {
+		data := make ([]byte, l)
+		req.bytes(data)
+		n, err = w.Write(data)
 	} else {
-		n, err = w.Write(req.HeaderBytes())
+		data := make([]byte, HDR_LEN+len(req.Extras)+req.CollIdLen+len(req.Key)+req.FramingElen)
+        	req.FillHeaderBytes(data)
+		n, err = w.Write(data)
 		if err == nil {
 			m := 0
 			m, err = w.Write(req.Body)
