@@ -70,6 +70,27 @@ func (_m *RemoteClusterSvc) DelRemoteCluster(refName string) (*metadata.RemoteCl
 	return r0, r1
 }
 
+// GetCapability provides a mock function with given fields: ref
+func (_m *RemoteClusterSvc) GetCapability(ref *metadata.RemoteClusterReference) (metadata.Capability, error) {
+	ret := _m.Called(ref)
+
+	var r0 metadata.Capability
+	if rf, ok := ret.Get(0).(func(*metadata.RemoteClusterReference) metadata.Capability); ok {
+		r0 = rf(ref)
+	} else {
+		r0 = ret.Get(0).(metadata.Capability)
+	}
+
+	var r1 error
+	if rf, ok := ret.Get(1).(func(*metadata.RemoteClusterReference) error); ok {
+		r1 = rf(ref)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
 // GetConnectionStringForRemoteCluster provides a mock function with given fields: ref, isCapiReplication
 func (_m *RemoteClusterSvc) GetConnectionStringForRemoteCluster(ref *metadata.RemoteClusterReference, isCapiReplication bool) (string, error) {
 	ret := _m.Called(ref, isCapiReplication)

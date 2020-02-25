@@ -62,6 +62,9 @@ type RemoteClusterSvc interface {
 	// Checks to see if XDCR should use alternate addressing to contact the remote cluster
 	ShouldUseAlternateAddress(ref *metadata.RemoteClusterReference) (bool, error)
 
+	// Retrieves the last-updated capability matrix
+	GetCapability(ref *metadata.RemoteClusterReference) (metadata.Capability, error)
+
 	// Called by PipelineMgr to check to see if any pipelines should restart due to remoteClusterRef changes
 	GetRefListForRestartAndClearState() ([]*metadata.RemoteClusterReference, error)
 }

@@ -37,7 +37,6 @@ const (
 var InvalidRemoteClusterOperationErrorMessage = "Invalid remote cluster operation. "
 var InvalidRemoteClusterErrorMessage = "Invalid remote cluster. "
 var UnknownRemoteClusterErrorMessage = "unknown remote cluster"
-var InvalidConnectionStrError = errors.New("invalid connection string")
 var BootStrapNodeHasMovedError = errors.New("Bootstrap node in reference has been moved")
 var UUIDMismatchError = errors.New("UUID does not match")
 
@@ -90,6 +89,7 @@ type RemoteClusterAgentIface interface {
 	GetReferenceClone() *metadata.RemoteClusterReference
 	GetConnectionStringForCAPIRemoteCluster() string
 	UsesAlternateAddress() (bool, error)
+	GetCapability() (metadata.Capability, error)
 }
 
 type RemoteClusterAgent struct {
@@ -111,6 +111,8 @@ type RemoteClusterAgent struct {
 	pendingAddressPreference AddressType
 	pendingAddressPrefCnt    int
 	configurationChanged     bool
+	// As the remote cluster is upgraded, certain features will automatically become enabled
+	currentCapability *metadata.Capability
 
 	// Wait group for making sure we exit synchronized
 	agentWaitGrp sync.WaitGroup
@@ -194,6 +196,9 @@ type refreshContext struct {
 	refCache           *metadata.RemoteClusterReference
 	origRefNodesList   base.StringPairList
 	cachedRefNodesList base.StringPairList
+	origCapability     metadata.Capability
+	cachedCapability   metadata.Capability
+	capabilityLoaded   bool
 
 	// connection related
 	connStr       string
@@ -230,6 +235,9 @@ func (rctx *refreshContext) initialize() error {
 	// addressType
 	rctx.origAddressPref = rctx.agent.addressPreference
 	rctx.origAddressPrefCnt = rctx.agent.pendingAddressPrefCnt
+	if rctx.agent.currentCapability != nil {
+		rctx.origCapability = rctx.agent.currentCapability.Clone()
+	}
 	rctx.agent.refMtx.RUnlock()
 
 	if err != nil {
@@ -284,7 +292,7 @@ func (rctx *refreshContext) checkAndUpdateAgentReference() error {
 	sort.Sort(rctx.cachedRefNodesList)
 	nodesListUpdated := !reflect.DeepEqual(rctx.origRefNodesList, rctx.cachedRefNodesList)
 
-	if !rctx.refOrig.IsSame(rctx.refCache) || nodesListUpdated || rctx.addressPrefUpdate {
+	if !rctx.refOrig.IsSame(rctx.refCache) || nodesListUpdated || rctx.addressPrefUpdate || rctx.capabilityChanged() {
 		rctx.agent.refMtx.Lock()
 		defer rctx.agent.refMtx.Unlock()
 		// First see if anyone has changed the reference from underneath us
@@ -306,7 +314,7 @@ func (rctx *refreshContext) checkAndUpdateAgentReference() error {
 		// 4. When refresh context has shown that the address preference count needs to be updated
 		//    only if there is not another concurrent refresh context updating at the same time
 		//    and that it isn't waiting for a consumer to poll
-		if !rctx.refOrig.IsSame(rctx.refCache) || rctx.addressPrefUpdate {
+		if !rctx.refOrig.IsSame(rctx.refCache) || rctx.addressPrefUpdate || rctx.capabilityChanged() {
 			isEssentiallySame := rctx.refOrig.IsEssentiallySame(rctx.refCache)
 			updateErr := rctx.agent.updateReferenceFromNoLock(rctx.refCache, !isEssentiallySame /*updateMetaKv*/, !isEssentiallySame /*shouldCallCb*/, rctx)
 			if updateErr != nil {
@@ -353,6 +361,11 @@ func (rctx *refreshContext) verifyNodeAndGetList(connStr string, updateSecurityS
 		}
 	}
 
+	capabilityErr := rctx.cachedCapability.LoadFromDefaultPoolInfo(defaultPoolInfo, rctx.agent.logger)
+	if capabilityErr == nil {
+		rctx.capabilityLoaded = true
+	}
+
 	clusterUUID, nodeList, err := rctx.agent.utils.GetClusterUUIDAndNodeListWithMinInfoFromDefaultPoolInfo(defaultPoolInfo, rctx.agent.logger)
 	if err != nil {
 		rctx.agent.logger.Warnf("When refreshing remote cluster reference %v, skipping node %v because of error parsing default pool info. err=%v\n", rctx.refCache.Id(), connStr, err)
@@ -397,8 +410,12 @@ func (rctx *refreshContext) checkUserIntent(nodeList []interface{}) {
 	if useExternal && !isExternal || !useExternal && isExternal {
 		// Change is expected
 		rctx.addressPrefUpdate = true
-		rctx.cachedNodeListWithMinInfo = nodeList
 	}
+	rctx.cachedNodeListWithMinInfo = nodeList
+}
+
+func (rctx *refreshContext) capabilityChanged() bool {
+	return rctx.capabilityLoaded && !rctx.origCapability.IsSameAs(rctx.cachedCapability)
 }
 
 func (agent *RemoteClusterAgent) Refresh() error {
@@ -623,6 +640,11 @@ func (agent *RemoteClusterAgent) DeleteReference(delFromMetaKv bool) (*metadata.
 func (agent *RemoteClusterAgent) syncInternalsFromStagedReferenceNoLock(rctx *refreshContext) error {
 	skipPrefUpdate := agent.shouldSkipAddressPrefNoLock(rctx)
 	nodeList, shouldUseCachedList := agent.shouldUseCachedNodeListFromRctxNoLock(rctx)
+	needToInitCapability := agent.currentCapability == nil
+	if needToInitCapability {
+		// Unlikely to use cache list, but when init-ing capability, must use full info
+		shouldUseCachedList = false
+	}
 
 	username, password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey, err := agent.pendingRef.MyCredentials()
 	if err != nil {
@@ -636,11 +658,25 @@ func (agent *RemoteClusterAgent) syncInternalsFromStagedReferenceNoLock(rctx *re
 	// If refresh context has already done the heavy lifting work of reaching the remote node to get the list
 	// Then just use it here to avoid duplicate work
 	if !shouldUseCachedList {
-		// use GetNodeListWithMinInfo API to ensure that it is supported by target cluster, which could be an elastic search cluster
-		nodeList, err = agent.utils.GetNodeListWithMinInfo(connStr, username, password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey, agent.logger)
+		clusterInfo, err := agent.utils.GetClusterInfo(connStr, base.DefaultPoolPath, username, password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey, agent.logger)
 		if err != nil {
 			agent.logger.Infof("Remote cluster reference %v has a bad connectivity, didn't populate alternative connection strings. err=%v", agent.pendingRef.Id(), err)
-			err = InvalidConnectionStrError
+			return err
+		}
+
+		if needToInitCapability {
+			newCapability := &metadata.Capability{}
+			capabilitiesErr := newCapability.LoadFromDefaultPoolInfo(clusterInfo, agent.logger)
+			if capabilitiesErr != nil {
+				agent.logger.Errorf("Unable to initialize capabilities: %v - replications may not start yet. Will try again next refresh cycle...", err)
+			} else {
+				agent.currentCapability = newCapability
+			}
+		}
+
+		nodeList, err = agent.utils.GetNodeListFromInfoMap(clusterInfo, agent.logger)
+		if err != nil {
+			agent.logger.Infof("Unable to parse default/pool data to populate alternative connection strings. err=%v", err)
 			agent.logger.Infof("nodes_connStrs from old cache =%v", agent.refNodesList)
 			agent.pendingRefNodes = base.DeepCopyStringPairList(agent.refNodesList)
 			return err
@@ -821,6 +857,18 @@ func (agent *RemoteClusterAgent) UsesAlternateAddress() (bool, error) {
 	}
 }
 
+func (agent *RemoteClusterAgent) GetCapability() (capability metadata.Capability, err error) {
+	agent.refMtx.RLock()
+	defer agent.refMtx.RUnlock()
+	if agent.currentCapability == nil {
+		err = fmt.Errorf("Remote cluster %v has not initialized capability yet", agent.reference.Name())
+		return
+	}
+
+	capability = agent.currentCapability.Clone()
+	return
+}
+
 func (agent *RemoteClusterAgent) runPeriodicRefresh() {
 	defer agent.agentWaitGrp.Done()
 
@@ -858,7 +906,7 @@ func (agent *RemoteClusterAgent) stageNewReferenceNoLock(newRef *metadata.Remote
 }
 
 // operation to commit the staged changes into the reference
-func (agent *RemoteClusterAgent) commitStagedChangesNoLock() {
+func (agent *RemoteClusterAgent) commitStagedChangesNoLock(rctx *refreshContext) {
 	if !agent.pendingRef.IsEmpty() {
 		agent.oldRef = agent.reference.Clone()
 		agent.reference.LoadFrom(&agent.pendingRef)
@@ -870,6 +918,13 @@ func (agent *RemoteClusterAgent) commitStagedChangesNoLock() {
 		agent.setAddressPreference(agent.pendingAddressPreference == External, false /*lock*/, false /*setOnlyIfUninit*/)
 		agent.configurationChanged = true
 	}
+
+	// Update capability if it was successfully initialized and it has changed
+	if agent.currentCapability != nil && rctx != nil && rctx.capabilityChanged() {
+		agent.currentCapability.LoadFromOther(rctx.cachedCapability)
+		agent.configurationChanged = true
+	}
+
 }
 
 func (agent *RemoteClusterAgent) IsSame(ref *metadata.RemoteClusterReference) bool {
@@ -942,7 +997,7 @@ func (agent *RemoteClusterAgent) shouldUseCachedNodeListFromRctxNoLock(rctx *ref
 	if agent.shouldSkipAddressPrefNoLock(rctx) {
 		return nil, false
 	}
-	if rctx != nil && rctx.addressPrefUpdate && len(rctx.cachedNodeListWithMinInfo) > 0 {
+	if rctx != nil && len(rctx.cachedNodeListWithMinInfo) > 0 && agent.addressPreference != Uninitialized {
 		return rctx.cachedNodeListWithMinInfo, true
 	}
 	return nil, false
@@ -959,8 +1014,10 @@ func (agent *RemoteClusterAgent) updateReferenceFromNoLock(newRef *metadata.Remo
 		return base.ErrorResourceDoesNotExist
 	}
 
-	//	No need to update if they are the same, or we're not transitioning
-	if agent.reference.IsSame(newRef) && agent.pendingAddressPrefCnt == 0 {
+	capabilityChanged := rctx != nil && rctx.capabilityChanged()
+
+	//	No need to update if they are the same, or we're not transitioning, or capability is the same
+	if agent.reference.IsSame(newRef) && agent.pendingAddressPrefCnt == 0 && !capabilityChanged {
 		return nil
 	}
 
@@ -997,7 +1054,7 @@ func (agent *RemoteClusterAgent) updateReferenceFromNoLock(newRef *metadata.Remo
 	}
 
 	if err == nil {
-		agent.commitStagedChangesNoLock()
+		agent.commitStagedChangesNoLock(rctx)
 		if shouldCallCb {
 			agent.callMetadataChangeCbNoLock()
 		}
@@ -2032,6 +2089,24 @@ func (service *RemoteClusterService) GetRefListForRestartAndClearState() (list [
 		}
 	}
 	return
+}
+
+func (service *RemoteClusterService) GetCapability(ref *metadata.RemoteClusterReference) (metadata.Capability, error) {
+	if ref == nil {
+		err := base.ErrorInvalidInput
+		var emptyCapability metadata.Capability
+		return emptyCapability, err
+	}
+
+	service.agentMutex.RLock()
+	defer service.agentMutex.RUnlock()
+	agent := service.agentMap[ref.Id()]
+	if agent == nil {
+		var emptyCapability metadata.Capability
+		return emptyCapability, errors.New(fmt.Sprintf("Cannot find local reference given the Id: %v", ref.Id()))
+	}
+
+	return agent.GetCapability()
 }
 
 /**

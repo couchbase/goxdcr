@@ -1257,3 +1257,72 @@ func MatchWrapper(matcher gojsonsm.Matcher, slice []byte) (matched bool, status 
 	}()
 	return matcher.MatchWithStatus(slice)
 }
+
+func GetClusterCompatibilityFromNodeList(nodeList []interface{}) (int, error) {
+	if len(nodeList) > 0 {
+		firstNode, ok := nodeList[0].(map[string]interface{})
+		if !ok {
+			return 0, fmt.Errorf("node info is of wrong type. node info=%v", nodeList[0])
+		}
+		clusterCompatibility, ok := firstNode[ClusterCompatibilityKey]
+		if !ok {
+			return 0, fmt.Errorf("Can't get cluster compatibility info. node info=%v\n If replicating to ElasticSearch node, use XDCR v1.", nodeList[0])
+		}
+		clusterCompatibilityFloat, ok := clusterCompatibility.(float64)
+		if !ok {
+			return 0, fmt.Errorf("cluster compatibility is not of int type. type=%v", reflect.TypeOf(clusterCompatibility))
+		}
+		return int(clusterCompatibilityFloat), nil
+	}
+	return 0, fmt.Errorf("node list is empty")
+}
+
+func GetNodeListFromInfoMap(infoMap map[string]interface{}, logger *log.CommonLogger) ([]interface{}, error) {
+	// get node list from the map
+	nodes, ok := infoMap[NodesKey]
+	if !ok {
+		errMsg := fmt.Sprintf("info map contains no nodes. info map=%v", infoMap)
+		logger.Error(errMsg)
+		return nil, errors.New(errMsg)
+	}
+
+	nodeList, ok := nodes.([]interface{})
+	if !ok {
+		errMsg := fmt.Sprintf("nodes is not of list type. type of nodes=%v", reflect.TypeOf(nodes))
+		logger.Error(errMsg)
+		return nil, errors.New(errMsg)
+	}
+
+	// only return the nodes that are active
+	activeNodeList := make([]interface{}, 0)
+	for _, node := range nodeList {
+		nodeInfoMap, ok := node.(map[string]interface{})
+		if !ok {
+			errMsg := fmt.Sprintf("node info is not of map type. type=%v", reflect.TypeOf(node))
+			logger.Error(errMsg)
+			return nil, errors.New(errMsg)
+		}
+		clusterMembershipObj, ok := nodeInfoMap[ClusterMembershipKey]
+		if !ok {
+			// this could happen when target is elastic search cluster (or maybe very old couchbase cluster?)
+			// consider the node to be "active" to be safe
+			errMsg := fmt.Sprintf("node info map does not contain cluster membership. node info map=%v ", nodeInfoMap)
+			logger.Debug(errMsg)
+			activeNodeList = append(activeNodeList, node)
+			continue
+		}
+		clusterMembership, ok := clusterMembershipObj.(string)
+		if !ok {
+			// play safe and return the node as active
+			errMsg := fmt.Sprintf("cluster membership is not string type. type=%v ", reflect.TypeOf(clusterMembershipObj))
+			logger.Warn(errMsg)
+			activeNodeList = append(activeNodeList, node)
+			continue
+		}
+		if clusterMembership == "" || clusterMembership == ClusterMembership_Active {
+			activeNodeList = append(activeNodeList, node)
+		}
+	}
+
+	return activeNodeList, nil
+}

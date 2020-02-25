@@ -471,6 +471,7 @@ var VersionForRBACAndXattrSupport = []int{5, 0}
 var VersionForCompressionSupport = []int{5, 5}
 var VersionForClientCertSupport = []int{5, 5}
 var VersionForHttpScramShaSupport = []int{5, 5}
+var VersionForCollectionSupport = []int{7, 0}
 
 var GoxdcrUserAgentPrefix = "couchbase-goxdcr"
 var GoxdcrUserAgent = ""
