@@ -254,6 +254,7 @@ func (reqHelper *dcpStreamReqHelper) getDisabledError() error {
 
 type DcpNozzleIface interface {
 	CheckStuckness(dcp_stats map[string]map[string]string) error
+	CollectionEnabled() bool
 	Close() error
 	GetStreamState(vbno uint16) (DcpStreamState, error)
 	GetVBList() []uint16
@@ -400,6 +401,10 @@ func NewDcpNozzle(id string,
 
 func (dcp *DcpNozzle) composeUserAgent() {
 	dcp.user_agent = base.ComposeUserAgentWithBucketNames("Goxdcr Dcp ", dcp.sourceBucketName, dcp.targetBucketName)
+}
+
+func (dcp *DcpNozzle) CollectionEnabled() bool {
+	return atomic.LoadUint32(&dcp.collectionEnabled) != 0
 }
 
 // Given the list of features, if a specific user requested feature is not essential to pipeline uptime
@@ -580,6 +585,10 @@ func (dcp *DcpNozzle) initialize(settings metadata.ReplicationSettingsMap) (err 
 		dcp.Logger().Warnf("Collections Manifest is not supported due to the use of CAPI nozzle")
 	} else {
 		dcp.specificManifestGetter = getterRaw.(service_def.CollectionsManifestReqFunc)
+	}
+
+	if !dcp.CollectionEnabled() {
+		err = dcp.checkDefaultCollectionExistence()
 	}
 	return
 }
@@ -1156,7 +1165,7 @@ func (dcp *DcpNozzle) startUprStreams_internal(streams_to_start []uint16) error 
 func (dcp *DcpNozzle) startUprStreamInner(vbno uint16, vbts *base.VBTimestamp, version uint16) (err error) {
 	flags := uint32(0)
 	seqEnd := uint64(0xFFFFFFFFFFFFFFFF)
-	dcp.Logger().Debugf("%v starting vb stream for vb=%v, version=%v collectionEnabled=%v\n", dcp.Id(), vbno, version, atomic.LoadUint32(&dcp.collectionEnabled))
+	dcp.Logger().Debugf("%v starting vb stream for vb=%v, version=%v collectionEnabled=%v\n", dcp.Id(), vbno, version, dcp.CollectionEnabled())
 
 	dcp.lock_uprFeed.RLock()
 	defer dcp.lock_uprFeed.RUnlock()
@@ -1184,7 +1193,7 @@ func (dcp *DcpNozzle) startUprStreamInner(vbno uint16, vbts *base.VBTimestamp, v
 					return
 				}
 				// version passed in == opaque, which will be passed back to us
-				if atomic.LoadUint32(&dcp.collectionEnabled) == 0 {
+				if !dcp.CollectionEnabled() {
 					err = dcp.uprFeed.UprRequestStream(vbno, version, flags, vbts.Vbuuid, vbts.Seqno, seqEnd, vbts.SnapshotStart, vbts.SnapshotEnd)
 				} else {
 					err = dcp.uprFeed.UprRequestCollectionsStream(vbno, version, flags, vbts.Vbuuid, vbts.Seqno, seqEnd, vbts.SnapshotStart, vbts.SnapshotEnd, nil)
@@ -1626,4 +1635,20 @@ func (dcp *DcpNozzle) getDcpDataChanLen() {
 
 func (dcp *DcpNozzle) ResponsibleVBs() []uint16 {
 	return dcp.vbnos
+}
+
+func (dcp *DcpNozzle) checkDefaultCollectionExistence() error {
+	manifest, err := dcp.specificManifestGetter(math.MaxUint64)
+	if err != nil {
+		dcp.Logger().Errorf("Unable to check default collection existence: %v", err)
+		return err
+	}
+
+	_, _, err = manifest.GetScopeAndCollectionName(uint64(base.DefaultCollectionId))
+	if err == base.ErrorNotFound {
+		dcp.Logger().Errorf("DCP %v cannot find default collection for spec", dcp.Id())
+		err = service_def.ErrorSourceDefaultCollectionDNE
+		dcp.RaiseEvent(common.NewEvent(common.ErrorEncountered, nil, dcp, nil, err))
+	}
+	return err
 }

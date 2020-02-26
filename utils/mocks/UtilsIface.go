@@ -1112,13 +1112,13 @@ func (_m *UtilsIface) GetMapFromExpvarMap(expvarMap *expvar.Map) map[string]inte
 	return r0
 }
 
-// GetMemcachedClient provides a mock function with given fields: serverAddr, bucketName, kv_mem_clients, userAgent, keepAlivePeriod, logger
-func (_m *UtilsIface) GetMemcachedClient(serverAddr string, bucketName string, kv_mem_clients map[string]memcached.ClientIface, userAgent string, keepAlivePeriod time.Duration, logger *log.CommonLogger) (memcached.ClientIface, error) {
-	ret := _m.Called(serverAddr, bucketName, kv_mem_clients, userAgent, keepAlivePeriod, logger)
+// GetMemcachedClient provides a mock function with given fields: serverAddr, bucketName, kv_mem_clients, userAgent, keepAlivePeriod, logger, features
+func (_m *UtilsIface) GetMemcachedClient(serverAddr string, bucketName string, kv_mem_clients map[string]memcached.ClientIface, userAgent string, keepAlivePeriod time.Duration, logger *log.CommonLogger, features utils.HELOFeatures) (memcached.ClientIface, error) {
+	ret := _m.Called(serverAddr, bucketName, kv_mem_clients, userAgent, keepAlivePeriod, logger, features)
 
 	var r0 memcached.ClientIface
-	if rf, ok := ret.Get(0).(func(string, string, map[string]memcached.ClientIface, string, time.Duration, *log.CommonLogger) memcached.ClientIface); ok {
-		r0 = rf(serverAddr, bucketName, kv_mem_clients, userAgent, keepAlivePeriod, logger)
+	if rf, ok := ret.Get(0).(func(string, string, map[string]memcached.ClientIface, string, time.Duration, *log.CommonLogger, utils.HELOFeatures) memcached.ClientIface); ok {
+		r0 = rf(serverAddr, bucketName, kv_mem_clients, userAgent, keepAlivePeriod, logger, features)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(memcached.ClientIface)
@@ -1126,8 +1126,8 @@ func (_m *UtilsIface) GetMemcachedClient(serverAddr string, bucketName string, k
 	}
 
 	var r1 error
-	if rf, ok := ret.Get(1).(func(string, string, map[string]memcached.ClientIface, string, time.Duration, *log.CommonLogger) error); ok {
-		r1 = rf(serverAddr, bucketName, kv_mem_clients, userAgent, keepAlivePeriod, logger)
+	if rf, ok := ret.Get(1).(func(string, string, map[string]memcached.ClientIface, string, time.Duration, *log.CommonLogger, utils.HELOFeatures) error); ok {
+		r1 = rf(serverAddr, bucketName, kv_mem_clients, userAgent, keepAlivePeriod, logger, features)
 	} else {
 		r1 = ret.Error(1)
 	}

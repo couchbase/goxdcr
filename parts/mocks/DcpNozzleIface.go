@@ -44,6 +44,20 @@ func (_m *DcpNozzleIface) Close() error {
 	return r0
 }
 
+// CollectionEnabled provides a mock function with given fields:
+func (_m *DcpNozzleIface) CollectionEnabled() bool {
+	ret := _m.Called()
+
+	var r0 bool
+	if rf, ok := ret.Get(0).(func() bool); ok {
+		r0 = rf()
+	} else {
+		r0 = ret.Get(0).(bool)
+	}
+
+	return r0
+}
+
 // GetStreamState provides a mock function with given fields: vbno
 func (_m *DcpNozzleIface) GetStreamState(vbno uint16) (parts.DcpStreamState, error) {
 	ret := _m.Called(vbno)

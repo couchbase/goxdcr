@@ -58,6 +58,7 @@ type Pipeline_mgr_iface interface {
 	UpdatePipeline(pipelineName string, cur_err error) error
 	DeletePipeline(pipelineName string) error
 	CheckPipelines()
+	AutoPauseReplication(topic string) error
 
 	// Internal APIs
 	OnExit() error
@@ -81,6 +82,7 @@ type Pipeline_mgr_iface interface {
 	GetLogSvc() service_def.UILogSvc
 	GetReplSpecSvc() service_def.ReplicationSpecSvc
 	GetXDCRTopologySvc() service_def.XDCRCompTopologySvc
+	PauseReplication(topic string) error
 }
 
 // Global ptr, should slowly get rid of refences to this global
@@ -207,6 +209,10 @@ func (pipelineMgr *PipelineManager) DeletePipeline(pipelineName string) error {
 
 func (pipelineMgr *PipelineManager) InitiateRepStatus(pipelineName string) error {
 	return pipelineMgr.serializer.Init(pipelineName)
+}
+
+func (pipelineMgr *PipelineManager) AutoPauseReplication(pipelineName string) error {
+	return pipelineMgr.serializer.Pause(pipelineName)
 }
 
 // This should really be the method to be used. This is considered part of the interface
@@ -649,6 +655,28 @@ func (pipelineMgr *PipelineManager) Update(topic string, cur_err error) error {
 	return nil
 }
 
+// Should be called internally from serializer's Pause()
+func (pipelineMgr *PipelineManager) PauseReplication(topic string) error {
+	currentSpec, err := pipelineMgr.repl_spec_svc.ReplicationSpec(topic)
+	if err != nil {
+		return fmt.Errorf("Pipeline %v unable to retrieve spec: %v", topic, err)
+	}
+
+	pauseMap := make(metadata.ReplicationSettingsMap)
+	pauseMap[metadata.ActiveKey] = false
+	_, errorMap := currentSpec.Settings.UpdateSettingsFromMap(pauseMap)
+	if len(errorMap) > 0 {
+		err = fmt.Errorf(base.FlattenErrorMap(errorMap))
+		return fmt.Errorf("Pipeline %v updateSettings: %v", topic, err)
+	}
+
+	err = pipelineMgr.repl_spec_svc.SetReplicationSpec(currentSpec)
+	if err != nil {
+		err = fmt.Errorf("Pipeline %v unable to setReplicationSpec: %v", topic, err)
+	}
+	return err
+}
+
 // Use this only for unit test
 func (pipelineMgr *PipelineManager) GetLastUpdateResult(topic string) bool {
 	repStatus, err := pipelineMgr.ReplicationStatus(topic)
@@ -1065,6 +1093,12 @@ RE:
 		r.logger.Infof("Replication %v has been paused. no need to update\n", r.pipeline_name)
 	} else if base.CheckErrorMapForError(errMap, service_def.MetadataNotFoundErr, true /*exactMatch */) {
 		r.logger.Infof("Replication %v has been deleted. no need to update\n", r.pipeline_name)
+	} else if base.CheckErrorMapForError(errMap, service_def.ErrorSourceDefaultCollectionDNE, false /*exactMatch*/) {
+		dneErr := fmt.Sprintf("Replication %v cannot continue because target does not support collections and the source bucket's default collection is removed. Replication will automatically be paused.\n", r.pipeline_name)
+		r.logger.Errorf(dneErr)
+		r.pipelineMgr.GetLogSvc().Write(dneErr)
+		r.pipelineMgr.AutoPauseReplication(r.pipeline_name)
+		return nil
 	} else {
 		r.logger.Errorf("Failed to update pipeline %v, err=%v\n", r.pipeline_name, base.FlattenErrorMap(errMap))
 	}

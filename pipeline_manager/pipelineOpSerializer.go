@@ -20,6 +20,7 @@ const (
 	PipelineUpdate       PipelineMgtOpType = iota
 	PipelineDeletion     PipelineMgtOpType = iota
 	PipelineReinitStream PipelineMgtOpType = iota
+	PipelineAutoPause    PipelineMgtOpType = iota
 )
 
 type PipelineOpSerializerIface interface {
@@ -28,6 +29,7 @@ type PipelineOpSerializerIface interface {
 	Update(topic string, err error) error
 	Init(topic string) error
 	ReInit(topic string) error
+	Pause(topic string) error
 
 	// Synchronous User APIs - call and get data from a channel
 	GetOrCreateReplicationStatus(topic string, cur_err error) (*pipeline.ReplicationStatus, error)
@@ -131,6 +133,14 @@ func (serializer *PipelineOpSerializer) ReInit(topic string) error {
 	resetJob.pipelineTopic = topic
 
 	return serializer.distributeJob(resetJob)
+}
+
+func (serializer *PipelineOpSerializer) Pause(topic string) error {
+	var pauseJob Job
+	pauseJob.jobType = PipelineAutoPause
+	pauseJob.pipelineTopic = topic
+
+	return serializer.distributeJob(pauseJob)
 }
 
 // Synchronous call
@@ -270,6 +280,11 @@ forloop:
 				err = serializer.pipelineMgr.Update(job.pipelineTopic, job.errForUpdateOp)
 				if err != nil {
 					serializer.logger.Warnf("Error updating pipeline %v. err=%v", job.pipelineTopic, err)
+				}
+			case PipelineAutoPause:
+				err := serializer.pipelineMgr.PauseReplication(job.pipelineTopic)
+				if err != nil {
+					serializer.logger.Warnf("Error auto-pausing pipeline %v. err=%v", job.pipelineTopic, err)
 				}
 			default:
 				serializer.logger.Errorf(fmt.Sprintf("Unknown job type: %v -> %v", job.jobType, job))

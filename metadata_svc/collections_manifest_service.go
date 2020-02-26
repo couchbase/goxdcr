@@ -704,6 +704,11 @@ func (a *CollectionsManifestAgent) GetSpecificSourceManifest(manifestVersion uin
 
 	a.srcMtx.RLock()
 
+	if manifestVersion == math.MaxUint64 {
+		defer a.srcMtx.RUnlock()
+		return a.sourceCache[a.lastSourcePull], nil
+	}
+
 	var err error
 	manifest, ok := a.sourceCache[manifestVersion]
 	if !ok {

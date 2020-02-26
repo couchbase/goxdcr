@@ -23,6 +23,7 @@ var ErrorRevisionMismatch = errors.New("revision number does not match")
 var MetaKVFailedAfterMaxTriesBaseString = "metakv failed for max number of retries"
 var MetaKVFailedAfterMaxTries error = fmt.Errorf("%v = %v", MetaKVFailedAfterMaxTriesBaseString, base.MaxNumOfMetakvRetries)
 var ErrorNotFound = errors.New("Not found") // corresponds to metakv
+var ErrorSourceDefaultCollectionDNE = errors.New("Source bucket's default collection has been removed")
 
 func DelOpConsideredPass(err error) bool {
 	if err == ErrorRevisionMismatch || (err != nil && strings.Contains(err.Error(), MetaKVFailedAfterMaxTriesBaseString)) {

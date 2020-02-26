@@ -776,6 +776,7 @@ func (xdcrf *XDCRFactory) constructSettingsForXmemNozzle(pipeline common.Pipelin
 	xmemSettings[parts.SETTING_OPTI_REP_THRESHOLD] = getSettingFromSettingsMap(settings, metadata.OptimisticReplicationThresholdKey, repSettings.OptimisticReplicationThreshold)
 	xmemSettings[parts.SETTING_STATS_INTERVAL] = getSettingFromSettingsMap(settings, metadata.PipelineStatsIntervalKey, repSettings.StatsInterval)
 	xmemSettings[parts.SETTING_COMPRESSION_TYPE] = base.GetCompressionType(getSettingFromSettingsMap(settings, metadata.CompressionTypeKey, repSettings.CompressionType).(int))
+	xdcrf.disableCollectionIfNeeded(settings, xmemSettings, pipeline.Specification())
 
 	xmemSettings[parts.XMEM_SETTING_DEMAND_ENCRYPTION] = targetClusterRef.DemandEncryption()
 	xmemSettings[parts.XMEM_SETTING_CERTIFICATE] = targetClusterRef.Certificate()
@@ -793,11 +794,6 @@ func (xdcrf *XDCRFactory) constructSettingsForXmemNozzle(pipeline common.Pipelin
 		xmemSettings[parts.XMEM_SETTING_SAN_IN_CERITICATE] = targetClusterRef.SANInCertificate()
 
 		xdcrf.logger.Infof("xmemSettings=%v\n", xmemSettings.CloneAndRedact())
-	}
-
-	forceCollectionDisable, ok := settings[parts.ForceCollectionDisableKey]
-	if ok {
-		xmemSettings[parts.ForceCollectionDisableKey] = forceCollectionDisable
 	}
 
 	return xmemSettings, nil
@@ -824,6 +820,34 @@ func (xdcrf *XDCRFactory) getTargetTimeoutEstimate(topic string) time.Duration {
 	return 100 * time.Millisecond
 }
 
+// This is called when trying to filter down a big settings map into a specific settings map for specific parts of the pipeline
+// 1. incomingSettings - the big specific settings map that Start() passes down
+// 2. filteredSettings - the smaller settings map that will be returned
+func (xdcrf *XDCRFactory) disableCollectionIfNeeded(incomingSettings, filteredSettings metadata.ReplicationSettingsMap, spec *metadata.ReplicationSpecification) error {
+	// This is if a force already is in place
+	forceCollectionDisable, ok := incomingSettings[parts.ForceCollectionDisableKey]
+	if ok {
+		filteredSettings[parts.ForceCollectionDisableKey] = forceCollectionDisable
+		return nil
+	}
+
+	// Check to see if remote side supports collections
+	ref, err := xdcrf.remote_cluster_svc.RemoteClusterByUuid(spec.TargetClusterUUID, false /*refresh*/)
+	if err != nil {
+		return err
+	}
+
+	capability, err := xdcrf.remote_cluster_svc.GetCapability(ref)
+	if err != nil {
+		return err
+	}
+
+	if !capability.Collection {
+		filteredSettings[parts.ForceCollectionDisableKey] = true
+	}
+	return nil
+}
+
 func (xdcrf *XDCRFactory) constructSettingsForDcpNozzle(pipeline common.Pipeline, part *parts.DcpNozzle, settings metadata.ReplicationSettingsMap) (map[string]interface{}, error) {
 	xdcrf.logger.Debugf("Construct settings for DcpNozzle ....")
 	dcpNozzleSettings := make(metadata.ReplicationSettingsMap)
@@ -848,9 +872,10 @@ func (xdcrf *XDCRFactory) constructSettingsForDcpNozzle(pipeline common.Pipeline
 			return xdcrf.collectionsManifestSvc.GetSpecificSourceManifest(spec, manifestUid)
 		}
 		dcpNozzleSettings[parts.DCP_Manifest_Getter] = service_def.CollectionsManifestReqFunc(getterFunc)
-		forceCollectionDisable, ok := settings[parts.ForceCollectionDisableKey]
-		if ok {
-			dcpNozzleSettings[parts.ForceCollectionDisableKey] = forceCollectionDisable
+
+		err := xdcrf.disableCollectionIfNeeded(settings, dcpNozzleSettings, pipeline.Specification())
+		if err != nil {
+			return nil, err
 		}
 	}
 
@@ -876,11 +901,7 @@ func (xdcrf *XDCRFactory) constructSettingsForRouter(pipeline common.Pipeline, s
 		routerSettings[parts.FilterExpDelKey] = filterExpDelMode
 	}
 
-	forceCollectionDisable, ok := settings[parts.ForceCollectionDisableKey]
-	if ok {
-		routerSettings[parts.ForceCollectionDisableKey] = forceCollectionDisable
-	}
-
+	xdcrf.disableCollectionIfNeeded(settings, routerSettings, pipeline.Specification())
 	return routerSettings, nil
 }
 
@@ -893,7 +914,7 @@ func (xdcrf *XDCRFactory) registerServices(pipeline common.Pipeline, logger_ctx 
 
 	//register pipeline supervisor
 	supervisor := pipeline_svc.NewPipelineSupervisor(base.PipelineSupervisorIdPrefix+pipeline.Topic(), logger_ctx,
-		xdcrf.pipeline_failure_handler, xdcrf.cluster_info_svc, xdcrf.xdcr_topology_svc, xdcrf.utils)
+		xdcrf.pipeline_failure_handler, xdcrf.cluster_info_svc, xdcrf.xdcr_topology_svc, xdcrf.utils, xdcrf.remote_cluster_svc)
 	err := ctx.RegisterService(base.PIPELINE_SUPERVISOR_SVC, supervisor)
 	if err != nil {
 		return err
@@ -907,7 +928,7 @@ func (xdcrf *XDCRFactory) registerServices(pipeline common.Pipeline, logger_ctx 
 	//Create pipeline statistics manager.
 	bucket_name := pipeline.Specification().SourceBucketName
 	actualStatsMgr := pipeline_svc.NewStatisticsManager(through_seqno_tracker_svc, xdcrf.cluster_info_svc,
-		xdcrf.xdcr_topology_svc, logger_ctx, kv_vb_map, bucket_name, xdcrf.utils)
+		xdcrf.xdcr_topology_svc, logger_ctx, kv_vb_map, bucket_name, xdcrf.utils, xdcrf.remote_cluster_svc)
 
 	//register pipeline checkpoint manager
 	ckptMgr, err := pipeline_svc.NewCheckpointManager(xdcrf.checkpoint_svc, xdcrf.capi_svc,

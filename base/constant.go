@@ -92,6 +92,8 @@ const NameKey = "name"
 const CollectionsKey = "collections"
 const DefaultScopeCollectionName = "_default"
 
+var DefaultCollectionId uint32 = 0
+
 var CollectionsUidBase int = 16
 
 // URL related constants

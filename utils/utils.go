@@ -778,7 +778,7 @@ func (u *Utilities) GetSettingFromSettings(settings metadata.ReplicationSettings
 }
 
 func (u *Utilities) GetMemcachedClient(serverAddr, bucketName string, kv_mem_clients map[string]mcc.ClientIface,
-	userAgent string, keepAlivePeriod time.Duration, logger *log.CommonLogger) (mcc.ClientIface, error) {
+	userAgent string, keepAlivePeriod time.Duration, logger *log.CommonLogger, features HELOFeatures) (mcc.ClientIface, error) {
 	client, ok := kv_mem_clients[serverAddr]
 	if ok {
 		return client, nil
@@ -789,8 +789,11 @@ func (u *Utilities) GetMemcachedClient(serverAddr, bucketName string, kv_mem_cli
 			return nil, err
 		}
 
-		var client, err = u.GetMemcachedConnection(serverAddr, bucketName, userAgent, keepAlivePeriod, logger)
+		var client, respFeatures, err = u.GetMemcachedConnectionWFeatures(serverAddr, bucketName, userAgent, keepAlivePeriod, features, logger)
 		if err == nil {
+			if features != respFeatures {
+				logger.Warnf("GetMemcachedClient for %v requested features: %v but got %v", serverAddr, features, respFeatures)
+			}
 			kv_mem_clients[serverAddr] = client
 			return client, nil
 		} else {

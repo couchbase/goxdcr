@@ -55,6 +55,7 @@ type PipelineSupervisor struct {
 
 	cluster_info_svc  service_def.ClusterInfoSvc
 	xdcr_topology_svc service_def.XDCRCompTopologySvc
+	remoteClusterSvc  service_def.RemoteClusterSvc
 
 	// memcached clients for dcp health check
 	kv_mem_clients      map[string]mcc.ClientIface
@@ -70,7 +71,7 @@ type PipelineSupervisor struct {
 
 func NewPipelineSupervisor(id string, logger_ctx *log.LoggerContext, failure_handler common.SupervisorFailureHandler,
 	cluster_info_svc service_def.ClusterInfoSvc, xdcr_topology_svc service_def.XDCRCompTopologySvc,
-	utilsIn utilities.UtilsIface) *PipelineSupervisor {
+	utilsIn utilities.UtilsIface, remoteClusterSvc service_def.RemoteClusterSvc) *PipelineSupervisor {
 	supervisor := supervisor.NewGenericSupervisor(id, logger_ctx, failure_handler, nil, utilsIn)
 	pipelineSupervisor := &PipelineSupervisor{GenericSupervisor: supervisor,
 		errors_seen:         make(map[string]error),
@@ -81,6 +82,7 @@ func NewPipelineSupervisor(id string, logger_ctx *log.LoggerContext, failure_han
 		kv_mem_clients_lock: &sync.Mutex{},
 		utils:               utilsIn,
 		filterErrCh:         make(chan error, maxFilterErrorsPerInterval),
+		remoteClusterSvc:    remoteClusterSvc,
 	}
 	return pipelineSupervisor
 }
@@ -375,15 +377,34 @@ func (pipelineSupervisor *PipelineSupervisor) getDcpStats() (map[string]map[stri
 
 	dcp_stats := make(map[string]map[string]string)
 
-	bucketName := pipelineSupervisor.pipeline.Specification().SourceBucketName
+	spec := pipelineSupervisor.pipeline.Specification()
+	bucketName := spec.SourceBucketName
 	nodes, err := pipelineSupervisor.xdcr_topology_svc.MyKVNodes()
 	if err != nil {
 		pipelineSupervisor.Logger().Errorf("Error retrieving kv nodes for pipeline %v. Skipping dcp stats check. err=%v", pipelineSupervisor.pipeline.Topic(), err)
 		return nil, err
 	}
 
+	ref, err := pipelineSupervisor.remoteClusterSvc.RemoteClusterByUuid(spec.TargetClusterUUID, false /*refresh*/)
+	if err != nil {
+		pipelineSupervisor.Logger().Errorf("Error retrieving remote cluster reference for pipeline %v. Skipping dcp stats check. err=%v", pipelineSupervisor.pipeline.Topic(), err)
+		return nil, err
+	}
+
+	rcCapability, err := pipelineSupervisor.remoteClusterSvc.GetCapability(ref)
+	if err != nil {
+		pipelineSupervisor.Logger().Errorf("Error retrieving remote cluster capability for pipeline %v. Skipping dcp stats check. err=%v", pipelineSupervisor.pipeline.Topic(), err)
+		return nil, err
+	}
+
 	for _, serverAddr := range nodes {
-		client, err := pipelineSupervisor.utils.GetMemcachedClient(serverAddr, bucketName, pipelineSupervisor.kv_mem_clients, pipelineSupervisor.user_agent, base.KeepAlivePeriod, pipelineSupervisor.Logger())
+		// If the remote cluster does not support collections, then only get the stat for default collection
+		// TODO MB-38157: when backfilling or doing explicit mapping, get stats for a specific set of collections
+		var features utilities.HELOFeatures
+		if !rcCapability.Collection {
+			features.Collections = true
+		}
+		client, err := pipelineSupervisor.utils.GetMemcachedClient(serverAddr, bucketName, pipelineSupervisor.kv_mem_clients, pipelineSupervisor.user_agent, base.KeepAlivePeriod, pipelineSupervisor.Logger(), features)
 		if err != nil {
 			return nil, err
 		}

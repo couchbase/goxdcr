@@ -65,7 +65,7 @@ SCOPE_NAME_COLLECTION_MAP=(["S1"]=${collection1Arr[@]} ["S2"]=${collection2Arr[@
 function runDataLoad {
 	# Run CBWorkloadgen in parallel
 #	runCbWorkloadGenBucket "C1" "B0" &
-#	runCbWorkloadGenBucket "C1" "B1" &
+	runCbWorkloadGenBucket "C1" "B1" &
 #	runCbWorkloadGenBucket "C2" "B2" &
 	runCbWorkloadGenCollection "C1" "B1" "S1" "col1"
 	waitForBgJobs
