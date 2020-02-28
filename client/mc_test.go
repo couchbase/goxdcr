@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/couchbase/gomemcached"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestConnect(t *testing.T) {
@@ -447,4 +448,27 @@ func TestCasOpError(t *testing.T) {
 			}
 		}
 	}
+}
+
+func TestCombineMap(t *testing.T) {
+	assert := assert.New(t)
+	seqnoRespBodyFile := "unitTestData/getSeqnoRespBody.bin"
+	respByteSlice, err := ioutil.ReadFile(seqnoRespBodyFile)
+	assert.Nil(err)
+
+	vbSeqnoList, err := parseGetSeqnoResp(respByteSlice)
+	assert.Nil(err)
+	assert.NotNil(vbSeqnoList)
+	// 1-node cluster should have 1024 vb's
+	assert.Equal(1024, len(*vbSeqnoList))
+
+	vbSeqnoMap := make(map[uint16]uint64)
+	combineMapWithReturnedList(vbSeqnoMap, vbSeqnoList)
+	assert.Equal(1024, len(vbSeqnoMap))
+
+	// Trim the list
+	trimmedList := (*vbSeqnoList)[0:1023]
+	assert.Equal(1023, len(trimmedList))
+	combineMapWithReturnedList(vbSeqnoMap, &trimmedList)
+	assert.Equal(1023, len(vbSeqnoMap))
 }

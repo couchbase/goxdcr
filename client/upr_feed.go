@@ -23,6 +23,7 @@ const dcpSystemEventExtraLen = 13
 const bufferAckThreshold = 0.2
 const opaqueOpen = 0xBEAF0001
 const opaqueFailover = 0xDEADBEEF
+const opaqueGetSeqno = 0xDEADBEEF
 const uprDefaultNoopInterval = 120
 
 // Counter on top of opaqueOpen that others can draw from for open and control msgs
@@ -755,7 +756,6 @@ func (feed *UprFeed) StartFeedWithConfig(datachan_len int) error {
 }
 
 func parseFailoverLog(body []byte) (*FailoverLog, error) {
-
 	if len(body)%16 != 0 {
 		err := fmt.Errorf("invalid body length %v, in failover-log", len(body))
 		return nil, err
@@ -768,6 +768,24 @@ func parseFailoverLog(body []byte) (*FailoverLog, error) {
 		j++
 	}
 	return &log, nil
+}
+
+func parseGetSeqnoResp(body []byte) (*VBSeqnos, error) {
+	// vbno of 2 bytes + seqno of 8 bytes
+	var entryLen int = 10
+
+	if len(body)%entryLen != 0 {
+		err := fmt.Errorf("invalid body length %v, in getVbSeqno", len(body))
+		return nil, err
+	}
+	vbSeqnos := make(VBSeqnos, len(body)/entryLen)
+	for i, j := 0, 0; i < len(body); i += entryLen {
+		vbno := binary.BigEndian.Uint16(body[i : i+2])
+		seqno := binary.BigEndian.Uint64(body[i+2 : i+10])
+		vbSeqnos[j] = [2]uint64{uint64(vbno), seqno}
+		j++
+	}
+	return &vbSeqnos, nil
 }
 
 func handleStreamRequest(

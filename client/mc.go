@@ -35,12 +35,13 @@ type ClientIface interface {
 	EnableMutationToken() (*gomemcached.MCResponse, error)
 	EnableFeatures(features Features) (*gomemcached.MCResponse, error)
 	Get(vb uint16, key string, context ...*ClientContext) (*gomemcached.MCResponse, error)
-	GetCollectionsManifest() (*gomemcached.MCResponse, error)
-	GetSubdoc(vb uint16, key string, subPaths []string, context ...*ClientContext) (*gomemcached.MCResponse, error)
+	GetAllVbSeqnos(vbSeqnoMap map[uint16]uint64, context ...*ClientContext) (map[uint16]uint64, error)
 	GetAndTouch(vb uint16, key string, exp int, context ...*ClientContext) (*gomemcached.MCResponse, error)
 	GetBulk(vb uint16, keys []string, rv map[string]*gomemcached.MCResponse, subPaths []string, context ...*ClientContext) error
+	GetCollectionsManifest() (*gomemcached.MCResponse, error)
 	GetMeta(vb uint16, key string, context ...*ClientContext) (*gomemcached.MCResponse, error)
 	GetRandomDoc(context ...*ClientContext) (*gomemcached.MCResponse, error)
+	GetSubdoc(vb uint16, key string, subPaths []string, context ...*ClientContext) (*gomemcached.MCResponse, error)
 	Hijack() io.ReadWriteCloser
 	Incr(vb uint16, key string, amt, def uint64, exp int, context ...*ClientContext) (uint64, error)
 	Observe(vb uint16, key string) (result ObserveResult, err error)
@@ -70,7 +71,46 @@ type ClientIface interface {
 }
 
 type ClientContext struct {
+	// Collection-based context
 	CollId uint32
+
+	// VB-state related context
+	// nil means not used in this context
+	VbState *VbStateType
+}
+
+type VbStateType uint8
+
+const (
+	VbAlive   VbStateType = 0x00
+	VbActive  VbStateType = 0x01
+	VbReplica VbStateType = 0x02
+	VbPending VbStateType = 0x03
+	VbDead    VbStateType = 0x04
+)
+
+func (context *ClientContext) InitExtras(req *gomemcached.MCRequest, client *Client) {
+	if req == nil || client == nil {
+		return
+	}
+
+	var bytesToAllocate int
+	switch req.Opcode {
+	case gomemcached.GET_ALL_VB_SEQNOS:
+		if context.VbState != nil {
+			bytesToAllocate += 4
+		}
+		if client.CollectionEnabled() {
+			if context.VbState == nil {
+				bytesToAllocate += 8
+			} else {
+				bytesToAllocate += 4
+			}
+		}
+	}
+	if bytesToAllocate > 0 {
+		req.Extras = make([]byte, bytesToAllocate)
+	}
 }
 
 const bufsize = 1024
@@ -305,7 +345,7 @@ func (c *Client) EnableFeatures(features Features) (*gomemcached.MCResponse, err
 		Body:   payload,
 	})
 
-	if err == nil  && collectionsEnabled != 0{
+	if err == nil && collectionsEnabled != 0 {
 		atomic.StoreUint32(&c.collectionsEnabled, uint32(collectionsEnabled))
 	}
 	return rv, err
@@ -330,13 +370,39 @@ func (c *Client) setCollection(req *gomemcached.MCRequest, context ...*ClientCon
 	return nil
 }
 
+func (c *Client) setVbSeqnoContext(req *gomemcached.MCRequest, context ...*ClientContext) error {
+	if len(context) == 0 || req == nil {
+		return nil
+	}
+
+	switch req.Opcode {
+	case gomemcached.GET_ALL_VB_SEQNOS:
+		if len(context) == 0 {
+			return nil
+		}
+
+		if len(req.Extras) == 0 {
+			context[0].InitExtras(req, c)
+		}
+		if context[0].VbState != nil {
+			binary.BigEndian.PutUint32(req.Extras, uint32(*(context[0].VbState)))
+		}
+		if c.CollectionEnabled() {
+			binary.BigEndian.PutUint32(req.Extras[4:8], context[0].CollId)
+		}
+		return nil
+	default:
+		return fmt.Errorf("setVbState Not supported for opcode: %v", req.Opcode.String())
+	}
+}
+
 // Get the value for a key.
 func (c *Client) Get(vb uint16, key string, context ...*ClientContext) (*gomemcached.MCResponse, error) {
 	req := &gomemcached.MCRequest{
-                Opcode:  gomemcached.GET,
-                VBucket: vb,
+		Opcode:  gomemcached.GET,
+		VBucket: vb,
 		Key:     []byte(key),
-        }
+	}
 	err := c.setCollection(req, context...)
 	if err != nil {
 		return nil, err
@@ -348,12 +414,12 @@ func (c *Client) Get(vb uint16, key string, context ...*ClientContext) (*gomemca
 func (c *Client) GetSubdoc(vb uint16, key string, subPaths []string, context ...*ClientContext) (*gomemcached.MCResponse, error) {
 	extraBuf, valueBuf := GetSubDocVal(subPaths)
 	req := &gomemcached.MCRequest{
-                Opcode:  gomemcached.SUBDOC_MULTI_LOOKUP,
-                VBucket: vb,
-                Key:     []byte(key),
-                Extras:  extraBuf,
-                Body:    valueBuf,
-        }
+		Opcode:  gomemcached.SUBDOC_MULTI_LOOKUP,
+		VBucket: vb,
+		Key:     []byte(key),
+		Extras:  extraBuf,
+		Body:    valueBuf,
+	}
 	err := c.setCollection(req, context...)
 	if err != nil {
 		return nil, err
@@ -395,7 +461,6 @@ func (c *Client) CollectionsGetCID(scope string, collection string) (*gomemcache
 }
 
 func (c *Client) CollectionEnabled() bool {
-
 	return atomic.LoadUint32(&c.collectionsEnabled) > 0
 }
 
@@ -404,11 +469,11 @@ func (c *Client) GetAndTouch(vb uint16, key string, exp int, context ...*ClientC
 	extraBuf := make([]byte, 4)
 	binary.BigEndian.PutUint32(extraBuf[0:], uint32(exp))
 	req := &gomemcached.MCRequest{
-                Opcode:  gomemcached.GAT,
-                VBucket: vb,
-                Key:     []byte(key),
-                Extras:  extraBuf,
-        }
+		Opcode:  gomemcached.GAT,
+		VBucket: vb,
+		Key:     []byte(key),
+		Extras:  extraBuf,
+	}
 	err := c.setCollection(req, context...)
 	if err != nil {
 		return nil, err
@@ -745,10 +810,10 @@ func (c *Client) GetBulk(vb uint16, keys []string, rv map[string]*gomemcached.MC
 		Opcode:  gomemcached.GET,
 		VBucket: vb,
 	}
-        err := c.setCollection(memcachedReqPkt, context...)
-        if err != nil {
-                return err
-        }
+	err := c.setCollection(memcachedReqPkt, context...)
+	if err != nil {
+		return err
+	}
 
 	if len(subPaths) > 0 {
 		extraBuf, valueBuf := GetSubDocVal(subPaths)
@@ -1200,11 +1265,6 @@ func (mc *Client) UprGetFailoverLog(vb []uint16) (map[uint16]*FailoverLog, error
 		Opaque: opaqueFailover,
 	}
 
-	var allFeaturesDisabled UprFeatures
-	if err := doUprOpen(mc, "FailoverLog", 0, allFeaturesDisabled); err != nil {
-		return nil, fmt.Errorf("UPR_OPEN Failed %s", err.Error())
-	}
-
 	failoverLogs := make(map[uint16]*FailoverLog)
 	for _, vBucket := range vb {
 		rq.VBucket = vBucket
@@ -1256,4 +1316,99 @@ func IfResStatusError(response *gomemcached.MCResponse) bool {
 
 func (c *Client) Conn() io.ReadWriteCloser {
 	return c.conn
+}
+
+// Since the binary request supports only a single collection at a time, it is possible
+// that this may be called multiple times in succession by callers to get vbSeqnos for
+// multiple collections. Thus, caller could pass in a non-nil map so the gomemcached
+// client won't need to allocate new map for each call to prevent too much GC
+// NOTE: If collection is enabled and context is not given, KV will still return stats for default collection
+func (c *Client) GetAllVbSeqnos(vbSeqnoMap map[uint16]uint64, context ...*ClientContext) (map[uint16]uint64, error) {
+	rq := &gomemcached.MCRequest{
+		Opcode: gomemcached.GET_ALL_VB_SEQNOS,
+		Opaque: opaqueGetSeqno,
+	}
+
+	err := c.setVbSeqnoContext(rq, context...)
+	if err != nil {
+		return vbSeqnoMap, err
+	}
+
+	err = c.Transmit(rq)
+	if err != nil {
+		return vbSeqnoMap, err
+	}
+
+	res, err := c.Receive()
+	if err != nil {
+		return vbSeqnoMap, fmt.Errorf("failed to receive: %v", err)
+	}
+
+	vbSeqnosList, err := parseGetSeqnoResp(res.Body)
+	if err != nil {
+		logging.Errorf("Unable to parse : err: %v\n", err)
+		return vbSeqnoMap, err
+	}
+
+	if vbSeqnoMap == nil {
+		vbSeqnoMap = make(map[uint16]uint64)
+	}
+
+	combineMapWithReturnedList(vbSeqnoMap, vbSeqnosList)
+	return vbSeqnoMap, nil
+}
+
+func combineMapWithReturnedList(vbSeqnoMap map[uint16]uint64, list *VBSeqnos) {
+	if list == nil {
+		return
+	}
+
+	// If the map contains exactly the existing vbs in the list, no need to modify
+	needToCleanupMap := true
+	if len(vbSeqnoMap) == 0 {
+		needToCleanupMap = false
+	} else if len(vbSeqnoMap) == len(*list) {
+		needToCleanupMap = false
+		for _, pair := range *list {
+			_, vbExists := vbSeqnoMap[uint16(pair[0])]
+			if !vbExists {
+				needToCleanupMap = true
+				break
+			}
+		}
+	}
+
+	if needToCleanupMap {
+		var vbsToDelete []uint16
+		for vbInSeqnoMap, _ := range vbSeqnoMap {
+			// If a vb in the seqno map doesn't exist in the returned list, need to clean up
+			// to ensure returning an accurate result
+			found := false
+			var vbno uint16
+			for _, pair := range *list {
+				vbno = uint16(pair[0])
+				if vbno == vbInSeqnoMap {
+					found = true
+					break
+				} else if vbno > vbInSeqnoMap {
+					// definitely not in the list
+					break
+				}
+			}
+			if !found {
+				vbsToDelete = append(vbsToDelete, vbInSeqnoMap)
+			}
+		}
+
+		for _, vbno := range vbsToDelete {
+			delete(vbSeqnoMap, vbno)
+		}
+	}
+
+	// Set the map with data from the list
+	for _, pair := range *list {
+		vbno := uint16(pair[0])
+		seqno := pair[1]
+		vbSeqnoMap[vbno] = seqno
+	}
 }

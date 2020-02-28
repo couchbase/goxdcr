@@ -30,7 +30,7 @@ type MCRequest struct {
 	// len() calls are expensive - cache this in case for collection
 	Keylen int
 	// Collection id for collection based operations
-	CollId	[binary.MaxVarintLen32]byte
+	CollId [binary.MaxVarintLen32]byte
 	// Length of collection id
 	CollIdLen int
 	// Flexible Framing Extras
@@ -40,8 +40,12 @@ type MCRequest struct {
 }
 
 // Size gives the number of bytes this request requires.
+func (req *MCRequest) HdrSize() int {
+	return HDR_LEN + len(req.Extras) + req.CollIdLen + req.FramingElen + len(req.Key)
+}
+
 func (req *MCRequest) Size() int {
-	return HDR_LEN + len(req.Extras) + req.CollIdLen + len(req.Key) + len(req.Body) + len(req.ExtMeta) + req.FramingElen
+	return req.HdrSize() + len(req.Body) + len(req.ExtMeta)
 }
 
 // A debugging string representation of this request
@@ -74,7 +78,7 @@ func (req *MCRequest) fillRegularHeaderBytes(data []byte) int {
 	data[pos] = byte(req.Opcode)
 	pos++
 	binary.BigEndian.PutUint16(data[pos:pos+2],
-		uint16(req.CollIdLen + len(req.Key)))
+		uint16(req.CollIdLen+len(req.Key)))
 	pos += 2
 
 	// 4
@@ -103,6 +107,7 @@ func (req *MCRequest) fillRegularHeaderBytes(data []byte) int {
 	}
 	pos += 8
 
+	// 24 - extras
 	if len(req.Extras) > 0 {
 		copy(data[pos:pos+len(req.Extras)], req.Extras)
 		pos += len(req.Extras)
@@ -116,6 +121,7 @@ func (req *MCRequest) fillRegularHeaderBytes(data []byte) int {
 		copy(data[pos:pos+len(req.Key)], req.Key)
 		pos += len(req.Key)
 	}
+
 	return pos
 }
 
@@ -142,7 +148,7 @@ func (req *MCRequest) fillFlexHeaderBytes(data []byte) (int, bool) {
 	data[0] = FLEX_MAGIC
 	data[1] = byte(req.Opcode)
 	data[2] = byte(req.FramingElen)
-	data[3] = byte(req.Keylen+req.CollIdLen)
+	data[3] = byte(req.Keylen + req.CollIdLen)
 	elen := len(req.Extras)
 	data[4] = byte(elen)
 	if req.DataType != 0 {
@@ -294,12 +300,12 @@ func (req *MCRequest) bytes(data []byte) {
 func (req *MCRequest) Transmit(w io.Writer) (n int, err error) {
 	l := req.Size()
 	if l < _BUFLEN {
-		data := make ([]byte, l)
+		data := make([]byte, l)
 		req.bytes(data)
 		n, err = w.Write(data)
 	} else {
-		data := make([]byte, HDR_LEN+len(req.Extras)+req.CollIdLen+len(req.Key)+req.FramingElen)
-        	req.FillHeaderBytes(data)
+		data := make([]byte, req.HdrSize())
+		req.FillHeaderBytes(data)
 		n, err = w.Write(data)
 		if err == nil {
 			m := 0

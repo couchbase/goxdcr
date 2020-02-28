@@ -89,6 +89,9 @@ type UprEvent struct {
 // FailoverLog containing vvuid and sequnce number
 type FailoverLog [][2]uint64
 
+// Containing a pair of vbno and the high seqno
+type VBSeqnos [][2]uint64
+
 func makeUprEvent(rq gomemcached.MCRequest, stream *UprStream, bytesReceivedFromDCP int) *UprEvent {
 	event := &UprEvent{
 		Opcode:       rq.Opcode,

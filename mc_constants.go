@@ -74,6 +74,7 @@ const (
 	TAP_VBUCKET_SET      = CommandCode(0x45) // Sets state of vbucket in receiver (used in takeover)
 	TAP_CHECKPOINT_START = CommandCode(0x46) // Notifies start of new checkpoint
 	TAP_CHECKPOINT_END   = CommandCode(0x47) // Notifies end of checkpoint
+	GET_ALL_VB_SEQNOS    = CommandCode(0x48) // Get current high sequence numbers from all vbuckets located on the server
 
 	UPR_OPEN        = CommandCode(0x50) // Open a UPR connection with a name
 	UPR_ADDSTREAM   = CommandCode(0x51) // Sent by ebucketMigrator to UPR Consumer

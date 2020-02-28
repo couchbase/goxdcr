@@ -392,7 +392,7 @@ func (_m *ClientIface) Get(vb uint16, key string, context ...*memcached.ClientCo
 }
 
 // GetAllVbSeqnos provides a mock function with given fields: vbSeqnoMap, context
-func (_m *ClientIface) GetAllVbSeqnos(vbSeqnoMap map[uint16]uint64, context ...*memcached.ClientContext) (map[uint16]uint64, error) {
+func (_m *ClientIface) GetAllVbSeqnos(vbSeqnoMap map[uint16]uint64, context ...*memcached.ClientContext) error {
 	_va := make([]interface{}, len(context))
 	for _i := range context {
 		_va[_i] = context[_i]
@@ -402,23 +402,14 @@ func (_m *ClientIface) GetAllVbSeqnos(vbSeqnoMap map[uint16]uint64, context ...*
 	_ca = append(_ca, _va...)
 	ret := _m.Called(_ca...)
 
-	var r0 map[uint16]uint64
-	if rf, ok := ret.Get(0).(func(map[uint16]uint64, ...*memcached.ClientContext) map[uint16]uint64); ok {
+	var r0 error
+	if rf, ok := ret.Get(0).(func(map[uint16]uint64, ...*memcached.ClientContext) error); ok {
 		r0 = rf(vbSeqnoMap, context...)
 	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(map[uint16]uint64)
-		}
+		r0 = ret.Error(0)
 	}
 
-	var r1 error
-	if rf, ok := ret.Get(1).(func(map[uint16]uint64, ...*memcached.ClientContext) error); ok {
-		r1 = rf(vbSeqnoMap, context...)
-	} else {
-		r1 = ret.Error(1)
-	}
-
-	return r0, r1
+	return r0
 }
 
 // GetAndTouch provides a mock function with given fields: vb, key, exp, context
