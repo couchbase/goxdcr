@@ -24,6 +24,8 @@ import (
 var uuidField string = "dummyUUID"
 var uuidField2 string = "dummyUUID2"
 var hostname string = "dummyHostName1:9999"
+var hostnameSSL string = "dummyHostName1:19999"
+var externalHostnameSSL string = "dummyHostName1:29999"
 var hostname2 string = "dummyHostName2:9999"
 var hostname3 string = "dummyHostName3:9999"
 var hostname4 string = "dummyHostName4:9999"
@@ -187,6 +189,51 @@ func setupUtilsMockSpecific(utilitiesMock *utilsMock.UtilsIface, simulatedNetwor
 	utilitiesMock.On("GetClusterInfoWStatusCode", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything,
 		mock.Anything, mock.Anything, mock.Anything, mock.Anything,
 		mock.Anything).Run(func(args mock.Arguments) { time.Sleep(simulatedNetworkDelay) }).Return(clusterInfo, nil, http.StatusOK)
+}
+
+func setupUtilsSSL(utilitiesMock *utilsMock.UtilsIface) {
+	// This is to simulate when user entered :8091 and tried to use SSL - it will fail
+	utilitiesMock.On("GetDefaultPoolInfoUsingHttps", hostname, hostname, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil, fmt.Errorf("HttpsUsingdefault will fail"))
+	utilitiesMock.On("HttpsRemoteHostAddr", hostname, mock.Anything).Return(hostnameSSL, externalHostnameSSL, nil)
+	// When using hostname instead of hostnameSSL (i.e. 8091), fail
+	utilitiesMock.On("GetSecuritySettingsAndDefaultPoolInfo", hostname, hostname, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(false /*refSanincertificate*/, base.HttpAuthMechHttps, nil /*defaultPoolInfo*/, fmt.Errorf("WrongPort") /*err*/)
+	utilitiesMock.On("GetSecuritySettingsAndDefaultPoolInfo", hostname, hostnameSSL, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(false /*refSanincertificate*/, base.HttpAuthMechHttps, nil /*defaultPoolInfo*/, nil /*err*/)
+	utilitiesMock.On("GetNodeListFromInfoMap", mock.Anything, mock.Anything).Return(nil, nil)
+	var sslPairList base.StringPairList
+	onePair := base.StringPair{hostname, hostnameSSL}
+	sslPairList = append(sslPairList, onePair)
+	utilitiesMock.On("GetRemoteNodeAddressesListFromNodeList", mock.Anything, hostname, mock.Anything, mock.Anything, mock.Anything).Return(sslPairList, nil)
+}
+
+func setupUtilsSSL2(utilitiesMock *utilsMock.UtilsIface) {
+
+	defaultPool, _ := getClusterInfoMockExtDummy()
+
+	// This is to simulate when user entered :8091 and tried to use SSL - it will fail
+	utilitiesMock.On("GetDefaultPoolInfoUsingHttps", hostname, "", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil, fmt.Errorf("HttpsUsingdefault will fail"))
+	utilitiesMock.On("HttpsRemoteHostAddr", hostname, mock.Anything).Return(hostnameSSL, externalHostnameSSL, nil)
+	// When using hostname instead of hostnameSSL (i.e. 8091), fail
+	utilitiesMock.On("GetSecuritySettingsAndDefaultPoolInfo", hostname, hostname, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(false /*refSanincertificate*/, base.HttpAuthMechHttps, nil /*defaultPoolInfo*/, fmt.Errorf("WrongPort") /*err*/)
+	// Pretend that the target internal host and port is closed
+	utilitiesMock.On("GetSecuritySettingsAndDefaultPoolInfo", hostname, hostnameSSL, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(false /*refSanincertificate*/, base.HttpAuthMechHttps, nil /*defaultPoolInfo*/, fmt.Errorf("dummy") /*err*/)
+	// Only if external port is used then it's ok
+	utilitiesMock.On("GetSecuritySettingsAndDefaultPoolInfo", hostname, externalHostnameSSL, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(false /*refSanincertificate*/, base.HttpAuthMechHttps, defaultPool /*defaultPoolInfo*/, nil /*err*/)
+
+	nodeList, _ := testUtils.GetNodeListFromInfoMap(defaultPool, nil)
+	// The 0th element of the node List is the dummy one we want
+	nodeInfoMap := nodeList[0].(map[string]interface{})
+
+	utilitiesMock.On("GetNodeListFromInfoMap", mock.Anything, mock.Anything).Return(nodeList, nil)
+	var sslPairList base.StringPairList
+	onePair := base.StringPair{hostname, externalHostnameSSL}
+	sslPairList = append(sslPairList, onePair)
+	utilitiesMock.On("GetRemoteNodeAddressesListFromNodeList", mock.Anything, hostname, mock.Anything, mock.Anything, true /*shouldUseExternal*/).Return(sslPairList, nil)
+
+	extHostStd, extPortStd, extErrStd := testUtils.GetExternalMgtHostAndPort(nodeInfoMap, false /*isHttps*/)
+	utilitiesMock.On("GetExternalMgtHostAndPort", nodeInfoMap, false /*isHttps*/).Return(extHostStd, extPortStd, extErrStd)
+
+	extHostSSL, extPortSSL, extErrSSL := testUtils.GetExternalMgtHostAndPort(nodeInfoMap, true /*isHttps*/)
+	utilitiesMock.On("GetExternalMgtHostAndPort", nodeInfoMap, true /*isHttps*/).Return(extHostSSL, extPortSSL, extErrSSL)
 }
 
 func setupUtilsMockPre1Good3Bad(utilitiesMock *utilsMock.UtilsIface) {
@@ -1018,6 +1065,12 @@ func getClusterInfoMockExt() (map[string]interface{}, error) {
 	return retMap, err
 }
 
+func getClusterInfoMockExtDummy() (map[string]interface{}, error) {
+	fileName := fmt.Sprintf("%v%v", testExtDataDir, "pools_default_dummy.json")
+	retMap, _, err := readJsonHelper(fileName)
+	return retMap, err
+}
+
 func getClusterInfoMockInt() (map[string]interface{}, error) {
 	fileName := fmt.Sprintf("%v%v", testIntDataDir, "pools_default.json")
 	retMap, _, err := readJsonHelper(fileName)
@@ -1288,4 +1341,65 @@ func TestAddressPreferenceChangeFlipFlop(t *testing.T) {
 	assert.Equal(0, agent.pendingAddressPrefCnt)
 
 	fmt.Println("============== Test case start: TestAddressPreferenceChangeFlipFlop =================")
+}
+
+// Tests to make sure the https address and port are parsed correctly
+// This test will simulate user entering host:nonSSLPort
+// And will only return pool info if host:SSL port is used
+func TestSetHostNamesAndSecuritySettings(t *testing.T) {
+	fmt.Println("============== Test case start: TestSetHostNamesAndSecuritySettings =================")
+	assert := assert.New(t)
+
+	uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
+		utilitiesMock, remoteClusterSvc := setupBoilerPlateRCS()
+
+	utilsMockFunc := func() {
+		setupUtilsSSL(utilitiesMock)
+	}
+
+	idAndName := "test"
+
+	ref := createRemoteClusterReference(idAndName)
+	setupMocksRCS(uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
+		remoteClusterSvc, ref, utilsMockFunc)
+
+	ref.EncryptionType_ = metadata.EncryptionType_Full
+	ref.DemandEncryption_ = true
+	assert.Equal(0, len(ref.HttpsHostName()))
+
+	err := remoteClusterSvc.setHostNamesAndSecuritySettings(ref)
+	assert.Nil(err)
+	assert.Equal(hostnameSSL, ref.HttpsHostName())
+	fmt.Println("============== Test case end: TestSetHostNamesAndSecuritySettings =================")
+}
+
+// Test when only external SSL port is successful
+// User enters dummyHostName1:9999 where both dummyHostName1 and 9999 are alternate hostname and
+// alternate stanard ns_server port
+// Ensure that dummyHostName:sslPort fails and only dummyHostName:AltSSLPort succeeds
+func TestSetHostNamesAndSecuritySettings2(t *testing.T) {
+	fmt.Println("============== Test case start: TestSetHostNamesAndSecuritySettings2 =================")
+	assert := assert.New(t)
+
+	uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
+		utilitiesMock, remoteClusterSvc := setupBoilerPlateRCS()
+
+	utilsMockFunc := func() {
+		setupUtilsSSL2(utilitiesMock)
+	}
+
+	idAndName := "test"
+
+	ref := createRemoteClusterReference(idAndName)
+	setupMocksRCS(uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
+		remoteClusterSvc, ref, utilsMockFunc)
+
+	ref.EncryptionType_ = metadata.EncryptionType_Full
+	ref.DemandEncryption_ = true
+	assert.Equal(0, len(ref.HttpsHostName()))
+
+	err := remoteClusterSvc.setHostNamesAndSecuritySettings(ref)
+	assert.Nil(err)
+	assert.Equal(externalHostnameSSL, ref.HttpsHostName())
+	fmt.Println("============== Test case end: TestSetHostNamesAndSecuritySettings2 =================")
 }
