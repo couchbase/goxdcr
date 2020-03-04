@@ -1525,25 +1525,32 @@ func (_m *UtilsIface) GetStringSettingFromSettings(settings metadata.Replication
 	return r0, r1
 }
 
-// HttpsRemoteHostAddr provides a mock function with given fields: hostAddr, logger, useExternal
-func (_m *UtilsIface) HttpsRemoteHostAddr(hostAddr string, logger *log.CommonLogger, useExternal bool) (string, error) {
-	ret := _m.Called(hostAddr, logger, useExternal)
+// HttpsRemoteHostAddr provides a mock function with given fields: hostAddr, logger
+func (_m *UtilsIface) HttpsRemoteHostAddr(hostAddr string, logger *log.CommonLogger) (string, string, error) {
+	ret := _m.Called(hostAddr, logger)
 
 	var r0 string
-	if rf, ok := ret.Get(0).(func(string, *log.CommonLogger, bool) string); ok {
-		r0 = rf(hostAddr, logger, useExternal)
+	if rf, ok := ret.Get(0).(func(string, *log.CommonLogger) string); ok {
+		r0 = rf(hostAddr, logger)
 	} else {
 		r0 = ret.Get(0).(string)
 	}
 
-	var r1 error
-	if rf, ok := ret.Get(1).(func(string, *log.CommonLogger, bool) error); ok {
-		r1 = rf(hostAddr, logger, useExternal)
+	var r1 string
+	if rf, ok := ret.Get(1).(func(string, *log.CommonLogger) string); ok {
+		r1 = rf(hostAddr, logger)
 	} else {
-		r1 = ret.Error(1)
+		r1 = ret.Get(1).(string)
 	}
 
-	return r0, r1
+	var r2 error
+	if rf, ok := ret.Get(2).(func(string, *log.CommonLogger) error); ok {
+		r2 = rf(hostAddr, logger)
+	} else {
+		r2 = ret.Error(2)
+	}
+
+	return r0, r1, r2
 }
 
 // InvalidRuneIndexErrorMessage provides a mock function with given fields: key, index

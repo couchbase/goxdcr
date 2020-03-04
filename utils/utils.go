@@ -1014,17 +1014,25 @@ func (u *Utilities) BucketInfoParseError(bucketInfo map[string]interface{}, logg
 }
 
 // The input is a non-https address, potentially with or without a port
-func (u *Utilities) HttpsRemoteHostAddr(hostAddr string, logger *log.CommonLogger, useExternal bool) (string, error) {
+// Returns 2 pairs of strings:
+// 1. Hostname:internalSSLPort
+// 2. Hostname:externalSSLPort (or "" if no external port)
+func (u *Utilities) HttpsRemoteHostAddr(hostAddr string, logger *log.CommonLogger) (string, string, error) {
+	// Extract hostname to be combined with SSL port
+	hostName := base.GetHostName(hostAddr)
+
 	internalSSLPort, internalErr, externalSSLPort, externalErr := u.GetRemoteSSLPorts(hostAddr, logger)
 	if internalErr != nil {
-		return "", internalErr
+		return "", "", internalErr
 	}
 
-	if useExternal && externalErr == nil {
-		return base.GetHostAddr(hostAddr, externalSSLPort), nil
-	} else {
-		return base.GetHostAddr(hostAddr, internalSSLPort), nil
+	internalHostPort := base.GetHostAddr(hostName, internalSSLPort)
+	var externalHostPort string
+	if externalErr == nil {
+		externalHostPort = base.GetHostAddr(hostName, externalSSLPort)
 	}
+
+	return internalHostPort, externalHostPort, nil
 }
 
 func (u *Utilities) GetRemoteSSLPorts(hostAddr string, logger *log.CommonLogger) (internalSSLPort uint16, internalSSLErr error, externalSSLPort uint16, externalSSLErr error) {

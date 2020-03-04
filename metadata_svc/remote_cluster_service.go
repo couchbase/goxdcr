@@ -1502,25 +1502,7 @@ func (service *RemoteClusterService) validateRemoteCluster(ref *metadata.RemoteC
 	return nil
 }
 
-func (service *RemoteClusterService) getUserIntentFromReference(ref *metadata.RemoteClusterReference, fullEncryption bool) (useExternal bool, err error) {
-	var defaultPoolInfo map[string]interface{}
-
-	if fullEncryption {
-		defaultPoolInfo, err = service.utils.GetDefaultPoolInfoUsingHttps(ref.HostName(), ref.UserName(), ref.Password(), ref.Certificate(), ref.ClientCertificate(), ref.ClientKey(), service.logger)
-	} else {
-		defaultPoolInfo, err = service.utils.GetDefaultPoolInfoUsingScramSha(ref.HostName(), ref.UserName(), ref.Password(), service.logger)
-	}
-	if err != nil {
-		err = wrapAsInvalidRemoteClusterError(err.Error())
-		return
-	}
-
-	nodeList, err := service.utils.GetNodeListFromInfoMap(defaultPoolInfo, service.logger)
-	if err != nil {
-		err = wrapAsInvalidRemoteClusterError(err.Error())
-		return
-	}
-
+func (service *RemoteClusterService) getUserIntentFromNodeList(ref *metadata.RemoteClusterReference, nodeList []interface{}) (useExternal bool, err error) {
 	checkHostName := base.GetHostName(ref.HostName())
 	checkPortNo, checkPortErr := base.GetPortNumber(ref.HostName())
 
@@ -1531,10 +1513,22 @@ func (service *RemoteClusterService) getUserIntentFromReference(ref *metadata.Re
 			return
 		}
 		extHost, extPort, extErr := service.utils.GetExternalMgtHostAndPort(nodeInfoMap, ref.IsHttps())
-		if fullEncryption {
-			// Calling this from full-encryption means user entered a SSL port already
-			// Need to match both to agree on intent
+		if ref.IsFullEncryption() {
+			// Calling this from full-encryption means user may have entered a SSL port already
 			if extErr == nil && checkPortErr == nil && checkHostName == extHost && int(checkPortNo) == extPort {
+				// 1. alternateHostname:alternateSSLPort
+				useExternal = true
+				break
+			}
+			// It is possible that the user is asking for full encryption but contacting the nonSSL port:
+			extHost2, extPort2, extErr2 := service.utils.GetExternalMgtHostAndPort(nodeInfoMap, false /*isHttps*/)
+			if extErr2 == base.ErrorNoPortNumber && checkPortErr == base.ErrorNoPortNumber && checkHostName == extHost2 {
+				// 2. alternateHostname (8091 is implied)
+				useExternal = true
+				break
+			}
+			if extErr2 == nil && checkPortErr == nil && checkHostName == extHost2 && int(checkPortNo) == extPort2 {
+				// 3. alternateHostname:9000 (8091 non-SSL alternate equivalent)
 				useExternal = true
 				break
 			}
@@ -1560,20 +1554,16 @@ func (service *RemoteClusterService) setHostNamesAndSecuritySettings(ref *metada
 
 	refHostName := ref.HostName()
 	refHttpsHostName := ref.HttpsHostName()
+	var externalRefHttpsHostName string
 	var err error
 	var err1 error
-
-	useExternal, err := service.getUserIntentFromReference(ref, ref.IsFullEncryption())
-	if err != nil {
-		return err
-	}
 
 	if refHttpsHostName == "" {
 		if !ref.IsFullEncryption() {
 			// half encryption mode
 			// refHostName is always a http address
 			// we will need to retrieve https port from target and compute https address
-			refHttpsHostName, err = service.getHttpsRemoteHostAddr(refHostName, useExternal)
+			refHttpsHostName, _, err = service.getHttpsRemoteHostAddr(refHostName)
 			if err != nil {
 				return err
 			}
@@ -1590,29 +1580,47 @@ func (service *RemoteClusterService) setHostNamesAndSecuritySettings(ref *metada
 		if !ref.IsFullEncryption() {
 			return wrapAsInvalidRemoteClusterError(err.Error())
 		}
+
 		// in full encryption mode, the error could have been caused by refHostName, and hence refHttpsHostName, containing a http address,
 		// try treating refHostName as a http address and compute the corresponding https address by retrieving tls port from target
-		refHttpsHostName, err1 = service.getHttpsRemoteHostAddr(refHostName, useExternal)
+		refHttpsHostName, externalRefHttpsHostName, err1 = service.getHttpsRemoteHostAddr(refHostName)
 		if err1 != nil {
 			// if the attempt to treat refHostName as a http address also fails, return all errors and let user decide what to do
 			errMsg := fmt.Sprintf("Cannot use HostName, %v, as a https address or a http address. Error when using it as a https address=%v\n. Error when using it as a http address=%v\n", ref.HostName(), err, err1)
 			return wrapAsInvalidRemoteClusterError(errMsg)
 		}
 
-		// now we have valid https address, re-do security settings retrieval
+		// now we potentially have valid https address, re-do security settings retrieval
 		refSANInCertificate, refHttpAuthMech, defaultPoolInfo, err = service.utils.GetSecuritySettingsAndDefaultPoolInfo(refHostName, refHttpsHostName, ref.UserName(), ref.Password(), ref.Certificate(), ref.ClientCertificate(), ref.ClientKey(), ref.IsHalfEncryption(), service.logger)
 		if err != nil {
-			return wrapAsInvalidRemoteClusterError(err.Error())
+			if len(externalRefHttpsHostName) > 0 {
+				// If the https address doesn't work, and remote cluster has set-up an alternate SSL port,
+				// as a last resort, try that for a third time
+				refHttpsHostName = externalRefHttpsHostName
+				refSANInCertificate, refHttpAuthMech, defaultPoolInfo, err = service.utils.GetSecuritySettingsAndDefaultPoolInfo(refHostName, refHttpsHostName, ref.UserName(), ref.Password(), ref.Certificate(), ref.ClientCertificate(), ref.ClientKey(), ref.IsHalfEncryption(), service.logger)
+			}
+			if err != nil {
+				return wrapAsInvalidRemoteClusterError(err.Error())
+			}
 		}
 	}
 
 	// by now defaultPoolInfo contains valid info
+	// Set this now so isHttps() call is correct
+	ref.SetHttpAuthMech(refHttpAuthMech)
+
 	// compute http address based on the returned defaultPoolInfo
 	// even though http address is needed only by half secure type reference as of now,
 	// always compute and populate http address to be more consistent and less error prone
 	nodeList, err := service.utils.GetNodeListFromInfoMap(defaultPoolInfo, service.logger)
 	if err != nil {
 		err = fmt.Errorf("Can't get nodes information for cluster %v for ref %v, err=%v", refHostName, ref.Id(), err)
+		return wrapAsInvalidRemoteClusterError(err.Error())
+	}
+
+	useExternal, err := service.getUserIntentFromNodeList(ref, nodeList)
+	if err != nil {
+		err = fmt.Errorf("Can't get user intent from node list, err=%v", err)
 		return wrapAsInvalidRemoteClusterError(err.Error())
 	}
 
@@ -1645,21 +1653,21 @@ func (service *RemoteClusterService) setHostNamesAndSecuritySettings(ref *metada
 	ref.SetActiveHttpsHostName(refHttpsHostName)
 
 	ref.SetSANInCertificate(refSANInCertificate)
-	ref.SetHttpAuthMech(refHttpAuthMech)
 	service.logger.Infof("Set hostName=%v, httpsHostName=%v, SANInCertificate=%v HttpAuthMech=%v for remote cluster reference %v\n", refHttpHostName, refHttpsHostName, refSANInCertificate, refHttpAuthMech, ref.Id())
 	return nil
 }
 
-func (service *RemoteClusterService) getHttpsRemoteHostAddr(hostName string, useExternal bool) (string, error) {
-	refHttpsHostName, err := service.utils.HttpsRemoteHostAddr(hostName, service.logger, useExternal)
+func (service *RemoteClusterService) getHttpsRemoteHostAddr(hostName string) (string, string, error) {
+	internalHttpsHostname, externalHttpsHostname, err := service.utils.HttpsRemoteHostAddr(hostName, service.logger)
 	if err != nil {
 		if err.Error() == base.ErrorUnauthorized.Error() {
-			return "", wrapAsInvalidRemoteClusterError(fmt.Sprintf("Could not get ssl port for %v. Remote cluster could be an Elasticsearch cluster that does not support ssl encryption. Please double check remote cluster configuration or turn off ssl encryption.", hostName))
+			return "", "", wrapAsInvalidRemoteClusterError(fmt.Sprintf("Could not get ssl port for %v. Remote cluster could be an Elasticsearch cluster that does not support ssl encryption. Please double check remote cluster configuration or turn off ssl encryption.", hostName))
 		} else {
-			return "", wrapAsInvalidRemoteClusterError(fmt.Sprintf("Could not get ssl port for %v. err=%v", hostName, err))
+			return "", "", wrapAsInvalidRemoteClusterError(fmt.Sprintf("Could not get ssl port for %v. err=%v", hostName, err))
 		}
 	}
-	return refHttpsHostName, nil
+
+	return internalHttpsHostname, externalHttpsHostname, nil
 }
 
 // validate certificates in remote cluster ref
