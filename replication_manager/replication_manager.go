@@ -17,6 +17,15 @@ import (
 	"errors"
 	"expvar"
 	"fmt"
+	"io"
+	"os"
+	"reflect"
+	"runtime"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+
 	mcc "github.com/couchbase/gomemcached/client"
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/common"
@@ -30,14 +39,6 @@ import (
 	"github.com/couchbase/goxdcr/service_def"
 	"github.com/couchbase/goxdcr/supervisor"
 	utilities "github.com/couchbase/goxdcr/utils"
-	"io"
-	"os"
-	"reflect"
-	"runtime"
-	"strconv"
-	"strings"
-	"sync"
-	"time"
 )
 
 var logger_rm *log.CommonLogger = log.NewLogger("ReplMgr", log.DefaultLoggerContext)
@@ -750,7 +751,7 @@ func (rm *replicationManager) createAndPersistReplicationSpec(justValidate bool,
  * Returns true if the error is to be hidden from the web GUI.
  */
 func bypassUIErrorCodes(errStr string) bool {
-	if errStr == base.ErrorNoSourceNozzle.Error() {
+	if strings.Contains(errStr, base.ErrorNoSourceNozzle.Error()) {
 		return true
 	} else if strings.Contains(errStr, base.ErrorMasterNegativeIndex.Error()) {
 		return true
