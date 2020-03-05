@@ -26,6 +26,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -39,6 +40,17 @@ var InvalidRemoteClusterErrorMessage = "Invalid remote cluster. "
 var UnknownRemoteClusterErrorMessage = "unknown remote cluster"
 var BootStrapNodeHasMovedError = errors.New("Bootstrap node in reference has been moved")
 var UUIDMismatchError = errors.New("UUID does not match")
+var RemoteSyncInProgress = errors.New("A RPC request is currently underway")
+var InitInProgress = errors.New("Initialization is already in progress")
+var SetInProgress = errors.New("An user-driven setRemoteClusterReference event is already in progress")
+var HostNameEmpty = errors.New("Hostname is empty")
+var RefreshNotEnabledYet = errors.New("The initial reference update hasn't finished yet, refresh is not enabled")
+var SetDisabledUntilInit = errors.New("The reference has not finished initializing yet. SetRemoteCluster is disabled")
+var RefreshAlreadyActive = errors.New("There is a refresh that is ongoing")
+var RefreshAborted = errors.New("Refresh instance was called to be aborted")
+var DeleteAlreadyIssued = errors.New("Underlying remote cluster reference has been already deleted manually")
+var WriteToMetakvErrString = "Error writing to metakv"
+var NoChangeNeeded = errors.New("No change is needed")
 
 // Whether or not to use internal or external (alternate) addressing for communications
 type AddressType int
@@ -81,6 +93,8 @@ type RemoteClusterAgentIface interface {
 	Stop()
 	// This call will set the RemoteClusterAgent's internal reference with new information from newRef
 	UpdateReferenceFrom(newRef *metadata.RemoteClusterReference, writeToMetaKv bool) error
+	// This call will queue the update and run it in the background without needing to wait for success
+	UpdateReferenceFromAsync(newRef *metadata.RemoteClusterReference, writeToMetaKv bool) error
 	DeleteReference(delFromMetaKv bool) (*metadata.RemoteClusterReference, error)
 	Refresh() error
 
@@ -100,8 +114,6 @@ type RemoteClusterAgent struct {
 	reference metadata.RemoteClusterReference
 	// The most up-to-date cached list of nodes in pairs of [httpAddr, httpsAddr]
 	refNodesList base.StringPairList
-	// function pointer to callback
-	metadataChangeCallback base.MetadataChangeHandlerCallback
 	// Flag to state that metakv deletes have occured. Any concurrent refresh() taking place
 	// when delete occures should NOT write to metakv after this is set
 	deletedFromMetakv bool
@@ -114,12 +126,35 @@ type RemoteClusterAgent struct {
 	// As the remote cluster is upgraded, certain features will automatically become enabled
 	currentCapability *metadata.Capability
 
+	// function pointer to callback
+	metadataChangeCallback base.MetadataChangeHandlerCallback
+	metadataChangeCbMtx    sync.RWMutex
+
 	// Wait group for making sure we exit synchronized
 	agentWaitGrp sync.WaitGroup
 	// finChannel for refresher
-	refresherFinCh chan bool
+	agentFinCh chan bool
 	// Make sure we call stop only once
 	stopOnce sync.Once
+	stopped  uint32
+
+	// When agent started asynchronously, prevent a refresh from happening until the first update
+	// finishes
+	initDone uint32
+	// It is possible that there may be concurrent calls to refresh()
+	refreshActive uint32
+	refreshResult []chan error
+
+	// Refresh() operation needs synchronization primatives in case abort is needed
+	refreshMtx        sync.Mutex
+	refreshCv         *sync.Cond
+	refreshAbortState int
+	// As part of refresh() it launches a bg task to do the RPC
+	refreshRPCState int
+	// The opaque is to prevent a stale refresh RPC from modifying the state
+	refreshRPCOpaque uint64
+	// If a user-induced set is taking place, disable any refresh
+	temporaryDisableRefresh bool
 
 	// for logging
 	logger *log.CommonLogger
@@ -147,6 +182,18 @@ type RemoteClusterAgent struct {
 	// For certain unit tests, bypass metakv
 	unitTestBypassMetaKV bool
 }
+
+const (
+	refreshRPCNotInit  = 0
+	refreshRPCUnderway = 1
+	refreshRPCDone     = 2
+)
+
+const (
+	refreshAbortNotRequested = 0
+	refreshAbortRequested    = 1
+	refreshAbortAcknowledged = 2
+)
 
 func (agent *RemoteClusterAgent) GetReferenceClone() *metadata.RemoteClusterReference {
 	agent.refMtx.RLock()
@@ -186,14 +233,60 @@ func (agent *RemoteClusterAgent) clearAddressModeAccounting() {
 	agent.configurationChanged = false
 }
 
-func (agent *RemoteClusterAgent) initializeNewRefreshContext() (*refreshContext, error) {
-	rctx := &refreshContext{agent: agent}
-	err := rctx.initialize()
-	if err != nil {
-		return nil, err
-	} else {
-		return rctx, nil
+func (agent *RemoteClusterAgent) initializeNewRefreshContext() (*refreshContext, chan error, error) {
+	if !agent.InitDone() {
+		return nil, nil, RefreshNotEnabledYet
 	}
+
+	var err error
+	var resultCh chan error
+	agent.refreshMtx.Lock()
+	if agent.temporaryDisableRefresh {
+		err = SetInProgress
+	} else {
+		if agent.refreshActive == 0 {
+			// This is the first Refresh() call and will get the honor of executing
+			agent.refreshActive = 1
+		} else {
+			// A Refresh() is currently ongoing - piggy back onto that running process for the result
+			resultCh = make(chan error, 1)
+			agent.refreshResult = append(agent.refreshResult, resultCh)
+			err = RefreshAlreadyActive
+		}
+	}
+	agent.refreshMtx.Unlock()
+
+	if err != nil {
+		return nil, resultCh, err
+	}
+
+	rctx := &refreshContext{agent: agent}
+	rctx.initialize()
+	return rctx, nil, nil
+}
+
+func (agent *RemoteClusterAgent) cleanupRefreshContext(rctx *refreshContext, result error) {
+	agent.refreshMtx.Lock()
+	if rctx != nil {
+		switch agent.refreshAbortState {
+		case refreshAbortNotRequested:
+			break
+		case refreshAbortRequested:
+			// too late
+			defer agent.refreshCv.Broadcast()
+			agent.refreshAbortState = refreshAbortAcknowledged
+		case refreshAbortAcknowledged:
+			// too late anyway
+			break
+		}
+	}
+
+	for _, ch := range agent.refreshResult {
+		ch <- result
+	}
+	agent.refreshActive = 0
+	agent.refreshRPCState = refreshRPCNotInit
+	agent.refreshMtx.Unlock()
 }
 
 // This is used as a helper context during each refresh operation
@@ -201,11 +294,11 @@ type refreshContext struct {
 	// For comparison and editing
 	refOrig            *metadata.RemoteClusterReference
 	refCache           *metadata.RemoteClusterReference
-	origRefNodesList   base.StringPairList
 	cachedRefNodesList base.StringPairList
 	origCapability     metadata.Capability
 	cachedCapability   metadata.Capability
 	capabilityLoaded   bool
+	nodeListUpdated    bool
 
 	// connection related
 	connStr       string
@@ -221,35 +314,25 @@ type refreshContext struct {
 
 	// addressType refresh
 	origAddressPref           AddressType
-	origAddressPrefCnt        int
 	addressPrefUpdate         bool
 	cachedNodeListWithMinInfo []interface{}
 }
 
 // Initializes the context and also populates the credentials for connecting to nodes
-func (rctx *refreshContext) initialize() error {
-	var err error
+func (rctx *refreshContext) initialize() {
 	// First cache the info
 	rctx.agent.refMtx.RLock()
 	// For comparison
 	rctx.refOrig = rctx.agent.reference.Clone()
 	// for editing
 	rctx.refCache = rctx.agent.reference.Clone()
-	// For comparison
-	rctx.origRefNodesList = base.DeepCopyStringPairList(rctx.agent.refNodesList)
-	// for editing
 	rctx.cachedRefNodesList = base.DeepCopyStringPairList(rctx.agent.refNodesList)
 	// addressType
 	rctx.origAddressPref = rctx.agent.addressPreference
-	rctx.origAddressPrefCnt = rctx.agent.pendingAddressPrefCnt
 	if rctx.agent.currentCapability != nil {
 		rctx.origCapability = rctx.agent.currentCapability.Clone()
 	}
 	rctx.agent.refMtx.RUnlock()
-
-	if err != nil {
-		return err
-	}
 
 	rctx.index = 0
 	rctx.atLeastOneValid = false
@@ -269,7 +352,6 @@ func (rctx *refreshContext) initialize() error {
 		base.ShuffleStringPairList(rctx.cachedRefNodesList)
 	}
 
-	return nil
 }
 
 func (rctx *refreshContext) setHostNamesAndConnStr(pair base.StringPair) {
@@ -295,20 +377,12 @@ func (rctx *refreshContext) checkAndUpdateActiveHost() {
 // Updates the agent reference if changes are made
 // Will also update the reference's boostrap hostname if necessary
 func (rctx *refreshContext) checkAndUpdateAgentReference() error {
-	sort.Sort(rctx.origRefNodesList)
-	sort.Sort(rctx.cachedRefNodesList)
-	nodesListUpdated := !reflect.DeepEqual(rctx.origRefNodesList, rctx.cachedRefNodesList)
+	err := rctx.checkIfAbortRequested()
+	if err != nil {
+		return err
+	}
 
-	if !rctx.refOrig.IsSame(rctx.refCache) || nodesListUpdated || rctx.addressPrefUpdate || rctx.capabilityChanged() {
-		rctx.agent.refMtx.Lock()
-		defer rctx.agent.refMtx.Unlock()
-		// First see if anyone has changed the reference from underneath us
-		sortedAgentList := base.DeepCopyStringPairList(rctx.agent.refNodesList)
-		sort.Sort(sortedAgentList)
-		if !rctx.agent.reference.IsSame(rctx.refOrig) || !reflect.DeepEqual(sortedAgentList, rctx.origRefNodesList) {
-			return populateRefreshDataInconsistentError(rctx.refOrig.CloneAndRedact(), rctx.agent.reference.CloneAndRedact(), rctx.origRefNodesList, sortedAgentList)
-		}
-
+	if !rctx.refOrig.IsSame(rctx.refCache) || rctx.nodeListUpdated || rctx.addressPrefUpdate || rctx.capabilityChanged() {
 		// 1. when refOrig.IsSame(refCache) is true, i.e., when there have been no changes to refCache,
 		//    updateReferenceFromNoLock is not called
 		// 2. when refOrig.IsSame(refCache) is false, and refOrig.IsEssentiallySame(refCache) is true,
@@ -323,26 +397,36 @@ func (rctx *refreshContext) checkAndUpdateAgentReference() error {
 		//    and that it isn't waiting for a consumer to poll
 		if !rctx.refOrig.IsSame(rctx.refCache) || rctx.addressPrefUpdate || rctx.capabilityChanged() {
 			isEssentiallySame := rctx.refOrig.IsEssentiallySame(rctx.refCache)
-			updateErr := rctx.agent.updateReferenceFromNoLock(rctx.refCache, !isEssentiallySame /*updateMetaKv*/, !isEssentiallySame /*shouldCallCb*/, rctx)
+			updateErr := rctx.agent.updateReferenceFromInternal(rctx.refCache, !isEssentiallySame, /*updateMetaKv*/
+				!isEssentiallySame /*shouldCallCb*/, true /*synchronous*/, rctx)
 			if updateErr != nil {
-				rctx.agent.logger.Warnf(updateErr.Error())
+				if updateErr != DeleteAlreadyIssued {
+					rctx.agent.logger.Warnf(updateErr.Error())
+				}
 				return updateErr
 			}
 		} else {
+			rctx.agent.refMtx.Lock()
 			rctx.agent.refNodesList = base.DeepCopyStringPairList(rctx.cachedRefNodesList)
+			rctx.agent.refMtx.Unlock()
 		}
 
-		rctx.agent.logger.Infof(populateRefreshSuccessMsg(rctx.refOrig.CloneAndRedact(), rctx.agent.reference.CloneAndRedact(), rctx.origRefNodesList, rctx.agent.refNodesList))
+		rctx.agent.logger.Infof(populateRefreshSuccessMsg(rctx.refOrig.CloneAndRedact(), rctx.agent.reference.CloneAndRedact(), rctx.agent.refNodesList))
 	}
 
 	return nil
 }
 
-func (rctx *refreshContext) finalizeRefCacheListFrom(listToBeUsed base.StringPairList) {
+func (rctx *refreshContext) finalizeRefCacheListFrom(listToBeUsed base.StringPairList, nodeList []interface{}) {
+	sort.Sort(listToBeUsed)
+	sort.Sort(rctx.cachedRefNodesList)
+	rctx.nodeListUpdated = !reflect.DeepEqual(rctx.cachedRefNodesList, listToBeUsed)
+
 	rctx.cachedRefNodesList = listToBeUsed
 	if !rctx.atLeastOneValid {
 		rctx.atLeastOneValid = true
 	}
+	rctx.cachedNodeListWithMinInfo = nodeList
 }
 
 func (rctx *refreshContext) verifyNodeAndGetList(connStr string, updateSecuritySettings bool) ([]interface{}, error) {
@@ -353,19 +437,73 @@ func (rctx *refreshContext) verifyNodeAndGetList(connStr string, updateSecurityS
 	}
 
 	var defaultPoolInfo map[string]interface{}
-	if updateSecuritySettings && rctx.refCache.IsEncryptionEnabled() {
-		// if updateSecuritySettings is true, get up to date security settings from target
-		sanInCertificate, httpAuthMech, defaultPoolInfo, err = rctx.agent.utils.GetSecuritySettingsAndDefaultPoolInfo(rctx.hostName, rctx.httpsHostName, username, password, certificate, clientCertificate, clientKey, rctx.refCache.IsHalfEncryption(), rctx.agent.logger)
-		if err != nil {
-			rctx.agent.logger.Warnf("When refreshing remote cluster reference %v, skipping node %v because of error retrieving security settings from target. err=%v\n", rctx.refCache.Id(), connStr, err)
-			return nil, err
+	var bgErr error
+	// This backgroundRPC is launched with an opaque
+	// Because it is possible that an Refresh is aborted - in which this function call will need to bail out
+	// quickly and leave this RPC call hanging.
+	// The RPC call may lag dramatically and by the time signalFunc() is called, another backgroundRPC is underway
+	// So the opaque is to ensure that only the right incarnation of backgroundRPC can modify the data and send broadcasts
+	backgroundRpc := func(opaque uint64) {
+		signalFunc := func() {
+			rctx.agent.refreshMtx.Lock()
+			defer rctx.agent.refreshMtx.Unlock()
+			if rctx.agent.refreshRPCOpaque == opaque && rctx.agent.refreshRPCState == refreshRPCUnderway {
+				rctx.agent.refreshRPCState = refreshRPCDone
+				rctx.agent.refreshCv.Broadcast()
+			}
 		}
-	} else {
-		defaultPoolInfo, err = rctx.agent.utils.GetClusterInfo(connStr, base.DefaultPoolPath, username, password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey, rctx.agent.logger)
-		if err != nil {
-			rctx.agent.logger.Warnf("When refreshing remote cluster reference %v, skipping node %v because of error retrieving default pool info from target. err=%v\n", rctx.refCache.Id(), connStr, err)
-			return nil, err
+		defer signalFunc()
+		if updateSecuritySettings && rctx.refCache.IsEncryptionEnabled() {
+			// if updateSecuritySettings is true, get up to date security settings from target
+			sanInCertificate, httpAuthMech, defaultPoolInfo, bgErr = rctx.agent.utils.GetSecuritySettingsAndDefaultPoolInfo(rctx.hostName, rctx.httpsHostName, username, password, certificate, clientCertificate, clientKey, rctx.refCache.IsHalfEncryption(), rctx.agent.logger)
+			if bgErr != nil {
+				rctx.agent.logger.Warnf("When refreshing remote cluster reference %v, skipping node %v because of error retrieving security settings from target. err=%v\n", rctx.refCache.Id(), connStr, bgErr)
+				return
+			}
+		} else {
+			defaultPoolInfo, bgErr = rctx.agent.utils.GetClusterInfo(connStr, base.DefaultPoolPath, username, password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey, rctx.agent.logger)
+			if bgErr != nil {
+				rctx.agent.logger.Warnf("When refreshing remote cluster reference %v, skipping node %v because of error retrieving default pool info from target. err=%v\n", rctx.refCache.Id(), connStr, bgErr)
+				return
+			}
 		}
+	}
+	// This operation can take a while. Let it run in the bg and watch for any abort signals
+	rctx.agent.refreshMtx.Lock()
+	// Before launching bg go-routine, check for abort signals
+	switch rctx.agent.refreshAbortState {
+	case refreshAbortRequested:
+		rctx.agent.refreshAbortState = refreshAbortAcknowledged
+		defer rctx.agent.refreshCv.Broadcast()
+		err = RefreshAborted
+	case refreshAbortAcknowledged:
+		// Don't launch the goroutine
+		err = RefreshAborted
+	case refreshAbortNotRequested:
+		rctx.agent.refreshRPCState = refreshRPCUnderway
+		// Assign a new ID for the background task
+		rctx.agent.refreshRPCOpaque++
+		go backgroundRpc(rctx.agent.refreshRPCOpaque)
+		for {
+			rctx.agent.refreshCv.Wait()
+			// When this wakes up, can be potential spurious wakeup, RPC Done, or abort
+			if rctx.agent.refreshAbortState == refreshAbortRequested || rctx.agent.refreshAbortState == refreshAbortAcknowledged {
+				// Revoke permission from the background RPC function
+				rctx.agent.refreshRPCOpaque++
+				err = RefreshAborted
+				if rctx.agent.refreshAbortState == refreshAbortRequested {
+					defer rctx.agent.refreshCv.Broadcast()
+				}
+				break
+			} else if rctx.agent.refreshRPCState == refreshRPCDone {
+				err = bgErr
+				break
+			}
+		}
+	}
+	rctx.agent.refreshMtx.Unlock()
+	if err != nil {
+		return nil, err
 	}
 
 	capabilityErr := rctx.cachedCapability.LoadFromDefaultPoolInfo(defaultPoolInfo, rctx.agent.logger)
@@ -380,20 +518,23 @@ func (rctx *refreshContext) verifyNodeAndGetList(connStr string, updateSecurityS
 	}
 	// selected node is accessible
 	refCacheUuid := rctx.refCache.Uuid()
-	if clusterUUID != refCacheUuid {
+	if len(refCacheUuid) == 0 {
+		rctx.agent.logger.Warnf("Current reference has empty UUID, setting to %v - this is likely due to a failed node-pull when the reference was first added", clusterUUID)
+	} else if clusterUUID != refCacheUuid {
 		rctx.agent.logger.Warnf("Cluster UUID: %v and refCache UUID: %v", clusterUUID, refCacheUuid)
 		return nil, UUIDMismatchError
 	}
+
 	if updateSecuritySettings {
 		// update security settings only if the target node is still in the same target cluster
 		if rctx.refCache.IsEncryptionEnabled() {
 			if rctx.refCache.SANInCertificate() != sanInCertificate {
-				rctx.agent.logger.Infof("Updating sanInCertificate in remote cluster reference %v to %v\n", rctx.refCache.Id(), sanInCertificate)
+				rctx.agent.logger.Infof("Preparing to update sanInCertificate in remote cluster reference %v to %v\n", rctx.refCache.Id(), sanInCertificate)
 				rctx.refCache.SetSANInCertificate(sanInCertificate)
 			}
 			refCacheAuthMech := rctx.refCache.HttpAuthMech()
 			if refCacheAuthMech != httpAuthMech {
-				rctx.agent.logger.Infof("Updating httpAuthMech in remote cluster reference %v from %v to %v\n", rctx.refCache.Id(), refCacheAuthMech, httpAuthMech)
+				rctx.agent.logger.Infof("Preparing to update httpAuthMech in remote cluster reference %v from %v to %v\n", rctx.refCache.Id(), refCacheAuthMech, httpAuthMech)
 				rctx.refCache.SetHttpAuthMech(httpAuthMech)
 			}
 		}
@@ -426,10 +567,21 @@ func (rctx *refreshContext) capabilityChanged() bool {
 }
 
 func (agent *RemoteClusterAgent) Refresh() error {
-	rctx, err := agent.initializeNewRefreshContext()
+	rctx, refreshErrCh, err := agent.initializeNewRefreshContext()
 	if err != nil {
-		return err
+		if err == RefreshAlreadyActive {
+			// Just wait until the err is returned from the active result
+			err = <-refreshErrCh
+			agent.logger.Warnf("Concurrent refresh was ongoing. Using the same result... %v", err)
+			return err
+		} else {
+			agent.logger.Errorf("Refresh err %v\n", err)
+			return err
+		}
 	}
+
+	// At this point, everything below can only be executed by a single refresh context
+	defer agent.cleanupRefreshContext(rctx, err)
 
 	useExternal, err := rctx.getAddressPreference()
 	if err != nil {
@@ -449,6 +601,8 @@ func (agent *RemoteClusterAgent) Refresh() error {
 					// then there's nothing to do now as there is no more nodes in the list to walk
 					return BootStrapNodeHasMovedError
 				}
+			} else if err == RefreshAborted {
+				return err
 			}
 		} else {
 			// rctx.hostname is in the cluster and is available - make it the activeHost
@@ -459,7 +613,7 @@ func (agent *RemoteClusterAgent) Refresh() error {
 			nodeAddressesList, err = agent.utils.GetRemoteNodeAddressesListFromNodeList(nodeList, rctx.connStr, rctx.refCache.IsEncryptionEnabled(), agent.logger, useExternal)
 			if err == nil {
 				// This node is an acceptable replacement for active node - and sets atLeastOneValid
-				rctx.finalizeRefCacheListFrom(nodeAddressesList)
+				rctx.finalizeRefCacheListFrom(nodeAddressesList, nodeList)
 
 				//  so check the list to make sure that the bootstrap node is valid
 				hostNameInCluster := false
@@ -491,13 +645,60 @@ func (agent *RemoteClusterAgent) Refresh() error {
 
 	// If there's anything that needs to be persisted to agent, update it
 	err = rctx.checkAndUpdateAgentReference()
-
 	return err
+}
+
+// Returns true if this call successfully disabled refresh, and need to re-enable it
+func (agent *RemoteClusterAgent) AbortAnyOngoingRefresh() (needToReEnable bool) {
+	agent.refreshMtx.Lock()
+	defer agent.refreshMtx.Unlock()
+	// This call could be called concurrently, only the first call should do the honor of restoration
+	if agent.temporaryDisableRefresh == false {
+		agent.temporaryDisableRefresh = true
+		needToReEnable = true
+	}
+	if agent.refreshActive > 0 {
+		if agent.refreshAbortState == refreshAbortNotRequested {
+			// The first call should set the state
+			agent.refreshAbortState = refreshAbortRequested
+		}
+		for agent.refreshAbortState != refreshAbortAcknowledged {
+			agent.refreshCv.Wait()
+		}
+	}
+	return
+}
+
+func (agent *RemoteClusterAgent) ReenableRefresh() {
+	agent.refreshMtx.Lock()
+	defer agent.refreshMtx.Unlock()
+	agent.temporaryDisableRefresh = false
+	agent.refreshAbortState = refreshAbortNotRequested
+}
+
+func (rctx *refreshContext) checkIfAbortRequested() error {
+	rctx.agent.refreshMtx.Lock()
+	defer rctx.agent.refreshMtx.Unlock()
+	switch rctx.agent.refreshAbortState {
+	case refreshAbortNotRequested:
+		return nil
+	case refreshAbortRequested:
+		rctx.agent.refreshAbortState = refreshAbortAcknowledged
+		defer rctx.agent.refreshCv.Broadcast()
+		return RefreshAborted
+	case refreshAbortAcknowledged:
+		return RefreshAborted
+	}
+	return fmt.Errorf("Not implemented")
 }
 
 func (rctx *refreshContext) getAddressPreference() (useExternal bool, err error) {
 	addressPref := rctx.origAddressPref
 	useExternal = addressPref == External
+	err = rctx.checkIfAbortRequested()
+	if err != nil {
+		return
+	}
 	if addressPref == Uninitialized {
 		// Uninitialized means that when the agent started up, it had trouble determining user's intent
 		// is external or interna. Take this refresh cycle to figure that out again
@@ -571,33 +772,59 @@ func (rctx *refreshContext) replaceHostNameUsingList(nodeAddressesList base.Stri
  * NOTE: If returned error is non-nil, this method must not have spawned any rouge go-routines.
  */
 func (agent *RemoteClusterAgent) Start(newRef *metadata.RemoteClusterReference, userInitiated bool) error {
+	var err error
 
-	err := agent.UpdateReferenceFrom(newRef, userInitiated)
+	if userInitiated {
+		// If user initiated, it means that no other reference should have existed
+		// It is safer to do a synchronous update
+		err = agent.UpdateReferenceFrom(newRef, true /*writeToMetakv*/)
+	} else {
+		// This is a startup time and loading from metakv, not going to update metakv
+		// Quickly get the agent up and running and let any error be fixed by refresh op
+		err = agent.UpdateReferenceFromAsync(newRef, false /*WriteToMetakv*/)
+	}
 
 	if err == nil {
-		agent.logger.Infof("Agent %v %v started for cluster: %v", agent.reference.Id(), agent.reference.Name(), agent.reference.Uuid())
+		agent.refMtx.RLock()
+		agentId := agent.pendingRef.Id()
+		agentName := agent.pendingRef.Name()
+		agentUuid := agent.pendingRef.Uuid()
+		agent.refMtx.RUnlock()
+		agent.logger.Infof("Agent %v %v started for cluster: %v synchronously? %v", agentId, agentName, agentUuid, userInitiated)
 		agent.agentWaitGrp.Add(1)
 		go agent.runPeriodicRefresh()
 	} else {
-		agent.logger.Warnf("Agent %v starting resulted in error: %v", agent.reference.Id(), err)
+		agent.logger.Warnf("Agent %v starting resulted in error: %v", newRef.Id(), err)
+	}
+
+	if userInitiated {
+		// When userInitiated, meaning that someone called AddRemoteCluster, then only allow Refresh
+		// operations to continue.
+		// Async call above would have set this automatically
+		atomic.StoreUint32(&agent.initDone, 1)
 	}
 	return err
 }
 
 func (agent *RemoteClusterAgent) stopAllGoRoutines() {
-	close(agent.refresherFinCh)
+	close(agent.agentFinCh)
 
 	// Wait for all go routines to stop before clean up
 	agent.agentWaitGrp.Wait()
 }
 
+func (agent *RemoteClusterAgent) IsStopped() bool {
+	return atomic.LoadUint32(&agent.stopped) > 0
+}
+
 // Once it's been Stopped, an agent *must* be deleted and not reused due to the stopOnce here
 func (agent *RemoteClusterAgent) Stop() {
 	agent.stopOnce.Do(func() {
+		atomic.StoreUint32(&agent.stopped, 1)
+
 		var cachedId string
 		var cachedName string
 		var cachedUuid string
-
 		agent.refMtx.RLock()
 		if !agent.reference.IsEmpty() {
 			cachedId = agent.reference.Id()
@@ -619,22 +846,20 @@ func (agent *RemoteClusterAgent) Stop() {
 // Cleans up. Returns a copy of the old reference back as part of the stoppage
 // If err occurred at any point, then the reference may still exist in metaKV
 func (agent *RemoteClusterAgent) DeleteReference(delFromMetaKv bool) (*metadata.RemoteClusterReference, error) {
-
-	agent.refMtx.Lock()
-	defer agent.refMtx.Unlock()
 	var err error
 
 	// When deleting reference, the clonedCopy is used for logging
+	agent.refMtx.RLock()
 	clonedCopy := agent.reference.Clone()
+	agent.refMtx.RUnlock()
 
 	if delFromMetaKv {
-		err = agent.deleteFromMetaKVNoLock()
+		err = agent.deleteFromMetaKV()
 	}
 
 	if service_def.DelOpConsideredPass(err) {
-		agent.clearReferenceNoLock()
-		agent.callMetadataChangeCbNoLock()
-		agent.deletedFromMetakv = true
+		agent.clearReference()
+		agent.callMetadataChangeCb()
 	}
 	return clonedCopy, err
 }
@@ -642,29 +867,24 @@ func (agent *RemoteClusterAgent) DeleteReference(delFromMetaKv bool) (*metadata.
 /**
  * Given the reference being staged in the reference, use the bare bone information to get more
  * information for caching purposes
- * Write lock needs to be held
  */
-func (agent *RemoteClusterAgent) syncInternalsFromStagedReferenceNoLock(rctx *refreshContext) error {
-	skipPrefUpdate := agent.shouldSkipAddressPrefNoLock(rctx)
-	nodeList, shouldUseCachedList := agent.shouldUseCachedNodeListFromRctxNoLock(rctx)
-	needToInitCapability := agent.currentCapability == nil
-	if needToInitCapability {
-		// Unlikely to use cache list, but when init-ing capability, must use full info
-		shouldUseCachedList = false
+func (agent *RemoteClusterAgent) syncInternalsFromStagedReference(rctx *refreshContext) error {
+	var nodeList []interface{}
+	_, capabilityErr := agent.GetCapability()
+	needToInitCapability := capabilityErr != nil
+	if rctx != nil && !needToInitCapability {
+		nodeList = rctx.cachedNodeListWithMinInfo
 	}
 
-	username, password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey, err := agent.pendingRef.MyCredentials()
-	if err != nil {
-		return err
-	}
-	connStr, err := agent.pendingRef.MyConnectionStr()
+	username, password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey,
+		connStr, refNodesList, encryptionEnabled, err := agent.getCredentialsAndMisc()
 	if err != nil {
 		return err
 	}
 
 	// If refresh context has already done the heavy lifting work of reaching the remote node to get the list
-	// Then just use it here to avoid duplicate work
-	if !shouldUseCachedList {
+	// Then just use it to avoid duplicate work
+	if len(nodeList) == 0 {
 		clusterInfo, err := agent.utils.GetClusterInfo(connStr, base.DefaultPoolPath, username, password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey, agent.logger)
 		if err != nil {
 			agent.logger.Infof("Remote cluster reference %v has a bad connectivity, didn't populate alternative connection strings. err=%v", agent.pendingRef.Id(), err)
@@ -672,12 +892,12 @@ func (agent *RemoteClusterAgent) syncInternalsFromStagedReferenceNoLock(rctx *re
 		}
 
 		if needToInitCapability {
-			newCapability := &metadata.Capability{}
+			var newCapability metadata.Capability
 			capabilitiesErr := newCapability.LoadFromDefaultPoolInfo(clusterInfo, agent.logger)
 			if capabilitiesErr != nil {
 				agent.logger.Errorf("Unable to initialize capabilities: %v - replications may not start yet. Will try again next refresh cycle...", err)
 			} else {
-				agent.currentCapability = newCapability
+				agent.SetCapability(newCapability)
 			}
 		}
 
@@ -685,25 +905,80 @@ func (agent *RemoteClusterAgent) syncInternalsFromStagedReferenceNoLock(rctx *re
 		if err != nil {
 			agent.logger.Infof("Unable to parse default/pool data to populate alternative connection strings. err=%v", err)
 			agent.logger.Infof("nodes_connStrs from old cache =%v", agent.refNodesList)
-			agent.pendingRefNodes = base.DeepCopyStringPairList(agent.refNodesList)
+			agent.refMtx.Lock()
+			agent.pendingRefNodes = base.DeepCopyStringPairList(refNodesList)
+			agent.refMtx.Unlock()
 			return err
 		}
 	}
 
-	useExternal := agent.addressPreference == External
-	if agent.addressPreference == Uninitialized {
-		err = agent.initAddressPreference(nodeList, agent.pendingRef.HostName(), agent.pendingRef.IsHttps())
+	useExternal, err := agent.updatePendingAddress(nodeList, rctx)
+	if err != nil {
+		return err
+	}
+
+	// Prepare pending refNodeList for committing
+	nodeAddressesList, err := agent.utils.GetRemoteNodeAddressesListFromNodeList(nodeList, connStr, encryptionEnabled, agent.logger, useExternal)
+	agent.refMtx.Lock()
+	if err != nil {
+		agent.logger.Warnf("Error getting nodes from target cluster. skipping alternative node computation. ref=%v\n", agent.pendingRef.HostName())
+		agent.pendingRefNodes = base.DeepCopyStringPairList(agent.refNodesList)
+	} else {
+		agent.pendingRefNodes = base.DeepCopyStringPairList(nodeAddressesList)
+	}
+	agent.refMtx.Unlock()
+
+	return nil
+}
+
+func (agent *RemoteClusterAgent) getCredentialsAndMisc() (username, password string, httpAuthMech base.HttpAuthMech,
+	certificate []byte, sanInCertificate bool, clientCertificate []byte, clientKey []byte,
+	connStr string, curRefNodesList base.StringPairList, encryptionEnabled bool, err error) {
+	agent.refMtx.RLock()
+	defer agent.refMtx.RUnlock()
+	if agent.pendingRef.IsEmpty() {
+		err = fmt.Errorf("Agent pendingRef is empty when doing sync to %v", agent.reference.Id())
+		return
+	}
+	username, password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey, err = agent.pendingRef.MyCredentials()
+	if err != nil {
+		return
+	}
+
+	// misc...
+	connStr, err = agent.pendingRef.MyConnectionStr()
+	if err != nil {
+		return
+	}
+	curRefNodesList = base.DeepCopyStringPairList(agent.refNodesList)
+	encryptionEnabled = agent.pendingRef.IsEncryptionEnabled()
+	return
+}
+
+func (agent *RemoteClusterAgent) updatePendingAddress(nodeList []interface{}, rctx *refreshContext) (useExternal bool, err error) {
+	agent.refMtx.RLock()
+	agentPref := agent.addressPreference
+	pendingHostName := agent.pendingRef.HostName()
+	pendingRefIsHttps := agent.pendingRef.IsHttps()
+	skipPrefUpdate := agent.shouldSkipAddressPrefNoLock(rctx)
+	agent.refMtx.RUnlock()
+
+	useExternal = agentPref == External
+	if agentPref == Uninitialized {
+		err = agent.initAddressPreference(nodeList, pendingHostName, pendingRefIsHttps)
 		if err != nil {
-			return err
+			return
 		}
-		useExternal = agent.addressPreference == External
+		useExternal = agent.getAddressPreference() == External
 	} else if !skipPrefUpdate {
-		isExternal, err := agent.checkIfHostnameIsAlternate(nodeList, agent.pendingRef.HostName(), agent.pendingRef.IsHttps())
+		var isExternal bool
+		isExternal, err = agent.checkIfHostnameIsAlternate(nodeList, agent.pendingRef.HostName(), agent.pendingRef.IsHttps())
 		if err != nil {
-			return err
+			return
 		}
 		if !isExternal && useExternal || isExternal && !useExternal {
 			// User intent has changed
+			agent.refMtx.Lock()
 			if agent.pendingAddressPreference == Uninitialized {
 				// first time
 				if isExternal {
@@ -713,24 +988,28 @@ func (agent *RemoteClusterAgent) syncInternalsFromStagedReferenceNoLock(rctx *re
 				}
 			}
 			agent.pendingAddressPrefCnt++
+			agent.refMtx.Unlock()
 		} else {
+			var upgraded bool
+			agent.refMtx.RLock()
 			if agent.pendingAddressPrefCnt > 0 {
-				// Either mixed-mode or flip flop
-				agent.pendingAddressPreference = Uninitialized
-				agent.pendingAddressPrefCnt = 0
+				agent.refMtx.RUnlock()
+				agent.refMtx.Lock()
+				upgraded = true
+				// Just re-check to be safe
+				if agent.pendingAddressPrefCnt > 0 {
+					// Either mixed-mode or flip flop
+					agent.pendingAddressPreference = Uninitialized
+					agent.pendingAddressPrefCnt = 0
+				}
+				agent.refMtx.Unlock()
+			}
+			if !upgraded {
+				agent.refMtx.RUnlock()
 			}
 		}
 	}
-
-	nodeAddressesList, err := agent.utils.GetRemoteNodeAddressesListFromNodeList(nodeList, connStr, agent.pendingRef.IsEncryptionEnabled(), agent.logger, useExternal)
-	if err != nil {
-		agent.logger.Errorf("Error getting nodes from target cluster. skipping alternative node computation. ref=%v\n", agent.pendingRef.HostName())
-		agent.pendingRefNodes = base.DeepCopyStringPairList(agent.refNodesList)
-	} else {
-		agent.pendingRefNodes = base.DeepCopyStringPairList(nodeAddressesList)
-	}
-
-	return nil
+	return
 }
 
 // This function checks the user's "intent" to use internal vs external address
@@ -745,7 +1024,7 @@ func (agent *RemoteClusterAgent) initAddressPreference(nodeList []interface{}, h
 		return err
 	}
 
-	agent.setAddressPreference(isExternal, false /*lock*/, true /*setOnlyIfUninit*/)
+	agent.setAddressPreference(isExternal, true /*lock*/, true /*setOnlyIfUninit*/)
 	return nil
 }
 
@@ -781,6 +1060,11 @@ func (agent *RemoteClusterAgent) setAddressPreference(external bool, lock bool, 
 
 func (agent *RemoteClusterAgent) checkIfHostnameIsAlternate(nodeList []interface{}, hostname string, isHttps bool) (bool, error) {
 	var isExternal bool
+
+	if len(hostname) == 0 {
+		return false, HostNameEmpty
+	}
+
 	pendingHostname := base.GetHostName(hostname)
 	pendingPort, portErr := base.GetPortNumber(hostname)
 
@@ -876,6 +1160,17 @@ func (agent *RemoteClusterAgent) GetCapability() (capability metadata.Capability
 	return
 }
 
+func (agent *RemoteClusterAgent) SetCapability(capability metadata.Capability) {
+	agent.refMtx.Lock()
+	defer agent.refMtx.Unlock()
+
+	if agent.currentCapability == nil {
+		agent.currentCapability = &capability
+	} else {
+		agent.currentCapability.LoadFromOther(capability)
+	}
+}
+
 func (agent *RemoteClusterAgent) runPeriodicRefresh() {
 	defer agent.agentWaitGrp.Done()
 
@@ -888,7 +1183,7 @@ func (agent *RemoteClusterAgent) runPeriodicRefresh() {
 
 	for {
 		select {
-		case <-agent.refresherFinCh:
+		case <-agent.agentFinCh:
 			agent.logger.Infof("Agent %v is stopped", cachedId)
 			return
 		case <-ticker.C:
@@ -901,7 +1196,15 @@ func (agent *RemoteClusterAgent) runPeriodicRefresh() {
 }
 
 // Prepare a staging area to populate run-time data for the incoming reference
-func (agent *RemoteClusterAgent) stageNewReferenceNoLock(newRef *metadata.RemoteClusterReference, userInitiated bool) {
+func (agent *RemoteClusterAgent) stageNewReferenceNoLock(newRef *metadata.RemoteClusterReference, userInitiated bool) error {
+	if !agent.pendingRef.IsEmpty() {
+		if !agent.InitDone() {
+			return InitInProgress
+		} else {
+			return RemoteSyncInProgress
+		}
+	}
+
 	agent.pendingRef.LoadFrom(newRef)
 	agent.pendingRefNodes = make(base.StringPairList, 0)
 	if !agent.reference.IsEmpty() {
@@ -910,10 +1213,20 @@ func (agent *RemoteClusterAgent) stageNewReferenceNoLock(newRef *metadata.Remote
 			agent.pendingRef.SetRevision(agent.reference.Revision())
 		}
 	}
+
+	return nil
 }
 
 // operation to commit the staged changes into the reference
-func (agent *RemoteClusterAgent) commitStagedChangesNoLock(rctx *refreshContext) {
+func (agent *RemoteClusterAgent) commitStagedChanges(rctx *refreshContext) {
+	agent.refMtx.Lock()
+	defer agent.refMtx.Unlock()
+
+	if agent.deletedFromMetakv {
+		// Bail
+		return
+	}
+
 	if !agent.pendingRef.IsEmpty() {
 		agent.oldRef = agent.reference.Clone()
 		agent.reference.LoadFrom(&agent.pendingRef)
@@ -931,7 +1244,12 @@ func (agent *RemoteClusterAgent) commitStagedChangesNoLock(rctx *refreshContext)
 		agent.currentCapability.LoadFromOther(rctx.cachedCapability)
 		agent.configurationChanged = true
 	}
+}
 
+func (agent *RemoteClusterAgent) clearStagedReference() {
+	agent.refMtx.Lock()
+	defer agent.refMtx.Unlock()
+	agent.pendingRef.Clear()
 }
 
 func (agent *RemoteClusterAgent) IsSame(ref *metadata.RemoteClusterReference) bool {
@@ -940,16 +1258,19 @@ func (agent *RemoteClusterAgent) IsSame(ref *metadata.RemoteClusterReference) bo
 	return agent.reference.IsSame(ref)
 }
 
-func (agent *RemoteClusterAgent) clearReferenceNoLock() {
+func (agent *RemoteClusterAgent) clearReference() {
+	agent.refMtx.Lock()
+	defer agent.refMtx.Unlock()
 	agent.oldRef = agent.reference.Clone()
 	agent.reference.Clear()
 	agent.refNodesList = nil
+	agent.deletedFromMetakv = true
 }
 
 // Retrieves the ref from metakv to be able to get the latest revision, stores into pendingRef
 // Write lock must be held
 // Returns non-nil if the reference in metakv is different from locally stored (less revision differences)
-func (agent *RemoteClusterAgent) updateRevisionFromMetaKVNoLock() error {
+func (agent *RemoteClusterAgent) updateRevisionFromMetaKV() error {
 	if len(agent.pendingRef.Id()) == 0 {
 		return base.ErrorResourceDoesNotExist
 	}
@@ -966,6 +1287,12 @@ func (agent *RemoteClusterAgent) updateRevisionFromMetaKVNoLock() error {
 		if err != nil {
 			time.Sleep(base.TimeBetweenMetaKVGetOps)
 		}
+	}
+
+	agent.refMtx.Lock()
+	defer agent.refMtx.Unlock()
+	if agent.deletedFromMetakv {
+		return DeleteAlreadyIssued
 	}
 
 	if err == nil {
@@ -993,98 +1320,192 @@ func (agent *RemoteClusterAgent) updateRevisionFromMetaKVNoLock() error {
 }
 
 func (agent *RemoteClusterAgent) shouldSkipAddressPrefNoLock(rctx *refreshContext) bool {
-	if agent.configurationChanged || (rctx != nil && (rctx.origAddressPrefCnt != agent.pendingAddressPrefCnt ||
-		rctx.origAddressPref != agent.addressPreference)) {
+	agent.refMtx.RLock()
+	defer agent.refMtx.RUnlock()
+
+	if agent.configurationChanged {
 		return true
 	}
 	return false
 }
 
-func (agent *RemoteClusterAgent) shouldUseCachedNodeListFromRctxNoLock(rctx *refreshContext) ([]interface{}, bool) {
-	if agent.shouldSkipAddressPrefNoLock(rctx) {
-		return nil, false
-	}
-	if rctx != nil && len(rctx.cachedNodeListWithMinInfo) > 0 && agent.addressPreference != Uninitialized {
-		return rctx.cachedNodeListWithMinInfo, true
-	}
-	return nil, false
-}
-
 /**
  * The agent will update its information from the incoming newRef.
  * If updateMetaKv is set to true, it'll write the information to metakv.
- * Returns an error code if any non-recoverable metakv operation failed.
+ *
+ * This operation performs RPC call and can take a while, and can be a synchronous
+ * or async call.
+ * Sync callers will care about the result of the queueing and the RPC
+ * Async callers will only care about the queueing, such as when the remote cluster service
+ * starts up and it needs to quickly get going without blocking due to RPCs
+ *
+ * This function could potentially be called concurrently
  */
-func (agent *RemoteClusterAgent) updateReferenceFromNoLock(newRef *metadata.RemoteClusterReference, updateMetaKv, shouldCallCb bool, rctx *refreshContext) error {
+func (agent *RemoteClusterAgent) updateReferenceFromInternal(newRef *metadata.RemoteClusterReference, updateMetaKv, shouldCallCb, synchronous bool, rctx *refreshContext) error {
 	var err error
 	if newRef == nil {
 		return base.ErrorResourceDoesNotExist
 	}
 
 	capabilityChanged := rctx != nil && rctx.capabilityChanged()
-
+	agent.refMtx.RLock()
 	//	No need to update if they are the same, or we're not transitioning, or capability is the same
 	if agent.reference.IsSame(newRef) && agent.pendingAddressPrefCnt == 0 && !capabilityChanged {
+		agent.refMtx.RUnlock()
 		return nil
 	}
+	agent.refMtx.RUnlock()
 
-	agent.stageNewReferenceNoLock(newRef, updateMetaKv)
-
-	// Populate staged runtime information from the staged metadata information.
-	syncErr := agent.syncInternalsFromStagedReferenceNoLock(rctx)
-	if syncErr != nil {
-		if agent.addressPreference != Uninitialized {
-			// Because as part of validateRemoteCluster, we already checked the remoteCluster status
-			// At this point, this error should be innocuous to pass through.
-			agent.logger.Warnf(fmt.Sprintf("Error: Issues populating runtime info: %v", syncErr.Error()))
-		} else {
-			// Cannot figure out user intent - let refresh take care of error handling
-			agent.logger.Errorf(fmt.Sprintf("Error: Issues populating runtime info: %v and unable to set preference", syncErr.Error()))
+	var needToReenable bool
+	if rctx != nil {
+		err = rctx.checkIfAbortRequested()
+		if err != nil {
+			return err
 		}
+	} else {
+		// This call is one of the following non-Refresh calls:
+		// 1. User calls AddRemoteCluster
+		// 2. User calls SetRemoteCluster
+		// 3. Metakv callback to create a new remote cluster
+		// 4. Metakv callback to set remote cluster based on user induced action
+		// All of the above must win over any potential Refresh()'s going on
+		needToReenable = agent.AbortAnyOngoingRefresh()
 	}
+
+	agent.refMtx.Lock()
+
+	if agent.deletedFromMetakv {
+		agent.refMtx.Unlock()
+		// No need to do the following
+		if rctx == nil && needToReenable {
+			agent.ReenableRefresh()
+		}
+		return DeleteAlreadyIssued
+	}
+
+	err = agent.stageNewReferenceNoLock(newRef, updateMetaKv)
 	if err != nil {
+		agent.refMtx.Unlock()
+		// The stage call will filter out concurrent callers
+		// Whoever goes through and staged the reference successfully will be responsible
+		// for re-enabling refresh
+		if rctx == nil && err == InitInProgress && needToReenable {
+			agent.ReenableRefresh()
+		}
 		return err
 	}
+	agent.refMtx.Unlock()
+	// At this point, safe to return and perform async task
+	// If refresh is the one running here, no more path to bail out of aborting refresh
+	// Also, async task is given the task to clean up the stagedReference above
 
-	/**
-	 * Update procedure:
-	 * First write the pending changes to metaKV. Once they are persisted, then commit the staged changes
-	 * permanently by loading it to agent.reference.
-	 * If unable to successfully operate on metakv, then discard the staged changes.
-	 */
-	if updateMetaKv {
-		err = agent.writeToMetaKVNoLock()
-		if err == nil {
-			// After writing, try to get the revision
-			err = agent.updateRevisionFromMetaKVNoLock()
-		}
+	var errCh chan error
+	if synchronous {
+		errCh = make(chan error)
 	}
 
-	if err == nil {
-		agent.commitStagedChangesNoLock(rctx)
-		if shouldCallCb {
-			agent.callMetadataChangeCbNoLock()
-		}
+	agent.agentWaitGrp.Add(1)
+	go agent.executeBgSyncTask(updateMetaKv, shouldCallCb, synchronous, errCh, rctx)
+
+	if synchronous {
+		err = <-errCh
 	}
 	return err
 }
 
-func (agent *RemoteClusterAgent) UpdateReferenceFrom(newRef *metadata.RemoteClusterReference, updateMetaKv bool) error {
-	agent.refMtx.Lock()
-	defer agent.refMtx.Unlock()
-	return agent.updateReferenceFromNoLock(newRef, updateMetaKv, true /*shouldCallCallback*/, nil /*refreshContext*/)
+// Only one instance at once allowed
+// The sync task needs to be in charge of cleaning up the pendingRefs for the next Stage() call
+func (agent *RemoteClusterAgent) executeBgSyncTask(updateMetaKv, shouldCallCb, synchronous bool, errCh chan error, rctx *refreshContext) {
+	defer agent.agentWaitGrp.Done()
+
+	select {
+	case <-agent.agentFinCh:
+		// Bail out
+		if synchronous {
+			errCh <- fmt.Errorf("Agent already stopped")
+			close(errCh)
+		}
+		return
+	default:
+		defer agent.clearStagedReference()
+		if rctx == nil {
+			defer agent.ReenableRefresh()
+		}
+		// Populate staged runtime information from the staged metadata information.
+		syncErr := agent.syncInternalsFromStagedReference(rctx)
+
+		if syncErr != nil {
+			if agent.getAddressPreference() != Uninitialized {
+				// Because as part of validateRemoteCluster, we already checked the remoteCluster status
+				// At this point, this error should be innocuous to pass through.
+				agent.logger.Warnf(fmt.Sprintf("Error: Issues populating runtime info: %v", syncErr.Error()))
+			} else {
+				// Cannot figure out user intent - let refresh take care of error handling
+				agent.logger.Errorf(fmt.Sprintf("Error: Issues populating runtime info: %v and unable to set preference", syncErr.Error()))
+			}
+		}
+
+		/**
+		 * Update procedure:
+		 * First write the pending changes to metaKV. Once they are persisted, then commit the staged changes
+		 * permanently by loading it to agent.reference.
+		 * If unable to successfully operate on metakv, then discard the staged changes.
+		 */
+		var err error
+		if updateMetaKv {
+			err = agent.writeToMetaKV()
+			if err == nil {
+				// After writing, try to get the revision
+				err = agent.updateRevisionFromMetaKV()
+			} else {
+				err = fmt.Errorf("%v: %v", WriteToMetakvErrString, err)
+			}
+		}
+
+		if err == nil {
+			agent.commitStagedChanges(rctx)
+			if shouldCallCb {
+				agent.callMetadataChangeCb()
+			}
+		}
+		if synchronous {
+			errCh <- err
+			close(errCh)
+		} else {
+			// Not sending err means that this was called asynchronously
+			// An asynchronous call is possible when the service starts up and the reference
+			// is loaded from the metakv. In this case, enable refresh path
+			atomic.StoreUint32(&agent.initDone, 1)
+		}
+		return
+	}
 }
 
-func (agent *RemoteClusterAgent) callMetadataChangeCbNoLock() {
+func (agent *RemoteClusterAgent) UpdateReferenceFrom(newRef *metadata.RemoteClusterReference, updateMetaKv bool) error {
+	return agent.updateReferenceFromInternal(newRef, updateMetaKv, true /*shouldCallCallback*/, true /*synchronous*/, nil /*refreshContext*/)
+}
+
+func (agent *RemoteClusterAgent) UpdateReferenceFromAsync(newRef *metadata.RemoteClusterReference, updateMetaKv bool) error {
+	return agent.updateReferenceFromInternal(newRef, updateMetaKv, true /*shouldCallCallback*/, false /*synchronous*/, nil /*refreshContext*/)
+}
+
+func (agent *RemoteClusterAgent) callMetadataChangeCb() {
 	var id string
+
+	agent.refMtx.RLock()
 	if agent.reference.IsEmpty() && agent.oldRef != nil {
 		id = agent.oldRef.Id()
 	} else {
 		id = agent.reference.Id()
 	}
+	oldRef := agent.oldRef.Clone()
+	ref := agent.reference.Clone()
+	agent.refMtx.RUnlock()
 
+	agent.metadataChangeCbMtx.RLock()
+	defer agent.metadataChangeCbMtx.RUnlock()
 	if agent.metadataChangeCallback != nil {
-		callbackErr := agent.metadataChangeCallback(id, agent.oldRef.Clone(), agent.reference.Clone())
+		callbackErr := agent.metadataChangeCallback(id, oldRef, ref)
 		if callbackErr != nil {
 			agent.logger.Error(callbackErr.Error())
 		}
@@ -1093,17 +1514,21 @@ func (agent *RemoteClusterAgent) callMetadataChangeCbNoLock() {
 
 func (agent *RemoteClusterAgent) deleteFromMetaKV() error {
 	agent.refMtx.Lock()
-	defer agent.refMtx.Unlock()
-	return agent.deleteFromMetaKVNoLock()
+	agent.deletedFromMetakv = true
+	referenceId := agent.reference.Id()
+	referenceName := agent.reference.Name()
+	agent.refMtx.Unlock()
+	// Delete should always succeed in a reference's life cycle, use nil revision
+	return agent.deleteFromMetaKVNoLock(referenceId, referenceName, nil)
 }
 
 // Delete the reference information from metakv
-func (agent *RemoteClusterAgent) deleteFromMetaKVNoLock() error {
-	err := agent.metakvSvc.DelWithCatalog(RemoteClustersCatalogKey, agent.reference.Id(), agent.reference.Revision())
+func (agent *RemoteClusterAgent) deleteFromMetaKVNoLock(id, name string, revision interface{}) error {
+	err := agent.metakvSvc.DelWithCatalog(RemoteClustersCatalogKey, id, revision)
 	if err != nil {
-		agent.logger.Errorf(fmt.Sprintf("Error occured when deleting reference %v from metakv: %v\n", agent.reference.Name(), err.Error()))
+		agent.logger.Errorf(fmt.Sprintf("Error occured when deleting reference %v from metakv: %v\n", name, err.Error()))
 	} else {
-		agent.logger.Infof("Remote cluster %v deleted from metadata store\n", agent.reference.Name())
+		agent.logger.Infof("Remote cluster %v deleted from metadata store\n", name)
 	}
 	return err
 }
@@ -1114,9 +1539,15 @@ func (agent *RemoteClusterAgent) deleteFromMetaKVNoLock() error {
  * Add is used when it is the first time this agent is writing to metakv to create a new kv.
  * Otherwise, Set should be used to update the existing kv.
  */
-func (agent *RemoteClusterAgent) writeToMetaKVNoLock() error {
+func (agent *RemoteClusterAgent) writeToMetaKV() error {
 	var err error
+
+	agent.refMtx.RLock()
+	defer agent.refMtx.RUnlock()
+
 	refForMetaKv := agent.pendingRef.CloneForMetakvUpdate()
+	referenceIsEmpty := agent.reference.IsEmpty()
+	revision := agent.pendingRef.Revision()
 
 	if agent.deletedFromMetakv {
 		return base.ErrorResourceDoesNotExist
@@ -1128,18 +1559,18 @@ func (agent *RemoteClusterAgent) writeToMetaKVNoLock() error {
 		return err
 	}
 
-	if agent.reference.IsEmpty() {
+	if referenceIsEmpty {
 		err = agent.metakvSvc.AddSensitiveWithCatalog(RemoteClustersCatalogKey, key, value)
 	} else {
-		err = agent.metakvSvc.SetSensitive(key, value, agent.pendingRef.Revision())
+		err = agent.metakvSvc.SetSensitive(key, value, revision)
 	}
 
 	return err
 }
 
 func (agent *RemoteClusterAgent) setMetadataChangeCb(newCb base.MetadataChangeHandlerCallback) {
-	agent.refMtx.Lock()
-	defer agent.refMtx.Unlock()
+	agent.metadataChangeCbMtx.Lock()
+	defer agent.metadataChangeCbMtx.Unlock()
 	agent.metadataChangeCallback = newCb
 }
 
@@ -1234,6 +1665,10 @@ func (agent *RemoteClusterAgent) refreshBucketsManifests() {
 	waitGrp.Wait()
 }
 
+func (agent *RemoteClusterAgent) InitDone() bool {
+	return atomic.LoadUint32(&agent.initDone) > 0
+}
+
 type RemoteClusterService struct {
 	metakv_svc        service_def.MetadataSvc
 	uilog_svc         service_def.UILogSvc
@@ -1251,6 +1686,16 @@ type RemoteClusterService struct {
 	agentCacheRefNameMap map[string]*RemoteClusterAgent
 	agentCacheUuidMap    map[string]*RemoteClusterAgent
 	agentMutex           sync.RWMutex
+
+	// When adding or setting a remote cluster reference, the metakv callback will be called even though
+	// the particular active node already has add or set ongoing
+	// The followings are needed to ensure add/set on the active-node do not get double-called
+	metakvCbAddMtx sync.RWMutex
+	metakvCbAddMap map[string]bool // refId
+	metakvCbSetMtx sync.RWMutex
+	metakvCbSetMap map[string]bool // refId
+	metakvCbDelMtx sync.RWMutex
+	metakvCbDelMap map[string]bool // refId
 }
 
 func NewRemoteClusterService(uilog_svc service_def.UILogSvc, metakv_svc service_def.MetadataSvc,
@@ -1268,6 +1713,9 @@ func NewRemoteClusterService(uilog_svc service_def.UILogSvc, metakv_svc service_
 		agentMap:             make(map[string]*RemoteClusterAgent),
 		agentCacheRefNameMap: make(map[string]*RemoteClusterAgent),
 		agentCacheUuidMap:    make(map[string]*RemoteClusterAgent),
+		metakvCbAddMap:       make(map[string]bool),
+		metakvCbSetMap:       make(map[string]bool),
+		metakvCbDelMap:       make(map[string]bool),
 	}
 
 	return svc, svc.loadFromMetaKV()
@@ -1296,7 +1744,7 @@ func (service *RemoteClusterService) loadFromMetaKV() error {
 			service.logger.Errorf("Unable to construct remote cluster %v from metaKV's data. err: %v. value: %v\n", KVentry.Key, base.TagUDBytes(KVentry.Value), err)
 			continue
 		}
-		_, _, err = service.getOrStartNewAgent(ref, false, true)
+		_, _, err = service.getOrStartNewAgent(ref, false /*user initiated*/, true /*updateFromRef*/)
 		if err != nil {
 			service.logger.Errorf("Failed to start new agent for remote cluster %v. err: %v\n", KVentry.Key, err)
 			continue
@@ -1351,13 +1799,17 @@ func (service *RemoteClusterService) RemoteClusterByRefId(refId string, refresh 
 
 	return agent.GetReferenceClone(), nil
 }
-
 func (service *RemoteClusterService) RemoteClusterByRefName(refName string, refresh bool) (*metadata.RemoteClusterReference, error) {
+	ref, _, err := service.remoteClusterByRefNameWithAgent(refName, refresh)
+	return ref, err
+}
+
+func (service *RemoteClusterService) remoteClusterByRefNameWithAgent(refName string, refresh bool) (*metadata.RemoteClusterReference, *RemoteClusterAgent, error) {
 	service.agentMutex.RLock()
 	agent := service.agentCacheRefNameMap[refName]
 	if agent == nil {
 		service.agentMutex.RUnlock()
-		return nil, getUnknownCluster("refName", refName)
+		return nil, nil, getUnknownCluster("refName", refName)
 	}
 	service.agentMutex.RUnlock()
 
@@ -1366,14 +1818,14 @@ func (service *RemoteClusterService) RemoteClusterByRefName(refName string, refr
 		if err != nil {
 			if err == BootStrapNodeHasMovedError {
 				service.logger.Errorf(getBootStrapNodeHasMovedErrorMsg(refName))
-				return nil, errors.New(getBootStrapNodeHasMovedErrorMsg(refName))
+				return nil, agent, errors.New(getBootStrapNodeHasMovedErrorMsg(refName))
 			} else {
 				service.logger.Warnf(getRefreshErrorMsg(refName, err))
 			}
 		}
 	}
 
-	return agent.GetReferenceClone(), nil
+	return agent.GetReferenceClone(), agent, nil
 }
 
 func (service *RemoteClusterService) RemoteClusterByUuid(uuid string, refresh bool) (*metadata.RemoteClusterReference, error) {
@@ -1402,7 +1854,6 @@ func (service *RemoteClusterService) RemoteClusterByUuid(uuid string, refresh bo
 
 func (service *RemoteClusterService) AddRemoteCluster(ref *metadata.RemoteClusterReference, skipConnectivityValidation bool) error {
 	service.logger.Infof("Adding remote cluster with referenceId %v\n", ref.Id())
-
 	err := service.validateAddRemoteCluster(ref, skipConnectivityValidation)
 	if err != nil {
 		return err
@@ -1424,18 +1875,14 @@ func (service *RemoteClusterService) SetRemoteCluster(refName string, ref *metad
 	return service.setRemoteCluster(refName, ref)
 }
 
+// Set ops are synchronous
 func (service *RemoteClusterService) setRemoteCluster(refName string, newRef *metadata.RemoteClusterReference) error {
 	service.logger.Infof("Setting remote cluster with refName %v. ref=%v\n", refName, newRef)
 
-	err := service.ValidateSetRemoteCluster(refName, newRef)
+	agent, err := service.validateSetRemoteClusterWithAgent(refName, newRef)
 	if err != nil {
 		return err
 	}
-
-	service.agentMutex.Lock()
-	defer service.agentMutex.Unlock()
-
-	agent := service.agentCacheRefNameMap[refName]
 
 	if agent == nil {
 		return errors.New(fmt.Sprintf("Error: refName %v not found in the cluster service\n", refName))
@@ -1443,10 +1890,11 @@ func (service *RemoteClusterService) setRemoteCluster(refName string, newRef *me
 		// In case things change and need to update maps
 		oldRef := agent.reference.Clone()
 
+		service.registerSet(newRef.Name())
 		err := agent.UpdateReferenceFrom(newRef, true)
 
 		if err == nil {
-			service.checkAndUpdateAgentMapsNoLock(oldRef, newRef, agent)
+			service.checkAndUpdateAgentMaps(oldRef, newRef, agent)
 
 			if service.uilog_svc != nil {
 				var hostnameChangeMsg string
@@ -1457,6 +1905,8 @@ func (service *RemoteClusterService) setRemoteCluster(refName string, newRef *me
 				uiLogMsg := fmt.Sprintf("Remote cluster reference \"%s\" updated.%s", oldRef.Name(), hostnameChangeMsg)
 				service.uilog_svc.Write(uiLogMsg)
 			}
+		} else {
+			service.deregisterSet(newRef.Name())
 		}
 		return err
 	}
@@ -1471,6 +1921,9 @@ func (service *RemoteClusterService) DelRemoteCluster(refName string) (*metadata
 
 	ref, err := service.delRemoteClusterAgent(refName, true)
 	if err != nil {
+		if !service_def.DelOpConsideredPass(err) {
+			service.deregisterDel(ref.Id())
+		}
 		return nil, err
 	}
 
@@ -1525,23 +1978,32 @@ func (service *RemoteClusterService) validateAddRemoteCluster(ref *metadata.Remo
 
 	return nil
 }
-
 func (service *RemoteClusterService) ValidateSetRemoteCluster(refName string, ref *metadata.RemoteClusterReference) error {
-	oldRef, err := service.RemoteClusterByRefName(refName, false)
+	_, err := service.validateSetRemoteClusterWithAgent(refName, ref)
+	return err
+}
+
+func (service *RemoteClusterService) validateSetRemoteClusterWithAgent(refName string, ref *metadata.RemoteClusterReference) (*RemoteClusterAgent, error) {
+	oldRef, agent, err := service.remoteClusterByRefNameWithAgent(refName, false)
 	if err != nil {
-		return err
+		return agent, err
+	}
+
+	if !agent.InitDone() {
+		// If a set is called before the first RPC call has finished, then do not allow the set to continue
+		return agent, SetDisabledUntilInit
 	}
 
 	err = service.validateRemoteCluster(ref, true)
 	if err != nil {
-		return err
+		return agent, err
 	}
 
 	if oldRef.Uuid() != ref.Uuid() {
-		return wrapAsInvalidRemoteClusterOperationError("The new hostname points to a different remote cluster, which is not allowed.")
+		return agent, wrapAsInvalidRemoteClusterOperationError(fmt.Sprintf("The new hostname points to a different remote cluster %v, which is not allowed with old cluster being %v.", ref.Uuid(), oldRef.Uuid()))
 	}
 
-	return nil
+	return agent, nil
 }
 
 // validate remote cluster info
@@ -1906,22 +2368,25 @@ func (service *RemoteClusterService) NewRemoteClusterAgent() *RemoteClusterAgent
 		utils:                  service.utils,
 		logger:                 service.logger,
 		metadataChangeCallback: service.metadata_change_callback,
-		refresherFinCh:         make(chan bool, 1),
 		bucketRefCnt:           make(map[string]uint32),
 		bucketManifestGetters:  make(map[string]*BucketManifestGetter),
+		agentFinCh:             make(chan bool, 1),
 	}
+	newAgent.refreshCv = &sync.Cond{L: &newAgent.refreshMtx}
 	return newAgent
 }
 
-func (service *RemoteClusterService) delRemoteAgentNoLock(agent *RemoteClusterAgent, delFromMetaKv bool) (*metadata.RemoteClusterReference, error) {
+// Should return as soon as metakv is updated (if needed)
+func (service *RemoteClusterService) delRemoteAgent(agent *RemoteClusterAgent, delFromMetaKv bool) (*metadata.RemoteClusterReference, error) {
 	if agent == nil {
 		return nil, errors.New("Nil agent provided")
 	}
 
 	clonedCopy, err := agent.DeleteReference(delFromMetaKv)
 	if service_def.DelOpConsideredPass(err) {
-		agent.Stop()
-		service.deleteAgentFromMapsNoLock(clonedCopy)
+		// This is do-able in the background
+		go agent.Stop()
+		service.deleteAgentFromMaps(clonedCopy)
 	}
 
 	return clonedCopy, err
@@ -1933,13 +2398,15 @@ func (service *RemoteClusterService) delRemoteClusterAgent(refName string, delFr
 		return nil, errors.New("No refName is given")
 	}
 
-	service.agentMutex.Lock()
-	defer service.agentMutex.Unlock()
+	service.agentMutex.RLock()
 	agent := service.agentCacheRefNameMap[refName]
+	refId := agent.reference.Id()
+	service.agentMutex.RUnlock()
+	service.registerDel(refId)
 	if agent == nil {
 		return nil, errors.New(fmt.Sprintf("Cannot find local reference given the name: %v", refName))
 	}
-	return service.delRemoteAgentNoLock(agent, delFromMetaKv)
+	return service.delRemoteAgent(agent, delFromMetaKv)
 }
 
 // Returns a cloned copy of the reference being deleted
@@ -1948,13 +2415,13 @@ func (service *RemoteClusterService) delRemoteClusterAgentById(id string, delFro
 		return nil, errors.New("No id given")
 	}
 
-	service.agentMutex.Lock()
-	defer service.agentMutex.Unlock()
+	service.agentMutex.RLock()
 	agent := service.agentMap[id]
+	service.agentMutex.RUnlock()
 	if agent == nil {
 		return nil, errors.New(fmt.Sprintf("Cannot find local reference given the Id: %v", id))
 	}
-	return service.delRemoteAgentNoLock(agent, delFromMetaKv)
+	return service.delRemoteAgent(agent, delFromMetaKv)
 }
 
 /**
@@ -1967,6 +2434,7 @@ func (service *RemoteClusterService) getOrStartNewAgent(ref *metadata.RemoteClus
 	if ref == nil {
 		return nil, false, base.ErrorResourceDoesNotExist
 	}
+
 	service.agentMutex.RLock()
 	if agent, ok := service.agentMap[ref.Id()]; ok {
 		defer service.agentMutex.RUnlock()
@@ -1977,8 +2445,8 @@ func (service *RemoteClusterService) getOrStartNewAgent(ref *metadata.RemoteClus
 	} else {
 		service.agentMutex.RUnlock()
 		service.agentMutex.Lock()
-		defer service.agentMutex.Unlock()
 		if agent, ok := service.agentMap[ref.Id()]; ok {
+			service.agentMutex.Unlock()
 			// someone jumped ahead of us
 			if updateFromRef {
 				err = agent.UpdateReferenceFrom(ref, userInitiated)
@@ -1987,10 +2455,15 @@ func (service *RemoteClusterService) getOrStartNewAgent(ref *metadata.RemoteClus
 		} else {
 			// empty for now - create a new agent and attempt to start it
 			newAgent := service.NewRemoteClusterAgent()
+			service.addAgentToAgentMapNoLock(ref, newAgent)
+			service.agentMutex.Unlock()
+
 			err := newAgent.Start(ref, userInitiated)
-			if err == nil {
-				service.addAgentToAgentMapNoLock(ref, newAgent)
-			} else {
+			if err != nil && strings.Contains(err.Error(), WriteToMetakvErrString) {
+				// Error writing to metakv with a brand new agent means that the reference
+				// wasn't written correctly - handle cleanup here
+				go newAgent.Stop()
+				service.deleteAgentFromMaps(ref)
 				newAgent = nil
 			}
 			return newAgent, false, err
@@ -2000,18 +2473,90 @@ func (service *RemoteClusterService) getOrStartNewAgent(ref *metadata.RemoteClus
 
 // this internal api differs from AddRemoteCluster in that it does not perform validation
 func (service *RemoteClusterService) addRemoteCluster(ref *metadata.RemoteClusterReference) error {
+	if ref == nil {
+		return base.ErrorInvalidInput
+	}
 	/**
 	 * Check to see if there is a local existance of this copy of the reference.
 	 * This is still subjected to conflict if user adds a same reference in >1 locations simultaneously,
 	 * but XDCR will have to do its best to resolve it if that's the case, as it's not a usual use case.
 	 * If it doesn't exist, a new agent will be created and started at this time.
 	 */
-	_, exist, err := service.getOrStartNewAgent(ref, true, false)
+	service.registerAdd(ref.Name())
+	_, exist, err := service.getOrStartNewAgent(ref, true /*userinitiated*/, false /*updateFromRef*/)
 	if exist {
 		return errors.New(fmt.Sprintf("Reference %v already exists on this node, potentially created from another node in the cluster. Please refresh the UI.", ref.Id()))
 	}
 
+	if err != nil && strings.Contains(err.Error(), WriteToMetakvErrString) {
+		service.deregisterAdd(ref.Name())
+	}
+
 	return err
+}
+
+// These registerAdd/dregisterAdd are needed to prevent innocuous errors from being shown in the logs
+func (service *RemoteClusterService) registerAdd(name string) {
+	service.metakvCbAddMtx.Lock()
+	defer service.metakvCbAddMtx.Unlock()
+
+	service.metakvCbAddMap[name] = true
+}
+
+func (service *RemoteClusterService) deregisterAdd(name string) {
+	service.metakvCbAddMtx.Lock()
+	defer service.metakvCbAddMtx.Unlock()
+
+	delete(service.metakvCbAddMap, name)
+}
+
+func (service *RemoteClusterService) checkIfAddingIsActive(name string) bool {
+	service.metakvCbAddMtx.RLock()
+	defer service.metakvCbAddMtx.RUnlock()
+	_, exists := service.metakvCbAddMap[name]
+	return exists
+}
+
+func (service *RemoteClusterService) registerSet(name string) {
+	service.metakvCbSetMtx.Lock()
+	defer service.metakvCbSetMtx.Unlock()
+
+	service.metakvCbSetMap[name] = true
+}
+
+func (service *RemoteClusterService) deregisterSet(name string) {
+	service.metakvCbSetMtx.Lock()
+	defer service.metakvCbSetMtx.Unlock()
+
+	delete(service.metakvCbSetMap, name)
+}
+
+func (service *RemoteClusterService) checkIfSettingIsActive(name string) bool {
+	service.metakvCbSetMtx.RLock()
+	defer service.metakvCbSetMtx.RUnlock()
+	_, exists := service.metakvCbSetMap[name]
+	return exists
+}
+
+func (service *RemoteClusterService) registerDel(refId string) {
+	service.metakvCbDelMtx.Lock()
+	defer service.metakvCbDelMtx.Unlock()
+
+	service.metakvCbDelMap[refId] = true
+}
+
+func (service *RemoteClusterService) deregisterDel(refId string) {
+	service.metakvCbDelMtx.Lock()
+	defer service.metakvCbDelMtx.Unlock()
+
+	delete(service.metakvCbDelMap, refId)
+}
+
+func (service *RemoteClusterService) checkIfDeletingIsActive(refId string) bool {
+	service.metakvCbDelMtx.RLock()
+	defer service.metakvCbDelMtx.RUnlock()
+	_, exists := service.metakvCbDelMap[refId]
+	return exists
 }
 
 func constructRemoteClusterReference(value []byte, rev interface{}) (*metadata.RemoteClusterReference, error) {
@@ -2093,11 +2638,25 @@ func (service *RemoteClusterService) RemoteClusterServiceCallback(path string, v
 				base.ErrorResourceDoesNotExist, refId, path))
 			service.logger.Errorf(err.Error())
 		} else {
-			// newRef was null - need to remove agent
-			_, err = service.delRemoteClusterAgentById(refId, false)
+			if service.checkIfDeletingIsActive(refId) {
+				service.deregisterDel(refId)
+			} else {
+				// newRef was null - need to remove agent
+				_, err = service.delRemoteClusterAgentById(refId, false)
+			}
 		}
 	} else {
-		_, _, err = service.getOrStartNewAgent(newRef, false, true)
+		if service.checkIfAddingIsActive(newRef.Name()) {
+			// When user executes an addRemoteCluster, the issuing node's metakv callback is also called
+			// Prevent duplicate call from happening
+			service.deregisterAdd(newRef.Name())
+		} else if service.checkIfSettingIsActive(newRef.Name()) {
+			// When user executes an setRemoteCluster, the issuing node's metakv callback is also called
+			// Prevent duplicate call from happening
+			service.deregisterSet(newRef.Name())
+		} else {
+			_, _, err = service.getOrStartNewAgent(newRef, false /*userInitiated*/, true /*updateFromRef*/)
+		}
 	}
 
 	return err
@@ -2127,14 +2686,9 @@ func (service *RemoteClusterService) GetConnectionStringForRemoteCluster(ref *me
 /**
  * Helper functions
  */
-func populateRefreshDataInconsistentError(origRef *metadata.RemoteClusterReference, newRef *metadata.RemoteClusterReference, origList base.StringPairList, newList base.StringPairList) error {
-	return errors.New(fmt.Sprintf("Refresher has experienced someone updating the reference from underneath it while it was populating data.\n Expected Original: %v %v\n Actual Reference in memory: %v %v\n Will skip updating the actual reference this time around.",
-		origRef, origList, newRef, newList))
-}
-
-func populateRefreshSuccessMsg(origRef *metadata.RemoteClusterReference, newRef *metadata.RemoteClusterReference, origList base.StringPairList, newList base.StringPairList) string {
-	return fmt.Sprintf("Refresher has successfully committed staged changes:\n Original: %v %v\n Actual staged changes now in memory: %v %v\n",
-		origRef, origList, newRef, newList)
+func populateRefreshSuccessMsg(origRef *metadata.RemoteClusterReference, newRef *metadata.RemoteClusterReference, newList base.StringPairList) string {
+	return fmt.Sprintf("Refresher has successfully committed staged changes:\n Original: %v\n Actual staged changes now in memory: %v %v\n",
+		origRef, newRef, newList)
 }
 
 func (service *RemoteClusterService) addAgentToAgentMapNoLock(ref *metadata.RemoteClusterReference, newAgent *RemoteClusterAgent) {
@@ -2143,21 +2697,25 @@ func (service *RemoteClusterService) addAgentToAgentMapNoLock(ref *metadata.Remo
 	service.agentCacheUuidMap[ref.Uuid()] = newAgent
 }
 
-func (service *RemoteClusterService) deleteAgentFromMapsNoLock(clonedCopy *metadata.RemoteClusterReference) {
+func (service *RemoteClusterService) deleteAgentFromMaps(clonedCopy *metadata.RemoteClusterReference) {
+	service.agentMutex.Lock()
 	delete(service.agentMap, clonedCopy.Id())
 	delete(service.agentCacheRefNameMap, clonedCopy.Name())
 	delete(service.agentCacheUuidMap, clonedCopy.Uuid())
+	service.agentMutex.Unlock()
 }
 
 // If agentMaps are updated, return true
-func (service *RemoteClusterService) checkAndUpdateAgentMapsNoLock(oldRef *metadata.RemoteClusterReference, newRef *metadata.RemoteClusterReference, agent *RemoteClusterAgent) bool {
+func (service *RemoteClusterService) checkAndUpdateAgentMaps(oldRef *metadata.RemoteClusterReference, newRef *metadata.RemoteClusterReference, agent *RemoteClusterAgent) bool {
 	var retVal bool
 	// UUID and ID both cannot change
 	oldRefName := oldRef.Name()
 	newRefName := newRef.Name()
 	if oldRefName != newRefName {
+		service.agentMutex.Lock()
 		service.agentCacheRefNameMap[newRefName] = agent
 		delete(service.agentCacheRefNameMap, oldRefName)
+		service.agentMutex.Unlock()
 		retVal = true
 	}
 	return retVal
@@ -2222,17 +2780,21 @@ func (service *RemoteClusterService) agentCacheMapsAreSynced() bool {
 	service.agentMutex.RLock()
 	defer service.agentMutex.RUnlock()
 	if len(service.agentMap) != len(service.agentCacheRefNameMap) {
+		fmt.Printf("AgentMap: %v\nAgentCacheRefNameMap: %v\n", service.agentMap, service.agentCacheRefNameMap)
 		return false
 	}
 	if len(service.agentMap) != len(service.agentCacheUuidMap) {
+		fmt.Printf("AgentMap: %v\nAgentCacheUuidMap: %v\n", service.agentMap, service.agentCacheUuidMap)
 		return false
 	}
 
 	for _, agent := range service.agentMap {
 		if service.agentCacheRefNameMap[agent.reference.Name()] != agent {
+			fmt.Printf("AgentCacheRefNameMap mismatch name: %v\n", agent.reference.Name())
 			return false
 		}
 		if service.agentCacheUuidMap[agent.reference.Uuid()] != agent {
+			fmt.Printf("AgentCacheUuidMap mismatch\n")
 			return false
 		}
 	}
@@ -2307,4 +2869,28 @@ func (service *RemoteClusterService) getAgentByReplSpec(spec *metadata.Replicati
 		return nil, getUnknownCluster("uuid", spec.TargetClusterUUID)
 	}
 	return agent, nil
+}
+
+func (service *RemoteClusterService) waitForRefreshEnabled(ref *metadata.RemoteClusterReference) {
+	service.agentMutex.RLock()
+	agent := service.agentMap[ref.Id()]
+	service.agentMutex.RUnlock()
+
+	agent.waitForRefreshEnabled()
+}
+
+func (agent *RemoteClusterAgent) waitForRefreshEnabled() {
+	for initDone := atomic.LoadUint32(&agent.initDone) == 1; !initDone; initDone = atomic.LoadUint32(&agent.initDone) == 1 {
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func (agent *RemoteClusterAgent) waitForRefreshOngoing() {
+	var refreshOngoing bool
+	for !refreshOngoing {
+		agent.refreshMtx.Lock()
+		refreshOngoing = agent.refreshActive > 0
+		agent.refreshMtx.Unlock()
+		time.Sleep(50 * time.Nanosecond)
+	}
 }
