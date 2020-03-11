@@ -13,6 +13,13 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"math"
+	"reflect"
+	"strconv"
+	"sync"
+	"sync/atomic"
+	"time"
+
 	mc "github.com/couchbase/gomemcached"
 	mcc "github.com/couchbase/gomemcached/client"
 	base "github.com/couchbase/goxdcr/base"
@@ -21,12 +28,6 @@ import (
 	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/goxdcr/service_def"
 	utilities "github.com/couchbase/goxdcr/utils"
-	"math"
-	"reflect"
-	"strconv"
-	"sync"
-	"sync/atomic"
-	"time"
 )
 
 const (
@@ -1073,10 +1074,23 @@ func (dcp *DcpNozzle) startUprStreamInner(vbno uint16, vbts *base.VBTimestamp, v
 			if ignore {
 				dcp.Logger().Debugf(fmt.Sprintf("%v ignoring send request for seqno %v since it has already been handled", dcp.Id(), vbts.Seqno))
 			} else {
+				//This function can be called from start, rollback and timeout states.As this call sets the state to INIT,
+				//The uprRequestStream failure should revert the state back to pre set state.
+				var prevState DcpStreamState
+				prevState, err = dcp.GetStreamState(vbno)
+				if err != nil {
+					return
+				}
+				err = dcp.setStreamState(vbno, Dcp_Stream_Init)
+				if err != nil {
+					return
+				}
 				// version passed in == opaque, which will be passed back to us
 				err = dcp.uprFeed.UprRequestStream(vbno, version, flags, vbts.Vbuuid, vbts.Seqno, seqEnd, vbts.SnapshotStart, vbts.SnapshotEnd)
-				if err == nil {
-					err = dcp.setStreamState(vbno, Dcp_Stream_Init)
+				if err != nil {
+					err = fmt.Errorf("UprRequestStream failed for vbno=%v with err=%v", vbno, err)
+					dcp.handleGeneralError(err)
+					err = dcp.setStreamState(vbno, prevState)
 				}
 			}
 			return
