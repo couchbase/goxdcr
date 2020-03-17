@@ -114,6 +114,10 @@ type Router struct {
 	targetColInfoPool utilities.TargetCollectionInfoPoolIface
 	dataPool          utilities.DataPoolIface
 	mcRequestPool     *base.MCRequestPool
+
+	// When DataFiltered events are raised, instead of looking up the latest manifestID
+	// just use the last known successful manifestID here instead
+	lastSuccessfulManifestId uint64
 }
 
 /**
@@ -547,6 +551,15 @@ func (router *Router) Stop() error {
 	return router.collectionsRouting.StopAll()
 }
 
+func (router *Router) getDataFilteredAdditional(uprEvent *mcc.UprEvent) interface{} {
+	return DataFilteredAdditional{Seqno: uprEvent.Seqno,
+		// For filtered document, send the latestSuccessfulManifestId
+		// so that the throughSeqno service can get the most updated manifestId
+		// for checkpointing if there is an overwhelming number of filtered docs
+		ManifestId: atomic.LoadUint64(&router.lastSuccessfulManifestId),
+	}
+}
+
 // Implementation of the routing algorithm
 // Currently doing static dispatching based on vbucket number.
 func (router *Router) Route(data interface{}) (map[string]interface{}, error) {
@@ -574,7 +587,7 @@ func (router *Router) Route(data interface{}) (map[string]interface{}, error) {
 
 	shouldContinue := router.ProcessExpDelTTL(uprEvent)
 	if !shouldContinue {
-		router.RaiseEvent(common.NewEvent(common.DataFiltered, uprEvent, router, nil, nil))
+		router.RaiseEvent(common.NewEvent(common.DataFiltered, uprEvent, router, nil, router.getDataFilteredAdditional(uprEvent)))
 		return result, nil
 	}
 
@@ -594,7 +607,7 @@ func (router *Router) Route(data interface{}) (map[string]interface{}, error) {
 				router.RaiseEvent(common.NewEvent(common.DataUnableToFilter, uprEvent, router, []interface{}{err, errDesc}, nil))
 			} else {
 				// if data does not need to be replicated, drop it. return empty result
-				router.RaiseEvent(common.NewEvent(common.DataFiltered, uprEvent, router, nil, nil))
+				router.RaiseEvent(common.NewEvent(common.DataFiltered, uprEvent, router, nil, router.getDataFilteredAdditional(uprEvent)))
 			}
 			// Let supervisor set the err instead of the router, to minimize pipeline interruption
 			return result, nil
@@ -680,6 +693,8 @@ func (router *Router) RouteCollection(data interface{}, partId string) error {
 	copy(mcRequest.ColInfo.ColIDPrefixedKey[leb128CidLen:totalLen], mcRequest.Req.Key)
 	mcRequest.Req.Key = mcRequest.ColInfo.ColIDPrefixedKey[0:totalLen]
 	mcRequest.Req.Keylen = totalLen
+
+	atomic.StoreUint64(&router.lastSuccessfulManifestId, manifestId)
 	return nil
 }
 
@@ -772,6 +787,30 @@ func (router *Router) UpdateSettings(settings metadata.ReplicationSettingsMap) e
 	_, ok = settings[ForceCollectionDisableKey]
 	if ok {
 		router.Router.SetStartable(false)
+	}
+
+	// When checkpoint manager starts up, it loads the last known target manifest ID
+	// and sends it as part of the UpdateVBTimestamp() call.
+	// This section will set the router's lastKnownManifestId to such value
+	// so that if immediately a filtered event is raised, the right manifest ID
+	// can be raised alongisde it.
+	// It is highly possible that this value can be transient... that is, when another successful
+	// mutation has gone through the router, that the lastSuccessfulManifestId will jump to the
+	// latest known target manifest ID. That is ok, though, because the corner case mentioned above
+	// is covered
+	ts_obj := router.utils.GetSettingFromSettings(settings, DCP_VBTimestamp)
+	if ts_obj != nil {
+		new_ts, ok := settings[DCP_VBTimestamp].(map[uint16]*base.VBTimestamp)
+		if ok && new_ts != nil && router.Router.IsStartable() {
+			// Find the max targetManifestId
+			var maxManifestId uint64
+			for _, ts := range new_ts {
+				if ts.ManifestIDs.TargetManifestId > maxManifestId {
+					maxManifestId = ts.ManifestIDs.TargetManifestId
+				}
+			}
+			atomic.StoreUint64(&router.lastSuccessfulManifestId, maxManifestId)
+		}
 	}
 
 	if len(errMap) > 0 {

@@ -907,6 +907,12 @@ func (xdcrf *XDCRFactory) constructSettingsForRouter(pipeline common.Pipeline, s
 	}
 
 	xdcrf.disableCollectionIfNeeded(settings, routerSettings, pipeline.Specification())
+
+	// Router keeps a copy of the current highest target manifest ID
+	vbTimestamp, ok := settings[base.VBTimestamps]
+	if ok {
+		routerSettings[parts.DCP_VBTimestamp] = vbTimestamp
+	}
 	return routerSettings, nil
 }
 
@@ -1034,6 +1040,7 @@ func (xdcrf *XDCRFactory) constructSettingsForStatsManager(pipeline common.Pipel
 func (xdcrf *XDCRFactory) constructSettingsForCheckpointManager(pipeline common.Pipeline, settings metadata.ReplicationSettingsMap) (metadata.ReplicationSettingsMap, error) {
 	s := make(metadata.ReplicationSettingsMap)
 	s[pipeline_svc.CHECKPOINT_INTERVAL] = getSettingFromSettingsMap(settings, metadata.CheckpointIntervalKey, pipeline.Specification().Settings.CheckpointInterval)
+	xdcrf.disableCollectionIfNeeded(settings, s, pipeline.Specification())
 	return s, nil
 }
 

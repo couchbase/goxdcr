@@ -21,4 +21,7 @@ type ThroughSeqnoTrackerSvc interface {
 	GetThroughSeqnos() map[uint16]uint64
 	SetStartSeqno(vbno uint16, seqno uint64)
 	PrintStatusSummary()
+
+	// Get ManifestIDs alongside with the through sequence numbers
+	GetThroughSeqnosAndManifestIds() (throughSeqnos, srcManifestIds, tgtManifestIds map[uint16]uint64)
 }

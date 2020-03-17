@@ -113,6 +113,11 @@ type CheckpointManager struct {
 	target_cluster_version int
 	utils                  utilities.UtilsIface
 	statsMgr               StatsMgrIface
+
+	/*
+	 * Collections related
+	 */
+	collectionEnabledVar uint32
 }
 
 // Checkpoint Manager keeps track of one checkpointRecord per vbucket
@@ -272,7 +277,17 @@ func (ckmgr *CheckpointManager) initializeConfig(settings metadata.ReplicationSe
 	} else {
 		return fmt.Errorf("%v %v should be provided in settings", ckmgr.pipeline.Topic(), CHECKPOINT_INTERVAL)
 	}
+
+	if _, exists := settings[parts.ForceCollectionDisableKey]; exists {
+		atomic.StoreUint32(&ckmgr.collectionEnabledVar, 0)
+	} else {
+		atomic.StoreUint32(&ckmgr.collectionEnabledVar, 1)
+	}
 	return nil
+}
+
+func (ckmgr *CheckpointManager) collectionEnabled() bool {
+	return atomic.LoadUint32(&ckmgr.collectionEnabledVar) > 0
 }
 
 func (ckmgr *CheckpointManager) startRandomizedCheckpointingTicker() {

@@ -63,15 +63,31 @@ type ThroughSeqnoTrackerSvc struct {
 	vb_last_seen_seqno_map map[uint16]*base.SeqnoWithLock
 
 	// System events sent down are recorded in this list
-	vbSystemEventsSeqnoListMap map[uint16]*DualSortedSeqnoListWithLock
+	vbSystemEventsSeqnoListMap SeqnoManifestsMapType
 
 	// stores sequence numbers that are ignored and not sent out because backfills will cover
 	vbIgnoredSeqnoListMap map[uint16]*base.SortedSeqnoListWithLock
 
+	// Keeps track of the manifestIDs associated with a range of sequence numbers
+	// Given multiple ranges of sequence numbers, such as {[a, b), [b, c)}
+	// elements of list 1 are the top of each range, in this case: b and c.
+	// When the high sequence number is in flux, maxuint64 is used and can be changed.
+	//
+	// List2 represent the manifestID associated with the range.
+	//
+	// For example, seqno of [0, 100) is manifestID 1, and [100, 200) is manifest ID of 2
+	// [200, inf) is manifestID of 3
+	//
+	// n:        0   1         2
+	// list1:  100 200 highSeqno (seqno)
+	// list2:    1   2         3 (manifestId)
+	vbTgtSeqnoManifestMap SeqnoManifestsMapType
+
 	id     string
 	rep_id string
 
-	logger *log.CommonLogger
+	logger      *log.CommonLogger
+	unitTesting bool
 }
 
 // struct containing two seqno lists that need to be accessed and locked together
@@ -145,6 +161,91 @@ func (list_obj *DualSortedSeqnoListWithLock) truncateSeqno1Floor(throughSeqno ui
 	}
 }
 
+// Given a through seqno, find it in the list1. If it is not in List1, then use the next lower seqno
+// in list1 as the found "pair"
+// Then, return the list2 pair value
+func (list_obj *DualSortedSeqnoListWithLock) getList2BasedonList1Floor(throughSeqno uint64) (uint64, error) {
+	list_obj.lock.RLock()
+	defer list_obj.lock.RUnlock()
+
+	index, found := base.SearchUint64List(list_obj.seqno_list_1, throughSeqno)
+	if found {
+		list2Element := list_obj.seqno_list_2[index]
+		return list2Element, nil
+	} else if index > 0 {
+		list2Element := list_obj.seqno_list_2[index-1]
+		return list2Element, nil
+	} else {
+		return 0, base.ErrorNotFound
+	}
+}
+
+type SeqnoManifestsMapType map[uint16]*DualSortedSeqnoListWithLock
+
+// If the manifestID has not changed, then this function will update the existing seqno associated with the manifestID
+// to be the incoming (and higher) seqno.
+// If the manifestID has changed, then this function will perform append
+func (t *SeqnoManifestsMapType) UpdateOrAppendSeqnoManifest(vbno uint16, seqno, manifestId uint64) error {
+	if t == nil {
+		return base.ErrorInvalidInput
+	}
+
+	lists, found := (*t)[vbno]
+	if !found {
+		return base.ErrorInvalidInput
+	}
+
+	lists.lock.Lock()
+	defer lists.lock.Unlock()
+
+	if len(lists.seqno_list_1) == 0 {
+		// First time
+		lists.seqno_list_1 = append(lists.seqno_list_1, seqno)
+		lists.seqno_list_2 = append(lists.seqno_list_2, manifestId)
+	} else {
+		N := len(lists.seqno_list_1) - 1
+		highestSeqno := lists.seqno_list_1[N]
+		currentManifestId := lists.seqno_list_2[N]
+		if manifestId > currentManifestId {
+			if highestSeqno > seqno {
+				panic(fmt.Sprintf("For vb %v a later seqno showed up with a lower manifestId %v when highest is %v",
+					vbno, seqno, currentManifestId))
+			}
+			// Need to add the new manifest as the top of the list
+			lists.seqno_list_1 = append(lists.seqno_list_1, seqno)
+			lists.seqno_list_2 = append(lists.seqno_list_2, manifestId)
+		} else if manifestId == currentManifestId && seqno > highestSeqno {
+			// Note this seqno as the last known seqno for the current highest manifestId
+			lists.seqno_list_1[N] = seqno
+		}
+	}
+	return nil
+}
+
+func (t *SeqnoManifestsMapType) GetManifestId(vbno uint16, seqno uint64) (uint64, error) {
+	if t == nil {
+		return 0, base.ErrorInvalidInput
+	}
+
+	listsObj, ok := (*t)[vbno]
+	if !ok {
+		return 0, base.ErrorInvalidInput
+	}
+
+	listsObj.lock.RLock()
+	defer listsObj.lock.RUnlock()
+
+	if len(listsObj.seqno_list_1) == 0 && len(listsObj.seqno_list_2) == 0 {
+		return 0, nil
+	}
+
+	manifestId, err := listsObj.getList2BasedonList1Floor(seqno)
+	if err != nil {
+		err = fmt.Errorf("Unable to retrieve manifest for vb %v, requesting seqno %v\n", vbno, seqno)
+	}
+	return manifestId, err
+}
+
 func truncateGapSeqnoList(through_seqno uint64, seqno_list []uint64) []uint64 {
 	index, found := base.SearchUint64List(seqno_list, through_seqno)
 	if found {
@@ -168,8 +269,9 @@ func NewThroughSeqnoTrackerSvc(logger_ctx *log.LoggerContext) *ThroughSeqnoTrack
 		vb_filtered_seqno_list_map:  make(map[uint16]*base.SortedSeqnoListWithLock),
 		vb_failed_cr_seqno_list_map: make(map[uint16]*base.SortedSeqnoListWithLock),
 		vb_gap_seqno_list_map:       make(map[uint16]*DualSortedSeqnoListWithLock),
-		vbSystemEventsSeqnoListMap:  make(map[uint16]*DualSortedSeqnoListWithLock),
+		vbSystemEventsSeqnoListMap:  make(SeqnoManifestsMapType),
 		vbIgnoredSeqnoListMap:       make(map[uint16]*base.SortedSeqnoListWithLock),
+		vbTgtSeqnoManifestMap:       make(SeqnoManifestsMapType),
 	}
 	return tsTracker
 }
@@ -189,6 +291,7 @@ func (tsTracker *ThroughSeqnoTrackerSvc) initialize(pipeline common.Pipeline) {
 		tsTracker.vb_gap_seqno_list_map[vbno] = newDualSortedSeqnoListWithLock()
 		tsTracker.vbSystemEventsSeqnoListMap[vbno] = newDualSortedSeqnoListWithLock()
 		tsTracker.vbIgnoredSeqnoListMap[vbno] = base.NewSortedSeqnoListWithLock()
+		tsTracker.vbTgtSeqnoManifestMap[vbno] = newDualSortedSeqnoListWithLock()
 	}
 }
 
@@ -211,7 +314,7 @@ func (tsTracker *ThroughSeqnoTrackerSvc) Attach(pipeline common.Pipeline) error 
 		tsTracker.logger.Errorf("%v", err)
 		return err
 	}
-	err := tsTracker.RegisterComponentEventListener(common.ErrorEncountered, supervisor.(*pipeline_svc.PipelineSupervisor))
+	err := tsTracker.RegisterComponentEventListener(common.ErrorEncountered, supervisor.(pipeline_svc.PipelineSupervisorSvc))
 	if err != nil {
 		tsTracker.logger.Errorf("%v", err)
 		return err
@@ -247,10 +350,14 @@ func (tsTracker *ThroughSeqnoTrackerSvc) ProcessEvent(event *common.Event) error
 	case common.DataSent:
 		vbno := event.OtherInfos.(parts.DataSentEventAdditional).VBucket
 		seqno := event.OtherInfos.(parts.DataSentEventAdditional).Seqno
+		manifestId := event.OtherInfos.(parts.DataSentEventAdditional).ManifestId
 		tsTracker.addSentSeqno(vbno, seqno)
+		tsTracker.addManifestId(vbno, seqno, manifestId)
 	case common.DataFiltered:
 		uprEvent := event.Data.(*mcc.UprEvent)
+		manifestId := event.OtherInfos.(parts.DataFilteredAdditional).ManifestId
 		tsTracker.markUprEventAsFiltered(uprEvent)
+		tsTracker.addManifestId(uprEvent.VBucket, uprEvent.Seqno, manifestId)
 	case common.DataUnableToFilter:
 		err := event.DerivedData[0].(error)
 		// If error is recoverable, do not mark it filtered in order to avoid data loss
@@ -261,7 +368,9 @@ func (tsTracker *ThroughSeqnoTrackerSvc) ProcessEvent(event *common.Event) error
 	case common.DataFailedCRSource:
 		seqno := event.OtherInfos.(parts.DataFailedCRSourceEventAdditional).Seqno
 		vbno := event.OtherInfos.(parts.DataFailedCRSourceEventAdditional).VBucket
+		manifestId := event.OtherInfos.(parts.DataFailedCRSourceEventAdditional).ManifestId
 		tsTracker.addFailedCRSeqno(vbno, seqno)
+		tsTracker.addManifestId(vbno, seqno, manifestId)
 	case common.DataReceived:
 		upr_event := event.Data.(*mcc.UprEvent)
 		seqno := upr_event.Seqno
@@ -282,7 +391,6 @@ func (tsTracker *ThroughSeqnoTrackerSvc) ProcessEvent(event *common.Event) error
 
 	}
 	return nil
-
 }
 
 func (tsTracker *ThroughSeqnoTrackerSvc) markSystemEvent(uprEvent *mcc.UprEvent) {
@@ -342,6 +450,11 @@ func (tsTracker *ThroughSeqnoTrackerSvc) addSystemSeqno(vbno uint16, systemEvent
 	tsTracker.vbSystemEventsSeqnoListMap[vbno].appendSeqnos(systemEventSeqno, manifestId, tsTracker.logger)
 }
 
+func (tsTracker *ThroughSeqnoTrackerSvc) addManifestId(vbno uint16, seqno, manifestId uint64) {
+	tsTracker.validateVbno(vbno, "addManifestId")
+	tsTracker.vbTgtSeqnoManifestMap.UpdateOrAppendSeqnoManifest(vbno, seqno, manifestId)
+}
+
 func (tsTracker *ThroughSeqnoTrackerSvc) truncateSeqnoLists(vbno uint16, through_seqno uint64) {
 	tsTracker.vb_sent_seqno_list_map[vbno].TruncateSeqnos(through_seqno)
 	tsTracker.vb_filtered_seqno_list_map[vbno].TruncateSeqnos(through_seqno)
@@ -349,6 +462,7 @@ func (tsTracker *ThroughSeqnoTrackerSvc) truncateSeqnoLists(vbno uint16, through
 	tsTracker.vb_gap_seqno_list_map[vbno].truncateSeqnos(through_seqno)
 	tsTracker.vbSystemEventsSeqnoListMap[vbno].truncateSeqno1Floor(through_seqno)
 	tsTracker.vbIgnoredSeqnoListMap[vbno].TruncateSeqnos(through_seqno)
+	tsTracker.vbTgtSeqnoManifestMap[vbno].truncateSeqno1Floor(through_seqno)
 }
 
 /**
@@ -578,6 +692,29 @@ func (tsTracker *ThroughSeqnoTrackerSvc) GetThroughSeqnos() map[uint16]uint64 {
 	return result_map
 }
 
+func (tsTracker *ThroughSeqnoTrackerSvc) GetThroughSeqnosAndManifestIds() (throughSeqnos, srcManifestIds, tgtManifestIds map[uint16]uint64) {
+	throughSeqnos = tsTracker.GetThroughSeqnos()
+	srcManifestIds = make(map[uint16]uint64)
+	tgtManifestIds = make(map[uint16]uint64)
+
+	for vbno, seqno := range throughSeqnos {
+		manifestId, err := tsTracker.vbTgtSeqnoManifestMap.GetManifestId(vbno, seqno)
+		if err != nil {
+			tsTracker.logger.Warnf(err.Error())
+		} else {
+			tgtManifestIds[vbno] = manifestId
+		}
+
+		manifestId, err = tsTracker.vbSystemEventsSeqnoListMap.GetManifestId(vbno, seqno)
+		if err != nil {
+			tsTracker.logger.Warnf(err.Error())
+		} else {
+			srcManifestIds[vbno] = manifestId
+		}
+	}
+	return
+}
+
 func (tsTracker *ThroughSeqnoTrackerSvc) getThroughSeqnos(executor_id int, listOfVbs []uint16, result_map map[uint16]uint64, wait_grp *sync.WaitGroup) {
 	tsTracker.logger.Tracef("%v getThroughSeqnos executor %v is working on vbuckets %v", tsTracker.id, executor_id, listOfVbs)
 	defer wait_grp.Done()
@@ -620,6 +757,10 @@ func (tsTracker *ThroughSeqnoTrackerSvc) Id() string {
 }
 
 func (tsTracker *ThroughSeqnoTrackerSvc) isPipelineRunning() bool {
+	if tsTracker.unitTesting {
+		return true
+	}
+
 	rep_status, _ := pipeline_manager.ReplicationStatus(tsTracker.rep_id)
 	if rep_status != nil {
 		pipeline := rep_status.Pipeline()

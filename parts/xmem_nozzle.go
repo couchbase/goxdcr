@@ -497,18 +497,19 @@ type opaqueKeySeqnoMap map[uint32][]interface{}
  * 2. Sequence number
  * 3. vbucket number
  * 4. time.Now()
+ * 5. ManifestId
  */
 
 // This function will ensure that the returned interface slice will have distinct copies of argument references
 // since everything coming in is passing by value
-func compileOpaqueKeySeqnoValue(docKey string, seqno uint64, vbucket uint16, timeNow time.Time) []interface{} {
-	return []interface{}{docKey, seqno, vbucket, timeNow}
+func compileOpaqueKeySeqnoValue(docKey string, seqno uint64, vbucket uint16, timeNow time.Time, manifestId uint64) []interface{} {
+	return []interface{}{docKey, seqno, vbucket, timeNow, manifestId}
 }
 
 func (omap opaqueKeySeqnoMap) Clone() opaqueKeySeqnoMap {
 	newMap := make(opaqueKeySeqnoMap)
 	for k, v := range omap {
-		newMap[k] = compileOpaqueKeySeqnoValue(v[0].(string), v[1].(uint64), v[2].(uint16), v[3].(time.Time))
+		newMap[k] = compileOpaqueKeySeqnoValue(v[0].(string), v[1].(uint64), v[2].(uint16), v[3].(time.Time), v[4].(uint64))
 	}
 	return newMap
 }
@@ -526,7 +527,7 @@ func (omap opaqueKeySeqnoMap) CloneAndRedact() opaqueKeySeqnoMap {
 	clonedMap := make(opaqueKeySeqnoMap)
 	for k, v := range omap {
 		if !base.IsStringRedacted(v[0].(string)) {
-			clonedMap[k] = compileOpaqueKeySeqnoValue(base.TagUD(v[0].(string)), v[1].(uint64), v[2].(uint16), v[3].(time.Time))
+			clonedMap[k] = compileOpaqueKeySeqnoValue(base.TagUD(v[0].(string)), v[1].(uint64), v[2].(uint16), v[3].(time.Time), v[4].(uint64))
 		} else {
 			clonedMap[k] = v
 		}
@@ -1310,6 +1311,7 @@ func (xmem *XmemNozzle) batchSetMetaWithRetry(batch *dataBatch, numOfRetry int) 
 						Opcode:      encodeOpCode(item.Req.Opcode),
 						IsExpirySet: (binary.BigEndian.Uint32(item.Req.Extras[4:8]) != 0),
 						VBucket:     item.Req.VBucket,
+						ManifestId:  item.GetManifestId(),
 					}
 					xmem.RaiseEvent(common.NewEvent(common.DataFailedCRSource, nil, xmem, nil, additionalInfo))
 				}
@@ -1537,12 +1539,15 @@ func (xmem *XmemNozzle) batchGetMetaHandler(count int, finch chan bool, return_c
 					seqno, ok2 := keySeqno[1].(uint64)
 					vbno, ok2 := keySeqno[2].(uint16)
 					start_time, ok3 := keySeqno[3].(time.Time)
-					if ok1 && ok2 && ok3 {
+					manifestId, ok4 := keySeqno[4].(uint64)
+					if ok1 && ok2 && ok3 && ok4 {
 						respMap[key] = response
 
+						// GetMeta successful means that the target manifest ID is valid for the collection ID of this key
 						additionalInfo := GetMetaReceivedEventAdditional{Key: key,
 							Seqno:       seqno,
 							Commit_time: time.Since(start_time),
+							ManifestId:  manifestId,
 						}
 						xmem.RaiseEvent(common.NewEvent(common.GetMetaReceived, nil, xmem, nil, additionalInfo))
 						if response.Status != mc.SUCCESS && !isIgnorableMCResponse(response) && !isTemporaryMCError(response.Status) &&
@@ -1621,7 +1626,7 @@ func (xmem *XmemNozzle) batchGetMeta(bigDoc_map base.McRequestMap) (map[string]b
 			// .Bytes() returns data ready to be fed over the wire
 			reqs_bytes = append(reqs_bytes, req.Bytes())
 			// a Map of array of items and map key is the opaque currently based on time (passed to the target and back)
-			opaque_keySeqno_map[opaque] = compileOpaqueKeySeqnoValue(docKey, originalReq.Seqno, originalReq.Req.VBucket, time.Now())
+			opaque_keySeqno_map[opaque] = compileOpaqueKeySeqnoValue(docKey, originalReq.Seqno, originalReq.Req.VBucket, time.Now(), originalReq.GetManifestId())
 			opaque++
 			numOfReqsInReqBytesBatch++
 			sent_key_map[docKey] = true
@@ -2112,11 +2117,13 @@ func (xmem *XmemNozzle) receiveResponse(finch chan bool, waitGrp *sync.WaitGroup
 				var seqno uint64
 				var committing_time time.Duration
 				var resp_wait_time time.Duration
+				var manifestId uint64
 				if wrappedReq != nil {
 					req = wrappedReq.Req
 					seqno = wrappedReq.Seqno
 					committing_time = time.Since(wrappedReq.Start_time)
 					resp_wait_time = time.Since(*sent_time)
+					manifestId = wrappedReq.GetManifestId()
 				}
 
 				if req != nil && req.Opaque == response.Opaque {
@@ -2128,6 +2135,7 @@ func (xmem *XmemNozzle) receiveResponse(finch chan bool, waitGrp *sync.WaitGroup
 						Req_size:       req.Size(),
 						Commit_time:    committing_time,
 						Resp_wait_time: resp_wait_time,
+						ManifestId:     manifestId,
 					}
 
 					xmem.RaiseEvent(common.NewEvent(common.DataSent, nil, xmem, nil, additionalInfo))
