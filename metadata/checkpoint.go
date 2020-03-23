@@ -7,18 +7,19 @@ import (
 )
 
 const (
-	FailOverUUID        string = "failover_uuid"
-	Seqno               string = "seqno"
-	DcpSnapshotSeqno    string = "dcp_snapshot_seqno"
-	DcpSnapshotEndSeqno string = "dcp_snapshot_end_seqno"
-	TargetVbOpaque      string = "target_vb_opaque"
-	TargetSeqno         string = "target_seqno"
-	TargetVbUuid        string = "target_vb_uuid"
-	StartUpTime         string = "startup_time"
-	FilteredCnt         string = "filtered_items_cnt"
-	FilteredFailedCnt   string = "filtered_failed_cnt"
-	SourceManifest      string = "source_manifest"
-	TargetManifest      string = "target_manifest"
+	FailOverUUID         string = "failover_uuid"
+	Seqno                string = "seqno"
+	DcpSnapshotSeqno     string = "dcp_snapshot_seqno"
+	DcpSnapshotEndSeqno  string = "dcp_snapshot_end_seqno"
+	TargetVbOpaque       string = "target_vb_opaque"
+	TargetSeqno          string = "target_seqno"
+	TargetVbUuid         string = "target_vb_uuid"
+	StartUpTime          string = "startup_time"
+	FilteredCnt          string = "filtered_items_cnt"
+	FilteredFailedCnt    string = "filtered_failed_cnt"
+	SourceManifest       string = "source_manifest"
+	TargetManifest       string = "target_manifest"
+	BrokenCollectionsMap string = "brokenCollectionsMap"
 )
 
 type CheckpointRecord struct {
@@ -41,10 +42,12 @@ type CheckpointRecord struct {
 	// Manifests uid corresponding to this checkpoint
 	SourceManifest uint64 `json:"source_manifest"`
 	TargetManifest uint64 `json:"target_manifest"`
+	// Broken mapping (if any) associated with the checkpoint
+	BrokenMappings CollectionNamespaceMapping `json:brokenCollectionsMap`
 }
 
 func NewCheckpointRecord(failoverUuid, seqno, dcpSnapSeqno, dcpSnapEnd, targetSeqno, filteredItems, filterFailed,
-	srcManifest, tgtManifest uint64) *CheckpointRecord {
+	srcManifest, tgtManifest uint64, brokenMappings CollectionNamespaceMapping) *CheckpointRecord {
 	return &CheckpointRecord{
 		Failover_uuid:          failoverUuid,
 		Seqno:                  seqno,
@@ -55,6 +58,7 @@ func NewCheckpointRecord(failoverUuid, seqno, dcpSnapSeqno, dcpSnapEnd, targetSe
 		Filtered_Failed_Cnt:    filterFailed,
 		SourceManifest:         srcManifest,
 		TargetManifest:         tgtManifest,
+		BrokenMappings:         brokenMappings,
 	}
 }
 
@@ -72,7 +76,10 @@ func (ckptRecord *CheckpointRecord) IsSame(new_record *CheckpointRecord) bool {
 		ckptRecord.Target_vb_opaque.IsSame(new_record.Target_vb_opaque) &&
 		ckptRecord.Target_Seqno == new_record.Target_Seqno &&
 		ckptRecord.Filtered_Failed_Cnt == new_record.Filtered_Failed_Cnt &&
-		ckptRecord.Filtered_Items_Cnt == new_record.Filtered_Items_Cnt {
+		ckptRecord.Filtered_Items_Cnt == new_record.Filtered_Items_Cnt &&
+		ckptRecord.SourceManifest == new_record.SourceManifest &&
+		ckptRecord.TargetManifest == new_record.TargetManifest &&
+		ckptRecord.BrokenMappings.IsSame(new_record.BrokenMappings) {
 		return true
 	} else {
 		return false
@@ -91,6 +98,9 @@ func (ckptRecord *CheckpointRecord) Load(other *CheckpointRecord) {
 	ckptRecord.Target_Seqno = other.Target_Seqno
 	ckptRecord.Filtered_Items_Cnt = other.Filtered_Items_Cnt
 	ckptRecord.Filtered_Failed_Cnt = other.Filtered_Failed_Cnt
+	ckptRecord.SourceManifest = other.SourceManifest
+	ckptRecord.TargetManifest = other.TargetManifest
+	ckptRecord.BrokenMappings = other.BrokenMappings
 }
 
 func (ckptRecord *CheckpointRecord) UnmarshalJSON(data []byte) error {
@@ -143,6 +153,21 @@ func (ckptRecord *CheckpointRecord) UnmarshalJSON(data []byte) error {
 	filteredFailedCnt, ok := fieldMap[FilteredFailedCnt]
 	if ok {
 		ckptRecord.Filtered_Failed_Cnt = uint64(filteredFailedCnt.(float64))
+	}
+
+	srcManifest, ok := fieldMap[SourceManifest]
+	if ok {
+		ckptRecord.SourceManifest = uint64(srcManifest.(float64))
+	}
+
+	tgtManifest, ok := fieldMap[TargetManifest]
+	if ok {
+		ckptRecord.TargetManifest = uint64(tgtManifest.(float64))
+	}
+
+	brokenMap, ok := fieldMap[BrokenCollectionsMap]
+	if ok {
+		ckptRecord.BrokenMappings = brokenMap.(CollectionNamespaceMapping)
 	}
 
 	return nil

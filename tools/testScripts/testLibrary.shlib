@@ -29,4 +29,26 @@ function checkItemCnt {
 	exit 1
 }
 
+# Assumes running test script from this directory
+function getNsServerDir {
+	# i.e. Running from "/Users/neil.huang/source/couchbase/goproj/src/github.com/couchbase/goxdcr/tools/testScripts"
+	local srcTreeName=`pwd | cut -d/ -f6-`
+	# /Users/neil.huang/source/couchbase/
+	local couchbaseDir=`pwd | sed "s|$srcTreeName||g"`
+	echo "${couchbaseDir}ns_server"
+	return 0
+}
 
+function grepForPanics {
+	local ns_serverDir=`getNsServerDir`
+	local logsDir="${ns_serverDir}/logs"
+	for dir in `ls $logsDir`
+	do
+		count=`grep -c panic ${logsDir}/${dir}/goxdcr.log`
+		if (( $count > 0 ));then
+			echo "WARNING Found panics in ${logsDir}/${dir}"
+			exit 1
+		fi
+	done
+	return 0
+}

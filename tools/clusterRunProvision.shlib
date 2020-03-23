@@ -138,6 +138,27 @@ function insertBucketReplIntoExportMap {
 	export BUCKET_REPL_EXPORT_MAP
 }
 
+function getBucketReplicationRestID {
+	local chkSourceCluster=$1
+	local chkSourceBucket=$2
+	local chkTargetCluster=$3
+	local chkTargetBucket=$4
+
+	for replKey in "${!BUCKET_REPL_EXPORT_MAP[@]}"
+	do
+		local sourceCluster=`echo "$replKey" | cut -d, -f1`
+		local restID=`echo "${BUCKET_REPL_EXPORT_MAP[$replKey]}" | sed 's/"//g'`
+		local sourceBucket=`echo "$replKey" | cut -d, -f2`
+		local targetCluster=`echo "$replKey" | cut -d, -f3`
+		local targetBucket=`echo "$replKey" | cut -d, -f4`
+
+		if [[ "$chkSourceCluster" == "$sourceCluster" && "$chkSourceBucket" == "$sourceBucket" && "$chkTargetCluster" == "$targetCluster" && "$chkTargetBucket" == "$targetBucket" ]];then
+			echo "$restID"
+			return 0
+		fi
+	done
+	return 1
+}
 
 # Input:
 # 1. Source Cluster name
@@ -925,4 +946,46 @@ function getStats {
 
 	# Gets the last element of the array with -1 indexing
 	echo "$statsOutput"  | jq ".nodeStats.\"[::1]:${port}\"[-1]"
+}
+
+function pauseReplication {
+	local srcClusterName=$1
+	local srcBucketName=$2
+	local targetClusterName=$3
+	local targetBucketName=$4
+
+	restID=`getBucketReplicationRestID "$srcClusterName" "$srcBucketName" "$targetClusterName" "$targetBucketName"`
+	if (( $? != 0 ));then
+		echo "Unable to find REST ID"
+		return 1
+	fi
+	local sourcePort=${CLUSTER_NAME_PORT_MAP[$srcClusterName]:-}
+	if [[ -z "$sourcePort" ]];then
+		echo "Unable to find admin port for cluster $srcClusterName"
+		return 1
+	fi
+
+	echo "Pausing replication $restID"
+	$CURL -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:${sourcePort}/settings/replications/${restID} -d pauseRequested=true > /dev/null 2>&1
+}
+
+function resumeReplication {
+	local srcClusterName=$1
+	local srcBucketName=$2
+	local targetClusterName=$3
+	local targetBucketName=$4
+
+	restID=`getBucketReplicationRestID "$srcClusterName" "$srcBucketName" "$targetClusterName" "$targetBucketName"`
+	if (( $? != 0 ));then
+		echo "Unable to find REST ID"
+		return 1
+	fi
+	local sourcePort=${CLUSTER_NAME_PORT_MAP[$srcClusterName]:-}
+	if [[ -z "$sourcePort" ]];then
+		echo "Unable to find admin port for cluster $srcClusterName"
+		return 1
+	fi
+
+	echo "Resuming replication $restID"
+	$CURL -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:${sourcePort}/settings/replications/${restID} -d pauseRequested=false > /dev/null 2>&1
 }

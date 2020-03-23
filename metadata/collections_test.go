@@ -465,3 +465,23 @@ func TestCollectionRecreatedDiff(t *testing.T) {
 
 	fmt.Println("============== Test case end: TestCollectionRecreatedDiff =================")
 }
+
+func TestMarshalUnmarshalCollectionsNamespaceMapping(t *testing.T) {
+	assert := assert.New(t)
+	fmt.Println("============== Test case start: TestMarshalUnmarshalCollectionsNamespaceMapping =================")
+	nsMap := make(CollectionNamespaceMapping)
+	defaultNamespace := base.CollectionNamespace{"_default", "_default"}
+	var nslist CollectionNamespaceList
+	nslist = append(nslist, &defaultNamespace)
+	nsMap[&defaultNamespace] = nslist
+
+	marshalledData, err := nsMap.MarshalJSON()
+	assert.Nil(err)
+
+	checkMap := make(CollectionNamespaceMapping)
+	err = checkMap.UnmarshalJSON(marshalledData)
+	assert.Nil(err)
+
+	assert.True(checkMap.IsSame(nsMap))
+	fmt.Println("============== Test case end: TestMarshalUnmarshalCollectionsNamespaceMapping =================")
+}

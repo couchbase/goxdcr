@@ -456,6 +456,7 @@ func (c CollectionList) Contains(cid uint64) bool {
 	return false
 }
 
+// TODO - clean up as part of MB-38331
 type CollectionToCollectionsMapping map[*Collection][]*Collection
 
 // Implements marshaller interface
@@ -1031,10 +1032,58 @@ func (c CollectionNamespaceList) Contains(namespace *base.CollectionNamespace) b
 	return false
 }
 
+type collectionNsMetaObj struct {
+	SourceCollections CollectionNamespaceList `json:SourceCollections`
+	// keys are integers of the index above
+	IndirectTargetMap map[uint64]CollectionNamespaceList `json:IndirectTargetMap`
+}
+
+func newCollectionNsMetaObj() *collectionNsMetaObj {
+	return &collectionNsMetaObj{
+		IndirectTargetMap: make(map[uint64]CollectionNamespaceList),
+	}
+}
+
 // This is used for namespace mapping that transcends over manifest lifecycles
 // Need to use pointers because of golang hash map support of indexable type
 // This means rest needs to do some gymanistics, instead of just simply checking for pointers
 type CollectionNamespaceMapping map[*base.CollectionNamespace]CollectionNamespaceList
+
+func (c CollectionNamespaceMapping) MarshalJSON() ([]byte, error) {
+	metaObj := newCollectionNsMetaObj()
+
+	var i uint64
+	for k, v := range c {
+		metaObj.SourceCollections = append(metaObj.SourceCollections, k)
+		metaObj.IndirectTargetMap[i] = v
+		i++
+	}
+	return json.Marshal(metaObj)
+}
+
+func (c *CollectionNamespaceMapping) UnmarshalJSON(b []byte) error {
+	if c == nil {
+		return base.ErrorInvalidInput
+	}
+
+	metaObj := newCollectionNsMetaObj()
+
+	err := json.Unmarshal(b, metaObj)
+	if err != nil {
+		return err
+	}
+
+	var i uint64
+	for i = 0; i < uint64(len(metaObj.SourceCollections)); i++ {
+		sourceCol := metaObj.SourceCollections[i]
+		targetCols, ok := metaObj.IndirectTargetMap[i]
+		if !ok {
+			return fmt.Errorf("Unable to unmarshal CollectionNamespaceMapping raw: %v", metaObj)
+		}
+		(*c)[sourceCol] = targetCols
+	}
+	return nil
+}
 
 func (c CollectionNamespaceMapping) String() string {
 	var buffer bytes.Buffer

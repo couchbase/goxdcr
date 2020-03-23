@@ -93,6 +93,8 @@ function runTestCase {
 	checkItemCnt "C1" "B1" $CBWORKLOAD_COLLECTION_NUM_ITEMS
 	checkItemCnt "C2" "B2" $CBWORKLOAD_COLLECTION_NUM_ITEMS
 
+	grepForPanics
+
 	echo "============================================================================"
 	echo "PASSED"
 	echo "============================================================================"

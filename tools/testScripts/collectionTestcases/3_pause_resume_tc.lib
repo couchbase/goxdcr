@@ -39,29 +39,15 @@ declare -a collection1Arr=("col1" "col2")
 declare -a collection2Arr=("col1" "col2" "col3")
 SCOPE_NAME_COLLECTION_MAP=(["S1"]=${collection1Arr[@]} ["S2"]=${collection2Arr[@]} ["S3"]=${collection2Arr[@]})
 
-
 function runDataLoad {
 	# Run CBWorkloadgen in parallel
-	echo "RUNNING dataload..."
-	runCbWorkloadGenCollection "C1" "B1" "S1" "col1" &
-	runCbWorkloadGenCollection "C2" "B2" "S1" "col1" &
+	runCbWorkloadGenCollection "C1" "B1" "S1" "col1"
 	waitForBgJobs
-}
-
-function validateDataLoad {
-	echo "VALIDATING Data..."
-	validateCbWorkloadGenCollection "C2" "B2" "S1" "col1" "C1" "B1" "S1" "col1"
-	validateCbWorkloadGenCollection "C1" "B1" "S1" "col1" "C2" "B2" "S1" "col1"
-
-	checkBidirectionalChangesLeft
-	expectedCnt=$(( $CBWORKLOAD_COLLECTION_NUM_ITEMS*2 ))
-	checkItemCnt "C1" "B1" $expectedCnt
-	checkItemCnt "C2" "B2" $expectedCnt
 }
 
 function runTestCase {
 	echo "============================================================================"
-	echo "Running simple collection bidirectional test case"
+	echo "Running pause and resume test case"
 	echo "============================================================================"
 	setupTopologies
 	if (( $? != 0 ));then
@@ -81,14 +67,15 @@ function runTestCase {
 
 	echo "Waiting 5 seconds before checking item count"
 	sleep 5
-	# because bidirectional
-	expectedCnt=$(( $CBWORKLOAD_COLLECTION_NUM_ITEMS*2 ))
-	checkItemCnt "C1" "B1" $expectedCnt
-	checkItemCnt "C2" "B2" $expectedCnt
+	checkItemCnt "C1" "B1" $CBWORKLOAD_COLLECTION_NUM_ITEMS
+	checkItemCnt "C2" "B2" $CBWORKLOAD_COLLECTION_NUM_ITEMS
 
+	# TODO - once resume is done, do a quicker pause
+	echo "Pausing replication"
+	pauseReplication "C1" "B1" "C2" "B2"
 	grepForPanics
-	checkBidirectionalChangesLeft
-	validateDataLoad
+	resumeReplication "C1" "B1" "C2" "B2"
+	grepForPanics
 
 	echo "============================================================================"
 	echo "PASSED"
