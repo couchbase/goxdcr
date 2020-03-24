@@ -146,6 +146,7 @@ type Client struct {
 	hdrBuf []byte
 
 	collectionsEnabled uint32
+	deadline           time.Time
 }
 
 var (
@@ -198,7 +199,11 @@ func (c *Client) SetReadDeadline(t time.Time) {
 }
 
 func (c *Client) SetDeadline(t time.Time) {
+	if t.Equal(c.deadline) {
+		return
+	}
 	c.conn.SetDeadline(t)
+	c.deadline = t
 }
 
 // Wrap an existing transport.
