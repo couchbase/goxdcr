@@ -712,11 +712,24 @@ func (a *CollectionsManifestAgent) GetSpecificSourceManifest(manifestVersion uin
 		return nil, parts.PartStoppedError
 	}
 
+	if manifestVersion == 0 {
+		return &defaultManifest, nil
+	}
+
 	a.srcMtx.RLock()
 
 	if manifestVersion == math.MaxUint64 {
 		defer a.srcMtx.RUnlock()
-		return a.sourceCache[a.lastSourcePull], nil
+		if a.lastSourcePull == 0 {
+			return &defaultManifest, nil
+		} else {
+			manifest, ok := a.sourceCache[a.lastSourcePull]
+			if !ok {
+				return nil, fmt.Errorf("Cannot find specific source manifest version %v", a.lastSourcePull)
+			} else {
+				return manifest, nil
+			}
+		}
 	}
 
 	var err error
@@ -745,12 +758,19 @@ func (a *CollectionsManifestAgent) GetSpecificTargetManifest(manifestVersion uin
 		return nil, parts.PartStoppedError
 	}
 
+	if manifestVersion == 0 {
+		return &defaultManifest, nil
+	}
+
 	a.tgtMtx.RLock()
 	defer a.tgtMtx.RUnlock()
 
 	var err error
 	if manifestVersion == math.MaxUint64 {
 		manifestVersion = a.lastTargetPull
+		if a.lastTargetPull == 0 {
+			return &defaultManifest, nil
+		}
 	}
 	manifest, ok := a.targetCache[manifestVersion]
 	if !ok {

@@ -126,7 +126,7 @@ func (router *Router) Forward(data interface{}) error {
 				return ErrorInvalidRoutingResult
 			}
 		}
-	} else if err == base.ErrorIgnoreRequest {
+	} else if err == base.ErrorRequestAlreadyIgnored || err == base.ErrorIgnoreRequest {
 		err = nil
 	}
 	return err

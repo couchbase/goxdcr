@@ -93,7 +93,7 @@ func (_m *ThroughSeqnoTrackerSvc) PrintStatusSummary() {
 	_m.Called()
 }
 
-// SetStartSeqno provides a mock function with given fields: vbno, seqno
-func (_m *ThroughSeqnoTrackerSvc) SetStartSeqno(vbno uint16, seqno uint64) {
-	_m.Called(vbno, seqno)
+// SetStartSeqno provides a mock function with given fields: vbno, seqno, manifestId
+func (_m *ThroughSeqnoTrackerSvc) SetStartSeqno(vbno uint16, seqno uint64, manifestId uint64) {
+	_m.Called(vbno, seqno, manifestId)
 }

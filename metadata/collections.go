@@ -973,11 +973,7 @@ type CollectionNamespaceList []*base.CollectionNamespace
 func (c CollectionNamespaceList) Len() int      { return len(c) }
 func (c CollectionNamespaceList) Swap(i, j int) { c[i], c[j] = c[j], c[i] }
 func (c CollectionNamespaceList) Less(i, j int) bool {
-	if c[i].ScopeName == c[j].ScopeName {
-		return c[i].CollectionName < c[j].CollectionName
-	} else {
-		return c[i].ScopeName < c[j].ScopeName
-	}
+	return (*(c[i])).LessThan(*(c[j]))
 }
 
 func SortCollectionsNamespaceList(list CollectionNamespaceList) CollectionNamespaceList {
@@ -1032,6 +1028,66 @@ func (c CollectionNamespaceList) Contains(namespace *base.CollectionNamespace) b
 	return false
 }
 
+// Caller should have called IsSame() before doing consolidate
+func (c *CollectionNamespaceList) Consolidate(other CollectionNamespaceList) {
+	aMissingAction := func(item *base.CollectionNamespace) {
+		*c = append(*c, item)
+	}
+
+	c.diffOrConsolidate(other, aMissingAction, nil /*bMissingAction*/)
+}
+
+func (c CollectionNamespaceList) Diff(other CollectionNamespaceList) (added, removed CollectionNamespaceList) {
+	aMissingAction := func(item *base.CollectionNamespace) {
+		added = append(added, item)
+	}
+
+	bMissingAction := func(item *base.CollectionNamespace) {
+		removed = append(removed, item)
+	}
+
+	c.diffOrConsolidate(other, aMissingAction, bMissingAction)
+	return
+}
+
+func (c *CollectionNamespaceList) diffOrConsolidate(other CollectionNamespaceList, aMissingAction, bMissingAction func(item *base.CollectionNamespace)) {
+	aList := SortCollectionsNamespaceList(*c)
+	bList := SortCollectionsNamespaceList(other)
+
+	var aIdx int
+	var bIdx int
+
+	// Note - c == aList in this case
+
+	for aIdx < len(aList) && bIdx < len(bList) {
+		if aList[aIdx].IsSameAs(*(bList[bIdx])) {
+			aIdx++
+			bIdx++
+		} else if aList[aIdx].LessThan(*(bList[bIdx])) {
+			// Blist does not have something aList have.
+			if bMissingAction != nil {
+				bMissingAction(aList[aIdx])
+			}
+			aIdx++
+		} else {
+			// Blist[bIdx] < aList[aIdx]
+			// B list has something aList does not have
+			if aMissingAction != nil {
+				aMissingAction(bList[bIdx])
+			}
+			bIdx++
+		}
+	}
+
+	for bIdx < len(bList) {
+		// The rest is all missing from A list
+		if aMissingAction != nil {
+			aMissingAction(bList[bIdx])
+		}
+		bIdx++
+	}
+}
+
 type collectionNsMetaObj struct {
 	SourceCollections CollectionNamespaceList `json:SourceCollections`
 	// keys are integers of the index above
@@ -1049,11 +1105,11 @@ func newCollectionNsMetaObj() *collectionNsMetaObj {
 // This means rest needs to do some gymanistics, instead of just simply checking for pointers
 type CollectionNamespaceMapping map[*base.CollectionNamespace]CollectionNamespaceList
 
-func (c CollectionNamespaceMapping) MarshalJSON() ([]byte, error) {
+func (c *CollectionNamespaceMapping) MarshalJSON() ([]byte, error) {
 	metaObj := newCollectionNsMetaObj()
 
 	var i uint64
-	for k, v := range c {
+	for k, v := range *c {
 		metaObj.SourceCollections = append(metaObj.SourceCollections, k)
 		metaObj.IndirectTargetMap[i] = v
 		i++
@@ -1085,17 +1141,17 @@ func (c *CollectionNamespaceMapping) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
-func (c CollectionNamespaceMapping) String() string {
+func (c *CollectionNamespaceMapping) String() string {
 	var buffer bytes.Buffer
-	for src, tgtList := range c {
-		buffer.WriteString(fmt.Sprintf("SOURCE ||Scope: %v Collection: %v|| -> %v\n", src.ScopeName, src.CollectionName, CollectionNamespaceList(tgtList).String()))
+	for src, tgtList := range *c {
+		buffer.WriteString(fmt.Sprintf("SOURCE ||Scope: %v Collection: %v|| -> TARGET(s) %v\n", src.ScopeName, src.CollectionName, CollectionNamespaceList(tgtList).String()))
 	}
 	return buffer.String()
 }
 
-func (c CollectionNamespaceMapping) Clone() (clone CollectionNamespaceMapping) {
+func (c *CollectionNamespaceMapping) Clone() (clone CollectionNamespaceMapping) {
 	clone = make(CollectionNamespaceMapping)
-	for k, v := range c {
+	for k, v := range *c {
 		srcClone := &base.CollectionNamespace{}
 		*srcClone = *k
 		clone[srcClone] = v.Clone()
@@ -1105,12 +1161,12 @@ func (c CollectionNamespaceMapping) Clone() (clone CollectionNamespaceMapping) {
 
 // The input "src" does not have to match the actual key pointer in the map, just the right matching values
 // Returns the srcPtr for referring to the exact tgtList
-func (c CollectionNamespaceMapping) Get(src *base.CollectionNamespace) (srcPtr *base.CollectionNamespace, tgt CollectionNamespaceList, exists bool) {
+func (c *CollectionNamespaceMapping) Get(src *base.CollectionNamespace) (srcPtr *base.CollectionNamespace, tgt CollectionNamespaceList, exists bool) {
 	if src == nil {
 		return
 	}
 
-	for k, v := range c {
+	for k, v := range *c {
 		if *k == *src {
 			// found
 			tgt = v
@@ -1122,7 +1178,7 @@ func (c CollectionNamespaceMapping) Get(src *base.CollectionNamespace) (srcPtr *
 	return
 }
 
-func (c CollectionNamespaceMapping) AddSingleMapping(src, tgt *base.CollectionNamespace) (alreadyExists bool) {
+func (c *CollectionNamespaceMapping) AddSingleMapping(src, tgt *base.CollectionNamespace) (alreadyExists bool) {
 	if src == nil || tgt == nil {
 		return
 	}
@@ -1133,7 +1189,7 @@ func (c CollectionNamespaceMapping) AddSingleMapping(src, tgt *base.CollectionNa
 		// Just use these as entries
 		var newList CollectionNamespaceList
 		newList = append(newList, tgt)
-		c[src] = newList
+		(*c)[src] = newList
 	} else {
 		// See if tgt already exists in the current list
 		if tgtList.Contains(tgt) {
@@ -1141,17 +1197,17 @@ func (c CollectionNamespaceMapping) AddSingleMapping(src, tgt *base.CollectionNa
 			return
 		}
 
-		c[srcPtr] = append(c[srcPtr], tgt)
+		(*c)[srcPtr] = append((*c)[srcPtr], tgt)
 	}
 	return
 }
 
 // Given a scope and collection, see if it exists as one of the targets in the mapping
-func (c CollectionNamespaceMapping) TargetNamespaceExists(checkNamespace *base.CollectionNamespace) bool {
+func (c *CollectionNamespaceMapping) TargetNamespaceExists(checkNamespace *base.CollectionNamespace) bool {
 	if checkNamespace == nil {
 		return false
 	}
-	for _, tgtList := range c {
+	for _, tgtList := range *c {
 		if tgtList.Contains(checkNamespace) {
 			return true
 		}
@@ -1160,10 +1216,10 @@ func (c CollectionNamespaceMapping) TargetNamespaceExists(checkNamespace *base.C
 }
 
 // Given a set of added scopesmap, return a subset of c that contains elements in this added
-func (c CollectionNamespaceMapping) GetSubsetBasedOnAddedTargets(added ScopesMap) (retMap CollectionNamespaceMapping) {
+func (c *CollectionNamespaceMapping) GetSubsetBasedOnAddedTargets(added ScopesMap) (retMap CollectionNamespaceMapping) {
 	retMap = make(CollectionNamespaceMapping)
 
-	for src, tgtList := range c {
+	for src, tgtList := range *c {
 		for _, tgt := range tgtList {
 			_, found := added.GetCollectionByNames(tgt.ScopeName, tgt.CollectionName)
 			if found {
@@ -1174,8 +1230,8 @@ func (c CollectionNamespaceMapping) GetSubsetBasedOnAddedTargets(added ScopesMap
 	return
 }
 
-func (c CollectionNamespaceMapping) IsSame(other CollectionNamespaceMapping) bool {
-	for src, tgtList := range c {
+func (c *CollectionNamespaceMapping) IsSame(other CollectionNamespaceMapping) bool {
+	for src, tgtList := range *c {
 		_, otherTgtList, exists := other.Get(src)
 		if !exists {
 			return false
@@ -1187,12 +1243,12 @@ func (c CollectionNamespaceMapping) IsSame(other CollectionNamespaceMapping) boo
 	return true
 }
 
-func (c CollectionNamespaceMapping) Delete(subset CollectionNamespaceMapping) (result CollectionNamespaceMapping) {
+func (c *CollectionNamespaceMapping) Delete(subset CollectionNamespaceMapping) (result CollectionNamespaceMapping) {
 	// Instead of deleting, just make a brand new map
 	result = make(CollectionNamespaceMapping)
 
 	// Subtract B from A
-	for aSrc, aTgtList := range c {
+	for aSrc, aTgtList := range *c {
 		_, bTgtList, exists := subset.Get(aSrc)
 		if !exists {
 			// No need to delete
@@ -1214,5 +1270,47 @@ func (c CollectionNamespaceMapping) Delete(subset CollectionNamespaceMapping) (r
 		result[aSrc] = newList
 	}
 
+	return
+}
+
+func (c *CollectionNamespaceMapping) Consolidate(other CollectionNamespaceMapping) {
+	for otherSrc, otherTgtList := range other {
+		srcPtr, tgtList, exists := c.Get(otherSrc)
+		if !exists {
+			(*c)[otherSrc] = otherTgtList.Clone()
+		} else if !tgtList.IsSame(otherTgtList) {
+			tgtList.Consolidate(otherTgtList)
+			(*c)[srcPtr] = tgtList
+		}
+	}
+}
+
+func (c *CollectionNamespaceMapping) Diff(other CollectionNamespaceMapping) (added, removed CollectionNamespaceMapping) {
+	added = make(CollectionNamespaceMapping)
+	removed = make(CollectionNamespaceMapping)
+	// First, populated "removed"
+	for src, tgtList := range *c {
+		_, oTgtList, exists := other.Get(src)
+		if !exists {
+			removed[src] = tgtList
+		} else if !tgtList.IsSame(oTgtList) {
+			listAdded, listRemoved := tgtList.Diff(oTgtList)
+			for _, addedNamespace := range listAdded {
+				added.AddSingleMapping(src, addedNamespace)
+			}
+			for _, removedNamespace := range listRemoved {
+				removed.AddSingleMapping(src, removedNamespace)
+			}
+		}
+	}
+
+	// Then populate added
+	for oSrc, oTgtList := range other {
+		_, _, exists := c.Get(oSrc)
+		if !exists {
+			added[oSrc] = oTgtList
+			// No else - any potential intersections would have been captured above
+		}
+	}
 	return
 }

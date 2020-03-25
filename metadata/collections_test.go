@@ -485,3 +485,56 @@ func TestMarshalUnmarshalCollectionsNamespaceMapping(t *testing.T) {
 	assert.True(checkMap.IsSame(nsMap))
 	fmt.Println("============== Test case end: TestMarshalUnmarshalCollectionsNamespaceMapping =================")
 }
+
+func TestCollectionsNsConsolidate(t *testing.T) {
+	assert := assert.New(t)
+	fmt.Println("============== Test case start: TestCollectionsNsConsolidate =================")
+
+	nsMap := make(CollectionNamespaceMapping)
+	defaultNamespace := base.CollectionNamespace{"_default", "_default"}
+	c1Ns := base.CollectionNamespace{"C1", "C1"}
+	c2Ns := base.CollectionNamespace{"C2", "C2"}
+	c3Ns := base.CollectionNamespace{"C3", "C3"}
+	var nslist CollectionNamespaceList
+	nslist = append(nslist, &c1Ns)
+	nslist = append(nslist, &c3Ns)
+	nsMap[&defaultNamespace] = nslist
+	assert.Equal(1, len(nsMap))
+	assert.Equal(2, len(nsMap[&defaultNamespace]))
+
+	nsMap2 := make(CollectionNamespaceMapping)
+	var nslist2 CollectionNamespaceList
+	nslist2 = append(nslist2, &c2Ns)
+	nslist2 = append(nslist2, &c3Ns)
+	nsMap2[&defaultNamespace] = nslist2
+	var nslist3 CollectionNamespaceList
+	nslist3 = append(nslist3, &defaultNamespace)
+	nsMap2[&c1Ns] = nslist3
+	assert.Equal(2, len(nsMap2))
+	assert.Equal(2, len(nsMap2[&defaultNamespace]))
+	assert.Equal(1, len(nsMap2[&c1Ns]))
+
+	//nsmap1
+	//SOURCE ||Scope: _default Collection: _default|| -> |Scope: C1 Collection: C1| |Scope: C3 Collection: C3| |Scope: C2 Collection: C2|
+	//SOURCE ||Scope: C1 Collection: C1|| -> |Scope: _default Collection: _default|
+	//
+	//nsmap2
+	//SOURCE ||Scope: _default Collection: _default|| -> |Scope: C2 Collection: C2| |Scope: C3 Collection: C3|
+	//SOURCE ||Scope: C1 Collection: C1|| -> |Scope: _default Collection: _default|
+	//
+	//Added:
+	//
+	//Removed:
+	//SOURCE ||Scope: _default Collection: _default|| -> |Scope: C1 Collection: C1|
+
+	nsMap.Consolidate(nsMap2)
+	assert.Equal(2, len(nsMap))
+	assert.Equal(3, len(nsMap[&defaultNamespace]))
+	assert.Equal(1, len(nsMap[&c1Ns]))
+
+	added, removed := nsMap.Diff(nsMap2)
+	assert.Equal(0, len(added))
+	assert.Equal(1, len(removed))
+	assert.Equal(1, len(removed[&defaultNamespace]))
+	fmt.Println("============== Test case end: TestCollectionsNsConsolidate =================")
+}

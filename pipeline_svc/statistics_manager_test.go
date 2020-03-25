@@ -85,7 +85,7 @@ func setupBoilerPlate() (*log.CommonLogger,
 	remoteClusterRef := &metadata.RemoteClusterReference{}
 
 	dcpNozzle := parts.NewDcpNozzle(testDCPPart, "sourceBucket", "targetBucket", vbs, xdcrTopologySvc,
-		false /*isCapi*/, log.DefaultLoggerContext, utils)
+		false /*isCapi*/, log.DefaultLoggerContext, utils, nil /*func*/)
 
 	connector := &common.Connector{}
 

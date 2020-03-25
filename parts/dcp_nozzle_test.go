@@ -38,7 +38,7 @@ func setupBoilerPlate() (*service_def.XDCRCompTopologySvc,
 	vblist = append(vblist, 1)
 	vblist = append(vblist, 5)
 	nozzle := NewDcpNozzle("testNozzle", "source", "target", vblist, xdcrTopologyMock,
-		false, log.DefaultLoggerContext, utilitiesMock)
+		false, log.DefaultLoggerContext, utilitiesMock, nil /*specificManifestGetter*/)
 
 	// base VBTimeStamp
 	vbTimestamp := &base.VBTimestamp{Vbno: 0, Seqno: 1000}

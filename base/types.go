@@ -108,6 +108,8 @@ type ErrorInfo struct {
 	ErrorMsg string
 }
 
+// These should be RO once they are created
+// because they are potentially used as constant keys for CollectionNamespaceMapping
 type CollectionNamespace struct {
 	ScopeName      string
 	CollectionName string
@@ -115,6 +117,18 @@ type CollectionNamespace struct {
 
 func (c *CollectionNamespace) IsDefault() bool {
 	return c.ScopeName == DefaultScopeCollectionName && c.CollectionName == DefaultScopeCollectionName
+}
+
+func (c CollectionNamespace) LessThan(other CollectionNamespace) bool {
+	if c.ScopeName == other.ScopeName {
+		return c.CollectionName < other.CollectionName
+	} else {
+		return c.ScopeName < other.ScopeName
+	}
+}
+
+func (c CollectionNamespace) IsSameAs(other CollectionNamespace) bool {
+	return c.ScopeName == other.ScopeName && c.CollectionName == other.CollectionName
 }
 
 type WrappedUprEvent struct {

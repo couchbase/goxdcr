@@ -278,6 +278,35 @@ func (c *CollectionsRouter) IsRunning() bool {
 	return atomic.LoadUint32(&c.started) != 0
 }
 
+func (c *CollectionsRouter) UpdateBrokenMappings(brokenMappings metadata.CollectionNamespaceMapping) {
+	if !c.IsRunning() || len(brokenMappings) == 0 {
+		return
+	}
+
+	c.brokenMapMtx.Lock()
+	defer c.brokenMapMtx.Unlock()
+	c.brokenMapping = brokenMappings
+}
+
+func (c *CollectionsRouter) UpdateTargetManifest(targetManifestId uint64) {
+	if !c.IsRunning() {
+		return
+	}
+
+	manifest, err := c.collectionsManifestSvc.GetSpecificTargetManifest(c.spec, targetManifestId)
+	if err != nil {
+		err = fmt.Errorf("Collections Router %v error - unable to find last known target manifest version %v from collectionsManifestSvc - err: %v",
+			c.spec.Id, targetManifestId, err)
+		// TODO MB-38445
+		c.fatalErrorFunc(err)
+		return
+	}
+
+	c.lastKnownManifestMtx.Lock()
+	c.lastKnownManifest = manifest
+	c.lastKnownManifestMtx.Unlock()
+}
+
 // No-Concurrent call
 func (c *CollectionsRouter) RouteReqToLatestTargetManifest(namespace *base.CollectionNamespace) (colId, manifestId uint64, err error) {
 	if !c.IsRunning() {
@@ -472,6 +501,18 @@ func (c CollectionsRoutingMap) startOrStopAll(start bool) error {
 	}
 }
 
+func (c CollectionsRoutingMap) UpdateBrokenMappings(brokenMaps metadata.CollectionNamespaceMapping) {
+	for _, collectionsRouter := range c {
+		collectionsRouter.UpdateBrokenMappings(brokenMaps)
+	}
+}
+
+func (c CollectionsRoutingMap) UpdateTargetManifestId(targetManifestId uint64) {
+	for _, collectionsRouter := range c {
+		collectionsRouter.UpdateTargetManifest(targetManifestId)
+	}
+}
+
 /**
  * Note
  * A router (for now) is created per source nozzle.
@@ -544,7 +585,6 @@ func NewRouter(id string, spec *metadata.ReplicationSpecification,
 		(utilities.RecycleObjFunc)(router.recycleDataObj))
 
 	routingUpdater := func(info CollectionsRoutingInfo) {
-		// TODO: MB-38021 - next step is to handle these events in lock-step
 		routingEvent := common.NewEvent(common.BrokenRoutingUpdateEvent, info, router, nil, nil)
 		router.RaiseEvent(routingEvent)
 	}
@@ -759,6 +799,7 @@ func (router *Router) RouteCollection(data interface{}, partId string) error {
 					router.Logger().Debugf("Request map is already marked broken for %v. Ready to be ignored", string(mcRequest.Req.Key))
 				}
 				router.collectionsRouting[partId].ignoreDataFunc(mcRequest)
+				err = base.ErrorRequestAlreadyIgnored
 			} else {
 				router.collectionsRouting[partId].recordUnroutableRequest(mcRequest)
 				err = base.ErrorIgnoreRequest
@@ -908,6 +949,16 @@ func (router *Router) UpdateSettings(settings metadata.ReplicationSettingsMap) e
 			}
 			atomic.StoreUint64(&router.lastSuccessfulManifestId, maxManifestId)
 		}
+	}
+
+	brokenMappings, ok := settings[metadata.BrokenMappings].(metadata.CollectionNamespaceMapping)
+	if ok && len(brokenMappings) > 0 && router.Router.IsStartable() {
+		router.collectionsRouting.UpdateBrokenMappings(brokenMappings)
+	}
+
+	targetManifestId, ok := settings[metadata.TargetManifestId].(uint64)
+	if ok && targetManifestId > 0 && router.Router.IsStartable() {
+		router.collectionsRouting.UpdateTargetManifestId(targetManifestId)
 	}
 
 	if len(errMap) > 0 {

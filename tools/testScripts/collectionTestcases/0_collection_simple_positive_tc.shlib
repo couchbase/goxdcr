@@ -39,38 +39,29 @@ declare -a collection1Arr=("col1" "col2")
 declare -a collection2Arr=("col1" "col2" "col3")
 SCOPE_NAME_COLLECTION_MAP=(["S1"]=${collection1Arr[@]} ["S2"]=${collection2Arr[@]} ["S3"]=${collection2Arr[@]})
 
-
 function runDataLoad {
-	# Run CBWorkloadgen in parallel
 	echo "RUNNING dataload..."
-	runCbWorkloadGenCollection "C1" "B1" "S1" "col1" &
-	runCbWorkloadGenCollection "C2" "B2" "S1" "col1" &
-	waitForBgJobs
+	runCbWorkloadGenCollection "C1" "B1" "S1" "col1"
 }
 
 function validateDataLoad {
 	echo "VALIDATING Data..."
 	validateCbWorkloadGenCollection "C2" "B2" "S1" "col1" "C1" "B1" "S1" "col1"
-	validateCbWorkloadGenCollection "C1" "B1" "S1" "col1" "C2" "B2" "S1" "col1"
-
 	checkBidirectionalChangesLeft
-	expectedCnt=$(( $CBWORKLOAD_COLLECTION_NUM_ITEMS*2 ))
-	checkItemCnt "C1" "B1" $expectedCnt
-	checkItemCnt "C2" "B2" $expectedCnt
+	checkItemCnt "C1" "B1" $CBWORKLOAD_COLLECTION_NUM_ITEMS
+	checkItemCnt "C2" "B2" $CBWORKLOAD_COLLECTION_NUM_ITEMS
 }
 
 function runTestCase {
 	echo "============================================================================"
-	echo "Running simple collection bidirectional test case"
+	echo "Running simple collection unidirectional test case"
 	echo "============================================================================"
 	setupTopologies
 	if (( $? != 0 ));then
 		exit $?
 	fi
 	# Wait for vbuckets and all the other things to propagate before XDCR provisioning
-	# TODO - MB-38021 - shorten this back to 2 seconds once checkpointing is completed
-	echo "MB-38021 - sleeping 20 seconds for vbucket distribution"
-	sleep 20
+	sleep 5
 	createRemoteClusterReference "C1" "C2"
 	createRemoteClusterReference "C2" "C1"
 	sleep 1
@@ -81,13 +72,13 @@ function runTestCase {
 
 	echo "Waiting 5 seconds before checking item count"
 	sleep 5
-	# because bidirectional
-	expectedCnt=$(( $CBWORKLOAD_COLLECTION_NUM_ITEMS*2 ))
-	checkItemCnt "C1" "B1" $expectedCnt
-	checkItemCnt "C2" "B2" $expectedCnt
+	checkItemCnt "C1" "B1" $CBWORKLOAD_COLLECTION_NUM_ITEMS
+	checkItemCnt "C2" "B2" $CBWORKLOAD_COLLECTION_NUM_ITEMS
+	
+	checkUnidirectionalChangesLeft
 
-	grepForPanics
-	checkBidirectionalChangesLeft
+	checkUnidirectionalChangesLeft
+
 	validateDataLoad
 
 	echo "============================================================================"
@@ -95,4 +86,5 @@ function runTestCase {
 	echo "============================================================================"
         cleanupBucketReplications
         cleanupBuckets
+        cleanupRemoteClusterRefs
 }

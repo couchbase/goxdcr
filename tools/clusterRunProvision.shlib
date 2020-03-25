@@ -459,8 +459,17 @@ function createReplicationInternal {
 	local sourceID=$1
 	local targetID=$2
 
-	replicationID=`$CURL -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:${NODEPORTS[$sourceID]}/controller/createReplication -d fromBucket=${BUCKETNAMES[$sourceID]} -d toCluster=${CLUSTERNAMES[$targetID]} -d toBucket=${BUCKETNAMES[$targetID]} -d replicationType=continuous -d checkpointInterval=60 -d statsInterval=500`
-	echo "$replicationID"
+	# Under stressed systems, possible that replication creation could fail
+	for (( i=0; $i < 3; i=$(($i+1)) ))
+	do
+		replicationID=`$CURL -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:${NODEPORTS[$sourceID]}/controller/createReplication -d fromBucket=${BUCKETNAMES[$sourceID]} -d toCluster=${CLUSTERNAMES[$targetID]} -d toBucket=${BUCKETNAMES[$targetID]} -d replicationType=continuous -d checkpointInterval=60 -d statsInterval=500`
+		if (( $? == 0 ));then
+			echo "$replicationID"
+		elif (( $i != 2 ));then
+			echo "Replication creation returned error code. Will retry in 10 seconds..."
+			sleep 10
+		fi
+	done
 }
 
 # Check if jq is present. It is used for parsing JSON in a bash environment
@@ -542,20 +551,40 @@ function createBucketReplication {
 	local sourcePort=${CLUSTER_NAME_PORT_MAP[$sourceCluster]:-}
 	getBucketReplPropertiesRESTString
 
-	repId=`$CURL -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$sourcePort/controller/createReplication -d fromBucket=$sourceBucket -d toCluster=$targetCluster -d toBucket=$targetBucket "${getBucketReplOutArr[@]}"`
-
-	if (( `checkJQ` == 0 ));then
-		repIdReal=`getKeyUsingJQ $repId '.id'`
-		if [[ "$repIdReal" == "" ]];then
-			echo "Captured replicationID: $repId"
-		else
-			restFriendlyReplID=`echo $repIdReal | sed 's|/|%2F|g'`
-			echo "ReplicationID: $repIdReal Rest-FriendlyID: $restFriendlyReplID"
-			insertBucketReplIntoExportMap "$sourceCluster" "$sourceBucket" "$targetCluster" "$targetBucket" "$restFriendlyReplID"
+	for (( i=0; $i < 3; i=$(($i+1)) ))
+	do
+		repId=`$CURL -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$sourcePort/controller/createReplication -d fromBucket=$sourceBucket -d toCluster=$targetCluster -d toBucket=$targetBucket "${getBucketReplOutArr[@]}"`
+		if (( (( $? == 0 )) && (( `echo "$repId" | grep -c error` == 0 )) ));then
+			if (( `checkJQ` == 0 ));then
+				repIdReal=`getKeyUsingJQ $repId '.id'`
+				if [[ "$repIdReal" == "" ]];then
+					echo "Captured replicationID: $repId"
+				else
+					restFriendlyReplID=`echo $repIdReal | sed 's|/|%2F|g'`
+					echo "ReplicationID: $repIdReal Rest-FriendlyID: $restFriendlyReplID"
+					insertBucketReplIntoExportMap "$sourceCluster" "$sourceBucket" "$targetCluster" "$targetBucket" "$restFriendlyReplID"
+				fi
+			else
+				echo "Captured replicationID: $repId"
+			fi
+			return 0
+		elif (( $i != 2 ));then
+			echo "Replication creation returned error code. Will retry in 10 seconds..."
+			sleep 10
 		fi
-	else
-		echo "Captured replicationID: $repId"
-	fi
+	done
+}
+
+function cleanupRemoteClusterRefs {
+	for replKey in "${!BUCKET_REPL_EXPORT_MAP[@]}"
+	do
+		local sourceCluster=`echo "$replKey" | cut -d, -f1`
+		local sourcePort=${CLUSTER_NAME_PORT_MAP[$sourceCluster]:-}
+		local targetCluster=`echo "$replKey" | cut -d, -f3`
+
+		echo "Deleting remote cluster reference $targetCluster on cluster $sourceCluster"
+		$CURL -X DELETE -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$sourcePort/pools/default/remoteClusters/$targetCluster > /dev/null 2>&1
+	done
 }
 
 function cleanupBucketReplications {
@@ -671,9 +700,18 @@ function runCbWorkloadGenBucket {
 		return 1
 	fi
 
-	echo "Running cbworkloadGen on $clusterName bucket $bucketName"
-	# Run 10000 items of json documents with set/get ratio of 100%
-	$workloadGen -i 10000 -j -r 1 -n 127.0.0.1:$port -b $bucketName -u $DEFAULT_ADMIN -p $DEFAULT_PW --prefix=xdcrProv_$clusterName
+	for (( i=0; i < 3; i=$(( $i+1 ))))
+	do
+		echo "Running cbworkloadGen on $clusterName bucket $bucketName"
+		# Run 10000 items of json documents with set/get ratio of 100%
+		$workloadGen -i 10000 -j -r 1 -n 127.0.0.1:$port -b $bucketName -u $DEFAULT_ADMIN -p $DEFAULT_PW --prefix=xdcrProv_$clusterName
+		if (( $? == 0 ));then
+			return 0
+		elif (( $? != 0 )) && (( $i != 2 ));then
+			echo "Workloadgen resulted in error. Possibly system is loaded. Retry in 10 seconds"
+			sleep 10
+		fi
+	done
 }
 
 # Very basic way of validation - given a target cluster, simply write the same docs naming convention as the target document
@@ -768,9 +806,18 @@ function runCbWorkloadGenCollection {
 		return 1
 	fi
 
-	echo "Running cbworkloadGen on $clusterName bucket $bucketName scope: $scopeName collection $collectionName (ID: $collectionId)"
-	# Run 10000 items of json documents with set/get ratio of 100%
-	$workloadGen -i $CBWORKLOAD_COLLECTION_NUM_ITEMS  -j -r 1 -n 127.0.0.1:$port -b $bucketName -u $DEFAULT_ADMIN -p $DEFAULT_PW --prefix=xdcrProv_$clusterName -c $collectionId
+	for (( i=0; i < 3; i=$(( $i+1 ))))
+	do
+		echo "Running cbworkloadGen on $clusterName bucket $bucketName scope: $scopeName collection $collectionName (ID: $collectionId)"
+		# Run 10000 items of json documents with set/get ratio of 100%
+		$workloadGen -i $CBWORKLOAD_COLLECTION_NUM_ITEMS  -j -r 1 -n 127.0.0.1:$port -b $bucketName -u $DEFAULT_ADMIN -p $DEFAULT_PW --prefix=xdcrProv_$clusterName -c $collectionId
+		if (( $? == 0 ));then
+			return 0
+		elif (( $? != 0 )) && (( $i != 2 ));then
+			echo "Workloadgen resulted in error. Possibly system is loaded. Retry in 10 seconds"
+			sleep 10
+		fi
+	done
 }
 
 function waitForBgJobs {
@@ -988,4 +1035,56 @@ function resumeReplication {
 
 	echo "Resuming replication $restID"
 	$CURL -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:${sourcePort}/settings/replications/${restID} -d pauseRequested=false > /dev/null 2>&1
+}
+
+declare INTERNAL_SETTINGS_REST_PATH="xdcr/internalSettings"
+
+function listInternalSettings {
+	local clusterName=$1
+	local jqStr
+	jqLocation=`which jq`
+	if (( $? == 0 ));then
+		jqStr="$jqLocation"
+	fi
+	importProvisionedConfig
+
+	local port=${CLUSTER_NAME_XDCR_PORT_MAP[$clusterName]:-}
+	if [[ -z "$port" ]];then
+		echo "Invalid clustername $clusterName"
+		return 1
+	fi
+
+	if [[ ! -z "$jqStr" ]];then
+		$CURL -X GET -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$port/$INTERNAL_SETTINGS_REST_PATH | $jqLocation
+	else
+		$CURL -X GET -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$port/$INTERNAL_SETTINGS_REST_PATH
+	fi
+}
+
+function setInternalSettings {
+	local clusterName=$1
+	local -a keyVal=("${@:2}")
+
+	local jqStr
+	jqLocation=`which jq`
+	if (( $? == 0 ));then
+		jqStr="$jqLocation"
+	fi
+	importProvisionedConfig
+
+	local port=${CLUSTER_NAME_XDCR_PORT_MAP[$clusterName]:-}
+	if [[ -z "$port" ]];then
+		echo "Invalid clustername $clusterName"
+		return 1
+	fi
+
+	# Because to do multiple -d keyvals, it's better to pass in a single array
+	local -a curlMultiArr
+	for kv in "${keyVal[@]}"
+	do
+		curlMultiArr+=(" -d ")
+		curlMultiArr+=("$kv")
+	done
+
+	$CURL -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$port/$INTERNAL_SETTINGS_REST_PATH ${curlMultiArr[@]} > /dev/null 2>&1
 }

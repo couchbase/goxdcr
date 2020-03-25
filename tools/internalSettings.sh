@@ -38,47 +38,6 @@ $0 [-h] -l | -g <ClusterName> | -s <ClusterName> -v "key=val" [-v... ]
 EOF
 }
 
-declare REST_PATH="xdcr/internalSettings"
-
-function listInternalSettings {
-	local port=${CLUSTER_NAME_XDCR_PORT_MAP[$clusterName]:-}
-	if [[ -z "$port" ]];then
-		echo "Invalid clustername $clusterName"
-		exit 1
-	fi
-	if [[ ! -z "$jqStr" ]];then
-		$CURL -X GET -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$port/$REST_PATH | $jqLocation
-	else
-		$CURL -X GET -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$port/$REST_PATH
-	fi
-}
-
-function setInternalSettings {
-	local port=${CLUSTER_NAME_XDCR_PORT_MAP[$clusterName]:-}
-	if [[ -z "$port" ]];then
-		echo "Invalid clustername $clusterName"
-		exit 1
-	fi
-
-	# Because to do multiple -d keyvals, it's better to pass in a single array
-	local -a curlMultiArr
-	for kv in "${keyVal[@]}"
-	do
-		curlMultiArr+=(" -d ")
-		curlMultiArr+=("$kv")
-	done
-
-	if [[ ! -z "$jqStr" ]];then
-		$CURL -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$port/$REST_PATH ${curlMultiArr[@]} | $jqLocation
-	else
-		$CURL -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$port/$REST_PATH ${curlMultiArr[@]}
-	fi
-
-	# sometimes setting doesn't return output always, so wait and then re-list
-	sleep 1
-	listInternalSettings
-}
-
 declare mode="None"
 declare clusterName
 declare -a keyVal
@@ -88,6 +47,17 @@ jqLocation=`which jq`
 if (( $? == 0 ));then
 	jqStr="$jqLocation"
 fi
+
+function ListInternalSettings {
+	listInternalSettings "$clusterName"
+}
+
+function SetInternalSettings {
+	setInternalSettings "$clusterName" "${keyVal[@]}"
+	# sometimes setting doesn't return output always, so wait and then re-list
+	sleep 1
+	listInternalSettings "$clusterName"
+}
 
 while getopts ":hlg:s:v:" opt; do
   case ${opt} in
@@ -124,7 +94,7 @@ done
 if [[ "$mode" == "None" ]];then
 	usage
 elif [[ "$mode" == "Get" ]];then
-	listInternalSettings
+	ListInternalSettings
 elif [[ "$mode" == "Set" ]];then
-	setInternalSettings
+	SetInternalSettings
 fi

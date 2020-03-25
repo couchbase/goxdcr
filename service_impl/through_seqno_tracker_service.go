@@ -724,10 +724,11 @@ func (tsTracker *ThroughSeqnoTrackerSvc) getThroughSeqnos(executor_id int, listO
 	}
 }
 
-func (tsTracker *ThroughSeqnoTrackerSvc) SetStartSeqno(vbno uint16, seqno uint64) {
+func (tsTracker *ThroughSeqnoTrackerSvc) SetStartSeqno(vbno uint16, seqno, manifestId uint64) {
 	tsTracker.validateVbno(vbno, "setStartSeqno")
 	obj, _ := tsTracker.through_seqno_map[vbno]
 	obj.SetSeqno(seqno)
+	tsTracker.addSystemSeqno(vbno, seqno, manifestId)
 }
 
 func (tsTracker *ThroughSeqnoTrackerSvc) validateVbno(vbno uint16, caller string) {

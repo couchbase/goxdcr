@@ -385,8 +385,14 @@ func (xdcrf *XDCRFactory) constructSourceNozzles(spec *metadata.ReplicationSpeci
 			// construct dcpNozzles
 			// partIds of the dcpNozzle nodes look like "dcpNozzle_$kvaddr_1"
 			id := xdcrf.partId(DCP_NOZZLE_NAME_PREFIX, spec.Id, kvaddr, i)
+
+			getterFunc := func(manifestUid uint64) (*metadata.CollectionsManifest, error) {
+				return xdcrf.collectionsManifestSvc.GetSpecificSourceManifest(spec, manifestUid)
+			}
+
 			dcpNozzle := parts.NewDcpNozzle(id,
-				spec.SourceBucketName, spec.TargetBucketName, vbList, xdcrf.xdcr_topology_svc, isCapiReplication, logger_ctx, xdcrf.utils)
+				spec.SourceBucketName, spec.TargetBucketName, vbList, xdcrf.xdcr_topology_svc, isCapiReplication, logger_ctx, xdcrf.utils,
+				service_def.CollectionsManifestReqFunc(getterFunc))
 			sourceNozzles[dcpNozzle.Id()] = dcpNozzle
 			xdcrf.logger.Debugf("Constructed source nozzle %v with vbList = %v \n", dcpNozzle.Id(), vbList)
 		}
@@ -913,6 +919,17 @@ func (xdcrf *XDCRFactory) constructSettingsForRouter(pipeline common.Pipeline, s
 	if ok {
 		routerSettings[parts.DCP_VBTimestamp] = vbTimestamp
 	}
+
+	brokenMappings, ok := settings[metadata.BrokenMappings]
+	if ok {
+		routerSettings[metadata.BrokenMappings] = brokenMappings
+	}
+
+	targetManifestId, ok := settings[metadata.TargetManifestId]
+	if ok {
+		routerSettings[metadata.TargetManifestId] = targetManifestId
+	}
+
 	return routerSettings, nil
 }
 

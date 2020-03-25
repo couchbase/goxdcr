@@ -349,6 +349,12 @@ type DcpNozzle struct {
 	// DCP will only bump the manifest (via a system event) if all older manifest has been sent
 	vbHighestManifestUidArray [base.NumberOfVbs]uint64
 
+	// When multiple SetTimestamps are called, this is used to ensure a specific version of the manifest
+	// is only validated once
+	setTsCheckedManifests map[uint64]bool
+	setTsCheckedMtx       sync.Mutex
+	setTsCleanOnce        sync.Once
+
 	collectionEnabled uint32
 
 	// Datapools for reusing memory
@@ -362,7 +368,8 @@ func NewDcpNozzle(id string,
 	xdcr_topology_svc service_def.XDCRCompTopologySvc,
 	is_capi bool,
 	logger_context *log.LoggerContext,
-	utilsIn utilities.UtilsIface) *DcpNozzle {
+	utilsIn utilities.UtilsIface,
+	specificManifestGetter service_def.CollectionsManifestReqFunc) *DcpNozzle {
 
 	part := NewAbstractPartWithLogger(id, log.NewLogger("DcpNozzle", logger_context))
 
@@ -386,6 +393,8 @@ func NewDcpNozzle(id string,
 		dcpPrioritySetting:       mcc.PriorityDisabled,
 		wrappedUprPool:           utilities.NewWrappedUprPool(),
 		collectionNamespacePool:  utilities.NewCollectionNamespacePool(),
+		setTsCheckedManifests:    make(map[uint64]bool),
+		specificManifestGetter:   specificManifestGetter,
 	}
 
 	for _, vbno := range vbnos {
@@ -956,11 +965,14 @@ func (dcp *DcpNozzle) processData() (err error) {
 						}
 						wrappedUpr, err := dcp.composeWrappedUprEvent(m)
 						if err != nil {
+							dcp.handleGeneralError(err)
+							dcp.Logger().Errorf("Composing wrappedUpr had error %v", err)
 							return err
 						}
 						// forward mutation downstream through connector
 						if err := dcp.Connector().Forward(wrappedUpr); err != nil {
 							dcp.handleGeneralError(err)
+							dcp.Logger().Errorf("Connector forward had error %v", err)
 							goto done
 						}
 						dcp.incCounterSent()
@@ -1014,8 +1026,6 @@ func (dcp *DcpNozzle) composeWrappedUprEvent(m *mcc.UprEvent) (*base.WrappedUprE
 	var err error
 
 	// VB events comes in sequence order, so the latest manifest must have the info for this collection data
-	// TODO - MB-38021 - when checkpoints are loaded, the vbHighestManifestUidArray will need to be updated too
-	// This is why VBUCKET errors are not successfully handled right now
 	topManifestUid := atomic.LoadUint64(&dcp.vbHighestManifestUidArray[m.VBucket])
 	manifest, err := dcp.specificManifestGetter(topManifestUid)
 	if err != nil {
@@ -1214,7 +1224,12 @@ func (dcp *DcpNozzle) startUprStreamInner(vbno uint16, vbts *base.VBTimestamp, v
 				if !dcp.CollectionEnabled() {
 					err = dcp.uprFeed.UprRequestStream(vbno, version, flags, vbts.Vbuuid, vbts.Seqno, seqEnd, vbts.SnapshotStart, vbts.SnapshotEnd)
 				} else {
-					err = dcp.uprFeed.UprRequestCollectionsStream(vbno, version, flags, vbts.Vbuuid, vbts.Seqno, seqEnd, vbts.SnapshotStart, vbts.SnapshotEnd, nil)
+					var filter *mcc.CollectionsFilter
+					if vbts.Seqno > 0 {
+						// Only need filter if it is resuming from a checkpoint
+						filter = &mcc.CollectionsFilter{UseManifestUid: true, ManifestUid: vbts.ManifestIDs.SourceManifestId}
+					}
+					err = dcp.uprFeed.UprRequestCollectionsStream(vbno, version, flags, vbts.Vbuuid, vbts.Seqno, seqEnd, vbts.SnapshotStart, vbts.SnapshotEnd, filter)
 				}
 				if err != nil {
 					err = fmt.Errorf("UprRequestStream failed for vbno=%v with err=%v", vbno, err)
@@ -1283,6 +1298,14 @@ func (dcp *DcpNozzle) nonInitDcpStreams() []uint16 {
 
 func nonInitStateCheck(state DcpStreamState) bool {
 	return state == Dcp_Stream_NonInit
+}
+
+func (dcp *DcpNozzle) activeStreams() []uint16 {
+	return dcp.getDcpStreams(activeStateCheck)
+}
+
+func activeStateCheck(state DcpStreamState) bool {
+	return state == Dcp_Stream_Active
 }
 
 func (dcp *DcpNozzle) inactiveDcpStreamsWithState() map[uint16]DcpStreamState {
@@ -1390,11 +1413,49 @@ func (dcp *DcpNozzle) setTS(vbno uint16, ts *base.VBTimestamp, need_lock bool) e
 			defer ts_entry.lock.Unlock()
 		}
 		ts_entry.ts = ts
+		// If the set op is successsful (which it is here), then ensure that the corresponding sourcemanifestID
+		// is also restored. This ensures that when dcp sends things down, DCP can lookup the right manifest
+		// as the older source manifests are not to be sent
+		atomic.StoreUint64(&dcp.vbHighestManifestUidArray[vbno], ts.ManifestIDs.SourceManifestId)
+
+		if dcp.setTSNeedToCheckManifest(ts.ManifestIDs.SourceManifestId) {
+			dcp.childrenWaitGrp.Add(1)
+			go dcp.checkManifestExistence(ts.ManifestIDs.SourceManifestId)
+		}
 		return nil
 	} else {
 		err := fmt.Errorf("setTS failed: vbno=%v is not tracked in cur_ts map", vbno)
 		dcp.handleGeneralError(err)
 		return err
+	}
+}
+
+func (dcp *DcpNozzle) setTSNeedToCheckManifest(manifestId uint64) bool {
+	var needToCheckManifest bool
+	if manifestId > 0 {
+		dcp.setTsCheckedMtx.Lock()
+		_, exists := dcp.setTsCheckedManifests[manifestId]
+		if !exists {
+			needToCheckManifest = true
+			dcp.setTsCheckedManifests[manifestId] = true
+		}
+		dcp.setTsCheckedMtx.Unlock()
+	}
+	return needToCheckManifest
+}
+
+// Can be run lazily in the background
+// When manifestId is not 0, it means that DCP is resuming from a checkpoint
+// Collections Manifest Service should have kept the actual manifest associated with checkpoints
+// If it is not there, it's a problem
+func (dcp *DcpNozzle) checkManifestExistence(manifestId uint64) {
+	defer dcp.childrenWaitGrp.Done()
+
+	_, err := dcp.specificManifestGetter(manifestId)
+	if err != nil {
+		// TODO MB-38445
+		err = fmt.Errorf("DCP cannot find source manifest version %v given a setTS operation - %v", manifestId, err)
+		dcp.handleGeneralError(err)
 	}
 }
 
@@ -1510,6 +1571,7 @@ func (dcp *DcpNozzle) isFeedClosed() bool {
  */
 func (dcp *DcpNozzle) checkInactiveUprStreams_once() error {
 	streams_inactive := dcp.initedButInactiveDcpStreams()
+	streams_active := dcp.activeStreams()
 	if len(streams_inactive) > 0 {
 		updated_streams_inactive_count := atomic.AddUint32(&dcp.counter_streams_inactive, 1)
 		dcp.Logger().Infof("%v incrementing counter for inactive streams to %v\n", dcp.Id(), updated_streams_inactive_count)
@@ -1522,6 +1584,12 @@ func (dcp *DcpNozzle) checkInactiveUprStreams_once() error {
 			}
 			atomic.StoreUint32(&dcp.counter_streams_inactive, 0)
 		}
+	} else if len(streams_active) == len(dcp.GetVBList()) {
+		dcp.setTsCleanOnce.Do(func() {
+			dcp.setTsCheckedMtx.Lock()
+			dcp.setTsCheckedManifests = nil
+			dcp.setTsCheckedMtx.Unlock()
+		})
 	}
 	return nil
 }

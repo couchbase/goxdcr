@@ -26,18 +26,21 @@ insertPropertyIntoBucketNamePropertyMap "B0" BucketProperty
 insertPropertyIntoBucketNamePropertyMap "B1" Bucket1Properties
 insertPropertyIntoBucketNamePropertyMap "B2" BucketProperty
 
+#pcre_filter='REGEXP_CONTAINS(click, "q(?!uit)")'
+#declare -A DefaultBucketReplProperties=(["filterExpression"]="$pcre_filter" ["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500)
 declare -A DefaultBucketReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500)
 
 # Bucket -> Scopes
 # -----------------
 declare -a scope1Arr=("S1" "S2")
-BUCKET_NAME_SCOPE_MAP=(["B1"]=${scope1Arr[@]} ["B2"]="S1")
+BUCKET_NAME_SCOPE_MAP=(["B1"]=${scope1Arr[@]} ["B2"]="S3")
 
 # Scopes -> Collections
 # ----------------------
 declare -a collection1Arr=("col1" "col2")
 declare -a collection2Arr=("col1" "col2" "col3")
 SCOPE_NAME_COLLECTION_MAP=(["S1"]=${collection1Arr[@]} ["S2"]=${collection2Arr[@]} ["S3"]=${collection2Arr[@]})
+
 
 function runDataLoad {
 	# Run CBWorkloadgen in parallel
@@ -47,16 +50,20 @@ function runDataLoad {
 
 function runTestCase {
 	echo "============================================================================"
-	echo "Running pause and resume test case"
+	echo "Running live rediscover test case"
 	echo "============================================================================"
+	testForClusterRun
+	if (( $? != 0 ));then
+		exit $?
+	fi
+
+	# First setup mis-matching mapping meaning all the data reside in C1
 	setupTopologies
 	if (( $? != 0 ));then
 		exit $?
 	fi
 	# Wait for vbuckets and all the other things to propagate before XDCR provisioning
-	# TODO - MB-38021 - shorten this back to 2 seconds once checkpointing is completed
-	echo "MB-38021 - sleeping 20 seconds for vbucket distribution"
-	sleep 20
+	sleep 5
 	createRemoteClusterReference "C1" "C2"
 	createRemoteClusterReference "C2" "C1"
 	sleep 1
@@ -65,16 +72,24 @@ function runTestCase {
 	printGlobalScopeAndCollectionInfo
 	runDataLoad
 
-	echo "Waiting 5 seconds before checking item count"
+	echo "Waiting 5 seconds before checking item count first pass"
 	sleep 5
+	checkItemCnt "C1" "B1" $CBWORKLOAD_COLLECTION_NUM_ITEMS
+	checkItemCnt "C2" "B2" 0
+
+	# Then re-setup the implicit matching that matches, and run i/o
+	BUCKET_NAME_SCOPE_MAP=(["B1"]=${scope1Arr[@]} ["B2"]="S1")
+	setupTopologies
+	echo "Sleeping up to 80 seconds for target manifest to be pulled and vbucket distribution"
+	echo "Sleeping 80 seconds for target manifest to be pulled and vbucket distribution"
+	sleep 80
+	printGlobalScopeAndCollectionInfo
+	runDataLoad
+
+	# The retry buffer should have sent the mutations
 	checkItemCnt "C1" "B1" $CBWORKLOAD_COLLECTION_NUM_ITEMS
 	checkItemCnt "C2" "B2" $CBWORKLOAD_COLLECTION_NUM_ITEMS
 
-	# TODO - once resume is done, do a quicker pause
-	echo "Pausing replication"
-	pauseReplication "C1" "B1" "C2" "B2"
-	grepForPanics
-	resumeReplication "C1" "B1" "C2" "B2"
 	grepForPanics
 
 	echo "============================================================================"
@@ -82,4 +97,5 @@ function runTestCase {
 	echo "============================================================================"
         cleanupBucketReplications
         cleanupBuckets
+	cleanupRemoteClusterRefs
 }

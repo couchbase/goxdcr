@@ -40,30 +40,21 @@ declare -a collection2Arr=("col1" "col2" "col3")
 SCOPE_NAME_COLLECTION_MAP=(["S1"]=${collection1Arr[@]} ["S2"]=${collection2Arr[@]} ["S3"]=${collection2Arr[@]})
 
 function runDataLoad {
-	echo "RUNNING dataload..."
+	# Run CBWorkloadgen in parallel
 	runCbWorkloadGenCollection "C1" "B1" "S1" "col1"
-}
-
-function validateDataLoad {
-	echo "VALIDATING Data..."
-	validateCbWorkloadGenCollection "C2" "B2" "S1" "col1" "C1" "B1" "S1" "col1"
-	checkBidirectionalChangesLeft
-	checkItemCnt "C1" "B1" $CBWORKLOAD_COLLECTION_NUM_ITEMS
-	checkItemCnt "C2" "B2" $CBWORKLOAD_COLLECTION_NUM_ITEMS
+	waitForBgJobs
 }
 
 function runTestCase {
 	echo "============================================================================"
-	echo "Running simple collection unidirectional test case"
+	echo "Running pause and resume test case"
 	echo "============================================================================"
 	setupTopologies
 	if (( $? != 0 ));then
 		exit $?
 	fi
 	# Wait for vbuckets and all the other things to propagate before XDCR provisioning
-	# TODO - MB-38021 - shorten this back to 2 seconds once checkpointing is completed
-	echo "MB-38021 - sleeping 20 seconds for vbucket distribution"
-	sleep 20
+	sleep 5
 	createRemoteClusterReference "C1" "C2"
 	createRemoteClusterReference "C2" "C1"
 	sleep 1
@@ -78,12 +69,46 @@ function runTestCase {
 	checkItemCnt "C2" "B2" $CBWORKLOAD_COLLECTION_NUM_ITEMS
 
 	checkUnidirectionalChangesLeft
+	oldDataReplicated=`getDataReplicated "C1" "B1" "C2" "B2"`
+	oldDocsProcessed=`getDocsProcessed "C1" "B1" "C2" "B2"`
 
-	validateDataLoad
+	echo "Pausing replication - current data replicated: $oldDataReplicated docs_processed: $oldDocsProcessed"
+	pauseReplication "C1" "B1" "C2" "B2"
+	echo "Waiting 15 seconds for pipeline to really pause"
+	sleep 15
+	grepForPanics
+	
+	checkUnidirectionalChangesLeft
+
+	resumeReplication "C1" "B1" "C2" "B2"
+	echo "Waiting 15 seconds for resume to finish"
+	sleep 15
+	grepForPanics
+
+	checkDocsProcessed "C1" "B1" "C2" "B2" "$oldDocsProcessed"
+	checkDataReplicatedIsZero "C1" "B1" "C2" "B2" "$oldDataReplicated"
+
+	# Run data load again
+	oldDataReplicated=`getDataReplicated "C1" "B1" "C2" "B2"`
+	runDataLoad
+	echo "Waiting 10 seconds before checking"
+	sleep 10
+	# Changes left should go to 0
+	checkUnidirectionalChangesLeft
+	if (( `getDocsProcessed "C1" "B1" "C2" "B2"` == $oldDocsProcessed ));then
+		echo "Data processed should not be the same after run"
+		exit 1
+	fi
+	if (( `getDataReplicated "C1" "B1" "C2" "B2"` == $oldDataReplicated ));then
+		echo "Data replicated should not be the same after run"
+		exit 1
+	fi
+	grepForPanics
 
 	echo "============================================================================"
 	echo "PASSED"
 	echo "============================================================================"
-        cleanupBucketReplications
-        cleanupBuckets
+	cleanupBucketReplications
+	cleanupBuckets
+	cleanupRemoteClusterRefs
 }
