@@ -10,6 +10,7 @@
 package pipeline_svc
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	mcc "github.com/couchbase/gomemcached/client"
@@ -65,6 +66,8 @@ type CheckpointManager struct {
 	xdcr_topology_svc service_def.XDCRCompTopologySvc
 
 	through_seqno_tracker_svc service_def.ThroughSeqnoTrackerSvc
+
+	uiLogSvc service_def.UILogSvc
 
 	//the interval between checkpointing in seconds
 	ckpt_interval uint32
@@ -161,7 +164,8 @@ func NewCheckpointManager(checkpoints_svc service_def.CheckpointsService, capi_s
 	xdcr_topology_svc service_def.XDCRCompTopologySvc, through_seqno_tracker_svc service_def.ThroughSeqnoTrackerSvc,
 	active_vbs map[string][]uint16, target_username, target_password string, target_bucket_name string,
 	target_kv_vb_map map[string][]uint16, target_cluster_ref *metadata.RemoteClusterReference,
-	target_cluster_version int, isTargetES bool, logger_ctx *log.LoggerContext, utilsIn utilities.UtilsIface, statsMgr StatsMgrIface) (*CheckpointManager, error) {
+	target_cluster_version int, isTargetES bool, logger_ctx *log.LoggerContext, utilsIn utilities.UtilsIface, statsMgr StatsMgrIface,
+	uiLogSvc service_def.UILogSvc) (*CheckpointManager, error) {
 	if checkpoints_svc == nil || capi_svc == nil || remote_cluster_svc == nil || rep_spec_svc == nil || cluster_info_svc == nil || xdcr_topology_svc == nil {
 		return nil, errors.New("checkpoints_svc, capi_svc, remote_cluster_svc, rep_spec_svc, cluster_info_svc and xdcr_topology_svc can't be nil")
 	}
@@ -195,6 +199,7 @@ func NewCheckpointManager(checkpoints_svc service_def.CheckpointsService, capi_s
 		isTargetES:                isTargetES,
 		utils:                     utilsIn,
 		statsMgr:                  statsMgr,
+		uiLogSvc:                  uiLogSvc,
 	}, nil
 }
 
@@ -796,12 +801,18 @@ func (ckmgr *CheckpointManager) setTimestampForVB(vbno uint16, ts *base.VBTimest
 }
 
 func (ckmgr *CheckpointManager) restoreBrokenMappingToRouters(brokenMapping metadata.CollectionNamespaceMapping) {
+	if len(brokenMapping) == 0 {
+		return
+	}
 	settings := make(map[string]interface{})
 	settings[metadata.BrokenMappings] = brokenMapping
 	ckmgr.pipeline.UpdateSettings(settings)
 }
 
 func (ckmgr *CheckpointManager) restoreCorrespondingTargetManifestId(targetManifestId uint64) {
+	if targetManifestId == 0 {
+		return
+	}
 	settings := make(map[string]interface{})
 	settings[metadata.TargetManifestId] = targetManifestId
 	ckmgr.pipeline.UpdateSettings(settings)
@@ -1547,6 +1558,8 @@ func (ckmgr *CheckpointManager) OnEvent(event *common.Event) {
 			// Don't accept "old" routing updates
 			ckmgr.cachedBrokenMap.lock.RUnlock()
 		} else {
+			// Updates will occur and need to log the differences on UI
+			olderMap := ckmgr.cachedBrokenMap.brokenMap.Clone()
 			ckmgr.cachedBrokenMap.lock.RUnlock()
 			ckmgr.cachedBrokenMap.lock.Lock()
 			// No need to re-check because OnEvent() is serialized
@@ -1558,8 +1571,50 @@ func (ckmgr *CheckpointManager) OnEvent(event *common.Event) {
 				ckmgr.cachedBrokenMap.brokenMap.Delete(routingInfo.BackfillMap)
 				ckmgr.cachedBrokenMap.correspondingTargetManifest = routingInfo.TargetManifestId
 			}
+			newerMap := ckmgr.cachedBrokenMap.brokenMap.Clone()
 			ckmgr.cachedBrokenMap.lock.Unlock()
+			// Can do this in the background - manifest updates usually don't happen too often
+			// to warrant a serializer
+			ckmgr.wait_grp.Add(1)
+			go ckmgr.logBrokenMapUpdatesToUI(olderMap, newerMap)
 		}
+	}
+}
+
+func (ckmgr *CheckpointManager) logBrokenMapUpdatesToUI(olderMap, newerMap metadata.CollectionNamespaceMapping) {
+	defer ckmgr.wait_grp.Done()
+	var buffer bytes.Buffer
+	var needToRaiseUI bool
+
+	added, removed := olderMap.Diff(newerMap)
+
+	if len(added) > 0 || len(removed) > 0 {
+		spec := ckmgr.pipeline.Specification()
+		ref, err := ckmgr.remote_cluster_svc.RemoteClusterByUuid(spec.TargetClusterUUID, false /*refresh*/)
+		if err != nil || ref == nil {
+			ckmgr.logger.Warnf("Unable to write to UI log service the update.\nNewly broken: %v Repaired: %v\n",
+				added, removed)
+			return
+		}
+		buffer.WriteString(fmt.Sprintf("XDCR SourceBucket %v to Target Cluster %v Bucket %v\n",
+			spec.SourceBucketName, ref.Name(), spec.TargetBucketName))
+		needToRaiseUI = true
+	}
+
+	if len(added) > 0 {
+		buffer.WriteString("The followings are collection mappings that are newly broken:\n")
+		buffer.WriteString(added.String())
+	}
+
+	if len(removed) > 0 {
+		buffer.WriteString("The followings are collection mappings that are now repaired:\n")
+		buffer.WriteString(removed.String())
+	}
+
+	if needToRaiseUI {
+		ckmgr.uiLogSvc.Write(buffer.String())
+		// TODO MB-38507 - Once UI portion is done and can parse replicationStatus with broken mapping, remove this log
+		ckmgr.logger.Infof("Current broken mapping for pipeline %v: %v", ckmgr.pipeline.Topic(), newerMap.String())
 	}
 }
 

@@ -963,7 +963,7 @@ func (xdcrf *XDCRFactory) registerServices(pipeline common.Pipeline, logger_ctx 
 		xdcrf.remote_cluster_svc, xdcrf.repl_spec_svc, xdcrf.cluster_info_svc,
 		xdcrf.xdcr_topology_svc, through_seqno_tracker_svc, kv_vb_map, targetUserName,
 		targetPassword, targetBucketName, target_kv_vb_map, targetClusterRef,
-		targetClusterVersion, isTargetES, logger_ctx, xdcrf.utils, actualStatsMgr)
+		targetClusterVersion, isTargetES, logger_ctx, xdcrf.utils, actualStatsMgr, xdcrf.uilog_svc)
 	if err != nil {
 		xdcrf.logger.Errorf("Failed to construct CheckpointManager for %v. err=%v ckpt_svc=%v, capi_svc=%v, remote_cluster_svc=%v, repl_spec_svc=%v\n", pipeline.Topic(), err, xdcrf.checkpoint_svc, xdcrf.capi_svc,
 			xdcrf.remote_cluster_svc, xdcrf.repl_spec_svc)
