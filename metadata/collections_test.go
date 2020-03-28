@@ -1,6 +1,7 @@
 package metadata
 
 import (
+	"encoding/json"
 	"fmt"
 	"github.com/couchbase/goxdcr/base"
 	"github.com/stretchr/testify/assert"
@@ -537,4 +538,56 @@ func TestCollectionsNsConsolidate(t *testing.T) {
 	assert.Equal(1, len(removed))
 	assert.Equal(1, len(removed[&defaultNamespace]))
 	fmt.Println("============== Test case end: TestCollectionsNsConsolidate =================")
+}
+
+func TestBrokenMappingsDocMarshaller(t *testing.T) {
+	assert := assert.New(t)
+	fmt.Println("============== Test case start: TestBrokenMappingsDocMarshaller =================")
+	// Test out of order list will have the same sha
+	nsMap := make(CollectionNamespaceMapping)
+	nsMapPrime := make(CollectionNamespaceMapping)
+
+	defaultNamespace := base.CollectionNamespace{"_default", "_default"}
+	c1Ns := base.CollectionNamespace{"C1", "C1"}
+	c3Ns := base.CollectionNamespace{"C3", "C3"}
+
+	var nslist CollectionNamespaceList
+	nslist = append(nslist, &c1Ns)
+	nslist = append(nslist, &c3Ns)
+
+	var nslistPrime CollectionNamespaceList
+	nslistPrime = append(nslistPrime, &c3Ns)
+	nslistPrime = append(nslistPrime, &c1Ns)
+
+	nsMap[&defaultNamespace] = nslist
+	nsMapPrime[&defaultNamespace] = nslistPrime
+
+	// Two map's snappy compressed content are different but sha should be the same
+	snappy1, err := nsMap.ToSnappyCompressed()
+	assert.Nil(err)
+	snappy2, err := nsMapPrime.ToSnappyCompressed()
+	assert.Nil(err)
+	assert.False(reflect.DeepEqual(snappy1, snappy2))
+	sha1, err := nsMap.Sha256()
+	assert.Nil(err)
+	sha2, err := nsMapPrime.Sha256()
+	assert.Nil(err)
+	assert.True(reflect.DeepEqual(sha1[:], sha2[:]))
+
+	// Load from compressed data
+	validate1, err := NewCollectionNamespaceMappingFromSnappyData(snappy1)
+	assert.Nil(err)
+	validate2, err := NewCollectionNamespaceMappingFromSnappyData(snappy2)
+	assert.Nil(err)
+	assert.True(validate1.IsSame(*validate2))
+
+	oneMapping := &CompressedColNamespaceMapping{nil, "dummySha"}
+	var oneList CompressedColNamespaceMappingList
+	oneList = append(oneList, oneMapping)
+
+	brokenMappingDoc := &BrokenMappingsDoc{oneList, "dummySpec", nil}
+
+	_, err = json.Marshal(brokenMappingDoc)
+	assert.Nil(err)
+	fmt.Println("============== Test case end: TestBrokenMappingsDocMarshaller =================")
 }

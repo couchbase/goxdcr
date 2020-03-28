@@ -44,11 +44,10 @@ const (
 	// FilterExpDelKey is a combination flag of the 3 below it
 	FilterExpDelKey = base.FilterExpDelKey
 	// These 3 are used for REST input/output into an internal flag of FilterExpDelKey
-	FilterExpKey     = base.FilterExpKey
-	FilterDelKey     = base.FilterDelKey
-	BypassExpiryKey  = base.BypassExpiryKey
-	BrokenMappings   = "BrokenMappings"
-	TargetManifestId = "TargetManifestId"
+	FilterExpKey       = base.FilterExpKey
+	FilterDelKey       = base.FilterDelKey
+	BypassExpiryKey    = base.BypassExpiryKey
+	BrokenMappingsPair = "BrokenMappingsPair"
 )
 
 // keys to facilitate redaction of replication settings map

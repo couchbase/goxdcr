@@ -4,22 +4,25 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/couchbase/goxdcr/base"
+	"github.com/golang/snappy"
+	"strings"
+	"unsafe"
 )
 
 const (
-	FailOverUUID         string = "failover_uuid"
-	Seqno                string = "seqno"
-	DcpSnapshotSeqno     string = "dcp_snapshot_seqno"
-	DcpSnapshotEndSeqno  string = "dcp_snapshot_end_seqno"
-	TargetVbOpaque       string = "target_vb_opaque"
-	TargetSeqno          string = "target_seqno"
-	TargetVbUuid         string = "target_vb_uuid"
-	StartUpTime          string = "startup_time"
-	FilteredCnt          string = "filtered_items_cnt"
-	FilteredFailedCnt    string = "filtered_failed_cnt"
-	SourceManifest       string = "source_manifest"
-	TargetManifest       string = "target_manifest"
-	BrokenCollectionsMap string = "brokenCollectionsMap"
+	FailOverUUID            string = "failover_uuid"
+	Seqno                   string = "seqno"
+	DcpSnapshotSeqno        string = "dcp_snapshot_seqno"
+	DcpSnapshotEndSeqno     string = "dcp_snapshot_end_seqno"
+	TargetVbOpaque          string = "target_vb_opaque"
+	TargetSeqno             string = "target_seqno"
+	TargetVbUuid            string = "target_vb_uuid"
+	StartUpTime             string = "startup_time"
+	FilteredCnt             string = "filtered_items_cnt"
+	FilteredFailedCnt       string = "filtered_failed_cnt"
+	SourceManifest          string = "source_manifest"
+	TargetManifest          string = "target_manifest"
+	BrokenCollectionsMapSha string = "brokenCollectionsMapSha256"
 )
 
 type CheckpointRecord struct {
@@ -42,13 +45,34 @@ type CheckpointRecord struct {
 	// Manifests uid corresponding to this checkpoint
 	SourceManifest uint64 `json:"source_manifest"`
 	TargetManifest uint64 `json:"target_manifest"`
-	// Broken mapping (if any) associated with the checkpoint
-	BrokenMappings CollectionNamespaceMapping `json:brokenCollectionsMap`
+	// BrokenMapping SHA256 string - Internally used by checkpoints Service to populate the actual BrokenMapping above
+	BrokenMappingSha256 string `json:"brokenCollectionsMapSha256"`
+	// Broken mapping (if any) associated with the checkpoint - this is populated automatically by checkpointsService
+	brokenMappings CollectionNamespaceMapping
+}
+
+func (c *CheckpointRecord) BrokenMappings() *CollectionNamespaceMapping {
+	if c == nil {
+		return nil
+	}
+	return &(c.brokenMappings)
+}
+
+func (c *CheckpointRecord) Size() int {
+	if c == nil {
+		return 0
+	}
+
+	var totalSize int
+	totalSize += int(unsafe.Sizeof(*c))
+	totalSize += len(c.BrokenMappingSha256)
+	totalSize += c.Target_vb_opaque.Size()
+	return totalSize
 }
 
 func NewCheckpointRecord(failoverUuid, seqno, dcpSnapSeqno, dcpSnapEnd, targetSeqno, filteredItems, filterFailed,
-	srcManifest, tgtManifest uint64, brokenMappings CollectionNamespaceMapping) *CheckpointRecord {
-	return &CheckpointRecord{
+	srcManifest, tgtManifest uint64, brokenMappings CollectionNamespaceMapping) (*CheckpointRecord, error) {
+	record := &CheckpointRecord{
 		Failover_uuid:          failoverUuid,
 		Seqno:                  seqno,
 		Dcp_snapshot_seqno:     dcpSnapSeqno,
@@ -58,8 +82,23 @@ func NewCheckpointRecord(failoverUuid, seqno, dcpSnapSeqno, dcpSnapEnd, targetSe
 		Filtered_Failed_Cnt:    filterFailed,
 		SourceManifest:         srcManifest,
 		TargetManifest:         tgtManifest,
-		BrokenMappings:         brokenMappings,
+		brokenMappings:         brokenMappings,
 	}
+	err := record.PopulateBrokenMappingSha()
+	return record, err
+}
+
+func (ckptRecord *CheckpointRecord) PopulateBrokenMappingSha() error {
+	if len(ckptRecord.brokenMappings) > 0 {
+		sha, err := ckptRecord.brokenMappings.Sha256()
+		if err != nil {
+			return err
+		}
+		ckptRecord.BrokenMappingSha256 = fmt.Sprintf("%x", sha[:])
+	} else {
+		ckptRecord.BrokenMappingSha256 = ""
+	}
+	return nil
 }
 
 func (ckptRecord *CheckpointRecord) IsSame(new_record *CheckpointRecord) bool {
@@ -79,7 +118,7 @@ func (ckptRecord *CheckpointRecord) IsSame(new_record *CheckpointRecord) bool {
 		ckptRecord.Filtered_Items_Cnt == new_record.Filtered_Items_Cnt &&
 		ckptRecord.SourceManifest == new_record.SourceManifest &&
 		ckptRecord.TargetManifest == new_record.TargetManifest &&
-		ckptRecord.BrokenMappings.IsSame(new_record.BrokenMappings) {
+		ckptRecord.BrokenMappingSha256 == new_record.BrokenMappingSha256 {
 		return true
 	} else {
 		return false
@@ -100,7 +139,16 @@ func (ckptRecord *CheckpointRecord) Load(other *CheckpointRecord) {
 	ckptRecord.Filtered_Failed_Cnt = other.Filtered_Failed_Cnt
 	ckptRecord.SourceManifest = other.SourceManifest
 	ckptRecord.TargetManifest = other.TargetManifest
-	ckptRecord.BrokenMappings = other.BrokenMappings
+	ckptRecord.LoadBrokenMapping(other.brokenMappings)
+}
+
+func (ckptRecord *CheckpointRecord) LoadBrokenMapping(other CollectionNamespaceMapping) {
+	if ckptRecord == nil {
+		return
+	}
+	ckptRecord.brokenMappings = other
+	ckptRecord.PopulateBrokenMappingSha()
+	return
 }
 
 func (ckptRecord *CheckpointRecord) UnmarshalJSON(data []byte) error {
@@ -165,9 +213,9 @@ func (ckptRecord *CheckpointRecord) UnmarshalJSON(data []byte) error {
 		ckptRecord.TargetManifest = uint64(tgtManifest.(float64))
 	}
 
-	brokenMap, ok := fieldMap[BrokenCollectionsMap]
+	brokenMapSha, ok := fieldMap[BrokenCollectionsMapSha]
 	if ok {
-		ckptRecord.BrokenMappings = brokenMap.(CollectionNamespaceMapping)
+		ckptRecord.BrokenMappingSha256 = brokenMapSha.(string)
 	}
 
 	return nil
@@ -176,11 +224,19 @@ func (ckptRecord *CheckpointRecord) UnmarshalJSON(data []byte) error {
 type TargetVBOpaque interface {
 	Value() interface{}
 	IsSame(targetVBOpaque TargetVBOpaque) bool
+	Size() int
 }
 
 // older clusters have a single int vbuuid
 type TargetVBUuid struct {
 	Target_vb_uuid uint64 `json:"target_vb_uuid"`
+}
+
+func (targetVBUuid *TargetVBUuid) Size() int {
+	if targetVBUuid == nil {
+		return 0
+	}
+	return int(unsafe.Sizeof(targetVBUuid.Target_vb_uuid))
 }
 
 func (targetVBUuid *TargetVBUuid) Value() interface{} {
@@ -209,6 +265,10 @@ type TargetVBUuidStr struct {
 	Target_vb_uuid string `json:"target_vb_uuid"`
 }
 
+func (targetVBUuid *TargetVBUuidStr) Size() int {
+	return len(targetVBUuid.Target_vb_uuid)
+}
+
 func (targetVBUuid *TargetVBUuidStr) Value() interface{} {
 	return targetVBUuid.Target_vb_uuid
 }
@@ -234,6 +294,10 @@ func (targetVBUuid *TargetVBUuidStr) IsSame(targetVBOpaque TargetVBOpaque) bool 
 type TargetVBUuidAndTimestamp struct {
 	Target_vb_uuid string `json:"target_vb_uuid"`
 	Startup_time   string `json:"startup_time"`
+}
+
+func (t *TargetVBUuidAndTimestamp) Size() int {
+	return len(t.Target_vb_uuid) + len(t.Startup_time)
 }
 
 func (targetVBUuidAndTimestamp *TargetVBUuidAndTimestamp) Value() interface{} {
@@ -322,9 +386,9 @@ func TargetVBOpaqueUnmarshalError(data interface{}) error {
 }
 
 func (ckpt_record *CheckpointRecord) String() string {
-	return fmt.Sprintf("{Failover_uuid=%v; Seqno=%v; Dcp_snapshot_seqno=%v; Dcp_snapshot_end_seqno=%v; Target_vb_opaque=%v; Commitopaque=%v}",
+	return fmt.Sprintf("{Failover_uuid=%v; Seqno=%v; Dcp_snapshot_seqno=%v; Dcp_snapshot_end_seqno=%v; Target_vb_opaque=%v; Commitopaque=%v; SourceManifest=%v; TargetManifest=%v; BrokenMappingSha=%v; BrokenMapping=%v}",
 		ckpt_record.Failover_uuid, ckpt_record.Seqno, ckpt_record.Dcp_snapshot_seqno, ckpt_record.Dcp_snapshot_end_seqno, ckpt_record.Target_vb_opaque,
-		ckpt_record.Target_Seqno)
+		ckpt_record.Target_Seqno, ckpt_record.SourceManifest, ckpt_record.TargetManifest, ckpt_record.BrokenMappingSha256, ckpt_record.brokenMappings)
 }
 
 type CheckpointsDoc struct {
@@ -343,6 +407,21 @@ type CheckpointsDoc struct {
 
 	//revision number
 	Revision interface{}
+}
+
+func (c *CheckpointsDoc) Size() int {
+	if c == nil {
+		return 0
+	}
+
+	var totalSize int
+	for _, j := range c.Checkpoint_records {
+		totalSize += j.Size()
+	}
+	totalSize += int(unsafe.Sizeof(c.XattrSeqno))
+	totalSize += int(unsafe.Sizeof(c.TargetClusterVersion))
+	totalSize += len(c.SpecInternalId)
+	return totalSize
 }
 
 func (ckpt *CheckpointRecord) ToMap() map[string]interface{} {
@@ -369,11 +448,14 @@ func NewCheckpointsDoc(specInternalId string) *CheckpointsDoc {
 }
 
 //Not concurrency safe. It should be used by one goroutine only
-func (ckptsDoc *CheckpointsDoc) AddRecord(record *CheckpointRecord) bool {
+func (ckptsDoc *CheckpointsDoc) AddRecord(record *CheckpointRecord) (added bool, removedRecords []*CheckpointRecord) {
 	length := len(ckptsDoc.Checkpoint_records)
 	if length > 0 {
 		if !ckptsDoc.Checkpoint_records[0].IsSame(record) {
 			if length > base.MaxCheckpointRecordsToKeep {
+				for i := base.MaxCheckpointRecordsToKeep - 1; i < length; i++ {
+					removedRecords = append(removedRecords, ckptsDoc.Checkpoint_records[i])
+				}
 				ckptsDoc.Checkpoint_records = ckptsDoc.Checkpoint_records[:base.MaxCheckpointRecordsToKeep]
 			} else if length < base.MaxCheckpointRecordsToKeep {
 				for i := length; i < base.MaxCheckpointRecordsToKeep; i++ {
@@ -381,16 +463,21 @@ func (ckptsDoc *CheckpointsDoc) AddRecord(record *CheckpointRecord) bool {
 				}
 			}
 			for i := len(ckptsDoc.Checkpoint_records) - 2; i >= 0; i-- {
+				if i+1 == len(ckptsDoc.Checkpoint_records)-1 {
+					removedRecords = append(removedRecords, ckptsDoc.Checkpoint_records[i+1])
+				}
 				ckptsDoc.Checkpoint_records[i+1] = ckptsDoc.Checkpoint_records[i]
 			}
 			ckptsDoc.Checkpoint_records[0] = record
-			return true
+			added = true
+			return
 		} else {
-			return false
+			return
 		}
 	} else {
 		ckptsDoc.Checkpoint_records = append(ckptsDoc.Checkpoint_records, record)
-		return true
+		added = true
+		return
 	}
 }
 
@@ -402,5 +489,157 @@ func (ckptsDoc *CheckpointsDoc) GetCheckpointRecords() []*CheckpointRecord {
 		return ckptsDoc.Checkpoint_records
 	} else {
 		return ckptsDoc.Checkpoint_records[:base.MaxCheckpointRecordsToRead]
+	}
+}
+
+type ShaToCollectionNamespaceMap map[string]*CollectionNamespaceMapping
+
+func (s *ShaToCollectionNamespaceMap) Clone() (newMap ShaToCollectionNamespaceMap) {
+	if s == nil {
+		return
+	}
+
+	newMap = make(ShaToCollectionNamespaceMap)
+
+	for k, v := range *s {
+		clonedVal := v.Clone()
+		newMap[k] = &clonedVal
+	}
+	return
+}
+
+func (s *ShaToCollectionNamespaceMap) String() string {
+	if s == nil {
+		return "<nil>"
+	}
+
+	var output []string
+	for k, v := range *s {
+		output = append(output, fmt.Sprintf("Sha256Digest: %v Map:", k))
+		if v != nil {
+			output = append(output, v.String())
+		}
+	}
+
+	return strings.Join(output, "\n")
+}
+
+type CompressedColNamespaceMapping struct {
+	// Snappy compressed byte slice of CollectionNamespaceMapping
+	CompressedMapping []byte `json:compressedMapping`
+	Sha256Digest      string `json:string`
+}
+
+func (c *CompressedColNamespaceMapping) Size() int {
+	if c == nil {
+		return 0
+	}
+	return len(c.CompressedMapping) + len(c.Sha256Digest)
+}
+
+type CompressedColNamespaceMappingList []*CompressedColNamespaceMapping
+
+func (c *CompressedColNamespaceMappingList) Size() int {
+	if c == nil {
+		return 0
+	}
+
+	var totalSize int
+	for _, j := range *c {
+		totalSize += j.Size()
+	}
+	return totalSize
+}
+
+type BrokenMappingsDoc struct {
+	BrokenMappingRecords CompressedColNamespaceMappingList `json:"brokenMappingRecords"`
+
+	// internal id of repl spec - for detection of repl spec deletion and recreation event
+	SpecInternalId string `json:"specInternalId"`
+
+	//revision number
+	Revision interface{}
+}
+
+func (b *BrokenMappingsDoc) Size() int {
+	if b == nil {
+		return 0
+	}
+
+	return len(b.SpecInternalId) + b.BrokenMappingRecords.Size()
+}
+
+func (b *BrokenMappingsDoc) ToShaMap() (ShaToCollectionNamespaceMap, error) {
+	if b == nil {
+		return nil, base.ErrorInvalidInput
+	}
+
+	errorMap := make(base.ErrorMap)
+	shaMap := make(ShaToCollectionNamespaceMap)
+
+	for _, oneRecord := range b.BrokenMappingRecords {
+		if oneRecord == nil {
+			continue
+		}
+
+		serializedMap, err := snappy.Decode(nil, oneRecord.CompressedMapping)
+		if err != nil {
+			errorMap[oneRecord.Sha256Digest] = fmt.Errorf("Snappy decompress failed %v", err)
+			continue
+		}
+		actualMap := make(CollectionNamespaceMapping)
+		err = json.Unmarshal(serializedMap, &actualMap)
+		if err != nil {
+			errorMap[oneRecord.Sha256Digest] = fmt.Errorf("Unmarshalling failed %v", err)
+			continue
+		}
+		// Sanity check
+		checkSha, err := actualMap.Sha256()
+		if err != nil {
+			errorMap[oneRecord.Sha256Digest] = fmt.Errorf("Validing SHA failed %v", err)
+			continue
+		}
+		checkShaString := fmt.Sprintf("%x", checkSha[:])
+		if checkShaString != oneRecord.Sha256Digest {
+			errorMap[oneRecord.Sha256Digest] = fmt.Errorf("SHA validation mismatch %v", checkShaString)
+			continue
+		}
+
+		shaMap[oneRecord.Sha256Digest] = &actualMap
+	}
+
+	var err error
+	if len(errorMap) > 0 {
+		errStr := base.FlattenErrorMap(errorMap)
+		err = fmt.Errorf(errStr)
+	}
+	return shaMap, err
+}
+
+// Will overwrite the existing records with the incoming map
+func (b *BrokenMappingsDoc) LoadShaMap(shaMap ShaToCollectionNamespaceMap) error {
+	if b == nil {
+		return base.ErrorInvalidInput
+	}
+
+	errorMap := make(base.ErrorMap)
+	b.BrokenMappingRecords = b.BrokenMappingRecords[:0]
+
+	for sha, colNsMap := range shaMap {
+		serializedMap, err := json.Marshal(colNsMap)
+		if err != nil {
+			errorMap[sha] = err
+			continue
+		}
+		compressedMapping := snappy.Encode(nil, serializedMap)
+
+		oneRecord := &CompressedColNamespaceMapping{compressedMapping, sha}
+		b.BrokenMappingRecords = append(b.BrokenMappingRecords, oneRecord)
+	}
+
+	if len(errorMap) > 0 {
+		return fmt.Errorf("Error LoadingShaMap - sha -> err: %v", base.FlattenErrorMap(errorMap))
+	} else {
+		return nil
 	}
 }

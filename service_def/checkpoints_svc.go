@@ -16,9 +16,12 @@ import (
 type CheckpointsService interface {
 	CheckpointsDoc(replicationId string, vbno uint16) (*metadata.CheckpointsDoc, error)
 	DelCheckpointsDoc(replicationId string, vbno uint16) error
+	PostDelCheckpointsDoc(replicationId string, doc *metadata.CheckpointsDoc) error
 	DelCheckpointsDocs(replicationId string) error
 	UpsertCheckpoints(replicationId string, specInternalId string, vbno uint16, ckpt_record *metadata.CheckpointRecord,
-		xattr_seqno uint64, targetClusterVersion int) error
-	CheckpointsDocs(replicationId string) (map[uint16]*metadata.CheckpointsDoc, error)
+		xattr_seqno uint64, targetClusterVersion int) (int, error)
+	CheckpointsDocs(replicationId string, brokenMappingsNeeded bool) (map[uint16]*metadata.CheckpointsDoc, error)
 	GetVbnosFromCheckpointDocs(replicationId string) ([]uint16, error)
+	PreUpsertBrokenMapping(replicationId string, specInternalId string, oneBrokenMapping *metadata.CollectionNamespaceMapping) error
+	UpsertBrokenMapping(replicationId string, specInternalId string) error
 }

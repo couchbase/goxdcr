@@ -899,7 +899,7 @@ func (a *CollectionsManifestAgent) refreshTargetCustom(force bool, waitTime time
 
 // Gets a sorted list of manifest UIDs that are referred by the checkpoints
 func (a *CollectionsManifestAgent) getAllManifestsUids() (srcManifestUids, tgtManifestUids []uint64, err error) {
-	ckptDocs, err := a.checkpointsSvc.CheckpointsDocs(a.replicationSpec.Id)
+	ckptDocs, err := a.checkpointsSvc.CheckpointsDocs(a.replicationSpec.Id, false /*needBrokenMapping*/)
 	if err != nil {
 		a.logger.Warnf("Unable to retrieve checkpoint docs for %v, operating persistence using last cached manifest from %v",
 			a.replicationSpec.Id, a.ckptDocsCacheTime)

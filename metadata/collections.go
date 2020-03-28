@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/couchbase/goxdcr/base"
+	"github.com/golang/snappy"
 	"reflect"
 	"sort"
 	"strconv"
@@ -1231,6 +1232,9 @@ func (c *CollectionNamespaceMapping) GetSubsetBasedOnAddedTargets(added ScopesMa
 }
 
 func (c *CollectionNamespaceMapping) IsSame(other CollectionNamespaceMapping) bool {
+	if c == nil {
+		return len(other) == 0
+	}
 	for src, tgtList := range *c {
 		_, otherTgtList, exists := other.Get(src)
 		if !exists {
@@ -1313,4 +1317,48 @@ func (c *CollectionNamespaceMapping) Diff(other CollectionNamespaceMapping) (add
 		}
 	}
 	return
+}
+
+// Json marshaller will serialize the map by key, but not necessarily the values, which is ordered list
+// Because the lists may not be ordered, we need to calculate sha256 with lists ordered
+func (c *CollectionNamespaceMapping) Sha256() (result [sha256.Size]byte, err error) {
+	if c == nil {
+		err = base.ErrorInvalidInput
+		return
+	}
+
+	// Simpler to just create a temporary map with ordered list for sha calculation
+	tempMap := make(CollectionNamespaceMapping)
+
+	for k, v := range *c {
+		tempMap[k] = SortCollectionsNamespaceList(v)
+	}
+
+	marshalledJson, err := tempMap.MarshalJSON()
+	if err != nil {
+		return
+	}
+
+	result = sha256.Sum256(marshalledJson)
+	return
+}
+
+func (c *CollectionNamespaceMapping) ToSnappyCompressed() ([]byte, error) {
+	marshalledJson, err := c.MarshalJSON()
+	if err != nil {
+		return nil, err
+	}
+	return snappy.Encode(nil, marshalledJson), nil
+}
+
+func NewCollectionNamespaceMappingFromSnappyData(data []byte) (*CollectionNamespaceMapping, error) {
+	marshalledJson, err := snappy.Decode(nil, data)
+	if err != nil {
+		return nil, err
+	}
+
+	newMap := make(CollectionNamespaceMapping)
+	err = newMap.UnmarshalJSON(marshalledJson)
+
+	return &newMap, err
 }

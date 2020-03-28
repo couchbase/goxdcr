@@ -162,17 +162,15 @@ type CollectionsRouter struct {
 	started                uint32
 	logger                 *log.CommonLogger
 
-	lastKnownManifestMtx sync.RWMutex
-	lastKnownManifest    *metadata.CollectionsManifest
-
 	/*
 	 * When retry fails, these members record the needed information
 	 */
 	// Collectively, these are the mappings that this collectionsRouter has seen broken
-	brokenMapMtx   sync.RWMutex
-	brokenMapping  metadata.CollectionNamespaceMapping
-	routingUpdater CollectionsRoutingUpdater
-	ignoreDataFunc IgnoreDataEventer
+	brokenMapMtx      sync.RWMutex
+	brokenMapping     metadata.CollectionNamespaceMapping
+	lastKnownManifest *metadata.CollectionsManifest // should be associated with a brokenMap
+	routingUpdater    CollectionsRoutingUpdater
+	ignoreDataFunc    IgnoreDataEventer
 
 	fatalErrorFunc func(error)
 }
@@ -278,33 +276,64 @@ func (c *CollectionsRouter) IsRunning() bool {
 	return atomic.LoadUint32(&c.started) != 0
 }
 
-func (c *CollectionsRouter) UpdateBrokenMappings(brokenMappings metadata.CollectionNamespaceMapping) {
-	if !c.IsRunning() || len(brokenMappings) == 0 {
+func (c *CollectionsRouter) UpdateBrokenMappingsPair(brokenMappings *metadata.CollectionNamespaceMapping, targetManifestId uint64) {
+	if !c.IsRunning() || brokenMappings == nil || len(*brokenMappings) == 0 {
 		return
 	}
 
-	c.brokenMapMtx.Lock()
-	defer c.brokenMapMtx.Unlock()
-	c.brokenMapping = brokenMappings
-}
+	// Just like how checkpoint manager is the consolidation of all broken map events raised by the router
+	// This place is where the consolidation occurs if somehow checkpoint manager has inconsistent mappings
+	c.brokenMapMtx.RLock()
+	var currentManifestId uint64
+	if c.lastKnownManifest != nil {
+		currentManifestId = c.lastKnownManifest.Uid()
+	}
+	currentBrokenMap := c.brokenMapping.Clone()
+	c.brokenMapMtx.RUnlock()
 
-func (c *CollectionsRouter) UpdateTargetManifest(targetManifestId uint64) {
-	if !c.IsRunning() {
-		return
+	// The key is to always pick the newer manifest, and if they are the same,
+	// consolidate the brokenmaps
+	needToUpdate := currentManifestId < targetManifestId
+	needToUpdate2 := currentManifestId > 0 && currentManifestId == targetManifestId && (len(currentBrokenMap) < len(*brokenMappings) || !currentBrokenMap.IsSame(*brokenMappings))
+
+	if needToUpdate {
+		manifest, err := c.collectionsManifestSvc.GetSpecificTargetManifest(c.spec, targetManifestId)
+		if err != nil {
+			err = fmt.Errorf("Collections Router %v error - unable to find last known target manifest version %v from collectionsManifestSvc - err: %v",
+				c.spec.Id, targetManifestId, err)
+			// TODO MB-38445
+			c.fatalErrorFunc(err)
+			return
+		}
+
+		c.brokenMapMtx.Lock()
+		var checkManifestId uint64
+		if c.lastKnownManifest != nil {
+			checkManifestId = c.lastKnownManifest.Uid()
+		}
+		if checkManifestId == currentManifestId &&
+			c.brokenMapping.IsSame(currentBrokenMap) {
+			// things were same as before
+			c.lastKnownManifest = manifest
+			c.brokenMapping = *brokenMappings
+		} else if checkManifestId == targetManifestId {
+			// Target manifest got bumped up between the rlock and lock
+			needToUpdate2 = true
+		}
+		c.brokenMapMtx.Unlock()
 	}
 
-	manifest, err := c.collectionsManifestSvc.GetSpecificTargetManifest(c.spec, targetManifestId)
-	if err != nil {
-		err = fmt.Errorf("Collections Router %v error - unable to find last known target manifest version %v from collectionsManifestSvc - err: %v",
-			c.spec.Id, targetManifestId, err)
-		// TODO MB-38445
-		c.fatalErrorFunc(err)
-		return
+	if needToUpdate2 {
+		c.brokenMapMtx.Lock()
+		var checkManifestId uint64
+		if c.lastKnownManifest != nil {
+			checkManifestId = c.lastKnownManifest.Uid()
+		}
+		if checkManifestId == targetManifestId {
+			c.brokenMapping.Consolidate(*brokenMappings)
+		}
+		c.brokenMapMtx.Unlock()
 	}
-
-	c.lastKnownManifestMtx.Lock()
-	c.lastKnownManifest = manifest
-	c.lastKnownManifestMtx.Unlock()
 }
 
 // No-Concurrent call
@@ -348,24 +377,30 @@ func (c *CollectionsRouter) RouteReqToLatestTargetManifest(namespace *base.Colle
 }
 
 func (c *CollectionsRouter) handleNewManifestChanges(latestManifest *metadata.CollectionsManifest) (err error) {
-	c.lastKnownManifestMtx.RLock()
+	if latestManifest == nil {
+		err = base.ErrorInvalidInput
+		return
+	}
+
+	c.brokenMapMtx.RLock()
 	if c.lastKnownManifest == nil {
-		c.lastKnownManifestMtx.RUnlock()
-		c.lastKnownManifestMtx.Lock()
+		c.brokenMapMtx.RUnlock()
+		c.brokenMapMtx.Lock()
 		if c.lastKnownManifest == nil {
 			c.lastKnownManifest = latestManifest
 		}
-		c.lastKnownManifestMtx.Unlock()
+		c.brokenMapMtx.Unlock()
 		return
 	}
 
 	if latestManifest.Uid() == c.lastKnownManifest.Uid() {
-		c.lastKnownManifestMtx.RUnlock()
+		c.brokenMapMtx.RUnlock()
 		return
 	}
 
 	lastKnownManifestId := c.lastKnownManifest.Uid()
-	c.lastKnownManifestMtx.RUnlock()
+	lastKnownManifestClone := c.lastKnownManifest.Clone()
+	c.brokenMapMtx.RUnlock()
 
 	// Diff should catch this error, but check here just in case
 	if lastKnownManifestId > latestManifest.Uid() {
@@ -373,49 +408,62 @@ func (c *CollectionsRouter) handleNewManifestChanges(latestManifest *metadata.Co
 		return
 	}
 
-	added, _, _, err := latestManifest.Diff(c.lastKnownManifest)
+	added, _, _, err := latestManifest.Diff(&lastKnownManifestClone)
 	if err != nil {
-		err = fmt.Errorf("Unable to diff manifests between %v and %v: %v", c.lastKnownManifest.Uid(), latestManifest.Uid(), err)
+		err = fmt.Errorf("Unable to diff manifests between %v and %v: %v", lastKnownManifestClone.Uid(), latestManifest.Uid(), err)
 		return
 	}
 
-	var lockUpgraded bool
 	var routingInfo CollectionsRoutingInfo
 	c.brokenMapMtx.RLock()
-	if len(added) > 0 && len(c.brokenMapping) > 0 {
+	if c.lastKnownManifest.Uid() != lastKnownManifestId {
+		// Something changed from underneath, abort
 		c.brokenMapMtx.RUnlock()
-		// These are new target collections - see if the broken ones can be backfilled
-		fixedMapping := c.brokenMapping.GetSubsetBasedOnAddedTargets(added)
+		return
+	} else {
+		var fixedMapping metadata.CollectionNamespaceMapping
+		brokenMappingClone := c.brokenMapping.Clone()
+		c.brokenMapMtx.RUnlock()
+
+		if len(added) > 0 && len(c.brokenMapping) > 0 {
+			// These are new target collections - see if the broken ones can be backfilled
+			fixedMapping = brokenMappingClone.GetSubsetBasedOnAddedTargets(added)
+		}
 
 		if len(fixedMapping) > 0 {
 			c.brokenMapMtx.Lock()
-			lockUpgraded = true
+			if c.lastKnownManifest.Uid() != lastKnownManifestId || !c.brokenMapping.IsSame(brokenMappingClone) {
+				// something changed from underneath, abort
+				c.brokenMapMtx.Unlock()
+				return
+			}
+			c.lastKnownManifest = latestManifest
 			c.brokenMapping = c.brokenMapping.Delete(fixedMapping)
 			routingInfo.BrokenMap = c.brokenMapping.Clone()
 			routingInfo.BackfillMap = fixedMapping.Clone()
 			routingInfo.TargetManifestId = latestManifest.Uid()
-			c.logger.Debugf("Based on target manifestID %v These mappings need backfilling: %v\n", latestManifest.Uid(), fixedMapping.String())
-			c.logger.Debugf("Based on target manifestID %v These mappings are broken: %v\n", latestManifest.Uid(), routingInfo.BrokenMap.String())
+			if c.logger.GetLogLevel() > log.LogLevelDebug {
+				c.logger.Debugf("Based on target manifestID %v These mappings need backfilling: %v\n", latestManifest.Uid(), fixedMapping.String())
+			}
+			c.brokenMapMtx.Unlock()
+		} else {
+			// No need to raise fixed mapping event but still need to bubble the latest pair of {brokenMap, targetManifestId} to checkpoint manager
+			// This is so that checkpoint manager will have the "latest" possible manifest that goes with this brokenMap when checkpointing
+			c.brokenMapMtx.Lock()
+			if c.lastKnownManifest.Uid() != lastKnownManifestId || !c.brokenMapping.IsSame(brokenMappingClone) {
+				// something changed from underneath, abort
+				c.brokenMapMtx.Unlock()
+				return
+			}
+			c.lastKnownManifest = latestManifest
+			routingInfo.BrokenMap = c.brokenMapping.Clone()
+			routingInfo.TargetManifestId = latestManifest.Uid()
+			if c.logger.GetLogLevel() > log.LogLevelDebug {
+				c.logger.Debugf("Based on target manifestID %v These mappings are broken: %v\n", latestManifest.Uid(), routingInfo.BrokenMap.String())
+			}
 			c.brokenMapMtx.Unlock()
 		}
-
-		if !lockUpgraded {
-			c.brokenMapMtx.RUnlock()
-		}
-	} else {
-		// No need to update broken map but still need to bubble the latest pair of {brokenMap, targetManifestId} to checkpoint manager
-		// This is so that checkpoint manager will have the "latest" possible manifest that goes with this brokenMap when checkpointing
-		routingInfo.BrokenMap = c.brokenMapping.Clone()
-		routingInfo.TargetManifestId = latestManifest.Uid()
-		c.brokenMapMtx.RUnlock()
 	}
-
-	c.lastKnownManifestMtx.Lock()
-	// Compare and swap
-	if c.lastKnownManifest.Uid() == lastKnownManifestId {
-		c.lastKnownManifest = latestManifest
-	}
-	c.lastKnownManifestMtx.Unlock()
 
 	c.routingUpdater(routingInfo)
 	return
@@ -501,15 +549,9 @@ func (c CollectionsRoutingMap) startOrStopAll(start bool) error {
 	}
 }
 
-func (c CollectionsRoutingMap) UpdateBrokenMappings(brokenMaps metadata.CollectionNamespaceMapping) {
+func (c CollectionsRoutingMap) UpdateBrokenMappingsPair(brokenMaps *metadata.CollectionNamespaceMapping, targetManifestId uint64) {
 	for _, collectionsRouter := range c {
-		collectionsRouter.UpdateBrokenMappings(brokenMaps)
-	}
-}
-
-func (c CollectionsRoutingMap) UpdateTargetManifestId(targetManifestId uint64) {
-	for _, collectionsRouter := range c {
-		collectionsRouter.UpdateTargetManifest(targetManifestId)
+		collectionsRouter.UpdateBrokenMappingsPair(brokenMaps, targetManifestId)
 	}
 }
 
@@ -951,14 +993,13 @@ func (router *Router) UpdateSettings(settings metadata.ReplicationSettingsMap) e
 		}
 	}
 
-	brokenMappings, ok := settings[metadata.BrokenMappings].(metadata.CollectionNamespaceMapping)
-	if ok && len(brokenMappings) > 0 && router.Router.IsStartable() {
-		router.collectionsRouting.UpdateBrokenMappings(brokenMappings)
-	}
-
-	targetManifestId, ok := settings[metadata.TargetManifestId].(uint64)
-	if ok && targetManifestId > 0 && router.Router.IsStartable() {
-		router.collectionsRouting.UpdateTargetManifestId(targetManifestId)
+	pair, ok := settings[metadata.BrokenMappingsPair].([]interface{})
+	if ok && len(pair) == 2 {
+		brokenMappings, ok2 := pair[0].(*metadata.CollectionNamespaceMapping)
+		targetManifestId, ok := pair[1].(uint64)
+		if ok && ok2 && router.Router.IsStartable() {
+			router.collectionsRouting.UpdateBrokenMappingsPair(brokenMappings, targetManifestId)
+		}
 	}
 
 	if len(errMap) > 0 {

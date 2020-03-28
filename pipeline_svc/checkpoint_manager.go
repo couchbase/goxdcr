@@ -606,7 +606,7 @@ func getDocsProcessedForReplication(topic string, vb_list []uint16, checkpoints_
 	logger.Infof("Start GetDocsProcessedForReplication for replication %v...", topic)
 
 	logger.Debugf("Getting checkpoint for %v\n", topic)
-	ckptDocs, err := checkpoints_svc.CheckpointsDocs(topic)
+	ckptDocs, err := checkpoints_svc.CheckpointsDocs(topic, false /*needBrokenMappings*/)
 	logger.Debugf("Done getting checkpoint for %v\n", topic)
 	if err != nil {
 		return 0, err
@@ -658,7 +658,7 @@ func (ckmgr *CheckpointManager) SetVBTimestamps(topic string) error {
 
 	// Get persisted checkpoints from metakv - each valid vbucket has a *metadata.CheckpointsDoc
 	ckmgr.logger.Infof("Getting checkpoint for %v\n", topic)
-	ckptDocs, err := ckmgr.checkpoints_svc.CheckpointsDocs(topic)
+	ckptDocs, err := ckmgr.checkpoints_svc.CheckpointsDocs(topic, true /*needBrokenMapping*/)
 	if err != nil {
 		ckmgr.RaiseEvent(common.NewEvent(common.ErrorEncountered, nil, ckmgr, nil, err))
 		return err
@@ -670,13 +670,18 @@ func (ckmgr *CheckpointManager) SetVBTimestamps(topic string) error {
 	target_support_xattr_now := base.IsClusterCompatible(ckmgr.target_cluster_version, base.VersionForRBACAndXattrSupport)
 	specInternalId := ckmgr.pipeline.Specification().InternalId
 
+	var brokenMappingModified bool
 	// Figure out if certain checkpoints need to be removed to force a complete resync due to external factors
 	for vbno, ckptDoc := range ckptDocs {
 		if !base.IsVbInList(vbno, listOfVbs) {
 			// if the vbno is no longer managed by the current checkpoint manager/pipeline,
 			// the checkpoint doc is no longer valid and needs to be deleted
 			// ignore errors, which should have been logged
-			ckmgr.checkpoints_svc.DelCheckpointsDoc(topic, vbno)
+			err = ckmgr.checkpoints_svc.DelCheckpointsDoc(topic, vbno)
+			if err == nil {
+				ckmgr.checkpoints_svc.PostDelCheckpointsDoc(topic, ckptDoc)
+				brokenMappingModified = true
+			}
 			deleted_vbnos = append(deleted_vbnos, vbno)
 		} else if target_support_xattr_now {
 			target_support_xattr_in_ckpt_doc := base.IsClusterCompatible(ckptDoc.TargetClusterVersion, base.VersionForRBACAndXattrSupport)
@@ -690,6 +695,8 @@ func (ckmgr *CheckpointManager) SetVBTimestamps(topic string) error {
 					ckmgr.RaiseEvent(common.NewEvent(common.ErrorEncountered, nil, ckmgr, nil, err))
 					return err
 				}
+				ckmgr.checkpoints_svc.PostDelCheckpointsDoc(topic, ckptDoc)
+				brokenMappingModified = true
 				deleted_vbnos = append(deleted_vbnos, vbno)
 			}
 		} else {
@@ -703,9 +710,16 @@ func (ckmgr *CheckpointManager) SetVBTimestamps(topic string) error {
 					ckmgr.RaiseEvent(common.NewEvent(common.ErrorEncountered, nil, ckmgr, nil, err))
 					return err
 				}
+				ckmgr.checkpoints_svc.PostDelCheckpointsDoc(topic, ckptDoc)
+				brokenMappingModified = true
 				deleted_vbnos = append(deleted_vbnos, vbno)
 			}
 		}
+	}
+
+	if brokenMappingModified {
+		// For potential deleted checkpoints, ensure the brokenMapping is synced with metakv
+		ckmgr.CommitBrokenMappingUpdates()
 	}
 
 	for _, deleted_vbno := range deleted_vbnos {
@@ -769,15 +783,15 @@ func (ckmgr *CheckpointManager) loadBrokenMapFromCkptDocs(ckptDocs map[uint16]*m
 			continue
 		}
 		for _, record := range ckptDoc.Checkpoint_records {
-			if record == nil || record.BrokenMappings == nil {
+			if record == nil || record.BrokenMappings() == nil {
 				continue
 			}
 			if record.TargetManifest > highestManifestId {
 				// Simply set the new map
-				ckmgr.cachedBrokenMap.brokenMap = record.BrokenMappings
+				ckmgr.cachedBrokenMap.brokenMap = *record.BrokenMappings()
 			} else if record.TargetManifest == highestManifestId {
 				// Same version - consolidate it into a bigger fishing net
-				ckmgr.cachedBrokenMap.brokenMap.Consolidate(record.BrokenMappings)
+				ckmgr.cachedBrokenMap.brokenMap.Consolidate(*record.BrokenMappings())
 			}
 		}
 	}
@@ -800,21 +814,15 @@ func (ckmgr *CheckpointManager) setTimestampForVB(vbno uint16, ts *base.VBTimest
 	return nil
 }
 
-func (ckmgr *CheckpointManager) restoreBrokenMappingToRouters(brokenMapping metadata.CollectionNamespaceMapping) {
-	if len(brokenMapping) == 0 {
+func (ckmgr *CheckpointManager) restoreBrokenMappingManifestsToRouter(brokenMapping *metadata.CollectionNamespaceMapping, manifestId uint64) {
+	if brokenMapping == nil || len(*brokenMapping) == 0 || manifestId == 0 {
 		return
 	}
 	settings := make(map[string]interface{})
-	settings[metadata.BrokenMappings] = brokenMapping
-	ckmgr.pipeline.UpdateSettings(settings)
-}
-
-func (ckmgr *CheckpointManager) restoreCorrespondingTargetManifestId(targetManifestId uint64) {
-	if targetManifestId == 0 {
-		return
-	}
-	settings := make(map[string]interface{})
-	settings[metadata.TargetManifestId] = targetManifestId
+	var pairList []interface{}
+	pairList = append(pairList, brokenMapping)
+	pairList = append(pairList, manifestId)
+	settings[metadata.BrokenMappingsPair] = pairList
 	ckmgr.pipeline.UpdateSettings(settings)
 }
 
@@ -823,12 +831,7 @@ func (ckmgr *CheckpointManager) startSeqnoGetter(getter_id int, listOfVbs []uint
 	ckmgr.logger.Infof("%v StartSeqnoGetter %v is started to do _pre_prelicate for vbs %v\n", ckmgr.pipeline.Topic(), getter_id, listOfVbs)
 	defer waitGrp.Done()
 
-	// TODO - MB-38399
-	var brokenMapOnce sync.Once
-	var targetManifestIdOnce sync.Once
-
 	for _, vbno := range listOfVbs {
-		// TODO - MB-38399 - brokenmapping should be broken out
 		// use math.MaxUint64 as max_seqno to make all checkpoint records eligible
 		vbts, vbStats, brokenMapping, targetManifestId, err := ckmgr.getDataFromCkpts(vbno, ckptDocs[vbno], math.MaxUint64)
 		if err != nil {
@@ -843,9 +846,7 @@ func (ckmgr *CheckpointManager) startSeqnoGetter(getter_id int, listOfVbs []uint
 			err_ch <- err_info
 			return
 		}
-		// TODO - MB-38399
-		brokenMapOnce.Do(func() { ckmgr.restoreBrokenMappingToRouters(brokenMapping) })
-		targetManifestIdOnce.Do(func() { ckmgr.restoreCorrespondingTargetManifestId(targetManifestId) })
+		ckmgr.restoreBrokenMappingManifestsToRouter(brokenMapping, targetManifestId)
 		err = ckmgr.setTimestampForVB(vbno, vbts)
 		if err != nil {
 			err_info := []interface{}{vbno, err}
@@ -857,7 +858,7 @@ func (ckmgr *CheckpointManager) startSeqnoGetter(getter_id int, listOfVbs []uint
 
 // Given a specific vbno and a list of checkpoints and a max possible seqno, return:
 // valid VBTimestamp and corresponding VB-specific stats for statsMgr that was stored in the same ckpt doc
-func (ckmgr *CheckpointManager) getDataFromCkpts(vbno uint16, ckptDoc *metadata.CheckpointsDoc, max_seqno uint64) (*base.VBTimestamp, VBCountMetricMap, metadata.CollectionNamespaceMapping, uint64, error) {
+func (ckmgr *CheckpointManager) getDataFromCkpts(vbno uint16, ckptDoc *metadata.CheckpointsDoc, max_seqno uint64) (*base.VBTimestamp, VBCountMetricMap, *metadata.CollectionNamespaceMapping, uint64, error) {
 	var agreedIndex int = -1
 
 	ckptRecordsList := ckmgr.ckptRecordsWLock(ckptDoc, vbno)
@@ -978,9 +979,9 @@ func (ckmgr *CheckpointManager) retrieveCkptDoc(vbno uint16) (*metadata.Checkpoi
 	return ckmgr.checkpoints_svc.CheckpointsDoc(ckmgr.pipeline.Topic(), vbno)
 }
 
-func (ckmgr *CheckpointManager) populateDataFromCkptDoc(ckptDoc *metadata.CheckpointsDoc, agreedIndex int, vbno uint16) (*base.VBTimestamp, metadata.CollectionNamespaceMapping, uint64, error) {
+func (ckmgr *CheckpointManager) populateDataFromCkptDoc(ckptDoc *metadata.CheckpointsDoc, agreedIndex int, vbno uint16) (*base.VBTimestamp, *metadata.CollectionNamespaceMapping, uint64, error) {
 	vbts := &base.VBTimestamp{Vbno: vbno}
-	var brokenMapping metadata.CollectionNamespaceMapping
+	var brokenMapping *metadata.CollectionNamespaceMapping
 	var targetManifestId uint64
 	if agreedIndex > -1 {
 		ckpt_records := ckptDoc.GetCheckpointRecords()
@@ -1006,7 +1007,7 @@ func (ckmgr *CheckpointManager) populateDataFromCkptDoc(ckptDoc *metadata.Checkp
 			vbts.ManifestIDs.SourceManifestId = ckpt_record.SourceManifest
 			vbts.ManifestIDs.TargetManifestId = ckpt_record.TargetManifest
 
-			brokenMapping = ckpt_record.BrokenMappings
+			brokenMapping = ckpt_record.BrokenMappings()
 			targetManifestId = ckpt_record.TargetManifest
 		}
 	}
@@ -1023,7 +1024,9 @@ func (ckmgr *CheckpointManager) populateDataFromCkptDoc(ckptDoc *metadata.Checkp
 			obj.ckpt.Dcp_snapshot_seqno = vbts.SnapshotStart
 			obj.ckpt.Dcp_snapshot_end_seqno = vbts.SnapshotEnd
 			obj.ckpt.Seqno = vbts.Seqno
-			obj.ckpt.BrokenMappings = brokenMapping
+			if brokenMapping != nil {
+				obj.ckpt.LoadBrokenMapping(*brokenMapping)
+			}
 			obj.ckpt.TargetManifest = targetManifestId
 		}
 	} else {
@@ -1090,6 +1093,26 @@ done:
 	ticker.Stop()
 }
 
+func (ckmgr *CheckpointManager) PreCommitBrokenMapping() {
+	// Before actually persisting the checkpoint, ensure that the current brokenmap is available before the checkpoints are populated
+	ckmgr.cachedBrokenMap.lock.RLock()
+	preUpsertMap := ckmgr.cachedBrokenMap.brokenMap.Clone()
+	ckmgr.cachedBrokenMap.lock.RUnlock()
+	err := ckmgr.checkpoints_svc.PreUpsertBrokenMapping(ckmgr.pipeline.Topic(), ckmgr.pipeline.Specification().InternalId, &preUpsertMap)
+	if err != nil {
+		ckmgr.logger.Warnf("Unable to pre-persist brokenMapping: %v", err)
+	}
+
+}
+
+func (ckmgr *CheckpointManager) CommitBrokenMappingUpdates() {
+	// If router updated ckptmgr's brokenmap during the checkpointing process, this call will ensure that all the necessary brokenmaps are persisted
+	err := ckmgr.checkpoints_svc.UpsertBrokenMapping(ckmgr.pipeline.Topic(), ckmgr.pipeline.Specification().InternalId)
+	if err != nil {
+		ckmgr.logger.Errorf("Unable to persist brokenMapping: %v", err)
+	}
+}
+
 // public API. performs one checkpoint operation on request
 func (ckmgr *CheckpointManager) PerformCkpt(fin_ch chan bool) {
 	ckmgr.logger.Infof("Start one time checkpointing for replication %v\n", ckmgr.pipeline.Topic())
@@ -1122,6 +1145,8 @@ func (ckmgr *CheckpointManager) PerformCkpt(fin_ch chan bool) {
 	}
 	load_distribution := base.BalanceLoad(number_of_workers, number_of_vbs)
 
+	ckmgr.PreCommitBrokenMapping()
+
 	worker_wait_grp := &sync.WaitGroup{}
 	var total_committing_time int64
 	for i := 0; i < number_of_workers; i++ {
@@ -1138,6 +1163,7 @@ func (ckmgr *CheckpointManager) PerformCkpt(fin_ch chan bool) {
 
 	//wait for all the getter done, then gather result
 	worker_wait_grp.Wait()
+	ckmgr.CommitBrokenMappingUpdates()
 	ckmgr.RaiseEvent(common.NewEvent(common.CheckpointDone, nil, ckmgr, nil, time.Duration(total_committing_time)*time.Nanosecond))
 
 }
@@ -1165,8 +1191,10 @@ func (ckmgr *CheckpointManager) performCkpt(fin_ch chan bool, wait_grp *sync.Wai
 		xattr_seqno_map = pipeline_utils.GetXattrSeqnos(ckmgr.pipeline)
 	}
 	var total_committing_time int64
+	ckmgr.PreCommitBrokenMapping()
 	ckmgr.performCkpt_internal(ckmgr.getMyVBs(), fin_ch, wait_grp, ckmgr.getCheckpointInterval(), through_seqno_map, high_seqno_and_vbuuid_map,
 		xattr_seqno_map, &total_committing_time, srcManifestIds, tgtManifestIds)
+	ckmgr.CommitBrokenMappingUpdates()
 	ckmgr.RaiseEvent(common.NewEvent(common.CheckpointDone, nil, ckmgr, nil, time.Duration(total_committing_time)*time.Nanosecond))
 
 }
@@ -1194,6 +1222,7 @@ func (ckmgr *CheckpointManager) performCkpt_internal(vb_list []uint16, fin_ch <-
 	ckmgr.logger.Infof("Checkpointing for replication %v, vb_list=%v, time_to_wait=%v, interval_btwn_vb=%v sec\n", ckmgr.pipeline.Topic(), vb_list, time_to_wait, interval_btwn_vb.Seconds())
 	err_map := make(map[uint16]error)
 
+	var totalSize int
 	for index, vb := range vb_list {
 		select {
 		case <-fin_ch:
@@ -1201,7 +1230,8 @@ func (ckmgr *CheckpointManager) performCkpt_internal(vb_list []uint16, fin_ch <-
 			return
 		default:
 			start_time_vb := time.Now()
-			err := ckmgr.doCheckpoint(vb, through_seqno_map, high_seqno_and_vbuuid_map, xattr_seqno_map, srcManifestIds, tgtManifestIds)
+			size, err := ckmgr.doCheckpoint(vb, through_seqno_map, high_seqno_and_vbuuid_map, xattr_seqno_map, srcManifestIds, tgtManifestIds)
+			totalSize += size
 			committing_time_vb := time.Since(start_time_vb)
 			atomic.AddInt64(total_committing_time, committing_time_vb.Nanoseconds())
 			if err != nil {
@@ -1216,7 +1246,7 @@ func (ckmgr *CheckpointManager) performCkpt_internal(vb_list []uint16, fin_ch <-
 		}
 	}
 
-	ckmgr.logger.Infof("Done checkpointing for replication %v with vb list %v\n", ckmgr.pipeline.Topic(), vb_list)
+	ckmgr.logger.Infof("Done checkpointing for replication %v with vb list %v totalSize=%v\n", ckmgr.pipeline.Topic(), vb_list, totalSize)
 	if len(err_map) > 0 {
 		ckmgr.logger.Infof("Errors encountered in checkpointing for replication %v: %v\n", ckmgr.pipeline.Topic(), err_map)
 	}
@@ -1227,36 +1257,37 @@ func (ckmgr *CheckpointManager) performCkpt_internal(vb_list []uint16, fin_ch <-
  * If update is successful, then it will persist the record in the checkpoint service.
  * Returns an error if version number mismatches while updating.
  * If an error occurs during persistence, ignore and override the error and logs an error message.
+ * Returns size persisted
  */
 func (ckptRecord *checkpointRecordWithLock) updateAndPersist(ckmgr *CheckpointManager, vbno uint16, versionNumberIn uint64,
-	xattrSeqno uint64, incomingRecord *metadata.CheckpointRecord) error {
+	xattrSeqno uint64, incomingRecord *metadata.CheckpointRecord) (int, error) {
 
 	if ckptRecord == nil {
-		return errors.New("Nil ckptRecord")
+		return 0, errors.New("Nil ckptRecord")
 	}
 
 	ckptRecord.lock.Lock()
 	defer ckptRecord.lock.Unlock()
 
 	if ckptRecord.ckpt == nil {
-		return errors.New("Nil ckpt")
+		return 0, errors.New("Nil ckpt")
 	}
 
 	if versionNumberIn != ckptRecord.versionNum {
-		return ckptRecordMismatch
+		return 0, ckptRecordMismatch
 	}
 	// Update the record
 	ckptRecord.ckpt.Load(incomingRecord)
 	ckptRecord.versionNum++
 
 	// Persist the record
-	persistErr := ckmgr.persistCkptRecord(vbno, ckptRecord.ckpt, xattrSeqno)
+	persistSize, persistErr := ckmgr.persistCkptRecord(vbno, ckptRecord.ckpt, xattrSeqno)
 	if persistErr == nil {
 		ckmgr.raiseSuccessCkptForVbEvent(*ckptRecord.ckpt, vbno)
 	} else {
 		ckmgr.logger.Warnf("%v skipping checkpointing for vb=%v due to error persisting checkpoint record. err=%v", ckmgr.pipeline.Topic(), vbno, persistErr)
 	}
-	return nil
+	return persistSize, nil
 }
 
 /**
@@ -1271,15 +1302,15 @@ func (ckptRecord *checkpointRecordWithLock) updateAndPersist(ckmgr *CheckpointMa
  * 8. Most up-to-date Broken Collection Mapping
  */
 func (ckmgr *CheckpointManager) doCheckpoint(vbno uint16, through_seqno_map map[uint16]uint64,
-	high_seqno_and_vbuuid_map map[uint16][]uint64, xattr_seqno_map, srcManifestIds, tgtManifestIds map[uint16]uint64) (err error) {
+	high_seqno_and_vbuuid_map map[uint16][]uint64, xattr_seqno_map, srcManifestIds, tgtManifestIds map[uint16]uint64) (size int, err error) {
 	//locking the current ckpt record and notsent_seqno list for this vb, no update is allowed during the checkpointing
 	ckmgr.logger.Debugf("%v Checkpointing for vb=%v\n", ckmgr.pipeline.Topic(), vbno)
 
 	ckpt_obj, ok := ckmgr.cur_ckpts[vbno]
 	if !ok {
-		err := fmt.Errorf("%v Trying to doCheckpoint on vb=%v which is not in MyVBList", ckmgr.pipeline.Topic(), vbno)
+		err = fmt.Errorf("%v Trying to doCheckpoint on vb=%v which is not in MyVBList", ckmgr.pipeline.Topic(), vbno)
 		ckmgr.handleGeneralError(err)
-		return err
+		return
 	}
 
 	var curCkptTargetVBOpaque metadata.TargetVBOpaque
@@ -1295,7 +1326,8 @@ func (ckmgr *CheckpointManager) doCheckpoint(vbno uint16, through_seqno_map map[
 	through_seqno, err := ckmgr.getThroughSeqno(vbno, through_seqno_map)
 	if err != nil {
 		ckmgr.logger.Warnf("%v skipping checkpointing for vb=%v. err=%v", ckmgr.pipeline.Topic(), vbno, err)
-		return nil
+		err = nil
+		return
 	}
 
 	// Item 1:
@@ -1310,22 +1342,23 @@ func (ckmgr *CheckpointManager) doCheckpoint(vbno uint16, through_seqno_map map[
 
 	if through_seqno == last_seqno {
 		ckmgr.logger.Debugf("%v No replication has happened in vb %v since replication start or last checkpoint. seqno=%v. Skip checkpointing\\n", ckmgr.pipeline.Topic(), vbno, last_seqno)
-		return nil
+		return
 	}
 
 	if curCkptTargetVBOpaque == nil {
 		ckmgr.logger.Infof("%v remote bucket is an older node, no checkpointing should be done.", ckmgr.pipeline.Topic())
-		return nil
+		return
 	}
 
 	remote_seqno, err := ckmgr.getRemoteSeqno(vbno, high_seqno_and_vbuuid_map, curCkptTargetVBOpaque)
 	if err != nil {
 		if err == targetVbuuidChangedError {
 			// vb uuid on target has changed. rollback may be needed. return error to get pipeline restarted
-			return err
+			return
 		} else {
 			ckmgr.logger.Warnf("%v skipping checkpointing for vb=%v. err=%v", ckmgr.pipeline.Topic(), vbno, err)
-			return nil
+			err = nil
+			return
 		}
 	}
 
@@ -1339,7 +1372,8 @@ func (ckmgr *CheckpointManager) doCheckpoint(vbno uint16, through_seqno_map map[
 		// skip checkpointing of this vb
 		// return nil so that we can continue to checkpoint the next vb
 		ckmgr.logger.Warnf("%v\n", failoverUuidErr.Error())
-		return nil
+		err = nil
+		return
 	}
 
 	// Go through the local snapshot records repository and figure out which snapshot contains this latest sequence number
@@ -1357,14 +1391,15 @@ func (ckmgr *CheckpointManager) doCheckpoint(vbno uint16, through_seqno_map map[
 	xattr_seqno, err := ckmgr.getXattrSeqno(vbno, xattr_seqno_map, through_seqno)
 	if err != nil {
 		ckmgr.logger.Warnf("%v skipping checkpointing for vb=%v. err=%v", ckmgr.pipeline.Topic(), vbno, err)
-		return nil
+		err = nil
+		return
 	}
 
 	// Get stats that need to persist
 	vbCountMetrics, err := ckmgr.statsMgr.GetVBCountMetrics(vbno)
 	if err != nil {
 		ckmgr.logger.Warnf("%v unable to get %v metric from stats manager\n", DOCS_FILTERED_METRIC)
-		return err
+		return
 	}
 	filteredItems := vbCountMetrics[DOCS_FILTERED_METRIC]
 	filterFailed := vbCountMetrics[DOCS_UNABLE_TO_FILTER_METRIC]
@@ -1391,19 +1426,26 @@ func (ckmgr *CheckpointManager) doCheckpoint(vbno uint16, through_seqno_map map[
 	ckmgr.cachedBrokenMap.lock.RUnlock()
 
 	// Write-operation - feed the temporary variables and update them into the record and also write them to metakv
-	newCkpt := metadata.NewCheckpointRecord(ckRecordFailoverUuid, through_seqno, ckRecordDcpSnapSeqno, ckRecordDcpSnapEndSeqno, ckptRecordTargetSeqno,
+	newCkpt, err := metadata.NewCheckpointRecord(ckRecordFailoverUuid, through_seqno, ckRecordDcpSnapSeqno, ckRecordDcpSnapEndSeqno, ckptRecordTargetSeqno,
 		uint64(filteredItems), uint64(filterFailed), srcManifestId, tgtManifestId, brokenMapping)
-	err = ckpt_obj.updateAndPersist(ckmgr, vbno, currRecordVersion, xattr_seqno, newCkpt)
+	if err != nil {
+		ckmgr.logger.Errorf("Unable to create a checkpoint record due to - %v", err)
+		err = nil
+		return
+	}
+
+	size, err = ckpt_obj.updateAndPersist(ckmgr, vbno, currRecordVersion, xattr_seqno, newCkpt)
 
 	if err != nil {
 		// We weren't able to atomically update the checkpoint record. This checkpoint record is essentially lost
 		// since someone jumped ahead of us
 		ckmgr.logger.Warnf("%v skipping checkpointing for vb=%v version %v since a more recent checkpoint has been completed",
 			ckmgr.pipeline.Topic(), vbno, currRecordVersion)
+		err = nil
 	}
 	// no error fall through. return nil here to keep checkpointing/replication going.
 	// if there is a need to stop checkpointing/replication, it needs to be done in a separate return statement
-	return nil
+	return
 }
 
 func (ckmgr *CheckpointManager) getThroughSeqno(vbno uint16, through_seqno_map map[uint16]uint64) (uint64, error) {
@@ -1479,7 +1521,7 @@ func (ckmgr *CheckpointManager) raiseSuccessCkptForVbEvent(ckpt_record metadata.
 	ckmgr.RaiseEvent(common.NewEvent(common.CheckpointDoneForVB, ckpt_record, ckmgr, nil, vbno))
 }
 
-func (ckmgr *CheckpointManager) persistCkptRecord(vbno uint16, ckpt_record *metadata.CheckpointRecord, xattr_seqno uint64) error {
+func (ckmgr *CheckpointManager) persistCkptRecord(vbno uint16, ckpt_record *metadata.CheckpointRecord, xattr_seqno uint64) (int, error) {
 	ckmgr.logger.Debugf("Persist vb=%v ckpt_record=%v for %v\n", vbno, ckpt_record, ckmgr.pipeline.Topic())
 	return ckmgr.checkpoints_svc.UpsertCheckpoints(ckmgr.pipeline.Topic(), ckmgr.pipeline.Specification().InternalId, vbno, ckpt_record, xattr_seqno, ckmgr.target_cluster_version)
 }
@@ -1573,12 +1615,19 @@ func (ckmgr *CheckpointManager) OnEvent(event *common.Event) {
 			}
 			newerMap := ckmgr.cachedBrokenMap.brokenMap.Clone()
 			ckmgr.cachedBrokenMap.lock.Unlock()
+			ckmgr.wait_grp.Add(2)
 			// Can do this in the background - manifest updates usually don't happen too often
 			// to warrant a serializer
-			ckmgr.wait_grp.Add(1)
 			go ckmgr.logBrokenMapUpdatesToUI(olderMap, newerMap)
+			// Just in case checkpoint operations may use this, ensure that this belongs
+			go ckmgr.preUpsertBrokenMapTask(newerMap)
 		}
 	}
+}
+
+func (ckmgr *CheckpointManager) preUpsertBrokenMapTask(newerMap metadata.CollectionNamespaceMapping) {
+	defer ckmgr.wait_grp.Done()
+	ckmgr.checkpoints_svc.PreUpsertBrokenMapping(ckmgr.pipeline.Topic(), ckmgr.pipeline.Specification().InternalId, &newerMap)
 }
 
 func (ckmgr *CheckpointManager) logBrokenMapUpdatesToUI(olderMap, newerMap metadata.CollectionNamespaceMapping) {
@@ -1710,8 +1759,7 @@ func (ckmgr *CheckpointManager) UpdateVBTimestamps(vbno uint16, rollbackseqno ui
 
 	pipeline_startSeqnos_map[vbno] = vbts
 
-	ckmgr.restoreCorrespondingTargetManifestId(targetManifestId)
-	ckmgr.restoreBrokenMappingToRouters(brokenMappings)
+	ckmgr.restoreBrokenMappingManifestsToRouter(brokenMappings, targetManifestId)
 
 	//set the start seqno on through_seqno_tracker_svc
 	ckmgr.through_seqno_tracker_svc.SetStartSeqno(vbno, vbts.Seqno, vbts.ManifestIDs.SourceManifestId)

@@ -920,14 +920,9 @@ func (xdcrf *XDCRFactory) constructSettingsForRouter(pipeline common.Pipeline, s
 		routerSettings[parts.DCP_VBTimestamp] = vbTimestamp
 	}
 
-	brokenMappings, ok := settings[metadata.BrokenMappings]
+	brokenMappingsPair, ok := settings[metadata.BrokenMappingsPair]
 	if ok {
-		routerSettings[metadata.BrokenMappings] = brokenMappings
-	}
-
-	targetManifestId, ok := settings[metadata.TargetManifestId]
-	if ok {
-		routerSettings[metadata.TargetManifestId] = targetManifestId
+		routerSettings[metadata.BrokenMappingsPair] = brokenMappingsPair
 	}
 
 	return routerSettings, nil
