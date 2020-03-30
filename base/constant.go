@@ -100,6 +100,11 @@ var CollectionsUidBase int = 16
 var UrlDelimiter = "/"
 var UrlPortNumberDelimiter = ":"
 
+// Custom conflict resolution related constants
+var DeveloperPreview = false
+var JSEngineWorkersPerNode = 1
+var JSEngineThreadsPerWorker = 2
+
 // constants for ipv6 addresses
 const Ipv6AddressSeparator = ":"
 const LeftBracket = "["

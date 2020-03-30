@@ -30,6 +30,7 @@ import (
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/common"
 	"github.com/couchbase/goxdcr/factory"
+	"github.com/couchbase/goxdcr/functions"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/goxdcr/pipeline"
@@ -179,6 +180,11 @@ func StartReplicationManager(sourceKVHost string,
 		replication_mgr.upgradeRemoteClusterRefs()
 
 		replication_mgr.initMetadataChangeMonitor()
+
+		if base.DeveloperPreview {
+			// Init and start Eventing Javascript Engine before admin port is started
+			functions.Init(sourceKVHost, xdcrRestPort)
+		}
 
 		// start adminport
 		adminport := NewAdminport(sourceKVHost, xdcrRestPort, sourceKVAdminPort, replication_mgr.adminport_finch, replication_mgr.utils)
