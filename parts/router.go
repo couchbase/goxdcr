@@ -150,24 +150,12 @@ type Router struct {
 type CollectionsRouter struct {
 	collectionsManifestSvc service_def.CollectionsManifestSvc
 	spec                   *metadata.ReplicationSpecification
-	finCh                  chan bool
 	started                uint32
 	logger                 *log.CommonLogger
-	waitGrp                sync.WaitGroup
-
-	// Requests that failed collection mapping routing will be put into this buffer
-	// and every retryInterval, all the data in this buffer will be retried
-	retryBufferCh    chan interface{}
-	retryInterval    time.Duration
-	retryForwardFunc func(interface{}) error
 
 	// No lock needed as this is going to be called only by the mother-Router
 	// which is run on a single go-routine
 	lastKnownManifest *metadata.CollectionsManifest
-
-	// dynamic
-	re_retryQueueInitialized uint32
-	tempRetryCh              chan interface{}
 
 	/*
 	 * When retry fails, these members record the needed information
@@ -184,21 +172,13 @@ type CollectionsRouter struct {
 func NewCollectionsRouter(colManifestSvc service_def.CollectionsManifestSvc,
 	spec *metadata.ReplicationSpecification,
 	logger *log.CommonLogger,
-	retryForwardFunc func(interface{}) error,
-	retryInterval time.Duration,
-	retryBufferCap int,
 	routingUpdater CollectionsRoutingUpdater,
 	ignoreDataFunc IgnoreDataEventer,
 	fatalErrorFunc func(error)) *CollectionsRouter {
 	return &CollectionsRouter{
 		collectionsManifestSvc: colManifestSvc,
 		spec:                   spec,
-		finCh:                  make(chan bool),
 		logger:                 logger,
-		retryForwardFunc:       retryForwardFunc,
-		retryBufferCh:          make(chan interface{}, retryBufferCap),
-		tempRetryCh:            make(chan interface{}, retryBufferCap),
-		retryInterval:          retryInterval,
 		brokenMapping:          make(metadata.CollectionNamespaceMapping),
 		routingUpdater:         routingUpdater,
 		ignoreDataFunc:         ignoreDataFunc,
@@ -208,16 +188,11 @@ func NewCollectionsRouter(colManifestSvc service_def.CollectionsManifestSvc,
 
 func (c *CollectionsRouter) Start() error {
 	atomic.StoreUint32(&c.started, 1)
-	c.waitGrp.Add(1)
-	go c.runRetry()
 	return nil
 }
 
 func (c *CollectionsRouter) Stop() error {
-	if atomic.CompareAndSwapUint32(&c.started, 1, 0) {
-		close(c.finCh)
-	}
-	c.waitGrp.Wait()
+	atomic.CompareAndSwapUint32(&c.started, 1, 0)
 	return nil
 }
 
@@ -258,7 +233,8 @@ func (c *CollectionsRouter) RouteReqToLatestTargetManifest(namespace *base.Colle
 		if exists {
 			err = base.ErrorIgnoreRequest
 		} else {
-			err = fmt.Errorf("Target manifest version %v does not include scope %v collection %v", manifestId, namespace.ScopeName, namespace.CollectionName)
+			err = fmt.Errorf("Target manifest version %v does not include scope %v collection %v - mutations with this mapping will need to be backfilled", manifestId, namespace.ScopeName, namespace.CollectionName)
+			c.logger.Warnf(err.Error())
 		}
 	}
 	return
@@ -310,174 +286,6 @@ func (c *CollectionsRouter) handleNewManifestChanges(latestManifest *metadata.Co
 	return
 }
 
-// This will attempt to retry the mutation by queuing it back in the queue if possible
-// Note - will block if full
-func (c *CollectionsRouter) retryRequest(req interface{}) error {
-	select {
-	case <-c.finCh:
-		return PartStoppedError
-	case c.retryBufferCh <- req:
-		return nil
-	default:
-		return c.emergencyProcessOneReq(req)
-	}
-}
-
-// Should only be run by runRetry goroutine
-func (c *CollectionsRouter) addToTemporaryRetryQueue(req interface{}) error {
-	wrappedMcr, ok := req.(*base.WrappedMCRequest)
-	if !ok {
-		panic(fmt.Sprintf("coding error type is: %v", reflect.TypeOf((req))))
-	}
-	if wrappedMcr.ColInfo.RoutingRetryCnt >= base.MaxCollectionsRoutingRetry {
-		c.recordUnroutableRequest(req)
-		// Record UnroutableRequest means this req is ignored
-		return nil
-	} else {
-		wrappedMcr.ColInfo.RoutingRetryCnt++
-	}
-
-	select {
-	case <-c.finCh:
-		return PartStoppedError
-	case c.tempRetryCh <- req:
-		return nil
-	default:
-		// buffer is full
-		return c.emergencyProcessOneReqFromTemporaryQueue(req)
-	}
-}
-
-// Should only be run by runRetry
-func (c *CollectionsRouter) moveItemsFromTempRetryQueue() error {
-	for {
-		select {
-		case <-c.finCh:
-			return PartStoppedError
-		case req := <-c.tempRetryCh:
-			select {
-			case <-c.finCh:
-				return PartStoppedError
-			case c.retryBufferCh <- req:
-				// happy path
-			default:
-				// retryBuffer full
-				c.emergencyProcessOneReqFromTemporaryQueue(req)
-			}
-		default:
-			// All has been processed
-			return nil
-		}
-	}
-}
-
-// Run when temporary queue is full
-// Its job is to pop off one item from retryBufferCh for immediate processing,
-// pop one off from temporary queue and put it into retryBuffer
-// and then put the incomingReq into the temporary queue
-func (c *CollectionsRouter) emergencyProcessOneReqFromTemporaryQueue(incomingReq interface{}) error {
-	for {
-		select {
-		case <-c.finCh:
-			return PartStoppedError
-		case tempReq := <-c.tempRetryCh:
-			c.tempRetryCh <- incomingReq
-			select {
-			case <-c.finCh:
-				return PartStoppedError
-			case processReq := <-c.retryBufferCh:
-				c.retryBufferCh <- tempReq
-				// Flush the retryBufferCh
-				err := c.retryForwardFunc(processReq)
-				if err != nil && err != base.ErrorIgnoreRequest {
-					c.recordUnroutableRequest(processReq)
-				}
-				return nil
-			default:
-				// retryBufferCh had nothing to take out
-				select {
-				case <-c.finCh:
-					return PartStoppedError
-				case c.retryBufferCh <- tempReq:
-					return nil
-				default:
-					// For really odd emergency - just process the tempReq out of order
-					err := c.retryForwardFunc(tempReq)
-					if err != nil && err != base.ErrorIgnoreRequest {
-						c.recordUnroutableRequest(tempReq)
-					}
-					return nil
-				}
-			}
-		default:
-			// Nothing to move
-			return nil
-		}
-	}
-}
-
-// Essentially, the #1 request waiting to be retried will immediately be called to retry
-// And the Maxnumber of retries no longer applies to it. Any failed error will immediately
-// be marked as a broken route
-func (c *CollectionsRouter) emergencyProcessOneReq(incomingReq interface{}) error {
-	for {
-		select {
-		case <-c.finCh:
-			return PartStoppedError
-		case req := <-c.retryBufferCh:
-			c.retryBufferCh <- incomingReq
-			// Flush the retryBufferCh
-			err := c.retryForwardFunc(req)
-			if err != nil && err != base.ErrorIgnoreRequest {
-				c.recordUnroutableRequest(req)
-			}
-			return nil
-		default:
-			// Nothing to move
-			return nil
-		}
-	}
-}
-
-// This handler is responsible for
-func (c *CollectionsRouter) runRetry() {
-	defer c.waitGrp.Done()
-	manifestRefreshTicker := time.NewTicker(c.retryInterval)
-
-	for {
-		select {
-		case <-c.finCh:
-			manifestRefreshTicker.Stop()
-			return
-		case <-manifestRefreshTicker.C:
-		timerLoop:
-			for {
-				select {
-				case <-c.finCh:
-					manifestRefreshTicker.Stop()
-					return
-				case requestToBeRetried := <-c.retryBufferCh:
-					err := c.retryForwardFunc(requestToBeRetried)
-					if err != nil {
-						err = c.addToTemporaryRetryQueue(requestToBeRetried)
-						if err != nil {
-							// Just for safety
-							c.fatalErrorFunc(err)
-						}
-					}
-				default:
-					// Either there is no requests to retry, or need to finalize the
-					// requests for next cycle, this function will handle it
-					c.moveItemsFromTempRetryQueue()
-					break timerLoop
-				}
-			}
-		default:
-			// Do nothing
-		}
-	}
-}
-
 // When a request is considered unroutable, then it needs to be marked to be
 // bypassed. Until it is marked, the throughseqNo will remain static, so data loss is safe
 // The process must be that the broken mapping is noted before it can be marked bypassed
@@ -513,21 +321,12 @@ func (c CollectionsRoutingMap) Init(downStreamParts map[string]common.Part,
 	logger *log.CommonLogger,
 	routingUpdater CollectionsRoutingUpdater,
 	ignoreDataFunc IgnoreDataEventer,
-	fatalErrorFunc func(error),
-	retryForwardFunc connector.CollectionsRerouteFunc) error {
-
-	retryInterval := time.Duration(base.ManifestRefreshTgtInterval) * time.Second
-	retryBufferCap := base.UprFeedDataChanLength * spec.Settings.SourceNozzlePerNode / spec.Settings.TargetNozzlePerNode
+	fatalErrorFunc func(error)) error {
 
 	for partId, _ := range downStreamParts {
 		_, exists := c[partId]
 		if !exists {
-			// This is equivalent inside to connector.Router's Forward()
-			wrappedRetryFunc := func(req interface{}) error {
-				return retryForwardFunc(req, partId)
-			}
-			c[partId] = NewCollectionsRouter(colManifestSvc, spec, logger, wrappedRetryFunc, retryInterval,
-				retryBufferCap, routingUpdater, ignoreDataFunc, fatalErrorFunc)
+			c[partId] = NewCollectionsRouter(colManifestSvc, spec, logger, routingUpdater, ignoreDataFunc, fatalErrorFunc)
 		}
 	}
 
@@ -649,8 +448,7 @@ func NewRouter(id string, spec *metadata.ReplicationSpecification,
 	}
 
 	router.collectionsRouting.Init(downStreamParts, collectionsManifestSvc, spec, router.Logger(),
-		CollectionsRoutingUpdater(routingUpdater), IgnoreDataEventer(ignoreRequestFunc), fatalErrorFunc,
-		router.Router.RetryCollectionsForward)
+		CollectionsRoutingUpdater(routingUpdater), IgnoreDataEventer(ignoreRequestFunc), fatalErrorFunc)
 
 	router.Logger().Infof("%v created with %d downstream parts isHighReplication=%v and filter=%v\n", router.id, len(downStreamParts), isHighReplication, filterPrintMsg)
 	return router, nil
@@ -832,13 +630,9 @@ func (router *Router) RouteCollection(data interface{}, partId string) error {
 				router.Logger().Debugf("Request map is already marked broken for %v. Ready to be ignored", string(mcRequest.Req.Key))
 			}
 			router.collectionsRouting[partId].ignoreDataFunc(mcRequest)
-			err = nil
 		} else {
-			err = router.collectionsRouting[partId].retryRequest(mcRequest)
-			if err == nil && router.Logger().GetLogLevel() >= log.LogLevelDebug {
-				router.Logger().Debugf("Request %v with namespace %v:%v could not be mapped. Is in retry queue",
-					string(mcRequest.Req.Key), mcRequest.ColNamespace.ScopeName, mcRequest.ColNamespace.CollectionName)
-			}
+			router.collectionsRouting[partId].recordUnroutableRequest(mcRequest)
+			err = base.ErrorIgnoreRequest
 		}
 		return err
 	}

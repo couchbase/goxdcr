@@ -126,32 +126,6 @@ func (router *Router) Forward(data interface{}) error {
 	return err
 }
 
-// When a collection request is not successfully routed, it will get a few more chances to be re-routed
-// Once it has finished re-routed, this function mirrors the Forward() but only does the collections
-// re-routing and forwarding portion
-func (router *Router) RetryCollectionsForward(wrappedMCRequest interface{}, downstreamPartId string) error {
-	router.stateLock.RLock()
-	defer router.stateLock.RUnlock()
-
-	part, exists := router.downStreamParts[downstreamPartId]
-	if !exists || router.collectionsRerouteCb == nil || part == nil {
-		return ErrorInvalidRouterConfig
-	}
-
-	err := router.collectionsRerouteCb(wrappedMCRequest, downstreamPartId)
-	if err == nil {
-		err = part.Receive(wrappedMCRequest)
-		if err != nil {
-			// TODO - MB-38023 - KV may lag even though manifest says collection exists
-			// May be moved into XMEM
-		}
-	} else if err == base.ErrorIgnoreRequest {
-		err = nil
-	}
-
-	return err
-}
-
 func (router *Router) DownStreams() map[string]common.Part {
 	router.stateLock.RLock()
 	defer router.stateLock.RUnlock()
