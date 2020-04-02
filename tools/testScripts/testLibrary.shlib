@@ -13,6 +13,7 @@ function checkItemCnt {
 	local cluster=$1
 	local bucket=$2
 	local expectedCnt=$3
+	local i
 
 	local previousItemCnt=0
 	for (( i=0; $i < 5; i=$(($i+1)) ))
@@ -111,6 +112,7 @@ function waitForChangesLeft0 {
 	local srcBucket=$2
 	local targetCluster=$3
 	local targetBucket=$4
+	local i
 
 	for (( i=0; $i < 3; i=$(($i+1)) ))
 	do
@@ -130,6 +132,7 @@ function checkChangesLeftInternal {
 	local srcBucket=$2
 	local targetCluster=$3
 	local targetBucket=$4
+	local i
 
 	local lastChangesLeft=0
 
@@ -169,6 +172,7 @@ function checkDataReplicatedIsZero {
 	local targetCluster=$3
 	local targetBucket=$4
 	local oldDataReplicated=$5
+	local i
 
 	for (( i=0; $i < 3; i=$(($i+1)) ))
 	do
@@ -180,11 +184,12 @@ function checkDataReplicatedIsZero {
 				break
 			fi
 		else
-			break
+			return 0
 		fi
 		echo "Sleeping 10 seconds and retrying..."
 		sleep 10
 	done
+	exit 1
 }
 
 function checkDocsProcessed {
@@ -193,6 +198,7 @@ function checkDocsProcessed {
 	local targetCluster=$3
 	local targetBucket=$4
 	local docsProcessedCheck=$5
+	local i
 
 	for (( i=0; $i < 5; i=$(($i+1)) ))
 	do
@@ -200,11 +206,12 @@ function checkDocsProcessed {
 		if (( $docsProcessed != $docsProcessedCheck ));then
 			echo "DocsProcessed: $docsProcessed. Waiting for it to be $docsProcessedCheck..."
 		else
-			break
+			return 0
 		fi
 		echo "Sleeping 10 seconds and retrying..."
 		sleep 10
 	done
+	exit 1
 }
 
 function getSpecificInternalSettings {
@@ -212,4 +219,16 @@ function getSpecificInternalSettings {
 	local key=$2
 
 	echo `listInternalSettings "$clusterName" | jq ".$key"`
+}
+
+function killGoXdcr {
+	local clusterName=$1
+	local sourcePort=${CLUSTER_NAME_PORT_MAP[$clusterName]:-}
+
+	if [[ -z "$sourcePort" ]];then
+		echo "Unable to kill goxdcr as source port is not found"
+	fi
+
+	echo "Killing GoXDCR for $clusterName with port $sourcePort..."
+	ps -ef | grep goxdcr | grep $sourcePort | awk '{print $2}' | xargs kill
 }

@@ -146,6 +146,7 @@ func (c *CollectionsManifestService) handleDelReplSpec(oldSpec *metadata.Replica
 	c.agentsMtx.Unlock()
 
 	if ok {
+		agent.DeleteManifests()
 		agent.Stop()
 	}
 
@@ -455,7 +456,6 @@ func (a *CollectionsManifestAgent) runPersistRequestHandler() {
 }
 
 // This method is called when checkpoint manager is doing a checkpointing
-// TODO: Checkpoint manager must call this AFTER checkpoints for all vbs have been persisted
 // Its job is to read the checkpointed files, and then read its internal pulled caches, dedup and prune
 // so that all the manifests that are needed by both source and target are stored in metakv
 // If the metakv already contains all the necessary manifests, via the use of sha256 hash, then don't
@@ -557,6 +557,10 @@ func (a *CollectionsManifestAgent) persistNeededManifestsInternal() (srcErr, tgt
 	}
 
 	return
+}
+
+func (a *CollectionsManifestAgent) DeleteManifests() error {
+	return a.metakvSvc.DelManifests(a.replicationSpec)
 }
 
 type ManifestsCache map[uint64]*metadata.CollectionsManifest

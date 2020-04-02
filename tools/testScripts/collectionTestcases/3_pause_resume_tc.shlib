@@ -45,6 +45,57 @@ function runDataLoad {
 	waitForBgJobs
 }
 
+function pauseAndResumeMultiples {
+	local total=$1
+	local i
+
+	for (( i=0; $i<$total; i=$(($i+1)) ))
+	do
+		echo "Sleeping 10 seconds before running another pass"
+		sleep 10
+		echo "Running multiple pause and resumes $(( $i+1 )) out of $total"
+		oldDataReplicated=`getDataReplicated "C1" "B1" "C2" "B2"`
+		oldDocsProcessed=`getDocsProcessed "C1" "B1" "C2" "B2"`
+
+		echo "Pausing replication - current data replicated: $oldDataReplicated docs_processed: $oldDocsProcessed"
+		pauseReplication "C1" "B1" "C2" "B2"
+		echo "Waiting 10 seconds for pipeline to really pause"
+		sleep 10
+		grepForPanics
+
+		resumeReplication "C1" "B1" "C2" "B2"
+		echo "Waiting 10 seconds for resume to finish"
+		sleep 10
+		grepForPanics
+
+		checkDocsProcessed "C1" "B1" "C2" "B2" "$oldDocsProcessed"
+		checkDataReplicatedIsZero "C1" "B1" "C2" "B2" "$oldDataReplicated"
+
+		# Kill source goxdcr
+		killGoXdcr "C1"
+		echo "Sleeping 15 seconds for goxdcr to reboot"
+		sleep 15
+		checkUnidirectionalChangesLeft
+		grepForPanics
+
+		# Run data load again
+		oldDataReplicated=`getDataReplicated "C1" "B1" "C2" "B2"`
+		runDataLoad "$i"
+		# Changes left should go to 0
+		checkUnidirectionalChangesLeft
+		if (( `getDocsProcessed "C1" "B1" "C2" "B2"` == $oldDocsProcessed ));then
+			echo "Data processed should not be the same after run"
+			exit 1
+		fi
+		if (( `getDataReplicated "C1" "B1" "C2" "B2"` == $oldDataReplicated ));then
+			# Because broken mapping should have persisted
+			echo "Data replicated should not be the same after run"
+			exit 1
+		fi
+		grepForPanics
+	done
+}
+
 function runTestCase {
 	echo "============================================================================"
 	echo "Running pause and resume test case"
@@ -69,41 +120,8 @@ function runTestCase {
 	checkItemCnt "C2" "B2" $CBWORKLOAD_COLLECTION_NUM_ITEMS
 
 	checkUnidirectionalChangesLeft
-	oldDataReplicated=`getDataReplicated "C1" "B1" "C2" "B2"`
-	oldDocsProcessed=`getDocsProcessed "C1" "B1" "C2" "B2"`
 
-	echo "Pausing replication - current data replicated: $oldDataReplicated docs_processed: $oldDocsProcessed"
-	pauseReplication "C1" "B1" "C2" "B2"
-	echo "Waiting 15 seconds for pipeline to really pause"
-	sleep 15
-	grepForPanics
-	
-	checkUnidirectionalChangesLeft
-
-	resumeReplication "C1" "B1" "C2" "B2"
-	echo "Waiting 15 seconds for resume to finish"
-	sleep 15
-	grepForPanics
-
-	checkDocsProcessed "C1" "B1" "C2" "B2" "$oldDocsProcessed"
-	checkDataReplicatedIsZero "C1" "B1" "C2" "B2" "$oldDataReplicated"
-
-	# Run data load again
-	oldDataReplicated=`getDataReplicated "C1" "B1" "C2" "B2"`
-	runDataLoad
-	echo "Waiting 10 seconds before checking"
-	sleep 10
-	# Changes left should go to 0
-	checkUnidirectionalChangesLeft
-	if (( `getDocsProcessed "C1" "B1" "C2" "B2"` == $oldDocsProcessed ));then
-		echo "Data processed should not be the same after run"
-		exit 1
-	fi
-	if (( `getDataReplicated "C1" "B1" "C2" "B2"` == $oldDataReplicated ));then
-		echo "Data replicated should not be the same after run"
-		exit 1
-	fi
-	grepForPanics
+	pauseAndResumeMultiples 3
 
 	echo "============================================================================"
 	echo "PASSED"

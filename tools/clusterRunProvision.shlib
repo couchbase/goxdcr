@@ -237,6 +237,7 @@ function getBucketItemCount {
 	local clusterName=$1
 	local bucketName=$2
 	local maxRetry=3
+	local i
 
 	if (( `checkJQ` != 0 ));then
 		echo "Cannot run $0 without jq"
@@ -458,6 +459,7 @@ function createRemoteClusterReference {
 function createReplicationInternal {
 	local sourceID=$1
 	local targetID=$2
+	local i
 
 	# Under stressed systems, possible that replication creation could fail
 	for (( i=0; $i < 3; i=$(($i+1)) ))
@@ -530,6 +532,7 @@ function createBucketReplication {
 	local targetCluster=$3
 	local targetBucket=$4
 	local -a replProperties=$5
+	local i
 
 	if [[ -z "${sourceCluster:-}" ]] || [[ -z "${sourceBucket:-}" ]] || [[ -z "${targetCluster:-}" ]] || [[ -z "${targetBucket:-}" ]] || [[ -z "${replProperties}" ]];then
 		echo "Invalid input"
@@ -688,6 +691,7 @@ function findCbWorkloadGen {
 function runCbWorkloadGenBucket {
 	local clusterName=$1
 	local bucketName=$2
+	local i
 	if [[ -z "${clusterName:-}" ]] || [[ -z "${bucketName:-}" ]];then
 		echo "Invalid input"
 		return 1
@@ -779,7 +783,9 @@ function runCbWorkloadGenCollection {
 	local bucketName=$2
 	local scopeName=$3
 	local collectionName=$4
+	local additionalPrefix=${5:-}
 	local collectionId
+	local i
 
 	if [[ -z "${clusterName:-}" ]] || [[ -z "${bucketName:-}" ]] || [[ -z "${scopeName:-}" ]] || [[ -z "${collectionName:-}" ]];then
 		echo "Invalid input"
@@ -806,11 +812,16 @@ function runCbWorkloadGenCollection {
 		return 1
 	fi
 
+	local prefix
 	for (( i=0; i < 3; i=$(( $i+1 ))))
 	do
 		echo "Running cbworkloadGen on $clusterName bucket $bucketName scope: $scopeName collection $collectionName (ID: $collectionId)"
+		prefix=xdcrProv_$clusterName
+		if [[ ! -z "$additionalPrefix" ]];then
+			prefix=${prefix}_${additionalPrefix}
+		fi
 		# Run 10000 items of json documents with set/get ratio of 100%
-		$workloadGen -i $CBWORKLOAD_COLLECTION_NUM_ITEMS  -j -r 1 -n 127.0.0.1:$port -b $bucketName -u $DEFAULT_ADMIN -p $DEFAULT_PW --prefix=xdcrProv_$clusterName -c $collectionId
+		$workloadGen -i $CBWORKLOAD_COLLECTION_NUM_ITEMS  -j -r 1 -n 127.0.0.1:$port -b $bucketName -u $DEFAULT_ADMIN -p $DEFAULT_PW --prefix=$prefix -c $collectionId
 		if (( $? == 0 ));then
 			return 0
 		elif (( $? != 0 )) && (( $i != 2 ));then
@@ -856,6 +867,7 @@ function hexStringToDec {
 
 function prettyPrintManifest {
 	local manifest=$1
+	local i
 
 	# get manifest version
 	local manifestVersion=`echo "$manifest" | jq '.uid'`
@@ -893,6 +905,7 @@ function getCollectionIdFromScopeAndCollectionName {
 	local manifest=$1
 	local requestedScopeName=$2
 	local requestedCollectionName=$3
+	local i
 
 	local scopesList=`echo "$manifest" | jq '.scopes'`
 	local scopesListLen=`echo "$manifest" | jq '.scopes | length'`

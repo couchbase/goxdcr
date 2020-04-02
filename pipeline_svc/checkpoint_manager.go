@@ -127,6 +127,8 @@ type CheckpointManager struct {
 	// If a ckpt is created before old ones are loaded, it could lead to incorrect
 	// resuming and potential data loss
 	checkpointOpAllowed uint32
+
+	collectionsManifestSvc service_def.CollectionsManifestSvc
 }
 
 // Checkpoint Manager keeps track of one checkpointRecord per vbucket
@@ -165,7 +167,7 @@ func NewCheckpointManager(checkpoints_svc service_def.CheckpointsService, capi_s
 	active_vbs map[string][]uint16, target_username, target_password string, target_bucket_name string,
 	target_kv_vb_map map[string][]uint16, target_cluster_ref *metadata.RemoteClusterReference,
 	target_cluster_version int, isTargetES bool, logger_ctx *log.LoggerContext, utilsIn utilities.UtilsIface, statsMgr StatsMgrIface,
-	uiLogSvc service_def.UILogSvc) (*CheckpointManager, error) {
+	uiLogSvc service_def.UILogSvc, collectionsManifestSvc service_def.CollectionsManifestSvc) (*CheckpointManager, error) {
 	if checkpoints_svc == nil || capi_svc == nil || remote_cluster_svc == nil || rep_spec_svc == nil || cluster_info_svc == nil || xdcr_topology_svc == nil {
 		return nil, errors.New("checkpoints_svc, capi_svc, remote_cluster_svc, rep_spec_svc, cluster_info_svc and xdcr_topology_svc can't be nil")
 	}
@@ -200,6 +202,7 @@ func NewCheckpointManager(checkpoints_svc service_def.CheckpointsService, capi_s
 		utils:                     utilsIn,
 		statsMgr:                  statsMgr,
 		uiLogSvc:                  uiLogSvc,
+		collectionsManifestSvc:    collectionsManifestSvc,
 	}, nil
 }
 
@@ -1164,6 +1167,7 @@ func (ckmgr *CheckpointManager) PerformCkpt(fin_ch chan bool) {
 	//wait for all the getter done, then gather result
 	worker_wait_grp.Wait()
 	ckmgr.CommitBrokenMappingUpdates()
+	ckmgr.collectionsManifestSvc.PersistNeededManifests(ckmgr.pipeline.Specification())
 	ckmgr.RaiseEvent(common.NewEvent(common.CheckpointDone, nil, ckmgr, nil, time.Duration(total_committing_time)*time.Nanosecond))
 
 }
@@ -1191,10 +1195,12 @@ func (ckmgr *CheckpointManager) performCkpt(fin_ch chan bool, wait_grp *sync.Wai
 		xattr_seqno_map = pipeline_utils.GetXattrSeqnos(ckmgr.pipeline)
 	}
 	var total_committing_time int64
+
 	ckmgr.PreCommitBrokenMapping()
 	ckmgr.performCkpt_internal(ckmgr.getMyVBs(), fin_ch, wait_grp, ckmgr.getCheckpointInterval(), through_seqno_map, high_seqno_and_vbuuid_map,
 		xattr_seqno_map, &total_committing_time, srcManifestIds, tgtManifestIds)
 	ckmgr.CommitBrokenMappingUpdates()
+	ckmgr.collectionsManifestSvc.PersistNeededManifests(ckmgr.pipeline.Specification())
 	ckmgr.RaiseEvent(common.NewEvent(common.CheckpointDone, nil, ckmgr, nil, time.Duration(total_committing_time)*time.Nanosecond))
 
 }

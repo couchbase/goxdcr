@@ -105,10 +105,34 @@ func (m *ManifestsService) GetTargetManifests(replSpec *metadata.ReplicationSpec
 	}
 }
 
+func (m *ManifestsService) DelManifests(replSpec *metadata.ReplicationSpecification) error {
+	errorMap := make(base.ErrorMap)
+
+	key := getManifestDocKey(replSpec.Id, true /*source*/)
+	err := m.metadata_svc.Del(key, nil /*revision*/)
+	if err != nil {
+		errorMap["sourceManifestDelOp"] = err
+	}
+
+	key = getManifestDocKey(replSpec.Id, false /*source*/)
+	err = m.metadata_svc.Del(key, nil /*revision*/)
+	if err != nil {
+		errorMap["targetManifestDelOp"] = err
+	}
+
+	if len(errorMap) > 0 {
+		return fmt.Errorf(base.FlattenErrorMap(errorMap))
+	} else {
+		return nil
+	}
+}
+
 func (m *ManifestsService) getInternal(key string) (*metadata.ManifestsDoc, error) {
 	compressedContent, rev, err := m.metadata_svc.Get(key)
 	if err != nil {
-		m.logger.Errorf("Unable to retrieve manifests using key %v err: %v", key, err)
+		if err != service_def.MetadataNotFoundErr {
+			m.logger.Errorf("Unable to retrieve manifests using key %v err: %v", key, err)
+		}
 		return nil, err
 	}
 
