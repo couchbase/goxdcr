@@ -98,7 +98,6 @@ type ReplicationStatusIface interface {
 	String() string
 	Updater() interface{}
 	SetUpdater(updater interface{}) error
-	ObjectPool() *base.MCRequestPool
 	SetCustomSettings(customSettings map[string]interface{})
 	ClearCustomSetting(settingsKey string)
 	ClearTemporaryCustomSettings()
@@ -114,7 +113,6 @@ type ReplicationStatus struct {
 	specInternalId   string
 	spec_getter      ReplicationSpecGetter
 	pipeline_updater interface{}
-	obj_pool         *base.MCRequestPool
 	lock             *sync.RWMutex
 	customSettings   map[string]interface{}
 	// tracks the list of vbs managed by the replication.
@@ -130,7 +128,6 @@ func NewReplicationStatus(specId string, spec_getter ReplicationSpecGetter, logg
 		err_list:       make(PipelineErrorArray, 0, PipelineErrorMaxEntries),
 		spec_getter:    spec_getter,
 		lock:           &sync.RWMutex{},
-		obj_pool:       base.NewMCRequestPool(specId, logger),
 		customSettings: make(map[string]interface{}),
 		progress:       ""}
 
@@ -473,10 +470,6 @@ func (rs *ReplicationStatus) SetUpdater(updater interface{}) error {
 	}
 	rs.pipeline_updater = updater
 	return nil
-}
-
-func (rs *ReplicationStatus) ObjectPool() *base.MCRequestPool {
-	return rs.obj_pool
 }
 
 func (rs *ReplicationStatus) GetSpecInternalId() string {

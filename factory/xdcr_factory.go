@@ -12,7 +12,6 @@ import (
 	"github.com/couchbase/goxdcr/parts"
 	pp "github.com/couchbase/goxdcr/pipeline"
 	pctx "github.com/couchbase/goxdcr/pipeline_ctx"
-	"github.com/couchbase/goxdcr/pipeline_manager"
 	"github.com/couchbase/goxdcr/pipeline_svc"
 	"github.com/couchbase/goxdcr/pipeline_utils"
 	"github.com/couchbase/goxdcr/service_def"
@@ -572,7 +571,7 @@ func (xdcrf *XDCRFactory) constructRouter(id string, spec *metadata.ReplicationS
 	// for replications with Medium priority and ongoing flag set, isHighReplication will be updated to true
 	// through a UpdateSettings() call to the router in the pipeline startup sequence before parts are started
 	router, err := parts.NewRouter(routerId, spec, downStreamParts, vbNozzleMap, sourceCRMode,
-		logger_ctx, pipeline_manager.NewMCRequestObj, xdcrf.utils, xdcrf.throughput_throttler_svc,
+		logger_ctx, xdcrf.utils, xdcrf.throughput_throttler_svc,
 		spec.Settings.GetPriority() == base.PriorityTypeHigh, spec.Settings.GetExpDelMode(),
 		xdcrf.collectionsManifestSvc, srcNozzleObjRecycler)
 	if err != nil {
@@ -612,7 +611,7 @@ func (xdcrf *XDCRFactory) constructXMEMNozzle(topic string,
 	// partIds of the xmem nozzles look like "xmem_$topic_$kvaddr_1"
 	xmemNozzle_Id := xdcrf.partId(XMEM_NOZZLE_NAME_PREFIX, topic, kvaddr, nozzle_index)
 	nozzle := parts.NewXmemNozzle(xmemNozzle_Id, xdcrf.remote_cluster_svc, targetClusterUuid, topic, topic, connPoolSize, kvaddr, sourceBucketName, targetBucketName,
-		targetBucketUuid, username, password, pipeline_manager.RecycleMCRequestObj, sourceCRMode, logger_ctx, xdcrf.utils, vbList)
+		targetBucketUuid, username, password, sourceCRMode, logger_ctx, xdcrf.utils, vbList)
 	return nozzle
 }
 
@@ -643,7 +642,7 @@ func (xdcrf *XDCRFactory) constructCAPINozzle(topic string,
 	xdcrf.logger.Debugf("Construct CapiNozzle: topic=%s, kvaddr=%s", topic, capiConnectionStr)
 	// partIds of the capi nozzles look like "capi_$topic_$kvaddr_1"
 	capiNozzle_Id := xdcrf.partId(CAPI_NOZZLE_NAME_PREFIX, topic, capiConnectionStr, nozzle_index)
-	nozzle := parts.NewCapiNozzle(capiNozzle_Id, topic, capiConnectionStr, username, password, certificate, subVBCouchApiBaseMap, pipeline_manager.RecycleMCRequestObj, logger_ctx, xdcrf.utils, vbList)
+	nozzle := parts.NewCapiNozzle(capiNozzle_Id, topic, capiConnectionStr, username, password, certificate, subVBCouchApiBaseMap, nil /*capi is deprecated, no more recycler*/, logger_ctx, xdcrf.utils, vbList)
 	return nozzle, nil
 }
 

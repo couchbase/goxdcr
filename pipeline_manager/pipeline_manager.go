@@ -135,21 +135,6 @@ func (pipelineMgr *PipelineManager) ReplicationStatus(topic string) (*pipeline.R
 	return obj.(*pipeline.ReplicationStatus), nil
 }
 
-func NewMCRequestObj(topic string) (*base.WrappedMCRequest, error) {
-	rep_status, err := ReplicationStatus(topic)
-	if err != nil {
-		return nil, err
-	}
-	return rep_status.ObjectPool().Get(), nil
-}
-
-func RecycleMCRequestObj(topic string, obj *base.WrappedMCRequest) {
-	rep_status, _ := ReplicationStatus(topic)
-	if rep_status != nil {
-		rep_status.ObjectPool().Put(obj)
-	}
-}
-
 func Update(topic string, cur_err error) error {
 	pipeline_mgr.serializer.Update(topic, cur_err)
 	return nil

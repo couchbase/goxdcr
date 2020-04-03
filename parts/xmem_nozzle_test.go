@@ -30,7 +30,6 @@ var kvString = fmt.Sprintf("%s:%s", "127.0.0.1", xmemPort)
 var connString = fmt.Sprintf("%s:%s", "127.0.0.1", targetPort)
 
 func setupBoilerPlateXmem() (*utilsMock.UtilsIface,
-	base.DataObjRecycler,
 	map[string]interface{},
 	*XmemNozzle,
 	*Router,
@@ -39,7 +38,6 @@ func setupBoilerPlateXmem() (*utilsMock.UtilsIface,
 	*serviceDefMocks.CollectionsManifestSvc) {
 
 	utilitiesMock := &utilsMock.UtilsIface{}
-	dummyDataObjRecycler := func(string, *base.WrappedMCRequest) {}
 	var vbList []uint16
 	for i := 0; i < 1024; i++ {
 		vbList = append(vbList, uint16(i))
@@ -51,7 +49,7 @@ func setupBoilerPlateXmem() (*utilsMock.UtilsIface,
 	// local cluster run has KV port starting at 12000
 	xmemNozzle := NewXmemNozzle("testId", remoteClusterSvc, "", "testTopic", "testConnPoolNamePrefix", 5, /* connPoolConnSize*/
 		kvString, "B1", xmemBucket, "temporaryBucketUuid", "Administrator", "wewewe",
-		dummyDataObjRecycler, base.CRMode_RevId, log.DefaultLoggerContext, utilitiesMock, vbList)
+		base.CRMode_RevId, log.DefaultLoggerContext, utilitiesMock, vbList)
 
 	// settings map
 	settingsMap := make(map[string]interface{})
@@ -72,10 +70,10 @@ func setupBoilerPlateXmem() (*utilsMock.UtilsIface,
 	colManifestSvc := &serviceDefMocks.CollectionsManifestSvc{}
 
 	router, _ := NewRouter("testId", spec, nil /*downstreamparts*/, nil, /*routingMap*/
-		base.CRMode_RevId, log.DefaultLoggerContext, nil, utilitiesMock, nil /*throughputThrottler*/, false, /*highRepl*/
+		base.CRMode_RevId, log.DefaultLoggerContext, utilitiesMock, nil /*throughputThrottler*/, false, /*highRepl*/
 		base.FilterExpDelNone, colManifestSvc, nil /*recycler*/)
 
-	return utilitiesMock, dummyDataObjRecycler, settingsMap, xmemNozzle, router, bandwidthThrottler, remoteClusterSvc, colManifestSvc
+	return utilitiesMock, settingsMap, xmemNozzle, router, bandwidthThrottler, remoteClusterSvc, colManifestSvc
 }
 
 func targetXmemIsUpAndCorrectSetupExists() bool {
@@ -142,7 +140,7 @@ func setupMocksXmem(xmem *XmemNozzle, utils *utilsMock.UtilsIface, bandwidthThro
 func TestPositiveXmemNozzle(t *testing.T) {
 	assert := assert.New(t)
 	fmt.Println("============== Test case start: TestPositiveXmemNozzle =================")
-	utils, _, settings, xmem, _, throttler, remoteClusterSvc, colManSvc := setupBoilerPlateXmem()
+	utils, settings, xmem, _, throttler, remoteClusterSvc, colManSvc := setupBoilerPlateXmem()
 	setupMocksXmem(xmem, utils, throttler, remoteClusterSvc, colManSvc)
 
 	assert.Nil(xmem.initialize(settings))
@@ -152,7 +150,7 @@ func TestPositiveXmemNozzle(t *testing.T) {
 func TestNegNoCompressionXmemNozzle(t *testing.T) {
 	assert := assert.New(t)
 	fmt.Println("============== Test case start: TestNegNoCompressionXmemNozzle =================")
-	utils, _, settings, xmem, _, _, _, _ := setupBoilerPlateXmem()
+	utils, settings, xmem, _, _, _, _ := setupBoilerPlateXmem()
 	setupMocksCompressNeg(utils)
 
 	assert.Equal(base.ErrorCompressionNotSupported, xmem.initialize(settings))
@@ -162,7 +160,7 @@ func TestNegNoCompressionXmemNozzle(t *testing.T) {
 func TestPosNoCompressionXmemNozzle(t *testing.T) {
 	assert := assert.New(t)
 	fmt.Println("============== Test case start: TestNegNoCompressionXmemNozzle =================")
-	utils, _, settings, xmem, _, _, _, _ := setupBoilerPlateXmem()
+	utils, settings, xmem, _, _, _, _ := setupBoilerPlateXmem()
 	settings[SETTING_COMPRESSION_TYPE] = (base.CompressionType)(base.CompressionTypeForceUncompress)
 	settings[ForceCollectionDisableKey] = true
 	setupMocksCompressNeg(utils)
@@ -175,7 +173,7 @@ func TestPosNoCompressionXmemNozzle(t *testing.T) {
 func TestPositiveXmemNozzleAuto(t *testing.T) {
 	assert := assert.New(t)
 	fmt.Println("============== Test case start: TestPositiveXmemNozzleAuto =================")
-	utils, _, settings, xmem, _, throttler, remoteClusterSvc, colManSvc := setupBoilerPlateXmem()
+	utils, settings, xmem, _, throttler, remoteClusterSvc, colManSvc := setupBoilerPlateXmem()
 	settings[SETTING_COMPRESSION_TYPE] = (base.CompressionType)(base.CompressionTypeAuto)
 	setupMocksXmem(xmem, utils, throttler, remoteClusterSvc, colManSvc)
 
@@ -203,7 +201,7 @@ func TestXmemSendAPacket(t *testing.T) {
 		return
 	}
 
-	utilsNotUsed, _, settings, xmem, router, throttler, remoteClusterSvc, colManSvc := setupBoilerPlateXmem()
+	utilsNotUsed, settings, xmem, router, throttler, remoteClusterSvc, colManSvc := setupBoilerPlateXmem()
 	realUtils := utilsReal.NewUtilities()
 	xmem.utils = realUtils
 

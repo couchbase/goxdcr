@@ -1043,6 +1043,7 @@ func (dcp *DcpNozzle) composeWrappedUprEvent(m *mcc.UprEvent) (*base.WrappedUprE
 	wrappedEvent := dcp.wrappedUprPool.Get()
 	wrappedEvent.UprEvent = m
 	wrappedEvent.ColNamespace = colInfo
+
 	return wrappedEvent, nil
 }
 
@@ -1667,11 +1668,17 @@ func (dcp *DcpNozzle) RecycleDataObj(req interface{}) {
 	switch req.(type) {
 	case *base.WrappedUprEvent:
 		if dcp.wrappedUprPool != nil {
+			wrappedReq := req.(*base.WrappedUprEvent)
+			wrappedReq.UprEvent = nil
+			wrappedReq.ColNamespace = nil
 			dcp.wrappedUprPool.Put(req.(*base.WrappedUprEvent))
 		}
 	case *base.CollectionNamespace:
 		if dcp.collectionNamespacePool != nil {
-			dcp.collectionNamespacePool.Put(req.(*base.CollectionNamespace))
+			ns := req.(*base.CollectionNamespace)
+			ns.ScopeName = ""
+			ns.CollectionName = ""
+			dcp.collectionNamespacePool.Put(ns)
 		}
 	default:
 		panic("Coding error")

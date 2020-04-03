@@ -21,7 +21,7 @@ var dummyDownStream string = "dummy"
 
 func setupBoilerPlateRouter() (routerId string, downStreamParts map[string]common.Part,
 	routingMap map[uint16]string, crMode base.ConflictResolutionMode, loggerCtx *log.LoggerContext,
-	req_creater ReqCreator, utilsMock utilities.UtilsIface, throughputThrottlerSvc service_def.ThroughputThrottlerSvc,
+	utilsMock utilities.UtilsIface, throughputThrottlerSvc service_def.ThroughputThrottlerSvc,
 	needToThrottle bool, expDelMode base.FilterExpDelType, collectionsManifestSvc service_def.CollectionsManifestSvc,
 	spec *metadata.ReplicationSpecification) {
 	routerId = "routerUnitTest"
@@ -33,7 +33,6 @@ func setupBoilerPlateRouter() (routerId string, downStreamParts map[string]commo
 	loggerCtx = log.DefaultLoggerContext
 	utilsMock = &UtilitiesMock.UtilsIface{}
 	throughputThrottlerSvc = &service_def_mocks.ThroughputThrottlerSvc{}
-	req_creater = nil
 	needToThrottle = false
 	expDelMode = base.FilterExpDelNone
 	collectionsManifestSvc = &service_def_mocks.CollectionsManifestSvc{}
@@ -47,11 +46,11 @@ func TestRouterRouteFunc(t *testing.T) {
 	assert := assert.New(t)
 
 	routerId, downStreamParts, routingMap, crMode, loggerCtx,
-		req_creater, utilsMock, throughputThrottlerSvc,
+		utilsMock, throughputThrottlerSvc,
 		needToThrottle, expDelMode, collectionsManifestSvc, spec := setupBoilerPlateRouter()
 
 	router, err := NewRouter(routerId, spec, downStreamParts,
-		routingMap, crMode, loggerCtx, req_creater, utilsMock, throughputThrottlerSvc, needToThrottle,
+		routingMap, crMode, loggerCtx, utilsMock, throughputThrottlerSvc, needToThrottle,
 		expDelMode, collectionsManifestSvc, nil /*objRecycler*/)
 
 	assert.Nil(err)
@@ -89,11 +88,11 @@ func TestRouterInitialNone(t *testing.T) {
 	assert := assert.New(t)
 
 	routerId, downStreamParts, routingMap, crMode, loggerCtx,
-		req_creater, utilsMock, throughputThrottlerSvc,
+		utilsMock, throughputThrottlerSvc,
 		needToThrottle, expDelMode, collectionsManifestSvc, spec := setupBoilerPlateRouter()
 
 	router, err := NewRouter(routerId, spec, downStreamParts,
-		routingMap, crMode, loggerCtx, req_creater, utilsMock, throughputThrottlerSvc, needToThrottle,
+		routingMap, crMode, loggerCtx, utilsMock, throughputThrottlerSvc, needToThrottle,
 		expDelMode, collectionsManifestSvc, nil /*objRecycler*/)
 
 	assert.Nil(err)
@@ -109,13 +108,13 @@ func TestRouterSkipDeletion(t *testing.T) {
 	assert := assert.New(t)
 
 	routerId, downStreamParts, routingMap, crMode, loggerCtx,
-		req_creater, utilsMock, throughputThrottlerSvc,
+		utilsMock, throughputThrottlerSvc,
 		needToThrottle, expDelMode, collectionsManifestSvc, spec := setupBoilerPlateRouter()
 
 	expDelMode = base.FilterExpDelSkipDeletes
 
 	router, err := NewRouter(routerId, spec, downStreamParts,
-		routingMap, crMode, loggerCtx, req_creater, utilsMock, throughputThrottlerSvc, needToThrottle,
+		routingMap, crMode, loggerCtx, utilsMock, throughputThrottlerSvc, needToThrottle,
 		expDelMode, collectionsManifestSvc, nil /*objRecycler*/)
 
 	assert.Nil(err)
@@ -145,13 +144,13 @@ func TestRouterSkipExpiration(t *testing.T) {
 	assert := assert.New(t)
 
 	routerId, downStreamParts, routingMap, crMode, loggerCtx,
-		req_creater, utilsMock, throughputThrottlerSvc,
+		utilsMock, throughputThrottlerSvc,
 		needToThrottle, expDelMode, collectionsManifestSvc, spec := setupBoilerPlateRouter()
 
 	expDelMode = base.FilterExpDelSkipExpiration
 
 	router, err := NewRouter(routerId, spec, downStreamParts,
-		routingMap, crMode, loggerCtx, req_creater, utilsMock, throughputThrottlerSvc, needToThrottle,
+		routingMap, crMode, loggerCtx, utilsMock, throughputThrottlerSvc, needToThrottle,
 		expDelMode, collectionsManifestSvc, nil /*objRecycler*/)
 
 	assert.Nil(err)
@@ -181,13 +180,13 @@ func TestRouterSkipDeletesStripTTL(t *testing.T) {
 	assert := assert.New(t)
 
 	routerId, downStreamParts, routingMap, crMode, loggerCtx,
-		req_creater, utilsMock, throughputThrottlerSvc,
+		utilsMock, throughputThrottlerSvc,
 		needToThrottle, expDelMode, collectionsManifestSvc, spec := setupBoilerPlateRouter()
 
 	expDelMode = base.FilterExpDelSkipExpiration | base.FilterExpDelStripExpiration
 
 	router, err := NewRouter(routerId, spec, downStreamParts,
-		routingMap, crMode, loggerCtx, req_creater, utilsMock, throughputThrottlerSvc, needToThrottle,
+		routingMap, crMode, loggerCtx, utilsMock, throughputThrottlerSvc, needToThrottle,
 		expDelMode, collectionsManifestSvc, nil /*objRecycler*/)
 
 	assert.Nil(err)
@@ -220,13 +219,13 @@ func TestRouterExpDelAllMode(t *testing.T) {
 	assert := assert.New(t)
 
 	routerId, downStreamParts, routingMap, crMode, loggerCtx,
-		req_creater, utilsMock, throughputThrottlerSvc,
+		utilsMock, throughputThrottlerSvc,
 		needToThrottle, expDelMode, collectionsManifestSvc, spec := setupBoilerPlateRouter()
 
 	expDelMode = base.FilterExpDelAll
 
 	router, err := NewRouter(routerId, spec, downStreamParts,
-		routingMap, crMode, loggerCtx, req_creater, utilsMock, throughputThrottlerSvc, needToThrottle,
+		routingMap, crMode, loggerCtx, utilsMock, throughputThrottlerSvc, needToThrottle,
 		expDelMode, collectionsManifestSvc, nil /*objRecycler*/)
 
 	assert.Nil(err)
