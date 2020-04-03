@@ -207,11 +207,15 @@ func (xdcrf *XDCRFactory) NewPipeline(topic string, progress_recorder common.Pip
 		}
 
 		// Construct a router - each Source nozzle has a router.
-		router, err := xdcrf.constructRouter(sourceNozzle.Id(), spec, downStreamParts, vbNozzleMap, sourceCRMode, logger_ctx)
+		router, err := xdcrf.constructRouter(sourceNozzle.Id(), spec, downStreamParts, vbNozzleMap, sourceCRMode, logger_ctx, (utilities.RecycleObjFunc)(sourceNozzle.RecycleDataObj))
 		if err != nil {
 			return nil, err
 		}
 		sourceNozzle.SetConnector(router)
+
+		for _, outNozzle := range outNozzles {
+			outNozzle.SetUpstreamObjRecycler(sourceNozzle.Connector().GetUpstreamObjRecycler())
+		}
 	}
 	progress_recorder("Source nozzles have been wired to target nozzles")
 
@@ -561,7 +565,8 @@ func (xdcrf *XDCRFactory) constructRouter(id string, spec *metadata.ReplicationS
 	downStreamParts map[string]common.Part,
 	vbNozzleMap map[uint16]string,
 	sourceCRMode base.ConflictResolutionMode,
-	logger_ctx *log.LoggerContext) (*parts.Router, error) {
+	logger_ctx *log.LoggerContext,
+	srcNozzleObjRecycler utilities.RecycleObjFunc) (*parts.Router, error) {
 	routerId := "Router" + PART_NAME_DELIMITER + id
 	// when initializing router, isHighReplication is set to true only if replication priority is High
 	// for replications with Medium priority and ongoing flag set, isHighReplication will be updated to true
@@ -569,7 +574,7 @@ func (xdcrf *XDCRFactory) constructRouter(id string, spec *metadata.ReplicationS
 	router, err := parts.NewRouter(routerId, spec, downStreamParts, vbNozzleMap, sourceCRMode,
 		logger_ctx, pipeline_manager.NewMCRequestObj, xdcrf.utils, xdcrf.throughput_throttler_svc,
 		spec.Settings.GetPriority() == base.PriorityTypeHigh, spec.Settings.GetExpDelMode(),
-		xdcrf.collectionsManifestSvc)
+		xdcrf.collectionsManifestSvc, srcNozzleObjRecycler)
 	if err != nil {
 		xdcrf.logger.Errorf("Error (%v) constructing router %v", err.Error(), routerId)
 	} else {

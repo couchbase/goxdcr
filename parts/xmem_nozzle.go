@@ -817,6 +817,8 @@ type XmemNozzle struct {
 	vbList []uint16
 
 	collectionEnabled uint32
+
+	upstreamObjRecycler utilities.RecycleObjFunc
 }
 
 func NewXmemNozzle(id string,
@@ -3017,8 +3019,23 @@ func (xmem *XmemNozzle) bytesInDataChan() int {
 	return int(atomic.LoadInt32(&xmem.bytes_in_dataChan))
 }
 
+func (xmem *XmemNozzle) RecycleDataObj(incomingReq interface{}) {
+	req, ok := incomingReq.(*base.WrappedMCRequest)
+	if ok {
+		xmem.recycleDataObj(req)
+	}
+}
+
 func (xmem *XmemNozzle) recycleDataObj(req *base.WrappedMCRequest) {
 	if xmem.dataObj_recycler != nil {
+		if xmem.upstreamObjRecycler != nil {
+			if req.ColInfo != nil {
+				xmem.upstreamObjRecycler(req.ColInfo)
+			}
+			if req.ColNamespace != nil {
+				xmem.upstreamObjRecycler(req.ColNamespace)
+			}
+		}
 		xmem.dataObj_recycler(xmem.topic, req)
 	}
 }
@@ -3100,4 +3117,9 @@ func (xmem *XmemNozzle) getClientWithRetry(xmem_id string, pool base.ConnPool, f
 
 func (xmem *XmemNozzle) ResponsibleVBs() []uint16 {
 	return xmem.vbList
+}
+
+// Should only be done during pipeline construction
+func (xmem *XmemNozzle) SetUpstreamObjRecycler(recycler func(interface{})) {
+	xmem.upstreamObjRecycler = utilities.RecycleObjFunc(recycler)
 }

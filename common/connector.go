@@ -30,4 +30,6 @@ type Connector interface {
 	IsStartable() bool
 	Start() error
 	Stop() error
+
+	GetUpstreamObjRecycler() func(obj interface{})
 }

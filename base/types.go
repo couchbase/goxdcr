@@ -107,8 +107,11 @@ type WrappedUprEvent struct {
 
 type TargetCollectionInfo struct {
 	// The manifestID used when retrying
-	ManifestId      uint64
-	RoutingRetryCnt int
+	ManifestId uint64
+	// Temporary storage space to avoid memmove
+	ColIDPrefixedKey []byte
+	// The len is needed because slice returned from datapool can have garbage
+	ColIDPrefixedKeyLen int
 }
 
 type WrappedMCRequest struct {

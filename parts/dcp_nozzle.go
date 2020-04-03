@@ -350,6 +350,10 @@ type DcpNozzle struct {
 	vbHighestManifestUidArray [base.NumberOfVbs]uint64
 
 	collectionEnabled uint32
+
+	// Datapools for reusing memory
+	wrappedUprPool          utilities.WrappedUprPoolIface
+	collectionNamespacePool utilities.CollectionNamespacePoolIface
 }
 
 func NewDcpNozzle(id string,
@@ -380,6 +384,8 @@ func NewDcpNozzle(id string,
 		utils:                    utilsIn,
 		vbHandshakeMap:           make(map[uint16]*dcpStreamReqHelper),
 		dcpPrioritySetting:       mcc.PriorityDisabled,
+		wrappedUprPool:           utilities.NewWrappedUprPool(),
+		collectionNamespacePool:  utilities.NewCollectionNamespacePool(),
 	}
 
 	for _, vbno := range vbnos {
@@ -991,10 +997,10 @@ func (dcp *DcpNozzle) handleSystemEvent(event *mcc.UprEvent) {
 
 // TODO - MB-37984
 func (dcp *DcpNozzle) composeWrappedUprEvent(m *mcc.UprEvent) (*base.WrappedUprEvent, error) {
-	wrappedEvent := &base.WrappedUprEvent{UprEvent: m}
-
 	if m.IsSystemEvent() || !m.IsCollectionType() {
 		// Collection not used
+		wrappedEvent := dcp.wrappedUprPool.Get()
+		wrappedEvent.UprEvent = m
 		return wrappedEvent, nil
 	}
 
@@ -1004,7 +1010,6 @@ func (dcp *DcpNozzle) composeWrappedUprEvent(m *mcc.UprEvent) (*base.WrappedUprE
 		return nil, base.ErrorSourceCollectionsNotSupported
 	}
 
-	colInfo := &base.CollectionNamespace{}
 	var err error
 
 	// VB events comes in sequence order, so the latest manifest must have the info for this collection data
@@ -1022,16 +1027,21 @@ func (dcp *DcpNozzle) composeWrappedUprEvent(m *mcc.UprEvent) (*base.WrappedUprE
 	}
 	// It is possible that the returned manifest from collectionsManifestService is higher than the one vb has seen
 
-	colInfo.ScopeName, colInfo.CollectionName, err = manifest.GetScopeAndCollectionName(m.CollectionId)
+	mappedScopeName, mappedColName, err := manifest.GetScopeAndCollectionName(m.CollectionId)
 	if err != nil {
 		err = fmt.Errorf("Document %v%v%v: vb %v topManifestID: %v manifest: %v asking for collectionId: %v returned err %v",
 			base.UdTagBegin, string(m.Key), base.UdTagEnd, m.VBucket, topManifestUid, manifest, m.CollectionId, err)
 		return nil, err
 	}
+	colInfo := dcp.collectionNamespacePool.Get()
+	colInfo.ScopeName = mappedScopeName
+	colInfo.CollectionName = mappedColName
 	if dcp.Logger().GetLogLevel() > log.LogLevelDebug {
 		dcp.Logger().Debugf("For doc %v topManifest is %v srcColId: %v namespace is %v:%v", string(m.Key), topManifestUid, m.CollectionId, colInfo.ScopeName, colInfo.CollectionName)
 	}
 
+	wrappedEvent := dcp.wrappedUprPool.Get()
+	wrappedEvent.UprEvent = m
 	wrappedEvent.ColNamespace = colInfo
 	return wrappedEvent, nil
 }
@@ -1651,4 +1661,23 @@ func (dcp *DcpNozzle) checkDefaultCollectionExistence() error {
 		dcp.RaiseEvent(common.NewEvent(common.ErrorEncountered, nil, dcp, nil, err))
 	}
 	return err
+}
+
+func (dcp *DcpNozzle) RecycleDataObj(req interface{}) {
+	switch req.(type) {
+	case *base.WrappedUprEvent:
+		if dcp.wrappedUprPool != nil {
+			dcp.wrappedUprPool.Put(req.(*base.WrappedUprEvent))
+		}
+	case *base.CollectionNamespace:
+		if dcp.collectionNamespacePool != nil {
+			dcp.collectionNamespacePool.Put(req.(*base.CollectionNamespace))
+		}
+	default:
+		panic("Coding error")
+	}
+}
+
+func (dcp *DcpNozzle) SetUpstreamObjRecycler(recycler func(interface{})) {
+	// no op
 }

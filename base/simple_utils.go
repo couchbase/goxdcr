@@ -1340,7 +1340,7 @@ func GetNodeListFromInfoMap(infoMap map[string]interface{}, logger *log.CommonLo
 
 // Used to encode a uint64 into a unsigned LEB128 32-bit int encoding
 // This is needed for converting collection/scope UID to setmeta/getmeta requests
-func NewUleb128(input uint64) (out Uleb128, err error) {
+func NewUleb128(input uint64, dataSliceGetter func(uint64) ([]byte, error), truncateGarbage bool) (out Uleb128, bufferLen int, err error) {
 	var outputBuf bytes.Buffer
 	var done bool
 
@@ -1360,15 +1360,27 @@ func NewUleb128(input uint64) (out Uleb128, err error) {
 		}
 	}
 
-	bufferLen := outputBuf.Len()
-	out = make([]byte, bufferLen, bufferLen)
-	for i := 0; i < bufferLen; i++ {
+	bufferLen = outputBuf.Len()
+	var err2 error
+	if dataSliceGetter != nil {
+		out, err2 = dataSliceGetter(uint64(bufferLen))
+	}
+	if err2 == nil || dataSliceGetter == nil {
+		out = make([]byte, bufferLen, bufferLen)
+	}
+
+	var i int
+	for i = 0; i < bufferLen; i++ {
 		out[i], err = outputBuf.ReadByte()
 		if err != nil {
 			// Shouldn't be here
-			out = nil
 			return
 		}
+	}
+	// Truncate rest of the slice to get rid of potential garbage from recycled slices from datapool
+	// If truncating, though, may cause inefficiencies when recycling of a datapool
+	if truncateGarbage {
+		out = out[:i]
 	}
 	return
 }

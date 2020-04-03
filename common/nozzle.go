@@ -35,4 +35,10 @@ type Nozzle interface {
 
 	// Returns a list of its responsible VBs (Read-only)
 	ResponsibleVBs() []uint16
+
+	// To avoid garbage
+	RecycleDataObj(obj interface{})
+
+	// Valid for outgoing nozzles
+	SetUpstreamObjRecycler(func(interface{}))
 }

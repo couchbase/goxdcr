@@ -52,7 +52,7 @@ func TestRouterRouteFunc(t *testing.T) {
 
 	router, err := NewRouter(routerId, spec, downStreamParts,
 		routingMap, crMode, loggerCtx, req_creater, utilsMock, throughputThrottlerSvc, needToThrottle,
-		expDelMode, collectionsManifestSvc)
+		expDelMode, collectionsManifestSvc, nil /*objRecycler*/)
 
 	assert.Nil(err)
 	assert.NotNil(router)
@@ -94,7 +94,7 @@ func TestRouterInitialNone(t *testing.T) {
 
 	router, err := NewRouter(routerId, spec, downStreamParts,
 		routingMap, crMode, loggerCtx, req_creater, utilsMock, throughputThrottlerSvc, needToThrottle,
-		expDelMode, collectionsManifestSvc)
+		expDelMode, collectionsManifestSvc, nil /*objRecycler*/)
 
 	assert.Nil(err)
 	assert.NotNil(router)
@@ -116,7 +116,7 @@ func TestRouterSkipDeletion(t *testing.T) {
 
 	router, err := NewRouter(routerId, spec, downStreamParts,
 		routingMap, crMode, loggerCtx, req_creater, utilsMock, throughputThrottlerSvc, needToThrottle,
-		expDelMode, collectionsManifestSvc)
+		expDelMode, collectionsManifestSvc, nil /*objRecycler*/)
 
 	assert.Nil(err)
 	assert.NotNil(router)
@@ -152,7 +152,7 @@ func TestRouterSkipExpiration(t *testing.T) {
 
 	router, err := NewRouter(routerId, spec, downStreamParts,
 		routingMap, crMode, loggerCtx, req_creater, utilsMock, throughputThrottlerSvc, needToThrottle,
-		expDelMode, collectionsManifestSvc)
+		expDelMode, collectionsManifestSvc, nil /*objRecycler*/)
 
 	assert.Nil(err)
 	assert.NotNil(router)
@@ -188,7 +188,7 @@ func TestRouterSkipDeletesStripTTL(t *testing.T) {
 
 	router, err := NewRouter(routerId, spec, downStreamParts,
 		routingMap, crMode, loggerCtx, req_creater, utilsMock, throughputThrottlerSvc, needToThrottle,
-		expDelMode, collectionsManifestSvc)
+		expDelMode, collectionsManifestSvc, nil /*objRecycler*/)
 
 	assert.Nil(err)
 	assert.NotNil(router)
@@ -227,7 +227,7 @@ func TestRouterExpDelAllMode(t *testing.T) {
 
 	router, err := NewRouter(routerId, spec, downStreamParts,
 		routingMap, crMode, loggerCtx, req_creater, utilsMock, throughputThrottlerSvc, needToThrottle,
-		expDelMode, collectionsManifestSvc)
+		expDelMode, collectionsManifestSvc, nil /*objRecycler*/)
 
 	assert.Nil(err)
 	assert.NotNil(router)

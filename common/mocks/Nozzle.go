@@ -119,6 +119,11 @@ func (_m *Nozzle) Receive(data interface{}) error {
 	return r0
 }
 
+// RecycleDataObj provides a mock function with given fields: obj
+func (_m *Nozzle) RecycleDataObj(obj interface{}) {
+	_m.Called(obj)
+}
+
 // RegisterComponentEventListener provides a mock function with given fields: eventType, listener
 func (_m *Nozzle) RegisterComponentEventListener(eventType common.ComponentEventType, listener common.ComponentEventListener) error {
 	ret := _m.Called(eventType, listener)
@@ -161,6 +166,11 @@ func (_m *Nozzle) SetConnector(connector common.Connector) error {
 	}
 
 	return r0
+}
+
+// SetUpstreamObjRecycler provides a mock function with given fields: _a0
+func (_m *Nozzle) SetUpstreamObjRecycler(_a0 func(interface{})) {
+	_m.Called(_a0)
 }
 
 // Start provides a mock function with given fields: settings

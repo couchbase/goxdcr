@@ -372,7 +372,7 @@ func TestUleb128EncoderDecoder(t *testing.T) {
 
 	for i := 0; i < 50; i++ {
 		input := generator.Uint64()
-		testLeb, err := NewUleb128(input)
+		testLeb, _, err := NewUleb128(input, nil, true)
 		assert.Nil(err)
 
 		verifyOutput := testLeb.ToUint64()

@@ -1293,6 +1293,13 @@ func (capi *CapiNozzle) UpdateSettings(settings metadata.ReplicationSettingsMap)
 	return nil
 }
 
+func (capi *CapiNozzle) RecycleDataObj(incomingReq interface{}) {
+	req, ok := incomingReq.(*base.WrappedMCRequest)
+	if ok {
+		capi.recycleDataObj(req)
+	}
+}
+
 func (capi *CapiNozzle) recycleDataObj(req *base.WrappedMCRequest) {
 	if capi.dataObj_recycler != nil {
 		capi.dataObj_recycler(capi.topic, req)
@@ -1334,4 +1341,8 @@ func (capi *CapiNozzle) getLastSentBatches() string {
 
 func (capi *CapiNozzle) ResponsibleVBs() []uint16 {
 	return capi.vbList
+}
+
+func (xmem *CapiNozzle) SetUpstreamObjRecycler(recycler func(interface{})) {
+	// no op
 }

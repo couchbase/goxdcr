@@ -20,3 +20,4 @@
 tools/.xdcrToolsExport
 tools/clusterRunProvision.sh
 tools/importExporter.sh
+tools/testScripts/testsLibrary.sh

@@ -15,6 +15,7 @@ import (
 	common "github.com/couchbase/goxdcr/common"
 	component "github.com/couchbase/goxdcr/component"
 	"github.com/couchbase/goxdcr/log"
+	utilities "github.com/couchbase/goxdcr/utils"
 	"sync"
 	"sync/atomic"
 )
@@ -48,12 +49,15 @@ type Router struct {
 	// If collections mapping temporarily failed, this function will be called
 	// to try to re-forward it to the right downstream part
 	collectionsRerouteCb CollectionsRerouteFunc
+
+	upstreamObjRecycler utilities.RecycleObjFunc
 }
 
 func NewRouter(id string, downStreamParts map[string]common.Part,
 	routing_callback *Routing_Callback_Func,
 	logger_context *log.LoggerContext, logger_module string,
-	startable bool, startFunc, stopFunc func() error, collectionsRerouteCb CollectionsRerouteFunc) *Router {
+	startable bool, startFunc, stopFunc func() error, collectionsRerouteCb CollectionsRerouteFunc,
+	upstreamObjRecycler utilities.RecycleObjFunc) *Router {
 	router := &Router{
 		AbstractComponent:    component.NewAbstractComponentWithLogger(id, log.NewLogger(logger_module, logger_context)),
 		downStreamParts:      downStreamParts,
@@ -61,6 +65,7 @@ func NewRouter(id string, downStreamParts map[string]common.Part,
 		startFunc:            startFunc,
 		stopFunc:             stopFunc,
 		collectionsRerouteCb: collectionsRerouteCb,
+		upstreamObjRecycler:  upstreamObjRecycler,
 	}
 	if startable {
 		atomic.StoreUint32(&router.startable, 1)
@@ -150,4 +155,8 @@ func (router *Router) SetRoutingCallBackFunc(routing_callback *Routing_Callback_
 	defer router.stateLock.Unlock()
 
 	router.routing_callback = routing_callback
+}
+
+func (router *Router) GetUpstreamObjRecycler() func(interface{}) {
+	return router.upstreamObjRecycler
 }

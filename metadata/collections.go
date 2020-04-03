@@ -334,7 +334,7 @@ func (c *CollectionsManifest) Uid() uint64 {
 }
 
 func (c *CollectionsManifest) Scopes() ScopesMap {
-	return c.scopes.Clone()
+	return c.scopes
 }
 
 /**
