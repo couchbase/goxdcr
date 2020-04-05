@@ -40,9 +40,16 @@ declare -a collection2Arr=("col1" "col2" "col3")
 SCOPE_NAME_COLLECTION_MAP=(["S1"]=${collection1Arr[@]} ["S2"]=${collection2Arr[@]} ["S3"]=${collection2Arr[@]})
 
 function runDataLoad {
-	# Run CBWorkloadgen in parallel
+	echo "RUNNING dataload..."
 	runCbWorkloadGenCollection "C1" "B1" "S1" "col1"
-	waitForBgJobs
+}
+
+function validateDataLoad {
+	echo "VALIDATING Data..."
+	validateCbWorkloadGenCollection "C2" "B2" "S1" "col1" "C1" "B1" "S1" "col1"
+	checkBidirectionalChangesLeft
+	checkItemCnt "C1" "B1" $CBWORKLOAD_COLLECTION_NUM_ITEMS
+	checkItemCnt "C2" "B2" $CBWORKLOAD_COLLECTION_NUM_ITEMS
 }
 
 function runTestCase {
@@ -69,6 +76,10 @@ function runTestCase {
 	sleep 5
 	checkItemCnt "C1" "B1" $CBWORKLOAD_COLLECTION_NUM_ITEMS
 	checkItemCnt "C2" "B2" $CBWORKLOAD_COLLECTION_NUM_ITEMS
+
+	checkUnidirectionalChangesLeft
+
+	validateDataLoad
 
 	echo "============================================================================"
 	echo "PASSED"

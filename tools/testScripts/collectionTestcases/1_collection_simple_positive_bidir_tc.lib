@@ -42,9 +42,21 @@ SCOPE_NAME_COLLECTION_MAP=(["S1"]=${collection1Arr[@]} ["S2"]=${collection2Arr[@
 
 function runDataLoad {
 	# Run CBWorkloadgen in parallel
-	runCbWorkloadGenCollection "C1" "B1" "S1" "col1"
-	runCbWorkloadGenCollection "C2" "B2" "S1" "col1"
+	echo "RUNNING dataload..."
+	runCbWorkloadGenCollection "C1" "B1" "S1" "col1" &
+	runCbWorkloadGenCollection "C2" "B2" "S1" "col1" &
 	waitForBgJobs
+}
+
+function validateDataLoad {
+	echo "VALIDATING Data..."
+	validateCbWorkloadGenCollection "C2" "B2" "S1" "col1" "C1" "B1" "S1" "col1"
+	validateCbWorkloadGenCollection "C1" "B1" "S1" "col1" "C2" "B2" "S1" "col1"
+
+	checkBidirectionalChangesLeft
+	expectedCnt=$(( $CBWORKLOAD_COLLECTION_NUM_ITEMS*2 ))
+	checkItemCnt "C1" "B1" $expectedCnt
+	checkItemCnt "C2" "B2" $expectedCnt
 }
 
 function runTestCase {
@@ -73,6 +85,12 @@ function runTestCase {
 	expectedCnt=$(( $CBWORKLOAD_COLLECTION_NUM_ITEMS*2 ))
 	checkItemCnt "C1" "B1" $expectedCnt
 	checkItemCnt "C2" "B2" $expectedCnt
+
+	grepForPanics
+
+	checkBidirectionalChangesLeft
+
+	validateDataLoad
 
 	echo "============================================================================"
 	echo "PASSED"
