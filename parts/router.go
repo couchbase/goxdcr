@@ -632,19 +632,29 @@ func (router *Router) RouteCollection(data interface{}, partId string) error {
 		panic(fmt.Sprintf("Coding bug: type: %v", reflect.TypeOf(mcRequest)))
 	}
 
-	colId, manifestId, err := router.collectionsRouting[partId].RouteReqToLatestTargetManifest(mcRequest.ColNamespace)
-	mcRequest.ColInfo.ManifestId = manifestId
-	if err != nil {
-		if err == base.ErrorIgnoreRequest {
-			if router.Logger().GetLogLevel() >= log.LogLevelDebug {
-				router.Logger().Debugf("Request map is already marked broken for %v. Ready to be ignored", string(mcRequest.Req.Key))
+	// Shortcut implicit only mapping
+	var colId uint64
+	var manifestId uint64
+	var err error
+
+	if mcRequest.ColNamespace == nil || mcRequest.ColNamespace.IsDefault() {
+		// TODO - implicit mapping default collection specific
+		colId = 0
+	} else {
+		colId, manifestId, err = router.collectionsRouting[partId].RouteReqToLatestTargetManifest(mcRequest.ColNamespace)
+		mcRequest.ColInfo.ManifestId = manifestId
+		if err != nil {
+			if err == base.ErrorIgnoreRequest {
+				if router.Logger().GetLogLevel() >= log.LogLevelDebug {
+					router.Logger().Debugf("Request map is already marked broken for %v. Ready to be ignored", string(mcRequest.Req.Key))
+				}
+				router.collectionsRouting[partId].ignoreDataFunc(mcRequest)
+			} else {
+				router.collectionsRouting[partId].recordUnroutableRequest(mcRequest)
+				err = base.ErrorIgnoreRequest
 			}
-			router.collectionsRouting[partId].ignoreDataFunc(mcRequest)
-		} else {
-			router.collectionsRouting[partId].recordUnroutableRequest(mcRequest)
-			err = base.ErrorIgnoreRequest
+			return err
 		}
-		return err
 	}
 
 	// no need to truncate if we use the leb128CidLen

@@ -100,6 +100,10 @@ type CollectionNamespace struct {
 	CollectionName string
 }
 
+func (c *CollectionNamespace) IsDefault() bool {
+	return c.ScopeName == DefaultScopeCollectionName && c.CollectionName == DefaultScopeCollectionName
+}
+
 type WrappedUprEvent struct {
 	UprEvent     *mcc.UprEvent
 	ColNamespace *CollectionNamespace

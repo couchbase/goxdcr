@@ -1027,12 +1027,18 @@ func (dcp *DcpNozzle) composeWrappedUprEvent(m *mcc.UprEvent) (*base.WrappedUprE
 	}
 	// It is possible that the returned manifest from collectionsManifestService is higher than the one vb has seen
 
-	mappedScopeName, mappedColName, err := manifest.GetScopeAndCollectionName(m.CollectionId)
-	if err != nil {
-		err = fmt.Errorf("Document %v%v%v: vb %v topManifestID: %v manifest: %v asking for collectionId: %v returned err %v",
-			base.UdTagBegin, string(m.Key), base.UdTagEnd, m.VBucket, topManifestUid, manifest, m.CollectionId, err)
-		return nil, err
+	// TODO - need to change for explicit mapping
+	var mappedScopeName string = base.DefaultScopeCollectionName
+	var mappedColName string = base.DefaultScopeCollectionName
+	if m.CollectionId > 0 {
+		mappedScopeName, mappedColName, err = manifest.GetScopeAndCollectionName(m.CollectionId)
+		if err != nil {
+			err = fmt.Errorf("Document %v%v%v: vb %v topManifestID: %v manifest: %v asking for collectionId: %v returned err %v",
+				base.UdTagBegin, string(m.Key), base.UdTagEnd, m.VBucket, topManifestUid, manifest, m.CollectionId, err)
+			return nil, err
+		}
 	}
+
 	colInfo := dcp.collectionNamespacePool.Get()
 	colInfo.ScopeName = mappedScopeName
 	colInfo.CollectionName = mappedColName
