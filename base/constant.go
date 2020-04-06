@@ -43,6 +43,7 @@ var SSLPortsPath = "/nodes/self/xdcrSSLPorts"
 var NodeServicesPath = "/pools/default/nodeServices"
 var BPath = "/pools/default/b/"
 var DocsPath = "/docs/"
+var CollectionsManifestPath = "/collections"
 
 // constants for CAPI nozzle
 var RevsDiffPath = "/_revs_diff"
@@ -84,6 +85,16 @@ var AlternateKey = "alternateAddresses"
 var ExternalKey = "external"
 var CapiPortKey = "capi"
 var CapiSSLPortKey = "capiSSL"
+
+// Collection consts
+const UIDKey = "uid"
+const NameKey = "name"
+const CollectionsKey = "collections"
+const DefaultScopeCollectionName = "_default"
+
+var DefaultCollectionId uint32 = 0
+
+var CollectionsUidBase int = 16
 
 // URL related constants
 var UrlDelimiter = "/"
@@ -228,6 +239,15 @@ var ErrorExpDelTrio = fmt.Errorf("%v, %v, and %v must be specified together", Fi
 var ErrorNoSourceKV = errors.New("Invalid configuration. No source kv node is found.")
 var ErrorExecutionTimedOut = errors.New("Execution timed out")
 var ErrorPipelineStartTimedOutUI = errors.New("Pipeline did not start in a timely manner, possibly due to busy source or target. Will try again...")
+var ErrorRemoteClusterUninit = errors.New("Remote cluster has not been successfully contacted to figure out user intent for alternate address yet. Will try again next refresh cycle")
+var ErrorTargetNoAltHostName = errors.New("Alternate hostname is not set up on at least one node of the remote cluster")
+var ErrorPipelineRestartDueToClusterConfigChange = errors.New("Pipeline needs to update due to remote cluster configuration change")
+var ErrorNotFound = errors.New("Specified entity is not found")
+var ErrorTargetCollectionsNotSupported = errors.New("Target cluster does not support collections")
+var ErrorSourceCollectionsNotSupported = errors.New("Source cluster collections critical error")
+var ErrorInvalidOperation = errors.New("Invalid operation")
+var ErrorRouterRequestRetry = errors.New("Request is in retry queue")
+var ErrorIgnoreRequest = errors.New("Request should be ignored")
 
 // Various non-error internal msgs
 var FilterForcePassThrough = errors.New("No data is to be filtered, should allow passthrough")
@@ -468,6 +488,7 @@ var VersionForRBACAndXattrSupport = []int{5, 0}
 var VersionForCompressionSupport = []int{5, 5}
 var VersionForClientCertSupport = []int{5, 5}
 var VersionForHttpScramShaSupport = []int{5, 5}
+var VersionForCollectionSupport = []int{7, 0}
 
 var GoxdcrUserAgentPrefix = "couchbase-goxdcr"
 var GoxdcrUserAgent = ""
@@ -489,6 +510,9 @@ var HELO_FEATURE_XERROR uint16 = 0x07
 
 // new XATTR bit in data type field in dcp mutations
 var PROTOCOL_BINARY_DATATYPE_XATTR uint8 = 0x04
+
+// Collections Feature
+var HELO_FEATURE_COLLECTIONS uint16 = 0x12
 
 // length of random id
 var LengthOfRandomId = 16
@@ -530,6 +554,8 @@ var RetryIntervalSetDerivedObj = 100 * time.Millisecond
 var MaxNumOfRetriesSetDerivedObj = 8
 
 var NumberOfWorkersForCheckpointing = 5
+
+const NumberOfVbs = 1024
 
 type FilterVersionType int
 
@@ -854,6 +880,17 @@ var ReservedWordsReplaceMap = map[string]PcreWrapperInterface{}
 // Used to make sure the pcre's are initialized only once, when needed
 var ReservedWordsReplaceMapOnce sync.Once
 
+// Number of times for a remote cluster to consistently change from using internal interface to
+// external interface, and vice versa
+var RemoteClusterAlternateAddrChangeCnt = 5
+
+// How often in seconds to pull manifests from ns_server
+var ManifestRefreshSrcInterval = 2
+var ManifestRefreshTgtInterval = 60
+
+// How many times to retry collections mapping routing before declaring that mapping is broken
+var MaxCollectionsRoutingRetry = 5
+
 func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeCountBeforeRestart,
 	maxTopologyStableCountBeforeRestart, maxWorkersForCheckpointing int,
 	timeoutCheckpointBeforeStop time.Duration, capiDataChanSizeMultiplier int,
@@ -896,7 +933,10 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	throughputSampleSize int, throughputSampleAlpha int,
 	thresholdRatioForProcessCpu int, thresholdRatioForTotalCpu int,
 	maxCountCpuNotMaxed int, maxCountThroughputDrop int,
-	filteringInternalKey string, filteringInternalXattr string) {
+	filteringInternalKey string, filteringInternalXattr string,
+	remoteClusterAlternateAddrChangeCnt int,
+	manifestRefreshSrcInterval int, manifestRefreshTgtInterval int,
+	maxCollectionsRoutingRetry int) {
 	TopologyChangeCheckInterval = topologyChangeCheckInterval
 	MaxTopologyChangeCountBeforeRestart = maxTopologyChangeCountBeforeRestart
 	MaxTopologyStableCountBeforeRestart = maxTopologyStableCountBeforeRestart
@@ -1002,6 +1042,10 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 		InternalKeyKey:   ExternalKeyKeyContains,
 		InternalKeyXattr: ExternalKeyXattrContains,
 	}
+	RemoteClusterAlternateAddrChangeCnt = remoteClusterAlternateAddrChangeCnt
+	ManifestRefreshSrcInterval = manifestRefreshSrcInterval
+	ManifestRefreshTgtInterval = manifestRefreshTgtInterval
+	MaxCollectionsRoutingRetry = maxCollectionsRoutingRetry
 }
 
 // Need to escape the () to result in "META().xattrs" literal

@@ -58,6 +58,7 @@ type Pipeline_mgr_iface interface {
 	UpdatePipeline(pipelineName string, cur_err error) error
 	DeletePipeline(pipelineName string) error
 	CheckPipelines()
+	AutoPauseReplication(topic string) error
 
 	// Internal APIs
 	OnExit() error
@@ -81,6 +82,7 @@ type Pipeline_mgr_iface interface {
 	GetLogSvc() service_def.UILogSvc
 	GetReplSpecSvc() service_def.ReplicationSpecSvc
 	GetXDCRTopologySvc() service_def.XDCRCompTopologySvc
+	PauseReplication(topic string) error
 }
 
 // Global ptr, should slowly get rid of refences to this global
@@ -209,6 +211,10 @@ func (pipelineMgr *PipelineManager) InitiateRepStatus(pipelineName string) error
 	return pipelineMgr.serializer.Init(pipelineName)
 }
 
+func (pipelineMgr *PipelineManager) AutoPauseReplication(pipelineName string) error {
+	return pipelineMgr.serializer.Pause(pipelineName)
+}
+
 // This should really be the method to be used. This is considered part of the interface
 // and can be easily unit tested
 func (pipelineMgr *PipelineManager) ReplicationStatusMap() map[string]*pipeline.ReplicationStatus {
@@ -278,6 +284,12 @@ func IsPipelineRunning(topic string) bool {
 }
 
 func (pipelineMgr *PipelineManager) CheckPipelines() {
+	pipelineMgr.validateAndGCSpecs()
+	pipelineMgr.checkRemoteClusterSvcForChangedConfigs()
+	LogStatusSummary()
+}
+
+func (pipelineMgr *PipelineManager) validateAndGCSpecs() {
 	rep_status_map := pipelineMgr.ReplicationStatusMap()
 	for _, rep_status := range rep_status_map {
 		//validate replication spec
@@ -287,7 +299,23 @@ func (pipelineMgr *PipelineManager) CheckPipelines() {
 			pipelineMgr.repl_spec_svc.ValidateAndGC(spec)
 		}
 	}
-	LogStatusSummary()
+}
+
+func (pipelineMgr *PipelineManager) checkRemoteClusterSvcForChangedConfigs() {
+	refList, err := pipelineMgr.remote_cluster_svc.GetRefListForRestartAndClearState()
+	if err != nil {
+		pipelineMgr.logger.Warnf("Checkpipeline got %v when asking remote cluster reference for config changes that require pipeline restarts", err)
+	}
+	for _, ref := range refList {
+		replSpecsList, err := pipelineMgr.repl_spec_svc.AllReplicationSpecsWithRemote(ref)
+		if err != nil {
+			pipelineMgr.logger.Warnf("Unable to retrieve specs for remote cluster %v ... user should manually restart pipelines replicating to this remote cluster", ref.Id())
+			continue
+		}
+		for _, spec := range replSpecsList {
+			pipelineMgr.UpdatePipeline(spec.Id, base.ErrorPipelineRestartDueToClusterConfigChange)
+		}
+	}
 }
 
 func (pipelineMgr *PipelineManager) OnExit() error {
@@ -625,6 +653,28 @@ func (pipelineMgr *PipelineManager) Update(topic string, cur_err error) error {
 		}
 	}
 	return nil
+}
+
+// Should be called internally from serializer's Pause()
+func (pipelineMgr *PipelineManager) PauseReplication(topic string) error {
+	currentSpec, err := pipelineMgr.repl_spec_svc.ReplicationSpec(topic)
+	if err != nil {
+		return fmt.Errorf("Pipeline %v unable to retrieve spec: %v", topic, err)
+	}
+
+	pauseMap := make(metadata.ReplicationSettingsMap)
+	pauseMap[metadata.ActiveKey] = false
+	_, errorMap := currentSpec.Settings.UpdateSettingsFromMap(pauseMap)
+	if len(errorMap) > 0 {
+		err = fmt.Errorf(base.FlattenErrorMap(errorMap))
+		return fmt.Errorf("Pipeline %v updateSettings: %v", topic, err)
+	}
+
+	err = pipelineMgr.repl_spec_svc.SetReplicationSpec(currentSpec)
+	if err != nil {
+		err = fmt.Errorf("Pipeline %v unable to setReplicationSpec: %v", topic, err)
+	}
+	return err
 }
 
 // Use this only for unit test
@@ -1043,6 +1093,12 @@ RE:
 		r.logger.Infof("Replication %v has been paused. no need to update\n", r.pipeline_name)
 	} else if base.CheckErrorMapForError(errMap, service_def.MetadataNotFoundErr, true /*exactMatch */) {
 		r.logger.Infof("Replication %v has been deleted. no need to update\n", r.pipeline_name)
+	} else if base.CheckErrorMapForError(errMap, service_def.ErrorSourceDefaultCollectionDNE, false /*exactMatch*/) {
+		dneErr := fmt.Sprintf("Replication %v cannot continue because target does not support collections and the source bucket's default collection is removed. Replication will automatically be paused.\n", r.pipeline_name)
+		r.logger.Errorf(dneErr)
+		r.pipelineMgr.GetLogSvc().Write(dneErr)
+		r.pipelineMgr.AutoPauseReplication(r.pipeline_name)
+		return nil
 	} else {
 		r.logger.Errorf("Failed to update pipeline %v, err=%v\n", r.pipeline_name, base.FlattenErrorMap(errMap))
 	}
@@ -1089,6 +1145,27 @@ func (r *PipelineUpdater) reportStatus() {
 func (r *PipelineUpdater) raiseWarningsIfNeeded() {
 	r.raiseXattrWarningIfNeeded()
 	r.raiseCompressionWarningIfNeeded()
+	r.raiseRemoteClusterRestartReasonsIfNeeded()
+}
+
+func (r *PipelineUpdater) raiseRemoteClusterRestartReasonsIfNeeded() {
+	if !r.currentErrors.ContainsError(base.ErrorPipelineRestartDueToClusterConfigChange, true /*exactMatch*/) {
+		return
+	}
+	spec := r.rep_status.Spec()
+	if spec == nil {
+		return
+	}
+	if spec.Settings.IsCapi() {
+		return
+	}
+	targetClusterRef, err := r.pipelineMgr.GetRemoteClusterSvc().RemoteClusterByUuid(spec.TargetClusterUUID, false)
+	if err != nil || targetClusterRef == nil {
+		return
+	}
+	errMsg := fmt.Sprintf("Replication from source bucket '%v' to target bucket '%v' on cluster '%v' has been restarted due to remote-cluster configuration changes\n", spec.SourceBucketName, spec.TargetBucketName, targetClusterRef.Name())
+	r.logger.Warnf(errMsg)
+	r.pipelineMgr.GetLogSvc().Write(errMsg)
 }
 
 // raise warning on UI console when

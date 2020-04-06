@@ -26,4 +26,8 @@ type Connector interface {
 	AddDownStream(partId string, part Part) error
 
 	UpdateSettings(settings metadata.ReplicationSettingsMap) error
+
+	IsStartable() bool
+	Start() error
+	Stop() error
 }

@@ -45,13 +45,15 @@ insertPropertyIntoBucketNamePropertyMap "B0" BucketProperty
 insertPropertyIntoBucketNamePropertyMap "B1" Bucket1Properties
 insertPropertyIntoBucketNamePropertyMap "B2" BucketProperty
 
-pcre_filter='REGEXP_CONTAINS(click, "q(?!uit)")'
-declare -A DefaultBucketReplProperties=(["filterExpression"]="$pcre_filter" ["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500)
+#pcre_filter='REGEXP_CONTAINS(click, "q(?!uit)")'
+#declare -A DefaultBucketReplProperties=(["filterExpression"]="$pcre_filter" ["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500)
+declare -A DefaultBucketReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500)
 
 # Bucket -> Scopes
 # -----------------
 declare -a scope1Arr=("S1" "S2")
-BUCKET_NAME_SCOPE_MAP=(["B1"]=${scope1Arr[@]} ["B2"]="S3")
+#BUCKET_NAME_SCOPE_MAP=(["B1"]=${scope1Arr[@]} ["B2"]="S3")
+BUCKET_NAME_SCOPE_MAP=(["B1"]=${scope1Arr[@]} ["B2"]="S1")
 
 # Scopes -> Collections
 # ----------------------
@@ -62,9 +64,9 @@ SCOPE_NAME_COLLECTION_MAP=(["S1"]=${collection1Arr[@]} ["S2"]=${collection2Arr[@
 
 function runDataLoad {
 	# Run CBWorkloadgen in parallel
-	runCbWorkloadGenBucket "C1" "B0" &
+#	runCbWorkloadGenBucket "C1" "B0" &
 	runCbWorkloadGenBucket "C1" "B1" &
-	runCbWorkloadGenBucket "C2" "B2" &
+#	runCbWorkloadGenBucket "C2" "B2" &
 	runCbWorkloadGenCollection "C1" "B1" "S1" "col1"
 	waitForBgJobs
 }
@@ -80,7 +82,7 @@ if (( $? != 0 ));then
 	exit $?
 fi
 # Wait for vbuckets and all the other things to propagate before XDCR provisioning
-sleep 1
+sleep 5
 createRemoteClusterReference "C1" "C2"
 createRemoteClusterReference "C2" "C1"
 sleep 1

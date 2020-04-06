@@ -208,6 +208,15 @@ const (
 	// Internal keys to wrap around incoming document's key or xattributes for advanced filtering
 	FilteringInternalKey   = "FilteringInternalKeyKey"
 	FilteringInternalXattr = "FilteringInternalXattrKey"
+
+	RemoteClusterAlternateAddrChangeKey = "RemoteClusterAlternateAddrChangeKey"
+
+	// How often to pull manifests
+	ManifestRefreshSrcIntervalKey = "ManifestRefreshSrcInterval"
+	ManifestRefreshTgtIntervalKey = "ManifestRefreshTgtInterval"
+
+	// How many times to retry before declaring collections mapping broken
+	MaxCollectionsRoutingRetryKey = "MaxCollectionsRoutingRetry"
 )
 
 var TopologyChangeCheckIntervalConfig = &SettingsConfig{10, &Range{1, 100}}
@@ -296,6 +305,10 @@ var MaxCountCpuNotMaxedConfig = &SettingsConfig{3, &Range{1, 1000}}
 var MaxCountThroughputDropConfig = &SettingsConfig{3, &Range{1, 1000}}
 var FilteringInternalKeyConfig = &SettingsConfig{base.InternalKeyKey, nil}
 var FilteringInternalXattrConfig = &SettingsConfig{base.InternalKeyXattr, nil}
+var RemoteClusterAlternateAddrChangeConfig = &SettingsConfig{base.RemoteClusterAlternateAddrChangeCnt, &Range{1, 1000}}
+var ManifestRefreshSrcIntervalConfig = &SettingsConfig{base.ManifestRefreshSrcInterval, &Range{1, 10000}}
+var ManifestRefreshTgtIntervalConfig = &SettingsConfig{base.ManifestRefreshTgtInterval, &Range{1, 10000}}
+var MaxCollectionsRoutingRetryConfig = &SettingsConfig{base.MaxCollectionsRoutingRetry, &Range{1, 100}}
 
 var XDCRInternalSettingsConfigMap = map[string]*SettingsConfig{
 	TopologyChangeCheckIntervalKey:                TopologyChangeCheckIntervalConfig,
@@ -384,6 +397,10 @@ var XDCRInternalSettingsConfigMap = map[string]*SettingsConfig{
 	MaxCountThroughputDropKey:                     MaxCountThroughputDropConfig,
 	FilteringInternalKey:                          FilteringInternalKeyConfig,
 	FilteringInternalXattr:                        FilteringInternalXattrConfig,
+	RemoteClusterAlternateAddrChangeKey:           RemoteClusterAlternateAddrChangeConfig,
+	ManifestRefreshSrcIntervalKey:                 ManifestRefreshSrcIntervalConfig,
+	ManifestRefreshTgtIntervalKey:                 ManifestRefreshTgtIntervalConfig,
+	MaxCollectionsRoutingRetryKey:                 MaxCollectionsRoutingRetryConfig,
 }
 
 func InitConstants(xmemMaxIdleCountLowerBound int, xmemMaxIdleCountUpperBound int) {

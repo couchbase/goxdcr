@@ -198,6 +198,11 @@ func getXattrValueMock() (map[string]interface{}, []byte, error) {
 	return readJsonHelper(fileName)
 }
 
+func getTargetVBucketMockAlt() (map[string]interface{}, []byte, error) {
+	fileName := fmt.Sprintf("%v%v", testExternalDataDir, "targetBucketInfo_alt.json")
+	return readJsonHelper(fileName)
+}
+
 func MakeSlicesBuf() [][]byte {
 	return make([][]byte, 0, 2)
 }
@@ -215,7 +220,7 @@ func TestGetNodeNameListFromNodeListExternal(t *testing.T) {
 	assert := assert.New(t)
 
 	nodeList, _ := getNodeListWithMinInfoMock(true /*external*/)
-	nodeAddressesList, err := testUtils.GetRemoteNodeAddressesListFromNodeList(nodeList, connStr, false, logger)
+	nodeAddressesList, err := testUtils.GetRemoteNodeAddressesListFromNodeList(nodeList, connStr, false, logger, true)
 	assert.Nil(err)
 
 	nodeNameList := nodeAddressesList.GetListOfFirstString()
@@ -231,7 +236,7 @@ func TestGetNodeNameListFromNodeListExternalK8(t *testing.T) {
 	assert := assert.New(t)
 
 	nodeList, _ := getNodeListWithMinInfoMockK8()
-	nodeAddressList, err := testUtils.GetRemoteNodeAddressesListFromNodeList(nodeList, connStr, false, logger)
+	nodeAddressList, err := testUtils.GetRemoteNodeAddressesListFromNodeList(nodeList, connStr, false, logger, true)
 	assert.Nil(err)
 	nodeNameList := nodeAddressList.GetListOfFirstString()
 
@@ -247,7 +252,7 @@ func TestGetNodeNameListFromNodeListInternal(t *testing.T) {
 
 	nodeList, err := getNodeListWithMinInfoMock(false /*external*/)
 	assert.Nil(err)
-	nodeAddressesList, err := testUtils.GetRemoteNodeAddressesListFromNodeList(nodeList, connStr, false, logger)
+	nodeAddressesList, err := testUtils.GetRemoteNodeAddressesListFromNodeList(nodeList, connStr, false, logger, false)
 	assert.Nil(err)
 
 	nodeNameList := nodeAddressesList.GetListOfFirstString()
@@ -496,7 +501,7 @@ func TestGetMgmtPortActive(t *testing.T) {
 	assert.Nil(err)
 
 	for _, nodeList := range nodesList {
-		hostAddr, hostPort, err := testUtils.getExternalMgtHostAndPort(nodeList.(map[string]interface{}), false /*isHttps*/)
+		hostAddr, hostPort, err := testUtils.GetExternalMgtHostAndPort(nodeList.(map[string]interface{}), false /*isHttps*/)
 		assert.Nil(err)
 		assert.NotEqual(-1, hostPort)
 		assert.True(len(hostAddr) > 0)
@@ -512,7 +517,7 @@ func TestGetMgmtPortInActive(t *testing.T) {
 	assert.Nil(err)
 
 	for _, nodeList := range nodesList {
-		hostAddr, hostPort, err := testUtils.getExternalMgtHostAndPort(nodeList.(map[string]interface{}), false /*isHttps*/)
+		hostAddr, hostPort, err := testUtils.GetExternalMgtHostAndPort(nodeList.(map[string]interface{}), false /*isHttps*/)
 		assert.NotNil(err)
 		assert.Equal(-1, hostPort)
 		assert.True(len(hostAddr) == 0)
@@ -1014,4 +1019,22 @@ func TestMatchPcreNegLookahead(t *testing.T) {
 	assert.True(match)
 
 	fmt.Println("============== Test case end: TestMatchPcreNegLookahead =================")
+}
+
+func TestGetServerVBucketsMapAfterReplacingRefNode(t *testing.T) {
+	fmt.Println("============== Test case start: TestGetServerVBucketsMapAfterReplacingRefNode =================")
+	assert := assert.New(t)
+
+	targetBucketInfo, _, err := getTargetVBucketMockAlt()
+
+	assert.Nil(err)
+	assert.NotNil(targetBucketInfo)
+
+	serverName := "10.100.174.24:9001"
+
+	kvVBMap, err := testUtils.GetRemoteServerVBucketsMap(serverName, "B2", targetBucketInfo, true /*useExternal*/)
+	assert.Nil(err)
+	assert.NotEqual(0, len(kvVBMap))
+
+	fmt.Println("============== Test case end: TestGetServerVBucketsMapAfterReplacingRefNode =================")
 }

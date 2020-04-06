@@ -35,7 +35,8 @@ func setupBoilerPlateXmem() (*utilsMock.UtilsIface,
 	*XmemNozzle,
 	*Router,
 	*serviceDefMocks.BandwidthThrottlerSvc,
-	*serviceDefMocks.RemoteClusterSvc) {
+	*serviceDefMocks.RemoteClusterSvc,
+	*serviceDefMocks.CollectionsManifestSvc) {
 
 	utilitiesMock := &utilsMock.UtilsIface{}
 	dummyDataObjRecycler := func(string, *base.WrappedMCRequest) {}
@@ -66,10 +67,15 @@ func setupBoilerPlateXmem() (*utilsMock.UtilsIface,
 	settingsMap[SETTING_BATCHSIZE] = 1024
 	settingsMap[SETTING_BATCHCOUNT] = 1
 
-	router, _ := NewRouter("testId", "testTopic", "" /*FilterExpression*/, nil /*downstreamparts*/, nil, /*routingMap*/
-		base.CRMode_RevId, log.DefaultLoggerContext, nil, utilitiesMock, nil /*throughputThrottler*/, false /*highRepl*/, base.FilterExpDelNone)
+	spec, _ := metadata.NewReplicationSpecification("srcBucket", "srcBucketUUID", "targetClusterUUID", "tgtBucket", "tgtBucketUUID")
 
-	return utilitiesMock, dummyDataObjRecycler, settingsMap, xmemNozzle, router, bandwidthThrottler, remoteClusterSvc
+	colManifestSvc := &serviceDefMocks.CollectionsManifestSvc{}
+
+	router, _ := NewRouter("testId", spec, nil /*downstreamparts*/, nil, /*routingMap*/
+		base.CRMode_RevId, log.DefaultLoggerContext, nil, utilitiesMock, nil /*throughputThrottler*/, false, /*highRepl*/
+		base.FilterExpDelNone, colManifestSvc)
+
+	return utilitiesMock, dummyDataObjRecycler, settingsMap, xmemNozzle, router, bandwidthThrottler, remoteClusterSvc, colManifestSvc
 }
 
 func targetXmemIsUpAndCorrectSetupExists() bool {
@@ -111,12 +117,14 @@ func setupMocksCompressNeg(utils *utilsMock.UtilsIface) {
 	utils.On("SendHELOWithFeatures", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(noCompressFeature, nil)
 }
 
-func setupMocksXmem(xmem *XmemNozzle, utils *utilsMock.UtilsIface, bandwidthThrottler *serviceDefMocks.BandwidthThrottlerSvc, remoteClusterSvc *serviceDefMocks.RemoteClusterSvc) {
+func setupMocksXmem(xmem *XmemNozzle, utils *utilsMock.UtilsIface, bandwidthThrottler *serviceDefMocks.BandwidthThrottlerSvc,
+	remoteClusterSvc *serviceDefMocks.RemoteClusterSvc, collectionsManifestSvc *serviceDefMocks.CollectionsManifestSvc) {
 	setupMocksCommon(utils)
 
 	var allFeatures utilsReal.HELOFeatures
 	allFeatures.Xattribute = true
 	allFeatures.CompressionType = base.CompressionTypeSnappy
+	allFeatures.Collections = true
 	utils.On("SendHELOWithFeatures", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(allFeatures, nil)
 
 	funcThatReturnsNumberOfBytes := func(numberOfBytes, minNumberOfBytes, numberOfBytesOfFirstItem int64) int64 { return numberOfBytes }
@@ -134,8 +142,8 @@ func setupMocksXmem(xmem *XmemNozzle, utils *utilsMock.UtilsIface, bandwidthThro
 func TestPositiveXmemNozzle(t *testing.T) {
 	assert := assert.New(t)
 	fmt.Println("============== Test case start: TestPositiveXmemNozzle =================")
-	utils, _, settings, xmem, _, throttler, remoteClusterSvc := setupBoilerPlateXmem()
-	setupMocksXmem(xmem, utils, throttler, remoteClusterSvc)
+	utils, _, settings, xmem, _, throttler, remoteClusterSvc, colManSvc := setupBoilerPlateXmem()
+	setupMocksXmem(xmem, utils, throttler, remoteClusterSvc, colManSvc)
 
 	assert.Nil(xmem.initialize(settings))
 	fmt.Println("============== Test case end: TestPositiveXmemNozzle =================")
@@ -144,7 +152,7 @@ func TestPositiveXmemNozzle(t *testing.T) {
 func TestNegNoCompressionXmemNozzle(t *testing.T) {
 	assert := assert.New(t)
 	fmt.Println("============== Test case start: TestNegNoCompressionXmemNozzle =================")
-	utils, _, settings, xmem, _, _, _ := setupBoilerPlateXmem()
+	utils, _, settings, xmem, _, _, _, _ := setupBoilerPlateXmem()
 	setupMocksCompressNeg(utils)
 
 	assert.Equal(base.ErrorCompressionNotSupported, xmem.initialize(settings))
@@ -154,8 +162,9 @@ func TestNegNoCompressionXmemNozzle(t *testing.T) {
 func TestPosNoCompressionXmemNozzle(t *testing.T) {
 	assert := assert.New(t)
 	fmt.Println("============== Test case start: TestNegNoCompressionXmemNozzle =================")
-	utils, _, settings, xmem, _, _, _ := setupBoilerPlateXmem()
+	utils, _, settings, xmem, _, _, _, _ := setupBoilerPlateXmem()
 	settings[SETTING_COMPRESSION_TYPE] = (base.CompressionType)(base.CompressionTypeForceUncompress)
+	settings[ForceCollectionDisableKey] = true
 	setupMocksCompressNeg(utils)
 
 	assert.Equal(nil, xmem.initialize(settings))
@@ -166,9 +175,9 @@ func TestPosNoCompressionXmemNozzle(t *testing.T) {
 func TestPositiveXmemNozzleAuto(t *testing.T) {
 	assert := assert.New(t)
 	fmt.Println("============== Test case start: TestPositiveXmemNozzleAuto =================")
-	utils, _, settings, xmem, _, throttler, remoteClusterSvc := setupBoilerPlateXmem()
+	utils, _, settings, xmem, _, throttler, remoteClusterSvc, colManSvc := setupBoilerPlateXmem()
 	settings[SETTING_COMPRESSION_TYPE] = (base.CompressionType)(base.CompressionTypeAuto)
-	setupMocksXmem(xmem, utils, throttler, remoteClusterSvc)
+	setupMocksXmem(xmem, utils, throttler, remoteClusterSvc, colManSvc)
 
 	assert.NotNil(xmem.initialize(settings))
 	fmt.Println("============== Test case end: TestPositiveXmemNozzleAuto =================")
@@ -194,11 +203,11 @@ func TestXmemSendAPacket(t *testing.T) {
 		return
 	}
 
-	utilsNotUsed, _, settings, xmem, router, throttler, remoteClusterSvc := setupBoilerPlateXmem()
+	utilsNotUsed, _, settings, xmem, router, throttler, remoteClusterSvc, colManSvc := setupBoilerPlateXmem()
 	realUtils := utilsReal.NewUtilities()
 	xmem.utils = realUtils
 
-	setupMocksXmem(xmem, utilsNotUsed, throttler, remoteClusterSvc)
+	setupMocksXmem(xmem, utilsNotUsed, throttler, remoteClusterSvc, colManSvc)
 
 	// Need to find the actual running targetBucketUUID
 	bucketInfo, err := realUtils.GetBucketInfo(connString, xmemBucket, username, password, base.HttpAuthMechPlain, nil, false, nil, nil, xmem.Logger())
@@ -210,10 +219,13 @@ func TestXmemSendAPacket(t *testing.T) {
 	uprNotCompressFile := "../utils/testInternalData/uprNotCompress.json"
 	event, err := RetrieveUprFile(uprNotCompressFile)
 	assert.Nil(err)
-	wrappedMCRequest, err := router.ComposeMCRequest(event)
+	wrappedEvent := &base.WrappedUprEvent{UprEvent: event}
+	wrappedMCRequest, err := router.ComposeMCRequest(wrappedEvent)
 	assert.Nil(err)
 	assert.NotNil(wrappedMCRequest)
 
+	settings[SETTING_COMPRESSION_TYPE] = base.CompressionTypeSnappy
+	settings[ForceCollectionDisableKey] = true
 	err = xmem.Start(settings)
 	assert.Nil(err)
 	xmem.Receive(wrappedMCRequest)

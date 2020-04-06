@@ -27,6 +27,7 @@ type ReplicationSpecSvc interface {
 	AllActiveReplicationSpecsReadOnly() (map[string]*metadata.ReplicationSpecification, error)
 	AllReplicationSpecIds() ([]string, error)
 	AllReplicationSpecIdsForBucket(bucket string) ([]string, error)
+	AllReplicationSpecsWithRemote(remoteClusterRef *metadata.RemoteClusterReference) ([]*metadata.ReplicationSpecification, error)
 
 	// checks if an error returned by the replication spec service is an internal server error or a validation error,
 	// e.g., an error indicating the replication spec involved should exist but does not, or the other way around
@@ -48,7 +49,7 @@ type ReplicationSpecSvc interface {
 	//set the derived object (i.e ReplicationStatus) for the specification
 	SetDerivedObj(specId string, derivedObj interface{}) error
 
-	// set the metadata change call back method
+	// set the metadata change call back methods
 	// when the replication spec service makes changes, it needs to call the call back
 	// explicitly, so that the actions can be taken immediately
 	SetMetadataChangeHandlerCallback(callBack base.MetadataChangeHandlerCallback)

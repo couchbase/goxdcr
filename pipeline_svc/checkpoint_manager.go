@@ -18,6 +18,7 @@ import (
 	component "github.com/couchbase/goxdcr/component"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
+	"github.com/couchbase/goxdcr/parts"
 	"github.com/couchbase/goxdcr/pipeline_utils"
 	"github.com/couchbase/goxdcr/service_def"
 	utilities "github.com/couchbase/goxdcr/utils"
@@ -197,6 +198,10 @@ func (ckmgr *CheckpointManager) Attach(pipeline common.Pipeline) error {
 	for _, dcp := range dcp_parts {
 		dcp.RegisterComponentEventListener(common.StreamingStart, ckmgr)
 		dcp.RegisterComponentEventListener(common.SnapshotMarkerReceived, ckmgr)
+
+		// Checkpoint manager needs to listen to router's collections routing updates
+		router := dcp.Connector()
+		router.RegisterComponentEventListener(common.RoutingUpdateEvent, ckmgr)
 	}
 
 	//register pipeline supervisor as ckmgr's error handler
@@ -331,7 +336,13 @@ func (ckmgr *CheckpointManager) initSSLConStrMap() error {
 		return err
 	}
 
-	ssl_port_map, err := ckmgr.utils.GetMemcachedSSLPortMap(connStr, username, password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey, ckmgr.target_bucket_name, ckmgr.logger)
+	useExternal, err := ckmgr.remote_cluster_svc.ShouldUseAlternateAddress(ckmgr.target_cluster_ref)
+	if err != nil {
+		return err
+	}
+
+	ssl_port_map, err := ckmgr.utils.GetMemcachedSSLPortMap(connStr, username, password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey,
+		ckmgr.target_bucket_name, ckmgr.logger, useExternal)
 	if err != nil {
 		return err
 	}
@@ -1240,7 +1251,7 @@ func (ckmgr *CheckpointManager) doCheckpoint(vbno uint16, through_seqno_map map[
 	filterFailed := vbCountMetrics[DOCS_UNABLE_TO_FILTER_METRIC]
 	// Write-operation - feed the temporary variables and update them into the record and also write them to metakv
 	newCkpt := metadata.NewCheckpointRecord(ckRecordFailoverUuid, through_seqno, ckRecordDcpSnapSeqno, ckRecordDcpSnapEndSeqno, ckptRecordTargetSeqno,
-		uint64(filteredItems), uint64(filterFailed))
+		uint64(filteredItems), uint64(filterFailed), 0 /*DefaultCollection*/, 0 /*DefaultTargetCollection*/)
 	err = ckpt_obj.updateAndPersist(ckmgr, vbno, currRecordVersion, xattr_seqno, newCkpt)
 
 	if err != nil {
@@ -1333,7 +1344,8 @@ func (ckmgr *CheckpointManager) persistCkptRecord(vbno uint16, ckpt_record *meta
 }
 
 func (ckmgr *CheckpointManager) OnEvent(event *common.Event) {
-	if event.EventType == common.StreamingStart {
+	switch event.EventType {
+	case common.StreamingStart:
 		upr_event, ok := event.Data.(*mcc.UprEvent)
 		if ok {
 			flog := upr_event.FailoverLog
@@ -1352,7 +1364,7 @@ func (ckmgr *CheckpointManager) OnEvent(event *common.Event) {
 				ckmgr.handleGeneralError(err)
 			}
 		}
-	} else if event.EventType == common.SnapshotMarkerReceived {
+	case common.SnapshotMarkerReceived:
 		upr_event, ok := event.Data.(*mcc.UprEvent)
 		ckmgr.logger.Debugf("%v Received snapshot vb=%v, start=%v, end=%v\n", ckmgr.pipeline.Topic(), upr_event.VBucket, upr_event.SnapstartSeq, upr_event.SnapendSeq)
 		if ok {
@@ -1378,8 +1390,15 @@ func (ckmgr *CheckpointManager) OnEvent(event *common.Event) {
 				ckmgr.handleGeneralError(err)
 			}
 		}
+	case common.RoutingUpdateEvent:
+		routingInfo, ok := event.Data.(parts.CollectionsRoutingInfo)
+		if !ok {
+			return
+		}
+		ckmgr.logger.Debugf("Routing update received based on target manifest v%v : brokenMapping %v",
+			routingInfo.TargetManifestId, routingInfo.BrokenMap.String())
+		// TODO - MB-38021 - handle this mapping and persist into checkpoints, and remove above log msg when done
 	}
-
 }
 
 func (ckmgr *CheckpointManager) getFailoverUUIDForSeqno(vbno uint16, seqno uint64) (uint64, error) {

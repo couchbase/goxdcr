@@ -167,7 +167,7 @@ func TestStatsMgrWithDCPCollector(t *testing.T) {
 		targetKVVbMap, remoteClusterRef, dcpNozzle, connector)
 
 	statsMgr := NewStatisticsManager(throughSeqSvc, clusterInfoSvc, xdcrTopologySvc,
-		log.DefaultLoggerContext, activeVBs, "TestBucket", utils)
+		log.DefaultLoggerContext, activeVBs, "TestBucket", utils, remoteClusterSvc)
 	assert.NotNil(statsMgr)
 
 	ckptManager := setupCheckpointMgr(ckptService, capiSvc, remoteClusterSvc, replSpecSvc, clusterInfoSvc,
@@ -298,7 +298,7 @@ func TestStatsMgrWithExpiration(t *testing.T) {
 		targetKVVbMap, remoteClusterRef, dcpNozzle, connector)
 
 	statsMgr := NewStatisticsManager(throughSeqSvc, clusterInfoSvc, xdcrTopologySvc,
-		log.DefaultLoggerContext, activeVBs, "TestBucket", utils)
+		log.DefaultLoggerContext, activeVBs, "TestBucket", utils, remoteClusterSvc)
 	assert.NotNil(statsMgr)
 
 	ckptManager := setupCheckpointMgr(ckptService, capiSvc, remoteClusterSvc, replSpecSvc, clusterInfoSvc,
@@ -338,4 +338,26 @@ func TestStatsMgrWithExpiration(t *testing.T) {
 	assert.Equal(int64(1), (dcpCollector.component_map[testDCPPart][DOCS_RECEIVED_DCP_METRIC]).(metrics.Counter).Count())
 
 	fmt.Println("============== Test case end: TestStatsMgrWithExpiration =================")
+}
+
+func TestFilterVBSeqnoMap(t *testing.T) {
+	fmt.Println("============== Test case start: TestFilterVBSeqnoMap =================")
+	assert := assert.New(t)
+
+	maxVbSeqnoMap := make(map[uint16]uint64)
+	latestVbSeqnoMap := make(map[uint16]uint64)
+
+	latestVbSeqnoMap[0] = 1
+	latestVbSeqnoMap[1] = 2
+	latestVbSeqnoMap[2] = 3
+
+	populateMaxVbSeqnoMap(latestVbSeqnoMap, maxVbSeqnoMap)
+	assert.Equal(3, len(maxVbSeqnoMap))
+
+	var filterVbs []uint16 = []uint16{0, 1}
+	maxVbSeqnoMap, err := filterVbSeqnoMap(filterVbs, maxVbSeqnoMap)
+	assert.Equal(2, len(maxVbSeqnoMap))
+	assert.Nil(err)
+
+	fmt.Println("============== Test case end: TestFilterVBSeqnoMap =================")
 }
