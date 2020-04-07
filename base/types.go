@@ -91,6 +91,33 @@ func (vbts VBTimestamp) IsEmpty() bool {
 	return vbts == emptyVBts
 }
 
+func (vbts *VBTimestamp) SameAs(other *VBTimestamp) bool {
+	if vbts == nil && other == nil {
+		return true
+	} else if vbts == nil && other != nil {
+		return false
+	} else if vbts != nil && other == nil {
+		return false
+	}
+
+	return vbts.Vbno == other.Vbno && vbts.Vbuuid == other.Vbuuid && vbts.Seqno == other.Seqno &&
+		vbts.SnapshotStart == other.SnapshotStart && vbts.SnapshotEnd == other.SnapshotEnd &&
+		vbts.ManifestIDs.SourceManifestId == other.ManifestIDs.SourceManifestId &&
+		vbts.ManifestIDs.TargetManifestId == other.ManifestIDs.TargetManifestId
+}
+
+func (vbts VBTimestamp) Clone() VBTimestamp {
+	var clonedTs VBTimestamp
+	clonedTs.Vbno = vbts.Vbno
+	clonedTs.Vbuuid = vbts.Vbuuid
+	clonedTs.Seqno = vbts.Seqno
+	clonedTs.SnapshotStart = vbts.SnapshotStart
+	clonedTs.SnapshotEnd = vbts.SnapshotEnd
+	clonedTs.ManifestIDs.SourceManifestId = vbts.ManifestIDs.SourceManifestId
+	clonedTs.ManifestIDs.TargetManifestId = vbts.ManifestIDs.TargetManifestId
+	return clonedTs
+}
+
 type ClusterConnectionInfoProvider interface {
 	MyConnectionStr() (string, error)
 	// returns username, password, http auth mechanism, certificate, whether certificate contains SAN, client certificate, client key

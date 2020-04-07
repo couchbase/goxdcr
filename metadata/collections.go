@@ -1,3 +1,12 @@
+// Copyright (c) 2013-2020 Couchbase, Inc.
+// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file
+// except in compliance with the License. You may obtain a copy of the License at
+//   http://www.apache.org/licenses/LICENSE-2.0
+// Unless required by applicable law or agreed to in writing, software distributed under the
+// License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND,
+// either express or implied. See the License for the specific language governing permissions
+// and limitations under the License.
+
 package metadata
 
 import (
@@ -69,8 +78,8 @@ func (m *ManifestsDoc) PostUnmarshal() error {
 }
 
 type CollectionsManifestPair struct {
-	Source *CollectionsManifest
-	Target *CollectionsManifest
+	Source *CollectionsManifest `json:"sourceManifest"`
+	Target *CollectionsManifest `json:"targetManifest"`
 }
 
 func (c *CollectionsManifestPair) IsSameAs(other *CollectionsManifestPair) bool {
@@ -386,45 +395,6 @@ func (c *CollectionsManifest) Scopes() ScopesMap {
 	return c.scopes
 }
 
-/**
- * When remote cluster has collections or scopes management changes, then there is potentially
- * a need for backfill
- * This method is run on the latest-pulled target manifest
- * Given the previous known target manifest, and also the current source manifest,
- * this method will pump out what collections on the targets that need to be backfilled
- * in the form of CollectionToCollectionsMapping
- */
-func (target *CollectionsManifest) GetBackfillCollectionIDs(prevTarget, source *CollectionsManifest) (CollectionToCollectionsMapping, error) {
-	// First, between the two different target manifests, find what has been added or modified
-	added, modified, _, err := target.Diff(prevTarget)
-	if err != nil {
-		return nil, err
-	}
-
-	backfillNeeded := make(CollectionToCollectionsMapping)
-	// These are most current collections that are mapped from source to target
-	srcToTargetMapping, _, _ := source.MapAsSourceToTargetByName(target)
-
-	for srcCol, targetCols := range srcToTargetMapping {
-		for _, targetCol := range targetCols {
-			// For each target collection, get the scope name and target collection name
-			scopeName, collectionName, err := target.GetScopeAndCollectionName(targetCol.Uid)
-			if err != nil {
-				return nil, err
-			}
-			_, found := added.GetCollectionByNames(scopeName, collectionName)
-			if found {
-				backfillNeeded.Add(srcCol, targetCol)
-			}
-			_, found = modified.GetCollectionByNames(scopeName, collectionName)
-			if found {
-				backfillNeeded.Add(srcCol, targetCol)
-			}
-		}
-	}
-	return backfillNeeded, nil
-}
-
 type CollectionsPtrList []*Collection
 
 func (c CollectionsPtrList) Len() int           { return len(c) }
@@ -503,199 +473,6 @@ func (c CollectionList) Contains(cid uint32) bool {
 		}
 	}
 	return false
-}
-
-// TODO - clean up as part of MB-38331
-type CollectionToCollectionsMapping map[*Collection][]*Collection
-
-// Implements marshaller interface
-// This will be used as part of the backfill replication storage
-func (c *CollectionToCollectionsMapping) MarshalJSON() ([]byte, error) {
-	if c == nil {
-		return nil, base.ErrorInvalidInput
-	}
-
-	marshalObj := newc2cMarshalObj()
-
-	var i int
-	for k, v := range *c {
-		marshalObj.SourceCollections = append(marshalObj.SourceCollections, k)
-		marshalObj.IndirectTargetMap[strconv.Itoa(i)] = v
-		i++
-	}
-
-	return json.Marshal(marshalObj)
-}
-
-// Implements marshaller interface
-func (c *CollectionToCollectionsMapping) UnmarshalJSON(b []byte) error {
-	if c == nil {
-		return base.ErrorInvalidInput
-	}
-
-	unmarshalObj := &c2cMarshalObj{}
-
-	err := json.Unmarshal(b, unmarshalObj)
-	if err != nil {
-		return err
-	}
-
-	for i := 0; i < len(unmarshalObj.SourceCollections); i++ {
-		sourceCol := unmarshalObj.SourceCollections[i]
-		targetCols, ok := unmarshalObj.IndirectTargetMap[strconv.Itoa(i)]
-		if !ok {
-			return fmt.Errorf("Unable to unmarshal CollectionToCollectionsMapping raw: %v", unmarshalObj)
-		}
-		(*c)[sourceCol] = targetCols
-	}
-
-	return nil
-}
-
-func (c *CollectionToCollectionsMapping) Add(sourceCol, targetCol *Collection) (alreadyExists bool) {
-	if c == nil {
-		return
-	}
-
-	targetList, exists := (*c)[sourceCol]
-	if !exists {
-		(*c)[sourceCol] = make([]*Collection, 0)
-		targetList = (*c)[sourceCol]
-	}
-
-	for _, checkTarget := range targetList {
-		if checkTarget.IsSameAs(*targetCol) {
-			alreadyExists = true
-			return
-		}
-	}
-
-	(*c)[sourceCol] = append((*c)[sourceCol], targetCol)
-	return
-}
-
-func (c *CollectionToCollectionsMapping) IsSameAs(other *CollectionToCollectionsMapping) bool {
-	if c == nil && other != nil || c != nil && other == nil {
-		return false
-	} else if c == nil && other == nil {
-		return true
-	}
-
-	if len(*c) != len(*other) {
-		return false
-	}
-
-	for k, v := range *c {
-		otherV, ok := (*other)[k]
-		if !ok {
-			return false
-		} else if !(CollectionsPtrList)(v).IsSameAs((CollectionsPtrList)(otherV)) {
-			return false
-		}
-	}
-
-	for k, v := range *other {
-		origV, ok := (*c)[k]
-		if !ok {
-			return false
-		} else if !(CollectionsPtrList)(v).IsSameAs((CollectionsPtrList)(origV)) {
-			return false
-		}
-	}
-
-	return true
-}
-
-// Used as part of Mapping source to target by name
-type CollectionIdKeyedMap map[uint32]Collection
-
-func (c CollectionIdKeyedMap) Diff(other CollectionIdKeyedMap) (missing, missingFromOther CollectionIdKeyedMap) {
-	missing = make(CollectionIdKeyedMap)
-	missingFromOther = make(CollectionIdKeyedMap)
-
-	// Cheat here by using sorting and compare
-	var cList []uint32
-	var oList []uint32
-
-	for cid, _ := range c {
-		cList = append(cList, cid)
-	}
-	for cid, _ := range other {
-		oList = append(oList, cid)
-	}
-
-	cList = base.SortUint32List(cList)
-	oList = base.SortUint32List(oList)
-
-	var cIdx int
-	var oIdx int
-
-	for cIdx = 0; cIdx < len(cList); cIdx++ {
-		if cList[cIdx] == oList[oIdx] {
-			if oIdx < len(oList) {
-				oIdx++
-			}
-		} else if cList[cIdx] < oList[oIdx] {
-			missingFromOther[cList[cIdx]] = c[cList[cIdx]]
-		} else /* cList[cIdx] > oList[oIdx] */ {
-			missing[oList[oIdx]] = other[oList[oIdx]]
-			oIdx++
-			if oIdx == len(oList) {
-				break
-			}
-		}
-	}
-
-	for ; cIdx < len(cList); cIdx++ {
-		missingFromOther[cList[cIdx]] = c[cList[cIdx]]
-	}
-
-	for ; oIdx < len(oList); oIdx++ {
-		missing[oList[oIdx]] = other[oList[oIdx]]
-	}
-
-	return
-}
-
-// Given one "source" manifest and one "target" manifest, try to map implicitly by name
-// Returns:
-func (sourceManifest *CollectionsManifest) MapAsSourceToTargetByName(targetManifest *CollectionsManifest) (successfulMapping CollectionToCollectionsMapping, unmappedSources CollectionIdKeyedMap, unmappedTarget CollectionIdKeyedMap) {
-	if sourceManifest == nil || targetManifest == nil {
-		return
-	}
-
-	successfulMapping = make(CollectionToCollectionsMapping)
-	unmappedSources = make(CollectionIdKeyedMap)
-	unmappedTarget = make(CollectionIdKeyedMap)
-
-	// First mark all of them as unmappedTarget
-	for _, scope := range targetManifest.Scopes() {
-		for _, collection := range scope.Collections {
-			unmappedTarget[collection.Uid] = collection
-		}
-	}
-
-	for scopeName, scope := range sourceManifest.Scopes() {
-		targetScope, exists := targetManifest.Scopes()[scopeName]
-		if !exists {
-			// All of these collections are unmapped
-			for _, collection := range scope.Collections {
-				unmappedSources[collection.Uid] = collection
-			}
-		} else {
-			for collectionName, collection := range scope.Collections {
-				targetCollection, exists := targetScope.Collections[collectionName]
-				if !exists {
-					unmappedSources[collection.Uid] = collection
-				} else {
-					colCopy := collection.Clone()
-					successfulMapping[&colCopy] = append(successfulMapping[&colCopy], &targetCollection)
-					delete(unmappedTarget, targetCollection.Uid)
-				}
-			}
-		}
-	}
-	return
 }
 
 type ScopesMap map[string]Scope

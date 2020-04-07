@@ -1,3 +1,12 @@
+// Copyright (c) 2013-2020 Couchbase, Inc.
+// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file
+// except in compliance with the License. You may obtain a copy of the License at
+//   http://www.apache.org/licenses/LICENSE-2.0
+// Unless required by applicable law or agreed to in writing, software distributed under the
+// License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND,
+// either express or implied. See the License for the specific language governing permissions
+// and limitations under the License.
+
 package metadata
 
 import (
@@ -248,122 +257,6 @@ func TestManifestsListSort(t *testing.T) {
 	assert.Equal(list[0].uid, provisionedManifest.uid)
 
 	fmt.Println("============== Test case end: TestManifestsListSort =================")
-}
-
-func TestManifestMapping(t *testing.T) {
-	assert := assert.New(t)
-	fmt.Println("============== Test case start: TestManifestMapping =================")
-	data, _ := ioutil.ReadFile(provisionedFile)
-	source, _ := NewCollectionsManifestFromBytes(data)
-	target, _ := NewCollectionsManifestFromBytes(data)
-
-	// unmapped source
-	delete(target.scopes["S1"].Collections, "col2")
-
-	// unmapped target
-	target.scopes["S2"].Collections["colTest"] = Collection{1234, "colTest"}
-
-	_, unmappedSrc, unmappedTgt := source.MapAsSourceToTargetByName(&target)
-	assert.Equal(1, len(unmappedSrc))
-	assert.Equal(1, len(unmappedTgt))
-
-	fmt.Println("============== Test case end: TestManifestMapping =================")
-}
-
-func TestManifestMappingReal(t *testing.T) {
-	assert := assert.New(t)
-	fmt.Println("============== Test case start: TestManifestMappingReal =================")
-	data, _ := ioutil.ReadFile(sourcev7)
-	source, _ := NewCollectionsManifestFromBytes(data)
-	data, _ = ioutil.ReadFile(targetv7)
-	target, _ := NewCollectionsManifestFromBytes(data)
-	data, _ = ioutil.ReadFile(targetv9)
-	target2, _ := NewCollectionsManifestFromBytes(data)
-
-	output, err := target2.GetBackfillCollectionIDs(&target, &source)
-	assert.Nil(err)
-	assert.Equal(1, len(output))
-
-	mappedSrcToTarget, unmappedSrc, unmappedTgt := source.MapAsSourceToTargetByName(&target)
-	assert.Equal(0, len(unmappedSrc))
-	assert.Equal(0, len(unmappedTgt))
-	assert.Equal(6, len(mappedSrcToTarget))
-
-	fmt.Println("============== Test case end: TestManifestMappingReal =================")
-}
-
-func TestManifestFindBackfill(t *testing.T) {
-	assert := assert.New(t)
-	fmt.Println("============== Test case start: TestManifestFindBackfill =================")
-	data, err := ioutil.ReadFile(provisionedFile)
-	if err != nil {
-		panic(err)
-	}
-	source, _ := NewCollectionsManifestFromBytes(data)
-	target, _ := NewCollectionsManifestFromBytes(data)
-	target2, _ := NewCollectionsManifestFromBytes(data)
-
-	newCol := target.scopes["S1"].Collections["col1"].Clone()
-	newCol.Uid = 13
-	target2.uid++
-	target2.scopes["S1"].Collections["col1"] = newCol
-
-	output, err := target2.GetBackfillCollectionIDs(&target, &source)
-	if len(output) == 0 {
-		fmt.Printf("Old Target: %v\n", target)
-		fmt.Printf("New Target: %v\n", target2)
-		fmt.Printf("Source: %v\n", source)
-	}
-	assert.Nil(err)
-	assert.Equal(1, len(output))
-	fmt.Println("============== Test case end: TestManifestFindBackfill =================")
-}
-
-func TestCollectionKeyedMapDiff(t *testing.T) {
-	assert := assert.New(t)
-	fmt.Println("============== Test case start: TestCollectionKeyedMapDiff =================")
-	aMap := make(CollectionIdKeyedMap)
-	bMap := make(CollectionIdKeyedMap)
-
-	aMap[0] = Collection{}
-	aMap[1] = Collection{}
-	aMap[2] = Collection{}
-
-	bMap[0] = Collection{}
-	bMap[1] = Collection{}
-	bMap[3] = Collection{}
-	bMap[4] = Collection{}
-
-	missing, missingFromOther := aMap.Diff(bMap)
-	assert.Equal(1, len(missingFromOther))
-	assert.Equal(2, len(missing))
-	fmt.Println("============== Test case end: TestCollectionKeyedMapDiff =================")
-}
-
-func TestCollectionsMapping(t *testing.T) {
-	assert := assert.New(t)
-	fmt.Println("============== Test case start: TestCollectionsMapping =================")
-	mapping := make(CollectionToCollectionsMapping)
-	mapping2 := make(CollectionToCollectionsMapping)
-
-	sourceCol1 := &Collection{Uid: 100, Name: "SourceCol"}
-	sourceCol2 := &Collection{Uid: 101, Name: "SourceCol"}
-	targetCol1 := &Collection{Uid: 102, Name: "TargetCol"}
-	targetCol2 := &Collection{Uid: 103, Name: "TargetCol2"}
-
-	mapping.Add(sourceCol1, targetCol1)
-	mapping.Add(sourceCol1, targetCol2)
-	mapping.Add(sourceCol2, targetCol2)
-
-	mapping2.Add(sourceCol1, targetCol1)
-	mapping2.Add(sourceCol2, targetCol2)
-
-	assert.False(mapping.IsSameAs(&mapping2))
-
-	mapping2.Add(sourceCol1, targetCol2)
-
-	assert.True(mapping.IsSameAs(&mapping2))
-	fmt.Println("============== Test case end: TestCollectionsMapping =================")
 }
 
 func TestCollectionsNsMapping(t *testing.T) {

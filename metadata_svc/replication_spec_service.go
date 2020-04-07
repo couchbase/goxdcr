@@ -38,7 +38,7 @@ var InvalidReplicationSpecError = errors.New("Invalid Replication spec")
 //replication spec and its derived object
 //This is what is put into the cache
 type ReplicationSpecVal struct {
-	spec       *metadata.ReplicationSpecification
+	spec       metadata.GenericSpecification
 	derivedObj interface{}
 	cas        int64
 }
@@ -48,7 +48,9 @@ func (rsv *ReplicationSpecVal) CAS(obj CacheableMetadataObj) bool {
 		return true
 	} else if rsv2, ok := obj.(*ReplicationSpecVal); ok {
 		if rsv.cas == rsv2.cas {
-			if !rsv.spec.SameSpec(rsv2.spec) {
+			genSpec, ok2 := rsv.spec.(metadata.GenericSpecification)
+			genSpec2, ok3 := rsv2.spec.(metadata.GenericSpecification)
+			if ok2 && ok3 && !genSpec.SameSpecGeneric(genSpec2) {
 				// increment cas only when the metadata portion of ReplicationSpecVal has been changed
 				// in other words, concurrent updates to the metadata portion is not allowed -- later write fails
 				// while concurrent updates to the runtime portion is allowed -- later write wins
@@ -68,7 +70,7 @@ func (rsv *ReplicationSpecVal) Clone() CacheableMetadataObj {
 		clonedRsv := &ReplicationSpecVal{}
 		*clonedRsv = *rsv
 		if rsv.spec != nil {
-			clonedRsv.spec = rsv.spec.Clone()
+			clonedRsv.spec = rsv.spec.CloneGeneric()
 		}
 		return clonedRsv
 	}
@@ -77,7 +79,7 @@ func (rsv *ReplicationSpecVal) Clone() CacheableMetadataObj {
 
 func (rsv *ReplicationSpecVal) Redact() CacheableMetadataObj {
 	if rsv != nil && rsv.spec != nil {
-		rsv.spec.Redact()
+		rsv.spec.RedactGeneric()
 	}
 	return rsv
 }
@@ -101,6 +103,7 @@ type ReplicationSpecService struct {
 	cache_lock               *sync.Mutex
 	logger                   *log.CommonLogger
 	metadata_change_callback []base.MetadataChangeHandlerCallback
+	metadataChangeMtx        sync.RWMutex
 	utils                    utilities.UtilsIface
 
 	// Replication Spec GC Counters
@@ -131,6 +134,8 @@ func NewReplicationSpecService(uilog_svc service_def.UILogSvc, remote_cluster_sv
 }
 
 func (service *ReplicationSpecService) SetMetadataChangeHandlerCallback(call_back base.MetadataChangeHandlerCallback) {
+	service.metadataChangeMtx.Lock()
+	defer service.metadataChangeMtx.Unlock()
 	service.metadata_change_callback = append(service.metadata_change_callback, call_back)
 }
 
@@ -159,11 +164,18 @@ func (service *ReplicationSpecService) ReplicationSpec(replicationId string) (*m
 // this method is cheaper than ReplicationSpec() and should be called only when the spec returned won't be modified or that the modifications do not matter.
 func (service *ReplicationSpecService) replicationSpec(replicationId string) (*metadata.ReplicationSpecification, error) {
 	val, ok := service.getCache().Get(replicationId)
-	if !ok || val == nil || val.(*ReplicationSpecVal).spec == nil {
-		return nil, errors.New(ReplicationSpecNotFoundErrorMessage)
+	if !ok {
+		return nil, ReplNotFoundErr
 	}
-
-	return val.(*ReplicationSpecVal).spec, nil
+	replSpecVal, ok := val.(*ReplicationSpecVal)
+	if !ok || replSpecVal == nil {
+		return nil, ReplNotFoundErr
+	}
+	replSpec, ok := replSpecVal.spec.(*metadata.ReplicationSpecification)
+	if !ok || replSpec == nil {
+		return nil, ReplNotFoundErr
+	}
+	return replSpec, nil
 }
 
 //validate the existence of source bucket
@@ -844,7 +856,7 @@ func (service *ReplicationSpecService) AllReplicationSpecs() (map[string]*metada
 	values_map := service.getCache().GetMap()
 	for key, val := range values_map {
 		if val.(*ReplicationSpecVal).spec != nil {
-			specs[key] = val.(*ReplicationSpecVal).spec.Clone()
+			specs[key] = val.(*ReplicationSpecVal).spec.(*metadata.ReplicationSpecification).Clone()
 		}
 	}
 	return specs, nil
@@ -860,7 +872,7 @@ func (service *ReplicationSpecService) AllActiveReplicationSpecsReadOnly() (map[
 	specs := make(map[string]*metadata.ReplicationSpecification, 0)
 	values_map := service.getCache().GetMap()
 	for key, val := range values_map {
-		spec := val.(*ReplicationSpecVal).spec
+		spec := val.(*ReplicationSpecVal).spec.(*metadata.ReplicationSpecification)
 		if spec != nil && spec.Settings.Active {
 			specs[key] = spec
 		}
@@ -1084,6 +1096,8 @@ func (service *ReplicationSpecService) updateCacheInternal(specId string, newSpe
 	}
 
 	var sumErr error
+	service.metadataChangeMtx.RLock()
+	defer service.metadataChangeMtx.RUnlock()
 	if updated && len(service.metadata_change_callback) > 0 {
 		for _, callback := range service.metadata_change_callback {
 			err = callback(specId, oldSpec, newSpec)
