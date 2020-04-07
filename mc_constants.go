@@ -109,12 +109,14 @@ const (
 // command codes that are counted toward DCP control buffer
 // when DCP clients receive DCP messages with these command codes, they need to provide acknowledgement
 var BufferedCommandCodeMap = map[CommandCode]bool{
-	SET_VBUCKET:    true,
-	UPR_STREAMEND:  true,
-	UPR_SNAPSHOT:   true,
-	UPR_MUTATION:   true,
-	UPR_DELETION:   true,
-	UPR_EXPIRATION: true}
+	SET_VBUCKET:      true,
+	UPR_STREAMEND:    true,
+	UPR_SNAPSHOT:     true,
+	UPR_MUTATION:     true,
+	UPR_DELETION:     true,
+	UPR_EXPIRATION:   true,
+	DCP_SYSTEM_EVENT: true,
+}
 
 // Status field for memcached response.
 type Status uint16
