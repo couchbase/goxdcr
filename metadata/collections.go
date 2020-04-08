@@ -1130,6 +1130,10 @@ func (c *CollectionNamespaceMapping) UnmarshalJSON(b []byte) error {
 		return err
 	}
 
+	if (*c) == nil {
+		(*c) = make(CollectionNamespaceMapping)
+	}
+
 	var i uint64
 	for i = 0; i < uint64(len(metaObj.SourceCollections)); i++ {
 		sourceCol := metaObj.SourceCollections[i]
