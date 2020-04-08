@@ -833,6 +833,7 @@ func (service *ReplicationSpecService) initCacheFromMetaKV() (err error) {
 			continue
 		}
 		service.updateCacheInternalNoLock(replicationId, replSpec)
+		service.remote_cluster_svc.RequestRemoteMonitoring(replSpec)
 	}
 	return
 
