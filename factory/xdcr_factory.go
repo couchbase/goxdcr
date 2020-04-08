@@ -865,6 +865,11 @@ func (xdcrf *XDCRFactory) constructSettingsForDcpNozzle(pipeline common.Pipeline
 
 	dcpNozzleSettings[parts.DCP_VBTimestampUpdater] = ckpt_svc.(*pipeline_svc.CheckpointManager).UpdateVBTimestamps
 	dcpNozzleSettings[parts.DCP_Stats_Interval] = getSettingFromSettingsMap(settings, metadata.PipelineStatsIntervalKey, repSettings.StatsInterval)
+	getterFunc := func(manifestUid uint64) (*metadata.CollectionsManifest, error) {
+		return xdcrf.collectionsManifestSvc.GetSpecificSourceManifest(spec, manifestUid)
+	}
+	dcpNozzleSettings[parts.DCP_Manifest_Getter] = service_def.CollectionsManifestReqFunc(getterFunc)
+
 	if repSettings.IsCapi() {
 		// For CAPI nozzle, do not allow DCP to have compression
 		dcpNozzleSettings[parts.SETTING_COMPRESSION_TYPE] = (base.CompressionType)(base.CompressionTypeNone)
@@ -872,10 +877,6 @@ func (xdcrf *XDCRFactory) constructSettingsForDcpNozzle(pipeline common.Pipeline
 		dcpNozzleSettings[parts.ForceCollectionDisableKey] = true
 	} else {
 		dcpNozzleSettings[parts.SETTING_COMPRESSION_TYPE] = base.GetCompressionType(getSettingFromSettingsMap(settings, metadata.CompressionTypeKey, repSettings.CompressionType).(int))
-		getterFunc := func(manifestUid uint64) (*metadata.CollectionsManifest, error) {
-			return xdcrf.collectionsManifestSvc.GetSpecificSourceManifest(spec, manifestUid)
-		}
-		dcpNozzleSettings[parts.DCP_Manifest_Getter] = service_def.CollectionsManifestReqFunc(getterFunc)
 
 		err := xdcrf.disableCollectionIfNeeded(settings, dcpNozzleSettings, pipeline.Specification())
 		if err != nil {

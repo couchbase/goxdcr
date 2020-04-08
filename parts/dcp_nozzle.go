@@ -587,13 +587,14 @@ func (dcp *DcpNozzle) initialize(settings metadata.ReplicationSettingsMap) (err 
 	}
 
 	getterRaw, exists := settings[DCP_Manifest_Getter]
-	if !exists {
-		dcp.Logger().Warnf("Collections Manifest is not supported due to the use of CAPI nozzle")
-	} else {
+	if exists {
 		dcp.specificManifestGetter = getterRaw.(service_def.CollectionsManifestReqFunc)
 	}
 
 	if !dcp.CollectionEnabled() {
+		if dcp.is_capi {
+			dcp.Logger().Warnf("Collections is not supported due to the use of CAPI nozzle - only the default collection on the source will be used for replication")
+		}
 		err = dcp.checkDefaultCollectionExistence()
 	}
 	return
