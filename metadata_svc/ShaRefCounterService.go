@@ -55,6 +55,10 @@ func (s *ShaRefCounterService) GetShaNamespaceMap(topic string) (metadata.ShaToC
 // Idempotent No-op if already exists
 // Init doesn't set the count to 1 - it sets it to 0 - and then individual counts need to be counted using recorder
 func (s *ShaRefCounterService) InitTopicShaCounter(topic string) (alreadyExists bool) {
+	return s.InitTopicShaCounterWithInternalId(topic, "")
+}
+
+func (s *ShaRefCounterService) InitTopicShaCounterWithInternalId(topic, internalId string) (alreadyExists bool) {
 	s.topicMapMtx.RLock()
 	_, alreadyExists = s.topicMaps[topic]
 	s.topicMapMtx.RUnlock()
@@ -64,7 +68,7 @@ func (s *ShaRefCounterService) InitTopicShaCounter(topic string) (alreadyExists 
 	}
 
 	s.topicMapMtx.Lock()
-	counter := NewMapShaRefCounter(topic, s.metadataSvc, s.metakvDocKeyGetter(topic))
+	counter := NewMapShaRefCounterWithInternalId(topic, internalId, s.metadataSvc, s.metakvDocKeyGetter(topic))
 	s.topicMaps[topic] = counter
 	s.topicMapMtx.Unlock()
 
@@ -200,6 +204,8 @@ func (s *ShaRefCounterService) UpsertMapping(topic, specInternalId string) error
 		return base.ErrorInvalidInput
 	}
 
+	// TODO - once consistent metakv is in, the cleanup effort will need to be coordinated
+	// Most likely called by the cluster master
 	return counter.upsertMapping(topic, specInternalId, true /*cleanup*/)
 }
 
@@ -236,14 +242,19 @@ type MapShaRefCounter struct {
 	metakvOpKey    string
 }
 
-func NewMapShaRefCounter(topic string, metadataSvc service_def.MetadataSvc, metakvOpKey string) *MapShaRefCounter {
+func NewMapShaRefCounterWithInternalId(topic, internalId string, metadataSvc service_def.MetadataSvc, metakvOpKey string) *MapShaRefCounter {
 	return &MapShaRefCounter{refCnt: make(map[string]uint64),
-		id:           topic,
-		shaToMapping: make(metadata.ShaToCollectionNamespaceMap),
-		singleUpsert: make(chan bool, 1),
-		metadataSvc:  metadataSvc,
-		metakvOpKey:  metakvOpKey,
+		id:             topic,
+		shaToMapping:   make(metadata.ShaToCollectionNamespaceMap),
+		singleUpsert:   make(chan bool, 1),
+		metadataSvc:    metadataSvc,
+		metakvOpKey:    metakvOpKey,
+		internalSpecId: internalId,
 	}
+}
+
+func NewMapShaRefCounter(topic string, metadataSvc service_def.MetadataSvc, metakvOpKey string) *MapShaRefCounter {
+	return NewMapShaRefCounterWithInternalId(topic, "", metadataSvc, metakvOpKey)
 }
 
 func (c *MapShaRefCounter) Init() {

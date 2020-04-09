@@ -10,6 +10,7 @@
 package metadata
 
 import (
+	"fmt"
 	"github.com/couchbase/goxdcr/base"
 )
 
@@ -27,10 +28,28 @@ type BackfillReplicationSpec struct {
 	// Backfill Replication spec is composed of jobs per VB that needs to be handled
 	// For vb's that have backfill needs, each vb contains a list of ordered jobs to backfill
 	VBTasksMap VBTasksMapType
+
+	// revision number to be used by metadata service. not included in json
+	revision interface{}
+}
+
+func NewBackfillReplicationSpec(id, internalId string, vbTasksMap VBTasksMapType, parentSpec *ReplicationSpecification) *BackfillReplicationSpec {
+	return &BackfillReplicationSpec{
+		Id:               id,
+		InternalId:       internalId,
+		VBTasksMap:       vbTasksMap,
+		replicationSpec_: parentSpec,
+	}
 }
 
 func (b *BackfillReplicationSpec) SameAs(other *BackfillReplicationSpec) bool {
-	return b.Id == other.Id && b.InternalId == other.InternalId && b.VBTasksMap.SameAs(other.VBTasksMap)
+	if b == nil && other == nil {
+		return true
+	} else if (b == nil && other != nil) || (b != nil && other == nil) {
+		return false
+	} else {
+		return b.Id == other.Id && b.InternalId == other.InternalId && b.VBTasksMap.SameAs(other.VBTasksMap)
+	}
 }
 
 func (b *BackfillReplicationSpec) SetReplicationSpec(spec *ReplicationSpecification) {
@@ -39,6 +58,14 @@ func (b *BackfillReplicationSpec) SetReplicationSpec(spec *ReplicationSpecificat
 
 func (b *BackfillReplicationSpec) ReplicationSpec() *ReplicationSpecification {
 	return b.replicationSpec_
+}
+
+func (b *BackfillReplicationSpec) Revision() interface{} {
+	return b.revision
+}
+
+func (b *BackfillReplicationSpec) SetRevision(rev interface{}) {
+	b.revision = rev
 }
 
 func (b *BackfillReplicationSpec) Clone() *BackfillReplicationSpec {
@@ -104,6 +131,28 @@ func (this VBTasksMapType) Clone() VBTasksMapType {
 	return clonedMap
 }
 
+func (v *VBTasksMapType) LoadFromMappingsShaMap(shaToCollectionNsMap ShaToCollectionNamespaceMap) error {
+	if v == nil {
+		return base.ErrorInvalidInput
+	}
+
+	errMap := make(base.ErrorMap)
+	for _, tasks := range *v {
+		for _, task := range *tasks {
+			collectionNsMapping, exists := shaToCollectionNsMap[task.RequestedCollectionsSha]
+			if !exists {
+				errMap[task.RequestedCollectionsSha] = base.ErrorNotFound
+				continue
+			}
+			task.requestedCollections_ = *collectionNsMapping
+		}
+	}
+	if len(errMap) > 0 {
+		return fmt.Errorf("Unable to find the following sha-collection namespace maps: %v", base.FlattenErrorMap(errMap))
+	}
+	return nil
+}
+
 // Backfill tasks are ordered list of backfill jobs, and to be handled in sequence
 type BackfillTasks []*BackfillTask
 
@@ -129,24 +178,47 @@ func (b BackfillTasks) SameAs(other BackfillTasks) bool {
 	return true
 }
 
+// Returns a map of sha -> mapping
+func (b BackfillTasks) GetAllCollectionNamespaceMappings() ShaToCollectionNamespaceMap {
+	returnMap := make(ShaToCollectionNamespaceMap)
+	for _, task := range b {
+		if _, exists := returnMap[task.RequestedCollectionsSha]; !exists {
+			requestedCols := task.RequestedCollections()
+			returnMap[task.RequestedCollectionsSha] = &requestedCols
+		}
+	}
+	return returnMap
+}
+
+// Each backfill task should be RO once created
+// And new tasks can be created to split/merge existing ones
 type BackfillTask struct {
 	// ts contains vbno
-	Timestamps           *BackfillVBTimestamps
-	RequestedCollections CollectionNamespaceMapping
-	// TODO - have a collections mapping service
+	Timestamps *BackfillVBTimestamps
+	// The namespace mapping is NOT stored as part of JSON marshalling
+	// It will be stored/retrieved by the ShaRefCounterservice
+	requestedCollections_   CollectionNamespaceMapping
+	RequestedCollectionsSha string
 }
 
 func NewBackfillTask(ts *BackfillVBTimestamps, reqCols CollectionNamespaceMapping) *BackfillTask {
-	return &BackfillTask{ts, reqCols}
+	shaSlice, _ := reqCols.Sha256()
+	return &BackfillTask{ts, reqCols, fmt.Sprintf("%x", shaSlice[:])}
+}
+
+func (b *BackfillTask) RequestedCollections() CollectionNamespaceMapping {
+	return b.requestedCollections_
 }
 
 func (b *BackfillTask) SameAs(other *BackfillTask) bool {
-	return b.RequestedCollections.IsSame(other.RequestedCollections) && b.Timestamps.SameAs(other.Timestamps)
+	return b.RequestedCollectionsSha == other.RequestedCollectionsSha && b.RequestedCollections().IsSame(other.RequestedCollections()) && b.Timestamps.SameAs(other.Timestamps)
 }
 
 func (b BackfillTask) Clone() BackfillTask {
 	clonedTs := b.Timestamps.Clone()
-	return BackfillTask{&clonedTs, b.RequestedCollections.Clone()}
+	// Sha is automatically calculated
+	task := NewBackfillTask(&clonedTs, b.RequestedCollections().Clone())
+	return *task
 }
 
 // This is specifically used to indicate the start and end of a backfill

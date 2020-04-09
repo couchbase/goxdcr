@@ -168,6 +168,13 @@ func main() {
 			os.Exit(1)
 		}
 
+		backfillReplService, err := metadata_svc.NewBackfillReplicationService(uilog_svc,
+			metakv_svc, log.DefaultLoggerContext, utils, replication_spec_svc, cluster_info_svc, top_svc)
+		if err != nil {
+			fmt.Printf("Error starting backfill replication service. err=%v\n", err)
+			os.Exit(1)
+		}
+
 		// start replication manager in normal mode
 		rm.StartReplicationManager(host,
 			uint16(options.xdcrRestPort),
@@ -186,7 +193,8 @@ func main() {
 			internalSettings_svc,
 			service_impl.NewThroughputThrottlerSvc(nil),
 			utils,
-			collectionsManifestService)
+			collectionsManifestService,
+			backfillReplService)
 
 		// keep main alive in normal mode
 		<-done

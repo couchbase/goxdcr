@@ -986,9 +986,9 @@ func (c *CollectionNamespaceMapping) String() string {
 	return buffer.String()
 }
 
-func (c *CollectionNamespaceMapping) Clone() (clone CollectionNamespaceMapping) {
+func (c CollectionNamespaceMapping) Clone() (clone CollectionNamespaceMapping) {
 	clone = make(CollectionNamespaceMapping)
-	for k, v := range *c {
+	for k, v := range c {
 		srcClone := &base.CollectionNamespace{}
 		*srcClone = *k
 		clone[srcClone] = v.Clone()
@@ -1067,11 +1067,8 @@ func (c *CollectionNamespaceMapping) GetSubsetBasedOnAddedTargets(added ScopesMa
 	return
 }
 
-func (c *CollectionNamespaceMapping) IsSame(other CollectionNamespaceMapping) bool {
-	if c == nil {
-		return len(other) == 0
-	}
-	for src, tgtList := range *c {
+func (c CollectionNamespaceMapping) IsSame(other CollectionNamespaceMapping) bool {
+	for src, tgtList := range c {
 		_, otherTgtList, exists := other.Get(src)
 		if !exists {
 			return false
@@ -1290,4 +1287,63 @@ func (b *CollectionNsMappingsDoc) LoadShaMap(shaMap ShaToCollectionNamespaceMap)
 	} else {
 		return nil
 	}
+}
+
+type ShaToCollectionNamespaceMap map[string]*CollectionNamespaceMapping
+
+func (s *ShaToCollectionNamespaceMap) Clone() (newMap ShaToCollectionNamespaceMap) {
+	if s == nil {
+		return
+	}
+
+	newMap = make(ShaToCollectionNamespaceMap)
+
+	for k, v := range *s {
+		clonedVal := v.Clone()
+		newMap[k] = &clonedVal
+	}
+	return
+}
+
+func (s *ShaToCollectionNamespaceMap) String() string {
+	if s == nil {
+		return "<nil>"
+	}
+
+	var output []string
+	for k, v := range *s {
+		output = append(output, fmt.Sprintf("Sha256Digest: %v Map:", k))
+		if v != nil {
+			output = append(output, v.String())
+		}
+	}
+
+	return strings.Join(output, "\n")
+}
+
+type CompressedColNamespaceMapping struct {
+	// Snappy compressed byte slice of CollectionNamespaceMapping
+	CompressedMapping []byte `json:compressedMapping`
+	Sha256Digest      string `json:string`
+}
+
+func (c *CompressedColNamespaceMapping) Size() int {
+	if c == nil {
+		return 0
+	}
+	return len(c.CompressedMapping) + len(c.Sha256Digest)
+}
+
+type CompressedColNamespaceMappingList []*CompressedColNamespaceMapping
+
+func (c *CompressedColNamespaceMappingList) Size() int {
+	if c == nil {
+		return 0
+	}
+
+	var totalSize int
+	for _, j := range *c {
+		totalSize += j.Size()
+	}
+	return totalSize
 }

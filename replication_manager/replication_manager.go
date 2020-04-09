@@ -101,6 +101,8 @@ type replicationManager struct {
 	utils utilities.UtilsIface
 	// Collections Manifests service
 	collectionsManifestSvc service_def.CollectionsManifestSvc
+	// Backfill replication service
+	backfillReplSvc service_def.BackfillReplSvc
 
 	once sync.Once
 
@@ -138,7 +140,8 @@ func StartReplicationManager(sourceKVHost string,
 	internal_settings_svc service_def.InternalSettingsSvc,
 	throughput_throttler_svc service_def.ThroughputThrottlerSvc,
 	utilitiesIn utilities.UtilsIface,
-	collectionsManifestSvc service_def.CollectionsManifestSvc) {
+	collectionsManifestSvc service_def.CollectionsManifestSvc,
+	backfillReplSvc service_def.BackfillReplSvc) {
 
 	replication_mgr.once.Do(func() {
 		// ns_server shutdown protocol: poll stdin and exit upon reciept of EOF
@@ -154,7 +157,7 @@ func StartReplicationManager(sourceKVHost string,
 		replication_mgr.init(repl_spec_svc, remote_cluster_svc, cluster_info_svc,
 			xdcr_topology_svc, replication_settings_svc, checkpoint_svc, capi_svc,
 			audit_svc, uilog_svc, global_setting_svc, bucket_settings_svc, internal_settings_svc,
-			throughput_throttler_svc, collectionsManifestSvc)
+			throughput_throttler_svc, collectionsManifestSvc, backfillReplSvc)
 
 		// start replication manager supervisor
 		// TODO should we make heart beat settings configurable?
@@ -351,6 +354,7 @@ func (rm *replicationManager) initMetadataChangeMonitor() {
 	// ReplSpecSvc allows multiple callbacks - add the collections one first to be called first
 	rm.repl_spec_svc.SetMetadataChangeHandlerCallback(rm.collectionsManifestSvc.ReplicationSpecChangeCallback)
 	rm.repl_spec_svc.SetMetadataChangeHandlerCallback(replicationSpecChangeListener.replicationSpecChangeHandlerCallback)
+	rm.repl_spec_svc.SetMetadataChangeHandlerCallback(rm.backfillReplSvc.ReplicationSpecChangeCallback)
 
 	mcm.Start()
 }
@@ -417,7 +421,8 @@ func (rm *replicationManager) init(
 	bucket_settings_svc service_def.BucketSettingsSvc,
 	internal_settings_svc service_def.InternalSettingsSvc,
 	throughput_throttler_svc service_def.ThroughputThrottlerSvc,
-	collectionsManifestSvc service_def.CollectionsManifestSvc) {
+	collectionsManifestSvc service_def.CollectionsManifestSvc,
+	backfillReplSvc service_def.BackfillReplSvc) {
 
 	rm.GenericSupervisor = *supervisor.NewGenericSupervisor(base.ReplicationManagerSupervisorId, log.DefaultLoggerContext, rm, nil, rm.utils)
 	rm.repl_spec_svc = repl_spec_svc
@@ -434,6 +439,7 @@ func (rm *replicationManager) init(
 	rm.bucket_settings_svc = bucket_settings_svc
 	rm.internal_settings_svc = internal_settings_svc
 	rm.collectionsManifestSvc = collectionsManifestSvc
+	rm.backfillReplSvc = backfillReplSvc
 
 	fac := factory.NewXDCRFactory(repl_spec_svc, remote_cluster_svc, cluster_info_svc,
 		xdcr_topology_svc, checkpoint_svc, capi_svc, uilog_svc, bucket_settings_svc,

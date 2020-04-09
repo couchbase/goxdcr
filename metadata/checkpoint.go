@@ -13,7 +13,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/couchbase/goxdcr/base"
-	"strings"
 	"unsafe"
 )
 
@@ -498,63 +497,4 @@ func (ckptsDoc *CheckpointsDoc) GetCheckpointRecords() []*CheckpointRecord {
 	} else {
 		return ckptsDoc.Checkpoint_records[:base.MaxCheckpointRecordsToRead]
 	}
-}
-
-type ShaToCollectionNamespaceMap map[string]*CollectionNamespaceMapping
-
-func (s *ShaToCollectionNamespaceMap) Clone() (newMap ShaToCollectionNamespaceMap) {
-	if s == nil {
-		return
-	}
-
-	newMap = make(ShaToCollectionNamespaceMap)
-
-	for k, v := range *s {
-		clonedVal := v.Clone()
-		newMap[k] = &clonedVal
-	}
-	return
-}
-
-func (s *ShaToCollectionNamespaceMap) String() string {
-	if s == nil {
-		return "<nil>"
-	}
-
-	var output []string
-	for k, v := range *s {
-		output = append(output, fmt.Sprintf("Sha256Digest: %v Map:", k))
-		if v != nil {
-			output = append(output, v.String())
-		}
-	}
-
-	return strings.Join(output, "\n")
-}
-
-type CompressedColNamespaceMapping struct {
-	// Snappy compressed byte slice of CollectionNamespaceMapping
-	CompressedMapping []byte `json:compressedMapping`
-	Sha256Digest      string `json:string`
-}
-
-func (c *CompressedColNamespaceMapping) Size() int {
-	if c == nil {
-		return 0
-	}
-	return len(c.CompressedMapping) + len(c.Sha256Digest)
-}
-
-type CompressedColNamespaceMappingList []*CompressedColNamespaceMapping
-
-func (c *CompressedColNamespaceMappingList) Size() int {
-	if c == nil {
-		return 0
-	}
-
-	var totalSize int
-	for _, j := range *c {
-		totalSize += j.Size()
-	}
-	return totalSize
 }

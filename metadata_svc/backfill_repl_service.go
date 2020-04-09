@@ -16,6 +16,7 @@ import (
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
+	"github.com/couchbase/goxdcr/pipeline_utils"
 	"github.com/couchbase/goxdcr/service_def"
 	utilities "github.com/couchbase/goxdcr/utils"
 	"strings"
@@ -24,16 +25,37 @@ import (
 
 const BackfillKey = "backfill"
 
+const SpecKey = "spec"
+
 var BackfillParentCatalogKey = CheckpointsCatalogKeyPrefix + base.KeyPartsDelimiter + BackfillKey
 
+const BackfillMappingsKey = "backfillMappings"
+
+// Get a unique key to access metakv for backfillMappings
+func getBackfillMappingsDocKeyFunc(replicationId string) string {
+	// ckpt/backfill/<replId>/backfillMappings
+	return fmt.Sprintf("%v", BackfillParentCatalogKey+base.KeyPartsDelimiter+replicationId+base.KeyPartsDelimiter+BackfillMappingsKey)
+}
+
+// This is the actual replicationSpec that contains all the VBs and their tasks
+// Each tasks depend on having the mapping information already loaded
+func getBackfillReplicationDocKeyFunc(replicationId string) string {
+	// ckpt/backfill/<replId>/spec
+	return fmt.Sprintf("%v", BackfillParentCatalogKey+base.KeyPartsDelimiter+replicationId+base.KeyPartsDelimiter+SpecKey)
+}
+
 type BackfillReplicationService struct {
-	metadataSvc service_def.MetadataSvc
-	uiLogSvc    service_def.UILogSvc
-	replSpecSvc service_def.ReplicationSpecSvc
-	logger      *log.CommonLogger
-	utils       utilities.UtilsIface
-	cache       *MetadataCache
-	cache_lock  sync.Mutex
+	*ShaRefCounterService
+	metadataSvc     service_def.MetadataSvc
+	uiLogSvc        service_def.UILogSvc
+	replSpecSvc     service_def.ReplicationSpecSvc
+	clusterInfoSvc  service_def.ClusterInfoSvc
+	xdcrTopologySvc service_def.XDCRCompTopologySvc
+
+	logger     *log.CommonLogger
+	utils      utilities.UtilsIface
+	cache      *MetadataCache
+	cache_lock sync.Mutex
 
 	metadataChangeCallbacks []base.MetadataChangeHandlerCallback
 	metadataChangeCbMtx     sync.RWMutex
@@ -43,13 +65,18 @@ func NewBackfillReplicationService(uiLogSvc service_def.UILogSvc,
 	metadataSvc service_def.MetadataSvc,
 	loggerCtx *log.LoggerContext,
 	utilsIn utilities.UtilsIface,
-	replSpecSvc service_def.ReplicationSpecSvc) (*BackfillReplicationService, error) {
+	replSpecSvc service_def.ReplicationSpecSvc,
+	clusterInfoSvc service_def.ClusterInfoSvc,
+	xdcrTopologySvc service_def.XDCRCompTopologySvc) (*BackfillReplicationService, error) {
 	logger := log.NewLogger("BackfillReplSvc", loggerCtx)
 	svc := &BackfillReplicationService{
-		metadataSvc: metadataSvc,
-		logger:      logger,
-		replSpecSvc: replSpecSvc,
-		utils:       utilsIn,
+		ShaRefCounterService: NewShaRefCounterService(getBackfillMappingsDocKeyFunc, metadataSvc),
+		metadataSvc:          metadataSvc,
+		logger:               logger,
+		replSpecSvc:          replSpecSvc,
+		utils:                utilsIn,
+		clusterInfoSvc:       clusterInfoSvc,
+		xdcrTopologySvc:      xdcrTopologySvc,
 	}
 
 	return svc, svc.initCacheFromMetaKV()
@@ -96,7 +123,32 @@ func (b *BackfillReplicationService) initCacheFromMetaKV() (err error) {
 			b.logger.Warnf("Out of date backfill found with internal ID %v - skipping...", backfillSpec.InternalId)
 			continue
 		}
+
 		backfillSpec.SetReplicationSpec(actualSpec)
+
+		// Last step is to make sure that the sha mapping is retrieved
+		b.InitTopicShaCounter(backfillSpec.Id)
+		mappingsDoc, err := b.GetMappingsDoc(backfillSpec.Id, false /*initIfNotFound*/)
+		if err != nil {
+			// TODO - MB-38506
+			b.logger.Errorf("Unable to retrieve mappingDoc for backfill replication %v - potential data loss", backfillSpec.Id)
+			continue
+		}
+		shaMapping, err := b.GetShaToCollectionNsMap(backfillSpec.Id, mappingsDoc)
+		if err != nil {
+			// TODO - MB-38506
+			b.logger.Errorf("Error - unable to get shaToCollectionsMap %v", err)
+			continue
+		}
+
+		err = backfillSpec.VBTasksMap.LoadFromMappingsShaMap(shaMapping)
+		if err != nil {
+			// TODO - MB-38506
+			b.logger.Errorf("Error - unable to get shaToCollectionsMap %v", err)
+			continue
+		}
+
+		// Finally, done
 		b.updateCacheInternal(replicationId, backfillSpec, false /*lock*/)
 	}
 
@@ -118,30 +170,6 @@ func (b *BackfillReplicationService) constructBackfillSpec(value []byte, rev int
 	return spec, nil
 }
 
-func (b *BackfillReplicationService) updateCacheInternal(specId string, newSpec *metadata.BackfillReplicationSpec, lock bool) error {
-	if lock {
-		b.cache_lock.Lock()
-		defer b.cache_lock.Unlock()
-	}
-
-	oldSpec, updated, err := b.updateCacheInternalNoLock(specId, newSpec)
-
-	var lastErr error
-	b.metadataChangeCbMtx.RLock()
-	if updated && len(b.metadataChangeCallbacks) > 0 {
-		for _, cb := range b.metadataChangeCallbacks {
-			err = cb(specId, oldSpec, newSpec)
-			if err != nil {
-				b.logger.Error(err.Error())
-				lastErr = err
-			}
-		}
-	}
-	b.metadataChangeCbMtx.RUnlock()
-
-	return lastErr
-}
-
 func (b *BackfillReplicationService) updateCacheInternalNoLock(specId string, newSpec *metadata.BackfillReplicationSpec) (*metadata.BackfillReplicationSpec, bool, error) {
 	oldSpec, err := b.backfillSpec(specId)
 	if err != nil {
@@ -159,7 +187,7 @@ func (b *BackfillReplicationService) updateCacheInternalNoLock(specId string, ne
 		// replication spec has been created or updated
 
 		// no need to update cache if newSpec is the same as the one already in cache
-		if !newSpec.SameAs(oldSpec) {
+		if oldSpec == nil || !newSpec.SameAs(oldSpec) {
 			err = b.cacheSpec(b.getCache(), specId, newSpec)
 			if err == nil {
 				specId = newSpec.Id
@@ -252,4 +280,205 @@ func (b *BackfillReplicationService) getReplicationIdFromKey(key string) string 
 		panic(fmt.Sprintf("Got unexpected key %v for backfill replication spec", key))
 	}
 	return key[len(prefix):]
+}
+
+func (b *BackfillReplicationService) BackfillReplSpec(replicationId string) (*metadata.BackfillReplicationSpec, error) {
+	spec, err := b.backfillSpec(replicationId)
+	if err != nil {
+		return nil, err
+	}
+
+	return spec.Clone(), nil
+}
+
+func (b *BackfillReplicationService) GetMyVBs(sourceBucketName string) ([]uint16, error) {
+	var vbList []uint16
+
+	kv_vb_map, _, err := pipeline_utils.GetSourceVBMap(b.clusterInfoSvc, b.xdcrTopologySvc, sourceBucketName, b.logger)
+	if err != nil {
+		return vbList, err
+	}
+
+	for _, vbno := range kv_vb_map {
+		vbList = append(vbList, vbno...)
+	}
+
+	return vbList, nil
+}
+
+func (b *BackfillReplicationService) AddBackfillReplSpec(spec *metadata.BackfillReplicationSpec) error {
+	if spec == nil {
+		return base.ErrorInvalidInput
+	}
+
+	// First, persist the collection mapping info for just the VBs this node owns
+	alreadyExists := b.InitTopicShaCounterWithInternalId(spec.Id, spec.InternalId)
+	if alreadyExists {
+		return fmt.Errorf("Error - previous spec shouldn't exist")
+	}
+
+	err := b.persistMappingsForThisNode(spec)
+	if err != nil {
+		return err
+	}
+	b.logger.Infof("Adding backfill spec %v to metadata store", spec)
+
+	value, err := json.Marshal(spec)
+	if err != nil {
+		return err
+	}
+
+	// TODO - once consistent metakv is in play, there could be conflict when adding, so this
+	// section would need to handle that and do RMW
+	key := getBackfillReplicationDocKeyFunc(spec.Id)
+	err = b.metadataSvc.Add(key, value)
+	if err != nil {
+		b.logger.Errorf("Add returned error: %v\n", err)
+		return err
+	}
+
+	return b.updateCache(spec.Id, spec)
+}
+
+// Each node should only be responsible to update the centralized mapping file
+// to ensure that the mappings that it needs are persisted. This way, it ensure that whichever VB is the most
+// advanced on whatever node will get the chance to update metakv with the needed mappings, and every other node
+// will benefit
+// When consistent metakv is in play, this would lead to less conflicts
+func (b *BackfillReplicationService) persistMappingsForThisNode(spec *metadata.BackfillReplicationSpec) error {
+	mappingsDoc, err := b.GetMappingsDoc(spec.Id, true /*InitIfNotFound*/)
+	if err != nil {
+		return err
+	}
+	inflatedMapping, err := b.GetShaToCollectionNsMap(spec.Id, mappingsDoc)
+	if err != nil {
+		return err
+	}
+	err = b.InitCounterShaToActualMappings(spec.Id, spec.InternalId, inflatedMapping)
+	if err != nil {
+		return err
+	}
+
+	myVBs, err := b.GetMyVBs(spec.ReplicationSpec().SourceBucketName)
+	if err != nil {
+		return err
+	}
+	mySortedVBs := base.SortUint16List(myVBs)
+
+	consolidatedMap := make(metadata.ShaToCollectionNamespaceMap)
+	for vb, tasks := range spec.VBTasksMap {
+		_, isMyVB := base.SearchVBInSortedList(vb, mySortedVBs)
+		if !isMyVB {
+			continue
+		}
+		innerConsolidatedMap := tasks.GetAllCollectionNamespaceMappings()
+		for sha, nsMap := range innerConsolidatedMap {
+			if _, exists := consolidatedMap[sha]; !exists {
+				consolidatedMap[sha] = nsMap
+			}
+		}
+	}
+
+	incrementer, err := b.GetIncrementerFunc(spec.Id)
+	if err != nil {
+		return err
+	}
+
+	for sha, mapping := range consolidatedMap {
+		incrementer(sha, mapping)
+	}
+
+	return b.UpsertMapping(spec.Id, spec.InternalId)
+}
+
+func (b *BackfillReplicationService) SetBackfillReplSpec(spec *metadata.BackfillReplicationSpec) error {
+	// TODO
+	return nil
+}
+
+func (b *BackfillReplicationService) DelBackfillReplSpec(replicationId string) (*metadata.BackfillReplicationSpec, error) {
+	_, err := b.backfillSpec(replicationId)
+	if err != nil {
+		return nil, ReplNotFoundErr
+	}
+
+	key := getBackfillReplicationDocKeyFunc(replicationId)
+	err = b.metadataSvc.Del(key, nil /*rev*/)
+	if err != nil {
+		b.logger.Errorf("Failed to delete backfill spec, key=%v, err=%v\n", key, err)
+		return nil, err
+	}
+
+	err = b.updateCache(replicationId, nil)
+	if err != nil {
+		b.logger.Errorf("Failed to delete backfill spec, key=%v, err=%v\n", key, err)
+		return nil, err
+	}
+
+	return nil, nil
+}
+
+func (b *BackfillReplicationService) updateCache(specId string, newSpec *metadata.BackfillReplicationSpec) error {
+	return b.updateCacheInternal(specId, newSpec, true /*lock*/)
+}
+
+func (b *BackfillReplicationService) updateCacheNoLock(specId string, newSpec *metadata.BackfillReplicationSpec) error {
+	return b.updateCacheInternal(specId, newSpec, false /*lock*/)
+}
+
+func (b *BackfillReplicationService) updateCacheInternal(specId string, newSpec *metadata.BackfillReplicationSpec, lock bool) error {
+	if lock {
+		b.cache_lock.Lock()
+		defer b.cache_lock.Unlock()
+	}
+
+	oldSpec, updated, err := b.updateCacheInternalNoLock(specId, newSpec)
+
+	if updated && oldSpec != nil && newSpec == nil {
+		// TODO
+	}
+
+	if updated && oldSpec == nil && newSpec != nil {
+		// TODO
+	}
+
+	return err
+}
+
+func (b *BackfillReplicationService) ReplicationSpecChangeCallback(id string, oldVal, newVal interface{}) error {
+	oldSpec, ok := oldVal.(*metadata.ReplicationSpecification)
+	if !ok {
+		return base.ErrorInvalidInput
+	}
+	newSpec, ok := newVal.(*metadata.ReplicationSpecification)
+	if !ok {
+		return base.ErrorInvalidInput
+	}
+
+	if oldSpec == nil && newSpec != nil {
+		// TODO
+	} else if oldSpec != nil && newSpec == nil {
+		_, err := b.DelBackfillReplSpec(id)
+		if err == ReplNotFoundErr {
+			err = nil
+		}
+		return err
+	}
+	return nil
+}
+
+func (b *BackfillReplicationService) SetMetadataChangeHandlerCallback(call_back base.MetadataChangeHandlerCallback) {
+	b.metadataChangeCbMtx.Lock()
+	defer b.metadataChangeCbMtx.Unlock()
+	b.metadataChangeCallbacks = append(b.metadataChangeCallbacks, call_back)
+}
+
+func (b *BackfillReplicationService) loadLatestMetakvRevisionIntoSpec(spec *metadata.BackfillReplicationSpec) error {
+	key := getBackfillReplicationDocKeyFunc(spec.Id)
+	_, rev, err := b.metadataSvc.Get(key)
+	if err != nil {
+		return err
+	}
+	spec.SetRevision(rev)
+	return nil
 }
