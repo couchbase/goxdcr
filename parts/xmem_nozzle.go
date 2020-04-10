@@ -11,7 +11,6 @@ package parts
 
 import (
 	"bytes"
-	"crypto/sha256"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -488,19 +487,18 @@ type opaqueKeySeqnoMap map[uint32][]interface{}
  * 2. Sequence number
  * 3. vbucket number
  * 4. time.Now()
- * 5. documentKeyHash
  */
 
 // This function will ensure that the returned interface slice will have distinct copies of argument references
 // since everything coming in is passing by value
-func compileOpaqueKeySeqnoValue(docKey string, seqno uint64, vbucket uint16, timeNow time.Time, docKeyHash string) []interface{} {
-	return []interface{}{docKey, seqno, vbucket, timeNow, docKeyHash}
+func compileOpaqueKeySeqnoValue(docKey string, seqno uint64, vbucket uint16, timeNow time.Time) []interface{} {
+	return []interface{}{docKey, seqno, vbucket, timeNow}
 }
 
 func (omap opaqueKeySeqnoMap) Clone() opaqueKeySeqnoMap {
 	newMap := make(opaqueKeySeqnoMap)
 	for k, v := range omap {
-		newMap[k] = compileOpaqueKeySeqnoValue(v[0].(string), v[1].(uint64), v[2].(uint16), v[3].(time.Time), v[4].(string))
+		newMap[k] = compileOpaqueKeySeqnoValue(v[0].(string), v[1].(uint64), v[2].(uint16), v[3].(time.Time))
 	}
 	return newMap
 }
@@ -518,7 +516,7 @@ func (omap opaqueKeySeqnoMap) CloneAndRedact() opaqueKeySeqnoMap {
 	clonedMap := make(opaqueKeySeqnoMap)
 	for k, v := range omap {
 		if !base.IsStringRedacted(v[0].(string)) {
-			clonedMap[k] = compileOpaqueKeySeqnoValue(base.TagUD(v[0].(string)), v[1].(uint64), v[2].(uint16), v[3].(time.Time), v[4].(string))
+			clonedMap[k] = compileOpaqueKeySeqnoValue(base.TagUD(v[0].(string)), v[1].(uint64), v[2].(uint16), v[3].(time.Time))
 		} else {
 			clonedMap[k] = v
 		}
@@ -1529,9 +1527,8 @@ func (xmem *XmemNozzle) batchGetMetaHandler(count int, finch chan bool, return_c
 					seqno, ok2 := keySeqno[1].(uint64)
 					vbno, ok2 := keySeqno[2].(uint16)
 					start_time, ok3 := keySeqno[3].(time.Time)
-					keySha, ok4 := keySeqno[4].(string)
-					if ok1 && ok2 && ok3 && ok4 {
-						respMap[keySha] = response
+					if ok1 && ok2 && ok3 {
+						respMap[key] = response
 
 						additionalInfo := GetMetaReceivedEventAdditional{Key: key,
 							Seqno:       seqno,
@@ -1599,27 +1596,26 @@ func (xmem *XmemNozzle) batchGetMeta(bigDoc_map base.McRequestMap) (map[string]b
 
 	// establish a opaque based on the current time - and since getting meta doesn't utilize buffer buckets, feed it 0
 	opaque := getOpaque(0, sequence)
-	sentKeyShaMap := make(map[string]bool, len(bigDoc_map))
+	sent_key_map := make(map[string]bool, len(bigDoc_map))
 
 	//de-dupe and prepare the packages
 	for _, originalReq := range bigDoc_map {
-		if len(originalReq.Req.Key) == 0 {
+		docKey := string(originalReq.Req.Key)
+		if docKey == "" {
 			xmem.Logger().Errorf("%v received empty docKey. unique-key= %v%v%v, req=%v%v%v, bigDoc_map=%v%v%v", xmem.Id(),
-				base.UdTagBegin, string(originalReq.Req.Key), base.UdTagEnd, base.UdTagBegin, originalReq.Req, base.UdTagEnd, base.UdTagBegin, bigDoc_map, base.UdTagEnd)
+				base.UdTagBegin, docKey, base.UdTagEnd, base.UdTagBegin, originalReq.Req, base.UdTagEnd, base.UdTagBegin, bigDoc_map, base.UdTagEnd)
 			return nil, fmt.Errorf("%v received empty docKey.", xmem.Id())
 		}
-		keySha := sha256.Sum256(originalReq.Req.Key)
-		keyShaString := fmt.Sprintf("%x", keySha[:])
 
-		if _, ok := sentKeyShaMap[keyShaString]; !ok {
-			req := xmem.composeRequestForGetMeta(originalReq.Req.Key, originalReq.Req.VBucket, opaque)
+		if _, ok := sent_key_map[docKey]; !ok {
+			req := xmem.composeRequestForGetMeta(docKey, originalReq.Req.VBucket, opaque)
 			// .Bytes() returns data ready to be fed over the wire
 			reqs_bytes = append(reqs_bytes, req.Bytes())
 			// a Map of array of items and map key is the opaque currently based on time (passed to the target and back)
-			opaque_keySeqno_map[opaque] = compileOpaqueKeySeqnoValue(string(originalReq.Req.Key), originalReq.Seqno, originalReq.Req.VBucket, time.Now(), keyShaString)
+			opaque_keySeqno_map[opaque] = compileOpaqueKeySeqnoValue(docKey, originalReq.Seqno, originalReq.Req.VBucket, time.Now())
 			opaque++
 			numOfReqsInReqBytesBatch++
-			sentKeyShaMap[keyShaString] = true
+			sent_key_map[docKey] = true
 
 			if numOfReqsInReqBytesBatch > base.XmemMaxBatchSize {
 				// Consider this a batch of requests and put it in as an element in reqs_bytes_list
@@ -1653,13 +1649,12 @@ func (xmem *XmemNozzle) batchGetMeta(bigDoc_map base.McRequestMap) (map[string]b
 
 	// Parse the result once the handler has finished populating the respMap
 	for _, wrappedReq := range bigDoc_map {
-		keySha := sha256.Sum256(wrappedReq.Req.Key)
-		keyShaStr := fmt.Sprintf("%x", keySha[:])
-		resp, ok := respMap[keyShaStr]
+		key := string(wrappedReq.Req.Key)
+		resp, ok := respMap[key]
 		if ok && resp.Status == mc.SUCCESS {
-			doc_meta_target, err := xmem.decodeGetMetaResp(wrappedReq.Req.Key, resp)
+			doc_meta_target, err := xmem.decodeGetMetaResp([]byte(key), resp)
 			if err != nil {
-				xmem.Logger().Warnf("%v batchGetMeta: Error decoding getMeta response for doc %v%v%v. err=%v. Skip conflict resolution and send the doc", xmem.Id(), base.UdTagBegin, string(wrappedReq.Req.Key), base.UdTagEnd, err)
+				xmem.Logger().Warnf("%v batchGetMeta: Error decoding getMeta response for doc %v%v%v. err=%v. Skip conflict resolution and send the doc", xmem.Id(), base.UdTagBegin, key, base.UdTagEnd, err)
 				continue
 			}
 			doc_meta_source := decodeSetMetaReq(wrappedReq)
@@ -1667,27 +1662,27 @@ func (xmem *XmemNozzle) batchGetMeta(bigDoc_map base.McRequestMap) (map[string]b
 				if xmem.Logger().GetLogLevel() >= log.LogLevelDebug {
 					docMetaSrcRedacted := doc_meta_source.CloneAndRedact()
 					docMetaTgtRedacted := doc_meta_target.CloneAndRedact()
-					xmem.Logger().Debugf("%v doc %v%v%v failed source side conflict resolution. source meta=%v, target meta=%v. no need to send\n", xmem.Id(), base.UdTagBegin, string(wrappedReq.Req.Key), base.UdTagEnd, docMetaSrcRedacted, docMetaTgtRedacted)
+					xmem.Logger().Debugf("%v doc %v%v%v failed source side conflict resolution. source meta=%v, target meta=%v. no need to send\n", xmem.Id(), base.UdTagBegin, key, base.UdTagEnd, docMetaSrcRedacted, docMetaTgtRedacted)
 				}
 				bigDoc_noRep_map[wrappedReq.UniqueKey] = true
 			} else if xmem.Logger().GetLogLevel() >= log.LogLevelDebug {
 				docMetaSrcRedacted := doc_meta_source.CloneAndRedact()
 				docMetaTgtRedacted := doc_meta_target.CloneAndRedact()
-				xmem.Logger().Debugf("%v doc %v%v%v succeeded source side conflict resolution. source meta=%v, target meta=%v. sending it to target\n", xmem.Id(), base.UdTagBegin, string(wrappedReq.Req.Key), base.UdTagEnd, docMetaSrcRedacted, docMetaTgtRedacted)
+				xmem.Logger().Debugf("%v doc %v%v%v succeeded source side conflict resolution. source meta=%v, target meta=%v. sending it to target\n", xmem.Id(), base.UdTagBegin, key, base.UdTagEnd, docMetaSrcRedacted, docMetaTgtRedacted)
 			}
 		} else if ok && isTopologyChangeMCError(resp.Status) {
 			bigDoc_noRep_map[wrappedReq.UniqueKey] = false
 		} else {
 			if !ok || resp == nil {
 				if xmem.Logger().GetLogLevel() >= log.LogLevelDebug {
-					xmem.Logger().Debugf("%v batchGetMeta: doc %v%s%v is not found in target system, send it", xmem.Id(), base.UdTagBegin, string(wrappedReq.Req.Key), base.UdTagEnd)
+					xmem.Logger().Debugf("%v batchGetMeta: doc %v%s%v is not found in target system, send it", xmem.Id(), base.UdTagBegin, key, base.UdTagEnd)
 				}
 			} else if resp.Status == mc.KEY_ENOENT {
 				if xmem.Logger().GetLogLevel() >= log.LogLevelDebug {
-					xmem.Logger().Debugf("%v batchGetMeta: doc %v%s%v does not exist on target. Skip conflict resolution and send the doc", xmem.Id(), base.UdTagBegin, string(wrappedReq.Req.Key), base.UdTagEnd)
+					xmem.Logger().Debugf("%v batchGetMeta: doc %v%s%v does not exist on target. Skip conflict resolution and send the doc", xmem.Id(), base.UdTagBegin, key, base.UdTagEnd)
 				}
 			} else {
-				xmem.Logger().Warnf("%v batchGetMeta: memcached response for doc %v%s%v has error status %v. Skip conflict resolution and send the doc", xmem.Id(), base.UdTagBegin, string(wrappedReq.Req.Key), base.UdTagEnd, resp.Status)
+				xmem.Logger().Warnf("%v batchGetMeta: memcached response for doc %v%s%v has error status %v. Skip conflict resolution and send the doc", xmem.Id(), base.UdTagBegin, key, base.UdTagEnd, resp.Status)
 			}
 		}
 	}
@@ -1719,9 +1714,9 @@ func (xmem *XmemNozzle) decodeGetMetaResp(key []byte, resp *mc.MCResponse) (docu
 
 }
 
-func (xmem *XmemNozzle) composeRequestForGetMeta(keyBytes []byte, vb uint16, opaque uint32) *mc.MCRequest {
+func (xmem *XmemNozzle) composeRequestForGetMeta(key string, vb uint16, opaque uint32) *mc.MCRequest {
 	req := &mc.MCRequest{VBucket: vb,
-		Key:    keyBytes,
+		Key:    []byte(key),
 		Opaque: opaque,
 		Opcode: base.GET_WITH_META}
 
