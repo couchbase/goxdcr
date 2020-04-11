@@ -784,8 +784,6 @@ type XmemNozzle struct {
 
 	connType base.ConnType
 
-	dataObj_recycler base.DataObjRecycler
-
 	topic                      string
 	last_ready_batch           int32
 	last_ten_batches_size      []uint32
@@ -817,6 +815,8 @@ type XmemNozzle struct {
 	vbList []uint16
 
 	collectionEnabled uint32
+
+	upstreamObjRecycler utilities.RecycleObjFunc
 }
 
 func NewXmemNozzle(id string,
@@ -831,7 +831,6 @@ func NewXmemNozzle(id string,
 	targetBucketUuid string,
 	username string,
 	password string,
-	dataObj_recycler base.DataObjRecycler,
 	source_cr_mode base.ConflictResolutionMode,
 	logger_context *log.LoggerContext,
 	utilsIn utilities.UtilsIface,
@@ -859,7 +858,6 @@ func NewXmemNozzle(id string,
 		counter_received:    0,
 		counter_waittime:    0,
 		counter_batches:     0,
-		dataObj_recycler:    dataObj_recycler,
 		topic:               topic,
 		source_cr_mode:      source_cr_mode,
 		sourceBucketName:    sourceBucketName,
@@ -1537,7 +1535,6 @@ func (xmem *XmemNozzle) batchGetMetaHandler(count int, finch chan bool, return_c
 							Commit_time: time.Since(start_time),
 						}
 						xmem.RaiseEvent(common.NewEvent(common.GetMetaReceived, nil, xmem, nil, additionalInfo))
-
 						if response.Status != mc.SUCCESS && !isIgnorableMCResponse(response) && !isTemporaryMCError(response.Status) {
 							if isTopologyChangeMCError(response.Status) {
 								vb_err := fmt.Errorf("Received error %v on vb %v\n", base.ErrorNotMyVbucket, vbno)
@@ -1606,7 +1603,7 @@ func (xmem *XmemNozzle) batchGetMeta(bigDoc_map base.McRequestMap) (map[string]b
 		docKey := string(originalReq.Req.Key)
 		if docKey == "" {
 			xmem.Logger().Errorf("%v received empty docKey. unique-key= %v%v%v, req=%v%v%v, bigDoc_map=%v%v%v", xmem.Id(),
-				base.UdTagBegin, originalReq.Req.Key, base.UdTagEnd, base.UdTagBegin, originalReq.Req, base.UdTagEnd, base.UdTagBegin, bigDoc_map, base.UdTagEnd)
+				base.UdTagBegin, docKey, base.UdTagEnd, base.UdTagBegin, originalReq.Req, base.UdTagEnd, base.UdTagBegin, bigDoc_map, base.UdTagEnd)
 			return nil, fmt.Errorf("%v received empty docKey.", xmem.Id())
 		}
 
@@ -3017,9 +3014,16 @@ func (xmem *XmemNozzle) bytesInDataChan() int {
 	return int(atomic.LoadInt32(&xmem.bytes_in_dataChan))
 }
 
+func (xmem *XmemNozzle) RecycleDataObj(incomingReq interface{}) {
+	req, ok := incomingReq.(*base.WrappedMCRequest)
+	if ok {
+		xmem.recycleDataObj(req)
+	}
+}
+
 func (xmem *XmemNozzle) recycleDataObj(req *base.WrappedMCRequest) {
-	if xmem.dataObj_recycler != nil {
-		xmem.dataObj_recycler(xmem.topic, req)
+	if xmem.upstreamObjRecycler != nil {
+		xmem.upstreamObjRecycler(req)
 	}
 }
 
@@ -3100,4 +3104,9 @@ func (xmem *XmemNozzle) getClientWithRetry(xmem_id string, pool base.ConnPool, f
 
 func (xmem *XmemNozzle) ResponsibleVBs() []uint16 {
 	return xmem.vbList
+}
+
+// Should only be done during pipeline construction
+func (xmem *XmemNozzle) SetUpstreamObjRecycler(recycler func(interface{})) {
+	xmem.upstreamObjRecycler = utilities.RecycleObjFunc(recycler)
 }

@@ -72,6 +72,22 @@ func (_m *Connector) Forward(data interface{}) error {
 	return r0
 }
 
+// GetUpstreamObjRecycler provides a mock function with given fields:
+func (_m *Connector) GetUpstreamObjRecycler() func(interface{}) {
+	ret := _m.Called()
+
+	var r0 func(interface{})
+	if rf, ok := ret.Get(0).(func() func(interface{})); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(func(interface{}))
+		}
+	}
+
+	return r0
+}
+
 // Id provides a mock function with given fields:
 func (_m *Connector) Id() string {
 	ret := _m.Called()

@@ -655,6 +655,66 @@ function runCbWorkloadGenBucket {
 	$workloadGen -i 10000 -j -r 1 -n 127.0.0.1:$port -b $bucketName -u $DEFAULT_ADMIN -p $DEFAULT_PW --prefix=xdcrProv_$clusterName
 }
 
+# Very basic way of validation - given a target cluster, simply write the same docs naming convention as the target document
+# If the doc count hasn't increased, then the keys are replicated correctly
+function validateCbWorkloadGenCollection {
+	local validateCluster=$1
+	local validateBucket=$2
+	local validateScope=$3
+	local validateCollection=$4
+
+	local clusterName=$5
+	local bucketName=$6
+	local scopeName=$7
+	local collectionName=$8
+	local additionalPrefix${9:-}
+
+	if [[ -z "${clusterName:-}" ]] || [[ -z "${bucketName:-}" ]] || [[ -z "${scopeName:-}" ]] || [[ -z "${collectionName:-}" ]] || \
+		[[ -z "${validateCluster:-}" ]] || [[ -z "${validateBucket:-}" ]] || [[ -z "${validateScope:-}" ]] || [[ -z "${validateCollection:-}" ]];then
+		echo "Invalid input"
+		return 1
+	fi
+
+	local port=${CLUSTER_NAME_PORT_MAP[$validateCluster]:-}
+	workloadGen=`findCbWorkloadGen`
+	if (( $? != 0 )) || [[ -z "$workloadGen" ]];then
+		echo "Could not find workload generator binary"
+		return 1
+	fi
+
+	manifestOutput=`getManifest $validateCluster $validateBucket`
+	if (( $? != 0 ));then
+		echo "Error retrieving manifest for cluster $validateCluster bucket $validateBucket"
+		return 1
+	fi
+
+	collectionId=`getCollectionIdFromScopeAndCollectionName "$manifestOutput" "$validateScope" "$validateCollection"`
+	if (( $? != 0 ));then
+		echo "Error retrieving collection ID for scope $validateScope collection $validateCollection"
+		echo "Output: $manifestOutput"
+		return 1
+	fi
+
+	local prefix
+	for (( i=0; i < 3; i=$(( $i+1 ))))
+	do
+		echo "Validating on $validateCluster $validateBucket $validateScope $validateCollection by running same name as it was on $clusterName"
+		prefix=xdcrProv_$clusterName
+		if [[ ! -z "${additionalPrefix:-}" ]];then
+			prefix=${prefix}_${additionalPrefix}
+		fi
+		# Run 10000 items of json documents with set/get ratio of 100%
+		echo "Running cbworkloadGen on port $port bucket $validateBucket collectionId $collectionId"
+		$workloadGen -i $CBWORKLOAD_COLLECTION_NUM_ITEMS  -j -r 1 -n 127.0.0.1:$port -b $validateBucket -u $DEFAULT_ADMIN -p $DEFAULT_PW --prefix=$prefix -c $collectionId
+		if (( $? == 0 ));then
+			return 0
+		elif (( $? != 0 )) && (( $i != 2 ));then
+			echo "Workloadgen resulted in error. Possibly system is loaded. Retry in 10 seconds"
+			sleep 10
+		fi
+	done
+}
+
 function runCbWorkloadGenCollection {
 	local clusterName=$1
 	local bucketName=$2

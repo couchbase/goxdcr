@@ -833,6 +833,49 @@ func TestPositiveRefresh(t *testing.T) {
 	fmt.Println("============== Test case end: TestPositiveRefresh =================")
 }
 
+func TestPositiveRefreshMultiples(t *testing.T) {
+	assert := assert.New(t)
+	fmt.Println("============== Test case start: TestPositiveRefreshMultiples =================")
+	uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
+		utilitiesMock, remoteClusterSvc := setupBoilerPlateRCS()
+
+	idAndName := "test"
+	ref := createRemoteClusterReference(idAndName)
+
+	utilsMockFunc := func() { setupUtilsMockGeneric(utilitiesMock, 0 /*networkDelay*/) }
+
+	setupMocksRCS(uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
+		remoteClusterSvc, ref, utilsMockFunc)
+
+	// First set the callback before creating agents
+	remoteClusterSvc.SetMetadataChangeHandlerCallback(testCallbackIncrementCount)
+
+	assert.Equal(0, remoteClusterSvc.getNumberOfAgents())
+	assert.Nil(remoteClusterSvc.AddRemoteCluster(ref, true))
+	assert.Equal(1, callBackCount)
+
+	agent, _, _ := remoteClusterSvc.getOrStartNewAgent(ref, false, false)
+	agent.Refresh()
+	assert.Equal(1, callBackCount) // refresh positive does not call callback
+	assert.Equal(hostname, agent.reference.HostName())
+	assert.True(refreshCheckActiveHostNameHelper(agent, dummyHostNameList))
+
+	fmt.Println("Executing multiple parallel refreshes for 10 times. If it is stuck here, something is wrong...")
+	for i := 0; i < 10; i++ {
+		var spawnWaitGrp sync.WaitGroup
+		spawnWaitGrp.Add(3)
+		for j := 0; j < 3; j++ {
+			go func() {
+				defer spawnWaitGrp.Done()
+				agent.Refresh()
+			}()
+		}
+		spawnWaitGrp.Wait()
+	}
+
+	fmt.Println("============== Test case end: TestPositiveRefreshMultiples =================")
+}
+
 func TestRefresh3Nodes2GoesBad(t *testing.T) {
 	assert := assert.New(t)
 	fmt.Println("============== Test case start: TestRefresh3Nodes2GoesBad =================")

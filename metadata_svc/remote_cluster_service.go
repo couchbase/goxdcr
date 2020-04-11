@@ -44,7 +44,7 @@ var RemoteSyncInProgress = errors.New("A RPC request is currently underway")
 var InitInProgress = errors.New("Initialization is already in progress")
 var SetInProgress = errors.New("An user-driven setRemoteClusterReference event is already in progress")
 var HostNameEmpty = errors.New("Hostname is empty")
-var RefreshNotEnabledYet = errors.New("The initial reference update hasn't finished yet, refresh is not enabled")
+var RefreshNotEnabledYet = errors.New("The initial reference update hasn't finished yet, refresh is not enabled and pipelines cannot be started yet")
 var SetDisabledUntilInit = errors.New("The reference has not finished initializing yet. SetRemoteCluster is disabled")
 var RefreshAlreadyActive = errors.New("There is a refresh that is ongoing")
 var RefreshAborted = errors.New("Refresh instance was called to be aborted")
@@ -283,7 +283,10 @@ func (agent *RemoteClusterAgent) cleanupRefreshContext(rctx *refreshContext, res
 
 	for _, ch := range agent.refreshResult {
 		ch <- result
+		close(ch)
 	}
+
+	agent.refreshResult = agent.refreshResult[:0]
 	agent.refreshActive = 0
 	agent.refreshRPCState = refreshRPCNotInit
 	agent.refreshMtx.Unlock()
@@ -1843,6 +1846,8 @@ func (service *RemoteClusterService) RemoteClusterByUuid(uuid string, refresh bo
 			if err == BootStrapNodeHasMovedError {
 				service.logger.Errorf(getBootStrapNodeHasMovedErrorMsg(uuid))
 				return nil, errors.New(getBootStrapNodeHasMovedErrorMsg(uuid))
+			} else if err == RefreshNotEnabledYet {
+				return nil, RefreshNotEnabledYet
 			} else {
 				service.logger.Warnf(getRefreshErrorMsg(uuid, err))
 			}

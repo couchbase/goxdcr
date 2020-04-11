@@ -12,7 +12,6 @@ import (
 	"github.com/couchbase/goxdcr/parts"
 	pp "github.com/couchbase/goxdcr/pipeline"
 	pctx "github.com/couchbase/goxdcr/pipeline_ctx"
-	"github.com/couchbase/goxdcr/pipeline_manager"
 	"github.com/couchbase/goxdcr/pipeline_svc"
 	"github.com/couchbase/goxdcr/pipeline_utils"
 	"github.com/couchbase/goxdcr/service_def"
@@ -207,11 +206,15 @@ func (xdcrf *XDCRFactory) NewPipeline(topic string, progress_recorder common.Pip
 		}
 
 		// Construct a router - each Source nozzle has a router.
-		router, err := xdcrf.constructRouter(sourceNozzle.Id(), spec, downStreamParts, vbNozzleMap, sourceCRMode, logger_ctx)
+		router, err := xdcrf.constructRouter(sourceNozzle.Id(), spec, downStreamParts, vbNozzleMap, sourceCRMode, logger_ctx, (utilities.RecycleObjFunc)(sourceNozzle.RecycleDataObj))
 		if err != nil {
 			return nil, err
 		}
 		sourceNozzle.SetConnector(router)
+
+		for _, outNozzle := range outNozzles {
+			outNozzle.SetUpstreamObjRecycler(sourceNozzle.Connector().GetUpstreamObjRecycler())
+		}
 	}
 	progress_recorder("Source nozzles have been wired to target nozzles")
 
@@ -561,15 +564,16 @@ func (xdcrf *XDCRFactory) constructRouter(id string, spec *metadata.ReplicationS
 	downStreamParts map[string]common.Part,
 	vbNozzleMap map[uint16]string,
 	sourceCRMode base.ConflictResolutionMode,
-	logger_ctx *log.LoggerContext) (*parts.Router, error) {
+	logger_ctx *log.LoggerContext,
+	srcNozzleObjRecycler utilities.RecycleObjFunc) (*parts.Router, error) {
 	routerId := "Router" + PART_NAME_DELIMITER + id
 	// when initializing router, isHighReplication is set to true only if replication priority is High
 	// for replications with Medium priority and ongoing flag set, isHighReplication will be updated to true
 	// through a UpdateSettings() call to the router in the pipeline startup sequence before parts are started
 	router, err := parts.NewRouter(routerId, spec, downStreamParts, vbNozzleMap, sourceCRMode,
-		logger_ctx, pipeline_manager.NewMCRequestObj, xdcrf.utils, xdcrf.throughput_throttler_svc,
+		logger_ctx, xdcrf.utils, xdcrf.throughput_throttler_svc,
 		spec.Settings.GetPriority() == base.PriorityTypeHigh, spec.Settings.GetExpDelMode(),
-		xdcrf.collectionsManifestSvc)
+		xdcrf.collectionsManifestSvc, srcNozzleObjRecycler)
 	if err != nil {
 		xdcrf.logger.Errorf("Error (%v) constructing router %v", err.Error(), routerId)
 	} else {
@@ -607,7 +611,7 @@ func (xdcrf *XDCRFactory) constructXMEMNozzle(topic string,
 	// partIds of the xmem nozzles look like "xmem_$topic_$kvaddr_1"
 	xmemNozzle_Id := xdcrf.partId(XMEM_NOZZLE_NAME_PREFIX, topic, kvaddr, nozzle_index)
 	nozzle := parts.NewXmemNozzle(xmemNozzle_Id, xdcrf.remote_cluster_svc, targetClusterUuid, topic, topic, connPoolSize, kvaddr, sourceBucketName, targetBucketName,
-		targetBucketUuid, username, password, pipeline_manager.RecycleMCRequestObj, sourceCRMode, logger_ctx, xdcrf.utils, vbList)
+		targetBucketUuid, username, password, sourceCRMode, logger_ctx, xdcrf.utils, vbList)
 	return nozzle
 }
 
@@ -638,7 +642,7 @@ func (xdcrf *XDCRFactory) constructCAPINozzle(topic string,
 	xdcrf.logger.Debugf("Construct CapiNozzle: topic=%s, kvaddr=%s", topic, capiConnectionStr)
 	// partIds of the capi nozzles look like "capi_$topic_$kvaddr_1"
 	capiNozzle_Id := xdcrf.partId(CAPI_NOZZLE_NAME_PREFIX, topic, capiConnectionStr, nozzle_index)
-	nozzle := parts.NewCapiNozzle(capiNozzle_Id, topic, capiConnectionStr, username, password, certificate, subVBCouchApiBaseMap, pipeline_manager.RecycleMCRequestObj, logger_ctx, xdcrf.utils, vbList)
+	nozzle := parts.NewCapiNozzle(capiNozzle_Id, topic, capiConnectionStr, username, password, certificate, subVBCouchApiBaseMap, nil /*capi is deprecated, no more recycler*/, logger_ctx, xdcrf.utils, vbList)
 	return nozzle, nil
 }
 
@@ -861,6 +865,11 @@ func (xdcrf *XDCRFactory) constructSettingsForDcpNozzle(pipeline common.Pipeline
 
 	dcpNozzleSettings[parts.DCP_VBTimestampUpdater] = ckpt_svc.(*pipeline_svc.CheckpointManager).UpdateVBTimestamps
 	dcpNozzleSettings[parts.DCP_Stats_Interval] = getSettingFromSettingsMap(settings, metadata.PipelineStatsIntervalKey, repSettings.StatsInterval)
+	getterFunc := func(manifestUid uint64) (*metadata.CollectionsManifest, error) {
+		return xdcrf.collectionsManifestSvc.GetSpecificSourceManifest(spec, manifestUid)
+	}
+	dcpNozzleSettings[parts.DCP_Manifest_Getter] = service_def.CollectionsManifestReqFunc(getterFunc)
+
 	if repSettings.IsCapi() {
 		// For CAPI nozzle, do not allow DCP to have compression
 		dcpNozzleSettings[parts.SETTING_COMPRESSION_TYPE] = (base.CompressionType)(base.CompressionTypeNone)
@@ -868,10 +877,6 @@ func (xdcrf *XDCRFactory) constructSettingsForDcpNozzle(pipeline common.Pipeline
 		dcpNozzleSettings[parts.ForceCollectionDisableKey] = true
 	} else {
 		dcpNozzleSettings[parts.SETTING_COMPRESSION_TYPE] = base.GetCompressionType(getSettingFromSettingsMap(settings, metadata.CompressionTypeKey, repSettings.CompressionType).(int))
-		getterFunc := func(manifestUid uint64) (*metadata.CollectionsManifest, error) {
-			return xdcrf.collectionsManifestSvc.GetSpecificSourceManifest(spec, manifestUid)
-		}
-		dcpNozzleSettings[parts.DCP_Manifest_Getter] = service_def.CollectionsManifestReqFunc(getterFunc)
 
 		err := xdcrf.disableCollectionIfNeeded(settings, dcpNozzleSettings, pipeline.Specification())
 		if err != nil {

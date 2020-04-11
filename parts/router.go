@@ -92,10 +92,9 @@ type RouterIface interface {
 type Router struct {
 	id string
 	*connector.Router
-	filter      *Filter
-	routingMap  map[uint16]string // pvbno -> partId. This defines the loading balancing strategy of which vbnos would be routed to which part
-	req_creator ReqCreator
-	topic       string
+	filter     *Filter
+	routingMap map[uint16]string // pvbno -> partId. This defines the loading balancing strategy of which vbnos would be routed to which part
+	topic      string
 	// whether lww conflict resolution mode has been enabled
 	sourceCRMode base.ConflictResolutionMode
 	utils        utilities.UtilsIface
@@ -109,6 +108,12 @@ type Router struct {
 	// Each router is responsible for routing incoming DCP packet to a corresponding XMEM
 	// When collections are used, it is responsible for mapping to the target collection
 	collectionsRouting CollectionsRoutingMap
+
+	// Instead of wasting memory, use these datapools
+	dcpObjRecycler    utilities.RecycleObjFunc
+	targetColInfoPool utilities.TargetCollectionInfoPoolIface
+	dataPool          utilities.DataPoolIface
+	mcRequestPool     *base.MCRequestPool
 }
 
 /**
@@ -379,12 +384,13 @@ func NewRouter(id string, spec *metadata.ReplicationSpecification,
 	downStreamParts map[string]common.Part,
 	routingMap map[uint16]string,
 	sourceCRMode base.ConflictResolutionMode,
-	logger_context *log.LoggerContext, req_creator ReqCreator,
+	logger_context *log.LoggerContext,
 	utilsIn utilities.UtilsIface,
 	throughputThrottlerSvc service_def.ThroughputThrottlerSvc,
 	isHighReplication bool,
 	filterExpDelType base.FilterExpDelType,
-	collectionsManifestSvc service_def.CollectionsManifestSvc) (*Router, error) {
+	collectionsManifestSvc service_def.CollectionsManifestSvc,
+	dcpObjRecycler utilities.RecycleObjFunc) (*Router, error) {
 
 	topic := spec.Id
 	filterExpression, ok := spec.Settings.Values[metadata.FilterExpressionKey].(string)
@@ -411,11 +417,14 @@ func NewRouter(id string, spec *metadata.ReplicationSpecification,
 		routingMap:             routingMap,
 		topic:                  topic,
 		sourceCRMode:           sourceCRMode,
-		req_creator:            req_creator,
 		utils:                  utilsIn,
 		isHighReplication:      base.NewAtomicBooleanType(isHighReplication),
 		throughputThrottlerSvc: throughputThrottlerSvc,
 		collectionsRouting:     make(CollectionsRoutingMap),
+		dcpObjRecycler:         dcpObjRecycler,
+		targetColInfoPool:      utilities.NewTargetCollectionInfoPool(),
+		dataPool:               utilities.NewDataPool(),
+		mcRequestPool:          base.NewMCRequestPool(spec.Id, nil /*logger*/),
 	}
 
 	router.expDelMode.Set(filterExpDelType)
@@ -430,7 +439,8 @@ func NewRouter(id string, spec *metadata.ReplicationSpecification,
 	// routingFunc is the main intelligence of the router's functionality
 	var routingFunc connector.Routing_Callback_Func = router.Route
 	router.Router = connector.NewRouter(id, downStreamParts, &routingFunc, logger_context, "XDCRRouter",
-		startable, router.Start, router.Stop, (connector.CollectionsRerouteFunc)(router.RouteCollection))
+		startable, router.Start, router.Stop, (connector.CollectionsRerouteFunc)(router.RouteCollection),
+		(utilities.RecycleObjFunc)(router.recycleDataObj))
 
 	routingUpdater := func(info CollectionsRoutingInfo) {
 		// TODO: MB-38021 - next step is to handle these events in lock-step
@@ -454,6 +464,7 @@ func NewRouter(id string, spec *metadata.ReplicationSpecification,
 	return router, nil
 }
 
+// NOTE - The caller of this ComposeMCRequest must separately call ConstructUniqueKey()
 func (router *Router) ComposeMCRequest(wrappedEvent *base.WrappedUprEvent) (*base.WrappedMCRequest, error) {
 	wrapped_req, err := router.newWrappedMCRequest()
 	if err != nil {
@@ -514,14 +525,11 @@ func (router *Router) ComposeMCRequest(wrappedEvent *base.WrappedUprEvent) (*bas
 
 	wrapped_req.Seqno = event.Seqno
 	wrapped_req.Start_time = time.Now()
-	wrapped_req.ConstructUniqueKey()
 
-	// TODO - this means implicit routing
+	// this means implicit routing only for now
 	wrapped_req.ColNamespace = wrappedEvent.ColNamespace
 
-	if wrapped_req.ColInfo == nil {
-		wrapped_req.ColInfo = &base.TargetCollectionInfo{}
-	}
+	wrapped_req.ColInfo = router.targetColInfoPool.Get()
 
 	return wrapped_req, nil
 }
@@ -594,6 +602,7 @@ func (router *Router) Route(data interface{}) (map[string]interface{}, error) {
 	}
 
 	mcRequest, err := router.ComposeMCRequest(wrappedUpr)
+	router.dcpObjRecycler(wrappedUpr)
 	if err != nil {
 		return nil, router.utils.NewEnhancedError("Error creating new memcached request.", err)
 	}
@@ -606,6 +615,7 @@ func (router *Router) Route(data interface{}) (map[string]interface{}, error) {
 		return result, err
 	}
 
+	mcRequest.ConstructUniqueKey()
 	result[partId] = mcRequest
 
 	return result, nil
@@ -622,32 +632,54 @@ func (router *Router) RouteCollection(data interface{}, partId string) error {
 		panic(fmt.Sprintf("Coding bug: type: %v", reflect.TypeOf(mcRequest)))
 	}
 
-	colId, manifestId, err := router.collectionsRouting[partId].RouteReqToLatestTargetManifest(mcRequest.ColNamespace)
-	mcRequest.ColInfo.ManifestId = manifestId
-	if err != nil {
-		if err == base.ErrorIgnoreRequest {
-			if router.Logger().GetLogLevel() >= log.LogLevelDebug {
-				router.Logger().Debugf("Request map is already marked broken for %v. Ready to be ignored", string(mcRequest.Req.Key))
+	// Shortcut implicit only mapping
+	var colId uint64
+	var manifestId uint64
+	var err error
+
+	if mcRequest.ColNamespace == nil || mcRequest.ColNamespace.IsDefault() {
+		// TODO - implicit mapping default collection specific
+		colId = 0
+	} else {
+		colId, manifestId, err = router.collectionsRouting[partId].RouteReqToLatestTargetManifest(mcRequest.ColNamespace)
+		mcRequest.ColInfo.ManifestId = manifestId
+		if err != nil {
+			if err == base.ErrorIgnoreRequest {
+				if router.Logger().GetLogLevel() >= log.LogLevelDebug {
+					router.Logger().Debugf("Request map is already marked broken for %v. Ready to be ignored", string(mcRequest.Req.Key))
+				}
+				router.collectionsRouting[partId].ignoreDataFunc(mcRequest)
+			} else {
+				router.collectionsRouting[partId].recordUnroutableRequest(mcRequest)
+				err = base.ErrorIgnoreRequest
 			}
-			router.collectionsRouting[partId].ignoreDataFunc(mcRequest)
-		} else {
-			router.collectionsRouting[partId].recordUnroutableRequest(mcRequest)
-			err = base.ErrorIgnoreRequest
+			return err
 		}
-		return err
 	}
 
-	leb128Cid, err := base.NewUleb128(colId)
+	// no need to truncate if we use the leb128CidLen
+	leb128Cid, leb128CidLen, err := base.NewUleb128(colId, router.dataPool.GetByteSlice, true /*truncate*/)
 	if err != nil {
 		err = fmt.Errorf("LEB encoding for collection ID %v error: %v", colId, err)
+		router.dataPool.PutByteSlice(leb128Cid)
 		return err
 	}
 
-	// TODO - MB-37983
+	totalLen := len(mcRequest.Req.Key) + leb128CidLen
+	mcRequest.ColInfo.ColIDPrefixedKeyLen = totalLen
+	mcRequest.ColInfo.ColIDPrefixedKey, err = router.dataPool.GetByteSlice(uint64(totalLen))
+	if err != nil {
+		mcRequest.ColInfo.ColIDPrefixedKey = make([]byte, totalLen, totalLen)
+		err = nil
+	} else {
+		mcRequest.ColInfo.ColIDPrefixedKey = mcRequest.ColInfo.ColIDPrefixedKey[:0]
+	}
+
 	// Embed collection ID in the beginning of the key
-	mcRequest.Req.Key = append([]byte(leb128Cid), mcRequest.Req.Key...)
-	// Technically, RE-construct
-	mcRequest.ConstructUniqueKey()
+	copy(mcRequest.ColInfo.ColIDPrefixedKey[0:leb128CidLen], leb128Cid[0:leb128CidLen])
+	copy(mcRequest.ColInfo.ColIDPrefixedKey[leb128CidLen:totalLen], mcRequest.Req.Key)
+	mcRequest.Req.Key = mcRequest.ColInfo.ColIDPrefixedKey[0:totalLen]
+	mcRequest.Req.Keylen = totalLen
 	return nil
 }
 
@@ -750,13 +782,10 @@ func (router *Router) UpdateSettings(settings metadata.ReplicationSettingsMap) e
 }
 
 func (router *Router) newWrappedMCRequest() (*base.WrappedMCRequest, error) {
-	if router.req_creator != nil {
-		return router.req_creator(router.topic)
-	} else {
-		return &base.WrappedMCRequest{Seqno: 0,
-			Req: &mc.MCRequest{},
-		}, nil
-	}
+	newReq := router.mcRequestPool.Get()
+	newReq.Req = &mc.MCRequest{}
+	newReq.ColInfo = nil
+	return newReq, nil
 }
 
 // Returns bool indicating if the data should continue to be sent
@@ -784,4 +813,39 @@ func (router *Router) ProcessExpDelTTL(uprEvent *mcc.UprEvent) bool {
 	}
 
 	return true
+}
+
+func (router *Router) recycleDataObj(obj interface{}) {
+	switch obj.(type) {
+	case *base.WrappedUprEvent:
+		if router.dcpObjRecycler != nil {
+			router.dcpObjRecycler(obj)
+		}
+	case *base.CollectionNamespace:
+		if router.dcpObjRecycler != nil {
+			router.dcpObjRecycler(obj)
+		}
+	case *base.WrappedMCRequest:
+		if router.mcRequestPool != nil {
+			req := obj.(*base.WrappedMCRequest)
+			if req.ColNamespace != nil {
+				req.ColNamespace.ScopeName = ""
+				req.ColNamespace.CollectionName = ""
+				router.dcpObjRecycler(req.ColNamespace)
+			}
+
+			if req.ColInfo != nil && router.targetColInfoPool != nil {
+				if req.ColInfo.ColIDPrefixedKeyLen > 0 && router.dataPool != nil {
+					req.ColInfo.ColIDPrefixedKeyLen = 0
+					router.dataPool.PutByteSlice(req.ColInfo.ColIDPrefixedKey)
+				}
+				req.ColInfo.ColIDPrefixedKeyLen = 0
+				req.ColInfo.ManifestId = 0
+				router.targetColInfoPool.Put(req.ColInfo)
+			}
+			router.mcRequestPool.Put(obj.(*base.WrappedMCRequest))
+		}
+	default:
+		panic(fmt.Sprintf("Coding bug type is %v", reflect.TypeOf(obj)))
+	}
 }
