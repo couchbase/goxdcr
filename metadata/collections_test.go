@@ -540,9 +540,9 @@ func TestCollectionsNsConsolidate(t *testing.T) {
 	fmt.Println("============== Test case end: TestCollectionsNsConsolidate =================")
 }
 
-func TestBrokenMappingsDocMarshaller(t *testing.T) {
+func TestCollectionNsMappingsDocMarshaller(t *testing.T) {
 	assert := assert.New(t)
-	fmt.Println("============== Test case start: TestBrokenMappingsDocMarshaller =================")
+	fmt.Println("============== Test case start: TestCollectionNsMappingsDocMarshaller =================")
 	// Test out of order list will have the same sha
 	nsMap := make(CollectionNamespaceMapping)
 	nsMapPrime := make(CollectionNamespaceMapping)
@@ -585,9 +585,9 @@ func TestBrokenMappingsDocMarshaller(t *testing.T) {
 	var oneList CompressedColNamespaceMappingList
 	oneList = append(oneList, oneMapping)
 
-	brokenMappingDoc := &BrokenMappingsDoc{oneList, "dummySpec", nil}
+	brokenMappingDoc := &CollectionNsMappingsDoc{oneList, "dummySpec", nil}
 
 	_, err = json.Marshal(brokenMappingDoc)
 	assert.Nil(err)
-	fmt.Println("============== Test case end: TestBrokenMappingsDocMarshaller =================")
+	fmt.Println("============== Test case end: TestCollectionNsMappingsDocMarshaller =================")
 }

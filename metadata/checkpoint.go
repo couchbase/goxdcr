@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/couchbase/goxdcr/base"
-	"github.com/golang/snappy"
 	"strings"
 	"unsafe"
 )
@@ -549,97 +548,4 @@ func (c *CompressedColNamespaceMappingList) Size() int {
 		totalSize += j.Size()
 	}
 	return totalSize
-}
-
-type BrokenMappingsDoc struct {
-	BrokenMappingRecords CompressedColNamespaceMappingList `json:"brokenMappingRecords"`
-
-	// internal id of repl spec - for detection of repl spec deletion and recreation event
-	SpecInternalId string `json:"specInternalId"`
-
-	//revision number
-	Revision interface{}
-}
-
-func (b *BrokenMappingsDoc) Size() int {
-	if b == nil {
-		return 0
-	}
-
-	return len(b.SpecInternalId) + b.BrokenMappingRecords.Size()
-}
-
-func (b *BrokenMappingsDoc) ToShaMap() (ShaToCollectionNamespaceMap, error) {
-	if b == nil {
-		return nil, base.ErrorInvalidInput
-	}
-
-	errorMap := make(base.ErrorMap)
-	shaMap := make(ShaToCollectionNamespaceMap)
-
-	for _, oneRecord := range b.BrokenMappingRecords {
-		if oneRecord == nil {
-			continue
-		}
-
-		serializedMap, err := snappy.Decode(nil, oneRecord.CompressedMapping)
-		if err != nil {
-			errorMap[oneRecord.Sha256Digest] = fmt.Errorf("Snappy decompress failed %v", err)
-			continue
-		}
-		actualMap := make(CollectionNamespaceMapping)
-		err = json.Unmarshal(serializedMap, &actualMap)
-		if err != nil {
-			errorMap[oneRecord.Sha256Digest] = fmt.Errorf("Unmarshalling failed %v", err)
-			continue
-		}
-		// Sanity check
-		checkSha, err := actualMap.Sha256()
-		if err != nil {
-			errorMap[oneRecord.Sha256Digest] = fmt.Errorf("Validing SHA failed %v", err)
-			continue
-		}
-		checkShaString := fmt.Sprintf("%x", checkSha[:])
-		if checkShaString != oneRecord.Sha256Digest {
-			errorMap[oneRecord.Sha256Digest] = fmt.Errorf("SHA validation mismatch %v", checkShaString)
-			continue
-		}
-
-		shaMap[oneRecord.Sha256Digest] = &actualMap
-	}
-
-	var err error
-	if len(errorMap) > 0 {
-		errStr := base.FlattenErrorMap(errorMap)
-		err = fmt.Errorf(errStr)
-	}
-	return shaMap, err
-}
-
-// Will overwrite the existing records with the incoming map
-func (b *BrokenMappingsDoc) LoadShaMap(shaMap ShaToCollectionNamespaceMap) error {
-	if b == nil {
-		return base.ErrorInvalidInput
-	}
-
-	errorMap := make(base.ErrorMap)
-	b.BrokenMappingRecords = b.BrokenMappingRecords[:0]
-
-	for sha, colNsMap := range shaMap {
-		serializedMap, err := json.Marshal(colNsMap)
-		if err != nil {
-			errorMap[sha] = err
-			continue
-		}
-		compressedMapping := snappy.Encode(nil, serializedMap)
-
-		oneRecord := &CompressedColNamespaceMapping{compressedMapping, sha}
-		b.BrokenMappingRecords = append(b.BrokenMappingRecords, oneRecord)
-	}
-
-	if len(errorMap) > 0 {
-		return fmt.Errorf("Error LoadingShaMap - sha -> err: %v", base.FlattenErrorMap(errorMap))
-	} else {
-		return nil
-	}
 }

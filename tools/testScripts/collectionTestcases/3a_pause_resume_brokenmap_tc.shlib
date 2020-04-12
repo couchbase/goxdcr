@@ -159,6 +159,7 @@ function runTestCase {
 
 	echo "============================================================================"
 	echo "PASSED"
+	echo "Recommended to manually go into node 0's UI to check for only 1 instance of broken mapping logged"
 	echo "============================================================================"
     cleanupBucketReplications
     cleanupBuckets
