@@ -129,6 +129,7 @@ func (doc_meta *documentMetadata) CloneAndRedact() *documentMetadata {
 }
 
 // We determine the "commit" time as the time we hear back from the target, for statistics purposes
+// This is shared between GetReceived and GetMetaReceived
 type GetMetaReceivedEventAdditional struct {
 	Key         string
 	Seqno       uint64

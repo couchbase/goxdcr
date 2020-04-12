@@ -323,6 +323,9 @@ func (xdcrf *XDCRFactory) registerAsyncListenersOnTargets(pipeline common.Pipeli
 		data_sent_event_listener := component.NewDefaultAsyncComponentEventListenerImpl(
 			pipeline_utils.GetElementIdFromNameAndIndex(pipeline, base.DataSentEventListener, i),
 			pipeline.Topic(), logger_ctx)
+		get_received_event_listener := component.NewDefaultAsyncComponentEventListenerImpl(
+			pipeline_utils.GetElementIdFromNameAndIndex(pipeline, base.GetReceivedEventListener, i),
+			pipeline.Topic(), logger_ctx)
 		get_meta_received_event_listener := component.NewDefaultAsyncComponentEventListenerImpl(
 			pipeline_utils.GetElementIdFromNameAndIndex(pipeline, base.GetMetaReceivedEventListener, i),
 			pipeline.Topic(), logger_ctx)
@@ -334,6 +337,7 @@ func (xdcrf *XDCRFactory) registerAsyncListenersOnTargets(pipeline common.Pipeli
 			out_nozzle := targets[index]
 			out_nozzle.RegisterComponentEventListener(common.DataSent, data_sent_event_listener)
 			out_nozzle.RegisterComponentEventListener(common.DataFailedCRSource, data_failed_cr_event_listener)
+			out_nozzle.RegisterComponentEventListener(common.GetReceived, get_received_event_listener)
 			out_nozzle.RegisterComponentEventListener(common.GetMetaReceived, get_meta_received_event_listener)
 			out_nozzle.RegisterComponentEventListener(common.DataThrottled, data_throttled_event_listener)
 		}

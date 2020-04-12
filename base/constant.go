@@ -384,6 +384,7 @@ const (
 var MaxVBReps = "max_vbreps"
 
 const (
+	GET              = mc.CommandCode(0x00)
 	GET_WITH_META    = mc.CommandCode(0xa0)
 	SET_WITH_META    = mc.CommandCode(0xa2)
 	DELETE_WITH_META = mc.CommandCode(0xa8)
@@ -404,6 +405,7 @@ const (
 	DataFilteredEventListener            = "DataFilteredEventListener"
 	DataSentEventListener                = "DataSentEventListener"
 	DataFailedCREventListener            = "DataFailedCREventListener"
+	GetReceivedEventListener             = "GetReceivedEventListener"
 	GetMetaReceivedEventListener         = "GetMetaReceivedEventListener"
 	DataThrottledEventListener           = "DataThrottledEventListener"
 	DataThroughputThrottledEventListener = "DataThroughputThrottledEventListener"

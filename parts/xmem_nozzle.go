@@ -49,6 +49,23 @@ const (
 	default_demandEncryption bool = false
 )
 
+// Return values from conflict detection
+type ConflictResult uint32
+const (
+	SourceDominate = iota
+	TargetDominate = iota
+	Conflict = iota
+)
+
+type RequestToCas struct {
+	req *base.WrappedMCRequest
+	cas uint64
+}
+type RequestToResponse struct {
+	req 	*base.WrappedMCRequest
+	resp	*mc.MCResponse
+}
+
 var xmem_setting_defs base.SettingDefinitions = base.SettingDefinitions{SETTING_BATCHCOUNT: base.NewSettingDef(reflect.TypeOf((*int)(nil)), true),
 	SETTING_BATCHSIZE:               base.NewSettingDef(reflect.TypeOf((*int)(nil)), true),
 	SETTING_NUMOFRETRY:              base.NewSettingDef(reflect.TypeOf((*int)(nil)), false),
@@ -1463,16 +1480,23 @@ func (xmem *XmemNozzle) sendSetMeta_internal(batch *dataBatch) error {
 	return err
 }
 
-// Launched as a part of the batchGetMeta, which will fire off the requests and this is the handler to decrypt the info coming back
+// Launched as a part of the batchGetMeta and batchGetWithRetry, which will fire off the requests 
+// and this is the handler to decrypt the info coming back
 func (xmem *XmemNozzle) batchGetMetaHandler(count int, finch chan bool, return_ch chan bool,
-	opaque_keySeqno_map opaqueKeySeqnoMap, respMap base.MCResponseMap, logger *log.CommonLogger) {
+	opaque_keySeqno_map opaqueKeySeqnoMap, respMap base.MCResponseMap, logger *log.CommonLogger, isGetMeta bool) {
+	var batchGetStr string
+	if isGetMeta {
+		batchGetStr = "batchGetMeta"
+	} else {
+		batchGetStr = "batchGetWithRetry"
+	}
 	defer func() {
 		//handle the panic gracefully.
 		if r := recover(); r != nil {
 			if xmem.validateRunningState() == nil {
 				errMsg := fmt.Sprintf("%v", r)
 				//add to the error list
-				xmem.Logger().Errorf("%v batchGetMeta receiver recovered from err = %v", xmem.Id(), errMsg)
+				xmem.Logger().Errorf("%v %v receiver recovered from err = %v", xmem.Id(), batchGetStr, errMsg)
 
 				//repair the connection
 				xmem.repairConn(xmem.client_for_getMeta, errMsg, xmem.client_for_getMeta.repairCount())
@@ -1511,10 +1535,10 @@ func (xmem *XmemNozzle) batchGetMetaHandler(count int, finch chan bool, return_c
 				}
 
 				if !isNetTimeoutError(err) && err != PartStoppedError {
-					logger.Errorf("%v batchGetMeta received fatal error and had to abort. Expected %v responses, got %v responses. err=%v", xmem.Id(), count, len(respMap), err)
+					logger.Errorf("%v %v received fatal error and had to abort. Expected %v responses, got %v responses. err=%v", xmem.Id(), batchGetStr, count, len(respMap), err)
 					logger.Infof("%v Expected=%v, Received=%v\n", xmem.Id(), opaque_keySeqno_map.CloneAndRedact(), base.UdTagBegin, respMap, base.UdTagEnd)
 				} else {
-					logger.Errorf("%v batchGetMeta timed out. Expected %v responses, got %v responses", xmem.Id(), count, len(respMap))
+					logger.Errorf("%v %v timed out. Expected %v responses, got %v responses", xmem.Id(), batchGetStr, count, len(respMap))
 					logger.Infof("%v Expected=%v, Received=%v\n", xmem.Id(), opaque_keySeqno_map.CloneAndRedact(), base.UdTagBegin, respMap, base.UdTagEnd)
 				}
 				return
@@ -1534,7 +1558,13 @@ func (xmem *XmemNozzle) batchGetMetaHandler(count int, finch chan bool, return_c
 							Seqno:       seqno,
 							Commit_time: time.Since(start_time),
 						}
-						xmem.RaiseEvent(common.NewEvent(common.GetMetaReceived, nil, xmem, nil, additionalInfo))
+						var receivedEvent common.ComponentEventType
+						if isGetMeta {
+							receivedEvent = common.GetMetaReceived
+						} else {
+							receivedEvent = common.GetReceived
+						}
+						xmem.RaiseEvent(common.NewEvent(receivedEvent, nil, xmem, nil, additionalInfo))
 						if response.Status != mc.SUCCESS && !isIgnorableMCResponse(response) && !isTemporaryMCError(response.Status) {
 							if isTopologyChangeMCError(response.Status) {
 								vb_err := fmt.Errorf("Received error %v on vb %v\n", base.ErrorNotMyVbucket, vbno)
@@ -1632,7 +1662,7 @@ func (xmem *XmemNozzle) batchGetMeta(bigDoc_map base.McRequestMap) (map[string]b
 	}
 
 	// launch the receiver - passing channel and maps in are fine since they are "reference types"
-	go xmem.batchGetMetaHandler(len(opaque_keySeqno_map), receiver_fin_ch, receiver_return_ch, opaque_keySeqno_map, respMap, xmem.Logger())
+	go xmem.batchGetMetaHandler(len(opaque_keySeqno_map), receiver_fin_ch, receiver_return_ch, opaque_keySeqno_map, respMap, xmem.Logger(), true)
 
 	//send the requests
 	for _, packet := range reqs_bytes_list {
@@ -1726,6 +1756,172 @@ func (xmem *XmemNozzle) composeRequestForGetMeta(key string, vb uint16, opaque u
 		req.Extras = make([]byte, 1)
 		req.Extras[0] = byte(base.ReqExtMetaDataType)
 	}
+	return req
+}
+
+/**
+ * batch call to memcached GET command for documents that are conflicting with source documents
+ * based on metadata alone.
+ * It takes a possibleConflict_map and returns rep_map and conflict_map
+ * For each key in possibleConflict_map, it tries to fetch the target document:
+ * 1. If target document doesn't exist or source wins, it is addded to rep_map and removed from
+ *    possibleConflict_map
+ * 2. If the target document dominates, it is removed from possibleConflict_map and event will
+ *    raised so it will be added to vb_failed_cr_seqno_list_map.
+ * 3. If conflict, it is added to conflict_map and removed from possibleConflict_map
+ *
+ * If we don't receive response for some keys, repeat the process for these keys.
+ * If we receive response for all keys, possibleConflict_map will be empty and it is done
+ *
+ * TODO: Review if we can use client_for_getMeta or create a new client with compression
+ */
+func (xmem *XmemNozzle) batchGetWithRetry(possibleConflict_map *base.McRequestMap) (map[string]RequestToCas, map[string]RequestToResponse, error) {
+	retryCount := 0
+	rep_map := make(map[string]RequestToCas)
+	conflict_map := make(map[string]RequestToResponse)
+
+	for {
+	RETRY:
+		// if the possibleConflict_map size is 0, then we are done
+		if possibleConflict_map != nil && len(*possibleConflict_map) == 0 {
+			return rep_map, conflict_map, nil
+		}
+
+		// If we don't get any response many times, then something is wrong. Return error
+		if retryCount >= xmem.config.maxRetry {
+			return rep_map, conflict_map, errors.New("batchGetWithRetry failed after " + string(retryCount) + "times")
+		}
+
+		respMap := make(base.MCResponseMap, xmem.config.maxCount)
+
+		opaque_keySeqno_map := make(opaqueKeySeqnoMap)
+		receiver_fin_ch := make(chan bool, 1)
+		receiver_return_ch := make(chan bool, 1)
+
+		// A list (slice) of req_bytes
+		reqs_bytes_list := [][][]byte{}
+
+		var sequence uint16 = uint16(time.Now().UnixNano())
+		// Slice of requests that have been converted to serialized bytes
+		reqs_bytes := [][]byte{}
+		// Counts the number of requests that will fit into each req_bytes slice
+		numOfReqsInReqBytesBatch := 0
+
+		// establish an opaque based on the current time - and since getting doc doesn't utilize buffer buckets, feed it 0
+		opaque := getOpaque(0, sequence)
+		sent_key_map := make(map[string]bool, len(*possibleConflict_map))
+
+		// Add each req in reqs_bytes_list and set sent_key_map for each doc key
+		for _, originalReq := range *possibleConflict_map {
+			docKey := string(originalReq.Req.Key)
+			if docKey == "" {
+				xmem.Logger().Errorf("%v received empty docKey. unique-key= %v%v%v, req=%v%v%v, possibleConflict_map=%v%v%v", xmem.Id(),
+					base.UdTagBegin, originalReq.Req.Key, base.UdTagEnd, base.UdTagBegin, originalReq.Req, base.UdTagEnd, base.UdTagBegin, possibleConflict_map, base.UdTagEnd)
+				return rep_map, conflict_map, errors.New(xmem.Id() + " received empty docKey.")
+			}
+
+			if _, ok := sent_key_map[docKey]; !ok {
+				req := xmem.composeRequestForGet(docKey, originalReq.Req.VBucket, opaque)
+				// .Bytes() returns data ready to be fed over the wire
+				reqs_bytes = append(reqs_bytes, req.Bytes())
+				// a Map of array of items and map key is the opaque currently based on time (passed to the target and back)
+				opaque_keySeqno_map[opaque] = compileOpaqueKeySeqnoValue(docKey, originalReq.Seqno, originalReq.Req.VBucket, time.Now())
+				opaque++
+				numOfReqsInReqBytesBatch++
+				sent_key_map[docKey] = true
+
+				if numOfReqsInReqBytesBatch > base.XmemMaxBatchSize {
+					// Consider this a batch of requests and put it in as an element in reqs_bytes_list
+					reqs_bytes_list = append(reqs_bytes_list, reqs_bytes)
+					numOfReqsInReqBytesBatch = 0
+					reqs_bytes = [][]byte{}
+				}
+			}
+		}
+
+		// In case there are tail ends of the batch that did not fill base.XmemMaxBatchSize, append them to the end
+		if numOfReqsInReqBytesBatch > 0 {
+			reqs_bytes_list = append(reqs_bytes_list, reqs_bytes)
+		}
+
+		// launch the receiver - passing channel and maps in are fine since they are "reference types"
+		go xmem.batchGetMetaHandler(len(opaque_keySeqno_map), receiver_fin_ch, receiver_return_ch, opaque_keySeqno_map, respMap, xmem.Logger(), false)
+
+		//send the requests
+		for _, packet := range reqs_bytes_list {
+			err, _ := xmem.writeToClient(xmem.client_for_getMeta, packet, true)
+			if err != nil {
+				xmem.Logger().Errorf("BatchGetWithRetry encountered error writing to client. Will retry.")
+				// Kill the receiver and retry
+				close(receiver_fin_ch)
+				retryCount++
+				xmem.Logger().Debugf("XmemGet retry count: " + string(retryCount))
+				goto RETRY
+			}
+		}
+
+		//wait for receiver to finish
+		<-receiver_return_ch
+
+		if len(respMap) == 0 {
+			retryCount++
+			xmem.Logger().Debugf("XmemGet retry count: " + string(retryCount))
+			goto RETRY
+		}
+		// Got some response. Reset retryCount
+		retryCount = 0
+
+		// Process the response the handler received
+		keys_to_be_deleted := make(map[string]bool)
+		for uniqueKey, wrappedReq := range *possibleConflict_map {
+			key := string(wrappedReq.Req.Key)
+			resp, ok := respMap[key]
+			if ok && (resp.Status == mc.SUCCESS || resp.Status == mc.KEY_ENOENT) {
+				switch detectConflict(wrappedReq.Req, resp) {
+				case SourceDominate:
+					if resp.Status == mc.KEY_ENOENT {
+						rep_map[uniqueKey] = RequestToCas{wrappedReq, 0}
+					} else {
+						rep_map[uniqueKey] = RequestToCas{wrappedReq, resp.Cas}
+					}
+				case TargetDominate:
+					additionalInfo := DataFailedCRSourceEventAdditional{Seqno: wrappedReq.Seqno,
+						Opcode:      encodeOpCode(wrappedReq.Req.Opcode),
+						IsExpirySet: (binary.BigEndian.Uint32(wrappedReq.Req.Extras[4:8]) != 0),
+						VBucket:     wrappedReq.Req.VBucket,
+					}
+					xmem.RaiseEvent(common.NewEvent(common.DataFailedCRSource, nil, xmem, nil, additionalInfo))
+				case Conflict:
+					conflict_map[uniqueKey] = RequestToResponse{wrappedReq, resp}
+				}
+				keys_to_be_deleted[uniqueKey] = true
+			}
+		}
+		if len(keys_to_be_deleted) == len(*possibleConflict_map) {
+			// Got response for all
+			return rep_map, conflict_map, nil
+		} else {
+			for uniqueKey, _ := range keys_to_be_deleted {
+				delete(*possibleConflict_map, uniqueKey)
+			}
+		}
+	}
+}
+
+// TODO: Full logic comes in later change set
+// If target doesn't exist (target.Status == KEY_ENOENT), return SourceDominate
+func detectConflict(source *mc.MCRequest, target *mc.MCResponse) ConflictResult {
+	return Conflict
+}
+
+func (xmem *XmemNozzle) composeRequestForGet(key string, vb uint16, opaque uint32) *mc.MCRequest {
+	req := &mc.MCRequest{VBucket: vb,
+		Key:    []byte(key),
+		Opaque: opaque,
+		Opcode: base.GET}
+
+	// GET request must not include extras
+
 	return req
 }
 

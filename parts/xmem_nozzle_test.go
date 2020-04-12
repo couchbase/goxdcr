@@ -15,6 +15,7 @@ import (
 	mock "github.com/stretchr/testify/mock"
 	gocb "gopkg.in/couchbase/gocb.v1"
 	"net"
+	"reflect"
 	"testing"
 	"time"
 )
@@ -195,11 +196,18 @@ func TestPositiveXmemNozzleAuto(t *testing.T) {
 func TestXmemSendAPacket(t *testing.T) {
 	fmt.Println("============== Test case start: TestXmemSendAPacket =================")
 	defer fmt.Println("============== Test case end: TestXmemSendAPacket =================")
-	assert := assert.New(t)
+
+	uprNotCompressFile := "../utils/testInternalData/uprNotCompress.json"
+	xmemSendAPacket(t, uprNotCompressFile)
+}
+
+func xmemSendAPacket(t *testing.T, uprfile string) {
 	if !targetXmemIsUpAndCorrectSetupExists() {
 		fmt.Println("Skipping since live cluster_run setup has not been detected")
 		return
 	}
+
+	assert := assert.New(t)
 
 	utilsNotUsed, settings, xmem, router, throttler, remoteClusterSvc, colManSvc := setupBoilerPlateXmem()
 	realUtils := utilsReal.NewUtilities()
@@ -214,8 +222,7 @@ func TestXmemSendAPacket(t *testing.T) {
 	assert.True(ok)
 	xmem.targetBucketUuid = uuid
 
-	uprNotCompressFile := "../utils/testInternalData/uprNotCompress.json"
-	event, err := RetrieveUprFile(uprNotCompressFile)
+	event, err := RetrieveUprFile(uprfile)
 	assert.Nil(err)
 	wrappedEvent := &base.WrappedUprEvent{UprEvent: event}
 	wrappedMCRequest, err := router.ComposeMCRequest(wrappedEvent)
@@ -243,4 +250,76 @@ func TestXmemSendAPacket(t *testing.T) {
 	_, err = bucket.Get(string(event.Key), &byteSlice)
 	assert.Nil(err)
 	assert.NotEqual(0, len(byteSlice))
+}
+
+
+func TestXmemGet(t *testing.T) {
+	fmt.Println("============== Test case start: TestXmemGet =================")
+	defer fmt.Println("============== Test case end: TestXmemGet =================")
+
+	if !targetXmemIsUpAndCorrectSetupExists() {
+		fmt.Println("Skipping since live cluster_run setup has not been detected")
+		return
+	}
+
+	uprNotCompressFile := "../utils/testInternalData/uprNotCompress.json"
+	xmemSendAPacket(t, uprNotCompressFile)
+
+	fmt.Println("Sent a packet. Trying to fetch it now.")
+	assert := assert.New(t)
+
+	utilsNotUsed, settings, xmem, router, throttler, remoteClusterSvc, colManSvc := setupBoilerPlateXmem()
+	realUtils := utilsReal.NewUtilities()
+	xmem.utils = realUtils
+	setupMocksXmem(xmem, utilsNotUsed, throttler, remoteClusterSvc, colManSvc)
+
+	// Need to find the actual running targetBucketUUID
+	bucketInfo, err := realUtils.GetBucketInfo(connString, xmemBucket, username, password, base.HttpAuthMechPlain, nil, false, nil, nil, xmem.Logger())
+	assert.Nil(err)
+	uuid, ok := bucketInfo["uuid"].(string)
+	assert.True(ok)
+	xmem.targetBucketUuid = uuid
+
+	event, err := RetrieveUprFile(uprNotCompressFile)
+	assert.Nil(err)
+	wrappedEvent := &base.WrappedUprEvent{UprEvent: event}
+	wrappedMCRequest, err := router.ComposeMCRequest(wrappedEvent)
+	assert.Nil(err)
+	assert.NotNil(wrappedMCRequest)
+
+	settings[SETTING_COMPRESSION_TYPE] = base.CompressionTypeSnappy
+	settings[ForceCollectionDisableKey] = true
+	err = xmem.Start(settings)
+	assert.Nil(err)
+
+	possibleConflict_map := make(base.McRequestMap)
+	possibleConflict_map[wrappedMCRequest.UniqueKey] = wrappedMCRequest
+	rep_map, conflict_map, err := xmem.batchGetWithRetry(&possibleConflict_map)
+	assert.Nil(err)
+	assert.NotNil(rep_map)
+	assert.NotNil(conflict_map)
+	assert.Equal(1, len(conflict_map))
+	if testing.Verbose() {
+		fmt.Printf("event: %v\n", event)
+		fmt.Printf("rep_map: %v\n", rep_map)
+		fmt.Printf("conflict_map: %v\n", conflict_map)
+		for _, docPair := range conflict_map {
+			source := docPair.req.Req
+			target := docPair.resp
+			s := reflect.ValueOf(source).Elem()
+			typeOf := s.Type()
+			fmt.Println("Source Document:")
+			for i := 0; i < s.NumField(); i++ {
+				f := s.Field(i)
+				fmt.Printf("%d: %s %s = %v\n", i, typeOf.Field(i).Name, f.Type(), f.Interface())
+			}
+			s = reflect.ValueOf(target).Elem()
+			typeOf = s.Type()
+			fmt.Println("Target Document:")
+			for i := 0; i < s.NumField(); i++ {
+				f := s.Field(i)
+				fmt.Printf("%d: %s %s = %v\n", i, typeOf.Field(i).Name, f.Type(), f.Interface())
+			}
+		}
+	}
 }
