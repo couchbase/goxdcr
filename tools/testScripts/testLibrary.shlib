@@ -232,3 +232,27 @@ function killGoXdcr {
 	echo "Killing GoXDCR for $clusterName with port $sourcePort..."
 	ps -ef | grep goxdcr | grep $sourcePort | awk '{print $2}' | xargs kill
 }
+
+# Input:
+# 1 - cluster name
+# 2 - String to look for
+# 3 - Number of occurrences
+function validateLogWithInstance {
+	local clusterName=$1
+	local grepStr="$2"
+	local instanceCnt=$3
+
+	logs=`getClusterLogs "$clusterName"`
+	if ! (( $? == 0 ));then
+		echo "Unable to get log for validation"
+		return 1
+	fi
+
+	count=`echo "$logs" | grep -c "$grepStr"`
+	if (( $count != $instanceCnt ));then
+		echo "Error - requested count is $instanceCnt, but found $count"
+		exit 1
+	else
+		echo "Found exactly $instanceCnt of \"$grepStr\""
+	fi
+}

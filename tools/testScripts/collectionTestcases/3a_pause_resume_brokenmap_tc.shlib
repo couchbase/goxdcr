@@ -53,6 +53,8 @@ function cleanupTestCaseInternalSettings {
 	setInternalSettings "C1" "ManifestRefreshTgtInterval=$ORIG_TARGET_MAN_PULL_INTERVAL" "MaxCollectionsRoutingRetry=$ORIG_ROUTER_MAX_RETRY"
 }
 
+declare LOGMSG="The followings are collection mappings that are newly broken"
+
 function runTestCase {
 	echo "============================================================================"
 	echo "Running pause and resume test case with broken mappings"
@@ -88,6 +90,10 @@ function runTestCase {
 	# At this point, settings need to be restored IF the script was forced exited
 	trap cleanupTestCaseInternalSettings EXIT
 
+	# Get current instance
+	local -i currentInstanceCnt
+	currentInstanceCnt=`getClusterLogs "C1" | grep -c "$LOGMSG"`
+
 	createRemoteClusterReference "C1" "C2"
 	createRemoteClusterReference "C2" "C1"
 	sleep 1
@@ -112,6 +118,9 @@ function runTestCase {
 		exit 1
 	fi
 
+	# Ensure broken mapping has been declared
+	validateLogWithInstance "C1" "$LOGMSG" $(( $currentInstanceCnt + 1 ))
+
 	echo "Pausing replication - current data replicated: $oldDataReplicated docs_processed: $oldDocsProcessed"
 	pauseReplication "C1" "B1" "C2" "B2"
 	echo "Waiting 15 seconds for pipeline to really pause"
@@ -129,6 +138,8 @@ function runTestCase {
 	# Run data load again
 	oldDataReplicated=`getDataReplicated "C1" "B1" "C2" "B2"`
 	runDataLoad
+	echo "Waiting 5 seconds before checking item count"
+	sleep 5
 	# The mapping should have remained broken and changes would have immediately not been replicated
 	# Changes left should go to 0
 	checkUnidirectionalChangesLeft
@@ -142,6 +153,9 @@ function runTestCase {
 		exit 1
 	fi
 	grepForPanics
+
+	# There should be only one instance of broken mapping - as resume should have restored the mapping
+	validateLogWithInstance "C1" "$LOGMSG" $(( $currentInstanceCnt + 1 ))
 
 	echo "============================================================================"
 	echo "PASSED"
