@@ -855,11 +855,28 @@ func (service *ReplicationSpecService) AllReplicationSpecs() (map[string]*metada
 	specs := make(map[string]*metadata.ReplicationSpecification, 0)
 	values_map := service.getCache().GetMap()
 	for key, val := range values_map {
-		if val.(*ReplicationSpecVal).spec != nil {
-			specs[key] = val.(*ReplicationSpecVal).spec.(*metadata.ReplicationSpecification).Clone()
+		spec := cacheableMetadataObjToReplicationSpec(val)
+		if spec != nil {
+			specs[key] = spec.Clone()
 		}
 	}
 	return specs, nil
+}
+
+func cacheableMetadataObjToReplicationSpec(val CacheableMetadataObj) *metadata.ReplicationSpecification {
+	rsv, ok := val.(*ReplicationSpecVal)
+	if !ok {
+		return nil
+	}
+	if rsv.spec == nil {
+		return nil
+	}
+	genSpec, ok := rsv.spec.(metadata.GenericSpecification)
+	if !ok {
+		return nil
+	}
+	spec := genSpec.(*metadata.ReplicationSpecification)
+	return spec
 }
 
 // Note, this method returns spec instead of spec.Clone() to avoid generating too much garbage.
@@ -872,7 +889,7 @@ func (service *ReplicationSpecService) AllActiveReplicationSpecsReadOnly() (map[
 	specs := make(map[string]*metadata.ReplicationSpecification, 0)
 	values_map := service.getCache().GetMap()
 	for key, val := range values_map {
-		spec := val.(*ReplicationSpecVal).spec.(*metadata.ReplicationSpecification)
+		spec := cacheableMetadataObjToReplicationSpec(val)
 		if spec != nil && spec.Settings.Active {
 			specs[key] = spec
 		}
@@ -884,7 +901,8 @@ func (service *ReplicationSpecService) AllReplicationSpecIds() ([]string, error)
 	repIds := []string{}
 	values_map := service.getCache().GetMap()
 	for key, val := range values_map {
-		if val.(*ReplicationSpecVal).spec != nil {
+		spec := cacheableMetadataObjToReplicationSpec(val)
+		if spec != nil {
 			repIds = append(repIds, key)
 		}
 	}
