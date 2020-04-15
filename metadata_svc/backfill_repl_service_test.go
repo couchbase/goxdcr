@@ -96,10 +96,28 @@ func constructBackfillRevSlice(id, internalId string) []byte {
 	return slice
 }
 
+type TasksMapType int
+
+const (
+	FullSet TasksMapType = iota
+	Subset  TasksMapType = iota
+)
+
 func constructDummyTasksMap() metadata.VBTasksMapType {
+	return constructDummyTasksMapCustom(FullSet)
+}
+
+const CustomScopeName = "CustomScope"
+const CustomCollectionName = "CustomCollection"
+
+func constructDummyTasksMapCustom(set TasksMapType) metadata.VBTasksMapType {
 	namespaceMapping := make(metadata.CollectionNamespaceMapping)
 	defaultNamespace := &base.CollectionNamespace{base.DefaultScopeCollectionName, base.DefaultScopeCollectionName}
 	namespaceMapping.AddSingleMapping(defaultNamespace, defaultNamespace)
+
+	nonDefaultNamespaceMapping := make(metadata.CollectionNamespaceMapping)
+	nonDefaultNamespace := &base.CollectionNamespace{CustomScopeName, CustomCollectionName}
+	nonDefaultNamespaceMapping.AddSingleMapping(nonDefaultNamespace, nonDefaultNamespace)
 
 	manifestsIdPair := base.CollectionsManifestIdPair{0, 0}
 	ts0 := &metadata.BackfillVBTimestamps{
@@ -108,16 +126,21 @@ func constructDummyTasksMap() metadata.VBTasksMapType {
 	}
 
 	vb0Task0 := metadata.NewBackfillTask(ts0, namespaceMapping)
+	var vb0Task1 *metadata.BackfillTask
 
-	ts1 := &metadata.BackfillVBTimestamps{
-		StartingTimestamp: &base.VBTimestamp{0, 0, 5005, 10, 10, manifestsIdPair},
-		EndingTimestamp:   &base.VBTimestamp{0, 0, 15005, 500, 500, manifestsIdPair},
+	if set == FullSet {
+		ts1 := &metadata.BackfillVBTimestamps{
+			StartingTimestamp: &base.VBTimestamp{0, 0, 5005, 10, 10, manifestsIdPair},
+			EndingTimestamp:   &base.VBTimestamp{0, 0, 15005, 500, 500, manifestsIdPair},
+		}
+		vb0Task1 = metadata.NewBackfillTask(ts1, nonDefaultNamespaceMapping)
 	}
-	vb0Task1 := metadata.NewBackfillTask(ts1, namespaceMapping)
 
 	var vb0Tasks metadata.BackfillTasks
 	vb0Tasks = append(vb0Tasks, vb0Task0)
-	vb0Tasks = append(vb0Tasks, vb0Task1)
+	if set == FullSet {
+		vb0Tasks = append(vb0Tasks, vb0Task1)
+	}
 
 	ts2 := &metadata.BackfillVBTimestamps{
 		StartingTimestamp: &base.VBTimestamp{1, 0, 5, 10, 10, manifestsIdPair},
@@ -135,9 +158,9 @@ func constructDummyTasksMap() metadata.VBTasksMapType {
 	return vbTasksMap
 }
 
-func createValidateCollectionNsMappingsDocBytes(internalId string) []byte {
+func createValidateCollectionNsMappingsDocBytes(internalId string, setType TasksMapType) []byte {
 	// As part of adding, upsert should be done for all the VBtaskmaps
-	dummyVBTaskMap := constructDummyTasksMap()
+	dummyVBTaskMap := constructDummyTasksMapCustom(setType)
 	shaToColMap := make(metadata.ShaToCollectionNamespaceMap)
 	for _, tasks := range dummyVBTaskMap {
 		oneMap := tasks.GetAllCollectionNamespaceMappings()
@@ -159,7 +182,7 @@ func createValidateCollectionNsMappingsDocBytes(internalId string) []byte {
 
 // Test Adding a brand new backfill repl service
 func setupMetakvStartupLoadingExistingOne(metadataSvc *service_def.MetadataSvc, specId, internalId string) {
-	docBytes := createValidateCollectionNsMappingsDocBytes(internalId)
+	docBytes := createValidateCollectionNsMappingsDocBytes(internalId, FullSet)
 	backfillMappingsKey := getBackfillMappingsDocKeyFunc(specId)
 	metadataSvc.On("Get", backfillMappingsKey).Return(docBytes, nil, nil)
 }
@@ -217,7 +240,7 @@ func TestBackfillReplSvc(t *testing.T) {
 }
 
 // Test Adding a brand new backfill repl service
-func setupMetakvInitialAdd(metadataSvc *service_def.MetadataSvc, specId, internalId string) {
+func setupMetakvInitialAddSetDel(metadataSvc *service_def.MetadataSvc, specId, internalId string, dummySpec *metadata.ReplicationSpecification) {
 	// Initially, there's no backfill mappings
 	backfillMappingsKey := getBackfillMappingsDocKeyFunc(specId)
 	metadataSvc.On("Get", backfillMappingsKey).Return(nil, nil, serviceDefReal.MetadataNotFoundErr).Times(1)
@@ -228,12 +251,13 @@ func setupMetakvInitialAdd(metadataSvc *service_def.MetadataSvc, specId, interna
 	if err != nil {
 		panic("Coding marshaller error")
 	}
+	// ADD PATH
 	metadataSvc.On("Add", backfillMappingsKey, emptyMappingDocBytes).Return(nil)
 
 	// Second time, when Get is called, it's part of RMW of upsert
 	metadataSvc.On("Get", backfillMappingsKey).Return(emptyMappingDocBytes, nil, nil).Times(1)
 
-	validateDocBytes := createValidateCollectionNsMappingsDocBytes(internalId)
+	validateDocBytes := createValidateCollectionNsMappingsDocBytes(internalId, FullSet)
 	// The add path should be consisted of the exact bytes as this validateDoc
 	// And should be called on Set not Add because init should have been done already on empty doc
 	metadataSvc.On("Set", backfillMappingsKey, validateDocBytes, mock.Anything).Return(nil)
@@ -242,13 +266,37 @@ func setupMetakvInitialAdd(metadataSvc *service_def.MetadataSvc, specId, interna
 	replKey := getBackfillReplicationDocKeyFunc(specId)
 	metadataSvc.On("Add", replKey, mock.Anything).Return(nil)
 
+	// SET OPS
+	// When setting, it will ask for the the currently stored mappingdoc, which was previously "SET" as part of the ADD PATH
+	// This is due to RMW of the sha service
+	metadataSvc.On("Get", backfillMappingsKey).Return(validateDocBytes, nil, nil).Times(1)
+
+	// The Write of the RMW should contain a smaller subset of doc due to setting of a subsetReplicationSpec
+	subsetDocBytes := createValidateCollectionNsMappingsDocBytes(internalId, Subset)
+	metadataSvc.On("Set", backfillMappingsKey, subsetDocBytes, mock.Anything).Return(nil)
+
+	// Then it will try to set the new subspec
+	backfillReplKey := getBackfillReplicationDocKeyFunc(specId)
+	subsetBackfillSpec := metadata.NewBackfillReplicationSpec(specId, internalId, constructDummyTasksMapCustom(Subset), dummySpec)
+	subsetDocVal, err := json.Marshal(subsetBackfillSpec)
+	if err != nil {
+		panic("Json marshal err")
+	}
+	metadataSvc.On("Set", backfillReplKey, subsetDocVal, mock.Anything).Return(nil).Times(1)
+
+	// After set, will get revision to update spec
+	dummyRev := "dummyRev"
+	metadataSvc.On("Get", backfillReplKey).Return(subsetDocVal, dummyRev, nil).Times(1)
+
+	// DEL OPS
 	// Del ops are pass-through
 	metadataSvc.On("Del", replKey, mock.Anything).Return(nil)
+	metadataSvc.On("Del", backfillMappingsKey, mock.Anything).Return(nil)
 }
 
-func TestBackfillReplSvcAddThenDel(t *testing.T) {
+func TestBackfillReplSvcAddSetDel(t *testing.T) {
 	assert := assert.New(t)
-	fmt.Println("============== Test case start: TestBackfillReplSvcAddThenDel =================")
+	fmt.Println("============== Test case start: TestBackfillReplSvcAddSetDel =================")
 	uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock, utilitiesMock, replSpecSvcMock := setupBoilerPlateBRS()
 
 	specName := "testSpec"
@@ -265,7 +313,7 @@ func TestBackfillReplSvcAddThenDel(t *testing.T) {
 	specMap[specName] = dummySpec
 
 	setupMocksBRS(uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock, utilitiesMock, replSpecSvcMock, metadataEntriesFunc, specMap)
-	setupMetakvInitialAdd(metadataSvcMock, specName, randInternalId)
+	setupMetakvInitialAddSetDel(metadataSvcMock, specName, randInternalId, dummySpec)
 
 	backfillReplSvc := NewBackfillReplTestSvc(uiLogSvcMock, metadataSvcMock, utilitiesMock, replSpecSvcMock, clusterInfoSvcMock, xdcrTopologyMock)
 	assert.NotNil(backfillReplSvc)
@@ -283,6 +331,15 @@ func TestBackfillReplSvcAddThenDel(t *testing.T) {
 	assert.NotNil(checkSpec)
 	assert.True(checkSpec.SameAs(backfillSpec))
 
+	// Do a set with a smaller subset of tasks
+	subsetBackfillSpec := metadata.NewBackfillReplicationSpec(specName, randInternalId, constructDummyTasksMapCustom(Subset), dummySpec)
+	assert.Nil(backfillReplSvc.SetBackfillReplSpec(subsetBackfillSpec))
+	checkSpec, err = backfillReplSvc.backfillSpec(specName)
+	assert.Nil(err)
+	assert.NotNil(checkSpec)
+	assert.False(checkSpec.SameAs(backfillSpec))
+	assert.True(checkSpec.SameAs(subsetBackfillSpec))
+
 	// Then do a delete
 	oldSpec := dummySpec
 	var newNilSpec *metadata.ReplicationSpecification
@@ -293,5 +350,5 @@ func TestBackfillReplSvcAddThenDel(t *testing.T) {
 	// Random delete of another entity that does not have backfill replication associated should be nil error
 	assert.Nil(backfillReplSvc.ReplicationSpecChangeCallback("randomIdName", oldSpec, newNilSpec))
 
-	fmt.Println("============== Test case end: TestBackfillReplSvcAddThenDel =================")
+	fmt.Println("============== Test case end: TestBackfillReplSvcAddSetDel =================")
 }

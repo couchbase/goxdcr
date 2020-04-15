@@ -392,7 +392,99 @@ func (b *BackfillReplicationService) persistMappingsForThisNode(spec *metadata.B
 }
 
 func (b *BackfillReplicationService) SetBackfillReplSpec(spec *metadata.BackfillReplicationSpec) error {
-	// TODO
+	if spec == nil {
+		return base.ErrorInvalidInput
+	}
+
+	oldSpec, err := b.backfillSpec(spec.Id)
+	if err != nil {
+		return err
+	}
+
+	specValue, err := json.Marshal(spec)
+	if err != nil {
+		return err
+	}
+
+	err = b.persistVBTasksMapDifferences(spec, oldSpec)
+	if err != nil {
+		return err
+	}
+
+	key := getBackfillReplicationDocKeyFunc(spec.Id)
+	err = b.metadataSvc.Set(key, specValue, spec.Revision())
+	if err != nil {
+		return err
+	}
+
+	err = b.loadLatestMetakvRevisionIntoSpec(spec)
+	if err != nil {
+		return err
+	}
+
+	err = b.updateCache(spec.Id, spec)
+	if err == nil {
+		b.logger.Infof("BackfillReplication spec %s has been updated, rev=%v\n", spec.Id, spec.Revision)
+	}
+
+	return err
+}
+
+func (b *BackfillReplicationService) persistVBTasksMapDifferences(spec, oldSpec *metadata.BackfillReplicationSpec) error {
+	vbsList, err := b.GetMyVBs(spec.ReplicationSpec().SourceBucketName)
+	if err != nil {
+		return err
+	}
+	sortedVbs := base.SortUint16List(vbsList)
+
+	subsetBackfillTasks := make(metadata.VBTasksMapType)
+	for vb, tasks := range spec.VBTasksMap {
+		_, isInList := base.SearchVBInSortedList(vb, sortedVbs)
+		if isInList {
+			subsetBackfillTasks[vb] = tasks
+		}
+	}
+
+	olderSubsetBackfillTasks := make(metadata.VBTasksMapType)
+	for vb, tasks := range oldSpec.VBTasksMap {
+		_, isInList := base.SearchVBInSortedList(vb, sortedVbs)
+		if isInList {
+			olderSubsetBackfillTasks[vb] = tasks
+		}
+	}
+
+	newShaToColMapping := subsetBackfillTasks.GetAllCollectionNamespaceMappings()
+	oldShaToColMapping := olderSubsetBackfillTasks.GetAllCollectionNamespaceMappings()
+
+	added, removed := newShaToColMapping.Diff(oldShaToColMapping)
+
+	if len(added) > 0 {
+		increment, err := b.GetIncrementerFunc(spec.Id)
+		if err != nil {
+			return err
+		}
+		for k, v := range added {
+			increment(k, v)
+		}
+	}
+
+	if len(removed) > 0 {
+		decrement, err := b.GetDecrementerFunc(spec.Id)
+		if err != nil {
+			return err
+		}
+		for k, _ := range removed {
+			decrement(k)
+		}
+	}
+
+	if len(added) > 0 || len(removed) > 0 {
+		err = b.UpsertMapping(spec.Id, spec.InternalId)
+		if err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
 
@@ -406,6 +498,14 @@ func (b *BackfillReplicationService) DelBackfillReplSpec(replicationId string) (
 	err = b.metadataSvc.Del(key, nil /*rev*/)
 	if err != nil {
 		b.logger.Errorf("Failed to delete backfill spec, key=%v, err=%v\n", key, err)
+		return nil, err
+	}
+
+	// Once backfill spec has been deleted, safe to delete the backfill mappings
+	// TODO - revisit once consistent metakv is in
+	err = b.CleanupMapping(replicationId)
+	if err != nil {
+		b.logger.Errorf("Failed to cleanup backfill spec mapping err=%v\n", err)
 		return nil, err
 	}
 
@@ -435,11 +535,11 @@ func (b *BackfillReplicationService) updateCacheInternal(specId string, newSpec 
 	oldSpec, updated, err := b.updateCacheInternalNoLock(specId, newSpec)
 
 	if updated && oldSpec != nil && newSpec == nil {
-		// TODO
+		// TODO MB-38331 - notify Backfill Manager
 	}
 
 	if updated && oldSpec == nil && newSpec != nil {
-		// TODO
+		// TODO MB-38331 - notify Backfill Manager
 	}
 
 	return err
@@ -456,7 +556,7 @@ func (b *BackfillReplicationService) ReplicationSpecChangeCallback(id string, ol
 	}
 
 	if oldSpec == nil && newSpec != nil {
-		// TODO
+		// TODO MB-38331 - notify Backfill Manager??
 	} else if oldSpec != nil && newSpec == nil {
 		_, err := b.DelBackfillReplSpec(id)
 		if err == ReplNotFoundErr {

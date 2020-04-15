@@ -1321,6 +1321,33 @@ func (s *ShaToCollectionNamespaceMap) String() string {
 	return strings.Join(output, "\n")
 }
 
+func (s ShaToCollectionNamespaceMap) Diff(older ShaToCollectionNamespaceMap) (added, removed ShaToCollectionNamespaceMap) {
+	if len(older) == 0 && len(s) > 0 {
+		added = s
+		return
+	} else if len(older) > 0 && len(s) == 0 {
+		removed = s
+		return
+	}
+
+	added = make(ShaToCollectionNamespaceMap)
+	removed = make(ShaToCollectionNamespaceMap)
+
+	for k, v := range s {
+		if _, exists := older[k]; !exists {
+			added[k] = v
+		}
+	}
+
+	for k, v := range older {
+		if _, exists := s[k]; !exists {
+			removed[k] = v
+		}
+	}
+
+	return
+}
+
 type CompressedColNamespaceMapping struct {
 	// Snappy compressed byte slice of CollectionNamespaceMapping
 	CompressedMapping []byte `json:compressedMapping`

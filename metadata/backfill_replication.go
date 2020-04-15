@@ -153,6 +153,24 @@ func (v *VBTasksMapType) LoadFromMappingsShaMap(shaToCollectionNsMap ShaToCollec
 	return nil
 }
 
+func (v *VBTasksMapType) GetAllCollectionNamespaceMappings() ShaToCollectionNamespaceMap {
+	if v == nil {
+		return ShaToCollectionNamespaceMap{}
+	}
+
+	returnMap := make(ShaToCollectionNamespaceMap)
+	for _, tasks := range *v {
+		tasksMap := tasks.GetAllCollectionNamespaceMappings()
+		for k, v := range tasksMap {
+			if _, exists := returnMap[k]; !exists {
+				returnMap[k] = v
+			}
+		}
+	}
+
+	return returnMap
+}
+
 // Backfill tasks are ordered list of backfill jobs, and to be handled in sequence
 type BackfillTasks []*BackfillTask
 
