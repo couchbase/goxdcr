@@ -64,6 +64,9 @@ type CollectionsManifestSvc interface {
 	GetSpecificSourceManifest(spec *metadata.ReplicationSpecification, manifestVersion uint64) (*metadata.CollectionsManifest, error)
 	GetSpecificTargetManifest(spec *metadata.ReplicationSpecification, manifestVersion uint64) (*metadata.CollectionsManifest, error)
 
+	// Error handling conditions requiring more system work
+	ForceTargetManifestRefresh(spec *metadata.ReplicationSpecification) error
+
 	// This service should allow multiple calls and each call should be append
 	SetMetadataChangeHandlerCallback(callBack base.MetadataChangeHandlerCallback)
 	ReplicationSpecChangeCallback(id string, oldVal, newVal interface{}) error
@@ -77,6 +80,7 @@ type CollectionsManifestOps interface {
 type CollectionsManifestAgentIface interface {
 	Start() error
 	Stop()
+	ForceTargetManifestRefresh() error
 	GetSourceManifest() (*metadata.CollectionsManifest, error)
 	GetTargetManifest() (*metadata.CollectionsManifest, error)
 	GetSpecificSourceManifest(manifestVersion uint64) (*metadata.CollectionsManifest, error)

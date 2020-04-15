@@ -16,6 +16,7 @@ import (
 	common "github.com/couchbase/goxdcr/common"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
+	"github.com/couchbase/goxdcr/parts"
 	"github.com/couchbase/goxdcr/pipeline"
 	"github.com/couchbase/goxdcr/pipeline_utils"
 	"github.com/couchbase/goxdcr/service_def"
@@ -38,17 +39,20 @@ const MaxErrorDataEntries = 50
 type func_report_fixed func(topic string)
 
 type PipelineManager struct {
-	pipeline_factory   common.PipelineFactory
-	repl_spec_svc      service_def.ReplicationSpecSvc
-	xdcr_topology_svc  service_def.XDCRCompTopologySvc
-	remote_cluster_svc service_def.RemoteClusterSvc
-	cluster_info_svc   service_def.ClusterInfoSvc
-	checkpoint_svc     service_def.CheckpointsService
-	uilog_svc          service_def.UILogSvc
-	once               sync.Once
-	logger             *log.CommonLogger
-	serializer         *PipelineOpSerializer
-	utils              utilities.UtilsIface
+	pipeline_factory common.PipelineFactory
+
+	repl_spec_svc          service_def.ReplicationSpecSvc
+	xdcr_topology_svc      service_def.XDCRCompTopologySvc
+	remote_cluster_svc     service_def.RemoteClusterSvc
+	cluster_info_svc       service_def.ClusterInfoSvc
+	checkpoint_svc         service_def.CheckpointsService
+	uilog_svc              service_def.UILogSvc
+	collectionsManifestSvc service_def.CollectionsManifestSvc
+
+	once       sync.Once
+	logger     *log.CommonLogger
+	serializer *PipelineOpSerializer
+	utils      utilities.UtilsIface
 }
 
 type Pipeline_mgr_iface interface {
@@ -83,6 +87,7 @@ type Pipeline_mgr_iface interface {
 	GetReplSpecSvc() service_def.ReplicationSpecSvc
 	GetXDCRTopologySvc() service_def.XDCRCompTopologySvc
 	PauseReplication(topic string) error
+	ForceTargetRefreshManifest(spec *metadata.ReplicationSpecification) error
 }
 
 // Global ptr, should slowly get rid of refences to this global
@@ -90,18 +95,19 @@ var pipeline_mgr *PipelineManager
 
 func NewPipelineManager(factory common.PipelineFactory, repl_spec_svc service_def.ReplicationSpecSvc, xdcr_topology_svc service_def.XDCRCompTopologySvc,
 	remote_cluster_svc service_def.RemoteClusterSvc, cluster_info_svc service_def.ClusterInfoSvc, checkpoint_svc service_def.CheckpointsService,
-	uilog_svc service_def.UILogSvc, logger_context *log.LoggerContext, utilsIn utilities.UtilsIface) *PipelineManager {
+	uilog_svc service_def.UILogSvc, logger_context *log.LoggerContext, utilsIn utilities.UtilsIface, collectionsManifestSvc service_def.CollectionsManifestSvc) *PipelineManager {
 
 	pipelineMgrRetVar := &PipelineManager{
-		pipeline_factory:   factory,
-		repl_spec_svc:      repl_spec_svc,
-		xdcr_topology_svc:  xdcr_topology_svc,
-		remote_cluster_svc: remote_cluster_svc,
-		checkpoint_svc:     checkpoint_svc,
-		logger:             log.NewLogger("PipelineMgr", logger_context),
-		cluster_info_svc:   cluster_info_svc,
-		uilog_svc:          uilog_svc,
-		utils:              utilsIn,
+		pipeline_factory:       factory,
+		repl_spec_svc:          repl_spec_svc,
+		xdcr_topology_svc:      xdcr_topology_svc,
+		remote_cluster_svc:     remote_cluster_svc,
+		checkpoint_svc:         checkpoint_svc,
+		logger:                 log.NewLogger("PipelineMgr", logger_context),
+		cluster_info_svc:       cluster_info_svc,
+		uilog_svc:              uilog_svc,
+		utils:                  utilsIn,
+		collectionsManifestSvc: collectionsManifestSvc,
 	}
 	pipelineMgrRetVar.logger.Info("Pipeline Manager is constructed")
 
@@ -662,6 +668,10 @@ func (pipelineMgr *PipelineManager) PauseReplication(topic string) error {
 	return err
 }
 
+func (pipelineMgr *PipelineManager) ForceTargetRefreshManifest(spec *metadata.ReplicationSpecification) error {
+	return pipelineMgr.collectionsManifestSvc.ForceTargetManifestRefresh(spec)
+}
+
 // Use this only for unit test
 func (pipelineMgr *PipelineManager) GetLastUpdateResult(topic string) bool {
 	repStatus, err := pipelineMgr.ReplicationStatus(topic)
@@ -985,6 +995,19 @@ func (r *PipelineUpdater) checkAndDisableProblematicFeatures() {
 			r.disableCompression(base.ErrorCompressionNotSupported)
 		} else if r.currentErrors.ContainsError(base.ErrorCompressionUnableToInflate, false /*exactMatch*/) {
 			r.disableCompression(base.ErrorCompressionUnableToInflate)
+
+		}
+
+		// Not exactly disable, but logic here dictates some action here
+		if r.currentErrors.ContainsError(base.ErrorXmemCollectionSubErr, false /*exactMatch*/) ||
+			r.currentErrors.ContainsError(parts.ErrorXmemIsStuck, false /*exactMatch*/) {
+			// Xmem is stuck or collection error can only be declared after an elongated period of xmem timeout
+			// It's more frequent than regular refresh interval, but not too frequent to bombard target ns_server
+			// May need to revisit if XDCR number of replication scales to a lot and all of them have the same issue
+			err := r.pipelineMgr.ForceTargetRefreshManifest(r.rep_status.Spec())
+			if err != nil {
+				r.logger.Errorf("Unable to force target to refresh collections manifest: %v", err)
+			}
 		}
 	}
 }

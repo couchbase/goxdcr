@@ -291,6 +291,16 @@ func (c *CollectionsManifestService) GetSpecificTargetManifest(spec *metadata.Re
 	return agent.GetSpecificTargetManifest(manifestVersion)
 }
 
+func (c *CollectionsManifestService) ForceTargetManifestRefresh(spec *metadata.ReplicationSpecification) error {
+	c.agentsMtx.RLock()
+	agent, ok := c.agentsMap[spec.Id]
+	c.agentsMtx.RUnlock()
+	if !ok {
+		return fmt.Errorf("Unable to find agent for spec %v\n", spec.Id)
+	}
+	return agent.ForceTargetManifestRefresh()
+}
+
 type AgentSrcManifestGetter func() *metadata.CollectionsManifest
 
 type AgentPersistResult struct {
@@ -1034,6 +1044,11 @@ func (a *CollectionsManifestAgent) GetLastPersistedManifests() (*metadata.Collec
 	}
 
 	return &metadata.CollectionsManifestPair{srcManifest, tgtManifest}, nil
+}
+
+func (a *CollectionsManifestAgent) ForceTargetManifestRefresh() error {
+	_, _, err := a.refreshTarget(true)
+	return err
 }
 
 // Unit test func
