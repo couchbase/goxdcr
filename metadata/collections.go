@@ -1279,7 +1279,7 @@ func (b *CollectionNsMappingsDoc) LoadShaMap(shaMap ShaToCollectionNamespaceMap)
 		compressedMapping := snappy.Encode(nil, serializedMap)
 
 		oneRecord := &CompressedColNamespaceMapping{compressedMapping, sha}
-		b.NsMappingRecords = append(b.NsMappingRecords, oneRecord)
+		b.NsMappingRecords.SortedInsert(oneRecord)
 	}
 
 	if len(errorMap) > 0 {
@@ -1327,6 +1327,10 @@ type CompressedColNamespaceMapping struct {
 	Sha256Digest      string `json:string`
 }
 
+func (c *CompressedColNamespaceMapping) String() string {
+	return fmt.Sprintf("Sha: %v Bytes: %v", c.Sha256Digest, fmt.Sprintf("%x", c.CompressedMapping[:]))
+}
+
 func (c *CompressedColNamespaceMapping) Size() int {
 	if c == nil {
 		return 0
@@ -1346,4 +1350,27 @@ func (c *CompressedColNamespaceMappingList) Size() int {
 		totalSize += j.Size()
 	}
 	return totalSize
+}
+
+func (c *CompressedColNamespaceMappingList) SortedInsert(elem *CompressedColNamespaceMapping) {
+	if c == nil {
+		return
+	}
+
+	if len(*c) == 0 {
+		*c = append(*c, elem)
+		return
+	}
+
+	var i int
+	// First, find where this should be
+	for i = 0; i < len(*c); i++ {
+		if (*c)[i].Sha256Digest > elem.Sha256Digest {
+			break
+		}
+	}
+
+	*c = append(*c, nil)
+	copy((*c)[i+1:], (*c)[i:])
+	(*c)[i] = elem
 }
