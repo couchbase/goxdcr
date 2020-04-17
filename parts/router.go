@@ -427,7 +427,7 @@ func (c *CollectionsRouter) handleNewManifestChanges(latestManifest *metadata.Co
 
 		if len(added) > 0 && len(c.brokenMapping) > 0 {
 			// These are new target collections - see if the broken ones can be backfilled
-			fixedMapping = brokenMappingClone.GetSubsetBasedOnAddedTargets(added)
+			fixedMapping = brokenMappingClone.GetSubsetBasedOnSpecifiedTargets(added)
 		}
 
 		if len(fixedMapping) > 0 {
@@ -627,6 +627,10 @@ func NewRouter(id string, spec *metadata.ReplicationSpecification,
 		(utilities.RecycleObjFunc)(router.recycleDataObj))
 
 	routingUpdater := func(info CollectionsRoutingInfo) {
+		// TODO - MB-38777 - When router raises a routing event, this is where the lock step happens:
+		// 1. It should raise a backfill event telling backfill manager to persist the backfill mapping
+		// 2. Backfill manager should persist the backfill. If it cannot persist, it must not allow the following to continue (TBD)
+		// 3. Once Backfill Manager has persisted it, then the broken event can be raised to the checkpoint manager (below)
 		routingEvent := common.NewEvent(common.BrokenRoutingUpdateEvent, info, router, nil, nil)
 		router.RaiseEvent(routingEvent)
 	}

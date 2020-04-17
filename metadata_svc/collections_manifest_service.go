@@ -226,6 +226,7 @@ func (c *CollectionsManifestService) GetLatestManifests(spec *metadata.Replicati
 	return
 }
 
+// This is used during startup so that Backfill Manager knows what was the last persisted was and figure out differences from here on out
 func (c *CollectionsManifestService) GetLastPersistedManifests(spec *metadata.ReplicationSpecification) (*metadata.CollectionsManifestPair, error) {
 	agent, err := c.getAgent(spec)
 	if err != nil {
@@ -1067,16 +1068,26 @@ func (a *CollectionsManifestAgent) GetLastPersistedManifests() (*metadata.Collec
 
 	a.srcMtx.RLock()
 	srcManifest, ok := a.sourceCache[a.lastSourceStoredManifest]
+	localLastStored := a.lastSourceStoredManifest
 	a.srcMtx.RUnlock()
 	if !ok {
-		return nil, fmt.Errorf("Cannot find manifest %v", a.lastSourceStoredManifest)
+		if localLastStored > 0 {
+			return nil, fmt.Errorf("Cannot find source manifest version %v", localLastStored)
+		} else {
+			srcManifest = &defaultManifest
+		}
 	}
 
 	a.tgtMtx.RLock()
 	tgtManifest, ok := a.targetCache[a.lastTargetStoredManifest]
+	localLastStored = a.lastTargetStoredManifest
 	a.tgtMtx.RUnlock()
 	if !ok {
-		return nil, fmt.Errorf("Cannot find manifest %v", a.lastTargetStoredManifest)
+		if localLastStored > 0 {
+			return nil, fmt.Errorf("Cannot find manifest version %v", localLastStored)
+		} else {
+			tgtManifest = &defaultManifest
+		}
 	}
 
 	return &metadata.CollectionsManifestPair{srcManifest, tgtManifest}, nil

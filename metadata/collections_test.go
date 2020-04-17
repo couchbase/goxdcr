@@ -530,3 +530,86 @@ func TestManifestsDocMarshalling(t *testing.T) {
 	}
 	fmt.Println("============== Test case end: TestManifestsDocMarshalling =================")
 }
+
+func TestManifestMapping(t *testing.T) {
+	assert := assert.New(t)
+	fmt.Println("============== Test case start: TestManifestMapping =================")
+	data, _ := ioutil.ReadFile(provisionedFile)
+	source, _ := NewCollectionsManifestFromBytes(data)
+	target, _ := NewCollectionsManifestFromBytes(data)
+
+	// unmapped source
+	delete(target.scopes["S1"].Collections, "col2")
+
+	// unmapped target
+	target.scopes["S2"].Collections["colTest"] = Collection{1234, "colTest"}
+
+	_, unmappedSrc, unmappedTgt := source.ImplicitMap(&target)
+	assert.Equal(1, len(unmappedSrc))
+	assert.Equal(1, len(unmappedTgt))
+
+	added, removed, modified := unmappedSrc.Diff(unmappedTgt)
+	assert.Equal(1, len(added))
+	assert.Equal(1, len(removed))
+	assert.Equal(0, len(modified))
+
+	fmt.Println("============== Test case end: TestManifestMapping =================")
+}
+
+func TestManifestMappingReal(t *testing.T) {
+	assert := assert.New(t)
+	fmt.Println("============== Test case start: TestManifestMappingReal =================")
+	data, _ := ioutil.ReadFile(sourcev7)
+	source, _ := NewCollectionsManifestFromBytes(data)
+	data, _ = ioutil.ReadFile(targetv7)
+	target, _ := NewCollectionsManifestFromBytes(data)
+
+	mappedSrcToTarget, unmappedSrc, unmappedTgt := source.ImplicitMap(&target)
+	assert.Equal(0, len(unmappedSrc))
+	assert.Equal(0, len(unmappedTgt))
+	assert.Equal(6, len(mappedSrcToTarget))
+
+	fmt.Println("============== Test case end: TestManifestMappingReal =================")
+}
+
+func TestManifestFindBackfill(t *testing.T) {
+	assert := assert.New(t)
+	fmt.Println("============== Test case start: TestManifestFindBackfill =================")
+	data, err := ioutil.ReadFile(provisionedFile)
+	if err != nil {
+		panic(err)
+	}
+	source, _ := NewCollectionsManifestFromBytes(data)
+	target, _ := NewCollectionsManifestFromBytes(data)
+	target2, _ := NewCollectionsManifestFromBytes(data)
+
+	newCol := target.scopes["S1"].Collections["col1"].Clone()
+	newCol.Uid++
+	target2.uid++
+	target2.scopes["S1"].Collections["col1"] = newCol
+
+	output, err := target2.ImplicitGetBackfillCollections(&target, &source)
+	assert.Nil(err)
+	assert.Equal(1, len(output))
+
+	// target 3 is target 2 but with one more collection
+	target3 := target2.Clone()
+	testCol := Collection{Uid: 1234, Name: "Extraneous"}
+	target3.scopes["S1"].Collections["testNewCol"] = testCol
+
+	// However, there should not be a backfill YET because source doesn't have a matching "Extraneous" collection
+	output, err = target3.ImplicitGetBackfillCollections(&target, &source)
+	assert.Nil(err)
+	assert.Equal(1, len(output))
+
+	// Source creates the same collection but diff UID, now it should be backfilled
+	source2 := source.Clone()
+	testSrcCol := Collection{Uid: 2345, Name: "Extraneous"}
+	source2.scopes["S1"].Collections["testNewCol"] = testSrcCol
+
+	output, err = target3.ImplicitGetBackfillCollections(&target, &source2)
+	assert.Nil(err)
+	assert.Equal(2, len(output))
+
+	fmt.Println("============== Test case end: TestManifestFindBackfill =================")
+}

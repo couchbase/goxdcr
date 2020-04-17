@@ -99,6 +99,10 @@ type CollectionsManifest struct {
 	scopes ScopesMap
 }
 
+func UnitTestGenerateCollManifest(uid uint64, scopes ScopesMap) *CollectionsManifest {
+	return &CollectionsManifest{uid, scopes}
+}
+
 func (c *CollectionsManifest) String() string {
 	if c == nil {
 		return ""
@@ -142,6 +146,29 @@ func (c *CollectionsManifest) GetCollectionId(scopeName, collectionName string) 
 		}
 	}
 	return 0, base.ErrorNotFound
+}
+
+func (target *CollectionsManifest) ImplicitGetBackfillCollections(prevTarget, source *CollectionsManifest) (backfillsNeeded CollectionNamespaceMapping, err error) {
+	backfillsNeeded = make(CollectionNamespaceMapping)
+
+	// First, find any previously unmapped target collections that are now mapped
+	oldSrcToTargetMapping, _, _ := source.ImplicitMap(prevTarget)
+	srcToTargetMapping, _, _ := source.ImplicitMap(target)
+
+	added, _ := oldSrcToTargetMapping.Diff(srcToTargetMapping)
+	backfillsNeeded.Consolidate(added)
+
+	// Then, find out if any target Collection UID changed from underneath the manifests
+	// These target collections need to be backfilled that couldn't be discovered from the namespacemappings
+	// because they were never "missing", but their collection UID changed
+	_, changedTargets, _, err := target.Diff(prevTarget)
+	if err != nil {
+		return nil, err
+	}
+	backfillsNeededDueToTargetRecreation := srcToTargetMapping.GetSubsetBasedOnSpecifiedTargets(changedTargets)
+
+	backfillsNeeded.Consolidate(backfillsNeededDueToTargetRecreation)
+	return
 }
 
 // Actual obj stored in metakv
@@ -395,6 +422,58 @@ func (c *CollectionsManifest) Scopes() ScopesMap {
 	return c.scopes
 }
 
+//type CollectionsMap map[string]Collection
+// Diff by name between two manifests
+func (sourceManifest *CollectionsManifest) ImplicitMap(targetManifest *CollectionsManifest) (successfulMapping CollectionNamespaceMapping, unmappedSources CollectionsMap, unmappedTargets CollectionsMap) {
+	if sourceManifest == nil || targetManifest == nil {
+		return
+	}
+
+	successfulMapping = make(CollectionNamespaceMapping)
+	unmappedSources = make(CollectionsMap)
+	unmappedTargets = make(CollectionsMap)
+
+	for _, sourceScope := range sourceManifest.Scopes() {
+		_, exists := targetManifest.Scopes()[sourceScope.Name]
+		if !exists {
+			// Whole scope does not exist on target
+			for _, collection := range sourceScope.Collections {
+				unmappedSources[collection.Name] = collection
+			}
+		} else {
+			// Some collections may or may not exist on target
+			for _, sourceCollection := range sourceScope.Collections {
+				_, err := targetManifest.GetCollectionId(sourceScope.Name, sourceCollection.Name)
+				if err == nil {
+					implicitNamespace := &base.CollectionNamespace{sourceScope.Name, sourceCollection.Name}
+					successfulMapping.AddSingleMapping(implicitNamespace, implicitNamespace)
+				} else {
+					unmappedSources[sourceCollection.Name] = sourceCollection
+				}
+			}
+		}
+	}
+
+	for _, targetScope := range targetManifest.Scopes() {
+		_, exists := sourceManifest.Scopes()[targetScope.Name]
+		if !exists {
+			// Whole scope does not exist on source
+			for _, collection := range targetScope.Collections {
+				unmappedTargets[collection.Name] = collection
+			}
+		} else {
+			// Some may or maynot exist on source
+			for _, targetCollection := range targetScope.Collections {
+				_, err := sourceManifest.GetCollectionId(targetScope.Name, targetCollection.Name)
+				if err != nil {
+					unmappedTargets[targetCollection.Name] = targetCollection
+				}
+			}
+		}
+	}
+	return
+}
+
 type CollectionsPtrList []*Collection
 
 func (c CollectionsPtrList) Len() int           { return len(c) }
@@ -462,17 +541,6 @@ func newc2cMarshalObj() *c2cMarshalObj {
 	return &c2cMarshalObj{
 		IndirectTargetMap: make(map[string][]*Collection),
 	}
-}
-
-type CollectionList []*Collection
-
-func (c CollectionList) Contains(cid uint32) bool {
-	for _, collection := range c {
-		if collection != nil && collection.Uid == cid {
-			return true
-		}
-	}
-	return false
 }
 
 type ScopesMap map[string]Scope
@@ -743,6 +811,32 @@ func (c CollectionsMap) Clone() CollectionsMap {
 		clone[k] = v.Clone()
 	}
 	return clone
+}
+
+// Diff by name
+// Modified is if the names are the same but collection IDs are different
+func (c CollectionsMap) Diff(older CollectionsMap) (added, removed, modified CollectionsMap) {
+	added = make(CollectionsMap)
+	removed = make(CollectionsMap)
+	modified = make(CollectionsMap)
+
+	for collectionName, collection := range c {
+		olderCol, exists := older[collectionName]
+		if !exists {
+			added[collectionName] = collection
+		} else if olderCol.Uid != collection.Uid {
+			modified[collectionName] = collection
+		}
+	}
+
+	for olderColName, olderCol := range older {
+		_, exists := c[olderColName]
+		if !exists {
+			removed[olderColName] = olderCol
+		}
+	}
+
+	return
 }
 
 type ManifestsList []*CollectionsManifest
@@ -1052,13 +1146,14 @@ func (c *CollectionNamespaceMapping) TargetNamespaceExists(checkNamespace *base.
 	return false
 }
 
-// Given a set of added scopesmap, return a subset of c that contains elements in this added
-func (c *CollectionNamespaceMapping) GetSubsetBasedOnAddedTargets(added ScopesMap) (retMap CollectionNamespaceMapping) {
+// Given a collection namespace mapping of source to target, and given a set of "ScopesMap",
+// return a subset of collection namespace mapping of the original that contain the specified target scopesmap
+func (c *CollectionNamespaceMapping) GetSubsetBasedOnSpecifiedTargets(targetScopeCollections ScopesMap) (retMap CollectionNamespaceMapping) {
 	retMap = make(CollectionNamespaceMapping)
 
 	for src, tgtList := range *c {
 		for _, tgt := range tgtList {
-			_, found := added.GetCollectionByNames(tgt.ScopeName, tgt.CollectionName)
+			_, found := targetScopeCollections.GetCollectionByNames(tgt.ScopeName, tgt.CollectionName)
 			if found {
 				retMap.AddSingleMapping(src, tgt)
 			}
