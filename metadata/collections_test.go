@@ -18,6 +18,10 @@ var sourcev7 string = testDir + "diffSourcev7.json"
 var targetv7 string = testDir + "diffTargetv7.json"
 var targetv9 string = testDir + "diffTargetv9.json"
 
+var colRecreatedDir string = "singleCollectionDiff/"
+var colRecreatedOrig string = testDir + colRecreatedDir + "orig.json"
+var colRecreatedNew string = testDir + colRecreatedDir + "newer.json"
+
 func TestUnmarshalCollectionManifest(t *testing.T) {
 	assert := assert.New(t)
 	fmt.Println("============== Test case start: TestUnmarshalCollectionManifest =================")
@@ -409,4 +413,55 @@ func TestCollectionsNsMapping(t *testing.T) {
 	assert.True(confirmMapping.IsSame(mapping))
 
 	fmt.Println("============== Test case end: TestCollectionsMapping =================")
+}
+
+func TestCollectionRecreatedDiff(t *testing.T) {
+	assert := assert.New(t)
+	fmt.Println("============== Test case start: TestCollectionRecreatedDiff =================")
+	data, err := ioutil.ReadFile(colRecreatedOrig)
+	assert.Nil(err)
+
+	var origManifest CollectionsManifest
+	err = origManifest.LoadBytes(data)
+	assert.Nil(err)
+
+	//	 Manifest version 7
+	//	 ScopeName "S2" (UID 9)
+	//	 ScopeName "S2" CollectionName "col3" (UID 12)
+	//	 ScopeName "S2" CollectionName "col2" (UID 11)
+	//	 ScopeName "S2" CollectionName "col1" (UID 10)
+	//	 ScopeName "S1" (UID 8)
+	//	 ScopeName "S1" CollectionName "col2" (UID 9)
+	//	 ScopeName "S1" CollectionName "col1" (UID 8) <--- Delete this one
+	//	 ScopeName "_default" (UID 0)
+	//	 ScopeName "_default" CollectionName "_default" (UID 0)
+
+	data, err = ioutil.ReadFile(colRecreatedNew)
+	assert.Nil(err)
+
+	var newerManifest CollectionsManifest
+	err = newerManifest.LoadBytes(data)
+	assert.Nil(err)
+
+	// Manifest version 9
+	// ScopeName "S2" (UID 9)
+	// ScopeName "S2" CollectionName "col3" (UID 12)
+	// ScopeName "S2" CollectionName "col2" (UID 11)
+	// ScopeName "S2" CollectionName "col1" (UID 10)
+	// ScopeName "S1" (UID 8)
+	// ScopeName "S1" CollectionName "col1" (UID 13) <----- Recreated one
+	// ScopeName "S1" CollectionName "col2" (UID 9)
+	// ScopeName "_default" (UID 0)
+	// ScopeName "_default" CollectionName "_default" (UID 0)
+
+	added, modified, removed, err := newerManifest.Diff(&origManifest)
+	assert.Nil(err)
+	assert.Equal(0, len(added))
+	assert.Equal(0, len(removed))
+	assert.Equal(1, len(modified))
+	col, found := modified.GetCollection(13)
+	assert.True(found)
+	assert.Equal("col1", col.Name)
+
+	fmt.Println("============== Test case end: TestCollectionRecreatedDiff =================")
 }
