@@ -2840,7 +2840,6 @@ func (service *RemoteClusterService) GetManifestByUuid(uuid, bucketName string, 
 	return manifest, nil
 }
 
-// TODO - MB-37885
 func (service *RemoteClusterService) RequestRemoteMonitoring(spec *metadata.ReplicationSpecification) error {
 	if spec == nil {
 		return base.ErrorInvalidInput
@@ -2853,7 +2852,6 @@ func (service *RemoteClusterService) RequestRemoteMonitoring(spec *metadata.Repl
 	return agent.RegisterBucketRequest(spec.TargetBucketName)
 }
 
-// TODO - MB-37885
 func (service *RemoteClusterService) UnRequestRemoteMonitoring(spec *metadata.ReplicationSpecification) error {
 	if spec == nil {
 		return base.ErrorInvalidInput

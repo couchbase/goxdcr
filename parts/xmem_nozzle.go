@@ -51,10 +51,11 @@ const (
 
 // Return values from conflict detection
 type ConflictResult uint32
+
 const (
 	SourceDominate = iota
 	TargetDominate = iota
-	Conflict = iota
+	Conflict       = iota
 )
 
 type RequestToCas struct {
@@ -62,8 +63,8 @@ type RequestToCas struct {
 	cas uint64
 }
 type RequestToResponse struct {
-	req 	*base.WrappedMCRequest
-	resp	*mc.MCResponse
+	req  *base.WrappedMCRequest
+	resp *mc.MCResponse
 }
 
 var xmem_setting_defs base.SettingDefinitions = base.SettingDefinitions{SETTING_BATCHCOUNT: base.NewSettingDef(reflect.TypeOf((*int)(nil)), true),
@@ -85,6 +86,13 @@ var xmem_setting_defs base.SettingDefinitions = base.SettingDefinitions{SETTING_
 
 var UninitializedReseverationNumber = -1
 
+func GetErrorXmemTargetUnknownCollection(mcr *base.WrappedMCRequest) error {
+	return fmt.Errorf("%v scope %v collection %v given known manifest ID %v", base.StringTargetCollectionMappingErr,
+		mcr.ColNamespace.ScopeName, mcr.ColNamespace.CollectionName, mcr.ColInfo.ManifestId)
+}
+
+var ErrorXmemIsStuck = errors.New("Xmem is stuck")
+
 type ConflictResolver func(doc_metadata_source documentMetadata, doc_metadata_target documentMetadata, source_cr_mode base.ConflictResolutionMode, xattrEnabled bool, logger *log.CommonLogger) bool
 
 var GetMetaClientName = "client_getMeta"
@@ -103,7 +111,9 @@ type bufferedMCRequest struct {
 	// whether a mutation locked response has been received for the corresponding MCRequest
 	// this affects the number of retries allowed on the MCRequest
 	mutationLocked bool
-	lock           sync.RWMutex
+	// If a mutation was not able to be sent because target KV was unable to find the specified collectionId
+	collectionMapErr bool
+	lock             sync.RWMutex
 }
 
 func newBufferedMCRequest() *bufferedMCRequest {
@@ -123,6 +133,7 @@ func resetBufferedMCRequest(request *bufferedMCRequest) {
 	request.num_of_retry = 0
 	request.timedout = false
 	request.mutationLocked = false
+	request.collectionMapErr = false
 	request.reservation = UninitializedReseverationNumber
 }
 
@@ -504,18 +515,19 @@ type opaqueKeySeqnoMap map[uint32][]interface{}
  * 2. Sequence number
  * 3. vbucket number
  * 4. time.Now()
+ * 5. ManifestId
  */
 
 // This function will ensure that the returned interface slice will have distinct copies of argument references
 // since everything coming in is passing by value
-func compileOpaqueKeySeqnoValue(docKey string, seqno uint64, vbucket uint16, timeNow time.Time) []interface{} {
-	return []interface{}{docKey, seqno, vbucket, timeNow}
+func compileOpaqueKeySeqnoValue(docKey string, seqno uint64, vbucket uint16, timeNow time.Time, manifestId uint64) []interface{} {
+	return []interface{}{docKey, seqno, vbucket, timeNow, manifestId}
 }
 
 func (omap opaqueKeySeqnoMap) Clone() opaqueKeySeqnoMap {
 	newMap := make(opaqueKeySeqnoMap)
 	for k, v := range omap {
-		newMap[k] = compileOpaqueKeySeqnoValue(v[0].(string), v[1].(uint64), v[2].(uint16), v[3].(time.Time))
+		newMap[k] = compileOpaqueKeySeqnoValue(v[0].(string), v[1].(uint64), v[2].(uint16), v[3].(time.Time), v[4].(uint64))
 	}
 	return newMap
 }
@@ -533,7 +545,7 @@ func (omap opaqueKeySeqnoMap) CloneAndRedact() opaqueKeySeqnoMap {
 	clonedMap := make(opaqueKeySeqnoMap)
 	for k, v := range omap {
 		if !base.IsStringRedacted(v[0].(string)) {
-			clonedMap[k] = compileOpaqueKeySeqnoValue(base.TagUD(v[0].(string)), v[1].(uint64), v[2].(uint16), v[3].(time.Time))
+			clonedMap[k] = compileOpaqueKeySeqnoValue(base.TagUD(v[0].(string)), v[1].(uint64), v[2].(uint16), v[3].(time.Time), v[4].(uint64))
 		} else {
 			clonedMap[k] = v
 		}
@@ -1317,6 +1329,7 @@ func (xmem *XmemNozzle) batchSetMetaWithRetry(batch *dataBatch, numOfRetry int) 
 						Opcode:      encodeOpCode(item.Req.Opcode),
 						IsExpirySet: (binary.BigEndian.Uint32(item.Req.Extras[4:8]) != 0),
 						VBucket:     item.Req.VBucket,
+						ManifestId:  item.GetManifestId(),
 					}
 					xmem.RaiseEvent(common.NewEvent(common.DataFailedCRSource, nil, xmem, nil, additionalInfo))
 				}
@@ -1480,7 +1493,7 @@ func (xmem *XmemNozzle) sendSetMeta_internal(batch *dataBatch) error {
 	return err
 }
 
-// Launched as a part of the batchGetMeta and batchGetWithRetry, which will fire off the requests 
+// Launched as a part of the batchGetMeta and batchGetWithRetry, which will fire off the requests
 // and this is the handler to decrypt the info coming back
 func (xmem *XmemNozzle) batchGetMetaHandler(count int, finch chan bool, return_ch chan bool,
 	opaque_keySeqno_map opaqueKeySeqnoMap, respMap base.MCResponseMap, logger *log.CommonLogger, isGetMeta bool) {
@@ -1551,12 +1564,15 @@ func (xmem *XmemNozzle) batchGetMetaHandler(count int, finch chan bool, return_c
 					seqno, ok2 := keySeqno[1].(uint64)
 					vbno, ok2 := keySeqno[2].(uint16)
 					start_time, ok3 := keySeqno[3].(time.Time)
-					if ok1 && ok2 && ok3 {
+					manifestId, ok4 := keySeqno[4].(uint64)
+					if ok1 && ok2 && ok3 && ok4 {
 						respMap[key] = response
 
+						// GetMeta successful means that the target manifest ID is valid for the collection ID of this key
 						additionalInfo := GetMetaReceivedEventAdditional{Key: key,
 							Seqno:       seqno,
 							Commit_time: time.Since(start_time),
+							ManifestId:  manifestId,
 						}
 						var receivedEvent common.ComponentEventType
 						if isGetMeta {
@@ -1565,12 +1581,11 @@ func (xmem *XmemNozzle) batchGetMetaHandler(count int, finch chan bool, return_c
 							receivedEvent = common.GetReceived
 						}
 						xmem.RaiseEvent(common.NewEvent(receivedEvent, nil, xmem, nil, additionalInfo))
-						if response.Status != mc.SUCCESS && !isIgnorableMCResponse(response) && !isTemporaryMCError(response.Status) {
+						if response.Status != mc.SUCCESS && !isIgnorableMCResponse(response) && !isTemporaryMCError(response.Status) &&
+							!isCollectionMappingError(response.Status) {
 							if isTopologyChangeMCError(response.Status) {
 								vb_err := fmt.Errorf("Received error %v on vb %v\n", base.ErrorNotMyVbucket, vbno)
 								xmem.handleVBError(vbno, vb_err)
-							} else if isCollectionMappingError(response.Status) {
-								// TODO - MB-38023
 							} else {
 								// log the corresponding request to facilitate debugging
 								xmem.Logger().Warnf("%v received error from getMeta client. key=%v%v%v, seqno=%v, response=%v%v%v\n", xmem.Id(), base.UdTagBegin, key, base.UdTagEnd, seqno,
@@ -1642,7 +1657,7 @@ func (xmem *XmemNozzle) batchGetMeta(bigDoc_map base.McRequestMap) (map[string]b
 			// .Bytes() returns data ready to be fed over the wire
 			reqs_bytes = append(reqs_bytes, req.Bytes())
 			// a Map of array of items and map key is the opaque currently based on time (passed to the target and back)
-			opaque_keySeqno_map[opaque] = compileOpaqueKeySeqnoValue(docKey, originalReq.Seqno, originalReq.Req.VBucket, time.Now())
+			opaque_keySeqno_map[opaque] = compileOpaqueKeySeqnoValue(docKey, originalReq.Seqno, originalReq.Req.VBucket, time.Now(), originalReq.GetManifestId())
 			opaque++
 			numOfReqsInReqBytesBatch++
 			sent_key_map[docKey] = true
@@ -1702,6 +1717,11 @@ func (xmem *XmemNozzle) batchGetMeta(bigDoc_map base.McRequestMap) (map[string]b
 			}
 		} else if ok && isTopologyChangeMCError(resp.Status) {
 			bigDoc_noRep_map[wrappedReq.UniqueKey] = false
+
+		} else if ok && isCollectionMappingError(resp.Status) {
+			if xmem.Logger().GetLogLevel() >= log.LogLevelDebug {
+				xmem.Logger().Debugf("%v batchGetMeta: doc %v%s%v could not be mapped to on target even though manifest says it exists. Skip conflict resolution and send the doc", xmem.Id(), base.UdTagBegin, key, base.UdTagEnd)
+			}
 		} else {
 			if !ok || resp == nil {
 				if xmem.Logger().GetLogLevel() >= log.LogLevelDebug {
@@ -1825,7 +1845,7 @@ func (xmem *XmemNozzle) batchGetWithRetry(possibleConflict_map *base.McRequestMa
 				// .Bytes() returns data ready to be fed over the wire
 				reqs_bytes = append(reqs_bytes, req.Bytes())
 				// a Map of array of items and map key is the opaque currently based on time (passed to the target and back)
-				opaque_keySeqno_map[opaque] = compileOpaqueKeySeqnoValue(docKey, originalReq.Seqno, originalReq.Req.VBucket, time.Now())
+				opaque_keySeqno_map[opaque] = compileOpaqueKeySeqnoValue(docKey, originalReq.Seqno, originalReq.Req.VBucket, time.Now(), originalReq.GetManifestId())
 				opaque++
 				numOfReqsInReqBytesBatch++
 				sent_key_map[docKey] = true
@@ -2058,7 +2078,6 @@ func (xmem *XmemNozzle) validateFeatures(features utilities.HELOFeatures) error 
 	collectionRequested := atomic.LoadUint32(&xmem.collectionEnabled) != 0
 	if collectionRequested && !features.Collections {
 		xmem.Logger().Errorf("%v target should have collection support returned with no collection support", xmem.Id())
-		// TODO - continue
 		return base.ErrorTargetCollectionsNotSupported
 	}
 
@@ -2260,7 +2279,16 @@ func (xmem *XmemNozzle) receiveResponse(finch chan bool, waitGrp *sync.WaitGroup
 								vb_err := fmt.Errorf("Received error %v on vb %v\n", base.ErrorNotMyVbucket, req.VBucket)
 								xmem.handleVBError(req.VBucket, vb_err)
 							} else if isCollectionMappingError(response.Status) {
-								// TODO - MB-38023
+								pos := xmem.getPosFromOpaque(response.Opaque)
+								// If Target manifest retrieved successfully and router has made a decision that this
+								// mutation's corresponding target collection should exist, then the reasons why
+								// the target responded with a collection mapping errors are only:
+								// 1. The target collection has been removed since the router has detected it OR
+								// 2. The target KV for this mutation's vbucket is particularly slow at getting the manifest
+								//    so it would return an UNKNOWN_COLLECTION error
+								// Either way, use the same logic as if a mutation is locked, which is to wait for the timeout
+								// monitor to kick in, and retry with a exponential backoff algorithm as the locked flag is set
+								_, err = xmem.buf.modSlot(pos, xmem.setCollectionNotFoundFlag)
 							} else {
 								// for other non-temporary errors, repair connections
 								xmem.Logger().Errorf("%v received error response from setMeta client. Repairing connection. response status=%v, opcode=%v, seqno=%v, req.Key=%v%v%v, req.Cas=%v, req.Extras=%v\n", xmem.Id(), response.Status, response.Opcode, seqno, base.UdTagBegin, string(req.Key), base.UdTagEnd, req.Cas, req.Extras)
@@ -2286,11 +2314,13 @@ func (xmem *XmemNozzle) receiveResponse(finch chan bool, waitGrp *sync.WaitGroup
 				var seqno uint64
 				var committing_time time.Duration
 				var resp_wait_time time.Duration
+				var manifestId uint64
 				if wrappedReq != nil {
 					req = wrappedReq.Req
 					seqno = wrappedReq.Seqno
 					committing_time = time.Since(wrappedReq.Start_time)
 					resp_wait_time = time.Since(*sent_time)
+					manifestId = wrappedReq.GetManifestId()
 				}
 
 				if req != nil && req.Opaque == response.Opaque {
@@ -2302,6 +2332,7 @@ func (xmem *XmemNozzle) receiveResponse(finch chan bool, waitGrp *sync.WaitGroup
 						Req_size:       req.Size(),
 						Commit_time:    committing_time,
 						Resp_wait_time: resp_wait_time,
+						ManifestId:     manifestId,
 					}
 
 					xmem.RaiseEvent(common.NewEvent(common.DataSent, nil, xmem, nil, additionalInfo))
@@ -2530,7 +2561,7 @@ func (xmem *XmemNozzle) selfMonitor(finch chan bool, waitGrp *sync.WaitGroup) {
 				//the connection might not be healthy, it should not go back to connection pool
 				xmem.client_for_setMeta.markConnUnhealthy()
 				xmem.client_for_getMeta.markConnUnhealthy()
-				xmem.handleGeneralError(errors.New("Xmem is stuck"))
+				xmem.handleGeneralError(ErrorXmemIsStuck)
 				goto done
 			}
 		case <-statsTicker.C:
@@ -2595,10 +2626,17 @@ func (xmem *XmemNozzle) resendIfTimeout(req *bufferedMCRequest, pos uint16) (boo
 				xmem.Id(), req.req.Req.Key, req.num_of_retry, maxRetry))
 			xmem.Logger().Error(err.Error())
 
-			// release lock before the expensive repairConn call
+			lastErrIsDueToCollectionMapping := req.collectionMapErr
+			if lastErrIsDueToCollectionMapping {
+				xmem.handleGeneralError(GetErrorXmemTargetUnknownCollection(req.req))
+			}
+
+			// release lock before the expensive repair calls
 			req.lock.Unlock()
 
-			xmem.repairConn(xmem.client_for_setMeta, err.Error(), xmem.client_for_setMeta.repairCount())
+			if !lastErrIsDueToCollectionMapping {
+				xmem.repairConn(xmem.client_for_setMeta, err.Error(), xmem.client_for_setMeta.repairCount())
+			}
 			return true, err
 		}
 
@@ -2682,6 +2720,11 @@ func (xmem *XmemNozzle) resendWithReset(req *bufferedMCRequest, pos uint16) (boo
 		modified = true
 	}
 
+	if req.collectionMapErr {
+		req.collectionMapErr = false
+		modified = true
+	}
+
 	// reset num_of_retry to 0 and reset timedout to false
 	if req.num_of_retry != 0 || req.timedout {
 		req.num_of_retry = 0
@@ -2715,11 +2758,44 @@ func (xmem *XmemNozzle) resendWithReset(req *bufferedMCRequest, pos uint16) (boo
 	return modified, nil
 }
 
+// If target is unable to find the collection, then set the correpsonding flag
+// And in the meantime, piggy back off the mutationLocked logic
+func (xmem *XmemNozzle) setCollectionNotFoundFlag(req *bufferedMCRequest, pos uint16) (bool, error) {
+	req.lock.Lock()
+	defer req.lock.Unlock()
+
+	if req.req == nil {
+		return false, nil
+	}
+
+	var colModified bool
+	if !req.collectionMapErr {
+		req.collectionMapErr = true
+		colModified = true
+	}
+
+	modified, _ := xmem.setMutationLockedFlagInternal(req, pos, false /*lockNeeded*/)
+
+	if !modified && colModified {
+		// locked has already been set - but this collectionMapErr set is new
+		// need to return the fact that something did change
+		return true, nil
+	}
+
+	return modified, nil
+}
+
 // set mutationLocked flag on the bufferedMCRequest
 // returns true if modification is made on the bufferedMCRequest
 func (xmem *XmemNozzle) setMutationLockedFlag(req *bufferedMCRequest, pos uint16) (bool, error) {
-	req.lock.Lock()
-	defer req.lock.Unlock()
+	return xmem.setMutationLockedFlagInternal(req, pos, true /*lock and from actual call */)
+}
+
+func (xmem *XmemNozzle) setMutationLockedFlagInternal(req *bufferedMCRequest, pos uint16, lockNeeded bool) (bool, error) {
+	if lockNeeded {
+		req.lock.Lock()
+		defer req.lock.Unlock()
+	}
 
 	// check that there is a valid WrappedMCRequest associated with req
 	if req.req == nil {
@@ -2733,9 +2809,17 @@ func (xmem *XmemNozzle) setMutationLockedFlag(req *bufferedMCRequest, pos uint16
 		return true, nil
 	}
 
-	// no op if req has already been marked as mutationLocked before
+	var modified bool
+	if lockNeeded && req.collectionMapErr {
+		// this means that this call was made directly from receiveResponse and not from setCollectionNotFound
+		// So, if collectionNotFound flag has been set, it needs to be unset
+		// to accurately represent the state of the mutation... that the last failure was due to mutationLocked
+		// and not due to mapping erros
+		req.collectionMapErr = false
+		modified = true
+	}
 
-	return false, nil
+	return modified, nil
 }
 
 func (xmem *XmemNozzle) getPosFromOpaque(opaque uint32) uint16 {

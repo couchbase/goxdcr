@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/couchbase/goxdcr/base"
+	"github.com/golang/snappy"
 	"reflect"
 	"sort"
 	"strconv"
@@ -456,6 +457,7 @@ func (c CollectionList) Contains(cid uint64) bool {
 	return false
 }
 
+// TODO - clean up as part of MB-38331
 type CollectionToCollectionsMapping map[*Collection][]*Collection
 
 // Implements marshaller interface
@@ -972,11 +974,7 @@ type CollectionNamespaceList []*base.CollectionNamespace
 func (c CollectionNamespaceList) Len() int      { return len(c) }
 func (c CollectionNamespaceList) Swap(i, j int) { c[i], c[j] = c[j], c[i] }
 func (c CollectionNamespaceList) Less(i, j int) bool {
-	if c[i].ScopeName == c[j].ScopeName {
-		return c[i].CollectionName < c[j].CollectionName
-	} else {
-		return c[i].ScopeName < c[j].ScopeName
-	}
+	return (*(c[i])).LessThan(*(c[j]))
 }
 
 func SortCollectionsNamespaceList(list CollectionNamespaceList) CollectionNamespaceList {
@@ -1031,22 +1029,134 @@ func (c CollectionNamespaceList) Contains(namespace *base.CollectionNamespace) b
 	return false
 }
 
+// Caller should have called IsSame() before doing consolidate
+func (c *CollectionNamespaceList) Consolidate(other CollectionNamespaceList) {
+	aMissingAction := func(item *base.CollectionNamespace) {
+		*c = append(*c, item)
+	}
+
+	c.diffOrConsolidate(other, aMissingAction, nil /*bMissingAction*/)
+}
+
+func (c CollectionNamespaceList) Diff(other CollectionNamespaceList) (added, removed CollectionNamespaceList) {
+	aMissingAction := func(item *base.CollectionNamespace) {
+		added = append(added, item)
+	}
+
+	bMissingAction := func(item *base.CollectionNamespace) {
+		removed = append(removed, item)
+	}
+
+	c.diffOrConsolidate(other, aMissingAction, bMissingAction)
+	return
+}
+
+func (c *CollectionNamespaceList) diffOrConsolidate(other CollectionNamespaceList, aMissingAction, bMissingAction func(item *base.CollectionNamespace)) {
+	aList := SortCollectionsNamespaceList(*c)
+	bList := SortCollectionsNamespaceList(other)
+
+	var aIdx int
+	var bIdx int
+
+	// Note - c == aList in this case
+
+	for aIdx < len(aList) && bIdx < len(bList) {
+		if aList[aIdx].IsSameAs(*(bList[bIdx])) {
+			aIdx++
+			bIdx++
+		} else if aList[aIdx].LessThan(*(bList[bIdx])) {
+			// Blist does not have something aList have.
+			if bMissingAction != nil {
+				bMissingAction(aList[aIdx])
+			}
+			aIdx++
+		} else {
+			// Blist[bIdx] < aList[aIdx]
+			// B list has something aList does not have
+			if aMissingAction != nil {
+				aMissingAction(bList[bIdx])
+			}
+			bIdx++
+		}
+	}
+
+	for bIdx < len(bList) {
+		// The rest is all missing from A list
+		if aMissingAction != nil {
+			aMissingAction(bList[bIdx])
+		}
+		bIdx++
+	}
+}
+
+type collectionNsMetaObj struct {
+	SourceCollections CollectionNamespaceList `json:SourceCollections`
+	// keys are integers of the index above
+	IndirectTargetMap map[uint64]CollectionNamespaceList `json:IndirectTargetMap`
+}
+
+func newCollectionNsMetaObj() *collectionNsMetaObj {
+	return &collectionNsMetaObj{
+		IndirectTargetMap: make(map[uint64]CollectionNamespaceList),
+	}
+}
+
 // This is used for namespace mapping that transcends over manifest lifecycles
 // Need to use pointers because of golang hash map support of indexable type
 // This means rest needs to do some gymanistics, instead of just simply checking for pointers
 type CollectionNamespaceMapping map[*base.CollectionNamespace]CollectionNamespaceList
 
-func (c CollectionNamespaceMapping) String() string {
+func (c *CollectionNamespaceMapping) MarshalJSON() ([]byte, error) {
+	metaObj := newCollectionNsMetaObj()
+
+	var i uint64
+	for k, v := range *c {
+		metaObj.SourceCollections = append(metaObj.SourceCollections, k)
+		metaObj.IndirectTargetMap[i] = v
+		i++
+	}
+	return json.Marshal(metaObj)
+}
+
+func (c *CollectionNamespaceMapping) UnmarshalJSON(b []byte) error {
+	if c == nil {
+		return base.ErrorInvalidInput
+	}
+
+	metaObj := newCollectionNsMetaObj()
+
+	err := json.Unmarshal(b, metaObj)
+	if err != nil {
+		return err
+	}
+
+	if (*c) == nil {
+		(*c) = make(CollectionNamespaceMapping)
+	}
+
+	var i uint64
+	for i = 0; i < uint64(len(metaObj.SourceCollections)); i++ {
+		sourceCol := metaObj.SourceCollections[i]
+		targetCols, ok := metaObj.IndirectTargetMap[i]
+		if !ok {
+			return fmt.Errorf("Unable to unmarshal CollectionNamespaceMapping raw: %v", metaObj)
+		}
+		(*c)[sourceCol] = targetCols
+	}
+	return nil
+}
+
+func (c *CollectionNamespaceMapping) String() string {
 	var buffer bytes.Buffer
-	for src, tgtList := range c {
-		buffer.WriteString(fmt.Sprintf("SOURCE ||Scope: %v Collection: %v|| -> %v\n", src.ScopeName, src.CollectionName, CollectionNamespaceList(tgtList).String()))
+	for src, tgtList := range *c {
+		buffer.WriteString(fmt.Sprintf("SOURCE ||Scope: %v Collection: %v|| -> TARGET(s) %v\n", src.ScopeName, src.CollectionName, CollectionNamespaceList(tgtList).String()))
 	}
 	return buffer.String()
 }
 
-func (c CollectionNamespaceMapping) Clone() (clone CollectionNamespaceMapping) {
+func (c *CollectionNamespaceMapping) Clone() (clone CollectionNamespaceMapping) {
 	clone = make(CollectionNamespaceMapping)
-	for k, v := range c {
+	for k, v := range *c {
 		srcClone := &base.CollectionNamespace{}
 		*srcClone = *k
 		clone[srcClone] = v.Clone()
@@ -1056,12 +1166,12 @@ func (c CollectionNamespaceMapping) Clone() (clone CollectionNamespaceMapping) {
 
 // The input "src" does not have to match the actual key pointer in the map, just the right matching values
 // Returns the srcPtr for referring to the exact tgtList
-func (c CollectionNamespaceMapping) Get(src *base.CollectionNamespace) (srcPtr *base.CollectionNamespace, tgt CollectionNamespaceList, exists bool) {
+func (c *CollectionNamespaceMapping) Get(src *base.CollectionNamespace) (srcPtr *base.CollectionNamespace, tgt CollectionNamespaceList, exists bool) {
 	if src == nil {
 		return
 	}
 
-	for k, v := range c {
+	for k, v := range *c {
 		if *k == *src {
 			// found
 			tgt = v
@@ -1073,7 +1183,7 @@ func (c CollectionNamespaceMapping) Get(src *base.CollectionNamespace) (srcPtr *
 	return
 }
 
-func (c CollectionNamespaceMapping) AddSingleMapping(src, tgt *base.CollectionNamespace) (alreadyExists bool) {
+func (c *CollectionNamespaceMapping) AddSingleMapping(src, tgt *base.CollectionNamespace) (alreadyExists bool) {
 	if src == nil || tgt == nil {
 		return
 	}
@@ -1084,7 +1194,7 @@ func (c CollectionNamespaceMapping) AddSingleMapping(src, tgt *base.CollectionNa
 		// Just use these as entries
 		var newList CollectionNamespaceList
 		newList = append(newList, tgt)
-		c[src] = newList
+		(*c)[src] = newList
 	} else {
 		// See if tgt already exists in the current list
 		if tgtList.Contains(tgt) {
@@ -1092,17 +1202,17 @@ func (c CollectionNamespaceMapping) AddSingleMapping(src, tgt *base.CollectionNa
 			return
 		}
 
-		c[srcPtr] = append(c[srcPtr], tgt)
+		(*c)[srcPtr] = append((*c)[srcPtr], tgt)
 	}
 	return
 }
 
 // Given a scope and collection, see if it exists as one of the targets in the mapping
-func (c CollectionNamespaceMapping) TargetNamespaceExists(checkNamespace *base.CollectionNamespace) bool {
+func (c *CollectionNamespaceMapping) TargetNamespaceExists(checkNamespace *base.CollectionNamespace) bool {
 	if checkNamespace == nil {
 		return false
 	}
-	for _, tgtList := range c {
+	for _, tgtList := range *c {
 		if tgtList.Contains(checkNamespace) {
 			return true
 		}
@@ -1111,10 +1221,10 @@ func (c CollectionNamespaceMapping) TargetNamespaceExists(checkNamespace *base.C
 }
 
 // Given a set of added scopesmap, return a subset of c that contains elements in this added
-func (c CollectionNamespaceMapping) GetSubsetBasedOnAddedTargets(added ScopesMap) (retMap CollectionNamespaceMapping) {
+func (c *CollectionNamespaceMapping) GetSubsetBasedOnAddedTargets(added ScopesMap) (retMap CollectionNamespaceMapping) {
 	retMap = make(CollectionNamespaceMapping)
 
-	for src, tgtList := range c {
+	for src, tgtList := range *c {
 		for _, tgt := range tgtList {
 			_, found := added.GetCollectionByNames(tgt.ScopeName, tgt.CollectionName)
 			if found {
@@ -1125,8 +1235,11 @@ func (c CollectionNamespaceMapping) GetSubsetBasedOnAddedTargets(added ScopesMap
 	return
 }
 
-func (c CollectionNamespaceMapping) IsSame(other CollectionNamespaceMapping) bool {
-	for src, tgtList := range c {
+func (c *CollectionNamespaceMapping) IsSame(other CollectionNamespaceMapping) bool {
+	if c == nil {
+		return len(other) == 0
+	}
+	for src, tgtList := range *c {
 		_, otherTgtList, exists := other.Get(src)
 		if !exists {
 			return false
@@ -1138,12 +1251,12 @@ func (c CollectionNamespaceMapping) IsSame(other CollectionNamespaceMapping) boo
 	return true
 }
 
-func (c CollectionNamespaceMapping) Delete(subset CollectionNamespaceMapping) (result CollectionNamespaceMapping) {
+func (c *CollectionNamespaceMapping) Delete(subset CollectionNamespaceMapping) (result CollectionNamespaceMapping) {
 	// Instead of deleting, just make a brand new map
 	result = make(CollectionNamespaceMapping)
 
 	// Subtract B from A
-	for aSrc, aTgtList := range c {
+	for aSrc, aTgtList := range *c {
 		_, bTgtList, exists := subset.Get(aSrc)
 		if !exists {
 			// No need to delete
@@ -1166,4 +1279,183 @@ func (c CollectionNamespaceMapping) Delete(subset CollectionNamespaceMapping) (r
 	}
 
 	return
+}
+
+func (c *CollectionNamespaceMapping) Consolidate(other CollectionNamespaceMapping) {
+	for otherSrc, otherTgtList := range other {
+		srcPtr, tgtList, exists := c.Get(otherSrc)
+		if !exists {
+			(*c)[otherSrc] = otherTgtList.Clone()
+		} else if !tgtList.IsSame(otherTgtList) {
+			tgtList.Consolidate(otherTgtList)
+			(*c)[srcPtr] = tgtList
+		}
+	}
+}
+
+func (c *CollectionNamespaceMapping) Diff(other CollectionNamespaceMapping) (added, removed CollectionNamespaceMapping) {
+	added = make(CollectionNamespaceMapping)
+	removed = make(CollectionNamespaceMapping)
+	// First, populated "removed"
+	for src, tgtList := range *c {
+		_, oTgtList, exists := other.Get(src)
+		if !exists {
+			removed[src] = tgtList
+		} else if !tgtList.IsSame(oTgtList) {
+			listAdded, listRemoved := tgtList.Diff(oTgtList)
+			for _, addedNamespace := range listAdded {
+				added.AddSingleMapping(src, addedNamespace)
+			}
+			for _, removedNamespace := range listRemoved {
+				removed.AddSingleMapping(src, removedNamespace)
+			}
+		}
+	}
+
+	// Then populate added
+	for oSrc, oTgtList := range other {
+		_, _, exists := c.Get(oSrc)
+		if !exists {
+			added[oSrc] = oTgtList
+			// No else - any potential intersections would have been captured above
+		}
+	}
+	return
+}
+
+// Json marshaller will serialize the map by key, but not necessarily the values, which is ordered list
+// Because the lists may not be ordered, we need to calculate sha256 with lists ordered
+func (c *CollectionNamespaceMapping) Sha256() (result [sha256.Size]byte, err error) {
+	if c == nil {
+		err = base.ErrorInvalidInput
+		return
+	}
+
+	// Simpler to just create a temporary map with ordered list for sha calculation
+	tempMap := make(CollectionNamespaceMapping)
+
+	for k, v := range *c {
+		tempMap[k] = SortCollectionsNamespaceList(v)
+	}
+
+	marshalledJson, err := tempMap.MarshalJSON()
+	if err != nil {
+		return
+	}
+
+	result = sha256.Sum256(marshalledJson)
+	return
+}
+
+func (c *CollectionNamespaceMapping) ToSnappyCompressed() ([]byte, error) {
+	marshalledJson, err := c.MarshalJSON()
+	if err != nil {
+		return nil, err
+	}
+	return snappy.Encode(nil, marshalledJson), nil
+}
+
+func NewCollectionNamespaceMappingFromSnappyData(data []byte) (*CollectionNamespaceMapping, error) {
+	marshalledJson, err := snappy.Decode(nil, data)
+	if err != nil {
+		return nil, err
+	}
+
+	newMap := make(CollectionNamespaceMapping)
+	err = newMap.UnmarshalJSON(marshalledJson)
+
+	return &newMap, err
+}
+
+type CollectionNsMappingsDoc struct {
+	NsMappingRecords CompressedColNamespaceMappingList `json:"NsMappingRecords"`
+
+	// internal id of repl spec - for detection of repl spec deletion and recreation event
+	SpecInternalId string `json:"specInternalId"`
+
+	//revision number
+	Revision interface{}
+}
+
+func (b *CollectionNsMappingsDoc) Size() int {
+	if b == nil {
+		return 0
+	}
+
+	return len(b.SpecInternalId) + b.NsMappingRecords.Size()
+}
+
+func (b *CollectionNsMappingsDoc) ToShaMap() (ShaToCollectionNamespaceMap, error) {
+	if b == nil {
+		return nil, base.ErrorInvalidInput
+	}
+
+	errorMap := make(base.ErrorMap)
+	shaMap := make(ShaToCollectionNamespaceMap)
+
+	for _, oneRecord := range b.NsMappingRecords {
+		if oneRecord == nil {
+			continue
+		}
+
+		serializedMap, err := snappy.Decode(nil, oneRecord.CompressedMapping)
+		if err != nil {
+			errorMap[oneRecord.Sha256Digest] = fmt.Errorf("Snappy decompress failed %v", err)
+			continue
+		}
+		actualMap := make(CollectionNamespaceMapping)
+		err = json.Unmarshal(serializedMap, &actualMap)
+		if err != nil {
+			errorMap[oneRecord.Sha256Digest] = fmt.Errorf("Unmarshalling failed %v", err)
+			continue
+		}
+		// Sanity check
+		checkSha, err := actualMap.Sha256()
+		if err != nil {
+			errorMap[oneRecord.Sha256Digest] = fmt.Errorf("Validing SHA failed %v", err)
+			continue
+		}
+		checkShaString := fmt.Sprintf("%x", checkSha[:])
+		if checkShaString != oneRecord.Sha256Digest {
+			errorMap[oneRecord.Sha256Digest] = fmt.Errorf("SHA validation mismatch %v", checkShaString)
+			continue
+		}
+
+		shaMap[oneRecord.Sha256Digest] = &actualMap
+	}
+
+	var err error
+	if len(errorMap) > 0 {
+		errStr := base.FlattenErrorMap(errorMap)
+		err = fmt.Errorf(errStr)
+	}
+	return shaMap, err
+}
+
+// Will overwrite the existing records with the incoming map
+func (b *CollectionNsMappingsDoc) LoadShaMap(shaMap ShaToCollectionNamespaceMap) error {
+	if b == nil {
+		return base.ErrorInvalidInput
+	}
+
+	errorMap := make(base.ErrorMap)
+	b.NsMappingRecords = b.NsMappingRecords[:0]
+
+	for sha, colNsMap := range shaMap {
+		serializedMap, err := json.Marshal(colNsMap)
+		if err != nil {
+			errorMap[sha] = err
+			continue
+		}
+		compressedMapping := snappy.Encode(nil, serializedMap)
+
+		oneRecord := &CompressedColNamespaceMapping{compressedMapping, sha}
+		b.NsMappingRecords = append(b.NsMappingRecords, oneRecord)
+	}
+
+	if len(errorMap) > 0 {
+		return fmt.Errorf("Error LoadingShaMap - sha -> err: %v", base.FlattenErrorMap(errorMap))
+	} else {
+		return nil
+	}
 }

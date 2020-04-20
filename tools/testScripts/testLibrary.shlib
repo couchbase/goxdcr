@@ -13,15 +13,23 @@ function checkItemCnt {
 	local cluster=$1
 	local bucket=$2
 	local expectedCnt=$3
+	local i
 
-	for (( i=0; $i < 3; i=$(($i+1)) ))
+	local previousItemCnt=0
+	for (( i=0; $i < 5; i=$(($i+1)) ))
 	do
 		itemCount=`getBucketItemCount "$cluster" "$bucket"`
 		if (( $itemCount == $expectedCnt ));then
 			echo "Item count for cluster $cluster bucket $bucket: $itemCount"
 			return 0
 		else
-			echo "ERROR: Cluster $cluster bucket $bucket only has $itemCount items"
+			if (( $itemCount != $previousItemCnt ));then
+				previousItemCnt=$itemCount
+				i=$(($i-1))
+				echo "ERROR: Cluster $cluster bucket $bucket only has $itemCount items. Items are increasing..."
+			else
+				echo "ERROR: Cluster $cluster bucket $bucket only has $itemCount items"
+			fi
 		fi
 		echo "Sleeping 10 seconds and retrying..."
 		sleep 10
@@ -29,4 +37,222 @@ function checkItemCnt {
 	exit 1
 }
 
+# Assumes running test script from this directory
+function getNsServerDir {
+	# i.e. Running from "/Users/neil.huang/source/couchbase/goproj/src/github.com/couchbase/goxdcr/tools/testScripts"
+	local srcTreeName=`pwd | cut -d/ -f6-`
+	# /Users/neil.huang/source/couchbase/
+	local couchbaseDir=`pwd | sed "s|$srcTreeName||g"`
+	echo "${couchbaseDir}ns_server"
+	return 0
+}
 
+function grepForPanics {
+	local ns_serverDir=`getNsServerDir`
+	local logsDir="${ns_serverDir}/logs"
+	for dir in `ls $logsDir`
+	do
+		count=`grep -c panic ${logsDir}/${dir}/goxdcr.log`
+		if (( $count > 0 ));then
+			echo "WARNING Found panics in ${logsDir}/${dir}"
+			exit 1
+		fi
+	done
+	return 0
+}
+
+function grepForInvalidCommand {
+	local ns_serverDir=`getNsServerDir`
+	local logsDir="${ns_serverDir}/logs"
+
+	for dir in `ls $logsDir`
+	do
+		counts=`grep -crhn "Invalid format specified" ${logsDir}/${dir}`
+		for count in `echo "$counts"`
+		do
+			if (( $count > 0 ));then
+				echo "WARNING Found invalid format in ${logsDir}/${dir}"
+				exit 1
+			fi
+		done
+	done
+	return 0
+}
+
+function getDataReplicated {
+	local srcCluster=$1
+	local srcBucket=$2
+	local targetCluster=$3
+	local targetBucket=$4
+
+	echo `getStats "$srcCluster" "$srcBucket" "$targetCluster" "$targetBucket" "data_replicated"`
+}
+
+function getChangesLeft {
+	local srcCluster=$1
+	local srcBucket=$2
+	local targetCluster=$3
+	local targetBucket=$4
+
+	echo `getStats "$srcCluster" "$srcBucket" "$targetCluster" "$targetBucket" "changes_left"`
+}
+
+function getDocsProcessed {
+	local srcCluster=$1
+	local srcBucket=$2
+	local targetCluster=$3
+	local targetBucket=$4
+
+	echo `getStats "$srcCluster" "$srcBucket" "$targetCluster" "$targetBucket" "docs_processed"`
+
+}
+
+function waitForChangesLeft0 {
+	local srcCluster=$1
+	local srcBucket=$2
+	local targetCluster=$3
+	local targetBucket=$4
+	local i
+
+	for (( i=0; $i < 3; i=$(($i+1)) ))
+	do
+		changesLeft=`getChangesLeft "$srcCluster" "$srcBucket" "$targetCluster" "$targetBucket"`
+		if (( $changesLeft > 0 ));then
+			echo "Changes left $changesLeft is not 0 yet..."
+		else
+			break
+		fi
+		echo "Sleeping 10 seconds and retrying..."
+		sleep 10
+	done
+}
+
+function checkChangesLeftInternal {
+	local srcCluster=$1
+	local srcBucket=$2
+	local targetCluster=$3
+	local targetBucket=$4
+	local i
+
+	local lastChangesLeft=0
+
+	for (( i=0; $i < 3; i=$(($i+1)) ))
+	do
+		changesLeft=`getChangesLeft "$srcCluster" "$srcBucket" "$targetCluster" "$targetBucket"`
+		if (( $changesLeft == 0 ));then
+			echo "Node $srcCluster changes_left is 0"
+			return 0
+		else
+			if (( $changesLeft == $lastChangesLeft ));then
+				echo "Node $srcCluster Changes left is not 0. It is $changesLeft"
+			else
+				lastChangesLeft=$changesLeft
+				i=$(($i-1))
+				echo "Node $srcCluster Changes left is not 0. It is $changesLeft... it is decreasing"
+			fi
+			sleep 10
+		fi
+    done
+    exit 1
+}
+
+function checkUnidirectionalChangesLeft {
+	checkChangesLeftInternal "C1" "B1" "C2" "B2"
+}
+
+function checkBidirectionalChangesLeft {
+	checkChangesLeftInternal "C1" "B1" "C2" "B2"
+	checkChangesLeftInternal "C2" "B2" "C1" "B1"
+}
+
+
+function checkDataReplicatedIsZero {
+	local srcCluster=$1
+	local srcBucket=$2
+	local targetCluster=$3
+	local targetBucket=$4
+	local oldDataReplicated=$5
+	local i
+
+	for (( i=0; $i < 3; i=$(($i+1)) ))
+	do
+		dataReplicated=`getDataReplicated "$srcCluster" "$srcBucket" "$targetCluster" "$targetBucket"`
+		if (( $dataReplicated > 0 ));then
+			echo "Data replicated $dataReplicated is not 0 yet..."
+			if (( $dataReplicated != $oldDataReplicated));then
+				echo "Error: Data replicated is different from previous replicated $oldDataReplicated"
+				break
+			fi
+		else
+			return 0
+		fi
+		echo "Sleeping 10 seconds and retrying..."
+		sleep 10
+	done
+	exit 1
+}
+
+function checkDocsProcessed {
+	local srcCluster=$1
+	local srcBucket=$2
+	local targetCluster=$3
+	local targetBucket=$4
+	local docsProcessedCheck=$5
+	local i
+
+	for (( i=0; $i < 5; i=$(($i+1)) ))
+	do
+		docsProcessed=`getDocsProcessed "$srcCluster" "$srcBucket" "$targetCluster" "$targetBucket"`
+		if (( $docsProcessed != $docsProcessedCheck ));then
+			echo "DocsProcessed: $docsProcessed. Waiting for it to be $docsProcessedCheck..."
+		else
+			return 0
+		fi
+		echo "Sleeping 10 seconds and retrying..."
+		sleep 10
+	done
+	exit 1
+}
+
+function getSpecificInternalSettings {
+	local clusterName=$1
+	local key=$2
+
+	echo `listInternalSettings "$clusterName" | jq ".$key"`
+}
+
+function killGoXdcr {
+	local clusterName=$1
+	local sourcePort=${CLUSTER_NAME_PORT_MAP[$clusterName]:-}
+
+	if [[ -z "$sourcePort" ]];then
+		echo "Unable to kill goxdcr as source port is not found"
+	fi
+
+	echo "Killing GoXDCR for $clusterName with port $sourcePort..."
+	ps -ef | grep goxdcr | grep $sourcePort | awk '{print $2}' | xargs kill
+}
+
+# Input:
+# 1 - cluster name
+# 2 - String to look for
+# 3 - Number of occurrences
+function validateLogWithInstance {
+	local clusterName=$1
+	local grepStr="$2"
+	local instanceCnt=$3
+
+	logs=`getClusterLogs "$clusterName"`
+	if ! (( $? == 0 ));then
+		echo "Unable to get log for validation"
+		return 1
+	fi
+
+	count=`echo "$logs" | grep -c "$grepStr"`
+	if (( $count != $instanceCnt ));then
+		echo "Error - requested count is $instanceCnt, but found $count"
+		exit 1
+	else
+		echo "Found exactly $instanceCnt of \"$grepStr\""
+	fi
+}

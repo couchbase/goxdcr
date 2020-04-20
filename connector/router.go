@@ -78,6 +78,7 @@ func (router *Router) SetStartable(startable bool) {
 		atomic.StoreUint32(&router.startable, 1)
 	} else {
 		if atomic.CompareAndSwapUint32(&router.startable, 1, 0) && router.stopFunc != nil {
+			router.Logger().Warnf("Setting Unstartable for router %v... stopping collectionsRouter", router.Id())
 			router.stopFunc()
 		}
 	}
@@ -125,7 +126,7 @@ func (router *Router) Forward(data interface{}) error {
 				return ErrorInvalidRoutingResult
 			}
 		}
-	} else if err == base.ErrorIgnoreRequest {
+	} else if err == base.ErrorRequestAlreadyIgnored || err == base.ErrorIgnoreRequest {
 		err = nil
 	}
 	return err

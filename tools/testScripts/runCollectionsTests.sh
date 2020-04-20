@@ -36,16 +36,21 @@ if (( $? != 0 ));then
 	exit $?
 fi
 
+testCaseNumber="${1:-}"
 testCasesDirectory="collectionTestcases"
-for testcase in `ls $testCasesDirectory`
-do
-	. $testCasesDirectory/$testcase
-	runTestCase
-	# Sleeping is needed because if test cases happen too quickly in succession, it's possible KV will
-	# will give "NOT_MY_VBUCKET" errors back when opening DCP streams. Right now, checkpointing mechanism
-	# hasn't been done yet, so any sort of resume will break
-	# TODO MB-38021 - once checkpointing has done
-	echo "Sleeping 30 seconds for cleanup"
-	sleep 30
-done
 
+if [[ -z "$testCaseNumber" ]];then
+	for testcase in `ls $testCasesDirectory`
+	do
+		. $testCasesDirectory/$testcase
+		runTestCase
+	done
+else
+	testCase=`find $testCasesDirectory/${testCaseNumber}*`
+	if [[ -z "$testCase" ]];then
+		echo "Cannot find test case number $testCaseNumber"
+		exit 1
+	fi
+	. $testCase
+	runTestCase
+fi

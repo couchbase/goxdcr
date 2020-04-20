@@ -253,6 +253,10 @@ var ErrorSourceCollectionsNotSupported = errors.New("Source cluster collections 
 var ErrorInvalidOperation = errors.New("Invalid operation")
 var ErrorRouterRequestRetry = errors.New("Request is in retry queue")
 var ErrorIgnoreRequest = errors.New("Request should be ignored")
+var ErrorXmemCollectionSubErr = errors.New(StringTargetCollectionMappingErr)
+var ErrorRequestAlreadyIgnored = errors.New("Request has been marked ignored")
+
+const StringTargetCollectionMappingErr = "Target node unable to find"
 
 // Various non-error internal msgs
 var FilterForcePassThrough = errors.New("No data is to be filtered, should allow passthrough")

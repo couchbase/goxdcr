@@ -44,9 +44,10 @@ const (
 	// FilterExpDelKey is a combination flag of the 3 below it
 	FilterExpDelKey = base.FilterExpDelKey
 	// These 3 are used for REST input/output into an internal flag of FilterExpDelKey
-	FilterExpKey    = base.FilterExpKey
-	FilterDelKey    = base.FilterDelKey
-	BypassExpiryKey = base.BypassExpiryKey
+	FilterExpKey       = base.FilterExpKey
+	FilterDelKey       = base.FilterDelKey
+	BypassExpiryKey    = base.BypassExpiryKey
+	BrokenMappingsPair = "BrokenMappingsPair"
 )
 
 // keys to facilitate redaction of replication settings map
@@ -92,6 +93,7 @@ var TargetNozzlePerNodeConfig = &SettingsConfig{2, &Range{1, 100}}
 var PipelineLogLevelConfig = &SettingsConfig{log.LogLevelInfo, nil}
 var PipelineStatsIntervalConfig = &SettingsConfig{1000, &Range{200, 600000}}
 var BandwidthLimitConfig = &SettingsConfig{0, &Range{0, 1000000}}
+
 // user can only configure compression to 1 (None) or 3(Auto). 2 (Snappy) is for internal use
 var CompressionTypeConfig = &SettingsConfig{base.CompressionTypeAuto, &Range{base.CompressionTypeStartMarker + 1, base.CompressionTypeEndMarker - 1}}
 var PriorityConfig = &SettingsConfig{base.PriorityTypeHigh, nil}

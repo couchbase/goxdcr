@@ -18,4 +18,5 @@ type ManifestsService interface {
 	UpsertTargetManifests(replSpec *metadata.ReplicationSpecification, tgt *metadata.ManifestsList) error
 	GetSourceManifests(replSpec *metadata.ReplicationSpecification) (*metadata.ManifestsList, error)
 	GetTargetManifests(replSpec *metadata.ReplicationSpecification) (*metadata.ManifestsList, error)
+	DelManifests(replSpec *metadata.ReplicationSpecification) error
 }

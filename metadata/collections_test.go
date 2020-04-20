@@ -1,6 +1,7 @@
 package metadata
 
 import (
+	"encoding/json"
 	"fmt"
 	"github.com/couchbase/goxdcr/base"
 	"github.com/stretchr/testify/assert"
@@ -17,6 +18,10 @@ var provisionedFileCustom string = testDir + "provisionedManifestv2.json"
 var sourcev7 string = testDir + "diffSourcev7.json"
 var targetv7 string = testDir + "diffTargetv7.json"
 var targetv9 string = testDir + "diffTargetv9.json"
+
+var colRecreatedDir string = "singleCollectionDiff/"
+var colRecreatedOrig string = testDir + colRecreatedDir + "orig.json"
+var colRecreatedNew string = testDir + colRecreatedDir + "newer.json"
 
 func TestUnmarshalCollectionManifest(t *testing.T) {
 	assert := assert.New(t)
@@ -409,4 +414,180 @@ func TestCollectionsNsMapping(t *testing.T) {
 	assert.True(confirmMapping.IsSame(mapping))
 
 	fmt.Println("============== Test case end: TestCollectionsMapping =================")
+}
+
+func TestCollectionRecreatedDiff(t *testing.T) {
+	assert := assert.New(t)
+	fmt.Println("============== Test case start: TestCollectionRecreatedDiff =================")
+	data, err := ioutil.ReadFile(colRecreatedOrig)
+	assert.Nil(err)
+
+	var origManifest CollectionsManifest
+	err = origManifest.LoadBytes(data)
+	assert.Nil(err)
+
+	//	 Manifest version 7
+	//	 ScopeName "S2" (UID 9)
+	//	 ScopeName "S2" CollectionName "col3" (UID 12)
+	//	 ScopeName "S2" CollectionName "col2" (UID 11)
+	//	 ScopeName "S2" CollectionName "col1" (UID 10)
+	//	 ScopeName "S1" (UID 8)
+	//	 ScopeName "S1" CollectionName "col2" (UID 9)
+	//	 ScopeName "S1" CollectionName "col1" (UID 8) <--- Delete this one
+	//	 ScopeName "_default" (UID 0)
+	//	 ScopeName "_default" CollectionName "_default" (UID 0)
+
+	data, err = ioutil.ReadFile(colRecreatedNew)
+	assert.Nil(err)
+
+	var newerManifest CollectionsManifest
+	err = newerManifest.LoadBytes(data)
+	assert.Nil(err)
+
+	// Manifest version 9
+	// ScopeName "S2" (UID 9)
+	// ScopeName "S2" CollectionName "col3" (UID 12)
+	// ScopeName "S2" CollectionName "col2" (UID 11)
+	// ScopeName "S2" CollectionName "col1" (UID 10)
+	// ScopeName "S1" (UID 8)
+	// ScopeName "S1" CollectionName "col1" (UID 13) <----- Recreated one
+	// ScopeName "S1" CollectionName "col2" (UID 9)
+	// ScopeName "_default" (UID 0)
+	// ScopeName "_default" CollectionName "_default" (UID 0)
+
+	added, modified, removed, err := newerManifest.Diff(&origManifest)
+	assert.Nil(err)
+	assert.Equal(0, len(added))
+	assert.Equal(0, len(removed))
+	assert.Equal(1, len(modified))
+	col, found := modified.GetCollection(13)
+	assert.True(found)
+	assert.Equal("col1", col.Name)
+
+	fmt.Println("============== Test case end: TestCollectionRecreatedDiff =================")
+}
+
+func TestMarshalUnmarshalCollectionsNamespaceMapping(t *testing.T) {
+	assert := assert.New(t)
+	fmt.Println("============== Test case start: TestMarshalUnmarshalCollectionsNamespaceMapping =================")
+	nsMap := make(CollectionNamespaceMapping)
+	defaultNamespace := base.CollectionNamespace{"_default", "_default"}
+	var nslist CollectionNamespaceList
+	nslist = append(nslist, &defaultNamespace)
+	nsMap[&defaultNamespace] = nslist
+
+	marshalledData, err := nsMap.MarshalJSON()
+	assert.Nil(err)
+
+	checkMap := make(CollectionNamespaceMapping)
+	err = checkMap.UnmarshalJSON(marshalledData)
+	assert.Nil(err)
+
+	assert.True(checkMap.IsSame(nsMap))
+	fmt.Println("============== Test case end: TestMarshalUnmarshalCollectionsNamespaceMapping =================")
+}
+
+func TestCollectionsNsConsolidate(t *testing.T) {
+	assert := assert.New(t)
+	fmt.Println("============== Test case start: TestCollectionsNsConsolidate =================")
+
+	nsMap := make(CollectionNamespaceMapping)
+	defaultNamespace := base.CollectionNamespace{"_default", "_default"}
+	c1Ns := base.CollectionNamespace{"C1", "C1"}
+	c2Ns := base.CollectionNamespace{"C2", "C2"}
+	c3Ns := base.CollectionNamespace{"C3", "C3"}
+	var nslist CollectionNamespaceList
+	nslist = append(nslist, &c1Ns)
+	nslist = append(nslist, &c3Ns)
+	nsMap[&defaultNamespace] = nslist
+	assert.Equal(1, len(nsMap))
+	assert.Equal(2, len(nsMap[&defaultNamespace]))
+
+	nsMap2 := make(CollectionNamespaceMapping)
+	var nslist2 CollectionNamespaceList
+	nslist2 = append(nslist2, &c2Ns)
+	nslist2 = append(nslist2, &c3Ns)
+	nsMap2[&defaultNamespace] = nslist2
+	var nslist3 CollectionNamespaceList
+	nslist3 = append(nslist3, &defaultNamespace)
+	nsMap2[&c1Ns] = nslist3
+	assert.Equal(2, len(nsMap2))
+	assert.Equal(2, len(nsMap2[&defaultNamespace]))
+	assert.Equal(1, len(nsMap2[&c1Ns]))
+
+	//nsmap1
+	//SOURCE ||Scope: _default Collection: _default|| -> |Scope: C1 Collection: C1| |Scope: C3 Collection: C3| |Scope: C2 Collection: C2|
+	//SOURCE ||Scope: C1 Collection: C1|| -> |Scope: _default Collection: _default|
+	//
+	//nsmap2
+	//SOURCE ||Scope: _default Collection: _default|| -> |Scope: C2 Collection: C2| |Scope: C3 Collection: C3|
+	//SOURCE ||Scope: C1 Collection: C1|| -> |Scope: _default Collection: _default|
+	//
+	//Added:
+	//
+	//Removed:
+	//SOURCE ||Scope: _default Collection: _default|| -> |Scope: C1 Collection: C1|
+
+	nsMap.Consolidate(nsMap2)
+	assert.Equal(2, len(nsMap))
+	assert.Equal(3, len(nsMap[&defaultNamespace]))
+	assert.Equal(1, len(nsMap[&c1Ns]))
+
+	added, removed := nsMap.Diff(nsMap2)
+	assert.Equal(0, len(added))
+	assert.Equal(1, len(removed))
+	assert.Equal(1, len(removed[&defaultNamespace]))
+	fmt.Println("============== Test case end: TestCollectionsNsConsolidate =================")
+}
+
+func TestCollectionNsMappingsDocMarshaller(t *testing.T) {
+	assert := assert.New(t)
+	fmt.Println("============== Test case start: TestCollectionNsMappingsDocMarshaller =================")
+	// Test out of order list will have the same sha
+	nsMap := make(CollectionNamespaceMapping)
+	nsMapPrime := make(CollectionNamespaceMapping)
+
+	defaultNamespace := base.CollectionNamespace{"_default", "_default"}
+	c1Ns := base.CollectionNamespace{"C1", "C1"}
+	c3Ns := base.CollectionNamespace{"C3", "C3"}
+
+	var nslist CollectionNamespaceList
+	nslist = append(nslist, &c1Ns)
+	nslist = append(nslist, &c3Ns)
+
+	var nslistPrime CollectionNamespaceList
+	nslistPrime = append(nslistPrime, &c3Ns)
+	nslistPrime = append(nslistPrime, &c1Ns)
+
+	nsMap[&defaultNamespace] = nslist
+	nsMapPrime[&defaultNamespace] = nslistPrime
+
+	// Two map's snappy compressed content are different but sha should be the same
+	snappy1, err := nsMap.ToSnappyCompressed()
+	assert.Nil(err)
+	snappy2, err := nsMapPrime.ToSnappyCompressed()
+	assert.Nil(err)
+	assert.False(reflect.DeepEqual(snappy1, snappy2))
+	sha1, err := nsMap.Sha256()
+	assert.Nil(err)
+	sha2, err := nsMapPrime.Sha256()
+	assert.Nil(err)
+	assert.True(reflect.DeepEqual(sha1[:], sha2[:]))
+
+	// Load from compressed data
+	validate1, err := NewCollectionNamespaceMappingFromSnappyData(snappy1)
+	assert.Nil(err)
+	validate2, err := NewCollectionNamespaceMappingFromSnappyData(snappy2)
+	assert.Nil(err)
+	assert.True(validate1.IsSame(*validate2))
+
+	oneMapping := &CompressedColNamespaceMapping{nil, "dummySha"}
+	var oneList CompressedColNamespaceMappingList
+	oneList = append(oneList, oneMapping)
+
+	brokenMappingDoc := &CollectionNsMappingsDoc{oneList, "dummySpec", nil}
+
+	_, err = json.Marshal(brokenMappingDoc)
+	assert.Nil(err)
+	fmt.Println("============== Test case end: TestCollectionNsMappingsDocMarshaller =================")
 }

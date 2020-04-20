@@ -54,12 +54,46 @@ func (_m *ThroughSeqnoTrackerSvc) GetThroughSeqnos() map[uint16]uint64 {
 	return r0
 }
 
+// GetThroughSeqnosAndManifestIds provides a mock function with given fields:
+func (_m *ThroughSeqnoTrackerSvc) GetThroughSeqnosAndManifestIds() (map[uint16]uint64, map[uint16]uint64, map[uint16]uint64) {
+	ret := _m.Called()
+
+	var r0 map[uint16]uint64
+	if rf, ok := ret.Get(0).(func() map[uint16]uint64); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(map[uint16]uint64)
+		}
+	}
+
+	var r1 map[uint16]uint64
+	if rf, ok := ret.Get(1).(func() map[uint16]uint64); ok {
+		r1 = rf()
+	} else {
+		if ret.Get(1) != nil {
+			r1 = ret.Get(1).(map[uint16]uint64)
+		}
+	}
+
+	var r2 map[uint16]uint64
+	if rf, ok := ret.Get(2).(func() map[uint16]uint64); ok {
+		r2 = rf()
+	} else {
+		if ret.Get(2) != nil {
+			r2 = ret.Get(2).(map[uint16]uint64)
+		}
+	}
+
+	return r0, r1, r2
+}
+
 // PrintStatusSummary provides a mock function with given fields:
 func (_m *ThroughSeqnoTrackerSvc) PrintStatusSummary() {
 	_m.Called()
 }
 
-// SetStartSeqno provides a mock function with given fields: vbno, seqno
-func (_m *ThroughSeqnoTrackerSvc) SetStartSeqno(vbno uint16, seqno uint64) {
-	_m.Called(vbno, seqno)
+// SetStartSeqno provides a mock function with given fields: vbno, seqno, manifestId
+func (_m *ThroughSeqnoTrackerSvc) SetStartSeqno(vbno uint16, seqno uint64, manifestId uint64) {
+	_m.Called(vbno, seqno, manifestId)
 }

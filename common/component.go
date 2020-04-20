@@ -58,7 +58,7 @@ const (
 	// When DCP sends down a system event
 	SystemEventReceived ComponentEventType = iota
 	// RoutingUpdate event
-	RoutingUpdateEvent ComponentEventType = iota
+	BrokenRoutingUpdateEvent ComponentEventType = iota
 	// Data not replicated due to broken collection mapping
 	// NOTE: This event is only supposed to be raised after ensuring the data will be
 	// re-replicated later in another backfill

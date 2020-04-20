@@ -64,6 +64,11 @@ func (se SettingsError) Add(key string, err error) {
 	se.err_map[key] = err
 }
 
+type CollectionsManifestIdPair struct {
+	SourceManifestId uint64
+	TargetManifestId uint64
+}
+
 // timestamp for a specific vb
 type VBTimestamp struct {
 	Vbno          uint16
@@ -71,10 +76,18 @@ type VBTimestamp struct {
 	Seqno         uint64
 	SnapshotStart uint64
 	SnapshotEnd   uint64
+	ManifestIDs   CollectionsManifestIdPair
 }
 
+var emptyVBts VBTimestamp
+
 func (vbts *VBTimestamp) String() string {
-	return fmt.Sprintf("[vbno=%v, uuid=%v, seqno=%v, sn_start=%v, sn_end=%v]", vbts.Vbno, vbts.Vbuuid, vbts.Seqno, vbts.SnapshotStart, vbts.SnapshotEnd)
+	return fmt.Sprintf("[vbno=%v, uuid=%v, seqno=%v, sn_start=%v, sn_end=%v, srcManId=%v, tgtManId=%v]",
+		vbts.Vbno, vbts.Vbuuid, vbts.Seqno, vbts.SnapshotStart, vbts.SnapshotEnd, vbts.ManifestIDs.SourceManifestId, vbts.ManifestIDs.TargetManifestId)
+}
+
+func (vbts VBTimestamp) IsEmpty() bool {
+	return vbts == emptyVBts
 }
 
 type ClusterConnectionInfoProvider interface {
@@ -95,6 +108,8 @@ type ErrorInfo struct {
 	ErrorMsg string
 }
 
+// These should be RO once they are created
+// because they are potentially used as constant keys for CollectionNamespaceMapping
 type CollectionNamespace struct {
 	ScopeName      string
 	CollectionName string
@@ -102,6 +117,18 @@ type CollectionNamespace struct {
 
 func (c *CollectionNamespace) IsDefault() bool {
 	return c.ScopeName == DefaultScopeCollectionName && c.CollectionName == DefaultScopeCollectionName
+}
+
+func (c CollectionNamespace) LessThan(other CollectionNamespace) bool {
+	if c.ScopeName == other.ScopeName {
+		return c.CollectionName < other.CollectionName
+	} else {
+		return c.ScopeName < other.ScopeName
+	}
+}
+
+func (c CollectionNamespace) IsSameAs(other CollectionNamespace) bool {
+	return c.ScopeName == other.ScopeName && c.CollectionName == other.CollectionName
 }
 
 type WrappedUprEvent struct {
@@ -132,6 +159,15 @@ func (req *WrappedMCRequest) ConstructUniqueKey() {
 	buffer.Write(req.Req.Key)
 	buffer.Write(req.Req.Extras[8:16])
 	req.UniqueKey = buffer.String()
+}
+
+// Returns 0 if no collection is used
+func (req *WrappedMCRequest) GetManifestId() uint64 {
+	if req != nil && req.ColInfo != nil {
+		return req.ColInfo.ManifestId
+	} else {
+		return 0
+	}
 }
 
 type McRequestMap map[string]*WrappedMCRequest

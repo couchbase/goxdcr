@@ -146,6 +146,7 @@ func (c *CollectionsManifestService) handleDelReplSpec(oldSpec *metadata.Replica
 	c.agentsMtx.Unlock()
 
 	if ok {
+		agent.DeleteManifests()
 		agent.Stop()
 	}
 
@@ -289,6 +290,16 @@ func (c *CollectionsManifestService) GetSpecificTargetManifest(spec *metadata.Re
 		return nil, fmt.Errorf("Unable to find agent for spec %v\n", spec.Id)
 	}
 	return agent.GetSpecificTargetManifest(manifestVersion)
+}
+
+func (c *CollectionsManifestService) ForceTargetManifestRefresh(spec *metadata.ReplicationSpecification) error {
+	c.agentsMtx.RLock()
+	agent, ok := c.agentsMap[spec.Id]
+	c.agentsMtx.RUnlock()
+	if !ok {
+		return fmt.Errorf("Unable to find agent for spec %v\n", spec.Id)
+	}
+	return agent.ForceTargetManifestRefresh()
 }
 
 type AgentSrcManifestGetter func() *metadata.CollectionsManifest
@@ -445,7 +456,6 @@ func (a *CollectionsManifestAgent) runPersistRequestHandler() {
 }
 
 // This method is called when checkpoint manager is doing a checkpointing
-// TODO: Checkpoint manager must call this AFTER checkpoints for all vbs have been persisted
 // Its job is to read the checkpointed files, and then read its internal pulled caches, dedup and prune
 // so that all the manifests that are needed by both source and target are stored in metakv
 // If the metakv already contains all the necessary manifests, via the use of sha256 hash, then don't
@@ -547,6 +557,10 @@ func (a *CollectionsManifestAgent) persistNeededManifestsInternal() (srcErr, tgt
 	}
 
 	return
+}
+
+func (a *CollectionsManifestAgent) DeleteManifests() error {
+	return a.metakvSvc.DelManifests(a.replicationSpec)
 }
 
 type ManifestsCache map[uint64]*metadata.CollectionsManifest
@@ -702,11 +716,24 @@ func (a *CollectionsManifestAgent) GetSpecificSourceManifest(manifestVersion uin
 		return nil, parts.PartStoppedError
 	}
 
+	if manifestVersion == 0 {
+		return &defaultManifest, nil
+	}
+
 	a.srcMtx.RLock()
 
 	if manifestVersion == math.MaxUint64 {
 		defer a.srcMtx.RUnlock()
-		return a.sourceCache[a.lastSourcePull], nil
+		if a.lastSourcePull == 0 {
+			return &defaultManifest, nil
+		} else {
+			manifest, ok := a.sourceCache[a.lastSourcePull]
+			if !ok {
+				return nil, fmt.Errorf("Cannot find specific source manifest version %v", a.lastSourcePull)
+			} else {
+				return manifest, nil
+			}
+		}
 	}
 
 	var err error
@@ -735,12 +762,19 @@ func (a *CollectionsManifestAgent) GetSpecificTargetManifest(manifestVersion uin
 		return nil, parts.PartStoppedError
 	}
 
+	if manifestVersion == 0 {
+		return &defaultManifest, nil
+	}
+
 	a.tgtMtx.RLock()
 	defer a.tgtMtx.RUnlock()
 
 	var err error
 	if manifestVersion == math.MaxUint64 {
 		manifestVersion = a.lastTargetPull
+		if a.lastTargetPull == 0 {
+			return &defaultManifest, nil
+		}
 	}
 	manifest, ok := a.targetCache[manifestVersion]
 	if !ok {
@@ -869,7 +903,7 @@ func (a *CollectionsManifestAgent) refreshTargetCustom(force bool, waitTime time
 
 // Gets a sorted list of manifest UIDs that are referred by the checkpoints
 func (a *CollectionsManifestAgent) getAllManifestsUids() (srcManifestUids, tgtManifestUids []uint64, err error) {
-	ckptDocs, err := a.checkpointsSvc.CheckpointsDocs(a.replicationSpec.Id)
+	ckptDocs, err := a.checkpointsSvc.CheckpointsDocs(a.replicationSpec.Id, false /*needBrokenMapping*/)
 	if err != nil {
 		a.logger.Warnf("Unable to retrieve checkpoint docs for %v, operating persistence using last cached manifest from %v",
 			a.replicationSpec.Id, a.ckptDocsCacheTime)
@@ -1034,6 +1068,11 @@ func (a *CollectionsManifestAgent) GetLastPersistedManifests() (*metadata.Collec
 	}
 
 	return &metadata.CollectionsManifestPair{srcManifest, tgtManifest}, nil
+}
+
+func (a *CollectionsManifestAgent) ForceTargetManifestRefresh() error {
+	_, _, err := a.refreshTarget(true)
+	return err
 }
 
 // Unit test func

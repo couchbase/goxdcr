@@ -33,13 +33,13 @@ func (_m *CheckpointsService) CheckpointsDoc(replicationId string, vbno uint16) 
 	return r0, r1
 }
 
-// CheckpointsDocs provides a mock function with given fields: replicationId
-func (_m *CheckpointsService) CheckpointsDocs(replicationId string) (map[uint16]*metadata.CheckpointsDoc, error) {
-	ret := _m.Called(replicationId)
+// CheckpointsDocs provides a mock function with given fields: replicationId, brokenMappingsNeeded
+func (_m *CheckpointsService) CheckpointsDocs(replicationId string, brokenMappingsNeeded bool) (map[uint16]*metadata.CheckpointsDoc, error) {
+	ret := _m.Called(replicationId, brokenMappingsNeeded)
 
 	var r0 map[uint16]*metadata.CheckpointsDoc
-	if rf, ok := ret.Get(0).(func(string) map[uint16]*metadata.CheckpointsDoc); ok {
-		r0 = rf(replicationId)
+	if rf, ok := ret.Get(0).(func(string, bool) map[uint16]*metadata.CheckpointsDoc); ok {
+		r0 = rf(replicationId, brokenMappingsNeeded)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(map[uint16]*metadata.CheckpointsDoc)
@@ -47,8 +47,8 @@ func (_m *CheckpointsService) CheckpointsDocs(replicationId string) (map[uint16]
 	}
 
 	var r1 error
-	if rf, ok := ret.Get(1).(func(string) error); ok {
-		r1 = rf(replicationId)
+	if rf, ok := ret.Get(1).(func(string, bool) error); ok {
+		r1 = rf(replicationId, brokenMappingsNeeded)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -107,16 +107,65 @@ func (_m *CheckpointsService) GetVbnosFromCheckpointDocs(replicationId string) (
 	return r0, r1
 }
 
-// UpsertCheckpoints provides a mock function with given fields: replicationId, specInternalId, vbno, ckpt_record, xattr_seqno, targetClusterVersion
-func (_m *CheckpointsService) UpsertCheckpoints(replicationId string, specInternalId string, vbno uint16, ckpt_record *metadata.CheckpointRecord, xattr_seqno uint64, targetClusterVersion int) error {
-	ret := _m.Called(replicationId, specInternalId, vbno, ckpt_record, xattr_seqno, targetClusterVersion)
+// PostDelCheckpointsDoc provides a mock function with given fields: replicationId, doc
+func (_m *CheckpointsService) PostDelCheckpointsDoc(replicationId string, doc *metadata.CheckpointsDoc) error {
+	ret := _m.Called(replicationId, doc)
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(string, string, uint16, *metadata.CheckpointRecord, uint64, int) error); ok {
-		r0 = rf(replicationId, specInternalId, vbno, ckpt_record, xattr_seqno, targetClusterVersion)
+	if rf, ok := ret.Get(0).(func(string, *metadata.CheckpointsDoc) error); ok {
+		r0 = rf(replicationId, doc)
 	} else {
 		r0 = ret.Error(0)
 	}
 
 	return r0
+}
+
+// PreUpsertBrokenMapping provides a mock function with given fields: replicationId, specInternalId, oneBrokenMapping
+func (_m *CheckpointsService) PreUpsertBrokenMapping(replicationId string, specInternalId string, oneBrokenMapping *metadata.CollectionNamespaceMapping) error {
+	ret := _m.Called(replicationId, specInternalId, oneBrokenMapping)
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(string, string, *metadata.CollectionNamespaceMapping) error); ok {
+		r0 = rf(replicationId, specInternalId, oneBrokenMapping)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// UpsertBrokenMapping provides a mock function with given fields: replicationId, specInternalId
+func (_m *CheckpointsService) UpsertBrokenMapping(replicationId string, specInternalId string) error {
+	ret := _m.Called(replicationId, specInternalId)
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(string, string) error); ok {
+		r0 = rf(replicationId, specInternalId)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// UpsertCheckpoints provides a mock function with given fields: replicationId, specInternalId, vbno, ckpt_record, xattr_seqno, targetClusterVersion
+func (_m *CheckpointsService) UpsertCheckpoints(replicationId string, specInternalId string, vbno uint16, ckpt_record *metadata.CheckpointRecord, xattr_seqno uint64, targetClusterVersion int) (int, error) {
+	ret := _m.Called(replicationId, specInternalId, vbno, ckpt_record, xattr_seqno, targetClusterVersion)
+
+	var r0 int
+	if rf, ok := ret.Get(0).(func(string, string, uint16, *metadata.CheckpointRecord, uint64, int) int); ok {
+		r0 = rf(replicationId, specInternalId, vbno, ckpt_record, xattr_seqno, targetClusterVersion)
+	} else {
+		r0 = ret.Get(0).(int)
+	}
+
+	var r1 error
+	if rf, ok := ret.Get(1).(func(string, string, uint16, *metadata.CheckpointRecord, uint64, int) error); ok {
+		r1 = rf(replicationId, specInternalId, vbno, ckpt_record, xattr_seqno, targetClusterVersion)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
 }

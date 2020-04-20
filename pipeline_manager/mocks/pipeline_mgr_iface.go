@@ -127,6 +127,20 @@ func (_m *Pipeline_mgr_iface) DeletePipeline(pipelineName string) error {
 	return r0
 }
 
+// ForceTargetRefreshManifest provides a mock function with given fields: spec
+func (_m *Pipeline_mgr_iface) ForceTargetRefreshManifest(spec *metadata.ReplicationSpecification) error {
+	ret := _m.Called(spec)
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(*metadata.ReplicationSpecification) error); ok {
+		r0 = rf(spec)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
 // GetClusterInfoSvc provides a mock function with given fields:
 func (_m *Pipeline_mgr_iface) GetClusterInfoSvc() service_def.ClusterInfoSvc {
 	ret := _m.Called()

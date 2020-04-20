@@ -10,6 +10,20 @@ type ManifestsService struct {
 	mock.Mock
 }
 
+// DelManifests provides a mock function with given fields: replSpec
+func (_m *ManifestsService) DelManifests(replSpec *metadata.ReplicationSpecification) error {
+	ret := _m.Called(replSpec)
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(*metadata.ReplicationSpecification) error); ok {
+		r0 = rf(replSpec)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
 // GetSourceManifests provides a mock function with given fields: replSpec
 func (_m *ManifestsService) GetSourceManifests(replSpec *metadata.ReplicationSpecification) (*metadata.ManifestsList, error) {
 	ret := _m.Called(replSpec)

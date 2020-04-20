@@ -389,8 +389,14 @@ func (xdcrf *XDCRFactory) constructSourceNozzles(spec *metadata.ReplicationSpeci
 			// construct dcpNozzles
 			// partIds of the dcpNozzle nodes look like "dcpNozzle_$kvaddr_1"
 			id := xdcrf.partId(DCP_NOZZLE_NAME_PREFIX, spec.Id, kvaddr, i)
+
+			getterFunc := func(manifestUid uint64) (*metadata.CollectionsManifest, error) {
+				return xdcrf.collectionsManifestSvc.GetSpecificSourceManifest(spec, manifestUid)
+			}
+
 			dcpNozzle := parts.NewDcpNozzle(id,
-				spec.SourceBucketName, spec.TargetBucketName, vbList, xdcrf.xdcr_topology_svc, isCapiReplication, logger_ctx, xdcrf.utils)
+				spec.SourceBucketName, spec.TargetBucketName, vbList, xdcrf.xdcr_topology_svc, isCapiReplication, logger_ctx, xdcrf.utils,
+				service_def.CollectionsManifestReqFunc(getterFunc))
 			sourceNozzles[dcpNozzle.Id()] = dcpNozzle
 			xdcrf.logger.Debugf("Constructed source nozzle %v with vbList = %v \n", dcpNozzle.Id(), vbList)
 		}
@@ -911,6 +917,18 @@ func (xdcrf *XDCRFactory) constructSettingsForRouter(pipeline common.Pipeline, s
 	}
 
 	xdcrf.disableCollectionIfNeeded(settings, routerSettings, pipeline.Specification())
+
+	// Router keeps a copy of the current highest target manifest ID
+	vbTimestamp, ok := settings[base.VBTimestamps]
+	if ok {
+		routerSettings[parts.DCP_VBTimestamp] = vbTimestamp
+	}
+
+	brokenMappingsPair, ok := settings[metadata.BrokenMappingsPair]
+	if ok {
+		routerSettings[metadata.BrokenMappingsPair] = brokenMappingsPair
+	}
+
 	return routerSettings, nil
 }
 
@@ -944,7 +962,7 @@ func (xdcrf *XDCRFactory) registerServices(pipeline common.Pipeline, logger_ctx 
 		xdcrf.remote_cluster_svc, xdcrf.repl_spec_svc, xdcrf.cluster_info_svc,
 		xdcrf.xdcr_topology_svc, through_seqno_tracker_svc, kv_vb_map, targetUserName,
 		targetPassword, targetBucketName, target_kv_vb_map, targetClusterRef,
-		targetClusterVersion, isTargetES, logger_ctx, xdcrf.utils, actualStatsMgr)
+		targetClusterVersion, isTargetES, logger_ctx, xdcrf.utils, actualStatsMgr, xdcrf.uilog_svc, xdcrf.collectionsManifestSvc)
 	if err != nil {
 		xdcrf.logger.Errorf("Failed to construct CheckpointManager for %v. err=%v ckpt_svc=%v, capi_svc=%v, remote_cluster_svc=%v, repl_spec_svc=%v\n", pipeline.Topic(), err, xdcrf.checkpoint_svc, xdcrf.capi_svc,
 			xdcrf.remote_cluster_svc, xdcrf.repl_spec_svc)
@@ -1038,6 +1056,7 @@ func (xdcrf *XDCRFactory) constructSettingsForStatsManager(pipeline common.Pipel
 func (xdcrf *XDCRFactory) constructSettingsForCheckpointManager(pipeline common.Pipeline, settings metadata.ReplicationSettingsMap) (metadata.ReplicationSettingsMap, error) {
 	s := make(metadata.ReplicationSettingsMap)
 	s[pipeline_svc.CHECKPOINT_INTERVAL] = getSettingFromSettingsMap(settings, metadata.CheckpointIntervalKey, pipeline.Specification().Settings.CheckpointInterval)
+	xdcrf.disableCollectionIfNeeded(settings, s, pipeline.Specification())
 	return s, nil
 }
 

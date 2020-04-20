@@ -114,6 +114,10 @@ type Router struct {
 	targetColInfoPool utilities.TargetCollectionInfoPoolIface
 	dataPool          utilities.DataPoolIface
 	mcRequestPool     *base.MCRequestPool
+
+	// When DataFiltered events are raised, instead of looking up the latest manifestID
+	// just use the last known successful manifestID here instead
+	lastSuccessfulManifestId uint64
 }
 
 /**
@@ -158,21 +162,88 @@ type CollectionsRouter struct {
 	started                uint32
 	logger                 *log.CommonLogger
 
-	// No lock needed as this is going to be called only by the mother-Router
-	// which is run on a single go-routine
-	lastKnownManifest *metadata.CollectionsManifest
-
 	/*
 	 * When retry fails, these members record the needed information
 	 */
 	// Collectively, these are the mappings that this collectionsRouter has seen broken
-	brokenMapMtx   sync.RWMutex
-	brokenMapping  metadata.CollectionNamespaceMapping
-	routingUpdater CollectionsRoutingUpdater
-	ignoreDataFunc IgnoreDataEventer
+	brokenMapMtx      sync.RWMutex
+	brokenMapping     metadata.CollectionNamespaceMapping
+	lastKnownManifest *metadata.CollectionsManifest // should be associated with a brokenMap
+	routingUpdater    CollectionsRoutingUpdater
+	ignoreDataFunc    IgnoreDataEventer
 
 	fatalErrorFunc func(error)
 }
+
+// A collection router is critically important to not only route to the target collection, but
+// also coordinate the checkpointing and throughseqno service
+//
+//  Checkpointing:
+//  --------------
+//
+//	The following takes place in a specific VB.
+//	1. Given seqno [0, n) [n+1, y], where n < y, and n is a mutation that is not able to be sent to the target because it couldn’t be mapped. [n+1, y] dictates a range of mutations that have been sent.
+//	2. The through sequence number should be n-1.
+//	3. Router decides that mutation with seqno n (let’s call it mutation N) is not routable and declares its mapping broken (i.e. c1 -> c1 is broken)
+//	4. Router Raises the “Routing Update” via an event with the following info embedded in the event:
+//	   a. Broken Mapping (c1 -> c1)
+//	   b. Backfill Mapping (nil)
+//	   c. Target Manifest ID that the mappings is accurate (i.e. A)
+//	   d. Seqno N.
+//	5. The recipients of the “Routing Update” will be “Checkpoint Manager” and “Backfill Manager” (new), and the actions below should block (4)
+//	   a. Backfill Manager (Not exist yet) will care about the backfill mapping:
+//	      i. Once receive the Routing Update, ensure that the backfills that are needed are known. If not know, add these backfills and persist to disk.
+//	         1. In this example, backfill mapping is nil, so it’s a no-op.
+//	   b. Checkpoint Manager cares about the broken mapping:
+//	      i.  Before receiving the Routing Update, any checkpointing done will receive a through sequence number of n-1, and checkpoints will contain no broken map.
+//	      ii. After receiving the Routing Update, at this time, any checkpointing will receive a through seqno of n-1, and will contain broken map.
+//	         1. When resuming from checkpoint, the broken mapping is loaded back to the Router, so Router knows to invoke future backfills.
+//
+//	6. Once (5) is finished, it unblocks (4). Router then Raise the “Ignore Event”
+//	   a. Ignore event says mutation N is ignored.
+//	7. The recipient of the “Ignore Event” is ThroughSeqno Tracker service.
+//	   a. Through Seqno will add N to its “ignored list”. Through Sequence number will now move from “n-1” to “y”.
+//	   b. Whenever Checkpoint Manager calls “GetThroughSeqno” for this VB from this point on , it will get “y” (or later).
+//	      i. Checkpoint Manager *must* have the broken mapping (which it got from (5)) before it should receive ‘y” during checkpointing procedures.
+//	         1. This is such that if the broken mapping is no longer broken, a backfill can be created. See resume scenario below.
+//
+//	Resuming:
+//  ---------
+//	Continue from the algorithm. Say the checkpoint contains broken mapping (c1 -> c1) and is at sequence number y.
+//	Say a new target collection c1 was created, with manifest ID “B”
+//
+//	When the checkpoint is loaded, the services’ states are restored:
+//	1. Checkpoint manager loads the above checkpoint
+//	   a. It knows that last broken mapping contains c1 -> c1
+//	2. Router’s state is restored.
+//	   a. Last known manifest ID is A
+//	   b. Last known broken mapping contains (c1 -> c1)
+//	3. DCP’s state is restored.
+//	   a. Starts streaming data from [y+1, inf)
+//	   b. ThroughSeqno service is empty
+//	   c. Backfill Manager is empty
+//	   d. Collections Manifest Service loads target Manifest A from metakv.
+//
+//	Now, DCP starts streaming from y+1
+//	1. For Router’s perspective, It is possible that y+1 maps to the broken mapping of (c1 -> c1).
+//	   a. Router is already aware of it, which means both CkptMgr and BackfillMgr are aware of this too.
+//	      i. Router does not raise Routing Event, no-op here.
+//	   b. Router raises Ignore event only.
+//	      i. ThroughSeqno service will now return y+1 as through sequence number.
+//	2. Now, XDCR is made aware of a new target manifest B. Manifest B now knows about target collection c1.
+//	   a. This can be done either via the Collections Manifest Service, or the I/O path. In this example, let’s say the I/O path.
+//	   b. Router creates n Routing Update Event with the following information:
+//	      i.   Broken Mapping (nil)
+//	      ii.  Backfill Mapping (c1 -> c1)
+//	      iii. Target Manifest Version B
+//	      iv.  Mutation seqno y+2
+//	3. Backfill Manager receives the event and looks at the backfill mapping.
+//	   i.  It sees that it doesn’t have the backfill information, creates and persists it to disk
+//	   ii. C1 -> C1 backfill [0, y+2] will start.
+//	       a. This will cover y and y+1 mutation that XDCR previously ignored.
+//	4. Checkpoint Manager receives the event. Since it only cares about the broken mapping, its state will reflect “no broken maps”.
+//	   a. Any future checkpoints will no longer contain broken maps.
+//	5. Now, mutation y+2 will be routed successfully.
 
 func NewCollectionsRouter(colManifestSvc service_def.CollectionsManifestSvc,
 	spec *metadata.ReplicationSpecification,
@@ -203,6 +274,66 @@ func (c *CollectionsRouter) Stop() error {
 
 func (c *CollectionsRouter) IsRunning() bool {
 	return atomic.LoadUint32(&c.started) != 0
+}
+
+func (c *CollectionsRouter) UpdateBrokenMappingsPair(brokenMappings *metadata.CollectionNamespaceMapping, targetManifestId uint64) {
+	if !c.IsRunning() || brokenMappings == nil || len(*brokenMappings) == 0 {
+		return
+	}
+
+	// Just like how checkpoint manager is the consolidation of all broken map events raised by the router
+	// This place is where the consolidation occurs if somehow checkpoint manager has inconsistent mappings
+	c.brokenMapMtx.RLock()
+	var currentManifestId uint64
+	if c.lastKnownManifest != nil {
+		currentManifestId = c.lastKnownManifest.Uid()
+	}
+	currentBrokenMap := c.brokenMapping.Clone()
+	c.brokenMapMtx.RUnlock()
+
+	// The key is to always pick the newer manifest, and if they are the same,
+	// consolidate the brokenmaps
+	needToUpdate := currentManifestId < targetManifestId
+	needToUpdate2 := currentManifestId > 0 && currentManifestId == targetManifestId && (len(currentBrokenMap) < len(*brokenMappings) || !currentBrokenMap.IsSame(*brokenMappings))
+
+	if needToUpdate {
+		manifest, err := c.collectionsManifestSvc.GetSpecificTargetManifest(c.spec, targetManifestId)
+		if err != nil {
+			err = fmt.Errorf("Collections Router %v error - unable to find last known target manifest version %v from collectionsManifestSvc - err: %v",
+				c.spec.Id, targetManifestId, err)
+			// TODO MB-38445
+			c.fatalErrorFunc(err)
+			return
+		}
+
+		c.brokenMapMtx.Lock()
+		var checkManifestId uint64
+		if c.lastKnownManifest != nil {
+			checkManifestId = c.lastKnownManifest.Uid()
+		}
+		if checkManifestId == currentManifestId &&
+			c.brokenMapping.IsSame(currentBrokenMap) {
+			// things were same as before
+			c.lastKnownManifest = manifest
+			c.brokenMapping = *brokenMappings
+		} else if checkManifestId == targetManifestId {
+			// Target manifest got bumped up between the rlock and lock
+			needToUpdate2 = true
+		}
+		c.brokenMapMtx.Unlock()
+	}
+
+	if needToUpdate2 {
+		c.brokenMapMtx.Lock()
+		var checkManifestId uint64
+		if c.lastKnownManifest != nil {
+			checkManifestId = c.lastKnownManifest.Uid()
+		}
+		if checkManifestId == targetManifestId {
+			c.brokenMapping.Consolidate(*brokenMappings)
+		}
+		c.brokenMapMtx.Unlock()
+	}
 }
 
 // No-Concurrent call
@@ -246,48 +377,95 @@ func (c *CollectionsRouter) RouteReqToLatestTargetManifest(namespace *base.Colle
 }
 
 func (c *CollectionsRouter) handleNewManifestChanges(latestManifest *metadata.CollectionsManifest) (err error) {
+	if latestManifest == nil {
+		err = base.ErrorInvalidInput
+		return
+	}
+
+	c.brokenMapMtx.RLock()
 	if c.lastKnownManifest == nil {
-		c.lastKnownManifest = latestManifest
+		c.brokenMapMtx.RUnlock()
+		c.brokenMapMtx.Lock()
+		if c.lastKnownManifest == nil {
+			c.lastKnownManifest = latestManifest
+		}
+		c.brokenMapMtx.Unlock()
 		return
 	}
 
 	if latestManifest.Uid() == c.lastKnownManifest.Uid() {
-		return
-	}
-
-	added, _, _, err := latestManifest.Diff(c.lastKnownManifest)
-	if err != nil {
-		err = fmt.Errorf("Unable to diff manifests between %v and %v: %v", c.lastKnownManifest.Uid(), latestManifest.Uid(), err)
-		return
-	}
-
-	var lockUpgraded bool
-	c.brokenMapMtx.RLock()
-	if len(added) > 0 && len(c.brokenMapping) > 0 {
 		c.brokenMapMtx.RUnlock()
-		// These are new target collections - see if the broken ones can be backfilled
-		fixedMapping := c.brokenMapping.GetSubsetBasedOnAddedTargets(added)
+		return
+	}
+
+	lastKnownManifestId := c.lastKnownManifest.Uid()
+	lastKnownManifestClone := c.lastKnownManifest.Clone()
+	c.brokenMapMtx.RUnlock()
+
+	// Diff should catch this error, but check here just in case
+	if lastKnownManifestId > latestManifest.Uid() {
+		err = fmt.Errorf("Odd error: New manifest coming in is older than currently known manifest")
+		return
+	}
+
+	added, _, _, err := latestManifest.Diff(&lastKnownManifestClone)
+	if err != nil {
+		err = fmt.Errorf("Unable to diff manifests between %v and %v: %v", lastKnownManifestClone.Uid(), latestManifest.Uid(), err)
+		return
+	}
+
+	var routingInfo CollectionsRoutingInfo
+	c.brokenMapMtx.RLock()
+	if c.lastKnownManifest.Uid() != lastKnownManifestId {
+		// Something changed from underneath, abort
+		c.brokenMapMtx.RUnlock()
+		return
+	} else {
+		var fixedMapping metadata.CollectionNamespaceMapping
+		brokenMappingClone := c.brokenMapping.Clone()
+		c.brokenMapMtx.RUnlock()
+
+		if len(added) > 0 && len(c.brokenMapping) > 0 {
+			// These are new target collections - see if the broken ones can be backfilled
+			fixedMapping = brokenMappingClone.GetSubsetBasedOnAddedTargets(added)
+		}
 
 		if len(fixedMapping) > 0 {
-			var routingInfo CollectionsRoutingInfo
 			c.brokenMapMtx.Lock()
-			lockUpgraded = true
+			if c.lastKnownManifest.Uid() != lastKnownManifestId || !c.brokenMapping.IsSame(brokenMappingClone) {
+				// something changed from underneath, abort
+				c.brokenMapMtx.Unlock()
+				return
+			}
+			c.lastKnownManifest = latestManifest
 			c.brokenMapping = c.brokenMapping.Delete(fixedMapping)
 			routingInfo.BrokenMap = c.brokenMapping.Clone()
 			routingInfo.BackfillMap = fixedMapping.Clone()
 			routingInfo.TargetManifestId = latestManifest.Uid()
-			c.logger.Debugf("Based on target manifestID %v These mappings need backfilling: %v\n", latestManifest.Uid(), fixedMapping.String())
-			c.logger.Debugf("Based on target manifestID %v These mappings are broken: %v\n", latestManifest.Uid(), routingInfo.BrokenMap.String())
+			if c.logger.GetLogLevel() > log.LogLevelDebug {
+				c.logger.Debugf("Based on target manifestID %v These mappings need backfilling: %v\n", latestManifest.Uid(), fixedMapping.String())
+			}
 			c.brokenMapMtx.Unlock()
-			c.routingUpdater(routingInfo)
+		} else {
+			// No need to raise fixed mapping event but still need to bubble the latest pair of {brokenMap, targetManifestId} to checkpoint manager
+			// This is so that checkpoint manager will have the "latest" possible manifest that goes with this brokenMap when checkpointing
+			c.brokenMapMtx.Lock()
+			if c.lastKnownManifest.Uid() != lastKnownManifestId || !c.brokenMapping.IsSame(brokenMappingClone) {
+				// something changed from underneath, abort
+				c.brokenMapMtx.Unlock()
+				return
+			}
+			c.lastKnownManifest = latestManifest
+			routingInfo.BrokenMap = c.brokenMapping.Clone()
+			routingInfo.TargetManifestId = latestManifest.Uid()
+			if c.logger.GetLogLevel() > log.LogLevelDebug {
+				c.logger.Debugf("Based on target manifestID %v These mappings are broken: %v\n", latestManifest.Uid(), routingInfo.BrokenMap.String())
+			}
+			c.brokenMapMtx.Unlock()
 		}
-
-	}
-	if !lockUpgraded {
-		c.brokenMapMtx.RUnlock()
 	}
 
-	c.lastKnownManifest = latestManifest
+	c.routingUpdater(routingInfo)
 	return
 }
 
@@ -371,6 +549,12 @@ func (c CollectionsRoutingMap) startOrStopAll(start bool) error {
 	}
 }
 
+func (c CollectionsRoutingMap) UpdateBrokenMappingsPair(brokenMaps *metadata.CollectionNamespaceMapping, targetManifestId uint64) {
+	for _, collectionsRouter := range c {
+		collectionsRouter.UpdateBrokenMappingsPair(brokenMaps, targetManifestId)
+	}
+}
+
 /**
  * Note
  * A router (for now) is created per source nozzle.
@@ -443,8 +627,7 @@ func NewRouter(id string, spec *metadata.ReplicationSpecification,
 		(utilities.RecycleObjFunc)(router.recycleDataObj))
 
 	routingUpdater := func(info CollectionsRoutingInfo) {
-		// TODO: MB-38021 - next step is to handle these events in lock-step
-		routingEvent := common.NewEvent(common.RoutingUpdateEvent, info, router, nil, nil)
+		routingEvent := common.NewEvent(common.BrokenRoutingUpdateEvent, info, router, nil, nil)
 		router.RaiseEvent(routingEvent)
 	}
 
@@ -547,6 +730,15 @@ func (router *Router) Stop() error {
 	return router.collectionsRouting.StopAll()
 }
 
+func (router *Router) getDataFilteredAdditional(uprEvent *mcc.UprEvent) interface{} {
+	return DataFilteredAdditional{Seqno: uprEvent.Seqno,
+		// For filtered document, send the latestSuccessfulManifestId
+		// so that the throughSeqno service can get the most updated manifestId
+		// for checkpointing if there is an overwhelming number of filtered docs
+		ManifestId: atomic.LoadUint64(&router.lastSuccessfulManifestId),
+	}
+}
+
 // Implementation of the routing algorithm
 // Currently doing static dispatching based on vbucket number.
 func (router *Router) Route(data interface{}) (map[string]interface{}, error) {
@@ -574,7 +766,7 @@ func (router *Router) Route(data interface{}) (map[string]interface{}, error) {
 
 	shouldContinue := router.ProcessExpDelTTL(uprEvent)
 	if !shouldContinue {
-		router.RaiseEvent(common.NewEvent(common.DataFiltered, uprEvent, router, nil, nil))
+		router.RaiseEvent(common.NewEvent(common.DataFiltered, uprEvent, router, nil, router.getDataFilteredAdditional(uprEvent)))
 		return result, nil
 	}
 
@@ -594,7 +786,7 @@ func (router *Router) Route(data interface{}) (map[string]interface{}, error) {
 				router.RaiseEvent(common.NewEvent(common.DataUnableToFilter, uprEvent, router, []interface{}{err, errDesc}, nil))
 			} else {
 				// if data does not need to be replicated, drop it. return empty result
-				router.RaiseEvent(common.NewEvent(common.DataFiltered, uprEvent, router, nil, nil))
+				router.RaiseEvent(common.NewEvent(common.DataFiltered, uprEvent, router, nil, router.getDataFilteredAdditional(uprEvent)))
 			}
 			// Let supervisor set the err instead of the router, to minimize pipeline interruption
 			return result, nil
@@ -649,6 +841,7 @@ func (router *Router) RouteCollection(data interface{}, partId string) error {
 					router.Logger().Debugf("Request map is already marked broken for %v. Ready to be ignored", string(mcRequest.Req.Key))
 				}
 				router.collectionsRouting[partId].ignoreDataFunc(mcRequest)
+				err = base.ErrorRequestAlreadyIgnored
 			} else {
 				router.collectionsRouting[partId].recordUnroutableRequest(mcRequest)
 				err = base.ErrorIgnoreRequest
@@ -680,6 +873,8 @@ func (router *Router) RouteCollection(data interface{}, partId string) error {
 	copy(mcRequest.ColInfo.ColIDPrefixedKey[leb128CidLen:totalLen], mcRequest.Req.Key)
 	mcRequest.Req.Key = mcRequest.ColInfo.ColIDPrefixedKey[0:totalLen]
 	mcRequest.Req.Keylen = totalLen
+
+	atomic.StoreUint64(&router.lastSuccessfulManifestId, manifestId)
 	return nil
 }
 
@@ -772,6 +967,39 @@ func (router *Router) UpdateSettings(settings metadata.ReplicationSettingsMap) e
 	_, ok = settings[ForceCollectionDisableKey]
 	if ok {
 		router.Router.SetStartable(false)
+	}
+
+	// When checkpoint manager starts up, it loads the last known target manifest ID
+	// and sends it as part of the UpdateVBTimestamp() call.
+	// This section will set the router's lastKnownManifestId to such value
+	// so that if immediately a filtered event is raised, the right manifest ID
+	// can be raised alongisde it.
+	// It is highly possible that this value can be transient... that is, when another successful
+	// mutation has gone through the router, that the lastSuccessfulManifestId will jump to the
+	// latest known target manifest ID. That is ok, though, because the corner case mentioned above
+	// is covered
+	ts_obj := router.utils.GetSettingFromSettings(settings, DCP_VBTimestamp)
+	if ts_obj != nil {
+		new_ts, ok := settings[DCP_VBTimestamp].(map[uint16]*base.VBTimestamp)
+		if ok && new_ts != nil && router.Router.IsStartable() {
+			// Find the max targetManifestId
+			var maxManifestId uint64
+			for _, ts := range new_ts {
+				if ts.ManifestIDs.TargetManifestId > maxManifestId {
+					maxManifestId = ts.ManifestIDs.TargetManifestId
+				}
+			}
+			atomic.StoreUint64(&router.lastSuccessfulManifestId, maxManifestId)
+		}
+	}
+
+	pair, ok := settings[metadata.BrokenMappingsPair].([]interface{})
+	if ok && len(pair) == 2 {
+		brokenMappings, ok2 := pair[0].(*metadata.CollectionNamespaceMapping)
+		targetManifestId, ok := pair[1].(uint64)
+		if ok && ok2 && router.Router.IsStartable() {
+			router.collectionsRouting.UpdateBrokenMappingsPair(brokenMappings, targetManifestId)
+		}
 	}
 
 	if len(errMap) > 0 {
