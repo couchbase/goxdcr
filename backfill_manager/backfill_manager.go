@@ -13,7 +13,9 @@ import (
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
+	"github.com/couchbase/goxdcr/pipeline_manager"
 	"github.com/couchbase/goxdcr/service_def"
+	"reflect"
 	"sync"
 )
 
@@ -38,6 +40,8 @@ type BackfillMgr struct {
 	replSpecSvc            service_def.ReplicationSpecSvc
 	backfillReplSvc        service_def.BackfillReplSvc
 
+	pipelineMgr pipeline_manager.PipelineMgrBackfillIface
+
 	logger *log.CommonLogger
 
 	// Collections Manifest Service will send down the latest changes from what it sees
@@ -50,7 +54,8 @@ type BackfillMgr struct {
 
 func NewBackfillManager(collectionsManifestSvc service_def.CollectionsManifestSvc,
 	replSpecSvc service_def.ReplicationSpecSvc,
-	backfillReplSvc service_def.BackfillReplSvc) *BackfillMgr {
+	backfillReplSvc service_def.BackfillReplSvc,
+	pipelineMgr pipeline_manager.PipelineMgrBackfillIface) *BackfillMgr {
 
 	backfillMgr := &BackfillMgr{
 		collectionsManifestSvc: collectionsManifestSvc,
@@ -59,6 +64,7 @@ func NewBackfillManager(collectionsManifestSvc service_def.CollectionsManifestSv
 		logger:                 log.NewLogger("BackfillMgr", log.DefaultLoggerContext),
 		cacheSpecSourceMap:     make(map[string]*metadata.CollectionsManifest),
 		cacheSpecTargetMap:     make(map[string]*metadata.CollectionsManifest),
+		pipelineMgr:            pipelineMgr,
 	}
 
 	return backfillMgr
@@ -68,7 +74,6 @@ func (b *BackfillMgr) Start() error {
 	b.logger.Infof("BackfillMgr Starting...")
 
 	b.collectionsManifestSvc.SetMetadataChangeHandlerCallback(b.collectionsManifestChangeCb)
-	b.replSpecSvc.SetMetadataChangeHandlerCallback(b.replicationSpecChangeHandlerCallback)
 	b.backfillReplSvc.SetMetadataChangeHandlerCallback(b.backfillReplSpecChangeHandlerCallback)
 
 	err := b.initCache()
@@ -133,7 +138,7 @@ func (b *BackfillMgr) backfillReplSpecChangeHandlerCallback(changedSpecId string
 	return nil
 }
 
-func (b *BackfillMgr) replicationSpecChangeHandlerCallback(changedSpecId string, oldSpecObj interface{}, newSpecObj interface{}) error {
+func (b *BackfillMgr) ReplicationSpecChangeCallback(changedSpecId string, oldSpecObj interface{}, newSpecObj interface{}) error {
 	oldSpec, ok := oldSpecObj.(*metadata.ReplicationSpecification)
 	newSpec, ok2 := newSpecObj.(*metadata.ReplicationSpecification)
 
@@ -147,6 +152,12 @@ func (b *BackfillMgr) replicationSpecChangeHandlerCallback(changedSpecId string,
 	// TODO - these should be handled by a different go routine as to not block
 	if oldSpecObj.(*metadata.ReplicationSpecification) == nil &&
 		newSpecObj.(*metadata.ReplicationSpecification) != nil {
+		// As part of new replication created, pull the source and target manifest and store them as the starting point
+		newSpec := newSpecObj.(*metadata.ReplicationSpecification)
+		err := b.initNewReplStartingManifests(newSpec)
+		if err != nil {
+			return err
+		}
 		// TODO - need to create a backfill request handler
 	} else if newSpecObj.(*metadata.ReplicationSpecification) == nil &&
 		oldSpecObj.(*metadata.ReplicationSpecification) != nil {
@@ -163,14 +174,30 @@ func (b *BackfillMgr) replicationSpecChangeHandlerCallback(changedSpecId string,
 	return nil
 }
 
+func (b *BackfillMgr) initNewReplStartingManifests(spec *metadata.ReplicationSpecification) error {
+	src, tgt, err := b.collectionsManifestSvc.GetLatestManifests(spec)
+	if err != nil {
+		b.logger.Errorf("Unable to retrieve manifests for new spec %v err %v", spec.Id, err)
+		return err
+	}
+
+	b.cacheMtx.Lock()
+	b.cacheSpecSourceMap[spec.Id] = src
+	b.cacheSpecTargetMap[spec.Id] = tgt
+	b.cacheMtx.Unlock()
+	return nil
+}
+
 func (b *BackfillMgr) collectionsManifestChangeCb(replId string, oldVal, newVal interface{}) error {
 	oldManifests, ok := oldVal.(*metadata.CollectionsManifestPair)
 	if !ok {
+		b.logger.Errorf("Oldval is not manifestpair, but %v", reflect.TypeOf(oldVal))
 		return base.ErrorInvalidInput
 	}
 
 	newManifests, ok := newVal.(*metadata.CollectionsManifestPair)
 	if !ok {
+		b.logger.Errorf("Newval is not manifestpair, but %v", reflect.TypeOf(newVal))
 		return base.ErrorInvalidInput
 	}
 
@@ -251,7 +278,9 @@ func (b *BackfillMgr) handleTargetChanges(replId string, sourceManifest, oldTarg
 		b.cacheMtx.RUnlock()
 
 		if sourceManifest == nil {
-			panic("FIXME")
+			// Really odd error
+			b.logger.Errorf("Repl %v Unable to find a baseline source manifest, and thus unable to figure out backfill situation", replId)
+			return
 		}
 	}
 
@@ -259,6 +288,7 @@ func (b *BackfillMgr) handleTargetChanges(replId string, sourceManifest, oldTarg
 		// Source manifest 0 means only default collection is being replicated
 		// If it's implicit mapping, no-op
 		// TODO - this section will change for explicit mapping and/or upgrade
+		b.logger.Infof("Repl %v shows default source manifest, thus no backfill would be created", replId)
 		return
 	}
 
@@ -276,10 +306,16 @@ func (b *BackfillMgr) handleTargetChanges(replId string, sourceManifest, oldTarg
 	b.cacheSpecTargetMap[replId] = newTargetManifest
 	b.cacheMtx.Unlock()
 
-	b.logger.Infof("These collections need to backfill %v to seqno TBD", backfillMapping)
+	seqnosMap, err := b.getThroughSeqno(replId)
+	if err != nil {
+		// If err is not-nil, it's a coding error
+		b.logger.Errorf("Unable to retrieve through seqnos for replication %v", replId)
+		return
+	}
+
+	b.logger.Infof("Replication %v - These collections need to backfill %v for vb->seqnos %v", replId, backfillMapping, seqnosMap)
 }
 
 func (b *BackfillMgr) getThroughSeqno(replId string) (map[uint16]uint64, error) {
-	// TODO
-	return nil, nil
+	return b.pipelineMgr.GetMainPipelineThroughSeqnos(replId)
 }

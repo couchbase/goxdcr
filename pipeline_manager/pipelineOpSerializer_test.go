@@ -13,9 +13,9 @@ import (
 	"time"
 )
 
-func setupBoilerPlateSerializer() (*PipelineOpSerializer, *PipelineMgrMock.Pipeline_mgr_iface) {
+func setupBoilerPlateSerializer() (*PipelineOpSerializer, *PipelineMgrMock.PipelineMgrInternalIface) {
 	testLogger := log.NewLogger("testLogger", log.DefaultLoggerContext)
-	pipelineMgr := &PipelineMgrMock.Pipeline_mgr_iface{}
+	pipelineMgr := &PipelineMgrMock.PipelineMgrInternalIface{}
 
 	serializer := NewPipelineOpSerializer(pipelineMgr, testLogger)
 

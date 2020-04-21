@@ -501,9 +501,9 @@ func setupMockPipelineMgr(replSpecSvcMock *service_def.ReplicationSpecSvc,
 	testTopic string,
 	testRepairer *PipelineUpdater,
 	xdcrTopologyMock *service_def.XDCRCompTopologySvc,
-	uiLogSvcMock *service_def.UILogSvc) *PipelineMgrMock.Pipeline_mgr_iface {
+	uiLogSvcMock *service_def.UILogSvc) *PipelineMgrMock.PipelineMgrInternalIface {
 
-	pmMock := &PipelineMgrMock.Pipeline_mgr_iface{}
+	pmMock := &PipelineMgrMock.PipelineMgrInternalIface{}
 
 	emptyMap := make(base.ErrorMap)
 	pmMock.On("StopPipeline", mock.Anything).Return(emptyMap)

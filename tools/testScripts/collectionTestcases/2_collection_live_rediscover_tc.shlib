@@ -49,7 +49,6 @@ function runDataLoad {
 }
 
 declare -i ORIG_TARGET_MAN_PULL_INTERVAL
-declare -i ORIG_ROUTER_MAX_RETRY
 
 function cleanupTestCaseInternalSettings {
 	resetCustomManifestRefreshInterval "C1"
@@ -57,6 +56,7 @@ function cleanupTestCaseInternalSettings {
 
 BROKEN_MSG="The followings are collection mappings that are newly broken"
 REPAIR_MSG="The followings are collection mappings that are now repaired"
+BACKFILL_MSG="These collections need to backfill"
 
 function runTestCase {
 	echo "============================================================================"
@@ -72,7 +72,6 @@ function runTestCase {
 	if (( $? != 0 ));then
 		exit $?
 	fi
-
 	# Before doing provisioning, get old internal settings
 	setCustomManifestRefreshInterval "C1"
 
@@ -82,11 +81,16 @@ function runTestCase {
 	# Get current instance
 	local -i currentBrokenInstanceCnt
 	local -i currentRepairedInstanceCnt
+	local -i currentBackfillInstanceCnt
 
 	local currentClusterLog
 	currentClusterLog=`getClusterLogs "C1"`
 	currentBrokenInstanceCnt=`echo "$currentClusterLog" | grep -c "$BROKEN_MSG"`
 	currentRepairedInstanceCnt=`echo "$currentClusterLog" | grep -c "$REPAIR_MSG"`
+
+	local currentXdcrLog
+	currentXdcrLog=`getInternalNodeXdcrLog "C1"`
+	currentBackfillInstanceCnt=`echo "$currentXdcrLog" | grep -c "$BACKFILL_MSG"`
 
 	# Wait for vbuckets and all the other things to propagate before XDCR provisioning
 	sleep 5
@@ -120,6 +124,8 @@ function runTestCase {
 
 	validateLogWithInstance "C1" "$REPAIR_MSG" $(( $currentRepairedInstanceCnt + 1 ))
 
+	validateInternalLogWithInstance "C1" "$BACKFILL_MSG"  $(( $currentBackfillInstanceCnt + 1 ))
+
 	grepForPanics
 	validateXDCRCheckpoints "C1"
 	validateXDCRCheckpoints "C2"
@@ -127,7 +133,10 @@ function runTestCase {
 	echo "============================================================================"
 	echo "PASSED"
 	echo "============================================================================"
-        cleanupBucketReplications
-        cleanupBuckets
+    cleanupBucketReplications
+    cleanupBuckets
 	cleanupRemoteClusterRefs
+    cleanupTestCaseInternalSettings
+    # remove trap as no longer needed
+    trap - EXIT
 }

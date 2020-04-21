@@ -27,6 +27,7 @@ import (
 	"time"
 
 	mcc "github.com/couchbase/gomemcached/client"
+	"github.com/couchbase/goxdcr/backfill_manager"
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/common"
 	"github.com/couchbase/goxdcr/factory"
@@ -71,9 +72,11 @@ type replicationManager struct {
 	// supervises the livesness of adminport
 	supervisor.GenericSupervisor
 	// Single instance of pipeline_mgr here instead of using a global
-	pipelineMgr pipeline_manager.Pipeline_mgr_iface
+	pipelineMgr pipeline_manager.PipelineMgrIface
 
 	resourceMgr resource_manager.ResourceMgrIface
+
+	backfillMgr backfill_manager.BackfillMgrIface
 
 	//replication specification service handle
 	repl_spec_svc service_def.ReplicationSpecSvc
@@ -355,6 +358,7 @@ func (rm *replicationManager) initMetadataChangeMonitor() {
 	rm.repl_spec_svc.SetMetadataChangeHandlerCallback(rm.collectionsManifestSvc.ReplicationSpecChangeCallback)
 	rm.repl_spec_svc.SetMetadataChangeHandlerCallback(replicationSpecChangeListener.replicationSpecChangeHandlerCallback)
 	rm.repl_spec_svc.SetMetadataChangeHandlerCallback(rm.backfillReplSvc.ReplicationSpecChangeCallback)
+	rm.repl_spec_svc.SetMetadataChangeHandlerCallback(rm.backfillMgr.ReplicationSpecChangeCallback)
 
 	mcm.Start()
 }
@@ -446,10 +450,14 @@ func (rm *replicationManager) init(
 		throughput_throttler_svc, log.DefaultLoggerContext, log.DefaultLoggerContext,
 		rm, rm.utils, collectionsManifestSvc)
 
-	rm.pipelineMgr = pipeline_manager.NewPipelineManager(fac, repl_spec_svc, xdcr_topology_svc, remote_cluster_svc, cluster_info_svc, checkpoint_svc, uilog_svc, log.DefaultLoggerContext, rm.utils, collectionsManifestSvc)
+	pipelineMgrObj := pipeline_manager.NewPipelineManager(fac, repl_spec_svc, xdcr_topology_svc, remote_cluster_svc, cluster_info_svc, checkpoint_svc, uilog_svc, log.DefaultLoggerContext, rm.utils, collectionsManifestSvc)
+	rm.pipelineMgr = pipelineMgrObj
 
 	rm.resourceMgr = resource_manager.NewResourceManager(rm.pipelineMgr, repl_spec_svc, xdcr_topology_svc, remote_cluster_svc, cluster_info_svc, checkpoint_svc, uilog_svc, throughput_throttler_svc, log.DefaultLoggerContext, rm.utils)
 	rm.resourceMgr.Start()
+
+	rm.backfillMgr = backfill_manager.NewBackfillManager(collectionsManifestSvc, repl_spec_svc, backfillReplSvc, pipelineMgrObj)
+	rm.backfillMgr.Start()
 
 	rm.metadata_change_callback_cancel_ch = make(chan struct{}, 1)
 

@@ -115,7 +115,7 @@ type CheckpointManager struct {
 
 	target_cluster_version int
 	utils                  utilities.UtilsIface
-	statsMgr               StatsMgrIface
+	statsMgr               service_def.StatsMgrIface
 
 	/*
 	 * Collections related
@@ -166,7 +166,7 @@ func NewCheckpointManager(checkpoints_svc service_def.CheckpointsService, capi_s
 	xdcr_topology_svc service_def.XDCRCompTopologySvc, through_seqno_tracker_svc service_def.ThroughSeqnoTrackerSvc,
 	active_vbs map[string][]uint16, target_username, target_password string, target_bucket_name string,
 	target_kv_vb_map map[string][]uint16, target_cluster_ref *metadata.RemoteClusterReference,
-	target_cluster_version int, isTargetES bool, logger_ctx *log.LoggerContext, utilsIn utilities.UtilsIface, statsMgr StatsMgrIface,
+	target_cluster_version int, isTargetES bool, logger_ctx *log.LoggerContext, utilsIn utilities.UtilsIface, statsMgr service_def.StatsMgrIface,
 	uiLogSvc service_def.UILogSvc, collectionsManifestSvc service_def.CollectionsManifestSvc) (*CheckpointManager, error) {
 	if checkpoints_svc == nil || capi_svc == nil || remote_cluster_svc == nil || rep_spec_svc == nil || cluster_info_svc == nil || xdcr_topology_svc == nil {
 		return nil, errors.New("checkpoints_svc, capi_svc, remote_cluster_svc, rep_spec_svc, cluster_info_svc and xdcr_topology_svc can't be nil")
@@ -872,7 +872,7 @@ func (ckmgr *CheckpointManager) startSeqnoGetter(getter_id int, listOfVbs []uint
 
 // Given a specific vbno and a list of checkpoints and a max possible seqno, return:
 // valid VBTimestamp and corresponding VB-specific stats for statsMgr that was stored in the same ckpt doc
-func (ckmgr *CheckpointManager) getDataFromCkpts(vbno uint16, ckptDoc *metadata.CheckpointsDoc, max_seqno uint64) (*base.VBTimestamp, VBCountMetricMap, *metadata.CollectionNamespaceMapping, uint64, error) {
+func (ckmgr *CheckpointManager) getDataFromCkpts(vbno uint16, ckptDoc *metadata.CheckpointsDoc, max_seqno uint64) (*base.VBTimestamp, service_def.VBCountMetricMap, *metadata.CollectionNamespaceMapping, uint64, error) {
 	var agreedIndex int = -1
 
 	ckptRecordsList := ckmgr.ckptRecordsWLock(ckptDoc, vbno)

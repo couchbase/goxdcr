@@ -1,4 +1,4 @@
-// Copyright (c) 2013 Couchbase, Inc.
+// Copyright (c) 2013-2020 Couchbase, Inc.
 // Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file
 // except in compliance with the License. You may obtain a copy of the License at
 //   http://www.apache.org/licenses/LICENSE-2.0
@@ -138,13 +138,10 @@ var OverviewMetricKeys = []string{CHANGES_LEFT_METRIC, DOCS_CHECKED_METRIC, DOCS
 	RESP_WAIT_METRIC, META_LATENCY_METRIC, DCP_DISPATCH_TIME_METRIC, DCP_DATACH_LEN, THROTTLE_LATENCY_METRIC, THROUGHPUT_THROTTLE_LATENCY_METRIC,
 	DP_GET_FAIL_METRIC, EXPIRY_STRIPPED_METRIC}
 
-// Stats per vbucket
-type VBCountMetricMap map[string]int64
-
 var VBMetricKeys = []string{DOCS_FILTERED_METRIC, DOCS_UNABLE_TO_FILTER_METRIC}
 
-func MakeVBCountMetricMap() VBCountMetricMap {
-	newMap := make(VBCountMetricMap)
+func MakeVBCountMetricMap() service_def.VBCountMetricMap {
+	newMap := make(service_def.VBCountMetricMap)
 	for _, key := range VBMetricKeys {
 		newMap[key] = 0
 	}
@@ -153,14 +150,14 @@ func MakeVBCountMetricMap() VBCountMetricMap {
 
 var VBCountMetrics = MakeVBCountMetricMap()
 
-func NewVBStatsMapFromCkpt(ckptDoc *metadata.CheckpointsDoc, agreedIndex int) VBCountMetricMap {
+func NewVBStatsMapFromCkpt(ckptDoc *metadata.CheckpointsDoc, agreedIndex int) service_def.VBCountMetricMap {
 	if agreedIndex < 0 || ckptDoc == nil || agreedIndex >= len(ckptDoc.Checkpoint_records) {
 		return nil
 	}
 
 	record := ckptDoc.Checkpoint_records[agreedIndex]
 
-	vbStatMap := make(VBCountMetricMap)
+	vbStatMap := make(service_def.VBCountMetricMap)
 	vbStatMap[DOCS_FILTERED_METRIC] = base.Uint64ToInt64(record.Filtered_Items_Cnt)
 	vbStatMap[DOCS_UNABLE_TO_FILTER_METRIC] = base.Uint64ToInt64(record.Filtered_Failed_Cnt)
 	return vbStatMap
@@ -234,15 +231,6 @@ type StatisticsManager struct {
 	user_agent string
 
 	utils utilities.UtilsIface
-}
-
-type StatsMgrIface interface {
-	Start(settings metadata.ReplicationSettingsMap) error
-	Stop() error
-	GetCountMetrics(key string) (int64, error)
-	GetVBCountMetrics(vb uint16) (VBCountMetricMap, error)
-	SetVBCountMetrics(vb uint16, metricKVs VBCountMetricMap) error
-	HandleLatestThroughSeqnos(SeqnoMap map[uint16]uint64)
 }
 
 func NewStatisticsManager(through_seqno_tracker_svc service_def.ThroughSeqnoTrackerSvc,
@@ -1806,7 +1794,7 @@ func (stats_mgr *StatisticsManager) GetCountMetrics(key string) (int64, error) {
 	return registry.(metrics.Counter).Count(), nil
 }
 
-func (stats_mgr *StatisticsManager) GetVBCountMetrics(vb uint16) (VBCountMetricMap, error) {
+func (stats_mgr *StatisticsManager) GetVBCountMetrics(vb uint16) (service_def.VBCountMetricMap, error) {
 	// Currently only DCP has vb specific stats
 	vbBasedMetric, ok := stats_mgr.getRouterCollector().vbBasedMetric[vb]
 	if !ok {
@@ -1826,7 +1814,7 @@ func (stats_mgr *StatisticsManager) GetVBCountMetrics(vb uint16) (VBCountMetricM
 	return metricsMap, nil
 }
 
-func (stats_mgr *StatisticsManager) SetVBCountMetrics(vb uint16, metricKVs VBCountMetricMap) error {
+func (stats_mgr *StatisticsManager) SetVBCountMetrics(vb uint16, metricKVs service_def.VBCountMetricMap) error {
 	// Currently only DCP has vb specific stats
 	vbBasedMetric, ok := stats_mgr.getRouterCollector().vbBasedMetric[vb]
 	if !ok {
@@ -1878,4 +1866,8 @@ func (statsMgr *StatisticsManager) HandleLatestThroughSeqnos(SeqnoMap map[uint16
 	for _, collector := range statsMgr.collectors {
 		collector.HandleLatestThroughSeqnos(SeqnoMap)
 	}
+}
+
+func (statsMgr *StatisticsManager) GetThroughSeqnosFromTsService() map[uint16]uint64 {
+	return statsMgr.through_seqno_tracker_svc.GetThroughSeqnos()
 }

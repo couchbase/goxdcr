@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/metadata"
+	pipeline_mgr "github.com/couchbase/goxdcr/pipeline_manager/mocks"
 	service_def "github.com/couchbase/goxdcr/service_def/mocks"
 	"github.com/stretchr/testify/assert"
 	mock "github.com/stretchr/testify/mock"
@@ -12,17 +13,20 @@ import (
 
 func setupBoilerPlate() (*service_def.CollectionsManifestSvc,
 	*service_def.ReplicationSpecSvc,
-	*service_def.BackfillReplSvc) {
+	*service_def.BackfillReplSvc,
+	*pipeline_mgr.PipelineMgrBackfillIface) {
 	manifestSvc := &service_def.CollectionsManifestSvc{}
 	replSpecSvc := &service_def.ReplicationSpecSvc{}
 	backfillReplSvc := &service_def.BackfillReplSvc{}
+	pipelineMgr := &pipeline_mgr.PipelineMgrBackfillIface{}
 
-	return manifestSvc, replSpecSvc, backfillReplSvc
+	return manifestSvc, replSpecSvc, backfillReplSvc, pipelineMgr
 }
 
 func setupMock(manifestSvc *service_def.CollectionsManifestSvc,
 	replSpecSvc *service_def.ReplicationSpecSvc,
-	backfillReplSvc *service_def.BackfillReplSvc) {
+	backfillReplSvc *service_def.BackfillReplSvc,
+	pipelineMgr *pipeline_mgr.PipelineMgrBackfillIface) {
 
 	manifestSvc.On("SetMetadataChangeHandlerCallback", mock.Anything).Return(nil)
 	replSpecSvc.On("SetMetadataChangeHandlerCallback", mock.Anything).Return(nil)
@@ -37,11 +41,11 @@ func setupReplStartupSpecs(replSpecSvc *service_def.ReplicationSpecSvc,
 func TestBackfillMgrLaunchNoSpecs(t *testing.T) {
 	assert := assert.New(t)
 	fmt.Println("============== Test case start: TestBackfillMgrLaunchNoSpecs =================")
-	manifestSvc, replSpecSvc, backfillReplSvc := setupBoilerPlate()
+	manifestSvc, replSpecSvc, backfillReplSvc, pipelineMgr := setupBoilerPlate()
 	setupReplStartupSpecs(replSpecSvc, nil)
-	setupMock(manifestSvc, replSpecSvc, backfillReplSvc)
+	setupMock(manifestSvc, replSpecSvc, backfillReplSvc, pipelineMgr)
 
-	backfillMgr := NewBackfillManager(manifestSvc, replSpecSvc, backfillReplSvc)
+	backfillMgr := NewBackfillManager(manifestSvc, replSpecSvc, backfillReplSvc, pipelineMgr)
 	assert.NotNil(backfillMgr)
 
 	assert.Nil(backfillMgr.Start())
@@ -114,13 +118,13 @@ func setupStartupManifests(manifestSvc *service_def.CollectionsManifestSvc,
 func TestBackfillMgrLaunchSpecs(t *testing.T) {
 	assert := assert.New(t)
 	fmt.Println("============== Test case start: TestBackfillMgrLaunchSpecs =================")
-	manifestSvc, replSpecSvc, backfillReplSvc := setupBoilerPlate()
+	manifestSvc, replSpecSvc, backfillReplSvc, pipelineMgr := setupBoilerPlate()
 	specs, manifestPairs := setupStartupSpecs(5)
 	setupReplStartupSpecs(replSpecSvc, specs)
 	setupStartupManifests(manifestSvc, specs, manifestPairs)
-	setupMock(manifestSvc, replSpecSvc, backfillReplSvc)
+	setupMock(manifestSvc, replSpecSvc, backfillReplSvc, pipelineMgr)
 
-	backfillMgr := NewBackfillManager(manifestSvc, replSpecSvc, backfillReplSvc)
+	backfillMgr := NewBackfillManager(manifestSvc, replSpecSvc, backfillReplSvc, pipelineMgr)
 	assert.NotNil(backfillMgr)
 
 	assert.Nil(backfillMgr.Start())
@@ -131,7 +135,7 @@ func TestBackfillMgrLaunchSpecs(t *testing.T) {
 func TestBackfillMgrLaunchSpecsWithErr(t *testing.T) {
 	assert := assert.New(t)
 	fmt.Println("============== Test case start: TestBackfillMgrLaunchSpecsWithErr =================")
-	manifestSvc, replSpecSvc, backfillReplSvc := setupBoilerPlate()
+	manifestSvc, replSpecSvc, backfillReplSvc, pipelineMgr := setupBoilerPlate()
 	specs, manifestPairs := setupStartupSpecs(5)
 
 	// Delete the 3rd one to simulate error
@@ -139,9 +143,9 @@ func TestBackfillMgrLaunchSpecsWithErr(t *testing.T) {
 
 	setupReplStartupSpecs(replSpecSvc, specs)
 	setupStartupManifests(manifestSvc, specs, manifestPairs)
-	setupMock(manifestSvc, replSpecSvc, backfillReplSvc)
+	setupMock(manifestSvc, replSpecSvc, backfillReplSvc, pipelineMgr)
 
-	backfillMgr := NewBackfillManager(manifestSvc, replSpecSvc, backfillReplSvc)
+	backfillMgr := NewBackfillManager(manifestSvc, replSpecSvc, backfillReplSvc, pipelineMgr)
 	assert.NotNil(backfillMgr)
 
 	assert.Nil(backfillMgr.Start())

@@ -58,7 +58,7 @@ type Job struct {
 
 type PipelineOpSerializer struct {
 	// Pipeline Manager related stuff
-	pipelineMgr Pipeline_mgr_iface
+	pipelineMgr PipelineMgrInternalIface
 	childWGrp   sync.WaitGroup
 	logger      *log.CommonLogger
 
@@ -74,7 +74,7 @@ type PipelineOpSerializer struct {
 
 // The goal of the serializer is to provide a serialized front-end to end-users for any operations
 // to the pipeline, and then distribute the operations into safe parallel tasks for pipeline manager
-func NewPipelineOpSerializer(pipelineMgrIn Pipeline_mgr_iface, logger *log.CommonLogger) *PipelineOpSerializer {
+func NewPipelineOpSerializer(pipelineMgrIn PipelineMgrInternalIface, logger *log.CommonLogger) *PipelineOpSerializer {
 	serializer := &PipelineOpSerializer{
 		pipelineMgr: pipelineMgrIn,
 		logger:      logger,

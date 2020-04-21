@@ -170,7 +170,7 @@ func (s *State) String() string {
 }
 
 type ResourceManager struct {
-	pipelineMgr            pipeline_manager.Pipeline_mgr_iface
+	pipelineMgr            pipeline_manager.PipelineMgrIface
 	repl_spec_svc          service_def.ReplicationSpecSvc
 	xdcr_topology_svc      service_def.XDCRCompTopologySvc
 	remote_cluster_svc     service_def.RemoteClusterSvc
@@ -240,7 +240,7 @@ type ResourceMgrIface interface {
 	HandleGoMaxProcsChange(goMaxProcs int)
 }
 
-func NewResourceManager(pipelineMgr pipeline_manager.Pipeline_mgr_iface, repl_spec_svc service_def.ReplicationSpecSvc, xdcr_topology_svc service_def.XDCRCompTopologySvc,
+func NewResourceManager(pipelineMgr pipeline_manager.PipelineMgrIface, repl_spec_svc service_def.ReplicationSpecSvc, xdcr_topology_svc service_def.XDCRCompTopologySvc,
 	remote_cluster_svc service_def.RemoteClusterSvc, cluster_info_svc service_def.ClusterInfoSvc, checkpoint_svc service_def.CheckpointsService,
 	uilog_svc service_def.UILogSvc, throughput_throttler_svc service_def.ThroughputThrottlerSvc,
 	logger_context *log.LoggerContext, utilsIn utilities.UtilsIface) ResourceMgrIface {

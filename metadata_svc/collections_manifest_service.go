@@ -393,13 +393,23 @@ func NewCollectionsManifestAgent(name string,
 	return manifestAgent
 }
 
+func (a *CollectionsManifestAgent) refreshAndNotify(refreshImmediately bool) {
+	oldSrc, newSrc, srcErr := a.refreshSource()
+	oldTgt, newTgt, tgtErr := a.refreshTarget(refreshImmediately)
+
+	if srcErr == nil && tgtErr == nil && (oldSrc != nil || newSrc != nil || oldTgt != nil || newTgt != nil) {
+		oldPair := metadata.NewCollectionsManifestPair(oldSrc, oldTgt)
+		newPair := metadata.NewCollectionsManifestPair(newSrc, newTgt)
+		err := a.metadataChangeCb(a.replicationSpec.Id, oldPair, newPair)
+		if err != nil {
+			a.logger.Errorf("Error with callback: %v\n", err.Error())
+		}
+	}
+}
+
 func (a *CollectionsManifestAgent) runPeriodicRefresh(refreshImmediately bool) {
 	if refreshImmediately {
-		_, _, srcErr := a.refreshSourceCustom(base.BucketInfoOpWaitTime, 1 /*max wait time*/)
-		_, _, tgtErr := a.refreshTargetCustom(true /*force*/, base.RemoteMcRetryWaitTime, 1 /*max wait time*/)
-		if srcErr != nil || tgtErr != nil {
-			a.logger.Warnf("Initial refresh resulted with sourceErr: %v tgtErr: %v", srcErr, tgtErr)
-		}
+		a.refreshAndNotify(true /*refreshImmediately*/)
 	}
 
 	ticker := time.NewTicker(base.TopologyChangeCheckInterval)
@@ -410,17 +420,7 @@ func (a *CollectionsManifestAgent) runPeriodicRefresh(refreshImmediately bool) {
 		case <-a.finCh:
 			return
 		case <-ticker.C:
-			oldSrc, newSrc, srcErr := a.refreshSource()
-			oldTgt, newTgt, tgtErr := a.refreshTarget(false)
-
-			if srcErr == nil && newSrc != nil && newSrc.Uid() > 0 && tgtErr == nil && newTgt != nil && newTgt.Uid() > 0 {
-				oldPair := metadata.NewCollectionsManifestPair(oldSrc, oldTgt)
-				newPair := metadata.NewCollectionsManifestPair(newSrc, newTgt)
-				err := a.metadataChangeCb(a.replicationSpec.Id, oldPair, newPair)
-				if err != nil {
-					a.logger.Errorf("Error with callback: %v\n", err.Error())
-				}
-			}
+			a.refreshAndNotify(false /*refreshImmediately*/)
 		}
 	}
 }

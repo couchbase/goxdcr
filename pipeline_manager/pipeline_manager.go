@@ -55,29 +55,29 @@ type PipelineManager struct {
 	utils      utilities.UtilsIface
 }
 
-type Pipeline_mgr_iface interface {
-	// External APIs
+// External APIs
+type PipelineMgrIface interface {
+	AllReplicationsForBucket(bucket string) []string
+	AllReplications() []string
+	AllReplicationsForTargetCluster(targetClusterUuid string) []string
+	AllReplicationSpecsForTargetCluster(targetClusterUuid string) map[string]*metadata.ReplicationSpecification
 	InitiateRepStatus(pipelineName string) error
 	ReInitStreams(pipelineName string) error
 	UpdatePipeline(pipelineName string, cur_err error) error
 	DeletePipeline(pipelineName string) error
 	CheckPipelines()
-	AutoPauseReplication(topic string) error
-
-	// Internal APIs
+	ReplicationStatusMap() map[string]*pipeline.ReplicationStatus
+	ReplicationStatus(topic string) (*pipeline.ReplicationStatus, error)
 	OnExit() error
+}
+
+type PipelineMgrInternalIface interface {
 	StopAllUpdaters()
 	StopPipeline(rep_status pipeline.ReplicationStatusIface) base.ErrorMap
 	StartPipeline(topic string) base.ErrorMap
 	Update(topic string, cur_err error) error
-	ReplicationStatusMap() map[string]*pipeline.ReplicationStatus
-	ReplicationStatus(topic string) (*pipeline.ReplicationStatus, error)
-	AllReplicationsForBucket(bucket string) []string
-	AllReplications() []string
-	AllReplicationsForTargetCluster(targetClusterUuid string) []string
 	CleanupPipeline(topic string) error
 	RemoveReplicationStatus(topic string) error
-	AllReplicationSpecsForTargetCluster(targetClusterUuid string) map[string]*metadata.ReplicationSpecification
 	GetOrCreateReplicationStatus(topic string, cur_err error) (*pipeline.ReplicationStatus, error)
 	GetLastUpdateResult(topic string) bool // whether or not the last update was successful
 	GetRemoteClusterSvc() service_def.RemoteClusterSvc
@@ -85,8 +85,14 @@ type Pipeline_mgr_iface interface {
 	GetLogSvc() service_def.UILogSvc
 	GetReplSpecSvc() service_def.ReplicationSpecSvc
 	GetXDCRTopologySvc() service_def.XDCRCompTopologySvc
+	AutoPauseReplication(topic string) error
 	PauseReplication(topic string) error
 	ForceTargetRefreshManifest(spec *metadata.ReplicationSpecification) error
+}
+
+// Specifically APIs used by backfill manager
+type PipelineMgrBackfillIface interface {
+	GetMainPipelineThroughSeqnos(topic string) (map[uint16]uint64, error)
 }
 
 // Global ptr, should slowly get rid of refences to this global
@@ -693,6 +699,23 @@ func (pipelineMgr *PipelineManager) GetXDCRTopologySvc() service_def.XDCRCompTop
 	return pipelineMgr.xdcr_topology_svc
 }
 
+func (pipelineMgr *PipelineManager) GetMainPipelineThroughSeqnos(topic string) (map[uint16]uint64, error) {
+	pipeline := pipelineMgr.getPipelineFromMap(topic)
+	if pipeline == nil {
+		return nil, fmt.Errorf("Unable to find pipeline %v", topic)
+	}
+	runtimeCtx := pipeline.RuntimeContext()
+	if runtimeCtx == nil {
+		return nil, fmt.Errorf("Unable to find runtimeContext for %v", topic)
+	}
+	statsMgrSvc := runtimeCtx.Service(base.STATISTICS_MGR_SVC)
+	statsMgr, ok := statsMgrSvc.(service_def.StatsMgrIface)
+	if !ok {
+		return nil, fmt.Errorf("Unable to cast stats mgr to StatsMgrIface")
+	}
+	return statsMgr.GetThroughSeqnosFromTsService(), nil
+}
+
 var updaterStateErrorStr = "Can't move update state from %v to %v"
 
 // unit test injection flags
@@ -776,7 +799,7 @@ type PipelineUpdater struct {
 	overflowErrors *pmErrMapType
 
 	// Pipeline Manager that created this updater
-	pipelineMgr Pipeline_mgr_iface
+	pipelineMgr PipelineMgrInternalIface
 
 	// should modify it via scheduleFutureRefresh() and cancelFutureRefresh()
 	// Null if nothing is being scheduled
