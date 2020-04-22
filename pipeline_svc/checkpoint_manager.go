@@ -1606,10 +1606,10 @@ func (ckmgr *CheckpointManager) OnEvent(event *common.Event) {
 			// Don't accept "old" routing updates
 			ckmgr.cachedBrokenMap.lock.RUnlock()
 		} else {
-			// Updates will occur and need to log the differences on UI
-			olderMap := ckmgr.cachedBrokenMap.brokenMap.Clone()
 			ckmgr.cachedBrokenMap.lock.RUnlock()
 			ckmgr.cachedBrokenMap.lock.Lock()
+			// Updates will occur and need to log the differences on UI
+			olderMap := ckmgr.cachedBrokenMap.brokenMap.Clone()
 			// No need to re-check because OnEvent() is serialized
 			// First, absorb any new broken mappings (case 1 and 2)
 			ckmgr.cachedBrokenMap.brokenMap.Consolidate(routingInfo.BrokenMap)
