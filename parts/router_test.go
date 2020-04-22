@@ -14,6 +14,7 @@ import (
 	utilities "github.com/couchbase/goxdcr/utils"
 	UtilitiesMock "github.com/couchbase/goxdcr/utils/mocks"
 	"github.com/stretchr/testify/assert"
+	"io/ioutil"
 	"testing"
 )
 
@@ -256,4 +257,60 @@ func TestRouterExpDelAllMode(t *testing.T) {
 	shouldContinue = router.ProcessExpDelTTL(delEvent)
 	assert.False(shouldContinue)
 	fmt.Println("============== Test case end: TestRouterExpDelAllMode =================")
+}
+
+var testDir string = "../metadata/testData/"
+
+var targetv8 string = testDir + "diffTargetv8.json"
+var targetv9 string = testDir + "diffTargetv9.json"
+
+func TestRouterManifestChange(t *testing.T) {
+	fmt.Println("============== Test case start: TestRouterManifestChange =================")
+	assert := assert.New(t)
+
+	routerId, downStreamParts, routingMap, crMode, loggerCtx,
+		utilsMock, throughputThrottlerSvc,
+		needToThrottle, expDelMode, collectionsManifestSvc, spec := setupBoilerPlateRouter()
+
+	expDelMode = base.FilterExpDelAll
+
+	router, err := NewRouter(routerId, spec, downStreamParts,
+		routingMap, crMode, loggerCtx, utilsMock, throughputThrottlerSvc, needToThrottle,
+		expDelMode, collectionsManifestSvc, nil /*objRecycler*/)
+
+	assert.Nil(err)
+	assert.NotNil(router)
+
+	assert.Nil(router.Start())
+	collectionsRouter := router.collectionsRouting[dummyDownStream]
+	assert.NotNil(collectionsRouter)
+
+	// routing updater receiver
+	newRoutingUpdater := func(info CollectionsRoutingInfo) {
+		// This test will show no broken map but one fixed map
+		assert.Equal(0, len(info.BrokenMap))
+		assert.Equal(1, len(info.BackfillMap))
+	}
+	collectionsRouter.routingUpdater = newRoutingUpdater
+
+	data, _ := ioutil.ReadFile(targetv8)
+	targetv8Manifest, _ := metadata.NewCollectionsManifestFromBytes(data)
+
+	data, _ = ioutil.ReadFile(targetv9)
+	targetv9Manifest, _ := metadata.NewCollectionsManifestFromBytes(data)
+
+	assert.Nil(collectionsRouter.handleNewManifestChanges(&targetv8Manifest))
+	// Force a manual brokenmap. V9 will have the following fixed
+	implicitNamespace := &base.CollectionNamespace{"S2", "col3"}
+	collectionsRouter.brokenMapMtx.Lock()
+	collectionsRouter.brokenMapping.AddSingleMapping(implicitNamespace, implicitNamespace)
+	collectionsRouter.brokenMapMtx.Unlock()
+
+	assert.Nil(collectionsRouter.handleNewManifestChanges(&targetv9Manifest))
+
+	collectionsRouter.brokenMapMtx.Lock()
+	assert.Equal(0, len(collectionsRouter.brokenMapping))
+	collectionsRouter.brokenMapMtx.Unlock()
+
+	fmt.Println("============== Test case end: TestRouterManifestChange =================")
 }

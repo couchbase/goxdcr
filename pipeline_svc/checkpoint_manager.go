@@ -1616,7 +1616,7 @@ func (ckmgr *CheckpointManager) OnEvent(event *common.Event) {
 			if routingInfo.TargetManifestId > ckmgr.cachedBrokenMap.correspondingTargetManifest {
 				// Newer version means potentially backfill maps that were fixed (case 2)
 				// Remove those from the broken mapppings
-				ckmgr.cachedBrokenMap.brokenMap.Delete(routingInfo.BackfillMap)
+				ckmgr.cachedBrokenMap.brokenMap = ckmgr.cachedBrokenMap.brokenMap.Delete(routingInfo.BackfillMap)
 				ckmgr.cachedBrokenMap.correspondingTargetManifest = routingInfo.TargetManifestId
 			}
 			newerMap := ckmgr.cachedBrokenMap.brokenMap.Clone()
