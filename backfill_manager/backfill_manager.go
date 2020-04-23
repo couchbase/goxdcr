@@ -10,6 +10,7 @@
 package backfill_manager
 
 import (
+	"fmt"
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
@@ -50,6 +51,11 @@ type BackfillMgr struct {
 	cacheMtx           sync.RWMutex
 	cacheSpecSourceMap map[string]*metadata.CollectionsManifest
 	cacheSpecTargetMap map[string]*metadata.CollectionsManifest
+
+	// Request Handlers are responsible for handling a specific replication's backfill
+	// request operations, like persisting, optimizing, stop/start, etc
+	specReqHandlersMtx  sync.RWMutex
+	specToReqHandlerMap map[string]*BackfillRequestHandler
 }
 
 func NewBackfillManager(collectionsManifestSvc service_def.CollectionsManifestSvc,
@@ -87,8 +93,48 @@ func (b *BackfillMgr) Start() error {
 
 func (b *BackfillMgr) Stop() {
 	b.logger.Infof("BackfillMgr Stopping...")
-	// TODO - stop handlers
+	errMap := b.stopHandlers()
+	if len(errMap) > 0 {
+		b.logger.Errorf("Stopping handlers returned: %v\n", errMap)
+	}
 	b.logger.Infof("BackfillMgr Stopped")
+}
+
+func (b *BackfillMgr) stopHandlers() base.ErrorMap {
+	var handlers []*BackfillRequestHandler
+	b.specReqHandlersMtx.RLock()
+	for _, handler := range b.specToReqHandlerMap {
+		handlers = append(handlers, handler)
+	}
+	b.specReqHandlersMtx.RUnlock()
+
+	errCh := make(chan base.ComponentError, len(handlers))
+	var errMap base.ErrorMap
+
+	stopHandlersFunc := func() error {
+		var stopChildWait sync.WaitGroup
+
+		for _, handler := range handlers {
+			stopChildWait.Add(1)
+			go handler.Stop(&stopChildWait, errCh)
+		}
+		stopChildWait.Wait()
+
+		if len(errCh) > 0 {
+			errMap = base.FormatErrMsgWithUpperLimit(errCh, 10000 /* doesn't matter*/)
+		}
+		return nil
+	}
+
+	err := base.ExecWithTimeout(stopHandlersFunc, base.TimeoutPartsStop, b.logger)
+	if err != nil {
+		// if err is not nill, it is possible that stopHandlersFunc is still running and may still access errMap
+		// return errMap1 instead of errMap to avoid race conditions
+		errMap1 := make(base.ErrorMap)
+		errMap1["backfillMgr.stopHandlers"] = err
+		return errMap1
+	}
+	return errMap
 }
 
 func (b *BackfillMgr) initCache() error {
@@ -318,4 +364,27 @@ func (b *BackfillMgr) handleTargetChanges(replId string, sourceManifest, oldTarg
 
 func (b *BackfillMgr) getThroughSeqno(replId string) (map[uint16]uint64, error) {
 	return b.pipelineMgr.GetMainPipelineThroughSeqnos(replId)
+}
+
+func (b *BackfillMgr) createNewBackfillReqHandler(replId string, start bool, spec *metadata.ReplicationSpecification) error {
+	b.specReqHandlersMtx.Lock()
+	_, exists := b.specToReqHandlerMap[replId]
+	if exists {
+		b.specReqHandlersMtx.Unlock()
+		return fmt.Errorf("Request handler for %v already exists", replId)
+	}
+
+	seqnoGetterFunc := func() (map[uint16]uint64, error) {
+		return b.getThroughSeqno(replId)
+	}
+
+	handler := NewCollectionBackfillRequestHandler(b.logger, replId, b.backfillReplSvc, spec, seqnoGetterFunc)
+	b.specToReqHandlerMap[replId] = handler
+	b.specReqHandlersMtx.Unlock()
+
+	if start {
+		return handler.Start()
+	}
+
+	return nil
 }
