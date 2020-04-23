@@ -282,3 +282,80 @@ function resetCustomManifestRefreshInterval {
 	echo "Cleaning up internal settings"
 	setInternalSettings "C1" "ManifestRefreshTgtInterval=$ORIG_TARGET_MAN_PULL_INTERVAL"
 }
+
+function getInternalNsServerLogDir {
+	local clusterName=$1
+	local port=${CLUSTER_NAME_PORT_MAP[$clusterName]:-}
+	if [[ -z "$port" ]];then
+		echo "Invalid clustername $clusterName"
+		return 1
+	fi
+
+	local lastDigit=`echo "${port: -1}"`
+	local logNodeDir="n_${lastDigit}"
+
+	# Currently this test library exists under goproj/src/github.com/couchbase/goxdcr/tools/testScripts/
+	local nsServerLogDir="../../../../../../../ns_server/logs/"
+
+	echo "${nsServerLogDir}/${logNodeDir}/"
+}
+
+function getInternalNodeMemcachedLog {
+	local clusterName=$1
+	local port=${CLUSTER_NAME_PORT_MAP[$clusterName]:-}
+	if [[ -z "$port" ]];then
+		echo "Invalid clustername $clusterName"
+		return 1
+	fi
+
+	local logfileDir=`getInternalNsServerLogDir "$clusterName"`
+
+	local memcachedLog
+	for memcachedLog in `ls $logfileDir | grep memcached`
+	do
+		cat ${logfileDir}/${memcachedLog}
+	done
+}
+
+function getInternalNodeXdcrLog {
+	local clusterName=$1
+	local port=${CLUSTER_NAME_PORT_MAP[$clusterName]:-}
+	if [[ -z "$port" ]];then
+		echo "Invalid clustername $clusterName"
+		return 1
+	fi
+
+	local logfileDir=`getInternalNsServerLogDir "$clusterName"`
+
+	local goxdcrLogFile=${logfileDir}/goxdcr.log
+	if ! [[ -f "$goxdcrLogFile" ]];then
+		echo "Unable to find file $goxdcrLogFile"
+		return 1
+	fi
+
+	cat $goxdcrLogFile
+}
+
+# 1 - cluster name
+# 2 - String to look for
+# 3 - Number of occurrences
+function validateInternalLogWithInstance {
+	local clusterName=$1
+	local grepStr="$2"
+	local instanceCnt=$3
+
+	logs=`getInternalNodeXdcrLog "$clusterName"`
+	if ! (( $? == 0 ));then
+		echo "Unable to get log for validation"
+		exit 1
+	fi
+
+	count=`echo "$logs" | grep -c "$grepStr"`
+	if (( $count != $instanceCnt ));then
+		echo "Error - requested count for $grepStr is $instanceCnt, but found $count"
+		exit 1
+	else
+		echo "Found exactly $instanceCnt of \"$grepStr\""
+	fi
+
+}
