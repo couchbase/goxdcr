@@ -79,5 +79,36 @@ func TestBackfillReplMarshal(t *testing.T) {
 	assert.Nil(err)
 	assert.True(checkSpec.SameAs(testSpec))
 
+	assert.Equal(2, len(*(testSpec.VBTasksMap[0])))
+	assert.Equal(1, len(*(testSpec.VBTasksMap[1])))
+	assert.Nil(testSpec.VBTasksMap[2])
+
+	// Test append
+	vb0TasksClone := vb0Tasks.Clone()
+	ts0_append := &BackfillVBTimestamps{
+		StartingTimestamp: &base.VBTimestamp{0, 0, 5, 10, 10, manifestsIdPair},
+		EndingTimestamp:   &base.VBTimestamp{0, 0, 7000, 700, 700, manifestsIdPair},
+	}
+	vb0AppendTask0 := NewBackfillTask(ts0_append, namespaceMapping)
+	ts2_append := &BackfillVBTimestamps{
+		StartingTimestamp: &base.VBTimestamp{1, 0, 5, 10, 10, manifestsIdPair},
+		EndingTimestamp:   &base.VBTimestamp{1, 0, 10000, 1000, 1000, manifestsIdPair},
+	}
+	vb1AppendTask0 := NewBackfillTask(ts2_append, namespaceMapping)
+	var vb0TasksAppend BackfillTasks
+	vb0TasksAppend = append(vb0TasksAppend, vb0AppendTask0)
+	var vb1TasksAppend BackfillTasks
+	vb1TasksAppend = append(vb1TasksAppend, vb1AppendTask0)
+	appendTasksMap := make(map[uint16]*BackfillTasks)
+	appendTasksMap[0] = &vb0TasksAppend
+	appendTasksMap[1] = &vb1TasksAppend
+	// Add an create for good measure
+	appendTasksMap[2] = &vb0TasksClone
+
+	testSpec.AppendTasks(appendTasksMap)
+
+	assert.Equal(3, len(*(testSpec.VBTasksMap[0])))
+	assert.Equal(2, len(*(testSpec.VBTasksMap[1])))
+	assert.Equal(2, len(*(testSpec.VBTasksMap[2])))
 	fmt.Println("============== Test case end: TestBackfillReplMarshal =================")
 }

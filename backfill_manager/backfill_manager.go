@@ -15,6 +15,7 @@ import (
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/goxdcr/pipeline_manager"
+	"github.com/couchbase/goxdcr/pipeline_utils"
 	"github.com/couchbase/goxdcr/service_def"
 	"reflect"
 	"sync"
@@ -40,6 +41,8 @@ type BackfillMgr struct {
 	collectionsManifestSvc service_def.CollectionsManifestSvc
 	replSpecSvc            service_def.ReplicationSpecSvc
 	backfillReplSvc        service_def.BackfillReplSvc
+	clusterInfoSvc         service_def.ClusterInfoSvc
+	xdcrTopologySvc        service_def.XDCRCompTopologySvc
 
 	pipelineMgr pipeline_manager.PipelineMgrBackfillIface
 
@@ -61,7 +64,9 @@ type BackfillMgr struct {
 func NewBackfillManager(collectionsManifestSvc service_def.CollectionsManifestSvc,
 	replSpecSvc service_def.ReplicationSpecSvc,
 	backfillReplSvc service_def.BackfillReplSvc,
-	pipelineMgr pipeline_manager.PipelineMgrBackfillIface) *BackfillMgr {
+	pipelineMgr pipeline_manager.PipelineMgrBackfillIface,
+	clusterInfoSvc service_def.ClusterInfoSvc,
+	xdcrTopologySvc service_def.XDCRCompTopologySvc) *BackfillMgr {
 
 	backfillMgr := &BackfillMgr{
 		collectionsManifestSvc: collectionsManifestSvc,
@@ -71,6 +76,9 @@ func NewBackfillManager(collectionsManifestSvc service_def.CollectionsManifestSv
 		cacheSpecSourceMap:     make(map[string]*metadata.CollectionsManifest),
 		cacheSpecTargetMap:     make(map[string]*metadata.CollectionsManifest),
 		pipelineMgr:            pipelineMgr,
+		specToReqHandlerMap:    make(map[string]*BackfillRequestHandler),
+		clusterInfoSvc:         clusterInfoSvc,
+		xdcrTopologySvc:        xdcrTopologySvc,
 	}
 
 	return backfillMgr
@@ -154,8 +162,26 @@ func (b *BackfillMgr) initCache() error {
 			b.cacheMtx.Unlock()
 			// TODO - MB-38868
 		}
+		b.createBackfillRequestHandler(spec)
 	}
 	return nil
+}
+
+func (b *BackfillMgr) createBackfillRequestHandler(spec *metadata.ReplicationSpecification) {
+	replId := spec.Id
+	seqnoGetter := func() (map[uint16]uint64, error) {
+		return b.getThroughSeqno(replId)
+	}
+	vbsGetter := func() ([]uint16, error) {
+		return b.GetMyVBs(spec.SourceBucketName)
+	}
+	b.specReqHandlersMtx.Lock()
+	reqHandler := NewCollectionBackfillRequestHandler(b.logger, replId,
+		b.backfillReplSvc, spec, seqnoGetter, vbsGetter, spec.Settings.SourceNozzlePerNode*2)
+	b.specToReqHandlerMap[replId] = reqHandler
+	b.specReqHandlersMtx.Unlock()
+
+	reqHandler.Start()
 }
 
 func (b *BackfillMgr) retrieveLastPersistedManifest(spec *metadata.ReplicationSpecification) error {
@@ -204,7 +230,7 @@ func (b *BackfillMgr) ReplicationSpecChangeCallback(changedSpecId string, oldSpe
 		if err != nil {
 			return err
 		}
-		// TODO - need to create a backfill request handler
+		b.createBackfillRequestHandler(newSpec)
 	} else if newSpecObj.(*metadata.ReplicationSpecification) == nil &&
 		oldSpecObj.(*metadata.ReplicationSpecification) != nil {
 		// Delete internal caches
@@ -352,14 +378,18 @@ func (b *BackfillMgr) handleTargetChanges(replId string, sourceManifest, oldTarg
 	b.cacheSpecTargetMap[replId] = newTargetManifest
 	b.cacheMtx.Unlock()
 
-	seqnosMap, err := b.getThroughSeqno(replId)
-	if err != nil {
-		// If err is not-nil, it's a coding error
-		b.logger.Errorf("Unable to retrieve through seqnos for replication %v", replId)
+	b.specReqHandlersMtx.RLock()
+	handler := b.specToReqHandlerMap[replId]
+	b.specReqHandlersMtx.RUnlock()
+	if handler == nil {
+		b.logger.Errorf("Unable to find handler for spec %v", replId)
 		return
 	}
 
-	b.logger.Infof("Replication %v - These collections need to backfill %v for vb->seqnos %v", replId, backfillMapping, seqnosMap)
+	err = handler.HandleBackfillRequest(backfillMapping)
+	if err != nil {
+		b.logger.Errorf("Handler returned err %v", err)
+	}
 }
 
 func (b *BackfillMgr) getThroughSeqno(replId string) (map[uint16]uint64, error) {
@@ -378,7 +408,11 @@ func (b *BackfillMgr) createNewBackfillReqHandler(replId string, start bool, spe
 		return b.getThroughSeqno(replId)
 	}
 
-	handler := NewCollectionBackfillRequestHandler(b.logger, replId, b.backfillReplSvc, spec, seqnoGetterFunc)
+	vbsGetter := func() ([]uint16, error) {
+		return b.GetMyVBs(spec.SourceBucketName)
+	}
+
+	handler := NewCollectionBackfillRequestHandler(b.logger, replId, b.backfillReplSvc, spec, seqnoGetterFunc, vbsGetter, spec.Settings.SourceNozzlePerNode)
 	b.specToReqHandlerMap[replId] = handler
 	b.specReqHandlersMtx.Unlock()
 
@@ -387,4 +421,19 @@ func (b *BackfillMgr) createNewBackfillReqHandler(replId string, start bool, spe
 	}
 
 	return nil
+}
+
+func (b *BackfillMgr) GetMyVBs(sourceBucketName string) ([]uint16, error) {
+	var vbList []uint16
+
+	kv_vb_map, _, err := pipeline_utils.GetSourceVBMap(b.clusterInfoSvc, b.xdcrTopologySvc, sourceBucketName, b.logger)
+	if err != nil {
+		return vbList, err
+	}
+
+	for _, vbno := range kv_vb_map {
+		vbList = append(vbList, vbno...)
+	}
+
+	return vbList, nil
 }

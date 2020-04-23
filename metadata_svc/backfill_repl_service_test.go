@@ -245,6 +245,8 @@ func setupMetakvInitialAddSetDel(metadataSvc *service_def.MetadataSvc, specId, i
 	backfillMappingsKey := getBackfillMappingsDocKeyFunc(specId)
 	metadataSvc.On("Get", backfillMappingsKey).Return(nil, nil, serviceDefReal.MetadataNotFoundErr).Times(1)
 
+	specGetKey := getBackfillReplicationDocKeyFunc(specId)
+
 	// sharefcounting service should persist an empty doc
 	emptyMappingsDoc := &metadata.CollectionNsMappingsDoc{}
 	emptyMappingDocBytes, err := json.Marshal(emptyMappingsDoc)
@@ -253,6 +255,11 @@ func setupMetakvInitialAddSetDel(metadataSvc *service_def.MetadataSvc, specId, i
 	}
 	// ADD PATH
 	metadataSvc.On("Add", backfillMappingsKey, emptyMappingDocBytes).Return(nil)
+
+	// When adding, a Get will be called  as part of getting the revision
+	metadataSvc.On("Get", specGetKey).Return(emptyMappingDocBytes, nil, nil).Times(1)
+
+	metadataSvc.On("Get", backfillMappingsKey).Return(emptyMappingDocBytes, nil, nil).Times(1)
 
 	// Second time, when Get is called, it's part of RMW of upsert
 	metadataSvc.On("Get", backfillMappingsKey).Return(emptyMappingDocBytes, nil, nil).Times(1)

@@ -90,6 +90,22 @@ func (b *BackfillReplicationSpec) Redact() *BackfillReplicationSpec {
 	return b
 }
 
+// Given a list of tasks for VBs, add (append) them to the list of currently existing tasks
+func (b *BackfillReplicationSpec) AppendTasks(vbTasksMap VBTasksMapType) {
+	if b == nil {
+		return
+	}
+
+	for vb, tasks := range vbTasksMap {
+		_, exists := b.VBTasksMap[vb]
+		if !exists {
+			b.VBTasksMap[vb] = tasks
+		} else {
+			*(b.VBTasksMap[vb]) = append(*(b.VBTasksMap[vb]), (*tasks)...)
+		}
+	}
+}
+
 func (b *BackfillReplicationSpec) SameSpecGeneric(other GenericSpecification) bool {
 	return b.SameAs(other.(*BackfillReplicationSpec))
 }
@@ -103,6 +119,35 @@ func (b *BackfillReplicationSpec) RedactGeneric() GenericSpecification {
 }
 
 type VBTasksMapType map[uint16]*BackfillTasks
+
+// Given a list of VBs and a namespace mapping, create a VBTasksMap that includes this this mapping
+func NewBackfillVBTasksMap(namespaceMap CollectionNamespaceMapping, vbs []uint16, endSeqnos map[uint16]uint64) (VBTasksMapType, error) {
+	var vbTasksMap VBTasksMapType
+
+	if len(vbs) == 0 {
+		return vbTasksMap, base.ErrorNoSourceKV
+	}
+
+	vbTasksMap = make(VBTasksMapType)
+	errorMap := make(base.ErrorMap)
+	for _, vb := range vbs {
+		endSeqno, exists := endSeqnos[vb]
+		if !exists {
+			errorMap[fmt.Sprintf("seqno for vb %v", vb)] = base.ErrorNotFound
+			continue
+		}
+
+		startTs := &base.VBTimestamp{Vbno: vb}
+		endTs := &base.VBTimestamp{Vbno: vb, Seqno: endSeqno}
+		timestamps := &BackfillVBTimestamps{startTs, endTs}
+
+		var tasks BackfillTasks
+		task := NewBackfillTask(timestamps, namespaceMap)
+		tasks = append(tasks, task)
+		vbTasksMap[vb] = &tasks
+	}
+	return vbTasksMap, nil
+}
 
 func (this VBTasksMapType) SameAs(other VBTasksMapType) bool {
 	if len(this) != len(other) {

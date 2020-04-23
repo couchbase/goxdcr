@@ -116,7 +116,11 @@ func (b *BackfillReplicationService) initCacheFromMetaKV() (err error) {
 		}
 		actualSpec, err := b.replSpecSvc.ReplicationSpec(replicationId)
 		if err != nil {
-			b.logger.Errorf("Unable to retrieve actual spec for id %v - %v", replicationId, err)
+			if err != service_def.MetadataNotFoundErr {
+				b.logger.Errorf("Unable to retrieve actual spec for id %v - %v", replicationId, err)
+			}
+			// TODO - do we need to clean up backfill repl?
+			continue
 		}
 		if backfillSpec.InternalId != actualSpec.InternalId {
 			// Out of date
@@ -334,6 +338,11 @@ func (b *BackfillReplicationService) AddBackfillReplSpec(spec *metadata.Backfill
 	err = b.metadataSvc.Add(key, value)
 	if err != nil {
 		b.logger.Errorf("Add returned error: %v\n", err)
+		return err
+	}
+
+	err = b.loadLatestMetakvRevisionIntoSpec(spec)
+	if err != nil {
 		return err
 	}
 
