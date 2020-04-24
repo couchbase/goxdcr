@@ -14,6 +14,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	mock "github.com/stretchr/testify/mock"
 	gocb "gopkg.in/couchbase/gocb.v1"
+	mcc "github.com/couchbase/gomemcached/client"
 	"net"
 	"reflect"
 	"testing"
@@ -30,7 +31,7 @@ const password = "wewewe"
 var kvString = fmt.Sprintf("%s:%s", "127.0.0.1", xmemPort)
 var connString = fmt.Sprintf("%s:%s", "127.0.0.1", targetPort)
 
-func setupBoilerPlateXmem() (*utilsMock.UtilsIface,
+func setupBoilerPlateXmem(bname string) (*utilsMock.UtilsIface,
 	map[string]interface{},
 	*XmemNozzle,
 	*Router,
@@ -49,7 +50,7 @@ func setupBoilerPlateXmem() (*utilsMock.UtilsIface,
 
 	// local cluster run has KV port starting at 12000
 	xmemNozzle := NewXmemNozzle("testId", remoteClusterSvc, "", "testTopic", "testConnPoolNamePrefix", 5, /* connPoolConnSize*/
-		kvString, "B1", xmemBucket, "temporaryBucketUuid", "Administrator", "wewewe",
+		kvString, "B1", bname, "temporaryBucketUuid", "Administrator", "wewewe",
 		base.CRMode_RevId, log.DefaultLoggerContext, utilitiesMock, vbList)
 
 	// settings map
@@ -141,7 +142,7 @@ func setupMocksXmem(xmem *XmemNozzle, utils *utilsMock.UtilsIface, bandwidthThro
 func TestPositiveXmemNozzle(t *testing.T) {
 	assert := assert.New(t)
 	fmt.Println("============== Test case start: TestPositiveXmemNozzle =================")
-	utils, settings, xmem, _, throttler, remoteClusterSvc, colManSvc := setupBoilerPlateXmem()
+	utils, settings, xmem, _, throttler, remoteClusterSvc, colManSvc := setupBoilerPlateXmem(xmemBucket)
 	setupMocksXmem(xmem, utils, throttler, remoteClusterSvc, colManSvc)
 
 	assert.Nil(xmem.initialize(settings))
@@ -151,7 +152,7 @@ func TestPositiveXmemNozzle(t *testing.T) {
 func TestNegNoCompressionXmemNozzle(t *testing.T) {
 	assert := assert.New(t)
 	fmt.Println("============== Test case start: TestNegNoCompressionXmemNozzle =================")
-	utils, settings, xmem, _, _, _, _ := setupBoilerPlateXmem()
+	utils, settings, xmem, _, _, _, _ := setupBoilerPlateXmem(xmemBucket)
 	setupMocksCompressNeg(utils)
 
 	assert.Equal(base.ErrorCompressionNotSupported, xmem.initialize(settings))
@@ -161,7 +162,7 @@ func TestNegNoCompressionXmemNozzle(t *testing.T) {
 func TestPosNoCompressionXmemNozzle(t *testing.T) {
 	assert := assert.New(t)
 	fmt.Println("============== Test case start: TestNegNoCompressionXmemNozzle =================")
-	utils, settings, xmem, _, _, _, _ := setupBoilerPlateXmem()
+	utils, settings, xmem, _, _, _, _ := setupBoilerPlateXmem(xmemBucket)
 	settings[SETTING_COMPRESSION_TYPE] = (base.CompressionType)(base.CompressionTypeForceUncompress)
 	settings[ForceCollectionDisableKey] = true
 	setupMocksCompressNeg(utils)
@@ -174,7 +175,7 @@ func TestPosNoCompressionXmemNozzle(t *testing.T) {
 func TestPositiveXmemNozzleAuto(t *testing.T) {
 	assert := assert.New(t)
 	fmt.Println("============== Test case start: TestPositiveXmemNozzleAuto =================")
-	utils, settings, xmem, _, throttler, remoteClusterSvc, colManSvc := setupBoilerPlateXmem()
+	utils, settings, xmem, _, throttler, remoteClusterSvc, colManSvc := setupBoilerPlateXmem(xmemBucket)
 	settings[SETTING_COMPRESSION_TYPE] = (base.CompressionType)(base.CompressionTypeAuto)
 	setupMocksXmem(xmem, utils, throttler, remoteClusterSvc, colManSvc)
 
@@ -198,10 +199,10 @@ func TestXmemSendAPacket(t *testing.T) {
 	defer fmt.Println("============== Test case end: TestXmemSendAPacket =================")
 
 	uprNotCompressFile := "../utils/testInternalData/uprNotCompress.json"
-	xmemSendAPacket(t, uprNotCompressFile)
+	xmemSendAPacket(t, uprNotCompressFile, xmemBucket)
 }
 
-func xmemSendAPacket(t *testing.T, uprfile string) {
+func xmemSendAPacket(t *testing.T, uprfile string, bname string) {
 	if !targetXmemIsUpAndCorrectSetupExists() {
 		fmt.Println("Skipping since live cluster_run setup has not been detected")
 		return
@@ -209,14 +210,14 @@ func xmemSendAPacket(t *testing.T, uprfile string) {
 
 	assert := assert.New(t)
 
-	utilsNotUsed, settings, xmem, router, throttler, remoteClusterSvc, colManSvc := setupBoilerPlateXmem()
+	utilsNotUsed, settings, xmem, router, throttler, remoteClusterSvc, colManSvc := setupBoilerPlateXmem(bname)
 	realUtils := utilsReal.NewUtilities()
 	xmem.utils = realUtils
 
 	setupMocksXmem(xmem, utilsNotUsed, throttler, remoteClusterSvc, colManSvc)
 
 	// Need to find the actual running targetBucketUUID
-	bucketInfo, err := realUtils.GetBucketInfo(connString, xmemBucket, username, password, base.HttpAuthMechPlain, nil, false, nil, nil, xmem.Logger())
+	bucketInfo, err := realUtils.GetBucketInfo(connString, bname, username, password, base.HttpAuthMechPlain, nil, false, nil, nil, xmem.Logger())
 	assert.Nil(err)
 	uuid, ok := bucketInfo["uuid"].(string)
 	assert.True(ok)
@@ -224,6 +225,7 @@ func xmemSendAPacket(t *testing.T, uprfile string) {
 
 	event, err := RetrieveUprFile(uprfile)
 	assert.Nil(err)
+
 	wrappedEvent := &base.WrappedUprEvent{UprEvent: event}
 	wrappedMCRequest, err := router.ComposeMCRequest(wrappedEvent)
 	assert.Nil(err)
@@ -243,15 +245,17 @@ func xmemSendAPacket(t *testing.T, uprfile string) {
 		Password: password,
 	})
 
-	bucket, err := cluster.OpenBucket(xmemBucket, "")
+	bucket, err := cluster.OpenBucket(bname, "")
 	assert.Nil(err)
 
-	var byteSlice []byte
-	_, err = bucket.Get(string(event.Key), &byteSlice)
-	assert.Nil(err)
-	assert.NotEqual(0, len(byteSlice))
+	if event.DataType & mcc.XattrDataType == 0 {
+		// Get doesn't work if it has XATTR
+		var byteSlice []byte
+		_, err = bucket.Get(string(event.Key), &byteSlice)
+		assert.Nil(err)
+		assert.NotEqual(0, len(byteSlice))
+	}
 }
-
 
 func TestXmemGet(t *testing.T) {
 	fmt.Println("============== Test case start: TestXmemGet =================")
@@ -263,12 +267,12 @@ func TestXmemGet(t *testing.T) {
 	}
 
 	uprNotCompressFile := "../utils/testInternalData/uprNotCompress.json"
-	xmemSendAPacket(t, uprNotCompressFile)
+	xmemSendAPacket(t, uprNotCompressFile, xmemBucket)
 
 	fmt.Println("Sent a packet. Trying to fetch it now.")
 	assert := assert.New(t)
 
-	utilsNotUsed, settings, xmem, router, throttler, remoteClusterSvc, colManSvc := setupBoilerPlateXmem()
+	utilsNotUsed, settings, xmem, router, throttler, remoteClusterSvc, colManSvc := setupBoilerPlateXmem(xmemBucket)
 	realUtils := utilsReal.NewUtilities()
 	xmem.utils = realUtils
 	setupMocksXmem(xmem, utilsNotUsed, throttler, remoteClusterSvc, colManSvc)
@@ -308,18 +312,272 @@ func TestXmemGet(t *testing.T) {
 			target := docPair.resp
 			s := reflect.ValueOf(source).Elem()
 			typeOf := s.Type()
-			fmt.Println("Source Document:")
+			fmt.Printf("Source Document: %v\n", source)
 			for i := 0; i < s.NumField(); i++ {
 				f := s.Field(i)
 				fmt.Printf("%d: %s %s = %v\n", i, typeOf.Field(i).Name, f.Type(), f.Interface())
 			}
 			s = reflect.ValueOf(target).Elem()
 			typeOf = s.Type()
-			fmt.Println("Target Document:")
+			fmt.Printf("Target Document: %v\n", target)
 			for i := 0; i < s.NumField(); i++ {
 				f := s.Field(i)
 				fmt.Printf("%d: %s %s = %v\n", i, typeOf.Field(i).Name, f.Type(), f.Interface())
 			}
 		}
 	}
+}
+
+type User struct {
+	Id string `json:"uid"`
+	Email string `json:"email"`
+	Interests []string `json:"interests"`
+}
+/*
+ * This testcase will create a bucket customCR, send two packets to target,
+ * one pre7.0 (kingarthur1), one 7.0 (kingarthur2), and perform conflict resolution
+ * using different source documents against the metadata of these two target documents.
+ * Some of the source documents have XATTR with PCAS and MV.
+ *
+ * Test 1: Two pre-7.0 docs, source larger revSeqno/CAS: Source wins.
+ * Test 2: Source pre-7.0, target 7.0: Target wins.
+ * Test 3: Source 7.0, target pre-7.0, source smaller CAS: Conflict
+ * Test 4: Source 7.0, target pre-7.0, source larger CAS and no PCAS/MV: Conflict
+ * Test 5: Source 7.0, target pre-7.0. source larger CAS and dominating MV: Source wins
+ * Test 6: Two 7.0 docs, same clusterID, source larger CAS: Source wins 
+ * Test 7: Two 7.0 docs, same clusterID, source smaller CAS: Source loses
+ * Test 8: Two 7.0 docs, different clusterID, source larger CAS, No PCAS: Conflict
+ * Test 9: Two 7.0 docs, different clusterID, source smaller CAS: Source loses
+ * Test 10: Two 7.0 docs, different clusterID, source larger CAS and dominating PCAS: Source wins
+ * Test 11: Two 7.0 docs. different clusterID, source larger CAS and dominating MV: Source wins
+ */
+func TestGetMetaForCustomCR(t *testing.T) {
+	fmt.Println("============== Test case start: GeteMetaForCustomCR =================")
+	defer fmt.Println("============== Test case end: GeteMetaForCustomCR =================")
+
+	if !targetXmemIsUpAndCorrectSetupExists() {
+		fmt.Println("Skipping since live cluster_run setup has not been detected")
+		return
+	}
+
+	assert := assert.New(t)
+	bucketName := "CustomCR"
+
+	cluster, err := gocb.Connect(fmt.Sprintf("http://127.0.0.1:%s", "9001"))
+	assert.Nil(err)
+
+	cluster.Authenticate(gocb.PasswordAuthenticator{
+		Username: username,
+		Password: password,
+	})
+	cm := cluster.Manager(username, password)
+
+	err = cm.RemoveBucket(bucketName)
+	bucketSettings := gocb.BucketSettings{false, false, bucketName, "", 100, 0, gocb.Couchbase}
+	err = cm.InsertBucket(&bucketSettings)
+	assert.Nil(err)
+
+	bucket, err := cluster.OpenBucket(bucketName, "")
+	for err != nil {
+		bucket, err = cluster.OpenBucket(bucketName, "")
+	}
+	assert.Nil(err)
+	assert.NotNil(bucket)
+
+	time.Sleep(2 * time.Second)
+	//uprNotCompressFile := "../utils/testInternalData/uprNotCompress.json"
+
+	// Set up target with a pre-7.0 and 7.0 document
+	kingarthur1_pre7_cas1 := "testdata/customCR/kingarthur1_pre7_cas1.json"
+	xmemSendAPacket(t, kingarthur1_pre7_cas1, bucketName)
+	kingarthur2_cluster2_cas1 := "testdata/customCR/kingarthur2_cluster2_cas1.json"
+	xmemSendAPacket(t, kingarthur2_cluster2_cas1, bucketName)
+
+	utilsNotUsed, settings, xmem, router, throttler, remoteClusterSvc, colManSvc := setupBoilerPlateXmem(bucketName)
+	realUtils := utilsReal.NewUtilities()
+	xmem.utils = realUtils
+	setupMocksXmem(xmem, utilsNotUsed, throttler, remoteClusterSvc, colManSvc)
+
+	// Need to find the actual running targetBucketUUID
+	bucketInfo, err := realUtils.GetBucketInfo(connString, bucketName, username, password, base.HttpAuthMechPlain, nil, false, nil, nil, xmem.Logger())
+	assert.Nil(err)
+	uuid, ok := bucketInfo["uuid"].(string)
+	assert.True(ok)
+	xmem.targetBucketUuid = uuid
+
+	settings[SETTING_COMPRESSION_TYPE] = base.CompressionTypeSnappy
+	settings[ForceCollectionDisableKey] = true
+	err = xmem.Start(settings)
+	assert.Nil(err)
+
+	/*
+	 * Source doc: kingarthur1_pre7_cas2
+	 * Target doc: kingarthur1_pre7_cas1
+	 * Source wins
+	 */
+	fmt.Println("Test 1: Two pre-7.0 docs, source larger revSeqno/CAS: Source wins.")
+	getMetaForCustomCR(1, t, "testdata/customCR/kingarthur1_pre7_cas2.json", xmem, router, SourceDominate)
+
+	/*
+	 * Source doc: kingarthur2_pre7_cas2
+	 * Target doc: kingarthur2_cluster2_cas1
+	 * Target wins.
+	 */
+
+	fmt.Println("Test 2: Source pre-7.0, target 7.0: Target wins.")
+	getMetaForCustomCR(2, t, "testdata/customCR/kingarthur2_pre7_cas2.json", xmem, router, TargetDominate)
+
+	/*
+	 * Source doc: kingarthur1_cluster1_cas0
+	 * Target doc: kingarthur1_pre7_cas1
+	 * Conflict
+	 */
+	fmt.Println("Test 3: Source 7.0, target pre-7.0, source smaller CAS: Conflict")
+	getMetaForCustomCR(3, t, "testdata/customCR/kingarthur1_cluster1_cas0.json", xmem, router, Conflict)
+
+	/*
+	 * Source doc: kingarthur1_cluster1_cas2
+	 * Target doc: kingarthur1_pre7_cas1
+	 * Conflict
+	 */
+	fmt.Println("Test 4: Source 7.0, target pre-7.0, source larger CAS and no PCAS/MV: Conflict")
+	getMetaForCustomCR(4, t, "testdata/customCR/kingarthur1_cluster1_cas2.json", xmem, router, Conflict)
+
+	/*
+	 * Source doc: kingarthur1_cluster1_pcasRevId.json
+	 * Target doc: kingarthur1_pre7_cas1
+	 * Conflict
+	 */
+	resetLogLevel := false
+	if testing.Verbose() {
+		log.DefaultLoggerContext.SetLogLevel(log.LogLevelDebug)
+		resetLogLevel = true
+	}
+	fmt.Println("Test 5: Source 7.0, target pre-7.0. source larger CAS and dominating PCAS: Source wins")
+	getMetaForCustomCR(5, t, "testdata/customCR/kingarthur1_cluster1_pcasRevId.json", xmem, router, SourceDominate)
+	if resetLogLevel {
+		log.DefaultLoggerContext.SetLogLevel(log.LogLevelInfo)
+	}
+
+	/*
+	 * Source doc: kingarthur2_cluster2_cas2
+	 * Target doc: kingarthur2_cluster2_cas1
+	 * Source wins
+	 */
+	fmt.Println("Test 6: Two 7.0 docs, same clusterID, source larger CAS: Source wins")
+	getMetaForCustomCR(6, t, "testdata/customCR/kingarthur2_cluster2_cas2.json", xmem, router, SourceDominate)
+
+	/*
+	 * Source doc: kingarthur2_cluster2_cas0
+	 * Target doc: kingarthur2_cluster2_cas1
+	 * Souce loses
+	 */
+	fmt.Println("Test 7: Two 7.0 docs, same clusterID, source smaller CAS: Source loses")
+	getMetaForCustomCR(7, t, "testdata/customCR/kingarthur2_cluster2_cas0.json", xmem, router, TargetDominate)
+
+	/*
+	 * Source doc: kingarthur2_cluster1_cas2
+	 * Target doc: kingarthur2_cluster2_cas1
+	 * Conflict and it is in possibleConflict_map
+	 */
+	fmt.Println("Test 8: Two 7.0 docs, different clusterID, source larger CAS, No PCAS: Conflict")
+	getMetaForCustomCR(8, t, "testdata/customCR/kingarthur2_cluster1_cas2.json", xmem, router, Conflict)
+
+	/*
+	 * Source doc: kingarthur2_cluster1_cas0
+	 * Target doc: kingarthur2_cluster2_cas1
+	 * Source loses
+	 */
+	fmt.Println("Test 9: Two 7.0 docs, different clusterID, source smaller CAS:	Source loses")
+	getMetaForCustomCR(9, t, "testdata/customCR/kingarthur2_cluster1_cas0.json", xmem, router, TargetDominate)
+
+	/*
+	 * Source doc: kingarthur2_cluster1_pcasC2
+	 * Target doc: kingarthur2_cluster2_cas1
+	 * Source PCAS dominate
+	 */
+
+	if testing.Verbose() {
+		log.DefaultLoggerContext.SetLogLevel(log.LogLevelDebug)
+		resetLogLevel = true
+	}
+	fmt.Println("Test 10: Two 7.0 docs, different clusterID, source larger CAS and dominating PCAS: Source wins")
+	getMetaForCustomCR(10, t, "testdata/customCR/kingarthur2_cluster1_pcasC2.json", xmem, router, SourceDominate)
+
+	/*
+	 * Source doc: kingarthur2_cluster1_mvC2
+	 * Target doc: kingarthur2_cluster2_cas1
+	 * Source PCAS dominate
+	 */
+	fmt.Println("Test 11: Two 7.0 docs. different clusterID, source larger CAS and dominating MV: Source wins")
+	getMetaForCustomCR(11, t, "testdata/customCR/kingarthur2_cluster1_mvC2.json", xmem, router, SourceDominate)
+	if resetLogLevel {
+		log.DefaultLoggerContext.SetLogLevel(log.LogLevelInfo)
+	}
+}
+func getMetaForCustomCR(testId uint32, t *testing.T, fname string, xmem *XmemNozzle, router *Router, expectedResult ConflictResult) {
+	assert := assert.New(t)
+	event, err := RetrieveUprFile(fname)
+	assert.Nil(err)
+	wrappedEvent := &base.WrappedUprEvent{UprEvent: event}
+	wrappedMCRequest, err := router.ComposeMCRequest(wrappedEvent)
+	assert.Nil(err)
+	assert.NotNil(wrappedMCRequest)
+	getMeta_map := make(base.McRequestMap)
+	getMeta_map[wrappedMCRequest.UniqueKey] = wrappedMCRequest
+	rep_map, possibleConflict_map, err := xmem.batchGetMetaForCustomCR(getMeta_map)
+	assert.Nil(err)
+	if expectedResult == SourceDominate {
+		assert.Equal(1, len(rep_map), fmt.Sprintf("Test %d failed", testId))
+	} else {
+		assert.Equal(0, len(rep_map), fmt.Sprintf("Test %d failed", testId))
+	}
+	if expectedResult == Conflict {
+		assert.Equal(1, len(possibleConflict_map), fmt.Sprintf("Test %d failed", testId))
+	} else {
+		assert.Equal(0, len(possibleConflict_map), fmt.Sprintf("Test %d failed", testId))
+	}
+}
+func TestSourceXattrDominate(t *testing.T) {
+	fmt.Println("============== Test case start: SourceXattrDominate =================")
+	defer fmt.Println("============== Test case end: SourceXattrDominate =================")
+
+	if !targetXmemIsUpAndCorrectSetupExists() {
+		fmt.Println("Skipping since live cluster_run setup has not been detected")
+		return
+	}
+
+	uprNotCompressFile := "testdata/customCR/kingarthur2_cluster1_pcasC2.json"
+	xmemSendAPacket(t, uprNotCompressFile, xmemBucket)
+
+	fmt.Println("Sent a packet. Trying to fetch it now.")
+	assert := assert.New(t)
+
+	utilsNotUsed, settings, xmem, router, throttler, remoteClusterSvc, colManSvc := setupBoilerPlateXmem(xmemBucket)
+	realUtils := utilsReal.NewUtilities()
+	xmem.utils = realUtils
+	setupMocksXmem(xmem, utilsNotUsed, throttler, remoteClusterSvc, colManSvc)
+
+	// Need to find the actual running targetBucketUUID
+	bucketInfo, err := realUtils.GetBucketInfo(connString, xmemBucket, username, password, base.HttpAuthMechPlain, nil, false, nil, nil, xmem.Logger())
+	assert.Nil(err)
+	uuid, ok := bucketInfo["uuid"].(string)
+	assert.True(ok)
+	xmem.targetBucketUuid = uuid
+
+	event, err := RetrieveUprFile(uprNotCompressFile)
+	assert.Nil(err)
+	wrappedEvent := &base.WrappedUprEvent{UprEvent: event}
+	wrappedMCRequest, err := router.ComposeMCRequest(wrappedEvent)
+	assert.Nil(err)
+	assert.NotNil(wrappedMCRequest)
+
+	settings[SETTING_COMPRESSION_TYPE] = base.CompressionTypeSnappy
+	settings[ForceCollectionDisableKey] = true
+	err = xmem.Start(settings)
+	assert.Nil(err)
+
+	var clusterID uint64 = 1<<47 + 2000
+	res := xmem.sourceXattrDominate(wrappedMCRequest.Req, clusterID, 1)
+	assert.Equal(res, true)
 }
