@@ -136,18 +136,26 @@ func (ckpt_svc *CheckpointsService) DelCheckpointsDocs(replicationId string) err
 }
 
 // Need to have correct accounting after deleting checkpoingsDocs
-func (ckpt_svc *CheckpointsService) PostDelCheckpointsDoc(replicationId string, doc *metadata.CheckpointsDoc) error {
+func (ckpt_svc *CheckpointsService) PostDelCheckpointsDoc(replicationId string, doc *metadata.CheckpointsDoc) (modified bool, err error) {
+	if doc == nil {
+		return
+	}
+
 	decrementerFunc, err := ckpt_svc.GetDecrementerFunc(replicationId)
 	if err != nil {
-		return err
+		return
 	}
 
 	for _, ckptRecord := range doc.Checkpoint_records {
+		if ckptRecord == nil {
+			continue
+		}
 		shaInRecord := ckptRecord.BrokenMappingSha256
 		decrementerFunc(shaInRecord)
+		modified = true
 	}
 
-	return nil
+	return
 }
 
 func (ckpt_svc *CheckpointsService) DelCheckpointsDoc(replicationId string, vbno uint16) error {
