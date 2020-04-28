@@ -16,7 +16,6 @@ import (
 	gocb "gopkg.in/couchbase/gocb.v1"
 	mcc "github.com/couchbase/gomemcached/client"
 	"net"
-	"reflect"
 	"testing"
 	"time"
 )
@@ -199,10 +198,10 @@ func TestXmemSendAPacket(t *testing.T) {
 	defer fmt.Println("============== Test case end: TestXmemSendAPacket =================")
 
 	uprNotCompressFile := "../utils/testInternalData/uprNotCompress.json"
-	xmemSendAPacket(t, uprNotCompressFile, xmemBucket)
+	xmemSendPackets(t, []string{uprNotCompressFile}, xmemBucket)
 }
 
-func xmemSendAPacket(t *testing.T, uprfile string, bname string) {
+func xmemSendPackets(t *testing.T, uprfiles []string, bname string) {
 	if !targetXmemIsUpAndCorrectSetupExists() {
 		fmt.Println("Skipping since live cluster_run setup has not been detected")
 		return
@@ -222,20 +221,24 @@ func xmemSendAPacket(t *testing.T, uprfile string, bname string) {
 	uuid, ok := bucketInfo["uuid"].(string)
 	assert.True(ok)
 	xmem.targetBucketUuid = uuid
-
-	event, err := RetrieveUprFile(uprfile)
-	assert.Nil(err)
-
-	wrappedEvent := &base.WrappedUprEvent{UprEvent: event}
-	wrappedMCRequest, err := router.ComposeMCRequest(wrappedEvent)
-	assert.Nil(err)
-	assert.NotNil(wrappedMCRequest)
-
 	settings[SETTING_COMPRESSION_TYPE] = base.CompressionTypeSnappy
 	settings[ForceCollectionDisableKey] = true
 	err = xmem.Start(settings)
 	assert.Nil(err)
-	xmem.Receive(wrappedMCRequest)
+
+	// Send the events
+	var events []*mcc.UprEvent
+	for _, uprfile := range uprfiles {
+		event, err := RetrieveUprFile(uprfile)
+		assert.Nil(err)
+		events = append(events, event)
+
+		wrappedEvent := &base.WrappedUprEvent{UprEvent: event}
+		wrappedMCRequest, err := router.ComposeMCRequest(wrappedEvent)
+		assert.Nil(err)
+		assert.NotNil(wrappedMCRequest)
+		xmem.Receive(wrappedMCRequest)
+	}
 
 	// retrieve the doc to check
 	cluster, err := gocb.Connect(fmt.Sprintf("http://127.0.0.1:%s", targetPort))
@@ -248,86 +251,189 @@ func xmemSendAPacket(t *testing.T, uprfile string, bname string) {
 	bucket, err := cluster.OpenBucket(bname, "")
 	assert.Nil(err)
 
-	if event.DataType & mcc.XattrDataType == 0 {
-		// Get doesn't work if it has XATTR
-		var byteSlice []byte
-		_, err = bucket.Get(string(event.Key), &byteSlice)
-		assert.Nil(err)
-		assert.NotEqual(0, len(byteSlice))
+	for _, event := range events {
+		if event.DataType & mcc.XattrDataType == 0 {
+			// Get doesn't work if it has XATTR
+			var byteSlice []byte
+			_, err = bucket.Get(string(event.Key), &byteSlice)
+			assert.Nil(err)
+			assert.NotEqual(0, len(byteSlice))
+		}
 	}
 }
+func setUpTargetBucket(t *testing.T, bucketName string) {
+	assert := assert.New(t)
 
-func TestXmemGet(t *testing.T) {
-	fmt.Println("============== Test case start: TestXmemGet =================")
-	defer fmt.Println("============== Test case end: TestXmemGet =================")
+	cluster, err := gocb.Connect(fmt.Sprintf("http://127.0.0.1:%s", "9001"))
+	assert.Nil(err)
+
+	cluster.Authenticate(gocb.PasswordAuthenticator{
+		Username: username,
+		Password: password,
+	})
+	cm := cluster.Manager(username, password)
+
+	_ = cm.RemoveBucket(bucketName)
+	bucketSettings := gocb.BucketSettings{false, false, bucketName, "", 100, 0, gocb.Couchbase}
+	err = cm.InsertBucket(&bucketSettings)
+	assert.Nil(err)
+
+	bucket, err := cluster.OpenBucket(bucketName, "")
+	for err != nil {
+		bucket, err = cluster.OpenBucket(bucketName, "")
+	}
+	assert.Nil(err)
+	assert.NotNil(bucket)
+
+	time.Sleep(2 * time.Second)
+}
+
+func TestGetForCustomCR(t *testing.T) {
+	fmt.Println("============== Test case start: TestGetForCustomCR =================")
+	defer fmt.Println("============== Test case end: TestGetForCustomCR =================")
 
 	if !targetXmemIsUpAndCorrectSetupExists() {
 		fmt.Println("Skipping since live cluster_run setup has not been detected")
 		return
 	}
 
-	uprNotCompressFile := "../utils/testInternalData/uprNotCompress.json"
-	xmemSendAPacket(t, uprNotCompressFile, xmemBucket)
+	bucketName := "getForCCR"
+	setUpTargetBucket(t, bucketName)
 
-	fmt.Println("Sent a packet. Trying to fetch it now.")
 	assert := assert.New(t)
 
-	utilsNotUsed, settings, xmem, router, throttler, remoteClusterSvc, colManSvc := setupBoilerPlateXmem(xmemBucket)
+	// Set up target
+	uprNotCompressFile := "../utils/testInternalData/uprNotCompress.json"
+	kingarthur3_cluster2_mv := "testdata/customCR/kingarthur3_cluster2_mv.json"
+	xmemSendPackets(t, []string{uprNotCompressFile, kingarthur3_cluster2_mv}, bucketName)
+
+	utilsNotUsed, settings, xmem, router, throttler, remoteClusterSvc, colManSvc := setupBoilerPlateXmem(bucketName)
 	realUtils := utilsReal.NewUtilities()
 	xmem.utils = realUtils
 	setupMocksXmem(xmem, utilsNotUsed, throttler, remoteClusterSvc, colManSvc)
 
 	// Need to find the actual running targetBucketUUID
-	bucketInfo, err := realUtils.GetBucketInfo(connString, xmemBucket, username, password, base.HttpAuthMechPlain, nil, false, nil, nil, xmem.Logger())
+	bucketInfo, err := realUtils.GetBucketInfo(connString, bucketName, username, password, base.HttpAuthMechPlain, nil, false, nil, nil, xmem.Logger())
 	assert.Nil(err)
 	uuid, ok := bucketInfo["uuid"].(string)
 	assert.True(ok)
 	xmem.targetBucketUuid = uuid
-
-	event, err := RetrieveUprFile(uprNotCompressFile)
-	assert.Nil(err)
-	wrappedEvent := &base.WrappedUprEvent{UprEvent: event}
-	wrappedMCRequest, err := router.ComposeMCRequest(wrappedEvent)
-	assert.Nil(err)
-	assert.NotNil(wrappedMCRequest)
 
 	settings[SETTING_COMPRESSION_TYPE] = base.CompressionTypeSnappy
 	settings[ForceCollectionDisableKey] = true
 	err = xmem.Start(settings)
 	assert.Nil(err)
 
+	/*
+	 * Source doc: uprNotCompressFile
+	 * target doc: uprNotCompressFile
+	 * Target wins
+	 */
+	// TODO(MB-39012): Revisit when KV actually provide revId in GET
+	fmt.Println("Test 1: Same pre-7.0 document. No target revId from KV. Conflict. Revisit for MB-39012")
+	getForCustomCR(1, t, "../utils/testInternalData/uprNotCompress.json", xmem, router, Conflict)
+
+	/*
+	 * Source doc: kingarthur3_cluster1_PcasMv.json
+	 * target doc: kingarthur3_cluster2_mv.json
+	 * Source PCAS+MV dominates target MV
+	 */
+	/*
+	 * TODO(MB-39012): Revisit when KV returns XATTR in GET.
+	 * The same CCR logic is being tested in TestDetectConflictWithXattrInner()
+	resetLogLevel := false
+	if testing.Verbose() {
+		log.DefaultLoggerContext.SetLogLevel(log.LogLevelDebug)
+		resetLogLevel = true
+	}
+	fmt.Println("Test 2: 7.0 documents. Source greater CAS and PCAS+MV dominates target MV")
+	getForCustomCR(2, t, "testdata/customCR/kingarthur3_cluster1_PcasMv.json", xmem, router, SourceDominate)
+	if resetLogLevel {
+		log.DefaultLoggerContext.SetLogLevel(log.LogLevelInfo)
+	}
+	*/
+}
+func getForCustomCR(testId uint32, t *testing.T, fname string, xmem *XmemNozzle, router *Router, expectedResult ConflictResult) {
+	assert := assert.New(t)
+	event, err := RetrieveUprFile(fname)
+	assert.Nil(err)
+	wrappedEvent := &base.WrappedUprEvent{UprEvent: event}
+	wrappedMCRequest, err := router.ComposeMCRequest(wrappedEvent)
+	assert.Nil(err)
+	assert.NotNil(wrappedMCRequest)
+	wrappedMCRequest.UniqueKey = string(wrappedMCRequest.Req.Key)
+	fmt.Printf("wrapptedMCRequest=%v\n", wrappedMCRequest)
+
+
 	possibleConflict_map := make(base.McRequestMap)
 	possibleConflict_map[wrappedMCRequest.UniqueKey] = wrappedMCRequest
-	rep_map, conflict_map, err := xmem.batchGetWithRetry(&possibleConflict_map)
+	noRep_map := make(map[string]bool)
+	conflict_map, err := xmem.batchGetForCustomCR(possibleConflict_map, &noRep_map)
 	assert.Nil(err)
-	assert.NotNil(rep_map)
-	assert.NotNil(conflict_map)
-	assert.Equal(1, len(conflict_map))
+	if expectedResult == SourceDominate {
+		assert.Equal(0, len(conflict_map), fmt.Sprintf("Test %d failed", testId))
+		assert.Equal(0, len(noRep_map), fmt.Sprintf("Test %d failed", testId))
+	} else if expectedResult == TargetDominate {
+		assert.Equal(0, len(conflict_map), fmt.Sprintf("Test %d failed", testId))
+		assert.Equal(1, len(noRep_map), fmt.Sprintf("Test %d failed", testId))
+	} else if expectedResult == Conflict {
+		assert.Equal(1, len(conflict_map), fmt.Sprintf("Test %d failed", testId))
+		assert.Equal(1, len(noRep_map), fmt.Sprintf("Test %d failed", testId))	}
 	if testing.Verbose() {
-		fmt.Printf("event: %v\n", event)
-		fmt.Printf("rep_map: %v\n", rep_map)
+		fmt.Printf("noRep_map: %v\n", noRep_map)
 		fmt.Printf("conflict_map: %v\n", conflict_map)
 		for _, docPair := range conflict_map {
 			source := docPair.req.Req
 			target := docPair.resp
-			s := reflect.ValueOf(source).Elem()
-			typeOf := s.Type()
 			fmt.Printf("Source Document: %v\n", source)
-			for i := 0; i < s.NumField(); i++ {
-				f := s.Field(i)
-				fmt.Printf("%d: %s %s = %v\n", i, typeOf.Field(i).Name, f.Type(), f.Interface())
+			fmt.Printf("Source Cas: %v\n", source.Cas)
+			fmt.Printf("Source Extras: %v\n", source.Extras)
+			doc_meta_source := decodeSetMetaReq(docPair.req)
+			if doc_meta_source.dataType & mcc.XattrDataType > 0 {
+				it, _ := base.NewXattrIterator(source.Body)
+				for it.HasNext() {
+					key, value, err := it.Next()
+					if err != nil {
+						fmt.Printf("Error iterating through XATTR: '%v'", err)
+					} else {
+						fmt.Printf("XATTR: %v:%v\n", string(key), string(value))
+					}
+				}
 			}
-			s = reflect.ValueOf(target).Elem()
-			typeOf = s.Type()
 			fmt.Printf("Target Document: %v\n", target)
-			for i := 0; i < s.NumField(); i++ {
-				f := s.Field(i)
-				fmt.Printf("%d: %s %s = %v\n", i, typeOf.Field(i).Name, f.Type(), f.Interface())
+			fmt.Printf("GET Status: %v\n", target.Status)
+			fmt.Printf("Target Cas: %v\n", target.Cas)
+			fmt.Printf("Target Key: %v\n", target.Key)
+			fmt.Printf("Target Extras: %v\n", target.Extras)
+			fmt.Printf("Target DataType: %v\n", target.DataType)
+			fmt.Printf("Target Body: %v\n", string(target.Body))
+			if target.DataType & mcc.XattrDataType > 0 {
+				it, _ := base.NewXattrIterator(target.Body)
+				for it.HasNext() {
+					key, value, err := it.Next()
+					if err != nil {
+						fmt.Printf("Error iterating through XATTR: '%v'", err)
+					} else {
+						fmt.Printf("XATTR: %v:%v\n", key, value)
+					}
+				}
 			}
 		}
 	}
 }
+func TestDetectConflictWithXattrInner(t *testing.T) {
+	fmt.Println("============== Test case start: GeteMetaForCustomCR =================")
+	defer fmt.Println("============== Test case end: GeteMetaForCustomCR =================")
+	assert := assert.New(t)
 
+	_, _, xmem, _, _, _, _ := setupBoilerPlateXmem("customCR")
+
+	sourcePcas := []byte("{\"123456\":456,\"140737488356328\":1234567890123456999,\"revId\":20}")
+	sourceMv := []byte("{\"140737488357328\":1587440822967074820,\"revId\":1357924680135792468}")
+	targetMv := []byte("{\"140737488356328\":1234567890123456789,\"140737488357328\":1587440822967074820,\"revId\":1357924680135792468}")
+	result := xmem.detectConflictWithXattr_inner(sourcePcas, sourceMv, targetMv)
+	assert.Equal(SourceDominate, result)
+}
 type User struct {
 	Id string `json:"uid"`
 	Email string `json:"email"`
@@ -359,39 +465,15 @@ func TestGetMetaForCustomCR(t *testing.T) {
 		fmt.Println("Skipping since live cluster_run setup has not been detected")
 		return
 	}
+	bucketName := "GetMetaForCCR"
+	setUpTargetBucket(t, bucketName)
 
 	assert := assert.New(t)
-	bucketName := "CustomCR"
-
-	cluster, err := gocb.Connect(fmt.Sprintf("http://127.0.0.1:%s", "9001"))
-	assert.Nil(err)
-
-	cluster.Authenticate(gocb.PasswordAuthenticator{
-		Username: username,
-		Password: password,
-	})
-	cm := cluster.Manager(username, password)
-
-	err = cm.RemoveBucket(bucketName)
-	bucketSettings := gocb.BucketSettings{false, false, bucketName, "", 100, 0, gocb.Couchbase}
-	err = cm.InsertBucket(&bucketSettings)
-	assert.Nil(err)
-
-	bucket, err := cluster.OpenBucket(bucketName, "")
-	for err != nil {
-		bucket, err = cluster.OpenBucket(bucketName, "")
-	}
-	assert.Nil(err)
-	assert.NotNil(bucket)
-
-	time.Sleep(2 * time.Second)
-	//uprNotCompressFile := "../utils/testInternalData/uprNotCompress.json"
 
 	// Set up target with a pre-7.0 and 7.0 document
 	kingarthur1_pre7_cas1 := "testdata/customCR/kingarthur1_pre7_cas1.json"
-	xmemSendAPacket(t, kingarthur1_pre7_cas1, bucketName)
 	kingarthur2_cluster2_cas1 := "testdata/customCR/kingarthur2_cluster2_cas1.json"
-	xmemSendAPacket(t, kingarthur2_cluster2_cas1, bucketName)
+	xmemSendPackets(t, []string{kingarthur1_pre7_cas1, kingarthur2_cluster2_cas1}, bucketName)
 
 	utilsNotUsed, settings, xmem, router, throttler, remoteClusterSvc, colManSvc := setupBoilerPlateXmem(bucketName)
 	realUtils := utilsReal.NewUtilities()
@@ -525,17 +607,14 @@ func getMetaForCustomCR(testId uint32, t *testing.T, fname string, xmem *XmemNoz
 	assert.NotNil(wrappedMCRequest)
 	getMeta_map := make(base.McRequestMap)
 	getMeta_map[wrappedMCRequest.UniqueKey] = wrappedMCRequest
-	rep_map, possibleConflict_map, err := xmem.batchGetMetaForCustomCR(getMeta_map)
+	noRep_map, possibleConflict_map, err := xmem.batchGetMetaForCustomCR(getMeta_map)
 	assert.Nil(err)
 	if expectedResult == SourceDominate {
-		assert.Equal(1, len(rep_map), fmt.Sprintf("Test %d failed", testId))
-	} else {
-		assert.Equal(0, len(rep_map), fmt.Sprintf("Test %d failed", testId))
-	}
-	if expectedResult == Conflict {
+		assert.Equal(0, len(noRep_map), fmt.Sprintf("Test %d failed", testId))
+	} else if expectedResult == TargetDominate {
+		assert.Equal(1, len(noRep_map), fmt.Sprintf("Test %d failed", testId))
+	} else if expectedResult == Conflict {
 		assert.Equal(1, len(possibleConflict_map), fmt.Sprintf("Test %d failed", testId))
-	} else {
-		assert.Equal(0, len(possibleConflict_map), fmt.Sprintf("Test %d failed", testId))
 	}
 }
 func TestSourceXattrDominate(t *testing.T) {
@@ -548,7 +627,7 @@ func TestSourceXattrDominate(t *testing.T) {
 	}
 
 	uprNotCompressFile := "testdata/customCR/kingarthur2_cluster1_pcasC2.json"
-	xmemSendAPacket(t, uprNotCompressFile, xmemBucket)
+	xmemSendPackets(t, []string{uprNotCompressFile}, xmemBucket)
 
 	fmt.Println("Sent a packet. Trying to fetch it now.")
 	assert := assert.New(t)
