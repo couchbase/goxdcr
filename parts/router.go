@@ -24,6 +24,7 @@ import (
 	utilities "github.com/couchbase/goxdcr/utils"
 	"math"
 	"reflect"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -38,9 +39,10 @@ var IsHighReplicationKey = "IsHighReplication"
 var NeedToThrottleKey = "NeedToThrottle"
 var FilterExpDelKey = base.FilterExpDelKey
 var ForceCollectionDisableKey = "ForceCollectionDisable"
+var BackfillPersistErrKey = "Backfill Persist Callback Error"
 
 // A function used by the router to raise routing updates to other services that need to know
-type CollectionsRoutingUpdater func(CollectionsRoutingInfo)
+type CollectionsRoutingUpdater func(CollectionsRoutingInfo) error
 
 // When data cannot be sent because mapping is broken, this function is used to raise the event
 type IgnoreDataEventer func(*base.WrappedMCRequest)
@@ -337,7 +339,7 @@ func (c *CollectionsRouter) UpdateBrokenMappingsPair(brokenMappings *metadata.Co
 }
 
 // No-Concurrent call
-func (c *CollectionsRouter) RouteReqToLatestTargetManifest(namespace *base.CollectionNamespace) (colId uint32, manifestId uint64, err error) {
+func (c *CollectionsRouter) RouteReqToLatestTargetManifest(namespace *base.CollectionNamespace) (colId uint32, manifestId uint64, backfillPersistHadErr bool, err error) {
 	if !c.IsRunning() {
 		err = PartStoppedError
 		return
@@ -353,7 +355,9 @@ func (c *CollectionsRouter) RouteReqToLatestTargetManifest(namespace *base.Colle
 	}
 
 	err = c.handleNewManifestChanges(latestManifest)
-	if err != nil {
+	backfillPersistHadErr = err != nil && strings.Contains(err.Error(), BackfillPersistErrKey)
+
+	if err != nil && !backfillPersistHadErr {
 		return
 	}
 
@@ -465,7 +469,7 @@ func (c *CollectionsRouter) handleNewManifestChanges(latestManifest *metadata.Co
 		}
 	}
 
-	c.routingUpdater(routingInfo)
+	err = c.routingUpdater(routingInfo)
 	return
 }
 
@@ -489,9 +493,13 @@ func (c *CollectionsRouter) recordUnroutableRequest(req interface{}) {
 	routingInfo.BrokenMap = c.brokenMapping.Clone()
 	routingInfo.TargetManifestId = wrappedMcr.ColInfo.ManifestId
 	c.brokenMapMtx.Unlock()
-	c.routingUpdater(routingInfo)
+	err := c.routingUpdater(routingInfo)
+	if err != nil {
+		c.logger.Errorf("%v - %v", BackfillPersistErrKey, err)
+		return
+	}
 
-	// Once a routing broken event is raised, then allow the data to be ignored
+	// Once a routing broken event is successfully raised, then allow the data to be ignored
 	c.ignoreDataFunc(wrappedMcr)
 }
 
@@ -626,13 +634,22 @@ func NewRouter(id string, spec *metadata.ReplicationSpecification,
 		startable, router.Start, router.Stop, (connector.CollectionsRerouteFunc)(router.RouteCollection),
 		(utilities.RecycleObjFunc)(router.recycleDataObj))
 
-	routingUpdater := func(info CollectionsRoutingInfo) {
-		// TODO - MB-38777 - When router raises a routing event, this is where the lock step happens:
+	routingUpdater := func(info CollectionsRoutingInfo) error {
 		// 1. It should raise a backfill event telling backfill manager to persist the backfill mapping
-		// 2. Backfill manager should persist the backfill. If it cannot persist, it must not allow the following to continue (TBD)
-		// 3. Once Backfill Manager has persisted it, then the broken event can be raised to the checkpoint manager (below)
+		// 2. Backfill manager should synchronously persist the backfill.
+		//    If it cannot persist, it must not allow the following to continue
+		// 3. Once Backfill Manager has persisted it, then the broken event can be raised to the checkpoint manager
+		syncCh := make(chan error)
+		backfillEvent := common.NewEvent(common.FixedRoutingUpdateEvent, info, router, nil, syncCh)
+		router.RaiseEvent(backfillEvent)
+		err := <-syncCh
+		if err != nil {
+			wrappedErr := fmt.Errorf("%v - %v", BackfillPersistErrKey, err.Error())
+			return wrappedErr
+		}
 		routingEvent := common.NewEvent(common.BrokenRoutingUpdateEvent, info, router, nil, nil)
 		router.RaiseEvent(routingEvent)
+		return nil
 	}
 
 	ignoreRequestFunc := func(req *base.WrappedMCRequest) {
@@ -837,16 +854,22 @@ func (router *Router) RouteCollection(data interface{}, partId string) error {
 		// TODO - implicit mapping default collection specific
 		colId = 0
 	} else {
-		colId, manifestId, err = router.collectionsRouting[partId].RouteReqToLatestTargetManifest(mcRequest.ColNamespace)
+		var backfillPersistHadErr bool
+		colId, manifestId, backfillPersistHadErr, err = router.collectionsRouting[partId].RouteReqToLatestTargetManifest(mcRequest.ColNamespace)
+		// If backfillPersistHadErr is set, then it is:
+		// 1. Safe to re-raise routingUpdate, as each routingUpdate will try to persist again
+		// 2. NOT safe to ignore data - as ignoring data means throughSeqno will move forward
 		mcRequest.ColInfo.ManifestId = manifestId
 		if err != nil {
-			if err == base.ErrorIgnoreRequest {
+			if err == base.ErrorIgnoreRequest && !backfillPersistHadErr {
 				if router.Logger().GetLogLevel() >= log.LogLevelDebug {
 					router.Logger().Debugf("Request map is already marked broken for %v. Ready to be ignored", string(mcRequest.Req.Key))
 				}
 				router.collectionsRouting[partId].ignoreDataFunc(mcRequest)
 				err = base.ErrorRequestAlreadyIgnored
 			} else {
+				// Record unroutable request will try to re-raise the synchronous routing update
+				// Only if it succeeds, will the ignoreDataFunc be called
 				router.collectionsRouting[partId].recordUnroutableRequest(mcRequest)
 				err = base.ErrorIgnoreRequest
 			}

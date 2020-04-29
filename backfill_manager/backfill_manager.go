@@ -12,6 +12,7 @@ package backfill_manager
 import (
 	"fmt"
 	"github.com/couchbase/goxdcr/base"
+	"github.com/couchbase/goxdcr/common"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/goxdcr/pipeline_manager"
@@ -59,6 +60,45 @@ type BackfillMgr struct {
 	// request operations, like persisting, optimizing, stop/start, etc
 	specReqHandlersMtx  sync.RWMutex
 	specToReqHandlerMap map[string]*BackfillRequestHandler
+
+	pipelineSvc  *pipelineSvcWrapper
+	startStopMtx sync.Mutex
+}
+
+// Pipeline SvcWrapper is a way for backfill manager to pretend to be a pipeline service
+// It implements the necessary functions to become a pipeline service
+// And wraps the necessary pipeline-dependent calls into backfill manager
+type pipelineSvcWrapper struct {
+	backfillMgr *BackfillMgr
+}
+
+func (p *pipelineSvcWrapper) Attach(pipeline common.Pipeline) error {
+	p.backfillMgr.specReqHandlersMtx.RLock()
+	defer p.backfillMgr.specReqHandlersMtx.RUnlock()
+
+	spec := pipeline.Specification()
+
+	handler, ok := p.backfillMgr.specToReqHandlerMap[spec.Id]
+	if !ok {
+		return fmt.Errorf("Backfill Request Handler for Spec %v not found", spec.Id)
+	}
+
+	return handler.Attach(pipeline)
+}
+
+func (p *pipelineSvcWrapper) Start(metadata.ReplicationSettingsMap) error {
+	// no op
+	return nil
+}
+
+func (p *pipelineSvcWrapper) Stop() error {
+	// no-op
+	return nil
+}
+
+func (p *pipelineSvcWrapper) UpdateSettings(settings metadata.ReplicationSettingsMap) error {
+	// no op
+	return nil
 }
 
 func NewBackfillManager(collectionsManifestSvc service_def.CollectionsManifestSvc,
@@ -79,13 +119,19 @@ func NewBackfillManager(collectionsManifestSvc service_def.CollectionsManifestSv
 		specToReqHandlerMap:    make(map[string]*BackfillRequestHandler),
 		clusterInfoSvc:         clusterInfoSvc,
 		xdcrTopologySvc:        xdcrTopologySvc,
+		pipelineSvc:            &pipelineSvcWrapper{},
 	}
 
 	return backfillMgr
 }
 
 func (b *BackfillMgr) Start() error {
+	b.startStopMtx.Lock()
+	defer b.startStopMtx.Unlock()
+
 	b.logger.Infof("BackfillMgr Starting...")
+
+	b.pipelineSvc.backfillMgr = b
 
 	b.collectionsManifestSvc.SetMetadataChangeHandlerCallback(b.collectionsManifestChangeCb)
 	b.backfillReplSvc.SetMetadataChangeHandlerCallback(b.backfillReplSpecChangeHandlerCallback)
@@ -100,11 +146,15 @@ func (b *BackfillMgr) Start() error {
 }
 
 func (b *BackfillMgr) Stop() {
+	b.startStopMtx.Lock()
+	defer b.startStopMtx.Unlock()
+
 	b.logger.Infof("BackfillMgr Stopping...")
 	errMap := b.stopHandlers()
 	if len(errMap) > 0 {
 		b.logger.Errorf("Stopping handlers returned: %v\n", errMap)
 	}
+	b.pipelineSvc.backfillMgr = nil
 	b.logger.Infof("BackfillMgr Stopped")
 }
 
@@ -169,6 +219,8 @@ func (b *BackfillMgr) initCache() error {
 
 func (b *BackfillMgr) createBackfillRequestHandler(spec *metadata.ReplicationSpecification) {
 	replId := spec.Id
+	internalId := spec.InternalId
+
 	seqnoGetter := func() (map[uint16]uint64, error) {
 		return b.getThroughSeqno(replId)
 	}
@@ -181,7 +233,36 @@ func (b *BackfillMgr) createBackfillRequestHandler(spec *metadata.ReplicationSpe
 	b.specToReqHandlerMap[replId] = reqHandler
 	b.specReqHandlersMtx.Unlock()
 
+	b.logger.Infof("Starting backfill request handler for spec %v internalId %v", replId, internalId)
 	reqHandler.Start()
+}
+
+func (b *BackfillMgr) deleteBackfillRequestHandler(oldSpec *metadata.ReplicationSpecification) {
+	replId := oldSpec.Id
+	internalId := oldSpec.InternalId
+
+	b.specReqHandlersMtx.Lock()
+	reqHandler := b.specToReqHandlerMap[replId]
+	delete(b.specToReqHandlerMap, replId)
+	b.specReqHandlersMtx.Unlock()
+
+	bgTask := func() {
+		errCh := make(chan base.ComponentError, 1)
+		var waitGrp sync.WaitGroup
+		b.logger.Infof("Stopping backfill request handler for spec %v internalId %v in the background", replId, internalId)
+		waitGrp.Add(1)
+		go reqHandler.Stop(&waitGrp, errCh)
+		waitGrp.Wait()
+		if len(errCh) > 0 {
+			err := <-errCh
+			b.logger.Errorf("Stopped backfill request handler for spec %v internalId %v with err %v", replId, internalId, err.Err)
+		} else {
+			b.logger.Infof("Stopped backfill request handler for spec %v internalId %v", replId, internalId)
+		}
+	}
+
+	// Don't care about waiting - a new replacement handler can be started in the meantime
+	go bgTask()
 }
 
 func (b *BackfillMgr) retrieveLastPersistedManifest(spec *metadata.ReplicationSpecification) error {
@@ -221,7 +302,6 @@ func (b *BackfillMgr) ReplicationSpecChangeCallback(changedSpecId string, oldSpe
 
 	b.logger.Infof("BackfillMgr detected specId %v old %v new %v", changedSpecId, oldSpec, newSpec)
 
-	// TODO - these should be handled by a different go routine as to not block
 	if oldSpecObj.(*metadata.ReplicationSpecification) == nil &&
 		newSpecObj.(*metadata.ReplicationSpecification) != nil {
 		// As part of new replication created, pull the source and target manifest and store them as the starting point
@@ -233,14 +313,14 @@ func (b *BackfillMgr) ReplicationSpecChangeCallback(changedSpecId string, oldSpe
 		b.createBackfillRequestHandler(newSpec)
 	} else if newSpecObj.(*metadata.ReplicationSpecification) == nil &&
 		oldSpecObj.(*metadata.ReplicationSpecification) != nil {
+		oldSpec := oldSpecObj.(*metadata.ReplicationSpecification)
 		// Delete internal caches
 		b.cacheMtx.Lock()
 		delete(b.cacheSpecSourceMap, changedSpecId)
 		delete(b.cacheSpecTargetMap, changedSpecId)
 		b.cacheMtx.Unlock()
 
-		// TODO - need to stop backfill request handler
-		// Backfill Replication service will delete backfill specs if there is one
+		b.deleteBackfillRequestHandler(oldSpec)
 	}
 
 	return nil
@@ -396,33 +476,6 @@ func (b *BackfillMgr) getThroughSeqno(replId string) (map[uint16]uint64, error) 
 	return b.pipelineMgr.GetMainPipelineThroughSeqnos(replId)
 }
 
-func (b *BackfillMgr) createNewBackfillReqHandler(replId string, start bool, spec *metadata.ReplicationSpecification) error {
-	b.specReqHandlersMtx.Lock()
-	_, exists := b.specToReqHandlerMap[replId]
-	if exists {
-		b.specReqHandlersMtx.Unlock()
-		return fmt.Errorf("Request handler for %v already exists", replId)
-	}
-
-	seqnoGetterFunc := func() (map[uint16]uint64, error) {
-		return b.getThroughSeqno(replId)
-	}
-
-	vbsGetter := func() ([]uint16, error) {
-		return b.GetMyVBs(spec.SourceBucketName)
-	}
-
-	handler := NewCollectionBackfillRequestHandler(b.logger, replId, b.backfillReplSvc, spec, seqnoGetterFunc, vbsGetter, spec.Settings.SourceNozzlePerNode)
-	b.specToReqHandlerMap[replId] = handler
-	b.specReqHandlersMtx.Unlock()
-
-	if start {
-		return handler.Start()
-	}
-
-	return nil
-}
-
 func (b *BackfillMgr) GetMyVBs(sourceBucketName string) ([]uint16, error) {
 	var vbList []uint16
 
@@ -436,4 +489,8 @@ func (b *BackfillMgr) GetMyVBs(sourceBucketName string) ([]uint16, error) {
 	}
 
 	return vbList, nil
+}
+
+func (b *BackfillMgr) GetPipelineSvc() common.PipelineService {
+	return b.pipelineSvc
 }

@@ -14,6 +14,7 @@ import (
 	utilities "github.com/couchbase/goxdcr/utils"
 	UtilitiesMock "github.com/couchbase/goxdcr/utils/mocks"
 	"github.com/stretchr/testify/assert"
+	mock "github.com/stretchr/testify/mock"
 	"io/ioutil"
 	"testing"
 )
@@ -23,7 +24,7 @@ var dummyDownStream string = "dummy"
 func setupBoilerPlateRouter() (routerId string, downStreamParts map[string]common.Part,
 	routingMap map[uint16]string, crMode base.ConflictResolutionMode, loggerCtx *log.LoggerContext,
 	utilsMock utilities.UtilsIface, throughputThrottlerSvc service_def.ThroughputThrottlerSvc,
-	needToThrottle bool, expDelMode base.FilterExpDelType, collectionsManifestSvc service_def.CollectionsManifestSvc,
+	needToThrottle bool, expDelMode base.FilterExpDelType, collectionsManifestSvc *service_def_mocks.CollectionsManifestSvc,
 	spec *metadata.ReplicationSpecification) {
 	routerId = "routerUnitTest"
 
@@ -286,10 +287,11 @@ func TestRouterManifestChange(t *testing.T) {
 	assert.NotNil(collectionsRouter)
 
 	// routing updater receiver
-	newRoutingUpdater := func(info CollectionsRoutingInfo) {
+	newRoutingUpdater := func(info CollectionsRoutingInfo) error {
 		// This test will show no broken map but one fixed map
 		assert.Equal(0, len(info.BrokenMap))
 		assert.Equal(1, len(info.BackfillMap))
+		return nil
 	}
 	collectionsRouter.routingUpdater = newRoutingUpdater
 
@@ -313,4 +315,112 @@ func TestRouterManifestChange(t *testing.T) {
 	collectionsRouter.brokenMapMtx.Unlock()
 
 	fmt.Println("============== Test case end: TestRouterManifestChange =================")
+}
+
+func mockTargetCollectionDNE(collectionsManifestSvc *service_def_mocks.CollectionsManifestSvc) {
+	// Target DNE simply means an empty manifest
+	defaultManifest := metadata.NewDefaultCollectionsManifest()
+	collectionsManifestSvc.On("GetSpecificTargetManifest", mock.Anything, mock.Anything).Return(&defaultManifest, nil)
+}
+
+func TestRouterTargetCollectionDNE(t *testing.T) {
+	fmt.Println("============== Test case start: TargetCollectionDNE =================")
+	assert := assert.New(t)
+
+	routerId, downStreamParts, routingMap, crMode, loggerCtx,
+		utilsMock, throughputThrottlerSvc,
+		needToThrottle, expDelMode, collectionsManifestSvc, spec := setupBoilerPlateRouter()
+
+	expDelMode = base.FilterExpDelAll
+
+	mockTargetCollectionDNE(collectionsManifestSvc)
+
+	router, err := NewRouter(routerId, spec, downStreamParts,
+		routingMap, crMode, loggerCtx, utilsMock, throughputThrottlerSvc, needToThrottle,
+		expDelMode, collectionsManifestSvc, nil /*objRecycler*/)
+
+	assert.Nil(err)
+	assert.NotNil(router)
+
+	assert.Nil(router.Start())
+	collectionsRouter := router.collectionsRouting[dummyDownStream]
+	assert.NotNil(collectionsRouter)
+
+	// routing updater receiver
+	newRoutingUpdater := func(info CollectionsRoutingInfo) error {
+		// This test will show one broken map and no fixed map
+		assert.Equal(1, len(info.BrokenMap))
+		assert.Equal(0, len(info.BackfillMap))
+		// For now say persist is fine
+		return nil
+	}
+
+	var ignoreCnt int
+	ignoreFunc := func(*base.WrappedMCRequest) {
+		ignoreCnt++
+	}
+
+	collectionsRouter.routingUpdater = newRoutingUpdater
+	collectionsRouter.ignoreDataFunc = ignoreFunc
+
+	implicitNamespace := &base.CollectionNamespace{"S2", "col3"}
+	dummyData := &base.WrappedMCRequest{ColNamespace: implicitNamespace,
+		ColInfo: &base.TargetCollectionInfo{},
+	}
+
+	assert.Equal(base.ErrorIgnoreRequest, router.RouteCollection(dummyData, dummyDownStream))
+	assert.Equal(1, ignoreCnt)
+	fmt.Println("============== Test case end: TargetCollectionDNE =================")
+}
+
+func TestRouterTargetCollectionDNEPersistErr(t *testing.T) {
+	fmt.Println("============== Test case start: TargetCollectionDNEPersistErr =================")
+	assert := assert.New(t)
+
+	routerId, downStreamParts, routingMap, crMode, loggerCtx,
+		utilsMock, throughputThrottlerSvc,
+		needToThrottle, expDelMode, collectionsManifestSvc, spec := setupBoilerPlateRouter()
+
+	expDelMode = base.FilterExpDelAll
+
+	mockTargetCollectionDNE(collectionsManifestSvc)
+
+	router, err := NewRouter(routerId, spec, downStreamParts,
+		routingMap, crMode, loggerCtx, utilsMock, throughputThrottlerSvc, needToThrottle,
+		expDelMode, collectionsManifestSvc, nil /*objRecycler*/)
+
+	assert.Nil(err)
+	assert.NotNil(router)
+
+	assert.Nil(router.Start())
+	collectionsRouter := router.collectionsRouting[dummyDownStream]
+	assert.NotNil(collectionsRouter)
+
+	// routing updater receiver
+	newRoutingUpdater := func(info CollectionsRoutingInfo) error {
+		// This test will show one broken map and no fixed map
+		assert.Equal(1, len(info.BrokenMap))
+		assert.Equal(0, len(info.BackfillMap))
+		// For now say persist is not fine
+		return fmt.Errorf("Dummy persist err")
+	}
+
+	var ignoreCnt int
+	ignoreFunc := func(*base.WrappedMCRequest) {
+		ignoreCnt++
+	}
+
+	collectionsRouter.routingUpdater = newRoutingUpdater
+	collectionsRouter.ignoreDataFunc = ignoreFunc
+
+	implicitNamespace := &base.CollectionNamespace{"S2", "col3"}
+	dummyData := &base.WrappedMCRequest{ColNamespace: implicitNamespace,
+		ColInfo: &base.TargetCollectionInfo{},
+	}
+
+	// Even if persist has problem, routeCollection should return a non-nil error to prevent forwarding to xmem
+	assert.Equal(base.ErrorIgnoreRequest, router.RouteCollection(dummyData, dummyDownStream))
+	// The ignore count should be 0 to indicate that throughSeqno will not move foward
+	assert.Equal(0, ignoreCnt)
+	fmt.Println("============== Test case end: TargetCollectionDNEPersistErr =================")
 }

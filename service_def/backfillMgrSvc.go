@@ -7,12 +7,17 @@
 // either express or implied. See the License for the specific language governing permissions
 // and limitations under the License.
 
-package backfill_manager
+package service_def
 
-import ()
+import (
+	"github.com/couchbase/goxdcr/common"
+)
 
 type BackfillMgrIface interface {
 	Start() error
 	Stop()
 	ReplicationSpecChangeCallback(id string, oldVal, newVal interface{}) error
+
+	// Backfill manager can act as a pipeline service and handle specific pipeline needs
+	GetPipelineSvc() common.PipelineService
 }

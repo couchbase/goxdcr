@@ -57,6 +57,7 @@ function cleanupTestCaseInternalSettings {
 BROKEN_MSG="The followings are collection mappings that are newly broken"
 REPAIR_MSG="The followings are collection mappings that are now repaired"
 BACKFILL_MSG="These collections need to backfill"
+BACKFILL_APPEND_MSG="These collections need to append backfill"
 
 function runTestCase {
 	echo "============================================================================"
@@ -91,6 +92,7 @@ function runTestCase {
 	local currentXdcrLog
 	currentXdcrLog=`getInternalNodeXdcrLog "C1"`
 	currentBackfillInstanceCnt=`echo "$currentXdcrLog" | grep -c "$BACKFILL_MSG"`
+	currentBackfillAppendInstanceCnt=`echo "$currentXdcrLog" | grep -c "$BACKFILL_APPEND_MSG"`
 
 	# Wait for vbuckets and all the other things to propagate before XDCR provisioning
 	sleep 5
@@ -125,7 +127,8 @@ function runTestCase {
 	validateLogWithInstance "C1" "$REPAIR_MSG" $(( $currentRepairedInstanceCnt + 1 ))
 
 	validateInternalLogWithInstance "C1" "$BACKFILL_MSG"  $(( $currentBackfillInstanceCnt + 1 ))
-
+	# 2 Source routers each with 2 pre-XMEM routers, each raise once
+	validateInternalLogWithInstance "C1" "$BACKFILL_APPEND_MSG"  $(( $currentBackfillAppendInstanceCnt + 4 ))
 	grepForPanics
 	validateXDCRCheckpoints "C1"
 	validateXDCRCheckpoints "C2"

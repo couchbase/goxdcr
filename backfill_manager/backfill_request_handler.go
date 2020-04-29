@@ -12,9 +12,15 @@ package backfill_manager
 import (
 	"fmt"
 	"github.com/couchbase/goxdcr/base"
+	"github.com/couchbase/goxdcr/common"
+	component "github.com/couchbase/goxdcr/component"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
+	"github.com/couchbase/goxdcr/parts"
+	pipeline_pkg "github.com/couchbase/goxdcr/pipeline"
+	"github.com/couchbase/goxdcr/pipeline_utils"
 	"github.com/couchbase/goxdcr/service_def"
+	"reflect"
 	"sync"
 	"sync/atomic"
 )
@@ -31,7 +37,9 @@ const (
 
 // Provide a running request serializer that can handle incoming requests
 // and backend operations for backfill mgr
+// Each backfill request handler is responsible for one replication
 type BackfillRequestHandler struct {
+	*component.AbstractComponent
 	id              string
 	logger          *log.CommonLogger
 	backfillReplSvc service_def.BackfillReplSvc
@@ -61,6 +69,7 @@ type MyVBsGetter func() ([]uint16, error)
 func NewCollectionBackfillRequestHandler(logger *log.CommonLogger, replId string, backfillReplSvc service_def.BackfillReplSvc,
 	spec *metadata.ReplicationSpecification, seqnoGetter LatestSeqnoGetter, vbsGetter MyVBsGetter, maxConcurrentReqs int) *BackfillRequestHandler {
 	return &BackfillRequestHandler{
+		AbstractComponent:    component.NewAbstractComponentWithLogger(replId, logger),
 		logger:               logger,
 		id:                   replId,
 		finCh:                make(chan bool),
@@ -77,24 +86,20 @@ func NewCollectionBackfillRequestHandler(logger *log.CommonLogger, replId string
 }
 
 func (b *BackfillRequestHandler) Start() error {
-	b.logger.Infof("BackfillRequestHandler %v starting...", b.id)
 	atomic.StoreUint32(&b.stopRequested, 0)
 	b.childrenWaitgrp.Add(1)
 	go b.run()
 
-	b.logger.Infof("BackfillRequestHandler %v started", b.id)
 	return nil
 }
 
 func (b *BackfillRequestHandler) Stop(waitGrp *sync.WaitGroup, errCh chan base.ComponentError) {
-	b.logger.Infof("BackfillRequestHandler %v stopping...", b.id)
 	defer waitGrp.Done()
 	atomic.StoreUint32(&b.stopRequested, 1)
 	close(b.finCh)
 	close(b.incomingReqCh)
 
 	b.childrenWaitgrp.Done()
-	b.logger.Infof("BackfillRequestHandler %v stopped", b.id)
 
 	var componentErr base.ComponentError
 	componentErr.ComponentId = b.id
@@ -178,8 +183,6 @@ func (b *BackfillRequestHandler) handleBackfillRequestInternal(req metadata.Coll
 		// TODO handle error
 		return err
 	}
-	b.logger.Infof("Replication %v - These collections need to backfill %v for vb->seqnos %v", b.id, req, seqnosMap)
-
 	myVBs, err := b.vbsGetter()
 	if err != nil {
 		return err
@@ -194,9 +197,11 @@ func (b *BackfillRequestHandler) handleBackfillRequestInternal(req metadata.Coll
 	if !exists {
 		backfillSpec := metadata.NewBackfillReplicationSpec(clonedSpec.Id, clonedSpec.InternalId, vbTasksMap, clonedSpec)
 		b.cachedBackfillSpec = backfillSpec
+		b.logger.Infof("Replication %v - These collections need to backfill %v for vb->seqnos %v", b.id, req, seqnosMap)
 		b.requestPersistence(AddOp)
 	} else {
 		b.cachedBackfillSpec.AppendTasks(vbTasksMap)
+		b.logger.Infof("Replication %v - These collections need to append backfill %v for vb->seqnos %v", b.id, req, seqnosMap)
 		b.requestPersistence(SetOp)
 	}
 	return nil
@@ -230,3 +235,50 @@ func (b *BackfillRequestHandler) metaKvOp(op PersistType) error {
 func (b *BackfillRequestHandler) GetSourceNucketName() string {
 	return b.spec.SourceBucketName
 }
+
+// Each backfill request handler is responsible for one specific replication
+// Each replication will have one single active pipeline at one time
+// Req Handlers are tied to the repl spec so
+// When replications are deleted, the backfill request handler will also be removed
+// and thus there is no need for "Detach"
+func (b *BackfillRequestHandler) Attach(pipeline common.Pipeline) error {
+	asyncListenerMap := pipeline_pkg.GetAllAsyncComponentEventListeners(pipeline)
+
+	pipeline_utils.RegisterAsyncComponentEventHandler(asyncListenerMap, base.CollectionRoutingEventListener, b)
+
+	return nil
+}
+
+// Implement AsyncComponentEventHandler
+func (b *BackfillRequestHandler) Id() string {
+	return b.id
+}
+
+func (b *BackfillRequestHandler) ProcessEvent(event *common.Event) error {
+	switch event.EventType {
+	case common.FixedRoutingUpdateEvent:
+		routingInfo, ok := event.Data.(parts.CollectionsRoutingInfo)
+		if !ok {
+			b.logger.Errorf("Invalid routing info %v type", reflect.TypeOf(event.Data))
+			// ProcessEvent doesn't care about return code
+			return nil
+		}
+		syncCh, ok := event.OtherInfos.(chan error)
+		if !ok {
+			b.logger.Errorf("Invalid routing info response channel %v type", reflect.TypeOf(event.OtherInfos))
+			// ProcessEvent doesn't care about return code
+			return nil
+		}
+		err := b.HandleBackfillRequest(routingInfo.BackfillMap)
+		if err != nil {
+			b.logger.Errorf("Handler Process event received err %v for backfillmap %v", err, routingInfo.BackfillMap)
+		}
+		syncCh <- err
+		close(syncCh)
+	default:
+		b.logger.Warnf("Incorrect event type, %v, received by %v", event.EventType, b.id)
+	}
+	return nil
+}
+
+// end Implement AsyncComponentEventHandler

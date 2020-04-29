@@ -175,6 +175,7 @@ const (
 	STATISTICS_MGR_SVC         string = "StatisticsManager"
 	TOPOLOGY_CHANGE_DETECT_SVC string = "TopologyChangeDetectSvc"
 	BANDWIDTH_THROTTLER_SVC    string = "BandwidthThrottlerSvc"
+	BACKFILL_MGR_SVC           string = "BackfillMgrSvc"
 )
 
 // supervisor related constants
@@ -407,6 +408,7 @@ const (
 	GetMetaReceivedEventListener         = "GetMetaReceivedEventListener"
 	DataThrottledEventListener           = "DataThrottledEventListener"
 	DataThroughputThrottledEventListener = "DataThroughputThrottledEventListener"
+	CollectionRoutingEventListener       = "CollectionRoutingEventListener"
 )
 
 const (

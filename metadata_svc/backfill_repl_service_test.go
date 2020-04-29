@@ -239,6 +239,8 @@ func TestBackfillReplSvc(t *testing.T) {
 	fmt.Println("============== Test case end: TestBackfillReplSvc =================")
 }
 
+var randomSpecName string = "randomIdName"
+
 // Test Adding a brand new backfill repl service
 func setupMetakvInitialAddSetDel(metadataSvc *service_def.MetadataSvc, specId, internalId string, dummySpec *metadata.ReplicationSpecification) {
 	// Initially, there's no backfill mappings
@@ -299,6 +301,12 @@ func setupMetakvInitialAddSetDel(metadataSvc *service_def.MetadataSvc, specId, i
 	// Del ops are pass-through
 	metadataSvc.On("Del", replKey, mock.Anything).Return(nil)
 	metadataSvc.On("Del", backfillMappingsKey, mock.Anything).Return(nil)
+	// Random delete of another entity that does not have backfill replication associated should be nil error
+	// Should call Del anyway just to ensure cleanup of stray backfills lying around
+	randomSpecKey := getBackfillReplicationDocKeyFunc(randomSpecName)
+	randomSpecBackfillKey := getBackfillMappingsDocKeyFunc(randomSpecName)
+	metadataSvc.On("Del", randomSpecKey, mock.Anything).Return(nil)
+	metadataSvc.On("Del", randomSpecBackfillKey, mock.Anything).Return(nil)
 }
 
 func TestBackfillReplSvcAddSetDel(t *testing.T) {
@@ -355,7 +363,7 @@ func TestBackfillReplSvcAddSetDel(t *testing.T) {
 	assert.Equal(ReplNotFoundErr, err)
 
 	// Random delete of another entity that does not have backfill replication associated should be nil error
-	assert.Nil(backfillReplSvc.ReplicationSpecChangeCallback("randomIdName", oldSpec, newNilSpec))
+	assert.Nil(backfillReplSvc.ReplicationSpecChangeCallback(randomSpecName, oldSpec, newNilSpec))
 
 	fmt.Println("============== Test case end: TestBackfillReplSvcAddSetDel =================")
 }

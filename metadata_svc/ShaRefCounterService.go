@@ -215,7 +215,10 @@ func (s *ShaRefCounterService) CleanupMapping(topic string) error {
 	s.topicMapMtx.Unlock()
 
 	if !ok {
-		return nil
+		// Still need to clean up the mapping
+		temporaryCounter := NewMapShaRefCounterWithInternalId(topic, "", s.metadataSvc, s.metakvDocKeyGetter(topic))
+		temporaryCounter.Init()
+		return temporaryCounter.DelAndCleanup()
 	}
 
 	s.topicMapMtx.Lock()

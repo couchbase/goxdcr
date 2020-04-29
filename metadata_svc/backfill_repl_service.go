@@ -321,7 +321,7 @@ func (b *BackfillReplicationService) AddBackfillReplSpec(spec *metadata.Backfill
 		return fmt.Errorf("Error - previous spec shouldn't exist")
 	}
 
-	err := b.persistMappingsForThisNode(spec)
+	err := b.persistMappingsForThisNode(spec, true /*addOp*/)
 	if err != nil {
 		return err
 	}
@@ -354,8 +354,8 @@ func (b *BackfillReplicationService) AddBackfillReplSpec(spec *metadata.Backfill
 // advanced on whatever node will get the chance to update metakv with the needed mappings, and every other node
 // will benefit
 // When consistent metakv is in play, this would lead to less conflicts
-func (b *BackfillReplicationService) persistMappingsForThisNode(spec *metadata.BackfillReplicationSpec) error {
-	mappingsDoc, err := b.GetMappingsDoc(spec.Id, true /*InitIfNotFound*/)
+func (b *BackfillReplicationService) persistMappingsForThisNode(spec *metadata.BackfillReplicationSpec, addOp bool) error {
+	mappingsDoc, err := b.GetMappingsDoc(spec.Id, addOp /*initIfNotFound*/)
 	if err != nil {
 		return err
 	}
@@ -499,13 +499,11 @@ func (b *BackfillReplicationService) persistVBTasksMapDifferences(spec, oldSpec 
 
 func (b *BackfillReplicationService) DelBackfillReplSpec(replicationId string) (*metadata.BackfillReplicationSpec, error) {
 	_, err := b.backfillSpec(replicationId)
-	if err != nil {
-		return nil, ReplNotFoundErr
-	}
+	backfillSpecCacheExists := err == nil
 
 	key := getBackfillReplicationDocKeyFunc(replicationId)
 	err = b.metadataSvc.Del(key, nil /*rev*/)
-	if err != nil {
+	if err != nil && err != service_def.MetadataNotFoundErr {
 		b.logger.Errorf("Failed to delete backfill spec, key=%v, err=%v\n", key, err)
 		return nil, err
 	}
@@ -518,12 +516,15 @@ func (b *BackfillReplicationService) DelBackfillReplSpec(replicationId string) (
 		return nil, err
 	}
 
-	err = b.updateCache(replicationId, nil)
-	if err != nil {
-		b.logger.Errorf("Failed to delete backfill spec, key=%v, err=%v\n", key, err)
-		return nil, err
+	if backfillSpecCacheExists {
+		err = b.updateCache(replicationId, nil)
+		if err != nil {
+			b.logger.Errorf("Failed to delete backfill spec, key=%v, err=%v\n", key, err)
+			return nil, err
+		}
 	}
 
+	b.logger.Infof("Backfill replication and spec mapping for %v cleaned up", replicationId)
 	return nil, nil
 }
 

@@ -57,6 +57,8 @@ const (
 	SystemEventReceived ComponentEventType = iota
 	// RoutingUpdate event
 	BrokenRoutingUpdateEvent ComponentEventType = iota
+	// When previously broken mappings have been fixed and should be backfilled
+	FixedRoutingUpdateEvent ComponentEventType = iota
 	// Data not replicated due to broken collection mapping
 	// NOTE: This event is only supposed to be raised after ensuring the data will be
 	// re-replicated later in another backfill

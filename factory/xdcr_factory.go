@@ -57,11 +57,15 @@ type XDCRFactory struct {
 	throughput_throttler_svc service_def.ThroughputThrottlerSvc
 	collectionsManifestSvc   service_def.CollectionsManifestSvc
 
+	getBackfillMgr BackfillMgrGetter
+
 	default_logger_ctx       *log.LoggerContext
 	pipeline_failure_handler common.SupervisorFailureHandler
 	logger                   *log.CommonLogger
 	utils                    utilities.UtilsIface
 }
+
+type BackfillMgrGetter func() service_def.BackfillMgrIface
 
 // set call back functions is done only once
 func NewXDCRFactory(repl_spec_svc service_def.ReplicationSpecSvc,
@@ -77,7 +81,8 @@ func NewXDCRFactory(repl_spec_svc service_def.ReplicationSpecSvc,
 	factory_logger_ctx *log.LoggerContext,
 	pipeline_failure_handler common.SupervisorFailureHandler,
 	utilsIn utilities.UtilsIface,
-	collectionsManifestSvc service_def.CollectionsManifestSvc) *XDCRFactory {
+	collectionsManifestSvc service_def.CollectionsManifestSvc,
+	getBackfillMgr BackfillMgrGetter) *XDCRFactory {
 	return &XDCRFactory{repl_spec_svc: repl_spec_svc,
 		remote_cluster_svc:       remote_cluster_svc,
 		cluster_info_svc:         cluster_info_svc,
@@ -91,7 +96,9 @@ func NewXDCRFactory(repl_spec_svc service_def.ReplicationSpecSvc,
 		pipeline_failure_handler: pipeline_failure_handler,
 		logger:                   log.NewLogger("XDCRFactory", factory_logger_ctx),
 		utils:                    utilsIn,
-		collectionsManifestSvc:   collectionsManifestSvc}
+		collectionsManifestSvc:   collectionsManifestSvc,
+		getBackfillMgr:           getBackfillMgr,
+	}
 }
 
 /**
@@ -286,6 +293,9 @@ func (xdcrf *XDCRFactory) registerAsyncListenersOnSources(pipeline common.Pipeli
 		data_throughput_throttled_event_listener := component.NewDefaultAsyncComponentEventListenerImpl(
 			pipeline_utils.GetElementIdFromNameAndIndex(pipeline, base.DataThroughputThrottledEventListener, i),
 			pipeline.Topic(), logger_ctx)
+		collection_routing_event_listener := component.NewDefaultAsyncComponentEventListenerImpl(
+			pipeline_utils.GetElementIdFromNameAndIndex(pipeline, base.CollectionRoutingEventListener, i),
+			pipeline.Topic(), logger_ctx)
 
 		for index := load_distribution[i][0]; index < load_distribution[i][1]; index++ {
 			// Get the source DCP nozzle
@@ -304,6 +314,7 @@ func (xdcrf *XDCRFactory) registerAsyncListenersOnSources(pipeline common.Pipeli
 			conn.RegisterComponentEventListener(common.DataUnableToFilter, data_filtered_event_listener)
 			conn.RegisterComponentEventListener(common.DataThroughputThrottled, data_throughput_throttled_event_listener)
 			conn.RegisterComponentEventListener(common.DataNotReplicated, data_filtered_event_listener)
+			conn.RegisterComponentEventListener(common.FixedRoutingUpdateEvent, collection_routing_event_listener)
 		}
 	}
 }
@@ -991,6 +1002,13 @@ func (xdcrf *XDCRFactory) registerServices(pipeline common.Pipeline, logger_ctx 
 		for _, target := range pipeline.Targets() {
 			target.(*parts.XmemNozzle).SetBandwidthThrottler(bw_throttler_svc)
 		}
+	}
+
+	// Register BackfillMgr as a pipeline service
+	backfillMgrPipelineSvc := xdcrf.getBackfillMgr().GetPipelineSvc()
+	err = ctx.RegisterService(base.BACKFILL_MGR_SVC, backfillMgrPipelineSvc)
+	if err != nil {
+		return err
 	}
 
 	return nil

@@ -1366,12 +1366,24 @@ func (b *CollectionNsMappingsDoc) LoadShaMap(shaMap ShaToCollectionNamespaceMap)
 	b.NsMappingRecords = b.NsMappingRecords[:0]
 
 	for sha, colNsMap := range shaMap {
-		serializedMap, err := json.Marshal(colNsMap)
+		if colNsMap == nil {
+			continue
+		}
+		// do sanity check - TODO remove before CC is shipped
+		checkSha, err := colNsMap.Sha256()
+		if err != nil {
+			continue
+		}
+		checkShaStr := fmt.Sprintf("%x", checkSha[:])
+		if sha != checkShaStr {
+			errorMap[sha] = fmt.Errorf("Before storing, sanity check failed - expected %v got %v", sha, checkShaStr)
+		}
+
+		compressedMapping, err := colNsMap.ToSnappyCompressed()
 		if err != nil {
 			errorMap[sha] = err
 			continue
 		}
-		compressedMapping := snappy.Encode(nil, serializedMap)
 
 		oneRecord := &CompressedColNamespaceMapping{compressedMapping, sha}
 		b.NsMappingRecords.SortedInsert(oneRecord)
