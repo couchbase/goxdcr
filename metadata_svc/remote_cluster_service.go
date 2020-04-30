@@ -551,6 +551,11 @@ func (rctx *refreshContext) verifyNodeAndGetList(connStr string, updateSecurityS
 }
 
 func (rctx *refreshContext) checkUserIntent(nodeList []interface{}) {
+	if rctx.refOrig.HostnameMode() != metadata.HostnameMode_None {
+		// No need to check intent
+		return
+	}
+
 	isExternal, err := rctx.agent.checkIfHostnameIsAlternate(nodeList, rctx.hostName, rctx.refCache.IsFullEncryption())
 	if err != nil {
 		rctx.agent.logger.Warnf("Unable to figure out if hostname %v is alternate or not", rctx.hostName)
@@ -967,12 +972,13 @@ func (agent *RemoteClusterAgent) updatePendingAddress(nodeList []interface{}, rc
 	agentPref := agent.addressPreference
 	pendingHostName := agent.pendingRef.HostName()
 	pendingRefIsHttps := agent.pendingRef.IsHttps()
+	hostnameMode := agent.pendingRef.HostnameMode()
 	skipPrefUpdate := agent.shouldSkipAddressPrefNoLock(rctx)
 	agent.refMtx.RUnlock()
 
 	useExternal = agentPref == External
 	if agentPref == Uninitialized {
-		err = agent.initAddressPreference(nodeList, pendingHostName, pendingRefIsHttps)
+		err = agent.initAddressPreference(nodeList, pendingHostName, pendingRefIsHttps, hostnameMode)
 		if err != nil {
 			return
 		}
@@ -1025,10 +1031,15 @@ func (agent *RemoteClusterAgent) updatePendingAddress(nodeList []interface{}, rc
 // the cluster (i.e. missing setting up alt address/port for certain nodes in the cluster)
 // as long as the specified node still belongs in the cluster, we can use that node's alternate
 // address setup as the source for the user's intent
-func (agent *RemoteClusterAgent) initAddressPreference(nodeList []interface{}, hostname string, isHttps bool) error {
-	isExternal, err := agent.checkIfHostnameIsAlternate(nodeList, hostname, isHttps)
-	if err != nil {
-		return err
+func (agent *RemoteClusterAgent) initAddressPreference(nodeList []interface{}, hostname string, isHttps bool, hostnameMode string) error {
+	isExternal := hostnameMode == metadata.HostnameMode_External
+	var err error
+
+	if hostnameMode == metadata.HostnameMode_None {
+		isExternal, err = agent.checkIfHostnameIsAlternate(nodeList, hostname, isHttps)
+		if err != nil {
+			return err
+		}
 	}
 
 	agent.setAddressPreference(isExternal, true /*lock*/, true /*setOnlyIfUninit*/)
@@ -1330,7 +1341,10 @@ func (agent *RemoteClusterAgent) shouldSkipAddressPrefNoLock(rctx *refreshContex
 	agent.refMtx.RLock()
 	defer agent.refMtx.RUnlock()
 
-	if agent.configurationChanged {
+	if agent.configurationChanged ||
+		agent.reference.HostnameMode() == metadata.HostnameMode_External ||
+		agent.reference.HostnameMode() == metadata.HostnameMode_Internal {
+		// forced internal or external mode means always skip addr pref change
 		return true
 	}
 	return false

@@ -118,7 +118,7 @@ func setupMocks(srcResolutionType string,
 	// RemoteClusterMock
 	hostAddr := "localhost:9000"
 
-	mockRemoteClusterRef, _ := metadata.NewRemoteClusterReference("1", "", hostAddr, "", "", false, "", nil, nil, nil)
+	mockRemoteClusterRef, _ := metadata.NewRemoteClusterReference("1", "", hostAddr, "", "", "", false, "", nil, nil, nil)
 	remoteClusterMock.On("RemoteClusterByRefName", mock.Anything, mock.Anything).Return(mockRemoteClusterRef, nil)
 	remoteClusterMock.On("RemoteClusterByUuid", "", false).Return(mockRemoteClusterRef, nil)
 	remoteClusterMock.On("RemoteClusterByUuid", "", true).Return(mockRemoteClusterRef, nil)

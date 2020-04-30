@@ -12,6 +12,7 @@ package replication_manager
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	ap "github.com/couchbase/goxdcr/adminport"
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
@@ -288,7 +289,7 @@ func DecodeCreateRemoteClusterRequest(request *http.Request) (justValidate bool,
 	errorsMap = make(map[string]error)
 	var err1 error
 	var demandEncryption bool
-	var name, hostName, userName, password, secureType, encryptionType string
+	var name, hostName, userName, password, secureType, encryptionType, hostnameMode string
 	var certificate, clientCertificate, clientKey []byte
 
 	if err1 = request.ParseForm(); err1 != nil {
@@ -326,6 +327,8 @@ func DecodeCreateRemoteClusterRequest(request *http.Request) (justValidate bool,
 		case base.RemoteClusterClientKey:
 			clientKeyStr := getStringFromValArr(valArr)
 			clientKey = []byte(clientKeyStr)
+		case base.RemoteClusterHostnameMode:
+			hostnameMode = getStringFromValArr(valArr)
 		default:
 			// ignore other parameters
 		}
@@ -358,7 +361,7 @@ func DecodeCreateRemoteClusterRequest(request *http.Request) (justValidate bool,
 
 	}
 
-	validateRemoteClusterParameters(name, hostName, secureType, userName, password, certificate, clientCertificate, clientKey, errorsMap)
+	validateRemoteClusterParameters(name, hostName, secureType, userName, password, hostnameMode, certificate, clientCertificate, clientKey, errorsMap)
 
 	hostAddr, err1 := base.ValidateHostAddr(hostName)
 	if err1 != nil {
@@ -366,13 +369,13 @@ func DecodeCreateRemoteClusterRequest(request *http.Request) (justValidate bool,
 	}
 
 	if len(errorsMap) == 0 {
-		remoteClusterRef, err = metadata.NewRemoteClusterReference("", name, hostAddr, userName, password, demandEncryption, encryptionType, certificate, clientCertificate, clientKey)
+		remoteClusterRef, err = metadata.NewRemoteClusterReference("", name, hostAddr, userName, password, hostnameMode, demandEncryption, encryptionType, certificate, clientCertificate, clientKey)
 	}
 
 	return
 }
 
-func validateRemoteClusterParameters(name, hostName, secureType, userName, password string, certificate, clientCertificate, clientKey []byte, errorsMap map[string]error) {
+func validateRemoteClusterParameters(name, hostName, secureType, userName, password, hostnameMode string, certificate, clientCertificate, clientKey []byte, errorsMap map[string]error) {
 	// check required parameters
 	if len(name) == 0 {
 		errorsMap[base.RemoteClusterName] = base.MissingParameterError("cluster name")
@@ -400,6 +403,10 @@ func validateRemoteClusterParameters(name, hostName, secureType, userName, passw
 
 	if secureType != base.SecureTypeFull && len(clientKey) > 0 {
 		errorsMap[base.RemoteClusterClientKey] = errors.New("client key cannot be given when secure type is not full")
+	}
+
+	if hostnameMode != metadata.HostnameMode_None && hostnameMode != metadata.HostnameMode_External && hostnameMode != metadata.HostnameMode_Internal {
+		errorsMap[base.RemoteClusterHostnameMode] = fmt.Errorf("%v specified is invalid", base.RemoteClusterHostnameMode)
 	}
 
 	// full secure type is special in that it is the only mode where

@@ -130,7 +130,7 @@ func setupMocksXmem(xmem *XmemNozzle, utils *utilsMock.UtilsIface, bandwidthThro
 
 	xmem.SetBandwidthThrottler(bandwidthThrottler)
 
-	remoteClusterRef, err := metadata.NewRemoteClusterReference("tempUUID", targetClusterName, "127.0.0.1:9001", username, password, false /*demandEncryption*/, "", nil, nil, nil)
+	remoteClusterRef, err := metadata.NewRemoteClusterReference("tempUUID", targetClusterName, "127.0.0.1:9001", username, password, "" /*hostnameMode*/, false /*demandEncryption*/, "", nil, nil, nil)
 	if err != nil {
 		fmt.Printf("Error creating RCR: %v\n", err)
 	}
