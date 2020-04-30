@@ -263,6 +263,7 @@ const (
 	RemoteClusterDeleted           = "deleted"
 	IsEnterprise                   = "isEnterprise"
 	Pools                          = "pools"
+	RemoteClusterHostnameMode      = "network_type"
 )
 
 // secure type for remote cluster reference

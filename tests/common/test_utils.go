@@ -50,7 +50,7 @@ func CreateTestRemoteCluster(remote_cluster_service service_def.RemoteClusterSvc
 		}
 	}
 
-	remoteClusterRef, err := metadata.NewRemoteClusterReference(remoteUuid, remoteName, remoteHostName, remoteUserName, remotePassword, remoteDemandEncryption != 0, metadata.EncryptionType_Full, serverCert)
+	remoteClusterRef, err := metadata.NewRemoteClusterReference(remoteUuid, remoteName, remoteHostName, remoteUserName, remotePassword, "", remoteDemandEncryption != 0, metadata.EncryptionType_Full, serverCert)
 	if err != nil {
 		return err
 	}

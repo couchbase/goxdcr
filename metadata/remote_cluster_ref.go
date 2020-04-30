@@ -34,6 +34,13 @@ const (
 	EncryptionType_Half string = "half"
 )
 
+// Hostname mode is specific to how XDCR would handle the hostname field
+const (
+	HostnameMode_None     string = ""         // XDCR Heuristic mode
+	HostnameMode_External string = "external" // used by K8 operator/DBAS
+	HostnameMode_Internal string = "default"  // To be consistent as goCBv2
+)
+
 /************************************
 /* struct RemoteClusterReference
  * NOTE - if adding/removing new members, need to also modify LoadFrom(), etc.
@@ -64,6 +71,8 @@ type RemoteClusterReference struct {
 	ActiveHostName_      string `json:"ActiveHostName"`
 	ActiveHttpsHostName_ string `json:"ActiveHttpsHostName"`
 
+	HostnameMode_ string `json:"HostnameMode"`
+
 	// revision number to be used by metadata service. not included in json
 	// Revision should only be passed along and should never be modified
 	revision interface{}
@@ -72,7 +81,7 @@ type RemoteClusterReference struct {
 	mutex sync.RWMutex
 }
 
-func NewRemoteClusterReference(uuid, name, hostName, userName, password string,
+func NewRemoteClusterReference(uuid, name, hostName, userName, password, hostnameMode string,
 	demandEncryption bool, encryptionType string, certificate, clientCertificate, clientKey []byte) (*RemoteClusterReference, error) {
 	refId, err := RemoteClusterRefId()
 	if err != nil {
@@ -90,6 +99,7 @@ func NewRemoteClusterReference(uuid, name, hostName, userName, password string,
 		Certificate_:       certificate,
 		ClientCertificate_: clientCertificate,
 		ClientKey_:         clientKey,
+		HostnameMode_:      hostnameMode,
 	}, nil
 }
 
@@ -331,6 +341,7 @@ func (ref *RemoteClusterReference) loadNonActivesFromNoLock(inRef *RemoteCluster
 	ref.EncryptionType_ = inRef.EncryptionType_
 	ref.SANInCertificate_ = inRef.SANInCertificate_
 	ref.HttpAuthMech_ = inRef.HttpAuthMech_
+	ref.HostnameMode_ = inRef.HostnameMode_
 	// !!! shallow copy of revision.
 	// ref.Revision should only be passed along and should never be modified
 	ref.revision = inRef.revision
@@ -391,6 +402,7 @@ func (ref *RemoteClusterReference) cloneCommonFieldsNoLock() *RemoteClusterRefer
 		EncryptionType_:    ref.EncryptionType_,
 		SANInCertificate_:  ref.SANInCertificate_,
 		HttpAuthMech_:      ref.HttpAuthMech_,
+		HostnameMode_:      ref.HostnameMode_,
 		// !!! shallow copy of revision.
 		// ref.Revision should only be passed along and should never be modified
 		revision: ref.revision,
@@ -621,6 +633,12 @@ func (ref *RemoteClusterReference) SetRevision(rev interface{}) {
 	ref.mutex.Lock()
 	defer ref.mutex.Unlock()
 	ref.revision = rev
+}
+
+func (ref *RemoteClusterReference) HostnameMode() string {
+	ref.mutex.RLock()
+	defer ref.mutex.RUnlock()
+	return ref.HostnameMode_
 }
 
 func (ref *RemoteClusterReference) Marshal() ([]byte, error) {
