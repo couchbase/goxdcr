@@ -357,5 +357,22 @@ function validateInternalLogWithInstance {
 	else
 		echo "Found exactly $instanceCnt of \"$grepStr\""
 	fi
+}
 
+function validateXDCRCheckpoints {
+	local cluster=$1
+
+	checkpointOutput=`getXDCRCheckpoints $cluster`
+	if ! (( $? == 0 ));then
+		echo "Unable to get checkpoint"
+		exit 1
+	fi
+
+	# validate
+	echo "$checkpointOutput" | jq type > /dev/null
+	if ! (( $? == 0 ));then
+		echo "$checkpointOutput" > /tmp/checkpoint.error
+		echo "Erroneous checkpoint output to /tmp/checkpoint.error"
+		exit 1
+	fi
 }

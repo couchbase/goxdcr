@@ -102,6 +102,8 @@ function runTestCase {
 	echo "Waiting 15 seconds for pipeline to really pause"
 	sleep 15
 	grepForPanics
+	validateXDCRCheckpoints "C1"
+	validateXDCRCheckpoints "C2"
 
 	resumeReplication "C1" "B1" "C2" "B2"
 	echo "Waiting 15 seconds for resume to finish"

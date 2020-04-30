@@ -14,10 +14,58 @@ import (
 )
 
 type ManifestsDoc struct {
-	CollectionsManifests []*CollectionsManifest `json:"collection_manifests"`
+	collectionsManifests []*CollectionsManifest
+
+	// When upserting or retrieving from metakv, compress them into a single byte slice
+	// This is not to be used otherwise - use CollectionsManifests()
+	CompressedCollectionsManifests []byte `json:"collection_manifests"`
 
 	//revision number
-	Revision interface{}
+	revision interface{}
+}
+
+func (m *ManifestsDoc) Revision() interface{} {
+	return m.revision
+}
+
+func (m *ManifestsDoc) SetRevision(rev interface{}) {
+	m.revision = rev
+}
+
+func (m *ManifestsDoc) CollectionsManifests() []*CollectionsManifest {
+	return m.collectionsManifests
+}
+
+func (m *ManifestsDoc) SetCollectionsManifests(manifests []*CollectionsManifest) {
+	m.collectionsManifests = manifests
+}
+
+func (m *ManifestsDoc) PreMarshal() error {
+	serializedJson, err := json.Marshal(m.collectionsManifests)
+	if err != nil {
+		return err
+	}
+	m.CompressedCollectionsManifests = snappy.Encode(nil, serializedJson)
+	return nil
+}
+
+func (m *ManifestsDoc) ClearCompressedData() {
+	m.CompressedCollectionsManifests = nil
+}
+
+func (m *ManifestsDoc) PostUnmarshal() error {
+	var serializedJson []byte
+	serializedJson, err := snappy.Decode(serializedJson, m.CompressedCollectionsManifests)
+	if err != nil {
+		return err
+	}
+
+	err = json.Unmarshal(serializedJson, &(m.collectionsManifests))
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
 
 type CollectionsManifestPair struct {
@@ -1374,7 +1422,7 @@ type CollectionNsMappingsDoc struct {
 	SpecInternalId string `json:"specInternalId"`
 
 	//revision number
-	Revision interface{}
+	revision interface{}
 }
 
 func (b *CollectionNsMappingsDoc) Size() int {

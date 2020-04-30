@@ -62,6 +62,8 @@ function pauseAndResumeMultiples {
 		echo "Waiting 10 seconds for pipeline to really pause"
 		sleep 10
 		grepForPanics
+		validateXDCRCheckpoints "C1"
+		validateXDCRCheckpoints "C2"
 
 		resumeReplication "C1" "B1" "C2" "B2"
 		echo "Waiting 10 seconds for resume to finish"

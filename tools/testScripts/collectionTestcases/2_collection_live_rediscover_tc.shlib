@@ -121,6 +121,8 @@ function runTestCase {
 	validateLogWithInstance "C1" "$REPAIR_MSG" $(( $currentRepairedInstanceCnt + 1 ))
 
 	grepForPanics
+	validateXDCRCheckpoints "C1"
+	validateXDCRCheckpoints "C2"
 
 	echo "============================================================================"
 	echo "PASSED"

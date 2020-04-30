@@ -531,7 +531,7 @@ func (a *CollectionsManifestAgent) persistNeededManifestsInternal() (srcErr, tgt
 		a.logger.Warnf("Not storing target hash due to err: %v\n", tgtHashErr)
 	}
 
-	if srcHashErr != nil || !reflect.DeepEqual(a.persistedSrcListHash, srcListHash) {
+	if srcHashErr == nil && !reflect.DeepEqual(a.persistedSrcListHash, srcListHash) {
 		// metakv is out of date
 		srcErr = a.metakvSvc.UpsertSourceManifests(a.replicationSpec, &srcMetaList)
 		if srcErr != nil {
@@ -544,7 +544,7 @@ func (a *CollectionsManifestAgent) persistNeededManifestsInternal() (srcErr, tgt
 		}
 	}
 
-	if tgtHashErr != nil || !reflect.DeepEqual(a.persistedTgtListHash, tgtListHash) {
+	if tgtHashErr == nil && !reflect.DeepEqual(a.persistedTgtListHash, tgtListHash) {
 		tgtErr = a.metakvSvc.UpsertTargetManifests(a.replicationSpec, &tgtMetaList)
 		if tgtErr != nil {
 			a.logger.Warnf("Upserting target resulted in err: %v\n", tgtErr)
@@ -924,8 +924,12 @@ func (a *CollectionsManifestAgent) getAllManifestsUids() (srcManifestUids, tgtMa
 			if ckptRecord == nil {
 				continue
 			}
-			srcDedupMap[ckptRecord.SourceManifest] = true
-			tgtDedupMap[ckptRecord.TargetManifest] = true
+			if ckptRecord.SourceManifest > 0 {
+				srcDedupMap[ckptRecord.SourceManifest] = true
+			}
+			if ckptRecord.TargetManifest > 0 {
+				tgtDedupMap[ckptRecord.TargetManifest] = true
+			}
 		}
 	}
 
@@ -948,6 +952,9 @@ func (a *CollectionsManifestAgent) getAllManifestsUids() (srcManifestUids, tgtMa
 	// Then go through the current cache ... anything lower then the lowest ckpt, don't save
 	a.srcMtx.RLock()
 	for uid, _ := range a.sourceCache {
+		if uid == 0 {
+			continue
+		}
 		if srcLen == 0 || uid > srcManifestUids[0] {
 			_, exists := srcDedupMap[uid]
 			if !exists {
@@ -959,6 +966,9 @@ func (a *CollectionsManifestAgent) getAllManifestsUids() (srcManifestUids, tgtMa
 	a.srcMtx.RUnlock()
 	a.tgtMtx.RLock()
 	for uid, _ := range a.targetCache {
+		if uid == 0 {
+			continue
+		}
 		if tgtLen == 0 || uid > tgtManifestUids[0] {
 			_, exists := tgtDedupMap[uid]
 			if !exists {
@@ -996,7 +1006,8 @@ func (a *CollectionsManifestAgent) cleanupUnreferredManifests(srcList, tgtList [
 	var tgtErr []uint64
 	var err error
 
-	replacementMap := make(map[uint64]*metadata.CollectionsManifest)
+	replacementMap := make(ManifestsCache)
+	replacementMap[0] = &defaultManifest
 	a.srcMtx.Lock()
 	for _, uid := range srcList {
 		manifest, ok := a.sourceCache[uid]
@@ -1018,6 +1029,7 @@ func (a *CollectionsManifestAgent) cleanupUnreferredManifests(srcList, tgtList [
 	a.srcMtx.Unlock()
 
 	replacementMap = make(ManifestsCache)
+	replacementMap[0] = &defaultManifest
 	a.tgtMtx.Lock()
 	for _, uid := range tgtList {
 		manifest, ok := a.targetCache[uid]

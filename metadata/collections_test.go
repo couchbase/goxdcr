@@ -591,3 +591,49 @@ func TestCollectionNsMappingsDocMarshaller(t *testing.T) {
 	assert.Nil(err)
 	fmt.Println("============== Test case end: TestCollectionNsMappingsDocMarshaller =================")
 }
+
+func TestManifestsDocMarshalling(t *testing.T) {
+	assert := assert.New(t)
+	fmt.Println("============== Test case start: TestManifestsDocMarshalling =================")
+
+	data, err := ioutil.ReadFile(emptyManifest)
+	assert.Nil(err)
+
+	var emptyCollection CollectionsManifest
+	err = emptyCollection.LoadBytes(data)
+	assert.Nil(err)
+	data, err = ioutil.ReadFile(provisionedFile)
+	data2, err2 := ioutil.ReadFile(provisionedFileCustom)
+	assert.Nil(err)
+	assert.Nil(err2)
+	var provisionedManifest CollectionsManifest
+	err = provisionedManifest.LoadBytes(data)
+	assert.Nil(err)
+	var provisionedManifestCustom CollectionsManifest
+	err = provisionedManifestCustom.LoadBytes(data2)
+	assert.Nil(err)
+
+	doc := &ManifestsDoc{}
+	doc.collectionsManifests = append(doc.collectionsManifests, &emptyCollection)
+	doc.collectionsManifests = append(doc.collectionsManifests, &provisionedManifest)
+	doc.collectionsManifests = append(doc.collectionsManifests, &provisionedManifestCustom)
+
+	assert.Nil(doc.PreMarshal())
+	assert.NotEqual(0, len(doc.CompressedCollectionsManifests))
+
+	serializedData, err := json.Marshal(doc)
+	assert.Nil(err)
+
+	doc.ClearCompressedData()
+
+	newDoc := &ManifestsDoc{}
+	assert.Nil(json.Unmarshal(serializedData, newDoc))
+	assert.Nil(newDoc.PostUnmarshal())
+	newDoc.ClearCompressedData()
+
+	assert.Equal(3, len(newDoc.collectionsManifests))
+	for i := 0; i < 3; i++ {
+		assert.True(doc.collectionsManifests[i].IsSameAs(newDoc.collectionsManifests[i]))
+	}
+	fmt.Println("============== Test case end: TestManifestsDocMarshalling =================")
+}

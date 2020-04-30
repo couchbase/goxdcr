@@ -1112,3 +1112,14 @@ function getClusterLogs {
 
 	$CURL -X GET -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$port/diag 2>&1
 }
+	
+function getXDCRCheckpoints {
+	local clusterName=$1
+	local port=${CLUSTER_NAME_PORT_MAP[$clusterName]:-}
+
+	checkpointOutput=`$CURL http://localhost:$port/diag/eval -d 'ns_server_testrunner_api:grab_all_goxdcr_checkpoints()' -u $DEFAULT_ADMIN:$DEFAULT_PW`
+	if (( $? != 0 ));then
+		return $?
+	fi
+	echo "$checkpointOutput"
+}
