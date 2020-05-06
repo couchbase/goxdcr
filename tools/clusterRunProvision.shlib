@@ -60,6 +60,103 @@ declare CBWORKLOADGEN=""
 # Value is in the format of actual value to send
 declare -A BUCKET_NAME_PROPERTIES_MAP
 
+# These are to record which containers have been created already
+# to prevent duplicated creates
+declare -A CLUSTER_NAME_BUCKET_DONE_MAP
+declare -A BUCKET_NAME_SCOPE_DONE_MAP
+declare -A SCOPE_NAME_COLLECTION_DONE_MAP
+
+# Input
+# 0: ClusterName
+# 1: Bucket Name
+# 2: Scope Name (optional)
+# 3: Collection Name (optional)
+# Return code:
+# 0: if namespace exists
+# 1: If it does not
+function checkNamespaceCreated {
+	local clusterName=$1
+	local bucketName=$2
+	local scopeName=${3:-}
+	local collectionName=${4:-}
+	local key
+	local key2
+
+	for chkClusterName in `echo ${!CLUSTER_NAME_BUCKET_DONE_MAP[@]}`
+	do
+		if [[ "$chkClusterName" == "$clusterName" ]];then
+			bucketNames=(${CLUSTER_NAME_BUCKET_DONE_MAP[$clusterName]:-})
+			for chkBucketName in `echo ${bucketNames[@]}`
+			do
+				if [[ "$chkBucketName" == "$bucketName" ]];then
+					if [[ -z "${scopeName:-}" ]];then
+						# User asked for clusterName:bucketName and it was done
+						return 0
+					fi
+					key="${chkClusterName},${chkBucketName}"
+					for chkScopeName in `echo ${BUCKET_NAME_SCOPE_DONE_MAP["$key"]:-}`
+					do
+						if [[ "$chkScopeName" == "$scopeName" ]];then
+							if [[ -z "${collectionName:-}" ]];then
+								#User asked for cluster:bucket:scope and it's done
+								return 0
+							fi
+							key2="${chkClusterName},${chkBucketName},${chkScopeName}"
+							for chkColName in `echo ${SCOPE_NAME_COLLECTION_DONE_MAP["$key2"]:-}`
+							do
+								if [[ "$chkColName" == "$collectionName" ]];then
+									return 0
+								fi
+							done
+						fi
+					done
+				fi
+			done
+		fi
+	done
+	return 1
+}
+
+function recordNamespaceCreated {
+	local clusterName=$1
+	local bucketName=$2
+	local scopeName=${3:-}
+	local collectionName=${4:-}
+
+	if [[ -z "${scopeName:-}" ]];then
+		# bucket
+		local -a bucketArr
+		local key="${clusterName}"
+		if [[ -z ${CLUSTER_NAME_BUCKET_DONE_MAP[$key]:-} ]];then
+			bucketArr=("$bucketName")
+		else
+			bucketArr=(${CLUSTER_NAME_BUCKET_DONE_MAP[$key]})
+			bucketArr[${#bucketArr[@]}]="$bucketName"
+		fi
+		CLUSTER_NAME_BUCKET_DONE_MAP[$key]=${bucketArr[@]}
+	elif [[ -z "${collectionName:-}" ]];then
+		local -a scopeArr
+		local key="${clusterName},${bucketName}"
+		if [[ -z ${BUCKET_NAME_SCOPE_DONE_MAP[$key]:-} ]];then
+			scopeArr=("$scopeName")
+		else
+			scopeArr=(${BUCKET_NAME_SCOPE_DONE_MAP[$key]})
+			scopeArr[${#scopeArr[@]}]="$scopeName"
+		fi
+		BUCKET_NAME_SCOPE_DONE_MAP[$key]=${scopeArr[@]}
+	else
+		local -a colArr
+		local key="${clusterName},${bucketName},${scopeName}"
+		if [[ -z ${SCOPE_NAME_COLLECTION_DONE_MAP[$key]:-} ]];then
+			colArr=("$collectionName")
+		else
+			colArr=(${SCOPE_NAME_COLLECTION_DONE_MAP[$key]})
+			colArr[${#colArr[@]}]="$collectionName"
+		fi
+		SCOPE_NAME_COLLECTION_DONE_MAP[$key]=${colArr[@]}
+	fi
+}
+
 # Input:
 # 1. Bucket name
 # 2. An associative array of Key - Parameter Value - value to send
@@ -308,10 +405,17 @@ function setupBuckets {
 				return 1
 			fi
 			getBucketPropertiesRESTString
-			$CURL -u $DEFAULT_ADMIN:$DEFAULT_PW -X POST http://localhost:$port/$POOLS_DEFAULT_BUCKETS_PATH -d name=$bucketName ${getBucketOutArr[@]}  > /dev/null 2>&1
-			if (( $? != 0 ));then
-				return $?
+
+			# Only run the bucket create command if it hasn't been executed before
+			checkNamespaceCreated "$clusterName" "$bucketName"
+			if (( ! $? == 0 ));then
+				$CURL -u $DEFAULT_ADMIN:$DEFAULT_PW -X POST http://localhost:$port/$POOLS_DEFAULT_BUCKETS_PATH -d name=$bucketName ${getBucketOutArr[@]}  > /dev/null 2>&1
+				if (( $? != 0 ));then
+					return $?
+				fi
+				recordNamespaceCreated "$clusterName" "$bucketName"
 			fi
+
 			# If bucket has scopes
 			if [[ ! -z "${BUCKET_NAME_SCOPE_MAP[$bucketName]:-}" ]];then
 				setupScopes $clusterName $bucketName
@@ -331,6 +435,9 @@ function cleanupBuckets {
 		$CURL -u $DEFAULT_ADMIN:$DEFAULT_PW -X DELETE http://localhost:$port/$POOLS_DEFAULT_BUCKETS_PATH/$bucketName > /dev/null 2>&1
 		done
 	done
+	CLUSTER_NAME_BUCKET_DONE_MAP=()
+	BUCKET_NAME_SCOPE_DONE_MAP=()
+	SCOPE_NAME_COLLECTION_DONE_MAP=()
 }
 
 function createScope {
@@ -372,7 +479,11 @@ function setupScopes {
 
 	for scopeName in `echo ${scopesArr[@]}`
 	do
-		createScope "$clusterName" "$bucketName" "$scopeName"
+		checkNamespaceCreated "$clusterName" "$bucketName" "$scopeName"
+		if (( ! $? == 0 ));then
+			createScope "$clusterName" "$bucketName" "$scopeName"
+			recordNamespaceCreated "$clusterName" "$bucketName" "$scopeName"
+		fi
 		# If scope has collections
 		if [[ ! -z "${SCOPE_NAME_COLLECTION_MAP[$scopeName]:-}" ]];then
 			setupCollections $clusterName $bucketName $scopeName
@@ -423,7 +534,11 @@ function setupCollections {
 
 	for collectionName in `echo ${collectionsArr[@]}`
 	do
-		createCollection "$clusterName" "$bucketName" "$scopeName" "$collectionName"
+		checkNamespaceCreated "$clusterName" "$bucketName" "$scopeName" "$collectionName"
+		if (( ! $? == 0 ));then
+			createCollection "$clusterName" "$bucketName" "$scopeName" "$collectionName"
+			recordNamespaceCreated "$clusterName" "$bucketName" "$scopeName" "$collectionName"
+		fi
 	done
 }
 

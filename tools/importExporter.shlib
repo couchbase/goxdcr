@@ -49,7 +49,10 @@ function exportProvisionedConfig {
 					BUCKET_PROPERTIES_OUTPUT_MAP \
 					BUCKET_REPL_PROPERTIES_MAP \
 					BUCKET_REPL_PROPERTIES_OUTPUT_MAP \
-					BUCKET_REPL_EXPORT_MAP
+					BUCKET_REPL_EXPORT_MAP \
+					CLUSTER_NAME_BUCKET_DONE_MAP \
+					BUCKET_NAME_SCOPE_DONE_MAP \
+					SCOPE_NAME_COLLECTION_DONE_MAP
 	do
 		local outputStr=`exportSingleVarMap $mapName`
 		if (( $? == 0 ));then
