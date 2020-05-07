@@ -125,7 +125,7 @@ func constructDummyTasksMapCustom(set TasksMapType) metadata.VBTasksMapType {
 		EndingTimestamp:   &base.VBTimestamp{0, 0, 5000, 500, 500, manifestsIdPair},
 	}
 
-	vb0Task0 := metadata.NewBackfillTask(ts0, namespaceMapping)
+	vb0Task0 := metadata.NewBackfillTask(ts0, []metadata.CollectionNamespaceMapping{namespaceMapping})
 	var vb0Task1 *metadata.BackfillTask
 
 	if set == FullSet {
@@ -133,7 +133,7 @@ func constructDummyTasksMapCustom(set TasksMapType) metadata.VBTasksMapType {
 			StartingTimestamp: &base.VBTimestamp{0, 0, 5005, 10, 10, manifestsIdPair},
 			EndingTimestamp:   &base.VBTimestamp{0, 0, 15005, 500, 500, manifestsIdPair},
 		}
-		vb0Task1 = metadata.NewBackfillTask(ts1, nonDefaultNamespaceMapping)
+		vb0Task1 = metadata.NewBackfillTask(ts1, []metadata.CollectionNamespaceMapping{nonDefaultNamespaceMapping})
 	}
 
 	var vb0Tasks metadata.BackfillTasks
@@ -146,7 +146,7 @@ func constructDummyTasksMapCustom(set TasksMapType) metadata.VBTasksMapType {
 		StartingTimestamp: &base.VBTimestamp{1, 0, 5, 10, 10, manifestsIdPair},
 		EndingTimestamp:   &base.VBTimestamp{1, 0, 5000, 500, 500, manifestsIdPair},
 	}
-	vb1Task0 := metadata.NewBackfillTask(ts2, namespaceMapping)
+	vb1Task0 := metadata.NewBackfillTask(ts2, []metadata.CollectionNamespaceMapping{namespaceMapping})
 
 	var vb1Tasks metadata.BackfillTasks
 	vb1Tasks = append(vb1Tasks, vb1Task0)

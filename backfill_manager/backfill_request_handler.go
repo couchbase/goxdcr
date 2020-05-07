@@ -200,7 +200,8 @@ func (b *BackfillRequestHandler) handleBackfillRequestInternal(req metadata.Coll
 		b.logger.Infof("Replication %v - These collections need to backfill %v for vb->seqnos %v", b.id, req, seqnosMap)
 		b.requestPersistence(AddOp)
 	} else {
-		b.cachedBackfillSpec.AppendTasks(vbTasksMap)
+		// TODO - the skipFirst should be dependent upon whether or not the backfill pipeline is running, set to true for now
+		b.cachedBackfillSpec.MergeNewTasks(vbTasksMap, true /*skipFirst*/)
 		b.logger.Infof("Replication %v - These collections need to append backfill %v for vb->seqnos %v", b.id, req, seqnosMap)
 		b.requestPersistence(SetOp)
 	}

@@ -90,6 +90,52 @@ func (b *BackfillReplicationSpec) Redact() *BackfillReplicationSpec {
 	return b
 }
 
+// Given a specifc new task, efficiently modify the current spec's task to incorporate the incoming tasks
+// The idea is to let the new tasks coming in piggy back off of whatever tasks ranges there are by merging
+// into the exist ones, and then whatever is leftover not covered is then appended at the end
+// If skipFirst is set, then the first task in existence is not modified
+// It's possible that the first task is actively being fulfilled
+// Keeps the current tasks in order, and whatever ask cannot be incorporated then append a new task
+// to cover it
+func (b *BackfillReplicationSpec) MergeNewTasks(vbTasksMap VBTasksMapType, skipFirst bool) {
+	for vb, newTasks := range vbTasksMap {
+		_, exists := b.VBTasksMap[vb]
+		if !exists {
+			b.VBTasksMap[vb] = newTasks
+			continue
+		}
+
+		if newTasks == nil {
+			continue
+		}
+
+		// Need to merge
+		for _, newTask := range *newTasks {
+			mergeCopy := *(b.VBTasksMap[vb])
+			firstTask := mergeCopy[0]
+			var unmergableTasks BackfillTasks
+			if skipFirst {
+				mergeCopy = mergeCopy[1:]
+			}
+			mergeCopy.MergeIncomingTaskIntoTasks(newTask, &unmergableTasks)
+
+			for _, unmergableTask := range unmergableTasks {
+				mergeCopy = append(mergeCopy, unmergableTask)
+			}
+
+			if skipFirst {
+				// Need to prepend first task back
+				mergeCopy = append(mergeCopy, nil)
+				copy(mergeCopy[1:], mergeCopy[0:])
+				mergeCopy[0] = firstTask
+			}
+
+			// Just replace
+			b.VBTasksMap[vb] = &mergeCopy
+		}
+	}
+}
+
 // Given a list of tasks for VBs, add (append) them to the list of currently existing tasks
 func (b *BackfillReplicationSpec) AppendTasks(vbTasksMap VBTasksMapType) {
 	if b == nil {
@@ -142,7 +188,7 @@ func NewBackfillVBTasksMap(namespaceMap CollectionNamespaceMapping, vbs []uint16
 		timestamps := &BackfillVBTimestamps{startTs, endTs}
 
 		var tasks BackfillTasks
-		task := NewBackfillTask(timestamps, namespaceMap)
+		task := NewBackfillTask(timestamps, []CollectionNamespaceMapping{namespaceMap})
 		tasks = append(tasks, task)
 		vbTasksMap[vb] = &tasks
 	}
@@ -176,6 +222,7 @@ func (this VBTasksMapType) Clone() VBTasksMapType {
 	return clonedMap
 }
 
+// TODO Expensive - optimize later
 func (v *VBTasksMapType) LoadFromMappingsShaMap(shaToCollectionNsMap ShaToCollectionNamespaceMap) error {
 	if v == nil {
 		return base.ErrorInvalidInput
@@ -184,12 +231,15 @@ func (v *VBTasksMapType) LoadFromMappingsShaMap(shaToCollectionNsMap ShaToCollec
 	errMap := make(base.ErrorMap)
 	for _, tasks := range *v {
 		for _, task := range *tasks {
-			collectionNsMapping, exists := shaToCollectionNsMap[task.RequestedCollectionsSha]
-			if !exists {
-				errMap[task.RequestedCollectionsSha] = base.ErrorNotFound
-				continue
+			task.requestedCollections_ = task.requestedCollections_[:0]
+			for _, oneRequestedCollectionSha := range task.RequestedCollectionsShas {
+				collectionNsMapping, exists := shaToCollectionNsMap[oneRequestedCollectionSha]
+				if !exists {
+					errMap[oneRequestedCollectionSha] = base.ErrorNotFound
+					continue
+				}
+				task.requestedCollections_ = append(task.requestedCollections_, *collectionNsMapping)
 			}
-			task.requestedCollections_ = *collectionNsMapping
 		}
 	}
 	if len(errMap) > 0 {
@@ -205,6 +255,9 @@ func (v *VBTasksMapType) GetAllCollectionNamespaceMappings() ShaToCollectionName
 
 	returnMap := make(ShaToCollectionNamespaceMap)
 	for _, tasks := range *v {
+		if tasks == nil {
+			continue
+		}
 		tasksMap := tasks.GetAllCollectionNamespaceMappings()
 		for k, v := range tasksMap {
 			if _, exists := returnMap[k]; !exists {
@@ -222,6 +275,9 @@ type BackfillTasks []*BackfillTask
 func (b BackfillTasks) Clone() BackfillTasks {
 	var clonedTasks BackfillTasks
 	for _, task := range b {
+		if task == nil {
+			continue
+		}
 		oneClonedTask := task.Clone()
 		clonedTasks = append(clonedTasks, &oneClonedTask)
 	}
@@ -245,42 +301,182 @@ func (b BackfillTasks) SameAs(other BackfillTasks) bool {
 func (b BackfillTasks) GetAllCollectionNamespaceMappings() ShaToCollectionNamespaceMap {
 	returnMap := make(ShaToCollectionNamespaceMap)
 	for _, task := range b {
-		if _, exists := returnMap[task.RequestedCollectionsSha]; !exists {
-			requestedCols := task.RequestedCollections()
-			returnMap[task.RequestedCollectionsSha] = &requestedCols
+		if task == nil {
+			continue
+		}
+		for i, requestedSha := range task.RequestedCollectionsShas {
+			if _, exists := returnMap[requestedSha]; !exists {
+				requestedCols := task.RequestedCollections()[i]
+				returnMap[requestedSha] = &requestedCols
+			}
 		}
 	}
 	return returnMap
+}
+
+/*
+ * This uses recursion to try to merge a task into the current list of tasks as much as possible
+ * and then returns a list of unmergable tasks (caller needs to allocate)
+ * The algorithm simply goes through a list of tasks in order
+ * Take the input task, try to merge it from the task in the list
+ * If it cannot be merged fully, and has intersection, then break the input task into 3 parts:
+ * 1. Left of the intersection
+ * 2. Intersection
+ * 3. Right of the intersection
+ * Take the (1), and run it through the rest of the Backfilltasks recursively
+ * Take (3) and run it through the rest of the backfilltasks recursively
+ * At the base case, if it cannot be merged, add it to the unmergable tasks
+ *
+ * For example, given list of 2 existing tasks ranges:
+ * 5-5000
+ * 5005-15005
+ * Try to merge a new task of 0-20000
+ * 1. First 5-5000 will soak up the middle, leaving 0-5 (subtask1) and 5000-20000 (subtask2)
+ * 2. Run subtask1 through 0-20000, and subtask2 through 0-20000
+ * Each subtask recursively will figure out what couldn't be "soaked" up and add the unmergable part to the list on the stack
+ */
+func (b *BackfillTasks) MergeIncomingTaskIntoTasks(task *BackfillTask, unmergableTasks *BackfillTasks) {
+	if b == nil || len(*b) == 0 {
+		(*unmergableTasks) = append(*unmergableTasks, task)
+		return
+	}
+
+	fullyMerged, unableToMerge, subTask1, subTask2 := ((*b)[0]).MergeIncomingTask(task)
+	if fullyMerged {
+		return
+	}
+	if unableToMerge {
+		(*unmergableTasks) = append((*unmergableTasks), task)
+		return
+	}
+
+	nextBackfillTasks := (*b)[1:]
+	nextBackfillTasks.MergeIncomingTaskIntoTasks(subTask1, unmergableTasks)
+	nextBackfillTasks.MergeIncomingTaskIntoTasks(subTask2, unmergableTasks)
+	return
+}
+
+func (b BackfillTasks) containsStartEndRange(startSeqno, endSeqno uint64) bool {
+	for _, task := range b {
+		if task.Timestamps.StartingTimestamp.Seqno == startSeqno && task.Timestamps.EndingTimestamp.Seqno == endSeqno {
+			return true
+		}
+	}
+	return false
 }
 
 // Each backfill task should be RO once created
 // And new tasks can be created to split/merge existing ones
 type BackfillTask struct {
 	// ts contains vbno
+	// The timestamps here in the backfill tasks only cares about seqnos
 	Timestamps *BackfillVBTimestamps
-	// The namespace mapping is NOT stored as part of JSON marshalling
-	// It will be stored/retrieved by the ShaRefCounterservice
-	requestedCollections_   CollectionNamespaceMapping
-	RequestedCollectionsSha string
+	// The namespace mappings are NOT stored as part of JSON marshalling
+	// They will be stored/retrieved by the ShaRefCounterservice
+	// The shas and the actual mappings are linked by the same index
+	requestedCollections_    []CollectionNamespaceMapping
+	RequestedCollectionsShas []string
 }
 
-func NewBackfillTask(ts *BackfillVBTimestamps, reqCols CollectionNamespaceMapping) *BackfillTask {
-	shaSlice, _ := reqCols.Sha256()
-	return &BackfillTask{ts, reqCols, fmt.Sprintf("%x", shaSlice[:])}
+func NewBackfillTask(ts *BackfillVBTimestamps, requestedCollectionMappings []CollectionNamespaceMapping) *BackfillTask {
+	var shas []string
+	for _, reqCols := range requestedCollectionMappings {
+		shaSlice, _ := reqCols.Sha256()
+		shas = append(shas, fmt.Sprintf("%x", shaSlice[:]))
+	}
+	return &BackfillTask{Timestamps: ts, requestedCollections_: requestedCollectionMappings, RequestedCollectionsShas: shas}
 }
 
-func (b *BackfillTask) RequestedCollections() CollectionNamespaceMapping {
+// When given a new task, try to merge the new tasks's request into this current task
+// Potentially returns 2 subtasks
+// Subtask1 represents the smaller range of seqno that this task cannot accomodate
+// Subtask2 represents the larger range of seqnos that this task cannot accomodate
+func (b *BackfillTask) MergeIncomingTask(task *BackfillTask) (canFullyMerge, unableToMerge bool, subtask1, subtask2 *BackfillTask) {
+	if b == nil || task == nil {
+		unableToMerge = true
+		return
+	}
+
+	tsAccomodated, tsUnableToMerge, tsSmallerBound, tsLargerBound := b.Timestamps.Accomodate(task.Timestamps)
+	if tsUnableToMerge {
+		unableToMerge = true
+		return
+	}
+
+	// Some sort of merge happened
+	for _, oneMapping := range task.RequestedCollections() {
+		b.AddCollectionNamespaceMapping(oneMapping)
+	}
+
+	if tsAccomodated {
+		canFullyMerge = true
+		return
+	}
+
+	// Otherwise, need to pop back out subset of tasks, one before and one after, that wasn't able to be merged
+	if !tsSmallerBound.IsEmpty() {
+		subtask1 = NewBackfillTask(&tsSmallerBound, task.RequestedCollections())
+	}
+
+	if !tsLargerBound.IsEmpty() {
+		subtask2 = NewBackfillTask(&tsLargerBound, task.RequestedCollections())
+	}
+
+	return
+}
+
+func (b *BackfillTask) RequestedCollections() []CollectionNamespaceMapping {
 	return b.requestedCollections_
 }
 
+func (b *BackfillTask) AddCollectionNamespaceMapping(nsMapping CollectionNamespaceMapping) {
+	incomingSha, _ := nsMapping.Sha256()
+	incomingShaStr := fmt.Sprintf("%x", incomingSha)
+	for _, checkSha := range b.RequestedCollectionsShas {
+		if checkSha == incomingShaStr {
+			// Mapping already exists
+			return
+		}
+	}
+
+	b.requestedCollections_ = append(b.requestedCollections_, nsMapping)
+	b.RequestedCollectionsShas = append(b.RequestedCollectionsShas, incomingShaStr)
+}
+
 func (b *BackfillTask) SameAs(other *BackfillTask) bool {
-	return b.RequestedCollectionsSha == other.RequestedCollectionsSha && b.RequestedCollections().IsSame(other.RequestedCollections()) && b.Timestamps.SameAs(other.Timestamps)
+	if b == nil && other != nil {
+		return false
+	} else if b != nil && other == nil {
+		return false
+	} else if b == nil && other == nil {
+		return true
+	}
+
+	sortedShas := base.SortStringList(b.RequestedCollectionsShas)
+	otherShas := base.SortStringList(other.RequestedCollectionsShas)
+	if len(sortedShas) != len(otherShas) {
+		return false
+	}
+
+	// Save work and just compare digests instead of actually diving into mappings
+	for i := 0; i < len(sortedShas); i++ {
+		if sortedShas[i] != otherShas[i] {
+			return false
+		}
+	}
+
+	// Last thing to check is the timestamps
+	return b.Timestamps.SameAs(other.Timestamps)
 }
 
 func (b BackfillTask) Clone() BackfillTask {
 	clonedTs := b.Timestamps.Clone()
+	var clonedList []CollectionNamespaceMapping
+	for _, nsMapping := range b.requestedCollections_ {
+		clonedList = append(clonedList, nsMapping.Clone())
+	}
 	// Sha is automatically calculated
-	task := NewBackfillTask(&clonedTs, b.RequestedCollections().Clone())
+	task := NewBackfillTask(&clonedTs, clonedList)
 	return *task
 }
 
@@ -288,6 +484,10 @@ func (b BackfillTask) Clone() BackfillTask {
 type BackfillVBTimestamps struct {
 	StartingTimestamp *base.VBTimestamp
 	EndingTimestamp   *base.VBTimestamp
+}
+
+func (b BackfillVBTimestamps) IsEmpty() bool {
+	return b.StartingTimestamp == nil && b.EndingTimestamp == nil
 }
 
 func (b BackfillVBTimestamps) Clone() BackfillVBTimestamps {
@@ -299,4 +499,52 @@ func (b BackfillVBTimestamps) Clone() BackfillVBTimestamps {
 func (b *BackfillVBTimestamps) SameAs(other *BackfillVBTimestamps) bool {
 	return b.StartingTimestamp.SameAs(other.StartingTimestamp) &&
 		b.EndingTimestamp.SameAs(other.EndingTimestamp)
+}
+
+// Given an incoming set of VB Timestamps
+// Try its best to see if the incoming timestamps can be accomodated by the current range
+// If the incoming timestamps spans more than the current coverage, then
+// return 2 ranges:
+//    range 1 - range smaller than this b could handle
+//    range 2 - range larger than this b could handle
+// This call modifies the existing timestamps
+func (b *BackfillVBTimestamps) Accomodate(incoming *BackfillVBTimestamps) (fullyAccomodated, unableToMerge bool, smallerOutOfBounds, largerOutOfBounds BackfillVBTimestamps) {
+	// Sanity check
+	if b == nil || incoming == nil || b.StartingTimestamp.Vbno != incoming.StartingTimestamp.Vbno || b.EndingTimestamp.Vbno != incoming.EndingTimestamp.Vbno {
+		return
+	}
+	var beginningAccomodated bool
+	if b.StartingTimestamp.Seqno <= incoming.StartingTimestamp.Seqno {
+		if b.EndingTimestamp.Seqno < incoming.StartingTimestamp.Seqno {
+			// no intersection
+			unableToMerge = true
+			return
+		}
+		// Can accomodate incoming's beginning
+		b.StartingTimestamp.ManifestIDs.Accomodate(incoming.StartingTimestamp.ManifestIDs)
+		beginningAccomodated = true
+	} else {
+		if incoming.EndingTimestamp.Seqno < b.StartingTimestamp.Seqno {
+			// No intersection
+			unableToMerge = true
+			return
+		}
+		// Incoming's starting point is earlier than b's starting point
+		smallerOutOfBounds.StartingTimestamp = incoming.StartingTimestamp
+		smallerOutOfBounds.EndingTimestamp = b.StartingTimestamp
+	}
+
+	if b.EndingTimestamp.Seqno >= incoming.EndingTimestamp.Seqno {
+		fullyAccomodated = beginningAccomodated
+		// Can fully accomodate seqno - need to ensure manifestID range is covered too
+		if fullyAccomodated {
+			b.EndingTimestamp.ManifestIDs.Accomodate(incoming.EndingTimestamp.ManifestIDs)
+		}
+	} else {
+		// Incoming's end is longer than b
+		largerOutOfBounds.StartingTimestamp = b.EndingTimestamp
+		largerOutOfBounds.EndingTimestamp = incoming.EndingTimestamp
+	}
+
+	return
 }

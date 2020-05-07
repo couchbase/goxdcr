@@ -1,4 +1,4 @@
-// Copyright (c) 2013 Couchbase, Inc.
+// Copyright (c) 2013-2020 Couchbase, Inc.
 // Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file
 // except in compliance with the License. You may obtain a copy of the License at
 //   http://www.apache.org/licenses/LICENSE-2.0
@@ -68,6 +68,16 @@ func (se SettingsError) Add(key string, err error) {
 type CollectionsManifestIdPair struct {
 	SourceManifestId uint64
 	TargetManifestId uint64
+}
+
+// Ensure that this current c can accomodate the other range
+func (c *CollectionsManifestIdPair) Accomodate(other CollectionsManifestIdPair) {
+	if c.SourceManifestId > other.SourceManifestId {
+		c.SourceManifestId = other.SourceManifestId
+	}
+	if c.TargetManifestId < other.TargetManifestId {
+		c.TargetManifestId = other.TargetManifestId
+	}
 }
 
 // timestamp for a specific vb
