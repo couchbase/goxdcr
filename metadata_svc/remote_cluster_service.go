@@ -52,6 +52,10 @@ var DeleteAlreadyIssued = errors.New("Underlying remote cluster reference has be
 var WriteToMetakvErrString = "Error writing to metakv"
 var NoChangeNeeded = errors.New("No change is needed")
 
+func IsRefreshError(err error) bool {
+	return err != nil && strings.Contains(err.Error(), RefreshNotEnabledYet.Error())
+}
+
 // Whether or not to use internal or external (alternate) addressing for communications
 type AddressType int
 
@@ -1794,6 +1798,8 @@ func (service *RemoteClusterService) RemoteClusterByRefId(refId string, refresh 
 			if err == BootStrapNodeHasMovedError {
 				service.logger.Errorf(getBootStrapNodeHasMovedErrorMsg(refId))
 				return nil, errors.New(getBootStrapNodeHasMovedErrorMsg(refId))
+			} else if IsRefreshError(err) {
+				return nil, RefreshNotEnabledYet
 			} else {
 				service.logger.Warnf(getRefreshErrorMsg(refId, err))
 			}
@@ -1822,6 +1828,8 @@ func (service *RemoteClusterService) remoteClusterByRefNameWithAgent(refName str
 			if err == BootStrapNodeHasMovedError {
 				service.logger.Errorf(getBootStrapNodeHasMovedErrorMsg(refName))
 				return nil, agent, errors.New(getBootStrapNodeHasMovedErrorMsg(refName))
+			} else if IsRefreshError(err) {
+				return nil, agent, RefreshNotEnabledYet
 			} else {
 				service.logger.Warnf(getRefreshErrorMsg(refName, err))
 			}
@@ -1846,7 +1854,7 @@ func (service *RemoteClusterService) RemoteClusterByUuid(uuid string, refresh bo
 			if err == BootStrapNodeHasMovedError {
 				service.logger.Errorf(getBootStrapNodeHasMovedErrorMsg(uuid))
 				return nil, errors.New(getBootStrapNodeHasMovedErrorMsg(uuid))
-			} else if err == RefreshNotEnabledYet {
+			} else if IsRefreshError(err) {
 				return nil, RefreshNotEnabledYet
 			} else {
 				service.logger.Warnf(getRefreshErrorMsg(uuid, err))

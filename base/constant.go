@@ -899,9 +899,6 @@ var RemoteClusterAlternateAddrChangeCnt = 5
 var ManifestRefreshSrcInterval = 2
 var ManifestRefreshTgtInterval = 60
 
-// How many times to retry collections mapping routing before declaring that mapping is broken
-var MaxCollectionsRoutingRetry = 5
-
 func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeCountBeforeRestart,
 	maxTopologyStableCountBeforeRestart, maxWorkersForCheckpointing int,
 	timeoutCheckpointBeforeStop time.Duration, capiDataChanSizeMultiplier int,
@@ -946,8 +943,7 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	maxCountCpuNotMaxed int, maxCountThroughputDrop int,
 	filteringInternalKey string, filteringInternalXattr string,
 	remoteClusterAlternateAddrChangeCnt int,
-	manifestRefreshSrcInterval int, manifestRefreshTgtInterval int,
-	maxCollectionsRoutingRetry int) {
+	manifestRefreshSrcInterval int, manifestRefreshTgtInterval int) {
 	TopologyChangeCheckInterval = topologyChangeCheckInterval
 	MaxTopologyChangeCountBeforeRestart = maxTopologyChangeCountBeforeRestart
 	MaxTopologyStableCountBeforeRestart = maxTopologyStableCountBeforeRestart
@@ -1056,7 +1052,6 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	RemoteClusterAlternateAddrChangeCnt = remoteClusterAlternateAddrChangeCnt
 	ManifestRefreshSrcInterval = manifestRefreshSrcInterval
 	ManifestRefreshTgtInterval = manifestRefreshTgtInterval
-	MaxCollectionsRoutingRetry = maxCollectionsRoutingRetry
 }
 
 // Need to escape the () to result in "META().xattrs" literal

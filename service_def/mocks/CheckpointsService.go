@@ -108,17 +108,24 @@ func (_m *CheckpointsService) GetVbnosFromCheckpointDocs(replicationId string) (
 }
 
 // PostDelCheckpointsDoc provides a mock function with given fields: replicationId, doc
-func (_m *CheckpointsService) PostDelCheckpointsDoc(replicationId string, doc *metadata.CheckpointsDoc) error {
+func (_m *CheckpointsService) PostDelCheckpointsDoc(replicationId string, doc *metadata.CheckpointsDoc) (bool, error) {
 	ret := _m.Called(replicationId, doc)
 
-	var r0 error
-	if rf, ok := ret.Get(0).(func(string, *metadata.CheckpointsDoc) error); ok {
+	var r0 bool
+	if rf, ok := ret.Get(0).(func(string, *metadata.CheckpointsDoc) bool); ok {
 		r0 = rf(replicationId, doc)
 	} else {
-		r0 = ret.Error(0)
+		r0 = ret.Get(0).(bool)
 	}
 
-	return r0
+	var r1 error
+	if rf, ok := ret.Get(1).(func(string, *metadata.CheckpointsDoc) error); ok {
+		r1 = rf(replicationId, doc)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
 }
 
 // PreUpsertBrokenMapping provides a mock function with given fields: replicationId, specInternalId, oneBrokenMapping

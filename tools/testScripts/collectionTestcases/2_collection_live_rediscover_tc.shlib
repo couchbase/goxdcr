@@ -48,6 +48,16 @@ function runDataLoad {
 	waitForBgJobs
 }
 
+declare -i ORIG_TARGET_MAN_PULL_INTERVAL
+declare -i ORIG_ROUTER_MAX_RETRY
+
+function cleanupTestCaseInternalSettings {
+	resetCustomManifestRefreshInterval "C1"
+}
+
+BROKEN_MSG="The followings are collection mappings that are newly broken"
+REPAIR_MSG="The followings are collection mappings that are now repaired"
+
 function runTestCase {
 	echo "============================================================================"
 	echo "Running live rediscover test case"
@@ -62,6 +72,22 @@ function runTestCase {
 	if (( $? != 0 ));then
 		exit $?
 	fi
+
+	# Before doing provisioning, get old internal settings
+	setCustomManifestRefreshInterval "C1"
+
+	# At this point, settings need to be restored IF the script was forced exited
+	trap cleanupTestCaseInternalSettings EXIT
+
+	# Get current instance
+	local -i currentBrokenInstanceCnt
+	local -i currentRepairedInstanceCnt
+
+	local currentClusterLog
+	currentClusterLog=`getClusterLogs "C1"`
+	currentBrokenInstanceCnt=`echo "$currentClusterLog" | grep -c "$BROKEN_MSG"`
+	currentRepairedInstanceCnt=`echo "$currentClusterLog" | grep -c "$REPAIR_MSG"`
+
 	# Wait for vbuckets and all the other things to propagate before XDCR provisioning
 	sleep 5
 	createRemoteClusterReference "C1" "C2"
@@ -77,20 +103,26 @@ function runTestCase {
 	checkItemCnt "C1" "B1" $CBWORKLOAD_COLLECTION_NUM_ITEMS
 	checkItemCnt "C2" "B2" 0
 
+	validateLogWithInstance "C1" "$BROKEN_MSG" $(( $currentBrokenInstanceCnt + 1 ))
+
 	# Then re-setup the implicit matching that matches, and run i/o
 	BUCKET_NAME_SCOPE_MAP=(["B1"]=${scope1Arr[@]} ["B2"]="S1")
 	setupTopologies
-	echo "Sleeping up to 80 seconds for target manifest to be pulled and vbucket distribution"
-	echo "Sleeping 80 seconds for target manifest to be pulled and vbucket distribution"
-	sleep 80
+	echo "Sleeping 20 seconds for target manifest to be pulled and vbucket distribution"
+	sleep 20
 	printGlobalScopeAndCollectionInfo
 	runDataLoad
+	sleep 5
 
 	# The retry buffer should have sent the mutations
 	checkItemCnt "C1" "B1" $CBWORKLOAD_COLLECTION_NUM_ITEMS
 	checkItemCnt "C2" "B2" $CBWORKLOAD_COLLECTION_NUM_ITEMS
 
+	validateLogWithInstance "C1" "$REPAIR_MSG" $(( $currentRepairedInstanceCnt + 1 ))
+
 	grepForPanics
+	validateXDCRCheckpoints "C1"
+	validateXDCRCheckpoints "C2"
 
 	echo "============================================================================"
 	echo "PASSED"

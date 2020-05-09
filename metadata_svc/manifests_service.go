@@ -16,7 +16,6 @@ import (
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/goxdcr/service_def"
-	"github.com/golang/snappy"
 )
 
 /**
@@ -52,8 +51,12 @@ func NewManifestsService(metadata_svc service_def.MetadataSvc, logger_ctx *log.L
 func (m *ManifestsService) UpsertSourceManifests(replSpec *metadata.ReplicationSpecification, src *metadata.ManifestsList) error {
 	key := getManifestDocKey(replSpec.Id, true /*source*/)
 
+	if src == nil {
+		return base.ErrorInvalidInput
+	}
+
 	manifestsDoc := &metadata.ManifestsDoc{}
-	manifestsDoc.CollectionsManifests = *src
+	manifestsDoc.SetCollectionsManifests(*src)
 
 	return m.upsertInternal(key, manifestsDoc)
 }
@@ -61,21 +64,43 @@ func (m *ManifestsService) UpsertSourceManifests(replSpec *metadata.ReplicationS
 func (m *ManifestsService) UpsertTargetManifests(replSpec *metadata.ReplicationSpecification, tgt *metadata.ManifestsList) error {
 	key := getManifestDocKey(replSpec.Id, false /*source*/)
 
+	if tgt == nil {
+		return base.ErrorInvalidInput
+	}
+
 	manifestsDoc := &metadata.ManifestsDoc{}
-	manifestsDoc.CollectionsManifests = *tgt
+	manifestsDoc.SetCollectionsManifests(*tgt)
 
 	return m.upsertInternal(key, manifestsDoc)
 }
 
 func (m *ManifestsService) upsertInternal(key string, data *metadata.ManifestsDoc) error {
+	err := data.PreMarshal()
+	if err != nil {
+		return err
+	}
+
 	serializedJson, err := json.Marshal(data)
 	if err != nil {
 		return err
 	}
 
-	compressedContent := snappy.Encode(nil, serializedJson)
+	// TODO - better optimization? First check if it exists
+	_, err = m.getInternal(key)
+	if err == service_def.MetadataNotFoundErr {
+		err = m.metadata_svc.Add(key, serializedJson)
+	} else {
+		err = m.metadata_svc.Set(key, serializedJson, nil)
+	}
 
-	err = m.metadata_svc.Set(key, compressedContent, nil)
+	getRevisionDoc, err := m.getInternal(key)
+	if err != nil {
+		m.logger.Warnf("Getting revision after set or add resulted in err %v", err)
+	} else {
+		data.SetRevision(getRevisionDoc.Revision())
+	}
+
+	data.ClearCompressedData()
 	return err
 }
 
@@ -87,7 +112,7 @@ func (m *ManifestsService) GetSourceManifests(replSpec *metadata.ReplicationSpec
 	} else if err != nil {
 		return nil, err
 	} else {
-		list := metadata.ManifestsList(manifestsDoc.CollectionsManifests)
+		list := metadata.ManifestsList(manifestsDoc.CollectionsManifests())
 		return &list, err
 	}
 }
@@ -100,7 +125,7 @@ func (m *ManifestsService) GetTargetManifests(replSpec *metadata.ReplicationSpec
 	} else if err != nil {
 		return nil, err
 	} else {
-		list := metadata.ManifestsList(manifestsDoc.CollectionsManifests)
+		list := metadata.ManifestsList(manifestsDoc.CollectionsManifests())
 		return &list, err
 	}
 }
@@ -128,18 +153,11 @@ func (m *ManifestsService) DelManifests(replSpec *metadata.ReplicationSpecificat
 }
 
 func (m *ManifestsService) getInternal(key string) (*metadata.ManifestsDoc, error) {
-	compressedContent, rev, err := m.metadata_svc.Get(key)
+	serializedJson, rev, err := m.metadata_svc.Get(key)
 	if err != nil {
 		if err != service_def.MetadataNotFoundErr {
 			m.logger.Errorf("Unable to retrieve manifests using key %v err: %v", key, err)
 		}
-		return nil, err
-	}
-
-	var serializedJson []byte
-	serializedJson, err = snappy.Decode(serializedJson, compressedContent)
-	if err != nil {
-		m.logger.Errorf("Unable to decompress manifests using key %v err: %v", key, err)
 		return nil, err
 	}
 
@@ -150,6 +168,12 @@ func (m *ManifestsService) getInternal(key string) (*metadata.ManifestsDoc, erro
 		return nil, err
 	}
 
-	manifestsDoc.Revision = rev
+	manifestsDoc.SetRevision(rev)
+
+	err = manifestsDoc.PostUnmarshal()
+	if err != nil {
+		m.logger.Errorf("PostUnmarshal err: %v", err)
+	}
+	manifestsDoc.ClearCompressedData()
 	return manifestsDoc, nil
 }

@@ -682,8 +682,7 @@ func (ckmgr *CheckpointManager) SetVBTimestamps(topic string) error {
 			// ignore errors, which should have been logged
 			err = ckmgr.checkpoints_svc.DelCheckpointsDoc(topic, vbno)
 			if err == nil {
-				ckmgr.checkpoints_svc.PostDelCheckpointsDoc(topic, ckptDoc)
-				brokenMappingModified = true
+				ckmgr.postDelCheckpointsDocWrapper(topic, ckptDoc, &brokenMappingModified)
 			}
 			deleted_vbnos = append(deleted_vbnos, vbno)
 		} else if target_support_xattr_now {
@@ -698,8 +697,7 @@ func (ckmgr *CheckpointManager) SetVBTimestamps(topic string) error {
 					ckmgr.RaiseEvent(common.NewEvent(common.ErrorEncountered, nil, ckmgr, nil, err))
 					return err
 				}
-				ckmgr.checkpoints_svc.PostDelCheckpointsDoc(topic, ckptDoc)
-				brokenMappingModified = true
+				ckmgr.postDelCheckpointsDocWrapper(topic, ckptDoc, &brokenMappingModified)
 				deleted_vbnos = append(deleted_vbnos, vbno)
 			}
 		} else {
@@ -713,8 +711,7 @@ func (ckmgr *CheckpointManager) SetVBTimestamps(topic string) error {
 					ckmgr.RaiseEvent(common.NewEvent(common.ErrorEncountered, nil, ckmgr, nil, err))
 					return err
 				}
-				ckmgr.checkpoints_svc.PostDelCheckpointsDoc(topic, ckptDoc)
-				brokenMappingModified = true
+				ckmgr.postDelCheckpointsDocWrapper(topic, ckptDoc, &brokenMappingModified)
 				deleted_vbnos = append(deleted_vbnos, vbno)
 			}
 		}
@@ -772,6 +769,20 @@ func (ckmgr *CheckpointManager) SetVBTimestamps(topic string) error {
 	ckmgr.logger.Infof("Done with setting starting seqno for pipeline %v\n", ckmgr.pipeline.Topic())
 
 	return nil
+}
+
+func (ckmgr *CheckpointManager) postDelCheckpointsDocWrapper(topic string, ckptDoc *metadata.CheckpointsDoc, brokenMappingModified *bool) {
+	if ckptDoc == nil {
+		return
+	}
+
+	modified, err := ckmgr.checkpoints_svc.PostDelCheckpointsDoc(topic, ckptDoc)
+	if err != nil {
+		ckmgr.logger.Warnf("Checkpoint service postDelCheckpointsDoc returned %v", err)
+	}
+	if modified {
+		*brokenMappingModified = true
+	}
 }
 
 func (ckmgr *CheckpointManager) loadBrokenMapFromCkptDocs(ckptDocs map[uint16]*metadata.CheckpointsDoc) {
@@ -1606,17 +1617,17 @@ func (ckmgr *CheckpointManager) OnEvent(event *common.Event) {
 			// Don't accept "old" routing updates
 			ckmgr.cachedBrokenMap.lock.RUnlock()
 		} else {
-			// Updates will occur and need to log the differences on UI
-			olderMap := ckmgr.cachedBrokenMap.brokenMap.Clone()
 			ckmgr.cachedBrokenMap.lock.RUnlock()
 			ckmgr.cachedBrokenMap.lock.Lock()
+			// Updates will occur and need to log the differences on UI
+			olderMap := ckmgr.cachedBrokenMap.brokenMap.Clone()
 			// No need to re-check because OnEvent() is serialized
 			// First, absorb any new broken mappings (case 1 and 2)
 			ckmgr.cachedBrokenMap.brokenMap.Consolidate(routingInfo.BrokenMap)
 			if routingInfo.TargetManifestId > ckmgr.cachedBrokenMap.correspondingTargetManifest {
 				// Newer version means potentially backfill maps that were fixed (case 2)
 				// Remove those from the broken mapppings
-				ckmgr.cachedBrokenMap.brokenMap.Delete(routingInfo.BackfillMap)
+				ckmgr.cachedBrokenMap.brokenMap = ckmgr.cachedBrokenMap.brokenMap.Delete(routingInfo.BackfillMap)
 				ckmgr.cachedBrokenMap.correspondingTargetManifest = routingInfo.TargetManifestId
 			}
 			newerMap := ckmgr.cachedBrokenMap.brokenMap.Clone()

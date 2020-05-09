@@ -80,6 +80,8 @@ function runTestCase {
 	checkUnidirectionalChangesLeft
 
 	validateDataLoad
+	validateXDCRCheckpoints "C1"
+	validateXDCRCheckpoints "C2"
 
 	echo "============================================================================"
 	echo "PASSED"

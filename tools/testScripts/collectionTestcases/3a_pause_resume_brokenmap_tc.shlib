@@ -45,12 +45,8 @@ function runDataLoad {
 	waitForBgJobs
 }
 
-declare -i ORIG_TARGET_MAN_PULL_INTERVAL
-declare -i ORIG_ROUTER_MAX_RETRY
-
 function cleanupTestCaseInternalSettings {
-	echo "Cleaning up internal settings"
-	setInternalSettings "C1" "ManifestRefreshTgtInterval=$ORIG_TARGET_MAN_PULL_INTERVAL" "MaxCollectionsRoutingRetry=$ORIG_ROUTER_MAX_RETRY"
+	resetCustomManifestRefreshInterval "C1"
 }
 
 declare LOGMSG="The followings are collection mappings that are newly broken"
@@ -65,27 +61,7 @@ function runTestCase {
 	fi
 
 	# Before doing provisioning, get old internal settings
-	ORIG_TARGET_MAN_PULL_INTERVAL=`getSpecificInternalSettings "C1" "ManifestRefreshTgtInterval"`
-	ORIG_ROUTER_MAX_RETRY=`getSpecificInternalSettings "C1" "MaxCollectionsRoutingRetry"`
-	tempTargetManifestPullInterval="5"
-	tempRouterMaxRetry="1"
-
-	echo "Temporarily updating targetManifestPull from $ORIG_TARGET_MAN_PULL_INTERVAL to $tempTargetManifestPullInterval"
-	echo "Temporarily updating maxCollectionsRoutingRetry from $ORIG_ROUTER_MAX_RETRY to $tempRouterMaxRetry"
-	setInternalSettings "C1" "ManifestRefreshTgtInterval=$tempTargetManifestPullInterval" "MaxCollectionsRoutingRetry=$tempRouterMaxRetry"
-
-	echo "Sleeping 10 seconds for XDCR to reboot before checking..."
-	sleep 10
-	chkTargetManifestPullInterval=`getSpecificInternalSettings "C1" "ManifestRefreshTgtInterval"`
-	chkRouterMaxRetry=`getSpecificInternalSettings "C1" "MaxCollectionsRoutingRetry"`
-	if (( $chkTargetManifestPullInterval != $tempTargetManifestPullInterval ));then
-		echo "Error - unable to update pull interval - stuck at $chkTargetManifestPullInterval"
-		exit 1
-	fi
-	if (( $chkRouterMaxRetry != $tempRouterMaxRetry ));then
-		echo "Error - unable to update maxRetry - stuck at $chkRouterMaxRetry"
-		exit 1
-	fi
+	setCustomManifestRefreshInterval "C1"
 
 	# At this point, settings need to be restored IF the script was forced exited
 	trap cleanupTestCaseInternalSettings EXIT
@@ -126,6 +102,8 @@ function runTestCase {
 	echo "Waiting 15 seconds for pipeline to really pause"
 	sleep 15
 	grepForPanics
+	validateXDCRCheckpoints "C1"
+	validateXDCRCheckpoints "C2"
 
 	resumeReplication "C1" "B1" "C2" "B2"
 	echo "Waiting 15 seconds for resume to finish"
@@ -159,7 +137,6 @@ function runTestCase {
 
 	echo "============================================================================"
 	echo "PASSED"
-	echo "Recommended to manually go into node 0's UI to check for only 1 instance of broken mapping logged"
 	echo "============================================================================"
     cleanupBucketReplications
     cleanupBuckets
