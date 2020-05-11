@@ -103,7 +103,7 @@ const (
 	SUBDOC_MULTI_LOOKUP      = CommandCode(0xd0) // Multi lookup. Doc xattrs and meta.
 
 	DCP_SYSTEM_EVENT = CommandCode(0x5f) // A system event has occurred
-
+	DCP_SEQNO_ADV    = CommandCode(0x64) // Sent when the vb seqno has advanced due to an unsubscribed event
 )
 
 // command codes that are counted toward DCP control buffer
@@ -116,6 +116,7 @@ var BufferedCommandCodeMap = map[CommandCode]bool{
 	UPR_DELETION:     true,
 	UPR_EXPIRATION:   true,
 	DCP_SYSTEM_EVENT: true,
+	DCP_SEQNO_ADV:    true,
 }
 
 // Status field for memcached response.
@@ -277,6 +278,8 @@ func init() {
 	CommandNames[SUBDOC_MULTI_LOOKUP] = "SUBDOC_MULTI_LOOKUP"
 	CommandNames[GET_COLLECTIONS_MANIFEST] = "GET_COLLECTIONS_MANIFEST"
 	CommandNames[COLLECTIONS_GET_CID] = "COLLECTIONS_GET_CID"
+	CommandNames[DCP_SYSTEM_EVENT] = "DCP_SYSTEM_EVENT"
+	CommandNames[DCP_SEQNO_ADV] = "DCP_SEQNO_ADV"
 
 	StatusNames = make(map[Status]string)
 	StatusNames[SUCCESS] = "SUCCESS"

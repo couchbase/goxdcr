@@ -20,6 +20,7 @@ const uprDeletetionExtraLen = 18
 const uprDeletetionWithDeletionTimeExtraLen = 21
 const uprSnapshotExtraLen = 20
 const dcpSystemEventExtraLen = 13
+const dcpSeqnoAdvExtraLen = 8
 const bufferAckThreshold = 0.2
 const opaqueOpen = 0xBEAF0001
 const opaqueFailover = 0xDEADBEEF
@@ -969,6 +970,12 @@ loop:
 					event = makeUprEvent(pkt, stream, bytes)
 				case gomemcached.UPR_FAILOVERLOG:
 					logging.Infof("Failover log for vb %d received: %v", vb, pkt)
+				case gomemcached.DCP_SEQNO_ADV:
+					if stream == nil {
+						logging.Infof("Stream not found for vb %d: %#v", vb, pkt)
+						break loop
+					}
+					event = makeUprEvent(pkt, stream, bytes)
 				default:
 					logging.Infof("Recived an unknown response for vbucket %d", vb)
 				}
