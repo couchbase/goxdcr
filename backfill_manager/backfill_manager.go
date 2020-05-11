@@ -101,6 +101,14 @@ func (p *pipelineSvcWrapper) UpdateSettings(settings metadata.ReplicationSetting
 	return nil
 }
 
+func (p *pipelineSvcWrapper) IsSharable() bool {
+	return false
+}
+
+func (p *pipelineSvcWrapper) Detach(pipeline common.Pipeline) error {
+	return base.ErrorNotSupported
+}
+
 func NewBackfillManager(collectionsManifestSvc service_def.CollectionsManifestSvc,
 	replSpecSvc service_def.ReplicationSpecSvc,
 	backfillReplSvc service_def.BackfillReplSvc,

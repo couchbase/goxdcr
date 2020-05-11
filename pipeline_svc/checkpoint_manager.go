@@ -1816,3 +1816,11 @@ func (ckmgr *CheckpointManager) handleVBError(vbno uint16, err error) {
 func (ckmgr *CheckpointManager) getCurrentCkptWLock(vbno uint16) *checkpointRecordWithLock {
 	return ckmgr.cur_ckpts[vbno]
 }
+
+func (ckgr *CheckpointManager) IsSharable() bool {
+	return false
+}
+
+func (ckmgr *CheckpointManager) Detach(pipeline common.Pipeline) error {
+	return base.ErrorNotSupported
+}

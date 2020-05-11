@@ -446,3 +446,11 @@ func (pipelineSupervisor *PipelineSupervisor) setError(partId string, err error)
 		pipelineSupervisor.Logger().Infof("%v Received error report : %v, but error is ignored. pipeline_state=%v\n errors_seen=%v\n", pipelineSupervisor.Id(), err, pipelineSupervisor.pipeline.State(), pipelineSupervisor.errors_seen)
 	}
 }
+
+func (pipelineSupervisor *PipelineSupervisor) IsSharable() bool {
+	return false
+}
+
+func (pipelineSupervisor *PipelineSupervisor) Detach(pipeline common.Pipeline) error {
+	return base.ErrorNotSupported
+}

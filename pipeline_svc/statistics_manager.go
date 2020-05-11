@@ -1871,3 +1871,11 @@ func (statsMgr *StatisticsManager) HandleLatestThroughSeqnos(SeqnoMap map[uint16
 func (statsMgr *StatisticsManager) GetThroughSeqnosFromTsService() map[uint16]uint64 {
 	return statsMgr.through_seqno_tracker_svc.GetThroughSeqnos()
 }
+
+func (statsMgr *StatisticsManager) IsSharable() bool {
+	return false
+}
+
+func (statsMgr *StatisticsManager) Detach(pipeline common.Pipeline) error {
+	return base.ErrorNotSupported
+}

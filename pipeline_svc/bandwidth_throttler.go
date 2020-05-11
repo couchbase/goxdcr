@@ -47,6 +47,9 @@ type BandwidthThrottler struct {
 	wait_grp  sync.WaitGroup
 
 	logger *log.CommonLogger
+
+	attachmentMtx sync.Mutex
+	pipelines     []common.Pipeline
 }
 
 func NewBandwidthThrottlerSvc(xdcr_topology_svc service_def.XDCRCompTopologySvc,
@@ -59,23 +62,35 @@ func NewBandwidthThrottlerSvc(xdcr_topology_svc service_def.XDCRCompTopologySvc,
 		logger:               log.NewLogger("BwThrottler", logger_ctx)}
 }
 
+// Throttler could be attached to multiple pipelines. The first one will always
+// be the main pipeline
 func (throttler *BandwidthThrottler) Attach(pipeline common.Pipeline) error {
-	throttler.id = pipeline_utils.GetElementIdFromName(pipeline, base.BANDWIDTH_THROTTLER_SVC)
+	throttler.attachmentMtx.Lock()
+	defer throttler.attachmentMtx.Unlock()
 
-	number_of_source_nodes, err := throttler.xdcr_topology_svc.NumberOfKVNodes()
-	if err != nil {
-		return err
+	if len(throttler.pipelines) == 0 {
+
+		throttler.id = pipeline_utils.GetElementIdFromName(pipeline, base.BANDWIDTH_THROTTLER_SVC)
+
+		number_of_source_nodes, err := throttler.xdcr_topology_svc.NumberOfKVNodes()
+		if err != nil {
+			return err
+		}
+
+		err = throttler.updateBandwidthLimitSettings(number_of_source_nodes, true, /*update_number_of_source_nodes*/
+			pipeline.Specification().Settings.BandwidthLimit, true /*update_overall_bandwidth_limit*/)
+		if err != nil {
+			return err
+		}
+
+		throttler.initBandwidthUsageQuota()
+
+		throttler.logger.Infof("%v attached to main pipeline", throttler.id)
+	} else {
+		throttler.logger.Infof("%v attached to secondary pipeline", throttler.id)
 	}
 
-	err = throttler.updateBandwidthLimitSettings(number_of_source_nodes, true, /*update_number_of_source_nodes*/
-		pipeline.Specification().Settings.BandwidthLimit, true /*update_overall_bandwidth_limit*/)
-	if err != nil {
-		return err
-	}
-
-	throttler.initBandwidthUsageQuota()
-
-	throttler.logger.Infof("%v attached to pipeline", throttler.id)
+	throttler.pipelines = append(throttler.pipelines, pipeline)
 	return nil
 }
 
@@ -401,4 +416,32 @@ func (throttler *BandwidthThrottler) PrintStatusSummary() {
 	} else {
 		throttler.logger.Infof("%v bandwidth_limit=%v, bandwidth_usage_quota=%v", throttler.id, bandwidth_limit, bandwidth_usage_quota)
 	}
+}
+
+func (throttler *BandwidthThrottler) IsSharable() bool {
+	// Replications can specify max bandwidth to use - and the said bandwidth
+	// should be shared among multiple pipelines within the same replication
+	return true
+}
+
+func (throttler *BandwidthThrottler) Detach(pipeline common.Pipeline) error {
+	throttler.attachmentMtx.Lock()
+	defer throttler.attachmentMtx.Unlock()
+
+	var idxToDel int = -1
+
+	for i, attachedP := range throttler.pipelines {
+		if pipeline.Topic() == attachedP.Topic() {
+			throttler.logger.Infof("Detaching pipeline %v", attachedP.Topic())
+			idxToDel = i
+			break
+		}
+	}
+
+	if idxToDel == -1 {
+		return base.ErrorNotFound
+	}
+
+	throttler.pipelines = append(throttler.pipelines[:idxToDel], throttler.pipelines[idxToDel+1:]...)
+	return nil
 }

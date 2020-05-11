@@ -22,4 +22,9 @@ type PipelineService interface {
 	Stop() error
 
 	UpdateSettings(settings metadata.ReplicationSettingsMap) error
+
+	// If a service can be shared by more than one pipeline in the same replication
+	IsSharable() bool
+	// If sharable, allow service to be detached
+	Detach(pipeline Pipeline) error
 }
