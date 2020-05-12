@@ -29,3 +29,31 @@ func (_m *PipelineMgrBackfillIface) GetMainPipelineThroughSeqnos(topic string) (
 
 	return r0, r1
 }
+
+// HaltBackfill provides a mock function with given fields: topic
+func (_m *PipelineMgrBackfillIface) HaltBackfill(topic string) error {
+	ret := _m.Called(topic)
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(string) error); ok {
+		r0 = rf(topic)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// RequestBackfill provides a mock function with given fields: topic
+func (_m *PipelineMgrBackfillIface) RequestBackfill(topic string) error {
+	ret := _m.Called(topic)
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(string) error); ok {
+		r0 = rf(topic)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}

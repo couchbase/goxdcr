@@ -225,7 +225,7 @@ func (genericPipeline *GenericPipeline) startPart(part common.Part, settings met
 //settings - a map of parameter to start the pipeline. it can contain initialization paramters
 //			 for each processing steps and for runtime context of the pipeline.
 func (genericPipeline *GenericPipeline) Start(settings metadata.ReplicationSettingsMap) base.ErrorMap {
-	genericPipeline.logger.Infof("Starting pipeline %s\n %s \n settings = %v\n", genericPipeline.InstanceId(), genericPipeline.Layout(), settings.CloneAndRedact())
+	genericPipeline.logger.Infof("Starting %v %s\n %s \n settings = %v\n", genericPipeline.Type().String(), genericPipeline.InstanceId(), genericPipeline.Layout(), settings.CloneAndRedact())
 	var errMap base.ErrorMap = make(base.ErrorMap)
 	var err error
 
@@ -297,14 +297,14 @@ func (genericPipeline *GenericPipeline) Start(settings metadata.ReplicationSetti
 		return errMap
 	}
 
-	genericPipeline.logger.Infof("%v All parts have been started", genericPipeline.Topic())
+	genericPipeline.logger.Infof("%v %v All parts have been started", genericPipeline.Type(), genericPipeline.Topic())
 	genericPipeline.ReportProgress("All parts have been started")
 
 	//open targets
 	for _, target := range genericPipeline.targets {
 		err = target.Open()
 		if err != nil {
-			genericPipeline.logger.Errorf("%v failed to open outgoing nozzle %s. err=%v", genericPipeline.InstanceId(), target.Id(), err)
+			genericPipeline.logger.Errorf("%v %v failed to open outgoing nozzle %s. err=%v", genericPipeline.Type(), genericPipeline.InstanceId(), target.Id(), err)
 			errMap["genericPipeline.outgoingNozzle.Open"] = err
 			return errMap
 		}
@@ -317,7 +317,7 @@ func (genericPipeline *GenericPipeline) Start(settings metadata.ReplicationSetti
 
 		err = source.Open()
 		if err != nil {
-			genericPipeline.logger.Errorf("%v failed to open incoming nozzle %s. err=%v", genericPipeline.InstanceId(), source.Id(), err)
+			genericPipeline.logger.Errorf("%v %v failed to open incoming nozzle %s. err=%v", genericPipeline.Type(), genericPipeline.InstanceId(), source.Id(), err)
 			errMap["genericPipeline.sourceNozzle.Open"] = err
 			return errMap
 		}
@@ -327,7 +327,7 @@ func (genericPipeline *GenericPipeline) Start(settings metadata.ReplicationSetti
 
 	err = genericPipeline.SetState(common.Pipeline_Running)
 	if err == nil {
-		genericPipeline.logger.Infof("-----------Pipeline %s has been started----------", genericPipeline.InstanceId())
+		genericPipeline.logger.Infof("----------- %v %s has been started----------", genericPipeline.Type(), genericPipeline.InstanceId())
 		genericPipeline.ReportProgress("Pipeline is running")
 	} else {
 		err = fmt.Errorf("Pipeline %s failed to start", genericPipeline.Topic())
@@ -423,7 +423,7 @@ func (genericPipeline *GenericPipeline) isUpstreamTo(target_part common.Part, pa
 func (genericPipeline *GenericPipeline) Stop() base.ErrorMap {
 	var errMap base.ErrorMap = make(base.ErrorMap)
 
-	genericPipeline.logger.Infof("Stopping pipeline %v\n", genericPipeline.InstanceId())
+	genericPipeline.logger.Infof("Stopping %v %v\n", genericPipeline.Type().String(), genericPipeline.InstanceId())
 	var err error
 
 	err = genericPipeline.SetState(common.Pipeline_Stopping)
@@ -439,7 +439,7 @@ func (genericPipeline *GenericPipeline) Stop() base.ErrorMap {
 	for _, asyncEventListener := range GetAllAsyncComponentEventListeners(genericPipeline) {
 		asyncEventListener.Stop()
 	}
-	genericPipeline.logger.Infof("%v Async listeners have been stopped", genericPipeline.InstanceId())
+	genericPipeline.logger.Infof("%v %v Async listeners have been stopped", genericPipeline.Type(), genericPipeline.InstanceId())
 	genericPipeline.ReportProgress("Async listeners have been stopped")
 
 	// stop services before stopping parts to avoid spurious errors from services
@@ -451,11 +451,11 @@ func (genericPipeline *GenericPipeline) Stop() base.ErrorMap {
 	for _, source := range genericPipeline.sources {
 		err = source.Close()
 		if err != nil {
-			genericPipeline.logger.Warnf("%v failed to close source %v. err=%v", genericPipeline.InstanceId(), source.Id(), err)
+			genericPipeline.logger.Warnf("%v %v failed to close source %v. err=%v", genericPipeline.Type(), genericPipeline.InstanceId(), source.Id(), err)
 			errMap[fmt.Sprintf("genericPipeline.%v.Close", source.Id())] = err
 		}
 	}
-	genericPipeline.logger.Infof("%v source nozzles have been closed", genericPipeline.InstanceId())
+	genericPipeline.logger.Infof("%v %v source nozzles have been closed", genericPipeline.Type(), genericPipeline.InstanceId())
 	genericPipeline.ReportProgress("Source nozzles have been closed")
 
 	partsErrMap := genericPipeline.stopPartsWithTimeout()
@@ -467,7 +467,7 @@ func (genericPipeline *GenericPipeline) Stop() base.ErrorMap {
 		errMap["genericPipeline.SetState.Pipeline_Stopped"] = err
 	}
 
-	genericPipeline.logger.Infof("Pipeline %v has been stopped\n errMap=%v\n", genericPipeline.InstanceId(), errMap)
+	genericPipeline.logger.Infof("%v %v has been stopped\n errMap=%v\n", genericPipeline.Type(), genericPipeline.InstanceId(), errMap)
 	return errMap
 }
 

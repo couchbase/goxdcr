@@ -89,9 +89,37 @@ func (_m *PipelineOpSerializerIface) ReInit(topic string) error {
 	return r0
 }
 
+// StartBackfill provides a mock function with given fields: topic
+func (_m *PipelineOpSerializerIface) StartBackfill(topic string) error {
+	ret := _m.Called(topic)
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(string) error); ok {
+		r0 = rf(topic)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
 // Stop provides a mock function with given fields:
 func (_m *PipelineOpSerializerIface) Stop() {
 	_m.Called()
+}
+
+// StopBackfill provides a mock function with given fields: topic
+func (_m *PipelineOpSerializerIface) StopBackfill(topic string) error {
+	ret := _m.Called(topic)
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(string) error); ok {
+		r0 = rf(topic)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
 }
 
 // Update provides a mock function with given fields: topic, err

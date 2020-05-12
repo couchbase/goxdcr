@@ -28,6 +28,22 @@ func (_m *ReplicationStatusIface) AddErrorsFromMap(errMap base.ErrorMap) {
 	_m.Called(errMap)
 }
 
+// BackfillPipeline provides a mock function with given fields:
+func (_m *ReplicationStatusIface) BackfillPipeline() common.Pipeline {
+	ret := _m.Called()
+
+	var r0 common.Pipeline
+	if rf, ok := ret.Get(0).(func() common.Pipeline); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(common.Pipeline)
+		}
+	}
+
+	return r0
+}
+
 // CleanupBeforeExit provides a mock function with given fields: statsToClear
 func (_m *ReplicationStatusIface) CleanupBeforeExit(statsToClear []string) {
 	_m.Called(statsToClear)
@@ -153,6 +169,11 @@ func (_m *ReplicationStatusIface) PublishWithStatus(status string, lock bool) {
 // RecordProgress provides a mock function with given fields: progress
 func (_m *ReplicationStatusIface) RecordProgress(progress string) {
 	_m.Called(progress)
+}
+
+// RemovePipeline provides a mock function with given fields: _a0
+func (_m *ReplicationStatusIface) RemovePipeline(_a0 common.Pipeline) {
+	_m.Called(_a0)
 }
 
 // RepId provides a mock function with given fields:

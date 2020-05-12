@@ -15,13 +15,38 @@ var ErrQueueMaxed error = errors.New("The requested action has been persisted in
 var SerializerStoppedErr error = errors.New("Pipeline Manager is shutting down. The requested action is unable to be processed.")
 
 const (
-	PipelineGetOrCreate  PipelineMgtOpType = iota
-	PipelineInit         PipelineMgtOpType = iota
-	PipelineUpdate       PipelineMgtOpType = iota
-	PipelineDeletion     PipelineMgtOpType = iota
-	PipelineReinitStream PipelineMgtOpType = iota
-	PipelineAutoPause    PipelineMgtOpType = iota
+	PipelineGetOrCreate   PipelineMgtOpType = iota
+	PipelineInit          PipelineMgtOpType = iota
+	PipelineUpdate        PipelineMgtOpType = iota
+	PipelineDeletion      PipelineMgtOpType = iota
+	PipelineReinitStream  PipelineMgtOpType = iota
+	PipelineAutoPause     PipelineMgtOpType = iota
+	BackfillPipelineStart PipelineMgtOpType = iota
+	BackfillPipelineStop  PipelineMgtOpType = iota
 )
+
+func (p PipelineMgtOpType) String() string {
+	switch p {
+	case PipelineGetOrCreate:
+		return "PipelineGetOrCreate"
+	case PipelineInit:
+		return "PipelineInit"
+	case PipelineUpdate:
+		return "PipelineUpdate"
+	case PipelineDeletion:
+		return "PipelineDeletion"
+	case PipelineReinitStream:
+		return "PipelineReinitStream"
+	case PipelineAutoPause:
+		return "PipelineAutoPause"
+	case BackfillPipelineStart:
+		return "BackfillPipelineStart"
+	case BackfillPipelineStop:
+		return "BackfillPipelineStop"
+	default:
+		return "?? PipelineMgtOpType"
+	}
+}
 
 type PipelineOpSerializerIface interface {
 	// Asynchronous User APIs
@@ -30,6 +55,10 @@ type PipelineOpSerializerIface interface {
 	Init(topic string) error
 	ReInit(topic string) error
 	Pause(topic string) error
+
+	// Async Backfill APIs
+	StartBackfill(topic string) error
+	StopBackfill(topic string) error
 
 	// Synchronous User APIs - call and get data from a channel
 	GetOrCreateReplicationStatus(topic string, cur_err error) (*pipeline.ReplicationStatus, error)
@@ -54,6 +83,10 @@ type Job struct {
 
 	// Optional outputs from jobs
 	repStatusCh chan SerializerRepStatusPair
+}
+
+func (j *Job) String() string {
+	return fmt.Sprintf("Job for %v Type: %v ", j.pipelineTopic, j.jobType.String())
 }
 
 type PipelineOpSerializer struct {
@@ -141,6 +174,30 @@ func (serializer *PipelineOpSerializer) Pause(topic string) error {
 	pauseJob.pipelineTopic = topic
 
 	return serializer.distributeJob(pauseJob)
+}
+
+func (serializer *PipelineOpSerializer) StartBackfill(topic string) error {
+	if serializer.isStopped() {
+		return SerializerStoppedErr
+	}
+
+	var startBackfillJob Job
+	startBackfillJob.jobType = BackfillPipelineStart
+	startBackfillJob.pipelineTopic = topic
+
+	return serializer.distributeJob(startBackfillJob)
+}
+
+func (serializer *PipelineOpSerializer) StopBackfill(topic string) error {
+	if serializer.isStopped() {
+		return SerializerStoppedErr
+	}
+
+	var stopBackfillJob Job
+	stopBackfillJob.jobType = BackfillPipelineStop
+	stopBackfillJob.pipelineTopic = topic
+
+	return serializer.distributeJob(stopBackfillJob)
 }
 
 // Synchronous call
@@ -240,7 +297,7 @@ forloop:
 				serializer.logger.Errorf("Names %v <-> %v do not match... coding bug", job.pipelineTopic, pipelineTopic)
 				continue forloop
 			}
-			serializer.logger.Infof("PipelineOpSerializer %v handling job: %v", pipelineTopic, job)
+			serializer.logger.Infof("PipelineOpSerializer %v handling job: %v", pipelineTopic, job.String())
 			switch job.jobType {
 			case PipelineGetOrCreate:
 				repStatus, repStatusErr := serializer.pipelineMgr.GetOrCreateReplicationStatus(job.pipelineTopic, job.errForUpdateOp)
@@ -286,10 +343,20 @@ forloop:
 				if err != nil {
 					serializer.logger.Warnf("Error auto-pausing pipeline %v. err=%v", job.pipelineTopic, err)
 				}
+			case BackfillPipelineStart:
+				err := serializer.pipelineMgr.StartBackfill(job.pipelineTopic)
+				if err != nil {
+					serializer.logger.Warnf("Error starting backfill pipeline %v. err=%v", job.pipelineTopic, err)
+				}
+			case BackfillPipelineStop:
+				err := serializer.pipelineMgr.StopBackfill(job.pipelineTopic)
+				if err != nil {
+					serializer.logger.Warnf("Error stopping backfill pipeline %v. err=%v", job.pipelineTopic, err)
+				}
 			default:
-				serializer.logger.Errorf(fmt.Sprintf("Unknown job type: %v -> %v", job.jobType, job))
+				serializer.logger.Errorf(fmt.Sprintf("Unknown job type: %v -> %v", job.jobType, job.String()))
 			}
-			serializer.logger.Infof("PipelineOpSerializer %v done handling job: %v", pipelineTopic, job)
+			serializer.logger.Infof("PipelineOpSerializer %v done handling job: %v", pipelineTopic, job.String())
 		default:
 			// Cannot read from channel anymore
 			serializer.stoppedLk.RLock()

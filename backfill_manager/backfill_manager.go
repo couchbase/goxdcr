@@ -294,8 +294,15 @@ func (b *BackfillMgr) backfillReplSpecChangeHandlerCallback(changedSpecId string
 		return base.ErrorInvalidInput
 	}
 	b.logger.Infof("Backfill spec change callback for %v detected old %v new %v", changedSpecId, oldSpec, newSpec)
-	// TODO - logics to determine what to do about current ongoing backfill tasks
-	// i.e. combine? Optimize? start? stop? simply just queue?
+	if oldSpec == nil && newSpec != nil {
+		err := b.pipelineMgr.RequestBackfill(changedSpecId)
+		if err != nil {
+			b.logger.Errorf("Unable to request backfill for %v", changedSpecId)
+			return err
+		}
+	} else if oldSpec != nil && newSpec == nil {
+		// When a spec is deleted, backfill pipeline will be automatically stopped as part of stopping main pipeline
+	}
 	return nil
 }
 

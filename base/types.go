@@ -42,6 +42,15 @@ func (errMap *ErrorMap) AddErrors(otherMap ErrorMap) {
 	MergeErrorMaps(*errMap, otherMap, true /*overwrite*/)
 }
 
+func (errMap *ErrorMap) HasError(err error) bool {
+	for _, v := range *errMap {
+		if v == err {
+			return true
+		}
+	}
+	return false
+}
+
 type SSLPortMap map[string]uint16
 
 type SettingsError struct {

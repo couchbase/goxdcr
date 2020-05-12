@@ -203,6 +203,36 @@ func (_m *PipelineMgrInternalIface) RemoveReplicationStatus(topic string) error 
 	return r0
 }
 
+// StartBackfill provides a mock function with given fields: topic
+func (_m *PipelineMgrInternalIface) StartBackfill(topic string) error {
+	ret := _m.Called(topic)
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(string) error); ok {
+		r0 = rf(topic)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// StartBackfillPipeline provides a mock function with given fields: topic
+func (_m *PipelineMgrInternalIface) StartBackfillPipeline(topic string) base.ErrorMap {
+	ret := _m.Called(topic)
+
+	var r0 base.ErrorMap
+	if rf, ok := ret.Get(0).(func(string) base.ErrorMap); ok {
+		r0 = rf(topic)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(base.ErrorMap)
+		}
+	}
+
+	return r0
+}
+
 // StartPipeline provides a mock function with given fields: topic
 func (_m *PipelineMgrInternalIface) StartPipeline(topic string) base.ErrorMap {
 	ret := _m.Called(topic)
@@ -222,6 +252,36 @@ func (_m *PipelineMgrInternalIface) StartPipeline(topic string) base.ErrorMap {
 // StopAllUpdaters provides a mock function with given fields:
 func (_m *PipelineMgrInternalIface) StopAllUpdaters() {
 	_m.Called()
+}
+
+// StopBackfill provides a mock function with given fields: topic
+func (_m *PipelineMgrInternalIface) StopBackfill(topic string) error {
+	ret := _m.Called(topic)
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(string) error); ok {
+		r0 = rf(topic)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// StopBackfillPipeline provides a mock function with given fields: topic
+func (_m *PipelineMgrInternalIface) StopBackfillPipeline(topic string) base.ErrorMap {
+	ret := _m.Called(topic)
+
+	var r0 base.ErrorMap
+	if rf, ok := ret.Get(0).(func(string) base.ErrorMap); ok {
+		r0 = rf(topic)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(base.ErrorMap)
+		}
+	}
+
+	return r0
 }
 
 // StopPipeline provides a mock function with given fields: rep_status

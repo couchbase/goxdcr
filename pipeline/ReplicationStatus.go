@@ -71,6 +71,7 @@ func (errArray PipelineErrorArray) String() string {
 
 type ReplicationStatusIface interface {
 	SetPipeline(pipeline common.Pipeline)
+	RemovePipeline(pipeline common.Pipeline)
 	Spec() *metadata.ReplicationSpecification
 	RepId() string
 	AddError(err error)
@@ -88,6 +89,7 @@ type ReplicationStatusIface interface {
 	Publish(lock bool)
 	PublishWithStatus(status string, lock bool)
 	Pipeline() common.Pipeline
+	BackfillPipeline() common.Pipeline
 	VbList() []uint16
 	SetVbList(vb_list []uint16)
 	SettingsMap() map[string]interface{}
@@ -104,17 +106,20 @@ type ReplicationStatusIface interface {
 }
 
 type ReplicationStatus struct {
-	pipeline_        common.Pipeline
-	err_list         PipelineErrorArray
-	progress         string
-	oldProgress      string
-	logger           *log.CommonLogger
-	specId           string
-	specInternalId   string
-	spec_getter      ReplicationSpecGetter
-	pipeline_updater interface{}
-	lock             *sync.RWMutex
-	customSettings   map[string]interface{}
+	pipeline_           common.Pipeline
+	backfillPipeline_   common.Pipeline
+	err_list            PipelineErrorArray
+	progress            string
+	oldProgress         string
+	backfillProgress    string
+	backfillOldProgress string
+	logger              *log.CommonLogger
+	specId              string
+	specInternalId      string
+	spec_getter         ReplicationSpecGetter
+	pipeline_updater    interface{}
+	lock                *sync.RWMutex
+	customSettings      map[string]interface{}
 	// tracks the list of vbs managed by the replication.
 	// useful when replication is paused, when it can be compared with the current vb_list to determine
 	// whether topology change has occured on source
@@ -138,14 +143,32 @@ func NewReplicationStatus(specId string, spec_getter ReplicationSpecGetter, logg
 func (rs *ReplicationStatus) SetPipeline(pipeline common.Pipeline) {
 	rs.lock.Lock()
 	defer rs.lock.Unlock()
-	rs.pipeline_ = pipeline
-	if pipeline != nil {
-		rs.vb_list = pipeline_utils.GetSourceVBListPerPipeline(pipeline)
-		base.SortUint16List(rs.vb_list)
-		rs.specInternalId = pipeline.Specification().GetReplicationSpec().InternalId
+	switch pipeline.Type() {
+	case common.MainPipeline:
+		rs.pipeline_ = pipeline
+		if pipeline != nil {
+			rs.vb_list = pipeline_utils.GetSourceVBListPerPipeline(pipeline)
+			base.SortUint16List(rs.vb_list)
+			rs.specInternalId = pipeline.Specification().GetReplicationSpec().InternalId
+		}
+	case common.BackfillPipeline:
+		rs.backfillPipeline_ = pipeline
+	default:
+		rs.logger.Errorf("SetPipeline called on unknown pipeline type %v", pipeline.Type())
 	}
 
 	rs.Publish(false)
+}
+
+func (rs *ReplicationStatus) RemovePipeline(pipeline common.Pipeline) {
+	rs.lock.Lock()
+	defer rs.lock.Unlock()
+	switch pipeline.Type() {
+	case common.MainPipeline:
+		rs.pipeline_ = nil
+	case common.BackfillPipeline:
+		rs.backfillPipeline_ = nil
+	}
 }
 
 func (rs *ReplicationStatus) SetCustomSettings(customSettings map[string]interface{}) {
@@ -370,6 +393,16 @@ func (rs *ReplicationStatus) PublishWithStatus(status string, lock bool) {
 	progressVar.Set(rs.progress)
 	rep_map.Set("Progress", progressVar)
 
+	//publish oldBackfillProgress
+	backfillOldProgressVar := new(expvar.String)
+	backfillOldProgressVar.Set(rs.backfillOldProgress)
+	rep_map.Set("Backfill Old Progress", backfillOldProgressVar)
+
+	// publish backfill progress
+	backfillProgressVar := new(expvar.String)
+	backfillProgressVar.Set(rs.backfillProgress)
+	rep_map.Set("Backfill Progress", backfillProgressVar)
+
 	//publish errors
 	errorVar := new(expvar.String)
 	errorVar.Set(rs.err_list.String())
@@ -381,6 +414,12 @@ func (rs *ReplicationStatus) Pipeline() common.Pipeline {
 	rs.lock.RLock()
 	defer rs.lock.RUnlock()
 	return rs.pipeline_
+}
+
+func (rs *ReplicationStatus) BackfillPipeline() common.Pipeline {
+	rs.lock.RLock()
+	defer rs.lock.RUnlock()
+	return rs.backfillPipeline_
 }
 
 func (rs *ReplicationStatus) VbList() []uint16 {
@@ -443,6 +482,14 @@ func (rs *ReplicationStatus) RecordProgress(progress string) {
 	rs.Publish(false)
 }
 
+func (rs *ReplicationStatus) RecordBackfillProgress(progress string) {
+	rs.lock.Lock()
+	defer rs.lock.Unlock()
+	rs.backfillOldProgress = rs.backfillProgress
+	rs.backfillProgress = progress
+	rs.Publish(false)
+}
+
 func (rs *ReplicationStatus) GetProgress() string {
 	rs.lock.RLock()
 	defer rs.lock.RUnlock()
@@ -452,7 +499,11 @@ func (rs *ReplicationStatus) GetProgress() string {
 func (rs *ReplicationStatus) String() string {
 	rs.lock.RLock()
 	defer rs.lock.RUnlock()
-	return fmt.Sprintf("name={%v}, status={%v}, errors={%v}, oldProgress={%v}, progress={%v}\n", rs.specId, rs.RuntimeStatus(false), rs.err_list, rs.oldProgress, rs.progress)
+	retStr := fmt.Sprintf("name={%v}, status={%v}, errors={%v}, oldProgress={%v}, progress={%v}", rs.specId, rs.RuntimeStatus(false), rs.err_list, rs.oldProgress, rs.progress)
+	if rs.backfillOldProgress != "" || rs.backfillProgress != "" {
+		retStr = fmt.Sprintf("%v, oldBackfillProgress={%v}, backfillProgress={%v}", retStr, rs.backfillOldProgress, rs.backfillProgress)
+	}
+	return retStr
 }
 
 // The caller should check if return value is null, if the creation process is ongoing

@@ -30,6 +30,7 @@ import (
 var ReplicationSpecNotActive error = errors.New("Replication specification not found or no longer active")
 var ReplicationStatusNotFound error = errors.New("Replication Status not found")
 var UpdaterStoppedError error = errors.New("Updater already stopped")
+var MainPipelineNotRunning error = errors.New("Main pipeline is not running")
 
 var default_failure_restart_interval = 10
 
@@ -48,6 +49,7 @@ type PipelineManager struct {
 	checkpoint_svc         service_def.CheckpointsService
 	uilog_svc              service_def.UILogSvc
 	collectionsManifestSvc service_def.CollectionsManifestSvc
+	backfillReplSvc        service_def.BackfillReplSvc
 
 	once       sync.Once
 	logger     *log.CommonLogger
@@ -88,11 +90,19 @@ type PipelineMgrInternalIface interface {
 	AutoPauseReplication(topic string) error
 	PauseReplication(topic string) error
 	ForceTargetRefreshManifest(spec *metadata.ReplicationSpecification) error
+	// Used by updater
+	StartBackfillPipeline(topic string) base.ErrorMap
+	StopBackfillPipeline(topic string) base.ErrorMap
+	// Used by serializer
+	StartBackfill(topic string) error
+	StopBackfill(topic string) error
 }
 
 // Specifically APIs used by backfill manager
 type PipelineMgrBackfillIface interface {
 	GetMainPipelineThroughSeqnos(topic string) (map[uint16]uint64, error)
+	RequestBackfill(topic string) error
+	HaltBackfill(topic string) error
 }
 
 // Global ptr, should slowly get rid of refences to this global
@@ -100,7 +110,8 @@ var pipeline_mgr *PipelineManager
 
 func NewPipelineManager(factory common.PipelineFactory, repl_spec_svc service_def.ReplicationSpecSvc, xdcr_topology_svc service_def.XDCRCompTopologySvc,
 	remote_cluster_svc service_def.RemoteClusterSvc, cluster_info_svc service_def.ClusterInfoSvc, checkpoint_svc service_def.CheckpointsService,
-	uilog_svc service_def.UILogSvc, logger_context *log.LoggerContext, utilsIn utilities.UtilsIface, collectionsManifestSvc service_def.CollectionsManifestSvc) *PipelineManager {
+	uilog_svc service_def.UILogSvc, logger_context *log.LoggerContext, utilsIn utilities.UtilsIface, collectionsManifestSvc service_def.CollectionsManifestSvc,
+	backfillReplSvc service_def.BackfillReplSvc) *PipelineManager {
 
 	pipelineMgrRetVar := &PipelineManager{
 		pipeline_factory:       factory,
@@ -113,6 +124,7 @@ func NewPipelineManager(factory common.PipelineFactory, repl_spec_svc service_de
 		uilog_svc:              uilog_svc,
 		utils:                  utilsIn,
 		collectionsManifestSvc: collectionsManifestSvc,
+		backfillReplSvc:        backfillReplSvc,
 	}
 	pipelineMgrRetVar.logger.Info("Pipeline Manager is constructed")
 
@@ -195,6 +207,14 @@ func (pipelineMgr *PipelineManager) InitiateRepStatus(pipelineName string) error
 
 func (pipelineMgr *PipelineManager) AutoPauseReplication(pipelineName string) error {
 	return pipelineMgr.serializer.Pause(pipelineName)
+}
+
+func (pipelineMgr *PipelineManager) RequestBackfill(pipelineName string) error {
+	return pipelineMgr.serializer.StartBackfill(pipelineName)
+}
+
+func (pipelineMgr *PipelineManager) HaltBackfill(pipelineName string) error {
+	return pipelineMgr.serializer.StopBackfill(pipelineName)
 }
 
 // This should really be the method to be used. This is considered part of the interface
@@ -372,6 +392,15 @@ func (pipelineMgr *PipelineManager) StartPipeline(topic string) base.ErrorMap {
 	errMap = p.Start(rep_status.SettingsMap())
 	if len(errMap) > 0 {
 		pipelineMgr.logger.Errorf("Failed to start the pipeline %v", p.InstanceId())
+	} else {
+		backfillSpec, _ := pipelineMgr.backfillReplSvc.BackfillReplSpec(topic)
+		if backfillSpec != nil {
+			// Has backfill pipeline waiting
+			backfillStartQueueErr := pipelineMgr.StartBackfill(topic)
+			if backfillStartQueueErr != nil {
+				pipelineMgr.logger.Errorf("Unable to queue backfill pipeline start for %v", topic)
+			}
+		}
 	}
 	return errMap
 }
@@ -416,7 +445,7 @@ func (pipelineMgr *PipelineManager) removePipelineFromReplicationStatus(p common
 	if p != nil {
 		rep_status, _ := ReplicationStatus(p.Topic())
 		if rep_status != nil {
-			rep_status.SetPipeline(nil)
+			rep_status.RemovePipeline(p)
 		} else {
 			return fmt.Errorf("Replication %v hasn't been registered with PipelineManager yet", p.Topic())
 
@@ -440,11 +469,30 @@ func (pipelineMgr *PipelineManager) StopPipeline(rep_status pipeline.Replication
 	pipelineMgr.logger.Infof("Trying to stop the pipeline %s", replId)
 
 	p := rep_status.Pipeline()
-
 	if p != nil {
 		state := p.State()
 		if state == common.Pipeline_Running || state == common.Pipeline_Starting || state == common.Pipeline_Error {
+			bp := rep_status.BackfillPipeline()
+			var bgWaitGrp *sync.WaitGroup
+			var bgErrMap base.ErrorMap
+			if bp != nil {
+				bgWaitGrp := &sync.WaitGroup{}
+				stopBackfillPipelineInBg := func() {
+					defer bgWaitGrp.Done()
+					bgErrMap = pipelineMgr.StopBackfillPipeline(replId)
+				}
+				bgWaitGrp.Add(1)
+				go stopBackfillPipelineInBg()
+			}
 			errMap = p.Stop()
+			if bgWaitGrp != nil {
+				bgWaitGrp.Wait()
+			}
+			if bgErrMap != nil {
+				for k, v := range bgErrMap {
+					errMap[k] = v
+				}
+			}
 			if len(errMap) > 0 {
 				pipelineMgr.logger.Errorf("Received error(s) when stopping pipeline %v - %v\n", replId, base.FlattenErrorMap(errMap))
 				//pipeline failed to stopped gracefully in time. ignore the error.
@@ -667,6 +715,130 @@ func (pipelineMgr *PipelineManager) ForceTargetRefreshManifest(spec *metadata.Re
 	return pipelineMgr.collectionsManifestSvc.ForceTargetManifestRefresh(spec)
 }
 
+func (pipelineMgr *PipelineManager) StartBackfill(topic string) error {
+	repStatus, _ := pipelineMgr.ReplicationStatus(topic)
+	if repStatus == nil {
+		return fmt.Errorf("Cannot start backfill for %v if main replication status does not exist", topic)
+	}
+
+	updaterObj := repStatus.Updater()
+	if updaterObj == nil {
+		errorStr := fmt.Sprintf("Failed to get updater from replication status in topic %v in StartBackfill()", topic)
+		return errors.New(errorStr)
+	} else {
+		updater, ok := updaterObj.(*PipelineUpdater)
+		if updater == nil || !ok {
+			errorStr := fmt.Sprintf("Unable to cast updaterObj as type PipelineUpdater in topic %v", topic)
+			return errors.New(errorStr)
+		}
+
+		updater.startBackfillPipeline()
+	}
+	return nil
+}
+
+func (pipelineMgr *PipelineManager) StopBackfill(topic string) error {
+	repStatus, _ := pipelineMgr.ReplicationStatus(topic)
+	if repStatus == nil {
+		return fmt.Errorf("Cannot stop backfill for %v if main replication status does not exist", topic)
+	}
+
+	updaterObj := repStatus.Updater()
+	if updaterObj == nil {
+		errorStr := fmt.Sprintf("Failed to get updater from replication status in topic %v in StopBackfill()", topic)
+		return errors.New(errorStr)
+	} else {
+		updater, ok := updaterObj.(*PipelineUpdater)
+		if updater == nil || !ok {
+			errorStr := fmt.Sprintf("Unable to cast updaterObj as type PipelineUpdater in topic %v", topic)
+			return errors.New(errorStr)
+		}
+
+		updater.stopBackfillPipeline()
+	}
+	return nil
+}
+
+func (pipelineMgr *PipelineManager) StartBackfillPipeline(topic string) base.ErrorMap {
+	var err error
+	errMap := make(base.ErrorMap)
+	pipelineMgr.logger.Infof("Starting the backfill pipeline %s\n", topic)
+	repStatusKey := fmt.Sprintf("pipelineMgr.ReplicationStatus(%v)", topic)
+	rep_status, _ := pipelineMgr.ReplicationStatus(topic)
+	if rep_status == nil {
+		// This should not be nil as updater should be the only one calling this and
+		// it would have created a rep_status way before here
+		errMap[repStatusKey] = errors.New("Error: Replication Status is missing when starting pipeline.")
+		return errMap
+	}
+
+	mainPipeline := rep_status.Pipeline()
+	if mainPipeline.State() != common.Pipeline_Running && mainPipeline.State() != common.Pipeline_Starting {
+		pipelineMgr.logger.Warnf("Replication %v's main pipeline is not running. Backfill pipeline will not start")
+		errMap[repStatusKey] = MainPipelineNotRunning
+		return errMap
+	}
+
+	rep_status.RecordBackfillProgress("Start backfill pipeline construction")
+
+	bp, err := pipelineMgr.pipeline_factory.NewSecondaryPipeline(topic, mainPipeline,
+		rep_status.RecordBackfillProgress, common.BackfillPipeline)
+	if err != nil {
+		errMap[fmt.Sprintf("pipelineMgr.pipeline_factory.NewSecondaryPipeline(%v)", topic)] = err
+		return errMap
+	}
+
+	rep_status.RecordBackfillProgress("Backfill Pipeline is constructed")
+	rep_status.SetPipeline(bp)
+
+	pipelineMgr.logger.Infof("Backfill Pipeline %v is constructed. Starting it.", bp.InstanceId())
+	bp.SetProgressRecorder(rep_status.RecordBackfillProgress)
+	errMap = bp.Start(rep_status.SettingsMap())
+	if len(errMap) > 0 {
+		pipelineMgr.logger.Errorf("Failed to start the backfill pipeline %v", bp.InstanceId())
+	}
+	return errMap
+}
+
+func (pipelineMgr *PipelineManager) StopBackfillPipeline(topic string) base.ErrorMap {
+	var errMap base.ErrorMap = make(base.ErrorMap)
+
+	pipelineMgr.logger.Infof("Stopping the backfill pipeline %s\n", topic)
+	repStatusKey := fmt.Sprintf("pipelineMgr.ReplicationStatus(%v)", topic)
+	rep_status, _ := pipelineMgr.ReplicationStatus(topic)
+	if rep_status == nil {
+		// This should not be nil as updater should be the only one calling this and
+		// it would have created a rep_status way before here
+		errMap[repStatusKey] = errors.New("Error: Replication Status is missing when stopping pipeline.")
+		return errMap
+	}
+
+	bp := rep_status.BackfillPipeline()
+
+	if bp == nil {
+		pipelineMgr.logger.Infof("Backfill pipeline for %v does not exist. Nothing to stop", topic)
+		return nil
+	}
+
+	state := bp.State()
+	if state == common.Pipeline_Running || state == common.Pipeline_Starting || state == common.Pipeline_Error {
+		errMap = bp.Stop()
+		if len(errMap) > 0 {
+			pipelineMgr.logger.Errorf("Received error(s) when stopping backfill pipeline %v - %v\n", topic, base.FlattenErrorMap(errMap))
+			//pipeline failed to stopped gracefully in time. ignore the error.
+			//the parts of the pipeline will eventually commit suicide.
+		} else {
+			pipelineMgr.logger.Infof("Backfill pipeline %v has been stopped\n", topic)
+		}
+		pipelineMgr.removePipelineFromReplicationStatus(bp)
+		pipelineMgr.logger.Infof("Replication Status=%v\n", rep_status)
+	} else {
+		pipelineMgr.logger.Infof("Backfill Pipeline %v is not in the right state to be stopped. state=%v\n", topic, state)
+	}
+
+	return nil
+}
+
 // Use this only for unit test
 func (pipelineMgr *PipelineManager) GetLastUpdateResult(topic string) bool {
 	repStatus, err := pipelineMgr.ReplicationStatus(topic)
@@ -796,6 +968,13 @@ type PipelineUpdater struct {
 	update_err_map_ch chan base.ErrorMap
 	// channel indicating whether updater is really done
 	done_ch chan bool
+	// startBackfillChannel
+	backfillStartCh chan bool
+	// stopBackfillChannel
+	backfillStopCh chan bool
+	// Backfill ErrorMap
+	backfillErrMapCh chan base.ErrorMap
+
 	//the current errors
 	currentErrors *pmErrMapType
 	// temporary map to catch any other errors while currentErrors are being processed
@@ -807,8 +986,10 @@ type PipelineUpdater struct {
 
 	// should modify it via scheduleFutureRefresh() and cancelFutureRefresh()
 	// Null if nothing is being scheduled
-	scheduledTimerLock sync.RWMutex
-	scheduledTimer     *time.Timer
+	scheduledTimerLock         sync.RWMutex
+	scheduledTimer             *time.Timer
+	backfillScheduledTimerLock sync.RWMutex
+	backfillScheduledTimer     *time.Timer
 
 	// boolean to store whether or not the last update was successful
 	lastSuccessful bool
@@ -910,6 +1091,9 @@ func newPipelineUpdater(pipeline_name string, retry_interval int, cur_err error,
 		done_ch:                make(chan bool, 1),
 		update_now_ch:          make(chan bool, 1),
 		update_err_map_ch:      make(chan base.ErrorMap, 1),
+		backfillStartCh:        make(chan bool, 1),
+		backfillStopCh:         make(chan bool, 1),
+		backfillErrMapCh:       make(chan base.ErrorMap, 1),
 		rep_status:             rep_status_in,
 		logger:                 logger,
 		pipelineMgr:            pipelineMgr_in,
@@ -973,6 +1157,48 @@ func (r *PipelineUpdater) run() {
 			}
 			if updateAgain {
 				r.scheduleFutureRefresh()
+			}
+		case <-r.backfillStartCh:
+			r.logger.Infof("Replication %v's backfill Pipeline is starting\n", r.pipeline_name)
+			r.cancelFutureBackfillStart()
+			retErrMap = r.pipelineMgr.StartBackfillPipeline(r.rep_status.Pipeline().Topic())
+			if len(retErrMap) > 0 && !retErrMap.HasError(MainPipelineNotRunning) {
+				r.logger.Infof("Replication %v backfill start experienced error(s): %v. Scheduling a redo.\n", r.pipeline_name, base.FlattenErrorMap(retErrMap))
+				r.setLastUpdateFailure(retErrMap)
+				r.sendBackfillStartErrMap(retErrMap)
+			} else {
+				r.setLastUpdateSuccess()
+			}
+		case <-r.backfillStopCh:
+			if r.rep_status == nil || r.rep_status.Pipeline() == nil {
+				r.logger.Warnf("Backfill pipeline for %v is already stopped", r.pipeline_name)
+			} else {
+				r.logger.Infof("Replication %v's backfill Pipeline is stopping\n", r.pipeline_name)
+				retErrMap = r.pipelineMgr.StopBackfillPipeline(r.rep_status.Pipeline().Topic())
+				if len(retErrMap) > 0 {
+					r.logger.Infof("Replication %v backfill stop experienced error(s): %v. Will let it die\n", r.pipeline_name, base.FlattenErrorMap(retErrMap))
+				}
+			}
+		case retErrMap = <-r.backfillErrMapCh:
+			var updateAgain bool
+			if r.getLastResult() {
+				// Last time update succeeded, so this error then triggers an immediate update
+				r.logger.Infof("Backfill Replication %v's status experienced changes or errors (%v), re-starting now\n", r.pipeline_name, base.FlattenErrorMap(retErrMap))
+				retErrMap = r.pipelineMgr.StartBackfillPipeline(r.rep_status.Pipeline().Topic())
+				r.cancelFutureRefresh()
+				if len(retErrMap) > 0 && !retErrMap.HasError(MainPipelineNotRunning) {
+					updateAgain = true
+					r.setLastUpdateFailure(retErrMap)
+				} else {
+					r.setLastUpdateSuccess()
+				}
+			} else {
+				r.logger.Infof("Backfill Replication %v's status experienced changes or errors (%v). However, last update resulted in failure, so will reschedule a future update\n", r.pipeline_name, retErr)
+				// Last time update failed, so we should wait for stablization
+				updateAgain = true
+			}
+			if updateAgain {
+				r.scheduleFutureBackfillStart()
 			}
 		}
 	}
@@ -1296,12 +1522,38 @@ func (r *PipelineUpdater) refreshPipelineDueToErr(err error) {
 	r.sendUpdateErr(err)
 }
 
+func (r *PipelineUpdater) startBackfillPipeline() {
+	r.sendStartBackfillPipeline()
+}
+
+func (r *PipelineUpdater) stopBackfillPipeline() {
+	r.sendStopBackfillPipeline()
+}
+
 // Lock must be held
 func (r *PipelineUpdater) sendUpdateNow() {
 	select {
 	case r.update_now_ch <- true:
 	default:
 		r.logger.Infof("Update-now message is already delivered for %v\n", r.pipeline_name)
+	}
+	r.logger.Infof("Replication status is updated now, current status=%v\n", r.rep_status)
+}
+
+func (r *PipelineUpdater) sendStartBackfillPipeline() {
+	select {
+	case r.backfillStartCh <- true:
+	default:
+		r.logger.Infof("BackfillStart-now message is already delivered for %v\n", r.pipeline_name)
+	}
+	r.logger.Infof("Replication status is updated now, current status=%v\n", r.rep_status)
+}
+
+func (r *PipelineUpdater) sendStopBackfillPipeline() {
+	select {
+	case r.backfillStopCh <- true:
+	default:
+		r.logger.Infof("BackfillStop-now message is already delivered for %v\n", r.pipeline_name)
 	}
 	r.logger.Infof("Replication status is updated now, current status=%v\n", r.rep_status)
 }
@@ -1320,6 +1572,16 @@ func (r *PipelineUpdater) sendUpdateErrMap(errMap base.ErrorMap) {
 		r.logger.Infof("Updater is currently running. Errors are captured in overflow map, and may be picked up if the current pipeline restart fails")
 	}
 	r.logger.Infof("Replication status is updated with error(s) %v, current status=%v\n", base.FlattenErrorMap(errMap), r.rep_status)
+}
+
+func (r PipelineUpdater) sendBackfillStartErrMap(errMap base.ErrorMap) {
+	select {
+	case r.backfillErrMapCh <- errMap:
+	default:
+		r.overflowErrors.ConcatenateErrors(errMap)
+		r.logger.Infof("Updater is currently running. Errors are captured in overflow map, and may be picked up if the current pipeline restart fails")
+	}
+	r.logger.Infof("Replication status is updated with backfill error(s) %v, current status=%v\n", base.FlattenErrorMap(errMap), r.rep_status)
 }
 
 func (r *PipelineUpdater) isScheduledTimerNil() bool {
@@ -1347,6 +1609,25 @@ func (r *PipelineUpdater) scheduleFutureRefresh() {
 	}
 }
 
+func (r *PipelineUpdater) scheduleFutureBackfillStart() {
+	var scheduledTimeMs time.Duration = r.retry_interval
+	r.backfillScheduledTimerLock.Lock()
+	defer r.backfillScheduledTimerLock.Unlock()
+
+	if r.testCustomScheduleTime > 0 {
+		scheduledTimeMs = r.testCustomScheduleTime
+		r.logger.Infof("Running unit test with custom sleep time of: %v\n", scheduledTimeMs)
+	}
+
+	if r.backfillScheduledTimer == nil {
+		r.logger.Infof("Pipeline updater scheduled to start backfill pipeline in %v\n", scheduledTimeMs)
+		r.scheduledTimer = time.AfterFunc(scheduledTimeMs, func() {
+			r.logger.Infof("Backfill Pipeline updater scheduled time is up. Executing pipeline updater\n")
+			r.sendStartBackfillPipeline()
+		})
+	}
+}
+
 func (r *PipelineUpdater) setLastUpdateSuccess() {
 	r.pipelineUpdaterLock.Lock()
 	defer r.pipelineUpdaterLock.Unlock()
@@ -1369,6 +1650,20 @@ func (r *PipelineUpdater) cancelFutureRefresh() bool {
 	if r.scheduledTimer != nil {
 		stopped = r.scheduledTimer.Stop()
 		r.scheduledTimer = nil
+	} else {
+		// If no timer, pretend we stopped it in time
+		stopped = true
+	}
+	return stopped
+}
+
+func (r *PipelineUpdater) cancelFutureBackfillStart() bool {
+	var stopped bool
+	r.backfillScheduledTimerLock.Lock()
+	defer r.backfillScheduledTimerLock.Unlock()
+	if r.backfillScheduledTimer != nil {
+		stopped = r.backfillScheduledTimer.Stop()
+		r.backfillScheduledTimer = nil
 	} else {
 		// If no timer, pretend we stopped it in time
 		stopped = true

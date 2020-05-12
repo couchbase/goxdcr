@@ -198,6 +198,7 @@ func (xdcrf *XDCRFactory) newPipelineCommon(topic string, pipelineType common.Pi
 	}
 
 	var specForConstruction metadata.GenericSpecification
+	var partTopic string = topic
 	switch pipelineType {
 	case common.MainPipeline:
 		specForConstruction = spec
@@ -207,18 +208,19 @@ func (xdcrf *XDCRFactory) newPipelineCommon(topic string, pipelineType common.Pi
 			return nil, nil, err
 		}
 		specForConstruction = backfillSpec
+		partTopic = fmt.Sprintf("%v_%v", "backfill", topic)
 	default:
 		panic("Not implemented")
 	}
 
-	xdcrf.logger.Infof("%v sourceCRMode=%v httpAuthMech=%v isCapiReplication=%v isTargetES=%v\n", topic, sourceCRMode, httpAuthMech, isCapiReplication, isTargetES)
+	xdcrf.logger.Infof("%v %v sourceCRMode=%v httpAuthMech=%v isCapiReplication=%v isTargetES=%v\n", pipelineType.String(), topic, sourceCRMode, httpAuthMech, isCapiReplication, isTargetES)
 
 	/**
 	 * Construct the Source nozzles
 	 * sourceNozzles - a map of DCPNozzleID -> *DCPNozzle
 	 * kv_vb_map - Map of SourceKVNode -> list of vbucket#'s that it's responsible for
 	 */
-	sourceNozzles, kv_vb_map, err := xdcrf.constructSourceNozzles(spec, topic, isCapiReplication, logger_ctx)
+	sourceNozzles, kv_vb_map, err := xdcrf.constructSourceNozzles(spec, partTopic, isCapiReplication, logger_ctx)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -229,7 +231,7 @@ func (xdcrf *XDCRFactory) newPipelineCommon(topic string, pipelineType common.Pi
 
 	progress_recorder(fmt.Sprintf("%v source nozzles have been constructed", len(sourceNozzles)))
 
-	xdcrf.logger.Infof("%v kv_vb_map=%v\n", topic, kv_vb_map)
+	xdcrf.logger.Infof("%v kv_vb_map=%v\n", partTopic, kv_vb_map)
 	/**
 	 * Construct the outgoing (Destination) nozzles
 	 * 1. outNozzles - map of ID -> actual nozzle
@@ -237,7 +239,7 @@ func (xdcrf *XDCRFactory) newPipelineCommon(topic string, pipelineType common.Pi
 	 * 3. kvVBMap - map of remote KVNodes -> vbucket# responsible for per node
 	 */
 	outNozzles, vbNozzleMap, target_kv_vb_map, targetUserName, targetPassword, targetClusterVersion, err :=
-		xdcrf.constructOutgoingNozzles(topic, spec, kv_vb_map, sourceCRMode, targetBucketInfo, targetClusterRef, isCapiReplication, isTargetES, logger_ctx)
+		xdcrf.constructOutgoingNozzles(partTopic, spec, kv_vb_map, sourceCRMode, targetBucketInfo, targetClusterRef, isCapiReplication, isTargetES, logger_ctx)
 
 	if err != nil {
 		return nil, nil, err

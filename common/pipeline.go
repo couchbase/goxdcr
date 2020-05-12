@@ -32,6 +32,17 @@ const (
 	BackfillPipeline PipelineType = iota
 )
 
+func (p PipelineType) String() string {
+	switch p {
+	case MainPipeline:
+		return "MainPipeline"
+	case BackfillPipeline:
+		return "BackfillPipeline"
+	default:
+		return "?? (PipelineType)"
+	}
+}
+
 type PipelineProgressRecorder func(progress string)
 
 //interface for Pipeline

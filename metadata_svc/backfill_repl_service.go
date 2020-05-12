@@ -119,12 +119,13 @@ func (b *BackfillReplicationService) initCacheFromMetaKV() (err error) {
 			if err != service_def.MetadataNotFoundErr {
 				b.logger.Errorf("Unable to retrieve actual spec for id %v - %v", replicationId, err)
 			}
-			// TODO - do we need to clean up backfill repl?
+			b.DelBackfillReplSpec(replicationId)
 			continue
 		}
 		if backfillSpec.InternalId != actualSpec.InternalId {
 			// Out of date
 			b.logger.Warnf("Out of date backfill found with internal ID %v - skipping...", backfillSpec.InternalId)
+			b.DelBackfillReplSpec(replicationId)
 			continue
 		}
 
@@ -545,11 +546,21 @@ func (b *BackfillReplicationService) updateCacheInternal(specId string, newSpec 
 	oldSpec, updated, err := b.updateCacheInternalNoLock(specId, newSpec)
 
 	if updated && oldSpec != nil && newSpec == nil {
-		// TODO MB-38331 - notify Backfill Manager
+		// TODO MB-38331 - notify Backfill Manager - wait until DCP is done
+		//		b.metadataChangeCbMtx.RLock()
+		//		for _, cb := range b.metadataChangeCallbacks {
+		//			cb(specId, oldSpec, newSpec)
+		//		}
+		//		b.metadataChangeCbMtx.RUnlock()
 	}
 
 	if updated && oldSpec == nil && newSpec != nil {
-		// TODO MB-38331 - notify Backfill Manager
+		// TODO MB-38331 - notify Backfill Manager - wait until DCP is done
+		//		b.metadataChangeCbMtx.RLock()
+		//		for _, cb := range b.metadataChangeCallbacks {
+		//			cb(specId, oldSpec, newSpec)
+		//		}
+		//		b.metadataChangeCbMtx.RUnlock()
 	}
 
 	return err
@@ -569,8 +580,14 @@ func (b *BackfillReplicationService) ReplicationSpecChangeCallback(id string, ol
 		// TODO MB-38331 - notify Backfill Manager??
 	} else if oldSpec != nil && newSpec == nil {
 		_, err := b.DelBackfillReplSpec(id)
+		if err == nil {
+			b.logger.Infof("Deleted backfill replication %v", id)
+		}
 		if err == ReplNotFoundErr {
 			err = nil
+		}
+		if err == nil {
+			b.updateCache(id, nil)
 		}
 		return err
 	}

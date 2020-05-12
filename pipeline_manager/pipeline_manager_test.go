@@ -66,7 +66,8 @@ func setupBoilerPlate() (*log.CommonLogger,
 	*replicationStatusMock.ReplicationStatusIface,
 	*service_def.CheckpointsService,
 	*service_def.ClusterInfoSvc,
-	*service_def.CollectionsManifestSvc) {
+	*service_def.CollectionsManifestSvc,
+	*service_def.BackfillReplSvc) {
 
 	testLogger := log.NewLogger("testLogger", log.DefaultLoggerContext)
 	pipelineMock := &common.PipelineFactory{}
@@ -78,10 +79,12 @@ func setupBoilerPlate() (*log.CommonLogger,
 	checkPointsSvc := &service_def.CheckpointsService{}
 	clusterInfoSvc := &service_def.ClusterInfoSvc{}
 	collectionsManifestSvc := &service_def.CollectionsManifestSvc{}
+	backfillReplSvc := &service_def.BackfillReplSvc{}
 
 	pipelineMgr := NewPipelineManager(pipelineMock, replSpecSvcMock, xdcrTopologyMock,
 		remoteClusterMock, clusterInfoSvc, nil, /*checkpoint_svc*/
-		uiLogSvcMock, log.DefaultLoggerContext, utilsNew, collectionsManifestSvc)
+		uiLogSvcMock, log.DefaultLoggerContext, utilsNew, collectionsManifestSvc,
+		backfillReplSvc)
 
 	// Some things needed for pipelinemgr
 	testTopic := "testTopic"
@@ -128,7 +131,7 @@ func setupBoilerPlate() (*log.CommonLogger,
 	return testLogger, pipelineMock, replSpecSvcMock, xdcrTopologyMock, remoteClusterMock,
 		pipelineMgr, testRepairer, testReplicationStatus, testTopic, testReplicationSettings,
 		testReplicationSpec, testRemoteClusterRef, testPipeline, uiLogSvcMock, repStatusMock,
-		checkPointsSvc, clusterInfoSvc, collectionsManifestSvc
+		checkPointsSvc, clusterInfoSvc, collectionsManifestSvc, backfillReplSvc
 }
 
 func setupLaunchUpdater(testRepairer *PipelineUpdater, waitForStablization bool) {
@@ -154,7 +157,8 @@ func setupDetailedMocking(testLogger *log.CommonLogger,
 	replStatusMock *replicationStatusMock.ReplicationStatusIface,
 	ckptMock *service_def.CheckpointsService,
 	clusterInfoSvc *service_def.ClusterInfoSvc,
-	collectionsManifestSvc *service_def.CollectionsManifestSvc) {
+	collectionsManifestSvc *service_def.CollectionsManifestSvc,
+	backfillReplSvc *service_def.BackfillReplSvc) {
 
 	testReplicationStatus.SetUpdater(testRepairer)
 	replSpecSvcMock.On("GetDerivedObj", testTopic).Return(testReplicationStatus, nil)
@@ -178,6 +182,7 @@ func setupDetailedMocking(testLogger *log.CommonLogger,
 	testPipeline.On("Stop", mock.Anything).Return(emptyMap)
 	testPipeline.On("Specification").Return(testReplicationSpec)
 	testPipeline.On("Topic").Return(testTopic)
+	testPipeline.On("Type").Return(commonReal.MainPipeline)
 
 	pipelineMock.On("NewPipeline", testTopic, mock.AnythingOfType("common.PipelineProgressRecorder")).Return(testPipeline, nil)
 
@@ -192,6 +197,9 @@ func setupDetailedMocking(testLogger *log.CommonLogger,
 
 	// Every force call will increment the counter by 1
 	collectionsManifestSvc.On("ForceTargetManifestRefresh", mock.Anything).Run(func(args mock.Arguments) { atomic.AddUint64(&collectionsSvcRefreshTgtCnt, 1) }).Return(nil)
+
+	// Let's skip backfill pipeline test for now
+	backfillReplSvc.On("BackfillReplSpec", mock.Anything).Return(nil, base.ErrorNotFound)
 }
 
 /**
@@ -215,12 +223,13 @@ func setupGenericMocking(testLogger *log.CommonLogger,
 	replStatusMock *replicationStatusMock.ReplicationStatusIface,
 	ckptSvc *service_def.CheckpointsService,
 	clusterInfoSvc *service_def.ClusterInfoSvc,
-	collectionsManifestSvc *service_def.CollectionsManifestSvc) {
+	collectionsManifestSvc *service_def.CollectionsManifestSvc,
+	backfillReplSvc *service_def.BackfillReplSvc) {
 
 	setupDetailedMocking(testLogger, pipelineMock, replSpecSvcMock, xdcrTopologyMock, true, remoteClusterMock,
 		pipelineMgr, testRepairer, testReplicationStatus, testTopic,
 		testReplicationSettings, testReplicationSpec, testRemoteClusterRef, testPipeline, uiLogSvc, replStatusMock,
-		ckptSvc, clusterInfoSvc, collectionsManifestSvc)
+		ckptSvc, clusterInfoSvc, collectionsManifestSvc, backfillReplSvc)
 
 	return
 }
@@ -238,12 +247,12 @@ func TestPipelineMgrRemoveReplicationStatus(t *testing.T) {
 	testLogger, pipelineMock, replSpecSvcMock, xdcrTopologyMock, remoteClusterMock,
 		pipelineMgr, testRepairer, testReplicationStatus, testTopic,
 		testReplicationSettings, testReplicationSpec, testRemoteClusterRef, testPipeline, uiLogSvc, replStatusMock,
-		ckptMock, clusterInfoSvc, collectionsManifestSvc := setupBoilerPlate()
+		ckptMock, clusterInfoSvc, collectionsManifestSvc, backfillReplSvc := setupBoilerPlate()
 
 	setupGenericMocking(testLogger, pipelineMock, replSpecSvcMock, xdcrTopologyMock, remoteClusterMock,
 		pipelineMgr, testRepairer, testReplicationStatus, testTopic,
 		testReplicationSettings, testReplicationSpec, testRemoteClusterRef, testPipeline, uiLogSvc, replStatusMock,
-		ckptMock, clusterInfoSvc, collectionsManifestSvc)
+		ckptMock, clusterInfoSvc, collectionsManifestSvc, backfillReplSvc)
 
 	setupMockPipelineMgr(replSpecSvcMock, testReplicationSettings, testTopic, testRepairer, xdcrTopologyMock, uiLogSvc)
 
@@ -265,7 +274,7 @@ func TestGetAllReplications(t *testing.T) {
 	fmt.Println("============== Test case start: TestGetAllReplicants =================")
 	_, _, replSpecSvcMock, _, _,
 		pipelineMgr, _, _, _,
-		_, _, _, _, _, _, _, _, _ := setupBoilerPlate()
+		_, _, _, _, _, _, _, _, _, _ := setupBoilerPlate()
 
 	var emptySlice []string
 	replSpecSvcMock.On("AllReplicationSpecIds").Return(emptySlice, nil)
@@ -285,12 +294,12 @@ func TestUpdateSerially(t *testing.T) {
 	testLogger, pipelineMock, replSpecSvcMock, xdcrTopologyMock, remoteClusterMock,
 		pipelineMgr, testRepairer, testReplicationStatus, testTopic,
 		testReplicationSettings, testReplicationSpec, testRemoteClusterRef, testPipeline, uiLogSvc, replStatusMock,
-		ckptMock, clusterInfoSvc, collectionsManifestSvc := setupBoilerPlate()
+		ckptMock, clusterInfoSvc, collectionsManifestSvc, backfillReplSvc := setupBoilerPlate()
 
 	setupGenericMocking(testLogger, pipelineMock, replSpecSvcMock, xdcrTopologyMock, remoteClusterMock,
 		pipelineMgr, testRepairer, testReplicationStatus, testTopic,
 		testReplicationSettings, testReplicationSpec, testRemoteClusterRef, testPipeline, uiLogSvc, replStatusMock,
-		ckptMock, clusterInfoSvc, collectionsManifestSvc)
+		ckptMock, clusterInfoSvc, collectionsManifestSvc, backfillReplSvc)
 
 	setupLaunchUpdater(testRepairer, false)
 
@@ -327,12 +336,12 @@ func TestUpdateErrorInjection(t *testing.T) {
 	testLogger, pipelineMock, replSpecSvcMock, xdcrTopologyMock, remoteClusterMock,
 		pipelineMgr, testRepairer, testReplicationStatus, testTopic,
 		testReplicationSettings, testReplicationSpec, testRemoteClusterRef, testPipeline, uiLogSvc, replStatusMock,
-		ckptMock, clusterInfoSvc, collectionsManifestSvc := setupBoilerPlate()
+		ckptMock, clusterInfoSvc, collectionsManifestSvc, backfillReplSvc := setupBoilerPlate()
 
 	setupGenericMocking(testLogger, pipelineMock, replSpecSvcMock, xdcrTopologyMock, remoteClusterMock,
 		pipelineMgr, testRepairer, testReplicationStatus, testTopic,
 		testReplicationSettings, testReplicationSpec, testRemoteClusterRef, testPipeline, uiLogSvc, replStatusMock,
-		ckptMock, clusterInfoSvc, collectionsManifestSvc)
+		ckptMock, clusterInfoSvc, collectionsManifestSvc, backfillReplSvc)
 
 	setupLaunchUpdater(testRepairer, true)
 	assert.Equal(uint64(0), atomic.LoadUint64(&testRepairer.runCounter))
@@ -379,12 +388,12 @@ func TestUpdateErrorInjection2(t *testing.T) {
 	testLogger, pipelineMock, replSpecSvcMock, xdcrTopologyMock, remoteClusterMock,
 		pipelineMgr, testRepairer, testReplicationStatus, testTopic,
 		testReplicationSettings, testReplicationSpec, testRemoteClusterRef, testPipeline, uiLogSvc, replStatusMock,
-		ckptMock, clusterInfoSvc, collectionsManifestSvc := setupBoilerPlate()
+		ckptMock, clusterInfoSvc, collectionsManifestSvc, backfillReplSvc := setupBoilerPlate()
 
 	setupGenericMocking(testLogger, pipelineMock, replSpecSvcMock, xdcrTopologyMock, remoteClusterMock,
 		pipelineMgr, testRepairer, testReplicationStatus, testTopic,
 		testReplicationSettings, testReplicationSpec, testRemoteClusterRef, testPipeline, uiLogSvc, replStatusMock,
-		ckptMock, clusterInfoSvc, collectionsManifestSvc)
+		ckptMock, clusterInfoSvc, collectionsManifestSvc, backfillReplSvc)
 
 	setupLaunchUpdater(testRepairer, true)
 	assert.Equal(uint64(0), atomic.LoadUint64(&testRepairer.runCounter))
@@ -469,12 +478,12 @@ func TestUpdateDoubleError(t *testing.T) {
 	testLogger, pipelineMock, replSpecSvcMock, xdcrTopologyMock, remoteClusterMock,
 		pipelineMgr, testRepairer, testReplicationStatus, testTopic,
 		testReplicationSettings, testReplicationSpec, testRemoteClusterRef, testPipeline, uiLogSvc, replStatusMock,
-		ckptMock, clusterInfoSvc, collectionsManifestSvc := setupBoilerPlate()
+		ckptMock, clusterInfoSvc, collectionsManifestSvc, backfillReplSvc := setupBoilerPlate()
 
 	setupGenericMocking(testLogger, pipelineMock, replSpecSvcMock, xdcrTopologyMock, remoteClusterMock,
 		pipelineMgr, testRepairer, testReplicationStatus, testTopic,
 		testReplicationSettings, testReplicationSpec, testRemoteClusterRef, testPipeline, uiLogSvc, replStatusMock,
-		ckptMock, clusterInfoSvc, collectionsManifestSvc)
+		ckptMock, clusterInfoSvc, collectionsManifestSvc, backfillReplSvc)
 
 	setupLaunchUpdater(testRepairer, true)
 	assert.Equal(uint64(0), atomic.LoadUint64(&testRepairer.runCounter))
@@ -523,12 +532,12 @@ func TestUpdater(t *testing.T) {
 	testLogger, pipelineMock, replSpecSvcMock, xdcrTopologyMock, remoteClusterMock,
 		pipelineMgr, testRepairer, testReplicationStatus, testTopic,
 		testReplicationSettings, testReplicationSpec, testRemoteClusterRef, testPipeline, uiLogSvc, replStatusMock,
-		ckptMock, clusterInfoSvc, collectionsManifestSvc := setupBoilerPlate()
+		ckptMock, clusterInfoSvc, collectionsManifestSvc, backfillReplSvc := setupBoilerPlate()
 
 	setupGenericMocking(testLogger, pipelineMock, replSpecSvcMock, xdcrTopologyMock, remoteClusterMock,
 		pipelineMgr, testRepairer, testReplicationStatus, testTopic,
 		testReplicationSettings, testReplicationSpec, testRemoteClusterRef, testPipeline, uiLogSvc, replStatusMock,
-		ckptMock, clusterInfoSvc, collectionsManifestSvc)
+		ckptMock, clusterInfoSvc, collectionsManifestSvc, backfillReplSvc)
 
 	setupMockPipelineMgr(replSpecSvcMock, testReplicationSettings, testTopic, testRepairer, xdcrTopologyMock, uiLogSvc)
 
@@ -545,12 +554,12 @@ func TestUpdaterRun(t *testing.T) {
 	testLogger, pipelineMock, replSpecSvcMock, xdcrTopologyMock, remoteClusterMock,
 		pipelineMgr, testRepairer, testReplicationStatus, testTopic,
 		testReplicationSettings, testReplicationSpec, testRemoteClusterRef, testPipeline, uiLogSvc, replStatusMock,
-		ckptMock, clusterInfoSvc, collectionsManifestSvc := setupBoilerPlate()
+		ckptMock, clusterInfoSvc, collectionsManifestSvc, backfillReplSvc := setupBoilerPlate()
 
 	setupGenericMocking(testLogger, pipelineMock, replSpecSvcMock, xdcrTopologyMock, remoteClusterMock,
 		pipelineMgr, testRepairer, testReplicationStatus, testTopic,
 		testReplicationSettings, testReplicationSpec, testRemoteClusterRef, testPipeline, uiLogSvc, replStatusMock,
-		ckptMock, clusterInfoSvc, collectionsManifestSvc)
+		ckptMock, clusterInfoSvc, collectionsManifestSvc, backfillReplSvc)
 
 	setupMockPipelineMgr(replSpecSvcMock, testReplicationSettings, testTopic, testRepairer, xdcrTopologyMock, uiLogSvc)
 
@@ -570,12 +579,12 @@ func TestUpdaterSendErrDuringCooldown(t *testing.T) {
 	testLogger, pipelineMock, replSpecSvcMock, xdcrTopologyMock, remoteClusterMock,
 		pipelineMgr, testRepairer, testReplicationStatus, testTopic,
 		testReplicationSettings, testReplicationSpec, testRemoteClusterRef, testPipeline, uiLogSvc, replStatusMock,
-		ckptMock, clusterInfoSvc, collectionsManifestSvc := setupBoilerPlate()
+		ckptMock, clusterInfoSvc, collectionsManifestSvc, backfillReplSvc := setupBoilerPlate()
 
 	setupGenericMocking(testLogger, pipelineMock, replSpecSvcMock, xdcrTopologyMock, remoteClusterMock,
 		pipelineMgr, testRepairer, testReplicationStatus, testTopic,
 		testReplicationSettings, testReplicationSpec, testRemoteClusterRef, testPipeline, uiLogSvc, replStatusMock,
-		ckptMock, clusterInfoSvc, collectionsManifestSvc)
+		ckptMock, clusterInfoSvc, collectionsManifestSvc, backfillReplSvc)
 
 	setupMockPipelineMgr(replSpecSvcMock, testReplicationSettings, testTopic, testRepairer, xdcrTopologyMock, uiLogSvc)
 
@@ -611,12 +620,12 @@ func TestPipelineMgrConcurrentGetOrCreateReplicationStatus(t *testing.T) {
 	testLogger, pipelineMock, replSpecSvcMock, xdcrTopologyMock, remoteClusterMock,
 		pipelineMgr, testRepairer, testReplicationStatus, testTopic,
 		testReplicationSettings, testReplicationSpec, testRemoteClusterRef, testPipeline, uiLogSvc, replStatusMock,
-		ckptMock, clusterInfoSvc, collectionsManifestSvc := setupBoilerPlate()
+		ckptMock, clusterInfoSvc, collectionsManifestSvc, backfillReplSvc := setupBoilerPlate()
 
 	setupGenericMocking(testLogger, pipelineMock, replSpecSvcMock, xdcrTopologyMock, remoteClusterMock,
 		pipelineMgr, testRepairer, testReplicationStatus, testTopic,
 		testReplicationSettings, testReplicationSpec, testRemoteClusterRef, testPipeline, uiLogSvc, replStatusMock,
-		ckptMock, clusterInfoSvc, collectionsManifestSvc)
+		ckptMock, clusterInfoSvc, collectionsManifestSvc, backfillReplSvc)
 
 	setupMockPipelineMgr(replSpecSvcMock, testReplicationSettings, testTopic, testRepairer, xdcrTopologyMock, uiLogSvc)
 
@@ -632,12 +641,12 @@ func TestUpdaterCompressionErr(t *testing.T) {
 	testLogger, pipelineMock, replSpecSvcMock, xdcrTopologyMock, remoteClusterMock,
 		pipelineMgr, testRepairer, testReplicationStatus, testTopic,
 		testReplicationSettings, testReplicationSpec, testRemoteClusterRef, testPipeline, uiLogSvc, replStatusMock,
-		ckptMock, clusterInfoSvc, collectionsManifestSvc := setupBoilerPlate()
+		ckptMock, clusterInfoSvc, collectionsManifestSvc, backfillReplSvc := setupBoilerPlate()
 
 	setupGenericMocking(testLogger, pipelineMock, replSpecSvcMock, xdcrTopologyMock, remoteClusterMock,
 		pipelineMgr, testRepairer, testReplicationStatus, testTopic,
 		testReplicationSettings, testReplicationSpec, testRemoteClusterRef, testPipeline, uiLogSvc, replStatusMock,
-		ckptMock, clusterInfoSvc, collectionsManifestSvc)
+		ckptMock, clusterInfoSvc, collectionsManifestSvc, backfillReplSvc)
 
 	setupMockPipelineMgr(replSpecSvcMock, testReplicationSettings, testTopic, testRepairer, xdcrTopologyMock, uiLogSvc)
 
@@ -669,12 +678,12 @@ func TestReplSettingsRevision(t *testing.T) {
 	testLogger, pipelineMock, replSpecSvcMock, xdcrTopologyMock, remoteClusterMock,
 		pipelineMgr, testRepairer, testReplicationStatus, testTopic,
 		testReplicationSettings, testReplicationSpec, testRemoteClusterRef, testPipeline, uiLogSvc, replStatusMock,
-		ckptMock, clusterInfoSvc, collectionsManifestSvc := setupBoilerPlate()
+		ckptMock, clusterInfoSvc, collectionsManifestSvc, backfillReplSvc := setupBoilerPlate()
 
 	setupGenericMocking(testLogger, pipelineMock, replSpecSvcMock, xdcrTopologyMock, remoteClusterMock,
 		pipelineMgr, testRepairer, testReplicationStatus, testTopic,
 		testReplicationSettings, testReplicationSpec, testRemoteClusterRef, testPipeline, uiLogSvc, replStatusMock,
-		ckptMock, clusterInfoSvc, collectionsManifestSvc)
+		ckptMock, clusterInfoSvc, collectionsManifestSvc, backfillReplSvc)
 
 	setupReplStatusMock(replStatusMock, testReplicationSpec)
 
@@ -710,12 +719,12 @@ func TestUpdaterCompressionErrRevChanged(t *testing.T) {
 	testLogger, pipelineMock, replSpecSvcMock, xdcrTopologyMock, remoteClusterMock,
 		pipelineMgr, testRepairer, testReplicationStatus, testTopic,
 		testReplicationSettings, testReplicationSpec, testRemoteClusterRef, testPipeline, uiLogSvc, replStatusMock,
-		ckptMock, clusterInfoSvc, collectionsManifestSvc := setupBoilerPlate()
+		ckptMock, clusterInfoSvc, collectionsManifestSvc, backfillReplSvc := setupBoilerPlate()
 
 	setupGenericMocking(testLogger, pipelineMock, replSpecSvcMock, xdcrTopologyMock, remoteClusterMock,
 		pipelineMgr, testRepairer, testReplicationStatus, testTopic,
 		testReplicationSettings, testReplicationSpec, testRemoteClusterRef, testPipeline, uiLogSvc, replStatusMock,
-		ckptMock, clusterInfoSvc, collectionsManifestSvc)
+		ckptMock, clusterInfoSvc, collectionsManifestSvc, backfillReplSvc)
 
 	setupMockPipelineMgr(replSpecSvcMock, testReplicationSettings, testTopic, testRepairer, xdcrTopologyMock, uiLogSvc)
 
@@ -742,14 +751,14 @@ func TestUpdaterCompressionErrRevChanged(t *testing.T) {
 	testLogger2, pipelineMock2, replSpecSvcMock2, xdcrTopologyMock2, remoteClusterMock2,
 		pipelineMgr2, testRepairer2, testReplicationStatus2, testTopic2,
 		testReplicationSettings2, testReplicationSpec2, testRemoteClusterRef2, testPipeline2, uiLogSvc2, replStatusMock2,
-		ckptMock2, clusterInfoSvc2, collectionsManifestSvc2 := setupBoilerPlate()
+		ckptMock2, clusterInfoSvc2, collectionsManifestSvc2, backfillReplSvc2 := setupBoilerPlate()
 
 	testReplicationSpec2.Settings.UpdateSettingsFromMap(origSettings)
 
 	setupGenericMocking(testLogger2, pipelineMock2, replSpecSvcMock2, xdcrTopologyMock2, remoteClusterMock2,
 		pipelineMgr2, testRepairer2, testReplicationStatus2, testTopic2,
 		testReplicationSettings2, testReplicationSpec2, testRemoteClusterRef2, testPipeline2, uiLogSvc2, replStatusMock2,
-		ckptMock2, clusterInfoSvc2, collectionsManifestSvc2)
+		ckptMock2, clusterInfoSvc2, collectionsManifestSvc2, backfillReplSvc2)
 
 	testRepairer.rep_status = testReplicationStatus2
 
@@ -774,12 +783,12 @@ func TestFilterCompressionErrorParsing(t *testing.T) {
 	testLogger, pipelineMock, replSpecSvcMock, xdcrTopologyMock, remoteClusterMock,
 		pipelineMgr, testRepairer, testReplicationStatus, testTopic,
 		testReplicationSettings, testReplicationSpec, testRemoteClusterRef, testPipeline, uiLogSvc, replStatusMock,
-		ckptMock, clusterInfoSvc, collectionsManifestSvc := setupBoilerPlate()
+		ckptMock, clusterInfoSvc, collectionsManifestSvc, backfillReplSvc := setupBoilerPlate()
 
 	setupGenericMocking(testLogger, pipelineMock, replSpecSvcMock, xdcrTopologyMock, remoteClusterMock,
 		pipelineMgr, testRepairer, testReplicationStatus, testTopic,
 		testReplicationSettings, testReplicationSpec, testRemoteClusterRef, testPipeline, uiLogSvc, replStatusMock,
-		ckptMock, clusterInfoSvc, collectionsManifestSvc)
+		ckptMock, clusterInfoSvc, collectionsManifestSvc, backfillReplSvc)
 
 	setupLaunchUpdater(testRepairer, true)
 	assert.Equal(uint64(0), atomic.LoadUint64(&testRepairer.runCounter))
@@ -808,12 +817,12 @@ func TestCleanupPipeline(t *testing.T) {
 	testLogger, pipelineMock, replSpecSvcMock, xdcrTopologyMock, remoteClusterMock,
 		pipelineMgr, testRepairer, testReplicationStatus, testTopic,
 		testReplicationSettings, testReplicationSpec, testRemoteClusterRef, testPipeline, uiLogSvc, replStatusMock,
-		ckptMock, clusterInfoSvc, collectionsManifestSvc := setupBoilerPlate()
+		ckptMock, clusterInfoSvc, collectionsManifestSvc, backfillReplSvc := setupBoilerPlate()
 
 	setupGenericMocking(testLogger, pipelineMock, replSpecSvcMock, xdcrTopologyMock, remoteClusterMock,
 		pipelineMgr, testRepairer, testReplicationStatus, testTopic,
 		testReplicationSettings, testReplicationSpec, testRemoteClusterRef, testPipeline, uiLogSvc, replStatusMock,
-		ckptMock, clusterInfoSvc, collectionsManifestSvc)
+		ckptMock, clusterInfoSvc, collectionsManifestSvc, backfillReplSvc)
 
 	setupLaunchUpdater(testRepairer, true)
 	assert.Equal(uint64(0), atomic.LoadUint64(&testRepairer.runCounter))
@@ -830,12 +839,12 @@ func TestRaiseWarningAtBeginning(t *testing.T) {
 	testLogger, pipelineMock, replSpecSvcMock, xdcrTopologyMock, remoteClusterMock,
 		pipelineMgr, testRepairer, testReplicationStatus, testTopic,
 		testReplicationSettings, testReplicationSpec, testRemoteClusterRef, testPipeline, uiLogSvc, replStatusMock,
-		ckptMock, clusterInfoSvc, collectionsManifestSvc := setupBoilerPlate()
+		ckptMock, clusterInfoSvc, collectionsManifestSvc, backfillReplSvc := setupBoilerPlate()
 
 	setupGenericMocking(testLogger, pipelineMock, replSpecSvcMock, xdcrTopologyMock, remoteClusterMock,
 		pipelineMgr, testRepairer, testReplicationStatus, testTopic,
 		testReplicationSettings, testReplicationSpec, testRemoteClusterRef, testPipeline, uiLogSvc, replStatusMock,
-		ckptMock, clusterInfoSvc, collectionsManifestSvc)
+		ckptMock, clusterInfoSvc, collectionsManifestSvc, backfillReplSvc)
 
 	setupLaunchUpdater(testRepairer, true)
 	assert.Equal(uint64(0), atomic.LoadUint64(&testRepairer.runCounter))
@@ -855,12 +864,12 @@ func TestCollectionsRefreshError(t *testing.T) {
 	testLogger, pipelineMock, replSpecSvcMock, xdcrTopologyMock, remoteClusterMock,
 		pipelineMgr, testRepairer, testReplicationStatus, testTopic,
 		testReplicationSettings, testReplicationSpec, testRemoteClusterRef, testPipeline, uiLogSvc, replStatusMock,
-		ckptMock, clusterInfoSvc, collectionsManifestSvc := setupBoilerPlate()
+		ckptMock, clusterInfoSvc, collectionsManifestSvc, backfillReplSvc := setupBoilerPlate()
 
 	setupGenericMocking(testLogger, pipelineMock, replSpecSvcMock, xdcrTopologyMock, remoteClusterMock,
 		pipelineMgr, testRepairer, testReplicationStatus, testTopic,
 		testReplicationSettings, testReplicationSpec, testRemoteClusterRef, testPipeline, uiLogSvc, replStatusMock,
-		ckptMock, clusterInfoSvc, collectionsManifestSvc)
+		ckptMock, clusterInfoSvc, collectionsManifestSvc, backfillReplSvc)
 
 	prevRun := atomic.LoadUint64(&collectionsSvcRefreshTgtCnt)
 

@@ -42,10 +42,10 @@ type PipelineRuntimeCtx struct {
 func NewWithSettingConstructor(p common.Pipeline, service_settings_constructor ServiceSettingsConstructor,
 	service_update_settings_constructor ServiceUpdateSettingsConstructor, logger_context *log.LoggerContext) (*PipelineRuntimeCtx, error) {
 	ctx := &PipelineRuntimeCtx{
-		runtime_svcs: make(map[string]common.PipelineService),
-		pipeline:     p,
-		isRunning:    false,
-		logger:       log.NewLogger(RuntimeContext, logger_context),
+		runtime_svcs:                        make(map[string]common.PipelineService),
+		pipeline:                            p,
+		isRunning:                           false,
+		logger:                              log.NewLogger(RuntimeContext, logger_context),
 		service_settings_constructor:        service_settings_constructor,
 		runtime_svcs_lock:                   &sync.RWMutex{},
 		service_update_settings_constructor: service_update_settings_constructor}
@@ -111,6 +111,10 @@ func (ctx *PipelineRuntimeCtx) Stop() base.ErrorMap {
 
 	errMap := make(base.ErrorMap)
 
+	if ctx.Pipeline().Type() != common.MainPipeline {
+		ctx.logger.Infof("%v Pipeline context is attached to %v, not a main pipeline. Not stopping services", ctx.Pipeline().Type().String, topic)
+		return nil
+	}
 	ctx.logger.Infof("%v Pipeline context is stopping...", topic)
 
 	stopServicesFunc := func() error {
