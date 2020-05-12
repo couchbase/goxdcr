@@ -61,6 +61,14 @@ func NewReplicationSpecification(sourceBucketName string, sourceBucketUUID strin
 		Settings:          DefaultReplicationSettings()}, nil
 }
 
+func (spec *ReplicationSpecification) GetReplicationSpec() *ReplicationSpecification {
+	return spec
+}
+
+func (spec *ReplicationSpecification) GetBackfillSpec() *BackfillReplicationSpec {
+	return nil
+}
+
 func (spec *ReplicationSpecification) String() string {
 	if spec == nil {
 		return ""

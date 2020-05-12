@@ -61,6 +61,9 @@ type GenericPipeline struct {
 	//name of the pipeline
 	topic string
 
+	// type of pipeline
+	pipelineType common.PipelineType
+
 	//incoming nozzles of the pipeline
 	sources map[string]common.Nozzle
 
@@ -102,7 +105,7 @@ type GenericPipeline struct {
 
 	logger *log.CommonLogger
 
-	spec          *metadata.ReplicationSpecification
+	spec          metadata.GenericSpecification
 	settings      metadata.ReplicationSettingsMap
 	settings_lock *sync.RWMutex
 
@@ -264,7 +267,7 @@ func (genericPipeline *GenericPipeline) Start(settings metadata.ReplicationSetti
 
 	var ssl_port_map map[string]uint16
 	if genericPipeline.sslPortMapConstructor != nil {
-		ssl_port_map, err = genericPipeline.sslPortMapConstructor(genericPipeline.targetClusterRef, genericPipeline.spec)
+		ssl_port_map, err = genericPipeline.sslPortMapConstructor(genericPipeline.targetClusterRef, genericPipeline.spec.GetReplicationSpec())
 		if err != nil {
 			errMap["genericPipeline.sslPortMapConstructor"] = err
 			return errMap
@@ -499,9 +502,10 @@ func NewGenericPipeline(t string,
 }
 
 func NewPipelineWithSettingConstructor(t string,
+	pipelineType common.PipelineType,
 	sources map[string]common.Nozzle,
 	targets map[string]common.Nozzle,
-	spec *metadata.ReplicationSpecification,
+	spec metadata.GenericSpecification,
 	targetClusterRef *metadata.RemoteClusterReference,
 	partsSettingsConstructor PartsSettingsConstructor,
 	connectorSettingsConstructor ConnectorSettingsConstructor,
@@ -526,7 +530,9 @@ func NewPipelineWithSettingConstructor(t string,
 		logger:                             log.NewLogger("GenericPipeline", logger_context),
 		instance_id:                        time.Now().Nanosecond(),
 		state:                              common.Pipeline_Initial,
-		settings_lock:                      &sync.RWMutex{}}
+		settings_lock:                      &sync.RWMutex{},
+		pipelineType:                       pipelineType,
+	}
 	// NOTE: Calling initialize here as part of constructor
 	pipeline.initialize()
 	pipeline.logger.Debugf("Pipeline %s has been initialized with a part setting constructor %v", t, partsSettingsConstructor)
@@ -646,7 +652,7 @@ func GetAllConnectors(p common.Pipeline) map[string]common.Connector {
 	return p.(*GenericPipeline).connectorsMap
 }
 
-func (genericPipeline *GenericPipeline) Specification() *metadata.ReplicationSpecification {
+func (genericPipeline *GenericPipeline) Specification() metadata.GenericSpecification {
 	return genericPipeline.spec
 }
 
@@ -887,6 +893,10 @@ func (genericPipeline *GenericPipeline) GetAsyncListenerMap() map[string]common.
 
 func (genericPipeline *GenericPipeline) SetAsyncListenerMap(asyncListenerMap map[string]common.AsyncComponentEventListener) {
 	genericPipeline.asyncEventListenerMap = asyncListenerMap
+}
+
+func (genericPipeline *GenericPipeline) Type() common.PipelineType {
+	return genericPipeline.pipelineType
 }
 
 //enforcer for GenericPipeline to implement Pipeline

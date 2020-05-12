@@ -490,7 +490,7 @@ func (stats_mgr *StatisticsManager) logStatsOnce() error {
 		//log parts summary
 		outNozzle_parts := stats_mgr.pipeline.Targets()
 		for _, part := range outNozzle_parts {
-			if stats_mgr.pipeline.Specification().Settings.RepType == metadata.ReplicationTypeXmem {
+			if stats_mgr.pipeline.Specification().GetReplicationSpec().Settings.RepType == metadata.ReplicationTypeXmem {
 				part.(*parts.XmemNozzle).PrintStatusSummary()
 			} else {
 				part.(*parts.CapiNozzle).PrintStatusSummary()
@@ -832,7 +832,7 @@ func (stats_mgr *StatisticsManager) Attach(pipeline common.Pipeline) error {
 
 // compose user agent string for HELO command
 func (stats_mgr *StatisticsManager) composeUserAgent() {
-	spec := stats_mgr.pipeline.Specification()
+	spec := stats_mgr.pipeline.Specification().GetReplicationSpec()
 	stats_mgr.user_agent = base.ComposeUserAgentWithBucketNames("Goxdcr StatsMgr", spec.SourceBucketName, spec.TargetBucketName)
 }
 
@@ -940,7 +940,7 @@ func (stats_mgr *StatisticsManager) closeConnections() {
 }
 
 func (stats_mgr *StatisticsManager) initConnections() error {
-	spec := stats_mgr.pipeline.Specification()
+	spec := stats_mgr.pipeline.Specification().GetReplicationSpec()
 	ref, err := stats_mgr.remoteClusterSvc.RemoteClusterByUuid(spec.TargetClusterUUID, false /*refresh*/)
 	if err != nil {
 		return err

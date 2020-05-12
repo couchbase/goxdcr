@@ -52,6 +52,14 @@ func (b *BackfillReplicationSpec) SameAs(other *BackfillReplicationSpec) bool {
 	}
 }
 
+func (b *BackfillReplicationSpec) GetReplicationSpec() *ReplicationSpecification {
+	return b.ReplicationSpec()
+}
+
+func (b *BackfillReplicationSpec) GetBackfillSpec() *BackfillReplicationSpec {
+	return b
+}
+
 func (b *BackfillReplicationSpec) SetReplicationSpec(spec *ReplicationSpecification) {
 	b.replicationSpec_ = spec
 }

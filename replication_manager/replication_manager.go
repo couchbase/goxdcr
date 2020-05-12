@@ -448,7 +448,7 @@ func (rm *replicationManager) init(
 	fac := factory.NewXDCRFactory(repl_spec_svc, remote_cluster_svc, cluster_info_svc,
 		xdcr_topology_svc, checkpoint_svc, capi_svc, uilog_svc, bucket_settings_svc,
 		throughput_throttler_svc, log.DefaultLoggerContext, log.DefaultLoggerContext,
-		rm, rm.utils, collectionsManifestSvc, rm.getBackfillMgr)
+		rm, rm.utils, collectionsManifestSvc, rm.getBackfillMgr, rm.backfillReplSvc)
 
 	pipelineMgrObj := pipeline_manager.NewPipelineManager(fac, repl_spec_svc, xdcr_topology_svc, remote_cluster_svc, cluster_info_svc, checkpoint_svc, uilog_svc, log.DefaultLoggerContext, rm.utils, collectionsManifestSvc)
 	rm.pipelineMgr = pipelineMgrObj

@@ -32,3 +32,26 @@ func (_m *PipelineFactory) NewPipeline(topic string, progressRecorder common.Pip
 
 	return r0, r1
 }
+
+// NewSecondaryPipeline provides a mock function with given fields: topic, primaryPipeline, progress_recorder, pipelineType
+func (_m *PipelineFactory) NewSecondaryPipeline(topic string, primaryPipeline common.Pipeline, progress_recorder common.PipelineProgressRecorder, pipelineType common.PipelineType) (common.Pipeline, error) {
+	ret := _m.Called(topic, primaryPipeline, progress_recorder, pipelineType)
+
+	var r0 common.Pipeline
+	if rf, ok := ret.Get(0).(func(string, common.Pipeline, common.PipelineProgressRecorder, common.PipelineType) common.Pipeline); ok {
+		r0 = rf(topic, primaryPipeline, progress_recorder, pipelineType)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(common.Pipeline)
+		}
+	}
+
+	var r1 error
+	if rf, ok := ret.Get(1).(func(string, common.Pipeline, common.PipelineProgressRecorder, common.PipelineType) error); ok {
+		r1 = rf(topic, primaryPipeline, progress_recorder, pipelineType)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}

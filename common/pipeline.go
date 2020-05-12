@@ -25,12 +25,20 @@ const (
 	Pipeline_Error    PipelineState = iota
 )
 
+type PipelineType int
+
+const (
+	MainPipeline     PipelineType = iota
+	BackfillPipeline PipelineType = iota
+)
+
 type PipelineProgressRecorder func(progress string)
 
 //interface for Pipeline
 type Pipeline interface {
 	//Name of the Pipeline
 	Topic() string
+	Type() PipelineType
 
 	Sources() map[string]Nozzle
 	Targets() map[string]Nozzle
@@ -44,7 +52,8 @@ type Pipeline interface {
 	//stop the data exchange
 	Stop() base.ErrorMap
 
-	Specification() *metadata.ReplicationSpecification
+	// Return the genericSpec that can be further used depending on pipeline type
+	Specification() metadata.GenericSpecification
 	Settings() metadata.ReplicationSettingsMap
 
 	State() PipelineState

@@ -76,7 +76,7 @@ func (p *pipelineSvcWrapper) Attach(pipeline common.Pipeline) error {
 	p.backfillMgr.specReqHandlersMtx.RLock()
 	defer p.backfillMgr.specReqHandlersMtx.RUnlock()
 
-	spec := pipeline.Specification()
+	spec := pipeline.Specification().GetReplicationSpec()
 
 	handler, ok := p.backfillMgr.specToReqHandlerMap[spec.Id]
 	if !ok {

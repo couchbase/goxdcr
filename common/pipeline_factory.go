@@ -13,4 +13,5 @@ import ()
 
 type PipelineFactory interface {
 	NewPipeline(topic string, progressRecorder PipelineProgressRecorder) (Pipeline, error)
+	NewSecondaryPipeline(topic string, primaryPipeline Pipeline, progress_recorder PipelineProgressRecorder, pipelineType PipelineType) (Pipeline, error)
 }

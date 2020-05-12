@@ -371,7 +371,7 @@ func (pipelineSupervisor *PipelineSupervisor) checkPipelineHealth() error {
 
 // compose user agent string for HELO command
 func (pipelineSupervisor *PipelineSupervisor) composeUserAgent() {
-	spec := pipelineSupervisor.pipeline.Specification()
+	spec := pipelineSupervisor.pipeline.Specification().GetReplicationSpec()
 	pipelineSupervisor.user_agent = base.ComposeUserAgentWithBucketNames("Goxdcr PipelineSupervisor", spec.SourceBucketName, spec.TargetBucketName)
 }
 
@@ -382,7 +382,7 @@ func (pipelineSupervisor *PipelineSupervisor) getDcpStats() (map[string]map[stri
 
 	dcp_stats := make(map[string]map[string]string)
 
-	spec := pipelineSupervisor.pipeline.Specification()
+	spec := pipelineSupervisor.pipeline.Specification().GetReplicationSpec()
 	bucketName := spec.SourceBucketName
 	nodes, err := pipelineSupervisor.xdcr_topology_svc.MyKVNodes()
 	if err != nil {

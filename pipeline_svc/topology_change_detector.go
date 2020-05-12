@@ -102,7 +102,7 @@ func (top_detect_svc *TopologyChangeDetectorSvc) Attach(pipeline common.Pipeline
 	pipelineType := "secondary"
 
 	if len(top_detect_svc.pipelines) == 0 {
-		top_detect_svc.capi = pipeline.Specification().Settings.IsCapi()
+		top_detect_svc.capi = pipeline.Specification().GetReplicationSpec().Settings.IsCapi()
 		pipelineType = "main"
 		top_detect_svc.mainPipelineTopic = pipeline.Topic()
 	}
@@ -393,7 +393,7 @@ func (top_detect_svc *TopologyChangeDetectorSvc) validateSourceTopology() ([]uin
 	defer top_detect_svc.logger.Infof("TopologyChangeDetectorSvc for pipeline %v validateSourceTopology completed", top_detect_svc.mainPipelineTopic)
 
 	top_detect_svc.pipelinesMtx.RLock()
-	mainPipelineSpec := top_detect_svc.pipelines[0].Specification()
+	mainPipelineSpec := top_detect_svc.pipelines[0].Specification().GetReplicationSpec()
 	top_detect_svc.pipelinesMtx.RUnlock()
 
 	vblist_supposed := []uint16{}

@@ -249,11 +249,8 @@ func (ckmgr *CheckpointManager) Attach(pipeline common.Pipeline) error {
 }
 
 func (ckmgr *CheckpointManager) populateRemoteBucketInfo(pipeline common.Pipeline) error {
-	topic := pipeline.Topic()
-	spec, err := ckmgr.rep_spec_svc.ReplicationSpec(topic)
-	if err != nil {
-		return err
-	}
+	spec := pipeline.Specification().GetReplicationSpec()
+
 	remote_bucket, err := service_def.NewRemoteBucketInfo(ckmgr.target_cluster_ref.Name(), spec.TargetBucketName, ckmgr.target_cluster_ref, ckmgr.remote_cluster_svc, ckmgr.cluster_info_svc, ckmgr.logger, ckmgr.utils)
 	if err != nil {
 		return err
@@ -337,7 +334,7 @@ func (ckmgr *CheckpointManager) initialize() {
 
 // compose user agent string for HELO command
 func (ckmgr *CheckpointManager) composeUserAgent() {
-	spec := ckmgr.pipeline.Specification()
+	spec := ckmgr.pipeline.Specification().GetReplicationSpec()
 	ckmgr.user_agent = base.ComposeUserAgentWithBucketNames("Goxdcr CkptMgr", spec.SourceBucketName, spec.TargetBucketName)
 }
 
@@ -671,7 +668,7 @@ func (ckmgr *CheckpointManager) SetVBTimestamps(topic string) error {
 
 	deleted_vbnos := make([]uint16, 0)
 	target_support_xattr_now := base.IsClusterCompatible(ckmgr.target_cluster_version, base.VersionForRBACAndXattrSupport)
-	specInternalId := ckmgr.pipeline.Specification().InternalId
+	specInternalId := ckmgr.pipeline.Specification().GetReplicationSpec().InternalId
 
 	var brokenMappingModified bool
 	// Figure out if certain checkpoints need to be removed to force a complete resync due to external factors
@@ -1112,7 +1109,7 @@ func (ckmgr *CheckpointManager) PreCommitBrokenMapping() {
 	ckmgr.cachedBrokenMap.lock.RLock()
 	preUpsertMap := ckmgr.cachedBrokenMap.brokenMap.Clone()
 	ckmgr.cachedBrokenMap.lock.RUnlock()
-	err := ckmgr.checkpoints_svc.PreUpsertBrokenMapping(ckmgr.pipeline.Topic(), ckmgr.pipeline.Specification().InternalId, &preUpsertMap)
+	err := ckmgr.checkpoints_svc.PreUpsertBrokenMapping(ckmgr.pipeline.Topic(), ckmgr.pipeline.Specification().GetReplicationSpec().InternalId, &preUpsertMap)
 	if err != nil {
 		ckmgr.logger.Warnf("Unable to pre-persist brokenMapping: %v", err)
 	}
@@ -1121,7 +1118,7 @@ func (ckmgr *CheckpointManager) PreCommitBrokenMapping() {
 
 func (ckmgr *CheckpointManager) CommitBrokenMappingUpdates() {
 	// If router updated ckptmgr's brokenmap during the checkpointing process, this call will ensure that all the necessary brokenmaps are persisted
-	err := ckmgr.checkpoints_svc.UpsertBrokenMapping(ckmgr.pipeline.Topic(), ckmgr.pipeline.Specification().InternalId)
+	err := ckmgr.checkpoints_svc.UpsertBrokenMapping(ckmgr.pipeline.Topic(), ckmgr.pipeline.Specification().GetReplicationSpec().InternalId)
 	if err != nil {
 		ckmgr.logger.Errorf("Unable to persist brokenMapping: %v", err)
 	}
@@ -1178,7 +1175,7 @@ func (ckmgr *CheckpointManager) PerformCkpt(fin_ch chan bool) {
 	//wait for all the getter done, then gather result
 	worker_wait_grp.Wait()
 	ckmgr.CommitBrokenMappingUpdates()
-	ckmgr.collectionsManifestSvc.PersistNeededManifests(ckmgr.pipeline.Specification())
+	ckmgr.collectionsManifestSvc.PersistNeededManifests(ckmgr.pipeline.Specification().GetReplicationSpec())
 	ckmgr.RaiseEvent(common.NewEvent(common.CheckpointDone, nil, ckmgr, nil, time.Duration(total_committing_time)*time.Nanosecond))
 
 }
@@ -1211,7 +1208,7 @@ func (ckmgr *CheckpointManager) performCkpt(fin_ch chan bool, wait_grp *sync.Wai
 	ckmgr.performCkpt_internal(ckmgr.getMyVBs(), fin_ch, wait_grp, ckmgr.getCheckpointInterval(), through_seqno_map, high_seqno_and_vbuuid_map,
 		xattr_seqno_map, &total_committing_time, srcManifestIds, tgtManifestIds)
 	ckmgr.CommitBrokenMappingUpdates()
-	ckmgr.collectionsManifestSvc.PersistNeededManifests(ckmgr.pipeline.Specification())
+	ckmgr.collectionsManifestSvc.PersistNeededManifests(ckmgr.pipeline.Specification().GetReplicationSpec())
 	ckmgr.RaiseEvent(common.NewEvent(common.CheckpointDone, nil, ckmgr, nil, time.Duration(total_committing_time)*time.Nanosecond))
 
 }
@@ -1540,7 +1537,7 @@ func (ckmgr *CheckpointManager) raiseSuccessCkptForVbEvent(ckpt_record metadata.
 
 func (ckmgr *CheckpointManager) persistCkptRecord(vbno uint16, ckpt_record *metadata.CheckpointRecord, xattr_seqno uint64) (int, error) {
 	ckmgr.logger.Debugf("Persist vb=%v ckpt_record=%v for %v\n", vbno, ckpt_record, ckmgr.pipeline.Topic())
-	return ckmgr.checkpoints_svc.UpsertCheckpoints(ckmgr.pipeline.Topic(), ckmgr.pipeline.Specification().InternalId, vbno, ckpt_record, xattr_seqno, ckmgr.target_cluster_version)
+	return ckmgr.checkpoints_svc.UpsertCheckpoints(ckmgr.pipeline.Topic(), ckmgr.pipeline.Specification().GetReplicationSpec().InternalId, vbno, ckpt_record, xattr_seqno, ckmgr.target_cluster_version)
 }
 
 func (ckmgr *CheckpointManager) OnEvent(event *common.Event) {
@@ -1644,7 +1641,7 @@ func (ckmgr *CheckpointManager) OnEvent(event *common.Event) {
 
 func (ckmgr *CheckpointManager) preUpsertBrokenMapTask(newerMap metadata.CollectionNamespaceMapping) {
 	defer ckmgr.wait_grp.Done()
-	ckmgr.checkpoints_svc.PreUpsertBrokenMapping(ckmgr.pipeline.Topic(), ckmgr.pipeline.Specification().InternalId, &newerMap)
+	ckmgr.checkpoints_svc.PreUpsertBrokenMapping(ckmgr.pipeline.Topic(), ckmgr.pipeline.Specification().GetReplicationSpec().InternalId, &newerMap)
 }
 
 func (ckmgr *CheckpointManager) logBrokenMapUpdatesToUI(olderMap, newerMap metadata.CollectionNamespaceMapping) {
@@ -1655,7 +1652,7 @@ func (ckmgr *CheckpointManager) logBrokenMapUpdatesToUI(olderMap, newerMap metad
 	added, removed := olderMap.Diff(newerMap)
 
 	if len(added) > 0 || len(removed) > 0 {
-		spec := ckmgr.pipeline.Specification()
+		spec := ckmgr.pipeline.Specification().GetReplicationSpec()
 		ref, err := ckmgr.remote_cluster_svc.RemoteClusterByUuid(spec.TargetClusterUUID, false /*refresh*/)
 		if err != nil || ref == nil {
 			ckmgr.logger.Warnf("Unable to write to UI log service the update.\nNewly broken: %v Repaired: %v\n",

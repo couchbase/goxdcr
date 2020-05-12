@@ -78,7 +78,7 @@ func (throttler *BandwidthThrottler) Attach(pipeline common.Pipeline) error {
 		}
 
 		err = throttler.updateBandwidthLimitSettings(number_of_source_nodes, true, /*update_number_of_source_nodes*/
-			pipeline.Specification().Settings.BandwidthLimit, true /*update_overall_bandwidth_limit*/)
+			pipeline.Specification().GetReplicationSpec().Settings.BandwidthLimit, true /*update_overall_bandwidth_limit*/)
 		if err != nil {
 			return err
 		}

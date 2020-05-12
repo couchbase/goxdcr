@@ -127,15 +127,15 @@ func (_m *Pipeline) Sources() map[string]common.Nozzle {
 }
 
 // Specification provides a mock function with given fields:
-func (_m *Pipeline) Specification() *metadata.ReplicationSpecification {
+func (_m *Pipeline) Specification() metadata.GenericSpecification {
 	ret := _m.Called()
 
-	var r0 *metadata.ReplicationSpecification
-	if rf, ok := ret.Get(0).(func() *metadata.ReplicationSpecification); ok {
+	var r0 metadata.GenericSpecification
+	if rf, ok := ret.Get(0).(func() metadata.GenericSpecification); ok {
 		r0 = rf()
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*metadata.ReplicationSpecification)
+			r0 = ret.Get(0).(metadata.GenericSpecification)
 		}
 	}
 
@@ -213,6 +213,20 @@ func (_m *Pipeline) Topic() string {
 		r0 = rf()
 	} else {
 		r0 = ret.Get(0).(string)
+	}
+
+	return r0
+}
+
+// Type provides a mock function with given fields:
+func (_m *Pipeline) Type() common.PipelineType {
+	ret := _m.Called()
+
+	var r0 common.PipelineType
+	if rf, ok := ret.Get(0).(func() common.PipelineType); ok {
+		r0 = rf()
+	} else {
+		r0 = ret.Get(0).(common.PipelineType)
 	}
 
 	return r0

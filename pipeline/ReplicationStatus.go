@@ -142,7 +142,7 @@ func (rs *ReplicationStatus) SetPipeline(pipeline common.Pipeline) {
 	if pipeline != nil {
 		rs.vb_list = pipeline_utils.GetSourceVBListPerPipeline(pipeline)
 		base.SortUint16List(rs.vb_list)
-		rs.specInternalId = pipeline.Specification().InternalId
+		rs.specInternalId = pipeline.Specification().GetReplicationSpec().InternalId
 	}
 
 	rs.Publish(false)

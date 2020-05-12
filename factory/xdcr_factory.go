@@ -31,7 +31,7 @@ const (
 
 // interface so we can autogenerate mock and do unit test
 type XDCRFactoryIface interface {
-	NewPipeline(topic string, progress_recorder common.PipelineProgressRecorder) (common.Pipeline, error)
+	common.PipelineFactory
 	ConstructSettingsForPart(pipeline common.Pipeline, part common.Part, settings metadata.ReplicationSettingsMap,
 		targetClusterRef *metadata.RemoteClusterReference, ssl_port_map map[string]uint16,
 		isSSLOverMem bool) (metadata.ReplicationSettingsMap, error)
@@ -56,6 +56,7 @@ type XDCRFactory struct {
 	bucket_settings_svc      service_def.BucketSettingsSvc
 	throughput_throttler_svc service_def.ThroughputThrottlerSvc
 	collectionsManifestSvc   service_def.CollectionsManifestSvc
+	backfillReplSvc          service_def.BackfillReplSvc
 
 	getBackfillMgr BackfillMgrGetter
 
@@ -82,7 +83,8 @@ func NewXDCRFactory(repl_spec_svc service_def.ReplicationSpecSvc,
 	pipeline_failure_handler common.SupervisorFailureHandler,
 	utilsIn utilities.UtilsIface,
 	collectionsManifestSvc service_def.CollectionsManifestSvc,
-	getBackfillMgr BackfillMgrGetter) *XDCRFactory {
+	getBackfillMgr BackfillMgrGetter,
+	backfillReplSvc service_def.BackfillReplSvc) *XDCRFactory {
 	return &XDCRFactory{repl_spec_svc: repl_spec_svc,
 		remote_cluster_svc:       remote_cluster_svc,
 		cluster_info_svc:         cluster_info_svc,
@@ -98,6 +100,7 @@ func NewXDCRFactory(repl_spec_svc service_def.ReplicationSpecSvc,
 		utils:                    utilsIn,
 		collectionsManifestSvc:   collectionsManifestSvc,
 		getBackfillMgr:           getBackfillMgr,
+		backfillReplSvc:          backfillReplSvc,
 	}
 }
 
@@ -111,44 +114,78 @@ func (xdcrf *XDCRFactory) NewPipeline(topic string, progress_recorder common.Pip
 		xdcrf.logger.Errorf("Failed to get replication specification for pipeline %v, err=%v\n", topic, err)
 		return nil, err
 	}
-	xdcrf.logger.Debugf("replication specification = %v\n", spec)
 
+	pipeline, registerCb, err := xdcrf.newPipelineCommon(topic, common.MainPipeline, spec, progress_recorder)
+
+	err = registerCb(nil /*main pipeline*/)
+	if err != nil {
+		return nil, err
+	}
+
+	progress_recorder("Pipeline has been constructed")
+
+	xdcrf.logger.Infof("Pipeline %v has been constructed", topic)
+	return pipeline, nil
+}
+
+// Given a primary pipeline, create a secondary/child pipeline that supplements the primary
+func (xdcrf *XDCRFactory) NewSecondaryPipeline(topic string, primaryPipeline common.Pipeline, progress_recorder common.PipelineProgressRecorder, pipelineType common.PipelineType) (common.Pipeline, error) {
+	spec := primaryPipeline.Specification().GetReplicationSpec()
+
+	logger_ctx := log.CopyCtx(xdcrf.default_logger_ctx)
+	logger_ctx.SetLogLevel(spec.Settings.LogLevel)
+
+	pipeline, registerCb, err := xdcrf.newPipelineCommon(topic, pipelineType, spec, progress_recorder)
+
+	// For secondary pipeline, use existing pipeline's context
+	err = registerCb(&primaryPipeline)
+	if err != nil {
+		return nil, err
+	}
+
+	progress_recorder("Secondary Pipeline has been constructed")
+
+	xdcrf.logger.Infof("Secondary Pipeline %v has been constructed", topic)
+	return pipeline, nil
+}
+
+func (xdcrf *XDCRFactory) newPipelineCommon(topic string, pipelineType common.PipelineType, spec *metadata.ReplicationSpecification, progress_recorder common.PipelineProgressRecorder) (common.Pipeline, func(*common.Pipeline) error, error) {
 	logger_ctx := log.CopyCtx(xdcrf.default_logger_ctx)
 	logger_ctx.SetLogLevel(spec.Settings.LogLevel)
 
 	targetClusterRef, err := xdcrf.remote_cluster_svc.RemoteClusterByUuid(spec.TargetClusterUUID, false)
 	if err != nil {
 		xdcrf.logger.Errorf("Error getting remote cluster with uuid=%v for pipeline %v, err=%v\n", spec.TargetClusterUUID, spec.Id, err)
-		return nil, err
+		return nil, nil, err
 	}
 
 	nozzleType, err := xdcrf.getOutNozzleType(targetClusterRef, spec)
 	if err != nil {
 		xdcrf.logger.Errorf("Failed to get the nozzle type for %v, err=%v\n", spec.Id, err)
-		return nil, err
+		return nil, nil, err
 	}
 	isCapiReplication := (nozzleType == base.Capi)
 
 	connStr, err := xdcrf.remote_cluster_svc.GetConnectionStringForRemoteCluster(targetClusterRef, isCapiReplication)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	username, password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey, err := targetClusterRef.MyCredentials()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	targetBucketInfo, err := xdcrf.utils.GetBucketInfo(connStr, spec.TargetBucketName, username, password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey, xdcrf.logger)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	isTargetES := xdcrf.utils.CheckWhetherClusterIsESBasedOnBucketInfo(targetBucketInfo)
 
 	conflictResolutionType, err := xdcrf.utils.GetConflictResolutionTypeFromBucketInfo(spec.TargetBucketName, targetBucketInfo)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	// sourceCRMode is the conflict resolution mode to use when resolving conflicts for big documents at source side
@@ -160,6 +197,20 @@ func (xdcrf *XDCRFactory) NewPipeline(topic string, progress_recorder common.Pip
 		sourceCRMode = base.GetCRModeFromConflictResolutionTypeSetting(conflictResolutionType)
 	}
 
+	var specForConstruction metadata.GenericSpecification
+	switch pipelineType {
+	case common.MainPipeline:
+		specForConstruction = spec
+	case common.BackfillPipeline:
+		backfillSpec, err := xdcrf.backfillReplSvc.BackfillReplSpec(spec.Id)
+		if err != nil {
+			return nil, nil, err
+		}
+		specForConstruction = backfillSpec
+	default:
+		panic("Not implemented")
+	}
+
 	xdcrf.logger.Infof("%v sourceCRMode=%v httpAuthMech=%v isCapiReplication=%v isTargetES=%v\n", topic, sourceCRMode, httpAuthMech, isCapiReplication, isTargetES)
 
 	/**
@@ -169,11 +220,11 @@ func (xdcrf *XDCRFactory) NewPipeline(topic string, progress_recorder common.Pip
 	 */
 	sourceNozzles, kv_vb_map, err := xdcrf.constructSourceNozzles(spec, topic, isCapiReplication, logger_ctx)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if len(sourceNozzles) == 0 {
 		// no pipeline is constructed if there is no source nozzle
-		return nil, base.ErrorNoSourceNozzle
+		return nil, nil, base.ErrorNoSourceNozzle
 	}
 
 	progress_recorder(fmt.Sprintf("%v source nozzles have been constructed", len(sourceNozzles)))
@@ -186,10 +237,10 @@ func (xdcrf *XDCRFactory) NewPipeline(topic string, progress_recorder common.Pip
 	 * 3. kvVBMap - map of remote KVNodes -> vbucket# responsible for per node
 	 */
 	outNozzles, vbNozzleMap, target_kv_vb_map, targetUserName, targetPassword, targetClusterVersion, err :=
-		xdcrf.constructOutgoingNozzles(spec, kv_vb_map, sourceCRMode, targetBucketInfo, targetClusterRef, isCapiReplication, isTargetES, logger_ctx)
+		xdcrf.constructOutgoingNozzles(topic, spec, kv_vb_map, sourceCRMode, targetBucketInfo, targetClusterRef, isCapiReplication, isTargetES, logger_ctx)
 
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	progress_recorder(fmt.Sprintf("%v target nozzles have been constructed", len(outNozzles)))
 
@@ -202,12 +253,12 @@ func (xdcrf *XDCRFactory) NewPipeline(topic string, progress_recorder common.Pip
 		for _, vb := range vblist {
 			targetNozzleId, ok := vbNozzleMap[vb]
 			if !ok {
-				return nil, fmt.Errorf("Error constructing pipeline %v since there is no target nozzle for vb=%v", topic, vb)
+				return nil, nil, fmt.Errorf("Error constructing pipeline %v since there is no target nozzle for vb=%v", topic, vb)
 			}
 
 			outNozzle, ok := outNozzles[targetNozzleId]
 			if !ok {
-				return nil, fmt.Errorf("%v There is no corresponding target nozzle for vb=%v, targetNozzleId=%v", topic, vb, targetNozzleId)
+				return nil, nil, fmt.Errorf("%v There is no corresponding target nozzle for vb=%v, targetNozzleId=%v", topic, vb, targetNozzleId)
 			}
 			downStreamParts[targetNozzleId] = outNozzle
 		}
@@ -215,7 +266,7 @@ func (xdcrf *XDCRFactory) NewPipeline(topic string, progress_recorder common.Pip
 		// Construct a router - each Source nozzle has a router.
 		router, err := xdcrf.constructRouter(sourceNozzle.Id(), spec, downStreamParts, vbNozzleMap, sourceCRMode, logger_ctx, (utilities.RecycleObjFunc)(sourceNozzle.RecycleDataObj))
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		sourceNozzle.SetConnector(router)
 
@@ -226,7 +277,7 @@ func (xdcrf *XDCRFactory) NewPipeline(topic string, progress_recorder common.Pip
 	progress_recorder("Source nozzles have been wired to target nozzles")
 
 	// construct and initializes the pipeline
-	pipeline := pp.NewPipelineWithSettingConstructor(topic, sourceNozzles, outNozzles, spec, targetClusterRef,
+	pipeline := pp.NewPipelineWithSettingConstructor(topic, pipelineType, sourceNozzles, outNozzles, specForConstruction, targetClusterRef,
 		xdcrf.ConstructSettingsForPart, xdcrf.ConstructSettingsForConnector, xdcrf.ConstructSSLPortMap, xdcrf.ConstructUpdateSettingsForPart,
 		xdcrf.ConstructUpdateSettingsForConnector, xdcrf.SetStartSeqno, xdcrf.CheckpointBeforeStop, logger_ctx)
 
@@ -237,23 +288,18 @@ func (xdcrf *XDCRFactory) NewPipeline(topic string, progress_recorder common.Pip
 	// initialize component event listener map in pipeline
 	pp.GetAllAsyncComponentEventListeners(pipeline)
 
-	// Create PipelineContext
-	if pipelineContext, err := pctx.NewWithSettingConstructor(pipeline, xdcrf.ConstructSettingsForService, xdcrf.ConstructUpdateSettingsForService, logger_ctx); err != nil {
-
-		return nil, err
-	} else {
-		//register services to the pipeline context, so when pipeline context starts as part of the pipeline starting, these services will start as well
-		pipeline.SetRuntimeContext(pipelineContext)
-		err = xdcrf.registerServices(pipeline, logger_ctx, kv_vb_map, targetUserName, targetPassword, spec.TargetBucketName, target_kv_vb_map, targetClusterRef, targetClusterVersion, isCapiReplication, isTargetES)
-		if err != nil {
-			return nil, err
-		}
+	pipelineContext, err := pctx.NewWithSettingConstructor(pipeline, xdcrf.ConstructSettingsForService, xdcrf.ConstructUpdateSettingsForService, logger_ctx)
+	if err != nil {
+		return nil, nil, err
 	}
 
-	progress_recorder("Pipeline has been constructed")
+	//register services to the pipeline context, so when pipeline context starts as part of the pipeline starting, these services will start as well
+	pipeline.SetRuntimeContext(pipelineContext)
 
-	xdcrf.logger.Infof("Pipeline %v has been constructed", topic)
-	return pipeline, nil
+	registerCb := func(mainPipeline *common.Pipeline) error {
+		return xdcrf.registerServices(pipeline, logger_ctx, kv_vb_map, targetUserName, targetPassword, spec.TargetBucketName, target_kv_vb_map, targetClusterRef, targetClusterVersion, isCapiReplication, isTargetES, mainPipeline)
+	}
+	return pipeline, registerCb, nil
 }
 
 func min(num1 int, num2 int) int {
@@ -395,7 +441,7 @@ func (xdcrf *XDCRFactory) constructSourceNozzles(spec *metadata.ReplicationSpeci
 
 			// construct dcpNozzles
 			// partIds of the dcpNozzle nodes look like "dcpNozzle_$kvaddr_1"
-			id := xdcrf.partId(DCP_NOZZLE_NAME_PREFIX, spec.Id, kvaddr, i)
+			id := xdcrf.partId(DCP_NOZZLE_NAME_PREFIX, topic, kvaddr, i)
 
 			getterFunc := func(manifestUid uint64) (*metadata.CollectionsManifest, error) {
 				return xdcrf.collectionsManifestSvc.GetSpecificSourceManifest(spec, manifestUid)
@@ -449,7 +495,7 @@ func (xdcrf *XDCRFactory) filterVBList(targetkvVBList []uint16, kv_vb_map map[st
  * 5. targetPassword
  * 6. targetVersion - target Cluster Version
  */
-func (xdcrf *XDCRFactory) constructOutgoingNozzles(spec *metadata.ReplicationSpecification, kv_vb_map map[string][]uint16,
+func (xdcrf *XDCRFactory) constructOutgoingNozzles(topic string, spec *metadata.ReplicationSpecification, kv_vb_map map[string][]uint16,
 	sourceCRMode base.ConflictResolutionMode, targetBucketInfo map[string]interface{},
 	targetClusterRef *metadata.RemoteClusterReference, isCapiReplication bool, isTargetES bool, logger_ctx *log.LoggerContext) (outNozzles map[string]common.Nozzle,
 	vbNozzleMap map[uint16]string, kvVBMap map[string][]uint16, targetUserName string, targetPassword string, targetClusterVersion int, err error) {
@@ -548,13 +594,13 @@ func (xdcrf *XDCRFactory) constructOutgoingNozzles(spec *metadata.ReplicationSpe
 			var outNozzle common.Nozzle
 
 			if isCapiReplication {
-				outNozzle, err = xdcrf.constructCAPINozzle(spec.Id, targetUserName, targetPassword, targetClusterRef.Certificate(), vbList, vbCouchApiBaseMap, i, logger_ctx)
+				outNozzle, err = xdcrf.constructCAPINozzle(topic, targetUserName, targetPassword, targetClusterRef.Certificate(), vbList, vbCouchApiBaseMap, i, logger_ctx)
 				if err != nil {
 					return
 				}
 			} else {
 				connSize := numOfOutNozzles * 2
-				outNozzle = xdcrf.constructXMEMNozzle(spec.Id, spec.TargetClusterUUID, kvaddr, spec.SourceBucketName, spec.TargetBucketName, spec.TargetBucketUUID, targetUserName, targetPassword, i, connSize, sourceCRMode, targetBucketInfo, logger_ctx, vbList)
+				outNozzle = xdcrf.constructXMEMNozzle(topic, spec.TargetClusterUUID, kvaddr, spec.SourceBucketName, spec.TargetBucketName, spec.TargetBucketUUID, targetUserName, targetPassword, i, connSize, sourceCRMode, targetBucketInfo, logger_ctx, vbList)
 			}
 
 			// Add the created nozzle to the collective map of outNozzles to be returned
@@ -786,7 +832,7 @@ func (xdcrf *XDCRFactory) constructSettingsForXmemNozzle(pipeline common.Pipelin
 	targetClusterRef *metadata.RemoteClusterReference, settings metadata.ReplicationSettingsMap,
 	ssl_port_map map[string]uint16) (metadata.ReplicationSettingsMap, error) {
 	xmemSettings := make(metadata.ReplicationSettingsMap)
-	spec := pipeline.Specification()
+	spec := pipeline.Specification().GetReplicationSpec()
 	repSettings := spec.Settings
 	xmemConnStr := part.(*parts.XmemNozzle).ConnStr()
 
@@ -797,7 +843,7 @@ func (xdcrf *XDCRFactory) constructSettingsForXmemNozzle(pipeline common.Pipelin
 	xmemSettings[parts.SETTING_OPTI_REP_THRESHOLD] = getSettingFromSettingsMap(settings, metadata.OptimisticReplicationThresholdKey, repSettings.OptimisticReplicationThreshold)
 	xmemSettings[parts.SETTING_STATS_INTERVAL] = getSettingFromSettingsMap(settings, metadata.PipelineStatsIntervalKey, repSettings.StatsInterval)
 	xmemSettings[parts.SETTING_COMPRESSION_TYPE] = base.GetCompressionType(getSettingFromSettingsMap(settings, metadata.CompressionTypeKey, repSettings.CompressionType).(int))
-	xdcrf.disableCollectionIfNeeded(settings, xmemSettings, pipeline.Specification())
+	xdcrf.disableCollectionIfNeeded(settings, xmemSettings, pipeline.Specification().GetReplicationSpec())
 
 	xmemSettings[parts.XMEM_SETTING_DEMAND_ENCRYPTION] = targetClusterRef.DemandEncryption()
 	xmemSettings[parts.XMEM_SETTING_CERTIFICATE] = targetClusterRef.Certificate()
@@ -823,7 +869,7 @@ func (xdcrf *XDCRFactory) constructSettingsForXmemNozzle(pipeline common.Pipelin
 
 func (xdcrf *XDCRFactory) constructSettingsForCapiNozzle(pipeline common.Pipeline, settings metadata.ReplicationSettingsMap) (map[string]interface{}, error) {
 	capiSettings := make(metadata.ReplicationSettingsMap)
-	repSettings := pipeline.Specification().Settings
+	repSettings := pipeline.Specification().GetReplicationSpec().Settings
 
 	capiSettings[parts.SETTING_BATCHCOUNT] = getSettingFromSettingsMap(settings, metadata.BatchCountKey, repSettings.BatchCount)
 	capiSettings[parts.SETTING_BATCHSIZE] = getSettingFromSettingsMap(settings, metadata.BatchSizeKey, repSettings.BatchSize)
@@ -872,7 +918,7 @@ func (xdcrf *XDCRFactory) disableCollectionIfNeeded(incomingSettings, filteredSe
 func (xdcrf *XDCRFactory) constructSettingsForDcpNozzle(pipeline common.Pipeline, part *parts.DcpNozzle, settings metadata.ReplicationSettingsMap) (map[string]interface{}, error) {
 	xdcrf.logger.Debugf("Construct settings for DcpNozzle ....")
 	dcpNozzleSettings := make(metadata.ReplicationSettingsMap)
-	spec := pipeline.Specification()
+	spec := pipeline.Specification().GetReplicationSpec()
 	repSettings := spec.Settings
 
 	ckpt_svc := pipeline.RuntimeContext().Service(base.CHECKPOINT_MGR_SVC)
@@ -895,7 +941,7 @@ func (xdcrf *XDCRFactory) constructSettingsForDcpNozzle(pipeline common.Pipeline
 	} else {
 		dcpNozzleSettings[parts.SETTING_COMPRESSION_TYPE] = base.GetCompressionType(getSettingFromSettingsMap(settings, metadata.CompressionTypeKey, repSettings.CompressionType).(int))
 
-		err := xdcrf.disableCollectionIfNeeded(settings, dcpNozzleSettings, pipeline.Specification())
+		err := xdcrf.disableCollectionIfNeeded(settings, dcpNozzleSettings, pipeline.Specification().GetReplicationSpec())
 		if err != nil {
 			return nil, err
 		}
@@ -923,7 +969,7 @@ func (xdcrf *XDCRFactory) constructSettingsForRouter(pipeline common.Pipeline, s
 		routerSettings[parts.FilterExpDelKey] = filterExpDelMode
 	}
 
-	xdcrf.disableCollectionIfNeeded(settings, routerSettings, pipeline.Specification())
+	xdcrf.disableCollectionIfNeeded(settings, routerSettings, pipeline.Specification().GetReplicationSpec())
 
 	// Router keeps a copy of the current highest target manifest ID
 	vbTimestamp, ok := settings[base.VBTimestamps]
@@ -942,9 +988,13 @@ func (xdcrf *XDCRFactory) constructSettingsForRouter(pipeline common.Pipeline, s
 func (xdcrf *XDCRFactory) registerServices(pipeline common.Pipeline, logger_ctx *log.LoggerContext,
 	kv_vb_map map[string][]uint16, targetUserName, targetPassword string, targetBucketName string,
 	target_kv_vb_map map[string][]uint16, targetClusterRef *metadata.RemoteClusterReference,
-	targetClusterVersion int, isCapi bool, isTargetES bool) error {
+	targetClusterVersion int, isCapi bool, isTargetES bool, mainPipeline *common.Pipeline) error {
 
 	ctx := pipeline.RuntimeContext()
+	var parentCtx common.PipelineRuntimeContext
+	if mainPipeline != nil {
+		parentCtx = (*mainPipeline).RuntimeContext()
+	}
 
 	//register pipeline supervisor
 	supervisor := pipeline_svc.NewPipelineSupervisor(base.PipelineSupervisorIdPrefix+pipeline.Topic(), logger_ctx,
@@ -960,7 +1010,7 @@ func (xdcrf *XDCRFactory) registerServices(pipeline common.Pipeline, logger_ctx 
 	through_seqno_tracker_svc.Attach(pipeline)
 
 	//Create pipeline statistics manager.
-	bucket_name := pipeline.Specification().SourceBucketName
+	bucket_name := pipeline.Specification().GetReplicationSpec().SourceBucketName
 	actualStatsMgr := pipeline_svc.NewStatisticsManager(through_seqno_tracker_svc, xdcrf.cluster_info_svc,
 		xdcrf.xdcr_topology_svc, logger_ctx, kv_vb_map, bucket_name, xdcrf.utils, xdcrf.remote_cluster_svc)
 
@@ -975,26 +1025,47 @@ func (xdcrf *XDCRFactory) registerServices(pipeline common.Pipeline, logger_ctx 
 			xdcrf.remote_cluster_svc, xdcrf.repl_spec_svc)
 		return err
 	}
+
 	err = ctx.RegisterService(base.CHECKPOINT_MGR_SVC, ckptMgr)
 	if err != nil {
 		return err
 	}
+
 	// Register statistics manager after checkpoint manager is created
 	err = ctx.RegisterService(base.STATISTICS_MGR_SVC, actualStatsMgr)
 	if err != nil {
 		return err
 	}
-	//register topology change detect service
-	targetHasRBACAndXattrSupport := base.IsClusterCompatible(targetClusterVersion, base.VersionForRBACAndXattrSupport)
-	top_detect_svc := pipeline_svc.NewTopologyChangeDetectorSvc(xdcrf.cluster_info_svc, xdcrf.xdcr_topology_svc, xdcrf.remote_cluster_svc, xdcrf.repl_spec_svc, targetHasRBACAndXattrSupport, logger_ctx, xdcrf.utils)
+
+	// register sharable topology change detect service
+	var top_detect_svc *pipeline_svc.TopologyChangeDetectorSvc
+	if mainPipeline != nil {
+		var ok bool
+		top_detect_svc, ok = parentCtx.Service(base.TOPOLOGY_CHANGE_DETECT_SVC).(*pipeline_svc.TopologyChangeDetectorSvc)
+		if !ok {
+			return fmt.Errorf("Unable to retrieve main pipeline service %v", base.TOPOLOGY_CHANGE_DETECT_SVC)
+		}
+	} else {
+		targetHasRBACAndXattrSupport := base.IsClusterCompatible(targetClusterVersion, base.VersionForRBACAndXattrSupport)
+		top_detect_svc = pipeline_svc.NewTopologyChangeDetectorSvc(xdcrf.cluster_info_svc, xdcrf.xdcr_topology_svc, xdcrf.remote_cluster_svc, xdcrf.repl_spec_svc, targetHasRBACAndXattrSupport, logger_ctx, xdcrf.utils)
+	}
 	err = ctx.RegisterService(base.TOPOLOGY_CHANGE_DETECT_SVC, top_detect_svc)
 	if err != nil {
 		return err
 	}
 
 	if !isCapi {
-		//register bandwidth throttler service
-		bw_throttler_svc := pipeline_svc.NewBandwidthThrottlerSvc(xdcrf.xdcr_topology_svc, logger_ctx)
+		var bw_throttler_svc *pipeline_svc.BandwidthThrottler
+		if mainPipeline != nil {
+			var ok bool
+			bw_throttler_svc, ok = parentCtx.Service(base.BANDWIDTH_THROTTLER_SVC).(*pipeline_svc.BandwidthThrottler)
+			if !ok {
+				return fmt.Errorf("Unable to retrieve main pipeline service %v", base.BANDWIDTH_THROTTLER_SVC)
+			}
+		} else {
+			//register bandwidth throttler service
+			bw_throttler_svc = pipeline_svc.NewBandwidthThrottlerSvc(xdcrf.xdcr_topology_svc, logger_ctx)
+		}
 		err = ctx.RegisterService(base.BANDWIDTH_THROTTLER_SVC, bw_throttler_svc)
 		if err != nil {
 			return err
@@ -1051,8 +1122,8 @@ func (xdcrf *XDCRFactory) ConstructUpdateSettingsForService(pipeline common.Pipe
 
 func (xdcrf *XDCRFactory) constructSettingsForSupervisor(pipeline common.Pipeline, settings metadata.ReplicationSettingsMap) (metadata.ReplicationSettingsMap, error) {
 	s := make(metadata.ReplicationSettingsMap)
-	s[pipeline_svc.PUBLISH_INTERVAL] = getSettingFromSettingsMap(settings, metadata.PipelineStatsIntervalKey, pipeline.Specification().Settings.StatsInterval)
-	log_level_str := getSettingFromSettingsMap(settings, metadata.PipelineLogLevelKey, pipeline.Specification().Settings.LogLevel.String())
+	s[pipeline_svc.PUBLISH_INTERVAL] = getSettingFromSettingsMap(settings, metadata.PipelineStatsIntervalKey, pipeline.Specification().GetReplicationSpec().Settings.StatsInterval)
+	log_level_str := getSettingFromSettingsMap(settings, metadata.PipelineLogLevelKey, pipeline.Specification().GetReplicationSpec().Settings.LogLevel.String())
 	log_level, err := log.LogLevelFromStr(log_level_str.(string))
 	if err != nil {
 		return nil, err
@@ -1063,14 +1134,14 @@ func (xdcrf *XDCRFactory) constructSettingsForSupervisor(pipeline common.Pipelin
 
 func (xdcrf *XDCRFactory) constructSettingsForStatsManager(pipeline common.Pipeline, settings metadata.ReplicationSettingsMap) (metadata.ReplicationSettingsMap, error) {
 	s := make(metadata.ReplicationSettingsMap)
-	s[pipeline_svc.PUBLISH_INTERVAL] = getSettingFromSettingsMap(settings, metadata.PipelineStatsIntervalKey, pipeline.Specification().Settings.StatsInterval)
+	s[pipeline_svc.PUBLISH_INTERVAL] = getSettingFromSettingsMap(settings, metadata.PipelineStatsIntervalKey, pipeline.Specification().GetReplicationSpec().Settings.StatsInterval)
 	return s, nil
 }
 
 func (xdcrf *XDCRFactory) constructSettingsForCheckpointManager(pipeline common.Pipeline, settings metadata.ReplicationSettingsMap) (metadata.ReplicationSettingsMap, error) {
 	s := make(metadata.ReplicationSettingsMap)
-	s[pipeline_svc.CHECKPOINT_INTERVAL] = getSettingFromSettingsMap(settings, metadata.CheckpointIntervalKey, pipeline.Specification().Settings.CheckpointInterval)
-	xdcrf.disableCollectionIfNeeded(settings, s, pipeline.Specification())
+	s[pipeline_svc.CHECKPOINT_INTERVAL] = getSettingFromSettingsMap(settings, metadata.CheckpointIntervalKey, pipeline.Specification().GetReplicationSpec().Settings.CheckpointInterval)
+	xdcrf.disableCollectionIfNeeded(settings, s, pipeline.Specification().GetReplicationSpec())
 	return s, nil
 }
 
