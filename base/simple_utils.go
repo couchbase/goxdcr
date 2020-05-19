@@ -18,7 +18,7 @@ import (
 	"errors"
 	"expvar"
 	"fmt"
-	"github.com/couchbase/gojsonsm"
+	"github.com/couchbaselabs/gojsonsm"
 	mcc "github.com/couchbase/gomemcached/client"
 	"github.com/couchbase/goxdcr/log"
 	"io/ioutil"

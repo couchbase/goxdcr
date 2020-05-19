@@ -11,7 +11,7 @@ package parts
 
 import (
 	"fmt"
-	"github.com/couchbase/gojsonsm"
+	"github.com/couchbaselabs/gojsonsm"
 	mc "github.com/couchbase/gomemcached"
 	mcc "github.com/couchbase/gomemcached/client"
 	"github.com/couchbase/goxdcr/base"

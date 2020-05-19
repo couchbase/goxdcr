@@ -3,7 +3,7 @@ package base
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/couchbase/gojsonsm"
+	"github.com/couchbaselabs/gojsonsm"
 	"github.com/stretchr/testify/assert"
 	"io/ioutil"
 	"math/rand"
