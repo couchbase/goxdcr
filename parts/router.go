@@ -137,12 +137,11 @@ type Router struct {
  *
  * 1. Lagging target nodes when a new manifest is created
  * When a new manifest is created on the target, some nodes may get it quicker than the others.
- * If RemoteClusterAgent pulled the laggy node last, it may not have the latest manifest
- * The CollectionsRouter has a retry mechanism where it will buffer up and retry for this case
- * (TODO: MB-38023)
+ * If RemoteClusterAgent pulled the laggy node last, it may not have the latest manifest and declares
+ * the mapping broken
  *
  * 2. Broken Mapping
- * When a CollectionsRouter determines that a mapping is no longer valid after the retries (#1)
+ * When a CollectionsRouter determines that a mapping is no longer valid
  * then it will declare the mapping broken. When a mapping is marked broken, further requests
  * that follow this map will simply be ignored and we will save the look-up and retry times
  *  It will do 2 things in strict order (and other svcs must follow):

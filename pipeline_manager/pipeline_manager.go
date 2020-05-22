@@ -791,6 +791,16 @@ func (pipelineMgr *PipelineManager) StartBackfillPipeline(topic string) base.Err
 	rep_status.RecordBackfillProgress("Backfill Pipeline is constructed")
 	rep_status.SetPipeline(bp)
 
+	// Set End timestamp
+	backfillSpec, err := pipelineMgr.backfillReplSvc.BackfillReplSpec(topic)
+	if backfillSpec == nil || err != nil {
+		errMap["pipelineMgr.StartBackfillPipeline"] = fmt.Errorf("Unable to get backfillSpec: %v", err)
+		return errMap
+	}
+	bpCustomSettingMap := make(map[string]interface{})
+	bpCustomSettingMap[parts.DCP_VBTasksMap] = backfillSpec.VBTasksMap
+	rep_status.SetCustomSettings(bpCustomSettingMap)
+
 	pipelineMgr.logger.Infof("Backfill Pipeline %v is constructed. Starting it.", bp.InstanceId())
 	bp.SetProgressRecorder(rep_status.RecordBackfillProgress)
 	errMap = bp.Start(rep_status.SettingsMap())

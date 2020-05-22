@@ -563,21 +563,20 @@ func (b *BackfillReplicationService) updateCacheInternal(specId string, newSpec 
 	oldSpec, updated, err := b.updateCacheInternalNoLock(specId, newSpec)
 
 	if updated && oldSpec != nil && newSpec == nil {
-		// TODO MB-38331 - notify Backfill Manager - wait until DCP is done
-		//		b.metadataChangeCbMtx.RLock()
-		//		for _, cb := range b.metadataChangeCallbacks {
-		//			cb(specId, oldSpec, newSpec)
-		//		}
-		//		b.metadataChangeCbMtx.RUnlock()
+		// TODO MB-39349 - notify Backfill Manager
+		b.metadataChangeCbMtx.RLock()
+		for _, cb := range b.metadataChangeCallbacks {
+			cb(specId, oldSpec, newSpec)
+		}
+		b.metadataChangeCbMtx.RUnlock()
 	}
 
 	if updated && oldSpec == nil && newSpec != nil {
-		// TODO MB-38331 - notify Backfill Manager - wait until DCP is done
-		//		b.metadataChangeCbMtx.RLock()
-		//		for _, cb := range b.metadataChangeCallbacks {
-		//			cb(specId, oldSpec, newSpec)
-		//		}
-		//		b.metadataChangeCbMtx.RUnlock()
+		b.metadataChangeCbMtx.RLock()
+		for _, cb := range b.metadataChangeCallbacks {
+			cb(specId, oldSpec, newSpec)
+		}
+		b.metadataChangeCbMtx.RUnlock()
 	}
 
 	return err

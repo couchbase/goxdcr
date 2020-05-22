@@ -430,6 +430,7 @@ const (
 	ProblematicVBSource = "ProblematicVBSource"
 	ProblematicVBTarget = "ProblematicVBTarget"
 	VBTimestamps        = "VBTimestamps"
+	CollectionNsMapping = "CollectionNsMapping"
 )
 
 // flag for requesting datatype in GetMeta request

@@ -111,19 +111,22 @@ function runTestCase {
 
 	validateLogWithInstance "C1" "$BROKEN_MSG" $(( $currentBrokenInstanceCnt + 1 ))
 
-	# Then re-setup the implicit matching that matches, and run i/o
+	# Then re-setup the implicit matching that matches
 	BUCKET_NAME_SCOPE_MAP=(["B1"]=${scope1Arr[@]} ["B2"]="S1")
 	setupTopologies
-	echo "Sleeping 20 seconds for target manifest to be pulled and vbucket distribution"
-	sleep 20
+	echo "Sleeping 30 seconds for target manifest to be pulled and vbucket distribution"
+	sleep 30
 	printGlobalScopeAndCollectionInfo
-	runDataLoad
-	sleep 5
 
-	# The retry buffer should have sent the mutations
+	# After sleeping, the backfill manager should have triggered the backfill
 	checkItemCnt "C1" "B1" $CBWORKLOAD_COLLECTION_NUM_ITEMS
 	checkItemCnt "C2" "B2" $CBWORKLOAD_COLLECTION_NUM_ITEMS
 
+	# Before running I/O, router will not raise a repaired message
+	validateLogWithInstance "C1" "$REPAIR_MSG" $(( $currentRepairedInstanceCnt ))
+	runDataLoad
+	# After running I/O, router should raise a repaired message
+	sleep 5
 	validateLogWithInstance "C1" "$REPAIR_MSG" $(( $currentRepairedInstanceCnt + 1 ))
 
 	validateInternalLogWithInstance "C1" "$BACKFILL_MSG"  $(( $currentBackfillInstanceCnt + 1 ))

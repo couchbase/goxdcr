@@ -804,6 +804,10 @@ func (xdcrf *XDCRFactory) constructUpdateSettingsForDcpNozzle(pipeline common.Pi
 		dcpSettings[parts.DCP_Priority] = dcpPriority
 	}
 
+	vbTasksMap, ok := settings[parts.DCP_VBTasksMap]
+	if ok {
+		dcpSettings[parts.DCP_VBTasksMap] = vbTasksMap
+	}
 	return dcpSettings
 }
 
@@ -955,6 +959,10 @@ func (xdcrf *XDCRFactory) constructSettingsForDcpNozzle(pipeline common.Pipeline
 		dcpNozzleSettings[parts.DCP_Priority] = dcpPriority
 	}
 
+	vbTasksMap, ok := settings[parts.DCP_VBTasksMap]
+	if ok {
+		dcpNozzleSettings[parts.DCP_VBTasksMap] = vbTasksMap
+	}
 	return dcpNozzleSettings, nil
 }
 

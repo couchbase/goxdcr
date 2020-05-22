@@ -123,6 +123,13 @@ type CheckpointManager struct {
 	 */
 	collectionEnabledVar uint32
 	cachedBrokenMap      brokenMappingWithLock
+	// When Checkpoint manager is attached to a backfill pipeline,
+	// The pipeline's VB first task is noted here as a starting point
+	// If there is no checkpoint, then use these as starting point instead of 0
+	// When a rollback is called, if rollback to 0 is requested, then these
+	// starting points should be erased
+	backfillStartingTsMtx sync.RWMutex
+	backfillStartingTs    map[uint16]*base.VBTimestamp
 
 	// Before a pipeline starts, prevent checkpoints from being created
 	// If a ckpt is created before old ones are loaded, it could lead to incorrect
@@ -204,6 +211,7 @@ func NewCheckpointManager(checkpoints_svc service_def.CheckpointsService, capi_s
 		statsMgr:                  statsMgr,
 		uiLogSvc:                  uiLogSvc,
 		collectionsManifestSvc:    collectionsManifestSvc,
+		backfillStartingTs:        make(map[uint16]*base.VBTimestamp),
 	}, nil
 }
 
@@ -212,6 +220,12 @@ func (ckmgr *CheckpointManager) Attach(pipeline common.Pipeline) error {
 	ckmgr.logger.Infof("Attach checkpoint manager with %v pipeline %v\n", pipeline.Type().String(), pipeline.Topic())
 
 	ckmgr.pipeline = pipeline
+	if ckmgr.pipeline.Type() == common.BackfillPipeline {
+		err := ckmgr.populateBackfillStartingTs(ckmgr.pipeline.Specification().GetBackfillSpec())
+		if err != nil {
+			return err
+		}
+	}
 
 	//populate the remote bucket information at the time of attaching
 	err := ckmgr.populateRemoteBucketInfo(pipeline)
@@ -247,6 +261,47 @@ func (ckmgr *CheckpointManager) Attach(pipeline common.Pipeline) error {
 	ckmgr.initialize()
 
 	return nil
+}
+
+func (ckmgr *CheckpointManager) populateBackfillStartingTs(spec *metadata.BackfillReplicationSpec) error {
+	var atLeastOneValid bool
+	ckmgr.backfillStartingTsMtx.Lock()
+	defer ckmgr.backfillStartingTsMtx.Unlock()
+
+	vbTasks := spec.VBTasksMap
+	for vb, tasks := range vbTasks {
+		if tasks == nil || len(*tasks) == 0 {
+			continue
+		}
+		ckmgr.backfillStartingTs[vb] = (*tasks)[0].Timestamps.StartingTimestamp
+		atLeastOneValid = true
+	}
+	if !atLeastOneValid {
+		return fmt.Errorf("Unable to find at least one valid task for backfill spec %v", spec.Id)
+	}
+
+	return nil
+}
+
+// When rolling back, if rollback is requesting a seqno that is earlier than the backfill task, then
+// allow that to happen by removing the startingTs
+// TODO MB-39584 - if rollback to 0 is requested by DCP, then ensure that all the backfill tasks are merged
+func (ckmgr *CheckpointManager) clearBackfillStartingTsIfNeeded(vbno uint16, rollbackSeqno uint64) {
+	var needToRemove bool
+	ckmgr.backfillStartingTsMtx.RLock()
+	startTs, exists := ckmgr.backfillStartingTs[vbno]
+	if exists {
+		if rollbackSeqno < startTs.Seqno {
+			needToRemove = true
+		}
+	}
+	ckmgr.backfillStartingTsMtx.RUnlock()
+
+	if needToRemove {
+		ckmgr.backfillStartingTsMtx.Lock()
+		delete(ckmgr.backfillStartingTs, vbno)
+		ckmgr.backfillStartingTsMtx.Unlock()
+	}
 }
 
 func (ckmgr *CheckpointManager) populateRemoteBucketInfo(pipeline common.Pipeline) error {
@@ -995,6 +1050,7 @@ func (ckmgr *CheckpointManager) populateDataFromCkptDoc(ckptDoc *metadata.Checkp
 	vbts := &base.VBTimestamp{Vbno: vbno}
 	var brokenMapping *metadata.CollectionNamespaceMapping
 	var targetManifestId uint64
+	var backfillBypassAgreedIndex bool
 	if agreedIndex > -1 {
 		ckpt_records := ckptDoc.GetCheckpointRecords()
 		if len(ckpt_records) < agreedIndex+1 {
@@ -1022,6 +1078,19 @@ func (ckmgr *CheckpointManager) populateDataFromCkptDoc(ckptDoc *metadata.Checkp
 			brokenMapping = ckpt_record.BrokenMappings()
 			targetManifestId = ckpt_record.TargetManifest
 		}
+	} else if ckmgr.pipeline.Type() == common.BackfillPipeline {
+		// Check to see if there's a starting point to use instead of 0
+		ckmgr.backfillStartingTsMtx.RLock()
+		startingTs, exists := ckmgr.backfillStartingTs[vbno]
+		ckmgr.backfillStartingTsMtx.RUnlock()
+		if exists {
+			backfillBypassAgreedIndex = true
+			vbts.Vbuuid = startingTs.Vbuuid
+			vbts.Seqno = startingTs.Seqno
+			vbts.SnapshotStart = startingTs.SnapshotStart
+			vbts.SnapshotEnd = startingTs.SnapshotEnd
+			vbts.ManifestIDs = startingTs.ManifestIDs
+		}
 	}
 
 	//update current ckpt map
@@ -1031,7 +1100,7 @@ func (ckmgr *CheckpointManager) populateDataFromCkptDoc(ckptDoc *metadata.Checkp
 		defer obj.lock.Unlock()
 
 		//populate the next ckpt (in cur_ckpts)'s information based on the previous checkpoint information if it exists
-		if agreedIndex > -1 {
+		if agreedIndex > -1 || backfillBypassAgreedIndex {
 			obj.ckpt.Failover_uuid = vbts.Vbuuid
 			obj.ckpt.Dcp_snapshot_seqno = vbts.SnapshotStart
 			obj.ckpt.Dcp_snapshot_end_seqno = vbts.SnapshotEnd
@@ -1747,6 +1816,10 @@ func (ckmgr *CheckpointManager) UpdateVBTimestamps(vbno uint16, rollbackseqno ui
 	pipeline_start_seqno, ok := pipeline_startSeqnos_map[vbno]
 	if !ok {
 		return nil, fmt.Errorf("%v Invalid vbno=%v\n", ckmgr.pipeline.Topic(), vbno)
+	}
+
+	if ckmgr.pipeline.Type() == common.BackfillPipeline {
+		ckmgr.clearBackfillStartingTsIfNeeded(vbno, rollbackseqno)
 	}
 
 	checkpointDoc, err := ckmgr.retrieveCkptDoc(vbno)

@@ -11,6 +11,7 @@ package metadata
 
 import (
 	"fmt"
+	mcc "github.com/couchbase/gomemcached/client"
 	"github.com/couchbase/goxdcr/base"
 )
 
@@ -486,6 +487,39 @@ func (b BackfillTask) Clone() BackfillTask {
 	// Sha is automatically calculated
 	task := NewBackfillTask(&clonedTs, clonedList)
 	return *task
+}
+
+func (b BackfillTask) ToDcpNozzleTask(latestSrcManifest *CollectionsManifest) (seqnoEnd uint64, filter *mcc.CollectionsFilter, err error) {
+	if b.Timestamps == nil || b.Timestamps.EndingTimestamp == nil || b.Timestamps.StartingTimestamp == nil || latestSrcManifest == nil {
+		err = base.ErrorInvalidInput
+		return
+	}
+	if len(b.RequestedCollections()) == 0 {
+		err = fmt.Errorf("No collections requested")
+		return
+	}
+	errMap := make(base.ErrorMap)
+	seqnoEnd = b.Timestamps.EndingTimestamp.Seqno
+	var filterCollectionList []uint32
+	for _, requestedCollection := range b.RequestedCollections() {
+		for sourceNamespace, _ := range requestedCollection {
+			cid, err := latestSrcManifest.GetCollectionId(sourceNamespace.ScopeName, sourceNamespace.CollectionName)
+			if err != nil {
+				errMap[fmt.Sprintf("Manifest %v looking up %v:%v", latestSrcManifest.Uid(), sourceNamespace.ScopeName, sourceNamespace.CollectionName)] = err
+				continue
+			}
+			filterCollectionList = append(filterCollectionList, cid)
+		}
+	}
+	if len(errMap) > 0 {
+		err = fmt.Errorf(base.FlattenErrorMap(errMap))
+	}
+	filter = &mcc.CollectionsFilter{
+		UseManifestUid:  true,
+		ManifestUid:     b.Timestamps.StartingTimestamp.ManifestIDs.SourceManifestId,
+		CollectionsList: filterCollectionList,
+	}
+	return
 }
 
 // This is specifically used to indicate the start and end of a backfill
