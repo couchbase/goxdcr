@@ -83,7 +83,7 @@ type UprEvent struct {
 	SystemEvent     SystemEventType         // Only valid if IsSystemEvent() is true
 	SysEventVersion uint8                   // Based on the version, the way Extra bytes is parsed is different
 	ValueLen        int                     // Cache it to avoid len() calls for performance
-	CollectionId    uint64                  // Valid if Collection is in use
+	CollectionId    uint32                  // Valid if Collection is in use
 }
 
 // FailoverLog containing vvuid and sequnce number
@@ -103,7 +103,7 @@ func makeUprEvent(rq gomemcached.MCRequest, stream *UprStream, bytesReceivedFrom
 		DataType:     rq.DataType,
 		ValueLen:     len(rq.Body),
 		SystemEvent:  InvalidSysEvent,
-		CollectionId: math.MaxUint64,
+		CollectionId: math.MaxUint32,
 	}
 
 	event.PopulateFieldsBasedOnStreamType(rq, stream.StreamType)
@@ -167,7 +167,7 @@ func (event *UprEvent) PopulateFieldsBasedOnStreamType(rq gomemcached.MCRequest,
 			gomemcached.UPR_DELETION,
 			gomemcached.UPR_EXPIRATION:
 			uleb128 := Uleb128(rq.Key)
-			result, bytesShifted := uleb128.ToUint64(rq.Keylen)
+			result, bytesShifted := uleb128.ToUint32(rq.Keylen)
 			event.CollectionId = result
 			event.Key = rq.Key[bytesShifted:]
 		default:
@@ -347,13 +347,13 @@ func (event *UprEvent) GetMaxTTL() (uint32, error) {
 
 type Uleb128 []byte
 
-func (u Uleb128) ToUint64(cachedLen int) (result uint64, bytesShifted int) {
+func (u Uleb128) ToUint32(cachedLen int) (result uint32, bytesShifted int) {
 	var shift uint = 0
 
 	for curByte := 0; curByte < cachedLen; curByte++ {
 		oneByte := u[curByte]
 		last7Bits := 0x7f & oneByte
-		result |= uint64(last7Bits) << shift
+		result |= uint32(last7Bits) << shift
 		bytesShifted++
 		if oneByte&0x80 == 0 {
 			break
