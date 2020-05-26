@@ -371,19 +371,19 @@ func TestUleb128EncoderDecoder(t *testing.T) {
 	generator := rand.New(seed)
 
 	for i := 0; i < 50; i++ {
-		input := generator.Uint64()
+		input := generator.Uint32()
 		testLeb, _, err := NewUleb128(input, nil, true)
 		assert.Nil(err)
 
-		verifyOutput := testLeb.ToUint64()
+		verifyOutput := testLeb.ToUint32()
 		assert.Equal(verifyOutput, input)
 	}
 
 	// Direct mem mapping test - for reading key with embedded CID
 	var testByteSlice []byte = make([]byte, 1, 1)
 	testByteSlice[0] = 0x09
-	var testOut uint64 = Uleb128(testByteSlice).ToUint64()
-	assert.Equal(uint64(9), testOut)
+	var testOut uint32 = Uleb128(testByteSlice).ToUint32()
+	assert.Equal(uint32(9), testOut)
 
 	fmt.Println("============== Test case end: TestUleb128EncoderDecoder =================")
 }
