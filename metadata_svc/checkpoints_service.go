@@ -67,9 +67,10 @@ type CheckpointsService struct {
 }
 
 func NewCheckpointsService(metadata_svc service_def.MetadataSvc, logger_ctx *log.LoggerContext) service_def.CheckpointsService {
+	logger := log.NewLogger("CheckpointSvc", logger_ctx)
 	return &CheckpointsService{metadata_svc: metadata_svc,
-		logger:               log.NewLogger("CheckpointSvc", logger_ctx),
-		ShaRefCounterService: NewShaRefCounterService(getCollectionNsMappingsDocKey, metadata_svc),
+		logger:               logger,
+		ShaRefCounterService: NewShaRefCounterService(getCollectionNsMappingsDocKey, metadata_svc, logger),
 	}
 }
 

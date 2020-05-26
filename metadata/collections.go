@@ -1372,6 +1372,7 @@ func (b *CollectionNsMappingsDoc) LoadShaMap(shaMap ShaToCollectionNamespaceMap)
 		// do sanity check - TODO remove before CC is shipped
 		checkSha, err := colNsMap.Sha256()
 		if err != nil {
+			panic(err)
 			continue
 		}
 		checkShaStr := fmt.Sprintf("%x", checkSha[:])

@@ -225,7 +225,7 @@ func (b *BackfillMgr) initCache() error {
 	return nil
 }
 
-func (b *BackfillMgr) createBackfillRequestHandler(spec *metadata.ReplicationSpecification) {
+func (b *BackfillMgr) createBackfillRequestHandler(spec *metadata.ReplicationSpecification) error {
 	replId := spec.Id
 	internalId := spec.InternalId
 
@@ -235,7 +235,13 @@ func (b *BackfillMgr) createBackfillRequestHandler(spec *metadata.ReplicationSpe
 	vbsGetter := func() ([]uint16, error) {
 		return b.GetMyVBs(spec.SourceBucketName)
 	}
+	var err error
 	b.specReqHandlersMtx.Lock()
+	if _, exists := b.specToReqHandlerMap[replId]; exists {
+		err = fmt.Errorf("BackfillRequestHandler for spec %v already exists", spec)
+		b.specReqHandlersMtx.Unlock()
+		return err
+	}
 	reqHandler := NewCollectionBackfillRequestHandler(b.logger, replId,
 		b.backfillReplSvc, spec, seqnoGetter, vbsGetter, spec.Settings.SourceNozzlePerNode*2)
 	b.specToReqHandlerMap[replId] = reqHandler
@@ -243,6 +249,7 @@ func (b *BackfillMgr) createBackfillRequestHandler(spec *metadata.ReplicationSpe
 
 	b.logger.Infof("Starting backfill request handler for spec %v internalId %v", replId, internalId)
 	reqHandler.Start()
+	return nil
 }
 
 func (b *BackfillMgr) deleteBackfillRequestHandler(oldSpec *metadata.ReplicationSpecification) {

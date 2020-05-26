@@ -13,6 +13,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/couchbase/goxdcr/base"
+	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/goxdcr/service_def"
 	"sync"
@@ -23,20 +24,21 @@ type ShaRefCounterService struct {
 	// Map of replicationId -> map of sha's -> refCnts
 	topicMapMtx sync.RWMutex
 	topicMaps   map[string]*MapShaRefCounter
-	// Prevent concurrent upsert for the same single backfill doc
-	//	topicUpsertCh map[string]chan bool
 
 	// Given a replication ID, return the key to use for metadataSvc
 	metakvDocKeyGetter func(string) string
+
+	logger *log.CommonLogger
 }
 
 func NewShaRefCounterService(metakvDocKeyGetter func(string) string,
-	metadataSvc service_def.MetadataSvc) *ShaRefCounterService {
+	metadataSvc service_def.MetadataSvc,
+	logger *log.CommonLogger) *ShaRefCounterService {
 	return &ShaRefCounterService{
-		topicMaps: make(map[string]*MapShaRefCounter),
-		//		topicUpsertCh:      make(map[string]chan bool),
+		topicMaps:          make(map[string]*MapShaRefCounter),
 		metakvDocKeyGetter: metakvDocKeyGetter,
 		metadataSvc:        metadataSvc,
+		logger:             logger,
 	}
 }
 
@@ -68,7 +70,7 @@ func (s *ShaRefCounterService) InitTopicShaCounterWithInternalId(topic, internal
 	}
 
 	s.topicMapMtx.Lock()
-	counter := NewMapShaRefCounterWithInternalId(topic, internalId, s.metadataSvc, s.metakvDocKeyGetter(topic))
+	counter := NewMapShaRefCounterWithInternalId(topic, internalId, s.metadataSvc, s.metakvDocKeyGetter(topic), s.logger)
 	s.topicMaps[topic] = counter
 	s.topicMapMtx.Unlock()
 
@@ -106,6 +108,7 @@ func (s *ShaRefCounterService) GetShaToCollectionNsMap(topic string, doc *metada
 		// Any error loading the sha to collectionNamespacemap is considered a fatal error
 		// This includes any mismatching sha256 - we cannot allow the pipeline to start
 		// TODO - MB-38506 - need to stop restarting if the error is not recoverable
+		s.logger.Errorf("CompiledShaNamespaceMap %v with error %v", topic, err)
 		return emptyS2CNsMap, err
 	}
 
@@ -216,7 +219,7 @@ func (s *ShaRefCounterService) CleanupMapping(topic string) error {
 
 	if !ok {
 		// Still need to clean up the mapping
-		temporaryCounter := NewMapShaRefCounterWithInternalId(topic, "", s.metadataSvc, s.metakvDocKeyGetter(topic))
+		temporaryCounter := NewMapShaRefCounterWithInternalId(topic, "", s.metadataSvc, s.metakvDocKeyGetter(topic), s.logger)
 		temporaryCounter.Init()
 		return temporaryCounter.DelAndCleanup()
 	}
@@ -243,9 +246,11 @@ type MapShaRefCounter struct {
 	internalSpecId string
 	metadataSvc    service_def.MetadataSvc
 	metakvOpKey    string
+	logger         *log.CommonLogger
 }
 
-func NewMapShaRefCounterWithInternalId(topic, internalId string, metadataSvc service_def.MetadataSvc, metakvOpKey string) *MapShaRefCounter {
+func NewMapShaRefCounterWithInternalId(topic, internalId string, metadataSvc service_def.MetadataSvc,
+	metakvOpKey string, logger *log.CommonLogger) *MapShaRefCounter {
 	return &MapShaRefCounter{refCnt: make(map[string]uint64),
 		id:             topic,
 		shaToMapping:   make(metadata.ShaToCollectionNamespaceMap),
@@ -253,11 +258,12 @@ func NewMapShaRefCounterWithInternalId(topic, internalId string, metadataSvc ser
 		metadataSvc:    metadataSvc,
 		metakvOpKey:    metakvOpKey,
 		internalSpecId: internalId,
+		logger:         logger,
 	}
 }
 
-func NewMapShaRefCounter(topic string, metadataSvc service_def.MetadataSvc, metakvOpKey string) *MapShaRefCounter {
-	return NewMapShaRefCounterWithInternalId(topic, "", metadataSvc, metakvOpKey)
+func NewMapShaRefCounter(topic string, metadataSvc service_def.MetadataSvc, metakvOpKey string, logger *log.CommonLogger) *MapShaRefCounter {
+	return NewMapShaRefCounterWithInternalId(topic, "", metadataSvc, metakvOpKey, logger)
 }
 
 func (c *MapShaRefCounter) Init() {
@@ -411,6 +417,7 @@ func (c *MapShaRefCounter) GetMappingsDoc(initIfNotFound bool) (*metadata.Collec
 
 	if err != nil && err == service_def.MetadataNotFoundErr {
 		if initIfNotFound {
+			c.logger.Infof("GetMappingsDoc %v initialized a new mappingsDoc", c.id)
 			err = c.upsertCollectionNsMappingsDoc(docReturn, true /*addOp*/)
 			return docReturn, err
 		} else {
@@ -425,6 +432,7 @@ func (c *MapShaRefCounter) GetMappingsDoc(initIfNotFound bool) (*metadata.Collec
 		return nil, err
 	}
 
+	c.logger.Infof("GetMappingsDoc %v retrieved an existing mappingsDoc", c.id)
 	return docReturn, nil
 }
 

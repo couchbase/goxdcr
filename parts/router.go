@@ -40,6 +40,7 @@ var NeedToThrottleKey = "NeedToThrottle"
 var FilterExpDelKey = base.FilterExpDelKey
 var ForceCollectionDisableKey = "ForceCollectionDisable"
 var BackfillPersistErrKey = "Backfill Persist Callback Error"
+var CkptMgrBrokenMappingErrKey = "Checkpoint Manager routing update Callback Error"
 
 // A function used by the router to raise routing updates to other services that need to know
 type CollectionsRoutingUpdater func(CollectionsRoutingInfo) error
@@ -639,16 +640,25 @@ func NewRouter(id string, spec *metadata.ReplicationSpecification,
 		// 2. Backfill manager should synchronously persist the backfill.
 		//    If it cannot persist, it must not allow the following to continue
 		// 3. Once Backfill Manager has persisted it, then the broken event can be raised to the checkpoint manager
+		if len(info.BackfillMap) > 0 {
+			syncCh := make(chan error)
+			backfillEvent := common.NewEvent(common.FixedRoutingUpdateEvent, info, router, nil, syncCh)
+			go router.RaiseEvent(backfillEvent)
+			err := <-syncCh
+			if err != nil {
+				wrappedErr := fmt.Errorf("%v - %v", BackfillPersistErrKey, err.Error())
+				router.Logger().Errorf("Unable to persist fixed routing update event: %v", wrappedErr)
+				return wrappedErr
+			}
+		}
 		syncCh := make(chan error)
-		backfillEvent := common.NewEvent(common.FixedRoutingUpdateEvent, info, router, nil, syncCh)
-		router.RaiseEvent(backfillEvent)
+		routingEvent := common.NewEvent(common.BrokenRoutingUpdateEvent, info, router, nil, syncCh)
+		go router.RaiseEvent(routingEvent)
 		err := <-syncCh
 		if err != nil {
-			wrappedErr := fmt.Errorf("%v - %v", BackfillPersistErrKey, err.Error())
+			wrappedErr := fmt.Errorf("%v - %v", CkptMgrBrokenMappingErrKey, err.Error())
 			return wrappedErr
 		}
-		routingEvent := common.NewEvent(common.BrokenRoutingUpdateEvent, info, router, nil, nil)
-		router.RaiseEvent(routingEvent)
 		return nil
 	}
 

@@ -127,8 +127,7 @@ function runTestCase {
 	validateLogWithInstance "C1" "$REPAIR_MSG" $(( $currentRepairedInstanceCnt + 1 ))
 
 	validateInternalLogWithInstance "C1" "$BACKFILL_MSG"  $(( $currentBackfillInstanceCnt + 1 ))
-	# 2 Source routers each with 2 pre-XMEM routers, each raise once
-	validateInternalLogWithInstance "C1" "$BACKFILL_APPEND_MSG"  $(( $currentBackfillAppendInstanceCnt + 4 ))
+	validateInternalLogWithInstance "C1" "$BACKFILL_APPEND_MSG"  $(( $currentBackfillAppendInstanceCnt + 2 ))
 	grepForPanics
 	validateXDCRCheckpoints "C1"
 	validateXDCRCheckpoints "C2"

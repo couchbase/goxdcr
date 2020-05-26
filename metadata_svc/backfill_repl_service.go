@@ -70,7 +70,7 @@ func NewBackfillReplicationService(uiLogSvc service_def.UILogSvc,
 	xdcrTopologySvc service_def.XDCRCompTopologySvc) (*BackfillReplicationService, error) {
 	logger := log.NewLogger("BackfillReplSvc", loggerCtx)
 	svc := &BackfillReplicationService{
-		ShaRefCounterService: NewShaRefCounterService(getBackfillMappingsDocKeyFunc, metadataSvc),
+		ShaRefCounterService: NewShaRefCounterService(getBackfillMappingsDocKeyFunc, metadataSvc, logger),
 		metadataSvc:          metadataSvc,
 		logger:               logger,
 		replSpecSvc:          replSpecSvc,
@@ -364,6 +364,11 @@ func (b *BackfillReplicationService) persistMappingsForThisNode(spec *metadata.B
 	if err != nil {
 		return err
 	}
+	if addOp && len(inflatedMapping) > 0 {
+		err = fmt.Errorf("Adding a new backfill spec %v should not have pre-existing mappings", spec.Id)
+		b.logger.Errorf("%v", err)
+		return err
+	}
 	err = b.InitCounterShaToActualMappings(spec.Id, spec.InternalId, inflatedMapping)
 	if err != nil {
 		return err
@@ -383,7 +388,15 @@ func (b *BackfillReplicationService) persistMappingsForThisNode(spec *metadata.B
 		}
 		innerConsolidatedMap := tasks.GetAllCollectionNamespaceMappings()
 		for sha, nsMap := range innerConsolidatedMap {
-			if _, exists := consolidatedMap[sha]; !exists {
+			if mapVal, exists := consolidatedMap[sha]; !exists && mapVal != nil {
+				// TODO Sanity check - remove before milestone delivery
+				checkSha, err := mapVal.Sha256()
+				if err != nil {
+					panic(err)
+				}
+				if fmt.Sprintf("%x", checkSha[:]) != sha {
+					panic("Mismatch sha")
+				}
 				consolidatedMap[sha] = nsMap
 			}
 		}
@@ -398,7 +411,11 @@ func (b *BackfillReplicationService) persistMappingsForThisNode(spec *metadata.B
 		incrementer(sha, mapping)
 	}
 
-	return b.UpsertMapping(spec.Id, spec.InternalId)
+	err = b.UpsertMapping(spec.Id, spec.InternalId)
+	if err != nil {
+		b.logger.Errorf("BackfillReplService error upserting mapping for spec %v. Consolidated mapping: %v", spec.Id, consolidatedMap)
+	}
+	return err
 }
 
 func (b *BackfillReplicationService) SetBackfillReplSpec(spec *metadata.BackfillReplicationSpec) error {

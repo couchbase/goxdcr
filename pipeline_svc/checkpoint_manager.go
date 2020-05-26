@@ -25,6 +25,7 @@ import (
 	utilities "github.com/couchbase/goxdcr/utils"
 	"math"
 	"math/rand"
+	"reflect"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -1594,6 +1595,12 @@ func (ckmgr *CheckpointManager) OnEvent(event *common.Event) {
 			ckmgr.handleGeneralError(err)
 			return
 		}
+		syncCh, ok := event.OtherInfos.(chan error)
+		if !ok {
+			err := fmt.Errorf("Invalid routing info response channel %v type", reflect.TypeOf(event.OtherInfos))
+			ckmgr.handleGeneralError(err)
+			return
+		}
 		// Each collection router will raise an update (from its perspective) event whenever:
 		// 1. A new mapping is marked broken OR
 		// 2. A new manifest has been used and some broken mappings are fixed
@@ -1636,6 +1643,8 @@ func (ckmgr *CheckpointManager) OnEvent(event *common.Event) {
 			// Just in case checkpoint operations may use this, ensure that this belongs
 			go ckmgr.preUpsertBrokenMapTask(newerMap)
 		}
+		syncCh <- nil
+		close(syncCh)
 	}
 }
 
