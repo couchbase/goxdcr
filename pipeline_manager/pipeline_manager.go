@@ -807,6 +807,12 @@ func (pipelineMgr *PipelineManager) StartBackfillPipeline(topic string) base.Err
 		errMap["pipelineMgr.StartBackfillPipeline"] = fmt.Errorf("Unable to get backfillSpec: %v", err)
 		return errMap
 	}
+
+	// Requesting a backfill pipeline means that a pipeline will start and for the top task in each VB
+	// of the VBTasksMap will be sent to DCP to be run and backfilled
+	// Once all the VB Task's top task is done, then the backfill pipeline will be considered finished
+	// (DCP will let Backfill Request Handler will know when each VB is done so the top task for the vb is removed)
+	// And if there are more VBTasks, then another new pipeline will be launched start to handle the next sets of tasks
 	bpCustomSettingMap := make(map[string]interface{})
 	bpCustomSettingMap[parts.DCP_VBTasksMap] = backfillSpec.VBTasksMap
 	rep_status.SetCustomSettings(bpCustomSettingMap)

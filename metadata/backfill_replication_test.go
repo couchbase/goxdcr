@@ -110,6 +110,9 @@ func TestBackfillReplMarshal(t *testing.T) {
 	assert.Equal(3, len(*(testSpec.VBTasksMap[0])))
 	assert.Equal(2, len(*(testSpec.VBTasksMap[1])))
 	assert.Equal(2, len(*(testSpec.VBTasksMap[2])))
+
+	testSpec.VBTasksMap.MarkOneVBTaskDone(0)
+	assert.Equal(2, len(*(testSpec.VBTasksMap[0])))
 	fmt.Println("============== Test case end: TestBackfillReplMarshal =================")
 }
 

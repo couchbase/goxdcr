@@ -278,6 +278,26 @@ func (v *VBTasksMapType) GetAllCollectionNamespaceMappings() ShaToCollectionName
 	return returnMap
 }
 
+// When the top VB task is done, remove it from the task list
+func (v *VBTasksMapType) MarkOneVBTaskDone(vbno uint16) {
+	if v == nil {
+		return
+	}
+
+	tasksPtr, exists := (*v)[vbno]
+	if !exists || tasksPtr == nil || len(*tasksPtr) == 0 {
+		return
+	}
+
+	if len(*tasksPtr) == 1 {
+		delete(*v, vbno)
+	} else {
+		// Chop off the 0'th element
+		slicedTasks := (*tasksPtr)[1:]
+		(*v)[vbno] = &slicedTasks
+	}
+}
+
 // Backfill tasks are ordered list of backfill jobs, and to be handled in sequence
 type BackfillTasks []*BackfillTask
 

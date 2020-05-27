@@ -18,11 +18,13 @@ import (
 	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/goxdcr/parts"
 	pipeline_pkg "github.com/couchbase/goxdcr/pipeline"
+	"github.com/couchbase/goxdcr/pipeline_svc"
 	"github.com/couchbase/goxdcr/pipeline_utils"
 	"github.com/couchbase/goxdcr/service_def"
 	"reflect"
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
 var errorStopped error = fmt.Errorf("BackfillMgr is stopping")
@@ -44,14 +46,25 @@ type BackfillRequestHandler struct {
 	logger          *log.CommonLogger
 	backfillReplSvc service_def.BackfillReplSvc
 
+	// Attached pipeline
+	pipeline             common.Pipeline
+	pipelineMtx          sync.RWMutex
+	pipelineVBsDone      map[uint16]bool
+	pipelineTotalVBsDone int
+
+	raisePipelineError func(error)
+
 	childrenWaitgrp      sync.WaitGroup
 	finCh                chan bool
 	stopRequested        uint32
 	incomingReqCh        chan metadata.CollectionNamespaceMapping
+	doneTaskCh           chan uint16
 	handleResultCh       chan error
+	doneTaskResultCh     chan error
 	persistResultCh      chan error
 	persistenceNeededCh  chan PersistType
 	persistentOverflowCh chan bool
+	persistInterval      time.Duration
 
 	getThroughSeqno LatestSeqnoGetter
 	vbsGetter       MyVBsGetter
@@ -59,6 +72,7 @@ type BackfillRequestHandler struct {
 	spec *metadata.ReplicationSpecification
 
 	// TODO MB-38931 - once consistent metakv is in, this needs to be updated
+	// TODO MB-39634 - need to handle cold start
 	cachedBackfillSpec *metadata.BackfillReplicationSpec
 }
 
@@ -67,17 +81,20 @@ type LatestSeqnoGetter func() (map[uint16]uint64, error)
 type MyVBsGetter func() ([]uint16, error)
 
 func NewCollectionBackfillRequestHandler(logger *log.CommonLogger, replId string, backfillReplSvc service_def.BackfillReplSvc,
-	spec *metadata.ReplicationSpecification, seqnoGetter LatestSeqnoGetter, vbsGetter MyVBsGetter, maxConcurrentReqs int) *BackfillRequestHandler {
+	spec *metadata.ReplicationSpecification, seqnoGetter LatestSeqnoGetter, vbsGetter MyVBsGetter, maxConcurrentReqs int,
+	persistInterval time.Duration) *BackfillRequestHandler {
 	return &BackfillRequestHandler{
 		AbstractComponent:    component.NewAbstractComponentWithLogger(replId, logger),
 		logger:               logger,
 		id:                   replId,
 		finCh:                make(chan bool),
 		incomingReqCh:        make(chan metadata.CollectionNamespaceMapping),
+		doneTaskCh:           make(chan uint16, base.NumberOfVbs),
+		doneTaskResultCh:     make(chan error, base.NumberOfVbs),
 		handleResultCh:       make(chan error, maxConcurrentReqs),
-		persistResultCh:      make(chan error, maxConcurrentReqs),
+		persistResultCh:      make(chan error, maxConcurrentReqs+base.NumberOfVbs),
 		persistenceNeededCh:  make(chan PersistType, 1),
-		persistentOverflowCh: make(chan bool, maxConcurrentReqs),
+		persistentOverflowCh: make(chan bool, maxConcurrentReqs+base.NumberOfVbs),
 		spec:                 spec,
 		getThroughSeqno:      seqnoGetter,
 		vbsGetter:            vbsGetter,
@@ -119,6 +136,7 @@ func (b *BackfillRequestHandler) Stop(waitGrp *sync.WaitGroup, errCh chan base.C
 // persistResultCh
 func (b *BackfillRequestHandler) run() {
 	var needToRunPersist bool
+	var needCoolDown uint32
 	for {
 		select {
 		case <-b.finCh:
@@ -129,14 +147,29 @@ func (b *BackfillRequestHandler) run() {
 			if err == nil {
 				needToRunPersist = true
 			}
-
+		case vbno := <-b.doneTaskCh:
+			err := b.handleVBDone(vbno)
+			b.doneTaskResultCh <- err
+			if err == nil {
+				needToRunPersist = true
+			}
 		default:
-			if needToRunPersist {
+			if needToRunPersist && atomic.LoadUint32(&needCoolDown) == 0 {
 				needToRunPersist = false
 				// No more incoming requests - done bursting handling, do a single metakv operation
 				select {
 				case persistType := <-b.persistenceNeededCh:
 					err := b.metaKvOp(persistType)
+					atomic.StoreUint32(&needCoolDown, 1)
+					go func() {
+						// Cool down period
+						resetFunc := func() {
+							atomic.StoreUint32(&needCoolDown, 0)
+						}
+						cooldownTimer := time.AfterFunc(b.persistInterval, resetFunc)
+						time.Sleep(b.persistInterval + 100*time.Millisecond)
+						cooldownTimer.Stop()
+					}()
 					b.persistResultCh <- err
 					// For any overflow, return the results too
 				OVERFLOWRETURN:
@@ -163,10 +196,25 @@ func (b *BackfillRequestHandler) HandleBackfillRequest(req metadata.CollectionNa
 		return errorStopped
 	}
 
-	// Serialize the requests
+	// Serialize the requests - goes to handleBackfillRequestInternal()
 	b.incomingReqCh <- req
 
 	err := <-b.handleResultCh
+	if err != nil {
+		return err
+	}
+
+	return <-b.persistResultCh
+}
+
+func (b *BackfillRequestHandler) HandleVBTaskDone(vbno uint16) error {
+	if b.IsStopped() {
+		return errorStopped
+	}
+
+	// goes to handleVBDone()
+	b.doneTaskCh <- vbno
+	err := <-b.doneTaskResultCh
 	if err != nil {
 		return err
 	}
@@ -200,9 +248,26 @@ func (b *BackfillRequestHandler) handleBackfillRequestInternal(req metadata.Coll
 		b.logger.Infof("Replication %v - These collections need to backfill %v for vb->seqnos %v", b.id, req, seqnosMap)
 		b.requestPersistence(AddOp)
 	} else {
-		// TODO - the skipFirst should be dependent upon whether or not the backfill pipeline is running, set to true for now
-		b.cachedBackfillSpec.MergeNewTasks(vbTasksMap, true /*skipFirst*/)
-		b.logger.Infof("Replication %v - These collections need to append backfill %v for vb->seqnos %v", b.id, req, seqnosMap)
+		var shouldSkipFirst bool = true
+		b.pipelineMtx.RLock()
+		if b.pipeline != nil && (b.pipeline.State() == common.Pipeline_Initial || b.pipeline.State() == common.Pipeline_Stopped) {
+			// See if there are checkpoints present that represent the backfill pipeline has started before
+			// If any is present, it means that the first VBTask has made progress and the incoming task cannot be merged with it
+			checkpointMgr, ok := b.pipeline.RuntimeContext().Service(base.CHECKPOINT_MGR_SVC).(pipeline_svc.CheckpointMgrSvc)
+			if ok {
+				ckptExists, err := checkpointMgr.CheckpointsExist(b.pipeline.FullTopic())
+				if err == nil && !ckptExists {
+					shouldSkipFirst = false
+				}
+			}
+		}
+		b.pipelineMtx.RUnlock()
+		skipFirstString := ""
+		if !shouldSkipFirst {
+			skipFirstString = " (complete merge) "
+		}
+		b.cachedBackfillSpec.MergeNewTasks(vbTasksMap, shouldSkipFirst)
+		b.logger.Infof("Replication %v%v- These collections need to append backfill %v for vb->seqnos %v", b.id, skipFirstString, req, seqnosMap)
 		b.requestPersistence(SetOp)
 	}
 	return nil
@@ -220,6 +285,65 @@ func (b *BackfillRequestHandler) requestPersistence(op PersistType) {
 	} else if op == DelOp {
 		panic("DelOp isn't a form or persistence")
 	}
+}
+
+// This is called per vb when DCP notifies backfill request handler that a VB has finished a task
+// Once a VB is finished, the VB task needs to be removed from the VBTaskMap, and then
+// it'll wait for other VBs until all the responsible VBs are finished
+// DCP should eventually all finish all the VBs, and the pipeline will restart
+// DCP has a check stuckness monitor. So if a VB is stuck, it'll restart the pipeline
+func (b BackfillRequestHandler) handleVBDone(vbno uint16) error {
+	b.pipelineMtx.Lock()
+	vbIsAlreadyDone, exists := b.pipelineVBsDone[vbno]
+	if !exists {
+		// odd coding error
+		err := fmt.Errorf("BackfillReqHandler %v attached to pipeline %v with registered vbs %v, but received vb %v",
+			b.Id(), b.pipeline.FullTopic(), b.pipelineVBsDone, vbno)
+		b.raisePipelineError(err)
+		b.pipelineMtx.Unlock()
+		return err
+	}
+	if vbIsAlreadyDone {
+		err := fmt.Errorf("BackfillReqHandler %v attached to pipeline %v already marked vb %v done",
+			b.Id(), b.pipeline.FullTopic(), vbno)
+		b.raisePipelineError(err)
+		b.pipelineMtx.Unlock()
+		return err
+	}
+	b.pipelineVBsDone[vbno] = true
+	b.pipelineTotalVBsDone++
+
+	if b.cachedBackfillSpec == nil {
+		// TODO remove after testing - could be hit due to MB-39634
+		panic("Cannot be nil")
+	} else {
+		b.cachedBackfillSpec.VBTasksMap.MarkOneVBTaskDone(vbno)
+		b.requestPersistence(SetOp)
+
+		// Need to also delete the checkpoints associated with this VB
+		// So that when backfill pipeline restarts and if there's another task to be done
+		// the old obsolete checkpoints will not be used
+		checkpointMgr, ok := b.pipeline.RuntimeContext().Service(base.CHECKPOINT_MGR_SVC).(pipeline_svc.CheckpointMgrSvc)
+		if !ok {
+			panic("Unable to find ckptmgr")
+		} else {
+			err := checkpointMgr.DelSingleVBCheckpoint(b.pipeline.FullTopic(), vbno)
+			if err != nil {
+				b.logger.Errorf("Unable to delete checkpoint doc for %v vbno %v err %v", b.pipeline.FullTopic(), vbno, err)
+			}
+		}
+	}
+
+	var backfillDone bool
+	if b.pipelineTotalVBsDone == len(b.pipelineVBsDone) {
+		backfillDone = true
+	}
+	b.pipelineMtx.Unlock()
+
+	if backfillDone {
+		// TODO MB-39636 - declare backfill finished
+	}
+	return nil
 }
 
 func (b *BackfillRequestHandler) metaKvOp(op PersistType) error {
@@ -243,16 +367,42 @@ func (b *BackfillRequestHandler) GetSourceNucketName() string {
 // When replications are deleted, the backfill request handler will also be removed
 // and thus there is no need for "Detach"
 func (b *BackfillRequestHandler) Attach(pipeline common.Pipeline) error {
-	asyncListenerMap := pipeline_pkg.GetAllAsyncComponentEventListeners(pipeline)
+	b.pipelineMtx.Lock()
+	defer b.pipelineMtx.Unlock()
 
+	b.pipelineVBsDone = make(map[uint16]bool)
+	b.pipelineTotalVBsDone = 0
+
+	asyncListenerMap := pipeline_pkg.GetAllAsyncComponentEventListeners(pipeline)
 	pipeline_utils.RegisterAsyncComponentEventHandler(asyncListenerMap, base.CollectionRoutingEventListener, b)
 
+	dcp_parts := pipeline.Sources()
+	for _, dcp := range dcp_parts {
+		dcp.RegisterComponentEventListener(common.StreamingEnd, b)
+		vbs := dcp.ResponsibleVBs()
+		for _, vb := range vbs {
+			b.pipelineVBsDone[vb] = false
+		}
+	}
+
+	b.pipeline = pipeline
+
+	b.raisePipelineError = func(err error) {
+		supervisor := b.pipeline.RuntimeContext().Service(base.PIPELINE_SUPERVISOR_SVC).(*pipeline_svc.PipelineSupervisor)
+		supervisor.OnEvent(common.NewEvent(common.ErrorEncountered, nil /*data*/, nil /*component*/, nil /*derivedData*/, err))
+	}
+	b.logger.Infof("BackfillRequestHandler %v attached to pipeline %v with %v total VBs", b.Id(), pipeline, len(b.pipelineVBsDone))
 	return nil
 }
 
 // Implement AsyncComponentEventHandler
 func (b *BackfillRequestHandler) Id() string {
 	return b.id
+}
+
+// Implement ComponentEventListener
+func (b *BackfillRequestHandler) OnEvent(event *common.Event) {
+	b.ProcessEvent(event)
 }
 
 func (b *BackfillRequestHandler) ProcessEvent(event *common.Event) error {
@@ -276,6 +426,19 @@ func (b *BackfillRequestHandler) ProcessEvent(event *common.Event) error {
 		}
 		syncCh <- err
 		close(syncCh)
+	case common.StreamingEnd:
+		// DCP will send out these events one per VB, until all the VBs that a backfill pipeline's is finished
+		vbno, ok := event.Data.(uint16)
+		if !ok {
+			err := fmt.Errorf("Invalid vbno data type raised for StreamingEnd. Type: %v", reflect.TypeOf(event.Data))
+			b.logger.Errorf(err.Error())
+			b.raisePipelineError(err)
+			return err
+		}
+		err := b.HandleVBTaskDone(vbno)
+		if err != nil {
+			b.logger.Errorf("Process StreamingEnd for % vbno %v resulted with %v", b.Id(), err)
+		}
 	default:
 		b.logger.Warnf("Incorrect event type, %v, received by %v", event.EventType, b.id)
 	}

@@ -18,6 +18,8 @@ type ComponentEventType int
 const (
 	//data streaming starts
 	StreamingStart ComponentEventType = iota
+	// data streaming ends
+	StreamingEnd ComponentEventType = iota
 	//data received by the component
 	DataReceived ComponentEventType = iota
 	//data is processed by the component

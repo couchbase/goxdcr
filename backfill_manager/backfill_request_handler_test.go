@@ -3,8 +3,11 @@ package backfill_manager
 import (
 	"fmt"
 	"github.com/couchbase/goxdcr/base"
+	commonReal "github.com/couchbase/goxdcr/common"
+	common "github.com/couchbase/goxdcr/common/mocks"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
+	pipeline_svc "github.com/couchbase/goxdcr/pipeline_svc/mocks"
 	service_def "github.com/couchbase/goxdcr/service_def/mocks"
 	"github.com/stretchr/testify/assert"
 	mock "github.com/stretchr/testify/mock"
@@ -63,11 +66,60 @@ func createTestSpec() *metadata.ReplicationSpecification {
 	}
 }
 
+func brhMockSourceNozzles() map[string]commonReal.Nozzle {
+	nozzleId := "dummyDCP"
+	dcpNozzle := &common.Nozzle{}
+	dcpNozzle.On("Id").Return(nozzleId)
+	dcpNozzle.On("AsyncComponentEventListeners").Return(nil)
+	dcpNozzle.On("Connector").Return(nil)
+	dcpNozzle.On("RegisterComponentEventListener", mock.Anything, mock.Anything).Return(nil)
+	// One nozzle responsible for 1024 vb's
+	var vbsList []uint16
+	for i := uint16(0); i < base.NumberOfVbs; i++ {
+		vbsList = append(vbsList, i)
+	}
+	dcpNozzle.On("ResponsibleVBs").Return(vbsList)
+
+	retMap := make(map[string]commonReal.Nozzle)
+	retMap[nozzleId] = dcpNozzle
+	return retMap
+}
+
+func brhMockFakePipeline(sourcesMap map[string]commonReal.Nozzle, pipelineState commonReal.PipelineState, ctx *common.PipelineRuntimeContext) *common.Pipeline {
+	pipeline := &common.Pipeline{}
+
+	pipeline.On("GetAsyncListenerMap").Return(nil)
+	pipeline.On("Sources").Return(sourcesMap)
+	pipeline.On("SetAsyncListenerMap", mock.Anything).Return(nil)
+	pipeline.On("State").Return(pipelineState)
+	pipeline.On("RuntimeContext").Return(ctx)
+	pipeline.On("FullTopic").Return(unitTestFullTopic)
+
+	return pipeline
+}
+
+func brhMockCkptMgr() *pipeline_svc.CheckpointMgrSvc {
+	ckptMgr := &pipeline_svc.CheckpointMgrSvc{}
+	ckptMgr.On("DelSingleVBCheckpoint", unitTestFullTopic, mock.Anything).Return(nil)
+	return ckptMgr
+}
+
+func brhMockPipelineContext(ckptMgr *pipeline_svc.CheckpointMgrSvc) *common.PipelineRuntimeContext {
+	ctx := &common.PipelineRuntimeContext{}
+	ctx.On("Service", base.CHECKPOINT_MGR_SVC).Return(ckptMgr)
+
+	return ctx
+}
+
+var maxConcurrentReqs int = 4
+
+var unitTestFullTopic string = "BackfillReqHandlerFullTopic"
+
 func TestBackfillReqHandlerStartStop(t *testing.T) {
 	assert := assert.New(t)
 	fmt.Println("============== Test case start: TestBackfillReqHandlerStartStop =================")
 	logger, backfillReplSvc := setupBRHBoilerPlate()
-	rh := NewCollectionBackfillRequestHandler(logger, specId, backfillReplSvc, createTestSpec(), createSeqnoGetterFunc(100), createVBsGetter())
+	rh := NewCollectionBackfillRequestHandler(logger, specId, backfillReplSvc, createTestSpec(), createSeqnoGetterFunc(100), createVBsGetter(), maxConcurrentReqs, time.Second)
 
 	assert.NotNil(rh)
 	assert.Nil(rh.Start())
@@ -89,9 +141,9 @@ func TestBackfillReqHandlerStartStop(t *testing.T) {
 	fmt.Println("============== Test case end: TestBackfillReqHandlerStartStop =================")
 }
 
-func TestBackfillReqHandlerCreateReq(t *testing.T) {
+func TestBackfillReqHandlerCreateReqThenMarkDone(t *testing.T) {
 	assert := assert.New(t)
-	fmt.Println("============== Test case start: TestBackfillReqHandlerCreateReq =================")
+	fmt.Println("============== Test case start: TestBackfillReqHandlerCreateReqThenMarkDone =================")
 	logger, _ := setupBRHBoilerPlate()
 	spec := createTestSpec()
 	vbsGetter := createVBsGetter()
@@ -107,10 +159,16 @@ func TestBackfillReqHandlerCreateReq(t *testing.T) {
 	backfillReplSvc.On("AddBackfillReplSpec", mock.Anything).Run(func(args mock.Arguments) { (addCount)++ }).Return(nil)
 	backfillReplSvc.On("SetBackfillReplSpec", mock.Anything).Run(func(args mock.Arguments) { (setCount)++ }).Return(nil)
 
-	rh := NewCollectionBackfillRequestHandler(logger, specId, backfillReplSvc, spec, seqnoGetter, vbsGetter)
+	rh := NewCollectionBackfillRequestHandler(logger, specId, backfillReplSvc, spec, seqnoGetter, vbsGetter, maxConcurrentReqs, time.Second)
 
 	assert.NotNil(rh)
 	assert.Nil(rh.Start())
+
+	srcNozzleMap := brhMockSourceNozzles()
+	ckptMgr := brhMockCkptMgr()
+	ctx := brhMockPipelineContext(ckptMgr)
+	pipeline := brhMockFakePipeline(srcNozzleMap, commonReal.Pipeline_Running, ctx)
+	rh.Attach(pipeline)
 
 	// Wait for the go-routine to start
 	time.Sleep(10 * time.Millisecond)
@@ -141,5 +199,12 @@ func TestBackfillReqHandlerCreateReq(t *testing.T) {
 	assert.Equal(1, addCount)
 	// One later set request should result in a single set
 	assert.Equal(1, setCount)
-	fmt.Println("============== Test case stop: TestBackfillReqHandlerCreateReq =================")
+
+	assert.Equal(1024, len(rh.cachedBackfillSpec.VBTasksMap))
+	assert.Equal(2, len(*(rh.cachedBackfillSpec.VBTasksMap[0])))
+	assert.Nil(rh.HandleVBTaskDone(0))
+	time.Sleep(100 * time.Millisecond)
+	assert.Equal(1024, len(rh.cachedBackfillSpec.VBTasksMap))
+	assert.Equal(1, len(*(rh.cachedBackfillSpec.VBTasksMap[0])))
+	fmt.Println("============== Test case stop: TestBackfillReqHandlerCreateReqThenMarkDone =================")
 }

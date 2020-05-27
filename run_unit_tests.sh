@@ -10,6 +10,7 @@ declare -a DIRS_WITH_UT
 
 DIRS_WITH_UT=(
 base
+backfill_manager
 pipeline
 pipeline_svc
 pipeline_manager

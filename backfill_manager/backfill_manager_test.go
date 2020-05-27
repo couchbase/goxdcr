@@ -16,15 +16,17 @@ func setupBoilerPlate() (*service_def.CollectionsManifestSvc,
 	*service_def.BackfillReplSvc,
 	*pipeline_mgr.PipelineMgrBackfillIface,
 	*service_def.ClusterInfoSvc,
-	*service_def.XDCRCompTopologySvc) {
+	*service_def.XDCRCompTopologySvc,
+	*service_def.CheckpointsService) {
 	manifestSvc := &service_def.CollectionsManifestSvc{}
 	replSpecSvc := &service_def.ReplicationSpecSvc{}
 	backfillReplSvc := &service_def.BackfillReplSvc{}
 	pipelineMgr := &pipeline_mgr.PipelineMgrBackfillIface{}
 	clusterInfoSvcMock := &service_def.ClusterInfoSvc{}
 	xdcrTopologyMock := &service_def.XDCRCompTopologySvc{}
+	checkpointSvcMock := &service_def.CheckpointsService{}
 
-	return manifestSvc, replSpecSvc, backfillReplSvc, pipelineMgr, clusterInfoSvcMock, xdcrTopologyMock
+	return manifestSvc, replSpecSvc, backfillReplSvc, pipelineMgr, clusterInfoSvcMock, xdcrTopologyMock, checkpointSvcMock
 }
 
 func setupMock(manifestSvc *service_def.CollectionsManifestSvc,
@@ -32,7 +34,8 @@ func setupMock(manifestSvc *service_def.CollectionsManifestSvc,
 	backfillReplSvc *service_def.BackfillReplSvc,
 	pipelineMgr *pipeline_mgr.PipelineMgrBackfillIface,
 	clusterInfoSvcMock *service_def.ClusterInfoSvc,
-	xdcrTopologyMock *service_def.XDCRCompTopologySvc) {
+	xdcrTopologyMock *service_def.XDCRCompTopologySvc,
+	checkpointSvcMock *service_def.CheckpointsService) {
 
 	manifestSvc.On("SetMetadataChangeHandlerCallback", mock.Anything).Return(nil)
 	replSpecSvc.On("SetMetadataChangeHandlerCallback", mock.Anything).Return(nil)
@@ -47,11 +50,11 @@ func setupReplStartupSpecs(replSpecSvc *service_def.ReplicationSpecSvc,
 func TestBackfillMgrLaunchNoSpecs(t *testing.T) {
 	assert := assert.New(t)
 	fmt.Println("============== Test case start: TestBackfillMgrLaunchNoSpecs =================")
-	manifestSvc, replSpecSvc, backfillReplSvc, pipelineMgr, clusterInfoSvc, xdcrCompTopologySvc := setupBoilerPlate()
+	manifestSvc, replSpecSvc, backfillReplSvc, pipelineMgr, clusterInfoSvc, xdcrCompTopologySvc, checkpointSvcMock := setupBoilerPlate()
 	setupReplStartupSpecs(replSpecSvc, nil)
-	setupMock(manifestSvc, replSpecSvc, backfillReplSvc, pipelineMgr, clusterInfoSvc, xdcrCompTopologySvc)
+	setupMock(manifestSvc, replSpecSvc, backfillReplSvc, pipelineMgr, clusterInfoSvc, xdcrCompTopologySvc, checkpointSvcMock)
 
-	backfillMgr := NewBackfillManager(manifestSvc, replSpecSvc, backfillReplSvc, pipelineMgr, clusterInfoSvc, xdcrCompTopologySvc)
+	backfillMgr := NewBackfillManager(manifestSvc, replSpecSvc, backfillReplSvc, pipelineMgr, clusterInfoSvc, xdcrCompTopologySvc, checkpointSvcMock)
 	assert.NotNil(backfillMgr)
 
 	assert.Nil(backfillMgr.Start())
@@ -124,13 +127,13 @@ func setupStartupManifests(manifestSvc *service_def.CollectionsManifestSvc,
 func TestBackfillMgrLaunchSpecs(t *testing.T) {
 	assert := assert.New(t)
 	fmt.Println("============== Test case start: TestBackfillMgrLaunchSpecs =================")
-	manifestSvc, replSpecSvc, backfillReplSvc, pipelineMgr, clusterInfoSvc, xdcrCompTopologySvc := setupBoilerPlate()
+	manifestSvc, replSpecSvc, backfillReplSvc, pipelineMgr, clusterInfoSvc, xdcrCompTopologySvc, checkpointSvcMock := setupBoilerPlate()
 	specs, manifestPairs := setupStartupSpecs(5)
 	setupReplStartupSpecs(replSpecSvc, specs)
 	setupStartupManifests(manifestSvc, specs, manifestPairs)
-	setupMock(manifestSvc, replSpecSvc, backfillReplSvc, pipelineMgr, clusterInfoSvc, xdcrCompTopologySvc)
+	setupMock(manifestSvc, replSpecSvc, backfillReplSvc, pipelineMgr, clusterInfoSvc, xdcrCompTopologySvc, checkpointSvcMock)
 
-	backfillMgr := NewBackfillManager(manifestSvc, replSpecSvc, backfillReplSvc, pipelineMgr, clusterInfoSvc, xdcrCompTopologySvc)
+	backfillMgr := NewBackfillManager(manifestSvc, replSpecSvc, backfillReplSvc, pipelineMgr, clusterInfoSvc, xdcrCompTopologySvc, checkpointSvcMock)
 	assert.NotNil(backfillMgr)
 
 	assert.Nil(backfillMgr.Start())
@@ -141,7 +144,7 @@ func TestBackfillMgrLaunchSpecs(t *testing.T) {
 func TestBackfillMgrLaunchSpecsWithErr(t *testing.T) {
 	assert := assert.New(t)
 	fmt.Println("============== Test case start: TestBackfillMgrLaunchSpecsWithErr =================")
-	manifestSvc, replSpecSvc, backfillReplSvc, pipelineMgr, clusterInfoSvc, xdcrCompTopologySvc := setupBoilerPlate()
+	manifestSvc, replSpecSvc, backfillReplSvc, pipelineMgr, clusterInfoSvc, xdcrCompTopologySvc, checkpointSvcMock := setupBoilerPlate()
 	specs, manifestPairs := setupStartupSpecs(5)
 
 	// Delete the 3rd one to simulate error
@@ -149,9 +152,9 @@ func TestBackfillMgrLaunchSpecsWithErr(t *testing.T) {
 
 	setupReplStartupSpecs(replSpecSvc, specs)
 	setupStartupManifests(manifestSvc, specs, manifestPairs)
-	setupMock(manifestSvc, replSpecSvc, backfillReplSvc, pipelineMgr, clusterInfoSvc, xdcrCompTopologySvc)
+	setupMock(manifestSvc, replSpecSvc, backfillReplSvc, pipelineMgr, clusterInfoSvc, xdcrCompTopologySvc, checkpointSvcMock)
 
-	backfillMgr := NewBackfillManager(manifestSvc, replSpecSvc, backfillReplSvc, pipelineMgr, clusterInfoSvc, xdcrCompTopologySvc)
+	backfillMgr := NewBackfillManager(manifestSvc, replSpecSvc, backfillReplSvc, pipelineMgr, clusterInfoSvc, xdcrCompTopologySvc, checkpointSvcMock)
 	assert.NotNil(backfillMgr)
 
 	assert.Nil(backfillMgr.Start())

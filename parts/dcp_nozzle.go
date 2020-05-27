@@ -49,6 +49,7 @@ const (
 	Dcp_Stream_NonInit = iota
 	Dcp_Stream_Init    = iota
 	Dcp_Stream_Active  = iota
+	Dcp_Stream_Closed  = iota
 )
 
 var dcp_inactive_stream_check_interval = 30 * time.Second
@@ -967,9 +968,14 @@ func (dcp *DcpNozzle) processData() (err error) {
 				// It is possible for DCP to receive a UPR_STREAMEND even if the original StreamRequest sent was not
 				// successful. In that case, make sure it is a no-op, by checking the status, which should not be active.
 				if err == nil && stream_status == Dcp_Stream_Active {
-					err_streamend := fmt.Errorf("dcp stream for vb=%v is closed by producer", m.VBucket)
+					err_streamend := fmt.Errorf("%v stream for vb=%v is closed by producer", dcp.Id(), m.VBucket)
 					dcp.Logger().Infof("%v: %v", dcp.Id(), err_streamend)
-					dcp.handleVBError(vbno, err_streamend)
+					if dcp.vbStreamEndIsOk(vbno) {
+						err = dcp.setStreamState(vbno, Dcp_Stream_Closed)
+						go dcp.RaiseEvent(common.NewEvent(common.StreamingEnd, vbno, dcp, nil, nil))
+					} else {
+						dcp.handleVBError(vbno, err_streamend)
+					}
 				}
 			} else if m.IsSystemEvent() {
 				dcp.handleSystemEvent(m)
@@ -1034,6 +1040,25 @@ func (dcp *DcpNozzle) handleSystemEvent(event *mcc.UprEvent) {
 
 	vbno := event.VBucket
 	atomic.StoreUint64(&dcp.vbHighestManifestUidArray[vbno], manifestId)
+}
+
+// Only ok situation dcp should receive a streamEnd is if it's a backfill
+func (dcp *DcpNozzle) vbStreamEndIsOk(vbno uint16) bool {
+	if !dcp.CollectionEnabled() {
+		return false
+	}
+
+	tasks, exists := dcp.backfillVBTasks[vbno]
+	if !exists {
+		return false
+	}
+
+	if tasks == nil || len(*tasks) == 0 {
+		return false
+	}
+
+	// There is at least one VB task
+	return true
 }
 
 // TODO - MB-37984
@@ -1337,7 +1362,7 @@ func (dcp *DcpNozzle) inactiveDcpStreams() []uint16 {
 }
 
 func inactiveStateCheck(state DcpStreamState) bool {
-	return state != Dcp_Stream_Active
+	return state != Dcp_Stream_Active && state != Dcp_Stream_Closed
 }
 
 func (dcp *DcpNozzle) initedButInactiveDcpStreams() []uint16 {
@@ -1368,7 +1393,7 @@ func (dcp *DcpNozzle) inactiveDcpStreamsWithState() map[uint16]DcpStreamState {
 	ret := make(map[uint16]DcpStreamState)
 	for _, vb := range dcp.GetVBList() {
 		state, err := dcp.GetStreamState(vb)
-		if err == nil && state != Dcp_Stream_Active {
+		if err == nil && state != Dcp_Stream_Active && state != Dcp_Stream_Closed {
 			ret[vb] = state
 		}
 	}

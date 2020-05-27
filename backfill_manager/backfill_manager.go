@@ -20,6 +20,7 @@ import (
 	"github.com/couchbase/goxdcr/service_def"
 	"reflect"
 	"sync"
+	"time"
 )
 
 // Checkpoint manager can only persist a manifest if and only if any broken maps have already been
@@ -246,7 +247,8 @@ func (b *BackfillMgr) createBackfillRequestHandler(spec *metadata.ReplicationSpe
 		return err
 	}
 	reqHandler := NewCollectionBackfillRequestHandler(b.logger, replId,
-		b.backfillReplSvc, spec, seqnoGetter, vbsGetter, spec.Settings.SourceNozzlePerNode*2)
+		b.backfillReplSvc, spec, seqnoGetter, vbsGetter, spec.Settings.SourceNozzlePerNode*2,
+		1*time.Second /*TODO - modifiable const*/)
 	b.specToReqHandlerMap[replId] = reqHandler
 	b.specReqHandlersMtx.Unlock()
 
@@ -308,6 +310,9 @@ func (b *BackfillMgr) backfillReplSpecChangeHandlerCallback(changedSpecId string
 	}
 	b.logger.Infof("Backfill spec change callback for %v detected old %v new %v", changedSpecId, oldSpec, newSpec)
 	if oldSpec == nil && newSpec != nil {
+		// Requesting a backfill pipeline means that a pipeline will start and for the top task in each VBTasksMap
+		// will be sent to DCP to be run and backfilled
+		// Once all the VB Task's top task is done, then the backfill pipeline will be considered finished
 		err := b.pipelineMgr.RequestBackfill(changedSpecId)
 		if err != nil {
 			b.logger.Errorf("Unable to request backfill for %v", changedSpecId)

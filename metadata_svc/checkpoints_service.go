@@ -302,7 +302,7 @@ func (ckpt_svc *CheckpointsService) RecordBrokenMappings(replicationId string, c
 	return nil
 }
 
-// Should be called non-concurrently per pipeline
+// Should be called non-concurrently per pipeline if brokenMappingsNeeded is true
 // When brokenMappingsNeeded is true, this should only be called once at the beginning of a pipeline start
 func (ckpt_svc *CheckpointsService) CheckpointsDocs(replicationId string, brokenMappingsNeeded bool) (map[uint16]*metadata.CheckpointsDoc, error) {
 	checkpointsDocs := make(map[uint16]*metadata.CheckpointsDoc)

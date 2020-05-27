@@ -43,6 +43,13 @@ var CHECKPOINT_INTERVAL = "checkpoint_interval"
 var ckptRecordMismatch error = errors.New("Checkpoint Records internal version mismatch")
 var targetVbuuidChangedError error = errors.New("target vbuuid has changed")
 
+type CheckpointMgrSvc interface {
+	common.PipelineService
+
+	CheckpointsExist(topic string) (bool, error)
+	DelSingleVBCheckpoint(topic string, vbno uint16) error
+}
+
 type CheckpointManager struct {
 	*component.AbstractComponent
 
@@ -137,6 +144,14 @@ type CheckpointManager struct {
 	checkpointOpAllowed uint32
 
 	collectionsManifestSvc service_def.CollectionsManifestSvc
+
+	// When a pipeline starts up and if it's a backfill pipeline, and the backfill job is short
+	// s.t. no ckpt is created, then it needs to have a way
+	// to ensure that DelCheckpoint for a vbno is a no-op if this pipeline does not have ckpt
+	// for such a VB so XDCR doesn't hit metakv un-necessarily, which is expensive
+	isBackfillPipeline uint32
+	bpVbMtx            sync.RWMutex
+	bpVbHasCkpt        map[uint16]bool
 }
 
 // Checkpoint Manager keeps track of one checkpointRecord per vbucket
@@ -225,11 +240,14 @@ func (ckmgr *CheckpointManager) Attach(pipeline common.Pipeline) error {
 		if err != nil {
 			return err
 		}
+		atomic.StoreUint32(&ckmgr.isBackfillPipeline, 1)
+		ckmgr.bpVbMtx.Lock()
+		ckmgr.bpVbHasCkpt = make(map[uint16]bool)
+		ckmgr.bpVbMtx.Unlock()
 	}
 
 	//populate the remote bucket information at the time of attaching
 	err := ckmgr.populateRemoteBucketInfo(pipeline)
-
 	if err != nil {
 		return err
 	}
@@ -694,6 +712,37 @@ func getDocsProcessedForReplication(topic string, vb_list []uint16, checkpoints_
 
 }
 
+func (ckmgr *CheckpointManager) CheckpointsExist(topic string) (bool, error) {
+	vbDocs, err := ckmgr.checkpoints_svc.CheckpointsDocs(topic, false /*needBrokenMapping*/)
+	if err != nil {
+		return false, err
+	}
+
+	for _, doc := range vbDocs {
+		if doc != nil && len(doc.Checkpoint_records) > 0 {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// Used by backfill pipeline only
+func (ckmgr *CheckpointManager) DelSingleVBCheckpoint(topic string, vbno uint16) error {
+	ckmgr.bpVbMtx.RLock()
+	hasCkpt := ckmgr.bpVbHasCkpt[vbno]
+	ckmgr.bpVbMtx.RUnlock()
+
+	if !hasCkpt {
+		return nil
+	}
+
+	err := ckmgr.checkpoints_svc.DelCheckpointsDoc(topic, vbno)
+	if err == service_def.MetadataNotFoundErr {
+		err = nil
+	}
+	return err
+}
+
 /**
  * As part of starting the pipeline, a go routine is launched with this as the entrypoint to figure out the
  * VB timestamp, (see types.go's VBTimestamp struct) for each of the vbucket that this node is responsible for.
@@ -721,6 +770,8 @@ func (ckmgr *CheckpointManager) SetVBTimestamps(topic string) error {
 	}
 	ckmgr.loadBrokenMapFromCkptDocs(ckptDocs)
 	ckmgr.logger.Infof("Found %v checkpoint documents for replication %v\n", len(ckptDocs), topic)
+
+	ckmgr.initBpMapIfNeeded(ckptDocs)
 
 	deleted_vbnos := make([]uint16, 0)
 	target_support_xattr_now := base.IsClusterCompatible(ckmgr.target_cluster_version, base.VersionForRBACAndXattrSupport)
@@ -822,6 +873,36 @@ func (ckmgr *CheckpointManager) SetVBTimestamps(topic string) error {
 	ckmgr.logger.Infof("Done with setting starting seqno for %v %v\n", ckmgr.pipeline.Type().String(), ckmgr.pipeline.FullTopic())
 
 	return nil
+}
+
+func (ckmgr *CheckpointManager) initBpMapIfNeeded(ckptDocs map[uint16]*metadata.CheckpointsDoc) {
+	if atomic.LoadUint32(&ckmgr.isBackfillPipeline) == 0 || len(ckptDocs) == 0 {
+		return
+	}
+	ckmgr.bpVbMtx.Lock()
+	defer ckmgr.bpVbMtx.Unlock()
+	for vbno, ckptDoc := range ckptDocs {
+		if ckptDoc == nil {
+			continue
+		}
+		ckmgr.bpVbHasCkpt[vbno] = true
+	}
+}
+
+func (ckmgr *CheckpointManager) markBpCkptStored(vbno uint16) {
+	if atomic.LoadUint32(&ckmgr.isBackfillPipeline) == 0 {
+		return
+	}
+	ckmgr.bpVbMtx.RLock()
+	marked := ckmgr.bpVbHasCkpt[vbno]
+	ckmgr.bpVbMtx.RUnlock()
+
+	if !marked {
+		ckmgr.bpVbMtx.Lock()
+		ckmgr.bpVbHasCkpt[vbno] = true
+		ckmgr.bpVbMtx.Unlock()
+	}
+	return
 }
 
 func (ckmgr *CheckpointManager) postDelCheckpointsDocWrapper(topic string, ckptDoc *metadata.CheckpointsDoc, brokenMappingModified *bool) {
@@ -1526,6 +1607,8 @@ func (ckmgr *CheckpointManager) doCheckpoint(vbno uint16, through_seqno_map map[
 		ckmgr.logger.Warnf("%v %v skipping checkpointing for vb=%v version %v since a more recent checkpoint has been completed",
 			ckmgr.pipeline.Type().String(), ckmgr.pipeline.FullTopic(), vbno, currRecordVersion)
 		err = nil
+	} else {
+		ckmgr.markBpCkptStored(vbno)
 	}
 	// no error fall through. return nil here to keep checkpointing/replication going.
 	// if there is a need to stop checkpointing/replication, it needs to be done in a separate return statement
