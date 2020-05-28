@@ -242,3 +242,42 @@ func TestIgnoredEventThroughSeqno(t *testing.T) {
 	assert.Equal(uint64(7), through_seqno)
 	fmt.Println("============== Test case end: TestIgnoredEventThroughSeqno =================")
 }
+
+func TestOutofOrderSent(t *testing.T) {
+	fmt.Println("============== Test case start: TestOutofOrderSent =================")
+	assert := assert.New(t)
+	pipeline, nozzle, replSpecSvc, runtimeCtx, pipelineSvc := setupBoilerPlate()
+	svc := setupMocks(pipeline, nozzle, replSpecSvc, runtimeCtx, pipelineSvc)
+
+	var earlySeqno uint64 = 1
+	var laterSeqno uint64 = 2
+	var earlyManifest uint64 = 3
+	var laterManifest uint64 = 5
+	var vbno uint16 = 1
+
+	// A mutation that belongs later in the sequence with lower manifestID gets sent first
+	var earlyDataSentAdditional parts.DataSentEventAdditional
+	earlyDataSentAdditional.VBucket = vbno
+	earlyDataSentAdditional.Seqno = laterSeqno
+	earlyDataSentAdditional.ManifestId = earlyManifest
+	commonEvent := common.NewEvent(common.DataSent, nil, nil, nil, earlyDataSentAdditional)
+	assert.NotNil(commonEvent)
+	assert.Nil(svc.ProcessEvent(commonEvent))
+
+	// A mutation that belongs earlier in the sequence got sent later and got tagged with a later manifest
+	var laterDataSentAdditional parts.DataSentEventAdditional
+	laterDataSentAdditional.VBucket = vbno
+	laterDataSentAdditional.Seqno = earlySeqno
+	laterDataSentAdditional.ManifestId = laterManifest
+	commonEvent = common.NewEvent(common.DataSent, nil, nil, nil, laterDataSentAdditional)
+	assert.NotNil(commonEvent)
+	assert.Nil(svc.ProcessEvent(commonEvent))
+
+	list1Len := len(svc.vbTgtSeqnoManifestMap[vbno].seqno_list_1)
+	list2Len := len(svc.vbTgtSeqnoManifestMap[vbno].seqno_list_2)
+
+	assert.Equal(svc.vbTgtSeqnoManifestMap[vbno].seqno_list_1[list1Len-1], laterSeqno)
+	assert.Equal(svc.vbTgtSeqnoManifestMap[vbno].seqno_list_2[list2Len-1], laterManifest)
+
+	fmt.Println("============== Test case end: TestOutofOrderSent =================")
+}

@@ -207,13 +207,18 @@ func (t *SeqnoManifestsMapType) UpdateOrAppendSeqnoManifest(vbno uint16, seqno, 
 		highestSeqno := lists.seqno_list_1[N]
 		currentManifestId := lists.seqno_list_2[N]
 		if manifestId > currentManifestId {
-			if highestSeqno > seqno {
-				panic(fmt.Sprintf("For vb %v a later seqno showed up with a lower manifestId %v when highest is %v",
-					vbno, seqno, currentManifestId))
+			if seqno < highestSeqno {
+				// It is possible that data sent out can be out of order
+				// For example, seqno 3 is sent out first with manifest 1
+				// Then seqno 2 is sent out but tagged with manifest 2 as the
+				// new target manifest is updated
+				// In this case, tag the higher seqno (3) with the highest manifest (2)
+				lists.seqno_list_2[N] = manifestId
+			} else {
+				// Need to add the new manifest as the top of the list
+				lists.seqno_list_1 = append(lists.seqno_list_1, seqno)
+				lists.seqno_list_2 = append(lists.seqno_list_2, manifestId)
 			}
-			// Need to add the new manifest as the top of the list
-			lists.seqno_list_1 = append(lists.seqno_list_1, seqno)
-			lists.seqno_list_2 = append(lists.seqno_list_2, manifestId)
 		} else if manifestId == currentManifestId && seqno > highestSeqno {
 			// Note this seqno as the last known seqno for the current highest manifestId
 			lists.seqno_list_1[N] = seqno
