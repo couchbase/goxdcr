@@ -37,13 +37,13 @@ func TestUnmarshalCollectionManifest(t *testing.T) {
 	// should have default scope
 	defaultScope, ok := emptyCollection.Scopes()[base.DefaultScopeCollectionName]
 	assert.True(ok)
-	assert.Equal(uint64(0), defaultScope.Uid)
+	assert.Equal(uint32(0), defaultScope.Uid)
 	assert.Equal(base.DefaultScopeCollectionName, defaultScope.Name)
 	// should have default collection
 	assert.Equal(1, len(defaultScope.Collections))
 	defaultCol, ok := defaultScope.Collections[base.DefaultScopeCollectionName]
 	assert.True(ok)
-	assert.Equal(uint64(0), defaultCol.Uid)
+	assert.Equal(uint32(0), defaultCol.Uid)
 	assert.Equal(base.DefaultScopeCollectionName, defaultCol.Name)
 	// Test marshal
 	marshalledBytes, _ := emptyCollection.MarshalJSON()
@@ -70,7 +70,7 @@ func TestUnmarshalCollectionManifest(t *testing.T) {
 	// should have default scope
 	defaultScope, ok = provisionedManifest.Scopes()[base.DefaultScopeCollectionName]
 	assert.True(ok)
-	assert.Equal(uint64(0), defaultScope.Uid)
+	assert.Equal(uint32(0), defaultScope.Uid)
 	// S1 and S2 scope
 	s1Scope, exists := provisionedManifest.Scopes()["S1"]
 	assert.True(exists)
@@ -78,7 +78,7 @@ func TestUnmarshalCollectionManifest(t *testing.T) {
 	assert.True(exists)
 	s1CustomScope, exists := provisionedManifestCustom.Scopes()["S2"]
 	assert.True(exists)
-	assert.Equal(uint64(11), s1CustomScope.Uid)
+	assert.Equal(uint32(11), s1CustomScope.Uid)
 	s1Col1, exists := s1Scope.Collections["col1"]
 	assert.True(exists)
 	assert.Equal("col1", s1Col1.Name)

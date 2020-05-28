@@ -101,7 +101,7 @@ func (c *CollectionsManifest) String() string {
 	return strings.Join(output, " ")
 }
 
-func (c *CollectionsManifest) GetScopeAndCollectionName(collectionId uint64) (scopeName, collectionName string, err error) {
+func (c *CollectionsManifest) GetScopeAndCollectionName(collectionId uint32) (scopeName, collectionName string, err error) {
 	if c == nil {
 		err = base.ErrorInvalidInput
 		return
@@ -119,7 +119,7 @@ func (c *CollectionsManifest) GetScopeAndCollectionName(collectionId uint64) (sc
 	return
 }
 
-func (c *CollectionsManifest) GetCollectionId(scopeName, collectionName string) (uint64, error) {
+func (c *CollectionsManifest) GetCollectionId(scopeName, collectionName string) (uint32, error) {
 	if c == nil {
 		return 0, base.ErrorInvalidInput
 	}
@@ -496,7 +496,7 @@ func newc2cMarshalObj() *c2cMarshalObj {
 
 type CollectionList []*Collection
 
-func (c CollectionList) Contains(cid uint64) bool {
+func (c CollectionList) Contains(cid uint32) bool {
 	for _, collection := range c {
 		if collection != nil && collection.Uid == cid {
 			return true
@@ -607,15 +607,15 @@ func (c *CollectionToCollectionsMapping) IsSameAs(other *CollectionToCollections
 }
 
 // Used as part of Mapping source to target by name
-type CollectionIdKeyedMap map[uint64]Collection
+type CollectionIdKeyedMap map[uint32]Collection
 
 func (c CollectionIdKeyedMap) Diff(other CollectionIdKeyedMap) (missing, missingFromOther CollectionIdKeyedMap) {
 	missing = make(CollectionIdKeyedMap)
 	missingFromOther = make(CollectionIdKeyedMap)
 
 	// Cheat here by using sorting and compare
-	var cList []uint64
-	var oList []uint64
+	var cList []uint32
+	var oList []uint32
 
 	for cid, _ := range c {
 		cList = append(cList, cid)
@@ -624,8 +624,8 @@ func (c CollectionIdKeyedMap) Diff(other CollectionIdKeyedMap) (missing, missing
 		oList = append(oList, cid)
 	}
 
-	cList = base.SortUint64List(cList)
-	oList = base.SortUint64List(oList)
+	cList = base.SortUint32List(cList)
+	oList = base.SortUint32List(oList)
 
 	var cIdx int
 	var oIdx int
@@ -738,7 +738,7 @@ func (s ScopesMap) Clone() ScopesMap {
 	return clone
 }
 
-func (s ScopesMap) GetCollection(id uint64) (col Collection, found bool) {
+func (s ScopesMap) GetCollection(id uint32) (col Collection, found bool) {
 	for _, scope := range s {
 		for _, collection := range scope.Collections {
 			if collection.Uid == id {
@@ -761,7 +761,7 @@ func (s ScopesMap) GetCollectionByNames(scopeName, collectionName string) (col C
 }
 
 type Scope struct {
-	Uid         uint64 `json:"Uid"`
+	Uid         uint32 `json:"Uid"`
 	Name        string `json:"Name"`
 	Collections CollectionsMap
 }
@@ -782,10 +782,11 @@ func NewScope(name string, scopeDetail map[string]interface{}) (Scope, error) {
 	if !ok {
 		return Scope{}, fmt.Errorf("Uid is not float64, but %v instead", reflect.TypeOf(scopeDetail[base.UIDKey]))
 	}
-	uid, err := strconv.ParseUint(uidString, base.CollectionsUidBase, 64)
+	uid64, err := strconv.ParseUint(uidString, base.CollectionsUidBase, 64)
 	if err != nil {
 		return Scope{}, err
 	}
+	uid32 := uint32(uid64)
 
 	collectionsDetail, ok := scopeDetail[base.CollectionsKey].([]interface{})
 	if !ok {
@@ -799,12 +800,12 @@ func NewScope(name string, scopeDetail map[string]interface{}) (Scope, error) {
 
 	return Scope{
 		Name:        name,
-		Uid:         uid,
+		Uid:         uid32,
 		Collections: collectionsMap,
 	}, nil
 }
 
-func NewEmptyScope(name string, uid uint64) Scope {
+func NewEmptyScope(name string, uid uint32) Scope {
 	return Scope{
 		Name:        name,
 		Uid:         uid,
@@ -847,7 +848,7 @@ func (s Scope) Clone() Scope {
 }
 
 type Collection struct {
-	Uid  uint64 `json:"Uid"`
+	Uid  uint32 `json:"Uid"`
 	Name string `json:"Name"`
 }
 
@@ -876,13 +877,14 @@ func NewCollectionsMap(collectionsList []interface{}) (map[string]Collection, er
 		if !ok {
 			return nil, base.ErrorInvalidInput
 		}
-		uid, err := strconv.ParseUint(uidStr, base.CollectionsUidBase, 64)
+		uid64, err := strconv.ParseUint(uidStr, base.CollectionsUidBase, 64)
 		if err != nil {
 			return nil, err
 		}
+		uid32 := uint32(uid64)
 
 		collectionMap[name] = Collection{
-			Uid:  uid,
+			Uid:  uid32,
 			Name: name,
 		}
 	}

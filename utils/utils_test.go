@@ -6,7 +6,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"github.com/couchbase/gojsonsm"
+	"github.com/couchbaselabs/gojsonsm"
 	mcc "github.com/couchbase/gomemcached/client"
 	base "github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"

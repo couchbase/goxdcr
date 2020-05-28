@@ -337,7 +337,7 @@ func (c *CollectionsRouter) UpdateBrokenMappingsPair(brokenMappings *metadata.Co
 }
 
 // No-Concurrent call
-func (c *CollectionsRouter) RouteReqToLatestTargetManifest(namespace *base.CollectionNamespace) (colId, manifestId uint64, err error) {
+func (c *CollectionsRouter) RouteReqToLatestTargetManifest(namespace *base.CollectionNamespace) (colId uint32, manifestId uint64, err error) {
 	if !c.IsRunning() {
 		err = PartStoppedError
 		return
@@ -825,7 +825,7 @@ func (router *Router) RouteCollection(data interface{}, partId string) error {
 	}
 
 	// Shortcut implicit only mapping
-	var colId uint64
+	var colId uint32
 	var manifestId uint64
 	var err error
 

@@ -1730,7 +1730,7 @@ func (dcp *DcpNozzle) checkDefaultCollectionExistence() error {
 		return err
 	}
 
-	_, _, err = manifest.GetScopeAndCollectionName(uint64(base.DefaultCollectionId))
+	_, _, err = manifest.GetScopeAndCollectionName(base.DefaultCollectionId)
 	if err == base.ErrorNotFound {
 		dcp.Logger().Errorf("DCP %v cannot find default collection for spec", dcp.Id())
 		err = service_def.ErrorSourceDefaultCollectionDNE
