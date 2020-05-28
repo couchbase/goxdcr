@@ -515,6 +515,7 @@ func (b *BackfillReplicationService) persistVBTasksMapDifferences(spec, oldSpec 
 	return nil
 }
 
+// replicationId is the main replication ID
 func (b *BackfillReplicationService) DelBackfillReplSpec(replicationId string) (*metadata.BackfillReplicationSpec, error) {
 	_, err := b.backfillSpec(replicationId)
 	backfillSpecCacheExists := err == nil

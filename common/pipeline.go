@@ -10,6 +10,7 @@
 package common
 
 import (
+	"fmt"
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/metadata"
 )
@@ -24,6 +25,8 @@ const (
 	Pipeline_Stopped  PipelineState = iota
 	Pipeline_Error    PipelineState = iota
 )
+
+const backfillPipelineTopicPrefix = "backfill_"
 
 type PipelineType int
 
@@ -43,12 +46,26 @@ func (p PipelineType) String() string {
 	}
 }
 
+func ComposeFullTopic(topic string, t PipelineType) string {
+	switch t {
+	case MainPipeline:
+		return topic
+	case BackfillPipeline:
+		return fmt.Sprintf("%v%v", backfillPipelineTopicPrefix, topic)
+	default:
+		return "Unable to composeFullTopic"
+	}
+}
+
 type PipelineProgressRecorder func(progress string)
 
 //interface for Pipeline
 type Pipeline interface {
 	//Name of the Pipeline
 	Topic() string
+	// Name of the pipeline and inferred type
+	FullTopic() string
+
 	Type() PipelineType
 
 	Sources() map[string]Nozzle

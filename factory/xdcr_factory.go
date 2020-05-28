@@ -819,7 +819,7 @@ func (xdcrf *XDCRFactory) SetStartSeqno(pipeline common.Pipeline) error {
 	if ckpt_mgr == nil {
 		return errors.New(fmt.Sprintf("CheckpointingManager has not been attached to pipeline %v", pipeline.Topic()))
 	}
-	return ckpt_mgr.(*pipeline_svc.CheckpointManager).SetVBTimestamps(pipeline.Topic())
+	return ckpt_mgr.(*pipeline_svc.CheckpointManager).SetVBTimestamps(pipeline.FullTopic())
 }
 
 func (xdcrf *XDCRFactory) CheckpointBeforeStop(pipeline common.Pipeline) error {

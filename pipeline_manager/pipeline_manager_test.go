@@ -200,6 +200,7 @@ func setupDetailedMocking(testLogger *log.CommonLogger,
 
 	// Let's skip backfill pipeline test for now
 	backfillReplSvc.On("BackfillReplSpec", mock.Anything).Return(nil, base.ErrorNotFound)
+	backfillReplSvc.On("DelBackfillReplSpec", mock.Anything).Return(nil, nil)
 }
 
 /**

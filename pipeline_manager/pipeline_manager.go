@@ -566,6 +566,16 @@ func (pipelineMgr *PipelineManager) CleanupPipeline(topic string) error {
 		pipelineMgr.logger.Warnf("Removing checkpoint resulting in error: %v\n")
 	}
 
+	// When pipeline is "cleaned up", we don't need anymore backfill specs
+	retryOp = func() error {
+		_, err := pipelineMgr.backfillReplSvc.DelBackfillReplSpec(replId)
+		return err
+	}
+	err = pipelineMgr.utils.ExponentialBackoffExecutor(fmt.Sprintf("DelBackfillReplSpec %v", topic), base.PipelineSerializerRetryWaitTime, base.PipelineSerializerMaxRetry, base.PipelineSerializerRetryFactor, retryOp)
+	if err != nil {
+		pipelineMgr.logger.Warnf("Removing backfill replication spec resulting in error: %v\n")
+	}
+
 	// regardless of err above, we should restart updater
 	err = pipelineMgr.launchUpdater(topic, nil, rep_status)
 

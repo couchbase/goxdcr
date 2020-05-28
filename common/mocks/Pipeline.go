@@ -14,6 +14,20 @@ type Pipeline struct {
 	mock.Mock
 }
 
+// FullTopic provides a mock function with given fields:
+func (_m *Pipeline) FullTopic() string {
+	ret := _m.Called()
+
+	var r0 string
+	if rf, ok := ret.Get(0).(func() string); ok {
+		r0 = rf()
+	} else {
+		r0 = ret.Get(0).(string)
+	}
+
+	return r0
+}
+
 // GetAsyncListenerMap provides a mock function with given fields:
 func (_m *Pipeline) GetAsyncListenerMap() map[string]common.AsyncComponentEventListener {
 	ret := _m.Called()

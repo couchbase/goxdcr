@@ -44,6 +44,7 @@ type BackfillMgr struct {
 	backfillReplSvc        service_def.BackfillReplSvc
 	clusterInfoSvc         service_def.ClusterInfoSvc
 	xdcrTopologySvc        service_def.XDCRCompTopologySvc
+	checkpointsSvc         service_def.CheckpointsService
 
 	pipelineMgr pipeline_manager.PipelineMgrBackfillIface
 
@@ -114,7 +115,8 @@ func NewBackfillManager(collectionsManifestSvc service_def.CollectionsManifestSv
 	backfillReplSvc service_def.BackfillReplSvc,
 	pipelineMgr pipeline_manager.PipelineMgrBackfillIface,
 	clusterInfoSvc service_def.ClusterInfoSvc,
-	xdcrTopologySvc service_def.XDCRCompTopologySvc) *BackfillMgr {
+	xdcrTopologySvc service_def.XDCRCompTopologySvc,
+	checkpointsSvc service_def.CheckpointsService) *BackfillMgr {
 
 	backfillMgr := &BackfillMgr{
 		collectionsManifestSvc: collectionsManifestSvc,
@@ -128,6 +130,7 @@ func NewBackfillManager(collectionsManifestSvc service_def.CollectionsManifestSv
 		clusterInfoSvc:         clusterInfoSvc,
 		xdcrTopologySvc:        xdcrTopologySvc,
 		pipelineSvc:            &pipelineSvcWrapper{},
+		checkpointsSvc:         checkpointsSvc,
 	}
 
 	return backfillMgr
@@ -252,14 +255,14 @@ func (b *BackfillMgr) createBackfillRequestHandler(spec *metadata.ReplicationSpe
 	return nil
 }
 
-func (b *BackfillMgr) deleteBackfillRequestHandler(oldSpec *metadata.ReplicationSpecification) {
-	replId := oldSpec.Id
-	internalId := oldSpec.InternalId
-
+func (b *BackfillMgr) deleteBackfillRequestHandler(replId, internalId string) error {
 	b.specReqHandlersMtx.Lock()
-	reqHandler := b.specToReqHandlerMap[replId]
-	delete(b.specToReqHandlerMap, replId)
-	b.specReqHandlersMtx.Unlock()
+	reqHandler, exists := b.specToReqHandlerMap[replId]
+	defer b.specReqHandlersMtx.Unlock()
+
+	if !exists {
+		return base.ErrorNotFound
+	}
 
 	bgTask := func() {
 		errCh := make(chan base.ComponentError, 1)
@@ -278,6 +281,9 @@ func (b *BackfillMgr) deleteBackfillRequestHandler(oldSpec *metadata.Replication
 
 	// Don't care about waiting - a new replacement handler can be started in the meantime
 	go bgTask()
+
+	delete(b.specToReqHandlerMap, replId)
+	return nil
 }
 
 func (b *BackfillMgr) retrieveLastPersistedManifest(spec *metadata.ReplicationSpecification) error {
@@ -309,6 +315,11 @@ func (b *BackfillMgr) backfillReplSpecChangeHandlerCallback(changedSpecId string
 		}
 	} else if oldSpec != nil && newSpec == nil {
 		// When a spec is deleted, backfill pipeline will be automatically stopped as part of stopping main pipeline
+		err := b.postDeleteBackfillRepl(changedSpecId, oldSpec.InternalId)
+		if err != nil {
+			b.logger.Errorf("Unable to run postDel backfill for %v", changedSpecId)
+			return err
+		}
 	}
 	return nil
 }
@@ -324,11 +335,12 @@ func (b *BackfillMgr) ReplicationSpecChangeCallback(changedSpecId string, oldSpe
 
 	b.logger.Infof("BackfillMgr detected specId %v old %v new %v", changedSpecId, oldSpec, newSpec)
 
+	var err error
 	if oldSpecObj.(*metadata.ReplicationSpecification) == nil &&
 		newSpecObj.(*metadata.ReplicationSpecification) != nil {
 		// As part of new replication created, pull the source and target manifest and store them as the starting point
 		newSpec := newSpecObj.(*metadata.ReplicationSpecification)
-		err := b.initNewReplStartingManifests(newSpec)
+		err = b.initNewReplStartingManifests(newSpec)
 		if err != nil {
 			return err
 		}
@@ -342,10 +354,24 @@ func (b *BackfillMgr) ReplicationSpecChangeCallback(changedSpecId string, oldSpe
 		delete(b.cacheSpecTargetMap, changedSpecId)
 		b.cacheMtx.Unlock()
 
-		b.deleteBackfillRequestHandler(oldSpec)
+		err = b.postDeleteBackfillRepl(changedSpecId, oldSpec.InternalId)
 	}
 
-	return nil
+	return err
+}
+
+func (b *BackfillMgr) postDeleteBackfillRepl(specId, internalId string) error {
+	err := b.deleteBackfillRequestHandler(specId, internalId)
+	if err == base.ErrorNotFound {
+		// No need to del checkpointdocs
+		return nil
+	}
+	backfillSpecId := common.ComposeFullTopic(specId, common.BackfillPipeline)
+	err = b.checkpointsSvc.DelCheckpointsDocs(backfillSpecId)
+	if err != nil {
+		b.logger.Errorf("Cleaning up backfill checkpoints for %v got err %v", backfillSpecId, err)
+	}
+	return err
 }
 
 func (b *BackfillMgr) initNewReplStartingManifests(spec *metadata.ReplicationSpecification) error {

@@ -57,9 +57,9 @@ type CheckpointFunc func(pipeline common.Pipeline) error
 //once incoming nozzle is open, it will propel the data through all
 //processing steps.
 type GenericPipeline struct {
-
 	//name of the pipeline
-	topic string
+	topic     string
+	fullTopic string
 
 	// type of pipeline
 	pipelineType common.PipelineType
@@ -483,6 +483,10 @@ func (genericPipeline *GenericPipeline) Topic() string {
 	return genericPipeline.topic
 }
 
+func (genericPipeline *GenericPipeline) FullTopic() string {
+	return genericPipeline.fullTopic
+}
+
 // Used for testing only
 func NewGenericPipeline(t string,
 	sources map[string]common.Nozzle,
@@ -543,6 +547,8 @@ func NewPipelineWithSettingConstructor(t string,
 // intialize all maps
 // the maps will not be modified at pipeline runtime, hence there is no chance of concurrent read and write to the maps
 func (genericPipeline *GenericPipeline) initialize() {
+	genericPipeline.initFullTopic()
+
 	sources := genericPipeline.Sources()
 
 	genericPipeline.partsMap = make(map[string]common.Part)
@@ -557,6 +563,10 @@ func (genericPipeline *GenericPipeline) initialize() {
 			addConnectorToMap(connector, genericPipeline.connectorsMap)
 		}
 	}
+}
+
+func (genericPipeline *GenericPipeline) initFullTopic() {
+	genericPipeline.fullTopic = common.ComposeFullTopic(genericPipeline.topic, genericPipeline.Type())
 }
 
 /**
