@@ -214,6 +214,8 @@ const (
 	// How often to pull manifests
 	ManifestRefreshSrcIntervalKey = "ManifestRefreshSrcInterval"
 	ManifestRefreshTgtIntervalKey = "ManifestRefreshTgtInterval"
+
+	BackfillPersistIntervalKey = "BackfillPersistInterval"
 )
 
 var TopologyChangeCheckIntervalConfig = &SettingsConfig{10, &Range{1, 100}}
@@ -305,6 +307,7 @@ var FilteringInternalXattrConfig = &SettingsConfig{base.InternalKeyXattr, nil}
 var RemoteClusterAlternateAddrChangeConfig = &SettingsConfig{base.RemoteClusterAlternateAddrChangeCnt, &Range{1, 1000}}
 var ManifestRefreshSrcIntervalConfig = &SettingsConfig{base.ManifestRefreshSrcInterval, &Range{1, 10000}}
 var ManifestRefreshTgtIntervalConfig = &SettingsConfig{base.ManifestRefreshTgtInterval, &Range{1, 10000}}
+var BackfillPersistIntervalConfig = &SettingsConfig{base.BackfillPersistInterval.Milliseconds(), &Range{1, 10000}}
 
 var XDCRInternalSettingsConfigMap = map[string]*SettingsConfig{
 	TopologyChangeCheckIntervalKey:                TopologyChangeCheckIntervalConfig,
@@ -396,6 +399,7 @@ var XDCRInternalSettingsConfigMap = map[string]*SettingsConfig{
 	RemoteClusterAlternateAddrChangeKey:           RemoteClusterAlternateAddrChangeConfig,
 	ManifestRefreshSrcIntervalKey:                 ManifestRefreshSrcIntervalConfig,
 	ManifestRefreshTgtIntervalKey:                 ManifestRefreshTgtIntervalConfig,
+	BackfillPersistIntervalKey:                    BackfillPersistIntervalConfig,
 }
 
 func InitConstants(xmemMaxIdleCountLowerBound int, xmemMaxIdleCountUpperBound int) {

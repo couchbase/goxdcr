@@ -896,6 +896,10 @@ var RemoteClusterAlternateAddrChangeCnt = 5
 var ManifestRefreshSrcInterval = 2
 var ManifestRefreshTgtInterval = 60
 
+// Amount of time between each backfill metakv persist operation
+// Be careful when changing the unit - need corresponding base.InitConstants to change
+var BackfillPersistInterval = 1000 * time.Millisecond
+
 func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeCountBeforeRestart,
 	maxTopologyStableCountBeforeRestart, maxWorkersForCheckpointing int,
 	timeoutCheckpointBeforeStop time.Duration, capiDataChanSizeMultiplier int,
@@ -940,7 +944,8 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	maxCountCpuNotMaxed int, maxCountThroughputDrop int,
 	filteringInternalKey string, filteringInternalXattr string,
 	remoteClusterAlternateAddrChangeCnt int,
-	manifestRefreshSrcInterval int, manifestRefreshTgtInterval int) {
+	manifestRefreshSrcInterval int, manifestRefreshTgtInterval int,
+	backfillPersistInterval time.Duration) {
 	TopologyChangeCheckInterval = topologyChangeCheckInterval
 	MaxTopologyChangeCountBeforeRestart = maxTopologyChangeCountBeforeRestart
 	MaxTopologyStableCountBeforeRestart = maxTopologyStableCountBeforeRestart
@@ -1049,6 +1054,7 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	RemoteClusterAlternateAddrChangeCnt = remoteClusterAlternateAddrChangeCnt
 	ManifestRefreshSrcInterval = manifestRefreshSrcInterval
 	ManifestRefreshTgtInterval = manifestRefreshTgtInterval
+	BackfillPersistInterval = backfillPersistInterval
 }
 
 // Need to escape the () to result in "META().xattrs" literal

@@ -20,7 +20,6 @@ import (
 	"github.com/couchbase/goxdcr/service_def"
 	"reflect"
 	"sync"
-	"time"
 )
 
 // Checkpoint manager can only persist a manifest if and only if any broken maps have already been
@@ -248,7 +247,7 @@ func (b *BackfillMgr) createBackfillRequestHandler(spec *metadata.ReplicationSpe
 	}
 	reqHandler := NewCollectionBackfillRequestHandler(b.logger, replId,
 		b.backfillReplSvc, spec, seqnoGetter, vbsGetter, spec.Settings.SourceNozzlePerNode*2,
-		1*time.Second /*TODO - modifiable const*/)
+		base.BackfillPersistInterval)
 	b.specToReqHandlerMap[replId] = reqHandler
 	b.specReqHandlersMtx.Unlock()
 
