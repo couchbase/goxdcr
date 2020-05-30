@@ -1159,12 +1159,17 @@ type CollectionNamespaceMapping map[*base.CollectionNamespace]CollectionNamespac
 func (c *CollectionNamespaceMapping) MarshalJSON() ([]byte, error) {
 	metaObj := newCollectionNsMetaObj()
 
-	var i uint64
-	for k, v := range *c {
-		metaObj.SourceCollections = append(metaObj.SourceCollections, k)
-		metaObj.IndirectTargetMap[i] = v
-		i++
+	var unsortedKeys []*base.CollectionNamespace
+	for k, _ := range *c {
+		unsortedKeys = append(unsortedKeys, k)
 	}
+	sortedKeys := base.SortCollectionNamespacePtrList(unsortedKeys)
+
+	for i, k := range sortedKeys {
+		metaObj.SourceCollections = append(metaObj.SourceCollections, k)
+		metaObj.IndirectTargetMap[uint64(i)] = (*c)[k]
+	}
+
 	return json.Marshal(metaObj)
 }
 

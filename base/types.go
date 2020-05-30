@@ -18,6 +18,7 @@ import (
 	mcc "github.com/couchbase/gomemcached/client"
 	mrand "math/rand"
 	"reflect"
+	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -129,6 +130,17 @@ func (c CollectionNamespace) LessThan(other CollectionNamespace) bool {
 
 func (c CollectionNamespace) IsSameAs(other CollectionNamespace) bool {
 	return c.ScopeName == other.ScopeName && c.CollectionName == other.CollectionName
+}
+
+type CollectionNamespacePtrList []*CollectionNamespace
+
+func (c CollectionNamespacePtrList) Len() int           { return len(c) }
+func (c CollectionNamespacePtrList) Swap(i, j int)      { c[i], c[j] = c[j], c[i] }
+func (c CollectionNamespacePtrList) Less(i, j int) bool { return (*(c[i])).LessThan(*(c[j])) }
+
+func SortCollectionNamespacePtrList(list CollectionNamespacePtrList) CollectionNamespacePtrList {
+	sort.Sort(list)
+	return list
 }
 
 type WrappedUprEvent struct {
