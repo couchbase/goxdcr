@@ -111,6 +111,10 @@ func brhMockPipelineContext(ckptMgr *pipeline_svc.CheckpointMgrSvc) *common.Pipe
 	return ctx
 }
 
+func brhMockBackfillReplSvcCommon(svc *service_def.BackfillReplSvc) {
+	svc.On("BackfillReplSpec", mock.Anything).Return(nil, base.ErrorNotFound)
+}
+
 var maxConcurrentReqs int = 4
 
 var unitTestFullTopic string = "BackfillReqHandlerFullTopic"
@@ -120,6 +124,8 @@ func TestBackfillReqHandlerStartStop(t *testing.T) {
 	fmt.Println("============== Test case start: TestBackfillReqHandlerStartStop =================")
 	logger, backfillReplSvc := setupBRHBoilerPlate()
 	rh := NewCollectionBackfillRequestHandler(logger, specId, backfillReplSvc, createTestSpec(), createSeqnoGetterFunc(100), createVBsGetter(), maxConcurrentReqs, time.Second)
+	backfillReplSvc.On("BackfillReplSpec", mock.Anything).Return(nil, base.ErrorNotFound)
+	brhMockBackfillReplSvcCommon(backfillReplSvc)
 
 	assert.NotNil(rh)
 	assert.Nil(rh.Start())
@@ -156,10 +162,11 @@ func TestBackfillReqHandlerCreateReqThenMarkDone(t *testing.T) {
 	requestMapping.AddSingleMapping(collectionNs, collectionNs)
 
 	backfillReplSvc := &service_def.BackfillReplSvc{}
+	brhMockBackfillReplSvcCommon(backfillReplSvc)
 	backfillReplSvc.On("AddBackfillReplSpec", mock.Anything).Run(func(args mock.Arguments) { (addCount)++ }).Return(nil)
 	backfillReplSvc.On("SetBackfillReplSpec", mock.Anything).Run(func(args mock.Arguments) { (setCount)++ }).Return(nil)
 
-	rh := NewCollectionBackfillRequestHandler(logger, specId, backfillReplSvc, spec, seqnoGetter, vbsGetter, maxConcurrentReqs, time.Second)
+	rh := NewCollectionBackfillRequestHandler(logger, specId, backfillReplSvc, spec, seqnoGetter, vbsGetter, maxConcurrentReqs, 500*time.Millisecond)
 
 	assert.NotNil(rh)
 	assert.Nil(rh.Start())
@@ -186,7 +193,8 @@ func TestBackfillReqHandlerCreateReqThenMarkDone(t *testing.T) {
 	}()
 	waitGroup.Wait()
 
-	fmt.Printf("Done with AddRequest\n")
+	// Test cool down period is active
+	startTime := time.Now()
 
 	time.Sleep(100 * time.Millisecond)
 
@@ -206,5 +214,10 @@ func TestBackfillReqHandlerCreateReqThenMarkDone(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 	assert.Equal(1024, len(rh.cachedBackfillSpec.VBTasksMap))
 	assert.Equal(1, len(*(rh.cachedBackfillSpec.VBTasksMap[0])))
+
+	endTime := time.Now()
+
+	// With 2 cooldown periods of 500ms each, this should be > 1 second
+	assert.True(endTime.Sub(startTime).Seconds() > 1)
 	fmt.Println("============== Test case stop: TestBackfillReqHandlerCreateReqThenMarkDone =================")
 }

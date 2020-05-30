@@ -24,12 +24,12 @@ import (
 )
 
 const BackfillKey = "backfill"
-
 const SpecKey = "spec"
+const BackfillMappingsKey = "backfillMappings"
+
+var ReplicationIdSuffixes = []string{BackfillKey, SpecKey, BackfillMappingsKey}
 
 var BackfillParentCatalogKey = CheckpointsCatalogKeyPrefix + base.KeyPartsDelimiter + BackfillKey
-
-const BackfillMappingsKey = "backfillMappings"
 
 // Get a unique key to access metakv for backfillMappings
 func getBackfillMappingsDocKeyFunc(replicationId string) string {
@@ -102,18 +102,45 @@ func (b *BackfillReplicationService) initCacheFromMetaKV() (err error) {
 		return
 	}
 
+	// Because "extras" below can cause double reads
+	specProcessed := make(map[string]bool)
+
 	// One by one update the specs
 	for _, KVentry := range KVsFromMetaKV {
 		key := KVentry.Key
 		marshalledSpec := KVentry.Value
 		rev := KVentry.Rev
 
-		replicationId := b.getReplicationIdFromKey(key)
+		replicationIdPlusExtra := b.getReplicationIdFromKey(key)
+		// replicationIdPlusExtra can be either
+		// 1. 63a5f325205fe7f610a7ec19570054da/B1/B2/backfillMappings - backfill mappings
+		// 2. 63a5f325205fe7f610a7ec19570054da/B1/B2/spec - actual replication spec
+		// 3. 63a5f325205fe7f610a7ec19570054da/B1/B2/backfill - actual replication spec
+		// The replicationId should be:
+		// 63a5f325205fe7f610a7ec19570054da/B1/B2
+		var replicationId string
+		for _, suffix := range ReplicationIdSuffixes {
+			suffixStr := fmt.Sprintf("%v%v", "/", suffix)
+			if strings.HasSuffix(replicationIdPlusExtra, suffixStr) {
+				replicationId = strings.TrimSuffix(replicationIdPlusExtra, suffixStr)
+				break
+			}
+		}
+		if replicationId == "" {
+			continue
+		}
+		if specProcessed[replicationId] {
+			// has already been processed
+			continue
+		}
+		specProcessed[replicationId] = true
+
 		backfillSpec, err := b.constructBackfillSpec(marshalledSpec, rev, false /*lock*/)
 		if err != nil {
 			b.logger.Errorf("Unable to construct spec %v from metaKV's data. err: %v", key, err)
 			continue
 		}
+
 		actualSpec, err := b.replSpecSvc.ReplicationSpec(replicationId)
 		if err != nil {
 			if err != service_def.MetadataNotFoundErr {
@@ -278,6 +305,7 @@ func (b *BackfillReplicationService) initCache() {
 	b.logger.Info("Cache has been initialized for BackfillReplicationService")
 }
 
+// Returns something like "89f6bd31bb8abff4b45714fdf06803a7/B1/B2/spec"
 func (b *BackfillReplicationService) getReplicationIdFromKey(key string) string {
 	prefix := BackfillParentCatalogKey + base.KeyPartsDelimiter
 	if !strings.HasPrefix(key, prefix) {
@@ -388,15 +416,7 @@ func (b *BackfillReplicationService) persistMappingsForThisNode(spec *metadata.B
 		}
 		innerConsolidatedMap := tasks.GetAllCollectionNamespaceMappings()
 		for sha, nsMap := range innerConsolidatedMap {
-			if mapVal, exists := consolidatedMap[sha]; !exists && mapVal != nil {
-				// TODO Sanity check - remove before milestone delivery
-				checkSha, err := mapVal.Sha256()
-				if err != nil {
-					panic(err)
-				}
-				if fmt.Sprintf("%x", checkSha[:]) != sha {
-					panic("Mismatch sha")
-				}
+			if _, exists := consolidatedMap[sha]; !exists {
 				consolidatedMap[sha] = nsMap
 			}
 		}

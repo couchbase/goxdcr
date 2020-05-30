@@ -99,11 +99,17 @@ func NewCollectionBackfillRequestHandler(logger *log.CommonLogger, replId string
 		getThroughSeqno:      seqnoGetter,
 		vbsGetter:            vbsGetter,
 		backfillReplSvc:      backfillReplSvc,
+		persistInterval:      persistInterval,
 	}
 }
 
 func (b *BackfillRequestHandler) Start() error {
 	atomic.StoreUint32(&b.stopRequested, 0)
+
+	spec, err := b.backfillReplSvc.BackfillReplSpec(b.id)
+	if err == nil && spec != nil {
+		b.cachedBackfillSpec = spec
+	}
 	b.childrenWaitgrp.Add(1)
 	go b.run()
 

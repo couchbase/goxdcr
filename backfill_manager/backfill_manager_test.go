@@ -40,6 +40,7 @@ func setupMock(manifestSvc *service_def.CollectionsManifestSvc,
 	manifestSvc.On("SetMetadataChangeHandlerCallback", mock.Anything).Return(nil)
 	replSpecSvc.On("SetMetadataChangeHandlerCallback", mock.Anything).Return(nil)
 	backfillReplSvc.On("SetMetadataChangeHandlerCallback", mock.Anything).Return(nil)
+	backfillReplSvc.On("BackfillReplSpec", mock.Anything).Return(nil, base.ErrorNotFound)
 }
 
 func setupReplStartupSpecs(replSpecSvc *service_def.ReplicationSpecSvc,

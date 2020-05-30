@@ -197,7 +197,7 @@ func TestBackfillReplSvc(t *testing.T) {
 	metadataEntriesFunc := func() []*serviceDefReal.MetadataEntry {
 		var entries []*serviceDefReal.MetadataEntry
 		dummyEntry := &serviceDefReal.MetadataEntry{
-			Key:   fmt.Sprintf("%v/%v", BackfillParentCatalogKey, specName),
+			Key:   fmt.Sprintf("%v/%v/%v", BackfillParentCatalogKey, specName, SpecKey),
 			Value: constructBackfillRevSlice(specName, randInternalId),
 		}
 		entries = append(entries, dummyEntry)
