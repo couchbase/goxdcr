@@ -388,11 +388,21 @@ const (
 var MaxVBReps = "max_vbreps"
 
 const (
-	GET              = mc.CommandCode(0x00)
-	GET_WITH_META    = mc.CommandCode(0xa0)
-	SET_WITH_META    = mc.CommandCode(0xa2)
-	DELETE_WITH_META = mc.CommandCode(0xa8)
-	SET_TIME_SYNC    = mc.CommandCode(0xc1)
+	GET                 = mc.CommandCode(0x00)
+	GET_WITH_META       = mc.CommandCode(0xa0)
+	SET_WITH_META       = mc.CommandCode(0xa2)
+	DELETE_WITH_META    = mc.CommandCode(0xa8)
+	SET_TIME_SYNC       = mc.CommandCode(0xc1)
+	SUBDOC_GET          = mc.CommandCode(0xc5)
+	SUBDOC_MULTI_LOOKUP = mc.CommandCode(0xd0)
+)
+
+// Flags for SUBDOC commands
+const (
+	// Document level flag
+	SUBDOC_DOC_FLAG_ACCESS_DELETED = 0x04
+	// Path level flag
+	SUBDOC_FLAG_XATTR = 0x04
 )
 
 const (

@@ -4,6 +4,7 @@ package parts
 
 import (
 	"fmt"
+	mcc "github.com/couchbase/gomemcached/client"
 	mcMock "github.com/couchbase/gomemcached/client/mocks"
 	base "github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
@@ -14,7 +15,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	mock "github.com/stretchr/testify/mock"
 	gocb "gopkg.in/couchbase/gocb.v1"
-	mcc "github.com/couchbase/gomemcached/client"
 	"net"
 	"testing"
 	"time"
@@ -136,6 +136,8 @@ func setupMocksXmem(xmem *XmemNozzle, utils *utilsMock.UtilsIface, bandwidthThro
 		fmt.Printf("Error creating RCR: %v\n", err)
 	}
 	remoteClusterSvc.On("RemoteClusterByUuid", mock.Anything, mock.Anything).Return(remoteClusterRef, nil)
+	xmem.sourceClusterId = []byte("SourceCluster")
+	xmem.targetClusterId = []byte("TargetCluster")
 }
 
 func TestPositiveXmemNozzle(t *testing.T) {
@@ -252,7 +254,7 @@ func xmemSendPackets(t *testing.T, uprfiles []string, bname string) {
 	assert.Nil(err)
 
 	for _, event := range events {
-		if event.DataType & mcc.XattrDataType == 0 {
+		if event.DataType&mcc.XattrDataType == 0 {
 			// Get doesn't work if it has XATTR
 			var byteSlice []byte
 			_, err = bucket.Get(string(event.Key), &byteSlice)
@@ -288,192 +290,40 @@ func setUpTargetBucket(t *testing.T, bucketName string) {
 	time.Sleep(2 * time.Second)
 }
 
-func TestGetForCustomCR(t *testing.T) {
-	fmt.Println("============== Test case start: TestGetForCustomCR =================")
-	defer fmt.Println("============== Test case end: TestGetForCustomCR =================")
-
-	if !targetXmemIsUpAndCorrectSetupExists() {
-		fmt.Println("Skipping since live cluster_run setup has not been detected")
-		return
-	}
-
-	bucketName := "getForCCR"
-	setUpTargetBucket(t, bucketName)
-
-	assert := assert.New(t)
-
-	// Set up target
-	uprNotCompressFile := "../utils/testInternalData/uprNotCompress.json"
-	kingarthur3_cluster2_mv := "testdata/customCR/kingarthur3_cluster2_mv.json"
-	xmemSendPackets(t, []string{uprNotCompressFile, kingarthur3_cluster2_mv}, bucketName)
-
-	utilsNotUsed, settings, xmem, router, throttler, remoteClusterSvc, colManSvc := setupBoilerPlateXmem(bucketName)
-	realUtils := utilsReal.NewUtilities()
-	xmem.utils = realUtils
-	setupMocksXmem(xmem, utilsNotUsed, throttler, remoteClusterSvc, colManSvc)
-
-	// Need to find the actual running targetBucketUUID
-	bucketInfo, err := realUtils.GetBucketInfo(connString, bucketName, username, password, base.HttpAuthMechPlain, nil, false, nil, nil, xmem.Logger())
-	assert.Nil(err)
-	uuid, ok := bucketInfo["uuid"].(string)
-	assert.True(ok)
-	xmem.targetBucketUuid = uuid
-
-	settings[SETTING_COMPRESSION_TYPE] = base.CompressionTypeSnappy
-	settings[ForceCollectionDisableKey] = true
-	err = xmem.Start(settings)
-	assert.Nil(err)
-
-	/*
-	 * Source doc: uprNotCompressFile
-	 * target doc: uprNotCompressFile
-	 * Target wins
-	 */
-	// TODO(MB-39012): Revisit when KV actually provide revId in GET
-	fmt.Println("Test 1: Same pre-7.0 document. No target revId from KV. Conflict. Revisit for MB-39012")
-	getForCustomCR(1, t, "../utils/testInternalData/uprNotCompress.json", xmem, router, Conflict)
-
-	/*
-	 * Source doc: kingarthur3_cluster1_PcasMv.json
-	 * target doc: kingarthur3_cluster2_mv.json
-	 * Source PCAS+MV dominates target MV
-	 */
-	/*
-	 * TODO(MB-39012): Revisit when KV returns XATTR in GET.
-	 * The same CCR logic is being tested in TestDetectConflictWithXattrInner()
-	resetLogLevel := false
-	if testing.Verbose() {
-		log.DefaultLoggerContext.SetLogLevel(log.LogLevelDebug)
-		resetLogLevel = true
-	}
-	fmt.Println("Test 2: 7.0 documents. Source greater CAS and PCAS+MV dominates target MV")
-	getForCustomCR(2, t, "testdata/customCR/kingarthur3_cluster1_PcasMv.json", xmem, router, SourceDominate)
-	if resetLogLevel {
-		log.DefaultLoggerContext.SetLogLevel(log.LogLevelInfo)
-	}
-	*/
-}
-func getForCustomCR(testId uint32, t *testing.T, fname string, xmem *XmemNozzle, router *Router, expectedResult ConflictResult) {
-	assert := assert.New(t)
-	event, err := RetrieveUprFile(fname)
-	assert.Nil(err)
-	wrappedEvent := &base.WrappedUprEvent{UprEvent: event}
-	wrappedMCRequest, err := router.ComposeMCRequest(wrappedEvent)
-	assert.Nil(err)
-	assert.NotNil(wrappedMCRequest)
-	wrappedMCRequest.UniqueKey = string(wrappedMCRequest.Req.Key)
-	fmt.Printf("wrapptedMCRequest=%v\n", wrappedMCRequest)
-
-
-	possibleConflict_map := make(base.McRequestMap)
-	possibleConflict_map[wrappedMCRequest.UniqueKey] = wrappedMCRequest
-	noRep_map := make(map[string]bool)
-	conflict_map, err := xmem.batchGetForCustomCR(possibleConflict_map, &noRep_map)
-	assert.Nil(err)
-	if expectedResult == SourceDominate {
-		assert.Equal(0, len(conflict_map), fmt.Sprintf("Test %d failed", testId))
-		assert.Equal(0, len(noRep_map), fmt.Sprintf("Test %d failed", testId))
-	} else if expectedResult == TargetDominate {
-		assert.Equal(0, len(conflict_map), fmt.Sprintf("Test %d failed", testId))
-		assert.Equal(1, len(noRep_map), fmt.Sprintf("Test %d failed", testId))
-	} else if expectedResult == Conflict {
-		assert.Equal(1, len(conflict_map), fmt.Sprintf("Test %d failed", testId))
-		assert.Equal(1, len(noRep_map), fmt.Sprintf("Test %d failed", testId))	}
-	if testing.Verbose() {
-		fmt.Printf("noRep_map: %v\n", noRep_map)
-		fmt.Printf("conflict_map: %v\n", conflict_map)
-		for _, docPair := range conflict_map {
-			source := docPair.req.Req
-			target := docPair.resp
-			fmt.Printf("Source Document: %v\n", source)
-			fmt.Printf("Source Cas: %v\n", source.Cas)
-			fmt.Printf("Source Extras: %v\n", source.Extras)
-			doc_meta_source := decodeSetMetaReq(docPair.req)
-			if doc_meta_source.dataType & mcc.XattrDataType > 0 {
-				it, _ := base.NewXattrIterator(source.Body)
-				for it.HasNext() {
-					key, value, err := it.Next()
-					if err != nil {
-						fmt.Printf("Error iterating through XATTR: '%v'", err)
-					} else {
-						fmt.Printf("XATTR: %v:%v\n", string(key), string(value))
-					}
-				}
-			}
-			fmt.Printf("Target Document: %v\n", target)
-			fmt.Printf("GET Status: %v\n", target.Status)
-			fmt.Printf("Target Cas: %v\n", target.Cas)
-			fmt.Printf("Target Key: %v\n", target.Key)
-			fmt.Printf("Target Extras: %v\n", target.Extras)
-			fmt.Printf("Target DataType: %v\n", target.DataType)
-			fmt.Printf("Target Body: %v\n", string(target.Body))
-			if target.DataType & mcc.XattrDataType > 0 {
-				it, _ := base.NewXattrIterator(target.Body)
-				for it.HasNext() {
-					key, value, err := it.Next()
-					if err != nil {
-						fmt.Printf("Error iterating through XATTR: '%v'", err)
-					} else {
-						fmt.Printf("XATTR: %v:%v\n", key, value)
-					}
-				}
-			}
-		}
-	}
-}
-func TestDetectConflictWithXattrInner(t *testing.T) {
-	fmt.Println("============== Test case start: GeteMetaForCustomCR =================")
-	defer fmt.Println("============== Test case end: GeteMetaForCustomCR =================")
-	assert := assert.New(t)
-
-	_, _, xmem, _, _, _, _ := setupBoilerPlateXmem("customCR")
-
-	sourcePcas := []byte("{\"123456\":456,\"140737488356328\":1234567890123456999,\"revId\":20}")
-	sourceMv := []byte("{\"140737488357328\":1587440822967074820,\"revId\":1357924680135792468}")
-	targetMv := []byte("{\"140737488356328\":1234567890123456789,\"140737488357328\":1587440822967074820,\"revId\":1357924680135792468}")
-	result := xmem.detectConflictWithXattr_inner(sourcePcas, sourceMv, targetMv)
-	assert.Equal(SourceDominate, result)
-}
 type User struct {
-	Id string `json:"uid"`
-	Email string `json:"email"`
+	Id        string   `json:"uid"`
+	Email     string   `json:"email"`
 	Interests []string `json:"interests"`
 }
+
 /*
- * This testcase will create a bucket customCR, send two packets to target,
- * one pre7.0 (kingarthur1), one 7.0 (kingarthur2), and perform conflict resolution
- * using different source documents against the metadata of these two target documents.
- * Some of the source documents have XATTR with PCAS and MV.
+ * This testcase will create a bucket GetXattrForCCR and test conflict detection.
  *
- * Test 1: Two pre-7.0 docs, source larger revSeqno/CAS: Source wins.
- * Test 2: Source pre-7.0, target 7.0: Target wins.
- * Test 3: Source 7.0, target pre-7.0, source smaller CAS: Conflict
- * Test 4: Source 7.0, target pre-7.0, source larger CAS and no PCAS/MV: Conflict
- * Test 5: Source 7.0, target pre-7.0. source larger CAS and dominating MV: Source wins
- * Test 6: Two 7.0 docs, same clusterID, source larger CAS: Source wins 
- * Test 7: Two 7.0 docs, same clusterID, source smaller CAS: Source loses
- * Test 8: Two 7.0 docs, different clusterID, source larger CAS, No PCAS: Conflict
- * Test 9: Two 7.0 docs, different clusterID, source smaller CAS: Source loses
- * Test 10: Two 7.0 docs, different clusterID, source larger CAS and dominating PCAS: Source wins
- * Test 11: Two 7.0 docs. different clusterID, source larger CAS and dominating MV: Source wins
+ * To avoid tightly couple the test files with real clusterID/UUID, we will use
+ * "SourceCluster" and "TargetCluster" as clusterIDs for the tests.
  */
-func TestGetMetaForCustomCR(t *testing.T) {
-	fmt.Println("============== Test case start: GeteMetaForCustomCR =================")
-	defer fmt.Println("============== Test case end: GeteMetaForCustomCR =================")
+func TestGetXattrForCustomCR(t *testing.T) {
+	fmt.Println("============== Test case start: TestGetXattrForCustomCR =================")
+	defer fmt.Println("============== Test case end: TestGetXattrForCustomCR =================")
 
 	if !targetXmemIsUpAndCorrectSetupExists() {
 		fmt.Println("Skipping since live cluster_run setup has not been detected")
 		return
 	}
-	bucketName := "GetMetaForCCR"
+	bucketName := "GetXattrForCCR"
 	setUpTargetBucket(t, bucketName)
 
 	assert := assert.New(t)
 
-	// Set up target with a pre-7.0 and 7.0 document
-	kingarthur1_pre7_cas1 := "testdata/customCR/kingarthur1_pre7_cas1.json"
-	kingarthur2_cluster2_cas1 := "testdata/customCR/kingarthur2_cluster2_cas1.json"
-	xmemSendPackets(t, []string{kingarthur1_pre7_cas1, kingarthur2_cluster2_cas1}, bucketName)
+	// Set up target documents
+	xmemSendPackets(t, []string{"testdata/customCR/kingarthur2_new_cas2.json",
+		"testdata/customCR/kingarthur3_cv1_cas1.json",
+		"testdata/customCR/kingarthur4_cv1_cas2.json",
+		"testdata/customCR/kingarthur5_cv1_cas2.json",
+		"testdata/customCR/kingarthur6_mv.json",
+		"testdata/customCR/kingarthur7_mv.json",
+		"testdata/customCR/kingarthur8_cas1.json",
+	}, bucketName)
 
 	utilsNotUsed, settings, xmem, router, throttler, remoteClusterSvc, colManSvc := setupBoilerPlateXmem(bucketName)
 	realUtils := utilsReal.NewUtilities()
@@ -491,113 +341,75 @@ func TestGetMetaForCustomCR(t *testing.T) {
 	settings[ForceCollectionDisableKey] = true
 	err = xmem.Start(settings)
 	assert.Nil(err)
-
 	/*
-	 * Source doc: kingarthur1_pre7_cas2
-	 * Target doc: kingarthur1_pre7_cas1
-	 * Source wins
+	 * Test 1: Doc never existed at target, source wins
+	 * Source doc: kingarthur1_new
+	 * Target doc: none
 	 */
-	fmt.Println("Test 1: Two pre-7.0 docs, source larger revSeqno/CAS: Source wins.")
-	getMetaForCustomCR(1, t, "testdata/customCR/kingarthur1_pre7_cas2.json", xmem, router, SourceDominate)
-
+	fmt.Println("Test 1: Source dominates when it doesn't exist at target.")
+	getXattrForCustomCR(1, t, "testdata/customCR/kingarthur1_new.json", xmem, router, SourceDominate)
 	/*
-	 * Source doc: kingarthur2_pre7_cas2
-	 * Target doc: kingarthur2_cluster2_cas1
-	 * Target wins.
+	 * Test 2: Target larger CAS. Target wins
+	 * Source: kingarthur2_new_cas1
+	 * Target: kingarthur2_new_cas2
 	 */
-
-	fmt.Println("Test 2: Source pre-7.0, target 7.0: Target wins.")
-	getMetaForCustomCR(2, t, "testdata/customCR/kingarthur2_pre7_cas2.json", xmem, router, TargetDominate)
-
+	fmt.Println("Test 2: Target dominates when it has larger CAS.")
+	getXattrForCustomCR(2, t, "testdata/customCR/kingarthur2_new_cas1.json", xmem, router, TargetDominate)
 	/*
-	 * Source doc: kingarthur1_cluster1_cas0
-	 * Target doc: kingarthur1_pre7_cas1
-	 * Conflict
+	 * Test 3: Target doc comes from source. Source larger CAS. Source wins
+	 * Source: kingarthur3_new_cas2
+	 * Target: kingarthur3_cv1_cas1 (cv1 == cas1)
+	 *         _xdcr{"cv":"0x0000ccae473b1316","id":"SourceCluster"}
 	 */
-	fmt.Println("Test 3: Source 7.0, target pre-7.0, source smaller CAS: Conflict")
-	getMetaForCustomCR(3, t, "testdata/customCR/kingarthur1_cluster1_cas0.json", xmem, router, Conflict)
-
+	fmt.Println("Test 3: Source larger CAS. Target comes from source with no new change. Source wins")
+	getXattrForCustomCR(3, t, "testdata/customCR/kingarthur3_new_cas2.json", xmem, router, SourceDominate)
 	/*
-	 * Source doc: kingarthur1_cluster1_cas2
-	 * Target doc: kingarthur1_pre7_cas1
-	 * Conflict
+	 * Test 4: Both has local changes and source pcas does not dominate. Conflict
+	 * Source: kingarthur4_pcasNoTarget_cas3:
+	 *		_xdcr{"cv":"0x0000ccae473b1316","id":"Cluster4","pc":{"cluster3":"Fge5BJLoAAQ"}}
+	 *		Fge5BJLoAAQ is base64 of 1587440822967074820
+	 * Target: kingarthur4_cv1_cas2, new change (Cas > cv)
+	 *		_xdcr{"cv":"0x0000ccae473b1316","id":"SourceCluster"}
 	 */
-	fmt.Println("Test 4: Source 7.0, target pre-7.0, source larger CAS and no PCAS/MV: Conflict")
-	getMetaForCustomCR(4, t, "testdata/customCR/kingarthur1_cluster1_cas2.json", xmem, router, Conflict)
-
+	fmt.Println("Test 4: Both has changes (CAS > cv), source has PCAS but does not dominate. Conflict")
+	getXattrForCustomCR(4, t, "testdata/customCR/kingarthur4_pcasNoTarget_cas3.json", xmem, router, Conflict)
 	/*
-	 * Source doc: kingarthur1_cluster1_pcasRevId.json
-	 * Target doc: kingarthur1_pre7_cas1
-	 * Conflict
+	 * Test 5: Both has local changes and source pcas that dominates target change
+	 * Source: kingarthur5_pcasDominateTargetCas.json:
+	 *		_xdcr{"cv":"0x0b00f8da4d881416","id":"Cluster3","pc":{"TargetCluster":"FhSITdr4AAA"}}
+	 * Target: kingarthur5_cv1_cas2, new change (Cas > cv)
+	 *		_xdcr{"cv":"0x0400e89204b90716","id":"SourceCluster"}, Cas: 1591046436336173056
 	 */
-	resetLogLevel := false
-	if testing.Verbose() {
-		log.DefaultLoggerContext.SetLogLevel(log.LogLevelDebug)
-		resetLogLevel = true
-	}
-	fmt.Println("Test 5: Source 7.0, target pre-7.0. source larger CAS and dominating PCAS: Source wins")
-	getMetaForCustomCR(5, t, "testdata/customCR/kingarthur1_cluster1_pcasRevId.json", xmem, router, SourceDominate)
-	if resetLogLevel {
-		log.DefaultLoggerContext.SetLogLevel(log.LogLevelInfo)
-	}
-
+	fmt.Println("Test 5: Both has changes (CAS > cv), source has PCAS that dominates.")
+	getXattrForCustomCR(5, t, "testdata/customCR/kingarthur5_pcasDominateTargetCas.json", xmem, router, SourceDominate)
 	/*
-	 * Source doc: kingarthur2_cluster2_cas2
-	 * Target doc: kingarthur2_cluster2_cas1
-	 * Source wins
+	 * Test 6: Target is a merged doc (has mv, CAS == cv). Source PCAS dominates
+	 * Source: kingarthur6_pcasDominateMv
+	 *		_xdcr{"cv":"0x0b0085b25e8d1416","id":"Cluster4","pc":{"Cluster1":"FhSITdr4AAA","Cluster2":"FhSITdr4ABU","Cluster3":"FhSITdr4ACA"}}
+	 * Target: kingarthur6_mv, no new change (Cas == cv)
+	 *		_xdcr{"cv":"0x00009125328d1416","id":"TargetCluster","mv":{"Cluster1":"FhSITdr4AAA","Cluster2":"FhSITdr4ABU","Cluster3":"FhSITdr4ACA"}}
 	 */
-	fmt.Println("Test 6: Two 7.0 docs, same clusterID, source larger CAS: Source wins")
-	getMetaForCustomCR(6, t, "testdata/customCR/kingarthur2_cluster2_cas2.json", xmem, router, SourceDominate)
-
+	fmt.Println("Test 6: Target is a merged doc, source PCAS dominates MV.")
+	getXattrForCustomCR(6, t, "testdata/customCR/kingarthur6_pcasDominateMv.json", xmem, router, SourceDominate)
 	/*
-	 * Source doc: kingarthur2_cluster2_cas0
-	 * Target doc: kingarthur2_cluster2_cas1
-	 * Souce loses
+	 * Test 7: Target is a merged doc (has mv, CAS == cv). Source PCAS does not dominate
+	 * Source: kingarthur7_pcasNotDominateMv
+	 *		_xdcr{"cv":"0x0b0085b25e8d1416","id":"Cluster4","pc":{"Cluster1":"FhSITdr4AAA","Cluster3":"FhSITdr4ACA"}}
+	 * Target: kingarthur7_mv, no new change (Cas == cv)
+	 *		_xdcr{"cv":"0x00009125328d1416","id":"TargetCluster","mv":{"Cluster1":"FhSITdr4AAA","Cluster2":"FhSITdr4ABU","Cluster3":"FhSITdr4ACA"}}
 	 */
-	fmt.Println("Test 7: Two 7.0 docs, same clusterID, source smaller CAS: Source loses")
-	getMetaForCustomCR(7, t, "testdata/customCR/kingarthur2_cluster2_cas0.json", xmem, router, TargetDominate)
-
+	fmt.Println("Test 7: Target is a merged doc, source PCAS dominates MV.")
+	getXattrForCustomCR(7, t, "testdata/customCR/kingarthur7_pcasNotDominateMv.json", xmem, router, Conflict)
 	/*
-	 * Source doc: kingarthur2_cluster1_cas2
-	 * Target doc: kingarthur2_cluster2_cas1
-	 * Conflict and it is in possibleConflict_map
+	 * Test 8: Target does not have _xdcr, Source pcas dominates target
+	 * Source: kingarthur8_pcasDominateTargetCas1
+	 *		_xdcr{"cv":"0x0b00104adc921416","id":"Cluster4","pc":{"Cluster2":"FhSITdr4ABU","TargetCluster":"FhSS3EoQAAA"}}
+	 * Target: kingarthur8_cas1
 	 */
-	fmt.Println("Test 8: Two 7.0 docs, different clusterID, source larger CAS, No PCAS: Conflict")
-	getMetaForCustomCR(8, t, "testdata/customCR/kingarthur2_cluster1_cas2.json", xmem, router, Conflict)
-
-	/*
-	 * Source doc: kingarthur2_cluster1_cas0
-	 * Target doc: kingarthur2_cluster2_cas1
-	 * Source loses
-	 */
-	fmt.Println("Test 9: Two 7.0 docs, different clusterID, source smaller CAS:	Source loses")
-	getMetaForCustomCR(9, t, "testdata/customCR/kingarthur2_cluster1_cas0.json", xmem, router, TargetDominate)
-
-	/*
-	 * Source doc: kingarthur2_cluster1_pcasC2
-	 * Target doc: kingarthur2_cluster2_cas1
-	 * Source PCAS dominate
-	 */
-
-	if testing.Verbose() {
-		log.DefaultLoggerContext.SetLogLevel(log.LogLevelDebug)
-		resetLogLevel = true
-	}
-	fmt.Println("Test 10: Two 7.0 docs, different clusterID, source larger CAS and dominating PCAS: Source wins")
-	getMetaForCustomCR(10, t, "testdata/customCR/kingarthur2_cluster1_pcasC2.json", xmem, router, SourceDominate)
-
-	/*
-	 * Source doc: kingarthur2_cluster1_mvC2
-	 * Target doc: kingarthur2_cluster2_cas1
-	 * Source PCAS dominate
-	 */
-	fmt.Println("Test 11: Two 7.0 docs. different clusterID, source larger CAS and dominating MV: Source wins")
-	getMetaForCustomCR(11, t, "testdata/customCR/kingarthur2_cluster1_mvC2.json", xmem, router, SourceDominate)
-	if resetLogLevel {
-		log.DefaultLoggerContext.SetLogLevel(log.LogLevelInfo)
-	}
+	fmt.Println("Test 8: Target does not have _xdcr, source PCAS dominates target CAS.")
+	getXattrForCustomCR(8, t, "testdata/customCR/kingarthur8_pcasDominateTargetCas1.json", xmem, router, SourceDominate)
 }
-func getMetaForCustomCR(testId uint32, t *testing.T, fname string, xmem *XmemNozzle, router *Router, expectedResult ConflictResult) {
+func getXattrForCustomCR(testId uint32, t *testing.T, fname string, xmem *XmemNozzle, router *Router, expectedResult ConflictResult) {
 	assert := assert.New(t)
 	event, err := RetrieveUprFile(fname)
 	assert.Nil(err)
@@ -607,56 +419,16 @@ func getMetaForCustomCR(testId uint32, t *testing.T, fname string, xmem *XmemNoz
 	assert.NotNil(wrappedMCRequest)
 	getMeta_map := make(base.McRequestMap)
 	getMeta_map[wrappedMCRequest.UniqueKey] = wrappedMCRequest
-	noRep_map, possibleConflict_map, err := xmem.batchGetMetaForCustomCR(getMeta_map)
+	noRep_map, getDoc_map, err := xmem.batchGetXattrForCustomCR(getMeta_map)
 	assert.Nil(err)
 	if expectedResult == SourceDominate {
 		assert.Equal(0, len(noRep_map), fmt.Sprintf("Test %d failed", testId))
+		assert.Equal(0, len(getDoc_map), fmt.Sprintf("Test %d failed", testId))
 	} else if expectedResult == TargetDominate {
 		assert.Equal(1, len(noRep_map), fmt.Sprintf("Test %d failed", testId))
+		assert.Equal(0, len(getDoc_map), fmt.Sprintf("Test %d failed", testId))
 	} else if expectedResult == Conflict {
-		assert.Equal(1, len(possibleConflict_map), fmt.Sprintf("Test %d failed", testId))
+		assert.Equal(1, len(noRep_map), fmt.Sprintf("Test %d failed", testId))
+		assert.Equal(1, len(getDoc_map), fmt.Sprintf("Test %d failed", testId))
 	}
-}
-func TestSourceXattrDominate(t *testing.T) {
-	fmt.Println("============== Test case start: SourceXattrDominate =================")
-	defer fmt.Println("============== Test case end: SourceXattrDominate =================")
-
-	if !targetXmemIsUpAndCorrectSetupExists() {
-		fmt.Println("Skipping since live cluster_run setup has not been detected")
-		return
-	}
-
-	uprNotCompressFile := "testdata/customCR/kingarthur2_cluster1_pcasC2.json"
-	xmemSendPackets(t, []string{uprNotCompressFile}, xmemBucket)
-
-	fmt.Println("Sent a packet. Trying to fetch it now.")
-	assert := assert.New(t)
-
-	utilsNotUsed, settings, xmem, router, throttler, remoteClusterSvc, colManSvc := setupBoilerPlateXmem(xmemBucket)
-	realUtils := utilsReal.NewUtilities()
-	xmem.utils = realUtils
-	setupMocksXmem(xmem, utilsNotUsed, throttler, remoteClusterSvc, colManSvc)
-
-	// Need to find the actual running targetBucketUUID
-	bucketInfo, err := realUtils.GetBucketInfo(connString, xmemBucket, username, password, base.HttpAuthMechPlain, nil, false, nil, nil, xmem.Logger())
-	assert.Nil(err)
-	uuid, ok := bucketInfo["uuid"].(string)
-	assert.True(ok)
-	xmem.targetBucketUuid = uuid
-
-	event, err := RetrieveUprFile(uprNotCompressFile)
-	assert.Nil(err)
-	wrappedEvent := &base.WrappedUprEvent{UprEvent: event}
-	wrappedMCRequest, err := router.ComposeMCRequest(wrappedEvent)
-	assert.Nil(err)
-	assert.NotNil(wrappedMCRequest)
-
-	settings[SETTING_COMPRESSION_TYPE] = base.CompressionTypeSnappy
-	settings[ForceCollectionDisableKey] = true
-	err = xmem.Start(settings)
-	assert.Nil(err)
-
-	var clusterID uint64 = 1<<47 + 2000
-	res := xmem.sourceXattrDominate(wrappedMCRequest.Req, clusterID, 1)
-	assert.Equal(res, true)
 }

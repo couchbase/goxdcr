@@ -639,6 +639,59 @@ func (xi *XattrIterator) Next() ([]byte, []byte, error) {
 	return key, value, nil
 }
 
+type CCRXattrFieldIterator struct {
+	xattr []byte
+	pos   int
+}
+
+func NewCCRXattrFieldIterator(xattr []byte) (*CCRXattrFieldIterator, error) {
+	length := len(xattr)
+	if xattr[0] != '{' || xattr[length-1] != '}' {
+		return nil, fmt.Errorf("Invalid format for XATTR: %v", xattr)
+	}
+	return &CCRXattrFieldIterator{
+		xattr: xattr,
+		pos:   1,
+	}, nil
+}
+
+func (xfi *CCRXattrFieldIterator) HasNext() bool {
+	return xfi.pos < len(xfi.xattr)
+}
+
+// Expected format is: {"key":"value","key":"value","key":{...},key:{...}}
+func (xfi *CCRXattrFieldIterator) Next() (key, value []byte, err error) {
+	beginQuote := xfi.pos
+	colon := bytes.Index(xfi.xattr[beginQuote:], []byte{':'})
+	endQuote := beginQuote + colon - 1
+	if colon == -1 || xfi.xattr[beginQuote] != '"' || xfi.xattr[endQuote] != '"' {
+		err = fmt.Errorf("XATTR %s invalid format at pos=%v, char '%c,, endQuote =%v", xfi.xattr, xfi.pos, xfi.xattr[xfi.pos], endQuote)
+		return
+	}
+	key = xfi.xattr[beginQuote+1 : endQuote]
+
+	beginValue := endQuote + 2
+	var endValue int
+	if xfi.xattr[beginValue] == '"' {
+		endValue = beginValue + 1 + bytes.Index(xfi.xattr[beginValue+1:], []byte{'"'})
+		if endValue < beginValue {
+			err = fmt.Errorf("XATTR %s invalid format searching for key '%s' at pos=%v, beginValue pos %v, char '%c', endValue pos %v, char '%c'", xfi.xattr, key, xfi.pos, beginValue, xfi.xattr[beginValue], endValue, xfi.xattr[endValue])
+		}
+		// The value is a string
+		value = xfi.xattr[beginValue+1 : endValue]
+	} else if xfi.xattr[beginValue] == '{' {
+		endValue = beginValue + 1 + bytes.Index(xfi.xattr[beginValue+1:], []byte{'}'})
+		if endValue < beginValue {
+			err = fmt.Errorf("XATTR %s invalid format searching for key '%s' at pos=%v, beginValue pos %v, char '%c', endValue pos %v, char '%c'", xfi.xattr, key, xfi.pos, beginValue, xfi.xattr[beginValue], endValue, xfi.xattr[endValue])
+		}
+		value = xfi.xattr[beginValue : endValue+1]
+	} else {
+		err = fmt.Errorf("XATTR %s invalid format searching for key '%s' at pos=%v, beginValue pos %v, char '%c', endValue pos %v, char '%c'", xfi.xattr, key, xfi.pos, beginValue, xfi.xattr[beginValue], endValue, xfi.xattr[endValue])
+	}
+	xfi.pos = endValue + 2
+	return
+}
+
 type SortedSeqnoListWithLock struct {
 	seqno_list []uint64
 	lock       *sync.RWMutex

@@ -50,12 +50,15 @@ const (
 )
 
 // Return values from conflict detection
+// When detecting/resolving conflicts between source and target document, all action are taken
+// when the source cluster has larger CAS.
 type ConflictResult uint32
 
 const (
-	SourceDominate ConflictResult = iota
-	TargetDominate ConflictResult = iota
-	Conflict       ConflictResult = iota
+	TargetDominate ConflictResult = iota // Source CAS is smaller. Skip
+	SourceDominate ConflictResult = iota // Source CAS is larger and it contains target. Send
+	Conflict       ConflictResult = iota // Source CAS is larger and they don't contain each other. Merge
+	TargetSetBack  ConflictResult = iota // Source CAS is larger but target dominates source MV. Set target back to source
 )
 
 type RequestToResponse struct {
@@ -755,6 +758,11 @@ type XmemNozzle struct {
 	targetClusterUuid string
 	targetBucketUuid  string
 
+	// Source and target cluster ID. Used for custom CR in XATTR _xdcr to identify source of changes.
+	// For DP, they are the cluster UUID encoded in base64. For test we can set it to any unique string.
+	sourceClusterId []byte
+	targetClusterId []byte
+
 	bOpen      bool
 	lock_bOpen sync.RWMutex
 
@@ -1164,10 +1172,12 @@ func (xmem *XmemNozzle) processData_sendbatch(finch chan bool, waitGrp *sync.Wai
 				//batch get meta to find what needs to be not sent via the noRep map
 				noRep_map, err = xmem.batchGetMeta(batch.getMeta_map)
 			} else {
-				noRep_map, possibleConflict_map, err := xmem.batchGetMetaForCustomCR(batch.getMeta_map)
+				// From Xattr, we get a map of what should not be replicated, and a map to get target
+				// document for further process
+				noRep_map, getDoc_map, err := xmem.batchGetXattrForCustomCR(batch.getMeta_map)
 				var conflict_map map[string]RequestToResponse
-				if err == nil && len(possibleConflict_map) > 0 {
-					conflict_map, err = xmem.batchGetForCustomCR(possibleConflict_map, &noRep_map)
+				if err == nil && len(getDoc_map) > 0 {
+					conflict_map, err = xmem.batchGetForCustomCR(getDoc_map, &noRep_map)
 				}
 
 				// TODO: merge docs in conflict_map and setWithMeta to source with optimistic locking
@@ -1797,26 +1807,26 @@ func (xmem *XmemNozzle) composeRequestForGetMeta(key string, vb uint16, opaque u
 }
 
 /**
- * batch call to memcached getMeta for custom conflict resolution.
- * Unlike batchGetMeta() which doesn't care if it returns because of error, since data can be sent 
- * for target side CR, we must get metadata since there is no target side custom CR. So we will retry
- * here until successful.
+ * Subdoc batch call to get XATTR for custom conflict resolution.
+ * There is no target site custom CR so we will retry in case of failure.
+ * This routine returns noRep_Map which contains the mutations that should not be replicated,
+ * and getDoc_map which contains the mutations that need target documents for furthur process.
  */
-func (xmem *XmemNozzle) batchGetMetaForCustomCR(getMeta_map base.McRequestMap) (noRep_map map[string]bool, possibleConflict_map base.McRequestMap, err error) {
+func (xmem *XmemNozzle) batchGetXattrForCustomCR(getMeta_map base.McRequestMap) (noRep_map map[string]bool, getDoc_map base.McRequestMap, err error) {
 	retryCount := 0
 	noRep_map = make(map[string]bool)
-	possibleConflict_map = make(base.McRequestMap)
+	getDoc_map = make(base.McRequestMap)
 
 	for {
 	RETRY:
 		// if input size is 0, then we are done
 		if len(getMeta_map) == 0 {
-			return noRep_map, possibleConflict_map, nil
+			return noRep_map, getDoc_map, nil
 		}
 
 		// If we don't get any response many times, then something is wrong. Return error
 		if retryCount >= xmem.config.maxRetry {
-			return noRep_map, possibleConflict_map, errors.New("batchGetMetaForCustomCR failed after " + string(retryCount) + "times")
+			return noRep_map, getDoc_map, errors.New("batchGetXattrForCustomCR failed after " + string(retryCount) + "times")
 		}
 
 		respMap := make(base.MCResponseMap, xmem.config.maxCount)
@@ -1844,11 +1854,11 @@ func (xmem *XmemNozzle) batchGetMetaForCustomCR(getMeta_map base.McRequestMap) (
 			if docKey == "" {
 				xmem.Logger().Errorf("%v received empty docKey. unique-key= %v%v%v, req=%v%v%v, getMeta_map=%v%v%v", xmem.Id(),
 					base.UdTagBegin, originalReq.Req.Key, base.UdTagEnd, base.UdTagBegin, originalReq.Req, base.UdTagEnd, base.UdTagBegin, getMeta_map, base.UdTagEnd)
-				return noRep_map, possibleConflict_map, errors.New(xmem.Id() + " received empty docKey.")
+				return noRep_map, getDoc_map, errors.New(xmem.Id() + " received empty docKey.")
 			}
 
 			if _, ok := sent_key_map[docKey]; !ok {
-				req := xmem.composeRequestForGetMeta(docKey, originalReq.Req.VBucket, opaque)
+				req := xmem.composeRequestForGetXattr(docKey, originalReq.Req.VBucket, opaque)
 				// .Bytes() returns data ready to be fed over the wire
 				reqs_bytes = append(reqs_bytes, req.Bytes())
 				// a Map of array of items and map key is the opaque currently based on time (passed to the target and back)
@@ -1878,7 +1888,7 @@ func (xmem *XmemNozzle) batchGetMetaForCustomCR(getMeta_map base.McRequestMap) (
 		for _, packet := range reqs_bytes_list {
 			err, _ = xmem.writeToClient(xmem.client_for_getMeta, packet, true)
 			if err != nil {
-				xmem.Logger().Errorf("batchGetMetaForCustomCR encountered error writing to client. Will retry.")
+				xmem.Logger().Errorf("batchGetXattrForCustomCR encountered error writing to client. Will retry.")
 				// Kill the receiver and retry
 				close(receiver_fin_ch)
 				retryCount++
@@ -1903,8 +1913,9 @@ func (xmem *XmemNozzle) batchGetMetaForCustomCR(getMeta_map base.McRequestMap) (
 		for uniqueKey, wrappedReq := range getMeta_map {
 			key := string(wrappedReq.Req.Key)
 			resp, ok := respMap[key]
-			if ok && (resp.Status == mc.SUCCESS || resp.Status == mc.KEY_ENOENT) {
-				switch xmem.detectConflictWithMeta(wrappedReq, resp, xmem.source_cr_mode, xmem.xattrEnabled, xmem.Logger()) {
+			// SUBDOC_BAD_MULTI is returned when some SUBDOC path doesn't exist
+			if ok && (resp.Status == mc.SUCCESS || resp.Status == mc.KEY_ENOENT || resp.Status == mc.SUBDOC_BAD_MULTI) {
+				switch xmem.detectConflictWithXattr(wrappedReq.Req, resp) {
 				case SourceDominate:
 					// TODO(MB-39012): when UPRRequest is extended to support optimistic locking:
 					// if resp.Status == mc.KEY_ENOENT {
@@ -1915,14 +1926,18 @@ func (xmem *XmemNozzle) batchGetMetaForCustomCR(getMeta_map base.McRequestMap) (
 				case TargetDominate:
 					noRep_map[uniqueKey] = true
 				case Conflict:
-					possibleConflict_map[uniqueKey] = wrappedReq
+					noRep_map[uniqueKey] = true
+					getDoc_map[uniqueKey] = wrappedReq
+				case TargetSetBack:
+					noRep_map[uniqueKey] = true
+					getDoc_map[uniqueKey] = wrappedReq
 				}
 				keys_to_be_deleted[uniqueKey] = true
 			}
 		}
 		if len(keys_to_be_deleted) == len(getMeta_map) {
 			// Got response for all
-			return noRep_map, possibleConflict_map, nil
+			return noRep_map, getDoc_map, nil
 		} else {
 			for uniqueKey, _ := range keys_to_be_deleted {
 				delete(getMeta_map, uniqueKey)
@@ -1931,41 +1946,40 @@ func (xmem *XmemNozzle) batchGetMetaForCustomCR(getMeta_map base.McRequestMap) (
 	}
 }
 
-func isClusterId(id uint64) bool {
-	// It is a cluster ID if the first bit of the 48 bit uint is set
-	if id & (1<<47) > 0 {
-		return true
-	} else {
-		return false
-	}
+// Request to get _xdcr XATTR
+func (xmem *XmemNozzle) composeRequestForGetXattr(key string, vb uint16, opaque uint32) *mc.MCRequest {
+	req := &mc.MCRequest{VBucket: vb,
+		Key:    []byte(key),
+		Opaque: opaque,
+		// We want the XATTR even if the document is deleted
+		Extras: []byte{base.SUBDOC_DOC_FLAG_ACCESS_DELETED},
+		/*
+		 * Paths are specified in body in the form:
+		 * commandCode(1 byte) flag(1 byte) length(2 bytes) path
+		 * We only look up one path: _xdcr
+		 */
+		Body:   []byte{uint8(base.SUBDOC_GET), base.SUBDOC_FLAG_XATTR, 0, 0, '_', 'x', 'd', 'c', 'r'},
+		Opcode: base.SUBDOC_MULTI_LOOKUP}
+	binary.BigEndian.PutUint16(req.Body[2:], uint16(len("_xdcr")))
+
+	return req
 }
 
-func (xmem *XmemNozzle) hasClusterID(meta documentMetadata) bool {
-	return isClusterId(meta.revSeq)
-}
 const (
-	XATTR_PCAS = "_xdcr_pc" // Name of an Xattribute. It's value is a version vector {"key":value,...}
-	XATTR_MV   = "_xdcr_mv" // Name of an Xattribute. It's value is a version vector {"key":value,...}
-	XATTR_LWW  = "lww"      // Possible key in the version vector above
-	XATTR_REVID  = "revId"	// Possible key in the version vector above
+	XATTR_XDCR = "_xdcr" // The XDCR XATTR
+	XATTR_ID   = "id"    // The cluster ID field in _xdcr
+	XATTR_CV   = "cv"    // The Cas field in _xdcr
+	XATTR_PCAS = "pc"    // The Pcas field in _xdcr
+	XATTR_MV   = "mv"    // the MV field in _xdcr
 )
-func (xmem *XmemNozzle) findSourceCustomCRXattr(req *mc.MCRequest) (pcas, mv []byte, err error) {
-	if req.DataType & mcc.XattrDataType == 0 {
-		return
-	}
-	pcas, mv, err = xmem.findCustomCRXattrFromBody(req.Body, false /* MvOnly */)
-	return
-}
 
-func (xmem *XmemNozzle) findTargetCustomCRXattr(resp *mc.MCResponse) (mv []byte, err error) {
-	if resp.DataType & mcc.XattrDataType == 0 {
+// This will find the custom CR XATTR from the req body
+func (xmem *XmemNozzle) findSourceCustomCRXattr(req *mc.MCRequest) (clusterId, cv, pcas, mv []byte, err error) {
+	if req.DataType&mcc.XattrDataType == 0 {
 		return
 	}
-	_, mv, err = xmem.findCustomCRXattrFromBody(resp.Body, true /* MvOnly */)
-	return
-}
-func (xmem *XmemNozzle) findCustomCRXattrFromBody(body []byte, mvOnly bool) (pcas, mv []byte, err error) {
-	var pos uint32 = 0;
+	body := req.Body
+	var pos uint32 = 0
 	pos = pos + 4
 
 	xattrIter, err := base.NewXattrIterator(body)
@@ -1974,157 +1988,91 @@ func (xmem *XmemNozzle) findCustomCRXattrFromBody(body []byte, mvOnly bool) (pca
 		return
 	}
 	var key, value []byte
+	var xattr []byte
 	for xattrIter.HasNext() {
 		key, value, err = xattrIter.Next()
 		if err != nil {
 			xmem.Logger().Errorf("findCustomCRXattrFromBody received error %v from NewXattrIterator for body %v", err, body)
 			return
 		}
-		if !mvOnly && pcas == nil && base.Equals(key, XATTR_PCAS) {
-			pcas = value
+		if base.Equals(key, XATTR_XDCR) {
+			xattr = value
+			break
 		}
-		if mv == nil && base.Equals(key, XATTR_MV) {
-			mv = value
-		}
-		if pcas != nil && mv != nil {
+	}
+	if xattr == nil {
+		// Source does not have _xdcr XATTR
+		return
+	}
+	// Found _xdcr XATTR. Now find the fields.
+	return xmem.findCustomCRXattrFields(xattr)
+}
+
+/*
+ * resp is expected to be a subdoc_multi_lookup response. Since we only lookup
+ * _xdcr or _xdcr plus body, the response is at the beginning of the body:
+ * 2 byte status, 4 byte lengh, value payload start at byte 6
+ */
+func (xmem *XmemNozzle) findTargetCustomCRXattr(resp *mc.MCResponse) (clusterId, cv, pcas, mv []byte, err error) {
+	status := mc.Status(binary.BigEndian.Uint16(resp.Body[0:2]))
+	if status == mc.SUCCESS {
+		xattrlen := binary.BigEndian.Uint32(resp.Body[2:6])
+		xattr := resp.Body[6 : 6+xattrlen]
+		clusterId, cv, pcas, mv, err = xmem.findCustomCRXattrFields(xattr)
+	}
+	return
+}
+
+func (xmem *XmemNozzle) findCustomCRXattrFields(xattr []byte) (clusterId, cv, pcas, mv []byte, err error) {
+	it, err := base.NewCCRXattrFieldIterator(xattr)
+	if err != nil {
+		xmem.Logger().Errorf("findCustomCRXattrFields received error %v create XattrFieldIterator for %v", err, xattr)
+		return
+	}
+	for it.HasNext() {
+		var key, value []byte
+		key, value, err = it.Next()
+		if err != nil {
+			xmem.Logger().Errorf("findCustomCRXattrFields received error '%v' iterating through %v", err, string(xattr))
 			return
+		}
+		if base.Equals(key, XATTR_ID) {
+			clusterId = value
+		} else if base.Equals(key, XATTR_CV) {
+			cv = value
+		} else if base.Equals(key, XATTR_PCAS) {
+			pcas = value
+		} else if base.Equals(key, XATTR_MV) {
+			mv = value
 		}
 	}
 	return
 }
 
 /*
- * vv is a version vector in the form {"key":value,"key":value,...}. It is either PCAS or MV.
- * Key is:
- *  - clusterID if it is 7.0 doc, or
- *  - "revId" if it is pre-7.0 and CR mode is revId
- *  - "lww" if it is pre-7.0 and CR mode is LWW
- * returns the mapped value if found. The mapped value is CAS except when key is "revId"
+ * vv is a version vector in the form {"key":"value","key":"value",...}. It is either PCAS or MV.
+ * Key is clusterID. Value is Cas encoded with base64.
+ * returns the value converted back to uint64 if found.
  * returns 0 if not found
  */
-func (xmem *XmemNozzle) findItemInVV(vv []byte, key string) (cas uint64) {
-	it, err := NewVVIterator(vv)
+func findItemInVV(vv []byte, key []byte) (cas uint64, err error) {
+	if len(vv) == 0 {
+		return 0, nil
+	}
+	it, err := base.NewCCRXattrFieldIterator(vv)
 	if err != nil {
-		xmem.Logger().Errorf("findItemInVV received error %v creating VVIterator for %v", err, vv)
-		return 0
+		return 0, err
 	}
 	for it.HasNext() {
 		itemKey, itemValue, err := it.Next()
 		if err != nil {
-			xmem.Logger().Errorf("findItemInVV received error '%v' at position %v iterating through %v", err, it.pos, string(vv))
-			return 0
+			return 0, err
 		}
-		if itemKey == key {
-			return itemValue
-		}
-	}
-	return 0
-}
-func (xmem *XmemNozzle) sourceXattrDominate(source *mc.MCRequest, revSeq, cas uint64) bool {
-	if source.DataType & mcc.XattrDataType == 0 {
-		return false
-	}
-
-	var key string
-	var value uint64
-	if isClusterId(revSeq) {
-		key = fmt.Sprintf("%d", revSeq)
-		value = cas
-	} else if xmem.source_cr_mode == base.CRMode_LWW {
-		key = XATTR_LWW
-		value = cas
-	} else {
-		key = XATTR_REVID
-		value = revSeq
-	}
-	if xmem.Logger().GetLogLevel() >= log.LogLevelDebug {
-		xmem.Logger().Debugf("sourceXattrDominate seaching for key %v and value greater or equal to %v", key, value)
-	}
-	body := source.Body
-	pcas, mv, err := xmem.findSourceCustomCRXattr(source)
-	if err != nil {
-		xmem.Logger().Errorf("findSourceCustomCRXattr() returned error for %v", body)
-		return false
-	}
-	if pcas != nil {
-		valueInPcas := xmem.findItemInVV(pcas, key)
-		if xmem.Logger().GetLogLevel() >= log.LogLevelDebug {
-			xmem.Logger().Debugf("key: %v, valueInPcas: %v, value to check: %v", key, valueInPcas, value)
-		}
-		if valueInPcas >= value {
-			return true
+		if bytes.Equal(itemKey, key) {
+			return base.Base64ToUint64(itemValue)
 		}
 	}
-	if mv != nil {
-		valueInMv := xmem.findItemInVV(mv, key)
-		if xmem.Logger().GetLogLevel() >= log.LogLevelDebug {
-			xmem.Logger().Debugf("key: %v, valueInMv: %v, value to check: %v", key, valueInMv, value)
-		}
-		if valueInMv >= value {
-			return true
-		}
-	}
-	return false
-}
-
-// target is a response from getMeta so we don't have target XATTR here.
-// Source XATTR is available
-func (xmem *XmemNozzle) detectConflictWithMeta(source *base.WrappedMCRequest, target *mc.MCResponse, source_cr_mode base.ConflictResolutionMode,
-		xattrEnabled bool, logger *log.CommonLogger) ConflictResult {
-	if target.Status == mc.KEY_ENOENT {
-		// Target doesn't exist
-		return SourceDominate
-	}
-	doc_meta_source := decodeSetMetaReq(source)
-	doc_meta_target, err := xmem.decodeGetMetaResp(source.Req.Key, target)
-	if err != nil {
-		xmem.Logger().Warnf("%v detectConflictWithMeta: Error decoding getMeta response for doc %v%v%v. err=%v. Treat it as conflict", xmem.Id(), base.UdTagBegin, source.Req.Key, base.UdTagEnd, err)
-		return Conflict
-	}
-	switch xmem.hasClusterID(doc_meta_source) {
-	case true: // source 7.0
-		switch xmem.hasClusterID(doc_meta_target) {
-		case true: // Both 7.0
-			if doc_meta_target.cas > doc_meta_source.cas {
-				// Either target dominate, or conflict and target will do CR.
-				// In both cases return TargetDominate since we want to skip
-				return TargetDominate
-			}
-			if doc_meta_source.revSeq == doc_meta_target.revSeq {
-				// Same clusterID
-				if doc_meta_source.cas > doc_meta_target.cas {
-					return SourceDominate
-				} else {
-					return TargetDominate
-				}
-			} else {
-				// 7.0 docs with different cluster ID. Need to check source PCAS/MV
-				if xmem.sourceXattrDominate(source.Req, doc_meta_target.revSeq, doc_meta_target.cas) {
-					return SourceDominate
-				} else {
-					return Conflict
-				}
-			}
-		case false: // Source 7.0, target pre-7.0
-			if xmem.sourceXattrDominate(source.Req, doc_meta_target.revSeq, doc_meta_target.cas) {
-				return SourceDominate
-			} else {
-				return Conflict
-			}
-		}
-	case false: // source pre-7.0
-		switch xmem.hasClusterID(doc_meta_target) {
-		case true: // source pre-7.0, target 7.0
-			return TargetDominate
-		case false: // Both pre-7.0
-			if resolveConflict(doc_meta_source, doc_meta_target, source_cr_mode, xattrEnabled, logger) {
-				return SourceDominate
-			} else {
-				return TargetDominate
-			}
-		}
-	}
-	return Conflict
+	return 0, nil
 }
 
 /**
@@ -2245,7 +2193,7 @@ func (xmem *XmemNozzle) batchGetForCustomCR(possibleConflict_map base.McRequestM
 		for uniqueKey, wrappedReq := range possibleConflict_map {
 			key := string(wrappedReq.Req.Key)
 			resp, ok := respMap[key]
-			if ok && (resp.Status == mc.SUCCESS || resp.Status == mc.KEY_ENOENT) {
+			if ok && (resp.Status == mc.SUCCESS || resp.Status == mc.KEY_ENOENT || resp.Status == mc.SUBDOC_BAD_MULTI) {
 				switch xmem.detectConflictWithXattr(wrappedReq.Req, resp) {
 				case SourceDominate:
 					// TODO(MB-39012): when UPRRequest is extended to have expectedCas field:
@@ -2273,112 +2221,181 @@ func (xmem *XmemNozzle) batchGetForCustomCR(possibleConflict_map base.McRequestM
 		}
 	}
 }
-// This is iterator for PCAS or MV, both a form of version vector
-type VVIterator struct {
-	vv	[]byte
-	pos	int
-}
-func NewVVIterator(versionVector []byte) (*VVIterator, error) {
-	length := len(versionVector)
-	if versionVector[0] != '{' || versionVector[length-1] != '}' {
-		return nil, fmt.Errorf("Version vector invalid format")
-	}
-	return &VVIterator{
-			vv:		versionVector,
-			pos:	1,
-			}, nil
-}
-func (vi *VVIterator) HasNext() bool {
-	return vi.pos < len(vi.vv)
-}
-func (vi *VVIterator) Next() (id string, value uint64, err error) {
-	// PCAS/MV has the format {"123456":456,"140737488357328":1587440822967074820}
-	beginQuote := vi.pos
-	colon := bytes.Index(vi.vv[beginQuote:], []byte{':'})
-	endQuote := beginQuote + colon - 1
-	if colon == -1 || vi.vv[beginQuote] != '"' || vi.vv[endQuote] != '"' {
-		err = fmt.Errorf("Version vector invalid format with pos=%v, endQuote =%v", vi.pos,endQuote)
-		return
-	}
-	id = string(vi.vv[beginQuote+1:endQuote])
 
-	comma := bytes.Index(vi.vv[endQuote:],[]byte{','})
-	valueStart := endQuote + 2
-	var valueEnd int
-	if comma == -1 {
-		valueEnd = len(vi.vv) - 1
+type CustomCRMeta struct {
+	senderId []byte // The source cluster that sent the document to XDCR
+	cas      uint64 // The Cas in the document metadata
+	cvId     []byte // _xdcr.id in XATTR
+	cv       uint64 // _xdcr.cv in XATTR
+	pcas     []byte // _xdcr.pc in XATTR
+	mv       []byte // _xdcr.mv in XATTR
+}
+
+func NewCustomCRMeta(sourceId []byte, cas uint64, id, cvHex, pcas, mv []byte) (*CustomCRMeta, error) {
+	if len(cvHex) == 0 {
+		return &CustomCRMeta{
+			senderId: sourceId,
+			cas:      cas,
+			cvId:     nil,
+			cv:       0,
+			pcas:     nil,
+			mv:       nil,
+		}, nil
+	}
+	cv, err := base.HexLittleEndianToUint64(cvHex)
+	if err != nil {
+		return nil, err
+	}
+	return &CustomCRMeta{
+		senderId: sourceId,
+		cas:      cas,
+		cvId:     id,
+		cv:       cv,
+		pcas:     pcas,
+		mv:       mv,
+	}, nil
+}
+
+func (doc *CustomCRMeta) isMergedDoc() bool {
+	if doc.mv != nil && doc.cas == doc.cv {
+		return true
 	} else {
-		valueEnd = endQuote + comma
+		return false
 	}
-	vi.pos = valueEnd + 1
-	for i := valueStart; i<valueEnd; i++ {
-		if vi.vv[i] < '0' || vi.vv[i] > '9' {
-			err = fmt.Errorf("Version vector invalid format")
-			return
+}
+
+func (doc *CustomCRMeta) docId() []byte {
+	if doc.cas > doc.cv {
+		// New change in sending cluster so that's the id
+		return doc.senderId
+	} else {
+		return doc.cvId
+	}
+}
+
+func (doc *CustomCRMeta) docCas() uint64 {
+	return doc.cas
+}
+
+func (doc *CustomCRMeta) containsVersion(targetId []byte, targetCas uint64) (bool, error) {
+	if doc.cas > doc.cv && bytes.Equal(doc.senderId, targetId) {
+		if doc.cas >= targetCas {
+			return true, nil
+		} else {
+			return false, nil
 		}
-		value = value * 10 + uint64(vi.vv[i] - '0')
 	}
-	return
+	if bytes.Equal(doc.cvId, targetId) {
+		if doc.cv >= targetCas {
+			return true, nil
+		} else {
+			return false, nil
+		}
+	}
+	if doc.pcas != nil {
+		casInVV, err := findItemInVV(doc.pcas, targetId)
+		if err != nil {
+			return false, err
+		}
+		if casInVV >= targetCas {
+			return true, nil
+		}
+	}
+	if doc.mv != nil {
+		casInVV, err := findItemInVV(doc.mv, targetId)
+		if err != nil {
+			return false, err
+		}
+		if casInVV >= targetCas {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+func (doc *CustomCRMeta) containsVV(vv []byte) (bool, error) {
+	it, err := base.NewCCRXattrFieldIterator(vv)
+	if err != nil {
+		return false, err
+	}
+	for it.HasNext() {
+		var key, value []byte
+		key, value, err = it.Next()
+		if err != nil {
+			return false, err
+		}
+		cas, err := base.Base64ToUint64(value)
+		if err != nil {
+			return false, err
+		}
+		if res, err := doc.containsVersion(key, cas); err != nil || res == false {
+			return false, err
+		}
+	}
+	return true, nil
 }
 
 // This is called after getting the target document. So we have both source and target XATTRs
 // If target doesn't exist (target.Status == KEY_ENOENT), return SourceDominate
 func (xmem *XmemNozzle) detectConflictWithXattr(source *mc.MCRequest, target *mc.MCResponse) ConflictResult {
-	/*
-	 * Between getMeta and fetch document, if the target document CAS has changed, we will check
-	 * the meta in the document again.
-	 */
-	/*
-	 * TODO(MB-39012): KV should add expected CAS in MCRequest for optimistic locking.
-	 * It also should return revId in MCResponse for the GET. Once these are there, we need to do:
-	 * if target.Cas > expected CAS in MCRequest {
-	 *	res = detectConflictWithMeta(source, target, xmem.source_cr_mode, xmem.xattrEnabled, xmem.Logger())
-	 *	if res != Conflict {
-	 *		return res
-	 *	}
-	 *}
-	 */
-	// TODO(MB-39012): Revisit after KV change. Currently it is always 0.
-	if target.DataType & mcc.XattrDataType == 0 {
-		// No MV for target. Cannot establish dominance.
+	if target.Status == mc.KEY_ENOENT {
+		// Target doesn't exist
+		return SourceDominate
+	}
+	if target.Cas > source.Cas {
+		// We can only replicate from larger CAS to smaller
+		return TargetDominate
+	}
+	targetId, targetCv, targetPcas, targetMv, err := xmem.findTargetCustomCRXattr(target)
+	if err != nil {
+		xmem.Logger().Errorf("detectConflictWithXattr received error %v calling findTargetCustomCRXattr()", err)
 		return Conflict
 	}
-	targetMv, err := xmem.findTargetCustomCRXattr(target)
-	if targetMv == nil || err != nil {
+	targetMeta, err := NewCustomCRMeta(xmem.targetClusterId, target.Cas, targetId, targetCv, targetPcas, targetMv)
+	if err != nil {
+		xmem.Logger().Errorf("detectConflictWithXattr received error %v calling NewCustomCRMeta()", err)
 		return Conflict
 	}
-	sourcePcas, sourceMv, err := xmem.findSourceCustomCRXattr(source)
+	sourceId, sourceCv, sourcePcas, sourceMv, err := xmem.findSourceCustomCRXattr(source)
 	if err != nil {
 		xmem.Logger().Errorf("detectConflictWithXattr received error %v calling findSourceCustomCRXattr()", err)
 		return Conflict
 	}
-	return xmem.detectConflictWithXattr_inner(sourcePcas, sourceMv, targetMv)
-}
-func (xmem *XmemNozzle) detectConflictWithXattr_inner(sourcePcas, sourceMv, targetMv []byte) ConflictResult {
-	targetVVIterator, err := NewVVIterator(targetMv)
+	sourceMeta, err := NewCustomCRMeta(xmem.sourceClusterId, source.Cas, sourceId, sourceCv, sourcePcas, sourceMv)
 	if err != nil {
-		xmem.Logger().Errorf("detectConflictWithXattr_inner received error %v creating VVIterator for %v", err, string(targetMv))
+		xmem.Logger().Errorf("detectConflictWithXattr received error %v calling NewCustomCRMeta()", err)
 		return Conflict
 	}
-	for targetVVIterator.HasNext() {
-		targetId, targetValue, err := targetVVIterator.Next()
+	if targetMeta.isMergedDoc() {
+		res, err := sourceMeta.containsVV(targetMv)
 		if err != nil {
-			xmem.Logger().Errorf("detectConflictWithXattr_inner received err %v iterating through %v", err, string(targetMv))
+			xmem.Logger().Errorf("detectConflictWithXattr received error %v", err)
 			return Conflict
 		}
-		casInPcas := xmem.findItemInVV(sourcePcas, targetId)
-		if casInPcas > 0 && casInPcas >= targetValue {
-			continue
+		if res == true {
+			return SourceDominate
 		}
-		casInMv := xmem.findItemInVV(sourceMv, targetId)
-		if casInMv > 0 && casInMv >= targetValue {
-			continue
+	} else {
+		res, err := sourceMeta.containsVersion(targetMeta.docId(), targetMeta.docCas())
+		if err != nil {
+			xmem.Logger().Errorf("detectConflictWithXattr received error %v", err)
+			return Conflict
 		}
-		// Didn't find larger CAS for this item.
-		return Conflict
+		if res == true {
+			return SourceDominate
+		}
 	}
-	// Found larger CAS for every item in targetMV.
-	return SourceDominate
+	// Now target has a smaller CAS but source does not dominate. Let's check if target dominates source MV
+	if sourceMeta.isMergedDoc() {
+		res, err := targetMeta.containsVV(sourceMeta.mv)
+		if err != nil {
+			xmem.Logger().Errorf("detectConflictWithXattr received error %v", err)
+			return Conflict
+		}
+		if res == true {
+			return TargetSetBack
+		}
+	}
+	return Conflict
 }
 
 func (xmem *XmemNozzle) composeRequestForGet(key string, vb uint16, opaque uint32) *mc.MCRequest {
@@ -2908,6 +2925,8 @@ func isIgnorableMCResponse(resp *mc.MCResponse) bool {
 	case mc.KEY_ENOENT:
 		return true
 	case mc.KEY_EEXISTS:
+		return true
+	case mc.SUBDOC_BAD_MULTI:
 		return true
 	}
 

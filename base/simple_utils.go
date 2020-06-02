@@ -14,6 +14,8 @@ import (
 	"bytes"
 	"crypto/rand"
 	"encoding/base64"
+	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"expvar"
@@ -922,6 +924,50 @@ func Uint64ToInt64(x uint64) int64 {
 		return math.MaxInt64
 	}
 	return int64(x)
+}
+
+func Base64ToUint64(b64 []byte) (uint64, error) {
+	decoded := make([]byte, 8)
+	_, err := base64.RawStdEncoding.Decode(decoded, b64)
+	if err != nil {
+		return 0, err
+	}
+	return binary.BigEndian.Uint64(decoded), nil
+}
+
+func Uint64ToBase64(u64 uint64) ([]byte) {
+	src := make([]byte, 8)
+	binary.BigEndian.PutUint64(src, u64)
+	encoded := make([]byte, base64.RawStdEncoding.EncodedLen(8))
+	base64.RawStdEncoding.Encode(encoded, src)
+	return encoded
+}
+
+// This routine expect prefix 0x since this is included in KV macro expansion.
+func HexLittleEndianToUint64(hexLE []byte) (uint64, error) {
+	if len(hexLE) <= 2 {
+		return 0, fmt.Errorf("Hex input too short.")
+	}
+	if hexLE[0] != '0' || hexLE[1] != 'x' {
+		return 0, fmt.Errorf("Incorrect hex input %v", hexLE)
+	}
+	decoded := make([]byte, hex.DecodedLen(len(hexLE[2:])))
+	_, err := hex.Decode(decoded, hexLE[2:])
+	if err != nil {
+		return 0, err
+	}
+	res := binary.LittleEndian.Uint64(decoded)
+	return res, nil
+}
+
+func Uint64ToHexLittleEndian(u64 uint64) []byte {
+	le := make([]byte, 8)
+	binary.LittleEndian.PutUint64(le, u64)
+	encoded := make([]byte, hex.EncodedLen(8)+2)
+	hex.Encode(encoded[2:], le)
+	encoded[0] = '0'
+	encoded[1] = 'x'
+	return encoded
 }
 
 // construct vb->server map for the vbs in vbList using server->vbList map
