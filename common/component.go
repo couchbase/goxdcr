@@ -65,6 +65,8 @@ const (
 	// NOTE: This event is only supposed to be raised after ensuring the data will be
 	// re-replicated later in another backfill
 	DataNotReplicated ComponentEventType = iota
+	// When a backfill pipeline ends, throughSeqnoTrackerSvc will raise this once the last seen DCP seqno has been processed
+	LastSeenSeqnoDoneProcessed ComponentEventType = iota
 )
 
 type Event struct {

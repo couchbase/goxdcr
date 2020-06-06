@@ -68,11 +68,11 @@ type BackfillRequestHandler struct {
 
 	getThroughSeqno LatestSeqnoGetter
 	vbsGetter       MyVBsGetter
+	vbsDoneNotifier MyVBsTasksDoneNotifier
 
 	spec *metadata.ReplicationSpecification
 
 	// TODO MB-38931 - once consistent metakv is in, this needs to be updated
-	// TODO MB-39634 - need to handle cold start
 	cachedBackfillSpec *metadata.BackfillReplicationSpec
 }
 
@@ -80,9 +80,11 @@ type LatestSeqnoGetter func() (map[uint16]uint64, error)
 
 type MyVBsGetter func() ([]uint16, error)
 
+type MyVBsTasksDoneNotifier func(startNewTask bool)
+
 func NewCollectionBackfillRequestHandler(logger *log.CommonLogger, replId string, backfillReplSvc service_def.BackfillReplSvc,
 	spec *metadata.ReplicationSpecification, seqnoGetter LatestSeqnoGetter, vbsGetter MyVBsGetter, maxConcurrentReqs int,
-	persistInterval time.Duration) *BackfillRequestHandler {
+	persistInterval time.Duration, vbsTasksDoneNotifier MyVBsTasksDoneNotifier) *BackfillRequestHandler {
 	return &BackfillRequestHandler{
 		AbstractComponent:    component.NewAbstractComponentWithLogger(replId, logger),
 		logger:               logger,
@@ -100,6 +102,7 @@ func NewCollectionBackfillRequestHandler(logger *log.CommonLogger, replId string
 		vbsGetter:            vbsGetter,
 		backfillReplSvc:      backfillReplSvc,
 		persistInterval:      persistInterval,
+		vbsDoneNotifier:      vbsTasksDoneNotifier,
 	}
 }
 
@@ -293,12 +296,16 @@ func (b *BackfillRequestHandler) requestPersistence(op PersistType) {
 	}
 }
 
-// This is called per vb when DCP notifies backfill request handler that a VB has finished a task
+// This is called per vb when ThroughSeqnoSvc notifies backfill request handler that a VB has finished a task
 // Once a VB is finished, the VB task needs to be removed from the VBTaskMap, and then
 // it'll wait for other VBs until all the responsible VBs are finished
-// DCP should eventually all finish all the VBs, and the pipeline will restart
+// The idea is that DCP for each VB that producer (KV) says "StreamEnd", it means there's no more data
+// ThroughSeqnoTrackerSvc then will ensure that the seqno last sent from the DCP is considered finished
+// Eventually all the VBs will finish, and the pipeline will restart
 // DCP has a check stuckness monitor. So if a VB is stuck, it'll restart the pipeline
-func (b BackfillRequestHandler) handleVBDone(vbno uint16) error {
+// If XMEM is stuck, then this callback will not be called, checkpoints will not be deleted,
+// and backfill pipeline will restart with error to restart from the last checkpoint.
+func (b *BackfillRequestHandler) handleVBDone(vbno uint16) error {
 	b.pipelineMtx.Lock()
 	vbIsAlreadyDone, exists := b.pipelineVBsDone[vbno]
 	if !exists {
@@ -320,7 +327,6 @@ func (b BackfillRequestHandler) handleVBDone(vbno uint16) error {
 	b.pipelineTotalVBsDone++
 
 	if b.cachedBackfillSpec == nil {
-		// TODO remove after testing - could be hit due to MB-39634
 		panic("Cannot be nil")
 	} else {
 		b.cachedBackfillSpec.VBTasksMap.MarkOneVBTaskDone(vbno)
@@ -347,7 +353,8 @@ func (b BackfillRequestHandler) handleVBDone(vbno uint16) error {
 	b.pipelineMtx.Unlock()
 
 	if backfillDone {
-		// TODO MB-39636 - declare backfill finished
+		hasMoreTasks := b.cachedBackfillSpec.VBTasksMap.ContainsAtLeastOneTask()
+		b.vbsDoneNotifier(hasMoreTasks)
 	}
 	return nil
 }
@@ -397,7 +404,7 @@ func (b *BackfillRequestHandler) Attach(pipeline common.Pipeline) error {
 		supervisor := b.pipeline.RuntimeContext().Service(base.PIPELINE_SUPERVISOR_SVC).(*pipeline_svc.PipelineSupervisor)
 		supervisor.OnEvent(common.NewEvent(common.ErrorEncountered, nil /*data*/, nil /*component*/, nil /*derivedData*/, err))
 	}
-	b.logger.Infof("BackfillRequestHandler %v attached to pipeline %v with %v total VBs", b.Id(), pipeline, len(b.pipelineVBsDone))
+	b.logger.Infof("BackfillRequestHandler %v attached to %v with %v total VBs", b.Id(), pipeline.FullTopic(), len(b.pipelineVBsDone))
 	return nil
 }
 
@@ -434,9 +441,17 @@ func (b *BackfillRequestHandler) ProcessEvent(event *common.Event) error {
 		close(syncCh)
 	case common.StreamingEnd:
 		// DCP will send out these events one per VB, until all the VBs that a backfill pipeline's is finished
-		vbno, ok := event.Data.(uint16)
+		_, ok := event.Data.(uint16)
 		if !ok {
 			err := fmt.Errorf("Invalid vbno data type raised for StreamingEnd. Type: %v", reflect.TypeOf(event.Data))
+			b.logger.Errorf(err.Error())
+			b.raisePipelineError(err)
+			return err
+		}
+	case common.LastSeenSeqnoDoneProcessed:
+		vbno, ok := event.Data.(uint16)
+		if !ok {
+			err := fmt.Errorf("Invalid vbno data type raised for LastSeenSeqnoDoneProcessed. Type: %v", reflect.TypeOf(event.Data))
 			b.logger.Errorf(err.Error())
 			b.raisePipelineError(err)
 			return err

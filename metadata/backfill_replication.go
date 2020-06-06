@@ -204,6 +204,15 @@ func NewBackfillVBTasksMap(namespaceMap CollectionNamespaceMapping, vbs []uint16
 	return vbTasksMap, nil
 }
 
+func (v VBTasksMapType) ContainsAtLeastOneTask() bool {
+	for _, tasks := range v {
+		if tasks != nil && len(*tasks) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
 func (this VBTasksMapType) SameAs(other VBTasksMapType) bool {
 	if len(this) != len(other) {
 		return false

@@ -103,11 +103,36 @@ func (p *pipelineSvcWrapper) UpdateSettings(settings metadata.ReplicationSetting
 }
 
 func (p *pipelineSvcWrapper) IsSharable() bool {
+	// TODO - MB-39797
 	return false
 }
 
 func (p *pipelineSvcWrapper) Detach(pipeline common.Pipeline) error {
 	return base.ErrorNotSupported
+}
+
+func (p *pipelineSvcWrapper) GetComponentEventListener(pipeline common.Pipeline) (common.ComponentEventListener, error) {
+	var emptyEventListener common.ComponentEventListener
+	if pipeline.Type() != common.BackfillPipeline {
+		return emptyEventListener, base.ErrorInvalidInput
+	}
+
+	spec := pipeline.Specification().GetReplicationSpec()
+	if spec == nil {
+		err := fmt.Errorf("Pipeline %v has nil spec", pipeline.Topic())
+		p.backfillMgr.logger.Errorf(err.Error())
+		return emptyEventListener, err
+	}
+
+	p.backfillMgr.specReqHandlersMtx.RLock()
+	defer p.backfillMgr.specReqHandlersMtx.RUnlock()
+	handler, ok := p.backfillMgr.specToReqHandlerMap[spec.Id]
+	if !ok {
+		err := fmt.Errorf("Unable to find handler given spec ID %v", spec.Id)
+		p.backfillMgr.logger.Errorf(err.Error())
+		return emptyEventListener, err
+	}
+	return handler, nil
 }
 
 func NewBackfillManager(collectionsManifestSvc service_def.CollectionsManifestSvc,
@@ -238,6 +263,22 @@ func (b *BackfillMgr) createBackfillRequestHandler(spec *metadata.ReplicationSpe
 	vbsGetter := func() ([]uint16, error) {
 		return b.GetMyVBs(spec.SourceBucketName)
 	}
+	vbsTasksDoneNotifier := func(startNewTask bool) {
+		// When the first tasks for all VBs in VBTasksMap are done, this is the callback
+		// (i.e. VBTasksMap 0th index of the VBTasksList for all VBs)
+		// It will tell pipeline manager to stop the backfill pipeline (tear down)
+		// and then start the backfill pipeline again (build a new one)
+		err := b.pipelineMgr.HaltBackfill(replId)
+		if err != nil {
+			b.logger.Errorf("Unable to halt backfill pipeline %v - %v", replId, err)
+		}
+		if startNewTask {
+			err = b.pipelineMgr.RequestBackfill(replId)
+			if err != nil {
+				b.logger.Errorf("Unable to request backfill pipeline %v - %v", replId, err)
+			}
+		}
+	}
 	var err error
 	b.specReqHandlersMtx.Lock()
 	if _, exists := b.specToReqHandlerMap[replId]; exists {
@@ -247,7 +288,7 @@ func (b *BackfillMgr) createBackfillRequestHandler(spec *metadata.ReplicationSpe
 	}
 	reqHandler := NewCollectionBackfillRequestHandler(b.logger, replId,
 		b.backfillReplSvc, spec, seqnoGetter, vbsGetter, spec.Settings.SourceNozzlePerNode*2,
-		base.BackfillPersistInterval)
+		base.BackfillPersistInterval, vbsTasksDoneNotifier)
 	b.specToReqHandlerMap[replId] = reqHandler
 	b.specReqHandlersMtx.Unlock()
 
@@ -545,4 +586,8 @@ func (b *BackfillMgr) GetMyVBs(sourceBucketName string) ([]uint16, error) {
 
 func (b *BackfillMgr) GetPipelineSvc() common.PipelineService {
 	return b.pipelineSvc
+}
+
+func (b *BackfillMgr) GetComponentEventListener(pipeline common.Pipeline) (common.ComponentEventListener, error) {
+	return b.pipelineSvc.GetComponentEventListener(pipeline)
 }

@@ -1014,6 +1014,13 @@ func (xdcrf *XDCRFactory) registerServices(pipeline common.Pipeline, logger_ctx 
 		return err
 	}
 
+	// Register BackfillMgr as a pipeline service
+	backfillMgrPipelineSvc := xdcrf.getBackfillMgr().GetPipelineSvc()
+	err = ctx.RegisterService(base.BACKFILL_MGR_SVC, backfillMgrPipelineSvc)
+	if err != nil {
+		return err
+	}
+
 	// through seqno tracker needs to be initialized after pipeline supervisor
 	// since it uses the latter as error handler
 	through_seqno_tracker_svc := service_impl.NewThroughSeqnoTrackerSvc(logger_ctx)
@@ -1083,13 +1090,6 @@ func (xdcrf *XDCRFactory) registerServices(pipeline common.Pipeline, logger_ctx 
 		for _, target := range pipeline.Targets() {
 			target.(*parts.XmemNozzle).SetBandwidthThrottler(bw_throttler_svc)
 		}
-	}
-
-	// Register BackfillMgr as a pipeline service
-	backfillMgrPipelineSvc := xdcrf.getBackfillMgr().GetPipelineSvc()
-	err = ctx.RegisterService(base.BACKFILL_MGR_SVC, backfillMgrPipelineSvc)
-	if err != nil {
-		return err
 	}
 
 	return nil

@@ -21,3 +21,8 @@ type BackfillMgrIface interface {
 	// Backfill manager can act as a pipeline service and handle specific pipeline needs
 	GetPipelineSvc() common.PipelineService
 }
+
+type BackfillMgrComponentListenerGetter interface {
+	// Backfill manager can act as a component event listener given a pipeline
+	GetComponentEventListener(pipeline common.Pipeline) (common.ComponentEventListener, error)
+}

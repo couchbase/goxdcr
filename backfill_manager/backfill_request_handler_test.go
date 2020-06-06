@@ -47,6 +47,13 @@ func createVBsGetter() MyVBsGetter {
 	return getterFunc
 }
 
+func createVBDoneFunc() MyVBsTasksDoneNotifier {
+	notifierFunc := func(startNewTask bool) {
+		fmt.Printf("Notifierfunc called\n")
+	}
+	return notifierFunc
+}
+
 const SourceBucketName = "sourceBucketName"
 const SourceBucketUUID = "sourceBucketUUID"
 const TargetClusterUUID = "targetClusterUUID"
@@ -123,7 +130,7 @@ func TestBackfillReqHandlerStartStop(t *testing.T) {
 	assert := assert.New(t)
 	fmt.Println("============== Test case start: TestBackfillReqHandlerStartStop =================")
 	logger, backfillReplSvc := setupBRHBoilerPlate()
-	rh := NewCollectionBackfillRequestHandler(logger, specId, backfillReplSvc, createTestSpec(), createSeqnoGetterFunc(100), createVBsGetter(), maxConcurrentReqs, time.Second)
+	rh := NewCollectionBackfillRequestHandler(logger, specId, backfillReplSvc, createTestSpec(), createSeqnoGetterFunc(100), createVBsGetter(), maxConcurrentReqs, time.Second, createVBDoneFunc())
 	backfillReplSvc.On("BackfillReplSpec", mock.Anything).Return(nil, base.ErrorNotFound)
 	brhMockBackfillReplSvcCommon(backfillReplSvc)
 
@@ -166,7 +173,7 @@ func TestBackfillReqHandlerCreateReqThenMarkDone(t *testing.T) {
 	backfillReplSvc.On("AddBackfillReplSpec", mock.Anything).Run(func(args mock.Arguments) { (addCount)++ }).Return(nil)
 	backfillReplSvc.On("SetBackfillReplSpec", mock.Anything).Run(func(args mock.Arguments) { (setCount)++ }).Return(nil)
 
-	rh := NewCollectionBackfillRequestHandler(logger, specId, backfillReplSvc, spec, seqnoGetter, vbsGetter, maxConcurrentReqs, 500*time.Millisecond)
+	rh := NewCollectionBackfillRequestHandler(logger, specId, backfillReplSvc, spec, seqnoGetter, vbsGetter, maxConcurrentReqs, 500*time.Millisecond, createVBDoneFunc())
 
 	assert.NotNil(rh)
 	assert.Nil(rh.Start())

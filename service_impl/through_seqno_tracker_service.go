@@ -22,7 +22,10 @@ import (
 	"github.com/couchbase/goxdcr/pipeline_manager"
 	"github.com/couchbase/goxdcr/pipeline_svc"
 	"github.com/couchbase/goxdcr/pipeline_utils"
+	"github.com/couchbase/goxdcr/service_def"
+	"reflect"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -88,6 +91,21 @@ type ThroughSeqnoTrackerSvc struct {
 
 	logger      *log.CommonLogger
 	unitTesting bool
+
+	// For backfill pipeline, it'll require coordination effort
+	// 1. DCP will first send streamEnd
+	// 2. This service will need to find the last DCP seen seqno and watch for it to be processed
+	vbBackfillHelperActive    uint32
+	vbBackfillLastDCPSeqnoMap map[uint16]*base.SeqnoWithLock
+
+	// The done map is used to make sure only the VB's that received streamStart should wait for streamEnd
+	// And then only those received streamEnd should wait for ThroughSeqno to catch up to the lastSeenDCPSeqno
+	// Uses SeqnoWithLock but ultimately only need 3 values
+	//
+	// 0: This VB should receive streamEnd
+	// 1: StreamEnd received
+	// 2: ThroughSeqno Reached
+	vbBackfillHelperDoneMap map[uint16]*base.SeqnoWithLock
 }
 
 // struct containing two seqno lists that need to be accessed and locked together
@@ -277,6 +295,8 @@ func NewThroughSeqnoTrackerSvc(logger_ctx *log.LoggerContext) *ThroughSeqnoTrack
 		vbSystemEventsSeqnoListMap:  make(SeqnoManifestsMapType),
 		vbIgnoredSeqnoListMap:       make(map[uint16]*base.SortedSeqnoListWithLock),
 		vbTgtSeqnoManifestMap:       make(SeqnoManifestsMapType),
+		vbBackfillLastDCPSeqnoMap:   make(map[uint16]*base.SeqnoWithLock),
+		vbBackfillHelperDoneMap:     make(map[uint16]*base.SeqnoWithLock),
 	}
 	return tsTracker
 }
@@ -297,11 +317,13 @@ func (tsTracker *ThroughSeqnoTrackerSvc) initialize(pipeline common.Pipeline) {
 		tsTracker.vbSystemEventsSeqnoListMap[vbno] = newDualSortedSeqnoListWithLock()
 		tsTracker.vbIgnoredSeqnoListMap[vbno] = base.NewSortedSeqnoListWithLock()
 		tsTracker.vbTgtSeqnoManifestMap[vbno] = newDualSortedSeqnoListWithLock()
+		tsTracker.vbBackfillLastDCPSeqnoMap[vbno] = base.NewSeqnoWithLock()
+		tsTracker.vbBackfillHelperDoneMap[vbno] = base.NewSeqnoWithLock()
 	}
 }
 
 func (tsTracker *ThroughSeqnoTrackerSvc) Attach(pipeline common.Pipeline) error {
-	tsTracker.logger.Infof("Attach through seqno tracker with pipeline %v\n", pipeline.InstanceId())
+	tsTracker.logger.Infof("Attach through seqno tracker with %v %v\n", pipeline.Type(), pipeline.InstanceId())
 
 	tsTracker.initialize(pipeline)
 
@@ -325,6 +347,43 @@ func (tsTracker *ThroughSeqnoTrackerSvc) Attach(pipeline common.Pipeline) error 
 		return err
 	}
 
+	if pipeline.Type() == common.BackfillPipeline {
+		// For backfill pipeline, the throughSeqnoTrackerSvc is needed to do the following (per needed VB):
+		// 1. Listen to DCP for stream end
+		// 2. Once (1) occurs, retrieve the "lastSeen" seqno. This is the last seqno that DCP received
+		// 3. Watch for this seqno to be handled, i.e. become the throughSeqnNo
+		// 4. Raise an Event to backfill request handler
+		backfillMgrPipelineSvc := pipeline.RuntimeContext().Service(base.BACKFILL_MGR_SVC)
+		if backfillMgrPipelineSvc == nil {
+			err := errors.New("Backfill Manager has to exist")
+			tsTracker.logger.Errorf("%v", err)
+			return err
+		}
+
+		componentListenerGetter, ok := backfillMgrPipelineSvc.(service_def.BackfillMgrComponentListenerGetter)
+		if !ok {
+			err := fmt.Errorf("For backfill pipeline service, cannot cast as componentListenerGetter type: %v", reflect.TypeOf(componentListenerGetter))
+			tsTracker.logger.Errorf("%v", err)
+			return err
+		}
+
+		backfillPipelineMgrComponentListener, err := componentListenerGetter.GetComponentEventListener(pipeline)
+		if err != nil {
+			return err
+		}
+
+		tsTracker.RegisterComponentEventListener(common.LastSeenSeqnoDoneProcessed, backfillPipelineMgrComponentListener)
+		if err != nil {
+			tsTracker.logger.Errorf("%v", err)
+			return err
+		}
+
+		dcp_parts := pipeline.Sources()
+		for _, dcp := range dcp_parts {
+			dcp.RegisterComponentEventListener(common.StreamingEnd, tsTracker)
+		}
+	}
+
 	return nil
 }
 
@@ -344,6 +403,11 @@ func (tsTracker *ThroughSeqnoTrackerSvc) markMCRequestAsIgnored(req *base.Wrappe
 	seqno := req.Seqno
 	vbno := req.Req.VBucket
 	tsTracker.addIgnoredSeqno(vbno, seqno)
+}
+
+// Implement ComponentEventListener
+func (tsTracker *ThroughSeqnoTrackerSvc) OnEvent(event *common.Event) {
+	tsTracker.ProcessEvent(event)
 }
 
 func (tsTracker *ThroughSeqnoTrackerSvc) ProcessEvent(event *common.Event) error {
@@ -391,11 +455,104 @@ func (tsTracker *ThroughSeqnoTrackerSvc) ProcessEvent(event *common.Event) error
 	case common.DataNotReplicated:
 		wrappedMcr := event.Data.(*base.WrappedMCRequest)
 		tsTracker.markMCRequestAsIgnored(wrappedMcr)
+	case common.StreamingEnd:
+		vbno, ok := event.Data.(uint16)
+		if !ok {
+			err := fmt.Errorf("Invalid vbno data type raised for StreamingEnd. Type: %v", reflect.TypeOf(event.Data))
+			tsTracker.logger.Errorf(err.Error())
+			tsTracker.handleGeneralError(err)
+			return err
+		}
+		tsTracker.handleBackfillStreamEnd(vbno)
 	default:
 		tsTracker.logger.Warnf("Incorrect event type, %v, received by %v", event.EventType, tsTracker.id)
 
 	}
 	return nil
+}
+
+func (tsTracker *ThroughSeqnoTrackerSvc) handleBackfillStreamEnd(vbno uint16) {
+	if atomic.CompareAndSwapUint32(&tsTracker.vbBackfillHelperActive, 0, 1) {
+		go tsTracker.bgScanForThroughSeqno()
+	}
+
+	lastSeenSeqno := tsTracker.vb_last_seen_seqno_map[vbno].GetSeqno()
+	tsTracker.vbBackfillLastDCPSeqnoMap[vbno].SetSeqno(lastSeenSeqno)
+
+	tsTracker.vbBackfillHelperDoneMap[vbno].SetSeqno(1)
+}
+
+func (tsTracker *ThroughSeqnoTrackerSvc) bgScanForThroughSeqno() {
+	// Wait for max time it takes for xmem to finish sending a mutation
+	totalScanTime := time.Duration(base.XmemMaxRetry) * base.XmemMaxRetryInterval
+	killTimer := time.NewTimer(totalScanTime)
+	periodicScanner := time.NewTicker(5 * time.Second /* TODO make this configurable*/)
+
+	defer killTimer.Stop()
+	defer periodicScanner.Stop()
+
+	for {
+		select {
+		case <-killTimer.C:
+			total, totalDone, waitingOnVbs := tsTracker.bgScanForDoneVBs()
+			if total == totalDone {
+				// Last minute catch
+				tsTracker.logger.Infof("%v Background check task finished", tsTracker.Id())
+				return
+			}
+			err := fmt.Errorf("ThroughSeqno %v background waiting backfill streams to all be replicated timed out. Expected count: %v actual count %v. VBs waiting on: %v",
+				tsTracker.Id(), total, totalDone, waitingOnVbs)
+			tsTracker.handleGeneralError(err)
+			return
+		case <-periodicScanner.C:
+			var doneLists []uint16
+			throughSeqnos := tsTracker.GetThroughSeqnos()
+
+			for vbno, lastSeenSeqnoLocked := range tsTracker.vbBackfillLastDCPSeqnoMap {
+				currentState := tsTracker.vbBackfillHelperDoneMap[vbno].GetSeqno()
+				if currentState != 1 {
+					// StreamEnd hasn't been received yet OR
+					// Already marked done
+					// so don't check the Seqnos
+					continue
+				}
+
+				// Otherwise, at this stage it means seqnoEnd has been sent by the producer
+				// Need to ensure throughSeqno is caught up with what DCP nozzle last saw before streamEnd
+				lastSeenSeqno := lastSeenSeqnoLocked.GetSeqno()
+				vbThroughSeqno := throughSeqnos[vbno]
+				if vbThroughSeqno >= lastSeenSeqno {
+					tsTracker.vbBackfillHelperDoneMap[vbno].SetSeqno(2)
+					doneLists = append(doneLists, vbno)
+				}
+			}
+
+			if len(doneLists) > 0 {
+				for _, vbno := range doneLists {
+					go tsTracker.RaiseEvent(common.NewEvent(common.LastSeenSeqnoDoneProcessed, vbno, tsTracker, nil, nil))
+				}
+			}
+
+			total, totalDone, _ := tsTracker.bgScanForDoneVBs()
+			// Ensure that all the VBs have been marked done
+			if totalDone == total {
+				tsTracker.logger.Infof("%v Background check task finished", tsTracker.Id())
+				return
+			}
+		}
+	}
+}
+
+func (tsTracker *ThroughSeqnoTrackerSvc) bgScanForDoneVBs() (total, totalDone int, waitingOnVbs []uint16) {
+	total = len(tsTracker.vbBackfillHelperDoneMap)
+	for vbno, seqnoWithLock := range tsTracker.vbBackfillHelperDoneMap {
+		if seqnoWithLock.GetSeqno() == 2 {
+			totalDone++
+		} else {
+			waitingOnVbs = append(waitingOnVbs, vbno)
+		}
+	}
+	return
 }
 
 func (tsTracker *ThroughSeqnoTrackerSvc) markSystemEvent(uprEvent *mcc.UprEvent) {

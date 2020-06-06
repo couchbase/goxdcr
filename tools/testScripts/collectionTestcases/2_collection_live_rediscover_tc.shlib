@@ -126,7 +126,7 @@ function runTestCase {
 	validateLogWithInstance "C1" "$REPAIR_MSG" $(( $currentRepairedInstanceCnt ))
 	runDataLoad
 	# After running I/O, router should raise a repaired message
-	sleep 5
+	sleep 10
 	validateLogWithInstance "C1" "$REPAIR_MSG" $(( $currentRepairedInstanceCnt + 1 ))
 
 	validateInternalLogWithInstance "C1" "$BACKFILL_MSG"  $(( $currentBackfillInstanceCnt + 1 ))
@@ -138,10 +138,10 @@ function runTestCase {
 	echo "============================================================================"
 	echo "PASSED"
 	echo "============================================================================"
-    cleanupBucketReplications
-    cleanupBuckets
-	cleanupRemoteClusterRefs
-    cleanupTestCaseInternalSettings
-    # remove trap as no longer needed
-    trap - EXIT
+	cleanupBucketReplications
+ 	cleanupBuckets
+ 	cleanupRemoteClusterRefs
+ 	cleanupTestCaseInternalSettings
+ 	# remove trap as no longer needed
+ 	trap - EXIT
 }
