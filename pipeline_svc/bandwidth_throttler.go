@@ -431,8 +431,8 @@ func (throttler *BandwidthThrottler) Detach(pipeline common.Pipeline) error {
 	var idxToDel int = -1
 
 	for i, attachedP := range throttler.pipelines {
-		if pipeline.Topic() == attachedP.Topic() {
-			throttler.logger.Infof("Detaching pipeline %v", attachedP.Topic())
+		if pipeline.FullTopic() == attachedP.FullTopic() {
+			throttler.logger.Infof("Detaching %v %v", attachedP.Type(), attachedP.Topic())
 			idxToDel = i
 			break
 		}

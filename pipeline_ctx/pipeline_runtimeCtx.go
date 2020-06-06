@@ -111,6 +111,43 @@ func (ctx *PipelineRuntimeCtx) Stop() base.ErrorMap {
 
 	errMap := make(base.ErrorMap)
 
+	// Before stopping service, detach
+	detachFunc := func() error {
+		ctx.runtime_svcs_lock.RLock()
+		defer ctx.runtime_svcs_lock.RUnlock()
+
+		waitGrp := &sync.WaitGroup{}
+		errCh := make(chan base.ComponentError, len(ctx.runtime_svcs))
+
+		// detach all registered services if they support it
+		for name, service := range ctx.runtime_svcs {
+			// detach services in parallel to ensure that all services get their turns
+			waitGrp.Add(1)
+			go ctx.detachService(name, service, waitGrp, errCh)
+		}
+
+		waitGrp.Wait()
+
+		if len(errCh) != 0 {
+			errMap = base.FormatErrMsg(errCh)
+		}
+		return nil
+	}
+
+	// Only detach non-main pipelines
+	if ctx.Pipeline().Type() != common.MainPipeline {
+		// put a timeout around service stopping to avoid being stuck
+		err := base.ExecWithTimeout(detachFunc, base.TimeoutRuntimeContextStop, ctx.logger)
+		if err != nil {
+			// if err is not nill, it is possible that stopServicesFunc is still running and may still access errMap
+			// return errMap1 instead of errMap to avoid race conditions
+			ctx.logger.Warnf("%v Error detaching pipeline context. err=%v", topic, err)
+			errMap1 := make(base.ErrorMap)
+			errMap1[RuntimeContext] = err
+			return errMap1
+		}
+	}
+
 	if ctx.Pipeline().Type() != common.MainPipeline {
 		ctx.logger.Infof("%v Pipeline context is attached to %v, not a main pipeline. Not stopping services", ctx.Pipeline().Type().String, topic)
 		return nil
@@ -168,6 +205,27 @@ func (ctx *PipelineRuntimeCtx) stopService(name string, service common.PipelineS
 		errCh <- base.ComponentError{name, err}
 	} else {
 		ctx.logger.Infof("%v successfully stopped service %s.", topic, name)
+	}
+}
+
+func (ctx *PipelineRuntimeCtx) detachService(name string, service common.PipelineService, waitGrp *sync.WaitGroup, errCh chan base.ComponentError) {
+	defer waitGrp.Done()
+
+	topic := ""
+	if ctx.pipeline != nil {
+		topic = ctx.pipeline.Topic()
+	}
+
+	if !service.IsSharable() {
+		return
+	}
+
+	err := service.Detach(ctx.pipeline)
+	if err != nil {
+		ctx.logger.Warnf("%v failed to detach service %s. err=%v", topic, name, err)
+		errCh <- base.ComponentError{name, err}
+	} else {
+		ctx.logger.Infof("%v successfully detached service %s.", topic, name)
 	}
 }
 

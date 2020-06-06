@@ -58,6 +58,7 @@ BROKEN_MSG="The followings are collection mappings that are newly broken"
 REPAIR_MSG="The followings are collection mappings that are now repaired"
 BACKFILL_MSG="These collections need to backfill"
 BACKFILL_APPEND_MSG="These collections need to append backfill"
+VBTASKS_DONE_MSG="has finished processing one task for all requested VBs"
 
 function runTestCase {
 	echo "============================================================================"
@@ -83,6 +84,7 @@ function runTestCase {
 	local -i currentBrokenInstanceCnt
 	local -i currentRepairedInstanceCnt
 	local -i currentBackfillInstanceCnt
+	local -i currentVBTasksDoneInstanceCnt
 
 	local currentClusterLog
 	currentClusterLog=`getClusterLogs "C1"`
@@ -93,6 +95,7 @@ function runTestCase {
 	currentXdcrLog=`getInternalNodeXdcrLog "C1"`
 	currentBackfillInstanceCnt=`echo "$currentXdcrLog" | grep -c "$BACKFILL_MSG"`
 	currentBackfillAppendInstanceCnt=`echo "$currentXdcrLog" | grep -c "$BACKFILL_APPEND_MSG"`
+	currentVBTasksDoneInstanceCnt=`echo "$currentXdcrLog" | grep -c "$VBTASKS_DONE_MSG"`
 
 	# Wait for vbuckets and all the other things to propagate before XDCR provisioning
 	sleep 5
@@ -131,6 +134,7 @@ function runTestCase {
 
 	validateInternalLogWithInstance "C1" "$BACKFILL_MSG"  $(( $currentBackfillInstanceCnt + 1 ))
 	validateInternalLogWithInstance "C1" "$BACKFILL_APPEND_MSG"  $(( $currentBackfillAppendInstanceCnt + 2 ))
+	validateInternalLogWithInstance "C1" "$VBTASKS_DONE_MSG" $(( $currentVBTasksDoneInstanceCnt + 1 ))
 	grepForPanics
 	validateXDCRCheckpoints "C1"
 	validateXDCRCheckpoints "C2"

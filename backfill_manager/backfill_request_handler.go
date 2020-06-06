@@ -45,14 +45,15 @@ type BackfillRequestHandler struct {
 	id              string
 	logger          *log.CommonLogger
 	backfillReplSvc service_def.BackfillReplSvc
+	startOnce       sync.Once
 
 	// Attached pipeline
-	pipeline             common.Pipeline
-	pipelineMtx          sync.RWMutex
-	pipelineVBsDone      map[uint16]bool
-	pipelineTotalVBsDone int
-
-	raisePipelineError func(error)
+	pipelines                    []common.Pipeline
+	pipelinesMtx                 sync.RWMutex
+	backfillPipelineVBsDone      map[uint16]bool
+	backfillPipelineTotalVBsDone int
+	raisePipelineErrors          []func(error)
+	detachCbs                    []func()
 
 	childrenWaitgrp      sync.WaitGroup
 	finCh                chan bool
@@ -107,15 +108,16 @@ func NewCollectionBackfillRequestHandler(logger *log.CommonLogger, replId string
 }
 
 func (b *BackfillRequestHandler) Start() error {
-	atomic.StoreUint32(&b.stopRequested, 0)
+	b.startOnce.Do(func() {
+		atomic.StoreUint32(&b.stopRequested, 0)
 
-	spec, err := b.backfillReplSvc.BackfillReplSpec(b.id)
-	if err == nil && spec != nil {
-		b.cachedBackfillSpec = spec
-	}
-	b.childrenWaitgrp.Add(1)
-	go b.run()
-
+		spec, err := b.backfillReplSvc.BackfillReplSpec(b.id)
+		if err == nil && spec != nil {
+			b.cachedBackfillSpec = spec
+		}
+		b.childrenWaitgrp.Add(1)
+		go b.run()
+	})
 	return nil
 }
 
@@ -258,19 +260,20 @@ func (b *BackfillRequestHandler) handleBackfillRequestInternal(req metadata.Coll
 		b.requestPersistence(AddOp)
 	} else {
 		var shouldSkipFirst bool = true
-		b.pipelineMtx.RLock()
-		if b.pipeline != nil && (b.pipeline.State() == common.Pipeline_Initial || b.pipeline.State() == common.Pipeline_Stopped) {
+		b.pipelinesMtx.RLock()
+		pipeline, _ := b.getPipeline(common.BackfillPipeline)
+		if pipeline != nil && (pipeline.State() == common.Pipeline_Initial || pipeline.State() == common.Pipeline_Stopped) {
 			// See if there are checkpoints present that represent the backfill pipeline has started before
 			// If any is present, it means that the first VBTask has made progress and the incoming task cannot be merged with it
-			checkpointMgr, ok := b.pipeline.RuntimeContext().Service(base.CHECKPOINT_MGR_SVC).(pipeline_svc.CheckpointMgrSvc)
+			checkpointMgr, ok := pipeline.RuntimeContext().Service(base.CHECKPOINT_MGR_SVC).(pipeline_svc.CheckpointMgrSvc)
 			if ok {
-				ckptExists, err := checkpointMgr.CheckpointsExist(b.pipeline.FullTopic())
+				ckptExists, err := checkpointMgr.CheckpointsExist(pipeline.FullTopic())
 				if err == nil && !ckptExists {
 					shouldSkipFirst = false
 				}
 			}
 		}
-		b.pipelineMtx.RUnlock()
+		b.pipelinesMtx.RUnlock()
 		skipFirstString := ""
 		if !shouldSkipFirst {
 			skipFirstString = " (complete merge) "
@@ -306,25 +309,30 @@ func (b *BackfillRequestHandler) requestPersistence(op PersistType) {
 // If XMEM is stuck, then this callback will not be called, checkpoints will not be deleted,
 // and backfill pipeline will restart with error to restart from the last checkpoint.
 func (b *BackfillRequestHandler) handleVBDone(vbno uint16) error {
-	b.pipelineMtx.Lock()
-	vbIsAlreadyDone, exists := b.pipelineVBsDone[vbno]
+	b.pipelinesMtx.Lock()
+	pipeline, i := b.getPipeline(common.BackfillPipeline)
+	if pipeline == nil {
+		b.pipelinesMtx.Unlock()
+		return fmt.Errorf("Fatal error: %v backfill pipeline cannot be found", b.Id())
+	}
+	vbIsAlreadyDone, exists := b.backfillPipelineVBsDone[vbno]
 	if !exists {
 		// odd coding error
 		err := fmt.Errorf("BackfillReqHandler %v attached to pipeline %v with registered vbs %v, but received vb %v",
-			b.Id(), b.pipeline.FullTopic(), b.pipelineVBsDone, vbno)
-		b.raisePipelineError(err)
-		b.pipelineMtx.Unlock()
+			b.Id(), pipeline.FullTopic(), b.backfillPipelineVBsDone, vbno)
+		b.raisePipelineErrors[i](err)
+		b.pipelinesMtx.Unlock()
 		return err
 	}
 	if vbIsAlreadyDone {
 		err := fmt.Errorf("BackfillReqHandler %v attached to pipeline %v already marked vb %v done",
-			b.Id(), b.pipeline.FullTopic(), vbno)
-		b.raisePipelineError(err)
-		b.pipelineMtx.Unlock()
+			b.Id(), pipeline.FullTopic(), vbno)
+		b.raisePipelineErrors[i](err)
+		b.pipelinesMtx.Unlock()
 		return err
 	}
-	b.pipelineVBsDone[vbno] = true
-	b.pipelineTotalVBsDone++
+	b.backfillPipelineVBsDone[vbno] = true
+	b.backfillPipelineTotalVBsDone++
 
 	if b.cachedBackfillSpec == nil {
 		panic("Cannot be nil")
@@ -335,22 +343,22 @@ func (b *BackfillRequestHandler) handleVBDone(vbno uint16) error {
 		// Need to also delete the checkpoints associated with this VB
 		// So that when backfill pipeline restarts and if there's another task to be done
 		// the old obsolete checkpoints will not be used
-		checkpointMgr, ok := b.pipeline.RuntimeContext().Service(base.CHECKPOINT_MGR_SVC).(pipeline_svc.CheckpointMgrSvc)
+		checkpointMgr, ok := pipeline.RuntimeContext().Service(base.CHECKPOINT_MGR_SVC).(pipeline_svc.CheckpointMgrSvc)
 		if !ok {
 			panic("Unable to find ckptmgr")
 		} else {
-			err := checkpointMgr.DelSingleVBCheckpoint(b.pipeline.FullTopic(), vbno)
+			err := checkpointMgr.DelSingleVBCheckpoint(pipeline.FullTopic(), vbno)
 			if err != nil {
-				b.logger.Errorf("Unable to delete checkpoint doc for %v vbno %v err %v", b.pipeline.FullTopic(), vbno, err)
+				b.logger.Errorf("Unable to delete checkpoint doc for %v vbno %v err %v", pipeline.FullTopic(), vbno, err)
 			}
 		}
 	}
 
 	var backfillDone bool
-	if b.pipelineTotalVBsDone == len(b.pipelineVBsDone) {
+	if b.backfillPipelineTotalVBsDone == len(b.backfillPipelineVBsDone) {
 		backfillDone = true
 	}
-	b.pipelineMtx.Unlock()
+	b.pipelinesMtx.Unlock()
 
 	if backfillDone {
 		hasMoreTasks := b.cachedBackfillSpec.VBTasksMap.ContainsAtLeastOneTask()
@@ -380,32 +388,79 @@ func (b *BackfillRequestHandler) GetSourceNucketName() string {
 // When replications are deleted, the backfill request handler will also be removed
 // and thus there is no need for "Detach"
 func (b *BackfillRequestHandler) Attach(pipeline common.Pipeline) error {
-	b.pipelineMtx.Lock()
-	defer b.pipelineMtx.Unlock()
+	b.pipelinesMtx.Lock()
+	defer b.pipelinesMtx.Unlock()
 
-	b.pipelineVBsDone = make(map[uint16]bool)
-	b.pipelineTotalVBsDone = 0
+	if pipeline.Type() == common.BackfillPipeline {
+		b.backfillPipelineVBsDone = make(map[uint16]bool)
+		b.backfillPipelineTotalVBsDone = 0
+		dcp_parts := pipeline.Sources()
+		for _, dcp := range dcp_parts {
+			vbs := dcp.ResponsibleVBs()
+			for _, vb := range vbs {
+				b.backfillPipelineVBsDone[vb] = false
+			}
+		}
+	} else if pipeline.Type() == common.MainPipeline {
+		asyncListenerMap := pipeline_pkg.GetAllAsyncComponentEventListeners(pipeline)
+		pipeline_utils.RegisterAsyncComponentEventHandler(asyncListenerMap, base.CollectionRoutingEventListener, b)
+	}
 
-	asyncListenerMap := pipeline_pkg.GetAllAsyncComponentEventListeners(pipeline)
-	pipeline_utils.RegisterAsyncComponentEventHandler(asyncListenerMap, base.CollectionRoutingEventListener, b)
+	// Register supervisor for error handling
+	supervisor := pipeline.RuntimeContext().Service(base.PIPELINE_SUPERVISOR_SVC).(pipeline_svc.PipelineSupervisorSvc)
+	b.RegisterComponentEventListener(common.ErrorEncountered, supervisor)
 
-	dcp_parts := pipeline.Sources()
-	for _, dcp := range dcp_parts {
-		dcp.RegisterComponentEventListener(common.StreamingEnd, b)
-		vbs := dcp.ResponsibleVBs()
-		for _, vb := range vbs {
-			b.pipelineVBsDone[vb] = false
+	b.pipelines = append(b.pipelines, pipeline)
+	errFunc := func(err error) {
+		supervisor.OnEvent(common.NewEvent(common.ErrorEncountered, nil /*data*/, nil /*component*/, nil /*derivedData*/, err))
+	}
+	b.raisePipelineErrors = append(b.raisePipelineErrors, errFunc)
+
+	detachCb := func() {
+		err := b.UnRegisterComponentEventListener(common.ErrorEncountered, supervisor)
+		b.logger.Infof("BackfillReqHandler for %v %v stopping by deregistering listener with err %v", pipeline.Type(), pipeline.Topic(), err)
+	}
+	b.detachCbs = append(b.detachCbs, detachCb)
+
+	b.logger.Infof("BackfillRequestHandler %v attached to %v with %v total VBs", b.Id(), pipeline.FullTopic(), len(b.backfillPipelineVBsDone))
+	return nil
+}
+
+func (b *BackfillRequestHandler) Detach(pipeline common.Pipeline) error {
+	b.pipelinesMtx.Lock()
+	defer b.pipelinesMtx.Unlock()
+
+	var idxToDel int = -1
+	for i, attachedP := range b.pipelines {
+		if pipeline.FullTopic() == attachedP.FullTopic() {
+			b.logger.Infof("Detaching %v %v", attachedP.Type(), attachedP.Topic())
+			idxToDel = i
+			break
 		}
 	}
 
-	b.pipeline = pipeline
-
-	b.raisePipelineError = func(err error) {
-		supervisor := b.pipeline.RuntimeContext().Service(base.PIPELINE_SUPERVISOR_SVC).(*pipeline_svc.PipelineSupervisor)
-		supervisor.OnEvent(common.NewEvent(common.ErrorEncountered, nil /*data*/, nil /*component*/, nil /*derivedData*/, err))
+	if idxToDel == -1 {
+		return base.ErrorNotFound
 	}
-	b.logger.Infof("BackfillRequestHandler %v attached to %v with %v total VBs", b.Id(), pipeline.FullTopic(), len(b.pipelineVBsDone))
+
+	if b.detachCbs[idxToDel] != nil {
+		b.detachCbs[idxToDel]()
+	}
+
+	b.pipelines = append(b.pipelines[:idxToDel], b.pipelines[idxToDel+1:]...)
+	b.detachCbs = append(b.detachCbs[:idxToDel], b.detachCbs[idxToDel+1:]...)
+	b.raisePipelineErrors = append(b.raisePipelineErrors[:idxToDel], b.raisePipelineErrors[idxToDel+1:]...)
 	return nil
+}
+
+// Need to hold lock
+func (b *BackfillRequestHandler) getPipeline(ptype common.PipelineType) (common.Pipeline, int) {
+	for i, pipeline := range b.pipelines {
+		if pipeline.Type() == ptype {
+			return pipeline, i
+		}
+	}
+	return nil, -1
 }
 
 // Implement AsyncComponentEventHandler
@@ -439,26 +494,21 @@ func (b *BackfillRequestHandler) ProcessEvent(event *common.Event) error {
 		}
 		syncCh <- err
 		close(syncCh)
-	case common.StreamingEnd:
-		// DCP will send out these events one per VB, until all the VBs that a backfill pipeline's is finished
-		_, ok := event.Data.(uint16)
-		if !ok {
-			err := fmt.Errorf("Invalid vbno data type raised for StreamingEnd. Type: %v", reflect.TypeOf(event.Data))
-			b.logger.Errorf(err.Error())
-			b.raisePipelineError(err)
-			return err
-		}
 	case common.LastSeenSeqnoDoneProcessed:
 		vbno, ok := event.Data.(uint16)
 		if !ok {
 			err := fmt.Errorf("Invalid vbno data type raised for LastSeenSeqnoDoneProcessed. Type: %v", reflect.TypeOf(event.Data))
+			// Only backfill pipeline could have raised it
+			b.pipelinesMtx.RLock()
+			defer b.pipelinesMtx.RUnlock()
+			_, i := b.getPipeline(common.BackfillPipeline)
 			b.logger.Errorf(err.Error())
-			b.raisePipelineError(err)
+			b.raisePipelineErrors[i](err)
 			return err
 		}
 		err := b.HandleVBTaskDone(vbno)
 		if err != nil {
-			b.logger.Errorf("Process StreamingEnd for % vbno %v resulted with %v", b.Id(), err)
+			b.logger.Errorf("Process LastSeenSeqnoDoneProcessed for % vbno %v resulted with %v", b.Id(), err)
 		}
 	default:
 		b.logger.Warnf("Incorrect event type, %v, received by %v", event.EventType, b.id)

@@ -75,11 +75,10 @@ type pipelineSvcWrapper struct {
 
 func (p *pipelineSvcWrapper) Attach(pipeline common.Pipeline) error {
 	p.backfillMgr.specReqHandlersMtx.RLock()
-	defer p.backfillMgr.specReqHandlersMtx.RUnlock()
-
 	spec := pipeline.Specification().GetReplicationSpec()
-
 	handler, ok := p.backfillMgr.specToReqHandlerMap[spec.Id]
+	p.backfillMgr.specReqHandlersMtx.RUnlock()
+
 	if !ok {
 		return fmt.Errorf("Backfill Request Handler for Spec %v not found", spec.Id)
 	}
@@ -103,12 +102,20 @@ func (p *pipelineSvcWrapper) UpdateSettings(settings metadata.ReplicationSetting
 }
 
 func (p *pipelineSvcWrapper) IsSharable() bool {
-	// TODO - MB-39797
-	return false
+	return true
 }
 
 func (p *pipelineSvcWrapper) Detach(pipeline common.Pipeline) error {
-	return base.ErrorNotSupported
+	p.backfillMgr.specReqHandlersMtx.RLock()
+	spec := pipeline.Specification().GetReplicationSpec()
+	handler, ok := p.backfillMgr.specToReqHandlerMap[spec.Id]
+	p.backfillMgr.specReqHandlersMtx.RUnlock()
+
+	if !ok {
+		return fmt.Errorf("Backfill Request Handler for Spec %v not found", spec.Id)
+	}
+
+	return handler.Detach(pipeline)
 }
 
 func (p *pipelineSvcWrapper) GetComponentEventListener(pipeline common.Pipeline) (common.ComponentEventListener, error) {
@@ -268,6 +275,7 @@ func (b *BackfillMgr) createBackfillRequestHandler(spec *metadata.ReplicationSpe
 		// (i.e. VBTasksMap 0th index of the VBTasksList for all VBs)
 		// It will tell pipeline manager to stop the backfill pipeline (tear down)
 		// and then start the backfill pipeline again (build a new one)
+		b.logger.Infof("Backfill Request Handler %v has finished processing one task for all requested VBs", replId)
 		err := b.pipelineMgr.HaltBackfill(replId)
 		if err != nil {
 			b.logger.Errorf("Unable to halt backfill pipeline %v - %v", replId, err)

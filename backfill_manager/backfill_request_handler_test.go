@@ -92,7 +92,7 @@ func brhMockSourceNozzles() map[string]commonReal.Nozzle {
 	return retMap
 }
 
-func brhMockFakePipeline(sourcesMap map[string]commonReal.Nozzle, pipelineState commonReal.PipelineState, ctx *common.PipelineRuntimeContext) *common.Pipeline {
+func brhMockFakePipeline(sourcesMap map[string]commonReal.Nozzle, pipelineState commonReal.PipelineState, ctx *common.PipelineRuntimeContext) (*common.Pipeline, *common.Pipeline) {
 	pipeline := &common.Pipeline{}
 
 	pipeline.On("GetAsyncListenerMap").Return(nil)
@@ -101,8 +101,19 @@ func brhMockFakePipeline(sourcesMap map[string]commonReal.Nozzle, pipelineState 
 	pipeline.On("State").Return(pipelineState)
 	pipeline.On("RuntimeContext").Return(ctx)
 	pipeline.On("FullTopic").Return(unitTestFullTopic)
+	pipeline.On("Type").Return(commonReal.MainPipeline)
 
-	return pipeline
+	backfillPipeline := &common.Pipeline{}
+
+	backfillPipeline.On("GetAsyncListenerMap").Return(nil)
+	backfillPipeline.On("Sources").Return(sourcesMap)
+	backfillPipeline.On("SetAsyncListenerMap", mock.Anything).Return(nil)
+	backfillPipeline.On("State").Return(pipelineState)
+	backfillPipeline.On("RuntimeContext").Return(ctx)
+	backfillPipeline.On("FullTopic").Return(unitTestFullTopic)
+	backfillPipeline.On("Type").Return(commonReal.BackfillPipeline)
+
+	return pipeline, backfillPipeline
 }
 
 func brhMockCkptMgr() *pipeline_svc.CheckpointMgrSvc {
@@ -111,10 +122,17 @@ func brhMockCkptMgr() *pipeline_svc.CheckpointMgrSvc {
 	return ckptMgr
 }
 
-func brhMockPipelineContext(ckptMgr *pipeline_svc.CheckpointMgrSvc) *common.PipelineRuntimeContext {
+func brhMockSupervisor() *pipeline_svc.PipelineSupervisorSvc {
+	supervisor := &pipeline_svc.PipelineSupervisorSvc{}
+	return supervisor
+}
+
+func brhMockPipelineContext(ckptMgr *pipeline_svc.CheckpointMgrSvc,
+	supervisor *pipeline_svc.PipelineSupervisorSvc) *common.PipelineRuntimeContext {
+
 	ctx := &common.PipelineRuntimeContext{}
 	ctx.On("Service", base.CHECKPOINT_MGR_SVC).Return(ckptMgr)
-
+	ctx.On("Service", base.PIPELINE_SUPERVISOR_SVC).Return(supervisor)
 	return ctx
 }
 
@@ -180,9 +198,10 @@ func TestBackfillReqHandlerCreateReqThenMarkDone(t *testing.T) {
 
 	srcNozzleMap := brhMockSourceNozzles()
 	ckptMgr := brhMockCkptMgr()
-	ctx := brhMockPipelineContext(ckptMgr)
-	pipeline := brhMockFakePipeline(srcNozzleMap, commonReal.Pipeline_Running, ctx)
-	rh.Attach(pipeline)
+	supervisor := brhMockSupervisor()
+	ctx := brhMockPipelineContext(ckptMgr, supervisor)
+	pipeline, backfillPipeline := brhMockFakePipeline(srcNozzleMap, commonReal.Pipeline_Running, ctx)
+	assert.Nil(rh.Attach(pipeline))
 
 	// Wait for the go-routine to start
 	time.Sleep(10 * time.Millisecond)
@@ -214,6 +233,9 @@ func TestBackfillReqHandlerCreateReqThenMarkDone(t *testing.T) {
 	assert.Equal(1, addCount)
 	// One later set request should result in a single set
 	assert.Equal(1, setCount)
+
+	// Pretend backfill pipeline started
+	assert.Nil(rh.Attach(backfillPipeline))
 
 	assert.Equal(1024, len(rh.cachedBackfillSpec.VBTasksMap))
 	assert.Equal(2, len(*(rh.cachedBackfillSpec.VBTasksMap[0])))

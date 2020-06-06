@@ -172,7 +172,7 @@ func (top_detect_svc *TopologyChangeDetectorSvc) Start(metadata.ReplicationSetti
 			top_detect_svc.logger.Infof("TopologyChangeDetectorSvc for secondary pipeline %v Starting...", pipeline.Topic())
 			top_detect_svc.detachCbs[i] = func() {
 				err := top_detect_svc.UnRegisterComponentEventListener(common.ErrorEncountered, supervisor.(*PipelineSupervisor))
-				top_detect_svc.logger.Infof("TopologyChangeDetectorSvc for secondary pipeline %v stopping by deregistering listener with err %v", pipeline.Topic(), err)
+				top_detect_svc.logger.Infof("TopologyChangeDetectorSvc for %v %v stopping by deregistering listener with err %v", pipeline.Type(), pipeline.Topic(), err)
 			}
 		}
 	}
@@ -573,8 +573,8 @@ func (top_detect_svc *TopologyChangeDetectorSvc) Detach(pipeline common.Pipeline
 	var idxToDel int = -1
 
 	for i, attachedP := range top_detect_svc.pipelines {
-		if pipeline.Topic() == attachedP.Topic() {
-			top_detect_svc.logger.Infof("Detaching pipeline %v", attachedP.Topic())
+		if pipeline.FullTopic() == attachedP.FullTopic() {
+			top_detect_svc.logger.Infof("Detaching %v %v", attachedP.Type(), attachedP.Topic())
 			idxToDel = i
 			break
 		}
